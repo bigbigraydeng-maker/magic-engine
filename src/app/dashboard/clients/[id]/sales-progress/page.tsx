@@ -57,7 +57,7 @@ export default async function SalesProgressPage({ params }: { params: { id: stri
         <CrmTabs clientId={params.id} active="sales" />
       </div>
       <h1 className="mb-3 text-lg font-semibold text-me-charcoal">销售进度</h1>
-      {data ? <SalesProgressTable data={data} /> : <Notice text={UNAVAILABLE_TEXT} />}
+      {data ? <SalesProgressTable data={data} clientId={params.id} /> : <Notice text={UNAVAILABLE_TEXT} />}
     </Shell>
   )
 }

@@ -91,6 +91,8 @@ export interface BlocklistEntry {
 export interface ClipSlice {
   id: string
   scene_tag: string
+  /** Human-reviewed catalogue tags; legacy clips may not have any. */
+  tags?: string[]
   motion_type: string | null
   track: 'a_real' | 'b_generated'
   usage_count: number
@@ -206,7 +208,7 @@ export interface VerifiedOffer {
 
 /** 发布目标(clients.factory_config.publish_target 存,FDE 配)。缺 → 不发标失败,绝不猜/误发别客户页。 */
 export interface PublishTarget {
-  platform: 'facebook' | 'publer'
+  platform: 'facebook' | 'instagram'
   /** facebook:页 id(如 Oztop 748077268383005)。 */
   page_id?: string
   /**
@@ -215,16 +217,13 @@ export interface PublishTarget {
    * 不满足就发不出去(2026-08-04 实测:讲课片发布报「授权没配好」正是这个原因)。
    */
   client_id?: string
-  /** publer:CTS 账号 id */
-  publer_account_id?: string
-  publer_provider?: string
   /** 防误发(魏征 B9 第三重):期望的客户品牌名,resolveToken 校验 FB 页名 ~ 此值,不符不发 */
   expect_brand?: string
 }
 
 /** 发布回执(存 published_ref):幂等对账锚(防"发出去没记上"重发)+ P1 measure 数据源。一次存全。 */
 export interface PublishedRef {
-  platform: 'facebook' | 'publer'
+  platform: 'facebook' | 'instagram'
   page_id?: string
   post_id: string
   video_id?: string
@@ -240,20 +239,11 @@ export interface PublishedRef {
    */
   video_state?: 'DRAFT' | 'PUBLISHED'
   /**
-   * Publer 通道专用:帖子在 Publer 里的状态。draft = 只存草稿(不会发出去);
-   * scheduled = 已排期,到点由 Publer 发出。Meta 原生通道用 video_state,不用这个。
-   */
-  provider_state?: 'draft' | 'scheduled'
-  /** Publer 通道专用:排期发布时间(UTC ISO)。草稿没有这个字段。 */
-  scheduled_at?: string
-  /** Publer 通道专用:建帖后回读列表成功、却没找到我们埋的幂等标记 —— 防重复发布的对账可能失效,要人看一眼 */
-  idempotency_unverified?: boolean
-  /**
    * 发布信号(me/factory.reel.published)的 Inngest 回执 id。
    * 有值 = 已喊过下游;空/缺 = 还没喊成 → 补发对账会重发(仅当 video_state=PUBLISHED)。
    */
   event_ids?: string[]
-  /** 受控转公开动作盖的戳:Instagram 跟发循环见到它一律跳过(Publer 删除 PR 合并后可撤)。 */
+  /** 受控转公开动作盖的戳:Instagram 跟发已下线,此标记保留无害。 */
   ig_crosspost_blocked?: boolean
   /** 受控转公开动作的请求编号(流量记录里 promote_authorization 的引用)。 */
   promote_request_id?: string
@@ -265,10 +255,10 @@ export interface PublishedRef {
 
 /**
  * 发布适配器契约(子牙 B8):publish-worker 主体只认 adapter + 状态机 + 三落库,平台差异全塞进 adapter。
- * 加 CTS = 多写个 PublerAdapter,worker 一行不改。
+ * 加新平台 = 多写个 adapter,worker 一行不改。
  */
 export interface PublishAdapter {
-  readonly platform: 'facebook' | 'publer'
+  readonly platform: 'facebook' | 'instagram'
   /**
    * 发布一条成片,返回回执。draft=true 只发草稿/不公开(首测验格式)。
    * onStarted(魏征 B9 防双发):拿到平台 video_id 的第一时间(上传/finish 之前)回调,
@@ -285,6 +275,11 @@ export interface PublishAdapter {
   }): Promise<PublishedRef>
   /** 幂等对账(魏征 B9 防双发):查平台侧该 wo(靠 idempotencyTag)是否已发。已发→回执,未发→null。 */
   findExisting(args: { target: PublishTarget; idempotencyTag: string }): Promise<PublishedRef | null>
+  /**
+   * 可选:平台侧「处理中」的临时回执(如 Instagram 容器)需要事后对账时由 adapter 提供;
+   * worker 暂不调用,Facebook 无此钩子。返回 null = 仍在处理或查不到,不得据此判定失败。
+   */
+  reconcile?(args: { target: PublishTarget; ref: PublishedRef; idempotencyTag: string }): Promise<PublishedRef | null>
   /** Create or recover the CTA first comment without duplicating it after a worker retry. */
   ensureFirstComment?(args: {
     target: PublishTarget
@@ -309,6 +304,8 @@ export interface WorkOrderBrief {
   clip_generation_plan: ClipGenerationPlanItem[]
   aspect_ratio: '9:16'
   notes: string
+  /** Set only when the signal asked for material and nothing publishable. */
+  remotion?: Record<string, unknown>
   /** A2:后端生成的广告文案(品牌接地)。worker 读它装配,不再自己写硬编 CTS 的文案。 */
   copy?: AdCopy
   /** B0 归因桩:这条产出预期服务的 Goal + 北极星指标。诸葛亮红线——每条片天生挂对 Goal

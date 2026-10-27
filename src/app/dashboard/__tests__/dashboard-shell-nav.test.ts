@@ -48,6 +48,7 @@ describe('admin sidebar', () => {
     const first = (ADMIN_SECTIONS[0]?.items ?? []).map((i) => i.href)
     expect(first).toContain('/dashboard/ad-approval')
     expect(first).toContain('/dashboard/kernel-approvals')
+    expect(first).toContain('/dashboard/launch-signoff')
   })
 
   it('retired-candidate pages are no longer linked (files kept, links can come back)', () => {

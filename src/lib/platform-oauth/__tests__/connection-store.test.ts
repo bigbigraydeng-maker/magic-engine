@@ -22,6 +22,7 @@ import {
   upsertConnection,
   listConnections,
   listSocialConnectionFacts,
+  confirmSocialConnectionWrite,
   getConnectionById,
   revokeConnection,
 } from '../connection-store'
@@ -95,10 +96,10 @@ describe('listSocialConnectionFacts', () => {
     mocks.from.mockReturnValue(chain)
     expect(await listSocialConnectionFacts('client-xyz')).toEqual([])
     expect(mocks.from).toHaveBeenCalledWith('platform_oauth_connections')
-    expect(chain.select).toHaveBeenCalledWith('id,provider,purpose,account_id,display_name,status,scopes,token_expiry,last_synced_at')
+    expect(chain.select).toHaveBeenCalledWith('id,provider,purpose,account_id,location_name,display_name,status,scopes,token_expiry,last_synced_at')
     expect(chain.eq).toHaveBeenCalledWith('client_id', 'client-xyz')
     expect(chain.eq).toHaveBeenCalledWith('purpose', 'legacy')
-    expect(chain.in).toHaveBeenCalledWith('provider', ['meta', 'tiktok', 'google_youtube'])
+    expect(chain.in).toHaveBeenCalledWith('provider', ['meta', 'instagram', 'tiktok', 'google_youtube'])
     expect(mocks.encryptToken).not.toHaveBeenCalled()
   })
   it('does not collapse database failure into an empty disconnected list', async () => {
@@ -108,6 +109,49 @@ describe('listSocialConnectionFacts', () => {
     chain.in.mockResolvedValue({ data: null, error: { message: 'private database detail' } })
     mocks.from.mockReturnValue(chain)
     await expect(listSocialConnectionFacts('client-xyz')).rejects.toThrow('Social connection facts unavailable')
+  })
+})
+
+describe('confirmSocialConnectionWrite', () => {
+  const verifiedAt = new Date('2026-10-19T00:00:00.123Z')
+  const tokenExpiry = new Date('2100-01-01T00:00:00.000Z')
+  const input = { clientId: 'client-xyz', provider: 'google_youtube' as const,
+    accountId: 'UCmJJDRx88y0IuZXJJQuGNFw', requiredScopes: ['youtube.upload'], tokenExpiry, verifiedAt }
+  const row = { id: 'grant', provider: 'google_youtube', purpose: 'legacy', account_id: input.accountId,
+    status: 'active', scopes: ['youtube.upload'], token_expiry: tokenExpiry.toISOString(),
+    last_synced_at: verifiedAt.toISOString() }
+  function withRows(data: unknown, error: unknown = null) {
+    const chain = { select: vi.fn(), eq: vi.fn(), in: vi.fn() }
+    chain.select.mockReturnValue(chain); chain.eq.mockReturnValue(chain)
+    chain.in.mockResolvedValue({ data, error }); mocks.from.mockReturnValue(chain)
+    return chain
+  }
+  it('reads back this exact client and this write without selecting credentials', async () => {
+    const chain = withRows([row])
+    expect(await confirmSocialConnectionWrite(input)).toBe(true)
+    expect(chain.eq).toHaveBeenCalledWith('client_id', input.clientId)
+    expect(chain.select).toHaveBeenCalledWith('id,provider,purpose,account_id,location_name,display_name,status,scopes,token_expiry,last_synced_at')
+  })
+  it.each([
+    ['no row', []],
+    ['another account', [{ ...row, account_id: 'another' }]],
+    ['an older write', [{ ...row, last_synced_at: '2026-10-18T00:00:00Z' }]],
+    ['missing scope', [{ ...row, scopes: [] }]],
+    ['malformed scope array', [{ ...row, scopes: ['youtube.upload', 42] }]],
+    ['expired token', [{ ...row, token_expiry: '2026-01-01T00:00:00Z' }]],
+    ['ambiguous rows', [row, { ...row, account_id: 'other' }]],
+  ])('does not confirm %s', async (_label, rows) => {
+    withRows(rows)
+    expect(await confirmSocialConnectionWrite(input)).toBe(false)
+  })
+  it('checks the Instagram username as well as its account ID', async () => {
+    withRows([{ ...row, provider: 'instagram', account_id: '987654321', location_name: 'other' }])
+    expect(await confirmSocialConnectionWrite({ ...input, provider: 'instagram',
+      accountId: '987654321', locationName: 'example' })).toBe(false)
+  })
+  it('fails closed when the read itself fails', async () => {
+    withRows(null, { message: 'private database detail' })
+    await expect(confirmSocialConnectionWrite(input)).rejects.toThrow('Social connection facts unavailable')
   })
 })
 
@@ -183,6 +227,21 @@ describe('upsertConnection', () => {
       expect.objectContaining({ location_name: 'accounts/999/locations/123' }),
       expect.anything(),
     )
+  })
+
+  it('重新连接 Meta 时清掉这条主页的暂停，Google 连接不清', async () => {
+    const chain = chainResolving({ error: null })
+    const deleteEq = vi.fn().mockResolvedValue({ error: null })
+    const deleteChain = { delete: vi.fn().mockReturnValue({ eq: vi.fn().mockReturnValue({ eq: deleteEq }) }) }
+    mocks.from.mockImplementation((table: string) => (table === 'meta_page_sync_holds' ? deleteChain : chain))
+
+    await upsertConnection(UPSERT_INPUT)
+    expect(mocks.from).not.toHaveBeenCalledWith('meta_page_sync_holds')
+
+    await upsertConnection({ ...UPSERT_INPUT, provider: PLATFORM_PROVIDERS.META, accountId: 'page-1' })
+    expect(mocks.from).toHaveBeenCalledWith('meta_page_sync_holds')
+    expect(deleteChain.delete).toHaveBeenCalled()
+    expect(deleteEq).toHaveBeenCalledWith('page_id', 'page-1')
   })
 
   it('throws when DB returns an error', async () => {

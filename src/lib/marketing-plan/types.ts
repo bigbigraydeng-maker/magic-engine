@@ -12,6 +12,9 @@
  *   - tasks:  批准后派发到 Luban 的具体任务清单
  */
 
+import type { WatchCode } from './promo/daily-watch'
+import type { ReconcileRow } from './promo/reconcile'
+
 // ─── Plan 状态 ────────────────────────────────────────────────────────────────
 
 export type MarketingPlanStatus = 'draft' | 'approved' | 'completed' | 'archived'
@@ -175,6 +178,53 @@ export interface WeeklyReviewRecord {
   at: string
 }
 
+// ─── 调整记录（IMPACT 的 Tune 段）────────────────────────────────────────────────
+// 补数据 / 补执行 / 改处方 / 继续；判断顺序固定，见 promo/adjust.ts。
+
+export type AdjustDecision = 'fix_data' | 'fix_execution' | 'revise_prescription' | 'continue'
+export type AdjustStatus = 'proposed' | 'confirmed' | 'rechecked'
+export type RecheckResult = 'improved' | 'no_change' | 'worse' | 'unknown'
+
+export interface PromoAdjustmentTriggerRow {
+  key: ReconcileRow['key']
+  status: ReconcileRow['status']
+  planned: number | null
+  actual: number | null
+  unit: string
+  reason: string
+  as_of: string | null
+}
+
+export interface PromoAdjustmentRecord {
+  id: string
+  v: 1
+  /** 对账窗口，YYYY-MM-DD */
+  window: { start: string; end: string }
+  goal_id: string
+  trigger: {
+    watch_codes: WatchCode[]
+    rows: PromoAdjustmentTriggerRow[]
+    /** 当时的检查证据摘要；没有检查证据 = null */
+    check_evidence: { status: 'declared' | 'unknown'; reason: string; as_of: string } | null
+    experiment_hit: 'stop_rule' | 'max_loss' | null
+  }
+  suggested_decision: AdjustDecision
+  suggestion_reasons: string[]
+  /** 人确认后才有 */
+  decision: AdjustDecision | null
+  /** decision 与 suggested_decision 不同时必填 */
+  override_reason: string | null
+  note: string
+  status: AdjustStatus
+  proposed_by: string
+  proposed_at: string
+  confirmed_by: string | null
+  confirmed_at: string | null
+  /** YYYY-MM-DD，见 nextRecheckDate */
+  recheck_due: string
+  recheck: { at: string; result: RecheckResult; rows: PromoAdjustmentTriggerRow[] } | null
+}
+
 export interface ApprovalReceipt {
   request_id: string
   approved_by: string | null
@@ -183,7 +233,18 @@ export interface ApprovalReceipt {
   tasks_skipped: number
   packages_created: number
   /** 批准当时第一阶段的检查清单快照（事后能说清「批的时候是什么状态」）*/
-  gate_snapshot?: { taken_at: string; results: { key: string; light: string; hard: boolean; phase_id?: string }[] }
+  gate_snapshot?: {
+    taken_at: string
+    results: {
+      key: string
+      light: string
+      hard: boolean
+      phase_id?: string
+      /** 「广告账户与付款」那一道才有：批准时用的是现读还是存档，以及证据的读取时间 */
+      source?: 'receipt' | 'live' | 'receipt_after_live_failed'
+      as_of?: string | null
+    }[]
+  }
   /** 批准当时 plan_data.promo 的内容指纹；旧回执没有。*/
   content_hash?: string
 }
@@ -219,6 +280,10 @@ export interface MarketingPlan {
     previous_weekly_reviews?: WeeklyReviewRecord[]
     /** PM 每周「按计划继续」的确认记录（服务端写入，按 week_start 幂等）。*/
     weekly_reviews?: WeeklyReviewRecord[]
+    /** 空白草稿创建时记下的目标。推广结构仍为空，等保存接口写入。*/
+    blank_draft?: { goal_id: string }
+    /** 广告 Agent 保存未批准草稿时由服务端写入。调用方传了这一段则整单拒绝。*/
+    agent_draft?: { key_id: string; prescription_id: string; saved_at: string }
   } | null
   approved_at: string | null
   created_at: string

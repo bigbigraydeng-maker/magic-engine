@@ -18,7 +18,7 @@
  * 总数；渠道/方向标签带 fallback（DB 加新枚举前端不炸）。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { CrmTabs } from '../_components/CrmTabs'
@@ -28,6 +28,7 @@ import { PrioritySectionHeader } from './_components/PrioritySection'
 import { BookingTrackerPanel } from '../_components/bookings/BookingTrackerPanel'
 import { useOpenContactFromNudge } from '../_components/bookings/useOpenContactFromNudge'
 import { takeContactName } from '../_components/bookings/payments-return'
+import { expectCrmList, markCrmListReady } from '@/lib/crm/list-ready'
 import { currentPositionLabel, nextNavStep, type NavInput, type SectionKey } from '@/lib/crm/drawer-nav'
 import { type KindView } from '@/lib/crm/kind-filter'
 import { dayProgress } from '@/lib/crm/day-list'
@@ -35,7 +36,7 @@ import { DAILY_QUOTA } from '@/lib/crm/next-action'
 import { ts, type ContactRow, type CustomColumnMeta } from './_components/contact-table-types'
 import { ContactTableRow } from './_components/ContactTableRow'
 import { ContactTableHead } from './_components/ContactTableHead'
-import { ListFilters, TradeBatchPanel } from './_components/ListFilters'
+import { ListFilters, TradeBatchPanel, type AssigneeView } from './_components/ListFilters'
 import { FlatPagination, SectionPagerRow } from './_components/ListPagination'
 import { isToday, toDrawerRow, sectionRange, type PrioritySectionData } from './_components/list-helpers'
 
@@ -44,7 +45,13 @@ type PendingNav =
   | { mode: 'segment'; sectionKey: SectionKey; openFirst: boolean }
   | { mode: 'flat'; openFirst: boolean }
 
+const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+
 export default function CrmAllContactsPage() {
+  // 次要请求（悬浮按钮摘要、付款页签探针、付款要催）等客人表出来后再发。
+  // 用 layout effect：它先于所有子组件的 useEffect 请求运行。
+  useIsoLayoutEffect(() => expectCrmList(), [])
+
   const params = useParams()
   const clientId = params.id as string
 
@@ -69,6 +76,12 @@ export default function CrmAllContactsPage() {
    * 不留一个"选了但看起来没生效"的筛选条件)。
    */
   const [kindFilter, setKindFilter] = useState<KindView>('all')
+  /**
+   * 跟进人筛选（issue #3158 part 3）—— 全部 / 我负责 / 未分配 / 具体邮箱。
+   * 只在平铺模式生效：服务端 priority 视图这一轮没接 `?assignee`，切到分段模式时
+   * 会被重置为 'all'，不留一个「选了但悄悄没生效」的筛选条件（同 kindFilter）。
+   */
+  const [assigneeFilter, setAssigneeFilter] = useState<AssigneeView>('all')
   const [page, setPage] = useState(1)
   // C1a 固定 100，先不给改每页条数的入口。
   // 分段（智能）视图：服务端每段默认 100 一页，这里的页数换算要与之一致。
@@ -82,6 +95,11 @@ export default function CrmAllContactsPage() {
   /**
    * 平铺 / 按优先级分段。默认平铺 —— 这一轮先把分段做出来给人看，
    * 不动任何老用户打开这一页时看到的东西。
+   */
+  /**
+   * 智能视图可以用网址直达：`?view=smart`。
+   * 这样「决策清单」那页能直接指过来，员工也能把它存成书签——
+   * 以前它只是页面里的一个开关，关掉页面就回到平铺名单。
    */
   const [grouped, setGrouped] = useState(false)
   const [sections, setSections] = useState<PrioritySectionData[]>([])
@@ -155,6 +173,7 @@ export default function CrmAllContactsPage() {
         if (qDebounced.trim()) params.set('q', qDebounced.trim())
         for (const s of stageFilter) params.append('stage', s)
         if (kindFilter !== 'all') params.set('kind', kindFilter)
+        if (assigneeFilter !== 'all') params.set('assignee', assigneeFilter)
       }
 
       const [res, stageRes] = await Promise.all([
@@ -217,8 +236,9 @@ export default function CrmAllContactsPage() {
       setLoading(false)
       setSectionsLoading(false)
       fetchInFlightRef.current = false
+      markCrmListReady()
     }
-  }, [clientId, page, perPage, flatPerPage, qDebounced, stageFilter, kindFilter, grouped, openSections, sectionPages])
+  }, [clientId, page, perPage, flatPerPage, qDebounced, stageFilter, kindFilter, assigneeFilter, grouped, openSections, sectionPages])
 
   useEffect(() => {
     void loadList()
@@ -233,7 +253,7 @@ export default function CrmAllContactsPage() {
   // 换了搜索词或筛选条件就回第一页 —— 否则会停在一个可能不存在的页码上。
   useEffect(() => {
     setPage(1)
-  }, [qDebounced, stageFilter, kindFilter])
+  }, [qDebounced, stageFilter, kindFilter, assigneeFilter])
 
   /**
    * 直达链接 `?contact=<id>` —— 列表加载完自动打开那个人的抽屉。
@@ -253,6 +273,31 @@ export default function CrmAllContactsPage() {
   const [deepLinkId, setDeepLinkId] = useState<string | null>(null)
   useEffect(() => {
     setDeepLinkId(new URLSearchParams(window.location.search).get('contact'))
+  }, [])
+
+  /**
+   * `?view=smart` 直接进智能视图 —— 退役的「决策清单」页就是跳到这里，员工也能存书签。
+   *
+   * 跟上面的 `?contact=` 同一个写法：在 `useEffect` 里读、不在 `useState` 初始值里读。
+   * 初始值里读 `window.location.search` 会让服务端渲染得 false、客户端首帧得 true，
+   * React 水合不一致（会报错 + 闪一下平铺名单）；用 `useSearchParams` 则要给整页套
+   * Suspense 边界，为一个可选参数不值当（子牙 / 魏征复审 P2-2）。
+   */
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('view') === 'smart') setGrouped(true)
+  }, [])
+
+  /**
+   * `?assignee=me|unassigned|<email>` 直达 —— 「我的待跟进」入口就是跳到
+   * `/dashboard/clients/<id>/crm/all?assignee=me`。首帧吃一次 URL，之后由筛选条
+   * 自己管状态，不随后续手动切换再去动 URL（跟 `?view=smart` 同款）。
+   */
+  useEffect(() => {
+    const raw = new URLSearchParams(window.location.search).get('assignee')
+    if (!raw) return
+    const trimmed = raw.trim()
+    if (trimmed === 'me' || trimmed === 'unassigned') setAssigneeFilter(trimmed)
+    else if (trimmed.length > 0) setAssigneeFilter(trimmed.toLowerCase())
   }, [])
 
   useEffect(() => {
@@ -611,11 +656,25 @@ export default function CrmAllContactsPage() {
             onStageFilterChange={setStageFilter}
             grouped={grouped}
             onToggleGrouped={() => {
-              setGrouped((v) => !v)
+              setGrouped((v) => {
+                const next = !v
+                // 让网址跟着视图走（不重新加载页面），这样刷新 / 存书签都还在同一个视图。
+                if (typeof window !== 'undefined') {
+                  const url = new URL(window.location.href)
+                  if (next) url.searchParams.set('view', 'smart')
+                  else url.searchParams.delete('view')
+                  window.history.replaceState(null, '', url.toString())
+                }
+                return next
+              })
               setKindFilter('all')
+              setAssigneeFilter('all')
             }}
             kindFilter={kindFilter}
             onKindFilterChange={setKindFilter}
+            clientId={clientId}
+            assigneeFilter={assigneeFilter}
+            onAssigneeFilterChange={setAssigneeFilter}
           />
 
           {!grouped && kindFilter === 'trade' && rows.length > 0 && (

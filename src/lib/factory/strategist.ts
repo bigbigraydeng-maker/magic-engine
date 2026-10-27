@@ -15,6 +15,7 @@ import {
   FACTORY_ORDER_BUDGET_CAP_USD,
   FACTORY_WINNER_FREQUENCY_UNLOCK,
 } from './constants'
+import { withAssetOnlyDeliverable } from './deliverable'
 import { pickShotRecipe, type ShotRecipe } from './shot-recipes'
 import type {
   AngleSource,
@@ -45,6 +46,26 @@ export function pickFactoryGoal(configGoalId: unknown, activeGoals: GoalSlice[])
     if (configured) return configured
   }
   return activeGoals[0] ?? null
+}
+
+/**
+ * A signal that names a goal hangs on that goal only.
+ * A named goal that is not active is not replaced with a newer one.
+ */
+export function goalForSignal(
+  evidenceGoalId: unknown,
+  configGoalId: unknown,
+  activeGoals: GoalSlice[],
+): GoalSlice | null {
+  if (typeof evidenceGoalId === 'string' && evidenceGoalId.trim()) {
+    return activeGoals.find((g) => g.id === evidenceGoalId) ?? null
+  }
+  return pickFactoryGoal(configGoalId, activeGoals)
+}
+
+function finishBrief(ctx: GateContext, brief: WorkOrderBrief): WorkOrderBrief {
+  if (ctx.signal.request['deliverable'] !== 'asset_only') return brief
+  return withAssetOnlyDeliverable(brief)
 }
 
 /**
@@ -260,9 +281,11 @@ interface ClipSelection {
 }
 
 /** scene_tag 与角度的 token 重叠度(魏征 M1-F12:素材必须优先匹配角度,防货不对题) */
-function sceneAngleOverlap(sceneTag: string, angle: string): number {
+function sceneAngleOverlap(sceneTag: string, angle: string, tags: readonly string[] = []): number {
   const angleTokens = new Set(normalizeAngle(angle).split(/[^a-z0-9一-鿿]+/).filter(Boolean))
-  const sceneTokens = sceneTag.toLowerCase().split(/[^a-z0-9一-鿿]+/).filter(Boolean)
+  const sceneTokens = [sceneTag, ...tags].flatMap((tag) =>
+    tag.toLowerCase().split(/[^a-z0-9一-鿿]+/).filter(Boolean),
+  )
   return sceneTokens.filter((t) => angleTokens.has(t)).length
 }
 
@@ -286,7 +309,7 @@ export function selectClips(
     .filter((c) => clipAllowed(ctx, c))
     .filter((c) => !requireRealFootage || c.track === 'a_real') // 价格广告红线:AI/生成绝不背书真价
     .sort((a, b) => {
-      const ov = sceneAngleOverlap(b.scene_tag, angle) - sceneAngleOverlap(a.scene_tag, angle)
+      const ov = sceneAngleOverlap(b.scene_tag, angle, b.tags) - sceneAngleOverlap(a.scene_tag, angle, a.tags)
       if (ov !== 0) return ov
       // 真实产品片(track='a_real',客户真拍)优先于 AI/stock(b_generated):治「AI 冒充真产品打真价+漏水印」
       // 「CTA 配狗」。**按来源(track)判真假,不靠文件名**(隔壁契约 + [[real-vs-generated-clip-provenance]])。
@@ -445,7 +468,7 @@ function decideAssetGap(ctx: GateContext): Decision {
       angle: `asset_gap:${scene}`,
       angle_source: { type: 'inventory_gap', ref_id: 'evidence.scene_tag', ref_text: scene },
       rationale_one_liner: rationale,
-      brief: {
+      brief: finishBrief(ctx, {
         segments: [],
         max_new_clips: maxNewClipsFor(budgetCap),
         clip_generation_plan: Array.from({ length: count }, (_, i) => ({
@@ -460,7 +483,7 @@ function decideAssetGap(ctx: GateContext): Decision {
         })),
         aspect_ratio: '9:16',
         notes: asString(ctx.signal.request['notes']) ?? '',
-      },
+      }),
       budget_cap_usd: budgetCap,
       source_ad_id: asString(ctx.signal.evidence['ad_id']),
       clip_links: [],
@@ -537,7 +560,7 @@ export function decideSignal(ctx: GateContext): Decision {
       angle: anglePick.angle,
       angle_source: anglePick.source,
       rationale_one_liner: rationale,
-      brief: briefPayload,
+      brief: finishBrief(ctx, briefPayload),
       budget_cap_usd: budgetCap,
       source_ad_id: asString(ctx.signal.evidence['ad_id']),
       clip_links: clipLinks,

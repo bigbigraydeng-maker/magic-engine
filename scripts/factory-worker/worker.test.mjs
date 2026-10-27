@@ -175,4 +175,15 @@ describe('pingAlive — 空闲存活信号', () => {
     const boom = async () => { throw new Error('offline') }
     expect(await pingAlive(boom, t0 + 5 * 60_000)).toBe(false)
   })
+
+  it('存活信号带上这次渲染检查，失败原因原样送出', async () => {
+    const bodies = []
+    const ok = async (_url, init) => {
+      bodies.push(JSON.parse(init.body))
+      return { ok: true, status: 200 }
+    }
+    const later = Date.now() + 6 * 3_600_000
+    expect(await pingAlive(ok, later, { ok: false, watched: true, reason: 'engine down' })).toBe(true)
+    expect(bodies[0].render_worker).toEqual({ ok: false, reason: 'engine down' })
+  })
 })

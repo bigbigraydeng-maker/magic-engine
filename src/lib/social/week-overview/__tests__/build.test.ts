@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { InMemoryLiteStore } from '../../story-lite/in-memory-store'
 import type { LiteServicePorts } from '../../story-lite/service'
 import type { LiteActor, NewLiteItem } from '../../story-lite/types'
 import { buildWeekOverview, readPublishingQuota } from '../build'
+import { REEL_QUERY_LIMIT } from '../reel-works'
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
 const OTHER = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
@@ -30,6 +31,7 @@ function fakeDb(rows: Row[], options: { fail?: boolean } = {}) {
     select: (...a: unknown[]) => { calls.push(['select', a]); return chain },
     eq: (...a: unknown[]) => { calls.push(['eq', a]); return chain },
     not: (...a: unknown[]) => { calls.push(['not', a]); return chain },
+    or: (...a: unknown[]) => { calls.push(['or', a]); return chain },
     order: (...a: unknown[]) => { calls.push(['order', a]); return chain },
     limit: async (...a: unknown[]) => {
       calls.push(['limit', a])
@@ -60,6 +62,12 @@ describe('buildWeekOverview', () => {
     expect(calls).toContainEqual(['eq', ['client_id', CLIENT]])
     expect(result.value.live).toBe(false)
     expect(result.value.post).toEqual({ connected: false })
+  })
+
+  it('asks for exactly as many Reel orders as the page believes it can see (the page says "only the newest N" from the same number)', async () => {
+    const { db, calls } = fakeDb([])
+    await buildWeekOverview({ ports: ports(new InMemoryLiteStore()), db, clientId: CLIENT, actor: ADMIN, switches: OFF, now: NOW })
+    expect(calls).toContainEqual(['limit', [REEL_QUERY_LIMIT]])
   })
 
   it('a stopped or expired pack is not shown as in play', async () => {
@@ -144,5 +152,55 @@ describe('readPublishingQuota', () => {
   })
   it('any other database error is thrown, not hidden', async () => {
     await expect(readPublishingQuota(quotaDb({ data: null, error: { message: 'timeout' } }), CLIENT)).rejects.toThrow('timeout')
+  })
+})
+
+describe('buildWeekOverview — the video address for the Reel cover', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  async function reelsOf(paths: Array<string | null>) {
+    const rows = paths.map((video, i) => reelRow(`r${i}`, CLIENT, 'in_review', video))
+    const { db } = fakeDb(rows)
+    const result = await buildWeekOverview({ ports: ports(new InMemoryLiteStore()), db, clientId: CLIENT, actor: ADMIN, switches: OFF, now: NOW })
+    if (!result.ok) throw new Error('overview failed')
+    return result.value.reels
+  }
+
+  it('turns the factory video path into the public address of that file in the factory bucket', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co')
+    const [reel] = await reelsOf(['renders/c1/r1/final.mp4'])
+    expect(reel.video_url).toBe('https://example.supabase.co/storage/v1/object/public/content-factory/renders/c1/r1/final.mp4')
+  })
+
+  it('without a configured storage address there is no cover address (the page keeps its plain tile), and the Reel is still listed', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', '')
+    const reels = await reelsOf(['renders/c1/r1/final.mp4'])
+    expect(reels).toHaveLength(1)
+    expect(reels[0].video_url).toBeNull()
+  })
+
+  it('accepts a base address written with a trailing slash, and writes spaces the way an address needs them', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co/')
+    const [reel] = await reelsOf(['renders/c1/my reel/final.mp4'])
+    expect(reel.video_url).toBe('https://example.supabase.co/storage/v1/object/public/content-factory/renders/c1/my%20reel/final.mp4')
+  })
+
+  it('a path that could point somewhere else never becomes an address, however it is written', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://example.supabase.co')
+    const unsafe = [
+      '../secret/final.mp4',
+      '/absolute/final.mp4',
+      'https://evil.example/x.mp4',
+      '%2e%2e/%2e%2e/%2e%2e/%2e%2e/rest/v1/clients?select=*',
+      '%2E%2E/%2E%2E/x.mp4',
+      'renders/c1/x.mp4?token=1',
+      'renders/c1/x.mp4#frag',
+      'a\\..\\..\\..\\x.mp4',
+    ]
+    const reels = await reelsOf([...unsafe, 'renders/c1/ok/final.mp4'])
+    expect(reels.map((r) => r.video_url)).toEqual([
+      ...unsafe.map(() => null),
+      'https://example.supabase.co/storage/v1/object/public/content-factory/renders/c1/ok/final.mp4',
+    ])
   })
 })

@@ -484,6 +484,41 @@ export async function fetchGa4KeyEventBreakdown(
 }
 
 /**
+ * 指定事件名近 N 天的次数（只读）。开投前追踪检查用它核对「留资事件」GA4 真的收到了没有。
+ * 没有可用的 Google 授权返回 null；一次都没出现过的事件不在结果里（调用方按 0 处理，不当成读不到）。
+ */
+export async function fetchGa4EventCounts(
+  propertyId: string,
+  clientId: string,
+  eventNames: readonly string[],
+  periodDays: number = DEFAULT_PERIOD_DAYS,
+): Promise<Record<string, number> | null> {
+  const token = await resolveAccessToken(clientId)
+  if (!token) return null
+
+  const report = await runReport(
+    token,
+    normalizePropertyId(propertyId),
+    toIsoDate(daysAgo(periodDays)),
+    toIsoDate(new Date()),
+    {
+      dimensions: ['eventName'],
+      metrics: ['eventCount'],
+      limit: Math.max(eventNames.length, 1),
+      dimensionFilter: { filter: { fieldName: 'eventName', inListFilter: { values: [...eventNames] } } },
+    },
+  )
+
+  const counts: Record<string, number> = {}
+  for (const row of report.rows ?? []) {
+    const name = row.dimensionValues?.[0]?.value ?? ''
+    const count = Number(row.metricValues?.[0]?.value ?? '0')
+    if (name !== '' && Number.isFinite(count)) counts[name] = count
+  }
+  return counts
+}
+
+/**
  * Form funnel raw numbers (read-only): form_start / form_submit / generate_lead counts and
  * people, form_start by page, and thank-you page views / people. Summarised in form-funnel.ts.
  */

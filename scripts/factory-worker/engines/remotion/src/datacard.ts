@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FPS } from './timing.ts';
-import { HEX_COLOR, MUSIC_EXTS, LOGO_EXTS, relFile, text, formatZodIssues } from './schema.ts';
+import { HEX_COLOR, MUSIC_EXTS, LOGO_EXTS, relFile, text, formatZodIssues, musicGainSchema, frameSchema } from './schema.ts';
 
 /** Fewest data rows a data card may show. */
 export const MIN_ROWS = 3;
@@ -47,6 +47,7 @@ export const DataCardPropsSchema = z
     logoFile: relFile('logo 文件', LOGO_EXTS).nullable(),
     musicFile: relFile('音乐文件', MUSIC_EXTS).nullable(),
     musicStartSec: z.number().min(0).max(600).optional(),
+    musicGain: musicGainSchema,
     hook: z
       .object({
         lines: z.array(text(MAX_HOOK_LINE_CHARS)).min(1).max(MAX_HOOK_LINES),
@@ -72,6 +73,7 @@ export const DataCardPropsSchema = z
       message: 'barMode 只能是 none、bars 或 steps',
     }),
     disclaimer: text(MAX_DISCLAIMER_CHARS),
+    frame: frameSchema.optional(),
   })
   .strict()
   .superRefine((val, ctx) => {

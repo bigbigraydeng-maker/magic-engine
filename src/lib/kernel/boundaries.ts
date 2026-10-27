@@ -24,7 +24,6 @@
  */
 export const PROVIDER_WRITE_MODULES = [
   '@/lib/meta/campaign-writes',
-  '@/lib/publer/client',
   '@/lib/cms/wordpress-client',
   '@/lib/cms/shopify-client',
   '@/lib/cms/github-client',
@@ -65,16 +64,10 @@ export const PROVIDER_WRITE_GRANDFATHERED = [
   'src/app/api/clients/[id]/cms/wordpress/update-post/route.ts',
   'src/app/api/clients/[id]/cms/wordpress/yoast-probe/route.ts',
   'src/app/api/clients/[id]/gsc/index-request/route.ts',
-  'src/app/api/clients/[id]/reels/[draftId]/publish/route.ts',
   'src/app/api/cms/github/webhook/route.ts',
   'src/app/api/cron/cms-connection-retest/route.ts',
-  'src/app/api/publer/accounts/route.ts',
-  'src/app/api/publer/create-post/route.ts',
-  'src/app/api/publer/draft/[assetId]/route.ts',
-  'src/app/api/publer/schedule/route.ts',
   'src/lib/blog/pr-sync.ts',
   'src/lib/cms/page-upgrade-pr-sync.ts',
-  'src/lib/flywheel/social-post-publish.ts',
   'src/lib/luban/tools.ts',
   'src/lib/seo-meta/cts-meta-pr.ts',
   // ⏳ 临时豁免，不是历史存量（2026-09-27 子牙拍板）。SEO 标题周循环 v1（9ea7af58，2026-09-20）
@@ -156,6 +149,7 @@ export const ACTION_BRIDGE_FORBIDDEN_IMPORTS = [
   '@/lib/execution',
   '@/lib/zhuge',
   '@/lib/cms/',
+  // 目录已删除（2026-10 Publer 退役），此条保留为防止回归。
   '@/lib/publer/',
   '@/lib/gbp/',
   '@/lib/gsc/',
@@ -188,6 +182,7 @@ export const ACTION_SUBMISSION_FORBIDDEN_IMPORTS = [
   '@/lib/growth',
   '@/lib/geo-module',
   '@/lib/cms/',
+  // 目录已删除（2026-10 Publer 退役），此条保留为防止回归。
   '@/lib/publer/',
   '@/lib/gbp/',
   '@/lib/gsc/',
@@ -207,6 +202,8 @@ export const ACTION_SUBMISSION_FORBIDDEN_IMPORTS = [
  *   · Kernel 自己（内部互相调用）
  *   · `src/lib/action-submission/**`（本轮新增的平台级 caller）
  *   · `src/lib/kernel-approval/**`（人点头之后的授权路径，见现有代码）
+ *   · `src/lib/confirmation-card/**`（确认卡出卡：sideEffect 'none' 的人工审批记录，
+ *     只开 pending_approval 的 run，点击走 kernel-approval；动作本身不接任何外部写入）
  *
  * 🔴 这条闸只管 runtime code（walker 排除 tests / __tests__ 目录 —— tests 需要
  *    直接调 Kernel 来验证 progression 语义，那是正当用途）。
@@ -218,6 +215,7 @@ export const KERNEL_RUNNER_ALLOWED_CALLER_DIRS = [
   'src/lib/kernel/',
   'src/lib/action-submission/',
   'src/lib/kernel-approval/',
+  'src/lib/confirmation-card/',
 ] as const
 
 /**

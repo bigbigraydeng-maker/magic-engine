@@ -2,6 +2,7 @@
  * 推广计划的事实读取（只读）：把数据库里的东西读成 gates / reconcile 要的形状。
  *
  * 规则：任何一项读失败都返回 null（= 没读到），绝不当成 0 / 空列表 / 通过。
+ * 例外：loadLatestGoalPrescription / loadLatestClientPrescription 读失败会抛错，调用处接住，只把这一项留空。
  * 复用：广告设置 parseCreativePool、账户时区 accountDayKey、行业剧本选择。
  * 所有读取都带 client_id（目标 / 广告账户额外校验归属同一客户）。
  */
@@ -12,8 +13,15 @@ import { parseCreativePool } from '@/lib/ads-strategy/config'
 import type { AccountCapFacts } from './budget-caps'
 import type { AccountSnapshotFact, GateFacts } from './gates'
 import { resolvePromoPlaybook, type PromoPlaybook } from './playbooks'
+import { loadTrackingGateFacts } from '@/lib/ads-tracking-preflight/load-receipt'
+import { readLiveBudgetGateCached } from '@/lib/ads-tracking-preflight/live-budget'
+import { resolveMetaToken } from '@/lib/meta/token-selection'
+import { currencyFromCountry, type AccountSpendTotal } from '@/lib/ads/spend-figures'
 import { addDays, plannedSpendCents, reconcileWindow, type GoalFact, type ReconcileFacts } from './reconcile'
 import { allAdsSteps, type ManualCheck, type PromoSpec } from './spec'
+
+export { loadLatestClientPrescription, loadLatestGoalPrescription } from './goal-prescription'
+export type { GoalPrescriptionView } from './goal-prescription'
 
 export interface LoadedPromoFacts {
   playbook: PromoPlaybook
@@ -31,20 +39,22 @@ interface SnapshotRow {
   captured_at: string | null
 }
 
-async function loadIndustry(clientId: string): Promise<string | null> {
-  const { data } = await supabaseAdmin.from('clients').select('industry').eq('id', clientId).maybeSingle()
-  return (data as { industry?: string | null } | null)?.industry ?? null
+async function loadClientMarket(clientId: string): Promise<{ industry: string | null; currency: string | null }> {
+  const { data } = await supabaseAdmin.from('clients').select('industry, country, semrush_db').eq('id', clientId).maybeSingle()
+  const row = data as { industry?: string | null; country?: string | null; semrush_db?: string | null } | null
+  const country = row?.country ?? (row?.semrush_db === 'nz' ? 'NZ' : row?.semrush_db === 'au' ? 'AU' : null)
+  return { industry: row?.industry ?? null, currency: currencyFromCountry(country) }
 }
 
-/** 该客户名下的广告账户（含账户级日上限）。读失败 = null。 */
-export async function loadOwnedAccounts(clientId: string): Promise<{ id: string; cap: number | null }[] | null> {
+/** 该客户名下的广告账户（含账户级日上限和给人看的名称）。读失败 = null。 */
+export async function loadOwnedAccounts(clientId: string): Promise<{ id: string; cap: number | null; label: string | null }[] | null> {
   const { data, error } = await supabaseAdmin
     .from('client_meta_ad_accounts')
-    .select('ad_account_id, daily_budget_cap_cents')
+    .select('ad_account_id, daily_budget_cap_cents, label')
     .eq('client_id', clientId)
   if (error) return null
-  return ((data ?? []) as { ad_account_id: string; daily_budget_cap_cents: number | null }[])
-    .map(r => ({ id: r.ad_account_id, cap: r.daily_budget_cap_cents ?? null }))
+  return ((data ?? []) as { ad_account_id: string; daily_budget_cap_cents: number | null; label: string | null }[])
+    .map(r => ({ id: r.ad_account_id, cap: r.daily_budget_cap_cents ?? null, label: r.label ?? null }))
 }
 
 /** 每个账户最新的账户级快照。某个账户读失败 = 该账户没有记录（调用方按灰处理）。 */
@@ -62,6 +72,31 @@ async function loadSnapshots(ids: string[]): Promise<Record<string, SnapshotRow>
     if (!error && row) out[id] = row
   }))
   return out
+}
+
+function currencyForTotals(snaps: Record<string, SnapshotRow>, clientCurrency: string | null): string | null {
+  const codes = [...new Set(
+    Object.values(snaps).map(s => s.currency?.trim().toUpperCase()).filter((c): c is string => !!c),
+  )]
+  if (codes.length === 1) return codes[0]
+  if (codes.length === 0) return clientCurrency
+  return null
+}
+
+/** 广告数据页那一行账户合计。读失败或没有行 = null，不当成 0。 */
+async function loadAccountTotal(clientId: string, currency: string | null): Promise<AccountSpendTotal | null> {
+  const { data, error } = await supabaseAdmin
+    .from('meta_ads_snapshots')
+    .select('spend, period_start, period_end')
+    .eq('client_id', clientId)
+    .order('period_start', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error || !data) return null
+  const row = data as { spend: number | string | null; period_start: string | null; period_end: string | null }
+  const spend = Number(row.spend)
+  if (!Number.isFinite(spend) || !row.period_start || !row.period_end) return null
+  return { spend, currency, period_start: row.period_start, period_end: row.period_end }
 }
 
 async function loadStrategyConfig(clientId: string): Promise<GateFacts['config']> {
@@ -214,13 +249,35 @@ export function resolveToday(timezones: (string | null)[], now: Date): { today: 
   return { today: days[0], known: true }
 }
 
+/** 现读预算门用的真依赖（只读）。SDK / 数据库客户端都在调用时才用，不在模块顶层建。 */
+function liveReadDeps(now: Date) {
+  return {
+    now,
+    fetcher: fetch,
+    supabase: supabaseAdmin,
+    resolveMetaToken: async (id: string) => (await resolveMetaToken(supabaseAdmin, id, process.env))?.token ?? null,
+  }
+}
+
+export interface LoadPromoFactsOptions {
+  /**
+   * 现读「广告账户与付款（含在投预算）」那一道门（只读库和 Meta，不写运行记录）：
+   *   · 'always'    —— 授权动作（批准）每次都读，不看存档多新；
+   *   · 'if_needed' —— 看板 / 派广告任务前的复查：存档里的这一道缺失、过期或没过（红 / 灰）才读；
+   *   · 不传        —— 只读存档，后台任务（每日对账等）不去打 Meta。
+   */
+  liveBudget?: 'if_needed' | 'always'
+}
+
 export async function loadPromoFacts(
   clientId: string,
   spec: PromoSpec,
   manualChecks: readonly ManualCheck[],
   now: Date = new Date(),
+  options: LoadPromoFactsOptions = {},
 ): Promise<LoadedPromoFacts> {
-  const playbook = resolvePromoPlaybook(await loadIndustry(clientId).catch(() => null))
+  const market = await loadClientMarket(clientId).catch(() => ({ industry: null, currency: null }))
+  const playbook = resolvePromoPlaybook(market.industry)
   const planAccountIds = [...new Set(allAdsSteps(spec).map(s => s.step.settings.ad_account_id))]
 
   const owned = await loadOwnedAccounts(clientId)
@@ -229,12 +286,20 @@ export async function loadPromoFacts(
   const { today, known } = resolveToday(accountTimezones, now)
   const win = reconcileWindow(today, playbook.insightsUnstableDays)
 
-  const [config, coverage, goal, insights, published] = await Promise.all([
+  const accountTotal = await loadAccountTotal(clientId, currencyForTotals(snapshots, market.currency))
+  const [config, coverage, goal, insights, published, tracking] = await Promise.all([
     loadStrategyConfig(clientId),
     loadDailyPlanCoverage(clientId, today),
     loadGoal(clientId, spec.goal_id),
     loadInsights(clientId, planAccountIds, Object.keys(plannedSpendCents(spec, win)), win, playbook.factFreshnessDays, now),
     loadPublishedCount(clientId, win, accountTimezones),
+    // 开投前追踪检查的最近回执；没配置追踪检查的客户是 undefined（清单里不出现追踪门）
+    loadTrackingGateFacts(supabaseAdmin, clientId, {
+      now,
+      ...(options.liveBudget !== undefined && planAccountIds.length > 0
+        ? { readLiveBudget: (id: string) => readLiveBudgetGateCached(id, liveReadDeps(now)), liveMode: options.liveBudget }
+        : {}),
+    }),
   ])
 
   const ownedSet = new Map((owned ?? []).map(a => [a.id, a]))
@@ -257,6 +322,7 @@ export async function loadPromoFacts(
       today, now, playbook, accounts, snapshots: snapFacts, config,
       daily_plan_coverage_days: coverage,
       manual_checks: [...manualChecks],
+      tracking,
     },
     recon: {
       spend_cents_by_account_day: insights.spend,
@@ -265,6 +331,7 @@ export async function loadPromoFacts(
       content_published: published,
       insights_as_of: insights.as_of,
       timezone_known: known,
+      account_total: accountTotal,
     },
   }
 }

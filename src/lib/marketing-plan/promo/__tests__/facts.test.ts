@@ -83,7 +83,7 @@ describe('loadPromoFacts — 正常读取', () => {
 
   it('所有读取都带 client_id（目标 / 账户 / 设置 / 花费 / 内容）', async () => {
     await loadPromoFacts('client-1', baseSpec(), [], NOW)
-    for (const t of ['client_meta_ad_accounts', 'ad_strategy_configs', 'goals', 'ad_daily_insights', 'content_posts', 'social_plans']) {
+    for (const t of ['client_meta_ad_accounts', 'ad_strategy_configs', 'goals', 'ad_daily_insights', 'content_posts', 'social_plans', 'meta_ads_snapshots']) {
       const f = filtersOf(t)
       const ok = f.some(([k, v]) => (k === 'eq:client_id' || k === 'eq:id') && v === 'client-1')
       expect(ok, `${t} 应带 client_id`).toBe(true)
@@ -104,6 +104,15 @@ describe('loadPromoFacts — 读失败一律 null / 不放行', () => {
     const f = await loadPromoFacts('client-1', baseSpec(), [], NOW)
     expect(f.recon.spend_cents_by_account_day).toBeNull()
     expect(f.recon.meta_results).toBeNull()
+  })
+  it('逐日花费缺失时带上广告数据页的账户合计，不把它写进逐日花费', async () => {
+    st.results.ad_daily_insights = { data: [], error: null }
+    st.results.meta_ads_snapshots = { data: { spend: '2012.00', period_start: '2026-09-25', period_end: '2026-10-25' } }
+    const f = await loadPromoFacts('client-1', baseSpec(), [], NOW)
+    expect(f.recon.spend_cents_by_account_day).toBeNull()
+    expect(f.recon.account_total).toEqual({
+      spend: 2012, currency: 'AUD', period_start: '2026-09-25', period_end: '2026-10-25',
+    })
   })
   it('每日计划覆盖按连续天数算：中间有空档就在空档处停', async () => {
     const day = (date: string) => ({ date, slots: { fb: 'PLANNED' } })

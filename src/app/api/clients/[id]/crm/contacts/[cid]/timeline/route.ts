@@ -13,12 +13,17 @@
  * Responses: 200 { contact, timeline } / 401 / 403 / 404 / 500
  */
 
+import { formFactsLine } from '@/lib/crm/form-facts'
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { contactCardTitle } from '@/lib/crm/display-name'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { normalisePhone } from '@/lib/crm/identity'
 import { dropEmailTouchesDuplicatedByMessage } from '@/lib/crm/timeline-dedupe'
+import { buildTouchpointLike } from '@/lib/crm/contact-model'
+import { buildJourney, type Journey } from '@/lib/crm/returning-journey'
+import { detectReturningLead, engagementLine, returningStory, summariseEngagement } from '@/lib/crm/returning-lead'
 
 interface RouteParams {
   params: { id: string; cid: string }
@@ -144,6 +149,13 @@ type TimelineEntry =
       note: string | null
     }
 
+/** 新西兰时区的「M月D日」。 */
+function nzMonthDay(iso: string): string {
+  const parts = new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland', month: 'numeric', day: 'numeric' }).formatToParts(new Date(iso))
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
+  return `${get('month')}月${get('day')}日`
+}
+
 export async function GET(_req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   const clientId = params.id
   const contactId = params.cid
@@ -170,6 +182,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
 
   const [
     { data: touches, error: tErr },
+    { data: allTouches },
     { data: events, error: eErr },
     { data: stageRows },
     { data: convs },
@@ -183,6 +196,16 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       .eq('client_id', clientId)
       .eq('contact_id', contactId)
       .neq('channel', 'messenger')
+      .order('occurred_at', { ascending: false })
+      .limit(2000),
+    // 「回头客 / 往来一览」要看**所有渠道**（含上面排除掉的私信占位），而且字段要跟列表那条路
+    // 喂给 `buildTouchpointLike` 的一模一样（多一列 `source`），判据才不会在抽屉和列表之间漂移。
+    // 只读这几列，不带 `raw`/`summary`：不会多出任何可展示的内容，也不会变成第二条渲染路径。
+    supabaseAdmin
+      .from('contact_touchpoints')
+      .select('channel, direction, occurred_at, source, raw, metadata')
+      .eq('client_id', clientId)
+      .eq('contact_id', contactId)
       .order('occurred_at', { ascending: false })
       .limit(2000),
     supabaseAdmin
@@ -409,14 +432,70 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     }
   }
 
+  // 官网表单里的「预计出发时间 / 每人预算」：取最新一条带这两项稳定代码的 web_form 触点，转成一行人话。
+  // 缺失就是 null（抽屉不显示），不当 0；这两项只是事实，不参与冷热/阶段判断。
+  let formFacts: string | null = null
+  let formFactsAt = ''
+  for (const t of (touches ?? []) as { channel: string; occurred_at: string; metadata: Record<string, unknown> | null }[]) {
+    if (t.channel !== 'web_form' || !t.metadata) continue
+    const line = formFactsLine({
+      travelWindow: typeof t.metadata.form_travel_window === 'string' ? t.metadata.form_travel_window : null,
+      budgetBand: typeof t.metadata.form_budget_band === 'string' ? t.metadata.form_budget_band : null,
+    })
+    if (line && t.occurred_at >= formFactsAt) {
+      // 带上提交日期：客人后来再填一次没带这两项的表单时，抽屉不会把旧答案当成现在的说法。
+      formFacts = `${line}（${nzMonthDay(t.occurred_at)}提交）`
+      formFactsAt = t.occurred_at
+    }
+  }
+
   // 同一封邮件的触点卡片和正文气泡说同一句话时只留气泡（见 timeline-dedupe）。
   const deduped = dropEmailTouchesDuplicatedByMessage(entries)
   deduped.sort((a, b) => ts(a.at) - ts(b.at))
 
+  // 「回头客」和「往来一览」：用列表同一个转换函数 + 同一份判据算。读不出来就当没有 ——
+  // 这是抽屉顶部的补充说明，绝不能因为它出错而把整条往来记录弄丢。
+  let engagement: {
+    returning: ReturnType<typeof detectReturningLead>
+    line: string | null
+    story: string[]
+    lastActiveAt: string | null
+    journey: Journey | null
+  } | null = null
+  try {
+    const tpLikes = ((allTouches ?? []) as Parameters<typeof buildTouchpointLike>[0][]).map((r) =>
+      buildTouchpointLike({ ...r, contact_id: contactId }),
+    )
+    const overview = summariseEngagement(tpLikes)
+    const returning = detectReturningLead(tpLikes)
+    // 路线只给回头客画；团意向取表单触点 metadata 里的原始代码（跟列表读的同一个字段），
+    // tpLikes 与 allTouches 同序一一对应。
+    const rows = (allTouches ?? []) as Array<{ metadata?: Record<string, unknown> | null }>
+    const journey = returning
+      ? buildJourney(
+          tpLikes.map((t, i) => {
+            const raw = rows[i]?.metadata?.tour_interest_raw ?? rows[i]?.metadata?.tour_interest
+            return { ...t, tour: typeof raw === 'string' ? raw : null }
+          }),
+          returning,
+          new Date(),
+        )
+      : null
+    engagement = {
+      returning,
+      line: engagementLine(overview),
+      story: returning ? returningStory(returning, overview, new Date()) : [],
+      lastActiveAt: overview.theirs.lastAt,
+      journey,
+    }
+  } catch (err) {
+    console.error('[crm timeline] 算回头客/往来一览失败，抽屉顶部不显示这一块:', err instanceof Error ? err.message : err)
+  }
+
   return NextResponse.json({
     contact: {
       contactId: contact.id,
-      name: contact.display_name || '未留姓名',
+      name: contactCardTitle(contact.display_name),
       phone: contact.primary_phone,
       email: contact.primary_email,
       stage: contact.stage,
@@ -424,5 +503,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     },
     timeline: deduped,
     omittedMessages,
+    formFactsLine: formFacts,
+    engagement,
   })
 }

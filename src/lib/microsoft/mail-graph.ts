@@ -29,6 +29,8 @@
  *    "Get Outlook mail, calendar, or contact IDs to remain the same"）。
  */
 
+import type { FormNoticeLead } from './mail-form-notice'
+
 const GRAPH = 'https://graph.microsoft.com/v1.0'
 
 /** 一次要多少封。Graph 硬顶 999，取 50 是为了单次响应小、失败重试便宜。 */
@@ -54,6 +56,11 @@ export interface MailMessage {
   direction: 'inbound' | 'outbound'
   /** 带附件吗 —— 付款截图/回单常常整封信只有一句「见附件」，正文判不出来。 */
   hasAttachment: boolean
+  /**
+   * 网站表单通知里提取出的客人（只有 syncMailbox 的预处理识别成功才会有）。
+   * 有它时 counterparty 已被改写成这位客人，下游据此走「网站表单」分支。
+   */
+  formLead?: FormNoticeLead
 }
 
 interface GraphAddress {
@@ -214,6 +221,63 @@ export async function fetchMessageText(accessToken: string, messageId: string): 
       body: raw.body?.content ?? '',
       firstRecipient: pickAddress(raw.toRecipients?.[0]),
       recipientCount: (raw.toRecipients?.length ?? 0) + (raw.ccRecipients?.length ?? 0),
+    },
+  }
+}
+
+export interface FormNoticeSource {
+  body: string
+  /** Reply-To 里的全部地址（小写）。 */
+  replyTo: string[]
+  headers: Array<{ name: string; value: string }>
+}
+
+export type FormNoticeSourceResult =
+  | { ok: true; source: FormNoticeSource }
+  | { ok: false; error: string; status?: number }
+
+/**
+ * 取一封「网站表单通知」的识别材料：纯文本全文 + Reply-To + 邮件头（认证结果、DKIM）。
+ *
+ * 为什么单独写、不改 `fetchMessageText` 也不放进列表读取：列表读取每小时对所有客户
+ * 邮箱都跑，邮件头很大，加进去会拖慢全部邮箱；这里只对已经初筛出的那几封单封读取。
+ */
+export async function fetchFormNoticeSource(
+  accessToken: string,
+  messageId: string,
+): Promise<FormNoticeSourceResult> {
+  const select = encodeURIComponent('body,replyTo,internetMessageHeaders')
+  const url = `${GRAPH}/me/messages/${encodeURIComponent(messageId)}?$select=${select}`
+  let res: Response
+  try {
+    res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Prefer: 'IdType="ImmutableId", outlook.body-content-type="text"',
+      },
+    })
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : '读取表单通知失败' }
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    return { ok: false, status: res.status, error: `HTTP ${res.status}: ${text.slice(0, 300)}` }
+  }
+  const raw = (await res.json()) as {
+    body?: { content?: string | null } | null
+    replyTo?: GraphAddress[] | null
+    internetMessageHeaders?: Array<{ name?: string | null; value?: string | null }> | null
+  }
+  return {
+    ok: true,
+    source: {
+      body: raw.body?.content ?? '',
+      replyTo: (raw.replyTo ?? [])
+        .map((a) => a?.emailAddress?.address?.trim().toLowerCase() ?? '')
+        .filter(Boolean),
+      headers: (raw.internetMessageHeaders ?? []).flatMap((h) =>
+        h?.name && typeof h.value === 'string' ? [{ name: h.name, value: h.value }] : [],
+      ),
     },
   }
 }

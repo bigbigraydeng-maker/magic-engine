@@ -45,6 +45,9 @@ export interface Schedule {
   too_dense: boolean
 }
 
+/** 广告开投日条目里的固定提示（展示层要原样识别并去掉，所以两边共用这一个常量） */
+export const ADS_APPROVAL_PAREN = '（开投需要 PM 在广告审批页另行批准，目前广告没有投）'
+
 const MAX_PER_WEEK = 7
 const MAX_REELS_PER_MONTH = 1000
 const MAX_NOTES = 20
@@ -142,7 +145,7 @@ function expandAds(ctx: Ctx, step: Extract<PromoStep, { kind: 'ads_campaign' }>)
   const pausedText = pauses.length > 0 ? `；计划里的暂停区间：${pauses.map(r => `${r.from} 至 ${r.to}`).join('、')}` : ''
   push(ctx, start, {
     kind: 'ads_start', phase_id: ctx.phase.id, step_id: step.id,
-    text: `计划开投日（开投需要 PM 在广告审批页另行批准，目前广告没有投）：日预算 ${(s.daily_budget_cents / 100).toFixed(2)}（币种以广告账户为准），受众引用 ${clip(s.audience_ref)}${pausedText}`,
+    text: `计划开投日${ADS_APPROVAL_PAREN}：日预算 ${(s.daily_budget_cents / 100).toFixed(2)}（币种以广告账户为准），受众引用 ${clip(s.audience_ref)}${pausedText}`,
   })
 }
 

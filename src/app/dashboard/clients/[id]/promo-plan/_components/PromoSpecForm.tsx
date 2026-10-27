@@ -4,8 +4,10 @@ import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
+import { readBlankDraftGoalId } from '@/lib/marketing-plan/blank-draft'
 import { readPromoSpec, type PromoPhase, type PromoSpec, type PromoStep } from '@/lib/marketing-plan/promo/spec'
 import { buildPromoTemplate } from '@/lib/marketing-plan/promo/template'
+import { formatGoalChoice } from '@/lib/marketing-plan/promo/goal-choice'
 import {
   STEP_KIND_LABEL, addPhase, addStep, newBusinessCase, newExperiment, newSalesHandover,
   removePhase, removeStep, setBusinessCase, setExperiment, setGoal, setIsExperiment, setSalesHandover,
@@ -144,13 +146,13 @@ function GoalPicker({ clientId, spec, options, setSpec }: { clientId: string; sp
   return (
     <div>
     <Field label="这份计划为哪个目标服务"
-      hint={goals.length === 0 ? '没有读到进行中的目标：可能这个客户还没建，也可能读取失败，刷新页面再看' : undefined}>
+      hint={goals.length === 0 ? '没有读到草稿或进行中的目标。可能还没建，也可能读取失败，刷新后再看。' : undefined}>
       <select className={inputCls} value={spec.goal_id} onChange={e => setSpec(setGoal(spec, e.target.value))}>
         <option value="">请选择</option>
         {spec.goal_id !== '' && !goals.some(g => g.id === spec.goal_id) && (
-          <option value={spec.goal_id}>{spec.goal_id}（不是进行中的目标，请重选）</option>
+          <option value={spec.goal_id}>{spec.goal_id}（不在这份可选目标里，请重选）</option>
         )}
-        {goals.map(g => <option key={g.id} value={g.id}>{g.title}（{g.period_start} 至 {g.period_end}）</option>)}
+        {goals.map(g => <option key={g.id} value={g.id}>{formatGoalChoice(g)}</option>)}
       </select>
     </Field>
     {goals.length === 0 && <Link href={`/dashboard/clients/${clientId}/goals`} className="text-xs text-indigo-600 underline">去目标页看看 →</Link>}
@@ -175,9 +177,17 @@ function SalesHandoverBlock({ spec, setSpec }: { spec: PromoSpec; setSpec: (s: P
   )
 }
 
+function initialPromoSpec(plan: MarketingPlan): PromoSpec {
+  const saved = readPromoSpec(plan.plan_data)
+  if (saved) return saved
+  const template = buildPromoTemplate(plan)
+  const goalId = readBlankDraftGoalId(plan.generation_meta)
+  return goalId ? setGoal(template, goalId) : template
+}
+
 /** PM / FDE 用：用表格填推广计划（阶段 + 每步设定）。保存走原来的保存接口，服务端照旧校验。只有草稿能改。 */
 export function PromoSpecForm({ clientId, plan, options, onSaved }: Props) {
-  const [spec, setSpec] = useState<PromoSpec>(() => readPromoSpec(plan.plan_data) ?? buildPromoTemplate(plan))
+  const [spec, setSpec] = useState<PromoSpec>(() => initialPromoSpec(plan))
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<string[]>([])
 

@@ -2,8 +2,8 @@
  * 「真实价格只能配真实画面」—— 服务端那道闸。
  *
  * 界面上的闸（SocialPlanSection 交付按钮）挡的是手滑。这里挡的是**绕过界面的路**：
- * Airtable 审批过了自动发（`/api/publer/create-post`）、Visuals 页面直接排期
- * （`/api/publer/schedule`）—— 这两条一旦跑起来东西就真出去了，人不在场。
+ * 每日计划自动发布、交付到 Launch Hub 存草稿的 quick-post ——
+ * 前者一旦跑起来东西就真出去了，人不在场。（Publer 退役后，Airtable 自动发和 Visuals 直接排期两条路已不存在。）
  *
  * 判定跟界面完全同源：`containsPriceClaim`（严口径）× `canBackRealPrice`。
  * 两边共用同一段代码，不会出现「界面拦了后端放行」这种最难查的不一致。

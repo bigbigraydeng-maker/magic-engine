@@ -35,15 +35,20 @@ export default function AutoPausePanel({ clientId }: { readonly clientId: string
   const [busyRunId, setBusyRunId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/clients/${clientId}/ad-health/auto-pause`)
-    if (!res.ok) {
-      // 保留前一条提示（比如 409 的原因），别让「刷新也失败」把它盖掉
-      setError((prev) => (prev ? `${prev}；刷新也失败了（${res.status}）` : `读取失败（${res.status}）`))
-      return
+    try {
+      const res = await fetch(`/api/clients/${clientId}/ad-health/auto-pause`)
+      if (!res.ok) {
+        // 保留前一条提示（比如 409 的原因），别让「刷新也失败」把它盖掉
+        setError((prev) => (prev ? `${prev}；刷新也失败了（${res.status}）` : `读取失败（${res.status}）`))
+        return
+      }
+      const json = await res.json()
+      setItems(json.items ?? [])
+      setHasMore(json.hasMore === true)
+    } catch {
+      // 网络断了 / 返回不是 JSON：给出提示，别让页面永远停在「加载中…」
+      setError((prev) => (prev ? `${prev}；刷新也失败了` : '读取失败，请检查网络后点「重试」'))
     }
-    const json = await res.json()
-    setItems(json.items ?? [])
-    setHasMore(json.hasMore === true)
   }, [clientId])
 
   useEffect(() => {
@@ -85,7 +90,20 @@ export default function AutoPausePanel({ clientId }: { readonly clientId: string
     }
   }
 
-  if (!items) return <div>{error ?? '加载中…'}</div>
+  if (!items) {
+    if (!error) return <div>加载中…</div>
+    return (
+      <div>
+        <div style={{ color: '#b91c1c', marginBottom: 8 }}>{error}</div>
+        <button
+          onClick={() => { setError(null); void load() }}
+          style={{ border: '1px solid #cbd5e1', borderRadius: 6, padding: '4px 12px', cursor: 'pointer' }}
+        >
+          重试
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div style={{ maxWidth: 720 }}>

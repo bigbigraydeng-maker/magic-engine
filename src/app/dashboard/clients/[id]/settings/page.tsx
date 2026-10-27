@@ -274,13 +274,15 @@ export default function ClientSettingsPage() {
   // 渲染横幅（那条横幅在 MailboxPanel 自己里面）。
   const mailStatus = searchParams.get('mail')
   const tiktokStatus = searchParams.get('tiktok')
-  const youtubeStatus = searchParams.get('youtube')
   const tiktokMessage: Record<string, string> = {
     connected: 'TikTok 授权已完成。发布视频前请确认目标账号。',
     denied: 'TikTok 授权已取消，可以重新连接。',
     bad_state: '本次连接已失效，请从「连接 TikTok」重新开始。',
     exchange_failed: 'TikTok 授权未完成，请重新连接。',
     missing_scopes: 'TikTok 没有授予所需权限，请重新连接并允许账号信息和视频发布。',
+    needs_team_check: '这个 TikTok 账号暂时无法连接到当前客户，请联系团队核实后再试。',
+    has_other_account: '该客户已连接另一个 TikTok 账号。如需更换，请联系团队先断开旧授权再重新连接。',
+    save_failed: 'TikTok 授权已完成，但保存失败，请稍后重试。',
   }
   // 深链锚点（见 lib/factory/config-link）——驾驶舱的「该客户工厂配置」跳过来时
   // 直接落在「视频工厂配置」那一块，不用人在「内容与社媒」里自己找。
@@ -307,14 +309,6 @@ export default function ClientSettingsPage() {
         {tiktokStatus && tiktokMessage[tiktokStatus] && (
           <div role="status" className="mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-800">
             {tiktokMessage[tiktokStatus]}
-          </div>
-        )}
-
-        {youtubeStatus && (
-          <div role="status" className="mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-800">
-            {youtubeStatus === 'connected'
-              ? 'YouTube 授权记录已保存。请在下方核对频道；此连接用于私享上传及核对，不代表已公开发布。'
-              : 'YouTube 授权未完成，请核实频道配置与管理权限后重试。'}
           </div>
         )}
 

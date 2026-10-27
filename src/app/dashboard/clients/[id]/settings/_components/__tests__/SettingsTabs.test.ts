@@ -75,3 +75,9 @@ describe('分组本身', () => {
     }
   })
 })
+
+
+it('Instagram callback wins over tab selection and lands on the visible content panel', () => {
+  const params = new URLSearchParams({ instagram: 'connected', tab: 'connect' })
+  expect(pickInitialTab(key => params.get(key))).toBe('content')
+})

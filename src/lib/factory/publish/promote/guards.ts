@@ -7,11 +7,15 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import {
   REEL_AUTO_CHECK_KEYS,
   checklistPasses,
-  humanKeysForStored,
+  humanKeysForReviewRef,
   validateContentChecklist,
 } from '@/lib/social/content-review'
 import type { PublishTarget } from '../../types'
+import { portFor } from './platform-port'
+import { asRecord, nonEmptyString } from './record'
 import type { PromoteOrder, TrafficRow } from './types'
+
+export { asRecord }
 
 // ── 文本归一化 ────────────────────────────────────────────────────────────────
 
@@ -89,31 +93,17 @@ export function emailSlot(email: string): string {
 
 // ── 结构收窄 ──────────────────────────────────────────────────────────────────
 
-/** 把 unknown 收窄成「普通对象」;数组、null、原始值一律返回 {}。 */
-export function asRecord(v: unknown): Record<string, unknown> {
-  if (typeof v !== 'object' || v === null || Array.isArray(v)) return {}
-  return v as Record<string, unknown>
-}
-
 // ── 前置检查 ──────────────────────────────────────────────────────────────────
 
 export type PrecheckResult =
   | { ok: true; row: TrafficRow; videoId: string; pageId: string; approvedAt: string }
   | { ok: false; status: number; error: string }
 
-function nonEmptyString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() !== '' ? v : null
-}
-
-/** 发布目标:必须是 Facebook 主页,且配置了防误发品牌名。 */
+/** 发布目标:找不到对应平台端口一律按「目标不可用」拒绝;具体规则由平台端口决定。 */
 function checkTarget(target: PublishTarget | null): PrecheckResult | null {
-  if (!target || target.platform !== 'facebook' || !nonEmptyString(target.page_id)) {
-    return { ok: false, status: 422, error: '发布目标未配置或不是 Facebook 主页,不能转公开' }
-  }
-  if (!nonEmptyString(target.expect_brand)) {
-    return { ok: false, status: 422, error: '防误发品牌名缺失,不能转公开' }
-  }
-  return null
+  const port = target ? portFor(target.platform) : null
+  const failure = port ? port.checkTarget(target) : { status: 422, error: '发布目标未配置或不是 Facebook 主页,不能转公开' }
+  return failure ? { ok: false, ...failure } : null
 }
 
 /** 工单状态:已发布、Reel 处于 DRAFT、且带 master_brief_id。 */
@@ -138,7 +128,7 @@ function checkChecklists(order: PromoteOrder): PrecheckResult | null {
   const output = asRecord(order.output)
   const humanChecklist = validateContentChecklist(
     reviewRef['checklist_human'],
-    humanKeysForStored(reviewRef['checklist_human']),
+    humanKeysForReviewRef(reviewRef),
     'HUMAN',
   )
   const autoChecklist = validateContentChecklist(
@@ -169,7 +159,7 @@ function checkRows(rows: TrafficRow[]): PrecheckResult | null {
 }
 
 /**
- * 数据一致性:工单、流量记录、发布目标三方的视频 id / 主页 id 必须一致,
+ * 数据一致性:工单、流量记录、发布目标三方的视频 id / 账号 id 必须一致(由平台端口检查),
  * 且工单带有审片通过时间。成功时返回收窄后的成功结果。
  */
 function checkIds(
@@ -177,20 +167,10 @@ function checkIds(
   row: TrafficRow,
   target: PublishTarget,
 ): PrecheckResult {
-  const publishedRef = asRecord(order.published_ref)
-  const payload = asRecord(row.payload)
-
-  const orderVideoId = nonEmptyString(publishedRef['video_id'])
-  const rowVideoId = nonEmptyString(payload['video_id'])
-  if (!orderVideoId || !rowVideoId || orderVideoId !== rowVideoId) {
-    return { ok: false, status: 409, error: '工单与流量记录的视频 id 不一致,不能转公开' }
-  }
-
-  const orderPageId = nonEmptyString(publishedRef['page_id'])
-  const rowPageId = nonEmptyString(payload['page_id'])
-  if (!orderPageId || !rowPageId || orderPageId !== target.page_id || rowPageId !== target.page_id) {
-    return { ok: false, status: 409, error: '工单、流量记录与发布目标的主页 id 不一致,不能转公开' }
-  }
+  const port = portFor(target.platform)
+  if (!port) return { ok: false, status: 422, error: '发布目标未配置或不是 Facebook 主页,不能转公开' }
+  const ids = port.checkIds(order, row, target)
+  if (!ids.ok) return ids
 
   const reviewRef = asRecord(order.review_ref)
   const approvedAt = nonEmptyString(reviewRef['approved_at'])
@@ -198,7 +178,7 @@ function checkIds(
     return { ok: false, status: 409, error: '工单缺少审片通过时间,不能转公开' }
   }
 
-  return { ok: true, row, videoId: orderVideoId, pageId: orderPageId, approvedAt }
+  return { ok: true, row, videoId: ids.videoId, pageId: ids.accountId, approvedAt }
 }
 
 /**

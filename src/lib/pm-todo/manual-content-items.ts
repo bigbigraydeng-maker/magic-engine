@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
+import { renderWorkerDownReason, type AlivePing } from '@/lib/factory/render-worker-report'
 import { judgeWorkerPresence, judgeQueueByClient, latestAliveAt } from '@/lib/factory/worker-presence'
 import { containsPriceClaim } from '@/lib/content/price-claim'
 import { judgeOutgoingPost } from '@/lib/content/price-claim-gate'
@@ -102,8 +103,8 @@ export async function pushCreatomateRenderItems(
 /**
  * 审批过了但发不出去的帖子 —— 文案报了价，配图来源却背不了真价。
  *
- * 为什么必须下发：`/api/publer/create-post` 是 Airtable 审批过就自动跑的，人不在场。
- * 那道闸拦下来只会往 webhook 回一个 409，**没有任何人会看到** —— 帖子就永远停在
+ * 为什么必须下发：Airtable 审批过的帖子会自动往外发，人不在场。
+ * 那道闸拦下来**没有任何人会看到** —— 帖子就永远停在
  * approved，看起来像「排着排着就没了」。发现死在日志里 = 管道断头。
  *
  * 不落新状态、不加新表：判定条件跟闸本身同源，改好文案或确认好素材，这条自己就消失。
@@ -220,7 +221,7 @@ export async function pushFactoryWorkerItems(
     .select('started_at, summary')
     .eq('job_name', 'factory-worker-alive')
   if (aliveError) throw new Error(`factory alive-ping query failed: ${aliveError.message}`)
-  const pings = (aliveData ?? []) as Array<{ started_at: string; summary: { client_ids?: string[] | null } | null }>
+  const pings = (aliveData ?? []) as Array<AlivePing & { started_at: string }>
 
   const latestHbByClient = new Map<string, string>()
   for (const clientId of clientIds) {
@@ -242,6 +243,19 @@ export async function pushFactoryWorkerItems(
   // 完全不同的处置（这家去开机 / 那家去查报错）搅在一起。
   for (const { clientId, verdict } of judgeQueueByClient(queued, latestHbByClient, now)) {
     pushOneFactoryWorkerItem(items, verdict, clientNames.get(clientId)?.name ?? '未知客户')
+  }
+  for (const clientId of clientIds) {
+    const reason = renderWorkerDownReason(pings, clientId)
+    if (!reason) continue
+    const clientName = clientNames.get(clientId)?.name ?? '未知客户'
+    items.push({
+      kind: 'factory_render_worker_down',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `【${clientName}】有片子在排队，但这台机器报渲染工人没就绪：${reason}。领单的程序还在，不等于片子能做出来。`,
+      how: '按上面那句原因修这台机器上的渲染环境。不要找做片的人，也不要找审核的人。修好之后这条会自己消失。',
+      href: 'https://app.magicengine.com.au/dashboard/factory',
+    })
   }
 }
 

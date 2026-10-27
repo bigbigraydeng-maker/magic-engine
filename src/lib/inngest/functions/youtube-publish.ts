@@ -8,8 +8,7 @@
  * Both events are cloud-owned (not in WORKER_OWNED_EVENTS).
  */
 import { inngest, CLOUD_FN_PREFIX } from '../client'
-import { getValidToken } from '@/lib/platform-oauth/token-manager'
-import { PLATFORM_PROVIDERS } from '@/lib/platform-oauth/vocabulary'
+import { getYouTubePublishToken } from '@/lib/youtube-publish/token'
 import {
   runPublicStep,
   runStaging,
@@ -28,7 +27,7 @@ import {
   insertReceipt,
 } from '@/lib/youtube-publish/store'
 
-const getToken = (clientId: string) => getValidToken(clientId, PLATFORM_PROVIDERS.GOOGLE_YOUTUBE)
+const getToken = (clientId: string) => getYouTubePublishToken(clientId)
 
 /** The factory's own storage bucket (see src/lib/factory/evaluate.ts). */
 const FACTORY_PATH_PREFIX = '/storage/v1/object/public/content-factory/'

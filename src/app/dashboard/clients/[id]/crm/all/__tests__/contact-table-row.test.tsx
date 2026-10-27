@@ -20,6 +20,7 @@ function makeRow(over: Partial<ContactRow> = {}): ContactRow {
     segmentLabel: 'S',
     temperature: 'cold',
     intent: null,
+    assignedTo: null,
     custom: {},
     nextAction: {
       list: 'hot',
@@ -50,6 +51,13 @@ function renderRow(row: ContactRow, grouped = false) {
     </table>,
   )
 }
+
+describe('nameForDisplay 与后端同一套判据', () => {
+  it('后端兜底词「未留姓名」也算没留名；带 @ 的昵称（kay@home）是名字，不算', () => {
+    expect(nameForDisplay({ name: '未留姓名', phone: null, email: null, hasMessenger: true })).toEqual({ text: '未留名', missing: true, sub: '仅 FB 私信' })
+    expect(nameForDisplay({ name: 'kay@home', phone: null, email: null, hasMessenger: false })).toEqual({ text: 'kay@home', missing: false, sub: null })
+  })
+})
 
 describe('nameForDisplay', () => {
   it('把 "WhatsApp Business" 当成没留名，副标题用电话', () => {
@@ -129,5 +137,36 @@ describe('ContactTableRow', () => {
     const reasonEl = screen.getByTitle(reason)
     expect(reasonEl.className).toContain('truncate')
     expect(screen.getByText('打给他')).toBeTruthy()
+  })
+})
+
+describe('🔥 回头标签（PM 2026-10-27：之前咨询过、我们联系过、今天又填了表）', () => {
+  const returning = {
+    firstEnquiryAt: '2026-06-15T07:55:00.000Z',
+    latestFormAt: '2026-10-26T23:47:00.000Z',
+    ourLastContactAt: '2026-10-24T01:11:00.000Z',
+    ourContacts: 3,
+    earlierForms: 1,
+  }
+
+  it('回头客 → 名字旁出现「🔥 回头」，悬停说清为什么', () => {
+    renderRow(makeRow({ returning, reason: '回头了：6月15日就咨询过，我们联系过 3 次，今天又填了表，意向很强' }))
+    const tag = screen.getByTestId('returning-tag')
+    expect(tag.textContent).toContain('回头')
+    expect(tag.getAttribute('title')).toContain('回头了')
+  })
+
+  it('🔴 不是回头客 → 没有这个标签（别满屏飘红）', () => {
+    renderRow(makeRow({ returning: null }))
+    expect(screen.queryByTestId('returning-tag')).toBeNull()
+    renderRow(makeRow())
+    expect(screen.queryByTestId('returning-tag')).toBeNull()
+  })
+
+  it('标签摆在渠道小标签前面（这一行最该先看到的东西）', () => {
+    renderRow(makeRow({ returning, sources: ['fb_form'] }))
+    const html = document.body.innerHTML
+    expect(html.indexOf('returning-tag')).toBeGreaterThan(-1)
+    expect(html.indexOf('returning-tag')).toBeLessThan(html.indexOf('FB 表单'))
   })
 })

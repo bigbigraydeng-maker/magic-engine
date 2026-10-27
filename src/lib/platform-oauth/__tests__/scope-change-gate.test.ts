@@ -45,6 +45,7 @@ import { describe, expect, it } from 'vitest'
 import { MICROSOFT_MAIL_SCOPES } from '@/lib/microsoft/mail-oauth'
 import { COMBINED_GOOGLE_SCOPES, GSC_SCOPES } from '@/lib/google-oauth/client'
 import { META_PAGE_SCOPES } from '@/lib/meta-oauth/client'
+import { INSTAGRAM_PUBLISH_SCOPES, INSTAGRAM_SCOPES } from '@/lib/instagram-oauth/identity'
 import { TIKTOK_SCOPES } from '@/lib/tiktok-oauth/client'
 import { YOUTUBE_PUBLISH_SCOPES } from '@/lib/youtube-publish/client'
 
@@ -90,6 +91,11 @@ describe('授权权限清单变更闸门（改了就来读文件头注）', () =
     ])
   })
 
+  it('Instagram 默认仅读取基本资料;发布开关打开时才多要发布权限', () => {
+    expect([...INSTAGRAM_SCOPES]).toEqual(['instagram_business_basic'])
+    expect([...INSTAGRAM_PUBLISH_SCOPES]).toEqual(['instagram_business_basic', 'instagram_business_content_publish'])
+  })
+
   it('TikTok 授权的清单没有被悄悄改动', () => {
     expect([...TIKTOK_SCOPES]).toEqual(['user.info.basic', 'video.publish'])
   })
@@ -117,6 +123,8 @@ const PINNED_SCOPE_CONSTANTS = [
   'src/lib/meta-oauth/client.ts:META_PAGE_SCOPES',
   'src/lib/microsoft/mail-oauth.ts:MICROSOFT_MAIL_SCOPES',
   'src/lib/tiktok-oauth/client.ts:TIKTOK_SCOPES',
+  'src/lib/instagram-oauth/identity.ts:INSTAGRAM_SCOPES',
+  'src/lib/instagram-oauth/identity.ts:INSTAGRAM_PUBLISH_SCOPES',
   'src/lib/youtube-publish/client.ts:YOUTUBE_PUBLISH_SCOPES',
 ]
 

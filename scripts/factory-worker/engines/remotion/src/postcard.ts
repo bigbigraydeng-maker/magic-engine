@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { FPS } from './timing.ts';
-import { HEX_COLOR, MUSIC_EXTS, LOGO_EXTS, CLIP_EXTS, relFile, text, formatZodIssues } from './schema.ts';
+import { HEX_COLOR, MUSIC_EXTS, LOGO_EXTS, CLIP_EXTS, relFile, text, formatZodIssues, musicGainSchema, frameSchema } from './schema.ts';
 
 /** Fewest scenes a postcard may show. */
 export const MIN_SCENES = 2;
@@ -365,6 +365,48 @@ export function isAcceptableSourceUrl(url: string): boolean {
   return true;
 }
 
+type FrameValue = z.infer<typeof frameSchema>;
+
+function frameCopyTargets(frame: FrameValue | undefined): Array<[Array<string | number>, string]> {
+  if (!frame) return [];
+  const out: Array<[Array<string | number>, string]> = [];
+  if (frame.hook && typeof frame.hook === 'object') {
+    const hook = frame.hook;
+    if (hook.text) out.push([['frame', 'hook', 'text'], hook.text]);
+    if (hook.stat) out.push([['frame', 'hook', 'stat'], hook.stat]);
+    if (hook.question) out.push([['frame', 'hook', 'question'], hook.question]);
+  }
+  if (frame.endCard && typeof frame.endCard === 'object') {
+    const end = frame.endCard;
+    if (end.cta) out.push([['frame', 'endCard', 'cta'], end.cta]);
+    if (end.contact) out.push([['frame', 'endCard', 'contact'], end.contact]);
+    if (end.brandName) out.push([['frame', 'endCard', 'brandName'], end.brandName]);
+  }
+  return out;
+}
+
+/** Scarcity and price rules also apply to optional hook and end-card copy. */
+function checkFrameCopy(frame: FrameValue | undefined, ctx: z.RefinementCtx): void {
+  for (const [path, value] of frameCopyTargets(frame)) {
+    const banned = bannedWordHits(value);
+    if (banned.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path,
+        message: `文字里不能出现促销词：${banned.join('、')}`,
+      });
+    }
+    const prices = priceMentionHits(value);
+    if (prices.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path,
+        message: '画面文字里不许出现价格（价格只放价格卡或首评链接）',
+      });
+    }
+  }
+}
+
 /** Schema for the generic travel-postcard video template props. No defaults: a missing field is rejected. */
 export const PostcardPropsSchema = z
   .object({
@@ -377,6 +419,7 @@ export const PostcardPropsSchema = z
       .optional(),
     musicFile: relFile('音乐文件', MUSIC_EXTS).nullable(),
     musicStartSec: z.number().min(0).max(600).optional(),
+    musicGain: musicGainSchema,
     scrim: z
       .number()
       .min(0, { message: '压暗强度必须在 0 到 1 之间' })
@@ -394,6 +437,10 @@ export const PostcardPropsSchema = z
       .min(600, { message: 'cardTop 必须在 600 到 940 之间' })
       .max(940, { message: 'cardTop 必须在 600 到 940 之间' })
       .optional(),
+    cardZone: z.enum(['upper', 'lower', 'alternate'], {
+      message: 'cardZone 只能是 upper、lower 或 alternate',
+    }).optional(),
+    frame: frameSchema.optional(),
     accent: hexColor.optional(),
     hook: HOOK,
     scenes: z
@@ -406,6 +453,15 @@ export const PostcardPropsSchema = z
   })
   .strict()
   .superRefine((val, ctx) => {
+    if (val.cardTop !== undefined && val.cardZone !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['cardZone'],
+        message: 'cardTop 和 cardZone 只能填一个',
+      });
+    }
+    checkFrameCopy(val.frame, ctx);
+
     val.hook.lines.forEach((line, i) => {
       if (textWidthUnits(line, true) > HOOK_LINE_UNITS) {
         ctx.addIssue({

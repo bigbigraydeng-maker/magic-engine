@@ -29,18 +29,48 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { askJson, listConfiguredProviders, type AskJsonDeps } from '@/lib/ai/failover'
 import {
   MessengerBriefSchema,
+  MessengerBriefStrictSchema,
   MESSENGER_BRIEF_JSON_SCHEMA,
   BRIEF_SCHEMA_VERSION,
   type MessengerBrief,
   type BriefContext,
+  type BriefChannel,
   type TripDetails,
 } from './brief-schema'
+
+// 渠道类型定义在 brief-schema（放这里会跟它成环），但调用方习惯从 brief 引，所以再导出一次。
+export type { BriefChannel }
+
 import { hasIndustryFeature } from '@/lib/clients/industry-features'
 import { getClientKnowledge, type GetClientKnowledgeDeps } from '@/lib/knowledge/read'
 import { KnowledgeNotEntitledError } from '@/lib/knowledge/errors'
 import type { KnowledgeEntry } from '@/lib/knowledge/types'
+
+/**
+ * 每条渠道怎么称呼、回信要带什么。英文是给模型看的，所以这里不翻译。
+ *
+ * `replyNote` 对私信**刻意留空**：私信这条路已经上线并在给 525 段对话写卡，
+ * 这次只加邮件，不顺手改它的提示词 —— 换了提示词就等于换了一条在跑的链路。
+ */
+const CHANNEL_WORDS: Record<
+  BriefChannel,
+  { article: string; thread: string; replyNote: (business: string) => string }
+> = {
+  messenger: {
+    article: 'a',
+    thread: 'Facebook Messenger thread',
+    replyNote: () => '',
+  },
+  email: {
+    article: 'an',
+    thread: 'email thread',
+    replyNote: (business) =>
+      `- It is an email, not a chat message: open with the customer's first name and sign off as ${business}. Never write a subject line.`,
+  },
+}
 
 /** Wait this long after the last message before summarising. */
 export const QUIET_PERIOD_MS = 30 * 60 * 1000
@@ -74,6 +104,8 @@ export interface StoredMessage {
   senderName: string | null
   body: string
   sentAt: string
+  /** 邮件渠道靠它去拉全文（库里只存了 255 字摘要）。私信不需要，留空。 */
+  messageId?: string | null
 }
 
 /**
@@ -232,11 +264,18 @@ TRIP DETAILS — every field describes what the CUSTOMER told us, never what we 
  * fact comes from `factEntries` (the `customer_reply`-eligible rows
  * `loadClientFacts`/`getClientKnowledge` returned for this client).
  */
-export function buildSystemPrompt(identity: ClientIdentity, factEntries: readonly KnowledgeEntry[]): string {
+export function buildSystemPrompt(
+  identity: ClientIdentity,
+  factEntries: readonly KnowledgeEntry[],
+  channel: BriefChannel = 'messenger',
+): string {
   const isTravel = isTravelIndustry(identity)
   const business = identity.name
+  const words = CHANNEL_WORDS[channel]
+  const replyNote = words.replyNote(business)
+  const replyNoteLine = replyNote === '' ? '' : `\n${replyNote}`
 
-  return `You turn a Facebook Messenger thread between ${business} and a prospective customer into a briefing card for a ${business} salesperson.
+  return `You turn ${words.article} ${words.thread} between ${business} and a prospective customer into a briefing card for a ${business} salesperson.
 
 LANGUAGE — this is the most common mistake, get it right:
 - summary, customer_needs, objections, promises_made, next_action, risk_flags: write in SIMPLIFIED CHINESE. Staff read these in a Chinese interface.
@@ -259,7 +298,7 @@ ${clientFactsBlock(factEntries)}
 next_action must be a concrete thing a salesperson does today, in the imperative — "打电话给 Kam，确认出行月份". Never "等待客户回复": if the customer has gone quiet, chasing them IS the action, and the elapsed time below tells you how overdue it is.
 
 draft_reply rules (it goes to a real customer as ${business}):
-- Warm, plain English. Two or three sentences. No hype words.
+- Warm, plain English. Two or three sentences. No hype words.${replyNoteLine}
 - If the thread is about refunds, cancellations, changes, payment, insurance, medical or accessibility needs, or a complaint: do not attempt to resolve it. Draft a short reply saying a ${business} specialist will come back to them.`
 }
 
@@ -274,6 +313,16 @@ function renderContext(context: BriefContext | undefined, business: string): str
     : `${business} spoke last. The customer has not replied for ${context.hoursSinceLastMessage} hours.`
   return `Current state: ${who}\n\n`
 }
+
+/**
+ * 只追加给备用模型（Claude / DeepSeek）的提示词后缀，OpenAI 不受影响。
+ *
+ * 2026-10-26 在 8 段真实 CTS 邮件对话上并排试跑：同一份提示词，Claude 只有 5/8 张把
+ * 一句话和下一步写成中文；末尾加这一句之后 8/8，耗时不变。语言要求是简报专属的，
+ * 所以内容放在这里、由调用方传给切换层，切换层自己不知道简报要中文。
+ */
+export const BACKUP_MODEL_LANGUAGE_REMINDER =
+  '\n\nFINAL CHECK before you answer — this is the most common mistake: summary, customer_needs, objections, promises_made, next_action and risk_flags MUST be written in SIMPLIFIED CHINESE (汉字), even though the thread is in English. Only draft_reply is English. Do not answer these fields in English.'
 
 function renderThread(messages: StoredMessage[], business: string): string {
   return messages
@@ -330,6 +379,41 @@ export function looksLikeAutomatedSpam(messages: StoredMessage[]): boolean {
 }
 
 /**
+ * 邮件线程清洗完一个字都不剩时写的卡。
+ *
+ * 为什么要写卡、而不是跳过（魏征式复审 2026-10-26 的 P2）：跳过等于不往
+ * `conversation_briefs` 写行，而「该不该写卡」的判据看的就是那张表——于是这段对话
+ * 每小时都会被重新选中、重新拉最多 12 封邮件全文，还占着邮件那半配额。
+ * 实测约一成邮件对话会落到这里（553 段里约 55 段），**比每轮 25 段的配额还多**，
+ * 真会把配额占死、让存量永远跑不完。
+ *
+ * 卡的内容只陈述事实，不编任何东西 —— 这正是员工需要知道的一件事：
+ * 这个人把我们自己发的邮件转回来了，但一个字没写。
+ */
+export function nothingFromCustomerBrief(): MessengerBrief {
+  return MessengerBriefSchema.parse({
+    summary: '客人这封邮件里没有自己写的内容（只转发/引用了我们发出的邮件）。',
+    intent_level: 'unknown',
+    customer_needs: [],
+    objections: [],
+    promises_made: [],
+    next_action: '打开原始邮件看一眼客人想问什么；如果确实什么都没写，直接打电话或回一封问他需要什么。',
+    follow_up_due_at: null,
+    risk_flags: ['客人没写文字，无法判断需求，别照这张卡做跟进决定'],
+    trip: {
+      tour_interest: null,
+      travel_window: null,
+      party_size: null,
+      departure_city: null,
+      first_time_to_china: null,
+      budget_signal: null,
+    },
+    contact: { phone: null, email: null },
+    draft_reply: '',
+  })
+}
+
+/**
  * Deterministic brief for a thread that is spam/phishing/promotional, not a
  * real customer inquiry. No model call, no invented need, no auto-reply.
  * The raw conversation is untouched and still visible to staff — this only
@@ -379,10 +463,24 @@ export interface GenerateBriefDeps {
    * the whole chunk never returns (see `CHUNK_TIME_BUDGET_MS`).
    */
   signal?: AbortSignal
+  /**
+   * 这一条候选的总预算（毫秒）。切换层按它给每一家切时间；省略时 20 秒，
+   * 跟 `brief-cycle.ts` 的 `PER_CANDIDATE_BUDGET_MS` 同值。
+   */
+  budgetMs?: number
+  /** 测试注入：假的供应商 / 冷却状态，整条链路不碰网络。生产不传。 */
+  failover?: AskJsonDeps
 }
 
 export interface GeneratedBrief {
   brief: MessengerBrief
+  /**
+   * 这张卡**实际是谁答的**。必须如实带回去落库 —— 原来 `storeBrief` 写的是
+   * `process.env.OPENAI_API_KEY ? modelName() : 'fallback'`：凭环境猜的，
+   * 断电时钥匙当然还在，于是备用模型答的卡也会被记成 gpt-4o-mini。
+   * 规则生成的卡（垃圾过滤、没钥匙的兜底）用 provider 'rule'。
+   */
+  answeredBy?: { provider: string; model: string }
   /**
    * `null` when no knowledge read was attempted at all (spam short-circuit,
    * or the no-API-key dev/test fallback — neither calls the model, so there
@@ -409,48 +507,45 @@ export async function generateBrief(
   context?: BriefContext,
   deps: GenerateBriefDeps = {},
 ): Promise<GeneratedBrief> {
-  if (looksLikeAutomatedSpam(messages)) return { brief: noiseBrief(), knowledgeStatus: null }
+  if (looksLikeAutomatedSpam(messages)) {
+    return { brief: noiseBrief(), knowledgeStatus: null, answeredBy: { provider: 'rule', model: 'spam-filter' } }
+  }
 
-  // apiKey gate stays BEFORE any network call (including the clients lookup
-  // below) — dev/test with no key configured must still make zero network
-  // calls, per this function's own contract (see docstring above).
-  const apiKey = process.env.OPENAI_API_KEY
-  if (!apiKey) return { brief: fallbackBrief(messages), knowledgeStatus: null }
+  // 钥匙门仍然在**任何网络调用之前**（包括下面查 clients）—— dev/test 没配钥匙时必须零网络，
+  // 这是本函数自己的合同。但门不能再只看 OpenAI：钥匙被撤/没填正是切换要兜的故障形态之一，
+  // 只认 OpenAI 的门会让 OpenAI 没钥匙时直接出兜底卡，Claude 一次都不会被试
+  // （魏征审查 2026-10-26）。现在是「所有启用的家都没钥匙」才兜底。
+  if (listConfiguredProviders().length === 0) {
+    return { brief: fallbackBrief(messages), knowledgeStatus: null, answeredBy: { provider: 'rule', model: 'fallback' } }
+  }
 
   const identity = await loadClientIdentity(clientId)
   const facts = await loadClientFacts(clientId, deps.knowledge)
-  // 🔴 **收编到统一入口**（2026-09-23，接 openai-client.ts 文件头点名留给本窗口的那条）。
-  //    原来这里自己 `new OpenAI({ apiKey })`，于是这条链路的失败**绕过了
-  //    `instrumentedFetch` 的拦截** —— 账户余额 9/20 耗尽三天没人知道，这里是漏网的一处。
+  // 走切换层：OpenAI 没钱时自动换 Claude（DeepSeek 经 PM 同意、由开关控制）。
+  // 设计稿 docs/specs/2026-10-26-ai-provider-failover-design-v1.md。
   //
-  //    `bypassGateway: true` 是刻意的，不是图省事：本函数用的是 `responses.create`，
-  //    而「网关代不代理 /v1/responses」在这个仓库里零证据（openai-client.ts 里写了
-  //    实测核对过程）。所以只拿拦截、不换路由 —— 换路由等于用一条没验过的链路
-  //    替掉一条在跑的链路。
-  const { getOpenAIClient } = await import('@/lib/ai/openai-client')
-  const client = getOpenAIClient({ apiKey, bypassGateway: true })
-  const res = await client.responses.create(
-    {
-      model: modelName(),
-      input: [
-        { role: 'system', content: buildSystemPrompt(identity, facts.entries) },
-        {
-          role: 'user',
-          content: `${renderContext(context, identity.name)}Thread:\n${renderThread(messages, identity.name)}`,
-        },
-      ],
-      text: {
-        format: { type: 'json_schema', name: 'messenger_brief', schema: MESSENGER_BRIEF_JSON_SCHEMA },
-      },
-    } as Parameters<typeof client.responses.create>[0],
-    // 🔴 2026-09-23 事故的直接原因：这个调用之前没有自己的超时，SDK 默认对 429
-    // 重试两次能把一条卡烧到 ~20 秒。`signal` 把剩余的段预算落到这一条调用本身，
-    // 而不是只靠调用方在条目之间读一次表。
-    deps.signal ? { signal: deps.signal } : undefined,
-  )
-
-  const text = (res as { output_text?: string }).output_text ?? '{}'
-  const brief = MessengerBriefSchema.parse(JSON.parse(text))
+  // 下面三条是**原来这里的刻意选择**，一条都没丢（传给切换层原样保留）：
+  //  · `bypassGateway: true` —— `responses.create` 从没走过 CF 网关一次（openai-client.ts 里有实测核对过程），
+  //    不拿一条零证据的路由换掉在跑的链路；
+  //  · 总预算 + 调用方 signal —— 2026-09-23 事故：这个调用曾没有自己的超时，SDK 对 429 重试两次能把一条卡烧到 ~20 秒；
+  //  · 不开 json_schema 的 strict —— 现在也没开，开了就是行为变更。
+  // 🔴 变化点（诚实列出，别写成「一字不变」）：每家 maxRetries 变成 0、错误类型变成聚合错误、
+  //    校验换成无默认值的严格版（缺字段不再被默认值悄悄填空，会触发重试/换家）。
+  const answer = await askJson({
+    system: buildSystemPrompt(identity, facts.entries, context?.channel),
+    user: `${renderContext(context, identity.name)}Thread:\n${renderThread(messages, identity.name)}`,
+    schema: MessengerBriefStrictSchema,
+    jsonSchema: {
+      name: 'messenger_brief',
+      schema: MESSENGER_BRIEF_JSON_SCHEMA as unknown as Record<string, unknown>,
+    },
+    totalBudgetMs: deps.budgetMs ?? 20_000,
+    signal: deps.signal,
+    bypassGateway: true,
+    openaiModel: modelName(),
+    backupSystemSuffix: BACKUP_MODEL_LANGUAGE_REMINDER,
+  }, deps.failover)
+  const brief = answer.data
   const finalBrief: MessengerBrief = {
     ...brief,
     follow_up_due_at: normaliseFollowUpDueAt(brief.follow_up_due_at),
@@ -469,7 +564,11 @@ export async function generateBrief(
     // depth, not the guarantee.
     trip: isTravelIndustry(identity) ? brief.trip : NULL_TRIP,
   }
-  return { brief: finalBrief, knowledgeStatus: facts.status }
+  return {
+    brief: finalBrief,
+    knowledgeStatus: facts.status,
+    answeredBy: { provider: answer.provider, model: answer.model },
+  }
 }
 
 /**
@@ -550,6 +649,12 @@ export async function storeBrief(
   knowledgeStatus: KnowledgeStatus | null = null,
   /** Same per-candidate deadline as `generateBrief`'s — see its `GenerateBriefDeps.signal`. */
   signal?: AbortSignal,
+  /**
+   * 实际答题的模型（来自 `GeneratedBrief.answeredBy.model`）。🔴 不再凭环境变量猜：
+   * 原来写 `process.env.OPENAI_API_KEY ? modelName() : 'fallback'`，断电时钥匙还在，
+   * 备用模型答的卡会被记成 gpt-4o-mini，这一列就在主动说谎。
+   */
+  model: string = 'unknown',
 ): Promise<void> {
   const today = now.toISOString().slice(0, 10)
   const countedToday = candidate.regenCountDate === today ? candidate.regenCount : 0
@@ -559,7 +664,7 @@ export async function storeBrief(
       conversation_id: candidate.conversationId,
       client_id: candidate.clientId,
       schema_version: BRIEF_SCHEMA_VERSION,
-      model: process.env.OPENAI_API_KEY ? modelName() : 'fallback',
+      model,
       summary: brief.summary,
       intent_level: brief.intent_level,
       customer_needs: brief.customer_needs,

@@ -21,7 +21,7 @@
 **做：**
 - 执行 Fix 操作（暂停关键词/调出价/加否定词/启停广告）
 - 调用 flywheel adapter → 写 `flywheel_actions`
-- 触发内容发布（Publer API）
+- 触发内容发布（Publer API）（Publer 已于 2026-10 删除）
 - 触发图片/视频生成（Atlas/WaveSpeed/Seedance）
 - 构建和执行 luban router（工具路由）
 
@@ -37,7 +37,7 @@
 
 | Plugin / Connector | 权限 |
 |--------------------|------|
-| Publer（Publishing Hub）| 读写 |
+| Publer（Publishing Hub）| 读写（Publer 已于 2026-10 删除） |
 | Meta Ads MCP | 读写（Fix 操作范围内）|
 | Google Ads API | 读写（Fix 操作范围内）|
 | Airtable（Content Workspace）| 读写 |
@@ -124,7 +124,7 @@ await flywheelAdapter.execute({
 | 失败场景 | 处理 |
 |---------|------|
 | 广告 API 返回 4xx | 标记 `failed`，写入失败原因，不重试 |
-| Publer 发布失败 | 重试 1 次，失败后转 FDE |
+| Publer 发布失败 | 重试 1 次，失败后转 FDE（Publer 已于 2026-10 删除） |
 | 生成任务超时（>60s）| 标记 `pending`，异步轮询 |
 | dry_run 模式 | 不实际操作，返回 `would_execute` 预览 |
 

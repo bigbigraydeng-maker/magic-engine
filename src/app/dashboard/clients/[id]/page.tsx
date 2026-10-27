@@ -18,8 +18,10 @@ import { IntelligenceSummarySection } from './_components/intelligence/Intellige
 import { BriefGateBanner } from './_components/BriefGateBanner';
 import { GoalBanner } from './_components/GoalBanner';
 import { WorkLogPanel } from './_components/WorkLogPanel';
-import { ReviewInbox } from '../../factory/_components/ReviewInbox';
+import { clientWorkflowSteps, prescriptionEntryHref } from './prescription-entry';
 import { industryFeatureFlags } from '@/lib/clients/industry-features';
+import { homeEntryVisible, type HomeEntry } from '@/lib/auth/home-entries';
+import { useWorkspaceViewer } from '@/app/dashboard/workspace-viewer';
 
 
 interface Client {
@@ -324,84 +326,49 @@ function ToolDoorCard({ href, onClick, title, desc, badge, links }: {
 
 function WorkflowProgress({
   discoveryConfirmed,
-  hasCompletedDiagnostic,
   hasPrescription,
+  prescriptionId,
   clientId,
 }: {
   discoveryConfirmed: boolean
-  hasCompletedDiagnostic: boolean
   hasPrescription: boolean
+  prescriptionId: string | null
   clientId: string
 }) {
-  const steps = [
-    {
-      label: '品牌扫描',
-      sublabel: '张骞',
-      done: discoveryConfirmed,
-      href: `/dashboard/clients/${clientId}/zhangqian`,
-    },
-    {
-      label: '深度诊断',
-      sublabel: '华佗',
-      done: hasCompletedDiagnostic,
-      href: `/dashboard/clients/${clientId}/diagnostic`,
-    },
-    {
-      label: '处方制定',
-      sublabel: '诸葛亮',
-      done: hasPrescription,
-      href: `/dashboard/clients/${clientId}/prescription/new`,
-    },
-    {
-      label: '执行追踪',
-      sublabel: '鲁班',
-      done: false,
-      href: `/dashboard/clients/${clientId}/execution`,
-    },
-  ]
-
+  const steps = clientWorkflowSteps({ discoveryConfirmed, hasPrescription, prescriptionId, clientId })
   const firstPending = steps.findIndex(s => !s.done)
-
   return (
     <div className="overflow-x-auto rounded-xl border border-black/10 bg-white px-4 py-4 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <div className="flex min-w-max items-center gap-0">
-      {steps.map((step, i) => {
-        const isActive = i === firstPending
-        const isDone   = step.done
-        const inner = (
-          <div className={`flex items-center gap-2 rounded-lg px-3 py-2 transition-colors ${
-            isActive ? 'bg-me-ochre/10' : ''
-          }`}>
-            <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[11px] font-black ${
-              isDone  ? 'bg-[#5C8A4A] text-white'
-              : isActive ? 'bg-me-charcoal text-white'
-              : 'bg-me-ivory text-me-charcoal/45'
-            }`}>
-              {isDone ? '✓' : i + 1}
-            </div>
-            <div>
-              <p className={`text-xs font-black leading-none ${
-                isDone ? 'text-[#5C8A4A]' : isActive ? 'text-me-charcoal' : 'text-me-charcoal/45'
-              }`}>{step.label}</p>
-              <p className="mt-0.5 text-[10px] font-semibold text-me-charcoal/45">{step.sublabel}</p>
-            </div>
-          </div>
-        )
-        return (
-          <div key={step.label} className="flex items-center">
-            {step.href && !isDone
-              ? <a href={step.href}>{inner}</a>
-              : inner
-            }
-            {i < steps.length - 1 && (
-              <div className={`w-8 h-px mx-1 flex-shrink-0 ${
-                steps[i].done ? 'bg-[#5C8A4A]/70' : 'bg-me-stone'
-              }`} />
-            )}
-          </div>
-        )
-      })}
+        {steps.map((step, i) => (
+          <ProgressStep key={step.label} step={step} index={i} active={i === firstPending} last={i === steps.length - 1} />
+        ))}
       </div>
+    </div>
+  )
+}
+
+function ProgressStep({ step, index, active, last }: {
+  step: ReturnType<typeof clientWorkflowSteps>[number]
+  index: number
+  active: boolean
+  last: boolean
+}) {
+  const inner = (
+    <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${active ? 'bg-me-ochre/10' : ''}`}>
+      <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-black ${step.done ? 'bg-[#5C8A4A] text-white' : active ? 'bg-me-charcoal text-white' : 'bg-me-ivory text-me-charcoal/45'}`}>
+        {step.done ? '✓' : index + 1}
+      </div>
+      <div>
+        <p className={`text-xs font-black leading-none ${step.done ? 'text-[#5C8A4A]' : active ? 'text-me-charcoal' : 'text-me-charcoal/45'}`}>{step.label}</p>
+        <p className="mt-0.5 text-[10px] font-semibold text-me-charcoal/45">{step.sublabel}</p>
+      </div>
+    </div>
+  )
+  return (
+    <div className="flex items-center">
+      {(step.alwaysLink || (step.href && !step.done)) ? <a href={step.href}>{inner}</a> : inner}
+      {!last && <div className={`mx-1 h-px w-8 ${step.done ? 'bg-[#5C8A4A]/70' : 'bg-me-stone'}`} />}
     </div>
   )
 }
@@ -418,16 +385,16 @@ export default function ClientDetailPage() {
   const router = useRouter();
   const pathname = usePathname();
   const clientId = params.id as string;
+  const viewer = useWorkspaceViewer();
+  const showEntry = (entry: HomeEntry) => homeEntryVisible(viewer, entry);
 
   const [client, setClient] = useState<Client | null>(null);
   const [loading, setLoading] = useState(true);
   const [hasActiveBrief, setHasActiveBrief] = useState<boolean | null>(null);
   const [discoveryStatus, setDiscoveryStatus] = useState<DiscoveryStatus>('none');
-  const [hasCompletedDiagnostic, setHasCompletedDiagnostic] = useState<boolean>(false);
   const [prescriptionStatus, setPrescriptionStatus] = useState<PrescriptionStatus>('none');
-  // Derived shorthands
+  const [prescriptionId, setPrescriptionId] = useState<string | null>(null);
   const discoveryConfirmed = discoveryStatus === 'confirmed';
-  const huatuoDone = hasCompletedDiagnostic || prescriptionStatus !== 'none';
 
   // ?exec=<itemId> 来自执行看板的「在社媒矩阵中执行」跳转：
   // 自动打开 GenerationDrawer 并把生成的内容关联回该执行项（内容飞轮闭环）
@@ -458,11 +425,10 @@ export default function ClientDetailPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [clientRes, briefRes, discoveryRes, diagnosticRes, prescriptionRes] = await Promise.all([
+      const [clientRes, briefRes, discoveryRes, prescriptionRes] = await Promise.all([
         fetch(`/api/clients/${clientId}`),
         fetch(`/api/clients/${clientId}/brief?status=active`),
         fetch(`/api/clients/${clientId}/zhangqian/latest`).catch(() => null),
-        fetch(`/api/clients/${clientId}/diagnostic/latest`).catch(() => null),
         fetch(`/api/clients/${clientId}/prescriptions/latest-draft`).catch(() => null),
       ]);
       if (clientRes.ok) {
@@ -482,15 +448,16 @@ export default function ClientDetailPage() {
       } else {
         setDiscoveryStatus('none');
       }
-      setHasCompletedDiagnostic(diagnosticRes?.ok ?? false);
-      // prescription status: granular
       if (prescriptionRes?.ok) {
         const pData = await prescriptionRes.json();
         const raw = pData?.prescription?.status as string | undefined;
+        const id = pData?.prescription?.id;
         const valid: PrescriptionStatus[] = ['generating', 'failed', 'draft', 'approved'];
         setPrescriptionStatus(valid.includes(raw as PrescriptionStatus) ? (raw as PrescriptionStatus) : 'none');
+        setPrescriptionId(typeof id === 'string' ? id : null);
       } else {
         setPrescriptionStatus('none');
+        setPrescriptionId(null);
       }
     } finally {
       setLoading(false);
@@ -565,7 +532,9 @@ export default function ClientDetailPage() {
 
       {/* ── Tab bar ──────────────────────────────────────────────────────────── */}
       <div className="flex gap-1 rounded-xl border border-black/10 bg-white p-1">
-        {([ ['overview', '概览'], ['data', '数据'], ['tools', '工具'], ['logs', '日志'] ] as const).map(([id, label]) => (
+        {([ ['overview', '概览'], ['data', '数据'], ['tools', '工具'], ['logs', '日志'] ] as const)
+          .filter(([id]) => id !== 'logs' || showEntry('work-logs'))
+          .map(([id, label]) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
@@ -583,21 +552,16 @@ export default function ClientDetailPage() {
       {/* ── 概览 tab ──────────────────────────────────────────────────────────── */}
       {activeTab === 'overview' && (
         <>
-          {/* 内容工厂待审 — 有成片等你拍板时冒出来(spec me-native-design v0.2) */}
-          <ReviewInbox clientId={clientId} hideWhenEmpty />
-
           {/* Workflow progress bar — 3-step overview */}
           <WorkflowProgress
             discoveryConfirmed={discoveryConfirmed}
-            hasCompletedDiagnostic={hasCompletedDiagnostic}
             hasPrescription={prescriptionStatus !== 'none'}
+            prescriptionId={prescriptionStatus === 'none' ? null : prescriptionId}
             clientId={clientId}
           />
 
-          {/* Dynamic next-step guidance — always shows one clear action */}
           <NextStepCard
             discoveryStatus={discoveryStatus}
-            hasCompletedDiagnostic={hasCompletedDiagnostic}
             prescriptionStatus={prescriptionStatus}
             clientId={clientId}
           />
@@ -664,7 +628,9 @@ export default function ClientDetailPage() {
               <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">内容生产</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 <ToolDoorCard
-                  href={`/dashboard/clients/${clientId}/daily-plan?tab=overview`}
+                  href={showEntry('week-overview')
+                    ? `/dashboard/clients/${clientId}/daily-plan?tab=overview`
+                    : `/dashboard/clients/${clientId}/daily-plan?tab=post`}
                   title="社媒"
                   desc="社媒日常 · 这周 Post / Story / Reel 一眼看清、审核通过或打回"
                   badge="in_house"
@@ -673,9 +639,15 @@ export default function ClientDetailPage() {
                   ]}
                 />
                 <ToolCard href={`/dashboard/clients/${clientId}/blog`}           title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
-                <ToolCard href={`/dashboard/clients/${clientId}/story`}          title="Story 自动发布" desc="看这一周要发的 Story · 一键授权 / 随时停（仅管理员）" badge="in_house" />
-                <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
-                <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
+                {showEntry('story') && (
+                  <ToolCard href={`/dashboard/clients/${clientId}/story`}          title="Story 自动发布" desc="看这一周要发的 Story · 一键授权 / 随时停（仅管理员）" badge="in_house" />
+                )}
+                {showEntry('geo-composer') && (
+                  <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
+                )}
+                {showEntry('ai-visibility') && (
+                  <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
+                )}
                 <ToolCard href={`/dashboard/clients/${clientId}/settings?tab=connect`} title="平台连接"    desc="连接 GBP · GSC · GA4 · Meta 广告账户" badge="in_house" />
                 <ToolDoorCard
                   href={`/dashboard/clients/${clientId}/ads-health`}
@@ -683,10 +655,8 @@ export default function ClientDetailPage() {
                   desc="广告健康 · 每天自动体检、疲劳预警 · 花钱推广的事都从这里进"
                   badge="in_house"
                   links={[
-                    { label: '推广计划', href: `/dashboard/clients/${clientId}/promo-plan` },
-                    { label: '推广活动', href: `/dashboard/clients/${clientId}/campaigns` },
-                    { label: 'Marketing Plan', href: `/dashboard/clients/${clientId}/marketing-plan` },
-                    { label: '等你点头的广告', href: '/dashboard/ad-approval' },
+                    { label: '计划', href: `/dashboard/clients/${clientId}/promo-plan` },
+                    ...(showEntry('ad-approval') ? [{ label: '等你点头的广告', href: '/dashboard/ad-approval' }] : []),
                     // 🔴 网址从登记表取，不写死：入口搬动时（2026-10-18 搬进广告门标签）
                     //    改 `dedicated-approval-entries.ts` 一处，这里和待办的链接一起跟着走。
                     { label: '自动暂停', href: autoPauseHref(clientId) },
@@ -696,13 +666,15 @@ export default function ClientDetailPage() {
                 {/* 视频工厂此前只在内部导航(跨客户总览),客户维度没有入口 —— 跟紧邻的
                     「素材库」不一致,而且 PM 是按客户干活的。?client= 进去只看这个客户。 */}
                 <ToolDoorCard
-                  href={`/dashboard/factory?client=${clientId}`}
+                  href={showEntry('factory')
+                    ? `/dashboard/factory?client=${clientId}`
+                    : `/dashboard/clients/${clientId}/content-factory`}
                   title="出片"
                   desc="视频工厂 · 看片审片、拍板、跟 Claude 说人话改片 · 只看这个客户"
                   badge="in_house"
                   links={[
                     { label: '素材库', href: `/dashboard/clients/${clientId}/assets` },
-                    { label: '内容生产包', href: `/dashboard/clients/${clientId}/production` },
+                    ...(showEntry('factory-clips') ? [{ label: '视频工厂素材标签与审核', href: `/dashboard/clients/${clientId}/factory-clips` }] : []),
                     { label: '内容工厂', href: `/dashboard/clients/${clientId}/content-factory` },
                     { label: '生成单条内容', onClick: () => setGenerationOpen(true) },
                   ]}
@@ -736,7 +708,7 @@ export default function ClientDetailPage() {
                   badge="in_house"
                 />
               )}
-              {industryFeatureFlags(client?.industry).business_calculator && (
+              {industryFeatureFlags(client?.industry).business_calculator && showEntry('business-calculator') && (
                 <ToolCard
                   href={`/dashboard/clients/${clientId}/business-calculator`}
                   title="经营测算 · 内部"
@@ -781,11 +753,12 @@ export default function ClientDetailPage() {
               <ToolCard href={`/dashboard/clients/${clientId}/crm/all`}            title="CRM 管理"       desc="客人清单、往来记录、跟进阶段、同行渠道 —— 全部客人相关的功能都在这里"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/operating-agent`}   title="经营 Agent"      desc="把客户目标、产品范围和竞品证据合成下一步经营判断；无证据时明确说不知道" badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/diagnostic`}         title="华佗深度诊断"   desc="从 SEO/社媒/口碑/广告/AI可见/竞品六维打分，找到核心病灶"  badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/prescription/new`}   title="诸葛亮处方"     desc="基于华佗诊断结果，生成优先级排序的具体执行行动路线图"  badge="in_house" />
+              <ToolCard href={prescriptionEntryHref(clientId, prescriptionStatus === 'none' ? null : prescriptionId)} title="处方" desc="跟华佗说要什么结果、每月预算，就能开方或改已有的方" badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/site-audit/pages`}   title="站点审计"       desc="逐页检查标题/描述/H1/图片ALT等 SEO 技术项，输出修复清单"  badge="in_house" />
               <ToolCard href={`/dashboard/clients/${clientId}/seo-gap`}            title="SEO Gap 分析"   desc="对比竞品，找出客户未覆盖但流量大的关键词机会"  badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/memory`}             title="客户记忆库"     desc="L3 长期学习：好模式 / 失败记录 / 偏好 / 决策历史（仅 FDE）"  badge="in_house" />
+              {showEntry('memory') && (
+                <ToolCard href={`/dashboard/clients/${clientId}/memory`}             title="客户记忆库"     desc="L3 长期学习：好模式 / 失败记录 / 偏好 / 决策历史（仅 FDE）"  badge="in_house" />
+              )}
               <ToolCard                                                             title="口碑管理"       desc="Google 评价 · 公众号舆情"        badge="external" soon />
               <ToolCard                                                             title="竞品追踪"       desc="持续监控竞品动态"                 badge="external" soon />
             </div>
@@ -803,7 +776,7 @@ export default function ClientDetailPage() {
       )}
 
       {/* ── 日志 tab ──────────────────────────────────────────────────────────── */}
-      {activeTab === 'logs' && (
+      {activeTab === 'logs' && showEntry('work-logs') && (
         <div className="max-w-2xl">
           <WorkLogPanel clientId={clientId} />
         </div>

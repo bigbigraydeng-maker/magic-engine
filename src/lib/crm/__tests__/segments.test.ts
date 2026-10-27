@@ -1114,3 +1114,122 @@ describe('外呼没人接不算已联系', () => {
   })
 })
 
+
+describe('机器发的出站不算「有人联系过他」（2026-10-22 PM：WhatsApp 自动安抚 / AI 批准回复把新咨询挤出「今天要联系」）', () => {
+  const now = new Date('2026-10-22T00:00:00Z')
+  const base = { id: 'x', displayName: 'Brian', doNotContact: false, hasPhone: true }
+  const inbound = (at: string) => ({ channel: 'whatsapp', direction: 'inbound' as const, occurredAt: at })
+  const outbound = (at: string, automated: boolean) => ({ channel: 'whatsapp', direction: 'outbound' as const, occurredAt: at, automated })
+
+  it('客人来消息 + 只有一条机器回复 → 仍是「进线了，还没人联系」（热名单），不是「聊过一轮」', () => {
+    const r = segmentContact({ ...base, touchpoints: [inbound('2026-10-21T02:37:00Z'), outbound('2026-10-21T02:38:00Z', true)] }, now)
+    expect(r.segment).toBe('new_untouched')
+  })
+
+  it('同样的两条，但那条回复是人发的 → 照旧「聊过一轮」（先放着）', () => {
+    const r = segmentContact({ ...base, touchpoints: [inbound('2026-10-21T02:37:00Z'), outbound('2026-10-21T02:38:00Z', false)] }, now)
+    expect(r.segment).toBe('stale_conversation')
+  })
+
+  it('机器回复之后客人又来消息 → 「客户来消息了」只有在「真人联系过」之后才成立；只有机器回复时仍是新进线', () => {
+    const r = segmentContact({ ...base, touchpoints: [inbound('2026-10-21T02:37:00Z'), outbound('2026-10-21T02:38:00Z', true), inbound('2026-10-21T09:00:00Z')] }, now)
+    expect(r.segment).toBe('new_untouched')
+  })
+
+  it('人回过之后机器又发了一条、客人再来消息 → 以人那次为准，客人在等', () => {
+    const r = segmentContact(
+      { ...base, touchpoints: [inbound('2026-10-20T01:00:00Z'), outbound('2026-10-20T02:00:00Z', false), outbound('2026-10-21T02:00:00Z', true), inbound('2026-10-21T09:00:00Z')] },
+      now,
+    )
+    expect(r.segment).toBe('replied')
+  })
+})
+
+/**
+ * 🔥 回头客：之前咨询过、我们联系过，今天又填了咨询表。
+ *
+ * PM 2026-10-27（看一个真实客人的抽屉）：这类人本来就落在「客户回了」那一档，但理由是通用的
+ * 「客户来消息了，已经等了 2 小时」，跟「随便回了一句邮件」长得一模一样；而且在这一档里
+ * 排不到前面。下面用她那条真实的形状（名字和联系方式不进测试）钉住。
+ */
+describe('回头客（再次留资）', () => {
+  const NOW2 = new Date('2026-10-27T01:00:00Z')
+  const t = (channel: string, direction: 'inbound' | 'outbound', at: string, extra: Record<string, unknown> = {}) => ({
+    channel, direction, occurredAt: at, ...extra,
+  }) as TouchpointLike
+
+  const RETURNING = [
+    t('meta_lead_form', 'inbound', '2026-06-15T07:55:00Z'),
+    t('phone', 'outbound', '2026-06-15T07:55:00Z', { unansweredCall: true }),
+    t('messenger', 'outbound', '2026-06-15T07:55:00Z'),
+    t('email', 'inbound', '2026-10-08T07:51:00Z', { engagement: 'click' }),
+    t('email', 'outbound', '2026-10-09T08:47:00Z'),
+    t('email', 'outbound', '2026-10-24T01:11:00Z'),
+    t('meta_lead_form', 'inbound', '2026-10-26T23:47:00Z'),
+  ]
+
+  it('🔴 判成「客户回了」这一档，带上 returning，理由是人话而且点出前因后果', () => {
+    const r = segmentContact(contact({ touchpoints: RETURNING }), NOW2)
+    expect(r.segment).toBe('replied')
+    // 🔴 不能只写 not.toBeNull()：缺字段（undefined）也满足它。第一版就这样漏过了「不带 returning」那个变异。
+    expect(r.returning).toMatchObject({ ourContacts: 3, earlierForms: 1, latestFormAt: '2026-10-26T23:47:00.000Z' })
+    expect(r.reason).toContain('回头了')
+    expect(r.reason).toContain('6月15日就咨询过')
+    expect(r.reason).toContain('今天又填了表')
+    // 旧的通用说法不能再出现在这类人身上
+    expect(r.reason).not.toContain('客户来消息了，已经等了')
+  })
+
+  it('🔴 排在这一档的最前面：比「随便回了一句邮件」的人更靠前', () => {
+    const plainReply = [
+      t('email', 'outbound', '2026-10-24T01:11:00Z'),
+      t('email', 'inbound', '2026-10-26T23:00:00Z'), // 比她的表单还更晚，但只是回了一句
+    ]
+    const ret = segmentContact(contact({ id: 'ret', touchpoints: RETURNING }), NOW2)
+    const plain = segmentContact(contact({ id: 'plain', touchpoints: plainReply }), NOW2)
+    expect(plain.segment).toBe('replied')
+    expect(plain.returning).toBeUndefined()
+    expect(ret.priority).toBeLessThan(plain.priority)
+  })
+
+  it('普通回复的理由一字不变（回归钉）', () => {
+    const r = segmentContact(contact({ touchpoints: [
+      t('email', 'outbound', '2026-10-24T01:11:00Z'),
+      t('email', 'inbound', '2026-10-26T23:00:00Z'),
+    ] }), NOW2)
+    expect(r.reason).toMatch(/^客户来消息了，已经等了/)
+    expect(r.priority).toBe(1)
+  })
+
+  it('🔴 第一次填表、我们还没联系过 → 不是回头客，还是「新线索没人碰」', () => {
+    const r = segmentContact(contact({ touchpoints: [t('meta_lead_form', 'inbound', '2026-10-26T23:47:00Z')] }), NOW2)
+    expect(r.segment).toBe('new_untouched')
+    expect(r.returning).toBeUndefined()
+  })
+
+  it('🔴 只有机器发的群发邮件，再填表 → 不算「我们联系过」，不是回头客', () => {
+    const r = segmentContact(contact({ touchpoints: [
+      t('meta_lead_form', 'inbound', '2026-06-15T07:55:00Z'),
+      t('email', 'outbound', '2026-10-09T08:47:00Z', { automated: true }),
+      t('meta_lead_form', 'inbound', '2026-10-26T23:47:00Z'),
+    ] }), NOW2)
+    expect(r.returning ?? null).toBeNull()
+  })
+
+  it('回头客说过「别再联系」→ 照样被挡住，强意向也不能绕过拒联', () => {
+    const r = segmentContact(contact({ doNotContact: true, touchpoints: RETURNING }), NOW2)
+    expect(r.segment).toBe('excluded')
+    expect(r.returning ?? null).toBeNull()
+  })
+
+  it('🔴 在今天要联系的名单里，回头客排在普通回复前面', () => {
+    const list = todayWorklist([
+      contact({ id: 'plain', displayName: 'Plain', touchpoints: [
+        t('email', 'outbound', '2026-10-24T01:11:00Z'),
+        t('email', 'inbound', '2026-10-26T23:50:00Z'),
+      ] }),
+      contact({ id: 'ret', displayName: 'Ret', touchpoints: RETURNING }),
+    ], NOW2)
+    expect(list.map((x) => x.id)[0]).toBe('ret')
+  })
+})

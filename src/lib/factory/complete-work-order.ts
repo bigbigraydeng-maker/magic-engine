@@ -14,6 +14,10 @@ import { scanRedlineHits, validateClipPath } from './worker-guard'
 import { assertRecipeReceipt, winnerRecipeFromBrief, type WinnerRecipe } from './recipe'
 import { buildReelPostCaption, buildReelPublishAutoChecks } from '@/lib/social/reel-publishing'
 import { buildReelMediaAutoChecks, type ReelMediaEvidence } from '@/lib/social/reel-media-checks'
+import { assessRemotionContentSubstance } from './content-substance'
+import type { AspectOutputRecord } from './video-aspects'
+import { isRemotionBrief } from './render-mode'
+import { MACHINE_REVIEWED_KEY } from '@/lib/maliang/review-disposition'
 
 const ACTIVE_STATUSES = ['claimed', 'producing']
 
@@ -41,6 +45,8 @@ export interface CompleteParams {
   /** blocker 1:recipe 单必须携带 executed receipt;legacy 单可 undefined。 */
   recipeReceipt?: unknown
   mediaEvidence?: ReelMediaEvidence | null
+  /** Set only when brief.remotion.aspects asked for extra ratios. */
+  aspectOutputs?: AspectOutputRecord[]
 }
 
 /**
@@ -121,13 +127,29 @@ export async function completeWorkOrder(
   supabase: SupabaseClient,
   p: CompleteParams,
 ): Promise<CompleteResult> {
-  const { wo, workerId, videoPath, segmentsPath, srtPath, caption, actualCost, newClips, recipeReceipt, mediaEvidence } = p
+  const { wo, workerId, videoPath, segmentsPath, srtPath, caption, actualCost, newClips, recipeReceipt, mediaEvidence, aspectOutputs } = p
   const clientId = wo.client_id as string
   const woId = wo.id as string
 
   // blocker 1:recipe brief 必须携带并通过 shared receipt validator（防旧 worker 只报路径就 in_review）
   const recipeGate = assertRecipeCompletion(wo, newClips, recipeReceipt)
   if (!recipeGate.ok) return { ok: false, status: 422, error: recipeGate.error }
+
+  // 内容实质闸（服务端复核）：用工单自己的 props 重算，不信出片机自报的结论。默认只告警+留审计，
+  // FACTORY_CONTENT_SUBSTANCE_ENFORCE=1 后：缺内容或缺 capability 一律 422（在任何库写入之前）。
+  const substance = assessRemotionContentSubstance(wo.brief, mediaEvidence)
+  const enforceSubstance = process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE === '1'
+  if (substance.applicable) {
+    if (enforceSubstance && !substance.assetOnly && substance.server?.verdict !== 'pass') {
+      return { ok: false, status: 422, error: `content_substance_failed: ${substance.server?.reason ?? ''}`.slice(0, 300) }
+    }
+    if (enforceSubstance && !substance.capable) {
+      return { ok: false, status: 422, error: 'content_substance_missing' }
+    }
+    if ((!substance.assetOnly && substance.server?.verdict !== 'pass') || substance.mismatch || !substance.capable) {
+      console.warn(`[factory worker] content substance warning for ${String(wo.id)}: server=${substance.server?.verdict} reported=${substance.reported?.verdict ?? 'none'} capable=${substance.capable} mismatch=${substance.mismatch} enforce=${enforceSubstance}`)
+    }
+  }
 
   // ② 成片级红线复扫(fail-closed:红线/brief 查询失败即拒,查不到 ≠ 没有)
   const { data: client, error: cErr } = await supabase
@@ -294,6 +316,26 @@ export async function completeWorkOrder(
       }),
     ],
     new_clip_ids: insertedClipIds,
+    ...(aspectOutputs ? { aspect_outputs: aspectOutputs } : {}),
+    ...(substance.applicable
+      ? {
+          // Server recompute is the verdict; the worker's report is audit only.
+          content_substance: {
+            server: substance.server
+              ? { verdict: substance.server.verdict, kinds: substance.server.kinds, textSeconds: substance.server.textSeconds, reason: substance.server.reason.slice(0, 500) }
+              : null,
+            reported: substance.reported,
+            capable: substance.capable,
+            mismatch: substance.mismatch,
+            enforced: enforceSubstance,
+          },
+          // Audit mark only: the approve/publish guards read brief.remotion.deliverable (see deliverable.ts), not this.
+          ...(substance.assetOnly ? { deliverable: 'asset_only' } : {}),
+        }
+      : {}),
+    // Template renders enter the human queue before 马良 finishes. Until the
+    // verdict lands, the order is explicitly not machine-reviewed.
+    ...(isRemotionBrief(wo.brief) ? { [MACHINE_REVIEWED_KEY]: false } : {}),
   }
 
   // .select() 判行数:load 后被 sweeper 收回时 0 行匹配不能伪装成功(魏征 M2-P1-1)

@@ -248,6 +248,25 @@ describe('sendWhatsApp', () => {
     expect(captured.filters.conversation_messages.__order_sent_at).toBe(false)
   })
 
+  it('2026-10-22 PM：机器发的（自动安抚 / AI 起草经人批准发出）触点标 automated；人亲手发的不标 —— CRM 才不会把机器回复当成「已跟进」', async () => {
+    const okFetch = () =>
+      (global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () => JSON.stringify({ messages: [{ id: 'wamid.1' }] }),
+      }) as unknown as typeof fetch)
+    const machine = stubSupabase({ lastInboundAt: NOW.toISOString() })
+    okFetch()
+    await send({ sentByEmail: 'governed-reply-agent@magicengine.cloud' })
+    expect(machine.touchpointUpserts[0].row).toMatchObject({ metadata: { sender: 'page', automated: true } })
+
+    const human = stubSupabase({ lastInboundAt: NOW.toISOString() })
+    okFetch()
+    await send({ sentByEmail: 'sales@cts.co.nz' })
+    const meta = (human.touchpointUpserts[0].row as { metadata: Record<string, unknown> }).metadata
+    expect(meta.sender).toBe('page')
+    expect('automated' in meta).toBe(false)
+  })
+
   it('不是 whatsapp 渠道的会话 → 拒', async () => {
     stubSupabase({ channel: 'messenger', lastInboundAt: NOW.toISOString() })
     expect(await send()).toMatchObject({ ok: false, reason: 'wrong_channel' })

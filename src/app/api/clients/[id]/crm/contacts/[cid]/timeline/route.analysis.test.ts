@@ -22,7 +22,7 @@ function mockDb(touchMeta: Record<string, unknown>) {
     }
     if (table === 'contact_touchpoints') {
       const data = [{ channel: 'phone', direction: 'inbound', occurred_at: '2026-10-12T00:00:00Z', summary: '通话', raw: null, metadata: touchMeta }]
-      return { select: () => ({ eq: () => ({ eq: () => ({ neq: () => ({ order: () => ({ limit: async () => ({ data, error: null }) }) }) }) }) }) }
+      return { select: () => ({ eq: () => ({ eq: () => ({ neq: () => ({ order: () => ({ limit: async () => ({ data, error: null }) }) }), order: () => ({ limit: async () => ({ data, error: null }) }) }) }) }) }
     }
     if (table === 'contact_stage_events') return { select: () => ({ eq: () => ({ eq: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) }) }
     if (table === 'client_pipeline_stages') return { select: () => ({ eq: async () => ({ data: [] }) }) }

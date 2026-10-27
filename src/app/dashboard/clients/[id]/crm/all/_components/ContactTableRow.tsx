@@ -1,5 +1,6 @@
 'use client'
 
+import { cleanDisplayName } from '@/lib/crm/clean-display-name'
 import {
   LIST_CLS,
   fmtDate,
@@ -21,10 +22,13 @@ export function nameForDisplay(
   r: Pick<ContactRow, 'name' | 'phone' | 'email' | 'hasMessenger'>,
 ): { text: string; missing: boolean; sub: string | null } {
   const trimmed = r.name.trim()
+  // 判据跟后端同一份：`cleanDisplayName`（邮箱 / 电话 / 占位词 = 没留名；`kay@home` 这类昵称是名字）；
+  // 后端兜底词「未留姓名」和平台系统账号名（WhatsApp Business）也算没留名。
   const missing =
     trimmed === '' ||
-    trimmed.includes('@') ||
-    /^(whatsapp business|unknown|未知)$/i.test(trimmed)
+    trimmed === '未留姓名' ||
+    /^whatsapp business$/i.test(trimmed) ||
+    cleanDisplayName(trimmed) === null
   if (missing) {
     return {
       text: '未留名',
@@ -81,6 +85,17 @@ function NameCell({ r }: { r: ContactRow }) {
         >
           {text}
         </span>
+        {/* 回头客 —— 摆在渠道小标签**前面**，是这一行最该先看到的东西（PM 2026-10-27）。
+            悬停说清为什么：之前咨询过、我们联系过、又填了表。 */}
+        {r.returning && (
+          <span
+            data-testid="returning-tag"
+            title={r.reason ?? '之前咨询过、我们联系过，今天又填了咨询表'}
+            className="shrink-0 rounded bg-[#C2453A]/12 px-1.5 py-0.5 text-[10px] font-black text-[#C2453A]"
+          >
+            🔥 回头
+          </span>
+        )}
         {(r.sources ?? []).slice(0, 1).map((k) => (
           <span
             key={k}

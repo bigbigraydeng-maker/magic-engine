@@ -18,6 +18,7 @@
 import { useState } from 'react'
 import type { GoalRow, GoalVerdict } from '@/types/strategy'
 import { PRIMARY_METRIC_CATALOG } from '@/types/strategy'
+import { depositedSeatMetricLabel } from '@/lib/strategy/seat-scope'
 
 const VERDICT_BADGE: Record<GoalVerdict, { label: string; color: string; emoji: string; textClass: string }> = {
   confirmed:    { label: 'Confirmed',    color: 'bg-status-track/10 text-status-track border-status-track/30', emoji: '✅', textClass: 'text-status-track' },
@@ -278,7 +279,7 @@ function VerdictModal({
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
-              Current value of {goal.primary_metric_label}
+              Current value of {depositedSeatMetricLabel(goal.supporting_metrics)?.label ?? goal.primary_metric_label}
             </label>
             {/* P31.X.2 — auto-fetch button (only for auto-measurement metrics) */}
             {isAutoMeasurement && (

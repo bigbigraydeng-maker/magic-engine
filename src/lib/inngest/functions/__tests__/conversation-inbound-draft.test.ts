@@ -49,7 +49,6 @@ import {
   CONVERSATION_AUTOACK_SENT_EVENT,
   CONVERSATION_REPLY_APPROVED_EVENT,
 } from '@/lib/conversations/events'
-import { TOURISM_POST_SALE_POLICY, type ConversationClass } from '@/lib/messenger-agent/classify'
 import { CLOUD_FN_PREFIX, WORKER_OWNED_EVENTS } from '../../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { MessengerAgentOutput } from '@/lib/messenger-agent/agent-output-schema'
@@ -150,8 +149,7 @@ function makeDeps(overrides: Partial<ConversationInboundDraftDeps> = {}): Conver
   return {
     isOptedOut: vi.fn(async () => false),
     isEnabled: vi.fn(async () => true),
-    classify: vi.fn(async (): Promise<ConversationClass> => 'lead_intake'),
-    loadIndustry: vi.fn(async () => null),
+    hasRecentOutbound: vi.fn(async () => false),
     loadContext: vi.fn(async () => fakeContext()),
     runAgent: vi.fn(async () => fakeAgentOutput()),
     verify: vi.fn(async () => okVerifier()),
@@ -260,7 +258,6 @@ describe('kill-check', () => {
     const result = await invoke(fn, fakeStep())
     expect(result).toMatchObject({ outcome: 'skipped_opted_out', conversation_id: CONVERSATION_ID })
     expect(deps.isEnabled).not.toHaveBeenCalled()
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(deps.runAgent).not.toHaveBeenCalled()
   })
 
@@ -269,28 +266,15 @@ describe('kill-check', () => {
     const fn = createConversationInboundDraftFunction(deps)
     const result = await invoke(fn, fakeStep())
     expect(result).toMatchObject({ outcome: 'skipped_channel_disabled' })
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(deps.runAgent).not.toHaveBeenCalled()
   })
 
-  it('分类为 post_sale → skipped_post_sale，不起草，传给 classify 的是旅游 Playbook', async () => {
-    const deps = makeDeps({
-      loadIndustry: vi.fn(async () => 'Travel — Tour Operator'),
-      classify: vi.fn(async (): Promise<ConversationClass> => 'post_sale'),
-    })
+  it('2026-10-22 PM：不再区分售前 / 售后——F2 不再做分类，所有进线都照常起草', async () => {
+    const deps = makeDeps()
     const fn = createConversationInboundDraftFunction(deps)
     const result = await invoke(fn, fakeStep())
-    expect(result).toMatchObject({ outcome: 'skipped_post_sale' })
-    expect(deps.runAgent).not.toHaveBeenCalled()
-    expect(deps.classify).toHaveBeenCalledWith(CONVERSATION_ID, TOURISM_POST_SALE_POLICY)
-  })
-
-  it('认不出行业 → 不调 classify，按 lead_intake 继续往下走', async () => {
-    const deps = makeDeps({ loadIndustry: vi.fn(async () => 'real_estate') })
-    const fn = createConversationInboundDraftFunction(deps)
-    const result = await invoke(fn, fakeStep())
-    expect(deps.classify).not.toHaveBeenCalled()
     expect(result).toMatchObject({ outcome: 'sent' })
+    expect(deps.runAgent).toHaveBeenCalled()
   })
 })
 
@@ -603,6 +587,63 @@ describe(
         timeout: '5m',
         if: `async.data.conversation_id == "${CONVERSATION_ID}"`,
       })
+    })
+
+    it('🔴 6 小时内已有成功出站（F1 会跳过、不 emit autoack.sent）→ 不等 wait-autoack，直接起草，不白等 5 分钟', async () => {
+      const deps = makeDeps({ hasRecentOutbound: vi.fn(async () => true) })
+      const fn = createConversationInboundDraftFunction(deps)
+      const step = fakeStep([{ ok: true }])
+      await invoke(fn, step)
+      expect(step.waitForEvent).toHaveBeenCalledTimes(1)
+      expect(step.waitForEvent).toHaveBeenNthCalledWith(1, 'await-approval', expect.anything())
+      expect(deps.hasRecentOutbound).toHaveBeenCalledWith(CONVERSATION_ID, expect.any(String))
+    })
+
+    it('🔴 查询起点用字面量「现在往前整整 6 小时」（不用常量算；窗口改 1 秒或改常量这条会红），并包在 step.run 里', async () => {
+      const T = new Date('2026-10-21T12:00:00.000Z').getTime()
+      vi.useFakeTimers()
+      vi.setSystemTime(T)
+      try {
+        const deps = makeDeps({ hasRecentOutbound: vi.fn(async () => true) })
+        const fn = createConversationInboundDraftFunction(deps)
+        const step = fakeStep([{ ok: true }])
+        await invoke(fn, step)
+        expect(deps.hasRecentOutbound).toHaveBeenCalledWith(CONVERSATION_ID, new Date(T - 6 * 3_600_000).toISOString())
+        expect(step.run).toHaveBeenCalledWith('check-autoack-cooldown', expect.any(Function))
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('🔴 生产实例接了真实的 hasRecentOutbound（删掉接线类型检查可能抓不到）', async () => {
+      const { readFileSync } = await import('node:fs')
+      const { join } = await import('node:path')
+      const source = readFileSync(join(process.cwd(), 'src/lib/inngest/functions/conversation-inbound-draft.ts'), 'utf8')
+      expect(source).toMatch(/import \{ hasRecentOutbound \} from '@\/lib\/messenger\/recent-outbound'/)
+      const prod = source.slice(source.indexOf('export const conversationInboundDraft = '))
+      expect(prod).toMatch(/hasRecentOutbound,/)
+    })
+
+    it('最近没有出站（F1 会发安抚）→ 照常等 wait-autoack', async () => {
+      const deps = makeDeps({ hasRecentOutbound: vi.fn(async () => false) })
+      const fn = createConversationInboundDraftFunction(deps)
+      const step = fakeStep()
+      await invoke(fn, step)
+      expect(step.waitForEvent).toHaveBeenNthCalledWith(1, 'wait-autoack', expect.anything())
+    })
+
+    it('读最近出站失败 → 不拦起草，退回照常等（这一步只是排序不是闸）', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const deps = makeDeps({
+        hasRecentOutbound: vi.fn(async () => {
+          throw new Error('db down')
+        }),
+      })
+      const fn = createConversationInboundDraftFunction(deps)
+      const step = fakeStep()
+      await invoke(fn, step)
+      expect(step.waitForEvent).toHaveBeenNthCalledWith(1, 'wait-autoack', expect.anything())
+      warn.mockRestore()
     })
 
     it(

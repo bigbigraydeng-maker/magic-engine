@@ -43,6 +43,18 @@ describe('describePromoSpec', () => {
   it('四类步骤都有对应分组', () => {
     expect(new Set(views[1].steps.map(s => s.group))).toEqual(new Set(['ads', 'social', 'blog', 'newsletter']))
   })
+  it('广告块不显示 act_ 账户号；有名称时用名称', () => {
+    const spec = buildPromoSample('2026-10-20')
+    const ads = spec.phases[1].steps[0]
+    if (ads.kind !== 'ads_campaign') throw new Error('expected an ads step')
+    ads.settings.ad_account_id = 'act_42'
+    const hidden = JSON.stringify(describePromoSpec(spec))
+    expect(hidden).not.toMatch(/act_\d/)
+    expect(hidden).toContain('已绑定的广告账户')
+    const named = JSON.stringify(describePromoSpec(spec, { act_42: '主账户' }))
+    expect(named).toContain('主账户')
+    expect(named).not.toMatch(/act_\d/)
+  })
   it('阶段乱序输入也按开始日期排', () => {
     const spec = buildPromoSample('2026-10-20')
     const out = describePromoSpec({ ...spec, phases: [...spec.phases].reverse() })

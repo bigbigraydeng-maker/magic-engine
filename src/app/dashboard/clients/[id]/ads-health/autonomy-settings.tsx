@@ -12,7 +12,7 @@
  * inputs that look editable would let a save overwrite real values with blanks.
  */
 
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 
 type AutonomyMode = 'observe' | 'bounded_auto'
@@ -22,6 +22,25 @@ interface CreativePoolEntry {
   ref: string
   status: string
   approved_by?: string | null
+  alias_refs?: string[]
+}
+
+function videoNumber(entry: CreativePoolEntry): string {
+  const alias = entry.alias_refs?.find((id) => /^\d+$/.test(id))
+  if (entry.kind === 'work_order' && alias) return alias
+  return entry.ref
+}
+
+/** 自动流程状态的中文名（spec 2026-10-21 §2）。candidate / approved 不走这里。 */
+const EXTENDED_STATUS_LABELS: Record<string, string> = {
+  pending_qc: '质检中',
+  test_queue: '待测试',
+  testing: '测试中',
+  scaling: '放大中',
+  rejected: '数据差已停',
+  inconclusive: '没测成',
+  retired: '已退役',
+  manual_approved: '手批在跑',
 }
 
 interface AdStrategyConfig {
@@ -63,12 +82,20 @@ function formatDate(iso: string | null): string {
 interface ConfigResponse {
   success?: boolean
   config?: AdStrategyConfig
+  /** 素材池的乐观锁版本；缺省表示服务端没给 */
+  version?: string | null
+  /** 服务端读不到版本时置 true（此时没有 version 键） */
+  version_unreadable?: boolean
   error?: string
+  /** 给员工看的中文说明（比 error 代码好懂）；有就优先显示 */
+  message?: string
 }
 
 interface AccountCapRow {
   ad_account_id: string
   daily_budget_cap_cents: number | null
+  /** 缺省当「显示」。只有明确 true 才是藏起来。 */
+  hidden_from_ad_health?: boolean | null
 }
 
 interface AccountCapsResponse {
@@ -83,10 +110,14 @@ function CapField({
   draftCap,
   currentCap,
   onChange,
+  onSave,
+  saving,
 }: {
   draftCap: string
   currentCap: number | null
   onChange: (v: string) => void
+  onSave: () => void
+  saving: boolean
 }) {
   return (
     <div>
@@ -101,6 +132,15 @@ function CapField({
           placeholder="未设"
           className="w-40 rounded-lg border border-gray-300 px-3 py-1.5 text-sm tabular-nums text-gray-800 focus:border-gray-400 focus:outline-none"
         />
+        <button
+          type="button"
+          disabled={saving}
+          onClick={onSave}
+          data-testid="save-total-cap"
+          className="rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
+        >
+          {saving ? '保存中…' : '保存上限'}
+        </button>
         <span className="text-xs text-gray-400">$ / 天（按广告账户的币种）</span>
       </div>
       <p className="mt-1 text-xs text-gray-400">广告自动化每天最多花这么多钱。留空 = 没设上限，这时系统只看不动钱。</p>
@@ -154,7 +194,8 @@ function ModeField({
 }
 
 function VideoRow({ entry, label }: { entry: CreativePoolEntry; label: CreativeLabel | undefined }) {
-  const fbUrl = label?.url ?? (entry.kind === 'meta_video' ? `https://www.facebook.com/reel/${entry.ref}` : null)
+  const number = videoNumber(entry)
+  const fbUrl = label?.url ?? (/^\d+$/.test(number) ? `https://www.facebook.com/reel/${number}` : null)
   return (
     <div className="min-w-0">
       <p className="truncate text-gray-800">
@@ -162,7 +203,7 @@ function VideoRow({ entry, label }: { entry: CreativePoolEntry; label: CreativeL
         {label?.subtitle && <span className="text-gray-500"> · {label.subtitle}</span>}
       </p>
       <p className="text-xs text-gray-400">
-        发布日期 {formatDate(label?.publishedAt ?? null)} · 编号 <span className="tabular-nums">{entry.ref}</span>
+        发布日期 {formatDate(label?.publishedAt ?? null)} · 编号 <span className="tabular-nums">{number}</span>
         {fbUrl && (
           <>
             {' '}·{' '}
@@ -180,10 +221,12 @@ function CreativePoolList({
   clientId,
   entries,
   onApproved,
+  onConflict,
 }: {
   clientId: string
   entries: CreativePoolEntry[]
-  onApproved: (config: AdStrategyConfig) => void
+  onApproved: (config: AdStrategyConfig, version?: string | null) => void
+  onConflict: () => void
 }) {
   const [busyRef, setBusyRef] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -211,8 +254,14 @@ function CreativePoolList({
         body: JSON.stringify({ ref }),
       })
       const json = (await res.json()) as ConfigResponse
-      if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
-      onApproved(json.config)
+      if (res.status === 409) {
+        setError(json.message ?? '素材池刚被别处改过，请刷新页面后再试。')
+        onConflict()
+        return
+      }
+      if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
+      // version_unreadable 时没有 version 键：传 undefined，让上层去刷新版本。
+      onApproved(json.config, json.version_unreadable === true ? undefined : json.version)
     } catch (err) {
       setError(err instanceof Error ? err.message : '批准失败')
     } finally {
@@ -231,9 +280,13 @@ function CreativePoolList({
           <VideoRow entry={e} label={labels[e.ref]} />
           <div className="flex shrink-0 items-center gap-2">
             <span className={`text-xs ${e.status === 'approved' ? 'text-emerald-600' : 'text-gray-400'}`}>
-              {e.status === 'approved' ? `已批准（${e.approved_by ?? '—'}）` : '待批准'}
+              {e.status === 'approved'
+                ? `已批准（${e.approved_by ?? '—'}）`
+                : e.status === 'candidate'
+                  ? '待批准'
+                  : `自动流程：${EXTENDED_STATUS_LABELS[e.status] ?? e.status}`}
             </span>
-            {e.status !== 'approved' && (
+            {e.status === 'candidate' && (
               <button
                 type="button"
                 disabled={busyRef !== null}
@@ -266,18 +319,59 @@ function clearConfirmText(accountCount: number, totalCap: number | null): string
   return '清空后这个账户将不允许自动动钱（这个客户绑了 2 个及以上账户时的规则）。确定清空吗？'
 }
 
+/** 关掉显示 = 心跳整户跳过这个账户（超支提醒不响），所以和清空上限一样要二次确认；打开方向不拦。 */
+const HIDE_CONFIRM_TEXT =
+  '关掉后这个账户整户跳过心跳、超支提醒不会响、广告健康页也不再列它。确定关掉吗？'
+
+function HealthPageSwitch({
+  shown,
+  busy,
+  onChange,
+}: {
+  shown: boolean
+  busy: boolean
+  onChange: (shown: boolean) => void
+}) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-gray-700">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={shown}
+        aria-label="在广告健康页显示"
+        disabled={busy}
+        onClick={() => onChange(!shown)}
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition disabled:opacity-50 ${
+          shown ? 'bg-gray-800' : 'bg-gray-300'
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 rounded-full bg-white shadow transition ${
+            shown ? 'translate-x-4' : 'translate-x-0.5'
+          }`}
+        />
+      </button>
+      在广告健康页显示
+    </label>
+  )
+}
+
 function AccountCapRowEditor({
   row,
   draft,
   busy,
+  visibilityBusy,
   onDraftChange,
   onSave,
+  onShownChange,
 }: {
   row: AccountCapRow
   draft: string
   busy: boolean
+  visibilityBusy: boolean
   onDraftChange: (v: string) => void
   onSave: () => void
+  onShownChange: (shown: boolean) => void
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -305,6 +399,7 @@ function AccountCapRowEditor({
           {row.daily_budget_cap_cents == null ? '未设' : `$${centsToDisplay(row.daily_budget_cap_cents)} / 天`}
         </span>
       </span>
+      <HealthPageSwitch shown={row.hidden_from_ad_health !== true} busy={visibilityBusy} onChange={onShownChange} />
     </div>
   )
 }
@@ -312,6 +407,10 @@ function AccountCapRowEditor({
 /** 留空（null）是合法的「清空」；NaN 或 <= 0 不是。 */
 function capDraftIsUsable(parsed: number | null): boolean {
   return !Number.isNaN(parsed) && (parsed === null || parsed > 0)
+}
+
+function flagVisibility(row: AccountCapRow): AccountCapRow {
+  return { ...row, hidden_from_ad_health: row.hidden_from_ad_health === true }
 }
 
 async function fetchAccountCaps(clientId: string): Promise<AccountCapsResponse> {
@@ -334,7 +433,7 @@ function useAccountCaps(clientId: string) {
     fetchAccountCaps(clientId)
       .then(j => {
         if (!alive) return
-        const list = j.accounts ?? []
+        const list = (j.accounts ?? []).map(flagVisibility)
         setRows(list)
         setTotalCap(j.client_total_cap_cents ?? null)
         setDrafts(Object.fromEntries(list.map(r => [r.ad_account_id, centsToDisplay(r.daily_budget_cap_cents)])))
@@ -374,12 +473,56 @@ function useAccountCaps(clientId: string) {
     }
   }
 
-  return { rows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save }
+  return { rows, setRows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save }
+}
+
+/** 开关先跟着点的方向走，接口回来后再改成它返回的结果；失败则弹回并显示原文。 */
+function useHealthVisibility(
+  clientId: string,
+  setRows: React.Dispatch<React.SetStateAction<AccountCapRow[] | null>>,
+) {
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const inflight = useRef<string | null>(null)
+
+  const setShown = async (adAccountId: string, shown: boolean, previousHidden: boolean) => {
+    if (inflight.current !== null) return
+    if (!shown && !window.confirm(HIDE_CONFIRM_TEXT)) return
+    inflight.current = adAccountId
+    setError(null)
+    setBusyId(adAccountId)
+    setRows(prev => prev?.map(r => (
+      r.ad_account_id === adAccountId ? { ...r, hidden_from_ad_health: !shown } : r
+    )) ?? prev)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/ad-accounts/${adAccountId}/visibility`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hidden_from_ad_health: !shown }),
+      })
+      const json = (await res.json()) as { hidden_from_ad_health?: boolean; error?: string }
+      if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
+      const hidden = json.hidden_from_ad_health === true
+      setRows(prev => prev?.map(r => (
+        r.ad_account_id === adAccountId ? { ...r, hidden_from_ad_health: hidden } : r
+      )) ?? prev)
+    } catch (err) {
+      setRows(prev => prev?.map(r => (
+        r.ad_account_id === adAccountId ? { ...r, hidden_from_ad_health: previousHidden } : r
+      )) ?? prev)
+      setError(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      inflight.current = null
+      setBusyId(null)
+    }
+  }
+
+  return { visibilityBusyId: busyId, visibilityError: error, setShown }
 }
 
 function AccountCapList({ clientId }: { clientId: string }) {
-  const { rows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save } = useAccountCaps(clientId)
-
+  const { rows, setRows, totalCap, drafts, setDrafts, busyId, message, loadFailed, save } = useAccountCaps(clientId)
+  const { visibilityBusyId, visibilityError, setShown } = useHealthVisibility(clientId, setRows)
   if (loadFailed) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -404,11 +547,15 @@ function AccountCapList({ clientId }: { clientId: string }) {
           row={row}
           draft={drafts[row.ad_account_id] ?? ''}
           busy={busyId !== null}
+          visibilityBusy={visibilityBusyId !== null}
           onDraftChange={v => setDrafts(prev => ({ ...prev, [row.ad_account_id]: v }))}
           onSave={() => void save(row.ad_account_id)}
+          onShownChange={shown => void setShown(row.ad_account_id, shown, row.hidden_from_ad_health === true)}
         />
       ))}
       {message && <p className="text-xs text-gray-500">{message}</p>}
+      {visibilityError && <p className="text-xs text-red-600">{visibilityError}</p>}
+      <p className="text-xs text-gray-400">关掉「在广告健康页显示」后，广告健康页不再列出这个账户，超支提醒也不会盯着它。打开后从下一次心跳 / 明早体检起生效；今日实时面板最多一分钟后更新。</p>
       <p className="text-xs text-gray-400">
         客户总闸：
         <span className="tabular-nums text-gray-600">
@@ -433,11 +580,13 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
   const [draftCap, setDraftCap] = useState('')
   const [draftMode, setDraftMode] = useState<AutonomyMode>('observe')
   const [draftRefs, setDraftRefs] = useState('')
+  const [version, setVersion] = useState<string | null | undefined>(undefined)
 
-  const applyConfig = (c: AdStrategyConfig) => {
+  const applyConfig = (c: AdStrategyConfig, v?: string | null) => {
     setConfig(c)
     setDraftCap(centsToDisplay(c.daily_budget_cap_cents))
     setDraftMode(c.autonomy_mode)
+    if (v !== undefined) setVersion(v)
   }
 
   const load = async () => {
@@ -445,9 +594,27 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
       const res = await fetch(`/api/clients/${clientId}/ad-strategy-config`)
       const json = (await res.json()) as ConfigResponse
       if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
-      applyConfig(json.config)
+      applyConfig(json.config, json.version)
     } catch {
       setLoadError('读不到广告自治配置，稍后再试')
+    }
+  }
+
+  /**
+   * 只刷新 config 和 version，**不碰**用户正在编辑的草稿。
+   * 409 之后用它：服务端值变了，但用户没保存的上限/模式不能被冲掉。
+   */
+  const refreshFromServer = async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/clients/${clientId}/ad-strategy-config`)
+      const json = (await res.json()) as ConfigResponse
+      if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
+      setConfig(json.config)
+      if (json.version !== undefined) setVersion(json.version)
+      return true
+    } catch {
+      setMessage('读不到最新设置，请刷新页面。')
+      return false
     }
   }
 
@@ -468,8 +635,57 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
     return <div className="text-sm text-gray-400 py-4">加载中…</div>
   }
 
+  /**
+   * 批准成功：只套用新配置和版本，**不碰**用户正在编辑的草稿
+   * （同一页上没保存的上限/模式不能被冲掉）。
+   * 服务端读不到版本时再刷一次版本。
+   */
+  const handleApproved = (c: AdStrategyConfig, v?: string | null) => {
+    setConfig(c)
+    if (v !== undefined) setVersion(v)
+    if (v === undefined) {
+      void refreshFromServer().then(ok => {
+        // 读不到版本就置为未知，下次保存不带 expected_version。
+        if (!ok) setVersion(undefined)
+      })
+    }
+  }
+
   const capUnset = draftCap.trim() === '' && config.daily_budget_cap_cents == null
   const newRefs = draftRefs.split('\n').map(r => r.trim()).filter(Boolean)
+  const existingRefs = new Set(config.creative_pool.map(e => e.ref))
+  const freshRefs = [...new Set(newRefs)].filter(r => !existingRefs.has(r))
+
+  // 单独保存客户总闸：和账户级保存按钮体验一致，用户改完数字可以直接存，不用滚到最底部。
+  // 只 PATCH daily_budget_cap_cents，不动模式、不动素材池；expected_version 也不带（这个字段只在素材池并发时才有意义）。
+  const saveTotalCap = async () => {
+    setSaving(true)
+    setMessage(null)
+    try {
+      const parsedCap = displayToCents(draftCap)
+      if (parsedCap !== null && (!Number.isInteger(parsedCap) || parsedCap <= 0)) {
+        setMessage('每天上限要填大于 0 的金额')
+        return
+      }
+      if (parsedCap === config.daily_budget_cap_cents) {
+        setMessage('没有改动')
+        return
+      }
+      const res = await fetch(`/api/clients/${clientId}/ad-strategy-config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ daily_budget_cap_cents: parsedCap }),
+      })
+      const json = (await res.json()) as ConfigResponse
+      if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
+      applyConfig(json.config, json.version)
+      setMessage('已保存')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const save = async () => {
     setSaving(true)
@@ -485,18 +701,29 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
       if (parsedCap !== config.daily_budget_cap_cents) body.daily_budget_cap_cents = parsedCap
       if (draftMode !== config.autonomy_mode) body.autonomy_mode = draftMode
 
-      // Only touch the pool when new candidates are being submitted. The PATCH
-      // route REPLACES the pool, so sending it back would demote approvals —
-      // the warning under the textarea tells the user this is the v1 behaviour.
-      if (newRefs.length > 0) {
+      // 只在提交新候选时才动素材池。服务端会保留已有素材的批准状态，但会带上
+      // 页面加载时的版本；页面太旧时服务端返回 409，界面刷新后让用户重做。
+      // 素材池只是这次保存的一部分：它有问题时不能连带取消预算/模式的修改。
+      const skippedExisting = newRefs.length > 0 && freshRefs.length === 0
+      const versionUnknown = newRefs.length > 0 && freshRefs.length > 0 && version === undefined
+      if (freshRefs.length > 0 && version !== undefined) {
         body.creative_pool = [
           ...config.creative_pool.map(e => ({ kind: e.kind, ref: e.ref, status: 'candidate' })),
-          ...newRefs.map(ref => ({ kind: 'meta_video', ref, status: 'candidate' })),
+          ...freshRefs.map(ref => ({ kind: 'meta_video', ref, status: 'candidate' })),
         ]
+        // version 可能是 null（库里还没有设置行），也必须带上。
+        body.expected_version = version
       }
 
       if (Object.keys(body).length === 0) {
-        setMessage('没有改动')
+        // 全是重复 / 已存在的编号：不发请求，也不清空输入框，让用户自己改。
+        if (skippedExisting) {
+          setMessage('这些视频编号已经在列表里了，没有需要添加的')
+        } else if (versionUnknown) {
+          setMessage('读不到页面版本，请刷新页面后再添加素材')
+        } else {
+          setMessage('没有改动')
+        }
         return
       }
 
@@ -506,11 +733,29 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
         body: JSON.stringify(body),
       })
       const json = (await res.json()) as ConfigResponse
-      if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
+      if (res.status === 409) {
+        // 素材池被别处改过：刷新到最新配置和版本，但保留用户填的编号，方便直接再点保存。
+        setMessage(json.message ?? '素材池刚被别处改过，请刷新页面后再保存。')
+        await refreshFromServer()
+        return
+      }
+      if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
 
-      applyConfig(json.config)
-      setDraftRefs('')
-      setMessage('已保存')
+      applyConfig(json.config, json.version)
+      if (skippedExisting) {
+        // 编号已存在：预算/模式照常保存，但不清空输入框，让用户自己改。
+        setMessage('编号已存在，预算/模式已保存')
+      } else if (versionUnknown) {
+        setMessage('预算/模式已保存；素材没有添加：读不到页面版本，请刷新页面后再添加')
+      } else {
+        setDraftRefs('')
+        setMessage('已保存')
+      }
+      // 服务端读不到版本：先把版本刷回来，读不到就置为未知，下次保存不带 expected_version。
+      if (json.version_unreadable === true) {
+        const ok = await refreshFromServer()
+        if (!ok) setVersion(undefined)
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : '保存失败')
     } finally {
@@ -534,7 +779,13 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
           </Link>
         </div>
 
-        <CapField draftCap={draftCap} currentCap={config.daily_budget_cap_cents} onChange={setDraftCap} />
+        <CapField
+          draftCap={draftCap}
+          currentCap={config.daily_budget_cap_cents}
+          onChange={setDraftCap}
+          onSave={saveTotalCap}
+          saving={saving}
+        />
 
         <ModeField draftMode={draftMode} capUnset={capUnset} onChange={setDraftMode} />
 
@@ -554,7 +805,12 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
             只有在这里批准过的视频，广告自动化才允许拿去投。批准本身不会开广告、不花钱。
           </p>
           <div className="mt-1.5">
-            <CreativePoolList clientId={clientId} entries={config.creative_pool} onApproved={applyConfig} />
+            <CreativePoolList
+              clientId={clientId}
+              entries={config.creative_pool}
+              onApproved={handleApproved}
+              onConflict={() => { void refreshFromServer() }}
+            />
           </div>
           <textarea
             value={draftRefs}
@@ -564,8 +820,11 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
             className="mt-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 focus:border-gray-400 focus:outline-none"
           />
           <p className="mt-1 text-xs text-amber-700">
-            注意：添加新视频后，上面已批准的视频会全部变回「待批准」，需要重新点批准。
+            添加新视频不会影响已批准的视频。如果这个页面打开很久了，保存时会提示「已被别处改过」，按提示刷新后再保存即可。
           </p>
+          {version === undefined && newRefs.length > 0 && (
+            <p className="mt-1 text-xs text-amber-700">读不到页面版本，请刷新页面后再添加素材。</p>
+          )}
         </div>
       </div>
 
