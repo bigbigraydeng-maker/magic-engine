@@ -5,8 +5,10 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { KernelDeps } from '@/lib/kernel/deps'
-import { assertMayClick, decideConfirmationCard, issueConfirmationCard, type CardClicker, type CardResolution, type ConfirmationCardView } from '@/lib/confirmation-card'
+import { canonicalHashOfInput } from '@/lib/kernel/canonical-hash'
+import { assertMayClick, contentFingerprint, decideConfirmationCard, issueConfirmationCard, normalizeFacts, type CardClicker, type CardResolution, type ConfirmationCardView } from '@/lib/confirmation-card'
 import { notesFor } from '@/lib/confirmation-card/records'
+import { voidStaleCard } from '@/lib/confirmation-card/settle'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import type { AdDraft } from './ad-draft'
 import { createDraftForApproval, type CreateDraftDeps, type CreateDraftOutcome } from './draft-and-gate'
@@ -23,12 +25,17 @@ import {
 
 type HoldStatus = 'holding' | 'building' | 'declined' | 'built' | 'refused' | 'failed'
 
+const PENDING_CAP = 50
+const ACCOUNT_CHANGED = '广告账户已经换过了，这张卡不能用来建。请重新出一张确认卡。'
+
 interface HoldPayload {
   status: HoldStatus
   cardRunId: string
   subjectKey: string
   fingerprint: string
+  draftHash: string
   draft: AdDraft
+  adAccountId: string
   accountLabel: string
   resultLine?: string
   errorClass?: string
@@ -63,20 +70,25 @@ export async function issuePausedDraftCard(args: {
 }): Promise<ConfirmationCardView> {
   const draft = { ...args.draft, clientId: args.clientId }
   const facts = pausedDraftFacts(draft, args.accountLabel, args.review)
+  const draftHash = canonicalHashOfInput(draft)
+  const fingerprint = contentFingerprint(normalizeFacts(facts))
+  await assertCanIssue(args.kernel.supabase, args.clientId, draftHash, fingerprint)
   const card = await issueConfirmationCard(args.kernel, {
     clientId: args.clientId,
     clicker: args.clicker,
     facts,
     now: args.now,
   })
-  const rows = await listHolds(args.kernel.supabase, args.clientId)
-  if (rows.some((row) => row.payload.cardRunId === card.runId)) return card
+  const existing = await rowsFor(args.kernel.supabase, args.clientId, 'payload->>cardRunId', card.runId)
+  if (existing.length > 0) return card
   await insertHold(args.kernel.supabase, args.clientId, {
     status: 'holding',
     cardRunId: card.runId,
     subjectKey: facts.subjectKey,
     fingerprint: card.fingerprint,
+    draftHash,
     draft,
+    adAccountId: args.review.adAccountId,
     accountLabel: args.accountLabel,
   })
   return card
@@ -120,16 +132,20 @@ async function confirmAndBuild(
   args: Parameters<typeof submitPausedDraftCard>[0],
   hold: HoldRow,
 ): Promise<PausedDraftSubmitResult> {
+  if (hold.payload.adAccountId !== args.review.adAccountId) return rejectAccountChange(args, hold)
   const card = await confirmedCard(args)
   if (!card) return { card: null, wroteMeta: false, queued: false, resultLine: '这张卡已经不能用来建草稿。', clickedBy: null }
   const who = await clickedBy(args.kernel, args.runId)
   const blocked = await pauseBlock(hold, args.review, args.kernel.supabase, args.clientId)
   if (blocked) return refuse(args, hold, who, blocked, card)
+  const deps = args.resolveDeps ? await args.resolveDeps() : null
+  if (!deps) return fail(args, hold, who, card, '拿不到广告授权，没有去建。', 'no-token')
+  if (deps.adAccountId !== hold.payload.adAccountId) return rejectAccountChange(args, hold)
   if (!(await claim(args.kernel.supabase, args.clientId, hold.id, { ...hold.payload, clickedBy: who }))) {
     const again = await holdForRun(args.kernel.supabase, args.clientId, args.runId)
     return finished(again.payload, card)
   }
-  return publish(args, hold, who, card)
+  return publish(args, hold, who, card, { ...deps, adAccountId: hold.payload.adAccountId })
 }
 
 async function confirmedCard(
@@ -167,15 +183,30 @@ async function publish(
   hold: HoldRow,
   who: string | null,
   card: ConfirmationCardView,
+  deps: CreateDraftDeps,
 ): Promise<PausedDraftSubmitResult> {
-  const deps = args.resolveDeps ? await args.resolveDeps() : null
-  if (!deps) return fail(args, hold, who, card, '拿不到广告授权，没有去建。', 'no-token')
   try {
     const outcome = await (args.createPaused ?? createDraftForApproval)(hold.payload.draft, deps)
     return recordOutcome(args, hold, who, card, outcome)
   } catch {
     return fail(args, hold, who, card, '建暂停草稿没有完成，没有再试。', 'thrown')
   }
+}
+
+async function rejectAccountChange(
+  args: Parameters<typeof submitPausedDraftCard>[0],
+  hold: HoldRow,
+): Promise<PausedDraftSubmitResult> {
+  const run = await args.kernel.requireRun(args.runId)
+  await voidStaleCard(args.kernel, run)
+  await save(args.kernel.supabase, args.clientId, hold.id, {
+    ...hold.payload,
+    status: 'refused',
+    resultLine: ACCOUNT_CHANGED,
+    queued: false,
+    wroteMeta: false,
+  })
+  return { card: null, wroteMeta: false, queued: false, resultLine: ACCOUNT_CHANGED, clickedBy: null }
 }
 
 async function recordOutcome(
@@ -275,29 +306,50 @@ async function clickedBy(kernel: KernelDeps, runId: string): Promise<string | nu
   return notes.get(run.authorization_decision_id)?.decidedBy ?? null
 }
 
-async function listHolds(sb: SupabaseClient, clientId: string): Promise<HoldRow[]> {
+async function assertCanIssue(
+  sb: SupabaseClient,
+  clientId: string,
+  draftHash: string,
+  fingerprint: string,
+): Promise<void> {
+  const holding = await rowsFor(sb, clientId, 'payload->>status', 'holding')
+  const building = await rowsFor(sb, clientId, 'payload->>status', 'building')
+  if (holding.length + building.length >= PENDING_CAP) {
+    throw new ConfirmationCardError('invalid', '待处理的建草稿记录太多，没有再出新卡。')
+  }
+  const byDraft = await rowsFor(sb, clientId, 'payload->>draftHash', draftHash)
+  const byPrint = await rowsFor(sb, clientId, 'payload->>fingerprint', fingerprint)
+  const busy = [...byDraft, ...byPrint].some((row) => row.payload.status === 'building' || row.payload.status === 'built')
+  if (busy) throw new ConfirmationCardError('invalid', '这份草稿已经在建或已经送审，没有再出一张卡。')
+}
+
+async function rowsFor(
+  sb: SupabaseClient,
+  clientId: string,
+  column: string,
+  value: string,
+): Promise<HoldRow[]> {
   const { data, error } = await sb
     .from('flywheel_actions')
     .select('id, payload')
     .eq('client_id', clientId)
     .eq('action_type', PAUSED_DRAFT_HOLD)
-    .limit(50)
+    .eq(column, value)
   if (error) throw new ConfirmationCardError('invalid', '建草稿的记录读不出来，没有去建。')
-  const rows = ((data ?? []) as Array<{ id?: unknown; payload?: unknown }>).flatMap(asHold)
-  if (rows.length >= 50) throw new ConfirmationCardError('invalid', '待处理的建草稿记录太多，没有再出新卡。')
-  return rows
+  return ((data ?? []) as Array<{ id?: unknown; payload?: unknown }>).flatMap(asHold)
 }
 
 async function holdForRun(sb: SupabaseClient, clientId: string, runId: string): Promise<HoldRow> {
-  const row = (await listHolds(sb, clientId)).find((item) => item.payload.cardRunId === runId)
+  const rows = await rowsFor(sb, clientId, 'payload->>cardRunId', runId)
+  if (rows.length !== 1) throw new ConfirmationCardError('not_found', '找不到这张建草稿的确认卡。')
+  const row = rows[0]
   if (!row) throw new ConfirmationCardError('not_found', '找不到这张建草稿的确认卡。')
   return row
 }
 
 async function priorFailures(sb: SupabaseClient, clientId: string, payload: HoldPayload): Promise<PriorPausedFailure[]> {
-  return (await listHolds(sb, clientId))
-    .filter((row) => row.payload.subjectKey === payload.subjectKey && row.payload.status === 'failed')
-    .filter((row) => row.payload.cardRunId !== payload.cardRunId)
+  return (await rowsFor(sb, clientId, 'payload->>subjectKey', payload.subjectKey))
+    .filter((row) => row.payload.status === 'failed' && row.payload.cardRunId !== payload.cardRunId)
     .map((row) => ({ fingerprint: row.payload.fingerprint, errorClass: row.payload.errorClass ?? 'meta-other' }))
 }
 
@@ -346,7 +398,13 @@ export async function pausedDraftResultLines(
 ): Promise<Map<string, string>> {
   const lines = new Map<string, string>()
   try {
-    for (const row of await listHolds(sb, clientId)) {
+    const { data, error } = await sb
+      .from('flywheel_actions')
+      .select('id, payload')
+      .eq('client_id', clientId)
+      .eq('action_type', PAUSED_DRAFT_HOLD)
+    if (error) return lines
+    for (const row of ((data ?? []) as Array<{ id?: unknown; payload?: unknown }>).flatMap(asHold)) {
       if (row.payload.resultLine) lines.set(row.payload.cardRunId, row.payload.resultLine)
     }
   } catch {

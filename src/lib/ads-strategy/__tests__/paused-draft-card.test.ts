@@ -68,7 +68,7 @@ async function issued(f: ReturnType<typeof fixture>, item = draft(), review = RE
     accountLabel: '这位客户的广告账户',
     review,
   })
-  const createPaused = vi.fn(async () => outcome('awaiting_approval'))
+  const createPaused = vi.fn(async (_draft: AdDraft, _deps: { adAccountId: string }) => outcome('awaiting_approval'))
   const resolveDeps = vi.fn(async (): Promise<CreateDraftDeps | null> => ({
     supabase: f.supabase,
     adAccountId: 'act_test',
@@ -105,6 +105,7 @@ describe('paused draft confirmation', () => {
       createPaused,
     })
     expect(createPaused).toHaveBeenCalledTimes(1)
+    expect(createPaused).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ adAccountId: 'act_test' }))
     expect(result.queued).toBe(true)
     expect(result.wroteMeta).toBe(true)
     expect(result.resultLine).toContain('opc@example.com')
@@ -326,6 +327,171 @@ describe('paused draft confirmation', () => {
       kernel: f.kernel, clientId: CLIENT_A, clicker: OTHER, draft: draft(), accountLabel: '这位客户的广告账户', review: REVIEW,
     })).rejects.toBeInstanceOf(ConfirmationCardError)
     expect(createPaused).not.toHaveBeenCalled()
+  })
+
+  it('refuses to build when the ad account changed after the card was issued', async () => {
+    const f = fixture()
+    const { card, createPaused, resolveDeps } = await issued(f)
+    expect(f.tables.flywheel_actions[0]?.payload).toMatchObject({ adAccountId: 'act_test' })
+    const switched = {
+      adAccountId: 'act_new',
+      accounts: [{ ...REVIEW.accounts[0], ad_account_id: 'act_new' }],
+      clientCapCents: REVIEW.clientCapCents,
+    }
+    resolveDeps.mockResolvedValue({
+      supabase: f.supabase,
+      adAccountId: 'act_new',
+      accessToken: 'tok',
+    })
+    const drifted = await submitPausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      runId: card.runId,
+      clicker: OPC,
+      resolution: 'confirm',
+      expectedDecisionId: card.expectedDecisionId,
+      fingerprint: card.fingerprint,
+      review: switched,
+      resolveDeps,
+      createPaused,
+    })
+    expect(createPaused).not.toHaveBeenCalled()
+    expect(drifted.wroteMeta).toBe(false)
+    expect(drifted.resultLine).toContain('重新出一张确认卡')
+    const again = await issuePausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      clicker: OPC,
+      draft: draft(),
+      accountLabel: 'Old account',
+      review: switched,
+    })
+    expect(again.runId).not.toBe(card.runId)
+    const built = await submitPausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      runId: again.runId,
+      clicker: OPC,
+      resolution: 'confirm',
+      expectedDecisionId: again.expectedDecisionId,
+      fingerprint: again.fingerprint,
+      review: switched,
+      resolveDeps,
+      createPaused,
+    })
+    expect(createPaused).toHaveBeenCalledTimes(1)
+    expect(createPaused).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ adAccountId: 'act_new' }))
+    expect(built.queued).toBe(true)
+  })
+
+  it('does not issue another card for a draft that is building or already queued', async () => {
+    const f = fixture()
+    const { card, createPaused, resolveDeps } = await issued(f)
+    const same = {
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      clicker: OPC,
+      draft: draft(),
+      accountLabel: '这位客户的广告账户',
+      review: REVIEW,
+    }
+    createPaused.mockImplementationOnce(async () => {
+      await expect(issuePausedDraftCard(same)).rejects.toThrow('已经在建或已经送审')
+      return outcome('awaiting_approval')
+    })
+    await submitPausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      runId: card.runId,
+      clicker: OPC,
+      resolution: 'confirm',
+      expectedDecisionId: card.expectedDecisionId,
+      fingerprint: card.fingerprint,
+      review: REVIEW,
+      resolveDeps,
+      createPaused,
+    })
+    await expect(issuePausedDraftCard(same)).rejects.toThrow('已经在建或已经送审')
+    expect(createPaused).toHaveBeenCalledTimes(1)
+  })
+
+  it('still confirms when history is long, and caps only the cards still waiting', async () => {
+    const f = fixture()
+    for (let i = 0; i < 60; i += 1) {
+      f.tables.flywheel_actions.push({
+        id: `built-${i}`,
+        client_id: CLIENT_A,
+        action_type: 'ads.paused_draft_hold',
+        payload: {
+          status: 'built',
+          cardRunId: `built-run-${i}`,
+          subjectKey: `meta-paused-draft:old${i}`,
+          fingerprint: `fp-built-${i}`,
+          draftHash: `hash-built-${i}`,
+          draft: draft({ campaignName: `old ${i}` }),
+          adAccountId: 'act_test',
+          accountLabel: '这位客户的广告账户',
+          wroteMeta: true,
+          resultLine: '已经送审',
+        },
+      })
+    }
+    const { card, createPaused, resolveDeps } = await issued(f, draft({ campaignName: 'still open' }))
+    const result = await submitPausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      runId: card.runId,
+      clicker: OPC,
+      resolution: 'confirm',
+      expectedDecisionId: card.expectedDecisionId,
+      fingerprint: card.fingerprint,
+      review: REVIEW,
+      resolveDeps,
+      createPaused,
+    })
+    expect(result.queued).toBe(true)
+    expect(createPaused).toHaveBeenCalledTimes(1)
+
+    for (let i = 0; i < 49; i += 1) {
+      f.tables.flywheel_actions.push({
+        id: `wait-${i}`,
+        client_id: CLIENT_A,
+        action_type: 'ads.paused_draft_hold',
+        payload: {
+          status: 'holding',
+          cardRunId: `wait-run-${i}`,
+          subjectKey: `meta-paused-draft:wait${i}`,
+          fingerprint: `fp-wait-${i}`,
+          draftHash: `hash-wait-${i}`,
+          draft: draft({ campaignName: `wait ${i}` }),
+          adAccountId: 'act_test',
+          accountLabel: '这位客户的广告账户',
+        },
+      })
+    }
+    const waiting = await issued(f, draft({ campaignName: 'one more' }))
+    await expect(issuePausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      clicker: OPC,
+      draft: draft({ campaignName: 'over the cap' }),
+      accountLabel: '这位客户的广告账户',
+      review: REVIEW,
+    })).rejects.toThrow('待处理的建草稿记录太多')
+    const declined = await submitPausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      runId: waiting.card.runId,
+      clicker: OPC,
+      resolution: 'decline',
+      expectedDecisionId: waiting.card.expectedDecisionId,
+      fingerprint: waiting.card.fingerprint,
+      review: REVIEW,
+      resolveDeps: waiting.resolveDeps,
+      createPaused: waiting.createPaused,
+    })
+    expect(waiting.createPaused).not.toHaveBeenCalled()
+    expect(declined.resultLine).toContain('不做')
   })
 })
 
