@@ -4,7 +4,7 @@ title: 仅素材成片验收时上传到广告账户并待批准进素材池
 status: done
 owner: agent
 decided_on: 2026-10-28
-source: session:ray1028a
+source: session:df1d1c5c
 verify_by: 2026-10-31
 verify_how: 用替身跑仅素材验收。开关不设时素材池多一条按工单引用、状态是待批准，视频编号来自替身上传回执。开关设为 0 时不上传、不进池、工单仍可归档。不调用 Meta，不改线上工单。
 done_on: 2026-10-28
