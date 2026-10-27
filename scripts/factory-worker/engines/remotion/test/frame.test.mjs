@@ -106,6 +106,49 @@ describe('hook fallbacks', () => {
     assert.equal(rows.map((row) => row.text).join(''), lines.join(''))
   })
 
+  test('an explicit question is drawn first and stays in the caption extras', () => {
+    const source = ['沿着海岸', '慢慢走走']
+    const question = '想去哪里？'
+    const props = {
+      ...postcardBase(),
+      hook: { clip: 'clips/hook.mp4', lines: source },
+      frame: { hook: { question } },
+    }
+    const hook = resolveFramePlan('postcard', props).hook
+    assert.equal(hook?.style, 'question')
+    assert.equal(hook?.question, question)
+    assert.deepEqual(hook?.lines.map((line) => line.text), [question, ...source])
+    assert.ok(extraCaptionLines('postcard', props).includes(question))
+    assert.deepEqual(frameCaptionExtras('postcard', props), extraCaptionLines('postcard', props))
+    assert.equal(hookRows(hook?.lines ?? []).map((row) => row.text).join(''), [question, ...source].join(''))
+  })
+
+  test('question-marked hook text is drawn ahead of the template lines', () => {
+    const hook = resolveHook({
+      lines: ['沿着海岸', '慢慢走走'],
+      spec: { text: '想去哪里？' },
+    })
+    assert.equal(hook.question, '想去哪里？')
+    assert.deepEqual(hook.lines.map((line) => line.text), ['想去哪里？', '沿着海岸', '慢慢走走'])
+  })
+
+  test('an explicit question is not repeated when a hook line already says it', () => {
+    const hook = resolveHook({
+      lines: ['沿着海岸', '想去哪里？'],
+      spec: { question: '想去哪里？' },
+    })
+    assert.deepEqual(hook.lines.map((line) => line.text), ['想去哪里？', '沿着海岸'])
+  })
+
+  test('when the explicit question cannot share three rows, it is the whole hook', () => {
+    const hook = resolveHook({
+      lines: ['沿着海岸', '慢慢走走', '看看日落'],
+      spec: { question: '想去哪里？' },
+    })
+    assert.deepEqual(hook.lines.map((line) => line.text), ['想去哪里？'])
+    assert.doesNotThrow(() => hookRows(hook.lines))
+  })
+
   test('a number selects the stat pop and keeps the other line as the caption', () => {
     const hook = resolveHook({ lines: ['48', '小时内回复'] })
     assert.equal(hook.style, 'stat')

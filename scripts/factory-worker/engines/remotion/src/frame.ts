@@ -290,15 +290,34 @@ function plainLines(input: Array<string | { text?: string; badge?: string | null
   return out
 }
 
+function explicitQuestionLines(spec: FrameHookSpec): ResolvedHookLine[] {
+  const question = spec.question?.trim() ?? ''
+  const text = spec.text?.trim() ?? ''
+  const lines: ResolvedHookLine[] = []
+  if (question) lines.push({ text: question, badge: null })
+  if (text && text !== question) lines.push({ text, badge: null })
+  return lines
+}
+
+/** Explicit copy is drawn first. Source lines stay only when all of them still fit in three rows. */
+function questionLines(explicit: ResolvedHookLine[], source: ResolvedHookLine[]): ResolvedHookLine[] {
+  if (explicit.length === 0) return source
+  const seen = new Set(explicit.map((line) => line.text))
+  const rest = source.filter((line) => !seen.has(line.text))
+  if (explicit.length + rest.length <= MAX_HOOK_ROWS) return [...explicit, ...rest]
+  return explicit.slice(0, MAX_HOOK_ROWS)
+}
+
 function resolveQuestion(source: ResolvedHookLine[], spec: FrameHookSpec, chinese: boolean): ResolvedHook {
-  const provided = Boolean(spec.question?.trim() || spec.text?.trim() || source.length > 0)
+  const explicit = explicitQuestionLines(spec)
+  const provided = explicit.length > 0 || source.length > 0
   const question =
-    spec.question?.trim() ||
-    spec.text?.trim() ||
+    explicit[0]?.text ||
     source.find((line) => QUESTION_END.test(line.text))?.text ||
     source[0]?.text ||
     fallbackHookLine(chinese)
-  const lines = source.length > 0 ? source : [{ text: question, badge: null }]
+  const picked = questionLines(explicit, source)
+  const lines = picked.length > 0 ? picked : [{ text: question, badge: null }]
   return {
     style: 'question',
     lines,
