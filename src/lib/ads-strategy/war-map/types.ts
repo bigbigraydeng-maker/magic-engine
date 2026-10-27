@@ -48,6 +48,8 @@ export interface AudienceHistoryPoint {
 
 export interface AdsetInput {
   id: string
+  /** 广告组所在账户；判断「账户现在有没有在投」用。旧调用方可不填 */
+  adAccountId?: string | null
   /** Meta effective_status。注意：账户欠款时它仍可能是 ACTIVE，不等于真在投 */
   effectiveStatus: string | null
   includedAudienceIds: string[]
@@ -61,11 +63,17 @@ export interface CampaignFrequencyInput {
   spend7d: number
   /** 窗口内最近一个非空的 7 天不重复频率；null = 没有 */
   frequency7d: number | null
+  /** 窗口内最后一次有花费的数据日（YYYY-MM-DD）；没填 = 不判「已停」 */
+  lastSpendDay?: string | null
 }
 
 export interface GrowthProblemInput {
   code: string
   title: string
+  /** 诊断点名的广告组名（只用来在标题里写明是哪个组）；没有 = null */
+  unitName?: string | null
+  /** 该广告组所在账户（用来算同账户全部系列的合计花费） */
+  unitAccountId?: string | null
   /** 怎么办（人话）；没有就是 null */
   how: string | null
 }
@@ -118,6 +126,8 @@ export interface WarMapInput {
   runningSince: string | null
   /** 每个绑定账户自己的数据日（该账户 ad_daily_insights 里最新的 insight_date）。键是 adAccountId；没有数据 = null。 */
   accountDataDays: Record<string, string | null>
+  /** 每个绑定账户最近一次取数时间（ad_daily_insights.fetched_at 最大值，ISO）。取数有没有断看它，不看花费日期；没填 = 退回看数据日。 */
+  accountFetchedAts?: Record<string, string | null>
   /** 素材池里「已批准」的条数；null = 读不到素材池 */
   creativePoolApproved: number | null
 }
@@ -182,6 +192,8 @@ export interface AccountPoolSummary {
   usable: boolean
   /** 不可用原因，例如「欠款停用·不可用」；可用时 null */
   note: string | null
+  /** 这个账户现在没在投（近 2 天没花钱、也没有 ACTIVE 广告组）：没有新数据是正常的 */
+  idle?: boolean
   /** 这个账户自己的数据日；null = 没有数据 */
   dataDay: string | null
   /** 这个账户的数据落后今天几天；null = 没有数据日 */
@@ -201,6 +213,15 @@ export interface FrequencyRow {
   spend7d: number
   light: Light
   note: string
+}
+
+/** 已停的系列（比数据日早 2 天以上没花钱）：单独放，不参与「最高频率」 */
+export interface StoppedCampaign {
+  campaignId: string
+  campaignName: string
+  accountName: string
+  lastSpendDay: string
+  frequency7d: number | null
 }
 
 export type ActionSeverity = 'red' | 'yellow' | 'info'
@@ -225,12 +246,13 @@ export interface GoalNote {
 export interface WarMapView {
   generatedAt: string
   countdown: CountdownView
-  clocks: { dataDay: string | null; fetchedAt: string | null; staleDays: number | null }
+  /** idleNote：全停账户的说明（「0470 没在投，没有新数据是正常的」）；没有 = null */
+  clocks: { dataDay: string | null; fetchedAt: string | null; staleDays: number | null; idleNote: string | null }
   accounts: AccountView[]
   accountSummaries: AccountPoolSummary[]
   pools: { headline: Headline; rows: PoolRow[]; hiddenCount: number; unusableRows: PoolRow[] }
   /** windowLabel：花费和频率对应的真实日期区间（数据日往前 7 天），如「10/4–10/10」 */
-  frequency: { headline: Headline; rows: FrequencyRow[]; windowLabel: string | null }
+  frequency: { headline: Headline; rows: FrequencyRow[]; windowLabel: string | null; stopped: StoppedCampaign[] }
   adjust: { headline: Headline; actions: ActionRow[] }
   goalNote: GoalNote | null
   /** 计划所挂目标的最新处方一行；没有就是 null */

@@ -8,7 +8,7 @@
 
 import { FATIGUE_FREQUENCY_HIGH } from '../rules/fatigue'
 import { diffDays, nzDay, shiftDay, shortDay } from './util'
-import type { FrequencyRow, Headline, Light, WarMapInput } from './types'
+import type { FrequencyRow, Headline, Light, StoppedCampaign, WarMapInput } from './types'
 
 /** 数据日落后今天超过这么多天，就算数据停了 */
 export const DATA_STALE_DAYS = 2
@@ -74,16 +74,37 @@ export function frequencyHeadline(rows: FrequencyRow[], staleDays: number | null
   return { light: 'green', sentence: `频率没过高，最高 ${max.toFixed(2)}，红线 3` }
 }
 
-export function buildFrequency(input: WarMapInput, names: Map<string, string>): { headline: Headline; rows: FrequencyRow[]; windowLabel: string | null } {
-  const staleDays = dataStaleDays(input)
+/** 比表头数据日早 2 天以上就没再花钱的系列 = 已停 */
+function isStopped(c: WarMapInput['campaigns'][number], dataDay: string | null): boolean {
+  return !!c.lastSpendDay && !!dataDay && diffDays(c.lastSpendDay, dataDay) >= DATA_STALE_DAYS
+}
+
+/** dataDay / staleDays 由表头统一算好传进来，频率卡和表头同一个数据日 */
+export function buildFrequency(
+  input: WarMapInput,
+  names: Map<string, string>,
+  fresh: { dataDay: string | null; staleDays: number | null },
+): { headline: Headline; rows: FrequencyRow[]; windowLabel: string | null; stopped: StoppedCampaign[] } {
+  const { dataDay, staleDays } = fresh
   const stale = staleDays !== null && staleDays > DATA_STALE_DAYS
-  const rows = input.campaigns
-    .filter(c => c.spend7d > 0)
+  const spending = input.campaigns.filter(c => c.spend7d > 0)
+  const rows = spending
+    .filter(c => !isStopped(c, dataDay))
     .sort((a, b) => b.spend7d - a.spend7d)
-    .map(c => rowOf(c, names, stale, input.clocks.dataDay))
+    .map(c => rowOf(c, names, stale, dataDay))
+  const stopped = spending
+    .filter(c => isStopped(c, dataDay))
+    .map((c): StoppedCampaign => ({
+      campaignId: c.campaignId,
+      campaignName: c.campaignName ?? c.campaignId,
+      accountName: names.get(c.adAccountId) ?? c.adAccountId,
+      lastSpendDay: c.lastSpendDay ?? '',
+      frequency7d: c.frequency7d,
+    }))
   return {
-    headline: frequencyHeadline(rows, staleDays, input.clocks.dataDay),
+    headline: frequencyHeadline(rows, staleDays, dataDay),
     rows,
-    windowLabel: windowLabel(input.clocks.dataDay),
+    windowLabel: windowLabel(dataDay),
+    stopped,
   }
 }

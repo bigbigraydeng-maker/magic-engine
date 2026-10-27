@@ -132,7 +132,7 @@ function AccountSummaryList({ view }: { view: WarMapView }) {
           )}
           <span>
             {s.dataDay === null ? '没有数据' : `数据日 ${fmtDay(s.dataDay)}`}
-            {s.staleDays !== null && s.staleDays > DATA_STALE_DAYS && (
+            {!s.idle && s.staleDays !== null && s.staleDays > DATA_STALE_DAYS && (
               <span className="ml-1 text-amber-700">已 {s.staleDays} 天没更新</span>
             )}
           </span>
@@ -352,6 +352,7 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
               数据已 {view.clocks.staleDays} 天没更新
             </span>
           )}
+          {view.clocks.idleNote ? <span className="text-gray-400">{view.clocks.idleNote}</span> : null}
         </p>
       </div>
 
@@ -363,7 +364,13 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
           <details className="mt-3"><summary className="cursor-pointer text-xs text-gray-500">看每个池子</summary><PoolBars view={view} /></details>
         </BigCard>
         <BigCard title="② 频率" light={view.frequency.headline.light} big={fb.big} unit={fb.unit} sentence={view.frequency.headline.sentence}>
-          <details className="mt-3"><summary className="cursor-pointer text-xs text-gray-500">看每个广告</summary><FrequencyGauges view={view} /></details>
+          <details className="mt-3"><summary className="cursor-pointer text-xs text-gray-500">看每个广告</summary><FrequencyGauges view={view} />
+            {view.frequency.stopped.length > 0 && (
+              <p className="mt-2 text-xs text-gray-500">
+                已停（不计入最高频率）：{view.frequency.stopped.map(c => `${c.campaignName}（${c.accountName}，${fmtDay(c.lastSpendDay)} 后没花钱${c.frequency7d === null ? '' : `，频率 ${c.frequency7d.toFixed(2)}`}）`).join('；')}
+              </p>
+            )}
+          </details>
         </BigCard>
         <BigCard title="③ 今天调什么" light={view.adjust.headline.light} big={ab.big} unit={ab.unit} sentence={view.adjust.headline.sentence}>
           <details className="mt-3" open={view.adjust.actions.some(a => a.severity !== 'info')}><summary className="cursor-pointer text-xs text-gray-500">看清单</summary><ActionCards view={view} /></details>

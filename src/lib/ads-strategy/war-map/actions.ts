@@ -5,10 +5,10 @@
  *    （魏征 2026-10-16 必改 3）。
  */
 
-import { dataStaleDays, DATA_STALE_DAYS } from './frequency'
+import { DATA_STALE_DAYS } from './frequency'
 import { diffDays, nzDay, shortDay } from './util'
 import type {
-  AccountView, ActionRow, ActionSeverity, FrequencyRow, GrowthInput, Headline, PoolRow, WarMapInput,
+  AccountView, ActionRow, ActionSeverity, FrequencyRow, GrowthInput, GrowthProblemInput, Headline, PoolRow, WarMapInput,
 } from './types'
 
 /** 账户状态是几个小时前读的；超过就不能说「正常」 */
@@ -85,25 +85,44 @@ function poolActions(rows: PoolRow[], videoIds: Set<string>): ActionRow[] {
   })
 }
 
+/**
+ * 「花钱结果太少」这类卡只统计一个广告组：标题写明是哪个组，再补一句同账户全部系列的合计花费，
+ * 免得把组 A 的数字当成整个系列的数字。
+ */
+function problemTitle(p: GrowthProblemInput, input: WarMapInput): string {
+  if (!p.unitName) return p.title
+  const named = p.title.includes(p.unitName) ? p.title : `${p.title}（广告组：${p.unitName}）`
+  const accountId = p.unitAccountId
+  if (!accountId) return named
+  const total = input.campaigns.filter(c => c.adAccountId === accountId).reduce((sum, c) => sum + c.spend7d, 0)
+  if (total <= 0) return named
+  const name = input.accounts.find(a => a.adAccountId === accountId)?.name ?? accountId
+  return `${named}；${name} 全部系列近 7 天合计花了 ${total.toFixed(2)}（上面只统计这个广告组）`
+}
+
 function growthActions(g: GrowthInput | null, input: WarMapInput, accountsUnhealthy: boolean): ActionRow[] {
   if (g === null) {
     return [{ key: 'growth-missing', severity: 'info', what: '经营视图一行都没有', how: '等每天巡察；持续没有就找开发', owner: 'dev' }]
   }
   const today = nzDay(input.now)
-  const stale = g.date !== today
+  // 经营视图写的是「数据截至日」（通常是昨天）；截至日 = 昨天就算新，只有更早才是旧数据
+  const days = diffDays(g.date, today)
+  const stale = days > 1
   const tag = stale ? `（${shortDay(g.date)} 的旧数据）` : ''
   const out: ActionRow[] = []
   if (stale) {
-    const days = diffDays(g.date, today)
     out.push({
-      key: 'growth-stale', severity: days > 1 ? 'yellow' : 'info',
-      what: `经营视图是 ${shortDay(g.date)} 的，今天还没跑`,
+      key: 'growth-stale', severity: 'yellow',
+      what: `经营视图是 ${shortDay(g.date)} 的，已经 ${days} 天没更新`,
       how: '等今天巡察；超过一天没有就找开发', owner: 'dev',
     })
   }
   g.problems.forEach((p, i) => {
     if (p.code === 'D7' && accountsUnhealthy) return // 只是重复「账户欠款」这件事
-    out.push({ key: `growth-${p.code}-${i}`, severity: 'yellow', what: `${p.title}${tag}`, how: p.how ?? '见经营视图', owner: 'agent' })
+    out.push({
+      key: `growth-${p.code}-${i}`, severity: 'yellow',
+      what: `${problemTitle(p, input)}${tag}`, how: p.how ?? '见经营视图', owner: 'agent',
+    })
   })
   g.opportunities.forEach((o, i) => {
     out.push({ key: `opp-${o.code}-${i}`, severity: 'info', what: `${o.title}${tag}`, how: '经营视图里有详情；加预算要你本人批', owner: 'pm' })
@@ -127,12 +146,13 @@ export interface AdjustContext {
   videoPoolIds: Set<string>
   frequencyRows: FrequencyRow[]
   upstream: Headline[]
+  /** 表头统一算好的数据日和落后天数 */
+  fresh: { dataDay: string | null; staleDays: number | null }
 }
 
-function staleNote(input: WarMapInput): string {
-  const days = dataStaleDays(input)
-  const day = input.clocks.dataDay
-  return days !== null && days > DATA_STALE_DAYS && day ? `（数据停在 ${shortDay(day)}）` : ''
+function staleNote(fresh: AdjustContext['fresh']): string {
+  const { staleDays, dataDay } = fresh
+  return staleDays !== null && staleDays > DATA_STALE_DAYS && dataDay ? `（数据停在 ${shortDay(dataDay)}）` : ''
 }
 
 export function buildAdjust(ctx: AdjustContext): { headline: Headline; actions: ActionRow[] } {
@@ -140,7 +160,7 @@ export function buildAdjust(ctx: AdjustContext): { headline: Headline; actions: 
   const actions = sortStable([
     ...accountActions(ctx.accounts),
     ...creativeActions(ctx.input.creativePoolApproved),
-    ...frequencyActions(ctx.frequencyRows, staleNote(ctx.input)),
+    ...frequencyActions(ctx.frequencyRows, staleNote(ctx.fresh)),
     ...poolActions(ctx.poolRows, ctx.videoPoolIds),
     ...growthActions(ctx.input.growth, ctx.input, unhealthy),
   ])

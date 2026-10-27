@@ -10,7 +10,8 @@
 
 import { buildAdjust, ACCOUNT_STALE_HOURS } from './actions'
 import { accountStatusHint, ACCOUNT_STATUS_ACTIVE, ACCOUNT_STATUS_UNSETTLED } from '@/lib/ads-strategy/account-status'
-import { buildFrequency, dataStaleDays } from './frequency'
+import { buildFrequency } from './frequency'
+import { computeFreshness } from './freshness'
 import { buildAccountSummaries, buildPools, unusableAccountNote } from './pools'
 import { diffDays, hoursSince, nzDay, shortDay } from './util'
 import type {
@@ -98,22 +99,15 @@ function usableAccountIds(input: WarMapInput): Set<string> {
   return new Set(input.accounts.filter(a => unusableAccountNote(a.statusCode) === null).map(a => a.adAccountId))
 }
 
-/** 最旧的数据日：整体数据日和每个在用账户各自的数据日里取最早，避免一个新鲜账户把另一个停更的账户盖成绿灯 */
-function oldestDataDay(input: WarMapInput, usable: Set<string>): string | null {
-  const days = [input.clocks.dataDay, ...[...usable].map(id => input.accountDataDays[id] ?? null)]
-  const known = days.filter((d): d is string => d !== null)
-  return known.length > 0 ? known.reduce((a, b) => (b < a ? b : a)) : null
-}
-
 export function buildWarMap(input: WarMapInput): WarMapView {
   const today = nzDay(input.now)
   const accounts = input.accounts.map(a => accountView(a, input.now))
   const names = new Map(accounts.map(a => [a.adAccountId, a.name]))
   const usable = usableAccountIds(input)
-  const oldestDay = oldestDataDay(input, usable)
-  const staleDays = oldestDay ? diffDays(oldestDay, today) : dataStaleDays(input)
-  const pools = buildPools(input, names, accounts, staleDays, oldestDay)
-  const frequency = buildFrequency({ ...input, campaigns: input.campaigns.filter(c => usable.has(c.adAccountId)) }, names)
+  const fresh = computeFreshness(input, usable, today)
+  const { dataDay, staleDays } = fresh
+  const pools = buildPools(input, names, accounts)
+  const frequency = buildFrequency({ ...input, campaigns: input.campaigns.filter(c => usable.has(c.adAccountId)) }, names, fresh)
   const adjust = buildAdjust({
     input,
     accounts,
@@ -121,14 +115,15 @@ export function buildWarMap(input: WarMapInput): WarMapView {
     videoPoolIds: videoPoolIds(input),
     frequencyRows: frequency.rows,
     upstream: [pools.headline, frequency.headline],
+    fresh,
   })
   return {
     generatedAt: input.now,
     countdown: buildCountdown(input, today),
-    // 表头的「数据日」和「已 N 天」必须同一口径：都取最旧的在用账户数据日
-    clocks: { ...input.clocks, dataDay: oldestDay ?? input.clocks.dataDay, staleDays },
+    // 表头、频率卡、今天调什么用同一个数据日和「已 N 天」（只算在投账户，全停账户在 idleNote 里注明）
+    clocks: { ...input.clocks, dataDay: dataDay ?? input.clocks.dataDay, staleDays, idleNote: fresh.idleNote },
     accounts,
-    accountSummaries: buildAccountSummaries(input, accounts, pools.everyRow, today),
+    accountSummaries: buildAccountSummaries(input, accounts, pools.everyRow, today, fresh.idleIds),
     pools: { headline: pools.headline, rows: pools.rows, hiddenCount: pools.hiddenCount, unusableRows: pools.unusableRows },
     frequency,
     adjust,

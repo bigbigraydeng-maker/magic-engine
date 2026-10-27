@@ -122,7 +122,9 @@ function isReliable(r: PoolRow): boolean {
   return r.light !== 'unknown' && r.sizeLower !== null && r.sizeLower > D4_AUDIENCE_FLOOR
 }
 
-export function poolsHeadline(rows: PoolRow[], staleDays: number | null, dataDay: string | null, unusableCount: number): Headline {
+// 🔴 观众池只看受众快照新不新（每行的 POOL_STALE_HOURS），不借用日报的数据日：
+//    日报日期是另一件事（2026-10-28 被不相干的日期挡住了判断）。
+export function poolsHeadline(rows: PoolRow[], unusableCount: number): Headline {
   const collapsed = rows.filter(r => r.light === 'red')
   if (collapsed.length > 0) {
     return { light: 'red', sentence: `有 ${collapsed.length} 个池子近 7 天从大池子掉到了显示下限，要查有没有人在补` }
@@ -134,9 +136,6 @@ export function poolsHeadline(rows: PoolRow[], staleDays: number | null, dataDay
         ? '当前在用的广告账户里没有观众池可判（有账户已停用，见下方）'
         : '观众池现在判不了：读不到，或者没有池子',
     }
-  }
-  if (staleDays !== null && staleDays > DATA_STALE_DAYS) {
-    return { light: 'unknown', sentence: `观众池判不了：广告数据已 ${staleDays} 天没更新（停在 ${dataDay ? shortDay(dataDay) : '更早'}），人数只供参考` }
   }
   const reliable = rows.filter(isReliable)
   if (reliable.length === 0) return { light: 'unknown', sentence: '观众池现在判不了：读不到，或者只有显示下限，或者数据过期了' }
@@ -165,8 +164,6 @@ export function buildPools(
   input: WarMapInput,
   names: Map<string, string>,
   accounts: AccountView[],
-  staleDays: number | null,
-  dataDay: string | null,
 ): { headline: Headline; rows: PoolRow[]; hiddenCount: number; allRows: PoolRow[]; unusableRows: PoolRow[]; everyRow: PoolRow[] } {
   const noteOf = new Map(accounts.map(a => [a.adAccountId, unusableAccountNote(a.statusCode)]))
   const everyRow = input.audiences.map(a => buildRow(a, input, names, noteOf.get(a.adAccountId) ?? null))
@@ -175,7 +172,7 @@ export function buildPools(
   const sorted = [...usable].sort(bySizeDesc)
   const rows = sorted.slice(0, MAX_POOL_ROWS)
   return {
-    headline: poolsHeadline(usable, staleDays, dataDay, unusableRows.length),
+    headline: poolsHeadline(usable, unusableRows.length),
     rows,
     hiddenCount: sorted.length - rows.length,
     allRows: usable,
@@ -189,17 +186,19 @@ export function buildAccountSummaries(
   accounts: AccountView[],
   allPoolRows: PoolRow[],
   nowDay: string,
+  idleIds: Set<string> = new Set(),
 ): AccountPoolSummary[] {
   return accounts.map(a => {
     const note = unusableAccountNote(a.statusCode)
     const dataDay = input.accountDataDays[a.adAccountId] ?? null
+    const idle = idleIds.has(a.adAccountId)
     const staleDays = dataDay ? diffDays(dataDay, nowDay) : null
     const rows = allPoolRows.filter(r => r.adAccountId === a.adAccountId)
     const reliable = rows.filter(r => r.light !== 'unknown' && r.sizeLower !== null && r.sizeLower > D4_AUDIENCE_FLOOR)
     const biggest = reliable.length > 0 ? reliable.reduce((x, y) => ((y.sizeLower ?? 0) > (x.sizeLower ?? 0) ? y : x)) : null
     let light: Light = 'unknown'
     if (note !== null) light = 'red'
-    else if (staleDays !== null && staleDays > DATA_STALE_DAYS) light = 'unknown'
+    else if (!idle && staleDays !== null && staleDays > DATA_STALE_DAYS) light = 'unknown'
     else if (biggest !== null) light = 'green'
     return {
       adAccountId: a.adAccountId,
@@ -207,6 +206,7 @@ export function buildAccountSummaries(
       statusCode: a.statusCode,
       usable: note === null,
       note,
+      idle,
       dataDay,
       staleDays,
       biggestPoolName: biggest?.name ?? null,
