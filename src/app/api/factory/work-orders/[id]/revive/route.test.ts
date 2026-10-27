@@ -86,6 +86,28 @@ describe('POST /api/factory/work-orders/[id]/revive', () => {
     expect(await res.json()).toEqual({ ok: true, status: 'queued' })
     expect(db.updates.length).toBe(1)
     expect((db.updates[0] as { status: string }).status).toBe('queued')
+    expect(db.updates[0]).not.toHaveProperty('brief')
+  })
+
+  it('drops a pinned postcard height and full-time logo when someone revives the order', async () => {
+    h.email = 'fde@magiclab.test'
+    db.loadResult = {
+      data: {
+        id: 'wo-1',
+        status: 'dead_letter',
+        reclaim_count: 0,
+        reject_reason: 'r',
+        brief: { remotion: { template: 'postcard', props: { cardTop: 870, logoMode: 'always', hook: { lines: ['A'] } } } },
+      },
+      error: null,
+    }
+
+    const res = await callPost()
+    expect(res.status).toBe(200)
+    const props = (db.updates[0] as { brief: { remotion: { props: Record<string, unknown> } } }).brief.remotion.props
+    expect(props.cardTop).toBeUndefined()
+    expect(props.logoMode).toBeUndefined()
+    expect(props.hook).toEqual({ lines: ['A'] })
   })
 
   it('refuses a client-scoped admin with 403 and never touches the database', async () => {

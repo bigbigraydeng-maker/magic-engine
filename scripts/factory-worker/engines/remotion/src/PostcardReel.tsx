@@ -7,6 +7,7 @@ import {
   estimatePostcardCardHeight,
   overlayWindows,
   postcardCardTop,
+  resolvePostcardLogoWindow,
   resolveEndCard,
   resolveFramePlan,
   resolveHook,
@@ -60,6 +61,7 @@ const Scene: React.FC<{ props: PostcardProps; index: number; logoVisible: boolea
     cardHeight: estimatePostcardCardHeight(scene.line),
     cardTop: props.cardTop,
     cardZone: props.cardZone,
+    layoutOverride: props.layoutOverride,
     logoVisible,
   })
   const stage = useStage()
@@ -109,14 +111,22 @@ export const PostcardReel: React.FC<Record<string, unknown>> = (rawProps) => {
   const plan = resolveFramePlan('postcard', props)
   const frame = useCurrentFrame()
   const vol = interpolate(frame, [0, 8, timing.totalFrames - 36, timing.totalFrames - 4], [0, 1, 1, 0], { extrapolateRight: 'clamp' })
-  const logoFrom = props.logoMode === 'always' ? 0 : Math.max(0, timing.totalFrames - 60)
   const price = props.price
   const end = props.end
   const replaceEnd = plan.endCard !== null && end !== null && price === null
   const overlayEnd = plan.endCard !== null && !replaceEnd
   const windows = overlayWindows(timing.totalFrames)
-  const logoStart = plan.hook ? Math.max(logoFrom, timing.hookFrames) : logoFrom
-  const logoEnd = replaceEnd ? timing.priceFrom : overlayEnd ? windows.endFrom : timing.totalFrames
+  const hideForEnd = replaceEnd || overlayEnd
+  const logoWindow = resolvePostcardLogoWindow({
+    logoMode: props.logoMode,
+    layoutOverride: props.layoutOverride,
+    totalFrames: timing.totalFrames,
+    hookFrames: timing.hookFrames,
+    endFrom: replaceEnd ? timing.priceFrom : windows.endFrom,
+    hideForEnd,
+  })
+  const logoStart = logoWindow.start
+  const logoEnd = logoWindow.end
   return (
     <AbsoluteFill style={{ background: '#000' }}>
       <Sequence from={0} durationInFrames={timing.hookFrames}><Hook props={props} animated={plan.hook !== null} /></Sequence>

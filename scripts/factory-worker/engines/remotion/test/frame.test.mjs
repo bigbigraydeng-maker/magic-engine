@@ -18,6 +18,7 @@ import {
   inferHookStyle,
   overlayWindows,
   postcardCardTop,
+  resolvePostcardLogoWindow,
   resolveEndCard,
   resolveFramePlan,
   resolveHook,
@@ -284,17 +285,46 @@ describe('postcard card position', () => {
     assert.ok(upper >= 270)
   })
 
-  test('an explicit cardTop is kept when it already fits', () => {
+  test('a bare cardTop is ignored so the card still alternates', () => {
     const height = estimatePostcardCardHeight('Short line')
-    assert.equal(postcardCardTop({ sceneIndex: 0, cardHeight: height, cardTop: 800 }), 800)
+    const pinned = postcardCardTop({ sceneIndex: 0, cardHeight: height, cardTop: 800 })
+    const free = postcardCardTop({ sceneIndex: 0, cardHeight: height })
+    assert.equal(pinned, free)
+    assert.notEqual(pinned, 800)
+  })
+
+  test('cardTop is kept only when the order asks for a manual layout', () => {
+    const height = estimatePostcardCardHeight('Short line')
+    assert.equal(postcardCardTop({ sceneIndex: 0, cardHeight: height, cardTop: 800, layoutOverride: true }), 800)
   })
 
   test('a tall card is pulled up so it does not cross the bottom chrome', () => {
     const line = 'A'.repeat(40)
     const height = estimatePostcardCardHeight(line)
-    const top = postcardCardTop({ sceneIndex: 0, cardHeight: height, cardTop: 940 })
+    const top = postcardCardTop({ sceneIndex: 0, cardHeight: height, cardTop: 940, layoutOverride: true })
     assert.ok(top < 940)
     assert.ok(top + height <= 1248 - 20)
+  })
+
+  test('logo stays off the hook and off the end card unless the layout is manual', () => {
+    const normal = resolvePostcardLogoWindow({
+      logoMode: 'always',
+      totalFrames: 570,
+      hookFrames: 90,
+      endFrom: 450,
+      hideForEnd: true,
+    })
+    assert.equal(normal.start, 90)
+    assert.equal(normal.end, 450)
+    const manual = resolvePostcardLogoWindow({
+      logoMode: 'always',
+      layoutOverride: true,
+      totalFrames: 570,
+      hookFrames: 90,
+      endFrom: 450,
+      hideForEnd: true,
+    })
+    assert.deepEqual(manual, { start: 0, end: 570 })
   })
 
   test('cardZone lower wins for every scene, and a visible corner logo pushes the upper band down', () => {
