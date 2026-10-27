@@ -7,16 +7,16 @@ const POLL_MS = 5000
 const MAX_POLLS = 24
 
 const TONE_CLASS: Record<PlanDraftCardView['tone'], string> = {
-  waiting: 'border-gray-200 bg-gray-50 text-gray-700',
-  ok: 'border-green-200 bg-green-50 text-green-900',
-  warn: 'border-amber-300 bg-amber-50 text-amber-950',
-  info: 'border-gray-200 bg-gray-50 text-gray-700',
+  waiting: 'border-black/10 bg-white text-me-charcoal/80',
+  ok: 'border-status-track/30 bg-status-track/10 text-me-charcoal',
+  warn: 'border-status-exec/30 bg-status-exec/10 text-me-charcoal',
+  info: 'border-black/10 bg-white text-me-charcoal/80',
 }
 
 export function PlanDraftNoticeCard({ view }: { view: PlanDraftCardView | null }) {
   if (!view) return null
   return (
-    <div role="status" className={`rounded-lg border p-3 text-sm ${TONE_CLASS[view.tone]}`}>
+    <div role="status" className={`rounded-xl border p-4 text-sm ${TONE_CLASS[view.tone]}`}>
       <p className="font-medium">推广计划草稿</p>
       <p className="mt-1">{view.text}</p>
     </div>

@@ -218,8 +218,8 @@ function FullText({ content }: { content: PrescriptionContent }) {
 }
 
 function badgeTone(status: string | null): string {
-  if (status === 'approved') return 'bg-emerald-50 text-emerald-950 ring-emerald-200'
-  if (status === 'draft') return 'bg-amber-50 text-amber-950 ring-amber-200'
-  if (status === 'rejected' || status === 'failed') return 'bg-rose-50 text-rose-950 ring-rose-200'
+  if (status === 'approved') return 'bg-status-track/10 text-me-charcoal ring-status-track/30'
+  if (status === 'draft') return 'bg-status-exec/10 text-me-charcoal ring-status-exec/30'
+  if (status === 'rejected' || status === 'failed') return 'bg-status-rej/10 text-status-rej ring-status-rej/30'
   return 'bg-black/5 text-me-charcoal ring-black/10'
 }
