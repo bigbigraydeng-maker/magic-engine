@@ -12,6 +12,16 @@ export type StaffPhoneResult =
   | { ok: true; phone: string; map: Record<string, string> }
   | { ok: false; error: string }
 
+/** 库里读出来的登记表可能被人工改坏（null / 数字 / 数组）：只保留「字符串 → 字符串」的条目。 */
+export function cleanExtensionMap(raw: unknown): Record<string, string> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v === 'string') out[k] = v
+  }
+  return out
+}
+
 export function registerStaffPhone(
   current: Record<string, string>,
   email: string | null | undefined,

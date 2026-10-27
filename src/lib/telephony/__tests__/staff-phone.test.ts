@@ -34,3 +34,15 @@ describe('registerStaffPhone', () => {
     expect(copy).toEqual(MAP)
   })
 })
+
+import { cleanExtensionMap } from '../staff-phone'
+
+describe('cleanExtensionMap', () => {
+  it('只留字符串→字符串；null / 数字 / 数组 / 字符串整体都当空表', () => {
+    expect(cleanExtensionMap({ a: 'x', b: null, c: 1, d: { e: 1 } })).toEqual({ a: 'x' })
+    expect(cleanExtensionMap(null)).toEqual({})
+    expect(cleanExtensionMap(['a'])).toEqual({})
+    expect(cleanExtensionMap('x')).toEqual({})
+    expect(cleanExtensionMap(undefined)).toEqual({})
+  })
+})

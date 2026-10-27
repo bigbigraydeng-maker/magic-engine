@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
-import { registerStaffPhone } from '@/lib/telephony/staff-phone'
+import { cleanExtensionMap, registerStaffPhone } from '@/lib/telephony/staff-phone'
 
 /**
  * POST /api/clients/[id]/crm/my-phone  body: { phone }
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const { data: rows, error } = await supabaseAdmin
     .from('telephony_connections')
-    .select('id, extension_map')
+    .select('id')
     .eq('client_id', clientId)
     .eq('provider', 'twilio')
     .eq('active', true)
@@ -32,15 +32,34 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!rows || rows.length === 0) return NextResponse.json({ error: '这个客户还没接入电话' }, { status: 422 })
   if (rows.length > 1) return NextResponse.json({ error: '电话连接不唯一，请联系管理员' }, { status: 422 })
 
-  const conn = rows[0] as { id: string; extension_map: Record<string, string> | null }
-  const result = registerStaffPhone(conn.extension_map ?? {}, access.user.email, body.phone)
-  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 })
+  const conn = rows[0] as { id: string }
+  // 整张表读出再写回，两个人同时登记时后写的会盖掉先写的：写完回读确认自己那条还在，不在就重来（最多 3 次）。
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data: cur, error: rErr } = await supabaseAdmin
+      .from('telephony_connections')
+      .select('extension_map')
+      .eq('id', conn.id)
+      .eq('client_id', clientId)
+      .maybeSingle()
+    if (rErr || !cur) return NextResponse.json({ error: '操作失败' }, { status: 500 })
+    const result = registerStaffPhone(cleanExtensionMap((cur as { extension_map: unknown }).extension_map), access.user.email, body.phone)
+    if (!result.ok) return NextResponse.json({ error: result.error }, { status: 422 })
 
-  const { error: uErr } = await supabaseAdmin
-    .from('telephony_connections')
-    .update({ extension_map: result.map })
-    .eq('id', conn.id)
-    .eq('client_id', clientId)
-  if (uErr) return NextResponse.json({ error: '操作失败' }, { status: 500 })
-  return NextResponse.json({ ok: true, phone: result.phone })
+    const { error: uErr } = await supabaseAdmin
+      .from('telephony_connections')
+      .update({ extension_map: result.map })
+      .eq('id', conn.id)
+      .eq('client_id', clientId)
+    if (uErr) return NextResponse.json({ error: '操作失败' }, { status: 500 })
+
+    const { data: after } = await supabaseAdmin
+      .from('telephony_connections')
+      .select('extension_map')
+      .eq('id', conn.id)
+      .eq('client_id', clientId)
+      .maybeSingle()
+    const kept = cleanExtensionMap((after as { extension_map: unknown } | null)?.extension_map)
+    if (kept[result.phone] === result.map[result.phone]) return NextResponse.json({ ok: true, phone: result.phone })
+  }
+  return NextResponse.json({ error: '同时有人在登记，请再点一次' }, { status: 409 })
 }
