@@ -1,5 +1,6 @@
 # 华佗 — Agent 手册
 
+> ⚠️ 与代码不符，见 [`agent-autonomy-operating-plan-v1` §4.4](../specs/2026-09-24-agent-autonomy-operating-plan-v1.md)：名单写「6 支柱打分」，`src/lib/huatuo/` 实际是开处方；6 维打分在 `src/lib/diagnostic/runner.ts`。正文未改。
 > 模型：Claude Sonnet  
 > 代码入口：`src/lib/huatuo/agent.ts` · `src/lib/huatuo/prompts.ts` · `src/lib/huatuo/personal-ip.ts` · `src/lib/huatuo/benchmarks.ts` · `src/lib/huatuo/industry-mapper.ts`  
 > 定位：开方的人。接收张骞确认过的品牌扫描和客户需求，按行业基准开出分阶段处方（做什么 / 不做什么 / 钱怎么分 / 怎么算做成），自评后交人同意；后面由诸葛亮、鲁班接着执行。
@@ -141,3 +142,9 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 - 诸葛亮手册（下游）：`docs/agents/20-zhuge.md`
 - 行业基准引擎：`src/lib/huatuo/benchmarks.ts`
 - 异常检测规则：`src/lib/diagnostic/`（Phase 22.D）
+
+---
+
+## 操作手册
+
+暂无。索引：[agents 索引](./README.md)。

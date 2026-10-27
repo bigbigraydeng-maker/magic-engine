@@ -1,7 +1,10 @@
+// @vitest-environment node
+// 生产是 Node：AbortSignal.timeout 拒绝非整数。jsdom 的同名方法会收下小数，复现不了线上那个 RangeError。
 import { describe, it, expect, vi } from 'vitest'
 import {
   runFailover,
   createFailoverState,
+  integerTimeoutMs,
   AllProvidersFailedError,
   isAccountLevel,
   DEFAULT_COOLDOWN_MS,
@@ -50,6 +53,19 @@ function classifyByMessage(_provider: Provider, err: unknown): FailoverFailureKi
 function acceptAll(raw: unknown): unknown {
   return raw
 }
+
+describe('integerTimeoutMs', () => {
+  it('把除不尽、过小、过大、非数字收成定时器肯收的整数', () => {
+    expect(integerTimeoutMs(20_000 / 3)).toBe(6_666)
+    expect(integerTimeoutMs(10_000)).toBe(10_000)
+    expect(integerTimeoutMs(0.9)).toBe(0)
+    expect(integerTimeoutMs(-1)).toBe(0)
+    expect(integerTimeoutMs(Number.NaN)).toBe(0)
+    expect(integerTimeoutMs(Number.POSITIVE_INFINITY)).toBe(0)
+    expect(integerTimeoutMs(2 ** 31)).toBe(2 ** 31 - 1)
+    expect(Number.isInteger(integerTimeoutMs(20_000 / 3))).toBe(true)
+  })
+})
 
 describe('runFailover', () => {
   it('健康：第一个供应商作答，第二个不被调用', async () => {
@@ -392,6 +408,72 @@ describe('runFailover', () => {
     })
     expect(result.provider).toBe('anthropic')
     expect(secondBudgetLeft).toBe(-1)
+  })
+
+  it('三家平分 20 秒时超时必须是整数（20000/3 原样传给定时器会抛 RangeError）', async () => {
+    // 线上简报：单条预算 20 秒、三家都启用。修复前第一条候选就在这里炸掉，一张卡都写不出。
+    const raw = 20_000 / 3
+    expect(Number.isInteger(raw)).toBe(false)
+    expect(() => AbortSignal.timeout(raw)).toThrow(RangeError)
+
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+    try {
+      const providers = (['openai', 'anthropic', 'deepseek'] as const).map((provider) =>
+        makeProvider(provider, provider, async () => ({ ok: 1 })),
+      )
+      const result = await runFailover({
+        providers,
+        validate: acceptAll,
+        classifyError: classifyByMessage,
+        totalBudgetMs: 20_000,
+        now: () => 0,
+        state: createFailoverState(),
+      })
+      expect(result).toEqual({ data: { ok: 1 }, provider: 'openai', model: 'openai', attempts: 1 })
+      expect(timeout).toHaveBeenCalledTimes(1)
+      expect(timeout.mock.calls[0]?.[0]).toBe(6_666)
+      expect(Number.isInteger(timeout.mock.calls[0]?.[0])).toBe(true)
+    } finally {
+      timeout.mockRestore()
+    }
+  })
+
+  it('调用方传入的总预算本身除不尽时，也不把小数交给定时器', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+    try {
+      const only = makeProvider('openai', 'gpt-4o', async () => ({ ok: 1 }))
+      const result = await runFailover({
+        providers: [only],
+        validate: acceptAll,
+        classifyError: classifyByMessage,
+        totalBudgetMs: 20_000 / 3,
+        now: () => 0,
+        state: createFailoverState(),
+      })
+      expect(result.provider).toBe('openai')
+      expect(timeout.mock.calls[0]?.[0]).toBe(6_666)
+    } finally {
+      timeout.mockRestore()
+    }
+  })
+
+  it('能整除的切片保持原值（两家平分 20 秒仍是 10 秒）', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+    try {
+      const first = makeProvider('openai', 'gpt-4o', async () => ({ ok: 1 }))
+      const second = makeProvider('anthropic', 'claude', async () => ({ ok: 2 }))
+      await runFailover({
+        providers: [first, second],
+        validate: acceptAll,
+        classifyError: classifyByMessage,
+        totalBudgetMs: 20_000,
+        now: () => 0,
+        state: createFailoverState(),
+      })
+      expect(timeout.mock.calls[0]?.[0]).toBe(10_000)
+    } finally {
+      timeout.mockRestore()
+    }
   })
 
   it('🔴 一家自己超时 → 记成 timeout，不是 other（超时不该冷却，也不该被当成没钱）', async () => {

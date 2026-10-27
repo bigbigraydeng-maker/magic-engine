@@ -3,7 +3,7 @@
 > **状态**：待狄仁杰审 → PM 拍板后跑（DO NOT RUN BLIND）
 > **影响**：CTS 87 Kanban 卡片 + Oztop n 卡片
 > **回滚成本**：低（UPDATE 单字段，无 DELETE / 无 ALTER）
-> **关联**：[Spec §2.4.3](../superpowers/specs/2026-06-08-me-dape-redefine-v0.2.md) · [migration 20260628000001](../../supabase/migrations/20260628000001_dape_w5_execution_prescription_link.sql)
+> **关联**：[Spec §2.4.3](../specs/2026-06-08-me-dape-redefine-v0.2.md) · [migration 20260628000001](../../supabase/migrations/20260628000001_dape_w5_execution_prescription_link.sql)
 
 ## 1. 背景
 
