@@ -7,6 +7,7 @@ import {
   MIN_VIDEO_KBPS,
   STORAGE_TARGET_BYTES,
   encodingCapFor,
+  oversizeUploadMessage,
 } from '../encode-cap.mjs'
 
 const estimatedBytes = (videoKbps, durationSec) =>
@@ -55,4 +56,18 @@ test('the upload gate sits at 48 MB, under the 50 MB object limit', () => {
   assert.equal(MAX_UPLOAD_BYTES, 48_000_000)
   assert.ok(MAX_UPLOAD_BYTES < 50_000_000)
   assert.ok(MAX_UPLOAD_BYTES > STORAGE_TARGET_BYTES)
+})
+
+test('the refusal names the file and the same 48 MB cap', () => {
+  assert.equal(
+    oversizeUploadMessage(48_000_001),
+    '成片体检没过：成片 48.0 MB，超过存储上限（48 MB）。请缩短时长或换更静的镜头后重出',
+  )
+  assert.match(oversizeUploadMessage(48_000_001, '16:9 成片'), /16:9 成片 48\.0 MB/)
+})
+
+test('upload-size-gate re-exports the one ceiling', async () => {
+  const gate = await import('../upload-size-gate.mjs')
+  assert.equal(gate.MAX_UPLOAD_BYTES, MAX_UPLOAD_BYTES)
+  assert.equal(gate.oversizeUploadMessage, oversizeUploadMessage)
 })
