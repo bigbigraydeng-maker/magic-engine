@@ -74,11 +74,11 @@ export function PrescriptionReviewActions({
   )
 }
 
-export function PrescriberLine({ agentName }: { agentName: string | null }) {
-  if (!agentName?.trim()) return null
+export function PrescriberLine({ agentName, manual = false }: { agentName: string | null; manual?: boolean }) {
+  if (!manual && !agentName?.trim()) return null
   return (
     <p className="text-sm text-gray-600">
-      开方人：<span className="font-medium text-gray-900">华佗</span>
+      开方人：<span className="font-medium text-gray-900">{manual ? '人工写下' : '华佗'}</span>
     </p>
   )
 }

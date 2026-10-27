@@ -1,10 +1,7 @@
 import type { PrescriptionContent } from '@/types/diagnostic'
 import type { SelfGrade } from '@/lib/huatuo/types'
 import { readHuatuoStream } from '@/lib/huatuo/stream-client'
-
-export const PRESCRIPTION_POLL_INTERVAL_MS = 2_000
-const POLL_MAX_MS = 8 * 60 * 1000
-const POLL_MAX_FAILURES = 5
+import { pollHuatuoPrescription } from '@/lib/huatuo/poll-prescription'
 
 export interface FollowedPrescription {
   ok: true
@@ -38,16 +35,6 @@ interface PollOptions extends FollowHandlers {
   isCancelled?: () => boolean
 }
 
-interface Snapshot {
-  id: string
-  status: string
-  content: PrescriptionContent | null
-  selfGrade: SelfGrade | null
-  progressNote: string | null
-  errorMessage: string | null
-  agentName: string | null
-}
-
 export async function followPrescriptionJob(
   response: Response,
   clientId: string,
@@ -62,38 +49,20 @@ export async function followPrescriptionJob(
   return followJson(response, clientId, handlers, fetchImpl, sleep, now)
 }
 
+// Polling is the shared #3227 implementation; this only maps its outcome to the dialog's shape.
 export async function pollSettled(options: PollOptions): Promise<FollowResult> {
-  const started = options.now()
-  let failures = 0
-  for (;;) {
-    if (options.isCancelled?.()) return { ok: false, error: '' }
-    const step = await onePoll(options)
-    if (step === 'again') {
-      failures = 0
-    } else if (step === 'retry') {
-      failures += 1
-      if (failures >= POLL_MAX_FAILURES) {
-        return { ok: false, error: '暂时查不到进度。请刷新，写好的处方会在上面。', prescriptionId: options.prescriptionId }
-      }
-    } else {
-      return step
-    }
-    if (options.now() - started > POLL_MAX_MS) {
-      return { ok: false, error: '写的时间比平时长。请过一会儿刷新。', prescriptionId: options.prescriptionId }
-    }
-    await options.sleep(PRESCRIPTION_POLL_INTERVAL_MS)
-  }
-}
-
-async function onePoll(options: PollOptions): Promise<FollowResult | 'again' | 'retry'> {
-  try {
-    const snap = await readSnapshot(options.clientId, options.prescriptionId, options.fetchImpl)
-    options.onProgress?.(snap.progressNote)
-    const settled = interpretSnapshot(snap)
-    return settled === 'wait' ? 'again' : settled
-  } catch {
-    return 'retry'
-  }
+  const outcome = await pollHuatuoPrescription(
+    options.clientId,
+    options.prescriptionId,
+    { mode: 'generate', onProgress: options.onProgress, isCancelled: options.isCancelled },
+    options.sleep,
+    options.now,
+    options.fetchImpl,
+  )
+  if (!outcome.ok) return { ok: false, error: outcome.error, prescriptionId: options.prescriptionId }
+  const { snapshot } = outcome
+  if (!snapshot.content) return { ok: false, error: '处方状态对不上。请刷新再看。', prescriptionId: options.prescriptionId }
+  return doneFrom(options.prescriptionId, snapshot.content, snapshot as unknown as Record<string, unknown>)
 }
 
 async function followJson(
@@ -143,37 +112,7 @@ async function readSse(response: Response, handlers: FollowHandlers): Promise<Fo
   return result
 }
 
-function interpretSnapshot(snap: Snapshot): FollowResult | 'wait' {
-  if (snap.status === 'generating') return 'wait'
-  if (snap.status === 'failed') {
-    return { ok: false, error: snap.errorMessage || '这版没写成。', prescriptionId: snap.id }
-  }
-  if ((snap.status === 'draft' || snap.status === 'approved') && snap.content) return doneFrom(snap.id, snap.content, snap)
-  if (snap.status === 'draft' || snap.status === 'approved') return 'wait'
-  return { ok: false, error: '处方状态对不上。请刷新再看。', prescriptionId: snap.id }
-}
-
-async function readSnapshot(clientId: string, prescriptionId: string, fetchImpl: typeof fetch): Promise<Snapshot> {
-  const res = await fetchImpl(`/api/clients/${clientId}/prescription/${prescriptionId}`, { cache: 'no-store' })
-  if (!res.ok) throw new Error(`transient ${res.status}`)
-  const data = await res.json() as { prescription?: Record<string, unknown> }
-  if (!data.prescription) throw new Error('missing prescription')
-  return toSnapshot(prescriptionId, data.prescription)
-}
-
-function toSnapshot(id: string, row: Record<string, unknown>): Snapshot {
-  return {
-    id,
-    status: textOf(row.status) || 'unknown',
-    content: isContent(row.content) ? row.content : null,
-    selfGrade: isRecord(row.self_grade) ? row.self_grade as unknown as SelfGrade : null,
-    progressNote: textOf(row.progress_note),
-    errorMessage: textOf(row.error_message),
-    agentName: textOf(row.agent_name),
-  }
-}
-
-function doneFrom(id: string, content: PrescriptionContent, extra: Record<string, unknown> | Snapshot): FollowedPrescription {
+function doneFrom(id: string, content: PrescriptionContent, extra: Record<string, unknown>): FollowedPrescription {
   const row = extra as Record<string, unknown>
   return {
     ok: true,

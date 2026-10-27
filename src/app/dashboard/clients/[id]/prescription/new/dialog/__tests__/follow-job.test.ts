@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { followPrescriptionJob } from '../follow-job'
+import { followPrescriptionJob, pollSettled } from '../follow-job'
 
 const content = {
   summary: '先改落地页',
@@ -40,6 +40,16 @@ describe('followPrescriptionJob', () => {
     expect(seen).toEqual(['/api/clients/c1/prescription/p9'])
     expect(result.ok).toBe(true)
     if (result.ok) expect(result.prescriptionId).toBe('p9')
+  })
+
+  it('returns the failure when polling finds a failed prescription', async () => {
+    const fetchImpl = (async () => Response.json({
+      prescription: { status: 'failed', content: null, error_message: '没写成', progress_note: null },
+    })) as typeof fetch
+    const result = await pollSettled({
+      clientId: 'c1', prescriptionId: 'p7', fetchImpl, sleep: async () => undefined, now: () => 0,
+    })
+    expect(result).toMatchObject({ ok: false, error: '没写成', prescriptionId: 'p7' })
   })
 
   it('surfaces a stream error without dumping the payload', async () => {

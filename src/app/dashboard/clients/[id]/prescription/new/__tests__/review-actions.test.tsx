@@ -70,6 +70,12 @@ describe('开方人与人工草稿提示', () => {
     expect(screen.queryByText('诸葛亮')).not.toBeInTheDocument()
   })
 
+  it('says a manually written draft was written by a person, not 华佗', () => {
+    render(<PrescriberLine agentName={null} manual />)
+    expect(screen.getByText('人工写下')).toBeInTheDocument()
+    expect(screen.queryByText('华佗')).not.toBeInTheDocument()
+  })
+
   it('hides the line when the prescriber is unknown', () => {
     const { container } = render(<PrescriberLine agentName={null} />)
     expect(container).toBeEmptyDOMElement()

@@ -82,6 +82,27 @@ describe('处方对话框', () => {
     expect(screen.queryByText(/我刚才说/)).not.toBeInTheDocument()
   })
 
+  it('shows a failure, not "writing", when a prescription that was still writing on open fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo) => {
+      const url = String(input)
+      if (url.includes('zhangqian/latest')) return json({ discovery: { id: 'd1', confirmed_at: '2026-01-01' } })
+      if (url.includes('active-list')) return json({ goals: [{ id: 'g1', title: '十一月线索' }] })
+      if (url.includes('latest-draft')) return json({ prescription: { id: 'p3', status: 'generating', content: null, agent_name: 'huatuo' } })
+      if (url.endsWith('/prescription/p3')) {
+        return json({ prescription: { id: 'p3', status: 'failed', content: null, error_message: '模型超时了', progress_note: null } })
+      }
+      return json({ error: 'unexpected' }, 500)
+    }))
+
+    render(<PrescriptionDialog clientId="c1" prescriptionId={null} goalId={null} supplementOf={null} reviseOf={null} />)
+    expect(await screen.findByText('模型超时了')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('这版没写成')
+    expect(screen.queryByText(/华佗正在写/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '跟华佗说' }), { target: { value: '再开一个要 300 条线索的方，预算 3700' } })
+    expect(screen.getByRole('button', { name: '发送' })).toBeEnabled()
+  })
+
   it('sends a plain sentence to the existing generate endpoint', async () => {
     const posts: Array<Record<string, unknown>> = []
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo, init?: RequestInit) => {

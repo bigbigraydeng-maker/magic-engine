@@ -69,7 +69,7 @@ function LoadedBody({ model }: { model: DialogModel }) {
         selfGrade={model.prescription?.selfGrade ?? null}
         problem={model.problem}
       />
-      {model.prescription && <PrescriberLine agentName={model.prescription.agentName} />}
+      {model.prescription && <PrescriberLine agentName={model.prescription.agentName} manual={model.prescription.manual} />}
       <ManualDraftBanner show={Boolean(model.prescription?.manual)} />
       <ChatTurns turns={model.turns} />
     </>
@@ -208,7 +208,7 @@ function useLoadedDialog(input: {
 function useGeneratingPoll(
   clientId: string,
   prescription: DialogPrescription | null,
-  setPrescription: (value: DialogPrescription | null | ((current: DialogPrescription | null) => DialogPrescription | null)) => void,
+  setPrescription: SetPrescription,
 ) {
   const prescriptionId = prescription?.status === 'generating' ? prescription.id : null
   useEffect(() => {
@@ -323,9 +323,16 @@ function progressHandlers(setPrescription: (value: DialogPrescription | null | (
   }
 }
 
-function applyFollow(result: FollowResult, setPrescription: (value: DialogPrescription | null) => void) {
-  if (!result.ok) return
-  setPrescription(followedToDialog(result, null))
+type SetPrescription = (value: DialogPrescription | null | ((current: DialogPrescription | null) => DialogPrescription | null)) => void
+
+function applyFollow(result: FollowResult, setPrescription: SetPrescription) {
+  if (!result.ok) {
+    // Cancelled polls carry an empty error; keep the page as it is.
+    if (!result.error) return
+    setPrescription((current) => current ? { ...current, status: 'failed', errorMessage: result.error, progressNote: null } : current)
+    return
+  }
+  setPrescription((current) => followedToDialog(result, current))
 }
 
 function followedToDialog(result: Extract<FollowResult, { ok: true }>, previous: DialogPrescription | null): DialogPrescription {
