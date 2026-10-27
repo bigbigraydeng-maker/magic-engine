@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -111,6 +111,27 @@ describe('doc header', () => {
     expect(h['负责']).toBe('示例甲')
     expect(h['状态']).toBe('在用')
     expect(h['风险']).toBe('待补')
+  })
+  it('splits several fields on one line', () => {
+    const h = parseDocHeader('> 负责：甲 | 范围：乙\n> 状态：**在用** ｜ 日期：d ｜ 最后核实：v ｜ 风险：C')
+    expect([h['负责'], h['范围'], h['状态'], h['日期'], h['最后核实'], h['风险'], h['依据']]).toEqual(['甲', '乙', '在用', 'd', 'v', 'C', '待补'])
+  })
+})
+
+describe('real README format', () => {
+  it('归谁 ownership is whitelisted, including a #3339-shaped extra table', () => {
+    const text = readFileSync(join(process.cwd(), 'docs/agents/README.md'), 'utf8')
+    const extra = '## 经验手册\n\n| 目录 | 归谁 | 说明 |\n|---|---|---|\n| [`docs/playbooks/social/`](../playbooks/social/README.md) | 苏东坡 `sudongpo` | 经验 |\n## 帮手\n\n| 中文名 | 代号 | 性质 | 档案 | 操作手册 |\n|---|---|---|---|---|\n| 齐白石 | `qibaishi` | 名单外 | [62](./62-qibaishi.md) | [ui](../sops/ui.md) |\n'
+    const p = parseReadme(`${text}\n${extra}`)
+    expect(p.ownership.some((o) => o.playbooksRaw.includes('ads-agent-playbook') && o.ownerRaw.includes('卫青'))).toBe(true)
+    expect(p.ownership.some((o) => o.ownerRaw.includes('待 ME Video'))).toBe(true)
+    expect(p.agents.some((a) => a.code === 'weiqing')).toBe(true)
+    expect(p.agents.some((a) => a.code === 'qibaishi')).toBe(true)
+    const c = buildCatalog(process.cwd())
+    expect(c.rows.find((r) => r.code === 'weiqing')?.playbooks.some((x) => x.file.includes('ads-agent-playbook'))).toBe(true)
+    expect(c.allowed.has('sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md')).toBe(true)
+    const h = parseDocHeader(text)
+    expect([h['负责'], h['日期'], h['风险'], h['范围'].includes('docs/agents'), h['最后核实'].includes('只核对'), h['状态'].includes('｜')]).toEqual(['待 PM 指定', '2026-10-27', 'C（仅文档）', true, true, false])
   })
 })
 

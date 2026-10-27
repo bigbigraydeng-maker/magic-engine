@@ -74,7 +74,7 @@ function parseAgentTable(t: Table): ReadmeAgentRow[] | null {
 
 function parseOwnershipTable(t: Table): ReadmeOwnershipRow[] | null {
   const pb = findCol(t.header, /手册|sop|playbook/i)
-  const owner = findCol(t.header, /归属|负责|管理|owner|agent/i)
+  const owner = findCol(t.header, /归属|归谁|负责|管理|owner|agent/i)
   if (pb < 0 || owner < 0 || pb === owner) return null
   return t.rows.map((r) => ({ playbooksRaw: r[pb] ?? '', ownerRaw: r[owner] ?? '' }))
 }

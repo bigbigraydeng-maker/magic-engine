@@ -8,8 +8,8 @@ const FIELD_RE = new RegExp(
 export function parseDocHeader(text: string): Record<HeaderField, string> {
   const result = Object.fromEntries(HEADER_FIELDS.map((f) => [f, '待补'])) as Record<HeaderField, string>
   const seen = new Set<string>()
-  for (const line of text.split(/\r?\n/).slice(0, 40)) {
-    const m = FIELD_RE.exec(line)
+  for (const line of text.split(/\r?\n/).slice(0, 40)) for (const part of line.split(/[｜|]/)) {
+    const m = FIELD_RE.exec(part)
     if (!m || seen.has(m[1])) continue
     const value = m[2].replace(/\*+$/, '').trim()
     if (value === '') continue
