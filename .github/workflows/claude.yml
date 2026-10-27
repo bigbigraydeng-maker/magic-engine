@@ -43,8 +43,18 @@ jobs:
           # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
           # prompt: 'Update the pull request description to include a summary of changes.'
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
+          # v1 passes claude_args to the CLI. The documented flag is --allowedTools
+          # (camelCase). The action merges this list with its built-in tools
+          # (read, search, in-repo edits, git add/commit, and the no-flag push
+          # wrapper). It does not replace them.
+          # gh pr create is prefix-locked to --draft. A create that does not
+          # start with "gh pr create --draft" is denied. No merge, no force-push,
+          # no gh api, no resolve-review-thread.
+          # Job permissions stay as declared above. gh uses the Claude app token
+          # minted in the action (it already requests pull request write), not
+          # the read-only GITHUB_TOKEN from this job.
+          # See https://github.com/anthropics/claude-code-action/blob/v1/docs/usage.md
+          # and https://github.com/anthropics/claude-code-action/blob/v1/docs/configuration.md
+          claude_args: |
+            --allowedTools "Bash(git fetch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git cherry-pick:*),Bash(gh pr create --draft:*),Bash(gh pr view:*),Bash(npm ci),Bash(npx vitest:*),Bash(npm test:*),Bash(npm run type-check)"
 
