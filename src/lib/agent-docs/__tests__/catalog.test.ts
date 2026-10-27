@@ -18,26 +18,9 @@ function repo(files: Record<string, string>): string {
   }
   return root
 }
-afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
-})
+afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }) })
 
-const README = `# 名单
-
-| 中文名 | 代号 | 分组 | 状态 | 档案 | 手册 |
-|---|---|---|---|---|---|
-| 示例甲 | alpha | §4.1 | 在用 | [档案](10-alpha.md) | [规则](../sops/alpha-rules.md) |
-| 示例乙 | beta | §4.2 | 已撤 | 80-beta.md | |
-| 示例丙 | gamma | §4.3 | 名单外，待 PM 定 | | |
-| 坏行 |
-
-## 手册归属
-
-| 手册 | 归属 |
-|---|---|
-| \`docs/sops/shared.md\` | 示例乙 |
-| \`docs/clients/secret-client.md\` | 示例甲 |
-`
+const README = ["# 名单","","| 中文名 | 代号 | 分组 | 状态 | 档案 | 手册 |","|---|---|---|---|---|---|","| 示例甲 | alpha | §4.1 | 在用 | [档案](10-alpha.md) | [规则](../sops/alpha-rules.md) |","| 示例乙 | beta | §4.2 | 已撤 | 80-beta.md | |","| 示例丙 | gamma | §4.3 | 名单外，待 PM 定 | | |","| 坏行 |","","## 手册归属","","| 手册 | 归属 |","|---|---|","| \\`docs/sops/shared.md\\` | 示例乙 |","| \\`docs/clients/secret-client.md\\` | 示例甲 |",""].join('\n')
 
 describe('parseReadme', () => {
   it('reads both tables and counts malformed rows', () => {
@@ -56,11 +39,8 @@ describe('parseReadme', () => {
 describe('buildCatalog', () => {
   it('README is the source of truth; unknown folders are not whitelisted', () => {
     const root = repo({
-      'docs/agents/README.md': README,
-      'docs/agents/10-alpha.md': '# 示例甲 — 手册',
-      'docs/sops/alpha-rules.md': '# r',
-      'docs/sops/shared.md': '# s',
-      'docs/clients/secret-client.md': '# secret',
+      'docs/agents/README.md': README, 'docs/agents/10-alpha.md': '# 示例甲 — 手册',
+      'docs/sops/alpha-rules.md': '# r', 'docs/sops/shared.md': '# s', 'docs/clients/secret-client.md': '# secret',
     })
     const c = buildCatalog(root)
     const alpha = c.rows.find((r) => r.code === 'alpha')!
@@ -71,13 +51,11 @@ describe('buildCatalog', () => {
     expect(c.notes.some((n) => n.includes('secret-client'))).toBe(true)
     expect(c.readmeMissing).toBe(false)
   })
-
   it('falls back to profiles when README is missing and flags it', () => {
     const root = repo({
       'docs/agents/10-ziya.md': '# 子牙 — Agent 手册\n\n## 九、操作手册\n\n- [规则](../sops/a.md)\n\n## 十、其他\n',
       'docs/agents/80-davinci.md': '# 达芬奇\n> 已撤 2026-09-24\n',
-      'docs/agents/00-architecture.md': '# 架构',
-      'docs/sops/a.md': '# a',
+      'docs/agents/00-architecture.md': '# 架构', 'docs/sops/a.md': '# a',
     })
     const c = buildCatalog(root)
     expect(c.readmeMissing).toBe(true)
@@ -88,34 +66,23 @@ describe('buildCatalog', () => {
     expect(c.rows.find((r) => r.code === 'davinci')!.warnings.join()).toContain('操作手册')
     expect(c.notes.join()).toContain('README')
   })
-
   it('flags files listed in README but missing on disk', () => {
-    const root = repo({ 'docs/agents/README.md': README })
-    const c = buildCatalog(root)
+    const c = buildCatalog(repo({ 'docs/agents/README.md': README }))
     expect(c.rows[0].warnings.join()).toContain('文件缺失')
   })
 })
 
 describe('whitelist / path traversal', () => {
-  const root = () =>
-    repo({
-      'docs/agents/README.md': README,
-      'docs/agents/10-alpha.md': '# 示例甲',
-      'docs/sops/alpha-rules.md': '# r',
-      'docs/clients/secret-client.md': '# secret',
-      'package.json': '{}',
-    })
+  const root = () => repo({
+    'docs/agents/README.md': README, 'docs/agents/10-alpha.md': '# 示例甲',
+    'docs/sops/alpha-rules.md': '# r', 'docs/clients/secret-client.md': '# secret', 'package.json': '{}',
+  })
   it.each([
-    ['agents', '../../package.json'],
-    ['agents', '..%2F..%2Fpackage.json'],
-    ['sops', '../clients/secret-client.md'],
-    ['clients', 'secret-client.md'],
-    ['agents', 'README.md'],
-    ['sops', 'not-listed.md'],
+    ['agents', '../../package.json'], ['agents', '..%2F..%2Fpackage.json'], ['sops', '../clients/secret-client.md'],
+    ['clients', 'secret-client.md'], ['agents', 'README.md'], ['sops', 'not-listed.md'],
   ])('%s/%s is not allowed', (kind, file) => {
     const r = root()
-    const out = readAllowedDoc(buildCatalog(r), kind, file, r)
-    expect(out).toEqual({ ok: false, reason: 'not_allowed' })
+    expect(readAllowedDoc(buildCatalog(r), kind, file, r)).toEqual({ ok: false, reason: 'not_allowed' })
   })
   it('listed file reads; listed-but-missing is unreadable, not not_allowed', () => {
     const r = root()
@@ -128,16 +95,11 @@ describe('whitelist / path traversal', () => {
 describe('doc links', () => {
   const allowed = new Set(['sops/a.md', 'agents/10-ziya.md'])
   it('whitelisted doc → in-app page', () => {
-    expect(resolveDocLink('../sops/a.md', 'agents', allowed)).toEqual({
-      href: '/dashboard/admin/agents/sops/a.md',
-      external: false,
-    })
+    expect(resolveDocLink('../sops/a.md', 'agents', allowed)).toEqual({ href: '/dashboard/admin/agents/sops/a.md', external: false })
     expect(resolveDocLink('10-ziya.md#x', 'agents', allowed).href).toBe('/dashboard/admin/agents/agents/10-ziya.md#x')
   })
   it('other folders → GitHub; web links untouched; escaping root is neutralised', () => {
-    expect(resolveDocLink('../clients/x.md', 'agents', allowed).href).toBe(
-      'https://github.com/bigbigraydeng-maker/magic-engine/blob/main/docs/clients/x.md',
-    )
+    expect(resolveDocLink('../clients/x.md', 'agents', allowed).href).toBe('https://github.com/bigbigraydeng-maker/magic-engine/blob/main/docs/clients/x.md')
     expect(resolveDocLink('https://example.com', 'sops', allowed)).toEqual({ href: 'https://example.com', external: true })
     expect(resolveDocLink('../../../../etc/passwd', 'sops', allowed).href).toBe('#')
   })

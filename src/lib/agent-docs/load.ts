@@ -10,10 +10,8 @@ const FILE_NAME_RE = /^[^/\\]+\.md$/
 
 type Exists = (kind: DocKind, file: string) => boolean
 
-/** Turn a path written in a doc (README cell, markdown link) into an openable ref, or null. */
 export function resolveDocRef(raw: string, exists: Exists): DocRef | null {
-  let p = raw.split('#')[0].trim().replace(/^\.\//, '')
-  p = p.replace(/^(\.\.\/)+/, '').replace(/^docs\//, '')
+  let p = raw.split('#')[0].trim().replace(/^\.\//, '').replace(/^(\.\.\/)+/, '').replace(/^docs\//, '')
   const parts = p.split('/')
   if (parts.length === 1 && FILE_NAME_RE.test(p)) {
     if (exists('agents', p)) return { kind: 'agents', file: p }
@@ -41,14 +39,9 @@ function refsFromCell(cell: string, exists: Exists, notes: string[]): DocRef[] {
 }
 
 function readTextOrNull(root: string, kind: DocKind, file: string): string | null {
-  try {
-    return readFileSync(join(root, 'docs', kind, file), 'utf8')
-  } catch {
-    return null
-  }
+  try { return readFileSync(join(root, 'docs', kind, file), 'utf8') } catch { return null }
 }
 
-/** Fallback: read one agent profile and its trailing「操作手册」section. */
 function rowFromProfile(root: string, file: string, exists: Exists, notes: string[]): AgentRow {
   const m = PROFILE_FILE_RE.exec(file)
   const text = readTextOrNull(root, 'agents', file)
@@ -65,14 +58,8 @@ function rowFromProfile(root: string, file: string, exists: Exists, notes: strin
     section = (end >= 0 ? rest.slice(0, end) : rest).join('\n')
   }
   const row: AgentRow = {
-    key: m ? m[2] : file,
-    nameZh,
-    code: m ? m[2] : '',
-    group: '待补',
-    status,
-    profile: { kind: 'agents', file },
-    playbooks: dedupe(refsFromCell(section, exists, notes)),
-    warnings: [],
+    key: m ? m[2] : file, nameZh, code: m ? m[2] : '', group: '待补', status,
+    profile: { kind: 'agents', file }, playbooks: dedupe(refsFromCell(section, exists, notes)), warnings: [],
   }
   if (text === null) row.warnings.push('档案文件读不到')
   if (start < 0) row.warnings.push('档案末尾没有「操作手册」一节，管哪些手册待补')
@@ -94,25 +81,15 @@ function rowFromReadme(r: ReadmeAgentRow, parse: ReadmeParse, exists: Exists, no
   if (!profile) warnings.push('对照表没写档案文件')
   if (r.group === '') warnings.push('分组待补')
   return {
-    key: r.code || r.nameZh,
-    nameZh: r.nameZh,
-    code: r.code,
-    group: r.group || '待补',
-    status: r.status,
-    profile,
-    playbooks,
-    warnings,
+    key: r.code || r.nameZh, nameZh: r.nameZh, code: r.code, group: r.group || '待补', status: r.status,
+    profile, playbooks, warnings,
   }
 }
 
 function listProfileFiles(root: string): string[] {
   try {
-    return readdirSync(join(root, AGENTS_DIR))
-      .filter((f) => PROFILE_FILE_RE.test(f) && !f.startsWith('00-'))
-      .sort()
-  } catch {
-    return []
-  }
+    return readdirSync(join(root, AGENTS_DIR)).filter((f) => PROFILE_FILE_RE.test(f) && !f.startsWith('00-')).sort()
+  } catch { return [] }
 }
 
 function markMissingFiles(root: string, rows: AgentRow[], allowed: Set<string>, notes: string[]): void {
@@ -128,7 +105,6 @@ function markMissingFiles(root: string, rows: AgentRow[], allowed: Set<string>, 
   }
 }
 
-/** Build the agent ↔ playbook catalog. README is the source of truth; profiles are the fallback. */
 export function buildCatalog(root: string = process.cwd()): AgentCatalog {
   const notes: string[] = []
   const exists: Exists = (kind, file) => existsSync(join(root, 'docs', kind, file))
@@ -139,7 +115,6 @@ export function buildCatalog(root: string = process.cwd()): AgentCatalog {
   if (readme === null) notes.push('docs/agents/README.md 读不到，对照表改为逐份读取档案；管哪些手册可能不全')
   else if (readmeMissing) notes.push('README 里没认出名单与对照表，改为逐份读取档案')
   if (parse && parse.skippedLines > 0) notes.push(`README 表格有 ${parse.skippedLines} 行格式对不上，已跳过`)
-
   const listed = new Set(rows.map((r) => r.profile?.file).filter(Boolean))
   for (const file of listProfileFiles(root)) {
     if (listed.has(file)) continue
@@ -155,7 +130,6 @@ export function buildCatalog(root: string = process.cwd()): AgentCatalog {
 
 export type DocRead = { ok: true; text: string } | { ok: false; reason: 'not_allowed' | 'unreadable' }
 
-/** Read a doc only if it is in the whitelist; anything else is `not_allowed` (→ 404). */
 export function readAllowedDoc(catalog: AgentCatalog, kind: string, file: string, root: string = process.cwd()): DocRead {
   if (!catalog.allowed.has(`${kind}/${file}`)) return { ok: false, reason: 'not_allowed' }
   const text = readTextOrNull(root, kind as DocKind, file)

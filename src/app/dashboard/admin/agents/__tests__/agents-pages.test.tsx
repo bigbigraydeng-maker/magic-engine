@@ -6,12 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 let headerMap: Record<string, string> = {}
 vi.mock('next/headers', () => ({ headers: async () => ({ get: (k: string) => headerMap[k] ?? null }) }))
 vi.mock('next/navigation', () => ({
-  redirect: (to: string) => {
-    throw new Error(`REDIRECT:${to}`)
-  },
-  notFound: () => {
-    throw new Error('NOT_FOUND')
-  },
+  redirect: (to: string) => { throw new Error(`REDIRECT:${to}`) },
+  notFound: () => { throw new Error('NOT_FOUND') },
 }))
 
 import AgentsPage from '../page'
@@ -19,10 +15,7 @@ import AgentDocPage from '../[kind]/[file]/page'
 import { DocMarkdown } from '../_components/DocMarkdown'
 
 const ADMIN = { 'x-user-role': 'admin', 'x-user-tier': 'admin' }
-
-beforeEach(() => {
-  headerMap = {}
-})
+beforeEach(() => { headerMap = {} })
 
 describe('page gate', () => {
   it.each([
@@ -34,14 +27,10 @@ describe('page gate', () => {
     headerMap = hdr
     await expect(AgentsPage()).rejects.toThrow('REDIRECT:/unauthorized')
   })
-
   it('scoped admin is bounced from the doc page too', async () => {
     headerMap = { ...ADMIN, 'x-allowed-client-id': 'c1' }
-    await expect(
-      AgentDocPage({ params: Promise.resolve({ kind: 'agents', file: '10-ziya.md' }) }),
-    ).rejects.toThrow('REDIRECT:/unauthorized')
+    await expect(AgentDocPage({ params: Promise.resolve({ kind: 'agents', file: '10-ziya.md' }) })).rejects.toThrow('REDIRECT:/unauthorized')
   })
-
   it('global admin sees the list with no write controls', async () => {
     headerMap = ADMIN
     const { container } = render(await AgentsPage())
@@ -54,21 +43,15 @@ describe('page gate', () => {
 
 describe('doc page 404s', () => {
   it.each([
-    ['agents', '../../package.json'],
-    ['agents', '..%2F..%2Fpackage.json'],
-    ['sops', '../clients/x.md'],
-    ['clients', 'x.md'],
-    ['agents', 'does-not-exist.md'],
+    ['agents', '../../package.json'], ['agents', '..%2F..%2Fpackage.json'], ['sops', '../clients/x.md'],
+    ['clients', 'x.md'], ['agents', 'does-not-exist.md'],
   ])('%s/%s → 404', async (kind, file) => {
     headerMap = ADMIN
     await expect(AgentDocPage({ params: Promise.resolve({ kind, file }) })).rejects.toThrow('NOT_FOUND')
   })
-
   it('opens a real profile', async () => {
     headerMap = ADMIN
-    const { container } = render(
-      await AgentDocPage({ params: Promise.resolve({ kind: 'agents', file: '10-ziya.md' }) }),
-    )
+    const { container } = render(await AgentDocPage({ params: Promise.resolve({ kind: 'agents', file: '10-ziya.md' }) }))
     expect(container.textContent).toContain('子牙')
     expect(container.textContent).toContain('待补')
   })
@@ -93,12 +76,8 @@ describe('read-only guarantee', () => {
     })
   }
   it('no API route and no write handlers/forms under the feature', () => {
-    const root = join(__dirname, '..')
-    const files = walk(root)
+    const files = walk(join(__dirname, '..'))
     expect(files.some((f) => /route\.ts$/.test(f))).toBe(false)
-    for (const f of files) {
-      const src = readFileSync(f, 'utf8')
-      expect(src, f).not.toMatch(/<form|<button|onSubmit|method:\s*['"](POST|PUT|PATCH|DELETE)/)
-    }
+    for (const f of files) expect(readFileSync(f, 'utf8'), f).not.toMatch(/<form|<button|onSubmit|method:\s*['"](POST|PUT|PATCH|DELETE)/)
   })
 })

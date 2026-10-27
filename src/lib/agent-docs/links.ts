@@ -4,12 +4,8 @@ import type { DocKind } from './types'
 export const AGENTS_BASE = '/dashboard/admin/agents'
 export const GITHUB_BLOB = 'https://github.com/bigbigraydeng-maker/magic-engine/blob/main/'
 
-export interface ResolvedLink {
-  href: string
-  external: boolean
-}
+export interface ResolvedLink { href: string; external: boolean }
 
-/** Pure path join for a doc-relative href (no fs): `../sops/a.md` from docs/agents → docs/sops/a.md */
 function repoPath(from: DocKind, href: string): string | null {
   const stack = ['docs', from]
   for (const seg of href.split('/')) {
@@ -22,10 +18,6 @@ function repoPath(from: DocKind, href: string): string | null {
   return stack.join('/')
 }
 
-/**
- * Where a link inside a doc should go:
- * whitelisted agent/playbook → in-app page; other repo file → GitHub; web/mail/anchor → unchanged.
- */
 export function resolveDocLink(href: string, from: DocKind, allowed: Set<string>): ResolvedLink {
   if (/^(https?:|mailto:)/i.test(href)) return { href, external: true }
   if (href.startsWith('#') || href === '') return { href, external: false }

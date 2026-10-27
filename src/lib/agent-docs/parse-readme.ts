@@ -1,28 +1,18 @@
 import type { AgentStatus } from './types'
 
 export interface ReadmeAgentRow {
-  nameZh: string
-  code: string
-  group: string
-  status: AgentStatus
-  profileRaw: string
-  playbooksRaw: string
+  nameZh: string; code: string; group: string; status: AgentStatus
+  profileRaw: string; playbooksRaw: string
 }
 
-export interface ReadmeOwnershipRow {
-  playbooksRaw: string
-  ownerRaw: string
-}
+export interface ReadmeOwnershipRow { playbooksRaw: string; ownerRaw: string }
 
 export interface ReadmeParse {
-  agents: ReadmeAgentRow[]
-  ownership: ReadmeOwnershipRow[]
-  skippedLines: number
+  agents: ReadmeAgentRow[]; ownership: ReadmeOwnershipRow[]; skippedLines: number
 }
 
 const MD_REF_RE = /[^\s()[\]`|<>"']+\.md/g
 
-/** Extract every `*.md` path mentioned in a table cell (links or backticks). */
 export function extractMdRefs(cell: string): string[] {
   return Array.from(new Set(cell.match(MD_REF_RE) ?? []))
 }
@@ -37,14 +27,9 @@ function splitRow(line: string): string[] {
   return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
 }
 
-const isSeparator = (line: string): boolean =>
-  /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line)
+const isSeparator = (line: string): boolean => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line)
 
-interface Table {
-  header: string[]
-  rows: string[][]
-  skipped: number
-}
+interface Table { header: string[]; rows: string[][]; skipped: number }
 
 function collectTables(text: string): Table[] {
   const lines = text.split(/\r?\n/)
@@ -65,10 +50,7 @@ function collectTables(text: string): Table[] {
   return tables
 }
 
-function findCol(header: string[], re: RegExp): number {
-  return header.findIndex((h) => re.test(h))
-}
-
+const findCol = (header: string[], re: RegExp): number => header.findIndex((h) => re.test(h))
 const clean = (s: string): string => s.replace(/[*`]/g, '').trim()
 
 function parseAgentTable(t: Table): ReadmeAgentRow[] | null {
@@ -97,7 +79,6 @@ function parseOwnershipTable(t: Table): ReadmeOwnershipRow[] | null {
   return t.rows.map((r) => ({ playbooksRaw: r[pb] ?? '', ownerRaw: r[owner] ?? '' }))
 }
 
-/** Tolerant parse of docs/agents/README.md: never throws, short rows are counted. */
 export function parseReadme(text: string): ReadmeParse {
   const out: ReadmeParse = { agents: [], ownership: [], skippedLines: 0 }
   for (const t of collectTables(text)) {

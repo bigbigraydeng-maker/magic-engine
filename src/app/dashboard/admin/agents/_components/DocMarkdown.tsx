@@ -2,17 +2,16 @@ import type { ReactNode } from 'react'
 import { resolveDocLink } from '@/lib/agent-docs/links'
 import type { DocKind } from '@/lib/agent-docs/types'
 
-/**
- * Read-only markdown renderer for docs/agents + docs/sops.
- * Pure React elements (no dangerouslySetInnerHTML), so doc text can never inject markup.
- * Supports: headings, paragraphs, lists, tables, blockquotes, fenced code, hr, bold, inline code, links.
- */
-interface Ctx {
-  from: DocKind
-  allowed: Set<string>
-}
+interface Ctx { from: DocKind; allowed: Set<string> }
 
 const INLINE_RE = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\[[^\]]+\]\([^)\s]+\))/g
+const splitCells = (line: string): string[] => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
+const isTableSep = (l: string): boolean => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l)
+const cellCls = 'border border-black/10 px-2 py-1'
+const HEADING_CLASS = ['', 'text-2xl font-bold mt-6', 'text-xl font-bold mt-6', 'text-lg font-semibold mt-5', 'text-base font-semibold mt-4']
+const LIST_RE = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/
+const startsBlock = (l: string): boolean =>
+  /^(#{1,6}\s|>|```|\s*([-*+]|\d+[.)])\s|\s*\|)/.test(l) || /^\s*(---+|\*\*\*+)\s*$/.test(l)
 
 function renderInline(text: string, ctx: Ctx, keyBase: string): ReactNode[] {
   const out: ReactNode[] = []
@@ -23,23 +22,12 @@ function renderInline(text: string, ctx: Ctx, keyBase: string): ReactNode[] {
     if (idx > last) out.push(text.slice(last, idx))
     const key = `${keyBase}-${i++}`
     const tok = m[0]
-    if (m[1]) {
-      out.push(<code key={key} className="rounded bg-black/5 px-1 text-[0.9em]">{tok.slice(1, -1)}</code>)
-    } else if (m[2]) {
-      out.push(<strong key={key}>{tok.slice(2, -2)}</strong>)
-    } else {
+    if (m[1]) out.push(<code key={key} className="rounded bg-black/5 px-1 text-[0.9em]">{tok.slice(1, -1)}</code>)
+    else if (m[2]) out.push(<strong key={key}>{tok.slice(2, -2)}</strong>)
+    else {
       const lm = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(tok)
       const link = resolveDocLink(lm?.[2] ?? '', ctx.from, ctx.allowed)
-      out.push(
-        <a
-          key={key}
-          href={link.href}
-          className="text-blue-700 underline"
-          {...(link.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-        >
-          {lm?.[1]}
-        </a>,
-      )
+      out.push(<a key={key} href={link.href} className="text-blue-700 underline" {...(link.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{lm?.[1]}</a>)
     }
     last = idx + tok.length
   }
@@ -47,34 +35,16 @@ function renderInline(text: string, ctx: Ctx, keyBase: string): ReactNode[] {
   return out
 }
 
-const splitCells = (line: string): string[] =>
-  line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim())
-const isTableSep = (l: string): boolean => /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l)
-
 function renderTable(lines: string[], ctx: Ctx, key: string): ReactNode {
   const head = splitCells(lines[0])
   const body = lines.slice(2).map(splitCells)
   return (
     <div key={key} className="my-3 overflow-x-auto">
       <table className="min-w-full border-collapse text-sm">
-        <thead>
-          <tr>
-            {head.map((c, i) => (
-              <th key={i} className="border border-black/10 bg-black/5 px-2 py-1 text-left font-semibold">
-                {renderInline(c, ctx, `${key}h${i}`)}
-              </th>
-            ))}
-          </tr>
-        </thead>
+        <thead><tr>{head.map((c, n) => <th key={n} className={`${cellCls} bg-black/5 text-left font-semibold`}>{renderInline(c, ctx, `${key}h${n}`)}</th>)}</tr></thead>
         <tbody>
           {body.map((row, r) => (
-            <tr key={r}>
-              {row.map((c, i) => (
-                <td key={i} className="border border-black/10 px-2 py-1 align-top">
-                  {renderInline(c, ctx, `${key}r${r}c${i}`)}
-                </td>
-              ))}
-            </tr>
+            <tr key={r}>{row.map((c, n) => <td key={n} className={`${cellCls} align-top`}>{renderInline(c, ctx, `${key}r${r}c${n}`)}</td>)}</tr>
           ))}
         </tbody>
       </table>
@@ -82,18 +52,15 @@ function renderTable(lines: string[], ctx: Ctx, key: string): ReactNode {
   )
 }
 
-const HEADING_CLASS = ['', 'text-2xl font-bold mt-6', 'text-xl font-bold mt-6', 'text-lg font-semibold mt-5', 'text-base font-semibold mt-4']
-const LIST_RE = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/
-
 function renderList(lines: string[], ctx: Ctx, key: string): ReactNode {
   return (
     <ul key={key} className="my-2 space-y-1">
-      {lines.map((l, i) => {
+      {lines.map((l, n) => {
         const m = LIST_RE.exec(l)
         const depth = Math.min(Math.floor((m?.[1].length ?? 0) / 2), 4)
         return (
-          <li key={i} style={{ marginLeft: `${1 + depth * 1.25}rem` }} className="list-disc text-sm leading-relaxed">
-            {renderInline(m?.[3] ?? l, ctx, `${key}l${i}`)}
+          <li key={n} style={{ marginLeft: `${1 + depth * 1.25}rem` }} className="list-disc text-sm leading-relaxed">
+            {renderInline(m?.[3] ?? l, ctx, `${key}l${n}`)}
           </li>
         )
       })}
@@ -107,9 +74,6 @@ function takeWhile(lines: string[], start: number, pred: (l: string) => boolean)
   return out
 }
 
-const startsBlock = (l: string): boolean =>
-  /^(#{1,6}\s|>|```|\s*([-*+]|\d+[.)])\s|\s*\|)/.test(l) || /^\s*(---+|\*\*\*+)\s*$/.test(l)
-
 export function DocMarkdown({ text, from, allowed }: { text: string; from: DocKind; allowed: Set<string> }) {
   const ctx: Ctx = { from, allowed }
   const lines = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').split(/\r?\n/)
@@ -119,21 +83,14 @@ export function DocMarkdown({ text, from, allowed }: { text: string; from: DocKi
     const line = lines[i]
     const key = `b${i}`
     const heading = /^(#{1,6})\s+(.*)$/.exec(line)
-    if (line.trim() === '') {
-      i++
-    } else if (line.startsWith('```')) {
+    if (line.trim() === '') i++
+    else if (line.startsWith('```')) {
       const code = takeWhile(lines, i + 1, (l) => !l.startsWith('```'))
-      blocks.push(
-        <pre key={key} className="my-3 overflow-x-auto rounded bg-black/5 p-3 text-xs">{code.join('\n')}</pre>,
-      )
+      blocks.push(<pre key={key} className="my-3 overflow-x-auto rounded bg-black/5 p-3 text-xs">{code.join('\n')}</pre>)
       i += code.length + 2
     } else if (heading) {
       const level = heading[1].length
-      blocks.push(
-        <div key={key} role="heading" aria-level={level} className={HEADING_CLASS[Math.min(level, 4)]}>
-          {renderInline(heading[2], ctx, key)}
-        </div>,
-      )
+      blocks.push(<div key={key} role="heading" aria-level={level} className={HEADING_CLASS[Math.min(level, 4)]}>{renderInline(heading[2], ctx, key)}</div>)
       i++
     } else if (/^\s*(---+|\*\*\*+)\s*$/.test(line)) {
       blocks.push(<hr key={key} className="my-4 border-black/10" />)
@@ -144,11 +101,7 @@ export function DocMarkdown({ text, from, allowed }: { text: string; from: DocKi
       i += rows.length
     } else if (line.startsWith('>')) {
       const quote = takeWhile(lines, i, (l) => l.startsWith('>')).map((l) => l.replace(/^>\s?/, ''))
-      blocks.push(
-        <blockquote key={key} className="my-3 border-l-4 border-black/10 pl-3 text-sm text-black/70">
-          {quote.map((q, n) => <div key={n}>{renderInline(q, ctx, `${key}q${n}`)}</div>)}
-        </blockquote>,
-      )
+      blocks.push(<blockquote key={key} className="my-3 border-l-4 border-black/10 pl-3 text-sm text-black/70">{quote.map((q, n) => <div key={n}>{renderInline(q, ctx, `${key}q${n}`)}</div>)}</blockquote>)
       i += quote.length
     } else if (LIST_RE.test(line)) {
       const items = takeWhile(lines, i, (l) => LIST_RE.test(l))
@@ -156,9 +109,7 @@ export function DocMarkdown({ text, from, allowed }: { text: string; from: DocKi
       i += items.length
     } else {
       const para = [line, ...takeWhile(lines, i + 1, (l) => l.trim() !== '' && !startsBlock(l))]
-      blocks.push(
-        <p key={key} className="my-2 text-sm leading-relaxed">{renderInline(para.join(' '), ctx, key)}</p>,
-      )
+      blocks.push(<p key={key} className="my-2 text-sm leading-relaxed">{renderInline(para.join(' '), ctx, key)}</p>)
       i += para.length
     }
   }
