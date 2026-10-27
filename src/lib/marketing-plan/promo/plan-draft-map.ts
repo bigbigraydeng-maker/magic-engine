@@ -3,9 +3,10 @@
  * Empty account, budget, country, or audience stays empty. No placeholder values.
  */
 
-import { checkAdsBudget, type AccountCapFacts } from './budget-caps'
+import type { AccountCapFacts } from './budget-caps'
 import { planDraftMissingPlaysLine, planDraftNoCountryLine, planDraftNoPeriodLine } from './plan-draft-card'
-import { parsePromoSpec, type PromoSpec } from './spec'
+import { validatePlanDraft } from './plan-draft-validate'
+import type { PromoSpec } from './spec'
 import type { PlanSeed, PlanSeedStep } from '@/lib/ads-strategy/plan-seed/types'
 
 export interface PlanDraftMapInput {
@@ -42,15 +43,6 @@ function usableAccount(step: PlanSeedStep | undefined): string | null {
   if (!step?.ad_account_id.ok) return null
   const value = step.ad_account_id.value.trim()
   return value === '' ? null : value
-}
-
-function canonicalSpec(raw: unknown): PromoSpec | null {
-  const first = parsePromoSpec(raw)
-  if (!first.ok) return null
-  const stripped: PromoSpec = { ...first.spec, checks: [] }
-  delete stripped.gate_snapshot
-  const second = parsePromoSpec(stripped)
-  return second.ok ? second.spec : null
 }
 
 function reject(code: string, text: string, retryable = false): PlanDraftMapResult {
@@ -104,14 +96,6 @@ function keptSteps(input: PlanDraftMapInput): { steps: RawAdsStep[]; dropped: st
   return { steps, dropped, network }
 }
 
-function budgetBlocks(spec: PromoSpec, input: PlanDraftMapInput): boolean {
-  for (const phase of spec.phases) {
-    const ads = phase.steps.flatMap(step => (step.kind === 'ads_campaign' ? [step] : []))
-    if (checkAdsBudget(ads, input.accounts, input.clientCapCents).verdict === 'over') return true
-  }
-  return false
-}
-
 /** Pure mapping. Callers skip the seed build when there are no ad plays. */
 export function mapSeedToPromo(input: PlanDraftMapInput): PlanDraftMapResult {
   if (input.plays.length === 0) return reject('missing_ad_plays', planDraftMissingPlaysLine())
@@ -124,7 +108,7 @@ export function mapSeedToPromo(input: PlanDraftMapInput): PlanDraftMapResult {
     const text = dropped.length > 0 ? [...new Set(dropped)].slice(0, 3).join('；') : NO_USABLE_STEP
     return reject('no_usable_step', text)
   }
-  const spec = canonicalSpec({
+  const verdict = validatePlanDraft({
     schema: 'promo_v1',
     goal_id: input.goalId,
     phases: [{
@@ -134,8 +118,12 @@ export function mapSeedToPromo(input: PlanDraftMapInput): PlanDraftMapResult {
       end_date: input.period.end_date,
       steps,
     }],
+  }, {
+    accounts: input.accounts,
+    clientCapCents: input.clientCapCents,
+    seed: input.seed,
   })
-  if (!spec) return reject('invalid_spec', SHAPE_REJECTED)
-  if (budgetBlocks(spec, input)) return reject('budget_over', BUDGET_OVER)
-  return { ok: true, spec, dropped: [...new Set(dropped)] }
+  if (!verdict.ok && verdict.code === 'invalid_spec') return reject('invalid_spec', SHAPE_REJECTED)
+  if (!verdict.ok) return reject('budget_over', BUDGET_OVER)
+  return { ok: true, spec: verdict.spec, dropped: [...new Set(dropped)] }
 }

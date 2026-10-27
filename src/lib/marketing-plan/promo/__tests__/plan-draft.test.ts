@@ -324,6 +324,7 @@ describe('card line and country', () => {
 
 describe('plan draft boundaries', () => {
   const files = [
+    'src/lib/marketing-plan/promo/plan-draft-validate.ts',
     'src/lib/marketing-plan/promo/plan-draft-id.ts',
     'src/lib/marketing-plan/promo/plan-draft-retry.ts',
     'src/lib/marketing-plan/promo/plan-draft-card.ts',

@@ -5,10 +5,10 @@
  */
 
 import type { AccountCapFacts } from '@/lib/marketing-plan/promo/budget-caps'
-import { collectPhaseBudgetProblems } from '@/lib/marketing-plan/promo/budget-caps'
 import { allAdsSteps, type PromoSpec } from '@/lib/marketing-plan/promo/spec'
 import type { GoalFact } from '@/lib/marketing-plan/promo/reconcile'
-import { seedBudgetProblems } from '@/lib/ads-strategy/plan-seed/budget-ceiling'
+import { planDraftId } from '@/lib/marketing-plan/promo/plan-draft-id'
+import { validatePlanDraft, type PlanDraftValidation } from '@/lib/marketing-plan/promo/plan-draft-validate'
 import type { PlanSeedRead } from '@/lib/ads-strategy/plan-seed/read-for-client'
 import type { AgentDraftRequest } from '@/lib/marketing-plan/agent-draft-parse'
 
@@ -41,6 +41,7 @@ export interface AgentDraftDeps {
 }
 
 export interface DraftInsert {
+  id?: string
   client_id: string
   campaign_id: null
   master_brief_id: null
@@ -76,9 +77,12 @@ export async function saveAgentDraft(input: {
   request: AgentDraftRequest
   deps: AgentDraftDeps
 }): Promise<DraftSaveResult> {
+  const pinned = pinnedId(input.request)
+  if (pinned === 'mismatch') return fail(400, 'plan_mismatch', '计划编号和这份处方的版本对不上，没有保存')
   const ready = await prepareDraft(input)
   if (!ready.ok) return ready.result
-  const stamp = agentStamp(input.keyId, input.request.prescriptionId, input.deps.now().toISOString())
+  const stamp = agentStamp(input.keyId, input.request.prescriptionId, input.deps.now().toISOString(), input.request.version)
+  if (typeof pinned === 'string') return savePinned(input, ready.spec, stamp, pinned)
   if (input.request.planId) return updateExisting(input, ready.spec, stamp)
   return createDraft(input, ready.spec, stamp)
 }
@@ -106,14 +110,19 @@ async function assertBudget(
   if (seed.status !== 200 || seed.body.success !== true) {
     return { ok: false, result: fail(503, 'seed_unavailable', '算不出计划草稿建议，这次没有保存') }
   }
-  if (allAdsSteps(request.spec).length === 0) return { ok: true }
-  const seedProblems = seedBudgetProblems(request.spec, seed.body.seed ?? null)
-  if (seedProblems.length > 0) return { ok: false, result: fail(400, 'budget_over', '广告预算超过建议', seedProblems) }
+  const seedFact = seed.body.seed ?? null
+  if (allAdsSteps(request.spec).length === 0) {
+    const verdict = validatePlanDraft(request.spec, { accounts: [], clientCapCents: null, seed: seedFact })
+    return verdict.ok ? { ok: true } : { ok: false, result: budgetFailure(verdict) }
+  }
   const caps = await deps.loadBudget(clientId, request.spec)
   if (caps === 'unreadable') return { ok: false, result: fail(503, 'cap_unreadable', '读不到预算上限，这次没有保存') }
-  const capProblems = collectPhaseBudgetProblems(request.spec, caps.accounts, caps.clientCapCents)
-  if (capProblems.length > 0) return { ok: false, result: fail(400, 'budget_over', '广告预算或账户不符合要求', capProblems) }
-  return { ok: true }
+  const verdict = validatePlanDraft(request.spec, {
+    accounts: caps.accounts,
+    clientCapCents: caps.clientCapCents,
+    seed: seedFact,
+  })
+  return verdict.ok ? { ok: true } : { ok: false, result: budgetFailure(verdict) }
 }
 
 async function createDraft(
@@ -122,9 +131,54 @@ async function createDraft(
   stamp: Record<string, unknown>,
 ): Promise<DraftSaveResult> {
   if (!input.request.title) return fail(400, 'invalid_title', '新建草稿要填写标题')
-  const id = await input.deps.insertPlan(insertRow(input.clientId, input.request, spec, stamp))
+  const id = await input.deps.insertPlan(insertRow(input.clientId, input.request, spec, stamp, null))
   if (!id) return fail(500, 'write_failed', '草稿没有保存')
   return { status: 200, code: 'saved', error: null, planId: id }
+}
+
+async function savePinned(
+  input: { clientId: string; request: AgentDraftRequest; deps: AgentDraftDeps },
+  spec: PromoSpec,
+  stamp: Record<string, unknown>,
+  planId: string,
+): Promise<DraftSaveResult> {
+  const plan = await input.deps.loadPlan(input.clientId, planId)
+  if (plan === 'error') return fail(503, 'plan_unreadable', '计划没有读到，这次没有保存')
+  if (!plan) return insertPinned(input, spec, stamp, planId)
+  if (plan.status !== 'draft') return blockedDraft(plan.status)
+  return writePinned(input, plan, spec, stamp)
+}
+
+async function insertPinned(
+  input: { clientId: string; request: AgentDraftRequest; deps: AgentDraftDeps },
+  spec: PromoSpec,
+  stamp: Record<string, unknown>,
+  planId: string,
+): Promise<DraftSaveResult> {
+  if (!input.request.title) return fail(400, 'invalid_title', '新建草稿要填写标题')
+  const id = await input.deps.insertPlan(insertRow(input.clientId, input.request, spec, stamp, planId))
+  if (id) return { status: 200, code: 'saved', error: null, planId: id }
+  const again = await input.deps.loadPlan(input.clientId, planId)
+  if (!again || again === 'error') return fail(500, 'write_failed', '草稿没有保存')
+  if (again.status !== 'draft') return blockedDraft(again.status)
+  return writePinned(input, again, spec, stamp)
+}
+
+async function writePinned(
+  input: { clientId: string; request: AgentDraftRequest; deps: AgentDraftDeps },
+  plan: AgentPlanRow,
+  spec: PromoSpec,
+  stamp: Record<string, unknown>,
+): Promise<DraftSaveResult> {
+  if (input.request.expectedUpdatedAt && input.request.expectedUpdatedAt !== plan.updatedAt) {
+    return fail(409, 'conflict', '这份计划刚刚在别处被改过，这次保存没有生效。请刷新后再试。')
+  }
+  const dates = mergedDates(input.request, plan)
+  if (dates === 'bad') return fail(400, 'invalid_dates', '结束日早于开始日')
+  const wrote = await input.deps.updatePlan(plan.id, input.clientId, plan.updatedAt, patchOf(plan, input.request, spec, stamp))
+  if (wrote === null) return fail(500, 'write_failed', '草稿没有保存')
+  if (!wrote) return fail(409, 'conflict', '这份计划刚刚在别处被改过，这次保存没有生效。请刷新后再试。')
+  return { status: 200, code: 'saved', error: null, planId: plan.id }
 }
 
 async function updateExisting(
@@ -149,8 +203,15 @@ async function updateExisting(
   return { status: 200, code: 'saved', error: null, planId }
 }
 
-function insertRow(clientId: string, request: AgentDraftRequest, spec: PromoSpec, stamp: Record<string, unknown>): DraftInsert {
+function insertRow(
+  clientId: string,
+  request: AgentDraftRequest,
+  spec: PromoSpec,
+  stamp: Record<string, unknown>,
+  id: string | null,
+): DraftInsert {
   return {
+    ...(id ? { id } : {}),
     client_id: clientId,
     campaign_id: null,
     master_brief_id: null,
@@ -183,8 +244,31 @@ function mergedDates(request: AgentDraftRequest, plan: AgentPlanRow): true | 'ba
   return true
 }
 
-function agentStamp(keyId: string, prescriptionId: string, savedAt: string): Record<string, unknown> {
-  return { agent_draft: { key_id: keyId, prescription_id: prescriptionId, saved_at: savedAt } }
+function agentStamp(keyId: string, prescriptionId: string, savedAt: string, version: number | null): Record<string, unknown> {
+  const agentDraft: Record<string, unknown> = { key_id: keyId, prescription_id: prescriptionId, saved_at: savedAt }
+  if (version != null) agentDraft.version = version
+  return { agent_draft: agentDraft }
+}
+
+function pinnedId(request: AgentDraftRequest): string | null | 'mismatch' {
+  if (request.version == null) return null
+  const id = planDraftId(request.prescriptionId, request.version)
+  if (request.planId && request.planId !== id) return 'mismatch'
+  return id
+}
+
+function budgetFailure(verdict: Exclude<PlanDraftValidation, { ok: true }>): DraftSaveResult {
+  if (verdict.code === 'invalid_spec') return fail(400, 'invalid_promo', '推广结构不正确')
+  const seedOnly = verdict.problems.every(line => line.includes('建议'))
+  const error = seedOnly ? '广告预算超过建议' : '广告预算或账户不符合要求'
+  return fail(400, 'budget_over', error, verdict.problems)
+}
+
+function blockedDraft(status: string): DraftSaveResult {
+  if (status === 'approved' || status === 'completed') {
+    return fail(409, 'already_approved', '这份处方的这一版已经批准，不能覆盖')
+  }
+  return fail(409, 'not_draft', '这份计划已经不是未批准草稿，不能覆盖')
 }
 
 function fail(status: number, code: string, error: string, problems?: string[]): DraftSaveResult {
