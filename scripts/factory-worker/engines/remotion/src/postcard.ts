@@ -372,10 +372,14 @@ export function isAcceptableSourceUrl(url: string): boolean {
   return true;
 }
 
-/** Hook / end-card citation: both fields or neither; when given it must be a real http(s) URL and its quote must support the shown text. */
+/**
+ * Hook / end-card citation: both fields or neither; when given it must be a real http(s) URL, free of banned words,
+ * and its quote must support every shown line. Only a first screen — the creative-library fact gate still decides
+ * whether the words sit in order inside the official page.
+ */
 function checkOptionalSource(
   path: Array<string | number>,
-  shown: string,
+  shownLines: string[],
   sourceUrl: string | undefined,
   sourceQuote: string | undefined,
   ctx: z.RefinementCtx,
@@ -388,9 +392,12 @@ function checkOptionalSource(
   if (!isAcceptableSourceUrl(sourceUrl)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, 'sourceUrl'], message: '出处链接必须是 http 或 https 网址' });
   }
-  if (!quoteSupports(shown, sourceQuote)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, 'sourceQuote'], message: '出处片段里找不到这句话的主要词' });
-  }
+  shownLines.forEach((line, i) => {
+    if (!quoteSupports(line, sourceQuote)) {
+      const where = shownLines.length > 1 ? `第 ${i + 1} 行` : '这句话'
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, 'sourceQuote'], message: `出处片段里找不到${where}的主要词` });
+    }
+  });
   const hits = bannedWordHits(sourceQuote);
   if (hits.length > 0) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, 'sourceQuote'], message: `文字里不能出现促销词：${hits.join('、')}` });
@@ -568,11 +575,9 @@ export const PostcardPropsSchema = z
       }
     }
 
-    for (const line of val.hook.lines) {
-      checkOptionalSource(['hook'], line, val.hook.sourceUrl, val.hook.sourceQuote, ctx);
-    }
+    checkOptionalSource(['hook'], val.hook.lines, val.hook.sourceUrl, val.hook.sourceQuote, ctx);
     if (val.end !== null) {
-      checkOptionalSource(['end'], val.end.title, val.end.sourceUrl, val.end.sourceQuote, ctx);
+      checkOptionalSource(['end'], [val.end.title], val.end.sourceUrl, val.end.sourceQuote, ctx);
     }
 
     val.scenes.forEach((scene, i) => {
