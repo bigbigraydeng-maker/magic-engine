@@ -202,6 +202,8 @@ export const ACTION_SUBMISSION_FORBIDDEN_IMPORTS = [
  *   · Kernel 自己（内部互相调用）
  *   · `src/lib/action-submission/**`（本轮新增的平台级 caller）
  *   · `src/lib/kernel-approval/**`（人点头之后的授权路径，见现有代码）
+ *   · `src/lib/confirmation-card/**`（确认卡出卡：sideEffect 'none' 的人工审批记录，
+ *     只开 pending_approval 的 run，点击走 kernel-approval；动作本身不接任何外部写入）
  *
  * 🔴 这条闸只管 runtime code（walker 排除 tests / __tests__ 目录 —— tests 需要
  *    直接调 Kernel 来验证 progression 语义，那是正当用途）。
@@ -213,6 +215,7 @@ export const KERNEL_RUNNER_ALLOWED_CALLER_DIRS = [
   'src/lib/kernel/',
   'src/lib/action-submission/',
   'src/lib/kernel-approval/',
+  'src/lib/confirmation-card/',
 ] as const
 
 /**

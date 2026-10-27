@@ -31,6 +31,11 @@ export interface DedicatedApprovalEntry {
 
 export const DEDICATED_APPROVAL_ENTRIES: readonly DedicatedApprovalEntry[] = [
   {
+    actionKey: 'governance.p0_confirmation',
+    label: '确认卡',
+    path: (clientId) => `/dashboard/clients/${encodeURIComponent(clientId)}/confirmation-cards`,
+  },
+  {
     actionKey: 'ads.auto_pause_on_d3',
     label: '广告门 ·「等你点头」',
     /**
