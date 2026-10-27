@@ -1,12 +1,14 @@
 ---
 id: 2026-10-27-paused-draft-confirmation
 title: 建暂停草稿要单独点确认，点了才去建
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-27
 source: session:4ecbbf4b
 verify_by: 2026-10-30
 verify_how: 内部账号打开这张确认卡，没点确认之前不会去建；点确认后只建成暂停并进入广告审批队列；点不做、代理人或客户员工都不会去建。
+done_on: 2026-10-27
+done_ref: pr:3315
 ---
 
 「同意」不会带出这张卡。标题是「批准建 Meta 暂停草稿并送审」，按钮仍是确认和不做。
