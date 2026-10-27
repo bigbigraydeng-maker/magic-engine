@@ -1,6 +1,6 @@
 /**
- * 验收路由用的接线：读工单、上传、写素材池。纯规则在 admit-finished-asset.ts。
- * 一次请求里做完，失败就不归档，所以没有另开异步任务。
+ * 三关通过后的上传接线：读工单、把成片传到广告账户、把视频编号记在工单上。
+ * 纯规则在 admit-finished-asset.ts。不写素材池；入池由三关验收同一条流程完成。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -10,12 +10,6 @@ import { uploadVideoToMeta } from '@/lib/meta/asset-upload'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
 import { getClientAdAccounts } from '@/lib/meta/client-ad-accounts'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import {
-  loadAdStrategyConfigWithSource,
-  loadConfigVersion,
-  writeConfigCas,
-  type CreativePoolEntry,
-} from './config'
 import {
   ACCOUNT_UPLOAD_SOURCE,
   admitFinishedAsset,
@@ -100,20 +94,6 @@ async function rememberVideo(
   return { ok: true as const }
 }
 
-async function loadPool(clientId: string) {
-  const version = await loadConfigVersion(clientId)
-  if (!version.ok) return { ok: false as const, error: version.error }
-  const loaded = await loadAdStrategyConfigWithSource(clientId)
-  if (loaded.source === 'fallback') return { ok: false as const, error: loaded.error ?? '读设置失败' }
-  return { ok: true as const, pool: loaded.config.creative_pool, version: version.version }
-}
-
-async function writePool(clientId: string, pool: CreativePoolEntry[], version: { exists: boolean; updatedAt: string | null }) {
-  const written = await writeConfigCas(clientId, { creative_pool: pool }, version)
-  if (written.ok) return { ok: true as const }
-  return { ok: false as const, conflict: written.kind === 'conflict', error: written.message }
-}
-
 export async function admitAssetBeforeAccept(
   supabase: SupabaseClient,
   workOrderId: string,
@@ -133,7 +113,5 @@ export async function admitAssetBeforeAccept(
       return { ok: true, videoId: uploaded.asset.videoId }
     },
     remember: (videoId, accountId) => rememberVideo(supabase, order, videoId, accountId),
-    loadPool: () => loadPool(order.clientId),
-    writePool: (pool, version) => writePool(order.clientId, pool, version),
   })
 }

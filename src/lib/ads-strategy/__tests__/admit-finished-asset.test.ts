@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ConfigVersion, CreativePoolEntry } from '../config'
 import {
   acceptUploadedVideoId,
+  accountUploadReceipt,
   admitFinishedAsset,
   creativePoolUploadEnabled,
   factoryPublicVideoUrl,
   pickPrimaryAdAccount,
-  placeWorkOrderCandidate,
   reusableVideoId,
   type AdmitDeps,
   type AdmitWorkOrder,
@@ -14,7 +13,6 @@ import {
 
 const ACCOUNT = 'act_1234567890'
 const OTHER = 'act_1098765432'
-const VERSION: ConfigVersion = { exists: true, updatedAt: '2026-10-01T00:00:00.000Z' }
 
 function order(over: Partial<AdmitWorkOrder> = {}): AdmitWorkOrder {
   return {
@@ -31,7 +29,6 @@ function order(over: Partial<AdmitWorkOrder> = {}): AdmitWorkOrder {
 function deps(over: Partial<AdmitDeps> = {}) {
   const upload = vi.fn<AdmitDeps['upload']>(async () => ({ ok: true as const, videoId: '555' }))
   const remember = vi.fn<AdmitDeps['remember']>(async () => ({ ok: true as const }))
-  const writePool = vi.fn<AdmitDeps['writePool']>(async () => ({ ok: true as const }))
   const token = vi.fn<AdmitDeps['token']>(async () => 'tok')
   const d: AdmitDeps = {
     uploadEnabled: true,
@@ -44,11 +41,9 @@ function deps(over: Partial<AdmitDeps> = {}) {
     token,
     upload,
     remember,
-    loadPool: async () => ({ ok: true as const, pool: [], version: VERSION }),
-    writePool,
     ...over,
   }
-  return { d, upload, remember, writePool, token }
+  return { d, upload, remember, token }
 }
 
 describe('creative pool upload switch', () => {
@@ -103,61 +98,6 @@ describe('acceptUploadedVideoId', () => {
   })
 })
 
-describe('placeWorkOrderCandidate', () => {
-  it('appends a candidate work-order entry and does not approve it', () => {
-    const placed = placeWorkOrderCandidate([], 'wo-1', '555')
-    expect(placed.changed).toBe(true)
-    expect(placed.status).toBe('candidate')
-    expect(placed.pool).toEqual([
-      { kind: 'work_order', ref: 'wo-1', status: 'candidate', alias_refs: ['555'] },
-    ])
-  })
-
-  it('keeps an already approved row approved when the video id is unchanged', () => {
-    const approved: CreativePoolEntry = {
-      kind: 'work_order',
-      ref: 'wo-1',
-      status: 'approved',
-      approved_by: 'a@x.test',
-      approved_at: '2026-10-01T00:00:00.000Z',
-      alias_refs: ['555'],
-    }
-    const placed = placeWorkOrderCandidate([approved], 'wo-1', '555')
-    expect(placed.changed).toBe(false)
-    expect(placed.status).toBe('approved')
-    expect(placed.pool[0]).toEqual(approved)
-  })
-
-  it('drops the old approval when a new video id is added to an approved work order', () => {
-    const approved: CreativePoolEntry = {
-      kind: 'work_order',
-      ref: 'wo-1',
-      status: 'approved',
-      approved_by: 'a@x.test',
-      approved_at: '2026-10-01T00:00:00.000Z',
-      alias_refs: ['111'],
-      promo_window: { kind: 'evergreen' },
-    }
-    const placed = placeWorkOrderCandidate([approved], 'wo-1', '555')
-    expect(placed.changed).toBe(true)
-    expect(placed.status).toBe('candidate')
-    expect(placed.pool).toEqual([{
-      kind: 'work_order',
-      ref: 'wo-1',
-      status: 'candidate',
-      alias_refs: ['111', '555'],
-      promo_window: { kind: 'evergreen' },
-    }])
-  })
-
-  it('does not add a second row when the video id is already in the pool', () => {
-    const existing: CreativePoolEntry = { kind: 'meta_video', ref: '555', status: 'candidate' }
-    const placed = placeWorkOrderCandidate([existing], 'wo-1', '555')
-    expect(placed.changed).toBe(false)
-    expect(placed.pool).toHaveLength(1)
-  })
-})
-
 describe('admitFinishedAsset', () => {
   it('ignores orders that are not material waiting for review', async () => {
     const { d, upload } = deps()
@@ -168,18 +108,18 @@ describe('admitFinishedAsset', () => {
     expect(upload).not.toHaveBeenCalled()
   })
 
-  it('skips upload and the pool when the switch is off', async () => {
-    const { d, upload, writePool } = deps({ uploadEnabled: false })
+  it('skips upload when the switch is off', async () => {
+    const { d, upload, remember } = deps({ uploadEnabled: false })
     const result = await admitFinishedAsset(order(), d)
     expect(result).toEqual({ ok: true, action: 'upload_disabled' })
     expect(upload).not.toHaveBeenCalled()
-    expect(writePool).not.toHaveBeenCalled()
+    expect(remember).not.toHaveBeenCalled()
   })
 
-  it('uploads to the primary account and enters the pool as candidate', async () => {
-    const { d, upload, remember, writePool } = deps()
+  it('uploads to the primary account and returns the video id without writing the pool', async () => {
+    const { d, upload, remember } = deps()
     const result = await admitFinishedAsset(order(), d)
-    expect(result).toEqual({ ok: true, action: 'pooled', videoId: '555', status: 'candidate' })
+    expect(result).toEqual({ ok: true, action: 'uploaded', videoId: '555', accountId: ACCOUNT })
     expect(upload).toHaveBeenCalledWith(
       ACCOUNT,
       'https://files.example.test/storage/v1/object/public/content-factory/renders/c-1/wo-1/final.mp4',
@@ -187,18 +127,14 @@ describe('admitFinishedAsset', () => {
       'asset wo-1',
     )
     expect(remember).toHaveBeenCalledWith('555', ACCOUNT)
-    const written = writePool.mock.calls[0][0] as CreativePoolEntry[]
-    expect(written).toEqual([{ kind: 'work_order', ref: 'wo-1', status: 'candidate', alias_refs: ['555'] }])
-    expect(written[0]).not.toHaveProperty('approved_by')
   })
 
-  it('does not upload or archive-side-effect when the video id is not numeric', async () => {
-    const { d, remember, writePool } = deps({ upload: vi.fn(async () => ({ ok: true as const, videoId: 'clip.mp4' })) })
+  it('does not remember a non-numeric video id', async () => {
+    const { d, remember } = deps({ upload: vi.fn(async () => ({ ok: true as const, videoId: 'clip.mp4' })) })
     const result = await admitFinishedAsset(order(), d)
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(422)
     expect(remember).not.toHaveBeenCalled()
-    expect(writePool).not.toHaveBeenCalled()
   })
 
   it('refuses a path that is not this order’s render file', async () => {
@@ -228,28 +164,17 @@ describe('admitFinishedAsset', () => {
     const result = await admitFinishedAsset(order({
       reviewRef: { meta_video_source: 'account_upload', meta_video_id: '555', meta_video_account: ACCOUNT },
     }), d)
-    expect(result).toMatchObject({ ok: true, action: 'pooled', videoId: '555' })
+    expect(result).toMatchObject({ ok: true, action: 'uploaded', videoId: '555', accountId: ACCOUNT })
     expect(upload).not.toHaveBeenCalled()
     expect(token).not.toHaveBeenCalled()
   })
 
-  it('retries the pool write once after a conflict', async () => {
-    const writePool = vi.fn<AdmitDeps['writePool']>()
-      .mockResolvedValueOnce({ ok: false, conflict: true, error: 'conflict' })
-      .mockResolvedValueOnce({ ok: true })
-    const { d } = deps({ writePool })
-    const result = await admitFinishedAsset(order(), d)
-    expect(result).toMatchObject({ ok: true, action: 'pooled' })
-    expect(writePool).toHaveBeenCalledTimes(2)
-  })
-
-  it('stops before the pool when Meta rejects the upload', async () => {
-    const { d, remember, writePool } = deps({ upload: vi.fn(async () => ({ ok: false as const, error: 'HTTP 500' })) })
+  it('stops before remembering when Meta rejects the upload', async () => {
+    const { d, remember } = deps({ upload: vi.fn(async () => ({ ok: false as const, error: 'HTTP 500' })) })
     const result = await admitFinishedAsset(order(), d)
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(502)
     expect(remember).not.toHaveBeenCalled()
-    expect(writePool).not.toHaveBeenCalled()
   })
 })
 
@@ -260,6 +185,13 @@ describe('url and receipt helpers', () => {
     )
     expect(factoryPublicVideoUrl('renders/c-1/wo-1/../x.mp4', 'https://files.example.test/bucket')).toBeNull()
     expect(factoryPublicVideoUrl('renders/c-1/wo-1/final.mp4', 'http://files.example.test/bucket')).toBeNull()
+  })
+
+  it('reads a stored upload receipt', () => {
+    const ref = { meta_video_source: 'account_upload', meta_video_id: '555', meta_video_account: ACCOUNT }
+    expect(accountUploadReceipt(ref)).toEqual({ videoId: '555', accountId: ACCOUNT })
+    expect(accountUploadReceipt({ ...ref, meta_video_source: 'hand' })).toBeNull()
+    expect(accountUploadReceipt(null)).toBeNull()
   })
 
   it('reuses a receipt only for this account and this uploader', () => {

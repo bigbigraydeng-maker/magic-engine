@@ -1,14 +1,13 @@
 /**
- * 仅素材工单验收前：把成片传进该客户主广告账户的视频库，拿回视频编号，
- * 以「按工单引用」写入素材池，状态固定为待批准（candidate）。
+ * 仅素材工单三关通过后：把成片传进该客户主广告账户的视频库，拿回视频编号。
+ * 不写素材池。入池和批准只走三关验收那一次（poolAfterPass）。
  *
- * 不批准、不建广告、不花钱。视频编号不从请求体读（#1090）：只接受这次
- * 上传到「该客户已登记账户」后 Meta 回的编号，或本流程上次写在工单上的同一条回执。
+ * 不建广告、不花钱。视频编号不从请求体读：只接受这次上传到「该客户已登记账户」
+ * 后 Meta 回的编号，或本流程上次写在工单上的同一条回执。
  *
  * 关掉上传：环境变量 ME_CREATIVE_POOL_META_UPLOAD=0。不设置则上传。
  */
 
-import type { ConfigVersion, CreativePoolEntry } from './config'
 import { canonicalAccountDigits, toActAccountId } from '@/lib/meta/ad-account-binding'
 
 export const CREATIVE_POOL_UPLOAD_ENV = 'ME_CREATIVE_POOL_META_UPLOAD'
@@ -44,20 +43,12 @@ export interface AdmitDeps {
     title: string,
   ) => Promise<{ ok: true; videoId: string } | { ok: false; error: string }>
   remember: (videoId: string, accountId: string) => Promise<{ ok: true } | { ok: false; error: string }>
-  loadPool: () => Promise<
-    | { ok: true; pool: CreativePoolEntry[]; version: ConfigVersion }
-    | { ok: false; error: string }
-  >
-  writePool: (
-    pool: CreativePoolEntry[],
-    version: ConfigVersion,
-  ) => Promise<{ ok: true } | { ok: false; conflict?: boolean; error: string }>
 }
 
 export type AdmitOutcome =
   | { ok: true; action: 'not_material' }
   | { ok: true; action: 'upload_disabled' }
-  | { ok: true; action: 'pooled'; videoId: string; status: CreativePoolEntry['status'] }
+  | { ok: true; action: 'uploaded'; videoId: string; accountId: string }
   | { ok: false; status: number; error: string }
 
 export function pickPrimaryAdAccount(
@@ -94,13 +85,21 @@ export function acceptUploadedVideoId(input: {
   return { ok: true, videoId: input.returnedVideoId }
 }
 
-export function reusableVideoId(reviewRef: Record<string, unknown>, accountId: string): string | null {
-  if (reviewRef.meta_video_source !== ACCOUNT_UPLOAD_SOURCE) return null
-  const id = reviewRef.meta_video_id
-  const account = reviewRef.meta_video_account
+export function accountUploadReceipt(reviewRef: unknown): { videoId: string; accountId: string } | null {
+  if (typeof reviewRef !== 'object' || reviewRef === null || Array.isArray(reviewRef)) return null
+  const ref = reviewRef as Record<string, unknown>
+  if (ref.meta_video_source !== ACCOUNT_UPLOAD_SOURCE) return null
+  const id = ref.meta_video_id
+  const account = ref.meta_video_account
   if (typeof id !== 'string' || !/^\d{1,32}$/.test(id)) return null
-  if (typeof account !== 'string' || !accountIsRegistered(account, [accountId])) return null
-  return id
+  if (typeof account !== 'string' || account.length === 0) return null
+  return { videoId: id, accountId: account }
+}
+
+export function reusableVideoId(reviewRef: Record<string, unknown>, accountId: string): string | null {
+  const stored = accountUploadReceipt(reviewRef)
+  if (!stored || !accountIsRegistered(stored.accountId, [accountId])) return null
+  return stored.videoId
 }
 
 export function factoryPublicVideoUrl(videoPath: string | null, publicBase: string): string | null {
@@ -108,44 +107,6 @@ export function factoryPublicVideoUrl(videoPath: string | null, publicBase: stri
   const base = publicBase.replace(/\/$/, '')
   if (!base.startsWith('https://')) return null
   return `${base}/${videoPath}`
-}
-
-/**
- * 给已有工单行加上一个新的视频编号。编号变了，旧批准盖不住新视频，
- * 和推广期接口一样降回待批准并清掉签字。调用方保证这个编号还不在别名里。
- */
-function appendVideoAlias(entry: CreativePoolEntry, videoId: string): CreativePoolEntry {
-  const next: CreativePoolEntry = { ...entry, alias_refs: [...(entry.alias_refs ?? []), videoId] }
-  if (next.status !== 'approved') return next
-  next.status = 'candidate'
-  delete next.approved_by
-  delete next.approved_at
-  return next
-}
-
-export function placeWorkOrderCandidate(
-  pool: CreativePoolEntry[],
-  workOrderId: string,
-  videoId: string,
-): { pool: CreativePoolEntry[]; changed: boolean; status: CreativePoolEntry['status'] } {
-  const byOrder = pool.find((entry) => entry.kind === 'work_order' && entry.ref === workOrderId)
-  const holders = pool.filter((entry) => entry.ref === videoId || (entry.alias_refs ?? []).includes(videoId))
-  if (byOrder && (byOrder.alias_refs ?? []).includes(videoId)) {
-    return { pool, changed: false, status: byOrder.status }
-  }
-  if (holders.length > 0 && (!byOrder || holders.some((entry) => entry !== byOrder))) {
-    return { pool, changed: false, status: holders[0].status }
-  }
-  if (byOrder) {
-    const updated = appendVideoAlias(byOrder, videoId)
-    return {
-      pool: pool.map((entry) => (entry === byOrder ? updated : entry)),
-      changed: true,
-      status: updated.status,
-    }
-  }
-  const entry: CreativePoolEntry = { kind: 'work_order', ref: workOrderId, status: 'candidate', alias_refs: [videoId] }
-  return { pool: [...pool, entry], changed: true, status: 'candidate' }
 }
 
 async function resolveTarget(deps: AdmitDeps): Promise<
@@ -186,31 +147,6 @@ async function obtainVideoId(
   return { ok: true, videoId: accepted.videoId }
 }
 
-async function putPool(
-  workOrderId: string,
-  videoId: string,
-  deps: AdmitDeps,
-): Promise<{ ok: true; status: CreativePoolEntry['status'] } | (AdmitOutcome & { ok: false })> {
-  const loaded = await deps.loadPool()
-  if (!loaded.ok) return { ok: false, status: 503, error: loaded.error }
-  const next = placeWorkOrderCandidate(loaded.pool, workOrderId, videoId)
-  if (!next.changed) return { ok: true, status: next.status }
-  const written = await deps.writePool(next.pool, loaded.version)
-  if (written.ok) return { ok: true, status: next.status }
-  if (written.conflict) return { ok: false, status: 409, error: '素材池刚被别处改过，请再验收一次。' }
-  return { ok: false, status: 500, error: written.error }
-}
-
-async function writeCandidate(
-  workOrderId: string,
-  videoId: string,
-  deps: AdmitDeps,
-): Promise<{ ok: true; status: CreativePoolEntry['status'] } | (AdmitOutcome & { ok: false })> {
-  const first = await putPool(workOrderId, videoId, deps)
-  if (first.ok || first.status !== 409) return first
-  return putPool(workOrderId, videoId, deps)
-}
-
 export async function admitFinishedAsset(order: AdmitWorkOrder, deps: AdmitDeps): Promise<AdmitOutcome> {
   if (!order.assetOnly || order.status !== 'in_review') return { ok: true, action: 'not_material' }
   if (!deps.uploadEnabled) return { ok: true, action: 'upload_disabled' }
@@ -218,7 +154,5 @@ export async function admitFinishedAsset(order: AdmitWorkOrder, deps: AdmitDeps)
   if (!target.ok) return target
   const video = await obtainVideoId(order, target.accountId, target.registeredIds, deps)
   if (!video.ok) return video
-  const pooled = await writeCandidate(order.id, video.videoId, deps)
-  if (!pooled.ok) return pooled
-  return { ok: true, action: 'pooled', videoId: video.videoId, status: pooled.status }
+  return { ok: true, action: 'uploaded', videoId: video.videoId, accountId: target.accountId }
 }

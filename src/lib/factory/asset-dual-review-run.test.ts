@@ -132,4 +132,62 @@ describe('runAssetDualReview', () => {
     expect(receipt).toMatchObject({ status: 'unreadable', pooled: false })
     expect(harness.writes).toEqual([])
   })
+
+  it('approves the pool row with the uploaded video id after the three gates pass', async () => {
+    const harness = io({})
+    let uploads = 0
+    harness.fake.attachVideo = async () => {
+      uploads += 1
+      return { ok: true, videoId: '555', accountId: 'act_1' }
+    }
+    const receipt = await runAssetDualReview(harness.fake, { clientId: CLIENT, workOrderId: WO })
+    expect(receipt).toMatchObject({ status: 'pooled', videoId: '555' })
+    expect(uploads).toBe(1)
+    expect(harness.pools[0]?.find((entry) => entry.ref === WO)).toMatchObject({
+      status: 'approved', approved_by: 'ai-dual-review', alias_refs: ['555'],
+    })
+    const ref = harness.writes[0]?.patch.review_ref as { kept?: boolean; meta_video_id?: string }
+    expect(ref.kept).toBe(true)
+    expect(ref.meta_video_id).toBe('555')
+  })
+
+  it('does not archive when the upload fails', async () => {
+    const harness = io({})
+    harness.fake.attachVideo = async () => ({ ok: false, error: '成片传到广告账户失败' })
+    const receipt = await runAssetDualReview(harness.fake, { clientId: CLIENT, workOrderId: WO })
+    expect(receipt).toMatchObject({ pooled: false, status: 'upload_failed' })
+    expect(harness.writes[0]?.patch.status).toBeUndefined()
+    expect(harness.pools).toEqual([])
+  })
+
+  it('still pools a pass when upload is switched off', async () => {
+    const harness = io({})
+    harness.fake.attachVideo = async () => ({ ok: true, videoId: null, accountId: null })
+    const receipt = await runAssetDualReview(harness.fake, { clientId: CLIENT, workOrderId: WO })
+    expect(receipt).toMatchObject({ status: 'pooled' })
+    expect(receipt.videoId).toBeUndefined()
+    expect(harness.pools[0]?.find((entry) => entry.ref === WO)?.alias_refs).toBeUndefined()
+    expect(harness.writes[0]?.patch.status).toBe('archived')
+  })
+
+  it('uses a video id already stored on an archived pass without uploading again', async () => {
+    const harness = io({
+      status: 'archived',
+      reviewRef: {
+        dual_review: { passed: true, pool: 'pending', reviewer: 'ai-dual-review' },
+        meta_video_source: 'account_upload',
+        meta_video_id: '555',
+        meta_video_account: 'act_1',
+      },
+    })
+    let uploads = 0
+    harness.fake.attachVideo = async () => {
+      uploads += 1
+      return { ok: false, error: 'should not upload' }
+    }
+    const receipt = await runAssetDualReview(harness.fake, { clientId: CLIENT, workOrderId: WO })
+    expect(uploads).toBe(0)
+    expect(receipt).toMatchObject({ pooled: true, videoId: '555' })
+    expect(harness.pools[0]?.find((entry) => entry.ref === WO)?.alias_refs).toEqual(['555'])
+  })
 })

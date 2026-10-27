@@ -1,6 +1,7 @@
 // Supabase adapter for the material dual review. Pool writes go through the existing config lock.
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { admitAssetBeforeAccept } from '@/lib/ads-strategy/admit-finished-asset-run'
 import { loadAdStrategyConfigWithSource, loadConfigVersion, writeConfigCas } from '@/lib/ads-strategy/config'
 import type { AssetOrder, DualReviewIo } from './asset-dual-review-run'
 import { readOfficialPage } from './asset-dual-review-page'
@@ -84,5 +85,11 @@ export function supabaseDualReviewIo(supabase: SupabaseClient): DualReviewIo {
     },
     writeOrder: (id, patch, expectStatus) => writeOrder(supabase, id, patch, expectStatus),
     now: () => new Date().toISOString(),
+    attachVideo: async (order) => {
+      const uploaded = await admitAssetBeforeAccept(supabase, order.id)
+      if (!uploaded.ok) return { ok: false as const, error: uploaded.error }
+      if (uploaded.action !== 'uploaded') return { ok: true as const, videoId: null, accountId: null }
+      return { ok: true as const, videoId: uploaded.videoId, accountId: uploaded.accountId }
+    },
   }
 }
