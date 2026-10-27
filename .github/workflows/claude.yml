@@ -30,6 +30,30 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Install the draft wrapper from the default branch, not the working tree.
+      # Claude can edit the checkout after this step. The copy it is allowed to
+      # run is root-owned and outside the repo, so those edits do not change it.
+      # Tradeoff: the merged default-branch file is trusted. This job does not
+      # verify a signature, and it does not add a separate sandbox.
+      - name: Install draft-only pull request wrapper
+        run: |
+          set -euo pipefail
+          default_branch="${{ github.event.repository.default_branch }}"
+          git fetch --depth=1 origin "$default_branch"
+          blob="$(mktemp)"
+          git show "FETCH_HEAD:.github/scripts/gh-pr-create-draft.sh" > "$blob"
+          sudo install -d -o root -g root -m 0755 /opt/claude-guards /opt/claude-guards/empty-gh
+          sudo install -o root -g root -m 0755 "$blob" /opt/claude-guards/gh-pr-create-draft
+          rm -f "$blob"
+          test "$(stat -c '%U:%a' /opt/claude-guards/gh-pr-create-draft)" = "root:755"
+          test "$(stat -c '%U:%a' /opt/claude-guards/empty-gh)" = "root:755"
+          test "$(stat -c '%U:%a' /opt/claude-guards)" = "root:755"
+          test -x /usr/bin/gh
+          if [[ -w /opt/claude-guards || -w /opt/claude-guards/gh-pr-create-draft || -w /opt/claude-guards/empty-gh ]]; then
+            echo "wrapper path is writable by the job user" >&2
+            exit 1
+          fi
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
@@ -47,14 +71,18 @@ jobs:
           # (camelCase). The action merges this list with its built-in tools
           # (read, search, in-repo edits, git add/commit, and the no-flag push
           # wrapper). It does not replace them.
-          # gh pr create is prefix-locked to --draft. A create that does not
-          # start with "gh pr create --draft" is denied. No merge, no force-push,
-          # no gh api, no resolve-review-thread.
+          # Pull requests are created only via the root-owned wrapper installed
+          # above. It always appends --draft and rejects flags that can turn
+          # draft off. Raw `gh pr create` is not allowed. No merge, no
+          # force-push, no gh api, no resolve-review-thread.
+          # npm ci, npm test, and npm run type-check are exact commands.
+          # Wildcards are omitted because npm accepts --script-shell and vitest
+          # accepts --config, both of which run arbitrary code.
           # Job permissions stay as declared above. gh uses the Claude app token
           # minted in the action (it already requests pull request write), not
           # the read-only GITHUB_TOKEN from this job.
           # See https://github.com/anthropics/claude-code-action/blob/v1/docs/usage.md
           # and https://github.com/anthropics/claude-code-action/blob/v1/docs/configuration.md
           claude_args: |
-            --allowedTools "Bash(git fetch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git cherry-pick:*),Bash(gh pr create --draft:*),Bash(gh pr view:*),Bash(npm ci),Bash(npx vitest:*),Bash(npm test:*),Bash(npm run type-check)"
+            --allowedTools "Bash(git fetch:*),Bash(git checkout:*),Bash(git switch:*),Bash(git cherry-pick:*),Bash(/opt/claude-guards/gh-pr-create-draft:*),Bash(gh pr view:*),Bash(npm ci),Bash(npm test),Bash(npm run type-check)"
 
