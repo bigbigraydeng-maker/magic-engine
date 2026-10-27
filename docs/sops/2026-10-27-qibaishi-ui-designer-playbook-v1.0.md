@@ -49,8 +49,8 @@
 ## 5. 改完谁来合并
 
 - 齐白石**只改文件，不提交、不推送、不合并**；Claude 也不自己合并。
-- 合并走 [#3087](https://github.com/bigbigraydeng-maker/magic-engine/issues/3087) 的分工规矩：**Codex 审，PM 点头后再合并**。
-- 风险级别照实判：用齐白石改页面样式，一般是 C 级；但改 `.claude/agents/` 说明书本身是 A 级（合并闸按此判）。纯样式改动一般是 C 级；碰了安全、数据库、鉴权、钱的文件就不再是齐白石的活，退回开发窗口。
+- 合并走 [#3087](https://github.com/bigbigraydeng-maker/magic-engine/issues/3087) 的分工规矩：**Codex 审，PM 点头后再合并**。注意：闸门现行的签字要求以 [`.github/merge-authorization.md`](../../.github/merge-authorization.md) 为准（2026-10-26 起 Codex 一签已去掉，A 级由 Claude Code 签当前提交）；两边不一致时听 PM 本人的话。
+- 风险级别照实判：用齐白石改页面样式，一般是 C 级；改 `.claude/agents/` 说明书本身是 A 级（合并闸按此判）；碰了安全、数据库、鉴权、钱的文件就不再是齐白石的活，退回开发窗口。
 
 ## 6. 停手条件
 
