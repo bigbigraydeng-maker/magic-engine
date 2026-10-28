@@ -106,6 +106,34 @@ describe('tricks with the link itself', () => {
   it('ordinary text with dots is not mistaken for a link', () => {
     expect(codes('Departs at 10.30am, e.g. in March. Mr.Lee will call. Thanks.It was great.')).toEqual([])
   })
+
+  // The token stops at the first non-ASCII character, but a mail client or browser keeps reading a HOST through letters of
+  // any script and through the ideographic full stop (which it treats as "."): the link then goes somewhere else.
+  it.each([
+    'https://www.example.com.例え.com',
+    'https://www.example.com。evil。com',
+    'https://www.example.com请看',
+    'https://例え.jp',
+    'https://例え.jp/pay',
+    'www.example.com例え.com',
+    'example.com请看',
+  ])('%s is not a link to an allowed host', (text) => {
+    expect(codes(`Go to ${text}`)).toContain('link_host_not_allowed')
+  })
+
+  it('a sentence-final Chinese full stop, a space, or text after a PATH is not part of the host', () => {
+    expect(codes('详见 https://www.example.com。')).toEqual([])
+    expect(codes('详见 https://www.example.com 。谢谢')).toEqual([])
+    expect(codes('Visit https://www.example.com.')).toEqual([])
+    expect(codes('See https://www.example.com/tours请看')).toEqual([])
+  })
+
+  it('a second link right behind Chinese text is still found', () => {
+    const behindPath = check('见https://www.example.com/about请看https://evil.com/x').blocks
+    expect(behindPath.some((b) => b.code === 'link_host_not_allowed' && b.detail === 'evil.com')).toBe(true)
+    const behindHost = check('见https://www.example.com请看https://evil.com/x').blocks
+    expect(behindHost.some((b) => b.code === 'link_host_not_allowed' && b.detail === 'evil.com')).toBe(true)
+  })
 })
 
 describe('red-line phrases and leftovers', () => {

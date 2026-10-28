@@ -59,6 +59,13 @@ const BARE_DOMAIN_RE = new RegExp(
 
 const TRAILING_PUNCT_RE = /[.,;:!?)]+$/
 
+// What a mail client or browser still reads as part of a HOST after our ASCII-only token has stopped: letters, digits and
+// combining marks of any script, joined by "." / "-" or by the ideographic full stop U+3002 and its halfwidth form U+FF61
+// (both count as "." in a host name). It must END on a letter or digit, so a sentence-final "。" alone is not swallowed.
+const HOST_CONTINUATION_RE = /^(?:[.\-。｡]*[\p{L}\p{N}\p{M}])+/u
+// A link whose host STARTS with a non-ASCII letter ("https://例え.jp") has no ASCII URL character to open a token with.
+const URL_IDN_HOST_RE = /https?:\/\/[\p{L}\p{N}\p{M}][\p{L}\p{N}\p{M}.\-。｡]*/giu
+
 function composedText(input: ContentGateInput): string {
   const parts = [input.subject, input.body]
   if (input.footer) parts.push(input.footer)
@@ -109,6 +116,18 @@ function toFullUrl(candidate: string): string {
   return `https://${candidate}`
 }
 
+/**
+ * The characters right after an authority-only link that a mail client or browser still reads as part of its HOST:
+ * "https://www.example.co.nz.例え.com" is a link to 例え.com, not to example.co.nz, and "https://example.co.nz请看" has the
+ * host "example.co.nz请看". Our token stops at the first non-ASCII character (so Chinese text after a link is not read
+ * as its path, which keeps a second link behind that text visible), and without this the host would look exact.
+ * A link that already has a path is unaffected: text after a path cannot change the host.
+ */
+function hostContinuation(token: string, after: string): string {
+  if (/[/?#]/.test(token.replace(/^https?:\/\//i, ''))) return ''
+  return HOST_CONTINUATION_RE.exec(after)?.[0] ?? ''
+}
+
 export function extractLinks(normalizedText: string): string[] {
   const seen = new Set<string>()
   const out: string[] = []
@@ -123,14 +142,18 @@ export function extractLinks(normalizedText: string): string[] {
   // Full URLs first: "https://user@example.com" must not be mistaken for an email address and swallowed.
   let rest = normalizedText
   for (const pattern of [URL_HTTP_RE, URL_WWW_RE]) {
-    rest = rest.replace(new RegExp(pattern.source, pattern.flags), (match) => {
-      add(match)
+    rest = rest.replace(new RegExp(pattern.source, pattern.flags), (match, offset: number, whole: string) => {
+      add(match + hostContinuation(match, whole.slice(offset + match.length)))
       return ' '
     })
   }
+  rest = rest.replace(new RegExp(URL_IDN_HOST_RE.source, URL_IDN_HOST_RE.flags), (match) => {
+    add(match)
+    return ' '
+  })
   rest = rest.replace(EMAIL_RE, ' ')
   for (const match of rest.matchAll(new RegExp(BARE_DOMAIN_RE.source, BARE_DOMAIN_RE.flags))) {
-    add(match[0])
+    add(match[0] + hostContinuation(match[0], rest.slice((match.index ?? 0) + match[0].length)))
   }
   return out
 }
