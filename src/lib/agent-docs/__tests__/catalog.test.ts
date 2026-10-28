@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildCatalog, readAllowedDoc } from '../load'
 import { parseReadme, parseRulesIndex } from '../parse-readme'
-import { agentCodeForLesson, loadPendingLessonCounts, pendingLessonLabel } from '../pending-lessons'
+import { agentCodeForLesson, countByAgent, isPendingLesson, loadPendingLessonCounts, pendingLessonLabel } from '../pending-lessons'
 import { parseDocHeader } from '../header'
 import { resolveDocLink } from '../links'
 import { isGlobalAdmin } from '../guard'
@@ -179,6 +179,19 @@ describe('rules index', () => {
 })
 
 describe('pending lesson label', () => {
+  it('counts new funnel candidates but excludes stopped adopted lessons', () => {
+    expect(isPendingLesson({ kind: 'candidate', candidate: true })).toBe(true)
+    expect(isPendingLesson({ status: 'adopted', kind: 'candidate', candidate: true })).toBe(false)
+    const counts = countByAgent([
+      { pillar: null, flywheel: 'ads', evidence: { kind: 'candidate', candidate: true } },
+      { pillar: null, flywheel: 'ads', evidence: { status: 'adopted', kind: 'candidate', candidate: true } },
+      { pillar: null, flywheel: 'seo', evidence: { kind: 'expert_rss_candidate' } },
+      { pillar: null, flywheel: 'ads', evidence: null },
+    ])
+    expect(counts.get('weiqing')).toBe(1)
+    expect(counts.get('kongzi')).toBe(1)
+  })
+
   it('names the agent from pillar or flywheel and does not touch the database without credentials', async () => {
     expect(agentCodeForLesson('ads', null)).toBe('weiqing')
     expect(agentCodeForLesson(null, 'geo')).toBe('mengzi')
