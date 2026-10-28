@@ -153,32 +153,61 @@ function toHourlyRow(i: HourlyRowInput) {
 const UPSERT_KEY = { onConflict: 'client_id,platform,level,entity_id,insight_date,hour' }
 
 /**
- * Rows per upsert request. A 14-day hourly backfill is tens of thousands of
- * rows and a single statement makes the day all-or-nothing; chunking keeps one
- * bad batch from costing the whole pull.
+ * Soft cap on rows per upsert request. A 14-day hourly backfill is tens of
+ * thousands of rows and a single statement makes the whole pull all-or-nothing;
+ * chunking keeps one bad batch from costing the whole pull.
  */
 const UPSERT_CHUNK = 500
 
 /**
- * Upsert in chunks, newest day FIRST, stopping at the first failure. Returns
- * the failure message, or null.
+ * Pack rows into requests WITHOUT splitting a day across two requests, newest
+ * day first. A single day larger than the cap goes out as one oversized request
+ * on its own — one statement is atomic, so a day is either fully stored or not
+ * stored at all.
  *
- * The ordering is the safety property, not cosmetics. Chunking means a partial
- * write is possible, and where the resulting gap lands decides whether anyone
- * ever fills it: writing newest-first leaves the gap at the OLD edge, which is
- * exactly what the depth check looks at, so the next run re-requests it.
- * Oldest-first would leave the gap in the middle of the window, where nothing
- * looks for it.
+ * Why this matters (Codex review on PR 3352): the depth check trusts the
+ * earliest stored day. If the OLDEST day could be half-written (some of its rows
+ * in a request that succeeded, the rest in one that failed), the earliest day
+ * would exist, the backfill would be judged complete, and the missing rows would
+ * never be requested again.
+ */
+function packByDay(rows: Array<Record<string, unknown>>): Array<Array<Record<string, unknown>>> {
+  const byDay = new Map<string, Array<Record<string, unknown>>>()
+  for (const row of rows) {
+    const day = String(row.insight_date)
+    const bucket = byDay.get(day)
+    if (bucket) bucket.push(row)
+    else byDay.set(day, [row])
+  }
+  const days = [...byDay.keys()].sort((a, b) => b.localeCompare(a))
+
+  const chunks: Array<Array<Record<string, unknown>>> = []
+  let current: Array<Record<string, unknown>> = []
+  for (const day of days) {
+    const dayRows = byDay.get(day) ?? []
+    if (current.length > 0 && current.length + dayRows.length > UPSERT_CHUNK) {
+      chunks.push(current)
+      current = []
+    }
+    current = current.concat(dayRows)
+  }
+  if (current.length > 0) chunks.push(current)
+  return chunks
+}
+
+/**
+ * Upsert day-packed requests, newest day FIRST, stopping at the first failure.
+ * Returns the failure message, or null.
+ *
+ * The ordering is the safety property, not cosmetics. A partial write is
+ * possible, and where the resulting gap lands decides whether anyone ever fills
+ * it: writing newest-first leaves the gap at the OLD edge, which is exactly what
+ * the depth check looks at, so the next run re-requests it. Oldest-first would
+ * leave the gap in the middle of the window, where nothing looks for it.
  */
 async function upsertChunked(rows: Array<Record<string, unknown>>): Promise<string | null> {
-  const newestFirst = [...rows].sort((a, b) =>
-    String(b.insight_date).localeCompare(String(a.insight_date)),
-  )
-
-  for (let i = 0; i < newestFirst.length; i += UPSERT_CHUNK) {
-    const { error } = await supabaseAdmin
-      .from('ad_hourly_insights')
-      .upsert(newestFirst.slice(i, i + UPSERT_CHUNK), UPSERT_KEY)
+  for (const chunk of packByDay(rows)) {
+    const { error } = await supabaseAdmin.from('ad_hourly_insights').upsert(chunk, UPSERT_KEY)
     if (error) return error.message
   }
   return null

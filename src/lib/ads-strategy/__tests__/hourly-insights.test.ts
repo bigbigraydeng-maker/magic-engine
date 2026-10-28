@@ -4,8 +4,8 @@
  * Two things are worth pinning here:
  *   - the request window is anchored to the AD ACCOUNT's timezone and never
  *     includes today (a partial day would read as a collapse);
- *   - the upsert is chunked newest-day-first, so a half-written batch leaves
- *     its gap at the OLD edge — the only place the depth probe looks, and the
+ *   - the upsert packs WHOLE days per request, newest day first, so a half-written
+ *     batch leaves its gap at the OLD edge and never splits a day — the only place the depth probe looks, and the
  *     probe judges by the EARLIEST stored day, so a shallow history re-backfills.
  *
  * The mocking shape mirrors __tests__/daily-insights.test.ts: the Meta fetcher
@@ -210,9 +210,9 @@ describe('syncAdsetHourlyInsights', () => {
     })
   })
 
-  it('chunks 1200 rows into 3 upserts, newest day first', async () => {
+  it('packs 1200 rows into whole-day upserts, newest day first (a day is never split across requests)', async () => {
     historyProbe.mockResolvedValue(DEEP_HISTORY)
-    // 1200 DISTINCT (ad set, day, hour) keys: 5 ad sets × 24 hours × 10 days.
+    // 1200 DISTINCT (ad set, day, hour) keys: 5 ad sets × 24 hours × 10 days = 120 rows a day.
     // Distinct on purpose — a real batch with a repeated key makes Postgres
     // reject the whole upsert ("cannot affect row a second time").
     const rows: MetaAdsetHourlyRow[] = Array.from({ length: 1200 }, (_, i) =>
@@ -227,22 +227,54 @@ describe('syncAdsetHourlyInsights', () => {
 
     const res = await syncAdsetHourlyInsights('client-1', 'act_1', 'tok')
 
-    expect(upsert).toHaveBeenCalledTimes(3)
-    expect((upsert.mock.calls[0][0] as unknown[]).length).toBe(500)
-    expect((upsert.mock.calls[2][0] as unknown[]).length).toBe(200)
+    // 4 whole days (480 rows) fit under the 500 cap; a 5th would not.
+    expect(upsert.mock.calls.map(c => (c[0] as unknown[]).length)).toEqual([480, 480, 240])
     expect(res.rows_written).toBe(1200)
 
-    // The safety property: if the run dies after chunk 1, the gap must land on
-    // the OLDEST days. Every day in an earlier chunk is at least as new as every
-    // day in a later chunk — removing the sort (input is oldest-first) breaks it.
-    const dates = (call: number) => (upsert.mock.calls[call][0] as Array<Record<string, string>>).map(r => r.insight_date)
-    const oldestOfFirst = [...dates(0)].sort()[0]
-    const newestOfSecond = [...dates(1)].sort().reverse()[0]
-    const oldestOfSecond = [...dates(1)].sort()[0]
-    const newestOfLast = [...dates(2)].sort().reverse()[0]
-    expect(oldestOfFirst >= newestOfSecond).toBe(true)
-    expect(oldestOfSecond >= newestOfLast).toBe(true)
-    expect(dates(0)[0]).toBe('2026-10-10')
+    const daysOf = (call: number) => new Set((upsert.mock.calls[call][0] as Array<Record<string, string>>).map(r => r.insight_date))
+    // No day appears in two requests.
+    const all = [0, 1, 2].flatMap(c => [...daysOf(c)])
+    expect(new Set(all).size).toBe(all.length)
+    // Newest first: every day in an earlier request is newer than every day in a later one.
+    // (The input is oldest-first, so removing the ordering breaks this.)
+    expect([...daysOf(0)].sort()[0] > [...daysOf(1)].sort().reverse()[0]).toBe(true)
+    expect([...daysOf(1)].sort()[0] > [...daysOf(2)].sort().reverse()[0]).toBe(true)
+    expect([...daysOf(0)].sort().reverse()[0]).toBe('2026-10-10')
+  })
+
+  it('keeps one oversized day in a single request instead of splitting it', async () => {
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
+    // 30 ad sets × 24 hours = 720 rows for ONE day — over the 500 cap, still one statement.
+    const rows: MetaAdsetHourlyRow[] = Array.from({ length: 720 }, (_, i) =>
+      hourlyRow({ adset_id: `a${i % 30}`, hour: Math.floor(i / 30), insight_date: '2026-10-27' }),
+    )
+    fetchHourly.mockResolvedValue({ rows, complete: true })
+
+    await syncAdsetHourlyInsights('client-1', 'act_1', 'tok')
+
+    expect(upsert.mock.calls.map(c => (c[0] as unknown[]).length)).toEqual([720])
+  })
+
+  it('a failed write on a later (older) request stops the run and never writes older days', async () => {
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
+    const rows: MetaAdsetHourlyRow[] = Array.from({ length: 1200 }, (_, i) =>
+      hourlyRow({
+        adset_id:     `a${i % 5}`,
+        hour:         Math.floor(i / 5) % 24,
+        insight_date: `2026-10-${String(Math.floor(i / 120) + 1).padStart(2, '0')}`,
+      }),
+    )
+    fetchHourly.mockResolvedValue({ rows, complete: true })
+    upsert.mockResolvedValueOnce({ error: null }).mockResolvedValueOnce({ error: { message: 'boom' } })
+
+    const res = await syncAdsetHourlyInsights('client-1', 'act_1', 'tok')
+
+    expect(res.success).toBe(false)
+    expect(res.error).toContain('boom')
+    expect(upsert).toHaveBeenCalledTimes(2)
+    // What WAS written is the newest 8 days; the oldest days (the gap) are untouched.
+    const written = upsert.mock.calls.slice(0, 1).flatMap(c => (c[0] as Array<Record<string, string>>).map(r => r.insight_date))
+    expect(written.every(d => d >= '2026-10-07')).toBe(true)
   })
 
   it('writes nothing and reports success when Meta returns an empty complete walk', async () => {
