@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 let headerMap: Record<string, string> = {}
 vi.mock('next/headers', () => ({ headers: async () => ({ get: (k: string) => headerMap[k] ?? null }) }))
+vi.mock('@/lib/agent-docs/pending-lessons', () => ({
+  loadPendingLessonCounts: async () => null,
+  pendingLessonLabel: (count: number | null) => (count === null ? '待采纳经验读不到' : `待采纳经验 ${count} 条`),
+}))
 vi.mock('next/navigation', () => ({
   redirect: (to: string) => { throw new Error(`REDIRECT:${to}`) },
   notFound: () => { throw new Error('NOT_FOUND') },

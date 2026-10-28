@@ -185,7 +185,13 @@ describe('pending lesson label', () => {
     expect(agentCodeForLesson('unknown', null)).toBeNull()
     expect(pendingLessonLabel(3)).toBe('待采纳经验 3 条')
     expect(pendingLessonLabel(null)).toBe('待采纳经验读不到')
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY
     expect(await loadPendingLessonCounts()).toBeNull()
+    if (url) process.env.NEXT_PUBLIC_SUPABASE_URL = url
+    if (key) process.env.SUPABASE_SERVICE_ROLE_KEY = key
   })
 })
 
