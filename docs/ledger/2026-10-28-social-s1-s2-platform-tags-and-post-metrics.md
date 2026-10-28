@@ -4,7 +4,7 @@ title: 社媒第一批：新工单必须写明平台和创意标签，并能按�
 status: done
 owner: agent
 decided_on: 2026-10-28
-source: doc:docs/specs/2026-10-19-social-agent-capability-map-v0.3.md
+source: pr:2906
 verify_by: 2026-11-04
 verify_how: 合并上线后查新建工单 brief 里 platform 带齐比例是否为 100%（按平台分别数）；再对 CTS 跑一次单条表现读取，确认读不到与 0 分开显示、n 标明；同时确认没有被拒收的信号是因为外部调用方没带平台
 done_on: 2026-10-28
