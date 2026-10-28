@@ -140,6 +140,34 @@ describe('syncMailchimpActivity · sent record', () => {
     expect(r).toMatchObject({ sentErrors: 1, sentRecorded: 1, campaigns: 2 })
   })
 
+  it('the prefix must match the START of the title, not appear anywhere in it', async () => {
+    mocks.listSentCampaigns.mockResolvedValue([camp('k1', 'x_auto_y')])
+    await syncMailchimpActivity({ clientId: CLIENT, apiKey: 'k', sentRecord: { titlePrefixes: ['auto_'] } })
+    expect(mocks.getCampaignRecipients).not.toHaveBeenCalled()
+  })
+
+  it('a later batch failing still reports the rows an earlier batch already wrote', async () => {
+    mocks.listSentCampaigns.mockResolvedValue([camp('k1', 'auto_a')])
+    mocks.getCampaignRecipients.mockResolvedValue(Array.from({ length: 600 }, () => ({ email: 'a@example.com', status: 'sent' as const })))
+    let n = 0
+    // 第一批（500）成功，第二批（100）失败
+    const orig = mocks.from.getMockImplementation()!
+    mocks.from.mockImplementation((table: string) => {
+      const c = orig(table) as Record<string, unknown>
+      if (table === 'contact_touchpoints') {
+        const up = c.upsert as (rows: Record<string, unknown>[], opts: unknown) => { select: () => Promise<unknown> }
+        c.upsert = (rows: Record<string, unknown>[], opts: unknown) => {
+          n++
+          if (n === 2) return { select: () => Promise.resolve({ data: null, error: { message: 'boom' } }) }
+          return up(rows, opts)
+        }
+      }
+      return c
+    })
+    const r = await syncMailchimpActivity({ clientId: CLIENT, apiKey: 'k', sentRecord: { titlePrefixes: ['auto_'] } })
+    expect(r).toMatchObject({ sentErrors: 1, sentRecorded: 500 })
+  })
+
   it('a failing write is counted as an error, not thrown', async () => {
     mocks.listSentCampaigns.mockResolvedValue([camp('k1', 'auto_a')])
     mocks.getCampaignRecipients.mockResolvedValue([{ email: 'a@example.com', status: 'sent' }])

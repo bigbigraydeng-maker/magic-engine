@@ -181,7 +181,8 @@ export async function syncMailchimpActivity(opts: {
     sentErrors: 0,
     sentSkippedBudget: 0,
   }
-  const sentStartedAt = Date.now()
+  /** 「发出」记录自己累计用掉的时间（不含打开 / 点击那部分）。 */
+  let sentSpentMs = 0
   const batchId = new Date().toISOString()
 
   for (const campaign of campaigns) {
@@ -249,16 +250,20 @@ export async function syncMailchimpActivity(opts: {
 
     // 「发出」记录：**单独兜住错误**，它失败不能拖垮上面原有的打开 / 点击记录（原有逻辑已写完）。
     if (opts.sentRecord && opts.sentRecord.titlePrefixes.some((p) => campaign.title.startsWith(p))) {
-      if (Date.now() - sentStartedAt > SENT_BUDGET_MS) {
+      if (sentSpentMs > SENT_BUDGET_MS) {
         result.sentSkippedBudget++
       } else {
+        const t0 = Date.now()
+        const tally = { recorded: 0, unmatched: 0 }
         try {
-          const r = await recordSent(opts.clientId, opts.apiKey, campaign, byEmail, batchId)
-          result.sentRecorded += r.recorded
-          result.sentUnmatched += r.unmatched
+          await recordSent(opts.clientId, opts.apiKey, campaign, byEmail, batchId, tally)
         } catch (err) {
           result.sentErrors++
           console.warn(`[mailchimp/sent-record] ${campaign.id} 失败：`, err instanceof Error ? err.message : err)
+        } finally {
+          result.sentRecorded += tally.recorded
+          result.sentUnmatched += tally.unmatched
+          sentSpentMs += Date.now() - t0
         }
       }
     }
@@ -274,14 +279,15 @@ async function recordSent(
   campaign: MailchimpCampaign,
   byEmail: Map<string, string>,
   batchId: string,
-): Promise<{ recorded: number; unmatched: number }> {
+  /** 已经写进去的条数、认不出的收件人数：中途某一批出错时，前面已写的也要如实计入回执。 */
+  tally: { recorded: number; unmatched: number },
+): Promise<void> {
   const recipients = await getCampaignRecipients(apiKey, campaign.id)
   const rows: Array<Record<string, unknown>> = []
-  let unmatched = 0
   for (const r of recipients) {
     const contactId = byEmail.get(normaliseEmail(r.email) ?? r.email)
     if (!contactId) {
-      unmatched++
+      tally.unmatched++
       continue
     }
     rows.push({
@@ -310,14 +316,12 @@ async function recordSent(
     })
   }
 
-  let recorded = 0
   for (let i = 0; i < rows.length; i += SENT_BATCH) {
     const { data, error } = await supabaseAdmin
       .from('contact_touchpoints')
       .upsert(rows.slice(i, i + SENT_BATCH), { onConflict: 'client_id,source,source_ref', ignoreDuplicates: true })
       .select('id')
     if (error) throw new Error(`写发出记录失败: ${error.message}`)
-    recorded += data?.length ?? 0
+    tally.recorded += data?.length ?? 0
   }
-  return { recorded, unmatched }
 }

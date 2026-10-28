@@ -322,7 +322,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       summary: t.summary,
       // 机器发的出站（Mailchimp 欢迎信 / 群发）：抽屉里要说清「系统自动发出」，不能当成同事写的话，
       // 也不能当「最后一句」盖掉客人真说的话。
-      automated: t.direction === 'outbound' && isAutomatedTouch(t.source, m),
+      automated: t.channel === 'email' && t.direction === 'outbound' && isAutomatedTouch(t.source, m),
       raw: cleanStr(t.raw),
       dncFlag: m.do_not_contact === true,
       // 外呼那条路写的是模型摘要，不是逐字原话 —— 靠 voice_call_id 认出来。

@@ -52,6 +52,14 @@ describe('loadTranscriptLines · machine-sent outbound', () => {
     expect(lines.map((l) => l.body).sort()).toEqual(['Hi Sue, here is the itinerary', 'Price for 2 pax please?'])
   })
 
+  it('keeps an AI outbound call (automated, but its raw is the call summary)', async () => {
+    stubDb([
+      { ...base, channel: 'phone', direction: 'outbound', raw: 'Customer said they want March, 2 pax', summary: 'ai call', source: 'voice', metadata: { automated: true } },
+    ])
+    const lines = await loadTranscriptLines('client-1', 'contact-1')
+    expect(lines.map((l) => l.body)).toEqual(['Customer said they want March, 2 pax'])
+  })
+
   it('keeps inbound mailchimp rows (opens/clicks are the customer’s own actions)', async () => {
     stubDb([{ ...base, direction: 'inbound', summary: '打开了《Welcome》', source: 'mailchimp' }])
     expect(await loadTranscriptLines('client-1', 'contact-1')).toHaveLength(1)

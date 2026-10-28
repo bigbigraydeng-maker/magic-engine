@@ -69,3 +69,9 @@ PM 2026-10-29（看着客人抽屉）：「我们使用 Mailchimp 发送的欢�
 1. 合并本 PR（缺省不记，**什么都不变**）。
 2. PM 说「开欢迎信记录」→ 写一行 CTS 的 `leads_config.mailchimp_sent_record = {"title_prefixes":["auto_"]}`（生产库写入）。
 3. 手动触发一次 `POST /api/cron/mailchimp-activity-sync`，读回执 `sentRecorded` / `sentErrors`，抽查 3 位客人抽屉。
+
+## 12. 代码两审后的追加（v0.2）
+- 子牙：`stage-infer` 与时间线/抽屉对「机器发的」判断**只针对邮件渠道**（AI 外呼也标了 `automated`，其 `raw` 是通话摘要，必须仍交给模型）；时间预算只累计「发出」记录自己的耗时。
+- 魏征：「全部客人」每行「最近联系」（`contact-response-row.ts`）原先把所有触点取最晚一条，欢迎信会把昨天进来的新客人每天一早算成「今天已处理」——已改为**机器发的出站邮件不算**；补测试。前缀判断补「必须从头匹配」测试；中途某批写入失败，前面已写的条数如实计入回执。
+- 建议开启时前缀配 `auto_e1_`（只欢迎信第一封），不用 `auto_`（会连带 E2–E4 发给老客人的批次，回补量更大）。
+- 已知小项不做：按房子看客人那页（`/api/clients/[id]/contacts/route.ts`）「最后一句」会显示「发出《…》」，只在开启记录的客户上出现；`marketing-plan/generate` 的「近 7 天收过自动信」人数会含退信者。

@@ -220,7 +220,8 @@ export async function loadTranscriptLines(
   }[]) {
     // 机器发的出站（Mailchimp 欢迎信 / 群发）不是「我们跟他聊过」——喂给模型，
     // 「对方一句没回 + 我们发过 + 已过两周」会把只收过欢迎信的人永久写成「无下文」。
-    if (t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata)) continue
+    // 只针对邮件：AI 外呼的触点也标了 automated，但它的 raw 是通话摘要（客人在电话里说的话都在里面），必须留给模型。
+    if (t.channel === 'email' && t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata)) continue
     // 电话触点的原话在 raw；raw 空的（FB 表单之类）退回 summary。
     const body = (t.raw ?? t.summary ?? '').trim()
     if (body) lines.push({ at: t.occurred_at, direction: t.direction, body, channel: t.channel })

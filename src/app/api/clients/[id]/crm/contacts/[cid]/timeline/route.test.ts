@@ -340,6 +340,7 @@ describe('机器发的出站邮件', () => {
         { channel: 'email', direction: 'outbound', occurred_at: '2026-10-28T19:02:00Z', summary: '发出《Welcome》', raw: null, metadata: { automated: true, kind: 'sent' }, source: 'mailchimp' },
         { channel: 'email', direction: 'inbound', occurred_at: '2026-10-28T01:00:00Z', summary: '打开了《Welcome》', raw: null, metadata: {}, source: 'mailchimp' },
         { channel: 'email', direction: 'outbound', occurred_at: '2026-10-27T01:00:00Z', summary: 'Hi Sue', raw: null, metadata: {}, source: 'microsoft_mail' },
+        { channel: 'phone', direction: 'outbound', occurred_at: '2026-10-26T01:00:00Z', summary: 'AI call summary', raw: null, metadata: { automated: true }, source: 'voice' },
       ],
       conversations: [],
       messages: [],
@@ -349,5 +350,7 @@ describe('机器发的出站邮件', () => {
     expect(byText['发出《Welcome》']).toBe(true)
     expect(byText['打开了《Welcome》']).toBe(false)
     expect(byText['Hi Sue']).toBe(false)
+    // AI 外呼也标了 automated，但电话不是「系统自动发出的邮件」，不能被同样处理
+    expect(byText['AI call summary']).toBe(false)
   })
 })
