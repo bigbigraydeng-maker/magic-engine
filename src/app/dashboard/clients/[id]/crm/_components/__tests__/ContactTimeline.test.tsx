@@ -283,6 +283,54 @@ describe('判决旁边的是原话，不是 AI 摘要', () => {
 })
 
 /**
+ * 表格同步进来的员工跟进记录只有原话（`sheetNote`）、没有 AI 摘要。
+ *
+ * 2026-10-29 PM：抽屉顶部写「拨过电话 1 次」，往来里却只有一张只剩标题的空「电话」卡片 ——
+ * 卡片只认摘要，原话从来没渲染过（CTS 有 393 位客人的 407 条记录是这样）。
+ * 表格不记打电话的时间，`at` 是客人填表的时间（`timeApproximate`），必须说清楚，
+ * 否则销售会把它当成真实的通话时间。
+ */
+describe('表格里员工写的跟进记录（没有摘要）要看得见', () => {
+  it('🔴 没有摘要 → 显示员工写的原话，并标明是表格里写的', async () => {
+    mockTimeline([touch({ summary: null, sheetNote: 'no, I do not want to go to China' })])
+    draw()
+    await waitFor(() => expect(screen.getByText(/no, I do not want to go to China/)).toBeTruthy())
+    expect(screen.getByText(/员工在表格里写的/)).toBeTruthy()
+  })
+
+  it('🔴 时间是近似的要说清楚 —— 表格不记几点，显示的是客人填表的时间', async () => {
+    mockTimeline([touch({ summary: null, sheetNote: '写了一句', timeApproximate: true })])
+    draw()
+    await waitFor(() => expect(screen.getByText(/表格没记具体时间/)).toBeTruthy())
+  })
+
+  it('普通记录不加这两句说明', async () => {
+    mockTimeline([touch({ summary: '打过去聊了两句' })])
+    draw()
+    await waitFor(() => expect(screen.getByText('打过去聊了两句')).toBeTruthy())
+    expect(screen.queryByText(/表格没记具体时间/)).toBeNull()
+    expect(screen.queryByText(/员工在表格里写的/)).toBeNull()
+  })
+
+  it('有摘要的记录只显示摘要 —— 同一句话不显示两遍，但时间照样标近似', async () => {
+    mockTimeline([touch({ summary: '客人说不去了', sheetNote: '不应出现的原话', timeApproximate: true })])
+    draw()
+    await waitFor(() => expect(screen.getByText('客人说不去了')).toBeTruthy())
+    expect(screen.queryByText(/不应出现的原话/)).toBeNull()
+    expect(screen.getByText(/表格没记具体时间/)).toBeTruthy()
+  })
+
+  it('🔴 带停联判决的那条 —— 原话只出现一次（判决那块已经显示原话）', async () => {
+    mockTimeline([
+      touch({ summary: null, raw: '别再打给我了', sheetNote: '别再打给我了', outcome: 'do_not_contact' }),
+    ])
+    draw()
+    await waitFor(() => expect(screen.getByText(/电话 \/ 邮件 \/ 私信全都不再发给他/)).toBeTruthy())
+    expect(screen.getAllByText(/别再打给我了/)).toHaveLength(1)
+  })
+})
+
+/**
  * 记录一多就框起来并停在最新那条 —— 微信 / WhatsApp 打开都停在最新一句，
  * 我们原先停在最早一句，销售每天白滚几十次（PM 2026-08-17，CTS 销售视角）。
  */

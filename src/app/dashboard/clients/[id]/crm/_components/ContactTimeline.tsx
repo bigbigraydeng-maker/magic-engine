@@ -43,6 +43,10 @@ export interface TimelineEntry {
   summary?: string | null
   /** 出站且是机器发的（Mailchimp 欢迎信 / 群发）：显示成「系统自动发出」，不算「我们说的最后一句」。 */
   automated?: boolean
+  /** 表格里员工写的原话（没有 AI 摘要的同步记录才有）。 */
+  sheetNote?: string | null
+  /** 时间是近似的：表格不记具体时间，`at` 是客人填表的时间。 */
+  timeApproximate?: boolean
   /**
    * 销售真正敲进去的那句话 —— **跟 `summary` 不是一回事**，后者是 AI 摘要。
    * 只在判决行旁边展示，理由见 `VERDICT_ROW`。
@@ -447,6 +451,15 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
       </p>
       {e.summary && (
         <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/85">{humanizeFormSummary(e.summary) ?? e.summary}</p>
+      )}
+      {!e.summary && e.sheetNote && !verdict && (
+        <p data-testid="sheet-note" className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-me-charcoal/85">
+          <span className="mr-1 text-[11px] font-bold text-me-charcoal/45">员工在表格里写的：</span>
+          {e.sheetNote}
+        </p>
+      )}
+      {e.timeApproximate && (
+        <p className="mt-1 text-[10px] text-me-charcoal/35">表格没记具体时间，这里显示的是客人填表的时间</p>
       )}
       <Verdict e={e} />
       <Chips items={chips} />
