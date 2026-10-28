@@ -34,6 +34,9 @@ export interface RollbackResult {
 }
 
 const PAGE_SIZE = 500
+/** 一次 `in()` 最多塞多少个人：几百个编号会让请求网址过长而直接失败。 */
+const IN_CHUNK = 100
+const READ_PAGE = 1000
 
 interface ContactRow {
   id: string
@@ -70,14 +73,24 @@ export async function rollbackScreenedContacts(
     if (rows.length === 0) break
     lastId = rows[rows.length - 1].id
 
-    const { data: evData, error: evErr } = await db
-      .from('contact_stage_events')
-      .select('contact_id, from_stage, to_stage, changed_by, created_at')
-      .in('contact_id', rows.map((r) => r.id))
-      .order('created_at', { ascending: false })
-    if (evErr) throw new Error(`读阶段变更失败: ${evErr.message}`)
     const latest = new Map<string, EventRow>()
-    for (const e of (evData ?? []) as EventRow[]) if (!latest.has(e.contact_id)) latest.set(e.contact_id, e)
+    for (let i = 0; i < rows.length; i += IN_CHUNK) {
+      const ids = rows.slice(i, i + IN_CHUNK).map((r) => r.id)
+      // Supabase 一次最多返回 1000 行且不报错 —— 读到读完为止，否则最早的（机器判走那条）会被悄悄截掉。
+      for (let from = 0; ; from += READ_PAGE) {
+        const { data: evData, error: evErr } = await db
+          .from('contact_stage_events')
+          .select('contact_id, from_stage, to_stage, changed_by, created_at')
+          .in('contact_id', ids)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .range(from, from + READ_PAGE - 1)
+        if (evErr) throw new Error(`读阶段变更失败: ${evErr.message}`)
+        const page = (evData ?? []) as EventRow[]
+        for (const e of page) if (!latest.has(e.contact_id)) latest.set(e.contact_id, e)
+        if (page.length < READ_PAGE) break
+      }
+    }
 
     for (const row of rows) {
       const e = latest.get(row.id)
@@ -109,13 +122,14 @@ export async function rollbackScreenedContacts(
         note: '回退：撤销机器判的「非咨询」',
       })
       if (aErr) {
-        await db
+        // 还原目标是空阶段时，条件要写成「阶段为空」（`.eq('stage', null)` 在 PostgREST 里匹配不上，等于没退回）。
+        let undo = db
           .from('contacts')
           .update({ stage: NOT_ENQUIRY_STAGE_KEY, stage_updated_at: row.stage_updated_at })
           .eq('id', row.id)
           .eq('client_id', clientId)
-          .eq('stage', e.from_stage)
-          .eq('stage_updated_at', nowIso)
+        undo = e.from_stage === null ? undo.is('stage', null) : undo.eq('stage', e.from_stage)
+        await undo.eq('stage_updated_at', nowIso)
         throw new Error(`留痕失败，已把阶段退回: ${aErr.message}`)
       }
       result.restored++

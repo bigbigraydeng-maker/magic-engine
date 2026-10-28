@@ -75,22 +75,47 @@ export function isRealInbound(t: Pick<InboundTouch, 'channel' | 'source' | 'meta
   if (engagementFromMetadata(md)) return false
   const subject = typeof md?.subject === 'string' ? (md.subject as string) : null
   if (isAutoReply(subject)) return false
-  // 来电只算接通的；未接来电不是「他说了话」。
-  if (t.channel === 'phone') return md?.reached === true
+  // 来电只算真的聊上了的：外呼接通（reached）或客人打进来、通话系统记为「聊上了」（outcome='spoke'）。
+  // 打进来的电话 `reached` 恒为 false（通话系统只对外呼算 reached），所以必须再认 outcome；
+  // 漏接（missed_inbound）不是「他说了话」。
+  if (t.channel === 'phone') return md?.reached === true || md?.outcome === 'spoke'
   return true
+}
+
+/** Supabase 一次最多返回 1000 行且不报错，超出的会被悄悄丢掉 —— 所以读到读完为止。 */
+const READ_PAGE = 1000
+
+async function readAll<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+  what: string,
+): Promise<T[]> {
+  const out: T[] = []
+  for (let from = 0; ; from += READ_PAGE) {
+    const { data, error } = await build(from, from + READ_PAGE - 1)
+    if (error) throw new Error(`${what}失败: ${error.message}`) // 读失败必须报错，不能当成「这个人没消息」
+    const rows = (data ?? []) as T[]
+    out.push(...rows)
+    if (rows.length < READ_PAGE) break
+  }
+  return out
 }
 
 /** 这批人里：最近一条阶段变更是机器筛选判的「非咨询」→ 返回判走的时间。 */
 async function machineScreenedAt(db: SupabaseClient, ids: string[]): Promise<Map<string, string>> {
-  const { data, error } = await db
-    .from('contact_stage_events')
-    .select('contact_id, changed_by, to_stage, created_at')
-    .in('contact_id', ids)
-    .order('created_at', { ascending: false })
-  if (error) throw new Error(`读阶段变更失败: ${error.message}`)
+  const events = await readAll<{ contact_id: string; changed_by: string | null; to_stage: string | null; created_at: string }>(
+    (f, t) =>
+      db
+        .from('contact_stage_events')
+        .select('contact_id, changed_by, to_stage, created_at')
+        .in('contact_id', ids)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(f, t),
+    '读阶段变更',
+  )
   const seen = new Set<string>()
   const out = new Map<string, string>()
-  for (const e of (data ?? []) as { contact_id: string; changed_by: string | null; to_stage: string | null; created_at: string }[]) {
+  for (const e of events) {
     if (seen.has(e.contact_id)) continue
     seen.add(e.contact_id)
     if (e.changed_by === ENQUIRY_SCREEN_ACTOR && e.to_stage === NOT_ENQUIRY_STAGE_KEY) out.set(e.contact_id, e.created_at)
@@ -102,13 +127,22 @@ async function machineScreenedAt(db: SupabaseClient, ids: string[]): Promise<Map
 async function newRealInbound(db: SupabaseClient, screened: Map<string, string>): Promise<Map<string, string>> {
   const out = new Map<string, string>()
   if (screened.size === 0) return out
-  const { data, error } = await db
-    .from('contact_touchpoints')
-    .select('contact_id, channel, source, metadata, created_at')
-    .in('contact_id', Array.from(screened.keys()))
-    .eq('direction', 'inbound')
-  if (error) throw new Error(`读入站触点失败: ${error.message}`)
-  for (const t of (data ?? []) as InboundTouch[]) {
+  // 只查「最早那次判走」之后入库的入站 —— 群发类的人每人几十封，不加时间下限一百人就超过一页。
+  const earliest = Array.from(screened.values()).reduce((a, b) => (Date.parse(a) <= Date.parse(b) ? a : b))
+  const touches = await readAll<InboundTouch>(
+    (f, t) =>
+      db
+        .from('contact_touchpoints')
+        .select('contact_id, channel, source, metadata, created_at')
+        .in('contact_id', Array.from(screened.keys()))
+        .eq('direction', 'inbound')
+        .gt('created_at', earliest)
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(f, t),
+    '读入站触点',
+  )
+  for (const t of touches) {
     const at = screened.get(t.contact_id)
     if (!at || out.has(t.contact_id)) continue
     if (Date.parse(t.created_at) <= Date.parse(at)) continue

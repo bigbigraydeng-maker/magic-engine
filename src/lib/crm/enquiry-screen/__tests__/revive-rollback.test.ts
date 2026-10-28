@@ -22,11 +22,19 @@ const SCREENED_AT = '2026-10-20T00:00:00Z'
 const AFTER = '2026-10-25T00:00:00Z'
 const BEFORE = '2026-10-10T00:00:00Z'
 
+interface FakeTouch {
+  contact_id: string
+  channel: string
+  direction?: 'inbound' | 'outbound'
+  source: string | null
+  metadata: Record<string, unknown> | null
+  created_at: string
+}
 interface Fake {
   stages: string[]
-  contacts: { id: string; client_id: string; stage_updated_at: string | null }[]
+  contacts: { id: string; client_id: string; stage_updated_at: string | null; do_not_contact?: boolean }[]
   events: { contact_id: string; from_stage: string | null; changed_by: string | null; to_stage: string | null; created_at: string }[]
-  touches: { contact_id: string; channel: string; source: string | null; metadata: Record<string, unknown> | null; created_at: string }[]
+  touches: FakeTouch[]
   updated: number
   auditErr?: string
 }
@@ -34,21 +42,57 @@ interface Fake {
 let updates: Record<string, unknown>[]
 let audits: Record<string, unknown>[]
 let eqs: [string, unknown][]
-let gtValue: string | null
+let iss: string[]
 
-function chain(result: () => unknown) {
+/** 假数据库会真按 eq / is / gt / range 过滤 —— 否则删掉被测代码里的筛选条件，测试照样全绿。 */
+function chain(rows: () => Record<string, unknown>[], onResult?: () => unknown) {
+  const conds: ((r: Record<string, unknown>) => boolean)[] = []
+  let range: [number, number] | null = null
+  let desc: boolean | null = null
+  let orderCol: string | null = null
   const b: Record<string, unknown> = {}
   const self = () => b
-  for (const m of ['select', 'in', 'is', 'order', 'limit']) b[m] = self
-  b.gt = (_c: string, v: string) => {
-    gtValue = v
+  for (const m of ['select', 'limit']) b[m] = self
+  b.in = (c: string, vs: unknown[]) => {
+    conds.push((r) => vs.includes(r[c]))
     return b
   }
   b.eq = (c: string, v: unknown) => {
     eqs.push([c, v])
+    conds.push((r) => r[c] === v)
     return b
   }
-  b.then = (res: (v: unknown) => unknown) => Promise.resolve(result()).then(res)
+  b.is = (c: string, v: unknown) => {
+    iss.push(c)
+    conds.push((r) => (r[c] ?? null) === v)
+    return b
+  }
+  b.gt = (c: string, v: string) => {
+    conds.push((r) => String(r[c]) > v)
+    return b
+  }
+  b.order = (c: string, o?: { ascending?: boolean }) => {
+    if (orderCol === null) {
+      orderCol = c
+      desc = o?.ascending === false
+    }
+    return b
+  }
+  b.range = (f: number, t: number) => {
+    range = [f, t]
+    return b
+  }
+  b.then = (res: (v: unknown) => unknown) => {
+    if (onResult) return Promise.resolve(onResult()).then(res)
+    let out = rows().filter((r) => conds.every((c) => c(r)))
+    if (orderCol) {
+      const col = orderCol
+      out = [...out].sort((x, y) => (String(x[col]) < String(y[col]) ? -1 : String(x[col]) > String(y[col]) ? 1 : 0))
+      if (desc) out.reverse()
+    }
+    if (range) out = out.slice(range[0], range[1] + 1)
+    return Promise.resolve({ data: out, error: null }).then(res)
+  }
   return b
 }
 
@@ -64,30 +108,32 @@ function stubDb(over: Partial<Fake> = {}): SupabaseClient {
   updates = []
   audits = []
   eqs = []
-  gtValue = null
+  iss = []
   const from = (table: string) => {
     if (table === 'client_pipeline_stages') {
-      return chain(() => ({ data: f.stages.map((stage_key) => ({ stage_key, client_id: CLIENT })), error: null }))
+      return chain(() => f.stages.map((stage_key) => ({ stage_key, client_id: CLIENT })))
     }
     if (table === 'contacts') {
       return {
-        select: () => chain(() => ({ data: f.contacts.filter((c) => gtValue === null || c.id > gtValue), error: null })),
+        select: () => chain(() => f.contacts.map((c) => ({ do_not_contact: false, stage: 'not_enquiry', ...c }))),
         update: (patch: Record<string, unknown>) => {
           updates.push(patch)
-          return chain(() => ({ data: Array.from({ length: f.updated }, () => ({ id: 'c1' })), error: null }))
+          return chain(() => [], () => ({ data: Array.from({ length: f.updated }, () => ({ id: 'c1' })), error: null }))
         },
       }
     }
     if (table === 'contact_stage_events') {
       return {
-        select: () => chain(() => ({ data: f.events, error: null })),
+        select: () => chain(() => f.events),
         insert: (row: Record<string, unknown>) => {
           audits.push(row)
           return Promise.resolve({ error: f.auditErr ? { message: f.auditErr } : null })
         },
       }
     }
-    if (table === 'contact_touchpoints') return { select: () => chain(() => ({ data: f.touches, error: null })) }
+    if (table === 'contact_touchpoints') {
+      return { select: () => chain(() => f.touches.map((t) => ({ direction: 'inbound', ...t }))) }
+    }
     throw new Error(`unexpected table ${table}`)
   }
   mocks.from.mockImplementation(from)
@@ -103,12 +149,15 @@ describe('isRealInbound', () => {
     expect(isRealInbound({ channel: 'email', source: 'microsoft_mail', metadata: { subject: 'Price?' } })).toBe(true)
     expect(isRealInbound({ channel: 'messenger', source: 'messenger', metadata: null })).toBe(true)
     expect(isRealInbound({ channel: 'phone', source: 'twilio', metadata: { reached: true } })).toBe(true)
+    // 客人打进来的电话：reached 恒为 false，聊上了的标记是 outcome='spoke'
+    expect(isRealInbound({ channel: 'phone', source: 'voipline', metadata: { reached: false, outcome: 'spoke' } })).toBe(true)
   })
   it('does not count auto-replies, mailchimp opens/clicks, automated or unanswered calls', () => {
     expect(isRealInbound({ channel: 'email', source: 'microsoft_mail', metadata: { subject: 'Automatic reply: away' } })).toBe(false)
     expect(isRealInbound({ channel: 'email', source: 'mailchimp', metadata: null })).toBe(false)
     expect(isRealInbound({ channel: 'email', source: 'microsoft_mail', metadata: { email_opened: true } })).toBe(false)
     expect(isRealInbound({ channel: 'phone', source: 'twilio', metadata: { reached: false } })).toBe(false)
+    expect(isRealInbound({ channel: 'phone', source: 'voipline', metadata: { reached: false, outcome: 'missed_inbound' } })).toBe(false)
     expect(isRealInbound({ channel: 'email', source: 'microsoft_mail', metadata: { automated: true } })).toBe(false)
   })
 })
@@ -195,6 +244,49 @@ describe('rollbackScreenedContacts', () => {
     const db = stubDb({ updated: 0 })
     expect(await rollbackScreenedContacts(db, CLIENT, { apply: true })).toMatchObject({ planned: 1, restored: 0, skipped: 1 })
     expect(audits).toHaveLength(0)
+  })
+})
+
+describe('reviveScreenedOnNewInbound · filters the fake db really applies', () => {
+  it('does not revive a contact marked do-not-contact', async () => {
+    const db = stubDb({ contacts: [{ id: 'c1', client_id: CLIENT, stage_updated_at: SCREENED_AT, do_not_contact: true }] })
+    expect(await reviveScreenedOnNewInbound(NOW, db)).toEqual({ candidates: 0, revived: 0, failed: 0 })
+    expect(updates).toHaveLength(0)
+  })
+
+  it('does not revive on an outbound message (staff replied)', async () => {
+    const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'email', direction: 'outbound', source: 'microsoft_mail', metadata: null, created_at: AFTER }] })
+    expect((await reviveScreenedOnNewInbound(NOW, db)).revived).toBe(0)
+  })
+
+  it('revives on a customer call that was picked up and spoken (inbound, outcome=spoke)', async () => {
+    const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'phone', source: 'voipline', metadata: { reached: false, outcome: 'spoke' }, created_at: AFTER }] })
+    expect((await reviveScreenedOnNewInbound(NOW, db)).revived).toBe(1)
+  })
+
+  it('finds the one real message even when more than a page (1000) of newsletters precede it', async () => {
+    const noise: FakeTouch[] = Array.from({ length: 1200 }, (_, i) => ({
+      contact_id: 'c1',
+      channel: 'email',
+      source: 'microsoft_mail',
+      metadata: { subject: 'Automatic reply: away' },
+      created_at: `2026-10-21T00:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}Z`,
+    }))
+    const real: FakeTouch = { contact_id: 'c1', channel: 'email', source: 'microsoft_mail', metadata: { subject: 'Quote for 2 pax?' }, created_at: '2026-10-28T00:00:00Z' }
+    const db = stubDb({ touches: [...noise, real] })
+    expect((await reviveScreenedOnNewInbound(NOW, db)).revived).toBe(1)
+  })
+})
+
+describe('rollbackScreenedContacts · empty original stage', () => {
+  it('when the audit row fails, the undo matches "stage is null", not "stage = null"', async () => {
+    const db = stubDb({
+      auditErr: 'boom',
+      events: [{ contact_id: 'c1', from_stage: null, changed_by: ENQUIRY_SCREEN_ACTOR, to_stage: 'not_enquiry', created_at: SCREENED_AT }],
+    })
+    await expect(rollbackScreenedContacts(db, CLIENT, { apply: true })).rejects.toThrow(/已把阶段退回/)
+    expect(iss).toContain('stage')
+    expect(updates.at(-1)).toMatchObject({ stage: 'not_enquiry' })
   })
 })
 
