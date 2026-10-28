@@ -10,6 +10,8 @@ const state = vi.hoisted(() => ({
   insertError: null as { code?: string; message: string } | null,
   inserted: [] as Array<{ table: string; row: Record<string, unknown> }>,
   deleted: [] as Array<{ table: string; filters: Filter[] }>,
+  selectData: {} as Record<string, unknown>,
+  selected: [] as Array<{ table: string; method: string; args: unknown[] }>,
 }))
 
 vi.mock('@/lib/supabase', () => ({
@@ -19,6 +21,19 @@ vi.mock('@/lib/supabase', () => ({
         insert(row: Record<string, unknown>) {
           state.inserted.push({ table, row })
           return Promise.resolve({ error: state.insertError })
+        },
+        select() {
+          state.selected.push({ table, method: 'select', args: [] })
+          const builder: Record<string, unknown> = {}
+          for (const method of ['eq', 'in', 'like', 'limit']) {
+            builder[method] = (...args: unknown[]) => {
+              state.selected.push({ table, method, args })
+              return builder
+            }
+          }
+          builder.then = (resolve: (value: { data: unknown; error: null }) => unknown) =>
+            resolve({ data: state.selectData[table] ?? null, error: null })
+          return builder
         },
         delete() {
           const filters: Filter[] = []
@@ -56,6 +71,8 @@ afterEach(() => {
   state.insertError = null
   state.inserted = []
   state.deleted = []
+  state.selectData = {}
+  state.selected = []
   vi.unstubAllGlobals()
 })
 
@@ -107,6 +124,30 @@ describe('contact lock ownership', () => {
     await expect(createMailNewStore().acquireContactLock('client-1', 'contact-1', 'lisa@cts.example')).rejects.toThrow(
       'connection lost',
     )
+  })
+})
+
+describe('findPriorSend', () => {
+  const REQ = '11111111-1111-4111-8111-111111111111'
+  const logRow = { id: 'audit-1', status: 'sent', meta_message_id: `req:${REQ}|msg:AAMk1`, conversation_id: 'conv-1' }
+
+  it('finds the earlier send when it went into this contact\'s own conversation', async () => {
+    state.selectData = { conversation_outbound_log: [logRow], conversations: [{ id: 'conv-1' }] }
+    const prior = await createMailNewStore().findPriorSend('client-1', REQ, 'contact-1')
+    expect(prior).toEqual({ auditId: 'audit-1', status: 'sent', messageId: 'AAMk1', conversationId: 'conv-1' })
+    const asked = state.selected.filter((c) => c.table === 'conversations')
+    expect(asked).toContainEqual({ table: 'conversations', method: 'eq', args: ['contact_id', 'contact-1'] })
+    expect(asked).toContainEqual({ table: 'conversations', method: 'eq', args: ['client_id', 'client-1'] })
+  })
+
+  it('does not call a request id reused for ANOTHER contact "already sent"', async () => {
+    state.selectData = { conversation_outbound_log: [logRow], conversations: [] }
+    expect(await createMailNewStore().findPriorSend('client-1', REQ, 'contact-2')).toBeNull()
+  })
+
+  it('is null when nothing was logged for the request id', async () => {
+    state.selectData = { conversation_outbound_log: [] }
+    expect(await createMailNewStore().findPriorSend('client-1', REQ, 'contact-1')).toBeNull()
   })
 })
 

@@ -6,9 +6,12 @@ vi.mock('@/lib/auth/client-access', () => ({
 }))
 vi.mock('@/lib/microsoft/mail-send-new-prod', () => ({ createMailNewDeps: vi.fn(() => ({ marker: 'deps' })) }))
 vi.mock('@/lib/microsoft/mail-send-new', () => ({ sendMailNew: vi.fn() }))
+vi.mock('@/lib/crm/email-templates/send-record-prod', () => ({ recordSendAttemptProd: vi.fn(async () => undefined) }))
 
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { sendMailNew } from '@/lib/microsoft/mail-send-new'
+import { createMailNewDeps } from '@/lib/microsoft/mail-send-new-prod'
+import { recordSendAttemptProd } from '@/lib/crm/email-templates/send-record-prod'
 import { POST } from './route'
 
 const post = (body: unknown, raw?: string) =>
@@ -57,5 +60,73 @@ describe('POST email/compose', () => {
     const arr = await post(null, '[1,2]')
     expect(arr.status).toBe(400)
     expect(sendMailNew).toHaveBeenCalledTimes(1)
+  })
+
+  describe('with a template', () => {
+    const template = {
+      key: 'post-call-single-tour',
+      version: 3,
+      catalogVersion: 7,
+      picks: [{ tourId: 't1', departOn: '2027-03-11' }],
+      inputs: {},
+      callBasis: 'staff_attested',
+    }
+    const fields = { subject: 'S', body: 'B', requestId: '22222222-2222-4222-8222-222222222222', expectedRecipient: 'a@b.com' }
+
+    it('builds the gates for THIS client and passes the parsed template on', async () => {
+      ;(sendMailNew as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true, messageId: 'm1', conversationId: 'c1' })
+      await post({ ...fields, template })
+      expect(createMailNewDeps).toHaveBeenCalledWith('client-a')
+      expect(sendMailNew).toHaveBeenCalledWith(expect.objectContaining({ template }), { marker: 'deps' })
+    })
+
+    it('400 on a malformed template, without sending anything or recording anything', async () => {
+      const res = await post({ ...fields, template: { ...template, version: 'three' } })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toMatchObject({ reason: 'invalid_input' })
+      expect(sendMailNew).not.toHaveBeenCalled()
+      expect(recordSendAttemptProd).not.toHaveBeenCalled()
+    })
+
+    it('records every outcome right after it is known: sent and refused alike', async () => {
+      const sent = { ok: true, messageId: 'm1', conversationId: 'c1' }
+      ;(sendMailNew as ReturnType<typeof vi.fn>).mockResolvedValueOnce(sent)
+      await post({ ...fields, template })
+      expect(recordSendAttemptProd).toHaveBeenLastCalledWith({
+        clientId: 'client-a',
+        contactId: 'contact-1',
+        requestId: fields.requestId,
+        actorEmail: 'sales@client.co.nz',
+        result: sent,
+      })
+      const refused = { ok: false, status: 409, reason: 'frequency_cap', error: 'cap' }
+      ;(sendMailNew as ReturnType<typeof vi.fn>).mockResolvedValueOnce(refused)
+      const res = await post({ ...fields, template })
+      expect(res.status).toBe(409)
+      expect(recordSendAttemptProd).toHaveBeenLastCalledWith(expect.objectContaining({ result: refused }))
+    })
+
+    it('a crash mid-send is answered with a clear 503 and recorded as "unknown", never as failed', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      ;(sendMailNew as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db exploded'))
+      const res = await post({ ...fields, template })
+      expect(res.status).toBe(503)
+      const body = (await res.json()) as { error: string; reason: string }
+      expect(body.reason).toBe('internal_error')
+      expect(body.error).toContain('不确定')
+      const call = (recordSendAttemptProd as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+        result: { ok: boolean; reason: string; meta: { templateKey: string; templateVersion: number; callBasis: string; blockDetail: string } }
+      }
+      expect(call.result).toMatchObject({ ok: false, reason: 'send_unknown' })
+      expect(call.result.meta).toMatchObject({ templateKey: 'post-call-single-tour', templateVersion: 3, callBasis: 'none', blockDetail: 'route_exception' })
+    })
+
+    it('a crash on a free-written email is also a clear 503 (and nothing is recorded: no settings era to account to)', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      ;(sendMailNew as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db exploded'))
+      const res = await post(fields)
+      expect(res.status).toBe(503)
+      expect(recordSendAttemptProd).not.toHaveBeenCalled()
+    })
   })
 })

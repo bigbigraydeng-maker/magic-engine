@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  findReceiptByRequest,
   findSentTemplateReceiptsSince,
   insertReceipt,
   listRecentReceipts,
@@ -150,6 +151,33 @@ describe('findSentTemplateReceiptsSince', () => {
       '2024-01-01T00:00:00.000Z',
     )
     expect(result.map((r) => r.requestId)).toEqual(['r1'])
+  })
+})
+
+describe('findReceiptByRequest', () => {
+  it('finds the receipt of exactly this client / contact / request / outcome', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = [
+      rowFor('r1', '2024-02-01T00:00:00.000Z', { outcome: 'unknown', block_reason: 'send_unknown' }),
+      rowFor('r1', '2024-02-02T00:00:00.000Z', { outcome: 'sent' }),
+      rowFor('r1', '2024-02-03T00:00:00.000Z', { outcome: 'unknown', contact_id: OTHER_CONTACT_ID }),
+      rowFor('r1', '2024-02-04T00:00:00.000Z', { outcome: 'unknown', client_id: 'other-client' }),
+      rowFor('r2', '2024-02-05T00:00:00.000Z', { outcome: 'unknown' }),
+    ]
+    const found = await findReceiptByRequest(db, CLIENT_ID, CONTACT_ID, 'r1', 'unknown')
+    expect(found?.createdAt).toBe('2024-02-01T00:00:00.000Z')
+    expect(found?.outcome).toBe('unknown')
+  })
+
+  it('is null when there is no such receipt', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = [rowFor('r1', '2024-02-01T00:00:00.000Z', { outcome: 'sent' })]
+    expect(await findReceiptByRequest(db, CLIENT_ID, CONTACT_ID, 'r1', 'unknown')).toBeNull()
+  })
+
+  it('throws when the table cannot be read (never answers "not found")', async () => {
+    const { db } = makeDb({ failTable: TABLE })
+    await expect(findReceiptByRequest(db, CLIENT_ID, CONTACT_ID, 'r1', 'unknown')).rejects.toThrow(TABLE)
   })
 })
 

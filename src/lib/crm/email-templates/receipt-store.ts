@@ -248,6 +248,27 @@ export async function listRecentReceipts(
   return mapRowsOrThrow(Array.isArray(data) ? data : [])
 }
 
+/** The stored receipt of one request with a given outcome (settling an `unknown` send starts from it). */
+export async function findReceiptByRequest(
+  db: SupabaseClient,
+  clientId: string,
+  contactId: string,
+  requestId: string,
+  outcome: ReceiptOutcome,
+): Promise<StoredReceipt | null> {
+  const { data, error } = await db
+    .from(TABLE)
+    .select('*')
+    .eq('client_id', clientId)
+    .eq('contact_id', contactId)
+    .eq('request_id', requestId)
+    .eq('outcome', outcome)
+    .limit(1)
+  if (error !== null) throw new Error(`${TABLE}: find by request: ${error.message}`)
+  const rows = mapRowsOrThrow(Array.isArray(data) ? data : [])
+  return rows[0] ?? null
+}
+
 export async function findSentTemplateReceiptsSince(
   db: SupabaseClient,
   clientId: string,

@@ -93,6 +93,8 @@ export interface SendMeta {
   finalSha256: string | null
   warnings: string[]
   blockDetail: string | null
+  /** The sending mailbox, once chosen (set by sendMailNew; the gates never know it). */
+  mailbox: string | null
 }
 
 export function emptyMeta(): SendMeta {
@@ -106,6 +108,7 @@ export function emptyMeta(): SendMeta {
     finalSha256: null,
     warnings: [],
     blockDetail: null,
+    mailbox: null,
   }
 }
 

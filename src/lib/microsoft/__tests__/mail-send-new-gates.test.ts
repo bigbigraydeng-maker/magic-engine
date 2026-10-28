@@ -9,10 +9,14 @@ import type {
   SendMeta,
 } from '@/lib/crm/email-templates/send-gates'
 import type { TemplateRequest } from '@/lib/crm/email-templates/send-gates'
-import { sendMailNew } from '../mail-send-new'
+import { emptyMeta } from '@/lib/crm/email-templates/send-gates'
+import { reconcileSendRequest, sendMailNew } from '../mail-send-new'
 import { baseInput, makeFakes, ENABLED, REQUEST_ID } from './mail-send-new-fakes'
 
 type Fakes = ReturnType<typeof makeFakes>
+
+// the mailbox the fakes connect by default
+const MAILBOX = 'info@client.co.nz'
 
 function settings(over: Partial<EmailSettings> = {}): EmailSettings {
   return {
@@ -51,6 +55,7 @@ function baseMeta(): SendMeta {
     finalSha256: 'f'.repeat(64),
     warnings: [],
     blockDetail: null,
+    mailbox: null,
   }
 }
 
@@ -200,7 +205,7 @@ describe('sendMailNew gate wiring', () => {
     f.deps.gates = stubGates(f, { preLock: failure })
     const result = await sendMailNew(baseInput(), f.deps)
     expect(result).toMatchObject({ ok: false, status: 409, reason: 'content_blocked', error: 'x' })
-    if (!result.ok) expect(result.meta).toBe(meta)
+    if (!result.ok) expect(result.meta).toEqual({ ...meta, mailbox: MAILBOX })
     expect(f.store.acquireContactLock).not.toHaveBeenCalled()
     expect(f.store.claimConversation).not.toHaveBeenCalled()
     expect(f.store.insertAudit).not.toHaveBeenCalled()
@@ -215,7 +220,7 @@ describe('sendMailNew gate wiring', () => {
     f.deps.gates = stubGates(f, { inLock: failure })
     const result = await sendMailNew(baseInput(), f.deps)
     expect(result).toMatchObject({ ok: false, status: 409, reason: 'frequency_cap', error: 'y' })
-    if (!result.ok) expect(result.meta).toBe(meta)
+    if (!result.ok) expect(result.meta).toEqual({ ...meta, mailbox: MAILBOX })
     expect(indexOf(f, 'acquireLock')).toBeGreaterThanOrEqual(0)
     expect(indexOf(f, 'releaseLock')).toBeGreaterThanOrEqual(0)
     expect(f.store.claimConversation).not.toHaveBeenCalled()
@@ -241,7 +246,44 @@ describe('sendMailNew gate wiring', () => {
     f.deps.gates = gates
     const result = await sendMailNew(baseInput(), f.deps)
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.meta).toBe(meta)
+    if (result.ok) expect(result.meta).toEqual({ ...meta, mailbox: MAILBOX })
+  })
+
+  it('settings era: a refusal before the gates still carries meta (so it gets a receipt), without a mailbox yet', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings({ recipientAllowlist: ['someone-else@example.com'] }))
+    f.deps.gates = stubGates(f)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 403, reason: 'recipient_not_allowed' })
+    expect(result.meta).toEqual(emptyMeta())
+  })
+
+  it('settings era: invalid settings are refused WITH meta, so the refusal is recorded', async () => {
+    const f = makeFakes()
+    withSettings(f, { kind: 'invalid', version: 2, errors: ['x'] })
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, reason: 'config_invalid' })
+    expect(result.meta).toEqual(emptyMeta())
+  })
+
+  it('settings era: a refusal after the pre-lock gates carries THEIR meta plus the mailbox', async () => {
+    const f = makeFakes({ lockAvailable: false })
+    withSettings(f, okSettings())
+    const meta = { ...baseMeta(), templateKey: 'post-call', templateVersion: 3, catalogVersion: 7 }
+    f.deps.gates = stubGates(f, { preLock: { ok: true, meta, state: baseState() } })
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 409, reason: 'busy' })
+    expect(result.meta).toEqual({ ...meta, mailbox: MAILBOX })
+  })
+
+  it('legacy config: results never carry meta (no receipt, behaviour unchanged)', async () => {
+    const f = makeFakes({ leadsConfig: ENABLED })
+    const sent = await sendMailNew(baseInput(), f.deps)
+    expect(sent.ok).toBe(true)
+    expect('meta' in sent).toBe(false)
+    const refused = await sendMailNew(baseInput({ expectedRecipient: 'other@example.com' }), makeFakes({ leadsConfig: ENABLED }).deps)
+    expect(refused.ok).toBe(false)
+    expect('meta' in refused).toBe(false)
   })
 
   it('preLock receives footer separately; createDraft body ends with footer', async () => {
@@ -316,5 +358,56 @@ describe('sendMailNew gate wiring', () => {
     const result = await sendMailNew(baseInput(), f.deps)
     expect(result.ok).toBe(true)
     expect(indexOf(f, 'sendDraft')).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('reconcileSendRequest', () => {
+  const args = { clientId: 'client-a', contactId: 'contact-1', requestId: REQUEST_ID }
+  const PRIOR_SENT = { auditId: 'a1', status: 'sent' as const, messageId: 'AAMk1', conversationId: 'conv-1' }
+
+  it('reports a request that turned out to be sent', async () => {
+    const f = makeFakes({ prior: PRIOR_SENT })
+    withSettings(f, okSettings())
+    expect(await reconcileSendRequest(args, f.deps)).toEqual({ status: 'sent', messageId: 'AAMk1', conversationId: 'conv-1' })
+    expect(f.store.findPriorSend).toHaveBeenCalledWith('client-a', REQUEST_ID, 'contact-1')
+  })
+
+  it('reports a request that failed', async () => {
+    const f = makeFakes({ prior: { ...PRIOR_SENT, status: 'failed', messageId: null } })
+    withSettings(f, okSettings())
+    expect(await reconcileSendRequest(args, f.deps)).toEqual({ status: 'failed' })
+  })
+
+  it('stays unresolved while the audit row is still pending', async () => {
+    const f = makeFakes({ prior: { ...PRIOR_SENT, status: 'pending', messageId: null } })
+    withSettings(f, okSettings())
+    expect(await reconcileSendRequest(args, f.deps)).toEqual({ status: 'unresolved' })
+  })
+
+  it('stays unresolved when there is no audit row for the request (never guesses)', async () => {
+    const f = makeFakes({ prior: null })
+    withSettings(f, okSettings())
+    expect(await reconcileSendRequest(args, f.deps)).toEqual({ status: 'unresolved' })
+  })
+
+  it('reconciles the contact\'s pending drafts first, so a draft that has left Drafts becomes sent', async () => {
+    const f = makeFakes({
+      prior: { ...PRIOR_SENT, status: 'pending', messageId: null },
+      pending: [{ auditId: 'a1', draftId: 'draft-1', createdAt: '2026-10-20T00:00:00Z' }],
+      isStillDraft: { 'draft-1': false },
+    })
+    withSettings(f, okSettings())
+    await reconcileSendRequest(args, f.deps)
+    expect(f.store.patchAudit).toHaveBeenCalledWith('a1', { status: 'sent' })
+  })
+
+  it('is unresolved (and touches no draft) when the settings or the mailbox cannot be resolved', async () => {
+    const noBox = makeFakes({ mailboxes: [] })
+    withSettings(noBox, okSettings())
+    expect(await reconcileSendRequest(args, noBox.deps)).toEqual({ status: 'unresolved' })
+    const bad = makeFakes()
+    withSettings(bad, { kind: 'invalid', version: 1, errors: ['x'] })
+    expect(await reconcileSendRequest(args, bad.deps)).toEqual({ status: 'unresolved' })
+    expect(bad.graph.isStillDraft).not.toHaveBeenCalled()
   })
 })

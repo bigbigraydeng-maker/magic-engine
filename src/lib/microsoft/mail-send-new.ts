@@ -22,6 +22,7 @@ import { classifySender } from '@/lib/microsoft/mail-sender'
 import { effectiveFromLegacy, effectiveFromSettings, type EffectiveEmailConfig } from '@/lib/crm/email-templates/effective-config'
 import {
   GATE_MESSAGES,
+  emptyMeta,
   type GateFailure,
   type GateReason,
   type MailNewGates,
@@ -101,7 +102,8 @@ export interface MailNewStore {
   loadIdentityEmails(clientId: string, contactId: string): Promise<string[]>
   loadTouchKinds(clientId: string, contactId: string): Promise<TouchKind[]>
   listActiveMailboxes(clientId: string): Promise<MailboxChoice[]>
-  findPriorSend(clientId: string, requestId: string): Promise<PriorSend | null>
+  /** The earlier send with this request id TO THIS CONTACT; a reused id for someone else's thread must not count as "already sent". */
+  findPriorSend(clientId: string, requestId: string, contactId: string): Promise<PriorSend | null>
   listPendingDrafts(clientId: string, contactId: string): Promise<PendingDraft[]>
   countUsage(clientId: string, sentByEmail: string, mailbox: string): Promise<EmailUsage>
   /** 最近 N 天我们发给这个人的邮件封数（只用于抽屉上的提示，不拦）。 */
@@ -147,6 +149,12 @@ export const metaIdFor = (requestId: string, kind: 'draft' | 'msg', id: string):
 
 const PENDING_UNKNOWN_AFTER_MS = 2 * 60_000
 
+/** What the receipt needs to know about an attempt, filled in as sendMailNew learns it. */
+interface Track {
+  meta: SendMeta | null
+  mailbox: string | null
+}
+
 interface Resolved {
   config: EffectiveEmailConfig
   to: string
@@ -164,7 +172,8 @@ async function loadEffectiveConfig(
     if (store.loadSettings) {
       const settings = await store.loadSettings(clientId)
       if (settings.kind === 'ok') return effectiveFromSettings(settings.settings, settings.version)
-      if (settings.kind === 'invalid') return fail(503, 'config_invalid', GATE_MESSAGES.config_invalid)
+      // A settings row exists (it just does not parse): the refusal still gets a receipt.
+      if (settings.kind === 'invalid') return { ...fail(503, 'config_invalid', GATE_MESSAGES.config_invalid), meta: emptyMeta() }
     }
     return effectiveFromLegacy(await store.loadLeadsConfig(clientId))
   } catch {
@@ -177,11 +186,14 @@ async function resolveSend(
   input: SendMailNewInput,
   deps: MailNewDeps,
   verifyMailbox = true,
+  track?: Track,
 ): Promise<Resolved | SendMailNewResult> {
   const { store } = deps
   const loaded = await loadEffectiveConfig(input.clientId, store)
   if ('ok' in loaded) return loaded
   const config = loaded
+  // From here on this is a settings-era attempt: every outcome, refusals included, gets a receipt.
+  if (track && config.source === 'settings') track.meta = emptyMeta()
   if (!config.enabled) return fail(403, 'disabled', '这个客户还没开通「在 CRM 里发邮件」。')
 
   const contact = await store.loadContact(input.clientId, input.contactId)
@@ -211,6 +223,7 @@ async function resolveSend(
 
   const mailbox = await chooseMailbox(input.clientId, config, deps, verifyMailbox)
   if ('ok' in mailbox) return mailbox
+  if (track) track.mailbox = mailbox.account
   return { config, to: pick.email, mailbox }
 }
 
@@ -252,7 +265,42 @@ async function reconcile(clientId: string, contactId: string, mailbox: MailboxCh
   return unresolved ? fail(409, 'reconcile_pending', '上一封邮件的发送状态还没确认，请一分钟后再看时间线，先别重发。') : null
 }
 
+export type ReconcileOutcome =
+  | { status: 'sent'; messageId: string; conversationId: string }
+  | { status: 'failed' }
+  | { status: 'unresolved' }
+
+/**
+ * 事后收口一封「状态不明」的发送：重新对账该联系人名下待定的草稿，再读这个 requestId 现在的审计结论。
+ * 读不到设置 / 邮箱 / 审计时一律回 unresolved，不猜。
+ */
+export async function reconcileSendRequest(
+  args: { clientId: string; contactId: string; requestId: string },
+  deps: MailNewDeps,
+): Promise<ReconcileOutcome> {
+  const config = await loadEffectiveConfig(args.clientId, deps.store)
+  if ('ok' in config) return { status: 'unresolved' }
+  const mailbox = await chooseMailbox(args.clientId, config, deps, false)
+  if ('ok' in mailbox) return { status: 'unresolved' }
+  await reconcile(args.clientId, args.contactId, mailbox, deps)
+  const prior = await deps.store.findPriorSend(args.clientId, args.requestId, args.contactId)
+  if (prior === null) return { status: 'unresolved' }
+  if (prior.status === 'sent' && prior.messageId) {
+    return { status: 'sent', messageId: prior.messageId, conversationId: prior.conversationId }
+  }
+  return prior.status === 'failed' ? { status: 'failed' } : { status: 'unresolved' }
+}
+
 export async function sendMailNew(input: SendMailNewInput, deps: MailNewDeps): Promise<SendMailNewResult> {
+  const track: Track = { meta: null, mailbox: null }
+  const result = await runSendMailNew(input, deps, track)
+  // Legacy-config clients (no versioned settings) get no meta and so no receipt: their behaviour is unchanged.
+  if (track.meta === null && result.meta === undefined) return result
+  const meta = { ...(result.meta ?? track.meta ?? emptyMeta()), mailbox: track.mailbox }
+  return { ...result, meta }
+}
+
+async function runSendMailNew(input: SendMailNewInput, deps: MailNewDeps, track: Track): Promise<SendMailNewResult> {
   const subject = sanitizeSubject(input.subject)
   const body = sanitizeBody(input.body)
   if (!subject || !body || !isUuid(input.requestId)) {
@@ -261,11 +309,11 @@ export async function sendMailNew(input: SendMailNewInput, deps: MailNewDeps): P
   const requestId = input.requestId
   const { store } = deps
 
-  const resolved = await resolveSend(input, deps)
+  const resolved = await resolveSend(input, deps, true, track)
   if ('ok' in resolved) return resolved
   const { config, to, mailbox } = resolved
 
-  const prior = await store.findPriorSend(input.clientId, requestId)
+  const prior = await store.findPriorSend(input.clientId, requestId, input.contactId)
   if (prior) {
     if (prior.status === 'sent' && prior.messageId) {
       return { ok: true, messageId: prior.messageId, conversationId: prior.conversationId, duplicate: true }
@@ -290,6 +338,7 @@ export async function sendMailNew(input: SendMailNewInput, deps: MailNewDeps): P
     })
     if (!step.ok) return gateFailure(step)
     pre = step
+    track.meta = step.meta
   }
 
   const unresolved = await reconcile(input.clientId, input.contactId, mailbox, deps)

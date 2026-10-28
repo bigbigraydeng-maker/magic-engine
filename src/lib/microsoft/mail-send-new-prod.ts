@@ -61,14 +61,24 @@ export function createMailNewStore(): MailNewStore {
         .eq('status', CONNECTION_STATUS.ACTIVE)
       return ((data as Array<{ id: string; account_id: string }> | null) ?? []).map((r) => ({ connectionId: r.id, account: r.account_id.toLowerCase() }))
     },
-    async findPriorSend(clientId, requestId): Promise<PriorSend | null> {
+    async findPriorSend(clientId, requestId, contactId): Promise<PriorSend | null> {
       const { data } = await db
         .from('conversation_outbound_log')
         .select('id, status, meta_message_id, conversation_id')
         .eq('client_id', clientId)
         .like('meta_message_id', `req:${requestId}%`)
-        .limit(1)
-      const row = (data as Array<{ id: string; status: 'pending' | 'sent' | 'failed'; meta_message_id: string | null; conversation_id: string }> | null)?.[0]
+        .limit(5)
+      const rows = (data as Array<{ id: string; status: 'pending' | 'sent' | 'failed'; meta_message_id: string | null; conversation_id: string }> | null) ?? []
+      if (rows.length === 0) return null
+      // Only a send into THIS contact's own conversation counts; a request id reused for another contact is not "already sent".
+      const { data: own } = await db
+        .from('conversations')
+        .select('id')
+        .eq('client_id', clientId)
+        .eq('contact_id', contactId)
+        .in('id', rows.map((r) => r.conversation_id))
+      const mine = new Set(((own as Array<{ id: string }> | null) ?? []).map((c) => c.id))
+      const row = rows.find((r) => mine.has(r.conversation_id))
       if (!row) return null
       return { auditId: row.id, status: row.status, messageId: metaPart(row.meta_message_id, 'msg'), conversationId: row.conversation_id }
     },
