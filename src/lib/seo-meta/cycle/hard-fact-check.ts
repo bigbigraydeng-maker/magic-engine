@@ -173,8 +173,19 @@ const normalizeDate = (s: string): string =>
 // ── Acronym extraction ──
 const PLACE_NAMES_UPPER = new Set(AU_NZ_PLACE_NAMES.map((n) => n.toUpperCase()))
 
-function extractAcronyms(text: string): string[] {
-  return [...text.matchAll(ACRONYM_RE)].map((m) => m[0]).filter((a) => !ACRONYM_ALLOWLIST.has(a) && !PLACE_NAMES_UPPER.has(a))
+function extractAcronyms(text: string, ignore: ReadonlySet<string> = EMPTY_IGNORE): string[] {
+  return [...text.matchAll(ACRONYM_RE)].map((m) => m[0]).filter((a) => !ACRONYM_ALLOWLIST.has(a) && !PLACE_NAMES_UPPER.has(a) && !ignore.has(a.toLowerCase()))
+}
+
+const EMPTY_IGNORE: ReadonlySet<string> = new Set()
+
+export interface HardFactOptions {
+  /** The client's own brand words (case-insensitive): a brand name is not a page fact, so dropping it is not a contradiction. Only affects the ALLCAPS-acronym rule. */
+  ignoreTerms?: string[]
+}
+
+function ignoreSet(options?: HardFactOptions): ReadonlySet<string> {
+  return new Set((options?.ignoreTerms ?? []).map((t) => t.toLowerCase()))
 }
 
 // ── Place-name extraction (with alias normalization, DR48-2) ──
@@ -209,6 +220,26 @@ function findDropped(oldText: string, newText: string, extract: (t: string) => s
 }
 
 /**
+ * The facts checkHardFactsPreserved will require to survive a rewrite —
+ * given to the generator up front so it keeps them. 2026-10-28: every CTS
+ * proposal had been blocked since 09-28 because the generator never saw the
+ * current text and dropped exactly these facts; feeding them in is the fix.
+ */
+export function listHardFacts(title: string, desc: string, options?: HardFactOptions): string[] {
+  const text = normalizeWidth(`${title}. ${desc}`)
+  const ignore = ignoreSet(options)
+  return [...new Set([
+    ...extractPrices(text),
+    ...extractDates(text),
+    ...extractAcronyms(text, ignore),
+    ...extractPlaceNames(text),
+    ...extractDeparturePoints(text),
+    ...extractPromos(text),
+    ...extractQuantities(text),
+  ])]
+}
+
+/**
  * Regex/string-level check, no AI involved — see file header. Catches
  * exactly the shape of PM's requirement 2: "新文案丢了旧文案里的具体数字/
  * 专有名词（价格数字、日期、出发城市名、认证/资质名词）— 一律判定不通过，
@@ -219,14 +250,17 @@ export function checkHardFactsPreserved(
   oldDesc: string,
   newTitle: string,
   newDesc: string,
+  options?: HardFactOptions,
 ): HardFactCheckResult {
   const oldText = normalizeWidth(`${oldTitle}. ${oldDesc}`)
   const newText = normalizeWidth(`${newTitle}. ${newDesc}`)
+  const ignore = ignoreSet(options)
+  const acronyms = (t: string): string[] => extractAcronyms(t, ignore)
 
   const droppedFacts = [...new Set([
     ...findDropped(oldText, newText, extractPrices, normalizePrice),
     ...findDropped(oldText, newText, extractDates, normalizeDate),
-    ...findDropped(oldText, newText, extractAcronyms),
+    ...findDropped(oldText, newText, acronyms),
     ...findDropped(oldText, newText, extractPlaceNames, normalizePlaceName),
     ...findDropped(oldText, newText, extractDeparturePoints, normalizePlaceName),
     ...findDropped(oldText, newText, extractPromos, normalizePromo),
@@ -236,7 +270,7 @@ export function checkHardFactsPreserved(
   const addedFacts = [...new Set([
     ...findDropped(newText, oldText, extractPrices, normalizePrice),
     ...findDropped(newText, oldText, extractDates, normalizeDate),
-    ...findDropped(newText, oldText, extractAcronyms),
+    ...findDropped(newText, oldText, acronyms),
     ...findDropped(newText, oldText, extractPlaceNames, normalizePlaceName),
     ...findDropped(newText, oldText, extractDeparturePoints, normalizePlaceName),
     ...findDropped(newText, oldText, extractPromos, normalizePromo),
