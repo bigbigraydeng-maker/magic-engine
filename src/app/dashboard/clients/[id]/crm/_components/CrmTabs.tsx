@@ -106,7 +106,7 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
       <NewMessagesBanner clientId={clientId} />
     <div className="flex flex-wrap items-center gap-3">
       <div className="inline-flex rounded-lg border border-me-charcoal/15 p-0.5">
-        <Link href={`${base}/all`} title="这个客户的所有客人：翻看、搜人、改他到哪一步。点右边「✨ Magic Engine 智能」能看今天该先联系谁。" className={cls(active === 'all')}>全部客人</Link>
+        <Link href={`${base}/all`} title="这个客户的所有客人：翻看、搜人、改他到哪一步。默认先看今天该先联系谁，点页面右边「看全部客人」翻看所有人。" className={cls(active === 'all')}>全部客人</Link>
         {showPayments && (
           <Link href={`${base}/payments`} title="按出发日期看每个团收了多少定金尾款、谁还没收齐、哪些已过期。" className={cls(active === 'payments')}>付款总览</Link>
         )}
