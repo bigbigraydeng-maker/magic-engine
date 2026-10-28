@@ -6,6 +6,23 @@
 
 ---
 
+## 0. IMPACT 环节更正（2026-10-29，PM 确认「改对」）
+
+PM 最初的说法是「在 IMPACT 里面的 C 提升这个能力」，v0.1/v0.2 跟着把整套能力标成「C（Check）」。对照 `docs/strategy/ME_PRODUCT_DEFINITION.md` §4 原文，这个标法不准确：
+
+| 本设计的部分 | 属于哪一段 | 依据（产品定义原文要点） |
+|---|---|---|
+| 每天抓 Meta 切法数据并存下 | I（Inspect） | 理解现在发生了什么，保存可追踪证据；含数据缺口、异常、机会 |
+| 花费对账、样本门槛、分母口径、按系列目标分开比 | M（Measure） | Baseline、分母、样本量、数据完整度、可比性 |
+| 统计 + AI 挖机会、排出先做哪个、给对照测试方案 | P（Prescribe） | Ranked Opportunities、Confidence、Verification Definition |
+| PM 授权后开对照测试 | A（Act） | Human Approval、Kernel Authorization——本模块不走内核，逐条 PM 授权 |
+| 测试期满回读两组数据，判断是否真的更好 | **C（Check）** | 按 Verification Definition 读 after evidence，未知保持 UNKNOWN |
+| 结论写进客户私有记忆、改变下次排序；有证据才升到行业 | T（Tune） | 让真实 Outcome 改变下一次判断；client-private 与 industry 晋升 |
+
+**结论**：这是横跨整条闭环的广告支柱能力。「Check」是其中验证效果的那一段；本次建的数据底座是 Check 读结果时的证据来源——没有它，Check 只能看每天总数，验证不了「改某个时段 / 版位之后有没有变好」。PM「提升 C」的目标不变，只是标注改准确。v0.2 正文里的环节标注已同步更正。
+
+---
+
 ## 1. 平台 / 行业 / 客户三层（PM 2026-10-29）
 
 跟 2026-10-10 PM 定的「所有支柱 agent 一律平台-行业-客户三层」同一个原则。
