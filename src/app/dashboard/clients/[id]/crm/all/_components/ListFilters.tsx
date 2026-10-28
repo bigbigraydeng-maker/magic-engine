@@ -96,7 +96,7 @@ function GroupToggleRow(props: Pick<FilterProps, 'grouped' | 'onToggleGrouped' |
       {!grouped && <KindFilter kindFilter={kindFilter} onKindFilterChange={onKindFilterChange} />}
       {grouped && (
         <span className="text-xs text-me-charcoal/45">
-          系统读完往来记录和 AI 摘要，告诉你今天该先联系谁、做什么；段内按紧急程度排，点表头不改顺序
+          今天先联系：系统读完往来记录，按紧急程度排好，从最上面一个开始打；段内顺序固定，点表头不改顺序
         </span>
       )}
       <button
@@ -104,7 +104,7 @@ function GroupToggleRow(props: Pick<FilterProps, 'grouped' | 'onToggleGrouped' |
         onClick={onToggleGrouped}
         className="ml-auto rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-xs font-bold text-me-charcoal hover:bg-me-ivory"
       >
-        {grouped ? '← 回到平铺名单' : '✨ Magic Engine 智能'}
+        {grouped ? '看全部客人 →' : '← 回到「今天先联系」'}
       </button>
     </div>
   )
