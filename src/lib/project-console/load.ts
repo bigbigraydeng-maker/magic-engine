@@ -38,7 +38,7 @@ interface Side {
 
 export async function listConsoleClients(
   db: SupabaseClient,
-  only: string | null,
+  only: readonly string[] | null,
 ): Promise<{ ok: true; clients: ClientRow[] } | { ok: false; message: string }> {
   const clients = await readClients(db, only)
   if (clients === 'unread') return { ok: false, message: '客户名单没读到。刷新再看。' }
@@ -47,10 +47,10 @@ export async function listConsoleClients(
 
 export async function loadProjects(
   db: SupabaseClient,
-  scope: { clientId: string | null },
+  scope: { clientIds: readonly string[] | null },
   nowIso: string,
 ): Promise<ProjectLoad> {
-  const clients = await readClients(db, scope.clientId)
+  const clients = await readClients(db, scope.clientIds)
   if (clients === 'unread') return { ok: false, message: '客户名单没读到。刷新再看。' }
   if (clients.length === 0) return { ok: true, projects: [] }
   const ids = clients.map((client) => client.id)
@@ -168,9 +168,10 @@ async function readBundle(
   }
 }
 
-async function readClients(db: SupabaseClient, only: string | null): Promise<ClientRow[] | 'unread'> {
+async function readClients(db: SupabaseClient, only: readonly string[] | null): Promise<ClientRow[] | 'unread'> {
+  if (only && only.length === 0) return []
   let query = db.from('clients').select('id, name').order('name', { ascending: true })
-  if (only) query = query.eq('id', only)
+  if (only) query = query.in('id', [...only])
   const { data, error } = await query
   if (error || !Array.isArray(data)) return 'unread'
   const rows: ClientRow[] = []

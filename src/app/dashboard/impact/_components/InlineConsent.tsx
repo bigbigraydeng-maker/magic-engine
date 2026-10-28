@@ -15,7 +15,12 @@ export function InlineConsent({ clientId, prescriptionId }: { clientId: string; 
     setNote(null)
     try {
       const saved = await postStatus(clientId, prescriptionId, status)
-      if (!saved) {
+      if (saved === 'conflict') {
+        setNote('这张方的状态已经变了。请刷新后再看。')
+        router.refresh()
+        return
+      }
+      if (saved !== 'saved') {
         setNote('这次没记上。能批处方的内部账号才能点。')
         return
       }
@@ -41,7 +46,7 @@ export function InlineConsent({ clientId, prescriptionId }: { clientId: string; 
   )
 }
 
-async function postStatus(clientId: string, prescriptionId: string, status: 'approved' | 'rejected'): Promise<boolean> {
+async function postStatus(clientId: string, prescriptionId: string, status: 'approved' | 'rejected'): Promise<'saved' | 'conflict' | 'failed'> {
   const res = await fetch(`/api/clients/${clientId}/prescription/${prescriptionId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -50,5 +55,6 @@ async function postStatus(clientId: string, prescriptionId: string, status: 'app
       rejection_note: status === 'rejected' ? '用户要求重新生成' : undefined,
     }),
   })
-  return res.ok || res.status === 409
+  if (res.status === 409) return 'conflict'
+  return res.ok ? 'saved' : 'failed'
 }

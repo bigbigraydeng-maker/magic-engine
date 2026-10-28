@@ -3,7 +3,7 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { prescriptionHref } from '@/lib/project-console/links'
 import { listConsoleClients } from '@/lib/project-console/load'
-import { requireStaffScope } from '@/lib/project-console/staff'
+import { requireStaffScope, staffCanOpenClient } from '@/lib/project-console/staff'
 import { loadStartChoices, type StartScan } from '@/lib/project-console/start'
 import { Notice } from '../_components/Notice'
 
@@ -21,11 +21,11 @@ export default async function StartProjectPage({
   const clientId = first(searchParams.client)
   const goalId = first(searchParams.goal)
   if (!clientId) {
-    const listed = await listConsoleClients(supabaseAdmin, scope.kind === 'one' ? scope.clientId : null)
+    const listed = await listConsoleClients(supabaseAdmin, scope.kind === 'clients' ? scope.clientIds : null)
     if (!listed.ok) return <Notice title="开始一个项目" body={listed.message} back />
     return <PickClient clients={listed.clients} />
   }
-  if (scope.kind === 'one' && scope.clientId !== clientId) {
+  if (!staffCanOpenClient(scope, clientId)) {
     return <Notice title="无权访问" body="这不是你负责的客户。" back />
   }
   const access = await requireDashboardClientAccess(clientId)

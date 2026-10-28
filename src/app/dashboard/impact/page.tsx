@@ -13,7 +13,7 @@ export default async function ImpactListPage() {
   if (!scope.ok) return <Notice title="项目" body={scope.message} />
   const loaded = await loadProjects(
     supabaseAdmin,
-    { clientId: scope.kind === 'one' ? scope.clientId : null },
+    { clientIds: scope.kind === 'clients' ? scope.clientIds : null },
     new Date().toISOString(),
   )
   if (!loaded.ok) return <Notice title="项目" body={loaded.message} />

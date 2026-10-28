@@ -119,7 +119,10 @@ function checkAndTune(input: ProjectInput, chain: ChainStatus): { check: Project
 }
 
 export function projectStages(input: ProjectInput): ProjectStageView[] {
-  if (!input.chain || !input.prescriptionId) return beforePrescription(input)
+  if (!input.prescriptionId) return beforePrescription(input)
+  if (!input.chain) {
+    return PROJECT_STAGE_IDS.map((id) => viewOf(input, id, 'unread', '这张方已经存在，但进度这次没读到。刷新后再看。'))
+  }
   const chain = input.chain
   const later = checkAndTune(input, chain)
   const stages = PROJECT_STAGE_IDS.map((id) => {

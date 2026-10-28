@@ -205,6 +205,14 @@ describe('deriveProject', () => {
     expect(view.waiting?.card).toContain('读不到')
   })
 
+  it('does not call an existing prescription missing when the chain read fails', () => {
+    const view = deriveProject(input({ chain: null, figures: 'unread' }))
+    expect(view.current).toMatchObject({ id: 'inspect', state: 'unread' })
+    expect(view.stages.every((stage) => stage.state === 'unread')).toBe(true)
+    expect(view.stages.find((stage) => stage.id === 'prescribe')?.detail).not.toContain('还没开方')
+    expect(view.showConsent).toBe(false)
+  })
+
   it('sorts a project that needs a click ahead of one that does not', () => {
     const quiet = deriveProject(input({
       clientName: '甲',
