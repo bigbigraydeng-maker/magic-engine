@@ -96,7 +96,7 @@ export default function LessonVerify({
   )
 }
 
-function BacktestView({ lessonKey, canBacktest, clients }: { lessonKey: string; canBacktest: boolean; clients: SiteOption[] }) {
+function BacktestView({ lessonKey, canBacktest, clients = [] }: { lessonKey: string; canBacktest: boolean; clients?: SiteOption[] }) {
   const [clientId, setClientId] = useState('')
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<{ forClient: string; msg: string } | null>(null)

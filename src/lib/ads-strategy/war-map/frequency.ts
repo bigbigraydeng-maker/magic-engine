@@ -7,16 +7,11 @@
  */
 
 import { FATIGUE_FREQUENCY_HIGH } from '../rules/fatigue'
-import { diffDays, nzDay, shiftDay, shortDay } from './util'
-import type { FrequencyRow, Headline, Light, WarMapInput } from './types'
+import { shiftDay, shortDay } from './util'
+import type { CampaignFrequencyInput, FrequencyRow, Headline, Light, WarMapInput } from './types'
 
 /** 数据日落后今天超过这么多天，就算数据停了 */
 export const DATA_STALE_DAYS = 2
-
-export function dataStaleDays(input: WarMapInput): number | null {
-  const day = input.clocks.dataDay
-  return day ? diffDays(day, nzDay(input.now)) : null
-}
 
 export function windowLabel(dataDay: string | null): string | null {
   return dataDay ? `${shortDay(shiftDay(dataDay, -6))}–${shortDay(dataDay)}` : null
@@ -74,16 +69,35 @@ export function frequencyHeadline(rows: FrequencyRow[], staleDays: number | null
   return { light: 'green', sentence: `频率没过高，最高 ${max.toFixed(2)}，红线 3` }
 }
 
-export function buildFrequency(input: WarMapInput, names: Map<string, string>): { headline: Headline; rows: FrequencyRow[]; windowLabel: string | null } {
-  const staleDays = dataStaleDays(input)
-  const stale = staleDays !== null && staleDays > DATA_STALE_DAYS
-  const rows = input.campaigns
-    .filter(c => c.spend7d > 0)
-    .sort((a, b) => b.spend7d - a.spend7d)
-    .map(c => rowOf(c, names, stale, input.clocks.dataDay))
+/** 停更文案跟表头同一个口径；花费区间用实际读取的窗口末日（不传则跟 dataDay 一样） */
+export interface FrequencyScope {
+  dataDay: string | null
+  staleDays: number | null
+  windowEnd?: string | null
+  isStopped: (c: CampaignFrequencyInput) => boolean
+}
+
+function stoppedRowOf(c: CampaignFrequencyInput, names: Map<string, string>): FrequencyRow {
+  const stoppedOn = c.lastSpendDay ? `，最后一次花钱是 ${shortDay(c.lastSpendDay)}` : ''
+  return { ...rowOf(c, names, false, null), light: 'unknown', note: `已停${stoppedOn}，不参与最高频率` }
+}
+
+export function buildFrequency(
+  input: WarMapInput,
+  names: Map<string, string>,
+  scope: FrequencyScope,
+): { headline: Headline; rows: FrequencyRow[]; stoppedRows: FrequencyRow[]; windowLabel: string | null } {
+  const stale = scope.staleDays !== null && scope.staleDays > DATA_STALE_DAYS
+  const spending = input.campaigns.filter(c => c.spend7d > 0).sort((a, b) => b.spend7d - a.spend7d)
+  const rows = spending.filter(c => !scope.isStopped(c)).map(c => rowOf(c, names, stale, scope.dataDay))
+  const stoppedRows = spending.filter(c => scope.isStopped(c)).map(c => stoppedRowOf(c, names))
+  const headline = frequencyHeadline(rows, scope.staleDays, scope.dataDay)
+  const tail = stoppedRows.length > 0 ? `（另有 ${stoppedRows.length} 条已停的系列不计入，见下方）` : ''
+  const windowDay = scope.windowEnd !== undefined ? scope.windowEnd : scope.dataDay
   return {
-    headline: frequencyHeadline(rows, staleDays, input.clocks.dataDay),
+    headline: tail ? { ...headline, sentence: headline.sentence + tail } : headline,
     rows,
-    windowLabel: windowLabel(input.clocks.dataDay),
+    stoppedRows,
+    windowLabel: windowLabel(windowDay),
   }
 }

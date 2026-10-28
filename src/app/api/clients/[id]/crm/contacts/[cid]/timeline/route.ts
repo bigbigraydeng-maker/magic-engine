@@ -14,6 +14,7 @@
  */
 
 import { formFactsLine } from '@/lib/crm/form-facts'
+import { fetchFullEmailBody, mayBeTruncatedPreview } from '@/lib/crm/email-full-body'
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -248,15 +249,24 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     sender_name: string | null
     body: string | null
     sent_at: string
+    message_id?: string | null
   }[] = []
   if (convIds.length > 0) {
     const { data: msgs } = await supabaseAdmin
       .from('conversation_messages')
-      .select('conversation_id, direction, sender_name, body, sent_at')
+      .select('conversation_id, direction, sender_name, body, sent_at, message_id')
       .in('conversation_id', convIds)
       .order('sent_at', { ascending: false })
       .limit(3000)
     messages = (msgs ?? []) as typeof messages
+    // 邮件同步只存 255 字摘要；「上次说到这」读的是最新一封客人来信，只对这一封去邮箱拉全文。
+    const latestInbound = messages.find(
+      (m) => m.direction === 'inbound' && convChannel.get(m.conversation_id) === 'email',
+    )
+    if (latestInbound?.message_id && mayBeTruncatedPreview(latestInbound.body)) {
+      const full = await fetchFullEmailBody(clientId, latestInbound.message_id)
+      if (full && full.length > (latestInbound.body ?? '').trim().length) latestInbound.body = full
+    }
   }
 
   // AI 摘要（意向 / 下一步）不再从这里出：2026-10-10 起由列表接口统一算进「该做什么」

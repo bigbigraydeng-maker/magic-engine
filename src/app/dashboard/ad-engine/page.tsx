@@ -169,7 +169,8 @@ export default async function AdEnginePage() {
   const sites: SiteOption[] = (siteRows.data ?? []).filter(c => c.domain).map(c => ({ id: c.id as string, name: c.name as string }))
 
   const active = lessons.filter(l => l.is_active)
-  const retired = lessons.filter(l => !l.is_active)
+  const trialable = lessons.filter(l => !l.is_active && trialSampleFor(l.lesson_key, l.evidence?.kind))
+  const retired = lessons.filter(l => !l.is_active && !trialable.some(t => t.lesson_key === l.lesson_key))
   const divergentCount = breakdowns.reduce(
     (n, c) => n + c.parents.filter(p => p.verdict === 'divergent').length, 0)
 
@@ -208,6 +209,20 @@ export default async function AdEnginePage() {
             <LessonCard key={l.lesson_key} lesson={l} sites={sites} clients={allClients} />
           ))}
         </div>
+
+        {trialable.length > 0 && (
+          <details open className="mt-6">
+            <summary className="cursor-pointer text-sm font-medium text-slate-800 hover:text-slate-900">
+              待试的专家经验（{trialable.length} 条）
+            </summary>
+            <p className="mt-2 text-sm text-slate-600">
+              点“试一下”对比有/没有这条经验的效果，只是测试，不会正式启用。
+            </p>
+            <div className="mt-3 space-y-3">
+              {trialable.map(l => <LessonCard key={l.lesson_key} lesson={l} sites={sites} clients={allClients} />)}
+            </div>
+          </details>
+        )}
 
         {retired.length > 0 && (
           <details className="mt-6">
@@ -353,6 +368,9 @@ export default async function AdEnginePage() {
 
 function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: SiteOption[]; clients: SiteOption[] }) {
   const redacted = Boolean(l.evidence && 'original_rationale' in l.evidence)
+  const expertSource = l.evidence?.kind === 'expert_rss_candidate' && typeof l.evidence.expert === 'string'
+    ? l.evidence.expert
+    : null
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-start justify-between gap-4">
@@ -364,6 +382,11 @@ function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: S
             </span>
             {l.flywheel && (
               <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">{l.flywheel}</span>
+            )}
+            {expertSource && (
+              <span className="rounded bg-sky-50 px-2 py-0.5 text-[11px] text-sky-800 ring-1 ring-sky-200">
+                来源：{expertSource}
+              </span>
             )}
             <span className="text-[11px] text-slate-400">
               置信 {Number(l.confidence).toFixed(2)}
@@ -383,7 +406,7 @@ function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: S
         </div>
         <LessonToggle lessonKey={l.lesson_key} isActive={l.is_active} />
       </div>
-      <LessonVerify lessonKey={l.lesson_key} lesson={l.lesson} rationale={l.rationale} sites={sites} />
+      <LessonVerify lessonKey={l.lesson_key} lesson={l.lesson} rationale={l.rationale} sites={sites} clients={clients} />
       {!l.is_active && trialSampleFor(l.lesson_key, l.evidence?.kind) && <LessonTrial lessonKey={l.lesson_key} />}
     </div>
   )

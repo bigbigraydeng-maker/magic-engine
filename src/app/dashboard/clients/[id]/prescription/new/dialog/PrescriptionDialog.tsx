@@ -389,13 +389,13 @@ async function patchStatus(
   setApproving(true)
   try {
     const saved = await postStatus(clientId, loaded.prescription.id, status)
-    if (!saved) {
+    if (!saved.ok) {
       reply('这次没记上。请再点一次。')
       return false
     }
     if (status === 'approved') {
       loaded.setPrescription({ ...loaded.prescription, status: 'approved' })
-      reply('已记下同意。这一步不是开始花钱。')
+      reply(saved.planText ? `已记下同意。这一步不是开始花钱。${saved.planText}` : '已记下同意。这一步不是开始花钱。')
     }
     return true
   } finally {
@@ -403,16 +403,31 @@ async function patchStatus(
   }
 }
 
-async function postStatus(clientId: string, prescriptionId: string, status: 'approved' | 'rejected'): Promise<boolean> {
+async function planTextOf(res: Response): Promise<string | null> {
+  try {
+    const body = await res.json() as { plan_approval?: { text?: unknown } } | null
+    const text = body?.plan_approval?.text
+    return typeof text === 'string' && text !== '' ? text : null
+  } catch {
+    return null
+  }
+}
+
+async function postStatus(
+  clientId: string,
+  prescriptionId: string,
+  status: 'approved' | 'rejected',
+): Promise<{ ok: boolean; planText: string | null }> {
   try {
     const res = await fetch(`/api/clients/${clientId}/prescription/${prescriptionId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, rejection_note: status === 'rejected' ? '用户要求重新生成' : undefined }),
     })
-    return res.ok || res.status === 409
+    // The plan result rides on the same reply; a bad body just means no extra line.
+    return { ok: res.ok || res.status === 409, planText: res.ok ? await planTextOf(res) : null }
   } catch {
-    return false
+    return { ok: false, planText: null }
   }
 }
 

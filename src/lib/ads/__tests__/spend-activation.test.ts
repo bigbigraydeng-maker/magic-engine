@@ -109,5 +109,25 @@ describe('buildSpendActivationReceipt', () => {
       draft_action_id: null,
       authorized_at: '2026-10-06T01:02:03.000Z',
     })
+    expect(receipt).not.toHaveProperty('card_run_id')
+  })
+
+  it('records the confirmation-card run only for a go-live click', () => {
+    const receipt = buildSpendActivationReceipt({
+      authority: {
+        actorUserId: 'u-fde',
+        actorEmail: 'fde@example.com',
+        basis: 'go_live_card',
+        cardRunId: '11111111-1111-4111-8111-111111111111',
+      },
+      entry: 'go-live-card',
+      clientId: 'c1',
+      campaignId: '120',
+      now: new Date('2026-10-28T01:00:00.000Z'),
+    })
+    expect(receipt.basis).toBe('go_live_card')
+    expect(receipt.entry).toBe('go-live-card')
+    expect(receipt.card_run_id).toBe('11111111-1111-4111-8111-111111111111')
   })
 })
+

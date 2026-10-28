@@ -66,6 +66,9 @@ describe('客户配置（L4）', () => {
     const cfg = getTrackingClientConfig('c0000000-0000-0000-0000-000000000000')
     expect(cfg).not.toBeNull()
     expect(cfg?.ad_account_id).toBe('act_2202695063810470')
+    // 本期广告投在旧账户 7274：「账户与付款」和预算读它；官网表单那道门本期不适用（广告都是 Meta 表单留资）
+    expect(cfg?.spend_ad_account_id).toBe('act_2775766642787274')
+    expect(cfg?.web_form_to_crm).toBe(false)
     expect(cfg?.site_url).toBe('https://www.ctstours.co.nz')
     expect(cfg?.landing_targets.map(t => new URL(t.url).searchParams.get('utm_content'))).toEqual([
       'nc_a2_web_20261022',

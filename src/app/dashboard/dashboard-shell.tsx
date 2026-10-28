@@ -89,6 +89,7 @@ export const ADMIN_SECTIONS: NavSection[] = [
       { key: 'viral-references', label: 'Viral References',mark: 'VR', href: '/dashboard/admin/viral-references' },
       { key: 'team-memory',     label: '团队工作记忆',     mark: 'TM', href: '/dashboard/team-memory' },
       { key: 'product-map',     label: 'ME2 产品地图',    mark: 'PM', href: '/dashboard/me2/product-map' },
+      { key: 'agents-docs',     label: 'Agent 与手册',     mark: 'AD', href: '/dashboard/admin/agents' },
     ],
   },
 ]
