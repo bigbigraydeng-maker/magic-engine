@@ -81,20 +81,21 @@ beforeEach(() => {
 })
 
 describe('POST /prescriptions/manual', () => {
-  it('inserts a draft with the next version, the latest run, and 广告 Agent', async () => {
-    const { inserts, tables } = mockDb()
+  it('inserts a draft with the next version and 广告 Agent, without a diagnostic run', async () => {
+    const { inserts, tables } = mockDb({ run: null })
     const res = await POST(request(payload()), { params })
     const json = await res.json()
     expect(res.status).toBe(200)
     expect(json).toMatchObject({
       success: true, prescription_id: 'rx-new', status: 'draft', version: 5,
-      agent_name: MANUAL_PRESCRIPTION_AGENT, goal_id: 'goal-1', run_id: 'run-9',
+      agent_name: MANUAL_PRESCRIPTION_AGENT, goal_id: 'goal-1', run_id: null,
       view_path: '/dashboard/clients/client-1/prescription/new?goal_id=goal-1',
     })
     expect(inserts[0]).toMatchObject({
-      status: 'draft', agent_name: MANUAL_PRESCRIPTION_AGENT, version: 5, run_id: 'run-9',
+      status: 'draft', agent_name: MANUAL_PRESCRIPTION_AGENT, version: 5, run_id: null,
       goal_id: 'goal-1', supersedes_id: null, discovery_id: null, intake: null,
     })
+    expect(tables).not.toContain('diagnostic_runs')
     expect(inserts[0].approved_at).toBeUndefined()
     expect((inserts[0].generation_meta as { source: string }).source).toBe('manual')
     expect(tables).not.toContain('execution_items')
@@ -108,14 +109,6 @@ describe('POST /prescriptions/manual', () => {
     const { inserts } = mockDb({ version: null })
     expect((await POST(request(payload()), { params })).status).toBe(200)
     expect(inserts[0].version).toBe(1)
-  })
-
-  it('returns 422 when the client has no completed diagnostic run', async () => {
-    const { inserts } = mockDb({ run: null })
-    const res = await POST(request(payload()), { params })
-    expect(res.status).toBe(422)
-    expect((await res.json()).error).toContain('还没有已完成的体检')
-    expect(inserts).toHaveLength(0)
   })
 
   it('returns 422 when the goal belongs to another client', async () => {

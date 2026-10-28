@@ -4,7 +4,6 @@ import { requireOperatorAccess } from '@/lib/auth/client-access'
 import { getGoalById } from '@/lib/strategy/goals'
 import {
   MANUAL_PRESCRIPTION_AGENT,
-  NO_COMPLETED_RUN_MESSAGE,
   parseManualPrescriptionBody,
   type ManualParseSuccess,
 } from '@/lib/diagnostic/manual-prescription'
@@ -15,24 +14,10 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 type Fail = { ok: false; status: number; error: string }
-type Ready = { ok: true; runId: string; version: number }
+type Ready = { ok: true; version: number }
 
 function jsonError(status: number, error: string): NextResponse {
   return NextResponse.json({ success: false, error }, { status })
-}
-
-async function latestCompletedRunId(clientId: string): Promise<{ runId: string } | Fail> {
-  const { data, error } = await supabaseAdmin
-    .from('diagnostic_runs')
-    .select('id')
-    .eq('client_id', clientId)
-    .eq('status', 'completed')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle<{ id: string }>()
-  if (error) return { ok: false, status: 500, error: '读取体检记录失败' }
-  if (!data?.id) return { ok: false, status: 422, error: NO_COMPLETED_RUN_MESSAGE }
-  return { runId: data.id }
 }
 
 async function nextVersionForGoal(goalId: string): Promise<number | Fail> {
@@ -52,11 +37,9 @@ async function loadInsertContext(clientId: string, goalId: string): Promise<Read
   if (!goal || goal.client_id !== clientId) {
     return { ok: false, status: 422, error: '目标不存在，或不属于这个客户' }
   }
-  const run = await latestCompletedRunId(clientId)
-  if (!('runId' in run)) return run
   const version = await nextVersionForGoal(goalId)
   if (typeof version !== 'number') return version
-  return { ok: true, runId: run.runId, version }
+  return { ok: true, version }
 }
 
 async function insertDraft(
@@ -67,7 +50,7 @@ async function insertDraft(
   const row = {
     client_id: clientId,
     goal_id: parsed.goalId,
-    run_id: ready.runId,
+    run_id: null,
     discovery_id: null,
     status: 'draft' as const,
     version: ready.version,
@@ -84,10 +67,6 @@ async function insertDraft(
     .select('id')
     .single<{ id: string }>()
   if (error || !data) {
-    const message = error?.message ?? ''
-    if (message.includes('run_id') || message.includes('discovery_id')) {
-      return jsonError(422, NO_COMPLETED_RUN_MESSAGE)
-    }
     console.error('[prescriptions/manual] insert failed', error)
     return jsonError(500, '保存处方草稿失败')
   }
@@ -99,7 +78,7 @@ async function insertDraft(
     version: ready.version,
     agent_name: MANUAL_PRESCRIPTION_AGENT,
     goal_id: parsed.goalId,
-    run_id: ready.runId,
+    run_id: null,
     view_path: `/dashboard/clients/${clientId}/prescription/new?goal_id=${parsed.goalId}`,
   })
 }
