@@ -29,7 +29,6 @@ const LOADERS: Record<string, () => Promise<RouteModule>> = {
   'viral-analyzer-worker': () => import('@/app/api/cron/viral-analyzer-worker/route'),
   'viral-discovery-weekly': () => import('@/app/api/cron/viral-discovery-weekly/route'),
   'content-factory-intake': () => import('@/app/api/cron/content-factory-intake/route'),
-  'diagnostic-weekly': () => import('@/app/api/cron/diagnostic-weekly/route'),
   'kpi-backfill': () => import('@/app/api/cron/kpi-backfill/route'),
   'benchmark-accumulator': () => import('@/app/api/cron/benchmark-accumulator/route'),
   'cms-connection-retest': () => import('@/app/api/cron/cms-connection-retest/route'),
