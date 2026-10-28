@@ -81,10 +81,12 @@ const setUrl = (search: string) => {
 beforeEach(() => {
   // scrollIntoView 在 jsdom 里不存在 —— 不补的话展开后直接抛。
   Element.prototype.scrollIntoView = vi.fn()
+  // 这页默认进「今天先联系」；下面绝大多数用例测的是平铺名单，所以默认钉在 ?view=all。
+  setUrl('?view=all')
 })
 afterEach(() => {
   vi.unstubAllGlobals()
-  setUrl('')
+  setUrl('?view=all')
 })
 
 describe('?contact=<id> 直达链接', () => {
@@ -102,7 +104,7 @@ describe('?contact=<id> 直达链接', () => {
 
   it('没带参数就谁都不展开 —— 别打扰只想翻表的人', async () => {
     stubFetch([contact('c1', 'Sue Masson')])
-    setUrl('')
+    setUrl('?view=all')
     render(<CrmAllContactsPage />)
 
     await waitFor(() => expect(screen.getByText('Sue Masson')).toBeTruthy())
@@ -166,7 +168,7 @@ describe('平铺名单每页 50 人', () => {
         return { ok: true, json: async () => ({ stages: [] }) }
       }),
     )
-    setUrl('')
+    setUrl('?view=all')
     render(<CrmAllContactsPage />)
     await waitFor(() => expect(screen.getByText('Guest 0')).toBeTruthy())
     expect(urls.some((u) => u.includes('perPage=50'))).toBe(true)
@@ -190,7 +192,7 @@ describe('搜索框', () => {
         return { ok: true, json: async () => ({ stages: [] }) }
       }),
     )
-    setUrl('')
+    setUrl('?view=all')
     render(<CrmAllContactsPage />)
     const input = (await screen.findByPlaceholderText(/客户打回来了/)) as HTMLInputElement
     input.focus()
@@ -261,7 +263,7 @@ describe('最后一列：平铺看阶段，Magic Engine 智能看「该做什么
     ])
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
     expect(screen.getByText('该做什么')).toBeTruthy()
@@ -361,7 +363,7 @@ describe('按「先联系谁」分段视图', () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(calls.some((u) => u.includes('view=priority'))).toBe(true))
   })
@@ -370,7 +372,7 @@ describe('按「先联系谁」分段视图', () => {
     stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
     expect(screen.getByText('先放着')).toBeTruthy()
@@ -383,7 +385,7 @@ describe('按「先联系谁」分段视图', () => {
     stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(screen.getByText('Sue Masson')).toBeTruthy())
     // cold 是 items=null：没有行，也不该冒出「这一段现在没有人」
@@ -394,7 +396,7 @@ describe('按「先联系谁」分段视图', () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
     await waitFor(() => expect(screen.getByText('先放着')).toBeTruthy())
     fireEvent.click(screen.getByText('先放着'))
 
@@ -410,7 +412,7 @@ describe('按「先联系谁」分段视图', () => {
     ])
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(screen.getByText('这一段现在没有人。')).toBeTruthy())
   })
@@ -420,7 +422,7 @@ describe('按「先联系谁」分段视图', () => {
     setUrl('?contact=z9')
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() =>
       expect(calls.some((u) => u.includes('open=') && u.includes('cold'))).toBe(true),
@@ -431,11 +433,11 @@ describe('按「先联系谁」分段视图', () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
     await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
     const before = calls.length
 
-    fireEvent.click(screen.getByText(/回到平铺名单/))
+    fireEvent.click(screen.getByText(/看全部客人/))
 
     await waitFor(() => expect(calls.length).toBeGreaterThan(before))
     expect(calls[calls.length - 1]).not.toContain('view=priority')
@@ -480,7 +482,7 @@ describe('分段视图 · 复审补测', () => {
     return calls
   }
 
-  const goGrouped = async () => fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+  const goGrouped = async () => fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
   /** M6：每段的人一个都不能少画。原来只比「画出来的 vs items 条数」，两边一起少就发现不了。 */
   it('M6 · 这一段下发了几个人，就必须画出几个人', async () => {
@@ -970,7 +972,7 @@ describe('B3 · 终端客户/同行筛选 + 批量发邮件', () => {
     await screen.findByText('Retail Rita')
     expect(screen.getByText('🤝 同行')).toBeTruthy()
 
-    fireEvent.click(screen.getByText(/Magic Engine 智能/))
+    fireEvent.click(screen.getByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(screen.queryByText('🤝 同行')).toBeNull())
   })
@@ -990,7 +992,7 @@ describe('今天要联系 · 每天 20 个的分界线', () => {
   it('25 个人：全部画出来，线画在第 20 个之后，写明排队 5 个', async () => {
     stubPriority(sections(25))
     render(<CrmAllContactsPage />)
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
     await waitFor(() => expect(screen.getByText('Person 25')).toBeTruthy())
 
     const line = screen.getByTestId('quota-line')
@@ -1006,8 +1008,38 @@ describe('今天要联系 · 每天 20 个的分界线', () => {
   it('刚好 20 个或更少：不画线', async () => {
     stubPriority(sections(20))
     render(<CrmAllContactsPage />)
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
     await waitFor(() => expect(screen.getByText('Person 20')).toBeTruthy())
     expect(screen.queryByTestId('quota-line')).toBeNull()
+  })
+})
+
+describe('默认进「今天先联系」（PM 2026-10-28）', () => {
+  const calledUrls = () =>
+    (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]))
+
+  it('裸进来 → 第一次请求就是分段（priority）视图，不先白发一次平铺请求', async () => {
+    stubFetch([contact('c1', 'Sue Masson')])
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    await waitFor(() => expect(calledUrls().some((u) => u.includes('view=priority'))).toBe(true))
+    expect(calledUrls().some((u) => u.includes('/crm/contacts') && !u.includes('view=priority') && !u.includes('stage'))).toBe(false)
+    expect(await screen.findByText(/看全部客人/)).toBeTruthy()
+  })
+
+  it('带 ?contact= 的直达链接 → 仍进平铺名单（老链接行为不变）', async () => {
+    stubFetch([contact('c1', 'Sue Masson')])
+    setUrl('?contact=c1')
+    render(<CrmAllContactsPage />)
+    await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy())
+    expect(calledUrls().some((u) => u.includes('view=priority'))).toBe(false)
+  })
+
+  it('带 ?assignee=me → 仍进平铺名单', async () => {
+    stubFetch([contact('c1', 'Sue Masson')])
+    setUrl('?assignee=me')
+    render(<CrmAllContactsPage />)
+    expect(await screen.findByText(/回到「今天先联系」/)).toBeTruthy()
+    expect(calledUrls().some((u) => u.includes('view=priority'))).toBe(false)
   })
 })
