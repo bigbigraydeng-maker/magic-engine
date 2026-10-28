@@ -353,3 +353,7 @@ export type RejectReason =
   | 'unsupported_signal'
   /** 价格广告红线:verifiedOffer(真价)客户无真拍(a_real)素材,不许用 AI 底料背书真价 */
   | 'price_ad_needs_real_footage'
+  /** New work orders must name their target platform (request.platform); missing or unknown = rejected. */
+  | 'platform_required'
+  /** request.creative_tags present but malformed. */
+  | 'creative_tags_invalid'
