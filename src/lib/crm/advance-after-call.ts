@@ -12,7 +12,7 @@
  *
  * 只改同时满足下面全部条件的人：
  *   · 当前阶段是 `new`（新线索）
- *   · 这个阶段是 AI 读往来记录放进去的（最近一条阶段变更的操作者是 `ai:conversation-read`）——
+ *   · 这个阶段是系统放进去的（最近一条阶段变更的操作者是 `ai:conversation-read` 或建档时的 `system:new-lead`）——
  *     人手动标过的一律不碰
  *   · 有一通外呼电话被判定为「接通」（触点 `metadata.reached === true`，判据在 `call-plan.ts`）
  *   · 这个客户的阶段配置里确实有 `contacted`
@@ -24,7 +24,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
-import { CALL_REACHED_ACTOR, STAGE_INFER_ACTOR } from './actors'
+import { CALL_REACHED_ACTOR, NEW_LEAD_ACTOR, STAGE_INFER_ACTOR } from './actors'
 import { loadClientsWithSafeStages, loadConfiguredStages } from './stage-infer'
 
 const FROM_STAGE = 'new'
@@ -68,7 +68,7 @@ async function aiPlacedInPool(db: SupabaseClient, contactIds: string[]): Promise
   }
   const out = new Set<string>()
   latest.forEach((e, id) => {
-    if (e.changed_by === STAGE_INFER_ACTOR && e.to_stage === FROM_STAGE) out.add(id)
+    if ((e.changed_by === STAGE_INFER_ACTOR || e.changed_by === NEW_LEAD_ACTOR) && e.to_stage === FROM_STAGE) out.add(id)
   })
   return out
 }

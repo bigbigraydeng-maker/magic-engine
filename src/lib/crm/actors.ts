@@ -35,6 +35,9 @@ import { AUTO_TAG_ACTOR } from './qualified-buyer'
  */
 export const STAGE_INFER_ACTOR = 'ai:conversation-read'
 
+/** 表单新线索进来、建档当下直接标「新线索」时写下的机器身份。 */
+export const NEW_LEAD_ACTOR = 'system:new-lead'
+
 /** 我们拨出并接通了电话、把「新线索」推进到「已联系」时写下的机器身份。 */
 export const CALL_REACHED_ACTOR = 'system:call-reached'
 
@@ -84,6 +87,7 @@ export function describeStageActor(actor: string | null | undefined): string {
   const a = raw.toLowerCase()
 
   if (a === STAGE_INFER_ACTOR) return '系统读往来记录判的'
+  if (a === NEW_LEAD_ACTOR) return '系统建档时标的'
   if (a === CALL_REACHED_ACTOR) return '系统按通话接通判的'
   if (a === AUTO_TAG_ACTOR) return '系统自动标的'
   if (a === ENQUIRY_SCREEN_ACTOR) return '系统判成不是咨询'
