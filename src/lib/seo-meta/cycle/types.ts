@@ -24,6 +24,13 @@ export interface MetaCycleClientConfig {
   cooldownDays: number
   brandVoice: string
   /**
+   * The client's own brand words (clients.seo_config.brand_terms). Never a page fact:
+   * the hard fact check must not demand they survive a rewrite — 2026-10-28 every CTS
+   * proposal was blocked for "dropping CTS" while the brand voice forbids adding the
+   * brand suffix. Optional so existing configs/fixtures stay valid (missing = []).
+   */
+  brandTerms?: string[]
+  /**
    * PM 2026-09-20 (fourth pass): DataForSEO location_codes to try (in order)
    * when the client's own primary market has no data — e.g. CTS configures
    * [2036] (AU) because DataForSEO doesn't index many NZ long-tail queries.
@@ -199,6 +206,12 @@ export interface ApplyAdapter {
    * description, etc.) — PM 2026-09-20 incident follow-up: a human must be
    * able to check the search volume/difficulty/competitor titles/CTS's own
    * ranking URL without leaving the PR.
+   */
+  /**
+   * dryRun: true MUST be read-only and MUST accept empty newTitle/newDesc — the
+   * runner calls it that way first to read the page's current title/description
+   * (oldTitle/oldDesc) before generating (2026-10-28). Any new implementation
+   * (e.g. wp_plugin) has to honour this.
    */
   apply(input: {
     candidate: MetaCycleCandidate
