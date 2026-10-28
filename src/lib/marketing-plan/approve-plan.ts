@@ -31,6 +31,8 @@ export type ApprovePlanResult =
   | { kind: 'needs_confirmation'; planStart: string; planEnd: string; checks: GateResult[]; contentHash: string }
   /** The card's content stamp does not match this plan. Nothing was written. */
   | { kind: 'stale' }
+  /** `commit: false`: the draft would be approved. Nothing was written. */
+  | { kind: 'ready' }
   | { kind: 'conflict'; error: string; status: 409 | 500 }
 
 async function existingTaskCount(planId: string): Promise<number> {
@@ -122,6 +124,8 @@ export async function approvePlan(args: {
   requireAllGreen?: boolean
   /** Set by the plan confirmation card. A different plan is not approved. */
   expectedContentHash?: string
+  /** false reports the outcome and does not dispatch or change the plan. */
+  commit?: boolean
 }): Promise<ApprovePlanResult> {
   const { data, error: fetchErr } = await supabaseAdmin
     .from('marketing_plans')
@@ -138,6 +142,7 @@ export async function approvePlan(args: {
 
   const gates = await runGates(plan, args.requireAllGreen === true, args.expectedContentHash)
   if ('stop' in gates) return gates.stop
+  if (args.commit === false) return { kind: 'ready' }
 
   // Dispatch first, flip the status after: a failed flip revokes the dispatch.
   // Plans with a promo structure do not dispatch legacy plan tasks.

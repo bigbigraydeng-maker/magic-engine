@@ -53,6 +53,15 @@ function approved() {
   return { kind: 'approved', plan: { id: PLAN }, dispatch: { tasks_created: 0 }, receipt: { content_hash: HASH } }
 }
 
+function issuePlan(f: Fixture, facts: CardFacts = planFacts(HASH)) {
+  return issueConfirmationCard(f.kernel, {
+    clientId: CLIENT_A,
+    clicker: OPC,
+    facts,
+    allowPlanApproval: true,
+  })
+}
+
 async function click(
   f: Fixture,
   card: { runId: string; expectedDecisionId: string; fingerprint: string },
@@ -76,47 +85,56 @@ function runStatus(f: Fixture, runId: string): string | undefined {
 
 beforeEach(() => {
   mockApprove.mockReset()
-  mockApprove.mockResolvedValue(approved())
+  mockApprove.mockImplementation(async (args: { commit?: boolean }) => (
+    args.commit === false ? { kind: 'ready' } : approved()
+  ))
 })
 
 describe('plan confirmation card', () => {
   it('confirm approves the plan the card names', async () => {
     const f = fixture()
-    const card = await issueConfirmationCard(f.kernel, { clientId: CLIENT_A, clicker: OPC, facts: planFacts(HASH) })
+    const card = await issuePlan(f)
     expect(card.confirmEnabled).toBe(true)
     expect(card.blockedReason).toContain('还差一点')
     const forFde = await listConfirmationCards(f.kernel, CLIENT_A, FDE)
     expect(forFde.find((row) => row.runId === card.runId)?.confirmEnabled).toBe(false)
 
+    const seen: string[] = []
+    mockApprove.mockImplementation(async (args: { commit?: boolean }) => {
+      seen.push(`${args.commit === false ? 'preview' : 'commit'}:${runStatus(f, card.runId)}`)
+      return args.commit === false ? { kind: 'ready' } : approved()
+    })
     const clicked = await click(f, card, 'confirm')
     expect(clicked.status).toBe('confirmed')
     expect(clicked.statusLine).toContain('这份计划已批准')
-    expect(mockApprove).toHaveBeenCalledTimes(1)
-    expect(mockApprove).toHaveBeenCalledWith({
+    expect(seen).toEqual(['preview:pending_approval', 'commit:authorized'])
+    expect(mockApprove).toHaveBeenNthCalledWith(2, expect.objectContaining({
       clientId: CLIENT_A,
       planId: PLAN,
       approvedBy: 'opc@example.com',
       requireAllGreen: false,
       expectedContentHash: HASH,
-    })
-    expect(runStatus(f, card.runId)).toBe('authorized')
+      commit: true,
+    }))
   })
 
-  it('still approves a card that was issued before the content stamp', async () => {
+  it('does not approve a card without the content stamp or with different words', async () => {
     const f = fixture()
-    const card = await issueConfirmationCard(f.kernel, { clientId: CLIENT_A, clicker: OPC, facts: planFacts(null) })
-    await click(f, card, 'confirm')
-    expect(mockApprove).toHaveBeenCalledWith({
+    const unstamped = await issuePlan(f, planFacts(null))
+    await expect(click(f, unstamped, 'confirm')).rejects.toMatchObject({ code: 'hard_check' })
+    const disguised = await issuePlan(f, { ...planFacts(HASH), what: '只是记下这条建议，不批准计划' })
+    await expect(click(f, disguised, 'confirm')).rejects.toMatchObject({ code: 'hard_check' })
+    expect(mockApprove).not.toHaveBeenCalled()
+    await expect(issueConfirmationCard(f.kernel, {
       clientId: CLIENT_A,
-      planId: PLAN,
-      approvedBy: 'opc@example.com',
-      requireAllGreen: false,
-    })
+      clicker: FDE,
+      facts: planFacts(HASH),
+    })).rejects.toMatchObject({ code: 'invalid' })
   })
 
   it('does not approve when the card on screen is out of date or expired', async () => {
     const f = fixture()
-    const card = await issueConfirmationCard(f.kernel, { clientId: CLIENT_A, clicker: OPC, facts: planFacts(HASH) })
+    const card = await issuePlan(f)
     await expect(applyConfirmationDecision(f.kernel, {
       clientId: CLIENT_A,
       runId: card.runId,
@@ -137,7 +155,7 @@ describe('plan confirmation card', () => {
 
   it('reject does not approve the plan', async () => {
     const f = fixture()
-    const card = await issueConfirmationCard(f.kernel, { clientId: CLIENT_A, clicker: OPC, facts: planFacts(HASH) })
+    const card = await issuePlan(f)
     const clicked = await click(f, card, 'decline')
     expect(clicked.status).toBe('declined')
     expect(mockApprove).not.toHaveBeenCalled()
@@ -150,7 +168,7 @@ describe('plan confirmation card', () => {
     ['agent', { kind: 'agent', email: null } as const],
   ])('refuses %s and does not approve', async (_name, clicker) => {
     const f = fixture()
-    const card = await issueConfirmationCard(f.kernel, { clientId: CLIENT_A, clicker: OPC, facts: planFacts(HASH) })
+    const card = await issuePlan(f)
     await expect(click(f, card, 'confirm', clicker)).rejects.toBeInstanceOf(ConfirmationCardError)
     await expect(click(f, card, 'confirm', clicker)).rejects.toMatchObject({ code: 'forbidden' })
     expect(mockApprove).not.toHaveBeenCalled()
@@ -159,29 +177,39 @@ describe('plan confirmation card', () => {
 
   it('a second confirm does not approve again', async () => {
     const f = fixture()
-    const kinds: string[] = []
-    mockApprove.mockImplementation(async () => {
-      const kind = kinds.length === 0 ? 'approved' : 'already_approved'
-      kinds.push(kind)
-      return kind === 'approved' ? approved() : { kind, plan: { id: PLAN }, existingTaskCount: 1 }
+    let wrote = false
+    mockApprove.mockImplementation(async (args: { commit?: boolean }) => {
+      if (args.commit === false) {
+        return wrote
+          ? { kind: 'already_approved', plan: { id: PLAN }, existingTaskCount: 1 }
+          : { kind: 'ready' }
+      }
+      if (!wrote) {
+        wrote = true
+        return approved()
+      }
+      return { kind: 'already_approved', plan: { id: PLAN }, existingTaskCount: 1 }
     })
-    const card = await issueConfirmationCard(f.kernel, { clientId: CLIENT_A, clicker: OPC, facts: planFacts(HASH) })
+    const card = await issuePlan(f)
     const first = await click(f, card, 'confirm')
     const second = await click(f, card, 'confirm')
     expect(first.status).toBe('confirmed')
     expect(second.status).toBe('confirmed')
-    expect(kinds).toEqual(['approved', 'already_approved'])
+    expect(wrote).toBe(true)
+    const commits = mockApprove.mock.calls.filter((call) => call[0].commit === true)
+    expect(commits).toHaveLength(2)
+    expect(commits[1][0]).toMatchObject({ planId: PLAN })
     expect(runStatus(f, card.runId)).toBe('authorized')
   })
 
   it('an already approved plan is not approved again', async () => {
     const f = fixture()
     mockApprove.mockResolvedValue({ kind: 'already_approved', plan: { id: PLAN }, existingTaskCount: 2 })
-    const card = await issueConfirmationCard(f.kernel, { clientId: CLIENT_A, clicker: OPC, facts: planFacts(HASH) })
+    const card = await issuePlan(f)
     const clicked = await click(f, card, 'confirm')
     expect(clicked.status).toBe('confirmed')
-    expect(mockApprove).toHaveBeenCalledTimes(1)
-    expect(mockApprove.mock.calls[0][0]).toMatchObject({ planId: PLAN, expectedContentHash: HASH })
+    expect(mockApprove).toHaveBeenCalledTimes(2)
+    expect(mockApprove.mock.calls.map((call) => call[0].commit)).toEqual([false, true])
   })
 
   it.each([
@@ -190,7 +218,7 @@ describe('plan confirmation card', () => {
   ] as const)('does not confirm when the plan comes back %s', async (_name, result, code) => {
     const f = fixture()
     mockApprove.mockResolvedValue(result)
-    const card = await issueConfirmationCard(f.kernel, { clientId: CLIENT_A, clicker: OPC, facts: planFacts(HASH) })
+    const card = await issuePlan(f)
     await expect(click(f, card, 'confirm')).rejects.toMatchObject({ code })
     expect(runStatus(f, card.runId)).toBe('pending_approval')
   })

@@ -206,6 +206,21 @@ describe('approvePlan requireAllGreen', () => {
     expect(h.dispatch).not.toHaveBeenCalled()
   })
 
+  it('a preview does not write the approval', async () => {
+    const promo = draft(baseSpec())
+    h.gate = landingVerified(promo)
+    const result = await approvePlan({
+      clientId: 'client-1',
+      planId: 'plan-1',
+      approvedBy: 'ray@example.com',
+      commit: false,
+      expectedContentHash: promoContentHash(promo),
+    })
+    expect(result.kind).toBe('ready')
+    expect(h.updates).toHaveLength(0)
+    expect(h.dispatch).not.toHaveBeenCalled()
+  })
+
   it('does not approve a card whose plan content changed', async () => {
     draft(socialSpec())
     const result = await approvePlan({

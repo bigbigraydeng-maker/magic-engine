@@ -10,7 +10,13 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { approvePlan, type ApprovePlanResult } from '@/lib/marketing-plan/approve-plan'
-import { planCardSubject } from '@/lib/marketing-plan/plan-card-subject'
+import {
+  PLAN_CARD_ACCOUNT,
+  PLAN_CARD_AMOUNT,
+  PLAN_CARD_SCOPE,
+  PLAN_CARD_WHAT,
+  planCardSubject,
+} from '@/lib/marketing-plan/plan-card-subject'
 import {
   issueConfirmationCard,
   type CardClicker,
@@ -93,13 +99,14 @@ async function cardFor(
     return await issueConfirmationCard(deps, {
       clientId: args.clientId,
       clicker: args.clicker,
+      allowPlanApproval: true,
       facts: {
         subjectKey: planCardSubject(args.planId, args.contentHash),
-        what: '批准推广计划草稿（只改计划状态，不开投）',
-        account: '不操作任何广告账户',
-        amount: '批准计划本身不花钱，不改预算',
+        what: PLAN_CARD_WHAT,
+        account: PLAN_CARD_ACCOUNT,
+        amount: PLAN_CARD_AMOUNT,
         date: `${args.start} 至 ${args.end}`,
-        scope: '只改这份计划的状态，不建广告草稿，不写 Meta',
+        scope: PLAN_CARD_SCOPE,
         hardChecks: args.checks.slice(0, 8).map(cardCheck),
       },
     })

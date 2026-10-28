@@ -90,7 +90,7 @@ export async function decideConfirmationCard(
   if (run.status !== 'pending_approval') {
     throw new ConfirmationCardError('not_waiting', '这张卡已经有结果了，不能再点。')
   }
-  if (args.resolution === 'confirm' && !planCardMayConfirmDespiteChecks(stored.subjectKey, stored.hardChecks)) {
+  if (args.resolution === 'confirm' && !planCardMayConfirmDespiteChecks(stored)) {
     const block = confirmBlockReason(stored.hardChecks)
     if (block) throw new ConfirmationCardError('hard_check', block)
   }

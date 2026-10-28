@@ -19,8 +19,8 @@ import { isExpired, presentCard, readStoredCard, type StoredCard } from '@/lib/c
 import { approvePlan, type ApprovePlanResult } from '@/lib/marketing-plan/approve-plan'
 import {
   PLAN_CARD_OPC_ONLY,
-  parsePlanCardSubject,
   planCardMayConfirmDespiteChecks,
+  trustedPlanCard,
 } from '@/lib/marketing-plan/plan-card-subject'
 
 export interface CardDecisionArgs {
@@ -33,8 +33,6 @@ export interface CardDecisionArgs {
   readonly approvedBy: string | null
   readonly now?: Date
 }
-
-type Refusal = Exclude<ApprovePlanResult, { kind: 'approved' | 'already_approved' }>
 
 function decisionArgs(args: CardDecisionArgs, now: Date) {
   return {
@@ -50,10 +48,13 @@ function decisionArgs(args: CardDecisionArgs, now: Date) {
 
 function isThisPlanCard(run: ActionRun, clientId: string, stored: StoredCard | null): stored is StoredCard {
   if (!stored || run.client_id !== clientId || run.action_key !== CONFIRMATION_ACTION_KEY) return false
-  return parsePlanCardSubject(stored.subjectKey) !== null
+  return trustedPlanCard(stored) !== null
 }
 
-function refusal(result: Refusal): ConfirmationCardError {
+function refusal(result: ApprovePlanResult): ConfirmationCardError {
+  if (result.kind === 'approved' || result.kind === 'already_approved' || result.kind === 'ready') {
+    return new ConfirmationCardError('invalid', '这张卡没有批准计划。')
+  }
   switch (result.kind) {
     case 'stale':
       return new ConfirmationCardError('stale', '这份计划已经改过了，这张卡不能再用来批准。请到推广计划页看现在这一版。')
@@ -87,13 +88,29 @@ async function showCard(deps: KernelDeps, run: ActionRun, clicker: CardClicker, 
   })
 }
 
-async function confirmPlan(
+function approvedView(card: ConfirmationCardView): ConfirmationCardView {
+  const who = card.statusLine.split(' 点了')[0] || '有人'
+  return { ...card, statusLine: `${who} 点了确认。这份计划已批准。还没开投，不会花钱。` }
+}
+
+function planArgs(args: CardDecisionArgs, planId: string, contentHash: string, commit: boolean) {
+  return {
+    clientId: args.clientId,
+    planId,
+    approvedBy: args.approvedBy,
+    requireAllGreen: false,
+    expectedContentHash: contentHash,
+    commit,
+  }
+}
+
+async function guardClick(
   deps: KernelDeps,
   args: CardDecisionArgs,
   run: ActionRun,
   stored: StoredCard,
   now: Date,
-): Promise<ConfirmationCardView> {
+): Promise<ConfirmationCardView | null> {
   if (args.clicker.kind !== 'opc') throw new ConfirmationCardError('forbidden', PLAN_CARD_OPC_ONLY)
   if (args.fingerprint !== stored.fingerprint) {
     throw new ConfirmationCardError('stale', '你看到的内容已经不是这一张卡了。请刷新后再点。')
@@ -104,27 +121,37 @@ async function confirmPlan(
   if (run.status !== 'pending_approval' && run.status !== 'authorized') {
     throw new ConfirmationCardError('not_waiting', '这张卡已经有结果了，不能再点。')
   }
-  // A repeat click still carries the id from before the first confirm. The plan
-  // approval itself is what must not run twice.
   if (run.status === 'pending_approval' && run.authorization_decision_id !== args.expectedDecisionId) {
     throw new ConfirmationCardError('stale', '这张卡的编号对不上，请刷新后再点。')
   }
-  if (!planCardMayConfirmDespiteChecks(stored.subjectKey, stored.hardChecks)) {
+  if (!planCardMayConfirmDespiteChecks(stored)) {
     const block = confirmBlockReason(stored.hardChecks)
     if (block) throw new ConfirmationCardError('hard_check', block)
   }
-  const parsed = parsePlanCardSubject(stored.subjectKey)
+  return null
+}
+
+async function confirmPlan(
+  deps: KernelDeps,
+  args: CardDecisionArgs,
+  run: ActionRun,
+  stored: StoredCard,
+  now: Date,
+): Promise<ConfirmationCardView> {
+  const early = await guardClick(deps, args, run, stored, now)
+  if (early) return early
+  const parsed = trustedPlanCard(stored)
   if (!parsed) throw new ConfirmationCardError('invalid', '这张卡认不出是哪一份计划，没有批准。')
-  const result = await approvePlan({
-    clientId: args.clientId,
-    planId: parsed.planId,
-    approvedBy: args.approvedBy,
-    requireAllGreen: false,
-    ...(parsed.contentHash ? { expectedContentHash: parsed.contentHash } : {}),
-  })
+  // Read first. The click is recorded only when this would approve. The write comes after.
+  const preview = await approvePlan(planArgs(args, parsed.planId, parsed.contentHash, false))
+  if (preview.kind !== 'ready' && preview.kind !== 'already_approved') throw refusal(preview)
+  const card = run.status === 'authorized'
+    ? await showCard(deps, run, args.clicker, now)
+    : await decideConfirmationCard(deps, decisionArgs(args, now))
+  if (card.status !== 'confirmed') return card
+  const result = await approvePlan(planArgs(args, parsed.planId, parsed.contentHash, true))
   if (result.kind !== 'approved' && result.kind !== 'already_approved') throw refusal(result)
-  if (run.status === 'authorized') return showCard(deps, run, args.clicker, now)
-  return decideConfirmationCard(deps, decisionArgs(args, now))
+  return approvedView(card)
 }
 
 export async function applyConfirmationDecision(

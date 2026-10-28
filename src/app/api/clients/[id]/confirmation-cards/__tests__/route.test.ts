@@ -154,6 +154,24 @@ describe('confirmation card routes', () => {
     expect(mocks.issueConfirmationCard).not.toHaveBeenCalled()
   })
 
+  it('does not open a plan approval card from this address', async () => {
+    mocks.requirePaidClientAccess.mockResolvedValue(access('admin', null))
+    const res = await POST(
+      post(`http://localhost/api/clients/${CLIENT}/confirmation-cards`, {
+        subjectKey: 'plan-approve:11111111-1111-4111-8111-111111111111:0123456789abcdef',
+        what: '批准推广计划草稿（只改计划状态，不开投）',
+        account: '不操作任何广告账户',
+        amount: '批准计划本身不花钱，不改预算',
+        date: '下周一',
+        scope: '只改这份计划的状态，不建广告草稿，不写 Meta',
+        hardChecks: [{ label: '预算', state: 'red', reason: '还差一点' }],
+      }),
+      { params: { id: CLIENT } },
+    )
+    expect(res.status).toBe(400)
+    expect(mocks.issueConfirmationCard).not.toHaveBeenCalled()
+  })
+
   it('lets staff see the list, with their clicker marked as staff', async () => {
     mocks.requirePaidClientAccess.mockResolvedValue(access('client-viewer', CLIENT))
     mocks.listConfirmationCards.mockResolvedValue([])

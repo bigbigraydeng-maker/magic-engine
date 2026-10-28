@@ -100,7 +100,7 @@ export function classifyStatus(runStatus: string, reason: string, issuedAt: stri
 function statusLine(status: CardStatus, decidedBy: string | null, subjectKey: string): string {
   if (status === 'waiting') return '还没人点。'
   if (status === 'confirmed' && isPlanApprovalCard(subjectKey)) {
-    return `${decidedBy ?? '有人'} 点了确认。这份计划已批准。还没开投，不会花钱。`
+    return `${decidedBy ?? '有人'} 点了确认。还没开投，不会花钱。`
   }
   if (status === 'confirmed') return `${decidedBy ?? '有人'} 点了确认。这件事还没有开始做。`
   if (status === 'declined') return `${decidedBy ?? '有人'} 点了不做。`
@@ -144,7 +144,7 @@ export function presentCard(args: {
   }
   const status = classifyStatus(args.run.status, args.decisionReason, stored.issuedAt, args.now)
   const hardBlock = confirmBlockReason(stored.hardChecks)
-  const waiveChecks = planCardMayConfirmDespiteChecks(stored.subjectKey, stored.hardChecks)
+  const waiveChecks = planCardMayConfirmDespiteChecks(stored)
   const buttons = buttonsFor(args.clicker, args.run.client_id, waiveChecks ? null : hardBlock, status === 'waiting')
   const click = shownButtons(waiveChecks, args.clicker, hardBlock, buttons, status === 'waiting')
   return {
