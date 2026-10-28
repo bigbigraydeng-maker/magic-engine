@@ -14,16 +14,14 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 type Fail = { ok: false; status: number; error: string }
-type Ready = { ok: true; runId: string; version: number }
-
-const NO_DIAGNOSTIC_RUN_MESSAGE = '这个客户还没有体检记录，处方草稿存不进去。'
+type Ready = { ok: true; runId: string | null; version: number }
 
 function jsonError(status: number, error: string): NextResponse {
   return NextResponse.json({ success: false, error }, { status })
 }
 
-/** Latest run id only. Scores and issue lists stay unread; the column is NOT NULL. */
-async function latestRunId(clientId: string): Promise<{ runId: string } | Fail> {
+/** Latest run id only. Scores and issue lists stay unread. Missing id is stored as null. */
+async function latestRunId(clientId: string): Promise<{ runId: string | null } | Fail> {
   const { data, error } = await supabaseAdmin
     .from('diagnostic_runs')
     .select('id')
@@ -32,8 +30,7 @@ async function latestRunId(clientId: string): Promise<{ runId: string } | Fail> 
     .limit(1)
     .maybeSingle<{ id: string }>()
   if (error) return { ok: false, status: 500, error: '读取体检记录失败' }
-  if (!data?.id) return { ok: false, status: 422, error: NO_DIAGNOSTIC_RUN_MESSAGE }
-  return { runId: data.id }
+  return { runId: data?.id ?? null }
 }
 
 async function nextVersionForGoal(goalId: string): Promise<number | Fail> {

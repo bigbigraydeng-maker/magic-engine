@@ -132,14 +132,19 @@ describe('POST /prescriptions/manual', () => {
     expect(mockHuatuo).not.toHaveBeenCalled()
   })
 
-  it('returns 422 and does not insert when the client has no diagnostic run', async () => {
-    const { inserts, tables } = mockDb({ run: null })
+  it('stores a null run id when the client has no diagnostic run', async () => {
+    const { inserts, tables, queries } = mockDb({ run: null })
     const res = await POST(request(payload()), { params })
-    expect(res.status).toBe(422)
-    expect((await res.json()).error).toBe('这个客户还没有体检记录，处方草稿存不进去。')
-    expect(inserts).toHaveLength(0)
+    const json = await res.json()
+    expect(res.status).toBe(200)
+    expect(json.run_id).toBeNull()
+    expect(inserts[0].run_id).toBeNull()
+    const runQuery = queries.find((query) => query.table === 'diagnostic_runs')
+    expect(runQuery?.select).toBe('id')
+    expect(runQuery?.filters).not.toContain('status=completed')
     expect(tables).toContain('diagnostic_runs')
-    expect(tables.filter((table) => table === 'prescriptions')).toHaveLength(0)
+    expect(tables).not.toContain('diagnostic_findings')
+    expect(tables).toContain('prescriptions')
   })
 
   it('starts at version 1 when the goal has no prescription yet', async () => {
