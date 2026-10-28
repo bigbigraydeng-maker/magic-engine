@@ -1,5 +1,5 @@
 ---
-id: 2026-10-29-social-new-client-cold-start-strategy-v0.1
+id: 2026-10-29-social-new-client-cold-start-strategy-v01
 title: 新客户社媒冷启动策略初稿（发什么、几点发、什么形式）并登记到后台手册页
 status: done
 owner: agent
