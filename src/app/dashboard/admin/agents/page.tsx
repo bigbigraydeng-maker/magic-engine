@@ -28,6 +28,7 @@ function AgentTableRow({ row, catalog }: { row: AgentRow; catalog: AgentCatalog 
     <tr className="align-top">
       <td className={`${TD} font-medium`}>{row.nameZh}</td>
       <td className={`${TD} text-sm`}>{row.code || '待补'}</td>
+      <td className={`${TD} max-w-xs text-sm`}>{row.summary || '待补'}</td>
       <td className={`${TD} text-sm`}>{row.group}</td>
       <td className={TD}><span className={`rounded px-2 py-0.5 text-xs ${STATUS_CLASS[row.status]}`}>{STATUS_LABEL[row.status]}</span></td>
       <td className={`${TD} text-sm`}>{row.profile ? <DocLink doc={row.profile} catalog={catalog} /> : '待补'}</td>
@@ -64,7 +65,7 @@ export default async function AgentsPage() {
             <table className="min-w-full text-left">
               <thead className="bg-black/5 text-sm">
                 <tr>
-                  {['中文名', '代号', '分组', '状态', '档案', '管哪些手册'].map((c) => (
+                  {['中文名', '代号', '主要功能', '分组', '状态', '档案', '管哪些手册'].map((c) => (
                     <th key={c} className="px-3 py-2 font-semibold">{c}</th>
                   ))}
                 </tr>

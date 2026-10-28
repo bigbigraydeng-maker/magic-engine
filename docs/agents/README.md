@@ -18,34 +18,34 @@
 
 ## 名单与对照表
 
-| 中文名 | 代号 | 闸门 role | 角色名 | §4 分组 | 状态 | 档案 | 操作手册 |
-|---|---|---|---|---|---|---|---|
-| 卫青 | `weiqing` | — | `ads` | 4.1 | 在用 | [11-weiqing](./11-weiqing.md) | 见下「手册归属」 |
-| 孔子 | `kongzi` | — | `seo` | 4.1 | 在用 | [13-kongzi](./13-kongzi.md) | 见下 |
-| 孟子 | `mengzi` | — | `geo` | 4.1 | 在用 | [15-mengzi](./15-mengzi.md) | 暂无 |
-| 苏东坡 | `sudongpo` | — | `social` / `video-factory` | 4.1 | 在用 | [14-sudongpo](./14-sudongpo.md) | 见下（另有[社媒经验手册](#经验手册playbooks)） |
-| 司马迁 | `simaqian` | — | `reputation` | 4.1 | 在用（档案为骨架） | [16-simaqian](./16-simaqian.md) | 暂无 |
-| 张骞 | `zhangqian` | — | `collect` | 4.1 | 在用 | [30-zhangqian](./30-zhangqian.md) | 暂无 |
-| 华佗 | `huatuo` | — | `prescribe` | 4.1 | 在用 | [40-huatuo](./40-huatuo.md) | 暂无 |
-| 鲁班 | `luban` | — | `execute` | 4.1 | 在用 | [50-luban](./50-luban.md) | 暂无 |
-| 马良 | `maliang` | — | `render-check` | 4.1 | 在用 | [60-maliang](./60-maliang.md) | 见下（配合） |
-| 李白 | `libai` | — | `copy-qa` | 4.1 | 在用 | [70-libai](./70-libai.md) | 暂无（提示词库见档案） |
-| 魏征 | `weicheng` | `weizheng` | `review` | 4.2 | 在用 | [90-weicheng](./90-weicheng.md) | 暂无 |
-| 狄仁杰 | `direnjie` | `direnjie` | `review-attack` | 4.2 | 在用（档案为骨架） | [91-direnjie](./91-direnjie.md) | 暂无 |
-| 板桥 | `banqiao` | — | `review-plainlang` | 4.2 | 在用（档案为骨架） | [92-banqiao](./92-banqiao.md) | 暂无 |
-| 子牙 | `ziya` | `ziya` | `tech-lead` | 4.3 | 在用 | [10-ziya](./10-ziya.md) | 暂无 |
-| 诸葛亮 | `zhuge` | — | `account-manager` | 4.3 | 在用 | [20-zhuge](./20-zhuge.md) | 暂无通用手册（客户专属手册不列入） |
-| 达芬奇 | `davinci` | — | — | §3 | **已撤**（审查问题并入子牙，见 10-ziya §四b） | [80-davinci](./80-davinci.md) | — |
-| 孙子 | `sunzi`（暂拟，PM 未定） | — | `seo-agent` | 名单外 | **名单外，去留待 PM 定**（§4.4：代码 `src/lib/seo-agent/`） | 无 | 无 |
-| 司马徽 | —（无） | — | — | 名单外 | **名单外，去留待 PM 定**（§4.4：CLAUDE.md 有、名单和代码都没有） | 无 | 无 |
+| 中文名 | 代号 | 闸门 role | 角色名 | 主要功能 | §4 分组 | 状态 | 档案 | 操作手册 |
+|---|---|---|---|---|---|---|---|---|
+| 卫青 | `weiqing` | — | `ads` | 盯每个客户每条 Meta 广告，出诊断和处方；信封内可自动暂停单条、小额调预算 | 4.1 | 在用 | [11-weiqing](./11-weiqing.md) | 见下「手册归属」 |
+| 孔子 | `kongzi` | — | `seo` | 盯网站在谷歌的排名与收录，出诊断；信息闸全绿时可改标题和摘要 | 4.1 | 在用 | [13-kongzi](./13-kongzi.md) | 见下 |
+| 孟子 | `mengzi` | — | `geo` | 测品牌在 ChatGPT 等 AI 回答里被提到、被引用的比例 | 4.1 | 在用 | [15-mengzi](./15-mengzi.md) | 暂无 |
+| 苏东坡 | `sudongpo` | — | `social` / `video-factory` | 按爆款配方产出帖子和 Reel，管评论与私信自动回复；任何发布须 PM 授权 | 4.1 | 在用 | [14-sudongpo](./14-sudongpo.md) | 见下（另有[社媒经验手册](#经验手册playbooks)） |
+| 司马迁 | `simaqian` | — | `reputation` | 盯评价不漏回，起草回复和谷歌商家帖子，发布一律审批 | 4.1 | 在用（档案为骨架） | [16-simaqian](./16-simaqian.md) | 暂无 |
+| 张骞 | `zhangqian` | — | `collect` | 每周只读采集站点、关键词、AI 可见度、竞品数据 | 4.1 | 在用 | [30-zhangqian](./30-zhangqian.md) | 暂无 |
+| 华佗 | `huatuo` | — | `prescribe` | 给每个客户开处方（6 维打分在 diagnostic 模块，不在这里） | 4.1 | 在用 | [40-huatuo](./40-huatuo.md) | 暂无 |
+| 鲁班 | `luban` | — | `execute` | 把已批准的动作真做出去并留回执；目前靠人在页面对话触发 | 4.1 | 在用 | [50-luban](./50-luban.md) | 暂无 |
+| 马良 | `maliang` | — | `render-check` | 出片检查，逐镜自检不过关不给 PM 看；另管素材视觉分析 | 4.1 | 在用 | [60-maliang](./60-maliang.md) | 见下（配合） |
+| 李白 | `libai` | — | `copy-qa` | 文案句句可溯源（官网 / brief / 未证实），管提示词库 | 4.1 | 在用 | [70-libai](./70-libai.md) | 暂无（提示词库见档案） |
+| 魏征 | `weicheng` | `weizheng` | `review` | 上线前代码审查挑刺，意见交子牙汇总 | 4.2 | 在用 | [90-weicheng](./90-weicheng.md) | 暂无 |
+| 狄仁杰 | `direnjie` | `direnjie` | `review-attack` | 改动命中 A 级清单时做攻击验证 | 4.2 | 在用（档案为骨架） | [91-direnjie](./91-direnjie.md) | 暂无 |
+| 板桥 | `banqiao` | — | `review-plainlang` | 用大白话审客户 / PM 看得到的页面、邮件、报告 | 4.2 | 在用（档案为骨架） | [92-banqiao](./92-banqiao.md) | 暂无 |
+| 子牙 | `ziya` | `ziya` | `tech-lead` | 技术大脑：架构、安全、开发统筹、合并前审查汇总 | 4.3 | 在用 | [10-ziya](./10-ziya.md) | 暂无 |
+| 诸葛亮 | `zhuge` | — | `account-manager` | 每个客户的账户经理：统筹增长，授权内自主决策与沟通 | 4.3 | 在用 | [20-zhuge](./20-zhuge.md) | 暂无通用手册（客户专属手册不列入） |
+| 达芬奇 | `davinci` | — | — | 已撤，审查问题并入子牙 | §3 | **已撤**（审查问题并入子牙，见 10-ziya §四b） | [80-davinci](./80-davinci.md) | — |
+| 孙子 | `sunzi`（暂拟，PM 未定） | — | `seo-agent` | SEO 规划代码 seo-agent，只被规划接口调用 | 名单外 | **名单外，去留待 PM 定**（§4.4：代码 `src/lib/seo-agent/`） | 无 | 无 |
+| 司马徽 | —（无） | — | — | CLAUDE.md 里的「发现」角色，无代码 | 名单外 | **名单外，去留待 PM 定**（§4.4：CLAUDE.md 有、名单和代码都没有） | 无 | 无 |
 
 名单内 15 个 agent：§4.1 十个、§4.2 三个、§4.3 两个，各占一行。
 
 ## 开发侧帮手（名单外，不计入 15 人）
 
-| 中文名 | 代号 | 性质 | 档案 | 操作手册 |
-|---|---|---|---|---|
-| 齐白石 | `qibaishi` | **开发侧，名单外**：开发侧子代理（`.claude/agents/me-backend-ui-designer.md`），不是产品内后台 agent，不在 spec §4 名单 | [62-qibaishi](./62-qibaishi.md) | [UI 美工手册 v1.0](../sops/2026-10-27-qibaishi-ui-designer-playbook-v1.0.md) |
+| 中文名 | 代号 | 主要功能 | 分组 | 档案 | 操作手册 |
+|---|---|---|---|---|---|
+| 齐白石 | `qibaishi` | 开发侧美工：只管后台 /dashboard、/portal 的界面样式，不碰数据（子代理 `.claude/agents/me-backend-ui-designer.md`，不是产品内后台 agent，不在 spec §4 名单） | 开发侧（名单外） | [62-qibaishi](./62-qibaishi.md) | [UI 美工手册 v1.0](../sops/2026-10-27-qibaishi-ui-designer-playbook-v1.0.md) |
 
 ## 经验手册（playbooks）
 
