@@ -5,7 +5,9 @@
  * 等 10 分钟，重新对账，结案就追加一行 sent / failed 回执；还没结案就报错让 Inngest 重试（最多 3 次）。
  * 其余结果（已发出 / 被拦 / 失败）回执早已同步写好，这里直接结束。
  *
- * 🔴 不发信、不改客户数据：只读审计行和邮箱草稿状态，写的只有一行追加型回执。
+ * 🔴 不发信、不改客户资料。对账（reconcileSendRequest）会动三样东西：把审计行改成 sent / failed；删掉邮箱草稿箱里
+ * 放了超过 PENDING_UNKNOWN_AFTER_MS 仍没发出去的草稿；最后追加一行回执。它不持有「同一客人发信锁」，所以刚建好、
+ * 还没到那个时限的草稿一律不动。
  */
 
 import { inngest, CLOUD_FN_PREFIX } from '../client'

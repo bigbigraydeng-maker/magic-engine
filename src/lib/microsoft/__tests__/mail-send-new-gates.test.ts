@@ -372,6 +372,56 @@ describe('sendMailNew gate wiring', () => {
   })
 })
 
+describe('an exception before the send starts is a refusal; once it has started it is not', () => {
+  const dbDown = async (): Promise<never> => {
+    throw new Error('db down')
+  }
+
+  it('a store read that throws before anything can leave: 503 internal_error, nothing touched, and a meta so the attempt gets a receipt', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.store.findPriorSend = vi.fn(dbDown)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(result.meta).toBeDefined()
+    expect(f.store.claimConversation).not.toHaveBeenCalled()
+    expect(f.store.insertAudit).not.toHaveBeenCalled()
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+  })
+
+  it('a legacy-config client gets the same refusal, without a meta (so still no receipt, as before)', async () => {
+    const f = makeFakes({ leadsConfig: ENABLED })
+    f.store.findPriorSend = vi.fn(dbDown)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(result.meta).toBeUndefined()
+  })
+
+  it('a gate that throws inside the lock is a refusal too, and the lock is released', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    const gates = stubGates(f)
+    gates.inLock = vi.fn(dbDown)
+    f.deps.gates = gates
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(f.store.releaseContactLock).toHaveBeenCalled()
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+  })
+
+  it('once the send has started an exception still propagates: the caller must record "unknown", not "failed"', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.graph.createDraft = vi.fn(async () => {
+      throw new Error('graph exploded')
+    })
+    await expect(sendMailNew(baseInput(), f.deps)).rejects.toThrow('graph exploded')
+    expect(f.store.releaseContactLock).toHaveBeenCalled()
+  })
+})
+
 describe('requestIdFromMeta', () => {
   it('reads the request id out of every audit meta shape, and nothing else', () => {
     expect(requestIdFromMeta(`req:${REQUEST_ID}`)).toBe(REQUEST_ID)

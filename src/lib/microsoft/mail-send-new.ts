@@ -161,6 +161,8 @@ const PENDING_UNKNOWN_AFTER_MS = 2 * 60_000
 interface Track {
   meta: SendMeta | null
   mailbox: string | null
+  /** Set the moment claimAndSend is entered: from there on a message may leave, so an exception no longer means "not sent". */
+  sendStarted: boolean
 }
 
 interface Resolved {
@@ -304,9 +306,26 @@ export async function reconcileSendRequest(
   return prior.status === 'failed' ? { status: 'failed' } : { status: 'unresolved' }
 }
 
+/**
+ * An exception raised BEFORE the send starts (reads, gates, the contact lock) means nothing left the building, so it is a
+ * plain refusal (receipt `failed`). Treating it as an "unknown" send would leave a receipt with no audit row behind it,
+ * which the settle step can never close, and the same template would stay blocked for this guest until the cooldown ends.
+ */
+function refusedBeforeSending(err: unknown): SendMailNewResult {
+  console.error('[mail-send-new] 发信前出错，这封没有发出:', err instanceof Error ? err.message : err)
+  return fail(503, 'internal_error', GATE_MESSAGES.internal_error)
+}
+
 export async function sendMailNew(input: SendMailNewInput, deps: MailNewDeps): Promise<SendMailNewResult> {
-  const track: Track = { meta: null, mailbox: null }
-  const result = await runSendMailNew(input, deps, track)
+  const track: Track = { meta: null, mailbox: null, sendStarted: false }
+  let result: SendMailNewResult
+  try {
+    result = await runSendMailNew(input, deps, track)
+  } catch (err) {
+    // Once claimAndSend has been entered a message may have left: the caller must see the exception and record "unknown".
+    if (track.sendStarted) throw err
+    result = refusedBeforeSending(err)
+  }
   // Legacy-config clients (no versioned settings) get no meta and so no receipt: their behaviour is unchanged.
   if (track.meta === null && result.meta === undefined) return result
   const meta = { ...(result.meta ?? track.meta ?? emptyMeta()), mailbox: track.mailbox }
@@ -370,7 +389,7 @@ async function runSendMailNew(input: SendMailNewInput, deps: MailNewDeps, track:
     return fail(409, 'busy', '这个客人正在发送另一封邮件，请稍等。')
   }
   try {
-    return await sendUnderLock({ input, subject, body, requestId, to, mailbox, config, pre }, deps)
+    return await sendUnderLock({ input, subject, body, requestId, to, mailbox, config, pre, track }, deps)
   } finally {
     await store.releaseContactLock(input.clientId, input.contactId).catch((err) => {
       console.error('[mail-send-new] 释放发送锁失败（5 分钟后自动失效）:', err)
@@ -395,6 +414,7 @@ interface LockedSend {
   mailbox: MailboxChoice
   config: EffectiveEmailConfig
   pre: Extract<PreLockResult, { ok: true }> | null
+  track: Track
 }
 
 // 已经拿到联系人锁：先跑「锁内」的检查（防重复跟进、7 天频次——必须在锁内数，防两个人同时都通过），再发。
@@ -413,6 +433,7 @@ async function sendUnderLock(args: LockedSend, deps: MailNewDeps): Promise<SendM
     if (!step.ok) return gateFailure(step)
     meta = step.meta
   }
+  args.track.sendStarted = true
   const sent = await claimAndSend(
     { input, subject: args.subject, body: appendFooter(args.body, config.footer), requestId: args.requestId, to: args.to, mailbox: args.mailbox },
     deps,
