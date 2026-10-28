@@ -269,6 +269,14 @@ export async function findReceiptByRequest(
   return rows[0] ?? null
 }
 
+/**
+ * The template receipts that mean "he may already have this mail": `sent`, and `unknown` (it may well have gone out; the
+ * follow-up gate counts it as sent until it is settled).
+ *
+ * The table is append-only: settling an `unknown` send adds a row and leaves the old one. A request whose `unknown` was
+ * later settled as `failed` never went out and must not count, or the guest stays blocked by a mail that does not exist.
+ * The `failed` rows are read only to apply that and are not returned.
+ */
 export async function findSentTemplateReceiptsSince(
   db: SupabaseClient,
   clientId: string,
@@ -280,12 +288,27 @@ export async function findSentTemplateReceiptsSince(
     .select('*')
     .eq('client_id', clientId)
     .eq('contact_id', contactId)
-    .in('outcome', ['sent', 'unknown']) // 'unknown' = may have gone out; see the follow-up gate
+    .in('outcome', ['sent', 'unknown', 'failed'])
     .not('template_key', 'is', null)
     .gte('created_at', sinceIso)
     .order('created_at', { ascending: false })
   if (error !== null) throw new Error(`${TABLE}: find sent since: ${error.message}`)
-  return mapRowsOrThrow(Array.isArray(data) ? data : [])
+  const rows = mapRowsOrThrow(Array.isArray(data) ? data : [])
+
+  const failedAt = new Map<string, number>() // request id -> latest `failed` row
+  for (const row of rows) {
+    if (row.outcome !== 'failed') continue
+    const at = Date.parse(row.createdAt)
+    if (Number.isFinite(at) && at > (failedAt.get(row.requestId) ?? -Infinity)) failedAt.set(row.requestId, at)
+  }
+  return rows.filter((row) => {
+    if (row.outcome === 'sent') return true
+    if (row.outcome !== 'unknown') return false
+    const settledAt = failedAt.get(row.requestId)
+    const unknownAt = Date.parse(row.createdAt)
+    // Only a `failed` row written at or after the `unknown` one settles it; anything unreadable keeps counting.
+    return !(settledAt !== undefined && Number.isFinite(unknownAt) && settledAt >= unknownAt)
+  })
 }
 
 interface SummaryAccumulator {

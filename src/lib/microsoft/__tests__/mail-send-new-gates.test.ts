@@ -10,7 +10,7 @@ import type {
 } from '@/lib/crm/email-templates/send-gates'
 import type { TemplateRequest } from '@/lib/crm/email-templates/send-gates'
 import { emptyMeta } from '@/lib/crm/email-templates/send-gates'
-import { reconcileSendRequest, sendMailNew } from '../mail-send-new'
+import { metaIdFor, reconcileSendRequest, requestIdFromMeta, sendMailNew } from '../mail-send-new'
 import { baseInput, makeFakes, ENABLED, REQUEST_ID } from './mail-send-new-fakes'
 
 type Fakes = ReturnType<typeof makeFakes>
@@ -372,6 +372,20 @@ describe('sendMailNew gate wiring', () => {
   })
 })
 
+describe('requestIdFromMeta', () => {
+  it('reads the request id out of every audit meta shape, and nothing else', () => {
+    expect(requestIdFromMeta(`req:${REQUEST_ID}`)).toBe(REQUEST_ID)
+    expect(requestIdFromMeta(`req:${REQUEST_ID}|draft:AAMk1`)).toBe(REQUEST_ID)
+    expect(requestIdFromMeta(`req:${REQUEST_ID}|msg:AAMk1`)).toBe(REQUEST_ID)
+    expect(requestIdFromMeta(metaIdFor(REQUEST_ID, 'msg', 'AAMk1'))).toBe(REQUEST_ID)
+    expect(requestIdFromMeta(null)).toBeNull()
+    expect(requestIdFromMeta('')).toBeNull()
+    expect(requestIdFromMeta('draft:AAMk1')).toBeNull()
+    expect(requestIdFromMeta('req:not-a-uuid|draft:AAMk1')).toBeNull()
+    expect(requestIdFromMeta(` req:${REQUEST_ID}`)).toBeNull()
+  })
+})
+
 describe('reconcileSendRequest', () => {
   const args = { clientId: 'client-a', contactId: 'contact-1', requestId: REQUEST_ID }
   const PRIOR_SENT = { auditId: 'a1', status: 'sent' as const, messageId: 'AAMk1', conversationId: 'conv-1' }
@@ -410,6 +424,42 @@ describe('reconcileSendRequest', () => {
     withSettings(f, okSettings())
     await reconcileSendRequest(args, f.deps)
     expect(f.store.patchAudit).toHaveBeenCalledWith('a1', { status: 'sent' })
+  })
+
+  it('writes the message id into the audit row when a pending draft turns out to have been sent', async () => {
+    const f = makeFakes({
+      prior: { ...PRIOR_SENT, status: 'pending', messageId: null },
+      pending: [{ auditId: 'a1', draftId: 'draft-1', createdAt: '2026-10-20T00:00:00Z', requestId: REQUEST_ID }],
+      isStillDraft: { 'draft-1': false },
+    })
+    withSettings(f, okSettings())
+    await reconcileSendRequest(args, f.deps)
+    expect(f.store.patchAudit).toHaveBeenCalledWith('a1', { status: 'sent', metaMessageId: `req:${REQUEST_ID}|msg:draft-1` })
+  })
+
+  it('a timed-out send that really went out settles as sent with its message id, and a retry still sees it', async () => {
+    const f = makeFakes({ isStillDraft: { 'draft-1': false } })
+    withSettings(f, okSettings())
+    // One audit row, exactly as finishSend leaves it after an `unknown` outcome (still pending, draft id only).
+    const row = { id: 'a1', status: 'pending' as 'pending' | 'sent' | 'failed', meta: `req:${REQUEST_ID}|draft:draft-1`, createdAt: '2026-10-20T00:00:00Z' }
+    f.store.listPendingDrafts = vi.fn(async () =>
+      row.status === 'pending' ? [{ auditId: row.id, draftId: 'draft-1', createdAt: row.createdAt, requestId: requestIdFromMeta(row.meta) }] : [],
+    )
+    f.store.patchAudit = vi.fn(async (_id, patch) => {
+      if (patch.status) row.status = patch.status
+      if (patch.metaMessageId) row.meta = patch.metaMessageId
+    })
+    // Same reading as the production store: the message id is whatever follows `|msg:`.
+    f.store.findPriorSend = vi.fn(async () => ({
+      auditId: row.id,
+      status: row.status,
+      messageId: /\|msg:(.+)$/.exec(row.meta)?.[1] ?? null,
+      conversationId: 'conv-1',
+    }))
+    const settled = { status: 'sent', messageId: 'draft-1', conversationId: 'conv-1' }
+    expect(await reconcileSendRequest(args, f.deps)).toEqual(settled)
+    // The retry: the row is no longer pending, so nothing is reconciled again, and the answer must not change.
+    expect(await reconcileSendRequest(args, f.deps)).toEqual(settled)
   })
 
   it('is unresolved (and touches no draft) when the settings or the mailbox cannot be resolved', async () => {

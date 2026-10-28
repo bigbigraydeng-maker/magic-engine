@@ -13,7 +13,15 @@ import { MICROSOFT_MAIL_PROVIDER } from '@/lib/microsoft/mail-oauth'
 import { checkManualSendDncForContact } from '@/lib/crm/manual-send-dnc-gate'
 import type { TouchKind } from '@/lib/crm/email-compose/enquiry-record'
 import { GRAPH, callWithRetry, writeTouchpoint, type GraphCallResult } from '@/lib/microsoft/mail-send'
-import type { GraphSendOutcome, MailNewDeps, MailNewGraph, MailNewStore, PendingDraft, PriorSend } from '@/lib/microsoft/mail-send-new'
+import {
+  requestIdFromMeta,
+  type GraphSendOutcome,
+  type MailNewDeps,
+  type MailNewGraph,
+  type MailNewStore,
+  type PendingDraft,
+  type PriorSend,
+} from '@/lib/microsoft/mail-send-new'
 
 const LOCK_STALE_MS = 5 * 60_000
 const UNIQUE_VIOLATION = '23505'
@@ -99,7 +107,7 @@ export function createMailNewStore(): MailNewStore {
       const out: PendingDraft[] = []
       for (const r of (data as Array<{ id: string; meta_message_id: string | null; created_at: string }> | null) ?? []) {
         const draftId = metaPart(r.meta_message_id, 'draft')
-        if (draftId) out.push({ auditId: r.id, draftId, createdAt: r.created_at })
+        if (draftId) out.push({ auditId: r.id, draftId, createdAt: r.created_at, requestId: requestIdFromMeta(r.meta_message_id) })
       }
       return out
     },

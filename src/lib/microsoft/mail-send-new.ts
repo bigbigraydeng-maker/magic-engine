@@ -81,6 +81,8 @@ export interface PendingDraft {
   auditId: string
   draftId: string
   createdAt: string
+  /** The request id read from the audit row's meta (`req:<requestId>|draft:<id>`); absent or null when it cannot be read. */
+  requestId?: string | null
 }
 
 export interface PriorSend {
@@ -146,6 +148,12 @@ const fail = (
 
 /** 审计行的 meta_message_id：`req:<requestId>|draft:<id>` / `req:<requestId>|msg:<id>`，让重复请求能认出自己。 */
 export const metaIdFor = (requestId: string, kind: 'draft' | 'msg', id: string): string => `req:${requestId}|${kind}:${id}`
+
+/** The request id inside an audit row's meta_message_id (`req:<requestId>`, optionally followed by `|draft:…` / `|msg:…`); null when there is none. */
+export const requestIdFromMeta = (meta: string | null): string | null => {
+  const m = /^req:([^|]+)(?:\||$)/.exec(meta ?? '')
+  return m !== null && isUuid(m[1]) ? m[1] : null
+}
 
 const PENDING_UNKNOWN_AFTER_MS = 2 * 60_000
 
@@ -254,7 +262,12 @@ async function reconcile(clientId: string, contactId: string, mailbox: MailboxCh
   for (const p of pending) {
     const draft = await deps.graph.isStillDraft(mailbox.connectionId, p.draftId)
     if (draft === false) {
-      await deps.store.patchAudit(p.auditId, { status: 'sent' })
+      // It has left Drafts, so it went out. Record the message id the way a normal send does (`req:<id>|msg:<id>`; the
+      // draft id is the message id, as in finishSend). A row that keeps only `|draft:` can never be looked up as sent,
+      // so the receipt of that request would stay "unknown" for good.
+      const sent: { status: 'sent'; metaMessageId?: string } = { status: 'sent' }
+      if (p.requestId) sent.metaMessageId = metaIdFor(p.requestId, 'msg', p.draftId)
+      await deps.store.patchAudit(p.auditId, sent)
     } else if (draft === true && now - Date.parse(p.createdAt) >= PENDING_UNKNOWN_AFTER_MS) {
       await deps.graph.deleteDraft(mailbox.connectionId, p.draftId)
       await deps.store.patchAudit(p.auditId, { status: 'failed', errorMessage: '对账：仍是草稿，已删除' })

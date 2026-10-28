@@ -10,6 +10,7 @@ import {
 } from '@/lib/crm/email-templates/receipt-store'
 import type { SendReceipt } from '@/lib/crm/email-templates/types'
 import { createFakeDb } from '@/lib/crm/email-templates/__tests__/fake-db'
+import { evaluateFollowUp } from '@/lib/crm/email-templates/gates/follow-up'
 
 const TABLE = 'crm_email_send_receipts'
 
@@ -144,6 +145,73 @@ describe('findSentTemplateReceiptsSince: sent or possibly sent', () => {
     ]
     const result = await findSentTemplateReceiptsSince(db, CLIENT_ID, CONTACT_ID, '2024-01-01T00:00:00.000Z')
     expect(result.map((r) => r.requestId).sort()).toEqual(['r1', 'r2'])
+  })
+
+  it('drops an unknown send that a later receipt of the same request settled as failed (it never went out)', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = [
+      rowFor('r1', '2024-02-01T00:00:00.000Z', { outcome: 'unknown', block_reason: 'send_unknown' }),
+      rowFor('r1', '2024-02-01T00:10:00.000Z', { outcome: 'failed', block_reason: 'reconcile_failed' }),
+      rowFor('r2', '2024-02-02T00:00:00.000Z', { outcome: 'unknown', block_reason: 'send_unknown' }),
+    ]
+    const result = await findSentTemplateReceiptsSince(db, CLIENT_ID, CONTACT_ID, '2024-01-01T00:00:00.000Z')
+    expect(result.map((r) => r.requestId)).toEqual(['r2'])
+    expect(result.every((r) => r.outcome !== 'failed')).toBe(true)
+  })
+
+  it('keeps counting a request that was settled as sent, and never returns a failed row itself', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = [
+      rowFor('r1', '2024-02-01T00:00:00.000Z', { outcome: 'unknown', block_reason: 'send_unknown' }),
+      rowFor('r1', '2024-02-01T00:10:00.000Z', { outcome: 'sent' }),
+      rowFor('r2', '2024-02-02T00:00:00.000Z', { outcome: 'failed', block_reason: 'graph_failed' }),
+    ]
+    const result = await findSentTemplateReceiptsSince(db, CLIENT_ID, CONTACT_ID, '2024-01-01T00:00:00.000Z')
+    expect(result.map((r) => r.requestId)).toEqual(['r1', 'r1'])
+    expect(result.map((r) => r.outcome).sort()).toEqual(['sent', 'unknown'])
+  })
+
+  it('a failed row written BEFORE the unknown one does not hide it, and one from another contact settles nothing', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = [
+      rowFor('r1', '2024-02-01T00:00:00.000Z', { outcome: 'failed', block_reason: 'graph_failed' }),
+      rowFor('r1', '2024-02-01T00:10:00.000Z', { outcome: 'unknown', block_reason: 'send_unknown' }),
+      rowFor('r2', '2024-02-02T00:00:00.000Z', { outcome: 'unknown', block_reason: 'send_unknown' }),
+      rowFor('r2', '2024-02-02T00:10:00.000Z', { outcome: 'failed', block_reason: 'reconcile_failed', contact_id: OTHER_CONTACT_ID }),
+    ]
+    const result = await findSentTemplateReceiptsSince(db, CLIENT_ID, CONTACT_ID, '2024-01-01T00:00:00.000Z')
+    expect(result.map((r) => r.requestId).sort()).toEqual(['r1', 'r2'])
+  })
+})
+
+describe('an unknown send that is confirmed not sent stops blocking the follow-up gate', () => {
+  const gateInput = (sentTemplateReceipts: Awaited<ReturnType<typeof findSentTemplateReceiptsSince>>) => ({
+    templateKey: 'welcome-tour',
+    callEvidenceAt: '2024-01-31T23:00:00.000Z',
+    cooldownHours: 24,
+    now: new Date('2024-02-01T01:00:00.000Z'),
+    sentTemplateReceipts,
+  })
+
+  it('blocks while the send is unknown, and lets the guest be written to again once it is settled as failed', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = [rowFor('r1', '2024-02-01T00:00:00.000Z', { outcome: 'unknown', block_reason: 'send_unknown' })]
+    const since = '2024-01-31T00:00:00.000Z'
+    expect(evaluateFollowUp(gateInput(await findSentTemplateReceiptsSince(db, CLIENT_ID, CONTACT_ID, since)))?.code).toBe(
+      'already_followed_up',
+    )
+    tables[TABLE]?.push(rowFor('r1', '2024-02-01T00:10:00.000Z', { outcome: 'failed', block_reason: 'reconcile_failed' }))
+    expect(evaluateFollowUp(gateInput(await findSentTemplateReceiptsSince(db, CLIENT_ID, CONTACT_ID, since)))).toBeNull()
+  })
+
+  it('still blocks once the send is settled as sent', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = [
+      rowFor('r1', '2024-02-01T00:00:00.000Z', { outcome: 'unknown', block_reason: 'send_unknown' }),
+      rowFor('r1', '2024-02-01T00:10:00.000Z', { outcome: 'sent' }),
+    ]
+    const receipts = await findSentTemplateReceiptsSince(db, CLIENT_ID, CONTACT_ID, '2024-01-31T00:00:00.000Z')
+    expect(evaluateFollowUp(gateInput(receipts))?.code).toBe('already_followed_up')
   })
 })
 
