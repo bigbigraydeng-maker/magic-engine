@@ -14,8 +14,11 @@ const NAMED_ENTITY_PATTERN = /&(amp|lt|gt|quot|apos|nbsp|hyphen|ndash|mdash);/g;
 const NUMERIC_ENTITY_PATTERN = /&#(?:(\d+)|[xX]([0-9a-fA-F]+));/g;
 const PERCENT_RUN_PATTERN = /(?:%[0-9a-fA-F]{2})+/g;
 
+// Zero-width characters, invisible operators (U+2061-2064), combining grapheme joiner, variation selectors,
+// soft hyphen, bidi controls and the invisible Hangul/Khmer fillers: none of them shows on screen, all of them
+// can be slipped between the letters of a blocked phrase.
 const INVISIBLE_PATTERN =
-  /[\u200B\u200C\u200D\u2060\uFEFF\u00AD\u180E\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+  /[\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u2066-\u2069\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\uFE00-\uFE0F\uFEFF\u00AD\u3164\uFFA0\u{E0100}-\u{E01EF}]/gu;
 
 const DASH_PATTERN = /[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D\u2043]/g;
 
@@ -77,4 +80,19 @@ export function normalizeForCheck(text: string): string {
   result = result.replace(WHITESPACE_PATTERN, ' ').trim();
   result = result.replace(HYPHEN_SPACING_PATTERN, '-');
   return result.toLowerCase();
+}
+
+/**
+ * Normalises text for LINK extraction. Differs from `normalizeForCheck` on purpose:
+ *  - no percent-decoding: `https://good.example%2F@evil.com` must keep its `%2F` so the host is read the way a
+ *    browser reads it (the authority is `good.example%2F@evil.com`: user-info, then host evil.com);
+ *  - whitespace and hyphens are left alone: squeezing the spaces around a hyphen would glue "a.com/x - https://evil.com"
+ *    into ONE link whose host looks fine while a mail client still shows the second link;
+ *  - not lower-cased (hosts are compared case-insensitively where they are used).
+ */
+export function normalizeForLinks(text: string): string {
+  let result = text.normalize('NFKC');
+  result = decodeEntities(result);
+  result = result.normalize('NFKC');
+  return result.replace(INVISIBLE_PATTERN, '');
 }

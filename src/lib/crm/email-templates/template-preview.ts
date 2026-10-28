@@ -112,13 +112,27 @@ interface PickState {
   provider: FactProvider | null
 }
 
+/**
+ * A template with no content source still has its links checked against the published catalog (same as the real send),
+ * but offers nothing to pick and has no catalog version of its own.
+ */
+async function linkOnlyState(args: PreviewArgs, data: SendGateData, tz: string): Promise<PickState | PreviewResult> {
+  const none: PickState = { options: [], pickProblem: null, facts: null, catalogVersion: null, provider: null }
+  const settings = args.config.providers.publishedTours
+  const provider = getProvider('published_tours')
+  if (settings === undefined || provider === null) return none
+  const loaded = await data.loadFacts(args.clientId, todayInZone(args.now, tz))
+  if (!loaded.ok) return refuse(503, 'catalog_unreadable', '团目录暂时读不到，先别发。')
+  return { ...none, provider, facts: { tours: loaded.tours, picks: [], settings, linkHosts: args.config.guardrails.allowedLinkHosts } }
+}
+
 async function pickState(
   args: PreviewArgs,
   tpl: { factSource: FactSource; pickMode: PickMode; pickFilter: Parameters<FactProvider['listPickOptions']>[1] },
   data: SendGateData,
   tz: string,
 ): Promise<PickState | PreviewResult> {
-  if (tpl.factSource === 'none') return { options: [], pickProblem: null, facts: null, catalogVersion: null, provider: null }
+  if (tpl.factSource === 'none') return linkOnlyState(args, data, tz)
   const provider = getProvider(tpl.factSource)
   if (provider === null) return refuse(503, 'internal_error', '这个模板用的事实来源现在不可用。')
   const loaded = await data.loadFacts(args.clientId, todayInZone(args.now, tz))
@@ -138,7 +152,7 @@ async function pickState(
   return {
     options: provider.listPickOptions(loaded.tours, tpl.pickFilter),
     pickProblem,
-    facts: { tours: loaded.tours, picks, settings: args.config.providers.publishedTours ?? null },
+    facts: { tours: loaded.tours, picks, settings: args.config.providers.publishedTours ?? null, linkHosts: args.config.guardrails.allowedLinkHosts },
     catalogVersion: loaded.version,
     provider,
   }

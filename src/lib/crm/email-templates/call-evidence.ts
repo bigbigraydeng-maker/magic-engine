@@ -9,12 +9,22 @@ export interface CallEvidence {
   at: string
 }
 
+/**
+ * The ONLY touchpoint sources that are a telephony system's own record of a call. An allowlist, not "anything
+ * except typed notes": other sources also write phone touchpoints (spreadsheet follow-up imports, the AI voice
+ * agent) whose `outcome` is a parser fallback or an automated call, and none of them is "he just spoke to us".
+ * A new telephony provider must be added here on purpose.
+ */
+export const SYSTEM_CALL_SOURCES: readonly string[] = ['phone/voipline']
+
 function isConnected(metadata: Record<string, unknown> | null): boolean {
   if (metadata === null) return false
+  // imported spreadsheet notes carry an approximate time; automated (AI agent) calls are not a staff conversation
+  if (metadata.automated === true || metadata.time_is_approximate === true) return false
   if (metadata.reached === true) return true
   const talk = metadata.talk_seconds
-  if (metadata.answered === true && typeof talk === 'number' && talk > 0) return true
-  return metadata.outcome === 'spoke'
+  // `outcome === 'spoke'` alone is deliberately NOT enough: it is also the note parser's catch-all value
+  return metadata.answered === true && typeof talk === 'number' && talk > 0
 }
 
 /**
@@ -32,7 +42,7 @@ export function findConnectedCallEvidence(
   const cutoff = now.getTime() - hours * 3_600_000
   let best: { ms: number; at: string } | null = null
   for (const touch of touches) {
-    if (touch.source === 'me_manual') continue
+    if (touch.source === null || !SYSTEM_CALL_SOURCES.includes(touch.source)) continue
     if (!isConnected(touch.metadata)) continue
     const ms = Date.parse(touch.occurredAt)
     if (Number.isNaN(ms) || ms < cutoff || ms > now.getTime() + 5 * 60_000) continue

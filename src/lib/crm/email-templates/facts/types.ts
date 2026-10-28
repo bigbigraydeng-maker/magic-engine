@@ -57,6 +57,11 @@ export interface RenderFacts {
   tours: PublishedTourFact[]
   picks: ResolvedPick[]
   settings: PublishedToursProviderSettings | null
+  /**
+   * Every host the client allows links to (guardrails.allowedLinkHosts). A site is often reachable under more than one
+   * spelling (with and without www): a link on ANY of them is held to the same page rules.
+   */
+  linkHosts?: readonly string[]
 }
 
 export interface LinkViolation {

@@ -294,6 +294,8 @@ interface PathPattern {
   host: string
   regex: RegExp
   groupOrder: Array<'destination' | 'tier' | 'slug'>
+  /** The literal start of the path before the first token (e.g. "/tours/"); '' when the pattern starts with a token. */
+  prefix: string
 }
 
 function parsePathPattern(urlPattern: string): PathPattern | null {
@@ -320,11 +322,17 @@ function parsePathPattern(urlPattern: string): PathPattern | null {
     regexSource += escapeRegex(rawPath[i])
     i += 1
   }
+  const firstToken = rawPath.indexOf('{')
   return {
     host: parsed.hostname.toLowerCase(),
     regex: new RegExp(`^${regexSource}/?$`),
     groupOrder,
+    prefix: firstToken < 0 ? '' : rawPath.slice(0, firstToken),
   }
+}
+
+function hostKey(host: string): string {
+  return host.toLowerCase().replace(/\.+$/, '')
 }
 
 function checkOneUrl(url: string, pattern: PathPattern, facts: RenderFacts): LinkViolation | null {
@@ -334,9 +342,17 @@ function checkOneUrl(url: string, pattern: PathPattern, facts: RenderFacts): Lin
   } catch {
     return null
   }
-  if (parsed.hostname.toLowerCase() !== pattern.host) return null
+  const host = hostKey(parsed.hostname)
+  const catalogHosts = new Set([hostKey(pattern.host), ...(facts.linkHosts ?? []).map(hostKey)])
+  if (!catalogHosts.has(host)) return null
   const match = pattern.regex.exec(parsed.pathname)
-  if (!match) return null
+  if (!match) {
+    // A page under the tours section that is not "a published tour" is not a link we can vouch for: it may be a
+    // taken-down tour (those pages answer 200 with a generic list). The list page itself stays allowed.
+    return isUnrecognisedTourPath(parsed.pathname, pattern, facts)
+      ? { url, code: 'tour_page_not_on_sale', detail: 'unrecognised page under the tours section' }
+      : null
+  }
   const captured: Partial<Record<'destination' | 'tier' | 'slug', string>> = {}
   pattern.groupOrder.forEach((key, idx) => {
     captured[key] = match[idx + 1]
@@ -370,6 +386,25 @@ function checkOneUrl(url: string, pattern: PathPattern, facts: RenderFacts): Lin
     }
   }
   return null
+}
+
+function trimSlashes(path: string): string {
+  return path.replace(/\/+$/, '')
+}
+
+function isUnrecognisedTourPath(pathname: string, pattern: PathPattern, facts: RenderFacts): boolean {
+  const prefix = trimSlashes(pattern.prefix)
+  if (prefix === '') return false // the pattern starts with a token: no way to tell a tours section from the rest of the site
+  const path = trimSlashes(pathname)
+  if (path !== prefix && !path.startsWith(`${prefix}/`)) return false
+  if (path === prefix) return false // the list of all tours
+  try {
+    const all = facts.settings ? trimSlashes(new URL(facts.settings.allToursUrl).pathname) : ''
+    if (all !== '' && path === all) return false
+  } catch {
+    // an unreadable all-tours URL cannot excuse a link
+  }
+  return true
 }
 
 function checkLinks(urls: readonly string[], facts: RenderFacts): LinkViolation[] {

@@ -266,6 +266,7 @@ async function templateStage(
     tours: loaded.tours,
     picks: resolved.picks,
     settings: args.config.providers.publishedTours ?? null,
+    linkHosts: args.config.guardrails.allowedLinkHosts,
   }
   return { ok: true, tpl, provider, facts }
 }
@@ -284,7 +285,7 @@ async function linkFactsStage(
   const loaded = await data.loadFacts(args.clientId, todayInZone(args.now, tz))
   if (!loaded.ok) return fail(503, 'catalog_unreadable', meta)
   meta.catalogVersion = loaded.version
-  return { ok: true, provider, facts: { tours: loaded.tours, picks: [], settings } }
+  return { ok: true, provider, facts: { tours: loaded.tours, picks: [], settings, linkHosts: args.config.guardrails.allowedLinkHosts } }
 }
 
 async function attachRenderHash(
@@ -335,6 +336,13 @@ async function runPreLock(args: PreLockArgs, data: SendGateData, tz: string): Pr
     if (!('tpl' in stage)) return stage
     provider = stage.provider
     facts = stage.facts
+    if (provider === null) {
+      // A template without a content source still must not carry a link to a taken-down tour page.
+      const links = await linkFactsStage(args, data, tz, meta)
+      if (!links.ok) return links
+      provider = links.provider
+      facts = links.facts
+    }
     await attachRenderHash(args, args.template, stage, view, data, tz, meta)
   } else {
     const stage = await linkFactsStage(args, data, tz, meta)
