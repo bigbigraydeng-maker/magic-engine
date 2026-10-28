@@ -81,8 +81,8 @@ describe('loadContactView', () => {
       contact_identities: ok(identities),
       contact_touchpoints: ok([
         { occurred_at: '2026-10-28T01:30:00Z', source: 'me_manual', metadata: { outcome: 'spoke' } },
-        { occurred_at: '2026-10-28T01:00:00Z', source: 'phone/voipline', metadata: { answered: true, talk_seconds: 95 } },
-        { occurred_at: '2026-10-27T20:00:00Z', source: 'phone/voipline', metadata: { reached: false } },
+        { occurred_at: '2026-10-28T01:00:00Z', source: 'twilio', metadata: { answered: true, talk_seconds: 95 } },
+        { occurred_at: '2026-10-27T20:00:00Z', source: 'voipline', metadata: { reached: false } },
       ]),
     })
     const view = await data.loadContactView(CLIENT, 'contact-1', 72, NOW)

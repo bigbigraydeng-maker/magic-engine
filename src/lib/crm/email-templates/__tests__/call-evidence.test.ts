@@ -5,7 +5,7 @@ const HOUR = 3_600_000
 const ago = (ms: number): string => new Date(Date.now() - ms).toISOString()
 const touch = (over: Partial<PhoneTouch>): PhoneTouch => ({
   occurredAt: ago(HOUR),
-  source: 'phone/voipline',
+  source: 'twilio',
   metadata: { reached: true },
   ...over,
 })
@@ -14,6 +14,28 @@ describe('findConnectedCallEvidence', () => {
   it('finds a system call that reached the guest', () => {
     const at = ago(2 * HOUR)
     expect(findConnectedCallEvidence([touch({ occurredAt: at })], new Date(), 24)).toEqual({ at })
+  })
+
+  // The source values are what the telephony writer stores (`source: conn.provider`): 'twilio' is the one production
+  // holds today, 'voipline' is the other provider the writer supports.
+  it.each(['twilio', 'voipline'])('the telephony provider "%s" is a system call source', (source) => {
+    expect(findConnectedCallEvidence([touch({ source })], new Date(), 24)).not.toBeNull()
+  })
+
+  it.each(['phone/twilio', 'phone/voipline'])(
+    'the "channel/source" kind key "%s" is not a source value: it is how the enquiry rule names a touch, no row stores it',
+    (source) => {
+      expect(findConnectedCallEvidence([touch({ source })], new Date(), 24)).toBeNull()
+    },
+  )
+
+  it('reads the three shapes real Twilio call rows have: outbound reached, inbound answered, inbound missed', () => {
+    const outbound = touch({ occurredAt: ago(3 * HOUR), metadata: { outcome: 'spoke', reached: true, answered: true, talk_seconds: 52 } })
+    const inboundAnswered = touch({ occurredAt: ago(2 * HOUR), metadata: { outcome: 'spoke', reached: false, answered: true, talk_seconds: 31 } })
+    const inboundMissed = touch({ occurredAt: ago(HOUR), metadata: { outcome: 'missed_inbound', reached: false, answered: false, talk_seconds: 0 } })
+    expect(findConnectedCallEvidence([outbound], new Date(), 24)).toEqual({ at: outbound.occurredAt })
+    expect(findConnectedCallEvidence([inboundAnswered], new Date(), 24)).toEqual({ at: inboundAnswered.occurredAt })
+    expect(findConnectedCallEvidence([inboundMissed], new Date(), 24)).toBeNull()
   })
 
   it('also accepts answered with talk time', () => {

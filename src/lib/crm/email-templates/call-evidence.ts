@@ -14,8 +14,12 @@ export interface CallEvidence {
  * except typed notes": other sources also write phone touchpoints (spreadsheet follow-up imports, the AI voice
  * agent) whose `outcome` is a parser fallback or an automated call, and none of them is "he just spoke to us".
  * A new telephony provider must be added here on purpose.
+ *
+ * These are the raw `contact_touchpoints.source` values: the telephony writer stores the provider's own name there
+ * (`source: conn.provider` in telephony/voipline/process.ts; production holds 'twilio' today). They are NOT the
+ * "channel/source" kind keys ('phone/twilio') that ENQUIRY_INBOUND_SOURCES uses to name a touch: no row stores those.
  */
-export const SYSTEM_CALL_SOURCES: readonly string[] = ['phone/voipline']
+export const SYSTEM_CALL_SOURCES: readonly string[] = ['twilio', 'voipline']
 
 function isConnected(metadata: Record<string, unknown> | null): boolean {
   if (metadata === null) return false
