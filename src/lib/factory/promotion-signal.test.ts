@@ -63,7 +63,7 @@ describe('promotion signal row', () => {
         budget_cap_usd: FACTORY_ORDER_BUDGET_CAP_USD,
         deliverable: 'asset_only',
       },
-      request: { notes: 'Autumn push second line', deliverable: 'asset_only' },
+      request: { notes: 'Autumn push second line', deliverable: 'asset_only', platform: 'facebook' },
     })
     expect(JSON.stringify(row)).not.toMatch(/CTS|Facebook|act_/)
   })

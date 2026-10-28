@@ -1,5 +1,7 @@
 # Winner Reel Auto-Sync · SOP
 
+> 负责 agent：卫青（`weiqing`）｜ 档案：[`docs/agents/11-weiqing.md`](../agents/11-weiqing.md) ｜ 索引：[agents 索引](../agents/README.md)
+
 **Phase 34.A · Level 1 试点版**
 
 ## 一句话

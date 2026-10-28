@@ -41,6 +41,8 @@ export interface TimelineEntry {
   channel?: string | null
   direction?: 'inbound' | 'outbound'
   summary?: string | null
+  /** 出站且是机器发的（Mailchimp 欢迎信 / 群发）：显示成「系统自动发出」，不算「我们说的最后一句」。 */
+  automated?: boolean
   /**
    * 销售真正敲进去的那句话 —— **跟 `summary` 不是一回事**，后者是 AI 摘要。
    * 只在判决行旁边展示，理由见 `VERDICT_ROW`。
@@ -198,6 +200,8 @@ const OUTCOME_CHIP: Record<string, string> = {
  *
  * 记录少的时候不框：一屏就看完了，框起来反而多一层滚动条。
  */
+/** 折叠时直接露出的最近条数。 */
+const RECENT_WHEN_COLLAPSED = 5
 const LONG_TIMELINE = 6
 
 /**
@@ -261,7 +265,8 @@ function summarise(
     if (e.travelWindow) s.travelWindow = e.travelWindow
     if (e.kind === 'stage') s.stageSource = stageSourceOf(e.changedBy)
     const text = e.kind === 'message' ? e.body : e.kind === 'touch' ? e.summary : null
-    if (text && text.trim()) {
+    // 机器自动发出的信不是「最后一句」：不能盖掉客人真说的话。
+    if (text && text.trim() && !e.automated) {
       s.lastText = (e.kind === 'touch' ? humanizeFormSummary(text) : null) ?? text.trim()
       s.lastWho = e.direction === 'inbound' ? (e.senderName || '客人') : '我们'
       s.lastAt = e.at
@@ -407,7 +412,7 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
   const icon = CHANNEL_ICON[e.channel ?? ''] ?? '•'
   const name = CHANNEL_NAME[e.channel ?? ''] ?? e.channel ?? '接触'
   const chips = [
-    e.tour && `想去：${e.tour}`,
+    e.tour && `想去：${humanizeFormCode(e.tour) ?? e.tour}`,
     e.travelWindow && `${e.travelWindow} 走`,
     e.competitor && `提到 ${e.competitor}`,
     e.callbackAt && '约了回电',
@@ -438,7 +443,7 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
     >
       <p className="text-[10px] font-bold text-me-charcoal/40">
         {icon} {name}
-        {e.direction === 'inbound' ? ' · 客人来的' : ''} · {when(e.at)}
+        {e.direction === 'inbound' ? ' · 客人来的' : e.automated ? ' · 系统自动发出' : ''} · {when(e.at)}
       </p>
       {e.summary && (
         <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/85">{humanizeFormSummary(e.summary) ?? e.summary}</p>
@@ -631,15 +636,24 @@ export function ContactTimeline({
   }
 
   if (collapsible && !expanded) {
+    // 折叠时仍露出最近几条：员工要看「他最近说了什么 / 我们回了什么」，不该只剩一行按钮。
+    // PM 2026-10-28：打开抽屉看不到过往记录。更早的才折起来。
+    const recent = data.timeline.slice(-RECENT_WHEN_COLLAPSED)
+    const earlier = data.timeline.length - recent.length
     return (
-      <button
-        type="button"
-        onClick={() => setExpanded(true)}
-        className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-2 text-[13px] font-bold text-me-charcoal/70 hover:bg-me-ivory"
-      >
-        看完整往来原文（{data.timeline.length} 条）
-        <span aria-hidden>▾</span>
-      </button>
+      <div className="space-y-2.5" data-testid="timeline-recent">
+        {recent.map((e, i) => (
+          <Row key={i} e={e} clientId={clientId} />
+        ))}
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-2 text-[13px] font-bold text-me-charcoal/70 hover:bg-me-ivory"
+        >
+          {earlier > 0 ? `看更早的往来（还有 ${earlier} 条）` : `看完整往来原文（${data.timeline.length} 条）`}
+          <span aria-hidden>▾</span>
+        </button>
+      </div>
     )
   }
 

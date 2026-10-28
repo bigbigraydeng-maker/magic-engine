@@ -31,7 +31,7 @@ import { readPageMetrics } from '@/lib/seo/post-publish-monitor-store'
 import { persistZhugeActions } from '@/lib/zhuge/action-persister'
 import type { PriorityAction, ZhugeOutput } from '@/lib/zhuge/types'
 import { checkFactPreservation } from './fact-check'
-import { checkHardFactsPreserved } from './hard-fact-check'
+import { checkHardFactsPreserved, listHardFacts } from './hard-fact-check'
 import { checkTitleOnTopic, GATE_REASON, resolveGscSiteUrl, runGateForCandidate } from './gate'
 import { fromGscPages, mergeCandidates, type RawGscPage } from './candidates'
 import { classifyMetaChangeOutcome } from './outcome-classifier'
@@ -364,6 +364,57 @@ const AI_META_MAX_DESC = 155
 
 export type GenerateMetaFn = (input: MetaGenerationInput) => Promise<{ title: string; desc: string }>
 
+/**
+ * 2026-10-28: every CTS proposal had been blocked since 09-28 because the
+ * generator ran before the current text was read, so it wrote generic copy
+ * that dropped the page's concrete facts. Now the generator sees the current
+ * text + the facts the hard check requires, and gets exactly ONE retry with
+ * the hard check's reason as feedback. Never loops; downstream checks still
+ * decide.
+ */
+async function generateWithFactRetry(
+  generateMeta: GenerateMetaFn,
+  baseInput: MetaGenerationInput,
+  oldTitle: string,
+  oldDesc: string,
+  brandTerms: string[],
+): Promise<{ title: string; desc: string }> {
+  const factOptions = { ignoreTerms: brandTerms }
+  const factsToKeep = listHardFacts(oldTitle, oldDesc, factOptions)
+  const first = await generateMeta({ ...baseInput, currentTitle: oldTitle, currentDesc: oldDesc, factsToKeep })
+  const firstTitle = first.title.slice(0, AI_META_MAX_TITLE)
+  const firstDesc = first.desc.slice(0, AI_META_MAX_DESC)
+  const firstCheck = checkHardFactsPreserved(oldTitle, oldDesc, firstTitle, firstDesc, factOptions)
+  if (firstCheck.consistent) return { title: firstTitle, desc: firstDesc }
+
+  const retry = await generateMeta({
+    ...baseInput,
+    currentTitle: oldTitle,
+    currentDesc: oldDesc,
+    factsToKeep,
+    retryFeedback: firstCheck.reason,
+  })
+  return { title: retry.title.slice(0, AI_META_MAX_TITLE), desc: retry.desc.slice(0, AI_META_MAX_DESC) }
+}
+
+/** The "preview failed / slug not editable" proposal record — shared by both preview calls. */
+function previewFailedProposal(
+  candidate: MetaCycleCandidate,
+  evidence: MetaCycleGateEvidence,
+  newTitle: string,
+  newDesc: string,
+  skipReason: string,
+): MetaCycleProposal {
+  return {
+    slug: candidate.slug ?? '', pageUrl: candidate.pageUrl ?? '', keyword: evidence.keyword,
+    searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate,
+    keywordDataSource: evidence.keywordDataSource, keywordDataLocation: evidence.keywordDataLocation, keywordDataNote: evidence.keywordDataNote,
+    competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason,
+    oldTitle: '', oldDesc: '', newTitle, newDesc,
+    factCheckConsistent: false, factCheckReason: 'not checked — preview failed first', applied: false, skipReason,
+  }
+}
+
 /** One candidate's worth of step-4 work — kept separate from runStep4Applied for the 50-line budget. */
 async function applyOnePrescription(
   supabase: SupabaseClient,
@@ -378,7 +429,23 @@ async function applyOnePrescription(
 ): Promise<{ proposal: MetaCycleProposal | null; manualAction: PriorityAction | null }> {
   if (!candidate.pageUrl || !candidate.slug) return { proposal: null, manualAction: null }
 
-  const meta = await generateMeta({
+  const evidenceMeta = { page_slug: candidate.slug, page_url: candidate.pageUrl, keyword: evidence.keyword }
+
+  // 2026-10-28: read the page's CURRENT text BEFORE generating. The generator
+  // used to run first and never saw it, so it wrote generic copy that dropped
+  // the page's concrete facts and the hard check blocked every proposal.
+  let current: ApplyAdapterResult
+  try {
+    current = await adapter.apply({ candidate, newTitle: '', newDesc: '', weekKey, dryRun: true, evidence })
+  } catch (err) {
+    return { proposal: null, manualAction: buildManualAction(`meta_cycle:${weekKey}:${candidate.slug}`, evidenceMeta, `预览 /${candidate.slug} 的改动失败（${err instanceof Error ? err.message : String(err)}）。`, '需要人工处理', undefined) }
+  }
+  if (current.skipReason && current.skipReason !== 'dry_run') {
+    // slug not found in the repo's data files etc — record it, don't silently drop (PM finding #6).
+    return { proposal: previewFailedProposal(candidate, evidence, '', '', current.skipReason), manualAction: null }
+  }
+
+  const meta = await generateWithFactRetry(generateMeta, {
     keyword: evidence.keyword,
     pageUrl: candidate.pageUrl,
     searchVolume: evidence.searchVolume,
@@ -387,10 +454,9 @@ async function applyOnePrescription(
     ctr: candidate.ctr,
     brandVoice: config.brandVoice,
     competitorTitles: evidence.competitorTitles,
-  })
+  }, current.oldTitle, current.oldDesc, config.brandTerms ?? [])
   const newTitle = meta.title.slice(0, AI_META_MAX_TITLE)
   const newDesc = meta.desc.slice(0, AI_META_MAX_DESC)
-  const evidenceMeta = { page_slug: candidate.slug, page_url: candidate.pageUrl, keyword: evidence.keyword }
 
   if (!newDesc) {
     return {
@@ -399,9 +465,9 @@ async function applyOnePrescription(
     }
   }
 
-  // Preview (dryRun:true) first — need old content BEFORE deciding whether
-  // the fact-check even allows writing anything (PM: "写之前...生成后再做
-  // 一次核对...矛盾→跳过", never write first and check after).
+  // Preview (dryRun:true) again with the generated copy — need old content
+  // BEFORE deciding whether the fact-check even allows writing anything (PM:
+  // "写之前...生成后再做一次核对...矛盾→跳过", never write first and check after).
   let preview: ApplyAdapterResult
   try {
     preview = await adapter.apply({ candidate, newTitle, newDesc, weekKey, dryRun: true, evidence })
@@ -410,10 +476,7 @@ async function applyOnePrescription(
   }
   if (preview.skipReason && preview.skipReason !== 'dry_run') {
     // slug not found in the repo's data files etc — record it, don't silently drop (PM finding #6).
-    return {
-      proposal: { slug: candidate.slug, pageUrl: candidate.pageUrl, keyword: evidence.keyword, searchVolume: evidence.searchVolume, keywordDifficulty: evidence.keywordDifficulty, snapshotDate: evidence.snapshotDate, keywordDataSource: evidence.keywordDataSource, keywordDataLocation: evidence.keywordDataLocation, keywordDataNote: evidence.keywordDataNote, competitorTitles: evidence.competitorTitles, ctsRankingUrl: evidence.ctsRankingUrl, chosenReason: evidence.chosenReason, oldTitle: '', oldDesc: '', newTitle, newDesc, factCheckConsistent: false, factCheckReason: 'not checked — preview failed first', applied: false, skipReason: preview.skipReason },
-      manualAction: null,
-    }
+    return { proposal: previewFailedProposal(candidate, evidence, newTitle, newDesc, preview.skipReason), manualAction: null }
   }
 
   // 2026-09-28 incident follow-up: checked BEFORE the hard fact-check —
@@ -438,7 +501,7 @@ async function applyOnePrescription(
   // against semantic reversals (visa-free -> visa-required) the regex can't
   // see. Both are fail-closed; the caller doesn't need to know which one
   // blocked.
-  const hardCheck = checkHardFactsPreserved(preview.oldTitle, preview.oldDesc, newTitle, newDesc)
+  const hardCheck = checkHardFactsPreserved(preview.oldTitle, preview.oldDesc, newTitle, newDesc, { ignoreTerms: config.brandTerms ?? [] })
   const factCheck = hardCheck.consistent
     ? await checkFactPreservation(preview.oldTitle, preview.oldDesc, newTitle, newDesc)
     : { consistent: false, reason: hardCheck.reason }

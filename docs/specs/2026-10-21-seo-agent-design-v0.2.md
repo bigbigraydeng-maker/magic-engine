@@ -107,7 +107,7 @@ no_publish       true   // 永远；SEO Agent 不写客户网站
 **总览页 `/tours/china/discovery`**（28 天：53 曝光 / 2 点击 / GSC 均排 25.8）
 - 库内词级数据里已知的词：`china discovery tours`（11 曝光，3.6）、`china discovery`（6，4.8），合计 17 次，约占 53 次的三分之一，其余词级未入库——**「已知词全是品牌 / 产品名」是对已知部分的观察，不是结论**。
 - 大词 `china tours`（NZ 月搜 260，难度 6）、`china tours from new zealand`（210，难度 0）由**受保护的主商业页**在抢（名单里的 `china-tours` 等），总览页**不该去碰**。
-- 实测（10-19、10-20）：总览页**不在 sitemap.xml**，同目录子页都在。
+- ~~实测总览页不在 sitemap.xml~~ **更正（121 号 10-21 指出，已复核）**：我的抓取在 2026-10-19 10:35 UTC，而 121 在 2026-10-20 00:12 NZDT（= 10-19 11:12 UTC）才把 `/tours/china/discovery` 等三个团型列表页加进 sitemap（提交 21699f6，`/tours/china` 为 00:19、2f43fe0）。我在 2026-10-20 11:36 UTC 重新下载 sitemap.xml：HTTP 200、174 条，含 `/tours/china`、`/tours/china/discovery`、`/tours/china/signature`、`/tours/china/stopover`。**原结论是抓取时间点过早造成的，不成立。**
 
 **上海团页 `/tours/china/discovery/shanghai-surroundings`**（标题「Shanghai & Surroundings Discovery | March 2027 | CTS NZ」，canonical 指自己）
 - 上海相关页至少 9 个在分食（28 天曝光）：`/shanghai-travel-guide` 157、`/blog/shanghai-suzhou-hangzhou-itinerary` 174（**0 点击**，GSC 均排 10.0）、`/blog/shanghai-skyline-modern-china` 122、`/blog/first-trip-china-beijing-or-shanghai` 92、`/blog/shanghai-10-days-itinerary` 82、`/explore/shanghai` 69、`/shanghai-tours` 51（22.5）、`/tours/china/stopover/shanghai-express` 52（13.1）、`/shanghai-surroundings-discovery-guide` 52（13.2）。指南 / 博客合计约 **700 曝光 / 28 天**，团页自己几乎没有。
@@ -118,7 +118,7 @@ no_publish       true   // 永远；SEO Agent 不写客户网站
 
 | # | 建议 | 证据 | 闸门 | 执行 | PM |
 |---|---|---|---|---|---|
-| R1 | 总览页加入 sitemap.xml | 10-19/10-20 实测 0 命中，同目录子页都在 | 结构类，不适用词闸 | 121 | 否（低风险结构修复） |
+| R1 | ~~总览页加入 sitemap.xml~~ **撤销（已由 121 于 10-20 00:12 NZDT 完成，10-20 11:36 UTC 复核在内）** | 见 §4 更正 | — | — | — |
 | R2 | 词归属台账初版（**待 121 对表后才算数**）：`shanghai tour(s)` → `/shanghai-tours`（hub）；团页名 / `shanghai & surroundings` → 团页；`things to do in shanghai`（NZ 月搜 480、难度 0，现 GSC 均排 39）→ `/shanghai-travel-guide`；`/campaigns/*` 一律不登记词 | GSC 页级 + DataForSEO 量 | 量 + 难度齐的词才登记 | 95 出表 / 121 对表 | 否（内部台账） |
 | R3 | 从 `/blog/shanghai-suzhou-hangzhou-itinerary`（174 曝光 / 0 点击）加一条指向上海团页的内链 | GSC 页级 28 天 | 非保护页；**74 号 10-21 决定：只做 dry_run 预览，不写网站**（按 §5 流程约定 3） | 预览由 95 出；真要上线再走博客 PR 通道 | 预览给 PM；上线另批 |
 | R4 | **总览页和上海团页的标题 / 描述这轮不改** | 总览页已知词级数据只有品牌 / 产品名且已排前 5；上海团页自然曝光极少，目标词量 + 难度不齐 → 闸门不过（`keyword_data_unavailable`）；小流量页点击率测不出效果（playbook §十四）。这是「闸门不过 + 样本不足」，不是「判定没价值」 | 闸门不过 → 写原因，不降级 | — | 否 |
@@ -155,3 +155,27 @@ GSC 为只读库内数据，未花钱；DataForSEO 一次 `keyword_overview`（1
 2. **规矩口径**：74 / PM 10-21 给本入口的更严红线（官网文案改动先 `dry_run` 给 PM 看、有流量页不做大改）与 73 决策权表「非保护页标题描述自动、官网 B 级改动写入者出稿 + 审查后合并」在新入口上不一致；需 73 记一句「**新入口先按更严的跑，跑稳后再回 10-14 口径**」，免得两份规矩打架。
 3. **互相让路**：121 的「接管页唯一写入者 / `site_agent_owned_slugs`」与计划器页面互斥闸、执行窗口怎么互相让路，要 98 / 73 对一次。
 处理：本稿按「草案，待 98 / 73 对表」合并；对表结果回写本文件的状态行。**设计稿合并 ≠ 批准实施**：新增 `seo_request` 处理函数、请求表、对外入口都属大任务，动手前须子牙 + 魏征双审（设计阶段一次、实施后一次）。
+
+## 9. 给 121 的对接件（10-21）
+**tour_slug 对照**：对 `config/clients/cts/offerings.yaml`（`code` ↔ `itinerary_url`）逐行核对，`code` 与官网路径末段**不总是一致**，所以**对接键用官网路径 `/tours/china/{层级}/{slug}`（offerings 已有 `itinerary_url`），`code` 只当别名**：
+
+| offerings `code` | 官网路径末段（121 的 tours.ts slug） | 一致？ |
+|---|---|---|
+| `golden-china` | `discovery/golden-china` | 是 |
+| `best-of-china` | `discovery/essentials` | **否**（code ≠ slug） |
+| `tale-of-two-cities` | `discovery/beijing-xian` | **否** |
+| `silk-road-discovery` | `signature/silk-road` | **否** |
+| `shanghai-surroundings` | `discovery/shanghai-surroundings` | 是 |
+| `xmas-nye-akl` / `xmas-nye-chch` | 已下架，旧页 301 到 `/tours/china/discovery` | — |
+| （offerings 没有）`yunnan-explorer`、`signature/{imperial-heritage,grand-tour,landscapes}`、`stopover/*` | 官网有、offerings 无 | offerings 不全，以官网路径为准 |
+
+**ownership_check 的只读出口（方案，待 119 定稿）**：不让官网仓库读 ME 库。①**长期**：`ownership_check` 走合同里的 `seo_request` / `seo_receipt`（`kind=cannibalization_check`），121 的页面变更回执里的 `ownership_check` 值来自 SEO 回执，不需要官网仓库读任何清单；②**过渡**（出口就绪前）：121 回执里该字段写 `unavailable`（不写 `pass`）；需要时 121 把"要改的页 + 目标词"发给 95，95 对着下表人工回 `conflict / clear / no_data`，写入页面变更说明。
+
+**词归属 v0（候选，只含量 + 难度齐、且未核 SERP 归属的词；待 121 / 119 对表后才算数）**
+| 词（NZ 月搜 / 难度，2026-10-20 单次取数） | 候选正主页 | 说明 |
+|---|---|---|
+| `things to do in shanghai`（480 / 0） | `/shanghai-travel-guide` | 指南页，121 不接管 |
+| `china tours`（260 / 6） | `/china-tours` | 在保护名单（PM 批才可改） |
+| `china tours from new zealand`（210 / 0） | `/china-tours-from-new-zealand` | **该页既在保护名单（`meta_cycle_protected_slugs`），又在 121 的接管提议里**——改文案需 PM 批，121 改它前先确认 |
+| `shanghai tour(s)`（30 / 取不到） | `/shanghai-tours` | 121 的接管清单没列这页，归属待 121 / 98 定 |
+其余团名类词（量取不到）按规则写 `keyword_data_unavailable`，不登记。

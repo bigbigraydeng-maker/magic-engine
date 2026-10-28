@@ -116,6 +116,28 @@ describe('asset dual review decision', () => {
     expect(decision.passed).toBe(false)
   })
 
+  it('passes a postcard whose hook and end title carry official-page sources', () => {
+    const page = 'Walk beside the old waterfront in Shanghai. Shanghai waterfront. Ten days across China. Explore China with us.'
+    const one = 'https://example.com/one'
+    const brief = {
+      remotion: {
+        template: 'postcard',
+        props: {
+          hook: { lines: ['Ten days'], sourceUrl: one, sourceQuote: 'Ten days across China.' },
+          scenes: [
+            { place: 'Shanghai', line: 'Walk beside the old waterfront.', sourceUrl: one, sourceQuote: 'Walk beside the old waterfront in Shanghai.', placeSourceQuote: 'Shanghai waterfront.' },
+          ],
+          end: { title: 'Explore China', sourceUrl: one, sourceQuote: 'Explore China with us.' },
+        },
+      },
+    }
+    const claims = collectFactClaims(brief)
+    expect(claims.find((claim) => claim.text === 'Ten days')).toMatchObject({ sourceUrl: one, sourceQuote: 'Ten days across China.' })
+    expect(claims.find((claim) => claim.text === 'Explore China')).toMatchObject({ sourceUrl: one })
+    const decision = decideAssetDualReview(input({ claims, pages: { [one]: page } }))
+    expect(decision.sudongpo.verdict).toBe('pass')
+  })
+
   it('does not treat a partial word match as support when the number changes', () => {
     const decision = decideAssetDualReview(input({
       claims: [{

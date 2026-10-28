@@ -267,3 +267,25 @@ describe('destination guides (guides.ts) are editable, with the guide field styl
     expect(gh.commitFile.mock.calls[0][2]).toBe(GUIDES_FILE)
   })
 })
+
+describe('dry run with empty new text is a pure read (runner reads the current text this way, 2026-10-28)', () => {
+  it('returns the current title/description and never touches GitHub', async () => {
+    const github = fakeGithub({ mergeResult: true })
+    const adapter = createCtsRepoApplyAdapter(github, CONN, openGuard())
+    const res = await adapter.apply({ candidate: candidate(), newTitle: '', newDesc: '', weekKey: '2026-W44', dryRun: true, evidence: EVIDENCE })
+    expect(res.skipReason).toBe('dry_run')
+    expect(res.oldTitle).toBe('Old Title')
+    expect(res.oldDesc).toBe('Old desc')
+    expect(github.createBranch).not.toHaveBeenCalled()
+    expect(github.commitFile).not.toHaveBeenCalled()
+    expect(github.createPullRequest).not.toHaveBeenCalled()
+
+    // and a real apply afterwards still writes the real new text (the empty read did not pollute the cache)
+    const real = await adapter.apply({ candidate: candidate(), newTitle: 'New Title', newDesc: 'New desc', weekKey: '2026-W44', dryRun: false, evidence: EVIDENCE })
+    expect(real.applied).toBe(true)
+    const committed = (github.commitFile.mock.calls[0] ?? []).map(String).join(' ')
+    expect(committed).toContain('New Title')
+    expect(committed).not.toMatch(/title: ''/)
+  })
+})
+

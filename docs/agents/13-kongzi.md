@@ -120,3 +120,14 @@
 - 样板：卫青 `docs/agents/11-weiqing.md`
 - 事故：`docs/PITFALLS.md` D10（W38）；Issue #2145（Oztop）
 - 平行：孟子 `docs/agents/15-mengzi.md`；苏东坡 `docs/agents/14-sudongpo.md`
+
+---
+
+## 操作手册
+
+- [SEO agent 操作手册与规则 v1.0](../sops/2026-10-11-seo-agent-playbook-and-rules-v1.0.md)
+- [SEO agent 工作流与目标方案 v1](../sops/2026-10-14-seo-agent-workflow-and-goal-plan-v1.md)（含客户层，§6 是客户层数据）
+- [关键词差距进攻手册](../sops/keyword-gap-attack-playbook.md)
+- [GSC 品牌别名设置](../sops/brand-aliases-setup-for-gsc.md)
+
+索引：[agents 索引](./README.md)。

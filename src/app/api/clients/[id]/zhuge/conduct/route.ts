@@ -132,7 +132,7 @@ export async function POST(
     persisted = await persistZhugeActions(supabaseAdmin, {
       clientId,
       discoveryId: assembled.discovery_id,
-      diagnosticRunId: assembled.diagnostic_run_id,
+      diagnosticRunId: null,
       // DAPE W5 (spec §2.4.3): hand the latest prescription_id to the persister
       // so kanban cards carry their P→E attribution. NULL is valid.
       prescriptionId: assembled.prescription_id,
@@ -148,8 +148,8 @@ export async function POST(
     output,
     context_used: {
       discovery_id: assembled.discovery_id,
-      diagnostic_run_id: assembled.diagnostic_run_id,
-      findings_count: assembled.findings_count,
+      diagnostic_run_id: null,
+      findings_count: 0,
       prompt_mode: promptMode ?? 'long',
       memory_loaded: memoryContext.has_content,
       memory_stats: {

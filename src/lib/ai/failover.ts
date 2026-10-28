@@ -11,6 +11,7 @@ import type { z } from 'zod'
 import {
   AllProvidersFailedError,
   createFailoverState,
+  integerTimeoutMs,
   runFailover,
   type FailoverFailureKind,
   type FailoverProvider,
@@ -259,7 +260,7 @@ function deepseekProvider(
           user: a.user,
           maxOutputTokens: a.maxOutputTokens ?? DEFAULT_MAX_OUTPUT,
           maxInputTokens: 100_000,
-          timeoutMs: Math.min(a.totalBudgetMs, 60_000),
+          timeoutMs: integerTimeoutMs(Math.min(a.totalBudgetMs, 60_000)),
         }),
         aborted,
       ])

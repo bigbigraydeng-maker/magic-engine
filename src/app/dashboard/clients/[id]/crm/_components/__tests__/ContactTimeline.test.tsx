@@ -550,21 +550,35 @@ describe('可折叠：默认收起，点开才铺原文（客人抽屉用）', (
   const drawCollapsible = (props: { refreshKey?: number } = {}) =>
     render(<ContactTimeline clientId="cts" contactId="c1" collapsible {...props} />)
 
-  it('默认只显示一行「看完整往来原文（N 条）」，不铺原文', async () => {
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      touch({ summary: `第${i + 1}通电话`, at: `2026-08-${String(10 + i).padStart(2, '0')}T00:00:00Z` }),
+    )
+
+  it('条数不多：最近几条直接露出，按钮仍写「看完整往来原文（N 条）」', async () => {
     mockTimeline([touch({ summary: '第一通电话' }), touch({ summary: '第二通电话', at: '2026-08-11T00:00:00Z' })])
     drawCollapsible()
     await waitFor(() => expect(screen.getByText(/看完整往来原文（2 条）/)).toBeTruthy())
-    expect(screen.queryByText('第一通电话')).toBeNull()
+    expect(screen.getByText('第一通电话')).toBeTruthy()
   })
 
-  it('点开铺出原文，再点「收起往来原文」回到一行', async () => {
-    mockTimeline([touch({ summary: '第一通电话' })])
+  it('条数多：只露最近 5 条，更早的折起来，按钮写还有几条', async () => {
+    mockTimeline(many(7))
     drawCollapsible()
-    fireEvent.click(await screen.findByText(/看完整往来原文/))
-    expect(screen.getByText('第一通电话')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText(/看更早的往来（还有 2 条）/)).toBeTruthy())
+    expect(screen.getByText('第7通电话')).toBeTruthy()
+    expect(screen.getByText('第3通电话')).toBeTruthy()
+    expect(screen.queryByText('第2通电话')).toBeNull()
+  })
+
+  it('点开铺出全部，再点「收起往来原文」回到只露最近 5 条', async () => {
+    mockTimeline(many(7))
+    drawCollapsible()
+    fireEvent.click(await screen.findByText(/看更早的往来/))
+    expect(screen.getByText('第1通电话')).toBeTruthy()
     fireEvent.click(screen.getByText(/收起往来原文/))
-    expect(screen.queryByText('第一通电话')).toBeNull()
-    expect(screen.getByText(/看完整往来原文/)).toBeTruthy()
+    expect(screen.queryByText('第1通电话')).toBeNull()
+    expect(screen.getByText(/看更早的往来/)).toBeTruthy()
   })
 
   it('🔴 展开后 refreshKey 变了（回了一条消息）→ 重新取数，且仍保持展开', async () => {
@@ -578,8 +592,8 @@ describe('可折叠：默认收起，点开才铺原文（客人抽屉用）', (
     view.rerender(<ContactTimeline clientId="cts" contactId="c1" collapsible refreshKey={1} />)
 
     await waitFor(() => expect(screen.getByText('刚发的一条')).toBeTruthy())
-    // 没缩回「看完整往来原文」那一行
-    expect(screen.queryByText(/看完整往来原文/)).toBeNull()
+    // 没缩回折叠按钮那一行
+    expect(screen.queryByText(/看完整往来原文|看更早的往来/)).toBeNull()
   })
 
   it('不传 collapsible → 照旧整条铺开（其它页面不受影响）', async () => {
@@ -587,5 +601,30 @@ describe('可折叠：默认收起，点开才铺原文（客人抽屉用）', (
     draw()
     await waitFor(() => expect(screen.getByText('直接铺开')).toBeTruthy())
     expect(screen.queryByText(/看完整往来原文/)).toBeNull()
+  })
+})
+
+describe('机器自动发出的邮件（Mailchimp 欢迎信 / 群发）', () => {
+  it('在时间线里标成「系统自动发出」', async () => {
+    mockTimeline([
+      touch({ channel: 'email', direction: 'outbound', summary: '发出《Welcome to CTS》', automated: true }),
+    ])
+    draw()
+    await waitFor(() => expect(screen.getByText(/系统自动发出/)).toBeTruthy())
+    expect(screen.getByText(/发出《Welcome to CTS》/)).toBeTruthy()
+  })
+
+  it('不算「最后一句」：不会盖掉客人真说的话', async () => {
+    mockTimeline([
+      touch({ channel: 'email', direction: 'inbound', at: '2026-10-28T01:00:00Z', summary: 'Price for 2 please?' }),
+      touch({ channel: 'email', direction: 'outbound', at: '2026-10-28T19:00:00Z', summary: '发出《Welcome to CTS》', automated: true }),
+    ])
+    const onSummary = vi.fn()
+    render(<ContactTimeline clientId="cts" contactId="c1" onSummary={onSummary} />)
+    await waitFor(() => expect(onSummary).toHaveBeenCalled())
+    // 抽屉顶上的「最后一句」交出去的是客人的话，不是那封自动信
+    const s = onSummary.mock.calls.at(-1)?.[0]
+    expect(s.lastText).toBe('Price for 2 please?')
+    expect(s.lastWho).toBe('客人')
   })
 })

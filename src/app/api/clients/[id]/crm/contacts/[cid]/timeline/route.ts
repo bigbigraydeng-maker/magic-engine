@@ -13,10 +13,12 @@
  * Responses: 200 { contact, timeline } / 401 / 403 / 404 / 500
  */
 
-import { formFactsLine } from '@/lib/crm/form-facts'
+import { formFactsLine, metaFormFactsLine } from '@/lib/crm/form-facts'
+import { fetchFullEmailBody, mayBeTruncatedPreview } from '@/lib/crm/email-full-body'
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { normalisePhone } from '@/lib/crm/identity'
@@ -76,6 +78,8 @@ type TimelineEntry =
       channel: string
       direction: 'inbound' | 'outbound'
       summary: string | null
+      /** 出站且是机器发的（Mailchimp 欢迎信 / 群发）。 */
+      automated?: boolean
       /**
        * 销售**真正敲进去的那句话**（客人的原文 / FDE 的手记）。
        *
@@ -192,7 +196,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     // 免得「Messenger 私信（5 条往来）」和真实 5 条消息在时间线里重复。
     supabaseAdmin
       .from('contact_touchpoints')
-      .select('channel, direction, occurred_at, summary, raw, metadata')
+      .select('channel, direction, occurred_at, summary, raw, metadata, source')
       .eq('client_id', clientId)
       .eq('contact_id', contactId)
       .neq('channel', 'messenger')
@@ -248,15 +252,24 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     sender_name: string | null
     body: string | null
     sent_at: string
+    message_id?: string | null
   }[] = []
   if (convIds.length > 0) {
     const { data: msgs } = await supabaseAdmin
       .from('conversation_messages')
-      .select('conversation_id, direction, sender_name, body, sent_at')
+      .select('conversation_id, direction, sender_name, body, sent_at, message_id')
       .in('conversation_id', convIds)
       .order('sent_at', { ascending: false })
       .limit(3000)
     messages = (msgs ?? []) as typeof messages
+    // 邮件同步只存 255 字摘要；「上次说到这」读的是最新一封客人来信，只对这一封去邮箱拉全文。
+    const latestInbound = messages.find(
+      (m) => m.direction === 'inbound' && convChannel.get(m.conversation_id) === 'email',
+    )
+    if (latestInbound?.message_id && mayBeTruncatedPreview(latestInbound.body)) {
+      const full = await fetchFullEmailBody(clientId, latestInbound.message_id)
+      if (full && full.length > (latestInbound.body ?? '').trim().length) latestInbound.body = full
+    }
   }
 
   // AI 摘要（意向 / 下一步）不再从这里出：2026-10-10 起由列表接口统一算进「该做什么」
@@ -297,6 +310,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     /** 原话。存量结果值读的时候要靠它重判一次（见 reclassifyStoredOutcome）。 */
     raw: string | null
     metadata: Record<string, unknown> | null
+    source: string | null
   }[]) {
     if (hasWhatsAppConversation && t.channel === 'whatsapp') continue
     const m = t.metadata ?? {}
@@ -306,6 +320,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       channel: t.channel,
       direction: t.direction,
       summary: t.summary,
+      // 机器发的出站（Mailchimp 欢迎信 / 群发）：抽屉里要说清「系统自动发出」，不能当成同事写的话，
+      // 也不能当「最后一句」盖掉客人真说的话。
+      automated: t.channel === 'email' && t.direction === 'outbound' && isAutomatedTouch(t.source, m),
       raw: cleanStr(t.raw),
       dncFlag: m.do_not_contact === true,
       // 外呼那条路写的是模型摘要，不是逐字原话 —— 靠 voice_call_id 认出来。
@@ -432,16 +449,19 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     }
   }
 
-  // 官网表单里的「预计出发时间 / 每人预算」：取最新一条带这两项稳定代码的 web_form 触点，转成一行人话。
+  // 官网表单 / Facebook 客资表单里的「预计出发时间 / 每人预算」：取最新一条带这两项答案的表单触点，转成一行人话。
   // 缺失就是 null（抽屉不显示），不当 0；这两项只是事实，不参与冷热/阶段判断。
   let formFacts: string | null = null
   let formFactsAt = ''
   for (const t of (touches ?? []) as { channel: string; occurred_at: string; metadata: Record<string, unknown> | null }[]) {
-    if (t.channel !== 'web_form' || !t.metadata) continue
-    const line = formFactsLine({
-      travelWindow: typeof t.metadata.form_travel_window === 'string' ? t.metadata.form_travel_window : null,
-      budgetBand: typeof t.metadata.form_budget_band === 'string' ? t.metadata.form_budget_band : null,
-    })
+    if ((t.channel !== 'web_form' && t.channel !== 'meta_lead_form') || !t.metadata) continue
+    const line =
+      t.channel === 'meta_lead_form'
+        ? metaFormFactsLine(t.metadata.custom_answers)
+        : formFactsLine({
+            travelWindow: typeof t.metadata.form_travel_window === 'string' ? t.metadata.form_travel_window : null,
+            budgetBand: typeof t.metadata.form_budget_band === 'string' ? t.metadata.form_budget_band : null,
+          })
     if (line && t.occurred_at >= formFactsAt) {
       // 带上提交日期：客人后来再填一次没带这两项的表单时，抽屉不会把旧答案当成现在的说法。
       formFacts = `${line}（${nzMonthDay(t.occurred_at)}提交）`

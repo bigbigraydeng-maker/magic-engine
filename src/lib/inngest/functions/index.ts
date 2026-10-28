@@ -25,6 +25,7 @@ import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
 import { calendarClosureAudit } from './calendar-closure-audit'
 import { promoPlanDailyWatch } from './promo-plan-daily-watch'
 import { adHeartbeat } from './ad-heartbeat'
+import { adBreakdownCapture } from './ad-breakdown-capture'
 import { adsTrackingPreflight } from './ads-tracking-preflight'
 import { adsTrackingLaunchWatch } from './ads-tracking-launch-watch'
 import { adsServicePauseNotify } from './ads-service-pause-notify'
@@ -51,6 +52,7 @@ import { crmEmailSendReceipt } from './crm-email-send-receipt'
 export const cloudFunctions = [
   promoPlanDailyWatch,
   adHeartbeat,
+  adBreakdownCapture,
   adsTrackingPreflight,
   adsTrackingLaunchWatch,
   adsServicePauseNotify,
