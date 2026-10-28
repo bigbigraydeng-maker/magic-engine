@@ -17,6 +17,7 @@
 import type { AdDraft, AdDraftCreative } from '@/lib/ads-strategy/ad-draft'
 import { metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
 import { isPlaybackGoal, PLAYBACK_REQUIRED_PLATFORMS } from '@/lib/ads-strategy/launch-readback'
+import { plannedFlightSchedule } from '@/lib/ads-strategy/planned-flight'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 
@@ -263,9 +264,8 @@ function campaignBody(d: AdDraft): Record<string, string> {
   }
 }
 
-function adSetBodyFor(d: AdDraft, campaignId: string, nowMs: number): Record<string, string> {
+function adSetBodyFor(d: AdDraft, campaignId: string, startMs: number, endMs: number): Record<string, string> {
   const t = metaTripletFor(d.kind)
-  const end = nowMs + d.durationDays * 86_400_000
   const body: Record<string, string> = {
     name: d.adSetName,
     campaign_id: campaignId,
@@ -277,8 +277,8 @@ function adSetBodyFor(d: AdDraft, campaignId: string, nowMs: number): Record<str
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
     // Meta 收的是最小货币单位（分）。传元会变成 1/100 的预算，静默跑不出量。
     daily_budget: String(Math.round(d.dailyBudget * 100)),
-    start_time: String(Math.floor(nowMs / 1000)),
-    end_time: String(Math.floor(end / 1000)),
+    start_time: String(Math.floor(startMs / 1000)),
+    end_time: String(Math.floor(endMs / 1000)),
     targeting: JSON.stringify(targetingFor(d)),
     // 三种类型都只需要主页；留成一个函数是为了以后哪种需要别的时有个明确的落点。
     promoted_object: JSON.stringify({ page_id: d.pageId }),
@@ -335,7 +335,7 @@ function newRun(accessToken: string, opts: PublishOptions) {
     return r
   }
 
-  return { make, now }
+  return { make, fail, now }
 }
 
 type Run = ReturnType<typeof newRun>
@@ -377,13 +377,19 @@ export async function publishDraftPaused(
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
   const run = newRun(accessToken, opts)
+  if (d.plannedFlight) {
+    const beforeWrite = plannedFlightSchedule(d.plannedFlight, d.durationDays, run.now())
+    if (!beforeWrite.ok) return { ok: false, step: 'campaign', error: beforeWrite.reason, orphans: [] }
+  }
 
   // ── 1. 广告系列 ──────────────────────────────────────────────────────
   const campaign = await run.make('campaign', '广告系列', d.campaignName, `${adAccountId}/campaigns`, campaignBody(d))
   if ('ok' in campaign) return campaign
 
   // ── 2. 广告组 ────────────────────────────────────────────────────────
-  const adSet = await run.make('adset', '广告组', d.adSetName, `${adAccountId}/adsets`, adSetBodyFor(d, campaign.id, run.now()))
+  const flight = plannedFlightSchedule(d.plannedFlight, d.durationDays, run.now())
+  if (!flight.ok) return run.fail('adset', flight.reason)
+  const adSet = await run.make('adset', '广告组', d.adSetName, `${adAccountId}/adsets`, adSetBodyFor(d, campaign.id, flight.startMs, flight.endMs))
   if ('ok' in adSet) return adSet
 
   // ── 3+4. 每条创意 → 每条广告 ─────────────────────────────────────────

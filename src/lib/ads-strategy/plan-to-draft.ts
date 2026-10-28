@@ -7,6 +7,7 @@
  */
 
 import type { AdDraft, AdDraftAdSet, AdDraftCreative, DraftExpansionSwitches, DraftKind } from './ad-draft'
+import { canonicalHashOfInput } from '@/lib/kernel/canonical-hash'
 import { draftNotYetBuildable, readPromoPhaseAdSets, reviewDraftForBuild } from './ad-draft-expansion'
 import type { CreativePoolEntry } from './config'
 import type { PausedDraftReview } from './paused-draft-facts'
@@ -25,6 +26,7 @@ import {
   type LeadFormRow,
 } from './plan-to-draft-rules'
 import { nzToday } from './promo-window'
+import { plannedFlightSchedule } from './planned-flight'
 import { parsePromoSpec, type AdsStep, type PromoPhase } from '@/lib/marketing-plan/promo/spec'
 
 export interface AssemblyState {
@@ -143,6 +145,11 @@ async function assemblePlan(clientId: string, plan: AssemblyPlan, deps: Assembly
   for (const phase of parsed.spec.phases) {
     for (const step of phase.steps) {
       if (step.kind !== 'ads_campaign') continue
+      const prior = state.steps[step.id]
+      if (prior?.status === 'issued') {
+        out.push({ planId: plan.id, stepId: step.id, status: 'issued', ...(prior.cardRunId ? { runId: prior.cardRunId } : {}) })
+        continue
+      }
       const result = await assembleStep({ clientId, plan, phase, step, shared, state, deps })
       state.steps[step.id] = noteOf(result, deps.now())
       out.push(result)
@@ -186,6 +193,8 @@ function gateStep(ctx: StepCtx): GateOk | Stop {
   }
   const days = flightDays(ctx.phase.start_date, ctx.phase.end_date)
   if (!days.ok) return days
+  const flight = plannedFlightSchedule({ startDate: ctx.phase.start_date, endDate: ctx.phase.end_date }, days.days, ctx.deps.now().getTime())
+  if (!flight.ok) return { ok: false, reason: `${flight.reason}没有出卡。` }
   const expansion = expansionForAudiences(hasAudiences(set))
   if (!expansion.ok) return expansion
   return { ok: true, kind: playStop.kind, play: playStop.play, set, days: days.days, expansion: expansion.expansion }
@@ -332,13 +341,15 @@ function buildDraft(
 ): AdDraft {
   const set = gate.set
   const title = ctx.plan.title.trim() || ctx.step.id
+  const stepKey = canonicalHashOfInput({ planId: ctx.plan.id, stepId: ctx.step.id }).slice(0, 16)
   return {
     kind: gate.kind,
     clientId: ctx.clientId,
-    campaignName: `${title} · ${ctx.step.id}`.slice(0, 180),
+    campaignName: `ME-${stepKey} · ${title} · ${ctx.step.id}`.slice(0, 180),
     adSetName: set.name,
     dailyBudget: set.dailyBudget ?? 0,
     durationDays: gate.days,
+    plannedFlight: { startDate: ctx.phase.start_date, endDate: ctx.phase.end_date },
     geoCountries: set.geoCountries,
     ...(set.geoCityKeys ? { geoCityKeys: set.geoCityKeys } : {}),
     ...(set.ageMin !== undefined ? { ageMin: set.ageMin } : {}),

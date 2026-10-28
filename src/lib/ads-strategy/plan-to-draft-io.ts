@@ -48,13 +48,23 @@ export function readAssemblyState(meta: unknown): AssemblyState {
   const box = record(raw)
   if (!box) return state
   const copies = record(box.copies)
-  if (!copies) return state
-  for (const [key, value] of Object.entries(copies)) {
+  for (const [key, value] of Object.entries(copies ?? {})) {
     const pair = record(value)
     const primaryText = pair?.primaryText
     const headline = pair?.headline
     if (typeof primaryText === 'string' && typeof headline === 'string' && primaryText.trim() && headline.trim()) {
       state.copies[key] = { primaryText, headline }
+    }
+  }
+  const steps = record(box.steps)
+  if (steps) for (const [key, value] of Object.entries(steps)) {
+    const note = record(value)
+    if ((note?.status !== 'issued' && note?.status !== 'blocked') || typeof note.at !== 'string') continue
+    state.steps[key] = {
+      status: note.status,
+      at: note.at,
+      ...(typeof note.reason === 'string' ? { reason: note.reason } : {}),
+      ...(typeof note.cardRunId === 'string' ? { cardRunId: note.cardRunId } : {}),
     }
   }
   return state

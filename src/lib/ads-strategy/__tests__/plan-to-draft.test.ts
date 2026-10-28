@@ -5,12 +5,14 @@ import type { AdDraft } from '../ad-draft'
 import { draftNotYetBuildable, reviewDraftForBuild } from '../ad-draft-expansion'
 import type { CreativePoolEntry } from '../config'
 import { afterAssetPooled, assemblePausedDraftsForClient, emptyAssemblyState, type AssemblyDeps, type AssemblyPlan } from '../plan-to-draft'
+import { readAssemblyState } from '../plan-to-draft-io'
+import { pausedDraftSubjectKey } from '../paused-draft-facts'
 import { promotionDedupeKey } from '@/lib/factory/promotion-signal'
 import { EXPANSION_SOURCE, promotionWorkOrderIds } from '../plan-to-draft-rules'
 import type { AdPlay } from '../plan-seed/ad-plays'
 
 const ACCOUNT = 'act_1111111111'
-const NOW = new Date('2026-11-01T12:00:00Z')
+const NOW = new Date('2026-11-01T00:00:00Z')
 
 function promo(over: { creativeRefs?: string[]; leadFormId?: string } = {}) {
   return {
@@ -32,7 +34,7 @@ function promo(over: { creativeRefs?: string[]; leadFormId?: string } = {}) {
           placements: [],
           paused_ranges: [],
           ...(over.leadFormId ? { lead_form_id: over.leadFormId } : {}),
-          targeting: { countries: ['NZ'], city_keys: [], excluded_audience_refs: [] },
+          targeting: { countries: ['NZ'], city_keys: [] as string[], excluded_audience_refs: [] },
         },
       }],
     }],
@@ -140,6 +142,49 @@ describe('plan step to paused-draft card', () => {
     expect(harness.cards.size).toBe(1)
     expect(harness.drafts).toHaveLength(1)
     expect(harness.copyCalls()).toBe(1)
+  })
+
+  it('keeps the issued step after persisted state reload even when the cover URL changes', async () => {
+    const harness = world()
+    await assemblePausedDraftsForClient('client-1', harness.deps)
+    const saved = harness.plans[0]?.state
+    expect(saved?.steps['step-1']?.cardRunId).toBe('run-1')
+    harness.plans[0]!.state = readAssemblyState({ plan_to_draft: saved })
+    const again = await assemblePausedDraftsForClient('client-1', {
+      ...harness.deps,
+      cover: async () => 'https://cdn.example/cover-changed.jpg',
+    })
+    expect(again.steps[0]).toMatchObject({ status: 'issued', runId: 'run-1' })
+    expect(harness.drafts).toHaveLength(1)
+  })
+
+  it('separates cards for different approved plans with the same title and step', async () => {
+    const harness = world()
+    harness.plans.push(plan({ id: 'plan-2' }))
+    const result = await assemblePausedDraftsForClient('client-1', harness.deps)
+    expect(result.steps).toHaveLength(2)
+    expect(harness.drafts).toHaveLength(2)
+    expect(pausedDraftSubjectKey(harness.drafts[0]!)).not.toBe(pausedDraftSubjectKey(harness.drafts[1]!))
+  })
+
+  it('issues a city-only step without silently broadening it to the country', async () => {
+    const spec = promo()
+    spec.phases[0]!.steps[0]!.settings.targeting = { countries: [], city_keys: ['2450022'], excluded_audience_refs: [] }
+    const harness = world({ loadPlans: async () => [plan({ promo: spec })] })
+    const result = await assemblePausedDraftsForClient('client-1', harness.deps)
+    expect(result.steps[0]?.status).toBe('issued')
+    expect(harness.drafts[0]?.geoCountries).toEqual([])
+    expect(harness.drafts[0]?.geoCityKeys).toEqual(['2450022'])
+    expect(reviewDraftForBuild(harness.drafts[0]!)).toEqual([])
+  })
+
+  it('blocks an approved plan whose start day has passed', async () => {
+    const spec = promo()
+    spec.phases[0]!.start_date = '2026-10-31'
+    const harness = world({ loadPlans: async () => [plan({ promo: spec })] })
+    const result = await assemblePausedDraftsForClient('client-1', harness.deps)
+    expect(result.steps[0]).toMatchObject({ status: 'blocked', reason: expect.stringContaining('开始日已过') })
+    expect(harness.drafts).toHaveLength(0)
   })
 
   it('missing creative blocks with a reason', async () => {

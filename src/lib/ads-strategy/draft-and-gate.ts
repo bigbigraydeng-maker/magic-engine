@@ -21,6 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AdDraft } from './ad-draft'
 import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
 import { draftNotYetBuildable } from './ad-draft-expansion'
+import { plannedActivationBlock } from './planned-flight'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
@@ -499,6 +500,8 @@ export async function approveDraft(
   if (p.status !== 'awaiting_approval') {
     return { ok: false, error: `这条现在是「${p.status}」，只有等待批准的才能开` }
   }
+  const flightBlock = plannedActivationBlock(p.draft.plannedFlight, Date.now())
+  if (flightBlock) return { ok: false, error: flightBlock }
   if (!p.campaignId || !p.adSetId || !p.adIds) {
     return { ok: false, error: '这条草案没记下 Meta 那边的 id，开不了' }
   }
