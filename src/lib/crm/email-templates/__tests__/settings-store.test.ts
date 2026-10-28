@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   loadEmailSettings,
   appendEmailSettings,
@@ -218,6 +218,32 @@ describe('database failure', () => {
       failTable: 'crm_email_settings',
     })
     await expect(loadEmailSettings(fake.db, 'client-a')).rejects.toThrow()
+    const result = await appendEmailSettings(fake.db, {
+      clientId: 'client-a',
+      baseVersion: null,
+      settings: validSettings(),
+      createdBy: 'admin@example.com',
+    })
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toBe('error')
+  })
+})
+
+describe('before the migration is applied', () => {
+  it.each(['42P01', 'PGRST205'])('a missing table (%s) reads as "no settings yet", so legacy sends carry on', async (code) => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const fake = createFakeDb({ failTable: 'crm_email_settings', failCode: code })
+    expect(await loadEmailSettings(fake.db, 'client-a')).toEqual({ kind: 'none' })
+    expect(console.error).toHaveBeenCalled()
+  })
+
+  it('any other read failure is still an error (the send is refused)', async () => {
+    const fake = createFakeDb({ failTable: 'crm_email_settings', failCode: '57014' })
+    await expect(loadEmailSettings(fake.db, 'client-a')).rejects.toThrow()
+  })
+
+  it('WRITING settings never treats a missing table as "first save"', async () => {
+    const fake = createFakeDb({ failTable: 'crm_email_settings', failCode: '42P01' })
     const result = await appendEmailSettings(fake.db, {
       clientId: 'client-a',
       baseVersion: null,

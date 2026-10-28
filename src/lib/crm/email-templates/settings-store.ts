@@ -59,24 +59,36 @@ function readRow(raw: unknown): SettingsRow {
   return { version, settings: raw.settings, created_by: createdBy, created_at: createdAt, change_note: changeNote }
 }
 
-async function fetchLatest(db: SupabaseClient, clientId: string): Promise<SettingsRow | null> {
+// Postgres 42P01 / PostgREST PGRST205: the table is not there (the migration has not been applied yet).
+const MISSING_TABLE_CODES: ReadonlySet<string> = new Set(['42P01', 'PGRST205'])
+
+async function fetchLatest(db: SupabaseClient, clientId: string, tolerateMissingTable = false): Promise<SettingsRow | null> {
   const { data, error } = await db
     .from(TABLE)
     .select('*')
     .eq('client_id', clientId)
     .order('version', { ascending: false })
     .limit(1)
+  if (error && tolerateMissingTable && MISSING_TABLE_CODES.has(error.code)) {
+    console.error(`[${TABLE}] 表还不存在（迁移没应用？），按「还没有设置」处理——旧配置的发信照旧。`)
+    return null
+  }
   if (error) throw fail('load latest', error.message)
   const rows = Array.isArray(data) ? data : []
   if (rows.length === 0) return null
   return readRow(rows[0])
 }
 
+/**
+ * 读客户当前的发信设置。表还不存在（迁移还没应用）时按「没有设置」处理——这样代码先于迁移上线时，
+ * 没有版本化设置的客户（沿用旧 leads_config 的）发信不会被一个读不到的新表拦住。
+ * 其它任何读失败都照样抛错，调用方会拒发。写设置（appendEmailSettings）不享受这个宽容。
+ */
 export async function loadEmailSettings(
   db: SupabaseClient,
   clientId: string,
 ): Promise<LoadSettingsResult> {
-  const row = await fetchLatest(db, clientId)
+  const row = await fetchLatest(db, clientId, true)
   if (row === null) return { kind: 'none' }
   const parsed = parseEmailSettingsStrict(row.settings)
   if (!parsed.ok) {

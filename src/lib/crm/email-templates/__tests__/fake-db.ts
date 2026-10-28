@@ -10,6 +10,8 @@ export interface FakeDbOptions {
   coalesceNull?: Record<string, string[]>
   // every operation touching this table resolves to { data: null, error: { code: 'XX000', message: 'boom' } }
   failTable?: string
+  // the error code carried by failTable errors (default XX000)
+  failCode?: string
 }
 
 export interface FakeCall {
@@ -176,7 +178,7 @@ function makeBuilder(
 
   const run = (): FakeResult => {
     calls.push({ table, op: state.op, filters: state.filters.map((f) => ({ ...f })) })
-    if (options.failTable === table) return { data: null, error: FAIL_ERROR }
+    if (options.failTable === table) return { data: null, error: options.failCode ? { ...FAIL_ERROR, code: options.failCode } : FAIL_ERROR }
     return state.op === 'insert' ? resolveInsert(state, tables, options) : resolveSelect(state, tables)
   }
 
