@@ -1,12 +1,14 @@
 ---
 id: 2026-10-28-landing-page-verified-before-go-live
 title: 开投前先核实落地页或表单，没通过又没人确认就不能开
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-28
 source: issue:3206
 verify_by: 2026-11-04
 verify_how: 草案合并后，打开一条还在等点头的暂停广告。页面能打开且是这一页时，开投卡写明已核实；打不开又没有负责人确认时，开投确认按不下去。不花钱，不改广告。
+done_on: 2026-10-28
+done_ref: pr:3370
 ---
 
 开投前多一步「落地页已核实」。系统只读打开客户网站上的地址，查打不打得开、是不是这一页、表单字段和追踪参数。
