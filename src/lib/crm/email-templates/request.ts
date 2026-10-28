@@ -76,3 +76,40 @@ export function parseTemplateRequest(raw: unknown): ParsedTemplateRequest {
     template: { key, version, catalogVersion: catalogVersion ?? null, picks, inputs, callBasis: callBasis as CallBasis },
   }
 }
+
+export type ParsedPreviewRequest =
+  | { ok: true; request: { key: string; picks: PickInput[]; inputs: Record<string, string>; callBasis: CallBasis; subject?: string; body?: string } }
+  | { ok: false; error: string }
+
+const PREVIEW_KEYS: ReadonlySet<string> = new Set(['key', 'picks', 'inputs', 'callBasis', 'subject', 'body'])
+const MAX_SUBJECT = 400
+const MAX_BODY = 20000
+
+/** 预览请求：模板键 + 所选团 / 手填内容 + 通话依据；可选带上销售改过的主题 / 正文（用来重跑文字检查）。 */
+export function parsePreviewRequest(raw: unknown): ParsedPreviewRequest {
+  if (!isRecord(raw)) return { ok: false, error: '请求格式不对。' }
+  for (const key of Object.keys(raw)) {
+    if (!PREVIEW_KEYS.has(key)) return { ok: false, error: `请求里有不认识的字段：${key.slice(0, 30)}。` }
+  }
+  if (typeof raw.key !== 'string' || !TEMPLATE_KEY_RE.test(raw.key)) return { ok: false, error: '模板标识不对。' }
+  const picks = parsePicks(raw.picks)
+  if (picks === null) return { ok: false, error: '所选的团 / 班期格式不对。' }
+  const inputs = parseInputs(raw.inputs)
+  if (inputs === null) return { ok: false, error: '手填的内容格式不对。' }
+  const callBasis = raw.callBasis === undefined ? 'none' : raw.callBasis
+  if (typeof callBasis !== 'string' || !CALL_BASES.includes(callBasis as CallBasis)) return { ok: false, error: '通话依据不对。' }
+  const { subject, body } = raw
+  if (subject !== undefined && (typeof subject !== 'string' || subject.length > MAX_SUBJECT)) return { ok: false, error: '主题不对。' }
+  if (body !== undefined && (typeof body !== 'string' || body.length > MAX_BODY)) return { ok: false, error: '正文不对。' }
+  return {
+    ok: true,
+    request: {
+      key: raw.key,
+      picks,
+      inputs,
+      callBasis: callBasis as CallBasis,
+      ...(subject === undefined ? {} : { subject }),
+      ...(body === undefined ? {} : { body }),
+    },
+  }
+}

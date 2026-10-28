@@ -31,6 +31,9 @@ const stubProvider: FactProvider = {
   resolvePicks() {
     return { ok: true, picks: [] }
   },
+  listPickOptions() {
+    return []
+  },
   checkLinks() {
     return []
   },

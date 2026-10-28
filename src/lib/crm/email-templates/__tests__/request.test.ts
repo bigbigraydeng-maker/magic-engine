@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseTemplateRequest } from '@/lib/crm/email-templates/request'
+import { parsePreviewRequest, parseTemplateRequest } from '@/lib/crm/email-templates/request'
 
 const valid = {
   key: 'post-call-single-tour',
@@ -54,5 +54,50 @@ describe('parseTemplateRequest', () => {
     const res = parseTemplateRequest(input)
     expect(res.ok).toBe(false)
     expect(!res.ok && res.error.length).toBeGreaterThan(0)
+  })
+})
+
+describe('parsePreviewRequest', () => {
+  it('accepts a key alone and fills the neutral defaults', () => {
+    expect(parsePreviewRequest({ key: 'post-call-single-tour' })).toEqual({
+      ok: true,
+      request: { key: 'post-call-single-tour', picks: [], inputs: {}, callBasis: 'none' },
+    })
+  })
+
+  it('carries the picks, the typed inputs, the call claim and the edited text', () => {
+    const res = parsePreviewRequest({
+      key: 'post-call-single-tour',
+      picks: [{ tourId: 't1', departOn: '2027-03-11' }],
+      inputs: { destination: 'China' },
+      callBasis: 'staff_attested',
+      subject: 'Edited subject',
+      body: 'Edited body',
+    })
+    expect(res).toEqual({
+      ok: true,
+      request: {
+        key: 'post-call-single-tour',
+        picks: [{ tourId: 't1', departOn: '2027-03-11' }],
+        inputs: { destination: 'China' },
+        callBasis: 'staff_attested',
+        subject: 'Edited subject',
+        body: 'Edited body',
+      },
+    })
+  })
+
+  it.each([
+    ['not an object', 'x'],
+    ['an unknown field', { key: 'post-call', version: 3 }],
+    ['a bad key', { key: 'Bad Key' }],
+    ['bad picks', { key: 'post-call', picks: 'x' }],
+    ['bad inputs', { key: 'post-call', inputs: { 'Bad-Name': 'x' } }],
+    ['a bad call basis', { key: 'post-call', callBasis: 'trust_me' }],
+    ['a numeric subject', { key: 'post-call', subject: 5 }],
+    ['an over-long subject', { key: 'post-call', subject: 'x'.repeat(401) }],
+    ['an over-long body', { key: 'post-call', body: 'x'.repeat(20001) }],
+  ])('rejects %s', (_name, input) => {
+    expect(parsePreviewRequest(input).ok).toBe(false)
   })
 })

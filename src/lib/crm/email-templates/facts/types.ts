@@ -12,6 +12,24 @@ export interface PickInput {
   departOn: string | null
 }
 
+/** What the staff member can choose from in the panel (already filtered by the template and by what is on sale). */
+export interface PickOption {
+  tourId: string
+  slug: string
+  destination: string
+  tier: string
+  name: string
+  durationText: string | null
+  priceText: string | null
+  requiresDeparture: boolean
+  departures: Array<{
+    departOn: string
+    displayDate: string
+    status: 'open' | 'limited'
+    priceText: string | null
+  }>
+}
+
 export interface ResolvedPick {
   tour: PublishedTourFact
   departure: PublishedTourFactDeparture | null
@@ -65,4 +83,6 @@ export interface FactProvider {
   ): ResolvePicksResult
   /** The picks must still be sellable now. */
   sellable(picks: readonly ResolvedPick[]): { ok: true } | { ok: false; detail: string }
+  /** What the staff member may pick right now for a template with this filter. */
+  listPickOptions(tours: readonly PublishedTourFact[], filter: PickFilter): PickOption[]
 }

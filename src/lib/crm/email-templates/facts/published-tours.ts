@@ -5,29 +5,13 @@ import type {
   FactProvider,
   LinkViolation,
   PickInput,
+  PickOption,
   ProviderValue,
   RenderFacts,
   ResolvePicksResult,
   ResolvedPick,
   VariableSpec,
 } from './types'
-
-export interface PickOption {
-  tourId: string
-  slug: string
-  destination: string
-  tier: string
-  name: string
-  durationText: string | null
-  priceText: string | null
-  requiresDeparture: boolean
-  departures: Array<{
-    departOn: string
-    displayDate: string
-    status: 'open' | 'limited'
-    priceText: string | null
-  }>
-}
 
 export type { ResolvePicksResult }
 
@@ -430,4 +414,5 @@ export const publishedToursProvider: FactProvider = {
   checkLinks,
   knownAmounts,
   sellable,
+  listPickOptions,
 }

@@ -57,6 +57,7 @@ function stubProvider(): FactProvider {
     variables: {},
     resolve: () => ({ ok: false, missing: 'stub' }),
     resolvePicks: () => ({ ok: true, picks: [] }),
+    listPickOptions: () => [],
     checkLinks: (urls: readonly string[]): LinkViolation[] => {
       const out: LinkViolation[] = []
       for (const url of urls) {
