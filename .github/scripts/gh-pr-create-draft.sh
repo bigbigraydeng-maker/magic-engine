@@ -5,6 +5,9 @@
 set -euo pipefail
 
 export PATH=/usr/bin:/bin
+GIT_BIN=/usr/bin/git
+# shellcheck disable=SC1091
+source /opt/claude-guards/git-command-config.sh
 export GH_CONFIG_DIR=/opt/claude-guards/empty-gh
 export GH_PROMPT_DISABLED=1
 export GH_NO_UPDATE_NOTIFIER=1
@@ -20,6 +23,10 @@ fi
 if [[ ! -x /usr/bin/gh ]]; then
   echo "gh-pr-create-draft: /usr/bin/gh missing" >&2
   exit 127
+fi
+if [[ ! -f /opt/claude-guards/git-command-config.sh || -w /opt/claude-guards/git-command-config.sh ]]; then
+  echo "gh-pr-create-draft: config checker must exist and not be writable" >&2
+  exit 2
 fi
 
 refuse() {
@@ -45,25 +52,32 @@ isolate_git_env() {
   export GIT_CONFIG_NOSYSTEM=1
   export GIT_CONFIG_GLOBAL=/dev/null
   export GIT_ATTR_NOSYSTEM=1
-  export GIT_CONFIG_COUNT=9
-  export GIT_CONFIG_KEY_0=core.fsmonitor
-  export GIT_CONFIG_VALUE_0=false
-  export GIT_CONFIG_KEY_1=core.hooksPath
-  export GIT_CONFIG_VALUE_1=/dev/null
-  export GIT_CONFIG_KEY_2=core.sshCommand
-  export GIT_CONFIG_VALUE_2=/usr/bin/ssh
-  export GIT_CONFIG_KEY_3=protocol.ext.allow
-  export GIT_CONFIG_VALUE_3=never
-  export GIT_CONFIG_KEY_4=protocol.file.allow
-  export GIT_CONFIG_VALUE_4=never
-  export GIT_CONFIG_KEY_5=protocol.ssh.allow
-  export GIT_CONFIG_VALUE_5=never
-  export GIT_CONFIG_KEY_6=credential.helper
-  export GIT_CONFIG_VALUE_6=
-  export GIT_CONFIG_KEY_7=diff.external
-  export GIT_CONFIG_VALUE_7=
-  export GIT_CONFIG_KEY_8=core.attributesFile
-  export GIT_CONFIG_VALUE_8=/dev/null
+  # Fixed keys only. Filter and merge drivers are open-ended, so those are
+  # refused by repo_git_unsafe before gh starts, not overridden here.
+  local -a keys=(
+    core.fsmonitor core.hooksPath core.sshCommand
+    protocol.ext.allow protocol.file.allow protocol.ssh.allow
+    credential.helper diff.external core.attributesFile
+    core.pager core.editor sequence.editor core.askPass gpg.program
+    submodule.recurse fetch.recurseSubmodules status.submoduleSummary
+    core.gitProxy alias.status alias.diff alias.rev-parse
+    commit.gpgsign tag.gpgsign
+  )
+  local -a vals=(
+    false /dev/null /usr/bin/ssh
+    never never never
+    "" "" /dev/null
+    cat true true /usr/bin/true /usr/bin/true
+    false false false
+    "" "" "" ""
+    false false
+  )
+  local i
+  export GIT_CONFIG_COUNT=${#keys[@]}
+  for i in "${!keys[@]}"; do
+    export "GIT_CONFIG_KEY_${i}=${keys[$i]}"
+    export "GIT_CONFIG_VALUE_${i}=${vals[$i]}"
+  done
 }
 
 # Bool flags. Draft itself is not here: the wrapper adds it, and a caller
@@ -132,6 +146,15 @@ validate_args() {
 
 isolate_git_env
 validate_args "$@"
+# gh runs git status in the work tree, including from a subdirectory.
+# That child reads local, worktree, and included config, and it runs
+# clean filters named by .gitattributes. Refuse before starting gh.
+repo_root=""
+if repo_root="$(repo_root_of_cwd)"; then
+  if repo_git_unsafe "$repo_root"; then
+    refuse "refusing unsafe git config"
+  fi
+fi
 # --draft is before caller args. A dangling value flag cannot consume it,
 # and validate_args already refused that shape.
 exec /usr/bin/gh pr create --draft "$@"

@@ -24,6 +24,7 @@ fi
 
 sudo install -d -o root -g root -m 0755 "$guard" "$guard/empty-gh"
 sudo install -o root -g root -m 0644 /dev/null "$guard/empty-gitconfig"
+sudo install -o root -g root -m 0644 "$root/.github/scripts/git-command-config.sh" "$guard/git-command-config.sh"
 printf '%s\n' "https://github.com/bigbigraydeng-maker/magic-engine.git" > "$tmp/origin-url"
 sudo install -o root -g root -m 0644 "$tmp/origin-url" "$guard/origin-url"
 
@@ -150,6 +151,47 @@ expect_git_refused() {
   fi
 }
 
+expect_git_ok() {
+  local name="$1"
+  shift
+  rm -f "$marker"
+  if ! ( cd "$repo" && "$@" ) >"$tmp/out" 2>"$tmp/err"; then
+    echo "$name: expected success" >&2
+    cat "$tmp/err" >&2
+    exit 1
+  fi
+  if [[ -e "$marker" ]]; then
+    echo "$name: command ran" >&2
+    exit 1
+  fi
+}
+
+expect_gh_refused() {
+  local name="$1"
+  shift
+  reset_mock
+  rm -f "$marker"
+  set +e
+  ( cd "$repo" && "$@" ) >"$tmp/out" 2>"$tmp/err"
+  local status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    echo "$name: expected refusal" >&2
+    cat "$tmp/err" >&2
+    exit 1
+  fi
+  assert_eq "$(calls_count)" "0" "$name must not start gh"
+  if [[ -e "$marker" ]]; then
+    echo "$name: command ran" >&2
+    exit 1
+  fi
+  if ! grep -q 'refusing unsafe git config' "$tmp/err"; then
+    echo "$name: gh ran or failed for another reason" >&2
+    cat "$tmp/err" >&2
+    exit 1
+  fi
+}
+
 expect_reject() {
   local name="$1"
   shift
@@ -186,6 +228,10 @@ expect_draft() {
   assert_eq "${args[1]}" "create" "$name argv1"
   assert_eq "${args[2]}" "--draft" "$name draft is first flag"
 }
+
+# Argument checks must not depend on the caller's repo. A parent .git would
+# be scanned before gh starts.
+cd "$tmp"
 
 draft="$tmp/gh-pr-create-draft"
 expect_reject "dangling title" "$draft" --head feature --body text --title
@@ -317,7 +363,7 @@ git -C "$repo" config --unset diff.evil.command
 
 reset_mock
 ( cd "$repo" && "$git_mock" fetch --prune main )
-assert_eq "$(calls_count)" "2" "safe fetch lists config, then calls git once"
+assert_eq "$(calls_count)" "3" "safe fetch lists config, lists the index, then calls git once"
 python3 - "$argv" "$guard/origin-url" << 'PY'
 import pathlib, sys
 argv = pathlib.Path(sys.argv[1]).read_bytes().split(b"\0")
@@ -398,21 +444,126 @@ cp "$config_backup" "$repo/.git/config"
 rm -f "$repo/.git/config.worktree" "$repo/.git/info/attributes" "$marker"
 git -C "$repo" checkout -q -- a.txt
 
-# gh pr create runs git status, which honors core.fsmonitor unless the
-# wrapper isolates git's config for that child.
-git -C "$repo" config core.fsmonitor "touch $marker"
-rm -f "$marker"
+# A command in repo config is refused before gh starts. Overrides stay in
+# place for the keys that are not open-ended.
+cp "$config_backup" "$repo/.git/config"
+rm -f "$repo/.gitattributes" "$repo/.git/info/attributes" "$repo/.git/config.worktree" "$marker"
 reset_mock
 ( cd "$repo" && "$tmp/gh-pr-create-draft-status" --title Hello --body text )
-assert_eq "$(calls_count)" "1" "fsmonitor still lets gh start"
+assert_eq "$(calls_count)" "1" "clean repo still lets gh start"
 if [[ -e "$marker" ]]; then
-  echo "gh git status ran fsmonitor" >&2
+  echo "clean gh run created a marker" >&2
   exit 1
 fi
 grep -q '^GIT_CONFIG_NOSYSTEM=1$' "$tmp/gh-env"
 grep -q '^GIT_CONFIG_GLOBAL=/dev/null$' "$tmp/gh-env"
 grep -q '^GIT_CONFIG_KEY_0=core.fsmonitor$' "$tmp/gh-env"
 grep -q '^GIT_CONFIG_VALUE_0=false$' "$tmp/gh-env"
+
+git -C "$repo" config core.fsmonitor "touch $marker"
+expect_gh_refused "gh fsmonitor config" "$tmp/gh-pr-create-draft-status" --title Hello --body text
 git -C "$repo" config --unset core.fsmonitor
+
+# filter.clean runs from git status when .gitattributes names it.
+# Overriding core.attributesFile does not disable that in-repo file.
+git -C "$repo" config filter.evil.clean "touch $marker"
+printf '* filter=evil\n' > "$repo/.gitattributes"
+echo dirty >> "$repo/a.txt"
+expect_gh_refused "gh filter clean" "$tmp/gh-pr-create-draft-status" --title Hello --body text
+# Same bypass with "=" inside the filter subsection name.
+cp "$config_backup" "$repo/.git/config"
+printf '\n[filter "evil=x"]\n\tclean = touch %s\n' "$marker" >> "$repo/.git/config"
+printf '* filter=evil=x\n' > "$repo/.gitattributes"
+expect_gh_refused "gh filter name with equals" "$tmp/gh-pr-create-draft-status" --title Hello --body text
+mkdir -p "$repo/sub"
+# The subdirectory case must actually start in that directory.
+rm -f "$marker"
+reset_mock
+set +e
+( cd "$repo/sub" && "$tmp/gh-pr-create-draft-status" --title Hello --body text ) >"$tmp/out" 2>"$tmp/err"
+status=$?
+set -e
+if [[ "$status" -eq 0 ]]; then
+  echo "subdir filter: expected refusal" >&2
+  exit 1
+fi
+assert_eq "$(calls_count)" "0" "subdir filter must not start gh"
+if [[ -e "$marker" ]]; then
+  echo "subdir filter command ran" >&2
+  exit 1
+fi
+
+cp "$config_backup" "$repo/.git/config"
+rm -f "$repo/.gitattributes" "$marker"
+git -C "$repo" checkout -q -- a.txt
+
+# Subsection "=" used to split the key so ".driver" was never checked.
+printf '\n[merge "evil=x"]\n\tdriver = touch %s\n' "$marker" >> "$repo/.git/config"
+expect_git_refused "merge driver key with equals" "$git_real" cherry-pick "$side_sha"
+cp "$config_backup" "$repo/.git/config"
+printf 'a.txt merge=evil=x\n' > "$repo/.gitattributes"
+expect_git_refused "merge attribute value with equals" "$git_real" cherry-pick "$side_sha"
+printf '\n[merge "evil=x"]\n\tdriver = touch %s\n' "$marker" >> "$repo/.git/config"
+expect_git_refused "merge driver and attribute" "$git_real" cherry-pick "$side_sha"
+cp "$config_backup" "$repo/.git/config"
+rm -f "$repo/.gitattributes" "$marker"
+
+printf '\n[diff "evil=x"]\n\ttextconv = touch %s\n' "$marker" >> "$repo/.git/config"
+expect_git_refused "diff textconv key with equals" "$git_real" switch feature-a
+cp "$config_backup" "$repo/.git/config"
+git -C "$repo" config interactive.diffFilter "touch $marker"
+expect_git_refused "interactive diff filter" "$git_real" switch feature-a
+git -C "$repo" config --unset interactive.diffFilter
+git -C "$repo" config pager.status "touch $marker"
+expect_git_refused "pager status command" "$git_real" switch feature-a
+git -C "$repo" config --unset pager.status
+git -C "$repo" config core.askPass "touch $marker"
+expect_git_refused "askpass command" "$git_real" switch feature-a
+git -C "$repo" config --unset core.askPass
+git -C "$repo" config imap.tunnel "touch $marker"
+expect_git_refused "imap tunnel" "$git_real" switch feature-a
+git -C "$repo" config --unset imap.tunnel
+printf '* diff=evil=x\n' > "$repo/.gitattributes"
+expect_git_refused "diff attribute value with equals" "$git_real" switch feature-a
+rm -f "$repo/.gitattributes"
+git -C "$repo" config credential.helper "/tmp/not-a-helper"
+expect_git_refused "absolute credential helper" "$git_real" fetch
+git -C "$repo" config --unset credential.helper
+inc="$tmp/included-filter"
+printf '[filter "hidden"]\n\tclean = touch %s\n' "$marker" > "$inc"
+git -C "$repo" config include.path "$inc"
+expect_git_refused "include path" "$git_real" switch feature-a
+if [[ -e "$marker" ]]; then
+  echo "included filter ran" >&2
+  exit 1
+fi
+git -C "$repo" config --unset include.path
+
+# Strict attribute parse: a pattern is not an attribute, comments are not
+# applied, and this repo's timestamp-ours driver is not a program.
+printf 'filter=evil\n' > "$repo/.gitattributes"
+expect_git_ok "pattern only" "$git_real" switch feature-a
+printf '# filter=evil\n* merge=text\n* diff\n' > "$repo/.gitattributes"
+expect_git_ok "comment and builtin merge" "$git_real" switch feature-a
+cp "$root/.gitattributes" "$repo/.gitattributes"
+expect_git_ok "repo gitattributes" "$git_real" switch feature-a
+printf '\n[merge "timestamp-ours"]\n\tdriver = touch %s\n' "$marker" >> "$repo/.git/config"
+expect_git_refused "timestamp driver command" "$git_real" switch feature-a
+cp "$config_backup" "$repo/.git/config"
+rm -f "$repo/.gitattributes" "$marker"
+
+# Checkout reads .gitattributes from the index when the work tree file is gone.
+printf '* filter=evil\n' > "$repo/.gitattributes"
+git -C "$repo" add .gitattributes
+git -C "$repo" commit -qm 'add attributes'
+rm -f "$repo/.gitattributes"
+expect_git_refused "index attributes" "$git_real" switch feature-a
+git -C "$repo" checkout -q -- .gitattributes
+rm -f "$repo/.gitattributes"
+git -C "$repo" reset -q HEAD -- .gitattributes >/dev/null 2>&1 || true
+
+printf '[merge "evil=x"]\n\tdriver = touch %s\n' "$marker" > "$repo/.git/config.worktree"
+expect_git_refused "worktree merge driver with equals" "$git_real" switch feature-a
+rm -f "$repo/.git/config.worktree" "$marker"
 
 echo "claude-guards tests passed"

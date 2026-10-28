@@ -5,6 +5,9 @@
 set -euo pipefail
 
 export PATH=/usr/bin:/bin
+GIT_BIN=/usr/bin/git
+# shellcheck disable=SC1091
+source /opt/claude-guards/git-command-config.sh
 export GIT_CONFIG_GLOBAL=/opt/claude-guards/empty-gitconfig
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_PAGER=cat
@@ -57,6 +60,9 @@ assert_guards() {
   if [[ ! -x /usr/bin/git ]]; then
     refuse "/usr/bin/git missing"
   fi
+  if [[ ! -f "$guard/git-command-config.sh" || -w "$guard/git-command-config.sh" ]]; then
+    refuse "config checker must exist and not be writable"
+  fi
 }
 
 read_origin() {
@@ -68,79 +74,13 @@ read_origin() {
   printf '%s' "$url"
 }
 
-# Git parsed this key/value. Includes are refused instead of followed: an
-# include path can block, and the included file can change before exec.
-config_entry_unsafe() {
-  local key="${1,,}" value="$2"
-  case "$value" in
-    '!'*|*'ext::'*) return 0 ;;
-  esac
-  case "$key" in
-    include.path|includeif.*|alias.*|insteadof|*.insteadof) return 0 ;;
-    *.smudge|*.clean|*.process|*.textconv|*.driver|*.external|*.command) return 0 ;;
-    *.sshcommand|*.fsmonitor|*.gitproxy|*.uploadpack|*.receivepack) return 0 ;;
-  esac
-  return 1
-}
-
-# `git config --file --list` understands `[filter.evil] smudge = ...`.
-# A line-start regex does not. Empty output is safe only when git exits 0.
-parsed_config_unsafe() {
-  local file="$1" line key value out
-  out="$(mktemp)"
-  if ! /usr/bin/git config --file "$file" --list >"$out" 2>/dev/null; then
-    rm -f "$out"
-    return 0
-  fi
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    key="${line%%=*}"
-    value="${line#*=}"
-    if config_entry_unsafe "$key" "$value"; then
-      rm -f "$out"
-      return 0
-    fi
-  done <"$out"
-  rm -f "$out"
-  return 1
-}
-
-# filter.<name> cannot be wildcarded away. A filter= attribute would still
-# run whatever smudge the config names, including one we failed to see.
-attributes_request_filter() {
-  local path
-  if [[ -L .git/info/attributes ]]; then
-    return 0
-  fi
-  if [[ -f .git/info/attributes ]] && grep -E -q '(^|[[:space:]])filter=' .git/info/attributes; then
-    return 0
-  fi
-  while IFS= read -r -d '' path; do
-    if [[ -L "$path" ]] || grep -E -q '(^|[[:space:]])filter=' "$path"; then
-      return 0
-    fi
-  done < <(find . -path './.git' -prune -o -name .gitattributes -print0)
-  return 1
-}
-
-# Local config can still name commands. Also read .git/config.worktree:
-# extensions.worktreeConfig makes Git load it in addition to .git/config.
+# Local, worktree, and include directives. Includes are refused rather than
+# opened. Attributes are parsed as tokens so merge=evil=x is a driver name.
 assert_config_safe() {
-  local cfg=".git/config" wt=".git/config.worktree"
-  if [[ -L .git || ! -d .git || -L "$cfg" || ! -f "$cfg" ]]; then
+  if [[ -L .git || ! -d .git || -L .git/config || ! -f .git/config ]]; then
     refuse "refusing to run without a normal .git directory"
   fi
-  if [[ -L "$wt" ]]; then
-    refuse "refusing unsafe git config"
-  fi
-  if parsed_config_unsafe "$cfg"; then
-    refuse "refusing unsafe git config"
-  fi
-  if [[ -e "$wt" ]]; then
-    if [[ ! -f "$wt" ]] || parsed_config_unsafe "$wt"; then
-      refuse "refusing unsafe git config"
-    fi
-  fi
-  if attributes_request_filter; then
+  if repo_git_unsafe .; then
     refuse "refusing unsafe git config"
   fi
 }
@@ -175,6 +115,8 @@ git_exec() {
     -c core.hooksPath=/dev/null \
     -c core.attributesFile=/dev/null \
     -c core.pager=cat \
+    -c diff.external= \
+    -c status.submoduleSummary=false \
     -c core.editor=true \
     -c sequence.editor=true \
     -c commit.gpgsign=false \

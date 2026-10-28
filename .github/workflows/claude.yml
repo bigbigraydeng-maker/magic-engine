@@ -43,23 +43,26 @@ jobs:
           tmp="$(mktemp -d)"
           git show "FETCH_HEAD:.github/scripts/gh-pr-create-draft.sh" > "$tmp/gh-pr-create-draft.sh"
           git show "FETCH_HEAD:.github/scripts/git-limited.sh" > "$tmp/git-limited.sh"
+          git show "FETCH_HEAD:.github/scripts/git-command-config.sh" > "$tmp/git-command-config.sh"
           printf '%s\n' "https://github.com/${{ github.repository }}.git" > "$tmp/origin-url"
           : > "$tmp/empty-gitconfig"
           sudo install -d -o root -g root -m 0755 /opt/claude-guards /opt/claude-guards/empty-gh
           sudo install -o root -g root -m 0755 "$tmp/gh-pr-create-draft.sh" /opt/claude-guards/gh-pr-create-draft
           sudo install -o root -g root -m 0755 "$tmp/git-limited.sh" /opt/claude-guards/git-limited
+          sudo install -o root -g root -m 0644 "$tmp/git-command-config.sh" /opt/claude-guards/git-command-config.sh
           sudo install -o root -g root -m 0644 "$tmp/origin-url" /opt/claude-guards/origin-url
           sudo install -o root -g root -m 0644 "$tmp/empty-gitconfig" /opt/claude-guards/empty-gitconfig
           rm -rf "$tmp"
           test "$(stat -c '%U:%a' /opt/claude-guards/gh-pr-create-draft)" = "root:755"
           test "$(stat -c '%U:%a' /opt/claude-guards/git-limited)" = "root:755"
+          test "$(stat -c '%U:%a' /opt/claude-guards/git-command-config.sh)" = "root:644"
           test "$(stat -c '%U:%a' /opt/claude-guards/origin-url)" = "root:644"
           test "$(stat -c '%U:%a' /opt/claude-guards/empty-gitconfig)" = "root:644"
           test "$(stat -c '%U:%a' /opt/claude-guards/empty-gh)" = "root:755"
           test "$(stat -c '%U:%a' /opt/claude-guards)" = "root:755"
           test -x /usr/bin/gh
           test -x /usr/bin/git
-          if [[ -w /opt/claude-guards || -w /opt/claude-guards/gh-pr-create-draft || -w /opt/claude-guards/git-limited || -w /opt/claude-guards/empty-gh || -w /opt/claude-guards/origin-url || -w /opt/claude-guards/empty-gitconfig ]]; then
+          if [[ -w /opt/claude-guards || -w /opt/claude-guards/gh-pr-create-draft || -w /opt/claude-guards/git-limited || -w /opt/claude-guards/git-command-config.sh || -w /opt/claude-guards/empty-gh || -w /opt/claude-guards/origin-url || -w /opt/claude-guards/empty-gitconfig ]]; then
             echo "guard path is writable by the job user" >&2
             exit 1
           fi
@@ -89,7 +92,13 @@ jobs:
           # fetch / checkout / switch / cherry-pick go through git-limited.
           # Raw git prefixes are not allowed: flags such as --upload-pack run
           # a local command. The wrapper allows only those four subcommands,
-          # a fixed https origin, and a short flag list.
+          # a fixed https origin, and a short flag list. Before it runs git,
+          # it parses config with NUL records and refuses keys that name a
+          # program, including a subsection that contains "=". It also refuses
+          # attribute values such as filter=<name> and merge=<custom driver>.
+          # gh pr create is refused the same way: its git status runs clean
+          # filters from the work tree, including when the command is started
+          # from a subdirectory.
           # npm ci, npm test, and npm run type-check are exact commands.
           # Wildcards are omitted because npm accepts --script-shell and vitest
           # accepts --config, both of which run arbitrary code.
