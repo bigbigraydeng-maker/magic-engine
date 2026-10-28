@@ -67,6 +67,15 @@ describe('go-live hard checks', () => {
     ])
   })
 
+  it('keeps the landing result on the card even when the other gates are green', () => {
+    const gates = gatesFromReceipt({ receipt: receipt('green', hoursAgo(1)), now: NOW })
+    const landing = { label: '落地页已核实', state: 'red' as const, reason: '没通过，还没有人确认。页面没有打开' }
+    expect(hardChecksForGoLive(gates, [], landing)).toEqual([
+      { label: '开投前十道检查', state: 'green', reason: '十道都是绿灯' },
+      landing,
+    ])
+  })
+
   it('skips a gate marked not applicable and says the rest are green', () => {
     const gates = gatesFromReceipt({
       receipt: receipt('green', hoursAgo(1), { na: true }),

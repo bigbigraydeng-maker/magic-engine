@@ -14,6 +14,7 @@ import {
 import { chooseAccountLabel } from './account'
 import { hardChecksForGoLive, type GoLiveGate } from './checks'
 import { goLiveSubjectKey, type PausedDraftView } from './draft'
+import { plainClip } from './text'
 
 function moneyLine(budget: number | null): { text: string; problem: HardCheck | null } {
   if (budget === null || budget <= 0) {
@@ -54,11 +55,21 @@ function extraProblems(view: PausedDraftView, accountProblem: string | null): Ha
   return extras
 }
 
+function scopeFor(landing: HardCheck): string {
+  const lead = landing.state === 'green'
+    ? `落地页已核实：${landing.reason}`
+    : landing.state === 'red'
+      ? `落地页没通过：${landing.reason}`
+      : `落地页还没核实：${landing.reason}`
+  return plainClip(`开到广告、广告组和广告系列这三层。${lead}`, 180)
+}
+
 export function buildGoLiveFacts(input: {
   readonly draftId: string
   readonly view: PausedDraftView
   readonly gates: readonly GoLiveGate[]
   readonly boundLabels: readonly (string | null)[] | null
+  readonly landing: HardCheck
 }): CardFacts {
   const subjectKey = goLiveSubjectKey(input.draftId)
   if (!subjectKey) {
@@ -74,8 +85,12 @@ export function buildGoLiveFacts(input: {
     account: 'label' in account ? account.label : account.problem,
     amount: money.text,
     date: date.text,
-    scope: '开到广告、广告组和广告系列这三层',
-    hardChecks: hardChecksForGoLive(input.gates, extraProblems(input.view, accountProblem)),
+    scope: scopeFor(input.landing),
+    hardChecks: hardChecksForGoLive(
+      input.gates,
+      extraProblems(input.view, accountProblem),
+      input.landing,
+    ),
   })
 }
 

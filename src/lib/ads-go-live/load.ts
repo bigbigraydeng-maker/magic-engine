@@ -5,8 +5,10 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { isLandingConfirmed, landingHardCheck, readStoredReceipt } from '@/lib/ads-landing-verify'
 import { ADS_CREATE_ACTION } from '@/lib/ads-strategy/draft-and-gate'
 import { loadTrackingGateFacts } from '@/lib/ads-tracking-preflight/load-receipt'
+import { receiptIsStale, TRACKING_RECEIPT_STALE_HOURS } from '@/lib/ads-tracking-preflight/receipt'
 import type { CardFacts } from '@/lib/confirmation-card'
 import { gatesFromReceipt, type StoredGate } from './checks'
 import { goLiveSubjectKey, parsePausedDraft, type GoLiveIds } from './draft'
@@ -83,6 +85,11 @@ export async function loadGoLive(
     return failure(409, '只有还在等点头的暂停广告才能出开投卡。')
   }
   const [labels, receipt] = await Promise.all([boundLabels(sb, clientId), receiptOf(sb, clientId, now)])
+  const landingReceipt = readStoredReceipt(row.payload)
+  const stale = !landingReceipt || receiptIsStale(landingReceipt.checkedAt, now, TRACKING_RECEIPT_STALE_HOURS)
+  const confirmed = !stale && landingReceipt
+    ? await isLandingConfirmed(sb, clientId, draftId, view.accountLabel, landingReceipt)
+    : false
   return {
     ok: true,
     ids: view.ids,
@@ -91,6 +98,7 @@ export async function loadGoLive(
       view,
       gates: gatesFromReceipt({ receipt, now }),
       boundLabels: labels,
+      landing: landingHardCheck({ receipt: landingReceipt, confirmed, now }),
     }),
   }
 }

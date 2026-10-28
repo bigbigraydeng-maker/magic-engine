@@ -81,10 +81,7 @@ function pack(problems: readonly HardCheck[]): HardCheck[] {
   ]
 }
 
-export function hardChecksForGoLive(
-  gates: readonly GoLiveGate[],
-  extras: readonly HardCheck[],
-): HardCheck[] {
+function baseChecks(gates: readonly GoLiveGate[], extras: readonly HardCheck[]): HardCheck[] {
   const rows = gates.map(oneGate).filter((row): row is HardCheck => row !== null)
   const problems = [...rows.filter((row) => row.state !== 'green'), ...extras]
   if (rows.length === 0) {
@@ -102,4 +99,30 @@ export function hardChecksForGoLive(
     }]
   }
   return pack(problems)
+}
+
+function withLanding(base: readonly HardCheck[], landing: HardCheck): HardCheck[] {
+  if (base.length < 8) return [...base, landing]
+  const overflow = base.slice(6)
+  const joined = plainClip(overflow.map((item) => `${item.label}：${item.reason || '没通过'}`).join('；'))
+  const state = overflow.some((item) => item.state === 'red')
+    ? 'red'
+    : overflow.some((item) => item.state === 'unread')
+      ? 'unread'
+      : 'green'
+  return [
+    ...base.slice(0, 6),
+    { label: '还有没通过的检查', state, reason: joined || '还有检查没通过' },
+    landing,
+  ]
+}
+
+export function hardChecksForGoLive(
+  gates: readonly GoLiveGate[],
+  extras: readonly HardCheck[],
+  landing?: HardCheck | null,
+): HardCheck[] {
+  const base = baseChecks(gates, extras)
+  if (!landing) return base
+  return withLanding(base, landing)
 }
