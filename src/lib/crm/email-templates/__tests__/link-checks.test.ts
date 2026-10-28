@@ -142,6 +142,12 @@ describe('tricks with the link itself', () => {
     expect(codes('链接 https://www.example.com：请看')).toEqual([])
   })
 
+  it('but a boundary mark does not hide a foreign host behind it: after "," ";" "!" a run that has a dot in it is still read as a host', () => {
+    expect(codes('Go to https://www.example.com,é.evil.com')).toContain('link_host_not_allowed')
+    expect(codes('见 https://www.example.com；例え。evil。com')).toContain('link_host_not_allowed')
+    expect(codes('见 www.example.com！谢谢.evil.com')).toContain('link_host_not_allowed')
+  })
+
   it('a code point that a domain name ignores (U+1BCA0, not on our hand-made list) does not hide a foreign host', () => {
     expect(codes(`Go to https://www.example.com${String.fromCodePoint(0x1bca0)}.evil.com`)).toContain('link_host_not_allowed')
   })

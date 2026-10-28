@@ -62,9 +62,9 @@ const TRAILING_PUNCT_RE = /[.,;:!?)]+$/
 // What a mail client or browser still reads as part of a HOST after our ASCII-only token has stopped: letters, digits and
 // combining marks of any script, joined by "." / "-" or by the ideographic full stop U+3002 and its halfwidth form U+FF61
 // (both count as "." in a host name). It must END on a letter or digit, so a sentence-final "。" alone is not swallowed.
-const HOST_CONTINUATION_RE = /^(?:[.\-。｡]*[\p{L}\p{N}\p{M}])+/u
+const HOST_CONTINUATION_RE = /^(?:[.\-\u3002\uFF61]*[\p{L}\p{N}\p{M}])+/u
 // A link whose host STARTS with a non-ASCII letter ("https://例え.jp") has no ASCII URL character to open a token with.
-const URL_IDN_HOST_RE = /https?:\/\/[\p{L}\p{N}\p{M}][\p{L}\p{N}\p{M}.\-。｡]*/giu
+const URL_IDN_HOST_RE = /https?:\/\/[\p{L}\p{N}\p{M}][\p{L}\p{N}\p{M}.\-\u3002\uFF61]*/giu
 
 function composedText(input: ContentGateInput): string {
   const parts = [input.subject, input.body]
@@ -124,11 +124,14 @@ function toFullUrl(candidate: string): string {
  * A link that already has a path is unaffected: text after a path cannot change the host.
  * A host ends in a letter, digit, "." or "-"; a token that ends in anything else was cut by a sentence boundary (a
  * full-width ，；：！ becomes the ASCII , ; : ! after NFKC and lands inside our token, but it is not part of the host).
+ * What follows such a boundary is a new sentence, unless it has the shape of a host: a dot-like separator inside the run
+ * ("https://example.co.nz,é.evil.com" — a name with a comma in it is still a name under evil.com).
  */
 function hostContinuation(token: string, after: string): string {
-  if (!/[A-Za-z0-9.-]$/.test(token)) return ''
   if (/[/?#]/.test(token.replace(/^https?:\/\//i, ''))) return ''
-  return HOST_CONTINUATION_RE.exec(after)?.[0] ?? ''
+  const run = HOST_CONTINUATION_RE.exec(after)?.[0] ?? ''
+  if (!/[A-Za-z0-9.-]$/.test(token) && !/[.\u3002\uFF61]/.test(run)) return ''
+  return run
 }
 
 export function extractLinks(normalizedText: string): string[] {
