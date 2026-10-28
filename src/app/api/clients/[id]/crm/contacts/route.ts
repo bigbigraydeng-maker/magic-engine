@@ -779,6 +779,10 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   // 页一致，不进两张名单（2026-09 CTS 老板：「contact 里面怎么还有工作人员？」）。平铺名单不动（见 ListQuery.kind 的说明）。
   const ownRules = readDomainRules(leadsConfig)
   contacts = contacts.filter((c) => contactKindOf(c.primary_email ? [c.primary_email] : [], ownRules) !== 'staff')
+  // 同行（旅行社 / 分销）：不在「今天先联系」散客名单里——挪到先放着并写明原因，仍可在全部客人里点「同行」筛出。
+  const tradeIds = new Set(
+    contacts.filter((c) => contactKindOf(c.primary_email ? [c.primary_email] : [], ownRules) === 'trade').map((c) => c.id),
+  )
 
   const enrichedPri = await enrichForDisplay(clientId, contacts, touches, false)
   contacts = enrichedPri.contacts
@@ -804,6 +808,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       page: query.sectionPage,
       focusContactId: query.focusContactId,
       briefs,
+      tradeIds,
     },
     (row, ranked) => {
       const tps = byContact.get(row.id) ?? []
