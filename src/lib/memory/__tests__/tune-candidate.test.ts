@@ -239,14 +239,16 @@ describe('ad engine groups', () => {
       { lesson_key: 'on', is_active: true, evidence: { status: 'candidate' } },
       { lesson_key: 'wait', is_active: false, evidence: { status: 'candidate' } },
       { lesson_key: 'expert', is_active: false, evidence: { kind: 'expert_rss_candidate' } },
+      { lesson_key: 'funnel', is_active: false, evidence: { kind: 'candidate', candidate: true } },
+      { lesson_key: 'funnel-adopted', is_active: false, evidence: { kind: 'candidate', candidate: true, status: 'adopted' } },
       { lesson_key: 'try', is_active: false, evidence: { kind: 'expert_rss_candidate' } },
       { lesson_key: 'try-adopted', is_active: false, evidence: { kind: 'expert_rss_candidate', status: 'adopted' } },
       { lesson_key: 'off', is_active: false, evidence: null },
     ], (lesson) => lesson.lesson_key === 'try' || lesson.lesson_key === 'try-adopted')
     expect(groups.active.map((row) => row.lesson_key)).toEqual(['on'])
-    expect(groups.pending.map((row) => row.lesson_key)).toEqual(['wait', 'expert'])
+    expect(groups.pending.map((row) => row.lesson_key)).toEqual(['wait', 'expert', 'funnel'])
     expect(groups.trial.map((row) => row.lesson_key)).toEqual(['try'])
-    expect(groups.retired.map((row) => row.lesson_key)).toEqual(['try-adopted', 'off'])
+    expect(groups.retired.map((row) => row.lesson_key)).toEqual(['funnel-adopted', 'try-adopted', 'off'])
   })
 })
 

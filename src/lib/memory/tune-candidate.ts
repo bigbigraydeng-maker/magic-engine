@@ -56,5 +56,7 @@ export function isAdoptionCandidate(
   if (isActive || !evidence) return false
   if (evidence.status === TUNE_ADOPTED_STATUS) return false
   if (evidence.status === TUNE_CANDIDATE_STATUS) return true
+  // Check-stage funnel diagnostics use the generic candidate evidence shape.
+  if (evidence.kind === 'candidate' && evidence.candidate === true) return true
   return evidence.kind === 'tune_candidate' || evidence.kind === 'expert_rss_candidate'
 }
