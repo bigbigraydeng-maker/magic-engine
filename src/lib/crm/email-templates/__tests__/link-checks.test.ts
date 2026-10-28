@@ -134,6 +134,17 @@ describe('tricks with the link itself', () => {
     const behindHost = check('见https://www.example.com请看https://evil.com/x').blocks
     expect(behindHost.some((b) => b.code === 'link_host_not_allowed' && b.detail === 'evil.com')).toBe(true)
   })
+
+  it('a full-width comma, semicolon, colon or exclamation mark after an allowed host ends the link (NFKC turns them into the ASCII ones)', () => {
+    expect(codes('官网 www.example.com，可以看到全部行程。')).toEqual([])
+    expect(codes('官网 https://www.example.com；请看')).toEqual([])
+    expect(codes('官网：https://www.example.com！好的')).toEqual([])
+    expect(codes('链接 https://www.example.com：请看')).toEqual([])
+  })
+
+  it('a code point that a domain name ignores (U+1BCA0, not on our hand-made list) does not hide a foreign host', () => {
+    expect(codes(`Go to https://www.example.com${String.fromCodePoint(0x1bca0)}.evil.com`)).toContain('link_host_not_allowed')
+  })
 })
 
 describe('red-line phrases and leftovers', () => {
@@ -146,6 +157,7 @@ describe('red-line phrases and leftovers', () => {
     ['a variation selector', `visa-fr${cp(0xfe0f)}ee`],
     ['a tag variation selector', `vi${cp(0xe0150)}sa-free`],
     ['a soft hyphen', `vi${cp(0x00ad)}sa-free`],
+    ['a shorthand format control (not on the hand-made list)', `vi${cp(0x1bca0)}sa-free`],
   ])('%s inside "visa-free" does not hide it', (_name, text) => {
     const result = evaluateContentGates({ subject: 'Hi', body: `This is ${text} travel`, footer: null, settings: { guardrails: rules }, provider: null, facts: null })
     expect(result.blocks.map((b) => b.ruleId)).toContain('no-visa-free')

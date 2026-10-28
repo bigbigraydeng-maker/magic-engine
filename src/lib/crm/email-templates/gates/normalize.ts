@@ -16,9 +16,12 @@ const PERCENT_RUN_PATTERN = /(?:%[0-9a-fA-F]{2})+/g;
 
 // Zero-width characters, invisible operators (U+2061-2064), combining grapheme joiner, variation selectors,
 // soft hyphen, bidi controls and the invisible Hangul/Khmer fillers: none of them shows on screen, all of them
-// can be slipped between the letters of a blocked phrase.
+// can be slipped between the letters of a blocked phrase. The explicit list is kept for readability; the Unicode
+// property at the end is the safety net for every other code point a browser or mail client ignores (for example the
+// shorthand format controls U+1BCA0-1BCA3, which a domain name ignores too), so a list that is one entry short cannot
+// let one through.
 const INVISIBLE_PATTERN =
-  /[\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u2066-\u2069\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\uFE00-\uFE0F\uFEFF\u00AD\u3164\uFFA0\u{E0100}-\u{E01EF}]/gu;
+  /[\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u2066-\u2069\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\uFE00-\uFE0F\uFEFF\u00AD\u3164\uFFA0\u{E0100}-\u{E01EF}\p{Default_Ignorable_Code_Point}]/gu;
 
 const DASH_PATTERN = /[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D\u2043]/g;
 

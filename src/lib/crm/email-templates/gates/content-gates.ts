@@ -122,8 +122,11 @@ function toFullUrl(candidate: string): string {
  * host "example.co.nz请看". Our token stops at the first non-ASCII character (so Chinese text after a link is not read
  * as its path, which keeps a second link behind that text visible), and without this the host would look exact.
  * A link that already has a path is unaffected: text after a path cannot change the host.
+ * A host ends in a letter, digit, "." or "-"; a token that ends in anything else was cut by a sentence boundary (a
+ * full-width ，；：！ becomes the ASCII , ; : ! after NFKC and lands inside our token, but it is not part of the host).
  */
 function hostContinuation(token: string, after: string): string {
+  if (!/[A-Za-z0-9.-]$/.test(token)) return ''
   if (/[/?#]/.test(token.replace(/^https?:\/\//i, ''))) return ''
   return HOST_CONTINUATION_RE.exec(after)?.[0] ?? ''
 }
