@@ -13,7 +13,7 @@
  * Responses: 200 { contact, timeline } / 401 / 403 / 404 / 500
  */
 
-import { formFactsLine } from '@/lib/crm/form-facts'
+import { formFactsLine, metaFormFactsLine } from '@/lib/crm/form-facts'
 import { fetchFullEmailBody, mayBeTruncatedPreview } from '@/lib/crm/email-full-body'
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
@@ -442,16 +442,19 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     }
   }
 
-  // 官网表单里的「预计出发时间 / 每人预算」：取最新一条带这两项稳定代码的 web_form 触点，转成一行人话。
+  // 官网表单 / Facebook 客资表单里的「预计出发时间 / 每人预算」：取最新一条带这两项答案的表单触点，转成一行人话。
   // 缺失就是 null（抽屉不显示），不当 0；这两项只是事实，不参与冷热/阶段判断。
   let formFacts: string | null = null
   let formFactsAt = ''
   for (const t of (touches ?? []) as { channel: string; occurred_at: string; metadata: Record<string, unknown> | null }[]) {
-    if (t.channel !== 'web_form' || !t.metadata) continue
-    const line = formFactsLine({
-      travelWindow: typeof t.metadata.form_travel_window === 'string' ? t.metadata.form_travel_window : null,
-      budgetBand: typeof t.metadata.form_budget_band === 'string' ? t.metadata.form_budget_band : null,
-    })
+    if ((t.channel !== 'web_form' && t.channel !== 'meta_lead_form') || !t.metadata) continue
+    const line =
+      t.channel === 'meta_lead_form'
+        ? metaFormFactsLine(t.metadata.custom_answers)
+        : formFactsLine({
+            travelWindow: typeof t.metadata.form_travel_window === 'string' ? t.metadata.form_travel_window : null,
+            budgetBand: typeof t.metadata.form_budget_band === 'string' ? t.metadata.form_budget_band : null,
+          })
     if (line && t.occurred_at >= formFactsAt) {
       // 带上提交日期：客人后来再填一次没带这两项的表单时，抽屉不会把旧答案当成现在的说法。
       formFacts = `${line}（${nzMonthDay(t.occurred_at)}提交）`

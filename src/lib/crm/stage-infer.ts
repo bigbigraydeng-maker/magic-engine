@@ -144,7 +144,7 @@ export async function askStage(transcript: string): Promise<StageVerdict | null>
  * 配齐 = 这个客户的漏斗**就是**那条漏斗（`traveling_soon` 即将出行是旅游独有的）。
  * 以后哪个行业要用，得先给它写自己的阶段定义和提示词，而不是共用这一份。
  */
-async function loadClientsWithSafeStages(): Promise<string[]> {
+export async function loadClientsWithSafeStages(): Promise<string[]> {
   const { data, error } = await supabaseAdmin
     .from('client_pipeline_stages')
     .select('client_id, stage_key')
@@ -163,7 +163,7 @@ async function loadClientsWithSafeStages(): Promise<string[]> {
 }
 
 /** 这个客户配置里真的有哪些阶段。没配的不许写进去。 */
-async function loadConfiguredStages(clientId: string): Promise<Set<string>> {
+export async function loadConfiguredStages(clientId: string): Promise<Set<string>> {
   const { data } = await supabaseAdmin
     .from('client_pipeline_stages')
     .select('stage_key')

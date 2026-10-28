@@ -35,6 +35,9 @@ import { AUTO_TAG_ACTOR } from './qualified-buyer'
  */
 export const STAGE_INFER_ACTOR = 'ai:conversation-read'
 
+/** 我们拨出并接通了电话、把「新线索」推进到「已联系」时写下的机器身份。 */
+export const CALL_REACHED_ACTOR = 'system:call-reached'
+
 /** 「邮件 / WhatsApp 来客是不是有效咨询」筛选写阶段时用的机器身份（设计稿 2026-10-21-crm-valid-leads-only-design）。 */
 export const ENQUIRY_SCREEN_ACTOR = 'ai:enquiry-screen'
 /** 回退脚本补的反向事件用的身份。 */
@@ -81,6 +84,7 @@ export function describeStageActor(actor: string | null | undefined): string {
   const a = raw.toLowerCase()
 
   if (a === STAGE_INFER_ACTOR) return '系统读往来记录判的'
+  if (a === CALL_REACHED_ACTOR) return '系统按通话接通判的'
   if (a === AUTO_TAG_ACTOR) return '系统自动标的'
   if (a === ENQUIRY_SCREEN_ACTOR) return '系统判成不是咨询'
   if (a === ENQUIRY_SCREEN_ROLLBACK_ACTOR) return '系统撤回了不是咨询的判定'

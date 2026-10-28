@@ -33,6 +33,7 @@ import {
 } from '@/lib/messenger/brief'
 import { autoTagQualifiedBuyers, type AutoTagResult } from '@/lib/crm/qualified-buyer-autotag'
 import { inferStagesFromConversations, type StageInferResult } from '@/lib/crm/stage-infer'
+import { advanceNewLeadsAfterReachedCall, type CallAdvanceResult } from '@/lib/crm/advance-after-call'
 import { inferConversationFacts, type FactsRunResult } from '@/lib/crm/facts/infer'
 import { supabaseFactsIo } from '@/lib/crm/facts/io'
 import type { BriefChannel } from './brief-schema'
@@ -204,6 +205,8 @@ export interface GenerateDueBriefsOptions {
 export interface PostBriefSweepResult {
   qualifiedBuyers: AutoTagResult | { error: string }
   stageInfer: StageInferResult | { error: string }
+  /** 我们拨出并接通了电话、客人还停在「新线索」的，推进到「已联系」。 */
+  callAdvance: CallAdvanceResult | { error: string }
   /** AI 读对话存事实（默认关，`CRM_FACTS_CLIENT_IDS` 列了客户才跑）。只写自己的表，不影响名单。 */
   conversationFacts: FactsRunResult | { error: string }
 }
@@ -633,6 +636,14 @@ export async function runPostBriefSweeps(now: Date): Promise<PostBriefSweepResul
     console.error('[crm/stage-infer] 读往来填阶段整轮失败:', err)
   }
 
+  let callAdvance: CallAdvanceResult | { error: string }
+  try {
+    callAdvance = await advanceNewLeadsAfterReachedCall(now)
+  } catch (err) {
+    callAdvance = { error: err instanceof Error ? err.message : String(err) }
+    console.error('[crm/advance-after-call] 通话接通推进阶段整轮失败:', err)
+  }
+
   // 存「AI 读对话得出的事实」。只写 conversation_facts 这一张自己的表，这一版名单**不读它**
   // （PR2 才读）。整轮出错只记一笔，不影响上面两遍。
   let conversationFacts: FactsRunResult | { error: string }
@@ -643,7 +654,7 @@ export async function runPostBriefSweeps(now: Date): Promise<PostBriefSweepResul
     console.error('[crm/facts] 存对话事实整轮失败:', err)
   }
 
-  return { qualifiedBuyers, stageInfer, conversationFacts }
+  return { qualifiedBuyers, stageInfer, callAdvance, conversationFacts }
 }
 
 /** 把 due 列表切成每段 `BRIEFS_PER_CHUNK` 条。抽出来是为了能直测切法。 */
