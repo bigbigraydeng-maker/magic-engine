@@ -6,8 +6,9 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { loadAdStrategyConfigWithSource } from '@/lib/ads-strategy/config'
-import { ADS_ATTRIBUTABLE_METRIC_KEYS, medianCostPerResultCents } from '@/lib/ads-strategy/portfolio/goal-context'
+import { ADS_ATTRIBUTABLE_METRIC_KEYS, costMetricForGoal, goalCampaignIds, medianCostPerResultCents } from '@/lib/ads-strategy/portfolio/goal-context'
 import { loadOutcomeConfig } from '@/lib/ads-strategy/portfolio/outcome-config'
+import type { OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
 import { todayInNz } from '@/lib/marketing-plan/promo/schedule-view'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
 import type { PrescriptionContent } from '@/types/diagnostic'
@@ -47,9 +48,10 @@ async function readCard(input: {
   ])
   const goal = goalOf(input.goal)
   const actualToDate = goal ? await readActual(input.clientId, input.goal, now) : null
-  const medianCostCents = goal ? await readMedian(input.clientId, today) : null
+  const medianCostCents = input.goal ? await readMedian(input.clientId, today, input.goal) : null
   return buildEffectJudgmentCard({
     goal,
+    approvedPrimary: approved.primary,
     approvedCost: approved.cost,
     approvedCostState: approved.state,
     prescriptionCosts: prescriptionCostReadings(input.content?.kpi_targets ?? []),
@@ -63,12 +65,13 @@ async function readCard(input: {
   })
 }
 
-async function readApprovedCost(clientId: string): Promise<{ state: ReadState; cost: { amount: number; currency: string | null } | null }> {
+async function readApprovedCost(clientId: string): Promise<{ state: ReadState; cost: { amount: number; currency: string | null } | null; primary: OutcomeStep | null }> {
   const loaded = await loadOutcomeConfig(clientId)
-  if (loaded.source === 'read_error') return { state: 'unreadable', cost: null }
+  if (loaded.source === 'read_error') return { state: 'unreadable', cost: null, primary: null }
   const amount = loaded.config.targetCostPerPrimary
-  if (amount == null) return { state: 'missing', cost: null }
-  return { state: 'value', cost: { amount, currency: null } }
+  const primary = loaded.config.primary
+  if (amount == null || primary == null) return { state: 'missing', cost: null, primary }
+  return { state: 'value', cost: { amount, currency: null }, primary }
 }
 
 async function readDailyCap(clientId: string): Promise<{ state: ReadState; cents: number | null }> {
@@ -89,8 +92,12 @@ async function readActual(clientId: string, goal: GoalRow | null, now: Date): Pr
   return Number.isFinite(fetched.value) ? fetched.value : null
 }
 
-async function readMedian(clientId: string, today: string): Promise<number | null> {
-  return medianCostPerResultCents(clientId, today)
+async function readMedian(clientId: string, today: string, goal: GoalRow): Promise<number | null> {
+  if (!ADS_ATTRIBUTABLE_METRIC_KEYS.has(goal.primary_metric_key)) return null
+  const metric = costMetricForGoal(goal.primary_metric_key)
+  const campaignIds = goalCampaignIds(clientId, metric)
+  if (!campaignIds?.length) return null
+  return medianCostPerResultCents(clientId, today, { metric, campaignIds })
 }
 
 function goalOf(goal: GoalRow | null): EffectGoal | null {
@@ -107,6 +114,7 @@ function goalOf(goal: GoalRow | null): EffectGoal | null {
 function failedSources(loadError: string) {
   return {
     goal: null,
+    approvedPrimary: null,
     approvedCost: null,
     approvedCostState: 'unreadable' as const,
     prescriptionCosts: [],

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { followPrescriptionJob, pollSettled } from '../follow-job'
+import { buildEffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 
 const content = {
   summary: '先改落地页',
@@ -15,13 +16,21 @@ function sse(events: object[]): Response {
 
 describe('followPrescriptionJob', () => {
   it('reads the current stream until the draft is ready', async () => {
+    const measure = buildEffectJudgmentCard({
+      goal: null, approvedCost: null, approvedCostState: 'missing', prescriptionCosts: [],
+      dailyCapCents: null, dailyCapState: 'missing', today: '2026-10-28',
+      actualToDate: null, medianCostCents: null, sampleDays: null, loadError: '读不到',
+    })
     const result = await followPrescriptionJob(sse([
       { type: 'started', prescription_id: 'p1' },
       { type: 'progress', note: '正在写' },
-      { type: 'done', prescription_id: 'p1', content },
+      { type: 'done', prescription_id: 'p1', content, generation_meta: { measure } },
     ]), 'c1')
     expect(result.ok).toBe(true)
-    if (result.ok) expect(result.content.summary).toBe('先改落地页')
+    if (result.ok) {
+      expect(result.content.summary).toBe('先改落地页')
+      expect(result.effectCard).toEqual(measure)
+    }
   })
 
   it('polls after a 202 receipt', async () => {

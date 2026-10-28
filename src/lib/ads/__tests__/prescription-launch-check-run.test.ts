@@ -27,6 +27,7 @@ function prescription(): StoredPrescription {
         budgetCurrency: 'NZD',
       },
       approvedCost: { amount: 12, currency: 'NZD' },
+      approvedPrimary: 'lead',
       approvedCostState: 'value',
       prescriptionCosts: [],
       dailyCapCents: 5000,
@@ -62,8 +63,8 @@ function store(over: Partial<LaunchCheckStore> = {}) {
     listApprovedPrescriptions: async (clientId: string) => [prescription()].filter(item => item.clientId === clientId),
     // One row per NZ day from launch day (10-26) to the day before NOW's day-7 deadline.
     listInsights: async () => ['26', '27', '28', '29', '30', '31'].map((d, i) => ({
-      insightDate: `2026-10-${d}`, spend: i === 0 ? 96 : 0, results: i === 0 ? 12 : 0,
-    })).concat([{ insightDate: '2026-11-01', spend: 0, results: 0 }]),
+      insightDate: `2026-10-${d}`, spend: i === 0 ? 96 : 0, results: i === 0 ? 12 : 0, leads: i === 0 ? 12 : 0,
+    })).concat([{ insightDate: '2026-11-01', spend: 0, results: 0, leads: 0 }]),
     readAccountTimezone: async () => 'Pacific/Auckland',
     findCaseId: async () => 'case-1',
     listOutcomes: async () => [],

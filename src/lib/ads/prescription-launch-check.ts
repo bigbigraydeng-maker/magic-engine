@@ -1,11 +1,12 @@
 /**
  * Plain-language check after a prescription's ad is already live.
  * Reads numbers the caller already loaded. Does not call Meta, write, or spend.
- * Cost and the day-7 / day-14 dates come from the effect-judgment card.
- * They are not rebuilt from launch day or from a cost line in the prose.
+ * New prescriptions use their effect-judgment card. Older prescriptions keep
+ * their original launch-day dates and prose cost checks.
  */
 
 import type { EffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
+import type { OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
 
 const NZ = 'Pacific/Auckland'
 const HOUR_MS = 3_600_000
@@ -23,8 +24,8 @@ const HOURS = [
 ] as const
 
 const DAYS = [
-  { kpiMetric: 'launch_check_day7', label: '第 7 天' },
-  { kpiMetric: 'launch_check_day14', label: '第 14 天' },
+  { kpiMetric: 'launch_check_day7', label: '第 7 天', offset: 6 },
+  { kpiMetric: 'launch_check_day14', label: '第 14 天', offset: 13 },
 ] as const
 
 export const LAUNCH_CHECK_METRICS = [
@@ -67,6 +68,8 @@ export interface InsightRef {
   insightDate: string | null
   spend: number | null
   results: number | null
+  /** Standard lead count; generic results can be a different outcome. */
+  leads?: number | null
   /** ThruPlays。null / 缺省 = 这天没读到观看数，不能当成 0。 */
   videoThruplays?: number | null
   /** 私信对话数。null / 缺省 = 这天没读到对话数，不能用 results 代替，也不能当成 0。 */
@@ -202,7 +205,7 @@ export function judgeLaunch(input: {
   const today = nzCalendarDay(input.now)
   const checkpoints = [
     ...HOURS.map(spec => hourPoint(spec, launchMs, input.now.getTime(), judgeUpTo, zoneGap)),
-    ...DAYS.map(spec => dayPoint(spec, launchDay, today, judgeUpTo, reviewDateFor(card, spec.kpiMetric))),
+    ...DAYS.map(spec => dayPoint(spec, launchDay, today, judgeUpTo, reviewDateFor(card, spec, launchDay))),
   ]
   return { lines: checkpoints.map(point => point.sentence), checkpoints, campaignId: input.launch.campaignId }
 }
@@ -365,10 +368,11 @@ function hourPoint(
 
 function reviewDateFor(
   card: EffectJudgmentCard | null,
-  metric: (typeof DAYS)[number]['kpiMetric'],
+  spec: (typeof DAYS)[number],
+  launchDay: string,
 ): { date: string | null; missing: string } {
-  if (!card) return { date: null, missing: '这份处方没有效果判断卡，不能从开投日另算复盘日。' }
-  const date = metric === 'launch_check_day7' ? card.review.day7 : card.review.day14
+  if (!card) return { date: addCalendarDays(launchDay, spec.offset), missing: '' }
+  const date = spec.kpiMetric === 'launch_check_day7' ? card.review.day7 : card.review.day14
   if (!date) return { date: null, missing: card.review.empty_reason ?? '效果判断卡没有写下这一天。' }
   return { date, missing: '' }
 }
@@ -458,25 +462,36 @@ function pushReadable(
   comparisons: boolean[],
 ): void {
   const leads = sumColumn(rows, 'results')
+  const typedLeads = sumColumn(rows, 'leads')
   const spend = sumColumn(rows, 'spend')
   const views = sumColumn(rows, 'videoThruplays')
   const conversations = sumColumn(rows, 'messagingConversations')
+  if (!card) {
+    for (const kpi of kpis) {
+      const kind = metricKind(kpi.metric)
+      if (kind === 'leads') pushLead(kpi, leads, parts, comparisons)
+      else if (kind === 'conversations') pushCount(kpi, '对话数', conversations, parts, comparisons)
+      else if (kind === 'views') pushCount(kpi, '看完数', views, parts, comparisons)
+      else if (kind === 'cost') pushCost(kpi, leads, spend, parts, comparisons)
+    }
+    return
+  }
   let needsCost = false
   for (const kpi of kpis) {
     const kind = metricKind(kpi.metric)
     if (kind === 'leads') {
       needsCost = true
-      pushLead(kpi, leads, parts, comparisons)
+      pushLead(kpi, typedLeads, parts, comparisons)
     } else if (kind === 'conversations') pushCount(kpi, '对话数', conversations, parts, comparisons)
     else if (kind === 'views') pushCount(kpi, '看完数', views, parts, comparisons)
     else if (kind === 'cost') needsCost = true
   }
-  if (needsCost) pushCardCost(card, leads, spend, parts, comparisons)
+  if (needsCost) pushCardCost(card, rows, spend, parts, comparisons)
 }
 
 function pushCardCost(
   card: EffectJudgmentCard | null,
-  leads: number | null,
+  rows: readonly InsightRef[],
   spend: number | null,
   parts: string[],
   comparisons: boolean[],
@@ -487,15 +502,28 @@ function pushCardCost(
     parts.push(why ? `每个结果的成本没有写在效果判断卡上：${why}` : '这份处方没有效果判断卡，不能用别的成本数。')
     return
   }
+  const count = cardCostCount(card?.primary_result ?? null, rows)
+  if (count === null) {
+    parts.push('主结果没有可归属的广告日报计数，不能拿通用结果数代替成本。')
+    return
+  }
   pushCost(
     { metric: '成本', target: amount, unit: card?.cost_per_result.currency ?? '' },
-    leads, spend, parts, comparisons,
+    count, spend, parts, comparisons,
+    card?.primary_result === 'lead' ? '线索' : card?.primary_result === 'messaging_started' ? '私信开聊' : '完播',
   )
+}
+
+function cardCostCount(primary: OutcomeStep | null, rows: readonly InsightRef[]): number | null {
+  if (primary === 'lead') return sumColumn(rows, 'leads')
+  if (primary === 'messaging_started') return sumColumn(rows, 'messagingConversations')
+  if (primary === 'video_complete') return sumColumn(rows, 'videoThruplays')
+  return null
 }
 
 function sumColumn(
   rows: readonly InsightRef[],
-  key: 'results' | 'spend' | 'videoThruplays' | 'messagingConversations',
+  key: 'results' | 'spend' | 'leads' | 'videoThruplays' | 'messagingConversations',
 ): number | null {
   let total = 0
   for (const row of rows) {
@@ -540,30 +568,31 @@ function pushCount(
 
 function pushCost(
   kpi: KpiRef,
-  leads: number | null,
+  count: number | null,
   spend: number | null,
   parts: string[],
   comparisons: boolean[],
+  resultLabel = '线索',
 ): void {
   if (kpi.target === null) {
     parts.push(`「${kpi.metric}」没有写下目标。`)
     return
   }
-  if (leads === null) {
-    parts.push('线索读不全，算不出单条成本。')
+  if (count === null) {
+    parts.push(resultLabel === '线索' ? '线索读不全，算不出单条成本。' : `${resultLabel}读不全，算不出单次成本。`)
     return
   }
-  if (leads === 0) {
-    parts.push('线索是 0，算不出单条成本。')
+  if (count === 0) {
+    parts.push(resultLabel === '线索' ? '线索是 0，算不出单条成本。' : `${resultLabel}是 0，算不出单次成本。`)
     return
   }
   if (spend === null) {
     parts.push('有几天的花费是空的，不能当成 0。')
     return
   }
-  const each = spend / leads
+  const each = spend / count
   comparisons.push(each <= kpi.target)
-  parts.push(pairText('单条成本', each, kpi.target, kpi.unit))
+  parts.push(pairText(resultLabel === '线索' ? '单条成本' : `每次${resultLabel}成本`, each, kpi.target, kpi.unit))
 }
 
 function pushUnrecognized(kpi: KpiRef, parts: string[]): void {

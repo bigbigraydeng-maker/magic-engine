@@ -32,7 +32,7 @@ const kpis: KpiRef[] = [
 ]
 
 /** Day 1 is the goal start, not a recount from launch. Cost is 12, not the 99 written on the kpi line. */
-function effectCard(periodStart = '2026-10-26'): EffectJudgmentCard {
+function effectCard(periodStart = '2026-10-26', primary: 'lead' | 'messaging_started' | 'qualified_enquiry' = 'lead'): EffectJudgmentCard {
   return buildEffectJudgmentCard({
     goal: {
       periodStart,
@@ -42,6 +42,7 @@ function effectCard(periodStart = '2026-10-26'): EffectJudgmentCard {
       budgetCurrency: 'NZD',
     },
     approvedCost: { amount: 12, currency: 'NZD' },
+    approvedPrimary: primary,
     approvedCostState: 'value',
     prescriptionCosts: [],
     dailyCapCents: 5000,
@@ -64,9 +65,10 @@ function series(first: Partial<InsightRef> = {}, through = '2026-11-01'): Insigh
   const cursor = new Date('2026-10-26T00:00:00Z')
   while (cursor.toISOString().slice(0, 10) <= through) {
     const insightDate = cursor.toISOString().slice(0, 10)
+    const firstRow = { insightDate, spend: 96, results: 12, ...first }
     out.push(out.length === 0
-      ? { insightDate, spend: 96, results: 12, ...first }
-      : { insightDate, spend: 0, results: 0 })
+      ? { ...firstRow, leads: first.leads === undefined ? firstRow.results : first.leads }
+      : { insightDate, spend: 0, results: 0, leads: 0 })
     cursor.setUTCDate(cursor.getUTCDate() + 1)
   }
   return out
@@ -74,7 +76,7 @@ function series(first: Partial<InsightRef> = {}, through = '2026-11-01'): Insigh
 
 const NZ_ZONE = 'Pacific/Auckland'
 
-function matched(now: string, insights: InsightRef[] = series(), targets: KpiRef[] = kpis) {
+function matched(now: string, insights: InsightRef[] = series(), targets: KpiRef[] = kpis, card = effectCard()) {
   const found = matchLaunch({
     prescription: prescription(),
     launches: [launch()],
@@ -84,7 +86,7 @@ function matched(now: string, insights: InsightRef[] = series(), targets: KpiRef
   })
   if (found.kind !== 'matched') throw new Error(found.kind)
   return judgeLaunch({
-    launch: found.launch, insights, kpis: targets, now: new Date(now), accountTimezone: NZ_ZONE, effectCard: effectCard(),
+    launch: found.launch, insights, kpis: targets, now: new Date(now), accountTimezone: NZ_ZONE, effectCard: card,
   })
 }
 
@@ -166,6 +168,23 @@ describe('prescription launch check', () => {
     expect(day7?.sentence).toContain('单条成本 8 NZD，目标 12 NZD')
     expect(day7?.sentence).not.toContain('99')
     expect(view.checkpoints.find(point => point.kpiMetric === 'launch_check_day14')?.verdict).toBe('pending')
+  })
+
+  it('keeps qualified enquiry cost unknown without attributable enquiry counts', () => {
+    const costs: KpiRef[] = [{ metric: '成本', target: 12, unit: 'NZD' }]
+    const view = matched('2026-11-02T00:00:00.000Z', series({ spend: 100, results: 10, leads: 10 }), costs, effectCard('2026-10-26', 'qualified_enquiry'))
+    const day7 = view.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')
+    expect(day7?.verdict).toBe('unknown')
+    expect(day7?.sentence).toContain('不能拿通用结果数代替成本')
+  })
+
+  it('compares messaging cost with conversations rather than generic results', () => {
+    const costs: KpiRef[] = [{ metric: '成本', target: 12, unit: 'NZD' }]
+    const rows = conversationsOn(series({ spend: 100, results: 10 }), 1)
+    const view = matched('2026-11-02T00:00:00.000Z', rows, costs, effectCard('2026-10-26', 'messaging_started'))
+    const day7 = view.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')
+    expect(day7?.verdict).toBe('missed')
+    expect(day7?.sentence).toContain('每次私信开聊成本 100 NZD')
   })
 
   it('says 没达标 when leads are below target', () => {
@@ -309,14 +328,14 @@ describe('prescription launch check', () => {
       effectCard: null,
     })
     const day7 = missing.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')
-    expect(day7).toMatchObject({ due: false, verdict: 'unknown' })
-    expect(day7?.sentence).toContain('没有效果判断卡')
-    expect(day7?.sentence).not.toContain('达标')
+    expect(day7).toMatchObject({ due: true, verdict: 'met' })
+    expect(day7?.sentence).toContain('目标 99 NZD')
+    expect(day7?.sentence).not.toContain('目标 12 NZD')
   })
 
   it('judges each early checkpoint on its own window when the run is late', () => {
     const rows = series({ spend: 20, results: 2 }, '2026-11-01')
-    rows[rows.length - 1] = { insightDate: '2026-11-01', spend: 100, results: 20 }
+    rows[rows.length - 1] = { insightDate: '2026-11-01', spend: 100, results: 20, leads: 20 }
     const leadsOnly: KpiRef[] = [{ metric: '线索', target: 10, unit: '条' }]
     const view = judgeAtMidnight('2026-11-20T00:00:00.000Z', rows, leadsOnly)
     const by = (metric: string) => view.checkpoints.find(point => point.kpiMetric === metric)

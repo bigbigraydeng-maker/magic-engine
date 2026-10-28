@@ -16,6 +16,7 @@ const GOAL = {
 function sources(over: Partial<EffectJudgmentSources> = {}): EffectJudgmentSources {
   return {
     goal: GOAL,
+    approvedPrimary: 'lead',
     approvedCost: { amount: 12, currency: null },
     approvedCostState: 'value',
     prescriptionCosts: [],
@@ -38,6 +39,7 @@ function card(over: Partial<EffectJudgmentCard> = {}): EffectJudgmentCard {
 describe('effect judgment card', () => {
   it('writes the four facts from the goal, the approved cost, and the daily cap', () => {
     const built = buildEffectJudgmentCard(sources())
+    expect(built.primary_result).toBe('lead')
     expect(built.cost_per_result).toMatchObject({ amount: 12, currency: 'NZD', empty_reason: null })
     expect(built.daily_spend_cap).toMatchObject({ cents: 5000, currency: 'NZD', empty_reason: null })
     expect(built.review).toEqual({
@@ -112,6 +114,7 @@ describe('effect judgment card', () => {
     const built = buildEffectJudgmentCard(sources({ dailyCapCents: 10.5 }))
     expect(built.daily_spend_cap.cents).toBeNull()
     expect(built.daily_spend_cap.empty_reason).toContain('整数分')
+    expect(built.pacing.line).toContain('日预算上限')
   })
 
   it('says the pace is unknown when results so far were not read', () => {
@@ -139,6 +142,7 @@ describe('effect judgment card', () => {
   it('round-trips a stored card and treats a missing key as an older prescription', () => {
     const built = buildEffectJudgmentCard(sources())
     expect(parseEffectJudgmentCard(built)).toEqual(built)
+    expect(parseEffectJudgmentCard({ ...built, primary_result: undefined })?.primary_result).toBeNull()
     expect(storedEffectCard({ measure: built })).toEqual(built)
     expect(storedEffectCard({})).toBeUndefined()
     expect(storedEffectCard(null)).toBeUndefined()

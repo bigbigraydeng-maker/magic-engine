@@ -97,6 +97,7 @@ async function readSse(response: Response, handlers: FollowHandlers): Promise<Fo
     onStarted: (id) => handlers.onStarted?.(id),
     onProgress: (note) => handlers.onProgress?.(note),
     onDone: (payload) => {
+      const extra = payload as unknown as Record<string, unknown>
       result = {
         ok: true,
         prescriptionId: payload.prescription_id,
@@ -105,7 +106,7 @@ async function readSse(response: Response, handlers: FollowHandlers): Promise<Fo
         status: 'draft',
         progressNote: null,
         agentName: 'huatuo',
-        effectCard: null,
+        effectCard: storedEffectCard(extra.generation_meta ?? extra.meta) ?? null,
       }
     },
     onError: (error) => {

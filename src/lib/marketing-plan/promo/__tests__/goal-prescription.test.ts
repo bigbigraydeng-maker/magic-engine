@@ -280,6 +280,7 @@ describe('大白话分段', () => {
             budgetCurrency: 'NZD',
           },
           approvedCost: { amount: 12, currency: 'NZD' },
+          approvedPrimary: 'lead',
           approvedCostState: 'value',
           prescriptionCosts: [],
           dailyCapCents: 5000,
@@ -316,6 +317,7 @@ describe('大白话分段', () => {
       insight_date: `2020-01-${String(i + 1).padStart(2, '0')}`,
       spend: i === 0 ? 80 : 0,
       results: i === 0 ? 12 : 0,
+      leads: i === 0 ? 12 : 0,
     }))
     const view = await loadLatestGoalPrescription(CLIENT, GOAL)
     expect(view?.launch_check?.lines.join('\n')).toContain('达标')

@@ -6,6 +6,7 @@
 
 import { computeGoalPace, type GoalPaceVerdict } from '@/lib/ads-strategy/goal-pace'
 import { withThinSampleGuard, withoutCapLens } from '@/lib/ads-strategy/portfolio/goal-context'
+import { isOutcomeStep, type OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const CURRENCY = /^[A-Za-z]{3}$/
@@ -29,6 +30,8 @@ export interface MeasuredCents {
 
 export interface EffectJudgmentCard {
   v: 1
+  /** The approved result type that the cost refers to. Null cannot be compared to daily results. */
+  primary_result: OutcomeStep | null
   cost_per_result: MeasuredAmount
   daily_spend_cap: MeasuredCents
   pacing: {
@@ -63,6 +66,7 @@ export type ReadState = 'value' | 'missing' | 'unreadable'
 
 export interface EffectJudgmentSources {
   goal: EffectGoal | null
+  approvedPrimary?: OutcomeStep | null
   /** Approved cost from ad outcome settings. Not account history. */
   approvedCost: CostReading | null
   approvedCostState: ReadState
@@ -94,6 +98,7 @@ export function buildEffectJudgmentCard(input: EffectJudgmentSources): EffectJud
     .filter((reason): reason is string => reason !== null)
   return {
     v: 1,
+    primary_result: input.approvedPrimary ?? null,
     cost_per_result: cost,
     daily_spend_cap: cap,
     pacing,
@@ -121,6 +126,7 @@ export function parseEffectJudgmentCard(value: unknown): EffectJudgmentCard | nu
   if (!Array.isArray(row.block_reasons) || row.block_reasons.some(item => typeof item !== 'string')) return null
   return {
     v: 1,
+    primary_result: isOutcomeStep(row.primary_result) ? row.primary_result : null,
     cost_per_result: cost,
     daily_spend_cap: cap,
     pacing,
@@ -171,6 +177,7 @@ function blockedCard(reason: string): EffectJudgmentCard {
   const emptyCents: MeasuredCents = { cents: null, currency: null, source: null, empty_reason: reason }
   return {
     v: 1,
+    primary_result: null,
     cost_per_result: emptyAmount,
     daily_spend_cap: emptyCents,
     pacing: { line: null, verdict: null, empty_reason: reason },
@@ -241,6 +248,8 @@ function resolvePacing(input: EffectJudgmentSources): EffectJudgmentCard['pacing
 }
 
 function paceOf(input: EffectJudgmentSources, goal: EffectGoal) {
+  const validCap = input.dailyCapState === 'value' && input.dailyCapCents !== null
+    && Number.isInteger(input.dailyCapCents) && input.dailyCapCents > 0
   const computed = computeGoalPace({
     targetValue: goal.targetValue,
     baselineValue: goal.baselineValue,
@@ -248,10 +257,10 @@ function paceOf(input: EffectJudgmentSources, goal: EffectGoal) {
     periodEnd: goal.periodEnd,
     today: input.today,
     actualToDate: input.actualToDate,
-    dailyCapCents: input.dailyCapState === 'value' ? input.dailyCapCents : null,
+    dailyCapCents: validCap ? input.dailyCapCents : null,
     medianCostPerResultCents7d: input.medianCostCents,
   })
-  const capped = input.dailyCapState === 'value' ? computed : withoutCapLens(computed)
+  const capped = validCap ? computed : withoutCapLens(computed)
   return withThinSampleGuard(capped, input.medianCostCents, input.sampleDays)
 }
 
