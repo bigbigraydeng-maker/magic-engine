@@ -45,6 +45,8 @@ export const CALL_REACHED_ACTOR = 'system:call-reached'
 export const ENQUIRY_SCREEN_ACTOR = 'ai:enquiry-screen'
 /** 回退脚本补的反向事件用的身份。 */
 export const ENQUIRY_SCREEN_ROLLBACK_ACTOR = 'ai:enquiry-screen-rollback'
+/** 被机器判成「非咨询」的人又来了真消息、系统把他放回「新线索」时写下的身份。 */
+export const ENQUIRY_REVIVE_ACTOR = 'system:enquiry-revived'
 
 /**
  * 机器发件身份（长得像邮箱，但不是人）。
@@ -92,6 +94,7 @@ export function describeStageActor(actor: string | null | undefined): string {
   if (a === AUTO_TAG_ACTOR) return '系统自动标的'
   if (a === ENQUIRY_SCREEN_ACTOR) return '系统判成不是咨询'
   if (a === ENQUIRY_SCREEN_ROLLBACK_ACTOR) return '系统撤回了不是咨询的判定'
+  if (a === ENQUIRY_REVIVE_ACTOR) return '系统发现他又来了新消息，放回名单'
   if (a === 'system') return '系统回填的'
   if (AUTOMATED_SENDER_EMAILS.has(a)) return '系统自动回复'
   if (isAutomatedActor(a)) return '系统'
