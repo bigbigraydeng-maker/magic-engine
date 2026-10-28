@@ -39,7 +39,7 @@ export interface MetaGenerationInput {
 }
 
 /** Prompt assembly kept out of generateMetaCycleTitle to stay under the 50-line budget. */
-function buildPrompt(input: MetaGenerationInput): string {
+export function buildPrompt(input: MetaGenerationInput): string {
   const contextLines = [
     `Target keyword: "${input.keyword}"`,
     `Page URL: ${input.pageUrl}`,

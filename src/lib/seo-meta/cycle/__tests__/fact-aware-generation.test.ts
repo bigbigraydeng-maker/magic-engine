@@ -148,7 +148,7 @@ describe('runStep4Applied — fact-aware generation', () => {
     }
     const generateMeta = vi.fn(async (_input: unknown) => {
       order.push('generate')
-      return { title: 'Liziba Station Chongqing', desc: 'Trains pass a building in Chongqing — guide for New Zealand travellers.' }
+      return { title: 'Liziba Station Chongqing', desc: 'Trains pass the 6th floor of a 19-storey building in Chongqing — for New Zealand travellers.' }
     })
 
     await runStep4Applied(supabase, adapter, CONFIG, '2026-W44', [{ candidate: candidate(), evidence: EVIDENCE }], generateMeta, true)
@@ -171,7 +171,7 @@ describe('runStep4Applied — fact-aware generation', () => {
     )
     const generateMeta = vi.fn()
       .mockResolvedValueOnce({ title: 'Liziba Station guide', desc: 'Visit this unique station today.' })
-      .mockResolvedValueOnce({ title: 'Liziba Station Chongqing', desc: 'Trains pass a building in Chongqing — guide for New Zealand travellers.' })
+      .mockResolvedValueOnce({ title: 'Liziba Station Chongqing', desc: 'Trains pass the 6th floor of a 19-storey building in Chongqing — for New Zealand travellers.' })
 
     const result = await runStep4Applied(supabase, adapter, CONFIG, '2026-W44', [{ candidate: candidate(), evidence: EVIDENCE }], generateMeta, true)
 
@@ -179,7 +179,7 @@ describe('runStep4Applied — fact-aware generation', () => {
     const secondArg = generateMeta.mock.calls[1][0] as { retryFeedback?: string }
     expect(typeof secondArg.retryFeedback).toBe('string')
     expect(secondArg.retryFeedback).toContain('New Zealand')
-    expect(result.proposals[0].newDesc).toBe('Trains pass a building in Chongqing — guide for New Zealand travellers.')
+    expect(result.proposals[0].newDesc).toBe('Trains pass the 6th floor of a 19-storey building in Chongqing — for New Zealand travellers.')
   })
 
   it('does not retry when the first attempt keeps every fact', async () => {
@@ -193,7 +193,7 @@ describe('runStep4Applied — fact-aware generation', () => {
     )
     const generateMeta = vi.fn().mockResolvedValue({
       title: 'Liziba Station Chongqing',
-      desc: 'Trains pass a building in Chongqing — guide for New Zealand travellers.',
+      desc: 'Trains pass the 6th floor of a 19-storey building in Chongqing — for New Zealand travellers.',
     })
 
     await runStep4Applied(supabase, adapter, CONFIG, '2026-W44', [{ candidate: candidate(), evidence: EVIDENCE }], generateMeta, true)
@@ -287,5 +287,41 @@ describe('roster reads brand terms from seo_config.brand_terms', () => {
     expect(entry && toClientConfig(entry).brandTerms).toEqual(['acme', 'acmetours'])
     const none = await loadMetaCycleClientConfigForDryRun(fakeClients({}), 'client-x')
     expect(none?.brandTerms).toEqual([])
+  })
+})
+
+describe('ignoreTerms cannot be used to excuse accreditation names or multi-word phrases (子牙 2026-10-29)', () => {
+  it('an accreditation listed as a brand term is still a fact', async () => {
+    const { checkHardFactsPreserved } = await import('../hard-fact-check')
+    const r = checkHardFactsPreserved('Tours | TAANZ bonded', 'Guide.', 'Tours', 'Guide.', { ignoreTerms: ['taanz'] })
+    expect(r.consistent).toBe(false)
+    expect(r.droppedFacts).toContain('TAANZ')
+  })
+
+  it('two-letter or multi-word entries are ignored, not honoured', async () => {
+    const { listHardFacts } = await import('../hard-fact-check')
+    expect(listHardFacts('Guide | ACME', 'Text.', { ignoreTerms: ['ac me', 'ac'] })).toContain('ACME')
+  })
+})
+
+describe('prompt actually carries the original text, the facts and the retry reason (魏征 2026-10-29)', () => {
+  it('buildPrompt includes current title/desc, every fact to keep and the retry feedback', async () => {
+    const { buildPrompt } = await import('../ai-meta')
+    const p = buildPrompt({
+      keyword: 'k', pageUrl: 'https://example.co.nz/p', searchVolume: null, keywordDifficulty: null, position: null, ctr: null,
+      brandVoice: 'v', competitorTitles: [],
+      currentTitle: 'OLD-TITLE-X', currentDesc: 'OLD-DESC-Y', factsToKeep: ['19-storey', 'New Zealand'], retryFeedback: 'REASON-Z',
+    })
+    for (const s of ['OLD-TITLE-X', 'OLD-DESC-Y', '19-storey', 'New Zealand', 'REASON-Z']) expect(p).toContain(s)
+  })
+})
+
+describe('numeric details are facts (魏征 2026-10-29)', () => {
+  it('dropping "19-storey" or "999-step" fails the hard rule; keeping them passes', async () => {
+    const { checkHardFactsPreserved, listHardFacts } = await import('../hard-fact-check')
+    const oldT = 'Liziba Station', oldD = 'Trains pass the 6th floor of a 19-storey building.'
+    expect(checkHardFactsPreserved(oldT, oldD, 'Liziba Station', 'Trains pass a building.').droppedFacts).toEqual(expect.arrayContaining(['6th', '19-storey']))
+    expect(checkHardFactsPreserved(oldT, oldD, 'Liziba Station guide', 'Trains pass the 6th floor of a 19-storey tower.').consistent).toBe(true)
+    expect(listHardFacts('Tianmen', "Heaven's Gate 999-step climb")).toContain('999-step')
   })
 })

@@ -46,6 +46,11 @@ const PROMO_RE = /\b(?:save\s+\d+\s*%|\d+\s*%\s*off\b|\d+-for-\d+\b)/gi
 // ── Quantity regexes (DR48-1) ────────────────────────────────────────────
 const QUANTITY_RE = /\b\d+[\s-](?:days?|nights?|hours?|weeks?|months?|years?)\b/gi
 
+// ── Numeric details (魏征 review 2026-10-29) ──────────────────────────────
+// "19-storey", "6th floor", "999-step": the concrete numbers that make a page specific. Before this,
+// only prices/dates/durations were facts, so a rewrite could silently drop them.
+const NUMERIC_DETAIL_RE = /\b\d[\d,]*(?:st|nd|rd|th)?(?:-[A-Za-z]+)?\b/g
+
 // ── Date regexes ─────────────────────────────────────────────────────────
 const DATE_NAMED_RE = /\b(?:\d{1,2}(?:st|nd|rd|th)?\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(?:\d{1,2}(?:st|nd|rd|th)?,?\s+)?\d{4}\b/gi
 const DATE_NUMERIC_RE = /\b\d{1,2}\/\d{1,2}\/\d{4}\b/g
@@ -142,6 +147,22 @@ const normalizePromo = (s: string): string => s.toLowerCase().replace(/\s+/g, ''
 function extractQuantities(text: string): string[] {
   return [...text.matchAll(QUANTITY_RE)].map((m) => m[0])
 }
+
+// Prices, dates, durations and promos already have their own rules (with their own format
+// normalisation); blank them out first so the same number is never judged twice — e.g. a date
+// reworded from "22nd Dec 2026" to "22 Dec 2026" must not look like a dropped "22nd".
+const ALREADY_COVERED_RES = [
+  PRICE_RE, PRICE_MULTI_CURRENCY_RE, PRICE_CODE_RE, PRICE_WORD_RE, PRICE_CONTEXT_RE, PROMO_RE, QUANTITY_RE,
+  DATE_NAMED_RE, DATE_NUMERIC_RE, DATE_ISO_RE, DATE_NO_YEAR_MONTH_FIRST_RE, DATE_NO_YEAR_DAY_FIRST_RE,
+]
+
+function extractNumericDetails(text: string): string[] {
+  const rest = ALREADY_COVERED_RES.reduce((t, re) => t.replace(re, ' '), text)
+  // A bare year ("2026") is a freshness marker SEO titles routinely add or refresh, not a page fact.
+  return [...rest.matchAll(NUMERIC_DETAIL_RE)].map((m) => m[0]).filter((n) => !/^(?:19|20)\d{2}$/.test(n))
+}
+const normalizeNumericDetail = (s: string): string =>
+  s.toLowerCase().replace(/,/g, '').replace(/^(\d+)(?:st|nd|rd|th)/, '$1')
 const normalizeQuantity = (s: string): string =>
   s.toLowerCase().replace(/\s+/g, '-').replace(/s\b/g, '')
 
@@ -180,12 +201,25 @@ function extractAcronyms(text: string, ignore: ReadonlySet<string> = EMPTY_IGNOR
 const EMPTY_IGNORE: ReadonlySet<string> = new Set()
 
 export interface HardFactOptions {
-  /** The client's own brand words (case-insensitive): a brand name is not a page fact, so dropping it is not a contradiction. Only affects the ALLCAPS-acronym rule. */
+  /**
+   * The client's own brand words (clients.seo_config.brand_terms, case-insensitive): a brand
+   * name is not a page fact, so dropping it is not a contradiction. ⚠️ These words relax a
+   * PUBLISHING gate — only the ALLCAPS-acronym rule is affected (place names, prices, dates,
+   * quantities never are), and only single words of 3+ letters that are not a known
+   * accreditation/authority name are honoured (子牙 review 2026-10-29).
+   */
   ignoreTerms?: string[]
 }
 
+/** Accreditation / authority acronyms that are real page facts even if someone lists them as a brand term. */
+const NEVER_IGNORED_ACRONYMS = new Set(['taanz', 'iata', 'tiaa', 'atas', 'afta', 'tico', 'abta', 'clia'])
+
 function ignoreSet(options?: HardFactOptions): ReadonlySet<string> {
-  return new Set((options?.ignoreTerms ?? []).map((t) => t.toLowerCase()))
+  return new Set(
+    (options?.ignoreTerms ?? [])
+      .map((t) => t.trim().toLowerCase())
+      .filter((t) => /^[a-z0-9]{3,}$/.test(t) && !NEVER_IGNORED_ACRONYMS.has(t)),
+  )
 }
 
 // ── Place-name extraction (with alias normalization, DR48-2) ──
@@ -236,6 +270,7 @@ export function listHardFacts(title: string, desc: string, options?: HardFactOpt
     ...extractDeparturePoints(text),
     ...extractPromos(text),
     ...extractQuantities(text),
+    ...extractNumericDetails(text),
   ])]
 }
 
@@ -265,6 +300,7 @@ export function checkHardFactsPreserved(
     ...findDropped(oldText, newText, extractDeparturePoints, normalizePlaceName),
     ...findDropped(oldText, newText, extractPromos, normalizePromo),
     ...findDropped(oldText, newText, extractQuantities, normalizeQuantity),
+    ...findDropped(oldText, newText, extractNumericDetails, normalizeNumericDetail),
   ])]
 
   const addedFacts = [...new Set([
@@ -275,6 +311,7 @@ export function checkHardFactsPreserved(
     ...findDropped(newText, oldText, extractDeparturePoints, normalizePlaceName),
     ...findDropped(newText, oldText, extractPromos, normalizePromo),
     ...findDropped(newText, oldText, extractQuantities, normalizeQuantity),
+    ...findDropped(newText, oldText, extractNumericDetails, normalizeNumericDetail),
   ])]
 
   if (droppedFacts.length === 0 && addedFacts.length === 0) {

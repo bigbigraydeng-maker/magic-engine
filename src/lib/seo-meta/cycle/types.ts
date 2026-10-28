@@ -207,6 +207,12 @@ export interface ApplyAdapter {
    * able to check the search volume/difficulty/competitor titles/CTS's own
    * ranking URL without leaving the PR.
    */
+  /**
+   * dryRun: true MUST be read-only and MUST accept empty newTitle/newDesc — the
+   * runner calls it that way first to read the page's current title/description
+   * (oldTitle/oldDesc) before generating (2026-10-28). Any new implementation
+   * (e.g. wp_plugin) has to honour this.
+   */
   apply(input: {
     candidate: MetaCycleCandidate
     newTitle: string
