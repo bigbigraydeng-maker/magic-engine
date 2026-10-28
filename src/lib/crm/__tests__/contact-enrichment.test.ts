@@ -338,3 +338,41 @@ describe('enrichContacts 不丢系统账号名', () => {
     expect(byId).toEqual({ a: 'WhatsApp Business', b: null, c: null, d: 'Jane Doe' })
   })
 })
+
+describe('enrichContacts — 机器发的出站不挡同事真发的信', () => {
+  const hints: ConversationHint[] = [{ contactId: 'c1', channel: 'email', participantName: 'Sue' }]
+  const outboundEmails: OutboundEmailMsg[] = [{ contactId: 'c1', sentAt: '2026-09-25T03:46:34Z', messageId: 'm1' }]
+  const mailchimpSent = (extra: Record<string, unknown> = {}): TouchRow =>
+    ({
+      id: 't1',
+      contact_id: 'c1',
+      channel: 'email',
+      direction: 'outbound',
+      occurred_at: '2026-10-28T19:02:00Z',
+      summary: '发出《Welcome》',
+      raw: null,
+      metadata: { automated: true, kind: 'sent' },
+      source: 'mailchimp',
+      ...extra,
+    }) as unknown as TouchRow
+
+  it('a Mailchimp "sent" row does not stop the colleague\u2019s real email from being added', () => {
+    const result = enrichContacts({
+      contacts: [makeContact({ id: 'c1', display_name: 'Sue', primary_email: 'sue@example.com', primary_phone: null })],
+      touches: [mailchimpSent()],
+      hints,
+      outboundEmails,
+    })
+    expect(result.touches.filter((t) => t.id === 'email-msg:m1')).toHaveLength(1)
+  })
+
+  it('a real (non-automated) outbound email touch still suppresses the synthetic one', () => {
+    const result = enrichContacts({
+      contacts: [makeContact({ id: 'c1', display_name: 'Sue', primary_email: 'sue@example.com', primary_phone: null })],
+      touches: [mailchimpSent({ source: 'microsoft_mail', metadata: {} })],
+      hints,
+      outboundEmails,
+    })
+    expect(result.touches.filter((t) => t.id === 'email-msg:m1')).toHaveLength(0)
+  })
+})

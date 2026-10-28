@@ -603,3 +603,28 @@ describe('可折叠：默认收起，点开才铺原文（客人抽屉用）', (
     expect(screen.queryByText(/看完整往来原文/)).toBeNull()
   })
 })
+
+describe('机器自动发出的邮件（Mailchimp 欢迎信 / 群发）', () => {
+  it('在时间线里标成「系统自动发出」', async () => {
+    mockTimeline([
+      touch({ channel: 'email', direction: 'outbound', summary: '发出《Welcome to CTS》', automated: true }),
+    ])
+    draw()
+    await waitFor(() => expect(screen.getByText(/系统自动发出/)).toBeTruthy())
+    expect(screen.getByText(/发出《Welcome to CTS》/)).toBeTruthy()
+  })
+
+  it('不算「最后一句」：不会盖掉客人真说的话', async () => {
+    mockTimeline([
+      touch({ channel: 'email', direction: 'inbound', at: '2026-10-28T01:00:00Z', summary: 'Price for 2 please?' }),
+      touch({ channel: 'email', direction: 'outbound', at: '2026-10-28T19:00:00Z', summary: '发出《Welcome to CTS》', automated: true }),
+    ])
+    const onSummary = vi.fn()
+    render(<ContactTimeline clientId="cts" contactId="c1" onSummary={onSummary} />)
+    await waitFor(() => expect(onSummary).toHaveBeenCalled())
+    // 抽屉顶上的「最后一句」交出去的是客人的话，不是那封自动信
+    const s = onSummary.mock.calls.at(-1)?.[0]
+    expect(s.lastText).toBe('Price for 2 please?')
+    expect(s.lastWho).toBe('客人')
+  })
+})

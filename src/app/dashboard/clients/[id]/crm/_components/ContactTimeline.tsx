@@ -41,6 +41,8 @@ export interface TimelineEntry {
   channel?: string | null
   direction?: 'inbound' | 'outbound'
   summary?: string | null
+  /** 出站且是机器发的（Mailchimp 欢迎信 / 群发）：显示成「系统自动发出」，不算「我们说的最后一句」。 */
+  automated?: boolean
   /**
    * 销售真正敲进去的那句话 —— **跟 `summary` 不是一回事**，后者是 AI 摘要。
    * 只在判决行旁边展示，理由见 `VERDICT_ROW`。
@@ -263,7 +265,8 @@ function summarise(
     if (e.travelWindow) s.travelWindow = e.travelWindow
     if (e.kind === 'stage') s.stageSource = stageSourceOf(e.changedBy)
     const text = e.kind === 'message' ? e.body : e.kind === 'touch' ? e.summary : null
-    if (text && text.trim()) {
+    // 机器自动发出的信不是「最后一句」：不能盖掉客人真说的话。
+    if (text && text.trim() && !e.automated) {
       s.lastText = (e.kind === 'touch' ? humanizeFormSummary(text) : null) ?? text.trim()
       s.lastWho = e.direction === 'inbound' ? (e.senderName || '客人') : '我们'
       s.lastAt = e.at
@@ -440,7 +443,7 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
     >
       <p className="text-[10px] font-bold text-me-charcoal/40">
         {icon} {name}
-        {e.direction === 'inbound' ? ' · 客人来的' : ''} · {when(e.at)}
+        {e.direction === 'inbound' ? ' · 客人来的' : e.automated ? ' · 系统自动发出' : ''} · {when(e.at)}
       </p>
       {e.summary && (
         <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/85">{humanizeFormSummary(e.summary) ?? e.summary}</p>
