@@ -1,9 +1,10 @@
 /**
- * Approve a draft marketing plan. One implementation for the approve route and
+ * Approve a draft marketing plan. One implementation for the approve route,
  * for "agree on a prescription" (the plan rides along only when every
- * applicable check, on every phase, is green). It only changes plan state
- * and dispatches internal to-dos for legacy plans: no Meta draft, no Meta
- * write, no spend, no budget change.
+ * applicable check, on every phase, is green), and for the plan confirmation
+ * card (the OPC has already seen the checks that are not green). It only
+ * changes plan state and dispatches internal to-dos for legacy plans: no Meta
+ * draft, no Meta write, no spend, no budget change.
  */
 
 import { randomUUID } from 'crypto'
@@ -25,9 +26,11 @@ export type ApprovePlanResult =
   | { kind: 'not_found' }
   | { kind: 'not_draft'; status: string }
   | { kind: 'invalid_spec'; issues: PromoValidationIssue[] }
-  | { kind: 'blocked'; blockers: GateResult[] }
+  | { kind: 'blocked'; blockers: GateResult[]; contentHash: string }
   /** Only with `requireAllGreen`: gates pass but some applicable check is not green. Nothing was written. */
-  | { kind: 'needs_confirmation'; planStart: string; planEnd: string; checks: GateResult[] }
+  | { kind: 'needs_confirmation'; planStart: string; planEnd: string; checks: GateResult[]; contentHash: string }
+  /** The card's content stamp does not match this plan. Nothing was written. */
+  | { kind: 'stale' }
   | { kind: 'conflict'; error: string; status: 409 | 500 }
 
 async function existingTaskCount(planId: string): Promise<number> {
@@ -43,17 +46,34 @@ interface Gated {
   hash?: string
 }
 
+function contentHashOf(plan: MarketingPlan): string | null {
+  if (!hasPromoField(plan.plan_data)) return null
+  const parsed = parsePromoSpec((plan.plan_data as unknown as { promo: unknown }).promo)
+  if (!parsed.ok) return null
+  return promoContentHash(parsed.spec)
+}
+
+async function alreadyApproved(plan: MarketingPlan, expectedHash: string | undefined): Promise<ApprovePlanResult> {
+  if (expectedHash && contentHashOf(plan) !== expectedHash) return { kind: 'stale' }
+  return { kind: 'already_approved', plan, existingTaskCount: await existingTaskCount(plan.id) }
+}
+
 async function runGates(
   plan: MarketingPlan,
   requireAllGreen: boolean,
+  expectedContentHash?: string,
 ): Promise<{ stop: ApprovePlanResult } | { gated: Gated }> {
-  if (!hasPromoField(plan.plan_data)) return { gated: {} }
+  if (!hasPromoField(plan.plan_data)) {
+    return expectedContentHash ? { stop: { kind: 'stale' } } : { gated: {} }
+  }
   const parsed = parsePromoSpec((plan.plan_data as unknown as { promo: unknown }).promo)
   if (!parsed.ok) return { stop: { kind: 'invalid_spec', issues: parsed.issues } }
+  const hash = promoContentHash(parsed.spec)
+  if (expectedContentHash && hash !== expectedContentHash) return { stop: { kind: 'stale' } }
   // Approval is an authorizing action: the budget gate always reads live.
   const facts = await loadPromoFacts(plan.client_id, parsed.spec, manualChecksOf(plan), new Date(), { liveBudget: 'always' })
   const verdict = evaluateApproval(parsed.spec, facts.gate)
-  if (!verdict.can_approve) return { stop: { kind: 'blocked', blockers: verdict.blockers } }
+  if (!verdict.can_approve) return { stop: { kind: 'blocked', blockers: verdict.blockers, contentHash: hash } }
   const notGreen = hardNotGreen(verdict)
   if (requireAllGreen && notGreen.length > 0) {
     return {
@@ -62,12 +82,13 @@ async function runGates(
         planStart: plan.start_date ?? '见计划',
         planEnd: plan.end_date ?? '见计划',
         checks: notGreen,
+        contentHash: hash,
       },
     }
   }
   return {
     gated: {
-      hash: promoContentHash(parsed.spec),
+      hash,
       snapshot: {
         taken_at: new Date().toISOString(),
         results: verdict.results.map(r => ({
@@ -99,6 +120,8 @@ export async function approvePlan(args: {
   planId: string
   approvedBy: string | null
   requireAllGreen?: boolean
+  /** Set by the plan confirmation card. A different plan is not approved. */
+  expectedContentHash?: string
 }): Promise<ApprovePlanResult> {
   const { data, error: fetchErr } = await supabaseAdmin
     .from('marketing_plans')
@@ -110,12 +133,10 @@ export async function approvePlan(args: {
   if (!data) return { kind: 'not_found' }
   const plan = data as MarketingPlan
 
-  if (plan.status === 'approved') {
-    return { kind: 'already_approved', plan, existingTaskCount: await existingTaskCount(plan.id) }
-  }
+  if (plan.status === 'approved') return alreadyApproved(plan, args.expectedContentHash)
   if (plan.status !== 'draft') return { kind: 'not_draft', status: plan.status }
 
-  const gates = await runGates(plan, args.requireAllGreen === true)
+  const gates = await runGates(plan, args.requireAllGreen === true, args.expectedContentHash)
   if ('stop' in gates) return gates.stop
 
   // Dispatch first, flip the status after: a failed flip revokes the dispatch.

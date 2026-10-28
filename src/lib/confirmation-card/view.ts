@@ -7,6 +7,7 @@ import type { CardClicker } from './actor'
 import { buttonsFor } from './actor'
 import { confirmBlockReason, type HardCheck } from './facts'
 import { ConfirmationCardError } from './errors'
+import { PLAN_CARD_OPC_ONLY, isPlanApprovalCard, planCardMayConfirmDespiteChecks } from '@/lib/marketing-plan/plan-card-subject'
 
 export const CONFIRMATION_TTL_MS = 30 * 60 * 1000
 
@@ -96,12 +97,37 @@ export function classifyStatus(runStatus: string, reason: string, issuedAt: stri
   return 'declined'
 }
 
-function statusLine(status: CardStatus, decidedBy: string | null): string {
+function statusLine(status: CardStatus, decidedBy: string | null, subjectKey: string): string {
   if (status === 'waiting') return '还没人点。'
+  if (status === 'confirmed' && isPlanApprovalCard(subjectKey)) {
+    return `${decidedBy ?? '有人'} 点了确认。这份计划已批准。还没开投，不会花钱。`
+  }
   if (status === 'confirmed') return `${decidedBy ?? '有人'} 点了确认。这件事还没有开始做。`
   if (status === 'declined') return `${decidedBy ?? '有人'} 点了不做。`
   if (status === 'expired') return '过了 30 分钟没人点，这张卡作废了。'
   return '要做的事变了，这张旧卡作废了。'
+}
+
+function shownButtons(
+  waiveChecks: boolean,
+  clicker: CardClicker,
+  hardBlock: string | null,
+  buttons: { confirmEnabled: boolean; declineEnabled: boolean; blockedReason: string | null },
+  waiting: boolean,
+): { confirmEnabled: boolean; declineEnabled: boolean; blockedReason: string | null } {
+  if (!waiveChecks || !waiting) return buttons
+  if (clicker.kind !== 'opc') {
+    return {
+      confirmEnabled: false,
+      declineEnabled: buttons.declineEnabled,
+      blockedReason: buttons.blockedReason ?? PLAN_CARD_OPC_ONLY,
+    }
+  }
+  return {
+    confirmEnabled: buttons.confirmEnabled,
+    declineEnabled: buttons.declineEnabled,
+    blockedReason: hardBlock,
+  }
 }
 
 export function presentCard(args: {
@@ -118,7 +144,9 @@ export function presentCard(args: {
   }
   const status = classifyStatus(args.run.status, args.decisionReason, stored.issuedAt, args.now)
   const hardBlock = confirmBlockReason(stored.hardChecks)
-  const buttons = buttonsFor(args.clicker, args.run.client_id, hardBlock, status === 'waiting')
+  const waiveChecks = planCardMayConfirmDespiteChecks(stored.subjectKey, stored.hardChecks)
+  const buttons = buttonsFor(args.clicker, args.run.client_id, waiveChecks ? null : hardBlock, status === 'waiting')
+  const click = shownButtons(waiveChecks, args.clicker, hardBlock, buttons, status === 'waiting')
   return {
     runId: args.run.id,
     expectedDecisionId: args.decisionId,
@@ -130,9 +158,9 @@ export function presentCard(args: {
     scope: stored.scope,
     expiresLabel: expiryLabel(stored.issuedAt),
     status,
-    statusLine: statusLine(status, args.decidedBy),
-    confirmEnabled: buttons.confirmEnabled,
-    declineEnabled: buttons.declineEnabled,
-    blockedReason: buttons.blockedReason,
+    statusLine: statusLine(status, args.decidedBy, stored.subjectKey),
+    confirmEnabled: click.confirmEnabled,
+    declineEnabled: click.declineEnabled,
+    blockedReason: click.blockedReason,
   }
 }

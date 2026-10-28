@@ -10,6 +10,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { approvePlan, type ApprovePlanResult } from '@/lib/marketing-plan/approve-plan'
+import { planCardSubject } from '@/lib/marketing-plan/plan-card-subject'
 import {
   issueConfirmationCard,
   type CardClicker,
@@ -71,16 +72,29 @@ function cardCheck(result: GateResult): HardCheck {
   }
 }
 
+function stampOf(result: ApprovePlanResult): string | null {
+  if (result.kind !== 'needs_confirmation' && result.kind !== 'blocked') return null
+  return typeof result.contentHash === 'string' ? result.contentHash : null
+}
+
 async function cardFor(
   deps: KernelDeps,
-  args: { clientId: string; planId: string; clicker: CardClicker; start: string; end: string; checks: GateResult[] },
+  args: {
+    clientId: string
+    planId: string
+    contentHash: string | null
+    clicker: CardClicker
+    start: string
+    end: string
+    checks: GateResult[]
+  },
 ): Promise<ConfirmationCardView | null> {
   try {
     return await issueConfirmationCard(deps, {
       clientId: args.clientId,
       clicker: args.clicker,
       facts: {
-        subjectKey: `plan-approve:${args.planId}`,
+        subjectKey: planCardSubject(args.planId, args.contentHash),
         what: '批准推广计划草稿（只改计划状态，不开投）',
         account: '不操作任何广告账户',
         amount: '批准计划本身不花钱，不改预算',
@@ -115,6 +129,7 @@ function describe(result: ApprovePlanResult): { status: PlanAgreeStatus; text: s
     case 'not_draft': return { status: 'failed', text: failedText('它已经不是草稿状态。') }
     case 'invalid_spec': return { status: 'failed', text: failedText('计划内容格式不合法。') }
     case 'conflict': return { status: 'failed', text: failedText(result.error) }
+    case 'stale': return { status: 'failed', text: failedText('这份计划已经改过了。') }
     default: return null
   }
 }
@@ -156,7 +171,15 @@ export async function approvePlanWithAgree(args: {
     if (checks.length === 0) return make('failed', failedText('检查结果读不出来。'), planId, now)
     const start = result.kind === 'needs_confirmation' ? result.planStart : '见计划'
     const end = result.kind === 'needs_confirmation' ? result.planEnd : '见计划'
-    const card = await cardFor(args.deps, { clientId: args.clientId, planId, clicker: args.clicker, start, end, checks })
+    const card = await cardFor(args.deps, {
+      clientId: args.clientId,
+      planId,
+      contentHash: stampOf(result),
+      clicker: args.clicker,
+      start,
+      end,
+      checks,
+    })
     return make('needs_confirmation', confirmationText(checks.length, card !== null), planId, now, { card })
   } catch (err) {
     console.warn('[plan-draft-agree] plan approval failed', err instanceof Error ? err.name : 'error')

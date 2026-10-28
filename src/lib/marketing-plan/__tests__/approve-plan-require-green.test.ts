@@ -140,6 +140,7 @@ describe('approvePlan requireAllGreen', () => {
       expect(result.checks.map(check => ({ key: check.key, light: check.light, phase_id: check.phase_id }))).toEqual([
         { key: 'ads.budget_within_caps', light: 'yellow', phase_id: 'p2' },
       ])
+      expect(result.contentHash).toBe(promoContentHash(promo))
     }
     expect(h.updates).toHaveLength(0)
     expect(h.dispatch).not.toHaveBeenCalled()
@@ -188,6 +189,47 @@ describe('approvePlan requireAllGreen', () => {
     expect(result.kind).toBe('approved')
     expect(h.dispatch).not.toHaveBeenCalled()
     expect(h.updates[0]).toMatchObject({ status: 'approved' })
+  })
+
+  it('approves a yellow draft from the plan card when the content stamp matches', async () => {
+    const promo = draft(baseSpec())
+    h.gate = landingVerified(promo)
+    const result = await approvePlan({
+      clientId: 'client-1',
+      planId: 'plan-1',
+      approvedBy: 'ray@example.com',
+      requireAllGreen: false,
+      expectedContentHash: promoContentHash(promo),
+    })
+    expect(result.kind).toBe('approved')
+    expect(h.updates).toHaveLength(1)
+    expect(h.dispatch).not.toHaveBeenCalled()
+  })
+
+  it('does not approve a card whose plan content changed', async () => {
+    draft(socialSpec())
+    const result = await approvePlan({
+      clientId: 'client-1',
+      planId: 'plan-1',
+      approvedBy: 'ray@example.com',
+      expectedContentHash: '0000000000000000',
+    })
+    expect(result.kind).toBe('stale')
+    expect(h.updates).toHaveLength(0)
+    expect(h.dispatch).not.toHaveBeenCalled()
+  })
+
+  it('does not treat an already-approved plan as the card when the content changed', async () => {
+    const promo = draft(socialSpec(), 'approved')
+    const result = await approvePlan({
+      clientId: 'client-1',
+      planId: 'plan-1',
+      approvedBy: 'ray@example.com',
+      expectedContentHash: '0000000000000000',
+    })
+    expect(result.kind).toBe('stale')
+    expect(promoContentHash(promo)).not.toBe('0000000000000000')
+    expect(h.updates).toHaveLength(0)
   })
 
   it('does not approve a plan that is already approved', async () => {

@@ -60,12 +60,13 @@ describe('plan rides along with agree', () => {
       planStart: '2026-11-01',
       planEnd: '2026-11-30',
       checks: [gate({ light: 'yellow', reason: '预算快到上限' }), gate({ key: 'ads.cap_set', light: 'red', reason: '没设上限' })],
+      contentHash: 'abc123abc123abcd',
     })
     const out = await run()
     expect(out.status).toBe('needs_confirmation')
     expect(out.card).toEqual({ id: 'card-1' })
     const facts = mockIssue.mock.calls[0][1].facts
-    expect(facts.subjectKey).toBe('plan-approve:plan-1')
+    expect(facts.subjectKey).toBe('plan-approve:plan-1:abc123abc123abcd')
     expect(facts.hardChecks.map((c: { state: string }) => c.state)).toEqual(['unread', 'red'])
   })
 
