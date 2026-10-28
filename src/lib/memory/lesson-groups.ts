@@ -3,7 +3,7 @@
  * Trial rows stay in the try-out group. Everything else inactive is retired.
  */
 
-import { isAdoptionCandidate } from './tune-candidate'
+import { isAdoptionCandidate, TUNE_ADOPTED_STATUS } from './tune-candidate'
 
 export interface GroupableLesson {
   lesson_key: string
@@ -29,6 +29,10 @@ export function groupEngineLessons<T extends GroupableLesson>(
   for (const lesson of lessons) {
     if (lesson.is_active) {
       active.push(lesson)
+      continue
+    }
+    if (lesson.evidence?.status === TUNE_ADOPTED_STATUS) {
+      retired.push(lesson)
       continue
     }
     if (isTrial(lesson)) {

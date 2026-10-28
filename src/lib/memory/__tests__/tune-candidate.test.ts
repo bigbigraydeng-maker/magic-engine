@@ -6,7 +6,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
 import { buildHuatuoGenerationPrompt } from '@/lib/huatuo/prompts'
-import type { DiscoveryReport, PrescriptionIntake } from '@/types/diagnostic'
+import type { DiscoveryReport } from '@/lib/zhangqian/types'
+import type { PrescriptionIntake } from '@/types/diagnostic'
 import type { HuatuoLookupContext } from '@/lib/huatuo/types'
 import { loadMemoryForClient } from '../service'
 import { groupEngineLessons } from '../lesson-groups'
@@ -79,35 +80,33 @@ describe('writeTuneCandidateLesson', () => {
 })
 
 describe('adopt flips is_active', () => {
-  it('the existing switch turns a candidate on and does not rewrite the text', async () => {
-    const updates: Record<string, unknown>[] = []
-    vi.mocked(supabaseAdmin.from).mockImplementation(() => ({
-      update: (patch: Record<string, unknown>) => {
-        updates.push(patch)
-        return {
-          eq: () => ({
-            select: () => ({
-              maybeSingle: async () => ({
-                data: { lesson_key: 'tune-retarget-lock', is_active: patch.is_active },
-                error: null,
-              }),
-            }),
-          }),
-        }
-      },
-    }) as never)
+  it('records adoption, then puts a stopped lesson in retired rather than pending', async () => {
+    const store = mockLessonStore({ is_active: false, evidence: { status: 'candidate', source: 'review' } })
+    const adopted = await changeLesson(true)
+    expect(adopted.status).toBe(200)
+    expect(store.updates[0]?.evidence).toEqual({ status: 'adopted', source: 'review' })
+    expect(store.updates[0]?.lesson).toBeUndefined()
 
-    const req = new NextRequest('http://localhost/api/ad-engine/lessons/tune-retarget-lock', {
-      method: 'PATCH',
-      body: JSON.stringify({ is_active: true }),
-      headers: { 'Content-Type': 'application/json' },
-    })
-    const res = await PATCH(req, { params: Promise.resolve({ key: 'tune-retarget-lock' }) })
-    const body = await res.json()
-    expect(res.status).toBe(200)
-    expect(body.lesson.is_active).toBe(true)
-    expect(Object.keys(updates[0] ?? {}).sort()).toEqual(['is_active', 'updated_at'])
-    expect(updates[0]?.is_active).toBe(true)
+    const stopped = await changeLesson(false)
+    expect(stopped.status).toBe(200)
+    const groups = groupEngineLessons([store.row()], () => false)
+    expect(groups.pending).toHaveLength(0)
+    expect(groups.retired).toHaveLength(1)
+  })
+
+  it('retires an already active legacy candidate on the first stop', async () => {
+    const store = mockLessonStore({ is_active: true, evidence: { kind: 'expert_rss_candidate' } })
+    expect((await changeLesson(false)).status).toBe(200)
+    expect(store.updates[0]?.evidence).toEqual({ kind: 'expert_rss_candidate', status: 'adopted' })
+    expect(groupEngineLessons([store.row()], () => false).retired).toHaveLength(1)
+  })
+
+  it('returns a conflict when the lesson changed between read and update', async () => {
+    const store = mockLessonStore({ is_active: false, evidence: { status: 'candidate' } }, true)
+    const res = await changeLesson(true)
+    expect(res.status).toBe(409)
+    expect(store.filters).toContainEqual(['updated_at', '2026-10-28T00:00:00Z'])
+    expect(store.filters).toContainEqual(['is_active', false])
   })
 
   it('refuses the switch when the person is not a global admin', async () => {
@@ -123,6 +122,42 @@ describe('adopt flips is_active', () => {
     expect(supabaseAdmin.from).not.toHaveBeenCalled()
   })
 })
+
+function mockLessonStore(
+  initial: { is_active: boolean; evidence: Record<string, unknown> },
+  conflict = false,
+) {
+  let row = { lesson_key: 'tune-retarget-lock', updated_at: '2026-10-28T00:00:00Z', ...initial }
+  const updates: Record<string, unknown>[] = []
+  const filters: Array<[string, unknown]> = []
+  vi.mocked(supabaseAdmin.from).mockImplementation(() => ({
+    select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: row, error: null }) }) }),
+    update: (patch: Record<string, unknown>) => {
+      updates.push(patch)
+      const chain = {
+        eq: (field: string, value: unknown) => { filters.push([field, value]); return chain },
+        is: (field: string, value: unknown) => { filters.push([field, value]); return chain },
+        select: () => chain,
+        maybeSingle: async () => {
+          if (conflict) return { data: null, error: null }
+          row = { ...row, ...patch } as typeof row
+          return { data: { lesson_key: row.lesson_key, is_active: row.is_active }, error: null }
+        },
+      }
+      return chain
+    },
+  }) as never)
+  return { updates, filters, row: () => row }
+}
+
+async function changeLesson(isActive: boolean) {
+  const req = new NextRequest('http://localhost/api/ad-engine/lessons/tune-retarget-lock', {
+    method: 'PATCH',
+    body: JSON.stringify({ is_active: isActive }),
+    headers: { 'Content-Type': 'application/json' },
+  })
+  return PATCH(req, { params: Promise.resolve({ key: 'tune-retarget-lock' }) })
+}
 
 describe('an adopted lesson is read when the next prescription is generated', () => {
   it('only the active lesson is loaded, and that text is in the prescription prompt', async () => {
@@ -205,12 +240,13 @@ describe('ad engine groups', () => {
       { lesson_key: 'wait', is_active: false, evidence: { status: 'candidate' } },
       { lesson_key: 'expert', is_active: false, evidence: { kind: 'expert_rss_candidate' } },
       { lesson_key: 'try', is_active: false, evidence: { kind: 'expert_rss_candidate' } },
+      { lesson_key: 'try-adopted', is_active: false, evidence: { kind: 'expert_rss_candidate', status: 'adopted' } },
       { lesson_key: 'off', is_active: false, evidence: null },
-    ], (lesson) => lesson.lesson_key === 'try')
+    ], (lesson) => lesson.lesson_key === 'try' || lesson.lesson_key === 'try-adopted')
     expect(groups.active.map((row) => row.lesson_key)).toEqual(['on'])
     expect(groups.pending.map((row) => row.lesson_key)).toEqual(['wait', 'expert'])
     expect(groups.trial.map((row) => row.lesson_key)).toEqual(['try'])
-    expect(groups.retired.map((row) => row.lesson_key)).toEqual(['off'])
+    expect(groups.retired.map((row) => row.lesson_key)).toEqual(['try-adopted', 'off'])
   })
 })
 

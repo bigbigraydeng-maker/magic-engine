@@ -14,6 +14,7 @@ import {
 } from './write-lesson'
 
 export const TUNE_CANDIDATE_STATUS = 'candidate'
+export const TUNE_ADOPTED_STATUS = 'adopted'
 
 export interface TuneCandidateInput {
   lessonKey: string
@@ -53,6 +54,7 @@ export function isAdoptionCandidate(
   evidence: Record<string, unknown> | null | undefined,
 ): boolean {
   if (isActive || !evidence) return false
+  if (evidence.status === TUNE_ADOPTED_STATUS) return false
   if (evidence.status === TUNE_CANDIDATE_STATUS) return true
   return evidence.kind === 'tune_candidate' || evidence.kind === 'expert_rss_candidate'
 }
