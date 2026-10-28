@@ -259,6 +259,36 @@ export async function getCampaignActivity(
   )
 }
 
+/** 一封邮件的一个收件人：Mailchimp 的发送状态（sent=已发出 / hard=永久退回 / soft=暂时退回）。 */
+export interface CampaignRecipient {
+  email: string
+  status: 'sent' | 'hard' | 'soft' | 'other'
+}
+
+/**
+ * 这封邮件发给了谁（含没打开的人）。
+ *
+ * 为什么要它：`getCampaignActivity` 只返回打开 / 点击过的人，收到了没打开的人一条都没有 ——
+ * 于是每天早上的欢迎信在客人抽屉里永远看不到（2026-10-29 PM 发现）。
+ *
+ * 端点 `/reports/{id}/sent-to`，返回的数组字段叫 `sent_to`（不是 `members`，照搬 `members` 会静默拿到 0 条）；
+ * 每人一行，**没有每个人各自的发送时间**，只能用整封邮件的发出时间。
+ */
+export async function getCampaignRecipients(
+  apiKey: string,
+  campaignId: string,
+): Promise<CampaignRecipient[]> {
+  const rows = await fetchAllMembers(apiKey, `/reports/${campaignId}/sent-to`, (j) => (j.sent_to as unknown[]) ?? [])
+  const out: CampaignRecipient[] = []
+  for (const r of rows as Array<{ email_address?: string; status?: string }>) {
+    const email = (r.email_address ?? '').trim().toLowerCase()
+    if (!email) continue
+    const st = r.status === 'sent' || r.status === 'hard' || r.status === 'soft' ? r.status : 'other'
+    out.push({ email, status: st })
+  }
+  return out
+}
+
 /** key 能不能用。配好之后先跑这个,别等同步时才发现 401。 */
 export async function ping(apiKey: string): Promise<{ ok: true; account: string }> {
   const json = await call<{ account_name?: string }>(apiKey, '/')

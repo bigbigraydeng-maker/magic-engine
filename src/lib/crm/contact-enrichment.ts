@@ -209,8 +209,13 @@ export function enrichContacts(args: {
       primary_email: resolvedEmail,
     })
 
+    // 机器发的（Mailchimp 欢迎信 / 群发）不算「我们回过他」——否则一封机器信一进来，
+    // 同事从 info@ 真回的信就不再补进时间线，名单会把已跟进的人当成没人联系过。
     const hasOutboundEmailTouch = contactTouches.some(
-      (t) => t.channel === 'email' && t.direction === 'outbound',
+      (t) =>
+        t.channel === 'email' &&
+        t.direction === 'outbound' &&
+        !isAutomatedTouch((t as { source?: string | null }).source, t.metadata as Record<string, unknown> | null),
     )
 
     if (contactEmails.length > 0 && !hasOutboundEmailTouch) {
