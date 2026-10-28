@@ -22,10 +22,26 @@ import { MANUAL_PRESCRIPTION_AGENT } from '@/lib/diagnostic/manual-prescription'
 
 const params = { id: 'client-1' }
 
-function chain(data: unknown) {
+type RecordedQuery = { table: string; select?: string; filters: string[] }
+
+function chain(data: unknown, query?: RecordedQuery) {
   const builder: Record<string, unknown> = {}
-  const self = () => builder
-  for (const name of ['select', 'eq', 'order', 'limit']) builder[name] = self
+  builder.select = (cols?: string) => {
+    if (query && cols !== undefined) query.select = cols
+    return builder
+  }
+  builder.eq = (col: string, value: unknown) => {
+    query?.filters.push(`${col}=${String(value)}`)
+    return builder
+  }
+  builder.order = (col: string, opts?: { ascending?: boolean }) => {
+    query?.filters.push(`order:${col}:${opts?.ascending === false ? 'desc' : 'asc'}`)
+    return builder
+  }
+  builder.limit = (n: number) => {
+    query?.filters.push(`limit:${n}`)
+    return builder
+  }
   builder.maybeSingle = async () => ({ data, error: null })
   builder.single = async () => ({ data, error: null })
   return builder
@@ -59,18 +75,21 @@ function request(body: unknown): NextRequest {
 function mockDb(options: { goal?: unknown; run?: unknown; version?: unknown } = {}) {
   const inserts: Array<Record<string, unknown>> = []
   const tables: string[] = []
+  const queries: RecordedQuery[] = []
   ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
     tables.push(table)
-    if (table === 'goals') return chain(options.goal === undefined ? { id: 'goal-1', client_id: 'client-1' } : options.goal)
-    if (table === 'diagnostic_runs') return chain(options.run === undefined ? { id: 'run-9' } : options.run)
-    const builder = chain(options.version === undefined ? { version: 4 } : options.version)
+    const query: RecordedQuery = { table, filters: [] }
+    queries.push(query)
+    if (table === 'goals') return chain(options.goal === undefined ? { id: 'goal-1', client_id: 'client-1' } : options.goal, query)
+    if (table === 'diagnostic_runs') return chain(options.run === undefined ? { id: 'run-9' } : options.run, query)
+    const builder = chain(options.version === undefined ? { version: 4 } : options.version, query)
     builder.insert = (row: Record<string, unknown>) => {
       inserts.push(row)
       return { select: () => ({ single: async () => ({ data: { id: 'rx-new' }, error: null }) }) }
     }
     return builder
   })
-  return { inserts, tables }
+  return { inserts, tables, queries }
 }
 
 beforeEach(() => {
@@ -81,21 +100,29 @@ beforeEach(() => {
 })
 
 describe('POST /prescriptions/manual', () => {
-  it('inserts a draft with the next version and 广告 Agent, without a diagnostic run', async () => {
-    const { inserts, tables } = mockDb({ run: null })
+  it('inserts a draft with the latest run id and the next version', async () => {
+    const { inserts, tables, queries } = mockDb()
     const res = await POST(request(payload()), { params })
     const json = await res.json()
     expect(res.status).toBe(200)
     expect(json).toMatchObject({
       success: true, prescription_id: 'rx-new', status: 'draft', version: 5,
-      agent_name: MANUAL_PRESCRIPTION_AGENT, goal_id: 'goal-1', run_id: null,
+      agent_name: MANUAL_PRESCRIPTION_AGENT, goal_id: 'goal-1', run_id: 'run-9',
       view_path: '/dashboard/clients/client-1/prescription/new?goal_id=goal-1',
     })
     expect(inserts[0]).toMatchObject({
-      status: 'draft', agent_name: MANUAL_PRESCRIPTION_AGENT, version: 5, run_id: null,
+      status: 'draft', agent_name: MANUAL_PRESCRIPTION_AGENT, version: 5, run_id: 'run-9',
       goal_id: 'goal-1', supersedes_id: null, discovery_id: null, intake: null,
     })
-    expect(tables).not.toContain('diagnostic_runs')
+    expect(inserts[0].run_id).not.toBe('spoof-run')
+    const runQuery = queries.find((query) => query.table === 'diagnostic_runs')
+    expect(runQuery?.select).toBe('id')
+    expect(runQuery?.filters).toEqual([
+      'client_id=client-1',
+      'order:created_at:desc',
+      'limit:1',
+    ])
+    expect(tables).not.toContain('diagnostic_findings')
     expect(inserts[0].approved_at).toBeUndefined()
     expect((inserts[0].generation_meta as { source: string }).source).toBe('manual')
     expect(tables).not.toContain('execution_items')
@@ -103,6 +130,16 @@ describe('POST /prescriptions/manual', () => {
     expect(mockLand).not.toHaveBeenCalled()
     expect(mockGenerate).not.toHaveBeenCalled()
     expect(mockHuatuo).not.toHaveBeenCalled()
+  })
+
+  it('returns 422 and does not insert when the client has no diagnostic run', async () => {
+    const { inserts, tables } = mockDb({ run: null })
+    const res = await POST(request(payload()), { params })
+    expect(res.status).toBe(422)
+    expect((await res.json()).error).toBe('这个客户还没有体检记录，处方草稿存不进去。')
+    expect(inserts).toHaveLength(0)
+    expect(tables).toContain('diagnostic_runs')
+    expect(tables.filter((table) => table === 'prescriptions')).toHaveLength(0)
   })
 
   it('starts at version 1 when the goal has no prescription yet', async () => {

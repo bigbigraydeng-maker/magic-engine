@@ -14,10 +14,26 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 type Fail = { ok: false; status: number; error: string }
-type Ready = { ok: true; version: number }
+type Ready = { ok: true; runId: string; version: number }
+
+const NO_DIAGNOSTIC_RUN_MESSAGE = '这个客户还没有体检记录，处方草稿存不进去。'
 
 function jsonError(status: number, error: string): NextResponse {
   return NextResponse.json({ success: false, error }, { status })
+}
+
+/** Latest run id only. Scores and issue lists stay unread; the column is NOT NULL. */
+async function latestRunId(clientId: string): Promise<{ runId: string } | Fail> {
+  const { data, error } = await supabaseAdmin
+    .from('diagnostic_runs')
+    .select('id')
+    .eq('client_id', clientId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ id: string }>()
+  if (error) return { ok: false, status: 500, error: '读取体检记录失败' }
+  if (!data?.id) return { ok: false, status: 422, error: NO_DIAGNOSTIC_RUN_MESSAGE }
+  return { runId: data.id }
 }
 
 async function nextVersionForGoal(goalId: string): Promise<number | Fail> {
@@ -37,9 +53,11 @@ async function loadInsertContext(clientId: string, goalId: string): Promise<Read
   if (!goal || goal.client_id !== clientId) {
     return { ok: false, status: 422, error: '目标不存在，或不属于这个客户' }
   }
+  const run = await latestRunId(clientId)
+  if (!('runId' in run)) return run
   const version = await nextVersionForGoal(goalId)
   if (typeof version !== 'number') return version
-  return { ok: true, version }
+  return { ok: true, runId: run.runId, version }
 }
 
 async function insertDraft(
@@ -50,7 +68,7 @@ async function insertDraft(
   const row = {
     client_id: clientId,
     goal_id: parsed.goalId,
-    run_id: null,
+    run_id: ready.runId,
     discovery_id: null,
     status: 'draft' as const,
     version: ready.version,
@@ -78,7 +96,7 @@ async function insertDraft(
     version: ready.version,
     agent_name: MANUAL_PRESCRIPTION_AGENT,
     goal_id: parsed.goalId,
-    run_id: null,
+    run_id: ready.runId,
     view_path: `/dashboard/clients/${clientId}/prescription/new?goal_id=${parsed.goalId}`,
   })
 }
