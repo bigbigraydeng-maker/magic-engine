@@ -7,6 +7,13 @@ import { buildEntityTree } from './build'
 import type { EntityTree, InsightRow, SnapshotRow } from './build'
 import { scopeToClientPage } from './scope'
 
+/** The tree plus what the scope filter left out, so the page never says "nothing running" when it simply could not tell. */
+export interface EntityTreeResult {
+  tree: EntityTree
+  hiddenAdsets: number
+  noPageRegistered: boolean
+}
+
 const PAGE_SIZE = 1000
 /** Snapshots are taken daily; a few days back is enough to hold the latest one of every live entity. */
 const SNAPSHOT_LOOKBACK_DAYS = 4
@@ -81,6 +88,13 @@ export function toSnapshotRow(r: RawSnapshot): SnapshotRow | null {
   }
 }
 
+/** Offset paging on a random id can read one row twice when a sync inserts mid-read; one row per (level, entity, date). */
+export function dedupeInsights(rows: InsightRow[]): InsightRow[] {
+  const seen = new Map<string, InsightRow>()
+  for (const r of rows) seen.set(`${r.level}|${r.entityId}|${r.date}`, r)
+  return [...seen.values()]
+}
+
 export function clampTreeDays(raw: string | null): number {
   const n = raw === null ? NaN : Number.parseInt(raw, 10)
   if (!Number.isFinite(n) || n < 1) return TREE_DEFAULT_DAYS
@@ -110,7 +124,7 @@ async function loadClientPageId(clientId: string, supabase: SupabaseClient): Pro
   return (data as { facebook_page_id: string | null } | null)?.facebook_page_id ?? null
 }
 
-export async function loadEntityTree(clientId: string, days: number, supabase: SupabaseClient): Promise<EntityTree> {
+export async function loadEntityTree(clientId: string, days: number, supabase: SupabaseClient): Promise<EntityTreeResult> {
   const latest = await supabase
     .from('ad_daily_insights')
     .select('insight_date')
@@ -119,7 +133,10 @@ export async function loadEntityTree(clientId: string, days: number, supabase: S
     .limit(1)
   if (latest.error) throw new Error(latest.error.message)
   const endDate = (latest.data?.[0] as { insight_date: string } | undefined)?.insight_date
-  if (!endDate) return buildEntityTree([], [], { endDate: addDays(new Date().toISOString().slice(0, 10), -1), days })
+  if (!endDate) {
+    const empty = buildEntityTree([], [], { endDate: addDays(new Date().toISOString().slice(0, 10), -1), days })
+    return { tree: empty, hiddenAdsets: 0, noPageRegistered: false }
+  }
   const since = addDays(endDate, -(days - 1))
 
   const rawInsights = await pageAll<RawInsight>((from, to) =>
@@ -145,8 +162,9 @@ export async function loadEntityTree(clientId: string, days: number, supabase: S
   )
 
   const clientPageId = await loadClientPageId(clientId, supabase)
-  const insights = rawInsights.map(toInsightRow).filter((r): r is InsightRow => r !== null)
+  const insights = dedupeInsights(rawInsights.map(toInsightRow).filter((r): r is InsightRow => r !== null))
   const snapshots = rawSnapshots.map(toSnapshotRow).filter((r): r is SnapshotRow => r !== null)
   const scoped = scopeToClientPage(insights, snapshots, clientPageId)
-  return buildEntityTree(scoped.insights, scoped.snapshots, { endDate, days })
+  const tree = buildEntityTree(scoped.insights, scoped.snapshots, { endDate, days, sharedCampaignIds: scoped.sharedCampaignIds })
+  return { tree, hiddenAdsets: scoped.droppedAdsets, noPageRegistered: scoped.noPageRegistered }
 }

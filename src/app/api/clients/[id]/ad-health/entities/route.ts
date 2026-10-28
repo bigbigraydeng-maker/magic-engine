@@ -6,7 +6,7 @@
  *
  * 🔴 Internal staff only (unscoped admin), same gate as breakdowns / war-map / live.
  * 🔴 Reads only from the database — never calls Meta. State comes from the latest daily snapshot,
- *    so something switched on today shows as "unknown" until the next snapshot.
+ *    so something switched on in the last few hours may not show yet.
  * 🔴 A failed load is a plain 500; the raw error is never returned to the client.
  */
 import { NextRequest, NextResponse } from 'next/server'
@@ -32,8 +32,8 @@ export async function GET(
 
   const days = clampTreeDays(new URL(req.url).searchParams.get('days'))
   try {
-    const tree = await loadEntityTree(clientId, days, supabaseAdmin)
-    return NextResponse.json({ success: true, tree })
+    const result = await loadEntityTree(clientId, days, supabaseAdmin)
+    return NextResponse.json({ success: true, ...result })
   } catch (e) {
     console.warn('[api/ad-health/entities] 读取失败', {
       clientId,

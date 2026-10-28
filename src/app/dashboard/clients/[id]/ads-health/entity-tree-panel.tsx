@@ -5,13 +5,16 @@
  * 系列 → 广告组 → 广告，每一层各自近 7 天的花费、留资、每条留资花费，以及现在开着还是停了。
  * 数据来自 /ad-health/entities（读库里的每日数据和每日快照，不调 Meta）。
  *
- * 🔴 状态取自每日快照：今天刚开的广告组最晚明天才出现，页面上写明这一点，不装成实时。
+ * 🔴 状态取自系统定期快照：刚开关的几个小时内可能还没反映，页面上写明这一点，不装成实时。
+ * 🔴 确认不了归属的广告组不列，但要把「有 N 个没列出」写出来，不能让人以为「没在投」。
+ * 🔴 系列合计里混着别家广告组的钱时，不显示系列合计。
  * 🔴 每层数字只算它自己那一层，不把下一层加上来（系列的数字不等于广告组数字之和，因为口径是 Meta 各层各报各的）。
  * 🔴 读不到就写「读不到」；403 直接不渲染（内部页面，非内部人员不该看到报错框）。
  */
 
 import React, { useEffect, useState } from 'react'
-import type { AdNode, AdsetNode, CampaignNode, DeliveryState, EntityMetrics, EntityTree } from '@/lib/ads-strategy/entity-tree/build'
+import type { AdNode, AdsetNode, CampaignNode, DeliveryState, EntityMetrics } from '@/lib/ads-strategy/entity-tree/build'
+import type { EntityTreeResult } from '@/lib/ads-strategy/entity-tree/load'
 
 const STATE_META: Record<DeliveryState, { label: string; dot: string; text: string }> = {
   running: { label: '在投', dot: 'bg-emerald-500', text: 'text-emerald-700' },
@@ -68,7 +71,7 @@ function AdsetRow({ s }: { s: AdsetNode }) {
         <StateBadge state={s.state} status={s.effectiveStatus} />
       </div>
       <div className="text-xs text-gray-400">
-        {s.dailyBudget === null ? '每天预算：读不到' : `每天预算 ${s.currency ?? ''} ${s.dailyBudget.toFixed(0)}`}
+        {s.dailyBudget === null ? '每天预算：设在系列上，或读不到' : `每天预算 ${s.currency ?? ''} ${s.dailyBudget.toFixed(0)}`}
       </div>
       <Numbers m={s.metrics} />
       {s.ads.map(ad => <AdRow key={ad.id} ad={ad} />)}
@@ -84,14 +87,21 @@ function CampaignBlock({ c }: { c: CampaignNode }) {
         <StateBadge state={c.state} status={c.effectiveStatus} />
       </div>
       <p className="text-xs text-gray-400">在投 {c.runningAdsets} 个广告组、{c.runningAds} 条广告</p>
-      <Numbers m={c.metrics} />
+      {c.metricsShared
+        ? <p className="text-xs text-amber-700">这个系列的合计里混着不是这个客户的广告组，系列合计不显示；看下面各广告组的数字。</p>
+        : <Numbers m={c.metrics} />}
+      {c.unplacedAds.count > 0 && (
+        <p className="text-xs text-gray-400">
+          另有 {c.unplacedAds.count} 条广告（多半已删除）花了 {usd(c.unplacedAds.spend)}、留资 {c.unplacedAds.leads}，归不到具体广告组，已含在上面广告组的数字里。
+        </p>
+      )}
       {c.adsets.map(s => <AdsetRow key={s.id} s={s} />)}
     </div>
   )
 }
 
 export default function EntityTreePanel({ clientId }: { clientId: string }) {
-  const [tree, setTree] = useState<EntityTree | null>(null)
+  const [result, setResult] = useState<EntityTreeResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [hidden, setHidden] = useState(false)
 
@@ -100,38 +110,50 @@ export default function EntityTreePanel({ clientId }: { clientId: string }) {
     fetch(`/api/clients/${clientId}/ad-health/entities`)
       .then(async r => {
         if (r.status === 403) { if (alive) setHidden(true); return null }
-        const json = (await r.json()) as { tree?: EntityTree; error?: string }
+        const json = (await r.json()) as Partial<EntityTreeResult> & { error?: string }
         if (!r.ok || !json.tree) throw new Error(json.error ?? '读不到')
-        return json.tree
+        return json as EntityTreeResult
       })
-      .then(t => { if (alive && t) setTree(t) })
+      .then(t => { if (alive && t) setResult(t) })
       .catch(() => alive && setError('读不到广告组和广告明细'))
     return () => { alive = false }
   }, [clientId])
 
   if (hidden) return null
   if (error) return <p className="mb-4 text-sm text-gray-500">{error}</p>
-  if (!tree) return <p className="mb-4 text-sm text-gray-400">广告组和广告加载中…</p>
+  if (!result) return <p className="mb-4 text-sm text-gray-400">广告组和广告加载中…</p>
+  const { tree, hiddenAdsets, noPageRegistered } = result
 
   const running = tree.campaigns.filter(c => c.state === 'running' || c.runningAdsets > 0)
-  const rest = tree.campaigns.filter(c => !running.includes(c))
+  const unclear = tree.campaigns.filter(c => !running.includes(c) && c.state === 'unknown')
+  const stopped = tree.campaigns.filter(c => !running.includes(c) && c.state !== 'unknown')
 
   return (
     <section className="mb-6">
       <h2 className="text-base font-semibold text-gray-800">广告组和广告（近 {tree.window.days} 天）</h2>
       <p className="mb-3 text-xs text-gray-400">
         {tree.window.since} 到 {tree.window.until}
-        {tree.snapshotAt ? ` · 开关状态取自 ${fmtNzTime(tree.snapshotAt)} 的每日快照，今天新开的最晚明天下午才会出现在这里` : ' · 没有状态快照，开关状态读不到'}
+        {tree.snapshotAt ? ` · 开关状态来自系统定期快照（最近一次记录 ${fmtNzTime(tree.snapshotAt)}），刚开关的几个小时内可能还没反映` : ' · 没有状态快照，开关状态读不到'}
       </p>
-      {running.length === 0 && <p className="text-sm text-gray-500">快照里现在没有在投的广告组。</p>}
+      {noPageRegistered && <p className="mb-3 text-sm text-amber-700">这个客户没有登记 Facebook 主页，没法确认哪些广告是它的，所以一条都没列出。</p>}
+      {hiddenAdsets > 0 && <p className="mb-3 text-xs text-gray-400">另有 {hiddenAdsets} 个广告组没有列出（属于别的主页，或确认不了归属），不代表它们没在投。</p>}
+      {running.length === 0 && !noPageRegistered && <p className="text-sm text-gray-500">能确认是这个客户的广告组里，快照显示现在没有在投的。</p>}
       <div className="grid gap-3">
         {running.map(c => <CampaignBlock key={c.id} c={c} />)}
       </div>
-      {rest.length > 0 && (
+      {unclear.length > 0 && (
+        <div className="mt-3">
+          <p className="mb-2 text-sm text-amber-700">状态还没确认的系列 {unclear.length} 个（审核中、有问题或还没有快照，不能说它们停了）</p>
+          <div className="grid gap-3">
+            {unclear.map(c => <CampaignBlock key={c.id} c={c} />)}
+          </div>
+        </div>
+      )}
+      {stopped.length > 0 && (
         <details className="mt-3">
-          <summary className="cursor-pointer text-sm text-gray-500">已停的系列 {rest.length} 个（点开看）</summary>
+          <summary className="cursor-pointer text-sm text-gray-500">已停的系列 {stopped.length} 个（点开看）</summary>
           <div className="mt-3 grid gap-3">
-            {rest.map(c => <CampaignBlock key={c.id} c={c} />)}
+            {stopped.map(c => <CampaignBlock key={c.id} c={c} />)}
           </div>
         </details>
       )}

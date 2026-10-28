@@ -33,6 +33,8 @@ export interface SnapshotRow {
 export interface TreeOptions {
   endDate: string
   days: number
+  /** campaigns whose campaign-level totals include another client's ad sets: totals are not shown */
+  sharedCampaignIds?: ReadonlySet<string>
 }
 
 export type DeliveryState = 'running' | 'stopped' | 'unknown'
@@ -76,6 +78,10 @@ export interface CampaignNode {
   adsets: AdsetNode[]
   runningAdsets: number
   runningAds: number
+  /** true = the campaign-level totals also contain ad sets that are not this client's, so metrics are zeroed and must not be shown */
+  metricsShared: boolean
+  /** ads with spend that could not be placed under an ad set (deleted ads have no ad set in the snapshots) */
+  unplacedAds: { count: number; spend: number; leads: number }
 }
 
 export interface EntityTree {
@@ -173,6 +179,7 @@ interface EntityInfo {
   dailyBudget: number | null
   currency: string | null
   parentId: string | null
+  campaignHint: string | null
 }
 
 function nameOf(snap: SnapshotRow | undefined, rows: InsightRow[], id: string): string {
@@ -193,11 +200,22 @@ function parentOf(snap: SnapshotRow | undefined, rows: InsightRow[], level: Leve
     if (level === 'adset' && snap.campaignId !== null) return snap.campaignId
     if (level === 'ad' && snap.adsetId !== null) return snap.adsetId
   }
+  // An ad's insight rows carry the CAMPAIGN as parent (not the ad set), so an ad is never placed by them.
+  if (level === 'ad') return null
   let latest: InsightRow | null = null
   for (const r of rows) {
     if (r.parentId !== null) {
       if (latest === null || r.date > latest.date) latest = r
     }
+  }
+  return latest !== null ? latest.parentId : null
+}
+
+function campaignHintOf(snap: SnapshotRow | undefined, rows: InsightRow[]): string | null {
+  if (snap && snap.campaignId !== null) return snap.campaignId
+  let latest: InsightRow | null = null
+  for (const r of rows) {
+    if (r.parentId !== null && (latest === null || r.date > latest.date)) latest = r
   }
   return latest !== null ? latest.parentId : null
 }
@@ -224,6 +242,7 @@ function collectEntities(
       dailyBudget: snap && snap.dailyBudgetMinor !== null ? snap.dailyBudgetMinor / 100 : null,
       currency: snap ? snap.currency : null,
       parentId: parentOf(snap, rows, level),
+      campaignHint: campaignHintOf(snap, rows),
     })
   }
   return out
@@ -262,7 +281,13 @@ function buildAdset(info: EntityInfo, rows: InsightRow[], ads: AdNode[]): AdsetN
   }
 }
 
-function buildCampaign(info: EntityInfo, rows: InsightRow[], adsets: AdsetNode[]): CampaignNode {
+function buildCampaign(
+  info: EntityInfo,
+  rows: InsightRow[],
+  adsets: AdsetNode[],
+  shared: boolean,
+  unplacedAds: { count: number; spend: number; leads: number },
+): CampaignNode {
   const sortedAdsets = sortByStateThenSpend(adsets)
   let runningAdsets = 0
   let runningAds = 0
@@ -275,10 +300,12 @@ function buildCampaign(info: EntityInfo, rows: InsightRow[], adsets: AdsetNode[]
     name: info.name,
     state: info.state,
     effectiveStatus: info.effectiveStatus,
-    metrics: metricsOf(rows),
+    metrics: metricsOf(shared ? [] : rows),
     adsets: sortedAdsets,
     runningAdsets,
     runningAds,
+    metricsShared: shared,
+    unplacedAds,
   }
 }
 
@@ -322,6 +349,7 @@ export function buildEntityTree(insights: InsightRow[], snapshots: SnapshotRow[]
         dailyBudget: null,
         currency: null,
         parentId: null,
+        campaignHint: null,
       })
     }
   }
@@ -344,9 +372,25 @@ export function buildEntityTree(insights: InsightRow[], snapshots: SnapshotRow[]
     else adsetsByCampaign.set(a.parentId, [node])
   }
 
+  const unplaced = new Map<string, { count: number; spend: number; leads: number }>()
+  for (const ad of ads.values()) {
+    if (ad.parentId !== null && adsets.has(ad.parentId)) continue
+    if (ad.campaignHint === null || !campaigns.has(ad.campaignHint)) continue
+    const m = metricsOf(rowsByEntity.get(`ad|${ad.id}`) ?? [])
+    if (m.spend <= 0) continue
+    const cur = unplaced.get(ad.campaignHint) ?? { count: 0, spend: 0, leads: 0 }
+    unplaced.set(ad.campaignHint, { count: cur.count + 1, spend: cur.spend + m.spend, leads: cur.leads + m.leads })
+  }
+
   const campaignNodes: CampaignNode[] = []
   for (const c of campaigns.values()) {
-    campaignNodes.push(buildCampaign(c, rowsByEntity.get(`campaign|${c.id}`) ?? [], adsetsByCampaign.get(c.id) ?? []))
+    campaignNodes.push(buildCampaign(
+      c,
+      rowsByEntity.get(`campaign|${c.id}`) ?? [],
+      adsetsByCampaign.get(c.id) ?? [],
+      opts.sharedCampaignIds?.has(c.id) ?? false,
+      unplaced.get(c.id) ?? { count: 0, spend: 0, leads: 0 },
+    ))
   }
 
   return {
