@@ -12,6 +12,7 @@ import { voidStaleCard } from '@/lib/confirmation-card/settle'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import { isExpired, readStoredCard } from '@/lib/confirmation-card/view'
 import type { AdDraft } from './ad-draft'
+import { plannedFlightSchedule } from './planned-flight'
 import { createDraftForApproval, type CreateDraftDeps, type CreateDraftOutcome } from './draft-and-gate'
 import {
   PAUSED_DRAFT_HOLD,
@@ -82,6 +83,8 @@ export async function issuePausedDraftCard(args: {
   const draftHash = canonicalHashOfInput(draft)
   const fingerprint = contentFingerprint(normalizeFacts(facts))
   const now = args.now ?? args.kernel.now()
+  const flight = plannedFlightSchedule(draft.plannedFlight, draft.durationDays, now.getTime())
+  if (!flight.ok) throw new ConfirmationCardError('invalid', flight.reason)
   await releaseDeadHolds(args.kernel.supabase, args.clientId, now, {
     subjectKey: facts.subjectKey,
     fingerprint,
@@ -149,6 +152,8 @@ async function confirmAndBuild(
   hold: HoldRow,
 ): Promise<PausedDraftSubmitResult> {
   if (hold.payload.adAccountId !== args.review.adAccountId) return rejectAccountChange(args, hold)
+  const flight = plannedFlightSchedule(hold.payload.draft.plannedFlight, hold.payload.draft.durationDays, (args.now ?? args.kernel.now()).getTime())
+  if (!flight.ok) return rejectBeforeBuild(args, hold, `计划投放日期已不适用，没有去建。${flight.reason}`)
   const card = await confirmedCard(args)
   if (!card) return { card: null, wroteMeta: false, queued: false, resultLine: '这张卡已经不能用来建草稿。', clickedBy: null }
   const who = await clickedBy(args.kernel, args.runId)
@@ -213,16 +218,24 @@ async function rejectAccountChange(
   args: Parameters<typeof submitPausedDraftCard>[0],
   hold: HoldRow,
 ): Promise<PausedDraftSubmitResult> {
+  return rejectBeforeBuild(args, hold, ACCOUNT_CHANGED)
+}
+
+async function rejectBeforeBuild(
+  args: Parameters<typeof submitPausedDraftCard>[0],
+  hold: HoldRow,
+  reason: string,
+): Promise<PausedDraftSubmitResult> {
   const run = await args.kernel.requireRun(args.runId)
   await voidStaleCard(args.kernel, run)
   await save(args.kernel.supabase, args.clientId, hold.id, {
     ...hold.payload,
     status: 'refused',
-    resultLine: ACCOUNT_CHANGED,
+    resultLine: reason,
     queued: false,
     wroteMeta: false,
   })
-  return { card: null, wroteMeta: false, queued: false, resultLine: ACCOUNT_CHANGED, clickedBy: null }
+  return { card: null, wroteMeta: false, queued: false, resultLine: reason, clickedBy: null }
 }
 
 async function recordOutcome(

@@ -168,14 +168,14 @@ describe('createDraftForApproval — 扩展草稿先停下，不去建', () => {
     expect(mMinBudget).not.toHaveBeenCalled()
   })
 
-  it('扩量开关打开：不调用发布器', async () => {
+  it('未挂受众却打开名单外扩量：不调用发布器', async () => {
     const { sb } = fakeSupabase()
     mPublish.mockClear()
     const r = await createDraftForApproval({
       ...DRAFT,
       expansion: {
         advantageAudience: true,
-        customAudienceRelaxed: false,
+        customAudienceRelaxed: true,
         lookalikeRelaxed: false,
         source: 'step-1',
       },
@@ -351,6 +351,20 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
     const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r).toEqual({ ok: false, error: expect.stringContaining('active') })
     expect(mActivate).not.toHaveBeenCalled()
+  })
+
+  it('does not activate a planned draft after its approved end day', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-11-08T00:00:00Z'))
+    try {
+      const planned = { ...READY, draft: { ...DRAFT, plannedFlight: { startDate: '2026-11-01', endDate: '2026-11-07' } } }
+      const { sb, updated } = fakeSupabase(planned)
+      const result = await approveDraft('act1', sb, 'tok', PM)
+      expect(result).toMatchObject({ ok: false, error: expect.stringContaining('已经结束') })
+      expect(updated).toHaveLength(0)
+      expect(mActivate).not.toHaveBeenCalled()
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it('被闸门拦下的不能开', async () => {

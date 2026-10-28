@@ -47,7 +47,9 @@ export function pausedDraftFacts(
     what: PAUSED_DRAFT_WHAT,
     account: safeLabel(accountLabel),
     amount: amountLine(draft, review),
-    date: `一共 ${durationDays(draft)} 天，从点确认当天算起`,
+    date: draft.plannedFlight
+      ? `按已批准计划：${draft.plannedFlight.startDate} 至 ${draft.plannedFlight.endDate}（新西兰日期，含结束日）`
+      : `一共 ${durationDays(draft)} 天，从点确认当天算起`,
     scope: `1 个暂停系列，${count} 个广告组，不开启。稿 ${draftMark(draft)}`,
     hardChecks: hardChecks(draft, review),
   }

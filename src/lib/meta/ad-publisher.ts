@@ -17,6 +17,7 @@
 import type { AdDraft, AdDraftCreative } from '@/lib/ads-strategy/ad-draft'
 import { metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
 import { isPlaybackGoal, PLAYBACK_REQUIRED_PLATFORMS } from '@/lib/ads-strategy/launch-readback'
+import { plannedFlightSchedule } from '@/lib/ads-strategy/planned-flight'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 
@@ -131,6 +132,18 @@ async function graphDelete(id: string, accessToken: string): Promise<boolean> {
  * （`NZ ∪ 北岸10km半径` = 整个 NZ），城市半径形同虚设。给了城市就只用城市，
  * 不再带国家（2026-08-04 事故：北岸 $1.25M 的房源投给了整个新西兰）。
  */
+function advantageAudienceFlag(d: AdDraft): 0 | 1 {
+  const value = d.expansion?.advantageAudience
+  return value === true ? 1 : 0
+}
+
+function relaxationFlags(d: AdDraft): { custom_audience: 0 | 1; lookalike: 0 | 1 } {
+  return {
+    custom_audience: d.expansion?.customAudienceRelaxed === true ? 1 : 0,
+    lookalike: d.expansion?.lookalikeRelaxed === true ? 1 : 0,
+  }
+}
+
 function targetingFor(d: AdDraft): Record<string, unknown> {
   const geo: Record<string, unknown> =
     d.geoCityKeys && d.geoCityKeys.length > 0
@@ -144,15 +157,14 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
     ...(isPlaybackGoal(metaTripletFor(d.kind).optimizationGoal)
       ? { publisher_platforms: [...PLAYBACK_REQUIRED_PLATFORMS] }
       : {}),
-    // 明确关掉 Meta 的自动放宽。**这不代表它一定关着** —— Meta 可能照样开，
-    // 所以建完还要回读一遍（这正是闸门存在的理由）。
-    targeting_automation: { advantage_audience: 0 },
+    // 草稿写明了优势受众就按草稿传。没写仍传 0（旧草稿）。
+    // **这不代表 Meta 一定照办** —— 建完还要回读一遍。
+    targeting_automation: { advantage_audience: advantageAudienceFlag(d) },
   }
 
   if (d.audienceIds && d.audienceIds.length > 0) {
     targeting.custom_audiences = d.audienceIds.map((id) => ({ id }))
-    // 明确不放宽名单：不扩展到名单以外的人，也不自动加相似人群。
-    targeting.targeting_relaxation_types = { custom_audience: 0, lookalike: 0 }
+    targeting.targeting_relaxation_types = relaxationFlags(d)
   }
   if (d.excludedAudienceIds && d.excludedAudienceIds.length > 0) {
     targeting.excluded_custom_audiences = d.excludedAudienceIds.map((id) => ({ id }))
@@ -252,9 +264,8 @@ function campaignBody(d: AdDraft): Record<string, string> {
   }
 }
 
-function adSetBodyFor(d: AdDraft, campaignId: string, nowMs: number): Record<string, string> {
+function adSetBodyFor(d: AdDraft, campaignId: string, startMs: number, endMs: number): Record<string, string> {
   const t = metaTripletFor(d.kind)
-  const end = nowMs + d.durationDays * 86_400_000
   const body: Record<string, string> = {
     name: d.adSetName,
     campaign_id: campaignId,
@@ -266,8 +277,8 @@ function adSetBodyFor(d: AdDraft, campaignId: string, nowMs: number): Record<str
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
     // Meta 收的是最小货币单位（分）。传元会变成 1/100 的预算，静默跑不出量。
     daily_budget: String(Math.round(d.dailyBudget * 100)),
-    start_time: String(Math.floor(nowMs / 1000)),
-    end_time: String(Math.floor(end / 1000)),
+    start_time: String(Math.floor(startMs / 1000)),
+    end_time: String(Math.floor(endMs / 1000)),
     targeting: JSON.stringify(targetingFor(d)),
     // 三种类型都只需要主页；留成一个函数是为了以后哪种需要别的时有个明确的落点。
     promoted_object: JSON.stringify({ page_id: d.pageId }),
@@ -324,7 +335,7 @@ function newRun(accessToken: string, opts: PublishOptions) {
     return r
   }
 
-  return { make, now }
+  return { make, fail, now }
 }
 
 type Run = ReturnType<typeof newRun>
@@ -366,13 +377,19 @@ export async function publishDraftPaused(
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
   const run = newRun(accessToken, opts)
+  if (d.plannedFlight) {
+    const beforeWrite = plannedFlightSchedule(d.plannedFlight, d.durationDays, run.now())
+    if (!beforeWrite.ok) return { ok: false, step: 'campaign', error: beforeWrite.reason, orphans: [] }
+  }
 
   // ── 1. 广告系列 ──────────────────────────────────────────────────────
   const campaign = await run.make('campaign', '广告系列', d.campaignName, `${adAccountId}/campaigns`, campaignBody(d))
   if ('ok' in campaign) return campaign
 
   // ── 2. 广告组 ────────────────────────────────────────────────────────
-  const adSet = await run.make('adset', '广告组', d.adSetName, `${adAccountId}/adsets`, adSetBodyFor(d, campaign.id, run.now()))
+  const flight = plannedFlightSchedule(d.plannedFlight, d.durationDays, run.now())
+  if (!flight.ok) return run.fail('adset', flight.reason)
+  const adSet = await run.make('adset', '广告组', d.adSetName, `${adAccountId}/adsets`, adSetBodyFor(d, campaign.id, flight.startMs, flight.endMs))
   if ('ok' in adSet) return adSet
 
   // ── 3+4. 每条创意 → 每条广告 ─────────────────────────────────────────

@@ -19,6 +19,7 @@
 
 import type { PlayKey } from './play-vocabulary'
 import { dominantScript } from './launch-readback'
+import { plannedFlightShapeError, type PlannedFlight } from './planned-flight'
 
 /** 目前 ME 会发的三种广告。要加第四种，先在 PLAY_CATALOG 里有对应打法。 */
 export type DraftKind = 'lead_form' | 'video_thruplay' | 'messenger_conversation'
@@ -144,7 +145,9 @@ export interface AdDraft {
   dailyBudget: number
   /** 跑几天。到期自动停 —— 不设终点的广告没人会记得去关。 */
   durationDays: number
-  /** 投放地区。空数组会被 `validateDraft` 拒掉：投给全世界不是一个决定。多个广告组时地区写在组上，这里留空数组。 */
+  /** Approved plan window, in Pacific/Auckland calendar dates. Omitted for manual drafts. */
+  plannedFlight?: PlannedFlight
+  /** 投放国家。国家和城市都空才会被拒；多个广告组时地区写在组上，这里留空数组。 */
   geoCountries: string[]
   /** 具体到城市/区（Meta 的 geo key）。给不出就只按国家投。 */
   geoCityKeys?: string[]
@@ -291,10 +294,18 @@ function validateCommon(d: AdDraft): DraftProblem[] {
   if (!d.clientId) p.push({ field: 'clientId', message: '没说是哪个客户' })
   if (!d.pageId) p.push({ field: 'pageId', message: '没说用哪个主页发' })
   p.push(...moneyAndSpanProblems(d))
+  const flightProblem = plannedFlightShapeError(d.plannedFlight, d.durationDays)
+  if (flightProblem) p.push({ field: 'plannedFlight', message: flightProblem })
 
   if (!Array.isArray(d.adSets)) {
-    if (!d.geoCountries || d.geoCountries.length === 0) {
+    if ((!d.geoCountries || d.geoCountries.length === 0) && (!d.geoCityKeys || d.geoCityKeys.length === 0)) {
       p.push({ field: 'geoCountries', message: '没说投给哪里 —— 投给全世界不是一个决定，是漏了一步' })
+    }
+    if (d.geoCityKeys !== undefined && (!Array.isArray(d.geoCityKeys) || d.geoCityKeys.some((key) => typeof key !== 'string' || !key.trim()))) {
+      p.push({ field: 'geoCityKeys', message: '城市格式不对' })
+    }
+    if (d.geoCountries?.length && d.geoCityKeys?.length) {
+      p.push({ field: 'geoCityKeys', message: '国家和城市不能同时填：一起写时城市范围会失效' })
     }
 
     if (d.creatives.length === 0) {

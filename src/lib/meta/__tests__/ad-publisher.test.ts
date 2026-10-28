@@ -177,6 +177,22 @@ describe('publishDraftPaused — 建出来的一律暂停', () => {
     const b = calls.find((c) => c.url.includes('/adsets'))!.body
     expect(Number(b.get('end_time'))).toBeGreaterThan(Number(b.get('start_time')))
   })
+
+  it('approved plan dates become fixed NZ start and end timestamps; expired plans send no write', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    const plannedFlight = { startDate: '2026-11-01', endDate: '2026-11-07' }
+    const draft = { ...DRAFT, plannedFlight }
+    const planned = await publishDraftPaused(draft, 'act_1', 'tok', { now: () => Date.parse('2026-10-30T00:00:00Z') })
+    expect(planned.ok).toBe(true)
+    const b = calls.find((c) => c.url.includes('/adsets'))!.body
+    expect(Number(b.get('start_time'))).toBe(Date.parse('2026-10-31T11:00:00Z') / 1000)
+    expect(Number(b.get('end_time'))).toBe(Date.parse('2026-11-07T11:00:00Z') / 1000)
+
+    calls = []
+    const expired = await publishDraftPaused(draft, 'act_1', 'tok', { now: () => Date.parse('2026-11-02T00:00:00Z') })
+    expect(expired).toMatchObject({ ok: false, step: 'campaign', orphans: [] })
+    expect(calls).toHaveLength(0)
+  })
 })
 
 describe('targetingFor — 城市和国家不能同时给（2026-08-04 事故：北岸的房投给了整个新西兰）', () => {
@@ -571,6 +587,18 @@ describe('targetingFor — 自定义受众（包含 / 排除）', () => {
       'age_max', 'age_min', 'geo_locations', 'targeting_automation',
     ])
     expect(targetingOf().targeting_automation).toEqual({ advantage_audience: 0 })
+
+    calls = []
+    await publishDraftPaused({
+      ...DRAFT,
+      expansion: {
+        advantageAudience: true,
+        customAudienceRelaxed: false,
+        lookalikeRelaxed: false,
+        source: 'ad-agent:default-advantage-plus',
+      },
+    }, 'act_1', 'tok')
+    expect(targetingOf().targeting_automation).toEqual({ advantage_audience: 1 })
 
     calls = []
     await publishDraftPaused({ ...DRAFT, audienceIds: [], excludedAudienceIds: [] }, 'act_1', 'tok')

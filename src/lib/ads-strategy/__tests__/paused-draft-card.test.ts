@@ -135,6 +135,29 @@ describe('paused draft confirmation', () => {
     expect(again.queued).toBe(true)
   })
 
+  it('voids a plan card when the approved start day has passed before confirmation', async () => {
+    const f = fixture()
+    const item = draft({ plannedFlight: { startDate: '2026-10-27', endDate: '2026-11-02' } })
+    const { card, createPaused, resolveDeps } = await issued(f, item)
+    expect(card.date).toContain('2026-10-27 至 2026-11-02')
+    const result = await submitPausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      runId: card.runId,
+      clicker: OPC,
+      resolution: 'confirm',
+      expectedDecisionId: card.expectedDecisionId,
+      fingerprint: card.fingerprint,
+      review: REVIEW,
+      resolveDeps,
+      createPaused,
+      now: new Date('2026-10-28T00:00:00Z'),
+    })
+    expect(createPaused).not.toHaveBeenCalled()
+    expect(result.wroteMeta).toBe(false)
+    expect(result.resultLine).toContain('开始日已过')
+  })
+
   it('does not build when the person declines', async () => {
     const f = fixture()
     const { card, createPaused, resolveDeps } = await issued(f)

@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   gate: null as GateFacts | null,
   updates: [] as Record<string, unknown>[],
   dispatch: vi.fn(),
+  assemble: vi.fn(),
 }))
 
 vi.mock('@/lib/supabase', () => {
@@ -32,9 +33,17 @@ vi.mock('@/lib/supabase', () => {
   return { supabaseAdmin: { from: () => chain() } }
 })
 
+vi.mock('@/lib/ads-strategy/plan-to-draft', () => ({
+  assemblePausedDraftsForClient: vi.fn(async () => ({ steps: [] })),
+}))
+
 vi.mock('@/lib/marketing-plan/task-dispatcher', () => ({
   dispatchPlanTasks: (...args: unknown[]) => h.dispatch(...args),
   revokePlanTasks: vi.fn(),
+}))
+
+vi.mock('@/lib/ads-strategy/plan-to-draft', () => ({
+  assemblePausedDraftsForClient: (...args: unknown[]) => h.assemble(...args),
 }))
 
 vi.mock('@/lib/marketing-plan/promo/facts', () => ({
@@ -107,11 +116,25 @@ function laterPhaseVerified(spec: PromoSpec): GateFacts {
 beforeEach(() => {
   h.updates = []
   h.dispatch.mockReset()
+  h.assemble.mockReset()
   h.gate = goodFacts()
   h.plan = null
 })
 
 describe('approvePlan requireAllGreen', () => {
+  it('does not assemble a paused draft while previewing an already approved plan', async () => {
+    const promo = draft(socialSpec(), 'approved')
+    const args = {
+      clientId: 'client-1', planId: 'plan-1', approvedBy: 'ray@example.com',
+      expectedContentHash: promoContentHash(promo),
+      expectedPlanStart: '2026-11-01', expectedPlanEnd: '2026-11-30',
+    }
+    expect((await approvePlan({ ...args, commit: false })).kind).toBe('already_approved')
+    expect(h.assemble).not.toHaveBeenCalled()
+    expect((await approvePlan({ ...args, commit: true })).kind).toBe('already_approved')
+    expect(h.assemble).toHaveBeenCalledTimes(1)
+  })
+
   it('refuses an old card when the displayed plan dates changed but the promo hash did not', async () => {
     const promo = draft(socialSpec())
     const args = {

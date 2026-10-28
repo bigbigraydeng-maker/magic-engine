@@ -5,6 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { runAssetDualReview, type DualReviewReceipt } from '@/lib/factory/asset-dual-review-run'
 import { supabaseDualReviewIo } from '@/lib/factory/asset-dual-review-store'
+import { afterAssetPooled } from '@/lib/ads-strategy/plan-to-draft'
 
 export const ASSET_DUAL_REVIEW_EVENT = 'factory.asset_dual_review.ready' as const
 
@@ -44,5 +45,9 @@ export function createAssetDualReviewFunction(deps: AssetDualReviewDeps) {
 }
 
 export const assetDualReview = createAssetDualReviewFunction({
-  run: (input) => runAssetDualReview(supabaseDualReviewIo(supabaseAdmin), input),
+  run: async (input) => {
+    const receipt = await runAssetDualReview(supabaseDualReviewIo(supabaseAdmin), input)
+    await afterAssetPooled(receipt.pooled, input.clientId)
+    return receipt
+  },
 })
