@@ -21,6 +21,7 @@ import { fetchAll } from '@/lib/supabase-paginate'
 import {
   listSentCampaigns,
   getCampaignActivity,
+  getCampaignRecipients,
   type MailchimpCampaign,
   type MemberActivity,
 } from './client'
@@ -34,6 +35,44 @@ export interface SyncResult {
   /** 邮箱在 Mailchimp 里但 CRM 里没这个人 —— 不建人，如实报数。 */
   unmatched: number
   details: Array<{ campaign: string; recorded: number; unmatched: number }>
+  /** 「发出」记录：写进去几条 / 认不出的收件人 / 失败的邮件数 / 因时间预算没做的邮件数。没开这个功能时恒为 0。 */
+  sentRecorded: number
+  sentUnmatched: number
+  sentErrors: number
+  sentSkippedBudget: number
+}
+
+/**
+ * 「我们发出了这封邮件」的记录配置（`clients.leads_config.mailchimp_sent_record`）。
+ *
+ * 只记**标题以这些前缀开头**的邮件（欢迎信 / 自动信这类每人一封的），不是所有群发：
+ * 一封几百人的新闻信一次写几百条，会把「全部客人」按最近一条往来的排序整体顶乱。
+ * 缺省 = 不记。前缀是客户自己的命名习惯，写在客户配置里，不写进共享代码。
+ */
+export interface SentRecordConfig {
+  titlePrefixes: string[]
+}
+
+export function readSentRecordConfig(leadsConfig: unknown): SentRecordConfig | null {
+  const raw = ((leadsConfig ?? {}) as Record<string, unknown>).mailchimp_sent_record as
+    | { title_prefixes?: unknown }
+    | undefined
+  const list = Array.isArray(raw?.title_prefixes)
+    ? (raw!.title_prefixes as unknown[]).filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+    : []
+  return list.length > 0 ? { titlePrefixes: list } : null
+}
+
+/** 「发出」记录读收件人的总时间预算：到点就停，剩下的邮件下一轮再做（整个同步上限 600 秒）。 */
+const SENT_BUDGET_MS = 240_000
+const SENT_BATCH = 500
+
+/** 退信不能写成「已送达」。 */
+function summariseSent(campaign: MailchimpCampaign, status: string): string {
+  const name = campaignLabel(campaign)
+  if (status === 'hard') return `《${name}》退回（地址无效）`
+  if (status === 'soft') return `《${name}》暂时没送达`
+  return `发出《${name}》`
 }
 
 /** 一封邮件 + 一个人 = 一条触点。source_ref 用它，天然幂等、可重跑。 */
@@ -90,6 +129,8 @@ export async function syncMailchimpActivity(opts: {
   sinceSentAt?: string
   /** 最多处理几封，防一次拉爆。 */
   maxCampaigns?: number
+  /** 要不要记「我们发出了这封邮件」。缺省 / null = 不记（保持原来只记打开、点击）。 */
+  sentRecord?: SentRecordConfig | null
 }): Promise<SyncResult> {
   const since =
     opts.sinceSentAt ?? new Date(Date.now() - 90 * 86_400_000).toISOString()
@@ -135,7 +176,14 @@ export async function syncMailchimpActivity(opts: {
     skipped: 0,
     unmatched: 0,
     details: [],
+    sentRecorded: 0,
+    sentUnmatched: 0,
+    sentErrors: 0,
+    sentSkippedBudget: 0,
   }
+  /** 「发出」记录自己累计用掉的时间（不含打开 / 点击那部分）。 */
+  let sentSpentMs = 0
+  const batchId = new Date().toISOString()
 
   for (const campaign of campaigns) {
     const activity = await getCampaignActivity(opts.apiKey, campaign.id)
@@ -199,7 +247,81 @@ export async function syncMailchimpActivity(opts: {
     result.skipped += rows.length - recorded
     result.unmatched += unmatched
     result.details.push({ campaign: campaign.title, recorded, unmatched })
+
+    // 「发出」记录：**单独兜住错误**，它失败不能拖垮上面原有的打开 / 点击记录（原有逻辑已写完）。
+    if (opts.sentRecord && opts.sentRecord.titlePrefixes.some((p) => campaign.title.startsWith(p))) {
+      if (sentSpentMs > SENT_BUDGET_MS) {
+        result.sentSkippedBudget++
+      } else {
+        const t0 = Date.now()
+        const tally = { recorded: 0, unmatched: 0 }
+        try {
+          await recordSent(opts.clientId, opts.apiKey, campaign, byEmail, batchId, tally)
+        } catch (err) {
+          result.sentErrors++
+          console.warn(`[mailchimp/sent-record] ${campaign.id} 失败：`, err instanceof Error ? err.message : err)
+        } finally {
+          result.sentRecorded += tally.recorded
+          result.sentUnmatched += tally.unmatched
+          sentSpentMs += Date.now() - t0
+        }
+      }
+    }
   }
 
   return result
+}
+
+/** 一封邮件的收件人 → 每个已认出的客人一条「发出」出站触点。 */
+async function recordSent(
+  clientId: string,
+  apiKey: string,
+  campaign: MailchimpCampaign,
+  byEmail: Map<string, string>,
+  batchId: string,
+  /** 已经写进去的条数、认不出的收件人数：中途某一批出错时，前面已写的也要如实计入回执。 */
+  tally: { recorded: number; unmatched: number },
+): Promise<void> {
+  const recipients = await getCampaignRecipients(apiKey, campaign.id)
+  const rows: Array<Record<string, unknown>> = []
+  for (const r of recipients) {
+    const contactId = byEmail.get(normaliseEmail(r.email) ?? r.email)
+    if (!contactId) {
+      tally.unmatched++
+      continue
+    }
+    rows.push({
+      client_id: clientId,
+      contact_id: contactId,
+      channel: 'email',
+      // 我们发出去的，方向是出站；机器发的（`source='mailchimp'` 整类 + `automated`），不算「有人跟过他」。
+      direction: 'outbound',
+      // 没有每个人各自的发送时间，用整封邮件的发出时间。
+      occurred_at: campaign.sentAt ?? new Date().toISOString(),
+      summary: summariseSent(campaign, r.status),
+      metadata: {
+        kind: 'sent',
+        automated: true,
+        email_campaign_id: campaign.id,
+        // 「近 7 天收过自动信」那类统计按这个内部名数（marketing-plan/generate）。
+        email_campaign_title: campaign.title,
+        email_campaign_subject: campaign.subject,
+        email_send_status: r.status,
+        // 以后要一键删掉某一次写入，靠它。
+        ingest_batch: batchId,
+      },
+      source: 'mailchimp',
+      // 与打开 / 点击那条（`<campaignId>:<contactId>`）互不冲突。
+      source_ref: `${sourceRef(campaign.id, contactId)}:sent`,
+    })
+  }
+
+  for (let i = 0; i < rows.length; i += SENT_BATCH) {
+    const { data, error } = await supabaseAdmin
+      .from('contact_touchpoints')
+      .upsert(rows.slice(i, i + SENT_BATCH), { onConflict: 'client_id,source,source_ref', ignoreDuplicates: true })
+      .select('id')
+    if (error) throw new Error(`写发出记录失败: ${error.message}`)
+    tally.recorded += data?.length ?? 0
+  }
 }
