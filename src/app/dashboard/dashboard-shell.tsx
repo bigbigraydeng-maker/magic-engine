@@ -187,7 +187,6 @@ function buildSelfServeSections(clientId: string): NavSection[] {
       items: [
         { key: 'goals',       label: 'Goals',       mark: 'GO', href: `/dashboard/clients/${clientId}/goals`,       paidOnlyFeature: 'Goals' },
         { key: 'strategy',    label: 'Strategy',    mark: 'ST', href: `/dashboard/clients/${clientId}/strategy`,    paidOnlyFeature: 'Strategy' },
-        { key: 'diagnostic',  label: 'Diagnostic',  mark: 'DG', href: `/dashboard/clients/${clientId}/diagnostic`,  paidOnlyFeature: 'Diagnostic' },
         { key: 'execution',   label: 'Execution',   mark: 'EX', href: `/dashboard/clients/${clientId}/execution`,   paidOnlyFeature: 'Execution' },
         { key: 'connectors',  label: 'Connectors',  mark: 'CN', href: `/dashboard/clients/${clientId}/settings?tab=connect`,  paidOnlyFeature: 'Connectors' },
       ],
@@ -226,7 +225,6 @@ function buildScopedAdminSections(clientId: string, industry: string | null): Na
       title: '诊断与策略',
       items: [
         { key: 'zhangqian',  label: '品牌扫描', mark: 'ZQ', href: at('/zhangqian') },
-        { key: 'diagnostic', label: '深度诊断', mark: 'DG', href: at('/diagnostic') },
         { key: 'goals',      label: '目标',     mark: 'GO', href: at('/goals') },
         { key: 'strategy',   label: '策略',     mark: 'ST', href: at('/strategy') },
         { key: 'execution',  label: '执行追踪', mark: 'EX', href: at('/execution') },
