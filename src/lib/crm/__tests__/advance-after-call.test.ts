@@ -30,11 +30,21 @@ interface Fake {
 let updates: Record<string, unknown>[]
 let audits: Record<string, unknown>[]
 let filters: [string, unknown][]
+let gtValue: string | null
+let limitValue: number | null
 
 function chain(result: () => unknown) {
   const b: Record<string, unknown> = {}
   const self = () => b
-  for (const m of ['select', 'in', 'is', 'order', 'limit']) b[m] = self
+  for (const m of ['select', 'in', 'is', 'order']) b[m] = self
+  b.limit = (n: number) => {
+    limitValue = n
+    return b
+  }
+  b.gt = (_c: string, v: string) => {
+    gtValue = v
+    return b
+  }
   b.eq = (col: string, val: unknown) => {
     filters.push([col, val])
     return b
@@ -55,13 +65,19 @@ function stubDb(over: Partial<Fake> = {}): SupabaseClient {
   updates = []
   audits = []
   filters = []
+  gtValue = null
+  limitValue = null
   const from = (table: string) => {
     if (table === 'client_pipeline_stages') {
       return chain(() => ({ data: f.stages.map((stage_key) => ({ stage_key, client_id: CLIENT })), error: null }))
     }
     if (table === 'contacts') {
       return {
-        select: () => chain(() => ({ data: f.contacts, error: null })),
+        select: () =>
+          chain(() => {
+            const rows = f.contacts.filter((c) => gtValue === null || c.id > gtValue)
+            return { data: limitValue === null ? rows : rows.slice(0, limitValue), error: null }
+          }),
         update: (patch: Record<string, unknown>) => {
           updates.push(patch)
           return chain(() => ({ data: Array.from({ length: f.updated }, () => ({ id: 'c1' })), error: null }))
@@ -146,6 +162,24 @@ describe('advanceNewLeadsAfterFollowUp', () => {
     expect((await advanceNewLeadsAfterFollowUp(NOW, auto)).advanced).toBe(0)
     const bulk = stubDb({ touches: [{ contact_id: 'c1', channel: 'email', source: 'mailchimp', metadata: null }] })
     expect((await advanceNewLeadsAfterFollowUp(NOW, bulk)).advanced).toBe(0)
+  })
+
+  it('pages past the first 200 new leads so a qualifying lead further down is not starved', async () => {
+    const contacts = Array.from({ length: 450 }, (_, i) => ({
+      id: `c${String(i).padStart(4, '0')}`,
+      client_id: CLIENT,
+      stage_updated_at: STAGE_AT,
+    }))
+    // 只有最后一位（第 3 页）有人跟进过
+    const last = contacts[449].id
+    const db = stubDb({
+      contacts,
+      events: contacts.map((c) => ({ contact_id: c.id, changed_by: STAGE_INFER_ACTOR, to_stage: 'new', created_at: STAGE_AT })),
+      touches: [{ contact_id: last, channel: 'email', source: 'microsoft_mail', metadata: null }],
+    })
+    const r = await advanceNewLeadsAfterFollowUp(NOW, db)
+    expect(r.candidates).toBe(450)
+    expect(r.advanced).toBe(1)
   })
 
   it('skips a client whose pipeline has no contacted stage', async () => {

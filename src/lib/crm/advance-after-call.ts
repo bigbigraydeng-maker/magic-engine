@@ -32,8 +32,12 @@ import { loadClientsWithSafeStages, loadConfiguredStages } from './stage-infer'
 
 const FROM_STAGE = 'new'
 const TO_STAGE = 'contacted'
-/** 一轮最多处理这么多人，防止某天数据暴涨变成一次大批量改动。 */
-const MAX_PER_RUN = 200
+/** 一页捞多少个「新线索」。 */
+const PAGE_SIZE = 200
+/** 一轮最多真的改这么多人，防止某天数据暴涨变成一次大批量改动。 */
+const MAX_ADVANCE_PER_RUN = 200
+/** 一轮最多翻这么多人（兜底，防止无限翻页）。 */
+const MAX_SCAN_PER_RUN = 5000
 const IN_CHUNK = 100
 
 export interface CallAdvanceResult {
@@ -156,33 +160,49 @@ export async function advanceNewLeadsAfterFollowUp(
   if (clientIds.length === 0) return result
 
   for (const clientId of clientIds) {
-    if (result.candidates >= MAX_PER_RUN) break
     const configured = await loadConfiguredStages(clientId)
     if (!configured.has(TO_STAGE) || !configured.has(FROM_STAGE)) continue
 
-    const { data, error } = await db
-      .from('contacts')
-      .select('id, client_id, stage_updated_at')
-      .eq('client_id', clientId)
-      .eq('stage', FROM_STAGE)
-      .eq('do_not_contact', false)
-      .limit(MAX_PER_RUN)
-    if (error) throw new Error(`捞新线索失败: ${error.message}`)
-    const rows = (data ?? []) as CandidateRow[]
-    result.candidates += rows.length
+    /**
+     * 🔴 必须翻页，不能只取前 N 个：「新线索」里有大量不满足条件的人（还没人联系过），
+     * 只取前 200 个的话，排在后面的符合条件的人永远轮不到（2026-10-28 上线后实测：
+     * CTS 有 321 个新线索，第二天仍有 34 位该改没改）。用 id 往后翻（不是偏移量）——
+     * 翻的过程中被改掉的人会离开「新线索」，偏移量会因此漏掉下一页的人。
+     */
+    let lastId: string | null = null
+    for (;;) {
+      if (result.candidates >= MAX_SCAN_PER_RUN || result.advanced >= MAX_ADVANCE_PER_RUN) break
+      let q = db
+        .from('contacts')
+        .select('id, client_id, stage_updated_at')
+        .eq('client_id', clientId)
+        .eq('stage', FROM_STAGE)
+        .eq('do_not_contact', false)
+        .order('id', { ascending: true })
+        .limit(PAGE_SIZE)
+      if (lastId !== null) q = q.gt('id', lastId)
+      const { data, error } = await q
+      if (error) throw new Error(`捞新线索失败: ${error.message}`)
+      const rows = (data ?? []) as CandidateRow[]
+      if (rows.length === 0) break
+      result.candidates += rows.length
+      lastId = rows[rows.length - 1].id
 
-    for (const part of chunk(rows, IN_CHUNK)) {
-      const ids = part.map((r) => r.id)
-      const [ai, reached] = await Promise.all([aiPlacedInPool(db, ids), followedUp(db, ids)])
-      for (const row of part) {
-        if (!ai.has(row.id) || !reached.has(row.id)) continue
-        try {
-          if (await applyReached(db, row, reached.get(row.id) ?? '已有人跟进过', now)) result.advanced++
-        } catch (err) {
-          result.failed++
-          console.warn(`[crm/advance-after-call] ${row.id} 失败：`, err instanceof Error ? err.message : err)
+      for (const part of chunk(rows, IN_CHUNK)) {
+        const ids = part.map((r) => r.id)
+        const [ai, reached] = await Promise.all([aiPlacedInPool(db, ids), followedUp(db, ids)])
+        for (const row of part) {
+          if (result.advanced >= MAX_ADVANCE_PER_RUN) break
+          if (!ai.has(row.id) || !reached.has(row.id)) continue
+          try {
+            if (await applyReached(db, row, reached.get(row.id) ?? '已有人跟进过', now)) result.advanced++
+          } catch (err) {
+            result.failed++
+            console.warn(`[crm/advance-after-call] ${row.id} 失败：`, err instanceof Error ? err.message : err)
+          }
         }
       }
+      if (rows.length < PAGE_SIZE) break
     }
   }
   return result
