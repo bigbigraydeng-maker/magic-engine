@@ -2,6 +2,8 @@
  * Approved plan step + pooled creative → one AdDraft → one paused-draft card.
  * Does not write Meta. The card's existing submit path is the only build.
  * One card per ad step, because the publisher builds one ad set.
+ * A work order opened by this plan's promotion signal can be used without a
+ * stored promo window. A window that is present and does not cover still blocks.
  */
 
 import type { AdDraft, AdDraftAdSet, AdDraftCreative, DraftExpansionSwitches, DraftKind } from './ad-draft'
@@ -13,7 +15,7 @@ import { PLAY_CATALOG } from './play-vocabulary'
 import {
   accountBlockReason,
   chooseLeadForm,
-  creativeWindowReason,
+  creativeReadyReason,
   expansionForAudiences,
   flightDays,
   kindForPlay,
@@ -45,6 +47,8 @@ export interface AssemblyDeps {
   loadPlays(clientId: string, prescriptionId: string): Promise<AdPlay[] | null>
   accounts(clientId: string): Promise<AccountFacts>
   pool(clientId: string): Promise<CreativePoolEntry[] | null>
+  /** Work orders from this plan's promotion signal. Unreadable is not "none". */
+  promotionWorkOrders(clientId: string, prescriptionId: string | null): Promise<{ unreadable: boolean; ids: string[] }>
   forms(clientId: string, pageId: string): Promise<{ ok: true; forms: LeadFormRow[] } | { ok: false; reason: string }>
   cover(clientId: string, videoId: string): Promise<string | null>
   linkUrl(clientId: string): Promise<string | null>
@@ -216,20 +220,42 @@ function shapeGate(ctx: StepCtx): { ok: true } | Stop {
 }
 
 async function readyCreatives(ctx: StepCtx, gate: GateOk): Promise<AssetOk | Stop> {
-  const refs = ctx.step.settings.creative_refs
-  if (refs.length === 0) return { ok: false, reason: '这一步没有指定素材，素材还没准备好。' }
   if (!ctx.shared.pool) return { ok: false, reason: '素材池读不出来，素材还没准备好。' }
+  const chosen = await refsForStep(ctx, ctx.shared.pool)
+  if (!chosen.ok) return chosen
   const today = nzToday(ctx.deps.now().getTime())
   const use = { start: ctx.phase.start_date, end: ctx.phase.end_date }
   const creatives: AdDraftCreative[] = []
-  for (let i = 0; i < refs.length; i += 1) {
-    const ref = refs[i]
+  for (let i = 0; i < chosen.refs.length; i += 1) {
+    const ref = chosen.refs[i]
     if (!ref) return { ok: false, reason: '素材还没准备好。' }
-    const one = await oneCreative(ctx, gate, ref, i, today, use)
+    const one = await oneCreative(ctx, gate, ref, i, today, use, chosen.linked)
     if (!one.ok) return one
     creatives.push(one.creative)
   }
   return { ok: true, creatives }
+}
+
+async function refsForStep(
+  ctx: StepCtx,
+  pool: CreativePoolEntry[],
+): Promise<{ ok: true; refs: string[]; linked: ReadonlySet<string> } | Stop> {
+  const linked = await ctx.deps.promotionWorkOrders(ctx.clientId, ctx.plan.prescriptionId)
+  const named = ctx.step.settings.creative_refs
+  if (named.length > 0) {
+    if (linked.unreadable && named.some((ref) => {
+      const entry = pool.find((row) => row.ref === ref)
+      return Boolean(entry) && entry?.promo_window === undefined
+    })) {
+      return { ok: false, reason: '推广素材的关联读不到，没有出卡。' }
+    }
+    return { ok: true, refs: named, linked: new Set(linked.ids) }
+  }
+  if (linked.unreadable) return { ok: false, reason: '推广素材的关联读不到，没有出卡。' }
+  const refs = linked.ids.filter((id) => pool.some((row) => row.ref === id && row.status === 'approved'))
+  if (refs.length > 0) return { ok: true, refs, linked: new Set(linked.ids) }
+  if (linked.ids.length > 0) return { ok: false, reason: '这条推广的素材还没入池，素材还没准备好。' }
+  return { ok: false, reason: '这一步没有指定素材，素材还没准备好。' }
 }
 
 async function oneCreative(
@@ -239,10 +265,11 @@ async function oneCreative(
   index: number,
   today: string,
   use: { start: string; end: string },
+  linked: ReadonlySet<string>,
 ): Promise<{ ok: true; creative: AdDraftCreative } | Stop> {
   const entry = ctx.shared.pool?.find((row) => row.ref === ref)
   if (!entry || entry.status !== 'approved') return { ok: false, reason: '素材还没准备好。' }
-  const window = creativeWindowReason(entry, today, use)
+  const window = creativeReadyReason(entry, today, use, linked.has(entry.ref))
   if (window) return { ok: false, reason: window }
   const video = videoIdFromPool(entry)
   if (!video.ok) return video

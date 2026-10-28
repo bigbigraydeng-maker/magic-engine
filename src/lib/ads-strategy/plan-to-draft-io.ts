@@ -17,7 +17,9 @@ import type { PrescriptionContent } from '@/types/diagnostic'
 import { loadAdStrategyConfigWithSource, type CreativePoolEntry } from './config'
 import { loadPausedDraftContext } from './paused-draft-context'
 import { issuePausedDraftCard } from './paused-draft-submit'
+import { promotionDedupeKey } from '@/lib/factory/promotion-signal'
 import { collectAdPlays } from './plan-seed/attach'
+import { promotionWorkOrderIds, type PromotionOrderLink, type PromotionSignalLink } from './plan-to-draft-rules'
 import { writeDraftCopy } from './plan-to-draft-copy'
 import type { AccountFacts, AssemblyDeps, AssemblyPlan, AssemblyState } from './plan-to-draft'
 
@@ -28,6 +30,7 @@ export function productionDeps(): AssemblyDeps {
     loadPlays,
     accounts: readAccounts,
     pool: readPool,
+    promotionWorkOrders: readPromotionWorkOrders,
     forms: readForms,
     cover: readCover,
     linkUrl: readLink,
@@ -119,6 +122,53 @@ async function readPool(clientId: string): Promise<CreativePoolEntry[] | null> {
   const loaded = await loadAdStrategyConfigWithSource(clientId)
   if (loaded.source === 'fallback') return null
   return loaded.config.creative_pool
+}
+
+async function readPromotionWorkOrders(clientId: string, prescriptionId: string | null) {
+  if (!prescriptionId) return { unreadable: false, ids: [] as string[] }
+  const signal = await supabaseAdmin
+    .from('content_demand_signals')
+    .select('id, client_id, source, dedupe_key, work_order_id')
+    .eq('client_id', clientId)
+    .eq('dedupe_key', promotionDedupeKey(prescriptionId))
+    .maybeSingle()
+  if (signal.error) return { unreadable: true, ids: [] as string[] }
+  const orders = signal.data
+    ? await supabaseAdmin
+      .from('content_work_orders')
+      .select('id, client_id, signal_id')
+      .eq('client_id', clientId)
+      .eq('signal_id', (signal.data as { id: string }).id)
+    : { data: [], error: null }
+  if (orders.error) return { unreadable: true, ids: [] as string[] }
+  return {
+    unreadable: false,
+    ids: promotionWorkOrderIds({
+      clientId,
+      prescriptionId,
+      signals: signal.data ? [signalLink(signal.data)] : [],
+      orders: ((orders.data ?? []) as Array<Record<string, unknown>>).map(orderLink),
+    }),
+  }
+}
+
+function signalLink(row: unknown): PromotionSignalLink {
+  const record = row as { id?: unknown; client_id?: unknown; source?: unknown; dedupe_key?: unknown; work_order_id?: unknown }
+  return {
+    id: typeof record.id === 'string' ? record.id : '',
+    clientId: typeof record.client_id === 'string' ? record.client_id : '',
+    source: typeof record.source === 'string' ? record.source : '',
+    dedupeKey: typeof record.dedupe_key === 'string' ? record.dedupe_key : '',
+    workOrderId: typeof record.work_order_id === 'string' ? record.work_order_id : null,
+  }
+}
+
+function orderLink(row: Record<string, unknown>): PromotionOrderLink {
+  return {
+    id: typeof row.id === 'string' ? row.id : '',
+    clientId: typeof row.client_id === 'string' ? row.client_id : '',
+    signalId: typeof row.signal_id === 'string' ? row.signal_id : null,
+  }
 }
 
 async function readForms(clientId: string, pageId: string) {

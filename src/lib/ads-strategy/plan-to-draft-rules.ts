@@ -6,6 +6,7 @@
 import type { DraftExpansionSwitches, DraftKind } from './ad-draft'
 import { MAX_DURATION_DAYS, MIN_DURATION_DAYS } from './ad-draft'
 import type { CreativePoolEntry } from './config'
+import { PROMOTION_SIGNAL_SOURCE, promotionDedupeKey } from '@/lib/factory/promotion-signal'
 import { canonicalAccountDigits } from '@/lib/meta/ad-account-binding'
 import type { AdPlay } from './plan-seed/ad-plays'
 import type { PlayKey } from './play-vocabulary'
@@ -108,6 +109,45 @@ export function videoIdFromPool(entry: CreativePoolEntry): Ruled<{ videoId: stri
   return { ok: false, reason: '素材有多个视频编号，不能猜用哪一个，素材还没准备好。' }
 }
 
+export interface PromotionSignalLink {
+  id: string
+  clientId: string
+  source: string
+  dedupeKey: string
+  workOrderId?: string | null
+}
+
+export interface PromotionOrderLink {
+  id: string
+  clientId: string
+  signalId: string | null
+}
+
+/** Work orders opened by this plan's promotion signal. No window is invented. */
+export function promotionWorkOrderIds(input: {
+  clientId: string
+  prescriptionId: string
+  signals: readonly PromotionSignalLink[]
+  orders: readonly PromotionOrderLink[]
+}): string[] {
+  const key = promotionDedupeKey(input.prescriptionId)
+  const signals = input.signals.filter((row) => (
+    row.clientId === input.clientId
+    && row.source === PROMOTION_SIGNAL_SOURCE
+    && row.dedupeKey === key
+  ))
+  const signalIds = new Set(signals.map((row) => row.id))
+  const ids = new Set<string>()
+  for (const signal of signals) {
+    if (signal.workOrderId) ids.add(signal.workOrderId)
+  }
+  for (const order of input.orders) {
+    if (order.clientId !== input.clientId || !order.signalId) continue
+    if (signalIds.has(order.signalId)) ids.add(order.id)
+  }
+  return [...ids].sort()
+}
+
 export function creativeWindowReason(
   entry: CreativePoolEntry,
   today: string,
@@ -119,6 +159,23 @@ export function creativeWindowReason(
   if (verdict === 'expired') return '素材的推广期已经过了，素材还没准备好。'
   if (verdict === 'not_started') return '素材的推广期还没开始，素材还没准备好。'
   return '素材的推广期盖不住这次投放，素材还没准备好。'
+}
+
+/**
+ * A missing window is not a placeholder. It is acceptable only when this pool
+ * row is the work order opened by the plan's own promotion signal.
+ * A window that is present and does not cover the flight still blocks.
+ */
+export function creativeReadyReason(
+  entry: CreativePoolEntry,
+  today: string,
+  use: { start: string; end: string },
+  linkedToPlan: boolean,
+): string | null {
+  const reason = creativeWindowReason(entry, today, use)
+  if (!reason) return null
+  if (linkedToPlan && entry.promo_window === undefined) return null
+  return reason
 }
 
 export function acceptDraftCopy(raw: unknown, brandText: string): Ruled<CopyPair> {
