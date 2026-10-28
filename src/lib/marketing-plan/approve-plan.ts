@@ -2,9 +2,10 @@
  * Approve a draft marketing plan. One implementation for the approve route,
  * for "agree on a prescription" (the plan rides along only when every
  * applicable check, on every phase, is green), and for the plan confirmation
- * card (the OPC has already seen the checks that are not green). It only
- * changes plan state and dispatches internal to-dos for legacy plans: no Meta
- * draft, no Meta write, no spend, no budget change.
+ * card. It changes plan state and dispatches internal to-dos for legacy
+ * plans. A successful approval then asks for a paused-draft confirmation
+ * card when a step is ready. That ask does not write Meta, spend, or change
+ * a budget, and a failure does not undo the approval.
  */
 
 import { randomUUID } from 'crypto'
@@ -15,6 +16,7 @@ import { promoContentHash } from '@/lib/marketing-plan/promo/content-hash'
 import { loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import { evaluateApproval, type GateResult } from '@/lib/marketing-plan/promo/gates'
 import { hardNotGreen } from '@/lib/marketing-plan/approve-plan-gates'
+import { assemblePausedDraftsForClient } from '@/lib/ads-strategy/plan-to-draft'
 import { hasPromoField, parsePromoSpec, type PromoValidationIssue } from '@/lib/marketing-plan/promo/spec'
 import type { ApprovalReceipt, MarketingPlan } from '@/lib/marketing-plan/types'
 
@@ -148,7 +150,11 @@ export async function approvePlan(args: {
     return { kind: 'stale' }
   }
 
-  if (plan.status === 'approved') return alreadyApproved(plan, args.expectedContentHash)
+  if (plan.status === 'approved') {
+    const result = await alreadyApproved(plan, args.expectedContentHash)
+    if (result.kind === 'already_approved' && args.commit !== false) await safeAssemble(args.clientId)
+    return result
+  }
   if (plan.status !== 'draft') return { kind: 'not_draft', status: plan.status }
 
   const gates = await runGates(plan, args.requireAllGreen === true, args.expectedContentHash)
@@ -192,5 +198,14 @@ export async function approvePlan(args: {
     await revokePlanTasks(args.planId, args.clientId)
     return { kind: 'conflict', status: 500, error: '批准没有保存成功，已撤销本次派发，请稍后重试。' }
   }
+  await safeAssemble(args.clientId)
   return { kind: 'approved', plan: (updated as MarketingPlan | null) ?? plan, dispatch, receipt }
+}
+
+async function safeAssemble(clientId: string): Promise<void> {
+  try {
+    await assemblePausedDraftsForClient(clientId)
+  } catch (err) {
+    console.error('[plan-to-draft] after approval failed', err instanceof Error ? err.message : 'error')
+  }
 }

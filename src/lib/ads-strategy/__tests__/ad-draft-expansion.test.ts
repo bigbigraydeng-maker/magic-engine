@@ -188,6 +188,22 @@ describe('扩展后的广告草稿', () => {
     expect(reviewed).toEqual([])
     expect(draftNotYetBuildable({ ...d, expansion: OFF })).toBeNull()
   })
+
+  it('单个草稿写明打开优势受众、没有名单外扩量 → 能按草稿建', () => {
+    const d: AdDraft = {
+      kind: 'lead_form', clientId: 'c1', campaignName: 'n', adSetName: 'a',
+      dailyBudget: 30, durationDays: 7, geoCountries: ['NZ'], pageId: 'p1', leadFormId: 'f1',
+      creatives: [creative()],
+      expansion: {
+        advantageAudience: true,
+        customAudienceRelaxed: false,
+        lookalikeRelaxed: false,
+        source: 'ad-agent:default-advantage-plus',
+      },
+    }
+    expect(reviewDraftForBuild(d)).toEqual([])
+    expect(draftNotYetBuildable(d)).toBeNull()
+  })
 })
 
 describe('建前复核用已经读到的数，自己不读 Meta', () => {

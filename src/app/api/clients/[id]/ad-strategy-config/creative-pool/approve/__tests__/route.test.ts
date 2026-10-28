@@ -23,6 +23,9 @@ vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: vi.fn() })
 vi.mock('@/lib/auth/require-session', () => ({ requireSession: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/email/sender', () => ({ ME_MAIL_TO_ADDRESS: 'team@example.com' }))
+vi.mock('@/lib/ads-strategy/plan-to-draft', () => ({
+  assemblePausedDraftsForClient: vi.fn(async () => ({ steps: [] })),
+}))
 
 import { POST } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'

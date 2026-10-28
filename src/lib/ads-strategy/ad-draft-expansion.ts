@@ -2,7 +2,8 @@
  * 广告草稿扩展（S9）：多个广告组、系列预算、受众扩量开关、按钮、网址参数、首评。
  *
  * 只检查 ME 自己手里的草稿。不读 Meta，不写 Meta，不删除已有广告。
- * 现在的发布器表达不了的字段，由 `draftNotYetBuildable` 在建之前拦住。
+ * 发布器表达不了的字段，由 `draftNotYetBuildable` 在建之前拦住。
+ * 写明了的优势受众开关，发布器会按草稿传；没挂受众却打开名单外扩量，仍然不建。
  */
 import type { AccountCapFacts, BudgetCheck } from '@/lib/marketing-plan/promo/budget-caps'
 import { checkAdsBudget } from '@/lib/marketing-plan/promo/budget-caps'
@@ -60,10 +61,10 @@ export function draftNotYetBuildable(d: AdDraft): string | null {
   if (d.budgetMode !== undefined && d.budgetMode !== 'ad_set' && d.budgetMode !== 'campaign') {
     reasons.push('看不懂的预算方式')
   }
-  if (expansionBlocksBuild(d.expansion)) reasons.push('打开的受众扩量')
+  if (expansionBlocksBuild(d.expansion, hasAudienceIds(d))) reasons.push('打开的受众扩量')
   if (Array.isArray(d.adSets)) {
     for (const set of d.adSets) {
-      if (isAdSet(set) && expansionBlocksBuild(set.expansion)) reasons.push('打开的受众扩量')
+      if (isAdSet(set) && expansionBlocksBuild(set.expansion, hasAudienceIds(set))) reasons.push('打开的受众扩量')
     }
   }
   if (d.urlTags !== undefined || d.firstComment !== undefined) reasons.push('网址参数或首评')
@@ -114,14 +115,19 @@ export function reviewDraftAgainstCaps(
  * 计划里每个广告步骤自带日预算，所以这里的预算方式是组预算，不是系列预算。
  * 受众引用不是数字编号、或没有投放地区时，不返回广告组，也不猜一个国家。
  * 文案不在计划步骤里，返回的广告组文案是空的，调用方补上之后才能通过 `validateDraft`。
+ * 传入 `stepId` 时只取那一个广告步骤，旁边步骤读不懂不会把这一步一起丢掉。
  */
-export function readPromoPhaseAdSets(raw: unknown, phaseId: string): PromoPhaseAdSets {
+export function readPromoPhaseAdSets(raw: unknown, phaseId: string, stepId?: string): PromoPhaseAdSets {
   const parsed = parsePromoSpec(raw)
   if (!parsed.ok) return { problems: parsed.issues.map((i) => ({ field: i.path || 'promo', message: i.message })) }
   const phase = parsed.spec.phases.find((p) => p.id === phaseId)
   if (!phase) return { problems: [{ field: 'phaseId', message: `计划里没有这个阶段：${phaseId}` }] }
-  const steps = phase.steps.filter((s) => s.kind === 'ads_campaign')
-  if (steps.length === 0) return { problems: [{ field: 'adSets', message: '这个阶段没有广告步骤' }] }
+  const ads = phase.steps.filter((s) => s.kind === 'ads_campaign')
+  const steps = stepId === undefined ? ads : ads.filter((s) => s.id === stepId)
+  if (steps.length === 0) {
+    const message = stepId === undefined ? '这个阶段没有广告步骤' : `计划里没有这个广告步骤：${stepId}`
+    return { problems: [{ field: 'adSets', message }] }
+  }
   const problems: DraftProblem[] = []
   const adSets: AdDraftAdSet[] = []
   let cents = 0
@@ -406,10 +412,11 @@ function firstCommentProblems(text: unknown, field: string): DraftProblem[] {
   return []
 }
 
-function expansionBlocksBuild(expansion: unknown): boolean {
+function expansionBlocksBuild(expansion: unknown, hasAudiences: boolean): boolean {
   if (expansion === undefined) return false
   if (!isSwitchShape(expansion)) return true
-  return expansion.advantageAudience || expansion.customAudienceRelaxed || expansion.lookalikeRelaxed
+  const relaxes = expansion.customAudienceRelaxed || expansion.lookalikeRelaxed
+  return relaxes && !hasAudiences
 }
 
 function ctaBlocksBuild(d: AdDraft): boolean {

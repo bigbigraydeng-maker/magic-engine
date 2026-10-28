@@ -131,6 +131,18 @@ async function graphDelete(id: string, accessToken: string): Promise<boolean> {
  * （`NZ ∪ 北岸10km半径` = 整个 NZ），城市半径形同虚设。给了城市就只用城市，
  * 不再带国家（2026-08-04 事故：北岸 $1.25M 的房源投给了整个新西兰）。
  */
+function advantageAudienceFlag(d: AdDraft): 0 | 1 {
+  const value = d.expansion?.advantageAudience
+  return value === true ? 1 : 0
+}
+
+function relaxationFlags(d: AdDraft): { custom_audience: 0 | 1; lookalike: 0 | 1 } {
+  return {
+    custom_audience: d.expansion?.customAudienceRelaxed === true ? 1 : 0,
+    lookalike: d.expansion?.lookalikeRelaxed === true ? 1 : 0,
+  }
+}
+
 function targetingFor(d: AdDraft): Record<string, unknown> {
   const geo: Record<string, unknown> =
     d.geoCityKeys && d.geoCityKeys.length > 0
@@ -144,15 +156,14 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
     ...(isPlaybackGoal(metaTripletFor(d.kind).optimizationGoal)
       ? { publisher_platforms: [...PLAYBACK_REQUIRED_PLATFORMS] }
       : {}),
-    // 明确关掉 Meta 的自动放宽。**这不代表它一定关着** —— Meta 可能照样开，
-    // 所以建完还要回读一遍（这正是闸门存在的理由）。
-    targeting_automation: { advantage_audience: 0 },
+    // 草稿写明了优势受众就按草稿传。没写仍传 0（旧草稿）。
+    // **这不代表 Meta 一定照办** —— 建完还要回读一遍。
+    targeting_automation: { advantage_audience: advantageAudienceFlag(d) },
   }
 
   if (d.audienceIds && d.audienceIds.length > 0) {
     targeting.custom_audiences = d.audienceIds.map((id) => ({ id }))
-    // 明确不放宽名单：不扩展到名单以外的人，也不自动加相似人群。
-    targeting.targeting_relaxation_types = { custom_audience: 0, lookalike: 0 }
+    targeting.targeting_relaxation_types = relaxationFlags(d)
   }
   if (d.excludedAudienceIds && d.excludedAudienceIds.length > 0) {
     targeting.excluded_custom_audiences = d.excludedAudienceIds.map((id) => ({ id }))

@@ -66,6 +66,13 @@ const adsStep = z.object({
     placements: z.array(z.string().min(1)).default([]),
     paused_ranges: z.array(pausedRange).default([]),
     /**
+     * 已有即时表单的编号或名字。可选，且不许写 default：
+     * default 会进每一份旧计划的解析结果，已批准计划的内容指纹就会变。
+     * 没写 = 这一步没有点名表单，由组装时按「恰好一个在用表单」决定，决定不了就不出卡。
+     */
+    lead_form_id: z.string().min(1).optional(),
+    lead_form_name: z.string().min(1).optional(),
+    /**
      * 结构化定向，可选。
      * **用 optional，绝对不许用 default** —— default 会被写进每一份旧计划的解析结果，
      * 让已批准计划的内容指纹变一次、被判成「内容变过了」，人工核实记录跟着作废。

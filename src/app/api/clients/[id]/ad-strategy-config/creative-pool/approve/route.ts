@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { loadAdStrategyConfig, loadConfigVersion, loadConfigWithVersion, writeConfigCas, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { assemblePausedDraftsForClient } from '@/lib/ads-strategy/plan-to-draft'
 import { promoVerdict, nzToday } from '@/lib/ads-strategy/promo-window'
 
 export const dynamic = 'force-dynamic'
@@ -63,6 +64,7 @@ export async function POST(
   if (entry.status === 'approved') {
     // 幂等分支：用已经读到的版本，不再读一次（读完 config 之后再读版本会拿到「旧内容 + 新版本号」）。
     const version = loadedVersion.version.exists ? loadedVersion.version.updatedAt : null
+    await assembleAfterPool(clientId)
     return NextResponse.json({ success: true, config, idempotent: true, version })
   }
 
@@ -97,6 +99,7 @@ export async function POST(
   }
 
   const loaded = await loadConfigWithVersion(clientId)
+  await assembleAfterPool(clientId)
   if (!loaded.ok) {
     return NextResponse.json({
       success: true,
@@ -105,4 +108,12 @@ export async function POST(
     })
   }
   return NextResponse.json({ success: true, config: loaded.config, version: loaded.version })
+}
+
+async function assembleAfterPool(clientId: string): Promise<void> {
+  try {
+    await assemblePausedDraftsForClient(clientId)
+  } catch (err) {
+    console.error('[plan-to-draft] after creative approval failed', err instanceof Error ? err.message : 'error')
+  }
 }

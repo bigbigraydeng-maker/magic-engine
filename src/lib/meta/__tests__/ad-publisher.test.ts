@@ -573,6 +573,18 @@ describe('targetingFor — 自定义受众（包含 / 排除）', () => {
     expect(targetingOf().targeting_automation).toEqual({ advantage_audience: 0 })
 
     calls = []
+    await publishDraftPaused({
+      ...DRAFT,
+      expansion: {
+        advantageAudience: true,
+        customAudienceRelaxed: false,
+        lookalikeRelaxed: false,
+        source: 'ad-agent:default-advantage-plus',
+      },
+    }, 'act_1', 'tok')
+    expect(targetingOf().targeting_automation).toEqual({ advantage_audience: 1 })
+
+    calls = []
     await publishDraftPaused({ ...DRAFT, audienceIds: [], excludedAudienceIds: [] }, 'act_1', 'tok')
     expect(Object.keys(targetingOf()).sort()).toEqual([
       'age_max', 'age_min', 'geo_locations', 'targeting_automation',

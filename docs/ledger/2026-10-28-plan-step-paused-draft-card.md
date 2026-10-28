@@ -1,0 +1,13 @@
+---
+id: 2026-10-28-plan-step-paused-draft-card
+title: 批准的广告步骤和入池素材会自动出一张暂停草稿确认卡
+status: decided
+owner: agent
+decided_on: 2026-10-28
+source: doc:docs/specs/2026-10-26-prescription-to-act-full-auto-design-v0.1.md
+verify_by: 2026-11-04
+verify_how: 一份已批准计划的广告步骤，素材已入池且表单能唯一确定时，应出现一张暂停草稿确认卡；点之前广告后台没有新建系列。缺素材、文案、表单或账户对不上时不出卡，并写明原因。
+---
+广告 Agent 把已批准计划的一个广告步骤和素材池里准备好的素材拼成一份草稿，并出确认卡。
+文案由广告 Agent 现写，优势受众开关写明为开。表单只挂主页上已经有的，对不上就不出卡。
+点确认之前不写广告后台。开投仍要另一张卡。版位、多组和系列预算这一轮不做。

@@ -32,6 +32,10 @@ vi.mock('@/lib/supabase', () => {
   return { supabaseAdmin: { from: () => chain() } }
 })
 
+vi.mock('@/lib/ads-strategy/plan-to-draft', () => ({
+  assemblePausedDraftsForClient: vi.fn(async () => ({ steps: [] })),
+}))
+
 vi.mock('@/lib/marketing-plan/task-dispatcher', () => ({
   dispatchPlanTasks: (...args: unknown[]) => h.dispatch(...args),
   revokePlanTasks: vi.fn(),

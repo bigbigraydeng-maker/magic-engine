@@ -3,9 +3,10 @@
  *
  * Every applicable check green -> the plan is approved with the same click.
  * Any yellow / red / grey, on any phase -> nothing is approved; a confirmation card asks the OPC.
- * Only OPC accounts count. An agent never approves. Plan state only: no Meta draft,
- * no Meta write, no spend, no budget change. A failure here never blocks the
- * prescription agree itself; the outcome is returned and stored for the agree card.
+ * Only OPC accounts count. An agent never approves. Approving may ask for a
+ * paused-draft confirmation card. That card is not a Meta write, a spend, or
+ * a budget change. A failure here never blocks the prescription agree itself;
+ * the outcome is returned and stored for the agree card.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
