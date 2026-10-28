@@ -300,6 +300,8 @@ function buildNonLeadSpend(
 interface Totals {
   spendAll: number
   spendLeadObjective: number
+  impressionsLeadObjective: number
+  clicksLeadObjective: number
   metaLeads: number
   crmLeads: number
   matchRate: number | null
@@ -313,11 +315,15 @@ function buildTotals(
 ): Totals {
   let spendAll = 0
   let spendLeadObjective = 0
+  let impressionsLeadObjective = 0
+  let clicksLeadObjective = 0
   let metaLeads = 0
   for (const s of placementDevice) {
     spendAll += s.spend
     if (isLeadObjective(s, objectives)) {
       spendLeadObjective += s.spend
+      impressionsLeadObjective += s.impressions
+      clicksLeadObjective += s.clicks
       metaLeads += s.meta_leads ?? 0
     }
   }
@@ -326,6 +332,8 @@ function buildTotals(
   return {
     spendAll: round2(spendAll),
     spendLeadObjective: round2(spendLeadObjective),
+    impressionsLeadObjective,
+    clicksLeadObjective,
     metaLeads,
     crmLeads,
     matchRate,

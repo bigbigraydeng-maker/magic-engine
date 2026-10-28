@@ -49,6 +49,9 @@ export interface BreakdownReport {
     spendAll: number
     /** Spend of lead-objective campaigns only (the cost-per-lead denominator). */
     spendLeadObjective: number
+    /** Impressions / clicks of the same lead-objective campaigns (for CTR and CPM). */
+    impressionsLeadObjective: number
+    clicksLeadObjective: number
     metaLeads: number
     crmLeads: number
     /** crmLeads / metaLeads; null when metaLeads is 0. */
