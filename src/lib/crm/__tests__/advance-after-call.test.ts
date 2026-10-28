@@ -11,7 +11,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 const mocks = vi.hoisted(() => ({ from: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: mocks.from } }))
 
-import { advanceNewLeadsAfterReachedCall } from '../advance-after-call'
+import { advanceNewLeadsAfterFollowUp } from '../advance-after-call'
 import { CALL_REACHED_ACTOR, STAGE_INFER_ACTOR } from '../actors'
 
 const NOW = new Date('2026-10-28T00:00:00Z')
@@ -22,7 +22,7 @@ interface Fake {
   stages: string[]
   contacts: { id: string; client_id: string; stage_updated_at: string | null }[]
   events: { contact_id: string; changed_by: string | null; to_stage: string | null; created_at: string }[]
-  touches: { contact_id: string; metadata: Record<string, unknown> | null }[]
+  touches: { contact_id: string; channel: string; source?: string | null; metadata: Record<string, unknown> | null }[]
   updated: number
   auditErr?: string
 }
@@ -48,7 +48,7 @@ function stubDb(over: Partial<Fake> = {}): SupabaseClient {
     stages: ['new', 'contacted', 'quoted', 'deferred', 'no_response', 'traveling_soon'],
     contacts: [{ id: 'c1', client_id: CLIENT, stage_updated_at: STAGE_AT }],
     events: [{ contact_id: 'c1', changed_by: STAGE_INFER_ACTOR, to_stage: 'new', created_at: STAGE_AT }],
-    touches: [{ contact_id: 'c1', metadata: { reached: true, talk_seconds: 39 } }],
+    touches: [{ contact_id: 'c1', channel: 'phone', metadata: { reached: true, talk_seconds: 39 } }],
     updated: 1,
     ...over,
   }
@@ -90,10 +90,10 @@ beforeEach(() => {
   mocks.from.mockReset()
 })
 
-describe('advanceNewLeadsAfterReachedCall', () => {
+describe('advanceNewLeadsAfterFollowUp', () => {
   it('moves an AI-placed new lead with a reached outbound call to contacted, with an audit row', async () => {
     const db = stubDb()
-    const r = await advanceNewLeadsAfterReachedCall(NOW, db)
+    const r = await advanceNewLeadsAfterFollowUp(NOW, db)
     expect(r).toEqual({ candidates: 1, advanced: 1, failed: 0 })
     expect(updates[0]).toMatchObject({ stage: 'contacted' })
     expect(audits[0]).toMatchObject({
@@ -112,7 +112,7 @@ describe('advanceNewLeadsAfterReachedCall', () => {
     const db = stubDb({
       events: [{ contact_id: 'c1', changed_by: 'info@ctstours.co.nz', to_stage: 'new', created_at: STAGE_AT }],
     })
-    const r = await advanceNewLeadsAfterReachedCall(NOW, db)
+    const r = await advanceNewLeadsAfterFollowUp(NOW, db)
     expect(r.advanced).toBe(0)
     expect(updates).toHaveLength(0)
   })
@@ -124,27 +124,40 @@ describe('advanceNewLeadsAfterReachedCall', () => {
         { contact_id: 'c1', changed_by: STAGE_INFER_ACTOR, to_stage: 'new', created_at: STAGE_AT },
       ],
     })
-    expect((await advanceNewLeadsAfterReachedCall(NOW, db)).advanced).toBe(0)
+    expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(0)
   })
 
   it('does nothing when no outbound call was reached', async () => {
-    const db = stubDb({ touches: [{ contact_id: 'c1', metadata: { reached: false } }] })
-    expect((await advanceNewLeadsAfterReachedCall(NOW, db)).advanced).toBe(0)
+    const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'phone', metadata: { reached: false } }] })
+    expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(0)
     const db2 = stubDb({ touches: [] })
-    expect((await advanceNewLeadsAfterReachedCall(NOW, db2)).advanced).toBe(0)
+    expect((await advanceNewLeadsAfterFollowUp(NOW, db2)).advanced).toBe(0)
     expect(updates).toHaveLength(0)
+  })
+
+  it('also advances when a colleague replied by email', async () => {
+    const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'email', source: 'microsoft_mail', metadata: null }] })
+    expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(1)
+    expect(String(audits[0].note)).toContain('同事已回过邮件')
+  })
+
+  it('ignores automated emails (auto-reply flag, bulk mail source)', async () => {
+    const auto = stubDb({ touches: [{ contact_id: 'c1', channel: 'email', source: 'microsoft_mail', metadata: { automated: true } }] })
+    expect((await advanceNewLeadsAfterFollowUp(NOW, auto)).advanced).toBe(0)
+    const bulk = stubDb({ touches: [{ contact_id: 'c1', channel: 'email', source: 'mailchimp', metadata: null }] })
+    expect((await advanceNewLeadsAfterFollowUp(NOW, bulk)).advanced).toBe(0)
   })
 
   it('skips a client whose pipeline has no contacted stage', async () => {
     // 缺 contacted 就不是「配齐」的客户，整个客户不在处理范围内
     const db = stubDb({ stages: ['new', 'quoted'] })
-    const r = await advanceNewLeadsAfterReachedCall(NOW, db)
+    const r = await advanceNewLeadsAfterFollowUp(NOW, db)
     expect(r).toEqual({ candidates: 0, advanced: 0, failed: 0 })
   })
 
   it('does not count it as advanced when a human changed the stage first (update hits 0 rows)', async () => {
     const db = stubDb({ updated: 0 })
-    const r = await advanceNewLeadsAfterReachedCall(NOW, db)
+    const r = await advanceNewLeadsAfterFollowUp(NOW, db)
     expect(r.advanced).toBe(0)
     expect(r.failed).toBe(0)
     expect(audits).toHaveLength(0)
@@ -152,7 +165,7 @@ describe('advanceNewLeadsAfterReachedCall', () => {
 
   it('rolls the stage back and reports failure when the audit row cannot be written', async () => {
     const db = stubDb({ auditErr: 'db down' })
-    const r = await advanceNewLeadsAfterReachedCall(NOW, db)
+    const r = await advanceNewLeadsAfterFollowUp(NOW, db)
     expect(r).toMatchObject({ advanced: 0, failed: 1 })
     expect(updates).toHaveLength(2)
     expect(updates[1]).toMatchObject({ stage: 'new', stage_updated_at: STAGE_AT })

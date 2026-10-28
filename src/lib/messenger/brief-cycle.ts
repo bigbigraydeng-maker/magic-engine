@@ -33,7 +33,7 @@ import {
 } from '@/lib/messenger/brief'
 import { autoTagQualifiedBuyers, type AutoTagResult } from '@/lib/crm/qualified-buyer-autotag'
 import { inferStagesFromConversations, type StageInferResult } from '@/lib/crm/stage-infer'
-import { advanceNewLeadsAfterReachedCall, type CallAdvanceResult } from '@/lib/crm/advance-after-call'
+import { advanceNewLeadsAfterFollowUp, type CallAdvanceResult } from '@/lib/crm/advance-after-call'
 import { inferConversationFacts, type FactsRunResult } from '@/lib/crm/facts/infer'
 import { supabaseFactsIo } from '@/lib/crm/facts/io'
 import type { BriefChannel } from './brief-schema'
@@ -638,7 +638,7 @@ export async function runPostBriefSweeps(now: Date): Promise<PostBriefSweepResul
 
   let callAdvance: CallAdvanceResult | { error: string }
   try {
-    callAdvance = await advanceNewLeadsAfterReachedCall(now)
+    callAdvance = await advanceNewLeadsAfterFollowUp(now)
   } catch (err) {
     callAdvance = { error: err instanceof Error ? err.message : String(err) }
     console.error('[crm/advance-after-call] 通话接通推进阶段整轮失败:', err)

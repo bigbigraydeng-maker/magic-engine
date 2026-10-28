@@ -1,5 +1,5 @@
 /**
- * 我们拨出并接通了电话，客人却还停在「新线索」—— 把他推进到「已联系」。
+ * 我们已经跟进过客人（拨出并接通了电话，或同事回过邮件），他却还停在「新线索」—— 把他推进到「已联系」。
  *
  * ## 为什么要有这一步
  *
@@ -14,7 +14,9 @@
  *   · 当前阶段是 `new`（新线索）
  *   · 这个阶段是系统放进去的（最近一条阶段变更的操作者是 `ai:conversation-read` 或建档时的 `system:new-lead`）——
  *     人手动标过的一律不碰
- *   · 有一通外呼电话被判定为「接通」（触点 `metadata.reached === true`，判据在 `call-plan.ts`）
+ *   · 有一通外呼电话被判定为「接通」（触点 `metadata.reached === true`，判据在 `call-plan.ts`），
+ *     或有一封**人发的**外发邮件（排除群发和自动回执，判据 `isAutomatedTouch`）——
+ *     2026-10-28 PM 发现 Yvonne McDiarmid：同事 10/23 就回过邮件，她仍显示「新线索」
  *   · 这个客户的阶段配置里确实有 `contacted`
  * 只说「已联系」这一档（最不下结论的一档，不终结、不停止跟进），更细的判断仍归员工和读对话那一套。
  *
@@ -24,6 +26,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
+import { isAutomatedTouch } from './automated-touch'
 import { CALL_REACHED_ACTOR, NEW_LEAD_ACTOR, STAGE_INFER_ACTOR } from './actors'
 import { loadClientsWithSafeStages, loadConfiguredStages } from './stage-infer'
 
@@ -73,29 +76,41 @@ async function aiPlacedInPool(db: SupabaseClient, contactIds: string[]): Promise
   return out
 }
 
-/** 有过接通的外呼电话的人（带上最近一通的通话秒数，写进留痕）。 */
-async function reachedByCall(db: SupabaseClient, contactIds: string[]): Promise<Map<string, number | null>> {
+/** 跟进过的人：值是写进留痕的那句话（接通的外呼电话优先，其次是同事回的邮件）。 */
+async function followedUp(db: SupabaseClient, contactIds: string[]): Promise<Map<string, string>> {
   const { data, error } = await db
     .from('contact_touchpoints')
-    .select('contact_id, metadata')
+    .select('contact_id, channel, source, metadata')
     .in('contact_id', contactIds)
-    .eq('channel', 'phone')
     .eq('direction', 'outbound')
+    .in('channel', ['phone', 'email'])
     .order('occurred_at', { ascending: false })
-  if (error) throw new Error(`读电话触点失败: ${error.message}`)
-  const out = new Map<string, number | null>()
-  for (const t of (data ?? []) as { contact_id: string; metadata: Record<string, unknown> | null }[]) {
-    if (t.metadata?.reached !== true || out.has(t.contact_id)) continue
-    const secs = t.metadata.talk_seconds
-    out.set(t.contact_id, typeof secs === 'number' ? secs : null)
+  if (error) throw new Error(`读外发触点失败: ${error.message}`)
+  const calls = new Map<string, string>()
+  const mails = new Map<string, string>()
+  for (const t of (data ?? []) as {
+    contact_id: string
+    channel: string
+    source: string | null
+    metadata: Record<string, unknown> | null
+  }[]) {
+    if (t.channel === 'phone') {
+      if (t.metadata?.reached !== true || calls.has(t.contact_id)) continue
+      const secs = t.metadata.talk_seconds
+      calls.set(t.contact_id, `我们拨出的电话已接通${typeof secs === 'number' ? `（${secs} 秒）` : ''}`)
+    } else if (!isAutomatedTouch(t.source, t.metadata) && !mails.has(t.contact_id)) {
+      mails.set(t.contact_id, '同事已回过邮件')
+    }
   }
+  const out = new Map<string, string>(mails)
+  calls.forEach((why, id) => out.set(id, why))
   return out
 }
 
 async function applyReached(
   db: SupabaseClient,
   row: CandidateRow,
-  talkSeconds: number | null,
+  why: string,
   now: Date,
 ): Promise<boolean> {
   const nowIso = now.toISOString()
@@ -110,14 +125,13 @@ async function applyReached(
   if (error) throw new Error(`改阶段失败: ${error.message}`)
   if (!data || data.length === 0) return false // 被员工抢先改了，不算失败
 
-  const secs = talkSeconds === null ? '' : `（${talkSeconds} 秒）`
   const { error: aErr } = await db.from('contact_stage_events').insert({
     client_id: row.client_id,
     contact_id: row.id,
     from_stage: FROM_STAGE,
     to_stage: TO_STAGE,
     changed_by: CALL_REACHED_ACTOR,
-    note: `我们拨出的电话已接通${secs}，新线索自动改为已联系`,
+    note: `${why}，新线索自动改为已联系`,
   })
   if (aErr) {
     // 留痕写不上就不留一个没有来历的阶段：条件卡死在我们刚写的值上，中间被改过就不会误伤。
@@ -133,7 +147,7 @@ async function applyReached(
   return true
 }
 
-export async function advanceNewLeadsAfterReachedCall(
+export async function advanceNewLeadsAfterFollowUp(
   now: Date,
   db: SupabaseClient = supabaseAdmin,
 ): Promise<CallAdvanceResult> {
@@ -159,11 +173,11 @@ export async function advanceNewLeadsAfterReachedCall(
 
     for (const part of chunk(rows, IN_CHUNK)) {
       const ids = part.map((r) => r.id)
-      const [ai, reached] = await Promise.all([aiPlacedInPool(db, ids), reachedByCall(db, ids)])
+      const [ai, reached] = await Promise.all([aiPlacedInPool(db, ids), followedUp(db, ids)])
       for (const row of part) {
         if (!ai.has(row.id) || !reached.has(row.id)) continue
         try {
-          if (await applyReached(db, row, reached.get(row.id) ?? null, now)) result.advanced++
+          if (await applyReached(db, row, reached.get(row.id) ?? '已有人跟进过', now)) result.advanced++
         } catch (err) {
           result.failed++
           console.warn(`[crm/advance-after-call] ${row.id} 失败：`, err instanceof Error ? err.message : err)
