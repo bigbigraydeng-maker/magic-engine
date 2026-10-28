@@ -203,6 +203,24 @@ describe('官网表单的「出发时间 / 每人预算」一行人话', () => {
     mockDb({ touches: [{ ...FORM('2026-10-20T00:00:00Z', { form_travel_window: 'mar_may_2027' }), channel: 'email' }] })
     expect((await (await call()).json()).formFactsLine).toBeNull()
   })
+
+  it('Facebook 客资表单的预算和出发时间也要显示（2026-10-28 PM 发现一直没读）', async () => {
+    mockDb({
+      touches: [
+        {
+          ...FORM('2026-10-26T11:23:31Z', {
+            custom_answers: {
+              'when_are_you_hoping_to_travel?': 'not_sure_exploring',
+              'whats_your_budget_per_person_nzd?': '5000_8000',
+            },
+          }),
+          channel: 'meta_lead_form',
+        },
+      ],
+    })
+    const body = await (await call()).json()
+    expect(body.formFactsLine).toBe('出发时间还没定（在了解） · 预算 NZD 5,000–8,000/人（10月27日提交）')
+  })
 })
 
 /**
