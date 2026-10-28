@@ -18,6 +18,7 @@ import { fetchFullEmailBody, mayBeTruncatedPreview } from '@/lib/crm/email-full-
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { normalisePhone } from '@/lib/crm/identity'
@@ -77,6 +78,8 @@ type TimelineEntry =
       channel: string
       direction: 'inbound' | 'outbound'
       summary: string | null
+      /** 出站且是机器发的（Mailchimp 欢迎信 / 群发）。 */
+      automated?: boolean
       /**
        * 销售**真正敲进去的那句话**（客人的原文 / FDE 的手记）。
        *
@@ -193,7 +196,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     // 免得「Messenger 私信（5 条往来）」和真实 5 条消息在时间线里重复。
     supabaseAdmin
       .from('contact_touchpoints')
-      .select('channel, direction, occurred_at, summary, raw, metadata')
+      .select('channel, direction, occurred_at, summary, raw, metadata, source')
       .eq('client_id', clientId)
       .eq('contact_id', contactId)
       .neq('channel', 'messenger')
@@ -307,6 +310,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     /** 原话。存量结果值读的时候要靠它重判一次（见 reclassifyStoredOutcome）。 */
     raw: string | null
     metadata: Record<string, unknown> | null
+    source: string | null
   }[]) {
     if (hasWhatsAppConversation && t.channel === 'whatsapp') continue
     const m = t.metadata ?? {}
@@ -316,6 +320,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       channel: t.channel,
       direction: t.direction,
       summary: t.summary,
+      // 机器发的出站（Mailchimp 欢迎信 / 群发）：抽屉里要说清「系统自动发出」，不能当成同事写的话，
+      // 也不能当「最后一句」盖掉客人真说的话。
+      automated: t.direction === 'outbound' && isAutomatedTouch(t.source, m),
       raw: cleanStr(t.raw),
       dncFlag: m.do_not_contact === true,
       // 外呼那条路写的是模型摘要，不是逐字原话 —— 靠 voice_call_id 认出来。

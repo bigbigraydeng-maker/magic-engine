@@ -18,6 +18,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { isAutomatedTouch } from './automated-touch'
 import { STAGE_INFER_ACTOR, STAGE_REASON_PREFIX } from './actors'
 import {
   STAGE_SYSTEM_PROMPT,
@@ -185,7 +186,7 @@ export async function loadTranscriptLines(
     supabaseAdmin.from('conversations').select('id').eq('client_id', clientId).eq('contact_id', contactId),
     supabaseAdmin
       .from('contact_touchpoints')
-      .select('channel, direction, occurred_at, raw, summary')
+      .select('channel, direction, occurred_at, raw, summary, source, metadata')
       .eq('client_id', clientId)
       .eq('contact_id', contactId)
       .neq('channel', 'messenger')
@@ -214,7 +215,12 @@ export async function loadTranscriptLines(
     occurred_at: string
     raw: string | null
     summary: string | null
+    source: string | null
+    metadata: Record<string, unknown> | null
   }[]) {
+    // 机器发的出站（Mailchimp 欢迎信 / 群发）不是「我们跟他聊过」——喂给模型，
+    // 「对方一句没回 + 我们发过 + 已过两周」会把只收过欢迎信的人永久写成「无下文」。
+    if (t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata)) continue
     // 电话触点的原话在 raw；raw 空的（FB 表单之类）退回 summary。
     const body = (t.raw ?? t.summary ?? '').trim()
     if (body) lines.push({ at: t.occurred_at, direction: t.direction, body, channel: t.channel })
