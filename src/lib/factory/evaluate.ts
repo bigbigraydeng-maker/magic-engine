@@ -338,7 +338,8 @@ async function persistDecision(
 
   const draft = decision.workOrder
 
-  // New orders must carry the target platform (and optional self-reported creative tags).
+  // New orders carry the target platform (missing = defaulted with a warning, unrecognised =
+  // rejected) and optional self-reported creative tags.
   // Old orders are never re-checked: this runs only on the create path.
   const stamped = stampPlatformAndTags(draft.brief, signal.request)
   if (!stamped.ok) {
@@ -350,6 +351,11 @@ async function persistDecision(
     return { outcome: 'rejected', reject_reason: reason }
   }
   draft.brief = stamped.brief
+  if (stamped.platform_defaulted) {
+    console.warn(
+      `[factory] signal ${signal.id} (client ${signal.client_id}, source ${signal.source}) sent no request.platform; defaulted to ${stamped.brief.platform}`,
+    )
+  }
 
   // R5:recipe 路径的完整可执行 brief 必须在 insert 之前构造完毕。缺源图 = 用不了 recipe,
   // typed rejection(不再 accepted with undefined work_order_id · R6)。

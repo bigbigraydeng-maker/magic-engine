@@ -90,6 +90,8 @@ export type StampResult<B extends object> =
   | {
       ok: true
       brief: B & { platform: SocialPlatform; creative_tags?: CreativeTags }
+      /** true = the caller sent no platform and we filled in the current factory output platform */
+      platform_defaulted: boolean
     }
   | {
       ok: false
@@ -103,13 +105,14 @@ export function stampPlatformAndTags<B extends object>(
 ): StampResult<B> {
   const req: Record<string, unknown> = isPlainObject(request) ? request : {}
 
-  const platform = normalizePlatform(req.platform)
+  // A missing platform (external callers that predate S1) falls back to the platform the
+  // factory publishes to today. A platform that is present but unrecognised is still rejected.
+  const platformMissing = req.platform === undefined || req.platform === null
+  const platform = platformMissing
+    ? CURRENT_FACTORY_OUTPUT_PLATFORM
+    : normalizePlatform(req.platform)
   if (platform === null) {
-    const rawPlatform = req.platform
-    const detail =
-      rawPlatform === undefined || rawPlatform === null
-        ? 'request.platform missing'
-        : `request.platform "${String(rawPlatform).slice(0, 20)}" is not one of ${SOCIAL_PLATFORMS.join('|')}`
+    const detail = `request.platform "${String(req.platform).slice(0, 20)}" is not one of ${SOCIAL_PLATFORMS.join('|')}`
     return { ok: false, reason: 'platform_required', detail }
   }
 
@@ -123,7 +126,7 @@ export function stampPlatformAndTags<B extends object>(
     platform,
     ...(parsed.tags ? { creative_tags: parsed.tags } : {}),
   }
-  return { ok: true, brief: stamped }
+  return { ok: true, brief: stamped, platform_defaulted: platformMissing }
 }
 
 export function readBriefPlatform(brief: unknown): SocialPlatform | 'unknown' {

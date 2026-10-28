@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { normalizePlatform, SOCIAL_PLATFORMS } from '@/lib/social/platforms'
 import {
+  CURRENT_FACTORY_OUTPUT_PLATFORM,
   parseCreativeTags,
   readBriefCreativeTags,
   readBriefPlatform,
@@ -49,13 +50,18 @@ describe('stampPlatformAndTags', () => {
     }
   })
 
-  it('rejects an empty request with platform_required', () => {
+  it('defaults a missing platform to facebook and flags it', () => {
     const result = stampPlatformAndTags({ id: 'w1' }, {})
-    expect(result.ok).toBe(false)
-    if (!result.ok) {
-      expect(result.reason).toBe('platform_required')
-      expect(result.detail).toContain('missing')
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.brief.platform).toBe(CURRENT_FACTORY_OUTPUT_PLATFORM)
+      expect(result.platform_defaulted).toBe(true)
     }
+  })
+
+  it('does not flag an explicit platform as defaulted', () => {
+    const result = stampPlatformAndTags({ id: 'w1' }, { platform: 'tiktok' })
+    expect(result.ok && result.platform_defaulted).toBe(false)
   })
 
   it('rejects an unknown platform and mentions it in the detail', () => {
@@ -67,12 +73,13 @@ describe('stampPlatformAndTags', () => {
     }
   })
 
-  it('rejects non-object requests with platform_required', () => {
+  it('defaults the platform for non-object requests too', () => {
     for (const request of [undefined, null, 'x']) {
       const result = stampPlatformAndTags({ id: 'w1' }, request)
-      expect(result.ok).toBe(false)
-      if (!result.ok) {
-        expect(result.reason).toBe('platform_required')
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.brief.platform).toBe('facebook')
+        expect(result.platform_defaulted).toBe(true)
       }
     }
   })
