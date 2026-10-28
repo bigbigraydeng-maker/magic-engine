@@ -55,7 +55,6 @@ import { pushPlanDraftFailureItems } from './plan-draft-failure-items'
 import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
-import { pushDiagnosticSynthesisItems } from './diagnostic-synthesis-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
   buildCrawlHealthItems,
@@ -76,7 +75,7 @@ export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, 
 import { pushFactoryMaterialItems } from './factory-material-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems, pushAdsAutoPauseConfigReadItems } from './manual-monitoring-items'
-import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
+import { pushLeadsSanityItems, pushPrescriptionItems } from './manual-strategy-items'
 
 export { pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 export { pushDataForSeoCreditsItem, buildProviderOutageItems, pushMailchimpExportItems } from './manual-monitoring-items'
@@ -325,13 +324,6 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushAdsAutoPauseItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] Ads D3 自动暂停待批准读取失败（不阻塞其他待办）:', e),
     ),
-    // 体检的 AI 文字叙事没写成 —— 保存必报错被吞了三个多月没人知道（2026-10-18）。
-    (b) => pushDiagnosticSynthesisItems(supabase, b, now).catch((e) =>
-      console.warn('[manual-items] 体检叙事回执检查失败（不阻塞其他待办）:', e),
-    ),
-    // 新诊断结果 —— PM 2026-08-03 拍板要逐条看；没有消费方的自动化 = 再造一个没人看的数据源。
-    // 必须放在 nameOf 定义之后：待办上显示 uuid 等于没显示。
-    (b) => pushDiagnosticItems(supabase, b, now, nameOf),
     // 审批过但被价格闸拦住的帖子 —— 自动发布那条路人不在场,不捞出来就没人知道
     (b) => pushPriceGateItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 价格闸待办检查失败（不阻塞其他待办）:', e),

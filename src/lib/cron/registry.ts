@@ -137,7 +137,9 @@ const CRON_REGISTRY_ENTRIES = [
   // 在同一个 PR 里删掉了，换成 Inngest 原生的 cloud-seo-meta-cycle-fanout。
   // 这里同步摘掉登记：留着会天天误报「没跑」，理由同 email-reply-digest。
   { service: 'daily-cron-digest', jobName: 'daily-cron-digest', schedule: '0 6 * * *', logsRuns: true },
-  { service: 'diagnostic-weekly', jobName: 'diagnostic-weekly', schedule: '0 8 * * 1', logsRuns: true, addedAt: '2026-08-03' },
+  // 华佗六维体检打分已废弃（刀 20）。路由固定返回 410，不再进 dispatcher。
+  // 留在登记里会在周一误报「没跑」。恢复不在这刀里。
+  // { service: 'diagnostic-weekly', jobName: 'diagnostic-weekly', schedule: '0 8 * * 1', logsRuns: true, addedAt: '2026-08-03' },
   // 客人来信没人回 → 每天早上给销售发一封汇总信。UTC 20:00 = 次日 NZ 08:00（NZST=UTC+12）。
   // email-reply-digest 于 2026-09-03 暂停（PM 拍板，上线当天，一封都没发出去过）：
   // 名单里噪音占七成 —— 现有排除只挡「自己人域名」和「同行域名」，挡不住陌生公司

@@ -140,15 +140,17 @@ describe('assembleZhugeInput()', () => {
 
     expect(ctx.input.client.name).toBe('CTS Tours')
     expect(ctx.input.discoveryEvidence.domain).toBe('ctstours.co.nz')
-    expect(ctx.input.diagnosticScores.seo).toBe(42)
-    expect(ctx.input.findings).toHaveLength(1)
+    expect(ctx.input.diagnosticScores).toEqual({})
+    expect(ctx.input.findings).toEqual([])
+    expect(supabase.from).not.toHaveBeenCalledWith('diagnostic_runs')
+    expect(supabase.from).not.toHaveBeenCalledWith('diagnostic_findings')
     expect(ctx.input.businessContext.market).toBe('NZ')
     expect(ctx.input.businessContext.monthly_budget_aud).toBe(2000)
     expect(ctx.input.businessContext.primary_goal).toBe('grow organic')
     expect(ctx.input.availableLubanTools.length).toBeGreaterThan(0)
     expect(ctx.discovery_id).toBe('discovery-1')
-    expect(ctx.diagnostic_run_id).toBe('run-1')
-    expect(ctx.findings_count).toBe(1)
+    expect(ctx.diagnostic_run_id).toBeNull()
+    expect(ctx.findings_count).toBe(0)
   })
 
   it('throws CLIENT_NOT_FOUND when client row is missing', async () => {

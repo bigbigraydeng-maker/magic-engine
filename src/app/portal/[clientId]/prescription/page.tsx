@@ -184,10 +184,10 @@ export default async function PortalPrescriptionPage({ params }: Props) {
           See execution progress →
         </Link>
         <Link
-          href={`/portal/${clientId}/diagnosis`}
+          href={`/portal/${clientId}`}
           className="flex h-11 items-center rounded-lg border border-slate-200 px-4 text-sm font-bold text-slate-950"
         >
-          Back to diagnosis
+          Back to overview
         </Link>
       </div>
     </div>

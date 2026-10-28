@@ -19,7 +19,7 @@ import type {
 } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import { getAnthropicClient, parseJsonResponse, MODEL_SONNET } from '@/lib/anthropic/client'
-import { loadNarrativesForRun, type NarrativeRow } from './synthesis/persistence'
+import { type NarrativeRow } from './synthesis/persistence'
 import { budgetAmountLabel, budgetCapInstruction, budgetCurrencyOf } from '@/lib/ads/budget-currency'
 import { adPlaysPromptSection, adPlaysSchemaExample } from '@/lib/ads-strategy/plan-seed/ad-plays-prompt'
 import { applyLlmAdPlays, dedupeAdPlayStepKeys } from '@/lib/ads-strategy/plan-seed/ad-plays'
@@ -173,39 +173,14 @@ export function stripInvalidAdPlays(content: PrescriptionContent): void {
 // ---------------------------------------------------------------------------
 
 export async function generatePrescription(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   runId: string,
   clientId: string,
-  intake: PrescriptionIntake,
+  _intake: PrescriptionIntake,
 ): Promise<GeneratePrescriptionResult> {
-  const [run, findings] = await fetchRunData(supabase, runId, clientId)
-  // P8.10.S3.6 — load Synthesis narratives if present; missing is non-fatal
-  const narratives = await loadNarrativesForRun(supabase, runId)
-  const prompt = buildPrescriptionPrompt(run, findings, intake, narratives)
-
-  // Init Anthropic client inside function (per CLAUDE.md — never at module top level)
-  const client = getAnthropicClient()
-  const message = await client.messages.create({
-    model: MODEL_SONNET,
-    max_tokens: 4096,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: prompt }],
-  })
-
-  const rawText = message.content
-    .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-    .map(b => b.text)
-    .join('')
-
-  const content = parseJsonResponse<PrescriptionContent>(rawText)
-  stripInvalidAdPlays(content)
-
-  // Clamp budget allocation so it never exceeds intake budget
-  clampBudgetAllocation(content, intake.monthly_budget_aud)
-
-  const prescriptionId = await savePrescription(supabase, { runId }, clientId, intake, content)
-
-  return { prescriptionId, content }
+  throw new Error(
+    `按体检编号开方已废弃，不再读取诊断分数和问题清单（run ${runId}, client ${clientId}）`,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -328,35 +303,6 @@ export function formatNarrativesForPrompt(narratives: NarrativeRow[]): string {
 // ---------------------------------------------------------------------------
 // Private helpers
 // ---------------------------------------------------------------------------
-
-async function fetchRunData(
-  supabase: SupabaseClient,
-  runId: string,
-  clientId: string,
-): Promise<[DiagnosticRun, DiagnosticFinding[]]> {
-  const [runRes, findingsRes] = await Promise.all([
-    supabase
-      .from('diagnostic_runs')
-      .select('id, overall_score, dimension_scores')
-      .eq('id', runId)
-      .single(),
-    supabase
-      .from('diagnostic_findings')
-      .select('*')
-      .eq('run_id', runId)
-      .eq('client_id', clientId)
-      .in('severity', ['critical', 'high']),
-  ])
-
-  if (runRes.error || !runRes.data) {
-    throw new Error(`Diagnostic run not found: ${runRes.error?.message ?? 'unknown'}`)
-  }
-
-  const run = runRes.data as DiagnosticRun
-  const findings = (findingsRes.data ?? []) as DiagnosticFinding[]
-
-  return [run, findings]
-}
 
 function clampBudgetAllocation(content: PrescriptionContent, maxBudget: number): void {
   if (!content.budget_allocation || content.budget_allocation.length === 0) return

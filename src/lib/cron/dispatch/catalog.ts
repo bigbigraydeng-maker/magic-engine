@@ -30,7 +30,7 @@ export const DISPATCH_CATALOG: readonly DispatchJob[] = [
   { service: 'viral-analyzer-worker', route: 'viral-analyzer-worker', method: 'POST', auth: 'bearer', schedule: '*/10 * * * *', healthcheckUrl: 'https://hc-ping.com/55891cbc-cfd5-4c58-b28b-f06206fade5a' },
   { service: 'viral-discovery-weekly', route: 'viral-discovery-weekly', method: 'POST', auth: 'bearer', schedule: '0 0 * * *', healthcheckUrl: 'https://hc-ping.com/e5c6cbe8-e6cc-457f-bb3f-538971dafd46', scheduleNote: 'Service name says weekly. Production schedule is daily at 00:00 UTC. Kept.' },
   { service: 'content-factory-intake', route: 'content-factory-intake', method: 'POST', auth: 'bearer', schedule: '0 22 * * *' },
-  { service: 'diagnostic-weekly', route: 'diagnostic-weekly', method: 'GET', auth: 'bearer', schedule: '0 8 * * 1' },
+  // diagnostic-weekly is retired (刀 20). Absent so cron-dispatch-weekly does not wake it.
   { service: 'kpi-backfill', route: 'kpi-backfill', method: 'GET', auth: 'bearer', schedule: '20 6 * * *' },
   { service: 'benchmark-accumulator', route: 'benchmark-accumulator', method: 'GET', auth: 'bearer', schedule: '40 7 * * 1' },
   { service: 'cms-connection-retest', route: 'cms-connection-retest', method: 'GET', auth: 'bearer', schedule: '10 6 * * *' },
