@@ -121,6 +121,10 @@ vi.mock('@/lib/ads-strategy/daily-insights', () => ({
   syncAdsetDailyInsights:    (...args: unknown[]) => mockSyncAdsetDailyInsights(...args),
   hasVideoColumns:           () => mockHasVideoColumns(),
 }))
+const mockSyncAdsetHourlyInsights = vi.fn().mockResolvedValue({ success: true, rows_written: 0 })
+vi.mock('@/lib/ads-strategy/hourly-insights', () => ({
+  syncAdsetHourlyInsights: (...args: unknown[]) => mockSyncAdsetHourlyInsights(...args),
+}))
 vi.mock('@/lib/ads-strategy/evaluate', () => ({ evaluateClientAdHealth: vi.fn() }))
 vi.mock('@/lib/ads-strategy/digest', () => ({ sendAdHealthDigest: vi.fn() }))
 const mockSnapshotTablesExist = vi.fn().mockResolvedValue(false)
@@ -674,6 +678,7 @@ describe('GET /api/cron/google-data-pullback-daily — 多账户 ad_daily_insigh
     mockSyncCampaignDailyInsights.mockResolvedValue({ success: true, rows_written: 5 })
     mockSyncAdDailyInsights.mockResolvedValue({ success: true, rows_written: 12 })
     mockSyncAdsetDailyInsights.mockResolvedValue({ success: true, rows_written: 7 })
+    mockSyncAdsetHourlyInsights.mockResolvedValue({ success: true, rows_written: 24 })
     mockHasVideoColumns.mockResolvedValue(false)
     mockFindSharedAdAccounts.mockResolvedValue({ shared: new Set<string>() })
 
@@ -723,6 +728,7 @@ describe('GET /api/cron/google-data-pullback-daily — 多账户 ad_daily_insigh
         ad_daily: { success: true, rows_written: 5 },
         ad_level: { success: true, rows_written: 12 },
         adset_level: { success: true, rows_written: 7 },
+        adset_hourly: { success: true, rows_written: 24 },
       },
     ])
   })
@@ -757,6 +763,36 @@ describe('GET /api/cron/google-data-pullback-daily — 多账户 ad_daily_insigh
     expect(mockSyncAdsetDailyInsights).not.toHaveBeenCalledWith(CLIENT_ID, SECONDARY_ACCOUNT, META_TOKEN, expect.anything())
     expect(mockSyncCampaignDailyInsights).toHaveBeenCalledWith(CLIENT_ID, SECONDARY_ACCOUNT, META_TOKEN, { withVideo: false })
     expect(json.results[0].ad_daily_secondary[0].adset_level.error).toContain('shared')
+    // 逐小时记录跟广告组日数据同一条规则：共用账户跳过，自己的账户照写
+    expect(mockSyncAdsetHourlyInsights).toHaveBeenCalledWith(CLIENT_ID, AD_ACCOUNT, META_TOKEN)
+    expect(mockSyncAdsetHourlyInsights).not.toHaveBeenCalledWith(CLIENT_ID, SECONDARY_ACCOUNT, META_TOKEN)
+    expect(json.results[0].ad_daily_secondary[0].adset_hourly.error).toContain('shared')
+  })
+
+  it('逐小时记录：主账户成功带出行数；它失败不触发 failed、不当失败邮件头条，但进 errors', async () => {
+    mockGetClientAdAccountIds.mockResolvedValue([AD_ACCOUNT])
+    const { GET } = await import('./route')
+    const ok = await (await GET(makeRequest(CRON_SECRET))).json()
+    expect(ok.results[0].adset_hourly).toEqual({ success: true, rows_written: 24 })
+    expect(mockSyncAdsetHourlyInsights).toHaveBeenCalledWith(CLIENT_ID, AD_ACCOUNT, META_TOKEN)
+
+    mockSyncAdsetHourlyInsights.mockResolvedValueOnce({ success: false, error: 'relation "ad_hourly_insights" does not exist' })
+    const bad = await (await GET(makeRequest(CRON_SECRET))).json()
+    // 小时记录失败不改变 failed 计数（其它步骤的 failed 在两次里一样）
+    expect(bad.failed).toBe(ok.failed)
+    const finishArg = mockCronFinish.mock.calls.at(-1)?.[0] as { summary?: { errors?: unknown[] } }
+    expect(finishArg.summary?.errors).toContainEqual(expect.objectContaining({ source: 'adset_hourly', error: expect.stringContaining('ad_hourly_insights') }))
+  })
+
+  it('逐小时记录：表还没建时不拖垮真正失败的头条（头条仍是 ad_health）', async () => {
+    mockGetClientAdAccountIds.mockResolvedValue([AD_ACCOUNT])
+    mockSyncAdsetHourlyInsights.mockResolvedValue({ success: false, error: 'hourly table missing' })
+    const { evaluateClientAdHealth } = await import('@/lib/ads-strategy/evaluate')
+    vi.mocked(evaluateClientAdHealth).mockResolvedValueOnce({ success: false, error: 'judge failed' } as never)
+    const { GET } = await import('./route')
+    await GET(makeRequest(CRON_SECRET))
+    const finishArg = mockCronFinish.mock.calls.at(-1)?.[0] as { error?: string }
+    expect(finishArg.error?.startsWith('ad_health')).toBe(true)
   })
 
   it('ads IMPACT 第 7 步：快照表已建 → 跑只读诊断发内部版日报，不再调原日报；表没建 → 照旧发原日报', async () => {
@@ -958,6 +994,7 @@ describe('GET /api/cron/google-data-pullback-daily — 评估日按广告账户�
     mockSyncCampaignDailyInsights.mockResolvedValue({ success: true, rows_written: 5 })
     mockSyncAdDailyInsights.mockResolvedValue({ success: true, rows_written: 12 })
     mockSyncAdsetDailyInsights.mockResolvedValue({ success: true, rows_written: 7 })
+    mockSyncAdsetHourlyInsights.mockResolvedValue({ success: true, rows_written: 24 })
     mockHasVideoColumns.mockResolvedValue(false)
     mockFindSharedAdAccounts.mockResolvedValue({ shared: new Set<string>() })
     mockGetClientAdAccountIds.mockResolvedValue([AD_ACCOUNT, SECONDARY_ACCOUNT])

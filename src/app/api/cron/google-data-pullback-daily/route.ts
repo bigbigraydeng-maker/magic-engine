@@ -60,6 +60,7 @@ import { startCronRun } from '@/lib/cron/run-logger'
 import { resolveMetaTokenDetailed, ownsKey, loadTokenOwnerPeers, type TokenOwnerRow } from '@/lib/meta/token-selection'
 import { findSharedAdAccounts, getClientAdAccountIds } from '@/lib/meta/client-ad-accounts'
 import { hasVideoColumns, syncAdDailyInsights, syncAdsetDailyInsights, syncCampaignDailyInsights } from '@/lib/ads-strategy/daily-insights'
+import { syncAdsetHourlyInsights } from '@/lib/ads-strategy/hourly-insights'
 import { buildGrowthState } from '@/lib/ads-strategy/agents/patrol'
 import { reconcileAutonomyMode } from '@/lib/ads-strategy/autonomy/notify'
 import { probeClientCircuit, type ClientProbe } from '@/lib/ads-strategy/circuit-probe'
@@ -140,8 +141,11 @@ interface ClientResult {
     ad_daily?: { success: boolean; rows_written?: number; error?: string }
     ad_level?:  { success: boolean; rows_written?: number; error?: string }
     adset_level?: { success: boolean; rows_written?: number; error?: string }
+    adset_hourly?: { success: boolean; rows_written?: number; error?: string }
   }>
   adset_level?: { success: boolean; rows_written?: number; error?: string }
+  /** 逐小时记录（ad_hourly_insights）：广告组 × 昨天每个小时。best-effort，不进 `failed`。 */
+  adset_hourly?: { success: boolean; rows_written?: number; days_requested?: number; backfilled?: boolean; error?: string }
 }
 
 /**
@@ -484,6 +488,10 @@ export async function GET(req: NextRequest) {
               secondaryResult.adset_level = isShared(secondaryAccountId)
                 ? skippedShared
                 : await syncAdsetDailyInsights(client.client_id, secondaryAccountId, metaToken, { withVideo })
+              // 逐小时记录：跟广告组日数据同一条共用账户规则（共用账户不写进两家名下）。
+              secondaryResult.adset_hourly = isShared(secondaryAccountId)
+                ? skippedShared
+                : await syncAdsetHourlyInsights(client.client_id, secondaryAccountId, metaToken)
               result.ad_daily_secondary.push(secondaryResult)
             }
           }
@@ -544,6 +552,12 @@ export async function GET(req: NextRequest) {
           result.adset_level = isShared(client.meta_ad_account_id)
             ? skippedShared
             : await syncAdsetDailyInsights(client.client_id, client.meta_ad_account_id, metaToken, { withVideo })
+
+          // IMPACT「Check」：广告组逐小时记录（昨天 24 个小时）。放在广告组日数据之后、诊断之前：
+          // best-effort（不进 `failed`），表还没建 / 读失败只进 errors，不影响诊断和日报。
+          result.adset_hourly = isShared(client.meta_ad_account_id)
+            ? skippedShared
+            : await syncAdsetHourlyInsights(client.client_id, client.meta_ad_account_id, metaToken)
 
           // ads IMPACT 阶段 1：只读诊断 + 内部版日报。放在广告组级同步之后（诊断要广告组级数据），
           // 且**不依赖**当天拉数/体检成功——授权断了导致拉数失败时，D7「授权/数据体检」正是要报这件事（子牙复审）。
@@ -664,7 +678,7 @@ export async function GET(req: NextRequest) {
   // Collect per-client errors so postmortem is possible without Render logs.
   // Diagnostic only — no behavior change.
   const errors = results.flatMap(r => {
-    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'|'circuit_probe'; error: string }> = []
+    const out: Array<{ client_id: string; source: 'gsc'|'ga4'|'meta'|'google_ads'|'ad_daily'|'ad_level'|'adset_level'|'adset_hourly'|'ad_health'|'ad_digest'|'ad_diagnostics'|'ads_growth_state'|'ad_daily_secondary'|'ad_config'|'circuit_probe'; error: string }> = []
     if (r.gsc?.success === false && r.gsc.error)               out.push({ client_id: r.client_id, source: 'gsc',        error: r.gsc.error })
     if (r.ga4?.success === false && r.ga4.error)               out.push({ client_id: r.client_id, source: 'ga4',        error: r.ga4.error })
     if (r.meta?.success === false && r.meta.error)             out.push({ client_id: r.client_id, source: 'meta',       error: r.meta.error })
@@ -672,6 +686,7 @@ export async function GET(req: NextRequest) {
     if (r.ad_daily?.success === false && r.ad_daily.error)     out.push({ client_id: r.client_id, source: 'ad_daily',   error: r.ad_daily.error })
     if (r.ad_level?.success === false && r.ad_level.error)     out.push({ client_id: r.client_id, source: 'ad_level',   error: r.ad_level.error })
     if (r.adset_level?.success === false && r.adset_level.error) out.push({ client_id: r.client_id, source: 'adset_level', error: r.adset_level.error })
+    if (r.adset_hourly?.success === false && r.adset_hourly.error) out.push({ client_id: r.client_id, source: 'adset_hourly', error: r.adset_hourly.error })
     if (r.ad_health?.success === false && r.ad_health.error)   out.push({ client_id: r.client_id, source: 'ad_health', error: r.ad_health.error })
     if (r.ad_digest && !r.ad_digest.sent && r.ad_digest.error)  out.push({ client_id: r.client_id, source: 'ad_digest', error: r.ad_digest.error })
     if (r.ad_config?.success === false) out.push({ client_id: r.client_id, source: 'ad_config', error: r.ad_config.error })
@@ -701,6 +716,9 @@ export async function GET(req: NextRequest) {
       if (secondary.adset_level?.success === false && secondary.adset_level.error) {
         out.push({ client_id: r.client_id, source: 'ad_daily_secondary', error: `[${secondary.ad_account_id}] adset: ${secondary.adset_level.error}` })
       }
+      if (secondary.adset_hourly?.success === false && secondary.adset_hourly.error) {
+        out.push({ client_id: r.client_id, source: 'ad_daily_secondary', error: `[${secondary.ad_account_id}] adset hourly: ${secondary.adset_hourly.error}` })
+      }
     }
     return out
   })
@@ -714,7 +732,7 @@ export async function GET(req: NextRequest) {
   // 常年 meta 报错盖住、没人注意到（2026-09-25 事故）。
   const headlineError =
     errors.find(e => e.source === 'ad_config') ??
-    errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'ad_daily_secondary' && e.source !== 'circuit_probe')
+    errors.find(e => e.source !== 'ad_level' && e.source !== 'adset_level' && e.source !== 'adset_hourly' && e.source !== 'ad_daily_secondary' && e.source !== 'circuit_probe')
   const errorMessage = failed > 0 && headlineError
     ? `${headlineError.source}: ${headlineError.error}${errors.length > 1 ? ` (+${errors.length - 1} more)` : ''}`
     : undefined
