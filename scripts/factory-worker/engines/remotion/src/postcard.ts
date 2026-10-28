@@ -237,6 +237,10 @@ const HOOK = z
   .object({
     clip: relFile('镜头文件', CLIP_EXTS),
     lines: z.array(text(30)).min(1).max(MAX_HOOK_LINES),
+    // Optional official-page citation for the hook text. Needed by the creative-library fact gate, which refuses any
+    // on-screen line without a source. Both or neither.
+    sourceUrl: z.string().optional(),
+    sourceQuote: text(300).optional(),
   })
   .strict();
 
@@ -273,6 +277,9 @@ const END = z
   .object({
     backdropClip: relFile('镜头文件', CLIP_EXTS),
     title: text(40),
+    // Optional official-page citation for the end-card title (same rule as the hook). Both or neither.
+    sourceUrl: z.string().optional(),
+    sourceQuote: text(300).optional(),
   })
   .strict();
 
@@ -363,6 +370,38 @@ export function isAcceptableSourceUrl(url: string): boolean {
   const last = labels[labels.length - 1];
   if (!/^[a-z]{2,}$/.test(last)) return false;
   return true;
+}
+
+/**
+ * Hook / end-card citation: both fields or neither; when given it must be a real http(s) URL, free of banned words,
+ * and its quote must support every shown line. Only a first screen — the creative-library fact gate still decides
+ * whether the words sit in order inside the official page.
+ */
+function checkOptionalSource(
+  path: Array<string | number>,
+  shownLines: string[],
+  sourceUrl: string | undefined,
+  sourceQuote: string | undefined,
+  ctx: z.RefinementCtx,
+): void {
+  if (sourceUrl === undefined && sourceQuote === undefined) return;
+  if (sourceUrl === undefined || sourceQuote === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: '出处链接和出处片段要么都填，要么都不填' });
+    return;
+  }
+  if (!isAcceptableSourceUrl(sourceUrl)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, 'sourceUrl'], message: '出处链接必须是 http 或 https 网址' });
+  }
+  shownLines.forEach((line, i) => {
+    if (!quoteSupports(line, sourceQuote)) {
+      const where = shownLines.length > 1 ? `第 ${i + 1} 行` : '这句话'
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, 'sourceQuote'], message: `出处片段里找不到${where}的主要词` });
+    }
+  });
+  const hits = bannedWordHits(sourceQuote);
+  if (hits.length > 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: [...path, 'sourceQuote'], message: `文字里不能出现促销词：${hits.join('、')}` });
+  }
 }
 
 type FrameValue = z.infer<typeof frameSchema>;
@@ -534,6 +573,11 @@ export const PostcardPropsSchema = z
           message: '画面文字里不许出现价格（价格只放价格卡或首评链接）',
         });
       }
+    }
+
+    checkOptionalSource(['hook'], val.hook.lines, val.hook.sourceUrl, val.hook.sourceQuote, ctx);
+    if (val.end !== null) {
+      checkOptionalSource(['end'], [val.end.title], val.end.sourceUrl, val.end.sourceQuote, ctx);
     }
 
     val.scenes.forEach((scene, i) => {
