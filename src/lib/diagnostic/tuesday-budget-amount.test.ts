@@ -25,8 +25,9 @@ const READY: UnitRead = {
   active: true,
   currency: 'NZD',
   capturedAt: '2026-10-27T07:00:00.000Z',
-  capCents: 10000,
-  capReadable: true,
+  accountRemainingCents: 7000,
+  clientRemainingCents: 7000,
+  headroomReadable: true,
 }
 
 function hit(code: 'O1' | 'D3', id = UNIT): RuleFinding {
@@ -63,15 +64,17 @@ describe('周二督导的金额', () => {
     if (!('after' in judged)) return
     expect(judged.after - judged.before).toBe(Math.round(3000 * MAX_BUDGET_ADJUSTMENT_RATIO))
     expect(checkBudgetWithinSafeRange(judged.before, judged.after).ok).toBe(true)
-    const clamped = judgeUnit({ ...READY, capCents: 3400 }, 'increase', NOW)
+    const clamped = judgeUnit({ ...READY, accountRemainingCents: 400 }, 'increase', NOW)
     expect(clamped).toMatchObject({ after: 3400 })
+    expect(judgeUnit({ ...READY, clientRemainingCents: 200 }, 'increase', NOW)).toMatchObject({ after: 3200 })
+    expect(judgeUnit({ ...READY, accountRemainingCents: 0 }, 'increase', NOW)).toMatchObject({ blocked: expect.stringContaining('上限') })
   })
 
   it('日上限没配或读不到时不加，也不写成 0', () => {
-    expect(judgeUnit({ ...READY, capCents: null }, 'increase', NOW)).toEqual({
-      blocked: '日预算上限没配，这次不加。',
+    expect(judgeUnit({ ...READY, accountRemainingCents: null }, 'increase', NOW)).toEqual({
+      blocked: '账户或客户的剩余日预算算不出，这次不加。',
     })
-    const unread = judgeUnit({ ...READY, capReadable: false, capCents: null }, 'increase', NOW)
+    const unread = judgeUnit({ ...READY, headroomReadable: false, accountRemainingCents: null }, 'increase', NOW)
     expect('blocked' in unread && unread.blocked).toContain('读不到')
     const text = JSON.stringify(judgeUnit({ ...READY, cents: null }, 'increase', NOW))
     expect(text).not.toContain('0.00')

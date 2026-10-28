@@ -5,6 +5,7 @@
 
 import { createHash } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { readAdBudgetHeadroom } from '@/lib/capabilities/ads/envelope-facts'
 import { checkBudgetWithinSafeRange, MAX_BUDGET_ADJUSTMENT_RATIO } from '@/lib/meta/guardrails'
 import { planCut } from '@/lib/ads-strategy/stop-loss'
 import { O1_MIN_DAYS } from '@/lib/ads-strategy/portfolio/opportunities/o1-hot-creative'
@@ -44,8 +45,9 @@ export interface UnitRead {
   active: boolean
   currency: string | null
   capturedAt: string | null
-  capCents: number | null
-  capReadable: boolean
+  accountRemainingCents: number | null
+  clientRemainingCents: number | null
+  headroomReadable: boolean
 }
 
 export type BudgetIntent =
@@ -55,7 +57,7 @@ export type BudgetIntent =
 
 export interface TuesdayBudgetIo {
   loadStates(clientIds: readonly string[]): Promise<SupervisionState[] | { error: string }>
-  loadUnit(clientId: string, unitId: string): Promise<UnitRead | { error: string }>
+  loadUnit(clientId: string, unitId: string, direction: 'increase' | 'decrease'): Promise<UnitRead | { error: string }>
 }
 
 export function budgetIntent(states: readonly SupervisionState[], now: Date): BudgetIntent {
@@ -74,9 +76,11 @@ export function judgeUnit(
 ): { before: number; after: number; currency: string } | { blocked: string } {
   const blocked = snapshotBlock(unit, now)
   if (blocked) return { blocked }
-  if (direction === 'increase' && !unit.capReadable) return { blocked: '日预算上限读不到，这次不加。' }
+  if (direction === 'increase' && !unit.headroomReadable) return { blocked: '账户和客户的剩余日预算读不到，这次不加。' }
   const before = unit.cents as number
-  const bounded = boundedAfter(direction, before, unit.capCents)
+  const remaining = unit.accountRemainingCents === null || unit.clientRemainingCents === null
+    ? null : Math.min(unit.accountRemainingCents, unit.clientRemainingCents)
+  const bounded = boundedAfter(direction, before, remaining)
   if ('blocked' in bounded) return bounded
   return { before, after: bounded.after, currency: currencyWord(unit.currency) as string }
 }
@@ -104,7 +108,7 @@ export function supervisionAmountSentence(row: WeeklyBudgetSuggestion): string {
   const from = centsText(row.beforeCents)
   const to = centsText(row.afterCents)
   const unit = row.currencyLabel ? ` ${row.currencyLabel}` : ''
-  return `建议把每天的预算从 ${from}${unit} 改成 ${to}${unit}（${way}）。要改的话去确认卡上点。系统不会自动改。`
+  return `建议把每天的预算从 ${from}${unit} 改成 ${to}${unit}（${way}）。若确认卡成功出现在页面上，再到卡上确认。系统不会自动改。`
 }
 
 export async function attachTuesdayBudgetAmounts(
@@ -222,13 +226,15 @@ function snapshotFresh(capturedAt: string | null, now: Date): boolean {
 function boundedAfter(
   direction: 'increase' | 'decrease',
   before: number,
-  cap: number | null,
+  remaining: number | null,
 ): { after: number } | { blocked: string } {
   if (direction === 'decrease') return boundedCut(before)
-  if (!Number.isSafeInteger(cap) || (cap ?? 0) <= 0) return { blocked: '日预算上限没配，这次不加。' }
+  if (!Number.isSafeInteger(remaining) || (remaining ?? -1) < 0) return { blocked: '账户或客户的剩余日预算算不出，这次不加。' }
   const raw = Math.round(before * (1 + MAX_BUDGET_ADJUSTMENT_RATIO))
   if (!Number.isSafeInteger(raw) || raw <= before) return { blocked: '按允许幅度算不出更高的日预算，这次不出卡。' }
-  const target = raw > (cap as number) ? (cap as number) : raw
+  const available = before + (remaining as number)
+  if (!Number.isSafeInteger(available)) return { blocked: '账户或客户的剩余日预算算不出，这次不加。' }
+  const target = raw > available ? available : raw
   if (target <= before) return { blocked: '已经到日预算上限，这次不加。' }
   if (!checkBudgetWithinSafeRange(before, target).ok) return { blocked: '加幅超出一次允许的范围，这次不出卡。' }
   return { after: target }
@@ -277,7 +283,7 @@ async function placeClient(
   const intent = budgetIntent(states, now)
   if (intent.kind === 'none') return {}
   if (intent.kind === 'block') return { block: { clientId, reason: intent.reason } }
-  const unit = await io.loadUnit(clientId, intent.unitId)
+  const unit = await io.loadUnit(clientId, intent.unitId, intent.direction)
   if ('error' in unit) return { block: { clientId, reason: unit.error } }
   const judged = judgeUnit(unit, intent.direction, now)
   if ('blocked' in judged) return { block: { clientId, reason: judged.blocked } }
@@ -360,7 +366,7 @@ function appendOnce(
 function supabaseIo(supabase: SupabaseClient, now: Date): TuesdayBudgetIo {
   return {
     loadStates: (clientIds) => loadStates(supabase, clientIds, now),
-    loadUnit: (clientId, unitId) => loadUnit(supabase, clientId, unitId),
+    loadUnit: (clientId, unitId, direction) => loadUnit(supabase, clientId, unitId, direction, now),
   }
 }
 
@@ -429,6 +435,8 @@ async function loadUnit(
   supabase: SupabaseClient,
   clientId: string,
   unitId: string,
+  direction: 'increase' | 'decrease',
+  now: Date,
 ): Promise<UnitRead | { error: string }> {
   const snap = await supabase
     .from('ad_entity_snapshots')
@@ -442,32 +450,23 @@ async function loadUnit(
     .maybeSingle()
   if (snap.error) return { error: '日预算读不到，没有按 0 出卡。' }
   if (!snap.data) return { error: '现日预算读不到，没有按 0 出卡。' }
-  const cap = await readCap(supabase, clientId, snap.data.ad_account_id)
+  const headroom = direction === 'increase' && snap.data.ad_account_id
+    ? await readAdBudgetHeadroom(
+      supabase, clientId, snap.data.ad_account_id, unitId,
+      snap.data.daily_budget_minor ?? Number.NaN, now,
+    )
+    : null
+  if (headroom && 'unavailable' in headroom) {
+    return { error: '账户和客户总预算核算不完整，这次不加预算。' }
+  }
   return {
     budgetLevel: snap.data.budget_level,
     cents: snap.data.daily_budget_minor,
     active: snap.data.effective_status === 'ACTIVE',
     currency: snap.data.currency,
     capturedAt: snap.data.captured_at,
-    capCents: cap.capCents,
-    capReadable: cap.capReadable,
+    accountRemainingCents: headroom?.accountRemainingCents ?? null,
+    clientRemainingCents: headroom?.clientRemainingCents ?? null,
+    headroomReadable: headroom !== null && 'accountRemainingCents' in headroom,
   }
-}
-
-async function readCap(
-  supabase: SupabaseClient,
-  clientId: string,
-  adAccountId: string | null,
-): Promise<{ capCents: number | null; capReadable: boolean }> {
-  if (!adAccountId) return { capCents: null, capReadable: false }
-  const { data, error } = await supabase
-    .from('client_meta_ad_accounts')
-    .select('daily_budget_cap_cents')
-    .eq('client_id', clientId)
-    .eq('ad_account_id', adAccountId)
-    .maybeSingle()
-  if (error) return { capCents: null, capReadable: false }
-  const cap = data?.daily_budget_cap_cents
-  if (cap === null || cap === undefined) return { capCents: null, capReadable: true }
-  return { capCents: cap, capReadable: true }
 }

@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createAdsEnvelopeFactsResolver, hoursSinceOwnLastAction } from '../envelope-facts'
+import { createAdsEnvelopeFactsResolver, hoursSinceOwnLastAction, readAdBudgetHeadroom } from '../envelope-facts'
 import type { CapabilityImplementation } from '@/lib/kernel/types'
 import type { EnvelopeFactsResolver } from '@/lib/kernel/deps'
 
@@ -283,6 +283,39 @@ describe('加预算客户级安全事实', () => {
     complete: true, skipped_shared: false,
   }))
   const scaleInput = { ad_account_id: ACCOUNT, adset_id: ADSET, before_cents: 500, after_cents: 550, cycle_date: '2026-09-27' }
+
+  it('周二金额复用完整快照：其他在投组吃满账户额度时没有加预算空间', async () => {
+    const tables: Tables = {
+      ad_entity_snapshots: [
+        account(ACCOUNT, 'account', ACCOUNT, null),
+        account(ACCOUNT, 'campaign', 'cmp-act_1', null, { budget_level: 'abo' }),
+        account(ACCOUNT, 'adset', ADSET, 3000),
+        account(ACCOUNT, 'adset', 'as-other', 7000),
+        account('act_2', 'account', 'act_2', null),
+        account('act_2', 'campaign', 'cmp-act_2', null, { budget_level: 'abo' }),
+        account('act_2', 'adset', 'as-2', 2000),
+      ],
+      ad_strategy_configs: { daily_budget_cap_cents: 14_000 },
+      ads_circuit_events: [],
+      client_meta_ad_accounts: [
+        { client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 10_000 },
+        { client_id: CLIENT, ad_account_id: 'act_2', daily_budget_cap_cents: 4_000 },
+      ],
+      ad_snapshot_captures: [...completeCaptures(ACCOUNT), ...completeCaptures('act_2')],
+      clients: null,
+      action_runs: [],
+    }
+    const sb = makeSb(tables, log())
+    expect(await readAdBudgetHeadroom(sb, CLIENT, ACCOUNT, ADSET, 3000, NOW)).toEqual({
+      accountRemainingCents: 0,
+      clientRemainingCents: 2000,
+    })
+    expect(await readAdBudgetHeadroom(sb, CLIENT, ACCOUNT, ADSET, 3100, NOW)).toMatchObject({
+      unavailable: expect.stringContaining('基线不一致'),
+    })
+    const incomplete = makeSb({ ...tables, ad_snapshot_captures: completeCaptures(ACCOUNT) }, log())
+    expect(await readAdBudgetHeadroom(incomplete, CLIENT, ACCOUNT, ADSET, 3000, NOW)).toHaveProperty('unavailable')
+  })
 
   it('读取客户所有账户并在同币种完整证据下返回总预算与客户上限', async () => {
     const rows = [

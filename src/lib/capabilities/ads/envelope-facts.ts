@@ -81,6 +81,7 @@ const POSTGREST_PAGE_SIZE = 1_000
 interface ClientBudgetRollup {
   totalCents: number
   accountTotals: Map<string, number>
+  accountCaps: Map<string, number>
   capCents: number
 }
 
@@ -265,7 +266,43 @@ async function loadClientBudgetRollup(
     return unavailable('目标预算与本次授权读取的基线不一致')
   }
 
-  return { totalCents, accountTotals, capCents: clientCapCents }
+  return {
+    totalCents,
+    accountTotals,
+    accountCaps: new Map(accountIds.map((id, index) => [id, perAccountCaps[index] as number])),
+    capCents: clientCapCents,
+  }
+}
+
+/** Read the same complete cross-account budget facts used by the execution envelope. */
+export async function readAdBudgetHeadroom(
+  sb: SupabaseClient,
+  clientId: string,
+  accountId: string,
+  adsetId: string,
+  beforeCents: number,
+  now: Date,
+): Promise<{ accountRemainingCents: number; clientRemainingCents: number } | { unavailable: string }> {
+  const { data: cfg, error } = await sb
+    .from('ad_strategy_configs')
+    .select('daily_budget_cap_cents')
+    .eq('client_id', clientId)
+    .maybeSingle<{ daily_budget_cap_cents: number | null }>()
+  if (error) return { unavailable: '客户日预算总上限读不到' }
+  const rollup = await loadClientBudgetRollup(
+    sb, clientId, accountId, 'adset', adsetId, beforeCents,
+    cfg?.daily_budget_cap_cents ?? null, now, 'authorize',
+  )
+  if ('unavailable' in rollup) return { unavailable: rollup.unavailable }
+  const accountTotal = rollup.accountTotals.get(accountId)
+  const accountCap = rollup.accountCaps.get(accountId)
+  if (accountTotal === undefined || accountCap === undefined) return { unavailable: '账户预算合计或上限读不到' }
+  const accountRemaining = accountCap - accountTotal
+  const clientRemaining = rollup.capCents - rollup.totalCents
+  if (!Number.isSafeInteger(accountRemaining) || !Number.isSafeInteger(clientRemaining)) {
+    return { unavailable: '预算剩余额度算不出来' }
+  }
+  return { accountRemainingCents: accountRemaining, clientRemainingCents: clientRemaining }
 }
 
 function studyCount(raw: unknown): number {
