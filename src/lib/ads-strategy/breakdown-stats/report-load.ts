@@ -168,6 +168,7 @@ function computeWindow(
 
 interface RawStatRow {
   ad_account_id: string
+  entity_id: string
   campaign_id: string | null
   stat_date: string
   breakdown_key: string
@@ -198,33 +199,56 @@ function toStatInput(r: RawStatRow): StatInput {
   }
 }
 
-async function loadStats(
+/** Parallel page requests; 90 days of hourly/region/age rows is ~30 pages, one at a time took seconds. */
+const STATS_PAGE_CONCURRENCY = 6
+
+export async function loadStats(
   accountIds: string[],
   since: string,
   until: string,
   deps: ReportLoadDeps,
-): Promise<StatInput[]> {
-  if (accountIds.length === 0) return []
-  const out: StatInput[] = []
-  let from = 0
-  for (;;) {
-    const { data, error } = await deps.supabase
+): Promise<{ stats: StatInput[]; adAccountMap: Map<string, string> }> {
+  const adAccountMap = new Map<string, string>()
+  if (accountIds.length === 0) return { stats: [], adAccountMap }
+  const query = () =>
+    deps.supabase
       .from('ad_breakdown_stats')
       .select(
-        'ad_account_id, campaign_id, stat_date, breakdown_key, breakdown_value, spend, impressions, clicks, meta_leads',
+        'ad_account_id, entity_id, campaign_id, stat_date, breakdown_key, breakdown_value, spend, impressions, clicks, meta_leads',
       )
       .in('ad_account_id', accountIds)
       .gte('stat_date', since)
       .lte('stat_date', until)
       .order('id', { ascending: true })
-      .range(from, from + PAGE_SIZE - 1)
+  const fetchPage = async (page: number): Promise<RawStatRow[]> => {
+    const from = page * PAGE_SIZE
+    const { data, error } = await query().range(from, from + PAGE_SIZE - 1)
     if (error) throw new Error(error.message)
-    const rows = (data ?? []) as RawStatRow[]
-    for (const r of rows) out.push(toStatInput(r))
-    if (rows.length < PAGE_SIZE) break
-    from += PAGE_SIZE
+    return (data ?? []) as RawStatRow[]
   }
-  return out
+
+  const raw: RawStatRow[] = []
+  // Fetch pages in batches; stop at the first short page so a count is never needed.
+  for (let page = 0; ; page += STATS_PAGE_CONCURRENCY) {
+    const batch = await Promise.all(
+      Array.from({ length: STATS_PAGE_CONCURRENCY }, (_, i) => fetchPage(page + i)),
+    )
+    let done = false
+    for (const rows of batch) {
+      if (done) break
+      for (const r of rows) raw.push(r)
+      if (rows.length < PAGE_SIZE) done = true
+    }
+    if (done) break
+  }
+
+  // Lead form ad -> account, from the placement rows already loaded (no second query).
+  for (const r of raw) {
+    if (r.breakdown_key === 'placement_device' && r.entity_id && !adAccountMap.has(r.entity_id)) {
+      adAccountMap.set(r.entity_id, r.ad_account_id)
+    }
+  }
+  return { stats: raw.map(toStatInput), adAccountMap }
 }
 
 interface RawSnapshotRow {
@@ -300,43 +324,6 @@ async function loadTouchpoints(
   return out
 }
 
-interface RawAdAccountRow {
-  entity_id: string
-  ad_account_id: string
-}
-
-async function loadAdAccountMap(
-  accountIds: string[],
-  since: string,
-  until: string,
-  deps: ReportLoadDeps,
-): Promise<Map<string, string>> {
-  const map = new Map<string, string>()
-  if (accountIds.length === 0) return map
-  let from = 0
-  for (;;) {
-    const { data, error } = await deps.supabase
-      .from('ad_breakdown_stats')
-      .select('entity_id, ad_account_id')
-      .in('ad_account_id', accountIds)
-      .eq('breakdown_key', 'placement_device')
-      .gte('stat_date', since)
-      .lte('stat_date', until)
-      .order('id', { ascending: true })
-      .range(from, from + PAGE_SIZE - 1)
-    if (error) throw new Error(error.message)
-    const rows = (data ?? []) as RawAdAccountRow[]
-    for (const r of rows) {
-      if (r.entity_id && !map.has(r.entity_id)) {
-        map.set(r.entity_id, r.ad_account_id)
-      }
-    }
-    if (rows.length < PAGE_SIZE) break
-    from += PAGE_SIZE
-  }
-  return map
-}
-
 function buildLeads(
   touchpoints: RawTouchpointRow[],
   adAccountMap: Map<string, string>,
@@ -372,17 +359,17 @@ export async function loadBreakdownReport(
   const accounts = await loadReportAccounts(accountIds, deps)
   const { since, until } = computeWindow(accounts, days, deps.now())
 
-  const stats = await loadStats(accountIds, since, until, deps)
+  const sinceIso = `${addDaysUtc(since, -1)}T00:00:00Z`
+  const [{ stats, adAccountMap }, touchpoints] = await Promise.all([
+    loadStats(accountIds, since, until, deps),
+    loadTouchpoints(clientId, sinceIso, deps),
+  ])
 
   const campaignIdSet = new Set<string>()
   for (const s of stats) {
     if (s.campaign_id) campaignIdSet.add(s.campaign_id)
   }
   const objectives = await loadObjectives([...campaignIdSet], deps)
-
-  const sinceIso = `${addDaysUtc(since, -1)}T00:00:00Z`
-  const touchpoints = await loadTouchpoints(clientId, sinceIso, deps)
-  const adAccountMap = await loadAdAccountMap(accountIds, since, until, deps)
 
   const timezoneByAccount = new Map<string, string | null>()
   for (const a of accounts) timezoneByAccount.set(a.adAccountId, a.timezone)
