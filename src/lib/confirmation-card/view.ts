@@ -11,7 +11,7 @@ import { PLAN_CARD_OPC_ONLY, isPlanApprovalCard, planCardMayConfirmDespiteChecks
 
 export const CONFIRMATION_TTL_MS = 30 * 60 * 1000
 
-export type CardStatus = 'waiting' | 'confirmed' | 'declined' | 'expired' | 'voided'
+export type CardStatus = 'waiting' | 'confirmed' | 'pending_application' | 'declined' | 'expired' | 'voided'
 
 export interface StoredCard {
   readonly subjectKey: string

@@ -112,6 +112,19 @@ beforeEach(() => {
 })
 
 describe('approvePlan requireAllGreen', () => {
+  it('refuses an old card when the displayed plan dates changed but the promo hash did not', async () => {
+    const promo = draft(socialSpec())
+    const args = {
+      clientId: 'client-1', planId: 'plan-1', approvedBy: 'ray@example.com',
+      expectedContentHash: promoContentHash(promo),
+      expectedPlanStart: '2026-11-01', expectedPlanEnd: '2026-11-30',
+    }
+    expect((await approvePlan({ ...args, commit: false })).kind).toBe('ready')
+    h.plan!.start_date = '2026-11-02'
+    expect((await approvePlan(args)).kind).toBe('stale')
+    expect(h.updates).toHaveLength(0)
+  })
+
   it('approves a draft whose applicable checks are all green, and only writes plan status', async () => {
     draft(socialSpec())
     const result = await approvePlan({ clientId: 'client-1', planId: 'plan-1', approvedBy: 'ray@example.com', requireAllGreen: true })

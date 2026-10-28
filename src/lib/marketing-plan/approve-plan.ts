@@ -26,7 +26,7 @@ export type ApprovePlanResult =
   | { kind: 'not_found' }
   | { kind: 'not_draft'; status: string }
   | { kind: 'invalid_spec'; issues: PromoValidationIssue[] }
-  | { kind: 'blocked'; blockers: GateResult[]; contentHash: string }
+  | { kind: 'blocked'; blockers: GateResult[]; contentHash: string; planStart: string | null; planEnd: string | null }
   /** Only with `requireAllGreen`: gates pass but some applicable check is not green. Nothing was written. */
   | { kind: 'needs_confirmation'; planStart: string; planEnd: string; checks: GateResult[]; contentHash: string }
   /** The card's content stamp does not match this plan. Nothing was written. */
@@ -48,7 +48,7 @@ interface Gated {
   hash?: string
 }
 
-function contentHashOf(plan: MarketingPlan): string | null {
+export function contentHashOf(plan: MarketingPlan): string | null {
   if (!hasPromoField(plan.plan_data)) return null
   const parsed = parsePromoSpec((plan.plan_data as unknown as { promo: unknown }).promo)
   if (!parsed.ok) return null
@@ -75,7 +75,10 @@ async function runGates(
   // Approval is an authorizing action: the budget gate always reads live.
   const facts = await loadPromoFacts(plan.client_id, parsed.spec, manualChecksOf(plan), new Date(), { liveBudget: 'always' })
   const verdict = evaluateApproval(parsed.spec, facts.gate)
-  if (!verdict.can_approve) return { stop: { kind: 'blocked', blockers: verdict.blockers, contentHash: hash } }
+  if (!verdict.can_approve) return { stop: {
+    kind: 'blocked', blockers: verdict.blockers, contentHash: hash,
+    planStart: plan.start_date, planEnd: plan.end_date,
+  } }
   const notGreen = hardNotGreen(verdict)
   if (requireAllGreen && notGreen.length > 0) {
     return {
@@ -124,6 +127,9 @@ export async function approvePlan(args: {
   requireAllGreen?: boolean
   /** Set by the plan confirmation card. A different plan is not approved. */
   expectedContentHash?: string
+  /** Dates displayed on the card must still be the plan's dates. */
+  expectedPlanStart?: string
+  expectedPlanEnd?: string
   /** false reports the outcome and does not dispatch or change the plan. */
   commit?: boolean
 }): Promise<ApprovePlanResult> {
@@ -136,6 +142,11 @@ export async function approvePlan(args: {
   if (fetchErr) throw fetchErr
   if (!data) return { kind: 'not_found' }
   const plan = data as MarketingPlan
+
+  if (args.expectedPlanStart !== undefined &&
+    (plan.start_date !== args.expectedPlanStart || plan.end_date !== args.expectedPlanEnd)) {
+    return { kind: 'stale' }
+  }
 
   if (plan.status === 'approved') return alreadyApproved(plan, args.expectedContentHash)
   if (plan.status !== 'draft') return { kind: 'not_draft', status: plan.status }

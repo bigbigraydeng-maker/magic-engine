@@ -17,8 +17,10 @@ import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import { notesFor } from '@/lib/confirmation-card/records'
 import { isExpired, presentCard, readStoredCard, type StoredCard } from '@/lib/confirmation-card/view'
 import { approvePlan, type ApprovePlanResult } from '@/lib/marketing-plan/approve-plan'
+import { approvedPlanView, pendingPlanView } from '@/lib/marketing-plan/plan-card-progress'
 import {
   PLAN_CARD_OPC_ONLY,
+  parsePlanCardDate,
   planCardMayConfirmDespiteChecks,
   trustedPlanCard,
 } from '@/lib/marketing-plan/plan-card-subject'
@@ -88,18 +90,15 @@ async function showCard(deps: KernelDeps, run: ActionRun, clicker: CardClicker, 
   })
 }
 
-function approvedView(card: ConfirmationCardView): ConfirmationCardView {
-  const who = card.statusLine.split(' 点了')[0] || '有人'
-  return { ...card, statusLine: `${who} 点了确认。这份计划已批准。还没开投，不会花钱。` }
-}
-
-function planArgs(args: CardDecisionArgs, planId: string, contentHash: string, commit: boolean) {
+function planArgs(args: CardDecisionArgs, planId: string, contentHash: string, dates: { start: string; end: string }, commit: boolean) {
   return {
     clientId: args.clientId,
     planId,
     approvedBy: args.approvedBy,
     requireAllGreen: false,
     expectedContentHash: contentHash,
+    expectedPlanStart: dates.start,
+    expectedPlanEnd: dates.end,
     commit,
   }
 }
@@ -142,16 +141,24 @@ async function confirmPlan(
   if (early) return early
   const parsed = trustedPlanCard(stored)
   if (!parsed) throw new ConfirmationCardError('invalid', '这张卡认不出是哪一份计划，没有批准。')
+  const dates = parsePlanCardDate(stored.date)
+  if (!dates) throw new ConfirmationCardError('invalid', '这张卡没有准确的计划日期，不能批准。请到推广计划页处理。')
   // Read first. The click is recorded only when this would approve. The write comes after.
-  const preview = await approvePlan(planArgs(args, parsed.planId, parsed.contentHash, false))
+  const preview = await approvePlan(planArgs(args, parsed.planId, parsed.contentHash, dates, false))
   if (preview.kind !== 'ready' && preview.kind !== 'already_approved') throw refusal(preview)
   const card = run.status === 'authorized'
     ? await showCard(deps, run, args.clicker, now)
     : await decideConfirmationCard(deps, decisionArgs(args, now))
   if (card.status !== 'confirmed') return card
-  const result = await approvePlan(planArgs(args, parsed.planId, parsed.contentHash, true))
-  if (result.kind !== 'approved' && result.kind !== 'already_approved') throw refusal(result)
-  return approvedView(card)
+  let result: ApprovePlanResult
+  try {
+    result = await approvePlan(planArgs(args, parsed.planId, parsed.contentHash, dates, true))
+  } catch {
+    return pendingPlanView(card, args.clicker, '批准没有保存成功，请再次点确认重试。', true)
+  }
+  if (result.kind === 'approved' || result.kind === 'already_approved') return approvedPlanView(card)
+  const retryable = result.kind === 'conflict' || result.kind === 'blocked'
+  return pendingPlanView(card, args.clicker, `${refusal(result).message}请刷新计划后再决定是否重试。`, retryable)
 }
 
 export async function applyConfirmationDecision(

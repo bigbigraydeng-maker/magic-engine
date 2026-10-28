@@ -71,7 +71,10 @@ describe('plan rides along with agree', () => {
   })
 
   it('a hard red from the gates also goes to the card, never to approved', async () => {
-    mockApprove.mockResolvedValue({ kind: 'blocked', blockers: [gate({ light: 'red', reason: '账户停用' })] })
+    mockApprove.mockResolvedValue({
+      kind: 'blocked', blockers: [gate({ light: 'red', reason: '账户停用' })],
+      planStart: '2026-11-01', planEnd: '2026-11-30', contentHash: 'abc123abc123abcd',
+    })
     const out = await run()
     expect(out.status).toBe('needs_confirmation')
     expect(mockIssue).toHaveBeenCalledTimes(1)

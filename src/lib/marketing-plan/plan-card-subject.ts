@@ -53,6 +53,12 @@ export function isPlanApprovalCard(subjectKey: string): boolean {
   return parsePlanCardSubject(subjectKey) !== null
 }
 
+/** The dates shown to the approver are part of the card's bound content. */
+export function parsePlanCardDate(value: string): { start: string; end: string } | null {
+  const match = /^(\d{4}-\d{2}-\d{2}) 至 (\d{4}-\d{2}-\d{2})$/.exec(value)
+  return match ? { start: match[1], end: match[2] } : null
+}
+
 /** Yellow and red checks are why this card exists. They do not lock confirm on a trusted plan card. */
 export function planCardMayConfirmDespiteChecks(card: PlanCardWords & { readonly hardChecks: readonly unknown[] }): boolean {
   return trustedPlanCard(card) !== null && card.hardChecks.length > 0

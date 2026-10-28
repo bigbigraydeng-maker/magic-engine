@@ -15,6 +15,7 @@ import {
   PLAN_CARD_AMOUNT,
   PLAN_CARD_SCOPE,
   PLAN_CARD_WHAT,
+  parsePlanCardDate,
   planCardSubject,
 } from '@/lib/marketing-plan/plan-card-subject'
 import {
@@ -95,6 +96,7 @@ async function cardFor(
     checks: GateResult[]
   },
 ): Promise<ConfirmationCardView | null> {
+  if (!parsePlanCardDate(`${args.start} 至 ${args.end}`)) return null
   try {
     return await issueConfirmationCard(deps, {
       clientId: args.clientId,
@@ -176,8 +178,10 @@ export async function approvePlanWithAgree(args: {
     }
     const checks = result.kind === 'needs_confirmation' ? result.checks : result.kind === 'blocked' ? result.blockers : []
     if (checks.length === 0) return make('failed', failedText('检查结果读不出来。'), planId, now)
-    const start = result.kind === 'needs_confirmation' ? result.planStart : '见计划'
-    const end = result.kind === 'needs_confirmation' ? result.planEnd : '见计划'
+    const start = result.kind === 'needs_confirmation' || result.kind === 'blocked'
+      ? result.planStart ?? '见计划' : '见计划'
+    const end = result.kind === 'needs_confirmation' || result.kind === 'blocked'
+      ? result.planEnd ?? '见计划' : '见计划'
     const card = await cardFor(args.deps, {
       clientId: args.clientId,
       planId,

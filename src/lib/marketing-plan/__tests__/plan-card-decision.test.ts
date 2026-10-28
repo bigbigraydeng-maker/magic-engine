@@ -11,6 +11,7 @@ import { parsePlanCardSubject, planCardSubject } from '@/lib/marketing-plan/plan
 const mockApprove = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/marketing-plan/approve-plan', () => ({
   approvePlan: (...args: unknown[]) => mockApprove(...args),
+  contentHashOf: (plan: { plan_data?: { promo?: { testHash?: string } } }) => plan.plan_data?.promo?.testHash ?? null,
 }))
 
 const PLAN = '11111111-1111-4111-8111-111111111111'
@@ -114,6 +115,8 @@ describe('plan confirmation card', () => {
       approvedBy: 'opc@example.com',
       requireAllGreen: false,
       expectedContentHash: HASH,
+      expectedPlanStart: '2026-11-01',
+      expectedPlanEnd: '2026-11-30',
       commit: true,
     }))
   })
@@ -210,6 +213,70 @@ describe('plan confirmation card', () => {
     expect(clicked.status).toBe('confirmed')
     expect(mockApprove).toHaveBeenCalledTimes(2)
     expect(mockApprove.mock.calls.map((call) => call[0].commit)).toEqual([false, true])
+  })
+
+  it('shows a retry state when approval fails after the card click, including after reload', async () => {
+    const f = makeFixture({
+      registry: ACTION_REGISTRY,
+      capabilities: (sb) => createCapabilities(sb),
+      startAt: START,
+      options: {
+        extraTables: {
+          marketing_plans: [{
+            id: PLAN, client_id: CLIENT_A, status: 'draft',
+            start_date: '2026-11-01', end_date: '2026-11-30',
+            plan_data: { promo: { testHash: HASH } },
+          }],
+        },
+      },
+    })
+    const card = await issuePlan(f)
+    mockApprove.mockImplementation(async (args: { commit?: boolean }) => (
+      args.commit === false ? { kind: 'ready' } : { kind: 'conflict', status: 500, error: '暂时没保存成功。' }
+    ))
+    const failed = await click(f, card, 'confirm')
+    expect(failed.status).toBe('pending_application')
+    expect(failed.statusLine).toContain('尚未批准')
+    expect(failed.confirmEnabled).toBe(true)
+    expect(failed.declineEnabled).toBe(false)
+    expect(runStatus(f, card.runId)).toBe('authorized')
+
+    const reloaded = await listConfirmationCards(f.kernel, CLIENT_A, OPC)
+    expect(reloaded.find((view) => view.runId === card.runId)).toMatchObject({
+      status: 'pending_application', confirmEnabled: true, declineEnabled: false,
+    })
+    const forFde = await listConfirmationCards(f.kernel, CLIENT_A, FDE)
+    expect(forFde.find((view) => view.runId === card.runId)?.confirmEnabled).toBe(false)
+
+    f.tables.marketing_plans[0].start_date = '2026-11-02'
+    const changed = await listConfirmationCards(f.kernel, CLIENT_A, OPC)
+    expect(changed.find((view) => view.runId === card.runId)).toMatchObject({
+      status: 'pending_application', confirmEnabled: false,
+    })
+    f.tables.marketing_plans[0].start_date = '2026-11-01'
+
+    mockApprove.mockImplementation(async (args: { commit?: boolean }) => (
+      args.commit === false ? { kind: 'ready' } : approved()
+    ))
+    const retried = await click(f, failed, 'confirm')
+    expect(retried.status).toBe('confirmed')
+    expect(retried.statusLine).toContain('已批准')
+    f.tables.marketing_plans[0].status = 'approved'
+    const done = await listConfirmationCards(f.kernel, CLIENT_A, OPC)
+    expect(done.find((view) => view.runId === card.runId)).toMatchObject({ status: 'confirmed', confirmEnabled: false })
+  })
+
+  it('keeps approval failure visible when the plan write throws', async () => {
+    const f = fixture()
+    const card = await issuePlan(f)
+    mockApprove.mockImplementation(async (args: { commit?: boolean }) => {
+      if (args.commit === false) return { kind: 'ready' }
+      throw new Error('write failed')
+    })
+    const failed = await click(f, card, 'confirm')
+    expect(failed.status).toBe('pending_application')
+    expect(failed.statusLine).toContain('尚未批准')
+    expect(runStatus(f, card.runId)).toBe('authorized')
   })
 
   it.each([
