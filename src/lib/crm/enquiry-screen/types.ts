@@ -101,6 +101,7 @@ export type IneligibleReason =
   | 'stage_not_allowed'
   | 'too_recent'
   | 'not_revived'
+  | 'rolled_back'
 
 export type Eligibility = { eligible: true } | { eligible: false; why: IneligibleReason }
 
