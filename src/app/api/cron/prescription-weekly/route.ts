@@ -14,6 +14,7 @@ import {
   PRESCRIPTION_WEEKLY_CHECK_KIND,
   runPrescriptionWeeklyCheck,
 } from '@/lib/diagnostic/prescription-weekly-check'
+import { attachTuesdayBudgetAmounts } from '@/lib/diagnostic/tuesday-budget-amount'
 import { runTuesdayBudgetTune } from '@/lib/diagnostic/tuesday-budget-tune'
 import { startCronRun } from '@/lib/cron/run-logger'
 
@@ -31,7 +32,8 @@ export async function GET(req: NextRequest) {
   const cronRun = await startCronRun('prescription-weekly')
   try {
     const summary = await runPrescriptionWeeklyCheck(supabaseAdmin)
-    const budgetTunes = await runTuesdayBudgetTune(() => createKernel(supabaseAdmin), summary)
+    const withBudgets = await attachTuesdayBudgetAmounts(supabaseAdmin, summary, new Date())
+    const budgetTunes = await runTuesdayBudgetTune(() => createKernel(supabaseAdmin), withBudgets)
     const failed = summary.outcomes.filter((o) => o.result === 'error').length
     await cronRun.finish({
       processed: summary.considered,
@@ -40,11 +42,11 @@ export async function GET(req: NextRequest) {
       summary: {
         kind: PRESCRIPTION_WEEKLY_CHECK_KIND,
         note: '本周只复查已经批准、正在执行的方案。没有新开方案，也没有自动批准。加预算和减预算只出确认卡，不会自动改预算。',
-        outcomes: summary.outcomes,
+        outcomes: withBudgets.outcomes,
         budget_tunes: budgetTunes,
       },
     })
-    return NextResponse.json({ ok: true, ...summary, budget_tunes: budgetTunes })
+    return NextResponse.json({ ok: true, ...withBudgets, budget_tunes: budgetTunes })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     await cronRun.finish({ error: msg })

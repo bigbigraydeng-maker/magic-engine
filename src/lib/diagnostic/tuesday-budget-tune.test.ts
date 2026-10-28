@@ -159,6 +159,61 @@ describe('周二加减预算只出确认卡', () => {
     expect(f.tables.action_runs).toHaveLength(0)
   })
 
+  it('督导给出有上限的金额时出卡，点了也不改预算', async () => {
+    const { f, calls } = fixture()
+    const [row] = await runTuesdayBudgetTune(() => f.kernel, {
+      considered: 1,
+      checked: 1,
+      outcomes: [],
+      budgetSuggestions: [{
+        clientId: CLIENT_A,
+        subjectKey: 'wkabcdefabcdefabcd',
+        direction: 'increase',
+        accountLabel: '在投日预算',
+        beforeCents: 3000,
+        afterCents: 3600,
+        currencyLabel: '纽元',
+        why: '连续多天点击好于账户中位，预算却偏低，按现有幅度建议加一点。',
+        dateLabel: '这周二',
+        scopeLabel: '只改这一次日预算',
+      }],
+    })
+    expect(row.issued).toBe(true)
+    expect(row.executed).toBe(false)
+    const card = await decideConfirmationCard(f.kernel, {
+      clientId: CLIENT_A,
+      runId: row.runId ?? '',
+      clicker: OPC,
+      resolution: 'confirm',
+      expectedDecisionId: expectDecision(f),
+      fingerprint: row.fingerprint ?? '',
+    })
+    expect(card.status).toBe('confirmed')
+    expect(card.amount).toContain('30.00')
+    expect(card.amount).toContain('36.00')
+    expect(calls).not.toHaveBeenCalled()
+    expect(actionKeys(f)).toEqual([KEY])
+  })
+
+  it('金额读不到时不出卡，也不去准备执行', async () => {
+    const open = vi.fn()
+    const rows = await runTuesdayBudgetTune(open, {
+      considered: 1,
+      checked: 1,
+      outcomes: [],
+      budgetBlocks: [{ clientId: CLIENT_A, reason: '现日预算读不到，没有按 0 出卡。' }],
+    })
+    expect(rows).toEqual([{
+      clientId: CLIENT_A,
+      issued: false,
+      executed: false,
+      reason: '现日预算读不到，没有按 0 出卡。',
+      runId: null,
+      fingerprint: null,
+    }])
+    expect(open).not.toHaveBeenCalled()
+  })
+
   it('这周复查没有现成的加减金额时，不出卡，也不去准备执行', async () => {
     const open = vi.fn()
     const rows = await runTuesdayBudgetTune(open, emptySummary())

@@ -40,10 +40,32 @@ export interface WeeklyCheckOutcome {
   detail?: string
 }
 
+/** A bounded daily-budget suggestion. Numbers are minor units. No account id. */
+export interface WeeklyBudgetSuggestion {
+  clientId: string
+  subjectKey: string
+  direction: 'increase' | 'decrease'
+  accountLabel: string
+  beforeCents: number
+  afterCents: number
+  currencyLabel: string | null
+  why: string
+  dateLabel: string
+  scopeLabel: string
+}
+
+/** Why this Tuesday produced no card. Missing numbers stay missing. */
+export interface WeeklyBudgetBlock {
+  clientId: string
+  reason: string
+}
+
 export interface WeeklyCheckSummary {
   considered: number
   checked: number
   outcomes: WeeklyCheckOutcome[]
+  budgetSuggestions?: readonly WeeklyBudgetSuggestion[]
+  budgetBlocks?: readonly WeeklyBudgetBlock[]
 }
 
 interface ApprovedRow {
