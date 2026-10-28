@@ -1,3 +1,5 @@
+> 全平台规则看 [平台规则总索引](../registry/platform-rules-index.md)。本文件只是局部清单，不合并、不重写。
+
 <!-- 由独立助手 2026-10-18 通读 ME 手册/SOP 生成，供每日学习任务做「对账」时先读这一份；16 行标「待核」；只是索引，冲突时必须读来源原文。更新方式：手册/SOP 有变动时重做。-->
 # ME 广告规则摘要索引（草稿）
 生成日期：2026-10-18｜主干读取点 origin/main ca89573287ffb1a68d9c7c6324cd484637ed486f（本地 git show，未 fetch）｜用法：日常只读本文，疑似冲突时按「来源#小节」读原文；本文只是索引
@@ -81,8 +83,8 @@
 [PB S-13] 合规：个人属性句禁写；AU规则库零调用方，NZ版无｜PB#S-13；src/lib/ads-strategy/draft-redlines.ts｜类型：规则｜适用：通用
 [PB C-12] 接口建Messenger素材用app_destination，不写占位链接｜PB#C-12；PG#§二十七｜类型：事故教训｜适用：NAL
 [PB S-16/PG§三十五] 创意只读，欢迎语只能新建创意或界面改｜PB#S-16；PG#§三十五｜类型：事故教训｜适用：通用
-[PB C-01] 疲劳=相对自身最好7天，CTR<×0.80黄/×0.70红｜PB#C-01；src/lib/ads-strategy/baseline.ts｜类型：规则｜适用：通用
-[PB C-02] D2：CTR跌≥25%且曝光够，频次>3算受众疲劳｜PB#C-02；src/lib/ads-strategy/rules/fatigue.ts｜类型：规则｜适用：通用
+[PB C-01] 疲劳=相对自身最好窗口；比例见 src/lib/ads-strategy/baseline.ts，本行不抄数字。判定词只用 healthy/watch/alert/insufficient_history/paused，黄/红已废弃｜PB#C-01；src/lib/ads-strategy/baseline.ts｜类型：规则｜适用：通用
+[PB C-02] D2 门槛见 src/lib/ads-strategy/rules/fatigue.ts，本行不抄数字｜PB#C-02；src/lib/ads-strategy/rules/fatigue.ts｜类型：规则｜适用：通用
 [PB C-03/PG§八] CTR降频次低换素材，频次高换受众｜PB#C-03；PG#§八｜类型：经验｜适用：通用
 [PB C-05/PG§十四] 素材换没换只认update_ad_creative，不看created_time｜PB#C-05；PG#§十四｜类型：事故教训｜适用：NAL
 [PB C-07] 素材排产=可用新素材÷每周替换数，节奏待验证｜PB#C-07；PT#四｜类型：经验｜适用：CTS（待核）

@@ -52,6 +52,7 @@
 | 目录 | 归谁 | 说明 |
 |---|---|---|
 | [`docs/playbooks/social/`](../playbooks/social/README.md) | 苏东坡 `sudongpo` | 社媒经验手册：平台层 `platform-general.md` · 行业层 `industry-travel.md` · 客户层 `clients/`（只列目录）· [README](../playbooks/social/README.md) · [MIGRATION-MAP](../playbooks/social/MIGRATION-MAP.md)。涉及视频工厂的部分归 ME Video 维护 |
+| [`docs/playbooks/ads/meta-general.md`](../playbooks/ads/meta-general.md) | 卫青 `weiqing` | 广告经验手册（Meta 平台层）。行业层、客户层仍不在仓库。账号号码已从正文去掉 |
 
 ## 手册归属（通用手册）
 

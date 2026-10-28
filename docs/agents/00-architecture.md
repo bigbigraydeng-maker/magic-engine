@@ -137,11 +137,15 @@ saveProvenPattern / savePreference / saveFailedExperiment / saveDecisionHistory
 禁止写：                       子牙、张骞、华佗、鲁班（只读）
 马良可写：                     client_proven_patterns（flywheel=social）
 李白可写：                     client_learned_preferences + client_proven_patterns（flywheel=seo/geo）
-孔子 / 孟子 / 苏东坡：          不直写 Memory 表；各自动作的 Check 结论写 flywheel_outcomes（孔子按页、
-                               孟子按问题集、苏东坡按帖），由 23.C 自动抽取器经 classifyActionCase 过滤后
-                               写 client_proven_patterns / client_failed_experiments（flywheel=seo / geo / social）。
+孔子 / 孟子 / 苏东坡 / 卫青：  不直写 Memory 表，也不自己写 Check 行。
+                               Check 只归现有归因任务 src/lib/flywheel/attribution/job.ts：
+                               它把结论写进 flywheel_outcomes。广告漏斗体检也只挂在这个任务上，
+                               不归卫青，不归诸葛亮，不新建 Check agent。没有对应模板就没有行（现状多数未接）。
+                               Tune 只归 src/lib/memory/write-lesson.ts：必须 isActive:false，写成候选；
+                               采纳人是 OPC，开关在 /dashboard/ad-engine。不归孔明落地，不归卫青改正文。
+                               23.C 抽取器仍可把已经写出的 outcome 滤进客户记忆，那不是另一套 Check。
                                经验手册只写候选区 docs/playbooks/<pillar>/inbox.md，升正文须子牙签字 + PM 合。
-                               （2026-09-28 设计 v0.1 目标态，见 13-kongzi / 14-sudongpo / 15-mengzi 各自 §八；现状多数未接）
+                               （2026-10-28 与代码和 #3125 v0.2 对齐；旧写法把 Check 记在孔子 / 孟子 / 苏东坡名下，作废）
 ```
 
 ---
