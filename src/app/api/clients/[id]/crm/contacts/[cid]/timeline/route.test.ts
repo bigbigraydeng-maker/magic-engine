@@ -25,6 +25,7 @@ vi.mock('@/lib/crm/email-full-body', async (orig) => ({
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchFullEmailBody } from '@/lib/crm/email-full-body'
 import { GET } from './route'
+import { asFacts } from '@/lib/crm/call-analysis-facts'
 
 /** 记录取消息时用的排序方向和上限。 */
 let messageOrder: { column: string; ascending: boolean } | null = null
@@ -352,5 +353,23 @@ describe('机器发的出站邮件', () => {
     expect(byText['Hi Sue']).toBe(false)
     // AI 外呼也标了 automated，但电话不是「系统自动发出的邮件」，不能被同样处理
     expect(byText['AI call summary']).toBe(false)
+  })
+})
+
+describe('asFacts · 说话人', () => {
+  it('把员工 / 客人的说话人带出去，界面据此写「员工原话 / 客人原话」；认不出的不带，不乱猜', () => {
+    const out = asFacts([
+      { key: 'next_step', value: 'v', quote: 'q1', speaker: 'employee' },
+      { key: 'travel_window', value: 'v', quote: 'q2', speaker: 'customer' },
+      { key: 'budget', value: 'v', quote: 'q3', speaker: 'robot' },
+      { key: 'party_size', value: 'v', quote: 'q4' },
+      { key: 'bad', value: 1, quote: 'q5' },
+    ])
+    expect(out).toEqual([
+      { key: 'next_step', value: 'v', quote: 'q1', speaker: 'employee' },
+      { key: 'travel_window', value: 'v', quote: 'q2', speaker: 'customer' },
+      { key: 'budget', value: 'v', quote: 'q3' },
+      { key: 'party_size', value: 'v', quote: 'q4' },
+    ])
   })
 })

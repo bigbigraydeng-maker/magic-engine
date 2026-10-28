@@ -21,6 +21,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
+import { asFacts } from '@/lib/crm/call-analysis-facts'
 import { normalisePhone } from '@/lib/crm/identity'
 import { dropEmailTouchesDuplicatedByMessage } from '@/lib/crm/timeline-dedupe'
 import { buildTouchpointLike } from '@/lib/crm/contact-model'
@@ -54,21 +55,11 @@ interface CallAnalysisView {
   id: string
   summary: string
   reviewStatus: 'pending_review' | 'confirmed' | 'rejected'
-  facts: { key: string; value: string; quote: string }[]
+  facts: { key: string; value: string; quote: string; speaker?: 'customer' | 'employee' }[]
 }
 
 function asReviewStatus(v: unknown): CallAnalysisView['reviewStatus'] {
   return v === 'confirmed' || v === 'rejected' ? v : 'pending_review'
-}
-
-function asFacts(v: unknown): CallAnalysisView['facts'] {
-  if (!Array.isArray(v)) return []
-  return v.flatMap((f) => {
-    const o = (f ?? {}) as Record<string, unknown>
-    return typeof o.key === 'string' && typeof o.value === 'string' && typeof o.quote === 'string'
-      ? [{ key: o.key, value: o.value, quote: o.quote }]
-      : []
-  })
 }
 
 type TimelineEntry =
