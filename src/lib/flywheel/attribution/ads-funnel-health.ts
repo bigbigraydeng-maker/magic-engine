@@ -7,9 +7,9 @@
  * lesson (see toLessonInput); adoption is a separate human step.
  *
  * Verdict words are the existing outcome enum: confirmed, inconclusive,
- * reversed. There is no UNKNOWN verdict. A thin sample is still inconclusive
- * so row-counters do not treat it as a decided case; the direction is kept
- * on `reading` and `strength: 'tendency'`.
+ * reversed. There is no UNKNOWN verdict. A thin sample is still inconclusive;
+ * the direction is kept on `reading` and `strength: 'tendency'` in candidate
+ * lesson evidence, never in the temporal attribution outcome.
  *
  * Winner baseline (one ad, not a blend, not another account, not an industry
  * number):
@@ -35,8 +35,6 @@
 
 import type { OutcomeVerdict } from '../adapters/types'
 import type { LessonInput } from '@/lib/memory/write-lesson'
-import { ADS_METRIC_KEY } from '../vocabulary'
-import { OUTCOME_EVALUATOR } from './outcome-identity'
 
 /** Below this many link clicks, a direction is only a tendency. */
 export const TENDENCY_MIN_LINK_CLICKS = 100
@@ -411,8 +409,8 @@ function sumNumbers(values: readonly (number | null)[]): number | null {
 
 /** All null → null. Any hole → null. Never fills a missing day with zero. */
 function sumOptional(values: readonly (number | null)[]): number | null {
-  if (values.length === 0 || values.some((value) => value === null)) return null
-  return values.reduce((total, value) => total + (value ?? 0), 0)
+  if (values.length === 0) return null
+  return sumNumbers(values)
 }
 
 function sumGroup(days: readonly DeliveryDay[]): FunnelUnit | null {
@@ -526,47 +524,6 @@ function isUnit(value: unknown): value is FunnelUnit {
   if (!value || typeof value !== 'object') return false
   const unit = value as FunnelUnit
   return typeof unit.id === 'string' && unit.id !== '' && typeof unit.adAccountId === 'string'
-}
-
-function roundMoney(value: number | null): number | null {
-  if (value === null || !Number.isFinite(value)) return null
-  return Math.round(value * 100) / 100
-}
-
-function decidedConfidence(worstReading: 'confirmed' | 'reversed' | null): number {
-  if (worstReading === null) return 0
-  return 0.7
-}
-
-/** One flywheel_outcomes row. Uses the action's own metric key so it stays a single row. */
-export function funnelOutcomeRow(args: {
-  actionId: string
-  clientId: string
-  windowDays: number
-  result: FunnelCheckResult
-  computedAt: string
-}): Record<string, unknown> {
-  const baseline = roundMoney(args.result.winnerCpl)
-  const after = roundMoney(args.result.subjectCpl)
-  const delta = baseline !== null && after !== null ? roundMoney(after - baseline) : null
-  const deltaPct = baseline !== null && baseline !== 0 && delta !== null
-    ? Math.round((delta / Math.abs(baseline)) * 10000) / 100
-    : null
-  const thin = args.result.strength === 'tendency' || args.result.verdict === 'inconclusive'
-  return {
-    action_id: args.actionId,
-    client_id: args.clientId,
-    metric_key: ADS_METRIC_KEY.COST_PER_LEAD,
-    baseline,
-    after_value: after,
-    delta,
-    delta_pct: deltaPct,
-    confidence: thin ? 0 : decidedConfidence(args.result.reading),
-    verdict: args.result.verdict,
-    window_days: args.windowDays,
-    evaluator_key: OUTCOME_EVALUATOR.FLYWHEEL_METRICS,
-    computed_at: args.computedAt,
-  }
 }
 
 /** Candidate lesson. isActive is false on purpose — write-lesson defaults to true. */

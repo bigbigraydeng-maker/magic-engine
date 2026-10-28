@@ -1,10 +1,7 @@
 /**
- * Writes the ads funnel check into the existing attribution outcome row.
- *
- * One row only: metric_key stays the action's cost-per-lead key, so memory
- * consumers that count outcome rows do not see a second piece of evidence.
- * When this check has nothing to read, it writes nothing and the generic
- * before/after path still runs.
+ * Checks ad delivery and saves an inactive candidate lesson when actionable.
+ * The temporal cost-per-lead attribution keeps its own outcome row; a
+ * same-account winner comparison is diagnostic context, not that outcome.
  *
  * No Meta call, no spend, no new table. A prescription goes out only as an
  * inactive candidate lesson.
@@ -15,13 +12,11 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { writeGlobalLesson, type LessonInput, type WriteLessonResult } from '@/lib/memory/write-lesson'
 import { ADS_METRIC_KEY } from '../vocabulary'
-import { OUTCOME_CONFLICT_TARGET } from './outcome-identity'
 import {
   aggregateDelivery,
   buildFunnelInput,
   checkAdsFunnel,
   finiteOrNull,
-  funnelOutcomeRow,
   isFunnelCheckInput,
   planOrNull,
   toLessonInput,
@@ -42,7 +37,7 @@ export interface FunnelAction {
 }
 
 export interface FunnelRecordResult {
-  wrote: boolean
+  checked: boolean
   errors: string[]
 }
 
@@ -169,18 +164,6 @@ function emptyUnit() {
   }
 }
 
-async function writeOutcome(action: FunnelAction, windowDays: number, result: FunnelCheckResult): Promise<string | null> {
-  const row = funnelOutcomeRow({
-    actionId: action.id,
-    clientId: action.client_id,
-    windowDays,
-    result,
-    computedAt: new Date().toISOString(),
-  })
-  const { error } = await supabaseAdmin.from('flywheel_outcomes').upsert(row, { onConflict: OUTCOME_CONFLICT_TARGET })
-  return error ? `funnel outcome upsert: ${error.message}` : null
-}
-
 /**
  * Write the candidate once. A later run must not flip is_active back to false
  * after a person has adopted the lesson (write-lesson defaults isActive to true;
@@ -210,30 +193,29 @@ async function writeLesson(result: FunnelCheckResult): Promise<string | null> {
 }
 
 /**
- * Run the check for a cost-per-lead action. Other metrics return wrote:false
+ * Run the check for a cost-per-lead action. Other metrics return checked:false
  * and do not touch ad insights. Never throws.
  */
 export async function recordAdsFunnelCheck(
   action: FunnelAction,
   windowDays: number,
 ): Promise<FunnelRecordResult> {
-  if (action.expected_metric !== ADS_METRIC_KEY.COST_PER_LEAD) return { wrote: false, errors: [] }
+  if (action.expected_metric !== ADS_METRIC_KEY.COST_PER_LEAD) return { checked: false, errors: [] }
   try {
     const days = action.payload?.funnel_health !== undefined ? [] : await loadDays(action, windowDays)
     const built = inputForAction(action, days)
-    if (!built) return { wrote: false, errors: [] }
+    if (!built) return { checked: false, errors: [] }
     const result = 'verdict' in built ? built : resolveInput(built)
     // Rows that never stored link clicks are "not checked", not a zero.
-    // Leave the existing before/after outcome alone in that case.
+    // There is no candidate diagnosis in that case.
     const explicit = action.payload?.funnel_health !== undefined
     if (!explicit && result.reasonCode === FUNNEL_REASON.missing_data) {
-      return { wrote: false, errors: [] }
+      return { checked: false, errors: [] }
     }
-    const outcomeError = await writeOutcome(action, windowDays, result)
-    const lessonError = outcomeError ? null : await writeLesson(result)
-    return { wrote: outcomeError === null, errors: [outcomeError, lessonError].filter((item): item is string => item !== null) }
+    const lessonError = await writeLesson(result)
+    return { checked: true, errors: lessonError === null ? [] : [lessonError] }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return { wrote: false, errors: [`ads funnel check: ${message}`] }
+    return { checked: false, errors: [`ads funnel check: ${message}`] }
   }
 }

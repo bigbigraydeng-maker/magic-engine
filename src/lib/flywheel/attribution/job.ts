@@ -376,8 +376,8 @@ async function upsertOutcome(row: Record<string, unknown>): Promise<void> {
  * Attribute one action at one window.
  *
  * Reconciliation runs first so an immature action is not left unsigned
- * (Codex P2, round 16 on PR #862). A cost-per-lead action that has ad delivery
- * is scored by the funnel check instead of a second before/after row.
+ * (Codex P2, round 16 on PR #862). The cost-per-lead funnel check may save a
+ * candidate lesson, but never replaces the temporal attribution outcome.
  */
 async function processAction(
   action: ActionRow,
@@ -386,12 +386,6 @@ async function processAction(
   const reconcileErrors = await reconcileLegacyWindows(action.id, action.expected_metric)
   const funnel = await recordAdsFunnelCheck(action, windowDays)
   reconcileErrors.push(...funnel.errors)
-  // The funnel check is the cost-per-lead outcome when it has delivery to read.
-  // Skipping the generic before/after keeps this action to one outcome row.
-  if (funnel.wrote) {
-    reconcileErrors.push(...await retireExtraWindows(action.id, action.expected_metric, windowDays))
-    return { wrote: true, reconcileErrors }
-  }
   return attributeExpectedMetric(action, windowDays, reconcileErrors)
 }
 

@@ -22,7 +22,6 @@ import {
 } from '../ads-funnel-health'
 import { mapInsightRow, persistCandidateLesson, recordAdsFunnelCheck } from '../ads-funnel-record'
 
-const writes: Record<string, unknown>[] = []
 const lessons: Record<string, unknown>[] = []
 
 function chain(data: unknown) {
@@ -32,8 +31,7 @@ function chain(data: unknown) {
   builder.range = () => Promise.resolve({ data, error: null })
   builder.maybeSingle = () => Promise.resolve({ data: null, error: null })
   builder.upsert = async (row: Record<string, unknown>) => {
-    if (Array.isArray(data)) writes.push(row)
-    else lessons.push(row)
+    lessons.push(row)
     return { error: null }
   }
   return builder
@@ -42,7 +40,6 @@ function chain(data: unknown) {
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: (table: string) => {
-      if (table === 'flywheel_outcomes') return chain([])
       if (table === 'ad_daily_insights') return chain([])
       if (table === 'global_learned_lessons') return chain(null)
       if (table === 'clients') return { select: async () => ({ data: [], error: null }) }
@@ -76,7 +73,6 @@ function check(subject: FunnelUnit, peers: FunnelUnit[], plan: DeliverySide | nu
 const winner = unit({ id: 'ad-win' })
 
 beforeEach(() => {
-  writes.length = 0
   lessons.length = 0
 })
 
@@ -223,7 +219,7 @@ describe('ads funnel health', () => {
     expect(upserted).toHaveLength(1)
   })
 
-  it('stores the check on the cost-per-lead outcome and does not run it for other metrics', async () => {
+  it('saves only the candidate lesson and leaves CPL attribution to the job', async () => {
     const subject = unit({ id: 'ad-sub', spend: 400, linkClicks: 200, leads: 20 })
     const recorded = await recordAdsFunnelCheck({
       id: 'action-1',
@@ -232,16 +228,11 @@ describe('ads funnel health', () => {
       executed_at: '2026-10-01T00:00:00.000Z',
       payload: { funnel_health: { plan: null, actual: null, subject, peers: [winner] } },
     }, 14)
-    expect(recorded.wrote).toBe(true)
+    expect(recorded.checked).toBe(true)
     expect(recorded.errors).toEqual([])
-    expect(writes[0]).toMatchObject({
-      metric_key: ADS_METRIC_KEY.COST_PER_LEAD,
-      verdict: 'reversed',
-      action_id: 'action-1',
-    })
+    expect(lessons).toHaveLength(1)
     expect(lessons[0].is_active).toBe(false)
 
-    writes.length = 0
     const other = await recordAdsFunnelCheck({
       id: 'action-2',
       client_id: 'client-1',
@@ -249,7 +240,7 @@ describe('ads funnel health', () => {
       executed_at: '2026-10-01T00:00:00.000Z',
       payload: null,
     }, 14)
-    expect(other.wrote).toBe(false)
-    expect(writes).toHaveLength(0)
+    expect(other.checked).toBe(false)
+    expect(lessons).toHaveLength(1)
   })
 })
