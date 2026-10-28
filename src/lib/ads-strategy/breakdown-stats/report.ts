@@ -341,6 +341,7 @@ export function buildBreakdownReport(input: {
   stats: readonly StatInput[]
   leads: readonly LeadInput[]
   objectives: ReadonlyMap<string, string | null>
+  unmatchedLeads?: number
 }): BreakdownReport {
   const { since, until, days, accounts, stats, leads, objectives } = input
 
@@ -351,14 +352,15 @@ export function buildBreakdownReport(input: {
   // There is no 'weekday' breakdown in the table: weekdays are the hourly rows grouped by stat_date.
   const weekdayStats = leadStats.filter((s) => s.breakdown_key === 'hour_account_tz')
   const placementStats = leadStats.filter((s) => s.breakdown_key === 'placement_device')
-  const deviceStats = leadStats.filter((s) => s.breakdown_key === 'device')
+  // Device is not its own breakdown in the table: it lives inside placement_device rows.
+  const deviceStats = placementStats
   const ageGenderStats = leadStats.filter((s) => s.breakdown_key === 'age_gender')
   const regionStats = leadStats.filter((s) => s.breakdown_key === 'region')
 
   return {
     window: { since, until, days },
     accounts,
-    totals: buildTotals(placementDevice, objectives, leads.length),
+    totals: { ...buildTotals(placementDevice, objectives, leads.length), crmLeadsUnmatched: input.unmatchedLeads ?? 0 },
     nonLeadSpend: buildNonLeadSpend(placementDevice.filter((s) => !isLeadObjective(s, objectives)), objectives),
     hour: buildHour(hourStats, leads),
     weekday: buildWeekday(weekdayStats, leads),

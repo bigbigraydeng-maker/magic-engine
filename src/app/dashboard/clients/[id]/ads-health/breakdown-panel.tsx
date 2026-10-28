@@ -67,6 +67,27 @@ function FlagCell({ flag }: { flag: ReportRow['flag'] }) {
   return <td className={`py-1.5 text-right ${cls}`}>{text}</td>
 }
 
+/** Things that make the numbers below less trustworthy, said in plain words. */
+function reportWarnings(report: BreakdownReport): string[] {
+  const out: string[] = []
+  const currencies = new Set(report.accounts.map(a => a.currency ?? '读不到'))
+  if (currencies.size > 1) {
+    out.push(`这个客户的广告账户用了不同币种（${[...currencies].join('、')}），下面的花费和成本是直接相加的，不能当真。`)
+  }
+  if (report.accounts.some(a => a.timezone === null)) {
+    out.push('有广告账户读不到时区，它的进线按国际标准时间分小时，按小时和按星期的结果会错位。')
+  }
+  if (report.totals.crmLeadsUnmatched > 0) {
+    out.push(`另有 ${report.totals.crmLeadsUnmatched} 条进线对不上广告账户（那条广告这段时间没抓到数据），没算进上面的进线数。`)
+  }
+  return out
+}
+
+function hourTitle(report: BreakdownReport): string {
+  const zones = [...new Set(report.accounts.map(a => a.timezone).filter((z): z is string => z !== null))]
+  return zones.length > 0 ? `按小时（广告账户时区：${zones.join('、')}）` : '按小时（广告账户时区读不到）'
+}
+
 function OverviewCard({ report }: { report: BreakdownReport }) {
   const cur = report.accounts[0]?.currency ?? null
   const t = report.totals
@@ -88,6 +109,7 @@ function OverviewCard({ report }: { report: BreakdownReport }) {
         </tbody>
       </table>
       {report.accounts.map(acc => <AccountLine key={acc.adAccountId} acc={acc} />)}
+      {reportWarnings(report).map(w => <p key={w} className="mt-2 text-xs text-amber-800">{w}</p>)}
     </div>
   )
 }
@@ -292,7 +314,7 @@ export default function BreakdownPanel({ clientId }: { clientId: string }) {
         <>
           <OverviewCard report={report} />
           <NonLeadCard rows={report.nonLeadSpend} cur={cur} />
-          <Section title="按小时（新西兰时间）" note="每小时每花 100 块能带来几条进线；进线按客户系统里的提交时间算。">
+          <Section title={hourTitle(report)} note="每小时每花 100 块能带来几条进线；进线按客户系统里的提交时间算。">
             <HourBars rows={report.hour} cur={cur} />
             <RowTable rows={report.hour} cur={cur} label={hourLabel} />
           </Section>

@@ -277,4 +277,39 @@ describe('buildBreakdownReport', () => {
     expect(report.placement).toHaveLength(1)
     expect(report.placement[0].leads).toBe(10)
   })
+
+  it('builds the device table from placement_device rows', () => {
+    const report = buildBreakdownReport({
+      since: '2026-10-01',
+      until: '2026-11-01',
+      days: 30,
+      accounts: [ACCOUNT],
+      stats: [
+        stat({ breakdown_value: { platform: 'facebook', position: 'feed', device: 'mobile_app' }, spend: 80, meta_leads: 8 }),
+        stat({ breakdown_value: { platform: 'instagram', position: 'feed', device: 'mobile_app' }, spend: 20, meta_leads: 2 }),
+        stat({ breakdown_value: { platform: 'facebook', position: 'feed', device: 'desktop' }, spend: 10, meta_leads: 1 }),
+      ],
+      leads: [],
+      objectives: OBJECTIVES,
+    })
+    expect(report.device.map((r) => [r.key, r.spend, r.leads])).toEqual([
+      ['mobile_app', 100, 10],
+      ['desktop', 10, 1],
+    ])
+  })
+
+  it('reports unmatched CRM leads apart from crmLeads', () => {
+    const report = buildBreakdownReport({
+      since: '2026-10-01',
+      until: '2026-11-01',
+      days: 30,
+      accounts: [ACCOUNT],
+      stats: [],
+      leads: [lead('2026-10-26', 9)],
+      objectives: OBJECTIVES,
+      unmatchedLeads: 3,
+    })
+    expect(report.totals.crmLeads).toBe(1)
+    expect(report.totals.crmLeadsUnmatched).toBe(3)
+  })
 })

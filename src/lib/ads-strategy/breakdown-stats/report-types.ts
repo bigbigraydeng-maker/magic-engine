@@ -54,6 +54,8 @@ export interface BreakdownReport {
     /** crmLeads / metaLeads; null when metaLeads is 0. */
     matchRate: number | null
     costPerCrmLead: number | null
+    /** CRM form leads in the window whose ad has no placement row (so no account to bucket them by); left out of crmLeads. */
+    crmLeadsUnmatched: number
   }
   nonLeadSpend: NonLeadSpend[]
   /** key = '0'..'23', account-timezone hour; leads = CRM form leads by submission hour in the ad's account timezone. */
@@ -62,7 +64,7 @@ export interface BreakdownReport {
   weekday: ReportRow[]
   /** key = 'platform · position'; leads = Meta-reported. */
   placement: ReportRow[]
-  /** key = device; leads = Meta-reported. */
+  /** key = device, taken from placement_device rows; leads = Meta-reported. */
   device: ReportRow[]
   /** key = 'age · gender'; leads = Meta-reported. */
   ageGender: ReportRow[]

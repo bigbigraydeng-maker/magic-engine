@@ -343,17 +343,23 @@ function buildLeads(
   timezoneByAccount: Map<string, string | null>,
   since: string,
   until: string,
-): LeadInput[] {
+): { leads: LeadInput[]; unmatched: number } {
   const out: LeadInput[] = []
+  let unmatched = 0
   for (const t of touchpoints) {
     const accountId = adAccountMap.get(t.attr_ad_id)
-    if (!accountId) continue
+    if (!accountId) {
+      // No account to take a timezone from; judge the window in UTC just for the count.
+      const { date } = localParts(t.occurred_at, null)
+      if (date >= since && date <= until) unmatched += 1
+      continue
+    }
     const tz = timezoneByAccount.get(accountId) ?? null
     const { date, hour } = localParts(t.occurred_at, tz)
     if (date < since || date > until) continue
     out.push({ ad_account_id: accountId, local_date: date, local_hour: hour })
   }
-  return out
+  return { leads: out, unmatched }
 }
 
 /** Load everything needed for the breakdown report and build it. */
@@ -381,7 +387,7 @@ export async function loadBreakdownReport(
   const timezoneByAccount = new Map<string, string | null>()
   for (const a of accounts) timezoneByAccount.set(a.adAccountId, a.timezone)
 
-  const leads = buildLeads(touchpoints, adAccountMap, timezoneByAccount, since, until)
+  const { leads, unmatched } = buildLeads(touchpoints, adAccountMap, timezoneByAccount, since, until)
 
   return buildBreakdownReport({
     since,
@@ -391,5 +397,6 @@ export async function loadBreakdownReport(
     stats,
     leads,
     objectives,
+    unmatchedLeads: unmatched,
   })
 }
