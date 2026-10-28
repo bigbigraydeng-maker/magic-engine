@@ -8,12 +8,15 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { requireOperatorAccess, requirePaidClientAccess } from '@/lib/auth/client-access'
+import { getProvider } from '@/lib/crm/email-templates/facts/registry'
 import { featureStateOf } from '@/lib/crm/email-templates/feature-state'
+import { COMMON_VARIABLES } from '@/lib/crm/email-templates/placeholders'
 import { summariseReceiptsSince } from '@/lib/crm/email-templates/receipt-store'
 import { canEditSettings } from '@/lib/crm/email-templates/settings-input'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
 import { checkTemplateForSave, parseTemplateWrite, statusForAppend } from '@/lib/crm/email-templates/template-input'
 import { appendTemplateVersion, listCurrentTemplates } from '@/lib/crm/email-templates/template-store'
+import { FACT_SOURCES } from '@/lib/crm/email-templates/types'
 import { supabaseAdmin } from '@/lib/supabase'
 
 interface RouteParams {
@@ -21,6 +24,13 @@ interface RouteParams {
 }
 
 const DAY_MS = 86_400_000
+
+/** The placeholders the editor may offer: the common ones, plus each fact source's own (read from the provider). */
+function variableCatalog(): { common: string[]; bySource: Record<string, string[]> } {
+  const bySource: Record<string, string[]> = {}
+  for (const source of FACT_SOURCES) bySource[source] = Object.keys(source === 'none' ? {} : (getProvider(source)?.variables ?? {}))
+  return { common: [...COMMON_VARIABLES], bySource }
+}
 const UNAVAILABLE = '邮件模板功能暂时读不到数据，请联系 Magic Lab 团队。'
 
 export async function GET(_req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
@@ -40,6 +50,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       canEditSettings: canEditSettings(access.user.email, access.allowedClientId),
       templates,
       stats,
+      variables: variableCatalog(),
     })
   } catch (err) {
     console.error('[crm/email-templates] 读取失败:', err instanceof Error ? err.message : err)

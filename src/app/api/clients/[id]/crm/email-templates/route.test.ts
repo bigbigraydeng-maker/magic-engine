@@ -61,7 +61,12 @@ describe('GET email-templates', () => {
     vi.mocked(canEditSettings).mockReturnValue(true)
     const res = await get()
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ featureState: 'ready', canEditTemplates: true, canEditSettings: true, templates: [], stats: [] })
+    const body = (await res.json()) as Record<string, unknown> & { variables: { common: string[]; bySource: Record<string, string[]> } }
+    expect(body).toMatchObject({ featureState: 'ready', canEditTemplates: true, canEditSettings: true, templates: [], stats: [] })
+    // the placeholders come from the providers, so the editor never hard-codes a vocabulary
+    expect(body.variables.common).toEqual(['first_name', 'sender_name', 'call_when'])
+    expect(body.variables.bySource.none).toEqual([])
+    expect(body.variables.bySource.published_tours).toContain('tour_name')
     expect(listCurrentTemplates).toHaveBeenCalledWith({ marker: 'db' }, 'client-a')
   })
 
