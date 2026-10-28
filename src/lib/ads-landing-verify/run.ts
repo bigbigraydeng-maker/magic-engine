@@ -11,7 +11,7 @@ import { destinationKey, readDestination, requestTarget, type Destination } from
 import { readLandingPage, type PageRead } from './fetch-page'
 import { landingHardCheck, landingHeadline } from './gate'
 import { explainLines, judgeDestination, needsPerson } from './judge'
-import { readStoredReceipt, receiptBody, type LandingReceipt } from './receipt'
+import { currentDestinationReceipt, readStoredReceipt, receiptBody, type LandingReceipt } from './receipt'
 
 export interface LandingView {
   readonly lines: readonly string[]
@@ -90,7 +90,7 @@ export async function showLandingVerify(
   const loaded = await deps.load()
   if (!loaded.ok) return loaded
   const dest = readDestination(loaded.payload)
-  const receipt = readStoredReceipt(loaded.payload)
+  const receipt = currentDestinationReceipt(loaded.payload)
   if (!dest || !receipt) {
     return {
       ok: true,

@@ -59,11 +59,13 @@ export async function writeLandingReceipt(
       .eq('client_id', clientId)
       .eq('action_type', ACTION)
       .eq('payload->>status', 'awaiting_approval')
+      .eq('payload', JSON.stringify(payload))
       .select('id')
     const rows = Array.isArray(updated.data) ? updated.data.length : 0
-    if (updated.error || rows !== 1) {
+    if (updated.error) {
       return { ok: false, status: 503, error: '核实结果没写上，请再查一次。' }
     }
+    if (rows !== 1) return { ok: false, status: 409, error: '广告草稿或核实结果刚刚变过，请刷新后再查一次。' }
     return { ok: true, payload: next }
   } catch {
     return { ok: false, status: 503, error: '核实结果没写上，请再查一次。' }

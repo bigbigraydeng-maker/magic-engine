@@ -3,7 +3,7 @@ import { destinationKey, readDestination, requestTarget } from '../destination'
 import { readLandingPage } from '../fetch-page'
 import { landingHardCheck } from '../gate'
 import { judgeDestination, needsPerson } from '../judge'
-import { receiptBody, readStoredReceipt } from '../receipt'
+import { currentDestinationReceipt, receiptBody, readStoredReceipt } from '../receipt'
 
 const SITE = 'https://example.test'
 const PAGE = `${SITE}/offer`
@@ -146,6 +146,13 @@ describe('landing gate', () => {
     expect(readStoredReceipt({ landing_verify: { v: 1, checkedAt: NOW.toISOString(), destinationKey: 'k', items: [] } })).toBeNull()
     expect(readStoredReceipt({})).toBeNull()
   })
+
+  it('does not reuse a green result after the draft changes its destination', () => {
+    const old = { status: 'awaiting_approval', draft: { kind: 'video_thruplay', linkUrl: PAGE } }
+    const changed = { ...old, draft: { kind: 'video_thruplay', linkUrl: `${SITE}/other` }, landing_verify: receiptBody(NOW.toISOString(), destinationKey(readDestination(old)!), pass.items) }
+    expect(currentDestinationReceipt(changed)).toBeNull()
+    expect(landingHardCheck({ receipt: currentDestinationReceipt(changed), confirmed: false, now: NOW }).state).toBe('unread')
+  })
 })
 
 describe('landing page read', () => {
@@ -170,5 +177,17 @@ describe('landing page read', () => {
       error: '地址不在这位客户的网站上',
     })
     expect(calls).toEqual([`GET ${PAGE}`])
+  })
+
+  it('times out while waiting for a stalled response body', async () => {
+    let cancelled = false
+    const stream = new ReadableStream<Uint8Array>({ cancel: () => { cancelled = true } })
+    const fetcher = vi.fn(async () => new Response(stream, { status: 200 }))
+    const result = await Promise.race([
+      readLandingPage(PAGE, { siteUrl: SITE, fetcher, timeoutMs: 20 }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('body read never returned')), 200)),
+    ])
+    expect(result.error).toContain('时限')
+    expect(cancelled).toBe(true)
   })
 })

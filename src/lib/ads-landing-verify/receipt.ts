@@ -4,6 +4,7 @@
  */
 
 import type { ItemKey, ItemState, LandingItem } from './judge'
+import { destinationKey, readDestination } from './destination'
 
 const KEYS: readonly ItemKey[] = ['loads', 'right_page', 'form_fields', 'utm']
 const STATES = new Set<ItemState>(['pass', 'fail', 'unchecked', 'skip'])
@@ -49,4 +50,11 @@ export function readStoredReceipt(payload: unknown): LandingReceipt | null {
 
 export function receiptBody(checkedAt: string, destinationKey: string, items: readonly LandingItem[]): LandingReceipt {
   return { v: 1, checkedAt, destinationKey, items }
+}
+
+/** A receipt for an older URL or form cannot open the current draft's gate. */
+export function currentDestinationReceipt(payload: unknown): LandingReceipt | null {
+  const dest = readDestination(payload)
+  const receipt = readStoredReceipt(payload)
+  return dest && receipt?.destinationKey === destinationKey(dest) ? receipt : null
 }

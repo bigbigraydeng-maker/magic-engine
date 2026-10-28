@@ -56,27 +56,43 @@ async function fetchOnce(fetcher: PageFetcher, url: string, timeoutMs: number): 
 
 async function readCapped(res: Response, timeoutMs: number): Promise<string> {
   const body = res.body
-  if (!body || typeof body.getReader !== 'function') return (await res.text()).slice(0, BODY_CAP)
+  if (!body || typeof body.getReader !== 'function') {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    try {
+      return await Promise.race([
+        res.text().then((text) => text.slice(0, BODY_CAP)),
+        new Promise<string>((_, reject) => { timer = setTimeout(() => reject(new Error('读取页面正文超时')), timeoutMs) }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let text = ''
-  const started = Date.now()
-  for (;;) {
-    if (Date.now() - started > timeoutMs) {
-      await reader.cancel().catch(() => undefined)
-      throw new Error('读取页面正文超时')
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('读取页面正文超时')), timeoutMs)
+  })
+  try {
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), timeout])
+      if (done) break
+      if (!value) continue
+      const room = BODY_CAP - text.length
+      text += decoder.decode(value.subarray(0, Math.max(0, room)), { stream: true })
+      if (room <= value.byteLength) {
+        void reader.cancel().catch(() => undefined)
+        break
+      }
     }
-    const { done, value } = await reader.read()
-    if (done) break
-    if (!value) continue
-    const room = BODY_CAP - text.length
-    text += decoder.decode(value.subarray(0, Math.max(0, room)), { stream: true })
-    if (room <= value.byteLength) {
-      await reader.cancel().catch(() => undefined)
-      break
-    }
+    return text
+  } catch (error) {
+    void reader.cancel().catch(() => undefined)
+    throw error
+  } finally {
+    if (timer) clearTimeout(timer)
   }
-  return text
 }
 
 function transient(res: Response): boolean {

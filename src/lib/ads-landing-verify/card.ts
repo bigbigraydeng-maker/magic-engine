@@ -45,7 +45,7 @@ export function landingCardFacts(
     amount: AMOUNT,
     date: DATE,
     scope,
-    hardChecks: [{ label: '请你看过再点', state: 'green', reason: '点确认表示你接受这次核实结果。' }],
+    hardChecks: [{ label: '请你看过再点', state: 'green', reason: `点确认表示你接受这次核实结果。目标校验码 ${receipt.destinationKey}` }],
   })
 }
 

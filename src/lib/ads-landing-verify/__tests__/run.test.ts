@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { CardFacts, ConfirmationCardView } from '@/lib/confirmation-card'
 import { landingCardFacts, landingCardFingerprint } from '../card'
 import { isLandingConfirmed } from '../confirm'
-import { runLandingVerify, type LandingRunDeps } from '../run'
+import { runLandingVerify, showLandingVerify, type LandingRunDeps } from '../run'
 import { receiptBody } from '../receipt'
 import { writeLandingReceipt } from '../store'
 
@@ -145,6 +145,27 @@ describe('landing confirmation', () => {
     expect(await isLandingConfirmed(chain([{ status: 'authorized', input }]) as never, 'client-1', DRAFT, '演示广告账户', receipt)).toBe(true)
     const other = { ...input, content_fingerprint: 'b'.repeat(64) }
     expect(await isLandingConfirmed(chain([{ status: 'authorized', input: other }]) as never, 'client-1', DRAFT, '演示广告账户', receipt)).toBe(false)
+
+    const moved = receiptBody(NOW.toISOString(), 'different-destination', receipt.items)
+    expect(landingCardFingerprint(landingCardFacts(DRAFT, '演示广告账户', moved)!)).not.toBe(input.content_fingerprint)
+    expect(await isLandingConfirmed(chain([{ status: 'authorized', input }]) as never, 'client-1', DRAFT, '演示广告账户', moved)).toBe(false)
+  })
+
+  it('shows an old destination receipt as unchecked', async () => {
+    const old = payload()
+    const receipt = receiptBody(NOW.toISOString(), 'old-destination', [
+      { key: 'loads', state: 'pass', detail: '页面能打开' },
+      { key: 'right_page', state: 'pass', detail: '打开的就是这一页' },
+      { key: 'form_fields', state: 'skip', detail: '这一页没有表单' },
+      { key: 'utm', state: 'skip', detail: '这条广告没有带追踪参数' },
+    ])
+    const shown = await showLandingVerify({
+      now: NOW,
+      load: async () => ({ ok: true, payload: { ...old, landing_verify: receipt } }),
+      confirmed: async () => true,
+    })
+    expect(shown.ok).toBe(true)
+    if (shown.ok) expect(shown.view.clear).toBe(false)
   })
 
   it('does not write the receipt onto an ad that is no longer waiting', async () => {
@@ -159,5 +180,24 @@ describe('landing confirmation', () => {
     const result = await writeLandingReceipt(sb as never, 'client-1', DRAFT, { status: 'active' }, receipt)
     expect(result.ok).toBe(false)
     expect(update).not.toHaveBeenCalled()
+  })
+
+  it('rejects a stale save when another check changed the draft payload', async () => {
+    const old = payload()
+    const receipt = receiptBody(NOW.toISOString(), 'key', [
+      { key: 'loads', state: 'pass', detail: '页面能打开' },
+      { key: 'right_page', state: 'pass', detail: '打开的就是这一页' },
+      { key: 'form_fields', state: 'skip', detail: '这一页没有表单' },
+      { key: 'utm', state: 'skip', detail: '这条广告没有带追踪参数' },
+    ])
+    const filters: Array<[string, unknown]> = []
+    const query = {
+      eq: (field: string, value: unknown) => { filters.push([field, value]); return query },
+      select: async () => ({ data: [], error: null }),
+    }
+    const sb = { from: () => ({ update: () => query }) }
+    const result = await writeLandingReceipt(sb as never, 'client-1', DRAFT, old, receipt)
+    expect(result).toMatchObject({ ok: false, status: 409 })
+    expect(filters).toContainEqual(['payload', JSON.stringify(old)])
   })
 })

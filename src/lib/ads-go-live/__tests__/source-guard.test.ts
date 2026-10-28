@@ -28,7 +28,10 @@ describe('go-live library stays off the ad network', () => {
 
   it('mounts the shared card on the approval page', () => {
     const page = readFileSync(join(process.cwd(), 'src/app/dashboard/ad-approval/page.tsx'), 'utf8')
-    expect(page).toContain('GoLiveCardPanel')
+    const gate = readFileSync(join(process.cwd(), 'src/components/landing-verify/BeforeGoLive.tsx'), 'utf8')
+    expect(page).toContain('BeforeGoLive')
+    expect(gate).toContain('LandingVerifyPanel')
+    expect(gate).toContain('GoLiveCardPanel')
     expect(page).not.toContain('ApproveButtons')
     expect(page).not.toContain('/api/ad-approval')
   })
