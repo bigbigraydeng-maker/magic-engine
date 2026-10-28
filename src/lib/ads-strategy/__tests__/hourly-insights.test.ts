@@ -5,7 +5,8 @@
  *   - the request window is anchored to the AD ACCOUNT's timezone and never
  *     includes today (a partial day would read as a collapse);
  *   - the upsert is chunked newest-day-first, so a half-written batch leaves
- *     its gap at the OLD edge — the only place the depth probe looks.
+ *     its gap at the OLD edge — the only place the depth probe looks, and the
+ *     probe judges by the EARLIEST stored day, so a shallow history re-backfills.
  *
  * The mocking shape mirrors __tests__/daily-insights.test.ts: the Meta fetcher
  * hands back a page walk ({ rows, complete }), and supabaseAdmin.from(table)
@@ -27,8 +28,9 @@ vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: (table: string) => ({
       // Two tables, two probes, dispatched by name:
-      //   ad_hourly_insights  → hasHourlyHistory(): select('insight_date')
-      //     .eq('client_id', id).eq('ad_account_id', acct).limit(1)
+      //   ad_hourly_insights  → needsHourlyBackfill(): select('insight_date')
+      //     .eq('client_id', id).eq('ad_account_id', acct)
+      //     .order('insight_date', { ascending: true }).limit(1)  → EARLIEST stored day
       //   ad_entity_snapshots → resolveAccountTimezone(): select(...)
       //     .eq('ad_account_id', acct).eq('level', 'account')
       //     .order('captured_at', …).limit(1)
@@ -44,7 +46,7 @@ vi.mock('@/lib/supabase', () => ({
         const eqs: unknown[] = []
         const chain = {
           eq: (...args: unknown[]) => { eqs.push(...args); return chain },
-          limit: () => historyProbe(...eqs),
+          order: () => ({ limit: () => historyProbe(...eqs) }),
         }
         return chain
       },
@@ -210,14 +212,17 @@ describe('syncAdsetHourlyInsights', () => {
 
   it('chunks 1200 rows into 3 upserts, newest day first', async () => {
     historyProbe.mockResolvedValue(DEEP_HISTORY)
-    // 1200 rows spread across 30 days × 40 ad sets — the realistic backfill shape.
+    // 1200 DISTINCT (ad set, day, hour) keys: 5 ad sets × 24 hours × 10 days.
+    // Distinct on purpose — a real batch with a repeated key makes Postgres
+    // reject the whole upsert ("cannot affect row a second time").
     const rows: MetaAdsetHourlyRow[] = Array.from({ length: 1200 }, (_, i) =>
       hourlyRow({
-        adset_id:     `a${i % 40}`,
-        insight_date: `2026-10-${String((i % 30) + 1).padStart(2, '0')}`,
-        hour:         i % 24,
+        adset_id:     `a${i % 5}`,
+        hour:         Math.floor(i / 5) % 24,
+        insight_date: `2026-10-${String(Math.floor(i / 120) + 1).padStart(2, '0')}`,
       }),
     )
+    expect(new Set(rows.map(r => `${r.adset_id}|${r.insight_date}|${r.hour}`)).size).toBe(1200)
     fetchHourly.mockResolvedValue({ rows, complete: true })
 
     const res = await syncAdsetHourlyInsights('client-1', 'act_1', 'tok')
@@ -228,12 +233,16 @@ describe('syncAdsetHourlyInsights', () => {
     expect(res.rows_written).toBe(1200)
 
     // The safety property: if the run dies after chunk 1, the gap must land on
-    // the OLDEST days — the only place the depth probe looks.
-    const firstChunk = upsert.mock.calls[0][0] as Array<Record<string, string>>
-    const lastChunk  = upsert.mock.calls[2][0] as Array<Record<string, string>>
-    const newestOfFirst = firstChunk.map(r => r.insight_date).sort().reverse()[0]
-    const oldestOfLast  = lastChunk.map(r => r.insight_date).sort()[0]
-    expect(newestOfFirst >= oldestOfLast).toBe(true)
+    // the OLDEST days. Every day in an earlier chunk is at least as new as every
+    // day in a later chunk — removing the sort (input is oldest-first) breaks it.
+    const dates = (call: number) => (upsert.mock.calls[call][0] as Array<Record<string, string>>).map(r => r.insight_date)
+    const oldestOfFirst = [...dates(0)].sort()[0]
+    const newestOfSecond = [...dates(1)].sort().reverse()[0]
+    const oldestOfSecond = [...dates(1)].sort()[0]
+    const newestOfLast = [...dates(2)].sort().reverse()[0]
+    expect(oldestOfFirst >= newestOfSecond).toBe(true)
+    expect(oldestOfSecond >= newestOfLast).toBe(true)
+    expect(dates(0)[0]).toBe('2026-10-10')
   })
 
   it('writes nothing and reports success when Meta returns an empty complete walk', async () => {
@@ -278,7 +287,7 @@ describe('syncAdsetHourlyInsights', () => {
     expect(res.error).toContain('meta 500')
   })
 
-  it('treats a failed history probe as "has history" so it does not backfill forever', async () => {
+  it('treats a failed history probe as "no backfill needed" so it does not deep-pull forever', async () => {
     historyProbe.mockResolvedValue({ data: null, error: { message: 'x' } })
     fetchHourly.mockResolvedValue({ rows: [hourlyRow()], complete: true })
 
@@ -286,5 +295,53 @@ describe('syncAdsetHourlyInsights', () => {
 
     expect(res.backfilled).toBe(false)
     expect(res.days_requested).toBe(HOURLY_DEFAULT_LOOKBACK_DAYS)
+  })
+
+  it('re-backfills when stored history is SHALLOW (a half-finished first run), not just when empty', async () => {
+    // Only the last 2 days made it in; the old edge is missing.
+    historyProbe.mockResolvedValue(historyReachingBack(2))
+    fetchHourly.mockResolvedValue({ rows: [hourlyRow()], complete: true })
+
+    const res = await syncAdsetHourlyInsights('client-1', 'act_1', 'tok')
+
+    expect(res.backfilled).toBe(true)
+    expect(res.days_requested).toBe(HOURLY_BACKFILL_LOOKBACK_DAYS)
+  })
+
+  it('does not backfill when history already reaches back to the backfill window', async () => {
+    historyProbe.mockResolvedValue(historyReachingBack(HOURLY_BACKFILL_LOOKBACK_DAYS + 1))
+    fetchHourly.mockResolvedValue({ rows: [hourlyRow()], complete: true })
+
+    const res = await syncAdsetHourlyInsights('client-1', 'act_1', 'tok')
+
+    expect(res.backfilled).toBe(false)
+  })
+
+  it('a refused deep backfill (0 rows, incomplete) retries the short window so recent days still land', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-28T10:00:00Z'))
+    historyProbe.mockResolvedValue(NO_HISTORY)
+    fetchHourly
+      .mockResolvedValueOnce({ rows: [], complete: false })
+      .mockResolvedValueOnce({ rows: [hourlyRow()], complete: true })
+
+    const res = await syncAdsetHourlyInsights('client-1', 'act_1', 'tok')
+
+    expect(fetchHourly).toHaveBeenCalledTimes(2)
+    const short = hourlyRequestWindow(false, AUCKLAND, new Date('2026-10-28T10:00:00Z'))
+    expect(fetchHourly.mock.calls[1]).toEqual(['act_1', 'tok', short.since, short.until])
+    expect(res).toMatchObject({ success: true, rows_written: 1, backfilled: false, days_requested: HOURLY_DEFAULT_LOOKBACK_DAYS })
+  })
+
+  it('steady-state pull passes the 3-day window to Meta', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-10-28T10:00:00Z'))
+    historyProbe.mockResolvedValue(DEEP_HISTORY)
+    fetchHourly.mockResolvedValue({ rows: [hourlyRow()], complete: true })
+
+    await syncAdsetHourlyInsights('client-1', 'act_1', 'tok')
+
+    const expected = hourlyRequestWindow(false, AUCKLAND, new Date('2026-10-28T10:00:00Z'))
+    expect(fetchHourly.mock.calls[0]).toEqual(['act_1', 'tok', expected.since, expected.until])
   })
 })

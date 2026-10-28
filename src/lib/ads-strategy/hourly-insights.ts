@@ -52,23 +52,38 @@ function shiftDays(from: Date, days: number): Date {
 }
 
 /**
- * True when this client's hourly history exists at all.
+ * Does this account's stored hourly history still need a backfill?
  *
- * On query error this returns TRUE, not false. Returning false would make every
+ * Judged by DEPTH, not by "any row exists": the earliest stored day must reach
+ * back to the backfill window. A first run that dies half-way (Meta page walk
+ * cut short, chunked write failing) leaves the newest days written and the old
+ * edge missing — "any row exists" would call that complete and freeze the gap
+ * forever. This mirrors daily-insights.needsBackfill.
+ *
+ * On query error this returns FALSE, not true. Returning true would make every
  * run request the 14-day backfill — an endless deep pull triggered by a broken
- * probe. Treating an error as "has history" keeps the steady-state window, and
- * the upsert that follows will surface a missing table loudly anyway.
+ * probe. The upsert that follows surfaces a missing table loudly anyway.
+ *
+ * Cost of the depth rule: an account with fewer than 14 days of delivery
+ * re-pulls 14 days each run until it ages in. Cheap (one capped page walk).
  */
-async function hasHourlyHistory(clientId: string, adAccountId: string): Promise<boolean> {
+async function needsHourlyBackfill(
+  clientId: string,
+  adAccountId: string,
+  backfillSince: string,
+): Promise<boolean> {
   const { data, error } = await supabaseAdmin
     .from('ad_hourly_insights')
     .select('insight_date')
     .eq('client_id', clientId)
     .eq('ad_account_id', adAccountId)
+    .order('insight_date', { ascending: true })
     .limit(1)
 
-  if (error) return true
-  return ((data as Array<{ insight_date: string }> | null) ?? []).length > 0
+  if (error) return false
+  const earliest = ((data as Array<{ insight_date: string }> | null) ?? [])[0]?.insight_date
+  if (!earliest) return true
+  return earliest > backfillSince
 }
 
 /**
@@ -181,14 +196,23 @@ export async function syncAdsetHourlyInsights(
   accessToken: string,
 ): Promise<SyncHourlyInsightsResult> {
   try {
-    const [hasHistory, timezone] = await Promise.all([
-      hasHourlyHistory(clientId, adAccountId),
-      resolveAccountTimezone(adAccountId),
-    ])
-    const backfill = !hasHistory
-    const { since, until, lookback } = hourlyRequestWindow(backfill, timezone)
+    const timezone = await resolveAccountTimezone(adAccountId)
+    let backfill = await needsHourlyBackfill(
+      clientId,
+      adAccountId,
+      hourlyRequestWindow(true, timezone).since,
+    )
+    let { since, until, lookback } = hourlyRequestWindow(backfill, timezone)
 
-    const { rows, complete } = await getAdsetHourlyInsights(adAccountId, accessToken, since, until)
+    let { rows, complete } = await getAdsetHourlyInsights(adAccountId, accessToken, since, until)
+    // A backfill that returned NOTHING and did not finish (Meta refused the deep
+    // pull) must not also cost the steady-state days: retry once with the short
+    // window so the recent edge still lands while the deep pull keeps failing.
+    if (backfill && rows.length === 0 && !complete) {
+      backfill = false
+      ;({ since, until, lookback } = hourlyRequestWindow(false, timezone))
+      ;({ rows, complete } = await getAdsetHourlyInsights(adAccountId, accessToken, since, until))
+    }
     if (rows.length === 0) {
       // An empty result only means "no delivery" when the walk actually
       // finished; otherwise Meta failed and silence would look identical.
@@ -217,7 +241,7 @@ export async function syncAdsetHourlyInsights(
       backfilled: backfill,
       // Steady-state runs re-pull the same window daily, so a short window is
       // self-healing — but it should still be visible rather than silent.
-      error: complete ? undefined : 'page walk stopped early — window is short; the next run re-requests the missing depth',
+      error: complete ? undefined : 'page walk stopped early — window is short; the next run re-requests the missing depth (depth check)',
     }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Unknown error' }
