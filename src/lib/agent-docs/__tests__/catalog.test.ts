@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildCatalog, readAllowedDoc } from '../load'
-import { parseReadme } from '../parse-readme'
+import { parseReadme, parseRulesIndex } from '../parse-readme'
+import { agentCodeForLesson, loadPendingLessonCounts, pendingLessonLabel } from '../pending-lessons'
 import { parseDocHeader } from '../header'
 import { resolveDocLink } from '../links'
 import { isGlobalAdmin } from '../guard'
@@ -132,6 +133,59 @@ describe('real README format', () => {
     expect(c.allowed.has('sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md')).toBe(true)
     const h = parseDocHeader(text)
     expect([h['负责'], h['日期'], h['风险'], h['范围'].includes('docs/agents'), h['最后核实'].includes('只核对'), h['状态'].includes('｜')]).toEqual(['待 PM 指定', '2026-10-27', 'C（仅文档）', true, true, false])
+  })
+})
+
+describe('rules index', () => {
+  const table = [
+    '| 规则来源 | 归谁 | 路径 | 条数 | 进不进提示词 | 最后核实 |',
+    '|---|---|---|---|---|---|',
+    '| 广告经验手册 | 卫青 `weiqing` | `docs/playbooks/ads/meta-general.md` | 42 | 不进提示词 | 2026-10-28 |',
+    '| 跨客户经验 | OPC | `src/lib/memory/write-lesson.ts` | 不抄 | 只有启用才进 | 2026-10-28 |',
+  ].join('\n')
+  it('reads the six columns and keeps the handwritten date', () => {
+    const parsed = parseRulesIndex(table)
+    expect(parsed?.rows[0]).toMatchObject({ source: '广告经验手册', count: '42', verified: '2026-10-28', inPrompt: '不进提示词' })
+    expect(parsed?.rows[1].owner).toContain('OPC')
+  })
+  it('rejects a table that is missing a column', () => {
+    expect(parseRulesIndex('| 规则来源 | 归谁 |\n|---|---|\n| a | b |')).toBeNull()
+  })
+  it('on the real repo, 卫青 sees the ads playbook and OPC does not', () => {
+    const c = buildCatalog(process.cwd())
+    expect(c.rulesOk).toBe(true)
+    expect(c.rulesNotice).toBeNull()
+    const w = c.rows.find((r) => r.code === 'weiqing')
+    const playbook = w?.rules.find((r) => r.source === '广告经验手册')
+    expect(playbook).toMatchObject({ count: '42', verified: '2026-10-28', doc: { kind: 'playbooks', file: 'ads/meta-general.md' } })
+    expect(w?.rules.some((r) => r.source === '跨客户经验' || r.source === '广告漏斗体检')).toBe(false)
+    expect(c.allowed.has('playbooks/ads/meta-general.md')).toBe(true)
+    expect(c.allowed.has('registry/platform-rules-index.md')).toBe(true)
+    expect(readAllowedDoc(c, 'playbooks', 'ads/meta-general.md').ok).toBe(true)
+    expect(readAllowedDoc(c, 'playbooks', '../secret.md').ok).toBe(false)
+  })
+  it('a missing or malformed index keeps the roster and only sets a notice', () => {
+    const missing = buildCatalog(repo({ 'docs/agents/README.md': README, 'docs/agents/10-alpha.md': '# 示例甲 — 手册' }))
+    expect(missing.rulesOk).toBe(false)
+    expect(missing.rulesNotice).toContain('规则总索引')
+    expect(missing.rows.find((r) => r.code === 'alpha')?.nameZh).toBe('示例甲')
+    const bad = buildCatalog(repo({
+      'docs/agents/README.md': README,
+      'docs/registry/platform-rules-index.md': '| 规则来源 | 归谁 |\n|---|---|\n| x | y |\n',
+    }))
+    expect(bad.rulesOk).toBe(false)
+    expect(bad.rows.every((r) => r.rules.length === 0)).toBe(true)
+  })
+})
+
+describe('pending lesson label', () => {
+  it('names the agent from pillar or flywheel and does not touch the database without credentials', async () => {
+    expect(agentCodeForLesson('ads', null)).toBe('weiqing')
+    expect(agentCodeForLesson(null, 'geo')).toBe('mengzi')
+    expect(agentCodeForLesson('unknown', null)).toBeNull()
+    expect(pendingLessonLabel(3)).toBe('待采纳经验 3 条')
+    expect(pendingLessonLabel(null)).toBe('待采纳经验读不到')
+    expect(await loadPendingLessonCounts()).toBeNull()
   })
 })
 

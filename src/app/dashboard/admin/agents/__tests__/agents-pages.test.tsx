@@ -11,7 +11,7 @@ vi.mock('next/navigation', () => ({
 }))
 
 import AgentsPage from '../page'
-import AgentDocPage from '../[kind]/[file]/page'
+import AgentDocPage from '../[kind]/[...file]/page'
 import { DocMarkdown } from '../_components/DocMarkdown'
 
 const ADMIN = { 'x-user-role': 'admin', 'x-user-tier': 'admin' }
@@ -35,9 +35,14 @@ describe('page gate', () => {
     headerMap = ADMIN
     const { container } = render(await AgentsPage())
     expect(screen.getByText('Agent 与手册')).toBeTruthy()
+    expect(screen.getByText('读哪些规则')).toBeTruthy()
+    expect(screen.getByText('进不进提示词')).toBeTruthy()
+    expect(screen.getByText('最后核实')).toBeTruthy()
+    expect(screen.getAllByText('待采纳经验读不到').length).toBeGreaterThan(0)
     expect(container.querySelector('button, form, input, textarea')).toBeNull()
     expect(container.textContent).toContain('改文档请走 GitHub')
     expect(container.textContent).not.toMatch(/[{]"/)
+    expect(container.textContent).not.toContain('规则总索引读不到')
   })
 })
 
@@ -54,6 +59,13 @@ describe('doc page 404s', () => {
     const { container } = render(await AgentDocPage({ params: Promise.resolve({ kind: 'agents', file: '10-ziya.md' }) }))
     expect(container.textContent).toContain('子牙')
     expect(container.textContent).toContain('待补')
+  })
+  it('opens a nested playbook and blocks a path that climbs out', async () => {
+    headerMap = ADMIN
+    const { container } = render(await AgentDocPage({ params: Promise.resolve({ kind: 'playbooks', file: ['ads', 'meta-general.md'] }) }))
+    expect(container.textContent).toContain('Meta 广告经验手册')
+    expect(container.querySelector('button, form, input, textarea')).toBeNull()
+    await expect(AgentDocPage({ params: Promise.resolve({ kind: 'playbooks', file: ['..', 'clients', 'x.md'] }) })).rejects.toThrow('NOT_FOUND')
   })
 })
 
