@@ -144,7 +144,7 @@ Reel:   处方 → 视频工厂工单 → 苏东坡 + 马良审 → PM 点「通
 - **`not_comparable`**：被助推 / `boost_unknown`；窗口内客户做过非 ME 改动；节假日或活动周（客户配置）；读不全（按 M8）；手动发布的帖子。
 - **「请示 PM」触发**：①`unreachable_within_quota`；②素材池耗尽；③熔断。①依赖每条帖子平均带来多少私信，**小样本下算不出来时它不会响——已知局限，日报如实写**。
 - **C3 分子分母口径**：目标进度的分子是主页层的自然私信 / 点击（含手动发布、剔除广告来源，见 M9），而"名额可达性"只能用系统发的帖子估每条结果——**两者口径不同，日报并列显示并标注，不拿其一去判另一个**；在 WP0 证明可剔除广告重复之前，C3 不用于请示 PM。
-- **诚实预期**：按现有量，C2 / C3 在 CTS 上很可能**数月都只给「样本不足」**；Post 的 C2 现在是空的（系统发图文为 0）；这条链前期价值是**把管道接通、让数据开始积累**，不是马上出结论。
+- **诚实预期**：按现有量，C2 / C3 在 CTS 上很可能**数月都只给「样本不足」**；Post 的 C2 现在基本是空的（系统发图文近乎为 0）；这条链前期价值是**把管道接通、让数据开始积累**，不是马上出结论。
 - 每次判定写入 M3 的新表，只追加不覆盖。
 
 ### 3.6 Tune（调）
@@ -243,7 +243,7 @@ social/pm_digest.ready          日检段
 
 ## 9. Reuse Statement
 
-- 复用：视频工厂、Story-lite 授权 / 指纹 / 发送窗口、每日计划自动发布与手动发布、Facebook 发布器、**现有读回链（`daily-plan-post-measurement`、`factory-reel-measurement-adapter`、`record_post_measurement_snapshot`、回执表）**、`post-performance`（S2）、创意标签（S1）、**`social-post-cohort` / `social-post-evaluator` / `tune-suggestions`**、`meta/ads-manager.ts`（助推识别）、`outbound-claims*`、评论分类、页面指标同步、`brief/jina.ts`、`goals`、memory 分层、Inngest、pm-todo、复盘 R1–R5、5A 设计、广告 `goal-pace` 线性部分。
+- 复用：视频工厂、Story-lite 授权 / 指纹 / 发送窗口、每日计划自动发布与手动发布、Facebook 发布器、**现有读回链（`daily-plan-post-measurement`、`factory-reel-measurement-adapter`、`record_post_measurement_snapshot`、回执表）**、`post-performance`（S2）、创意标签（S1）、**`social-post-cohort` / `social-post-evaluator` / `tune-suggestions`**、`ads-strategy/portfolio/snapshot.ts` 与新写的「读不全」函数（助推识别；不直接用 `fetchAdStoryIds`）、`outbound-claims*`、评论分类、页面指标同步、`brief/jina.ts`、`goals`、memory 分层、Inngest、pm-todo、复盘 R1–R5、5A 设计、广告 `goal-pace` 线性部分。
 - 新增 platform-shared：巡察、验证模块、**判定表（新表，A）**、发布暂停标记、助推识别、封闭处方词表、两支柱共用的 `goal-pace` 抽取、日检段。
 - industry-specific：角色枚举、行业事实 → 行业剧本；旅游版目前仅有候选。
 - client-specific：目标数字、名额、素材池、「邀请私信」槽位与读取小时数、utm 约定、受众节奏、禁用词、时段、memory 条目。
