@@ -14,8 +14,10 @@ function parseIso(value: string): number | null {
   return Number.isNaN(ms) ? null : ms
 }
 
+// 'unknown' = the mail may well have gone out and has not been settled yet (that takes ten minutes): treated as sent,
+// because the cost of a wrong "yes, he already got it" is a short wait, the cost of a wrong "no" is a second mail.
 function isSentWithTemplate(receipt: StoredReceipt): boolean {
-  return receipt.outcome === 'sent' && receipt.templateKey !== null
+  return (receipt.outcome === 'sent' || receipt.outcome === 'unknown') && receipt.templateKey !== null
 }
 
 export function evaluateFollowUp(input: FollowUpInput): GateViolation | null {

@@ -12,7 +12,7 @@ import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
 import { MICROSOFT_MAIL_PROVIDER } from '@/lib/microsoft/mail-oauth'
 import { checkManualSendDncForContact } from '@/lib/crm/manual-send-dnc-gate'
 import type { TouchKind } from '@/lib/crm/email-compose/enquiry-record'
-import { GRAPH, callWithRetry, sendDraft as graphSendDraft, writeTouchpoint, type GraphCallResult } from '@/lib/microsoft/mail-send'
+import { GRAPH, callWithRetry, writeTouchpoint, type GraphCallResult } from '@/lib/microsoft/mail-send'
 import type { GraphSendOutcome, MailNewDeps, MailNewGraph, MailNewStore, PendingDraft, PriorSend } from '@/lib/microsoft/mail-send-new'
 
 const LOCK_STALE_MS = 5 * 60_000
@@ -62,21 +62,24 @@ export function createMailNewStore(): MailNewStore {
       return ((data as Array<{ id: string; account_id: string }> | null) ?? []).map((r) => ({ connectionId: r.id, account: r.account_id.toLowerCase() }))
     },
     async findPriorSend(clientId, requestId, contactId): Promise<PriorSend | null> {
-      const { data } = await db
+      const { data, error: priorError } = await db
         .from('conversation_outbound_log')
         .select('id, status, meta_message_id, conversation_id')
         .eq('client_id', clientId)
         .like('meta_message_id', `req:${requestId}%`)
         .limit(5)
+      // A failed lookup is NOT "nothing was sent before": answering that way would let a retry send the mail again.
+      if (priorError) throw new Error(`findPriorSend: ${priorError.message}`)
       const rows = (data as Array<{ id: string; status: 'pending' | 'sent' | 'failed'; meta_message_id: string | null; conversation_id: string }> | null) ?? []
       if (rows.length === 0) return null
       // Only a send into THIS contact's own conversation counts; a request id reused for another contact is not "already sent".
-      const { data: own } = await db
+      const { data: own, error: ownError } = await db
         .from('conversations')
         .select('id')
         .eq('client_id', clientId)
         .eq('contact_id', contactId)
         .in('id', rows.map((r) => r.conversation_id))
+      if (ownError) throw new Error(`findPriorSend: ${ownError.message}`)
       const mine = new Set(((own as Array<{ id: string }> | null) ?? []).map((c) => c.id))
       const row = rows.find((r) => mine.has(r.conversation_id))
       if (!row) return null
@@ -201,12 +204,12 @@ export function createMailNewStore(): MailNewStore {
 
 const PREFER = { Prefer: 'IdType="ImmutableId"' }
 
-async function graphJson<T>(token: string, path: string, init: RequestInit): Promise<GraphCallResult<T>> {
+async function graphJson<T>(token: string, path: string, init: RequestInit, timeoutMs = GRAPH_TIMEOUT_MS): Promise<GraphCallResult<T>> {
   let res: Response
   try {
     res = await fetch(`${GRAPH}${path}`, {
       ...init,
-      signal: init.signal ?? AbortSignal.timeout(GRAPH_TIMEOUT_MS),
+      signal: init.signal ?? AbortSignal.timeout(timeoutMs),
       headers: { Authorization: `Bearer ${token}`, ...PREFER, ...(init.headers ?? {}) },
     })
   } catch (err) {
@@ -216,23 +219,45 @@ async function graphJson<T>(token: string, path: string, init: RequestInit): Pro
   return { ok: true, value: (await res.json().catch(() => ({}))) as T }
 }
 
-export function createMailNewGraph(): MailNewGraph {
+/**
+ * Send a draft. 202 = accepted. Same contract as the shared `sendDraft`, but with a time limit: a hung call must not
+ * hold the contact lock for minutes. A timeout comes back as status 0, which the caller reports as "outcome unknown"
+ * (the mail may well have gone out) — never as a failure.
+ */
+async function sendDraftWithTimeout(token: string, draftId: string, timeoutMs: number): Promise<GraphCallResult<null>> {
+  let res: Response
+  try {
+    res = await fetch(`${GRAPH}/me/messages/${encodeURIComponent(draftId)}/send`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, ...PREFER },
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+  } catch (err) {
+    return { ok: false, status: 0, error: err instanceof Error ? err.message : String(err) }
+  }
+  if (res.status === 202) return { ok: true, value: null }
+  const text = await res.text().catch(() => '')
+  return { ok: false, status: res.status, error: `HTTP ${res.status}: ${text.slice(0, 300)}` }
+}
+
+export function createMailNewGraph(opts: { timeoutMs?: number } = {}): MailNewGraph {
+  const timeoutMs = opts.timeoutMs ?? GRAPH_TIMEOUT_MS
   return {
     async whoAmI(connectionId) {
-      const r = await callWithRetry(connectionId, (t) => graphJson<{ mail?: string; userPrincipalName?: string }>(t, '/me?$select=mail,userPrincipalName', { method: 'GET' }))
+      const r = await callWithRetry(connectionId, (t) => graphJson<{ mail?: string; userPrincipalName?: string }>(t, '/me?$select=mail,userPrincipalName', { method: 'GET' }, timeoutMs))
       if (!r.ok) return null
       const a = r.value.mail ?? r.value.userPrincipalName
       return a ? a.toLowerCase() : null
     },
     async createDraft(connectionId, { to, subject, body }) {
       const payload = { subject, body: { contentType: 'Text', content: body }, toRecipients: [{ emailAddress: { address: to } }] }
-      const r = await callWithRetry(connectionId, (t) => graphJson<{ id?: string; conversationId?: string }>(t, '/me/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }))
+      const r = await callWithRetry(connectionId, (t) => graphJson<{ id?: string; conversationId?: string }>(t, '/me/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, timeoutMs))
       if (!r.ok) return { error: r.error }
       if (!r.value.id || !r.value.conversationId) return { error: '建草稿成功但没拿到消息 id / conversationId' }
       return { id: r.value.id, conversationId: r.value.conversationId }
     },
     async sendDraft(connectionId, draftId): Promise<GraphSendOutcome> {
-      const r = await callWithRetry(connectionId, (t) => graphSendDraft(t, draftId))
+      const r = await callWithRetry(connectionId, (t) => sendDraftWithTimeout(t, draftId, timeoutMs))
       if (r.ok) return 'sent'
       // 超时 / 网络错误 / 5xx：信可能已经发走，不能当失败。
       if (r.status === 0 || r.status >= 500) return 'unknown'
@@ -240,12 +265,12 @@ export function createMailNewGraph(): MailNewGraph {
     },
     async deleteDraft(connectionId, draftId) {
       await callWithRetry(connectionId, async (t) => {
-        const res = await fetch(`${GRAPH}/me/messages/${encodeURIComponent(draftId)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${t}` } }).catch(() => null)
+        const res = await fetch(`${GRAPH}/me/messages/${encodeURIComponent(draftId)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${t}` }, signal: AbortSignal.timeout(timeoutMs) }).catch(() => null)
         return res && (res.ok || res.status === 404) ? { ok: true as const, value: null } : { ok: false as const, status: res?.status ?? 0, error: 'delete draft failed' }
       })
     },
     async isStillDraft(connectionId, messageId) {
-      const r = await callWithRetry(connectionId, (t) => graphJson<{ isDraft?: boolean }>(t, `/me/messages/${encodeURIComponent(messageId)}?$select=isDraft`, { method: 'GET' }))
+      const r = await callWithRetry(connectionId, (t) => graphJson<{ isDraft?: boolean }>(t, `/me/messages/${encodeURIComponent(messageId)}?$select=isDraft`, { method: 'GET' }, timeoutMs))
       if (!r.ok || typeof r.value.isDraft !== 'boolean') return null
       return r.value.isDraft
     },

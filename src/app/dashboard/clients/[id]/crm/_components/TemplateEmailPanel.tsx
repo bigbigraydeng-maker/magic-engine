@@ -68,7 +68,6 @@ function formatWhen(iso: string | null): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '稍后'
   return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Pacific/Auckland',
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',

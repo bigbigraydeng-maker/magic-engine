@@ -20,6 +20,7 @@ import {
   type SendMeta,
 } from './send-gates'
 import { getCurrentTemplate } from './template-store'
+import { loadClientTimeZone } from './time-zone'
 
 export interface SendGatesProdArgs {
   clientId: string
@@ -103,6 +104,7 @@ export function createSendGateData(
     loadContactView: (clientId, contactId, hours, now) => loadContactView(db, clientId, contactId, hours, now),
     loadSenderName: (clientId, email) => loadSenderName(db, clientId, email),
     sentTemplateReceiptsSince: (clientId, contactId, sinceIso) => findSentTemplateReceiptsSince(db, clientId, contactId, sinceIso),
+    loadTimeZone: (clientId) => loadClientTimeZone(db, clientId),
     frequencySources: createFrequencySources({
       db,
       clientId: args.clientId,

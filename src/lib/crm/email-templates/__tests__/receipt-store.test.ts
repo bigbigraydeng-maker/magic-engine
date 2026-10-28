@@ -133,6 +133,20 @@ describe('listRecentReceipts', () => {
   })
 })
 
+describe('findSentTemplateReceiptsSince: sent or possibly sent', () => {
+  it('includes sends whose outcome is still unknown, but not blocked or failed ones', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = [
+      rowFor('r1', '2024-02-01T00:00:00.000Z', { outcome: 'sent' }),
+      rowFor('r2', '2024-02-02T00:00:00.000Z', { outcome: 'unknown', block_reason: 'send_unknown' }),
+      rowFor('r3', '2024-02-03T00:00:00.000Z', { outcome: 'blocked', block_reason: 'frequency_cap' }),
+      rowFor('r4', '2024-02-04T00:00:00.000Z', { outcome: 'failed', block_reason: 'graph_failed' }),
+    ]
+    const result = await findSentTemplateReceiptsSince(db, CLIENT_ID, CONTACT_ID, '2024-01-01T00:00:00.000Z')
+    expect(result.map((r) => r.requestId).sort()).toEqual(['r1', 'r2'])
+  })
+})
+
 describe('findSentTemplateReceiptsSince', () => {
   it('returns only sent template receipts for the contact since the cut-off', async () => {
     const { db, tables } = makeDb()

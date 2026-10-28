@@ -2,6 +2,7 @@ import type {
   FrequencySources,
   FrequencyVerdict,
   OutboundItem,
+  OutboundSource,
   SourceResult,
 } from './types'
 
@@ -29,8 +30,17 @@ function parseAt(at: string): number | null {
   return Number.isNaN(t) ? null : t
 }
 
+// These sources hold ONE record per mail by construction (a mailbox lists each sent mail once, every send writes one
+// audit row, every campaign is its own id). Two of their records are therefore two mails unless they carry the same id —
+// "same minute, same subject" must never fold two real mails into one, because folding can only UNDER-count.
+const ONE_RECORD_PER_MAIL: ReadonlySet<OutboundSource> = new Set(['sent_items', 'audit', 'mailchimp'])
+// The mailbox and our audit rows use the same id space (Graph immutable ids): equal = the same mail, different = not.
+const GRAPH_ID_SOURCES: ReadonlySet<OutboundSource> = new Set(['sent_items', 'audit'])
+
 function sameMessage(a: OutboundItem, b: OutboundItem): boolean {
   if (a.id !== null && b.id !== null && a.id === b.id) return true
+  if (a.id !== null && b.id !== null && GRAPH_ID_SOURCES.has(a.source) && GRAPH_ID_SOURCES.has(b.source)) return false
+  if (a.source === b.source && ONE_RECORD_PER_MAIL.has(a.source)) return false
   if (a.address.toLowerCase() !== b.address.toLowerCase()) return false
   const ta = parseAt(a.at)
   const tb = parseAt(b.at)

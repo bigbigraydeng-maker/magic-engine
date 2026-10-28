@@ -180,10 +180,13 @@ describe('after he was dialled from the drawer', () => {
 
 describe('formatCallTime', () => {
   const now = new Date('2026-10-28T02:00:00Z') // 15:00 on the 28th in Auckland
-  it('says today / yesterday / the date, in New Zealand time', () => {
-    expect(formatCallTime('2026-10-28T00:42:00Z', now)).toBe('今天 13:42')
-    expect(formatCallTime('2026-10-27T00:42:00Z', now)).toBe('昨天 13:42')
-    expect(formatCallTime('2026-10-20T00:42:00Z', now)).toMatch(/^10月20日 13:42$|^10\/20 13:42$/)
-    expect(formatCallTime('not a date', now)).toBe('刚才')
+  it('says today / yesterday / the date, in the zone it is given', () => {
+    const nz = 'Pacific/Auckland'
+    expect(formatCallTime('2026-10-28T00:42:00Z', now, nz)).toBe('今天 13:42')
+    expect(formatCallTime('2026-10-27T00:42:00Z', now, nz)).toBe('昨天 13:42')
+    expect(formatCallTime('2026-10-20T00:42:00Z', now, nz)).toMatch(/^10月20日 13:42$|^10\/20 13:42$/)
+    expect(formatCallTime('not a date', now, nz)).toBe('刚才')
+    // the same instant is a different clock time in another country's zone
+    expect(formatCallTime('2026-10-28T00:42:00Z', now, 'Australia/Perth')).toBe('今天 08:42')
   })
 })

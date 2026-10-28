@@ -16,6 +16,7 @@ import { evaluateFrequency } from './gates/frequency'
 import type { FrequencySources, GateViolation } from './gates/types'
 import { renderTemplate } from './render'
 import { checkTemplateSendable } from './template-store'
+import { DEFAULT_TIME_ZONE, isValidTimeZone } from './time-zone'
 import type { CallBasis, EmailTemplateVersion, StoredReceipt } from './types'
 
 export type GateReason =
@@ -167,9 +168,26 @@ export interface SendGateData {
   loadSenderName(clientId: string, email: string): Promise<string | null>
   sentTemplateReceiptsSince(clientId: string, contactId: string, sinceIso: string): Promise<StoredReceipt[]>
   frequencySources: FrequencySources
+  /** The client's own time zone ("today" differs between Sydney and Auckland). Absent = the default zone. */
+  loadTimeZone?(clientId: string): Promise<string>
 }
 
-export const DEFAULT_TIME_ZONE = 'Pacific/Auckland'
+export { DEFAULT_TIME_ZONE }
+
+/**
+ * The client's own time zone when the data layer can tell (`loadTimeZone`), else the fallback. A zone that cannot be
+ * read must not stop a send, but it also must not pretend: the fallback is the default market's zone.
+ */
+export async function resolveTimeZone(data: Pick<SendGateData, 'loadTimeZone'>, clientId: string, fallback: string): Promise<string> {
+  if (data.loadTimeZone === undefined) return fallback
+  try {
+    const zone = await data.loadTimeZone(clientId)
+    return isValidTimeZone(zone) ? zone : fallback
+  } catch (err) {
+    console.error('[send-gates] time zone unreadable, using the default:', errorText(err))
+    return fallback
+  }
+}
 
 export function todayInZone(now: Date, timeZone: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
@@ -221,8 +239,11 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+// What goes into the receipt: the rule ids / codes only. A violation's detail can be a piece of the mail itself (a
+// leftover "[Name]", a whole URL), and receipts never hold message text. The staff member still sees the detail in the
+// refusal message that comes back to them.
 function summarise(blocks: readonly GateViolation[]): string {
-  const text = blocks.map((b) => `${b.ruleId ?? b.code}${b.detail ? `:${b.detail}` : ''}`).join(' | ')
+  const text = blocks.map((b) => b.ruleId ?? b.code).join(' | ')
   return text.length > 300 ? text.slice(0, 300) : text
 }
 
@@ -414,11 +435,11 @@ async function runInLock(args: InLockArgs, data: SendGateData, tz: string): Prom
 }
 
 export function createSendGates(data: SendGateData, opts: { timeZone?: string } = {}): MailNewGates {
-  const tz = opts.timeZone ?? DEFAULT_TIME_ZONE
+  const fallback = opts.timeZone ?? DEFAULT_TIME_ZONE
   return {
     async preLock(args) {
       try {
-        return await runPreLock(args, data, tz)
+        return await runPreLock(args, data, await resolveTimeZone(data, args.clientId, fallback))
       } catch (err) {
         console.error('[send-gates] preLock failed:', errorText(err))
         return fail(503, 'internal_error', emptyMeta())
@@ -426,7 +447,7 @@ export function createSendGates(data: SendGateData, opts: { timeZone?: string } 
     },
     async inLock(args) {
       try {
-        return await runInLock(args, data, tz)
+        return await runInLock(args, data, await resolveTimeZone(data, args.clientId, fallback))
       } catch (err) {
         console.error('[send-gates] inLock failed:', errorText(err))
         return fail(503, 'internal_error', args.meta)

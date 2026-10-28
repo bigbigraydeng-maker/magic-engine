@@ -74,9 +74,9 @@ describe('dedupeItems', () => {
     expect(dedupeItems([a, b])).toHaveLength(1)
   })
 
-  it('dedupes same address within window with same subject', () => {
-    const a = item({ at: ago(60_000), subject: 'hi' })
-    const b = item({ at: ago(0), subject: 'hi' })
+  it('dedupes the same mail seen by two sources: same address, within the window, same subject', () => {
+    const a = item({ at: ago(60_000), subject: 'hi', source: 'sent_items' })
+    const b = item({ at: ago(0), subject: 'hi', source: 'touchpoint' })
     expect(dedupeItems([a, b])).toHaveLength(1)
   })
 
@@ -93,15 +93,66 @@ describe('dedupeItems', () => {
     expect(dedupeItems([a, b])).toHaveLength(2)
   })
 
-  it('dedupes when one subject is null', () => {
-    const a = item({ at: ago(60_000), subject: null })
-    const b = item({ at: ago(0), subject: 'hi' })
+  it('dedupes across sources when one side has no subject (audit rows and touchpoints never have one)', () => {
+    const a = item({ at: ago(60_000), subject: null, source: 'audit' })
+    const b = item({ at: ago(0), subject: 'hi', source: 'sent_items' })
+    expect(dedupeItems([a, b])).toHaveLength(1)
+    const c = item({ at: ago(60_000), subject: null, source: 'audit' })
+    const d = item({ at: ago(0), subject: null, source: 'touchpoint' })
+    expect(dedupeItems([c, d])).toHaveLength(1)
+  })
+
+  it('dedupes re: hello with hello across sources', () => {
+    const a = item({ at: ago(60_000), subject: 're: hello', source: 'sent_items' })
+    const b = item({ at: ago(0), subject: 'hello', source: 'touchpoint' })
     expect(dedupeItems([a, b])).toHaveLength(1)
   })
 
-  it('dedupes re: hello with hello', () => {
-    const a = item({ at: ago(60_000), subject: 're: hello' })
-    const b = item({ at: ago(0), subject: 'hello' })
+  describe('two real mails are never folded into one', () => {
+    it('two sent-items entries with different ids, same subject, a minute apart', () => {
+      const a = item({ at: ago(60_000), id: 'A', subject: 'Following up', source: 'sent_items' })
+      const b = item({ at: ago(0), id: 'B', subject: 'Following up', source: 'sent_items' })
+      expect(dedupeItems([a, b])).toHaveLength(2)
+    })
+
+    it('two audit rows with no ids and no subjects, thirty seconds apart', () => {
+      const a = item({ at: ago(30_000), source: 'audit' })
+      const b = item({ at: ago(0), source: 'audit' })
+      expect(dedupeItems([a, b])).toHaveLength(2)
+    })
+
+    it('two Mailchimp campaigns sent within the window', () => {
+      const a = item({ at: ago(30_000), id: 'mc:1:guest@example.com', subject: 'News', source: 'mailchimp' })
+      const b = item({ at: ago(0), id: 'mc:2:guest@example.com', subject: 'News', source: 'mailchimp' })
+      expect(dedupeItems([a, b])).toHaveLength(2)
+    })
+
+    it('a mailbox entry and an audit row with DIFFERENT Graph ids are different mails, even a minute apart', () => {
+      const a = item({ at: ago(60_000), id: 'A', subject: 'Hello', source: 'sent_items' })
+      const b = item({ at: ago(0), id: 'B', subject: null, source: 'audit' })
+      expect(dedupeItems([a, b])).toHaveLength(2)
+    })
+
+    it('the same Graph id in the mailbox and in our audit row is one mail', () => {
+      const a = item({ at: ago(60_000), id: 'A', subject: 'Hello', source: 'sent_items' })
+      const b = item({ at: ago(0), id: 'A', subject: null, source: 'audit' })
+      expect(dedupeItems([a, b])).toHaveLength(1)
+    })
+
+    it('two mails each seen by the mailbox AND by our audit rows still count as two', () => {
+      const items = [
+        item({ at: ago(70_000), id: 'A', subject: 'Hello', source: 'sent_items' }),
+        item({ at: ago(60_000), id: 'A', subject: null, source: 'audit' }),
+        item({ at: ago(10_000), id: 'B', subject: 'Hello', source: 'sent_items' }),
+        item({ at: ago(0), id: 'B', subject: null, source: 'audit' }),
+      ]
+      expect(dedupeItems(items)).toHaveLength(2)
+    })
+  })
+
+  it('touchpoint records of one mail (written at send time and again by the mailbox sync) still fold together', () => {
+    const a = item({ at: ago(30_000), source: 'touchpoint' })
+    const b = item({ at: ago(0), source: 'touchpoint' })
     expect(dedupeItems([a, b])).toHaveLength(1)
   })
 })
@@ -138,13 +189,12 @@ describe('evaluateFrequency', () => {
     const v = await run(
       sources({ audit: async () => ({ ok: true, items: [oldest, newer] }) }),
     )
-    expect(v.ok).toBe(false)
-    if (!v.ok && v.reason === 'frequency_cap') {
-      expect(v.count).toBe(2)
-      expect(v.nextAllowedAt).toBe(
-        new Date(Date.parse(oldest.at) + 7 * DAY).toISOString(),
-      )
-    }
+    expect(v).toMatchObject({
+      ok: false,
+      reason: 'frequency_cap',
+      count: 2,
+      nextAllowedAt: new Date(Date.parse(oldest.at) + 7 * DAY).toISOString(),
+    })
   })
 
   it('with three items uses second-oldest for nextAllowedAt', async () => {
@@ -154,13 +204,12 @@ describe('evaluateFrequency', () => {
     const v = await run(
       sources({ audit: async () => ({ ok: true, items: [a, b, c] }) }),
     )
-    expect(v.ok).toBe(false)
-    if (!v.ok && v.reason === 'frequency_cap') {
-      expect(v.count).toBe(3)
-      expect(v.nextAllowedAt).toBe(
-        new Date(Date.parse(b.at) + 7 * DAY).toISOString(),
-      )
-    }
+    expect(v).toMatchObject({
+      ok: false,
+      reason: 'frequency_cap',
+      count: 3,
+      nextAllowedAt: new Date(Date.parse(b.at) + 7 * DAY).toISOString(),
+    })
   })
 
   it('counts an item 6d 23h 59m old', async () => {
@@ -222,20 +271,24 @@ describe('evaluateFrequency', () => {
     if (v.ok) expect(v.count).toBe(1)
   })
 
-  it('dedupes same address 60s apart with same subject', async () => {
+  it('dedupes the same mail reported by two sources, 60s apart, same subject', async () => {
     const v = await run(
       sources({
-        audit: async () => ({
-          ok: true,
-          items: [
-            item({ at: ago(60_000), subject: 'hi' }),
-            item({ at: ago(0), subject: 'hi' }),
-          ],
-        }),
+        sentItems: async () => ({ ok: true, items: [item({ at: ago(60_000), subject: 'hi', source: 'sent_items' })] }),
+        touchpoints: async () => ({ ok: true, items: [item({ at: ago(0), subject: 'hi', source: 'touchpoint' })] }),
       }),
     )
-    expect(v.ok).toBe(true)
-    if (v.ok) expect(v.count).toBe(1)
+    expect(v).toMatchObject({ ok: true, count: 1 })
+  })
+
+  it('counts two audit rows 60s apart as two mails (one send = one row)', async () => {
+    const v = await run(
+      sources({
+        audit: async () => ({ ok: true, items: [item({ at: ago(60_000), subject: 'hi' }), item({ at: ago(0), subject: 'hi' })] }),
+      }),
+      { max: 5, windowDays: 7 },
+    )
+    expect(v).toMatchObject({ ok: true, count: 2 })
   })
 
   it('counts same address 60s apart with different subjects twice', async () => {
@@ -272,36 +325,24 @@ describe('evaluateFrequency', () => {
     if (v.ok) expect(v.count).toBe(2)
   })
 
-  it('dedupes null subject with 60s-apart item', async () => {
+  it('dedupes a subject-less audit row with the mailbox entry of the same mail 60s apart', async () => {
     const v = await run(
       sources({
-        audit: async () => ({
-          ok: true,
-          items: [
-            item({ at: ago(60_000), subject: null }),
-            item({ at: ago(0), subject: 'hi' }),
-          ],
-        }),
+        audit: async () => ({ ok: true, items: [item({ at: ago(60_000), subject: null })] }),
+        sentItems: async () => ({ ok: true, items: [item({ at: ago(0), subject: 'hi', source: 'sent_items' })] }),
       }),
     )
-    expect(v.ok).toBe(true)
-    if (v.ok) expect(v.count).toBe(1)
+    expect(v).toMatchObject({ ok: true, count: 1 })
   })
 
-  it('dedupes re: hello with hello', async () => {
+  it('dedupes re: hello with hello across sources', async () => {
     const v = await run(
       sources({
-        audit: async () => ({
-          ok: true,
-          items: [
-            item({ at: ago(60_000), subject: 're: hello' }),
-            item({ at: ago(0), subject: 'hello' }),
-          ],
-        }),
+        sentItems: async () => ({ ok: true, items: [item({ at: ago(60_000), subject: 're: hello', source: 'sent_items' })] }),
+        touchpoints: async () => ({ ok: true, items: [item({ at: ago(0), subject: 'hello', source: 'touchpoint' })] }),
       }),
     )
-    expect(v.ok).toBe(true)
-    if (v.ok) expect(v.count).toBe(1)
+    expect(v).toMatchObject({ ok: true, count: 1 })
   })
 
   it.each([
@@ -315,10 +356,7 @@ describe('evaluateFrequency', () => {
       error: `${key} down`,
     })
     const v = await run(sources({ [key]: failing }))
-    expect(v.ok).toBe(false)
-    if (!v.ok && v.reason === 'frequency_unverifiable') {
-      expect(v.error).toBe(`${key} down`)
-    }
+    expect(v).toEqual({ ok: false, reason: 'frequency_unverifiable', error: `${key} down` })
   })
 
   it('fails when a source throws', async () => {
@@ -329,10 +367,7 @@ describe('evaluateFrequency', () => {
         },
       }),
     )
-    expect(v.ok).toBe(false)
-    if (!v.ok && v.reason === 'frequency_unverifiable') {
-      expect(v.error).toBe('boom')
-    }
+    expect(v).toEqual({ ok: false, reason: 'frequency_unverifiable', error: 'boom' })
   })
 
   it('times out when a source never resolves', async () => {
@@ -346,10 +381,7 @@ describe('evaluateFrequency', () => {
       }),
       budgetMs: 50,
     })
-    expect(v.ok).toBe(false)
-    if (!v.ok && v.reason === 'frequency_unverifiable') {
-      expect(v.error).toBe('timeout')
-    }
+    expect(v).toEqual({ ok: false, reason: 'frequency_unverifiable', error: 'timeout' })
   })
 
   it('treats mailchimp applicable:false as contributing nothing', async () => {

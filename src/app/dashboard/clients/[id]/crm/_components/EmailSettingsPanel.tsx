@@ -207,7 +207,6 @@ function buildSettings(form: FormState): BuildResult {
 }
 
 const NZ_FORMATTER = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Pacific/Auckland',
   month: '2-digit',
   day: '2-digit',
   hour: '2-digit',
@@ -613,6 +612,7 @@ export function EmailSettingsPanel(props: { clientId: string }): JSX.Element {
       </Section>
 
       <Section title="团目录链接">
+        <Help>不填团页链接格式 = 邮件里的团页链接不会被检查（挡不住指向下架团的链接），用团的模板也发不出去。</Help>
         <label className="mb-2 block text-xs">
           <span className="mb-1 block font-bold text-me-charcoal/70">团页链接格式</span>
           <input

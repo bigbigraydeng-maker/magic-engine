@@ -55,7 +55,6 @@ const CALL_BASIS_LABELS: Record<string, string> = {
 }
 
 const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Pacific/Auckland',
   month: 'numeric',
   day: 'numeric',
   hour: '2-digit',

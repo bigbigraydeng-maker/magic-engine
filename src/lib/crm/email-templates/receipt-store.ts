@@ -280,7 +280,7 @@ export async function findSentTemplateReceiptsSince(
     .select('*')
     .eq('client_id', clientId)
     .eq('contact_id', contactId)
-    .eq('outcome', 'sent')
+    .in('outcome', ['sent', 'unknown']) // 'unknown' = may have gone out; see the follow-up gate
     .not('template_key', 'is', null)
     .gte('created_at', sinceIso)
     .order('created_at', { ascending: false })

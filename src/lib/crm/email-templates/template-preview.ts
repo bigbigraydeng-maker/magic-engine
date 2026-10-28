@@ -16,6 +16,7 @@ import {
   DEFAULT_TIME_ZONE,
   computeCallWhen,
   decideCallBasis,
+  resolveTimeZone,
   todayInZone,
   type SendGateData,
 } from './send-gates'
@@ -163,7 +164,7 @@ export async function previewTemplate(
   data: SendGateData,
   opts: { timeZone?: string } = {},
 ): Promise<PreviewResult> {
-  const tz = opts.timeZone ?? DEFAULT_TIME_ZONE
+  const tz = await resolveTimeZone(data, args.clientId, opts.timeZone ?? DEFAULT_TIME_ZONE)
   const tpl = await data.loadTemplate(args.clientId, args.request.key)
   const sendable = checkTemplateSendable(tpl, tpl === null ? 0 : tpl.version)
   if (!sendable.ok || tpl === null) return refuse(409, 'template_unavailable', '这个模板现在不能用了（已停用或不存在）。')

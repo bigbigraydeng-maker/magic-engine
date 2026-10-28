@@ -10,6 +10,8 @@ import { getCampaignRecipientStatus, listSentCampaigns, type MailchimpCampaign }
 import { collectSentItems, toOutboundItems, type PageFetcher } from './gates/sent-items'
 import type { FrequencySources, OutboundItem, SourceResult } from './gates/types'
 
+const CAMPAIGN_PAGE = 100
+
 export interface MailboxRef {
   connectionId: string
   account: string
@@ -18,7 +20,7 @@ export interface MailboxRef {
 export interface MailchimpPort {
   apiKey(): string | undefined
   readAudience(clientId: string): Promise<AudienceIdRead>
-  listSentCampaigns(apiKey: string, opts: { sinceSentAt: string }): Promise<MailchimpCampaign[]>
+  listSentCampaigns(apiKey: string, opts: { sinceSentAt: string; listId: string; count: number }): Promise<MailchimpCampaign[]>
   getCampaignRecipientStatus(apiKey: string, campaignId: string, email: string): Promise<'sent' | 'soft' | 'hard' | 'not_recipient'>
 }
 
@@ -134,7 +136,9 @@ async function mailchimpSource(
   if (audience.audienceId === '') return { ok: true, items: [], applicable: false }
   const apiKey = port.apiKey()
   if (!apiKey) return { ok: false, error: 'MAILCHIMP_API_KEY is not set' }
-  const campaigns = await port.listSentCampaigns(apiKey, { sinceSentAt: sinceIso })
+  // Only THIS client's audience, and one full page means there may be more we did not see: then we cannot vouch for the count.
+  const campaigns = await port.listSentCampaigns(apiKey, { sinceSentAt: sinceIso, listId: audience.audienceId, count: CAMPAIGN_PAGE })
+  if (campaigns.length >= CAMPAIGN_PAGE) return { ok: false, error: 'too many Mailchimp campaigns in the window to check them all' }
   const items: OutboundItem[] = []
   for (const campaign of campaigns) {
     if (campaign.sentAt === null || campaign.sentAt < sinceIso) continue

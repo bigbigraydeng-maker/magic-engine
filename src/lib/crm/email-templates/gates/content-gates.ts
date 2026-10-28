@@ -189,7 +189,10 @@ function checkLinks(
     out.push(...checkLink(url, allowedHosts))
   }
   if (provider && facts) {
-    const providerViolations: LinkViolation[] = provider.checkLinks(urls, facts)
+    // The hosts the client allows links to are the hosts the provider must hold to the tour page rules; supplying them
+    // here (not leaving it to each caller) means no caller can forget and re-open the "other spelling of the host" hole.
+    const checked: RenderFacts = { ...facts, linkHosts: facts.linkHosts ?? settings.guardrails.allowedLinkHosts }
+    const providerViolations: LinkViolation[] = provider.checkLinks(urls, checked)
     for (const v of providerViolations) {
       out.push({ code: v.code, detail: v.detail })
     }

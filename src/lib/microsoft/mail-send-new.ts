@@ -323,7 +323,10 @@ async function runSendMailNew(input: SendMailNewInput, deps: MailNewDeps, track:
 
   // 模板时代新增的锁前检查：版本新鲜、所选团仍在售、文字红线。只有「有版本化设置」的客户才跑，旧配置行为不变。
   let pre: Extract<PreLockResult, { ok: true }> | null = null
-  if (deps.gates !== undefined && config.source === 'settings') {
+  if (config.source === 'settings') {
+    // The client is on versioned settings, so the new gates MUST run. A caller that did not wire them gets a refusal,
+    // not a quiet pass-through.
+    if (deps.gates === undefined) return fail(503, 'internal_error', GATE_MESSAGES.internal_error)
     const step = await deps.gates.preLock({
       clientId: input.clientId,
       contactId: input.contactId,

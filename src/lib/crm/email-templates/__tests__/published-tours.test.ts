@@ -368,9 +368,19 @@ describe('checkLinks', () => {
   const t = tour()
   const f = facts([pick(t, '2027-03-11')])
 
-  it('other host is skipped', () => {
+  it('a host that is neither the pattern host nor an allowed link host is not the provider\'s business (the shared host rule blocks it)', () => {
     expect(
-      publishedToursProvider.checkLinks(['https://other.example.com/tours/china/discovery/essentials'], f),
+      publishedToursProvider.checkLinks(['https://other.example.com/tours/china/discovery/gone'], f),
+    ).toEqual([])
+  })
+
+  it('but a host the client allows links to IS held to the tour page rules, whichever way it is spelled', () => {
+    const withHosts = { ...f, linkHosts: ['other.example.com'] }
+    expect(
+      publishedToursProvider.checkLinks(['https://other.example.com/tours/china/discovery/gone'], withHosts).map((v) => v.code),
+    ).toEqual(['tour_page_not_on_sale'])
+    expect(
+      publishedToursProvider.checkLinks(['https://OTHER.example.com./tours/china/discovery/essentials'], withHosts),
     ).toEqual([])
   })
 

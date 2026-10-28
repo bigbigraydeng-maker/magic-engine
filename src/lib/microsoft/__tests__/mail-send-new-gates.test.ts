@@ -351,10 +351,21 @@ describe('sendMailNew gate wiring', () => {
     expect(indexOf(f, 'inLock')).toBe(-1)
   })
 
-  it('settings-source client with no gates object still succeeds (production always supplies gates)', async () => {
+  it('settings-source client with NO gates wired is refused — the new gates are never silently skipped', async () => {
     const f = makeFakes()
     withSettings(f, okSettings())
     // deps.gates intentionally left undefined
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(result.meta).toEqual({ ...emptyMeta(), mailbox: MAILBOX }) // still gets a receipt
+    expect(f.store.acquireContactLock).not.toHaveBeenCalled()
+    expect(f.store.claimConversation).not.toHaveBeenCalled()
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+    expect(f.graph.sendDraft).not.toHaveBeenCalled()
+  })
+
+  it('legacy-config client with no gates object carries on exactly as before', async () => {
+    const f = makeFakes({ leadsConfig: ENABLED })
     const result = await sendMailNew(baseInput(), f.deps)
     expect(result.ok).toBe(true)
     expect(indexOf(f, 'sendDraft')).toBeGreaterThanOrEqual(0)

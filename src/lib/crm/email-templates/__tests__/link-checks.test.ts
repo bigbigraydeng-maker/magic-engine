@@ -76,8 +76,10 @@ describe('tour page links', () => {
     expect(codes('About us: https://www.example.com/about')).toEqual([])
   })
 
-  it('without the allowed-host list the provider still checks the main host', () => {
+  it('a caller that forgets to pass the allowed-host list cannot re-open the hole: the gate supplies it from the settings', () => {
     expect(codes('See https://www.example.com/tours/china/discovery/gone', { linkHosts: undefined })).toContain('tour_page_not_on_sale')
+    expect(codes('See https://example.com/tours/china/discovery/gone', { linkHosts: undefined })).toContain('tour_page_not_on_sale')
+    expect(codes('See example.com/tours/china/discovery/gone', { linkHosts: undefined })).toContain('tour_page_not_on_sale')
   })
 })
 
@@ -198,5 +200,29 @@ describe('the same rules on a template that has no content source, and on a free
     )
     expect(res.ok && res.catalogVersion).toBeNull()
     expect(res.ok && res.options).toEqual([])
+  })
+})
+
+describe('what a refusal leaves in the receipt', () => {
+  it('only the rule ids / codes — never a piece of the mail (a URL, a leftover marker) — while the staff member still sees the detail', async () => {
+    const args: PreLockArgs = {
+      clientId: 'client-a',
+      contactId: 'contact-1',
+      sentByEmail: 'lisa@client.co.nz',
+      config: config(),
+      subject: 'Thanks',
+      body: 'Dear [Name], pay at https://evil.com/secret-token-123 now',
+      footer: null,
+      template: null,
+      to: 'amy@gmail.com',
+      now: NOW,
+    }
+    const result = await createSendGates(makeData()).preLock(args)
+    expect(result).toMatchObject({ ok: false, status: 409 })
+    if (result.ok) return
+    expect(result.meta.blockDetail).not.toContain('evil.com')
+    expect(result.meta.blockDetail).not.toContain('secret-token')
+    expect(result.meta.blockDetail).not.toContain('[Name]')
+    expect(result.meta.blockDetail).toMatch(/placeholder_left|link_host_not_allowed/)
   })
 })

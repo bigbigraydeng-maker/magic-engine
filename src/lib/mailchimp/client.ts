@@ -212,7 +212,7 @@ async function fetchAllMembers(
 /** 最近发出去的邮件（含打开/点击汇总）。 */
 export async function listSentCampaigns(
   apiKey: string,
-  opts: { sinceSentAt?: string; count?: number } = {},
+  opts: { sinceSentAt?: string; count?: number; listId?: string } = {},
 ): Promise<MailchimpCampaign[]> {
   const params: Record<string, string> = {
     status: 'sent',
@@ -221,6 +221,8 @@ export async function listSentCampaigns(
     count: String(opts.count ?? 100),
   }
   if (opts.sinceSentAt) params.since_send_time = opts.sinceSentAt
+  // The API key is shared by every client's audience: without this, one client's campaigns would be read as another's.
+  if (opts.listId) params.list_id = opts.listId
 
   const json = await call<{ campaigns?: RawCampaign[] }>(apiKey, '/campaigns', params)
   return (json.campaigns ?? []).map(normaliseCampaign)

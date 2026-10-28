@@ -31,14 +31,11 @@ type EditorState =
   | { kind: 'edit'; initial: EmailTemplateVersion }
   | { kind: 'prefill'; initial: EmailTemplateVersion; prefill: EmailTemplateVersion }
 
-const NZ_TZ = 'Pacific/Auckland'
-
 function formatNz(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return '—'
   try {
     return new Intl.DateTimeFormat('zh-CN', {
-      timeZone: NZ_TZ,
       month: 'numeric',
       day: 'numeric',
       hour: '2-digit',
@@ -55,7 +52,6 @@ function formatNzFull(iso: string): string {
   if (Number.isNaN(d.getTime())) return '—'
   try {
     return new Intl.DateTimeFormat('zh-CN', {
-      timeZone: NZ_TZ,
       year: 'numeric',
       month: 'numeric',
       day: 'numeric',

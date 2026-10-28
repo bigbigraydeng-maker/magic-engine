@@ -140,17 +140,34 @@ describe('evaluateFollowUp', () => {
     expect(result).toBeNull()
   })
 
-  it('ignores blocked receipts for both rules', () => {
+  it.each(['blocked', 'failed'] as const)('ignores %s receipts for both rules (nothing went out)', (outcome) => {
     const result = evaluateFollowUp({
       templateKey: TEMPLATE,
       callEvidenceAt: isoAgo(2 * HOUR),
       cooldownHours: 24,
       now: new Date(),
-      sentTemplateReceipts: [
-        receipt({ outcome: 'blocked', createdAt: isoAgo(HOUR) }),
-      ],
+      sentTemplateReceipts: [receipt({ outcome, createdAt: isoAgo(HOUR) })],
     })
     expect(result).toBeNull()
+  })
+
+  it('a send whose outcome is still unknown counts as sent for both rules (it may well have gone out)', () => {
+    const afterCall = evaluateFollowUp({
+      templateKey: TEMPLATE,
+      callEvidenceAt: isoAgo(2 * HOUR),
+      cooldownHours: 24,
+      now: new Date(),
+      sentTemplateReceipts: [receipt({ outcome: 'unknown', blockReason: 'send_unknown', createdAt: isoAgo(HOUR) })],
+    })
+    expect(afterCall?.code).toBe('already_followed_up')
+    const cooldown = evaluateFollowUp({
+      templateKey: TEMPLATE,
+      callEvidenceAt: null,
+      cooldownHours: 24,
+      now: new Date(),
+      sentTemplateReceipts: [receipt({ outcome: 'unknown', blockReason: 'send_unknown', createdAt: isoAgo(HOUR) })],
+    })
+    expect(cooldown?.code).toBe('duplicate_template')
   })
 
   it('prefers already_followed_up when both rules would apply', () => {

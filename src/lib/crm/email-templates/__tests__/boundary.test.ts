@@ -79,6 +79,16 @@ describe('email template platform boundary', () => {
     expect(stale).toEqual([])
   })
 
+  it('the shared screens (src/app/dashboard/.../crm) do not name a customer or a staff member either', () => {
+    const crm = path.join(REPO, 'src/app/dashboard/clients/[id]/crm')
+    const files = [
+      'templates/page.tsx',
+      ...['TemplateEmailPanel', 'PostCallEmailBar', 'TemplateEditor', 'TemplatesAdmin', 'EmailSettingsPanel', 'RecentSends'].map((n) => `_components/${n}.tsx`),
+    ]
+    const offenders = files.filter((f) => FORBIDDEN.test(fs.readFileSync(path.join(crm, f), 'utf8')))
+    expect(offenders).toEqual([])
+  })
+
   it('the provider module itself is where the travel vocabulary lives', () => {
     const provider = fs.readFileSync(path.join(ROOT, 'facts/published-tours.ts'), 'utf8')
     for (const name of ['tour_name', 'tour_price', 'tour_url', 'tour_cards', 'departure_date', 'all_tours_url']) expect(provider).toContain(name)

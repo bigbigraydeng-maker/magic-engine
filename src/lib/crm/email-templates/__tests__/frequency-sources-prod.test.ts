@@ -249,6 +249,27 @@ describe('mailchimp source', () => {
     expect(getCampaignRecipientStatus).toHaveBeenCalledTimes(4) // c5 and c6 are never asked about
   })
 
+  it('lists only THIS client\'s audience, over the window, asking for a full page', async () => {
+    const listSentCampaigns = vi.fn(async () => [])
+    const { value } = deps({ mailchimp: port({ readAudience: async () => ({ ok: true, audienceId: 'aud-cts' }), listSentCampaigns }) })
+    await createFrequencySources(value).mailchimp(['guest@example.com'], SINCE)
+    expect(listSentCampaigns).toHaveBeenCalledWith('key-us1', { sinceSentAt: SINCE, listId: 'aud-cts', count: 100 })
+  })
+
+  it('a full page may hide more campaigns: it fails closed instead of undercounting', async () => {
+    const many = Array.from({ length: 100 }, (_, i) => campaign(`c${i}`, '2026-10-25T00:00:00Z'))
+    const { value } = deps({ mailchimp: port({ listSentCampaigns: async () => many }) })
+    const res = await createFrequencySources(value).mailchimp(['guest@example.com'], SINCE)
+    expect(res.ok).toBe(false)
+    expect(!res.ok && res.error).toContain('too many')
+  })
+
+  it('99 campaigns are fine', async () => {
+    const some = Array.from({ length: 99 }, (_, i) => campaign(`c${i}`, '2026-10-25T00:00:00Z'))
+    const { value } = deps({ mailchimp: port({ listSentCampaigns: async () => some }) })
+    expect((await createFrequencySources(value).mailchimp(['guest@example.com'], SINCE)).ok).toBe(true)
+  })
+
   it('turns a provider error into a failed source', async () => {
     const { value } = deps({
       mailchimp: port({

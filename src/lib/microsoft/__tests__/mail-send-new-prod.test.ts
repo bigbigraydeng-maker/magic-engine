@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   inserted: [] as Array<{ table: string; row: Record<string, unknown> }>,
   deleted: [] as Array<{ table: string; filters: Filter[] }>,
   selectData: {} as Record<string, unknown>,
+  selectError: null as { table: string; message: string } | null,
   selected: [] as Array<{ table: string; method: string; args: unknown[] }>,
 }))
 
@@ -31,8 +32,12 @@ vi.mock('@/lib/supabase', () => ({
               return builder
             }
           }
-          builder.then = (resolve: (value: { data: unknown; error: null }) => unknown) =>
-            resolve({ data: state.selectData[table] ?? null, error: null })
+          builder.then = (resolve: (value: { data: unknown; error: { message: string } | null }) => unknown) =>
+            resolve(
+              state.selectError !== null && state.selectError.table === table
+                ? { data: null, error: { message: state.selectError.message } }
+                : { data: state.selectData[table] ?? null, error: null },
+            )
           return builder
         },
         delete() {
@@ -65,13 +70,14 @@ vi.mock('@/lib/microsoft/mail-send', () => ({
   writeTouchpoint: vi.fn(),
 }))
 
-import { createMailNewDeps, createMailNewStore, graphGetPage } from '@/lib/microsoft/mail-send-new-prod'
+import { createMailNewDeps, createMailNewGraph, createMailNewStore, graphGetPage } from '@/lib/microsoft/mail-send-new-prod'
 
 afterEach(() => {
   state.insertError = null
   state.inserted = []
   state.deleted = []
   state.selectData = {}
+  state.selectError = null
   state.selected = []
   vi.unstubAllGlobals()
 })
@@ -145,6 +151,14 @@ describe('findPriorSend', () => {
     expect(await createMailNewStore().findPriorSend('client-1', REQ, 'contact-2')).toBeNull()
   })
 
+  it('a failed lookup is an error, never "nothing was sent before" (a retry would send the mail again)', async () => {
+    state.selectError = { table: 'conversation_outbound_log', message: 'timeout' }
+    await expect(createMailNewStore().findPriorSend('client-1', REQ, 'contact-1')).rejects.toThrow('timeout')
+    state.selectError = { table: 'conversations', message: 'boom' }
+    state.selectData = { conversation_outbound_log: [logRow] }
+    await expect(createMailNewStore().findPriorSend('client-1', REQ, 'contact-1')).rejects.toThrow('boom')
+  })
+
   it('is null when nothing was logged for the request id', async () => {
     state.selectData = { conversation_outbound_log: [] }
     expect(await createMailNewStore().findPriorSend('client-1', REQ, 'contact-1')).toBeNull()
@@ -191,6 +205,61 @@ describe('graphGetPage', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 503 })))
     const res = await graphGetPage('conn-1', '/me/messages')
     expect(res.ok).toBe(false)
+  })
+})
+
+describe('Graph calls are time-limited', () => {
+  /** A fetch that never answers on its own and only ends when its signal fires (like a hung network call). */
+  function hangingFetch() {
+    return vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('The operation was aborted due to timeout')))
+        }),
+    )
+  }
+
+  it('a send that hangs comes back as "outcome unknown" (the mail may have gone out), not as a failure, and not after minutes', async () => {
+    const fetchMock = hangingFetch()
+    vi.stubGlobal('fetch', fetchMock)
+    const outcome = await createMailNewGraph({ timeoutMs: 30 }).sendDraft('conn-1', 'draft-1')
+    expect(outcome).toBe('unknown')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('https://graph.microsoft.com/v1.0/me/messages/draft-1/send')
+  })
+
+  it('a hung draft delete gives up instead of hanging', async () => {
+    vi.stubGlobal('fetch', hangingFetch())
+    await expect(createMailNewGraph({ timeoutMs: 30 }).deleteDraft('conn-1', 'draft-1')).resolves.toBeUndefined()
+  })
+
+  it.each([
+    [202, 'sent'],
+    [400, 'rejected'],
+    [403, 'rejected'],
+    [500, 'unknown'],
+    [503, 'unknown'],
+  ])('a %i answer to the send is "%s"', async (status, expected) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(status === 202 ? null : 'nope', { status })))
+    expect(await createMailNewGraph().sendDraft('conn-1', 'draft-1')).toBe(expected)
+  })
+
+  it('the send carries the immutable-id header and the access token', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 202 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await createMailNewGraph().sendDraft('conn-1', 'draft-1')
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1]
+    expect(init.method).toBe('POST')
+    expect(init.headers).toMatchObject({ Authorization: 'Bearer test-token', Prefer: 'IdType="ImmutableId"' })
+    expect(init.signal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('reading a draft\'s state and creating a draft are time-limited too', async () => {
+    const fetchMock = hangingFetch()
+    vi.stubGlobal('fetch', fetchMock)
+    const graph = createMailNewGraph({ timeoutMs: 30 })
+    expect(await graph.isStillDraft('conn-1', 'm1')).toBeNull()
+    expect(await graph.createDraft('conn-1', { to: 'a@b.co', subject: 's', body: 'b' })).toMatchObject({ error: expect.any(String) })
   })
 })
 

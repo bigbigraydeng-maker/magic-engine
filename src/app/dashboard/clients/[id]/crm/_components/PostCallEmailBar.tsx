@@ -20,7 +20,6 @@ type BarState = PostCallState & { canEditSettings: boolean }
 
 const POLL_MS = 30_000
 const POLL_WINDOW_MS = 10 * 60_000
-const ZONE = 'Pacific/Auckland'
 
 const OFF_TEXT: Record<Exclude<PostCallState['featureState'], 'ready'>, string> = {
   disabled: '没开通',
@@ -29,18 +28,21 @@ const OFF_TEXT: Record<Exclude<PostCallState['featureState'], 'ready'>, string> 
   unreadable: '读不到设置',
 }
 
-function dayKey(d: Date): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
+function dayKey(d: Date, timeZone?: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d)
 }
 
-/** "今天 10:42" / "昨天 10:42" / "10/25 10:42" in New Zealand time. */
-export function formatCallTime(iso: string, now: Date = new Date()): string {
+/**
+ * "今天 10:42" / "昨天 10:42" / "10/25 10:42". In the viewer's own time zone unless one is given: the salesperson
+ * reading it is in the client's country, whichever country that is.
+ */
+export function formatCallTime(iso: string, now: Date = new Date(), timeZone?: string): string {
   const at = new Date(iso)
   if (Number.isNaN(at.getTime())) return '刚才'
-  const clock = new Intl.DateTimeFormat('zh-CN', { timeZone: ZONE, hour: '2-digit', minute: '2-digit', hour12: false }).format(at)
-  if (dayKey(at) === dayKey(now)) return `今天 ${clock}`
-  if (dayKey(at) === dayKey(new Date(now.getTime() - 86_400_000))) return `昨天 ${clock}`
-  const date = new Intl.DateTimeFormat('zh-CN', { timeZone: ZONE, month: 'numeric', day: 'numeric' }).format(at)
+  const clock = new Intl.DateTimeFormat('zh-CN', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false }).format(at)
+  if (dayKey(at, timeZone) === dayKey(now, timeZone)) return `今天 ${clock}`
+  if (dayKey(at, timeZone) === dayKey(new Date(now.getTime() - 86_400_000), timeZone)) return `昨天 ${clock}`
+  const date = new Intl.DateTimeFormat('zh-CN', { timeZone, month: 'numeric', day: 'numeric' }).format(at)
   return `${date} ${clock}`
 }
 
