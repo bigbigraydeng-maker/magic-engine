@@ -58,6 +58,7 @@ vi.mock('@/lib/supabase', () => {
   return { supabaseAdmin: { from: (table: string) => new Q(table) } }
 })
 
+import { buildEffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 import { todayInNz } from '../schedule-view'
 import { loadLatestClientPrescription, loadLatestGoalPrescription } from '../goal-prescription'
 
@@ -269,6 +270,27 @@ describe('大白话分段', () => {
       id: 'rx-1',
       status: 'approved',
       approved_at: '2019-11-01T00:00:00.000Z',
+      generation_meta: {
+        measure: buildEffectJudgmentCard({
+          goal: {
+            periodStart: '2020-01-01',
+            periodEnd: '2020-01-31',
+            targetValue: 10,
+            baselineValue: 0,
+            budgetCurrency: 'NZD',
+          },
+          approvedCost: { amount: 12, currency: 'NZD' },
+          approvedCostState: 'value',
+          prescriptionCosts: [],
+          dailyCapCents: 5000,
+          dailyCapState: 'value',
+          today: '2020-01-20',
+          actualToDate: 12,
+          medianCostCents: 800,
+          sampleDays: null,
+          loadError: null,
+        }),
+      },
     })]
     db.tables.marketing_plans = [{
       client_id: CLIENT,

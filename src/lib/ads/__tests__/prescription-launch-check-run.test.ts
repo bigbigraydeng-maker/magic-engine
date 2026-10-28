@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { buildEffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 import {
   runWithStore, type LaunchCheckStore, type OutcomeInsert, type StoredPrescription,
 } from '../prescription-launch-check-run'
@@ -15,8 +16,27 @@ function prescription(): StoredPrescription {
     approvedAt: '2026-10-25T10:20:00.000Z',
     kpis: [
       { metric: '线索', target: 10, unit: '条' },
-      { metric: '成本', target: 12, unit: 'NZD' },
+      { metric: '成本', target: 99, unit: 'NZD' },
     ],
+    effectCard: buildEffectJudgmentCard({
+      goal: {
+        periodStart: '2026-10-26',
+        periodEnd: '2026-11-30',
+        targetValue: 10,
+        baselineValue: 0,
+        budgetCurrency: 'NZD',
+      },
+      approvedCost: { amount: 12, currency: 'NZD' },
+      approvedCostState: 'value',
+      prescriptionCosts: [],
+      dailyCapCents: 5000,
+      dailyCapState: 'value',
+      today: '2026-11-02',
+      actualToDate: null,
+      medianCostCents: null,
+      sampleDays: null,
+      loadError: null,
+    }),
   }
 }
 

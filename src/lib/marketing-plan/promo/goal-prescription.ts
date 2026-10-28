@@ -6,6 +6,7 @@
  */
 
 import { readPrescriptionLaunch } from '@/lib/ads/prescription-launch-check-store'
+import { storedEffectCard } from '@/lib/ads-strategy/effect-judgment/card'
 import { supabaseAdmin } from '@/lib/supabase'
 import {
   isStandingRule, oneSentence, reviewAnchor, ruleLines, spendFromStored, whySentences,
@@ -80,6 +81,7 @@ export interface GoalPrescriptionRow {
   content?: unknown
   created_at?: unknown
   approved_at?: unknown
+  generation_meta?: unknown
 }
 
 const UNREADABLE_LAUNCH_CHECK: LaunchCheckView = {
@@ -267,7 +269,7 @@ export async function loadLatestGoalPrescription(clientId: string, goalId: strin
   if (goalId.trim() === '') return null
   const { data, error } = await supabaseAdmin
     .from('prescriptions')
-    .select('id, goal_id, status, version, agent_name, content, created_at, approved_at')
+    .select('id, goal_id, status, version, agent_name, content, created_at, approved_at, generation_meta')
     .eq('client_id', clientId)
     .eq('goal_id', goalId)
     .order('version', { ascending: false })
@@ -285,7 +287,7 @@ const READABLE_STATUSES = ['draft', 'generating', 'failed', 'approved'] as const
 export async function loadLatestClientPrescription(clientId: string): Promise<GoalPrescriptionView | null> {
   const { data, error } = await supabaseAdmin
     .from('prescriptions')
-    .select('id, goal_id, status, version, agent_name, content, created_at, approved_at')
+    .select('id, goal_id, status, version, agent_name, content, created_at, approved_at, generation_meta')
     .eq('client_id', clientId)
     .in('status', [...READABLE_STATUSES])
     .order('created_at', { ascending: false })
@@ -305,7 +307,7 @@ async function finishPrescription(
   const currency = goalId.trim() === '' ? null : await readGoalBudgetCurrency(clientId, goalId)
   const view = toGoalPrescriptionView(row, goalId, currency)
   if (!view) return null
-  return attachLaunchCheck(clientId, view, optionalText(row.approved_at))
+  return attachLaunchCheck(clientId, view, optionalText(row.approved_at), storedEffectCard(row.generation_meta) ?? null)
 }
 
 function optionalText(value: unknown): string | null {
@@ -317,6 +319,7 @@ async function attachLaunchCheck(
   clientId: string,
   view: GoalPrescriptionView,
   approvedAt: string | null,
+  effectCard: ReturnType<typeof storedEffectCard> | null,
 ): Promise<GoalPrescriptionView> {
   try {
     const launch_check = await readPrescriptionLaunch({
@@ -329,6 +332,7 @@ async function attachLaunchCheck(
         status: view.status,
         approvedAt,
         kpis: view.kpis.map(kpi => ({ metric: kpi.metric, target: kpi.target_value, unit: kpi.unit })),
+        effectCard: effectCard ?? null,
       },
     })
     return { ...view, launch_check }

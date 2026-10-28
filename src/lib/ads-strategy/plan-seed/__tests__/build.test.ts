@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { buildEffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { buildPlanSeed, type PlanSeedDeps, type BuildArgs } from '../build'
@@ -906,5 +907,40 @@ describe('buildPlanSeed', () => {
     const seed = await buildPlanSeed(args([thruplayPlay('s1')]), deps)
     expect(seed.ad_steps).toEqual([])
     expect(findSkipped(seed, 's1')).toBeDefined()
+  })
+
+  it('keeps the suggestion when the card cap matches, and blocks when it does not', async () => {
+    const matching = buildEffectJudgmentCard({
+      goal: null,
+      approvedCost: null,
+      approvedCostState: 'missing',
+      prescriptionCosts: [],
+      dailyCapCents: 20000,
+      dailyCapState: 'value',
+      today: '2026-10-26',
+      actualToDate: null,
+      medianCostCents: null,
+      sampleDays: null,
+      loadError: null,
+    })
+    const kept = await buildPlanSeed(args([leadPlay('s1')], { effectCard: matching }), makeDeps())
+    expect(findStep(kept, 's1')?.daily_budget_cents.ok).toBe(true)
+
+    const clashing = buildEffectJudgmentCard({
+      goal: null,
+      approvedCost: null,
+      approvedCostState: 'missing',
+      prescriptionCosts: [],
+      dailyCapCents: 1000,
+      dailyCapState: 'value',
+      today: '2026-10-26',
+      actualToDate: null,
+      medianCostCents: null,
+      sampleDays: null,
+      loadError: null,
+    })
+    const blocked = await buildPlanSeed(args([leadPlay('s1')], { effectCard: clashing }), makeDeps())
+    expect(blocked.ad_steps).toEqual([])
+    expect(findSkipped(blocked, 's1')?.why_empty).toContain('不取其中一个')
   })
 })

@@ -5,6 +5,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { storedEffectCard } from '@/lib/ads-strategy/effect-judgment/card'
 import { resolveAccountTimezone } from '@/lib/ads-strategy/account-timezone'
 import {
   kpisFromContent, pickLatestCase, readMetric, LAUNCH_CHECK_METRICS,
@@ -43,6 +44,7 @@ export async function readPrescriptionLaunch(input: {
     clientId: input.clientId,
     prescription: input.prescription,
     kpis: input.prescription.kpis,
+    effectCard: input.prescription.effectCard,
     now: input.now,
   })
 }
@@ -94,7 +96,7 @@ async function listApprovedPlans(clientId: string): Promise<PlanRef[]> {
 }
 
 async function listApprovedPrescriptions(clientId: string): Promise<StoredPrescription[]> {
-  const data = await eqRows('prescriptions', 'id, client_id, goal_id, status, approved_at, content', [
+  const data = await eqRows('prescriptions', 'id, client_id, goal_id, status, approved_at, content, generation_meta', [
     ['client_id', clientId],
     ['status', 'approved'],
   ])
@@ -223,6 +225,7 @@ function prescriptionFrom(value: unknown): StoredPrescription | null {
     status: text(row.status),
     approvedAt: approvedAt === '' ? null : approvedAt,
     kpis: kpisFromContent(row.content),
+    effectCard: storedEffectCard(row.generation_meta) ?? null,
   }
 }
 

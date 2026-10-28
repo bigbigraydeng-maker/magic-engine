@@ -1,7 +1,11 @@
 /**
  * Plain-language check after a prescription's ad is already live.
  * Reads numbers the caller already loaded. Does not call Meta, write, or spend.
+ * Cost and the day-7 / day-14 dates come from the effect-judgment card.
+ * They are not rebuilt from launch day or from a cost line in the prose.
  */
+
+import type { EffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 
 const NZ = 'Pacific/Auckland'
 const HOUR_MS = 3_600_000
@@ -19,8 +23,8 @@ const HOURS = [
 ] as const
 
 const DAYS = [
-  { kpiMetric: 'launch_check_day7', label: '第 7 天', offset: 6 },
-  { kpiMetric: 'launch_check_day14', label: '第 14 天', offset: 13 },
+  { kpiMetric: 'launch_check_day7', label: '第 7 天' },
+  { kpiMetric: 'launch_check_day14', label: '第 14 天' },
 ] as const
 
 export const LAUNCH_CHECK_METRICS = [
@@ -185,16 +189,20 @@ export function judgeLaunch(input: {
   now: Date
   /** Timezone the ad account's daily rows are cut in; null when it could not be read. */
   accountTimezone: string | null
+  /** Null when this prescription has no effect-judgment card. */
+  effectCard?: EffectJudgmentCard | null
 }): LaunchAssessment {
   const launchMs = Date.parse(input.launch.authorizedAt)
   if (Number.isNaN(launchMs)) return invalidLaunch(input.launch.campaignId)
   const launchDay = nzCalendarDay(new Date(launchMs))
+  const card = input.effectCard ?? null
   const zoneGap = zoneGapFor(input.accountTimezone)
   const judgeUpTo = (endDay: string): Judged =>
-    zoneGap ?? judgeNumbers(input.insights, input.kpis, launchDay, endDay)
+    zoneGap ?? judgeNumbers(input.insights, input.kpis, launchDay, endDay, card)
+  const today = nzCalendarDay(input.now)
   const checkpoints = [
     ...HOURS.map(spec => hourPoint(spec, launchMs, input.now.getTime(), judgeUpTo, zoneGap)),
-    ...DAYS.map(spec => dayPoint(spec, launchDay, nzCalendarDay(input.now), judgeUpTo)),
+    ...DAYS.map(spec => dayPoint(spec, launchDay, today, judgeUpTo, reviewDateFor(card, spec.kpiMetric))),
   ]
   return { lines: checkpoints.map(point => point.sentence), checkpoints, campaignId: input.launch.campaignId }
 }
@@ -355,14 +363,35 @@ function hourPoint(
   return finish(spec.kpiMetric, spec.label, judgeUpTo(addCalendarDays(deadlineDay, -1)))
 }
 
+function reviewDateFor(
+  card: EffectJudgmentCard | null,
+  metric: (typeof DAYS)[number]['kpiMetric'],
+): { date: string | null; missing: string } {
+  if (!card) return { date: null, missing: '这份处方没有效果判断卡，不能从开投日另算复盘日。' }
+  const date = metric === 'launch_check_day7' ? card.review.day7 : card.review.day14
+  if (!date) return { date: null, missing: card.review.empty_reason ?? '效果判断卡没有写下这一天。' }
+  return { date, missing: '' }
+}
+
 function dayPoint(
   spec: (typeof DAYS)[number],
   launchDay: string,
   today: string,
   judgeUpTo: (endDay: string) => Judged,
+  review: { date: string | null; missing: string },
 ): LaunchCheckpoint {
-  const endDay = addCalendarDays(launchDay, spec.offset)
-  if (today < endDay) {
+  if (!review.date) {
+    return {
+      kpiMetric: spec.kpiMetric,
+      due: false,
+      verdict: 'unknown',
+      sentence: `${spec.label}：不知道。${review.missing}`,
+    }
+  }
+  if (review.date < launchDay) {
+    return finish(spec.kpiMetric, spec.label, { verdict: 'unknown', parts: ['复盘日早于开投日，不能下结论。'] })
+  }
+  if (today < review.date) {
     return {
       kpiMetric: spec.kpiMetric,
       due: false,
@@ -370,7 +399,7 @@ function dayPoint(
       sentence: `${spec.label}：还不知道。还没到${spec.label}。`,
     }
   }
-  return finish(spec.kpiMetric, spec.label, judgeUpTo(endDay))
+  return finish(spec.kpiMetric, spec.label, judgeUpTo(review.date))
 }
 
 function finish(
@@ -394,6 +423,7 @@ function judgeNumbers(
   kpis: readonly KpiRef[],
   launchDay: string,
   endDay: string,
+  card: EffectJudgmentCard | null,
 ): Judged {
   const windowed = insights.filter(row =>
     row.insightDate !== null && row.insightDate >= launchDay && row.insightDate <= endDay)
@@ -404,7 +434,7 @@ function judgeNumbers(
   }
   const parts: string[] = []
   const comparisons: boolean[] = []
-  pushReadable(windowed, kpis, parts, comparisons)
+  pushReadable(windowed, kpis, card, parts, comparisons)
   if (dateGap) parts.push('有几天的日期读不出来。')
   for (const kpi of kpis) pushUnrecognized(kpi, parts)
   if (kpis.length === 0) parts.push('这份处方没有写下能对照的线索或成本目标。')
@@ -423,6 +453,7 @@ function missingDays(rows: readonly InsightRef[], from: string, to: string): str
 function pushReadable(
   rows: readonly InsightRef[],
   kpis: readonly KpiRef[],
+  card: EffectJudgmentCard | null,
   parts: string[],
   comparisons: boolean[],
 ): void {
@@ -430,13 +461,36 @@ function pushReadable(
   const spend = sumColumn(rows, 'spend')
   const views = sumColumn(rows, 'videoThruplays')
   const conversations = sumColumn(rows, 'messagingConversations')
+  let needsCost = false
   for (const kpi of kpis) {
     const kind = metricKind(kpi.metric)
-    if (kind === 'leads') pushLead(kpi, leads, parts, comparisons)
-    else if (kind === 'conversations') pushCount(kpi, '对话数', conversations, parts, comparisons)
+    if (kind === 'leads') {
+      needsCost = true
+      pushLead(kpi, leads, parts, comparisons)
+    } else if (kind === 'conversations') pushCount(kpi, '对话数', conversations, parts, comparisons)
     else if (kind === 'views') pushCount(kpi, '看完数', views, parts, comparisons)
-    else if (kind === 'cost') pushCost(kpi, leads, spend, parts, comparisons)
+    else if (kind === 'cost') needsCost = true
   }
+  if (needsCost) pushCardCost(card, leads, spend, parts, comparisons)
+}
+
+function pushCardCost(
+  card: EffectJudgmentCard | null,
+  leads: number | null,
+  spend: number | null,
+  parts: string[],
+  comparisons: boolean[],
+): void {
+  const amount = card?.cost_per_result.amount
+  if (amount == null) {
+    const why = card?.cost_per_result.empty_reason
+    parts.push(why ? `每个结果的成本没有写在效果判断卡上：${why}` : '这份处方没有效果判断卡，不能用别的成本数。')
+    return
+  }
+  pushCost(
+    { metric: '成本', target: amount, unit: card?.cost_per_result.currency ?? '' },
+    leads, spend, parts, comparisons,
+  )
 }
 
 function sumColumn(

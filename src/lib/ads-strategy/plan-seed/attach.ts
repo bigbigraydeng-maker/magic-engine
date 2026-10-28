@@ -1,3 +1,4 @@
+import type { EffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 import type { PrescriptionContent } from '@/types/diagnostic'
 import { lenientAdPlays, wasAdPlaysDropped, type AdPlay } from './ad-plays'
 import { buildPlanSeed, type PlanSeedDeps } from './build'
@@ -182,7 +183,7 @@ function resolveDeps(deps: AttachDeps | undefined): PlanSeedDeps {
  */
 export async function attachPlanSeed(
   content: PrescriptionContent,
-  ctx: { clientId: string; goalId: string | null; priorContent?: PrescriptionContent },
+  ctx: { clientId: string; goalId: string | null; priorContent?: PrescriptionContent; effectCard?: EffectJudgmentCard | null },
   deps?: AttachDeps,
 ): Promise<PrescriptionContent> {
   try {
@@ -210,7 +211,12 @@ export async function attachPlanSeed(
 
     const full = resolveDeps(deps)
     const remaining = Math.max(0, timeoutMs - (Date.now() - startedAt))
-    const seed = await buildPlanSeed({ clientId: ctx.clientId, plays, period }, full, {
+    const seed = await buildPlanSeed({
+      clientId: ctx.clientId,
+      plays,
+      period,
+      effectCard: ctx.effectCard,
+    }, full, {
       timeoutMs: remaining,
     })
 

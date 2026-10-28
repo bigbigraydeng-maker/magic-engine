@@ -18,6 +18,8 @@ import { savePrescriptionCase, deriveCrisisType } from '@/lib/case-library/saver
 import { audOnlyAmount } from '@/lib/ads/budget-currency'
 import { mapIndustryToCategory } from '@/lib/huatuo/industry-mapper'
 import { loadMemoryForClient } from '@/lib/memory'
+import { buildEffectJudgmentCard, type EffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
+import { loadEffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/load'
 import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
 import { afterPrescriptionDraftSaved } from '@/lib/marketing-plan/promo/plan-draft-hook'
 
@@ -67,11 +69,13 @@ export async function executePrescriptionGeneration(input: GenerationJobInput): 
         onProgress: (note) => noteProgress(clientId, prescriptionId, note),
       },
     ))
+    const measure = await measureCard(clientId, input.goal, result.content)
     result.content = await attachPlanSeed(result.content, {
       clientId,
       goalId: input.goal?.id ?? null,
+      effectCard: measure,
     }).catch(() => result.content)
-    await persistDraft(clientId, prescriptionId, result, true)
+    await persistDraft(clientId, prescriptionId, result, true, measure)
     await draftPlanAfterSave(clientId, prescriptionId)
     archiveCase(input, result)
   } catch (err) {
@@ -93,12 +97,14 @@ export async function executePrescriptionRefine(input: RefineJobInput): Promise<
       },
     ))
     // 精修重写了内容：用新内容的打法重建计划草稿种子（某阶段打法被校验整组丢掉时，按阶段号带回上一版该阶段的；LLM 没写的阶段不补）
+    const measure = await measureCard(clientId, input.goal, result.content)
     result.content = await attachPlanSeed(result.content, {
       clientId,
       goalId: input.goal?.id ?? null,
       priorContent: input.previousContent,
+      effectCard: measure,
     }).catch(() => result.content)
-    await persistDraft(clientId, prescriptionId, result, false)
+    await persistDraft(clientId, prescriptionId, result, false, measure)
     await draftPlanAfterSave(clientId, prescriptionId)
   } catch (err) {
     await markTerminal(clientId, prescriptionId, 'draft', messageOf(err))
@@ -130,17 +136,43 @@ async function noteProgress(clientId: string, prescriptionId: string, note: stri
     .eq('client_id', clientId)
 }
 
+async function measureCard(
+  clientId: string,
+  goal: GenerationJobInput['goal'],
+  content: HuatuoPrescriptionResult['content'],
+): Promise<EffectJudgmentCard> {
+  try {
+    return await loadEffectJudgmentCard({ clientId, goal, content })
+  } catch (err) {
+    console.warn('[effect-judgment] card failed', err instanceof Error ? err.message : 'unknown')
+    return buildEffectJudgmentCard({
+      goal: null,
+      approvedCost: null,
+      approvedCostState: 'unreadable',
+      prescriptionCosts: [],
+      dailyCapCents: null,
+      dailyCapState: 'unreadable',
+      today: '',
+      actualToDate: null,
+      medianCostCents: null,
+      sampleDays: null,
+      loadError: '量这些数时没有读成，效果判断卡先空着。',
+    })
+  }
+}
+
 async function persistDraft(
   clientId: string,
   prescriptionId: string,
   result: HuatuoPrescriptionResult,
   includeAgentMeta: boolean,
+  measure: EffectJudgmentCard,
 ): Promise<void> {
   const patch: Record<string, unknown> = {
     status: 'draft',
     content: result.content,
     self_grade: result.self_grade,
-    generation_meta: { ...result.meta, trend_summary: result.trend_summary },
+    generation_meta: { ...result.meta, trend_summary: result.trend_summary, measure },
     progress_note: null,
     error_message: null,
   }
