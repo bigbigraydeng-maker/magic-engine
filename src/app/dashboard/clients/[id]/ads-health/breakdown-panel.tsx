@@ -7,11 +7,13 @@
  * 🔴 读不到就写「读不到」，不画成 0。403 直接不渲染（内部页面，非内部人员不该看到报错框）。
  */
 
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import type {
   BreakdownReport, ReportRow, ReportAccount, NonLeadSpend,
 } from '@/lib/ads-strategy/breakdown-stats/report-types'
 import { REPORT_DEFAULT_DAYS } from '@/lib/ads-strategy/breakdown-stats/report-types'
+import { buildDaySeries } from '@/lib/ads-strategy/breakdown-stats/day-series'
+import { DayBarCharts, DayTrendChart } from './day-charts'
 
 function fmtNzTime(iso: string): string {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -297,6 +299,40 @@ function Section({ title, note, children }: { title: string; note: string; child
   )
 }
 
+type DayView = 'table' | 'bar' | 'trend'
+
+const DAY_VIEWS: ReadonlyArray<{ key: DayView; label: string }> = [
+  { key: 'table', label: '表格' },
+  { key: 'bar', label: '柱状图' },
+  { key: 'trend', label: '走势图' },
+]
+
+/** 「按天」：表格 / 柱状图 / 走势图三种看法，默认表格；表格一直在，图只是另一种看法。 */
+function DaySection({ rows, cur }: { rows: ReportRow[]; cur: string | null }) {
+  const [view, setView] = useState<DayView>('table')
+  const points = useMemo(() => buildDaySeries(rows), [rows])
+  return (
+    <Section title="按天" note="每天的花费来自当天每小时数据加总，进线按客户系统里的提交时间算；单独一天样本太少，不打「偏贵/偏便宜」。">
+      <div className="mt-2 inline-flex gap-1" role="group" aria-label="按天的看法">
+        {DAY_VIEWS.map((v) => (
+          <button
+            key={v.key}
+            type="button"
+            onClick={() => setView(v.key)}
+            aria-pressed={view === v.key}
+            className={`rounded-md px-3 py-1 text-xs ${view === v.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+      {view === 'table' && <RowTable rows={rows} cur={cur} label={dayLabel} />}
+      {view === 'bar' && <DayBarCharts points={points} cur={cur} />}
+      {view === 'trend' && <DayTrendChart points={points} cur={cur} />}
+    </Section>
+  )
+}
+
 export default function BreakdownPanel({ clientId }: { clientId: string }) {
   const [days, setDays] = useState<number>(REPORT_DEFAULT_DAYS)
   const [report, setReport] = useState<BreakdownReport | null>(null)
@@ -348,9 +384,7 @@ export default function BreakdownPanel({ clientId }: { clientId: string }) {
         <>
           <OverviewCard report={report} />
           <p className="mb-3 text-xs text-gray-500">往下依次是：按天、其他目标的花费、按小时、按星期、版位、设备、年龄性别、地区。</p>
-          <Section title="按天" note="每天的花费来自当天每小时数据加总，进线按客户系统里的提交时间算；单独一天样本太少，不打「偏贵/偏便宜」。">
-            <RowTable rows={report.day} cur={cur} label={dayLabel} />
-          </Section>
+          <DaySection rows={report.day} cur={cur} />
           <NonLeadCard rows={report.nonLeadSpend} cur={cur} />
           <Section title={hourTitle(report)} note="每小时每花 100 块能带来几条进线；进线按客户系统里的提交时间算。">
             <HourBars rows={report.hour} cur={cur} />
