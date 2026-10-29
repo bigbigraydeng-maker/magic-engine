@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-30
 done_on: 2026-10-30
-done_ref: pr:PRNUM
+done_ref: pr:3406
 source: session:90a50c3b
 verify_how: 合并部署后，PM 打开广告健康页「多维数据」标签，能看到「按天」表：每天一行、最新日期在上，每天花费合计等于同一天按小时那张表的合计；单独一天不打「偏贵/偏便宜」
 ---
