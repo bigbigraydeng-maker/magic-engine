@@ -52,6 +52,14 @@ describe('POST email/compose/draft', () => {
     expect(res.status).toBe(502)
   })
 
+  it('customer said "stop contacting me" on a call → 409 call_dnc, not 502', async () => {
+    ;(previewCompose as ReturnType<typeof vi.fn>).mockResolvedValueOnce(can)
+    ;(generateFirstEmailDraft as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: false, reason: 'call_dnc', message: 'x' })
+    const res = await call()
+    expect(res.status).toBe(409)
+    expect((await res.json()).reason).toBe('call_dnc')
+  })
+
   it('cooldown hit → 429 and the AI is never called', async () => {
     ;(previewCompose as ReturnType<typeof vi.fn>).mockResolvedValueOnce(can)
     ;(claimDraftSlot as ReturnType<typeof vi.fn>).mockReturnValueOnce(false)

@@ -5,13 +5,33 @@ const eqCalls: Array<[string, string, unknown]> = []
 vi.mock('@/lib/supabase', () => {
   const chain = (table: string) => {
     const q: Record<string, unknown> = {}
-    for (const m of ['select', 'order', 'limit', 'in']) q[m] = () => q
+    const orders: Array<[string, boolean]> = []
+    for (const m of ['select', 'limit', 'in']) q[m] = () => q
+    // order 真的排序 —— 「最新一版分析胜出」靠它，替身不排就守不住（魏征 10-29 复审）
+    q.order = (col: string, opts?: { ascending?: boolean }) => {
+      orders.push([col, opts?.ascending !== false])
+      return q
+    }
     q.eq = (col: string, val: unknown) => {
       eqCalls.push([table, col, val])
       return q
     }
     q.maybeSingle = async () => ({ data: tables[table] ?? null })
-    q.then = (res: (v: unknown) => unknown) => res({ data: tables[table] ?? [] })
+    q.then = (res: (v: unknown) => unknown) => {
+      if (tables[`${table}:error`]) return res({ data: null, error: { message: 'boom' } })
+      const rows = Array.isArray(tables[table]) ? [...(tables[table] as Array<Record<string, unknown>>)] : (tables[table] ?? [])
+      if (Array.isArray(rows)) {
+        rows.sort((a, b) => {
+          for (const [col, asc] of orders) {
+            const x = a[col] as string | number
+            const y = b[col] as string | number
+            if (x !== y) return (x < y ? -1 : 1) * (asc ? 1 : -1)
+          }
+          return 0
+        })
+      }
+      return res({ data: rows })
+    }
     return q
   }
   return { supabaseAdmin: { from: (t: string) => chain(t) } }
@@ -190,9 +210,10 @@ describe('phone calls feed the draft (PM 2026-10-29: drafts must follow up what 
   })
 
   it('🔴 newest analysis version wins: v2 rejected must not fall back to an older v1', async () => {
+    // 旧版故意放在前面：只有真的按版本号从新到旧排，才不会退回去用 v1
     tables.telephony_call_analyses = [
-      { call_id: 'call1', review_status: 'rejected', schema_version: 2, facts: [fact('next_step', 'x', 'v2 quote')] },
       { call_id: 'call1', review_status: 'pending_review', schema_version: 1, facts: [fact('next_step', 'y', 'v1 quote')] },
+      { call_id: 'call1', review_status: 'rejected', schema_version: 2, facts: [fact('next_step', 'x', 'v2 quote')] },
     ]
     const { arg } = await draftInput()
     expect(arg?.user).not.toContain('v1 quote')
@@ -203,6 +224,18 @@ describe('phone calls feed the draft (PM 2026-10-29: drafts must follow up what 
     const { r } = await draftInput()
     expect(r).toMatchObject({ ok: false, reason: 'call_dnc' })
     expect(askJson).not.toHaveBeenCalled()
+  })
+
+  it('🔴 call records unreadable → no draft (else the do-not-contact check is silently skipped)', async () => {
+    tables['telephony_call_analyses:error'] = true
+    const { r } = await draftInput()
+    expect(r).toMatchObject({ ok: false, reason: 'facts_unreadable' })
+    expect(askJson).not.toHaveBeenCalled()
+  })
+
+  it('unconfirmed call: may send what was asked, must not claim it was promised', async () => {
+    const { arg } = await draftInput()
+    expect(arg?.system).toContain('For an UNCONFIRMED call you may still send what was asked for, but do not claim it was promised')
   })
 
   it('at most 8 points per call reach the model', async () => {
