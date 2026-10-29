@@ -96,6 +96,16 @@ function NameCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
             🔥 回头
           </span>
         )}
+        {/* 刚打通聊上 —— 这个人正热着，跟「回头」一样摆在最前（PM 2026-10-29）。 */}
+        {r.afterCall && !r.returning && (
+          <span
+            data-testid="after-call-tag"
+            title={r.reason ?? '刚打通电话聊上了，还没记下一步'}
+            className="shrink-0 rounded bg-[#C2453A]/12 px-1.5 py-0.5 text-[10px] font-black text-[#C2453A]"
+          >
+            📞 刚聊过
+          </span>
+        )}
         {/* 「今天先联系」不画来源小标签：一行只留名字和「回头」这类最该先看的东西。 */}
         {!grouped && (r.sources ?? []).slice(0, 1).map((k) => (
           <span

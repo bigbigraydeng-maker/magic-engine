@@ -32,6 +32,8 @@ export interface CustomColumnDef {
   label: string
   /** 从这个人的全部触点里抽出该列的值；没有就 null。 */
   extract: (touchpoints: TouchpointForColumn[]) => string | null
+  /** false = 值照算，但横表不画这一列。缺省 = 画。 */
+  showInList?: boolean
 }
 
 export interface CustomColumnMeta {
@@ -82,7 +84,9 @@ function extractTourInterest(touchpoints: TouchpointForColumn[]): string | null 
 
 /** 可用自定义列注册表。加列：在这里追加 + 扩 CustomColumnKey 联合类型。 */
 export const CUSTOM_COLUMNS: CustomColumnDef[] = [
-  { key: 'tour_interest', label: '感兴趣的团', extract: extractTourInterest },
+  // 横表不画（PM 2026-10-29）：这是客人在 FB 广告表单下拉里随手点的，最后订哪个团常常不是它，
+  // 摆成一整列会让人当真。抽屉时间线里那条表单记录仍会写出来。
+  { key: 'tour_interest', label: '感兴趣的团', extract: extractTourInterest, showInList: false },
 ]
 
 /** 一个联系人的全部自定义列值（GET 逐人算，横表逐格渲染）。 */
@@ -101,7 +105,9 @@ export function extractCustomColumns(
 export function visibleCustomColumns(
   perContact: Array<Record<CustomColumnKey, string | null>>,
 ): CustomColumnMeta[] {
-  return CUSTOM_COLUMNS.filter((col) => perContact.some((v) => v[col.key] != null)).map((col) => ({
+  return CUSTOM_COLUMNS.filter(
+    (col) => col.showInList !== false && perContact.some((v) => v[col.key] != null),
+  ).map((col) => ({
     key: col.key,
     label: col.label,
   }))

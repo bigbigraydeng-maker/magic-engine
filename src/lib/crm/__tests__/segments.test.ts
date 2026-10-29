@@ -1247,6 +1247,23 @@ describe('刚通完电话、还没记下一步的人留在今天要联系（PM 2
     expect(r.segment).toBe('callback_due')
     expect(r.temperature).toBe('hot')
     expect(r.reason).toContain('还没记下一步')
+    expect(r.afterCall).toBe(true)
+    // 第一次咨询离通话不到 14 天 —— 不说「老客人」
+    expect(r.reason).not.toContain('老客人')
+  })
+
+  it('22 天前留的资料、今天才聊上 → 理由写「老客人重新聊热」（PM 2026-10-29 Chris Anthony）', () => {
+    const c = contact({ touchpoints: [wa('2026-10-06T14:00:00Z'), spoke('2026-10-28T22:30:00Z')] })
+    const r = segmentContact(c, NOW2)
+    expect(r.segment).toBe('callback_due')
+    expect(r.reason).toContain('老客人（22 天前就咨询过）重新聊热了')
+  })
+
+  it('普通到点回电不是「刚聊过」', () => {
+    const c = contact({ touchpoints: [wa('2026-10-22T21:00:00Z'), spoke('2026-10-25T22:30:00Z', { callbackAt: '2026-10-28T20:00:00Z' })] })
+    const r = segmentContact(c, NOW2)
+    expect(r.segment).toBe('callback_due')
+    expect(r.afterCall).toBeUndefined()
   })
 
   it('通话之后有人发了邮件 / 写了备注 / 再拨 → 有人跟了，不再提醒', () => {
@@ -1282,6 +1299,8 @@ describe('刚通完电话、还没记下一步的人留在今天要联系（PM 2
       expect(r.temperature).toBe('cold')
       expect(listOf(r.segment)).toBe('cold')
       expect(r.reason).toBe('刚通完电话（1 小时前），客人说现在还没准备好 —— 先放着，过阵子再联系')
+      // 客人推掉了 —— 不能再标「📞 刚聊过 / 记下一步」
+      expect(r.afterCall).toBeUndefined()
       expect(todayWorklist([gavin('not_now')], NOW2)).toHaveLength(0)
     })
 

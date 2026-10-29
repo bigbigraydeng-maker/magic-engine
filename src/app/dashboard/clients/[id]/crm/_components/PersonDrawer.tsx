@@ -455,7 +455,7 @@ export function PersonDrawer({
                 <div className="mt-2 flex flex-wrap gap-1">
                   {summary.tour && (
                     <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-me-charcoal/75">
-                      想去：{summary.tour}
+                      广告表单里点过：{summary.tour}
                     </span>
                   )}
                   {summary.travelWindow && (

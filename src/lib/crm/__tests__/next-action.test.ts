@@ -92,6 +92,11 @@ describe('intentNote', () => {
 })
 
 describe('verbOf', () => {
+  it('刚打通聊上 → 记下一步，不是再「打给他」（PM 2026-10-29）', () => {
+    expect(verbOf('callback_due', 'phone', 'hot', true)).toBe('follow_up')
+    expect(verbOf('callback_due', 'phone', 'hot')).toBe('call')
+  })
+
   it('excluded → do_not_contact', () => {
     expect(verbOf('excluded', 'none', 'cold')).toBe('do_not_contact')
   })

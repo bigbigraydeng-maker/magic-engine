@@ -173,6 +173,8 @@ export function responseRowFor(
       reason: seg.reason,
       // 回头客：同一份判据算出来的，原样带出去，列表标小标签、抽屉顶部画横幅都读它。
       returning: seg.returning ?? null,
+      // 刚打通聊上、还没记下一步：列表在名字旁标「📞 刚聊过」。
+      afterCall: seg.afterCall === true,
       /**
        * 「该做什么」—— 三套状态（阶段 / 冷热 / 意向）合成的那一个概念（PM 2026-10-10）。
        * 列表只画这一行；stage / segment 字段仍返回，抽屉和筛选还在用。
