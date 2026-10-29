@@ -359,6 +359,9 @@ const DEAD_OUTCOMES = new Set(['not_interested', 'do_not_contact'])
  */
 const HANDOFF_AFTER_DAYS = 3
 
+/** 真人刚通完一通电话、还没记下一步的人，留在「今天要联系」多久（天）。 */
+const AFTER_CALL_WINDOW_DAYS = 3
+
 /**
  * 「进线了但从没人联系过」超过这个天数，就不再算「新客人」。
  *
@@ -864,6 +867,29 @@ export function segmentContact(
       return make('retry_channel', `${when}打过，没人接`, 'sms')
     }
     return make('handoff_sop', `${when}打过，一直没接上 —— 交给系统跟`, 'email')
+  }
+
+  // 6.5) 我们刚打通一通电话、聊上了，**之后没人记下一步**（没约回电、没发邮件、没写备注）——
+  //      留在今天要联系里提醒「记一笔或发后续」，最长挂 AFTER_CALL_WINDOW_DAYS 天。
+  //
+  //      PM 2026-10-29：Mercurio 通话 4 分钟，答应了整理方案发邮箱，随后被归成「聊过一轮就断了」
+  //      掉进先放着 —— 恰恰是最不该丢的人。只认**人打的**（`automated` 的 AI 外呼不算）、
+  //      **通话是最后一次人出手**（之后有邮件 / 备注 / 再次拨出就算有人跟了）、没有未到期的回电约定。
+  //      客人之后又来消息，规则 2 会接手；这里不重复。
+  const lastSpoke = Math.max(
+    0,
+    ...tps
+      .filter((t) => t.channel === 'phone' && t.direction === 'outbound' && !t.automated && t.outcome === 'spoke')
+      .map((t) => ts(t.occurredAt)),
+  )
+  const hasFutureCallback = tps.some((t) => t.callbackAt && ts(t.callbackAt) > nowMs)
+  if (
+    lastSpoke > 0 &&
+    lastSpoke >= lastOutbound &&
+    nowMs - lastSpoke <= AFTER_CALL_WINDOW_DAYS * 86_400_000 &&
+    !hasFutureCallback
+  ) {
+    return make('callback_due', `刚通完电话（${humanGap(nowMs - lastSpoke)}前），还没记下一步 —— 记一笔或发后续`, 'phone')
   }
 
   // 7) 聊过一轮就断了、也没约下次 —— 温的，最该回头捞的一批。

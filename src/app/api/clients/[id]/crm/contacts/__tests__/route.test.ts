@@ -433,6 +433,19 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     expect(names).not.toContain('Sue')
   })
 
+  it('同行（trade_domains 里的邮箱域名）不在「今天要联系」，挪到先放着并写明原因；人没有消失', async () => {
+    clientsLeadsConfig = { trade_domains: ['example.com'] }
+    const { body } = await get('cts', '?view=priority&open=hot,cold')
+    const secs = body.sections as Array<{ key: string; items: Array<{ name: string; reason: string }> | null }>
+    const hot = (secs.find((s) => s.key === 'hot')?.items ?? []).map((i) => i.name)
+    const cold = secs.find((s) => s.key === 'cold')?.items ?? []
+    expect(hot).not.toContain('Bob')
+    expect(hot).not.toContain('Sue')
+    const bob = cold.find((i) => i.name === 'Bob')
+    expect(bob).toBeTruthy()
+    expect(bob?.reason).toContain('同行')
+  })
+
   it('没登记自己人域名时，同一批人照常出现（只有登记过的域名才会被排掉）', async () => {
     clientsLeadsConfig = { own_email_domains: ['other.example'] }
     const { body } = await get('cts', '?view=priority&open=hot,cold')

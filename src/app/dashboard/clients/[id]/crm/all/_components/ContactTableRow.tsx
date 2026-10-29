@@ -73,7 +73,7 @@ function PinCell({ r, onTogglePin }: { r: ContactRow; onTogglePin: (row: Contact
   )
 }
 
-function NameCell({ r }: { r: ContactRow }) {
+function NameCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
   const { text, missing, sub } = nameForDisplay(r)
   return (
     <td className="px-4 py-2">
@@ -96,7 +96,8 @@ function NameCell({ r }: { r: ContactRow }) {
             🔥 回头
           </span>
         )}
-        {(r.sources ?? []).slice(0, 1).map((k) => (
+        {/* 「今天先联系」不画来源小标签：一行只留名字和「回头」这类最该先看的东西。 */}
+        {!grouped && (r.sources ?? []).slice(0, 1).map((k) => (
           <span
             key={k}
             title="最早是从这个渠道进来的"
@@ -123,6 +124,24 @@ function NameCell({ r }: { r: ContactRow }) {
         <div className="truncate text-[11px] font-normal text-me-charcoal/45">{sub}</div>
       )}
       </div>
+    </td>
+  )
+}
+
+/** 联系渠道：一个词 + 一个小图标，让销售一眼知道「用什么联系他」。号码 / 邮箱留在点开后的详情里。 */
+const CHANNEL_CHIP: Record<NonNullable<ContactRow['suggestedChannel']>, string> = {
+  phone: '📞 电话',
+  sms: '💬 短信',
+  email: '✉️ 邮件',
+  messenger: '💬 私信',
+  none: '暂无可用渠道',
+}
+
+function ChannelCell({ r }: { r: ContactRow }) {
+  const ch = r.suggestedChannel
+  return (
+    <td className="whitespace-nowrap px-4 py-2 text-xs text-me-charcoal/60" data-testid="channel-cell">
+      {ch ? CHANNEL_CHIP[ch] : <span className="text-me-charcoal/35">—</span>}
     </td>
   )
 }
@@ -167,7 +186,14 @@ export function ContactTableRow(props: {
       className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${active ? 'bg-me-ivory/50' : ''}`}
     >
       <PinCell r={r} onTogglePin={onTogglePin} />
-      <NameCell r={r} />
+      <NameCell r={r} grouped={grouped} />
+      {grouped ? (
+        <>
+          <StageCell r={r} grouped />
+          <ChannelCell r={r} />
+        </>
+      ) : (
+        <>
       <td className="whitespace-nowrap px-4 py-2 text-me-charcoal/60">{fmtDate(r.firstSeenAt)}</td>
       <td className="whitespace-nowrap px-4 py-2 text-me-charcoal/60">
         {r.lastTouchAt ? relTime(r.lastTouchAt) : <span className="text-me-charcoal/35">—</span>}
@@ -188,7 +214,9 @@ export function ContactTableRow(props: {
           </td>
         )
       })}
-      <StageCell r={r} grouped={grouped} />
+      <StageCell r={r} grouped={false} />
+        </>
+      )}
     </tr>
   )
 }

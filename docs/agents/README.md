@@ -23,7 +23,7 @@
 | 卫青 | `weiqing` | — | `ads` | 4.1 | 在用 | [11-weiqing](./11-weiqing.md) | 见下「手册归属」 |
 | 孔子 | `kongzi` | — | `seo` | 4.1 | 在用 | [13-kongzi](./13-kongzi.md) | 见下 |
 | 孟子 | `mengzi` | — | `geo` | 4.1 | 在用 | [15-mengzi](./15-mengzi.md) | 暂无 |
-| 苏东坡 | `sudongpo` | — | `social` / `video-factory` | 4.1 | 在用 | [14-sudongpo](./14-sudongpo.md) | 见下 |
+| 苏东坡 | `sudongpo` | — | `social` / `video-factory` | 4.1 | 在用 | [14-sudongpo](./14-sudongpo.md) | 见下（另有[社媒经验手册](#经验手册playbooks)） |
 | 司马迁 | `simaqian` | — | `reputation` | 4.1 | 在用（档案为骨架） | [16-simaqian](./16-simaqian.md) | 暂无 |
 | 张骞 | `zhangqian` | — | `collect` | 4.1 | 在用 | [30-zhangqian](./30-zhangqian.md) | 暂无 |
 | 华佗 | `huatuo` | — | `prescribe` | 4.1 | 在用 | [40-huatuo](./40-huatuo.md) | 暂无 |
@@ -41,6 +41,18 @@
 
 名单内 15 个 agent：§4.1 十个、§4.2 三个、§4.3 两个，各占一行。
 
+## 开发侧帮手（名单外，不计入 15 人）
+
+| 中文名 | 代号 | 性质 | 档案 | 操作手册 |
+|---|---|---|---|---|
+| 齐白石 | `qibaishi` | **开发侧，名单外**：开发侧子代理（`.claude/agents/me-backend-ui-designer.md`），不是产品内后台 agent，不在 spec §4 名单 | [62-qibaishi](./62-qibaishi.md) | [UI 美工手册 v1.0](../sops/2026-10-27-qibaishi-ui-designer-playbook-v1.0.md) |
+
+## 经验手册（playbooks）
+
+| 目录 | 归谁 | 说明 |
+|---|---|---|
+| [`docs/playbooks/social/`](../playbooks/social/README.md) | 苏东坡 `sudongpo` | 社媒经验手册：平台层 `platform-general.md` · 行业层 `industry-travel.md` · 客户层 `clients/`（只列目录）· [README](../playbooks/social/README.md) · [MIGRATION-MAP](../playbooks/social/MIGRATION-MAP.md)。涉及视频工厂的部分归 ME Video 维护 |
+
 ## 手册归属（通用手册）
 
 | 手册 | 归谁 | 依据 / 备注 |
@@ -53,6 +65,8 @@
 | [`keyword-gap-attack-playbook`](../sops/keyword-gap-attack-playbook.md) | 孔子 | #3261 补充评论建议，待 PM 确认 |
 | [`brand-aliases-setup-for-gsc`](../sops/brand-aliases-setup-for-gsc.md) | 孔子 | #3261 补充评论建议，待 PM 确认 |
 | [社媒 agent 手册 v1.0](../sops/2026-10-19-social-agent-playbook-and-rules-v1.0.md) | 苏东坡 `sudongpo` | |
+| [社媒平台运营思路 · Facebook v0.1](../sops/2026-10-28-social-platform-facebook-playbook-v0.1.md) | 苏东坡 `sudongpo` | 初稿，打法多为「候选」，待 PM 逐条确认 |
+| [社媒平台运营思路 · Instagram v0.1](../sops/2026-10-28-social-platform-instagram-playbook-v0.1.md) | 苏东坡 `sudongpo` | 只写事实与待验证问题，不写打法 |
 | [视频模板优化手册 v1.0](../sops/2026-10-27-video-factory-template-playbook-v1.0.md) | 苏东坡（主），马良（出片检查配合） | 见下「视频工厂手册归属」 |
 | [`messenger-ai-rollback`](../sops/messenger-ai-rollback.md) | 苏东坡 | #3261 补充评论建议，待 PM 确认；§4.4 苏东坡入口含 `src/lib/messenger/` |
 | [`tiktok-app-setup`](../sops/tiktok-app-setup.md)、[`tiktok-production-audit-checkpoint`](../sops/tiktok-production-audit-checkpoint.md)、[`tiktok-publishing-test-checkpoint`](../sops/tiktok-publishing-test-checkpoint.md) | 苏东坡 | #3261 补充评论建议，待 PM 确认（`tiktok-*`） |

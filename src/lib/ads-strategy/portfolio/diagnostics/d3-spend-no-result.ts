@@ -15,6 +15,7 @@
 import type { AccountContext } from './context'
 import { adsetRows, money, sumSpend, unitOf } from './context'
 import { countOutcome, OUTCOME_STEP_LABEL } from '../outcome-ladder'
+import type { EntitySnapshotRow } from '../snapshot'
 import type { Diagnosis, DiagnosisInput } from './types'
 import { D3_COST_MULTIPLE } from './thresholds'
 
@@ -30,6 +31,36 @@ function isAutoPauseScope(role: string | undefined): boolean {
 /** 新纳入范围：类似人群，或按点击 / 落地页浏览优化的流量组。只提醒。 */
 function isAlertOnlyScope(role: string | undefined, optimizationGoal: string | null): boolean {
   return role === 'expansion' || (optimizationGoal !== null && TRAFFIC_GOALS.has(optimizationGoal))
+}
+
+/**
+ * 标题要写明是哪个广告组；同系列下还有别的有花费的广告组时，再补一段系列合计，
+ * 免得把「这个组」的数当成整个系列的数（合计 = 各组花费之和 / 各组结果之和）。
+ */
+function campaignTotalTail(ctx: AccountContext, input: DiagnosisInput, adset: EntitySnapshotRow): string {
+  const primary = input.outcome.primary
+  if (!adset.campaign_id || primary === null) return ''
+  const withSpend = Array.from(ctx.adsets.values())
+    .filter(s => s.campaign_id === adset.campaign_id)
+    .map(s => ({ s, rows: adsetRows(ctx, [s.entity_id]) }))
+    .filter(x => sumSpend(x.rows) > 0)
+  if (withSpend.length < 2) return ''
+  let spend = 0
+  let results = 0
+  for (const { s, rows } of withSpend) {
+    spend += sumSpend(rows)
+    for (const r of rows) {
+      const c = countOutcome(primary, r, {
+        messagingReferralAvailable: input.messagingReferralAvailable,
+        optimizationGoal: s.optimization_goal,
+      })
+      if (c.value === null) return '' // 有一个组归不上，合计不可信，不写
+      results += c.value
+    }
+  }
+  const name = ctx.campaigns.get(adset.campaign_id)?.entity_name ?? '所属系列'
+  const per = results > 0 ? money(ctx, round2(spend / results)) : '—'
+  return `；「${name}」系列合计 ${money(ctx, round2(spend))} / ${results} = ${per}`
 }
 
 export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput): Diagnosis[] {
@@ -90,12 +121,14 @@ export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput
     if (spend < threshold) continue
     if (cpr !== null && cpr < threshold) continue
     const noteOnly = alertOnly ? '（只提醒，不会自动暂停）' : ''
+    const who = `广告组「${s.entity_name ?? s.entity_id}」`
+    const tail = campaignTotalTail(ctx, input, s)
     out.push({
       code: 'D3', status: 'hit',
       ...(alertOnly ? { autoPauseEligible: false } : {}),
       title: results === 0
-        ? `花钱没结果${noteOnly}：近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[outcome.primary]} 0 个`
-        : `花钱结果太少${noteOnly}：近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[outcome.primary]} ${results} 个，每个 ${money(ctx, cpr)}（目标 ${money(ctx, target)}）`,
+        ? `花钱没结果${noteOnly}：${who}近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[outcome.primary]} 0 个${tail}`
+        : `花钱结果太少${noteOnly}：${who}近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[outcome.primary]} ${results} 个，每个 ${money(ctx, cpr)}（目标 ${money(ctx, target)}）${tail}`,
       units: [unit],
       evidence: { window_start: ctx.window[0], window_end: ctx.date, spend, results, cost_per_result: cpr, target_cost: target, multiple: D3_COST_MULTIPLE },
       sample: [{ label: OUTCOME_STEP_LABEL[outcome.primary], value: results }, { label: '有花费的天数', value: rows.filter(r => r.spend > 0).length }],

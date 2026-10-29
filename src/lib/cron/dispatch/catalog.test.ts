@@ -91,6 +91,11 @@ describe('dispatch catalog', () => {
     expect(workflow).toContain('workflow_dispatch:')
   })
 
+  it('does not schedule the retired six-dimension diagnostic', () => {
+    expect(DISPATCH_CATALOG.some((job) => job.service === 'diagnostic-weekly')).toBe(false)
+    expect(CRON_REGISTRY.some((entry) => entry.service === 'diagnostic-weekly')).toBe(false)
+  })
+
   it('records the three name/schedule mismatches instead of "correcting" them', () => {
     const notes = DISPATCH_CATALOG.filter((job) => job.scheduleNote).map((job) => job.service)
     expect(notes.sort()).toEqual([

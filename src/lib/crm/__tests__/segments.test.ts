@@ -1233,3 +1233,39 @@ describe('回头客（再次留资）', () => {
     expect(list.map((x) => x.id)[0]).toBe('ret')
   })
 })
+
+describe('刚通完电话、还没记下一步的人留在今天要联系（PM 2026-10-29 Mercurio）', () => {
+  const NOW2 = new Date('2026-10-29T00:00:00Z')
+  const wa = (at: string) => ({ channel: 'whatsapp', direction: 'inbound' as const, occurredAt: at })
+  const spoke = (at: string, extra: Record<string, unknown> = {}) => call(at, 'spoke', extra)
+
+  it('我们打通聊了 4 分钟、之后没人跟 → 今天要联系（hot），理由写清「还没记下一步」', () => {
+    const c = contact({ touchpoints: [wa('2026-10-22T21:00:00Z'), spoke('2026-10-28T22:30:00Z')] })
+    const r = segmentContact(c, NOW2)
+    expect(r.segment).toBe('callback_due')
+    expect(r.temperature).toBe('hot')
+    expect(r.reason).toContain('还没记下一步')
+  })
+
+  it('通话之后有人发了邮件 / 写了备注 / 再拨 → 有人跟了，不再提醒', () => {
+    const mail = { channel: 'email', direction: 'outbound' as const, occurredAt: '2026-10-28T23:30:00Z', source: 'microsoft_mail' }
+    const c = contact({ touchpoints: [wa('2026-10-22T21:00:00Z'), spoke('2026-10-28T22:30:00Z'), mail] })
+    expect(segmentContact(c, NOW2).segment).toBe('stale_conversation')
+  })
+
+  it('已经约了未来的回电 → 有下一步，不用提醒', () => {
+    const c = contact({ touchpoints: [wa('2026-10-22T21:00:00Z'), spoke('2026-10-28T22:30:00Z', { callbackAt: '2026-11-02T00:00:00Z' })] })
+    expect(segmentContact(c, NOW2).segment).toBe('stale_conversation')
+  })
+
+  it('超过 3 天仍没人记下一步 → 不再挂在今天（回到原来的「聊过一轮就断了」）', () => {
+    const c = contact({ touchpoints: [wa('2026-10-10T21:00:00Z'), spoke('2026-10-24T22:30:00Z')] })
+    expect(segmentContact(c, NOW2).segment).toBe('stale_conversation')
+  })
+
+  it('AI 外呼（automated）不算人打的电话', () => {
+    const earlierMail = { channel: 'email', direction: 'outbound' as const, occurredAt: '2026-10-23T01:00:00Z', source: 'microsoft_mail' }
+    const c = contact({ touchpoints: [wa('2026-10-22T21:00:00Z'), earlierMail, spoke('2026-10-28T22:30:00Z', { automated: true })] })
+    expect(segmentContact(c, NOW2).segment).toBe('stale_conversation')
+  })
+})

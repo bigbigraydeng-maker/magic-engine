@@ -132,8 +132,12 @@ function AccountSummaryList({ view }: { view: WarMapView }) {
           )}
           <span>
             {s.dataDay === null ? '没有数据' : `数据日 ${fmtDay(s.dataDay)}`}
-            {s.staleDays !== null && s.staleDays > DATA_STALE_DAYS && (
-              <span className="ml-1 text-amber-700">已 {s.staleDays} 天没更新</span>
+            {s.dormant ? (
+              <span className="ml-1 text-gray-400">没在投，没有新数据是正常的</span>
+            ) : (
+              s.staleDays !== null && s.staleDays > DATA_STALE_DAYS && (
+                <span className="ml-1 text-amber-700">已 {s.staleDays} 天没更新</span>
+              )
             )}
           </span>
           {s.biggestPoolSize !== null ? (
@@ -152,7 +156,8 @@ function AccountSummaryList({ view }: { view: WarMapView }) {
 
 function FrequencyGauges({ view }: { view: WarMapView }) {
   const rows = view.frequency.rows
-  if (rows.length === 0) return <p className="mt-3 text-xs text-gray-400">近 7 天没有花钱的广告</p>
+  const stopped = view.frequency.stoppedRows
+  if (rows.length === 0 && stopped.length === 0) return <p className="mt-3 text-xs text-gray-400">近 7 天没有花钱的广告</p>
   const scaleMax = 4
   return (
     <div className="mt-3 space-y-2">
@@ -173,6 +178,16 @@ function FrequencyGauges({ view }: { view: WarMapView }) {
         )
       })}
       <p className="text-[11px] text-gray-400">竖线 = 红线 3。{view.frequency.windowLabel !== null ? `对应 ${view.frequency.windowLabel}。` : ''}</p>
+      {stopped.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-xs text-gray-500">已停的系列（{stopped.length}）· 不计入最高频率</summary>
+          {stopped.map(r => (
+            <p key={r.campaignId} className="mt-1 text-xs text-gray-500">
+              {r.campaignName}：{r.frequency7d === null ? '—' : r.frequency7d.toFixed(2)} · 花 {r.spend7d.toFixed(0)} · {r.note}
+            </p>
+          ))}
+        </details>
+      )}
     </div>
   )
 }
@@ -352,6 +367,7 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
               数据已 {view.clocks.staleDays} 天没更新
             </span>
           )}
+          {view.clocks.note !== null && <span className="text-gray-400">{view.clocks.note}</span>}
         </p>
       </div>
 

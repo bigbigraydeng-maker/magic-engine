@@ -1,7 +1,6 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  SYNTHESIS_ITEM_LOOKBACK_DAYS,
   extractSynthesisFailures,
   buildDiagnosticSynthesisItems,
   pushDiagnosticSynthesisItems,
@@ -132,38 +131,15 @@ describe('pushDiagnosticSynthesisItems', () => {
     return { supabase: supabase as unknown as SupabaseClient, calls }
   }
 
-  it('queries diagnostic-weekly since ~8 days ago and pushes items', async () => {
-    const now = new Date('2026-03-10T00:00:00.000Z')
+  it('does not read diagnostic-weekly logs or push items', async () => {
     const { supabase, calls } = fakeSupabase({
-      data: [
-        {
-          summary: {
-            outcomes: [
-              { clientId: 'c1', clientName: 'Acme', synthesis: { state: 'failed', failed_modules: ['score_explanations'], errors: [], total_cost_usd: 0.2 } },
-            ],
-          },
-        },
-      ],
+      data: [{ summary: { outcomes: [] } }],
       error: null,
     })
     const items: unknown[] = []
-    await pushDiagnosticSynthesisItems(supabase, items as never, now)
-
-    expect(items).toHaveLength(1)
-    expect(calls.find((c) => c.method === 'from')?.args[0]).toBe('cron_run_logs')
-    expect(calls.find((c) => c.method === 'eq')?.args).toEqual(['job_name', 'diagnostic-weekly'])
-    const gte = calls.find((c) => c.method === 'gte')
-    expect(gte?.args[0]).toBe('started_at')
-    const since = new Date(gte?.args[1] as string)
-    const days = (now.getTime() - since.getTime()) / 86_400_000
-    expect(days).toBeCloseTo(SYNTHESIS_ITEM_LOOKBACK_DAYS, 5)
-  })
-
-  it('throws on query error', async () => {
-    const { supabase } = fakeSupabase({ data: null, error: { message: 'boom' } })
-    await expect(
-      pushDiagnosticSynthesisItems(supabase, [], new Date()),
-    ).rejects.toThrow('cron_run_logs query failed: boom')
+    await pushDiagnosticSynthesisItems(supabase, items as never, new Date('2026-03-10T00:00:00.000Z'))
+    expect(items).toEqual([])
+    expect(calls).toEqual([])
   })
 })
 

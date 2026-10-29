@@ -67,67 +67,14 @@ async function checkClientLeads(supabase: SupabaseClient, clientId: string) {
 }
 
 
-/** 新诊断出的问题多久内算「新」—— 周更任务，给一周多一点余量。 */
-const DIAGNOSTIC_FRESH_DAYS = 8
-
-/**
- * 本周新诊断出的严重问题 → 下发。
- *
- * PM 2026-08-03 拍板：诊断结果进今日待办逐条看。
- *
- * 🔴 **每个客户只出一条汇总，不是每个发现出一条。**
- *    库里光 critical + high 就有 98 条。全塞进待办 = 刷屏 = PM 直接不看 ——
- *    那跟没做一样，而且比没做更糟（占了注意力还不产生行动）。
- *    一条说清楚「几个严重问题 + 最要紧的是哪个 + 去哪看全部」。
- */
+/** Kept so old callers compile. Six-dimension findings are no longer pushed. */
 export async function pushDiagnosticItems(
-  supabase: SupabaseClient,
-  items: ManualItem[],
-  now: Date,
-  /** 客户名查表 —— 待办上要显示客户名，显示 uuid 等于没显示。 */
-  nameOf: (id: string) => string,
+  _supabase: SupabaseClient,
+  _items: ManualItem[],
+  _now: Date,
+  _nameOf: (id: string) => string,
 ): Promise<void> {
-  const since = new Date(now.getTime() - DIAGNOSTIC_FRESH_DAYS * 86_400_000).toISOString()
-  const { data } = await supabase
-    .from('diagnostic_findings')
-    .select('client_id, severity, title, priority_score, created_at')
-    .in('severity', ['critical', 'high'])
-    .gte('created_at', since)
-    .order('priority_score', { ascending: false })
-    .limit(300)
-
-  const rows = (data ?? []) as Array<{
-    client_id: string
-    severity: string
-    title: string
-  }>
-  if (rows.length === 0) return
-
-  // 按客户归堆；因为已按 priority_score 倒序取回，每堆第一条就是最要紧的
-  const byClient = new Map<string, { critical: number; high: number; top: string }>()
-  for (const r of rows) {
-    const cur = byClient.get(r.client_id) ?? { critical: 0, high: 0, top: r.title }
-    if (r.severity === 'critical') cur.critical += 1
-    else cur.high += 1
-    byClient.set(r.client_id, cur)
-  }
-
-  for (const [clientId, v] of Array.from(byClient.entries())) {
-    const counts = [
-      v.critical > 0 ? `${v.critical} 个严重` : null,
-      v.high > 0 ? `${v.high} 个高优先` : null,
-    ].filter(Boolean).join('、')
-    items.push({
-      kind: 'diagnostic_findings',
-      client_id: clientId,
-      client_name: nameOf(clientId),
-      // 体检页是只读报告。点开执行看板看现在在做的事。
-      // 每周二只复查已经批准的方案，不会再把体检自动排成看板上的待办。
-      what: `本周体检查出 ${counts}问题。最要紧的一条：${v.top}`,
-      how: '点开是执行看板，看现在在做的事对不对。每周不会再自动把体检排成看板上的待办；要改方向跟我说一声',
-      href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/execution`,
-    })
-  }
+  return
 }
 
 /** 复查回执多新算「本周的」。比一周多一天，免得周一早上漏掉上周二那轮。 */
