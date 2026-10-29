@@ -21,7 +21,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { syncMailchimpActivity } from '@/lib/mailchimp/sync'
+import { readSentRecordConfig, syncMailchimpActivity } from '@/lib/mailchimp/sync'
 import { ping } from '@/lib/mailchimp/client'
 import { startCronRun } from '@/lib/cron/run-logger'
 
@@ -80,7 +80,11 @@ async function run(): Promise<NextResponse> {
   const synced: Array<Record<string, unknown>> = []
   for (const c of targets) {
     try {
-      const r = await syncMailchimpActivity({ clientId: c.id as string, apiKey })
+      const r = await syncMailchimpActivity({
+        clientId: c.id as string,
+        apiKey,
+        sentRecord: readSentRecordConfig(c.leads_config),
+      })
       synced.push({ client: c.name, ...r })
     } catch (err) {
       // 一个客户失败不拖垮其它客户。

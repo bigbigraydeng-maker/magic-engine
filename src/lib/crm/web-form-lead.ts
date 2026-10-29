@@ -22,6 +22,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
+import { markNewLeadStage } from './new-lead-stage'
 import { attributionColumns, attributionFromUtm } from '@/lib/crm/attribution'
 
 export interface WebFormLeadInput {
@@ -83,7 +84,7 @@ export async function mirrorWebFormLead(input: WebFormLeadInput): Promise<WebFor
       utm_content: input.utmContent,
     })
 
-    const { contactId } = await resolveContact({
+    const { contactId, created } = await resolveContact({
       clientId: input.clientId,
       identities,
       displayName: input.name,
@@ -95,6 +96,7 @@ export async function mirrorWebFormLead(input: WebFormLeadInput): Promise<WebFor
       attribution,
       listingId: input.listingId ?? null,
     })
+    if (created) await markNewLeadStage(input.clientId, contactId)
 
     const { error: touchError } = await supabaseAdmin.from('contact_touchpoints').upsert(
       {

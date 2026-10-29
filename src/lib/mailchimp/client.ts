@@ -15,6 +15,8 @@
  * 所以只需要一个环境变量，不用另配 region。
  */
 
+import { createHash } from 'node:crypto'
+
 const API_VERSION = '3.0'
 
 export interface MailchimpCampaign {
@@ -210,7 +212,7 @@ async function fetchAllMembers(
 /** 最近发出去的邮件（含打开/点击汇总）。 */
 export async function listSentCampaigns(
   apiKey: string,
-  opts: { sinceSentAt?: string; count?: number } = {},
+  opts: { sinceSentAt?: string; count?: number; listId?: string } = {},
 ): Promise<MailchimpCampaign[]> {
   const params: Record<string, string> = {
     status: 'sent',
@@ -219,6 +221,8 @@ export async function listSentCampaigns(
     count: String(opts.count ?? 100),
   }
   if (opts.sinceSentAt) params.since_send_time = opts.sinceSentAt
+  // The API key is shared by every client's audience: without this, one client's campaigns would be read as another's.
+  if (opts.listId) params.list_id = opts.listId
 
   const json = await call<{ campaigns?: RawCampaign[] }>(apiKey, '/campaigns', params)
   return (json.campaigns ?? []).map(normaliseCampaign)
@@ -257,6 +261,62 @@ export async function getCampaignActivity(
     openers as Array<{ email_address?: string; last_open?: string }>,
     clickers as Array<{ email_address?: string; timestamp?: string }>,
   )
+}
+
+/** `not_recipient` = the address was not sent this campaign; `hard` = it bounced and never arrived. */
+export type CampaignRecipientStatus = 'sent' | 'soft' | 'hard' | 'not_recipient'
+
+/**
+ * 这个邮箱收到过这封群发吗（官方「Get campaign recipient info」：subscriber_hash = 小写邮箱的 MD5）。
+ * 404 = 不是收件人；其它错误照常抛（调用方要把「查不了」当成「无法核实」，不能当成「没收到」）。
+ * 返回了不认识的 status 时按 `sent` 算：宁可多数一封。
+ */
+export async function getCampaignRecipientStatus(
+  apiKey: string,
+  campaignId: string,
+  email: string,
+): Promise<CampaignRecipientStatus> {
+  const hash = createHash('md5').update(email.trim().toLowerCase()).digest('hex')
+  try {
+    const json = await call<{ status?: string }>(
+      apiKey,
+      `/reports/${encodeURIComponent(campaignId)}/sent-to/${hash}`,
+    )
+    return json.status === 'soft' || json.status === 'hard' ? json.status : 'sent'
+  } catch (err) {
+    if (err instanceof MailchimpError && err.status === 404) return 'not_recipient'
+    throw err
+  }
+}
+
+/** 一封邮件的一个收件人：Mailchimp 的发送状态（sent=已发出 / hard=永久退回 / soft=暂时退回）。 */
+export interface CampaignRecipient {
+  email: string
+  status: 'sent' | 'hard' | 'soft' | 'other'
+}
+
+/**
+ * 这封邮件发给了谁（含没打开的人）。
+ *
+ * 为什么要它：`getCampaignActivity` 只返回打开 / 点击过的人，收到了没打开的人一条都没有 ——
+ * 于是每天早上的欢迎信在客人抽屉里永远看不到（2026-10-29 PM 发现）。
+ *
+ * 端点 `/reports/{id}/sent-to`，返回的数组字段叫 `sent_to`（不是 `members`，照搬 `members` 会静默拿到 0 条）；
+ * 每人一行，**没有每个人各自的发送时间**，只能用整封邮件的发出时间。
+ */
+export async function getCampaignRecipients(
+  apiKey: string,
+  campaignId: string,
+): Promise<CampaignRecipient[]> {
+  const rows = await fetchAllMembers(apiKey, `/reports/${campaignId}/sent-to`, (j) => (j.sent_to as unknown[]) ?? [])
+  const out: CampaignRecipient[] = []
+  for (const r of rows as Array<{ email_address?: string; status?: string }>) {
+    const email = (r.email_address ?? '').trim().toLowerCase()
+    if (!email) continue
+    const st = r.status === 'sent' || r.status === 'hard' || r.status === 'soft' ? r.status : 'other'
+    out.push({ email, status: st })
+  }
+  return out
 }
 
 /** key 能不能用。配好之后先跑这个,别等同步时才发现 401。 */

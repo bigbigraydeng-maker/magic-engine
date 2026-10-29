@@ -288,6 +288,37 @@ describe('originOf（最早从哪个渠道进来）', () => {
     ).toBe('fb_form')
   })
 
+  it('我们打出去的电话 / 群发打开记录不算「从哪来」（Hinemoa Taylor：导入的外呼备注与 FB 表单同一秒）', () => {
+    const sameInstant = '2026-07-20T21:18:59Z'
+    expect(
+      originOf({
+        touches: [
+          { channel: 'phone', direction: 'outbound', source: 'sheet_followup', occurred_at: sameInstant },
+          { channel: 'meta_lead_form', direction: 'inbound', source: 'meta_lead_form', occurred_at: sameInstant },
+        ],
+        conversationChannels: [],
+      }),
+    ).toBe('fb_form')
+    expect(
+      originOf({
+        touches: [
+          { channel: 'email', direction: 'inbound', source: 'mailchimp', occurred_at: '2026-09-01T00:00:00Z' },
+          { channel: 'messenger', direction: 'inbound', source: 'messenger', occurred_at: '2026-09-10T00:00:00Z' },
+        ],
+        conversationChannels: [],
+      }),
+    ).toBe('messenger')
+  })
+
+  it('客人发起的一条都没有时，退回最早的任意触点（旧行为）', () => {
+    expect(
+      originOf({
+        touches: [{ channel: 'phone', direction: 'outbound', source: 'sheet_followup', occurred_at: '2026-07-20T00:00:00Z' }],
+        conversationChannels: [],
+      }),
+    ).toBe('phone')
+  })
+
   it('没有可认的触点就退回会话渠道；都没有返回 null', () => {
     expect(originOf({ touches: [{ channel: 'unknown', occurred_at: '2026-09-01T00:00:00Z' }], conversationChannels: ['email'] })).toBe('email')
     expect(originOf({ touches: [], conversationChannels: [] })).toBeNull()
@@ -305,5 +336,43 @@ describe('enrichContacts 不丢系统账号名', () => {
     } as never)
     const byId = Object.fromEntries(result.contacts.map((c) => [c.id, c.display_name]))
     expect(byId).toEqual({ a: 'WhatsApp Business', b: null, c: null, d: 'Jane Doe' })
+  })
+})
+
+describe('enrichContacts — 机器发的出站不挡同事真发的信', () => {
+  const hints: ConversationHint[] = [{ contactId: 'c1', channel: 'email', participantName: 'Sue' }]
+  const outboundEmails: OutboundEmailMsg[] = [{ contactId: 'c1', sentAt: '2026-09-25T03:46:34Z', messageId: 'm1' }]
+  const mailchimpSent = (extra: Record<string, unknown> = {}): TouchRow =>
+    ({
+      id: 't1',
+      contact_id: 'c1',
+      channel: 'email',
+      direction: 'outbound',
+      occurred_at: '2026-10-28T19:02:00Z',
+      summary: '发出《Welcome》',
+      raw: null,
+      metadata: { automated: true, kind: 'sent' },
+      source: 'mailchimp',
+      ...extra,
+    }) as unknown as TouchRow
+
+  it('a Mailchimp "sent" row does not stop the colleague\u2019s real email from being added', () => {
+    const result = enrichContacts({
+      contacts: [makeContact({ id: 'c1', display_name: 'Sue', primary_email: 'sue@example.com', primary_phone: null })],
+      touches: [mailchimpSent()],
+      hints,
+      outboundEmails,
+    })
+    expect(result.touches.filter((t) => t.id === 'email-msg:m1')).toHaveLength(1)
+  })
+
+  it('a real (non-automated) outbound email touch still suppresses the synthetic one', () => {
+    const result = enrichContacts({
+      contacts: [makeContact({ id: 'c1', display_name: 'Sue', primary_email: 'sue@example.com', primary_phone: null })],
+      touches: [mailchimpSent({ source: 'microsoft_mail', metadata: {} })],
+      hints,
+      outboundEmails,
+    })
+    expect(result.touches.filter((t) => t.id === 'email-msg:m1')).toHaveLength(0)
   })
 })

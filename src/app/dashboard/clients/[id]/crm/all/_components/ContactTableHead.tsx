@@ -9,6 +9,20 @@ export function ContactTableHead(props: {
   onToggleSort: (key: 'firstSeenAt' | 'lastTouchAt') => void
 }) {
   const { grouped, columns, sortArrow, onToggleSort } = props
+  // 「今天先联系」只留三样：客人 / 该做什么 / 联系渠道（PM 2026-10-29：第一眼进来太懵）。
+  // 进线时间、最近联系、联系方式和自定义列都收进点开后的详情；要翻全部信息去「全部客人」。
+  if (grouped) {
+    return (
+      <thead>
+        <tr className="border-b border-me-charcoal/10 text-left text-xs text-me-charcoal/50">
+          <th className="whitespace-nowrap px-2 py-2">⭐</th>
+          <th className="whitespace-nowrap px-4 py-2">客人</th>
+          <th className="whitespace-nowrap px-4 py-2">该做什么</th>
+          <th className="whitespace-nowrap px-4 py-2">联系渠道</th>
+        </tr>
+      </thead>
+    )
+  }
   return (
     <thead>
       <tr className="border-b border-me-charcoal/10 text-left text-xs text-me-charcoal/50">

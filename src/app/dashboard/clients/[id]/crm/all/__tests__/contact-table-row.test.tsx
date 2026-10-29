@@ -170,3 +170,46 @@ describe('🔥 回头标签（PM 2026-10-27：之前咨询过、我们联系过�
     expect(html.indexOf('returning-tag')).toBeLessThan(html.indexOf('FB 表单'))
   })
 })
+
+describe('「今天先联系」每行只留三样：名字 / 一句话原因 / 一个渠道', () => {
+  it('分段视图：画 客人 + 该做什么 + 联系渠道，不画进线时间、最近联系、联系方式、自定义列、来源小标签', () => {
+    renderRow(makeRow({ suggestedChannel: 'phone', sources: ['fb_form'], custom: { tour: 'Best of China' } }), true)
+    expect(screen.getByText('Jane Doe')).toBeTruthy()
+    expect(screen.getByText('进线了，还没人联系')).toBeTruthy()
+    expect(screen.getByTestId('channel-cell').textContent).toContain('电话')
+    expect(screen.queryByText('+64211111111')).toBeNull() // 联系方式收进详情
+    expect(screen.queryByText('FB 表单')).toBeNull() // 来源小标签不画
+    expect(screen.queryByText('Best of China')).toBeNull() // 自定义列不画
+    expect(document.querySelectorAll('td').length).toBe(4) // ⭐ / 客人 / 该做什么 / 联系渠道
+  })
+
+  it('每种渠道都有人话；没有可用渠道时直说，不画成空白', () => {
+    const cases: Array<[NonNullable<ContactRow['suggestedChannel']>, string]> = [
+      ['email', '邮件'],
+      ['messenger', '私信'],
+      ['sms', '短信'],
+      ['none', '暂无可用渠道'],
+    ]
+    for (const [ch, text] of cases) {
+      const { unmount } = renderRow(makeRow({ suggestedChannel: ch }), true)
+      expect(screen.getByTestId('channel-cell').textContent).toContain(text)
+      unmount()
+    }
+  })
+
+  it('「回头」标签仍然画在名字旁边（最该先看的东西）', () => {
+    renderRow(
+      makeRow({ returning: { firstEnquiryAt: 'a', latestFormAt: 'b', ourLastContactAt: 'c', ourContacts: 1, earlierForms: 1 } }),
+      true,
+    )
+    expect(screen.getByTestId('returning-tag')).toBeTruthy()
+  })
+
+  it('平铺名单（全部客人）不变：仍然画进线时间、联系方式、自定义列、来源标签', () => {
+    renderRow(makeRow({ sources: ['fb_form'], custom: { tour: 'Best of China' } }), false)
+    expect(screen.getByText('+64211111111')).toBeTruthy()
+    expect(screen.getByText('FB 表单')).toBeTruthy()
+    expect(screen.getByText('Best of China')).toBeTruthy()
+    expect(screen.queryByTestId('channel-cell')).toBeNull()
+  })
+})

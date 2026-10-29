@@ -27,6 +27,7 @@ import {
 } from '@/lib/crm/table-columns'
 
 import { contactCardTitle } from './display-name'
+import { isAutomatedTouch } from './automated-touch'
 
 export interface ContactRow {
   id: string
@@ -107,6 +108,10 @@ export function responseRowFor(
     const v = ts(t.occurred_at)
     if (v > 0) {
       if (firstTouch === 0 || v < firstTouch) firstTouch = v
+      // 机器发出的邮件（Mailchimp 欢迎信 / 群发）不算「最近联系」：
+      // 否则每天早上 8:02 的欢迎信会让昨天进来的新客人被算成「今天已处理」（2026-08-02 同类事故）。
+      // 只针对邮件——AI 外呼也标了 automated，但那是一通真电话。
+      if (t.channel === 'email' && t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata)) continue
       if (v > lastTouch) lastTouch = v
     }
   }

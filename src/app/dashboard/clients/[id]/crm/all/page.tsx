@@ -102,6 +102,8 @@ export default function CrmAllContactsPage() {
    * 以前它只是页面里的一个开关，关掉页面就回到平铺名单。
    */
   const [grouped, setGrouped] = useState(false)
+  /** 读完网址、定好进哪个视图之前不发列表请求 —— 否则默认视图一换，会白发一次请求再作废。 */
+  const [viewReady, setViewReady] = useState(false)
   const [sections, setSections] = useState<PrioritySectionData[]>([])
   /** 展开哪些段。null = 还没动过，用服务端默认（前两段展开）。 */
   const [openSections, setOpenSections] = useState<SectionKey[] | null>(null)
@@ -241,8 +243,9 @@ export default function CrmAllContactsPage() {
   }, [clientId, page, perPage, flatPerPage, qDebounced, stageFilter, kindFilter, assigneeFilter, grouped, openSections, sectionPages])
 
   useEffect(() => {
+    if (!viewReady) return
     void loadList()
-  }, [loadList])
+  }, [loadList, viewReady])
 
   // 搜索词防抖：300ms 内还在敲就不发请求。
   useEffect(() => {
@@ -283,8 +286,18 @@ export default function CrmAllContactsPage() {
    * React 水合不一致（会报错 + 闪一下平铺名单）；用 `useSearchParams` 则要给整页套
    * Suspense 边界，为一个可选参数不值当（子牙 / 魏征复审 P2-2）。
    */
+  /**
+   * 默认进「今天先联系」（PM 2026-10-28：第一眼进来太懵 —— 原来默认是 1000 多人的平铺大表，
+   * 真正回答「先联系谁」的智能视图藏在按钮后面）。
+   *
+   * 只对「裸进来」的人生效：带 `?contact=`（今日待办 / 付款总览 / 摘要邮件的直达链接）、
+   * `?assignee=`（我的待跟进）或 `?view=all` 的，仍然进平铺名单，老链接的行为不变。
+   */
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('view') === 'smart') setGrouped(true)
+    const sp = new URLSearchParams(window.location.search)
+    const wantsFlat = sp.get('view') === 'all' || sp.has('contact') || sp.has('assignee')
+    setGrouped(sp.get('view') === 'smart' || !wantsFlat)
+    setViewReady(true)
   }, [])
 
   /**
@@ -570,7 +583,8 @@ export default function CrmAllContactsPage() {
     }
   }
 
-  const colCount = 6 + columns.length
+  // 「今天先联系」只有 4 列（⭐ / 客人 / 该做什么 / 联系渠道）；平铺名单是 6 列 + 自定义列。
+  const colCount = grouped ? 4 : 6 + columns.length
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
@@ -605,11 +619,13 @@ export default function CrmAllContactsPage() {
           ← 返回客户
         </Link>
         <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-black text-me-charcoal">全部客人</h1>
+          <h1 className="text-2xl font-black text-me-charcoal">{grouped ? '今天先联系' : '全部客人'}</h1>
           <CrmTabs clientId={clientId} active="all" />
         </div>
         <p className="mt-1 text-sm text-me-charcoal/45">
-          翻看所有人、查某个客人的来往记录。想知道今天该打谁，点上面「今天要联系」。
+          {grouped
+            ? '先处理最上面一段：客人说了话、等你回的，在最前面。'
+            : '翻看所有人、查某个客人的来往记录。想知道今天该先联系谁，点右边的「回到今天先联系」按钮。'}
         </p>
       </div>
 
@@ -661,8 +677,7 @@ export default function CrmAllContactsPage() {
                 // 让网址跟着视图走（不重新加载页面），这样刷新 / 存书签都还在同一个视图。
                 if (typeof window !== 'undefined') {
                   const url = new URL(window.location.href)
-                  if (next) url.searchParams.set('view', 'smart')
-                  else url.searchParams.delete('view')
+                  url.searchParams.set('view', next ? 'smart' : 'all')
                   window.history.replaceState(null, '', url.toString())
                 }
                 return next

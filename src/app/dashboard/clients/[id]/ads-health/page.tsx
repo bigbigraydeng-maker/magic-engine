@@ -19,6 +19,7 @@ import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView } from './growth-panel'
 import WarMapPanel from './war-map-panel'
 import LiveTodayPanel from './live-today-panel'
+import BreakdownPanel from './breakdown-panel'
 import AutoPausePanel from './auto-pause-panel'
 import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
@@ -663,6 +664,8 @@ export default function AdsHealthPage() {
           )}
         </>
       )}
+
+      {tab === 'breakdown' && <BreakdownPanel clientId={clientId} />}
 
       {/*
         「等你点头」标签 —— 这个客户等人点头的广告动作，就在这一页批

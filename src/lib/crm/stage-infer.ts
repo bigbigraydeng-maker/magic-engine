@@ -18,6 +18,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { isAutomatedTouch } from './automated-touch'
 import { STAGE_INFER_ACTOR, STAGE_REASON_PREFIX } from './actors'
 import {
   STAGE_SYSTEM_PROMPT,
@@ -144,7 +145,7 @@ export async function askStage(transcript: string): Promise<StageVerdict | null>
  * 配齐 = 这个客户的漏斗**就是**那条漏斗（`traveling_soon` 即将出行是旅游独有的）。
  * 以后哪个行业要用，得先给它写自己的阶段定义和提示词，而不是共用这一份。
  */
-async function loadClientsWithSafeStages(): Promise<string[]> {
+export async function loadClientsWithSafeStages(): Promise<string[]> {
   const { data, error } = await supabaseAdmin
     .from('client_pipeline_stages')
     .select('client_id, stage_key')
@@ -163,7 +164,7 @@ async function loadClientsWithSafeStages(): Promise<string[]> {
 }
 
 /** 这个客户配置里真的有哪些阶段。没配的不许写进去。 */
-async function loadConfiguredStages(clientId: string): Promise<Set<string>> {
+export async function loadConfiguredStages(clientId: string): Promise<Set<string>> {
   const { data } = await supabaseAdmin
     .from('client_pipeline_stages')
     .select('stage_key')
@@ -185,7 +186,7 @@ export async function loadTranscriptLines(
     supabaseAdmin.from('conversations').select('id').eq('client_id', clientId).eq('contact_id', contactId),
     supabaseAdmin
       .from('contact_touchpoints')
-      .select('channel, direction, occurred_at, raw, summary')
+      .select('channel, direction, occurred_at, raw, summary, source, metadata')
       .eq('client_id', clientId)
       .eq('contact_id', contactId)
       .neq('channel', 'messenger')
@@ -214,7 +215,13 @@ export async function loadTranscriptLines(
     occurred_at: string
     raw: string | null
     summary: string | null
+    source: string | null
+    metadata: Record<string, unknown> | null
   }[]) {
+    // 机器发的出站（Mailchimp 欢迎信 / 群发）不是「我们跟他聊过」——喂给模型，
+    // 「对方一句没回 + 我们发过 + 已过两周」会把只收过欢迎信的人永久写成「无下文」。
+    // 只针对邮件：AI 外呼的触点也标了 automated，但它的 raw 是通话摘要（客人在电话里说的话都在里面），必须留给模型。
+    if (t.channel === 'email' && t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata)) continue
     // 电话触点的原话在 raw；raw 空的（FB 表单之类）退回 summary。
     const body = (t.raw ?? t.summary ?? '').trim()
     if (body) lines.push({ at: t.occurred_at, direction: t.direction, body, channel: t.channel })

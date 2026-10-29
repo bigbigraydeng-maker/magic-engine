@@ -13,6 +13,7 @@
 
 import type { ContactRow, TouchRow } from './contact-response-row'
 import { cleanDisplayName } from './clean-display-name'
+import { isAutomatedTouch } from './automated-touch'
 
 export interface ConversationHint {
   contactId: string
@@ -116,17 +117,27 @@ export function sourcesOf(args: {
 }
 
 /**
- * 这个人**最早**是从哪个渠道进来的（来源）—— 最早的一条触点；没有触点就看会话渠道。
+ * 这个人**最早**是从哪个渠道进来的（来源）。
+ *
+ * 只认**客人自己发起**的触点：我们打出去的电话 / 发出去的邮件、群发工具记下的「打开了邮件」都不是
+ * 他「从哪里来」。2026-10-28 PM 发现 Hinemoa Taylor 来源显示「电话」——其实是 7 月导入跟进表时
+ * 记的一条「留言未回复」（我们打出去的，时间戳跟她的 Facebook 表单同一秒，排序时它排在前面），
+ * 而 CTS 根本没有电话打进来的渠道。
+ *
+ * 取舍：先在客人发起的触点里找最早的；一条都没有才退回「最早的任意触点」，再退回会话渠道。
  * 不是「来过哪些渠道」：很多人几个渠道都碰过，列出一串等于没说。
  */
 export function originOf(args: {
-  touches: Array<{ channel: string; occurred_at: string }>
+  touches: Array<{ channel: string; occurred_at: string; direction?: string | null; source?: string | null }>
   conversationChannels: string[]
 }): SourceKey | null {
   const byTime = [...args.touches].sort((a, b) => Date.parse(a.occurred_at) - Date.parse(b.occurred_at))
-  for (const t of byTime) {
-    const key = sourceKeyOf(t.channel)
-    if (key !== null) return key
+  const customerInitiated = byTime.filter((t) => t.direction === 'inbound' && !isAutomatedTouch(t.source, null))
+  for (const list of [customerInitiated, byTime]) {
+    for (const t of list) {
+      const key = sourceKeyOf(t.channel)
+      if (key !== null) return key
+    }
   }
   for (const c of args.conversationChannels) {
     const key = sourceKeyOf(c)
@@ -198,8 +209,13 @@ export function enrichContacts(args: {
       primary_email: resolvedEmail,
     })
 
+    // 机器发的（Mailchimp 欢迎信 / 群发）不算「我们回过他」——否则一封机器信一进来，
+    // 同事从 info@ 真回的信就不再补进时间线，名单会把已跟进的人当成没人联系过。
     const hasOutboundEmailTouch = contactTouches.some(
-      (t) => t.channel === 'email' && t.direction === 'outbound',
+      (t) =>
+        t.channel === 'email' &&
+        t.direction === 'outbound' &&
+        !isAutomatedTouch((t as { source?: string | null }).source, t.metadata as Record<string, unknown> | null),
     )
 
     if (contactEmails.length > 0 && !hasOutboundEmailTouch) {

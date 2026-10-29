@@ -11,6 +11,8 @@
  * 在调用方必须能区分（否则快照会把读失败记成「账户空了」）。
  */
 
+import type { GraphBreakdownRow } from '@/lib/ads-strategy/breakdown-stats/types'
+
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 const PAGE_LIMIT = '200'
 const MAX_PAGES = 25
@@ -251,6 +253,44 @@ export function fetchHourlyAdsetSpend(adAccountId: string, accessToken: string, 
     level: 'adset',
     breakdowns: 'hourly_stats_aggregated_by_advertiser_time_zone',
     time_range: JSON.stringify({ since: day, until: day }),
+    limit: '500',
+  }, accessToken))
+}
+
+/**
+ * 广告级、按天、按一种切法拆开的 insights（广告机会挖掘底座，只读，设计 v0.3 §3）。
+ * `graphBreakdowns` 由 `breakdown-stats/specs.ts` 给出；Meta 不允许小时拆分叠加别的切法，调用方一次只传一种。
+ * 窗口要由调用方切小（按 7 天一段）：广告 × 24 小时 × 天数很快会顶到 MAX_PAGES 上限，顶到就是 complete:false。
+ */
+export function fetchAdBreakdownInsights(
+  adAccountId: string,
+  accessToken: string,
+  graphBreakdowns: string,
+  since: string,
+  until: string,
+) {
+  return readList<GraphBreakdownRow>(graphUrl(`${adAccountId}/insights`, {
+    fields: 'ad_id,adset_id,campaign_id,spend,impressions,clicks,inline_link_clicks,actions,account_currency',
+    level: 'ad',
+    breakdowns: graphBreakdowns,
+    time_increment: '1',
+    time_range: JSON.stringify({ since, until }),
+    limit: '500',
+  }, accessToken))
+}
+
+export interface GraphAccountDailySpendRow {
+  date_start?: string
+  spend?: string
+}
+
+/** 账户级逐日总花费（对账用：各切法花费合计应等于它）。Meta 对零花费的日子不返回行。 */
+export function fetchAccountDailySpend(adAccountId: string, accessToken: string, since: string, until: string) {
+  return readList<GraphAccountDailySpendRow>(graphUrl(`${adAccountId}/insights`, {
+    fields: 'spend',
+    level: 'account',
+    time_increment: '1',
+    time_range: JSON.stringify({ since, until }),
     limit: '500',
   }, accessToken))
 }
