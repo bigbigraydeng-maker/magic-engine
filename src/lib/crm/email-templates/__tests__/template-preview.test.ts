@@ -96,6 +96,22 @@ describe('previewTemplate: rendering and picks', () => {
     expect(res.callBasis).toBe('staff_attested')
   })
 
+  it('hands back the footer the server appends on every send, so the preview is the whole mail', async () => {
+    const footer = 'CTS Tours, Auckland\nTo stop hearing from us, reply STOP.'
+    const res = await previewTemplate(args({ config: config({ footer }) }), makeData())
+    expect(res.ok && res.footer).toBe(footer)
+  })
+
+  it('has no footer when none is configured', async () => {
+    const res = await previewTemplate(args(), makeData())
+    expect(res.ok && res.footer).toBeNull()
+  })
+
+  it('runs the red lines on the footer too, as the real send does (a link in the footer to a site that is not allowed)', async () => {
+    const res = await previewTemplate(args({ config: config({ footer: 'Unsubscribe: https://evil.com/stop' }) }), makeData())
+    expect(res.ok && res.blocks.some((b) => b.code === 'link_host_not_allowed' && b.detail === 'evil.com')).toBe(true)
+  })
+
   it('explains a pick that cannot be used and does not render it', async () => {
     const data = makeData({ loadFacts: vi.fn(async () => ({ ok: true as const, version: 7, tours: [tour({ soldOut: true })] })) })
     const res = await previewTemplate(args(), data)

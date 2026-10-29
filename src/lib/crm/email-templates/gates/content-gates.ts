@@ -44,7 +44,10 @@ const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi
 // A URL ends at the first character that cannot be part of a URL: a Chinese full stop or the Chinese text after a
 // link is not "the path" (and a mail client does not link it either).
 const URL_CHARS = "A-Za-z0-9\\-._~:/?#@!$&*+,;=%\\[\\]"
-const URL_HTTP_RE = new RegExp(`https?://[${URL_CHARS}]+`, 'gi')
+// A browser reads "https:/evil.com" and "https:\\evil.com" as "https://evil.com", and a hand-typed link can lose a slash by
+// accident: the scheme may be followed by any run of slashes or backslashes. It is normalised to "//" before the host is read.
+const URL_HTTP_RE = new RegExp(`https?:[\\\\/]+[${URL_CHARS}]+`, 'gi')
+const SCHEME_AND_SLASHES_RE = /^(https?):[\\/]+/i
 const URL_WWW_RE = new RegExp(`www\\.[${URL_CHARS}]+`, 'gi')
 // Bare domains are only recognised under the TLDs listed here: a list, not "anything with a dot", so ordinary
 // text ("e.g.", "10.30am", "Mr.Lee") is not flagged. Common English words that are also TLDs (it, in, at, no, so...) are left out.
@@ -64,7 +67,9 @@ const TRAILING_PUNCT_RE = /[.,;:!?)]+$/
 // (both count as "." in a host name). It must END on a letter or digit, so a sentence-final "。" alone is not swallowed.
 const HOST_CONTINUATION_RE = /^(?:[.\-\u3002\uFF61]*[\p{L}\p{N}\p{M}])+/u
 // A link whose host STARTS with a non-ASCII letter ("https://例え.jp") has no ASCII URL character to open a token with.
-const URL_IDN_HOST_RE = /https?:\/\/[\p{L}\p{N}\p{M}][\p{L}\p{N}\p{M}.\-\u3002\uFF61]*/giu
+const URL_IDN_HOST_RE = /https?:[\\/]+[\p{L}\p{N}\p{M}][\p{L}\p{N}\p{M}.\-\u3002\uFF61]*/giu
+// The same for "www.": "www.例え.com" has no ASCII URL character after the dot to open a token with.
+const WWW_IDN_HOST_RE = /www\.[\p{L}\p{N}\p{M}][\p{L}\p{N}\p{M}.\-\u3002\uFF61]*/giu
 
 function composedText(input: ContentGateInput): string {
   const parts = [input.subject, input.body]
@@ -149,11 +154,16 @@ export function extractLinks(normalizedText: string): string[] {
   let rest = normalizedText
   for (const pattern of [URL_HTTP_RE, URL_WWW_RE]) {
     rest = rest.replace(new RegExp(pattern.source, pattern.flags), (match, offset: number, whole: string) => {
-      add(match + hostContinuation(match, whole.slice(offset + match.length)))
+      const token = match.replace(SCHEME_AND_SLASHES_RE, '$1://')
+      add(token + hostContinuation(token, whole.slice(offset + match.length)))
       return ' '
     })
   }
   rest = rest.replace(new RegExp(URL_IDN_HOST_RE.source, URL_IDN_HOST_RE.flags), (match) => {
+    add(match.replace(SCHEME_AND_SLASHES_RE, '$1://'))
+    return ' '
+  })
+  rest = rest.replace(new RegExp(WWW_IDN_HOST_RE.source, WWW_IDN_HOST_RE.flags), (match) => {
     add(match)
     return ' '
   })

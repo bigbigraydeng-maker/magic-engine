@@ -133,6 +133,65 @@ describe('contact lock ownership', () => {
   })
 })
 
+describe('recipient lock (one send to an address at a time, whichever contact record it is)', () => {
+  it('locks on the address itself, lower-cased, so two contact records that share it collide', async () => {
+    const store = createMailNewStore()
+    expect(await store.acquireRecipientLock('client-1', ' Amy@Gmail.com ', 'lisa@cts.example')).toBe(true)
+    const row = state.inserted.find((i) => i.row.conversation_id === 'mail-lock:to:amy@gmail.com')
+    expect(row?.row).toMatchObject({ client_id: 'client-1', channel: 'email', page_id: 'lisa@cts.example' })
+    expect(typeof row?.row.subject).toBe('string')
+  })
+
+  it('does not collide with a contact lock (a contact id is a uuid, never "to:…")', async () => {
+    const store = createMailNewStore()
+    await store.acquireContactLock('client-1', 'contact-1', 'lisa@cts.example')
+    await store.acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')
+    const keys = state.inserted.map((i) => i.row.conversation_id)
+    expect(keys).toEqual(['mail-lock:contact-1', 'mail-lock:to:amy@gmail.com'])
+  })
+
+  it('a second request for the same address is told the lock is taken', async () => {
+    const holder = createMailNewStore()
+    const latecomer = createMailNewStore()
+    expect(await holder.acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')).toBe(true)
+    state.insertError = { code: '23505', message: 'duplicate key' }
+    expect(await latecomer.acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')).toBe(false)
+  })
+
+  it('releases only its own token, and never touches a lock someone else holds', async () => {
+    const holder = createMailNewStore()
+    const latecomer = createMailNewStore()
+    await holder.acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')
+    const token = state.inserted.find((i) => i.row.conversation_id === 'mail-lock:to:amy@gmail.com')?.row.subject
+    state.insertError = { code: '23505', message: 'duplicate key' }
+    await latecomer.acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')
+
+    state.deleted = []
+    await latecomer.releaseRecipientLock('client-1', 'amy@gmail.com')
+    expect(releases()).toHaveLength(0)
+
+    await holder.releaseRecipientLock('client-1', 'AMY@gmail.com')
+    const [release] = releases()
+    expect(release.filters).toEqual(
+      expect.arrayContaining([
+        { op: 'eq', column: 'client_id', value: 'client-1' },
+        { op: 'eq', column: 'conversation_id', value: 'mail-lock:to:amy@gmail.com' },
+        { op: 'eq', column: 'subject', value: token },
+      ]),
+    )
+  })
+
+  it('sweeps a stale address lock and surfaces a real insert failure, like the contact lock', async () => {
+    await createMailNewStore().acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')
+    const sweep = state.deleted.find(
+      (d) => d.filters.some((f) => f.op === 'lt' && f.column === 'created_at') && d.filters.some((f) => f.column === 'conversation_id' && f.value === 'mail-lock:to:amy@gmail.com'),
+    )
+    expect(sweep).toBeDefined()
+    state.insertError = { code: '08006', message: 'connection lost' }
+    await expect(createMailNewStore().acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')).rejects.toThrow('connection lost')
+  })
+})
+
 describe('findPriorSend', () => {
   const REQ = '11111111-1111-4111-8111-111111111111'
   const logRow = { id: 'audit-1', status: 'sent', meta_message_id: `req:${REQ}|msg:AAMk1`, conversation_id: 'conv-1' }

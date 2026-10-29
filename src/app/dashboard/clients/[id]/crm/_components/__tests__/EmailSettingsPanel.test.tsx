@@ -13,6 +13,7 @@ import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { EmailSettingsPanel } from '../EmailSettingsPanel'
+import { EMAIL_SETTINGS_SAVED_EVENT } from '@/lib/crm/email-templates/settings-events'
 
 const stored = (over: Record<string, unknown> = {}) => ({
   enabled: true,
@@ -273,6 +274,51 @@ describe('when the save does not go through', () => {
     expect(await screen.findByText('设置刚被别人改过，请重新载入后再改。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '重新载入' }))
     await waitFor(() => expect(f.mock.calls.filter((c) => (c[1] as RequestInit | undefined)?.method !== 'PUT')).toHaveLength(2))
+  })
+
+  it('a successful save tells the rest of the page exactly once', async () => {
+    routes([{ body: okPayload() }, { body: okPayload({ version: 5 }) }], [{ body: { ok: true, version: 5 } }])
+    const listener = vi.fn()
+    window.addEventListener(EMAIL_SETTINGS_SAVED_EVENT, listener)
+    try {
+      render(<EmailSettingsPanel clientId="c1" />)
+      await ready()
+      fireEvent.click(saveButton())
+      expect(await screen.findByText('✓ 已保存为第 5 版')).toBeInTheDocument()
+      expect(listener).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener(EMAIL_SETTINGS_SAVED_EVENT, listener)
+    }
+  })
+
+  it('a 409 conflict does not tell the rest of the page', async () => {
+    routes([{ body: okPayload() }], [{ status: 409, body: { error: 'stale' } }])
+    const listener = vi.fn()
+    window.addEventListener(EMAIL_SETTINGS_SAVED_EVENT, listener)
+    try {
+      render(<EmailSettingsPanel clientId="c1" />)
+      await ready()
+      fireEvent.click(saveButton())
+      expect(await screen.findByText('设置刚被别人改过，请重新载入后再改。')).toBeInTheDocument()
+      expect(listener).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener(EMAIL_SETTINGS_SAVED_EVENT, listener)
+    }
+  })
+
+  it('a rejected save with an errors list does not tell the rest of the page', async () => {
+    routes([{ body: okPayload() }], [{ status: 400, body: { error: 'x', errors: ['footer: too long'] } }])
+    const listener = vi.fn()
+    window.addEventListener(EMAIL_SETTINGS_SAVED_EVENT, listener)
+    try {
+      render(<EmailSettingsPanel clientId="c1" />)
+      await ready()
+      fireEvent.click(saveButton())
+      expect(await screen.findByText('footer: too long')).toBeInTheDocument()
+      expect(listener).not.toHaveBeenCalled()
+    } finally {
+      window.removeEventListener(EMAIL_SETTINGS_SAVED_EVENT, listener)
+    }
   })
 
   it('a network failure says the outcome is not certain', async () => {

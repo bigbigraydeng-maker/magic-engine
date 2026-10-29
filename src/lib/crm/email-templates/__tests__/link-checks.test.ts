@@ -151,6 +151,42 @@ describe('tricks with the link itself', () => {
   it('a code point that a domain name ignores (U+1BCA0, not on our hand-made list) does not hide a foreign host', () => {
     expect(codes(`Go to https://www.example.com${String.fromCodePoint(0x1bca0)}.evil.com`)).toContain('link_host_not_allowed')
   })
+
+  // A browser reads these as "https://evil.com" although there is no "//": a link that lost a slash by accident, or on purpose.
+  it.each(['https:/evil.com/x', 'https:///evil.com/x', 'https:\\\\evil.com/x', 'https:/\\evil.com/x', 'HTTPS:/EVIL.COM'])(
+    '%s is a link to evil.com, not a string with no link in it',
+    (text) => {
+      expect(check(`Go to ${text}`).blocks.some((b) => b.code === 'link_host_not_allowed' && b.detail === 'evil.com')).toBe(true)
+    },
+  )
+
+  it('an http link with a lost slash is still flagged as not https', () => {
+    expect(codes('Go to http:/www.example.com/tours')).toContain('link_not_https')
+  })
+
+  it('a link to an allowed host with a lost slash is checked exactly like the full form (tour page rules included)', () => {
+    expect(codes('See https:/www.example.com/tours/china/discovery/gone')).toContain('tour_page_not_on_sale')
+    expect(codes('详见 https:/www.example.com/tours/china/discovery/essentials?date=2027-03-11。谢谢')).toEqual([])
+  })
+
+  it('a lost slash followed by Chinese text is no way to hide a foreign host', () => {
+    expect(codes('Go to https:/www.example.com请看')).toContain('link_host_not_allowed')
+    // the host is read as 例え.jp (not as "https:"), exactly as in the full form
+    const idn = check('见 https:/例え.jp').blocks.filter((b) => b.code === 'link_host_not_allowed')
+    expect(idn.map((b) => b.detail)).toEqual(['例え.jp'])
+  })
+
+  it('"www." followed by a letter of another script is a link too (www.例え.com used to slip through)', () => {
+    const blocks = check('官网 www.例え.com 请看').blocks
+    expect(blocks.some((b) => b.code === 'link_host_not_allowed' && b.detail === 'www.例え.com')).toBe(true)
+    expect(codes('Go to www.Ünïcode-evil.example')).toContain('link_host_not_allowed')
+    expect(codes('Go to www.例え。evil。com')).toContain('link_host_not_allowed')
+  })
+
+  it('a bare "www." in ordinary text is not a link', () => {
+    expect(codes('Our site starts with www. and then the name')).toEqual([])
+    expect(codes('Visit www.')).toEqual([])
+  })
 })
 
 describe('red-line phrases and leftovers', () => {

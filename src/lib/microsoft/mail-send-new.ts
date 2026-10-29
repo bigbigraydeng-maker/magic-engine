@@ -8,7 +8,8 @@
  * 所以每一道闸、每一种失败都能用内存替身一条条钉住；真实实现在 `mail-send-new-prod.ts`。
  *
  * 顺序（任何一步失败都不发）：校验 → 开关 → 收件人 → 只发给咨询过的人 → 别再联系 → 选邮箱
- * → 重复请求 → 对账上次不明的发送 → 配额 → 抢锁 → 先写会话 + 审计 → 建草稿 → 发送 → 发完补记录。
+ * → 重复请求 → 对账上次不明的发送 → 配额 → 抢锁（联系人 + 收件地址两把）→ 锁内再看一次重复请求
+ * → 先写会话 + 审计 → 建草稿 → 发送 → 发完补记录。
  *
  * 🔴 「信可能已经发出去了」不能记成失败：超时/网络错误时 Graph 也许已经把信发走了。
  * 这种情况审计保持 pending（带草稿 id），响应「状态不明，先别重发」，下次对账再定。
@@ -112,6 +113,12 @@ export interface MailNewStore {
   countRecentEmailsToContact(clientId: string, contactId: string, days: number): Promise<number>
   acquireContactLock(clientId: string, contactId: string, mailbox: string): Promise<boolean>
   releaseContactLock(clientId: string, contactId: string): Promise<void>
+  /**
+   * One send to an address at a time. Two contact records can carry the same address; each takes its own contact lock, so
+   * without this a pair of sends could both pass the per-guest cap and both go out.
+   */
+  acquireRecipientLock(clientId: string, recipient: string, mailbox: string): Promise<boolean>
+  releaseRecipientLock(clientId: string, recipient: string): Promise<void>
   claimConversation(args: { clientId: string; contactId: string; requestId: string; mailbox: string; subject: string }): Promise<ClaimResult>
   insertAudit(args: { clientId: string; conversationId: string; sentByEmail: string; body: string; requestId: string }): Promise<string | null>
   patchAudit(auditId: string, patch: { status?: 'sent' | 'failed'; metaMessageId?: string; errorMessage?: string }): Promise<void>
@@ -156,6 +163,23 @@ export const requestIdFromMeta = (meta: string | null): string | null => {
 }
 
 const PENDING_UNKNOWN_AFTER_MS = 2 * 60_000
+
+/**
+ * Thrown by `sendMailNew` when something went wrong once the send had started: a message may already have left, so the
+ * caller must record "outcome unknown", never "failed". Carries what the receipt needs (`meta` is null for clients that
+ * are not on versioned settings: they get no receipts).
+ */
+export class SendStartedError extends Error {
+  readonly original: unknown
+  readonly meta: SendMeta | null
+
+  constructor(original: unknown, meta: SendMeta | null) {
+    super(original instanceof Error ? original.message : String(original))
+    this.name = 'SendStartedError'
+    this.original = original
+    this.meta = meta
+  }
+}
 
 /** What the receipt needs to know about an attempt, filled in as sendMailNew learns it. */
 interface Track {
@@ -323,7 +347,7 @@ export async function sendMailNew(input: SendMailNewInput, deps: MailNewDeps): P
     result = await runSendMailNew(input, deps, track)
   } catch (err) {
     // Once claimAndSend has been entered a message may have left: the caller must see the exception and record "unknown".
-    if (track.sendStarted) throw err
+    if (track.sendStarted) throw new SendStartedError(err, track.meta === null ? null : { ...track.meta, mailbox: track.mailbox })
     result = refusedBeforeSending(err)
   }
   // Legacy-config clients (no versioned settings) get no meta and so no receipt: their behaviour is unchanged.
@@ -346,12 +370,7 @@ async function runSendMailNew(input: SendMailNewInput, deps: MailNewDeps, track:
   const { config, to, mailbox } = resolved
 
   const prior = await store.findPriorSend(input.clientId, requestId, input.contactId)
-  if (prior) {
-    if (prior.status === 'sent' && prior.messageId) {
-      return { ok: true, messageId: prior.messageId, conversationId: prior.conversationId, duplicate: true }
-    }
-    return fail(409, 'duplicate_unfinished', '这封邮件已经在处理中或发送状态不明，请稍后看时间线，先别重发。')
-  }
+  if (prior) return priorSendResult(prior)
 
   // 模板时代新增的锁前检查：版本新鲜、所选团仍在售、文字红线。只有「有版本化设置」的客户才跑，旧配置行为不变。
   let pre: Extract<PreLockResult, { ok: true }> | null = null
@@ -389,12 +408,30 @@ async function runSendMailNew(input: SendMailNewInput, deps: MailNewDeps, track:
     return fail(409, 'busy', '这个客人正在发送另一封邮件，请稍等。')
   }
   try {
-    return await sendUnderLock({ input, subject, body, requestId, to, mailbox, config, pre, track }, deps)
+    // Second lock, on the address itself (see acquireRecipientLock). Both are try-locks, so they cannot deadlock.
+    if (!(await store.acquireRecipientLock(input.clientId, to, mailbox.account))) {
+      return fail(409, 'busy', '这个邮箱地址正在发送另一封邮件（可能是同一个人的另一条记录），请稍等。')
+    }
+    try {
+      return await sendUnderLock({ input, subject, body, requestId, to, mailbox, config, pre, track }, deps)
+    } finally {
+      await store.releaseRecipientLock(input.clientId, to).catch((err) => {
+        console.error('[mail-send-new] 释放收件地址锁失败（5 分钟后自动失效）:', err)
+      })
+    }
   } finally {
     await store.releaseContactLock(input.clientId, input.contactId).catch((err) => {
       console.error('[mail-send-new] 释放发送锁失败（5 分钟后自动失效）:', err)
     })
   }
+}
+
+/** The answer for a request id that has been seen before: replay the success, or refuse while the first one is unfinished. */
+function priorSendResult(prior: PriorSend): SendMailNewResult {
+  if (prior.status === 'sent' && prior.messageId) {
+    return { ok: true, messageId: prior.messageId, conversationId: prior.conversationId, duplicate: true }
+  }
+  return fail(409, 'duplicate_unfinished', '这封邮件已经在处理中或发送状态不明，请稍后看时间线，先别重发。')
 }
 
 function appendFooter(body: string, footer: string | null): string {
@@ -420,6 +457,11 @@ interface LockedSend {
 // 已经拿到联系人锁：先跑「锁内」的检查（防重复跟进、7 天频次——必须在锁内数，防两个人同时都通过），再发。
 async function sendUnderLock(args: LockedSend, deps: MailNewDeps): Promise<SendMailNewResult> {
   const { input, config, pre } = args
+  // The first look at this request id was made before the lock. A twin of this request (a double click, a retry) may have
+  // finished while this one was busy with its own checks, and then only a second look, made while nobody else can be
+  // sending to this guest, sees it. Without it the twin would send the same mail again.
+  const twin = await deps.store.findPriorSend(input.clientId, args.requestId, input.contactId)
+  if (twin) return priorSendResult(twin)
   let meta = pre === null ? undefined : pre.meta
   if (pre !== null && deps.gates !== undefined) {
     const step = await deps.gates.inLock({

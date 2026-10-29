@@ -10,8 +10,9 @@
 
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
+import { EMAIL_SETTINGS_SAVED_EVENT } from '@/lib/crm/email-templates/settings-events'
 
 vi.mock('../TemplateEditor', () => ({
   TemplateEditor: (props: {
@@ -153,6 +154,39 @@ describe('reading the list', () => {
     await screen.findByText('Post call')
     if (text === null) expect(screen.queryByText(/设置在本页下方/)).toBeNull()
     else expect(screen.getByText(new RegExp(`${text}.*设置在本页下方`))).toBeInTheDocument()
+  })
+})
+
+describe('re-reading after the settings were saved', () => {
+  it('the "not configured" banner goes away once the settings are saved', async () => {
+    const r = routes({
+      [LIST]: [
+        { body: list({ featureState: 'unconfigured' }) },
+        { body: list({ featureState: 'ready' }) },
+      ],
+    })
+    render(<TemplatesAdmin clientId="c1" />)
+    expect(await screen.findByText(/还没配发信设置，现在发不出去。/)).toBeInTheDocument()
+    expect(r.of(LIST)).toHaveLength(1)
+    act(() => {
+      window.dispatchEvent(new Event(EMAIL_SETTINGS_SAVED_EVENT))
+    })
+    await waitFor(() => expect(r.of(LIST)).toHaveLength(2))
+    await waitFor(() => expect(screen.queryByText(/还没配发信设置，现在发不出去。/)).toBeNull())
+    expect(await screen.findByText('Post call')).toBeInTheDocument()
+  })
+
+  it('after unmount the event no longer triggers a read', async () => {
+    const r = routes({ [LIST]: [{ body: list() }] })
+    const view = render(<TemplatesAdmin clientId="c1" />)
+    await screen.findByText('Post call')
+    expect(r.of(LIST)).toHaveLength(1)
+    view.unmount()
+    act(() => {
+      window.dispatchEvent(new Event(EMAIL_SETTINGS_SAVED_EVENT))
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(r.of(LIST)).toHaveLength(1)
   })
 })
 

@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
 import type { ReceiptSummaryRow } from '@/lib/crm/email-templates/receipt-store'
 import type { FeatureState } from '@/lib/crm/email-templates/feature-state'
+import { EMAIL_SETTINGS_SAVED_EVENT } from '@/lib/crm/email-templates/settings-events'
 import { TemplateEditor, type TemplateVariables } from './TemplateEditor'
 
 interface ListPayload {
@@ -174,6 +175,14 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
 
   useEffect(() => {
     void load()
+  }, [load])
+
+  useEffect(() => {
+    const reload = (): void => {
+      void load()
+    }
+    window.addEventListener(EMAIL_SETTINGS_SAVED_EVENT, reload)
+    return () => window.removeEventListener(EMAIL_SETTINGS_SAVED_EVENT, reload)
   }, [load])
 
   const showNotices = useCallback(
