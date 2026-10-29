@@ -30,14 +30,22 @@ describe('buildDaySeries', () => {
     const rows = [row('2026-10-20', 100, 10), row('2026-10-26', 50, 1), row('2026-10-27', 50, 4)]
     const out = buildDaySeries(rows)
     // 10-27: window 10-21..10-27 -> the 10-20 row is outside; (50+50)/(1+4) = 20
-    expect(out[2].cpl7).toBeCloseTo(20, 5)
+    expect(out.find(p => p.date === '2026-10-27')?.cpl7).toBeCloseTo(20, 5)
     // 10-26: window 10-20..10-26 -> includes 10-20: (100+50)/(10+1)
-    expect(out[1].cpl7).toBeCloseTo(150 / 11, 5)
+    expect(out.find(p => p.date === '2026-10-26')?.cpl7).toBeCloseTo(150 / 11, 5)
   })
 
   it('a window with no leads at all gives no 7-day cost per lead', () => {
     const out = buildDaySeries([row('2026-10-26', 7, 0), row('2026-10-27', 9, 0)])
     expect(out[1].cpl7).toBeNull()
+  })
+
+  it('fills the days that have no row so the time axis does not skip them (spend 0, leads 0, no cost per lead)', () => {
+    const out = buildDaySeries([row('2026-10-10', 98, 8), row('2026-10-13', 50, 5)])
+    expect(out.map(p => p.date)).toEqual(['2026-10-10', '2026-10-11', '2026-10-12', '2026-10-13'])
+    expect(out[1]).toMatchObject({ spend: 0, leads: 0, cpl: null })
+    // 10-13's 7-day window still includes 10-10: (98+50)/(8+5)
+    expect(out[3].cpl7).toBeCloseTo(148 / 13, 5)
   })
 
   it('empty input gives an empty series', () => {
