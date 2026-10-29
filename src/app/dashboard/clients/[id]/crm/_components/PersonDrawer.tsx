@@ -7,6 +7,7 @@
  * 滑出，手机上铺满整屏。prospecting 的看板也是这个交互。
  */
 
+import { MarkTradeButton } from './MarkTradeButton'
 import { phoneRegionLabel } from '@/lib/crm/phone-region'
 import { ReturningRoute } from './ReturningRoute'
 import { AssigneeSelect } from './AssigneeSelect'
@@ -515,6 +516,7 @@ export function PersonDrawer({
                 </a>
                 {/* mailto 靠电脑里设好的邮件程序，没设就没反应——旁边永远有一个有反馈的「复制」。 */}
                 <CopyEmailButton email={row.email} />
+                <MarkTradeButton clientId={clientId} email={row.email} onDone={(msg) => onSaved(msg, true)} />
               </>
             )}
             {row.doNotContact && (

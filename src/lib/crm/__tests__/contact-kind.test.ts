@@ -12,6 +12,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  tradeDomainFor,
   contactKindOf,
   isSystemAccountName,
   normaliseDomain,
@@ -246,5 +247,16 @@ describe('isSystemAccountName', () => {
     expect(isSystemAccountName('WhatsApp Business Support Ltd')).toBe(false)
     expect(isSystemAccountName(null)).toBe(false)
     expect(isSystemAccountName('')).toBe(false)
+  })
+})
+
+describe('tradeDomainFor（「这是同行」按钮标哪个域名）', () => {
+  it('公司邮箱 → 规整后的域名', () => {
+    expect(tradeDomainFor('Sunita@FineTravel.co.nz')).toBe('finetravel.co.nz')
+  })
+  it('私人邮箱 / 空 / 认不出 → null（不许整域名标同行）', () => {
+    for (const e of ['a@gmail.com', 'b@xtra.co.nz', 'c@kinect.co.nz', 'd@hotmail.com', null, '', 'no-at-sign']) {
+      expect(tradeDomainFor(e)).toBeNull()
+    }
   })
 })
