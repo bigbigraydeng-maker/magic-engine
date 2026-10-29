@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-30
 done_on: 2026-10-30
-done_ref: pr:PRNUM
+done_ref: pr:3410
 source: session:90a50c3b
 verify_how: 合并部署后，PM 在「多维数据」→「按天」点「柱状图」看到每天花费和每天进线两张图，点「走势图」看到每条进线成本（当天与近 7 天合计两条线），点「表格」回到原表；鼠标放上去有数字提示
 ---
