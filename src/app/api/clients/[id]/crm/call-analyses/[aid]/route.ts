@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
-import { mirrorReviewToTouchpoints } from '@/lib/telephony/transcribe/call-stance'
+import { mirrorReviewToTouchpoints, type ReviewSyncResult } from '@/lib/telephony/transcribe/call-stance'
+import { supabaseAnalysisStore } from '@/lib/telephony/transcribe/store'
 
 /**
  * PATCH /api/clients/[id]/crm/call-analyses/[aid]
@@ -12,7 +13,7 @@ import { mirrorReviewToTouchpoints } from '@/lib/telephony/transcribe/call-stanc
  * IDOR：分析必须属于 path 上的 client（同时 .eq client_id），否则 404。
  *
  * Body: { review: 'confirmed' | 'rejected' | 'pending_review' }
- * Responses: 200 { reviewStatus } / 400 / 401 / 403 / 404 / 500
+ * Responses: 200 { reviewStatus, touchpointSync? } / 400 / 401 / 403 / 404 / 500
  */
 
 export const dynamic = 'force-dynamic'
@@ -50,7 +51,7 @@ export async function PATCH(
     })
     .eq('id', aid)
     .eq('client_id', clientId)
-    .select('id')
+    .select('id, call_id')
     .maybeSingle()
 
   if (error) {
@@ -60,7 +61,19 @@ export async function PATCH(
   if (!data) return NextResponse.json({ error: '分析不存在' }, { status: 404 })
 
   // 驳回的分析，CRM 不能再按它的「客人说现在还没准备好」把人挪去先放着 —— 状态同步到触点上。
-  await mirrorReviewToTouchpoints({ clientId, analysisId: aid, review })
+  // 同步没成不撤销复核，但要让人看得见：响应里带 touchpointSync，通话回执里留一条。
+  const sync = await mirrorReviewToTouchpoints({ clientId, analysisId: aid, review })
+  if (sync !== 'ok') await recordSyncReceipt((data as { call_id?: unknown }).call_id, sync, review)
 
-  return NextResponse.json({ reviewStatus: review })
+  return NextResponse.json(sync === 'ok' ? { reviewStatus: review } : { reviewStatus: review, touchpointSync: sync })
+}
+
+/** 复核状态没同步到 CRM 触点 → 记到这通电话的回执里（只写结果码，不写原话）。写不上只记日志。 */
+async function recordSyncReceipt(callId: unknown, sync: Exclude<ReviewSyncResult, 'ok'>, review: Review): Promise<void> {
+  if (typeof callId !== 'string') return
+  try {
+    await supabaseAnalysisStore.patchCall(callId, {}, { stage: 'review_sync', status: sync, detail: review })
+  } catch (e) {
+    console.error('[crm/call-analyses] 复核同步回执写入失败:', e instanceof Error ? e.message : 'unknown')
+  }
 }

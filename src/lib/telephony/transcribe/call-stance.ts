@@ -10,7 +10,25 @@ import type { CallStance } from '@/lib/crm/segments'
 import { mergeTouchpointMetadata, type MetadataMergeOutcome } from '@/lib/crm/touchpoint-metadata'
 import type { RawFact } from './analysis-schema'
 
+/**
+ * 客人在同一通电话里还**要了东西**（约了下一步 / 给了邮箱 / 约了回电时间 / 说了想去哪）——
+ * 他不是「先放着」的人，照常走通话后的提醒（复审 2026-10-29 的两句真实说法：
+ * "I'm not ready to book yet but send me the brochure"、"I am not interested in Japan, I want China."）。
+ * 下一步 / 邮箱 / 回电只要不是员工说的就算（分不清谁说的宁可当客人要的，不把人挪走）；
+ * 目的地必须是客人自己说的（员工介绍线路不算）。
+ */
+const STILL_WANTS_KEYS: ReadonlySet<string> = new Set(['next_step', 'contact_email', 'callback_time'])
+
+function stillAskedForSomething(facts: readonly RawFact[]): boolean {
+  return facts.some(
+    (f) =>
+      (STILL_WANTS_KEYS.has(f.key) && f.speaker !== 'employee') ||
+      (f.key === 'destination_or_tour' && f.speaker === 'customer'),
+  )
+}
+
 export function callStanceFromFacts(facts: readonly RawFact[]): CallStance | null {
+  if (stillAskedForSomething(facts)) return null
   const byCustomer = facts.filter((f) => f.speaker === 'customer')
   if (byCustomer.some((f) => f.key === 'not_interested')) return 'not_interested'
   if (byCustomer.some((f) => f.key === 'not_ready_now')) return 'not_now'
@@ -39,26 +57,30 @@ export function writeCallStance(input: {
   })
 }
 
+/** 复核状态同步到触点的结果：`ok` = 都同步了（或没有挂这份分析的触点）。 */
+export type ReviewSyncResult = 'ok' | 'conflict' | 'failed'
+
 /**
  * 人工复核改了分析状态 → 同步到挂着这份分析的触点上（`call_analysis_review`）。
  *
  * 为什么要同步：触点上的 `call_analysis_review` 以前只在分析刚出来时写一次 `pending_review`，
  * 之后复核驳回不会回写 —— CRM 读触点时根本不知道这份分析被驳回了，表态就会照样生效。
- * 尽力而为：失败只记日志，复核本身已经成功。
+ * 不抛错（复核本身已经成功），但**结果要交回去**：同步失败不能只死在日志里，调用方要让人看得见。
  */
 export async function mirrorReviewToTouchpoints(input: {
   clientId: string
   analysisId: string
   review: 'confirmed' | 'rejected' | 'pending_review'
-}): Promise<void> {
+}): Promise<ReviewSyncResult> {
   try {
-    await mirrorReview(input)
+    return await mirrorReview(input)
   } catch (e) {
     console.error('[call-stance] 复核状态同步到触点失败:', e instanceof Error ? e.message : 'unknown')
+    return 'failed'
   }
 }
 
-async function mirrorReview(input: Parameters<typeof mirrorReviewToTouchpoints>[0]): Promise<void> {
+async function mirrorReview(input: Parameters<typeof mirrorReviewToTouchpoints>[0]): Promise<ReviewSyncResult> {
   const { data, error } = await supabaseAdmin
     .from('contact_touchpoints')
     .select('id')
@@ -66,11 +88,12 @@ async function mirrorReview(input: Parameters<typeof mirrorReviewToTouchpoints>[
     .eq('metadata->>call_analysis_id', input.analysisId)
   if (error) {
     console.error('[call-stance] 找触点失败，复核状态没同步到 CRM:', error.message)
-    return
+    return 'failed'
   }
+  let result: ReviewSyncResult = 'ok'
   for (const row of (data ?? []) as { id: string }[]) {
     try {
-      await mergeTouchpointMetadata({
+      const outcome = await mergeTouchpointMetadata({
         touchpointId: row.id,
         clientId: input.clientId,
         decide: (md) =>
@@ -78,8 +101,11 @@ async function mirrorReview(input: Parameters<typeof mirrorReviewToTouchpoints>[
             ? { call_analysis_review: input.review }
             : null,
       })
+      if (outcome === 'conflict' && result === 'ok') result = 'conflict'
     } catch (e) {
       console.error('[call-stance] 复核状态同步到触点失败:', e instanceof Error ? e.message : 'unknown')
+      result = 'failed'
     }
   }
+  return result
 }

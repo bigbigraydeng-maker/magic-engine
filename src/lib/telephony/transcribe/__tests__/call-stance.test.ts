@@ -53,6 +53,81 @@ describe('分析：两个新的表态事实', () => {
   })
 })
 
+describe('复审 2026-10-29：表态的误判口子', () => {
+  const stanceOnly = (quote: string, speaker: RawFact['speaker'] = 'customer') =>
+    ({ summary: '', language: 'en', facts: [notReady({ quote, speaker })] })
+
+  it('模型把问号去掉交回来，但转写原句是问句 → 丢掉', () => {
+    const t = "声道1：So you're not ready for that yet?\n声道2：Hmm."
+    expect(verifyFacts(stanceOnly("So you're not ready for that yet"), t).facts).toHaveLength(0)
+  })
+
+  it('中文原句以「吗 / 呢 / 么」收尾（有无标点都算）→ 问句，丢掉', () => {
+    for (const line of ['我们是不是还没准备好吗', '我们还没准备好呢？', '我还没准备好么。']) {
+      expect(verifyFacts(stanceOnly(line.replace(/[？。]$/, '')), `声道1：${line}`).facts).toHaveLength(0)
+    }
+  })
+
+  it('员工说的「No worries if you\'re not ready yet」没有第一人称 → 不算表态', () => {
+    const t = "声道1：No worries if you're not ready yet.\n声道2：OK."
+    expect(verifyFacts(stanceOnly("No worries if you're not ready yet", 'customer'), t).facts).toHaveLength(0)
+  })
+
+  it('员工问「你现在还没准备好吗」→ 不算（既不是第一人称，也是问句）', () => {
+    const t = '声道1：你现在还没准备好吗'
+    expect(verifyFacts(stanceOnly('你现在还没准备好吗', 'customer'), t).facts).toHaveLength(0)
+  })
+
+  it("Gavin 的原话跨两行（转写按句换行）→ 仍然保留", () => {
+    const t = "声道1：Hi Gavin, about the China tour.\n声道2：I'm not ready for that.\n声道2：I'll talk to you another day."
+    expect(verifyFacts(stanceOnly("I'm not ready for that. I'll talk to you another day."), t).facts.map((f) => f.key)).toEqual(['not_ready_now'])
+  })
+
+  it('员工半句 + 客人半句拼起来的原话（跨声道）→ 不算', () => {
+    const t = "声道1：I know I'm not ready\n声道2：for that, sorry."
+    expect(verifyFacts(stanceOnly("I'm not ready for that"), t).facts).toHaveLength(0)
+  })
+
+  it('前一行是员工的问句、表态在下一行 → 不受前一行影响，保留', () => {
+    const t = "声道1：Are you ready to book?\n声道2：I'm not ready for that."
+    expect(verifyFacts(stanceOnly("I'm not ready for that."), t).facts).toHaveLength(1)
+  })
+
+  it('中文第一人称陈述「我们现在还没准备好，以后再说」→ 保留', () => {
+    const t = '声道2：我们现在还没准备好，以后再说。'
+    expect(verifyFacts(stanceOnly('我们现在还没准备好，以后再说'), t).facts).toHaveLength(1)
+  })
+
+  it('"I\'m not ready to book yet but send me the brochure" → 客人还要了资料，不记表态', () => {
+    const quote = "I'm not ready to book yet but send me the brochure"
+    const t = `声道2：${quote}.`
+    const v = verifyFacts({ summary: '', language: 'en', facts: [
+      notReady({ quote }),
+      { key: 'next_step', value: '给客人发行程册', quote: 'send me the brochure', confidence: 0.9, speaker: 'customer' },
+    ] }, t)
+    expect(v.facts.map((f) => f.key)).toEqual(['not_ready_now', 'next_step'])
+    expect(callStanceFromFacts(v.facts)).toBeNull()
+  })
+
+  it('"I am not interested in Japan, I want China." → 客人说了想去哪，不记表态', () => {
+    const t = '声道2：I am not interested in Japan, I want China.'
+    const v = verifyFacts({ summary: '', language: 'en', facts: [
+      notReady({ key: 'not_interested', value: '对日本不感兴趣', quote: 'I am not interested in Japan' }),
+      { key: 'destination_or_tour', value: '中国', quote: 'I am not interested in Japan, I want China', confidence: 0.9, speaker: 'customer' },
+    ] }, t)
+    expect(v.facts.map((f) => f.key)).toEqual(['not_interested', 'destination_or_tour'])
+    expect(callStanceFromFacts(v.facts)).toBeNull()
+  })
+
+  it('邮箱 / 回电时间（客人或分不清谁说）也算「还要了东西」；员工介绍线路、员工说的下一步不算', () => {
+    const f = (key: RawFact['key'], speaker: RawFact['speaker']): RawFact => ({ key, value: 'x', quote: 'x', confidence: 1, speaker })
+    expect(callStanceFromFacts([notReady(), f('contact_email', 'customer')])).toBeNull()
+    expect(callStanceFromFacts([notReady(), f('callback_time', 'unclear')])).toBeNull()
+    expect(callStanceFromFacts([notReady(), f('destination_or_tour', 'employee')])).toBe('not_now')
+    expect(callStanceFromFacts([notReady(), f('next_step', 'employee')])).toBe('not_now')
+  })
+})
+
 describe('事实 → 表态', () => {
   it('客人说的 not_ready_now → not_now；not_interested 优先', () => {
     expect(callStanceFromFacts([notReady()])).toBe('not_now')
@@ -111,7 +186,7 @@ describe('人工复核状态同步到触点', () => {
       { id: 'tp-3', client_id: 'c-OTHER', metadata: { call_analysis_id: 'an-1', call_analysis_review: 'pending_review' } },
     ])
     holder.db = fake
-    await mirrorReviewToTouchpoints({ clientId: 'c-1', analysisId: 'an-1', review: 'rejected' })
+    expect(await mirrorReviewToTouchpoints({ clientId: 'c-1', analysisId: 'an-1', review: 'rejected' })).toBe('ok')
     expect(fake.rows[0].metadata.call_analysis_review).toBe('rejected')
     expect(fake.rows[1].metadata.call_analysis_review).toBe('pending_review')
     expect(fake.rows[2].metadata.call_analysis_review).toBe('pending_review')
@@ -120,8 +195,18 @@ describe('人工复核状态同步到触点', () => {
   it('找触点失败 → 只记日志，不抛错（复核本身已成功）', async () => {
     holder.db = makeFakeTouchpointDb([], { failList: true })
     const err = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    await expect(mirrorReviewToTouchpoints({ clientId: 'c-1', analysisId: 'an-1', review: 'rejected' })).resolves.toBeUndefined()
+    await expect(mirrorReviewToTouchpoints({ clientId: 'c-1', analysisId: 'an-1', review: 'rejected' })).resolves.toBe('failed')
     expect(err).toHaveBeenCalled()
     err.mockRestore()
+  })
+
+  it('两次都被别人抢先改了 → 交回 conflict（不是悄悄当成功）', async () => {
+    holder.db = makeFakeTouchpointDb(
+      [{ id: 'tp-1', client_id: 'c-1', metadata: { call_analysis_id: 'an-1', call_analysis_review: 'pending_review' } }],
+      { interfere: 5 },
+    )
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    expect(await mirrorReviewToTouchpoints({ clientId: 'c-1', analysisId: 'an-1', review: 'rejected' })).toBe('conflict')
+    warn.mockRestore()
   })
 })
