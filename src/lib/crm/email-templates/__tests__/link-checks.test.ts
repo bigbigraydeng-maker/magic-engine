@@ -151,6 +151,122 @@ describe('tricks with the link itself', () => {
   it('a code point that a domain name ignores (U+1BCA0, not on our hand-made list) does not hide a foreign host', () => {
     expect(codes(`Go to https://www.example.com${String.fromCodePoint(0x1bca0)}.evil.com`)).toContain('link_host_not_allowed')
   })
+
+  // A browser reads these as "https://evil.com" although there is no "//": a link that lost a slash by accident, or on purpose.
+  it.each(['https:/evil.com/x', 'https:///evil.com/x', 'https:\\\\evil.com/x', 'https:/\\evil.com/x', 'HTTPS:/EVIL.COM'])(
+    '%s is a link to evil.com, not a string with no link in it',
+    (text) => {
+      expect(check(`Go to ${text}`).blocks.some((b) => b.code === 'link_host_not_allowed' && b.detail === 'evil.com')).toBe(true)
+    },
+  )
+
+  it('an http link with a lost slash is still flagged as not https', () => {
+    expect(codes('Go to http:/www.example.com/tours')).toContain('link_not_https')
+  })
+
+  it('a link to an allowed host with a lost slash is checked exactly like the full form (tour page rules included)', () => {
+    expect(codes('See https:/www.example.com/tours/china/discovery/gone')).toContain('tour_page_not_on_sale')
+    expect(codes('详见 https:/www.example.com/tours/china/discovery/essentials?date=2027-03-11。谢谢')).toEqual([])
+  })
+
+  it('a lost slash followed by Chinese text is no way to hide a foreign host', () => {
+    expect(codes('Go to https:/www.example.com请看')).toContain('link_host_not_allowed')
+    // the host is read as 例え.jp (not as "https:"), exactly as in the full form
+    const idn = check('见 https:/例え.jp').blocks.filter((b) => b.code === 'link_host_not_allowed')
+    expect(idn.map((b) => b.detail)).toEqual(['例え.jp'])
+  })
+
+  it('"www." followed by a letter of another script is a link too (www.例え.com used to slip through)', () => {
+    const blocks = check('官网 www.例え.com 请看').blocks
+    expect(blocks.some((b) => b.code === 'link_host_not_allowed' && b.detail === 'www.例え.com')).toBe(true)
+    expect(codes('Go to www.Ünïcode-evil.example')).toContain('link_host_not_allowed')
+    expect(codes('Go to www.例え。evil。com')).toContain('link_host_not_allowed')
+  })
+
+  it('ordinary text that merely mentions a scheme or a path is not turned into a link', () => {
+    expect(codes('Write it as https:/ or http:\\ in the box; the folder is C:\\temp\\notes.txt')).toEqual([])
+  })
+
+  it('"https://" said in passing, or followed by a stray space, is not a link with an empty site name', () => {
+    expect(codes('Type https:// and then the address')).toEqual([])
+    expect(codes('Our website: https:// www.example.com/tours')).toEqual([])
+    // a scheme with nothing behind it has no destination: not a link (the old gate blocked these with an empty site name)
+    expect(codes('Make sure the address starts with https://.')).toEqual([])
+    expect(codes('Links must start with https://, never http://.')).toEqual([])
+    const idn = check('官网 https://例え 请看').blocks.filter((b) => b.code === 'link_host_not_allowed')
+    expect(idn.map((b) => b.detail)).toEqual(['例え'])
+  })
+
+  // The token runs on through "," ";" "?" "=" and the like, so a second link glued to the first used to ride along inside it
+  // (the first link's host is allowed, the second one's is not). A mail client that starts a link at "://" shows two links.
+  it.each([
+    'Book here https://www.example.com/tours,https://evil.com/pay',
+    'Book here https://www.example.com/tours?ref=https://evil.com/pay',
+    'Book here https://www.example.com/tours;http://evil.com',
+    'Book here www.example.com/tours,https://evil.com/pay',
+    'Book here https:/www.example.com/tours,https://evil.com/pay',
+    'Book here https:\\www.example.com/x,https://evil.com',
+    'Book here https:///www.example.com/x;http://evil.com',
+  ])('a second link glued to the first one is a link of its own: %s', (text) => {
+    expect(check(text).blocks.some((b) => b.code === 'link_host_not_allowed' && b.detail === 'evil.com')).toBe(true)
+  })
+
+  // A mail client that does not split the string opens whatever the WHOLE string points to ("/../" climbs out of the tours
+  // section, a "date" in the query is read by the page): the whole string is a link too, not only its parts.
+  it.each([
+    ['Book: https://www.example.com/tours/china/discovery/essentials/https://www.example.com/../../../../gone', 'tour_page_not_on_sale'],
+    ['Book: https://www.example.com/tours/china/discovery/essentials?x=https://www.example.com/&date=2099-01-01', 'departure_not_on_sale'],
+  ])('the whole glued string is checked as one link as well: %s', (text, code) => {
+    expect(codes(text)).toContain(code)
+  })
+
+  it.each([
+    'https://www.example.com.https://www.example.com/',
+    'https://www.example.com,https://www.example.com\\@evil.com',
+    'https://https://www.example.com/tours',
+  ])('a link typed twice in a row is not a link to the allowed site: %s', (text) => {
+    expect(codes(`Go to ${text}`)).toContain('link_host_not_allowed')
+  })
+
+  it('a second link whose site is written in another script, glued behind the first, is a link of its own', () => {
+    const blocks = check('See https://www.example.com/x,https://例え.jp today').blocks
+    expect(blocks.some((b) => b.code === 'link_host_not_allowed' && b.detail === '例え.jp')).toBe(true)
+  })
+
+  it('a bare address with backslashes in its path is read like the one with slashes', () => {
+    expect(codes('See example.com\\tours\\china\\discovery\\gone')).toContain('tour_page_not_on_sale')
+    expect(codes('See example.com\\tours\\china\\discovery\\essentials?date=2027-03-11')).toEqual([])
+  })
+
+  it('a page-link block says WHICH link it is about when the mail has two (the url travels with the violation)', () => {
+    const blocks = check('See https://www.example.com/tours/china/discovery/gone and https://www.example.com/tours/china/discovery/essentials').blocks
+    const gone = blocks.find((b) => b.code === 'tour_page_not_on_sale')
+    expect(gone?.url).toBe('https://www.example.com/tours/china/discovery/gone')
+    expect(blocks.filter((b) => b.code === 'tour_page_not_on_sale')).toHaveLength(1)
+  })
+
+  it('a good link glued to another good link is still accepted', () => {
+    expect(codes('See https://www.example.com/tours,https://example.com/tours')).toEqual([])
+    expect(codes('See https://www.example.com/tours?ref=https://example.com/tours/china/discovery/essentials')).toEqual([])
+  })
+
+  // A browser reads "\" as "/" in an http(s) link, so these are the page /tours/china/discovery/gone.
+  it.each([
+    'See https://www.example.com\\tours\\china\\discovery\\gone',
+    'See https://www.example.com/tours\\china\\discovery\\gone',
+    'See https:\\\\www.example.com\\tours\\china\\discovery\\gone',
+  ])('a backslash in the path is read as a slash, so a taken-down tour page is still caught: %s', (text) => {
+    expect(codes(text)).toContain('tour_page_not_on_sale')
+  })
+
+  it('a good link written with backslashes is accepted like the normal one', () => {
+    expect(codes('See https://www.example.com\\tours\\china\\discovery\\essentials?date=2027-03-11')).toEqual([])
+  })
+
+  it('a bare "www." in ordinary text is not a link', () => {
+    expect(codes('Our site starts with www. and then the name')).toEqual([])
+    expect(codes('Visit www.')).toEqual([])
+  })
 })
 
 describe('red-line phrases and leftovers', () => {

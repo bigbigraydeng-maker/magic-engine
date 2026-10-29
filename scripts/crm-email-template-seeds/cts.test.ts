@@ -61,6 +61,13 @@ describe('the CTS seed templates', () => {
     expect(spring.pickFilter).toEqual({ departureMonths: [3, 5] })
   })
 
+  it('write no year into the name, subject or body: the month filter matches every year, so a year in the text goes stale', () => {
+    for (const t of CTS_SEED_TEMPLATES) {
+      const text = `${t.fields.name}\n${t.fields.subject}\n${t.fields.body}`
+      expect(text).not.toMatch(/\b(19|20)\d{2}\b/)
+    }
+  })
+
   it('contain no hard-coded fact: tour names, prices, dates and links all come from placeholders', () => {
     for (const t of CTS_SEED_TEMPLATES) {
       const text = `${t.fields.subject}\n${t.fields.body}`

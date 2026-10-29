@@ -8,6 +8,8 @@ export interface GateViolation {
   detail: string
   /** Guardrail rule id, when the violation comes from a configured phrase rule. */
   ruleId?: string
+  /** The link the violation is about, when it is a link (shown to the staff member only; receipts never carry it). */
+  url?: string
 }
 
 export interface ContentGateResult {

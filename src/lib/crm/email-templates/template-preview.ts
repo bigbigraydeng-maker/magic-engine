@@ -61,6 +61,8 @@ export type PreviewResult =
       options: PickOption[]
       pickProblem: string | null
       rendered: { subject: string; body: string; missing: string[]; problems: string[] }
+      /** The block the server appends after the staff member's text on every send; shown so the preview is the whole mail. */
+      footer: string | null
       blocks: GateViolation[]
       warnings: GateViolation[]
       callBasis: CallBasis
@@ -202,6 +204,7 @@ export async function previewTemplate(
     options: state.options,
     pickProblem: state.pickProblem,
     rendered: { subject: rendered.subject, body: rendered.body, missing: rendered.missing, problems: rendered.problems },
+    footer: args.config.footer,
     blocks: checked.blocks,
     warnings: checked.warnings,
     callBasis,

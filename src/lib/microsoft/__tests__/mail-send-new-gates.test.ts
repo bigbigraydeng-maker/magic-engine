@@ -10,7 +10,7 @@ import type {
 } from '@/lib/crm/email-templates/send-gates'
 import type { TemplateRequest } from '@/lib/crm/email-templates/send-gates'
 import { emptyMeta } from '@/lib/crm/email-templates/send-gates'
-import { metaIdFor, reconcileSendRequest, requestIdFromMeta, sendMailNew } from '../mail-send-new'
+import { SendStartedError, metaIdFor, reconcileSendRequest, requestIdFromMeta, sendMailNew } from '../mail-send-new'
 import { baseInput, makeFakes, ENABLED, REQUEST_ID } from './mail-send-new-fakes'
 
 type Fakes = ReturnType<typeof makeFakes>
@@ -414,11 +414,274 @@ describe('an exception before the send starts is a refusal; once it has started 
     const f = makeFakes()
     withSettings(f, okSettings())
     f.deps.gates = stubGates(f)
-    f.graph.createDraft = vi.fn(async () => {
+    f.graph.sendDraft = vi.fn(async () => {
       throw new Error('graph exploded')
     })
     await expect(sendMailNew(baseInput(), f.deps)).rejects.toThrow('graph exploded')
     expect(f.store.releaseContactLock).toHaveBeenCalled()
+  })
+
+  it('a claim that throws wrote nothing and sent nothing: a plain refusal (503, no SendStartedError), locks given back', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.store.claimConversation = vi.fn(dbDown)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(result.meta).toBeDefined()
+    expect(f.store.insertAudit).not.toHaveBeenCalled()
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+    expect(f.store.releaseRecipientLock).toHaveBeenCalledTimes(1)
+    expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('an audit insert that throws leaves no audit row and sends nothing: the empty claim is taken back and the attempt is refused, not "unknown"', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.store.insertAudit = vi.fn(dbDown)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(f.store.discardConversation).toHaveBeenCalledTimes(1)
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+    expect(f.graph.sendDraft).not.toHaveBeenCalled()
+    expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('an audit insert that throws still refuses, and it is THAT error that is reported, when taking the claim back fails too', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.store.insertAudit = vi.fn(async (): Promise<never> => {
+      throw new Error('insert failed')
+    })
+    f.store.discardConversation = vi.fn(async (): Promise<never> => {
+      throw new Error('discard failed')
+    })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const result = await sendMailNew(baseInput(), f.deps)
+    const reported = log.mock.calls.map((c) => c.join(' ')).join('\n')
+    log.mockRestore()
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+    expect(reported).toContain('insert failed')
+    expect(reported).not.toContain('discard failed')
+  })
+
+  it('a draft that cannot be made by an exception sent nothing: refused as graph_failed (failed), the claim is taken back, sendDraft never called', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.graph.createDraft = vi.fn(async (): Promise<never> => {
+      throw new Error('graph exploded')
+    })
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 502, reason: 'graph_failed' })
+    expect(result.meta).toBeDefined()
+    expect(f.graph.sendDraft).not.toHaveBeenCalled()
+    expect(f.store.discardConversation).toHaveBeenCalledTimes(1)
+    expect(f.store.patchAudit).toHaveBeenCalledWith('audit-1', expect.objectContaining({ status: 'failed', errorMessage: 'graph exploded' }))
+    expect(f.store.releaseRecipientLock).toHaveBeenCalledTimes(1)
+    expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('that exception arrives as a SendStartedError carrying the original error and the meta of the attempt (with the mailbox)', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    const boom = new Error('graph exploded')
+    f.graph.sendDraft = vi.fn(async () => {
+      throw boom
+    })
+    const caught = await sendMailNew(baseInput(), f.deps).catch((e: unknown) => e)
+    expect(caught).toBeInstanceOf(SendStartedError)
+    const err = caught as SendStartedError
+    expect(err.original).toBe(boom)
+    expect(err.meta).toMatchObject({ finalSha256: 'f'.repeat(64), mailbox: MAILBOX })
+  })
+
+  it('a legacy-config client gets the same error with no meta (no receipts for them, as before)', async () => {
+    const f = makeFakes({ leadsConfig: ENABLED })
+    f.graph.sendDraft = vi.fn(async () => {
+      throw new Error('graph exploded')
+    })
+    const caught = await sendMailNew(baseInput(), f.deps).catch((e: unknown) => e)
+    expect(caught).toBeInstanceOf(SendStartedError)
+    expect((caught as SendStartedError).meta).toBeNull()
+  })
+})
+
+describe('a twin of the same request that finished while this one was still on its way to the lock', () => {
+  const sent = { auditId: 'audit-0', status: 'sent' as const, messageId: 'msg-0', conversationId: 'conv-0' }
+
+  // First look (before the lock): nothing yet. Second look (inside the lock): the twin is there.
+  function twinAppears(f: Fakes, second: unknown): void {
+    let looks = 0
+    f.store.findPriorSend = vi.fn(async () => {
+      f.calls.push('findPriorSend')
+      looks += 1
+      if (looks === 1) return null
+      if (second instanceof Error) throw second
+      return second as typeof sent | null
+    })
+  }
+
+  it('answers with the twin\'s result and sends nothing again', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    twinAppears(f, sent)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: true, messageId: 'msg-0', conversationId: 'conv-0', duplicate: true })
+    expect(indexOf(f, 'inLock')).toBe(-1)
+    expect(f.store.claimConversation).not.toHaveBeenCalled()
+    expect(f.store.insertAudit).not.toHaveBeenCalled()
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+    expect(f.graph.sendDraft).not.toHaveBeenCalled()
+  })
+
+  it('looks a second time only once it holds both locks, and before the in-lock gates and the claim', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    twinAppears(f, null)
+    await sendMailNew(baseInput(), f.deps)
+    const looks = f.calls.map((c, i) => (c === 'findPriorSend' ? i : -1)).filter((i) => i >= 0)
+    expect(looks).toHaveLength(2)
+    expect(looks[0]).toBeLessThan(indexOf(f, 'acquireLock'))
+    expect(looks[1]).toBeGreaterThan(indexOf(f, 'acquireRecipientLock'))
+    expect(looks[1]).toBeLessThan(indexOf(f, 'inLock'))
+    expect(looks[1]).toBeLessThan(indexOf(f, 'claim'))
+    expect(f.store.findPriorSend).toHaveBeenNthCalledWith(2, 'client-a', REQUEST_ID, 'contact-1')
+  })
+
+  it('a twin that is still unfinished (pending) is refused, not sent over', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    twinAppears(f, { ...sent, status: 'pending', messageId: null })
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 409, reason: 'duplicate_unfinished' })
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+    expect(f.graph.sendDraft).not.toHaveBeenCalled()
+  })
+
+  it('a second look that cannot be answered is a refusal (nothing left), and both locks are given back', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    twinAppears(f, new Error('db down'))
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+    expect(f.store.releaseRecipientLock).toHaveBeenCalled()
+    expect(f.store.releaseContactLock).toHaveBeenCalled()
+  })
+
+  it('a replay of an already sent request is answered as a replay even when the same-template cooldown would now refuse it', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    const gates = stubGates(f, { inLock: { ok: false, status: 409, reason: 'duplicate_template', error: 'cooldown', meta: baseMeta() } })
+    f.deps.gates = gates
+    twinAppears(f, sent)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: true, duplicate: true })
+    expect(gates.inLock).not.toHaveBeenCalled()
+  })
+})
+
+describe('one send to an address at a time (two contact records can share an address)', () => {
+  it('takes the address lock after the contact lock with the chosen address and mailbox, and gives them back in reverse', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result.ok).toBe(true)
+    expect(f.store.acquireRecipientLock).toHaveBeenCalledWith('client-a', 'amy@gmail.com', MAILBOX)
+    expect(f.store.releaseRecipientLock).toHaveBeenCalledWith('client-a', 'amy@gmail.com')
+    const order = f.calls.filter((c) => ['acquireLock', 'acquireRecipientLock', 'sendDraft', 'releaseRecipientLock', 'releaseLock'].includes(c))
+    expect(order).toEqual(['acquireLock', 'acquireRecipientLock', 'sendDraft', 'releaseRecipientLock', 'releaseLock'])
+  })
+
+  it('the address is busy: 409 busy, the contact lock is given back, nothing is checked or sent', async () => {
+    const f = makeFakes({ recipientLockAvailable: false })
+    withSettings(f, okSettings())
+    const gates = stubGates(f)
+    f.deps.gates = gates
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 409, reason: 'busy' })
+    expect(f.store.releaseContactLock).toHaveBeenCalled()
+    expect(f.store.releaseRecipientLock).not.toHaveBeenCalled() // it never held that one
+    expect(gates.inLock).not.toHaveBeenCalled()
+    expect(f.store.claimConversation).not.toHaveBeenCalled()
+    expect(f.graph.sendDraft).not.toHaveBeenCalled()
+  })
+
+  it('the contact is busy: the address lock is never even asked for', async () => {
+    const f = makeFakes({ lockAvailable: false })
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, reason: 'busy' })
+    expect(f.store.acquireRecipientLock).not.toHaveBeenCalled()
+  })
+
+  it('a failed send gives the address lock back as well', async () => {
+    const f = makeFakes({ sendOutcome: 'rejected' })
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, reason: 'graph_failed' })
+    expect(f.store.releaseRecipientLock).toHaveBeenCalledTimes(1)
+    expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a send whose outcome is unknown still gives both locks back', async () => {
+    const f = makeFakes({ sendOutcome: 'unknown' })
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, reason: 'send_unknown' })
+    expect(f.store.releaseRecipientLock).toHaveBeenCalledTimes(1)
+    expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('an address lock that cannot be asked for is a refusal (nothing left) and the contact lock is given back', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.store.acquireRecipientLock = vi.fn(async () => {
+      throw new Error('db down')
+    })
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1)
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+  })
+
+  it('a lock that cannot be given back is only logged: the mail that went out is still reported as sent', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.store.releaseRecipientLock = vi.fn(async () => {
+      throw new Error('release failed')
+    })
+    f.store.releaseContactLock = vi.fn(async () => {
+      throw new Error('release failed too')
+    })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const result = await sendMailNew(baseInput(), f.deps)
+    log.mockRestore()
+    expect(result.ok).toBe(true)
+    expect(f.store.releaseRecipientLock).toHaveBeenCalledTimes(1)
+    expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1) // the second release is still tried when the first one failed
+  })
+
+  it('legacy-config clients are covered too', async () => {
+    const f = makeFakes({ leadsConfig: ENABLED, recipientLockAvailable: false })
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 409, reason: 'busy' })
+    expect(f.graph.sendDraft).not.toHaveBeenCalled()
   })
 })
 

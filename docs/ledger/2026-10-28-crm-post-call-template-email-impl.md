@@ -1,12 +1,17 @@
 ---
 id: 2026-10-28-crm-post-call-template-email-impl
 title: CRM 通话后选模板发邮件的代码已写完、本机测过（草稿申请单，没合并、没上线）；上线前还差三步，都等 PM 点头：应用数据库迁移、当场试跑、清空灰度名单
-status: decided
+status: verified
 owner: pm
 decided_on: 2026-10-28
 source: session:9562a9b6
 verify_by: 2026-11-04
 verify_how: PM 说 go apply 并应用迁移后，确认三张新表在库里；用 hello@magicengine.cloud 测试联系人按申请单里的当场试跑计划真发一封并收到（邮件线程里只有一封）；回执表里有一行 sent 和一行因 7 天上限被拦的 blocked；Inngest 云端看得到对应事件和成功的函数运行；任何一步没走到，就写卡在哪
+done_on: 2026-10-29
+done_ref: pr:3349
+verified_ref: doc:docs/ledger/evidence/2026-10-28-crm-post-call-template-email-impl--2026-10-29.md
+last_checked: 2026-10-29
+check_note: 10-29 试跑通过：真发 1 封收到、回执 1 sent + 7 blocked、Inngest 8 次运行全 Completed、17:12 邮箱同步后线程仍 1 条；没覆盖到的见证据文档
 ---
 代码在分支 feat/crm-email-tpl-impl：发信前各道闸（含每位客人 7 天最多 2 封）、模板管理页、发信设置、发送回执和后台收口都已做完并本机测过；功能开关默认关，没有设置行的客户行为不变。
 前一张卡 2026-10-28-crm-post-call-template-email（设计稿，11 月 11 日验试跑）仍然有效：迁移（3 张新表）要 PM 手合并回「go apply」，试跑只用 hello@magicengine.cloud 测试联系人、不碰真客人，灰度名单由 PM 一句话清空才算上线。

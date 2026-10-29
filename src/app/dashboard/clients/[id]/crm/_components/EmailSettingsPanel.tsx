@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { EMAIL_SETTINGS_SAVED_EVENT } from '@/lib/crm/email-templates/settings-events'
 import type { SettingsHistoryEntry } from '@/lib/crm/email-templates/settings-store'
 
 interface StoredSettings {
@@ -334,6 +335,7 @@ export function EmailSettingsPanel(props: { clientId: string }): JSX.Element {
       // fetchSettings clears the banners, so the "saved" note is put back after the re-read
       await fetchSettings()
       if (typeof json.version === 'number') setSaveOk(json.version)
+      window.dispatchEvent(new Event(EMAIL_SETTINGS_SAVED_EVENT))
     } catch {
       setSaveError(['网络出错，保存状态不明。请重新载入后再确认。'])
     } finally {

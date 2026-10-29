@@ -267,7 +267,7 @@ describe('when the send button must stay locked', () => {
   it('placeholders are still missing: locked until the staff member has written the text themselves', async () => {
     const button = await locked({ rendered: { subject: 'Hello', body: 'Kia ora {{first_name}}', missing: ['first_name'], problems: [] } })
     expect(button).toBeDisabled()
-    expect(screen.getByText('还缺：first_name')).toBeInTheDocument()
+    expect(screen.getByText('客人的名字没有记录，称呼请在正文里手填。')).toBeInTheDocument()
     fireEvent.change(bodyBox(), { target: { value: 'Kia ora Amy, thank you for the call.' } })
     expect(sendButton()).not.toBeDisabled()
   })
@@ -388,6 +388,53 @@ describe('a template or catalog that changed while the panel was open', () => {
     expect(screen.getByText(/模板或团目录刚更新了/)).toBeInTheDocument()
     const details = screen.getByText('旧稿').closest('details') as HTMLElement
     expect(within(details).getByText('What I had typed')).toBeInTheDocument()
+  })
+})
+
+describe('explaining what is wrong in plain words', () => {
+  it.each([
+    ['sender_name', /^你的账号还没设置显示名/],
+    ['call_when', /刚和他通过电话/],
+    ['mystery', /^还缺：mystery$/],
+  ])('a missing %s is explained', async (name, text) => {
+    routeFetch({ preview: [{ body: previewOk({ rendered: { subject: 'Hello', body: 'Kia ora', missing: [name], problems: [] } }) }] })
+    draw()
+    await pickTemplate('Thank you')
+    expect(screen.getByText(text)).toBeInTheDocument()
+  })
+
+  it('a leftover placeholder is explained and locks sending', async () => {
+    routeFetch({ preview: [{ body: previewOk({ blocks: [{ code: 'placeholder_left', detail: '[Name]' }] }) }] })
+    draw()
+    await pickTemplate('Thank you')
+    expect(screen.getByText('不能发：还有没填完的地方：「[Name]」。请填完，或连同括号一起去掉。')).toBeInTheDocument()
+    expect(sendButton()).toBeDisabled()
+  })
+
+  it('an amount that is not in the catalog is explained as a warning', async () => {
+    routeFetch({ preview: [{ body: previewOk({ warnings: [{ code: 'amount_not_in_catalog', detail: '$99' }] }) }] })
+    draw()
+    await pickTemplate('Thank you')
+    expect(screen.getByText('提醒：金额 $99 在已发布的目录里找不到，请核对是不是写错了。')).toBeInTheDocument()
+  })
+})
+
+describe('the footer the server adds', () => {
+  it('is shown below the text, with a line saying it is added automatically and cannot be changed here', async () => {
+    routeFetch({ preview: [{ body: previewOk({ footer: 'CTS Tours, Auckland\nReply STOP to opt out' }) }] })
+    draw()
+    await pickTemplate('Thank you')
+    const box = screen.getByTestId('template-footer')
+    expect(within(box).getByText(/自动加上这一段/)).toBeInTheDocument()
+    expect(box.textContent).toContain('CTS Tours, Auckland')
+    expect(box.textContent).toContain('Reply STOP to opt out')
+  })
+
+  it.each([[null], [''], [undefined]])('shows nothing when there is none (%s)', async (footer) => {
+    routeFetch({ preview: [{ body: previewOk({ footer }) }] })
+    draw()
+    await pickTemplate('Thank you')
+    expect(screen.queryByTestId('template-footer')).toBeNull()
   })
 })
 

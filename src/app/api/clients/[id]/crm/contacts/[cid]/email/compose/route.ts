@@ -20,7 +20,7 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { parseTemplateRequest } from '@/lib/crm/email-templates/request'
 import { emptyMeta, type TemplateRequest } from '@/lib/crm/email-templates/send-gates'
 import { recordSendAttemptProd } from '@/lib/crm/email-templates/send-record-prod'
-import { sendMailNew, type SendMailNewResult } from '@/lib/microsoft/mail-send-new'
+import { SendStartedError, sendMailNew, type SendMailNewResult } from '@/lib/microsoft/mail-send-new'
 import { createMailNewDeps } from '@/lib/microsoft/mail-send-new-prod'
 
 interface RouteParams {
@@ -28,11 +28,22 @@ interface RouteParams {
 }
 
 const CRASH_MESSAGE = '系统出错了，这封邮件有没有发出去还不确定。请先到时间线确认，别重复发送。'
+const NOT_SENT_MESSAGE = '系统出错了，这封邮件没有发出。请稍后再试。'
 
-/** 流程中途抛了异常：信可能已经发出，记成「状态不明」（后台会在 10 分钟后对账补一行结论），不记成失败。 */
-function crashResult(template: TemplateRequest): SendMailNewResult {
+/**
+ * 发送已经开始之后抛了异常（SendStartedError）：信可能已经发出，记成「状态不明」（后台会在 10 分钟后对账补一行结论），
+ * 不记成失败；它自带回执要的信息，用模板写的和自己写的信都一样记；旧配置客户没有回执（null）。
+ * 其余异常（sendMailNew 之外，例如建依赖时出错）：信一定没有发出，也没有审计行可对账——记成「失败」，不记「状态不明」
+ * （否则这条「不明」永远收不了口，还会让同一份模板对这位客人冷却拦着），且只有用模板写的信才记，和以前一样。
+ */
+function crashResult(err: unknown, template: TemplateRequest | null): SendMailNewResult | null {
+  if (err instanceof SendStartedError) {
+    if (err.meta === null) return null
+    return { ok: false, status: 503, reason: 'send_unknown', error: CRASH_MESSAGE, meta: { ...err.meta, blockDetail: 'route_exception' } }
+  }
+  if (template === null) return null
   const meta = { ...emptyMeta(), templateKey: template.key, templateVersion: template.version, blockDetail: 'route_exception' }
-  return { ok: false, status: 503, reason: 'send_unknown', error: CRASH_MESSAGE, meta }
+  return { ok: false, status: 503, reason: 'internal_error', error: NOT_SENT_MESSAGE, meta }
 }
 
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
@@ -77,8 +88,10 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     )
   } catch (err) {
     console.error('[crm/email/compose] 发送流程抛出异常:', err instanceof Error ? err.message : err)
-    if (template !== null) await recordSendAttemptProd({ ...record, result: crashResult(template) })
-    return NextResponse.json({ error: CRASH_MESSAGE, reason: 'internal_error' }, { status: 503 })
+    const crash = crashResult(err, template)
+    if (crash !== null) await recordSendAttemptProd({ ...record, result: crash })
+    const message = err instanceof SendStartedError ? CRASH_MESSAGE : NOT_SENT_MESSAGE
+    return NextResponse.json({ error: message, reason: 'internal_error' }, { status: 503 })
   }
 
   await recordSendAttemptProd({ ...record, result })

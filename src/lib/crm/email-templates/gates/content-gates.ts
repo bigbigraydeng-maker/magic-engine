@@ -43,8 +43,21 @@ const RESIDUE_PATTERNS: RegExp[] = [
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi
 // A URL ends at the first character that cannot be part of a URL: a Chinese full stop or the Chinese text after a
 // link is not "the path" (and a mail client does not link it either).
-const URL_CHARS = "A-Za-z0-9\\-._~:/?#@!$&*+,;=%\\[\\]"
-const URL_HTTP_RE = new RegExp(`https?://[${URL_CHARS}]+`, 'gi')
+// A backslash counts as a URL character: a browser reads "\" as "/" in an http(s) link, so "https://www.example.com\tours\gone"
+// is the page /tours/gone. It is turned into "/" (normaliseLinkToken) before the link is checked.
+const URL_CHARS = "A-Za-z0-9\\-._~:/\\\\?#@!$&*+,;=%\\[\\]"
+// The first character after the scheme's slashes is never a slash, or "https://" said in passing would be a link with no host.
+const URL_FIRST_CHARS = "A-Za-z0-9\\-._~:?#@!$&*+,;=%\\[\\]"
+// A browser reads "https:/evil.com" and "https:\\evil.com" as "https://evil.com", and a hand-typed link can lose a slash by
+// accident: the scheme may be followed by any run of slashes or backslashes. It is normalised to "//" before the host is read.
+const URL_HTTP_RE = new RegExp(`https?:[\\\\/]+[${URL_FIRST_CHARS}][${URL_CHARS}]*`, 'gi')
+const SCHEME_AND_SLASHES_RE = /^(https?):[\\/]+/i
+// Where a second link starts inside a token. Our token runs on through "," ";" "?" "=" and the like, so
+// "https://www.example.com/x,https://evil.com" is ONE token, but a mail client that starts a link at "://" shows two.
+// A scheme at the very END of the token counts too: the host behind it may be in another script ("…,https://例え.jp"), which
+// stops our ASCII token right after the slashes.
+const EMBEDDED_LINK_START_RE = new RegExp(`(?=https?:[\\\\/]+(?:[${URL_FIRST_CHARS}]|$))`, 'i')
+const BARE_SCHEME_RE = /^https?:\/\/$/i
 const URL_WWW_RE = new RegExp(`www\\.[${URL_CHARS}]+`, 'gi')
 // Bare domains are only recognised under the TLDs listed here: a list, not "anything with a dot", so ordinary
 // text ("e.g.", "10.30am", "Mr.Lee") is not flagged. Common English words that are also TLDs (it, in, at, no, so...) are left out.
@@ -53,7 +66,7 @@ const BARE_TLDS =
   'de|fr|es|nl|ru|top|club|vip|cc|tv|ws|mobi|pro|tw|vn|ph|br|mx|ch|se|dk|fi|pl|cz|tr|ae|za|ie|pt|gr|hu|ro|ua|il|' +
   'tech|art|fun|live|life|world|today|click|cloud|website|space|host|work|ltd|group|agency|news|email|ga|tk|ml|cf|gq|pw|su|zip|mov'
 const BARE_DOMAIN_RE = new RegExp(
-  `(?<![a-z0-9@./-])(?:[a-z0-9-]+\\.)+(?:${BARE_TLDS})(?![a-z0-9-])(?:[/?#][${URL_CHARS}]*)?`,
+  `(?<![a-z0-9@./-])(?:[a-z0-9-]+\\.)+(?:${BARE_TLDS})(?![a-z0-9-])(?:[/\\\\?#][${URL_CHARS}]*)?`,
   'gi',
 )
 
@@ -64,7 +77,9 @@ const TRAILING_PUNCT_RE = /[.,;:!?)]+$/
 // (both count as "." in a host name). It must END on a letter or digit, so a sentence-final "。" alone is not swallowed.
 const HOST_CONTINUATION_RE = /^(?:[.\-\u3002\uFF61]*[\p{L}\p{N}\p{M}])+/u
 // A link whose host STARTS with a non-ASCII letter ("https://例え.jp") has no ASCII URL character to open a token with.
-const URL_IDN_HOST_RE = /https?:\/\/[\p{L}\p{N}\p{M}][\p{L}\p{N}\p{M}.\-\u3002\uFF61]*/giu
+const URL_IDN_HOST_RE = /https?:[\\/]+[\p{L}\p{N}\p{M}][\p{L}\p{N}\p{M}.\-\u3002\uFF61]*/giu
+// The same for "www.": "www.例え.com" has no ASCII URL character after the dot to open a token with.
+const WWW_IDN_HOST_RE = /www\.[\p{L}\p{N}\p{M}][\p{L}\p{N}\p{M}.\-\u3002\uFF61]*/giu
 
 function composedText(input: ContentGateInput): string {
   const parts = [input.subject, input.body]
@@ -116,6 +131,11 @@ function toFullUrl(candidate: string): string {
   return `https://${candidate}`
 }
 
+/** "https:/x" and "https:\\x" become "https://x"; a backslash anywhere else in the link is a "/" to a browser. */
+function normaliseLinkToken(token: string): string {
+  return token.replace(SCHEME_AND_SLASHES_RE, '$1://').replace(/\\/g, '/')
+}
+
 /**
  * The characters right after an authority-only link that a mail client or browser still reads as part of its HOST:
  * "https://www.example.co.nz.例え.com" is a link to 例え.com, not to example.co.nz, and "https://example.co.nz请看" has the
@@ -139,7 +159,8 @@ export function extractLinks(normalizedText: string): string[] {
   const out: string[] = []
   const add = (candidate: string): void => {
     const cleaned = stripTrailingPunct(candidate)
-    if (cleaned === '') return
+    // A scheme with nothing behind it ("https://" said in passing, or the cut-off start of a link) is not a link.
+    if (cleaned === '' || BARE_SCHEME_RE.test(cleaned)) return
     const full = toFullUrl(cleaned)
     if (seen.has(full)) return
     seen.add(full)
@@ -149,17 +170,30 @@ export function extractLinks(normalizedText: string): string[] {
   let rest = normalizedText
   for (const pattern of [URL_HTTP_RE, URL_WWW_RE]) {
     rest = rest.replace(new RegExp(pattern.source, pattern.flags), (match, offset: number, whole: string) => {
-      add(match + hostContinuation(match, whole.slice(offset + match.length)))
+      const after = whole.slice(offset + match.length)
+      // Every link that starts inside the token is a link of its own; only the last one is followed by the rest of the text.
+      const parts = match.split(EMBEDDED_LINK_START_RE).map(normaliseLinkToken)
+      parts.forEach((token, i) => add(i === parts.length - 1 ? token + hostContinuation(token, after) : token))
+      // ...and a client that does not split the string opens whatever the WHOLE string points to ("…/essentials/https://x/../gone"):
+      // that is a link too.
+      if (parts.length > 1) {
+        const whole = normaliseLinkToken(match)
+        add(whole + hostContinuation(whole, after))
+      }
       return ' '
     })
   }
   rest = rest.replace(new RegExp(URL_IDN_HOST_RE.source, URL_IDN_HOST_RE.flags), (match) => {
+    add(normaliseLinkToken(match))
+    return ' '
+  })
+  rest = rest.replace(new RegExp(WWW_IDN_HOST_RE.source, WWW_IDN_HOST_RE.flags), (match) => {
     add(match)
     return ' '
   })
   rest = rest.replace(EMAIL_RE, ' ')
   for (const match of rest.matchAll(new RegExp(BARE_DOMAIN_RE.source, BARE_DOMAIN_RE.flags))) {
-    add(match[0] + hostContinuation(match[0], rest.slice((match.index ?? 0) + match[0].length)))
+    add(normaliseLinkToken(match[0]) + hostContinuation(match[0], rest.slice((match.index ?? 0) + match[0].length)))
   }
   return out
 }
@@ -223,7 +257,7 @@ function checkLinks(
     const checked: RenderFacts = { ...facts, linkHosts: facts.linkHosts ?? settings.guardrails.allowedLinkHosts }
     const providerViolations: LinkViolation[] = provider.checkLinks(urls, checked)
     for (const v of providerViolations) {
-      out.push({ code: v.code, detail: v.detail })
+      out.push({ code: v.code, detail: v.detail, url: v.url })
     }
   }
   return out

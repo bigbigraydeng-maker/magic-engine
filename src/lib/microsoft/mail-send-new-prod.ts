@@ -4,7 +4,7 @@
  * 设计稿：docs/specs/2026-10-21-crm-send-first-email-design-v0.md
  */
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/supabase'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
 import { createSendGatesProd } from '@/lib/crm/email-templates/send-gates-prod'
@@ -28,6 +28,10 @@ const UNIQUE_VIOLATION = '23505'
 const GRAPH_TIMEOUT_MS = 15_000
 
 const lockKey = (contactId: string): string => `mail-lock:${contactId}`
+// A contact id is a uuid, so "to:" can never collide with a contact lock. conversations is unique on (client_id, conversation_id).
+// The address is hashed: a lock row that outlives a crashed request must not leave a guest's address lying in `conversations`.
+export const recipientLockKey = (recipient: string): string =>
+  `mail-lock:to:${createHash('sha256').update(recipient.trim().toLowerCase()).digest('hex')}`
 
 function metaPart(meta: string | null, kind: 'draft' | 'msg'): string | null {
   const m = new RegExp(`\\|${kind}:(.+)$`).exec(meta ?? '')
@@ -38,6 +42,28 @@ export function createMailNewStore(): MailNewStore {
   const db = supabaseAdmin
   // Lock tokens of this store instance (one per request): release only deletes OUR lock row.
   const lockTokens = new Map<string, string>()
+
+  async function takeLock(clientId: string, key: string, mailbox: string): Promise<boolean> {
+    await db.from('conversations').delete().eq('client_id', clientId).eq('conversation_id', key).lt('created_at', new Date(Date.now() - LOCK_STALE_MS).toISOString())
+    // The subject column of a lock row carries a random token. If a send outlives LOCK_STALE_MS and another request
+    // takes the lock over, our release must not delete theirs.
+    const token = randomUUID()
+    const { error } = await db.from('conversations').insert({ client_id: clientId, channel: 'email', page_id: mailbox, conversation_id: key, subject: token })
+    if (!error) {
+      lockTokens.set(key, token)
+      return true
+    }
+    if (error.code === UNIQUE_VIOLATION) return false
+    throw new Error(error.message)
+  }
+
+  async function dropLock(clientId: string, key: string): Promise<void> {
+    const token = lockTokens.get(key)
+    lockTokens.delete(key)
+    if (token === undefined) return // this store instance never took the lock, so there is nothing of ours to delete
+    await db.from('conversations').delete().eq('client_id', clientId).eq('conversation_id', key).eq('subject', token)
+  }
+
   return {
     loadSettings: (clientId) => loadEmailSettings(db, clientId),
     async loadLeadsConfig(clientId) {
@@ -143,26 +169,10 @@ export function createMailNewStore(): MailNewStore {
         .gte('occurred_at', new Date(Date.now() - days * 86_400_000).toISOString())
       return count ?? 0
     },
-    async acquireContactLock(clientId, contactId, mailbox) {
-      await db.from('conversations').delete().eq('client_id', clientId).eq('conversation_id', lockKey(contactId)).lt('created_at', new Date(Date.now() - LOCK_STALE_MS).toISOString())
-      // The subject column of a lock row carries a random token. If a send outlives LOCK_STALE_MS and another request
-      // takes the lock over, our release must not delete theirs.
-      const token = randomUUID()
-      const { error } = await db.from('conversations').insert({ client_id: clientId, channel: 'email', page_id: mailbox, conversation_id: lockKey(contactId), subject: token })
-      if (!error) {
-        lockTokens.set(lockKey(contactId), token)
-        return true
-      }
-      if (error.code === UNIQUE_VIOLATION) return false
-      throw new Error(error.message)
-    },
-    async releaseContactLock(clientId, contactId) {
-      const key = lockKey(contactId)
-      const token = lockTokens.get(key)
-      lockTokens.delete(key)
-      if (token === undefined) return // this store instance never took the lock, so there is nothing of ours to delete
-      await db.from('conversations').delete().eq('client_id', clientId).eq('conversation_id', key).eq('subject', token)
-    },
+    acquireContactLock: (clientId, contactId, mailbox) => takeLock(clientId, lockKey(contactId), mailbox),
+    releaseContactLock: (clientId, contactId) => dropLock(clientId, lockKey(contactId)),
+    acquireRecipientLock: (clientId, recipient, mailbox) => takeLock(clientId, recipientLockKey(recipient), mailbox),
+    releaseRecipientLock: (clientId, recipient) => dropLock(clientId, recipientLockKey(recipient)),
     async claimConversation({ clientId, contactId, requestId, mailbox, subject }) {
       const { data, error } = await db
         .from('conversations')
@@ -198,7 +208,8 @@ export function createMailNewStore(): MailNewStore {
       return !error
     },
     async discardConversation(conversationId) {
-      // 已有审计行引用它时删不掉，那就留着（/email 路由只认有入站消息的会话，不会误判有线程）。
+      // 审计行（conversation_outbound_log）对会话是 ON DELETE CASCADE：删会话会把它的审计行一起删掉，
+      // 所以「失败」的审计行不会留下，失败的记录以回执为准。
       await db.from('conversations').delete().eq('id', conversationId)
     },
     async recordSent({ clientId, contactId, conversationId, messageId, sentByEmail, body }) {
