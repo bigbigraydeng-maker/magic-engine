@@ -37,6 +37,16 @@ const STATUS_TEXT: Record<CallAnalysisData['reviewStatus'], string> = {
   rejected: '已驳回',
 }
 
+/**
+ * 复核成功了，但「今天要联系」名单那边没同步上（接口返回 touchpointSync）。
+ * 不当成失败（复核已生效），只提醒一句，别让人以为名单已经跟着变了。
+ */
+export function syncWarning(next: CallAnalysisData['reviewStatus'], body: unknown): string | null {
+  const sync = (body as { touchpointSync?: unknown } | null)?.touchpointSync
+  if (sync !== 'conflict' && sync !== 'failed') return null
+  return `${STATUS_TEXT[next]}，但名单那边没同步上，稍后刷新再看`
+}
+
 /** 原话是谁说的：员工说的写「员工原话」，客人说的写「客人原话」，没记说话人就只写「原话」，不乱猜。 */
 export function quoteLabel(speaker: 'customer' | 'employee' | undefined): string {
   if (speaker === 'employee') return '员工原话'
@@ -57,6 +67,7 @@ export function CallAnalysisCard({ clientId, analysis }: { clientId: string; ana
   const [status, setStatus] = useState(analysis.reviewStatus)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [warn, setWarn] = useState<string | null>(null)
   const [transcript, setTranscript] = useState<string | null>(null)
   const [tOpen, setTOpen] = useState(false)
   const [tBusy, setTBusy] = useState(false)
@@ -84,6 +95,7 @@ export function CallAnalysisCard({ clientId, analysis }: { clientId: string; ana
   async function review(next: CallAnalysisData['reviewStatus']) {
     setBusy(true)
     setErr(null)
+    setWarn(null)
     try {
       const res = await fetch(`/api/clients/${clientId}/crm/call-analyses/${analysis.id}`, {
         method: 'PATCH',
@@ -92,6 +104,7 @@ export function CallAnalysisCard({ clientId, analysis }: { clientId: string; ana
       })
       if (!res.ok) throw new Error('操作没成功，请重试')
       setStatus(next)
+      setWarn(syncWarning(next, await res.json().catch(() => null)))
     } catch (e) {
       setErr(e instanceof Error ? e.message : '操作没成功，请重试')
     } finally {
@@ -170,6 +183,7 @@ export function CallAnalysisCard({ clientId, analysis }: { clientId: string; ana
           </button>
         )}
         {err && <span className="text-[11px] text-[#C2453A]">{err}</span>}
+        {warn && <span className="text-[11px] text-me-ochre">{warn}</span>}
       </div>
     </div>
   )

@@ -58,8 +58,9 @@ describe('复审 2026-10-29：表态的误判口子', () => {
     ({ summary: '', language: 'en', facts: [notReady({ quote, speaker })] })
 
   it('模型把问号去掉交回来，但转写原句是问句 → 丢掉', () => {
-    const t = "声道1：So you're not ready for that yet?\n声道2：Hmm."
-    expect(verifyFacts(stanceOnly("So you're not ready for that yet"), t).facts).toHaveLength(0)
+    // 原话本身过得了「第一人称主语」那道闸，只有回到原行才看得出是问句
+    const t = "声道1：So I'm not ready for that yet?\n声道2：Hmm."
+    expect(verifyFacts(stanceOnly("So I'm not ready for that yet"), t).facts).toHaveLength(0)
   })
 
   it('中文原句以「吗 / 呢 / 么」收尾（有无标点都算）→ 问句，丢掉', () => {
@@ -125,6 +126,76 @@ describe('复审 2026-10-29：表态的误判口子', () => {
     expect(callStanceFromFacts([notReady(), f('callback_time', 'unclear')])).toBeNull()
     expect(callStanceFromFacts([notReady(), f('destination_or_tour', 'employee')])).toBe('not_now')
     expect(callStanceFromFacts([notReady(), f('next_step', 'employee')])).toBe('not_now')
+  })
+})
+
+describe('复审第二轮：第一人称必须是拒绝的主语', () => {
+  const stanceOnly = (quote: string) => ({ summary: '', language: 'en', facts: [notReady({ quote })] })
+  const keeps = (quote: string) => verifyFacts(stanceOnly(quote), `声道2：${quote}`).facts.length === 1
+
+  it('员工的「We understand if you\'re not ready yet」→ 有 we 也不算', () => {
+    expect(keeps("We understand if you're not ready yet")).toBe(false)
+  })
+  it('Gavin 的「I\'m not ready for that. I\'ll talk to you another day.」→ 算', () => {
+    expect(keeps("I'm not ready for that. I'll talk to you another day.")).toBe(true)
+  })
+  it('其他客人说法：I am not interested / we are not quite ready / I\'ll think about it later / 我们现在还没准备好 / 我不感兴趣 → 算', () => {
+    for (const q of ['I am not interested in that tour', 'we are not quite ready yet', "I'll think about it later", '我们现在还没准备好', '我不感兴趣']) {
+      expect(keeps(q)).toBe(true)
+    }
+  })
+  it('只是出现了 I / 我，但拒绝的主语不是他 → 不算', () => {
+    for (const q of ["I hope you're not ready to give up", "I think you're not interested", "I'm sure you're not ready yet", '我觉得你们还没准备好']) {
+      expect(keeps(q)).toBe(false)
+    }
+  })
+})
+
+describe('复审第二轮：推托不算「还要了东西」', () => {
+  const GAVIN_LINE = "I'm not ready for that. I'll talk to you another day."
+  const fact = (key: RawFact['key'], value: string, quote: string): RawFact => ({ key, value, quote, confidence: 0.9, speaker: 'customer' })
+
+  it('Gavin：模型同时抽出表态和「改天再聊」这条下一步 → 仍记 not_now', () => {
+    const t = `声道1：Hi Gavin, about the China tour.\n声道2：${GAVIN_LINE}`
+    const v = verifyFacts({ summary: '', language: 'en', facts: [
+      notReady({ quote: GAVIN_LINE }),
+      fact('next_step', '改天再聊', "I'll talk to you another day"),
+    ] }, t)
+    expect(v.facts.map((f) => f.key)).toEqual(['not_ready_now', 'next_step'])
+    expect(callStanceFromFacts(v.facts)).toBe('not_now')
+  })
+
+  it('下一步的原话就是表态那一句（没有推托字眼、也没要东西）→ 不算还要了东西', () => {
+    const q = "I'm not ready for that"
+    expect(callStanceFromFacts([notReady({ quote: q }), fact('next_step', '客人暂不推进', q)])).toBe('not_now')
+  })
+
+  it('下一步只是推托（以后再说 / 再联系）、原话不同句 → 仍记表态', () => {
+    expect(callStanceFromFacts([notReady(), fact('next_step', '以后再说', '我们以后再说吧')])).toBe('not_now')
+    expect(callStanceFromFacts([notReady(), fact('callback_time', '以后再联系', 'we will be in touch later')])).toBe('not_now')
+  })
+
+  it('真要了东西照样挡住：发资料 / email me / call me on Friday at 3', () => {
+    expect(callStanceFromFacts([notReady(), fact('next_step', '发资料', 'send me the brochure')])).toBeNull()
+    expect(callStanceFromFacts([notReady(), fact('next_step', '发邮件', 'just email me the details')])).toBeNull()
+    expect(callStanceFromFacts([notReady(), fact('callback_time', '周五三点', 'call me on Friday at 3')])).toBeNull()
+  })
+
+  it('同一句里既推托又要资料（"I\'m not ready to book yet but send me the brochure"）→ 挡住', () => {
+    const q = "I'm not ready to book yet but send me the brochure"
+    expect(callStanceFromFacts([notReady({ quote: q }), fact('next_step', '发资料', q)])).toBeNull()
+  })
+})
+
+describe('长转写不能拖慢（子牙 2026-10-29 实测旧做法 1200 行约 2.7 秒）', () => {
+  it('3000 行同一声道 + 编造的表态原话 → 远低于 200 毫秒', () => {
+    const t = Array.from({ length: 3000 }, (_, i) => `声道1：This is sentence number ${i} about the tour.`).join('\n')
+    const facts = Array.from({ length: 40 }, (_, i) => notReady({ quote: `I'm not ready for that one ${i}` }))
+    const start = performance.now()
+    const v = verifyFacts({ summary: '', language: 'en', facts }, t)
+    const ms = performance.now() - start
+    expect(v.facts).toHaveLength(0)
+    expect(ms).toBeLessThan(200)
   })
 })
 

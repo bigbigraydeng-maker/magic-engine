@@ -8,7 +8,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import type { CallStance } from '@/lib/crm/segments'
 import { mergeTouchpointMetadata, type MetadataMergeOutcome } from '@/lib/crm/touchpoint-metadata'
-import type { RawFact } from './analysis-schema'
+import { norm, STANCE_FACT_KEYS, type RawFact } from './analysis-schema'
 
 /**
  * 客人在同一通电话里还**要了东西**（约了下一步 / 给了邮箱 / 约了回电时间 / 说了想去哪）——
@@ -18,11 +18,37 @@ import type { RawFact } from './analysis-schema'
  * 目的地必须是客人自己说的（员工介绍线路不算）。
  */
 const STILL_WANTS_KEYS: ReadonlySet<string> = new Set(['next_step', 'contact_email', 'callback_time'])
+/** 只有「下一步 / 回电时间」可能只是一句推托；邮箱永远算真要了东西。 */
+const MAYBE_DEFERRAL_KEYS: ReadonlySet<string> = new Set(['next_step', 'callback_time'])
+
+/**
+ * 真的要了东西：发资料 / 发邮件 / 指定时间回电。命中它的「下一步」永远挡住表态，
+ * 哪怕原话跟表态是同一句（"I'm not ready to book yet but send me the brochure"）。
+ */
+const REAL_REQUEST = /\b(?:send|email|e-mail|mail|text)\b|brochure|catalog(?:ue)?|\binfo(?:rmation)?\b|details|itinerar|quote|\bcall me\b.*\b(?:on|at|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d)|发(?:给)?我|寄|邮件|邮箱|资料|行程|报价|(?:周|星期|礼拜)[一二三四五六日天]|\d+\s*点/i
+/** 只是推托：改天 / 以后 / 再联系。（复审 2026-10-29：模型会从 Gavin 那句里再抽一条「改天再聊」当下一步。） */
+const DEFERRAL_ONLY = /another day|another time|some other time|\blater\b|\bsome ?time\b|get back to you|be in touch|改天|以后再说|下次再说|回头再说|再联系|过阵子|以后/i
+
+/** 两段原话归一化后互相包含 = 说的是同一句。 */
+function overlaps(a: string, b: string): boolean {
+  const x = norm(a)
+  const y = norm(b)
+  return x.length > 0 && y.length > 0 && (x.includes(y) || y.includes(x))
+}
+
+/** 这条「下一步 / 回电」只是表态本身的推托，不算客人还要了东西。 */
+function isJustDeferral(f: RawFact, stanceQuotes: readonly string[]): boolean {
+  if (!MAYBE_DEFERRAL_KEYS.has(f.key)) return false
+  const text = `${f.value} ${f.quote}`
+  if (REAL_REQUEST.test(text)) return false
+  return stanceQuotes.some((q) => overlaps(q, f.quote)) || DEFERRAL_ONLY.test(text)
+}
 
 function stillAskedForSomething(facts: readonly RawFact[]): boolean {
+  const stanceQuotes = facts.filter((f) => STANCE_FACT_KEYS.has(f.key)).map((f) => f.quote)
   return facts.some(
     (f) =>
-      (STILL_WANTS_KEYS.has(f.key) && f.speaker !== 'employee') ||
+      (STILL_WANTS_KEYS.has(f.key) && f.speaker !== 'employee' && !isJustDeferral(f, stanceQuotes)) ||
       (f.key === 'destination_or_tour' && f.speaker === 'customer'),
   )
 }

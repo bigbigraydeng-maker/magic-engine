@@ -1,7 +1,7 @@
 import React from 'react'
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { CallAnalysisCard, quoteLabel, splitAroundQuote, type CallAnalysisData } from '../CallAnalysisCard'
+import { CallAnalysisCard, quoteLabel, splitAroundQuote, syncWarning, type CallAnalysisData } from '../CallAnalysisCard'
 
 const analysis: CallAnalysisData = {
   id: 'an-1',
@@ -58,5 +58,30 @@ describe('CallAnalysisCard', () => {
     render(<CallAnalysisCard clientId="cts" analysis={analysis} />)
     fireEvent.click(screen.getByText('看完整通话文字'))
     await waitFor(() => expect(screen.getByText('这通电话没有文字稿')).toBeTruthy())
+  })
+})
+
+describe('复核后名单没同步上的提醒', () => {
+  it('syncWarning：只在 conflict / failed 时出一句话', () => {
+    expect(syncWarning('rejected', { reviewStatus: 'rejected', touchpointSync: 'conflict' })).toBe('已驳回，但名单那边没同步上，稍后刷新再看')
+    expect(syncWarning('rejected', { reviewStatus: 'rejected', touchpointSync: 'failed' })).toBe('已驳回，但名单那边没同步上，稍后刷新再看')
+    expect(syncWarning('rejected', { reviewStatus: 'rejected' })).toBeNull()
+    expect(syncWarning('rejected', null)).toBeNull()
+  })
+
+  it('点驳回、接口说没同步上 → 卡片显示提醒，状态仍是已驳回', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ reviewStatus: 'rejected', touchpointSync: 'failed' }) }))
+    render(<CallAnalysisCard clientId="cts" analysis={analysis} />)
+    fireEvent.click(screen.getByText('驳回'))
+    await waitFor(() => expect(screen.getByText('已驳回，但名单那边没同步上，稍后刷新再看')).toBeTruthy())
+    expect(screen.getByText(/通话分析 · 已驳回/)).toBeTruthy()
+  })
+
+  it('同步正常 → 不显示提醒', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ reviewStatus: 'rejected' }) }))
+    render(<CallAnalysisCard clientId="cts" analysis={analysis} />)
+    fireEvent.click(screen.getByText('驳回'))
+    await waitFor(() => expect(screen.getByText(/通话分析 · 已驳回/)).toBeTruthy())
+    expect(screen.queryByText(/名单那边没同步上/)).toBeNull()
   })
 })
