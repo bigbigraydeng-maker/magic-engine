@@ -41,6 +41,8 @@ export interface ContactRow {
    * 列表只画 `nextAction.line`；`stage` / `segment` 仍在，抽屉改阶段和筛选还要用。
    */
   nextAction: NextAction
+  /** AI 对这位客人的摘要；分段列表「该做什么」列有就显示它，没有就显示规则那句。 */
+  aiSummary?: string | null
   /** 最新一张 AI 摘要的意向；null = 没有摘要。 */
   intent: IntentLevel | null
   custom: Record<string, string | null>

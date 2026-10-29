@@ -676,9 +676,10 @@ describe('分段视图 · 复审补测', () => {
     render(<CrmAllContactsPage />)
     await goGrouped()
     await waitFor(() => expect(screen.getByText('Aaa One')).toBeTruthy())
-    // 「今天先联系」只有三样：客人 / 该做什么 / 联系渠道，没有任何可点排序的表头
+    // 分段模式的表头一个都不能排序（含 2026-10-30 新加的 进线 / 最近联系 列）
     expect(screen.getByText('该做什么').closest('th')?.className).not.toContain('cursor-pointer')
-    expect(screen.queryByText(/最近联系/)).toBeNull()
+    expect(screen.getByText('最近联系').closest('th')?.className).not.toContain('cursor-pointer')
+    expect(screen.getByText('进线').closest('th')?.className).not.toContain('cursor-pointer')
     // 而且要有一句话说明段内按什么排，别让人以为能自己排
     expect(screen.getByText(/点表头不改顺序/)).toBeTruthy()
   })

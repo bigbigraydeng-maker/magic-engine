@@ -97,7 +97,7 @@ export function responseRowFor(
   stageMeta: Map<string, { label: string; suppressed: boolean }>,
   model: ReturnType<typeof buildContactModel>,
   seg: ReturnType<typeof segmentContact>,
-  brief?: { intent: IntentLevel | null; nextAction: string | null } | null,
+  brief?: { intent: IntentLevel | null; nextAction: string | null; summary?: string | null } | null,
 ): { row: Record<string, unknown>; custom: Record<CustomColumnKey, string | null> } {
   // 进线时间 = 真实最早一条触点（不是导入日期）；没触点退回 first_seen_at。
   // 最近联系 = 最晚一条触点；0 触点显式 null —— 绝不 fallback last_seen_at
@@ -180,6 +180,8 @@ export function responseRowFor(
        * 列表只画这一行；stage / segment 字段仍返回，抽屉和筛选还在用。
        */
       nextAction: nextActionFor({ seg, intent: brief?.intent ?? null, aiNextAction: brief?.nextAction ?? null }),
+      // AI 对这位客人的摘要（有就在「该做什么」列显示，比规则那句「进线了」有用）。
+      aiSummary: brief?.summary ?? null,
       intent: brief?.intent ?? null,
       // 跟进人（issue #3158 第二刀 part 3）：null = 未分配。前端据此在列表 /
       // 抽屉里显示「跟进人」一列和下拉；跟 `assigned_to` 列同一个值，不作转换。
