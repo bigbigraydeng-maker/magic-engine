@@ -161,15 +161,22 @@ function StageCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
   return (
     <td className="whitespace-nowrap px-4 py-2">
       {grouped ? (
-        <div className="flex max-w-[380px] items-center gap-2">
+        <div className="flex max-w-[460px] items-center gap-2">
           <span
             className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold ${LIST_CLS[r.nextAction.list]}`}
           >
             {r.nextAction.verbLabel}
           </span>
-          <span className="truncate text-xs text-me-charcoal/60" title={r.nextAction.reason}>
-            {r.nextAction.reason}
-          </span>
+          {r.aiSummary ? (
+            <span className="truncate text-xs text-me-charcoal/70" title={r.aiSummary} data-testid="ai-summary">
+              <span className="mr-1 rounded bg-me-charcoal/10 px-1 text-[10px] font-bold text-me-charcoal/50">AI</span>
+              {r.aiSummary}
+            </span>
+          ) : (
+            <span className="truncate text-xs text-me-charcoal/60" title={r.nextAction.reason}>
+              {r.nextAction.reason}
+            </span>
+          )}
         </div>
       ) : r.stageLabel ? (
         <span className="text-me-charcoal/70">{r.stageLabel}</span>
@@ -202,6 +209,9 @@ export function ContactTableRow(props: {
         <>
           <td className="whitespace-nowrap px-4 py-2 text-xs text-me-charcoal/55" data-testid="arrival-cell">
             {r.firstSeenAt ? arrivalLabel(r.firstSeenAt) : <span className="text-me-charcoal/35">—</span>}
+          </td>
+          <td className="whitespace-nowrap px-4 py-2 text-xs text-me-charcoal/55" data-testid="recent-cell">
+            {r.lastTouchAt ? relTime(r.lastTouchAt) : <span className="text-me-charcoal/35">—</span>}
           </td>
           <StageCell r={r} grouped />
           <ChannelCell r={r} />

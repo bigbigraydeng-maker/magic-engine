@@ -20,6 +20,8 @@ import { INTENT_LEVELS, type IntentLevel } from './next-action'
 export interface ContactBrief {
   intent: IntentLevel | null
   nextAction: string | null
+  /** AI 对这位客人最近一段对话的摘要（库里 conversation_briefs.summary）；列表「该做什么」列显示它。 */
+  summary: string | null
   generatedAt: string
 }
 
@@ -42,6 +44,7 @@ export function latestBriefPerContact(
     conversation_id: string
     intent_level: unknown
     next_action: unknown
+    summary: unknown
     generated_at: string | null
   }>,
 ): Map<string, ContactBrief> {
@@ -65,9 +68,11 @@ export function latestBriefPerContact(
     if (prev !== undefined && prev >= stamp) continue
 
     const trimmed = typeof brief.next_action === 'string' ? brief.next_action.trim() : ''
+    const summaryTrim = typeof brief.summary === 'string' ? brief.summary.trim() : ''
     latest.set(contactId, {
       intent: normaliseIntent(brief.intent_level),
       nextAction: trimmed.length > 0 ? trimmed : null,
+      summary: summaryTrim.length > 0 ? summaryTrim : null,
       generatedAt: typeof brief.generated_at === 'string' ? brief.generated_at : '',
     })
     latestAt.set(contactId, stamp)
@@ -96,11 +101,12 @@ async function loadBriefsOrThrow(clientId: string): Promise<BriefByContact> {
     conversation_id: string
     intent_level: unknown
     next_action: unknown
+    summary: unknown
     generated_at: string | null
   }>((from, to) =>
     supabaseAdmin
       .from('conversation_briefs')
-      .select('conversation_id, intent_level, next_action, generated_at')
+      .select('conversation_id, intent_level, next_action, summary, generated_at')
       .eq('client_id', clientId)
       .order('id', { ascending: true })
       .range(from, to),

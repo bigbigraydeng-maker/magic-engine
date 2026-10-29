@@ -172,16 +172,30 @@ describe('🔥 回头标签（PM 2026-10-27：之前咨询过、我们联系过�
 })
 
 describe('「今天先联系」每行只留三样：名字 / 一句话原因 / 一个渠道', () => {
-  it('分段视图：画 客人 + 进线 + 该做什么 + 联系渠道，不画最近联系、联系方式、自定义列、来源小标签', () => {
+  it('分段视图：客人 + 进线 + 最近联系 + 该做什么 + 联系渠道；不画联系方式、自定义列、来源小标签', () => {
     renderRow(makeRow({ suggestedChannel: 'phone', sources: ['fb_form'], custom: { tour: 'Best of China' } }), true)
     expect(screen.getByText('Jane Doe')).toBeTruthy()
     expect(screen.getByText('进线了，还没人联系')).toBeTruthy()
-    expect(screen.getByTestId('arrival-cell').textContent?.trim()).toBeTruthy() // 进线时间画出来了（PM 2026-10-30）
+    expect(screen.getByTestId('arrival-cell').textContent?.trim()).toBeTruthy() // 进线时间
+    expect(screen.getByTestId('recent-cell').textContent?.trim()).toBeTruthy() // 最近联系（PM 2026-10-30）
     expect(screen.getByTestId('channel-cell').textContent).toContain('电话')
-    expect(screen.queryByText('+64211111111')).toBeNull() // 联系方式收进详情
-    expect(screen.queryByText('FB 表单')).toBeNull() // 来源小标签不画
-    expect(screen.queryByText('Best of China')).toBeNull() // 自定义列不画
-    expect(document.querySelectorAll('td').length).toBe(5) // ⭐ / 客人 / 进线 / 该做什么 / 联系渠道
+    expect(screen.queryByText('+64211111111')).toBeNull()
+    expect(screen.queryByText('FB 表单')).toBeNull()
+    expect(screen.queryByText('Best of China')).toBeNull()
+    expect(document.querySelectorAll('td').length).toBe(6) // ⭐ / 客人 / 进线 / 最近联系 / 该做什么 / 联系渠道
+  })
+
+  it('有 AI 摘要时，「该做什么」列显示摘要而不是规则那句（PM 2026-10-30）', () => {
+    renderRow(makeRow({ suggestedChannel: 'phone', aiSummary: '客户想要 4 月上海团、约 10 人' }), true)
+    expect(screen.getByTestId('ai-summary').textContent).toContain('客户想要 4 月上海团')
+    expect(screen.queryByText('进线了，还没人联系')).toBeNull() // 规则那句被摘要顶掉
+    expect(screen.getByText('打给他')).toBeTruthy() // 动作小标签还在
+  })
+
+  it('没有 AI 摘要时，退回规则那句', () => {
+    renderRow(makeRow({ suggestedChannel: 'phone' }), true)
+    expect(screen.queryByTestId('ai-summary')).toBeNull()
+    expect(screen.getByText('进线了，还没人联系')).toBeTruthy()
   })
 
   it('每种渠道都有人话；没有可用渠道时直说，不画成空白', () => {

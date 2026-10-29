@@ -18,6 +18,7 @@ export function ContactTableHead(props: {
           <th className="whitespace-nowrap px-2 py-2">⭐</th>
           <th className="whitespace-nowrap px-4 py-2">客人</th>
           <th className="whitespace-nowrap px-4 py-2">进线</th>
+          <th className="whitespace-nowrap px-4 py-2">最近联系</th>
           <th className="whitespace-nowrap px-4 py-2">该做什么</th>
           <th className="whitespace-nowrap px-4 py-2">联系渠道</th>
         </tr>
