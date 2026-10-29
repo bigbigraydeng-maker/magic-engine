@@ -65,6 +65,8 @@ export interface BreakdownReport {
   hour: ReportRow[]
   /** key = '1'..'7' (Mon..Sun); leads = CRM form leads. */
   weekday: ReportRow[]
+  /** key = 'YYYY-MM-DD' (account-timezone date), newest first; leads = CRM form leads submitted that local day. No flag: one day alone is too noisy to call costly/cheap. */
+  day: ReportRow[]
   /** key = 'platform · position'; leads = Meta-reported. */
   placement: ReportRow[]
   /** key = device, taken from placement_device rows; leads = Meta-reported. */

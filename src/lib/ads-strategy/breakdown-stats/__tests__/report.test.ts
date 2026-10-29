@@ -228,6 +228,29 @@ describe('buildBreakdownReport', () => {
     expect(report.weekday.reduce((n, r) => n + r.spend, 0)).toBe(100)
   })
 
+  it('day rows: one per date, newest first, spend from hourly rows and leads from CRM by local date, no verdict', () => {
+    const report = buildBreakdownReport({
+      since: '2026-10-26', until: '2026-10-28', days: 3, accounts: [ACCOUNT], objectives: OBJECTIVES,
+      stats: [
+        stat({ breakdown_key: 'hour_account_tz', breakdown_value: { hour: 9 }, stat_date: '2026-10-26', spend: 30, clicks: 3, impressions: 300 }),
+        stat({ breakdown_key: 'hour_account_tz', breakdown_value: { hour: 20 }, stat_date: '2026-10-26', spend: 20, clicks: 2, impressions: 200 }),
+        stat({ breakdown_key: 'hour_account_tz', breakdown_value: { hour: 9 }, stat_date: '2026-10-28', spend: 50, clicks: 5, impressions: 500 }),
+      ],
+      leads: [lead('2026-10-26', 9), lead('2026-10-27', 10), lead('2026-10-28', 9), lead('2026-10-28', 21)],
+    })
+    expect(report.day.map((r) => r.key)).toEqual(['2026-10-28', '2026-10-27', '2026-10-26'])
+    const d26 = report.day.find((r) => r.key === '2026-10-26')
+    expect(d26?.spend).toBe(50)
+    expect(d26?.impressions).toBe(500)
+    expect(d26?.leads).toBe(1)
+    expect(d26?.costPerLead).toBe(50)
+    const d27 = report.day.find((r) => r.key === '2026-10-27')
+    expect(d27?.spend).toBe(0)
+    expect(d27?.leads).toBe(1)
+    expect(report.day.every((r) => r.flag === null && r.expectedLeads === null)).toBe(true)
+    expect(report.day.reduce((n, r) => n + r.spend, 0)).toBe(100)
+  })
+
   it('matchRate is null when metaLeads is 0', () => {
     const stats: StatInput[] = [
       stat({
