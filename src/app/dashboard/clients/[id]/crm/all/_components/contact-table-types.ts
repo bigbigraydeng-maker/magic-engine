@@ -159,6 +159,19 @@ export function fmtDate(iso: string | null): string {
  * 原来满 30 天就换成「9/10」这种日期：PM 2026-10-10 看本地页，一列里「29天前」
  * 紧跟着「9/10」，同一列两种写法，眼睛要换算。一年以内都说「N天前」，超过一年才给日期。
  */
+/** 进线时间：今天显示「今天 HH:MM」好看出谁是刚进的新客人；昨天/几天前/更早按天或日期（PM 2026-10-30）。 */
+export function arrivalLabel(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const now = new Date()
+  const dayOf = (x: Date) => Date.UTC(x.getFullYear(), x.getMonth(), x.getDate())
+  const days = Math.round((dayOf(now) - dayOf(d)) / 86_400_000)
+  if (days <= 0) return `今天 ${d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}`
+  if (days === 1) return '昨天'
+  if (days < 365) return `${days}天前`
+  return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+}
+
 export function relTime(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)

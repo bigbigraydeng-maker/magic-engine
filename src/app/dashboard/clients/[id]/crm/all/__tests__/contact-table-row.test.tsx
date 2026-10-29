@@ -172,15 +172,16 @@ describe('🔥 回头标签（PM 2026-10-27：之前咨询过、我们联系过�
 })
 
 describe('「今天先联系」每行只留三样：名字 / 一句话原因 / 一个渠道', () => {
-  it('分段视图：画 客人 + 该做什么 + 联系渠道，不画进线时间、最近联系、联系方式、自定义列、来源小标签', () => {
+  it('分段视图：画 客人 + 进线 + 该做什么 + 联系渠道，不画最近联系、联系方式、自定义列、来源小标签', () => {
     renderRow(makeRow({ suggestedChannel: 'phone', sources: ['fb_form'], custom: { tour: 'Best of China' } }), true)
     expect(screen.getByText('Jane Doe')).toBeTruthy()
     expect(screen.getByText('进线了，还没人联系')).toBeTruthy()
+    expect(screen.getByTestId('arrival-cell').textContent?.trim()).toBeTruthy() // 进线时间画出来了（PM 2026-10-30）
     expect(screen.getByTestId('channel-cell').textContent).toContain('电话')
     expect(screen.queryByText('+64211111111')).toBeNull() // 联系方式收进详情
     expect(screen.queryByText('FB 表单')).toBeNull() // 来源小标签不画
     expect(screen.queryByText('Best of China')).toBeNull() // 自定义列不画
-    expect(document.querySelectorAll('td').length).toBe(4) // ⭐ / 客人 / 该做什么 / 联系渠道
+    expect(document.querySelectorAll('td').length).toBe(5) // ⭐ / 客人 / 进线 / 该做什么 / 联系渠道
   })
 
   it('每种渠道都有人话；没有可用渠道时直说，不画成空白', () => {

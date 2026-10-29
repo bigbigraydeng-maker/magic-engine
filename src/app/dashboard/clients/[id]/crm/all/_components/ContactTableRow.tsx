@@ -3,6 +3,7 @@
 import { cleanDisplayName } from '@/lib/crm/clean-display-name'
 import {
   LIST_CLS,
+  arrivalLabel,
   fmtDate,
   relTime,
   type ContactRow,
@@ -199,6 +200,9 @@ export function ContactTableRow(props: {
       <NameCell r={r} grouped={grouped} />
       {grouped ? (
         <>
+          <td className="whitespace-nowrap px-4 py-2 text-xs text-me-charcoal/55" data-testid="arrival-cell">
+            {r.firstSeenAt ? arrivalLabel(r.firstSeenAt) : <span className="text-me-charcoal/35">—</span>}
+          </td>
           <StageCell r={r} grouped />
           <ChannelCell r={r} />
         </>
