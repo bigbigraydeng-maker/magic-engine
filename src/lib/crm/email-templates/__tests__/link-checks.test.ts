@@ -183,6 +183,10 @@ describe('tricks with the link itself', () => {
     expect(codes('Go to www.例え。evil。com')).toContain('link_host_not_allowed')
   })
 
+  it('ordinary text that merely mentions a scheme or a path is not turned into a link', () => {
+    expect(codes('Write it as https:/ or http:\\ in the box; the folder is C:\\temp\\notes.txt')).toEqual([])
+  })
+
   it('a bare "www." in ordinary text is not a link', () => {
     expect(codes('Our site starts with www. and then the name')).toEqual([])
     expect(codes('Visit www.')).toEqual([])
