@@ -347,6 +347,10 @@ export default function BreakdownPanel({ clientId }: { clientId: string }) {
       {report && (
         <>
           <OverviewCard report={report} />
+          <p className="mb-3 text-xs text-gray-500">往下依次是：按天、其他目标的花费、按小时、按星期、版位、设备、年龄性别、地区。</p>
+          <Section title="按天" note="每天的花费来自当天每小时数据加总，进线按客户系统里的提交时间算；单独一天样本太少，不打「偏贵/偏便宜」。">
+            <RowTable rows={report.day} cur={cur} label={dayLabel} />
+          </Section>
           <NonLeadCard rows={report.nonLeadSpend} cur={cur} />
           <Section title={hourTitle(report)} note="每小时每花 100 块能带来几条进线；进线按客户系统里的提交时间算。">
             <HourBars rows={report.hour} cur={cur} />
@@ -354,9 +358,6 @@ export default function BreakdownPanel({ clientId }: { clientId: string }) {
           </Section>
           <Section title="按星期" note="进线按客户系统里的提交时间算。">
             <RowTable rows={report.weekday} cur={cur} label={weekdayLabel} />
-          </Section>
-          <Section title="按天" note="每天的花费来自当天每小时数据加总，进线按客户系统里的提交时间算；单独一天样本太少，不打「偏贵/偏便宜」。">
-            <RowTable rows={report.day} cur={cur} label={dayLabel} />
           </Section>
           <Section title="版位" note="留资是 Meta 自己报的（客户系统里没有这些信息），只算最后一下的功劳。">
             <BreakdownTable rows={report.placement} cur={cur} />
