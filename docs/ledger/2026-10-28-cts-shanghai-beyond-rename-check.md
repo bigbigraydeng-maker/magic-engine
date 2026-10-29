@@ -9,7 +9,10 @@ verify_by: 2026-10-29
 verify_how: "官网改名后：打开 Mailchimp 草稿 15909753（每天批次底稿）、15910789（欢迎信 v2）、15910787（电话后跟进）、N1–N5 与 SP2，搜 Surroundings 应为 0 处且团名链接指向新团页（核页面标题）；官网旧网址 /tours/china/discovery/shanghai-surroundings 仍能打开并跳到新页面；官网 next.config.js 里 shanghai-beyond 的跳转已反向或删除；ME 团目录已发布版本改名"
 done_on: 2026-10-28
 done_ref: doc:docs/ledger/evidence/2026-10-28-cts-shanghai-beyond-rename-check.md
+last_checked: 2026-10-29
+check_note: 10/29 下午查：官网仍是旧名 Shanghai and Surroundings、旧网址 200、新网址跳回旧页、价格没变；邮件里已是新名；官网改名后再核（日历 10/30 9:30）
 ---
 PM 临时通知：CTS 上海团从 10/29 起全面更新为 Shanghai & Beyond，要我检查包括 newsletter 在内的所有地方。检查已做完：Mailchimp 92 封里 34 封含旧名（草稿 13、已发 21）、官网仓库 53 个文件、ME 团目录 2 行已发布版本、CRM 识别词表等。
-还没改任何东西：新名字下的价格、出发日、路线、网址 PM 还没给，官网也还没更新。
-最要紧的三件：每天 8:01 批次底稿 15909753 仍含旧名和已下架圣诞团；官网 next.config.js 现有的 shanghai-beyond 跳转要反向；已发邮件里的旧网址必须继续能打开。
+PM 回「只改名」（价格、出发日、路线没变）后，已把 9 封草稿里 7 封的显示名改成新名（含 2 封主题行），网页版和纯文字版都读回核对过；没发任何邮件。没动：每天 8:01 批次底稿 15909753（仍含旧名、已下架圣诞团和旧价，换要 PM 说「开」）、团页链接（仍是旧网址）、官网、ME 库。
+最要紧的三件：每天批次底稿 15909753 仍是旧名旧内容；官网 next.config.js 现有的 shanghai-beyond 跳转要反向；已发邮件里的旧网址必须继续能打开。
+后续（10-28 23:00）：PM 对欢迎信 v2 回「开」，每天批次底稿 15909753 已换成 v2（含新名），见 2026-10-28-cts-welcome-e1-template-swapped-to-v2；上一段「没动」里的 15909753 已过时。
