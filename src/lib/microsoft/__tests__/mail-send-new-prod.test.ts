@@ -70,7 +70,7 @@ vi.mock('@/lib/microsoft/mail-send', () => ({
   writeTouchpoint: vi.fn(),
 }))
 
-import { createMailNewDeps, createMailNewGraph, createMailNewStore, graphGetPage } from '@/lib/microsoft/mail-send-new-prod'
+import { createMailNewDeps, createMailNewGraph, createMailNewStore, graphGetPage, recipientLockKey } from '@/lib/microsoft/mail-send-new-prod'
 
 afterEach(() => {
   state.insertError = null
@@ -84,6 +84,15 @@ afterEach(() => {
 
 const releases = () =>
   state.deleted.filter((d) => d.filters.some((f) => f.op === 'eq' && f.column === 'subject'))
+
+// How old the rows are that the sweep for this lock key deletes (NaN when there was no sweep for the key).
+const sweepAgeMs = (key: string): number => {
+  const sweep = state.deleted.find(
+    (d) => d.filters.some((f) => f.column === 'conversation_id' && f.value === key) && d.filters.some((f) => f.op === 'lt' && f.column === 'created_at'),
+  )
+  const cutoff = sweep?.filters.find((f) => f.op === 'lt' && f.column === 'created_at')?.value
+  return typeof cutoff === 'string' ? Date.now() - Date.parse(cutoff) : Number.NaN
+}
 
 describe('contact lock ownership', () => {
   it('writes a random token into the lock row and releases only that token', async () => {
@@ -121,8 +130,9 @@ describe('contact lock ownership', () => {
   it('still sweeps stale locks older than five minutes before taking a new one', async () => {
     const store = createMailNewStore()
     await store.acquireContactLock('client-1', 'contact-1', 'lisa@cts.example')
-    const sweep = state.deleted.find((d) => d.filters.some((f) => f.op === 'lt' && f.column === 'created_at'))
-    expect(sweep).toBeDefined()
+    // Five minutes ago, not "now": a cutoff of "now" would delete the fresh row of the request that holds the lock.
+    expect(sweepAgeMs('mail-lock:contact-1')).toBeGreaterThan(290_000)
+    expect(sweepAgeMs('mail-lock:contact-1')).toBeLessThan(310_000)
   })
 
   it('surfaces a real insert failure instead of pretending the lock is taken', async () => {
@@ -134,10 +144,19 @@ describe('contact lock ownership', () => {
 })
 
 describe('recipient lock (one send to an address at a time, whichever contact record it is)', () => {
-  it('locks on the address itself, lower-cased, so two contact records that share it collide', async () => {
+  it('the key does not carry the address itself (a lock row that outlives a crash must not leave it behind)', () => {
+    const key = recipientLockKey(' Amy@Gmail.com ')
+    expect(key).toBe(recipientLockKey('amy@gmail.com'))
+    expect(key).toMatch(/^mail-lock:to:[0-9a-f]{64}$/)
+    expect(key).not.toContain('amy')
+    expect(key).not.toContain('@')
+    expect(recipientLockKey('bob@gmail.com')).not.toBe(key)
+  })
+
+  it('locks on the address itself (trimmed, lower-cased), so two contact records that share it collide', async () => {
     const store = createMailNewStore()
     expect(await store.acquireRecipientLock('client-1', ' Amy@Gmail.com ', 'lisa@cts.example')).toBe(true)
-    const row = state.inserted.find((i) => i.row.conversation_id === 'mail-lock:to:amy@gmail.com')
+    const row = state.inserted.find((i) => i.row.conversation_id === recipientLockKey('amy@gmail.com'))
     expect(row?.row).toMatchObject({ client_id: 'client-1', channel: 'email', page_id: 'lisa@cts.example' })
     expect(typeof row?.row.subject).toBe('string')
   })
@@ -147,7 +166,7 @@ describe('recipient lock (one send to an address at a time, whichever contact re
     await store.acquireContactLock('client-1', 'contact-1', 'lisa@cts.example')
     await store.acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')
     const keys = state.inserted.map((i) => i.row.conversation_id)
-    expect(keys).toEqual(['mail-lock:contact-1', 'mail-lock:to:amy@gmail.com'])
+    expect(keys).toEqual(['mail-lock:contact-1', recipientLockKey('amy@gmail.com')])
   })
 
   it('a second request for the same address is told the lock is taken', async () => {
@@ -162,7 +181,7 @@ describe('recipient lock (one send to an address at a time, whichever contact re
     const holder = createMailNewStore()
     const latecomer = createMailNewStore()
     await holder.acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')
-    const token = state.inserted.find((i) => i.row.conversation_id === 'mail-lock:to:amy@gmail.com')?.row.subject
+    const token = state.inserted.find((i) => i.row.conversation_id === recipientLockKey('amy@gmail.com'))?.row.subject
     state.insertError = { code: '23505', message: 'duplicate key' }
     await latecomer.acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')
 
@@ -175,7 +194,7 @@ describe('recipient lock (one send to an address at a time, whichever contact re
     expect(release.filters).toEqual(
       expect.arrayContaining([
         { op: 'eq', column: 'client_id', value: 'client-1' },
-        { op: 'eq', column: 'conversation_id', value: 'mail-lock:to:amy@gmail.com' },
+        { op: 'eq', column: 'conversation_id', value: recipientLockKey('amy@gmail.com') },
         { op: 'eq', column: 'subject', value: token },
       ]),
     )
@@ -183,10 +202,8 @@ describe('recipient lock (one send to an address at a time, whichever contact re
 
   it('sweeps a stale address lock and surfaces a real insert failure, like the contact lock', async () => {
     await createMailNewStore().acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')
-    const sweep = state.deleted.find(
-      (d) => d.filters.some((f) => f.op === 'lt' && f.column === 'created_at') && d.filters.some((f) => f.column === 'conversation_id' && f.value === 'mail-lock:to:amy@gmail.com'),
-    )
-    expect(sweep).toBeDefined()
+    expect(sweepAgeMs(recipientLockKey('amy@gmail.com'))).toBeGreaterThan(290_000)
+    expect(sweepAgeMs(recipientLockKey('amy@gmail.com'))).toBeLessThan(310_000)
     state.insertError = { code: '08006', message: 'connection lost' }
     await expect(createMailNewStore().acquireRecipientLock('client-1', 'amy@gmail.com', 'lisa@cts.example')).rejects.toThrow('connection lost')
   })

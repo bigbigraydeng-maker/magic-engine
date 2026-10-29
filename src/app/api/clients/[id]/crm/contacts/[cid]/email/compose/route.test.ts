@@ -111,18 +111,19 @@ describe('POST email/compose', () => {
       expect(recordSendAttemptProd).toHaveBeenLastCalledWith(expect.objectContaining({ result: refused }))
     })
 
-    it('a crash mid-send is answered with a clear 503 and recorded as "unknown", never as failed', async () => {
+    it('an exception that did not come from the send itself (nothing left the building, no audit row) is answered 503 "not sent" and recorded as failed, never as unknown', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => undefined)
       ;(sendMailNew as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db exploded'))
       const res = await post({ ...fields, template })
       expect(res.status).toBe(503)
       const body = (await res.json()) as { error: string; reason: string }
       expect(body.reason).toBe('internal_error')
-      expect(body.error).toContain('不确定')
+      expect(body.error).toContain('没有发出')
+      expect(body.error).not.toContain('不确定')
       const call = (recordSendAttemptProd as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
         result: { ok: boolean; reason: string; meta: { templateKey: string; templateVersion: number; callBasis: string; blockDetail: string } }
       }
-      expect(call.result).toMatchObject({ ok: false, reason: 'send_unknown' })
+      expect(call.result).toMatchObject({ ok: false, reason: 'internal_error' })
       expect(call.result.meta).toMatchObject({ templateKey: 'post-call-single-tour', templateVersion: 3, callBasis: 'none', blockDetail: 'route_exception' })
     })
 
@@ -148,7 +149,9 @@ describe('POST email/compose', () => {
         ;(sendMailNew as ReturnType<typeof vi.fn>).mockRejectedValueOnce(crash(meta))
         const res = await post(fields)
         expect(res.status).toBe(503)
-        expect(((await res.json()) as { reason: string }).reason).toBe('internal_error')
+        const body = (await res.json()) as { reason: string; error: string }
+        expect(body.reason).toBe('internal_error')
+        expect(body.error).toContain('不确定') // the mail may have gone out: "do not send again", never "not sent"
         const call = recorded()
         expect(call.requestId).toBe(fields.requestId)
         expect(call.result).toMatchObject({ ok: false, status: 503, reason: 'send_unknown' })

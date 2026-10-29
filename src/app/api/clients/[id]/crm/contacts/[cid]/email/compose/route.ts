@@ -28,11 +28,13 @@ interface RouteParams {
 }
 
 const CRASH_MESSAGE = '系统出错了，这封邮件有没有发出去还不确定。请先到时间线确认，别重复发送。'
+const NOT_SENT_MESSAGE = '系统出错了，这封邮件没有发出。请稍后再试。'
 
 /**
- * 流程中途抛了异常：信可能已经发出，记成「状态不明」（后台会在 10 分钟后对账补一行结论），不记成失败。
- * 发送已经开始的异常（SendStartedError）自带回执要的信息，用模板写的和自己写的信都一样记；旧配置客户没有回执（null）。
- * 其余异常（发送流程之外）只有用模板写的信才记。
+ * 发送已经开始之后抛了异常（SendStartedError）：信可能已经发出，记成「状态不明」（后台会在 10 分钟后对账补一行结论），
+ * 不记成失败；它自带回执要的信息，用模板写的和自己写的信都一样记；旧配置客户没有回执（null）。
+ * 其余异常（sendMailNew 之外，例如建依赖时出错）：信一定没有发出，也没有审计行可对账——记成「失败」，不记「状态不明」
+ * （否则这条「不明」永远收不了口，还会让同一份模板对这位客人冷却拦着），且只有用模板写的信才记，和以前一样。
  */
 function crashResult(err: unknown, template: TemplateRequest | null): SendMailNewResult | null {
   if (err instanceof SendStartedError) {
@@ -41,7 +43,7 @@ function crashResult(err: unknown, template: TemplateRequest | null): SendMailNe
   }
   if (template === null) return null
   const meta = { ...emptyMeta(), templateKey: template.key, templateVersion: template.version, blockDetail: 'route_exception' }
-  return { ok: false, status: 503, reason: 'send_unknown', error: CRASH_MESSAGE, meta }
+  return { ok: false, status: 503, reason: 'internal_error', error: NOT_SENT_MESSAGE, meta }
 }
 
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
@@ -88,7 +90,8 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     console.error('[crm/email/compose] 发送流程抛出异常:', err instanceof Error ? err.message : err)
     const crash = crashResult(err, template)
     if (crash !== null) await recordSendAttemptProd({ ...record, result: crash })
-    return NextResponse.json({ error: CRASH_MESSAGE, reason: 'internal_error' }, { status: 503 })
+    const message = err instanceof SendStartedError ? CRASH_MESSAGE : NOT_SENT_MESSAGE
+    return NextResponse.json({ error: message, reason: 'internal_error' }, { status: 503 })
   }
 
   await recordSendAttemptProd({ ...record, result })

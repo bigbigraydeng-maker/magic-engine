@@ -43,11 +43,18 @@ const RESIDUE_PATTERNS: RegExp[] = [
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi
 // A URL ends at the first character that cannot be part of a URL: a Chinese full stop or the Chinese text after a
 // link is not "the path" (and a mail client does not link it either).
-const URL_CHARS = "A-Za-z0-9\\-._~:/?#@!$&*+,;=%\\[\\]"
+// A backslash counts as a URL character: a browser reads "\" as "/" in an http(s) link, so "https://www.example.com\tours\gone"
+// is the page /tours/gone. It is turned into "/" (normaliseLinkToken) before the link is checked.
+const URL_CHARS = "A-Za-z0-9\\-._~:/\\\\?#@!$&*+,;=%\\[\\]"
+// The first character after the scheme's slashes is never a slash, or "https://" said in passing would be a link with no host.
+const URL_FIRST_CHARS = "A-Za-z0-9\\-._~:?#@!$&*+,;=%\\[\\]"
 // A browser reads "https:/evil.com" and "https:\\evil.com" as "https://evil.com", and a hand-typed link can lose a slash by
 // accident: the scheme may be followed by any run of slashes or backslashes. It is normalised to "//" before the host is read.
-const URL_HTTP_RE = new RegExp(`https?:[\\\\/]+[${URL_CHARS}]+`, 'gi')
+const URL_HTTP_RE = new RegExp(`https?:[\\\\/]+[${URL_FIRST_CHARS}][${URL_CHARS}]*`, 'gi')
 const SCHEME_AND_SLASHES_RE = /^(https?):[\\/]+/i
+// Where a second link starts inside a token. Our token runs on through "," ";" "?" "=" and the like, so
+// "https://www.example.com/x,https://evil.com" is ONE token, but a mail client that starts a link at "://" shows two.
+const EMBEDDED_LINK_START_RE = new RegExp(`(?=https?:[\\\\/]+[${URL_FIRST_CHARS}])`, 'i')
 const URL_WWW_RE = new RegExp(`www\\.[${URL_CHARS}]+`, 'gi')
 // Bare domains are only recognised under the TLDs listed here: a list, not "anything with a dot", so ordinary
 // text ("e.g.", "10.30am", "Mr.Lee") is not flagged. Common English words that are also TLDs (it, in, at, no, so...) are left out.
@@ -121,6 +128,11 @@ function toFullUrl(candidate: string): string {
   return `https://${candidate}`
 }
 
+/** "https:/x" and "https:\\x" become "https://x"; a backslash anywhere else in the link is a "/" to a browser. */
+function normaliseLinkToken(token: string): string {
+  return token.replace(SCHEME_AND_SLASHES_RE, '$1://').replace(/\\/g, '/')
+}
+
 /**
  * The characters right after an authority-only link that a mail client or browser still reads as part of its HOST:
  * "https://www.example.co.nz.例え.com" is a link to 例え.com, not to example.co.nz, and "https://example.co.nz请看" has the
@@ -154,13 +166,15 @@ export function extractLinks(normalizedText: string): string[] {
   let rest = normalizedText
   for (const pattern of [URL_HTTP_RE, URL_WWW_RE]) {
     rest = rest.replace(new RegExp(pattern.source, pattern.flags), (match, offset: number, whole: string) => {
-      const token = match.replace(SCHEME_AND_SLASHES_RE, '$1://')
-      add(token + hostContinuation(token, whole.slice(offset + match.length)))
+      const after = whole.slice(offset + match.length)
+      // Every link that starts inside the token is a link of its own; only the last one is followed by the rest of the text.
+      const parts = match.split(EMBEDDED_LINK_START_RE).map(normaliseLinkToken)
+      parts.forEach((token, i) => add(i === parts.length - 1 ? token + hostContinuation(token, after) : token))
       return ' '
     })
   }
   rest = rest.replace(new RegExp(URL_IDN_HOST_RE.source, URL_IDN_HOST_RE.flags), (match) => {
-    add(match.replace(SCHEME_AND_SLASHES_RE, '$1://'))
+    add(normaliseLinkToken(match))
     return ' '
   })
   rest = rest.replace(new RegExp(WWW_IDN_HOST_RE.source, WWW_IDN_HOST_RE.flags), (match) => {

@@ -185,7 +185,11 @@ export class SendStartedError extends Error {
 interface Track {
   meta: SendMeta | null
   mailbox: string | null
-  /** Set the moment claimAndSend is entered: from there on a message may leave, so an exception no longer means "not sent". */
+  /**
+   * Set once the audit row exists (see claimAndSend): from there a draft is made and a message may leave, and the settle
+   * step has a row to find, so an exception no longer means "not sent". Before it nothing can have left and there is
+   * nothing to settle: an exception is a plain refusal.
+   */
   sendStarted: boolean
 }
 
@@ -475,9 +479,16 @@ async function sendUnderLock(args: LockedSend, deps: MailNewDeps): Promise<SendM
     if (!step.ok) return gateFailure(step)
     meta = step.meta
   }
-  args.track.sendStarted = true
   const sent = await claimAndSend(
-    { input, subject: args.subject, body: appendFooter(args.body, config.footer), requestId: args.requestId, to: args.to, mailbox: args.mailbox },
+    {
+      input,
+      subject: args.subject,
+      body: appendFooter(args.body, config.footer),
+      requestId: args.requestId,
+      to: args.to,
+      mailbox: args.mailbox,
+      track: args.track,
+    },
     deps,
   )
   return meta === undefined ? sent : { ...sent, meta }
@@ -496,6 +507,7 @@ interface SendPlan {
   requestId: string
   to: string
   mailbox: MailboxChoice
+  track: Track
 }
 
 /** 先写会话 + 审计，再碰 Graph。 */
@@ -508,11 +520,20 @@ async function claimAndSend(plan: SendPlan, deps: MailNewDeps): Promise<SendMail
   if (claim.kind === 'error') return fail(502, 'audit_failed', '系统暂时无法记录这次发送，请稍后重试。')
   const conversationId = claim.conversationId
 
-  const auditId = await store.insertAudit({ clientId: input.clientId, conversationId, sentByEmail: input.sentByEmail, body: plan.body, requestId })
+  let auditId: string | null
+  try {
+    auditId = await store.insertAudit({ clientId: input.clientId, conversationId, sentByEmail: input.sentByEmail, body: plan.body, requestId })
+  } catch (err) {
+    // Nothing was written but the empty claim and nothing was sent: take the claim back and let the caller refuse.
+    await store.discardConversation(conversationId).catch(() => undefined)
+    throw err
+  }
   if (!auditId) {
     await store.discardConversation(conversationId)
     return fail(502, 'audit_failed', '系统暂时无法记录这次发送，请稍后重试。')
   }
+  // From here a draft is made and a message may leave, and the audit row is what the settle step finds.
+  plan.track.sendStarted = true
 
   const draft = await graph.createDraft(mailbox.connectionId, { to: plan.to, subject: plan.subject, body: plan.body })
   if ('error' in draft) {

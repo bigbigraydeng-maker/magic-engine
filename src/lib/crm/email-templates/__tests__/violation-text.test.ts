@@ -40,6 +40,28 @@ describe('describeBlock', () => {
     expect(text).toContain('请先空一格')
   })
 
+  it('explains a host written with %-codes instead of printing the fixed word the gate uses for it', () => {
+    expect(describeBlock({ code: 'link_host_not_allowed', detail: 'encoded host' })).toBe('链接里的网站地址被编码过（带 % 的写法），不能发；请直接写网址。')
+  })
+
+  it('explains a page that is not on sale, with its path when it is known', () => {
+    expect(describeBlock({ code: 'tour_page_not_on_sale', detail: 'china/discovery/gone' })).toBe(
+      '这个链接指向的页面现在没有在售（已下架、售完，或不是已发布的页面）：china/discovery/gone',
+    )
+  })
+
+  it('and without echoing the English sentence when the page is not a published page at all', () => {
+    const text = describeBlock({ code: 'tour_page_not_on_sale', detail: 'unrecognised page under the tours section' })
+    expect(text).toBe('这个链接指向的页面现在没有在售（已下架、售完，或不是已发布的页面）')
+    expect(text).not.toContain('unrecognised')
+  })
+
+  it('explains a departure date that is not on sale', () => {
+    expect(describeBlock({ code: 'departure_not_on_sale', detail: 'china/discovery/essentials 2030-01-01' })).toBe(
+      '这个链接里的出发日期现在没有在售：china/discovery/essentials 2030-01-01',
+    )
+  })
+
   it('explains an insecure link', () => {
     expect(describeBlock({ code: 'link_not_https', detail: 'http://a.co.nz' })).toBe('链接要用 https 开头：http://a.co.nz')
   })

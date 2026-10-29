@@ -4,7 +4,7 @@
  * 设计稿：docs/specs/2026-10-21-crm-send-first-email-design-v0.md
  */
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/supabase'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
 import { createSendGatesProd } from '@/lib/crm/email-templates/send-gates-prod'
@@ -29,7 +29,9 @@ const GRAPH_TIMEOUT_MS = 15_000
 
 const lockKey = (contactId: string): string => `mail-lock:${contactId}`
 // A contact id is a uuid, so "to:" can never collide with a contact lock. conversations is unique on (client_id, conversation_id).
-const recipientLockKey = (recipient: string): string => `mail-lock:to:${recipient.trim().toLowerCase()}`
+// The address is hashed: a lock row that outlives a crashed request must not leave a guest's address lying in `conversations`.
+export const recipientLockKey = (recipient: string): string =>
+  `mail-lock:to:${createHash('sha256').update(recipient.trim().toLowerCase()).digest('hex')}`
 
 function metaPart(meta: string | null, kind: 'draft' | 'msg'): string | null {
   const m = new RegExp(`\\|${kind}:(.+)$`).exec(meta ?? '')

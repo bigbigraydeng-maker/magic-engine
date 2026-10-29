@@ -187,6 +187,45 @@ describe('tricks with the link itself', () => {
     expect(codes('Write it as https:/ or http:\\ in the box; the folder is C:\\temp\\notes.txt')).toEqual([])
   })
 
+  it('"https://" said in passing, or followed by a stray space, is not a link with an empty site name', () => {
+    expect(codes('Type https:// and then the address')).toEqual([])
+    expect(codes('Our website: https:// www.example.com/tours')).toEqual([])
+    const idn = check('官网 https://例え 请看').blocks.filter((b) => b.code === 'link_host_not_allowed')
+    expect(idn.map((b) => b.detail)).toEqual(['例え'])
+  })
+
+  // The token runs on through "," ";" "?" "=" and the like, so a second link glued to the first used to ride along inside it
+  // (the first link's host is allowed, the second one's is not). A mail client that starts a link at "://" shows two links.
+  it.each([
+    'Book here https://www.example.com/tours,https://evil.com/pay',
+    'Book here https://www.example.com/tours?ref=https://evil.com/pay',
+    'Book here https://www.example.com/tours;http://evil.com',
+    'Book here www.example.com/tours,https://evil.com/pay',
+    'Book here https:/www.example.com/tours,https://evil.com/pay',
+    'Book here https:\\www.example.com/x,https://evil.com',
+    'Book here https:///www.example.com/x;http://evil.com',
+  ])('a second link glued to the first one is a link of its own: %s', (text) => {
+    expect(check(text).blocks.some((b) => b.code === 'link_host_not_allowed' && b.detail === 'evil.com')).toBe(true)
+  })
+
+  it('a good link glued to another good link is still accepted', () => {
+    expect(codes('See https://www.example.com/tours,https://example.com/tours')).toEqual([])
+    expect(codes('See https://www.example.com/tours?ref=https://example.com/tours/china/discovery/essentials')).toEqual([])
+  })
+
+  // A browser reads "\" as "/" in an http(s) link, so these are the page /tours/china/discovery/gone.
+  it.each([
+    'See https://www.example.com\\tours\\china\\discovery\\gone',
+    'See https://www.example.com/tours\\china\\discovery\\gone',
+    'See https:\\\\www.example.com\\tours\\china\\discovery\\gone',
+  ])('a backslash in the path is read as a slash, so a taken-down tour page is still caught: %s', (text) => {
+    expect(codes(text)).toContain('tour_page_not_on_sale')
+  })
+
+  it('a good link written with backslashes is accepted like the normal one', () => {
+    expect(codes('See https://www.example.com\\tours\\china\\discovery\\essentials?date=2027-03-11')).toEqual([])
+  })
+
   it('a bare "www." in ordinary text is not a link', () => {
     expect(codes('Our site starts with www. and then the name')).toEqual([])
     expect(codes('Visit www.')).toEqual([])

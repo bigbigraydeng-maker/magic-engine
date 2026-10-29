@@ -176,6 +176,59 @@ describe('re-reading after the settings were saved', () => {
     expect(await screen.findByText('Post call')).toBeInTheDocument()
   })
 
+  it('a re-read that fails leaves the page as it is: the list stays and an open editor is not closed', async () => {
+    const r = routes({ [LIST]: [{ body: list() }, { status: 503, body: { error: '暂时读不到' } }] })
+    render(<TemplatesAdmin clientId="c1" />)
+    await screen.findByText('Post call')
+    fireEvent.click(screen.getByRole('button', { name: '新建模板' }))
+    expect(screen.getByTestId('editor')).toBeInTheDocument()
+    act(() => {
+      window.dispatchEvent(new Event(EMAIL_SETTINGS_SAVED_EVENT))
+    })
+    await waitFor(() => expect(r.of(LIST)).toHaveLength(2))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.getByTestId('editor')).toBeInTheDocument()
+    expect(screen.getByText('Post call')).toBeInTheDocument()
+    expect(screen.queryByText(/暂时读不到邮件模板/)).toBeNull()
+  })
+
+  it('a re-read that cannot even reach the server (network error) also leaves the page as it is', async () => {
+    const r = routes({ [LIST]: [{ body: list() }, new Error('offline')] })
+    render(<TemplatesAdmin clientId="c1" />)
+    await screen.findByText('Post call')
+    fireEvent.click(screen.getByRole('button', { name: '新建模板' }))
+    act(() => {
+      window.dispatchEvent(new Event(EMAIL_SETTINGS_SAVED_EVENT))
+    })
+    await waitFor(() => expect(r.of(LIST)).toHaveLength(2))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.getByTestId('editor')).toBeInTheDocument()
+    expect(screen.getByText('Post call')).toBeInTheDocument()
+    expect(screen.queryByText('网络出错')).toBeNull()
+  })
+
+  it('a re-read does not blank the list while it is running (no "加载中…" flash)', async () => {
+    let finish: (value: Response) => void = () => undefined
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve
+    })
+    const first = { ok: true, status: 200, json: async () => list() } as Response
+    const f = vi.fn().mockResolvedValueOnce(first).mockReturnValueOnce(pending)
+    vi.stubGlobal('fetch', f)
+    render(<TemplatesAdmin clientId="c1" />)
+    await screen.findByText('Post call')
+    act(() => {
+      window.dispatchEvent(new Event(EMAIL_SETTINGS_SAVED_EVENT))
+    })
+    await waitFor(() => expect(f).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText('加载中…')).toBeNull()
+    expect(screen.getByText('Post call')).toBeInTheDocument()
+    await act(async () => {
+      finish({ ok: true, status: 200, json: async () => list({ featureState: 'disabled' }) } as Response)
+    })
+    expect(await screen.findByText(/邮件功能现在是关着的/)).toBeInTheDocument()
+  })
+
   it('after unmount the event no longer triggers a read', async () => {
     const r = routes({ [LIST]: [{ body: list() }] })
     const view = render(<TemplatesAdmin clientId="c1" />)

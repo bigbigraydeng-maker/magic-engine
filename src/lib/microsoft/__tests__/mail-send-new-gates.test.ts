@@ -421,6 +421,44 @@ describe('an exception before the send starts is a refusal; once it has started 
     expect(f.store.releaseContactLock).toHaveBeenCalled()
   })
 
+  it('a claim that throws wrote nothing and sent nothing: a plain refusal (503, no SendStartedError), locks given back', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.store.claimConversation = vi.fn(dbDown)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(result.meta).toBeDefined()
+    expect(f.store.insertAudit).not.toHaveBeenCalled()
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+    expect(f.store.releaseRecipientLock).toHaveBeenCalledTimes(1)
+    expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('an audit insert that throws leaves no audit row and sends nothing: the empty claim is taken back and the attempt is refused, not "unknown"', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.store.insertAudit = vi.fn(dbDown)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(f.store.discardConversation).toHaveBeenCalledTimes(1)
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+    expect(f.graph.sendDraft).not.toHaveBeenCalled()
+    expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1)
+  })
+
+  it('an audit insert that throws still refuses (and does not hide the error) when taking the claim back fails too', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.store.insertAudit = vi.fn(dbDown)
+    f.store.discardConversation = vi.fn(dbDown)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
+    expect(f.graph.createDraft).not.toHaveBeenCalled()
+  })
+
   it('that exception arrives as a SendStartedError carrying the original error and the meta of the attempt (with the mailbox)', async () => {
     const f = makeFakes()
     withSettings(f, okSettings())
@@ -593,6 +631,24 @@ describe('one send to an address at a time (two contact records can share an add
     expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
     expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1)
     expect(f.graph.createDraft).not.toHaveBeenCalled()
+  })
+
+  it('a lock that cannot be given back is only logged: the mail that went out is still reported as sent', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.store.releaseRecipientLock = vi.fn(async () => {
+      throw new Error('release failed')
+    })
+    f.store.releaseContactLock = vi.fn(async () => {
+      throw new Error('release failed too')
+    })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const result = await sendMailNew(baseInput(), f.deps)
+    log.mockRestore()
+    expect(result.ok).toBe(true)
+    expect(f.store.releaseRecipientLock).toHaveBeenCalledTimes(1)
+    expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1) // the second release is still tried when the first one failed
   })
 
   it('legacy-config clients are covered too', async () => {

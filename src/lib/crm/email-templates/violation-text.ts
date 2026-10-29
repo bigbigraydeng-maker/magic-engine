@@ -29,6 +29,8 @@ export function describeBlock(violation: ViolationLike): string {
     case 'placeholder_left':
       return `还有没填完的地方：「${violation.detail}」。请填完，或连同括号一起去掉。`
     case 'link_host_not_allowed':
+      // The content gate reports a host written with %-codes under this fixed word instead of a site name.
+      if (violation.detail === 'encoded host') return '链接里的网站地址被编码过（带 % 的写法），不能发；请直接写网址。'
       return hasNonAscii(violation.detail)
         ? `链接指向的网站不在允许范围内：${violation.detail}。如果链接后面紧跟着文字，请先空一格。`
         : `链接指向的网站不在允许范围内：${violation.detail}。`
@@ -36,6 +38,11 @@ export function describeBlock(violation: ViolationLike): string {
       return `链接要用 https 开头：${violation.detail}`
     case 'link_userinfo':
       return `链接里不能带用户名或密码：${violation.detail}`
+    case 'tour_page_not_on_sale':
+      // The detail is a page path when the page is known, and a sentence in English when it is not a published page at all.
+      return `这个链接指向的页面现在没有在售（已下架、售完，或不是已发布的页面）${violation.detail.includes('/') ? `：${violation.detail}` : ''}`
+    case 'departure_not_on_sale':
+      return `这个链接里的出发日期现在没有在售：${violation.detail}`
     default:
       return violation.detail
   }
