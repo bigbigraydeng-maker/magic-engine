@@ -192,11 +192,19 @@ describe('compareNextAction —— hot 里一条规则：最近有动静的排�
     expect(compareNextAction(old, recent)).toBeGreaterThan(0)
   })
 
-  it('在等我们回的客人（replied）排在新客人前面，哪怕新客人更近（PM 2026-10-30）', () => {
+  it('在等我们回的 和 今天新客人 同一档，按最新动静排：更近的新客人在前（PM 2026-10-30）', () => {
     const a = { seg: seg('replied', { lastTouchAt: '2026-08-07T00:00:00.000Z' }), intent: null }
     const b = { seg: seg('new_untouched', { lastTouchAt: '2026-09-29T00:00:00.000Z' }), intent: null }
-    expect(compareNextAction(a, b)).toBeLessThan(0)
-    expect(compareNextAction(b, a)).toBeGreaterThan(0)
+    expect(compareNextAction(b, a)).toBeLessThan(0)
+    expect(compareNextAction(a, b)).toBeGreaterThan(0)
+  })
+
+  it('新客人（刚进线）排在很久前「点过链接/打过没接」前面（PM 2026-10-30）', () => {
+    const fresh = { seg: seg('new_untouched', { lastTouchAt: '2026-10-29T00:00:00.000Z' }), intent: null }
+    for (const other of ['clicked_link', 'retry_channel'] as const) {
+      const o = { seg: seg(other, { lastTouchAt: '2026-10-29T12:00:00.000Z' }), intent: null }
+      expect(compareNextAction(fresh, o)).toBeLessThan(0)
+    }
   })
 
   it('约好今天回电的永远在最前，哪怕很久没动静', () => {

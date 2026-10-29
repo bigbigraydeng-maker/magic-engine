@@ -584,7 +584,7 @@ export default function CrmAllContactsPage() {
   }
 
   // 「今天先联系」只有 4 列（⭐ / 客人 / 该做什么 / 联系渠道）；平铺名单是 6 列 + 自定义列。
-  const colCount = grouped ? 4 : 6 + columns.length
+  const colCount = grouped ? 5 : 6 + columns.length
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 

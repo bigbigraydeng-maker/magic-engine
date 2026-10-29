@@ -162,7 +162,7 @@ function recency(iso: string | null): number {
  * 「今天要联系」里，这个人落在哪一档（越小越靠前）。PM 2026-10-30 定，CTS 团队次日正式上线前的一次排序更新。
  *
  *   0 约好的回电时间到了（真约定，不是刚打完电话的提醒）—— 我们答应过的时间，最该先打。
- *   1 客人来消息了、在等我们回（replied，含回头客）—— 第二该处理，别让在等的人沉底。
+ *   1 在等我们回（replied / 回头客）和今天刚进线的新客人 —— 都是今天就得联系的，按最新动静排。
  *   2 新客人 / 点过我们邮件链接 / 打过没接要再试 —— 中间这一大段维持原来「最近有动静排前面」。
  *   3 刚通完电话、只差记一笔（afterCall）—— 用不着再外联，放最后，别占着最前面的位置
  *     （PM 2026-10-30：「记下一步」挤在最前面，把真正要联系的人压下去了）。
@@ -173,7 +173,9 @@ function recency(iso: string | null): number {
  */
 function hotTier(seg: SegmentResult): 0 | 1 | 2 | 3 {
   if (seg.segment === 'callback_due') return seg.afterCall === true ? 3 : 0
-  if (seg.segment === 'replied') return 1
+  // 在等我们回的（replied / 回头客）和今天刚进线的新客人并列最前，按最新动静排 ——
+  // 新线索凉得快，不能埋在回头客后面（PM 2026-10-30）。
+  if (seg.segment === 'replied' || seg.segment === 'new_untouched') return 1
   return 2
 }
 

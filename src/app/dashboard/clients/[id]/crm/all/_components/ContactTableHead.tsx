@@ -10,13 +10,14 @@ export function ContactTableHead(props: {
 }) {
   const { grouped, columns, sortArrow, onToggleSort } = props
   // 「今天先联系」只留三样：客人 / 该做什么 / 联系渠道（PM 2026-10-29：第一眼进来太懵）。
-  // 进线时间、最近联系、联系方式和自定义列都收进点开后的详情；要翻全部信息去「全部客人」。
+  // 进线时间保留在列表上（PM 2026-10-30：要一眼看出谁是今天刚进的）；最近联系、联系方式、自定义列仍收进详情。
   if (grouped) {
     return (
       <thead>
         <tr className="border-b border-me-charcoal/10 text-left text-xs text-me-charcoal/50">
           <th className="whitespace-nowrap px-2 py-2">⭐</th>
           <th className="whitespace-nowrap px-4 py-2">客人</th>
+          <th className="whitespace-nowrap px-4 py-2">进线</th>
           <th className="whitespace-nowrap px-4 py-2">该做什么</th>
           <th className="whitespace-nowrap px-4 py-2">联系渠道</th>
         </tr>
