@@ -7,7 +7,7 @@
 - **用途（PM 2026-10-29 定）**：已付款客人的**行前通知和预订确认**，服务类，不带促销。
 - **周期与钱**：官方写 4–6 周；ClickSend 公布价每个客户开通费 NZ$65–600、月费 NZ$65–350（4 / 5 / 6 位），最便宜的 6 位能不能给我们，要在申请里问。**实际以他们销售的报价为准**，报价到了发给我核对，你回「批」才确认付钱。
 - **现实提醒**：CTS 在 ME 里有 26 个有效订单，只有 9 个有手机号；最近的团 11/03 出发，短号码最快 12 月初才下来，赶不上；用得上的是 2027 年 3 月起的团。
-- **营销短信（PM 10-29 追加）**：发给明确同意收短信的潜在意向客户，短信带链接，点开后填表单或直达指定网页。**现在发不了**——官网和 Facebook 表单都没有「同意收短信」那一句。申请时一并问清：一个号码能不能两种用途都挂、要不要两个号码（营销类要「零费率」）、各自多少钱；先按服务类提交。
+- **营销短信（PM 10-29 追加，选了「放宽」口径）**：发给潜在意向客户（明确同意的人，加上最近咨询过、自己留过手机号的人），短信带链接，点开后填表单或直达指定网页。**发之前要先问清法务，并问 ClickSend 接不接受「默示同意」作为依据**；申请时同意依据**如实写**，不要写成「客人都勾选过同意」。申请时一并问清：一个号码能不能两种用途都挂、要不要两个号码（营销类要「零费率」）、各自多少钱；先按服务类提交。
 
 ## 2. 谁办、怎么办（what / how / href）
 1. **谁**：PM 或 CTS 负责人本人（要公司注册信息；我不能替你们开户，提交表单也要你们本人点头）。
@@ -23,8 +23,8 @@
 | 联系人 | [姓名、职务、邮箱、直线电话] |
 | 号码类型 | Dedicated short code, **standard rate** (transactional). Please confirm whether a 6-digit code is available to us. |
 | Use case | Transactional service messages to existing customers with a confirmed booking: pre-departure reminders and booking confirmations for CTS Tours guided China tours departing from New Zealand. No promotional content. |
-| Second use case (planned) | Marketing messages to prospective customers who have explicitly opted in (through CTS web enquiry forms and Facebook lead forms, with the consent recorded). Each message identifies CTS Tours, contains one link to a CTS Tours page or enquiry form, and a free opt-out (Reply STOP). Not live yet: consent capture is being added first. |
-| Questions for ClickSend | (1) Can one dedicated short code carry both transactional and marketing campaigns, or do we need two codes (standard-rate and zero-rated)? (2) Price for each option. (3) What opt-in proof do you need for the marketing campaign? (4) Is a "Reply to this SMS will be charged" line required on standard-rate messages? |
+| Second use case (planned) | Marketing messages to prospective customers: (a) people who have explicitly opted in, and (b) people who recently enquired with CTS Tours and gave us their mobile number themselves (we rely on inferred consent for messages related to their enquiry; to be confirmed with our legal adviser and with ClickSend). Each message identifies CTS Tours, says why the person is receiving it, contains one link to a CTS Tours page or enquiry form, and a free opt-out (Reply STOP). Not live yet. |
+| Questions for ClickSend | (1) Can one dedicated short code carry both transactional and marketing campaigns, or do we need two codes (standard-rate and zero-rated)? (2) Price for each option. (3) What opt-in proof do you need for the marketing campaign, and is inferred consent from a recent enquiry (the customer gave us their mobile number themselves) acceptable? (4) Is a "Reply to this SMS will be charged" line required on standard-rate messages? |
 | Who receives | Only customers who have a confirmed booking (deposit or full payment) and have given CTS their mobile number. |
 | Opt-in basis | Customers give CTS their mobile number when they enquire or book. CTS's privacy policy (https://www.ctstours.co.nz/privacy-policy) lists "booking confirmations, updates and travel documents" as a purpose and explains that customers can opt out by replying STOP to any SMS. [CTS to add to the booking confirmation: "We'll text you a short reminder before departure. Reply STOP to opt out." and keep a record of it.] |
 | Volume | [10–30] messages per month for now (about [9] customers currently have a mobile number on file), rising with 2027 departures. [PM to confirm] |
@@ -46,10 +46,11 @@
    - **怎么留记录**：首选让 ME 从已发送的订单确认邮件里自动认出这句话并记下（客人、时间、文本版本），不靠人手点；备选是 CRM 订单页手动勾选。具体放设计稿阶段 3。**这句话的原文改一个字，版本号就要变**，所以请先定稿再用。
 2. **已有订单怎么办**（26 个有效订单，他们收到的确认里没有这句，**不能倒填同意**）：建议下一封发给他们的邮件（如行前须知）里加这句，并请客人回复确认手机号；回复确认的才进行前短信名单。要不要这样做，PM / CTS 定。
 3. **下订单时必收手机号**。现在 26 个有效订单里只有 9 个在 ME 里有手机号，不补的话行前短信覆盖不到多少人。
-4. **（营销短信前）官网表单和 Facebook 表单加「同意收短信」一句并留记录**：参考英文 `Yes, text me tour offers from CTS Tours. I can reply STOP at any time to opt out.`。官网表单由官网仓库的窗口改；Facebook 表单要先通知广告总控窗口，不要自己改正在投的表单。没有这个，营销短信一条都不能发，ClickSend 也会要看证明。
+4. **（营销短信前）官网表单和 Facebook 表单加「同意收短信」一句并留记录**：参考英文 `Yes, text me tour offers from CTS Tours. I can reply STOP at any time to opt out.`。官网表单由官网仓库的窗口改；Facebook 表单要先通知广告总控窗口，不要自己改正在投的表单。放宽口径下这不是硬前提，但它是把「默示同意」换成「明确同意」的路，也是 ClickSend 要求证明时的退路。
 
 ## 6. 我没核实的
 - ClickSend 申请表格（Jotform）的具体字段：要开了账号才看得到，上面是按常见要求备的草稿。
 - 标准费率号码是否必须带「Reply to this SMS will be charged」；6 位号码是否会批给我们；每条短信的官方单价。
 - CTS 的法定名称、注册号、注册地址：ME 里没有，要你们提供。
 - 营销类短号码的具体要求（零费率号码是否要单独申请、是否要先给出同意采集的证明）：问 ClickSend。
+- 营销短信「放宽」口径（默示同意）：法律上站不站得住、ClickSend 接不接受，都要先问；申请表里同意依据必须如实写，不能写成「客人都勾选过同意」。
