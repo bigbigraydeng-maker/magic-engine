@@ -179,6 +179,25 @@ export interface TouchpointLike {
   outcome?: string | null
   travelWindow?: string | null
   callbackAt?: string | null
+  /**
+   * 通话分析从这通电话里读出的**客人表态**（`metadata.call_stance`；分析被人驳回时为 null）。
+   *
+   * 规则 6.5 用它：刚通完电话、客人亲口说「现在还没准备好 / 改天再说」或「不感兴趣」，
+   * 就不该再当「刚通完电话还没记下一步」挂在今天要联系里（PM 2026-10-29 Gavin Hall）。
+   */
+  callStance?: CallStance | null
+}
+
+/** 客人在电话里的表态：现在还没准备好（改天再说）/ 不感兴趣。 */
+export type CallStance = 'not_now' | 'not_interested'
+
+/** metadata → 表态。分析被人驳回过的不算数。今天名单 / 全部客人两个读模型共用这一份判据。 */
+export function callStanceFromMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+): CallStance | null {
+  if (!metadata || metadata.call_analysis_review === 'rejected') return null
+  const s = metadata.call_stance
+  return s === 'not_now' || s === 'not_interested' ? s : null
 }
 
 /**
@@ -514,6 +533,17 @@ export function latestIntentVerdict(tps: TouchpointLike[]): string | null {
     .filter((t) => t.outcome && INTENT_VERDICTS.has(t.outcome))
     .sort((a, b) => ts(b.occurredAt) - ts(a.occurredAt))[0]
   return latest?.outcome ?? null
+}
+
+/**
+ * 触发规则 6.5 的那通电话（最后一通人打的、接通的）上，客人的表态。
+ * 只看那一通：更早一通里说过「改天再说」，不代表最近这通也这么说。
+ */
+function latestCallStance(spokeCalls: TouchpointLike[], lastSpokeMs: number): CallStance | null {
+  const latest = spokeCalls.filter((t) => ts(t.occurredAt) === lastSpokeMs)
+  if (latest.some((t) => t.callStance === 'not_interested')) return 'not_interested'
+  if (latest.some((t) => t.callStance === 'not_now')) return 'not_now'
+  return null
 }
 
 export function isPhoneVerdict(
@@ -876,12 +906,10 @@ export function segmentContact(
   //      掉进先放着 —— 恰恰是最不该丢的人。只认**人打的**（`automated` 的 AI 外呼不算）、
   //      **通话是最后一次人出手**（之后有邮件 / 备注 / 再次拨出就算有人跟了）、没有未到期的回电约定。
   //      客人之后又来消息，规则 2 会接手；这里不重复。
-  const lastSpoke = Math.max(
-    0,
-    ...tps
-      .filter((t) => t.channel === 'phone' && t.direction === 'outbound' && !t.automated && t.outcome === 'spoke')
-      .map((t) => ts(t.occurredAt)),
+  const spokeCalls = tps.filter(
+    (t) => t.channel === 'phone' && t.direction === 'outbound' && !t.automated && t.outcome === 'spoke',
   )
+  const lastSpoke = Math.max(0, ...spokeCalls.map((t) => ts(t.occurredAt)))
   const hasFutureCallback = tps.some((t) => t.callbackAt && ts(t.callbackAt) > nowMs)
   if (
     lastSpoke > 0 &&
@@ -889,7 +917,18 @@ export function segmentContact(
     nowMs - lastSpoke <= AFTER_CALL_WINDOW_DAYS * 86_400_000 &&
     !hasFutureCallback
   ) {
-    return make('callback_due', `刚通完电话（${humanGap(nowMs - lastSpoke)}前），还没记下一步 —— 记一笔或发后续`, 'phone')
+    const ago = humanGap(nowMs - lastSpoke)
+    // 客人在这通电话里亲口说了「现在还没准备好 / 改天再说」或「不感兴趣」（通话分析读出、没被驳回）——
+    // 他不是热线索，今天别再打（PM 2026-10-29 Gavin Hall：37 秒，"I'm not ready for that.
+    // I'll talk to you another day."）。挪去先放着，过了这几天按原规则回到「聊过一轮就断了」。
+    const stance = latestCallStance(spokeCalls, lastSpoke)
+    if (stance === 'not_now') {
+      return make('nurture_future', `刚通完电话（${ago}前），客人说现在还没准备好 —— 先放着，过阵子再联系`, 'email')
+    }
+    if (stance === 'not_interested') {
+      return make('nurture_future', `刚通完电话（${ago}前），客人说不感兴趣 —— 先放着`, 'email')
+    }
+    return make('callback_due', `刚通完电话（${ago}前），还没记下一步 —— 记一笔或发后续`, 'phone')
   }
 
   // 7) 聊过一轮就断了、也没约下次 —— 温的，最该回头捞的一批。

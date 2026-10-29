@@ -27,6 +27,8 @@ const FACT_LABEL: Record<string, string> = {
   next_step: '约定的下一步',
   callback_time: '回电时间',
   do_not_contact: '要求别再联系',
+  not_ready_now: '客人说现在还没准备好',
+  not_interested: '客人说不感兴趣',
 }
 
 const STATUS_TEXT: Record<CallAnalysisData['reviewStatus'], string> = {

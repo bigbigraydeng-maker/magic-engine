@@ -20,8 +20,16 @@ export const FACT_KEYS = [
   'callback_time', // 约定回电时间
   'do_not_contact', // 客人要求别再联系
   'contact_email', // 通话中明确提供的邮箱（候选值，人工复核后才算数）
+  'not_ready_now', // 客人说现在还没准备好 / 改天再说 / 以后再说
+  'not_interested', // 客人明确说不感兴趣 / 不考虑
 ] as const
 export type FactKey = (typeof FACT_KEYS)[number]
+
+/**
+ * 客人在电话里对「现在要不要继续谈」的表态。CRM 分段靠它别把刚说过「改天再说」的人当热线索
+ * （PM 2026-10-29 Gavin Hall：37 秒通话，客人说 "I'm not ready for that. I'll talk to you another day."）。
+ */
+export const STANCE_FACT_KEYS: ReadonlySet<FactKey> = new Set<FactKey>(['not_ready_now', 'not_interested'])
 
 /** Version 2 adds sourced questions; completed version 1 analyses are not backfilled automatically. */
 export const ANALYSIS_SCHEMA_VERSION = 2
@@ -163,6 +171,8 @@ const QUESTION = /[?？]|什么意思|为什么|why\b|是什么/i
 function valueSupported(f: RawFact): boolean {
   if (f.key === 'do_not_contact') return NEGATION.test(f.quote) && !QUESTION.test(f.quote)
   if (f.key === 'contact_email') return f.speaker === 'customer' && emailSupported(f.value, f.quote)
+  // 表态必须是陈述句：「你现在还没准备好吗？」这种员工的问句不能当成客人的表态。
+  if (STANCE_FACT_KEYS.has(f.key)) return !QUESTION.test(f.quote)
   if (!NUMERIC_KEYS.has(f.key)) return true
   const need = [...numbersIn(f.value)]
   if (need.length === 0 || need.some((n) => n > 10_000_000)) return false

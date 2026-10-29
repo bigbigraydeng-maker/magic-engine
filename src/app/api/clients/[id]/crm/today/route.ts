@@ -26,6 +26,7 @@ import {
   type ContactLike,
   type Segment,
   engagementFromMetadata,
+  callStanceFromMetadata,
   isPhoneVerdict,
   isFailedReach,
   isUnansweredCall,
@@ -316,6 +317,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
             : t.metadata?.action === 'unsnooze'
               ? ('unsnooze' as const)
               : null,
+        // 通话分析读出的客人表态（改天再说 / 不感兴趣）—— 跟 contact-model 同一份判据（驳回的不算）。
+        callStance: callStanceFromMetadata(t.metadata),
       })),
       // 这个人实际能怎么被联系到 —— 决定「建议用哪个渠道」落在哪。
       // 私信能力看他有没有 messenger 触点（有触点就说明那条线是通的）。

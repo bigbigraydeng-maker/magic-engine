@@ -110,7 +110,7 @@ describe('分析：原话核验', () => {
   })
 })
 
-function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<AnalysisConnection>; transcribedToday?: number; markFails?: boolean } = {}) {
+function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<AnalysisConnection>; transcribedToday?: number; markFails?: boolean; stanceFails?: boolean } = {}) {
   const over2 = { transcribedToday: over.transcribedToday ?? 0 }
   const call: AnalysisCall = {
     id: 'call-row-1', clientId: 'client-1', connectionId: 'conn-1', provider: 'twilio', providerCallId: 'CA1', startedAt: '2026-10-12T11:37:24.000Z',
@@ -123,6 +123,7 @@ function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<Analysis
   const analyses: Array<{ callId: string; summary: string; facts: unknown[]; dropped: number }> = []
   const receipts: string[] = []
   const marks: string[] = []
+  const stances: string[] = []
   const store: AnalysisStore = {
     async getCall() { return call },
     async getConnection() { return conn },
@@ -145,8 +146,9 @@ function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<Analysis
     async countTranscribedSince() { return over2.transcribedToday },
     async saveAnalysis(r) { analyses.push({ callId: r.callId, summary: r.analysis.summary, facts: r.analysis.facts, dropped: r.analysis.droppedFacts }); return 'an-1' },
     async markTouchpoint(tp, _c, an) { if (over.markFails) throw new Error('boom'); marks.push(`${tp}:${an}`) },
+    async markCallStance(tp, _c, an, stance) { if (over.stanceFails) throw new Error('boom'); stances.push(`${tp}:${an}:${stance}`); return 'written' },
   }
-  return { store, call, files, transcripts, analyses, receipts, marks }
+  return { store, call, files, transcripts, analyses, receipts, marks, stances }
 }
 
 const ref = { clientId: 'client-1', provider: 'twilio', providerCallId: 'CA1' }
@@ -424,5 +426,59 @@ describe('口语数字与书面数字写法不同时，不许把正确摘要误�
       ref,
     )
     expect(s.analyses[0].summary).toBe('客人计划2027年3月20日出行。')
+  })
+})
+
+describe('客人在电话里说「现在还没准备好」→ 记到 CRM 触点（PM 2026-10-29 Gavin Hall）', () => {
+  const GAVIN = "I'm not ready for that. I'll talk to you another day."
+  const gavinDeps = (store: AnalysisStore, speaker: 'customer' | 'employee' = 'customer') => goodDeps(store, {
+    transcribe: async () => ({ text: `声道1：Hi, about the China tour. 声道2：${GAVIN}`, model: 'm-t' }),
+    analyze: async () => ({
+      raw: { summary: '客人表示尚未准备好，改日再谈', language: 'en', facts: [{ key: 'not_ready_now' as const, value: '客人说现在还没准备好', quote: GAVIN, confidence: 0.9, speaker }] },
+      model: 'm-a',
+    }),
+  })
+
+  it('客人说的、原话核验通过 → 标完触点后写上 not_now，并留回执', async () => {
+    const m = makeStore()
+    const r = await runCallAnalysis(gavinDeps(m.store), ref)
+    expect(r.status).toBe('done')
+    expect(m.marks).toEqual(['tp-1:an-1'])
+    expect(m.stances).toEqual(['tp-1:an-1:not_now'])
+    expect(m.receipts).toContain('call_stance:written')
+  })
+
+  it('员工说的 → 不写表态', async () => {
+    const m = makeStore()
+    await runCallAnalysis(gavinDeps(m.store, 'employee'), ref)
+    expect(m.stances).toEqual([])
+  })
+
+  it('没有表态事实的普通通话 → 不写', async () => {
+    const m = makeStore()
+    await runCallAnalysis(goodDeps(m.store), ref)
+    expect(m.stances).toEqual([])
+  })
+
+  it('标触点失败 → 不写表态（前提是触点已挂上这份分析）', async () => {
+    const m = makeStore({ markFails: true })
+    await runCallAnalysis(gavinDeps(m.store), ref)
+    expect(m.stances).toEqual([])
+  })
+
+  it('写表态失败 → 只记回执，分析照样算完成', async () => {
+    const m = makeStore({ stanceFails: true })
+    const r = await runCallAnalysis(gavinDeps(m.store), ref)
+    expect(r.status).toBe('done')
+    expect(m.receipts).toContain('call_stance:failed')
+  })
+
+  it('分析早已存在（可能已被复核 / 驳回）→ 状态修复时不重写表态', async () => {
+    const m = makeStore({ call: { summaryStatus: 'not_started', transcriptStatus: 'done', recordingStatus: 'downloaded' } })
+    m.transcripts.set('call-row-1', `声道2：${GAVIN}`)
+    m.analyses.push({ callId: 'call-row-1', summary: 'x', facts: [], dropped: 0 })
+    await runCallAnalysis(gavinDeps(m.store), ref)
+    expect(m.marks).toEqual(['tp-1:an-1'])
+    expect(m.stances).toEqual([])
   })
 })

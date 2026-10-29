@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { mirrorReviewToTouchpoints } from '@/lib/telephony/transcribe/call-stance'
 
 /**
  * PATCH /api/clients/[id]/crm/call-analyses/[aid]
@@ -57,6 +58,9 @@ export async function PATCH(
     return NextResponse.json({ error: '操作失败' }, { status: 500 })
   }
   if (!data) return NextResponse.json({ error: '分析不存在' }, { status: 404 })
+
+  // 驳回的分析，CRM 不能再按它的「客人说现在还没准备好」把人挪去先放着 —— 状态同步到触点上。
+  await mirrorReviewToTouchpoints({ clientId, analysisId: aid, review })
 
   return NextResponse.json({ reviewStatus: review })
 }
