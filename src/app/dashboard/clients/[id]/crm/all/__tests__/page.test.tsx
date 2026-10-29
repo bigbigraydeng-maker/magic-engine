@@ -747,8 +747,7 @@ describe('阶段变更那一行 · 谁判的 + 凭什么', () => {
     setUrl('?contact=c1')
     render(<CrmAllContactsPage />)
 
-    // 往来原文默认折叠（48af83a88，AI 概况卡那次改的）—— 阶段变更行在折叠段里，先点开
-    fireEvent.click(await screen.findByText(/看完整往来原文/))
+    // 往来只有一条：全部直接摆出来（超过 5 条才折叠，且那时的按钮写「看更早的往来」）
     await waitFor(() => expect(screen.getByText(/系统读往来记录判的/)).toBeTruthy())
     // 🔴 这一条是重点：`ai:conversation-read` 一个字都不许出现在屏幕上
     expect(screen.queryByText(/ai:conversation-read/)).toBeNull()
@@ -760,7 +759,6 @@ describe('阶段变更那一行 · 谁判的 + 凭什么', () => {
     setUrl('?contact=c1')
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/看完整往来原文/))
     await waitFor(() => expect(screen.getByText(/客户对旅游信息感兴趣/)).toBeTruthy())
     // 客人自己说的那句话是最硬的凭据，必须留着
     expect(document.body.textContent).toContain('Hello! I filled out your form')
@@ -773,7 +771,6 @@ describe('阶段变更那一行 · 谁判的 + 凭什么', () => {
     setUrl('?contact=c1')
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/看完整往来原文/))
     await waitFor(() => expect(screen.getByText(/info 改的/)).toBeTruthy())
     // 生产上真人改的那 12 条 note 全是空的 —— 人不解释自己，界面也别编一个理由出来
     expect(document.body.textContent).not.toContain('系统读往来记录判的')

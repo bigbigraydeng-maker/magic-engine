@@ -603,11 +603,31 @@ describe('可折叠：默认收起，点开才铺原文（客人抽屉用）', (
       touch({ summary: `第${i + 1}通电话`, at: `2026-08-${String(10 + i).padStart(2, '0')}T00:00:00Z` }),
     )
 
-  it('条数不多：最近几条直接露出，按钮仍写「看完整往来原文（N 条）」', async () => {
+  /**
+   * 🔴 PM 2026-10-29：抽屉里只有 4 条往来，下面却有个「看完整往来原文（4 条）」，
+   * 点了页面不变 —— 因为这 4 条早就全摆在眼前了，没有更多可展开。
+   * 没有更多可看，就不放展开按钮。
+   */
+  it('🔴 条数不多（≤5）：全部直接摆出来，没有更多可展开 → 不放展开按钮', async () => {
     mockTimeline([touch({ summary: '第一通电话' }), touch({ summary: '第二通电话', at: '2026-08-11T00:00:00Z' })])
     drawCollapsible()
-    await waitFor(() => expect(screen.getByText(/看完整往来原文（2 条）/)).toBeTruthy())
-    expect(screen.getByText('第一通电话')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('第一通电话')).toBeTruthy())
+    expect(screen.getByText('第二通电话')).toBeTruthy()
+    expect(screen.queryByText(/看完整往来原文|看更早的往来|收起往来原文/)).toBeNull()
+  })
+
+  it('刚好 5 条也全摆出来不放按钮；6 条才开始折叠最早的 1 条', async () => {
+    mockTimeline(many(5))
+    const five = drawCollapsible()
+    await waitFor(() => expect(screen.getByText('第1通电话')).toBeTruthy())
+    expect(screen.queryByText(/看完整往来原文|看更早的往来|收起往来原文/)).toBeNull()
+    five.unmount()
+
+    mockTimeline(many(6))
+    drawCollapsible()
+    await waitFor(() => expect(screen.getByText(/看更早的往来（还有 1 条）/)).toBeTruthy())
+    expect(screen.queryByText('第1通电话')).toBeNull()
+    expect(screen.getByText('第6通电话')).toBeTruthy()
   })
 
   it('条数多：只露最近 5 条，更早的折起来，按钮写还有几条', async () => {
@@ -630,18 +650,19 @@ describe('可折叠：默认收起，点开才铺原文（客人抽屉用）', (
   })
 
   it('🔴 展开后 refreshKey 变了（回了一条消息）→ 重新取数，且仍保持展开', async () => {
-    mockTimeline([touch({ summary: '旧的一条' })])
+    mockTimeline(many(7))
     const view = drawCollapsible({ refreshKey: 0 })
-    fireEvent.click(await screen.findByText(/看完整往来原文/))
-    expect(screen.getByText('旧的一条')).toBeTruthy()
+    fireEvent.click(await screen.findByText(/看更早的往来/))
+    expect(screen.getByText('第1通电话')).toBeTruthy()
 
     // 发完消息后服务端多了一条
-    mockTimeline([touch({ summary: '旧的一条' }), touch({ summary: '刚发的一条', at: '2026-08-12T00:00:00Z' })])
+    mockTimeline([...many(7), touch({ summary: '刚发的一条', at: '2026-08-20T00:00:00Z' })])
     view.rerender(<ContactTimeline clientId="cts" contactId="c1" collapsible refreshKey={1} />)
 
     await waitFor(() => expect(screen.getByText('刚发的一条')).toBeTruthy())
-    // 没缩回折叠按钮那一行
-    expect(screen.queryByText(/看完整往来原文|看更早的往来/)).toBeNull()
+    // 仍保持展开：最早那条还在，没缩回折叠按钮那一行
+    expect(screen.getByText('第1通电话')).toBeTruthy()
+    expect(screen.queryByText(/看更早的往来/)).toBeNull()
   })
 
   it('不传 collapsible → 照旧整条铺开（其它页面不受影响）', async () => {

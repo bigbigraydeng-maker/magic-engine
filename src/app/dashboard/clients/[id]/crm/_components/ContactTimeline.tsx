@@ -648,7 +648,11 @@ export function ContactTimeline({
     return <Placeholder loading={loading} err={err} onRetry={retry} />
   }
 
-  if (collapsible && !expanded) {
+  // 条数不超过折叠时露出的条数：全部已经摆在眼前，没有更多可展开 —— 再放一个展开按钮，
+  // 点了页面不变（PM 2026-10-29：「点击看完整往来原文，页面无反应」）。
+  const hasEarlier = data.timeline.length > RECENT_WHEN_COLLAPSED
+
+  if (collapsible && !expanded && hasEarlier) {
     // 折叠时仍露出最近几条：员工要看「他最近说了什么 / 我们回了什么」，不该只剩一行按钮。
     // PM 2026-10-28：打开抽屉看不到过往记录。更早的才折起来。
     const recent = data.timeline.slice(-RECENT_WHEN_COLLAPSED)
@@ -663,7 +667,7 @@ export function ContactTimeline({
           onClick={() => setExpanded(true)}
           className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-2 text-[13px] font-bold text-me-charcoal/70 hover:bg-me-ivory"
         >
-          {earlier > 0 ? `看更早的往来（还有 ${earlier} 条）` : `看完整往来原文（${data.timeline.length} 条）`}
+          {`看更早的往来（还有 ${earlier} 条）`}
           <span aria-hidden>▾</span>
         </button>
       </div>
@@ -700,7 +704,7 @@ export function ContactTimeline({
           </p>
         )}
       </div>
-      {collapsible && expanded && (
+      {collapsible && expanded && hasEarlier && (
         <button
           type="button"
           onClick={() => setExpanded(false)}
