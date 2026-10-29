@@ -130,42 +130,85 @@ describe('internal staff records', () => {
 })
 
 describe('phone calls feed the draft (PM 2026-10-29: drafts must follow up what was said on the call)', () => {
+  const fact = (key: string, value: string, quote: string, speaker = 'employee') => ({ key, value, quote, speaker })
   beforeEach(() => {
     tables.telephony_calls = [{ id: 'call1', started_at: '2026-10-29T03:32:53Z', direction: 'outbound' }]
     tables.telephony_call_analyses = [
       {
         call_id: 'call1',
-        summary: 'Shanghai tour; next year; send catalogue',
         review_status: 'pending_review',
+        schema_version: 2,
         facts: [
-          { key: 'destination_or_tour', value: 'Shanghai tour', quote: 'in March for the Shanghai tour', speaker: 'employee' },
-          { key: 'next_step', value: 'send catalogue', quote: "I'll send you a full catalog with all the options.", speaker: 'employee' },
+          fact('destination_or_tour', 'Shanghai tour', 'in March for the Shanghai tour'),
+          fact('next_step', 'send catalogue', "I'll send you a full catalog with all the options."),
         ],
       },
     ]
-    tables.telephony_transcripts = [{ call_id: 'call1', body: 'Hi Chris, thanks for picking up' }]
+    tables.telephony_transcripts = [{ call_id: 'call1', body: 'Channel 1: we can do $4,990 for you' }]
   })
 
-  it('call summary, who-said-what facts and the latest transcript reach the model, client-scoped', async () => {
+  async function draftInput() {
     askJson.mockResolvedValueOnce({ data: { subject: 's', body: 'b' }, provider: 'openai', model: 'm' })
-    await generateFirstEmailDraft('c1', 'p1')
-    const arg = askJson.mock.calls[0][0] as { user: string; system: string }
-    expect(arg.user).toContain('we called the customer')
-    expect(arg.user).toContain('Acme Tours staff said: "I\'ll send you a full catalog')
-    expect(arg.user).toContain('Transcript (start of call): Hi Chris')
-    expect(arg.system).toContain('PHONE CALLS')
-    for (const t of ['telephony_calls', 'telephony_call_analyses', 'telephony_transcripts']) {
-      expect(eqCalls).toContainEqual([t, 'client_id', 'c1'])
-    }
+    const r = await generateFirstEmailDraft('c1', 'p1')
+    return { r, arg: askJson.mock.calls[0]?.[0] as { user: string; system: string } | undefined }
+  }
+
+  it('who-said-what call points reach the model, scoped to this client AND this customer', async () => {
+    const { arg } = await draftInput()
+    expect(arg?.user).toContain('we called the customer')
+    expect(arg?.user).toContain('Acme Tours staff said: "I\'ll send you a full catalog')
+    expect(arg?.system).toContain('PHONE CALLS')
+    expect(eqCalls).toContainEqual(['telephony_calls', 'client_id', 'c1'])
+    expect(eqCalls).toContainEqual(['telephony_calls', 'contact_id', 'p1'])
+    expect(eqCalls).toContainEqual(['telephony_call_analyses', 'client_id', 'c1'])
   })
 
-  it('a rejected analysis is never shown to the model', async () => {
+  it('🔴 unreviewed points are labelled UNCONFIRMED and the prompt forbids stating them (table rule: pending_review is not fact)', async () => {
+    const { arg } = await draftInput()
+    expect(arg?.user).toContain('UNCONFIRMED')
+    expect(arg?.user).not.toContain('CONFIRMED by staff')
+    expect(arg?.system).toContain('UNCONFIRMED may contain listening mistakes: never state them')
+  })
+
+  it('confirmed analysis is labelled CONFIRMED', async () => {
+    ;(tables.telephony_call_analyses as Array<Record<string, unknown>>)[0].review_status = 'confirmed'
+    const { arg } = await draftInput()
+    expect(arg?.user).toContain('CONFIRMED by staff')
+  })
+
+  it('🔴 the raw transcript (speakers unlabelled, staff prices) never reaches the model', async () => {
+    const { arg } = await draftInput()
+    expect(arg?.user).not.toContain('4,990')
+    expect(arg?.user).not.toContain('Channel 1')
+  })
+
+  it('🔴 a rejected analysis drops the whole call', async () => {
     ;(tables.telephony_call_analyses as Array<Record<string, unknown>>)[0].review_status = 'rejected'
-    delete tables.telephony_transcripts
-    askJson.mockResolvedValueOnce({ data: { subject: 's', body: 'b' }, provider: 'openai', model: 'm' })
-    await generateFirstEmailDraft('c1', 'p1')
-    const arg = askJson.mock.calls[0][0] as { user: string }
-    expect(arg.user).not.toContain('Phone calls')
-    expect(arg.user).not.toContain('full catalog')
+    const { arg } = await draftInput()
+    expect(arg?.user).not.toContain('Phone calls')
+    expect(arg?.user).not.toContain('full catalog')
+  })
+
+  it('🔴 newest analysis version wins: v2 rejected must not fall back to an older v1', async () => {
+    tables.telephony_call_analyses = [
+      { call_id: 'call1', review_status: 'rejected', schema_version: 2, facts: [fact('next_step', 'x', 'v2 quote')] },
+      { call_id: 'call1', review_status: 'pending_review', schema_version: 1, facts: [fact('next_step', 'y', 'v1 quote')] },
+    ]
+    const { arg } = await draftInput()
+    expect(arg?.user).not.toContain('v1 quote')
+  })
+
+  it('🔴 customer asked not to be contacted on the call → no draft, model never called', async () => {
+    ;(tables.telephony_call_analyses as Array<Record<string, unknown>>)[0].facts = [fact('do_not_contact', 'yes', 'please stop calling me', 'customer')]
+    const { r } = await draftInput()
+    expect(r).toMatchObject({ ok: false, reason: 'call_dnc' })
+    expect(askJson).not.toHaveBeenCalled()
+  })
+
+  it('at most 8 points per call reach the model', async () => {
+    ;(tables.telephony_call_analyses as Array<Record<string, unknown>>)[0].facts = Array.from({ length: 12 }, (_, n) => fact('concern', `c${n}`, `quote number ${n}`))
+    const { arg } = await draftInput()
+    expect(arg?.user).toContain('quote number 7')
+    expect(arg?.user).not.toContain('quote number 8')
   })
 })

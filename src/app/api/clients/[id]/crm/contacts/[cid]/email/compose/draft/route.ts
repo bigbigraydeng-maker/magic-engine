@@ -39,7 +39,7 @@ export async function POST(_req: NextRequest, { params }: RouteParams): Promise<
 
   const result = await generateFirstEmailDraft(params.id, params.cid)
   if (!result.ok) {
-    const status = result.reason === 'contact_not_found' ? 404 : 502
+    const status = result.reason === 'contact_not_found' ? 404 : result.reason === 'call_dnc' ? 409 : 502
     return NextResponse.json({ error: result.message, reason: result.reason }, { status })
   }
   return NextResponse.json({ subject: result.draft.subject, body: result.draft.body })
