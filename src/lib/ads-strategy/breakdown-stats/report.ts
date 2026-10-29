@@ -227,6 +227,23 @@ function buildWeekday(
   return flagRows(rows)
 }
 
+/** One row per calendar day (newest first). Spend comes from the hourly rows of that stat_date, leads from CRM by local date. */
+function buildDay(
+  stats: readonly StatInput[],
+  leads: readonly LeadInput[],
+): ReportRow[] {
+  const map = groupByKey(stats, (s) => s.stat_date, () => 0)
+  const leadCounts = new Map<string, number>()
+  for (const l of leads) leadCounts.set(l.local_date, (leadCounts.get(l.local_date) ?? 0) + 1)
+  const dates = new Set<string>([...map.keys(), ...leadCounts.keys()])
+  const rows: FlagInput[] = [...dates].sort().reverse().map((date) => {
+    const acc = map.get(date) ?? emptyAcc()
+    return { key: date, spend: acc.spend, impressions: acc.impressions, clicks: acc.clicks, leads: leadCounts.get(date) ?? 0 }
+  })
+  // A single day is too noisy to call costly or cheap: keep the numbers, drop the verdict.
+  return flagRows(rows).map((r) => ({ ...r, expectedLeads: null, flag: null }))
+}
+
 function buildPlacement(stats: readonly StatInput[]): ReportRow[] {
   const map = groupByKey(
     stats,
@@ -372,6 +389,7 @@ export function buildBreakdownReport(input: {
     nonLeadSpend: buildNonLeadSpend(placementDevice.filter((s) => !isLeadObjective(s, objectives)), objectives),
     hour: buildHour(hourStats, leads),
     weekday: buildWeekday(weekdayStats, leads),
+    day: buildDay(weekdayStats, leads),
     placement: buildPlacement(placementStats),
     device: buildDevice(deviceStats),
     ageGender: buildAgeGender(ageGenderStats),

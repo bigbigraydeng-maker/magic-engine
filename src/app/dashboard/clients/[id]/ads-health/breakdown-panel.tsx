@@ -57,6 +57,18 @@ function weekdayLabel(key: string): string {
   return WEEKDAYS[n - 1] ?? key
 }
 
+function dayLabel(key: string): string {
+  const n = isoWeekdayOf(key)
+  return n === null ? key : `${key.slice(5)} ${WEEKDAYS[n - 1]}`
+}
+
+function isoWeekdayOf(date: string): number | null {
+  const d = new Date(`${date}T00:00:00Z`)
+  if (Number.isNaN(d.getTime())) return null
+  const day = d.getUTCDay()
+  return day === 0 ? 7 : day
+}
+
 function hourLabel(key: string): string {
   const n = Number(key)
   return Number.isFinite(n) ? `${String(n).padStart(2, '0')}:00` : key
@@ -342,6 +354,9 @@ export default function BreakdownPanel({ clientId }: { clientId: string }) {
           </Section>
           <Section title="按星期" note="进线按客户系统里的提交时间算。">
             <RowTable rows={report.weekday} cur={cur} label={weekdayLabel} />
+          </Section>
+          <Section title="按天" note="每天的花费来自当天每小时数据加总，进线按客户系统里的提交时间算；单独一天样本太少，不打「偏贵/偏便宜」。">
+            <RowTable rows={report.day} cur={cur} label={dayLabel} />
           </Section>
           <Section title="版位" note="留资是 Meta 自己报的（客户系统里没有这些信息），只算最后一下的功劳。">
             <BreakdownTable rows={report.placement} cur={cur} />
