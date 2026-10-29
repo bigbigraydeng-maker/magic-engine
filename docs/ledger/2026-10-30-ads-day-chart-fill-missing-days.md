@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-30
 done_on: 2026-10-30
-done_ref: pr:PRNUM
+done_ref: pr:3413
 source: session:90a50c3b
 verify_how: 合并部署后，PM 在「多维数据」→「按天」→「柱状图」里，10 月上旬和 10 月下旬之间能看到没投表单广告的那些天是空的（花费 0），走势图在那段是断开的，不再把两段接在一起
 ---
