@@ -10,6 +10,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAll } from '@/lib/supabase-paginate'
 import { CRON_REGISTRY, type CronOutputTable } from './registry'
 import { unhealthyJobs, type JobHealth, type JobHealthInput } from './schedule'
 
@@ -105,6 +106,14 @@ const STUCK_AFTER_MS = 60 * 60 * 1000
  */
 const STUCK_WINDOW_MS = 48 * 60 * 60 * 1000
 
+/**
+ * 「最近一次运行」批量查询的回看窗口。
+ *
+ * 3 天足够覆盖所有日更及更勤的任务；周更/月更任务落不进窗口，会走各自的
+ * 单任务索引查询兜底（见 latestRunsByJob），所以窗口小不会漏判。
+ */
+const WINDOW_MS = 3 * 24 * 60 * 60 * 1000
+
 /** 一个服务在窗口里卡死的汇总（一个服务一条，不是一条记录一条）。 */
 export interface StuckService {
   service: string
@@ -116,34 +125,6 @@ export interface StuckService {
   rounds: number
 }
 
-/**
- * 每个任务各查一次「最近一次运行」。
- *
- * 🔴 不能用「拉最近 N 条再分组」那种写法(首版就是,当场翻车)：
- *    高频任务两周能写 4400 条,窗口全被它们占满,周更任务的记录根本进不来 ——
- *    于是一批一直在跑的任务被判成「从来没跑过」。
- *    **误报一旦成为常态,真出事那天也会被当噪音划掉。**
- *
- * 40 个各查一条带索引的小查询,并发跑,代价远低于误报。
- */
-async function lastRunByJob(supabase: SupabaseClient, jobNames: string[]): Promise<Map<string, Date>> {
-  const out = new Map<string, Date>()
-  const results = await Promise.all(
-    jobNames.map(async (name) => {
-      const { data } = await supabase
-        .from('cron_run_logs')
-        .select('started_at')
-        .eq('job_name', name)
-        .order('started_at', { ascending: false })
-        .limit(1)
-      const row = (data ?? [])[0] as { started_at: string } | undefined
-      return [name, row ? new Date(row.started_at) : null] as const
-    }),
-  )
-  for (const [name, at] of results) if (at) out.set(name, at)
-  return out
-}
-
 interface LastOutcome {
   status: string
   error: string | null
@@ -151,32 +132,86 @@ interface LastOutcome {
   finishedAt: string | null
 }
 
-/** 每个任务**最近一次**的结果 —— 只有最后一次失败才算「现在是坏的」。 */
-async function lastOutcome(
+interface RunRow {
+  job_name: string
+  status: string
+  error_message: string | null
+  started_at: string
+  finished_at: string | null
+}
+
+function toLastOutcome(r: RunRow): LastOutcome {
+  return { status: r.status, error: r.error_message, startedAt: r.started_at, finishedAt: r.finished_at }
+}
+
+/** 单任务兜底：走 `(job_name, started_at DESC)` 复合索引，取最近一条。 */
+async function latestRunForJob(supabase: SupabaseClient, name: string): Promise<LastOutcome | null> {
+  const { data } = await supabase
+    .from('cron_run_logs')
+    .select('job_name, status, error_message, started_at, finished_at')
+    .eq('job_name', name)
+    .order('started_at', { ascending: false })
+    .limit(1)
+  const r = (data ?? [])[0] as RunRow | undefined
+  return r ? toLastOutcome(r) : null
+}
+
+/**
+ * 每个任务**最近一次**的结果 —— 只有最后一次失败才算「现在是坏的」。
+ *
+ * 🔴 不能用「拉最近 N 条再分组」那种写法(首版就是,当场翻车)：
+ *    高频任务两周能写 4400 条,窗口全被它们占满,周更任务的记录根本进不来 ——
+ *    于是一批一直在跑的任务被判成「从来没跑过」。
+ *    **误报一旦成为常态,真出事那天也会被当噪音划掉。**
+ *
+ * 现在的做法：一次分页查询拉回 `WINDOW_MS` 窗口内所有任务的运行记录（按
+ * `started_at` 倒序，所以每个 job_name 第一次出现的那行就是它窗口内的最近一次），
+ * 窗口里没出现的任务（周更/月更/已停摆）再各自走一次带索引的单任务查询兜底。
+ * 窗口查询因此不会像「全局拉最近 N 条」那样被高频任务挤占 —— 挤不进来的任务
+ * 有自己的兜底路径，答案跟逐任务查询完全一致。
+ *
+ * 窗口查询报错时，退回**全部**任务逐条查：宁可慢，也不返回半份 map。
+ */
+async function latestRunsByJob(
   supabase: SupabaseClient,
   jobNames: string[],
+  now: Date,
 ): Promise<Map<string, LastOutcome>> {
   const out = new Map<string, LastOutcome>()
-  const rows = await Promise.all(
-    jobNames.map(async (name) => {
-      const { data } = await supabase
-        .from('cron_run_logs')
-        .select('status, error_message, started_at, finished_at')
-        .eq('job_name', name)
-        .order('started_at', { ascending: false })
-        .limit(1)
-      const r = (data ?? [])[0] as
-        | { status: string; error_message: string | null; started_at: string; finished_at: string | null }
-        | undefined
-      return [
-        name,
-        r
-          ? { status: r.status, error: r.error_message, startedAt: r.started_at, finishedAt: r.finished_at }
-          : null,
-      ] as const
-    }),
-  )
-  for (const [name, v] of rows) if (v) out.set(name, v)
+  if (jobNames.length === 0) return out
+
+  const sinceIso = new Date(now.getTime() - WINDOW_MS).toISOString()
+  let windowRows: RunRow[] | null = null
+  try {
+    const rows = await fetchAll<RunRow>(
+      (from, to) =>
+        supabase
+          .from('cron_run_logs')
+          .select('job_name, status, error_message, started_at, finished_at')
+          .in('job_name', jobNames)
+          .gte('started_at', sinceIso)
+          .order('started_at', { ascending: false })
+          .range(from, to),
+      20_000,
+    )
+    windowRows = rows
+  } catch (e) {
+    console.error(
+      `[cron-health] 批量查最近运行失败，退回逐任务查询: ${e instanceof Error ? e.message : String(e)}`,
+    )
+    windowRows = null
+  }
+
+  if (windowRows) {
+    // 倒序返回：每个 job 第一次出现即窗口内最近一次，后面的行忽略
+    for (const r of windowRows) {
+      if (!out.has(r.job_name)) out.set(r.job_name, toLastOutcome(r))
+    }
+  }
+
+  const missing = windowRows ? jobNames.filter((n) => !out.has(n)) : jobNames
+  const fallback = await Promise.all(missing.map(async (name) => [name, await latestRunForJob(supabase, name)] as const))
+  for (const [name, v] of fallback) if (v) out.set(name, v)
   return out
 }
 
@@ -262,6 +297,59 @@ async function stuckByService(
   const found = await Promise.all(
     CRON_REGISTRY.map(async (e) => collapseStuckRuns(e.service, await prober(e.jobName, sinceIso), now)),
   )
+  return found.filter((s): s is StuckService => s !== null)
+}
+
+interface StuckRow {
+  job_name: string
+  status: string
+  started_at: string
+  finished_at: string | null
+}
+
+/**
+ * 跟 `stuckByService` 同语义，但只发**一次**分页查询：把窗口内所有任务的
+ * `running` 孤儿行一次拉回，再按 job_name 分组喂给 `collapseStuckRuns`。
+ *
+ * 判据（`isStuck`）和聚合方式（按服务、取最早那轮）一个字不改 —— 只是把
+ * 「一任务一查」换成「一次查完再分组」。查询报错时打一行日志并返回 []，
+ * 跟旧 prober 的行为一致（查不了不能当成「没有卡死」，但也不能让体检整体挂掉）。
+ */
+async function stuckByServiceBatch(supabase: SupabaseClient, now: Date): Promise<StuckService[]> {
+  const jobNames = Array.from(new Set(CRON_REGISTRY.map((e) => e.jobName)))
+  if (jobNames.length === 0) return []
+  const sinceIso = new Date(now.getTime() - STUCK_WINDOW_MS).toISOString()
+
+  let rows: StuckRow[]
+  try {
+    rows = await fetchAll<StuckRow>(
+      (from, to) =>
+        supabase
+          .from('cron_run_logs')
+          .select('job_name, status, started_at, finished_at')
+          .in('job_name', jobNames)
+          .eq('status', 'running')
+          .is('finished_at', null)
+          .gte('started_at', sinceIso)
+          .order('started_at', { ascending: true })
+          .range(from, to),
+      5_000,
+    )
+  } catch (e) {
+    console.error(
+      `[cron-health] 批量查卡死记录失败: ${e instanceof Error ? e.message : String(e)}`,
+    )
+    return []
+  }
+
+  const byJob = new Map<string, StuckRunRow[]>()
+  for (const r of rows) {
+    const list = byJob.get(r.job_name) ?? []
+    list.push({ status: r.status, startedAt: r.started_at, finishedAt: r.finished_at })
+    byJob.set(r.job_name, list)
+  }
+
+  const found = CRON_REGISTRY.map((e) => collapseStuckRuns(e.service, byJob.get(e.jobName) ?? [], now))
   return found.filter((s): s is StuckService => s !== null)
 }
 
@@ -450,24 +538,26 @@ export async function checkCronHealth(
   now: Date = new Date(),
 ): Promise<HealthReport> {
   const names = Array.from(new Set(CRON_REGISTRY.map((e) => e.jobName)))
-  const [lastRun, outcomes, silentSuccess, stuck] = await Promise.all([
-    lastRunByJob(supabase, names),
-    lastOutcome(supabase, names),
+  const [outcomes, silentSuccess, stuck] = await Promise.all([
+    latestRunsByJob(supabase, names, now),
     // 卡死判定用主干那份（48 小时窗口全量扫、按服务汇总），本分支原来那版
     // 「只看回退 60 分钟后最新一条」已删 —— 主干那份同样修掉小时级任务的盲点，
     // 还额外接住「卡死被下一轮成功掩埋」那种形态。
     checkDownstreamFreshness(makeSupabaseProber(supabase), now, makeSupabaseRunActivityReader(supabase)),
-    stuckByService(makeSupabaseStuckProber(supabase), now),
+    stuckByServiceBatch(supabase, now),
   ])
 
-  const inputs: JobHealthInput[] = CRON_REGISTRY.map((e) => ({
-    service: e.service,
-    jobName: e.jobName,
-    schedule: e.schedule,
-    logsRuns: e.logsRuns,
-    lastRunAt: lastRun.get(e.jobName) ?? null,
-    registeredAt: e.addedAt ? new Date(`${e.addedAt}T00:00:00Z`) : null,
-  }))
+  const inputs: JobHealthInput[] = CRON_REGISTRY.map((e) => {
+    const outcome = outcomes.get(e.jobName)
+    return {
+      service: e.service,
+      jobName: e.jobName,
+      schedule: e.schedule,
+      logsRuns: e.logsRuns,
+      lastRunAt: outcome ? new Date(outcome.startedAt) : null,
+      registeredAt: e.addedAt ? new Date(`${e.addedAt}T00:00:00Z`) : null,
+    }
+  })
 
   const bad = unhealthyJobs(inputs, now)
 
