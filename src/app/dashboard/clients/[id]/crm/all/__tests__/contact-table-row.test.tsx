@@ -213,3 +213,15 @@ describe('「今天先联系」每行只留三样：名字 / 一句话原因 / �
     expect(screen.queryByTestId('channel-cell')).toBeNull()
   })
 })
+
+describe('📞 刚聊过标签（PM 2026-10-29：打完电话，这个人该标成正热着）', () => {
+  it('刚打通聊上 → 名字旁出现「📞 刚聊过」', () => {
+    renderRow(makeRow({ afterCall: true, reason: '刚通完电话（不到 1 小时前），还没记下一步' }))
+    expect(screen.getByTestId('after-call-tag').textContent).toContain('刚聊过')
+  })
+
+  it('没有这个标记 → 不画', () => {
+    renderRow(makeRow())
+    expect(screen.queryByTestId('after-call-tag')).toBeNull()
+  })
+})

@@ -258,6 +258,11 @@ export interface SegmentResult {
    * （`returning-lead.ts`），列表排序和抽屉展示共用。只在 `segment === 'replied'` 时才有。
    */
   returning?: ReturningLead | null
+  /**
+   * 「刚聊过」：我们刚打通电话聊上了，之后还没人记下一步（规则 6.5）。
+   * 动作就不该再是「打给他」—— 是「记下一步」（PM 2026-10-29，Chris Anthony）。只在这一条规则里为 true。
+   */
+  afterCall?: boolean
   /** 一句人话，告诉销售为什么这个人在今天的名单上。 */
   reason: string
   /**
@@ -361,6 +366,8 @@ const HANDOFF_AFTER_DAYS = 3
 
 /** 真人刚通完一通电话、还没记下一步的人，留在「今天要联系」多久（天）。 */
 const AFTER_CALL_WINDOW_DAYS = 3
+/** 第一次咨询距这通电话超过这么多天，就算「老客人重新聊热」。 */
+const REHEATED_MIN_DAYS = 14
 
 /**
  * 「进线了但从没人联系过」超过这个天数，就不再算「新客人」。
@@ -889,7 +896,16 @@ export function segmentContact(
     nowMs - lastSpoke <= AFTER_CALL_WINDOW_DAYS * 86_400_000 &&
     !hasFutureCallback
   ) {
-    return make('callback_due', `刚通完电话（${humanGap(nowMs - lastSpoke)}前），还没记下一步 —— 记一笔或发后续`, 'phone')
+    // 老客人被这通电话重新聊热了，要说出来（PM 2026-10-29：Chris Anthony 22 天前留的资料，今天才聊上）。
+    const firstInbound = Math.min(
+      ...messages.filter((t) => t.direction === 'inbound').map((t) => ts(t.occurredAt)).filter((v) => v > 0),
+    )
+    const ageDays = Number.isFinite(firstInbound) ? Math.floor((lastSpoke - firstInbound) / 86_400_000) : 0
+    const old = ageDays >= REHEATED_MIN_DAYS ? `老客人（${ageDays} 天前就咨询过）重新聊热了，` : ''
+    return {
+      ...make('callback_due', `刚通完电话（${humanGap(nowMs - lastSpoke)}前），${old}还没记下一步 —— 记一笔或发后续`, 'phone'),
+      afterCall: true,
+    }
   }
 
   // 7) 聊过一轮就断了、也没约下次 —— 温的，最该回头捞的一批。

@@ -69,15 +69,13 @@ describe('extractCustomColumns · tour_interest', () => {
 })
 
 describe('visibleCustomColumns · 数据驱动', () => {
-  it('任一联系人有值 → 显示这列', () => {
+  it('「感兴趣的团」有值也不进横表（PM 2026-10-29：FB 表单随手点的，不是最终选择）', () => {
     const per = [
       { tour_interest: null },
       { tour_interest: 'Best of China' },
       { tour_interest: null },
     ]
-    const cols = visibleCustomColumns(per)
-    expect(cols.map((c) => c.key)).toContain('tour_interest')
-    expect(cols.find((c) => c.key === 'tour_interest')?.label).toBe('感兴趣的团')
+    expect(visibleCustomColumns(per)).toEqual([])
   })
 
   it('全客户都没值 → 这列隐藏（别的客户默认不显示）', () => {

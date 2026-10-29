@@ -416,7 +416,7 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
   const icon = CHANNEL_ICON[e.channel ?? ''] ?? '•'
   const name = CHANNEL_NAME[e.channel ?? ''] ?? e.channel ?? '接触'
   const chips = [
-    e.tour && `想去：${humanizeFormCode(e.tour) ?? e.tour}`,
+    e.tour && `广告表单里点过：${humanizeFormCode(e.tour) ?? e.tour}`,
     e.travelWindow && `${e.travelWindow} 走`,
     e.competitor && `提到 ${e.competitor}`,
     e.callbackAt && '约了回电',

@@ -25,7 +25,7 @@ export type IntentLevel = 'high' | 'medium' | 'low' | 'unknown'
 export const INTENT_LEVELS: readonly IntentLevel[] = ['high', 'medium', 'low', 'unknown']
 
 export type NextActionList = 'hot' | 'cold'
-export type NextActionVerb = 'reply' | 'call' | 'system_watching' | 'hold' | 'do_not_contact'
+export type NextActionVerb = 'reply' | 'call' | 'follow_up' | 'system_watching' | 'hold' | 'do_not_contact'
 
 export interface NextAction {
   list: NextActionList
@@ -61,6 +61,7 @@ export const LIST_META: Record<NextActionList, { title: string; hint: string }> 
 export const VERB_LABEL: Record<NextActionVerb, string> = {
   reply: '回他',
   call: '打给他',
+  follow_up: '记下一步',
   system_watching: '系统盯着',
   hold: '先别打',
   do_not_contact: '不联系',
@@ -112,8 +113,11 @@ export function verbOf(
   segment: Segment,
   channel: SegmentResult['suggestedChannel'],
   list: NextActionList,
+  afterCall = false,
 ): NextActionVerb {
   if (segment === 'excluded') return 'do_not_contact'
+  // 刚打通聊上了 —— 再写「打给他」是让人再打一遍（PM 2026-10-29）。
+  if (afterCall) return 'follow_up'
   // 没有这一行会落到最后的 `return 'reply'`，名单上就会出现自相矛盾的
   // 「回他 —— 看着不是客人来咨询（供应商系统通知）」（子牙复审 P1-1）。
   if (segment === 'not_enquiry_suspect') return 'do_not_contact'
@@ -132,7 +136,7 @@ export function nextActionFor(input: {
 }): NextAction {
   const { seg, intent, aiNextAction } = input
   const list = listOf(seg.segment, intent)
-  const verb = verbOf(seg.segment, seg.suggestedChannel, list)
+  const verb = verbOf(seg.segment, seg.suggestedChannel, list, seg.afterCall === true)
   const verbLabel = VERB_LABEL[verb]
   const reason = seg.reason
   const trimmed = typeof aiNextAction === 'string' ? aiNextAction.trim() : ''

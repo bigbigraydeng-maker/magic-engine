@@ -57,6 +57,8 @@ export interface ContactRow {
     ourContacts: number
     earlierForms: number
   } | null
+  /** 我们刚打通电话聊上了、还没记下一步（`segments.ts` 规则 6.5）。缺省 = 不是。 */
+  afterCall?: boolean
   /**
    * 这条线索当前分给谁跟进（`client_portal_users.email`）。null = 未分配。
    * part 2 的 round-robin 自动写入；part 3 UI 让人手动改（issue #3158）。
