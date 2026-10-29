@@ -128,3 +128,44 @@ describe('internal staff records', () => {
     expect(out).toContain('INTERNAL staff record')
   })
 })
+
+describe('phone calls feed the draft (PM 2026-10-29: drafts must follow up what was said on the call)', () => {
+  beforeEach(() => {
+    tables.telephony_calls = [{ id: 'call1', started_at: '2026-10-29T03:32:53Z', direction: 'outbound' }]
+    tables.telephony_call_analyses = [
+      {
+        call_id: 'call1',
+        summary: 'Shanghai tour; next year; send catalogue',
+        review_status: 'pending_review',
+        facts: [
+          { key: 'destination_or_tour', value: 'Shanghai tour', quote: 'in March for the Shanghai tour', speaker: 'employee' },
+          { key: 'next_step', value: 'send catalogue', quote: "I'll send you a full catalog with all the options.", speaker: 'employee' },
+        ],
+      },
+    ]
+    tables.telephony_transcripts = [{ call_id: 'call1', body: 'Hi Chris, thanks for picking up' }]
+  })
+
+  it('call summary, who-said-what facts and the latest transcript reach the model, client-scoped', async () => {
+    askJson.mockResolvedValueOnce({ data: { subject: 's', body: 'b' }, provider: 'openai', model: 'm' })
+    await generateFirstEmailDraft('c1', 'p1')
+    const arg = askJson.mock.calls[0][0] as { user: string; system: string }
+    expect(arg.user).toContain('we called the customer')
+    expect(arg.user).toContain('Acme Tours staff said: "I\'ll send you a full catalog')
+    expect(arg.user).toContain('Transcript (start of call): Hi Chris')
+    expect(arg.system).toContain('PHONE CALLS')
+    for (const t of ['telephony_calls', 'telephony_call_analyses', 'telephony_transcripts']) {
+      expect(eqCalls).toContainEqual([t, 'client_id', 'c1'])
+    }
+  })
+
+  it('a rejected analysis is never shown to the model', async () => {
+    ;(tables.telephony_call_analyses as Array<Record<string, unknown>>)[0].review_status = 'rejected'
+    delete tables.telephony_transcripts
+    askJson.mockResolvedValueOnce({ data: { subject: 's', body: 'b' }, provider: 'openai', model: 'm' })
+    await generateFirstEmailDraft('c1', 'p1')
+    const arg = askJson.mock.calls[0][0] as { user: string }
+    expect(arg.user).not.toContain('Phone calls')
+    expect(arg.user).not.toContain('full catalog')
+  })
+})
