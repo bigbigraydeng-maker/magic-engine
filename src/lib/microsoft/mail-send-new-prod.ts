@@ -208,7 +208,8 @@ export function createMailNewStore(): MailNewStore {
       return !error
     },
     async discardConversation(conversationId) {
-      // 已有审计行引用它时删不掉，那就留着（/email 路由只认有入站消息的会话，不会误判有线程）。
+      // 审计行（conversation_outbound_log）对会话是 ON DELETE CASCADE：删会话会把它的审计行一起删掉，
+      // 所以「失败」的审计行不会留下，失败的记录以回执为准。
       await db.from('conversations').delete().eq('id', conversationId)
     },
     async recordSent({ clientId, contactId, conversationId, messageId, sentByEmail, body }) {

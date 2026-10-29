@@ -166,11 +166,13 @@ describe('POST email/compose', () => {
         expect(recorded().result.meta).toMatchObject({ templateVersion: 3, catalogVersion: 7, callBasis: 'staff_attested', finalSha256: 'a'.repeat(64), blockDetail: 'route_exception' })
       })
 
-      it('a client without versioned settings gets no receipt (as before), still a clear 503', async () => {
+      it('a client without versioned settings gets no receipt (as before), still a clear 503 that says the mail MAY have gone out', async () => {
         vi.spyOn(console, 'error').mockImplementation(() => undefined)
         ;(sendMailNew as ReturnType<typeof vi.fn>).mockRejectedValueOnce(crash(null))
         const res = await post(fields)
         expect(res.status).toBe(503)
+        // no receipt does not mean nothing was sent: the staff member must still be told not to send again
+        expect(((await res.json()) as { error: string }).error).toContain('不确定')
         expect(recordSendAttemptProd).not.toHaveBeenCalled()
       })
     })

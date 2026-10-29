@@ -535,7 +535,11 @@ async function claimAndSend(plan: SendPlan, deps: MailNewDeps): Promise<SendMail
   // From here a draft is made and a message may leave, and the audit row is what the settle step finds.
   plan.track.sendStarted = true
 
-  const draft = await graph.createDraft(mailbox.connectionId, { to: plan.to, subject: plan.subject, body: plan.body })
+  // A draft is not a send: a createDraft that throws (rather than answering with an error) still sent nothing, and an
+  // "unknown" for it could never be settled (the audit row has no draft id to look up).
+  const draft = await graph
+    .createDraft(mailbox.connectionId, { to: plan.to, subject: plan.subject, body: plan.body })
+    .catch((err: unknown) => ({ error: err instanceof Error ? err.message : String(err) }))
   if ('error' in draft) {
     await store.patchAudit(auditId, { status: 'failed', errorMessage: draft.error })
     await store.discardConversation(conversationId)

@@ -229,6 +229,33 @@ describe('re-reading after the settings were saved', () => {
     expect(await screen.findByText(/邮件功能现在是关着的/)).toBeInTheDocument()
   })
 
+  it('a re-read that comes back 200 but unreadable (a proxy or maintenance page) leaves the page as it is', async () => {
+    const r = routes({ [LIST]: [{ body: list() }, { body: { html: 'maintenance' } }] })
+    render(<TemplatesAdmin clientId="c1" />)
+    await screen.findByText('Post call')
+    fireEvent.click(screen.getByRole('button', { name: '新建模板' }))
+    act(() => {
+      window.dispatchEvent(new Event(EMAIL_SETTINGS_SAVED_EVENT))
+    })
+    await waitFor(() => expect(r.of(LIST)).toHaveLength(2))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.getByTestId('editor')).toBeInTheDocument()
+    expect(screen.getByText('Post call')).toBeInTheDocument()
+    expect(screen.queryByText('返回的数据看不懂')).toBeNull()
+  })
+
+  it('after a first read that failed, a re-read that works clears the error box and shows the list', async () => {
+    const r = routes({ [LIST]: [{ status: 503, body: { error: '暂时读不到' } }, { body: list() }] })
+    render(<TemplatesAdmin clientId="c1" />)
+    expect(await screen.findByText(/暂时读不到邮件模板/)).toBeInTheDocument()
+    act(() => {
+      window.dispatchEvent(new Event(EMAIL_SETTINGS_SAVED_EVENT))
+    })
+    await waitFor(() => expect(r.of(LIST)).toHaveLength(2))
+    expect(await screen.findByText('Post call')).toBeInTheDocument()
+    expect(screen.queryByText(/暂时读不到邮件模板/)).toBeNull()
+  })
+
   it('after unmount the event no longer triggers a read', async () => {
     const r = routes({ [LIST]: [{ body: list() }] })
     const view = render(<TemplatesAdmin clientId="c1" />)

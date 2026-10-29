@@ -414,7 +414,7 @@ describe('an exception before the send starts is a refusal; once it has started 
     const f = makeFakes()
     withSettings(f, okSettings())
     f.deps.gates = stubGates(f)
-    f.graph.createDraft = vi.fn(async () => {
+    f.graph.sendDraft = vi.fn(async () => {
       throw new Error('graph exploded')
     })
     await expect(sendMailNew(baseInput(), f.deps)).rejects.toThrow('graph exploded')
@@ -448,15 +448,41 @@ describe('an exception before the send starts is a refusal; once it has started 
     expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1)
   })
 
-  it('an audit insert that throws still refuses (and does not hide the error) when taking the claim back fails too', async () => {
+  it('an audit insert that throws still refuses, and it is THAT error that is reported, when taking the claim back fails too', async () => {
     const f = makeFakes()
     withSettings(f, okSettings())
     f.deps.gates = stubGates(f)
-    f.store.insertAudit = vi.fn(dbDown)
-    f.store.discardConversation = vi.fn(dbDown)
+    f.store.insertAudit = vi.fn(async (): Promise<never> => {
+      throw new Error('insert failed')
+    })
+    f.store.discardConversation = vi.fn(async (): Promise<never> => {
+      throw new Error('discard failed')
+    })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const result = await sendMailNew(baseInput(), f.deps)
+    const reported = log.mock.calls.map((c) => c.join(' ')).join('\n')
+    log.mockRestore()
     expect(result).toMatchObject({ ok: false, status: 503, reason: 'internal_error' })
     expect(f.graph.createDraft).not.toHaveBeenCalled()
+    expect(reported).toContain('insert failed')
+    expect(reported).not.toContain('discard failed')
+  })
+
+  it('a draft that cannot be made by an exception sent nothing: refused as graph_failed (failed), the claim is taken back, sendDraft never called', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    f.graph.createDraft = vi.fn(async (): Promise<never> => {
+      throw new Error('graph exploded')
+    })
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result).toMatchObject({ ok: false, status: 502, reason: 'graph_failed' })
+    expect(result.meta).toBeDefined()
+    expect(f.graph.sendDraft).not.toHaveBeenCalled()
+    expect(f.store.discardConversation).toHaveBeenCalledTimes(1)
+    expect(f.store.patchAudit).toHaveBeenCalledWith('audit-1', expect.objectContaining({ status: 'failed', errorMessage: 'graph exploded' }))
+    expect(f.store.releaseRecipientLock).toHaveBeenCalledTimes(1)
+    expect(f.store.releaseContactLock).toHaveBeenCalledTimes(1)
   })
 
   it('that exception arrives as a SendStartedError carrying the original error and the meta of the attempt (with the mailbox)', async () => {
@@ -464,7 +490,7 @@ describe('an exception before the send starts is a refusal; once it has started 
     withSettings(f, okSettings())
     f.deps.gates = stubGates(f)
     const boom = new Error('graph exploded')
-    f.graph.createDraft = vi.fn(async () => {
+    f.graph.sendDraft = vi.fn(async () => {
       throw boom
     })
     const caught = await sendMailNew(baseInput(), f.deps).catch((e: unknown) => e)
@@ -476,7 +502,7 @@ describe('an exception before the send starts is a refusal; once it has started 
 
   it('a legacy-config client gets the same error with no meta (no receipts for them, as before)', async () => {
     const f = makeFakes({ leadsConfig: ENABLED })
-    f.graph.createDraft = vi.fn(async () => {
+    f.graph.sendDraft = vi.fn(async () => {
       throw new Error('graph exploded')
     })
     const caught = await sendMailNew(baseInput(), f.deps).catch((e: unknown) => e)

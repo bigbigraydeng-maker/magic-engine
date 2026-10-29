@@ -54,7 +54,10 @@ const URL_HTTP_RE = new RegExp(`https?:[\\\\/]+[${URL_FIRST_CHARS}][${URL_CHARS}
 const SCHEME_AND_SLASHES_RE = /^(https?):[\\/]+/i
 // Where a second link starts inside a token. Our token runs on through "," ";" "?" "=" and the like, so
 // "https://www.example.com/x,https://evil.com" is ONE token, but a mail client that starts a link at "://" shows two.
-const EMBEDDED_LINK_START_RE = new RegExp(`(?=https?:[\\\\/]+[${URL_FIRST_CHARS}])`, 'i')
+// A scheme at the very END of the token counts too: the host behind it may be in another script ("…,https://例え.jp"), which
+// stops our ASCII token right after the slashes.
+const EMBEDDED_LINK_START_RE = new RegExp(`(?=https?:[\\\\/]+(?:[${URL_FIRST_CHARS}]|$))`, 'i')
+const BARE_SCHEME_RE = /^https?:\/\/$/i
 const URL_WWW_RE = new RegExp(`www\\.[${URL_CHARS}]+`, 'gi')
 // Bare domains are only recognised under the TLDs listed here: a list, not "anything with a dot", so ordinary
 // text ("e.g.", "10.30am", "Mr.Lee") is not flagged. Common English words that are also TLDs (it, in, at, no, so...) are left out.
@@ -63,7 +66,7 @@ const BARE_TLDS =
   'de|fr|es|nl|ru|top|club|vip|cc|tv|ws|mobi|pro|tw|vn|ph|br|mx|ch|se|dk|fi|pl|cz|tr|ae|za|ie|pt|gr|hu|ro|ua|il|' +
   'tech|art|fun|live|life|world|today|click|cloud|website|space|host|work|ltd|group|agency|news|email|ga|tk|ml|cf|gq|pw|su|zip|mov'
 const BARE_DOMAIN_RE = new RegExp(
-  `(?<![a-z0-9@./-])(?:[a-z0-9-]+\\.)+(?:${BARE_TLDS})(?![a-z0-9-])(?:[/?#][${URL_CHARS}]*)?`,
+  `(?<![a-z0-9@./-])(?:[a-z0-9-]+\\.)+(?:${BARE_TLDS})(?![a-z0-9-])(?:[/\\\\?#][${URL_CHARS}]*)?`,
   'gi',
 )
 
@@ -156,7 +159,8 @@ export function extractLinks(normalizedText: string): string[] {
   const out: string[] = []
   const add = (candidate: string): void => {
     const cleaned = stripTrailingPunct(candidate)
-    if (cleaned === '') return
+    // A scheme with nothing behind it ("https://" said in passing, or the cut-off start of a link) is not a link.
+    if (cleaned === '' || BARE_SCHEME_RE.test(cleaned)) return
     const full = toFullUrl(cleaned)
     if (seen.has(full)) return
     seen.add(full)
@@ -170,6 +174,12 @@ export function extractLinks(normalizedText: string): string[] {
       // Every link that starts inside the token is a link of its own; only the last one is followed by the rest of the text.
       const parts = match.split(EMBEDDED_LINK_START_RE).map(normaliseLinkToken)
       parts.forEach((token, i) => add(i === parts.length - 1 ? token + hostContinuation(token, after) : token))
+      // ...and a client that does not split the string opens whatever the WHOLE string points to ("…/essentials/https://x/../gone"):
+      // that is a link too.
+      if (parts.length > 1) {
+        const whole = normaliseLinkToken(match)
+        add(whole + hostContinuation(whole, after))
+      }
       return ' '
     })
   }
@@ -183,7 +193,7 @@ export function extractLinks(normalizedText: string): string[] {
   })
   rest = rest.replace(EMAIL_RE, ' ')
   for (const match of rest.matchAll(new RegExp(BARE_DOMAIN_RE.source, BARE_DOMAIN_RE.flags))) {
-    add(match[0] + hostContinuation(match[0], rest.slice((match.index ?? 0) + match[0].length)))
+    add(normaliseLinkToken(match[0]) + hostContinuation(match[0], rest.slice((match.index ?? 0) + match[0].length)))
   }
   return out
 }
@@ -247,7 +257,7 @@ function checkLinks(
     const checked: RenderFacts = { ...facts, linkHosts: facts.linkHosts ?? settings.guardrails.allowedLinkHosts }
     const providerViolations: LinkViolation[] = provider.checkLinks(urls, checked)
     for (const v of providerViolations) {
-      out.push({ code: v.code, detail: v.detail })
+      out.push({ code: v.code, detail: v.detail, url: v.url })
     }
   }
   return out

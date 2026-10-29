@@ -1,6 +1,8 @@
 export interface ViolationLike {
   code: string
   detail: string
+  /** The link the violation is about, when the gate knows it. */
+  url?: string
 }
 
 function hasNonAscii(text: string): boolean {
@@ -24,6 +26,11 @@ export function describeMissing(name: string): string {
   return `还缺：${name}`
 }
 
+// With two links in a mail, "which one" is the first thing the staff member needs to know.
+function linkNote(violation: ViolationLike): string {
+  return violation.url ? `（链接：${violation.url}）` : ''
+}
+
 export function describeBlock(violation: ViolationLike): string {
   switch (violation.code) {
     case 'placeholder_left':
@@ -31,6 +38,7 @@ export function describeBlock(violation: ViolationLike): string {
     case 'link_host_not_allowed':
       // The content gate reports a host written with %-codes under this fixed word instead of a site name.
       if (violation.detail === 'encoded host') return '链接里的网站地址被编码过（带 % 的写法），不能发；请直接写网址。'
+      if (violation.detail === '') return '链接里没写网站地址，请补上完整网址，或把它去掉。'
       return hasNonAscii(violation.detail)
         ? `链接指向的网站不在允许范围内：${violation.detail}。如果链接后面紧跟着文字，请先空一格。`
         : `链接指向的网站不在允许范围内：${violation.detail}。`
@@ -40,9 +48,9 @@ export function describeBlock(violation: ViolationLike): string {
       return `链接里不能带用户名或密码：${violation.detail}`
     case 'tour_page_not_on_sale':
       // The detail is a page path when the page is known, and a sentence in English when it is not a published page at all.
-      return `这个链接指向的页面现在没有在售（已下架、售完，或不是已发布的页面）${violation.detail.includes('/') ? `：${violation.detail}` : ''}`
+      return `这个链接指向的页面现在没有在售（已下架、售完，或不是已发布的页面）${violation.detail.includes('/') ? `：${violation.detail}` : ''}${linkNote(violation)}`
     case 'departure_not_on_sale':
-      return `这个链接里的出发日期现在没有在售：${violation.detail}`
+      return `这个链接里的出发日期现在没有在售：${violation.detail}${linkNote(violation)}`
     default:
       return violation.detail
   }

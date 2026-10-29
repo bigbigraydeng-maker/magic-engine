@@ -426,7 +426,7 @@ export function TemplateEmailPanel(props: TemplateEmailPanelProps): JSX.Element 
           </div>
 
           {blocks.map((b) => (
-            <p key={`${b.code}:${b.ruleId ?? ''}:${b.detail}`} className="mt-1 text-xs font-semibold text-red-700">
+            <p key={`${b.code}:${b.ruleId ?? ''}:${b.detail}:${b.url ?? ''}`} className="mt-1 text-xs font-semibold text-red-700">
               不能发：{describeBlock(b)}
             </p>
           ))}

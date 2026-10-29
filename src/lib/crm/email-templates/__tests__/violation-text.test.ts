@@ -56,6 +56,20 @@ describe('describeBlock', () => {
     expect(text).not.toContain('unrecognised')
   })
 
+  it('says which link it is when the gate knows it (the url comes along)', () => {
+    const url = 'https://www.example.com/tours/china/discovery/gone'
+    expect(describeBlock({ code: 'tour_page_not_on_sale', detail: 'china/discovery/gone', url })).toBe(
+      `这个链接指向的页面现在没有在售（已下架、售完，或不是已发布的页面）：china/discovery/gone（链接：${url}）`,
+    )
+    expect(describeBlock({ code: 'departure_not_on_sale', detail: 'china/discovery/essentials 2030-01-01', url })).toBe(
+      `这个链接里的出发日期现在没有在售：china/discovery/essentials 2030-01-01（链接：${url}）`,
+    )
+  })
+
+  it('a link with no site name written in it gets a fixed sentence instead of an empty name', () => {
+    expect(describeBlock({ code: 'link_host_not_allowed', detail: '' })).toBe('链接里没写网站地址，请补上完整网址，或把它去掉。')
+  })
+
   it('explains a departure date that is not on sale', () => {
     expect(describeBlock({ code: 'departure_not_on_sale', detail: 'china/discovery/essentials 2030-01-01' })).toBe(
       '这个链接里的出发日期现在没有在售：china/discovery/essentials 2030-01-01',
