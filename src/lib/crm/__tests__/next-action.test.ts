@@ -192,11 +192,11 @@ describe('compareNextAction —— hot 里一条规则：最近有动静的排�
     expect(compareNextAction(old, recent)).toBeGreaterThan(0)
   })
 
-  it('最近度压过分段优先级：new_untouched（9-29）排在 replied（8-07）前面', () => {
+  it('在等我们回的客人（replied）排在新客人前面，哪怕新客人更近（PM 2026-10-30）', () => {
     const a = { seg: seg('replied', { lastTouchAt: '2026-08-07T00:00:00.000Z' }), intent: null }
     const b = { seg: seg('new_untouched', { lastTouchAt: '2026-09-29T00:00:00.000Z' }), intent: null }
-    expect(compareNextAction(b, a)).toBeLessThan(0)
-    expect(compareNextAction(a, b)).toBeGreaterThan(0)
+    expect(compareNextAction(a, b)).toBeLessThan(0)
+    expect(compareNextAction(b, a)).toBeGreaterThan(0)
   })
 
   it('约好今天回电的永远在最前，哪怕很久没动静', () => {
@@ -206,11 +206,28 @@ describe('compareNextAction —— hot 里一条规则：最近有动静的排�
     expect(compareNextAction(replied, due)).toBeGreaterThan(0)
   })
 
-  it('没有任何触点的新人（lastTouchAt 为空）当成「刚刚」，排最前', () => {
+  it('没有任何触点的新人（lastTouchAt 为空）当成「刚刚」，在新客人这一档里排最前', () => {
     const fresh = { seg: seg('new_untouched', { lastTouchAt: null }), intent: null }
-    const replied = { seg: seg('replied', { lastTouchAt: '2026-10-10T00:00:00.000Z' }), intent: null }
-    expect(compareNextAction(fresh, replied)).toBeLessThan(0)
-    expect(compareNextAction(replied, fresh)).toBeGreaterThan(0)
+    const older = { seg: seg('new_untouched', { lastTouchAt: '2026-10-10T00:00:00.000Z' }), intent: null }
+    expect(compareNextAction(fresh, older)).toBeLessThan(0)
+    expect(compareNextAction(older, fresh)).toBeGreaterThan(0)
+  })
+
+  it('刚通完电话、只差记一笔（afterCall）排在最后，让位给要真联系的人（PM 2026-10-30）', () => {
+    const note = { seg: seg('callback_due', { afterCall: true, lastTouchAt: '2026-10-29T00:00:00.000Z' }), intent: null }
+    for (const other of ['replied', 'new_untouched', 'retry_channel', 'clicked_link'] as const) {
+      const o = { seg: seg(other, { lastTouchAt: '2026-08-01T00:00:00.000Z' }), intent: null }
+      expect(compareNextAction(o, note)).toBeLessThan(0)
+      expect(compareNextAction(note, o)).toBeGreaterThan(0)
+    }
+  })
+
+  it('约好的回电（真约定，无 afterCall）仍排在所有人最前', () => {
+    const due = { seg: seg('callback_due', { lastTouchAt: '2026-08-01T00:00:00.000Z' }), intent: null }
+    for (const other of ['replied', 'new_untouched'] as const) {
+      const o = { seg: seg(other, { lastTouchAt: '2026-10-29T00:00:00.000Z' }), intent: null }
+      expect(compareNextAction(due, o)).toBeLessThan(0)
+    }
   })
 
   it('意向不影响排序：同样的两个人，一个 high 一个 low → 0', () => {

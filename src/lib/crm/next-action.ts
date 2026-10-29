@@ -159,17 +159,29 @@ function recency(iso: string | null): number {
 }
 
 /**
+ * 「今天要联系」里，这个人落在哪一档（越小越靠前）。PM 2026-10-30 定，CTS 团队次日正式上线前的一次排序更新。
+ *
+ *   0 约好的回电时间到了（真约定，不是刚打完电话的提醒）—— 我们答应过的时间，最该先打。
+ *   1 客人来消息了、在等我们回（replied，含回头客）—— 第二该处理，别让在等的人沉底。
+ *   2 新客人 / 点过我们邮件链接 / 打过没接要再试 —— 中间这一大段维持原来「最近有动静排前面」。
+ *   3 刚通完电话、只差记一笔（afterCall）—— 用不着再外联，放最后，别占着最前面的位置
+ *     （PM 2026-10-30：「记下一步」挤在最前面，把真正要联系的人压下去了）。
+ *
+ * 只把最该在最前的（约定 / 在等我们）和最该在最后的（只差记一笔）挪开，中间一大段仍按
+ * 最近动静排 —— 避免 PM 2026-10-10 指出的「最近联系那一列来回跳、看不出顺序」。
+ * 意向**完全不参与排序**（未校准，见文件头）。
+ */
+function hotTier(seg: SegmentResult): 0 | 1 | 2 | 3 {
+  if (seg.segment === 'callback_due') return seg.afterCall === true ? 3 : 0
+  if (seg.segment === 'replied') return 1
+  return 2
+}
+
+/**
  * 名单里谁排前面。
  *
- * 🔴 PM 2026-10-10 看本地页：按分段成块排会让「最近联系」一列
- * 64 天前 → 11 天前 → 昨天 来回跳，销售看不出顺序。今天要联系里只留一条规则。
- *
- * 意向**完全不参与排序**（未校准，见文件头）。
- *
- * hot 名单：
- *   1. 约好今天回电的永远在最前 —— 那是我们答应过的事。
- *   2. 其余一条规则：最近有动静的排前面。没有任何触点的新人当成「刚刚」。
- * cold 名单沿用引擎原排序（`compareForWorklist`）。
+ * hot 名单：先按上面四档分先后；同一档内维持一条规则 —— 最近有动静的排前面，
+ * 没有任何触点的新人当成「刚刚」。cold 名单沿用引擎原排序（`compareForWorklist`）。
  */
 export function compareNextAction(
   a: { seg: SegmentResult; intent: IntentLevel | null },
@@ -178,9 +190,9 @@ export function compareNextAction(
   const aHot = BASE_LIST_OF_SEGMENT[a.seg.segment] === 'hot'
   const bHot = BASE_LIST_OF_SEGMENT[b.seg.segment] === 'hot'
   if (aHot && bHot) {
-    const aDue = a.seg.segment === 'callback_due'
-    const bDue = b.seg.segment === 'callback_due'
-    if (aDue !== bDue) return aDue ? -1 : 1
+    const at = hotTier(a.seg)
+    const bt = hotTier(b.seg)
+    if (at !== bt) return at - bt
     const aAt = recency(a.seg.lastTouchAt)
     const bAt = recency(b.seg.lastTouchAt)
     if (Number.isFinite(aAt) || Number.isFinite(bAt)) {
