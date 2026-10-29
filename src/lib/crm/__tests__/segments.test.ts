@@ -13,6 +13,8 @@ import {
   TOURISM_PLAYBOOK,
   type ContactLike, type TouchpointLike, type IndustryPlaybook,
 } from '../segments'
+import { listOf } from '../next-action'
+import { buildTouchpointLike } from '../contact-model'
 
 const NOW = new Date('2026-07-26T12:00:00Z')
 
@@ -1284,5 +1286,58 @@ describe('刚通完电话、还没记下一步的人留在今天要联系（PM 2
     const earlierMail = { channel: 'email', direction: 'outbound' as const, occurredAt: '2026-10-23T01:00:00Z', source: 'microsoft_mail' }
     const c = contact({ touchpoints: [wa('2026-10-22T21:00:00Z'), earlierMail, spoke('2026-10-28T22:30:00Z', { automated: true })] })
     expect(segmentContact(c, NOW2).segment).toBe('stale_conversation')
+  })
+  describe('客人在这通电话里说了「现在还没准备好 / 不感兴趣」（PM 2026-10-29 Gavin Hall）', () => {
+    // Gavin：表单进线 → 我们打通 37 秒 → 客人说 "I'm not ready for that. I'll talk to you another day."
+    const gavin = (stance: string | null, extra: Record<string, unknown> = {}) => contact({
+      touchpoints: [form('2026-10-28T20:00:00Z'), spoke('2026-10-28T22:30:00Z', { callStance: stance, ...extra })],
+    })
+
+    it('说现在还没准备好 → 不进今天要联系，挪去先放着，理由照实说', () => {
+      const r = segmentContact(gavin('not_now'), NOW2)
+      expect(r.segment).toBe('nurture_future')
+      expect(r.temperature).toBe('cold')
+      expect(listOf(r.segment)).toBe('cold')
+      expect(r.reason).toBe('刚通完电话（1 小时前），客人说现在还没准备好 —— 先放着，过阵子再联系')
+      // 客人推掉了 —— 不能再标「📞 刚聊过 / 记下一步」
+      expect(r.afterCall).toBeUndefined()
+      expect(todayWorklist([gavin('not_now')], NOW2)).toHaveLength(0)
+    })
+
+    it('说不感兴趣 → 同样先放着，理由写「不感兴趣」', () => {
+      const r = segmentContact(gavin('not_interested'), NOW2)
+      expect(r.segment).toBe('nurture_future')
+      expect(r.reason).toBe('刚通完电话（1 小时前），客人说不感兴趣 —— 先放着')
+    })
+
+    it('没有表态的普通通话 → 照旧留在今天要联系', () => {
+      const r = segmentContact(gavin(null), NOW2)
+      expect(r.segment).toBe('callback_due')
+      expect(r.temperature).toBe('hot')
+    })
+
+    it('分析被驳回 → 表态不算，照旧留在今天要联系', () => {
+      const tp = buildTouchpointLike({
+        contact_id: 'c1', channel: 'phone', direction: 'outbound', occurred_at: '2026-10-28T22:30:00Z',
+        raw: null, source: 'twilio',
+        metadata: { outcome: 'spoke', call_stance: 'not_now', call_analysis_review: 'rejected' },
+      })
+      const r = segmentContact(contact({ touchpoints: [form('2026-10-28T20:00:00Z'), tp] }), NOW2)
+      expect(r.segment).toBe('callback_due')
+    })
+
+    it('只认最近那一通：上一通说过「改天再说」，这一通没这么说 → 照旧提醒', () => {
+      const c = contact({ touchpoints: [
+        form('2026-10-27T20:00:00Z'),
+        spoke('2026-10-27T22:30:00Z', { callStance: 'not_now' }),
+        spoke('2026-10-28T22:30:00Z'),
+      ] })
+      expect(segmentContact(c, NOW2).segment).toBe('callback_due')
+    })
+
+    it('之后客人自己又来消息 → 规则 2「客户回话了」照样接手', () => {
+      const c = contact({ touchpoints: [form('2026-10-28T20:00:00Z'), spoke('2026-10-28T22:30:00Z', { callStance: 'not_now' }), wa('2026-10-28T23:30:00Z')] })
+      expect(segmentContact(c, NOW2).segment).toBe('replied')
+    })
   })
 })

@@ -186,7 +186,7 @@ function isTravelIndustry(identity: ClientIdentity): boolean {
  * now. Only a genuinely missing row (queried fine, no such client) falls
  * back to a neutral name — it must NEVER fall back to another client's name.
  */
-async function loadClientIdentity(clientId: string): Promise<ClientIdentity> {
+export async function loadClientIdentity(clientId: string): Promise<ClientIdentity> {
   const { data, error } = await supabaseAdmin
     .from('clients')
     .select('name, industry, country')
@@ -223,7 +223,7 @@ function isNeverClaimShaped(value: unknown): value is { wrong: string; insteadSa
  * comes from `entries`, which is empty for any client with nothing approved
  * (or no entitlement grant at all; see `loadClientFacts`).
  */
-function clientFactsBlock(entries: readonly KnowledgeEntry[]): string {
+export function clientFactsBlock(entries: readonly KnowledgeEntry[]): string {
   if (entries.length === 0) return ''
   const lines = entries.map((entry) =>
     isNeverClaimShaped(entry.structuredValue)
@@ -250,7 +250,7 @@ function clientFactsBlock(entries: readonly KnowledgeEntry[]): string {
  *     `draft_reply` and mark this brief for retry (see `shouldGenerateBrief`
  *     / `storeBrief`'s `knowledge_status` column).
  */
-async function loadClientFacts(
+export async function loadClientFacts(
   clientId: string,
   deps: GetClientKnowledgeDeps = {},
 ): Promise<{ status: KnowledgeStatus; entries: KnowledgeEntry[] }> {

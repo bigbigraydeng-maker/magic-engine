@@ -24,10 +24,10 @@
 
 | 这一句 / 这一块 | 来源 | 备注 |
 |---|---|---|
-| 主题 `Our March and May 2027 departures` | 新写·待确认 | 月份与模板的筛选条件（3 月、5 月）一致 |
+| 主题 `Our March and May departures` | 新写·待确认 | 月份与模板的筛选条件（3 月、5 月）一致。**不写年份**：筛选只认月份、不认年份，目录里出现下一年的 3 月 / 5 月班期时，写死的年份就会错；每个团卡片自带出发日期（2026-10-29 去掉了原先的 2027 字样） |
 | `Kia ora {{first_name}},` | Lisa 原信 | 同上 |
 | `Thank you for talking with me {{call_when}}. It was a real pleasure.` | Lisa 原信 | 同上 |
-| `Here are our tours with departures in March and May 2027:` | 新写·待确认 | 2026-10-28 的上架数据里 3 月、5 月确有班期（见设计稿 §12 的团单）；**以启用那天的目录为准** |
+| `Here are our tours with departures in March and May:` | 新写·待确认 | 2026-10-28 的上架数据里 3 月、5 月确有班期（见设计稿 §12 的团单）；**以启用那天的目录为准** |
 | `{{tour_cards}}` | 目录可溯 | 销售最多选 3 个团，每个团渲染成固定四行：名称与天数 / 出发日 / 价格 / 链接 |
 | `You can see all of our tours here: {{all_tours_url}}` | 新写·待确认 | 链接来自「发信设置」里的「全部团页面」，没配置就不发 |
 | `If you have any questions, or would like to go ahead, just reply to this email and I will take care of the rest.` | Lisa 原信 | 同上 |

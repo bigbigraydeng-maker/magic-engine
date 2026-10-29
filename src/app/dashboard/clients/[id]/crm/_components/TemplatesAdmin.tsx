@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
 import type { ReceiptSummaryRow } from '@/lib/crm/email-templates/receipt-store'
 import type { FeatureState } from '@/lib/crm/email-templates/feature-state'
+import { EMAIL_SETTINGS_SAVED_EVENT } from '@/lib/crm/email-templates/settings-events'
 import { TemplateEditor, type TemplateVariables } from './TemplateEditor'
 
 interface ListPayload {
@@ -136,15 +137,22 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
     }
   }, [clearTimers])
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setReadError(null)
+  // A background read (after the settings were saved) never blanks the page: if it fails, what is on the screen stays,
+  // so an open template editor does not lose what is being typed into it.
+  const load = useCallback(async (opts: { background?: boolean } = {}) => {
+    const background = opts.background === true
+    if (!background) {
+      setLoading(true)
+      setReadError(null)
+    }
     try {
       const res = await fetch(`/api/clients/${clientId}/crm/email-templates`)
       const json = (await res.json().catch(() => ({}))) as Partial<ListPayload> & { error?: string }
       if (!res.ok) {
-        setData(null)
-        setReadError(json.error ?? '服务器出错了')
+        if (!background) {
+          setData(null)
+          setReadError(json.error ?? '服务器出错了')
+        }
         return
       }
       if (
@@ -152,8 +160,10 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
         !Array.isArray(json.stats) ||
         typeof json.featureState !== 'string'
       ) {
-        setData(null)
-        setReadError('返回的数据看不懂')
+        if (!background) {
+          setData(null)
+          setReadError('返回的数据看不懂')
+        }
         return
       }
       setData({
@@ -164,16 +174,27 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
         stats: json.stats,
         variables: (json.variables ?? {}) as TemplateVariables,
       })
+      setReadError(null)
     } catch {
-      setData(null)
-      setReadError('网络出错')
+      if (!background) {
+        setData(null)
+        setReadError('网络出错')
+      }
     } finally {
-      setLoading(false)
+      if (!background) setLoading(false)
     }
   }, [clientId])
 
   useEffect(() => {
     void load()
+  }, [load])
+
+  useEffect(() => {
+    const reload = (): void => {
+      void load({ background: true })
+    }
+    window.addEventListener(EMAIL_SETTINGS_SAVED_EVENT, reload)
+    return () => window.removeEventListener(EMAIL_SETTINGS_SAVED_EVENT, reload)
   }, [load])
 
   const showNotices = useCallback(

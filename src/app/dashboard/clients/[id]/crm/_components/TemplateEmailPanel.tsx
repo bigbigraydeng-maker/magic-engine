@@ -12,6 +12,7 @@ import type { PreviewFrequency, PreviewResult } from '@/lib/crm/email-templates/
 import type { PickOption } from '@/lib/crm/email-templates/facts/types'
 import type { CallBasis } from '@/lib/crm/email-templates/types'
 import type { ComposePreview } from '@/lib/microsoft/mail-send-new'
+import { describeBlock, describeMissing, describeWarning } from '@/lib/crm/email-templates/violation-text'
 
 export interface TemplateEmailPanelProps {
   clientId: string
@@ -375,7 +376,7 @@ export function TemplateEmailPanel(props: TemplateEmailPanelProps): JSX.Element 
           })}
           {missingOther.map((m) => (
             <p key={m} className="mt-1 text-xs font-semibold text-red-700">
-              还缺：{m}
+              {describeMissing(m)}
             </p>
           ))}
           {preview.rendered.problems.map((p) => (
@@ -407,6 +408,14 @@ export function TemplateEmailPanel(props: TemplateEmailPanelProps): JSX.Element 
             className="mt-2 w-full rounded-lg border border-me-stone bg-white px-3 py-2 text-sm"
             aria-label="邮件正文"
           />
+          {typeof preview.footer === 'string' && preview.footer !== '' && (
+            <div className="mt-1" data-testid="template-footer">
+              <p className="text-xs text-me-charcoal/55">发出时，系统会在正文后面自动加上这一段（在这里改不了）：</p>
+              <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-white/60 px-3 py-2 font-sans text-xs text-me-charcoal/70">
+                {preview.footer}
+              </pre>
+            </div>
+          )}
           <div className="mt-1 flex items-center gap-3">
             <button type="button" onClick={regenerate} className="text-xs text-me-charcoal/55 underline">
               按模板重新生成（会丢掉你的修改）
@@ -417,13 +426,13 @@ export function TemplateEmailPanel(props: TemplateEmailPanelProps): JSX.Element 
           </div>
 
           {blocks.map((b) => (
-            <p key={`${b.code}:${b.ruleId ?? ''}:${b.detail}`} className="mt-1 text-xs font-semibold text-red-700">
-              不能发：{b.detail}
+            <p key={`${b.code}:${b.ruleId ?? ''}:${b.detail}:${b.url ?? ''}`} className="mt-1 text-xs font-semibold text-red-700">
+              不能发：{describeBlock(b)}
             </p>
           ))}
           {warnings.map((w) => (
             <p key={`${w.code}:${w.ruleId ?? ''}:${w.detail}`} className="mt-1 text-xs font-semibold text-amber-700">
-              提醒：{w.detail}
+              提醒：{describeWarning(w)}
             </p>
           ))}
 

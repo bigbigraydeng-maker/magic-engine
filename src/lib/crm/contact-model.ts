@@ -18,7 +18,7 @@
  */
 
 import type { ContactLike, TouchpointLike } from './segments'
-import { engagementFromMetadata, isUnansweredCall } from './segments'
+import { callStanceFromMetadata, engagementFromMetadata, isUnansweredCall } from './segments'
 import { reclassifyStoredOutcome } from './note-parser'
 import { isDoNotContact } from './dnc'
 import { isAutomatedTouch } from './automated-touch'
@@ -80,6 +80,8 @@ export function buildTouchpointLike(t: TouchpointRowLike): TouchpointLike {
     action: actionOf(md),
     // 电话系统记录的外呼没人接：我们没联系上他，不算「我们最后一次出站」。
     unansweredCall: t.channel === 'phone' && t.direction === 'outbound' && isUnansweredCall(md),
+    // 通话分析读出的客人表态（改天再说 / 不感兴趣）；分析被驳回的不算。规则 6.5 用。
+    callStance: callStanceFromMetadata(md),
   }
 }
 

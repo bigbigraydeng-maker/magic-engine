@@ -14,6 +14,8 @@ export interface SeedTemplate {
   fields: TemplateFields
 }
 
+// No year anywhere in the letter text: the month filter matches those months in EVERY year the catalog lists, so a year
+// written into the text would be wrong the day the catalog also holds the next year's March and May. Every card shows its own date.
 const SIGN_OFF = 'Warm regards,\n{{sender_name}}\nCTS Tours'
 const SEED_NOTE = '种子模板：写入时停用，等 PM / Lisa 确认后再启用'
 
@@ -53,13 +55,13 @@ export const CTS_SEED_TEMPLATES: readonly SeedTemplate[] = [
     templateKey: 'spring-2027-follow-up',
     fields: {
       name: '春季团通用跟进信 · 3 月 / 5 月',
-      subject: 'Our March and May 2027 departures',
+      subject: 'Our March and May departures',
       body: [
         'Kia ora {{first_name}},',
         '',
         'Thank you for talking with me {{call_when}}. It was a real pleasure.',
         '',
-        'Here are our tours with departures in March and May 2027:',
+        'Here are our tours with departures in March and May:',
         '',
         '{{tour_cards}}',
         '',
