@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-10-30
 done_on: 2026-10-30
-done_ref: pr:PRNUM
+done_ref: pr:3409
 source: session:90a50c3b
 verify_how: 合并部署后，PM 打开广告健康页「多维数据」标签，总览的下面第一张表就是「按天」，每天一行、最新在上
 ---
