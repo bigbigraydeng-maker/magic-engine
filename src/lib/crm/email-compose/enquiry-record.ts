@@ -13,6 +13,7 @@ export const ENQUIRY_INBOUND_SOURCES: ReadonlySet<string> = new Set([
   'email/outlook',
   'email/outlook_info_scan',
   'phone/twilio',
+  'phone/voipline',
 ]);
 
 export function hasEnquiryRecord(touches: readonly TouchKind[]): boolean {
