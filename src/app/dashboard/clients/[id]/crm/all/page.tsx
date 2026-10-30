@@ -656,8 +656,8 @@ export default function CrmAllContactsPage() {
     }
   }
 
-  // 「今天先联系」只有 4 列（⭐ / 客人 / 该做什么 / 联系渠道）；平铺名单是 6 列 + 自定义列。
-  const colCount = grouped ? 6 : 6 + columns.length
+  // 智能名单 7 列（含当前状态）；平铺名单是 6 列 + 自定义列。空行的 colSpan 必须同步。
+  const colCount = grouped ? 7 : 6 + columns.length
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
@@ -765,7 +765,7 @@ export default function CrmAllContactsPage() {
             onAssigneeFilterChange={setAssigneeFilter}
           />
 
-          {grouped && <RecentNotesPanel notes={recentNotes} openingContactId={openingRecentId} onOpen={(note) => void openRecentNote(note)} />}
+          {grouped && <RecentNotesPanel clientId={clientId} notes={recentNotes} openingContactId={openingRecentId} onOpen={(note) => void openRecentNote(note)} />}
 
           {!grouped && kindFilter === 'trade' && rows.length > 0 && (
             <TradeBatchPanel clientId={clientId} rows={rows} total={total} onLogged={(msg) => afterWrite(msg)} />
