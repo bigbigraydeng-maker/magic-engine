@@ -221,13 +221,28 @@ describe('compareNextAction —— hot 里一条规则：最近有动静的排�
     expect(compareNextAction(older, fresh)).toBeGreaterThan(0)
   })
 
-  it('刚通完电话、只差记一笔（afterCall）排在最后，让位给要真联系的人（PM 2026-10-30）', () => {
-    const note = { seg: seg('callback_due', { afterCall: true, lastTouchAt: '2026-10-29T00:00:00.000Z' }), intent: null }
+  it('刚通完电话 3 小时内（afterCall）排在要真联系的人前面，好找（PM 2026-10-30 Esther）', () => {
+    const justNow = new Date(Date.now() - 20 * 60 * 1000).toISOString()
+    const note = { seg: seg('callback_due', { afterCall: true, lastTouchAt: justNow }), intent: null }
+    for (const other of ['replied', 'new_untouched', 'retry_channel', 'clicked_link'] as const) {
+      const o = { seg: seg(other, { lastTouchAt: new Date().toISOString() }), intent: null }
+      expect(compareNextAction(note, o)).toBeLessThan(0)
+    }
+  })
+
+  it('刚通完电话超过 3 小时还没记 → 沉到最后，让位给要真联系的人', () => {
+    const old = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString()
+    const note = { seg: seg('callback_due', { afterCall: true, lastTouchAt: old }), intent: null }
     for (const other of ['replied', 'new_untouched', 'retry_channel', 'clicked_link'] as const) {
       const o = { seg: seg(other, { lastTouchAt: '2026-08-01T00:00:00.000Z' }), intent: null }
       expect(compareNextAction(o, note)).toBeLessThan(0)
-      expect(compareNextAction(note, o)).toBeGreaterThan(0)
     }
+  })
+
+  it('真约定的回电仍排在「刚通完电话」前面', () => {
+    const due = { seg: seg('callback_due', { lastTouchAt: '2026-08-01T00:00:00.000Z' }), intent: null }
+    const justNow = { seg: seg('callback_due', { afterCall: true, lastTouchAt: new Date().toISOString() }), intent: null }
+    expect(compareNextAction(due, justNow)).toBeLessThan(0)
   })
 
   it('约好的回电（真约定，无 afterCall）仍排在所有人最前', () => {
