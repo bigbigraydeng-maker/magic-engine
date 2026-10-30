@@ -9,7 +9,7 @@ import type { KernelDeps } from '@/lib/kernel/deps'
 import { issueConfirmationCard, type CardFacts, type HardCheck } from '@/lib/confirmation-card'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import { isUuid } from '@/lib/validation-utils'
-import type { WeeklyCheckSummary } from './prescription-weekly-check'
+import type { WeeklyBudgetSuggestion, WeeklyCheckSummary } from './prescription-weekly-check'
 
 export type BudgetDirection = 'increase' | 'decrease'
 
@@ -37,13 +37,9 @@ export interface TuesdayBudgetTuneResult {
 
 const SUBJECT = /^[a-z0-9][a-z0-9:_-]{0,60}$/
 
-/**
- * The weekly read has progress text, not a current daily budget and a computed
- * next amount. Inventing either number would be a budget change, so there is
- * nothing to put on a card.
- */
-export function planTuesdayBudgetTunes(_summary: WeeklyCheckSummary): readonly TuesdayBudgetProposal[] {
-  return []
+/** Cards only for suggestions the supervision already bounded. No invented amount. */
+export function planTuesdayBudgetTunes(summary: WeeklyCheckSummary): readonly TuesdayBudgetProposal[] {
+  return (summary.budgetSuggestions ?? []).map(proposalFromSuggestion)
 }
 
 export async function runTuesdayBudgetTune(
@@ -51,9 +47,26 @@ export async function runTuesdayBudgetTune(
   summary: WeeklyCheckSummary,
   now?: Date,
 ): Promise<TuesdayBudgetTuneResult[]> {
+  const blocked = (summary.budgetBlocks ?? []).map((block) => skipped(block.clientId, block.reason))
   const proposals = planTuesdayBudgetTunes(summary)
-  if (proposals.length === 0) return []
-  return issueTuesdayBudgetTunes(openKernel(), proposals, now)
+  if (proposals.length === 0) return blocked
+  const issued = await issueTuesdayBudgetTunes(openKernel(), proposals, now)
+  return [...issued, ...blocked]
+}
+
+function proposalFromSuggestion(row: WeeklyBudgetSuggestion): TuesdayBudgetProposal {
+  return {
+    clientId: row.clientId,
+    subjectKey: row.subjectKey,
+    direction: row.direction,
+    accountLabel: row.accountLabel,
+    beforeCents: row.beforeCents,
+    afterCents: row.afterCents,
+    currencyLabel: row.currencyLabel,
+    why: row.why,
+    dateLabel: row.dateLabel,
+    scopeLabel: row.scopeLabel,
+  }
 }
 
 export async function issueTuesdayBudgetTunes(
