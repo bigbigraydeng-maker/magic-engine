@@ -146,8 +146,11 @@ export default function CrmAllContactsPage() {
    * 哪一批跑到都能读到当下最新的值。
    */
   const fetchInFlightRef = useRef(false)
+  const latestListRequestRef = useRef(0)
+  const lastDebouncedQueryRef = useRef('')
 
   const loadList = useCallback(async () => {
+    const requestId = ++latestListRequestRef.current
     setError(null)
     fetchInFlightRef.current = true
     try {
@@ -193,10 +196,11 @@ export default function CrmAllContactsPage() {
         error?: string
         viewerEmail?: string | null
       }
+      if (requestId !== latestListRequestRef.current) return
       if (!res.ok) {
         // 400 是搜索词非法（逗号/括号）—— 只提示搜索框，别把已有名单清空。
         if (res.status === 400) {
-          setQError('搜索里不能有逗号或括号')
+          setQError('搜索里不能有逗号或非电话号码的括号')
           return
         }
         setError(json.error ?? '加载失败')
@@ -229,8 +233,10 @@ export default function CrmAllContactsPage() {
       const resolvedStageRes = json.view === 'priority' && Array.isArray(json.stages)
         ? null
         : stageRes ?? await fetch(`/api/clients/${clientId}/pipeline-stages`)
+      if (requestId !== latestListRequestRef.current) return
       if (json.view === 'priority' && Array.isArray(json.stages) || resolvedStageRes?.ok) {
         const s = resolvedStageRes ? (await resolvedStageRes.json()) as { stages?: StageOption[] } : { stages: json.stages }
+        if (requestId !== latestListRequestRef.current) return
         // marketingAction 之前被这里的映射漏掉了——NAL"标已成交"要靠它判断该弹
         // 金额面板还是走普通改状态，没有它这条判断永远是 false（2026-09-15 修）。
         setStages(
@@ -238,12 +244,14 @@ export default function CrmAllContactsPage() {
         )
       }
     } catch {
-      setError('加载失败，检查网络后再试。')
+      if (requestId === latestListRequestRef.current) setError('加载失败，检查网络后再试。')
     } finally {
-      setLoading(false)
-      setSectionsLoading(false)
-      fetchInFlightRef.current = false
-      markCrmListReady()
+      if (requestId === latestListRequestRef.current) {
+        setLoading(false)
+        setSectionsLoading(false)
+        fetchInFlightRef.current = false
+        markCrmListReady()
+      }
     }
   }, [clientId, page, perPage, flatPerPage, qDebounced, stageFilter, kindFilter, assigneeFilter, grouped, openSections, sectionPages])
 
@@ -254,7 +262,14 @@ export default function CrmAllContactsPage() {
 
   // 搜索词防抖：300ms 内还在敲就不发请求。
   useEffect(() => {
-    const t = window.setTimeout(() => setQDebounced(q), 300)
+    const t = window.setTimeout(() => {
+      if (lastDebouncedQueryRef.current !== q) {
+        lastDebouncedQueryRef.current = q
+        setOpenSections(q.trim() ? ['hot', 'cold'] : null)
+        setSectionPages({})
+      }
+      setQDebounced(q)
+    }, 300)
     return () => window.clearTimeout(t)
   }, [q])
 
