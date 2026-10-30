@@ -180,7 +180,7 @@ export default function CrmAllContactsPage() {
 
       const [res, stageRes] = await Promise.all([
         fetch(`/api/clients/${clientId}/crm/contacts?${params.toString()}`),
-        fetch(`/api/clients/${clientId}/pipeline-stages`),
+        grouped ? Promise.resolve(null) : fetch(`/api/clients/${clientId}/pipeline-stages`),
       ])
       const json = (await res.json()) as {
         total?: number
@@ -188,6 +188,7 @@ export default function CrmAllContactsPage() {
         items?: ContactRow[]
         view?: string
         sections?: PrioritySectionData[]
+        stages?: StageOption[]
         focus?: { found: boolean; section?: SectionKey; page?: number }
         error?: string
         viewerEmail?: string | null
@@ -224,8 +225,12 @@ export default function CrmAllContactsPage() {
         setColumns(json.columns ?? [])
         setTotal(json.total ?? 0)
       }
-      if (stageRes.ok) {
-        const s = (await stageRes.json()) as { stages?: StageOption[] }
+      // 旧版服务端没有返回 stages 时，回退到独立接口，兼容滚动部署。
+      const resolvedStageRes = json.view === 'priority' && Array.isArray(json.stages)
+        ? null
+        : stageRes ?? await fetch(`/api/clients/${clientId}/pipeline-stages`)
+      if (json.view === 'priority' && Array.isArray(json.stages) || resolvedStageRes?.ok) {
+        const s = resolvedStageRes ? (await resolvedStageRes.json()) as { stages?: StageOption[] } : { stages: json.stages }
         // marketingAction 之前被这里的映射漏掉了——NAL"标已成交"要靠它判断该弹
         // 金额面板还是走普通改状态，没有它这条判断永远是 false（2026-09-15 修）。
         setStages(

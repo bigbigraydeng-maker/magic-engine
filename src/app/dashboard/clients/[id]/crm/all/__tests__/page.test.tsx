@@ -1017,6 +1017,31 @@ describe('默认进「今天先联系」（PM 2026-10-28）', () => {
   const calledUrls = () =>
     (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]))
 
+  it('复用名单返回的阶段，展示筛选且不再请求阶段接口', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/crm/contacts?')) return { ok: true, json: async () => ({
+        view: 'priority', sections: [], columns: [],
+        stages: [{ stageKey: 'quoted', label: '已报价', marketingAction: 'nurture' }],
+      }) }
+      return { ok: true, json: async () => ({ stages: [] }) }
+    }))
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    expect(await screen.findByText('已报价')).toBeTruthy()
+    expect(calledUrls().some((u) => u.includes('/pipeline-stages'))).toBe(false)
+  })
+
+  it('旧版名单接口未返回阶段时回退到阶段接口', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/crm/contacts?')) return { ok: true, json: async () => ({ view: 'priority', sections: [], columns: [] }) }
+      return { ok: true, json: async () => ({ stages: [{ stageKey: 'quoted', label: '已报价', marketingAction: 'nurture' }] }) }
+    }))
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    expect(await screen.findByText('已报价')).toBeTruthy()
+    expect(calledUrls().some((u) => u.includes('/pipeline-stages'))).toBe(true)
+  })
+
   it('裸进来 → 第一次请求就是分段（priority）视图，不先白发一次平铺请求', async () => {
     stubFetch([contact('c1', 'Sue Masson')])
     setUrl('')
