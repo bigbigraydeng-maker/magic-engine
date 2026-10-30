@@ -116,3 +116,49 @@ describe('P2-a：意思翻转的改写一律退回原话', () => {
     expect(firstUngroundedClaim('客户预订。', '想报名 Silk Road')).toBeNull()
   })
 })
+
+describe('子牙 P1：出行时间不被「原话里有否定」错杀', () => {
+  const g = (note: string, travel: string, summary: string) =>
+    groundNoteParse(note, { ...BASE, travel_window: travel, summary })
+
+  it('「他没空，明年3月去」保留「明年3月」', () => {
+    expect(g('他没空，明年3月去', '明年3月', '客户明年3月去，现在没空。').travel_window).toBe('明年3月')
+  })
+  it('「客户说现在不考虑，明年三月再走」保留「明年三月」', () => {
+    expect(g('客户说现在不考虑，明年三月再走', '明年三月', '客户现在不考虑，明年三月再走。').travel_window).toBe('明年三月')
+  })
+  it('「No rush, going March 2027」保留（英文月份对得上「3月」）', () => {
+    expect(g('No rush, going March 2027', '2027年3月', '客户不急，2027年3月去。').travel_window).toBe('2027年3月')
+  })
+  it('出行时间里的数字原话里真没有 → 仍然置空', () => {
+    expect(g('他没空，改天再说', '2027年3月', '客户没空。').travel_window).toBeNull()
+  })
+  it('只对「整句摘要」查否定翻转：不要报价→要求报价 仍被拦', () => {
+    const r = g('客户不要报价', '', '客户要求报价。')
+    expect(r.summary).toBe('客户不要报价')
+  })
+})
+
+describe('子牙 (c)：中文数字与地名', () => {
+  it('「两个人」→「三人出行」被拦；「两人」放行', () => {
+    expect(firstUngroundedClaim('客户三人出行。', '两个人想去')).not.toBeNull()
+    expect(firstUngroundedClaim('客户两人出行。', '两个人想去')).toBeNull()
+    expect(groundNoteParse('两个人想去', { ...BASE, summary: '客户三人出行。' }).summary).toBe('两个人想去')
+  })
+  it('「十二天」「二十人」换算正确', () => {
+    expect(firstUngroundedClaim('客户想去12天。', '想去十二天')).toBeNull()
+    expect(firstUngroundedClaim('客户想去12天。', '想去十三天')).not.toBeNull()
+    expect(firstUngroundedClaim('共20人。', '二十个人')).toBeNull()
+  })
+  it('「一直」「一下」不会被当成数字 1', () => {
+    expect(firstUngroundedClaim('客户一直想去。', '想去')).toBeNull()
+  })
+  it('「想去北京」→「想去上海」被拦；「想去北京」→「客户想去北京」放行', () => {
+    expect(firstUngroundedClaim('客户想去上海。', '想去北京')).not.toBeNull()
+    expect(firstUngroundedClaim('客户想去北京。', '想去北京')).toBeNull()
+  })
+  it('英文地名对得上中文：want to visit Shanghai → 想去上海 放行；→ 想去北京 被拦', () => {
+    expect(firstUngroundedClaim('客户想去上海。', 'want to visit Shanghai')).toBeNull()
+    expect(firstUngroundedClaim('客户想去北京。', 'want to visit Shanghai')).not.toBeNull()
+  })
+})

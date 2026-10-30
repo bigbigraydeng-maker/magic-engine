@@ -258,13 +258,18 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
 
   const placed = escalated ? live : withLiveReach(frozen, live, contact)
   // 通话打完、员工还没记笔记：「记下一步」提醒还在，卡片就不能是灰的（还欠一笔）。
-  const noteToday = hasStaffNoteSince(contact, opts.dayStartMs)
-  const reminderPending = placed.afterCall === true && !noteToday
+  // 🔴 判据是「最近一通接通的电话**之后**有没有员工笔记」，不是「今天有没有任何笔记」
+  // （子牙复审 PR #3417 (a)）：早上记了「没人接」、下午电话接通了却没记，早上那条不能把提醒吞掉。
+  const lastCallMs = lastConnectedCallMs(contact)
+  const noteAfterCall = hasStaffNoteSince(contact, Math.max(opts.dayStartMs, lastCallMs + 1))
+  const reminderPending = placed.afterCall === true && !noteAfterCall
   const handled = !stillNeedsMe && (opts.touchedToday || droppedOff) && !reminderPending
   // 已记过笔记的卡片不能还挂着「刚通完电话，还没记下一步」（魏征复审 P2-b）：提醒撤掉，换成说明今天做了什么的话。
+  // 「刚」只在通话 3 小时内才说（通话是几天前的话，写「刚」是错的）。
+  const justCalled = lastCallMs > 0 && now.getTime() - lastCallMs <= JUST_CALLED_MS
   const seg: SegmentResult =
-    placed.afterCall === true && noteToday
-      ? { ...placed, afterCall: false, reason: '刚通完电话，今天已记录' }
+    placed.afterCall === true && noteAfterCall
+      ? { ...placed, afterCall: false, reason: justCalled ? '刚通完电话，今天已记录' : '通完电话，今天已记录' }
       : placed
 
   return {
@@ -380,6 +385,26 @@ function withoutStaffNotesSince(contact: ContactLike, sinceMs: number): ContactL
       (t) => !(t.source === 'me_manual' && t.direction === 'outbound' && tsOf(t.occurredAt) >= sinceMs),
     ),
   }
+}
+
+/** 「刚」通话的时间窗：与列表排序里「刚聊过」同一个 3 小时。 */
+const JUST_CALLED_MS = 3 * 60 * 60 * 1000
+
+/** 最近一通真正接通的人打的电话（电话系统记的 spoke，不含员工手记 / 机器外呼）的时间；没有返回 0。 */
+function lastConnectedCallMs(contact: ContactLike): number {
+  return Math.max(
+    0,
+    ...contact.touchpoints
+      .filter(
+        (t) =>
+          t.channel === 'phone' &&
+          t.direction === 'outbound' &&
+          !t.automated &&
+          t.source !== 'me_manual' &&
+          t.outcome === 'spoke',
+      )
+      .map((t) => tsOf(t.occurredAt)),
+  )
 }
 
 /** 今天员工有没有手记过一笔（推迟 / 取消推迟那种按钮痕迹不算）。 */

@@ -82,6 +82,7 @@ interface Out {
   segment: string
   afterCall: boolean
   handled: boolean | undefined
+  reason: string
 }
 
 function view(id: string, tps: TouchpointRowLike[], opts: { day: boolean }) {
@@ -101,6 +102,7 @@ function view(id: string, tps: TouchpointRowLike[], opts: { day: boolean }) {
       segment: ranked.seg.segment,
       afterCall: ranked.seg.afterCall === true,
       handled: ranked.handled,
+      reason: ranked.seg.reason,
     }),
   )
   const hot = sections.find((s) => s.key === 'hot')?.items ?? []
@@ -274,6 +276,46 @@ describe('灰卡和提醒不能同时出现（魏征 P2-b）', () => {
     expect(h.verb).toBe('hold')
     expect(h.list).toBe(na.list)
     expect(h.line).toBe('先别打 —— 今天联系过了，他还没回')
+  })
+})
+
+describe('提醒只看「最近一通接通的电话之后」有没有笔记（子牙 (a)）', () => {
+  it('早上记了「没人接」、下午电话接通了却没记 → 提醒还在、不灰', () => {
+    const morningNote: TouchpointRowLike = {
+      ...staffNote('Nathan'),
+      occurred_at: '2026-10-29T21:00:00.000Z', // 新西兰 10/30 早上 10 点
+      raw: '没人接',
+      metadata: { outcome: 'no_answer' },
+    }
+    const { hot } = view('Nathan', [enquiry('Nathan'), morningNote, twilioCall('Nathan')], { day: true })
+    expect(hot.map((r) => r.id)).toEqual(['Nathan'])
+    expect(hot[0].afterCall).toBe(true)
+    expect(hot[0].handled).toBe(false)
+  })
+
+  it('接通之后又记了笔记 → 提醒撤掉、变灰', () => {
+    const morningNote: TouchpointRowLike = {
+      ...staffNote('Nathan'),
+      occurred_at: '2026-10-29T21:00:00.000Z',
+      raw: '没人接',
+      metadata: { outcome: 'no_answer' },
+    }
+    const { hot } = view('Nathan', [enquiry('Nathan'), morningNote, twilioCall('Nathan'), staffNote('Nathan')], { day: true })
+    expect(hot[0].afterCall).toBe(false)
+    expect(hot[0].handled).toBe(true)
+  })
+})
+
+describe('「刚」只在通话 3 小时内才说（子牙 (b)）', () => {
+  it('40 分钟前的通话 → 「刚通完电话，今天已记录」', () => {
+    const { hot } = view('Nathan', [enquiry('Nathan'), twilioCall('Nathan'), staffNote('Nathan')], { day: true })
+    expect(hot[0].reason).toBe('刚通完电话，今天已记录')
+  })
+  it('两天前的通话、今天才记笔记 → 不说「刚」', () => {
+    const oldCall = { ...twilioCall('Nathan'), occurred_at: '2026-10-28T02:00:00.000Z' }
+    const { hot } = view('Nathan', [{ ...enquiry('Nathan'), occurred_at: '2026-10-27T02:00:00.000Z' }, oldCall, staffNote('Nathan')], { day: true })
+    expect(hot[0].handled).toBe(true)
+    expect(hot[0].reason).toBe('通完电话，今天已记录')
   })
 })
 

@@ -108,26 +108,102 @@ function latinTokens(s: string): string[] {
   return s.match(/[A-Za-z][A-Za-z&'-]{2,}/g) ?? []
 }
 
+const CN_DIGIT: Record<string, number> = {
+  零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+}
+
+/** 「三十一」「十二」「二十」→ 数字。只处理 1–99；认不出返回 null。 */
+function cnNumeralValue(t: string): number | null {
+  if (t === '十') return 10
+  if (t.length === 1) return CN_DIGIT[t] ?? null
+  const ten = t.indexOf('十')
+  if (ten === -1) return null
+  const tens = ten === 0 ? 1 : CN_DIGIT[t.slice(0, ten)]
+  const ones = ten === t.length - 1 ? 0 : CN_DIGIT[t.slice(ten + 1)]
+  if (tens === undefined || ones === undefined) return null
+  return tens * 10 + ones
+}
+
+/**
+ * 把「两个人 / 三月 / 十二天」里的中文数字换成阿拉伯数字，后面再比数字。
+ * 只换「数字 + （个）+ 量词」这种明确的数量 / 日期（避免「一直」「一下」被当成数字 1）。
+ */
+export function cnNumeralsToArabic(s: string): string {
+  return s.replace(/([零〇一二两三四五六七八九十]{1,3})个?(?=[人位天晚岁月号日周年万元块间])/g, (m, num: string) => {
+    const v = cnNumeralValue(num)
+    return v === null ? m : String(v)
+  })
+}
+
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+
+/** 原话里出现过的所有数字：阿拉伯数字 + 中文数字换算 + 英文月份名对应的月份号。 */
+function noteDigitSet(raw: string): Set<string> {
+  const out = new Set<string>()
+  for (const d of digitRuns(raw)) out.add(String(Number(d)))
+  for (const d of digitRuns(cnNumeralsToArabic(raw))) out.add(String(Number(d)))
+  const low = raw.toLowerCase()
+  MONTHS.forEach((m, i) => {
+    if (new RegExp(`\\b${m}[a-z]*\\b`).test(low)) out.add(String(i + 1))
+  })
+  return out
+}
+
 /** 摘要里的数字串，原话里必须有同样的数字。 */
 function digitRuns(s: string): string[] {
   return s.match(/\d+/g) ?? []
 }
 
+/** 地名 / 目的地：摘要里写了哪个，原话里就必须有（中文或对应英文）。 */
+const PLACES: Array<[string, RegExp]> = [
+  ['北京', /beijing/i], ['上海', /shanghai/i], ['西安', /xi'?an/i], ['成都', /chengdu/i], ['桂林', /guilin/i],
+  ['杭州', /hangzhou/i], ['苏州', /suzhou/i], ['广州', /guangzhou/i], ['深圳', /shenzhen/i], ['香港', /hong\s*kong/i],
+  ['澳门', /macau|macao/i], ['重庆', /chongqing/i], ['昆明', /kunming/i], ['丽江', /lijiang/i], ['大理', /dali/i],
+  ['拉萨', /lhasa/i], ['西藏', /tibet/i], ['新疆', /xinjiang/i], ['云南', /yunnan/i], ['张家界', /zhangjiajie/i],
+  ['黄山', /huangshan|yellow mountain/i], ['哈尔滨', /harbin/i], ['青岛', /qingdao/i], ['厦门', /xiamen/i],
+  ['南京', /nanjing/i], ['洛阳', /luoyang/i], ['敦煌', /dunhuang/i], ['兰州', /lanzhou/i], ['三亚', /sanya/i],
+  ['台湾', /taiwan/i], ['日本', /japan/i], ['韩国', /korea/i], ['越南', /vietnam/i], ['泰国', /thailand/i],
+  ['澳洲', /australia|aussie/i], ['新西兰', /new zealand|\bnz\b/i], ['中国', /china|chinese/i],
+]
+
+function firstUngroundedPlace(summary: string, raw: string): string | null {
+  for (const [cn, en] of PLACES) {
+    if (summary.includes(cn) && !raw.includes(cn) && !en.test(raw)) return cn
+  }
+  return null
+}
+
 /**
- * 摘要里有没有哪句话是原话撑不住的。返回第一个无依据的词；全有依据返回 null。
+ * 一个「值」（摘要 / 出行时间…）里的具体词，原话里有没有依据：数字（含中文数字、英文月份）、
+ * 英文专名、地名、日期 / 动作词。**不含**否定和已完成状态检查 —— 那两项只对「整句摘要」有意义；
+ * 出行时间这类短语（「明年3月」）本来就不带否定字，拿它去比「原话有没有『不』」会把
+ * 「他没空，明年3月去」的出行时间错杀（子牙复审 PR #3417 P1）。
  */
-export function firstUngroundedClaim(summary: string, raw: string): string | null {
-  for (const d of digitRuns(summary)) {
-    if (!raw.includes(d)) return d
+export function firstUngroundedTerm(value: string, raw: string): string | null {
+  const have = noteDigitSet(raw)
+  for (const d of digitRuns(cnNumeralsToArabic(value))) {
+    if (!have.has(String(Number(d)))) return d
   }
   const lowRaw = raw.toLowerCase()
-  for (const w of latinTokens(summary)) {
+  for (const w of latinTokens(value)) {
     if (!lowRaw.includes(w.toLowerCase())) return w
   }
+  const place = firstUngroundedPlace(value, raw)
+  if (place) return place
   for (const rule of CLAIM_RULES) {
-    const hit = summary.match(rule.inSummary)
+    const hit = value.match(rule.inSummary)
     if (hit && !rule.inNote.test(raw)) return hit[0]
   }
+  return null
+}
+
+/**
+ * 整句摘要有没有哪句话是原话撑不住的。返回第一个无依据的词；全有依据返回 null。
+ * 在 `firstUngroundedTerm` 之上再查「已完成状态」和「意思翻转（否定）」。
+ */
+export function firstUngroundedClaim(summary: string, raw: string): string | null {
+  const term = firstUngroundedTerm(summary, raw)
+  if (term !== null) return term
   // 「已完成」的事实需要原话里有「已完成」的说法。
   const done = summary.match(COMPLETED_IN_SUMMARY_RE)
   if (done && !COMPLETED_IN_NOTE_RE.test(raw)) return done[0]
@@ -180,7 +256,7 @@ export function groundNoteParse(raw: string, parsed: NoteParse): NoteParse {
   const competitor =
     parsed.competitor && includesLoose(note, parsed.competitor) ? parsed.competitor : null
   const travel =
-    parsed.travel_window && TIME_CUE_RE.test(note) && firstUngroundedClaim(parsed.travel_window, note) === null
+    parsed.travel_window && TIME_CUE_RE.test(note) && firstUngroundedTerm(parsed.travel_window, note) === null
       ? parsed.travel_window
       : null
   const hasCue = NEXT_STEP_CUE_RE.test(note)
