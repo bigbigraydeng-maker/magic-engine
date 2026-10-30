@@ -59,3 +59,28 @@ export async function fetchAll<T>(
   }
   return out
 }
+
+/** Read later pages in bounded batches, preserving order and the same fail-closed cap. */
+export async function fetchAllBatched<T>(
+  page: (from: number, to: number) => PromiseLike<PageResult<T>>,
+  hardCap = 100_000,
+): Promise<T[]> {
+  const out: T[] = []
+  let from = 0
+  let batchSize = 1
+  while (from < hardCap) {
+    const starts = Array.from({ length: batchSize }, (_, i) => from + i * PAGE_SIZE)
+      .filter((start) => start < hardCap)
+    const pages = await Promise.all(starts.map((start) => page(start, start + PAGE_SIZE - 1)))
+    for (const result of pages) {
+      if (result.error) throw new Error(result.error.message)
+      if (!result.data || result.data.length === 0) return out
+      out.push(...result.data)
+      if (out.length >= hardCap) throw new Error(`fetchAll 触到 ${hardCap} 行上限，数据可能不完整 —— 这里需要改成流式或收窄查询条件`)
+      if (result.data.length < PAGE_SIZE) return out
+    }
+    from += starts.length * PAGE_SIZE
+    batchSize = 3
+  }
+  return out
+}
