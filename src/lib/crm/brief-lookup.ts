@@ -87,30 +87,31 @@ export function latestBriefPerContact(
  * 查询失败不抛：返回空 Map，列表照常显示，只是没有意向抬升（摘要是辅助信息，不能让整页打不开）。
  */
 async function loadBriefsOrThrow(clientId: string): Promise<BriefByContact> {
-  const convs = await fetchAll<{ id: string; contact_id: string | null }>((from, to) =>
-    supabaseAdmin
-      .from('conversations')
-      .select('id, contact_id')
-      .eq('client_id', clientId)
-      .not('contact_id', 'is', null)
-      .order('id', { ascending: true })
-      .range(from, to),
-  )
-
-  const briefs = await fetchAll<{
-    conversation_id: string
-    intent_level: unknown
-    next_action: unknown
-    summary: unknown
-    generated_at: string | null
-  }>((from, to) =>
-    supabaseAdmin
-      .from('conversation_briefs')
-      .select('conversation_id, intent_level, next_action, summary, generated_at')
-      .eq('client_id', clientId)
-      .order('id', { ascending: true })
-      .range(from, to),
-  )
+  const [convs, briefs] = await Promise.all([
+    fetchAll<{ id: string; contact_id: string | null }>((from, to) =>
+      supabaseAdmin
+        .from('conversations')
+        .select('id, contact_id')
+        .eq('client_id', clientId)
+        .not('contact_id', 'is', null)
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+    fetchAll<{
+      conversation_id: string
+      intent_level: unknown
+      next_action: unknown
+      summary: unknown
+      generated_at: string | null
+    }>((from, to) =>
+      supabaseAdmin
+        .from('conversation_briefs')
+        .select('conversation_id, intent_level, next_action, summary, generated_at')
+        .eq('client_id', clientId)
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+  ])
 
   return latestBriefPerContact(convs, briefs)
 }

@@ -81,6 +81,7 @@ const BRIEF_ROWS: Record<string, Row[]> = { conversations: [], conversation_brie
 /** 一次查询链上记下来的东西。 */
 interface Recorded {
   table: string
+  columns?: string
   eqs: Array<[string, unknown]>
   ins: Array<[string, unknown[]]>
   ors: string[]
@@ -110,6 +111,7 @@ function fakeDb(table: string) {
 
   const builder: Record<string, unknown> = {
     select: (_cols?: string, opts?: { count?: string; head?: boolean }) => {
+      rec.columns = _cols
       if (opts?.head) rec.countHead = true
       return builder
     },
@@ -425,6 +427,66 @@ describe('GET contacts — 筛选落到 SQL', () => {
 })
 
 describe('GET contacts — view=priority（WP3 R5 接线）', () => {
+  it('只读名单计算所需触点字段，并返回分段计时', async () => {
+    const req = new NextRequest('http://localhost/api/clients/cts/crm/contacts?view=priority')
+    const res = await GET(req, { params: { id: 'cts' } })
+    expect(res.status).toBe(200)
+    const touch = recorded.find((r) => r.table === 'contact_touchpoints')
+    expect(touch?.columns?.split(', ')).not.toContain('summary')
+    expect(touch?.columns?.split(', ')).toEqual(expect.arrayContaining(['raw', 'metadata']))
+    expect(touch?.eqs).toContainEqual(['client_id', 'cts'])
+    const timing = res.headers.get('Server-Timing') ?? ''
+    for (const step of ['gate', 'priority_reads', 'priority_enrich', 'priority_assemble', 'total']) {
+      expect(timing).toContain(`${step};dur=`)
+    }
+    expect(timing).not.toMatch(/cts|@/)
+  })
+
+  it('联系人还在读取时，并行开始补全资料和摘要查询', async () => {
+    let releaseContacts!: () => void
+    const contactsReady = new Promise<void>((resolve) => { releaseContacts = resolve })
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder = fakeDb(table)
+      if (table === 'contacts') {
+        const then = builder.then as (resolve: (v: unknown) => unknown) => unknown
+        builder.then = (resolve: (v: unknown) => unknown) => contactsReady.then(() => then(resolve))
+      }
+      return builder
+    })
+    const request = get('cts', '?view=priority')
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(recorded.some((r) => r.table === 'conversations' && r.columns?.includes('participant_name'))).toBe(true)
+      expect(recorded.some((r) => r.table === 'conversation_briefs')).toBe(true)
+    } finally {
+      releaseContacts()
+    }
+    expect((await request).status).toBe(200)
+  })
+
+  it('会话映射未返回时就开始读取摘要', async () => {
+    let releaseConversations!: () => void
+    const conversationsReady = new Promise<void>((resolve) => { releaseConversations = resolve })
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder = fakeDb(table)
+      const rec = recorded[recorded.length - 1]
+      if (table === 'conversations') {
+        const then = builder.then as (resolve: (v: unknown) => unknown) => unknown
+        builder.then = (resolve: (v: unknown) => unknown) =>
+          rec.columns === 'id, contact_id' ? conversationsReady.then(() => then(resolve)) : then(resolve)
+      }
+      return builder
+    })
+    const request = get('cts', '?view=priority')
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(recorded.some((r) => r.table === 'conversation_briefs')).toBe(true)
+    } finally {
+      releaseConversations()
+    }
+    expect((await request).status).toBe(200)
+  })
+
   it('自己人（own_email_domains 里的邮箱域名）不进 hot / cold 任何一张名单；别人照常', async () => {
     clientsLeadsConfig = { own_email_domains: ['example.com'] }
     const { body } = await get('cts', '?view=priority&open=hot,cold')
