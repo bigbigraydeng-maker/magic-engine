@@ -766,12 +766,19 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     scanRows = [{
       id: 'recent-sue', contact_id: 'a2', channel: 'phone', direction: 'outbound',
       occurred_at: new Date(Date.now() - 60_000).toISOString(), created_at: new Date().toISOString(),
-      summary: '已记通话', raw: '答应发送 catalogue', metadata: {}, source: 'me_manual',
+      summary: 'Sue 等待我们发送 catalogue。', raw: '答应发送 catalogue', metadata: {}, source: 'me_manual',
     }]
     const { body } = await get('cts', '?view=priority&stage=quoted')
     const listed = (body.sections as Array<{ items: Array<{ contactId: string }> | null }>).flatMap((section) => section.items ?? [])
     expect(listed.map((row) => row.contactId)).toEqual(['a1'])
     expect((body.recentNotes as Array<{ contactId: string }>).map((note) => note.contactId)).toEqual(['a2'])
+    expect((body.recentNotes as Array<{ touchpointId: string; aiSummary: string }>)[0]).toMatchObject({
+      touchpointId: 'recent-sue', aiSummary: 'Sue 等待我们发送 catalogue。',
+    })
+    const summaryQuery = recorded.find((r) => r.table === 'contact_touchpoints' && r.ins.some(([col]) => col === 'id'))
+    expect(summaryQuery?.columns).toBe('id, summary')
+    expect(summaryQuery?.eqs).toContainEqual(['client_id', 'cts'])
+    expect(summaryQuery?.ins).toContainEqual(['id', ['recent-sue']])
     const contactQueries = recorded.filter((r) => r.table === 'contacts')
     expect(contactQueries.some((r) => r.ins.some(([col]) => col === 'stage'))).toBe(true)
     expect(contactQueries.some((r) => !r.ins.some(([col]) => col === 'stage') &&

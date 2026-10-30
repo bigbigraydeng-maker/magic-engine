@@ -765,7 +765,7 @@ export default function CrmAllContactsPage() {
             onAssigneeFilterChange={setAssigneeFilter}
           />
 
-          {grouped && <RecentNotesPanel clientId={clientId} notes={recentNotes} openingContactId={openingRecentId} onOpen={(note) => void openRecentNote(note)} />}
+          {grouped && <RecentNotesPanel notes={recentNotes} openingContactId={openingRecentId} onOpen={(note) => void openRecentNote(note)} />}
 
           {!grouped && kindFilter === 'trade' && rows.length > 0 && (
             <TradeBatchPanel clientId={clientId} rows={rows} total={total} onLogged={(msg) => afterWrite(msg)} />

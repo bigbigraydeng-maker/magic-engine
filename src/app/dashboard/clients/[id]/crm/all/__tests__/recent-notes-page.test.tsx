@@ -21,7 +21,7 @@ it('批准的桌面版默认直接显示这批 11 位手记客户', () => {
     preview: '已记通话',
     content: '已记通话',
   }))
-  render(<RecentNotesPanel clientId="cts" notes={notes} onOpen={() => undefined} />)
+  render(<RecentNotesPanel notes={notes.map((note, i) => ({ ...note, touchpointId: `t${i}` }))} onOpen={() => undefined} />)
   expect(screen.getAllByRole('button', { name: /Guest/ })).toHaveLength(11)
   expect(screen.queryByRole('button', { name: /展开这/ })).toBeNull()
   expect(screen.getByText('按写入时间排序')).toBeTruthy()
@@ -103,23 +103,30 @@ it('连续点两位跨页客户时，较慢的旧请求不会把抽屉切回上�
   expect(screen.getByRole('heading', { name: 'Second customer' })).toBeTruthy()
 })
 
-it('最近手记点卡片只展开原文和 AI 概况；旧 AI 有时间提醒，姓名保留原文', async () => {
+it('最近手记点卡片直接展开这笔的 AI 摘要，姓名保留原文，不借用对话概况', () => {
   const onOpen = vi.fn()
-  const fetchBrief = vi.fn(async () => ({ ok: true, json: async () => ({ brief: {
-    summary: '客户大卫·斯科特通过表单了解上海旅游。', customerNeeds: [], objections: [], promisesMade: [],
-    nextAction: null, intentLevel: null, channel: 'email', generatedAt: '2026-10-29T00:00:00Z',
-  } }) }))
+  const fetchBrief = vi.fn()
   vi.stubGlobal('fetch', fetchBrief)
-  render(<RecentNotesPanel clientId="cts" notes={[{
+  render(<RecentNotesPanel notes={[{
+    touchpointId: 't1',
     contactId: 'c1', name: 'David Scott', at: '2026-10-31T00:00:00Z', occurredAt: '2026-10-31T00:00:00Z',
-    preview: '答应发送', content: '答应发送完整的上海行程资料',
+    preview: '答应发送', content: '答应发送完整的上海行程资料', aiSummary: '客户大卫·斯科特想看上海行程。',
   }]} onOpen={onOpen} />)
   fireEvent.click(screen.getByRole('button', { name: /David Scott/ }))
   expect(screen.getByText('答应发送完整的上海行程资料')).toBeTruthy()
   expect(onOpen).not.toHaveBeenCalled()
-  expect((await screen.findByText(/客户 David Scott 通过表单/)).textContent).not.toContain('大卫·斯科特')
-  expect(screen.getByText(/AI 概况早于最近手记/)).toBeTruthy()
-  expect(fetchBrief).toHaveBeenCalledTimes(1)
+  expect(screen.getByText(/客户 David Scott 想看上海行程/)).toBeTruthy()
+  expect(fetchBrief).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: /David Scott/ }))
   expect(screen.queryByText('答应发送完整的上海行程资料')).toBeNull()
+})
+
+it('没有单独 AI 摘要时保留员工原文，不误拿旧的对话概况', () => {
+  render(<RecentNotesPanel notes={[{
+    touchpointId: 't2', contactId: 'c2', name: 'Vivien Lum',
+    at: '2026-10-31T00:00:00Z', occurredAt: '2026-10-31T00:00:00Z',
+    preview: '想看上海行程', content: '想看上海行程', aiSummary: '想看上海行程',
+  }]} onOpen={() => undefined} />)
+  fireEvent.click(screen.getByRole('button', { name: /Vivien Lum/ }))
+  expect(screen.getByText(/这笔手记暂无单独 AI 摘要/)).toBeTruthy()
 })
