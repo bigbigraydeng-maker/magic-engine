@@ -99,6 +99,7 @@ let rpcRows: Array<{ id: string; total: number }> | null = null
 let rpcCalls: Array<Record<string, unknown>> = []
 /** `clients.leads_config` 的假返回（view=priority 用它认「自己人」邮箱域名）。 */
 let clientsLeadsConfig: unknown = null
+let identityRows: Row[] = []
 
 /**
  * 假 builder。链式方法都返回自己，`then` 让它可 await。
@@ -147,6 +148,7 @@ function fakeDb(table: string) {
         return resolve({ data: CONTACTS, count: null, error: null })
       }
       if (table === 'client_pipeline_stages') return resolve({ data: STAGES, error: null })
+      if (table === 'contact_identities') return resolve({ data: identityRows, error: null })
       if (table === 'contact_touchpoints') {
         // 排序用的「最新触点」扫描没有 .in('contact_id', …)；取页用的有。
         const isScan = !rec.ins.some(([col]) => col === 'contact_id')
@@ -168,6 +170,7 @@ async function get(clientId: string, qs = '') {
 }
 
 beforeEach(() => {
+  identityRows = []
   resetBriefCacheForTests()
   recorded = []
   scanRows = null
@@ -272,6 +275,15 @@ describe('GET contacts — 分页形状', () => {
   })
 
   describe('数据库函数路径', () => {
+    it('平铺视图搜索次要联系方式时，将对应 ID 交给分页函数', async () => {
+      const id = '11111111-1111-4111-8111-111111111111'
+      identityRows = [{ contact_id: id }]
+      rpcRows = [{ id: 'a1', total: 1 }]
+      await get('client-a', '?page=1&q=guest%40example.nz')
+      expect(rpcCalls[0].p_q).toBeNull()
+      expect(rpcCalls[0].p_in_ids).toContain(id)
+      expect(recorded.find((r) => r.table === 'contact_identities')?.eqs).toContainEqual(['client_id', 'client-a'])
+    })
     it('函数可用 → 用它返回的 id 顺序和总数，不再取全客户 id 列表也不扫触点', async () => {
       rpcRows = [{ id: 'a3', total: 3 }, { id: 'a1', total: 3 }]
       const { body } = await get('client-a', '?page=1&perPage=2')
@@ -289,7 +301,8 @@ describe('GET contacts — 分页形状', () => {
       expect(rpcCalls[0]).toMatchObject({
         p_client_id: 'client-a',
         p_stages: ['quoted'],
-        p_q: 'Bob',
+        p_q: null,
+        p_in_ids: ['a1', 'a2', 'a3'],
         p_limit: 1,
         p_offset: 1,
       })
@@ -438,6 +451,53 @@ describe('GET contacts — 筛选落到 SQL', () => {
 })
 
 describe('GET contacts — view=priority（WP3 R5 接线）', () => {
+  it('按电话搜索时兼容本地格式，并将触点查询限制到命中的联系人', async () => {
+    const { status } = await get('cts', '?view=priority&q=021%20363%20598')
+    expect(status).toBe(200)
+    const contacts = recorded.find((r) => r.table === 'contacts' && r.ors.length > 0)
+    expect(contacts?.ors[0]).toContain('primary_phone.ilike.%+6421363598%')
+    const touchQueries = recorded.filter((r) => r.table === 'contact_touchpoints')
+    expect(touchQueries.length).toBeGreaterThan(0)
+    expect(touchQueries.every((r) => r.ins.some(([col]) => col === 'contact_id'))).toBe(true)
+  })
+
+  it('按邮箱搜索也会查同客户的其他联系方式', async () => {
+    const id = '11111111-1111-4111-8111-111111111111'
+    identityRows = [{ contact_id: id }]
+    const { status } = await get('cts', '?view=priority&q=example%40mail.nz')
+    expect(status).toBe(200)
+    const identities = recorded.find((r) => r.table === 'contact_identities')
+    expect(identities?.eqs).toContainEqual(['client_id', 'cts'])
+    expect(identities?.ors[0]).toContain('value.ilike.%example@mail.nz%')
+    expect(recorded.some((r) => r.table === 'contacts' && r.ins.some(([col, values]) => col === 'id' && values.includes(id)))).toBe(true)
+  })
+
+  it('只有次要邮箱命中时，仍把对应联系人返回到搜索结果', async () => {
+    const id = '11111111-1111-4111-8111-111111111111'
+    identityRows = [{ contact_id: id }]
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder = fakeDb(table)
+      const rec = recorded[recorded.length - 1]
+      if (table === 'contacts') {
+        builder.then = (resolve: (value: unknown) => unknown) => resolve({
+          data: rec.ins.some(([col, values]) => col === 'id' && values.includes(id))
+            ? [{ ...CONTACTS[0], id, display_name: 'Secondary Match' }]
+            : [],
+          error: null,
+        })
+      }
+      return builder
+    })
+    const { status, body } = await get('cts', '?view=priority&open=hot,cold&q=alt%40example.nz')
+    expect(status).toBe(200)
+    const rows = (body.sections as Array<{ items: Array<{ contactId: string }> | null }>).flatMap((s) => s.items ?? [])
+    expect(rows.map((row) => row.contactId)).toContain(id)
+  })
+
+  it('电话括号可搜索；带逗号的普通搜索仍拒绝', async () => {
+    expect((await get('cts', '?view=priority&q=%28021%29%20363%20598')).status).toBe(200)
+    expect((await get('cts', '?view=priority&q=abc%2Cdef')).status).toBe(400)
+  })
   it('只读名单计算所需触点字段，并返回分段计时', async () => {
     const req = new NextRequest('http://localhost/api/clients/cts/crm/contacts?view=priority')
     const res = await GET(req, { params: { id: 'cts' } })

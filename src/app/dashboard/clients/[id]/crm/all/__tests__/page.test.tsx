@@ -13,7 +13,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import CrmAllContactsPage from '../page'
 
 vi.mock('next/navigation', () => ({
@@ -178,6 +178,52 @@ describe('平铺名单每页 50 人', () => {
 })
 
 describe('搜索框', () => {
+  it('较早的慢请求不能覆盖较新的搜索结果', async () => {
+    let releaseOld: (() => void) | undefined
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/crm/contacts?')) {
+        const q = new URL(url, 'https://example.test').searchParams.get('q')
+        if (q === 'old') await new Promise<void>((resolve) => { releaseOld = resolve })
+        const name = q === 'old' ? 'Old Result' : q === 'new' ? 'New Result' : 'Initial Result'
+        return { ok: true, json: async () => ({ items: [contact('c1', name)], total: 1, columns: [] }) }
+      }
+      return { ok: true, json: async () => ({ stages: [] }) }
+    }))
+    setUrl('?view=all')
+    render(<CrmAllContactsPage />)
+    const input = await screen.findByPlaceholderText(/客户打回来了/)
+    await screen.findByText('Initial Result')
+    fireEvent.change(input, { target: { value: 'old' } })
+    await waitFor(() => expect(releaseOld).toBeDefined())
+    fireEvent.change(input, { target: { value: 'new' } })
+    await screen.findByText('New Result')
+    await act(async () => { releaseOld!(); await Promise.resolve() })
+    expect(screen.getByText('New Result')).toBeTruthy()
+    expect(screen.queryByText('Old Result')).toBeNull()
+  })
+
+  it('搜索时打开原本收起的分组，让匹配的人可见', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/crm/contacts?')) {
+        urls.push(url)
+        const params = new URL(url, 'https://example.test').searchParams
+        const open = (params.get('open') ?? '').includes('cold')
+        return { ok: true, json: async () => ({ view: 'priority', columns: [], stages: [], sections: [
+          { key: 'hot', title: '今天要联系', hint: '', total: 0, open: true, items: [] },
+          { key: 'cold', title: '先放着', hint: '', total: 1, open, items: open ? [contact('c1', 'Cold Match')] : null },
+        ] }) }
+      }
+      return { ok: true, json: async () => ({ stages: [] }) }
+    }))
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    const input = await screen.findByPlaceholderText(/客户打回来了/)
+    fireEvent.change(input, { target: { value: 'Cold' } })
+    expect(await screen.findByText('Cold Match')).toBeTruthy()
+    expect(urls.some((url) => url.includes('q=Cold') && url.includes('open=hot%2Ccold'))).toBe(true)
+  })
+
   it('敲字触发重新加载时，输入框不被卸载（焦点不丢，不像整页刷新）', async () => {
     let release: (() => void) | null = null
     vi.stubGlobal(

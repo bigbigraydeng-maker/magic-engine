@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { contactCardTitle } from '@/lib/crm/display-name'
-import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
+import { buildIdentities, normalisePhone, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
 import { contactKindOf, isSystemAccountName, normaliseDomain, readDomainRules, SYSTEM_ACCOUNT_NAMES } from '@/lib/crm/contact-kind'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
 import { segmentContact } from '@/lib/crm/segments'
@@ -131,7 +131,7 @@ function parseListQuery(url: URL): ListQuery | { error: string } {
 
   // PostgREST 的 `or(...)` 语法用逗号和括号分隔条件，q 里带这些字符会把
   // 语法拆坏（甚至注入别的条件）。不尝试转义 —— 直接拒绝，让调用方自己清。
-  if (q !== null && /[,()]/.test(q)) return { error: 'invalid characters in q' }
+  if (q !== null && /[,()]/.test(q) && !(/^[+\d\s().-]+$/.test(q) && /\d/.test(q))) return { error: 'invalid characters in q' }
 
   const rawView = sp.get('view')
   if (rawView !== null && rawView !== 'priority') return { error: 'invalid view' }
@@ -212,8 +212,34 @@ function contactFilterParams(query: ListQuery): {
     orExpr:
       query.q === null
         ? null
-        : `display_name.ilike.%${query.q}%,primary_phone.ilike.%${query.q}%,primary_email.ilike.%${query.q}%`,
+        : searchFilters(query.q, ['display_name', 'primary_phone', 'primary_email']),
   }
+}
+
+/** Build safe PostgREST search patterns for human-formatted NZ/AU phone numbers. */
+function searchFilters(q: string, fields: string[]): string {
+  const phoneLike = /^[+\d\s().-]+$/.test(q)
+  const safe = phoneLike ? q.replace(/[()]/g, '') : q
+  const patterns = new Set([safe])
+  if (phoneLike) {
+    const digits = q.replace(/\D/g, '')
+    if (digits) patterns.add(digits)
+    if (digits.startsWith('0') && digits.length >= 3) patterns.add(digits.slice(1))
+    for (const country of ['NZ', 'AU'] as const) {
+      const normalised = normalisePhone(q, country)
+      if (normalised) patterns.add(normalised)
+    }
+  }
+  return fields.flatMap((field) => [...patterns].map((pattern) => `${field}.ilike.%${pattern}%`)).join(',')
+}
+
+async function searchIdentityContactIds(clientId: string, q: string): Promise<string[]> {
+  const rows = await fetchAll<{ contact_id: string }>((from, to) =>
+    supabaseAdmin.from('contact_identities').select('contact_id').eq('client_id', clientId)
+      .in('kind', ['phone', 'email']).or(searchFilters(q, ['value']))
+      .order('id', { ascending: true }).range(from, to),
+  )
+  return [...new Set(rows.map((row) => row.contact_id).filter((id) => UUID_RE.test(id)))]
 }
 
 /**
@@ -514,6 +540,20 @@ async function getPaged(
       }
     }
 
+    // Search all stored phone/email identities as well as the primary fields.
+    // Pass the resulting IDs to the RPC rather than a long PostgREST URL.
+    if (query.q !== null && filters.orExpr !== null) {
+      const [primary, secondary] = await Promise.all([
+        fetchAll<{ id: string }>((from, to) => supabaseAdmin.from('contacts').select('id')
+          .eq('client_id', clientId).or(filters.orExpr!).order('id', { ascending: true }).range(from, to)),
+        searchIdentityContactIds(clientId, query.q),
+      ])
+      const ids = [...new Set([...primary.map((row) => row.id), ...secondary])]
+      const permitted = kindInIds === null ? ids : ids.filter((id) => kindInIds!.includes(id))
+      if (permitted.length === 0) return NextResponse.json({ total: 0, page: query.page, perPage: query.perPage, columns: [], items: [], viewerEmail })
+      kindInIds = permitted
+    }
+
     // 先取「符合筛选的全部人」的 id（几百到一两千行，只带 id 和首次进线时间），再按「最近有互动」排好序，
     // 最后只把当前这一页的人取全。排序不能放在 SQL 里：「最近联系」是逐人对触点取最大值，
     // 而 contacts.last_seen_at 不可信（生产里 721/1159 人比真实最新触点旧）。见 contact-touch-order.ts。
@@ -533,7 +573,7 @@ async function getPaged(
         supabaseAdmin.rpc('crm_contacts_page_by_latest_touch', {
           p_client_id: clientId,
           p_stages: filters.stages,
-          p_q: query.q,
+          p_q: null,
           p_in_ids: kindInIds,
           p_not_in_ids: kindNotInIds !== null && kindNotInIds.length > 0 ? kindNotInIds : null,
           p_limit: query.perPage,
@@ -560,7 +600,7 @@ async function getPaged(
           const first = await supabaseAdmin.rpc('crm_contacts_page_by_latest_touch', {
             p_client_id: clientId,
             p_stages: filters.stages,
-            p_q: query.q,
+            p_q: null,
             p_in_ids: kindInIds,
             p_not_in_ids: kindNotInIds !== null && kindNotInIds.length > 0 ? kindNotInIds : null,
             p_limit: 1,
@@ -623,12 +663,14 @@ async function getPaged(
     }
 
     if (!fastDone) {
-      const [idRows, stages] = await Promise.all([
-        fetchAll<{ id: string; first_seen_at: string | null }>((from, to) => {
+      const idChunks: Array<string[] | null> = kindInIds === null ? [null] : Array.from(
+        { length: Math.ceil(kindInIds.length / 100) }, (_, i) => kindInIds!.slice(i * 100, i * 100 + 100),
+      )
+      const [idParts, stages] = await Promise.all([
+        Promise.all(idChunks.map((chunk) => fetchAll<{ id: string; first_seen_at: string | null }>((from, to) => {
           let b = supabaseAdmin.from('contacts').select('id, first_seen_at').eq('client_id', clientId)
           if (filters.stages !== null) b = b.in('stage', filters.stages)
-          if (filters.orExpr !== null) b = b.or(filters.orExpr)
-          if (kindInIds !== null) b = b.in('id', kindInIds)
+          if (chunk !== null) b = b.in('id', chunk)
           if (kindNotInIds !== null && kindNotInIds.length > 0) {
             b = b.not('id', 'in', `(${kindNotInIds.join(',')})`)
           }
@@ -636,7 +678,7 @@ async function getPaged(
           if (assigneeFilter?.kind === 'null') b = b.is('assigned_to', null)
           else if (assigneeFilter?.kind === 'eq') b = b.eq('assigned_to', assigneeFilter.email)
           return b.order('id', { ascending: true }).range(from, to)
-        }),
+        }))),
         fetchAll<StageRow>((from, to) =>
           supabaseAdmin
             .from('client_pipeline_stages')
@@ -646,6 +688,7 @@ async function getPaged(
             .range(from, to),
         ),
       ])
+      const idRows = idParts.flat()
 
       const orderedIds = await orderContactIdsByLatestTouch({
         contacts: idRows.map((r) => ({ id: r.id, firstSeenAt: r.first_seen_at })),
@@ -735,23 +778,43 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   // Request-local only: both consumers use this client's same conversation rows.
   const sharedConversations = loadAllEnrichmentConversations(supabaseAdmin, clientId)
   sharedConversations.catch(() => undefined)
-  const enrichmentInputs = loadEnrichmentInputs(supabaseAdmin, clientId, undefined, sharedConversations)
-  enrichmentInputs.catch(() => undefined)
-  try {
-    const filters = contactFilterParams(query)
-    ;[contacts, touches, stageRows, briefs, leadsConfig] = await Promise.all([
+  const filters = contactFilterParams(query)
+  const contactsRead = fetchAll<ContactRow>((from, to) => {
+    let b = supabaseAdmin.from('contacts').select(PAGE_CONTACT_COLUMNS).eq('client_id', clientId)
+    if (filters.stages !== null) b = b.in('stage', filters.stages)
+    if (filters.orExpr !== null) b = b.or(filters.orExpr)
+    return b.order('id', { ascending: true }).range(from, to)
+  })
+  const selectedContacts = query.q === null ? contactsRead : (async () => {
+    const [primary, identities] = await Promise.all([
+      contactsRead,
+      searchIdentityContactIds(clientId, query.q!),
+    ])
+    const ids = identities
+    const parts = await Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) =>
       fetchAll<ContactRow>((from, to) => {
-        let b = supabaseAdmin
-          .from('contacts')
-          .select(PAGE_CONTACT_COLUMNS)
-          .eq('client_id', clientId)
+        let b = supabaseAdmin.from('contacts').select(PAGE_CONTACT_COLUMNS).eq('client_id', clientId).in('id', ids.slice(i * 100, i * 100 + 100))
         if (filters.stages !== null) b = b.in('stage', filters.stages)
-        if (filters.orExpr !== null) b = b.or(filters.orExpr)
         return b.order('id', { ascending: true }).range(from, to)
       }),
+    ))
+    return [...new Map([...primary, ...parts.flat()].map((row) => [row.id, row])).values()].sort((a, b) => a.id.localeCompare(b.id))
+  })()
+  selectedContacts.catch(() => undefined)
+  const enrichmentInputs = query.q === null
+    ? loadEnrichmentInputs(supabaseAdmin, clientId, undefined, sharedConversations)
+    : selectedContacts.then((rows) => loadEnrichmentInputs(supabaseAdmin, clientId, rows.map((row) => row.id)))
+  enrichmentInputs.catch(() => undefined)
+  try {
+    ;[contacts, touches, stageRows, briefs, leadsConfig] = await Promise.all([
+      selectedContacts,
       // Summary is not consumed by the priority calculation or the list row.
       // Keep raw and metadata: they affect follow-up and do-not-contact rules.
-      fetchAllBatched<Omit<TouchRow, 'summary'>>((from, to) =>
+      query.q !== null ? selectedContacts.then(async (rows) => {
+        const ids = rows.map((row) => row.id)
+        const parts = await Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) => fetchTouchesFor(clientId, ids.slice(i * 100, i * 100 + 100))))
+        return parts.flat().map((row) => ({ ...row, summary: null }))
+      }) : fetchAllBatched<Omit<TouchRow, 'summary'>>((from, to) =>
         supabaseAdmin
           .from('contact_touchpoints')
           .select('id, contact_id, channel, direction, occurred_at, raw, metadata, source')
