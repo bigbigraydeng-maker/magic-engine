@@ -723,12 +723,16 @@ async function getPaged(
  * CTS 量级约 5k 行 / 1.4MB，跟今天页每次打开读的量相同。真要收窄得按 100 个
  * contact_id 一批走 `.in()`（PostgREST URL 长度限制），留作后续一轮。
  */
-async function getPriority(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
+async function getPriority(clientId: string, query: ListQuery, viewerEmail: string | null, timer: StepTimer): Promise<NextResponse> {
   let contacts: ContactRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
   let briefs: BriefByContact
   let leadsConfig: unknown = null
+  // Enrichment reads the same tenant-wide inputs regardless of the filtered contact list.
+  // Start it with the other reads instead of waiting for all of them to finish.
+  const enrichmentInputs = loadEnrichmentInputs(supabaseAdmin, clientId)
+  enrichmentInputs.catch(() => undefined)
   try {
     const filters = contactFilterParams(query)
     ;[contacts, touches, stageRows, briefs, leadsConfig] = await Promise.all([
@@ -741,15 +745,17 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
         if (filters.orExpr !== null) b = b.or(filters.orExpr)
         return b.order('id', { ascending: true }).range(from, to)
       }),
-      fetchAll<TouchRow>((from, to) =>
+      // Summary is not consumed by the priority calculation or the list row.
+      // Keep raw and metadata: they affect follow-up and do-not-contact rules.
+      fetchAll<Omit<TouchRow, 'summary'>>((from, to) =>
         supabaseAdmin
           .from('contact_touchpoints')
-          .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
+          .select('id, contact_id, channel, direction, occurred_at, raw, metadata, source')
           .eq('client_id', clientId)
           .order('occurred_at', { ascending: false })
           .order('id', { ascending: false })
           .range(from, to),
-      ),
+      ).then((rows) => rows.map((row) => ({ ...row, summary: null }))),
       fetchAll<StageRow>((from, to) =>
         supabaseAdmin
           .from('client_pipeline_stages')
@@ -772,6 +778,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       { status: 500 },
     )
   }
+  timer.step('priority_reads')
 
   // 系统账号（WhatsApp Business 等）不是客人，不进「智能」视图的任何一栏。
   contacts = contacts.filter((c) => !isSystemAccountName(c.display_name))
@@ -784,7 +791,8 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     contacts.filter((c) => contactKindOf(c.primary_email ? [c.primary_email] : [], ownRules) === 'trade').map((c) => c.id),
   )
 
-  const enrichedPri = await enrichForDisplay(clientId, contacts, touches, false)
+  const enrichedPri = await enrichForDisplay(clientId, contacts, touches, false, enrichmentInputs)
+  timer.step('priority_enrich')
   contacts = enrichedPri.contacts
   touches = enrichedPri.touches
 
@@ -819,13 +827,16 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     },
   )
 
-  return NextResponse.json({
+  timer.step('priority_assemble')
+  const res = NextResponse.json({
     view: 'priority',
     focus,
     columns: visibleCustomColumns(customPerContact),
     sections,
     viewerEmail,
   })
+  res.headers.set('Server-Timing', timer.header())
+  return res
 }
 
 /**
@@ -857,7 +868,7 @@ export async function GET(
   }
   if (parsed.ids !== undefined) return getByIds(clientId, parsed.ids, viewerEmail, timer)
   if (parsed.paged) return getPaged(clientId, parsed, viewerEmail, timer)
-  if (parsed.view === 'priority') return getPriority(clientId, parsed, viewerEmail)
+  if (parsed.view === 'priority') return getPriority(clientId, parsed, viewerEmail, timer)
 
   // 必须分页拉全 —— Supabase 单次查询硬顶 1000 行，`.limit(20000)` 会被静默
   // 砍掉且不报错。实测 CTS：库里 1271 条触点只回 1000 条；配合 order desc，
