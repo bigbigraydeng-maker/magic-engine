@@ -55,6 +55,8 @@ export interface TouchRow {
   channel: string
   direction: 'inbound' | 'outbound'
   occurred_at: string
+  /** Staff-note write time can differ from the backfilled call time. */
+  created_at?: string | null
   summary: string | null
   /** 原话。存量结果值读的时候要靠它重判一次（见 reclassifyStoredOutcome）。 */
   raw: string | null

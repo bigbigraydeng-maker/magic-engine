@@ -25,6 +25,7 @@ import { CrmTabs } from '../_components/CrmTabs'
 import { type StageOption } from '../_components/ComposeNote'
 import { PersonDrawer } from '../_components/PersonDrawer'
 import { PrioritySectionHeader } from './_components/PrioritySection'
+import { RecentNotesPanel } from './_components/RecentNotesPanel'
 import { BookingTrackerPanel } from '../_components/bookings/BookingTrackerPanel'
 import { useOpenContactFromNudge } from '../_components/bookings/useOpenContactFromNudge'
 import { takeContactName } from '../_components/bookings/payments-return'
@@ -39,6 +40,7 @@ import { ContactTableHead } from './_components/ContactTableHead'
 import { ListFilters, TradeBatchPanel, type AssigneeView } from './_components/ListFilters'
 import { FlatPagination, SectionPagerRow } from './_components/ListPagination'
 import { isToday, toDrawerRow, sectionRange, type PrioritySectionData } from './_components/list-helpers'
+import type { RecentStaffNote } from '@/lib/crm/recent-staff-notes'
 
 /** 抽屉打开时正在等下一页数据 —— 拿到之后打开这一页的首个/末个。 */
 type PendingNav =
@@ -105,6 +107,10 @@ export default function CrmAllContactsPage() {
   /** 读完网址、定好进哪个视图之前不发列表请求 —— 否则默认视图一换，会白发一次请求再作废。 */
   const [viewReady, setViewReady] = useState(false)
   const [sections, setSections] = useState<PrioritySectionData[]>([])
+  const [recentNotes, setRecentNotes] = useState<RecentStaffNote[]>([])
+  const [quickRow, setQuickRow] = useState<ContactRow | null>(null)
+  const [openingRecentId, setOpeningRecentId] = useState<string | null>(null)
+  const recentOpenSeqRef = useRef(0)
   /** 展开哪些段。null = 还没动过，用服务端默认（前两段展开）。 */
   const [openSections, setOpenSections] = useState<SectionKey[] | null>(null)
   /**
@@ -191,6 +197,7 @@ export default function CrmAllContactsPage() {
         items?: ContactRow[]
         view?: string
         sections?: PrioritySectionData[]
+        recentNotes?: RecentStaffNote[]
         stages?: StageOption[]
         focus?: { found: boolean; section?: SectionKey; page?: number }
         error?: string
@@ -211,6 +218,7 @@ export default function CrmAllContactsPage() {
       setViewerEmail(json.viewerEmail ?? null)
       if (json.view === 'priority') {
         const secs = json.sections ?? []
+        setRecentNotes(json.recentNotes ?? [])
         setSections(secs)
         setColumns(json.columns ?? [])
         setTotal(secs.reduce((n, s) => n + s.total, 0))
@@ -225,6 +233,7 @@ export default function CrmAllContactsPage() {
           })
         }
       } else {
+        setRecentNotes([])
         setRows(json.items ?? [])
         setColumns(json.columns ?? [])
         setTotal(json.total ?? 0)
@@ -372,6 +381,9 @@ export default function CrmAllContactsPage() {
   }
 
   function openDrawer(contactId: string) {
+    recentOpenSeqRef.current += 1
+    setOpeningRecentId(null)
+    setQuickRow(null)
     setDrawerContactId(contactId)
     if (grouped) {
       setDrawerSectionKey(findRowInSections(contactId)?.sectionKey ?? null)
@@ -381,7 +393,10 @@ export default function CrmAllContactsPage() {
   }
 
   function closeDrawer() {
+    recentOpenSeqRef.current += 1
+    setOpeningRecentId(null)
     setDrawerContactId(null)
+    setQuickRow(null)
     setDrawerSectionKey(null)
     setPendingNav(null)
   }
@@ -389,8 +404,9 @@ export default function CrmAllContactsPage() {
   // 当前抽屉里这个人的完整行数据——从 rows（平铺）或 sections（分段）里找，
   // 两边共用同一份 rows（loadList 里两条路径都会 setRows）。
   const drawerContactRow = useMemo(
-    () => (drawerContactId ? (rows.find((r) => r.contactId === drawerContactId) ?? null) : null),
-    [drawerContactId, rows],
+    () => (drawerContactId ? (rows.find((r) => r.contactId === drawerContactId) ??
+      (quickRow?.contactId === drawerContactId ? quickRow : null)) : null),
+    [drawerContactId, rows, quickRow],
   )
 
   // 数据重新加载完之后，抽屉打开的这个人如果已经不在名单里了（被筛选/搜索掉出，
@@ -404,12 +420,42 @@ export default function CrmAllContactsPage() {
   // 接管，不该被这条误判。
   useEffect(() => {
     if (!drawerContactId || loading || sectionsLoading || pendingNav) return
-    if (!rows.some((r) => r.contactId === drawerContactId)) {
+    if (!rows.some((r) => r.contactId === drawerContactId) && quickRow?.contactId !== drawerContactId) {
       setToast('他不在这份名单里了 —— 用上面的搜索框找找看')
       window.setTimeout(() => setToast(null), 4000)
       closeDrawer()
     }
-  }, [drawerContactId, rows, loading, sectionsLoading, pendingNav])
+  }, [drawerContactId, rows, quickRow, loading, sectionsLoading, pendingNav])
+
+  // Open a recent note even when its contact is on another queue page.
+  const openRecentNote = async (note: RecentStaffNote) => {
+    const onPage = rows.find((row) => row.contactId === note.contactId)
+    if (onPage) { openDrawer(note.contactId); return }
+    const requestSeq = ++recentOpenSeqRef.current
+    setOpeningRecentId(note.contactId)
+    try {
+      const found = await readContactById(note.contactId)
+      if (requestSeq !== recentOpenSeqRef.current) return
+      setQuickRow(found)
+      setDrawerSectionKey(null)
+      setDrawerContactId(found.contactId)
+    } catch {
+      if (requestSeq !== recentOpenSeqRef.current) return
+      setToast('暂时打不开这位客人，请用上方搜索框查找')
+      window.setTimeout(() => setToast(null), 4000)
+    } finally {
+      if (requestSeq === recentOpenSeqRef.current) setOpeningRecentId(null)
+    }
+  }
+
+  async function readContactById(contactId: string): Promise<ContactRow> {
+    const res = await fetch(`/api/clients/${clientId}/crm/contacts?ids=${encodeURIComponent(contactId)}`)
+    if (!res.ok) throw new Error('read failed')
+    const data = await res.json() as { items?: ContactRow[] }
+    const found = data.items?.find((row) => row.contactId === contactId)
+    if (!found) throw new Error('missing contact')
+    return found
+  }
 
   // 「付款要催」名单里点一个人：在当前这页就直接开抽屉，不在就先按名字搜，搜到再开。
   const openContactFromNudge = useOpenContactFromNudge({
@@ -436,6 +482,7 @@ export default function CrmAllContactsPage() {
   /** 组装 nextNavStep 的输入——分段模式用 sections 里那一段，平铺模式用 sorted 那份已排序的行。 */
   function buildNavInput(direction: 'prev' | 'next'): NavInput | null {
     if (!drawerContactId) return null
+    if (quickRow?.contactId === drawerContactId && !rows.some((row) => row.contactId === drawerContactId)) return null
     if (grouped && drawerSectionKey) {
       const secIdx = sections.findIndex((s) => s.key === drawerSectionKey)
       const sec = sections[secIdx]
@@ -549,6 +596,12 @@ export default function CrmAllContactsPage() {
   const afterWrite = (msg: string, reload = true) => {
     setToast(msg)
     if (reload) void loadList()
+    if (quickRow) {
+      const id = quickRow.contactId
+      void readContactById(id).then((fresh) => setQuickRow((current) => current?.contactId === id ? fresh : current)).catch(() => {
+        // The list reload still completes; the contact is read again next time it opens.
+      })
+    }
     window.setTimeout(() => setToast(null), 2400)
   }
 
@@ -711,6 +764,8 @@ export default function CrmAllContactsPage() {
             assigneeFilter={assigneeFilter}
             onAssigneeFilterChange={setAssigneeFilter}
           />
+
+          {grouped && <RecentNotesPanel notes={recentNotes} openingContactId={openingRecentId} onOpen={(note) => void openRecentNote(note)} />}
 
           {!grouped && kindFilter === 'trade' && rows.length > 0 && (
             <TradeBatchPanel clientId={clientId} rows={rows} total={total} onLogged={(msg) => afterWrite(msg)} />
