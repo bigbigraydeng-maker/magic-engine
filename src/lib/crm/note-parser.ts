@@ -358,6 +358,7 @@ These notes are terse shorthand typed by a salesperson right after a phone call 
 
 Rules:
 - summary: ONE short sentence in SIMPLIFIED CHINESE, plain language, for another salesperson to read.
+  Keep every customer's name exactly as written in the note. Never translate or transliterate a name.
 - travel_window: what the CUSTOMER said about when they travel, in their own terms ("明年三月" / "2027 年底"). Null if they never said.
 - tour_interest: tour name in ENGLISH exactly as written ("Best of China", "Tale of Two Cities", "Silk Road"). Null if none named.
 - competitor: another travel company the customer mentioned using or quoting. Null if none.

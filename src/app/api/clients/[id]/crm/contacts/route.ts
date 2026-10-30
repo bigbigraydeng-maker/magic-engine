@@ -909,6 +909,26 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   )
 
   timer.step('priority_assemble')
+  const recentNotes = query.q === null ? recentStaffNotes(noteContacts, touches, new Date()) : []
+  if (recentNotes.length > 0) {
+    // The main priority scan intentionally omits summary for every touchpoint.
+    // Read only the selected, latest staff note IDs so the inline card shows
+    // that exact note's summary, even when no conversation brief exists.
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('contact_touchpoints')
+        .select('id, summary')
+        .eq('client_id', clientId)
+        .in('id', recentNotes.map((note) => note.touchpointId))
+      if (!error && data) {
+        const summaries = new Map(data.map((row) => [row.id, row.summary]))
+        for (const note of recentNotes) note.aiSummary = summaries.get(note.touchpointId) ?? null
+      }
+    } catch {
+      // A missing summary must not hide the staff note or the contact list.
+    }
+  }
+  timer.step('priority_note_summaries')
   const res = NextResponse.json({
     view: 'priority',
     focus,
@@ -919,7 +939,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       marketingAction: isMarketingAction(stage.marketing_action) ? stage.marketing_action : 'suppress',
     })),
     sections,
-    recentNotes: query.q === null ? recentStaffNotes(noteContacts, touches, new Date()) : [],
+    recentNotes,
     viewerEmail,
   })
   res.headers.set('Server-Timing', timer.header())

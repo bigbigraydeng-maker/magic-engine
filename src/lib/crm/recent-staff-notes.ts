@@ -1,5 +1,6 @@
 /** 最近手记是翻找入口，不代表承诺已完成或该再次致电。 */
 export interface RecentStaffNote {
+  touchpointId: string
   contactId: string
   name: string
   /** 员工写入 CRM 的时间，用来排“最近记一笔”。 */
@@ -9,11 +10,14 @@ export interface RecentStaffNote {
   preview: string
   /** 展开时显示完整员工原文；preview 仅供收起时快速浏览。 */
   content: string
+  /** 仅这笔手记自己的解析摘要；没有时不借用旧对话概况。 */
+  aiSummary?: string | null
 }
 
 export function recentStaffNotes(
   contacts: ReadonlyArray<{ id: string; display_name: string | null }>,
   touches: ReadonlyArray<{
+    id: string
     contact_id: string
     source: string | null
     direction: 'inbound' | 'outbound'
@@ -38,6 +42,7 @@ export function recentStaffNotes(
     const existing = latest.get(touch.contact_id)
     if (!existing || atMs > Date.parse(existing.at)) {
       latest.set(touch.contact_id, {
+        touchpointId: touch.id,
         contactId: touch.contact_id,
         name,
         at: loggedAt,

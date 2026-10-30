@@ -3,6 +3,7 @@ import { recentStaffNotes } from '../recent-staff-notes'
 
 const now = new Date('2026-10-31T01:00:00Z')
 const note = (id: string, at: string, raw = '发送行程资料') => ({
+  id: `${id}-${at}`,
   contact_id: id, source: 'me_manual', direction: 'outbound' as const,
   occurred_at: at, raw, metadata: {} as Record<string, unknown>,
 })
@@ -20,8 +21,8 @@ describe('recentStaffNotes', () => {
       note('outsider', '2026-10-30T23:30:00Z'),
     ]
     expect(recentStaffNotes(contacts, touches, now)).toEqual([
-      { contactId: 'c228', name: 'Guest 228', at: '2026-10-30T23:00:00Z', occurredAt: '2026-10-30T23:00:00Z', preview: '答应发送 catalogue', content: '答应发送 catalogue' },
-      { contactId: 'c211', name: 'Guest 211', at: '2026-10-30T22:00:00Z', occurredAt: '2026-10-30T22:00:00Z', preview: '周一 9 点回电', content: '周一 9 点回电' },
+      { touchpointId: 'c228-2026-10-30T23:00:00Z', contactId: 'c228', name: 'Guest 228', at: '2026-10-30T23:00:00Z', occurredAt: '2026-10-30T23:00:00Z', preview: '答应发送 catalogue', content: '答应发送 catalogue' },
+      { touchpointId: 'c211-2026-10-30T22:00:00Z', contactId: 'c211', name: 'Guest 211', at: '2026-10-30T22:00:00Z', occurredAt: '2026-10-30T22:00:00Z', preview: '周一 9 点回电', content: '周一 9 点回电' },
     ])
   })
 
