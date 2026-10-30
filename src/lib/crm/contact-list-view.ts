@@ -18,6 +18,7 @@
 
 import { buildContactModel, type ContactRowLike, type StageMetaLike, type TouchpointRowLike } from './contact-model'
 import { segmentContact, SEGMENT_META, type SegmentResult } from './segments'
+import { dayRow } from './day-list'
 import { senderShapeOf } from './enquiry-screen/sender-shape'
 import { type IntentLevel } from './next-action'
 import {
@@ -48,6 +49,17 @@ export interface PriorityViewInput {
    * 命中的人挪到「先放着」并写明原因——只挪不删，仍在「全部客人」里看得见、点「同行」可筛出来。
    */
   tradeIds?: ReadonlySet<string>
+  /**
+   * 今天从哪一刻开始（客户所在地时间，毫秒）。**传了才做「当天名单不变」**：
+   * 员工今天记的笔记 / 打的电话不许把人从「今天要联系」挪走（day-list 的承诺）。
+   * 不传 = 旧行为（实时分段），给不需要这个保证的调用方 / 旧测试。
+   *
+   * 2026-10-30 事故：「全部客人」的两张名单一直是实时分段，从没走过 day-list，
+   * 员工记完笔记人就从「今天要联系」掉进「先放着」，以为没存上。
+   */
+  dayStartMs?: number
+  /** 今天真人联系过的人（`contactsTouchedToday` 算好传进来）。只在传了 `dayStartMs` 时用。 */
+  touchedToday?: ReadonlySet<string>
 }
 
 /**
@@ -137,11 +149,21 @@ export function buildPriorityView<T>(
     byId.set(c.id, c)
     const tps = byContact.get(c.id) ?? []
     const model = buildContactModel(c, tps, input.stageMeta)
-    const base = demoteNonEnquirySender(c, segmentContact(model, input.now))
+    // 传了 dayStartMs → 位置按「今天开工那一刻」的样子算（冻结），客人今天的动作照常实时进来。
+    const day =
+      input.dayStartMs !== undefined
+        ? dayRow(model, input.now, {
+            dayStartMs: input.dayStartMs,
+            touchedToday: input.touchedToday?.has(c.id) ?? false,
+          })
+        : null
+    const base = demoteNonEnquirySender(c, day ? day.seg : segmentContact(model, input.now))
     const seg = input.tradeIds?.has(c.id) ? demoteTrade(base) : base
     ranked.push({
       contactId: c.id,
       seg,
+      handled: day?.handled,
+      handledWhy: day?.handledWhy,
       intent: input.briefs?.get(c.id)?.intent ?? null,
       pinnedAt: (c as ContactRowLike & { pinned_at?: string | null }).pinned_at ?? null,
     })

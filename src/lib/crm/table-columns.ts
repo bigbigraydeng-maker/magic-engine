@@ -24,6 +24,8 @@ export interface TouchpointForColumn {
   channel: string
   occurredAt: string
   metadata: Record<string, unknown> | null
+  /** 触点来源（`contact_touchpoints.source`）。只用来认「员工手记」（me_manual）。可选：不传按非手记算。 */
+  source?: string | null
 }
 
 export interface CustomColumnDef {
@@ -63,7 +65,11 @@ function cleanValue(v: unknown): string | null {
  * 感兴趣的团。确定性两级取值（钉死成一个规则，防提示词一改就漂）：
  *   ① meta_lead_form 触点上的 tour_interest_raw —— 客户自己在 FB 表单下拉选的，
  *      最干净、最该信；多条取最近一条非空。
- *   ② 没有再退回手工笔记解析出的 metadata.tour_interest（最近一条非空）。
+ *   ② 没有再取**员工手记**（source = me_manual）解析出的 metadata.tour_interest（最近一条非空）。
+ *   ③ 再没有才取其他来源（AI 通话整理等，未经员工核实）解析出的值。
+ *
+ *   员工亲手写的笔记是最高置信度的证据（PM 2026-10-30）：它的值永远压过 AI 通话分析
+ *   这类待复核的来源，哪怕后者更新 —— 不做成「谁新听谁的」。
  * 实务上①覆盖几乎所有 FB 来源，②只对纯手工联系人生效。都没有就 null。
  */
 function extractTourInterest(touchpoints: TouchpointForColumn[]): string | null {
@@ -74,6 +80,11 @@ function extractTourInterest(touchpoints: TouchpointForColumn[]): string | null 
       const raw = cleanValue(t.metadata?.tour_interest_raw)
       if (raw) return raw
     }
+  }
+  for (const t of byRecent) {
+    if (t.source !== 'me_manual') continue
+    const staff = cleanValue(t.metadata?.tour_interest)
+    if (staff) return staff
   }
   for (const t of byRecent) {
     const parsed = cleanValue(t.metadata?.tour_interest)

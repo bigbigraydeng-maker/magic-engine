@@ -28,16 +28,14 @@ import {
   engagementFromMetadata,
   callStanceFromMetadata,
   isPhoneVerdict,
-  isFailedReach,
-  isUnansweredCall,
   latestIntentVerdict,
 } from '@/lib/crm/segments'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { isDoNotContact, withoutClearedDnc } from '@/lib/crm/dnc'
 import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { contactCardTitle } from '@/lib/crm/display-name'
-import { followUpMarks, localDay } from '@/lib/crm/follow-up-marks'
-import { dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
+import { followUpMarks } from '@/lib/crm/follow-up-marks'
+import { contactsTouchedToday, dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import {
@@ -371,25 +369,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
    *    真推迟的那一头不受影响：live 版看得见 `snooze_until`，
    *    `dayRow` 靠 `droppedOff` 照样把他标成已处理（理由写「标了：先放着…」）。
    */
-  const todayLocal = localDay(now.toISOString(), timeZone)
-  const touchedTodayIds = new Set(
-    touches
-      .filter(
-        (t) =>
-          t.direction === 'outbound' &&
-          !isAutomatedTouch(t.source, t.metadata) &&
-          !engagementFromMetadata(t.metadata) &&
-          t.metadata?.action !== 'snooze' &&
-          t.metadata?.action !== 'unsnooze' &&
-          // 拨到一个空号不算「我们出手了」—— 客人什么都没收到，
-          // 该走的备用渠道一次都还没走。判据跟 day-list 共用同一个函数。
-          !isFailedReach(t.metadata?.outcome as string | undefined) &&
-          // 电话系统记录的「没人接」同样不算出手（PM 2026-10-12）。
-          !isUnansweredCall(t.metadata) &&
-          localDay(t.occurred_at, timeZone) === todayLocal,
-      )
-      .map((t) => t.contact_id),
-  )
+  const touchedTodayIds = contactsTouchedToday(touches, now, timeZone)
 
   /**
    * 今天**从「还在名单上」被推进到「不再联系」**的那些人。

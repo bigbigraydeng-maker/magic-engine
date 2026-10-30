@@ -68,7 +68,17 @@
  */
 
 import type { ContactLike, IndustryPlaybook, SegmentResult, TouchpointLike } from './segments'
-import { TOURISM_PLAYBOOK, compareForWorklist, reachableChannel, segmentContact } from './segments'
+import {
+  TOURISM_PLAYBOOK,
+  compareForWorklist,
+  engagementFromMetadata,
+  isFailedReach,
+  isUnansweredCall,
+  reachableChannel,
+  segmentContact,
+} from './segments'
+import { isAutomatedTouch } from './automated-touch'
+import { localDay } from './follow-up-marks'
 
 /**
  * 冻结版 + 两个**永远不该被冻结**的显示值。
@@ -289,6 +299,43 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
           : null,
     handledKind: stillNeedsMe ? null : droppedOff ? 'closed' : opts.touchedToday ? 'followed' : null,
   }
+}
+
+/**
+ * 今天（按客户所在地）真人联系过的人。「今天要联系」页（today 路由）和「全部客人」
+ * 的两张名单（view=priority）共用这一份判据 —— 两处各写一套，同一个人会在一页灰、
+ * 另一页不灰，正是 2026-10-30 CTS 员工「记了笔记却在名单里找不到」的根源之一。
+ *
+ * 排除（都是真事故，原因见 today 路由当年的注释）：群发 / 机器发的、打开点击、
+ * 推迟 / 取消推迟、拨到空号、电话系统记的没人接。
+ */
+export function contactsTouchedToday(
+  touches: ReadonlyArray<{
+    contact_id: string
+    source: string | null
+    direction: 'inbound' | 'outbound'
+    occurred_at: string
+    metadata: Record<string, unknown> | null
+  }>,
+  now: Date,
+  timeZone: string,
+): Set<string> {
+  const todayLocal = localDay(now.toISOString(), timeZone)
+  return new Set(
+    touches
+      .filter(
+        (t) =>
+          t.direction === 'outbound' &&
+          !isAutomatedTouch(t.source, t.metadata) &&
+          !engagementFromMetadata(t.metadata) &&
+          t.metadata?.action !== 'snooze' &&
+          t.metadata?.action !== 'unsnooze' &&
+          !isFailedReach(t.metadata?.outcome as string | undefined) &&
+          !isUnansweredCall(t.metadata) &&
+          localDay(t.occurred_at, timeZone) === todayLocal,
+      )
+      .map((t) => t.contact_id),
+  )
 }
 
 /** 时间读不出来就当没有 —— 不猜。 */

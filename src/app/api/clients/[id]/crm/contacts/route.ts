@@ -31,6 +31,7 @@ import {
   type StageRow,
 } from '@/lib/crm/contact-response-row'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
+import { contactsTouchedToday, localDayStartMs } from '@/lib/crm/day-list'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
@@ -796,25 +797,41 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     byContact.set(t.contact_id, list)
   }
 
+  // 「今天」按客户所在地算（同 today 路由）：员工今天记的笔记 / 打的电话不许把人从
+  // 「今天要联系」挪走 —— 2026-10-30 CTS 员工记完笔记人掉进「先放着」，以为没存上。
+  let timeZone = 'Pacific/Auckland'
+  try {
+    const { data: cli } = await supabaseAdmin.from('clients').select('country').eq('id', clientId).maybeSingle()
+    if ((cli?.country ?? '').toUpperCase() === 'AU') timeZone = 'Australia/Sydney'
+  } catch {
+    // 读不到就按 NZ，猜错最多差两小时。
+  }
+  const nowPri = new Date()
+
   const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
   const { sections, focus } = buildPriorityView(
     {
       contacts,
       touchpoints: touches,
       stageMeta,
-      now: new Date(),
+      now: nowPri,
       perPage: query.perPage,
       open: query.open,
       page: query.sectionPage,
       focusContactId: query.focusContactId,
       briefs,
       tradeIds,
+      dayStartMs: localDayStartMs(nowPri, timeZone),
+      touchedToday: contactsTouchedToday(touches, nowPri, timeZone),
     },
     (row, ranked) => {
       const tps = byContact.get(row.id) ?? []
       const built = responseRowFor(row as ContactRow, tps, stageMeta, buildContactModel(row, tps, stageMeta), ranked.seg, briefs.get(row.id) ?? null)
       customPerContact.push(built.custom)
       built.row.sources = enrichedPri.sources.get(row.id) ?? []
+      // 今天已处理：页面就地变灰打勾，位置不动。
+      built.row.handled = ranked.handled === true
+      built.row.handledWhy = ranked.handledWhy ?? null
       return built.row
     },
   )

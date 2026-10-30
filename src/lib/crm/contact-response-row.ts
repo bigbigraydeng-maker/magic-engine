@@ -120,6 +120,7 @@ export function responseRowFor(
     channel: t.channel,
     occurredAt: t.occurred_at,
     metadata: t.metadata,
+    source: t.source,
   }))
   const custom = extractCustomColumns(forColumns)
 

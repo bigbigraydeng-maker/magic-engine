@@ -114,6 +114,13 @@ type TimelineEntry =
        * 销售会据此决定要不要解除全渠道停联 —— 而他以为自己在看客人说的话。
        */
       rawKind: 'verbatim' | 'ai_summary'
+      /**
+       * 员工自己在 CRM 里手记的一笔（`source = me_manual`）。前端据此把 `raw`（员工原话）当主行、
+       * AI 整理当次要行 —— 员工写的字是最高置信度的证据，AI 改写不能替代它（PM 2026-10-30）。
+       */
+      staffNote?: boolean
+      /** 谁记的（登录邮箱，`metadata.logged_by`）；不知道就没有。 */
+      loggedBy?: string | null
 
       tour: string | null
       outcome: string | null
@@ -330,6 +337,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       dncFlag: m.do_not_contact === true,
       // 外呼那条路写的是模型摘要，不是逐字原话 —— 靠 voice_call_id 认出来。
       rawKind: m.voice_call_id ? 'ai_summary' : 'verbatim',
+      ...(t.source === 'me_manual' ? { staffNote: true, loggedBy: cleanStr(m.logged_by) } : {}),
       // 这一条触点自己带的团意向：FB 表单下拉优先，其次手工笔记解析值。
       tour: cleanStr(m.tour_interest_raw) ?? cleanStr(m.tour_interest),
       /**

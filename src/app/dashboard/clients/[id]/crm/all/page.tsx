@@ -741,7 +741,7 @@ export default function CrmAllContactsPage() {
                         total={s.total}
                         // 段收起时 items=null——没数据就不算「今天进度」，等展开了再算，
                         // 不能拿 0 冒充「今天一个都没处理」。
-                        progress={s.items ? dayProgress(s.items.map((r) => ({ handled: isToday(r.lastTouchAt) }))) : undefined}
+                        progress={s.items ? dayProgress(s.items.map((r) => ({ handled: r.handled ?? isToday(r.lastTouchAt) }))) : undefined}
                         open={open}
                         colSpan={colCount}
                         onToggle={() => toggleSection(s.key)}
