@@ -34,7 +34,7 @@ import { buildPriorityView } from '@/lib/crm/contact-list-view'
 import { isMarketingAction } from '@/lib/crm/pipeline'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
-import { fetchAll } from '@/lib/supabase-paginate'
+import { fetchAll, fetchAllBatched } from '@/lib/supabase-paginate'
 import { createStepTimer, type StepTimer } from '@/lib/http/step-timing'
 import { orderContactIdsByLatestTouch, scanLatestTouchContactIds, type TouchRowLite } from '@/lib/crm/contact-touch-order'
 import {
@@ -751,7 +751,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       }),
       // Summary is not consumed by the priority calculation or the list row.
       // Keep raw and metadata: they affect follow-up and do-not-contact rules.
-      fetchAll<Omit<TouchRow, 'summary'>>((from, to) =>
+      fetchAllBatched<Omit<TouchRow, 'summary'>>((from, to) =>
         supabaseAdmin
           .from('contact_touchpoints')
           .select('id, contact_id, channel, direction, occurred_at, raw, metadata, source')
