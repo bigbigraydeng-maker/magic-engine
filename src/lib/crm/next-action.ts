@@ -162,21 +162,30 @@ function recency(iso: string | null): number {
  * 「今天要联系」里，这个人落在哪一档（越小越靠前）。PM 2026-10-30 定，CTS 团队次日正式上线前的一次排序更新。
  *
  *   0 约好的回电时间到了（真约定，不是刚打完电话的提醒）—— 我们答应过的时间，最该先打。
- *   1 在等我们回（replied / 回头客）和今天刚进线的新客人 —— 都是今天就得联系的，按最新动静排。
- *   2 新客人 / 点过我们邮件链接 / 打过没接要再试 —— 中间这一大段维持原来「最近有动静排前面」。
- *   3 刚通完电话、只差记一笔（afterCall）—— 用不着再外联，放最后，别占着最前面的位置
- *     （PM 2026-10-30：「记下一步」挤在最前面，把真正要联系的人压下去了）。
+ *   1 刚通完电话 3 小时内、只差记一笔 —— 员工要马上回来记，放前面好找（PM 2026-10-30：Esther 被沉到最底找不到）。
+ *   2 在等我们回（replied / 回头客）和今天刚进线的新客人 —— 都是今天就得联系的，按最新动静排。
+ *   3 点过我们邮件链接 / 打过没接要再试 —— 中间这一大段维持原来「最近有动静排前面」。
+ *   4 刚通完电话超过 3 小时还没记 —— 已不紧迫，放最后。
  *
  * 只把最该在最前的（约定 / 在等我们）和最该在最后的（只差记一笔）挪开，中间一大段仍按
  * 最近动静排 —— 避免 PM 2026-10-10 指出的「最近联系那一列来回跳、看不出顺序」。
  * 意向**完全不参与排序**（未校准，见文件头）。
  */
-function hotTier(seg: SegmentResult): 0 | 1 | 2 | 3 {
-  if (seg.segment === 'callback_due') return seg.afterCall === true ? 3 : 0
+/** 刚打完电话多久内，算「刚聊过」排前面。 */
+const JUST_CALLED_MS = 3 * 60 * 60 * 1000
+
+function hotTier(seg: SegmentResult): 0 | 1 | 2 | 3 | 4 {
+  if (seg.segment === 'callback_due') {
+    if (seg.afterCall !== true) return 0
+    // 刚打完电话 3 小时内：员工马上要回来记一笔，排在真约定之后、其余之前，好找（PM 2026-10-30，Esther 被沉到最底找不到）。
+    // 超过 3 小时还没记：已不紧迫，沉到最后。
+    const at = seg.lastTouchAt ? Date.parse(seg.lastTouchAt) : NaN
+    return Number.isFinite(at) && Date.now() - at <= JUST_CALLED_MS ? 1 : 4
+  }
   // 在等我们回的（replied / 回头客）和今天刚进线的新客人并列最前，按最新动静排 ——
   // 新线索凉得快，不能埋在回头客后面（PM 2026-10-30）。
-  if (seg.segment === 'replied' || seg.segment === 'new_untouched') return 1
-  return 2
+  if (seg.segment === 'replied' || seg.segment === 'new_untouched') return 2
+  return 3
 }
 
 /**
