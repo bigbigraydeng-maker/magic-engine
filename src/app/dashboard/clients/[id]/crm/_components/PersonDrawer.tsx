@@ -18,6 +18,7 @@ import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
 import { ContactTimeline, type TimelineSummary, type TimelineAiBrief, type StageSource } from './ContactTimeline'
 import { briefAge } from '@/lib/crm/brief-age'
+import { preserveOriginalName } from '@/lib/crm/brief-display-name'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
 import { ComposeEmail } from './ComposeEmail'
@@ -400,7 +401,7 @@ export function PersonDrawer({
                   ⚠️ 这张卡生成之后他又有新动作（见上面的往来一览），卡里「尚未回复」之类的说法可能已不对，以最新记录为准
                 </p>
               )}
-              <p className="text-[13px] leading-relaxed text-me-charcoal/90">{aiBrief.summary}</p>
+              <p className="text-[13px] leading-relaxed text-me-charcoal/90">{preserveOriginalName(aiBrief.summary, row.name)}</p>
               {aiBrief.customerNeeds.length > 0 && (
                 <div className="mt-2 flex gap-2">
                   <span className="min-w-[52px] text-[11px] font-bold text-me-charcoal/50">想要什么</span>

@@ -20,8 +20,8 @@ describe('recentStaffNotes', () => {
       note('outsider', '2026-10-30T23:30:00Z'),
     ]
     expect(recentStaffNotes(contacts, touches, now)).toEqual([
-      { contactId: 'c228', name: 'Guest 228', at: '2026-10-30T23:00:00Z', occurredAt: '2026-10-30T23:00:00Z', preview: '答应发送 catalogue' },
-      { contactId: 'c211', name: 'Guest 211', at: '2026-10-30T22:00:00Z', occurredAt: '2026-10-30T22:00:00Z', preview: '周一 9 点回电' },
+      { contactId: 'c228', name: 'Guest 228', at: '2026-10-30T23:00:00Z', occurredAt: '2026-10-30T23:00:00Z', preview: '答应发送 catalogue', content: '答应发送 catalogue' },
+      { contactId: 'c211', name: 'Guest 211', at: '2026-10-30T22:00:00Z', occurredAt: '2026-10-30T22:00:00Z', preview: '周一 9 点回电', content: '周一 9 点回电' },
     ])
   })
 

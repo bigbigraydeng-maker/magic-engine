@@ -19,8 +19,9 @@ it('批准的桌面版默认直接显示这批 11 位手记客户', () => {
     at: '2026-10-31T00:00:00Z',
     occurredAt: '2026-10-30T23:00:00Z',
     preview: '已记通话',
+    content: '已记通话',
   }))
-  render(<RecentNotesPanel notes={notes} onOpen={() => undefined} />)
+  render(<RecentNotesPanel clientId="cts" notes={notes} onOpen={() => undefined} />)
   expect(screen.getAllByRole('button', { name: /Guest/ })).toHaveLength(11)
   expect(screen.queryByRole('button', { name: /展开这/ })).toBeNull()
   expect(screen.getByText('按写入时间排序')).toBeTruthy()
@@ -53,6 +54,9 @@ it('第三页的最近手记可从顶部按 id 打开，不翻主名单', async 
   window.history.replaceState({}, '', '/dashboard/clients/cts/crm/all?view=smart')
   render(<CrmAllContactsPage />)
   fireEvent.click(await screen.findByRole('button', { name: /Off-page guest/ }))
+  expect(screen.queryByText('往来记录')).toBeNull()
+  expect(screen.getAllByText('Asked for a catalogue').length).toBeGreaterThan(0)
+  fireEvent.click(screen.getByRole('button', { name: /打开客户卡片/ }))
   await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy())
   expect(urls.some((url) => url.includes(`ids=${id}`))).toBe(true)
   expect(urls.some((url) => url.includes('p_hot=3'))).toBe(false)
@@ -90,9 +94,32 @@ it('连续点两位跨页客户时，较慢的旧请求不会把抽屉切回上�
   window.history.replaceState({}, '', '/dashboard/clients/cts/crm/all?view=smart')
   render(<CrmAllContactsPage />)
   fireEvent.click(await screen.findByRole('button', { name: /First customer/ }))
+  fireEvent.click(screen.getByRole('button', { name: /打开客户卡片/ }))
   expect(await screen.findByText('正在打开客户…')).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: /Second customer/ }))
+  fireEvent.click(screen.getByRole('button', { name: /打开客户卡片/ }))
   await waitFor(() => expect(screen.getByRole('heading', { name: 'Second customer' })).toBeTruthy())
   await act(async () => releaseFirst({ ok: true, json: async () => ({ items: [row(firstId, 'First customer')] }) }))
   expect(screen.getByRole('heading', { name: 'Second customer' })).toBeTruthy()
+})
+
+it('最近手记点卡片只展开原文和 AI 概况；旧 AI 有时间提醒，姓名保留原文', async () => {
+  const onOpen = vi.fn()
+  const fetchBrief = vi.fn(async () => ({ ok: true, json: async () => ({ brief: {
+    summary: '客户大卫·斯科特通过表单了解上海旅游。', customerNeeds: [], objections: [], promisesMade: [],
+    nextAction: null, intentLevel: null, channel: 'email', generatedAt: '2026-10-29T00:00:00Z',
+  } }) }))
+  vi.stubGlobal('fetch', fetchBrief)
+  render(<RecentNotesPanel clientId="cts" notes={[{
+    contactId: 'c1', name: 'David Scott', at: '2026-10-31T00:00:00Z', occurredAt: '2026-10-31T00:00:00Z',
+    preview: '答应发送', content: '答应发送完整的上海行程资料',
+  }]} onOpen={onOpen} />)
+  fireEvent.click(screen.getByRole('button', { name: /David Scott/ }))
+  expect(screen.getByText('答应发送完整的上海行程资料')).toBeTruthy()
+  expect(onOpen).not.toHaveBeenCalled()
+  expect((await screen.findByText(/客户 David Scott 通过表单/)).textContent).not.toContain('大卫·斯科特')
+  expect(screen.getByText(/AI 概况早于最近手记/)).toBeTruthy()
+  expect(fetchBrief).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: /David Scott/ }))
+  expect(screen.queryByText('答应发送完整的上海行程资料')).toBeNull()
 })

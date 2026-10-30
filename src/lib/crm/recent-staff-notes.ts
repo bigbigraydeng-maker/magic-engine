@@ -7,6 +7,8 @@ export interface RecentStaffNote {
   /** 原通话时间，补记时可能早于 at。 */
   occurredAt: string
   preview: string
+  /** 展开时显示完整员工原文；preview 仅供收起时快速浏览。 */
+  content: string
 }
 
 export function recentStaffNotes(
@@ -41,6 +43,7 @@ export function recentStaffNotes(
         at: loggedAt,
         occurredAt: touch.occurred_at,
         preview: preview.slice(0, 120),
+        content: preview,
       })
     }
   }

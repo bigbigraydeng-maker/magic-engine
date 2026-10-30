@@ -1,6 +1,7 @@
 'use client'
 
 import { cleanDisplayName } from '@/lib/crm/clean-display-name'
+import { preserveOriginalName } from '@/lib/crm/brief-display-name'
 import {
   LIST_CLS,
   arrivalLabel,
@@ -158,6 +159,7 @@ function ChannelCell({ r }: { r: ContactRow }) {
 }
 
 function StageCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
+  const aiSummary = r.aiSummary ? preserveOriginalName(r.aiSummary, r.name) : null
   return (
     <td className="whitespace-nowrap px-4 py-2">
       {grouped ? (
@@ -167,10 +169,10 @@ function StageCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
           >
             {r.nextAction.verbLabel}
           </span>
-          {r.aiSummary ? (
-            <span className="truncate text-xs text-me-charcoal/70" title={r.aiSummary} data-testid="ai-summary">
+          {aiSummary ? (
+            <span className="truncate text-xs text-me-charcoal/70" title={aiSummary} data-testid="ai-summary">
               <span className="mr-1 rounded bg-me-charcoal/10 px-1 text-[10px] font-bold text-me-charcoal/50">AI</span>
-              {r.aiSummary}
+              {aiSummary}
             </span>
           ) : (
             <span className="truncate text-xs text-me-charcoal/60" title={r.nextAction.reason}>
@@ -185,6 +187,14 @@ function StageCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
       )}
     </td>
   )
+}
+
+function CurrentStageCell({ r }: { r: ContactRow }) {
+  return <td className="whitespace-nowrap px-4 py-2 text-xs" data-testid="current-stage-cell">
+    {r.stageLabel
+      ? <span className="rounded-full bg-me-charcoal/[0.07] px-2 py-1 font-semibold text-me-charcoal/75">{r.stageLabel}</span>
+      : <span className="text-me-charcoal/35">还没标</span>}
+  </td>
 }
 
 export function ContactTableRow(props: {
@@ -213,6 +223,7 @@ export function ContactTableRow(props: {
           <td className="whitespace-nowrap px-4 py-2 text-xs text-me-charcoal/55" data-testid="recent-cell">
             {r.lastTouchAt ? relTime(r.lastTouchAt) : <span className="text-me-charcoal/35">—</span>}
           </td>
+          <CurrentStageCell r={r} />
           <StageCell r={r} grouped />
           <ChannelCell r={r} />
         </>

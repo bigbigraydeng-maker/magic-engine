@@ -182,7 +182,14 @@ describe('「今天先联系」每行只留三样：名字 / 一句话原因 / �
     expect(screen.queryByText('+64211111111')).toBeNull()
     expect(screen.queryByText('FB 表单')).toBeNull()
     expect(screen.queryByText('Best of China')).toBeNull()
-    expect(document.querySelectorAll('td').length).toBe(6) // ⭐ / 客人 / 进线 / 最近联系 / 该做什么 / 联系渠道
+    expect(screen.getByTestId('current-stage-cell').textContent).toBe('还没标')
+    expect(document.querySelectorAll('td').length).toBe(7) // ⭐ / 客人 / 进线 / 最近联系 / 当前状态 / 该做什么 / 联系渠道
+  })
+
+  it('当前状态与该做什么分开，已报价客户能一眼看到阶段', () => {
+    renderRow(makeRow({ stage: 'quoted', stageLabel: '已报价', suggestedChannel: 'phone' }), true)
+    expect(screen.getByTestId('current-stage-cell').textContent).toBe('已报价')
+    expect(screen.getByText('打给他')).toBeTruthy()
   })
 
   it('有 AI 摘要时，「该做什么」列显示摘要而不是规则那句（PM 2026-10-30）', () => {
@@ -190,6 +197,12 @@ describe('「今天先联系」每行只留三样：名字 / 一句话原因 / �
     expect(screen.getByTestId('ai-summary').textContent).toContain('客户想要 4 月上海团')
     expect(screen.queryByText('进线了，还没人联系')).toBeNull() // 规则那句被摘要顶掉
     expect(screen.getByText('打给他')).toBeTruthy() // 动作小标签还在
+  })
+
+  it('列表摘要也保留客户原始姓名', () => {
+    renderRow(makeRow({ name: 'David Scott', aiSummary: '客户大卫·斯科特表示想了解上海团。' }), true)
+    expect(screen.getByTestId('ai-summary').textContent).toContain('客户 David Scott 表示')
+    expect(screen.getByTestId('ai-summary').textContent).not.toContain('大卫·斯科特')
   })
 
   it('没有 AI 摘要时，退回规则那句', () => {
