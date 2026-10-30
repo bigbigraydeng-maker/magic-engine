@@ -31,6 +31,7 @@ import {
   type StageRow,
 } from '@/lib/crm/contact-response-row'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
+import { recentStaffNotes } from '@/lib/crm/recent-staff-notes'
 import { isMarketingAction } from '@/lib/crm/pipeline'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
@@ -773,6 +774,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   let stageRows: StageRow[]
   let briefs: BriefByContact
   let leadsConfig: unknown = null
+  let allNoteContacts: Array<{ id: string; display_name: string | null; primary_email: string | null }> | null
   // Enrichment reads the same tenant-wide inputs regardless of the filtered contact list.
   // Start it with the other reads instead of waiting for all of them to finish.
   // Request-local only: both consumers use this client's same conversation rows.
@@ -785,6 +787,13 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     if (filters.orExpr !== null) b = b.or(filters.orExpr)
     return b.order('id', { ascending: true }).range(from, to)
   })
+  // The lookup panel stays useful while the main queue is filtered by stage.
+  // Fetch minimal tenant-scoped identity fields in parallel only for that case.
+  const noteContactsRead = query.stages.length > 0 && query.q === null
+    ? fetchAll<{ id: string; display_name: string | null; primary_email: string | null }>((from, to) =>
+        supabaseAdmin.from('contacts').select('id, display_name, primary_email')
+          .eq('client_id', clientId).order('id', { ascending: true }).range(from, to))
+    : Promise.resolve(null)
   const selectedContacts = query.q === null ? contactsRead : (async () => {
     const [primary, identities] = await Promise.all([
       contactsRead,
@@ -806,7 +815,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     : selectedContacts.then((rows) => loadEnrichmentInputs(supabaseAdmin, clientId, rows.map((row) => row.id)))
   enrichmentInputs.catch(() => undefined)
   try {
-    ;[contacts, touches, stageRows, briefs, leadsConfig] = await Promise.all([
+    ;[contacts, touches, stageRows, briefs, leadsConfig, allNoteContacts] = await Promise.all([
       selectedContacts,
       // Summary is not consumed by the priority calculation or the list row.
       // Keep raw and metadata: they affect follow-up and do-not-contact rules.
@@ -817,7 +826,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       }) : fetchAllBatched<Omit<TouchRow, 'summary'>>((from, to) =>
         supabaseAdmin
           .from('contact_touchpoints')
-          .select('id, contact_id, channel, direction, occurred_at, raw, metadata, source')
+          .select('id, contact_id, channel, direction, occurred_at, created_at, raw, metadata, source')
           .eq('client_id', clientId)
           .order('occurred_at', { ascending: false })
           .order('id', { ascending: false })
@@ -838,6 +847,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
         .eq('id', clientId)
         .maybeSingle()
         .then((r) => (r.data as { leads_config: unknown } | null)?.leads_config ?? null),
+      noteContactsRead,
     ])
   } catch (err) {
     return NextResponse.json(
@@ -853,6 +863,10 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   // 页一致，不进两张名单（2026-09 CTS 老板：「contact 里面怎么还有工作人员？」）。平铺名单不动（见 ListQuery.kind 的说明）。
   const ownRules = readDomainRules(leadsConfig)
   contacts = contacts.filter((c) => contactKindOf(c.primary_email ? [c.primary_email] : [], ownRules) !== 'staff')
+  const noteContacts = allNoteContacts
+    ? allNoteContacts.filter((c) => !isSystemAccountName(c.display_name) &&
+        contactKindOf(c.primary_email ? [c.primary_email] : [], ownRules) !== 'staff')
+    : contacts
   // 同行（旅行社 / 分销）：不在「今天先联系」散客名单里——挪到先放着并写明原因，仍可在全部客人里点「同行」筛出。
   const tradeIds = new Set(
     contacts.filter((c) => contactKindOf(c.primary_email ? [c.primary_email] : [], ownRules) === 'trade').map((c) => c.id),
@@ -905,6 +919,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       marketingAction: isMarketingAction(stage.marketing_action) ? stage.marketing_action : 'suppress',
     })),
     sections,
+    recentNotes: query.q === null ? recentStaffNotes(noteContacts, touches, new Date()) : [],
     viewerEmail,
   })
   res.headers.set('Server-Timing', timer.header())
