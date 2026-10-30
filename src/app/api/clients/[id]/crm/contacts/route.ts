@@ -22,7 +22,7 @@ import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
 import { segmentContact } from '@/lib/crm/segments'
 import { buildContactModel } from '@/lib/crm/contact-model'
 import { enrichContacts, type SourceKey } from '@/lib/crm/contact-enrichment'
-import { loadEnrichmentInputs, type EnrichmentInputs } from '@/lib/crm/contact-enrichment-loader'
+import { loadAllEnrichmentConversations, loadEnrichmentInputs, type EnrichmentInputs } from '@/lib/crm/contact-enrichment-loader'
 import {
   responseRowFor,
   stageMetaOf,
@@ -31,6 +31,7 @@ import {
   type StageRow,
 } from '@/lib/crm/contact-response-row'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
+import { isMarketingAction } from '@/lib/crm/pipeline'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
@@ -731,7 +732,10 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   let leadsConfig: unknown = null
   // Enrichment reads the same tenant-wide inputs regardless of the filtered contact list.
   // Start it with the other reads instead of waiting for all of them to finish.
-  const enrichmentInputs = loadEnrichmentInputs(supabaseAdmin, clientId)
+  // Request-local only: both consumers use this client's same conversation rows.
+  const sharedConversations = loadAllEnrichmentConversations(supabaseAdmin, clientId)
+  sharedConversations.catch(() => undefined)
+  const enrichmentInputs = loadEnrichmentInputs(supabaseAdmin, clientId, undefined, sharedConversations)
   enrichmentInputs.catch(() => undefined)
   try {
     const filters = contactFilterParams(query)
@@ -764,7 +768,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
           .order('sort_order', { ascending: true })
           .range(from, to),
       ),
-      loadLatestBriefByContact(clientId),
+      loadLatestBriefByContact(clientId, sharedConversations),
       supabaseAdmin
         .from('clients')
         .select('leads_config')
@@ -832,6 +836,11 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     view: 'priority',
     focus,
     columns: visibleCustomColumns(customPerContact),
+    stages: stageRows.map((stage) => ({
+      stageKey: stage.stage_key,
+      label: stage.label,
+      marketingAction: isMarketingAction(stage.marketing_action) ? stage.marketing_action : 'suppress',
+    })),
     sections,
     viewerEmail,
   })

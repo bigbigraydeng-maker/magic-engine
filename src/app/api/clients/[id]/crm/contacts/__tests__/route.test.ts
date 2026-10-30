@@ -208,6 +208,17 @@ describe('GET contacts — 分页形状', () => {
     expect(body).not.toHaveProperty('contacts')
   })
 
+  it('阶段营销动作无效时与阶段接口一样回退到 suppress', async () => {
+    const original = STAGES[0].marketing_action
+    STAGES[0].marketing_action = 'invalid'
+    try {
+      const { body } = await get('cts', '?view=priority')
+      expect(body.stages).toEqual([{ stageKey: 'quoted', label: '已报价', marketingAction: 'suppress' }])
+    } finally {
+      STAGES[0].marketing_action = original
+    }
+  })
+
   /**
    * 🔴 2026-09-28 · PM 当场撞到的真实事故：`contacts.id` 是 UUID，按它排等于按
    * 随机字符串排——第 1 页选出来的 20 个人跟「谁最近有动静」没有任何关系，
@@ -469,11 +480,9 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     const conversationsReady = new Promise<void>((resolve) => { releaseConversations = resolve })
     ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
       const builder = fakeDb(table)
-      const rec = recorded[recorded.length - 1]
       if (table === 'conversations') {
         const then = builder.then as (resolve: (v: unknown) => unknown) => unknown
-        builder.then = (resolve: (v: unknown) => unknown) =>
-          rec.columns === 'id, contact_id' ? conversationsReady.then(() => then(resolve)) : then(resolve)
+        builder.then = (resolve: (v: unknown) => unknown) => conversationsReady.then(() => then(resolve))
       }
       return builder
     })
@@ -485,6 +494,57 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
       releaseConversations()
     }
     expect((await request).status).toBe(200)
+  })
+
+  it('优先名单复用同一客户的会话查询，同时保留摘要', async () => {
+    BRIEF_ROWS.conversations = [{ id: 'c3', contact_id: 'a3', channel: 'messenger', participant_name: 'Stan', subject: null }]
+    BRIEF_ROWS.conversation_briefs = [{ conversation_id: 'c3', intent_level: 'high', next_action: 'follow up', summary: 'recent', generated_at: '2026-10-01T00:00:00Z' }]
+    const { status, body } = await get('cts', '?view=priority&open=hot,cold')
+    expect(status).toBe(200)
+    const queries = recorded.filter((r) => r.table === 'conversations')
+    expect(queries).toHaveLength(1)
+    expect(queries[0].eqs).toContainEqual(['client_id', 'cts'])
+    const rows = (body.sections as Array<{ items: Array<{ contactId: string; aiSummary: string | null }> | null }>).flatMap((s) => s.items ?? [])
+    expect(rows.find((r) => r.contactId === 'a3')?.aiSummary).toBe('recent')
+  })
+
+  it('共享会话读取失败后，两条路径独立回退，不丢摘要', async () => {
+    BRIEF_ROWS.conversations = [{ id: 'c3', contact_id: 'a3', channel: 'messenger', participant_name: 'Stan', subject: null }]
+    BRIEF_ROWS.conversation_briefs = [{ conversation_id: 'c3', intent_level: 'high', next_action: 'follow up', summary: 'recent', generated_at: '2026-10-01T00:00:00Z' }]
+    let calls = 0
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder = fakeDb(table)
+      if (table === 'conversations' && ++calls === 1) {
+        builder.then = (resolve: (v: unknown) => unknown) => resolve({ data: null, error: { message: 'temporary failure' } })
+      }
+      return builder
+    })
+    const { status, body } = await get('cts', '?view=priority&open=hot,cold')
+    expect(status).toBe(200)
+    expect(calls).toBe(3)
+    const rows = (body.sections as Array<{ items: Array<{ contactId: string; aiSummary: string | null }> | null }>).flatMap((s) => s.items ?? [])
+    expect(rows.find((r) => r.contactId === 'a3')?.aiSummary).toBe('recent')
+  })
+
+  it('邮件消息补全失败不影响独立摘要', async () => {
+    BRIEF_ROWS.conversations = [{ id: 'c3', contact_id: 'a3', channel: 'email', participant_name: 'Stan', subject: 'hello' }]
+    BRIEF_ROWS.conversation_briefs = [{ conversation_id: 'c3', intent_level: 'high', next_action: 'follow up', summary: 'recent', generated_at: '2026-10-01T00:00:00Z' }]
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder = fakeDb(table)
+      if (table === 'conversation_messages') {
+        builder.then = (resolve: (v: unknown) => unknown) => resolve({ data: null, error: { message: 'message failure' } })
+      }
+      return builder
+    })
+    try {
+      const { status, body } = await get('cts', '?view=priority&open=hot,cold')
+      expect(status).toBe(200)
+      const rows = (body.sections as Array<{ items: Array<{ contactId: string; aiSummary: string | null }> | null }>).flatMap((s) => s.items ?? [])
+      expect(rows.find((r) => r.contactId === 'a3')?.aiSummary).toBe('recent')
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   it('自己人（own_email_domains 里的邮箱域名）不进 hot / cold 任何一张名单；别人照常', async () => {
@@ -522,6 +582,7 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     expect(body.view).toBe('priority')
     expect(body).toHaveProperty('focus')
     expect(body).toHaveProperty('columns')
+    expect(body.stages).toEqual([{ stageKey: 'quoted', label: '已报价', marketingAction: 'nurture' }])
     expect((body.sections as Array<{ key: string }>).map((s) => s.key)).toEqual(['hot', 'cold'])
   })
 
