@@ -762,7 +762,19 @@ export function segmentContact(
     const label = contact.stageLabel?.trim()
     return make('excluded', label ? `已经是「${label}」了` : '已推进到不再联系的阶段', 'none')
   }
-  if (outcomes.some((o) => DEAD_OUTCOMES.has(o))) {
+  // 客人说过「不感兴趣」之后，**自己又找上门**（重新填表 / 回了消息 / 发了私信）—— 他重新有兴趣了，
+  // 不能再被那句旧话永远压在「不联系」里（PM 2026-10-30：Annette 8/31 被记 not interested，今天重新填了
+  // 表单，却一直躺在先放着）。只认**严格晚于**最后一次「不感兴趣」的真人来信：邮件打开/点链接是
+  // 行为信号不算（它们不在 `messages` 里）。**别再联系（do_not_contact）不在此列** —— 那是合规红线，
+  // 重新填表也不自动解除。
+  const lastDeclineAt = Math.max(
+    0,
+    ...withoutClearedDnc(tps)
+      .filter((t) => t.outcome === 'not_interested')
+      .map((t) => ts(t.occurredAt)),
+  )
+  const reEnquiredAfterDecline = lastDeclineAt > 0 && lastInbound > lastDeclineAt
+  if (outcomes.some((o) => DEAD_OUTCOMES.has(o) && !(o === 'not_interested' && reEnquiredAfterDecline))) {
     // 措辞按销售的说法写（板桥 2026-08-06）：
     //  · 「号码是坏的」不是人说的话（电池是坏的；号码是空号 / 停机）
     //  · 按钮上写「他不买了」，这里原先写「聊过了，明确没兴趣」——
