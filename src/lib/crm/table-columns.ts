@@ -26,6 +26,8 @@ export interface TouchpointForColumn {
   metadata: Record<string, unknown> | null
   /** 触点来源（`contact_touchpoints.source`）。只用来认「员工手记」（me_manual）。可选：不传按非手记算。 */
   source?: string | null
+  /** 员工原话（`contact_touchpoints.raw`）。员工手记的团名要在它里面找得到才采信。可选。 */
+  raw?: string | null
 }
 
 export interface CustomColumnDef {
@@ -81,14 +83,21 @@ function extractTourInterest(touchpoints: TouchpointForColumn[]): string | null 
       if (raw) return raw
     }
   }
+  // 员工手记的团名要在原话里找得到才采信：存量里可能有 AI 在「事实后验」上线前编出来的团名
+  // （魏征复审 PR #3417 P3）。原话缺失（读不到）时不拦。
+  const grounded = (t: TouchpointForColumn, v: string): boolean => {
+    if (t.source !== 'me_manual' || typeof t.raw !== 'string') return true
+    const norm = (x: string) => x.toLowerCase().replace(/\s+/g, '')
+    return norm(t.raw).includes(norm(v))
+  }
   for (const t of byRecent) {
     if (t.source !== 'me_manual') continue
     const staff = cleanValue(t.metadata?.tour_interest)
-    if (staff) return staff
+    if (staff && grounded(t, staff)) return staff
   }
   for (const t of byRecent) {
     const parsed = cleanValue(t.metadata?.tour_interest)
-    if (parsed) return parsed
+    if (parsed && grounded(t, parsed)) return parsed
   }
   return null
 }

@@ -60,6 +60,8 @@ export interface PriorityViewInput {
   dayStartMs?: number
   /** 今天真人联系过的人（`contactsTouchedToday` 算好传进来）。只在传了 `dayStartMs` 时用。 */
   touchedToday?: ReadonlySet<string>
+  /** 今天从「还在名单上」被推到成交 / 停止营销的人（`loadStageSuppressedTodayIds`）。 */
+  stageSuppressedTodayIds?: ReadonlySet<string>
 }
 
 /**
@@ -152,10 +154,11 @@ export function buildPriorityView<T>(
     // 传了 dayStartMs → 位置按「今天开工那一刻」的样子算（冻结），客人今天的动作照常实时进来。
     const day =
       input.dayStartMs !== undefined
-        ? dayRow(model, input.now, {
-            dayStartMs: input.dayStartMs,
-            touchedToday: input.touchedToday?.has(c.id) ?? false,
-          })
+        ? dayRow(
+            { ...model, stageSuppressedToday: input.stageSuppressedTodayIds?.has(c.id) ?? false },
+            input.now,
+            { dayStartMs: input.dayStartMs, touchedToday: input.touchedToday?.has(c.id) ?? false },
+          )
         : null
     const base = demoteNonEnquirySender(c, day ? day.seg : segmentContact(model, input.now))
     const seg = input.tradeIds?.has(c.id) ? demoteTrade(base) : base

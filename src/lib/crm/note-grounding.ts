@@ -41,8 +41,11 @@ export function noteIsContentFree(raw: string): boolean {
   const cjk = (m.match(/[一-鿿]/g) ?? []).length
   const words = (raw.match(/[A-Za-z]{2,}/g) ?? []).length
   const digits = (raw.match(/\d/g) ?? []).length
-  // 中文不足 6 字、英文不足 2 个词、也没有数字 —— 没什么可整理的。
-  return cjk < 6 && words < 2 && digits === 0
+  // 不是占位词，且连 2 个汉字 / 2 个英文词 / 一个数字都没有（单个字、单个词、「好」「.」）。
+  // 🔴 之前的门槛是「汉字 < 6」，把「周五回电」「明天再打」「发了报价」「客户说贵」这类短而真的笔记
+  // 当成没内容、不送模型，回电时间丢了（魏征复审 PR #3417 P1-1）。只要不是占位词、有 ≥2 个汉字就算有内容；
+  // 编造的风险由下面的后验拦，不靠「短」来防。
+  return cjk < 2 && words < 2 && digits === 0
 }
 
 // ── 摘要里的「具体事实词」必须在原话里有依据 ────────────────────────────
@@ -56,9 +59,12 @@ interface ClaimRule {
 
 const CLAIM_RULES: ClaimRule[] = [
   { inSummary: /报价|报个价/, inNote: /报价|quote|quotation|price|pricing|多少钱|价格|费用|cost/i },
-  { inSummary: /要求|请求|索要/, inNote: /要求|要|想|请|求|问|request|ask|need|want|require/i },
-  { inSummary: /预订|订了|订团|报名|定金|付款|支付|已付/, inNote: /订|报名|定金|付|book|deposit|pay|reserv/i },
+  { inSummary: /要求|请求|索要/, inNote: /要求|想要|需要|(?<![不没别无未])要|请|求|问|request|ask|(?<!(?:do not |don'?t |not ))need|(?<!(?:do not |don'?t |not ))want|require/i },
+  { inSummary: /预订|订团|报名/, inNote: /订|报名|book|reserv|sign(ed)?\s*up/i },
+  { inSummary: /付款|支付|已付|定金/, inNote: /付|定金|pay|paid|deposit/i },
   { inSummary: /取消/, inNote: /取消|cancel/i },
+  { inSummary: /拒绝|婉拒|放弃/, inNote: /不|没|拒|别|无|未|算了|放弃|\bno\b|\bnot\b|n't|decline|refus|never|cancel/i },
+  { inSummary: /不再联系|别再联系|不要再联系|停止联系/, inNote: /别再|不再|不要.{0,6}联系|不用.{0,6}联系|不需要联系|do\s*not|don'?t|stop|no\s*more|unsubscribe|no\s*need/i },
   { inSummary: /退款|退钱/, inNote: /退|refund/i },
   { inSummary: /投诉|不满/, inNote: /投诉|不满|complain|unhappy|upset/i },
   { inSummary: /预算/, inNote: /预算|budget/i },
@@ -88,6 +94,15 @@ const CLAIM_RULES: ClaimRule[] = [
   { inSummary: /晚上/, inNote: /晚上|evening|night/i },
 ]
 
+/** 摘要说「已经发生」的事（已预订 / 已付款 / 已成交…），原话里必须有「已完成」的说法，光是想订不行。 */
+const COMPLETED_IN_SUMMARY_RE = /已预订|已订|订了|已付款|已支付|已付|已成交|已确认|已报名|已购买|已缴/
+const COMPLETED_IN_NOTE_RE = /已|订了|付了|定了|买了|成交|搞定|\b(booked|paid|confirmed|bought|signed|purchased|sorted|deposit\s*paid|paid\s*deposit)\b/i
+
+/** 否定 / 拒绝：原话里的写法。 */
+const NEG_NOTE_RE = /不|没|别|无|未|拒|算了|放弃|\bno\b|\bnot\b|n't|\bnever\b|without|cannot|decline|refus|unsubscribe/i
+/** 否定 / 拒绝：摘要里的写法（拒绝 / 放弃 里没有「不」字，要单列）。 */
+const NEG_SUMMARY_RE = /不|没|别|无|未|拒绝|婉拒|放弃/
+
 /** 摘要里的英文词（≥3 字母）：专名、团名，必须原样出现在原话里。 */
 function latinTokens(s: string): string[] {
   return s.match(/[A-Za-z][A-Za-z&'-]{2,}/g) ?? []
@@ -113,6 +128,15 @@ export function firstUngroundedClaim(summary: string, raw: string): string | nul
     const hit = summary.match(rule.inSummary)
     if (hit && !rule.inNote.test(raw)) return hit[0]
   }
+  // 「已完成」的事实需要原话里有「已完成」的说法。
+  const done = summary.match(COMPLETED_IN_SUMMARY_RE)
+  if (done && !COMPLETED_IN_NOTE_RE.test(raw)) return done[0]
+  // 意思翻转：原话有否定、摘要没有（「不要报价」→「要求报价」「没兴趣」→「感兴趣」），
+  // 或摘要有否定 / 拒绝、原话一点否定都没有（「可能感兴趣」→「明确拒绝」）。宁可退回原话。
+  const noteNeg = NEG_NOTE_RE.test(raw)
+  const sumNeg = NEG_SUMMARY_RE.test(summary)
+  if (noteNeg && !sumNeg) return '否定被丢了'
+  if (sumNeg && !noteNeg) return '凭空出现否定'
   return null
 }
 

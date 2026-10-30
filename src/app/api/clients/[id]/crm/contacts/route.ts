@@ -32,6 +32,8 @@ import {
 } from '@/lib/crm/contact-response-row'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
 import { contactsTouchedToday, localDayStartMs } from '@/lib/crm/day-list'
+import { loadStageSuppressedTodayIds } from '@/lib/crm/day-stage-events'
+import { handledNextAction, type NextAction } from '@/lib/crm/next-action'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
@@ -730,9 +732,10 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   let stageRows: StageRow[]
   let briefs: BriefByContact
   let leadsConfig: unknown = null
+  let clientCountry = ''
   try {
     const filters = contactFilterParams(query)
-    ;[contacts, touches, stageRows, briefs, leadsConfig] = await Promise.all([
+    ;[contacts, touches, stageRows, briefs, { leadsConfig, country: clientCountry }] = await Promise.all([
       fetchAll<ContactRow>((from, to) => {
         let b = supabaseAdmin
           .from('contacts')
@@ -762,10 +765,13 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       loadLatestBriefByContact(clientId),
       supabaseAdmin
         .from('clients')
-        .select('leads_config')
+        .select('leads_config, country')
         .eq('id', clientId)
         .maybeSingle()
-        .then((r) => (r.data as { leads_config: unknown } | null)?.leads_config ?? null),
+        .then((r) => {
+          const d = r.data as { leads_config: unknown; country: string | null } | null
+          return { leadsConfig: d?.leads_config ?? null, country: d?.country ?? '' }
+        }),
     ])
   } catch (err) {
     return NextResponse.json(
@@ -799,14 +805,15 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
 
   // 「今天」按客户所在地算（同 today 路由）：员工今天记的笔记 / 打的电话不许把人从
   // 「今天要联系」挪走 —— 2026-10-30 CTS 员工记完笔记人掉进「先放着」，以为没存上。
-  let timeZone = 'Pacific/Auckland'
-  try {
-    const { data: cli } = await supabaseAdmin.from('clients').select('country').eq('id', clientId).maybeSingle()
-    if ((cli?.country ?? '').toUpperCase() === 'AU') timeZone = 'Australia/Sydney'
-  } catch {
-    // 读不到就按 NZ，猜错最多差两小时。
-  }
+  // 读不到国家就按 NZ，猜错最多差两小时。
+  const timeZone = clientCountry.toUpperCase() === 'AU' ? 'Australia/Sydney' : 'Pacific/Auckland'
   const nowPri = new Date()
+  // 今天被推到成交 / 停止营销的人也要就地变灰（和今天要联系页同一份读取）。
+  const stageSuppressedTodayIds = await loadStageSuppressedTodayIds(
+    clientId,
+    localDayStartMs(nowPri, timeZone),
+    (k) => stageMeta.get(k)?.suppressed ?? false,
+  )
 
   const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
   const { sections, focus } = buildPriorityView(
@@ -823,6 +830,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       tradeIds,
       dayStartMs: localDayStartMs(nowPri, timeZone),
       touchedToday: contactsTouchedToday(touches, nowPri, timeZone),
+      stageSuppressedTodayIds,
     },
     (row, ranked) => {
       const tps = byContact.get(row.id) ?? []
@@ -832,6 +840,11 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       // 今天已处理：页面就地变灰打勾，位置不动。
       built.row.handled = ranked.handled === true
       built.row.handledWhy = ranked.handledWhy ?? null
+      if (ranked.handled === true) {
+        // 已处理的卡片不能同时又写着「记下一步」（魏征复审 P2-b）：灰色 + 打勾那句话说明今天做了什么。
+        // （afterCall 提醒本身由 dayRow 在员工记完笔记后撤掉；没记笔记时 dayRow 不会把卡片标成已处理。）
+        built.row.nextAction = handledNextAction(built.row.nextAction as NextAction, ranked.handledWhy ?? '今天已处理')
+      }
       return built.row
     },
   )

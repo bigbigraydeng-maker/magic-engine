@@ -209,12 +209,32 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
   // 上而看起来一致，只有将来接了第二个行业、真的传了非默认 playbook 时，
   // 漏传的那一处才会悄悄裂开，而且不会有任何测试提醒（见下面专门钉住这条的用例）。
   const playbook = opts.playbook ?? TOURISM_PLAYBOOK
-  const frozen = segmentContact(withoutOurActionsSince(contact, opts.dayStartMs), now, playbook)
+  const frozenMorning = segmentContact(withoutOurActionsSince(contact, opts.dayStartMs), now, playbook)
   const live = segmentContact(contact, now, playbook)
 
-  // 今天开工那一刻他该不该在名单上。**只看冻结版** —— 我们今天做了什么，
+  /**
+   * 🔴 **我们自己的通话也会把人抬进「今天要联系」**（魏征复审 PR #3417 P1-2）。
+   *
+   * 本文件原来假定「比今早更紧急」只可能是客人造成的。规则 6.5（10-29）打破了它：
+   * 早上还在「先放着」的老客人，我们今天打通了一通电话，系统把他抬成「刚聊过，还没记下一步」
+   * （hot）。员工记完笔记，提醒按设计消失 —— 但如果位置退回早上的「先放着」，
+   * 这个人又从名单里掉了，正是 10-30 CTS 员工「记了找不到」的同一件事。
+   *
+   * 所以位置基线 = 「只摘掉今天的员工笔记、保留今天的通话」那一版（通话之后的提醒态）和早上冻结版
+   * 里更靠前的那个。只在提醒态（afterCall）更靠前时才取它；其他情形不变。
+   */
+  // 今天没人手记过笔记就没有「摘掉笔记」这一版可算，省一次分段（也保持 playbook 只被调两次）。
+  const callHeld = hasStaffNoteSince(contact, opts.dayStartMs)
+    ? segmentContact(withoutStaffNotesSince(contact, opts.dayStartMs), now, playbook)
+    : null
+  const frozen =
+    callHeld !== null && callHeld.afterCall === true && callHeld.priority < frozenMorning.priority
+      ? callHeld
+      : frozenMorning
+
+  // 今天开工那一刻他该不该在名单上。**只看早上的冻结版** —— 我们今天做了什么，
   // 不能决定他今天出不出现，否则就又回到「做完就消失」。
-  const onList = frozen.temperature === 'hot' || frozen.temperature === 'warm'
+  const onList = frozenMorning.temperature === 'hot' || frozenMorning.temperature === 'warm'
 
   // 实时状态说他已经下名单了（标了不买 / 推迟了 / 成交了）。
   // 这一类不写触点，靠 touchedToday 抓不到。
@@ -236,6 +256,17 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
   // 「他还欠我一次动作吗」—— 这一条决定灰不灰，**不能拿 escalated 代替**。
   const stillNeedsMe = needsMeAgain(contact, live, now, opts.dayStartMs)
 
+  const placed = escalated ? live : withLiveReach(frozen, live, contact)
+  // 通话打完、员工还没记笔记：「记下一步」提醒还在，卡片就不能是灰的（还欠一笔）。
+  const noteToday = hasStaffNoteSince(contact, opts.dayStartMs)
+  const reminderPending = placed.afterCall === true && !noteToday
+  const handled = !stillNeedsMe && (opts.touchedToday || droppedOff) && !reminderPending
+  // 已记过笔记的卡片不能还挂着「刚通完电话，还没记下一步」（魏征复审 P2-b）：提醒撤掉，换成说明今天做了什么的话。
+  const seg: SegmentResult =
+    placed.afterCall === true && noteToday
+      ? { ...placed, afterCall: false, reason: '刚通完电话，今天已记录' }
+      : placed
+
   return {
     /**
      * 位置按冻结版排，**但「约好几点回电」取实时那个**。
@@ -254,7 +285,7 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
      * 方向、时间、通话结果、出行意向**全部**对冻结版可见 —— 冻结当场失效。
      * 真正需要逃出冻结的只有 `dueAt` 这一个显示值。
      */
-    seg: escalated ? live : withLiveReach(frozen, live, contact),
+    seg,
     onList,
     /**
      * 🔴 **升级过的人绝不能算「已处理」。**
@@ -279,7 +310,7 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
      *
      * 所以这里直说那件事本身：**我们今天最后一次出手之后，他又动了没有。**
      */
-    handled: !stillNeedsMe && (opts.touchedToday || droppedOff),
+    handled,
     /**
      * 具体动作优先于泛泛的「联系过了」——「聊过了，明确没兴趣」信息量大得多。
      *
@@ -335,6 +366,26 @@ export function contactsTouchedToday(
           localDay(t.occurred_at, timeZone) === todayLocal,
       )
       .map((t) => t.contact_id),
+  )
+}
+
+/**
+ * 只摘掉今天员工手记的笔记（保留今天的真通话）。
+ * 用来还原「通话刚打完、笔记还没记」那一刻的位置，见 `dayRow` 的 callHeld。
+ */
+function withoutStaffNotesSince(contact: ContactLike, sinceMs: number): ContactLike {
+  return {
+    ...contact,
+    touchpoints: contact.touchpoints.filter(
+      (t) => !(t.source === 'me_manual' && t.direction === 'outbound' && tsOf(t.occurredAt) >= sinceMs),
+    ),
+  }
+}
+
+/** 今天员工有没有手记过一笔（推迟 / 取消推迟那种按钮痕迹不算）。 */
+function hasStaffNoteSince(contact: ContactLike, sinceMs: number): boolean {
+  return contact.touchpoints.some(
+    (t) => t.source === 'me_manual' && t.direction === 'outbound' && !t.action && tsOf(t.occurredAt) >= sinceMs,
   )
 }
 

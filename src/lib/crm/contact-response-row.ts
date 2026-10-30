@@ -121,6 +121,7 @@ export function responseRowFor(
     occurredAt: t.occurred_at,
     metadata: t.metadata,
     source: t.source,
+    raw: t.raw,
   }))
   const custom = extractCustomColumns(forColumns)
 
