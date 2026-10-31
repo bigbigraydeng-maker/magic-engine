@@ -137,7 +137,7 @@ describe('发布信号 emit(只在真·PUBLISHED 喊)', () => {
     } as never)
 
     const r = await runPublishWorker({ draft: true, workerId: 'test' })
-    expect(r.result).toBe('published')
+    expect(r.result).toBe('drafted')
     expect(mockSend).not.toHaveBeenCalled()
   })
 
