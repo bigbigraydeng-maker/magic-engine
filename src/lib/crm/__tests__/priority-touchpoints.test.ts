@@ -49,6 +49,28 @@ describe('priority touchpoints batch loader', () => {
     expect(c.eq).toHaveBeenCalledWith('client_id', 'tenant-a')
   })
 
+  it.each([
+    ['created_at', 42],
+    ['metadata', []],
+    ['raw', 42],
+    ['source', false],
+  ] as const)('uses the tenant-scoped reader when %s has a disallowed value', async (field, value) => {
+    const rpc = vi.fn(async () => ({ data: [{ ...row(1), [field]: value }], error: null }))
+    const c = client(rpc)
+    const result = await loadPriorityTouchpoints(c.sb, 'tenant-a')
+    expect(result.map((r) => r.id)).toEqual(['99'])
+    expect(c.eq).toHaveBeenCalledWith('client_id', 'tenant-a')
+    expect(c.from).toHaveBeenCalled()
+  })
+
+  it('keeps null notes and object metadata on the batch path', async () => {
+    const good = { ...row(1), created_at: null, raw: 'note', metadata: {}, source: 'me_manual' }
+    const rpc = vi.fn(async () => ({ data: [good], error: null }))
+    const c = client(rpc)
+    await expect(loadPriorityTouchpoints(c.sb, 'tenant-a')).resolves.toEqual([{ ...good, summary: null }])
+    expect(c.from).not.toHaveBeenCalled()
+  })
+
   it('does not return partial data when a later batch fails', async () => {
     const rpc = vi.fn(async (_name: string, args: { p_offset: number }) => args.p_offset === 0
       ? { data: Array.from({ length: 10000 }, (_, i) => row(i)), error: null }
