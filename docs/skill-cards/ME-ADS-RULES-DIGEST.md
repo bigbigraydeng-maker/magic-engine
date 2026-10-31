@@ -3,7 +3,7 @@
 <!-- 由独立助手 2026-10-18 通读 ME 手册/SOP 生成，供每日学习任务做「对账」时先读这一份；16 行标「待核」；只是索引，冲突时必须读来源原文。更新方式：手册/SOP 有变动时重做。-->
 # ME 广告规则摘要索引（草稿）
 生成日期：2026-10-18｜主干读取点 origin/main ca89573287ffb1a68d9c7c6324cd484637ed486f（本地 git show，未 fetch）｜用法：日常只读本文，疑似冲突时按「来源#小节」读原文；本文只是索引
-路径简写：PB=docs/sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md｜AT=docs/sops/meta-ads-angle-test-and-budget.md｜CT=docs/clients/cts/2026-10-17-cts-ad-strategy-v2.md｜PG=记忆 ~/.claude/projects/-Users-raydeng-Projects-magic-engine/memory/playbook-ads-meta-general.md｜PT、PL=同目录 playbook-ads-industry-travel.md、playbook-ads-industry-logistics.md
+路径简写：PB=docs/sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md｜AT=docs/sops/meta-ads-angle-test-and-budget.md｜CT=docs/clients/cts/2026-10-17-cts-ad-strategy-v2.md｜PG=docs/playbooks/ads/meta-general.md｜PT、PL=行业层手册（尚未进仓库，路径不写进本文）
 完整通读：PB、AT、CT、PG、PT、PL。只读关键点：src/lib/ads-strategy/（baseline、rules/fatigue、portfolio/diagnostics/thresholds、stop-loss、circuit-detectors、circuit-state、config、launch-budget-headroom、playbooks/types、autonomy/sync-policy）、src/lib/kernel/registry-ads.ts、autonomy-envelope.ts、src/lib/meta/guardrails.ts；src/lib/meta/ 其余文件只看了目录。
 已知遗漏：①CT 文件名 v2、正文标题是 v3，且无「第0节」，判断在 §1；②PB 的 §1b/§1c/§1d 工作流与工作包、§11 代码对照、§13 审查回执只摘了与规则直接相关的；③PB「代码」栏的有/无代码状态写于 10-10，未逐项重核；④无电商专属规则（来源里没有）；⑤PG 有重号（§十三×2、§三十×2），下文用括号区分；⑥PB 引用的 51/52 号稿及各 spec 未读；⑦CLAUDE.md、docs/ledger 里的广告规则不在范围；⑧registry-ads.ts 头注释写「六个动作」而 PB 写 8 个，未核。；⑨为控制行数未收的低频条：AT§7（拍的数字清单）、AT§8（前置清单）、PB S-18、PB E-09/E-11、PB B-12、PG§三/§九/§三十一、PT§六–七、CT§3-素材
 「（待核）」= 原文自标待验证/待PM定，或我无法在来源完全确认。类型/适用为我的归类，非原文字段。

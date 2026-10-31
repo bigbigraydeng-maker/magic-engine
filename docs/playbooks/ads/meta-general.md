@@ -82,7 +82,7 @@ Meta 支持一条广告挂最多 6 个语言版本（Dynamic Language Optimizati
 1. **开广告户**：在 Meta Business Manager 里新建广告账户，关联客户的 Facebook 主页。
 2. **绑付款方式**：客户在 Meta 广告管理后台自己绑定信用卡——这步 ME 做不了，必须客户本人操作。
 3. **授权 ME 读广告数据**：在 Meta Business Manager → 广告账户 → 添加合作伙伴/系统用户，给 ME 的系统账号至少"分析师"权限。这样 ME 才能每天同步花费/CTR/ROAS 数据，也才能帮客户自动暂停/调整广告。
-4. **在 ME 后台登记广告账户 ID**：一律用带 `act_` 前缀的格式。真实号码不写进本文，口头只说「客户 A 的主账号」。必须走 ME 客户设置页的绑定入口，禁止直写数据库。账户号填错/漏前缀会导致快照任务连续报错（2026-09-21 NM Medspa 事故）。
+4. **在 ME 后台登记广告账户 ID**：一律用带 `act_` 前缀的格式（例：`act_<账户号>`；真实号码不写进本文，口头说「客户 A 的主账号」），必须走 ME 客户设置页的绑定入口，禁止直写数据库。账户号填错/漏前缀会导致快照任务连续报错（2026-09-21 NM Medspa 事故）。
 
 **不属于广告账户侧（但同时要做的事）：**
 - **Facebook 主页发布令牌** — 这是让 ME 代客户发帖/发 Reel 的独立授权，见 [[playbook-social-general]] 第十三条。
@@ -123,7 +123,7 @@ Meta 支持一条广告挂最多 6 个语言版本（Dynamic Language Optimizati
 - **每结果成本一律拿留资人数当分母**。用两者之和当分母，成本会被稀释近一半，直接导致该报警的广告判成健康、该砍的预算反而看着划算。
 - 这条跟第十二条是一套：**十二条管"别挑错指标"，这条管"别把同一个人数两遍"**，两个坑都出在 `actions` 是个大杂烩数组上。
 
-**已落地的防护**：CTS 每日广告日报的算法已改（`~/.claude/scheduled-tasks/cts-daily-ads-report/SKILL.md`），卫青手册 §5.0 也把这条列为"先于一切诊断"的口径硬规则（`docs/agents/11-weiqing.md`）。
+**已落地的防护**：CTS 每日广告日报的算法已改（开发机本地的日报定时任务说明，路径不写进本文），卫青手册 §5.0 也把这条列为"先于一切诊断"的口径硬规则（`docs/agents/11-weiqing.md`）。
 
 ## 十三、"每结果成本暴涨但点击率正常"的第一嫌疑人是**学习期被反复重置**，不是落地页
 
@@ -410,7 +410,7 @@ Meta 的自动分配对新广告有保护期，**三天不会自己纠正**—�
 **处方**：开顶层认知视频广告（ThruPlay / video_view）给池子补新人。**另建独立系列，别往再营销系列里加**（往正在跑的系列里加会重置它的学习期，同 §二十七）。
 
 **🔴 三个前置坑，不补就是纯白烧钱（第 0 条最根本，2026-09-27 才挖出来）**：
-0. **供血广告必须和受众池在同一个广告账号**——自定义受众是**账号级资产，跨账号的完播事件根本不进池**。CTS 实测：三个再营销池（Video viewers 50%、ThruPlay viewers、FB Page engaged）全挂在客户 A 的个人号下；而客户 A 的官方账号那 6 条 GC 视频近 30 天 1.2 万次完播、**0 人进池**。号码不写进本文。
+0. **供血广告必须和受众池在同一个广告账号**——自定义受众是**账号级资产，跨账号的完播事件根本不进池**。CTS 实测：三个再营销池（Video viewers 50%、ThruPlay viewers、FB Page engaged）全挂在**客户 A 的旧账号（个人号）** 下；而客户 A 的官方账号 那 6 条 GC 视频近 30 天 1.2 万次完播、**0 人进池**。
    ⚠️ 这件事我一开始误判成「视频没写进 rule」（坑 1），**真因是跨账号不通**——两个原因长得一样（都是完播了不进池），但修法完全不同：改 rule 治不了跨账号。
    **动手前先查池子挂在哪个账号**（`ad_entity_snapshots` 里 `level='audience'` 那行的 `ad_account_id`），供血就在那个账号开。同理适用于 lookalike 种子（见 [[reference-cts-meta-ad-account-id]] 里种子在 CTStours 账户、广告投个人号那次）。
 1. **要投的顶层视频必须在池子的「收人规则」里**。实测 CTS 官方号那 6 条 GC 视频近 30 天 1.2 万次完播，**一个人都没进再营销池**——两个池子 rule 里收的是另外 13 条 / 9 条老视频，压根不含这 6 条。开之前先把 video_id 追加进两个池子规则（读回原 rule → 在 `event_sources` 里追加 → 写回 → 读回验证，**别覆盖原有的**，修法同 [[project-cts-audience-pool-freshness-20260922]] 那次加表单 ID）。
@@ -451,15 +451,15 @@ Meta 的自动分配对新广告有保护期，**三天不会自己纠正**—�
 - 对于预算敏感的客户（比如月预算有硬顶），如果要精确控日花费，WhatsApp 更可控。
 
 ## 二十四、建创意 / 激活别人建的广告前，显式核对 `creative.object_story_spec.page_id` 是不是这个客户自己的主页
-**来源**（原独立记忆 project-cts-thruplay-wrong-page-incident-20260922，2026-09-25 并入）：CTS 圣诞团 ThruPlay 广告的创意 `page_id` 绑到了另一个客户的主页，2026-09-20 建的时候就错了（同一天在处理另一个客户的账户解绑，模板残留/手误），9-21 打开投放，9-22 发现后三层暂停，扫全账户约 65 条广告确认是孤立事件；影响很小（一天 $2.44、205 曝光、1 次真实点击，且命中同晚查出的 Audience Network 假用户污染）。PM 本人对话里回「删除」后按广告→广告组→系列从子到父 `DELETE`，三层回读 `"status":"DELETED"`；底稿在本机备份目录，路径不进仓库。
+**来源**（原独立记忆 project-cts-thruplay-wrong-page-incident-20260922，2026-09-25 并入）：CTS 圣诞团 ThruPlay 广告的创意 `page_id` 绑到了另一个客户的主页，2026-09-20 建的时候就错了（同一天在处理另一个客户的账户解绑，模板残留/手误），9-21 打开投放，9-22 发现后三层暂停，扫全账户约 65 条广告确认是孤立事件；影响很小（一天 $2.44、205 曝光、1 次真实点击，且命中同晚查出的 Audience Network 假用户污染）。PM 本人对话里回「删除」后按广告→广告组→系列从子到父 `DELETE`，三层回读 `"status":"DELETED"`；底稿存在开发机本地备份目录（路径不写进本文）。
 **怎么用**：① 建新创意时 `page_id` 跟"这条广告是哪个客户的"做一次显式核对，尤其同一天/同一窗口还在处理别的客户账户变更时；② 激活一条自己没参与创建的广告前顺手核对 page_id，广告名/系列名全是本客户字眼也看不出主页绑错；③ 验证脚本 `fields` 拼出多余逗号会触发语法错误，**语法错误 ≠ 对象不存在**，别把"读不到"判成"已删除"。
 
 ## 二十五、视频互动型自定义受众要求主页过 Meta 商家认证；多个受众直接并集勾选，不用建"组合受众"
 **来源**（原独立记忆 project-oztop-video-audience-blocked-unverified，2026-07-15，2026-09-25 并入）：给 Oztop「Video Viewers 25% - Retarget」追加在跑的真实视频 ID，广告账户上传的视频和主页已发布的 Reel 两种来源都报 `error_subcode: 1713216`（"video isn't associated with a Page or New Page Experience"）；`GET /{PAGE}?fields=verification_status` 返回 `not_verified`——Oztop 主页没做商家认证（高度吻合但非 100% 确认）。
-**怎么用**：① 只能 PM 人工去 Business Settings → Business Verification 提交营业执照，Claude 没有操作入口；② 认证前 video_view 受众这条线废掉别重试；③「Page Engagers 365d」「Form Openers 90d」不受限制，先用它们撑暖池；④ 广告组定向里 `targeting.custom_audiences: [id1, id2]` 直接并集，不要浪费 API 建组合对象。该客户的广告账户与主页号码不写进本文（记成客户 C 的广告账户、客户 C 的主页）。
+**怎么用**：① 只能 PM 人工去 Business Settings → Business Verification 提交营业执照，Claude 没有操作入口；② 认证前 video_view 受众这条线废掉别重试；③「Page Engagers 365d」「Form Openers 90d」不受限制，先用它们撑暖池；④ 广告组定向里 `targeting.custom_audiences: [id1, id2]` 直接并集，不要浪费 API 建组合对象。（客户 B 的广告账户和主页号不写进本文，需要时到 ME 客户设置页查。）
 
 ## 二十六、Meta 官方 ads MCP server（mcp.facebook.com/ads）已向所有开发者开放，ME 自己的 App 早在用
-**来源**（原独立记忆 reference-meta-ads-mcp-server-official，2026-07-17 Meta 开发者邮件，2026-09-25 并入）：ME 自己的应用是收件对象（应用编号和业务编号不写进本文）；本会话里查/改广告用的 `ads_get_ad_entities` / `ads_create_campaign` / `ads_account_get_activity_logs` 等工具分类跟官方 7 大类一一对应，几乎可以肯定就是这台官方 server。
+**来源**（原独立记忆 reference-meta-ads-mcp-server-official，2026-07-17 Meta 开发者邮件，2026-09-25 并入）：ME 自己的应用（应用编号、业务编号不写进本文）是收件对象；本会话里查/改广告用的 `ads_get_ad_entities` / `ads_create_campaign` / `ads_account_get_activity_logs` 等工具分类跟官方 7 大类一一对应，几乎可以肯定就是这台官方 server。
 **怎么用**：现在的用法 = 内部 PM/FDE 在 Claude Code 里"人在回路"操作某客户账户；ME 产品的 Ads Intelligence 客户自助场景（客户 OAuth 连自己账户 → ME 后台程序化代管）正式设计时应直接基于这个官方 MCP 协议搭后端，不重新封装 Graph API。现在不需要为此动工。
 
 ## 三十二、别拿单日判趋势，也别拿 30 天汇总判「现在」——加预算这类前置条件必须按最近窗口算
@@ -558,7 +558,7 @@ Meta 的自动分配对新广告有保护期，**三天不会自己纠正**—�
    实测：ME 自己的起草链路（`createDraftForApproval` → `ad-publisher.ts` `campaignBody`）在 CTS 旧账户跑 $1 试跑，第一步 campaign 就被拒，账本 `flywheel_actions` 记 failed（25e8e175）、无孤儿。这是 Meta 侧新要求，不是我们的权限或格式问题；ABO（广告组各自日预算）就传 `'false'`。
    **怎么用**：凡是建 campaign 的入口（ad-publisher、winner-reel-sync 的 ads-manager、R4 工厂起草、listing）都要补这个字段，并在测试里断言请求体带它；以后见到 4834011 就是这一条，别去查权限。
 
-7. 🔴 **（2026-10-26 新增）账户的「受众列表边」会漏掉部分相似受众（lookalike），所以「不在列表里 = 不属于这个账户」是错判据。** 实测 客户 A 的旧账号：`act_<id>/customaudiences?limit=200` 只回 8 条，而 Meta 广告 MCP 的 `ads_get_ad_account_custom_audiences` 回 12 条；差的 4 条**全是「类似受众 (NZ, 1%)」**，按 id 直读都是 200 且 `account_id` 就是该账户，只是不出现在列表边上。客户 A 的官方账号 同样：列表边 8 条、MCP 11 条。
+7. 🔴 **（2026-10-26 新增）账户的「受众列表边」会漏掉部分相似受众（lookalike），所以「不在列表里 = 不属于这个账户」是错判据。** 实测客户 A 的旧账号：`act_<id>/customaudiences?limit=200` 只回 8 条，而 Meta 广告 MCP 的 `ads_get_ad_account_custom_audiences` 回 12 条；差的 4 条**全是「类似受众 (NZ, 1%)」**，按 id 直读都是 200 且 `account_id` 就是该账户，只是不出现在列表边上。官方账户 0470 同样：列表边 8 条、MCP 11 条。
    **怎么用**：凡是要校验「这个受众归不归这个账户」，列表边里没查到时**必须按 id 直读一次核 `account_id`**，对得上才算本账户；读不到或属于别的账户才拒。只靠列表边会把相似受众全部误拒——而相似受众正是拉新打法的主力。同一次实测还确认：`approximate_count_lower_bound` 真的会返回 **-1**（Meta 对小受众隐私分桶的"不报"），所以 ≤0 必须当"读不到"放行 + 记账本，不能当"人太少"拒掉。
    另：这两个账户在 `limit=200` 下 `paging` 里**只有 cursors、没有 next**，但这是 8 条样本上的结论，别当成"Meta 不会无条件给 next"的通则。
 
@@ -620,7 +620,7 @@ order by d.depart_on;
 
 ## 三十九、「不是当前主推」≠「已过期」——断言素材过期必须有证据
 
-同一天的第二个错：把客户 A 旧账号上的六条写 `Departs 16 November 2026` 的广告写成「已过期」，并据此否决重开表单系列。
+同一天的第二个错：把客户 A 旧账号上六条写 `Departs 16 November 2026` 的广告写成「已过期」，并据此否决重开表单系列。
 核查当天是 10-25，**11/16 根本还没到**；查目录，那班 `Golden China` 是 `open`、`is_active`、未售罄，**仍在售**。
 是 Codex 复审（PR #3129）把这条挑出来的，不是自己发现的。
 
@@ -637,7 +637,7 @@ order by d.depart_on;
 顺带一条反面教材里的正面范本——这是合规的免签写法（来自 `Reborn-Winner-Ad-20260624`）：
 > Many NZ passport holders may qualify for visa-free entry — confirm for your itinerary before booking.
 
-## 四十、在 Ads Manager 网页建即时表单广告：Meta 有 8 个默认开关会替你「说话」，建完逐个关（2026-10-25 客户 A 的旧账号 实测，通用层）
+## 四十、在 Ads Manager 网页建即时表单广告：Meta 有 8 个默认开关会替你「说话」，建完逐个关（2026-10-25 客户 A 旧账号实测，通用层）
 
 接口（MCP）建线索组报 `1815089`（读不到主页的线索广告条款），而网页上同一主页显示「已接受条款」——**这是接口权限问题，不是主页没签**，改走网页建，不要去重签条款。
 网页建的时候，下面这些是 Meta **默认就开着**的，处方里没写不等于没有，建完必须逐个看：
