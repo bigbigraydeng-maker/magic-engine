@@ -143,6 +143,103 @@ export async function pushConversionReviewItems(
   }
 
   await pushTokenDeadItems(supabase, items, clientNames, now)
+  await pushHeldSendItems(supabase, items, clientNames, now)
+}
+
+type HeldOutcome = {
+  client_id: string
+  outcome_kind?: 'purchase' | 'balance' | 'lead'
+  occurred_at: string
+  review_status: string
+  redacted_at: string | null
+}
+
+type HeldRow = {
+  outcome_id: string
+  me_sale_outcomes: HeldOutcome | null
+}
+
+/**
+ * 已批准、但被允许名单停在队列里的成交。没有新的定时任务：人改完名单后
+ * 在成交页点「再试一次」，发送口会再查名单和 7 天窗口。
+ */
+function isDealKind(kind: HeldOutcome['outcome_kind']): boolean {
+  return kind === 'purchase' || kind === 'balance'
+}
+
+function tallyHeld(
+  rows: HeldRow[],
+  now: Date,
+  wantDeal: boolean,
+): Map<string, { count: number; oldestId: string; oldest: string }> {
+  const byClient = new Map<string, { count: number; oldestId: string; oldest: string }>()
+  for (const row of rows) {
+    const o = row.me_sale_outcomes
+    if (!o || o.review_status !== 'approved' || o.redacted_at) continue
+    if (isPastEventWindow(o.occurred_at, now)) continue
+    const wanted = wantDeal ? isDealKind(o.outcome_kind) : o.outcome_kind === 'lead'
+    if (!wanted) continue
+    const cur = byClient.get(o.client_id)
+    if (!cur) {
+      byClient.set(o.client_id, { count: 1, oldestId: row.outcome_id, oldest: o.occurred_at })
+      continue
+    }
+    cur.count += 1
+    if (o.occurred_at < cur.oldest) {
+      cur.oldest = o.occurred_at
+      cur.oldestId = row.outcome_id
+    }
+  }
+  return byClient
+}
+
+function appendHeldLines(
+  rows: HeldRow[],
+  items: ManualItem[],
+  clientNames: Map<string, { name: string }>,
+  now: Date,
+): void {
+  const byClient = tallyHeld(rows, now, true)
+  for (const [clientId, agg] of byClient) {
+    const daysLeft = Math.max(0, 7 - daysAgo(agg.oldest, now))
+    const when = daysLeft === 0 ? '今天就会过期' : `再过 ${daysLeft} 天就过期`
+    items.push({
+      kind: 'conversion_needs_review',
+      client_name: clientNames.get(clientId)?.name ?? '客户',
+      client_id: clientId,
+      what:
+        `有 ${agg.count} 笔已经批准的成交按这个客户允许发送的名单先停住了，没有发出去。` +
+        `最早的一笔${when}。名单改好之前它们不会自己发出去。`,
+      how: '名单改好之后，打开这一页，在「需要你动手」里点「再试一次」。还在 7 天内、而且名单允许，才会发出去。',
+      href: `https://app.magicengine.com.au/dashboard/conversions?client=${clientId}&focus=${agg.oldestId}&status=held`,
+    })
+  }
+  for (const [clientId, agg] of tallyHeld(rows, now, false)) {
+    items.push({
+      kind: 'conversion_needs_review',
+      client_name: clientNames.get(clientId)?.name ?? '客户',
+      client_id: clientId,
+      what: '按名单不发，不用处理。',
+      how: `这 ${agg.count} 条已批准的咨询不在允许发送的名单里。不用改名单，也不用重发。`,
+      href: `https://app.magicengine.com.au/dashboard/conversions?client=${clientId}`,
+    })
+  }
+}
+
+async function pushHeldSendItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  clientNames: Map<string, { name: string }>,
+  now: Date,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('id, outcome_id, me_sale_outcomes(client_id, outcome_kind, occurred_at, review_status, redacted_at)')
+    .eq('status', 'queued')
+    .contains('payload_preview', { held: true })
+    .limit(200)
+  if (error) throw new Error(`名单停住待补发查询失败: ${error.message}`)
+  appendHeldLines((data ?? []) as unknown as HeldRow[], items, clientNames, now)
 }
 
 type AuthFailedRow = {

@@ -7,7 +7,6 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
-import { CAPI_EVENT_CHOICES } from '@/lib/conversions/capi-client-config'
 
 type Milestone = '' | 'deposit' | 'balance'
 
@@ -28,8 +27,6 @@ interface CapiConfig {
 }
 
 interface Draft {
-  restrictEvents: boolean
-  events: string[]
   milestone: Milestone
   qualifiedStage: string
   dealStage: string
@@ -123,7 +120,6 @@ function CapiForm(props: {
   const { draft } = props
   return (
     <div className="space-y-4">
-      <EventList draft={draft} saving={props.saving} onChange={props.onChange} />
       <MilestoneField draft={draft} saving={props.saving} onChange={props.onChange} />
       <StageField
         id={`capi-qualified-${props.clientId}`}
@@ -159,58 +155,6 @@ function CapiForm(props: {
         保存
       </button>
     </div>
-  )
-}
-
-function EventList({ draft, saving, onChange }: { draft: Draft; saving: boolean; onChange: (d: Draft) => void }) {
-  const toggle = (name: string) => {
-    const events = draft.events.includes(name) ? draft.events.filter((e) => e !== name) : [...draft.events, name]
-    onChange({ ...draft, events })
-  }
-  return (
-    <fieldset>
-      <legend className="text-sm font-bold text-slate-800">允许发给广告平台的事</legend>
-      <label className="mt-2 flex items-start gap-2 text-sm text-slate-700">
-        <input
-          type="radio"
-          name="capi-restrict"
-          checked={!draft.restrictEvents}
-          disabled={saving}
-          onChange={() => onChange({ ...draft, restrictEvents: false })}
-          className="mt-1"
-        />
-        不限制（跟现在一样，成交、尾款、咨询都会发）
-      </label>
-      <label className="mt-1 flex items-start gap-2 text-sm text-slate-700">
-        <input
-          type="radio"
-          name="capi-restrict"
-          checked={draft.restrictEvents}
-          disabled={saving}
-          onChange={() => onChange({ ...draft, restrictEvents: true })}
-          className="mt-1"
-        />
-        只发勾选的。没勾上的先停在排队里，以后勾上、还在 7 天内可以再发。
-      </label>
-      {draft.restrictEvents && (
-        <div className="mt-2 space-y-1 pl-6">
-          {CAPI_EVENT_CHOICES.map((choice) => (
-            <label key={choice.name} className="flex items-center gap-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={draft.events.includes(choice.name)}
-                disabled={saving}
-                onChange={() => toggle(choice.name)}
-              />
-              {choice.label}
-            </label>
-          ))}
-          {draft.events.length === 0 && (
-            <p className="text-xs text-amber-700">一项都没勾，等于全部先停着、先不发。</p>
-          )}
-        </div>
-      )}
-    </fieldset>
   )
 }
 
@@ -271,10 +215,7 @@ function StageField(props: {
 }
 
 function draftFrom(cfg: CapiConfig | undefined): Draft {
-  const hasList = cfg?.capiAllowedEvents != null
   return {
-    restrictEvents: cfg?.capiAllowedEventsMalformed === true || hasList,
-    events: cfg?.capiAllowedEvents ?? [],
     milestone: cfg?.capiDealMilestone ?? '',
     qualifiedStage: cfg?.capiQualifiedLeadStageKey ?? '',
     dealStage: cfg?.capiDealStageKey ?? '',
@@ -283,7 +224,6 @@ function draftFrom(cfg: CapiConfig | undefined): Draft {
 
 function payloadFrom(draft: Draft): Record<string, unknown> {
   return {
-    capiAllowedEvents: draft.restrictEvents ? draft.events : null,
     capiDealMilestone: draft.milestone || null,
     capiQualifiedLeadStageKey: draft.qualifiedStage || null,
     capiDealStageKey: draft.dealStage || null,
@@ -293,7 +233,6 @@ function payloadFrom(draft: Draft): Record<string, unknown> {
 function warningsFor(cfg: CapiConfig | undefined): string[] {
   if (!cfg) return []
   const lines: string[] = []
-  if (cfg.capiAllowedEventsMalformed) lines.push('允许发送的名单之前存坏了，请重新选一次再保存。')
   if (cfg.capiDealMilestoneMalformed) lines.push('「哪一笔记成成交」之前存坏了。不重选就保存会清掉它，之后不会自动记成交。')
   if (cfg.capiQualifiedLeadStageMalformed) lines.push('「哪一步算合格咨询」之前存坏了，请从跟进步骤里重选。')
   if (cfg.capiDealStageKeyMalformed) lines.push('「哪一步可以手录成交金额」之前存坏了，请从跟进步骤里重选。')

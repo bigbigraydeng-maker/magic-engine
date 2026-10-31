@@ -6,6 +6,7 @@ import {
   decideCapiEventAllowed,
   normalizeCapiSettingsWrite,
   readCapiClientConfig,
+  readyCapiSettingsWrite,
 } from '../capi-client-config'
 
 describe('capi event names', () => {
@@ -100,7 +101,7 @@ describe('settings write', () => {
   it('null clears only the keys that were sent', () => {
     const write = normalizeCapiSettingsWrite({ capiAllowedEvents: null })
     expect(write.touched).toBe(true)
-    if (!write.touched || write.error) throw new Error('expected a clear')
+    if (!readyCapiSettingsWrite(write)) throw new Error('expected a clear')
     const next = applyCapiSettingsWrite(
       { capi_allowed_events: ['Purchase'], capi_deal_milestone: 'deposit', trade_domains: ['hot.co.nz'] },
       write,
