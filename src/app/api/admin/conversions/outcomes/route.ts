@@ -215,6 +215,9 @@ export async function GET(request: Request) {
   if (searchParams.get('companion_open') === '1') {
     return listCompanionOpen(clientId, limit, SELECT_COLUMNS)
   }
+  if (searchParams.get('unsent_deal') === '1') {
+    return listUnsentDeals(clientId, limit, SELECT_COLUMNS)
+  }
 
   const sendStatus = searchParams.get('send_status')
   const sendStatuses = sendStatus ? sendStatus.split(',').map((s) => s.trim()).filter(Boolean) : []
@@ -261,6 +264,7 @@ type ListedOutcome = {
   meta_lead_id?: string | null
   me_conversion_writebacks?: ListedWriteback[]
   companion_expected?: boolean
+  primary_missing?: boolean
 }
 
 function windowStart(): string {
@@ -300,6 +304,36 @@ function qualifiedStillOpen(row: ListedOutcome): boolean {
     if (wb.payload_preview?.held === true || wb.last_error_code === 'auth') return false
     return wb.status === 'queued' || wb.status === 'failed'
   })
+}
+
+async function listUnsentDeals(clientId: string, limit: number, columns: string) {
+  const { data, error } = await supabaseAdmin
+    .from('me_sale_outcomes')
+    .select(columns)
+    .eq('client_id', clientId)
+    .eq('review_status', 'approved')
+    .in('outcome_kind', ['purchase', 'balance'])
+    .is('redacted_at', null)
+    .gte('occurred_at', windowStart())
+    .order('occurred_at', { ascending: false })
+    .limit(limit)
+  if (error) return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
+  const outcomes = ((data ?? []) as ListedOutcome[])
+    .filter(primaryMissing)
+    .map((row) => ({ ...row, primary_missing: true }))
+  return NextResponse.json({ outcomes, count: outcomes.length })
+}
+
+function primaryMissing(row: ListedOutcome): boolean {
+  if (row.outcome_kind !== 'purchase' && row.outcome_kind !== 'balance') return false
+  if (row.redacted_at) return false
+  const writes = row.me_conversion_writebacks ?? []
+  return !writes.some((wb) => isPrimaryWriteback(row.id, wb))
+}
+
+function isPrimaryWriteback(outcomeId: string, wb: ListedWriteback): boolean {
+  if ((wb.event_id ?? '').endsWith(':conversion-stage')) return false
+  return wb.event_id == null || wb.event_id === outcomeId
 }
 
 async function listCompanionOpen(clientId: string, limit: number, columns: string) {

@@ -500,6 +500,38 @@ describe('授权失效的失败行说清「会自动补发」（2026-09-22 起�
       expect(calls).toHaveLength(1)
     })
   })
+
+  it('自动通过但还没有发送记录的成交可以再试一次，普通排队成交不出现', async () => {
+    mountWith([
+      outcome({
+        id: 'unsent',
+        review_status: 'approved',
+        primary_missing: true,
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [],
+      }),
+      outcome({
+        id: 'queued-deal',
+        review_status: 'approved',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{
+          id: 'wb-q',
+          status: 'queued',
+          last_error: null,
+          last_error_code: null,
+          next_attempt_at: null,
+          event_id: 'queued-deal',
+        }],
+      }),
+    ])
+    expect(await screen.findByText(/发送记录当时没写成/)).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: '再试一次' })).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '再试一次' }))
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((c) => String(c[0]).includes('/outcomes/unsent/send'))
+      expect(calls).toHaveLength(1)
+    })
+  })
 })
 
 function heldWriteback(id: string) {

@@ -275,6 +275,55 @@ describe('GET outcomes · 已报价排队和成交下一步', () => {
     expect(body.outcomes.map((o: Row) => o.id)).toEqual(['older-queued'])
   })
 
+  it('没有主发送记录的已批准成交会返回，普通排队和已经发出的不会', async () => {
+    rows = [
+      {
+        id: 'missing',
+        client_id: CLIENT,
+        outcome_kind: 'purchase',
+        review_status: 'approved',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [],
+      },
+      {
+        id: 'stage-only',
+        client_id: CLIENT,
+        outcome_kind: 'balance',
+        review_status: 'approved',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{ status: 'failed', event_id: 'stage-only:conversion-stage' }],
+      },
+      {
+        id: 'queued',
+        client_id: CLIENT,
+        outcome_kind: 'purchase',
+        review_status: 'approved',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{ status: 'queued', event_id: 'queued' }],
+      },
+      {
+        id: 'sent',
+        client_id: CLIENT,
+        outcome_kind: 'purchase',
+        review_status: 'approved',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{ status: 'confirmed', event_id: 'sent' }],
+      },
+      {
+        id: 'old',
+        client_id: CLIENT,
+        outcome_kind: 'purchase',
+        review_status: 'approved',
+        occurred_at: new Date(Date.now() - 40 * 86_400_000).toISOString(),
+        me_conversion_writebacks: [],
+      },
+    ]
+    const res = await get('unsent_deal=1')
+    const body = await res.json()
+    expect(body.outcomes.map((o: Row) => o.id).sort()).toEqual(['missing', 'stage-only'])
+    expect(body.outcomes.every((o: Row & { primary_missing?: boolean }) => o.primary_missing === true)).toBe(true)
+  })
+
   it('打开了下一步、又有线索编号、但还没那条发送记录的成交会被标出来', async () => {
     clientConfig = { capi_conversion_leads: true, capi_conversion_deal_stage_key: 'balance_received' }
     rows = [
