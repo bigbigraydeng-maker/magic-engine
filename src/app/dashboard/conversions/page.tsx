@@ -142,6 +142,8 @@ export default function ConversionsPage() {
   const [flash, setFlash] = useState<{ id: string; text: string; ok: boolean } | null>(null)
   const [stuck, setStuck] = useState<Outcome[]>([])
   const [heldInquiry, setHeldInquiry] = useState(false)
+  /** 这一轮列表请求已经结束（含两边都是空）。深链定位要等它，不能把「还没读」当成「没有」。 */
+  const [listsReady, setListsReady] = useState(false)
   const [rejecting, setRejecting] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState<string>('')
   const [rejectNote, setRejectNote] = useState('')
@@ -169,17 +171,21 @@ export default function ConversionsPage() {
   const load = useCallback(async () => {
     if (!clientId) return
     setLoading(true)
+    setListsReady(false)
     setError(null)
     setWritebackDisabled(false)
     try {
-      const base = `/api/admin/conversions/outcomes?client_id=${encodeURIComponent(clientId)}&limit=200`
+      const root = `/api/admin/conversions/outcomes?client_id=${encodeURIComponent(clientId)}`
       // 已批准但没走完的：发出去没下文的、失败可重试的。send_status 交给接口在 SQL
       // 层筛（不是先按最新 200 条截断再筛）—— 否则堆积超过 200 条时，卡住的老记录
       // 会先被"最新 N 条"的窗口挤掉，压根轮不到这一步筛选。
-      const [pendingRes, stuckRes, heldRes] = await Promise.all([
-        fetch(`${base}&review_status=pending_review`),
-        fetch(`${base}&review_status=approved&send_status=in_doubt,failed`),
-        fetch(`${base}&review_status=approved&send_status=queued&held=1`),
+      // 停发的成交和咨询必须分开取：咨询只用来显示「不用处理」，混在同一次 limit 里
+      // 会把还在 7 天内的成交挤出「需要你动手」。
+      const [pendingRes, stuckRes, heldDealRes, heldLeadRes] = await Promise.all([
+        fetch(`${root}&limit=200&review_status=pending_review`),
+        fetch(`${root}&limit=200&review_status=approved&send_status=in_doubt,failed`),
+        fetch(`${root}&limit=200&review_status=approved&send_status=queued&held=1&outcome_kind=purchase,balance`),
+        fetch(`${root}&limit=1&review_status=approved&send_status=queued&held=1&outcome_kind=lead`),
       ])
       const pending = await pendingRes.json()
       if (!pendingRes.ok) {
@@ -203,15 +209,19 @@ export default function ConversionsPage() {
       //    只返回 outcome 主表，渲染时 `sendState(o)!` 会 crash 整页。
       //    再挡一次：stuck 里只放**真有 writeback**的 outcome。
       const stuckBody = await stuckRes.json()
-      const heldBody = await heldRes.json()
-      if (!heldRes.ok) throw new Error(heldBody.error ?? '读取失败')
-      const heldList: Outcome[] = heldBody.outcomes ?? []
-      setStuck(mergeStuck(stuckBody.outcomes ?? [], heldList))
-      setHeldInquiry(heldList.some((o) => isHeldOutcome(o) && o.outcome_kind === 'lead'))
+      const heldDealBody = await heldDealRes.json()
+      const heldLeadBody = await heldLeadRes.json()
+      if (!heldDealRes.ok) throw new Error(heldDealBody.error ?? '读取失败')
+      if (!heldLeadRes.ok) throw new Error(heldLeadBody.error ?? '读取失败')
+      const heldDeals: Outcome[] = heldDealBody.outcomes ?? []
+      const heldLeads: Outcome[] = heldLeadBody.outcomes ?? []
+      setStuck(mergeStuck(stuckBody.outcomes ?? [], heldDeals))
+      setHeldInquiry(heldLeads.some((o) => isHeldOutcome(o) && o.outcome_kind === 'lead'))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
+      setListsReady(true)
     }
   }, [clientId])
 
@@ -227,9 +237,7 @@ export default function ConversionsPage() {
    * 静默不动，用户看到普通列表，不弹错。跳完清空 focusOutcomeId，同一 URL 不会二次跳。
    */
   useEffect(() => {
-    if (!focusOutcomeId) return
-    // rows / stuck 都还没读回来，等 —— 先返回，等某一边填了再触发本 effect
-    if (rows.length === 0 && stuck.length === 0) return
+    if (!focusOutcomeId || !listsReady) return
     const id = focusOutcomeId
 
     // 先在两个列表里找
@@ -248,8 +256,8 @@ export default function ConversionsPage() {
       return
     }
 
-    // 两边都没有 —— 按 id 直查一次（可能被 200 条窗口挤掉），拿回来后按
-    // review_status 决定塞 rows 还是 stuck。
+    // 两边都没有（含列表本身就是空的）—— 按 id 直查一次。待核对或停发成交
+    // 比默认窗口更老时，不查这一下邮件链接会落空。
     if (!clientId) return
     let cancelled = false
     void (async () => {
@@ -284,7 +292,7 @@ export default function ConversionsPage() {
     return () => {
       cancelled = true
     }
-  }, [focusOutcomeId, rows, stuck, clientId])
+  }, [focusOutcomeId, rows, stuck, clientId, listsReady])
 
   /**
    * 邮件深链 ?status=in_doubt：数据到手后 scroll 到「需要你动手」区块，

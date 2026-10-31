@@ -295,8 +295,10 @@ describe('邮件深链 ?focus= 和 ?status= 支持', () => {
     expect(targetCard).toBeTruthy()
     expect(targetCard!.className).toContain('border-me-ochre')
 
-    // scrollIntoView 被调过
-    expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+    // 跳转发生在数据到手之后的下一拍，等滚动被调过再断言
+    await waitFor(() => {
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+    })
   })
 
   it('?focus= 指向不存在的 id → 静默不动，不弹错', async () => {
@@ -413,3 +415,96 @@ describe('授权失效的失败行说清「会自动补发」（2026-09-22 起�
     expect(screen.queryByRole('button', { name: '再试一次' })).toBeNull()
   })
 })
+
+function heldWriteback(id: string) {
+  return [{
+    id,
+    status: 'queued',
+    last_error: '名单里没有这一类',
+    last_error_code: null,
+    next_attempt_at: null,
+    payload_preview: { held: true },
+  }]
+}
+
+describe('停发成交不被更新的咨询挤出「需要你动手」', () => {
+  it('成交和咨询分开取：200 条更新咨询仍在时，更老的成交还在，咨询只留一句提示', async () => {
+    const deal = outcome({
+      id: 'deal-old',
+      outcome_kind: 'purchase',
+      review_status: 'approved',
+      order_ref: 'DEAL-OLD',
+      occurred_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+      me_conversion_writebacks: heldWriteback('wb-deal'),
+    })
+    const leads = Array.from({ length: 200 }, (_, i) =>
+      outcome({
+        id: `lead-${i}`,
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        amount_minor: null,
+        currency: null,
+        order_ref: null,
+        occurred_at: new Date(Date.now() - 60_000).toISOString(),
+        me_conversion_writebacks: heldWriteback(`wb-lead-${i}`),
+      }),
+    )
+
+    fetchMock = vi.fn().mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.includes('outcome_kind=purchase,balance')) {
+        return Promise.resolve({ ok: true, json: async () => ({ outcomes: [deal], count: 1 }) })
+      }
+      if (u.includes('outcome_kind=lead')) {
+        return Promise.resolve({ ok: true, json: async () => ({ outcomes: [leads[0]], count: 1 }) })
+      }
+      if (u.includes('held=1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ outcomes: leads, count: leads.length }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ outcomes: [], count: 0 }) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.pushState({}, '', `/dashboard/conversions?client=${CLIENT}`)
+    render(<ConversionsPage />)
+
+    expect(await screen.findByRole('heading', { name: /需要你动手/ })).toBeTruthy()
+    expect(screen.getByText(/单号 DEAL-OLD/)).toBeTruthy()
+    expect(screen.getByText('按名单不发，不用处理。')).toBeTruthy()
+
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]))
+    const dealUrl = urls.find((u) => u.includes('outcome_kind=purchase,balance'))
+    const leadUrl = urls.find((u) => u.includes('outcome_kind=lead'))
+    expect(dealUrl).toContain('held=1')
+    expect(dealUrl).toContain('limit=200')
+    expect(leadUrl).toContain('limit=1')
+    expect(urls.filter((u) => u.includes('held=1')).every((u) => u.includes('outcome_kind='))).toBe(true)
+  })
+
+  it('待核对和需要你动手都是空的时，邮件深链仍按 id 把停发成交找出来', async () => {
+    Element.prototype.scrollIntoView = vi.fn()
+    const deal = outcome({
+      id: 'focus-deal',
+      outcome_kind: 'purchase',
+      review_status: 'approved',
+      order_ref: 'FOCUS-DEAL',
+      occurred_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+      me_conversion_writebacks: heldWriteback('wb-focus'),
+    })
+
+    fetchMock = vi.fn().mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.includes('id=focus-deal')) {
+        return Promise.resolve({ ok: true, json: async () => ({ outcomes: [deal], count: 1 }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ outcomes: [], count: 0 }) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.pushState({}, '', `/dashboard/conversions?client=${CLIENT}&focus=focus-deal`)
+    render(<ConversionsPage />)
+
+    expect(await screen.findByText(/单号 FOCUS-DEAL/)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /需要你动手/ })).toBeTruthy()
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('id=focus-deal'))).toBe(true)
+  })
+})
+

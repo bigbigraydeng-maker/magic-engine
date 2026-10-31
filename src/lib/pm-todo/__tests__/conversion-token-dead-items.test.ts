@@ -16,33 +16,64 @@ const NAL = '4ae76381-cd45-43bd-85cd-98cfd7604007'
  *   me_sale_outcomes: select → eq → is → order → limit → await
  *   me_conversion_writebacks（in_doubt）: select → eq → limit → await
  *   me_conversion_writebacks（auth）: select → eq → eq → limit → await
- *   me_conversion_writebacks（held）: select → eq → contains → limit → await
- * 假件按 (table, status) 分流，过滤按真语义执行。
+ *   me_conversion_writebacks（held）: select → eq → contains → eq → is → in → gte → order → limit → await
+ * 假件按 (table, status) 分流。点路径、排序和 limit 按真语义，过滤在截断之前。
  */
+function cell(row: Row, path: string): unknown {
+  let cur: unknown = row
+  for (const part of path.split('.')) {
+    if (!cur || typeof cur !== 'object') return undefined
+    cur = (cur as Row)[part]
+  }
+  return cur
+}
+
 function fakeSupabase(seed: { pending?: Row[]; doubts?: Row[]; authFailed?: Row[]; held?: Row[] }) {
   return {
     from(table: string) {
       const filters: Array<(r: Row) => boolean> = []
-      const rows = () => {
-        if (table === 'me_sale_outcomes') return (seed.pending ?? []).filter((r) => filters.every((f) => f(r)))
-        const all = [...(seed.doubts ?? []), ...(seed.authFailed ?? []), ...(seed.held ?? [])]
-        return all.filter((r) => filters.every((f) => f(r)))
+      let sortCol: string | null = null
+      let sortAsc = true
+      let cap: number | null = null
+      const source = () => {
+        if (table === 'me_sale_outcomes') return seed.pending ?? []
+        return [...(seed.doubts ?? []), ...(seed.authFailed ?? []), ...(seed.held ?? [])]
       }
       const b: Record<string, unknown> = {
         select: () => b,
-        eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), b),
-        is: (c: string, v: unknown) => (filters.push((r) => (r[c] ?? null) === v), b),
+        eq: (c: string, v: unknown) => (filters.push((r) => cell(r, c) === v), b),
+        is: (c: string, v: unknown) => (filters.push((r) => (cell(r, c) ?? null) === v), b),
+        in: (c: string, values: unknown[]) => (filters.push((r) => values.includes(cell(r, c))), b),
+        gte: (c: string, v: unknown) => (filters.push((r) => String(cell(r, c) ?? '') >= String(v)), b),
         contains: (c: string, v: Record<string, unknown>) => (
           filters.push((r) => {
-            const cur = r[c]
+            const cur = cell(r, c)
             if (!cur || typeof cur !== 'object') return false
             return Object.entries(v).every(([k, val]) => (cur as Row)[k] === val)
           }),
           b
         ),
-        order: () => b,
-        limit: () => b,
-        then: (resolve: (v: { data: Row[]; error: null }) => unknown) => resolve({ data: rows(), error: null }),
+        order: (c: string, opts?: { ascending?: boolean; foreignTable?: string }) => {
+          sortCol = opts?.foreignTable ? `${opts.foreignTable}.${c}` : c
+          sortAsc = opts?.ascending !== false
+          return b
+        },
+        limit: (n: number) => {
+          cap = n
+          return b
+        },
+        then: (resolve: (v: { data: Row[]; error: null }) => unknown) => {
+          let out = source().filter((r) => filters.every((f) => f(r)))
+          if (sortCol) {
+            const col = sortCol
+            out = [...out].sort((a, b) => {
+              const cmp = String(cell(a, col) ?? '').localeCompare(String(cell(b, col) ?? ''))
+              return sortAsc ? cmp : -cmp
+            })
+          }
+          if (cap != null) out = out.slice(0, cap)
+          return resolve({ data: out, error: null })
+        },
       }
       return b
     },
@@ -119,6 +150,8 @@ describe('conversion_capi_token_dead 待办', () => {
           is: () => b,
           order: () => b,
           limit: () => b,
+          in: () => b,
+          gte: () => b,
           contains: () => b,
           then: (resolve: (v: { data: Row[] | null; error: { message: string } | null }) => unknown) =>
             resolve(table === 'me_conversion_writebacks' ? { data: null, error: { message: '模拟故障' } } : { data: [], error: null }),
@@ -209,5 +242,24 @@ describe('名单停住的已批准成交', () => {
     expect(inquiry?.what).toBe('按名单不发，不用处理。')
     expect(inquiry?.how).toContain('1 条已批准的咨询')
     expect(inquiry?.how).toContain('不用改名单')
+  })
+
+  it('先滤掉过期行再截 200 条，窗口里最新的成交不会被挤掉', async () => {
+    const expired = Array.from({ length: 201 }, (_, i) => held(`old-${i}`, { occurred_at: '2026-09-01T00:00:00.000Z' }))
+    const newer = Array.from({ length: 200 }, (_, i) =>
+      held(`new-${i}`, { occurred_at: `2026-09-21T00:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}.000Z` }),
+    )
+    const oldestKept = held('edge', { occurred_at: '2026-09-16T00:00:00.000Z' })
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({ held: [...expired, oldestKept, ...newer] }) as never,
+      items,
+      clientNames,
+      NOW,
+    )
+    const deals = items.find((i) => i.what.includes('笔已经批准的成交'))
+    expect(deals?.what).toContain('200 笔已经批准的成交')
+    expect(deals?.what).toContain('再过 6 天就过期')
+    expect(deals?.what).not.toContain('再过 1 天')
   })
 })

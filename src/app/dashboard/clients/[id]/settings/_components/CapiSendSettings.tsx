@@ -124,7 +124,7 @@ function CapiForm(props: {
       <StageField
         id={`capi-qualified-${props.clientId}`}
         label="哪一步算合格咨询"
-        hint="只是先记下来。现在还不会因为走到这一步就发给广告平台。"
+        hint="员工亲手标成这一步，和系统读往来记录自动标成这一步，都算合格咨询。现在还不会因为走到这一步就发给广告平台。"
         value={draft.qualifiedStage}
         stages={props.stages}
         stagesLoaded={props.stagesLoaded}
@@ -134,7 +134,7 @@ function CapiForm(props: {
       <StageField
         id={`capi-deal-stage-${props.clientId}`}
         label="哪一步可以手录成交金额"
-        hint="没有行程价目表的客户，在客人详情里把人标到这一步时，可以手填金额。不选就不会弹出。"
+        hint="还没生效。先记下来：以后在客人详情里把人标到这一步，才可以手填金额。现在标到这一步不会弹出。"
         value={draft.dealStage}
         stages={props.stages}
         stagesLoaded={props.stagesLoaded}
@@ -163,7 +163,7 @@ function MilestoneField({ draft, saving, onChange }: { draft: Draft; saving: boo
     <label className="block text-sm font-bold text-slate-800">
       哪一笔记成成交
       <p className="mt-1 text-xs font-normal leading-relaxed text-slate-500">
-        员工在订单里把这一笔记成已付之后，记一笔等审核的成交。不选就不会自动记。
+        还没生效。先记下来：以后员工把这一笔记成已付，才会记一笔等审核的成交。现在标已付不会自动记。
       </p>
       <select
         className={selectClass}
