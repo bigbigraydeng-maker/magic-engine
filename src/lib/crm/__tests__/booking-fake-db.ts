@@ -13,7 +13,7 @@ export type Row = Record<string, unknown>
 
 export interface RecordedQuery {
   table: string
-  op: 'select' | 'upsert' | 'delete'
+  op: 'select' | 'upsert' | 'delete' | 'update'
   columns: string | null
   eqs: Array<[string, unknown]>
   ins: Array<[string, unknown[]]>
@@ -69,10 +69,14 @@ function sortRows(rows: Row[], col: string, ascending: boolean): Row[] {
 class FakeQuery implements PromiseLike<QueryResult> {
   private readonly state: FakeState
   private readonly table: string
-  private op: 'select' | 'upsert' | 'delete' = 'select'
+  private op: 'select' | 'upsert' | 'delete' | 'update' = 'select'
+  private patch: Row | null = null
   private columns: string | null = null
   private readonly eqs: Array<[string, unknown]> = []
   private readonly ins: Array<[string, unknown[]]> = []
+  private readonly neqs: Array<[string, unknown]> = []
+  private gteCol: string | null = null
+  private gteVal: unknown = null
   private limitValue: number | null = null
   private single = false
   private upsertRow: Row | null = null
@@ -84,8 +88,14 @@ class FakeQuery implements PromiseLike<QueryResult> {
   }
 
   select(columns?: string): this {
-    this.op = 'select'
+    if (this.op !== 'update') this.op = 'select'
     this.columns = columns ?? null
+    return this
+  }
+
+  update(patch: Row): this {
+    this.op = 'update'
+    this.patch = patch
     return this
   }
 
@@ -96,6 +106,17 @@ class FakeQuery implements PromiseLike<QueryResult> {
 
   in(col: string, values: unknown[]): this {
     this.ins.push([col, values])
+    return this
+  }
+
+  neq(col: string, val: unknown): this {
+    this.neqs.push([col, val])
+    return this
+  }
+
+  gte(col: string, val: unknown): this {
+    this.gteCol = col
+    this.gteVal = val
     return this
   }
 
@@ -145,6 +166,13 @@ class FakeQuery implements PromiseLike<QueryResult> {
     for (const [col, values] of this.ins) {
       if (!values.includes(row[col])) return false
     }
+    for (const [col, val] of this.neqs) {
+      if (row[col] === val) return false
+    }
+    if (this.gteCol !== null) {
+      const raw = row[this.gteCol]
+      if (typeof raw !== 'string' || typeof this.gteVal !== 'string' || raw < this.gteVal) return false
+    }
     return true
   }
 
@@ -175,6 +203,7 @@ class FakeQuery implements PromiseLike<QueryResult> {
     }
     if (this.op === 'upsert') return this.runUpsert()
     if (this.op === 'delete') return this.runDelete()
+    if (this.op === 'update') return this.runUpdate()
     return this.runSelect()
   }
 
@@ -189,6 +218,14 @@ class FakeQuery implements PromiseLike<QueryResult> {
     }
     existing.push({ ...row })
     return { data: null, error: null }
+  }
+
+  private runUpdate(): QueryResult {
+    const matched = this.rows().filter((row) => this.matches(row))
+    for (const row of matched) Object.assign(row, this.patch ?? {})
+    const projected = matched.map((row) => project(row, this.columns))
+    if (this.single) return { data: projected[0] ?? null, error: null }
+    return { data: projected, error: null }
   }
 
   private runDelete(): QueryResult {

@@ -31,8 +31,10 @@ import {
   qualifiedLeadHoldReason,
   resolveConversionLead,
 } from './conversion-lead'
+import { closeRevokedUnsentSend, revokedSendBlocksResend } from './crm-deal-void'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
+import { parkUnsentFailure } from './unsent-writeback'
 import type {
   ClientSendConfig,
   DestinationWriter,
@@ -278,6 +280,20 @@ async function deliverApprovedOutcome(
   deps: SendDeps,
   companion: StageCompanion | null,
 ): Promise<SendOutcomeResult> {
+  try {
+    return await deliverApprovedOutcomeBody(outcomeId, deps, companion)
+  } catch (error) {
+    // 发送记录还没写成就失败时，留下一条失败记录。已有记录时插入会被唯一约束挡住，不会另开一条。
+    await parkUnsentFailure(deps.supabase, outcomeId, deps.writer.kind, companion?.eventId ?? outcomeId, error)
+    throw error
+  }
+}
+
+async function deliverApprovedOutcomeBody(
+  outcomeId: string,
+  deps: SendDeps,
+  companion: StageCompanion | null,
+): Promise<SendOutcomeResult> {
   // 可被重复调用：批准时调一次，之后人在页面上点「再试一次」/「重新发送」还会调。
   // 幂等由下面四道闸保证，不靠调用方克制。
   const { supabase, writer, fetcher } = deps
@@ -389,7 +405,7 @@ async function deliverApprovedOutcome(
 
   const { data: wbData, error: wbErr } = await supabase
     .from('me_conversion_writebacks')
-    .select('id, status, receipt, attempts, last_attempt_at')
+    .select('id, status, receipt, attempts, last_attempt_at, payload_preview')
     .eq('destination', destination)
     .eq('event_id', eventId)
     .maybeSingle()
@@ -403,7 +419,11 @@ async function deliverApprovedOutcome(
     receipt: unknown
     attempts: number
     last_attempt_at: string | null
+    payload_preview?: unknown
   }
+
+  const revoked = await closeRevokedUnsentSend(supabase, wb)
+  if (revoked) return revoked
 
   // 已经是终态就到此为止 —— 包括 in_doubt（那一档只能由人来解）。
   if ((TERMINAL as readonly string[]).includes(wb.status)) {
@@ -668,6 +688,13 @@ export async function resolveDoubt(
   actor: string | null,
   supabase: SupabaseClient,
 ): Promise<{ ok: boolean; status: WritebackStatus; message: string }> {
+  if (resolution === 'resend' && await revokedSendBlocksResend(supabase, writebackId)) {
+    return {
+      ok: false,
+      status: 'in_doubt',
+      message: '收款已撤销。这笔可能已经发给广告平台，不能再发一次。',
+    }
+  }
   if (resolution === 'confirmed') {
     const ok = await casUpdate(supabase, writebackId, ['in_doubt'], {
       status: 'confirmed',

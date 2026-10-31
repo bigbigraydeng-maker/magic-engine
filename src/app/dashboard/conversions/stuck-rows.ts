@@ -20,8 +20,8 @@ export type Writeback = {
   last_error_code: string | null
   next_attempt_at: string | null
   event_id?: string | null
-  /** 允许名单先停住时为 `{ held: true }`。没有这个标记的排队行不是「需要你动手」。 */
-  payload_preview?: { held?: boolean } | null
+  /** 允许名单先停住时为 `{ held: true }`。收款撤销后带 `paymentRevoked`。 */
+  payload_preview?: { held?: boolean; paymentRevoked?: boolean } | null
 }
 
 export type Outcome = {
@@ -41,6 +41,8 @@ export type Outcome = {
   customer_first: string | null
   /** Set by the list API only when this deal still owes its lead-stage send. */
   companion_expected?: boolean
+  /** Set by the list API only when this approved deal has no primary send row. */
+  primary_missing?: boolean
   me_conversion_writebacks?: Writeback[]
 }
 
@@ -100,6 +102,19 @@ function openQualifiedWriteback(wb: Writeback): boolean {
   return wb.status === 'queued' || wb.status === 'failed'
 }
 
+/** Approved purchase whose primary send row was never written. A queued primary stays off. */
+export function primaryNeedsRetry(o: Outcome): boolean {
+  if (o.primary_missing !== true || o.redacted_at) return false
+  if (o.outcome_kind !== 'purchase' && o.outcome_kind !== 'balance') return false
+  if (isPastEventWindow(o.occurred_at, Date.now())) return false
+  return !writebacks(o).some((wb) => isPrimaryWriteback(o, wb))
+}
+
+function isPrimaryWriteback(o: Outcome, wb: Writeback): boolean {
+  if ((wb.event_id ?? '').endsWith(':conversion-stage')) return false
+  return wb.event_id == null || wb.event_id === o.id
+}
+
 /**
  * The API sets companion_expected only when this deal should have sent the
  * lead-stage step and that step is missing, queued, or failed. Ordinary
@@ -107,6 +122,7 @@ function openQualifiedWriteback(wb: Writeback): boolean {
  */
 export function companionNeedsRetry(o: Outcome): boolean {
   if (o.companion_expected !== true || o.outcome_kind === 'lead' || o.redacted_at) return false
+  if (writebacks(o).some((wb) => wb.payload_preview?.paymentRevoked === true)) return false
   const companion = companionWriteback(o)
   if (!companion) return true
   if (isHeldWriteback(companion) || companion.last_error_code === 'auth') return false
@@ -118,12 +134,13 @@ export function mergeStuck(
   held: Outcome[],
   qualified: Outcome[],
   companions: Outcome[],
+  unsent: Outcome[] = [],
 ): Outcome[] {
   const rows = failed.filter(isRetryableFailure)
   const seen = new Set(rows.map((o) => o.id))
-  for (const o of [...held, ...qualified, ...companions]) {
+  for (const o of [...held, ...qualified, ...unsent, ...companions]) {
     if (seen.has(o.id)) continue
-    if (!isHeldDeal(o) && !isOpenQualified(o) && !companionNeedsRetry(o)) continue
+    if (!isHeldDeal(o) && !isOpenQualified(o) && !companionNeedsRetry(o) && !primaryNeedsRetry(o)) continue
     rows.push(o)
     seen.add(o.id)
   }
@@ -132,12 +149,18 @@ export function mergeStuck(
 
 export function showInStuck(o: Outcome): boolean {
   if (o.review_status !== 'approved') return false
-  return isRetryableFailure(o) || isHeldDeal(o) || isOpenQualified(o) || companionNeedsRetry(o)
+  return isRetryableFailure(o) || isHeldDeal(o) || isOpenQualified(o) || companionNeedsRetry(o) || primaryNeedsRetry(o)
 }
 
 export function stuckExplanation(o: Outcome): string {
-  if (companionNeedsRetry(o) && !isRetryableFailure(o) && !isHeldDeal(o)) return companionExplanation(o)
   const wb = sendState(o)
+  if (wb?.payload_preview?.paymentRevoked === true) {
+    return '收款已撤销。这笔可能已经发给广告平台，撤不回来，不要再发。'
+  }
+  if (primaryNeedsRetry(o) && !isRetryableFailure(o) && !isHeldDeal(o)) {
+    return '这笔已经自动通过，但发送记录当时没写成，所以还没发给广告平台。点「再试一次」会补发这一次。'
+  }
+  if (companionNeedsRetry(o) && !isRetryableFailure(o) && !isHeldDeal(o)) return companionExplanation(o)
   if (!wb) return '这条已报价还没有发给广告平台。点「再试一次」会补发这一条，不会另记一笔。'
   return writebackExplanation(wb)
 }

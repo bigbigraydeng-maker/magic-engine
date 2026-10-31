@@ -14,6 +14,7 @@ const NAL = '4ae76381-cd45-43bd-85cd-98cfd7604007'
 /**
  * 实测核实（对着 conversion-review-items.ts 源码查过）：三段查询分别是
  *   me_sale_outcomes: select → eq → is → order → limit → await
+ *   me_sale_outcomes（成交汇总）: select → eq → is → in → gte → order → limit → await
  *   me_conversion_writebacks（in_doubt）: select → eq → limit → await
  *   me_conversion_writebacks（auth）: select → eq → eq → limit → await
  *   me_conversion_writebacks（held）: select → eq → contains → eq → is → in → gte → order → limit → await
@@ -121,6 +122,73 @@ const names = new Map([
   [CTS, { name: 'CTS Tours' }],
   [NAL, { name: 'NAL' }],
 ])
+
+describe('成交待批准提醒', () => {
+  const CLIENT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const names = new Map([[CLIENT, { name: '示例客户' }]])
+
+  function deal(id: string, occurred_at: string, kind: 'purchase' | 'lead' = 'purchase'): Row {
+    return {
+      id,
+      client_id: CLIENT,
+      outcome_kind: kind,
+      customer_first: 'A',
+      customer_last: 'B',
+      amount_minor: 100,
+      currency: 'NZD',
+      order_ref: null,
+      occurred_at,
+      review_status: 'pending_review',
+      redacted_at: null,
+    }
+  }
+
+  it('还在 7 天内的成交合成一句：几笔待批准、最早的几天后过期', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({
+        pending: [deal('old', '2026-09-18T00:00:00.000Z'), deal('new', '2026-09-20T00:00:00.000Z'), deal('ask', '2026-09-21T00:00:00.000Z', 'lead')],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    const summary = items.find((i) => i.what.includes('笔成交待批准'))
+    expect(summary?.what).toContain('2 笔成交待批准')
+    expect(summary?.what).toContain('再过 3 天过期')
+    expect(summary?.href).toMatch(/^https:\/\/app\.magicengine\.com\.au\/dashboard\/conversions\?/)
+    expect(summary?.client_name).toBe('示例客户')
+  })
+
+  it('只有咨询、或已经过了 7 天的成交，不另起这句', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({
+        pending: [deal('ask', '2026-09-21T00:00:00.000Z', 'lead'), deal('old', '2026-09-01T00:00:00.000Z')],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    expect(items.some((i) => i.what.includes('笔成交待批准'))).toBe(false)
+  })
+
+  it('最老的 20 条都是咨询时，更新的成交仍被单独数进来', async () => {
+    const leads = Array.from({ length: 21 }, (_, i) =>
+      deal(`lead-${i}`, `2026-09-16T00:00:${String(i).padStart(2, '0')}.000Z`, 'lead'),
+    )
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({ pending: [...leads, deal('fresh', '2026-09-21T00:00:00.000Z')] }) as never,
+      items,
+      names,
+      NOW,
+    )
+    const summary = items.find((i) => i.what.includes('笔成交待批准'))
+    expect(summary?.what).toContain('1 笔成交待批准')
+    expect(summary?.what).toContain('再过 6 天过期')
+  })
+})
 
 describe('conversion_capi_token_dead 待办', () => {
   it('同一客户多条授权失败 → 合并成一条，说清几条、最早的几天后过期，href 是绝对网址', async () => {
@@ -459,6 +527,43 @@ describe('已报价发给广告平台没成功', () => {
     const missing = items.filter((item) => item.what.includes('没记上'))
     expect(missing).toHaveLength(1)
     expect(missing[0].href).toContain(contactId)
+  })
+
+  it('收款已撤销、阶段记录还没建成时，不再叫人再试一次', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({
+        clients: [{
+          id: CTS,
+          conversion_stage: 'live',
+          leads_config: {
+            capi_conversion_leads: true,
+            capi_qualified_lead_stage_key: 'quoted',
+            capi_conversion_deal_stage_key: 'balance_received',
+          },
+        }],
+        deals: [{
+          id: 'deal-revoked',
+          client_id: CTS,
+          outcome_kind: 'purchase',
+          review_status: 'approved',
+          redacted_at: null,
+          meta_lead_id: '1687504185706630',
+          occurred_at: '2026-09-20T00:00:00.000Z',
+          order_ref: '84191',
+        }],
+        held: [{
+          outcome_id: 'deal-revoked',
+          event_id: 'deal-revoked',
+          status: 'confirmed',
+          payload_preview: { paymentRevoked: true },
+        }],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    expect(items.filter((item) => item.what.includes('没记上'))).toHaveLength(0)
   })
 
   it('先排除已经发出的，再限条数：最早的 20 条成功不会挡住后面没发出的', async () => {

@@ -12,6 +12,8 @@ import {
   BOOKING_A1,
   BOOKING_B1,
   UPDATED_AT,
+  ENABLED_LEADS_CONFIG,
+  TOURS_TABLE,
 } from '@/lib/crm/__tests__/booking-fixtures'
 import {
   ADMIN_EMAIL,
@@ -459,6 +461,48 @@ describe('happy path rpc arguments', () => {
     const body = await jsonOf(res)
     expect(body.changed).toBe(false)
     expect(body.reason).toBe('already_paid')
+    expect(body.deal).toBeUndefined()
+  })
+
+  it('paid without a deal milestone does not attach a deal or insert a sale', async () => {
+    state().rpcData['crm_booking_set_paid'] = { changed: true, reason: null }
+    const res = await paidPOST(
+      request('POST', { expectedUpdatedAt: UPDATED_AT, paidOn: '2026-10-08' }),
+      params(CLIENT_A, { bookingId: BOOKING_A1, kind: 'deposit' }),
+    )
+    const body = await jsonOf(res)
+    expect(res.status).toBe(200)
+    expect(body.changed).toBe(true)
+    expect(body.deal).toBeUndefined()
+    expect(state().queries.some((q) => q.table === 'me_sale_outcomes')).toBe(false)
+  })
+
+  it('a failed deal record does not undo the payment', async () => {
+    state().rpcData['crm_booking_set_paid'] = { changed: true, reason: null }
+    const client = state().tables.clients.find((r) => r.id === CLIENT_A)
+    if (client) {
+      client.conversion_stage = 'live'
+      client.leads_config = { ...ENABLED_LEADS_CONFIG, capi_deal_milestone: 'deposit' }
+    }
+    const booking = state().tables.crm_bookings.find((r) => r.id === BOOKING_A1)
+    if (booking) booking.party_size = 2
+    const deposit = state().tables.crm_booking_milestones.find((r) => r.booking_id === BOOKING_A1 && r.kind === 'deposit')
+    if (deposit) deposit.paid_on = '2026-10-08'
+    const contact = state().tables.contacts.find((r) => r.id === CONTACT_A1)
+    if (contact) contact.primary_email = 'a@b.test'
+    const tour = state().tables[TOURS_TABLE].find((r) => r.id === TOUR_A1)
+    if (tour) tour.display_price_text = 'From NZD $100'
+    const res = await paidPOST(
+      request('POST', { expectedUpdatedAt: UPDATED_AT, paidOn: '2026-10-08' }),
+      params(CLIENT_A, { bookingId: BOOKING_A1, kind: 'deposit' }),
+    )
+    const body = await jsonOf(res)
+    expect(res.status).toBe(200)
+    expect(body.changed).toBe(true)
+    const deal = body.deal as { recorded: boolean; reason: string; message: string }
+    expect(deal.recorded).toBe(false)
+    expect(deal.reason).toBe('record_failed')
+    expect(deal.message).toContain('款已记下')
   })
 
   it('override-due sends the override date', async () => {
@@ -511,6 +555,66 @@ describe('happy path rpc arguments', () => {
       params(CLIENT_A, { bookingId: BOOKING_A1, kind: 'deposit' }),
     )
     expect(rpcArgs('crm_booking_unset_paid').p_kind).toBe('deposit')
+  })
+
+  it('unpaid voids a deal that has not been sent', async () => {
+    const client = state().tables.clients.find((row) => row.id === CLIENT_A)
+    if (client) client.leads_config = { ...ENABLED_LEADS_CONFIG, capi_deal_milestone: 'deposit' }
+    state().tables.me_sale_outcomes = [{
+      id: 'outcome-1',
+      client_id: CLIENT_A,
+      contact_id: CONTACT_A1,
+      source_kind: 'crm_stage_manual',
+      source_ref: `crm_deal:${CONTACT_A1}:${BOOKING_A1}`,
+      review_status: 'pending_review',
+    }]
+    state().tables.me_conversion_writebacks = [{
+      id: 'wb-1',
+      outcome_id: 'outcome-1',
+      status: 'queued',
+      payload_preview: null,
+    }]
+    const res = await unpaidPOST(
+      request('POST', { expectedUpdatedAt: UPDATED_AT }),
+      params(CLIENT_A, { bookingId: BOOKING_A1, kind: 'deposit' }),
+    )
+    const body = await jsonOf(res)
+    expect(res.status).toBe(200)
+    expect(body.deal).toMatchObject({ reason: 'voided' })
+    expect(String((body.deal as { message: string }).message)).toContain('已作废')
+    expect(state().tables.me_sale_outcomes[0].review_status).toBe('rejected')
+    expect(state().tables.me_sale_outcomes[0].reject_reason).toBe('not_real_sale')
+    expect(state().tables.me_conversion_writebacks[0].status).toBe('failed_permanent')
+    expect(rpcArgs('crm_booking_unset_paid').p_kind).toBe('deposit')
+  })
+
+  it('unpaid leaves an already sent deal and says so', async () => {
+    const client = state().tables.clients.find((row) => row.id === CLIENT_A)
+    if (client) client.leads_config = { ...ENABLED_LEADS_CONFIG, capi_deal_milestone: 'deposit' }
+    state().tables.me_sale_outcomes = [{
+      id: 'outcome-1',
+      client_id: CLIENT_A,
+      contact_id: CONTACT_A1,
+      source_kind: 'crm_stage_manual',
+      source_ref: `crm_deal:${CONTACT_A1}:${BOOKING_A1}`,
+      review_status: 'approved',
+    }]
+    state().tables.me_conversion_writebacks = [{
+      id: 'wb-1',
+      outcome_id: 'outcome-1',
+      status: 'confirmed',
+      payload_preview: { held: false },
+    }]
+    const res = await unpaidPOST(
+      request('POST', { expectedUpdatedAt: UPDATED_AT }),
+      params(CLIENT_A, { bookingId: BOOKING_A1, kind: 'deposit' }),
+    )
+    const body = await jsonOf(res)
+    expect(res.status).toBe(200)
+    expect(String((body.deal as { message: string }).message)).toContain('已经发给广告平台')
+    expect(state().tables.me_sale_outcomes[0].review_status).toBe('approved')
+    expect(state().tables.me_conversion_writebacks[0].status).toBe('confirmed')
+    expect(state().tables.me_conversion_writebacks[0].payload_preview).toMatchObject({ paymentRevoked: true })
   })
 })
 

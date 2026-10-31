@@ -94,8 +94,8 @@ describe('号码好好的人，一个字都不该变', () => {
  * 🔴 缺的那两样都不是可选项：
  * · 「要记住的事」—— 今日待办有一条 `crm_important_due` 直接依赖它。抽屉里没有，
  *   销售在「今天要联系」页上就设不了提醒，得跳到另一页去设。
- * · NAL 的「确认已成交」—— 标成交要先录金额再回传广告转化。抽屉里没有，
- *   同一个客人在一页能标、另一页标不了。
+ * · 没把某一阶段配成「手录成交」时，「已成交」仍打开金额面板。其它阶段走确认框。
+ *   配了具体一步之后，只认那一步，并弹出「标已成交并录金额」。
  *
  * `DncBanner.tsx` 的头注就是这个分裂的事故记录：「FDE 照着人工任务点进去，
  * 页面上根本没有任务里说的那个按钮」。
@@ -113,9 +113,15 @@ const openStagePanel = () => {
   openMore()
   fireEvent.click(btn('改「到哪一步了」')!)
 }
+/** Stage buttons stay off until leads-config succeeds. Wait, then click. */
+async function clickReadyStage(label: string) {
+  openStagePanel()
+  await waitFor(() => expect(btn(label)?.disabled).toBe(false))
+  fireEvent.click(btn(label)!)
+}
 
 describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
-  const NAL = '4ae76381-cd45-43bd-85cd-98cfd7604007'
+  const CLIENT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
   const drawFor = (
     clientId: string,
@@ -150,45 +156,99 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
     expect(document.querySelector('input[type="date"]')).toBeTruthy()
   })
 
-  /**
-   * 🔴 判据必须跟「全部客人」那一页一模一样：**只有 NAL + 那一档营销动作是 won**。
-   * 两个方向都有代价：漏了 → NAL 标成交不录金额、广告转化回传不了；
-   * 过宽 → CTS 标成交时冒出一个它根本不该走的录金额面板（CTS 走 Google 表格那条）。
-   */
-  /**
-   * 🔴 这两条**刻意不用 `waitFor`**：点「已成交」只改本地 state，面板是同步就渲染出来的
-   * （实测点完那一刻 `document.body.textContent` 里已经有金额提示了）。
-   * 而在这个文件里套 `waitFor` 会让 body 变空 —— 等一件已经发生的事，只会把它等没了。
-   */
-  it('NAL 点「已成交」→ 先弹录金额，不直接改阶段', () => {
-    drawFor(NAL, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
-    openStagePanel()
-    fireEvent.click(btn('已成交')!)
-    const body = document.body.textContent ?? ''
-    expect(body).toContain('这笔生意多少钱')
-    expect(body).toContain('确认已成交')
+  it('没配成交阶段时，「已成交」仍打开金额面板', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    drawFor(CLIENT, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
+    await clickReadyStage('已成交')
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(document.body.textContent ?? '').toContain('这笔生意多少钱')
   })
 
-  /**
-   * 🔴 判据是**两个条件都要满足**：是 NAL + 这一档的营销动作是「成交」。
-   *
-   * 少了后半个条件，NAL 标「已联系」也会弹录金额 —— 员工填个数字进去，
-   * 系统就往广告平台回传一笔**根本没发生的成交**，广告优化会照着假数据去找人。
-   * 变异实测：把 `s.marketingAction === 'won'` 那半去掉，原来那几条测试全绿（存活），
-   * 因为它们只点成交那一档。这一条专门钉后半个条件。
-   */
-  it('NAL 点的不是成交档（比如「已联系」）→ 不许弹录金额', () => {
-    drawFor(NAL, {}, [{ stageKey: 'contacted', label: '已联系', marketingAction: 'nurture' }])
-    openStagePanel()
-    fireEvent.click(btn('已联系')!)
+  it('阶段键是全款已付、营销动作是成交时，走确认框，不弹金额', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    drawFor(CLIENT, {}, [{ stageKey: 'paid_full', label: '全款已付', marketingAction: 'won' }])
+    await clickReadyStage('全款已付')
+    expect(confirmSpy).toHaveBeenCalled()
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
 
-  it('CTS 点同一档「已成交」→ 不该弹录金额（那是 NAL 专属通道）', () => {
-    drawFor('cts', {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
-    openStagePanel()
-    fireEvent.click(btn('已成交')!)
+  it('点「已联系」同样不弹金额', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    drawFor(CLIENT, {}, [{ stageKey: 'contacted', label: '已联系', marketingAction: 'nurture' }])
+    await clickReadyStage('已联系')
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
+  })
+
+  it('点「售后」也走确认框，不弹金额', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    drawFor(CLIENT, {}, [{ stageKey: 'postsale', label: '售后', marketingAction: 'postsale' }])
+    await clickReadyStage('售后')
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
+  })
+
+  it('另一个客户没配时，「已成交」也打开金额面板', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    drawFor('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
+    await clickReadyStage('已成交')
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(document.body.textContent ?? '').toContain('这笔生意多少钱')
+  })
+
+  it('跟进设置还没读完时，已成交不能改阶段，也不能当成没配置', async () => {
+    let release: (value: { ok: boolean; json: () => Promise<unknown> }) => void = () => {}
+    const pending = new Promise<{ ok: boolean; json: () => Promise<unknown> }>((resolve) => {
+      release = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (String(url).includes('leads-config')) return pending
+      return Promise.resolve({ ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) })
+    }))
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    drawFor(CLIENT, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
+    openStagePanel()
+    await waitFor(() => expect(btn('已成交')?.disabled).toBe(true))
+    fireEvent.click(btn('已成交')!)
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(document.body.textContent ?? '').not.toContain('标已成交并录金额')
+    release({ ok: true, json: async () => ({ config: { capiDealStageKey: 'won' } }) })
+    await waitFor(() => expect(btn('已成交')?.disabled).toBe(false))
+    fireEvent.click(btn('已成交')!)
+    expect(screen.getByText(/标已成交并录金额/)).toBeTruthy()
+    expect(confirmSpy).not.toHaveBeenCalled()
+  })
+
+  it('跟进设置读失败时，已成交保持停用，并可以再读一次', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('leads-config')) return { ok: false, status: 500, json: async () => ({}) }
+      return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+    }))
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    drawFor(CLIENT, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
+    openStagePanel()
+    await waitFor(() => expect(screen.getByText(/跟进设置没读到/)).toBeTruthy())
+    expect(btn('已成交')?.disabled).toBe(true)
+    fireEvent.click(btn('已成交')!)
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(btn('再读一次')).toBeTruthy()
+  })
+
+  it('这一步被配成手录成交时，弹出录金额，不走普通确认', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('leads-config')) {
+        return { ok: true, json: async () => ({ config: { capiDealStageKey: 'won' } }) }
+      }
+      return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+    }))
+    drawFor(CLIENT, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
+    openStagePanel()
+    await waitFor(() => {
+      confirmSpy.mockClear()
+      fireEvent.click(btn('已成交')!)
+      expect(screen.getByText(/标已成交并录金额/)).toBeTruthy()
+    })
+    expect(confirmSpy).not.toHaveBeenCalled()
   })
 })
 
@@ -418,8 +478,7 @@ describe('B2 · 改阶段的并发保护', () => {
         onSaved={vi.fn()}
       />,
     )
-    openStagePanel()
-    fireEvent.click(btn('已联系')!)
+    await clickReadyStage('已联系')
     await Promise.resolve()
     await Promise.resolve()
     const call = fetchMock.mock.calls.find((c) => String(c[0]).includes('/stage'))
@@ -432,10 +491,11 @@ describe('B2 · 改阶段的并发保护', () => {
     const onSaved = vi.fn()
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 409,
-        json: async () => ({ actualStage: 'won' }),
+      vi.fn(async (url: string) => {
+        if (String(url).includes('leads-config')) {
+          return { ok: true, status: 200, json: async () => ({ config: {} }) }
+        }
+        return { ok: false, status: 409, json: async () => ({ actualStage: 'won' }) }
       }),
     )
     vi.stubGlobal('confirm', vi.fn(() => true))
@@ -452,12 +512,8 @@ describe('B2 · 改阶段的并发保护', () => {
         onSaved={onSaved}
       />,
     )
-    openStagePanel()
-    fireEvent.click(btn('已联系')!)
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(onSaved).toHaveBeenCalledWith(expect.stringContaining('已成交'), true)
+    await clickReadyStage('已联系')
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.stringContaining('已成交'), true))
   })
 })
 

@@ -29,9 +29,11 @@ import {
 
 export interface BookingCardProps {
   clientId: string
+  contactId: string
   booking: BookingView
   busy: boolean
   run: RunAction
+  dealMilestone?: 'deposit' | 'balance' | null
 }
 
 type Panel = 'none' | 'edit' | 'cancel'
@@ -97,9 +99,11 @@ function ActionRow({
 
 export function BookingCard({
   clientId,
+  contactId,
   booking,
   busy,
   run,
+  dealMilestone = null,
 }: BookingCardProps): JSX.Element {
   const [panel, setPanel] = useState<Panel>('none')
   const editButtonRef = useRef<HTMLButtonElement>(null)
@@ -154,10 +158,12 @@ export function BookingCard({
               <MilestoneRow
                 key={milestone.kind}
                 clientId={clientId}
+                contactId={contactId}
                 booking={booking}
                 milestone={milestone}
                 warnings={booking.warnings.filter((w) => w.kind === milestone.kind)}
                 busy={busy}
+                dealMilestone={dealMilestone}
                 run={run}
               />
             ))}

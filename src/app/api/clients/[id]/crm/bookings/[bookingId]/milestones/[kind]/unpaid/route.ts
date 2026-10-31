@@ -8,6 +8,7 @@ import {
 } from '@/lib/crm/booking-http'
 import { parseExpectedOnly, parseKind } from '@/lib/crm/booking-input'
 import { unsetPaid } from '@/lib/crm/booking-store'
+import { voidDealAfterUnpaid } from '@/lib/conversions/crm-deal-void'
 
 export const dynamic = 'force-dynamic'
 
@@ -38,5 +39,15 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     parsed.value.expectedUpdatedAt,
     access.actor,
   )
-  return finishBookingWrite(result, supabaseAdmin, clientId, bookingId, access.rule)
+  if (!result.ok || (kind !== 'deposit' && kind !== 'balance')) {
+    return finishBookingWrite(result, supabaseAdmin, clientId, bookingId, access.rule)
+  }
+  const deal = await voidDealAfterUnpaid(supabaseAdmin, {
+    clientId,
+    bookingId,
+    kind,
+    actor: access.actor,
+  })
+  const extra = deal ? { deal, milestoneKind: kind } : undefined
+  return finishBookingWrite(result, supabaseAdmin, clientId, bookingId, access.rule, extra)
 }

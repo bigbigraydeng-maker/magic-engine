@@ -14,6 +14,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
 import { readCapiClientConfig, stageCountsAsQualifiedLead } from '@/lib/conversions/capi-client-config'
 import { dealStageEventId, latestMetaLeadId, legalMetaLeadId } from '@/lib/conversions/conversion-lead'
+import { paymentRevokedPreview } from '@/lib/conversions/crm-deal-void'
+import { pushCrmDealFollowUps } from './crm-deal-gap-items'
 import { formatMoney } from '@/lib/conversions/money'
 import { DAY_MS, META_EVENT_WINDOW_DAYS, isPastEventWindow } from '@/lib/conversions/event-window'
 
@@ -114,6 +116,10 @@ export async function pushConversionReviewItems(
       href: `https://app.magicengine.com.au/dashboard/conversions?client=${row.client_id}&focus=${row.id}`,
     })
   }
+
+  const deals = await loadDealsAwaitingApproval(supabase, now)
+  pushDealApprovalReminder(deals, items, clientNames, now)
+  await pushCrmDealFollowUps(supabase, items, clientNames, now)
 
   // ── 发出去了但不知道对方收没收 ──────────────────────────────────────
   // 这一档程序绝不会自己重发 —— 重发一次就是永久多记一笔成交，撤不回。
@@ -510,6 +516,58 @@ type AuthFailedRow = {
  * CTS 19 条就是这样静静过了 7 天窗口的（子牙复审 M2：发现不许死在日志里）。
  * 这里是拉模式：直接查库，不依赖补发步骤有没有跑。
  */
+/** Deals only, inside the 7-day window. The mixed pending list is capped at 20 oldest rows and would hide a new deal behind older leads. */
+async function loadDealsAwaitingApproval(supabase: SupabaseClient, now: Date): Promise<PendingRow[]> {
+  const since = new Date(now.getTime() - META_EVENT_WINDOW_DAYS * DAY_MS).toISOString()
+  const { data, error } = await supabase
+    .from('me_sale_outcomes')
+    .select('id, client_id, outcome_kind, occurred_at')
+    .eq('review_status', 'pending_review')
+    .is('redacted_at', null)
+    .in('outcome_kind', ['purchase', 'balance'])
+    .gte('occurred_at', since)
+    .order('occurred_at', { ascending: true })
+    .limit(500)
+  if (error) throw new Error(`成交待批准汇总查询失败: ${error.message}`)
+  return (data ?? []) as unknown as PendingRow[]
+}
+
+/** One line per client: how many deals are still waiting, and when the oldest expires. */
+function pushDealApprovalReminder(
+  rows: PendingRow[],
+  items: ManualItem[],
+  clientNames: Map<string, { name: string }>,
+  now: Date,
+): void {
+  const byClient = new Map<string, { count: number; oldest: string; oldestId: string }>()
+  for (const row of rows) {
+    if (row.outcome_kind === 'lead') continue
+    if (isPastEventWindow(row.occurred_at, now)) continue
+    const cur = byClient.get(row.client_id)
+    if (!cur) {
+      byClient.set(row.client_id, { count: 1, oldest: row.occurred_at, oldestId: row.id })
+      continue
+    }
+    cur.count += 1
+    if (row.occurred_at < cur.oldest) {
+      cur.oldest = row.occurred_at
+      cur.oldestId = row.id
+    }
+  }
+  for (const [clientId, agg] of byClient) {
+    const daysLeft = Math.max(0, 7 - daysAgo(agg.oldest, now))
+    const when = daysLeft === 0 ? '今天就会过期' : `再过 ${daysLeft} 天过期`
+    items.push({
+      kind: 'conversion_needs_review',
+      client_name: clientNames.get(clientId)?.name ?? '客户',
+      client_id: clientId,
+      what: `有 ${agg.count} 笔成交待批准，最早的一笔${when}。过了广告平台就收不进去，同样的预算会继续找不会付钱的人。`,
+      how: '打开页面，看一眼客人和金额对不对，对就点「告诉广告平台」（会再确认一次），不对就点「不发送」并选个原因。',
+      href: `https://app.magicengine.com.au/dashboard/conversions?client=${clientId}&focus=${agg.oldestId}`,
+    })
+  }
+}
+
 async function pushTokenDeadItems(
   supabase: SupabaseClient,
   items: ManualItem[],
@@ -579,10 +637,12 @@ async function pushMissingDealStageCompanions(
   const deals = await loadDealsAwaitingCompanion(supabase, now, gates)
   if (deals.length === 0) return
   const settled = await loadSettledCompanionEventIds(supabase, deals.map((deal) => dealStageEventId(deal.id)))
+  const revoked = await loadRevokedDealIds(supabase, deals.map((deal) => deal.id))
   let added = 0
   for (const deal of deals) {
     if (added >= MAX_ITEMS) break
     if (settled.has(dealStageEventId(deal.id))) continue
+    if (revoked.has(deal.id)) continue
     if (!dealStillExpectsCompanion(deal, gates)) continue
     items.push(missingCompanionItem(deal, clientNames))
     added += 1
@@ -630,6 +690,21 @@ function dealStillExpectsCompanion(row: DealCompanionRow, gates: ClientGate[]): 
   const gate = gates.find((item) => item.id === row.client_id)
   if (!gate || !legalMetaLeadId(row.meta_lead_id)) return false
   return gateOpensDealStage(gate)
+}
+
+async function loadRevokedDealIds(supabase: SupabaseClient, outcomeIds: string[]): Promise<Set<string>> {
+  if (outcomeIds.length === 0) return new Set()
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('outcome_id, payload_preview')
+    .in('outcome_id', outcomeIds)
+    .limit(FILTERED_SCAN)
+  if (error) throw new Error(`成交下一步撤销标记查询失败: ${error.message}`)
+  const found = new Set<string>()
+  for (const row of (data ?? []) as Array<{ outcome_id?: string; payload_preview?: unknown }>) {
+    if (row.outcome_id && paymentRevokedPreview(row.payload_preview)) found.add(row.outcome_id)
+  }
+  return found
 }
 
 type CompanionWriteback = {

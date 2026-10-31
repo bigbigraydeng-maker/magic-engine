@@ -406,6 +406,51 @@ describe('不该发的都不发', () => {
     expect(w.sendSpy).not.toHaveBeenCalled()
   })
 
+  it('写出发送记录之前就失败时留下一条可重试记录，下次只发一次', async () => {
+    seed(db, { outcome: { contact_id: 'ct-1' }, contact: { id: 'ct-1', do_not_contact: false } })
+    db.errorOn.contact_touchpoints = { message: '数据库连接超时' }
+    const w = makeWriter()
+    await expect(sendApprovedOutcome(OUTCOME, deps(db, w))).rejects.toThrow('触点')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+    expect(db.tables.me_conversion_writebacks).toHaveLength(1)
+    expect(db.tables.me_conversion_writebacks[0]).toMatchObject({
+      outcome_id: OUTCOME,
+      event_id: OUTCOME,
+      destination: 'meta_capi',
+      status: 'failed',
+      last_error_code: 'retry',
+    })
+
+    delete db.errorOn.contact_touchpoints
+    const again = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(again.status).toBe('confirmed')
+    expect(w.sendSpy).toHaveBeenCalledTimes(1)
+    expect(db.tables.me_conversion_writebacks).toHaveLength(1)
+
+    const third = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(third.status).toBe('confirmed')
+    expect(w.sendSpy).toHaveBeenCalledTimes(1)
+    expect(db.tables.me_conversion_writebacks).toHaveLength(1)
+  })
+
+  it('写出发送记录之前的失败不会改掉已经存在的发送记录', async () => {
+    seed(db, { outcome: { contact_id: 'ct-1' }, contact: { id: 'ct-1', do_not_contact: false } })
+    db.tables.me_conversion_writebacks.push({
+      id: 'wb-kept',
+      outcome_id: OUTCOME,
+      destination: 'meta_capi',
+      event_id: OUTCOME,
+      status: 'confirmed',
+      last_error: null,
+    })
+    db.errorOn.contact_touchpoints = { message: '数据库连接超时' }
+    const w = makeWriter()
+    await expect(sendApprovedOutcome(OUTCOME, deps(db, w))).rejects.toThrow('触点')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+    expect(db.tables.me_conversion_writebacks).toHaveLength(1)
+    expect(db.tables.me_conversion_writebacks[0]).toMatchObject({ id: 'wb-kept', status: 'confirmed' })
+  })
+
   it('超过平台时间窗口的不发，并说清早了几天', async () => {
     seed(db, { outcome: { occurred_at: new Date(Date.now() - 35 * 86_400_000).toISOString() } })
     const w = makeWriter()
@@ -734,6 +779,15 @@ describe('人工裁决「不确定」', () => {
     expect(db.tables.me_conversion_writebacks[0].status).toBe('confirmed')
     // 要留痕是人工判定的，不能跟平台真回执混为一谈
     expect(db.tables.me_conversion_writebacks[0].receipt).toMatchObject({ manual: true })
+  })
+
+  it('收款已撤销的不确定记录不能再发一次', async () => {
+    seedDoubt()
+    db.tables.me_conversion_writebacks[0].payload_preview = { paymentRevoked: true }
+    const r = await resolveDoubt('wb-1', 'resend', 'pm@example.com', db as never)
+    expect(r.ok).toBe(false)
+    expect(r.message).toContain('不能再发')
+    expect(db.tables.me_conversion_writebacks[0].status).toBe('in_doubt')
   })
 
   it('人确认没收到 → 放回队列，并清掉发送标记', async () => {

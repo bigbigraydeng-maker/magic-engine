@@ -17,8 +17,10 @@ import type { BookingView } from '@/lib/crm/booking-types'
 import {
   announceBookingsChanged,
   fetchBookings,
+  markPaid,
   type ApiResult,
 } from './booking-api'
+import { dealSettled, readDealNotice, readDealRetry, type DealRetryEntry } from './deal-notice'
 
 export type BookingsState =
   | { status: 'loading' }
@@ -31,9 +33,11 @@ export type RunAction = (action: () => Promise<ApiResult<unknown>>) => Promise<b
 export interface UseBookingsResult {
   state: BookingsState
   notice: string | null
+  dealRetry: DealRetryEntry | null
   busy: boolean
   reload: () => Promise<void>
   run: RunAction
+  retryDeal: () => Promise<boolean>
   clearNotice: () => void
 }
 
@@ -76,7 +80,10 @@ function applyLoadResult(
 export function useBookings(clientId: string, contactId: string): UseBookingsResult {
   const [state, setState] = useState<BookingsState>({ status: 'loading' })
   const [notice, setNotice] = useState<string | null>(null)
+  const [dealRetry, setDealRetry] = useState<DealRetryEntry | null>(null)
   const [busy, setBusy] = useState(false)
+  const dealRetryRef = useRef<DealRetryEntry | null>(null)
+  dealRetryRef.current = dealRetry
 
   const requestIdRef = useRef(0)
   const mountedRef = useRef(true)
@@ -124,12 +131,19 @@ export function useBookings(clientId: string, contactId: string): UseBookingsRes
       busyRef.current = true
       setBusy(true)
       setNotice(null)
+      setDealRetry(null)
       try {
         const result = await action()
         if (!mountedRef.current) return false
         if (result.ok) {
           const loaded = await reloadOk()
-          if (!loaded) setNotice(REFRESH_FAILED_MESSAGE)
+          const hold = unsettledDeal(result.data)
+          if (hold) {
+            setNotice(hold.message)
+            setDealRetry(hold.retry)
+          } else if (!loaded) {
+            setNotice(REFRESH_FAILED_MESSAGE)
+          }
           announceBookingsChanged()
           return true
         }
@@ -152,9 +166,52 @@ export function useBookings(clientId: string, contactId: string): UseBookingsRes
     [reload, reloadOk],
   )
 
+  const retryDeal = useCallback(
+    () => postDealRetry(clientId, dealRetryRef.current, stateRef.current, run, setNotice),
+    [clientId, run],
+  )
+
   const clearNotice = useCallback((): void => {
     setNotice(null)
+    setDealRetry(null)
   }, [])
 
-  return { state, notice, busy, reload, run, clearNotice }
+  return { state, notice, dealRetry, busy, reload, run, retryDeal, clearNotice }
+}
+
+function unsettledDeal(data: unknown): { message: string; retry: DealRetryEntry | null } | null {
+  const notice = readDealNotice(data)
+  if (!notice || dealSettled(notice)) return null
+  return { message: notice.message, retry: readDealRetry(data) }
+}
+
+function milestoneStamp(state: BookingsState, bookingId: string, kind: string): string | null {
+  if (state.status !== 'ready') return null
+  const booking = state.bookings.find((item) => item.id === bookingId)
+  const milestone = booking?.milestones.find((item) => item.kind === kind)
+  return milestone?.updatedAt ?? null
+}
+
+function postDealRetry(
+  clientId: string,
+  entry: DealRetryEntry | null,
+  state: BookingsState,
+  run: RunAction,
+  setNotice: (message: string) => void,
+): Promise<boolean> {
+  if (!entry) return Promise.resolve(false)
+  const updatedAt = milestoneStamp(state, entry.bookingId, entry.kind)
+  const paidOn = storedPaidOn(state, entry.bookingId, entry.kind)
+  if (!updatedAt || !paidOn) {
+    setNotice('找不到这一笔记下的付款日，请刷新后再补记成交。')
+    return Promise.resolve(false)
+  }
+  return run(() => markPaid(clientId, entry.bookingId, entry.kind, updatedAt, paidOn))
+}
+
+function storedPaidOn(state: BookingsState, bookingId: string, kind: string): string | null {
+  if (state.status !== 'ready') return null
+  const booking = state.bookings.find((item) => item.id === bookingId)
+  const paidOn = booking?.milestones.find((item) => item.kind === kind)?.paidOn
+  return typeof paidOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(paidOn) ? paidOn : null
 }

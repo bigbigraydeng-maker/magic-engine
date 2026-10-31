@@ -503,3 +503,87 @@ describe('BookingsBlock edit booking', () => {
     expect(within(alert.parentElement as HTMLElement).getByRole('button', { name: '重试' })).toBeTruthy()
   })
 })
+
+describe('成交没记上时告诉员工原因', () => {
+  const paidDeposit = makeBooking({
+    milestones: [
+      makeMilestone('deposit', { state: 'paid', paidOn: '2026-10-08' }),
+      makeMilestone('balance'),
+    ],
+  })
+
+  it('没配哪一笔记成成交时，不在订单上多一句', async () => {
+    const { calls } = await setup([paidDeposit])
+    await waitFor(() => expect(calls.some((c) => c.url.includes('leads-config'))).toBe(true))
+    expect(screen.queryByText(/订单没有人数/)).toBeNull()
+    expect(screen.queryByRole('button', { name: '保存人数并补记成交' })).toBeNull()
+  })
+
+  it('记下成交的那一笔，人数空着时先停住，填上才先保存人数再记收款', async () => {
+    const { calls } = await setup([makeBooking()], [
+      route('GET', '/leads-config', () => jsonResponse({ config: { capiDealMilestone: 'deposit' } })),
+      route('GET', '/party-hint', () => jsonResponse({ size: 4, source: 'ai_summary' })),
+    ])
+    fireEvent.click(screen.getByRole('button', { name: '定金已收到款' }))
+    const panel = await screen.findByRole('group', { name: '确认定金已收到款' })
+    const input = await within(panel).findByLabelText('确认收款的人数') as HTMLInputElement
+    await waitFor(() => expect(input.value).toBe('4'))
+    expect(within(panel).getByText('人数来自对话摘要，可以改')).toBeTruthy()
+    fireEvent.change(input, { target: { value: '' } })
+    expect(within(panel).getByRole('button', { name: '确认已收到款' })).toBeDisabled()
+    fireEvent.change(input, { target: { value: '2' } })
+    fireEvent.click(within(panel).getByRole('button', { name: '确认已收到款' }))
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === 'POST' && c.url.endsWith('/deposit/paid'))).toBe(true)
+    })
+    const patchAt = calls.findIndex((c) => c.method === 'PATCH' && (c.body?.patch as { partySize?: number } | undefined)?.partySize === 2)
+    const paidAt = calls.findIndex((c) => c.method === 'POST' && c.url.endsWith('/deposit/paid'))
+    expect(patchAt).toBeGreaterThanOrEqual(0)
+    expect(patchAt).toBeLessThan(paidAt)
+  })
+
+  it('人数提示回来时，不盖掉员工已经填上的数字', async () => {
+    let releaseHint: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      releaseHint = resolve
+    })
+    await setup([makeBooking()], [
+      route('GET', '/leads-config', () => jsonResponse({ config: { capiDealMilestone: 'deposit' } })),
+      route('GET', '/party-hint', async () => {
+        await gate
+        return jsonResponse({ size: 2, source: 'ai_summary' })
+      }),
+    ])
+    fireEvent.click(screen.getByRole('button', { name: '定金已收到款' }))
+    const panel = await screen.findByRole('group', { name: '确认定金已收到款' })
+    const input = await within(panel).findByLabelText('确认收款的人数') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '4' } })
+    releaseHint()
+    await waitFor(() => expect(input.value).toBe('4'))
+    expect(within(panel).queryByText('人数来自对话摘要，可以改')).toBeNull()
+  })
+
+  it('订单上已有人数时，确认收款不用再填', async () => {
+    await setup([makeBooking({ partySize: 4 })], [
+      route('GET', '/leads-config', () => jsonResponse({ config: { capiDealMilestone: 'deposit' } })),
+    ])
+    fireEvent.click(screen.getByRole('button', { name: '定金已收到款' }))
+    const panel = await screen.findByRole('group', { name: '确认定金已收到款' })
+    expect(within(panel).queryByLabelText('确认收款的人数')).toBeNull()
+    expect(within(panel).getByRole('button', { name: '确认已收到款' })).toBeEnabled()
+  })
+
+  it('人数没填时写出原因，填上人数后再走原来的记下款接口', async () => {
+    const { calls } = await setup([paidDeposit], [
+      route('GET', '/leads-config', () => jsonResponse({ config: { capiDealMilestone: 'deposit' } })),
+    ])
+    expect(await screen.findByText(/订单没有人数/)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('补记成交的人数'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存人数并补记成交' }))
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === 'PATCH' && (c.body?.patch as { partySize?: number } | undefined)?.partySize === 2)).toBe(true)
+    })
+    const paid = calls.find((c) => c.method === 'POST' && c.url.endsWith('/deposit/paid'))
+    expect(paid?.body).toMatchObject({ paidOn: '2026-10-08', expectedUpdatedAt: DEPOSIT_UPDATED_AT })
+  })
+})

@@ -9,6 +9,7 @@ import {
 import { parseKind, parsePaidBody } from '@/lib/crm/booking-input'
 import { setPaid } from '@/lib/crm/booking-store'
 import { nzTodayIso } from '@/lib/crm/booking-view'
+import { paymentDealExtra } from '@/lib/conversions/crm-deal-supabase'
 
 export const dynamic = 'force-dynamic'
 
@@ -43,8 +44,24 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   if (!result.ok) {
     return finishBookingWrite(result, supabaseAdmin, clientId, bookingId, access.rule)
   }
-  return finishBookingWrite(result, supabaseAdmin, clientId, bookingId, access.rule, {
+  const extra: Record<string, unknown> = {
     changed: result.value.changed,
     reason: result.value.reason,
-  })
+  }
+  if (kind === 'deposit' || kind === 'balance') {
+    const deal = await paymentDealExtra(supabaseAdmin, {
+      clientId,
+      bookingId,
+      kind,
+      paidOn: parsed.value.paidOn,
+      actor: access.actor,
+      changed: result.value.changed,
+      reason: result.value.reason,
+    })
+    if (deal) {
+      extra.deal = deal
+      extra.milestoneKind = kind
+    }
+  }
+  return finishBookingWrite(result, supabaseAdmin, clientId, bookingId, access.rule, extra)
 }

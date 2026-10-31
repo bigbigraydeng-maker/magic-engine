@@ -21,30 +21,35 @@
 import { useState } from 'react'
 
 /**
- * NAL 专属：标已成交时弹出的金额/到账日期录入。
+ * Optional amount panel. The drawer mounts this only when the clicked stage
+ * is the client's saved deal stage. Deposit auto-record stays a separate path.
+ * Repeating the same stage does not mint a new event id; the sale row id is that id.
  *
- * 幂等键在挂载时生成一次、整个提交生命周期复用（照抄 `ComposeNote` 同一个理由：
- * 双击/网络重试要复用同一个键，在点击那一刻才生成的话每次点击都是新键，
- * 重复提交就挡不住了）。
+ * The currency box shows NZD until the person changes it. That is only a
+ * visible default in this form. The server does not assume a currency.
  */
 export function MarkWonPanel({
+  clientId,
   contactId,
+  stageKey,
   onDone,
   onCancel,
 }: {
+  clientId: string
   contactId: string
+  stageKey: string
   /** 第二个参数 = 要不要顺手重拉列表；失败时传 false。 */
   onDone: (msg: string, reload?: boolean) => void
   onCancel: () => void
 }) {
   const [amount, setAmount] = useState('')
+  const [currency, setCurrency] = useState('NZD')
   const [occurredAt, setOccurredAt] = useState(() => new Date().toISOString().slice(0, 10))
   const [busy, setBusy] = useState(false)
-  const [idempotencyKey] = useState(() => crypto.randomUUID())
 
   const submit = async () => {
-    const amountMajor = Number(amount)
-    if (!amountMajor || amountMajor <= 0) {
+    const amountMajor = amount.trim() === '' ? null : Number(amount)
+    if (amountMajor != null && (!amountMajor || amountMajor <= 0)) {
       onDone('请填一个大于 0 的金额', false)
       return
     }
@@ -54,10 +59,11 @@ export function MarkWonPanel({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          clientId,
           contactId,
-          amountMajor,
+          stageKey,
+          ...(amountMajor != null ? { amountMajor, currency } : {}),
           occurredAt: new Date(occurredAt).toISOString(),
-          idempotencyKey,
         }),
       })
       const body = (await res.json()) as { message?: string; error?: string }
@@ -75,10 +81,15 @@ export function MarkWonPanel({
 
   return (
     <div className="space-y-2 rounded-lg border border-me-ochre/25 bg-me-gold/10 p-3" onClick={(e) => e.stopPropagation()}>
-      <div className="text-xs font-bold text-me-charcoal">这笔生意多少钱？（到账后再回传给广告平台）</div>
+      <div className="text-xs font-bold text-me-charcoal">标已成交并录金额（这笔生意多少钱？到账后再回传给广告平台）</div>
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1">
-          <span className="text-xs text-me-charcoal/50">NZD $</span>
+          <input
+            value={currency}
+            onChange={(e) => setCurrency(e.target.value.toUpperCase())}
+            aria-label="币种"
+            className="w-14 rounded-lg border border-me-stone bg-white px-2 py-1.5 text-sm text-me-charcoal focus:border-me-ochre focus:outline-none"
+          />
           <input
             type="number"
             min="0"

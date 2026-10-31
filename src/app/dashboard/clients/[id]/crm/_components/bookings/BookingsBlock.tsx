@@ -44,7 +44,8 @@ function BookingsBlockInner({
   scrollIntoViewOnReady = false,
 }: BookingsBlockProps): JSX.Element | null {
   const headingId = useId()
-  const { state, notice, busy, run, reload, clearNotice } = useBookings(clientId, contactId)
+  const { state, notice, dealRetry, busy, run, reload, retryDeal, clearNotice } = useBookings(clientId, contactId)
+  const dealMilestone = useDealMilestone(clientId)
   const [adding, setAdding] = useState(false)
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const lastAddingRef = useRef(false)
@@ -115,7 +116,13 @@ function BookingsBlockInner({
         </button>
       </div>
 
-      <BookingNotice message={notice} onDismiss={clearNotice} />
+      <BookingNotice
+        message={notice}
+        onDismiss={clearNotice}
+        retryLabel={dealRetry ? '补记成交' : null}
+        onRetry={dealRetry ? () => void retryDeal() : null}
+        retryDisabled={busy}
+      />
 
       {adding ? (
         <AddBookingForm
@@ -134,13 +141,15 @@ function BookingsBlockInner({
 
       <div className="space-y-3">
         {ordered.map((booking) => (
-          <BookingCard
-            key={booking.id}
-            clientId={clientId}
-            booking={booking}
-            busy={busy}
-            run={run}
-          />
+            <BookingCard
+              key={booking.id}
+              clientId={clientId}
+              contactId={contactId}
+              booking={booking}
+              busy={busy}
+              run={run}
+              dealMilestone={dealMilestone}
+            />
         ))}
       </div>
     </section>
@@ -153,4 +162,23 @@ export function BookingsBlock(props: BookingsBlockProps): JSX.Element {
       <BookingsBlockInner {...props} />
     </BookingsErrorBoundary>
   )
+}
+
+function useDealMilestone(clientId: string): 'deposit' | 'balance' | null {
+  const [value, setValue] = useState<'deposit' | 'balance' | null>(null)
+  useEffect(() => {
+    let alive = true
+    void fetch(`/api/clients/${clientId}/leads-config`)
+      .then(async (res) => {
+        if (!res.ok) return
+        const json = (await res.json()) as { config?: { capiDealMilestone?: unknown } }
+        const next = json.config?.capiDealMilestone
+        if (alive && (next === 'deposit' || next === 'balance')) setValue(next)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [clientId])
+  return value
 }
