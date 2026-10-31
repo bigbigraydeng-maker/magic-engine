@@ -186,7 +186,7 @@ function isTravelIndustry(identity: ClientIdentity): boolean {
  * now. Only a genuinely missing row (queried fine, no such client) falls
  * back to a neutral name — it must NEVER fall back to another client's name.
  */
-async function loadClientIdentity(clientId: string): Promise<ClientIdentity> {
+export async function loadClientIdentity(clientId: string): Promise<ClientIdentity> {
   const { data, error } = await supabaseAdmin
     .from('clients')
     .select('name, industry, country')
@@ -223,7 +223,7 @@ function isNeverClaimShaped(value: unknown): value is { wrong: string; insteadSa
  * comes from `entries`, which is empty for any client with nothing approved
  * (or no entitlement grant at all; see `loadClientFacts`).
  */
-function clientFactsBlock(entries: readonly KnowledgeEntry[]): string {
+export function clientFactsBlock(entries: readonly KnowledgeEntry[]): string {
   if (entries.length === 0) return ''
   const lines = entries.map((entry) =>
     isNeverClaimShaped(entry.structuredValue)
@@ -250,7 +250,7 @@ function clientFactsBlock(entries: readonly KnowledgeEntry[]): string {
  *     `draft_reply` and mark this brief for retry (see `shouldGenerateBrief`
  *     / `storeBrief`'s `knowledge_status` column).
  */
-async function loadClientFacts(
+export async function loadClientFacts(
   clientId: string,
   deps: GetClientKnowledgeDeps = {},
 ): Promise<{ status: KnowledgeStatus; entries: KnowledgeEntry[] }> {
@@ -295,6 +295,7 @@ LANGUAGE — this is the most common mistake, get it right:
 - summary, customer_needs, objections, promises_made, next_action, risk_flags: write in SIMPLIFIED CHINESE. Staff read these in a Chinese interface.
 - draft_reply: write in ENGLISH. It is sent to the customer.
 - When quoting the customer inside a Chinese field, keep their original English in brackets.
+- Customer names are identity data: copy their spelling exactly as it appears in the source, even inside Chinese fields. Never translate or transliterate a name (for example, Jane Doe must stay Jane Doe). If the source name is uncertain, write 客户 without a name. Do not invent one.
 
 ATTRIBUTION — the mistake that makes a card useless. Every field under "trip" and "contact" describes what the CUSTOMER told us. Anything the ${business} side said — a date we offered, a price we quoted, something we suggested — is OUR information, not theirs.
 - If ${business} quoted a price and the customer said nothing about money, budget_signal is null. A quote is not a budget.

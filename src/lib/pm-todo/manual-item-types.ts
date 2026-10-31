@@ -63,6 +63,9 @@ import type { PmKind } from './five-kinds'
 //   我们的探活 fetch 很可能拿到 403 → 整条被当坏链接丢掉。而这两条恰恰是
 //   「全站 AI 在空跑」和「这套告警自己瞎了」—— 宁可让人自己找入口，也不能让它静默消失。
 export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
+  // 标题效果判定的两条欠账：链接是要登录的后台页，探活会判坏链接——不能因此静默消失（2026-10-29）。
+  'seo_rank_verdict_overdue',
+  'seo_rank_baseline_missing',
   // diagnostic_synthesis_failing：链接是需要登录的后台页，探活大概率判成坏链接 —— 这条正是要消灭「静默」的，不能被探活悄悄丢掉（魏征 2026-10-18）。
   'diagnostic_synthesis_failing',
   'cross_client_leak',
@@ -114,6 +117,9 @@ export const META_PENDING_STALE_DAYS = 3
 export const CRAWL_STALE_DAYS = CRAWL_FRESH_DAYS
 
 export type ManualItemKind =
+  /** 已上线标题改动超期没有效果判定 / 上线时没记改前名次 —— 开发欠账（2026-10-29）。 */
+  | 'seo_rank_verdict_overdue'
+  | 'seo_rank_baseline_missing'
   /** 体检的 AI 文字叙事没写成（保存失败/模型失败）—— 开发欠账，不用 PM 动手（2026-10-18）。 */
   | 'diagnostic_synthesis_failing'
   | 'promo_plan_watch'
