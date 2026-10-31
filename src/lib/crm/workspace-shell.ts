@@ -12,18 +12,21 @@ export type StorageLike = {
   setItem(key: string, value: string): void
 }
 
-export type CrmNavKey = 'today' | 'all' | 'sales' | 'calendar' | 'mail' | 'settings'
+export type CrmNavKey = 'today' | 'all' | 'payments' | 'sales' | 'calendar' | 'templates' | 'settings'
+
+/** Who may see an item: everyone, only people passing the bookings-access probe, or only people who see the email-template page today. */
+export type CrmNavGate = 'none' | 'bookings' | 'templates'
 
 export type CrmNavItem = {
   key: CrmNavKey
   /** Chinese label shown in the top nav. */
   label: string
-  /** null = placeholder, rendered as a disabled item rather than a link. */
-  href: string | null
+  href: string
   /** Short Chinese tooltip. */
   title: string
-  /** true = only show when the bookings-access probe returned 200. */
-  needsBookingsAccess: boolean
+  gate: CrmNavGate
+  /** Which side of the bar the item sits on. */
+  align: 'left' | 'right'
 }
 
 /**
@@ -58,52 +61,17 @@ export function writeSidebarCollapsed(
   }
 }
 
-/** Build the top nav items for a given client, in display order. */
+/** Build the top nav items for a given client: left group first, then the right-aligned group. */
 export function buildCrmNavItems(clientId: string): CrmNavItem[] {
   const base = `/dashboard/clients/${clientId}`
   return [
-    {
-      key: 'today',
-      label: '今天先联系',
-      href: `${base}/crm/all?view=smart`,
-      title: '系统排好的：今天先联系谁',
-      needsBookingsAccess: false,
-    },
-    {
-      key: 'all',
-      label: '全部客人',
-      href: `${base}/crm/all?view=all`,
-      title: '翻看、搜索这个客户的所有客人',
-      needsBookingsAccess: false,
-    },
-    {
-      key: 'sales',
-      label: '销售进度',
-      href: `${base}/sales-progress`,
-      title: '每个团卖了多少、还差多少人成行',
-      needsBookingsAccess: true,
-    },
-    {
-      key: 'calendar',
-      label: '到期日历',
-      href: `${base}/crm/calendar`,
-      title: '定金尾款到期日历',
-      needsBookingsAccess: true,
-    },
-    {
-      key: 'mail',
-      label: '邮件 / 短信',
-      href: null,
-      title: '预留位，之后接入',
-      needsBookingsAccess: false,
-    },
-    {
-      key: 'settings',
-      label: '设置',
-      href: `${base}/settings?tab=crm`,
-      title: 'CRM 设置',
-      needsBookingsAccess: false,
-    },
+    { key: 'today', label: '今天先联系', href: `${base}/crm/all?view=smart`, title: '系统排好的：今天先联系谁', gate: 'none', align: 'left' },
+    { key: 'all', label: '全部客人', href: `${base}/crm/all?view=all`, title: '翻看、搜索这个客户的所有客人', gate: 'none', align: 'left' },
+    { key: 'payments', label: '付款总览', href: `${base}/crm/payments`, title: '按出发日期看每个团收了多少定金尾款、谁还没收齐、哪些已过期', gate: 'bookings', align: 'left' },
+    { key: 'sales', label: '销售进度', href: `${base}/sales-progress`, title: '每个团卖了多少、还差多少人成行', gate: 'bookings', align: 'left' },
+    { key: 'calendar', label: '到期日历', href: `${base}/crm/calendar`, title: '定金尾款到期日历', gate: 'bookings', align: 'left' },
+    { key: 'templates', label: '邮件模板', href: `${base}/crm/templates`, title: '通话后发跟进邮件用的模板：看模板、改模板、看最近发了什么', gate: 'templates', align: 'right' },
+    { key: 'settings', label: '设置', href: `${base}/settings?tab=crm`, title: 'CRM 设置', gate: 'none', align: 'right' },
   ]
 }
 
@@ -130,6 +98,8 @@ export function activeCrmNavKey(
   }
 
   if (pathname === `${base}/crm/calendar`) return 'calendar'
+  if (pathname === `${base}/crm/payments`) return 'payments'
+  if (pathname === `${base}/crm/templates`) return 'templates'
 
   if (pathname === `${base}/sales-progress` || pathname.startsWith(`${base}/sales-progress/`)) {
     return 'sales'

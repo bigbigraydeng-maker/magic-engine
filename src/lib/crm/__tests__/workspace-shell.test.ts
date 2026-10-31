@@ -97,33 +97,32 @@ describe('writeSidebarCollapsed', () => {
 describe('buildCrmNavItems', () => {
   it('returns items in the expected order', () => {
     const keys = buildCrmNavItems(CLIENT).map((item) => item.key)
-    expect(keys).toEqual(['today', 'all', 'sales', 'calendar', 'mail', 'settings'])
+    expect(keys).toEqual(['today', 'all', 'payments', 'sales', 'calendar', 'templates', 'settings'])
   })
 
   it('uses the exact Chinese labels', () => {
     const labels = buildCrmNavItems(CLIENT).map((item) => item.label)
-    expect(labels).toEqual(['今天先联系', '全部客人', '销售进度', '到期日历', '邮件 / 短信', '设置'])
+    expect(labels).toEqual(['今天先联系', '全部客人', '付款总览', '销售进度', '到期日历', '邮件模板', '设置'])
   })
 
-  it('marks the mail item as a placeholder with no href', () => {
-    const mail = buildCrmNavItems(CLIENT).find((item) => item.key === 'mail')
-    expect(mail).toBeDefined()
-    expect(mail?.href).toBeNull()
+  it('has no placeholder item: every item is a real link', () => {
+    for (const item of buildCrmNavItems(CLIENT)) expect(typeof item.href).toBe('string')
   })
 
-  it('only sales and calendar need bookings access', () => {
-    const needing = buildCrmNavItems(CLIENT)
-      .filter((item) => item.needsBookingsAccess)
-      .map((item) => item.key)
-    expect(needing).toEqual(['sales', 'calendar'])
+  it('payments, sales and calendar need bookings access; only templates needs the template gate', () => {
+    const items = buildCrmNavItems(CLIENT)
+    expect(items.filter((i) => i.gate === 'bookings').map((i) => i.key)).toEqual(['payments', 'sales', 'calendar'])
+    expect(items.filter((i) => i.gate === 'templates').map((i) => i.key)).toEqual(['templates'])
   })
 
-  it('embeds the clientId in every non-null href', () => {
-    for (const item of buildCrmNavItems(CLIENT)) {
-      if (item.href !== null) {
-        expect(item.href).toContain(CLIENT)
-      }
-    }
+  it('templates and settings are right-aligned, the rest left-aligned', () => {
+    const items = buildCrmNavItems(CLIENT)
+    expect(items.filter((i) => i.align === 'right').map((i) => i.key)).toEqual(['templates', 'settings'])
+    expect(items.filter((i) => i.align === 'left')).toHaveLength(5)
+  })
+
+  it('embeds the clientId in every href', () => {
+    for (const item of buildCrmNavItems(CLIENT)) expect(item.href).toContain(CLIENT)
   })
 })
 
@@ -172,8 +171,16 @@ describe('activeCrmNavKey', () => {
     expect(activeCrmNavKey(`${BASE}/settings`, '?tab=crm', CLIENT)).toBe('settings')
   })
 
-  it('payments page => null', () => {
-    expect(activeCrmNavKey(`${BASE}/payments`, '', CLIENT)).toBeNull()
+  it('payments page => payments', () => {
+    expect(activeCrmNavKey(`${BASE}/crm/payments`, '', CLIENT)).toBe('payments')
+  })
+
+  it('templates page => templates', () => {
+    expect(activeCrmNavKey(`${BASE}/crm/templates`, '', CLIENT)).toBe('templates')
+  })
+
+  it('a CRM page with no nav item (decisions) => null', () => {
+    expect(activeCrmNavKey(`${BASE}/crm/decisions`, '', CLIENT)).toBeNull()
   })
 
   it("a different client's path => null", () => {
