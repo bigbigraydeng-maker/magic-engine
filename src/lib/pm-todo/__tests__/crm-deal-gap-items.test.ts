@@ -30,6 +30,8 @@ function fake(tables: Record<string, Row[]>): SupabaseClient {
         in: (col: string, values: unknown[]) => (filters.push((row) => values.includes(cell(row, col))), b),
         gte: (col: string, val: unknown) => (filters.push((row) => String(cell(row, col) ?? '') >= String(val)), b),
         contains: () => b,
+        like: () => b,
+        not: () => b,
         order: () => b,
         limit: (n: number) => {
           cap = n
