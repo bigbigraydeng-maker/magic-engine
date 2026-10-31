@@ -151,14 +151,16 @@ function CapiForm(props: {
         <span>
           把已报价回传到这条 Meta 线索
           <span className="mt-1 block text-xs font-normal leading-relaxed text-slate-500">
-            每个客户单独打开。打开后，合格咨询和有线索编号的成交是同一条线索的两步。
+            每个客户单独打开。广告线索刚进来的那一步还没接上，补上之前先不要打开。
+            已报价只看这个开关，不看允许发送的名单。名单仍然管成交和尾款。
+            没有原始线索编号的不发，也不会改发成普通咨询。
           </span>
         </span>
       </label>
       <StageField
         id={`capi-conversion-deal-${props.clientId}`}
         label="成交记在这条线索的哪一步"
-        hint="有原始线索编号的成交，按这里选的名字回传，并带上成交金额。没有编号的成交仍按原来的成交或尾款发送。不选名字就不会改发送方式。"
+        hint="有原始线索编号的成交会发两条：一条按这里选的名字，带上金额和原来的线索编号；另一条仍是原来的成交或尾款。两条各发一次。没有编号的只发原来的那条。不选名字就只发原来的那条。"
         value={draft.conversionDealStage}
         stages={props.stages}
         stagesLoaded={props.stagesLoaded}

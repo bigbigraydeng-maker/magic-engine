@@ -788,7 +788,7 @@ describe('同一条 Meta 线索', () => {
     expect(writer.sendSpy).not.toHaveBeenCalled()
   })
 
-  it('有线索编号的成交先过成交名单，再带上阶段名和金额', async () => {
+  it('有线索编号的成交两条都发，各自只发一次', async () => {
     seed(db, {
       outcome: { meta_lead_id: leadId, amount_minor: 388000, currency: 'NZD' },
       client: {
@@ -800,10 +800,31 @@ describe('同一条 Meta 线索', () => {
       },
     })
     const build = vi.fn().mockReturnValue({ data: [] })
-    await sendApprovedOutcome(OUTCOME, deps(db, makeWriter({ build })))
-    expect(build.mock.calls[0][0].conversionLeadEventName).toBe('balance_received')
+    const writer = makeWriter({ build })
+    const first = await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(first.status).toBe('confirmed')
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBeUndefined()
+    expect(build.mock.calls[0][0].outcomeKind).toBe('purchase')
+    expect(build.mock.calls[0][0].platformEventId).toBeUndefined()
     expect(build.mock.calls[0][0].amountMinor).toBe(388000)
     expect(build.mock.calls[0][0].metaLeadId).toBe(leadId)
+    expect(build.mock.calls[1][0].conversionLeadEventName).toBe('balance_received')
+    expect(build.mock.calls[1][0].platformEventId).toBe(`${OUTCOME}:conversion-stage`)
+    expect(build.mock.calls[1][0].amountMinor).toBe(388000)
+    expect(build.mock.calls[1][0].metaLeadId).toBe(leadId)
+    expect(writer.sendSpy).toHaveBeenCalledTimes(2)
+    const ids = db.tables.me_conversion_writebacks.map((row) => row.event_id)
+    expect(ids).toEqual([OUTCOME, `${OUTCOME}:conversion-stage`])
+    expect(db.tables.me_conversion_writebacks.every((row) => row.status === 'confirmed')).toBe(true)
+
+    build.mockClear()
+    writer.sendSpy.mockClear()
+    const second = await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(second.status).toBe('confirmed')
+    expect(second.message).toContain('不会重复发送')
+    expect(build).not.toHaveBeenCalled()
+    expect(writer.sendSpy).not.toHaveBeenCalled()
+    expect(db.tables.me_conversion_writebacks).toHaveLength(2)
   })
 
   it('没有线索编号的成交仍按原来的方式发', async () => {
@@ -813,14 +834,17 @@ describe('同一条 Meta 线索', () => {
       },
     })
     const build = vi.fn().mockReturnValue({ data: [] })
-    await sendApprovedOutcome(OUTCOME, deps(db, makeWriter({ build })))
+    const writer = makeWriter({ build })
+    await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(build).toHaveBeenCalledTimes(1)
+    expect(writer.sendSpy).toHaveBeenCalledTimes(1)
     expect(build.mock.calls[0][0].conversionLeadEventName).toBeUndefined()
     expect(build.mock.calls[0][0].outcomeKind).toBe('purchase')
   })
 
-  it('成交不在允许名单里时，不因为开了线索阶段就发出去', async () => {
+  it('成交不在允许名单里时成交那条停住，阶段那条仍发一次', async () => {
     seed(db, {
-      outcome: { meta_lead_id: leadId },
+      outcome: { meta_lead_id: leadId, amount_minor: 388000, currency: 'NZD' },
       client: {
         leads_config: {
           capi_allowed_events: ['BalancePaid'],
@@ -829,9 +853,20 @@ describe('同一条 Meta 线索', () => {
         },
       },
     })
-    const build = vi.fn()
-    const result = await sendApprovedOutcome(OUTCOME, deps(db, makeWriter({ build })))
+    const build = vi.fn().mockReturnValue({ data: [] })
+    const writer = makeWriter({ build })
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer))
     expect(result.status).toBe('queued')
-    expect(build).not.toHaveBeenCalled()
+    expect(build).toHaveBeenCalledTimes(1)
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBe('balance_received')
+    expect(writer.sendSpy).toHaveBeenCalledTimes(1)
+    const purchase = db.tables.me_conversion_writebacks.find((row) => row.event_id === OUTCOME)
+    const stage = db.tables.me_conversion_writebacks.find((row) => row.event_id === `${OUTCOME}:conversion-stage`)
+    expect(purchase?.status).toBe('queued')
+    expect(stage?.status).toBe('confirmed')
+
+    writer.sendSpy.mockClear()
+    await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(writer.sendSpy).not.toHaveBeenCalled()
   })
 })

@@ -99,6 +99,6 @@ async function noteQualifiedLead(
     const recorded = await recordQualifiedStageLead(db, { clientId, contactId, stageKey, actor })
     return recorded.attempted ? { message: recorded.message } : null
   } catch {
-    return null
+    return { message: '阶段已经改了。发给广告平台这一步没完成，可以稍后再试，不会另发成普通咨询。' }
   }
 }

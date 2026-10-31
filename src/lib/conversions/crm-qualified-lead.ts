@@ -6,10 +6,20 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { readCapiClientConfig, stageCountsAsQualifiedLead } from './capi-client-config'
-import { legalMetaLeadId, NO_META_LEAD_MESSAGE, qualifiedLeadSourceRef } from './conversion-lead'
+import { latestMetaLeadId, NO_META_LEAD_MESSAGE, qualifiedLeadSourceRef } from './conversion-lead'
 import { buildIntakeRow, type IntakeInput } from './intake'
 
 export const CRM_QUALIFIED_LEAD_ACTOR = 'system:crm-qualified-lead'
+
+const SETTLED_SEND = new Set([
+  'confirmed',
+  'dry_run',
+  'failed_permanent',
+  'expired_no_send',
+  'redacted',
+  'in_doubt',
+  'sending',
+])
 
 export type QualifiedLeadResult = { attempted: boolean; message: string }
 
@@ -23,9 +33,8 @@ export async function recordQualifiedStageLead(
 ): Promise<QualifiedLeadResult> {
   const gate = await openGate(db, input)
   if (!gate) return { attempted: false, message: '' }
-  if (await alreadyRecorded(db, input.clientId, gate.sourceRef)) {
-    return { attempted: true, message: '这条合格咨询已经记过了。' }
-  }
+  const existingId = await existingOutcomeId(db, input.clientId, gate.sourceRef)
+  if (existingId) return retryQualified(db, existingId)
   const leadId = await readMetaLeadId(db, input.clientId, input.contactId)
   if (!leadId) return { attempted: true, message: NO_META_LEAD_MESSAGE }
   const built = await intakeRow(db, input, gate, leadId, now)
@@ -51,27 +60,35 @@ async function openGate(
   }
 }
 
-async function alreadyRecorded(db: SupabaseClient, clientId: string, sourceRef: string): Promise<boolean> {
+async function existingOutcomeId(db: SupabaseClient, clientId: string, sourceRef: string): Promise<string | null> {
   const row = await one(db, 'me_sale_outcomes', 'id', [
     ['client_id', clientId],
     ['source_kind', 'crm_stage_manual'],
     ['source_ref', sourceRef],
   ])
-  return row != null
+  return text(row?.id)
+}
+
+async function retryQualified(db: SupabaseClient, outcomeId: string): Promise<QualifiedLeadResult> {
+  const wb = await one(db, 'me_conversion_writebacks', 'status', [
+    ['outcome_id', outcomeId],
+    ['destination', 'meta_capi'],
+    ['event_id', outcomeId],
+  ])
+  const status = text(wb?.status)
+  if (status && SETTLED_SEND.has(status)) {
+    return { attempted: true, message: '这条合格咨询已经记过了。' }
+  }
+  return { attempted: true, message: await dispatchQualified(db, outcomeId) }
 }
 
 async function readMetaLeadId(db: SupabaseClient, clientId: string, contactId: string): Promise<string | null> {
-  const found = await many(db, 'contact_touchpoints', 'source_ref', [
+  const found = await many(db, 'contact_touchpoints', 'source_ref, occurred_at', [
     ['contact_id', contactId],
     ['client_id', clientId],
     ['source', 'meta_lead_form'],
   ])
-  for (const row of found) {
-    const ref = typeof row.source_ref === 'string' ? row.source_ref : null
-    const leadId = legalMetaLeadId(ref)
-    if (leadId) return leadId
-  }
-  return null
+  return latestMetaLeadId(found)
 }
 
 async function intakeRow(

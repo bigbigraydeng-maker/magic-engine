@@ -73,6 +73,11 @@ export type OutcomeForSend = {
    * not an ordinary Lead or Purchase. The string is the client's stage key.
    */
   conversionLeadEventName?: string | null
+  /**
+   * Platform idempotency key. The sale row id is the purchase or balance key.
+   * A companion stage event uses a different key so the two do not collapse.
+   */
+  platformEventId?: string | null
 }
 
 /** 客户侧配置。谁去读库是调用方的事，这一层只拿现成的值。 */
