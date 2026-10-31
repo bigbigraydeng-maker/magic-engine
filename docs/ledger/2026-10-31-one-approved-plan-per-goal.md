@@ -1,12 +1,14 @@
 ---
 id: 2026-10-31-one-approved-plan-per-goal
 title: 同一目标只保留一份已批准的推广计划
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-31
 source: doc:docs/specs/2026-10-24-impact-loop-reuse-gap.md
 verify_by: 2026-11-07
 verify_how: 同一客户同一目标下再批准一份计划后，旧的已批准计划显示「已被新计划替换（日期）」；另一个目标的已批准计划不变；批准没保存成功时旧计划仍是已批准。
+done_on: 2026-10-31
+done_ref: pr:3438
 ---
 Ray 于 2026-11-01（新西兰）同意：同一客户、同一目标只留一份已批准计划。
 新计划批准时，同目标下已批准的旧计划改为已归档，并记下替换它的计划和时间。
