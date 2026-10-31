@@ -9,14 +9,15 @@
  * 这个模块**不判对错**，只负责建。判在 `ads-strategy/launch-readback.ts`。
  *
  * ── 建到一半失败要能收拾 ────────────────────────────────────────────────
- * 建广告是四次写操作（系列 / 组 / 创意 / 广告），任何一步都可能失败。半成品
- * 留在账户里比失败更糟：它会出现在后台、会被人误开、会进第二天的扫描。
- * 所以失败时按创建的**逆序**删回去，删不掉的如实报出来让人处理。
+ * 新建整棵树是四次写操作（系列 / 组 / 创意 / 广告）。带了已有系列编号就跳过系列。
+ * 任何一步都可能失败。半成品留在账户里比失败更糟：它会出现在后台、会被人误开。
+ * 所以失败时按这次新建的逆序删回去，不删原来就有的系列。删不掉的如实报出来。
  */
 
 import type { AdDraft, AdDraftCreative } from '@/lib/ads-strategy/ad-draft'
 import { metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
 import { isPlaybackGoal, PLAYBACK_REQUIRED_PLATFORMS } from '@/lib/ads-strategy/launch-readback'
+import { assertOwnedByAccount } from './owned-ad-object'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 
@@ -40,6 +41,8 @@ export interface PublishedDraft {
   adIds: string[]
   /** 建到一半失败、又没删干净的东西 —— 必须有人去 Meta 后台手动删。 */
   orphans: string[]
+  /** 这次没有新建系列。补暂停和以后开投都不能去改它的开关。 */
+  reusedCampaign?: boolean
 }
 
 export interface PublishFailure {
@@ -354,8 +357,47 @@ async function publishCreatives(
   return adIds
 }
 
+async function resolveCampaignId(
+  d: AdDraft,
+  adAccountId: string,
+  accessToken: string,
+  run: Run,
+): Promise<string | PublishFailure> {
+  if (!d.existingCampaignId) {
+    const campaign = await run.make('campaign', '广告系列', d.campaignName, `${adAccountId}/campaigns`, campaignBody(d))
+    if ('ok' in campaign) return campaign
+    return campaign.id
+  }
+  const owned = await assertOwnedByAccount(d.existingCampaignId, adAccountId, accessToken, 'id,account_id')
+  if (!owned.ok) return { ok: false, step: 'campaign', error: owned.error, orphans: [] }
+  return d.existingCampaignId
+}
+
+async function publishAdSetAndAds(
+  d: AdDraft,
+  adAccountId: string,
+  campaignId: string,
+  run: Run,
+): Promise<PublishResult> {
+  const adSet = await run.make(
+    'adset', '广告组', d.adSetName, `${adAccountId}/adsets`, adSetBodyFor(d, campaignId, run.now()),
+  )
+  if ('ok' in adSet) return adSet
+  const adIds = await publishCreatives(d, adAccountId, adSet.id, run)
+  if (!Array.isArray(adIds)) return adIds
+  return {
+    ok: true,
+    campaignId,
+    adSetId: adSet.id,
+    adIds,
+    orphans: [],
+    ...(d.existingCampaignId ? { reusedCampaign: true } : {}),
+  }
+}
+
 /**
- * 建。全程 `status: PAUSED`。
+ * 建。全程这次新建的对象都是 `status: PAUSED`。
+ * 已有系列只用来挂新组，不会被新建，也不会被这次改开关。
  *
  * @param adAccountId `act_<digits>`
  */
@@ -366,20 +408,9 @@ export async function publishDraftPaused(
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
   const run = newRun(accessToken, opts)
-
-  // ── 1. 广告系列 ──────────────────────────────────────────────────────
-  const campaign = await run.make('campaign', '广告系列', d.campaignName, `${adAccountId}/campaigns`, campaignBody(d))
-  if ('ok' in campaign) return campaign
-
-  // ── 2. 广告组 ────────────────────────────────────────────────────────
-  const adSet = await run.make('adset', '广告组', d.adSetName, `${adAccountId}/adsets`, adSetBodyFor(d, campaign.id, run.now()))
-  if ('ok' in adSet) return adSet
-
-  // ── 3+4. 每条创意 → 每条广告 ─────────────────────────────────────────
-  const adIds = await publishCreatives(d, adAccountId, adSet.id, run)
-  if (!Array.isArray(adIds)) return adIds
-
-  return { ok: true, campaignId: campaign.id, adSetId: adSet.id, adIds, orphans: [] }
+  const campaignId = await resolveCampaignId(d, adAccountId, accessToken, run)
+  if (typeof campaignId !== 'string') return campaignId
+  return publishAdSetAndAds(d, adAccountId, campaignId, run)
 }
 
 /**
@@ -391,8 +422,11 @@ export async function publishDraftPaused(
 export async function activatePublished(
   p: Pick<PublishedDraft, 'campaignId' | 'adSetId' | 'adIds'>,
   accessToken: string,
+  opts: { skipIds?: readonly string[] } = {},
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const skip = new Set(opts.skipIds ?? [])
   for (const id of [...p.adIds, p.adSetId, p.campaignId]) {
+    if (skip.has(id)) continue
     // 改状态走的是另一种返回（`{"success":true}`，没有 id），不能复用 graphPost。
     const r = await graphUpdate(id, { status: 'ACTIVE' }, accessToken)
     if (!r.ok) return { ok: false, error: `开 ${id} 失败：${r.error}` }
@@ -407,14 +441,15 @@ export async function activatePublished(
  * 失败的 id 如实返回，由调用方记账让人看见。
  */
 export async function pausePublished(
-  p: Pick<PublishedDraft, 'campaignId' | 'adSetId' | 'adIds'>,
+  p: Pick<PublishedDraft, 'campaignId' | 'adSetId' | 'adIds' | 'reusedCampaign'>,
   accessToken: string,
   opts: { deadlineAt?: number; now?: () => number } = {},
 ): Promise<{ ok: boolean; failed: string[] }> {
   const now = opts.now ?? Date.now
+  const skip = new Set(p.reusedCampaign ? [p.campaignId] : [])
   // 同时发：此刻的目标是尽快让钱停下来，不是保持顺序；串行最坏 (N+2)×15 秒。
   const results = await Promise.all(
-    [...p.adIds, p.adSetId, p.campaignId].map(async (id): Promise<string | null> => {
+    [...p.adIds, p.adSetId, p.campaignId].filter((id) => !skip.has(id)).map(async (id): Promise<string | null> => {
       // 有顶：整次请求不能因为补暂停拖过平台的超时线。没来得及的如实报出来。
       if (opts.deadlineAt !== undefined && now() > opts.deadlineAt) {
         return `${id}：整次请求的时间用完了，没来得及`

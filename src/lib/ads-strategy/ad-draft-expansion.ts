@@ -24,6 +24,7 @@ import {
   type DraftKind,
   type DraftProblem,
 } from './ad-draft'
+import { isMetaObjectId } from '@/lib/meta/owned-ad-object'
 import { audienceReadinessError, type AudienceFact } from './draft-audiences'
 
 const CTA_FOR_KIND: Readonly<Record<DraftKind, string>> = {
@@ -75,7 +76,17 @@ export function draftNotYetBuildable(d: AdDraft): string | null {
 
 /** `validateDraft` 里多出来的那部分。旧草稿一个新字段都没有时，返回空。 */
 export function expandedDraftProblems(d: AdDraft): DraftProblem[] {
-  return [...budgetProblems(d), ...(Array.isArray(d.adSets) ? adSetListProblems(d) : singleSetExtraProblems(d))]
+  return [
+    ...budgetProblems(d),
+    ...attachIdProblems(d),
+    ...(Array.isArray(d.adSets) ? adSetListProblems(d) : singleSetExtraProblems(d)),
+  ]
+}
+
+function attachIdProblems(d: AdDraft): DraftProblem[] {
+  if (d.existingCampaignId === undefined) return []
+  if (isMetaObjectId(d.existingCampaignId)) return []
+  return [{ field: 'existingCampaignId', message: '已有系列编号必须是广告账户里的数字编号' }]
 }
 
 /**
