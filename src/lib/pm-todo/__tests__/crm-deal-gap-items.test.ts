@@ -30,6 +30,8 @@ function fake(tables: Record<string, Row[]>): SupabaseClient {
         in: (col: string, values: unknown[]) => (filters.push((row) => values.includes(cell(row, col))), b),
         gte: (col: string, val: unknown) => (filters.push((row) => String(cell(row, col) ?? '') >= String(val)), b),
         contains: () => b,
+        like: () => b,
+        not: () => b,
         order: () => b,
         limit: (n: number) => {
           cap = n
@@ -81,6 +83,20 @@ describe('自动通过之后的今日待办', () => {
     expect(note?.what).toContain('不用再批准')
     expect(note?.what).toContain('1 笔已经发出去')
     expect(note?.href).toMatch(/^https:\/\/app\.magicengine\.com\.au\/dashboard\/conversions\?/)
+  })
+
+  it('一条发成功不算整笔都发了', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(fake({
+      me_sale_outcomes: [autoDeal('both')],
+      me_conversion_writebacks: [
+        { outcome_id: 'both', status: 'confirmed', payload_preview: null },
+        { outcome_id: 'both', status: 'failed', payload_preview: null },
+      ],
+    }), items, names, NOW)
+    const note = items.find((item) => item.what.includes('已自动通过'))
+    expect(note?.what).toContain('另一条还没发出去')
+    expect(note?.what).not.toContain('已自动发给广告平台')
   })
 
   it('does not add a second line for a send the allow-list already held', async () => {

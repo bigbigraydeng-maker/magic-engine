@@ -542,6 +542,27 @@ describe('成交没记上时告诉员工原因', () => {
     expect(patchAt).toBeLessThan(paidAt)
   })
 
+  it('人数提示回来时，不盖掉员工已经填上的数字', async () => {
+    let releaseHint: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      releaseHint = resolve
+    })
+    await setup([makeBooking()], [
+      route('GET', '/leads-config', () => jsonResponse({ config: { capiDealMilestone: 'deposit' } })),
+      route('GET', '/party-hint', async () => {
+        await gate
+        return jsonResponse({ size: 2, source: 'ai_summary' })
+      }),
+    ])
+    fireEvent.click(screen.getByRole('button', { name: '定金已收到款' }))
+    const panel = await screen.findByRole('group', { name: '确认定金已收到款' })
+    const input = await within(panel).findByLabelText('确认收款的人数') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '4' } })
+    releaseHint()
+    await waitFor(() => expect(input.value).toBe('4'))
+    expect(within(panel).queryByText('人数来自对话摘要，可以改')).toBeNull()
+  })
+
   it('订单上已有人数时，确认收款不用再填', async () => {
     await setup([makeBooking({ partySize: 4 })], [
       route('GET', '/leads-config', () => jsonResponse({ config: { capiDealMilestone: 'deposit' } })),
