@@ -481,6 +481,27 @@ describe('已报价发给广告平台没成功', () => {
     ])
   })
 
+  it('超过 200 条已发出的已报价不会被当成没发出', async () => {
+    const items: ManualItem[] = []
+    const start = Date.parse('2026-09-18T00:00:00.000Z')
+    const sent = Array.from({ length: 201 }, (_, i) => quoted(`sent-${i}`, {
+      occurred_at: new Date(start + i * 1000).toISOString(),
+    }))
+    await pushConversionReviewItems(
+      fakeSupabase({
+        qualified: [...sent, quoted('still-open', { occurred_at: '2026-09-21T00:00:00.000Z' })],
+        doubts: sent.map((row) => sendRow(String(row.id), { status: 'confirmed' })),
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    const quotes = items.filter((item) => item.what.includes('已报价发给广告平台没成功'))
+    expect(quotes.map((item) => item.href)).toEqual([
+      'https://app.magicengine.com.au/dashboard/conversions?client=c0000000-0000-0000-0000-000000000000&focus=still-open',
+    ])
+  })
+
   it('成交已记下、下一步发送记录没建成时进今日待办', async () => {
     const items: ManualItem[] = []
     await pushConversionReviewItems(
