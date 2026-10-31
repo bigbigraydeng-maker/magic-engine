@@ -84,6 +84,12 @@ export interface AdDraftCreative {
    * 光靠文字体系判不出「英文 vs 毛利语 / 越南语」（都是拉丁字母）。
    */
   language?: string
+  /**
+   * An already published page post, `<pageId>_<postId>`.
+   * When set with `existingAdSetId`, the publisher promotes this post as a
+   * paused ad and does not build a new story, campaign, or budget.
+   */
+  promotedPostId?: string
 }
 
 /** 预算放在系列上，还是放在每个广告组上。不写 = 今天的单组做法（预算在这一个组上）。 */
@@ -157,6 +163,12 @@ export interface AdDraft {
   linkUrl?: string
   /** 广告主页 id。 */
   pageId: string
+  /**
+   * Add paused ads into this existing ad set.
+   * Do not create a campaign or ad set, and do not change its budget.
+   * Digits only. Absent on a draft that creates a new paused campaign.
+   */
+  existingAdSetId?: string
   /** 一个草案下可以有多条创意；**同一个组里语言必须一致**（闸门会查）。多个广告组时文案写在组上，这里留空数组。 */
   creatives: AdDraftCreative[]
   /** 包含的自定义受众编号（Meta 自定义受众的数字 id）。给了就等于声明这个广告组是重定向。 */
@@ -285,7 +297,38 @@ function moneyAndSpanProblems(d: AdDraft): DraftProblem[] {
   return p
 }
 
+const AD_SET_ID = /^\d{5,}$/
+
+function promotionProblems(d: AdDraft): DraftProblem[] {
+  const p: DraftProblem[] = []
+  if (!d.clientId) p.push({ field: 'clientId', message: '没说是哪个客户' })
+  if (!d.pageId) p.push({ field: 'pageId', message: '没说用哪个主页发' })
+  if (!d.existingAdSetId || !AD_SET_ID.test(d.existingAdSetId)) {
+    p.push({ field: 'existingAdSetId', message: '已有广告组编号格式不对' })
+  }
+  if (d.adSets !== undefined || d.budgetMode === 'campaign' || d.campaignDailyBudget !== undefined) {
+    p.push({ field: 'existingAdSetId', message: '往已有广告组加广告时，不能同时写新的组或系列预算' })
+  }
+  if (!(d.dailyBudget > 0)) {
+    p.push({ field: 'dailyBudget', message: '还没读到这个广告组的真实每天预算，没有加预算' })
+  }
+  if (d.creatives.length === 0) p.push({ field: 'creatives', message: '一条要加的帖子都没有' })
+  const prefix = `${d.pageId}_`
+  d.creatives.forEach((c, i) => {
+    if (!c.name.trim()) p.push({ field: `creatives[${i}].name`, message: '广告名是空的' })
+    if (!c.primaryText.trim()) p.push({ field: `creatives[${i}].primaryText`, message: '正文是空的' })
+    if (!c.headline.trim()) p.push({ field: `creatives[${i}].headline`, message: '标题是空的' })
+    const story = c.promotedPostId ?? ''
+    if (!story.startsWith(prefix) || !/^\d+_\d+$/.test(story)) {
+      p.push({ field: `creatives[${i}].promotedPostId`, message: '要加的帖子必须是这个主页上已经发出去的帖子' })
+    }
+  })
+  p.push(...expandedDraftProblems(d))
+  return p
+}
+
 function validateCommon(d: AdDraft): DraftProblem[] {
+  if (d.existingAdSetId !== undefined) return promotionProblems(d)
   const p: DraftProblem[] = []
 
   if (!d.clientId) p.push({ field: 'clientId', message: '没说是哪个客户' })
@@ -487,6 +530,10 @@ const DRAFT_WHAT: Readonly<Record<DraftKind, string>> = {
 }
 
 export function describeDraft(d: AdDraft): string {
+  if (d.existingAdSetId) {
+    const n = Array.isArray(d.creatives) ? d.creatives.length : 0
+    return `在已有广告组里加 ${n} 条暂停广告，不新建系列、不加预算、不开`
+  }
   const total = d.dailyBudget * d.durationDays
   // 这一步在 `validateDraft` 之前就会被调（账本的摘要），所以 kind 可能是请求体里的任何值。
   const what = isKnownDraftKind(d.kind) ? DRAFT_WHAT[d.kind] : '（不认识的广告类型）'

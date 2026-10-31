@@ -337,19 +337,21 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
     expect(msg).not.toContain('明天会再自动扫')
   })
 
-  it('a successful top-up credits ME and the PM — nobody else', async () => {
+  it('a successful top-up asks for a confirmation card and does not claim the ad exists', async () => {
     vi.stubGlobal('fetch', mockFetch({
-      '/execute-prescription': { adsAdded: [{ name: 'a' }, { name: 'b' }] },
+      '/execute-prescription': { cardIssued: true, adsAdded: [] },
       '/ad-health': respond([OZTOP_ALERT]),
     }))
     await renderAdsTab()
     await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
 
     await userEvent.click(screen.getByText('执行'))
-    await waitFor(() => expect(screen.getByText(/已补 2 条新素材/)).toBeTruthy())
-    const msg = screen.getByText(/已补 2 条新素材/).textContent ?? ''
-    expect(msg).toContain('一分钱不花')
+    await waitFor(() => expect(screen.getByText(/已经出了一张确认卡/)).toBeTruthy())
+    const msg = screen.getByText(/已经出了一张确认卡/).textContent ?? ''
+    expect(msg).toContain('不会自动开投')
+    expect(msg).toContain('也不会加预算')
     expect(msg).not.toContain('团队')
+    expect(msg).not.toContain('已补')
   })
 })
 

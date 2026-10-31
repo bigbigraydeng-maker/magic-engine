@@ -159,7 +159,7 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
 
   const run = async () => {
     // The one line that makes it safe to press (板桥): existing ads untouched.
-    const confirmText = `确定执行「${p.title}」?\n现有广告一条都不动,只是往里加暂停状态的新素材。\n${p.execute_hint ?? ''}`
+    const confirmText = `确定为「${p.title}」出一张确认卡？\n现在不会改广告。你在确认卡上点确认之后，才会在原来的广告组里加暂停的广告。不会自动开投，也不会加预算。\n${p.execute_hint ?? ''}`
     if (!window.confirm(confirmText)) return
     setRunning(true)
     setResult(null)
@@ -197,11 +197,11 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
       setDone(true)
       setResult({
         kind: 'ok',
-        text: n > 0
-          // No invented third party: ME did it, or it needs your click. Nothing
-          // is ever "已通知团队" (板桥) — the PM knows there is no such team.
-          ? `已补 ${n} 条新素材,全部暂停、一分钱不花。要开投的时候你点一下就行。`
-          : '现成的老素材里没有能用的,所以这次没补上 —— 新片要现做。\n钱这边你现在就能按住:上面的「预算降 20%」或「先全停」。做片的事我去接,接通了告诉你。',
+        text: json.cardIssued
+          ? '已经出了一张确认卡，广告还没建。你在确认卡上点确认之后，才会在原来的广告组里加上暂停的广告。不会自动开投，也不会加预算。'
+          : n > 0
+            ? `已补 ${n} 条新素材,全部暂停、一分钱不花。要开投的时候你点一下就行。`
+            : '现成的老素材里没有能用的,所以这次没补上 —— 新片要现做。\n钱这边你现在就能按住:上面的「预算降 20%」或「先全停」。做片的事我去接,接通了告诉你。',
       })
     } catch (err) {
       // Raw API errors are English tech-speak — log them, speak human (板桥 #5).
