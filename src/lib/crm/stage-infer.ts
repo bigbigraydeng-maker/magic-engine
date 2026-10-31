@@ -342,8 +342,16 @@ async function noteQualifiedLead(clientId: string, contactId: string, stage: str
       { clientId, contactId, stageKey: stage, actor: STAGE_INFER_ACTOR },
       now,
     )
-  } catch {
-    // Already committed. The next stage change can try again.
+  } catch (error) {
+    // The stage stays. This run does not retry it; the conversions page does.
+    console.info(JSON.stringify({
+      receipt: 'qualified_lead_unsent',
+      client_id: clientId,
+      contact_id: contactId,
+      stage,
+      status: 'error',
+      message: error instanceof Error ? error.message : String(error),
+    }))
   }
 }
 

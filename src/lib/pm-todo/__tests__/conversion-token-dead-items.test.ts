@@ -28,7 +28,7 @@ function cell(row: Row, path: string): unknown {
   return cur
 }
 
-function fakeSupabase(seed: { pending?: Row[]; doubts?: Row[]; authFailed?: Row[]; held?: Row[] }) {
+function fakeSupabase(seed: { pending?: Row[]; doubts?: Row[]; authFailed?: Row[]; held?: Row[]; qualified?: Row[] }) {
   return {
     from(table: string) {
       const filters: Array<(r: Row) => boolean> = []
@@ -36,7 +36,7 @@ function fakeSupabase(seed: { pending?: Row[]; doubts?: Row[]; authFailed?: Row[
       let sortAsc = true
       let cap: number | null = null
       const source = () => {
-        if (table === 'me_sale_outcomes') return seed.pending ?? []
+        if (table === 'me_sale_outcomes') return [...(seed.pending ?? []), ...(seed.qualified ?? [])]
         return [...(seed.doubts ?? []), ...(seed.authFailed ?? []), ...(seed.held ?? [])]
       }
       const b: Record<string, unknown> = {
@@ -261,5 +261,65 @@ describe('名单停住的已批准成交', () => {
     expect(deals?.what).toContain('200 笔已经批准的成交')
     expect(deals?.what).toContain('再过 6 天就过期')
     expect(deals?.what).not.toContain('再过 1 天')
+  })
+})
+
+describe('已报价发给广告平台没成功', () => {
+  function quoted(id: string, over: Row = {}): Row {
+    return {
+      id,
+      client_id: CTS,
+      outcome_kind: 'lead',
+      source_kind: 'crm_stage_manual',
+      source_ref: `crm_qualified:contact:${id}`,
+      review_status: 'approved',
+      redacted_at: null,
+      occurred_at: '2026-09-20T00:00:00.000Z',
+      ...over,
+    }
+  }
+
+  function sendRow(outcomeId: string, over: Row = {}): Row {
+    return {
+      outcome_id: outcomeId,
+      event_id: outcomeId,
+      status: 'failed',
+      last_error_code: 'retry',
+      payload_preview: null,
+      ...over,
+    }
+  }
+
+  it('失败或还没发送记录的已报价进今日待办，已发出和授权失效的不进', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({
+        qualified: [
+          quoted('failed-one'),
+          quoted('missing-one'),
+          quoted('sent-one'),
+          quoted('auth-one'),
+          quoted('held-one'),
+          quoted('other', { source_ref: 'messenger:1' }),
+        ],
+        doubts: [
+          sendRow('failed-one'),
+          sendRow('sent-one', { status: 'confirmed' }),
+          sendRow('auth-one', { last_error_code: 'auth' }),
+          sendRow('held-one', { status: 'queued', payload_preview: { held: true } }),
+        ],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    const quotes = items.filter((item) => item.what.includes('已报价发给广告平台没成功'))
+    expect(quotes.map((item) => item.href)).toEqual([
+      'https://app.magicengine.com.au/dashboard/conversions?client=c0000000-0000-0000-0000-000000000000&focus=failed-one',
+      'https://app.magicengine.com.au/dashboard/conversions?client=c0000000-0000-0000-0000-000000000000&focus=missing-one',
+    ])
+    expect(quotes[0].how).toContain('再试一次')
+    expect(quotes[0].what).not.toContain('回写')
+    expect(quotes[0].kind).toBe('conversion_needs_review')
   })
 })

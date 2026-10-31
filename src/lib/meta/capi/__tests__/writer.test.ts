@@ -200,12 +200,14 @@ describe('build · 同一条 Meta 线索的阶段', () => {
         outcomeKind: 'purchase',
         metaLeadId: leadId,
         conversionLeadEventName: stageName,
+        platformEventId: '11111111-2222-3333-4444-555555555555:conversion-stage',
         amountMinor: 388000,
         currency: 'NZD',
       }),
       CONFIG,
     ).data[0]
     expect(p.event_name).toBe(stageName)
+    expect(p.event_id).toBe('11111111-2222-3333-4444-555555555555:conversion-stage')
     expect(p.event_name).not.toBe('Purchase')
     expect(p.action_source).toBe('system_generated')
     expect(p.user_data.lead_id).toBe(leadId)

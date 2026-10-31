@@ -235,7 +235,9 @@ export function buildIntakeRow(input: IntakeInput, ctx: IntakeContext): IntakeRe
   }
 
   const contactId = input.contactId && input.contactId !== '' ? input.contactId : null
-  if (!email && !phone && !pageScopedUserId && !metaLeadId) {
+  // 线索编号不能单独当匹配键。库里的检查只认邮箱、电话或私信身份，
+  // 只带编号的行插不进去，而合格咨询的失败会被吞掉，看起来像记下了。
+  if (!email && !phone && !pageScopedUserId) {
     errors.push(
       '至少要有邮箱、电话、或 Facebook 私信身份之一 —— 一个都没有的话，发给 Meta 100% 匹配不上',
     )

@@ -144,6 +144,7 @@ export async function pushConversionReviewItems(
 
   await pushTokenDeadItems(supabase, items, clientNames, now)
   await pushHeldSendItems(supabase, items, clientNames, now)
+  await pushUnsentQualifiedLeads(supabase, items, clientNames, now)
 }
 
 type HeldOutcome = {
@@ -241,6 +242,90 @@ async function loadHeldRows(supabase: SupabaseClient, now: Date, kinds: string[]
     .limit(200)
   if (error) throw new Error(`名单停住待补发查询失败: ${error.message}`)
   return (data ?? []) as unknown as HeldRow[]
+}
+
+type QualifiedLeadRow = {
+  id: string
+  client_id: string
+  source_ref: string | null
+  occurred_at: string
+}
+
+type QualifiedWriteback = {
+  outcome_id: string
+  event_id: string | null
+  status: string
+  last_error_code: string | null
+  payload_preview: { held?: boolean } | null
+}
+
+/** Approved quoted leads whose send is missing, still queued, or failed. Not auth, not a held row. */
+async function pushUnsentQualifiedLeads(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  clientNames: Map<string, { name: string }>,
+  now: Date,
+): Promise<void> {
+  const leads = await loadQualifiedLeads(supabase, now)
+  if (leads.length === 0) return
+  const writebacks = await loadQualifiedWritebacks(supabase, leads.map((lead) => lead.id))
+  for (const lead of leads) {
+    if (needsQualifiedRetry(lead.id, writebacks)) items.push(qualifiedRetryItem(lead, clientNames))
+  }
+}
+
+async function loadQualifiedLeads(supabase: SupabaseClient, now: Date): Promise<QualifiedLeadRow[]> {
+  const since = new Date(now.getTime() - META_EVENT_WINDOW_DAYS * DAY_MS).toISOString()
+  const { data, error } = await supabase
+    .from('me_sale_outcomes')
+    .select('id, client_id, source_ref, occurred_at')
+    .eq('review_status', 'approved')
+    .eq('outcome_kind', 'lead')
+    .eq('source_kind', 'crm_stage_manual')
+    .is('redacted_at', null)
+    .gte('occurred_at', since)
+    .order('occurred_at', { ascending: true })
+    .limit(MAX_ITEMS)
+  if (error) throw new Error(`已报价未发出查询失败: ${error.message}`)
+  return ((data ?? []) as unknown as QualifiedLeadRow[]).filter((row) => openQualifiedLead(row, now))
+}
+
+function openQualifiedLead(row: QualifiedLeadRow, now: Date): boolean {
+  if (typeof row.source_ref !== 'string' || !row.source_ref.startsWith('crm_qualified:')) return false
+  return !isPastEventWindow(row.occurred_at, now)
+}
+
+async function loadQualifiedWritebacks(
+  supabase: SupabaseClient,
+  outcomeIds: string[],
+): Promise<QualifiedWriteback[]> {
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('outcome_id, event_id, status, last_error_code, payload_preview')
+    .in('outcome_id', outcomeIds)
+    .limit(200)
+  if (error) throw new Error(`已报价发送记录查询失败: ${error.message}`)
+  return (data ?? []) as unknown as QualifiedWriteback[]
+}
+
+function needsQualifiedRetry(outcomeId: string, writebacks: QualifiedWriteback[]): boolean {
+  const own = writebacks.filter((row) => row.outcome_id === outcomeId && (row.event_id == null || row.event_id === outcomeId))
+  if (own.length === 0) return true
+  const row = own[0]
+  if (row.payload_preview?.held === true) return false
+  if (row.last_error_code === 'auth') return false
+  return row.status === 'queued' || row.status === 'failed'
+}
+
+function qualifiedRetryItem(lead: QualifiedLeadRow, clientNames: Map<string, { name: string }>): ManualItem {
+  return {
+    kind: 'conversion_needs_review',
+    client_name: clientNames.get(lead.client_id)?.name ?? '客户',
+    client_id: lead.client_id,
+    what: '有一条已报价发给广告平台没成功。不补发的话，广告平台不知道这个人已经问过价。',
+    how: '打开这一页，找到这一条，点「再试一次」。同一条不会发成两笔。',
+    href: `https://app.magicengine.com.au/dashboard/conversions?client=${lead.client_id}&focus=${lead.id}`,
+  }
 }
 
 async function pushHeldSendItems(
