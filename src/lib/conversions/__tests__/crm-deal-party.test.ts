@@ -21,7 +21,7 @@ describe('stored party size', () => {
   })
 
   it('does not guess when one note names two counts or two notes disagree', () => {
-    expect(partySizesInText('2 adults and 1 child, 3 pax')).toEqual([2, 3])
+    expect(partySizesInText('2 adults and 1 child, 3 pax')).toEqual([2, 1, 3])
     expect(choosePartySize(null, [[2], [4]])).toBeNull()
     expect(choosePartySize(null, [[2, 4]])).toBeNull()
     expect(choosePartySize(null, [[], []])).toBeNull()
@@ -29,10 +29,28 @@ describe('stored party size', () => {
     expect(choosePartySize(null, [[3], [3]])).toBe(3)
   })
 
+  it('does not treat an adult and child split as the total headcount', () => {
+    expect(partySizesInText('2 adults')).toEqual([2])
+    expect(partySizesInText('2 adults and 1 child')).toEqual([2, 1])
+    expect(partySizesInText('2 adults and 2 children')).toEqual([2, 2])
+    expect(choosePartySize(null, [partySizesInText('2 adults and 1 child')])).toBeNull()
+    expect(choosePartySize(null, [partySizesInText('2 adults and 2 children')])).toBeNull()
+    expect(choosePartySize(null, [partySizesInText('2 adults and 1 child'), [4]])).toBeNull()
+  })
+
   it('reads party_size from a call fact and ignores other keys', () => {
     expect(partySizeFromFacts({ party_size: 5 })).toBe(5)
     expect(partySizeFromFacts({ party_size: 0 })).toBeNull()
     expect(partySizeFromFacts({ guests: 5 })).toBeNull()
     expect(partySizeFromFacts(null)).toBeNull()
+    const stored = [
+      { key: 'travel_window', value: 'March', quote: 'in March', confidence: 0.9 },
+      { key: 'party_size', value: '4', quote: 'about four people', confidence: 0.8 },
+    ]
+    expect(partySizeFromFacts(stored)).toBe(4)
+    expect(partySizeFromFacts([{ key: 'party_size', value: '4' }, { key: 'party_size', value: '5' }])).toBeNull()
+    expect(partySizeFromFacts([{ key: 'budget', value: '200' }])).toBeNull()
+    expect(partySizeFromFacts([])).toBeNull()
+    expect(partySizeFromFacts([{ key: 'party_size', value: '三个人' }])).toBeNull()
   })
 })

@@ -77,7 +77,7 @@ export async function restoreVoidedDeal(
     if (!(await reopenStoppedSend(db, sendId))) return false
   }
   if (!(await reopenDeal(db, id, row, write))) return false
-  await writeRestoreAudit(db, id, row.created_by)
+  await writeRestoreAudit(db, id, row.created_by, write?.milestoneKind ?? null)
   return true
 }
 
@@ -135,12 +135,19 @@ async function reopenDeal(db: SupabaseClient, id: string, row: IntakeRow, write?
   return (data?.length ?? 0) === 1
 }
 
-async function writeRestoreAudit(db: SupabaseClient, outcomeId: string, actor: string | null): Promise<void> {
+async function writeRestoreAudit(
+  db: SupabaseClient,
+  outcomeId: string,
+  actor: string | null,
+  milestone: DealWrite['milestoneKind'] | null,
+): Promise<void> {
+  const detail: Record<string, string> = { from: 'payment_void' }
+  if (milestone === 'deposit' || milestone === 'balance') detail.milestone = milestone
   const { error } = await db.from('me_conversion_audit').insert({
     outcome_id: outcomeId,
     action: 'restored',
     actor,
-    detail: { from: 'payment_void' },
+    detail,
   })
   if (error) console.info(JSON.stringify({ event: 'crm_deal.audit_failed' }))
 }

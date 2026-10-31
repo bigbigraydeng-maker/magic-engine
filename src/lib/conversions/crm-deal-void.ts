@@ -211,16 +211,53 @@ async function configuredMilestone(db: SupabaseClient, clientId: string): Promis
   return cfg.dealMilestone
 }
 
+/**
+ * The first created stamp is the payment the deal started on. A later restore
+ * that names a payment replaces it. A restore with no payment leaves the
+ * previous link in place.
+ */
+export function milestoneStampFromAudits(
+  rows: Array<{ action?: unknown; detail?: unknown; at?: unknown }>,
+): string | null {
+  const ordered = [...rows].sort((a, b) => stampTime(a.at).localeCompare(stampTime(b.at)))
+  let stamp: string | null = null
+  let createdSeen = false
+  for (const row of ordered) {
+    if (row.action === 'created') {
+      if (createdSeen) continue
+      createdSeen = true
+      stamp = stampOf(row.detail)
+      continue
+    }
+    if (row.action !== 'restored') continue
+    const next = stampOf(row.detail)
+    if (next) stamp = next
+  }
+  return stamp
+}
+
+function stampTime(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
 async function loadStamps(db: SupabaseClient, outcomeIds: string[]): Promise<Map<string, string | null>> {
   const out = new Map<string, string | null>()
   if (outcomeIds.length === 0) return out
-  const { data, error } = await db.from('me_conversion_audit').select('outcome_id, detail').in('outcome_id', outcomeIds).eq('action', 'created')
+  const { data, error } = await db.from('me_conversion_audit')
+    .select('outcome_id, action, detail, at')
+    .in('outcome_id', outcomeIds)
+    .in('action', ['created', 'restored'])
+    .order('at', { ascending: true })
   if (error) throw new Error('crm_deal_void_failed')
+  const grouped = new Map<string, Array<{ action?: unknown; detail?: unknown; at?: unknown }>>()
   for (const item of Array.isArray(data) ? data as Array<Record<string, unknown>> : []) {
     const id = typeof item.outcome_id === 'string' ? item.outcome_id : null
-    if (!id || out.has(id)) continue
-    out.set(id, stampOf(item.detail))
+    if (!id) continue
+    const list = grouped.get(id) ?? []
+    list.push({ action: item.action, detail: item.detail, at: item.at })
+    grouped.set(id, list)
   }
+  for (const [id, rows] of grouped) out.set(id, milestoneStampFromAudits(rows))
   return out
 }
 

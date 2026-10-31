@@ -110,7 +110,8 @@ describe('restoreVoidedDeal', () => {
       currency: 'NZD',
     })
     expect(seed.writebacks[0]).toMatchObject({ status: 'queued', last_error: null, payload_preview: null })
-    expect(audits[0]).toMatchObject({ action: 'restored', outcome_id: OUTCOME })
+    expect(audits[0]).toMatchObject({ action: 'restored', outcome_id: OUTCOME, detail: { from: 'payment_void' } })
+    expect(audits[0].detail).toEqual({ from: 'payment_void' })
     info.mockRestore()
   })
 
@@ -148,7 +149,7 @@ describe('restoreVoidedDeal', () => {
   })
 
   it('a payment deal that auto-passes comes back approved, and an already reopened send is left queued', async () => {
-    const { db, seed } = fakeDb({
+    const { db, seed, audits } = fakeDb({
       outcomes: [{
         id: OUTCOME,
         client_id: CLIENT,
@@ -179,5 +180,25 @@ describe('restoreVoidedDeal', () => {
       reject_note: null,
     })
     expect(seed.writebacks[0].status).toBe('queued')
+    expect(audits[0].detail).toEqual({ from: 'payment_void', milestone: 'deposit' })
+  })
+
+  it('records the payment kind the restored deal now belongs to', async () => {
+    const { db, audits } = fakeDb({
+      outcomes: [{
+        id: OUTCOME,
+        review_status: 'rejected',
+        reject_note: PAYMENT_VOID_REJECT_NOTE,
+      }],
+      writebacks: [],
+    })
+    const ok = await restoreVoidedDeal(db, OUTCOME, row(), [], {
+      reviewStatus: 'approved',
+      reviewedBy: 'system:crm-deal-auto',
+      reviewedAt: '2026-10-31T00:00:00.000Z',
+      milestoneKind: 'balance',
+    })
+    expect(ok).toBe(true)
+    expect(audits[0].detail).toEqual({ from: 'payment_void', milestone: 'balance' })
   })
 })
