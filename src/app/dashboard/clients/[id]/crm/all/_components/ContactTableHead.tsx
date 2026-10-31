@@ -9,6 +9,22 @@ export function ContactTableHead(props: {
   onToggleSort: (key: 'firstSeenAt' | 'lastTouchAt') => void
 }) {
   const { grouped, columns, sortArrow, onToggleSort } = props
+  // 智能名单一眼看客人、进线与最近联系、当前状态、该做什么和渠道；联系方式与自定义列在详情里。
+  if (grouped) {
+    return (
+      <thead>
+        <tr className="border-b border-me-charcoal/10 text-left text-xs text-me-charcoal/50">
+          <th className="whitespace-nowrap px-2 py-2">⭐</th>
+          <th className="whitespace-nowrap px-4 py-2">客人</th>
+          <th className="whitespace-nowrap px-4 py-2">进线</th>
+          <th className="whitespace-nowrap px-4 py-2">最近联系</th>
+          <th className="whitespace-nowrap px-4 py-2">当前状态</th>
+          <th className="whitespace-nowrap px-4 py-2">该做什么</th>
+          <th className="whitespace-nowrap px-4 py-2">联系渠道</th>
+        </tr>
+      </thead>
+    )
+  }
   return (
     <thead>
       <tr className="border-b border-me-charcoal/10 text-left text-xs text-me-charcoal/50">

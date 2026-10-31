@@ -150,6 +150,17 @@ describe('advanceNewLeadsAfterFollowUp', () => {
     expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(0)
   })
 
+  it('also advances when the customer picked up but hung up almost at once (answered, not reached)', async () => {
+    const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'phone', metadata: { reached: false, answered: true, talk_seconds: 0 } }] })
+    expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(1)
+    expect(audits[0].note).toContain('很快挂断')
+  })
+
+  it('does nothing for a call that just rang out (not answered, not reached)', async () => {
+    const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'phone', metadata: { reached: false, answered: false } }] })
+    expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(0)
+  })
+
   it('does nothing when no outbound call was reached', async () => {
     const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'phone', metadata: { reached: false } }] })
     expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(0)

@@ -14,7 +14,7 @@
  *   · 当前阶段是 `new`（新线索）
  *   · 这个阶段是系统放进去的（最近一条阶段变更的操作者是 `ai:conversation-read`、建档时的 `system:new-lead`，或被机器判成非咨询后又来了新消息而放回的 `system:enquiry-revived`）——
  *     人手动标过的一律不碰
- *   · 有一通外呼电话被判定为「接通」（触点 `metadata.reached === true`，判据在 `call-plan.ts`），
+ *   · 有一通外呼电话被判定为「接通」（触点 `metadata.reached === true`，判据在 `call-plan.ts`），或对方接起了但很快挂断（`metadata.answered === true`），
  *     或有一封**人发的**外发邮件（排除群发和自动回执，判据 `isAutomatedTouch`）——
  *     2026-10-28 PM 发现 Yvonne McDiarmid：同事 10/23 就回过邮件，她仍显示「新线索」
  *   · 这个客户的阶段配置里确实有 `contacted`
@@ -99,9 +99,18 @@ async function followedUp(db: SupabaseClient, contactIds: string[]): Promise<Map
     metadata: Record<string, unknown> | null
   }[]) {
     if (t.channel === 'phone') {
-      if (t.metadata?.reached !== true || calls.has(t.contact_id)) continue
-      const secs = t.metadata.talk_seconds
-      calls.set(t.contact_id, `我们拨出的电话已接通${typeof secs === 'number' ? `（${secs} 秒）` : ''}`)
+      // 接通（聊上了 / 留了语音）算；对方接起来但很快挂断（`answered` 但没算接通）也算「我们联系过」——
+      // PM 2026-10-29：这类拨出了，状态却还停在新线索。只是铃响没人接的不算（那是要再试一次的人）。
+      const reached = t.metadata?.reached === true
+      const pickedUp = t.metadata?.answered === true
+      if ((!reached && !pickedUp) || calls.has(t.contact_id)) continue
+      const secs = t.metadata?.talk_seconds
+      calls.set(
+        t.contact_id,
+        reached
+          ? `我们拨出的电话已接通${typeof secs === 'number' ? `（${secs} 秒）` : ''}`
+          : '我们拨出的电话对方接起后很快挂断',
+      )
     } else if (!isAutomatedTouch(t.source, t.metadata) && !mails.has(t.contact_id)) {
       mails.set(t.contact_id, '同事已回过邮件')
     }

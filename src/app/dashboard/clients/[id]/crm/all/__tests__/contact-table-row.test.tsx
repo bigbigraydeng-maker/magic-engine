@@ -170,3 +170,86 @@ describe('🔥 回头标签（PM 2026-10-27：之前咨询过、我们联系过�
     expect(html.indexOf('returning-tag')).toBeLessThan(html.indexOf('FB 表单'))
   })
 })
+
+describe('「今天先联系」每行只留三样：名字 / 一句话原因 / 一个渠道', () => {
+  it('分段视图：客人 + 进线 + 最近联系 + 该做什么 + 联系渠道；不画联系方式、自定义列、来源小标签', () => {
+    renderRow(makeRow({ suggestedChannel: 'phone', sources: ['fb_form'], custom: { tour: 'Best of China' } }), true)
+    expect(screen.getByText('Jane Doe')).toBeTruthy()
+    expect(screen.getByText('进线了，还没人联系')).toBeTruthy()
+    expect(screen.getByTestId('arrival-cell').textContent?.trim()).toBeTruthy() // 进线时间
+    expect(screen.getByTestId('recent-cell').textContent?.trim()).toBeTruthy() // 最近联系（PM 2026-10-30）
+    expect(screen.getByTestId('channel-cell').textContent).toContain('电话')
+    expect(screen.queryByText('+64211111111')).toBeNull()
+    expect(screen.queryByText('FB 表单')).toBeNull()
+    expect(screen.queryByText('Best of China')).toBeNull()
+    expect(screen.getByTestId('current-stage-cell').textContent).toBe('还没标')
+    expect(document.querySelectorAll('td').length).toBe(7) // ⭐ / 客人 / 进线 / 最近联系 / 当前状态 / 该做什么 / 联系渠道
+  })
+
+  it('当前状态与该做什么分开，已报价客户能一眼看到阶段', () => {
+    renderRow(makeRow({ stage: 'quoted', stageLabel: '已报价', suggestedChannel: 'phone' }), true)
+    expect(screen.getByTestId('current-stage-cell').textContent).toBe('已报价')
+    expect(screen.getByText('打给他')).toBeTruthy()
+  })
+
+  it('有 AI 摘要时，「该做什么」列显示摘要而不是规则那句（PM 2026-10-30）', () => {
+    renderRow(makeRow({ suggestedChannel: 'phone', aiSummary: '客户想要 4 月上海团、约 10 人' }), true)
+    expect(screen.getByTestId('ai-summary').textContent).toContain('客户想要 4 月上海团')
+    expect(screen.queryByText('进线了，还没人联系')).toBeNull() // 规则那句被摘要顶掉
+    expect(screen.getByText('打给他')).toBeTruthy() // 动作小标签还在
+  })
+
+  it('列表摘要也保留客户原始姓名', () => {
+    renderRow(makeRow({ name: 'David Scott', aiSummary: '客户大卫·斯科特表示想了解上海团。' }), true)
+    expect(screen.getByTestId('ai-summary').textContent).toContain('客户 David Scott 表示')
+    expect(screen.getByTestId('ai-summary').textContent).not.toContain('大卫·斯科特')
+  })
+
+  it('没有 AI 摘要时，退回规则那句', () => {
+    renderRow(makeRow({ suggestedChannel: 'phone' }), true)
+    expect(screen.queryByTestId('ai-summary')).toBeNull()
+    expect(screen.getByText('进线了，还没人联系')).toBeTruthy()
+  })
+
+  it('每种渠道都有人话；没有可用渠道时直说，不画成空白', () => {
+    const cases: Array<[NonNullable<ContactRow['suggestedChannel']>, string]> = [
+      ['email', '邮件'],
+      ['messenger', '私信'],
+      ['sms', '短信'],
+      ['none', '暂无可用渠道'],
+    ]
+    for (const [ch, text] of cases) {
+      const { unmount } = renderRow(makeRow({ suggestedChannel: ch }), true)
+      expect(screen.getByTestId('channel-cell').textContent).toContain(text)
+      unmount()
+    }
+  })
+
+  it('「回头」标签仍然画在名字旁边（最该先看的东西）', () => {
+    renderRow(
+      makeRow({ returning: { firstEnquiryAt: 'a', latestFormAt: 'b', ourLastContactAt: 'c', ourContacts: 1, earlierForms: 1 } }),
+      true,
+    )
+    expect(screen.getByTestId('returning-tag')).toBeTruthy()
+  })
+
+  it('平铺名单（全部客人）不变：仍然画进线时间、联系方式、自定义列、来源标签', () => {
+    renderRow(makeRow({ sources: ['fb_form'], custom: { tour: 'Best of China' } }), false)
+    expect(screen.getByText('+64211111111')).toBeTruthy()
+    expect(screen.getByText('FB 表单')).toBeTruthy()
+    expect(screen.getByText('Best of China')).toBeTruthy()
+    expect(screen.queryByTestId('channel-cell')).toBeNull()
+  })
+})
+
+describe('📞 刚聊过标签（PM 2026-10-29：打完电话，这个人该标成正热着）', () => {
+  it('刚打通聊上 → 名字旁出现「📞 刚聊过」', () => {
+    renderRow(makeRow({ afterCall: true, reason: '刚通完电话（不到 1 小时前），还没记下一步' }))
+    expect(screen.getByTestId('after-call-tag').textContent).toContain('刚聊过')
+  })
+
+  it('没有这个标记 → 不画', () => {
+    renderRow(makeRow())
+    expect(screen.queryByTestId('after-call-tag')).toBeNull()
+  })
+})

@@ -43,6 +43,10 @@ export interface TimelineEntry {
   summary?: string | null
   /** 出站且是机器发的（Mailchimp 欢迎信 / 群发）：显示成「系统自动发出」，不算「我们说的最后一句」。 */
   automated?: boolean
+  /** 表格里员工写的原话（没有 AI 摘要的同步记录才有）。 */
+  sheetNote?: string | null
+  /** 时间是近似的：表格不记具体时间，`at` 是客人填表的时间。 */
+  timeApproximate?: boolean
   /**
    * 销售真正敲进去的那句话 —— **跟 `summary` 不是一回事**，后者是 AI 摘要。
    * 只在判决行旁边展示，理由见 `VERDICT_ROW`。
@@ -59,6 +63,10 @@ export interface TimelineEntry {
    * 标成「原话」会让销售以为自己在看客人说的话。
    */
   rawKind?: 'verbatim' | 'ai_summary'
+  /** 员工自己手记的一笔（me_manual）：主行显示员工原话，AI 整理放次要行。 */
+  staffNote?: boolean
+  /** 谁记的（登录邮箱）。 */
+  loggedBy?: string | null
   tour?: string | null
   outcome?: string | null
   travelWindow?: string | null
@@ -264,7 +272,8 @@ function summarise(
     if (e.tour) s.tour = humanizeFormCode(e.tour) ?? e.tour
     if (e.travelWindow) s.travelWindow = e.travelWindow
     if (e.kind === 'stage') s.stageSource = stageSourceOf(e.changedBy)
-    const text = e.kind === 'message' ? e.body : e.kind === 'touch' ? e.summary : null
+    // 员工手记：「上次说到这」用员工原话，不用 AI 改写（改写可能丢细节）。
+    const text = e.kind === 'message' ? e.body : e.kind === 'touch' ? (e.staffNote && e.raw ? e.raw : e.summary) : null
     // 机器自动发出的信不是「最后一句」：不能盖掉客人真说的话。
     if (text && text.trim() && !e.automated) {
       s.lastText = (e.kind === 'touch' ? humanizeFormSummary(text) : null) ?? text.trim()
@@ -375,7 +384,7 @@ function Verdict({ e }: { e: TimelineEntry }) {
   const stop = verdict.tone === 'stop'
   return (
     <>
-      {e.raw && e.raw !== e.summary && (
+      {e.raw && e.raw !== e.summary && !e.staffNote && (
         <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-me-charcoal/[0.04] px-2 py-1.5 text-[12px] leading-relaxed text-me-charcoal/70">
           {/* 🔴 外呼那条路的 raw 是**模型生成**的通话摘要，不是逐字原话 —— 标错了，
               销售会以为自己在看客人说的话，然后据此决定要不要解除全渠道停联。 */}
@@ -412,7 +421,7 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
   const icon = CHANNEL_ICON[e.channel ?? ''] ?? '•'
   const name = CHANNEL_NAME[e.channel ?? ''] ?? e.channel ?? '接触'
   const chips = [
-    e.tour && `想去：${humanizeFormCode(e.tour) ?? e.tour}`,
+    e.tour && (e.staffNote ? `员工记录里提到：${e.tour}` : `广告表单里点过：${humanizeFormCode(e.tour) ?? e.tour}`),
     e.travelWindow && `${e.travelWindow} 走`,
     e.competitor && `提到 ${e.competitor}`,
     e.callbackAt && '约了回电',
@@ -445,8 +454,36 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
         {icon} {name}
         {e.direction === 'inbound' ? ' · 客人来的' : e.automated ? ' · 系统自动发出' : ''} · {when(e.at)}
       </p>
-      {e.summary && (
-        <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/85">{humanizeFormSummary(e.summary) ?? e.summary}</p>
+      {e.staffNote && e.raw ? (
+        <>
+          {/* 员工写的字是最高置信度的证据：原样放主行，标明是谁记的；AI 整理只是旁边一行小字，
+              永远不替代、不盖住它（PM 2026-10-30：员工的原话被 AI 改写盖掉、细节丢了）。 */}
+          <p data-testid="staff-note" className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-me-charcoal/90">
+            <span className="mr-1 text-[11px] font-bold text-me-charcoal/45">
+              员工记录{e.loggedBy ? `（${e.loggedBy}）` : ''}：
+            </span>
+            {e.raw}
+          </p>
+          {e.summary && e.summary !== e.raw && (
+            <p data-testid="staff-note-ai" className="mt-0.5 text-[11px] leading-relaxed text-me-charcoal/45">
+              <span className="mr-1 font-bold">AI 整理：</span>
+              {e.summary}
+            </p>
+          )}
+        </>
+      ) : (
+        e.summary && (
+          <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/85">{humanizeFormSummary(e.summary) ?? e.summary}</p>
+        )
+      )}
+      {!e.summary && e.sheetNote && !verdict && (
+        <p data-testid="sheet-note" className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-me-charcoal/85">
+          <span className="mr-1 text-[11px] font-bold text-me-charcoal/45">员工在表格里写的：</span>
+          {e.sheetNote}
+        </p>
+      )}
+      {e.timeApproximate && (
+        <p className="mt-1 text-[10px] text-me-charcoal/35">表格没记具体时间，这里显示的是客人填表的时间</p>
       )}
       <Verdict e={e} />
       <Chips items={chips} />
@@ -635,7 +672,11 @@ export function ContactTimeline({
     return <Placeholder loading={loading} err={err} onRetry={retry} />
   }
 
-  if (collapsible && !expanded) {
+  // 条数不超过折叠时露出的条数：全部已经摆在眼前，没有更多可展开 —— 再放一个展开按钮，
+  // 点了页面不变（PM 2026-10-29：「点击看完整往来原文，页面无反应」）。
+  const hasEarlier = data.timeline.length > RECENT_WHEN_COLLAPSED
+
+  if (collapsible && !expanded && hasEarlier) {
     // 折叠时仍露出最近几条：员工要看「他最近说了什么 / 我们回了什么」，不该只剩一行按钮。
     // PM 2026-10-28：打开抽屉看不到过往记录。更早的才折起来。
     const recent = data.timeline.slice(-RECENT_WHEN_COLLAPSED)
@@ -650,7 +691,7 @@ export function ContactTimeline({
           onClick={() => setExpanded(true)}
           className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-2 text-[13px] font-bold text-me-charcoal/70 hover:bg-me-ivory"
         >
-          {earlier > 0 ? `看更早的往来（还有 ${earlier} 条）` : `看完整往来原文（${data.timeline.length} 条）`}
+          {`看更早的往来（还有 ${earlier} 条）`}
           <span aria-hidden>▾</span>
         </button>
       </div>
@@ -687,7 +728,7 @@ export function ContactTimeline({
           </p>
         )}
       </div>
-      {collapsible && expanded && (
+      {collapsible && expanded && hasEarlier && (
         <button
           type="button"
           onClick={() => setExpanded(false)}
