@@ -99,8 +99,11 @@ function describeAuto(rows: AutoRow[], sends: SendRow[], now: Date): Map<string,
 function classifySends(rows: SendRow[]): 'skip' | 'sent' | string {
   if (rows.some((row) => row.status === 'in_doubt' || row.status === 'sending')) return 'skip'
   if (rows.some((row) => row.status === 'queued' && held(row.payload_preview))) return 'skip'
-  if (rows.some((row) => row.status === 'confirmed')) return 'sent'
   if (rows.length === 0) return '还没有发送记录'
+  if (rows.every((row) => row.status === 'confirmed' || row.status === 'dry_run')) return 'sent'
+  if (rows.some((row) => row.status === 'confirmed' || row.status === 'dry_run')) {
+    return '成交已经发出去，另一条还没发出去'
+  }
   if (rows.some((row) => row.status === 'expired_no_send')) return '已经超过 7 天，广告平台收不进去'
   return '发送没有成功'
 }

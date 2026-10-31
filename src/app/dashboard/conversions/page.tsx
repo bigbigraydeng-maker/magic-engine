@@ -117,7 +117,7 @@ export default function ConversionsPage() {
       // 会先被"最新 N 条"的窗口挤掉，压根轮不到这一步筛选。
       // 停发的成交和咨询必须分开取：咨询只用来显示「不用处理」，混在同一次 limit 里
       // 会把还在 7 天内的成交挤出「需要你动手」。
-      const [pendingRes, stuckRes, heldDealRes, heldLeadRes, qualifiedRes, companionRes] = await Promise.all([
+      const [pendingRes, stuckRes, heldDealRes, heldLeadRes, qualifiedRes, companionRes, unsentRes] = await Promise.all([
         fetch(`${root}&limit=200&review_status=pending_review`),
         fetch(`${root}&limit=200&review_status=approved&send_status=in_doubt,failed`),
         fetch(`${root}&limit=200&review_status=approved&send_status=queued&held=1&outcome_kind=purchase,balance`),
@@ -126,6 +126,8 @@ export default function ConversionsPage() {
         fetch(`${root}&limit=200&qualified_open=1`),
         // 成交已经发出、同一条线索的下一步还没发出。接口只返回确实欠着这一步的行。
         fetch(`${root}&limit=200&companion_open=1`),
+        // 已自动通过，但主发送记录还没写成。普通排队成交不在这里。
+        fetch(`${root}&limit=200&unsent_deal=1`),
       ])
       const pending = await pendingRes.json()
       if (!pendingRes.ok) {
@@ -153,10 +155,12 @@ export default function ConversionsPage() {
       const heldLeadBody = await heldLeadRes.json()
       const qualifiedBody = await qualifiedRes.json()
       const companionBody = await companionRes.json()
+      const unsentBody = await unsentRes.json()
       if (!heldDealRes.ok) throw new Error(heldDealBody.error ?? '读取失败')
       if (!heldLeadRes.ok) throw new Error(heldLeadBody.error ?? '读取失败')
       if (!qualifiedRes.ok) throw new Error(qualifiedBody.error ?? '读取失败')
       if (!companionRes.ok) throw new Error(companionBody.error ?? '读取失败')
+      if (!unsentRes.ok) throw new Error(unsentBody.error ?? '读取失败')
       const heldDeals: Outcome[] = heldDealBody.outcomes ?? []
       const heldLeads: Outcome[] = heldLeadBody.outcomes ?? []
       setStuck(mergeStuck(
@@ -164,6 +168,7 @@ export default function ConversionsPage() {
         heldDeals,
         qualifiedBody.outcomes ?? [],
         companionBody.outcomes ?? [],
+        unsentBody.outcomes ?? [],
       ))
       setHeldInquiry(heldLeads.some((o) => isHeldOutcome(o) && o.outcome_kind === 'lead'))
     } catch (e) {

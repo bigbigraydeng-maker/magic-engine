@@ -529,6 +529,43 @@ describe('已报价发给广告平台没成功', () => {
     expect(missing[0].href).toContain(contactId)
   })
 
+  it('收款已撤销、阶段记录还没建成时，不再叫人再试一次', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({
+        clients: [{
+          id: CTS,
+          conversion_stage: 'live',
+          leads_config: {
+            capi_conversion_leads: true,
+            capi_qualified_lead_stage_key: 'quoted',
+            capi_conversion_deal_stage_key: 'balance_received',
+          },
+        }],
+        deals: [{
+          id: 'deal-revoked',
+          client_id: CTS,
+          outcome_kind: 'purchase',
+          review_status: 'approved',
+          redacted_at: null,
+          meta_lead_id: '1687504185706630',
+          occurred_at: '2026-09-20T00:00:00.000Z',
+          order_ref: '84191',
+        }],
+        held: [{
+          outcome_id: 'deal-revoked',
+          event_id: 'deal-revoked',
+          status: 'confirmed',
+          payload_preview: { paymentRevoked: true },
+        }],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    expect(items.filter((item) => item.what.includes('没记上'))).toHaveLength(0)
+  })
+
   it('先排除已经发出的，再限条数：最早的 20 条成功不会挡住后面没发出的', async () => {
     const items: ManualItem[] = []
     const sent = Array.from({ length: 20 }, (_, i) => quoted(`sent-${i}`, {

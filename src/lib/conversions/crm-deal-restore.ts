@@ -16,6 +16,8 @@ export type SourceDealHit = {
   id: string
   voidedByPaymentReversal: boolean
   stoppedSendIds: string[]
+  reviewStatus: string
+  hasSendRecord: boolean
 }
 
 type SourceRow = {
@@ -62,8 +64,13 @@ export async function readSourceDeal(
     rejectNote: str(row.reject_note),
     writebacks,
   })
-  if (stopped == null) return { id, voidedByPaymentReversal: false, stoppedSendIds: [] }
-  return { id, voidedByPaymentReversal: true, stoppedSendIds: stopped }
+  const hit = {
+    id,
+    reviewStatus: str(row.review_status) ?? '',
+    hasSendRecord: writebacks.length > 0,
+  }
+  if (stopped == null) return { ...hit, voidedByPaymentReversal: false, stoppedSendIds: [] }
+  return { ...hit, voidedByPaymentReversal: true, stoppedSendIds: stopped }
 }
 
 export async function restoreVoidedDeal(

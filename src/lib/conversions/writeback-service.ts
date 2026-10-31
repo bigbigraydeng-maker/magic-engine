@@ -34,6 +34,7 @@ import {
 import { PAYMENT_VOID_STOP_ERROR, paymentRevokedPreview } from './crm-deal-void'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
+import { parkUnsentFailure } from './unsent-writeback'
 import type {
   ClientSendConfig,
   DestinationWriter,
@@ -275,6 +276,20 @@ async function readDealStageName(supabase: SupabaseClient, outcomeId: string): P
 }
 
 async function deliverApprovedOutcome(
+  outcomeId: string,
+  deps: SendDeps,
+  companion: StageCompanion | null,
+): Promise<SendOutcomeResult> {
+  try {
+    return await deliverApprovedOutcomeBody(outcomeId, deps, companion)
+  } catch (error) {
+    // 发送记录还没写成就失败时，留下一条失败记录。已有记录时插入会被唯一约束挡住，不会另开一条。
+    await parkUnsentFailure(deps.supabase, outcomeId, deps.writer.kind, companion?.eventId ?? outcomeId, error)
+    throw error
+  }
+}
+
+async function deliverApprovedOutcomeBody(
   outcomeId: string,
   deps: SendDeps,
   companion: StageCompanion | null,

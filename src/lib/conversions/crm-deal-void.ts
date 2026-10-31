@@ -3,8 +3,9 @@
  *
  * A deal that has not reached the ad platform is rejected, and any queued or
  * failed send row is closed, so a later approval or retry cannot send it.
- * A deal that already went out, or might have, is left as-is and marked so
- * the screen can say so in plain language. Nothing here calls the platform.
+ * A deal that already went out, or might have, stays approved and is marked so
+ * the screen can say so. A sibling send that has not gone out is still stopped.
+ * Nothing here calls the platform.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -54,16 +55,16 @@ export function planDealVoid(rows: DealVoidRow[]): DealVoidPlan {
   for (const row of rows) {
     if (row.reviewStatus === 'rejected') continue
     const left = row.writebacks.filter((item) => LEFT_ALONE.has(item.status))
+    const stoppable = row.writebacks.filter((item) => STOPPABLE.has(item.status))
     if (left.length > 0) {
       plan.flagIds.push(...left.map((item) => item.id))
+      plan.stopIds.push(...stoppable.map((item) => item.id))
       if (left.some((item) => item.status === 'confirmed')) plan.confirmed = true
       else plan.maybeSent = true
       continue
     }
     plan.voidIds.push(row.id)
-    for (const item of row.writebacks) {
-      if (STOPPABLE.has(item.status)) plan.stopIds.push(item.id)
-    }
+    plan.stopIds.push(...stoppable.map((item) => item.id))
   }
   return plan
 }

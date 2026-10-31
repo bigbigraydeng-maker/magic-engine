@@ -37,6 +37,20 @@ export function autoPassMessage(kind: 'recorded' | 'restored', send: DealSendCla
   return head + tail[send]
 }
 
+/** The deal row already exists. Say so, then say what this send attempt did. */
+export function unsentRetryMessage(send: DealSendClass): string {
+  const head = '这笔已经记下了，但上次发送记录没写成。'
+  const tail: Record<DealSendClass, string> = {
+    sent: '这次已发给广告平台。',
+    held: '这次仍按允许发送的名单停住了，没有发出去。',
+    expired: '这笔已经超过 7 天，广告平台收不进去，没有发出去。',
+    blocked: '这次也没有发给广告平台。',
+    not_sent: '这次没有发给广告平台。',
+    failed: '这次还是没写成发送记录。请到成交页再试一次。',
+  }
+  return head + tail[send]
+}
+
 export function partyReadNote(message: string, fromStored: boolean): string {
   if (!fromStored) return message
   return `${message}人数是从已经存下的往来或跟进记录里读到的。`

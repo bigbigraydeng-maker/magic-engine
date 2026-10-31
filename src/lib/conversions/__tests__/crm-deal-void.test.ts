@@ -21,6 +21,17 @@ describe('planDealVoid', () => {
     expect(voidDealMessage(plan)).not.toContain('已经发给')
   })
 
+  it('stops a queued companion when the original send already went out, and does not void the deal', () => {
+    const plan = planDealVoid([row('approved', [
+      { id: 'wb-primary', status: 'confirmed' },
+      { id: 'wb-stage', status: 'queued' },
+    ])])
+    expect(plan.voidIds).toEqual([])
+    expect(plan.stopIds).toEqual(['wb-stage'])
+    expect(plan.flagIds).toEqual(['wb-primary'])
+    expect(plan.confirmed).toBe(true)
+  })
+
   it('leaves a confirmed send and does not void the deal', () => {
     const plan = planDealVoid([row('approved', [{ id: 'wb-1', status: 'confirmed' }])])
     expect(plan.voidIds).toEqual([])
