@@ -29,6 +29,7 @@ import {
 
 export interface BookingCardProps {
   clientId: string
+  contactId: string
   booking: BookingView
   busy: boolean
   run: RunAction
@@ -98,6 +99,7 @@ function ActionRow({
 
 export function BookingCard({
   clientId,
+  contactId,
   booking,
   busy,
   run,
@@ -156,6 +158,7 @@ export function BookingCard({
               <MilestoneRow
                 key={milestone.kind}
                 clientId={clientId}
+                contactId={contactId}
                 booking={booking}
                 milestone={milestone}
                 warnings={booking.warnings.filter((w) => w.kind === milestone.kind)}

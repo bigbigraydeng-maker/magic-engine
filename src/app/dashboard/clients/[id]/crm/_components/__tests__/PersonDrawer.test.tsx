@@ -94,8 +94,8 @@ describe('号码好好的人，一个字都不该变', () => {
  * 🔴 缺的那两样都不是可选项：
  * · 「要记住的事」—— 今日待办有一条 `crm_important_due` 直接依赖它。抽屉里没有，
  *   销售在「今天要联系」页上就设不了提醒，得跳到另一页去设。
- * · 没把某一阶段配成「手录成交」时，改阶段一律走确认框，不弹金额。
- *   配了的那一步才弹出「标已成交并录金额」。
+ * · 没把某一阶段配成「手录成交」时，「已成交」仍打开金额面板。其它阶段走确认框。
+ *   配了具体一步之后，只认那一步，并弹出「标已成交并录金额」。
  *
  * `DncBanner.tsx` 的头注就是这个分裂的事故记录：「FDE 照着人工任务点进去，
  * 页面上根本没有任务里说的那个按钮」。
@@ -156,10 +156,18 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
     expect(document.querySelector('input[type="date"]')).toBeTruthy()
   })
 
-  it('点「已成交」走确认框，不弹金额', async () => {
+  it('没配成交阶段时，「已成交」仍打开金额面板', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     drawFor(CLIENT, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
     await clickReadyStage('已成交')
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(document.body.textContent ?? '').toContain('这笔生意多少钱')
+  })
+
+  it('阶段键是全款已付、营销动作是成交时，走确认框，不弹金额', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    drawFor(CLIENT, {}, [{ stageKey: 'paid_full', label: '全款已付', marketingAction: 'won' }])
+    await clickReadyStage('全款已付')
     expect(confirmSpy).toHaveBeenCalled()
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
@@ -179,12 +187,12 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
 
-  it('另一个客户点「已成交」也不弹金额', async () => {
+  it('另一个客户没配时，「已成交」也打开金额面板', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     drawFor('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
     await clickReadyStage('已成交')
-    expect(confirmSpy).toHaveBeenCalled()
-    expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(document.body.textContent ?? '').toContain('这笔生意多少钱')
   })
 
   it('跟进设置还没读完时，已成交不能改阶段，也不能当成没配置', async () => {

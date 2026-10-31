@@ -18,6 +18,7 @@ import {
   type DealWrite,
 } from './crm-deal-record'
 import type { DealMilestone } from './capi-client-config'
+import { latestMetaLeadId } from './conversion-lead'
 import { readStoredPartySize } from './crm-deal-party-read'
 import { dispatchCrmDeal } from './crm-deal-send'
 import { readSourceDeal, restoreVoidedDeal } from './crm-deal-restore'
@@ -144,12 +145,14 @@ async function loadPsid(db: SupabaseClient, clientId: string, contactId: string)
 }
 
 async function loadMetaLeadId(db: SupabaseClient, clientId: string, contactId: string): Promise<string | null> {
-  const rows = await many(db, 'contact_touchpoints', 'source_ref', [['contact_id', contactId], ['client_id', clientId], ['source', 'meta_lead_form']])
-  for (const row of rows) {
-    const ref = str(row.source_ref)
-    if (ref && /^\d{15,17}$/.test(ref)) return ref
-  }
-  return null
+  const rows = await many(
+    db,
+    'contact_touchpoints',
+    'source_ref, occurred_at',
+    [['contact_id', contactId], ['client_id', clientId], ['source', 'meta_lead_form']],
+    'occurred_at',
+  )
+  return latestMetaLeadId(rows)
 }
 
 async function loadApproved(db: SupabaseClient, clientId: string, contactId: string): Promise<ApprovedPurchase[]> {

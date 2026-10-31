@@ -2,18 +2,21 @@
 
 /**
  * Stage buttons inside the guest drawer.
- * The amount panel opens only when this client's saved deal stage matches
- * the button. No client id is special-cased. Buttons stay disabled until
- * that setting has loaded, so a slow or failed read cannot become a plain
- * stage change with no deal record.
+ * The amount panel opens for the saved deal stage. When none is saved, only
+ * the stage key won opens it. A marketing action named won does not. No
+ * client id is special-cased.
+ * Buttons stay disabled until that setting has loaded, so a slow or failed
+ * read cannot become a plain stage change with no deal record.
  */
 
 import { useEffect, useState } from 'react'
+import { stageCountsAsDeal } from '@/lib/conversions/crm-deal-stage'
 import { MarkWonPanel } from './MarkWonPanel'
 
 interface StageChoice {
   stageKey: string
   label: string
+  marketingAction?: string
 }
 
 type DealStageLoad =
@@ -106,7 +109,7 @@ function chooseStage(
   onPlainStage: (stageKey: string, label: string) => void,
 ): void {
   if (!ready) return
-  if (dealKey && stage.stageKey === dealKey) {
+  if (stageCountsAsDeal(dealKey, stage.stageKey)) {
     setWon(stage)
     return
   }

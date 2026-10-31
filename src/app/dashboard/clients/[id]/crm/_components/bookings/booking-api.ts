@@ -169,6 +169,27 @@ export function fetchNudgeList(
   return callApi<NudgeResponse>(bookingsUrl(clientId, `/nudge-list?limit=${limit}`), 'GET')
 }
 
+export interface PartyHintView {
+  size: number
+  source: 'ai_summary' | 'guest_message' | 'call'
+}
+
+/** Headcount already stored on this guest's summary, mail, or call notes. */
+export async function fetchPartyHint(clientId: string, contactId: string): Promise<PartyHintView | null> {
+  const result = await callApi<{ size?: unknown; source?: unknown }>(
+    `/api/clients/${clientId}/crm/contacts/${encodeURIComponent(contactId)}/party-hint`,
+    'GET',
+  )
+  if (!result.ok) return null
+  return partyHintView(result.data)
+}
+
+function partyHintView(data: { size?: unknown; source?: unknown }): PartyHintView | null {
+  if (typeof data.size !== 'number' || !Number.isInteger(data.size)) return null
+  if (data.source !== 'ai_summary' && data.source !== 'guest_message' && data.source !== 'call') return null
+  return { size: data.size, source: data.source }
+}
+
 /** Mark a milestone as paid. */
 export function markPaid(
   clientId: string,

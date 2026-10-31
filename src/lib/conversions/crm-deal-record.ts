@@ -15,6 +15,7 @@
 import type { DncTouch } from '@/lib/crm/dnc'
 import { isDoNotContact } from '@/lib/crm/dnc'
 import { readCapiClientConfig, type DealMilestone } from './capi-client-config'
+import { stageCountsAsDeal } from './crm-deal-stage'
 import { legalPartySize } from './crm-deal-party'
 import { autoPassMessage, CRM_DEAL_AUTO_ACTOR, partyReadNote, type DealSendClass } from './crm-deal-send'
 import { buildIntakeRow, type IntakeRow } from './intake'
@@ -132,16 +133,43 @@ export function milestonePaidOn(
   return undefined
 }
 
-/** Noon at +12 keeps the paid-on calendar date across AU/NZ. */
+/** Noon in Auckland, so daylight saving does not move the paid-on calendar date. */
 export function dealOccurredAt(paidOn: string | null, now: Date): string {
-  if (paidOn && /^\d{4}-\d{2}-\d{2}$/.test(paidOn)) {
-    return new Date(`${paidOn}T12:00:00+12:00`).toISOString()
-  }
+  if (paidOn && /^\d{4}-\d{2}-\d{2}$/.test(paidOn)) return aucklandNoonIso(paidOn)
   if (paidOn) {
     const parsed = new Date(paidOn)
     if (!Number.isNaN(parsed.getTime())) return parsed.toISOString()
   }
   return now.toISOString()
+}
+
+const AUCKLAND = 'Pacific/Auckland'
+
+function aucklandNoonIso(day: string): string {
+  const [year, month, date] = day.split('-').map(Number)
+  let utc = Date.UTC(year, month - 1, date, 12, 0, 0)
+  for (let pass = 0; pass < 2; pass += 1) {
+    utc = Date.UTC(year, month - 1, date, 12, 0, 0) - aucklandOffsetMinutes(new Date(utc)) * 60_000
+  }
+  return new Date(utc).toISOString()
+}
+
+function aucklandOffsetMinutes(instant: Date): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: AUCKLAND,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(instant)
+  const bag: Record<string, string> = {}
+  for (const part of parts) bag[part.type] = part.value
+  const hour = bag.hour === '24' ? 0 : Number(bag.hour)
+  const asUtc = Date.UTC(Number(bag.year), Number(bag.month) - 1, Number(bag.day), hour, Number(bag.minute), Number(bag.second))
+  return Math.round((asUtc - instant.getTime()) / 60_000)
 }
 
 /** Approved purchase from another source, occurred_at within 30 days (t === since blocks). */
@@ -214,7 +242,7 @@ export async function recordStageDeal(
     logSkip('config_malformed')
     return idle('stage_mismatch')
   }
-  if (cfg.dealStageKey == null || cfg.dealStageKey !== input.stageKey) return idle('stage_mismatch')
+  if (!stageCountsAsDeal(cfg.dealStageKey, input.stageKey)) return idle('stage_mismatch')
   if (client.conversionStage !== 'live') return logged('not_live', true, MSG.notLive)
   const booking = input.bookingId ? await io.loadBooking(input.clientId, input.bookingId) : null
   if (input.bookingId && !booking) return logged('booking_missing', false, MSG.failed)
