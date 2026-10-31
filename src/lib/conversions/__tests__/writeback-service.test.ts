@@ -538,7 +538,7 @@ describe('试运行模式', () => {
 })
 
 describe('允许发送的事件名单', () => {
-  it('名单里没有的事件停在试运行，不预检也不发送', async () => {
+  it('名单里没有的事件继续排队，不预检也不发送，不是终态试运行', async () => {
     seed(db, {
       client: { leads_config: { capi_allowed_events: ['Purchase', 'BalancePaid'] } },
       outcome: { outcome_kind: 'lead', amount_minor: null, currency: null },
@@ -546,12 +546,32 @@ describe('允许发送的事件名单', () => {
     const preflight = vi.fn(async () => ({ ok: true, detail: {} }))
     const w = makeWriter({ preflight })
     const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
-    expect(r.status).toBe('dry_run')
+    expect(r.status).toBe('queued')
     expect(r.message).toContain('Lead')
-    expect(r.message).toContain('试运行')
+    expect(r.message).toContain('排队')
+    expect(r.message).not.toContain('试运行')
     expect(w.sendSpy).not.toHaveBeenCalled()
     expect(preflight).not.toHaveBeenCalled()
-    expect(db.tables.me_conversion_writebacks[0].status).toBe('dry_run')
+    const row = db.tables.me_conversion_writebacks[0]
+    expect(row.status).toBe('queued')
+    expect(row.last_error_code).toBeNull()
+    expect(row.payload_preview).toMatchObject({ held: true })
+  })
+
+  it('名单改好之后，还在 7 天内的下一次发送会真的发出去', async () => {
+    seed(db, {
+      client: { leads_config: { capi_allowed_events: ['Purchase'] } },
+      outcome: { outcome_kind: 'lead', amount_minor: null, currency: null },
+    })
+    const w = makeWriter()
+    const first = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(first.status).toBe('queued')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+
+    db.tables.clients[0].leads_config = { capi_allowed_events: ['Purchase', 'Lead'] }
+    const second = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(second.status).toBe('confirmed')
+    expect(w.sendSpy).toHaveBeenCalledTimes(1)
   })
 
   it('名单里有的事件，正式客户照常发送', async () => {
@@ -574,9 +594,10 @@ describe('允许发送的事件名单', () => {
     seed(db, { client: { leads_config: { capi_allowed_events: 'Purchase' } } })
     const w = makeWriter()
     const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
-    expect(r.status).toBe('dry_run')
+    expect(r.status).toBe('queued')
     expect(r.message).toContain('格式不对')
     expect(w.sendSpy).not.toHaveBeenCalled()
+    expect(db.tables.me_conversion_writebacks[0].status).not.toBe('dry_run')
   })
 
   it('还在试运行的客户，事件不在名单里时原因写的是名单，不是普通试运行', async () => {
