@@ -290,6 +290,42 @@ async function loadDeals(db: SupabaseClient, clientId: string, sourceRef: string
   }))
 }
 
+/** A revoked payment must not leave the queue. Same stop the sender used to do inline. */
+export async function closeRevokedUnsentSend(
+  supabase: SupabaseClient,
+  wb: { id: string; status: string; payload_preview?: unknown },
+): Promise<{ status: 'failed_permanent'; message: string; writebackId: string } | null> {
+  if (!paymentRevokedPreview(wb.payload_preview)) return null
+  if (wb.status !== 'queued' && wb.status !== 'failed') return null
+  const { error } = await supabase
+    .from('me_conversion_writebacks')
+    .update({
+      status: 'failed_permanent',
+      last_error: PAYMENT_VOID_STOP_ERROR,
+      last_error_code: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', wb.id)
+    .in('status', ['queued', 'failed'])
+  if (error) throw new Error(`更新发送状态失败：${error.message}`)
+  return { status: 'failed_permanent', message: PAYMENT_VOID_STOP_ERROR, writebackId: wb.id }
+}
+
+/** Fail closed: if the send row cannot be read, do not offer another send. */
+export async function revokedSendBlocksResend(
+  supabase: SupabaseClient,
+  writebackId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('payload_preview')
+    .eq('id', writebackId)
+    .maybeSingle()
+  if (error) return true
+  const row = data as { payload_preview?: unknown } | null
+  return paymentRevokedPreview(row?.payload_preview)
+}
+
 async function loadWritebacks(db: SupabaseClient, outcomeIds: string[]): Promise<Array<DealVoidWriteback & { outcomeId: string }>> {
   if (outcomeIds.length === 0) return []
   const { data, error } = await db.from('me_conversion_writebacks').select('id, outcome_id, status, payload_preview').in('outcome_id', outcomeIds)

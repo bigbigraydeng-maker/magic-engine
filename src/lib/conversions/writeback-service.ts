@@ -31,7 +31,7 @@ import {
   qualifiedLeadHoldReason,
   resolveConversionLead,
 } from './conversion-lead'
-import { PAYMENT_VOID_STOP_ERROR, paymentRevokedPreview } from './crm-deal-void'
+import { closeRevokedUnsentSend, revokedSendBlocksResend } from './crm-deal-void'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
 import { parkUnsentFailure } from './unsent-writeback'
@@ -422,7 +422,7 @@ async function deliverApprovedOutcomeBody(
     payload_preview?: unknown
   }
 
-  const revoked = await stopRevokedSend(supabase, wb)
+  const revoked = await closeRevokedUnsentSend(supabase, wb)
   if (revoked) return revoked
 
   // 已经是终态就到此为止 —— 包括 in_doubt（那一档只能由人来解）。
@@ -688,7 +688,7 @@ export async function resolveDoubt(
   actor: string | null,
   supabase: SupabaseClient,
 ): Promise<{ ok: boolean; status: WritebackStatus; message: string }> {
-  if (resolution === 'resend' && await resendBlockedByRevoke(supabase, writebackId)) {
+  if (resolution === 'resend' && await revokedSendBlocksResend(supabase, writebackId)) {
     return {
       ok: false,
       status: 'in_doubt',
@@ -722,32 +722,6 @@ export async function resolveDoubt(
  * 条件更新：只有当前状态在 `from` 里才改。
  * 返回是否真的改到了（`false` = 别人抢先了，本次放弃）。
  */
-const REVOKED_UNSENT = PAYMENT_VOID_STOP_ERROR
-
-async function stopRevokedSend(
-  supabase: SupabaseClient,
-  wb: { id: string; status: string; payload_preview?: unknown },
-): Promise<SendOutcomeResult | null> {
-  if (!paymentRevokedPreview(wb.payload_preview)) return null
-  if (wb.status !== 'queued' && wb.status !== 'failed') return null
-  await casUpdate(supabase, wb.id, ['queued', 'failed'], {
-    status: 'failed_permanent',
-    last_error: REVOKED_UNSENT,
-    last_error_code: null,
-  })
-  return { status: 'failed_permanent', message: REVOKED_UNSENT, writebackId: wb.id }
-}
-
-async function resendBlockedByRevoke(supabase: SupabaseClient, writebackId: string): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('me_conversion_writebacks')
-    .select('payload_preview')
-    .eq('id', writebackId)
-    .maybeSingle()
-  if (error) return true
-  return paymentRevokedPreview((data as { payload_preview?: unknown } | null)?.payload_preview)
-}
-
 async function casUpdate(
   supabase: SupabaseClient,
   writebackId: string,
