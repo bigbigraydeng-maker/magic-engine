@@ -124,7 +124,7 @@ function CapiForm(props: {
       <StageField
         id={`capi-qualified-${props.clientId}`}
         label="哪一步算合格咨询"
-        hint="只是先记下来。现在还不会因为走到这一步就发给广告平台。"
+        hint="员工亲手标成这一步，和系统读往来记录自动标成这一步，都算合格咨询。现在还不会因为走到这一步就发给广告平台。"
         value={draft.qualifiedStage}
         stages={props.stages}
         stagesLoaded={props.stagesLoaded}
