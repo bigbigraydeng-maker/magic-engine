@@ -554,7 +554,7 @@ type DealCompanionRow = {
   order_ref: string | null
 }
 
-/** Purchase already recorded, but the lead-stage send row was never created. Pull, not a log line. */
+/** Purchase recorded, but the lead-stage send is missing, queued, or failed for a reason other than auth. */
 async function pushMissingDealStageCompanions(
   supabase: SupabaseClient,
   items: ManualItem[],
@@ -565,11 +565,11 @@ async function pushMissingDealStageCompanions(
   if (gates.length === 0) return
   const deals = await loadDealsAwaitingCompanion(supabase, now, gates)
   if (deals.length === 0) return
-  const sent = await loadCompanionEventIds(supabase, deals.map((deal) => dealStageEventId(deal.id)))
+  const settled = await loadSettledCompanionEventIds(supabase, deals.map((deal) => dealStageEventId(deal.id)))
   let added = 0
   for (const deal of deals) {
     if (added >= MAX_ITEMS) break
-    if (sent.has(dealStageEventId(deal.id))) continue
+    if (settled.has(dealStageEventId(deal.id))) continue
     if (!dealStillExpectsCompanion(deal, gates)) continue
     items.push(missingCompanionItem(deal, clientNames))
     added += 1
@@ -619,16 +619,31 @@ function dealStillExpectsCompanion(row: DealCompanionRow, gates: ClientGate[]): 
   return gateOpensDealStage(gate)
 }
 
-async function loadCompanionEventIds(supabase: SupabaseClient, eventIds: string[]): Promise<Set<string>> {
+type CompanionWriteback = {
+  event_id?: string | null
+  status?: string
+  last_error_code?: string | null
+  payload_preview?: { held?: boolean } | null
+}
+
+/** Ordinary queue and non-auth failures still need a person. Auth and allow-list holds do not. */
+function stageSendNeedsPerson(row: CompanionWriteback): boolean {
+  if (row.payload_preview?.held === true) return false
+  if (row.last_error_code === 'auth') return false
+  return row.status === 'queued' || row.status === 'failed'
+}
+
+async function loadSettledCompanionEventIds(supabase: SupabaseClient, eventIds: string[]): Promise<Set<string>> {
   const { data, error } = await supabase
     .from('me_conversion_writebacks')
-    .select('event_id')
+    .select('event_id, status, last_error_code, payload_preview')
     .in('event_id', eventIds)
     .limit(FILTERED_SCAN)
   if (error) throw new Error(`成交下一步发送记录查询失败: ${error.message}`)
   const found = new Set<string>()
-  for (const row of (data ?? []) as Array<{ event_id?: string | null }>) {
-    if (row.event_id) found.add(row.event_id)
+  for (const row of (data ?? []) as CompanionWriteback[]) {
+    if (!row.event_id || stageSendNeedsPerson(row)) continue
+    found.add(row.event_id)
   }
   return found
 }
