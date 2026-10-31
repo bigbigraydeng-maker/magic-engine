@@ -274,8 +274,10 @@ export function cnNumeralsToArabic(s: string): string {
 /**
  * 英文月份只认完整月份和常见缩写（jan/january、sep/sept/september）。
  * 不以月份开头就算的普通词排除在外：maybe、decided、mark、separate。
- * may 单独出现多半是情态动词（he may call），不能单独证明 5 月；
- * 要有月份语境（in May、May 2027、15 May、early May、March to May）。
+ * may 单独出现多半是情态动词（he may call、they may come、maybe），不能单独证明 5 月；
+ * 要有月份语境（in May、May 2027、15 May、early May、early-May、end May、end of May、
+ * this May for the Japan trip、March to May）。
+ * this/next/last May 后面如果是动词（this may come）仍不算月份。
  */
 const MONTH_FORMS: ReadonlyArray<{ month: string; pattern: string }> = [
   { month: '1', pattern: 'jan(?:uary)?' },
@@ -295,9 +297,13 @@ const OTHER_MONTH = MONTH_FORMS.map((m) => m.pattern).join('|')
 
 const MAY_AS_MONTH_RE = new RegExp(
   [
-    String.raw`\b(?:in|early|late|mid|during|by|until|till|from|of|on|for|through|thru|before|after|around|throughout)\s+may\b`,
-    String.raw`\bmid-may\b`,
-    String.raw`\b(?:this|next|last)\s+may\b(?=\s*(?:$|[\d,.;:，。]|(?:and|or|to|through|until)\b))`,
+    String.raw`\b(?:in|during|by|until|till|from|of|on|for|through|thru|before|after|around|throughout)\s+may\b`,
+    // early/late/mid/end 与 May 之间可以是空格或连字符（early May、late-May、end May）。
+    // end of May 由上一支的 of May 覆盖。
+    String.raw`\b(?:early|late|mid|end)[-\s]+may\b`,
+    // this/next/last May 后面可以收束，或接 for（this May for the Japan trip）。
+    // 不接动词：this may come 仍是情态动词。
+    String.raw`\b(?:this|next|last)\s+may\b(?=\s*(?:$|[\d,.;:，。]|(?:and|or|to|through|until|for)\b))`,
     String.raw`\bmay\s+\d{1,4}\b`,
     String.raw`\b\d{1,2}(?:st|nd|rd|th)?\s+may\b`,
     String.raw`\b(?:${OTHER_MONTH})\s*(?:,|and|&|-|–|—|to|through|/)\s*may\b`,
@@ -446,7 +452,7 @@ function includesLoose(hay: string, needle: string): boolean {
 // ── 下一步 / 回电：原话里得真有这类说法 ──────────────────────────────────
 
 const NEXT_STEP_CUE_RE =
-  /下周|明天|后天|今天|今晚|周[一二三四五六日天]|星期[一二三四五六日天]|礼拜|\d+\s*[月号日点]|[点:：]\d|再打|再联系|回电|回拨|跟进|稍后|过几天|(?:\d+|[零〇一二两三四五六七八九十几]{1,3})天后再?|早上|上午|中午|下午|晚上|傍晚|凌晨|明早|明晚|今早|今夜|(?<![有这那哪差])[零〇一二两三四五六七八九十]{1,3}点|call\s*(him|her|them|back)|callback|follow\s*up|tomorrow|tonight|next\s*week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\b\d{1,2}\s*(am|pm)\b|\d{1,2}[:.]\d{2}/i
+  /下周|明天|后天|今天|今晚|周[一二三四五六日天]|星期[一二三四五六日天]|礼拜|\d+\s*[月号日点]|[点:：]\d|再打|再联系|回电|回拨|跟进|稍后|过几天|(?:\d+|[零〇一二两三四五六七八九十几]{1,3})\s*天后再?|早上|上午|中午|下午|晚上|傍晚|凌晨|明早|明晚|今早|今夜|(?<![有这那哪差])[零〇一二两三四五六七八九十]{1,3}点|call\s*(him|her|them|back)|callback|follow\s*up|tomorrow|tonight|next\s*week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\b\d{1,2}\s*(am|pm)\b|\d{1,2}[:.]\d{2}/i
 
 /** 出行时间：原话里要有时间性的词、数字，或英文月份（月份表见 englishMonthNumbers）。 */
 const TIME_CUE_RE =

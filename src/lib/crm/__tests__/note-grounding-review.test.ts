@@ -338,3 +338,99 @@ describe('Bugbot 9639f8f：月份只认真词、预订要有订的证据、N天�
     expect(segmentContact(c, new Date('2026-11-03T02:00:00.000Z')).segment).toBe('callback_due')
   })
 })
+
+describe('Bugbot ddaa453：May 的月份语境、数字和「天后」之间可以有空格', () => {
+  const keepTravel = (note: string, travel: string) =>
+    groundNoteParse(note, { ...BASE, travel_window: travel, summary: note }).travel_window
+
+  // end of May（靠 of May）和 mid-May 在 ddaa453 已经认得出，这里一并钉住，避免修 lookahead 时退回去。
+  it.each([
+    'this May for the Japan trip',
+    'next May for the family trip',
+    'last May for the reunion',
+    'end May',
+    'end of May',
+    'late-May',
+    'early-May',
+    'mid-May',
+    'end-May',
+  ])('「%s」算 5 月，出行时间留下', (note) => {
+    expect(keepTravel(note, 'May')).toBe('May')
+    expect(keepTravel(note, '5月')).toBe('5月')
+  })
+
+  it.each([
+    'they may come',
+    'maybe',
+    'maybe later',
+    'this may come',
+    'this may be the one',
+    'he may call next week',
+  ])('「%s」仍是情态动词，不能证明 5 月', (note) => {
+    expect(keepTravel(note, 'May')).toBeNull()
+    expect(keepTravel(note, '5月')).toBeNull()
+  })
+
+  it.each([
+    '3 天后联系',
+    '3  天后联系',
+    '3\u3000天后联系',
+    '12 天后',
+    '三 天后联系',
+    '五 天后再说',
+    '三十 天后',
+    '两 天后',
+  ])('「%s」保留回电时间', (note) => {
+    const at = '2026-11-03T01:00:00.000Z'
+    const g = groundNoteParse(note, {
+      ...BASE,
+      callback_at: at,
+      mentioned_next_step: true,
+      summary: note,
+    })
+    expect(g.callback_at).toBe(at)
+    expect(g.mentioned_next_step).toBe(true)
+  })
+
+  it('「3 天后联系」到点后进 callback_due', () => {
+    const at = '2026-11-03T01:00:00.000Z'
+    const parsed = groundNoteParse('3 天后联系', {
+      ...BASE,
+      callback_at: at,
+      mentioned_next_step: true,
+      summary: '3 天后联系',
+    })
+    expect(parsed.callback_at).toBe(at)
+    const c: ContactLike = {
+      id: 'c',
+      displayName: 'X',
+      doNotContact: false,
+      hasPhone: true,
+      touchpoints: [
+        {
+          channel: 'phone',
+          direction: 'outbound',
+          occurredAt: '2026-10-31T02:00:00.000Z',
+          source: 'me_manual',
+          outcome: 'callback_set',
+          callbackAt: parsed.callback_at,
+        },
+      ],
+    }
+    expect(segmentContact(c, new Date('2026-11-03T02:00:00.000Z')).segment).toBe('callback_due')
+  })
+
+  it('只说住了几天、没有「后再」，仍然清掉回电', () => {
+    const at = '2026-11-03T01:00:00.000Z'
+    for (const note of ['聊了3 天', '住了三 天']) {
+      const g = groundNoteParse(note, {
+        ...BASE,
+        callback_at: at,
+        mentioned_next_step: true,
+        summary: note,
+      })
+      expect(g.callback_at).toBeNull()
+      expect(g.mentioned_next_step).toBe(false)
+    }
+  })
+})
