@@ -23,6 +23,10 @@ function fakeDb(tables: Record<string, Row[]>): { db: SupabaseClient; orders: st
               filters.push((row) => values.includes(String(row[column])))
               return chain
             },
+            neq(column: string, value: string) {
+              filters.push((row) => row[column] !== value)
+              return chain
+            },
             order(column: string) {
               orders.push(`${table}.${column}`)
               return chain
@@ -106,6 +110,37 @@ describe('readPartyHint', () => {
       telephony_call_analyses: [{
         id: 'call-1',
         client_id: CLIENT,
+        facts: [{ key: 'party_size', value: '4' }],
+      }],
+    })
+    expect(await readPartyHint(db, CLIENT, CONTACT)).toEqual({ size: 4, source: 'call' })
+  })
+
+  it('ignores a call analysis a person already rejected', async () => {
+    const { db } = fakeDb({
+      contact_touchpoints: [
+        touch({ channel: 'phone', direction: 'inbound', metadata: { call_analysis_id: 'call-rejected' } }),
+        touch({ summary: '3 pax' }),
+      ],
+      telephony_call_analyses: [{
+        id: 'call-rejected',
+        client_id: CLIENT,
+        review_status: 'rejected',
+        facts: [{ key: 'party_size', value: '9' }],
+      }],
+    })
+    expect(await readPartyHint(db, CLIENT, CONTACT)).toEqual({ size: 3, source: 'guest_message' })
+  })
+
+  it('still reads a call analysis that has not been reviewed yet', async () => {
+    const { db } = fakeDb({
+      contact_touchpoints: [
+        touch({ channel: 'phone', direction: 'inbound', metadata: { call_analysis_id: 'call-pending' } }),
+      ],
+      telephony_call_analyses: [{
+        id: 'call-pending',
+        client_id: CLIENT,
+        review_status: 'pending_review',
         facts: [{ key: 'party_size', value: '4' }],
       }],
     })
