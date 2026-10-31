@@ -41,6 +41,10 @@ export interface ContactRow {
    * 列表只画 `nextAction.line`；`stage` / `segment` 仍在，抽屉改阶段和筛选还要用。
    */
   nextAction: NextAction
+  /** 今天已经动过他了（记过笔记 / 打过电话 / 发过信）—— 卡片就地变灰打勾，位置不动。缺省 = 没有这个信息。 */
+  handled?: boolean
+  /** 已处理时的一句人话（例如「今天联系过了，他还没回」）。 */
+  handledWhy?: string | null
   /** AI 对这位客人的摘要；分段列表「该做什么」列有就显示它，没有就显示规则那句。 */
   aiSummary?: string | null
   /** 最新一张 AI 摘要的意向；null = 没有摘要。 */

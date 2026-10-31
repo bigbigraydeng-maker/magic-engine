@@ -68,7 +68,17 @@
  */
 
 import type { ContactLike, IndustryPlaybook, SegmentResult, TouchpointLike } from './segments'
-import { TOURISM_PLAYBOOK, compareForWorklist, reachableChannel, segmentContact } from './segments'
+import {
+  TOURISM_PLAYBOOK,
+  compareForWorklist,
+  engagementFromMetadata,
+  isFailedReach,
+  isUnansweredCall,
+  reachableChannel,
+  segmentContact,
+} from './segments'
+import { isAutomatedTouch } from './automated-touch'
+import { localDay } from './follow-up-marks'
 
 /**
  * 冻结版 + 两个**永远不该被冻结**的显示值。
@@ -199,12 +209,32 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
   // 上而看起来一致，只有将来接了第二个行业、真的传了非默认 playbook 时，
   // 漏传的那一处才会悄悄裂开，而且不会有任何测试提醒（见下面专门钉住这条的用例）。
   const playbook = opts.playbook ?? TOURISM_PLAYBOOK
-  const frozen = segmentContact(withoutOurActionsSince(contact, opts.dayStartMs), now, playbook)
+  const frozenMorning = segmentContact(withoutOurActionsSince(contact, opts.dayStartMs), now, playbook)
   const live = segmentContact(contact, now, playbook)
 
-  // 今天开工那一刻他该不该在名单上。**只看冻结版** —— 我们今天做了什么，
+  /**
+   * 🔴 **我们自己的通话也会把人抬进「今天要联系」**（魏征复审 PR #3417 P1-2）。
+   *
+   * 本文件原来假定「比今早更紧急」只可能是客人造成的。规则 6.5（10-29）打破了它：
+   * 早上还在「先放着」的老客人，我们今天打通了一通电话，系统把他抬成「刚聊过，还没记下一步」
+   * （hot）。员工记完笔记，提醒按设计消失 —— 但如果位置退回早上的「先放着」，
+   * 这个人又从名单里掉了，正是 10-30 CTS 员工「记了找不到」的同一件事。
+   *
+   * 所以位置基线 = 「只摘掉今天的员工笔记、保留今天的通话」那一版（通话之后的提醒态）和早上冻结版
+   * 里更靠前的那个。只在提醒态（afterCall）更靠前时才取它；其他情形不变。
+   */
+  // 今天没人手记过笔记就没有「摘掉笔记」这一版可算，省一次分段（也保持 playbook 只被调两次）。
+  const callHeld = hasStaffNoteSince(contact, opts.dayStartMs)
+    ? segmentContact(withoutStaffNotesSince(contact, opts.dayStartMs), now, playbook)
+    : null
+  const frozen =
+    callHeld !== null && callHeld.afterCall === true && callHeld.priority < frozenMorning.priority
+      ? callHeld
+      : frozenMorning
+
+  // 今天开工那一刻他该不该在名单上。**只看早上的冻结版** —— 我们今天做了什么，
   // 不能决定他今天出不出现，否则就又回到「做完就消失」。
-  const onList = frozen.temperature === 'hot' || frozen.temperature === 'warm'
+  const onList = frozenMorning.temperature === 'hot' || frozenMorning.temperature === 'warm'
 
   // 实时状态说他已经下名单了（标了不买 / 推迟了 / 成交了）。
   // 这一类不写触点，靠 touchedToday 抓不到。
@@ -226,6 +256,28 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
   // 「他还欠我一次动作吗」—— 这一条决定灰不灰，**不能拿 escalated 代替**。
   const stillNeedsMe = needsMeAgain(contact, live, now, opts.dayStartMs)
 
+  const placed = escalated ? live : withLiveReach(frozen, live, contact)
+  // 通话打完、员工还没记笔记：「记下一步」提醒还在，卡片就不能是灰的（还欠一笔）。
+  // 🔴 判据是「最近一通接通的电话**之后**有没有员工笔记」，不是「今天有没有任何笔记」
+  // （子牙复审 PR #3417 (a)）：早上记了「没人接」、下午电话接通了却没记，早上那条不能把提醒吞掉。
+  const lastCallMs = lastConnectedCallMs(contact)
+  const noteAfterCall = hasStaffNoteSince(contact, Math.max(opts.dayStartMs, lastCallMs + 1))
+  const reminderPending = placed.afterCall === true && !noteAfterCall
+  const handled = !stillNeedsMe && (opts.touchedToday || droppedOff) && !reminderPending
+  // 已记过笔记的卡片不能还挂着「刚通完电话，还没记下一步」（魏征复审 P2-b）：提醒撤掉，换成说明今天做了什么的话。
+  // 「刚」只在通话 3 小时内才说（通话是几天前的话，写「刚」是错的）。
+  const justCalled = lastCallMs > 0 && now.getTime() - lastCallMs <= JUST_CALLED_MS
+  // 接通之后又记了笔记：客人已经在电话里说过话。「他还没回」是另一件事（发出去没人接）。
+  const loggedAfterCall = placed.afterCall === true && noteAfterCall
+  const loggedReason = loggedAfterCall
+    ? justCalled
+      ? '刚通完电话，今天已记录'
+      : '通完电话，今天已记录'
+    : null
+  const seg: SegmentResult = loggedReason
+    ? { ...placed, afterCall: false, reason: loggedReason }
+    : placed
+
   return {
     /**
      * 位置按冻结版排，**但「约好几点回电」取实时那个**。
@@ -244,7 +296,7 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
      * 方向、时间、通话结果、出行意向**全部**对冻结版可见 —— 冻结当场失效。
      * 真正需要逃出冻结的只有 `dueAt` 这一个显示值。
      */
-    seg: escalated ? live : withLiveReach(frozen, live, contact),
+    seg,
     onList,
     /**
      * 🔴 **升级过的人绝不能算「已处理」。**
@@ -269,7 +321,7 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
      *
      * 所以这里直说那件事本身：**我们今天最后一次出手之后，他又动了没有。**
      */
-    handled: !stillNeedsMe && (opts.touchedToday || droppedOff),
+    handled,
     /**
      * 具体动作优先于泛泛的「联系过了」——「聊过了，明确没兴趣」信息量大得多。
      *
@@ -278,17 +330,98 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
      *     没有它，卡片上一个绿勾加一句「号码是坏的」，读起来像「✓ 打不通」是个成就
      *   · 「他还没回」补上后半句 —— 销售真正想知道的是他回了没有。
      *     这句是**算出来的事实**：`handled` 只在 `!stillNeedsMe` 时为真，
-     *     也就是我们出手之后他确实没再动过
+     *     也就是我们出手之后他确实没再动过。
+     *     接通后又记了笔记不是「没回」—— 灰勾和「先别打」必须跟卡片那句
+     *     「刚通完电话，今天已记录」用同一句话，否则一边说聊过了、一边说没回。
      */
     handledWhy: stillNeedsMe
       ? null
       : droppedOff
         ? `标了：${live.reason}`
-        : opts.touchedToday
-          ? '今天联系过了，他还没回'
-          : null,
+        : loggedReason
+          ? loggedReason
+          : opts.touchedToday
+            ? '今天联系过了，他还没回'
+            : null,
     handledKind: stillNeedsMe ? null : droppedOff ? 'closed' : opts.touchedToday ? 'followed' : null,
   }
+}
+
+/**
+ * 今天（按客户所在地）真人联系过的人。「今天要联系」页（today 路由）和「全部客人」
+ * 的两张名单（view=priority）共用这一份判据 —— 两处各写一套，同一个人会在一页灰、
+ * 另一页不灰，正是 2026-10-30 CTS 员工「记了笔记却在名单里找不到」的根源之一。
+ *
+ * 排除（都是真事故，原因见 today 路由当年的注释）：群发 / 机器发的、打开点击、
+ * 推迟 / 取消推迟、拨到空号、电话系统记的没人接。
+ */
+export function contactsTouchedToday(
+  touches: ReadonlyArray<{
+    contact_id: string
+    source: string | null
+    direction: 'inbound' | 'outbound'
+    occurred_at: string
+    metadata: Record<string, unknown> | null
+  }>,
+  now: Date,
+  timeZone: string,
+): Set<string> {
+  const todayLocal = localDay(now.toISOString(), timeZone)
+  return new Set(
+    touches
+      .filter(
+        (t) =>
+          t.direction === 'outbound' &&
+          !isAutomatedTouch(t.source, t.metadata) &&
+          !engagementFromMetadata(t.metadata) &&
+          t.metadata?.action !== 'snooze' &&
+          t.metadata?.action !== 'unsnooze' &&
+          !isFailedReach(t.metadata?.outcome as string | undefined) &&
+          !isUnansweredCall(t.metadata) &&
+          localDay(t.occurred_at, timeZone) === todayLocal,
+      )
+      .map((t) => t.contact_id),
+  )
+}
+
+/**
+ * 只摘掉今天员工手记的笔记（保留今天的真通话）。
+ * 用来还原「通话刚打完、笔记还没记」那一刻的位置，见 `dayRow` 的 callHeld。
+ */
+function withoutStaffNotesSince(contact: ContactLike, sinceMs: number): ContactLike {
+  return {
+    ...contact,
+    touchpoints: contact.touchpoints.filter(
+      (t) => !(t.source === 'me_manual' && t.direction === 'outbound' && tsOf(t.occurredAt) >= sinceMs),
+    ),
+  }
+}
+
+/** 「刚」通话的时间窗：与列表排序里「刚聊过」同一个 3 小时。 */
+const JUST_CALLED_MS = 3 * 60 * 60 * 1000
+
+/** 最近一通真正接通的人打的电话（电话系统记的 spoke，不含员工手记 / 机器外呼）的时间；没有返回 0。 */
+function lastConnectedCallMs(contact: ContactLike): number {
+  return Math.max(
+    0,
+    ...contact.touchpoints
+      .filter(
+        (t) =>
+          t.channel === 'phone' &&
+          t.direction === 'outbound' &&
+          !t.automated &&
+          t.source !== 'me_manual' &&
+          t.outcome === 'spoke',
+      )
+      .map((t) => tsOf(t.occurredAt)),
+  )
+}
+
+/** 今天员工有没有手记过一笔（推迟 / 取消推迟那种按钮痕迹不算）。 */
+function hasStaffNoteSince(contact: ContactLike, sinceMs: number): boolean {
+  return contact.touchpoints.some(
+    (t) => t.source === 'me_manual' && t.direction === 'outbound' && !t.action && tsOf(t.occurredAt) >= sinceMs,
+  )
 }
 
 /** 时间读不出来就当没有 —— 不猜。 */

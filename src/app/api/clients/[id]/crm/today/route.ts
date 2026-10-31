@@ -28,16 +28,15 @@ import {
   engagementFromMetadata,
   callStanceFromMetadata,
   isPhoneVerdict,
-  isFailedReach,
-  isUnansweredCall,
   latestIntentVerdict,
 } from '@/lib/crm/segments'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { isDoNotContact, withoutClearedDnc } from '@/lib/crm/dnc'
 import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { contactCardTitle } from '@/lib/crm/display-name'
-import { followUpMarks, localDay } from '@/lib/crm/follow-up-marks'
-import { dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
+import { followUpMarks } from '@/lib/crm/follow-up-marks'
+import { contactsTouchedToday, dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
+import { loadStageSuppressedTodayIds } from '@/lib/crm/day-stage-events'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import {
@@ -371,25 +370,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
    *    真推迟的那一头不受影响：live 版看得见 `snooze_until`，
    *    `dayRow` 靠 `droppedOff` 照样把他标成已处理（理由写「标了：先放着…」）。
    */
-  const todayLocal = localDay(now.toISOString(), timeZone)
-  const touchedTodayIds = new Set(
-    touches
-      .filter(
-        (t) =>
-          t.direction === 'outbound' &&
-          !isAutomatedTouch(t.source, t.metadata) &&
-          !engagementFromMetadata(t.metadata) &&
-          t.metadata?.action !== 'snooze' &&
-          t.metadata?.action !== 'unsnooze' &&
-          // 拨到一个空号不算「我们出手了」—— 客人什么都没收到，
-          // 该走的备用渠道一次都还没走。判据跟 day-list 共用同一个函数。
-          !isFailedReach(t.metadata?.outcome as string | undefined) &&
-          // 电话系统记录的「没人接」同样不算出手（PM 2026-10-12）。
-          !isUnansweredCall(t.metadata) &&
-          localDay(t.occurred_at, timeZone) === todayLocal,
-      )
-      .map((t) => t.contact_id),
-  )
+  const touchedTodayIds = contactsTouchedToday(touches, now, timeZone)
 
   /**
    * 今天**从「还在名单上」被推进到「不再联系」**的那些人。
@@ -406,29 +387,12 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
    * 一天内改了多次就看**最早那一条**的 from_stage，那才是今天早上的状态。
    * 读不到就当没有：最坏结果是人照旧当天消失（改动前的行为），不会多打电话。
    */
-  const stageSuppressedTodayIds = new Set<string>()
-  /** 已经看过今天第一条变更的人 —— 后面的都不看了。 */
-  const seenStageEvent = new Set<string>()
-  try {
-    const { data: events } = await supabaseAdmin
-      .from('contact_stage_events')
-      .select('contact_id, from_stage, created_at')
-      .eq('client_id', clientId)
-      .gte('created_at', new Date(localDayStartMs(now, timeZone)).toISOString())
-      .order('created_at', { ascending: true })
-
-    for (const e of events ?? []) {
-      const cid = e.contact_id as string
-      // 只认今天最早那一条 —— 后面的 from_stage 已经是今天改过之后的状态了。
-      if (seenStageEvent.has(cid)) continue
-      seenStageEvent.add(cid)
-      const from = e.from_stage as string | null
-      const wasOnList = !from || !(stageMeta.get(from)?.suppressed ?? false)
-      if (wasOnList) stageSuppressedTodayIds.add(cid)
-    }
-  } catch (err) {
-    console.error('[crm/today] 读今天的阶段变更失败，按「没改过」算:', err)
-  }
+  // 读取逻辑抽成共用函数，「全部客人」页同用一份（魏征复审 PR #3417 P2-c）。
+  const stageSuppressedTodayIds = await loadStageSuppressedTodayIds(
+    clientId,
+    localDayStartMs(now, timeZone),
+    (k) => stageMeta.get(k)?.suppressed ?? false,
+  )
 
   /**
    * 今天这份名单**一天之内不变**（判据见 lib/crm/day-list）。
