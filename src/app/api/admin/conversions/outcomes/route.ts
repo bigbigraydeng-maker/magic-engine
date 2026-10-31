@@ -205,7 +205,7 @@ export async function GET(request: Request) {
     if (error) {
       return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
     }
-    const outcomes = data ? await markOpenCompanions(clientId, [data as ListedOutcome]) : []
+    const outcomes = data ? await markOpenCompanions(clientId, [asListed(data)]) : []
     return NextResponse.json({ outcomes, count: outcomes.length })
   }
 
@@ -253,7 +253,15 @@ type ListedWriteback = {
   event_id?: string | null
   status?: string
   last_error_code?: string | null
-  payload_preview?: { held?: boolean } | null
+  payload_preview?: { held?: boolean; paymentRevoked?: boolean } | null
+}
+
+function asListed(value: unknown): ListedOutcome {
+  return value as unknown as ListedOutcome
+}
+
+function asListedRows(value: unknown): ListedOutcome[] {
+  return (value ?? []) as unknown as ListedOutcome[]
 }
 
 type ListedOutcome = {
@@ -294,7 +302,7 @@ async function loadQualifiedPage(clientId: string, columns: string, offset: numb
     .order('occurred_at', { ascending: false })
     .range(offset, offset + RECOVERY_PAGE - 1)
   if (error) return { rows: [], error: `查询失败: ${error.message}` }
-  return { rows: (data ?? []) as ListedOutcome[], error: null }
+  return { rows: asListedRows(data), error: null }
 }
 
 function qualifiedStillOpen(row: ListedOutcome): boolean {
@@ -307,7 +315,9 @@ function qualifiedStillOpen(row: ListedOutcome): boolean {
 }
 
 async function listUnsentDeals(clientId: string, limit: number, columns: string) {
-  const { data, error } = await supabaseAdmin
+  const blocked = await idsWithPrimarySend(clientId)
+  if (!blocked.ok) return NextResponse.json({ error: blocked.error }, { status: 500 })
+  let query = supabaseAdmin
     .from('me_sale_outcomes')
     .select(columns)
     .eq('client_id', clientId)
@@ -316,19 +326,33 @@ async function listUnsentDeals(clientId: string, limit: number, columns: string)
     .is('redacted_at', null)
     .gte('occurred_at', windowStart())
     .order('occurred_at', { ascending: false })
-    .limit(limit)
+  if (blocked.ids.length > 0) query = query.not('id', 'in', `(${blocked.ids.join(',')})`)
+  const { data, error } = await query.limit(limit)
   if (error) return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
-  const outcomes = ((data ?? []) as ListedOutcome[])
-    .filter(primaryMissing)
-    .map((row) => ({ ...row, primary_missing: true }))
+  const outcomes = asListedRows(data).map((row) => ({ ...row, primary_missing: true }))
   return NextResponse.json({ outcomes, count: outcomes.length })
 }
 
-function primaryMissing(row: ListedOutcome): boolean {
-  if (row.outcome_kind !== 'purchase' && row.outcome_kind !== 'balance') return false
-  if (row.redacted_at) return false
-  const writes = row.me_conversion_writebacks ?? []
-  return !writes.some((wb) => isPrimaryWriteback(row.id, wb))
+/** Outcome ids that already have the original purchase or balance send row. */
+async function idsWithPrimarySend(
+  clientId: string,
+): Promise<{ ok: true; ids: string[] } | { ok: false; error: string }> {
+  const { data, error } = await supabaseAdmin
+    .from('me_conversion_writebacks')
+    .select('outcome_id, event_id, me_sale_outcomes!inner(client_id, review_status, outcome_kind, redacted_at, occurred_at)')
+    .eq('me_sale_outcomes.client_id', clientId)
+    .eq('me_sale_outcomes.review_status', 'approved')
+    .in('me_sale_outcomes.outcome_kind', ['purchase', 'balance'])
+    .is('me_sale_outcomes.redacted_at', null)
+    .gte('me_sale_outcomes.occurred_at', windowStart())
+    .limit(5000)
+  if (error) return { ok: false, error: `查询失败: ${error.message}` }
+  const ids = new Set<string>()
+  for (const row of (data ?? []) as unknown as Array<{ outcome_id?: string; event_id?: string | null }>) {
+    if (!row.outcome_id) continue
+    if (isPrimaryWriteback(row.outcome_id, { event_id: row.event_id ?? null })) ids.add(row.outcome_id)
+  }
+  return { ok: true, ids: [...ids] }
 }
 
 function isPrimaryWriteback(outcomeId: string, wb: ListedWriteback): boolean {
@@ -362,7 +386,7 @@ async function loadCompanionPage(clientId: string, columns: string, offset: numb
     .order('occurred_at', { ascending: false })
     .range(offset, offset + RECOVERY_PAGE - 1)
   if (error) return { rows: [], error: `查询失败: ${error.message}` }
-  return { rows: (data ?? []) as ListedOutcome[], error: null }
+  return { rows: asListedRows(data), error: null }
 }
 
 type PageResult = { rows: ListedOutcome[]; error: string | null }
@@ -405,6 +429,7 @@ function companionStillOpen(row: ListedOutcome, leadsConfig: unknown): boolean {
   if (row.outcome_kind !== 'purchase' && row.outcome_kind !== 'balance') return false
   if (row.review_status && row.review_status !== 'approved') return false
   if (row.redacted_at) return false
+  if ((row.me_conversion_writebacks ?? []).some((wb) => wb.payload_preview?.paymentRevoked === true)) return false
   if (!dealStageEventName(leadsConfig, legalMetaLeadId(row.meta_lead_id))) return false
   const companion = (row.me_conversion_writebacks ?? []).find((wb) => wb.event_id === dealStageEventId(row.id))
   if (!companion) return true

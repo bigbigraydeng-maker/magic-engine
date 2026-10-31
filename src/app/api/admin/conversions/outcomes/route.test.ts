@@ -25,7 +25,7 @@ type Writeback = {
   status: string
   event_id?: string | null
   last_error_code?: string | null
-  payload_preview?: { held?: boolean } | null
+  payload_preview?: { held?: boolean; paymentRevoked?: boolean } | null
 }
 type Row = {
   id: string
@@ -45,31 +45,82 @@ function held(status = 'queued'): Writeback[] {
   return [{ status, payload_preview: { held: true } }]
 }
 
-function matches(row: Row, op: string, col: string, val: unknown): boolean {
-  if (op === 'eq') return row[col as keyof Row] === val
-  if (op === 'in' && col === 'outcome_kind') return (val as string[]).includes(row.outcome_kind)
+type WritebackLookup = {
+  outcome_id: string
+  event_id: string | null
+  me_sale_outcomes: {
+    client_id: string
+    review_status: string
+    outcome_kind: string
+    redacted_at: string | null
+    occurred_at: string
+  }
+}
+
+type Listed = Row | WritebackLookup
+
+function cell(row: Listed, col: string): unknown {
+  let cur: unknown = row
+  for (const part of col.split('.')) {
+    if (!cur || typeof cur !== 'object') return undefined
+    cur = (cur as Record<string, unknown>)[part]
+  }
+  return cur
+}
+
+function matches(row: Listed, op: string, col: string, val: unknown): boolean {
+  if (op === 'eq') return cell(row, col) === val
+  if (op === 'in' && (col === 'outcome_kind' || col.endsWith('.outcome_kind'))) {
+    return (val as string[]).includes(String(cell(row, col)))
+  }
   if (op === 'in' && col === 'me_conversion_writebacks.status') {
-    return (row.me_conversion_writebacks ?? []).some((w) => (val as string[]).includes(w.status))
+    return writebacksOf(row).some((w) => (val as string[]).includes(w.status))
   }
   if (op === 'contains') {
-    return (row.me_conversion_writebacks ?? []).some((w) => w.payload_preview?.held === true)
+    return writebacksOf(row).some((w) => w.payload_preview?.held === true)
   }
-  if (op === 'like') return String((row as Record<string, unknown>)[col] ?? '').startsWith(String(val).replace(/%$/, ''))
-  if (op === 'gte') return String((row as Record<string, unknown>)[col] ?? '') >= String(val)
-  if (op === 'is') return ((row as Record<string, unknown>)[col] ?? null) === val
-  if (op === 'not') return ((row as Record<string, unknown>)[col] ?? null) !== val
+  if (op === 'like') return String(cell(row, col) ?? '').startsWith(String(val).replace(/%$/, ''))
+  if (op === 'gte') return String(cell(row, col) ?? '') >= String(val)
+  if (op === 'is') return (cell(row, col) ?? null) === val
+  if (op === 'not') return (cell(row, col) ?? null) !== val
+  if (op === 'not-in') return !(val as string[]).includes(String(cell(row, col) ?? ''))
   return false
 }
 
+function writebacksOf(row: Listed): Writeback[] {
+  return 'me_conversion_writebacks' in row ? row.me_conversion_writebacks ?? [] : []
+}
+
+function writebackRows(): WritebackLookup[] {
+  const out: WritebackLookup[] = []
+  for (const outcome of rows) {
+    for (const wb of outcome.me_conversion_writebacks ?? []) {
+      out.push({
+        outcome_id: outcome.id,
+        event_id: wb.event_id ?? null,
+        me_sale_outcomes: {
+          client_id: outcome.client_id,
+          review_status: outcome.review_status,
+          outcome_kind: outcome.outcome_kind,
+          redacted_at: outcome.redacted_at ?? null,
+          occurred_at: outcome.occurred_at,
+        },
+      })
+    }
+  }
+  return out
+}
+
 /** 先套筛选、再按时间倒序、最后才截断。漏掉类型筛选时，更新的咨询会占满 limit。 */
-function listRows(
+function listRows<T extends Listed>(
+  source: T[],
   filters: Array<[string, string, unknown]>,
   limitN: number | null,
   rangeFrom: number | null = null,
   rangeTo: number | null = null,
-): Row[] {
-  let out = rows.filter((row) => filters.every(([op, col, val]) => matches(row, op, col, val)))
-  out = [...out].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
+): T[] {
+  let out = source.filter((row) => filters.every(([op, col, val]) => matches(row, op, col, val)))
+  out = [...out].sort((a, b) => String(cell(b, 'occurred_at') ?? '').localeCompare(String(cell(a, 'occurred_at') ?? '')))
   if (rangeFrom != null && rangeTo != null) return out.slice(rangeFrom, rangeTo + 1)
   if (limitN != null) out = out.slice(0, limitN)
   return out
@@ -109,8 +160,13 @@ function fakeDb(table = 'me_sale_outcomes') {
     filters.push(['is', col, val])
     return builder
   }
-  builder.not = (col: string, _op: string, val: unknown) => {
-    filters.push(['not', col, val])
+  builder.not = (col: string, op: string, val: unknown) => {
+    if (op === 'in') {
+      const ids = String(val).replace(/^\(/, '').replace(/\)$/, '').split(',').map((item) => item.trim()).filter(Boolean)
+      filters.push(['not-in', col, ids])
+    } else {
+      filters.push(['not', col, val])
+    }
     return builder
   }
   builder.order = self
@@ -123,13 +179,14 @@ function fakeDb(table = 'me_sale_outcomes') {
     rangeTo = to
     return builder
   }
+  const source = (): Listed[] => (table === 'me_conversion_writebacks' ? writebackRows() : rows)
   builder.maybeSingle = async () => {
     if (table === 'clients') return { data: { leads_config: clientConfig }, error: null }
-    const found = listRows(filters, null)[0] ?? null
+    const found = listRows(source(), filters, null)[0] ?? null
     return { data: found, error: null }
   }
-  builder.then = (resolve: (v: { data: Row[]; error: null }) => unknown) =>
-    Promise.resolve(resolve({ data: listRows(filters, limitN, rangeFrom, rangeTo), error: null }))
+  builder.then = (resolve: (v: { data: Listed[]; error: null }) => unknown) =>
+    Promise.resolve(resolve({ data: listRows(source(), filters, limitN, rangeFrom, rangeTo), error: null }))
   return builder
 }
 
@@ -324,6 +381,31 @@ describe('GET outcomes · 已报价排队和成交下一步', () => {
     expect(body.outcomes.every((o: Row & { primary_missing?: boolean }) => o.primary_missing === true)).toBe(true)
   })
 
+  it('先排除已经有主发送记录的，再限条数，更老的没记录成交不会被挤掉', async () => {
+    const recent = Array.from({ length: 200 }, (_, i) => ({
+      id: `sent-${i}`,
+      client_id: CLIENT,
+      outcome_kind: 'purchase',
+      review_status: 'approved',
+      occurred_at: new Date(Date.now() - i * 1000).toISOString(),
+      me_conversion_writebacks: [{ status: 'confirmed', event_id: `sent-${i}` }],
+    }))
+    rows = [
+      ...recent,
+      {
+        id: 'older-missing',
+        client_id: CLIENT,
+        outcome_kind: 'purchase',
+        review_status: 'approved',
+        occurred_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+        me_conversion_writebacks: [],
+      },
+    ]
+    const res = await get('unsent_deal=1&limit=50')
+    const body = await res.json()
+    expect(body.outcomes.map((o: Row) => o.id)).toEqual(['older-missing'])
+  })
+
   it('打开了下一步、又有线索编号、但还没那条发送记录的成交会被标出来', async () => {
     clientConfig = { capi_conversion_leads: true, capi_conversion_deal_stage_key: 'balance_received' }
     rows = [
@@ -344,6 +426,19 @@ describe('GET outcomes · 已报价排队和成交下一步', () => {
         meta_lead_id: null,
         occurred_at: new Date().toISOString(),
         me_conversion_writebacks: [{ status: 'confirmed', event_id: 'no-lead' }],
+      },
+      {
+        id: 'revoked',
+        client_id: CLIENT,
+        outcome_kind: 'purchase',
+        review_status: 'approved',
+        meta_lead_id: LEAD,
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{
+          status: 'confirmed',
+          event_id: 'revoked',
+          payload_preview: { paymentRevoked: true },
+        }],
       },
     ]
     const res = await get('companion_open=1')

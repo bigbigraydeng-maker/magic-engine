@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
 import { readCapiClientConfig, stageCountsAsQualifiedLead } from '@/lib/conversions/capi-client-config'
 import { dealStageEventId, latestMetaLeadId, legalMetaLeadId } from '@/lib/conversions/conversion-lead'
+import { paymentRevokedPreview } from '@/lib/conversions/crm-deal-void'
 import { pushCrmDealFollowUps } from './crm-deal-gap-items'
 import { formatMoney } from '@/lib/conversions/money'
 import { DAY_MS, META_EVENT_WINDOW_DAYS, isPastEventWindow } from '@/lib/conversions/event-window'
@@ -636,10 +637,12 @@ async function pushMissingDealStageCompanions(
   const deals = await loadDealsAwaitingCompanion(supabase, now, gates)
   if (deals.length === 0) return
   const settled = await loadSettledCompanionEventIds(supabase, deals.map((deal) => dealStageEventId(deal.id)))
+  const revoked = await loadRevokedDealIds(supabase, deals.map((deal) => deal.id))
   let added = 0
   for (const deal of deals) {
     if (added >= MAX_ITEMS) break
     if (settled.has(dealStageEventId(deal.id))) continue
+    if (revoked.has(deal.id)) continue
     if (!dealStillExpectsCompanion(deal, gates)) continue
     items.push(missingCompanionItem(deal, clientNames))
     added += 1
@@ -687,6 +690,21 @@ function dealStillExpectsCompanion(row: DealCompanionRow, gates: ClientGate[]): 
   const gate = gates.find((item) => item.id === row.client_id)
   if (!gate || !legalMetaLeadId(row.meta_lead_id)) return false
   return gateOpensDealStage(gate)
+}
+
+async function loadRevokedDealIds(supabase: SupabaseClient, outcomeIds: string[]): Promise<Set<string>> {
+  if (outcomeIds.length === 0) return new Set()
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('outcome_id, payload_preview')
+    .in('outcome_id', outcomeIds)
+    .limit(FILTERED_SCAN)
+  if (error) throw new Error(`成交下一步撤销标记查询失败: ${error.message}`)
+  const found = new Set<string>()
+  for (const row of (data ?? []) as Array<{ outcome_id?: string; payload_preview?: unknown }>) {
+    if (row.outcome_id && paymentRevokedPreview(row.payload_preview)) found.add(row.outcome_id)
+  }
+  return found
 }
 
 type CompanionWriteback = {

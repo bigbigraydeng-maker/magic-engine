@@ -122,6 +122,7 @@ function isPrimaryWriteback(o: Outcome, wb: Writeback): boolean {
  */
 export function companionNeedsRetry(o: Outcome): boolean {
   if (o.companion_expected !== true || o.outcome_kind === 'lead' || o.redacted_at) return false
+  if (writebacks(o).some((wb) => wb.payload_preview?.paymentRevoked === true)) return false
   const companion = companionWriteback(o)
   if (!companion) return true
   if (isHeldWriteback(companion) || companion.last_error_code === 'auth') return false
