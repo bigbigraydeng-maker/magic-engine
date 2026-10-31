@@ -128,6 +128,8 @@ export interface AdDraftAdSet {
   urlTags?: string
   /** 首评。不写 = 不发首评。 */
   firstComment?: string
+  /** 计划步骤上的投放位置。不写 = 不另锁。多个广告组时写在组上，发布时再提到草稿根上。 */
+  placements?: string[]
 }
 
 export interface AdDraft {
@@ -184,6 +186,11 @@ export interface AdDraft {
   ctaType?: string
   urlTags?: string
   firstComment?: string
+  /**
+   * 计划步骤上的投放位置。不写或空 = 不另锁：看完类视频仍锁 Facebook 和 Instagram，
+   * 其它类型仍不写版位。写了就按这些词锁，并且回读必须对得上。
+   */
+  placements?: string[]
 }
 
 /** 每天最多敢自动花多少 —— 超过这个数不是 ME 该自己决定的事。 */

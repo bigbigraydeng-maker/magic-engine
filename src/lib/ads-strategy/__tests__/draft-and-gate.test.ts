@@ -1463,3 +1463,25 @@ describe('createDraftForApproval — 已有系列', () => {
     expect(inserted[0].draft.existingAdSetId).toBe('800001')
   })
 })
+
+describe('计划版位从草稿带到回读', () => {
+  it('回读和计划一致 → 可以进审批；多出来的平台 → 拦住', async () => {
+    const { sb } = fakeSupabase()
+    mAdSet.mockResolvedValue({
+      id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      status: 'PAUSED', campaign_id: 'camp1',
+      targeting: { geo_locations: { countries: ['NZ'] }, publisher_platforms: ['instagram'] },
+    })
+    const ok = await createDraftForApproval({ ...DRAFT, placements: ['instagram'] }, deps(sb))
+    expect(ok.status).toBe('awaiting_approval')
+
+    mAdSet.mockResolvedValue({
+      id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      status: 'PAUSED', campaign_id: 'camp1',
+      targeting: { geo_locations: { countries: ['NZ'] }, publisher_platforms: ['facebook', 'instagram'] },
+    })
+    const extra = await createDraftForApproval({ ...DRAFT, placements: ['instagram'] }, deps(sb))
+    expect(extra.status).toBe('blocked')
+    expect(extra.findings.map((f) => f.code)).toContain('placement_not_as_planned')
+  })
+})

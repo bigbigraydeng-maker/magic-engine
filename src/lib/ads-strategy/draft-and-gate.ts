@@ -28,6 +28,7 @@ import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetc
 import { checkAudiences, renderAudienceSummary, type AudienceFact, type AudiencesChecked } from './draft-audiences'
 import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
+import { expectedPlacement } from './placement-lock'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
 import { checkCreatedAsExpected } from './created-as-expected'
 import {
@@ -388,6 +389,7 @@ function launchReportFor(
     }),
     industry: deps.industry ?? null,
     expectedOptimizationGoal: metaTripletFor(draft.kind).optimizationGoal,
+    ...expectedPlacement(draft.placements),
     ...(draft.audienceIds && draft.audienceIds.length > 0 ? { expectedAudienceIds: draft.audienceIds } : {}),
     ...(draft.excludedAudienceIds && draft.excludedAudienceIds.length > 0 ? { expectedExcludedAudienceIds: draft.excludedAudienceIds } : {}),
   })
