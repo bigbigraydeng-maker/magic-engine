@@ -182,6 +182,14 @@ export function normalizeCapiSettingsWrite(input: CapiSettingsWriteInput): CapiS
   }
 }
 
+/** Success arm of {@link CapiSettingsWrite}. `error: ""` is still a failure — a falsy check does not narrow it. */
+export function readyCapiSettingsWrite(
+  write: CapiSettingsWrite,
+): write is Extract<CapiSettingsWrite, { touched: true; error?: undefined }> {
+  if (!write.touched) return false
+  return !('error' in write && typeof write.error === 'string')
+}
+
 export function applyCapiSettingsWrite(
   current: Record<string, unknown>,
   write: Extract<CapiSettingsWrite, { touched: true; error?: undefined }>,

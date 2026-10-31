@@ -34,6 +34,8 @@ type Writeback = {
   /** 'auth' = 授权失效，系统会在令牌修好后自动补发（2026-09-22）；其它值走「再试一次」文案。 */
   last_error_code: string | null
   next_attempt_at: string | null
+  /** 允许名单先停住时为 `{ held: true }`。没有这个标记的排队行不是「需要你动手」。 */
+  payload_preview?: { held?: boolean } | null
 }
 
 type Outcome = {
@@ -87,6 +89,39 @@ function kindLabel(k: Outcome['outcome_kind']): string {
   return k === 'purchase' ? '收到定金' : k === 'balance' ? '收到尾款' : '有效咨询'
 }
 
+function isRetryableFailure(o: Outcome): boolean {
+  const status = o.me_conversion_writebacks?.[0]?.status
+  return status === 'in_doubt' || status === 'failed'
+}
+
+function isHeldOutcome(o: Outcome): boolean {
+  const wb = o.me_conversion_writebacks?.[0]
+  return wb?.status === 'queued' && wb.payload_preview?.held === true
+}
+
+function mergeStuck(failed: Outcome[], held: Outcome[]): Outcome[] {
+  const rows = failed.filter(isRetryableFailure)
+  const seen = new Set(rows.map((o) => o.id))
+  for (const o of held) {
+    if (!isHeldOutcome(o) || seen.has(o.id)) continue
+    rows.push(o)
+  }
+  return rows
+}
+
+function stuckExplanation(wb: Writeback): string {
+  if (wb.status === 'in_doubt') {
+    return '这一笔发出去时断线了，不确定平台收到没有。系统不会自己重发 —— 重发一次就是把同一笔算成两笔，撤不回。'
+  }
+  if (wb.status === 'queued' && wb.payload_preview?.held === true) {
+    return '这笔已经批准，但按这个客户现在允许发送的名单先停住了，没有发出去。名单改好之后点「再试一次」：还在 7 天内、而且名单允许，才会发出去。'
+  }
+  if (wb.last_error_code === 'auth') {
+    return '连接广告平台的授权失效了，这条还没发出去。重新连接授权后，系统每天早上会自动补发（7 天内有效）；连好后也可以现在点「再试一次」。'
+  }
+  return `上次发送没成功：${wb.last_error ?? '未知原因'}。可以再试一次。`
+}
+
 /** 精确天数。判"过没过期"用它，跟服务端同一口径；显示时才取整。 */
 function daysAgo(iso: string): number {
   return (Date.now() - new Date(iso).getTime()) / 86_400_000
@@ -136,9 +171,10 @@ export default function ConversionsPage() {
       // 已批准但没走完的：发出去没下文的、失败可重试的。send_status 交给接口在 SQL
       // 层筛（不是先按最新 200 条截断再筛）—— 否则堆积超过 200 条时，卡住的老记录
       // 会先被"最新 N 条"的窗口挤掉，压根轮不到这一步筛选。
-      const [pendingRes, stuckRes] = await Promise.all([
+      const [pendingRes, stuckRes, heldRes] = await Promise.all([
         fetch(`${base}&review_status=pending_review`),
         fetch(`${base}&review_status=approved&send_status=in_doubt,failed`),
+        fetch(`${base}&review_status=approved&send_status=queued&held=1`),
       ])
       const pending = await pendingRes.json()
       if (!pendingRes.ok) {
@@ -162,10 +198,9 @@ export default function ConversionsPage() {
       //    只返回 outcome 主表，渲染时 `sendState(o)!` 会 crash 整页。
       //    再挡一次：stuck 里只放**真有 writeback**的 outcome。
       const stuckBody = await stuckRes.json()
-      const stuckRows: Outcome[] = (stuckBody.outcomes ?? []).filter(
-        (o: Outcome) => (o.me_conversion_writebacks?.length ?? 0) > 0,
-      )
-      setStuck(stuckRows)
+      const heldBody = await heldRes.json()
+      if (!heldRes.ok) throw new Error(heldBody.error ?? '读取失败')
+      setStuck(mergeStuck(stuckBody.outcomes ?? [], heldBody.outcomes ?? []))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -228,7 +263,8 @@ export default function ConversionsPage() {
         // approved + 卡在 in_doubt/failed 的 outcome：走 stuck 展示（只当它真有
         // writeback 时才塞 —— 跟 load() 里的防御过滤同一口径）
         const wb = found.me_conversion_writebacks?.[0]
-        if (found.review_status === 'approved' && wb && (wb.status === 'in_doubt' || wb.status === 'failed')) {
+        const held = wb?.status === 'queued' && wb.payload_preview?.held === true
+        if (found.review_status === 'approved' && wb && (wb.status === 'in_doubt' || wb.status === 'failed' || held)) {
           setStuck((s) => (s.some((r) => r.id === found.id) ? s : [found, ...s]))
           setTimeout(() => stuckSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0)
         }
@@ -248,7 +284,8 @@ export default function ConversionsPage() {
    */
   useEffect(() => {
     // 2026-09-22 起今日待办「授权失效发不出去」那条链接带 ?status=failed，同样滚到这个区块。
-    if ((autoScrollStatus !== 'in_doubt' && autoScrollStatus !== 'failed') || stuck.length === 0) return
+    const scrolls = autoScrollStatus === 'in_doubt' || autoScrollStatus === 'failed' || autoScrollStatus === 'held'
+    if (!scrolls || stuck.length === 0) return
     setTimeout(() => stuckSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
     setAutoScrollStatus(null)
   }, [autoScrollStatus, stuck])
@@ -372,7 +409,8 @@ export default function ConversionsPage() {
       try {
         const res = await fetch(`/api/admin/conversions/outcomes/${o.id}/send`, { method: 'POST' })
         const body = await res.json()
-        setFlash({ id: o.id, text: body.message ?? (res.ok ? '已重试' : '出错了'), ok: res.ok })
+        const finished = body.send_status !== 'queued' && body.send_status !== 'error'
+        setFlash({ id: o.id, text: body.message ?? (res.ok ? '已重试' : '出错了'), ok: res.ok && finished })
         if (res.ok) void load()
       } catch (e) {
         setFlash({ id: o.id, text: e instanceof Error ? e.message : String(e), ok: false })
@@ -543,13 +581,7 @@ export default function ConversionsPage() {
                   {o.outcome_kind !== 'lead' && ` · ${money(o)}`}
                   {o.order_ref && <span className="font-normal text-me-charcoal/50"> · 单号 {o.order_ref}</span>}
                 </div>
-                <div className="my-2 text-sm leading-relaxed text-me-charcoal/70">
-                  {doubt
-                    ? '这一笔发出去时断线了，不确定平台收到没有。系统不会自己重发 —— 重发一次就是把同一笔算成两笔，撤不回。'
-                    : wb.last_error_code === 'auth'
-                      ? '连接广告平台的授权失效了，这条还没发出去。重新连接授权后，系统每天早上会自动补发（7 天内有效）；连好后也可以现在点「再试一次」。'
-                      : `上次发送没成功：${wb.last_error ?? '未知原因'}。可以再试一次。`}
-                </div>
+                <div className="my-2 text-sm leading-relaxed text-me-charcoal/70">{stuckExplanation(wb)}</div>
                 {doubt ? (
                   <div className="flex flex-wrap gap-2">
                     <button disabled={busy === o.id} onClick={() => void resolve(o, 'confirmed')} className={btnSolid('status-track')}>

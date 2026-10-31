@@ -348,4 +348,47 @@ describe('授权失效的失败行说清「会自动补发」（2026-09-22 起�
     expect(await screen.findByText(/上次发送没成功：平台忙/)).toBeTruthy()
     expect(screen.queryByText(/自动补发/)).toBeNull()
   })
+
+  it('名单停住的排队行出现在需要你动手，再试一次会重新走发送', async () => {
+    mountWith([
+      outcome({
+        id: 'held-1',
+        review_status: 'approved',
+        me_conversion_writebacks: [{
+          id: 'wb-h',
+          status: 'queued',
+          last_error: '名单里没有这一类',
+          last_error_code: null,
+          next_attempt_at: null,
+          payload_preview: { held: true },
+        }],
+      }),
+    ])
+    expect(await screen.findByRole('heading', { name: /需要你动手/ })).toBeTruthy()
+    expect(screen.getByText(/先停住了/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '再试一次' }))
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((c) => String(c[0]).includes('/outcomes/held-1/send'))
+      expect(calls).toHaveLength(1)
+      expect(calls[0][1]).toMatchObject({ method: 'POST' })
+    })
+  })
+
+  it('普通排队、没有停住标记的行不进需要你动手', async () => {
+    mountWith([
+      outcome({
+        id: 'queued-1',
+        review_status: 'approved',
+        me_conversion_writebacks: [{
+          id: 'wb-q',
+          status: 'queued',
+          last_error: null,
+          last_error_code: null,
+          next_attempt_at: null,
+        }],
+      }),
+    ])
+    await screen.findByText(/收到定金/)
+    expect(screen.queryByRole('heading', { name: /需要你动手/ })).toBeNull()
+  })
 })
