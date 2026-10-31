@@ -458,6 +458,31 @@ describe('GET contacts — 筛选落到 SQL', () => {
 })
 
 describe('GET contacts — view=priority（WP3 R5 接线）', () => {
+  it('数据库批次函数可用时，使用同客户的完整触点且不再发分页触点请求', async () => {
+    ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      expect(name).toBe('crm_priority_touchpoint_batch')
+      expect(args).toEqual({ p_client_id: 'cts', p_offset: 0 })
+      return { data: STALE_TOUCHES.map(({ summary: _summary, ...touch }) => ({ ...touch, created_at: touch.occurred_at })), error: null }
+    })
+    const { status, body } = await get('cts', '?view=priority&open=hot,cold')
+    expect(status).toBe(200)
+    const rows = (body.sections as Array<{ items: Array<{ contactId: string }> | null }>).flatMap((s) => s.items ?? [])
+    expect(rows.some((row) => row.contactId === 'a3')).toBe(true)
+    expect(recorded.some((r) => r.table === 'contact_touchpoints')).toBe(false)
+  })
+
+  it('批次读取保留补记时间，最近手记按创建时间显示', async () => {
+    const createdAt = new Date().toISOString()
+    ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [{
+      id: 'backdated-note', contact_id: 'a2', channel: 'phone', direction: 'outbound',
+      occurred_at: '2020-01-01T00:00:00Z', created_at: createdAt,
+      raw: 'Recent entry', metadata: {}, source: 'me_manual',
+    }], error: null })
+    const { body } = await get('cts', '?view=priority')
+    expect(body.recentNotes).toEqual(expect.arrayContaining([expect.objectContaining({ contactId: 'a2', at: createdAt })]))
+    expect(recorded.some((r) => r.table === 'contact_touchpoints')).toBe(false)
+  })
+
   it('按电话搜索时兼容本地格式，并将触点查询限制到命中的联系人', async () => {
     const { status } = await get('cts', '?view=priority&q=021%20363%20598')
     expect(status).toBe(200)

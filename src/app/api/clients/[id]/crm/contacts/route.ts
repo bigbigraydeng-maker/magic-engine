@@ -35,7 +35,8 @@ import { recentStaffNotes } from '@/lib/crm/recent-staff-notes'
 import { isMarketingAction } from '@/lib/crm/pipeline'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
-import { fetchAll, fetchAllBatched } from '@/lib/supabase-paginate'
+import { fetchAll } from '@/lib/supabase-paginate'
+import { loadPriorityTouchpoints } from '@/lib/crm/priority-touchpoints'
 import { createStepTimer, type StepTimer } from '@/lib/http/step-timing'
 import { orderContactIdsByLatestTouch, scanLatestTouchContactIds, type TouchRowLite } from '@/lib/crm/contact-touch-order'
 import {
@@ -823,15 +824,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
         const ids = rows.map((row) => row.id)
         const parts = await Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) => fetchTouchesFor(clientId, ids.slice(i * 100, i * 100 + 100))))
         return parts.flat().map((row) => ({ ...row, summary: null }))
-      }) : fetchAllBatched<Omit<TouchRow, 'summary'>>((from, to) =>
-        supabaseAdmin
-          .from('contact_touchpoints')
-          .select('id, contact_id, channel, direction, occurred_at, created_at, raw, metadata, source')
-          .eq('client_id', clientId)
-          .order('occurred_at', { ascending: false })
-          .order('id', { ascending: false })
-          .range(from, to),
-      ).then((rows) => rows.map((row) => ({ ...row, summary: null }))),
+      }) : loadPriorityTouchpoints(supabaseAdmin, clientId),
       fetchAll<StageRow>((from, to) =>
         supabaseAdmin
           .from('client_pipeline_stages')
