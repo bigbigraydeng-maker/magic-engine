@@ -59,6 +59,29 @@ describe('EntityTreePanel', () => {
     expect(screen.queryByText(/样本不足/)).toBeNull()
   })
 
+  it('链接点击没存过时写暂无数据，不跟赢家比成 0%', async () => {
+    const unknown = metrics(40, 5)
+    unknown.ctr = null
+    unknown.linkClicks = 0
+    const withUnknown: EntityTree = {
+      ...tree,
+      winnerBaseline: { cpm: 12, linkCtr: 0.02, completion: 0.25, hook: 0.3 },
+      campaigns: [{
+        ...tree.campaigns[0],
+        adsets: [{
+          ...tree.campaigns[0].adsets[0],
+          ads: [{ ...tree.campaigns[0].adsets[0].ads[0], metrics: unknown }],
+        }],
+      }],
+    }
+    mockFetch(200, { success: true, tree: withUnknown, hiddenAdsets: 0, noPageRegistered: false })
+    render(<EntityTreePanel clientId="c" />)
+    const line = await screen.findByText(/链接点击率 暂无数据/)
+    expect(line.textContent).not.toContain('赢家')
+    expect(line.textContent).not.toContain('0.0%')
+    expect(line.textContent).not.toContain('样本不足')
+  })
+
   it('puts stopped campaigns behind a collapsed section', async () => {
     mockFetch(200, { success: true, tree, hiddenAdsets: 0, noPageRegistered: false } satisfies Partial<EntityTreeResult> & { success: boolean })
     render(<EntityTreePanel clientId="c" />)

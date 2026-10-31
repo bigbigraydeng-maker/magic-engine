@@ -6,7 +6,7 @@
  */
 
 import { DATA_STALE_DAYS } from './frequency'
-import { budgetHoldFromRate, buildFollowupAction, withBudgetHold } from './followup'
+import { budgetHoldFor, buildFollowupAction, withBudgetHold } from './followup'
 import { diffDays, nzDay, shortDay } from './util'
 import type {
   AccountView, ActionRow, ActionSeverity, FollowupInput, FrequencyRow, GrowthInput, Headline, PoolRow, WarMapInput,
@@ -149,7 +149,7 @@ function staleNote(ctx: AdjustContext): string {
 
 export function buildAdjust(ctx: AdjustContext): { headline: Headline; actions: ActionRow[] } {
   const unhealthy = ctx.accounts.some(a => a.statusCode !== null && a.statusCode !== 1)
-  const hold = budgetHoldFromRate(ctx.followup?.rateWithin24h)
+  const hold = budgetHoldFor(ctx.followup)
   const actions = sortStable([
     ...accountActions(ctx.accounts),
     ...creativeActions(ctx.input.creativePoolApproved),

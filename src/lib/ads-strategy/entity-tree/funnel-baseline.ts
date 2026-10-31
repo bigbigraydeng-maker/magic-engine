@@ -17,10 +17,19 @@ export interface FunnelMetrics {
   costPerLead: number | null
 }
 
+/** Entity rows carry `ctr: null` when link clicks were never stored. A plain 0 is a real zero. */
+function recordedLinkCtr(m: FunnelMetrics): number | null | undefined {
+  if (!('ctr' in m)) return undefined
+  const ctr = (m as FunnelMetrics & { ctr?: number | null }).ctr
+  return ctr === undefined ? undefined : ctr
+}
+
 export function ratesFromMetrics(m: FunnelMetrics): FunnelRates {
+  const recorded = recordedLinkCtr(m)
+  const linkKnown = recorded === undefined || recorded !== null
   const cpm = m.impressions > 0 ? (m.spend / m.impressions) * 1000 : null
-  const linkCtr = m.impressions > 0 ? m.linkClicks / m.impressions : null
-  const completion = m.linkClicks > 0 ? m.leads / m.linkClicks : null
+  const linkCtr = recorded !== undefined ? recorded : (m.impressions > 0 ? m.linkClicks / m.impressions : null)
+  const completion = linkKnown && m.linkClicks > 0 ? m.leads / m.linkClicks : null
   const hook = m.impressions > 0 ? m.video3sViews / m.impressions : null
   return { cpm, linkCtr, completion, hook }
 }

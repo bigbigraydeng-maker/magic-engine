@@ -65,12 +65,17 @@ function versus(own: string, winner: FunnelRates | null, base: number | null, fm
   return `${own}（赢家 ${base === null ? '—' : fmt(base)}）`
 }
 
+function linkCtrText(ctr: number | null, winner: FunnelRates | null): string {
+  if (ctr === null) return '暂无数据'
+  return versus(pct(ctr), winner, winner?.linkCtr ?? null, pct)
+}
+
 function AdFunnel({ ad, winner }: { ad: AdNode; winner: FunnelRates | null }) {
   const rates = ratesFromMetrics(ad.metrics)
   return (
     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
       <span>千次展示费用 {versus(money1(rates.cpm), winner, winner?.cpm ?? null, money1)}</span>
-      <span>链接点击率 {versus(pct(rates.linkCtr), winner, winner?.linkCtr ?? null, pct)}</span>
+      <span>链接点击率 {linkCtrText(ad.metrics.ctr, winner)}</span>
       <span>表单完成率 {versus(pct(rates.completion), winner, winner?.completion ?? null, pct)}</span>
       <span>3 秒播放率 {versus(pct(rates.hook), winner, winner?.hook ?? null, pct)}</span>
     </div>

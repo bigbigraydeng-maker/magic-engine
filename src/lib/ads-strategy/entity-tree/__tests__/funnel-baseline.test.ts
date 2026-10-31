@@ -21,6 +21,14 @@ describe('account winner baseline', () => {
     expect(winner?.linkCtr).toBe(0.02)
     expect(winner?.completion).toBe(1.5)
   })
+
+  it('does not turn a missing link-click count into 0%', () => {
+    const rates = ratesFromMetrics({ ...adMetrics({ leads: 20, costPerLead: 5, linkClicks: 0 }), ctr: null })
+    expect(rates.linkCtr).toBeNull()
+    expect(rates.completion).toBeNull()
+    const winner = pickWinnerBaseline([{ ...adMetrics({ leads: 20, costPerLead: 5, linkClicks: 0 }), ctr: null }])
+    expect(winner?.linkCtr).toBeNull()
+  })
 })
 
 describe('entity tree link CTR', () => {

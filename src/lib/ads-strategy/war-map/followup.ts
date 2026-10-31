@@ -11,8 +11,10 @@ export const FOLLOWUP_ACTION_KEY = 'ad-lead-followup'
 
 export type { FollowupGroup, FollowupInput }
 
-export function budgetHoldFromRate(rate: number | null | undefined): boolean {
-  return rate != null && rate < FOLLOWUP_RATE_FLOOR
+export function budgetHoldFor(input: FollowupInput | undefined): boolean {
+  if (!input || input.unreadable) return false
+  if (input.inWindow + input.outsideWindow <= 0) return false
+  return input.rateWithin24h != null && input.rateWithin24h < FOLLOWUP_RATE_FLOOR
 }
 
 export function groupFollowupByAdset(
@@ -64,11 +66,20 @@ export function buildFollowupAction(input: FollowupInput): ActionRow {
       owner: 'dev',
     }
   }
-  const older = input.outsideWindow > 0 ? `，另有更早的 ${input.outsideWindow} 条` : ''
   const waiting = input.inWindow + input.outsideWindow
+  if (waiting <= 0) {
+    return {
+      key: FOLLOWUP_ACTION_KEY,
+      severity: 'info',
+      what: '超过 24 小时的广告线索都有人跟进了',
+      how: '',
+      owner: 'pm',
+    }
+  }
+  const older = input.outsideWindow > 0 ? `，另有更早的 ${input.outsideWindow} 条` : ''
   return {
     key: FOLLOWUP_ACTION_KEY,
-    severity: waiting > 0 ? 'yellow' : 'info',
+    severity: 'yellow',
     what: `广告线索超过 24 小时没人跟进：${input.inWindow} 条${older}`,
     how: followupHow(input.groups),
     owner: 'pm',

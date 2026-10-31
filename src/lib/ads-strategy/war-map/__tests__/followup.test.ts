@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildAdjust } from '../actions'
 import {
-  budgetHoldFromRate,
+  budgetHoldFor,
   buildFollowupAction,
   groupFollowupByAdset,
 } from '../followup'
@@ -29,19 +29,31 @@ describe('ad follow-up card', () => {
     expect(action.how).not.toContain('set-a')
   })
 
-  it('adds the budget note only when the 24h follow-up rate is below 80%', () => {
-    expect(budgetHoldFromRate(0.8)).toBe(false)
-    expect(budgetHoldFromRate(null)).toBe(false)
-    expect(budgetHoldFromRate(0.79)).toBe(true)
-    const low = adjust(0.5)
-    const ok = adjust(0.8)
+  it('adds the budget note only when the 24h follow-up rate is below 80% and someone is still waiting', () => {
+    const low = adjust(0.5, 2)
+    const ok = adjust(0.8, 2)
+    const clear = adjust(0.5, 0)
     expect(low.actions.find((a) => a.key.startsWith('opp-O1'))?.how).toContain('先补跟进，暂不建议加预算')
     expect(low.actions.find((a) => a.key.startsWith('growth-'))?.how).toContain('先补跟进，暂不建议加预算')
     expect(ok.actions.some((a) => a.how.includes('先补跟进'))).toBe(false)
+    expect(clear.actions.some((a) => a.how.includes('先补跟进'))).toBe(false)
+    expect(budgetHoldFor(clearFollowup(0.5, 0))).toBe(false)
+    expect(budgetHoldFor(clearFollowup(0.79, 1))).toBe(true)
+  })
+
+  it('zero waiting leads is a neutral line, not a 24-hour warning', () => {
+    const action = buildFollowupAction(clearFollowup(0.5, 0))
+    expect(action.severity).toBe('info')
+    expect(action.what).toBe('超过 24 小时的广告线索都有人跟进了')
+    expect(action.what).not.toContain('0 条')
   })
 })
 
-function adjust(rate: number) {
+function clearFollowup(rate: number, waiting: number) {
+  return { unreadable: false, groups: [], inWindow: waiting, outsideWindow: 0, rateWithin24h: rate }
+}
+
+function adjust(rate: number, waiting = 2) {
   const input = {
     now: '2026-10-16T03:00:00.000Z',
     creativePoolApproved: 3,
@@ -62,6 +74,6 @@ function adjust(rate: number) {
     upstream: [],
     dataDay: '2026-10-16',
     staleDays: 0,
-    followup: { unreadable: false, groups: [], inWindow: 0, outsideWindow: 0, rateWithin24h: rate },
+    followup: clearFollowup(rate, waiting),
   })
 }

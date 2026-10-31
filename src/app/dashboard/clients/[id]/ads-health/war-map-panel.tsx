@@ -275,10 +275,13 @@ function Timeline({ view }: { view: WarMapView }) {
 function FollowupCard({ view, clientId }: { view: WarMapView; clientId: string }) {
   const action = view.adjust.actions.find(a => a.key === FOLLOWUP_ACTION_KEY)
   if (!action) return null
+  if (action.severity === 'info') {
+    return <p className="mt-3 text-xs text-gray-500">{action.what}</p>
+  }
   return (
     <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
       <p className="text-sm font-medium text-gray-800">{action.what}</p>
-      <p className="mt-1 text-xs text-gray-600">{action.how}</p>
+      {action.how ? <p className="mt-1 text-xs text-gray-600">{action.how}</p> : null}
       <Link href={`/dashboard/clients/${clientId}/crm/all`} className="mt-1 inline-block text-xs text-sky-700 underline">打开客人名单</Link>
     </div>
   )
