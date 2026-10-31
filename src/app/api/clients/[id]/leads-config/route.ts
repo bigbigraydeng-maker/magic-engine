@@ -29,6 +29,7 @@ import {
   applyCapiSettingsWrite,
   capiSettingsView,
   normalizeCapiSettingsWrite,
+  readyCapiSettingsWrite,
   type CapiSettingsView,
 } from '@/lib/conversions/capi-client-config'
 
@@ -136,7 +137,7 @@ export async function PATCH(
 
   // 广告回传这几项先校验。填错就整次不写，避免名单存进去一半。
   const capiWrite = normalizeCapiSettingsWrite(body)
-  if (capiWrite.touched && capiWrite.error) {
+  if (capiWrite.touched && 'error' in capiWrite && typeof capiWrite.error === 'string') {
     return NextResponse.json({ error: capiWrite.error }, { status: 400 })
   }
 
@@ -296,7 +297,7 @@ export async function PATCH(
       : Array.from(new Set([...curAddresses, ...(ownAddressesPatch ?? [])]))
     merged.own_email_domains = [...domains, ...addresses]
   }
-  const next = capiWrite.touched && !capiWrite.error ? applyCapiSettingsWrite(merged, capiWrite) : merged
+  const next = readyCapiSettingsWrite(capiWrite) ? applyCapiSettingsWrite(merged, capiWrite) : merged
 
   const { error: updErr } = await supabaseAdmin
     .from('clients')

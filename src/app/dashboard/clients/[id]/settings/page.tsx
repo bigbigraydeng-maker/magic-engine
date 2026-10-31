@@ -205,7 +205,7 @@ function TabBody({
           <SettingsSection icon="📧" title="邮件反应同步（谁打开了 / 谁点了链接）">
             <LeadsConfigPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="📣" title="发给广告平台：允许哪些、哪一笔记成成交">
+          <SettingsSection icon="📣" title="发给广告平台：哪一笔记成成交">
             <CapiSendSettings clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="📨" title="网站表单来了新客资，发邮件通知谁">

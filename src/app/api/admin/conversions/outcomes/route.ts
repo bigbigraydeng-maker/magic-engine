@@ -167,7 +167,7 @@ export async function GET(request: Request) {
     // 新增泄露面，只是省一次跳转。
     'id, outcome_kind, order_ref, amount_minor, currency, occurred_at, ' +
     'review_status, reject_reason, redacted_at, source_kind, created_at, contact_id, customer_first, ' +
-    'me_conversion_writebacks(id, status, last_error, last_error_code, next_attempt_at)'
+    'me_conversion_writebacks(id, status, last_error, last_error_code, next_attempt_at, payload_preview)'
 
   // 深链目标查询：今日待办邮件里的 ?focus=<id> 指向的记录可能比列表的
   // limit/排序窗口更老（积压超过 limit 条时会被挤出默认列表）。
@@ -192,6 +192,7 @@ export async function GET(request: Request) {
 
   const sendStatus = searchParams.get('send_status')
   const sendStatuses = sendStatus ? sendStatus.split(',').map((s) => s.trim()).filter(Boolean) : []
+  const heldOnly = searchParams.get('held') === '1'
 
   let query = supabaseAdmin
     .from('me_sale_outcomes')
@@ -205,6 +206,7 @@ export async function GET(request: Request) {
 
   if (status) query = query.eq('review_status', status)
   if (sendStatuses.length > 0) query = query.in('me_conversion_writebacks.status', sendStatuses)
+  if (heldOnly) query = query.contains('me_conversion_writebacks.payload_preview', { held: true })
 
   const { data, error } = await query
   if (error) {
