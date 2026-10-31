@@ -48,7 +48,13 @@ function targets(ids: GoLiveIds): { name: string; id: string }[] {
     name: ids.adIds.length === 1 ? '广告' : `第${index + 1}条广告`,
     id,
   }))
-  return [...ads, { name: '广告组', id: ids.adSetId }, { name: '广告系列', id: ids.campaignId }]
+  // A reused campaign stays as it was. It is not part of the "is this live" read.
+  const campaign = ids.reusedCampaign ? [] : [{ name: '广告系列', id: ids.campaignId }]
+  return [...ads, { name: '广告组', id: ids.adSetId }, ...campaign]
+}
+
+function skipIds(ids: GoLiveIds): string[] {
+  return ids.reusedCampaign ? [ids.campaignId] : []
 }
 
 async function readLayers(ids: GoLiveIds, token: string): Promise<LayerRead[] | null> {
@@ -150,10 +156,17 @@ async function runSettle(
     claimAndActivate: async () => fromWrite(await approveDraft(
       args.draftId, args.supabase, token, args.authority, 'go-live-card',
     )),
-    activateOnly: async () => fromWrite(await activatePublished(ids, token)),
+    activateOnly: async () => fromWrite(await activatePublished(
+      ids,
+      token,
+      skipIds(args.ids).length > 0 ? { skipIds: skipIds(args.ids) } : undefined,
+    )),
     readBack: () => readLayers(args.ids, token),
     stillOwns,
-    keepPaused: () => pausePublished(ids, token),
+    keepPaused: () => pausePublished(
+      { ...ids, ...(args.ids.reusedCampaign ? { reusedCampaign: true } : {}) },
+      token,
+    ),
   }
   try {
     return await settleGoLive(ports)

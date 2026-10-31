@@ -41,14 +41,13 @@ export function pausedDraftFacts(
   accountLabel: string,
   review: PausedDraftReview,
 ): CardFacts {
-  const count = adSetCount(draft)
   return {
     subjectKey: pausedDraftSubjectKey(draft),
     what: PAUSED_DRAFT_WHAT,
     account: safeLabel(accountLabel),
     amount: amountLine(draft, review),
     date: `一共 ${durationDays(draft)} 天，从点确认当天算起`,
-    scope: `1 个暂停系列，${count} 个广告组，不开启。稿 ${draftMark(draft)}`,
+    scope: scopeLine(draft),
     hardChecks: hardChecks(draft, review),
   }
 }
@@ -129,6 +128,12 @@ function capMajor(review: PausedDraftReview): { amount: string; currency: string
 
 function adSetCount(draft: AdDraft): number {
   return Array.isArray(draft.adSets) ? draft.adSets.length : 1
+}
+
+function scopeLine(draft: AdDraft): string {
+  const mark = draftMark(draft)
+  if (draft.existingCampaignId) return `在已有系列里加 1 个暂停广告组，不新建系列、不开。稿 ${mark}`
+  return `1 个暂停系列，${adSetCount(draft)} 个广告组，不开启。稿 ${mark}`
 }
 
 function durationDays(draft: AdDraft): number {
