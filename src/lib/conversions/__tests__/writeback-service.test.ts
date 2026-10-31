@@ -736,6 +736,15 @@ describe('人工裁决「不确定」', () => {
     expect(db.tables.me_conversion_writebacks[0].receipt).toMatchObject({ manual: true })
   })
 
+  it('收款已撤销的不确定记录不能再发一次', async () => {
+    seedDoubt()
+    db.tables.me_conversion_writebacks[0].payload_preview = { paymentRevoked: true }
+    const r = await resolveDoubt('wb-1', 'resend', 'pm@example.com', db as never)
+    expect(r.ok).toBe(false)
+    expect(r.message).toContain('不能再发')
+    expect(db.tables.me_conversion_writebacks[0].status).toBe('in_doubt')
+  })
+
   it('人确认没收到 → 放回队列，并清掉发送标记', async () => {
     seedDoubt()
     const r = await resolveDoubt('wb-1', 'resend', 'pm@example.com', db as never)

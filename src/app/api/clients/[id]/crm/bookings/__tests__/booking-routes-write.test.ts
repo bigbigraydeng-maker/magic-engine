@@ -556,6 +556,66 @@ describe('happy path rpc arguments', () => {
     )
     expect(rpcArgs('crm_booking_unset_paid').p_kind).toBe('deposit')
   })
+
+  it('unpaid voids a deal that has not been sent', async () => {
+    const client = state().tables.clients.find((row) => row.id === CLIENT_A)
+    if (client) client.leads_config = { ...ENABLED_LEADS_CONFIG, capi_deal_milestone: 'deposit' }
+    state().tables.me_sale_outcomes = [{
+      id: 'outcome-1',
+      client_id: CLIENT_A,
+      contact_id: CONTACT_A1,
+      source_kind: 'crm_stage_manual',
+      source_ref: `crm_deal:${CONTACT_A1}:${BOOKING_A1}`,
+      review_status: 'pending_review',
+    }]
+    state().tables.me_conversion_writebacks = [{
+      id: 'wb-1',
+      outcome_id: 'outcome-1',
+      status: 'queued',
+      payload_preview: null,
+    }]
+    const res = await unpaidPOST(
+      request('POST', { expectedUpdatedAt: UPDATED_AT }),
+      params(CLIENT_A, { bookingId: BOOKING_A1, kind: 'deposit' }),
+    )
+    const body = await jsonOf(res)
+    expect(res.status).toBe(200)
+    expect(body.deal).toMatchObject({ reason: 'voided' })
+    expect(String((body.deal as { message: string }).message)).toContain('已作废')
+    expect(state().tables.me_sale_outcomes[0].review_status).toBe('rejected')
+    expect(state().tables.me_sale_outcomes[0].reject_reason).toBe('not_real_sale')
+    expect(state().tables.me_conversion_writebacks[0].status).toBe('failed_permanent')
+    expect(rpcArgs('crm_booking_unset_paid').p_kind).toBe('deposit')
+  })
+
+  it('unpaid leaves an already sent deal and says so', async () => {
+    const client = state().tables.clients.find((row) => row.id === CLIENT_A)
+    if (client) client.leads_config = { ...ENABLED_LEADS_CONFIG, capi_deal_milestone: 'deposit' }
+    state().tables.me_sale_outcomes = [{
+      id: 'outcome-1',
+      client_id: CLIENT_A,
+      contact_id: CONTACT_A1,
+      source_kind: 'crm_stage_manual',
+      source_ref: `crm_deal:${CONTACT_A1}:${BOOKING_A1}`,
+      review_status: 'approved',
+    }]
+    state().tables.me_conversion_writebacks = [{
+      id: 'wb-1',
+      outcome_id: 'outcome-1',
+      status: 'confirmed',
+      payload_preview: { held: false },
+    }]
+    const res = await unpaidPOST(
+      request('POST', { expectedUpdatedAt: UPDATED_AT }),
+      params(CLIENT_A, { bookingId: BOOKING_A1, kind: 'deposit' }),
+    )
+    const body = await jsonOf(res)
+    expect(res.status).toBe(200)
+    expect(String((body.deal as { message: string }).message)).toContain('已经发给广告平台')
+    expect(state().tables.me_sale_outcomes[0].review_status).toBe('approved')
+    expect(state().tables.me_conversion_writebacks[0].status).toBe('confirmed')
+    expect(state().tables.me_conversion_writebacks[0].payload_preview).toMatchObject({ paymentRevoked: true })
+  })
 })
 
 describe('unknown keys', () => {
