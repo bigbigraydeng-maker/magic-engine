@@ -260,3 +260,25 @@ describe('tradeDomainFor（「这是同行」按钮标哪个域名）', () => {
     }
   })
 })
+
+describe('own_email_domains 里点名的员工地址（WP-1a）', () => {
+  const cfg = { own_email_domains: ['ctstours.co.nz', 'Op3@AsiaScapeHolidays.com', 'staff.person@gmail.com', 'not an address@'], trade_domains: ['asiascapeholidays.com'] }
+
+  it('含 @ 的条目保持为精确地址，不被 normaliseDomain 扩成整个域名', () => {
+    const rules = readDomainRules(cfg)
+    expect(rules.own).toEqual(['ctstours.co.nz'])
+    expect(rules.ownAddresses).toEqual(['op3@asiascapeholidays.com', 'staff.person@gmail.com'])
+  })
+
+  it('没有点名地址时不多出 ownAddresses 字段（旧调用方形状不变）', () => {
+    expect(readDomainRules({ own_email_domains: ['ctstours.co.nz'] })).toEqual({ own: ['ctstours.co.nz'], trade: [] })
+  })
+
+  it('点名的人是自己人（即使他的域名在同行名单里）；同域其他人仍是同行；点名私人邮箱不连累其他 Gmail 客人', () => {
+    const rules = readDomainRules(cfg)
+    expect(contactKindOf(['op3@asiascapeholidays.com'], rules)).toBe('staff')
+    expect(contactKindOf(['other@asiascapeholidays.com'], rules)).toBe('trade')
+    expect(contactKindOf(['staff.person@gmail.com'], rules)).toBe('staff')
+    expect(contactKindOf(['real.customer@gmail.com'], rules)).toBe('retail')
+  })
+})

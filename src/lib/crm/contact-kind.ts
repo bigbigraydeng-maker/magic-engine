@@ -47,6 +47,8 @@ export interface DomainRules {
   own: string[]
   /** 同行 / 分销商的域名。 */
   trade: string[]
+  /** 点名的员工地址（own_email_domains 里含 @ 的条目，只认这一个地址，不扩成整个域名）。 */
+  ownAddresses?: string[]
 }
 
 export const EMPTY_RULES: DomainRules = { own: [], trade: [] }
@@ -191,6 +193,13 @@ export function contactKindOf(emails: readonly string[], rules: DomainRules): Co
   const trade = rules.trade.map(normaliseDomain).filter(Boolean)
   const domains = emails.map(domainOf).filter((d): d is string => !!d)
 
+  // 点名的员工地址：只认这一个地址，不扩成整个域名。
+  const ownAddresses = rules.ownAddresses ?? []
+  if (ownAddresses.length > 0) {
+    const addresses = emails.map((e) => e.trim().toLowerCase())
+    if (addresses.some((a) => ownAddresses.includes(a))) return 'staff'
+  }
+
   // 员工优先 —— 两边都命中时说「自己人」更准确，也更该被排除。
   if (domains.some((d) => own.some((o) => domainMatches(d, o)))) return 'staff'
   if (domains.some((d) => trade.some((t) => domainMatches(d, t)))) return 'trade'
@@ -220,7 +229,21 @@ export function readDomainRules(leadsConfig: unknown): DomainRules {
           ),
         )
       : []
-  return { own: list(cfg.own_email_domains), trade: list(cfg.trade_domains) }
+  // 含 @ 的条目是点名的员工地址，必须原样保留 —— 走 normaliseDomain 会被扩成
+  // 整个域名，把同域的其他真人（客人、同行）一起当成员工。
+  const rawOwn = Array.isArray(cfg.own_email_domains)
+    ? cfg.own_email_domains.filter((x): x is string => typeof x === 'string')
+    : []
+  const own = list(rawOwn.filter((x) => !x.includes('@')))
+  const ownAddresses = Array.from(
+    new Set(
+      rawOwn
+        .filter((x) => x.includes('@'))
+        .map((x) => x.trim().toLowerCase())
+        .filter((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)),
+    ),
+  )
+  return { own, trade: list(cfg.trade_domains), ...(ownAddresses.length > 0 ? { ownAddresses } : {}) }
 }
 
 /** 卡片上那个小标记。终端客户不标 —— 他们是默认，标了只是噪音。 */

@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod'
+import { CUSTOMER_SPOKE_VALUES, verifyCustomerSpoke, type CustomerSpokeVerdict } from './customer-spoke'
 
 /** CTS（旅游）关心的信息种类；行业差异走这个枚举的版本，不进共享流水线。 */
 export const FACT_KEYS = [
@@ -70,11 +71,16 @@ export const RawAnalysisSchema = z.object({
   inquiries: z.array(RawInquirySchema).max(40).default([]),
   /** Invalid model rows are counted here so they remain visible after parsing. */
   parseDroppedInquiries: z.number().int().min(0).default(0),
+  /** 客人开没开口；模型给的值不合规一律按 unclear / null 处理，不让整通分析作废。 */
+  customerSpoke: z.enum(CUSTOMER_SPOKE_VALUES).catch('unclear'),
+  customerSpokeQuote: z.string().max(500).nullable().catch(null),
 })
 type ParsedRawAnalysis = z.infer<typeof RawAnalysisSchema>
-export type RawAnalysis = Omit<ParsedRawAnalysis, 'inquiries' | 'parseDroppedInquiries'> & {
+export type RawAnalysis = Omit<ParsedRawAnalysis, 'inquiries' | 'parseDroppedInquiries' | 'customerSpoke' | 'customerSpokeQuote'> & {
   inquiries?: RawInquiry[]
   parseDroppedInquiries?: number
+  customerSpoke?: CustomerSpokeVerdict
+  customerSpokeQuote?: string | null
 }
 
 export interface VerifiedAnalysis {
@@ -86,6 +92,8 @@ export interface VerifiedAnalysis {
   droppedFacts: number
   /** 原话、说话人或答复结构无法核实的问题条数。 */
   droppedInquiries: number
+  /** 客人本人有没有开口（核验后）；语音信箱 / 没出声 = 'no'，说不清 = 'unclear'。 */
+  customerSpoke?: CustomerSpokeVerdict
 }
 
 export const norm = (s: string) => s.toLowerCase().replace(/[\s\u3000"'“”‘’.,，。!！?？、:;；]+/g, '')
@@ -435,16 +443,19 @@ export function verifyFacts(raw: RawAnalysis, transcript: string): VerifiedAnaly
     inquiries: inquiryResult.inquiries,
     droppedFacts: raw.facts.length - kept.length,
     droppedInquiries: inquiryResult.droppedInquiries,
+    customerSpoke: verifyCustomerSpoke({ customerSpoke: raw.customerSpoke ?? 'unclear', customerSpokeQuote: raw.customerSpokeQuote ?? null }, transcript),
   }
 }
 
 export const ANALYSIS_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['summary', 'language', 'facts', 'inquiries'],
+  required: ['summary', 'language', 'customerSpoke', 'customerSpokeQuote', 'facts', 'inquiries'],
   properties: {
     summary: { type: 'string' },
     language: { type: ['string', 'null'] },
+    customerSpoke: { type: 'string', enum: [...CUSTOMER_SPOKE_VALUES] },
+    customerSpokeQuote: { type: ['string', 'null'] },
     facts: {
       type: 'array',
       items: {

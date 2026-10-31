@@ -106,8 +106,29 @@ export interface ClassifySenderInput {
   /**
    * 客户自己的邮件域名（比如 `ctstours.co.nz`）。同域来信 = 内部同事，不建人。
    * 不传就不做这项判断 —— 不猜。
+   * 条目也可以是点名的员工地址（含 @，只认这一个地址）。
    */
   ownDomains?: string[]
+}
+
+/**
+ * 这个地址算不算「自己人」：命中自家域名，或命中名单里点名的员工地址（条目含 "@"，只认那一个地址，不扩成整个域名）。
+ * 纯函数；不传名单就不判（不猜）。
+ */
+export function isOwnAddress(address: string, ownEntries: readonly string[] | undefined): boolean {
+  const parts = split(address)
+  if (!parts) return false
+  const full = address.trim().toLowerCase()
+  for (const raw of ownEntries ?? []) {
+    const entry = raw.trim().toLowerCase()
+    if (!entry) continue
+    if (entry.includes('@')) {
+      if (entry === full) return true
+    } else if (entry === parts.domain) {
+      return true
+    }
+  }
+  return false
 }
 
 /**
@@ -123,8 +144,7 @@ export function classifySender(input: ClassifySenderInput): SenderVerdict {
 
   // 内部同事之间的邮件。**先判这条** —— 公司自己的 accounts@ 既是内部的
   // 也是机器人，两条都命中时说「是同事」比说「是机器人」更准确。
-  const own = (input.ownDomains ?? []).map((d) => d.trim().toLowerCase()).filter(Boolean)
-  if (own.includes(domain)) return { kind: 'skip', why: '公司内部邮箱' }
+  if (isOwnAddress(input.address, input.ownDomains)) return { kind: 'skip', why: '公司内部邮箱' }
 
   if (looksRobotic(local)) {
     return { kind: 'skip', why: '系统发件人（noreply 一类）' }

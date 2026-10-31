@@ -29,6 +29,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { isAutoReply } from '@/lib/microsoft/auto-reply'
 import { isAutomatedTouch } from '../automated-touch'
+import { isVoicemailOrSilentCall } from '@/lib/crm/customer-spoke'
 import { ENQUIRY_REVIVE_ACTOR, ENQUIRY_SCREEN_ACTOR } from '../actors'
 import { engagementFromMetadata } from '../segments'
 import { NOT_ENQUIRY_STAGE_KEY } from './types'
@@ -78,7 +79,8 @@ export function isRealInbound(t: Pick<InboundTouch, 'channel' | 'source' | 'meta
   // 来电只算真的聊上了的：外呼接通（reached）或客人打进来、通话系统记为「聊上了」（outcome='spoke'）。
   // 打进来的电话 `reached` 恒为 false（通话系统只对外呼算 reached），所以必须再认 outcome；
   // 漏接（missed_inbound）不是「他说了话」。
-  if (t.channel === 'phone') return md?.reached === true || md?.outcome === 'spoke'
+  // 分析确认客人没出声（语音信箱 / 对方没说话）的不算他说了话。
+  if (t.channel === 'phone') return (md?.reached === true || md?.outcome === 'spoke') && !isVoicemailOrSilentCall(md)
   return true
 }
 

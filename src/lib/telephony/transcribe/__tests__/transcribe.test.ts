@@ -124,6 +124,7 @@ function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<Analysis
   const receipts: string[] = []
   const marks: string[] = []
   const stances: string[] = []
+  const spokes: string[] = []
   const store: AnalysisStore = {
     async getCall() { return call },
     async getConnection() { return conn },
@@ -147,8 +148,9 @@ function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<Analysis
     async saveAnalysis(r) { analyses.push({ callId: r.callId, summary: r.analysis.summary, facts: r.analysis.facts, dropped: r.analysis.droppedFacts }); return 'an-1' },
     async markTouchpoint(tp, _c, an) { if (over.markFails) throw new Error('boom'); marks.push(`${tp}:${an}`) },
     async markCallStance(tp, _c, an, stance) { if (over.stanceFails) throw new Error('boom'); stances.push(`${tp}:${an}:${stance}`); return 'written' },
+    async markCustomerSpoke(tp, _c, an, verdict) { spokes.push(`${tp}:${an}:${verdict}`); return 'written' },
   }
-  return { store, call, files, transcripts, analyses, receipts, marks, stances }
+  return { store, call, files, transcripts, analyses, receipts, marks, stances, spokes }
 }
 
 const ref = { clientId: 'client-1', provider: 'twilio', providerCallId: 'CA1' }
@@ -480,5 +482,53 @@ describe('客人在电话里说「现在还没准备好」→ 记到 CRM 触点�
     await runCallAnalysis(gavinDeps(m.store), ref)
     expect(m.marks).toEqual(['tp-1:an-1'])
     expect(m.stances).toEqual([])
+  })
+})
+
+
+describe('客人开没开口（WP-1a）：语音信箱不能当成聊过', () => {
+  const VOICEMAIL = '声道2：Not available. At the tone, please record your message.\n声道1：Hi, this is Baker calling from China Travel Service about your enquiry.'
+  const CHAT = '声道2：Hello, yes this is Kam speaking.\n声道1：Hi Kam, this is Baker from China Travel Service.'
+  const rawWith = (customerSpoke: 'yes' | 'no' | 'unclear', customerSpokeQuote: string | null): RawAnalysis => ({
+    summary: '', language: 'en', facts: [], customerSpoke, customerSpokeQuote,
+  })
+
+  it('verifyFacts 带出核验后的结论；模型没给 → unclear', () => {
+    expect(verifyFacts(rawWith('yes', 'yes this is Kam speaking'), CHAT).customerSpoke).toBe('yes')
+    expect(verifyFacts({ summary: '', language: null, facts: [] }, CHAT).customerSpoke).toBe('unclear')
+  })
+
+  it('模型说 yes 但原话不在转写里 → unclear；原话是空/纯标点 → unclear', () => {
+    expect(verifyFacts(rawWith('yes', 'I would love to book'), CHAT).customerSpoke).toBe('unclear')
+    expect(verifyFacts(rawWith('yes', '...'), CHAT).customerSpoke).toBe('unclear')
+    expect(verifyFacts(rawWith('yes', null), CHAT).customerSpoke).toBe('unclear')
+  })
+
+  it('语音信箱：模型把问候语当客人说话 → no；把员工留言当客人说话 → 降为 unclear（不声称聊过）', () => {
+    expect(verifyFacts(rawWith('yes', 'At the tone, please record your message'), VOICEMAIL).customerSpoke).toBe('no')
+    expect(verifyFacts(rawWith('yes', 'this is Baker calling from China Travel Service'), VOICEMAIL).customerSpoke).toBe('unclear')
+  })
+
+  it('模型说 no：有语音信箱问候语或只有一个声道出声 → no；两边都说了话却说 no → unclear（没证据不下结论）', () => {
+    expect(verifyFacts(rawWith('no', null), VOICEMAIL).customerSpoke).toBe('no')
+    expect(verifyFacts(rawWith('no', null), '声道2：Is available.').customerSpoke).toBe('no')
+    expect(verifyFacts(rawWith('no', null), CHAT).customerSpoke).toBe('unclear')
+  })
+
+  it('流水线把核验后的结论记到触点上', async () => {
+    const m = makeStore()
+    const analyze = async () => ({ raw: rawWith('no', null), model: 'm-a' })
+    await runCallAnalysis(goodDeps(m.store, { transcribe: async () => ({ text: VOICEMAIL, model: 'm-t' }), analyze }), ref)
+    expect(m.spokes).toEqual(['tp-1:an-1:no'])
+    expect(m.receipts).toContain('customer_spoke:written')
+  })
+
+  it('触点没标上分析（标记失败）→ 不写结论；分析失败 → 不写结论', async () => {
+    const m = makeStore({ markFails: true })
+    await runCallAnalysis(goodDeps(m.store), ref)
+    expect(m.spokes).toEqual([])
+    const m2 = makeStore()
+    await runCallAnalysis(goodDeps(m2.store, { analyze: async () => { throw new Error('vendor down') } }), ref)
+    expect(m2.spokes).toEqual([])
   })
 })
