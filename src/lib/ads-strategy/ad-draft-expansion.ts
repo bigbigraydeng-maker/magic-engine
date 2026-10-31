@@ -25,6 +25,7 @@ import {
   type DraftProblem,
 } from './ad-draft'
 import { isMetaObjectId } from '@/lib/meta/owned-ad-object'
+import { lockPlacements } from './placement-lock'
 import { audienceReadinessError, type AudienceFact } from './draft-audiences'
 
 const CTA_FOR_KIND: Readonly<Record<DraftKind, string>> = {
@@ -79,6 +80,7 @@ export function expandedDraftProblems(d: AdDraft): DraftProblem[] {
   return [
     ...budgetProblems(d),
     ...attachIdProblems(d),
+    ...placementProblems(d),
     ...(Array.isArray(d.adSets) ? adSetListProblems(d) : singleSetExtraProblems(d)),
   ]
 }
@@ -95,6 +97,36 @@ function attachIdProblems(d: AdDraft): DraftProblem[] {
     problems.push({ field: 'existingAdSetId', message: '加组和加广告要分成两张卡' })
   }
   return problems
+}
+
+function placementProblems(d: AdDraft): DraftProblem[] {
+  const problems = placementListProblems(d.placements, 'placements')
+  if (d.existingAdSetId && (d.placements?.length ?? 0) > 0) {
+    problems.push({ field: 'placements', message: '往已有广告组加广告不会改它的版位。版位要在新建广告组时锁。' })
+  }
+  if (!Array.isArray(d.adSets)) return problems
+  d.adSets.forEach((set, i) => {
+    if (!isAdSet(set)) return
+    problems.push(...placementListProblems(set.placements, `adSets[${i}].placements`))
+  })
+  return problems
+}
+
+const PLACEMENT_LIST = '版位必须是一列文字。数字、空值或别的格式不能锁。'
+
+function placementListProblems(tokens: unknown, field: string): DraftProblem[] {
+  const list = placementTokens(tokens)
+  if (!list) return [{ field, message: PLACEMENT_LIST }]
+  if (list.length === 0) return []
+  const locked = lockPlacements(list)
+  return locked.ok ? [] : [{ field, message: locked.message }]
+}
+
+/** 缺省当没写。不是字符串数组就返回 null，调用方记一条草稿问题，不去锁。 */
+function placementTokens(tokens: unknown): string[] | null {
+  if (tokens == null) return []
+  if (!Array.isArray(tokens) || tokens.some((item) => typeof item !== 'string')) return null
+  return tokens
 }
 
 /**
@@ -500,7 +532,10 @@ function adSetFromPromoStep(
   if (countries.length === 0 && cities.length === 0) {
     problems.push({ field: `${field}.targeting`, message: '这一步没有投放地区。受众编号不能代替投放地区，这里不猜国家' })
   }
-  if (audienceIds === null || excluded === null || (countries.length === 0 && cities.length === 0)) return null
+  const placements = placementsForStep(settings.placements, field, problems)
+  if (audienceIds === null || excluded === null || placements === null || (countries.length === 0 && cities.length === 0)) {
+    return null
+  }
   const set: AdDraftAdSet = {
     name: step.id,
     dailyBudget: settings.daily_budget_cents / 100,
@@ -510,9 +545,30 @@ function adSetFromPromoStep(
     ...(settings.targeting?.age_max !== undefined ? { ageMax: settings.targeting.age_max } : {}),
     ...(audienceIds.length > 0 ? { audienceIds } : {}),
     ...(excluded.length > 0 ? { excludedAudienceIds: excluded } : {}),
+    ...(placements.length > 0 ? { placements } : {}),
     creatives: [],
   }
   return { set, cents: settings.daily_budget_cents }
+}
+
+/** 空列表不写进广告组。不是文字列表、或认不出的词，记一条问题，这一组不返回。 */
+function placementsForStep(
+  tokens: unknown,
+  field: string,
+  problems: DraftProblem[],
+): string[] | null {
+  const list = placementTokens(tokens)
+  if (!list) {
+    problems.push({ field: `${field}.placements`, message: PLACEMENT_LIST })
+    return null
+  }
+  if (list.length === 0) return []
+  const locked = lockPlacements(list)
+  if (!locked.ok) {
+    problems.push({ field: `${field}.placements`, message: locked.message })
+    return null
+  }
+  return [...list]
 }
 
 function audienceIdsFromRef(ref: string, field: string, problems: DraftProblem[]): string[] | null {
