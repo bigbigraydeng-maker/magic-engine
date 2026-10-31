@@ -14,6 +14,11 @@ import { CRM_STAGE_MANUAL_SOURCE, crmDealSourceRef } from './crm-deal-record'
 const LEFT_ALONE = new Set(['confirmed', 'in_doubt', 'sending'])
 const STOPPABLE = new Set(['queued', 'failed'])
 
+/** Written on the deal when a payment reversal voids it. Restore matches this exact note. */
+export const PAYMENT_VOID_REJECT_NOTE = '收款已撤销，这笔成交还没发给广告平台，已作废。'
+/** Written on the unsent send row the reversal stopped. Reopen matches this exact error. */
+export const PAYMENT_VOID_STOP_ERROR = '收款已撤销，这条还没发出去，已停住。'
+
 const VOIDED = '这笔款已撤销。还没发给广告平台的成交记录已作废，不会再发出去。'
 const ALREADY_SENT = '这笔款已撤销。已经发给广告平台的成交留着，撤不回来，请到广告后台核对。'
 const MAYBE_SENT = '这笔款已撤销。有一笔成交可能已经发给广告平台，记录留着没改，请到广告后台核对。'
@@ -129,7 +134,7 @@ async function stopOpenSends(db: SupabaseClient, ids: string[]): Promise<void> {
   if (ids.length === 0) return
   const { error } = await db.from('me_conversion_writebacks').update({
     status: 'failed_permanent',
-    last_error: '收款已撤销，这条还没发出去，已停住。',
+    last_error: PAYMENT_VOID_STOP_ERROR,
     last_error_code: null,
     updated_at: new Date().toISOString(),
   }).in('id', ids).in('status', ['queued', 'failed'])
@@ -142,7 +147,7 @@ async function rejectDeals(db: SupabaseClient, ids: string[], actor: string | nu
   const { error } = await db.from('me_sale_outcomes').update({
     review_status: 'rejected',
     reject_reason: 'not_real_sale',
-    reject_note: '收款已撤销，这笔成交还没发给广告平台，已作废。',
+    reject_note: PAYMENT_VOID_REJECT_NOTE,
     reviewed_by: actor,
     reviewed_at: now,
     updated_at: now,

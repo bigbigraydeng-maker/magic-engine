@@ -57,6 +57,16 @@ export type DealIo = {
   loadApprovedPurchases(clientId: string, contactId: string): Promise<ApprovedPurchase[]>
   loadDncTouches(clientId: string, contactId: string): Promise<DncTouch[] | null>
   insertOutcome(row: IntakeRow): Promise<{ ok: true; id: string } | { ok: false; duplicate: boolean }>
+  /** The row that already owns this source ref, if the insert collided. */
+  loadExistingSourceDeal(clientId: string, sourceKind: string, sourceRef: string): Promise<ExistingSourceDeal | null>
+  /** Put a payment-voided deal back to pending review and reopen its stopped send. */
+  restoreVoidedDeal(id: string, row: IntakeRow, stoppedSendIds: string[]): Promise<{ ok: boolean }>
+}
+
+export type ExistingSourceDeal = {
+  id: string
+  voidedByPaymentReversal: boolean
+  stoppedSendIds: string[]
 }
 
 export type DealRecordResult = {
@@ -74,6 +84,7 @@ const MSG = {
   recorded: '记下了，等审核后再发给广告平台。',
   dnc: '记下了，等审核。这位客人在拒联名单上，审核通过也不会发给广告平台。',
   already: '这笔已经记过了，没有再插入一条。',
+  restored: '这笔之前因为撤销收款作废了。款又记下之后，已重新打开，等审核后再发给广告平台。',
   notLive: '这位客户还没开到正式发送，这笔没有写成成交记录。',
   noMatch: '没有邮箱、电话或私信身份，成交记录没有写成。',
   missingParty: '订单没有人数，不能按标价估算，成交记录没有写成。',
@@ -264,12 +275,36 @@ async function insertDeal(
     return logged(noKey ? 'no_match_key' : 'unpriced', false, noKey ? MSG.noMatch : MSG.unpriced)
   }
   const inserted = await io.insertOutcome(built.row)
-  if (!inserted.ok && inserted.duplicate) {
-    return { ...base(true, 'already_recorded', MSG.already), alreadyRecorded: true, advanceStage: input.advanceOnDedupe }
-  }
+  if (!inserted.ok && inserted.duplicate) return resolveDuplicate(io, built.row, input, contact)
   if (!inserted.ok) return logged('record_failed', false, MSG.failed)
   const dnc = input.warnDnc ? await dncOf(io, input, contact.doNotContact) : false
   return { ...base(true, null, dnc ? MSG.dnc : MSG.recorded), recorded: true, outcomeId: inserted.id, advanceStage: input.advanceOnDedupe, doNotContact: dnc }
+}
+
+async function resolveDuplicate(
+  io: DealIo,
+  row: IntakeRow,
+  input: FinishInput,
+  contact: { doNotContact: boolean },
+): Promise<DealRecordResult> {
+  const sourceRef = row.source_ref
+  if (!sourceRef) return already(input)
+  const existing = await io.loadExistingSourceDeal(row.client_id, row.source_kind, sourceRef)
+  if (!existing?.voidedByPaymentReversal) return already(input)
+  const restored = await io.restoreVoidedDeal(existing.id, row, existing.stoppedSendIds)
+  if (!restored.ok) return logged('record_failed', false, MSG.failed)
+  const dnc = input.warnDnc ? await dncOf(io, input, contact.doNotContact) : false
+  return {
+    ...base(true, null, dnc ? MSG.dnc : MSG.restored),
+    recorded: true,
+    outcomeId: existing.id,
+    advanceStage: input.advanceOnDedupe,
+    doNotContact: dnc,
+  }
+}
+
+function already(input: FinishInput): DealRecordResult {
+  return { ...base(true, 'already_recorded', MSG.already), alreadyRecorded: true, advanceStage: input.advanceOnDedupe }
 }
 
 async function resolveAmount(

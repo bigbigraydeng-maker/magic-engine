@@ -38,6 +38,8 @@ function memory(over: Partial<DealIo> = {}): Memory {
     loadPriceTexts: async () => ({ departurePriceText: null, tourPriceText: 'From NZD $4,999 per person' }),
     loadApprovedPurchases: async () => [],
     loadDncTouches: async () => [],
+    loadExistingSourceDeal: async () => null,
+    restoreVoidedDeal: async () => ({ ok: false }),
     insertOutcome: async (row) => {
       if (inserted.some((r) => r.source_ref === row.source_ref && r.source_kind === row.source_kind)) {
         return { ok: false, duplicate: true }
@@ -172,6 +174,48 @@ describe('recordMilestoneDeal', () => {
     const again = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
     expect(again).toMatchObject({ alreadyRecorded: true, recorded: false })
     expect(io.inserted).toHaveLength(1)
+  })
+
+  it('reopens a deal voided by a payment reversal instead of treating the clash as already recorded', async () => {
+    const restored: string[] = []
+    const io = memory({
+      insertOutcome: async () => ({ ok: false, duplicate: true }),
+      loadExistingSourceDeal: async () => ({ id: 'voided-1', voidedByPaymentReversal: true, stoppedSendIds: ['wb-1'] }),
+      restoreVoidedDeal: async (id, _row, ids) => {
+        restored.push(id, ...ids)
+        return { ok: true }
+      },
+    })
+    const result = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
+    expect(result).toMatchObject({ recorded: true, alreadyRecorded: false, outcomeId: 'voided-1', reason: null, advanceStage: false })
+    expect(result.message).toContain('重新打开')
+    expect(result.message).toContain('审核')
+    expect(restored).toEqual(['voided-1', 'wb-1'])
+  })
+
+  it('does not reopen a rejection that was not caused by undoing the payment', async () => {
+    let calls = 0
+    const io = memory({
+      insertOutcome: async () => ({ ok: false, duplicate: true }),
+      loadExistingSourceDeal: async () => ({ id: 'human-rej', voidedByPaymentReversal: false, stoppedSendIds: [] }),
+      restoreVoidedDeal: async () => {
+        calls += 1
+        return { ok: true }
+      },
+    })
+    const result = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
+    expect(result).toMatchObject({ alreadyRecorded: true, recorded: false })
+    expect(calls).toBe(0)
+  })
+
+  it('a failed reopen is not reported as already recorded', async () => {
+    const io = memory({
+      insertOutcome: async () => ({ ok: false, duplicate: true }),
+      loadExistingSourceDeal: async () => ({ id: 'voided-1', voidedByPaymentReversal: true, stoppedSendIds: ['wb-1'] }),
+      restoreVoidedDeal: async () => ({ ok: false }),
+    })
+    const result = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
+    expect(result).toMatchObject({ recorded: false, alreadyRecorded: false, reason: 'record_failed' })
   })
 
   it('uses the stored paid date, so an old payment stays outside the send window', async () => {
