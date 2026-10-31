@@ -112,10 +112,21 @@ function placementProblems(d: AdDraft): DraftProblem[] {
   return problems
 }
 
-function placementListProblems(tokens: readonly string[] | undefined, field: string): DraftProblem[] {
-  if (!tokens || tokens.length === 0) return []
-  const locked = lockPlacements(tokens)
+const PLACEMENT_LIST = '版位必须是一列文字。数字、空值或别的格式不能锁。'
+
+function placementListProblems(tokens: unknown, field: string): DraftProblem[] {
+  const list = placementTokens(tokens)
+  if (!list) return [{ field, message: PLACEMENT_LIST }]
+  if (list.length === 0) return []
+  const locked = lockPlacements(list)
   return locked.ok ? [] : [{ field, message: locked.message }]
+}
+
+/** 缺省当没写。不是字符串数组就返回 null，调用方记一条草稿问题，不去锁。 */
+function placementTokens(tokens: unknown): string[] | null {
+  if (tokens == null) return []
+  if (!Array.isArray(tokens) || tokens.some((item) => typeof item !== 'string')) return null
+  return tokens
 }
 
 /**
@@ -521,7 +532,7 @@ function adSetFromPromoStep(
   if (countries.length === 0 && cities.length === 0) {
     problems.push({ field: `${field}.targeting`, message: '这一步没有投放地区。受众编号不能代替投放地区，这里不猜国家' })
   }
-  const placements = placementsForStep(settings.placements ?? [], field, problems)
+  const placements = placementsForStep(settings.placements, field, problems)
   if (audienceIds === null || excluded === null || placements === null || (countries.length === 0 && cities.length === 0)) {
     return null
   }
@@ -540,19 +551,24 @@ function adSetFromPromoStep(
   return { set, cents: settings.daily_budget_cents }
 }
 
-/** 空列表不写进广告组。认不出的词记一条问题，这一组不返回。 */
+/** 空列表不写进广告组。不是文字列表、或认不出的词，记一条问题，这一组不返回。 */
 function placementsForStep(
-  tokens: readonly string[],
+  tokens: unknown,
   field: string,
   problems: DraftProblem[],
 ): string[] | null {
-  if (tokens.length === 0) return []
-  const locked = lockPlacements(tokens)
+  const list = placementTokens(tokens)
+  if (!list) {
+    problems.push({ field: `${field}.placements`, message: PLACEMENT_LIST })
+    return null
+  }
+  if (list.length === 0) return []
+  const locked = lockPlacements(list)
   if (!locked.ok) {
     problems.push({ field: `${field}.placements`, message: locked.message })
     return null
   }
-  return [...tokens]
+  return [...list]
 }
 
 function audienceIdsFromRef(ref: string, field: string, problems: DraftProblem[]): string[] | null {

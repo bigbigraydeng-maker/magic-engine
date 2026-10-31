@@ -89,6 +89,19 @@ describe('草稿接受计划里的版位', () => {
     expect(bad.some((p) => p.field === 'placements')).toBe(true)
   })
 
+  it('版位不是文字列表时返回草稿问题，不抛错', () => {
+    const cases = [[123], [null], {}] as const
+    for (const placements of cases) {
+      const bad = validateDraft({ ...DRAFT, placements: placements as unknown as string[] })
+      expect(bad.some((p) => p.field === 'placements' && p.message.includes('一列文字'))).toBe(true)
+    }
+    const set = {
+      name: '组', dailyBudget: 30, geoCountries: ['NZ'], creatives: DRAFT.creatives, placements: [123],
+    }
+    const onSet = validateDraft({ ...DRAFT, adSets: [set] as unknown as AdDraft['adSets'] })
+    expect(onSet.some((p) => p.field === 'adSets[0].placements' && p.message.includes('一列文字'))).toBe(true)
+  })
+
   it('计划步骤上的版位抄到广告组；坏词则不返回广告组', () => {
     const ok = readPromoPhaseAdSets(promo(['instagram_reels']), 'p1')
     expect(ok.problems).toEqual([])
