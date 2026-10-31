@@ -45,7 +45,7 @@ const DB_OBJECT_PREFIX = ['tour', 'catalog', ''].join('_')
  * fixed column lists, never writes, and returns just the internal seat NUMBER (never the internal JSON) — its own
  * self-test below pins that down too.
  */
-const OPEN_MODULES = new Set(['publish-contract', 'types', 'api-contract', 'catalog-contract', 'publish-request-feed', 'booking-facts', 'sales-facts'])
+const OPEN_MODULES = new Set(['publish-contract', 'types', 'api-contract', 'catalog-contract', 'publish-request-feed', 'booking-facts', 'sales-facts', 'deal-price-facts'])
 /** store-publish is importable only for these names. */
 const PUBLISHED_READER_MODULE = 'store-publish'
 const PUBLISHED_READER_NAMES = new Set([
@@ -184,6 +184,21 @@ describe('tour catalog draft boundary', () => {
       'BOOKING_OPTION_DEPARTURE_COLUMNS',
       'BOOKING_OPTION_TOUR_COLUMNS',
     ])
+  })
+
+  it('the deal price reader only reads the two price columns, never writes, and imports no CRM code', () => {
+    const facts = readFileSync(join(process.cwd(), 'src', 'lib', 'tour-catalog', 'deal-price-facts.ts'), 'utf8')
+    const tables = facts.match(new RegExp(`${DB_OBJECT_PREFIX}[a-z_]+`, 'g')) ?? []
+    expect(Array.from(new Set(tables)).sort()).toEqual([
+      `${DB_OBJECT_PREFIX}departures`,
+      `${DB_OBJECT_PREFIX}tours`,
+    ])
+    expect(/\.(insert|update|upsert|delete|rpc)\(/.test(facts)).toBe(false)
+    expect(/from\s+['"][^'"]*\/crm\//.test(facts)).toBe(false)
+    expect(facts).toContain(`DEAL_PRICE_TOUR_COLUMNS = 'id, display_price_text'`)
+    expect(facts).toContain(`DEAL_PRICE_DEPARTURE_COLUMNS = 'id, price_text_override'`)
+    const selects = Array.from(facts.matchAll(/\.select\(([^)]*)\)/g)).map((m) => m[1].trim())
+    expect(Array.from(new Set(selects)).sort()).toEqual(['DEAL_PRICE_DEPARTURE_COLUMNS', 'DEAL_PRICE_TOUR_COLUMNS'])
   })
 
   it('the sales facts reader only reads the two catalog tables, never writes, imports no CRM code and never returns the internal JSON', () => {
