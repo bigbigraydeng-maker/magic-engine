@@ -48,6 +48,7 @@ import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-vo
 import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
 import { planDraftFromPrescription } from './plan-draft-from-prescription'
 import { crmEmailSendReceipt } from './crm-email-send-receipt'
+import { clientWeeklyReportFanOut, clientWeeklyReportRunOne } from './client-weekly-report'
 
 export const cloudFunctions = [
   promoPlanDailyWatch,
@@ -84,6 +85,8 @@ export const cloudFunctions = [
   competitorWatchRunOne,
   aiVisibilityWeeklyFanOut,
   aiVisibilityTrackerRunOne,
+  clientWeeklyReportFanOut,
+  clientWeeklyReportRunOne,
   reelBatchRender,
   adsD3AutoPause,
   leadSheetSyncFanOut,
