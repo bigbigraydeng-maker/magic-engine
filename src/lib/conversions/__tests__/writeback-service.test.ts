@@ -537,6 +537,65 @@ describe('试运行模式', () => {
   })
 })
 
+describe('允许发送的事件名单', () => {
+  it('名单里没有的事件停在试运行，不预检也不发送', async () => {
+    seed(db, {
+      client: { leads_config: { capi_allowed_events: ['Purchase', 'BalancePaid'] } },
+      outcome: { outcome_kind: 'lead', amount_minor: null, currency: null },
+    })
+    const preflight = vi.fn(async () => ({ ok: true, detail: {} }))
+    const w = makeWriter({ preflight })
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.status).toBe('dry_run')
+    expect(r.message).toContain('Lead')
+    expect(r.message).toContain('试运行')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+    expect(preflight).not.toHaveBeenCalled()
+    expect(db.tables.me_conversion_writebacks[0].status).toBe('dry_run')
+  })
+
+  it('名单里有的事件，正式客户照常发送', async () => {
+    seed(db, { client: { leads_config: { capi_allowed_events: ['Purchase', 'BalancePaid'] } } })
+    const w = makeWriter()
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.status).toBe('confirmed')
+    expect(w.sendSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('没填名单时保持原来的行为，咨询事件也会发送', async () => {
+    seed(db, { outcome: { outcome_kind: 'lead', amount_minor: null, currency: null } })
+    const w = makeWriter()
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.status).toBe('confirmed')
+    expect(w.sendSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('名单格式不对就停住，即使客户已是正式模式', async () => {
+    seed(db, { client: { leads_config: { capi_allowed_events: 'Purchase' } } })
+    const w = makeWriter()
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.status).toBe('dry_run')
+    expect(r.message).toContain('格式不对')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('还在试运行的客户，事件不在名单里时原因写的是名单，不是普通试运行', async () => {
+    seed(db, {
+      client: {
+        conversion_stage: 'dry_run',
+        leads_config: { capi_allowed_events: ['Purchase'] },
+      },
+      outcome: { outcome_kind: 'balance' },
+    })
+    const preflight = vi.fn(async () => ({ ok: true, detail: {} }))
+    const w = makeWriter({ preflight })
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.message).toContain('BalancePaid')
+    expect(r.message).not.toContain('预检')
+    expect(preflight).not.toHaveBeenCalled()
+  })
+})
+
 // ─────────────────────────────────────────────────────────────────────────
 describe('各种失败分档落到正确状态', () => {
   const cases: Array<[string, SendVerdict, string, boolean]> = [
