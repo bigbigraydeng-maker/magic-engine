@@ -1,9 +1,11 @@
 ---
 id: 2026-10-31-ads-health-outside-change-tag
 title: 广告健康页标出快照里对不上本系统动作记录的预算、新广告组和新广告
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-31
+done_on: 2026-10-31
+done_ref: pr:3434
 source: session:a0c6a0c6
 verify_how: 打开广告健康页，前后两次快照里预算变了或新出现广告组/广告、且附近没有本系统动作记录时，能看到「ME 外改动」以及位置、内容和新西兰时间；有对应动作记录的不出现
 ---
