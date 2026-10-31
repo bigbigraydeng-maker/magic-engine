@@ -5,6 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { selectLessonsForClient } from '@/lib/agent-learning/lesson-audience'
 import type {
   MemoryContext,
   MemoryLoadOptions,
@@ -133,6 +134,11 @@ async function loadPreferences(
  *   - is_active=true
  *   - confidence >= minConfidence（与客户级 preferences 同一门槛）
  *   - contradicted_count <= confirmed_count（被反例推翻更多次的经验不再注入）
+ *   - evidence.pilot_client_ids 有名单 → 只有名单里的客户读得到
+ *   - 没有这个字段 → 跟以前一样
+ *   - 字段在但内容不合法 → 谁都读不到
+ *
+ * 名单在取回之后于内存里比对，不把客户 id 拼进查询串（和行业值同一条红线）。
  *
  * 任何失败都降级为空数组，绝不阻塞 agent —— 与本文件其他 loader 行为一致。
  */
@@ -199,13 +205,7 @@ async function loadGlobalLessons(
       ...((industryRes.data ?? []) as GlobalLesson[]),
     ]
 
-    return (
-      merged
-        // 被推翻次数多于确认次数的经验不再注入（把偶然当规律的防线）
-        .filter((l) => (l.contradicted_count ?? 0) <= (l.confirmed_count ?? 1))
-        .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
-        .slice(0, 25)
-    )
+    return selectLessonsForClient(merged, clientId)
   } catch {
     return []
   }
