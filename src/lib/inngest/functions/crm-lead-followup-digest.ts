@@ -7,14 +7,8 @@
  * Inngest。这里每一段都要能单独看见成败 —— 挑名单 / 数积压 / 发信 / 记回执 ——
  * 一条 cron 路由里全做完，失败只会剩一行 `console.error`。
  *
- * ## 每个客户四段
+ * ## 每个客户三段
  *
- *   · `sheet-notes-<clientId>` —— 先把员工在表格上记的跟进（打过电话 / 打不通 /
- *                              约了回电）同步进触点表。**必须排在挑名单之前**：
- *                              这是「有没有人跟过他」的主要证据来源，漏了这一步，
- *                              名单里一半是已经被打过电话的人（实测 331 个里
- *                              224 个表格上有记录）—— 那正是 2026-09-03 那封
- *                              汇总信被叫停的死法。没配表格的客户直接跳过。
  *   · `scan-<clientId>`     —— 窗口内该逐条列的名单
  *   · `backlog-<clientId>`  —— 窗口外的积压数字。**单独一段、单独兜底**：
  *                              它是最贵、最可能出错的一次查询，而产出只是正文里
@@ -56,11 +50,6 @@ import {
   LEAD_WINDOW_DAYS,
 } from '@/lib/crm/lead-followup-due'
 import { sendLeadFollowupDigest } from '@/lib/crm/lead-followup-digest'
-import {
-  CLIENT_FOLLOWUP_SHEETS,
-  syncSheetFollowupNotes,
-  type SheetFollowupSyncSummary,
-} from '@/lib/crm/sheet-followup-sync'
 
 export const LEAD_DIGEST_JOB = 'crm-lead-followup-digest'
 export const LEAD_DIGEST_TZ = 'Pacific/Auckland'
@@ -92,8 +81,6 @@ export interface LeadFollowupClientReceipt {
   readonly backlog: number | null
   /** 表单触点指向的人在 `contacts` 里查不到的条数 —— 不静默跳过。 */
   readonly orphans: number
-  /** 这一轮从表格同步进来的跟进记录。没配表格的客户是 null。 */
-  readonly sheet_notes: SheetFollowupSyncSummary | null
   readonly sent: boolean
   readonly reason?: string
   readonly recipients: string[]
@@ -123,7 +110,6 @@ export interface LeadFollowupDigestDeps {
   findDue: typeof findLeadFollowupDue
   countBacklog: typeof countLeadFollowupBacklog
   sendDigest: typeof sendLeadFollowupDigest
-  syncSheetNotes: typeof syncSheetFollowupNotes
   env?: DigestEnv
 }
 
@@ -144,26 +130,12 @@ async function scanAndSendForClient(
   enabled: boolean,
   now: Date,
 ): Promise<LeadFollowupClientReceipt> {
-  // 🔴 先同步表格上的跟进记录，再挑名单。顺序反了名单就是错的。
-  const spreadsheetId = CLIENT_FOLLOWUP_SHEETS[client.id]
-  const sheetNotes = spreadsheetId
-    ? await step.run(`sheet-notes-${client.id}`, async () => {
-        // 这个函数自己吞异常、把原因放进 errors，所以这里拿到的一定是个摘要。
-        const s = await deps.syncSheetNotes(deps.supabase, { clientId: client.id, spreadsheetId })
-        if (s.errors.length > 0) {
-          console.warn(`[${LEAD_DIGEST_JOB}] 表格跟进记录同步有错 clientId=${client.id}:`, s.errors)
-        }
-        return s
-      })
-    : null
-
   const base = {
     client_id: client.id,
     client_name: client.name,
     recipients: [DIGEST_RECIPIENT],
     no_publish: true as const,
     created_at: now.toISOString(),
-    sheet_notes: sheetNotes,
   }
 
   const due = await step.run(`scan-${client.id}`, async () => {
@@ -355,5 +327,4 @@ export const crmLeadFollowupDigest = createLeadFollowupDigestFunction({
   findDue: findLeadFollowupDue,
   countBacklog: countLeadFollowupBacklog,
   sendDigest: sendLeadFollowupDigest,
-  syncSheetNotes: syncSheetFollowupNotes,
 })
