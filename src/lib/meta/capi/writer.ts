@@ -50,6 +50,8 @@ export type MetaCapiPayload = {
     event_time: number
     event_id: string
     action_source: string
+    /** Required by Meta when action_source is business_messaging. Absent on email and stage sends. */
+    messaging_channel?: 'messenger'
     user_data: Record<string, string[] | string>
     custom_data?: Record<string, unknown>
   }>
@@ -135,6 +137,14 @@ function userDataFor(outcome: OutcomeForSend, config: ClientSendConfig): Record<
   return userData
 }
 
+function messagingChannelFor(
+  converting: boolean,
+  actionSource: OutcomeForSend['actionSource'],
+): { messaging_channel: 'messenger' } | Record<string, never> {
+  if (converting || actionSource !== 'business_messaging') return {}
+  return { messaging_channel: 'messenger' }
+}
+
 function customDataFor(outcome: OutcomeForSend): Record<string, unknown> | undefined {
   const money = moneyData(outcome)
   if (!outcome.conversionLeadEventName) return money
@@ -169,6 +179,7 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
       // 普通事件沿用来源渠道。线索阶段回传按官方要求用 system_generated。
       action_source: converting ? 'system_generated' : outcome.actionSource,
       user_data: userDataFor(outcome, config),
+      ...messagingChannelFor(converting, outcome.actionSource),
     }
     const custom = customDataFor(outcome)
     if (custom) event.custom_data = custom
