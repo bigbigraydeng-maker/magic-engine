@@ -334,4 +334,29 @@ describe('GET outcomes · 已报价排队和成交下一步', () => {
     expect(body.outcomes.map((o: Row) => o.id)).toEqual(['older-open'])
     expect(body.outcomes[0].companion_expected).toBe(true)
   })
+
+  it('阶段发送带上设置里的阶段名，方便和平台上的那一条对上', async () => {
+    clientConfig = { capi_conversion_leads: true, capi_conversion_deal_stage_key: 'balance_received' }
+    rows = [
+      {
+        id: DEAL,
+        client_id: CLIENT,
+        outcome_kind: 'purchase',
+        review_status: 'approved',
+        meta_lead_id: LEAD,
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [
+          { status: 'confirmed', event_id: DEAL },
+          { status: 'in_doubt', event_id: `${DEAL}:conversion-stage` },
+        ],
+      },
+    ]
+    const res = await get('review_status=approved&send_status=in_doubt,failed')
+    const body = await res.json()
+    const stage = body.outcomes[0].me_conversion_writebacks.find(
+      (wb: { event_id?: string }) => wb.event_id === `${DEAL}:conversion-stage`,
+    )
+    expect(stage.stage_name).toBe('balance_received')
+    expect(body.outcomes[0].me_conversion_writebacks[0].stage_name).toBeUndefined()
+  })
 })

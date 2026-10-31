@@ -100,7 +100,7 @@ describe('recordQualifiedStageLead', () => {
     const row = db.tables.me_sale_outcomes[0]
     expect(row.review_status).toBe('approved')
     expect(row.reviewed_by).toBe('system:crm-qualified-lead')
-    expect(row.source_ref).toBe(`crm_qualified:${CONTACT}:quoted`)
+    expect(row.source_ref).toBe(`crm_qualified:${LEAD}:quoted`)
     expect(row.outcome_kind).toBe('lead')
     expect(row.meta_lead_id).toBe(LEAD)
     expect(send).toHaveBeenCalledTimes(1)
@@ -144,6 +144,93 @@ describe('recordQualifiedStageLead', () => {
     expect(db.tables.me_sale_outcomes).toHaveLength(1)
     expect(send).toHaveBeenCalledTimes(1)
     expect(send.mock.calls[0]?.[0]).toBe(String(db.tables.me_sale_outcomes[0].id))
+  })
+
+  it('sends again when the same contact reaches the stage on a new form id', async () => {
+    const db = fakeDb()
+    db.tables.clients.push(liveClient())
+    db.tables.contacts.push({ id: CONTACT, client_id: CLIENT, primary_email: 'a@b.co' })
+    db.tables.me_sale_outcomes.push({
+      id: 'out-old',
+      client_id: CLIENT,
+      contact_id: CONTACT,
+      source_kind: 'crm_stage_manual',
+      source_ref: `crm_qualified:${CONTACT}:quoted`,
+      meta_lead_id: LEAD,
+      outcome_kind: 'lead',
+    })
+    db.tables.me_conversion_writebacks.push({
+      outcome_id: 'out-old',
+      destination: 'meta_capi',
+      event_id: 'out-old',
+      status: 'confirmed',
+    })
+    const nextLead = '222222222222222'
+    db.tables.contact_touchpoints.push(
+      { contact_id: CONTACT, client_id: CLIENT, source: 'meta_lead_form', source_ref: LEAD, occurred_at: '2026-10-02T00:00:00.000Z' },
+      { contact_id: CONTACT, client_id: CLIENT, source: 'meta_lead_form', source_ref: nextLead, occurred_at: '2026-10-03T00:00:00.000Z' },
+    )
+    const again = await recordQualifiedStageLead(db as never, {
+      clientId: CLIENT, contactId: CONTACT, stageKey: 'quoted', actor: 'roman@example.com',
+    })
+    expect(again.message).toContain('已发给广告平台')
+    expect(db.tables.me_sale_outcomes).toHaveLength(2)
+    expect(db.tables.me_sale_outcomes[1].meta_lead_id).toBe(nextLead)
+    expect(db.tables.me_sale_outcomes[1].source_ref).toBe(`crm_qualified:${nextLead}:quoted`)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not send again when the same form id leaves the stage and comes back', async () => {
+    const db = fakeDb()
+    db.tables.clients.push(liveClient())
+    db.tables.contacts.push({ id: CONTACT, client_id: CLIENT, primary_email: 'a@b.co' })
+    db.tables.contact_touchpoints.push({
+      contact_id: CONTACT, client_id: CLIENT, source: 'meta_lead_form', source_ref: LEAD, occurred_at: '2026-10-02T00:00:00.000Z',
+    })
+    const quoted = { clientId: CLIENT, contactId: CONTACT, stageKey: 'quoted', actor: 'roman@example.com' }
+    await recordQualifiedStageLead(db as never, quoted)
+    db.tables.me_conversion_writebacks.push({
+      outcome_id: db.tables.me_sale_outcomes[0].id,
+      destination: 'meta_capi',
+      event_id: db.tables.me_sale_outcomes[0].id,
+      status: 'confirmed',
+    })
+    const away = await recordQualifiedStageLead(db as never, { ...quoted, stageKey: 'new_enquiry' })
+    expect(away.attempted).toBe(false)
+    const back = await recordQualifiedStageLead(db as never, quoted)
+    expect(back.message).toContain('已经记过')
+    expect(db.tables.me_sale_outcomes).toHaveLength(1)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not send again when an older contact-keyed row already recorded this form id', async () => {
+    const db = fakeDb()
+    db.tables.clients.push(liveClient())
+    db.tables.contacts.push({ id: CONTACT, client_id: CLIENT, primary_email: 'a@b.co' })
+    db.tables.contact_touchpoints.push({
+      contact_id: CONTACT, client_id: CLIENT, source: 'meta_lead_form', source_ref: LEAD, occurred_at: '2026-10-02T00:00:00.000Z',
+    })
+    db.tables.me_sale_outcomes.push({
+      id: 'out-old',
+      client_id: CLIENT,
+      contact_id: CONTACT,
+      source_kind: 'crm_stage_manual',
+      source_ref: `crm_qualified:${CONTACT}:quoted`,
+      meta_lead_id: LEAD,
+      outcome_kind: 'lead',
+    })
+    db.tables.me_conversion_writebacks.push({
+      outcome_id: 'out-old',
+      destination: 'meta_capi',
+      event_id: 'out-old',
+      status: 'confirmed',
+    })
+    const again = await recordQualifiedStageLead(db as never, {
+      clientId: CLIENT, contactId: CONTACT, stageKey: 'quoted', actor: 'roman@example.com',
+    })
+    expect(again.message).toContain('已经记过')
+    expect(db.tables.me_sale_outcomes).toHaveLength(1)
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('states why a lead with no form id is not sent, and does not send an ordinary lead', async () => {

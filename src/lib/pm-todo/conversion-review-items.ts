@@ -13,7 +13,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
 import { readCapiClientConfig, stageCountsAsQualifiedLead } from '@/lib/conversions/capi-client-config'
-import { dealStageEventId, latestMetaLeadId, legalMetaLeadId } from '@/lib/conversions/conversion-lead'
+import { dealStageEventId, latestMetaLeadId, legalMetaLeadId, stageKeyFromQualifiedRef } from '@/lib/conversions/conversion-lead'
 import { formatMoney } from '@/lib/conversions/money'
 import { DAY_MS, META_EVENT_WINDOW_DAYS, isPastEventWindow } from '@/lib/conversions/event-window'
 
@@ -454,13 +454,14 @@ async function loadQualifiedOutcomeRefs(supabase: SupabaseClient, contactIds: st
   if (error) throw new Error(`已报价是否已记查询失败: ${error.message}`)
   const found = new Set<string>()
   for (const row of (data ?? []) as unknown as QualifiedOutcomeRef[]) {
-    if (row.contact_id && row.source_ref) found.add(`${row.contact_id}:${row.source_ref}`)
+    const stage = stageKeyFromQualifiedRef(row.source_ref)
+    if (row.contact_id && stage) found.add(`${row.contact_id}:${stage}`)
   }
   return found
 }
 
 function qualifiedRef(row: StageContact): string {
-  return `${row.id}:crm_qualified:${row.id}:${row.stage}`
+  return `${row.id}:${row.stage}`
 }
 
 function missingQualifiedItem(row: StageContact, clientNames: Map<string, { name: string }>): ManualItem {

@@ -19,6 +19,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { formatMoney } from '@/lib/conversions/money'
 import { isPastEventWindow, META_EVENT_WINDOW_DAYS } from '@/lib/conversions/event-window'
 import {
+  doubtCheck,
+  doubtConfirm,
   isHeldOutcome,
   mergeStuck,
   sendState,
@@ -324,20 +326,8 @@ export default function ConversionsPage() {
     async (o: Outcome, resolution: 'confirmed' | 'resend') => {
       const wb = sendState(o)
       if (!wb) return
-      if (resolution === 'confirmed') {
-        const ok = window.confirm(
-          '你在广告平台后台确认看到这一笔了吗？\n\n' +
-            '看到了才点确定 —— 记成"已收到"之后就不会再发了。',
-        )
-        if (!ok) return
-      } else {
-        const ok = window.confirm(
-          '确认平台**没有**收到，要重新发一次吗？\n\n' +
-            '⚠️ 如果其实已经收到了，这一下会让同一笔算成两笔，而且撤不回。\n' +
-            '请先在平台后台确认真的没有再点。',
-        )
-        if (!ok) return
-      }
+      const ok = window.confirm(doubtConfirm(o, resolution))
+      if (!ok) return
 
       setBusy(o.id)
       try {
@@ -537,6 +527,7 @@ export default function ConversionsPage() {
           {stuck.map((o) => {
             const wb = sendState(o)
             const doubt = wb?.status === 'in_doubt'
+            const check = doubt ? doubtCheck(o) : null
             return (
               <div key={o.id} className="rounded-xl border border-status-attn/40 bg-me-gold/15 p-4">
                 <div className="text-[15px] font-semibold text-me-charcoal">
@@ -544,6 +535,13 @@ export default function ConversionsPage() {
                   {o.outcome_kind !== 'lead' && ` · ${money(o)}`}
                   {o.order_ref && <span className="font-normal text-me-charcoal/50"> · 单号 {o.order_ref}</span>}
                 </div>
+                {check && (
+                  <div className="mt-1 text-sm text-me-charcoal">
+                    {check.which === 'stage' ? '要核对的是阶段事件，不是原来的这笔成交' : '要核对的是原来的这笔成交，不是后面的阶段事件'}
+                    {check.stageName ? ` · 阶段 ${check.stageName}` : ''}
+                    {check.eventId ? ` · 发送编号 ${check.eventId}` : ''}
+                  </div>
+                )}
                 <div className="my-2 text-sm leading-relaxed text-me-charcoal/70">{stuckExplanation(o)}</div>
                 {doubt ? (
                   <div className="flex flex-wrap gap-2">

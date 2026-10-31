@@ -8,6 +8,7 @@
  * this list.
  */
 
+import { stageKeyFromQualifiedRef } from '@/lib/conversions/conversion-lead'
 import { isPastEventWindow } from '@/lib/conversions/event-window'
 
 const QUALIFIED_PREFIX = 'crm_qualified:'
@@ -20,8 +21,10 @@ export type Writeback = {
   last_error_code: string | null
   next_attempt_at: string | null
   event_id?: string | null
+  /** Deal-stage name for a companion send, when the list already knows it. */
+  stage_name?: string | null
   /** 允许名单先停住时为 `{ held: true }`。没有这个标记的排队行不是「需要你动手」。 */
-  payload_preview?: { held?: boolean } | null
+  payload_preview?: { held?: boolean; 事件类型?: unknown } | null
 }
 
 export type Outcome = {
@@ -139,7 +142,80 @@ export function stuckExplanation(o: Outcome): string {
   if (companionNeedsRetry(o) && !isRetryableFailure(o) && !isHeldDeal(o)) return companionExplanation(o)
   const wb = sendState(o)
   if (!wb) return '这条已报价还没有发给广告平台。点「再试一次」会补发这一条，不会另记一笔。'
-  return writebackExplanation(wb)
+  return writebackExplanation(o, wb)
+}
+
+const PLATFORM_EVENT_NAMES = new Set(['Purchase', 'BalancePaid', 'Lead'])
+
+export type DoubtCheck = {
+  which: 'stage' | 'deal'
+  stageName: string | null
+  eventId: string | null
+}
+
+/** Which send the person must match on the platform before marking it received. */
+export function doubtCheck(o: Outcome): DoubtCheck | null {
+  const wb = sendState(o)
+  if (!wb || wb.status !== 'in_doubt') return null
+  const qualifiedStage = stageKeyFromQualifiedRef(o.source_ref ?? null)
+  const stageEvent = (wb.event_id ?? '').endsWith(':conversion-stage') || Boolean(qualifiedStage)
+  return {
+    which: stageEvent ? 'stage' : 'deal',
+    stageName: stageEvent ? stageNameFor(wb, qualifiedStage) : null,
+    eventId: cleanText(wb.event_id),
+  }
+}
+
+export function doubtExplanation(o: Outcome): string {
+  const check = doubtCheck(o)
+  const tail = '发出去时断线了，不确定平台收到没有。系统不会自己重发 —— 重发一次就是把同一条算成两条，撤不回。'
+  if (!check) return `这一笔${tail}`
+  const which = check.which === 'stage'
+    ? '要核对的是后面那个阶段事件，不是原来的这笔成交。'
+    : '要核对的是原来的这笔成交，不是后面的阶段事件。'
+  const stage = check.stageName ? `阶段是「${check.stageName}」。` : ''
+  const id = check.eventId ? `到广告平台按发送编号「${check.eventId}」对一下。` : ''
+  return `${which}${stage}${id}${tail}`
+}
+
+export function doubtConfirm(o: Outcome, resolution: 'confirmed' | 'resend'): string {
+  const check = doubtCheck(o)
+  const which = check?.which === 'stage' ? '后面那个阶段事件' : '原来的这笔成交'
+  const head = resolution === 'confirmed'
+    ? `你在广告平台后台确认看到的是${which}吗？`
+    : `确认平台没有收到${which}，要重新发一次吗？`
+  const facts = [
+    check?.stageName ? `阶段：${check.stageName}` : '',
+    check?.eventId ? `发送编号：${check.eventId}` : '',
+  ].filter((line) => line !== '').join('\n')
+  const tail = resolution === 'confirmed'
+    ? confirmedTail(check?.which === 'stage')
+    : '如果其实已经收到了，这一下会让同一条算成两条，而且撤不回。请先在平台后台对一下发送编号，确认真的没有再点。'
+  return facts ? `${head}\n\n${facts}\n\n${tail}` : `${head}\n\n${tail}`
+}
+
+function confirmedTail(stage: boolean): string {
+  if (stage) {
+    return '看到的是这一条才点确定。原来的成交已经记下了，不要把它当成这一条。记成「已收到」之后，这一条就不会再发。'
+  }
+  return '看到的是这一笔才点确定 —— 记成「已收到」之后就不会再发了。'
+}
+
+function stageNameFor(wb: Writeback, fromRef: string | null): string | null {
+  return cleanText(wb.stage_name) ?? previewStageName(wb.payload_preview) ?? fromRef
+}
+
+function previewStageName(preview: Writeback['payload_preview']): string | null {
+  if (!preview) return null
+  const named = preview.事件类型
+  if (typeof named !== 'string') return null
+  const trimmed = named.trim()
+  if (trimmed === '' || PLATFORM_EVENT_NAMES.has(trimmed)) return null
+  return trimmed
+}
+
+function cleanText(value: string | null | undefined): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
 }
 
 function companionExplanation(o: Outcome): string {
@@ -150,10 +226,8 @@ function companionExplanation(o: Outcome): string {
   return '这笔成交已经记下，同一条线索的下一步还没发出去。点「再试一次」会补上这一步，已经发出去的那笔不会再发一次。'
 }
 
-function writebackExplanation(wb: Writeback): string {
-  if (wb.status === 'in_doubt') {
-    return '这一笔发出去时断线了，不确定平台收到没有。系统不会自己重发 —— 重发一次就是把同一笔算成两笔，撤不回。'
-  }
+function writebackExplanation(o: Outcome, wb: Writeback): string {
+  if (wb.status === 'in_doubt') return doubtExplanation(o)
   if (isHeldWriteback(wb)) {
     return '这笔已经批准，但按这个客户现在允许发送的名单先停住了，没有发出去。名单改好之后点「再试一次」：还在 7 天内、而且名单允许，才会发出去。'
   }

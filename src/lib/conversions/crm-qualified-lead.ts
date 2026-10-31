@@ -6,7 +6,12 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { readCapiClientConfig, stageCountsAsQualifiedLead } from './capi-client-config'
-import { latestMetaLeadId, NO_META_LEAD_MESSAGE, qualifiedLeadSourceRef } from './conversion-lead'
+import {
+  latestMetaLeadId,
+  NO_META_LEAD_MESSAGE,
+  qualifiedLeadSourceRef,
+  stageKeyFromQualifiedRef,
+} from './conversion-lead'
 import { buildIntakeRow, type IntakeInput } from './intake'
 
 export const CRM_QUALIFIED_LEAD_ACTOR = 'system:crm-qualified-lead'
@@ -23,7 +28,7 @@ const SETTLED_SEND = new Set([
 
 export type QualifiedLeadResult = { attempted: boolean; message: string }
 
-type Gate = { sourceRef: string; phoneCountry: string | null }
+type Gate = { stageKey: string; phoneCountry: string | null }
 type Row = Record<string, unknown>
 
 export async function recordQualifiedStageLead(
@@ -33,11 +38,12 @@ export async function recordQualifiedStageLead(
 ): Promise<QualifiedLeadResult> {
   const gate = await openGate(db, input)
   if (!gate) return { attempted: false, message: '' }
-  const existingId = await existingOutcomeId(db, input.clientId, gate.sourceRef)
-  if (existingId) return retryQualified(db, existingId)
   const leadId = await readMetaLeadId(db, input.clientId, input.contactId)
   if (!leadId) return { attempted: true, message: NO_META_LEAD_MESSAGE }
-  const built = await intakeRow(db, input, gate, leadId, now)
+  const sourceRef = qualifiedLeadSourceRef(leadId, gate.stageKey)
+  const existingId = await existingOutcomeId(db, input.clientId, leadId, gate.stageKey)
+  if (existingId) return retryQualified(db, existingId)
+  const built = await intakeRow(db, input, { sourceRef, phoneCountry: gate.phoneCountry }, leadId, now)
   if (!built.ok) return { attempted: true, message: built.message }
   const id = await insertLead(db, built.row, input.actor, now)
   if (!id) return { attempted: true, message: '这条合格咨询已经记过了。' }
@@ -46,7 +52,7 @@ export async function recordQualifiedStageLead(
 
 async function openGate(
   db: SupabaseClient,
-  input: { clientId: string; stageKey: string; contactId: string },
+  input: { clientId: string; stageKey: string },
 ): Promise<Gate | null> {
   const client = await one(db, 'clients', 'leads_config, conversion_stage, default_phone_country', [['id', input.clientId]])
   if (!client || client.conversion_stage !== 'live') return null
@@ -55,18 +61,24 @@ async function openGate(
   if (!stageCountsAsQualifiedLead(input.stageKey, cfg.qualifiedLeadStageKey)) return null
   const country = client.default_phone_country
   return {
-    sourceRef: qualifiedLeadSourceRef(input.contactId, input.stageKey),
+    stageKey: input.stageKey,
     phoneCountry: typeof country === 'string' ? country : null,
   }
 }
 
-async function existingOutcomeId(db: SupabaseClient, clientId: string, sourceRef: string): Promise<string | null> {
-  const row = await one(db, 'me_sale_outcomes', 'id', [
+async function existingOutcomeId(
+  db: SupabaseClient,
+  clientId: string,
+  leadId: string,
+  stageKey: string,
+): Promise<string | null> {
+  const rows = await many(db, 'me_sale_outcomes', 'id, source_ref, meta_lead_id', [
     ['client_id', clientId],
     ['source_kind', 'crm_stage_manual'],
-    ['source_ref', sourceRef],
+    ['meta_lead_id', leadId],
   ])
-  return text(row?.id)
+  const hit = rows.find((row) => stageKeyFromQualifiedRef(text(row.source_ref)) === stageKey)
+  return text(hit?.id)
 }
 
 async function retryQualified(db: SupabaseClient, outcomeId: string): Promise<QualifiedLeadResult> {
@@ -94,7 +106,7 @@ async function readMetaLeadId(db: SupabaseClient, clientId: string, contactId: s
 async function intakeRow(
   db: SupabaseClient,
   input: { clientId: string; contactId: string; actor: string | null },
-  gate: Gate,
+  gate: { sourceRef: string; phoneCountry: string | null },
   leadId: string,
   now: Date,
 ): Promise<{ ok: true; row: Row } | { ok: false; message: string }> {

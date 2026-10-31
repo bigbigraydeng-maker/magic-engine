@@ -16,6 +16,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin, requireAdmin } from '@/lib/auth/require-admin'
 import { assertClientScope } from '@/lib/conversions/route-guard'
 import { buildIntakeRow, type IntakeInput } from '@/lib/conversions/intake'
+import { readCapiClientConfig } from '@/lib/conversions/capi-client-config'
 import { dealStageEventId, dealStageEventName, legalMetaLeadId } from '@/lib/conversions/conversion-lead'
 import { META_EVENT_WINDOW_DAYS } from '@/lib/conversions/event-window'
 
@@ -205,7 +206,8 @@ export async function GET(request: Request) {
     if (error) {
       return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
     }
-    const outcomes = data ? await markOpenCompanions(clientId, [data as ListedOutcome]) : []
+    const marked = data ? await markOpenCompanions(clientId, [data as unknown as ListedOutcome]) : []
+    const outcomes = await labelStageSends(clientId, marked)
     return NextResponse.json({ outcomes, count: outcomes.length })
   }
 
@@ -242,7 +244,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
   }
 
-  const outcomes = data ?? []
+  const outcomes = await labelStageSends(clientId, (data ?? []) as unknown as ListedOutcome[])
   return NextResponse.json({ outcomes, count: outcomes.length })
 }
 
@@ -250,6 +252,7 @@ type ListedWriteback = {
   event_id?: string | null
   status?: string
   last_error_code?: string | null
+  stage_name?: string | null
   payload_preview?: { held?: boolean } | null
 }
 
@@ -274,7 +277,8 @@ async function listQualifiedOpen(clientId: string, limit: number, columns: strin
     qualifiedStillOpen,
   )
   if (found.error) return NextResponse.json({ error: found.error }, { status: 500 })
-  return NextResponse.json({ outcomes: found.rows, count: found.rows.length })
+  const outcomes = await labelStageSends(clientId, found.rows)
+  return NextResponse.json({ outcomes, count: outcomes.length })
 }
 
 async function loadQualifiedPage(clientId: string, columns: string, offset: number): Promise<PageResult> {
@@ -290,7 +294,7 @@ async function loadQualifiedPage(clientId: string, columns: string, offset: numb
     .order('occurred_at', { ascending: false })
     .range(offset, offset + RECOVERY_PAGE - 1)
   if (error) return { rows: [], error: `查询失败: ${error.message}` }
-  return { rows: (data ?? []) as ListedOutcome[], error: null }
+  return { rows: (data ?? []) as unknown as ListedOutcome[], error: null }
 }
 
 function qualifiedStillOpen(row: ListedOutcome): boolean {
@@ -311,7 +315,8 @@ async function listCompanionOpen(clientId: string, limit: number, columns: strin
     (row) => companionStillOpen(row, config.leadsConfig),
   )
   if (found.error) return NextResponse.json({ error: found.error }, { status: 500 })
-  const outcomes = found.rows.map((row) => ({ ...row, companion_expected: true }))
+  const labeled = await labelStageSends(clientId, found.rows)
+  const outcomes = labeled.map((row) => ({ ...row, companion_expected: true }))
   return NextResponse.json({ outcomes, count: outcomes.length })
 }
 
@@ -328,7 +333,7 @@ async function loadCompanionPage(clientId: string, columns: string, offset: numb
     .order('occurred_at', { ascending: false })
     .range(offset, offset + RECOVERY_PAGE - 1)
   if (error) return { rows: [], error: `查询失败: ${error.message}` }
-  return { rows: (data ?? []) as ListedOutcome[], error: null }
+  return { rows: (data ?? []) as unknown as ListedOutcome[], error: null }
 }
 
 type PageResult = { rows: ListedOutcome[]; error: string | null }
@@ -365,6 +370,28 @@ async function readLeadConfig(
   if (error) return { ok: false, error: `查询失败: ${error.message}` }
   const row = data as { leads_config?: unknown } | null
   return { ok: true, leadsConfig: row?.leads_config }
+}
+
+async function labelStageSends(clientId: string, rows: ListedOutcome[]): Promise<ListedOutcome[]> {
+  if (!rows.some((row) => (row.me_conversion_writebacks ?? []).some(isStageSendRow))) return rows
+  const config = await readLeadConfig(clientId)
+  if (!config.ok) return rows
+  const stageName = readCapiClientConfig(config.leadsConfig).conversionDealStageKey
+  if (!stageName) return rows
+  return rows.map((row) => labelStageRow(row, stageName))
+}
+
+function isStageSendRow(wb: ListedWriteback): boolean {
+  return (wb.event_id ?? '').endsWith(':conversion-stage')
+}
+
+function labelStageRow(row: ListedOutcome, stageName: string): ListedOutcome {
+  const writes = row.me_conversion_writebacks
+  if (!writes?.some(isStageSendRow)) return row
+  return {
+    ...row,
+    me_conversion_writebacks: writes.map((wb) => (isStageSendRow(wb) ? { ...wb, stage_name: stageName } : wb)),
+  }
 }
 
 function companionStillOpen(row: ListedOutcome, leadsConfig: unknown): boolean {

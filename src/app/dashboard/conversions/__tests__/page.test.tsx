@@ -477,6 +477,49 @@ describe('授权失效的失败行说清「会自动补发」（2026-09-22 起�
     expect(screen.getByText(/不确定平台收到没有/)).toBeTruthy()
   })
 
+  it('成交已收到、阶段还不确定时，核对提示和确认框写明是阶段事件', async () => {
+    const eventId = 'owed:conversion-stage'
+    mountWith([
+      outcome({
+        id: 'owed',
+        review_status: 'approved',
+        order_ref: '84191',
+        me_conversion_writebacks: [
+          {
+            id: 'primary',
+            status: 'confirmed',
+            last_error: null,
+            last_error_code: null,
+            next_attempt_at: null,
+            event_id: 'owed',
+          },
+          {
+            id: 'stage',
+            status: 'in_doubt',
+            last_error: '断了',
+            last_error_code: null,
+            next_attempt_at: null,
+            event_id: eventId,
+            stage_name: 'balance_received',
+          },
+        ],
+      }),
+    ])
+    expect(await screen.findByText(/要核对的是阶段事件，不是原来的这笔成交/)).toBeTruthy()
+    expect(screen.getByText(/阶段 balance_received/)).toBeTruthy()
+    expect(screen.getAllByText(new RegExp(eventId)).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText(/阶段是「balance_received」/)).toBeTruthy()
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    fireEvent.click(screen.getByRole('button', { name: '平台后台看到了 · 记为已收到' }))
+    const prompt = String(confirmSpy.mock.calls[0]?.[0] ?? '')
+    expect(prompt).toContain('后面那个阶段事件')
+    expect(prompt).toContain('阶段：balance_received')
+    expect(prompt).toContain(`发送编号：${eventId}`)
+    expect(prompt).toContain('不要把它当成这一条')
+    expect(prompt).not.toContain('event_id')
+  })
+
   it('成交下一步还没记上时可以再试一次，普通排队成交仍然不出现', async () => {
     mountWith([
       outcome({

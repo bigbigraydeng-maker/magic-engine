@@ -24,9 +24,9 @@ export function legalMetaLeadId(value: string | null | undefined): string | null
   return value
 }
 
-/** One row per contact and stage. The stage key is the event name sent later. */
-export function qualifiedLeadSourceRef(contactId: string, stageKey: string): string {
-  return `${QUALIFIED_PREFIX}${contactId}:${stageKey}`
+/** One row per Meta lead id and stage. The stage key is the event name sent later. */
+export function qualifiedLeadSourceRef(leadId: string, stageKey: string): string {
+  return `${QUALIFIED_PREFIX}${leadId}:${stageKey}`
 }
 
 export function isQualifiedLeadSource(sourceRef: string | null | undefined): boolean {
