@@ -335,6 +335,9 @@ function expectedFindings(
 ): LaunchFinding[] {
   if (draft.kind !== 'messenger_conversation' || readback.campaignStatus === undefined) return []
   const t = metaTripletFor(draft.kind)
+  const ads = published.reusedAdSet
+    ? readback.ads.filter((ad) => published.adIds.includes(ad.adId))
+    : readback.ads
   return checkCreatedAsExpected(
     {
       optimizationGoal: t.optimizationGoal,
@@ -342,8 +345,8 @@ function expectedFindings(
       adCount: published.adIds.length,
       brandRedlines: deps.brandRedlines ?? [],
     },
-    { campaignStatus: readback.campaignStatus, adSet: readback.adSet, ads: readback.ads },
-    { campaign: !published.reusedCampaign, adSet: true },
+    { campaignStatus: readback.campaignStatus, adSet: readback.adSet, ads },
+    { campaign: !(published.reusedCampaign || published.reusedAdSet), adSet: !published.reusedAdSet },
   )
 }
 
@@ -413,7 +416,7 @@ async function gateReadback(
   const report = launchReportFor(draft, deps, rawAdSet, ads)
   const extra = [
     ...expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps),
-    ...attachReadbackFindings(draft, rawAdSet),
+    ...attachReadbackFindings(draft, published, rawAdSet, ads),
   ]
   const autoPause = extra.some((f) => f.code === 'not_paused')
     ? await pausePublished(published, deps.accessToken, {
@@ -473,6 +476,13 @@ function renderAutoPause(r: { ok: boolean; failed: string[] } | undefined): stri
  * 审批页开失败会马上退回 awaiting_approval。确认卡不能这么做：回读和补暂停还没完，
  * 退回之后另一次确认会占走，这次再去暂停就会把对方正在开的广告关掉。确认卡占到失败结束。
  */
+function activationSkipIds(draft: AdDraft, campaignId: string, adSetId: string): string[] {
+  const skip: string[] = []
+  if (draft.existingCampaignId || draft.existingAdSetId) skip.push(campaignId)
+  if (draft.existingAdSetId) skip.push(adSetId)
+  return skip
+}
+
 export async function approveDraft(
   actionId: string,
   supabase: SupabaseClient,
@@ -543,7 +553,7 @@ export async function approveDraft(
     return { ok: false, error: '这条刚被别处处理过（可能已经被开启或否决），这次没有再开。' }
   }
 
-  const skipIds = p.draft.existingCampaignId ? [p.campaignId] : []
+  const skipIds = activationSkipIds(p.draft, p.campaignId, p.adSetId)
   const r = await activatePublished(
     { campaignId: p.campaignId, adSetId: p.adSetId, adIds: p.adIds },
     accessToken,

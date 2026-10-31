@@ -142,6 +142,11 @@ export interface AdDraft {
   existingCampaignId?: string
   adSetName: string
   /**
+   * 已有广告组的编号。写了就不再新建系列和广告组，只在这个组里加暂停广告。
+   * 和已有系列编号不能同时写，两件事要分成两张卡。
+   */
+  existingAdSetId?: string
+  /**
    * 每天多少钱，客户账户的货币单位（元，不是分）。
    * 单个广告组时，这就是这一组的日预算。
    * 多个广告组时，这是整份草稿每天的合计，必须和各组（或系列预算）对得上。
@@ -497,6 +502,6 @@ export function describeDraft(d: AdDraft): string {
   const what = isKnownDraftKind(d.kind) ? DRAFT_WHAT[d.kind] : '（不认识的广告类型）'
   const budget = d.budgetMode === 'campaign' ? '（系列预算）' : ''
   const sets = Array.isArray(d.adSets) ? `，${d.adSets.length} 个广告组` : ''
-  const attached = d.existingCampaignId ? '，加到已有系列' : ''
+  const attached = d.existingAdSetId ? '，加到已有广告组' : d.existingCampaignId ? '，加到已有系列' : ''
   return `${what}，每天 $${d.dailyBudget}${budget}、跑 ${d.durationDays} 天，最多花 $${total}${sets}${attached}`
 }

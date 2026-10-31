@@ -1414,4 +1414,52 @@ describe('createDraftForApproval — 已有系列', () => {
     expect(r.findings.map((f) => f.code)).toContain('attached_to_wrong_campaign')
     expect(mPause).not.toHaveBeenCalled()
   })
+
+  it('已有广告组里的新广告不是暂停 → 拦住，补暂停不关原组和原系列', async () => {
+    mPublish.mockResolvedValue({
+      ok: true, campaignId: '900001', adSetId: '800001', adIds: ['ad9'], orphans: [],
+      reusedCampaign: true, reusedAdSet: true,
+    })
+    mAdSet.mockResolvedValue({
+      id: '800001', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      status: 'ACTIVE', campaign_id: '900001',
+      targeting: { geo_locations: { countries: ['NZ'] } },
+    })
+    mCreatives.mockResolvedValue([
+      { adId: 'ad-old', adName: 'old', status: 'ACTIVE', texts: ['old line'] },
+      { adId: 'ad9', adName: 'new', status: 'ACTIVE', texts: ['Brand new four bedroom home in Rothesay Bay'] },
+    ])
+    mPause.mockResolvedValue({ ok: true, failed: [] })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval({ ...DRAFT, existingAdSetId: '800001' }, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('not_paused')
+    expect(mPause).toHaveBeenCalledWith(
+      expect.objectContaining({ adSetId: '800001', reusedAdSet: true }),
+      'tok',
+      expect.any(Object),
+    )
+  })
+
+  it('已有广告组仍开着、新广告是暂停 → 可以进审批，不去关原组', async () => {
+    mPublish.mockResolvedValue({
+      ok: true, campaignId: '900001', adSetId: '800001', adIds: ['ad9'], orphans: [],
+      reusedCampaign: true, reusedAdSet: true,
+    })
+    mAdSet.mockResolvedValue({
+      id: '800001', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      status: 'ACTIVE', campaign_id: '900001',
+      targeting: { geo_locations: { countries: ['NZ'] } },
+    })
+    mCreatives.mockResolvedValue([
+      { adId: 'ad-old', adName: 'old', status: 'ACTIVE', texts: ['old line'] },
+      { adId: 'ad9', adName: 'new', status: 'PAUSED', texts: ['Brand new four bedroom home in Rothesay Bay'] },
+    ])
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval({ ...DRAFT, existingAdSetId: '800001' }, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPause).not.toHaveBeenCalled()
+    expect(inserted[0].adIds).toEqual(['ad9'])
+    expect(inserted[0].draft.existingAdSetId).toBe('800001')
+  })
 })
