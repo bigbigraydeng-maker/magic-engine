@@ -1,6 +1,6 @@
 /**
- * 改阶段不再弹出金额面板。任何客户点「已成交 / 售后 / 慢慢养」都走确认框。
- * 金额面板组件还在，但抽屉不挂它；直接渲染时请求体必须带上客户和阶段。
+ * 没配成交阶段时，「已成交」仍打开金额面板。售后和慢慢养走确认框。
+ * 金额面板直接渲染时，请求体必须带上客户和阶段。
  */
 
 import React from 'react'
@@ -70,17 +70,19 @@ async function openStage(label: string) {
   fireEvent.click(await screen.findByText('Jordan Example'))
   fireEvent.click(await screen.findByRole('button', { name: /更多/ }))
   fireEvent.click(await screen.findByRole('button', { name: /改「到哪一步了」/ }))
-  fireEvent.click(await withinDrawer().findByText(label))
+  const button = await withinDrawer().findByRole('button', { name: label })
+  await waitFor(() => expect(button).toBeEnabled())
+  fireEvent.click(button)
 }
 
-describe('点阶段走确认框，不弹金额', () => {
+describe('没配成交阶段时，已成交仍打开金额面板', () => {
   it('已成交', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     stubFetch([contact('c1', 'Jordan Example')])
     render(<CrmAllContactsPage />)
     await openStage('已成交')
-    expect(confirmSpy).toHaveBeenCalled()
-    expect(screen.queryByText(/这笔生意多少钱/)).toBeNull()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(screen.getByText(/这笔生意多少钱/)).toBeTruthy()
   })
 
   it('另一个客户点已成交也一样', async () => {
@@ -89,6 +91,21 @@ describe('点阶段走确认框，不弹金额', () => {
     stubFetch([contact('c1', 'Jordan Example')])
     render(<CrmAllContactsPage />)
     await openStage('已成交')
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(screen.getByText(/这笔生意多少钱/)).toBeTruthy()
+  })
+
+  it('售后仍走确认框', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    stubFetch([contact('c1', 'Jordan Example')])
+    render(<CrmAllContactsPage />)
+    fireEvent.click(await screen.findByText('Jordan Example'))
+    fireEvent.click(await screen.findByRole('button', { name: /更多/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /改「到哪一步了」/ }))
+    fireEvent.click(await withinDrawer().findByRole('button', { name: /其他/ }))
+    const button = await withinDrawer().findByRole('button', { name: '售后' })
+    await waitFor(() => expect(button).toBeEnabled())
+    fireEvent.click(button)
     expect(confirmSpy).toHaveBeenCalled()
     expect(screen.queryByText(/这笔生意多少钱/)).toBeNull()
   })

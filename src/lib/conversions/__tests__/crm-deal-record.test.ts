@@ -84,7 +84,8 @@ function purchase(over: Partial<ApprovedPurchase> = {}): ApprovedPurchase {
 
 describe('deal helpers', () => {
   it('keeps the paid-on calendar date and uses the row id as the only event id', () => {
-    expect(dealOccurredAt('2026-10-08', NOW)).toBe('2026-10-08T00:00:00.000Z')
+    expect(dealOccurredAt('2026-07-08', NOW)).toBe('2026-07-08T00:00:00.000Z')
+    expect(dealOccurredAt('2026-10-08', NOW)).toBe('2026-10-07T23:00:00.000Z')
     expect(dealOccurredAt(null, NOW)).toBe(NOW.toISOString())
     expect(crmDealSourceRef(CONTACT, BOOKING, 'won')).toBe(`crm_deal:${CONTACT}:${BOOKING}`)
     expect(crmDealSourceRef(CONTACT, null, 'won')).toBe(`crm_deal:${CONTACT}:stage:won`)
@@ -129,7 +130,7 @@ describe('recordMilestoneDeal', () => {
       source_ref: `crm_deal:${CONTACT}:${BOOKING}`,
       order_ref: BOOKING,
       meta_lead_id: '123456789012345',
-      occurred_at: '2026-10-08T00:00:00.000Z',
+      occurred_at: '2026-10-07T23:00:00.000Z',
       customer_phone: '61412345678',
     })
     expect(io.inserted[0]).not.toHaveProperty('review_status')
@@ -185,6 +186,7 @@ describe('recordMilestoneDeal', () => {
     const io = memory({
       loadContact: async () => ({ email: null, phone: null, doNotContact: false }),
       loadPsid: async () => null,
+      loadMetaLeadId: async () => null,
     })
     const result = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
     expect(result).toMatchObject({ recorded: false, reason: 'no_match_key', advanceStage: false })
@@ -348,6 +350,46 @@ describe('recordStageDeal', () => {
     expect(io.inserted.some((row) => row.contact_id === other)).toBe(false)
   })
 
+  it('records the historical won stage when no deal stage is saved', async () => {
+    const io = memory({
+      loadClient: async () => ({ conversionStage: 'live', defaultPhoneCountry: null, leadsConfig: {} }),
+    })
+    const result = await recordStageDeal(io, {
+      clientId: CLIENT, contactId: CONTACT, stageKey: 'won', bookingId: null,
+      occurredAt: null, actor: null, staffAmount: '10', staffCurrency: 'NZD',
+    }, NOW)
+    expect(result.recorded).toBe(true)
+    expect(io.inserted).toHaveLength(1)
+  })
+
+  it('does not treat another stage as a deal when none is saved', async () => {
+    const io = memory({
+      loadClient: async () => ({ conversionStage: 'live', defaultPhoneCountry: null, leadsConfig: {} }),
+    })
+    const result = await recordStageDeal(io, {
+      clientId: CLIENT, contactId: CONTACT, stageKey: 'quoted', bookingId: null,
+      occurredAt: null, actor: null, staffAmount: '10', staffCurrency: 'NZD',
+    }, NOW)
+    expect(result.attempted).toBe(false)
+    expect(io.inserted).toHaveLength(0)
+  })
+
+  it('a saved deal stage does not fall back to won', async () => {
+    const io = memory({
+      loadClient: async () => ({
+        conversionStage: 'live',
+        defaultPhoneCountry: null,
+        leadsConfig: { capi_deal_stage_key: 'booked' },
+      }),
+    })
+    const result = await recordStageDeal(io, {
+      clientId: CLIENT, contactId: CONTACT, stageKey: 'won', bookingId: null,
+      occurredAt: null, actor: null, staffAmount: '10', staffCurrency: 'NZD',
+    }, NOW)
+    expect(result.attempted).toBe(false)
+    expect(io.inserted).toHaveLength(0)
+  })
+
   it('does not advance when the stage is not the configured deal stage', async () => {
     const io = memory()
     const result = await recordStageDeal(io, {
@@ -428,6 +470,7 @@ describe('recordStageDeal', () => {
     const io = memory({
       loadContact: async () => ({ email: null, phone: null, doNotContact: false }),
       loadPsid: async () => null,
+      loadMetaLeadId: async () => null,
     })
     const result = await recordStageDeal(io, {
       clientId: CLIENT, contactId: CONTACT, stageKey: 'won', bookingId: null,

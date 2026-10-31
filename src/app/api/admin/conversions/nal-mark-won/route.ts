@@ -3,6 +3,8 @@
  *
  * Staff can record one pending purchase when they move a contact onto the
  * stage this client configured as a deal (`leads_config.capi_deal_stage_key`).
+ * A client with no saved stage still accepts the historical `won` step, so
+ * that panel does not go quiet until someone fills the setting in.
  * The drawer does not call this. Paying the configured milestone is the
  * primary trigger. This route stays for a direct call, and it refuses to
  * advance the stage when the purchase cannot be stored.
