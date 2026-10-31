@@ -57,6 +57,7 @@ import { UploadLinkPanel } from './_components/UploadLinkPanel'
 import { FactoryConfigPanel } from './_components/FactoryConfigPanel'
 import { CommentAutoReplyPanel } from './_components/CommentAutoReplyPanel'
 import { LeadsConfigPanel } from './_components/LeadsConfigPanel'
+import { CapiSendSettings } from './_components/CapiSendSettings'
 import { MailchimpAudiencePanel } from './_components/MailchimpAudiencePanel'
 import { LeadNotifyEmailsPanel } from './_components/LeadNotifyEmailsPanel'
 import { DomainRulesPanel } from './_components/DomainRulesPanel'
@@ -203,6 +204,9 @@ function TabBody({
           </SettingsSection>
           <SettingsSection icon="📧" title="邮件反应同步（谁打开了 / 谁点了链接）">
             <LeadsConfigPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="📣" title="发给广告平台：允许哪些、哪一笔记成成交">
+            <CapiSendSettings clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="📨" title="网站表单来了新客资，发邮件通知谁">
             <LeadNotifyEmailsPanel clientId={clientId} />
