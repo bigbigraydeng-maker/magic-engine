@@ -18,7 +18,11 @@
  * 传了它就跳过解析 —— 省一次调用（每次约 1 秒 + 费用），更重要的是**结论不再
  * 靠模型**：一个「他不买了」被解析成 unknown，这个人明天照旧出现在名单上，
  * 而销售以为自己已经处理完了。
- * Responses: 200 { created, touchpointId, parsed } / 400 / 401 / 403 / 404 / 500
+ *
+ * `callbackAt` / `callbackPreset`（二选一，可选）是销售在「约回电」快捷项里选的**确定时间**：
+ * 服务端按客户所在地时区换算，校验不是过去、不超过 60 天，写成 metadata.callback_at +
+ * outcome=callback_set，并且**赢过** AI 从原话里读出来的时间。原话照旧原样保存。
+ * Responses: 200 { created, touchpointId, parsed, callbackBooked } / 400 / 401 / 403 / 404 / 500
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -26,6 +30,7 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { recordManualTouchpoint } from '@/lib/crm/touchpoints'
 import { CONTACT_OUTCOMES, type ContactOutcome } from '@/lib/crm/note-parser'
+import { callbackBookedMessage, resolveCallbackRequest } from '@/lib/crm/callback-pick'
 
 // 补记历史电话是常态;但明显未来的时间(>5min)几乎都是脏输入,clamp 到 now,
 // 否则会压制 segments 里「客户回话了」的判定。
@@ -41,6 +46,10 @@ interface Body {
   note?: unknown
   occurredAt?: unknown
   clientRef?: unknown
+  /** 「约回电」自选时间（ISO 或当地时间 YYYY-MM-DDTHH:mm）。见 lib/crm/callback-pick。 */
+  callbackAt?: unknown
+  /** 「约回电」三个一键快捷项之一（tomorrow_am / tomorrow_pm / next_monday_am）。 */
+  callbackPreset?: unknown
 }
 
 export async function POST(
@@ -133,6 +142,20 @@ export async function POST(
       ? (aliases.filter((a): a is string => typeof a === 'string'))
       : undefined
 
+  // 约回电：时间按客户所在地算，服务端再校验一遍（不是过去、≤ 60 天）。
+  const callback = resolveCallbackRequest(
+    { callbackAt: body.callbackAt, callbackPreset: body.callbackPreset },
+    new Date(now),
+    timeZone,
+  )
+  if (!callback.ok) {
+    return NextResponse.json({ error: callback.error }, { status: 400 })
+  }
+  // 一键结果（「没打通」之类）已经把结论定死了，再带一个回电时间是自相矛盾。
+  if (callback.iso && presetOutcome) {
+    return NextResponse.json({ error: '这个动作不能同时约回电' }, { status: 400 })
+  }
+
   try {
     const result = await recordManualTouchpoint({
       clientId,
@@ -160,6 +183,7 @@ export async function POST(
       // 谁记的。销售早上打开名单要分得清「昨天聊过」是不是自己聊的 ——
       // 在此之前这个信息一条都没存过。
       loggedByEmail: access.user?.email ?? null,
+      callbackAt: callback.iso,
     })
 
     return NextResponse.json({
@@ -174,6 +198,15 @@ export async function POST(
        * 「周五晚上」会被确认成周六 —— 而这句话存在的全部意义就是让他核对。
        */
       timeZone,
+      /**
+       * 约了回电时给销售看的那句确认；没约就是 null。
+       * 以**实际存下的**时间为准：读出「别再联系」时回电不会被排上，
+       * 这时绝不能还说「已约」。
+       */
+      callbackBooked:
+        callback.iso && result.parsed.callback_at === callback.iso
+          ? callbackBookedMessage(callback.iso, timeZone)
+          : null,
       parsed: {
         summary: result.parsed.summary,
         outcome: result.parsed.outcome,

@@ -12,6 +12,7 @@
  */
 
 import { useState } from 'react'
+import { CALLBACK_PRESETS, CALLBACK_PRESET_LABELS, type CallbackPreset } from '@/lib/crm/callback-presets'
 
 export interface StageOption {
   stageKey: string
@@ -51,9 +52,19 @@ export function ComposeNote({
   const [nextStage, setNextStage] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [callbackPreset, setCallbackPreset] = useState<CallbackPreset | null>(null)
+  const [customOpen, setCustomOpen] = useState(false)
+  const [customAt, setCustomAt] = useState('')
+  const customChosen = customOpen && customAt !== ''
+  const hasCallback = callbackPreset !== null || customChosen
 
   const submit = async () => {
-    if (!note.trim() || saving) return
+    const text =
+      note.trim() ||
+      (hasCallback
+        ? `约好回电：${callbackPreset ? CALLBACK_PRESET_LABELS[callbackPreset] : customAt.replace('T', ' ')}`
+        : '')
+    if (!text || saving) return
     setSaving(true)
     setErr(null)
     try {
@@ -63,14 +74,17 @@ export function ComposeNote({
         body: JSON.stringify({
           contactId: row.contactId,
           direction: inbound ? 'inbound' : 'outbound',
-          note: note.trim(),
+          note: text,
           clientRef,
+          ...(callbackPreset ? { callbackPreset } : {}),
+          ...(customChosen ? { callbackAt: customAt } : {}),
         }),
       })
       const json = (await res.json()) as {
         error?: string
         created?: boolean
         parsed?: { do_not_contact?: boolean }
+        callbackBooked?: string | null
       }
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
 
@@ -114,7 +128,9 @@ export function ComposeNote({
       onDone(
         json.parsed?.do_not_contact
           ? '✓ 记好了 —— 读出他说「别再联系」，他不会再进「今天要联系」的名单。档案还在，「全部客人」里随时翻得到'
-          : '✓ 记好了',
+          : json.callbackBooked
+            ? `✓ 记好了 —— ${json.callbackBooked}`
+            : '✓ 记好了',
       )
     } catch (e) {
       setErr(e instanceof Error ? e.message : '没存上，再试一次')
@@ -142,6 +158,49 @@ export function ComposeNote({
         className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm focus:border-me-charcoal focus:outline-none"
       />
 
+      <div className="mt-2">
+        <label className="text-xs text-me-charcoal/50">约了回电吗？点一个就行（可跳过）</label>
+        <div className="mt-1 flex flex-wrap gap-2">
+          {CALLBACK_PRESETS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => {
+                setCallbackPreset(callbackPreset === key ? null : key)
+                setCustomOpen(false)
+                setCustomAt('')
+              }}
+              className={pill(callbackPreset === key)}
+            >
+              {CALLBACK_PRESET_LABELS[key]}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              if (customOpen) {
+                setCustomOpen(false)
+                setCustomAt('')
+              } else {
+                setCustomOpen(true)
+                setCallbackPreset(null)
+              }
+            }}
+            className={pill(customOpen)}
+          >
+            自选时间
+          </button>
+        </div>
+        {customOpen && (
+          <input
+            type="datetime-local"
+            value={customAt}
+            onChange={(e) => setCustomAt(e.target.value)}
+            className="mt-2 w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm"
+          />
+        )}
+      </div>
+
       {stages.length > 0 && (
         <div className="mt-2">
           <label className="text-xs text-me-charcoal/50">要更新他到哪一步吗？（可跳过）</label>
@@ -163,7 +222,7 @@ export function ComposeNote({
       <div className="mt-3 flex items-center gap-2">
         <button
           onClick={() => void submit()}
-          disabled={!note.trim() || saving}
+          disabled={(!note.trim() && !hasCallback) || saving}
           className="rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white disabled:bg-me-charcoal/30"
         >
           {saving ? '存着…' : '存这一笔'}
