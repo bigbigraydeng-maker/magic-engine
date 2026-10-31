@@ -86,8 +86,10 @@ export function latestBriefPerContact(
  * 在内存里按 conversation_id 连起来 —— 不用 `.in()`，免得 PostgREST URL 被几百个 id 撑爆。
  * 查询失败不抛：返回空 Map，列表照常显示，只是没有意向抬升（摘要是辅助信息，不能让整页打不开）。
  */
-async function loadBriefsOrThrow(clientId: string): Promise<BriefByContact> {
-  const convs = await fetchAll<{ id: string; contact_id: string | null }>((from, to) =>
+type ConversationLink = { id: string; contact_id: string | null }
+
+function loadBriefConversations(clientId: string): Promise<ConversationLink[]> {
+  return fetchAll<ConversationLink>((from, to) =>
     supabaseAdmin
       .from('conversations')
       .select('id, contact_id')
@@ -96,21 +98,28 @@ async function loadBriefsOrThrow(clientId: string): Promise<BriefByContact> {
       .order('id', { ascending: true })
       .range(from, to),
   )
+}
 
-  const briefs = await fetchAll<{
-    conversation_id: string
-    intent_level: unknown
-    next_action: unknown
-    summary: unknown
-    generated_at: string | null
-  }>((from, to) =>
-    supabaseAdmin
-      .from('conversation_briefs')
-      .select('conversation_id, intent_level, next_action, summary, generated_at')
-      .eq('client_id', clientId)
-      .order('id', { ascending: true })
-      .range(from, to),
-  )
+async function loadBriefsOrThrow(clientId: string, sharedConversations?: Promise<ConversationLink[]>): Promise<BriefByContact> {
+  const [convs, briefs] = await Promise.all([
+    sharedConversations
+      ? sharedConversations.catch(() => loadBriefConversations(clientId))
+      : loadBriefConversations(clientId),
+    fetchAll<{
+      conversation_id: string
+      intent_level: unknown
+      next_action: unknown
+      summary: unknown
+      generated_at: string | null
+    }>((from, to) =>
+      supabaseAdmin
+        .from('conversation_briefs')
+        .select('conversation_id, intent_level, next_action, summary, generated_at')
+        .eq('client_id', clientId)
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+  ])
 
   return latestBriefPerContact(convs, briefs)
 }
@@ -121,9 +130,9 @@ function logBriefFailure(clientId: string, err: unknown): void {
   console.error('[brief-lookup] load failed, falling back to no briefs', clientId, err instanceof Error ? err.message : err)
 }
 
-export async function loadLatestBriefByContact(clientId: string): Promise<BriefByContact> {
+export async function loadLatestBriefByContact(clientId: string, sharedConversations?: Promise<ConversationLink[]>): Promise<BriefByContact> {
   try {
-    return await loadBriefsOrThrow(clientId)
+    return await loadBriefsOrThrow(clientId, sharedConversations)
   } catch (err) {
     logBriefFailure(clientId, err)
     return new Map()

@@ -1341,3 +1341,58 @@ describe('刚通完电话、还没记下一步的人留在今天要联系（PM 2
     })
   })
 })
+
+describe('说过「不感兴趣」之后自己又找上门 → 拿回来（PM 2026-10-30 Annette）', () => {
+  const declined = call('2026-07-01T00:00:00Z', 'not_interested')
+
+  it('之后重新填了表单 → 不再被旧的「不感兴趣」压在不联系里，回到「客户来消息了」', () => {
+    const c = contact({ touchpoints: [form('2026-06-30T00:00:00Z'), declined, form('2026-07-25T00:00:00Z')] })
+    const r = segmentContact(c, NOW)
+    expect(r.segment).toBe('replied')
+    expect(listOf(r.segment)).toBe('hot')
+  })
+
+  it('之后回了邮件 / 发了私信（真人来信）也算重新找上门', () => {
+    const c = contact({
+      touchpoints: [declined, { channel: 'messenger', direction: 'inbound' as const, occurredAt: '2026-07-20T00:00:00Z' }],
+    })
+    expect(segmentContact(c, NOW).segment).not.toBe('excluded')
+  })
+
+  it('只是打开 / 点了我们的邮件（行为信号，不是他开口）→ 仍然不联系', () => {
+    const c = contact({
+      touchpoints: [
+        declined,
+        { channel: 'email', direction: 'inbound' as const, occurredAt: '2026-07-20T00:00:00Z', engagement: 'click' as const },
+      ],
+    })
+    const r = segmentContact(c, NOW)
+    expect(r.segment).toBe('excluded')
+    expect(r.reason).toBe('他说不买了')
+  })
+
+  it('来信比「不感兴趣」更早 → 仍然不联系', () => {
+    const c = contact({ touchpoints: [form('2026-06-01T00:00:00Z'), declined] })
+    expect(segmentContact(c, NOW).segment).toBe('excluded')
+  })
+
+  it('别再联系（do_not_contact）不能被重新填表解除 —— 合规红线', () => {
+    const c = contact({ touchpoints: [call('2026-07-01T00:00:00Z', 'do_not_contact'), form('2026-07-25T00:00:00Z')] })
+    expect(segmentContact(c, NOW).segment).toBe('excluded')
+    const flag = contact({ doNotContact: true, touchpoints: [declined, form('2026-07-25T00:00:00Z')] })
+    expect(segmentContact(flag, NOW).segment).toBe('excluded')
+  })
+
+  it('既说过不感兴趣、又说过别再联系 → 重新填表也只解掉前者，别再联系仍然挡住', () => {
+    const c = contact({
+      touchpoints: [declined, call('2026-07-02T00:00:00Z', 'do_not_contact'), form('2026-07-25T00:00:00Z')],
+    })
+    expect(segmentContact(c, NOW).segment).toBe('excluded')
+  })
+
+  it('重新找上门之后又说了一次不感兴趣 → 再次不联系', () => {
+    const again = call('2026-07-24T00:00:00Z', 'not_interested')
+    const c = contact({ touchpoints: [declined, form('2026-07-10T00:00:00Z'), again] })
+    expect(segmentContact(c, NOW).segment).toBe('excluded')
+  })
+})

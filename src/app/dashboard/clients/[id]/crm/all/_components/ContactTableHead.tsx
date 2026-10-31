@@ -9,8 +9,7 @@ export function ContactTableHead(props: {
   onToggleSort: (key: 'firstSeenAt' | 'lastTouchAt') => void
 }) {
   const { grouped, columns, sortArrow, onToggleSort } = props
-  // 「今天先联系」只留三样：客人 / 该做什么 / 联系渠道（PM 2026-10-29：第一眼进来太懵）。
-  // 进线时间保留在列表上（PM 2026-10-30：要一眼看出谁是今天刚进的）；最近联系、联系方式、自定义列仍收进详情。
+  // 智能名单一眼看客人、进线与最近联系、当前状态、该做什么和渠道；联系方式与自定义列在详情里。
   if (grouped) {
     return (
       <thead>
@@ -19,6 +18,7 @@ export function ContactTableHead(props: {
           <th className="whitespace-nowrap px-4 py-2">客人</th>
           <th className="whitespace-nowrap px-4 py-2">进线</th>
           <th className="whitespace-nowrap px-4 py-2">最近联系</th>
+          <th className="whitespace-nowrap px-4 py-2">当前状态</th>
           <th className="whitespace-nowrap px-4 py-2">该做什么</th>
           <th className="whitespace-nowrap px-4 py-2">联系渠道</th>
         </tr>
