@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   DOCUMENTED_DEAL_ONLY_EVENTS,
+  applyCapiSettingsWrite,
   capiEventNameForKind,
   decideCapiEventAllowed,
+  normalizeCapiSettingsWrite,
   readCapiClientConfig,
 } from '../capi-client-config'
 
@@ -30,7 +32,9 @@ describe('allowed events gate', () => {
     expect(decision.allow).toBe(false)
     if (!decision.allow) {
       expect(decision.reason).toContain('Lead')
-      expect(decision.reason).toContain('试运行')
+      expect(decision.reason).toContain('排队')
+      expect(decision.reason).toContain('7 天')
+      expect(decision.reason).not.toContain('试运行')
     }
   })
 
@@ -89,5 +93,25 @@ describe('qualified lead and deal settings', () => {
     expect(cfg.dealStageKey).toBeNull()
     expect(cfg.qualifiedLeadStageKey).toBeNull()
     expect(cfg.dealMilestoneMalformed).toBe(false)
+  })
+})
+
+describe('settings write', () => {
+  it('null clears only the keys that were sent', () => {
+    const write = normalizeCapiSettingsWrite({ capiAllowedEvents: null })
+    expect(write.touched).toBe(true)
+    if (!write.touched || write.error) throw new Error('expected a clear')
+    const next = applyCapiSettingsWrite(
+      { capi_allowed_events: ['Purchase'], capi_deal_milestone: 'deposit', trade_domains: ['hot.co.nz'] },
+      write,
+    )
+    expect(next.capi_allowed_events).toBeUndefined()
+    expect(next.capi_deal_milestone).toBe('deposit')
+    expect(next.trade_domains).toEqual(['hot.co.nz'])
+  })
+
+  it('rejects an event name the settings page does not offer', () => {
+    const write = normalizeCapiSettingsWrite({ capiAllowedEvents: ['ViewContent'] })
+    expect(write.touched && write.error).toBeTruthy()
   })
 })

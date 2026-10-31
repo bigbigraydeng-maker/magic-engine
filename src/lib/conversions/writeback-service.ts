@@ -303,18 +303,20 @@ export async function sendApprovedOutcome(
     }
   }
 
-  // ── 5b. 客户允许的事件名单。不在名单里的停在试运行，连预检请求都不发。 ──
+  // ── 5b. 客户允许的事件名单。不在名单里的继续排队，连预检请求都不发。 ──
+  // 停在排队而不是试运行：试运行是终态，名单改好后也补发不了。
   // 名单这个键不存在 = 保持今天的行为。格式读不出来 = 停住，不许发出去。
   const allowed = decideCapiEventAllowed(client.leads_config, capiEventNameForKind(outcome.outcome_kind))
   if (!allowed.allow) {
     const preview = { held: true, reason: allowed.reason }
     const held = await casUpdate(supabase, wb.id, ['queued', 'failed'], {
-      status: 'dry_run',
+      status: 'queued',
       last_error: allowed.reason,
+      last_error_code: null,
       payload_preview: preview,
     })
     if (!held) return await currentState(supabase, wb.id)
-    return { status: 'dry_run', message: allowed.reason, writebackId: wb.id, preview }
+    return { status: 'queued', message: allowed.reason, writebackId: wb.id, preview }
   }
 
   const forSend = toOutcomeForSend(outcome)
