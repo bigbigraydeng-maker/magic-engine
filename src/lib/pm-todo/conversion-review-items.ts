@@ -13,7 +13,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
 import { formatMoney } from '@/lib/conversions/money'
-import { isPastEventWindow } from '@/lib/conversions/event-window'
+import { DAY_MS, META_EVENT_WINDOW_DAYS, isPastEventWindow } from '@/lib/conversions/event-window'
 
 /** 一次最多列这么多，免得某天灌进来几百条把今日待办淹掉。 */
 const MAX_ITEMS = 20
@@ -226,20 +226,32 @@ function appendHeldLines(
   }
 }
 
+async function loadHeldRows(supabase: SupabaseClient, now: Date, kinds: string[]): Promise<HeldRow[]> {
+  const since = new Date(now.getTime() - META_EVENT_WINDOW_DAYS * DAY_MS).toISOString()
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('id, outcome_id, me_sale_outcomes!inner(client_id, outcome_kind, occurred_at, review_status, redacted_at)')
+    .eq('status', 'queued')
+    .contains('payload_preview', { held: true })
+    .eq('me_sale_outcomes.review_status', 'approved')
+    .is('me_sale_outcomes.redacted_at', null)
+    .in('me_sale_outcomes.outcome_kind', kinds)
+    .gte('me_sale_outcomes.occurred_at', since)
+    .order('occurred_at', { foreignTable: 'me_sale_outcomes', ascending: false })
+    .limit(200)
+  if (error) throw new Error(`名单停住待补发查询失败: ${error.message}`)
+  return (data ?? []) as unknown as HeldRow[]
+}
+
 async function pushHeldSendItems(
   supabase: SupabaseClient,
   items: ManualItem[],
   clientNames: Map<string, { name: string }>,
   now: Date,
 ): Promise<void> {
-  const { data, error } = await supabase
-    .from('me_conversion_writebacks')
-    .select('id, outcome_id, me_sale_outcomes(client_id, outcome_kind, occurred_at, review_status, redacted_at)')
-    .eq('status', 'queued')
-    .contains('payload_preview', { held: true })
-    .limit(200)
-  if (error) throw new Error(`名单停住待补发查询失败: ${error.message}`)
-  appendHeldLines((data ?? []) as unknown as HeldRow[], items, clientNames, now)
+  const deals = await loadHeldRows(supabase, now, ['purchase', 'balance'])
+  const leads = await loadHeldRows(supabase, now, ['lead'])
+  appendHeldLines([...deals, ...leads], items, clientNames, now)
 }
 
 type AuthFailedRow = {
