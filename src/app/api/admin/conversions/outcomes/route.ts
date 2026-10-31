@@ -23,6 +23,9 @@ export const dynamic = 'force-dynamic'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const OUTCOME_KINDS = ['purchase', 'balance', 'lead'] as const
+/** Read a page, drop rows that need no action, then continue until the list is full. */
+const RECOVERY_PAGE = 200
+const RECOVERY_PAGES = 25
 
 /** 列表在截断之前按类型筛。逗号分隔，空着表示不限类型。 */
 function parseOutcomeKinds(raw: string | null): { ok: true; kinds: string[] } | { ok: false } {
@@ -265,6 +268,16 @@ function windowStart(): string {
 }
 
 async function listQualifiedOpen(clientId: string, limit: number, columns: string) {
+  const found = await collectOpenRows(
+    limit,
+    (offset) => loadQualifiedPage(clientId, columns, offset),
+    qualifiedStillOpen,
+  )
+  if (found.error) return NextResponse.json({ error: found.error }, { status: 500 })
+  return NextResponse.json({ outcomes: found.rows, count: found.rows.length })
+}
+
+async function loadQualifiedPage(clientId: string, columns: string, offset: number): Promise<PageResult> {
   const { data, error } = await supabaseAdmin
     .from('me_sale_outcomes')
     .select(columns)
@@ -275,10 +288,9 @@ async function listQualifiedOpen(clientId: string, limit: number, columns: strin
     .is('redacted_at', null)
     .gte('occurred_at', windowStart())
     .order('occurred_at', { ascending: false })
-    .limit(limit)
-  if (error) return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
-  const outcomes = ((data ?? []) as ListedOutcome[]).filter(qualifiedStillOpen)
-  return NextResponse.json({ outcomes, count: outcomes.length })
+    .range(offset, offset + RECOVERY_PAGE - 1)
+  if (error) return { rows: [], error: `查询失败: ${error.message}` }
+  return { rows: (data ?? []) as ListedOutcome[], error: null }
 }
 
 function qualifiedStillOpen(row: ListedOutcome): boolean {
@@ -293,6 +305,17 @@ function qualifiedStillOpen(row: ListedOutcome): boolean {
 async function listCompanionOpen(clientId: string, limit: number, columns: string) {
   const config = await readLeadConfig(clientId)
   if (!config.ok) return NextResponse.json({ error: config.error }, { status: 500 })
+  const found = await collectOpenRows(
+    limit,
+    (offset) => loadCompanionPage(clientId, columns, offset),
+    (row) => companionStillOpen(row, config.leadsConfig),
+  )
+  if (found.error) return NextResponse.json({ error: found.error }, { status: 500 })
+  const outcomes = found.rows.map((row) => ({ ...row, companion_expected: true }))
+  return NextResponse.json({ outcomes, count: outcomes.length })
+}
+
+async function loadCompanionPage(clientId: string, columns: string, offset: number): Promise<PageResult> {
   const { data, error } = await supabaseAdmin
     .from('me_sale_outcomes')
     .select(columns)
@@ -303,12 +326,30 @@ async function listCompanionOpen(clientId: string, limit: number, columns: strin
     .not('meta_lead_id', 'is', null)
     .gte('occurred_at', windowStart())
     .order('occurred_at', { ascending: false })
-    .limit(limit)
-  if (error) return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
-  const outcomes = ((data ?? []) as ListedOutcome[])
-    .filter((row) => companionStillOpen(row, config.leadsConfig))
-    .map((row) => ({ ...row, companion_expected: true }))
-  return NextResponse.json({ outcomes, count: outcomes.length })
+    .range(offset, offset + RECOVERY_PAGE - 1)
+  if (error) return { rows: [], error: `查询失败: ${error.message}` }
+  return { rows: (data ?? []) as ListedOutcome[], error: null }
+}
+
+type PageResult = { rows: ListedOutcome[]; error: string | null }
+
+async function collectOpenRows(
+  limit: number,
+  loadPage: (offset: number) => Promise<PageResult>,
+  stillOpen: (row: ListedOutcome) => boolean,
+): Promise<PageResult> {
+  const kept: ListedOutcome[] = []
+  for (let page = 0; kept.length < limit && page < RECOVERY_PAGES; page += 1) {
+    const batch = await loadPage(page * RECOVERY_PAGE)
+    if (batch.error) return { rows: [], error: batch.error }
+    for (const row of batch.rows) {
+      if (!stillOpen(row)) continue
+      kept.push(row)
+      if (kept.length >= limit) break
+    }
+    if (batch.rows.length < RECOVERY_PAGE) break
+  }
+  return { rows: kept, error: null }
 }
 
 async function markOpenCompanions(clientId: string, rows: ListedOutcome[]): Promise<ListedOutcome[]> {

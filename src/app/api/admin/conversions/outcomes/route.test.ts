@@ -62,9 +62,15 @@ function matches(row: Row, op: string, col: string, val: unknown): boolean {
 }
 
 /** 先套筛选、再按时间倒序、最后才截断。漏掉类型筛选时，更新的咨询会占满 limit。 */
-function listRows(filters: Array<[string, string, unknown]>, limitN: number | null): Row[] {
+function listRows(
+  filters: Array<[string, string, unknown]>,
+  limitN: number | null,
+  rangeFrom: number | null = null,
+  rangeTo: number | null = null,
+): Row[] {
   let out = rows.filter((row) => filters.every(([op, col, val]) => matches(row, op, col, val)))
   out = [...out].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
+  if (rangeFrom != null && rangeTo != null) return out.slice(rangeFrom, rangeTo + 1)
   if (limitN != null) out = out.slice(0, limitN)
   return out
 }
@@ -74,6 +80,8 @@ let clientConfig: unknown = null
 function fakeDb(table = 'me_sale_outcomes') {
   const filters: Array<[string, string, unknown]> = []
   let limitN: number | null = null
+  let rangeFrom: number | null = null
+  let rangeTo: number | null = null
   const builder: Record<string, unknown> = {}
   const self = () => builder
   builder.select = self
@@ -110,13 +118,18 @@ function fakeDb(table = 'me_sale_outcomes') {
     limitN = n
     return builder
   }
+  builder.range = (from: number, to: number) => {
+    rangeFrom = from
+    rangeTo = to
+    return builder
+  }
   builder.maybeSingle = async () => {
     if (table === 'clients') return { data: { leads_config: clientConfig }, error: null }
     const found = listRows(filters, null)[0] ?? null
     return { data: found, error: null }
   }
   builder.then = (resolve: (v: { data: Row[]; error: null }) => unknown) =>
-    Promise.resolve(resolve({ data: listRows(filters, limitN), error: null }))
+    Promise.resolve(resolve({ data: listRows(filters, limitN, rangeFrom, rangeTo), error: null }))
   return builder
 }
 
@@ -235,6 +248,33 @@ describe('GET outcomes · 已报价排队和成交下一步', () => {
     expect(body.outcomes.map((o: Row) => o.id).sort()).toEqual(['quoted-missing', 'quoted-queued'])
   })
 
+  it('最新 200 条已报价都已发出时，更早还在排队的仍在补发列表里', async () => {
+    const sent = Array.from({ length: 200 }, (_, i) => ({
+      id: `sent-${i}`,
+      client_id: CLIENT,
+      outcome_kind: 'lead',
+      review_status: 'approved',
+      source_ref: `crm_qualified:c:sent-${i}`,
+      occurred_at: new Date(Date.now() - i * 1000).toISOString(),
+      me_conversion_writebacks: [{ status: 'confirmed' }],
+    }))
+    rows = [
+      ...sent,
+      {
+        id: 'older-queued',
+        client_id: CLIENT,
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        source_ref: 'crm_qualified:c:older',
+        occurred_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+        me_conversion_writebacks: [{ status: 'queued' }],
+      },
+    ]
+    const res = await get('qualified_open=1&limit=200')
+    const body = await res.json()
+    expect(body.outcomes.map((o: Row) => o.id)).toEqual(['older-queued'])
+  })
+
   it('打开了下一步、又有线索编号、但还没那条发送记录的成交会被标出来', async () => {
     clientConfig = { capi_conversion_leads: true, capi_conversion_deal_stage_key: 'balance_received' }
     rows = [
@@ -260,6 +300,38 @@ describe('GET outcomes · 已报价排队和成交下一步', () => {
     const res = await get('companion_open=1')
     const body = await res.json()
     expect(body.outcomes.map((o: Row) => o.id)).toEqual([DEAL])
+    expect(body.outcomes[0].companion_expected).toBe(true)
+  })
+
+  it('最新 200 笔成交的下一步都已发出时，更早还没记下的仍在补发列表里', async () => {
+    clientConfig = { capi_conversion_leads: true, capi_conversion_deal_stage_key: 'balance_received' }
+    const sent = Array.from({ length: 200 }, (_, i) => ({
+      id: `deal-sent-${i}`,
+      client_id: CLIENT,
+      outcome_kind: 'purchase',
+      review_status: 'approved',
+      meta_lead_id: LEAD,
+      occurred_at: new Date(Date.now() - i * 1000).toISOString(),
+      me_conversion_writebacks: [
+        { status: 'confirmed', event_id: `deal-sent-${i}` },
+        { status: 'confirmed', event_id: `deal-sent-${i}:conversion-stage` },
+      ],
+    }))
+    rows = [
+      ...sent,
+      {
+        id: 'older-open',
+        client_id: CLIENT,
+        outcome_kind: 'purchase',
+        review_status: 'approved',
+        meta_lead_id: LEAD,
+        occurred_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+        me_conversion_writebacks: [{ status: 'confirmed', event_id: 'older-open' }],
+      },
+    ]
+    const res = await get('companion_open=1&limit=200')
+    const body = await res.json()
+    expect(body.outcomes.map((o: Row) => o.id)).toEqual(['older-open'])
     expect(body.outcomes[0].companion_expected).toBe(true)
   })
 })

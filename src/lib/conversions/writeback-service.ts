@@ -25,7 +25,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { capiEventNameForKind, decideCapiEventAllowed } from './capi-client-config'
-import { dealStageEventId, dealStageEventName, resolveConversionLead } from './conversion-lead'
+import {
+  dealStageEventId,
+  dealStageEventName,
+  qualifiedLeadHoldReason,
+  resolveConversionLead,
+} from './conversion-lead'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
 import type {
@@ -33,6 +38,7 @@ import type {
   DestinationWriter,
   OutcomeForSend,
 } from './destination-writer'
+import { parkStuckStageSend } from './stuck-stage-send'
 
 /** 终态：任何自动路径都不许再改。 */
 const TERMINAL = [
@@ -135,12 +141,32 @@ async function prepareOrdinarySend(
     leadsConfig,
   })
   if (resolution.kind === 'refuse') return refuseOutcome(supabase, writebackId, resolution.message)
-  const qualifiedStage = resolution.kind === 'stage' && outcome.outcome_kind === 'lead'
-  if (!qualifiedStage) {
+  const eventName = resolution.kind === 'stage' ? resolution.eventName : null
+  if (eventName && outcome.outcome_kind === 'lead') {
+    const reason = qualifiedLeadHoldReason(leadsConfig)
+    if (reason) return holdQualifiedSwitch(supabase, writebackId, reason)
+  } else {
     const held = await holdUnlessAllowed(supabase, writebackId, leadsConfig, outcome.outcome_kind)
     if (held) return held
   }
-  return { eventName: resolution.kind === 'stage' ? resolution.eventName : null }
+  return { eventName }
+}
+
+/** Closed switch: stay queued, keep the stage event, do not send a plain Lead. */
+async function holdQualifiedSwitch(
+  supabase: SupabaseClient,
+  writebackId: string,
+  reason: string,
+): Promise<SendOutcomeResult> {
+  const preview = { qualifiedSwitch: true, reason }
+  const held = await casUpdate(supabase, writebackId, ['queued', 'failed'], {
+    status: 'queued',
+    last_error: reason,
+    last_error_code: null,
+    payload_preview: preview,
+  })
+  if (!held) return await currentState(supabase, writebackId)
+  return { status: 'queued', message: reason, writebackId, preview }
 }
 
 async function holdUnlessAllowed(
@@ -200,13 +226,17 @@ export async function sendApprovedOutcome(
 
 async function sendScopedCompanion(outcomeId: string, deps: SendDeps): Promise<SendOutcomeResult> {
   const eventName = await readDealStageName(deps.supabase, outcomeId)
-  if (!eventName) {
-    return { status: 'failed', message: '这条阶段记录现在发不出去。', writebackId: null }
+  if (eventName) {
+    return deliverApprovedOutcome(outcomeId, deps, {
+      eventId: dealStageEventId(outcomeId),
+      eventName,
+    })
   }
-  return deliverApprovedOutcome(outcomeId, deps, {
-    eventId: dealStageEventId(outcomeId),
-    eventName,
-  })
+  // Switch off: do not send. A request that already left still becomes in_doubt.
+  const parked = await parkStuckStageSend(
+    deps.supabase, deps.writer.kind, dealStageEventId(outcomeId), deps.now ?? new Date(), STUCK_SENDING_MS,
+  )
+  return parked ?? { status: 'failed', message: '这条阶段记录现在发不出去。', writebackId: null }
 }
 
 async function sendDealStageCompanion(outcomeId: string, deps: SendDeps): Promise<void> {

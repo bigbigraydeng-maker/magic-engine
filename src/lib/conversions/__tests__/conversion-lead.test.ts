@@ -5,6 +5,7 @@ import {
   isQualifiedLeadSource,
   latestMetaLeadId,
   qualifiedLeadSourceRef,
+  qualifiedLeadHoldReason,
   resolveConversionLead,
   stageKeyFromQualifiedRef,
 } from '../conversion-lead'
@@ -54,6 +55,13 @@ describe('resolveConversionLead', () => {
       { source_ref: LEAD, occurred_at: '2026-10-02T00:00:00.000Z' },
       { source_ref: '222222222222222', occurred_at: 'not-a-time' },
     ])).toBe(LEAD)
+  })
+
+  it('a closed or unreadable switch holds a qualified row without renaming it', () => {
+    expect(qualifiedLeadHoldReason({ capi_conversion_leads: true })).toBeNull()
+    expect(qualifiedLeadHoldReason({ capi_conversion_leads: false })).toContain('现在是关的')
+    expect(qualifiedLeadHoldReason({ capi_conversion_leads: 'yes' })).toContain('读不出来')
+    expect(qualifiedLeadHoldReason({})).toContain('现在是关的')
   })
 
   it('a qualified row keeps its stage name even after the switch is turned off', () => {
