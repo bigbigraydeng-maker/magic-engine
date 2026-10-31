@@ -18,6 +18,7 @@ import {
   normaliseDomain,
   parseDomainList,
   readDomainRules,
+  parseAddressList,
   EMPTY_RULES,
   type DomainRules,
 } from '../contact-kind'
@@ -280,5 +281,23 @@ describe('own_email_domains 里点名的员工地址（WP-1a）', () => {
     expect(contactKindOf(['other@asiascapeholidays.com'], rules)).toBe('trade')
     expect(contactKindOf(['staff.person@gmail.com'], rules)).toBe('staff')
     expect(contactKindOf(['real.customer@gmail.com'], rules)).toBe('retail')
+  })
+})
+
+describe('私人邮箱整域名 + 地址清单解析（魏征 P1）', () => {
+  it('parseDomainList 退回 gmail.com / yahoo.* / outlook.* 等整域名', () => {
+    const r = parseDomainList('gmail.com\nyahoo.com.au\nhotmail.co.nz\niCloud.com\nhot.co.nz')
+    expect(r.domains).toEqual(['hot.co.nz'])
+    expect(r.rejected).toEqual(expect.arrayContaining(['gmail.com', 'yahoo.com.au', 'hotmail.co.nz', 'iCloud.com']))
+  })
+
+  it('readDomainRules 忽略已存的私人邮箱整域名，Gmail 客人不会被当成自己人', () => {
+    const rules = readDomainRules({ own_email_domains: ['gmail.com', 'ctstours.co.nz'], trade_domains: ['outlook.com'] })
+    expect(rules).toEqual({ own: ['ctstours.co.nz'], trade: [] })
+    expect(contactKindOf(['real.customer@gmail.com'], rules)).toBe('retail')
+  })
+
+  it('parseAddressList 只校验格式、保持精确地址', () => {
+    expect(parseAddressList('A@B.co.nz, a@b.co.nz;c@gmail.com\nbad')).toEqual({ addresses: ['a@b.co.nz', 'c@gmail.com'], rejected: ['bad'] })
   })
 })

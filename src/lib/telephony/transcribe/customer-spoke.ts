@@ -10,7 +10,7 @@ export type CustomerSpokeVerdict = (typeof CUSTOMER_SPOKE_VALUES)[number]
 
 /** 语音信箱 / 自动应答的典型问候语（英文 + 中文）。 */
 export const VOICEMAIL_GREETING =
-  /at the (?:tone|beep)|after the (?:tone|beep)|record your message|leave (?:a|your) (?:message|name)|voice ?mail|mailbox|answering (?:machine|service)|语音信箱|请留言|嘀声|滴声/i
+  /at the (?:tone|beep)|after the (?:tone|beep)|record your message|leave (?:a|your) (?:message|name)|voice ?mail|mailbox|answering (?:machine|service)|you(?:'ve| have) reached|leave me a message|(?:is|are) not available|unable to take your call|can(?:'|’)?t come to the phone|please leave|语音信箱|请留言|嘀声|滴声/i
 
 /** 把文本压成可比较的形式：小写，去掉空白和常见标点。 */
 function squash(s: string): string {
@@ -24,6 +24,15 @@ export function speakingChannelCount(transcript: string): number {
   return channels.size
 }
 
+/** 每个声道说过的话（压缩后拼起来）。没有声道标记的转写返回空表。 */
+function textByChannel(transcript: string): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const m of transcript.matchAll(/^声道(\d+)：(.*)$/gm)) {
+    out.set(m[1], (out.get(m[1]) ?? '') + squash(m[2]))
+  }
+  return out
+}
+
 export interface RawCustomerSpoke { customerSpoke: CustomerSpokeVerdict; customerSpokeQuote: string | null }
 
 /**
@@ -34,7 +43,7 @@ export interface RawCustomerSpoke { customerSpoke: CustomerSpokeVerdict; custome
  *  - 模型说 no：转写命中 VOICEMAIL_GREETING，或只有 ≤1 个声道出过声 → 'no'；否则 unclear（没证据就不下"没开口"的结论）。
  *  - 其他（unclear）→ unclear。
  */
-export function verifyCustomerSpoke(raw: RawCustomerSpoke, transcript: string): CustomerSpokeVerdict {
+export function verifyCustomerSpoke(raw: RawCustomerSpoke, transcript: string, customerChannel?: string): CustomerSpokeVerdict {
   if (raw.customerSpoke === 'yes') {
     const quote = raw.customerSpokeQuote?.trim() ?? ''
     const squashed = squash(quote)
@@ -43,6 +52,14 @@ export function verifyCustomerSpoke(raw: RawCustomerSpoke, transcript: string): 
     // 原话里带信箱字眼（例如客人说「I got your voicemail」）不等于这是问候语：只降为说不清，绝不判 no。
     if (VOICEMAIL_GREETING.test(quote)) return 'unclear'
     if (VOICEMAIL_GREETING.test(transcript)) return 'unclear'
+    // 转写带声道标记时，这句原话必须能落在某一个声道里（跨声道拼出来的不算），
+    // 且调用方知道客人在哪个声道时，必须就在那个声道上；否则说不清。
+    const byChannel = textByChannel(transcript)
+    if (byChannel.size > 0) {
+      const holders = [...byChannel.entries()].filter(([, text]) => text.includes(squashed)).map(([ch]) => ch)
+      if (holders.length === 0) return 'unclear'
+      if (customerChannel !== undefined && !holders.includes(customerChannel)) return 'unclear'
+    }
     return 'yes'
   }
   if (raw.customerSpoke === 'no') {

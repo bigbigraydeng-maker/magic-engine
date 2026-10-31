@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { downloadTwilioRecording, MAX_RECORDING_BYTES, RecordingFetchError } from '../recording'
 import { numbersIn, verifyFacts, type RawAnalysis } from '../analysis-schema'
+import { verifyCustomerSpoke } from '../customer-spoke'
 import { planAnalysisSweep } from '@/lib/inngest/functions/telephony-analysis'
 import { TranscriptPendingError } from '../vendors'
 import { runCallAnalysis, MAX_STEP_ATTEMPTS, type AnalysisCall, type AnalysisConnection, type AnalysisStore } from '../pipeline'
@@ -514,6 +515,26 @@ describe('客人开没开口（WP-1a）：语音信箱不能当成聊过', () =>
     const v = verifyFacts(rawWith('yes', 'I got your voicemail, calling back about the tour'), t).customerSpoke
     expect(v).not.toBe('no')
     expect(v).toBe('unclear')
+  })
+
+  it('更多信箱问候语（you have reached / is not available / please leave …）也能识别', () => {
+    for (const greet of ['You have reached Sam, I am not around', 'Please leave me a message', 'The person you are calling is not available', 'We are unable to take your call']) {
+      const t = `声道2：${greet}\n声道1：Hi, this is Baker from CTS calling about your enquiry`
+      expect(verifyFacts(rawWith('no', null), t).customerSpoke).toBe('no')
+    }
+  })
+
+  it('转写带声道标记时，yes 的原话必须落在某一个声道里（跨声道拼出来的不算）；指定客人声道时必须在该声道', () => {
+    const t = '声道2：Hello yes this is Kam speaking\n声道1：Hi Kam this is Baker from CTS'
+    expect(verifyFacts(rawWith('yes', 'Kam speaking Hi Kam'), t).customerSpoke).toBe('unclear')
+    expect(verifyFacts(rawWith('yes', 'yes this is Kam speaking'), t).customerSpoke).toBe('yes')
+    expect(verifyCustomerSpoke({ customerSpoke: 'yes', customerSpokeQuote: 'yes this is Kam speaking' }, t, '2')).toBe('yes')
+    expect(verifyCustomerSpoke({ customerSpoke: 'yes', customerSpokeQuote: 'Hi Kam this is Baker from CTS' }, t, '2')).toBe('unclear')
+  })
+
+  it('裸的「I saw your voicemail」保持 unclear', () => {
+    const t = '声道2：I saw your voicemail\n声道1：Thanks for calling back'
+    expect(verifyFacts(rawWith('yes', 'I saw your voicemail'), t).customerSpoke).toBe('unclear')
   })
 
   it('模型说 no：有语音信箱问候语或只有一个声道出声 → no；两边都说了话却说 no → unclear（没证据不下结论）', () => {

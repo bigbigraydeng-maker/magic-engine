@@ -187,8 +187,12 @@ export function planMailIngest(messages: MailMessage[], opts: PlanOptions): Mail
     if (direction === 'inbound') thread.hasInbound = true
     // 主题以**最新一封**为准 —— 线程标题跟着最后一次来回走，跟邮箱里看到的一致。
     if (m.subject) thread.subject = m.subject
-    thread.lastAt = m.receivedAt
-    thread.lastFrom = direction === 'inbound' ? 'customer' : 'page'
+    // 同事的信只存触点，不动线程的「最后一句是谁说的 / 几点」：否则同事内部往来会让
+    // 「客人写了超过一天没人回」这条提醒把客人丢掉（子牙复审 P1）。
+    if (!staffSent) {
+      thread.lastAt = m.receivedAt
+      thread.lastFrom = direction === 'inbound' ? 'customer' : 'page'
+    }
   }
 
   return { threads: Array.from(threads.values()), skipped: Array.from(skipped.values()) }

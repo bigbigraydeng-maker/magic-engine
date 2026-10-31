@@ -71,6 +71,8 @@ type TimelineEntry =
       summary: string | null
       /** 出站且是机器发的（Mailchimp 欢迎信 / 群发）。 */
       automated?: boolean
+      /** 同事发的信（不是发给客人的，也不是系统群发）：显示成「同事内部邮件」。 */
+      staffInternal?: boolean
       /**
        * 表格「员工跟进记录」那列的原话（source = sheet_followup）。仅当这条记录没有自己的摘要时才带 ——
        * 抽屉只认摘要，不带的话这类记录整条看不见。
@@ -331,6 +333,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       // 机器发的出站（Mailchimp 欢迎信 / 群发）：抽屉里要说清「系统自动发出」，不能当成同事写的话，
       // 也不能当「最后一句」盖掉客人真说的话。
       automated: t.channel === 'email' && t.direction === 'outbound' && isAutomatedTouch(t.source, m),
+      ...(t.channel === 'email' && typeof m.staff_sender === 'string' ? { staffInternal: true } : {}),
       raw: cleanStr(t.raw),
       ...(sheetNote ? { sheetNote } : {}),
       ...(m.time_is_approximate === true ? { timeApproximate: true } : {}),

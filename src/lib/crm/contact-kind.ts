@@ -91,6 +91,12 @@ export const PERSONAL_MAIL_DOMAINS: ReadonlySet<string> = new Set([
   'qq.com', '163.com', '126.com', 'sina.com', 'foxmail.com',
 ])
 
+/** 私人邮箱服务商的整域名（含 yahoo.* / hotmail.* 这类各国后缀）。整域名登记它们 = 所有用私人邮箱的客人都被误判。 */
+export function isPersonalMailDomain(domain: string): boolean {
+  const d = domain.trim().toLowerCase()
+  return PERSONAL_MAIL_DOMAINS.has(d) || /^(gmail|googlemail|hotmail|outlook|live|yahoo|icloud|msn|ymail|proton|protonmail)\./.test(d)
+}
+
 /**
  * 「这是同行」按钮要标的域名：邮箱的域名，前提是它像个公司域名。
  * 私人邮箱或认不出的返回 null —— 那种人只能单独处理，不能整域名拉黑。
@@ -132,7 +138,8 @@ export function parseDomainList(input: unknown): ParsedDomainList {
 
   const take = (t: string) => {
     const d = normaliseDomain(t)
-    if (d && isUsableDomain(d)) {
+    // 私人邮箱整域名（gmail.com 等）不能登记成「自家 / 同行域名」：登记了，所有用它的客人都会被误判。
+    if (d && isUsableDomain(d) && !isPersonalMailDomain(d)) {
       if (!domains.includes(d)) domains.push(d)
       return true
     }
@@ -234,7 +241,8 @@ export function readDomainRules(leadsConfig: unknown): DomainRules {
   const rawOwn = Array.isArray(cfg.own_email_domains)
     ? cfg.own_email_domains.filter((x): x is string => typeof x === 'string')
     : []
-  const own = list(rawOwn.filter((x) => !x.includes('@')))
+  // 已存的私人邮箱整域名（历史脏数据）也不认：否则所有 Gmail 客人都成了「自己人」。
+  const own = list(rawOwn.filter((x) => !x.includes('@'))).filter((d) => !isPersonalMailDomain(d))
   const ownAddresses = Array.from(
     new Set(
       rawOwn
@@ -243,7 +251,11 @@ export function readDomainRules(leadsConfig: unknown): DomainRules {
         .filter((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)),
     ),
   )
-  return { own, trade: list(cfg.trade_domains), ...(ownAddresses.length > 0 ? { ownAddresses } : {}) }
+  return {
+    own,
+    trade: list(cfg.trade_domains).filter((d) => !isPersonalMailDomain(d)),
+    ...(ownAddresses.length > 0 ? { ownAddresses } : {}),
+  }
 }
 
 /** 卡片上那个小标记。终端客户不标 —— 他们是默认，标了只是噪音。 */
@@ -271,4 +283,30 @@ export const SYSTEM_ACCOUNT_NAMES: ReadonlySet<string> = new Set([
 export function isSystemAccountName(name: string | null | undefined): boolean {
   if (!name) return false
   return SYSTEM_ACCOUNT_NAMES.has(name.trim().toLowerCase())
+}
+
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/**
+ * 把一坨文字拆成「点名的员工地址」清单：只校验邮箱格式，**保持精确地址**，绝不退化成域名。
+ * 认不出来的原样退回。
+ */
+export function parseAddressList(input: unknown): { addresses: string[]; rejected: string[] } {
+  const pieces = Array.isArray(input)
+    ? input.filter((x): x is string => typeof x === 'string')
+    : typeof input === 'string'
+      ? input.split(/[\s,;、，；]+/)
+      : []
+  const addresses: string[] = []
+  const rejected: string[] = []
+  for (const piece of pieces) {
+    const t = piece.trim().toLowerCase()
+    if (!t) continue
+    if (EMAIL_SHAPE.test(t)) {
+      if (!addresses.includes(t)) addresses.push(t)
+    } else if (!rejected.includes(piece.trim())) {
+      rejected.push(piece.trim())
+    }
+  }
+  return { addresses, rejected }
 }

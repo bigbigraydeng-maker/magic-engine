@@ -354,7 +354,7 @@ describe('⑤ 同事发的信不能记成客人来信', () => {
     expect(first.direction).toBe('inbound')
     expect(quote.direction).toBe('outbound')
     expect(quote.staffSender).toBe('ticketing@ctstours.co.nz')
-    expect(plan.threads[0].lastFrom).toBe('page')
+    expect(plan.threads[0].lastFrom).toBe('customer') // 同事的信不动「最后一句是谁说的」
   })
 
   it('点名的员工地址同样生效；同域的其他人不受影响（仍是客人来信）', () => {
@@ -420,5 +420,20 @@ describe('⑤b 同事的信不算「有人跟进过客人」（子牙 P1-1）', 
       { ownDomains: ['ctstours.co.nz'] },
     )
     expect(plan.threads[0].messages[1]).toMatchObject({ direction: 'outbound', automated: true, staffSender: 'ticketing@ctstours.co.nz' })
+  })
+})
+
+describe('⑤c 同事的信不动线程的「最后一句是谁说的 / 几点」（子牙复审 P1）', () => {
+  it('客人来信后跟一封同事内部信 → lastFrom 仍是 customer，lastAt 仍是客人那封', () => {
+    const plan = planMailIngest(
+      [
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T01:00:00.000Z' }),
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T05:00:00.000Z', counterparty: { address: 'ticketing@ctstours.co.nz', name: 'T' } }),
+      ],
+      { ownDomains: ['ctstours.co.nz'] },
+    )
+    expect(plan.threads[0].messages).toHaveLength(2) // 信照存
+    expect(plan.threads[0].lastFrom).toBe('customer')
+    expect(plan.threads[0].lastAt).toBe('2026-08-01T01:00:00.000Z')
   })
 })
