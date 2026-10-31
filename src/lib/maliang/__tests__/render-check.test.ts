@@ -41,6 +41,7 @@ import {
   type NineGridResult,
   type MaliangCheck,
 } from '../render-check'
+import { reconcileTextOnlyMiss } from '../text-compare'
 
 const probeMock = vi.mocked(safeProbeRemoteFile)
 
@@ -201,6 +202,55 @@ describe('allowedVideoHosts', () => {
 
   it('returns [] when unset', () => {
     expect(allowedVideoHosts({})).toEqual([])
+  })
+})
+
+describe('reconcileTextOnlyMiss', () => {
+  const line = 'West Lake and the Legend of the White Snake'
+  const expected = [line]
+
+  it('treats a case or line-break difference as a model miss when the picture has the whole line', () => {
+    const frames = nineFrames()
+    frames[2] = frame({
+      t_pct: 25,
+      text_ok: false,
+      text_note: '少了 Snake',
+      text_seen: 'West Lake and the Legend of the White\nSnake',
+    })
+    const verdict = decideVerdict({ frames, overall_note: '' }, true)
+    const next = reconcileTextOnlyMiss(verdict, frames, expected)
+    expect(verdict.status).toBe('fail')
+    expect(next.status).toBe('pass')
+    expect(next.text_recheck).toBe('false_positive')
+  })
+
+  it('still fails when the picture is actually missing the word', () => {
+    const frames = nineFrames()
+    frames[2] = frame({
+      t_pct: 25,
+      text_ok: false,
+      text_note: '少了 Snake',
+      text_seen: 'West Lake and the Legend of the White',
+    })
+    const next = reconcileTextOnlyMiss(decideVerdict({ frames, overall_note: '' }, true), frames, expected)
+    expect(next.status).toBe('fail')
+    expect(next.text_recheck).toBeNull()
+    expect(next.reasons.some((reason) => reason.includes('少了 Snake'))).toBe(true)
+  })
+
+  it('does not override a real picture problem', () => {
+    const frames = nineFrames()
+    frames[2] = frame({ t_pct: 25, image_ok: false, image_note: '糊了', text_seen: line })
+    const next = reconcileTextOnlyMiss(decideVerdict({ frames, overall_note: '' }, true), frames, expected)
+    expect(next.status).toBe('fail')
+    expect(next.text_recheck).toBeNull()
+  })
+
+  it('leaves an already passing check unchanged', () => {
+    const frames = nineFrames({ text_seen: line })
+    const next = reconcileTextOnlyMiss(decideVerdict({ frames, overall_note: '' }, true), frames, expected)
+    expect(next.status).toBe('pass')
+    expect(next.text_recheck).toBeNull()
   })
 })
 
