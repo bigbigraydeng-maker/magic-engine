@@ -17,7 +17,7 @@ import { isDoNotContact } from '@/lib/crm/dnc'
 import { readCapiClientConfig, type DealMilestone } from './capi-client-config'
 import { stageCountsAsDeal } from './crm-deal-stage'
 import { legalPartySize } from './crm-deal-party'
-import { autoPassMessage, CRM_DEAL_AUTO_ACTOR, partyReadNote, type DealSendClass } from './crm-deal-send'
+import { autoPassMessage, CRM_DEAL_AUTO_ACTOR, partyReadNote, unsentRetryMessage, type DealSendClass } from './crm-deal-send'
 import { buildIntakeRow, type IntakeRow } from './intake'
 import { minorToDecimalString, priceDealFromCatalog } from './tour-deal-price'
 import { toMinorUnits } from './money'
@@ -83,6 +83,9 @@ export type ExistingSourceDeal = {
   id: string
   voidedByPaymentReversal: boolean
   stoppedSendIds: string[]
+  reviewStatus: string
+  /** True once any send row exists, including a failed one. A retry must not open another. */
+  hasSendRecord: boolean
 }
 
 export type DealRecordResult = {
@@ -344,7 +347,12 @@ async function resolveDuplicate(
   const sourceRef = row.source_ref
   if (!sourceRef) return already(input)
   const existing = await io.loadExistingSourceDeal(row.client_id, row.source_kind, sourceRef)
-  if (!existing?.voidedByPaymentReversal) return already(input)
+  if (!existing?.voidedByPaymentReversal) {
+    if (existing && input.autoPass && existing.reviewStatus === 'approved' && !existing.hasSendRecord) {
+      return retryUnsent(io, input, existing.id)
+    }
+    return already(input)
+  }
   const restored = await io.restoreVoidedDeal(existing.id, row, existing.stoppedSendIds, dealWrite(input, now))
   if (!restored.ok) return logged('record_failed', false, MSG.failed)
   return finishRecorded(io, input, contact, existing.id, 'restored')
@@ -366,6 +374,12 @@ function dealWrite(input: FinishInput, now: Date): DealWrite | undefined {
     reviewedAt: now.toISOString(),
     milestoneKind: input.milestoneKind,
   }
+}
+
+async function retryUnsent(io: DealIo, input: FinishInput, outcomeId: string): Promise<DealRecordResult> {
+  const send = await safeDispatch(io, outcomeId)
+  const message = partyReadNote(unsentRetryMessage(send), input.partyFromStored)
+  return { ...base(true, null, message), outcomeId, advanceStage: false }
 }
 
 async function finishRecorded(

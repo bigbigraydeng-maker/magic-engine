@@ -218,7 +218,13 @@ describe('recordMilestoneDeal', () => {
     const restored: string[] = []
     const io = memory({
       insertOutcome: async () => ({ ok: false, duplicate: true }),
-      loadExistingSourceDeal: async () => ({ id: 'voided-1', voidedByPaymentReversal: true, stoppedSendIds: ['wb-1'] }),
+      loadExistingSourceDeal: async () => ({
+        id: 'voided-1',
+        voidedByPaymentReversal: true,
+        stoppedSendIds: ['wb-1'],
+        reviewStatus: 'rejected',
+        hasSendRecord: true,
+      }),
       restoreVoidedDeal: async (id, _row, ids, write) => {
         restored.push(id, ...ids)
         expect(write).toMatchObject({ reviewStatus: 'approved', reviewedBy: 'system:crm-deal-auto', milestoneKind: 'deposit' })
@@ -238,7 +244,13 @@ describe('recordMilestoneDeal', () => {
     let calls = 0
     const io = memory({
       insertOutcome: async () => ({ ok: false, duplicate: true }),
-      loadExistingSourceDeal: async () => ({ id: 'human-rej', voidedByPaymentReversal: false, stoppedSendIds: [] }),
+      loadExistingSourceDeal: async () => ({
+        id: 'human-rej',
+        voidedByPaymentReversal: false,
+        stoppedSendIds: [],
+        reviewStatus: 'rejected',
+        hasSendRecord: false,
+      }),
       restoreVoidedDeal: async () => {
         calls += 1
         return { ok: true }
@@ -252,7 +264,13 @@ describe('recordMilestoneDeal', () => {
   it('a failed reopen is not reported as already recorded', async () => {
     const io = memory({
       insertOutcome: async () => ({ ok: false, duplicate: true }),
-      loadExistingSourceDeal: async () => ({ id: 'voided-1', voidedByPaymentReversal: true, stoppedSendIds: ['wb-1'] }),
+      loadExistingSourceDeal: async () => ({
+        id: 'voided-1',
+        voidedByPaymentReversal: true,
+        stoppedSendIds: ['wb-1'],
+        reviewStatus: 'rejected',
+        hasSendRecord: true,
+      }),
       restoreVoidedDeal: async () => ({ ok: false }),
     })
     const result = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
@@ -326,6 +344,73 @@ describe('recordMilestoneDeal', () => {
     expect(result.message).toContain('往来或跟进记录')
     expect(io.inserted[0]?.amount_minor).toBe(1_499_700)
     expect(io.storedPartyLoads).toBe(1)
+  })
+
+  it('sends once on the next record when the first send died before a send row existed', async () => {
+    let attempts = 0
+    let sendRows = 0
+    const io = memory({
+      dispatchSend: async (id) => {
+        io.sends.push(id)
+        attempts += 1
+        if (attempts === 1) throw new Error('db down')
+        sendRows += 1
+        return 'sent'
+      },
+      loadExistingSourceDeal: async () => {
+        if (io.inserted.length === 0) return null
+        return {
+          id: 'out-1',
+          voidedByPaymentReversal: false,
+          stoppedSendIds: [],
+          reviewStatus: 'approved',
+          hasSendRecord: sendRows > 0,
+        }
+      },
+    })
+    const first = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
+    expect(first).toMatchObject({ recorded: true, alreadyRecorded: false, outcomeId: 'out-1' })
+    expect(first.message).toContain('没成功')
+    expect(first.message).not.toContain('已经记过')
+
+    const second = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
+    expect(second.alreadyRecorded).toBe(false)
+    expect(second.recorded).toBe(false)
+    expect(second.outcomeId).toBe('out-1')
+    expect(second.message).not.toContain('已经记过')
+    expect(second.message).toContain('这次已发给广告平台')
+    expect(io.inserted).toHaveLength(1)
+    expect(io.sends).toEqual(['out-1', 'out-1'])
+
+    const third = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
+    expect(third).toMatchObject({ alreadyRecorded: true, recorded: false })
+    expect(third.message).toContain('已经记过')
+    expect(io.sends).toHaveLength(2)
+  })
+
+  it('does not send a hand-entered deal again when no send row exists', async () => {
+    let sends = 0
+    const io = memory({
+      insertOutcome: async () => ({ ok: false, duplicate: true }),
+      loadExistingSourceDeal: async () => ({
+        id: 'stage-1',
+        voidedByPaymentReversal: false,
+        stoppedSendIds: [],
+        reviewStatus: 'approved',
+        hasSendRecord: false,
+      }),
+      dispatchSend: async () => {
+        sends += 1
+        return 'sent'
+      },
+    })
+    const result = await recordStageDeal(io, {
+      clientId: CLIENT, contactId: CONTACT, stageKey: 'won', bookingId: null,
+      occurredAt: null, actor: null, staffAmount: '10', staffCurrency: 'NZD',
+    }, NOW)
+    expect(sends).toBe(0)
+    expect(result).toMatchObject({ alreadyRecorded: true, recorded: false })
+    expect(result.message).toContain('已经记过')
   })
 })
 

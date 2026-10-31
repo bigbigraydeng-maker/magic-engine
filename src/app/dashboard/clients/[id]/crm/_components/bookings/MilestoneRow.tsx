@@ -150,8 +150,13 @@ function useConfirmParty(required: boolean, clientId: string, contactId: string)
     let alive = true
     void fetchPartyHint(clientId, contactId).then((hint) => {
       if (!alive || !hint) return
-      setText(String(hint.size))
-      setSourceLabel(PARTY_SOURCE_LABEL[hint.source])
+      let applied = false
+      setText((current) => {
+        if (current.trim() !== '') return current
+        applied = true
+        return String(hint.size)
+      })
+      if (applied) setSourceLabel(PARTY_SOURCE_LABEL[hint.source])
     })
     return () => {
       alive = false
