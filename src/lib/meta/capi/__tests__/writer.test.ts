@@ -190,6 +190,41 @@ describe('build · Facebook 线索编号（lead_id）匹配键', () => {
   })
 })
 
+describe('build · 同一条 Meta 线索的阶段', () => {
+  const leadId = '1687504185706630'
+
+  it('阶段名用传入的值，action_source 与来源按线索阶段回传，成交带金额', () => {
+    const stageName = 'balance_received'
+    const p = writer.build(
+      outcome({
+        outcomeKind: 'purchase',
+        metaLeadId: leadId,
+        conversionLeadEventName: stageName,
+        amountMinor: 388000,
+        currency: 'NZD',
+      }),
+      CONFIG,
+    ).data[0]
+    expect(p.event_name).toBe(stageName)
+    expect(p.event_name).not.toBe('Purchase')
+    expect(p.action_source).toBe('system_generated')
+    expect(p.user_data.lead_id).toBe(leadId)
+    expect(p.custom_data).toMatchObject({
+      event_source: 'crm',
+      lead_event_source: 'Magic Engine',
+      currency: 'NZD',
+      value: 3880,
+      order_id: '84191',
+    })
+  })
+
+  it('没有合法线索编号时直接拒绝，不会装成普通咨询', () => {
+    expect(() =>
+      writer.build(outcome({ outcomeKind: 'lead', conversionLeadEventName: 'quoted', metaLeadId: null, amountMinor: null, currency: null }), CONFIG),
+    ).toThrow('没有原始线索编号')
+  })
+})
+
 describe('build · 金额与时间', () => {
   it('最小单位换回主单位', () => {
     const p = writer.build(outcome({ amountMinor: 388000, currency: 'NZD' }), CONFIG)
