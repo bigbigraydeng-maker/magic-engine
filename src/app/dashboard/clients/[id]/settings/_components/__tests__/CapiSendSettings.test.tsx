@@ -12,7 +12,7 @@ describe('成交配置已经接到记成交', () => {
       json: async () => ({ config: {}, stages: [] }),
     }))
     render(<CapiSendSettings clientId="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" />)
-    expect(await screen.findByText(/记一笔等审核的成交/)).toBeTruthy()
+    expect(await screen.findByText(/自动记下成交并发送/)).toBeTruthy()
     expect(screen.getByText(/可以手填金额/)).toBeTruthy()
     expect(screen.queryByText(/还没生效/)).toBeNull()
   })

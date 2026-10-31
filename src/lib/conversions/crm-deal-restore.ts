@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { PAYMENT_VOID_REJECT_NOTE, PAYMENT_VOID_STOP_ERROR } from './crm-deal-void'
+import type { DealWrite } from './crm-deal-record'
 import type { IntakeRow } from './intake'
 
 export type SourceWriteback = { id: string; status: string; lastError: string | null }
@@ -32,6 +33,7 @@ export function voidStoppedSendIds(row: SourceRow): string[] | null {
       ids.push(item.id)
       continue
     }
+    if (item.status === 'queued' && (item.lastError == null || item.lastError === '')) continue
     return null
   }
   return ids
@@ -69,11 +71,12 @@ export async function restoreVoidedDeal(
   id: string,
   row: IntakeRow,
   stoppedSendIds: string[],
+  write?: DealWrite,
 ): Promise<boolean> {
   for (const sendId of stoppedSendIds) {
     if (!(await reopenStoppedSend(db, sendId))) return false
   }
-  if (!(await reopenDeal(db, id, row))) return false
+  if (!(await reopenDeal(db, id, row, write))) return false
   await writeRestoreAudit(db, id, row.created_by)
   return true
 }
@@ -98,7 +101,7 @@ async function reopenStoppedSend(db: SupabaseClient, id: string): Promise<boolea
   return found?.status === 'queued' && (found.last_error == null || found.last_error === '')
 }
 
-async function reopenDeal(db: SupabaseClient, id: string, row: IntakeRow): Promise<boolean> {
+async function reopenDeal(db: SupabaseClient, id: string, row: IntakeRow, write?: DealWrite): Promise<boolean> {
   const now = new Date().toISOString()
   const { data, error } = await db
     .from('me_sale_outcomes')
@@ -114,9 +117,9 @@ async function reopenDeal(db: SupabaseClient, id: string, row: IntakeRow): Promi
       occurred_at: row.occurred_at,
       page_scoped_user_id: row.page_scoped_user_id,
       meta_lead_id: row.meta_lead_id,
-      review_status: 'pending_review',
-      reviewed_by: null,
-      reviewed_at: null,
+      review_status: write ? 'approved' : 'pending_review',
+      reviewed_by: write?.reviewedBy ?? null,
+      reviewed_at: write?.reviewedAt ?? null,
       reviewed_ip: null,
       reviewed_ua: null,
       review_request_id: null,

@@ -15,8 +15,11 @@ import {
   type ApprovedPurchase,
   type DealBooking,
   type DealIo,
+  type DealWrite,
 } from './crm-deal-record'
 import type { DealMilestone } from './capi-client-config'
+import { readStoredPartySize } from './crm-deal-party-read'
+import { dispatchCrmDeal } from './crm-deal-send'
 import { readSourceDeal, restoreVoidedDeal } from './crm-deal-restore'
 import type { IntakeRow } from './intake'
 
@@ -32,9 +35,11 @@ export function supabaseDealIo(db: SupabaseClient): DealIo {
     loadPriceTexts: (clientId, tourId, departureId) => loadDealPriceTexts(db, clientId, tourId, departureId),
     loadApprovedPurchases: (clientId, contactId) => loadApproved(db, clientId, contactId),
     loadDncTouches: (clientId, contactId) => loadTouches(db, clientId, contactId),
-    insertOutcome: (row) => insertOutcome(db, row),
+    loadStoredPartySize: (clientId, contactId) => readStoredPartySize(db, clientId, contactId),
+    insertOutcome: (row, write) => insertOutcome(db, row, write),
     loadExistingSourceDeal: (clientId, sourceKind, sourceRef) => readSourceDeal(db, clientId, sourceKind, sourceRef),
-    restoreVoidedDeal: async (id, row, stoppedSendIds) => ({ ok: await restoreVoidedDeal(db, id, row, stoppedSendIds) }),
+    restoreVoidedDeal: async (id, row, stoppedSendIds, write) => ({ ok: await restoreVoidedDeal(db, id, row, stoppedSendIds, write) }),
+    dispatchSend: (outcomeId) => dispatchCrmDeal(db, outcomeId),
   }
 }
 
@@ -175,21 +180,35 @@ async function loadTouches(db: SupabaseClient, clientId: string, contactId: stri
   return data.map((item) => touchOf(item))
 }
 
-async function insertOutcome(db: SupabaseClient, row: IntakeRow): Promise<{ ok: true; id: string } | { ok: false; duplicate: boolean }> {
-  const { data, error } = await db.from('me_sale_outcomes').insert(row).select('id').single()
+async function insertOutcome(
+  db: SupabaseClient,
+  row: IntakeRow,
+  write?: DealWrite,
+): Promise<{ ok: true; id: string } | { ok: false; duplicate: boolean }> {
+  const payload = write
+    ? { ...row, review_status: write.reviewStatus, reviewed_by: write.reviewedBy, reviewed_at: write.reviewedAt }
+    : row
+  const { data, error } = await db.from('me_sale_outcomes').insert(payload).select('id').single()
   if (error) return { ok: false, duplicate: codeOf(error) === '23505' }
   const id = str(asRow(data)?.id)
   if (!id) return { ok: false, duplicate: false }
-  await writeAudit(db, id, row)
+  await writeAudit(db, id, row, write?.milestoneKind ?? null)
   return { ok: true, id }
 }
 
-async function writeAudit(db: SupabaseClient, outcomeId: string, row: IntakeRow): Promise<void> {
+async function writeAudit(
+  db: SupabaseClient,
+  outcomeId: string,
+  row: IntakeRow,
+  milestone: DealMilestone | null,
+): Promise<void> {
+  const detail: Record<string, string | null> = { source_kind: row.source_kind, source_ref: row.source_ref }
+  if (milestone) detail.milestone = milestone
   const { error } = await db.from('me_conversion_audit').insert({
     outcome_id: outcomeId,
     action: 'created',
     actor: row.created_by,
-    detail: { source_kind: row.source_kind, source_ref: row.source_ref },
+    detail,
   })
   if (error) console.info(JSON.stringify({ event: 'crm_deal.audit_failed' }))
 }

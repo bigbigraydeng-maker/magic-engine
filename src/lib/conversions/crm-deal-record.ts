@@ -1,9 +1,11 @@
 /**
- * One pending purchase when staff record a configured deal.
+ * One purchase when staff record a configured deal.
  *
- * The inserted row id is the platform event id (the sender already uses
- * `outcome.id`). Nothing here approves or sends. A second source that already
- * has an approved purchase for this contact inside 30 days blocks a new row.
+ * A payment of the configured milestone is approved by the system and sent
+ * through the existing sender. A hand-entered stage deal stays pending review
+ * and is not sent from here. The inserted row id is the platform event id.
+ * A second source that already has an approved purchase for this contact
+ * inside 30 days blocks a new row.
  *
  * Catalog totals are starting prices ("From …" × party size). A missing party
  * size does not fall back to a staff-typed amount, and this module does not
@@ -13,9 +15,18 @@
 import type { DncTouch } from '@/lib/crm/dnc'
 import { isDoNotContact } from '@/lib/crm/dnc'
 import { readCapiClientConfig, type DealMilestone } from './capi-client-config'
+import { legalPartySize } from './crm-deal-party'
+import { autoPassMessage, CRM_DEAL_AUTO_ACTOR, partyReadNote, type DealSendClass } from './crm-deal-send'
 import { buildIntakeRow, type IntakeRow } from './intake'
 import { minorToDecimalString, priceDealFromCatalog } from './tour-deal-price'
 import { toMinorUnits } from './money'
+
+export type DealWrite = {
+  reviewStatus: 'approved'
+  reviewedBy: string
+  reviewedAt: string
+  milestoneKind: DealMilestone
+}
 
 export const DEAL_DEDUPE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 export const CRM_STAGE_MANUAL_SOURCE = 'crm_stage_manual'
@@ -56,11 +67,15 @@ export type DealIo = {
   }>
   loadApprovedPurchases(clientId: string, contactId: string): Promise<ApprovedPurchase[]>
   loadDncTouches(clientId: string, contactId: string): Promise<DncTouch[] | null>
-  insertOutcome(row: IntakeRow): Promise<{ ok: true; id: string } | { ok: false; duplicate: boolean }>
+  /** Headcount already stored on follow-ups or mail previews. Not used for hand-entered deals. */
+  loadStoredPartySize?(clientId: string, contactId: string): Promise<number | null>
+  insertOutcome(row: IntakeRow, write?: DealWrite): Promise<{ ok: true; id: string } | { ok: false; duplicate: boolean }>
   /** The row that already owns this source ref, if the insert collided. */
   loadExistingSourceDeal(clientId: string, sourceKind: string, sourceRef: string): Promise<ExistingSourceDeal | null>
-  /** Put a payment-voided deal back to pending review and reopen its stopped send. */
-  restoreVoidedDeal(id: string, row: IntakeRow, stoppedSendIds: string[]): Promise<{ ok: boolean }>
+  /** Reopen a payment-voided deal. `write` approves it again; without it the row waits for review. */
+  restoreVoidedDeal(id: string, row: IntakeRow, stoppedSendIds: string[], write?: DealWrite): Promise<{ ok: boolean }>
+  /** Send an already approved payment deal. Must not throw. */
+  dispatchSend?(outcomeId: string): Promise<DealSendClass>
 }
 
 export type ExistingSourceDeal = {
@@ -172,6 +187,9 @@ export async function recordMilestoneDeal(
     staffCurrency: null,
     advanceOnDedupe: false,
     warnDnc: false,
+    autoPass: true,
+    milestoneKind: input.kind,
+    partyFromStored: false,
   }, now)
 }
 
@@ -215,6 +233,9 @@ export async function recordStageDeal(
     staffCurrency: input.staffCurrency,
     advanceOnDedupe: true,
     warnDnc: true,
+    autoPass: false,
+    milestoneKind: null,
+    partyFromStored: false,
   }, now)
 }
 
@@ -230,10 +251,14 @@ type FinishInput = {
   staffCurrency: string | null
   advanceOnDedupe: boolean
   warnDnc: boolean
+  autoPass: boolean
+  milestoneKind: DealMilestone | null
+  partyFromStored: boolean
 }
 
 async function finishDeal(io: DealIo, phoneCountry: string | null, input: FinishInput, now: Date): Promise<DealRecordResult> {
-  const priced = await resolveAmount(io, input)
+  const ready = await applyStoredParty(io, input)
+  const priced = await resolveAmount(io, ready)
   if (!priced.ok) return logged(priced.reason, false, priced.reason === 'missing_party_size' ? MSG.missingParty : priced.reason === 'invalid_amount' ? MSG.failed : MSG.unpriced)
   const contact = await io.loadContact(input.clientId, input.contactId)
   if (!contact) return logged('contact_missing', false, MSG.failed)
@@ -242,7 +267,7 @@ async function finishDeal(io: DealIo, phoneCountry: string | null, input: Finish
     logSkip('recent_other_source', block.sourceKind)
     return { ...logged('recent_other_source', input.advanceOnDedupe, MSG.dedupe), alreadyRecorded: false }
   }
-  return insertDeal(io, phoneCountry, input, contact, priced, now)
+  return insertDeal(io, phoneCountry, ready, contact, priced, now)
 }
 
 async function insertDeal(
@@ -274,11 +299,11 @@ async function insertDeal(
     const noKey = built.errors.some((e) => e.includes('至少要有'))
     return logged(noKey ? 'no_match_key' : 'unpriced', false, noKey ? MSG.noMatch : MSG.unpriced)
   }
-  const inserted = await io.insertOutcome(built.row)
-  if (!inserted.ok && inserted.duplicate) return resolveDuplicate(io, built.row, input, contact)
+  const write = dealWrite(input, now)
+  const inserted = await io.insertOutcome(built.row, write)
+  if (!inserted.ok && inserted.duplicate) return resolveDuplicate(io, built.row, input, contact, now)
   if (!inserted.ok) return logged('record_failed', false, MSG.failed)
-  const dnc = input.warnDnc ? await dncOf(io, input, contact.doNotContact) : false
-  return { ...base(true, null, dnc ? MSG.dnc : MSG.recorded), recorded: true, outcomeId: inserted.id, advanceStage: input.advanceOnDedupe, doNotContact: dnc }
+  return finishRecorded(io, input, contact, inserted.id, 'recorded')
 }
 
 async function resolveDuplicate(
@@ -286,20 +311,66 @@ async function resolveDuplicate(
   row: IntakeRow,
   input: FinishInput,
   contact: { doNotContact: boolean },
+  now: Date,
 ): Promise<DealRecordResult> {
   const sourceRef = row.source_ref
   if (!sourceRef) return already(input)
   const existing = await io.loadExistingSourceDeal(row.client_id, row.source_kind, sourceRef)
   if (!existing?.voidedByPaymentReversal) return already(input)
-  const restored = await io.restoreVoidedDeal(existing.id, row, existing.stoppedSendIds)
+  const restored = await io.restoreVoidedDeal(existing.id, row, existing.stoppedSendIds, dealWrite(input, now))
   if (!restored.ok) return logged('record_failed', false, MSG.failed)
-  const dnc = input.warnDnc ? await dncOf(io, input, contact.doNotContact) : false
+  return finishRecorded(io, input, contact, existing.id, 'restored')
+}
+
+async function applyStoredParty(io: DealIo, input: FinishInput): Promise<FinishInput> {
+  if (!input.autoPass || !input.booking || legalPartySize(input.booking.partySize) != null) return input
+  if (!io.loadStoredPartySize) return input
+  const stored = legalPartySize(await io.loadStoredPartySize(input.clientId, input.contactId))
+  if (stored == null || !input.booking) return input
+  return { ...input, partyFromStored: true, booking: { ...input.booking, partySize: stored } }
+}
+
+function dealWrite(input: FinishInput, now: Date): DealWrite | undefined {
+  if (!input.autoPass || input.milestoneKind == null) return undefined
   return {
-    ...base(true, null, dnc ? MSG.dnc : MSG.restored),
-    recorded: true,
-    outcomeId: existing.id,
-    advanceStage: input.advanceOnDedupe,
-    doNotContact: dnc,
+    reviewStatus: 'approved',
+    reviewedBy: CRM_DEAL_AUTO_ACTOR,
+    reviewedAt: now.toISOString(),
+    milestoneKind: input.milestoneKind,
+  }
+}
+
+async function finishRecorded(
+  io: DealIo,
+  input: FinishInput,
+  contact: { doNotContact: boolean },
+  outcomeId: string,
+  kind: 'recorded' | 'restored',
+): Promise<DealRecordResult> {
+  if (!input.autoPass) return pendingResult(io, input, contact, outcomeId, kind)
+  const send = await safeDispatch(io, outcomeId)
+  const message = partyReadNote(autoPassMessage(kind, send), input.partyFromStored)
+  return { ...base(true, null, message), recorded: true, outcomeId, advanceStage: false, doNotContact: false }
+}
+
+async function pendingResult(
+  io: DealIo,
+  input: FinishInput,
+  contact: { doNotContact: boolean },
+  outcomeId: string,
+  kind: 'recorded' | 'restored',
+): Promise<DealRecordResult> {
+  const dnc = input.warnDnc ? await dncOf(io, input, contact.doNotContact) : false
+  const message = dnc ? MSG.dnc : kind === 'restored' ? MSG.restored : MSG.recorded
+  return { ...base(true, null, message), recorded: true, outcomeId, advanceStage: input.advanceOnDedupe, doNotContact: dnc }
+}
+
+async function safeDispatch(io: DealIo, outcomeId: string): Promise<DealSendClass> {
+  if (!io.dispatchSend) return 'failed'
+  try {
+    return await io.dispatchSend(outcomeId)
+  } catch {
+    return 'failed'
   }
 }
 

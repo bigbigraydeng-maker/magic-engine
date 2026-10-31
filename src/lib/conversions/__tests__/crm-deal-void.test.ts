@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PAYMENT_VOID_REJECT_NOTE, PAYMENT_VOID_STOP_ERROR, planDealVoid, voidDealMessage, type DealVoidRow } from '../crm-deal-void'
+import { dealBelongsToUnmarkedKind, PAYMENT_VOID_REJECT_NOTE, PAYMENT_VOID_STOP_ERROR, planDealVoid, selectDealsForUnmark, voidDealMessage, type DealVoidRow } from '../crm-deal-void'
 import { voidStoppedSendIds } from '../crm-deal-restore'
 
 function row(status: string, writebacks: Array<{ id: string; status: string }> = []): DealVoidRow {
@@ -61,6 +61,29 @@ describe('planDealVoid', () => {
       rejectNote: PAYMENT_VOID_REJECT_NOTE,
       writebacks: [{ id: 'wb-3', status: 'failed_permanent', lastError: '别的原因' }],
     })).toBeNull()
+    expect(voidStoppedSendIds({
+      reviewStatus: 'rejected',
+      rejectNote: PAYMENT_VOID_REJECT_NOTE,
+      writebacks: [{ id: 'wb-4', status: 'queued', lastError: null }],
+    })).toEqual([])
+    expect(voidStoppedSendIds({
+      reviewStatus: 'rejected',
+      rejectNote: PAYMENT_VOID_REJECT_NOTE,
+      writebacks: [{ id: 'wb-5', status: 'queued', lastError: '还停着' }],
+    })).toBeNull()
+  })
+
+  it('a creation stamp follows the payment that was unmarked, not today\'s setting', () => {
+    expect(dealBelongsToUnmarkedKind('deposit', 'deposit', 'balance')).toBe('void')
+    expect(dealBelongsToUnmarkedKind('deposit', 'balance', 'deposit')).toBe('skip')
+    expect(dealBelongsToUnmarkedKind(null, 'deposit', 'deposit')).toBe('void')
+    expect(dealBelongsToUnmarkedKind(null, 'deposit', 'balance')).toBe('skip')
+    expect(dealBelongsToUnmarkedKind(null, 'deposit', 'malformed')).toBe('void_failed')
+    expect(selectDealsForUnmark(
+      [{ id: 'stamped', stamp: 'deposit' }, { id: 'old', stamp: null }],
+      'deposit',
+      'malformed',
+    )).toEqual({ ids: ['stamped'], failed: true })
   })
 
   it('leaves an in-doubt send without calling it already delivered', () => {
