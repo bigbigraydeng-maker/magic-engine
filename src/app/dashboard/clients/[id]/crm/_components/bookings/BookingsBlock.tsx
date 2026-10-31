@@ -44,7 +44,7 @@ function BookingsBlockInner({
   scrollIntoViewOnReady = false,
 }: BookingsBlockProps): JSX.Element | null {
   const headingId = useId()
-  const { state, notice, busy, run, reload, clearNotice } = useBookings(clientId, contactId)
+  const { state, notice, dealRetry, busy, run, reload, retryDeal, clearNotice } = useBookings(clientId, contactId)
   const dealMilestone = useDealMilestone(clientId)
   const [adding, setAdding] = useState(false)
   const addButtonRef = useRef<HTMLButtonElement>(null)
@@ -116,7 +116,13 @@ function BookingsBlockInner({
         </button>
       </div>
 
-      <BookingNotice message={notice} onDismiss={clearNotice} />
+      <BookingNotice
+        message={notice}
+        onDismiss={clearNotice}
+        retryLabel={dealRetry ? '补记成交' : null}
+        onRetry={dealRetry ? () => void retryDeal() : null}
+        retryDisabled={busy}
+      />
 
       {adding ? (
         <AddBookingForm

@@ -181,6 +181,26 @@ describe('recordMilestoneDeal', () => {
 })
 
 describe('recordStageDeal', () => {
+  it('refuses when the booking belongs to a different contact', async () => {
+    const other = '22222222-2222-4222-8222-222222222222'
+    const io = memory({
+      loadBooking: async () => ({ contactId: other, partySize: 2, tourId: 'tour', departureId: 'dep' }),
+    })
+    const result = await recordStageDeal(io, {
+      clientId: CLIENT, contactId: CONTACT, stageKey: 'won', bookingId: BOOKING,
+      occurredAt: null, actor: null, staffAmount: null, staffCurrency: null,
+    }, NOW)
+    expect(result).toMatchObject({
+      attempted: true,
+      recorded: false,
+      advanceStage: false,
+      reason: 'contact_mismatch',
+    })
+    expect(result.message).toContain('不是同一人')
+    expect(io.inserted).toHaveLength(0)
+    expect(io.inserted.some((row) => row.contact_id === other)).toBe(false)
+  })
+
   it('does not advance when the stage is not the configured deal stage', async () => {
     const io = memory()
     const result = await recordStageDeal(io, {

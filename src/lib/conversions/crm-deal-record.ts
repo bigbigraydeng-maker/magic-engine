@@ -17,8 +17,8 @@ import { buildIntakeRow, type IntakeRow } from './intake'
 import { minorToDecimalString, priceDealFromCatalog } from './tour-deal-price'
 import { toMinorUnits } from './money'
 
-const WINDOW_MS = 30 * 24 * 60 * 60 * 1000
-const SAME_SOURCE = 'crm_stage_manual'
+export const DEAL_DEDUPE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
+export const CRM_STAGE_MANUAL_SOURCE = 'crm_stage_manual'
 
 export type ApprovedPurchase = {
   sourceKind: string
@@ -78,6 +78,7 @@ const MSG = {
   unpriced: '没有可用的标价，成交记录没有写成。现有的成交表要求必须有金额，所以没有空着金额存一条。',
   dedupe: '近 30 天已有另一来源的已批准成交，这条没有再记。',
   failed: '成交记录没有写成。',
+  contactMismatch: '订单上的客人和这一步要记的不是同一人，成交记录没有写成，阶段也没有往前推。',
   paymentFailed: '款已记下，成交记录没有写成。请稍后再试，这笔款不会因此丢失。',
 }
 
@@ -100,9 +101,9 @@ export function dealOccurredAt(paidOn: string | null, now: Date): string {
 
 /** Approved purchase from another source, occurred_at within 30 days (t === since blocks). */
 export function blockingApprovedPurchase(rows: ApprovedPurchase[], now: Date): { sourceKind: string } | null {
-  const since = now.getTime() - WINDOW_MS
+  const since = now.getTime() - DEAL_DEDUPE_WINDOW_MS
   for (const row of rows) {
-    if (row.reviewStatus !== 'approved' || row.sourceKind === SAME_SOURCE) continue
+    if (row.reviewStatus !== 'approved' || row.sourceKind === CRM_STAGE_MANUAL_SOURCE) continue
     if (row.outcomeKind != null && row.outcomeKind !== 'purchase') continue
     const t = Date.parse(row.occurredAt)
     if (Number.isNaN(t) || t < since) continue
@@ -167,9 +168,12 @@ export async function recordStageDeal(
   if (client.conversionStage !== 'live') return logged('not_live', true, MSG.notLive)
   const booking = input.bookingId ? await io.loadBooking(input.clientId, input.bookingId) : null
   if (input.bookingId && !booking) return logged('booking_missing', false, MSG.failed)
+  if (booking && booking.contactId !== input.contactId) {
+    return logged('contact_mismatch', false, MSG.contactMismatch)
+  }
   return finishDeal(io, client.defaultPhoneCountry, {
     clientId: input.clientId,
-    contactId: booking?.contactId ?? input.contactId,
+    contactId: input.contactId,
     bookingId: input.bookingId,
     booking,
     stageKey: input.stageKey,
@@ -228,7 +232,7 @@ async function insertDeal(
     amount: priced.amount,
     currency: priced.currency,
     occurredAt: input.occurredAt,
-    sourceKind: SAME_SOURCE,
+    sourceKind: CRM_STAGE_MANUAL_SOURCE,
     // Row id from insertOutcome is the platform event_id. Do not mint a second one.
     sourceRef: crmDealSourceRef(input.contactId, input.bookingId, input.stageKey),
     orderRef: input.bookingId,

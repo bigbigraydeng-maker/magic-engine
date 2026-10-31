@@ -73,6 +73,9 @@ class FakeQuery implements PromiseLike<QueryResult> {
   private columns: string | null = null
   private readonly eqs: Array<[string, unknown]> = []
   private readonly ins: Array<[string, unknown[]]> = []
+  private readonly neqs: Array<[string, unknown]> = []
+  private gteCol: string | null = null
+  private gteVal: unknown = null
   private limitValue: number | null = null
   private single = false
   private upsertRow: Row | null = null
@@ -96,6 +99,17 @@ class FakeQuery implements PromiseLike<QueryResult> {
 
   in(col: string, values: unknown[]): this {
     this.ins.push([col, values])
+    return this
+  }
+
+  neq(col: string, val: unknown): this {
+    this.neqs.push([col, val])
+    return this
+  }
+
+  gte(col: string, val: unknown): this {
+    this.gteCol = col
+    this.gteVal = val
     return this
   }
 
@@ -144,6 +158,13 @@ class FakeQuery implements PromiseLike<QueryResult> {
     }
     for (const [col, values] of this.ins) {
       if (!values.includes(row[col])) return false
+    }
+    for (const [col, val] of this.neqs) {
+      if (row[col] === val) return false
+    }
+    if (this.gteCol !== null) {
+      const raw = row[this.gteCol]
+      if (typeof raw !== 'string' || typeof this.gteVal !== 'string' || raw < this.gteVal) return false
     }
     return true
   }
