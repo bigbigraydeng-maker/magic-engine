@@ -27,9 +27,9 @@ Meta 说明 Threads Insights 的周度概览包含帖子数、总 views、新增
 候选并入现有社媒复盘；不增新机制。
 
 ## 效果回写
-尚无。
+2026-10-19 首轮只读验证：判 cannot_check。连接表无 Threads；Meta 连接权限列表无 threads_basic / threads_manage_insights；src 里没有 Threads 接口代码。
 
 ## 机器索引
 ```json
-{"pillar":"social","points":[{"key":"threads_weekly_insights","text":"Threads 周报可并列查看发帖、views、关注与回复变化；需同窗复核且不推断因果。","state":"learning","note":"功能字段/权限待只读核验；7–90天图表不构成成效阈值。"}]}
+{"pillar":"social","points":[{"key":"threads_weekly_insights","text":"Threads 周报可并列查看发帖、views、关注与回复变化；需同窗复核且不推断因果。","state":"cannot_check","note":"ME 没有 Threads 连接，Meta 权限里也没有 threads 类权限，代码里没有 Threads 接口。"}]}
 ```
