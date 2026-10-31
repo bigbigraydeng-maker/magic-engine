@@ -42,6 +42,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getActiveBrief } from '@/lib/content/brief-injector'
 import { getClientKnowledge, type KnowledgeEntry } from '@/lib/knowledge'
+import { getClientKnowledgeWithCatalog } from '@/lib/messenger-agent/catalog-knowledge'
 
 // ─── ctx + 越权轴守卫(照抄 agent-tools/readonly/types.ts 的 pattern)──────────
 
@@ -92,6 +93,9 @@ export function warnOnResourceIds(input: unknown, toolName: string): void {
     }
   }
 }
+
+/** Catalog-backed facts add one entry per tour/price (dozens of rows): give the facts tool more room than the 6000 default so rows are never silently cut. */
+export const CUSTOMER_FACTS_TOOL_MAX_CHARS = 30000
 
 function truncateToolOutput(s: string, maxChars = 6000): string {
   return s.length <= maxChars ? s : `${s.slice(0, maxChars)}\n…[truncated ${s.length - maxChars} chars]`
@@ -166,16 +170,27 @@ export const queryCustomerFacingFacts: MessengerAgentToolModule = {
     const keywords = optStringArray(args.intent_keywords)
 
     try {
-      const result = await getClientKnowledge(ctx.clientId, { purpose: 'customer_reply' })
+      const result = await getClientKnowledgeWithCatalog(ctx.clientId, { purpose: 'customer_reply' })
       const facts = result.entries
         .filter((e) => CUSTOMER_FACING_SENSITIVITIES.has(e.sensitivity))
         .filter((e) => keywords.length === 0 || factMatchesAnyKeyword(e, keywords))
 
-      return truncateToolOutput(JSON.stringify({
+      // Never cut the JSON mid-way: add whole facts until the size budget is used, and say how many were left out
+      // (the agent is told to narrow with intent_keywords) — a silently half-cut list would hide tours.
+      const summarized = facts.map(summarizeFact)
+      const shown: ReturnType<typeof summarizeFact>[] = []
+      const envelope = (n: number) => ({
         fact_layer: 'client_knowledge_base',
         matched_by_keywords: keywords.length > 0 ? keywords : null,
-        facts: facts.map(summarizeFact),
-      }))
+        omitted_facts: n,
+        ...(n > 0 ? { omitted_note: 'Too many facts to list; call again with intent_keywords to narrow. Treat omitted facts as NOT seen.' } : {}),
+      })
+      for (const fact of summarized) {
+        const candidate = JSON.stringify({ ...envelope(summarized.length - shown.length - 1), facts: [...shown, fact] })
+        if (candidate.length > CUSTOMER_FACTS_TOOL_MAX_CHARS) break
+        shown.push(fact)
+      }
+      return JSON.stringify({ ...envelope(summarized.length - shown.length), facts: shown })
     } catch (err) {
       return JSON.stringify({
         error: `Knowledge base lookup failed — treat every commercial fact as UNKNOWN, do not guess: ${err instanceof Error ? err.message : String(err)}`,
