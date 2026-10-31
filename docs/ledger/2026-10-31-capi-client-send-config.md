@@ -1,12 +1,14 @@
 ---
 id: 2026-10-31-capi-client-send-config
 title: 回传前先看每个客户允许发哪些事件
-status: decided
+status: done
 owner: agent
 decided_on: 2026-10-31
 source: session:20261031
 verify_by: 2026-11-07
 verify_how: 正式客户的允许事件名单没填时，已批准的成交仍按原来的规则发送；名单里没有的事件停在排队且没有真的发出，名单改好后 7 天内下一次发送会再试。
+done_on: 2026-10-31
+done_ref: pr:3455
 ---
 发送前读客户配置里的允许事件。名单没填就保持今天的行为。
 不在名单里的停在排队，不写成试运行；名单改好后、还在 7 天内，下一次发送会再试。
