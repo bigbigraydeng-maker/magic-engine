@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { matchDrafts } from './draft-match'
+import { matchDraftRows } from './draft-match'
 import {
   parseDraftRow,
   parseGoal,
@@ -143,15 +143,25 @@ async function readRawDrafts(db: ChainReader, clientId: string, prescriptionId: 
   return { read: 'ok', value: { itemIds, rows } }
 }
 
-function draftsFrom(
+function matchedDrafts(
   raw: Loaded<RawDrafts>,
   goalId: string | null,
   plans: Loaded<PlanFact[]>,
   strategy: Loaded<StrategyFact | null>,
-): ChainFacts['drafts'] {
+): Loaded<DraftRow[]> {
   if (raw.read !== 'ok') return { read: 'unread' }
   const pool = strategy.read === 'ok' ? strategy.value?.pool ?? null : null
-  return matchDrafts({ rows: raw.value.rows, itemIds: raw.value.itemIds, goalId, plans, pool })
+  return matchDraftRows({ rows: raw.value.rows, itemIds: raw.value.itemIds, goalId, plans, pool })
+}
+
+function draftsFrom(matched: Loaded<DraftRow[]>): ChainFacts['drafts'] {
+  if (matched.read !== 'ok') return { read: 'unread' }
+  return { read: 'ok', value: matched.value.map((row) => ({ status: row.status })) }
+}
+
+function approvalIds(matched: Loaded<DraftRow[]>): readonly string[] | 'unread' {
+  if (matched.read !== 'ok') return 'unread'
+  return matched.value.filter((row) => row.status === 'awaiting_approval').map((row) => row.id)
 }
 
 function prescriptionFrom(row: Loaded<unknown>): ChainFacts['prescription'] {
@@ -161,7 +171,13 @@ function prescriptionFrom(row: Loaded<unknown>): ChainFacts['prescription'] {
   return parsed ? { read: 'ok', value: parsed } : { read: 'unread' }
 }
 
-export async function loadChainFacts(db: ChainReader, input: LoadChainInput): Promise<ChainFacts> {
+export interface ChainBundle {
+  facts: ChainFacts
+  /** Empty only when drafts matched and none are waiting for go-live. Unread when the match itself failed. */
+  goLiveDraftIds: readonly string[] | 'unread'
+}
+
+export async function loadChainBundle(db: ChainReader, input: LoadChainInput): Promise<ChainBundle> {
   const prescription = prescriptionFrom(await readMaybe(
     db.from('prescriptions')
       .select('status, goal_id, approved_at, error_message, intake, content')
@@ -183,7 +199,8 @@ export async function loadChainFacts(db: ChainReader, input: LoadChainInput): Pr
   ])
   const split = configFrom(config)
   const planFacts = plansFrom(plans)
-  return {
+  const matched = matchedDrafts(rawDrafts, goalId, planFacts, split.strategy)
+  const facts: ChainFacts = {
     nowIso: input.nowIso,
     prescriptionId: input.prescriptionId,
     prescription,
@@ -192,9 +209,15 @@ export async function loadChainFacts(db: ChainReader, input: LoadChainInput): Pr
     strategy: split.strategy,
     plans: planFacts,
     workOrders: orders.read === 'skipped' ? { read: 'skipped' } : ordersFrom(orders),
-    drafts: draftsFrom(rawDrafts, goalId, planFacts, split.strategy),
+    drafts: draftsFrom(matched),
     snapshot: snapshotFrom(snapshot),
   }
+  return { facts, goLiveDraftIds: approvalIds(matched) }
+}
+
+export async function loadChainFacts(db: ChainReader, input: LoadChainInput): Promise<ChainFacts> {
+  const bundle = await loadChainBundle(db, input)
+  return bundle.facts
 }
 
 /** The production reader is the service client. Callers must already have passed the access check. */

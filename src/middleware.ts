@@ -9,6 +9,12 @@ import {
   type AccessTier,
 } from '@/lib/auth/access-types'
 
+function projectConsoleClient(path: string): string | null {
+  if (path === '/dashboard/impact' || path === '/dashboard/impact/new') return ''
+  const match = /^\/dashboard\/impact\/([^/]+)$/.exec(path)
+  return match?.[1] ?? null
+}
+
 export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers)
   const response = NextResponse.next({ request: { headers: requestHeaders } })
@@ -115,8 +121,10 @@ export async function middleware(request: NextRequest) {
     if (scopedClientId) {
       const onOwnClient =
         path.startsWith('/dashboard/clients/') && path.split('/')[3] === scopedClientId
+      const projectClient = projectConsoleClient(path)
+      const onProjectConsole = projectClient === '' || projectClient === scopedClientId
 
-      if (!onOwnClient) {
+      if (!onOwnClient && !onProjectConsole) {
         return NextResponse.redirect(
           new URL(`/dashboard/clients/${scopedClientId}`, request.url)
         )
@@ -154,15 +162,17 @@ export async function middleware(request: NextRequest) {
 
   if (scopedClientIds.length > 0) {
     const home = `/dashboard/clients/${scopedClientIds[0]}`
-    const requested = path.startsWith('/dashboard/clients/') ? path.split('/')[3] : null
+    const projectClient = projectConsoleClient(path)
+    const requested = path.startsWith('/dashboard/clients/') ? path.split('/')[3] : projectClient || null
     const onOwnClient = requested !== null && scopedClientIds.includes(requested)
+    const onProjectConsole = projectClient === '' || (projectClient !== null && scopedClientIds.includes(projectClient))
 
     // 客户列表页可以放行：/api/clients 对非全局管理员只返回门户白名单里的客户，
     // 也就是这个演示账号自己那几个。有多个客户时它就是现成的切换器，
     // 不必为此另造一个组件。
     const onClientList = path === '/dashboard/clients'
 
-    if (!onOwnClient && !onClientList) {
+    if (!onOwnClient && !onClientList && !onProjectConsole) {
       return NextResponse.redirect(new URL(home, request.url))
     }
 
