@@ -26,20 +26,33 @@ const DRAFT: AdDraft = {
 interface Call { url: string; method: string; body: URLSearchParams }
 let calls: Call[] = []
 
-function mockGraph(opts: { accountId?: string; campaignId?: unknown; failAd?: boolean } = {}) {
+function mockGraph(opts: {
+  accountId?: string
+  campaignId?: unknown
+  failAd?: boolean
+  dailyBudget?: string | null
+  lifetimeBudget?: string | null
+  endTime?: string | null
+  campaignDaily?: string | null
+} = {}) {
   return vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET'
     calls.push({ url, method, body: new URLSearchParams(String(init?.body ?? '')) })
     if (method === 'GET') {
-      return {
-        ok: true,
-        status: 200,
-        text: async () => JSON.stringify({
-          id: ADSET,
-          account_id: opts.accountId ?? '1',
-          campaign_id: opts.campaignId === undefined ? CAMPAIGN : opts.campaignId,
-        }),
-      } as Response
+      const id = (url.split('?')[0] ?? url).split('/').pop() ?? ADSET
+      const campaignRead = id === CAMPAIGN
+      const body: Record<string, unknown> = {
+        id,
+        account_id: opts.accountId ?? '1',
+        ...(campaignRead ? {} : { campaign_id: opts.campaignId === undefined ? CAMPAIGN : opts.campaignId }),
+      }
+      const daily = campaignRead ? opts.campaignDaily : opts.dailyBudget
+      if (daily) body.daily_budget = daily
+      else if (!campaignRead && opts.dailyBudget === undefined) body.daily_budget = '1500'
+      if (!campaignRead && opts.lifetimeBudget) body.lifetime_budget = opts.lifetimeBudget
+      if (!campaignRead && opts.endTime) body.end_time = opts.endTime
+      if (!campaignRead && opts.endTime) body.start_time = '2026-10-01T00:00:00+0000'
+      return { ok: true, status: 200, text: async () => JSON.stringify(body) } as Response
     }
     if (method === 'DELETE') return { ok: true, status: 200, text: async () => '{}' } as Response
     if (opts.failAd && url.includes('/ads')) {
@@ -111,5 +124,51 @@ describe('往已有广告组加暂停视频广告', () => {
     const touched = posts().map((c) => c.url)
     expect(touched.some((url) => url.includes(CAMPAIGN) || url.includes(ADSET))).toBe(false)
     expect(touched.some((url) => url.includes('ad9'))).toBe(true)
+  })
+
+  it('草稿写 15 元 7 天，真实是 100 元且没有结束日：不改组，确认用读到的数', async () => {
+    vi.stubGlobal('fetch', mockGraph({ dailyBudget: '10000' }))
+    const r = await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.inheritedSpend).toEqual({ dailyBudget: 100, durationDays: null })
+    expect(posts().some((c) => c.body.has('daily_budget') || c.body.has('end_time'))).toBe(false)
+  })
+
+  it('读不到每天预算就不建广告', async () => {
+    vi.stubGlobal('fetch', mockGraph({ dailyBudget: null, campaignDaily: null }))
+    const r = await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toContain('每天')
+    expect(posts()).toEqual([])
+  })
+
+  it('总预算的广告组不拿草稿天数冒充排期', async () => {
+    vi.stubGlobal('fetch', mockGraph({ dailyBudget: null, lifetimeBudget: '5000', campaignDaily: null }))
+    const r = await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.error).toContain('总预算')
+    expect(posts()).toEqual([])
+  })
+
+  it('确认卡上的预算已经变了，就不建', async () => {
+    vi.stubGlobal('fetch', mockGraph({ dailyBudget: '10000' }))
+    const r = await publishDraftPaused(
+      { ...DRAFT, inheritedSpend: { dailyBudget: 15, durationDays: 7 } },
+      'act_1',
+      'tok',
+    )
+    expect(r.ok).toBe(false)
+    expect(posts()).toEqual([])
+  })
+
+  it('广告组自己没有日预算时，用系列的每天预算', async () => {
+    vi.stubGlobal('fetch', mockGraph({ dailyBudget: null, campaignDaily: '10000' }))
+    const r = await publishDraftPaused(DRAFT, 'act_1', 'tok')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.inheritedSpend).toEqual({ dailyBudget: 100, durationDays: null })
   })
 })

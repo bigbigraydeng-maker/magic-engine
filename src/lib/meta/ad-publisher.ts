@@ -17,7 +17,9 @@
 import type { AdDraft, AdDraftCreative } from '@/lib/ads-strategy/ad-draft'
 import { metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
 import { isPlaybackGoal, PLAYBACK_REQUIRED_PLATFORMS } from '@/lib/ads-strategy/launch-readback'
-import { assertOwnedByAccount, isMetaObjectId } from './owned-ad-object'
+import { assertOwnedByAccount } from './owned-ad-object'
+import { readExistingAdSetSpend } from './existing-adset-spend'
+import { inheritedSpendOf, sameInheritedSpend, type InheritedAdSetSpend } from '@/lib/ads-strategy/ad-draft'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 
@@ -45,6 +47,8 @@ export interface PublishedDraft {
   reusedCampaign?: boolean
   /** 这次没有新建广告组。补暂停和以后开投都不能去改它的开关。 */
   reusedAdSet?: boolean
+  /** 加进已有广告组时读到的真实预算和排期。没有把它写回 Meta。 */
+  inheritedSpend?: InheritedAdSetSpend
 }
 
 export interface PublishFailure {
@@ -407,16 +411,28 @@ async function publishOnExistingAdSet(
     return { ok: false, step: 'adset', error: '加组和加广告要分成两张卡，没有去建。', orphans: [] }
   }
   const adSetId = d.existingAdSetId ?? ''
-  const owned = await assertOwnedByAccount(adSetId, adAccountId, accessToken, 'id,account_id,campaign_id')
-  if (!owned.ok) return { ok: false, step: 'adset', error: owned.error, orphans: [] }
-  const campaignId = owned.body.campaign_id
-  if (!isMetaObjectId(campaignId)) {
-    return { ok: false, step: 'adset', error: '读不到这个广告组属于哪个系列，没有去建。', orphans: [] }
+  const read = await readExistingAdSetSpend(adSetId, adAccountId, accessToken)
+  if (!read.ok) return { ok: false, step: 'adset', error: read.error, orphans: [] }
+  const confirmed = inheritedSpendOf(d)
+  if (confirmed && !sameInheritedSpend(confirmed, read.spend)) {
+    return {
+      ok: false,
+      step: 'adset',
+      error: '这个广告组的每天预算或结束日已经变了，和确认卡上的不一样，没有去建。',
+      orphans: [],
+    }
   }
   const adIds = await publishCreatives(d, adAccountId, adSetId, run)
   if (!Array.isArray(adIds)) return adIds
   return {
-    ok: true, campaignId, adSetId, adIds, orphans: [], reusedCampaign: true, reusedAdSet: true,
+    ok: true,
+    campaignId: read.campaignId,
+    adSetId,
+    adIds,
+    orphans: [],
+    reusedCampaign: true,
+    reusedAdSet: true,
+    inheritedSpend: read.spend,
   }
 }
 

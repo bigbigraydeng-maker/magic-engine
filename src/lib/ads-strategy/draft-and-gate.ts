@@ -19,9 +19,21 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AdDraft } from './ad-draft'
-import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
+import {
+  validateDraft,
+  describeDraft,
+  DRAFT_PLAY,
+  metaTripletFor,
+  isApprovableKind,
+  draftUsingInheritedBudget,
+  inheritedSpendOf,
+  sameInheritedSpend,
+  withInheritedSpend,
+  withoutInheritedSpend,
+} from './ad-draft'
 import { draftNotYetBuildable } from './ad-draft-expansion'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
+import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
 import { attachReadbackFindings } from './attach-readback'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
@@ -185,44 +197,55 @@ export interface CreateDraftOutcome {
  * 返回的 `status` 就是它现在的处境：`awaiting_approval` 才轮到人看。
  */
 export async function createDraftForApproval(
-  draft: AdDraft,
+  input: AdDraft,
   deps: CreateDraftDeps,
 ): Promise<CreateDraftOutcome> {
   const now = deps.now ?? Date.now
   const startedAt = now()
+  const clean = withoutInheritedSpend(input)
   const base: RecordBase = {
-    summary: describeDraft(draft),
+    summary: describeDraft(clean),
     redlinesChecked: deps.brandRedlines === undefined ? null : deps.brandRedlines.length,
     redlinesSkipped: skippedRedlines(deps.brandRedlines),
   }
 
   // 发布器今天只会建单个广告组、预算在组上。新字段对不上时，在任何 Meta 读取或写入之前停下。
   // 不删除、不修改已经存在的广告对象。
-  const held = draftNotYetBuildable(draft)
-  if (held) return failedOutcome(deps, draft, { ...base, error: held })
+  const held = draftNotYetBuildable(clean)
+  if (held) return failedOutcome(deps, clean, { ...base, error: held })
 
   // ── 0. ME 自己就能判的错，不要浪费一次真实创建 ────────────────────────
-  const problems = [...validateDraft(draft), ...checkDraftRedlines(draft, deps.brandRedlines)]
+  const problems = [...validateDraft(clean), ...checkDraftRedlines(clean, deps.brandRedlines)]
   if (problems.length > 0) {
     const error = problems.map((p) => `${p.field}：${p.message}`).join('；')
-    return failedOutcome(deps, draft, { ...base, error })
+    return failedOutcome(deps, clean, { ...base, error })
   }
 
-  // ── 0.3 受众：属不属于这个账户、准备好没有（失败关闭）─────────────
+  const prepared = await draftForBuild(input, deps)
+  if (!prepared.ok) return failedOutcome(deps, clean, { ...base, error: prepared.error })
+  const draft = prepared.draft
+  base.summary = describeDraft(draft)
+  return publishPrepared(draft, deps, base, startedAt, now)
+}
+
+async function publishPrepared(
+  draft: AdDraft,
+  deps: CreateDraftDeps,
+  base: RecordBase,
+  startedAt: number,
+  now: () => number,
+): Promise<CreateDraftOutcome> {
   const audiences = await checkAudiences(draft, deps)
   base.audiencesChecked = audiences.checked
   if (audiences.error) return failedOutcome(deps, draft, { ...base, error: audiences.error })
 
-  // ── 0.4 日预算低于账户最低日预算 → Meta 一定拒，别浪费一次真实创建 ──────
-  const budget = await checkMinDailyBudget(draft, deps)
+  const budget = await checkMinDailyBudget(draftUsingInheritedBudget(draft), deps)
   base.minBudgetChecked = budget.checked
   if (budget.error) return failedOutcome(deps, draft, { ...base, error: budget.error })
 
-  // ── 0.5 私信类型：视频上传完还要转码，转码没完就建会失败 ───────────────
   const waitError = await waitForTranscode(draft, deps, now)
   if (waitError) return failedOutcome(deps, draft, { ...base, error: waitError })
 
-  // ── 1. 建（全程暂停）────────────────────────────────────────────────
   const published = await publishDraftPaused(
     draft, deps.adAccountId, deps.accessToken, publishBudgetFor(draft, startedAt, now),
   )
@@ -232,10 +255,25 @@ export async function createDraftForApproval(
     return failedOutcome(deps, draft, { ...base, error, orphans })
   }
 
-  // ── 2+3. 回读 → 闸门 ────────────────────────────────────────────────
   return gateReadback(draft, published, deps, {
     ...base, startedAt, now, tooLateToRead: now() > startedAt + BUDGET.skipReadbackAfterMs,
   })
+}
+
+/** 已有广告组先读真实预算。对不上确认卡上已经读过的数，就不建。 */
+async function draftForBuild(
+  input: AdDraft,
+  deps: CreateDraftDeps,
+): Promise<{ ok: true; draft: AdDraft } | { ok: false; error: string }> {
+  const clean = withoutInheritedSpend(input)
+  if (!clean.existingAdSetId) return { ok: true, draft: clean }
+  const read = await readExistingAdSetSpend(clean.existingAdSetId, deps.adAccountId, deps.accessToken)
+  if (!read.ok) return read
+  const confirmed = inheritedSpendOf(input)
+  if (confirmed && !sameInheritedSpend(confirmed, read.spend)) {
+    return { ok: false, error: '这个广告组的每天预算或结束日已经变了，和确认卡上的不一样，没有去建。' }
+  }
+  return { ok: true, draft: withInheritedSpend(clean, read.spend) }
 }
 
 interface RecordBase {

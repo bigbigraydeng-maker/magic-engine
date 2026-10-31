@@ -6,7 +6,7 @@
 import { canonicalHashOfInput } from '@/lib/kernel/canonical-hash'
 import type { AccountCapFacts } from '@/lib/marketing-plan/promo/budget-caps'
 import { confirmBlockReason, contentFingerprint, type CardFacts, type HardCheck } from '@/lib/confirmation-card/facts'
-import { MAX_AD_SETS, type AdDraft } from './ad-draft'
+import { MAX_AD_SETS, type AdDraft, inheritedSpendOf, draftUsingInheritedBudget } from './ad-draft'
 import { draftNotYetBuildable, reviewDraftAgainstCaps, reviewDraftForBuild } from './ad-draft-expansion'
 import { PAUSED_DRAFT_WHAT } from './paused-draft-copy'
 
@@ -46,7 +46,7 @@ export function pausedDraftFacts(
     what: PAUSED_DRAFT_WHAT,
     account: safeLabel(accountLabel),
     amount: amountLine(draft, review),
-    date: `一共 ${durationDays(draft)} 天，从点确认当天算起`,
+    date: dateLine(draft),
     scope: scopeLine(draft),
     hardChecks: hardChecks(draft, review),
   }
@@ -93,10 +93,18 @@ function reviewCheck(draft: AdDraft): HardCheck {
 }
 
 function capCheck(draft: AdDraft, review: PausedDraftReview): HardCheck {
+  if (draft.existingAdSetId && !inheritedSpendOf(draft)) {
+    return { label: '日预算上限', state: 'unread', reason: '还没读到这个广告组的真实每天预算' }
+  }
   if (!review.accounts) return { label: '日预算上限', state: 'unread', reason: '上限没读到' }
   const known = review.accounts.some((account) => account.ad_account_id === review.adAccountId && account.owned_by_client)
   if (!known) return { label: '日预算上限', state: 'unread', reason: '广告账户没读到' }
-  const verdict = reviewDraftAgainstCaps(draft, review.adAccountId, review.accounts, review.clientCapCents)
+  const verdict = reviewDraftAgainstCaps(
+    draftUsingInheritedBudget(draft),
+    review.adAccountId,
+    review.accounts,
+    review.clientCapCents,
+  )
   if (verdict.verdict === 'ok') return { label: '日预算上限', state: 'green', reason: '' }
   if (verdict.verdict === 'unknown') return { label: '日预算上限', state: 'unread', reason: '上限没核成' }
   return { label: '日预算上限', state: 'red', reason: '每天要花的超过了这张卡上的上限' }
@@ -114,10 +122,11 @@ function buildableCheck(draft: AdDraft): HardCheck {
 }
 
 function amountLine(draft: AdDraft, review: PausedDraftReview): string {
-  const daily = money(draft.dailyBudget)
+  const daily = shownDaily(draft)
   const cap = capMajor(review)
-  if (!cap) return `每天 ${daily}，上限读不到`
-  return `每天 ${daily} ${cap.currency}，上限 ${cap.amount} ${cap.currency}`
+  if (daily === null) return '每天多少要等读到这个广告组'
+  if (!cap) return `每天 ${money(daily)}，上限读不到`
+  return `每天 ${money(daily)} ${cap.currency}，上限 ${cap.amount} ${cap.currency}`
 }
 
 function capMajor(review: PausedDraftReview): { amount: string; currency: string } | null {
@@ -135,6 +144,21 @@ function scopeLine(draft: AdDraft): string {
   if (draft.existingAdSetId) return `在已有广告组里加暂停广告，不新建系列、不开。稿 ${mark}`
   if (draft.existingCampaignId) return `在已有系列里加 1 个暂停广告组，不新建系列、不开。稿 ${mark}`
   return `1 个暂停系列，${adSetCount(draft)} 个广告组，不开启。稿 ${mark}`
+}
+
+function dateLine(draft: AdDraft): string {
+  if (draft.existingAdSetId) {
+    const spend = inheritedSpendOf(draft)
+    if (!spend) return '结束日读不到'
+    if (spend.durationDays === null) return '这个广告组没有结束日'
+    return `跟这个广告组一起跑 ${spend.durationDays} 天`
+  }
+  return `一共 ${durationDays(draft)} 天，从点确认当天算起`
+}
+
+function shownDaily(draft: AdDraft): number | null {
+  if (!draft.existingAdSetId) return draft.dailyBudget
+  return inheritedSpendOf(draft)?.dailyBudget ?? null
 }
 
 function durationDays(draft: AdDraft): number {
