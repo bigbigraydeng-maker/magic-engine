@@ -143,7 +143,7 @@ describe('recordQualifiedStageLead', () => {
     expect(again.message).toContain('已发给广告平台')
     expect(db.tables.me_sale_outcomes).toHaveLength(1)
     expect(send).toHaveBeenCalledTimes(1)
-    expect(send.mock.calls[0][0]).toBe(db.tables.me_sale_outcomes[0].id)
+    expect(send.mock.calls[0]?.[0]).toBe(db.tables.me_sale_outcomes[0].id)
   })
 
   it('states why a lead with no form id is not sent, and does not send an ordinary lead', async () => {

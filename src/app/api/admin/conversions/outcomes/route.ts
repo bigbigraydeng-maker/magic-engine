@@ -16,6 +16,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin, requireAdmin } from '@/lib/auth/require-admin'
 import { assertClientScope } from '@/lib/conversions/route-guard'
 import { buildIntakeRow, type IntakeInput } from '@/lib/conversions/intake'
+import { dealStageEventId, dealStageEventName, legalMetaLeadId } from '@/lib/conversions/conversion-lead'
+import { META_EVENT_WINDOW_DAYS } from '@/lib/conversions/event-window'
 
 export const dynamic = 'force-dynamic'
 
@@ -180,8 +182,8 @@ export async function GET(request: Request) {
     // 就已经在联系人管理页上明摆着（上面那条链接点进去就是），这里显示不构成
     // 新增泄露面，只是省一次跳转。
     'id, outcome_kind, order_ref, amount_minor, currency, occurred_at, ' +
-    'review_status, reject_reason, redacted_at, source_kind, created_at, contact_id, customer_first, ' +
-    'me_conversion_writebacks(id, status, last_error, last_error_code, next_attempt_at, payload_preview)'
+    'review_status, reject_reason, redacted_at, source_kind, source_ref, meta_lead_id, created_at, contact_id, customer_first, ' +
+    'me_conversion_writebacks(id, event_id, status, last_error, last_error_code, next_attempt_at, payload_preview)'
 
   // 深链目标查询：今日待办邮件里的 ?focus=<id> 指向的记录可能比列表的
   // limit/排序窗口更老（积压超过 limit 条时会被挤出默认列表）。
@@ -200,8 +202,15 @@ export async function GET(request: Request) {
     if (error) {
       return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
     }
-    const outcomes = data ? [data] : []
+    const outcomes = data ? await markOpenCompanions(clientId, [data as ListedOutcome]) : []
     return NextResponse.json({ outcomes, count: outcomes.length })
+  }
+
+  if (searchParams.get('qualified_open') === '1') {
+    return listQualifiedOpen(clientId, limit, SELECT_COLUMNS)
+  }
+  if (searchParams.get('companion_open') === '1') {
+    return listCompanionOpen(clientId, limit, SELECT_COLUMNS)
   }
 
   const sendStatus = searchParams.get('send_status')
@@ -232,4 +241,98 @@ export async function GET(request: Request) {
 
   const outcomes = data ?? []
   return NextResponse.json({ outcomes, count: outcomes.length })
+}
+
+type ListedWriteback = {
+  event_id?: string | null
+  status?: string
+  last_error_code?: string | null
+  payload_preview?: { held?: boolean } | null
+}
+
+type ListedOutcome = {
+  id: string
+  outcome_kind?: string
+  review_status?: string
+  redacted_at?: string | null
+  meta_lead_id?: string | null
+  me_conversion_writebacks?: ListedWriteback[]
+  companion_expected?: boolean
+}
+
+function windowStart(): string {
+  return new Date(Date.now() - META_EVENT_WINDOW_DAYS * 86_400_000).toISOString()
+}
+
+async function listQualifiedOpen(clientId: string, limit: number, columns: string) {
+  const { data, error } = await supabaseAdmin
+    .from('me_sale_outcomes')
+    .select(columns)
+    .eq('client_id', clientId)
+    .eq('review_status', 'approved')
+    .eq('outcome_kind', 'lead')
+    .like('source_ref', 'crm_qualified:%')
+    .is('redacted_at', null)
+    .gte('occurred_at', windowStart())
+    .order('occurred_at', { ascending: false })
+    .limit(limit)
+  if (error) return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
+  const outcomes = ((data ?? []) as ListedOutcome[]).filter(qualifiedStillOpen)
+  return NextResponse.json({ outcomes, count: outcomes.length })
+}
+
+function qualifiedStillOpen(row: ListedOutcome): boolean {
+  const writes = row.me_conversion_writebacks ?? []
+  if (writes.length === 0) return true
+  return writes.some((wb) => {
+    if (wb.payload_preview?.held === true || wb.last_error_code === 'auth') return false
+    return wb.status === 'queued' || wb.status === 'failed'
+  })
+}
+
+async function listCompanionOpen(clientId: string, limit: number, columns: string) {
+  const config = await readLeadConfig(clientId)
+  if (!config.ok) return NextResponse.json({ error: config.error }, { status: 500 })
+  const { data, error } = await supabaseAdmin
+    .from('me_sale_outcomes')
+    .select(columns)
+    .eq('client_id', clientId)
+    .eq('review_status', 'approved')
+    .in('outcome_kind', ['purchase', 'balance'])
+    .is('redacted_at', null)
+    .not('meta_lead_id', 'is', null)
+    .gte('occurred_at', windowStart())
+    .order('occurred_at', { ascending: false })
+    .limit(limit)
+  if (error) return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
+  const outcomes = ((data ?? []) as ListedOutcome[])
+    .filter((row) => companionStillOpen(row, config.leadsConfig))
+    .map((row) => ({ ...row, companion_expected: true }))
+  return NextResponse.json({ outcomes, count: outcomes.length })
+}
+
+async function markOpenCompanions(clientId: string, rows: ListedOutcome[]): Promise<ListedOutcome[]> {
+  const config = await readLeadConfig(clientId)
+  if (!config.ok) return rows
+  return rows.map((row) => (companionStillOpen(row, config.leadsConfig) ? { ...row, companion_expected: true } : row))
+}
+
+async function readLeadConfig(
+  clientId: string,
+): Promise<{ ok: true; leadsConfig: unknown } | { ok: false; error: string }> {
+  const { data, error } = await supabaseAdmin.from('clients').select('leads_config').eq('id', clientId).maybeSingle()
+  if (error) return { ok: false, error: `查询失败: ${error.message}` }
+  const row = data as { leads_config?: unknown } | null
+  return { ok: true, leadsConfig: row?.leads_config }
+}
+
+function companionStillOpen(row: ListedOutcome, leadsConfig: unknown): boolean {
+  if (row.outcome_kind !== 'purchase' && row.outcome_kind !== 'balance') return false
+  if (row.review_status && row.review_status !== 'approved') return false
+  if (row.redacted_at) return false
+  if (!dealStageEventName(leadsConfig, legalMetaLeadId(row.meta_lead_id))) return false
+  const companion = (row.me_conversion_writebacks ?? []).find((wb) => wb.event_id === dealStageEventId(row.id))
+  if (!companion) return true
+  if (companion.payload_preview?.held === true || companion.last_error_code === 'auth') return false
+  return companion.status === 'queued' || companion.status === 'failed' || companion.status === 'in_doubt'
 }

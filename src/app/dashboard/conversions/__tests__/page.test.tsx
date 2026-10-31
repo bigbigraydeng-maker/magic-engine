@@ -414,6 +414,75 @@ describe('授权失效的失败行说清「会自动补发」（2026-09-22 起�
     expect(screen.queryByRole('heading', { name: /需要你动手/ })).toBeNull()
     expect(screen.queryByRole('button', { name: '再试一次' })).toBeNull()
   })
+
+  it('排队中或没有发送记录的已报价可以再试一次', async () => {
+    mountWith([
+      outcome({
+        id: 'quoted-q',
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        source_ref: 'crm_qualified:person:quoted',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{
+          id: 'wb-q',
+          status: 'queued',
+          last_error: null,
+          last_error_code: null,
+          next_attempt_at: null,
+        }],
+      }),
+      outcome({
+        id: 'quoted-missing',
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        source_ref: 'crm_qualified:person:missing',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [],
+      }),
+    ])
+    expect(await screen.findByRole('heading', { name: /需要你动手/ })).toBeTruthy()
+    expect(screen.getByText(/还没有发给广告平台/)).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: '再试一次' })).toHaveLength(2)
+  })
+
+  it('两条发送记录时，失败的那条不会被已经成功的那条盖住', async () => {
+    mountWith([
+      outcome({
+        id: 'two-sends',
+        review_status: 'approved',
+        me_conversion_writebacks: [
+          { id: 'primary', status: 'confirmed', last_error: null, last_error_code: null, next_attempt_at: null, event_id: 'two-sends' },
+          { id: 'stage', status: 'failed', last_error: '阶段没发出去', last_error_code: 'retry', next_attempt_at: null, event_id: 'two-sends:conversion-stage' },
+        ],
+      }),
+    ])
+    expect(await screen.findByText(/阶段没发出去/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: '再试一次' })).toBeTruthy()
+  })
+
+  it('成交下一步还没记上时可以再试一次，普通排队成交仍然不出现', async () => {
+    mountWith([
+      outcome({
+        id: 'owed',
+        review_status: 'approved',
+        companion_expected: true,
+        me_conversion_writebacks: [{
+          id: 'primary',
+          status: 'confirmed',
+          last_error: null,
+          last_error_code: null,
+          next_attempt_at: null,
+          event_id: 'owed',
+        }],
+      }),
+    ])
+    expect(await screen.findByText(/下一步还没发出去/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '再试一次' }))
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((c) => String(c[0]).includes('/outcomes/owed/send'))
+      expect(calls).toHaveLength(1)
+    })
+  })
 })
 
 function heldWriteback(id: string) {

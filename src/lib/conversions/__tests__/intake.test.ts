@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildIntakeRow, toMinorUnits, minorUnitsFor, type IntakeInput } from '../intake'
+import { actionSourceForSourceKind, buildIntakeRow, toMinorUnits, minorUnitsFor, type IntakeInput } from '../intake'
 import { normalizeEmail, normalizePhone } from '@/lib/pii/normalize'
 
 const CTS = 'c0000000-0000-0000-0000-000000000000'
@@ -405,5 +405,13 @@ describe('录入 · Facebook 线索编号（meta_lead_id）', () => {
       CTX,
     )
     expect(r.ok).toBe(false)
+  })
+})
+
+describe('action source follows where the sale actually happened', () => {
+  it('付款和手改阶段按邮件，只有私信对话才按私信', () => {
+    expect(actionSourceForSourceKind('crm_stage_manual')).toBe('email')
+    expect(actionSourceForSourceKind('manual_seed')).toBe('email')
+    expect(actionSourceForSourceKind('messenger_conversation')).toBe('business_messaging')
   })
 })
