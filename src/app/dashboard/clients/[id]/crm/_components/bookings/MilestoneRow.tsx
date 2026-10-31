@@ -99,7 +99,7 @@ function PaidPanel(props: PaidPanelProps): JSX.Element {
         >
           确认已收到款
         </button>
-        <button type="button" className={SECONDARY_BUTTON} onClick={onDone}>
+        <button type="button" className={SECONDARY_BUTTON} onClick={() => onDone(null)}>
           先不勾
         </button>
       </div>

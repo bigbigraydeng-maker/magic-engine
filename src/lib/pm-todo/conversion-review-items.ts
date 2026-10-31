@@ -115,7 +115,8 @@ export async function pushConversionReviewItems(
     })
   }
 
-  pushDealApprovalReminder((data ?? []) as unknown as PendingRow[], items, clientNames, now)
+  const deals = await loadDealsAwaitingApproval(supabase, now)
+  pushDealApprovalReminder(deals, items, clientNames, now)
 
   // ── 发出去了但不知道对方收没收 ──────────────────────────────────────
   // 这一档程序绝不会自己重发 —— 重发一次就是永久多记一笔成交，撤不回。
@@ -512,6 +513,22 @@ type AuthFailedRow = {
  * CTS 19 条就是这样静静过了 7 天窗口的（子牙复审 M2：发现不许死在日志里）。
  * 这里是拉模式：直接查库，不依赖补发步骤有没有跑。
  */
+/** Deals only, inside the 7-day window. The mixed pending list is capped at 20 oldest rows and would hide a new deal behind older leads. */
+async function loadDealsAwaitingApproval(supabase: SupabaseClient, now: Date): Promise<PendingRow[]> {
+  const since = new Date(now.getTime() - META_EVENT_WINDOW_DAYS * DAY_MS).toISOString()
+  const { data, error } = await supabase
+    .from('me_sale_outcomes')
+    .select('id, client_id, outcome_kind, occurred_at')
+    .eq('review_status', 'pending_review')
+    .is('redacted_at', null)
+    .in('outcome_kind', ['purchase', 'balance'])
+    .gte('occurred_at', since)
+    .order('occurred_at', { ascending: true })
+    .limit(500)
+  if (error) throw new Error(`成交待批准汇总查询失败: ${error.message}`)
+  return (data ?? []) as unknown as PendingRow[]
+}
+
 /** One line per client: how many deals are still waiting, and when the oldest expires. */
 function pushDealApprovalReminder(
   rows: PendingRow[],
