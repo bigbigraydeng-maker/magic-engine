@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  dealStageEventId,
+  dealStageEventName,
   isQualifiedLeadSource,
+  latestMetaLeadId,
   qualifiedLeadSourceRef,
   resolveConversionLead,
   stageKeyFromQualifiedRef,
@@ -25,13 +28,32 @@ describe('resolveConversionLead', () => {
     })).toEqual({ kind: 'ordinary' })
   })
 
-  it('a deal with a lead id uses the configured stage name', () => {
+  it('a deal with a lead id stays a purchase and also names the stage step', () => {
     expect(resolveConversionLead({
       outcomeKind: 'balance',
       sourceRef: 'crm_deal:a:b',
       metaLeadId: LEAD,
       leadsConfig: on,
-    })).toEqual({ kind: 'stage', eventName: 'balance_received' })
+    })).toEqual({ kind: 'ordinary' })
+    expect(dealStageEventName(on, LEAD)).toBe('balance_received')
+    expect(dealStageEventId('11111111-2222-3333-4444-555555555555')).toBe(
+      '11111111-2222-3333-4444-555555555555:conversion-stage',
+    )
+  })
+
+  it('a deal with the switch off does not name a stage step', () => {
+    expect(dealStageEventName({}, LEAD)).toBeNull()
+    expect(dealStageEventName(on, null)).toBeNull()
+  })
+
+  it('several form ids: the latest readable time wins', () => {
+    const older = '111111111111111'
+    expect(latestMetaLeadId([
+      { source_ref: older, occurred_at: '2026-10-01T00:00:00.000Z' },
+      { source_ref: 'not-a-lead', occurred_at: '2026-10-03T00:00:00.000Z' },
+      { source_ref: LEAD, occurred_at: '2026-10-02T00:00:00.000Z' },
+      { source_ref: '222222222222222', occurred_at: 'not-a-time' },
+    ])).toBe(LEAD)
   })
 
   it('a qualified row keeps its stage name even after the switch is turned off', () => {

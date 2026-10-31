@@ -163,9 +163,9 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
     const event: MetaCapiPayload['data'][number] = {
       event_name: eventName,
       event_time: Math.floor(new Date(outcome.occurredAt).getTime() / 1000),
-      // 幂等键 = 事实行的 uuid（不可变）。
+      // 幂等键默认是事实行的 uuid。同一笔的阶段那条用另一个键，避免两条合成一条。
       // Meta 只在 pixel↔server 之间用它去重，服务端之间不去重。
-      event_id: outcome.id,
+      event_id: outcome.platformEventId ?? outcome.id,
       // 普通事件沿用来源渠道。线索阶段回传按官方要求用 system_generated。
       action_source: converting ? 'system_generated' : outcome.actionSource,
       user_data: userDataFor(outcome, config),

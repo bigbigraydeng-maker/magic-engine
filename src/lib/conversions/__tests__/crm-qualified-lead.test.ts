@@ -19,6 +19,7 @@ function fakeDb() {
     contact_touchpoints: [],
     me_sale_outcomes: [],
     me_conversion_audit: [],
+    me_conversion_writebacks: [],
   }
   return {
     tables,
@@ -88,7 +89,10 @@ describe('recordQualifiedStageLead', () => {
     const db = fakeDb()
     db.tables.clients.push(liveClient())
     db.tables.contacts.push({ id: CONTACT, client_id: CLIENT, primary_email: 'a@b.co' })
-    db.tables.contact_touchpoints.push({ contact_id: CONTACT, client_id: CLIENT, source: 'meta_lead_form', source_ref: LEAD })
+    db.tables.contact_touchpoints.push(
+      { contact_id: CONTACT, client_id: CLIENT, source: 'meta_lead_form', source_ref: '111111111111111', occurred_at: '2026-10-01T00:00:00.000Z' },
+      { contact_id: CONTACT, client_id: CLIENT, source: 'meta_lead_form', source_ref: LEAD, occurred_at: '2026-10-02T00:00:00.000Z' },
+    )
     const result = await recordQualifiedStageLead(db as never, {
       clientId: CLIENT, contactId: CONTACT, stageKey: 'quoted', actor: 'roman@example.com',
     })
@@ -109,10 +113,37 @@ describe('recordQualifiedStageLead', () => {
     db.tables.contact_touchpoints.push({ contact_id: CONTACT, client_id: CLIENT, source: 'meta_lead_form', source_ref: LEAD })
     const input = { clientId: CLIENT, contactId: CONTACT, stageKey: 'quoted', actor: 'ai:conversation-read' }
     await recordQualifiedStageLead(db as never, input)
+    db.tables.me_conversion_writebacks.push({
+      outcome_id: db.tables.me_sale_outcomes[0].id,
+      destination: 'meta_capi',
+      event_id: db.tables.me_sale_outcomes[0].id,
+      status: 'confirmed',
+    })
     const again = await recordQualifiedStageLead(db as never, input)
     expect(again.message).toContain('已经记过')
     expect(db.tables.me_sale_outcomes).toHaveLength(1)
     expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a failed send once and does not insert a second row', async () => {
+    const db = fakeDb()
+    db.tables.clients.push(liveClient())
+    db.tables.contacts.push({ id: CONTACT, client_id: CLIENT, primary_email: 'a@b.co' })
+    db.tables.contact_touchpoints.push({ contact_id: CONTACT, client_id: CLIENT, source: 'meta_lead_form', source_ref: LEAD })
+    const input = { clientId: CLIENT, contactId: CONTACT, stageKey: 'quoted', actor: 'ai:conversation-read' }
+    await recordQualifiedStageLead(db as never, input)
+    db.tables.me_conversion_writebacks.push({
+      outcome_id: db.tables.me_sale_outcomes[0].id,
+      destination: 'meta_capi',
+      event_id: db.tables.me_sale_outcomes[0].id,
+      status: 'failed',
+    })
+    send.mockClear()
+    const again = await recordQualifiedStageLead(db as never, input)
+    expect(again.message).toContain('已发给广告平台')
+    expect(db.tables.me_sale_outcomes).toHaveLength(1)
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(send.mock.calls[0][0]).toBe(db.tables.me_sale_outcomes[0].id)
   })
 
   it('states why a lead with no form id is not sent, and does not send an ordinary lead', async () => {
