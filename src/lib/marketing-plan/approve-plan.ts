@@ -14,6 +14,11 @@ import { promoContentHash } from '@/lib/marketing-plan/promo/content-hash'
 import { loadPromoFacts } from '@/lib/marketing-plan/promo/facts'
 import { evaluateApproval, type GateResult } from '@/lib/marketing-plan/promo/gates'
 import { hardNotGreen } from '@/lib/marketing-plan/approve-plan-gates'
+import {
+  archiveSameGoalApprovedPlans,
+  releaseSupersedeUnlessApproved,
+  type ArchiveSameGoalResult,
+} from '@/lib/marketing-plan/promo/supersede-prior-approved-write'
 import { hasPromoField, parsePromoSpec, type PromoValidationIssue } from '@/lib/marketing-plan/promo/spec'
 import type { ApprovalReceipt, MarketingPlan } from '@/lib/marketing-plan/types'
 
@@ -118,42 +123,96 @@ export async function approvePlan(args: {
   const gates = await runGates(plan, args.requireAllGreen === true)
   if ('stop' in gates) return gates.stop
 
-  // Dispatch first, flip the status after: a failed flip revokes the dispatch.
-  // Plans with a promo structure do not dispatch legacy plan tasks.
+  // Dispatch first, then archive older approved plans, then flip this one.
+  // A failed archive is rolled back inside that call. A failed flip puts those
+  // plans back to approved. Plans with a promo structure do not dispatch legacy tasks.
   const dispatch: Dispatch = hasPromoField(plan.plan_data)
     ? { marketing_plan_id: plan.id, tasks_created: 0, tasks_skipped: 0, task_ids: [], packages_created: 0, package_ids: [] }
     : await dispatchPlanTasks(plan)
 
+  return commitApproval({ plan, clientId: args.clientId, approvedBy: args.approvedBy, dispatch, gated: gates.gated })
+}
+
+async function commitApproval(args: {
+  plan: MarketingPlan
+  clientId: string
+  approvedBy: string | null
+  dispatch: Dispatch
+  gated: Gated
+}): Promise<ApprovePlanResult> {
   const approvedAt = new Date().toISOString()
-  const receipt: ApprovalReceipt = {
+  const held = await archiveSameGoalApprovedPlans({
+    clientId: args.clientId,
+    approving: args.plan,
+    at: approvedAt,
+  })
+  if (!held.ok) {
+    await revokePlanTasks(args.plan.id, args.clientId)
+    return { kind: 'conflict', status: held.rolledBack ? 409 : 500, error: held.error }
+  }
+  const receipt = buildReceipt(args, approvedAt)
+  const flipped = await flipToApproved(args.plan, args.clientId, approvedAt, receipt)
+  if (flipped.ok) return { kind: 'approved', plan: flipped.plan, dispatch: args.dispatch, receipt }
+  return abandonFlip(args.plan, args.clientId, held, flipped)
+}
+
+function buildReceipt(
+  args: { plan: MarketingPlan; approvedBy: string | null; dispatch: Dispatch; gated: Gated },
+  approvedAt: string,
+): ApprovalReceipt {
+  return {
     request_id: randomUUID(),
     approved_by: args.approvedBy,
     approved_at: approvedAt,
-    tasks_created: dispatch.tasks_created,
-    tasks_skipped: dispatch.tasks_skipped ?? 0,
-    packages_created: dispatch.packages_created,
-    ...(gates.gated.snapshot ? { gate_snapshot: gates.gated.snapshot } : {}),
-    ...(gates.gated.hash ? { content_hash: gates.gated.hash } : {}),
+    tasks_created: args.dispatch.tasks_created,
+    tasks_skipped: args.dispatch.tasks_skipped ?? 0,
+    packages_created: args.dispatch.packages_created,
+    ...(args.gated.snapshot ? { gate_snapshot: args.gated.snapshot } : {}),
+    ...(args.gated.hash ? { content_hash: args.gated.hash } : {}),
   }
-  const { data: updated, error: updateErr } = await supabaseAdmin
+}
+
+async function flipToApproved(
+  plan: MarketingPlan,
+  clientId: string,
+  approvedAt: string,
+  receipt: ApprovalReceipt,
+): Promise<{ ok: true; plan: MarketingPlan } | { ok: false; error: unknown; missed: boolean }> {
+  const { data: updated, error } = await supabaseAdmin
     .from('marketing_plans')
     .update({
       status: 'approved',
       approved_at: approvedAt,
       generation_meta: { ...(plan.generation_meta ?? {}), approval_receipt: receipt },
     })
-    .eq('id', args.planId)
-    .eq('client_id', args.clientId)
+    .eq('id', plan.id)
+    .eq('client_id', clientId)
     .eq('status', 'draft')
     .eq('updated_at', plan.updated_at) // saved during checks/dispatch → do not approve
     .select('*')
     .maybeSingle()
+  if (!error && updated) return { ok: true, plan: updated as MarketingPlan }
+  return { ok: false, error, missed: !error && !updated }
+}
 
-  if (!updateErr && !updated) return loseRace(args.planId, args.clientId)
-  if (updateErr) {
-    console.error('[marketing-plan approve] status update failed, revoking dispatch:', updateErr)
-    await revokePlanTasks(args.planId, args.clientId)
-    return { kind: 'conflict', status: 500, error: '批准没有保存成功，已撤销本次派发，请稍后重试。' }
+async function abandonFlip(
+  plan: MarketingPlan,
+  clientId: string,
+  held: Extract<ArchiveSameGoalResult, { ok: true }>,
+  flipped: { error: unknown; missed: boolean },
+): Promise<ApprovePlanResult> {
+  const released = await releaseSupersedeUnlessApproved({
+    clientId,
+    planId: plan.id,
+    approvingId: plan.id,
+    archived: held.archived,
+  })
+  if (!released.ok) return { kind: 'conflict', status: 500, error: released.error }
+  if (released.planNowApproved) {
+    return { kind: 'conflict', status: 409, error: '这份计划刚刚已经被批准了，本次请求没有重复处理。' }
   }
-  return { kind: 'approved', plan: (updated as MarketingPlan | null) ?? plan, dispatch, receipt }
+  if (flipped.missed) return loseRace(plan.id, clientId)
+  console.error('[marketing-plan approve] status update failed, revoking dispatch:', flipped.error)
+  await revokePlanTasks(plan.id, clientId)
+  return { kind: 'conflict', status: 500, error: '批准没有保存成功，已撤销本次派发，请稍后重试。' }
 }
