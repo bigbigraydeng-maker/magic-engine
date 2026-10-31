@@ -409,3 +409,16 @@ describe('⑤ 同事发的信不能记成客人来信', () => {
     expect(plan.threads[0].messages[1]).toMatchObject({ direction: 'outbound', automated: true })
   })
 })
+
+describe('⑤b 同事的信不算「有人跟进过客人」（子牙 P1-1）', () => {
+  it('同事发的信照存，但标 automated：看不到收件人，不能证明发给了客人', () => {
+    const plan = planMailIngest(
+      [
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T01:00:00.000Z' }),
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T02:00:00.000Z', counterparty: { address: 'ticketing@ctstours.co.nz', name: 'T' }, subject: 'RE: quote' }),
+      ],
+      { ownDomains: ['ctstours.co.nz'] },
+    )
+    expect(plan.threads[0].messages[1]).toMatchObject({ direction: 'outbound', automated: true, staffSender: 'ticketing@ctstours.co.nz' })
+  })
+})

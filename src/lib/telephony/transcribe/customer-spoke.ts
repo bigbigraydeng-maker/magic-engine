@@ -40,13 +40,15 @@ export function verifyCustomerSpoke(raw: RawCustomerSpoke, transcript: string): 
     const squashed = squash(quote)
     // 压缩后为空（纯标点 / 空白）的「原话」不是证据，否则 includes('') 恒为真。
     if (!squashed || !squash(transcript).includes(squashed)) return 'unclear'
-    if (VOICEMAIL_GREETING.test(quote)) return 'no'
+    // 原话里带信箱字眼（例如客人说「I got your voicemail」）不等于这是问候语：只降为说不清，绝不判 no。
+    if (VOICEMAIL_GREETING.test(quote)) return 'unclear'
     if (VOICEMAIL_GREETING.test(transcript)) return 'unclear'
     return 'yes'
   }
   if (raw.customerSpoke === 'no') {
     if (VOICEMAIL_GREETING.test(transcript)) return 'no'
-    if (speakingChannelCount(transcript) <= 1) return 'no'
+    // 恰好一个声道出过声才算「只有一边在说」；零个声道（转写空/格式不认识）说不清。
+    if (speakingChannelCount(transcript) === 1) return 'no'
     return 'unclear'
   }
   return 'unclear'

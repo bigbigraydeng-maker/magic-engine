@@ -178,7 +178,9 @@ export function planMailIngest(messages: MailMessage[], opts: PlanOptions): Mail
       receivedAt: m.receivedAt,
       // 只有出站才可能是自动回执；客人那边发来的自动回复不归我们管，
       // 而且把它标成 automated 会让一条真的来信从「他回话了」里消失。
-      automated: direction === 'outbound' && isAutoReply(m.subject),
+      // 同事发的信一律标 automated：同步看不到收件人，没法证明这封信真的发给了客人
+      // （例如回复全部时去掉了客人的内部往来），不能算「有人跟进过他」。信照存。
+      automated: staffSent || (direction === 'outbound' && isAutoReply(m.subject)),
       formLead: m.formLead,
       staffSender: staffSent ? m.counterparty.address : undefined,
     })
@@ -680,7 +682,8 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     token,
     mailbox: target.mailbox,
     clientId: target.clientId,
-    ownDomains,
+    // 表单通知认证只认真域名；点名的员工地址（含 @）不能当成整个域名交过去。
+    ownDomains: ownDomains.filter((d) => !d.includes('@')),
     messages: all,
     stats: formStats,
   })

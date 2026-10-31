@@ -97,3 +97,15 @@ describe('segmentContact · 语音信箱不算聊过', () => {
     expect(r.afterCall).toBe(true)
   })
 })
+
+describe('同事内部往来（automated 出站）不改变「我们最后一次真人联系」也不推进阶段', () => {
+  it('客人来信后只有一封 automated 的同事信 → 仍是「还没人联系」（new_untouched）', () => {
+    const staffMail = buildTouchpointLike({
+      contact_id: 'c1', channel: 'email', direction: 'outbound', occurred_at: '2026-10-28T23:00:00Z',
+      source: 'microsoft_mail', raw: null, metadata: { automated: true, staff_sender: 'ticketing@ctstours.co.nz' },
+    })
+    const inbound = { channel: 'email', direction: 'inbound' as const, occurredAt: '2026-10-28T20:00:00Z', source: 'microsoft_mail' }
+    const r = segmentContact(contact([inbound, staffMail]), NOW)
+    expect(r.segment).toBe('new_untouched')
+  })
+})

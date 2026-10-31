@@ -160,11 +160,10 @@ describe('isRealInbound', () => {
     expect(isRealInbound({ channel: 'phone', source: 'voipline', metadata: { reached: false, outcome: 'missed_inbound' } })).toBe(false)
     expect(isRealInbound({ channel: 'email', source: 'microsoft_mail', metadata: { automated: true } })).toBe(false)
   })
-  it('does not count a call the analysis says the customer never spoke on (voicemail / silence)', () => {
-    expect(isRealInbound({ channel: 'phone', source: 'twilio', metadata: { reached: true, outcome: 'spoke', customer_spoke: 'no' } })).toBe(false)
-    expect(isRealInbound({ channel: 'phone', source: 'twilio', metadata: { reached: true, outcome: 'spoke', customer_spoke: 'yes' } })).toBe(true)
-    // 分析还没出结果：照旧（不藏人）
-    expect(isRealInbound({ channel: 'phone', source: 'twilio', metadata: { reached: true, outcome: 'spoke' } })).toBe(true)
+  it('revive only sees inbound calls: the customer calling in IS speaking, whatever the analysis verdict says', () => {
+    expect(isRealInbound({ channel: 'phone', source: 'twilio', metadata: { reached: false, outcome: 'spoke', customer_spoke: 'no' } })).toBe(true)
+    expect(isRealInbound({ channel: 'phone', source: 'twilio', metadata: { reached: false, outcome: 'spoke', customer_spoke: 'unclear' } })).toBe(true)
+    expect(isRealInbound({ channel: 'phone', source: 'twilio', metadata: { reached: false, outcome: 'missed_inbound' } })).toBe(false)
   })
 })
 

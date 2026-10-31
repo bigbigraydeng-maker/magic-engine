@@ -504,15 +504,24 @@ describe('客人开没开口（WP-1a）：语音信箱不能当成聊过', () =>
     expect(verifyFacts(rawWith('yes', null), CHAT).customerSpoke).toBe('unclear')
   })
 
-  it('语音信箱：模型把问候语当客人说话 → no；把员工留言当客人说话 → 降为 unclear（不声称聊过）', () => {
-    expect(verifyFacts(rawWith('yes', 'At the tone, please record your message'), VOICEMAIL).customerSpoke).toBe('no')
+  it('语音信箱：模型把问候语或员工留言当客人说话 → 降为 unclear（不声称聊过，也不下「没开口」的结论）', () => {
+    expect(verifyFacts(rawWith('yes', 'At the tone, please record your message'), VOICEMAIL).customerSpoke).toBe('unclear')
     expect(verifyFacts(rawWith('yes', 'this is Baker calling from China Travel Service'), VOICEMAIL).customerSpoke).toBe('unclear')
+  })
+
+  it('反例：客人真说了话，原话里带 voicemail 字眼 → 不能判 no', () => {
+    const t = '声道2：Hi, I got your voicemail, calling back about the tour.\n声道1：Thanks for calling back!'
+    const v = verifyFacts(rawWith('yes', 'I got your voicemail, calling back about the tour'), t).customerSpoke
+    expect(v).not.toBe('no')
+    expect(v).toBe('unclear')
   })
 
   it('模型说 no：有语音信箱问候语或只有一个声道出声 → no；两边都说了话却说 no → unclear（没证据不下结论）', () => {
     expect(verifyFacts(rawWith('no', null), VOICEMAIL).customerSpoke).toBe('no')
     expect(verifyFacts(rawWith('no', null), '声道2：Is available.').customerSpoke).toBe('no')
     expect(verifyFacts(rawWith('no', null), CHAT).customerSpoke).toBe('unclear')
+    // 零个声道（转写空 / 格式不认识）说不清，不是 no
+    expect(verifyFacts(rawWith('no', null), 'no channel markers here').customerSpoke).toBe('unclear')
   })
 
   it('流水线把核验后的结论记到触点上', async () => {
