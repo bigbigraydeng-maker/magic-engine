@@ -8,6 +8,7 @@ import {
   recordStageDeal,
   type ApprovedPurchase,
   type DealIo,
+  type DealWrite,
 } from '../crm-deal-record'
 import type { IntakeRow } from '../intake'
 
@@ -16,12 +17,21 @@ const CONTACT = '11111111-1111-4111-8111-111111111111'
 const BOOKING = '30000000-0000-4000-8000-0000000000a1'
 const NOW = new Date('2026-10-31T00:00:00.000Z')
 
-type Memory = DealIo & { inserted: IntakeRow[]; bookingLoads: number }
+type Memory = DealIo & {
+  inserted: IntakeRow[]
+  writes: Array<DealWrite | undefined>
+  sends: string[]
+  storedPartyLoads: number
+  bookingLoads: number
+}
 
 function memory(over: Partial<DealIo> = {}): Memory {
   const inserted: IntakeRow[] = []
   const mem: Memory = {
     inserted,
+    writes: [],
+    sends: [],
+    storedPartyLoads: 0,
     bookingLoads: 0,
     loadClient: async () => ({
       conversionStage: 'live',
@@ -40,11 +50,20 @@ function memory(over: Partial<DealIo> = {}): Memory {
     loadDncTouches: async () => [],
     loadExistingSourceDeal: async () => null,
     restoreVoidedDeal: async () => ({ ok: false }),
-    insertOutcome: async (row) => {
+    loadStoredPartySize: async () => {
+      mem.storedPartyLoads += 1
+      return null
+    },
+    dispatchSend: async (id) => {
+      mem.sends.push(id)
+      return 'sent'
+    },
+    insertOutcome: async (row, write) => {
       if (inserted.some((r) => r.source_ref === row.source_ref && r.source_kind === row.source_kind)) {
         return { ok: false, duplicate: true }
       }
       inserted.push(row)
+      mem.writes.push(write)
       return { ok: true, id: `out-${inserted.length}` }
     },
     ...over,
@@ -94,7 +113,12 @@ describe('recordMilestoneDeal', () => {
       actor: 'staff@example.com',
     }, NOW)
     expect(result).toMatchObject({ attempted: true, recorded: true, outcomeId: 'out-1', advanceStage: false })
-    expect(result.message).toContain('审核')
+    expect(result.message).toContain('已自动通过')
+    expect(result.message).toContain('已发给广告平台')
+    expect(result.message).not.toContain('等审核')
+    expect(io.writes[0]).toMatchObject({ reviewStatus: 'approved', reviewedBy: 'system:crm-deal-auto', milestoneKind: 'deposit' })
+    expect(io.sends).toEqual(['out-1'])
+    expect(io.storedPartyLoads).toBe(0)
     expect(io.inserted).toHaveLength(1)
     expect(io.inserted[0]).toMatchObject({
       outcome_kind: 'purchase',
@@ -181,16 +205,19 @@ describe('recordMilestoneDeal', () => {
     const io = memory({
       insertOutcome: async () => ({ ok: false, duplicate: true }),
       loadExistingSourceDeal: async () => ({ id: 'voided-1', voidedByPaymentReversal: true, stoppedSendIds: ['wb-1'] }),
-      restoreVoidedDeal: async (id, _row, ids) => {
+      restoreVoidedDeal: async (id, _row, ids, write) => {
         restored.push(id, ...ids)
+        expect(write).toMatchObject({ reviewStatus: 'approved', reviewedBy: 'system:crm-deal-auto', milestoneKind: 'deposit' })
         return { ok: true }
       },
     })
     const result = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
     expect(result).toMatchObject({ recorded: true, alreadyRecorded: false, outcomeId: 'voided-1', reason: null, advanceStage: false })
     expect(result.message).toContain('重新打开')
-    expect(result.message).toContain('审核')
+    expect(result.message).toContain('已自动通过')
+    expect(result.message).not.toContain('等审核')
     expect(restored).toEqual(['voided-1', 'wb-1'])
+    expect(io.sends).toEqual(['voided-1'])
   })
 
   it('does not reopen a rejection that was not caused by undoing the payment', async () => {
@@ -265,6 +292,26 @@ describe('recordMilestoneDeal', () => {
     const io = memory({ insertOutcome: async () => ({ ok: false, duplicate: false }) })
     const result = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
     expect(result).toMatchObject({ recorded: false, reason: 'record_failed', advanceStage: false })
+    expect(io.sends).toEqual([])
+  })
+
+  it('reads one stored headcount when the booking has none, and does not treat a send error as a lost row', async () => {
+    const io = memory({
+      loadBooking: async () => ({ contactId: CONTACT, partySize: null, tourId: 'tour', departureId: null }),
+      loadStoredPartySize: async () => {
+        io.storedPartyLoads += 1
+        return 3
+      },
+      dispatchSend: async () => {
+        throw new Error('platform down')
+      },
+    })
+    const result = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
+    expect(result).toMatchObject({ recorded: true, reason: null, outcomeId: 'out-1' })
+    expect(result.message).toContain('没成功')
+    expect(result.message).toContain('往来或跟进记录')
+    expect(io.inserted[0]?.amount_minor).toBe(1_499_700)
+    expect(io.storedPartyLoads).toBe(1)
   })
 })
 
@@ -321,6 +368,7 @@ describe('recordStageDeal', () => {
     }, NOW)
     expect(result).toMatchObject({ reason: 'missing_party_size', advanceStage: false, recorded: false })
     expect(io.inserted).toHaveLength(0)
+    expect(io.storedPartyLoads).toBe(0)
   })
 
   it('uses a typed amount only when the party size is present and the catalog has no price', async () => {
@@ -334,6 +382,10 @@ describe('recordStageDeal', () => {
     expect(result.recorded).toBe(true)
     expect(io.inserted[0]).toMatchObject({ amount_minor: 8000, currency: 'AUD' })
     expect(result.advanceStage).toBe(true)
+    expect(result.message).toContain('审核')
+    expect(io.sends).toEqual([])
+    expect(io.writes[0]).toBeUndefined()
+    expect(io.storedPartyLoads).toBe(0)
   })
 
   it('a cross-source duplicate advances and does not insert again', async () => {

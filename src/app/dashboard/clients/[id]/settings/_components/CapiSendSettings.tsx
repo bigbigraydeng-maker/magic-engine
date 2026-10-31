@@ -199,7 +199,7 @@ function MilestoneField({ draft, saving, onChange }: { draft: Draft; saving: boo
     <label className="block text-sm font-bold text-slate-800">
       哪一笔记成成交
       <p className="mt-1 text-xs font-normal leading-relaxed text-slate-500">
-        员工在订单里把这一笔记成已付之后，记一笔等审核的成交。不选就不会自动记。
+        员工在订单里把这一笔记成已付之后，自动记下成交并发送。不选就不会自动记。没有人数时，先读已经存下的往来；读不到会请员工补上。
       </p>
       <select
         className={selectClass}

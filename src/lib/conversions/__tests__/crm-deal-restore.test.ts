@@ -146,4 +146,38 @@ describe('restoreVoidedDeal', () => {
     expect(seed.outcomes[0].review_status).toBe('rejected')
     expect(seed.outcomes[0].reject_note).toBe('客人说这不是成交')
   })
+
+  it('a payment deal that auto-passes comes back approved, and an already reopened send is left queued', async () => {
+    const { db, seed } = fakeDb({
+      outcomes: [{
+        id: OUTCOME,
+        client_id: CLIENT,
+        source_kind: 'crm_stage_manual',
+        source_ref: 'crm_deal:contact:booking-1',
+        review_status: 'rejected',
+        reject_note: PAYMENT_VOID_REJECT_NOTE,
+      }],
+      writebacks: [{
+        id: 'wb-1',
+        outcome_id: OUTCOME,
+        status: 'queued',
+        last_error: null,
+      }],
+    })
+    const found = await readSourceDeal(db, CLIENT, 'crm_stage_manual', 'crm_deal:contact:booking-1')
+    expect(found).toMatchObject({ voidedByPaymentReversal: true, stoppedSendIds: [] })
+    const ok = await restoreVoidedDeal(db, OUTCOME, row(), [], {
+      reviewStatus: 'approved',
+      reviewedBy: 'system:crm-deal-auto',
+      reviewedAt: '2026-10-31T00:00:00.000Z',
+      milestoneKind: 'deposit',
+    })
+    expect(ok).toBe(true)
+    expect(seed.outcomes[0]).toMatchObject({
+      review_status: 'approved',
+      reviewed_by: 'system:crm-deal-auto',
+      reject_note: null,
+    })
+    expect(seed.writebacks[0].status).toBe('queued')
+  })
 })
