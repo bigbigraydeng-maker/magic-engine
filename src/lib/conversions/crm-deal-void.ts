@@ -80,6 +80,39 @@ export function paymentRevokedPreview(preview: unknown): boolean {
   return typeof preview === 'object' && preview !== null && (preview as { paymentRevoked?: unknown }).paymentRevoked === true
 }
 
+export type UnmarkChoice = 'void' | 'skip' | 'void_failed'
+
+/**
+ * A stamp written when the deal was created wins over today's setting.
+ * No stamp falls back to today's setting. A broken setting with no stamp
+ * refuses instead of guessing which payment the deal belonged to.
+ */
+export function dealBelongsToUnmarkedKind(
+  stamp: string | null,
+  unmarked: DealMilestone,
+  current: DealMilestone | null | 'malformed',
+): UnmarkChoice {
+  if (stamp === 'deposit' || stamp === 'balance') return stamp === unmarked ? 'void' : 'skip'
+  if (current === 'malformed') return 'void_failed'
+  if (current !== unmarked) return 'skip'
+  return 'void'
+}
+
+export function selectDealsForUnmark(
+  deals: Array<{ id: string; stamp: string | null }>,
+  unmarked: DealMilestone,
+  current: DealMilestone | null | 'malformed',
+): { ids: string[]; failed: boolean } {
+  const ids: string[] = []
+  let failed = false
+  for (const deal of deals) {
+    const choice = dealBelongsToUnmarkedKind(deal.stamp, unmarked, current)
+    if (choice === 'void') ids.push(deal.id)
+    else if (choice === 'void_failed') failed = true
+  }
+  return { ids, failed }
+}
+
 export async function voidDealAfterUnpaid(
   db: SupabaseClient,
   input: { clientId: string; bookingId: string; kind: DealMilestone; actor: string | null },
@@ -96,18 +129,22 @@ async function voidMatchingDeal(
   db: SupabaseClient,
   input: { clientId: string; bookingId: string; kind: DealMilestone; actor: string | null },
 ): Promise<DealVoidNotice | null> {
-  const milestone = await configuredMilestone(db, input.clientId)
-  if (milestone === 'malformed') return notice('void_failed', VOID_FAILED)
-  if (milestone !== input.kind) return null
   const contactId = await bookingContact(db, input.clientId, input.bookingId)
   if (!contactId) return null
   const rows = await loadDeals(db, input.clientId, crmDealSourceRef(contactId, input.bookingId, null))
-  const plan = planDealVoid(rows)
+  if (rows.length === 0) return null
+  const current = await configuredMilestone(db, input.clientId)
+  const stamps = await loadStamps(db, rows.map((row) => row.id))
+  const picked = selectDealsForUnmark(rows.map((row) => ({ id: row.id, stamp: stamps.get(row.id) ?? null })), input.kind, current)
+  if (picked.ids.length === 0) return picked.failed ? notice('void_failed', VOID_FAILED) : null
+  const chosen = rows.filter((row) => picked.ids.includes(row.id))
+  const plan = planDealVoid(chosen)
   const message = voidDealMessage(plan)
-  if (!message) return null
-  await applyPlan(db, rows, plan, input.actor)
-  if (plan.voidIds.length > 0) return notice('voided', message)
-  return notice('already_sent', message)
+  if (!message) return picked.failed ? notice('void_failed', VOID_FAILED) : null
+  await applyPlan(db, chosen, plan, input.actor)
+  const text = picked.failed ? `${message}${VOID_FAILED}` : message
+  if (plan.voidIds.length > 0) return notice('voided', text)
+  return notice('already_sent', text)
 }
 
 async function applyPlan(db: SupabaseClient, rows: DealVoidRow[], plan: DealVoidPlan, actor: string | null): Promise<void> {
@@ -172,6 +209,25 @@ async function configuredMilestone(db: SupabaseClient, clientId: string): Promis
   const cfg = readCapiClientConfig((data as { leads_config?: unknown } | null)?.leads_config)
   if (cfg.dealMilestoneMalformed) return 'malformed'
   return cfg.dealMilestone
+}
+
+async function loadStamps(db: SupabaseClient, outcomeIds: string[]): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>()
+  if (outcomeIds.length === 0) return out
+  const { data, error } = await db.from('me_conversion_audit').select('outcome_id, detail').in('outcome_id', outcomeIds).eq('action', 'created')
+  if (error) throw new Error('crm_deal_void_failed')
+  for (const item of Array.isArray(data) ? data as Array<Record<string, unknown>> : []) {
+    const id = typeof item.outcome_id === 'string' ? item.outcome_id : null
+    if (!id || out.has(id)) continue
+    out.set(id, stampOf(item.detail))
+  }
+  return out
+}
+
+function stampOf(detail: unknown): string | null {
+  if (detail == null || typeof detail !== 'object' || Array.isArray(detail)) return null
+  const milestone = (detail as { milestone?: unknown }).milestone
+  return milestone === 'deposit' || milestone === 'balance' ? milestone : null
 }
 
 async function bookingContact(db: SupabaseClient, clientId: string, bookingId: string): Promise<string | null> {
