@@ -31,7 +31,7 @@ import {
   qualifiedLeadHoldReason,
   resolveConversionLead,
 } from './conversion-lead'
-import { paymentRevokedPreview } from './crm-deal-void'
+import { PAYMENT_VOID_STOP_ERROR, paymentRevokedPreview } from './crm-deal-void'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
 import type {
@@ -707,7 +707,7 @@ export async function resolveDoubt(
  * 条件更新：只有当前状态在 `from` 里才改。
  * 返回是否真的改到了（`false` = 别人抢先了，本次放弃）。
  */
-const REVOKED_UNSENT = '收款已撤销，这条还没发出去，已停住。'
+const REVOKED_UNSENT = PAYMENT_VOID_STOP_ERROR
 
 async function stopRevokedSend(
   supabase: SupabaseClient,
