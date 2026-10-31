@@ -402,7 +402,10 @@ describe('按钮精简（PM 2026-10-10：一屏只留一个主按钮）', () => 
  */
 describe('B2 · 改阶段的并发保护', () => {
   it('PATCH body 带上 expectedFromStage: row.stage', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => ({
+      ok: true, status: 200,
+      json: async () => url.includes('/timeline') ? { timeline: [], omittedMessages: 0 } : {},
+    }))
     vi.stubGlobal('fetch', fetchMock)
     vi.stubGlobal('confirm', vi.fn(() => true))
     render(
@@ -421,7 +424,7 @@ describe('B2 · 改阶段的并发保护', () => {
     await Promise.resolve()
     const call = fetchMock.mock.calls.find((c) => String(c[0]).includes('/stage'))
     expect(call).toBeTruthy()
-    const body = JSON.parse((call![1] as RequestInit).body as string)
+    const body = JSON.parse(call![1]!.body as string)
     expect(body).toEqual({ toStage: 'contacted', expectedFromStage: 'new' })
   })
 
@@ -502,6 +505,17 @@ describe('AI 概况卡写明生成时间（简报里的时间说法跟生成时�
     draw()
     await waitFor(() => screen.getByTestId('ai-overview'))
     expect(screen.queryByTestId('ai-overview-age')).toBeNull()
+  })
+
+  it('旧 AI 概况把英文姓名音译时，抽屉显示 CRM 原始姓名', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
+      ok: true,
+      json: async () => url.endsWith('/brief') ? { brief: { ...brief(null), summary: '客户大卫·斯科特通过表单联系了 CTS。' } } : { timeline: [], omittedMessages: 0 },
+    })))
+    draw({ name: 'David Scott' })
+    const overview = await waitFor(() => screen.getByTestId('ai-overview'))
+    expect(overview.textContent).toContain('客户 David Scott 通过表单')
+    expect(overview.textContent).not.toContain('大卫·斯科特')
   })
 })
 

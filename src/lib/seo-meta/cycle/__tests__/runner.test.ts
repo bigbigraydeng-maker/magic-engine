@@ -256,7 +256,10 @@ describe('runStep4Applied — baseline_ctr reaches the seo_meta_log insert (fixe
     expect(result.applied).toHaveLength(0)
     expect(result.proposals).toHaveLength(1)
     expect(result.proposals[0].newTitle).toBe('New Title')
-    expect(applySpy).toHaveBeenCalledTimes(1) // only the preview call — dry run never calls apply again for real
+    // 2026-10-28: a read of the current text before generating + the preview after — both dry runs;
+    // a dry run must never call apply for real.
+    expect(applySpy).toHaveBeenCalledTimes(2)
+    expect(applySpy.mock.calls.every(([arg]) => arg.dryRun === true)).toBe(true)
   })
 })
 

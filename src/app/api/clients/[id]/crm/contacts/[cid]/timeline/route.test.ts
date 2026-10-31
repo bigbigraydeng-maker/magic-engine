@@ -25,6 +25,7 @@ vi.mock('@/lib/crm/email-full-body', async (orig) => ({
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchFullEmailBody } from '@/lib/crm/email-full-body'
 import { GET } from './route'
+import { asFacts } from '@/lib/crm/call-analysis-facts'
 
 /** 记录取消息时用的排序方向和上限。 */
 let messageOrder: { column: string; ascending: boolean } | null = null
@@ -330,5 +331,97 @@ describe('最新一封客人来信：摘要被截断时拉全文', () => {
     mockDb({ conversations: [{ id: 'conv-e', channel: 'messenger' }], messages: emailMsgs('in-1') })
     await bodies()
     expect(fetchFullEmailBody).not.toHaveBeenCalled()
+  })
+})
+
+describe('机器发的出站邮件', () => {
+  it('Mailchimp 发出的触点带 automated:true，客人的入站、同事的出站不带', async () => {
+    mockDb({
+      touches: [
+        { channel: 'email', direction: 'outbound', occurred_at: '2026-10-28T19:02:00Z', summary: '发出《Welcome》', raw: null, metadata: { automated: true, kind: 'sent' }, source: 'mailchimp' },
+        { channel: 'email', direction: 'inbound', occurred_at: '2026-10-28T01:00:00Z', summary: '打开了《Welcome》', raw: null, metadata: {}, source: 'mailchimp' },
+        { channel: 'email', direction: 'outbound', occurred_at: '2026-10-27T01:00:00Z', summary: 'Hi Sue', raw: null, metadata: {}, source: 'microsoft_mail' },
+        { channel: 'phone', direction: 'outbound', occurred_at: '2026-10-26T01:00:00Z', summary: 'AI call summary', raw: null, metadata: { automated: true }, source: 'voice' },
+      ],
+      conversations: [],
+      messages: [],
+    })
+    const body = await (await call()).json()
+    const byText = Object.fromEntries(body.timeline.map((e: { summary: string; automated: boolean }) => [e.summary, e.automated]))
+    expect(byText['发出《Welcome》']).toBe(true)
+    expect(byText['打开了《Welcome》']).toBe(false)
+    expect(byText['Hi Sue']).toBe(false)
+    // AI 外呼也标了 automated，但电话不是「系统自动发出的邮件」，不能被同样处理
+    expect(byText['AI call summary']).toBe(false)
+  })
+})
+
+/**
+ * 表格「员工跟进记录」同步进来的触点（source = sheet_followup）只有原话（raw）、没有 AI 摘要。
+ * 抽屉只认摘要，这类记录整条看不见（2026-10-29 PM 发现：CTS 393 位客人的 407 条）。
+ * 所以没有摘要时要把原话以 `sheetNote` 送出去；表格不记时间，`at` 是客人填表的时间，
+ * 要带 `timeApproximate` 让界面说清楚。
+ */
+describe('表格同步的员工跟进记录：原话要送到前端', () => {
+  const SHEET = (over: Record<string, unknown> = {}) => ({
+    channel: 'phone',
+    direction: 'outbound',
+    occurred_at: '2026-10-03T18:44:59Z',
+    summary: null,
+    raw: 'no, I do not want to go to China',
+    source: 'sheet_followup',
+    metadata: { outcome: 'spoke', time_is_approximate: true, timestamp_basis: 'lead_created_time' },
+    ...over,
+  })
+  const onlyTouch = async (touch: Record<string, unknown>) => {
+    mockDb({ touches: [touch], conversations: [], messages: [] })
+    const body = await (await call()).json()
+    return (body.timeline as Array<Record<string, unknown>>).filter((e) => e.kind === 'touch')
+  }
+
+  it('🔴 没有摘要的表格记录 → 带出员工写的原话，并标明时间是近似的', async () => {
+    const [t] = await onlyTouch(SHEET())
+    expect(t.sheetNote).toBe('no, I do not want to go to China')
+    expect(t.timeApproximate).toBe(true)
+  })
+
+  it('摘要是空串也算没有摘要', async () => {
+    const [t] = await onlyTouch(SHEET({ summary: '  ' }))
+    expect(t.sheetNote).toBe('no, I do not want to go to China')
+  })
+
+  it('已经有摘要的旧导入记录 → 不再带原话（抽屉显示摘要，同一句话不显示两遍），时间照样标近似', async () => {
+    const [t] = await onlyTouch(SHEET({ summary: '客人说不去中国了' }))
+    expect(t).not.toHaveProperty('sheetNote')
+    expect(t.timeApproximate).toBe(true)
+  })
+
+  it('不是表格来的记录（手工 / 外呼）→ 不带 sheetNote，也不带近似标记', async () => {
+    const [t] = await onlyTouch(SHEET({ source: 'me_manual', metadata: { outcome: 'spoke' } }))
+    expect(t).not.toHaveProperty('sheetNote')
+    expect(t).not.toHaveProperty('timeApproximate')
+  })
+
+  it('原话只有空白 → 不带（没有东西可显示）', async () => {
+    const [t] = await onlyTouch(SHEET({ raw: '   ' }))
+    expect(t).not.toHaveProperty('sheetNote')
+  })
+})
+
+describe('asFacts · 说话人', () => {
+  it('把员工 / 客人的说话人带出去，界面据此写「员工原话 / 客人原话」；认不出的不带，不乱猜', () => {
+    const out = asFacts([
+      { key: 'next_step', value: 'v', quote: 'q1', speaker: 'employee' },
+      { key: 'travel_window', value: 'v', quote: 'q2', speaker: 'customer' },
+      { key: 'budget', value: 'v', quote: 'q3', speaker: 'robot' },
+      { key: 'party_size', value: 'v', quote: 'q4' },
+      { key: 'bad', value: 1, quote: 'q5' },
+    ])
+    expect(out).toEqual([
+      { key: 'next_step', value: 'v', quote: 'q1', speaker: 'employee' },
+      { key: 'travel_window', value: 'v', quote: 'q2', speaker: 'customer' },
+      { key: 'budget', value: 'v', quote: 'q3' },
+      { key: 'party_size', value: 'v', quote: 'q4' },
+    ])
   })
 })

@@ -76,6 +76,31 @@ export function isUsableDomain(domain: string): boolean {
   return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(domain)
 }
 
+/**
+ * 私人邮箱服务商。用这些邮箱的人不能按域名标成同行 —— 一标就把所有用 Gmail 的客人都扔出名单。
+ * 不求全：漏一个的后果是按钮让人标了一个大众邮箱，所以下面 `tradeDomainFor` 只认这里没有的。
+ */
+export const PERSONAL_MAIL_DOMAINS: ReadonlySet<string> = new Set([
+  'gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.co.nz', 'hotmail.co.uk', 'outlook.com', 'outlook.co.nz',
+  'live.com', 'live.co.nz', 'live.com.au', 'msn.com', 'windowslive.com', 'yahoo.com', 'yahoo.co.nz', 'yahoo.com.au',
+  'ymail.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'protonmail.com', 'proton.me', 'mail.com', 'gmx.com',
+  'xtra.co.nz', 'slingshot.co.nz', 'orcon.net.nz', 'vodafone.co.nz', 'clear.net.nz', 'paradise.net.nz',
+  'actrix.co.nz', 'inspire.net.nz', 'kinect.co.nz', 'bigpond.com', 'bigpond.net.au', 'optusnet.com.au',
+  'qq.com', '163.com', '126.com', 'sina.com', 'foxmail.com',
+])
+
+/**
+ * 「这是同行」按钮要标的域名：邮箱的域名，前提是它像个公司域名。
+ * 私人邮箱或认不出的返回 null —— 那种人只能单独处理，不能整域名拉黑。
+ */
+export function tradeDomainFor(email: string | null | undefined): string | null {
+  if (!email || !email.includes('@')) return null
+  const domain = normaliseDomain(email)
+  if (!isUsableDomain(domain)) return null
+  if (PERSONAL_MAIL_DOMAINS.has(domain)) return null
+  return domain
+}
+
 export interface ParsedDomainList {
   domains: string[]
   /** 认不出来的原样退回，让填的人知道哪几条没生效。 */

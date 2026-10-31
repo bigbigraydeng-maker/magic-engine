@@ -25,6 +25,7 @@ import { CrmTabs } from '../_components/CrmTabs'
 import { type StageOption } from '../_components/ComposeNote'
 import { PersonDrawer } from '../_components/PersonDrawer'
 import { PrioritySectionHeader } from './_components/PrioritySection'
+import { RecentNotesPanel } from './_components/RecentNotesPanel'
 import { BookingTrackerPanel } from '../_components/bookings/BookingTrackerPanel'
 import { useOpenContactFromNudge } from '../_components/bookings/useOpenContactFromNudge'
 import { takeContactName } from '../_components/bookings/payments-return'
@@ -39,6 +40,7 @@ import { ContactTableHead } from './_components/ContactTableHead'
 import { ListFilters, TradeBatchPanel, type AssigneeView } from './_components/ListFilters'
 import { FlatPagination, SectionPagerRow } from './_components/ListPagination'
 import { isToday, toDrawerRow, sectionRange, type PrioritySectionData } from './_components/list-helpers'
+import type { RecentStaffNote } from '@/lib/crm/recent-staff-notes'
 
 /** 抽屉打开时正在等下一页数据 —— 拿到之后打开这一页的首个/末个。 */
 type PendingNav =
@@ -102,7 +104,13 @@ export default function CrmAllContactsPage() {
    * 以前它只是页面里的一个开关，关掉页面就回到平铺名单。
    */
   const [grouped, setGrouped] = useState(false)
+  /** 读完网址、定好进哪个视图之前不发列表请求 —— 否则默认视图一换，会白发一次请求再作废。 */
+  const [viewReady, setViewReady] = useState(false)
   const [sections, setSections] = useState<PrioritySectionData[]>([])
+  const [recentNotes, setRecentNotes] = useState<RecentStaffNote[]>([])
+  const [quickRow, setQuickRow] = useState<ContactRow | null>(null)
+  const [openingRecentId, setOpeningRecentId] = useState<string | null>(null)
+  const recentOpenSeqRef = useRef(0)
   /** 展开哪些段。null = 还没动过，用服务端默认（前两段展开）。 */
   const [openSections, setOpenSections] = useState<SectionKey[] | null>(null)
   /**
@@ -144,8 +152,11 @@ export default function CrmAllContactsPage() {
    * 哪一批跑到都能读到当下最新的值。
    */
   const fetchInFlightRef = useRef(false)
+  const latestListRequestRef = useRef(0)
+  const lastDebouncedQueryRef = useRef('')
 
   const loadList = useCallback(async () => {
+    const requestId = ++latestListRequestRef.current
     setError(null)
     fetchInFlightRef.current = true
     try {
@@ -178,7 +189,7 @@ export default function CrmAllContactsPage() {
 
       const [res, stageRes] = await Promise.all([
         fetch(`/api/clients/${clientId}/crm/contacts?${params.toString()}`),
-        fetch(`/api/clients/${clientId}/pipeline-stages`),
+        grouped ? Promise.resolve(null) : fetch(`/api/clients/${clientId}/pipeline-stages`),
       ])
       const json = (await res.json()) as {
         total?: number
@@ -186,14 +197,17 @@ export default function CrmAllContactsPage() {
         items?: ContactRow[]
         view?: string
         sections?: PrioritySectionData[]
+        recentNotes?: RecentStaffNote[]
+        stages?: StageOption[]
         focus?: { found: boolean; section?: SectionKey; page?: number }
         error?: string
         viewerEmail?: string | null
       }
+      if (requestId !== latestListRequestRef.current) return
       if (!res.ok) {
         // 400 是搜索词非法（逗号/括号）—— 只提示搜索框，别把已有名单清空。
         if (res.status === 400) {
-          setQError('搜索里不能有逗号或括号')
+          setQError('搜索里不能有逗号或非电话号码的括号')
           return
         }
         setError(json.error ?? '加载失败')
@@ -204,6 +218,7 @@ export default function CrmAllContactsPage() {
       setViewerEmail(json.viewerEmail ?? null)
       if (json.view === 'priority') {
         const secs = json.sections ?? []
+        setRecentNotes(json.recentNotes ?? [])
         setSections(secs)
         setColumns(json.columns ?? [])
         setTotal(secs.reduce((n, s) => n + s.total, 0))
@@ -218,12 +233,19 @@ export default function CrmAllContactsPage() {
           })
         }
       } else {
+        setRecentNotes([])
         setRows(json.items ?? [])
         setColumns(json.columns ?? [])
         setTotal(json.total ?? 0)
       }
-      if (stageRes.ok) {
-        const s = (await stageRes.json()) as { stages?: StageOption[] }
+      // 旧版服务端没有返回 stages 时，回退到独立接口，兼容滚动部署。
+      const resolvedStageRes = json.view === 'priority' && Array.isArray(json.stages)
+        ? null
+        : stageRes ?? await fetch(`/api/clients/${clientId}/pipeline-stages`)
+      if (requestId !== latestListRequestRef.current) return
+      if (json.view === 'priority' && Array.isArray(json.stages) || resolvedStageRes?.ok) {
+        const s = resolvedStageRes ? (await resolvedStageRes.json()) as { stages?: StageOption[] } : { stages: json.stages }
+        if (requestId !== latestListRequestRef.current) return
         // marketingAction 之前被这里的映射漏掉了——NAL"标已成交"要靠它判断该弹
         // 金额面板还是走普通改状态，没有它这条判断永远是 false（2026-09-15 修）。
         setStages(
@@ -231,22 +253,32 @@ export default function CrmAllContactsPage() {
         )
       }
     } catch {
-      setError('加载失败，检查网络后再试。')
+      if (requestId === latestListRequestRef.current) setError('加载失败，检查网络后再试。')
     } finally {
-      setLoading(false)
-      setSectionsLoading(false)
-      fetchInFlightRef.current = false
-      markCrmListReady()
+      if (requestId === latestListRequestRef.current) {
+        setLoading(false)
+        setSectionsLoading(false)
+        fetchInFlightRef.current = false
+        markCrmListReady()
+      }
     }
   }, [clientId, page, perPage, flatPerPage, qDebounced, stageFilter, kindFilter, assigneeFilter, grouped, openSections, sectionPages])
 
   useEffect(() => {
+    if (!viewReady) return
     void loadList()
-  }, [loadList])
+  }, [loadList, viewReady])
 
   // 搜索词防抖：300ms 内还在敲就不发请求。
   useEffect(() => {
-    const t = window.setTimeout(() => setQDebounced(q), 300)
+    const t = window.setTimeout(() => {
+      if (lastDebouncedQueryRef.current !== q) {
+        lastDebouncedQueryRef.current = q
+        setOpenSections(q.trim() ? ['hot', 'cold'] : null)
+        setSectionPages({})
+      }
+      setQDebounced(q)
+    }, 300)
     return () => window.clearTimeout(t)
   }, [q])
 
@@ -283,8 +315,18 @@ export default function CrmAllContactsPage() {
    * React 水合不一致（会报错 + 闪一下平铺名单）；用 `useSearchParams` 则要给整页套
    * Suspense 边界，为一个可选参数不值当（子牙 / 魏征复审 P2-2）。
    */
+  /**
+   * 默认进「今天先联系」（PM 2026-10-28：第一眼进来太懵 —— 原来默认是 1000 多人的平铺大表，
+   * 真正回答「先联系谁」的智能视图藏在按钮后面）。
+   *
+   * 只对「裸进来」的人生效：带 `?contact=`（今日待办 / 付款总览 / 摘要邮件的直达链接）、
+   * `?assignee=`（我的待跟进）或 `?view=all` 的，仍然进平铺名单，老链接的行为不变。
+   */
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('view') === 'smart') setGrouped(true)
+    const sp = new URLSearchParams(window.location.search)
+    const wantsFlat = sp.get('view') === 'all' || sp.has('contact') || sp.has('assignee')
+    setGrouped(sp.get('view') === 'smart' || !wantsFlat)
+    setViewReady(true)
   }, [])
 
   /**
@@ -339,6 +381,9 @@ export default function CrmAllContactsPage() {
   }
 
   function openDrawer(contactId: string) {
+    recentOpenSeqRef.current += 1
+    setOpeningRecentId(null)
+    setQuickRow(null)
     setDrawerContactId(contactId)
     if (grouped) {
       setDrawerSectionKey(findRowInSections(contactId)?.sectionKey ?? null)
@@ -348,7 +393,10 @@ export default function CrmAllContactsPage() {
   }
 
   function closeDrawer() {
+    recentOpenSeqRef.current += 1
+    setOpeningRecentId(null)
     setDrawerContactId(null)
+    setQuickRow(null)
     setDrawerSectionKey(null)
     setPendingNav(null)
   }
@@ -356,8 +404,9 @@ export default function CrmAllContactsPage() {
   // 当前抽屉里这个人的完整行数据——从 rows（平铺）或 sections（分段）里找，
   // 两边共用同一份 rows（loadList 里两条路径都会 setRows）。
   const drawerContactRow = useMemo(
-    () => (drawerContactId ? (rows.find((r) => r.contactId === drawerContactId) ?? null) : null),
-    [drawerContactId, rows],
+    () => (drawerContactId ? (rows.find((r) => r.contactId === drawerContactId) ??
+      (quickRow?.contactId === drawerContactId ? quickRow : null)) : null),
+    [drawerContactId, rows, quickRow],
   )
 
   // 数据重新加载完之后，抽屉打开的这个人如果已经不在名单里了（被筛选/搜索掉出，
@@ -371,12 +420,42 @@ export default function CrmAllContactsPage() {
   // 接管，不该被这条误判。
   useEffect(() => {
     if (!drawerContactId || loading || sectionsLoading || pendingNav) return
-    if (!rows.some((r) => r.contactId === drawerContactId)) {
+    if (!rows.some((r) => r.contactId === drawerContactId) && quickRow?.contactId !== drawerContactId) {
       setToast('他不在这份名单里了 —— 用上面的搜索框找找看')
       window.setTimeout(() => setToast(null), 4000)
       closeDrawer()
     }
-  }, [drawerContactId, rows, loading, sectionsLoading, pendingNav])
+  }, [drawerContactId, rows, quickRow, loading, sectionsLoading, pendingNav])
+
+  // Open a recent note even when its contact is on another queue page.
+  const openRecentNote = async (note: RecentStaffNote) => {
+    const onPage = rows.find((row) => row.contactId === note.contactId)
+    if (onPage) { openDrawer(note.contactId); return }
+    const requestSeq = ++recentOpenSeqRef.current
+    setOpeningRecentId(note.contactId)
+    try {
+      const found = await readContactById(note.contactId)
+      if (requestSeq !== recentOpenSeqRef.current) return
+      setQuickRow(found)
+      setDrawerSectionKey(null)
+      setDrawerContactId(found.contactId)
+    } catch {
+      if (requestSeq !== recentOpenSeqRef.current) return
+      setToast('暂时打不开这位客人，请用上方搜索框查找')
+      window.setTimeout(() => setToast(null), 4000)
+    } finally {
+      if (requestSeq === recentOpenSeqRef.current) setOpeningRecentId(null)
+    }
+  }
+
+  async function readContactById(contactId: string): Promise<ContactRow> {
+    const res = await fetch(`/api/clients/${clientId}/crm/contacts?ids=${encodeURIComponent(contactId)}`)
+    if (!res.ok) throw new Error('read failed')
+    const data = await res.json() as { items?: ContactRow[] }
+    const found = data.items?.find((row) => row.contactId === contactId)
+    if (!found) throw new Error('missing contact')
+    return found
+  }
 
   // 「付款要催」名单里点一个人：在当前这页就直接开抽屉，不在就先按名字搜，搜到再开。
   const openContactFromNudge = useOpenContactFromNudge({
@@ -403,6 +482,7 @@ export default function CrmAllContactsPage() {
   /** 组装 nextNavStep 的输入——分段模式用 sections 里那一段，平铺模式用 sorted 那份已排序的行。 */
   function buildNavInput(direction: 'prev' | 'next'): NavInput | null {
     if (!drawerContactId) return null
+    if (quickRow?.contactId === drawerContactId && !rows.some((row) => row.contactId === drawerContactId)) return null
     if (grouped && drawerSectionKey) {
       const secIdx = sections.findIndex((s) => s.key === drawerSectionKey)
       const sec = sections[secIdx]
@@ -516,6 +596,12 @@ export default function CrmAllContactsPage() {
   const afterWrite = (msg: string, reload = true) => {
     setToast(msg)
     if (reload) void loadList()
+    if (quickRow) {
+      const id = quickRow.contactId
+      void readContactById(id).then((fresh) => setQuickRow((current) => current?.contactId === id ? fresh : current)).catch(() => {
+        // The list reload still completes; the contact is read again next time it opens.
+      })
+    }
     window.setTimeout(() => setToast(null), 2400)
   }
 
@@ -570,7 +656,8 @@ export default function CrmAllContactsPage() {
     }
   }
 
-  const colCount = 6 + columns.length
+  // 智能名单 7 列（含当前状态）；平铺名单是 6 列 + 自定义列。空行的 colSpan 必须同步。
+  const colCount = grouped ? 7 : 6 + columns.length
   const sortArrow = (key: 'firstSeenAt' | 'lastTouchAt') =>
     sortKey === key ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
 
@@ -605,11 +692,13 @@ export default function CrmAllContactsPage() {
           ← 返回客户
         </Link>
         <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-black text-me-charcoal">全部客人</h1>
+          <h1 className="text-2xl font-black text-me-charcoal">{grouped ? '今天先联系' : '全部客人'}</h1>
           <CrmTabs clientId={clientId} active="all" />
         </div>
         <p className="mt-1 text-sm text-me-charcoal/45">
-          翻看所有人、查某个客人的来往记录。想知道今天该打谁，点上面「今天要联系」。
+          {grouped
+            ? '先处理最上面一段：客人说了话、等你回的，在最前面。'
+            : '翻看所有人、查某个客人的来往记录。想知道今天该先联系谁，点右边的「回到今天先联系」按钮。'}
         </p>
       </div>
 
@@ -661,8 +750,7 @@ export default function CrmAllContactsPage() {
                 // 让网址跟着视图走（不重新加载页面），这样刷新 / 存书签都还在同一个视图。
                 if (typeof window !== 'undefined') {
                   const url = new URL(window.location.href)
-                  if (next) url.searchParams.set('view', 'smart')
-                  else url.searchParams.delete('view')
+                  url.searchParams.set('view', next ? 'smart' : 'all')
                   window.history.replaceState(null, '', url.toString())
                 }
                 return next
@@ -676,6 +764,8 @@ export default function CrmAllContactsPage() {
             assigneeFilter={assigneeFilter}
             onAssigneeFilterChange={setAssigneeFilter}
           />
+
+          {grouped && <RecentNotesPanel notes={recentNotes} openingContactId={openingRecentId} onOpen={(note) => void openRecentNote(note)} />}
 
           {!grouped && kindFilter === 'trade' && rows.length > 0 && (
             <TradeBatchPanel clientId={clientId} rows={rows} total={total} onLogged={(msg) => afterWrite(msg)} />

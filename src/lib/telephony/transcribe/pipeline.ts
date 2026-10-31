@@ -11,6 +11,9 @@ import { verifyFacts, ANALYSIS_SCHEMA_VERSION, type VerifiedAnalysis } from './a
 import { verifySummary, fallbackSummaryFromFacts } from './summary-gate'
 import { SECRET_REF_PATTERN } from '@/lib/telephony/twilio/ingest'
 import { TranscriptPendingError, type Analyzer, type Transcriber } from './vendors'
+import { callStanceFromFacts } from './call-stance'
+import type { CallStance } from '@/lib/crm/segments'
+import type { MetadataMergeOutcome } from '@/lib/crm/touchpoint-metadata'
 
 export const MAX_STEP_ATTEMPTS = 3
 /** 每个连接每天最多转写这么多通（花钱的闸；打开开关前的最低限度保护）。 */
@@ -69,6 +72,11 @@ export interface AnalysisStore {
   saveAnalysis(row: { callId: string; clientId: string; model: string; analysis: VerifiedAnalysis }): Promise<string>
   /** 数据库里原子合并，把「有一份待复核分析」标到触点元数据上（不写正文）。 */
   markTouchpoint(touchpointId: string, clientId: string, analysisId: string): Promise<void>
+  /**
+   * 把客人在电话里的表态（现在还没准备好 / 不感兴趣）记到触点上，供 CRM 分段别把他当热线索。
+   * 可选：没接的实现就不写（CRM 照旧按原规则走）。
+   */
+  markCallStance?: (touchpointId: string, clientId: string, analysisId: string, stance: CallStance) => Promise<MetadataMergeOutcome>
   /** 这个连接从某时刻起已经转写了多少通（日上限用）。 */
   countTranscribedSince(connectionId: string, sinceIso: string): Promise<number>
 }
@@ -167,6 +175,8 @@ export async function runCallAnalysis(
   // ③ 分析（原话核验）
   if (call.analysisAttempts >= MAX_STEP_ATTEMPTS) return { status: 'analysis_failed', detail: 'attempts_exhausted' }
   let analysisId = await store.getAnalysisId(call.id)
+  // 只有这一轮新做出来的分析才拿来记表态：已存在的那份可能已被人复核 / 驳回，这里看不到它的事实。
+  let freshFacts: VerifiedAnalysis['facts'] | null = null
   if (!analysisId) {
     try {
       const out = await deps.analyze(transcript)
@@ -190,6 +200,7 @@ export async function runCallAnalysis(
         : { ...verified, summary: fallbackSummaryFromFacts(verified.facts) }
 
       analysisId = await store.saveAnalysis({ callId: call.id, clientId: call.clientId, model: out.model, analysis: gated })
+      freshFacts = gated.facts
       const truncated = transcript.length > 60_000 ? ' truncated=1' : ''
       // 被闸掉的事实和被换掉的摘要都留痕：否则只看到一个数字，分不清是闸太严还是模型在编。
       const droppedKeys = out.raw.facts
@@ -219,11 +230,36 @@ export async function runCallAnalysis(
 
   // 触点标记失败不影响「分析已完成」：只记回执，不把已完成的分析改成失败、不重跑花钱。
   if (call.touchpointId) {
+    let marked = false
     try {
       await store.markTouchpoint(call.touchpointId, call.clientId, analysisId)
+      marked = true
     } catch {
       await store.patchCall(call.id, {}, { stage: 'touchpoint_mark', status: 'failed', detail: 'mark_failed' })
     }
+    // 表态只写在已经标上这份分析的触点上（写入前提就是 call_analysis_id 对得上）。
+    if (marked) await recordCallStance(store, call, call.touchpointId, analysisId, freshFacts)
   }
   return { status: 'done' }
+}
+
+/**
+ * 客人在电话里说了「现在还没准备好 / 不感兴趣」→ 记到触点上（CRM 据此不把他当热线索）。
+ * 写不上只记回执，不影响分析本身；回执只写结果码，不写原话。
+ */
+async function recordCallStance(
+  store: AnalysisStore,
+  call: AnalysisCall,
+  touchpointId: string,
+  analysisId: string,
+  facts: VerifiedAnalysis['facts'] | null,
+): Promise<void> {
+  const stance = facts ? callStanceFromFacts(facts) : null
+  if (!stance || !store.markCallStance) return
+  try {
+    const outcome = await store.markCallStance(touchpointId, call.clientId, analysisId, stance)
+    await store.patchCall(call.id, {}, { stage: 'call_stance', status: outcome, detail: stance })
+  } catch {
+    await store.patchCall(call.id, {}, { stage: 'call_stance', status: 'failed', detail: stance })
+  }
 }

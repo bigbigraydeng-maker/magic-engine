@@ -2,6 +2,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { ANALYSIS_SCHEMA_VERSION } from './analysis-schema'
+import { writeCallStance } from './call-stance'
 import type { AnalysisCall, AnalysisConnection, AnalysisStore } from './pipeline'
 
 const BUCKET = 'telephony-recordings'
@@ -135,6 +136,10 @@ export const supabaseAnalysisStore: AnalysisStore = {
   async markTouchpoint(touchpointId, clientId, analysisId) {
     const { error } = await supabaseAdmin.rpc('telephony_mark_touchpoint', { p_touchpoint_id: touchpointId, p_client_id: clientId, p_analysis_id: analysisId })
     if (error) throw new Error('标记触点失败')
+  },
+
+  markCallStance(touchpointId, clientId, analysisId, stance) {
+    return writeCallStance({ touchpointId, clientId, analysisId, stance })
   },
 
   async countTranscribedSince(connectionId, sinceIso) {

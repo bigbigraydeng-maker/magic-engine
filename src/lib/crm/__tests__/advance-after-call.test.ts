@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({ from: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: mocks.from } }))
 
 import { advanceNewLeadsAfterFollowUp } from '../advance-after-call'
-import { CALL_REACHED_ACTOR, STAGE_INFER_ACTOR } from '../actors'
+import { CALL_REACHED_ACTOR, ENQUIRY_REVIVE_ACTOR, STAGE_INFER_ACTOR } from '../actors'
 
 const NOW = new Date('2026-10-28T00:00:00Z')
 const CLIENT = 'client-1'
@@ -107,6 +107,13 @@ beforeEach(() => {
 })
 
 describe('advanceNewLeadsAfterFollowUp', () => {
+  it('also moves a contact the enquiry screen revived into new once a call is reached', async () => {
+    const db = stubDb({
+      events: [{ contact_id: 'c1', changed_by: ENQUIRY_REVIVE_ACTOR, to_stage: 'new', created_at: STAGE_AT }],
+    })
+    expect(await advanceNewLeadsAfterFollowUp(NOW, db)).toEqual({ candidates: 1, advanced: 1, failed: 0 })
+  })
+
   it('moves an AI-placed new lead with a reached outbound call to contacted, with an audit row', async () => {
     const db = stubDb()
     const r = await advanceNewLeadsAfterFollowUp(NOW, db)
@@ -140,6 +147,17 @@ describe('advanceNewLeadsAfterFollowUp', () => {
         { contact_id: 'c1', changed_by: STAGE_INFER_ACTOR, to_stage: 'new', created_at: STAGE_AT },
       ],
     })
+    expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(0)
+  })
+
+  it('also advances when the customer picked up but hung up almost at once (answered, not reached)', async () => {
+    const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'phone', metadata: { reached: false, answered: true, talk_seconds: 0 } }] })
+    expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(1)
+    expect(audits[0].note).toContain('很快挂断')
+  })
+
+  it('does nothing for a call that just rang out (not answered, not reached)', async () => {
+    const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'phone', metadata: { reached: false, answered: false } }] })
     expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(0)
   })
 

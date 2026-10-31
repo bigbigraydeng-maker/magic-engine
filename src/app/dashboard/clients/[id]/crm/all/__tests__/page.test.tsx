@@ -13,7 +13,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import CrmAllContactsPage from '../page'
 
 vi.mock('next/navigation', () => ({
@@ -81,10 +81,12 @@ const setUrl = (search: string) => {
 beforeEach(() => {
   // scrollIntoView 在 jsdom 里不存在 —— 不补的话展开后直接抛。
   Element.prototype.scrollIntoView = vi.fn()
+  // 这页默认进「今天先联系」；下面绝大多数用例测的是平铺名单，所以默认钉在 ?view=all。
+  setUrl('?view=all')
 })
 afterEach(() => {
   vi.unstubAllGlobals()
-  setUrl('')
+  setUrl('?view=all')
 })
 
 describe('?contact=<id> 直达链接', () => {
@@ -102,7 +104,7 @@ describe('?contact=<id> 直达链接', () => {
 
   it('没带参数就谁都不展开 —— 别打扰只想翻表的人', async () => {
     stubFetch([contact('c1', 'Sue Masson')])
-    setUrl('')
+    setUrl('?view=all')
     render(<CrmAllContactsPage />)
 
     await waitFor(() => expect(screen.getByText('Sue Masson')).toBeTruthy())
@@ -166,7 +168,7 @@ describe('平铺名单每页 50 人', () => {
         return { ok: true, json: async () => ({ stages: [] }) }
       }),
     )
-    setUrl('')
+    setUrl('?view=all')
     render(<CrmAllContactsPage />)
     await waitFor(() => expect(screen.getByText('Guest 0')).toBeTruthy())
     expect(urls.some((u) => u.includes('perPage=50'))).toBe(true)
@@ -176,6 +178,52 @@ describe('平铺名单每页 50 人', () => {
 })
 
 describe('搜索框', () => {
+  it('较早的慢请求不能覆盖较新的搜索结果', async () => {
+    let releaseOld: (() => void) | undefined
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/crm/contacts?')) {
+        const q = new URL(url, 'https://example.test').searchParams.get('q')
+        if (q === 'old') await new Promise<void>((resolve) => { releaseOld = resolve })
+        const name = q === 'old' ? 'Old Result' : q === 'new' ? 'New Result' : 'Initial Result'
+        return { ok: true, json: async () => ({ items: [contact('c1', name)], total: 1, columns: [] }) }
+      }
+      return { ok: true, json: async () => ({ stages: [] }) }
+    }))
+    setUrl('?view=all')
+    render(<CrmAllContactsPage />)
+    const input = await screen.findByPlaceholderText(/客户打回来了/)
+    await screen.findByText('Initial Result')
+    fireEvent.change(input, { target: { value: 'old' } })
+    await waitFor(() => expect(releaseOld).toBeDefined())
+    fireEvent.change(input, { target: { value: 'new' } })
+    await screen.findByText('New Result')
+    await act(async () => { releaseOld!(); await Promise.resolve() })
+    expect(screen.getByText('New Result')).toBeTruthy()
+    expect(screen.queryByText('Old Result')).toBeNull()
+  })
+
+  it('搜索时打开原本收起的分组，让匹配的人可见', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/crm/contacts?')) {
+        urls.push(url)
+        const params = new URL(url, 'https://example.test').searchParams
+        const open = (params.get('open') ?? '').includes('cold')
+        return { ok: true, json: async () => ({ view: 'priority', columns: [], stages: [], sections: [
+          { key: 'hot', title: '今天要联系', hint: '', total: 0, open: true, items: [] },
+          { key: 'cold', title: '先放着', hint: '', total: 1, open, items: open ? [contact('c1', 'Cold Match')] : null },
+        ] }) }
+      }
+      return { ok: true, json: async () => ({ stages: [] }) }
+    }))
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    const input = await screen.findByPlaceholderText(/客户打回来了/)
+    fireEvent.change(input, { target: { value: 'Cold' } })
+    expect(await screen.findByText('Cold Match')).toBeTruthy()
+    expect(urls.some((url) => url.includes('q=Cold') && url.includes('open=hot%2Ccold'))).toBe(true)
+  })
+
   it('敲字触发重新加载时，输入框不被卸载（焦点不丢，不像整页刷新）', async () => {
     let release: (() => void) | null = null
     vi.stubGlobal(
@@ -190,7 +238,7 @@ describe('搜索框', () => {
         return { ok: true, json: async () => ({ stages: [] }) }
       }),
     )
-    setUrl('')
+    setUrl('?view=all')
     render(<CrmAllContactsPage />)
     const input = (await screen.findByPlaceholderText(/客户打回来了/)) as HTMLInputElement
     input.focus()
@@ -261,7 +309,7 @@ describe('最后一列：平铺看阶段，Magic Engine 智能看「该做什么
     ])
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
     expect(screen.getByText('该做什么')).toBeTruthy()
@@ -361,7 +409,7 @@ describe('按「先联系谁」分段视图', () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(calls.some((u) => u.includes('view=priority'))).toBe(true))
   })
@@ -370,7 +418,7 @@ describe('按「先联系谁」分段视图', () => {
     stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
     expect(screen.getByText('先放着')).toBeTruthy()
@@ -383,7 +431,7 @@ describe('按「先联系谁」分段视图', () => {
     stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(screen.getByText('Sue Masson')).toBeTruthy())
     // cold 是 items=null：没有行，也不该冒出「这一段现在没有人」
@@ -394,7 +442,7 @@ describe('按「先联系谁」分段视图', () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
     await waitFor(() => expect(screen.getByText('先放着')).toBeTruthy())
     fireEvent.click(screen.getByText('先放着'))
 
@@ -410,7 +458,7 @@ describe('按「先联系谁」分段视图', () => {
     ])
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(screen.getByText('这一段现在没有人。')).toBeTruthy())
   })
@@ -420,7 +468,7 @@ describe('按「先联系谁」分段视图', () => {
     setUrl('?contact=z9')
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
     await waitFor(() =>
       expect(calls.some((u) => u.includes('open=') && u.includes('cold'))).toBe(true),
@@ -431,11 +479,11 @@ describe('按「先联系谁」分段视图', () => {
     const calls = stubPriority(SECTIONS())
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
     await waitFor(() => expect(screen.getByText('今天要联系')).toBeTruthy())
     const before = calls.length
 
-    fireEvent.click(screen.getByText(/回到平铺名单/))
+    fireEvent.click(screen.getByText(/看全部客人/))
 
     await waitFor(() => expect(calls.length).toBeGreaterThan(before))
     expect(calls[calls.length - 1]).not.toContain('view=priority')
@@ -480,7 +528,7 @@ describe('分段视图 · 复审补测', () => {
     return calls
   }
 
-  const goGrouped = async () => fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+  const goGrouped = async () => fireEvent.click(await screen.findByText(/回到「今天先联系」/))
 
   /** M6：每段的人一个都不能少画。原来只比「画出来的 vs items 条数」，两边一起少就发现不了。 */
   it('M6 · 这一段下发了几个人，就必须画出几个人', async () => {
@@ -674,8 +722,10 @@ describe('分段视图 · 复审补测', () => {
     render(<CrmAllContactsPage />)
     await goGrouped()
     await waitFor(() => expect(screen.getByText('Aaa One')).toBeTruthy())
-    const th = screen.getByText(/最近联系/).closest('th')
-    expect(th?.className).not.toContain('cursor-pointer')
+    // 分段模式的表头一个都不能排序（含 2026-10-30 新加的 进线 / 最近联系 列）
+    expect(screen.getByText('该做什么').closest('th')?.className).not.toContain('cursor-pointer')
+    expect(screen.getByText('最近联系').closest('th')?.className).not.toContain('cursor-pointer')
+    expect(screen.getByText('进线').closest('th')?.className).not.toContain('cursor-pointer')
     // 而且要有一句话说明段内按什么排，别让人以为能自己排
     expect(screen.getByText(/点表头不改顺序/)).toBeTruthy()
   })
@@ -744,8 +794,7 @@ describe('阶段变更那一行 · 谁判的 + 凭什么', () => {
     setUrl('?contact=c1')
     render(<CrmAllContactsPage />)
 
-    // 往来原文默认折叠（48af83a88，AI 概况卡那次改的）—— 阶段变更行在折叠段里，先点开
-    fireEvent.click(await screen.findByText(/看完整往来原文/))
+    // 往来只有一条：全部直接摆出来（超过 5 条才折叠，且那时的按钮写「看更早的往来」）
     await waitFor(() => expect(screen.getByText(/系统读往来记录判的/)).toBeTruthy())
     // 🔴 这一条是重点：`ai:conversation-read` 一个字都不许出现在屏幕上
     expect(screen.queryByText(/ai:conversation-read/)).toBeNull()
@@ -757,7 +806,6 @@ describe('阶段变更那一行 · 谁判的 + 凭什么', () => {
     setUrl('?contact=c1')
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/看完整往来原文/))
     await waitFor(() => expect(screen.getByText(/客户对旅游信息感兴趣/)).toBeTruthy())
     // 客人自己说的那句话是最硬的凭据，必须留着
     expect(document.body.textContent).toContain('Hello! I filled out your form')
@@ -770,7 +818,6 @@ describe('阶段变更那一行 · 谁判的 + 凭什么', () => {
     setUrl('?contact=c1')
     render(<CrmAllContactsPage />)
 
-    fireEvent.click(await screen.findByText(/看完整往来原文/))
     await waitFor(() => expect(screen.getByText(/info 改的/)).toBeTruthy())
     // 生产上真人改的那 12 条 note 全是空的 —— 人不解释自己，界面也别编一个理由出来
     expect(document.body.textContent).not.toContain('系统读往来记录判的')
@@ -970,7 +1017,7 @@ describe('B3 · 终端客户/同行筛选 + 批量发邮件', () => {
     await screen.findByText('Retail Rita')
     expect(screen.getByText('🤝 同行')).toBeTruthy()
 
-    fireEvent.click(screen.getByText(/Magic Engine 智能/))
+    fireEvent.click(screen.getByText(/回到「今天先联系」/))
 
     await waitFor(() => expect(screen.queryByText('🤝 同行')).toBeNull())
   })
@@ -990,7 +1037,7 @@ describe('今天要联系 · 每天 20 个的分界线', () => {
   it('25 个人：全部画出来，线画在第 20 个之后，写明排队 5 个', async () => {
     stubPriority(sections(25))
     render(<CrmAllContactsPage />)
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
     await waitFor(() => expect(screen.getByText('Person 25')).toBeTruthy())
 
     const line = screen.getByTestId('quota-line')
@@ -1006,8 +1053,63 @@ describe('今天要联系 · 每天 20 个的分界线', () => {
   it('刚好 20 个或更少：不画线', async () => {
     stubPriority(sections(20))
     render(<CrmAllContactsPage />)
-    fireEvent.click(await screen.findByText(/Magic Engine 智能/))
+    fireEvent.click(await screen.findByText(/回到「今天先联系」/))
     await waitFor(() => expect(screen.getByText('Person 20')).toBeTruthy())
     expect(screen.queryByTestId('quota-line')).toBeNull()
+  })
+})
+
+describe('默认进「今天先联系」（PM 2026-10-28）', () => {
+  const calledUrls = () =>
+    (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]))
+
+  it('复用名单返回的阶段，展示筛选且不再请求阶段接口', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/crm/contacts?')) return { ok: true, json: async () => ({
+        view: 'priority', sections: [], columns: [],
+        stages: [{ stageKey: 'quoted', label: '已报价', marketingAction: 'nurture' }],
+      }) }
+      return { ok: true, json: async () => ({ stages: [] }) }
+    }))
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    expect(await screen.findByText('已报价')).toBeTruthy()
+    expect(calledUrls().some((u) => u.includes('/pipeline-stages'))).toBe(false)
+  })
+
+  it('旧版名单接口未返回阶段时回退到阶段接口', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/crm/contacts?')) return { ok: true, json: async () => ({ view: 'priority', sections: [], columns: [] }) }
+      return { ok: true, json: async () => ({ stages: [{ stageKey: 'quoted', label: '已报价', marketingAction: 'nurture' }] }) }
+    }))
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    expect(await screen.findByText('已报价')).toBeTruthy()
+    expect(calledUrls().some((u) => u.includes('/pipeline-stages'))).toBe(true)
+  })
+
+  it('裸进来 → 第一次请求就是分段（priority）视图，不先白发一次平铺请求', async () => {
+    stubFetch([contact('c1', 'Sue Masson')])
+    setUrl('')
+    render(<CrmAllContactsPage />)
+    await waitFor(() => expect(calledUrls().some((u) => u.includes('view=priority'))).toBe(true))
+    expect(calledUrls().some((u) => u.includes('/crm/contacts') && !u.includes('view=priority') && !u.includes('stage'))).toBe(false)
+    expect(await screen.findByText(/看全部客人/)).toBeTruthy()
+  })
+
+  it('带 ?contact= 的直达链接 → 仍进平铺名单（老链接行为不变）', async () => {
+    stubFetch([contact('c1', 'Sue Masson')])
+    setUrl('?contact=c1')
+    render(<CrmAllContactsPage />)
+    await waitFor(() => expect(screen.getByText('往来记录')).toBeTruthy())
+    expect(calledUrls().some((u) => u.includes('view=priority'))).toBe(false)
+  })
+
+  it('带 ?assignee=me → 仍进平铺名单', async () => {
+    stubFetch([contact('c1', 'Sue Masson')])
+    setUrl('?assignee=me')
+    render(<CrmAllContactsPage />)
+    expect(await screen.findByText(/回到「今天先联系」/)).toBeTruthy()
+    expect(calledUrls().some((u) => u.includes('view=priority'))).toBe(false)
   })
 })

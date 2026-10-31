@@ -13,6 +13,8 @@ import {
   TOURISM_PLAYBOOK,
   type ContactLike, type TouchpointLike, type IndustryPlaybook,
 } from '../segments'
+import { listOf } from '../next-action'
+import { buildTouchpointLike } from '../contact-model'
 
 const NOW = new Date('2026-07-26T12:00:00Z')
 
@@ -1231,5 +1233,166 @@ describe('回头客（再次留资）', () => {
       contact({ id: 'ret', displayName: 'Ret', touchpoints: RETURNING }),
     ], NOW2)
     expect(list.map((x) => x.id)[0]).toBe('ret')
+  })
+})
+
+describe('刚通完电话、还没记下一步的人留在今天要联系（PM 2026-10-29 Mercurio）', () => {
+  const NOW2 = new Date('2026-10-29T00:00:00Z')
+  const wa = (at: string) => ({ channel: 'whatsapp', direction: 'inbound' as const, occurredAt: at })
+  const spoke = (at: string, extra: Record<string, unknown> = {}) => call(at, 'spoke', extra)
+
+  it('我们打通聊了 4 分钟、之后没人跟 → 今天要联系（hot），理由写清「还没记下一步」', () => {
+    const c = contact({ touchpoints: [wa('2026-10-22T21:00:00Z'), spoke('2026-10-28T22:30:00Z')] })
+    const r = segmentContact(c, NOW2)
+    expect(r.segment).toBe('callback_due')
+    expect(r.temperature).toBe('hot')
+    expect(r.reason).toContain('还没记下一步')
+    expect(r.afterCall).toBe(true)
+    // 第一次咨询离通话不到 14 天 —— 不说「老客人」
+    expect(r.reason).not.toContain('老客人')
+  })
+
+  it('22 天前留的资料、今天才聊上 → 理由写「老客人重新聊热」（PM 2026-10-29 Chris Anthony）', () => {
+    const c = contact({ touchpoints: [wa('2026-10-06T14:00:00Z'), spoke('2026-10-28T22:30:00Z')] })
+    const r = segmentContact(c, NOW2)
+    expect(r.segment).toBe('callback_due')
+    expect(r.reason).toContain('老客人（22 天前就咨询过）重新聊热了')
+  })
+
+  it('普通到点回电不是「刚聊过」', () => {
+    const c = contact({ touchpoints: [wa('2026-10-22T21:00:00Z'), spoke('2026-10-25T22:30:00Z', { callbackAt: '2026-10-28T20:00:00Z' })] })
+    const r = segmentContact(c, NOW2)
+    expect(r.segment).toBe('callback_due')
+    expect(r.afterCall).toBeUndefined()
+  })
+
+  it('通话之后有人发了邮件 / 写了备注 / 再拨 → 有人跟了，不再提醒', () => {
+    const mail = { channel: 'email', direction: 'outbound' as const, occurredAt: '2026-10-28T23:30:00Z', source: 'microsoft_mail' }
+    const c = contact({ touchpoints: [wa('2026-10-22T21:00:00Z'), spoke('2026-10-28T22:30:00Z'), mail] })
+    expect(segmentContact(c, NOW2).segment).toBe('stale_conversation')
+  })
+
+  it('已经约了未来的回电 → 有下一步，不用提醒', () => {
+    const c = contact({ touchpoints: [wa('2026-10-22T21:00:00Z'), spoke('2026-10-28T22:30:00Z', { callbackAt: '2026-11-02T00:00:00Z' })] })
+    expect(segmentContact(c, NOW2).segment).toBe('stale_conversation')
+  })
+
+  it('超过 3 天仍没人记下一步 → 不再挂在今天（回到原来的「聊过一轮就断了」）', () => {
+    const c = contact({ touchpoints: [wa('2026-10-10T21:00:00Z'), spoke('2026-10-24T22:30:00Z')] })
+    expect(segmentContact(c, NOW2).segment).toBe('stale_conversation')
+  })
+
+  it('AI 外呼（automated）不算人打的电话', () => {
+    const earlierMail = { channel: 'email', direction: 'outbound' as const, occurredAt: '2026-10-23T01:00:00Z', source: 'microsoft_mail' }
+    const c = contact({ touchpoints: [wa('2026-10-22T21:00:00Z'), earlierMail, spoke('2026-10-28T22:30:00Z', { automated: true })] })
+    expect(segmentContact(c, NOW2).segment).toBe('stale_conversation')
+  })
+  describe('客人在这通电话里说了「现在还没准备好 / 不感兴趣」（PM 2026-10-29 Gavin Hall）', () => {
+    // Gavin：表单进线 → 我们打通 37 秒 → 客人说 "I'm not ready for that. I'll talk to you another day."
+    const gavin = (stance: string | null, extra: Record<string, unknown> = {}) => contact({
+      touchpoints: [form('2026-10-28T20:00:00Z'), spoke('2026-10-28T22:30:00Z', { callStance: stance, ...extra })],
+    })
+
+    it('说现在还没准备好 → 不进今天要联系，挪去先放着，理由照实说', () => {
+      const r = segmentContact(gavin('not_now'), NOW2)
+      expect(r.segment).toBe('nurture_future')
+      expect(r.temperature).toBe('cold')
+      expect(listOf(r.segment)).toBe('cold')
+      expect(r.reason).toBe('刚通完电话（1 小时前），客人说现在还没准备好 —— 先放着，过阵子再联系')
+      // 客人推掉了 —— 不能再标「📞 刚聊过 / 记下一步」
+      expect(r.afterCall).toBeUndefined()
+      expect(todayWorklist([gavin('not_now')], NOW2)).toHaveLength(0)
+    })
+
+    it('说不感兴趣 → 同样先放着，理由写「不感兴趣」', () => {
+      const r = segmentContact(gavin('not_interested'), NOW2)
+      expect(r.segment).toBe('nurture_future')
+      expect(r.reason).toBe('刚通完电话（1 小时前），客人说不感兴趣 —— 先放着')
+    })
+
+    it('没有表态的普通通话 → 照旧留在今天要联系', () => {
+      const r = segmentContact(gavin(null), NOW2)
+      expect(r.segment).toBe('callback_due')
+      expect(r.temperature).toBe('hot')
+    })
+
+    it('分析被驳回 → 表态不算，照旧留在今天要联系', () => {
+      const tp = buildTouchpointLike({
+        contact_id: 'c1', channel: 'phone', direction: 'outbound', occurred_at: '2026-10-28T22:30:00Z',
+        raw: null, source: 'twilio',
+        metadata: { outcome: 'spoke', call_stance: 'not_now', call_analysis_review: 'rejected' },
+      })
+      const r = segmentContact(contact({ touchpoints: [form('2026-10-28T20:00:00Z'), tp] }), NOW2)
+      expect(r.segment).toBe('callback_due')
+    })
+
+    it('只认最近那一通：上一通说过「改天再说」，这一通没这么说 → 照旧提醒', () => {
+      const c = contact({ touchpoints: [
+        form('2026-10-27T20:00:00Z'),
+        spoke('2026-10-27T22:30:00Z', { callStance: 'not_now' }),
+        spoke('2026-10-28T22:30:00Z'),
+      ] })
+      expect(segmentContact(c, NOW2).segment).toBe('callback_due')
+    })
+
+    it('之后客人自己又来消息 → 规则 2「客户回话了」照样接手', () => {
+      const c = contact({ touchpoints: [form('2026-10-28T20:00:00Z'), spoke('2026-10-28T22:30:00Z', { callStance: 'not_now' }), wa('2026-10-28T23:30:00Z')] })
+      expect(segmentContact(c, NOW2).segment).toBe('replied')
+    })
+  })
+})
+
+describe('说过「不感兴趣」之后自己又找上门 → 拿回来（PM 2026-10-30 Annette）', () => {
+  const declined = call('2026-07-01T00:00:00Z', 'not_interested')
+
+  it('之后重新填了表单 → 不再被旧的「不感兴趣」压在不联系里，回到「客户来消息了」', () => {
+    const c = contact({ touchpoints: [form('2026-06-30T00:00:00Z'), declined, form('2026-07-25T00:00:00Z')] })
+    const r = segmentContact(c, NOW)
+    expect(r.segment).toBe('replied')
+    expect(listOf(r.segment)).toBe('hot')
+  })
+
+  it('之后回了邮件 / 发了私信（真人来信）也算重新找上门', () => {
+    const c = contact({
+      touchpoints: [declined, { channel: 'messenger', direction: 'inbound' as const, occurredAt: '2026-07-20T00:00:00Z' }],
+    })
+    expect(segmentContact(c, NOW).segment).not.toBe('excluded')
+  })
+
+  it('只是打开 / 点了我们的邮件（行为信号，不是他开口）→ 仍然不联系', () => {
+    const c = contact({
+      touchpoints: [
+        declined,
+        { channel: 'email', direction: 'inbound' as const, occurredAt: '2026-07-20T00:00:00Z', engagement: 'click' as const },
+      ],
+    })
+    const r = segmentContact(c, NOW)
+    expect(r.segment).toBe('excluded')
+    expect(r.reason).toBe('他说不买了')
+  })
+
+  it('来信比「不感兴趣」更早 → 仍然不联系', () => {
+    const c = contact({ touchpoints: [form('2026-06-01T00:00:00Z'), declined] })
+    expect(segmentContact(c, NOW).segment).toBe('excluded')
+  })
+
+  it('别再联系（do_not_contact）不能被重新填表解除 —— 合规红线', () => {
+    const c = contact({ touchpoints: [call('2026-07-01T00:00:00Z', 'do_not_contact'), form('2026-07-25T00:00:00Z')] })
+    expect(segmentContact(c, NOW).segment).toBe('excluded')
+    const flag = contact({ doNotContact: true, touchpoints: [declined, form('2026-07-25T00:00:00Z')] })
+    expect(segmentContact(flag, NOW).segment).toBe('excluded')
+  })
+
+  it('既说过不感兴趣、又说过别再联系 → 重新填表也只解掉前者，别再联系仍然挡住', () => {
+    const c = contact({
+      touchpoints: [declined, call('2026-07-02T00:00:00Z', 'do_not_contact'), form('2026-07-25T00:00:00Z')],
+    })
+    expect(segmentContact(c, NOW).segment).toBe('excluded')
+  })
+
+  it('重新找上门之后又说了一次不感兴趣 → 再次不联系', () => {
+    const again = call('2026-07-24T00:00:00Z', 'not_interested')
+    const c = contact({ touchpoints: [declined, form('2026-07-10T00:00:00Z'), again] })
+    expect(segmentContact(c, NOW).segment).toBe('excluded')
   })
 })

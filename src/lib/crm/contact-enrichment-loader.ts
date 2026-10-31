@@ -9,7 +9,7 @@ import { fetchAll } from '@/lib/supabase-paginate'
 import { isAutoReply } from '@/lib/microsoft/mail-ingest'
 import { isMissingName, type ConversationHint, type OutboundEmailMsg } from './contact-enrichment'
 
-interface ConvRow {
+export interface ConvRow {
   id: string
   contact_id: string | null
   channel: string
@@ -39,6 +39,19 @@ export interface EnrichmentInputs {
   outboundEmails: OutboundEmailMsg[]
 }
 
+/** Read the tenant-wide conversation set once for priority-list enrichment and briefs. */
+export function loadAllEnrichmentConversations(sb: SupabaseClient, clientId: string): Promise<ConvRow[]> {
+  return fetchAll<ConvRow>((from, to) =>
+    sb
+      .from('conversations')
+      .select('id, contact_id, channel, participant_name, subject')
+      .eq('client_id', clientId)
+      .not('contact_id', 'is', null)
+      .order('id', { ascending: true })
+      .range(from, to),
+  )
+}
+
 /**
  * @param contactIds 只查这些人（分页路径：一页 50 人）；不传 = 整个客户（分段 / 老路径）。
  */
@@ -46,6 +59,7 @@ export async function loadEnrichmentInputs(
   sb: SupabaseClient,
   clientId: string,
   contactIds?: string[],
+  sharedConversations?: Promise<ConvRow[]>,
 ): Promise<EnrichmentInputs> {
   try {
     let convs: ConvRow[]
@@ -66,15 +80,10 @@ export async function loadEnrichmentInputs(
       )
       convs = parts.flat()
     } else {
-      convs = await fetchAll<ConvRow>((from, to) =>
-        sb
-          .from('conversations')
-          .select('id, contact_id, channel, participant_name, subject')
-          .eq('client_id', clientId)
-          .not('contact_id', 'is', null)
-          .order('id', { ascending: true })
-          .range(from, to),
-      )
+      // A failed shared read must not prevent this independent fallback from succeeding.
+      convs = sharedConversations
+        ? await sharedConversations.catch(() => loadAllEnrichmentConversations(sb, clientId))
+        : await loadAllEnrichmentConversations(sb, clientId)
     }
 
     const hints: ConversationHint[] = []

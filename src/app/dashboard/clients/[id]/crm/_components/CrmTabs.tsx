@@ -39,9 +39,12 @@ function readProbeCache(clientId: string): boolean | null {
   return hit.ok
 }
 
+const templatesProbeCache = new Map<string, { show: boolean; at: number }>()
+
 /** Test hook: forget every cached probe answer. */
 export function resetPaymentsProbeCache(): void {
   probeCache.clear()
+  templatesProbeCache.clear()
 }
 
 export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' | 'decisions' | 'payments' | 'sales' }) {
@@ -100,13 +103,45 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
     }
   }, [clientId])
 
+  // 「邮件模板」入口：功能已开通，或者我是能去配置它的全局管理员，才显示（其余人不暴露这个页面）。
+  const [showTemplates, setShowTemplates] = useState(() => {
+    const hit = templatesProbeCache.get(clientId)
+    return hit !== undefined && Date.now() - hit.at <= PROBE_TTL_MS && hit.show
+  })
+  useEffect(() => {
+    const hit = templatesProbeCache.get(clientId)
+    if (hit !== undefined && Date.now() - hit.at <= PROBE_TTL_MS) {
+      setShowTemplates(hit.show)
+      return
+    }
+    let cancelled = false
+    const cancelWait = afterCrmListReady(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/clients/${clientId}/crm/email-templates`)
+          if (!res.ok) return
+          const json = (await res.json()) as { featureState?: string; canEditSettings?: boolean }
+          const show = json.featureState === 'ready' || json.canEditSettings === true
+          templatesProbeCache.set(clientId, { show, at: Date.now() })
+          if (!cancelled) setShowTemplates(show)
+        } catch {
+          // 读不到就不显示，也不缓存（下次再试）
+        }
+      })()
+    })
+    return () => {
+      cancelled = true
+      cancelWait()
+    }
+  }, [clientId])
+
   return (
     <>
       {/* 新消息提醒：页面不会自己刷新，隔 30 秒问一次有没有客人发来新消息（读失败什么都不做）。 */}
       <NewMessagesBanner clientId={clientId} />
     <div className="flex flex-wrap items-center gap-3">
       <div className="inline-flex rounded-lg border border-me-charcoal/15 p-0.5">
-        <Link href={`${base}/all`} title="这个客户的所有客人：翻看、搜人、改他到哪一步。点右边「✨ Magic Engine 智能」能看今天该先联系谁。" className={cls(active === 'all')}>全部客人</Link>
+        <Link href={`${base}/all`} title="这个客户的所有客人：翻看、搜人、改他到哪一步。默认先看今天该先联系谁，点页面右边「看全部客人」翻看所有人。" className={cls(active === 'all')}>全部客人</Link>
         {showPayments && (
           <Link href={`${base}/payments`} title="按出发日期看每个团收了多少定金尾款、谁还没收齐、哪些已过期。" className={cls(active === 'payments')}>付款总览</Link>
         )}
@@ -143,6 +178,15 @@ export function CrmTabs({ clientId, active }: { clientId: string; active: 'all' 
         >
           商务收件箱
         </Link>
+        {showTemplates && (
+          <Link
+            href={`${base}/templates`}
+            title="通话后发跟进邮件用的模板：看模板、改模板、看最近发了什么。"
+            className="hover:text-me-charcoal hover:underline"
+          >
+            ✉️ 邮件模板
+          </Link>
+        )}
         {flags.agents && (
           <Link
             href={`/dashboard/clients/${clientId}/agents`}

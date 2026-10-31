@@ -7,6 +7,7 @@
  * 滑出，手机上铺满整屏。prospecting 的看板也是这个交互。
  */
 
+import { MarkTradeButton } from './MarkTradeButton'
 import { phoneRegionLabel } from '@/lib/crm/phone-region'
 import { ReturningRoute } from './ReturningRoute'
 import { AssigneeSelect } from './AssigneeSelect'
@@ -17,9 +18,11 @@ import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
 import { ContactTimeline, type TimelineSummary, type TimelineAiBrief, type StageSource } from './ContactTimeline'
 import { briefAge } from '@/lib/crm/brief-age'
+import { preserveOriginalName } from '@/lib/crm/brief-display-name'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
 import { ComposeEmail } from './ComposeEmail'
+import { PostCallEmailBar } from './PostCallEmailBar'
 import { ProfileCard } from './ProfileCard'
 import { ReturnLeadPanel } from './ReturnLeadPanel'
 import { DncBanner } from './DncBanner'
@@ -398,7 +401,7 @@ export function PersonDrawer({
                   ⚠️ 这张卡生成之后他又有新动作（见上面的往来一览），卡里「尚未回复」之类的说法可能已不对，以最新记录为准
                 </p>
               )}
-              <p className="text-[13px] leading-relaxed text-me-charcoal/90">{aiBrief.summary}</p>
+              <p className="text-[13px] leading-relaxed text-me-charcoal/90">{preserveOriginalName(aiBrief.summary, row.name)}</p>
               {aiBrief.customerNeeds.length > 0 && (
                 <div className="mt-2 flex gap-2">
                   <span className="min-w-[52px] text-[11px] font-bold text-me-charcoal/50">想要什么</span>
@@ -453,7 +456,7 @@ export function PersonDrawer({
                 <div className="mt-2 flex flex-wrap gap-1">
                   {summary.tour && (
                     <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-me-charcoal/75">
-                      想去：{summary.tour}
+                      广告表单里点过：{summary.tour}
                     </span>
                   )}
                   {summary.travelWindow && (
@@ -514,6 +517,7 @@ export function PersonDrawer({
                 </a>
                 {/* mailto 靠电脑里设好的邮件程序，没设就没反应——旁边永远有一个有反馈的「复制」。 */}
                 <CopyEmailButton email={row.email} />
+                <MarkTradeButton clientId={clientId} email={row.email} onDone={(msg) => onSaved(msg, true)} />
               </>
             )}
             {row.doNotContact && (
@@ -740,6 +744,17 @@ export function PersonDrawer({
           {/* 回复框放在往来记录之后（先读后回，跟聊天类产品一样）：原来它在上面，一个空的邮件回复框就有 320 像素高，
               把往来记录整个顶到屏幕下面（PM 2026-10-14 好用性调整）。 */}
           <div className="mt-5 space-y-3 empty:hidden" data-testid="drawer-replies">
+          {/* 通话后选模板发邮件：功能没开通 / 没有模板时什么都不渲染，容器照样是空的。 */}
+          <PostCallEmailBar
+            key={row.contactId}
+            clientId={clientId}
+            contactId={row.contactId}
+            dialedAt={dialedAt}
+            onSent={() => {
+              setTimelineKey((k) => k + 1)
+              onSaved('✓ 邮件已发出', false)
+            }}
+          />
           {/* 在这一页直接回私信 —— 没有私信线的人这里什么都不渲染。
               110 位 CTS 客人只有 Facebook 身份，卡上写着「只能在 Messenger
               回他」，之前却要跳去另一个页面才回得了。 */}
