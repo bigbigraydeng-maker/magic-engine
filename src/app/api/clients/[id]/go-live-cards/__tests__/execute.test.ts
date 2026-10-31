@@ -466,6 +466,46 @@ describe('executeConfirmedGoLive', () => {
     )
   })
 
+  it('does not turn a reused ad set or its campaign on or off', async () => {
+    const ids = { ...IDS, reusedCampaign: true as const, reusedAdSet: true as const }
+    m.fetchCampaignStatus.mockResolvedValue('PAUSED')
+    const { sb } = fakeDb(owned('active'))
+    const held = await executeConfirmedGoLive({
+      supabase: sb as never,
+      clientId: 'client-1',
+      draftId: 'draft-1',
+      authority: authority(),
+      ids,
+    })
+    expect(held.settle.outcome).toBe('held')
+    expect(m.fetchCampaignStatus.mock.calls.map((call) => call[0])).toEqual(['ad', 'ad'])
+    expect(m.activatePublished).toHaveBeenCalledWith(
+      { campaignId: 'camp', adSetId: 'set', adIds: ['ad'] },
+      'tok',
+      { skipIds: ['camp', 'set'] },
+    )
+    expect(m.pausePublished).toHaveBeenCalledWith(
+      expect.objectContaining({ reusedCampaign: true, reusedAdSet: true }),
+      'tok',
+    )
+
+    vi.clearAllMocks()
+    m.token.mockResolvedValue('tok')
+    m.approveDraft.mockResolvedValue({ ok: true })
+    m.fetchCampaignStatus.mockResolvedValue('ACTIVE')
+    const live = await executeConfirmedGoLive({
+      supabase: sb as never,
+      clientId: 'client-1',
+      draftId: 'draft-1',
+      authority: authority(),
+      ids,
+    })
+    expect(live.settle).toMatchObject({ outcome: 'live', attempts: 1 })
+    expect(m.fetchCampaignStatus.mock.calls.map((call) => call[0])).toEqual(['ad'])
+    expect(m.activatePublished).not.toHaveBeenCalled()
+    expect(m.pausePublished).not.toHaveBeenCalled()
+  })
+
   it('does not overwrite another run that already recorded the open', async () => {
     const winner = {
       status: 'active',

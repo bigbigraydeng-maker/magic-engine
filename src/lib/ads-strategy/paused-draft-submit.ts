@@ -11,7 +11,8 @@ import { notesFor } from '@/lib/confirmation-card/records'
 import { voidStaleCard } from '@/lib/confirmation-card/settle'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import { isExpired, readStoredCard } from '@/lib/confirmation-card/view'
-import type { AdDraft } from './ad-draft'
+import type { AdDraft, InheritedAdSetSpend } from './ad-draft'
+import { withInheritedSpend, withoutInheritedSpend } from './ad-draft'
 import { createDraftForApproval, type CreateDraftDeps, type CreateDraftOutcome } from './draft-and-gate'
 import {
   PAUSED_DRAFT_HOLD,
@@ -76,8 +77,9 @@ export async function issuePausedDraftCard(args: {
   accountLabel: string
   review: PausedDraftReview
   now?: Date
+  readSpend?: (draft: AdDraft) => Promise<{ ok: true; spend: InheritedAdSetSpend } | { ok: false; error: string }>
 }): Promise<ConfirmationCardView> {
-  const draft = { ...args.draft, clientId: args.clientId }
+  const draft = await draftShownOnCard(args)
   const facts = pausedDraftFacts(draft, args.accountLabel, args.review)
   const draftHash = canonicalHashOfInput(draft)
   const fingerprint = contentFingerprint(normalizeFacts(facts))
@@ -106,6 +108,17 @@ export async function issuePausedDraftCard(args: {
     accountLabel: args.accountLabel,
   })
   return card
+}
+
+async function draftShownOnCard(args: Parameters<typeof issuePausedDraftCard>[0]): Promise<AdDraft> {
+  const clean = withoutInheritedSpend({ ...args.draft, clientId: args.clientId })
+  if (!clean.existingAdSetId) return clean
+  if (!args.readSpend) {
+    throw new ConfirmationCardError('invalid', '还没读到这个广告组的真实预算，没有出卡。')
+  }
+  const read = await args.readSpend(clean)
+  if (!read.ok) throw new ConfirmationCardError('invalid', read.error)
+  return withInheritedSpend(clean, read.spend)
 }
 
 export async function submitPausedDraftCard(args: {

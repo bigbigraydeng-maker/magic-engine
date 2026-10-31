@@ -703,6 +703,33 @@ describe('paused draft helpers', () => {
     expect(loaded.review.clientCapCents).toBe(20000)
   })
 
+  it('shows an existing ad set by its real budget, not the draft numbers', async () => {
+    const f = fixture()
+    const item = draft({ existingAdSetId: '800001', dailyBudget: 15, durationDays: 7 })
+    await expect(issuePausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      clicker: OPC,
+      draft: item,
+      accountLabel: '这位客户的广告账户',
+      review: REVIEW,
+    })).rejects.toThrow('真实预算')
+
+    const card = await issuePausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      clicker: OPC,
+      draft: item,
+      accountLabel: '这位客户的广告账户',
+      review: REVIEW,
+      readSpend: async () => ({ ok: true, spend: { dailyBudget: 40, durationDays: null } }),
+    })
+    expect(card.amount).toContain('40.00')
+    expect(card.amount).not.toContain('15.00')
+    expect(card.date).toBe('这个广告组没有结束日')
+    expect(card.confirmEnabled).toBe(true)
+  })
+
   it('is not wired into prescription agreement', () => {
     const landing = readFileSync('src/lib/diagnostic/prescription-landing.ts', 'utf8')
     const dialog = readFileSync('src/app/dashboard/clients/[id]/prescription/new/dialog/decide-turn.ts', 'utf8')

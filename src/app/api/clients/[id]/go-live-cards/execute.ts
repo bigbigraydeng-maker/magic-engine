@@ -48,13 +48,17 @@ function targets(ids: GoLiveIds): { name: string; id: string }[] {
     name: ids.adIds.length === 1 ? '广告' : `第${index + 1}条广告`,
     id,
   }))
-  // A reused campaign stays as it was. It is not part of the "is this live" read.
-  const campaign = ids.reusedCampaign ? [] : [{ name: '广告系列', id: ids.campaignId }]
-  return [...ads, { name: '广告组', id: ids.adSetId }, ...campaign]
+  // A reused campaign or ad set stays as it was. It is not part of the "is this live" read.
+  const adSet = ids.reusedAdSet ? [] : [{ name: '广告组', id: ids.adSetId }]
+  const campaign = ids.reusedCampaign || ids.reusedAdSet ? [] : [{ name: '广告系列', id: ids.campaignId }]
+  return [...ads, ...adSet, ...campaign]
 }
 
 function skipIds(ids: GoLiveIds): string[] {
-  return ids.reusedCampaign ? [ids.campaignId] : []
+  const skip: string[] = []
+  if (ids.reusedCampaign || ids.reusedAdSet) skip.push(ids.campaignId)
+  if (ids.reusedAdSet) skip.push(ids.adSetId)
+  return skip
 }
 
 async function readLayers(ids: GoLiveIds, token: string): Promise<LayerRead[] | null> {
@@ -164,7 +168,11 @@ async function runSettle(
     readBack: () => readLayers(args.ids, token),
     stillOwns,
     keepPaused: () => pausePublished(
-      { ...ids, ...(args.ids.reusedCampaign ? { reusedCampaign: true } : {}) },
+      {
+        ...ids,
+        ...(args.ids.reusedCampaign ? { reusedCampaign: true } : {}),
+        ...(args.ids.reusedAdSet ? { reusedAdSet: true } : {}),
+      },
       token,
     ),
   }

@@ -37,7 +37,7 @@ const REASON: Readonly<Record<string, string>> = {
   'ads.add_retargeting_adset':
     '新建再营销广告组要跨 audience/adset/ad 三层，本轮先不上线自动执行；PM 手动在 Ads Manager 里建',
   'ads.swap_creative':
-    '换素材要建新 creative 再切换，本轮先不上线自动执行；PM 手动在 Ads Manager 里换',
+    '往已有广告组加一条新的暂停广告，走暂停草稿确认卡，不走这个动作。给已经在投的广告换掉素材仍然先不自动执行。',
 }
 
 function deferredStep(actionKey: ActionKey) {
