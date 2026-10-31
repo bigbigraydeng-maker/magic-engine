@@ -58,7 +58,10 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       changed: result.value.changed,
       reason: result.value.reason,
     })
-    if (deal) extra.deal = deal
+    if (deal) {
+      extra.deal = deal
+      extra.milestoneKind = kind
+    }
   }
   return finishBookingWrite(result, supabaseAdmin, clientId, bookingId, access.rule, extra)
 }
