@@ -122,6 +122,57 @@ const names = new Map([
   [NAL, { name: 'NAL' }],
 ])
 
+describe('成交待批准提醒', () => {
+  const CLIENT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const names = new Map([[CLIENT, { name: '示例客户' }]])
+
+  function deal(id: string, occurred_at: string, kind: 'purchase' | 'lead' = 'purchase'): Row {
+    return {
+      id,
+      client_id: CLIENT,
+      outcome_kind: kind,
+      customer_first: 'A',
+      customer_last: 'B',
+      amount_minor: 100,
+      currency: 'NZD',
+      order_ref: null,
+      occurred_at,
+      review_status: 'pending_review',
+      redacted_at: null,
+    }
+  }
+
+  it('还在 7 天内的成交合成一句：几笔待批准、最早的几天后过期', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({
+        pending: [deal('old', '2026-09-18T00:00:00.000Z'), deal('new', '2026-09-20T00:00:00.000Z'), deal('ask', '2026-09-21T00:00:00.000Z', 'lead')],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    const summary = items.find((i) => i.what.includes('笔成交待批准'))
+    expect(summary?.what).toContain('2 笔成交待批准')
+    expect(summary?.what).toContain('再过 3 天过期')
+    expect(summary?.href).toMatch(/^https:\/\/app\.magicengine\.com\.au\/dashboard\/conversions\?/)
+    expect(summary?.client_name).toBe('示例客户')
+  })
+
+  it('只有咨询、或已经过了 7 天的成交，不另起这句', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({
+        pending: [deal('ask', '2026-09-21T00:00:00.000Z', 'lead'), deal('old', '2026-09-01T00:00:00.000Z')],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    expect(items.some((i) => i.what.includes('笔成交待批准'))).toBe(false)
+  })
+})
+
 describe('conversion_capi_token_dead 待办', () => {
   it('同一客户多条授权失败 → 合并成一条，说清几条、最早的几天后过期，href 是绝对网址', async () => {
     const items: ManualItem[] = []

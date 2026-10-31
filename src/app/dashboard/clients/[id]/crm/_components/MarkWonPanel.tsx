@@ -21,9 +21,9 @@
 import { useState } from 'react'
 
 /**
- * Optional amount panel. The drawer does not mount this. A deal is recorded
- * when staff mark the configured milestone paid. Repeating the same stage
- * does not mint a new event id; the sale row id is that id.
+ * Optional amount panel. The drawer mounts this only when the clicked stage
+ * is the client's saved deal stage. Deposit auto-record stays a separate path.
+ * Repeating the same stage does not mint a new event id; the sale row id is that id.
  *
  * The currency box shows NZD until the person changes it. That is only a
  * visible default in this form. The server does not assume a currency.
@@ -81,7 +81,7 @@ export function MarkWonPanel({
 
   return (
     <div className="space-y-2 rounded-lg border border-me-ochre/25 bg-me-gold/10 p-3" onClick={(e) => e.stopPropagation()}>
-      <div className="text-xs font-bold text-me-charcoal">这笔生意多少钱？（到账后再回传给广告平台）</div>
+      <div className="text-xs font-bold text-me-charcoal">标已成交并录金额（这笔生意多少钱？到账后再回传给广告平台）</div>
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1">
           <input

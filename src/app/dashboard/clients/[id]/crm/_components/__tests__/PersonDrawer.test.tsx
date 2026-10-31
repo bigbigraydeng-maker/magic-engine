@@ -94,7 +94,8 @@ describe('号码好好的人，一个字都不该变', () => {
  * 🔴 缺的那两样都不是可选项：
  * · 「要记住的事」—— 今日待办有一条 `crm_important_due` 直接依赖它。抽屉里没有，
  *   销售在「今天要联系」页上就设不了提醒，得跳到另一页去设。
- * · 改阶段一律走确认框。成交金额不在这里录，点阶段不会弹出金额面板。
+ * · 没把某一阶段配成「手录成交」时，改阶段一律走确认框，不弹金额。
+ *   配了的那一步才弹出「标已成交并录金额」。
  *
  * `DncBanner.tsx` 的头注就是这个分裂的事故记录：「FDE 照着人工任务点进去，
  * 页面上根本没有任务里说的那个按钮」。
@@ -182,6 +183,24 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
     fireEvent.click(btn('已成交')!)
     expect(confirmSpy).toHaveBeenCalled()
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
+  })
+
+  it('这一步被配成手录成交时，弹出录金额，不走普通确认', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('leads-config')) {
+        return { ok: true, json: async () => ({ config: { capiDealStageKey: 'won' } }) }
+      }
+      return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+    }))
+    drawFor(CLIENT, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
+    openStagePanel()
+    await waitFor(() => {
+      confirmSpy.mockClear()
+      fireEvent.click(btn('已成交')!)
+      expect(screen.getByText(/标已成交并录金额/)).toBeTruthy()
+    })
+    expect(confirmSpy).not.toHaveBeenCalled()
   })
 })
 

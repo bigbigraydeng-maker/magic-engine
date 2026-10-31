@@ -115,6 +115,8 @@ export async function pushConversionReviewItems(
     })
   }
 
+  pushDealApprovalReminder((data ?? []) as unknown as PendingRow[], items, clientNames, now)
+
   // ── 发出去了但不知道对方收没收 ──────────────────────────────────────
   // 这一档程序绝不会自己重发 —— 重发一次就是永久多记一笔成交，撤不回。
   const { data: doubts, error: doubtErr } = await supabase
@@ -510,6 +512,42 @@ type AuthFailedRow = {
  * CTS 19 条就是这样静静过了 7 天窗口的（子牙复审 M2：发现不许死在日志里）。
  * 这里是拉模式：直接查库，不依赖补发步骤有没有跑。
  */
+/** One line per client: how many deals are still waiting, and when the oldest expires. */
+function pushDealApprovalReminder(
+  rows: PendingRow[],
+  items: ManualItem[],
+  clientNames: Map<string, { name: string }>,
+  now: Date,
+): void {
+  const byClient = new Map<string, { count: number; oldest: string; oldestId: string }>()
+  for (const row of rows) {
+    if (row.outcome_kind === 'lead') continue
+    if (isPastEventWindow(row.occurred_at, now)) continue
+    const cur = byClient.get(row.client_id)
+    if (!cur) {
+      byClient.set(row.client_id, { count: 1, oldest: row.occurred_at, oldestId: row.id })
+      continue
+    }
+    cur.count += 1
+    if (row.occurred_at < cur.oldest) {
+      cur.oldest = row.occurred_at
+      cur.oldestId = row.id
+    }
+  }
+  for (const [clientId, agg] of byClient) {
+    const daysLeft = Math.max(0, 7 - daysAgo(agg.oldest, now))
+    const when = daysLeft === 0 ? '今天就会过期' : `再过 ${daysLeft} 天过期`
+    items.push({
+      kind: 'conversion_needs_review',
+      client_name: clientNames.get(clientId)?.name ?? '客户',
+      client_id: clientId,
+      what: `有 ${agg.count} 笔成交待批准，最早的一笔${when}。过了广告平台就收不进去，同样的预算会继续找不会付钱的人。`,
+      how: '打开页面，看一眼客人和金额对不对，对就点「告诉广告平台」（会再确认一次），不对就点「不发送」并选个原因。',
+      href: `https://app.magicengine.com.au/dashboard/conversions?client=${clientId}&focus=${agg.oldestId}`,
+    })
+  }
+}
+
 async function pushTokenDeadItems(
   supabase: SupabaseClient,
   items: ManualItem[],

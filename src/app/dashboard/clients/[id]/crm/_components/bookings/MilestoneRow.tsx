@@ -12,7 +12,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
 
 import type { BookingView, BookingWarning, MilestoneView } from '@/lib/crm/booking-types'
-import { markPaid, markUnpaid, overrideDue } from './booking-api'
+import { markPaid, markUnpaid, overrideDue, patchBooking } from './booking-api'
+import { dealSettled, MISSING_PARTY_MESSAGE, readDealNotice, type DealNotice } from './deal-notice'
 import { milestoneStatusText, nzToday } from './booking-format'
 import {
   PRIMARY_BUTTON,
@@ -28,6 +29,8 @@ export interface MilestoneRowProps {
   warnings: BookingWarning[]
   busy: boolean
   readOnly?: boolean
+  /** Which paid item should record a deal. Null means this client does not auto-record. */
+  dealMilestone?: 'deposit' | 'balance' | null
   run: RunAction
 }
 
@@ -39,7 +42,7 @@ interface PaidPanelProps {
   milestone: MilestoneView
   busy: boolean
   run: RunAction
-  onDone: () => void
+  onDone: (notice: DealNotice | null) => void
 }
 
 /** Inline panel that records a payment for one item. */
@@ -54,10 +57,14 @@ function PaidPanel(props: PaidPanelProps): JSX.Element {
   }, [])
 
   const confirm = async (): Promise<void> => {
-    const ok = await run(() =>
-      markPaid(clientId, bookingId, milestone.kind, milestone.updatedAt, paidOn),
-    )
-    if (ok) onDone()
+    let notice: DealNotice | null = null
+    const ok = await run(async () => {
+      const result = await markPaid(clientId, bookingId, milestone.kind, milestone.updatedAt, paidOn)
+      if (result.ok) notice = readDealNotice(result.data)
+      return result
+    })
+    if (!ok) return
+    onDone(notice)
   }
 
   return (
@@ -181,8 +188,22 @@ function OverridePanel(props: OverridePanelProps): JSX.Element {
 }
 
 export function MilestoneRow(props: MilestoneRowProps): JSX.Element {
-  const { clientId, booking, milestone, warnings, busy, readOnly, run } = props
+  const { clientId, booking, milestone, warnings, busy, readOnly, dealMilestone = null, run } = props
   const [mode, setMode] = useState<Mode>('idle')
+  const [held, setHeld] = useState<DealNotice | null>(null)
+  useEffect(() => {
+    setHeld(loadHold(booking.id, milestone.kind))
+  }, [booking.id, milestone.kind])
+  const remember = (notice: DealNotice | null): void => {
+    setHeld(notice)
+    saveHold(booking.id, milestone.kind, notice)
+  }
+  const showDeal =
+    milestone.state === 'paid' &&
+    !milestone.autoByEmail &&
+    !readOnly &&
+    mode === 'idle' &&
+    (held !== null || (dealMilestone === milestone.kind && booking.partySize == null))
   const paidButtonRef = useRef<HTMLButtonElement | null>(null)
   const overrideButtonRef = useRef<HTMLButtonElement | null>(null)
   const openerKindRef = useRef<'paid' | 'override' | null>(null)
@@ -287,7 +308,21 @@ export function MilestoneRow(props: MilestoneRowProps): JSX.Element {
           milestone={milestone}
           busy={busy}
           run={run}
-          onDone={() => setMode('idle')}
+          onDone={(notice) => {
+            remember(notice)
+            setMode('idle')
+          }}
+        />
+      )}
+      {showDeal && (
+        <DealHold
+          clientId={clientId}
+          booking={booking}
+          milestone={milestone}
+          notice={held}
+          busy={busy}
+          run={run}
+          onNotice={remember}
         />
       )}
 
@@ -303,4 +338,103 @@ export function MilestoneRow(props: MilestoneRowProps): JSX.Element {
       )}
     </li>
   )
+}
+
+function DealHold(props: {
+  clientId: string
+  booking: BookingView
+  milestone: MilestoneView
+  notice: DealNotice | null
+  busy: boolean
+  run: RunAction
+  onNotice: (notice: DealNotice | null) => void
+}): JSX.Element {
+  const [party, setParty] = useState('')
+  const settled = dealSettled(props.notice)
+  const needsParty =
+    props.booking.partySize == null &&
+    (props.notice == null || props.notice.reason === 'missing_party_size')
+  const message = settled
+    ? (props.notice?.message ?? '')
+    : (props.notice?.message ?? MISSING_PARTY_MESSAGE)
+  const size = Number(party)
+  const sizeOk = Number.isInteger(size) && size >= 1 && size <= 60
+
+  const retry = async (): Promise<void> => {
+    if (needsParty && !sizeOk) return
+    let next: DealNotice | null = null
+    const ok = await props.run(async () => {
+      if (needsParty) {
+        const patched = await patchBooking(props.clientId, props.booking.id, props.booking.updatedAt, {
+          partySize: size,
+        })
+        if (!patched.ok) return patched
+      }
+      const paidOn = props.milestone.paidOn ?? nzToday()
+      const paid = await markPaid(
+        props.clientId,
+        props.booking.id,
+        props.milestone.kind,
+        props.milestone.updatedAt,
+        paidOn,
+      )
+      if (paid.ok) next = readDealNotice(paid.data)
+      return paid
+    })
+    if (ok) props.onNotice(next)
+  }
+
+  return (
+    <div className="mt-2 space-y-2" role="status">
+      <p className={`text-sm font-semibold ${settled ? 'text-me-charcoal' : 'text-[#9B2C22]'}`}>{message}</p>
+      {!settled && needsParty && (
+        <label className="block text-sm font-semibold text-me-charcoal">
+          人数
+          <input
+            type="number"
+            min={1}
+            max={60}
+            value={party}
+            aria-label="补记成交的人数"
+            onChange={(e) => setParty(e.target.value)}
+            className="mt-1 min-h-[44px] w-full rounded-lg border border-me-charcoal/25 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal"
+          />
+        </label>
+      )}
+      {!settled && (
+        <button
+          type="button"
+          className={SECONDARY_BUTTON}
+          disabled={props.busy || (needsParty && !sizeOk)}
+          onClick={() => void retry()}
+        >
+          {needsParty ? '保存人数并补记成交' : '补记成交'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+function holdKey(bookingId: string, kind: string): string {
+  return `me-deal-hold:${bookingId}:${kind}`
+}
+
+function loadHold(bookingId: string, kind: string): DealNotice | null {
+  try {
+    const raw = sessionStorage.getItem(holdKey(bookingId, kind))
+    if (!raw) return null
+    return readDealNotice({ deal: JSON.parse(raw) as unknown })
+  } catch {
+    return null
+  }
+}
+
+function saveHold(bookingId: string, kind: string, notice: DealNotice | null): void {
+  try {
+    const key = holdKey(bookingId, kind)
+    if (!notice || dealSettled(notice)) sessionStorage.removeItem(key)
+    else sessionStorage.setItem(key, JSON.stringify(notice))
+  } catch {
+    // Private mode: the message still shows until this panel unmounts.
+  }
 }

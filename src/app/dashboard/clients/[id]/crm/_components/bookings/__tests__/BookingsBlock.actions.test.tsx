@@ -503,3 +503,33 @@ describe('BookingsBlock edit booking', () => {
     expect(within(alert.parentElement as HTMLElement).getByRole('button', { name: '重试' })).toBeTruthy()
   })
 })
+
+describe('成交没记上时告诉员工原因', () => {
+  const paidDeposit = makeBooking({
+    milestones: [
+      makeMilestone('deposit', { state: 'paid', paidOn: '2026-10-08' }),
+      makeMilestone('balance'),
+    ],
+  })
+
+  it('没配哪一笔记成成交时，不在订单上多一句', async () => {
+    const { calls } = await setup([paidDeposit])
+    await waitFor(() => expect(calls.some((c) => c.url.includes('leads-config'))).toBe(true))
+    expect(screen.queryByText(/订单没有人数/)).toBeNull()
+    expect(screen.queryByRole('button', { name: '保存人数并补记成交' })).toBeNull()
+  })
+
+  it('人数没填时写出原因，填上人数后再走原来的记下款接口', async () => {
+    const { calls } = await setup([paidDeposit], [
+      route('GET', '/leads-config', () => jsonResponse({ config: { capiDealMilestone: 'deposit' } })),
+    ])
+    expect(await screen.findByText(/订单没有人数/)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('补记成交的人数'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存人数并补记成交' }))
+    await waitFor(() => {
+      expect(calls.some((c) => c.method === 'PATCH' && (c.body?.patch as { partySize?: number } | undefined)?.partySize === 2)).toBe(true)
+    })
+    const paid = calls.find((c) => c.method === 'POST' && c.url.endsWith('/deposit/paid'))
+    expect(paid?.body).toMatchObject({ paidOn: '2026-10-08', expectedUpdatedAt: DEPOSIT_UPDATED_AT })
+  })
+})

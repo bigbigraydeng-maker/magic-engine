@@ -27,6 +27,7 @@ import { ProfileCard } from './ProfileCard'
 import { ReturnLeadPanel } from './ReturnLeadPanel'
 import { DncBanner } from './DncBanner'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
+import { StageChoices } from './StageChoices'
 import { BookingsBlock } from './bookings/BookingsBlock'
 import { BackToPayments } from './BackToPayments'
 import { useBodyScrollLock } from './useBodyScrollLock'
@@ -647,33 +648,15 @@ export function PersonDrawer({
                         改「到哪一步了」▾
                       </button>
                       {changingStage && (
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {/* 只给下一步 + 一个「谈崩了」的出口。
-                              铺 9 个阶段的问题不是占地方，是每多一个选项就多一次犹豫 ——
-                              而「新线索」直接跳「已付全款」的情况根本不存在。 */}
-                          {(allStages
-                            ? [...stageChoices.suggested, ...stageChoices.rest]
-                            : stageChoices.suggested
-                          ).map((s) => (
-                            <button
-                              key={s.stageKey}
-                              onClick={() => {
-                                void changeStage(s.stageKey, s.label)
-                              }}
-                              className="rounded-full bg-white px-3 py-1.5 text-[13px] font-bold text-me-charcoal shadow-sm"
-                            >
-                              {s.label}
-                            </button>
-                          ))}
-                          {!allStages && stageChoices.rest.length > 0 && (
-                            <button
-                              onClick={() => setAllStages(true)}
-                              className="rounded-full border border-dashed border-me-charcoal/25 px-3 py-1.5 text-[13px] font-bold text-me-charcoal/50"
-                            >
-                              其他 {stageChoices.rest.length} 个…
-                            </button>
-                          )}
-                        </div>
+                        <StageChoices
+                          clientId={clientId}
+                          contactId={row.contactId}
+                          stages={allStages ? [...stageChoices.suggested, ...stageChoices.rest] : stageChoices.suggested}
+                          restCount={!allStages ? stageChoices.rest.length : 0}
+                          onShowRest={() => setAllStages(true)}
+                          onPlainStage={(stageKey, label) => void changeStage(stageKey, label)}
+                          onSaved={onSaved}
+                        />
                       )}
                     </div>
                   )}
