@@ -164,6 +164,14 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
     expect(document.body.textContent ?? '').toContain('这笔生意多少钱')
   })
 
+  it('阶段键是全款已付、营销动作是成交时，走确认框，不弹金额', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    drawFor(CLIENT, {}, [{ stageKey: 'paid_full', label: '全款已付', marketingAction: 'won' }])
+    await clickReadyStage('全款已付')
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
+  })
+
   it('点「已联系」同样不弹金额', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
     drawFor(CLIENT, {}, [{ stageKey: 'contacted', label: '已联系', marketingAction: 'nurture' }])

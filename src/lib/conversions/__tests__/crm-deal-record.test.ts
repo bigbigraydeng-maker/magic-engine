@@ -362,6 +362,19 @@ describe('recordStageDeal', () => {
     expect(io.inserted).toHaveLength(1)
   })
 
+  it('does not record paid_full as a deal when no deal stage is saved', async () => {
+    const io = memory({
+      loadClient: async () => ({ conversionStage: 'live', defaultPhoneCountry: null, leadsConfig: {} }),
+    })
+    const result = await recordStageDeal(io, {
+      clientId: CLIENT, contactId: CONTACT, stageKey: 'paid_full', bookingId: null,
+      occurredAt: null, actor: null, staffAmount: '10', staffCurrency: 'NZD',
+    }, NOW)
+    expect(result.attempted).toBe(false)
+    expect(result.reason).toBe('stage_mismatch')
+    expect(io.inserted).toHaveLength(0)
+  })
+
   it('does not treat another stage as a deal when none is saved', async () => {
     const io = memory({
       loadClient: async () => ({ conversionStage: 'live', defaultPhoneCountry: null, leadsConfig: {} }),

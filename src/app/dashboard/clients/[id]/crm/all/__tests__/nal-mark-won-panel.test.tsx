@@ -95,6 +95,25 @@ describe('没配成交阶段时，已成交仍打开金额面板', () => {
     expect(screen.getByText(/这笔生意多少钱/)).toBeTruthy()
   })
 
+  it('全款已付即使营销动作是成交，也走确认框', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const paidFull = { stageKey: 'paid_full', label: '全款已付', marketingAction: 'won', isTerminal: true }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/crm/contacts?') || url.endsWith('/crm/contacts')) {
+          return { ok: true, json: async () => ({ items: [contact('c1', 'Jordan Example')], total: 1, page: 1, perPage: 100, columns: [] }) }
+        }
+        if (url.includes('/timeline')) return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+        return { ok: true, json: async () => ({ stages: [NEW_STAGE, paidFull, POSTSALE_STAGE] }) }
+      }),
+    )
+    render(<CrmAllContactsPage />)
+    await openStage('全款已付')
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(screen.queryByText(/这笔生意多少钱/)).toBeNull()
+  })
+
   it('售后仍走确认框', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     stubFetch([contact('c1', 'Jordan Example')])
