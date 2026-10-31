@@ -55,6 +55,7 @@ import { pushPlanDraftFailureItems } from './plan-draft-failure-items'
 import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
+import { pushRankVerdictGapItems } from './seo-rank-verdict-overdue-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
   buildCrawlHealthItems,
@@ -323,6 +324,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 广告 D3（花钱没结果）自动暂停建议等人批准——点一下就执行，不用去 Meta 后台
     (b) => pushAdsAutoPauseItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] Ads D3 自动暂停待批准读取失败（不阻塞其他待办）:', e),
+    ),
+    // 已上线的标题改动一直没有效果判定 —— 9-28 起「改了有没有用」整条静默，没人知道（2026-10-29）。
+    (b) => pushRankVerdictGapItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 标题效果判定检查失败（不阻塞其他待办）:', e),
     ),
     // 审批过但被价格闸拦住的帖子 —— 自动发布那条路人不在场,不捞出来就没人知道
     (b) => pushPriceGateItems(supabase, b, nameOf).catch((e) =>

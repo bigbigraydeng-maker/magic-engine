@@ -99,6 +99,14 @@ describe('buildContactModel', () => {
     expect(m.doNotContact).toBe(false)
   })
 
+  it('通话分析的客人表态 call_stance 透传；分析被驳回 / 值不认识 → null（PM 2026-10-29 Gavin Hall）', () => {
+    expect(buildTouchpointLike(tp({ metadata: { call_stance: 'not_now', call_analysis_review: 'pending_review' } })).callStance).toBe('not_now')
+    expect(buildTouchpointLike(tp({ metadata: { call_stance: 'not_interested' } })).callStance).toBe('not_interested')
+    expect(buildTouchpointLike(tp({ metadata: { call_stance: 'not_now', call_analysis_review: 'rejected' } })).callStance).toBeNull()
+    expect(buildTouchpointLike(tp({ metadata: { call_stance: 'maybe' } })).callStance).toBeNull()
+    expect(buildTouchpointLike(tp({ metadata: null })).callStance).toBeNull()
+  })
+
   it('metadata.action=snooze / unsnooze 原样透传，别的值一律 null（避免新按钮偷偷影响判断）', () => {
     expect(buildTouchpointLike(tp({ metadata: { action: 'snooze' } })).action).toBe('snooze')
     expect(buildTouchpointLike(tp({ metadata: { action: 'unsnooze' } })).action).toBe('unsnooze')

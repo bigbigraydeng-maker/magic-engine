@@ -15,6 +15,8 @@
  * 所以只需要一个环境变量，不用另配 region。
  */
 
+import { createHash } from 'node:crypto'
+
 const API_VERSION = '3.0'
 
 export interface MailchimpCampaign {
@@ -210,7 +212,7 @@ async function fetchAllMembers(
 /** 最近发出去的邮件（含打开/点击汇总）。 */
 export async function listSentCampaigns(
   apiKey: string,
-  opts: { sinceSentAt?: string; count?: number } = {},
+  opts: { sinceSentAt?: string; count?: number; listId?: string } = {},
 ): Promise<MailchimpCampaign[]> {
   const params: Record<string, string> = {
     status: 'sent',
@@ -219,6 +221,8 @@ export async function listSentCampaigns(
     count: String(opts.count ?? 100),
   }
   if (opts.sinceSentAt) params.since_send_time = opts.sinceSentAt
+  // The API key is shared by every client's audience: without this, one client's campaigns would be read as another's.
+  if (opts.listId) params.list_id = opts.listId
 
   const json = await call<{ campaigns?: RawCampaign[] }>(apiKey, '/campaigns', params)
   return (json.campaigns ?? []).map(normaliseCampaign)
@@ -257,6 +261,32 @@ export async function getCampaignActivity(
     openers as Array<{ email_address?: string; last_open?: string }>,
     clickers as Array<{ email_address?: string; timestamp?: string }>,
   )
+}
+
+/** `not_recipient` = the address was not sent this campaign; `hard` = it bounced and never arrived. */
+export type CampaignRecipientStatus = 'sent' | 'soft' | 'hard' | 'not_recipient'
+
+/**
+ * 这个邮箱收到过这封群发吗（官方「Get campaign recipient info」：subscriber_hash = 小写邮箱的 MD5）。
+ * 404 = 不是收件人；其它错误照常抛（调用方要把「查不了」当成「无法核实」，不能当成「没收到」）。
+ * 返回了不认识的 status 时按 `sent` 算：宁可多数一封。
+ */
+export async function getCampaignRecipientStatus(
+  apiKey: string,
+  campaignId: string,
+  email: string,
+): Promise<CampaignRecipientStatus> {
+  const hash = createHash('md5').update(email.trim().toLowerCase()).digest('hex')
+  try {
+    const json = await call<{ status?: string }>(
+      apiKey,
+      `/reports/${encodeURIComponent(campaignId)}/sent-to/${hash}`,
+    )
+    return json.status === 'soft' || json.status === 'hard' ? json.status : 'sent'
+  } catch (err) {
+    if (err instanceof MailchimpError && err.status === 404) return 'not_recipient'
+    throw err
+  }
 }
 
 /** 一封邮件的一个收件人：Mailchimp 的发送状态（sent=已发出 / hard=永久退回 / soft=暂时退回）。 */

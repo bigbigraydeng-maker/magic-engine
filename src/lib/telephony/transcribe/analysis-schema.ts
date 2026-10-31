@@ -20,8 +20,16 @@ export const FACT_KEYS = [
   'callback_time', // 约定回电时间
   'do_not_contact', // 客人要求别再联系
   'contact_email', // 通话中明确提供的邮箱（候选值，人工复核后才算数）
+  'not_ready_now', // 客人说现在还没准备好 / 改天再说 / 以后再说
+  'not_interested', // 客人明确说不感兴趣 / 不考虑
 ] as const
 export type FactKey = (typeof FACT_KEYS)[number]
+
+/**
+ * 客人在电话里对「现在要不要继续谈」的表态。CRM 分段靠它别把刚说过「改天再说」的人当热线索
+ * （PM 2026-10-29 Gavin Hall：37 秒通话，客人说 "I'm not ready for that. I'll talk to you another day."）。
+ */
+export const STANCE_FACT_KEYS: ReadonlySet<FactKey> = new Set<FactKey>(['not_ready_now', 'not_interested'])
 
 /** Version 2 adds sourced questions; completed version 1 analyses are not backfilled automatically. */
 export const ANALYSIS_SCHEMA_VERSION = 2
@@ -80,7 +88,7 @@ export interface VerifiedAnalysis {
   droppedInquiries: number
 }
 
-const norm = (s: string) => s.toLowerCase().replace(/[\s\u3000"'“”‘’.,，。!！?？、:;；]+/g, '')
+export const norm = (s: string) => s.toLowerCase().replace(/[\s\u3000"'“”‘’.,，。!！?？、:;；]+/g, '')
 
 const CJK = /[\u4e00-\u9fff]/g
 
@@ -158,11 +166,89 @@ const NUMERIC_KEYS: ReadonlySet<FactKey> = new Set<FactKey>(['budget', 'party_si
 /** 第一人称的拒绝联系（不是任何含 stop/别再 的句子）。 */
 const NEGATION = /(don'?t|do not|please don'?t|stop)\s+(call|calling|contact|contacting|ring|phone)\s+(me|us)\b|别再(给我|联系我|打给我|打电话)|不要再(给我|联系我|打电话)|不用再(联系|打电话)|请勿(再)?联系(我|我们)|remove (me|my number|us) from/i
 const QUESTION = /[?？]|什么意思|为什么|why\b|是什么/i
+/**
+ * 表态原话里，**第一人称必须是那句拒绝的主语**（复审 2026-10-29 两轮）：
+ *   · I'm / I am / we're / we are（中间最多一个词）not（最多一个词）ready / interested
+ *   · I'll / I will / we'll / we will …（同一句内）another day / another time / some other time / later
+ *   · 我 / 我们（现在 / 暂时 / 目前）（还 / 也）没 / 不 + 准备 / 感兴趣 / 考虑 / 想 / 需要 / 打算 / 决定 / 定
+ * 只是句子里出现「I / we / 我」不够：员工的「We understand if you're not ready yet」
+ * 「No worries if you're not ready yet」「你现在还没准备好吗」都不能算成客人的表态。
+ */
+const STANCE_SUBJECT = new RegExp(
+  [
+    String.raw`\b(?:i[’']?m|i am|we[’']?re|we are)\s+(?:\w+\s+)?not\s+(?:\w+\s+)?(?:ready|interested)\b`,
+    String.raw`\b(?:i|we)(?:[’']ll|\s+will)\b[^.?!？。！]{0,60}\b(?:another day|another time|some other time|later)\b`,
+    String.raw`我们?(?:现在|暂时|目前)?(?:还|也)?(?:没|不)(?:有)?(?:准备|感兴趣|考虑|想|需要|打算|决定|定)`,
+  ].join('|'),
+  'i',
+)
+/** 一行转写以问号结尾，或中文以 吗/呢/么 收尾（标点可有可无）—— 这一行是问句。 */
+const QUESTION_LINE_END = /(?:[?？]|[吗呢么][。.!！]?)["'”’」』\s]*$/
+
+const CHANNEL_PREFIX = /^\s*(声道\d+)[：:]\s*/
+
+/** 同一声道连续的几行拼成一段（归一化后），记下每行在拼接文本里从哪开始。 */
+interface ChannelRun { text: string; starts: number[]; lines: string[] }
+
+/**
+ * 转写 → 若干段「同一声道连续行」。每通电话只建一次，所有表态事实共用（线性，长转写也快）。
+ * 行首的「声道N：」不算原话内容；不同声道的行不拼在一起（不许把员工半句和客人半句拼成一句）。
+ */
+export function buildChannelRuns(transcript: string): ChannelRun[] {
+  const runs: ChannelRun[] = []
+  let cur: (ChannelRun & { ch: string }) | null = null
+  for (const raw of transcript.split('\n')) {
+    const ch = raw.match(CHANNEL_PREFIX)?.[1] ?? ''
+    const text = raw.replace(CHANNEL_PREFIX, '')
+    if (!cur || cur.ch !== ch) {
+      cur = { ch, text: '', starts: [], lines: [] }
+      runs.push(cur)
+    }
+    cur.starts.push(cur.text.length)
+    cur.lines.push(text)
+    cur.text += norm(text)
+  }
+  return runs
+}
+
+/** 偏移落在第几行（starts 递增）。 */
+function lineAt(starts: number[], offset: number): number {
+  let lo = 0
+  let hi = starts.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (starts[mid] <= offset) lo = mid
+    else hi = mid - 1
+  }
+  return lo
+}
+
+/**
+ * 原话在转写里落在哪几行（可跨同一声道相邻几行：转写按句换行，Gavin 那两句可能占两行）。
+ * 每段只做一次 indexOf，没找到就是 null。norm() 会去掉问号，所以「是不是问句」要回到这几行原文看。
+ */
+function linesContaining(runs: ChannelRun[], quoteNorm: string): string[] | null {
+  for (const run of runs) {
+    const at = run.text.indexOf(quoteNorm)
+    if (at < 0) continue
+    return run.lines.slice(lineAt(run.starts, at), lineAt(run.starts, at + quoteNorm.length - 1) + 1)
+  }
+  return null
+}
+
+/** 表态事实：原话找得到，且所在的转写行不是问句（模型可能把问号去掉再交回来）。 */
+function stanceSupported(f: RawFact, runs: ChannelRun[]): boolean {
+  const found = linesContaining(runs, norm(f.quote))
+  if (!found) return false
+  return !found.some((line) => QUESTION_LINE_END.test(line.trim()))
+}
 
 /** 数值类事实：值里的数字必须有原话依据，且原话要像金额/人数，不是电话号码、日期、钟点。「别再联系」必须是第一人称的陈述句。 */
 function valueSupported(f: RawFact): boolean {
   if (f.key === 'do_not_contact') return NEGATION.test(f.quote) && !QUESTION.test(f.quote)
   if (f.key === 'contact_email') return f.speaker === 'customer' && emailSupported(f.value, f.quote)
+  // 表态还要对照转写原句再判一次是不是问句，见 stanceSupported（在 verifyFacts 里做）。
+  if (STANCE_FACT_KEYS.has(f.key)) return !QUESTION.test(f.quote) && STANCE_SUBJECT.test(f.quote)
   if (!NUMERIC_KEYS.has(f.key)) return true
   const need = [...numbersIn(f.value)]
   if (need.length === 0 || need.some((n) => n > 10_000_000)) return false
@@ -332,10 +418,14 @@ function summaryWithVerifiedEvidence(summary: string, facts: RawFact[], inquirie
 /** 事实的原话必须真的出现在转写里，且够分量；数值类和「别再联系」还要核对值与原话一致。 */
 export function verifyFacts(raw: RawAnalysis, transcript: string): VerifiedAnalysis {
   const t = norm(transcript)
+  // 只在真有表态事实时才建一次，所有表态事实共用
+  let runs: ChannelRun[] | null = null
   const kept = raw.facts.filter((f) => {
     const q = norm(f.quote)
     const enoughEvidence = f.key === 'contact_email' ? q.length >= 6 : quoteLongEnough(q)
-    return enoughEvidence && t.includes(q) && valueSupported(f)
+    // 表态单独找原话所在行（可跨同一声道的相邻几行），顺带判问句；其余事实照旧在整段转写里找。
+    const found = STANCE_FACT_KEYS.has(f.key) ? stanceSupported(f, (runs ??= buildChannelRuns(transcript))) : t.includes(q)
+    return enoughEvidence && found && valueSupported(f)
   })
   const inquiryResult = verifyInquiries(raw, transcript)
   return {

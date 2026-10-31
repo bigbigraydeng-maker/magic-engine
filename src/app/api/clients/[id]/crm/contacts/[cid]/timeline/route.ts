@@ -21,6 +21,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
+import { asFacts } from '@/lib/crm/call-analysis-facts'
 import { normalisePhone } from '@/lib/crm/identity'
 import { dropEmailTouchesDuplicatedByMessage } from '@/lib/crm/timeline-dedupe'
 import { buildTouchpointLike } from '@/lib/crm/contact-model'
@@ -54,21 +55,11 @@ interface CallAnalysisView {
   id: string
   summary: string
   reviewStatus: 'pending_review' | 'confirmed' | 'rejected'
-  facts: { key: string; value: string; quote: string }[]
+  facts: { key: string; value: string; quote: string; speaker?: 'customer' | 'employee' }[]
 }
 
 function asReviewStatus(v: unknown): CallAnalysisView['reviewStatus'] {
   return v === 'confirmed' || v === 'rejected' ? v : 'pending_review'
-}
-
-function asFacts(v: unknown): CallAnalysisView['facts'] {
-  if (!Array.isArray(v)) return []
-  return v.flatMap((f) => {
-    const o = (f ?? {}) as Record<string, unknown>
-    return typeof o.key === 'string' && typeof o.value === 'string' && typeof o.quote === 'string'
-      ? [{ key: o.key, value: o.value, quote: o.quote }]
-      : []
-  })
 }
 
 type TimelineEntry =
@@ -80,6 +71,13 @@ type TimelineEntry =
       summary: string | null
       /** 出站且是机器发的（Mailchimp 欢迎信 / 群发）。 */
       automated?: boolean
+      /**
+       * 表格「员工跟进记录」那列的原话（source = sheet_followup）。仅当这条记录没有自己的摘要时才带 ——
+       * 抽屉只认摘要，不带的话这类记录整条看不见。
+       */
+      sheetNote?: string
+      /** 表格不记具体时间：`at` 是客人填表的时间，不是通话 / 写记录的时间（同步时标了 time_is_approximate）。 */
+      timeApproximate?: boolean
       /**
        * 销售**真正敲进去的那句话**（客人的原文 / FDE 的手记）。
        *
@@ -116,6 +114,13 @@ type TimelineEntry =
        * 销售会据此决定要不要解除全渠道停联 —— 而他以为自己在看客人说的话。
        */
       rawKind: 'verbatim' | 'ai_summary'
+      /**
+       * 员工自己在 CRM 里手记的一笔（`source = me_manual`）。前端据此把 `raw`（员工原话）当主行、
+       * AI 整理当次要行 —— 员工写的字是最高置信度的证据，AI 改写不能替代它（PM 2026-10-30）。
+       */
+      staffNote?: boolean
+      /** 谁记的（登录邮箱，`metadata.logged_by`）；不知道就没有。 */
+      loggedBy?: string | null
 
       tour: string | null
       outcome: string | null
@@ -314,6 +319,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   }[]) {
     if (hasWhatsAppConversation && t.channel === 'whatsapp') continue
     const m = t.metadata ?? {}
+    // 'sheet_followup' 跟 lib/crm/sheet-followup-sync 的 SHEET_FOLLOWUP_SOURCE 同值；这里不 import 它，
+    // 免得把读 Google 表格的依赖拖进抽屉接口。
+    const sheetNote = t.source === 'sheet_followup' && !cleanStr(t.summary) ? cleanStr(t.raw) : null
     entries.push({
       kind: 'touch',
       at: t.occurred_at,
@@ -324,9 +332,12 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       // 也不能当「最后一句」盖掉客人真说的话。
       automated: t.channel === 'email' && t.direction === 'outbound' && isAutomatedTouch(t.source, m),
       raw: cleanStr(t.raw),
+      ...(sheetNote ? { sheetNote } : {}),
+      ...(m.time_is_approximate === true ? { timeApproximate: true } : {}),
       dncFlag: m.do_not_contact === true,
       // 外呼那条路写的是模型摘要，不是逐字原话 —— 靠 voice_call_id 认出来。
       rawKind: m.voice_call_id ? 'ai_summary' : 'verbatim',
+      ...(t.source === 'me_manual' ? { staffNote: true, loggedBy: cleanStr(m.logged_by) } : {}),
       // 这一条触点自己带的团意向：FB 表单下拉优先，其次手工笔记解析值。
       tour: cleanStr(m.tour_interest_raw) ?? cleanStr(m.tour_interest),
       /**
