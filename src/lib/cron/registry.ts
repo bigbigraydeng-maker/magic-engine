@@ -386,6 +386,10 @@ const CRON_REGISTRY_ENTRIES = [
   { service: 'inngest:cloud-calendar-closure-audit', jobName: 'calendar-closure-audit', schedule: '20 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-08' },
   { service: 'inngest:cloud-lead-sheet-sync-fanout', jobName: 'lead-sheet-sync', schedule: '20 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-24' },
   { service: 'inngest:cloud-ai-visibility-weekly-fanout', jobName: 'ai-visibility-tracker-weekly', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-21' },
+  // 客户每周浏览总结（灰度）：只处理 seo_config.client_weekly_report_enabled=true 的客户，只发公司内部待审邮件，不对客户发信。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/client-weekly-report/fanout.ts 的 CLIENT_WEEKLY_REPORT_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
+  { service: 'inngest:cloud-client-weekly-report-fanout', jobName: 'client-weekly-report', schedule: '30 8 * * 4', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-01' },
   // 「客人填了表还没人回」每天一封汇总信。新西兰早上 8 点（Inngest 的 cron 带 TZ=）。
   //
   // 🔴 为什么一定要登记：`LEAD_FOLLOWUP_DIGEST_ENABLED` 默认是关的，所以上线后
