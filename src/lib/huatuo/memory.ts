@@ -113,6 +113,7 @@ export async function loadHuatuoMemoryBundle(
 
   const has_content =
     trimmedMemory.has_content ||
+    (trimmedMemory.global_lessons?.length ?? 0) > 0 ||
     recentFeedback.length > 0 ||
     lastPrescriptionOutcomes.length > 0
 
@@ -260,32 +261,29 @@ export function computeFulfillmentRatio(
  * 把 HuatuoMemoryBundle 渲染成 prompt 文本块。
  *
  * 短模式输出 ~500 tokens 摘要；长模式输出 ~3000 tokens 详细。
- * has_content=false → 返回空字符串（行为兼容旧版）。
+ * 没有任何客户记忆、也没有已采纳经验时返回空字符串。
+ * 只有已采纳经验时仍然输出，下一份处方才能读到。
  */
 export function formatHuatuoMemoryForPrompt(
   bundle: HuatuoMemoryBundle,
   mode: HuatuoPromptMode,
 ): string {
-  if (!bundle.has_content) return ''
-
   const parts: string[] = []
   const isShort = mode === 'short'
 
-  // ── L3 memory（preferences / patterns / failed / decisions） ────────────
-  if (bundle.memoryContext.has_content) {
-    const memoryText = formatMemoryForPrompt(bundle.memoryContext, {
-      // 短模式只保留 preferences；其他三段已在 loadHuatuoMemoryBundle 中裁空，
-      // 但显式 include 设置增加防御性
-      includePreferences: true,
-      includeProvenPatterns: !isShort,
-      includeFailedExperiments: !isShort,
-      includeRecentDecisions: !isShort,
-      heading: isShort
-        ? 'Client Memory (Quick)'
-        : 'Client Memory (L3 Long-term Learning)',
-    })
-    if (memoryText.trim()) parts.push(memoryText)
-  }
+  // Adopted lessons live in global_lessons. has_content ignores them on purpose,
+  // so this block must still render when that is the only memory.
+  const memoryText = formatMemoryForPrompt(bundle.memoryContext, {
+    includePreferences: true,
+    includeProvenPatterns: !isShort,
+    includeFailedExperiments: !isShort,
+    includeRecentDecisions: !isShort,
+    includeGlobalLessons: true,
+    heading: isShort
+      ? 'Client Memory (Quick)'
+      : 'Client Memory (L3 Long-term Learning)',
+  })
+  if (memoryText.trim()) parts.push(memoryText)
 
   // ── 客户反馈摘要（zhuge_feedback_events） ───────────────────────────────
   if (bundle.recentFeedback.length > 0) {
