@@ -9,10 +9,10 @@
  * expected version so a concurrent edit is detected.
  */
 
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type RefObject } from 'react'
 
 import type { BookingView, BookingWarning, MilestoneView } from '@/lib/crm/booking-types'
-import { markPaid, markUnpaid, overrideDue, patchBooking } from './booking-api'
+import { fetchPartyHint, markPaid, markUnpaid, overrideDue, patchBooking, type PartyHintView } from './booking-api'
 import { dealSettled, MISSING_PARTY_MESSAGE, readDealNotice, type DealNotice } from './deal-notice'
 import { milestoneStatusText, nzToday } from './booking-format'
 import {
@@ -29,6 +29,7 @@ export interface MilestoneRowProps {
   warnings: BookingWarning[]
   busy: boolean
   readOnly?: boolean
+  contactId: string
   /** Which paid item should record a deal. Null means this client does not auto-record. */
   dealMilestone?: 'deposit' | 'balance' | null
   run: RunAction
@@ -39,16 +40,34 @@ type Mode = 'idle' | 'confirm_paid' | 'override_due'
 interface PaidPanelProps {
   clientId: string
   bookingId: string
+  bookingUpdatedAt: string
+  contactId: string
+  requireParty: boolean
   milestone: MilestoneView
   busy: boolean
   run: RunAction
   onDone: (notice: DealNotice | null) => void
 }
 
+const PARTY_SOURCE_LABEL: Record<PartyHintView['source'], string> = {
+  ai_summary: '人数来自对话摘要，可以改',
+  guest_message: '人数来自客人发来的消息，可以改',
+  call: '人数来自通话记录，可以改',
+}
+
+interface ConfirmParty {
+  text: string
+  setText: (value: string) => void
+  sourceLabel: string | null
+  ok: boolean
+  size: number
+}
+
 /** Inline panel that records a payment for one item. */
 function PaidPanel(props: PaidPanelProps): JSX.Element {
-  const { clientId, bookingId, milestone, busy, run, onDone } = props
+  const { milestone, busy, onDone, requireParty } = props
   const [paidOn, setPaidOn] = useState<string>(() => nzToday())
+  const party = useConfirmParty(requireParty, props.clientId, props.contactId)
   const inputRef = useRef<HTMLInputElement>(null)
   const inputId = useId()
 
@@ -56,46 +75,18 @@ function PaidPanel(props: PaidPanelProps): JSX.Element {
     inputRef.current?.focus()
   }, [])
 
-  const confirm = async (): Promise<void> => {
-    let notice: DealNotice | null = null
-    const ok = await run(async () => {
-      const result = await markPaid(clientId, bookingId, milestone.kind, milestone.updatedAt, paidOn)
-      if (result.ok) notice = readDealNotice(result.data)
-      return result
-    })
-    if (!ok) return
-    onDone(notice)
-  }
-
+  const dateBad = paidOn === '' || paidOn > nzToday()
   return (
-    <div
-      role="group"
-      aria-label={`确认${milestone.label}已收到款`}
-      className="mt-2 space-y-2"
-    >
-      <p className="text-sm font-semibold text-me-charcoal">
-        确认已收到{milestone.label}吗？
-      </p>
-      <div>
-        <label htmlFor={inputId} className="block text-sm font-semibold text-me-charcoal">
-          收款日期
-        </label>
-        <input
-          id={inputId}
-          ref={inputRef}
-          type="date"
-          value={paidOn}
-          max={nzToday()}
-          onChange={(e) => setPaidOn(e.target.value)}
-          className="min-h-[44px] w-full rounded-lg border border-me-charcoal/25 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:outline-none focus-visible:ring-2 focus-visible:ring-me-ochre"
-        />
-      </div>
+    <div role="group" aria-label={`确认${milestone.label}已收到款`} className="mt-2 space-y-2">
+      <p className="text-sm font-semibold text-me-charcoal">确认已收到{milestone.label}吗？</p>
+      <PaidDateField inputId={inputId} inputRef={inputRef} paidOn={paidOn} onChange={setPaidOn} />
+      {requireParty ? <PartyCountField party={party} /> : null}
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
           className={PRIMARY_BUTTON}
-          disabled={busy || paidOn === '' || paidOn > nzToday()}
-          onClick={() => void confirm()}
+          disabled={busy || dateBad || (requireParty && !party.ok)}
+          onClick={() => void savePaid(props, paidOn, party)}
         >
           确认已收到款
         </button>
@@ -105,6 +96,85 @@ function PaidPanel(props: PaidPanelProps): JSX.Element {
       </div>
     </div>
   )
+}
+
+function PaidDateField(props: {
+  inputId: string
+  inputRef: RefObject<HTMLInputElement>
+  paidOn: string
+  onChange: (value: string) => void
+}): JSX.Element {
+  return (
+    <div>
+      <label htmlFor={props.inputId} className="block text-sm font-semibold text-me-charcoal">收款日期</label>
+      <input
+        id={props.inputId}
+        ref={props.inputRef}
+        type="date"
+        value={props.paidOn}
+        max={nzToday()}
+        onChange={(e) => props.onChange(e.target.value)}
+        className="min-h-[44px] w-full rounded-lg border border-me-charcoal/25 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal focus:outline-none focus-visible:ring-2 focus-visible:ring-me-ochre"
+      />
+    </div>
+  )
+}
+
+function PartyCountField(props: { party: ConfirmParty }): JSX.Element {
+  return (
+    <div>
+      <label className="block text-sm font-semibold text-me-charcoal">
+        这笔记成成交，要填人数
+        <input
+          type="number"
+          min={1}
+          max={60}
+          value={props.party.text}
+          aria-label="确认收款的人数"
+          onChange={(e) => props.party.setText(e.target.value)}
+          className="mt-1 min-h-[44px] w-full rounded-lg border border-me-charcoal/25 bg-white px-3 py-2 text-sm font-semibold text-me-charcoal"
+        />
+      </label>
+      {props.party.sourceLabel ? (
+        <p className="mt-1 text-sm font-semibold text-me-charcoal/70">{props.party.sourceLabel}</p>
+      ) : null}
+    </div>
+  )
+}
+
+function useConfirmParty(required: boolean, clientId: string, contactId: string): ConfirmParty {
+  const [text, setText] = useState('')
+  const [sourceLabel, setSourceLabel] = useState<string | null>(null)
+  useEffect(() => {
+    if (!required) return undefined
+    let alive = true
+    void fetchPartyHint(clientId, contactId).then((hint) => {
+      if (!alive || !hint) return
+      setText(String(hint.size))
+      setSourceLabel(PARTY_SOURCE_LABEL[hint.source])
+    })
+    return () => {
+      alive = false
+    }
+  }, [required, clientId, contactId])
+  const size = Number(text)
+  const ok = Number.isInteger(size) && size >= 1 && size <= 60
+  return { text, setText, sourceLabel, ok, size }
+}
+
+async function savePaid(props: PaidPanelProps, paidOn: string, party: ConfirmParty): Promise<void> {
+  if (props.requireParty && !party.ok) return
+  let notice: DealNotice | null = null
+  const ok = await props.run(async () => {
+    if (props.requireParty) {
+      const patched = await patchBooking(props.clientId, props.bookingId, props.bookingUpdatedAt, { partySize: party.size })
+      if (!patched.ok) return patched
+    }
+    const result = await markPaid(props.clientId, props.bookingId, props.milestone.kind, props.milestone.updatedAt, paidOn)
+    if (result.ok) notice = readDealNotice(result.data)
+    return result
+  })
+  if (ok) props.onDone(notice)
 }
 
 interface OverridePanelProps {
@@ -188,7 +258,7 @@ function OverridePanel(props: OverridePanelProps): JSX.Element {
 }
 
 export function MilestoneRow(props: MilestoneRowProps): JSX.Element {
-  const { clientId, booking, milestone, warnings, busy, readOnly, dealMilestone = null, run } = props
+  const { clientId, contactId, booking, milestone, warnings, busy, readOnly, dealMilestone = null, run } = props
   const [mode, setMode] = useState<Mode>('idle')
   const [held, setHeld] = useState<DealNotice | null>(null)
   useEffect(() => {
@@ -305,6 +375,9 @@ export function MilestoneRow(props: MilestoneRowProps): JSX.Element {
         <PaidPanel
           clientId={clientId}
           bookingId={booking.id}
+          bookingUpdatedAt={booking.updatedAt}
+          contactId={contactId}
+          requireParty={dealMilestone === milestone.kind && booking.partySize == null}
           milestone={milestone}
           busy={busy}
           run={run}

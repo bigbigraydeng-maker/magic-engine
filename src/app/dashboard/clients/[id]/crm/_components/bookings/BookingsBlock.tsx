@@ -144,6 +144,7 @@ function BookingsBlockInner({
             <BookingCard
               key={booking.id}
               clientId={clientId}
+              contactId={contactId}
               booking={booking}
               busy={busy}
               run={run}
