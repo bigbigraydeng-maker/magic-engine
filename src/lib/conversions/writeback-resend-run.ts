@@ -12,9 +12,11 @@
  *    去平台后台看一眼再点「再试一次」，机器每天自动点等于把它降级成自动重发。
  *    `in_doubt` 更不碰——那是整套设计的要害，永不自动重发。
  *
- * 🔴 发送本身走 `sendApprovedOutcome()`——跟看板「再试一次」按钮背后是同一个函数、
- *    同一套四道闸（唯一约束 / CAS / post_started_at 抢占 / dry_run 门）。这里不另起
- *    一条发送路径。超过 7 天窗口的行由它自己判 `expired_no_send`，这里不重复判。
+ * 🔴 发送本身走 `sendApprovedOutcome()`——跟看板「再试一次」同一套四道闸
+ *    （唯一约束 / CAS / post_started_at 抢占 / dry_run 门）。这里不另起一条发送路径。
+ *    但只把选中的那一条事件编号传进去。看板按钮不带范围，成交和阶段可以一起补；
+ *    这里若也一起补，选中阶段那条时会把上次 5xx（可能已经入账）的成交再发一遍。
+ *    超过 7 天窗口的行由状态机自己判 `expired_no_send`，这里不重复判。
  *
  * 🔴 先探活再发：候选里只要有 auth 行，先调一次 `writer.preflight()`（只读，不写任何
  *    东西）。令牌还没修好就整批跳过、不白烧 `attempts`，并把「有 N 条发不出去、最早
@@ -58,6 +60,7 @@ export type ResendSummary = {
 type CandidateRow = {
   id: string
   outcome_id: string
+  event_id: string | null
   status: string
   last_error_code: string | null
   next_attempt_at: string | null
@@ -86,7 +89,7 @@ async function findCandidates(
   const [failedRes, stuckRes] = await Promise.all([
     supabase
       .from('me_conversion_writebacks')
-      .select('id, outcome_id, status, last_error_code, next_attempt_at, last_attempt_at')
+      .select('id, outcome_id, event_id, status, last_error_code, next_attempt_at, last_attempt_at')
       .eq('destination', destination)
       .eq('status', 'failed')
       .eq('last_error_code', 'auth')
@@ -95,7 +98,7 @@ async function findCandidates(
       .limit(RESEND_MAX_PER_RUN),
     supabase
       .from('me_conversion_writebacks')
-      .select('id, outcome_id, status, last_error_code, next_attempt_at, last_attempt_at')
+      .select('id, outcome_id, event_id, status, last_error_code, next_attempt_at, last_attempt_at')
       .eq('destination', destination)
       .eq('status', 'sending')
       .lte('last_attempt_at', stuckBefore)
@@ -181,7 +184,9 @@ export async function runFailedWritebackResend(clientId: string, deps: ResendDep
       // 🔴 发送不透传 `now`（判断用的流水线开跑时刻可能已落后十几分钟；状态机要用真实时间
       //    写 `last_attempt_at`，否则「卡在 sending 超过 5 分钟」会被误触发——见
       //    conversion-daily-pipeline.ts 文件头「now 只给判断用」）。
-      const result = await sendApprovedOutcome(row.outcome_id, { supabase, ...sendDeps })
+      const result = await sendApprovedOutcome(row.outcome_id, { supabase, ...sendDeps }, {
+        eventId: row.event_id ?? row.outcome_id,
+      })
       tally(summary, result.status)
       summary.items.push({ outcomeId: row.outcome_id, writebackId: row.id, status: result.status, message: result.message })
       const { error: auditErr } = await supabase.from('me_conversion_audit').insert({
