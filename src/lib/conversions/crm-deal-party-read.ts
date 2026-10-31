@@ -112,7 +112,7 @@ async function readTouches(db: SupabaseClient, clientId: string, contactId: stri
 async function readFacts(db: SupabaseClient, clientId: string, ids: string[]): Promise<unknown[]> {
   if (ids.length === 0) return []
   const rows = await many(db, 'telephony_call_analyses', 'id, facts', (query) =>
-    query.eq('client_id', clientId).in('id', ids),
+    query.eq('client_id', clientId).in('id', ids).neq('review_status', 'rejected'),
   )
   const byId = new Map(rows.map((row) => [row.id, row.facts]))
   return ids.map((id) => byId.get(id)).filter((facts) => facts !== undefined)
@@ -144,6 +144,7 @@ async function conversationIdsFor(db: SupabaseClient, clientId: string, contactI
 interface Chain {
   eq(column: string, value: string): Chain
   in(column: string, values: string[]): Chain
+  neq(column: string, value: string): Chain
   order(column: string, options: { ascending: boolean }): Chain
   then<T>(onfulfilled: (value: { data: unknown; error: { message: string } | null }) => T): Promise<T>
 }
