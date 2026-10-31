@@ -26,7 +26,6 @@ import { PostCallEmailBar } from './PostCallEmailBar'
 import { ProfileCard } from './ProfileCard'
 import { ReturnLeadPanel } from './ReturnLeadPanel'
 import { DncBanner } from './DncBanner'
-import { MarkWonPanel } from './MarkWonPanel'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
 import { BookingsBlock } from './bookings/BookingsBlock'
 import { BackToPayments } from './BackToPayments'
@@ -102,14 +101,6 @@ const STAGE_SOURCE_LABEL: Record<StageSource, string> = {
   order_system: '订单系统',
 }
 
-/**
- * New Asian Logistics —— 只有这一个客户把人标「已成交」时要先录金额并回传 Meta 广告。
- * 同一个字面量在 `nal-mark-won/route.ts` 另有一份，是既有惯例（`ContactDetail.tsx` 那份已在
- * 2026-09-28 CRM 重整 B2 随「全部客人」换用本组件一起删掉，不再有第三份）；按设计稿 R3
- * 要统一改成读 `leads_config.crm.onWon` 配置、不认客户 id。
- */
-const NAL_CLIENT_ID = '4ae76381-cd45-43bd-85cd-98cfd7604007'
-
 export interface DrawerNav {
   /** 「客人在等你 · 第 12 位 / 共 217 位」这类文案，drawer-nav.ts 的 positionLabel 原样传入。 */
   positionLabel: string
@@ -148,8 +139,6 @@ export function PersonDrawer({
 }) {
   const [composing, setComposing] = useState(false)
   const [changingStage, setChangingStage] = useState(false)
-  /** NAL 专属：标「已成交」前先录金额。 */
-  const [markingWon, setMarkingWon] = useState(false)
   /** 阶段的「其他」展开没有 —— 默认只给下一步 + 一个出口。 */
   const [allStages, setAllStages] = useState(false)
   /** 「上次说到这」默认只露四行，长的可展开看全。 */
@@ -590,22 +579,7 @@ export function PersonDrawer({
               一个从没被联系过的人只有两种结果：打通了，或者没打通。
               其余控件在这一刻都是噪音，而噪音的代价是销售不用这一页。 */}
           <div className="mt-3">
-            {/*
-              🔴 `markingWon` 必须判在最前面。第一版把它写在 `!composing` 的 else 分支里，
-              于是只有「正在记一笔」时才可能出现 —— 而点「已成交」只设 markingWon、
-              不设 composing，所以那个面板永远不出现。是新加的测试抓到的。
-            */}
-            {markingWon ? (
-              <MarkWonPanel
-                contactId={row.contactId}
-                onCancel={() => setMarkingWon(false)}
-                onDone={(msg, reload) => {
-                  setMarkingWon(false)
-                  setTimelineKey((k) => k + 1)
-                  onSaved(msg, reload)
-                }}
-              />
-            ) : !composing ? (
+            {!composing ? (
               <div className="flex gap-2">
                 {actions
                   .filter((a) => a.kind === 'log')
@@ -637,8 +611,8 @@ export function PersonDrawer({
           </div>
 
           {/* 「更多」—— 次要控件都收在这里，屏幕上只留一个主按钮（PM：按钮太多）。
-              markingWon / composing 那两个面板占屏时整块藏起来，别跟它们抢。 */}
-          {!markingWon && !composing && (
+              正在记一笔时整块藏起来，别跟输入框抢。 */}
+          {!composing && (
             <div className="mt-2">
               <button
                 type="button"
@@ -684,15 +658,6 @@ export function PersonDrawer({
                             <button
                               key={s.stageKey}
                               onClick={() => {
-                                // 🔴 判据照抄「全部客人」那一页（ContactDetail），一个字没改：
-                                // 只有 NAL 把人标成「已成交」时要先录金额、再回传广告转化。
-                                // 两页必须说同一件事，否则销售在一页能标、另一页标不了。
-                                // 那个客户 id 按设计稿要在后续轮改成读配置，这一轮先保持一致。
-                                if (clientId === NAL_CLIENT_ID && s.marketingAction === 'won') {
-                                  setChangingStage(false)
-                                  setMarkingWon(true)
-                                  return
-                                }
                                 void changeStage(s.stageKey, s.label)
                               }}
                               className="rounded-full bg-white px-3 py-1.5 text-[13px] font-bold text-me-charcoal shadow-sm"

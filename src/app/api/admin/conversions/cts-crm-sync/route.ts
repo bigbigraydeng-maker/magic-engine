@@ -15,12 +15,23 @@
 import { NextResponse } from 'next/server'
 import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 import { runCtsCrmSync } from '@/lib/conversions/cts-crm-sheet-sync-run'
+import { isSheetDealSyncEnabled } from '@/lib/conversions/sheet-deal-sync'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST() {
   const guard = await guardGlobalAdmin()
   if (guard) return guard
+  if (!isSheetDealSyncEnabled()) {
+    return NextResponse.json(
+      {
+        skipped: true,
+        reason: 'sheet_deal_sync_off',
+        message: '表格成交同步默认关着。要打开，本人在环境里把开关设上之后再跑。',
+      },
+      { status: 409 },
+    )
+  }
 
   try {
     const summary = await runCtsCrmSync()
