@@ -6,6 +6,12 @@ import { overlayWindows, resolveFramePlan } from './frame'
 import { fontFamily } from './theme'
 import { aspectFromCanvas, portraitCoverBox, templateProps } from './aspect'
 import { useStage } from './stage'
+import { FPS } from './timing'
+import { useStyleFamily } from './styles/fonts'
+import { peelStyle } from './styles/select'
+import { StyledMontage } from './styles/StyledMontage'
+import { styledMontageTiming } from './styles/template-craft'
+import type { ResolvedLook } from './styles/types'
 import {
   parseMontageReelProps,
   computeMontageTiming,
@@ -71,7 +77,7 @@ const Grain: React.FC = () => {
   )
 }
 
-export const MontageReel: React.FC<Record<string, unknown>> = (rawProps) => {
+const MontageReelMain: React.FC<Record<string, unknown>> = (rawProps) => {
   const props = parseMontageReelProps(templateProps(rawProps))
   const timing = computeMontageTiming(props)
   const segments = buildMontageSegments(props)
@@ -96,4 +102,37 @@ export const MontageReel: React.FC<Record<string, unknown>> = (rawProps) => {
       <Audio src={staticFile(props.musicFile)} volume={vol * (props.musicGain ?? 1)} />
     </AbsoluteFill>
   )
+}
+
+function carriedLook(rawProps: Record<string, unknown>): ResolvedLook | null {
+  const look = peelStyle(rawProps).look
+  return look == null ? null : (look as ResolvedLook)
+}
+
+function plainProps(rawProps: Record<string, unknown>): Record<string, unknown> {
+  const body = peelStyle(rawProps).body
+  return body === rawProps ? rawProps : (body as Record<string, unknown>)
+}
+
+const MontageStyled: React.FC<{ rawProps: Record<string, unknown>; look: ResolvedLook }> = ({ rawProps, look }) => {
+  const family = useStyleFamily(look)
+  const props = parseMontageReelProps(templateProps(peelStyle(rawProps).body))
+  const timing = styledMontageTiming(props.clips.length, props.words.length, look, FPS)
+  const frame = useCurrentFrame()
+  const fade = interpolate(frame, [timing.totalFrames - 8, timing.totalFrames], [1, 0], { extrapolateLeft: 'clamp' })
+  const vol = interpolate(frame, [0, 6, timing.totalFrames - 24, timing.totalFrames - 2], [0, 1, 1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' })
+  if (family === null) return null
+  return (
+    <AbsoluteFill style={{ background: '#000' }}>
+      <StyledMontage props={props} look={look} family={family} />
+      <AbsoluteFill style={{ background: '#000', opacity: 1 - fade }} />
+      <Audio src={staticFile(props.musicFile)} volume={vol * (props.musicGain ?? 1)} />
+    </AbsoluteFill>
+  )
+}
+
+export const MontageReel: React.FC<Record<string, unknown>> = (rawProps) => {
+  const look = carriedLook(rawProps)
+  if (look) return <MontageStyled rawProps={rawProps} look={look} />
+  return <MontageReelMain rawProps={plainProps(rawProps)} />
 }
