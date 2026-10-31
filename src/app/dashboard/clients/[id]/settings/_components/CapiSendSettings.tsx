@@ -24,12 +24,17 @@ interface CapiConfig {
   capiQualifiedLeadStageMalformed: boolean
   capiDealStageKey: string | null
   capiDealStageKeyMalformed: boolean
+  capiConversionLeads: boolean
+  capiConversionDealStageKey: string | null
+  capiConversionDealStageMalformed: boolean
 }
 
 interface Draft {
   milestone: Milestone
   qualifiedStage: string
   dealStage: string
+  conversionLeads: boolean
+  conversionDealStage: string
 }
 
 const selectClass =
@@ -66,6 +71,10 @@ export function CapiSendSettings({ clientId }: { clientId: string }) {
 
   const save = async () => {
     if (!draft) return
+    if (draft.conversionLeads && (!draft.qualifiedStage || !draft.conversionDealStage)) {
+      setErr('打开回传之前，先选合格咨询那一步，以及成交记在哪一步')
+      return
+    }
     setSaving(true)
     setErr(null)
     try {
@@ -124,12 +133,37 @@ function CapiForm(props: {
       <StageField
         id={`capi-qualified-${props.clientId}`}
         label="哪一步算合格咨询"
-        hint="员工亲手标成这一步，和系统读往来记录自动标成这一步，都算合格咨询。现在还不会因为走到这一步就发给广告平台。"
+        hint="员工亲手标成这一步，和系统读往来记录自动标成这一步，都算。打开下面的回传后，这一步会带上 Meta 表单的原始线索编号发出去。没有这个编号的不发，也不会改发成普通咨询。"
         value={draft.qualifiedStage}
         stages={props.stages}
         stagesLoaded={props.stagesLoaded}
         disabled={props.saving}
         onChange={(qualifiedStage) => props.onChange({ ...draft, qualifiedStage })}
+      />
+      <label className="flex items-start gap-2 text-sm font-bold text-slate-800">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={draft.conversionLeads}
+          disabled={props.saving}
+          onChange={(e) => props.onChange({ ...draft, conversionLeads: e.target.checked })}
+        />
+        <span>
+          把已报价回传到这条 Meta 线索
+          <span className="mt-1 block text-xs font-normal leading-relaxed text-slate-500">
+            每个客户单独打开。打开后，合格咨询和有线索编号的成交是同一条线索的两步。
+          </span>
+        </span>
+      </label>
+      <StageField
+        id={`capi-conversion-deal-${props.clientId}`}
+        label="成交记在这条线索的哪一步"
+        hint="有原始线索编号的成交，按这里选的名字回传，并带上成交金额。没有编号的成交仍按原来的成交或尾款发送。不选名字就不会改发送方式。"
+        value={draft.conversionDealStage}
+        stages={props.stages}
+        stagesLoaded={props.stagesLoaded}
+        disabled={props.saving}
+        onChange={(conversionDealStage) => props.onChange({ ...draft, conversionDealStage })}
       />
       <StageField
         id={`capi-deal-stage-${props.clientId}`}
@@ -219,6 +253,8 @@ function draftFrom(cfg: CapiConfig | undefined): Draft {
     milestone: cfg?.capiDealMilestone ?? '',
     qualifiedStage: cfg?.capiQualifiedLeadStageKey ?? '',
     dealStage: cfg?.capiDealStageKey ?? '',
+    conversionLeads: cfg?.capiConversionLeads === true,
+    conversionDealStage: cfg?.capiConversionDealStageKey ?? '',
   }
 }
 
@@ -227,6 +263,8 @@ function payloadFrom(draft: Draft): Record<string, unknown> {
     capiDealMilestone: draft.milestone || null,
     capiQualifiedLeadStageKey: draft.qualifiedStage || null,
     capiDealStageKey: draft.dealStage || null,
+    capiConversionLeads: draft.conversionLeads ? true : null,
+    capiConversionDealStageKey: draft.conversionDealStage || null,
   }
 }
 
@@ -236,5 +274,6 @@ function warningsFor(cfg: CapiConfig | undefined): string[] {
   if (cfg.capiDealMilestoneMalformed) lines.push('「哪一笔记成成交」之前存坏了。不重选就保存会清掉它，之后不会自动记成交。')
   if (cfg.capiQualifiedLeadStageMalformed) lines.push('「哪一步算合格咨询」之前存坏了，请从跟进步骤里重选。')
   if (cfg.capiDealStageKeyMalformed) lines.push('「哪一步可以手录成交金额」之前存坏了，请从跟进步骤里重选。')
+  if (cfg.capiConversionDealStageMalformed) lines.push('「成交记在这条线索的哪一步」之前存坏了，请从跟进步骤里重选。')
   return lines
 }

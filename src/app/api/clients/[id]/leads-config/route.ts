@@ -28,6 +28,7 @@ import { readAudienceId, writeAudienceId } from '@/lib/mailchimp/audience-config
 import {
   applyCapiSettingsWrite,
   capiSettingsView,
+  conversionLeadOptInError,
   normalizeCapiSettingsWrite,
   readyCapiSettingsWrite,
   type CapiSettingsView,
@@ -116,6 +117,8 @@ interface PatchBody {
   capiDealMilestone?: unknown
   capiQualifiedLeadStageKey?: unknown
   capiDealStageKey?: unknown
+  capiConversionLeads?: unknown
+  capiConversionDealStageKey?: unknown
 }
 
 export async function PATCH(
@@ -298,6 +301,10 @@ export async function PATCH(
     merged.own_email_domains = [...domains, ...addresses]
   }
   const next = readyCapiSettingsWrite(capiWrite) ? applyCapiSettingsWrite(merged, capiWrite) : merged
+  if (readyCapiSettingsWrite(capiWrite)) {
+    const problem = conversionLeadOptInError(next)
+    if (problem) return NextResponse.json({ error: problem }, { status: 400 })
+  }
 
   const { error: updErr } = await supabaseAdmin
     .from('clients')
