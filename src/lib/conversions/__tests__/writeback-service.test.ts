@@ -869,4 +869,52 @@ describe('同一条 Meta 线索', () => {
     await sendApprovedOutcome(OUTCOME, deps(db, writer))
     expect(writer.sendSpy).not.toHaveBeenCalled()
   })
+
+  it('只补发阶段那条时，上次 5xx 的成交不会再发', async () => {
+    seed(db, {
+      outcome: { meta_lead_id: leadId, amount_minor: 388000, currency: 'NZD' },
+      client: {
+        leads_config: {
+          capi_allowed_events: ['Purchase'],
+          capi_conversion_leads: true,
+          capi_conversion_deal_stage_key: 'balance_received',
+        },
+      },
+    })
+    db.tables.me_conversion_writebacks.push(
+      {
+        id: 'wb-purchase',
+        outcome_id: OUTCOME,
+        destination: 'meta_capi',
+        event_id: OUTCOME,
+        status: 'failed',
+        last_error_code: 'retry',
+        last_error: 'HTTP 500',
+        attempts: 1,
+        post_started_at: null,
+      },
+      {
+        id: 'wb-stage',
+        outcome_id: OUTCOME,
+        destination: 'meta_capi',
+        event_id: `${OUTCOME}:conversion-stage`,
+        status: 'failed',
+        last_error_code: 'auth',
+        last_error: '令牌失效',
+        attempts: 1,
+        post_started_at: null,
+      },
+    )
+    const writer = makeWriter()
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer), {
+      eventId: `${OUTCOME}:conversion-stage`,
+    })
+    expect(result.status).toBe('confirmed')
+    expect(writer.sendSpy).toHaveBeenCalledTimes(1)
+    const purchase = db.tables.me_conversion_writebacks.find((row) => row.event_id === OUTCOME)
+    const stage = db.tables.me_conversion_writebacks.find((row) => row.event_id === `${OUTCOME}:conversion-stage`)
+    expect(purchase).toMatchObject({ status: 'failed', last_error_code: 'retry' })
+    expect(stage?.status).toBe('confirmed')
+    expect(db.tables.me_conversion_writebacks).toHaveLength(2)
+  })
 })
