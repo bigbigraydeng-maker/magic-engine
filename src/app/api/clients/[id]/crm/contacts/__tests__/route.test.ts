@@ -480,7 +480,12 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     }], error: null })
     const { body } = await get('cts', '?view=priority')
     expect(body.recentNotes).toEqual(expect.arrayContaining([expect.objectContaining({ contactId: 'a2', at: createdAt })]))
-    expect(recorded.some((r) => r.table === 'contact_touchpoints')).toBe(false)
+    // PR #3427 起，最近手记会按触点 id 单独读一次自己的摘要（批次函数不带 summary）。
+    // 允许的只有这一条：按 id 精确取、限定本客户；不许再出现整表扫描式的触点查询。
+    const touchQueries = recorded.filter((r) => r.table === 'contact_touchpoints')
+    expect(touchQueries).toHaveLength(1)
+    expect(touchQueries[0].ins.map(([col]) => col)).toEqual(['id'])
+    expect(touchQueries[0].eqs).toContainEqual(['client_id', 'cts'])
   })
 
   it('按电话搜索时兼容本地格式，并将触点查询限制到命中的联系人', async () => {
