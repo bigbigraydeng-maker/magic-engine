@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from '@testing-library/react'
+import { buildEffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CHAT_NOTE } from '../present'
 import { PrescriptionDialog } from '../PrescriptionDialog'
@@ -118,6 +119,51 @@ describe('处方页排版', () => {
     expect(screen.queryByText('对话不会留下')).not.toBeInTheDocument()
     expect(document.querySelector('footer')).toBeNull()
     expect(document.querySelector('.fixed')).toBeNull()
+    expect(screen.getByRole('region', { name: '怎么判断有没有效果' })).toHaveTextContent('这份处方还没有效果判断卡')
+  })
+
+  it('shows the effect card in plain sentences, not as raw data', async () => {
+    const card = buildEffectJudgmentCard({
+      goal: {
+        periodStart: '2026-10-01',
+        periodEnd: '2026-10-30',
+        targetValue: 100,
+        baselineValue: 0,
+        budgetCurrency: 'NZD',
+      },
+      approvedCost: { amount: 12, currency: 'NZD' },
+      approvedCostState: 'value',
+      prescriptionCosts: [],
+      dailyCapCents: 5000,
+      dailyCapState: 'value',
+      today: '2026-10-20',
+      actualToDate: 70,
+      medianCostCents: 1200,
+      sampleDays: null,
+      loadError: null,
+    })
+    stub({
+      id: 'p1',
+      status: 'draft',
+      content: layoutContent,
+      intake: {
+        business_goal: '十一月线索',
+        timeline_urgency: 'short_term',
+        monthly_budget_aud: 3700,
+        budget_currency: 'NZD',
+        priority_dimensions: [],
+        notes: null,
+      },
+      agent_name: 'huatuo',
+      generation_meta: { measure: card },
+    })
+    renderDialog()
+    const block = await screen.findByRole('region', { name: '怎么判断有没有效果' })
+    expect(block).toHaveTextContent('每个结果最多花 12 NZD')
+    expect(block).toHaveTextContent('每天最多花 50 NZD')
+    expect(block).toHaveTextContent('不会改广告预算')
+    expect(block).toHaveTextContent('2026年10月7日')
+    expect(block.textContent).not.toMatch(/[{}[\]]/)
   })
 
   it('shows the agree hint on a draft only when the agree button is there', async () => {

@@ -1,3 +1,4 @@
+import { storedEffectCard, type EffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 import type { PrescriptionContent } from '@/types/diagnostic'
 import type { SelfGrade } from '@/lib/huatuo/types'
 import { readHuatuoStream } from '@/lib/huatuo/stream-client'
@@ -11,6 +12,7 @@ export interface FollowedPrescription {
   status: string
   progressNote: string | null
   agentName: string | null
+  effectCard: EffectJudgmentCard | null
 }
 
 export interface FollowFailure {
@@ -95,6 +97,7 @@ async function readSse(response: Response, handlers: FollowHandlers): Promise<Fo
     onStarted: (id) => handlers.onStarted?.(id),
     onProgress: (note) => handlers.onProgress?.(note),
     onDone: (payload) => {
+      const extra = payload as unknown as Record<string, unknown>
       result = {
         ok: true,
         prescriptionId: payload.prescription_id,
@@ -103,6 +106,7 @@ async function readSse(response: Response, handlers: FollowHandlers): Promise<Fo
         status: 'draft',
         progressNote: null,
         agentName: 'huatuo',
+        effectCard: storedEffectCard(extra.generation_meta ?? extra.meta) ?? null,
       }
     },
     onError: (error) => {
@@ -124,6 +128,7 @@ function doneFrom(id: string, content: PrescriptionContent, extra: Record<string
     status: textOf(row.status) || 'draft',
     progressNote: textOf(row.progressNote ?? row.progress_note),
     agentName: textOf(row.agentName ?? row.agent_name),
+    effectCard: storedEffectCard(row.generation_meta) ?? null,
   }
 }
 

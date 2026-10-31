@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { buildEffectJudgmentCard, type EffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 import {
   judgeLaunch, linesForCard, matchLaunch, planOutcomeWrites, UNSAVED_CASE_LINE,
   type InsightRef, type KpiRef, type LaunchRef, type PlanRef, type PrescriptionRef, type SiblingRef,
@@ -27,8 +28,32 @@ function sibling(over: Partial<SiblingRef> = {}): SiblingRef {
 
 const kpis: KpiRef[] = [
   { metric: '线索', target: 10, unit: '条' },
-  { metric: '成本', target: 12, unit: 'NZD' },
+  { metric: '成本', target: 99, unit: 'NZD' },
 ]
+
+/** Day 1 is the goal start, not a recount from launch. Cost is 12, not the 99 written on the kpi line. */
+function effectCard(periodStart = '2026-10-26', primary: 'lead' | 'messaging_started' | 'qualified_enquiry' = 'lead'): EffectJudgmentCard {
+  return buildEffectJudgmentCard({
+    goal: {
+      periodStart,
+      periodEnd: '2026-11-30',
+      targetValue: 10,
+      baselineValue: 0,
+      budgetCurrency: 'NZD',
+    },
+    approvedCost: { amount: 12, currency: 'NZD' },
+    approvedPrimary: primary,
+    approvedCostState: 'value',
+    prescriptionCosts: [],
+    dailyCapCents: 5000,
+    dailyCapState: 'value',
+    today: '2026-11-02',
+    actualToDate: null,
+    medianCostCents: null,
+    sampleDays: null,
+    loadError: null,
+  })
+}
 
 function day(over: Partial<InsightRef> = {}): InsightRef {
   return { insightDate: '2026-10-27', spend: 96, results: 12, ...over }
@@ -40,9 +65,10 @@ function series(first: Partial<InsightRef> = {}, through = '2026-11-01'): Insigh
   const cursor = new Date('2026-10-26T00:00:00Z')
   while (cursor.toISOString().slice(0, 10) <= through) {
     const insightDate = cursor.toISOString().slice(0, 10)
+    const firstRow = { insightDate, spend: 96, results: 12, ...first }
     out.push(out.length === 0
-      ? { insightDate, spend: 96, results: 12, ...first }
-      : { insightDate, spend: 0, results: 0 })
+      ? { ...firstRow, leads: first.leads === undefined ? firstRow.results : first.leads }
+      : { insightDate, spend: 0, results: 0, leads: 0 })
     cursor.setUTCDate(cursor.getUTCDate() + 1)
   }
   return out
@@ -50,7 +76,7 @@ function series(first: Partial<InsightRef> = {}, through = '2026-11-01'): Insigh
 
 const NZ_ZONE = 'Pacific/Auckland'
 
-function matched(now: string, insights: InsightRef[] = series(), targets: KpiRef[] = kpis) {
+function matched(now: string, insights: InsightRef[] = series(), targets: KpiRef[] = kpis, card = effectCard()) {
   const found = matchLaunch({
     prescription: prescription(),
     launches: [launch()],
@@ -59,7 +85,9 @@ function matched(now: string, insights: InsightRef[] = series(), targets: KpiRef
     missingCampaign: false,
   })
   if (found.kind !== 'matched') throw new Error(found.kind)
-  return judgeLaunch({ launch: found.launch, insights, kpis: targets, now: new Date(now), accountTimezone: NZ_ZONE })
+  return judgeLaunch({
+    launch: found.launch, insights, kpis: targets, now: new Date(now), accountTimezone: NZ_ZONE, effectCard: card,
+  })
 }
 
 // Launch exactly at NZ midnight (2026-10-26 00:00 NZDT), so 24h / 48h line up with whole days.
@@ -67,7 +95,12 @@ const MIDNIGHT_LAUNCH = '2026-10-25T11:00:00.000Z'
 
 function judgeAtMidnight(now: string, insights: InsightRef[], targets: KpiRef[] = kpis, zone: string | null = NZ_ZONE) {
   return judgeLaunch({
-    launch: launch({ authorizedAt: MIDNIGHT_LAUNCH }), insights, kpis: targets, now: new Date(now), accountTimezone: zone,
+    launch: launch({ authorizedAt: MIDNIGHT_LAUNCH }),
+    insights,
+    kpis: targets,
+    now: new Date(now),
+    accountTimezone: zone,
+    effectCard: effectCard(),
   })
 }
 
@@ -133,7 +166,25 @@ describe('prescription launch check', () => {
     expect(day7?.sentence).toContain('达标')
     expect(day7?.sentence).toContain('线索 12 条，目标 10 条')
     expect(day7?.sentence).toContain('单条成本 8 NZD，目标 12 NZD')
+    expect(day7?.sentence).not.toContain('99')
     expect(view.checkpoints.find(point => point.kpiMetric === 'launch_check_day14')?.verdict).toBe('pending')
+  })
+
+  it('keeps qualified enquiry cost unknown without attributable enquiry counts', () => {
+    const costs: KpiRef[] = [{ metric: '成本', target: 12, unit: 'NZD' }]
+    const view = matched('2026-11-02T00:00:00.000Z', series({ spend: 100, results: 10, leads: 10 }), costs, effectCard('2026-10-26', 'qualified_enquiry'))
+    const day7 = view.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')
+    expect(day7?.verdict).toBe('unknown')
+    expect(day7?.sentence).toContain('不能拿通用结果数代替成本')
+  })
+
+  it('compares messaging cost with conversations rather than generic results', () => {
+    const costs: KpiRef[] = [{ metric: '成本', target: 12, unit: 'NZD' }]
+    const rows = conversationsOn(series({ spend: 100, results: 10 }), 1)
+    const view = matched('2026-11-02T00:00:00.000Z', rows, costs, effectCard('2026-10-26', 'messaging_started'))
+    const day7 = view.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')
+    expect(day7?.verdict).toBe('missed')
+    expect(day7?.sentence).toContain('每次私信开聊成本 100 NZD')
   })
 
   it('says 没达标 when leads are below target', () => {
@@ -254,24 +305,37 @@ describe('prescription launch check', () => {
     expect(line).not.toContain('达标')
   })
 
-  it('counts launch day as day 1 in New Zealand', () => {
+  it('uses the card review date, not a recount from launch day', () => {
     const onTheDay = matched('2026-10-31T11:00:00.000Z')
     const before = matched('2026-10-31T10:59:00.000Z')
     expect(onTheDay.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')?.due).toBe(true)
     expect(before.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')?.due).toBe(false)
-    const nextCalendarDay = judgeLaunch({
+    const laterLaunch = judgeLaunch({
       launch: launch({ authorizedAt: '2026-10-26T11:00:00.000Z' }),
       insights: [day({ insightDate: '2026-10-27' })],
       kpis,
       now: new Date('2026-11-01T10:59:00.000Z'),
       accountTimezone: NZ_ZONE,
+      effectCard: effectCard(),
     })
-    expect(nextCalendarDay.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')?.due).toBe(false)
+    expect(laterLaunch.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')?.due).toBe(true)
+    const missing = judgeLaunch({
+      launch: launch(),
+      insights: series(),
+      kpis,
+      now: new Date('2026-11-02T00:00:00.000Z'),
+      accountTimezone: NZ_ZONE,
+      effectCard: null,
+    })
+    const day7 = missing.checkpoints.find(point => point.kpiMetric === 'launch_check_day7')
+    expect(day7).toMatchObject({ due: true, verdict: 'met' })
+    expect(day7?.sentence).toContain('目标 99 NZD')
+    expect(day7?.sentence).not.toContain('目标 12 NZD')
   })
 
   it('judges each early checkpoint on its own window when the run is late', () => {
     const rows = series({ spend: 20, results: 2 }, '2026-11-01')
-    rows[rows.length - 1] = { insightDate: '2026-11-01', spend: 100, results: 20 }
+    rows[rows.length - 1] = { insightDate: '2026-11-01', spend: 100, results: 20, leads: 20 }
     const leadsOnly: KpiRef[] = [{ metric: '线索', target: 10, unit: '条' }]
     const view = judgeAtMidnight('2026-11-20T00:00:00.000Z', rows, leadsOnly)
     const by = (metric: string) => view.checkpoints.find(point => point.kpiMetric === metric)
@@ -409,8 +473,10 @@ describe('prescription launch check', () => {
     const leadsOnly: KpiRef[] = [{ metric: '线索', target: 10, unit: '条' }]
     for (const zone of ['Australia/Brisbane', null]) {
       const view = judgeAtMidnight('2026-11-02T00:00:00.000Z', rows, leadsOnly, zone)
-      for (const point of view.checkpoints) {
-        expect(point).toMatchObject({ due: true, verdict: 'unknown' })
+      const due = view.checkpoints.filter(point => point.due)
+      expect(due.length).toBeGreaterThan(0)
+      for (const point of due) {
+        expect(point).toMatchObject({ verdict: 'unknown' })
         expect(point.sentence).toContain('不能下结论')
         expect(point.sentence).not.toContain('没达标')
       }
