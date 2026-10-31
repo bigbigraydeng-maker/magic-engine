@@ -13,11 +13,14 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
 import { readCapiClientConfig, stageCountsAsQualifiedLead } from '@/lib/conversions/capi-client-config'
+import { dealStageEventId, latestMetaLeadId, legalMetaLeadId } from '@/lib/conversions/conversion-lead'
 import { formatMoney } from '@/lib/conversions/money'
 import { DAY_MS, META_EVENT_WINDOW_DAYS, isPastEventWindow } from '@/lib/conversions/event-window'
 
 /** 一次最多列这么多，免得某天灌进来几百条把今日待办淹掉。 */
 const MAX_ITEMS = 20
+/** 先按「已报价 / 已开回传的客户」筛完，再截断。这个数只是筛完之后的安全上限。 */
+const FILTERED_SCAN = 500
 
 type PendingRow = {
   id: string
@@ -147,6 +150,7 @@ export async function pushConversionReviewItems(
   await pushHeldSendItems(supabase, items, clientNames, now)
   await pushUnsentQualifiedLeads(supabase, items, clientNames, now)
   await pushQualifiedLeadsNeverRecorded(supabase, items, clientNames, now)
+  await pushMissingDealStageCompanions(supabase, items, clientNames, now)
 }
 
 type HeldOutcome = {
@@ -250,6 +254,7 @@ type QualifiedLeadRow = {
   id: string
   client_id: string
   source_ref: string | null
+  meta_lead_id: string | null
   occurred_at: string
 }
 
@@ -271,8 +276,13 @@ async function pushUnsentQualifiedLeads(
   const leads = await loadQualifiedLeads(supabase, now)
   if (leads.length === 0) return
   const writebacks = await loadQualifiedWritebacks(supabase, leads.map((lead) => lead.id))
+  let added = 0
   for (const lead of leads) {
-    if (needsQualifiedRetry(lead.id, writebacks)) items.push(qualifiedRetryItem(lead, clientNames))
+    if (added >= MAX_ITEMS) break
+    if (!legalMetaLeadId(lead.meta_lead_id)) continue
+    if (!needsQualifiedRetry(lead.id, writebacks)) continue
+    items.push(qualifiedRetryItem(lead, clientNames))
+    added += 1
   }
 }
 
@@ -280,14 +290,16 @@ async function loadQualifiedLeads(supabase: SupabaseClient, now: Date): Promise<
   const since = new Date(now.getTime() - META_EVENT_WINDOW_DAYS * DAY_MS).toISOString()
   const { data, error } = await supabase
     .from('me_sale_outcomes')
-    .select('id, client_id, source_ref, occurred_at')
+    .select('id, client_id, source_ref, meta_lead_id, occurred_at')
     .eq('review_status', 'approved')
     .eq('outcome_kind', 'lead')
     .eq('source_kind', 'crm_stage_manual')
+    .like('source_ref', 'crm_qualified:%')
+    .not('meta_lead_id', 'is', null)
     .is('redacted_at', null)
     .gte('occurred_at', since)
     .order('occurred_at', { ascending: true })
-    .limit(MAX_ITEMS)
+    .limit(FILTERED_SCAN)
   if (error) throw new Error(`已报价未发出查询失败: ${error.message}`)
   return ((data ?? []) as unknown as QualifiedLeadRow[]).filter((row) => openQualifiedLead(row, now))
 }
@@ -330,28 +342,60 @@ async function pushQualifiedLeadsNeverRecorded(
   clientNames: Map<string, { name: string }>,
   now: Date,
 ): Promise<void> {
-  const contacts = await loadRecentStageContacts(supabase, now)
+  const gates = await loadLiveQualifiedGates(supabase)
+  if (gates.length === 0) return
+  const contacts = await loadQualifiedStageContacts(supabase, now, gates)
   if (contacts.length === 0) return
-  const gates = await loadClientGates(supabase, contacts.map((row) => row.client_id))
-  const waiting = contacts.filter((row) => contactWaitsForQualifiedRow(row, gates))
-  if (waiting.length === 0) return
-  const recorded = await loadQualifiedOutcomeRefs(supabase, waiting.map((row) => row.id))
-  for (const row of waiting) {
-    if (recorded.has(qualifiedRef(row))) continue
-    items.push(missingQualifiedItem(row, clientNames))
-  }
+  const recorded = await loadQualifiedOutcomeRefs(supabase, contacts.map((row) => row.id))
+  const waiting = contacts.filter((row) => !recorded.has(qualifiedRef(row)))
+  const withLead = await contactsWithMetaLead(supabase, waiting)
+  for (const row of withLead.slice(0, MAX_ITEMS)) items.push(missingQualifiedItem(row, clientNames))
 }
 
-async function loadRecentStageContacts(supabase: SupabaseClient, now: Date): Promise<StageContact[]> {
+async function loadLiveQualifiedGates(supabase: SupabaseClient): Promise<ClientGate[]> {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('id, conversion_stage, leads_config')
+    .eq('conversion_stage', 'live')
+    .limit(FILTERED_SCAN)
+  if (error) throw new Error(`已报价客户设置查询失败: ${error.message}`)
+  return ((data ?? []) as unknown as ClientGate[]).filter((gate) => gateOpensQualified(gate))
+}
+
+function gateOpensQualified(gate: ClientGate): boolean {
+  if (gate.conversion_stage !== 'live') return false
+  const cfg = readCapiClientConfig(gate.leads_config)
+  return cfg.conversionLeadsEnabled && !cfg.qualifiedLeadStageMalformed && Boolean(cfg.qualifiedLeadStageKey)
+}
+
+async function loadQualifiedStageContacts(
+  supabase: SupabaseClient,
+  now: Date,
+  gates: ClientGate[],
+): Promise<StageContact[]> {
+  const keys = qualifiedStageKeys(gates)
+  if (keys.length === 0) return []
   const since = new Date(now.getTime() - META_EVENT_WINDOW_DAYS * DAY_MS).toISOString()
   const { data, error } = await supabase
     .from('contacts')
     .select('id, client_id, stage, stage_updated_at')
+    .in('client_id', gates.map((gate) => gate.id))
+    .in('stage', keys)
     .gte('stage_updated_at', since)
     .order('stage_updated_at', { ascending: true })
-    .limit(MAX_ITEMS)
+    .limit(FILTERED_SCAN)
   if (error) throw new Error(`已报价没记上查询失败: ${error.message}`)
-  return ((data ?? []) as unknown as StageContact[]).filter((row) => openStageContact(row, now))
+  return ((data ?? []) as unknown as StageContact[])
+    .filter((row) => openStageContact(row, now) && contactWaitsForQualifiedRow(row, gates))
+}
+
+function qualifiedStageKeys(gates: ClientGate[]): string[] {
+  const keys = new Set<string>()
+  for (const gate of gates) {
+    const key = readCapiClientConfig(gate.leads_config).qualifiedLeadStageKey
+    if (key) keys.add(key)
+  }
+  return [...keys]
 }
 
 function openStageContact(row: StageContact, now: Date): boolean {
@@ -359,14 +403,23 @@ function openStageContact(row: StageContact, now: Date): boolean {
   return !isPastEventWindow(row.stage_updated_at, now)
 }
 
-async function loadClientGates(supabase: SupabaseClient, clientIds: string[]): Promise<ClientGate[]> {
+async function contactsWithMetaLead(supabase: SupabaseClient, rows: StageContact[]): Promise<StageContact[]> {
+  if (rows.length === 0) return []
   const { data, error } = await supabase
-    .from('clients')
-    .select('id, conversion_stage, leads_config')
-    .in('id', [...new Set(clientIds)])
-    .limit(MAX_ITEMS)
-  if (error) throw new Error(`已报价客户设置查询失败: ${error.message}`)
-  return (data ?? []) as unknown as ClientGate[]
+    .from('contact_touchpoints')
+    .select('contact_id, source_ref, occurred_at')
+    .eq('source', 'meta_lead_form')
+    .in('contact_id', rows.map((row) => row.id))
+    .limit(FILTERED_SCAN)
+  if (error) throw new Error(`已报价线索编号查询失败: ${error.message}`)
+  const byContact = new Map<string, Array<{ source_ref?: unknown; occurred_at?: unknown }>>()
+  for (const point of (data ?? []) as Array<{ contact_id?: string; source_ref?: unknown; occurred_at?: unknown }>) {
+    if (!point.contact_id) continue
+    const list = byContact.get(point.contact_id) ?? []
+    list.push(point)
+    byContact.set(point.contact_id, list)
+  }
+  return rows.filter((row) => latestMetaLeadId(byContact.get(row.id) ?? []) != null)
 }
 
 function contactWaitsForQualifiedRow(row: StageContact, gates: ClientGate[]): boolean {
@@ -384,7 +437,7 @@ async function loadQualifiedOutcomeRefs(supabase: SupabaseClient, contactIds: st
     .eq('source_kind', 'crm_stage_manual')
     .eq('outcome_kind', 'lead')
     .in('contact_id', contactIds)
-    .limit(200)
+    .limit(FILTERED_SCAN)
   if (error) throw new Error(`已报价是否已记查询失败: ${error.message}`)
   const found = new Set<string>()
   for (const row of (data ?? []) as unknown as QualifiedOutcomeRef[]) {
@@ -490,5 +543,103 @@ async function pushTokenDeadItems(
       // 🔴 必须是绝对网址（见上面同类注释）。
       href: `https://app.magicengine.com.au/dashboard/conversions?client=${clientId}&status=failed`,
     })
+  }
+}
+
+type DealCompanionRow = {
+  id: string
+  client_id: string
+  meta_lead_id: string | null
+  occurred_at: string
+  order_ref: string | null
+}
+
+/** Purchase already recorded, but the lead-stage send row was never created. Pull, not a log line. */
+async function pushMissingDealStageCompanions(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  clientNames: Map<string, { name: string }>,
+  now: Date,
+): Promise<void> {
+  const gates = await loadLiveDealGates(supabase)
+  if (gates.length === 0) return
+  const deals = await loadDealsAwaitingCompanion(supabase, now, gates)
+  if (deals.length === 0) return
+  const sent = await loadCompanionEventIds(supabase, deals.map((deal) => dealStageEventId(deal.id)))
+  let added = 0
+  for (const deal of deals) {
+    if (added >= MAX_ITEMS) break
+    if (sent.has(dealStageEventId(deal.id))) continue
+    if (!dealStillExpectsCompanion(deal, gates)) continue
+    items.push(missingCompanionItem(deal, clientNames))
+    added += 1
+  }
+}
+
+async function loadLiveDealGates(supabase: SupabaseClient): Promise<ClientGate[]> {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('id, conversion_stage, leads_config')
+    .eq('conversion_stage', 'live')
+    .limit(FILTERED_SCAN)
+  if (error) throw new Error(`成交下一步客户设置查询失败: ${error.message}`)
+  return ((data ?? []) as unknown as ClientGate[]).filter((gate) => gateOpensDealStage(gate))
+}
+
+function gateOpensDealStage(gate: ClientGate): boolean {
+  if (gate.conversion_stage !== 'live') return false
+  const cfg = readCapiClientConfig(gate.leads_config)
+  return cfg.conversionLeadsEnabled && Boolean(cfg.conversionDealStageKey)
+}
+
+async function loadDealsAwaitingCompanion(
+  supabase: SupabaseClient,
+  now: Date,
+  gates: ClientGate[],
+): Promise<DealCompanionRow[]> {
+  const since = new Date(now.getTime() - META_EVENT_WINDOW_DAYS * DAY_MS).toISOString()
+  const { data, error } = await supabase
+    .from('me_sale_outcomes')
+    .select('id, client_id, meta_lead_id, occurred_at, order_ref')
+    .in('client_id', gates.map((gate) => gate.id))
+    .in('outcome_kind', ['purchase', 'balance'])
+    .eq('review_status', 'approved')
+    .is('redacted_at', null)
+    .not('meta_lead_id', 'is', null)
+    .gte('occurred_at', since)
+    .order('occurred_at', { ascending: true })
+    .limit(FILTERED_SCAN)
+  if (error) throw new Error(`成交下一步查询失败: ${error.message}`)
+  return ((data ?? []) as unknown as DealCompanionRow[]).filter((row) => !isPastEventWindow(row.occurred_at, now))
+}
+
+function dealStillExpectsCompanion(row: DealCompanionRow, gates: ClientGate[]): boolean {
+  const gate = gates.find((item) => item.id === row.client_id)
+  if (!gate || !legalMetaLeadId(row.meta_lead_id)) return false
+  return gateOpensDealStage(gate)
+}
+
+async function loadCompanionEventIds(supabase: SupabaseClient, eventIds: string[]): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('event_id')
+    .in('event_id', eventIds)
+    .limit(FILTERED_SCAN)
+  if (error) throw new Error(`成交下一步发送记录查询失败: ${error.message}`)
+  const found = new Set<string>()
+  for (const row of (data ?? []) as Array<{ event_id?: string | null }>) {
+    if (row.event_id) found.add(row.event_id)
+  }
+  return found
+}
+
+function missingCompanionItem(deal: DealCompanionRow, clientNames: Map<string, { name: string }>): ManualItem {
+  return {
+    kind: 'conversion_needs_review',
+    client_name: clientNames.get(deal.client_id)?.name ?? '客户',
+    client_id: deal.client_id,
+    what: `有一笔成交${deal.order_ref ? `（单号 ${deal.order_ref}）` : ''}的下一步还没记上。不补的话，广告平台只知道收了款，不知道这是同一条线索的下一步。`,
+    how: '打开这一页，找到这一条，点「再试一次」。已经发出去的那笔不会再发一次。',
+    href: `https://app.magicengine.com.au/dashboard/conversions?client=${deal.client_id}&focus=${deal.id}`,
   }
 }

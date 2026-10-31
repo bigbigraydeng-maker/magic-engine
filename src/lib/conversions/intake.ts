@@ -64,7 +64,9 @@ export const SOURCE_KINDS: readonly SourceKind[] = [
  */
 export type ActionSource = 'email' | 'business_messaging'
 
-const MESSENGER_SOURCED: ReadonlySet<SourceKind> = new Set(['messenger_conversation', 'crm_stage_manual'])
+// 只有真的从私信来的才算私信。付款、手改阶段记在 crm_stage_manual，那是邮件或转账，
+// 不能因为客人以前留过私信身份就报成私信。私信发出去时还必须带 messaging_channel。
+const MESSENGER_SOURCED: ReadonlySet<SourceKind> = new Set(['messenger_conversation'])
 
 export function actionSourceForSourceKind(sourceKind: SourceKind): ActionSource {
   return MESSENGER_SOURCED.has(sourceKind) ? 'business_messaging' : 'email'

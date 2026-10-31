@@ -156,6 +156,8 @@ describe('build · Facebook 私信身份（PSID）匹配键', () => {
       CONFIG,
     )
     expect(messenger.data[0].action_source).toBe('business_messaging')
+    expect(messenger.data[0].messaging_channel).toBe('messenger')
+    expect(email.data[0].messaging_channel).toBeUndefined()
   })
 })
 
@@ -210,6 +212,7 @@ describe('build · 同一条 Meta 线索的阶段', () => {
     expect(p.event_id).toBe('11111111-2222-3333-4444-555555555555:conversion-stage')
     expect(p.event_name).not.toBe('Purchase')
     expect(p.action_source).toBe('system_generated')
+    expect(p.messaging_channel).toBeUndefined()
     expect(p.user_data.lead_id).toBe(leadId)
     expect(p.custom_data).toMatchObject({
       event_source: 'crm',

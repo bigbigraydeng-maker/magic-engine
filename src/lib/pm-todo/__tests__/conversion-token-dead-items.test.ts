@@ -36,6 +36,8 @@ function fakeSupabase(seed: {
   qualified?: Row[]
   contacts?: Row[]
   clients?: Row[]
+  touchpoints?: Row[]
+  deals?: Row[]
 }) {
   return {
     from(table: string) {
@@ -44,9 +46,10 @@ function fakeSupabase(seed: {
       let sortAsc = true
       let cap: number | null = null
       const source = () => {
-        if (table === 'me_sale_outcomes') return [...(seed.pending ?? []), ...(seed.qualified ?? [])]
+        if (table === 'me_sale_outcomes') return [...(seed.pending ?? []), ...(seed.qualified ?? []), ...(seed.deals ?? [])]
         if (table === 'contacts') return seed.contacts ?? []
         if (table === 'clients') return seed.clients ?? []
+        if (table === 'contact_touchpoints') return seed.touchpoints ?? []
         return [...(seed.doubts ?? []), ...(seed.authFailed ?? []), ...(seed.held ?? [])]
       }
       const b: Record<string, unknown> = {
@@ -55,6 +58,15 @@ function fakeSupabase(seed: {
         is: (c: string, v: unknown) => (filters.push((r) => (cell(r, c) ?? null) === v), b),
         in: (c: string, values: unknown[]) => (filters.push((r) => values.includes(cell(r, c))), b),
         gte: (c: string, v: unknown) => (filters.push((r) => String(cell(r, c) ?? '') >= String(v)), b),
+        like: (c: string, pattern: string) => {
+          const prefix = pattern.endsWith('%') ? pattern.slice(0, -1) : pattern
+          filters.push((r) => String(cell(r, c) ?? '').startsWith(prefix))
+          return b
+        },
+        not: (c: string, op: string, v: unknown) => {
+          if (op === 'is') filters.push((r) => (cell(r, c) ?? null) !== v)
+          return b
+        },
         contains: (c: string, v: Record<string, unknown>) => (
           filters.push((r) => {
             const cur = cell(r, c)
@@ -275,6 +287,8 @@ describe('名单停住的已批准成交', () => {
 })
 
 describe('已报价发给广告平台没成功', () => {
+  const LEAD = '1687504185706630'
+
   function quoted(id: string, over: Row = {}): Row {
     return {
       id,
@@ -282,6 +296,7 @@ describe('已报价发给广告平台没成功', () => {
       outcome_kind: 'lead',
       source_kind: 'crm_stage_manual',
       source_ref: `crm_qualified:contact:${id}`,
+      meta_lead_id: LEAD,
       review_status: 'approved',
       redacted_at: null,
       occurred_at: '2026-09-20T00:00:00.000Z',
@@ -311,6 +326,7 @@ describe('已报价发给广告平台没成功', () => {
           quoted('auth-one'),
           quoted('held-one'),
           quoted('other', { source_ref: 'messenger:1' }),
+          quoted('no-lead', { meta_lead_id: null }),
         ],
         doubts: [
           sendRow('failed-one'),
@@ -344,6 +360,12 @@ describe('已报价发给广告平台没成功', () => {
           stage: 'quoted',
           stage_updated_at: '2026-09-20T00:00:00.000Z',
         }],
+        touchpoints: [{
+          contact_id: contactId,
+          source: 'meta_lead_form',
+          source_ref: '1687504185706630',
+          occurred_at: '2026-09-19T00:00:00.000Z',
+        }],
         clients: [{
           id: CTS,
           conversion_stage: 'live',
@@ -364,5 +386,132 @@ describe('已报价发给广告平台没成功', () => {
     expect(items[0].href).toBe(
       `https://app.magicengine.com.au/dashboard/clients/${CTS}/crm/all?contact=${contactId}`,
     )
+  })
+
+  it('没有线索编号的已报价不进待办', async () => {
+    const items: ManualItem[] = []
+    const contactId = '11111111-2222-3333-4444-555555555555'
+    await pushConversionReviewItems(
+      fakeSupabase({
+        contacts: [{
+          id: contactId,
+          client_id: CTS,
+          stage: 'quoted',
+          stage_updated_at: '2026-09-20T00:00:00.000Z',
+        }],
+        clients: [{
+          id: CTS,
+          conversion_stage: 'live',
+          leads_config: {
+            capi_conversion_leads: true,
+            capi_qualified_lead_stage_key: 'quoted',
+            capi_conversion_deal_stage_key: 'balance_received',
+          },
+        }],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    expect(items.filter((item) => item.what.includes('没记上'))).toHaveLength(0)
+  })
+
+  it('先按已报价筛，再限条数：前面几十个别的阶段不会挡住新的已报价', async () => {
+    const items: ManualItem[] = []
+    const contactId = '22222222-2222-3333-4444-555555555555'
+    const others = Array.from({ length: 30 }, (_, i) => ({
+      id: `other-${i}`,
+      client_id: CTS,
+      stage: 'new',
+      stage_updated_at: `2026-09-18T00:${String(i).padStart(2, '0')}:00.000Z`,
+    }))
+    await pushConversionReviewItems(
+      fakeSupabase({
+        contacts: [
+          ...others,
+          {
+            id: contactId,
+            client_id: CTS,
+            stage: 'quoted',
+            stage_updated_at: '2026-09-21T00:00:00.000Z',
+          },
+        ],
+        clients: [{
+          id: CTS,
+          conversion_stage: 'live',
+          leads_config: {
+            capi_conversion_leads: true,
+            capi_qualified_lead_stage_key: 'quoted',
+            capi_conversion_deal_stage_key: 'balance_received',
+          },
+        }],
+        touchpoints: [{
+          contact_id: contactId,
+          source: 'meta_lead_form',
+          source_ref: '1687504185706630',
+          occurred_at: '2026-09-19T00:00:00.000Z',
+        }],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    const missing = items.filter((item) => item.what.includes('没记上'))
+    expect(missing).toHaveLength(1)
+    expect(missing[0].href).toContain(contactId)
+  })
+
+  it('先排除已经发出的，再限条数：最早的 20 条成功不会挡住后面没发出的', async () => {
+    const items: ManualItem[] = []
+    const sent = Array.from({ length: 20 }, (_, i) => quoted(`sent-${i}`, {
+      occurred_at: `2026-09-18T00:${String(i).padStart(2, '0')}:00.000Z`,
+    }))
+    await pushConversionReviewItems(
+      fakeSupabase({
+        qualified: [...sent, quoted('still-open', { occurred_at: '2026-09-21T00:00:00.000Z' })],
+        doubts: sent.map((row) => sendRow(String(row.id), { status: 'confirmed' })),
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    const quotes = items.filter((item) => item.what.includes('已报价发给广告平台没成功'))
+    expect(quotes.map((item) => item.href)).toEqual([
+      'https://app.magicengine.com.au/dashboard/conversions?client=c0000000-0000-0000-0000-000000000000&focus=still-open',
+    ])
+  })
+
+  it('成交已记下、下一步发送记录没建成时进今日待办', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({
+        clients: [{
+          id: CTS,
+          conversion_stage: 'live',
+          leads_config: {
+            capi_conversion_leads: true,
+            capi_qualified_lead_stage_key: 'quoted',
+            capi_conversion_deal_stage_key: 'balance_received',
+          },
+        }],
+        deals: [{
+          id: 'deal-1',
+          client_id: CTS,
+          outcome_kind: 'purchase',
+          review_status: 'approved',
+          redacted_at: null,
+          meta_lead_id: '1687504185706630',
+          occurred_at: '2026-09-20T00:00:00.000Z',
+          order_ref: '84191',
+        }],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    const gap = items.find((item) => item.what.includes('下一步还没记上'))
+    expect(gap?.href).toContain('focus=deal-1')
+    expect(gap?.how).toContain('再试一次')
+    expect(gap?.what).not.toContain('回写')
   })
 })
