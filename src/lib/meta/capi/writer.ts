@@ -38,6 +38,7 @@ import { hashEmail, hashName, hashPhone } from '@/lib/pii/hasher'
 import { maskForPreview } from './preview'
 import { resolveCapiConfig, type CapiCredentials } from './config'
 import { capiEventNameForKind } from '@/lib/conversions/capi-client-config'
+import { CONVERSION_CRM_NAME, CONVERSION_EVENT_SOURCE, NO_META_LEAD_MESSAGE } from '@/lib/conversions/conversion-lead'
 import { toMajorUnits } from '@/lib/conversions/money'
 
 const GRAPH_VERSION = process.env.META_CAPI_VERSION ?? 'v19.0'
@@ -103,6 +104,53 @@ function isThrottleCode(code: number | undefined): boolean {
   return typeof code === 'number' && code >= 80000 && code < 90000
 }
 
+function eventNameFor(outcome: OutcomeForSend): string {
+  if (!outcome.conversionLeadEventName) return capiEventNameForKind(outcome.outcomeKind)
+  if (!outcome.metaLeadId || !/^\d{15,17}$/.test(outcome.metaLeadId)) {
+    throw new Error(NO_META_LEAD_MESSAGE)
+  }
+  return outcome.conversionLeadEventName
+}
+
+function userDataFor(outcome: OutcomeForSend, config: ClientSendConfig): Record<string, string[] | string> {
+  const userData: Record<string, string[] | string> = {}
+  const em = hashEmail(outcome.customerEmail)
+  const ph = hashPhone(outcome.customerPhone, config.defaultPhoneCountry)
+  const fn = hashName(outcome.customerFirst)
+  const ln = hashName(outcome.customerLast)
+  // 只放真有的。空字符串的哈希人人相同，会降低匹配质量。
+  if (em) userData.em = [em]
+  if (ph) userData.ph = [ph]
+  if (fn) userData.fn = [fn]
+  if (ln) userData.ln = [ln]
+  // PSID 与主页 id 官方要求不哈希。
+  if (outcome.pageScopedUserId) {
+    userData.page_scoped_user_id = outcome.pageScopedUserId
+    if (config.facebookPageId) userData.page_id = config.facebookPageId
+  }
+  // lead_id 不哈希。普通事件里它只是匹配键；线索阶段回传里它是这条线索的编号。
+  if (outcome.metaLeadId && /^\d{15,17}$/.test(outcome.metaLeadId)) {
+    userData.lead_id = outcome.metaLeadId
+  }
+  return userData
+}
+
+function customDataFor(outcome: OutcomeForSend): Record<string, unknown> | undefined {
+  const money = moneyData(outcome)
+  if (!outcome.conversionLeadEventName) return money
+  return { event_source: CONVERSION_EVENT_SOURCE, lead_event_source: CONVERSION_CRM_NAME, ...(money ?? {}) }
+}
+
+function moneyData(outcome: OutcomeForSend): Record<string, unknown> | undefined {
+  if (outcome.outcomeKind === 'lead' || outcome.amountMinor == null || !outcome.currency) return undefined
+  const value = toMajorUnits(outcome.amountMinor, outcome.currency)
+  // 不认识的币种不按 2 位小数猜。猜错就是差 100 倍，而且撤不回。
+  if (value == null) {
+    throw new Error(`不支持的币种 ${outcome.currency} —— 请先在 src/lib/conversions/money.ts 里补上它的小数位`)
+  }
+  return { currency: outcome.currency, value, ...(outcome.orderRef ? { order_id: outcome.orderRef } : {}) }
+}
+
 export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
   readonly kind = 'meta_capi' as const
 
@@ -110,73 +158,26 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
   readonly maxEventAgeDays = 7
 
   build(outcome: OutcomeForSend, config: ClientSendConfig): MetaCapiPayload {
-    const userData: Record<string, string[] | string> = {}
-
-    const em = hashEmail(outcome.customerEmail)
-    const ph = hashPhone(outcome.customerPhone, config.defaultPhoneCountry)
-    const fn = hashName(outcome.customerFirst)
-    const ln = hashName(outcome.customerLast)
-
-    // 匹配键越全，Meta 越容易认出这是谁。但只放真有的，
-    // 不塞空字符串的哈希 —— 那会是一个"人人相同"的假身份，反而降低匹配质量。
-    if (em) userData.em = [em]
-    if (ph) userData.ph = [ph]
-    if (fn) userData.fn = [fn]
-    if (ln) userData.ln = [ln]
-
-    // 🔴 第三种匹配键——Facebook Messenger 私信身份。官方文档原话"Do not hash"，
-    //    两个字段（PSID + 主页 id）都不哈希，跟上面 em/ph/fn/ln 处理方式不一样，
-    //    不能顺手套进 hash* 函数里。
-    if (outcome.pageScopedUserId) {
-      userData.page_scoped_user_id = outcome.pageScopedUserId
-      if (config.facebookPageId) userData.page_id = config.facebookPageId
-    }
-
-    // ⚠️ 这只是给既有 Purchase/Lead 事件多加一把匹配键，**不是** Meta 的 “CRM 线索阶段回传”
-    //    （Conversion Leads：system_generated + custom_data.event_source=crm + 月 200 线索 /
-    //    28 天内成交等条件）。后者是另一套集成，当前没做，别因为这里出现 lead_id 就当成做过了。
-    // 🔴 第四种匹配键——Facebook 即时表单线索编号。官方参数表标注「Do not hash」，
-    //    跟 em/ph/fn/ln 不同，不能套 hash* 函数。只放真有的、格式对的（15–17 位纯数字）。
-    if (outcome.metaLeadId && /^\d{15,17}$/.test(outcome.metaLeadId)) {
-      userData.lead_id = outcome.metaLeadId
-    }
-
+    const eventName = eventNameFor(outcome)
+    const converting = Boolean(outcome.conversionLeadEventName)
     const event: MetaCapiPayload['data'][number] = {
-      event_name: capiEventNameForKind(outcome.outcomeKind),
+      event_name: eventName,
       event_time: Math.floor(new Date(outcome.occurredAt).getTime() / 1000),
       // 幂等键 = 事实行的 uuid（不可变）。
-      // 注意：Meta 只在 pixel↔server 之间用它去重，服务端之间不去重 ——
-      // 真正防重复靠我们自己那道数据库锁，这里带上是为了跟浏览器端事件对齐。
+      // Meta 只在 pixel↔server 之间用它去重，服务端之间不去重。
       event_id: outcome.id,
-      // 由调用方按数据来源渠道决定（见 destination-writer.ts 的字段注释），
-      // 这一层不做推断——同一个人可能既留过私信身份、又是靠邮件促成的成交，
-      // 判断"这笔事实来自哪"是业务层的事，不是"这条记录里有没有某个字段"。
-      action_source: outcome.actionSource,
-      user_data: userData,
+      // 普通事件沿用来源渠道。线索阶段回传按官方要求用 system_generated。
+      action_source: converting ? 'system_generated' : outcome.actionSource,
+      user_data: userDataFor(outcome, config),
     }
-
-    if (outcome.outcomeKind !== 'lead' && outcome.amountMinor != null && outcome.currency) {
-      const value = toMajorUnits(outcome.amountMinor, outcome.currency)
-      // 🔴 不认识的币种：宁可不带金额，也不按 2 位小数猜 —— 猜错就是差 100 倍，
-      //    而金额发错给 Meta 撤不回。录入层本就拒收未知币种，这里是第二道闸。
-      if (value == null) {
-        throw new Error(
-          `不支持的币种 ${outcome.currency} —— 请先在 src/lib/conversions/money.ts 里补上它的小数位`,
-        )
-      }
-      event.custom_data = {
-        currency: outcome.currency,
-        value,
-        ...(outcome.orderRef ? { order_id: outcome.orderRef } : {}),
-      }
-    }
-
+    const custom = customDataFor(outcome)
+    if (custom) event.custom_data = custom
     return { data: [event] }
   }
 
   preview(outcome: OutcomeForSend, config: ClientSendConfig): Record<string, unknown> {
     return maskForPreview(outcome, config, {
-      eventName: capiEventNameForKind(outcome.outcomeKind),
+      eventName: eventNameFor(outcome),
       maxEventAgeDays: this.maxEventAgeDays,
     })
   }

@@ -329,7 +329,22 @@ async function applyStage(
     throw new Error(`留痕失败，已把阶段退回: ${aErr.message}`)
   }
 
+  await noteQualifiedLead(clientId, contactId, stage, now)
   return true
+}
+
+/** The stage is already saved. A send failure must not undo it or fail the run. */
+async function noteQualifiedLead(clientId: string, contactId: string, stage: string, now: Date): Promise<void> {
+  try {
+    const { recordQualifiedStageLead } = await import('@/lib/conversions/crm-qualified-lead')
+    await recordQualifiedStageLead(
+      supabaseAdmin,
+      { clientId, contactId, stageKey: stage, actor: STAGE_INFER_ACTOR },
+      now,
+    )
+  } catch {
+    // Already committed. The next stage change can try again.
+  }
 }
 
 /**

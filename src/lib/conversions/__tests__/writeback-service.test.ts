@@ -768,3 +768,70 @@ describe('人工裁决「不确定」', () => {
     }
   })
 })
+
+describe('同一条 Meta 线索', () => {
+  const leadId = '1687504185706630'
+  const quotedRef = 'crm_qualified:11111111-2222-3333-4444-555555555555:quoted'
+
+  it('合格咨询没有线索编号时停住，不调用发送，也不改成普通咨询', async () => {
+    seed(db, {
+      outcome: { outcome_kind: 'lead', amount_minor: null, currency: null, source_ref: quotedRef, meta_lead_id: null },
+      client: { leads_config: { capi_allowed_events: ['Purchase'] } },
+    })
+    const build = vi.fn()
+    const writer = makeWriter({ build })
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(result.status).toBe('failed_permanent')
+    expect(result.message).toContain('没有原始线索编号')
+    expect(result.message).toContain('普通咨询')
+    expect(build).not.toHaveBeenCalled()
+    expect(writer.sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('有线索编号的成交先过成交名单，再带上阶段名和金额', async () => {
+    seed(db, {
+      outcome: { meta_lead_id: leadId, amount_minor: 388000, currency: 'NZD' },
+      client: {
+        leads_config: {
+          capi_allowed_events: ['Purchase'],
+          capi_conversion_leads: true,
+          capi_conversion_deal_stage_key: 'balance_received',
+        },
+      },
+    })
+    const build = vi.fn().mockReturnValue({ data: [] })
+    await sendApprovedOutcome(OUTCOME, deps(db, makeWriter({ build })))
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBe('balance_received')
+    expect(build.mock.calls[0][0].amountMinor).toBe(388000)
+    expect(build.mock.calls[0][0].metaLeadId).toBe(leadId)
+  })
+
+  it('没有线索编号的成交仍按原来的方式发', async () => {
+    seed(db, {
+      client: {
+        leads_config: { capi_conversion_leads: true, capi_conversion_deal_stage_key: 'balance_received' },
+      },
+    })
+    const build = vi.fn().mockReturnValue({ data: [] })
+    await sendApprovedOutcome(OUTCOME, deps(db, makeWriter({ build })))
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBeUndefined()
+    expect(build.mock.calls[0][0].outcomeKind).toBe('purchase')
+  })
+
+  it('成交不在允许名单里时，不因为开了线索阶段就发出去', async () => {
+    seed(db, {
+      outcome: { meta_lead_id: leadId },
+      client: {
+        leads_config: {
+          capi_allowed_events: ['BalancePaid'],
+          capi_conversion_leads: true,
+          capi_conversion_deal_stage_key: 'balance_received',
+        },
+      },
+    })
+    const build = vi.fn()
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, makeWriter({ build })))
+    expect(result.status).toBe('queued')
+    expect(build).not.toHaveBeenCalled()
+  })
+})

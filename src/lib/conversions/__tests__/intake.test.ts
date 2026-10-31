@@ -300,6 +300,24 @@ describe('录入校验 · 匹配键', () => {
     expect(r.errors.join()).toContain('contactId 必须提供')
   })
 
+  it('只有合法的 Meta 线索编号和 contactId 也可以记下', () => {
+    const r = buildIntakeRow(
+      {
+        clientId: CTS,
+        contactId: '11111111-2222-3333-4444-555555555555',
+        outcomeKind: 'lead',
+        occurredAt: '2026-09-04T00:00:00Z',
+        sourceKind: 'crm_stage_manual',
+        metaLeadId: '1687504185706630',
+      },
+      CTX,
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.row.meta_lead_id).toBe('1687504185706630')
+    expect(r.row.customer_email).toBeNull()
+  })
+
   it('邮箱/电话/PSID 一个都没有 → 拒，错误信息带上三个选项', () => {
     const r = buildIntakeRow(
       {

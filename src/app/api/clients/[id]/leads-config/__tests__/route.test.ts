@@ -273,6 +273,8 @@ describe('PATCH 广告回传配置', () => {
     expect(json.config.capiDealMilestone).toBeNull()
     expect(json.config.capiQualifiedLeadStageKey).toBeNull()
     expect(json.config.capiDealStageKey).toBeNull()
+    expect(json.config.capiConversionLeads).toBe(false)
+    expect(json.config.capiConversionDealStageKey).toBeNull()
   })
 
   it('保存四项时留下原来的邮件配置', async () => {
@@ -347,5 +349,32 @@ describe('PATCH 广告回传配置', () => {
     expect((await PATCH(patchReq({ capiDealMilestone: 'won' }), params)).status).toBe(400)
     expect((await PATCH(patchReq({ capiDealStageKey: 'Won' }), params)).status).toBe(400)
     expect(updates).toHaveLength(0)
+  })
+
+  it('打开线索阶段回传时，两步都没选就不保存', async () => {
+    const updates = mockClients({ trade_domains: ['hot.co.nz'] })
+    const res = await PATCH(patchReq({ capiConversionLeads: true }), params)
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toContain('合格咨询')
+    expect(updates).toHaveLength(0)
+  })
+
+  it('两步都选了才打开，并且不碰原来的邮件配置', async () => {
+    const updates = mockClients({ trade_domains: ['hot.co.nz'] })
+    const res = await PATCH(
+      patchReq({
+        capiConversionLeads: true,
+        capiQualifiedLeadStageKey: 'quoted',
+        capiConversionDealStageKey: 'balance_received',
+      }),
+      params,
+    )
+    expect(res.status).toBe(200)
+    expect(updates[0].leads_config).toMatchObject({
+      trade_domains: ['hot.co.nz'],
+      capi_conversion_leads: true,
+      capi_qualified_lead_stage_key: 'quoted',
+      capi_conversion_deal_stage_key: 'balance_received',
+    })
   })
 })
