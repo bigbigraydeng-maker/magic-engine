@@ -671,7 +671,7 @@ export function localDayStartMs(now: Date, timeZone: string): number {
 }
 
 /** 某一刻，某个时区比 UTC 快多少毫秒。 */
-function tzOffsetMs(at: Date, timeZone: string): number {
+export function tzOffsetMs(at: Date, timeZone: string): number {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone,
     hour12: false,
