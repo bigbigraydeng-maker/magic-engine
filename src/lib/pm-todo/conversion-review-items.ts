@@ -21,6 +21,8 @@ import { DAY_MS, META_EVENT_WINDOW_DAYS, isPastEventWindow } from '@/lib/convers
 const MAX_ITEMS = 20
 /** 先按「已报价 / 已开回传的客户」筛完，再截断。这个数只是筛完之后的安全上限。 */
 const FILTERED_SCAN = 500
+/** 发送记录按成交编号分批读。一批再截断会把后面已发出的当成没发过。 */
+const WRITEBACK_ID_BATCH = 100
 
 type PendingRow = {
   id: string
@@ -313,11 +315,22 @@ async function loadQualifiedWritebacks(
   supabase: SupabaseClient,
   outcomeIds: string[],
 ): Promise<QualifiedWriteback[]> {
+  const rows: QualifiedWriteback[] = []
+  for (let start = 0; start < outcomeIds.length; start += WRITEBACK_ID_BATCH) {
+    const batch = outcomeIds.slice(start, start + WRITEBACK_ID_BATCH)
+    rows.push(...await loadQualifiedWritebackBatch(supabase, batch))
+  }
+  return rows
+}
+
+async function loadQualifiedWritebackBatch(
+  supabase: SupabaseClient,
+  outcomeIds: string[],
+): Promise<QualifiedWriteback[]> {
   const { data, error } = await supabase
     .from('me_conversion_writebacks')
     .select('outcome_id, event_id, status, last_error_code, payload_preview')
     .in('outcome_id', outcomeIds)
-    .limit(200)
   if (error) throw new Error(`已报价发送记录查询失败: ${error.message}`)
   return (data ?? []) as unknown as QualifiedWriteback[]
 }

@@ -460,6 +460,23 @@ describe('授权失效的失败行说清「会自动补发」（2026-09-22 起�
     expect(screen.getByRole('button', { name: '再试一次' })).toBeTruthy()
   })
 
+  it('原发送失败、阶段记录不确定时，先给出人工核对', async () => {
+    mountWith([
+      outcome({
+        id: 'mixed',
+        review_status: 'approved',
+        me_conversion_writebacks: [
+          { id: 'primary', status: 'failed', last_error: '平台忙', last_error_code: 'retry', next_attempt_at: null, event_id: 'mixed' },
+          { id: 'stage', status: 'in_doubt', last_error: '断了', last_error_code: null, next_attempt_at: null, event_id: 'mixed:conversion-stage' },
+        ],
+      }),
+    ])
+    expect(await screen.findByRole('button', { name: '平台后台看到了 · 记为已收到' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '确认没收到 · 重新发送' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '再试一次' })).toBeNull()
+    expect(screen.getByText(/不确定平台收到没有/)).toBeTruthy()
+  })
+
   it('成交下一步还没记上时可以再试一次，普通排队成交仍然不出现', async () => {
     mountWith([
       outcome({

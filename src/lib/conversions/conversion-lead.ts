@@ -100,6 +100,19 @@ function occurredAtMs(value: unknown): number {
   return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed
 }
 
+/**
+ * A quoted row keeps the stage name stored on it. Sending still waits for the
+ * current switch: off or unreadable means hold, and never an ordinary Lead.
+ */
+export function qualifiedLeadHoldReason(leadsConfig: unknown): string | null {
+  const cfg = readCapiClientConfig(leadsConfig)
+  if (cfg.conversionLeadsEnabled) return null
+  const why = cfg.conversionLeadsMalformed
+    ? '线索阶段回传的开关读不出来'
+    : '这个客户的线索阶段回传现在是关的'
+  return `${why}。这条先停住，没有发给广告平台，也没有改成普通咨询。`
+}
+
 function quotedResolution(sourceRef: string | null, metaLeadId: string | null): ConversionLeadResolution {
   const eventName = stageKeyFromQualifiedRef(sourceRef)
   if (!eventName) {
