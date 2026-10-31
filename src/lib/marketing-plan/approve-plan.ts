@@ -16,6 +16,7 @@ import { evaluateApproval, type GateResult } from '@/lib/marketing-plan/promo/ga
 import { hardNotGreen } from '@/lib/marketing-plan/approve-plan-gates'
 import {
   archiveSameGoalApprovedPlans,
+  reconcileSameGoalApprovedPlans,
   releaseSupersedeUnlessApproved,
   type ArchiveSameGoalResult,
 } from '@/lib/marketing-plan/promo/supersede-prior-approved-write'
@@ -125,7 +126,8 @@ export async function approvePlan(args: {
 
   // Dispatch first, then archive older approved plans, then flip this one.
   // A failed archive is rolled back inside that call. A failed flip puts those
-  // plans back to approved. Plans with a promo structure do not dispatch legacy tasks.
+  // plans back to approved. After a successful flip, keep only the latest
+  // approved plan for this goal. Plans with a promo structure do not dispatch legacy tasks.
   const dispatch: Dispatch = hasPromoField(plan.plan_data)
     ? { marketing_plan_id: plan.id, tasks_created: 0, tasks_skipped: 0, task_ids: [], packages_created: 0, package_ids: [] }
     : await dispatchPlanTasks(plan)
@@ -152,8 +154,21 @@ async function commitApproval(args: {
   }
   const receipt = buildReceipt(args, approvedAt)
   const flipped = await flipToApproved(args.plan, args.clientId, approvedAt, receipt)
-  if (flipped.ok) return { kind: 'approved', plan: flipped.plan, dispatch: args.dispatch, receipt }
-  return abandonFlip(args.plan, args.clientId, held, flipped)
+  if (!flipped.ok) return abandonFlip(args.plan, args.clientId, held, flipped)
+  const lost = await lostToNewerPlan(args.clientId, args.plan)
+  if (lost) return lost
+  return { kind: 'approved', plan: flipped.plan, dispatch: args.dispatch, receipt }
+}
+
+const NEWER_WON = '同一目标已经有一份更新的已批准计划，这份已收起。请刷新后查看。'
+
+async function lostToNewerPlan(clientId: string, approving: MarketingPlan): Promise<ApprovePlanResult | null> {
+  const reconciled = await reconcileSameGoalApprovedPlans({ clientId, approving })
+  if (!reconciled.ok) return { kind: 'conflict', status: 500, error: reconciled.error }
+  if (reconciled.keptId !== null && reconciled.keptId !== approving.id) {
+    return { kind: 'conflict', status: 409, error: NEWER_WON }
+  }
+  return null
 }
 
 function buildReceipt(

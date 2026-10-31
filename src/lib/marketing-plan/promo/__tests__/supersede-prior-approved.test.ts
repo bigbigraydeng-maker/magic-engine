@@ -7,6 +7,7 @@ import type { GateFacts } from '@/lib/marketing-plan/promo/gates'
 import { baseSpec } from '@/lib/marketing-plan/promo/__tests__/fixtures'
 import type { PromoSpec } from '@/lib/marketing-plan/promo/spec'
 import {
+  keptApprovedPlanId,
   planStatusLabel,
   priorApprovedSameGoal,
   supersededReplacementText,
@@ -30,6 +31,7 @@ const h = vi.hoisted(() => ({
   rows: [] as Row[],
   failApprove: null as null | 'error' | 'winner',
   failArchiveIds: new Set<string>(),
+  afterFirstArchive: null as null | (() => Promise<void>),
   dispatch: vi.fn(),
   revoke: vi.fn(),
   gate: null as GateFacts | null,
@@ -86,7 +88,13 @@ vi.mock('@/lib/supabase', () => {
         const refused = refusal(hit)
         if (refused) return refused
         Object.assign(hit, { ...hit, ...patch, updated_at: `bumped-${hit.id}` })
-        return { data: { ...hit }, error: null }
+        const saved = { data: { ...hit }, error: null }
+        if (patch.status === 'archived' && h.afterFirstArchive) {
+          const hook = h.afterFirstArchive
+          h.afterFirstArchive = null
+          return Promise.resolve().then(() => hook()).then(() => saved)
+        }
+        return saved
       }
       if (one) {
         const row = hits[0]
@@ -115,6 +123,7 @@ vi.mock('@/lib/marketing-plan/promo/facts', () => ({
 }))
 
 import { approvePlan } from '@/lib/marketing-plan/approve-plan'
+import { reconcileSameGoalApprovedPlans } from '@/lib/marketing-plan/promo/supersede-prior-approved-write'
 import { goodFacts } from '@/lib/marketing-plan/promo/__tests__/fixtures'
 
 function socialPromo(goalId: string): PromoSpec {
@@ -162,6 +171,7 @@ beforeEach(() => {
   h.rows = []
   h.failApprove = null
   h.failArchiveIds = new Set()
+  h.afterFirstArchive = null
   h.dispatch.mockReset()
   h.dispatch.mockResolvedValue({
     marketing_plan_id: 'plan-new', tasks_created: 1, tasks_skipped: 0,
@@ -279,6 +289,56 @@ describe('approvePlan archives the previous approved plan for the same goal', ()
     expect(stampOf('plan-old')?.plan_id).toBe('plan-new')
     expect(h.revoke).not.toHaveBeenCalled()
   })
+
+  it('keeps only the later approval when two drafts for the same goal overlap', async () => {
+    let tick = 0
+    const clock = vi.spyOn(Date.prototype, 'toISOString').mockImplementation(() => {
+      tick += 1
+      return `2026-10-31T01:00:${String(tick).padStart(2, '0')}.000Z`
+    })
+    h.rows = [
+      planRow({ id: 'plan-a', status: 'draft' }),
+      planRow({ id: 'plan-b', status: 'draft' }),
+      planRow({ id: 'plan-old', status: 'approved' }),
+    ]
+    h.afterFirstArchive = async () => {
+      const second = await approvePlan({ clientId: 'client-1', planId: 'plan-b', approvedBy: 'ray@example.com' })
+      expect(second.kind).toBe('approved')
+    }
+    try {
+      const first = await approvePlan({ clientId: 'client-1', planId: 'plan-a', approvedBy: 'ray@example.com' })
+      expect(first.kind).toBe('conflict')
+      if (first.kind === 'conflict') expect(first.error).toContain('已收起')
+      expect(byId('plan-b').status).toBe('approved')
+      expect(byId('plan-a').status).toBe('archived')
+      expect(byId('plan-old').status).toBe('archived')
+      expect(stampOf('plan-a')?.plan_id).toBe('plan-b')
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it('keeps the same plan when two reconciles both see two approvals', async () => {
+    h.rows = [
+      planRow({ id: 'plan-a', status: 'approved' }),
+      planRow({ id: 'plan-b', status: 'approved' }),
+    ]
+    byId('plan-a').approved_at = '2026-10-31T01:00:01.000Z'
+    byId('plan-b').approved_at = '2026-10-31T01:00:02.000Z'
+    const [left, right] = await Promise.all([
+      reconcileSameGoalApprovedPlans({ clientId: 'client-1', approving: byId('plan-a') }),
+      reconcileSameGoalApprovedPlans({ clientId: 'client-1', approving: byId('plan-b') }),
+    ])
+    expect(left).toEqual({ ok: true, keptId: 'plan-b' })
+    expect(right).toEqual({ ok: true, keptId: 'plan-b' })
+    expect(byId('plan-b').status).toBe('approved')
+    expect(byId('plan-a').status).toBe('archived')
+    expect(stampOf('plan-a')?.plan_id).toBe('plan-b')
+    const again = await reconcileSameGoalApprovedPlans({ clientId: 'client-1', approving: byId('plan-b') })
+    expect(again).toEqual({ ok: true, keptId: 'plan-b' })
+    expect(byId('plan-a').status).toBe('archived')
+    expect(byId('plan-b').status).toBe('approved')
+  })
 })
 
 describe('replaced plans are described in plain language', () => {
@@ -307,6 +367,7 @@ describe('priorApprovedSameGoal', () => {
     return {
       client_id: 'client-1',
       updated_at: '2026-10-01T00:00:00.000Z',
+      approved_at: '2026-10-01T00:00:00.000Z',
       plan_data: { promo: socialPromo('goal-a') },
       generation_meta: null,
       ...over,
@@ -328,5 +389,19 @@ describe('priorApprovedSameGoal', () => {
   it('archives nothing when the plan being approved has no goal', () => {
     const bare = { id: 'plan-new', plan_data: { tasks: [] }, generation_meta: null }
     expect(priorApprovedSameGoal(bare, 'client-1', [row({ id: 'plan-old', status: 'approved' })])).toEqual([])
+  })
+})
+
+describe('keptApprovedPlanId', () => {
+  it('keeps the later approval, and the higher id when the time matches', () => {
+    const earlier = { id: 'plan-a', approved_at: '2026-10-31T01:00:01.000Z' }
+    const later = { id: 'plan-b', approved_at: '2026-10-31T01:00:02.000Z' }
+    expect(keptApprovedPlanId([earlier, later])).toBe('plan-b')
+    expect(keptApprovedPlanId([later, earlier])).toBe('plan-b')
+    expect(keptApprovedPlanId([
+      { id: 'plan-a', approved_at: '2026-10-31T01:00:02.000Z' },
+      { id: 'plan-b', approved_at: '2026-10-31T01:00:02.000Z' },
+    ])).toBe('plan-b')
+    expect(keptApprovedPlanId([])).toBeNull()
   })
 })

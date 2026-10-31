@@ -14,6 +14,7 @@ export interface PriorApprovedRow {
   client_id: string
   status: string
   updated_at: string
+  approved_at: string | null
   plan_data: unknown
   generation_meta: MarketingPlan['generation_meta']
 }
@@ -24,6 +25,30 @@ export interface SupersededBy {
 }
 
 type GoalPlan = Pick<PriorApprovedRow, 'id' | 'plan_data' | 'generation_meta'>
+
+/**
+ * Which approved plan to keep when more than one exists for the goal.
+ * A later approval time wins. The same time keeps the higher id, so two
+ * callers reading the same rows archive the same losers.
+ */
+export function keptApprovedPlanId(
+  rows: readonly Pick<PriorApprovedRow, 'id' | 'approved_at'>[],
+): string | null {
+  let kept: Pick<PriorApprovedRow, 'id' | 'approved_at'> | null = null
+  for (const row of rows) {
+    if (kept === null || approvalIsNewer(row, kept)) kept = row
+  }
+  return kept?.id ?? null
+}
+
+function approvalIsNewer(
+  row: Pick<PriorApprovedRow, 'id' | 'approved_at'>,
+  kept: Pick<PriorApprovedRow, 'id' | 'approved_at'>,
+): boolean {
+  const byTime = (row.approved_at ?? '').localeCompare(kept.approved_at ?? '')
+  if (byTime !== 0) return byTime > 0
+  return row.id.localeCompare(kept.id) > 0
+}
 
 /** Approved rows for the same non-empty goal. Drafts, other goals, and this plan are left out. */
 export function priorApprovedSameGoal(
