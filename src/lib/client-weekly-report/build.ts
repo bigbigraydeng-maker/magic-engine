@@ -84,12 +84,19 @@ function normalizeTerm(s: string): string {
   return flat.endsWith('s') ? flat.slice(0, -1) : flat
 }
 
+/** Shorter normalized terms match too many unrelated queries (substring match across word boundaries). */
+const MIN_BRAND_TERM_LENGTH = 6
+
+function usableBrandTerms(terms: readonly string[]): string[] {
+  return terms.filter((t) => normalizeTerm(t).length >= MIN_BRAND_TERM_LENGTH)
+}
+
 export function isBrandQuery(query: string, brandTerms: readonly string[]): boolean {
   const q = normalizeTerm(query)
   if (q.length === 0) return false
   return brandTerms.some((t) => {
     const n = normalizeTerm(t)
-    return n.length >= 4 && q.includes(n)
+    return n.length >= MIN_BRAND_TERM_LENGTH && q.includes(n)
   })
 }
 
@@ -129,7 +136,9 @@ export function buildWeeklySummary(input: WeeklyReportInput): WeeklySummary {
   if (input.leadsInWindow === null) notes.push('咨询记录本周没有读到，咨询数未列出，不代表为 0。')
 
   // Brand split is only meaningful on the queries Google returned (top rows, not the full tail).
-  const brand = input.gsc ? splitBrand(input.gsc.queries, input.brandTerms) : null
+  // No usable brand term configured => no split at all (never a fabricated "brand clicks: 0").
+  const hasBrandTerms = usableBrandTerms(input.brandTerms).length > 0
+  const brand = input.gsc && hasBrandTerms ? splitBrand(input.gsc.queries, input.brandTerms) : null
   if (input.gsc && input.gsc.queries.length > 0 && brand) {
     notes.push('谷歌不公开搜索量很小的搜索词，所以品牌和其他搜索的点击相加，会少于上面的总点击数。')
   }
@@ -174,6 +183,7 @@ export function renderWeeklyReportZh(s: WeeklySummary): string {
 
   lines.push('二、网站浏览（网站流量统计）')
   if (input.ga4) {
+    lines.push(`- 流量统计区间：${input.ga4.periodStart} 至 ${input.ga4.periodEnd}（与上面的搜索统计区间不完全相同，含当天尚未统计完的数据）`)
     lines.push(`- 页面浏览 ${input.ga4.totalPageviews} 次，访问 ${input.ga4.totalSessions} 次，访客 ${input.ga4.totalUsers} 人`)
     if (s.topPages.length > 0) {
       lines.push('- 浏览最多的页面：')
@@ -194,12 +204,12 @@ export function renderWeeklyReportZh(s: WeeklySummary): string {
 
   lines.push('四、本周网站更新')
   if (input.siteUpdates.length > 0) for (const u of input.siteUpdates) lines.push(`- ${u}`)
-  else lines.push('- 本周没有新的更新')
+  else lines.push('- （待运营补充）')
   lines.push('')
 
   lines.push('五、下周计划与需要您提供的')
   if (input.nextSteps.length > 0) for (const n of input.nextSteps) lines.push(`- ${n}`)
-  else lines.push('- 暂无')
+  else lines.push('- （待运营补充）')
 
   if (s.notes.length > 0) {
     lines.push('')

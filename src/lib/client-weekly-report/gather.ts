@@ -50,12 +50,13 @@ interface ConnectorRow {
 }
 
 async function loadConnectors(clientId: string): Promise<{ siteUrl: string | null; propertyId: string | null }> {
-  const { data } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('client_connectors')
     .select('anchor, config')
     .eq('client_id', clientId)
     .eq('status', 'connected')
     .in('anchor', ['gsc', 'ga4'])
+  if (error) throw new Error(`connectors_read_failed:${error.message}`)
   const rows = (data ?? []) as ConnectorRow[]
   const siteUrl = rows.find((r) => r.anchor === 'gsc')?.config?.site_url
   const propertyId = rows.find((r) => r.anchor === 'ga4')?.config?.property_id
@@ -126,6 +127,7 @@ async function gatherGa4(clientId: string, propertyId: string): Promise<WeeklyRe
   }
 }
 
+// Leads use UTC day boundaries while Search Console days are Pacific time: a few hours of drift, same 7-day span.
 async function countLeads(clientId: string, w: ReportWindows): Promise<number | null> {
   const { count, error } = await supabaseAdmin
     .from('leads')
@@ -148,11 +150,12 @@ export async function gatherWeeklyReportInput(
   clientId: string,
   opts: GatherOptions = {},
 ): Promise<WeeklyReportInput | null> {
-  const { data: client } = await supabaseAdmin
+  const { data: client, error: clientError } = await supabaseAdmin
     .from('clients')
     .select('name, brand_aliases')
     .eq('id', clientId)
     .maybeSingle()
+  if (clientError) throw new Error(`client_read_failed:${clientError.message}`)
   if (!client) return null
 
   const windows = computeWindows(opts.now ?? new Date())

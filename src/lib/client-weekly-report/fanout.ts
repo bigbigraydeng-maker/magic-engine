@@ -79,7 +79,9 @@ export function parseWeeklyReportDue(raw: unknown): ParsedWeeklyDue {
 export interface WeeklyReportOutcome {
   readonly client_id: string
   readonly week_key: string
-  readonly status: 'sent_to_internal_review' | 'no_data' | 'client_not_found' | 'send_failed'
+  readonly status: 'sent_to_internal_review' | 'no_data' | 'client_not_found' | 'send_failed' | 'error'
+  /** Why it failed, when it did. Never contains report content or credentials. */
+  readonly detail: string | null
   readonly gsc_read: boolean
   readonly ga4_read: boolean
   readonly leads_read: boolean
@@ -102,19 +104,23 @@ export async function runOneWeeklyReport(
   deps: WeeklyReportDeps,
 ): Promise<WeeklyReportOutcome> {
   const base = { client_id: due.client_id, week_key: due.week_key, no_client_send: true as const }
-  const input = await deps.gather(due.client_id)
-  if (!input) {
-    return { ...base, status: 'client_not_found', gsc_read: false, ga4_read: false, leads_read: false, receipt: null }
-  }
-  const reads = { gsc_read: input.gsc !== null, ga4_read: input.ga4 !== null, leads_read: input.leadsInWindow !== null }
-  if (!reads.gsc_read && !reads.ga4_read) {
-    return { ...base, status: 'no_data', ...reads, receipt: null }
-  }
-  const receipt = await deps.send(buildWeeklySummary(input), `${due.week_key}-${due.client_id}`)
-  return {
-    ...base,
-    status: receipt.status === 'sent_to_internal_review' ? 'sent_to_internal_review' : 'send_failed',
-    ...reads,
-    receipt,
+  const none = { gsc_read: false, ga4_read: false, leads_read: false, receipt: null }
+  try {
+    const input = await deps.gather(due.client_id)
+    if (!input) return { ...base, ...none, status: 'client_not_found', detail: null }
+    const reads = { gsc_read: input.gsc !== null, ga4_read: input.ga4 !== null, leads_read: input.leadsInWindow !== null }
+    if (!reads.gsc_read && !reads.ga4_read) return { ...base, ...reads, receipt: null, status: 'no_data', detail: null }
+    const receipt = await deps.send(buildWeeklySummary(input), `${due.week_key}-${due.client_id}`)
+    const sent = receipt.status === 'sent_to_internal_review'
+    return {
+      ...base,
+      ...reads,
+      receipt,
+      status: sent ? 'sent_to_internal_review' : 'send_failed',
+      detail: sent ? null : receipt.detail ?? receipt.status,
+    }
+  } catch (e) {
+    // A throw must become a failed receipt, otherwise the run row stays "running" forever.
+    return { ...base, ...none, status: 'error', detail: e instanceof Error ? e.message : String(e) }
   }
 }

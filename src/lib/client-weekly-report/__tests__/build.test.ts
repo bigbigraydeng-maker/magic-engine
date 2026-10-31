@@ -100,6 +100,26 @@ describe('buildWeeklySummary / render', () => {
     expect(renderWeeklyReportZh(s)).toContain('（上周为 0）')
   })
 
+  it('does not invent brand numbers when no usable brand term is configured', () => {
+    const text = renderWeeklyReportZh(buildWeeklySummary({ ...base, brandTerms: [] }))
+    expect(text).not.toContain('通过品牌名搜索')
+    const short = renderWeeklyReportZh(buildWeeklySummary({ ...base, brandTerms: ['home', '大瑞'] }))
+    expect(short).not.toContain('通过品牌名搜索')
+  })
+
+  it('says unsupplied free-text sections are pending, never "none this week"', () => {
+    const text = renderWeeklyReportZh(buildWeeklySummary(base))
+    expect(text).not.toContain('本周没有新的更新')
+    expect(text.match(/（待运营补充）/g)?.length).toBe(2)
+  })
+
+  it('shows the real GA4 interval, since it differs from the search window', () => {
+    const text = renderWeeklyReportZh(
+      buildWeeklySummary({ ...base, ga4: { ...base.ga4!, periodStart: '2026-10-28', periodEnd: '2026-11-04' } }),
+    )
+    expect(text).toContain('流量统计区间：2026-10-28 至 2026-11-04')
+  })
+
   it('does not hardcode any client name', () => {
     const text = renderWeeklyReportZh(buildWeeklySummary({ ...base, clientLabel: 'Other Co' }))
     expect(text.startsWith('Other Co')).toBe(true)

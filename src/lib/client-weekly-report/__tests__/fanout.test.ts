@@ -87,6 +87,23 @@ describe('runOneWeeklyReport', () => {
     expect(out).toMatchObject({ status: 'sent_to_internal_review', gsc_read: true, ga4_read: false })
   })
 
+  it('turns a thrown error into a failed outcome instead of letting the run hang', async () => {
+    const out = await runOneWeeklyReport(due, {
+      gather: async () => {
+        throw new Error('db down')
+      },
+      send: vi.fn(),
+    })
+    expect(out).toMatchObject({ status: 'error', detail: 'db down', no_client_send: true })
+    const sendThrows = await runOneWeeklyReport(due, {
+      gather: async () => input(),
+      send: async () => {
+        throw new Error('network')
+      },
+    })
+    expect(sendThrows).toMatchObject({ status: 'error', detail: 'network' })
+  })
+
   it('reports a failed send as failed, and a missing client as not found', async () => {
     const failed = await runOneWeeklyReport(due, { gather: async () => input(), send: async () => receipt('failed') })
     expect(failed.status).toBe('send_failed')

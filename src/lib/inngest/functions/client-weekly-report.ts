@@ -150,6 +150,7 @@ export function createWeeklyReportRunOneFunction(deps: WeeklyReportDeps) {
             ga4_read: result.ga4_read,
             leads_read: result.leads_read,
             request_id: result.receipt?.requestId ?? null,
+            detail: result.detail,
             no_client_send: true,
           },
           error: ok ? undefined : `weekly_report_${result.status}`,

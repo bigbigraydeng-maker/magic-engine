@@ -23,6 +23,12 @@ export interface DraftReceipt {
   detail?: string
 }
 
+function errorDetail(e: unknown): string {
+  if (e instanceof Error) return e.message
+  if (e && typeof e === 'object' && 'message' in e) return String((e as { message: unknown }).message)
+  return String(e)
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
@@ -49,14 +55,18 @@ export async function sendWeeklyReportDraftToInternalReview(
     `<p><b>待审草稿：以下内容尚未发给客户。</b>审过后由人决定是否发出。</p>` +
     `<pre style="font-family:inherit;white-space:pre-wrap">${escapeHtml(text)}</pre>`
 
-  const resend = new Resend(apiKey)
-  const { error } = await resend.emails.send({
-    from: meMailFrom('Magic Engine 客户周报'),
-    to: [ME_MAIL_TO_ADDRESS],
-    subject: `[待审] ${input.clientLabel} 每周浏览总结 ${input.window.start} 至 ${input.window.end}`,
-    html,
-    text: `待审草稿：以下内容尚未发给客户。\n\n${text}`,
-  })
-  if (error) return { ...base, status: 'failed', detail: String(error) }
-  return { ...base, status: 'sent_to_internal_review' }
+  try {
+    const resend = new Resend(apiKey)
+    const { error } = await resend.emails.send({
+      from: meMailFrom('Magic Engine 客户周报'),
+      to: [ME_MAIL_TO_ADDRESS],
+      subject: `[待审] ${input.clientLabel.replace(/\s+/g, ' ')} 每周浏览总结 ${input.window.start} 至 ${input.window.end}`,
+      html,
+      text: `待审草稿：以下内容尚未发给客户。\n\n${text}`,
+    })
+    if (error) return { ...base, status: 'failed', detail: errorDetail(error) }
+    return { ...base, status: 'sent_to_internal_review' }
+  } catch (e) {
+    return { ...base, status: 'failed', detail: errorDetail(e) }
+  }
 }
