@@ -200,13 +200,57 @@ export async function sendApprovedOutcome(
 
 async function sendScopedCompanion(outcomeId: string, deps: SendDeps): Promise<SendOutcomeResult> {
   const eventName = await readDealStageName(deps.supabase, outcomeId)
-  if (!eventName) {
-    return { status: 'failed', message: '这条阶段记录现在发不出去。', writebackId: null }
+  if (eventName) {
+    return deliverApprovedOutcome(outcomeId, deps, {
+      eventId: dealStageEventId(outcomeId),
+      eventName,
+    })
   }
-  return deliverApprovedOutcome(outcomeId, deps, {
-    eventId: dealStageEventId(outcomeId),
-    eventName,
+  // Switch is off, so a new send is forbidden. An outbound request that already
+  // left still has to become in_doubt, or the daily todo never sees it.
+  const parked = await parkStuckStageSend(
+    deps.supabase,
+    deps.writer.kind,
+    dealStageEventId(outcomeId),
+    deps.now ?? new Date(),
+  )
+  return parked ?? { status: 'failed', message: '这条阶段记录现在发不出去。', writebackId: null }
+}
+
+/** Reconcile a stage row stuck in `sending`. Never sends. Null when there is nothing to park. */
+async function parkStuckStageSend(
+  supabase: SupabaseClient,
+  destination: string,
+  eventId: string,
+  now: Date,
+): Promise<SendOutcomeResult | null> {
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('id, status, last_attempt_at')
+    .eq('destination', destination)
+    .eq('event_id', eventId)
+    .maybeSingle()
+  if (error) throw new Error(`读取阶段发送记录失败：${error.message}`)
+  const wb = data as { id: string; status: string; last_attempt_at: string | null } | null
+  if (!wb || wb.status !== 'sending') return null
+  const startedAt = wb.last_attempt_at ? new Date(wb.last_attempt_at).getTime() : null
+  const stuckMs = startedAt == null ? Infinity : now.getTime() - startedAt
+  if (stuckMs < STUCK_SENDING_MS) {
+    return {
+      status: 'sending',
+      message: '这条正在发送中，请过几秒再看 —— 不会重复发送',
+      writebackId: wb.id,
+    }
+  }
+  await casUpdate(supabase, wb.id, ['sending'], {
+    status: 'in_doubt',
+    last_error: `发送开始后 ${Math.round(stuckMs / 60_000)} 分钟没有结果，状态未知`,
   })
+  return {
+    status: 'in_doubt',
+    message: '上一次发送中途断了，不确定平台收没收 —— 需要人去核对，不会自动重发',
+    writebackId: wb.id,
+  }
 }
 
 async function sendDealStageCompanion(outcomeId: string, deps: SendDeps): Promise<void> {

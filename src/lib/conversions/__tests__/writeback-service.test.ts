@@ -917,4 +917,36 @@ describe('同一条 Meta 线索', () => {
     expect(stage?.status).toBe('confirmed')
     expect(db.tables.me_conversion_writebacks).toHaveLength(2)
   })
+
+  it('开关关掉后，发到一半的阶段记录转成不确定，不自动重发', async () => {
+    seed(db, {
+      outcome: { meta_lead_id: leadId },
+      client: {
+        leads_config: {
+          capi_conversion_leads: false,
+          capi_conversion_deal_stage_key: 'balance_received',
+        },
+      },
+    })
+    const started = new Date(Date.now() - 10 * 60_000).toISOString()
+    db.tables.me_conversion_writebacks.push({
+      id: 'wb-stage',
+      outcome_id: OUTCOME,
+      destination: 'meta_capi',
+      event_id: `${OUTCOME}:conversion-stage`,
+      status: 'sending',
+      attempts: 1,
+      post_started_at: started,
+      last_attempt_at: started,
+    })
+    const writer = makeWriter()
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer), {
+      eventId: `${OUTCOME}:conversion-stage`,
+    })
+    expect(writer.sendSpy).not.toHaveBeenCalled()
+    expect(result.status).toBe('in_doubt')
+    expect(result.message).toContain('不会自动重发')
+    expect(db.tables.me_conversion_writebacks).toHaveLength(1)
+    expect(db.tables.me_conversion_writebacks[0].status).toBe('in_doubt')
+  })
 })
