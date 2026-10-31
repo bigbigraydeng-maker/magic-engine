@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
 import { readCapiClientConfig, stageCountsAsQualifiedLead } from '@/lib/conversions/capi-client-config'
 import { dealStageEventId, latestMetaLeadId, legalMetaLeadId } from '@/lib/conversions/conversion-lead'
+import { pushCrmDealFollowUps } from './crm-deal-gap-items'
 import { formatMoney } from '@/lib/conversions/money'
 import { DAY_MS, META_EVENT_WINDOW_DAYS, isPastEventWindow } from '@/lib/conversions/event-window'
 
@@ -117,6 +118,7 @@ export async function pushConversionReviewItems(
 
   const deals = await loadDealsAwaitingApproval(supabase, now)
   pushDealApprovalReminder(deals, items, clientNames, now)
+  await pushCrmDealFollowUps(supabase, items, clientNames, now)
 
   // ── 发出去了但不知道对方收没收 ──────────────────────────────────────
   // 这一档程序绝不会自己重发 —— 重发一次就是永久多记一笔成交，撤不回。

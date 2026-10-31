@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { choosePartySize, partySizesInText } from '../crm-deal-party'
 import { isPastEventWindow } from '../event-window'
 import {
   blockingApprovedPurchase,
@@ -158,6 +159,17 @@ describe('recordMilestoneDeal', () => {
     const result = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: null, actor: null }, NOW)
     expect(result).toMatchObject({ attempted: true, recorded: false, reason: 'not_live' })
     expect(io.inserted).toHaveLength(0)
+  })
+
+  it('does not auto-send when the only stored headcount splits adults and children', async () => {
+    const io = memory({
+      loadBooking: async () => ({ contactId: CONTACT, partySize: null, tourId: 'tour', departureId: null }),
+      loadStoredPartySize: async () => choosePartySize(null, [partySizesInText('2 adults and 1 child')]),
+    })
+    const result = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
+    expect(result).toMatchObject({ recorded: false, reason: 'missing_party_size' })
+    expect(io.inserted).toHaveLength(0)
+    expect(io.sends).toEqual([])
   })
 
   it('does not insert when party size is missing, and does not fall back to a typed amount', async () => {
