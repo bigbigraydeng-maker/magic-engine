@@ -28,7 +28,15 @@ function cell(row: Row, path: string): unknown {
   return cur
 }
 
-function fakeSupabase(seed: { pending?: Row[]; doubts?: Row[]; authFailed?: Row[]; held?: Row[]; qualified?: Row[] }) {
+function fakeSupabase(seed: {
+  pending?: Row[]
+  doubts?: Row[]
+  authFailed?: Row[]
+  held?: Row[]
+  qualified?: Row[]
+  contacts?: Row[]
+  clients?: Row[]
+}) {
   return {
     from(table: string) {
       const filters: Array<(r: Row) => boolean> = []
@@ -37,6 +45,8 @@ function fakeSupabase(seed: { pending?: Row[]; doubts?: Row[]; authFailed?: Row[
       let cap: number | null = null
       const source = () => {
         if (table === 'me_sale_outcomes') return [...(seed.pending ?? []), ...(seed.qualified ?? [])]
+        if (table === 'contacts') return seed.contacts ?? []
+        if (table === 'clients') return seed.clients ?? []
         return [...(seed.doubts ?? []), ...(seed.authFailed ?? []), ...(seed.held ?? [])]
       }
       const b: Record<string, unknown> = {
@@ -321,5 +331,38 @@ describe('已报价发给广告平台没成功', () => {
     expect(quotes[0].how).toContain('再试一次')
     expect(quotes[0].what).not.toContain('回写')
     expect(quotes[0].kind).toBe('conversion_needs_review')
+  })
+
+  it('阶段已改、成交记录没记上的已报价也进今日待办', async () => {
+    const items: ManualItem[] = []
+    const contactId = '11111111-2222-3333-4444-555555555555'
+    await pushConversionReviewItems(
+      fakeSupabase({
+        contacts: [{
+          id: contactId,
+          client_id: CTS,
+          stage: 'quoted',
+          stage_updated_at: '2026-09-20T00:00:00.000Z',
+        }],
+        clients: [{
+          id: CTS,
+          conversion_stage: 'live',
+          leads_config: {
+            capi_conversion_leads: true,
+            capi_qualified_lead_stage_key: 'quoted',
+            capi_conversion_deal_stage_key: 'balance_received',
+          },
+        }],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('没记上')
+    expect(items[0].how).toContain('再改回已报价')
+    expect(items[0].href).toBe(
+      `https://app.magicengine.com.au/dashboard/clients/${CTS}/crm/all?contact=${contactId}`,
+    )
   })
 })

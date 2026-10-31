@@ -12,6 +12,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
+import { readCapiClientConfig, stageCountsAsQualifiedLead } from '@/lib/conversions/capi-client-config'
 import { formatMoney } from '@/lib/conversions/money'
 import { DAY_MS, META_EVENT_WINDOW_DAYS, isPastEventWindow } from '@/lib/conversions/event-window'
 
@@ -145,6 +146,7 @@ export async function pushConversionReviewItems(
   await pushTokenDeadItems(supabase, items, clientNames, now)
   await pushHeldSendItems(supabase, items, clientNames, now)
   await pushUnsentQualifiedLeads(supabase, items, clientNames, now)
+  await pushQualifiedLeadsNeverRecorded(supabase, items, clientNames, now)
 }
 
 type HeldOutcome = {
@@ -315,6 +317,95 @@ function needsQualifiedRetry(outcomeId: string, writebacks: QualifiedWriteback[]
   if (row.payload_preview?.held === true) return false
   if (row.last_error_code === 'auth') return false
   return row.status === 'queued' || row.status === 'failed'
+}
+
+type StageContact = { id: string; client_id: string; stage: string | null; stage_updated_at: string | null }
+type ClientGate = { id: string; conversion_stage: string | null; leads_config: unknown }
+type QualifiedOutcomeRef = { contact_id: string | null; source_ref: string | null }
+
+/** Stage saved, but the qualified row never landed. The next stage scan will not try again. */
+async function pushQualifiedLeadsNeverRecorded(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  clientNames: Map<string, { name: string }>,
+  now: Date,
+): Promise<void> {
+  const contacts = await loadRecentStageContacts(supabase, now)
+  if (contacts.length === 0) return
+  const gates = await loadClientGates(supabase, contacts.map((row) => row.client_id))
+  const waiting = contacts.filter((row) => contactWaitsForQualifiedRow(row, gates))
+  if (waiting.length === 0) return
+  const recorded = await loadQualifiedOutcomeRefs(supabase, waiting.map((row) => row.id))
+  for (const row of waiting) {
+    if (recorded.has(qualifiedRef(row))) continue
+    items.push(missingQualifiedItem(row, clientNames))
+  }
+}
+
+async function loadRecentStageContacts(supabase: SupabaseClient, now: Date): Promise<StageContact[]> {
+  const since = new Date(now.getTime() - META_EVENT_WINDOW_DAYS * DAY_MS).toISOString()
+  const { data, error } = await supabase
+    .from('contacts')
+    .select('id, client_id, stage, stage_updated_at')
+    .gte('stage_updated_at', since)
+    .order('stage_updated_at', { ascending: true })
+    .limit(MAX_ITEMS)
+  if (error) throw new Error(`已报价没记上查询失败: ${error.message}`)
+  return ((data ?? []) as unknown as StageContact[]).filter((row) => openStageContact(row, now))
+}
+
+function openStageContact(row: StageContact, now: Date): boolean {
+  if (!row.id || !row.client_id || !row.stage || !row.stage_updated_at) return false
+  return !isPastEventWindow(row.stage_updated_at, now)
+}
+
+async function loadClientGates(supabase: SupabaseClient, clientIds: string[]): Promise<ClientGate[]> {
+  const { data, error } = await supabase
+    .from('clients')
+    .select('id, conversion_stage, leads_config')
+    .in('id', [...new Set(clientIds)])
+    .limit(MAX_ITEMS)
+  if (error) throw new Error(`已报价客户设置查询失败: ${error.message}`)
+  return (data ?? []) as unknown as ClientGate[]
+}
+
+function contactWaitsForQualifiedRow(row: StageContact, gates: ClientGate[]): boolean {
+  const gate = gates.find((item) => item.id === row.client_id)
+  if (!gate || gate.conversion_stage !== 'live') return false
+  const cfg = readCapiClientConfig(gate.leads_config)
+  if (!cfg.conversionLeadsEnabled || cfg.qualifiedLeadStageMalformed) return false
+  return stageCountsAsQualifiedLead(row.stage, cfg.qualifiedLeadStageKey)
+}
+
+async function loadQualifiedOutcomeRefs(supabase: SupabaseClient, contactIds: string[]): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from('me_sale_outcomes')
+    .select('contact_id, source_ref')
+    .eq('source_kind', 'crm_stage_manual')
+    .eq('outcome_kind', 'lead')
+    .in('contact_id', contactIds)
+    .limit(200)
+  if (error) throw new Error(`已报价是否已记查询失败: ${error.message}`)
+  const found = new Set<string>()
+  for (const row of (data ?? []) as unknown as QualifiedOutcomeRef[]) {
+    if (row.contact_id && row.source_ref) found.add(`${row.contact_id}:${row.source_ref}`)
+  }
+  return found
+}
+
+function qualifiedRef(row: StageContact): string {
+  return `${row.id}:crm_qualified:${row.id}:${row.stage}`
+}
+
+function missingQualifiedItem(row: StageContact, clientNames: Map<string, { name: string }>): ManualItem {
+  return {
+    kind: 'conversion_needs_review',
+    client_name: clientNames.get(row.client_id)?.name ?? '客户',
+    client_id: row.client_id,
+    what: '有一条已报价记下了，但发给广告平台这一步没记上。不补的话，广告平台不知道这个人已经问过价。',
+    how: '打开这个客人，把阶段改成别的，再改回已报价。改回来会再记一次，不会记成两笔。',
+    href: `https://app.magicengine.com.au/dashboard/clients/${row.client_id}/crm/all?contact=${row.id}`,
+  }
 }
 
 function qualifiedRetryItem(lead: QualifiedLeadRow, clientNames: Map<string, { name: string }>): ManualItem {
