@@ -143,10 +143,22 @@ export async function POST(
       : undefined
 
   // 约回电：时间按客户所在地算，服务端再校验一遍（不是过去、≤ 60 天）。
+  // 上面的 timeZone 对没填国家的客户会兜底成新西兰（只影响解析原话，老行为）；
+  // 但回电时间是**确定的承诺**，不能悄悄猜时区 —— 国家不是 NZ/AU 就明说，不排。
+  const country = (client?.country ?? '').toUpperCase()
+  const callbackZone =
+    country === 'NZ' ? 'Pacific/Auckland' : country === 'AU' ? 'Australia/Sydney' : null
+  const wantsCallback = body.callbackAt !== undefined || body.callbackPreset !== undefined
+  if (wantsCallback && !callbackZone) {
+    return NextResponse.json(
+      { error: '这个客户没有设置所在国家（NZ / AU），没法确定回电时间按哪个时区算，请先在客户设置里补上' },
+      { status: 400 },
+    )
+  }
   const callback = resolveCallbackRequest(
     { callbackAt: body.callbackAt, callbackPreset: body.callbackPreset },
     new Date(now),
-    timeZone,
+    callbackZone ?? timeZone,
   )
   if (!callback.ok) {
     return NextResponse.json({ error: callback.error }, { status: 400 })
@@ -202,10 +214,12 @@ export async function POST(
        * 约了回电时给销售看的那句确认；没约就是 null。
        * 以**实际存下的**时间为准：读出「别再联系」时回电不会被排上，
        * 这时绝不能还说「已约」。
+       * 幂等重试（created=false）命中的是**之前存的那一笔**，这次选的时间没有写进去，
+       * 同样不能说「已约」—— 页面据此提示「没排上，换个时间再点一次」。
        */
       callbackBooked:
-        callback.iso && result.parsed.callback_at === callback.iso
-          ? callbackBookedMessage(callback.iso, timeZone)
+        callback.iso && callbackZone && result.created && result.parsed.callback_at === callback.iso
+          ? callbackBookedMessage(callback.iso, callbackZone)
           : null,
       parsed: {
         summary: result.parsed.summary,

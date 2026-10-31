@@ -150,6 +150,14 @@ describe('按钮选的时间盖过 AI 读出来的', () => {
     expect(withStructuredCallback(p, undefined)).toBe(p)
   })
 
+  it('员工原话是「没接」/「先不考虑」：保留结论，只补时间', () => {
+    for (const outcome of ['no_answer', 'not_interested_now'] as const) {
+      const out = withStructuredCallback(parsed({ outcome }), '2026-11-02T01:00:00.000Z')
+      expect(out.outcome).toBe(outcome)
+      expect(out.callback_at).toBe('2026-11-02T01:00:00.000Z')
+    }
+  })
+
   it('「别再联系」和坏号码比日程硬：不排回电', () => {
     const dnc = parsed({ outcome: 'do_not_contact', do_not_contact: true, callback_at: null })
     const bad = parsed({ outcome: 'bad_number', callback_at: null })

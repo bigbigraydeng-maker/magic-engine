@@ -70,6 +70,28 @@ describe('约回电：到点才算 callback_due', () => {
   })
 })
 
+describe('约回电：员工原话是「没接」，保留 no_answer 但到点照样 callback_due', () => {
+  const noAnswerNote = (id: string): TouchpointRowLike => ({
+    ...bookedNote(id),
+    metadata: { outcome: 'no_answer', callback_at: DUE_AT, logged_by: 'info@ctstours.co.nz' },
+  })
+
+  it.each([
+    ['到点之后', '2026-11-01T21:01:00.000Z', 'callback_due'],
+  ])('%s → %s', (_n, at, expected) => {
+    expect(segAt('Bob', [enquiry('Bob'), noAnswerNote('Bob')], new Date(at)).segment).toBe(expected)
+  })
+
+  it('没到点 → 不是 callback_due', () => {
+    expect(segAt('Bob', [enquiry('Bob'), noAnswerNote('Bob')], new Date('2026-11-01T20:59:00.000Z')).segment).not.toBe('callback_due')
+  })
+
+  it('先不考虑（not_interested_now）同样到点 callback_due', () => {
+    const tp: TouchpointRowLike = { ...bookedNote('Cy'), metadata: { outcome: 'not_interested_now', callback_at: DUE_AT } }
+    expect(segAt('Cy', [enquiry('Cy'), tp], new Date('2026-11-01T21:01:00.000Z')).segment).toBe('callback_due')
+  })
+})
+
 describe('约回电：没到点时他在不在「今天要联系」（核对现状）', () => {
   const viewAt = (id: string, tps: TouchpointRowLike[], at: Date) => {
     const { sections } = buildPriorityView<{ id: string; segment: string; handled: boolean | undefined }>(

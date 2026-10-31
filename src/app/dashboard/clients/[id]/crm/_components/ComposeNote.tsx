@@ -46,7 +46,7 @@ export function ComposeNote({
   onDone: (msg: string) => void
   onCancel: () => void
 }) {
-  const [clientRef] = useState(() => globalThis.crypto.randomUUID())
+  const [clientRef, setClientRef] = useState(() => globalThis.crypto.randomUUID())
   const [note, setNote] = useState('')
   const [inbound, setInbound] = useState(false)
   const [nextStage, setNextStage] = useState('')
@@ -91,6 +91,13 @@ export function ComposeNote({
       // created=false 说明这一笔之前就存过（同一个记录框重试）。要说出来，
       // 否则用户以为补写的内容存上了，其实服务端保留的是第一版。
       if (json.created === false) {
+        if (hasCallback) {
+          // 选了回电时间，但服务端保留的是之前那一笔 —— 这次的时间没有排上，必须明说。
+          // 换一个新的幂等键，下次再点才会真的写进去（沿用旧键只会再命中旧的那一笔）。
+          setClientRef(globalThis.crypto.randomUUID())
+          setErr('回电没排上：这一笔之前已经记过了。请再点一次「存这一笔」，或换个时间再存')
+          return
+        }
         onDone('这一笔之前已经记过了，没有重复记')
         return
       }
@@ -159,7 +166,7 @@ export function ComposeNote({
       />
 
       <div className="mt-2">
-        <label className="text-xs text-me-charcoal/50">约了回电吗？点一个就行（可跳过）</label>
+        <label className="text-xs text-me-charcoal/50">约了回电吗？点一个就行（可跳过）· 按客户所在地时间</label>
         <div className="mt-1 flex flex-wrap gap-2">
           {CALLBACK_PRESETS.map((key) => (
             <button
@@ -191,6 +198,9 @@ export function ComposeNote({
             自选时间
           </button>
         </div>
+        {customOpen && (
+          <label className="mt-2 block text-xs text-me-charcoal/50">选一个时间（按客户所在地时间，不是你电脑的时间）</label>
+        )}
         {customOpen && (
           <input
             type="datetime-local"

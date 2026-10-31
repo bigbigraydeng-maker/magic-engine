@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   upserts: [] as Array<Record<string, unknown>>,
   contactPatches: [] as Array<Record<string, unknown>>,
   country: null as string | null,
+  inserted: true,
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: mocks.access }))
@@ -59,7 +60,8 @@ beforeEach(() => {
   vi.setSystemTime(NOW)
   mocks.upserts.length = 0
   mocks.contactPatches.length = 0
-  mocks.country = null
+  mocks.country = 'NZ'
+  mocks.inserted = true
   mocks.access.mockResolvedValue({ ok: true, user: { email: 'info@ctstours.co.nz' } })
   mocks.parseNote.mockResolvedValue(parse())
   mocks.from.mockImplementation((table: string) => {
@@ -89,7 +91,7 @@ beforeEach(() => {
       return {
         upsert: (row: Record<string, unknown>) => {
           mocks.upserts.push(row)
-          return { select: () => ({ maybeSingle: async () => ({ data: { id: 'tp-1' }, error: null }) }) }
+          return { select: () => ({ maybeSingle: async () => ({ data: mocks.inserted ? { id: 'tp-1' } : null, error: null }) }) }
         },
       }
     }
@@ -159,6 +161,30 @@ describe('服务端校验：挡在写库之前', () => {
   })
 })
 
+describe('时区不明 / 幂等重试：不假装排上了', () => {
+  it.each([[null], [''], ['US']])('客户国家是 %j：选了回电 → 400 讲清原因，什么都没写', async (country) => {
+    mocks.country = country
+    const res = await call({ callbackPreset: 'tomorrow_am' })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toContain('所在国家')
+    expect(mocks.upserts).toHaveLength(0)
+  })
+
+  it('国家没填但没选回电：照旧能记（解析原话仍兜底新西兰）', async () => {
+    mocks.country = null
+    const res = await call({})
+    expect(res.status).toBe(200)
+  })
+
+  it('同一个记录框重试（命中之前那一笔，created=false）：不说「已约」', async () => {
+    mocks.inserted = false
+    const res = await call({ callbackPreset: 'tomorrow_am' })
+    const json = (await res.json()) as { created: boolean; callbackBooked: string | null }
+    expect(json.created).toBe(false)
+    expect(json.callbackBooked).toBeNull()
+  })
+})
+
 describe('不动旧行为', () => {
   it('没选回电：照旧用 AI 读出来的时间，也不回确认话术', async () => {
     const res = await call({})
@@ -166,6 +192,13 @@ describe('不动旧行为', () => {
     expect(meta().outcome).toBe('spoke')
     const json = (await res.json()) as { callbackBooked: string | null }
     expect(json.callbackBooked).toBeNull()
+  })
+
+  it('原话是「没接」：保留没接的结论，只补回电时间', async () => {
+    mocks.parseNote.mockResolvedValue(parse({ outcome: 'no_answer', callback_at: null }))
+    await call({ callbackPreset: 'tomorrow_am', note: '打了没人接' })
+    expect(meta().outcome).toBe('no_answer')
+    expect(meta().callback_at).toBe('2026-11-01T21:00:00.000Z')
   })
 
   it('原话读出「别再联系」：合规优先，不因为点了时间就排进回电名单', async () => {
