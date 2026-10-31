@@ -10,6 +10,13 @@ export interface GoLiveIds {
   readonly campaignId: string
   readonly adSetId: string
   readonly adIds: readonly string[]
+  /**
+   * This campaign already existed. Go-live may switch the new ad set and ads,
+   * and must not turn the campaign on or off.
+   */
+  readonly reusedCampaign?: boolean
+  /** This ad set already existed. Go-live may switch only the new ads. */
+  readonly reusedAdSet?: boolean
 }
 
 export interface PausedDraftView {
@@ -19,6 +26,8 @@ export interface PausedDraftView {
   readonly durationDays: number | null
   readonly accountLabel: string | null
   readonly ids: GoLiveIds | null
+  /** The daily amount and span were read from an existing ad set, not the draft request. */
+  readonly inheritedSchedule?: boolean
 }
 
 export function goLiveSubjectKey(draftId: string): string | null {
@@ -53,12 +62,37 @@ export function parsePausedDraft(payload: unknown): PausedDraftView | null {
   const campaignId = text(row.campaignId)
   const adSetId = text(row.adSetId)
   const adIds = idList(row.adIds)
+  const reusedAdSet = Boolean(body && text(body.existingAdSetId))
+  const reusedCampaign = Boolean(body && text(body.existingCampaignId)) || reusedAdSet
+  const spend = reusedAdSet ? storedSpend(body) : null
   return {
     status,
     kind: body ? text(body.kind) : null,
-    dailyBudget: body ? finite(body.dailyBudget) : null,
-    durationDays: body ? finite(body.durationDays) : null,
+    dailyBudget: reusedAdSet ? (spend?.daily ?? null) : (body ? finite(body.dailyBudget) : null),
+    durationDays: reusedAdSet ? (spend ? spend.days : null) : (body ? finite(body.durationDays) : null),
     accountLabel: text(row.accountLabel),
-    ids: campaignId && adSetId && adIds ? { campaignId, adSetId, adIds } : null,
+    inheritedSchedule: Boolean(spend),
+    ids: campaignId && adSetId && adIds
+      ? {
+          campaignId,
+          adSetId,
+          adIds,
+          ...(reusedCampaign ? { reusedCampaign: true } : {}),
+          ...(reusedAdSet ? { reusedAdSet: true } : {}),
+        }
+      : null,
   }
+}
+
+function storedSpend(body: Record<string, unknown> | null): { daily: number; days: number | null } | null {
+  if (!body) return null
+  const raw = body.inheritedSpend
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const row = raw as Record<string, unknown>
+  const daily = finite(row.dailyBudget)
+  if (daily === null || daily <= 0) return null
+  if (row.durationDays === null) return { daily, days: null }
+  const days = finite(row.durationDays)
+  if (days === null || !Number.isInteger(days) || days < 1) return null
+  return { daily, days }
 }

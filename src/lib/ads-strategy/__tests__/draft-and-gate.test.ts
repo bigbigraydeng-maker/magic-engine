@@ -9,6 +9,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+vi.mock('@/lib/meta/existing-adset-spend', () => ({
+  readExistingAdSetSpend: vi.fn(),
+}))
 vi.mock('@/lib/meta/ad-publisher', () => ({
   publishDraftPaused: vi.fn(),
   activatePublished: vi.fn(),
@@ -28,6 +31,7 @@ vi.mock('@/lib/meta/asset-upload', () => ({
   waitForVideoReady: vi.fn(),
 }))
 
+import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
 import { publishDraftPaused, activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
 import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
 import { fetchCustomAudiences, fetchCustomAudienceById } from '@/lib/meta/entity-settings'
@@ -44,6 +48,7 @@ import type { AdDraft } from '../ad-draft'
 const PM = { actorUserId: 'u-pm', actorEmail: 'pm@magiclab.test', basis: 'global_admin' as const }
 
 const mPublish = vi.mocked(publishDraftPaused)
+const mSpend = vi.mocked(readExistingAdSetSpend)
 const mActivate = vi.mocked(activatePublished)
 const mAdSet = vi.mocked(fetchAdSetReadback)
 const mCreatives = vi.mocked(fetchAdCreativesReadback)
@@ -132,6 +137,11 @@ const OK_PUBLISH = {
 beforeEach(() => {
   vi.resetAllMocks()
   mPublish.mockResolvedValue(OK_PUBLISH)
+  mSpend.mockResolvedValue({
+    ok: true,
+    campaignId: '900001',
+    spend: { dailyBudget: 100, durationDays: null },
+  })
   mAdSet.mockResolvedValue({
     id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION',
     destination_type: 'ON_AD',
@@ -1461,6 +1471,13 @@ describe('createDraftForApproval — 已有系列', () => {
     expect(mPause).not.toHaveBeenCalled()
     expect(inserted[0].adIds).toEqual(['ad9'])
     expect(inserted[0].draft.existingAdSetId).toBe('800001')
+    expect(inserted[0].draft.inheritedSpend).toEqual({ dailyBudget: 100, durationDays: null })
+    expect(inserted[0].summary).toContain('没有结束日')
+    expect(inserted[0].summary).not.toContain('跑 7')
+    expect(mPublish.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      inheritedSpend: { dailyBudget: 100, durationDays: null },
+      existingAdSetId: '800001',
+    }))
   })
 })
 
