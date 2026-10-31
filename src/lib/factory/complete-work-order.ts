@@ -18,6 +18,8 @@ import { assessRemotionContentSubstance } from './content-substance'
 import type { AspectOutputRecord } from './video-aspects'
 import { isRemotionBrief } from './render-mode'
 import { MACHINE_REVIEWED_KEY } from '@/lib/maliang/review-disposition'
+import { assessEngineReport } from './engine-catalog.mjs'
+import { encodeCapVerdict } from '../../../scripts/factory-worker/engines/remotion/encode-cap.mjs'
 
 const ACTIVE_STATUSES = ['claimed', 'producing']
 
@@ -47,6 +49,8 @@ export interface CompleteParams {
   mediaEvidence?: ReelMediaEvidence | null
   /** Set only when brief.remotion.aspects asked for extra ratios. */
   aspectOutputs?: AspectOutputRecord[]
+  /** Code the machine was running. Missing means an old machine finished a job it already held. */
+  engine?: unknown
 }
 
 /**
@@ -128,6 +132,17 @@ export async function completeWorkOrder(
   p: CompleteParams,
 ): Promise<CompleteResult> {
   const { wo, workerId, videoPath, segmentsPath, srtPath, caption, actualCost, newClips, recipeReceipt, mediaEvidence, aspectOutputs } = p
+  const sizeBytes = mediaEvidence?.file_size_bytes
+  const durationSec = mediaEvidence?.duration_seconds
+  if (typeof sizeBytes === 'number' && typeof durationSec === 'number') {
+    const budget = encodeCapVerdict({
+      sizeBytes,
+      durationSec,
+      videoBitrateBps: mediaEvidence?.video_bitrate_bps,
+    })
+    if (!budget.ok) return { ok: false, status: 422, error: budget.message }
+  }
+  const engine = assessEngineReport(p.engine)
   const clientId = wo.client_id as string
   const woId = wo.id as string
 
@@ -336,6 +351,10 @@ export async function completeWorkOrder(
     // Template renders enter the human queue before 马良 finishes. Until the
     // verdict lands, the order is explicitly not machine-reviewed.
     ...(isRemotionBrief(wo.brief) ? { [MACHINE_REVIEWED_KEY]: false } : {}),
+    engine_rev: engine.engine_rev,
+    engine_catalog_id: engine.ok ? engine.catalog_id : null,
+    engine_capabilities: engine.ok ? engine.capabilities : [],
+    engine_stale: !engine.ok,
   }
 
   // .select() 判行数:load 后被 sweeper 收回时 0 行匹配不能伪装成功(魏征 M2-P1-1)

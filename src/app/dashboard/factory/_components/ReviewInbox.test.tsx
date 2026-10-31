@@ -35,6 +35,7 @@ const mount = async (
   orderOverride: Partial<Order> = {},
   expand = false,
   musicResponses: Array<{ ok: boolean; error?: string; music_choices?: Order['music_choices'] }> = [],
+  extra: Record<string, unknown> = {},
 ) => {
   const merged: Order = { ...order, ...orderOverride }
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: { method?: string; body?: string }) => {
@@ -42,7 +43,7 @@ const mount = async (
       const r = musicResponses.shift() ?? { ok: true, music_choices: merged.music_choices ?? [] }
       return { ok: r.ok, status: r.ok ? 200 : 503, json: async () => (r.ok ? { music_choices: r.music_choices ?? [] } : { error: r.error }) }
     }
-    if (init?.method !== 'POST') return { ok: true, json: async () => ({ orders: [merged] }) }
+    if (init?.method !== 'POST') return { ok: true, json: async () => ({ orders: [merged], ...extra }) }
     posts.push({ url: u, body: init.body ? JSON.parse(init.body) : undefined })
     const r = responses.shift()!
     return { ok: r.ok, status: r.ok ? 200 : 422, json: async () => (r.ok ? {} : { error: r.error }) }
@@ -57,6 +58,14 @@ const MISSING = 'checklist factual_claims_have_source requires source_ref'
 const reviewPosts = () => posts.filter(p => p.url === '/api/factory/work-orders/w1/review')
 const ONE_CLICK = '我已看过这条片子,同意通过'
 const FAIL_AUTO = auto.map(item => item.key === 'audio_track_present_nonsilent' ? { ...item, outcome: 'FAIL' } : item)
+
+it('shows when the render machine is too old, on the inbox and on that video', async () => {
+  await mount([], { output: { quality_checklist_auto: auto, engine_stale: true } }, false, [], {
+    worker: { engine_notice: '出片机版本过旧。队列里的单子还在，不会作废。' },
+  })
+  expect(document.querySelector('[data-testid="engine-stale-notice"]')?.textContent).toContain('出片机版本过旧')
+  expect(document.querySelector('[data-testid="engine-stale-card"]')?.textContent).toContain('不会作废')
+})
 
 it('retries loading music choices after a temporary failure when the reject dialog is reopened', async () => {
   await mount([{ ok: true }], {}, false, [

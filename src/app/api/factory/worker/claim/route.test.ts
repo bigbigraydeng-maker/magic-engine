@@ -7,20 +7,30 @@ vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: { rpc: rpcMock },
 }))
 
+import { ENGINE_CATALOG_ID, REQUIRED_ENGINE_CAPABILITIES } from '@/lib/factory/engine-catalog.mjs'
 import { POST } from './route'
+
+const CURRENT_ENGINE = {
+  engine_rev: 'a'.repeat(40),
+  catalog_id: ENGINE_CATALOG_ID,
+  capabilities: [...REQUIRED_ENGINE_CAPABILITIES],
+}
 
 const CLIENT_A = '10000000-0000-0000-0000-000000000001'
 const CLIENT_B = '20000000-0000-0000-0000-000000000002'
 const UNKNOWN = '30000000-0000-0000-0000-000000000003'
 
 function claimRequest(body: unknown) {
+  const payload = body && typeof body === 'object' && !Array.isArray(body)
+    ? { engine: CURRENT_ENGINE, ...(body as Record<string, unknown>) }
+    : body
   return new NextRequest('http://localhost/api/factory/worker/claim', {
     method: 'POST',
     headers: {
       authorization: 'Bearer test-worker-token',
       'content-type': 'application/json',
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   })
 }
 
@@ -84,5 +94,16 @@ describe('POST /api/factory/worker/claim client scope', () => {
     const response = await POST(claimRequest({ worker_id: 'mac-a', client_id: CLIENT_A }))
 
     expect(response.status).toBe(500)
+  })
+
+  it('旧出片机不派单，工单留在队列，并告诉人怎么更新', async () => {
+    const response = await POST(claimRequest({ worker_id: 'mac-old', client_id: CLIENT_A, engine: null }))
+    expect(response.status).toBe(200)
+    const json = await response.json()
+    expect(json.claimed).toBe(false)
+    expect(json.stale_engine).toBe(true)
+    expect(json.message).toContain('出片机版本过旧')
+    expect(json.message).toContain('不会作废')
+    expect(rpcMock).not.toHaveBeenCalled()
   })
 })

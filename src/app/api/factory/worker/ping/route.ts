@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { parseRenderWorkerField } from '@/lib/factory/render-worker-report'
+import { assessEngineReport } from '@/lib/factory/engine-catalog.mjs'
 import {
   isWorkerAuthorized,
   workerClaimClientIds,
@@ -40,6 +41,7 @@ export async function POST(req: NextRequest) {
 
   const at = new Date().toISOString()
   const renderWorker = parseRenderWorkerField(body)
+  const engine = assessEngineReport(body.engine)
   const row = {
     status: 'completed',
     started_at: at,
@@ -49,6 +51,9 @@ export async function POST(req: NextRequest) {
       worker_id: workerId,
       client_ids: clientIds,
       ...(renderWorker ? { render_worker: renderWorker } : {}),
+      engine_rev: engine.engine_rev,
+      engine_stale: !engine.ok,
+      ...(!engine.ok ? { engine_notice: engine.message } : {}),
     },
   }
   const { data: existing, error: findErr } = await supabaseAdmin

@@ -10,6 +10,8 @@ export interface ReelMediaEvidence {
   cover_mean_luma?: number
   cover_luma_range?: number
   cover_placeholder_detected?: boolean | null
+  file_size_bytes?: number
+  video_bitrate_bps?: number
   content_substance?: {
     verdict: 'pass' | 'asset_only' | 'fail'
     kinds: string[]
