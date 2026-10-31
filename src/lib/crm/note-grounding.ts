@@ -97,11 +97,12 @@ const CLAIM_RULES: ClaimRule[] = [
 /**
  * 摘要说某件具体的事已经发生（订了 / 付了 / 确认了）。
  * 原话里必须是这件事本身完成了。「已发报价」里的「已」不能拿来证明「已预订」。
+ * 「确定了 / 说定了 / 约定了 / 敲定了」只是把人数、日子或报价说死，不是订了。
  */
 const COMPLETION_RULES: ClaimRule[] = [
   {
     inSummary: /已预订|已订|订了|已报名/,
-    inNote: /已(?:经)?预订|已订|订了|(?<!决)定了|已报名|报名了|\bbooked\b|\breserved\b|\bsigned\b|signed\s*up/i,
+    inNote: /已(?:经)?预订|已订|订了|已报名|报名了|\bbooked\b|\breserved\b|\bsigned\b|signed\s*up/i,
   },
   {
     inSummary: /已付款|已支付|已付|已缴/,
@@ -270,16 +271,79 @@ export function cnNumeralsToArabic(s: string): string {
   })
 }
 
-const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+/**
+ * 英文月份只认完整月份和常见缩写（jan/january、sep/sept/september）。
+ * 不以月份开头就算的普通词排除在外：maybe、decided、mark、separate。
+ * may 单独出现多半是情态动词（he may call），不能单独证明 5 月；
+ * 要有月份语境（in May、May 2027、15 May、early May、March to May）。
+ */
+const MONTH_FORMS: ReadonlyArray<{ month: string; pattern: string }> = [
+  { month: '1', pattern: 'jan(?:uary)?' },
+  { month: '2', pattern: 'feb(?:ruary)?' },
+  { month: '3', pattern: 'mar(?:ch)?' },
+  { month: '4', pattern: 'apr(?:il)?' },
+  { month: '6', pattern: 'jun(?:e)?' },
+  { month: '7', pattern: 'jul(?:y)?' },
+  { month: '8', pattern: 'aug(?:ust)?' },
+  { month: '9', pattern: 'sept?(?:ember)?' },
+  { month: '10', pattern: 'oct(?:ober)?' },
+  { month: '11', pattern: 'nov(?:ember)?' },
+  { month: '12', pattern: 'dec(?:ember)?' },
+]
 
-/** 原话里的英文月份（March / June / Sep…）→ 月份号。数字核对和出行时间依据共用这一处。 */
+const OTHER_MONTH = MONTH_FORMS.map((m) => m.pattern).join('|')
+
+const MAY_AS_MONTH_RE = new RegExp(
+  [
+    String.raw`\b(?:in|early|late|mid|during|by|until|till|from|of|on|for|through|thru|before|after|around|throughout)\s+may\b`,
+    String.raw`\bmid-may\b`,
+    String.raw`\b(?:this|next|last)\s+may\b(?=\s*(?:$|[\d,.;:，。]|(?:and|or|to|through|until)\b))`,
+    String.raw`\bmay\s+\d{1,4}\b`,
+    String.raw`\b\d{1,2}(?:st|nd|rd|th)?\s+may\b`,
+    String.raw`\b(?:${OTHER_MONTH})\s*(?:,|and|&|-|–|—|to|through|/)\s*may\b`,
+    String.raw`\bmay\s*(?:,|and|&|-|–|—|to|through|/)\s*(?:${OTHER_MONTH})\b`,
+  ].join('|'),
+  'i',
+)
+
+/** 情态动词 may（may call / may not go），不是月份。 */
+const MAY_MODAL_RE =
+  /\bmay\s+(?:not\s+)?(?:be|have|do|go|come|want|need|call|travel|get|make|take|see|know|think|like|prefer|book|pay|confirm|decide|leave|visit|join|ask|send|wait|return|fly|stay|also)\b/i
+
+function monthNumberOfToken(token: string): string | null {
+  const low = token.toLowerCase()
+  for (const { month, pattern } of MONTH_FORMS) {
+    if (new RegExp(`^(?:${pattern})$`).test(low)) return month
+  }
+  return null
+}
+
+/** 原话里的英文月份（March / June / Sep / in May…）→ 月份号。数字核对和出行时间依据共用这一处。 */
 function englishMonthNumbers(raw: string): string[] {
   const low = raw.toLowerCase()
   const out: string[] = []
-  MONTHS.forEach((m, i) => {
-    if (new RegExp(`\\b${m}[a-z]*\\b`).test(low)) out.push(String(i + 1))
-  })
+  for (const { month, pattern } of MONTH_FORMS) {
+    if (new RegExp(`\\b(?:${pattern})\\b`).test(low)) out.push(month)
+  }
+  if (MAY_AS_MONTH_RE.test(low)) out.push('5')
   return out
+}
+
+/** 这段文字在主张「五月」，而不是在用情态动词 may。 */
+function valueClaimsMay(value: string): boolean {
+  if (MAY_AS_MONTH_RE.test(value)) return true
+  if (!/\bmay\b/i.test(value)) return false
+  return !MAY_MODAL_RE.test(value)
+}
+
+function firstUngroundedMonthWord(value: string, raw: string): string | null {
+  const have = new Set(englishMonthNumbers(raw))
+  if (valueClaimsMay(value) && !have.has('5')) return 'May'
+  for (const w of latinTokens(value)) {
+    const month = monthNumberOfToken(w)
+    if (month && !have.has(month)) return w
+  }
+  return null
 }
 
 /** 原话里出现过的所有数字：阿拉伯数字 + 中文数字换算 + 英文月份名对应的月份号。 */
@@ -326,8 +390,13 @@ export function firstUngroundedTerm(value: string, raw: string): string | null {
   for (const d of digitRuns(cnNumeralsToArabic(value))) {
     if (!have.has(String(Number(d)))) return d
   }
+  const monthWord = firstUngroundedMonthWord(value, raw)
+  if (monthWord) return monthWord
   const lowRaw = raw.toLowerCase()
   for (const w of latinTokens(value)) {
+    // 月份已按整词核对过（Sept 对得上 September）。情态动词 may 仍要原样出现在原话里。
+    if (monthNumberOfToken(w)) continue
+    if (w.toLowerCase() === 'may' && valueClaimsMay(value)) continue
     if (!lowRaw.includes(w.toLowerCase())) return w
   }
   const place = firstUngroundedPlace(value, raw)
@@ -377,7 +446,7 @@ function includesLoose(hay: string, needle: string): boolean {
 // ── 下一步 / 回电：原话里得真有这类说法 ──────────────────────────────────
 
 const NEXT_STEP_CUE_RE =
-  /下周|明天|后天|今天|今晚|周[一二三四五六日天]|星期[一二三四五六日天]|礼拜|\d+\s*[月号日点]|[点:：]\d|再打|再联系|回电|回拨|跟进|稍后|过几天|早上|上午|中午|下午|晚上|傍晚|凌晨|明早|明晚|今早|今夜|(?<![有这那哪差])[零〇一二两三四五六七八九十]{1,3}点|call\s*(him|her|them|back)|callback|follow\s*up|tomorrow|tonight|next\s*week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\b\d{1,2}\s*(am|pm)\b|\d{1,2}[:.]\d{2}/i
+  /下周|明天|后天|今天|今晚|周[一二三四五六日天]|星期[一二三四五六日天]|礼拜|\d+\s*[月号日点]|[点:：]\d|再打|再联系|回电|回拨|跟进|稍后|过几天|(?:\d+|[零〇一二两三四五六七八九十几]{1,3})天后再?|早上|上午|中午|下午|晚上|傍晚|凌晨|明早|明晚|今早|今夜|(?<![有这那哪差])[零〇一二两三四五六七八九十]{1,3}点|call\s*(him|her|them|back)|callback|follow\s*up|tomorrow|tonight|next\s*week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\b\d{1,2}\s*(am|pm)\b|\d{1,2}[:.]\d{2}/i
 
 /** 出行时间：原话里要有时间性的词、数字，或英文月份（月份表见 englishMonthNumbers）。 */
 const TIME_CUE_RE =

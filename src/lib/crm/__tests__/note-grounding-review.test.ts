@@ -238,3 +238,103 @@ describe('Codex 复审 559352e：中文钟点、完成态、否定范围、英�
     expect(keep('wants to travel someday', 'March')).toBeNull()
   })
 })
+
+describe('Bugbot 9639f8f：月份只认真词、预订要有订的证据、N天后留回电', () => {
+  const keepTravel = (note: string, travel: string) =>
+    groundNoteParse(note, { ...BASE, travel_window: travel, summary: note }).travel_window
+
+  it('真月份和常见缩写仍算作出行时间；in May / May 2027 / 15 May 也算', () => {
+    expect(keepTravel('wants to travel in March', 'March')).toBe('March')
+    expect(keepTravel('going in June', 'June')).toBe('June')
+    expect(keepTravel('depart Sep', 'Sep')).toBe('Sep')
+    expect(keepTravel('leaving in Sept', '9月')).toBe('9月')
+    expect(keepTravel('leaving in Sept', 'September')).toBe('September')
+    expect(keepTravel('in March', 'Mar')).toBe('Mar')
+    expect(keepTravel('trip in September', 'September')).toBe('September')
+    expect(keepTravel('wants to travel in May', 'May')).toBe('May')
+    expect(keepTravel('wants to travel in May', '5月')).toBe('5月')
+    expect(keepTravel('May 2027', '2027年5月')).toBe('2027年5月')
+    expect(keepTravel('leaving 15 May', '5月')).toBe('5月')
+    expect(keepTravel('early May', 'May')).toBe('May')
+  })
+
+  it('月份前缀和单独的 may 不能证明出行月份', () => {
+    const invented: Array<[string, string]> = [
+      ['maybe later', 'May'],
+      ['maybe later', '5月'],
+      ['we decided the quote later', 'December'],
+      ['we decided the quote later', 'Dec'],
+      ['we decided the quote later', '12月'],
+      ['mark this for later', 'March'],
+      ['mark this for later', 'Mar'],
+      ['mark this for later', '3月'],
+      ['separate this for later', 'September'],
+      ['separate this for later', 'Sep'],
+      ['separate this for later', '9月'],
+      ['he may call next week', 'May'],
+      ['he may call next week', '5月'],
+      ['customer may travel next year', 'May'],
+    ]
+    for (const [note, travel] of invented) {
+      expect(keepTravel(note, travel)).toBeNull()
+    }
+    expect(firstUngroundedClaim('客户五月出行。', 'maybe we go later')).not.toBeNull()
+    expect(firstUngroundedClaim('客户十二月出行。', 'we decided later')).not.toBeNull()
+  })
+
+  it('确定了 / 说定了 / 约定了 / 敲定了 不能让「客户已预订」过关', () => {
+    const cases: Array<[string, string]> = [
+      ['想预订，人数确定了', '客户已预订。'],
+      ['人数确定了，一共四位', '客户订了。'],
+      ['周五说定了', '客户已订。'],
+      ['约定了周五，问了怎么订', '客户已预订。'],
+      ['报价敲定了，他说想订', '客户已预订。'],
+      ['确定了要报名', '客户已预订。'],
+    ]
+    for (const [note, summary] of cases) {
+      expect(firstUngroundedClaim(summary, note)).not.toBeNull()
+      expect(groundNoteParse(note, { ...BASE, summary }).summary).toBe(note)
+    }
+    expect(firstUngroundedClaim('客户已预订。', '客户已经订了 Silk Road')).toBeNull()
+    expect(firstUngroundedClaim('客户已预订。', 'booked the China tour')).toBeNull()
+    expect(firstUngroundedClaim('客户已付款。', '订金付了')).toBeNull()
+  })
+
+  it('「三天后联系 / 3天后再说 / 五天后」保留回电，到点后进 callback_due', () => {
+    const at = '2026-11-03T01:00:00.000Z'
+    for (const note of ['三天后联系', '3天后再说', '五天后']) {
+      const g = groundNoteParse(note, {
+        ...BASE,
+        callback_at: at,
+        mentioned_next_step: true,
+        summary: note,
+      })
+      expect(g.callback_at).toBe(at)
+      expect(g.mentioned_next_step).toBe(true)
+    }
+
+    const parsed = groundNoteParse('三天后联系', {
+      ...BASE,
+      callback_at: at,
+      mentioned_next_step: true,
+      summary: '三天后联系',
+    })
+    const c: ContactLike = {
+      id: 'c',
+      displayName: 'X',
+      doNotContact: false,
+      hasPhone: true,
+      touchpoints: [
+        {
+          channel: 'phone',
+          direction: 'outbound',
+          occurredAt: '2026-10-31T02:00:00.000Z',
+          source: 'me_manual',
+          outcome: 'callback_set',
+          callbackAt: parsed.callback_at,
+        },
+      ],
+    }
+    expect(segmentContact(c, new Date('2026-11-03T02:00:00.000Z')).segment).toBe('callback_due')
+  })
+})

@@ -267,10 +267,16 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
   // 已记过笔记的卡片不能还挂着「刚通完电话，还没记下一步」（魏征复审 P2-b）：提醒撤掉，换成说明今天做了什么的话。
   // 「刚」只在通话 3 小时内才说（通话是几天前的话，写「刚」是错的）。
   const justCalled = lastCallMs > 0 && now.getTime() - lastCallMs <= JUST_CALLED_MS
-  const seg: SegmentResult =
-    placed.afterCall === true && noteAfterCall
-      ? { ...placed, afterCall: false, reason: justCalled ? '刚通完电话，今天已记录' : '通完电话，今天已记录' }
-      : placed
+  // 接通之后又记了笔记：客人已经在电话里说过话。「他还没回」是另一件事（发出去没人接）。
+  const loggedAfterCall = placed.afterCall === true && noteAfterCall
+  const loggedReason = loggedAfterCall
+    ? justCalled
+      ? '刚通完电话，今天已记录'
+      : '通完电话，今天已记录'
+    : null
+  const seg: SegmentResult = loggedReason
+    ? { ...placed, afterCall: false, reason: loggedReason }
+    : placed
 
   return {
     /**
@@ -324,15 +330,19 @@ export function dayRow(contact: ContactLike, now: Date, opts: DayRowOptions): Da
      *     没有它，卡片上一个绿勾加一句「号码是坏的」，读起来像「✓ 打不通」是个成就
      *   · 「他还没回」补上后半句 —— 销售真正想知道的是他回了没有。
      *     这句是**算出来的事实**：`handled` 只在 `!stillNeedsMe` 时为真，
-     *     也就是我们出手之后他确实没再动过
+     *     也就是我们出手之后他确实没再动过。
+     *     接通后又记了笔记不是「没回」—— 灰勾和「先别打」必须跟卡片那句
+     *     「刚通完电话，今天已记录」用同一句话，否则一边说聊过了、一边说没回。
      */
     handledWhy: stillNeedsMe
       ? null
       : droppedOff
         ? `标了：${live.reason}`
-        : opts.touchedToday
-          ? '今天联系过了，他还没回'
-          : null,
+        : loggedReason
+          ? loggedReason
+          : opts.touchedToday
+            ? '今天联系过了，他还没回'
+            : null,
     handledKind: stillNeedsMe ? null : droppedOff ? 'closed' : opts.touchedToday ? 'followed' : null,
   }
 }
