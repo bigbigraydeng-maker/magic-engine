@@ -83,6 +83,16 @@ function datasetsInPlay(input: JudgeInput): (MetaDatasetFact | undefined)[] {
   return commonDatasetIds(input).map(id => input.meta.datasets.find(d => d.id === id))
 }
 
+/** 近 7 天有没有读到过留资（Meta 留资事件、已读到的网站统计、已读到的官网表单）。没读到不算有。 */
+function hadLeadsInLast7Days(input: JudgeInput): boolean {
+  if (metaLeadTotal(input) > 0) return true
+  if (input.ga4.read) {
+    const ga4 = input.config.ga4_lead_events.reduce((sum, name) => sum + (input.ga4.events_7d[name] ?? 0), 0)
+    if (ga4 > 0) return true
+  }
+  return input.crm.read && input.crm.web_form_touchpoints_7d > 0
+}
+
 /** 近 7 天 Meta 留资事件总数（忽略读不到的）。 */
 function metaLeadTotal(input: JudgeInput): number {
   const names = leadNamesOf(input)
@@ -508,6 +518,8 @@ function judgeCapiReady(input: JudgeInput): TrackingGateReceipt {
     capi_confirmed_7d: ev ? ev.confirmed : null,
     capi_in_doubt_7d: ev ? ev.in_doubt : null,
     capi_failed_7d: ev ? ev.failed : null,
+    conversion_stage: input.env.conversion_stage,
+    recent_leads_present: hadLeadsInLast7Days(input),
   }
 
   if (pre === null) {
@@ -522,6 +534,9 @@ function judgeCapiReady(input: JudgeInput): TrackingGateReceipt {
   }
   if (ev.failed > 0 || ev.in_doubt > 0) {
     return receipt(key, 'yellow', `近 7 天回传有 ${ev.failed} 条失败、${ev.in_doubt} 条不确定`, '排查失败的回传事件', evidence, as_of)
+  }
+  if (input.env.conversion_stage === 'live' && ev.confirmed === 0 && hadLeadsInLast7Days(input)) {
+    return receipt(key, 'yellow', '管道通但没料', '', evidence, as_of)
   }
   return receipt(key, 'green', '转化 API 探活通过，近 7 天没有失败的回传', '', evidence, as_of)
 }

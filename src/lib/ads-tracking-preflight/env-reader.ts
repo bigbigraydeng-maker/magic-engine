@@ -45,21 +45,34 @@ const PIXEL_VALUE_RE = /^\d{6,20}$/
 type CapiTarget = EnvFacts['capi_target']
 type CapiPreflight = EnvFacts['capi_preflight']
 type CapiEvents = EnvFacts['capi_events_7d']
+type ConversionStage = EnvFacts['conversion_stage']
+
+interface ClientEnvRead {
+  target: CapiTarget
+  conversion_stage: ConversionStage
+}
+
+const UNREAD_CLIENT: ClientEnvRead = {
+  target: { status: 'unreadable', pixel_id: null },
+  conversion_stage: null,
+}
 
 // ─── 1. capi_target ─────────────────────────────────────────────────────────
 
-async function readCapiTarget(
+function conversionStageOf(value: unknown): ConversionStage {
+  return value === 'live' || value === 'dry_run' ? value : null
+}
+
+async function readClientEnv(
   clientId: string,
   deps: EnvReadDeps,
   errors: string[],
-): Promise<CapiTarget> {
-  const unreadable: CapiTarget = { status: 'unreadable', pixel_id: null }
-
+): Promise<ClientEnvRead> {
   const { data, error } = await retryOnce(
     async () => {
       const r = await deps.supabase
         .from('clients')
-        .select('domain')
+        .select('domain, conversion_stage')
         .eq('id', clientId)
         .maybeSingle()
       return { data: r.data, error: r.error ? { message: r.error.message } : null }
@@ -69,24 +82,28 @@ async function readCapiTarget(
 
   if (error) {
     errors.push(sanitizeError(error.message))
-    return unreadable
+    return UNREAD_CLIENT
   }
-  if (!data) return unreadable
+  if (!data) return UNREAD_CLIENT
 
-  const domain = (data as { domain: unknown }).domain
-  if (typeof domain !== 'string' || domain.trim() === '') return unreadable
+  const row = data as { domain: unknown; conversion_stage: unknown }
+  const conversion_stage = conversionStageOf(row.conversion_stage)
+  const domain = row.domain
+  if (typeof domain !== 'string' || domain.trim() === '') {
+    return { target: UNREAD_CLIENT.target, conversion_stage }
+  }
 
   const raw = deps.env[pixelEnvVar(domain)]
   if (raw === undefined || raw === '') {
-    return { status: 'not_configured', pixel_id: null }
+    return { target: { status: 'not_configured', pixel_id: null }, conversion_stage }
   }
 
   const trimmed = raw.trim()
   if (PIXEL_VALUE_RE.test(trimmed)) {
-    return { status: 'configured', pixel_id: trimmed }
+    return { target: { status: 'configured', pixel_id: trimmed }, conversion_stage }
   }
   // 值不是纯数字（比如把令牌填错了位置）：判为不可读，且绝不把这个值带出去。
-  return unreadable
+  return { target: UNREAD_CLIENT.target, conversion_stage }
 }
 
 // ─── 2. capi_preflight ──────────────────────────────────────────────────────
@@ -267,11 +284,7 @@ export async function readEnvFacts(
   const requiredJobs = input.requiredJobs ?? REQUIRED_JOBS
   const errors: string[] = []
 
-  const capi_target = await guarded(
-    () => readCapiTarget(clientId, deps, errors),
-    { status: 'unreadable', pixel_id: null } as CapiTarget,
-    errors,
-  )
+  const clientEnv = await guarded(() => readClientEnv(clientId, deps, errors), UNREAD_CLIENT, errors)
   const capi_preflight = await readCapiPreflight(clientId, deps, errors)
   const capi_events_7d = await guarded(() => readCapiEvents(clientId, now, deps, errors), null, errors)
   const meta_token_resolved = await readMetaTokenResolved(clientId, deps, errors)
@@ -279,10 +292,11 @@ export async function readEnvFacts(
 
   return {
     facts: {
-      capi_target,
+      capi_target: clientEnv.target,
       capi_preflight,
       capi_events_7d,
       meta_token_resolved,
+      conversion_stage: clientEnv.conversion_stage,
       jobs,
       as_of: now.toISOString(),
     },
