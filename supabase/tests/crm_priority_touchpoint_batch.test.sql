@@ -31,7 +31,8 @@ begin
   select array_agg((entry->>'id')::uuid order by ord) into actual
     from jsonb_array_elements(first_batch || second_batch) with ordinality as rows(entry, ord);
   if actual is distinct from expected then raise exception 'missing, duplicated or reordered rows'; end if;
-  if first_batch->0->>'raw' <> 'note' or first_batch->0->'metadata'->>'outcome' <> 'spoke' then
+  if first_batch->0->>'raw' <> 'note' or first_batch->0->'metadata'->>'outcome' <> 'spoke' or
+     first_batch->0->>'created_at' is null then
     raise exception 'required fields not preserved';
   end if;
   if has_function_privilege('anon', 'public.crm_priority_touchpoint_batch(uuid,integer)', 'execute') or

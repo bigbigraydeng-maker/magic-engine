@@ -94,6 +94,7 @@ interface Recorded {
 let recorded: Recorded[]
 /** 排序扫描（不带 contact_id 的 .in）用的触点；默认就是 STALE_TOUCHES。 */
 let scanRows: Row[] | null = null
+let simulateStageFiltering = false
 /** 数据库函数的假返回；null = 函数还没装（报错，路由要退回老路径）。 */
 let rpcRows: Array<{ id: string; total: number }> | null = null
 let rpcCalls: Array<Record<string, unknown>> = []
@@ -145,7 +146,12 @@ function fakeDb(table: string) {
       if (table === 'contacts') {
         // count 查询（head）只回 count；取页查询回行。
         if (rec.countHead) return resolve({ data: null, count: CONTACTS.length, error: null })
-        return resolve({ data: CONTACTS, count: null, error: null })
+        const stages = rec.ins.find(([col]) => col === 'stage')?.[1]
+        const ids = rec.ins.find(([col]) => col === 'id')?.[1]
+        const data = simulateStageFiltering
+          ? CONTACTS.filter((contact) => (!stages || stages.includes(contact.stage)) && (!ids || ids.includes(contact.id)))
+          : CONTACTS
+        return resolve({ data, count: null, error: null })
       }
       if (table === 'client_pipeline_stages') return resolve({ data: STAGES, error: null })
       if (table === 'contact_identities') return resolve({ data: identityRows, error: null })
@@ -174,6 +180,7 @@ beforeEach(() => {
   resetBriefCacheForTests()
   recorded = []
   scanRows = null
+  simulateStageFiltering = false
   clientsLeadsConfig = null
   rpcRows = null
   rpcCalls = []
@@ -455,12 +462,24 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockImplementation(async (name: string, args: Record<string, unknown>) => {
       expect(name).toBe('crm_priority_touchpoint_batch')
       expect(args).toEqual({ p_client_id: 'cts', p_offset: 0 })
-      return { data: STALE_TOUCHES.map(({ summary: _summary, ...touch }) => touch), error: null }
+      return { data: STALE_TOUCHES.map(({ summary: _summary, ...touch }) => ({ ...touch, created_at: touch.occurred_at })), error: null }
     })
     const { status, body } = await get('cts', '?view=priority&open=hot,cold')
     expect(status).toBe(200)
     const rows = (body.sections as Array<{ items: Array<{ contactId: string }> | null }>).flatMap((s) => s.items ?? [])
     expect(rows.some((row) => row.contactId === 'a3')).toBe(true)
+    expect(recorded.some((r) => r.table === 'contact_touchpoints')).toBe(false)
+  })
+
+  it('批次读取保留补记时间，最近手记按创建时间显示', async () => {
+    const createdAt = new Date().toISOString()
+    ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [{
+      id: 'backdated-note', contact_id: 'a2', channel: 'phone', direction: 'outbound',
+      occurred_at: '2020-01-01T00:00:00Z', created_at: createdAt,
+      raw: 'Recent entry', metadata: {}, source: 'me_manual',
+    }], error: null })
+    const { body } = await get('cts', '?view=priority')
+    expect(body.recentNotes).toEqual(expect.arrayContaining([expect.objectContaining({ contactId: 'a2', at: createdAt })]))
     expect(recorded.some((r) => r.table === 'contact_touchpoints')).toBe(false)
   })
 
@@ -518,6 +537,7 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     const touch = recorded.find((r) => r.table === 'contact_touchpoints')
     expect(touch?.columns?.split(', ')).not.toContain('summary')
     expect(touch?.columns?.split(', ')).toEqual(expect.arrayContaining(['raw', 'metadata']))
+    expect(touch?.columns?.split(', ')).toContain('created_at')
     expect(touch?.eqs).toContainEqual(['client_id', 'cts'])
     const timing = res.headers.get('Server-Timing') ?? ''
     for (const step of ['gate', 'priority_reads', 'priority_enrich', 'priority_assemble', 'total']) {
@@ -764,6 +784,33 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     await get('cts', '?view=priority&stage=quoted')
     const contactQ = recorded.find((r) => r.table === 'contacts')
     expect(contactQ?.ins).toContainEqual(['stage', ['quoted']])
+  })
+
+  it('阶段筛选只缩小主名单，仍能找回最近记录但阶段不同的客户', async () => {
+    simulateStageFiltering = true
+    scanRows = [{
+      id: 'recent-sue', contact_id: 'a2', channel: 'phone', direction: 'outbound',
+      occurred_at: new Date(Date.now() - 60_000).toISOString(), created_at: new Date().toISOString(),
+      summary: '已记通话', raw: '答应发送 catalogue', metadata: {}, source: 'me_manual',
+    }]
+    const { body } = await get('cts', '?view=priority&stage=quoted')
+    const listed = (body.sections as Array<{ items: Array<{ contactId: string }> | null }>).flatMap((section) => section.items ?? [])
+    expect(listed.map((row) => row.contactId)).toEqual(['a1'])
+    expect((body.recentNotes as Array<{ contactId: string }>).map((note) => note.contactId)).toEqual(['a2'])
+    const contactQueries = recorded.filter((r) => r.table === 'contacts')
+    expect(contactQueries.some((r) => r.ins.some(([col]) => col === 'stage'))).toBe(true)
+    expect(contactQueries.some((r) => !r.ins.some(([col]) => col === 'stage') &&
+      r.eqs.some(([col, val]) => col === 'client_id' && val === 'cts'))).toBe(true)
+  })
+
+  it('搜索时收起最近手记，让匹配客户紧贴搜索框', async () => {
+    scanRows = [{
+      id: 'recent-sue', contact_id: 'a2', channel: 'phone', direction: 'outbound',
+      occurred_at: new Date().toISOString(), created_at: new Date().toISOString(),
+      summary: '已记通话', raw: '答应发送 catalogue', metadata: {}, source: 'me_manual',
+    }]
+    const { body } = await get('cts', '?view=priority&q=Bob')
+    expect(body.recentNotes).toEqual([])
   })
 })
 

@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadPriorityTouchpoints } from '../priority-touchpoints'
 
 function row(i: number) {
-  return { id: String(i), contact_id: `c${i}`, channel: 'email', direction: 'inbound', occurred_at: '2026-01-01T00:00:00Z', raw: null, metadata: null, source: null }
+  return { id: String(i), contact_id: `c${i}`, channel: 'email', direction: 'inbound', occurred_at: '2026-01-01T00:00:00Z', created_at: '2026-02-01T00:00:00Z', raw: null, metadata: null, source: null }
 }
 
 function client(rpc: ReturnType<typeof vi.fn>, fallbackRows = [row(99)]) {
@@ -26,6 +26,7 @@ describe('priority touchpoints batch loader', () => {
     const result = await loadPriorityTouchpoints(c.sb, 'tenant-a')
     expect(result.map((r) => r.id)).toEqual(rows.map((r) => r.id))
     expect(result.every((r) => r.summary === null)).toBe(true)
+    expect(result[0].created_at).toBe('2026-02-01T00:00:00Z')
     expect(rpc).toHaveBeenCalledOnce()
     expect(rpc).toHaveBeenCalledWith('crm_priority_touchpoint_batch', { p_client_id: 'tenant-a', p_offset: 0 })
     expect(c.from).not.toHaveBeenCalled()

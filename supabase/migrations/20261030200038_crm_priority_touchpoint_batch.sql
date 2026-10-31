@@ -10,7 +10,7 @@ set search_path = public
 as $$
   select coalesce(jsonb_agg(to_jsonb(r) order by r.occurred_at desc, r.id desc), '[]'::jsonb)
   from (
-    select id, contact_id, channel, direction, occurred_at, raw, metadata, source
+    select id, contact_id, channel, direction, occurred_at, created_at, raw, metadata, source
     from public.contact_touchpoints
     where client_id = p_client_id
     order by occurred_at desc, id desc

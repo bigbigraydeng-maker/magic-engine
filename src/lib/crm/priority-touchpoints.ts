@@ -15,7 +15,7 @@ export async function loadPriorityTouchpoints(sb: SupabaseClient, clientId: stri
       for (const row of data) {
         if (!row || typeof row.id !== 'string' || typeof row.contact_id !== 'string' ||
           typeof row.channel !== 'string' || (row.direction !== 'inbound' && row.direction !== 'outbound') ||
-          typeof row.occurred_at !== 'string' || !('metadata' in row) || !('raw' in row) || !('source' in row)) {
+          typeof row.occurred_at !== 'string' || !('created_at' in row) || !('metadata' in row) || !('raw' in row) || !('source' in row)) {
           throw new Error('invalid priority batch')
         }
         all.push({ ...row, summary: null } as TouchRow)
@@ -27,7 +27,7 @@ export async function loadPriorityTouchpoints(sb: SupabaseClient, clientId: stri
   } catch {
     // Missing migration, malformed response or an RPC failure: preserve existing complete-read semantics.
     const rows = await fetchAllBatched<Omit<TouchRow, 'summary'>>((from, to) =>
-      sb.from('contact_touchpoints').select('id, contact_id, channel, direction, occurred_at, raw, metadata, source')
+      sb.from('contact_touchpoints').select('id, contact_id, channel, direction, occurred_at, created_at, raw, metadata, source')
         .eq('client_id', clientId).order('occurred_at', { ascending: false }).order('id', { ascending: false }).range(from, to),
     )
     return rows.map((row) => ({ ...row, summary: null }))
