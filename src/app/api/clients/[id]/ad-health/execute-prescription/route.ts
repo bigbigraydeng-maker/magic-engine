@@ -5,8 +5,8 @@
  * campaign card. Currently one executable kind:
  *
  *   refresh_creatives — trigger the winner-reel-sync engine for this client.
- *     It scans the client's organic winners and adds the best into the paid
- *     pool as NEW ads, DEFAULT PAUSED (no spend until a human activates them).
+ *     It scans organic winners and asks for one paused-draft confirmation card.
+ *     It does not write Meta. A person confirms the card before any paused ad is created.
  *     Called as a direct library import — never an internal HTTP self-call
  *     (zhangqian lesson, PR #297).
  *
@@ -123,6 +123,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     status: result.status,
     postsScanned: result.postsScanned,
     adsAdded: result.adsAdded.map(a => ({ name: a.name, score: a.score })),
+    cardIssued: Boolean(result.cardRunId),
     guardsHit: result.guardsHit,
   })
 }

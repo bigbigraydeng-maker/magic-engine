@@ -47,8 +47,8 @@ export function pausedDraftFacts(
     what: PAUSED_DRAFT_WHAT,
     account: safeLabel(accountLabel),
     amount: amountLine(draft, review),
-    date: `一共 ${durationDays(draft)} 天，从点确认当天算起`,
-    scope: `1 个暂停系列，${count} 个广告组，不开启。稿 ${draftMark(draft)}`,
+    date: dateLine(draft),
+    scope: scopeLine(draft, count),
     hardChecks: hardChecks(draft, review),
   }
 }
@@ -94,6 +94,9 @@ function reviewCheck(draft: AdDraft): HardCheck {
 }
 
 function capCheck(draft: AdDraft, review: PausedDraftReview): HardCheck {
+  if (draft.existingAdSetId && !(draft.dailyBudget > 0)) {
+    return { label: '日预算上限', state: 'unread', reason: '还没读到这个广告组的真实每天预算' }
+  }
   if (!review.accounts) return { label: '日预算上限', state: 'unread', reason: '上限没读到' }
   const known = review.accounts.some((account) => account.ad_account_id === review.adAccountId && account.owned_by_client)
   if (!known) return { label: '日预算上限', state: 'unread', reason: '广告账户没读到' }
@@ -115,6 +118,7 @@ function buildableCheck(draft: AdDraft): HardCheck {
 }
 
 function amountLine(draft: AdDraft, review: PausedDraftReview): string {
+  if (draft.existingAdSetId) return inheritedAmount(draft, review)
   const daily = money(draft.dailyBudget)
   const cap = capMajor(review)
   if (!cap) return `每天 ${daily}，上限读不到`
@@ -125,6 +129,25 @@ function capMajor(review: PausedDraftReview): { amount: string; currency: string
   const row = review.accounts?.find((account) => account.ad_account_id === review.adAccountId)
   if (!row?.currency || row.daily_cap_cents === null) return null
   return { amount: (row.daily_cap_cents / 100).toFixed(2), currency: row.currency }
+}
+
+function inheritedAmount(draft: AdDraft, review: PausedDraftReview): string {
+  if (!(draft.dailyBudget > 0)) return '不新增每天预算。这个组现在每天多少还没读到'
+  const daily = money(draft.dailyBudget)
+  const cap = capMajor(review)
+  if (!cap) return `不新增每天预算。这个组现在每天 ${daily}，上限读不到`
+  return `不新增每天预算。这个组现在每天 ${daily} ${cap.currency}，上限 ${cap.amount} ${cap.currency}`
+}
+
+function scopeLine(draft: AdDraft, count: number): string {
+  const mark = draftMark(draft)
+  if (draft.existingAdSetId) return `在已有广告组里加暂停广告，不新建系列、不加预算、不开。稿 ${mark}`
+  return `1 个暂停系列，${count} 个广告组，不开启。稿 ${mark}`
+}
+
+function dateLine(draft: AdDraft): string {
+  if (draft.existingAdSetId) return '不改这个广告组的结束日'
+  return `一共 ${durationDays(draft)} 天，从点确认当天算起`
 }
 
 function adSetCount(draft: AdDraft): number {
