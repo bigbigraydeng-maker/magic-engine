@@ -486,6 +486,8 @@ describe('happy path rpc arguments', () => {
     }
     const booking = state().tables.crm_bookings.find((r) => r.id === BOOKING_A1)
     if (booking) booking.party_size = 2
+    const deposit = state().tables.crm_booking_milestones.find((r) => r.booking_id === BOOKING_A1 && r.kind === 'deposit')
+    if (deposit) deposit.paid_on = '2026-10-08'
     const contact = state().tables.contacts.find((r) => r.id === CONTACT_A1)
     if (contact) contact.primary_email = 'a@b.test'
     const tour = state().tables[TOURS_TABLE].find((r) => r.id === TOUR_A1)

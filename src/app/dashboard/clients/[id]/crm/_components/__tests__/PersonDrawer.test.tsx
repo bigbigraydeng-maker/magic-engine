@@ -113,6 +113,12 @@ const openStagePanel = () => {
   openMore()
   fireEvent.click(btn('改「到哪一步了」')!)
 }
+/** Stage buttons stay off until leads-config succeeds. Wait, then click. */
+async function clickReadyStage(label: string) {
+  openStagePanel()
+  await waitFor(() => expect(btn(label)?.disabled).toBe(false))
+  fireEvent.click(btn(label)!)
+}
 
 describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
   const CLIENT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -150,39 +156,73 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
     expect(document.querySelector('input[type="date"]')).toBeTruthy()
   })
 
-  it('点「已成交」走确认框，不弹金额', () => {
+  it('点「已成交」走确认框，不弹金额', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     drawFor(CLIENT, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
-    openStagePanel()
-    fireEvent.click(btn('已成交')!)
+    await clickReadyStage('已成交')
     expect(confirmSpy).toHaveBeenCalled()
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
 
-  it('点「已联系」同样不弹金额', () => {
+  it('点「已联系」同样不弹金额', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
     drawFor(CLIENT, {}, [{ stageKey: 'contacted', label: '已联系', marketingAction: 'nurture' }])
-    openStagePanel()
-    fireEvent.click(btn('已联系')!)
+    await clickReadyStage('已联系')
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
 
-  it('点「售后」也走确认框，不弹金额', () => {
+  it('点「售后」也走确认框，不弹金额', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     drawFor(CLIENT, {}, [{ stageKey: 'postsale', label: '售后', marketingAction: 'postsale' }])
-    openStagePanel()
-    fireEvent.click(btn('售后')!)
+    await clickReadyStage('售后')
     expect(confirmSpy).toHaveBeenCalled()
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
 
-  it('另一个客户点「已成交」也不弹金额', () => {
+  it('另一个客户点「已成交」也不弹金额', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     drawFor('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
-    openStagePanel()
-    fireEvent.click(btn('已成交')!)
+    await clickReadyStage('已成交')
     expect(confirmSpy).toHaveBeenCalled()
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
+  })
+
+  it('跟进设置还没读完时，已成交不能改阶段，也不能当成没配置', async () => {
+    let release: (value: { ok: boolean; json: () => Promise<unknown> }) => void = () => {}
+    const pending = new Promise<{ ok: boolean; json: () => Promise<unknown> }>((resolve) => {
+      release = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (String(url).includes('leads-config')) return pending
+      return Promise.resolve({ ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) })
+    }))
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    drawFor(CLIENT, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
+    openStagePanel()
+    await waitFor(() => expect(btn('已成交')?.disabled).toBe(true))
+    fireEvent.click(btn('已成交')!)
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(document.body.textContent ?? '').not.toContain('标已成交并录金额')
+    release({ ok: true, json: async () => ({ config: { capiDealStageKey: 'won' } }) })
+    await waitFor(() => expect(btn('已成交')?.disabled).toBe(false))
+    fireEvent.click(btn('已成交')!)
+    expect(screen.getByText(/标已成交并录金额/)).toBeTruthy()
+    expect(confirmSpy).not.toHaveBeenCalled()
+  })
+
+  it('跟进设置读失败时，已成交保持停用，并可以再读一次', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('leads-config')) return { ok: false, status: 500, json: async () => ({}) }
+      return { ok: true, json: async () => ({ timeline: [], omittedMessages: 0 }) }
+    }))
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    drawFor(CLIENT, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
+    openStagePanel()
+    await waitFor(() => expect(screen.getByText(/跟进设置没读到/)).toBeTruthy())
+    expect(btn('已成交')?.disabled).toBe(true)
+    fireEvent.click(btn('已成交')!)
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(btn('再读一次')).toBeTruthy()
   })
 
   it('这一步被配成手录成交时，弹出录金额，不走普通确认', async () => {
@@ -430,8 +470,7 @@ describe('B2 · 改阶段的并发保护', () => {
         onSaved={vi.fn()}
       />,
     )
-    openStagePanel()
-    fireEvent.click(btn('已联系')!)
+    await clickReadyStage('已联系')
     await Promise.resolve()
     await Promise.resolve()
     const call = fetchMock.mock.calls.find((c) => String(c[0]).includes('/stage'))
@@ -444,10 +483,11 @@ describe('B2 · 改阶段的并发保护', () => {
     const onSaved = vi.fn()
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 409,
-        json: async () => ({ actualStage: 'won' }),
+      vi.fn(async (url: string) => {
+        if (String(url).includes('leads-config')) {
+          return { ok: true, status: 200, json: async () => ({ config: {} }) }
+        }
+        return { ok: false, status: 409, json: async () => ({ actualStage: 'won' }) }
       }),
     )
     vi.stubGlobal('confirm', vi.fn(() => true))
@@ -464,12 +504,8 @@ describe('B2 · 改阶段的并发保护', () => {
         onSaved={onSaved}
       />,
     )
-    openStagePanel()
-    fireEvent.click(btn('已联系')!)
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-    expect(onSaved).toHaveBeenCalledWith(expect.stringContaining('已成交'), true)
+    await clickReadyStage('已联系')
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.stringContaining('已成交'), true))
   })
 })
 

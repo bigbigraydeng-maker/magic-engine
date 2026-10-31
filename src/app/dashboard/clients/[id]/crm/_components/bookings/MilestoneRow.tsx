@@ -370,7 +370,16 @@ function DealHold(props: {
         })
         if (!patched.ok) return patched
       }
-      const paidOn = props.milestone.paidOn ?? nzToday()
+      const paidOn = props.milestone.paidOn
+      if (!paidOn || !/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) {
+        next = {
+          recorded: false,
+          alreadyRecorded: false,
+          reason: 'paid_on_missing',
+          message: '这笔款没有记下付款日，不能按今天补记。',
+        }
+        return { ok: true, data: {} }
+      }
       const paid = await markPaid(
         props.clientId,
         props.booking.id,

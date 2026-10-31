@@ -95,7 +95,35 @@ async function loadBooking(db: SupabaseClient, clientId: string, bookingId: stri
     partySize: typeof row.party_size === 'number' ? row.party_size : null,
     tourId: str(row.tour_id),
     departureId: str(row.departure_id),
+    paidOnByKind: await loadPaidDates(db, clientId, bookingId),
   }
+}
+
+async function loadPaidDates(
+  db: SupabaseClient,
+  clientId: string,
+  bookingId: string,
+): Promise<Partial<Record<DealMilestone, string | null>>> {
+  const { data, error } = await db
+    .from('crm_booking_milestones')
+    .select('kind, paid_on')
+    .eq('client_id', clientId)
+    .eq('booking_id', bookingId)
+  if (error) throw new Error('crm_deal_read_failed')
+  const out: Partial<Record<DealMilestone, string | null>> = {}
+  for (const item of Array.isArray(data) ? data : []) {
+    const row = asRow(item)
+    const kind = str(row?.kind)
+    if (kind !== 'deposit' && kind !== 'balance') continue
+    out[kind] = dayOf(row?.paid_on)
+  }
+  return out
+}
+
+function dayOf(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const day = value.slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null
 }
 
 async function loadPsid(db: SupabaseClient, clientId: string, contactId: string): Promise<string | null> {

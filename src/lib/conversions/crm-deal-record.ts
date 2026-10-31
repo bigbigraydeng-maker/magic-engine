@@ -32,6 +32,8 @@ export type DealBooking = {
   partySize: number | null
   tourId: string | null
   departureId: string | null
+  /** Present once the milestone rows were read. Absent only in older callers. */
+  paidOnByKind?: Partial<Record<DealMilestone, string | null>>
 }
 
 export type DealIo = {
@@ -80,11 +82,28 @@ const MSG = {
   failed: '成交记录没有写成。',
   contactMismatch: '订单上的客人和这一步要记的不是同一人，成交记录没有写成，阶段也没有往前推。',
   paymentFailed: '款已记下，成交记录没有写成。请稍后再试，这笔款不会因此丢失。',
+  missingPaid: '这笔款没有记下付款日，成交记录没有写成。',
 }
 
 export function crmDealSourceRef(contactId: string, bookingId: string | null, stageKey: string | null): string {
   if (bookingId) return `crm_deal:${contactId}:${bookingId}`
   return `crm_deal:${contactId}:stage:${stageKey ?? ''}`
+}
+
+/**
+ * A loaded milestone map wins over the request. Missing or unusable stored
+ * dates refuse (`undefined`) instead of substituting the request or today.
+ * Callers that never loaded the map still pass the requested date through.
+ */
+export function milestonePaidOn(
+  booking: DealBooking,
+  kind: DealMilestone,
+  requested: string | null,
+): string | null | undefined {
+  if (booking.paidOnByKind === undefined) return requested
+  const stored = booking.paidOnByKind[kind]
+  if (typeof stored === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(stored)) return stored
+  return undefined
 }
 
 /** Noon at +12 keeps the paid-on calendar date across AU/NZ. */
@@ -128,13 +147,15 @@ export async function recordMilestoneDeal(
   if (client.conversionStage !== 'live') return logged('not_live', false, MSG.notLive)
   const booking = await io.loadBooking(input.clientId, input.bookingId)
   if (!booking) return logged('booking_missing', false, MSG.failed)
+  const paidOn = milestonePaidOn(booking, input.kind, input.paidOn)
+  if (paidOn === undefined) return logged('paid_on_missing', false, MSG.missingPaid)
   return finishDeal(io, client.defaultPhoneCountry, {
     clientId: input.clientId,
     contactId: booking.contactId,
     bookingId: input.bookingId,
     booking,
     stageKey: null,
-    occurredAt: dealOccurredAt(input.paidOn, now),
+    occurredAt: dealOccurredAt(paidOn, now),
     actor: input.actor,
     staffAmount: null,
     staffCurrency: null,

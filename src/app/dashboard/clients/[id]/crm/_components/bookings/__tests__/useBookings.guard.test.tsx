@@ -63,4 +63,47 @@ describe('useBookings run()', () => {
       paidOn: '2026-10-08',
     })
   })
+
+  it('does not offer a retry when the stored milestone has no paid date', async () => {
+    installFetch([route('GET', '/crm/bookings?contactId=', () => jsonResponse({ bookings: [makeBooking()] }))])
+    const { result } = renderHook(() => useBookings(CLIENT, CONTACT))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    await act(async () => {
+      await result.current.run(async () => ({
+        ok: true as const,
+        data: {
+          booking: { id: BOOKING_ID, milestones: [{ kind: 'deposit' }] },
+          milestoneKind: 'deposit',
+          deal: { recorded: false, alreadyRecorded: false, reason: 'record_failed', message: '款已记下，成交记录没有写成。' },
+        },
+      }))
+    })
+    expect(result.current.dealRetry).toBeNull()
+  })
+
+  it('retries with the paid date already on the booking, not the date in the last response', async () => {
+    const paid = makeBooking({
+      milestones: [makeMilestone('deposit', { state: 'paid', paidOn: '2026-09-01' })],
+    })
+    const calls = installFetch([
+      route('GET', '/crm/bookings?contactId=', () => jsonResponse({ bookings: [paid] })),
+      route('POST', '/milestones/deposit/paid', () => jsonResponse({ booking: paid, milestoneKind: 'deposit' })),
+    ])
+    const { result } = renderHook(() => useBookings(CLIENT, CONTACT))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    await act(async () => {
+      await result.current.run(async () => ({
+        ok: true as const,
+        data: {
+          booking: { id: BOOKING_ID, milestones: [{ kind: 'deposit', paidOn: '2026-10-31' }] },
+          milestoneKind: 'deposit',
+          deal: { recorded: false, alreadyRecorded: false, reason: 'record_failed', message: '款已记下，成交记录没有写成。' },
+        },
+      }))
+    })
+    await act(async () => {
+      await result.current.retryDeal()
+    })
+    expect(calls.calls.find((call) => call.method === 'POST')?.body).toMatchObject({ paidOn: '2026-09-01' })
+  })
 })

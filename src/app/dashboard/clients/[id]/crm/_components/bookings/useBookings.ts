@@ -20,7 +20,6 @@ import {
   markPaid,
   type ApiResult,
 } from './booking-api'
-import { nzToday } from './booking-format'
 import { dealSettled, readDealNotice, readDealRetry, type DealRetryEntry } from './deal-notice'
 
 export type BookingsState =
@@ -183,7 +182,7 @@ export function useBookings(clientId: string, contactId: string): UseBookingsRes
 function unsettledDeal(data: unknown): { message: string; retry: DealRetryEntry | null } | null {
   const notice = readDealNotice(data)
   if (!notice || dealSettled(notice)) return null
-  return { message: notice.message, retry: readDealRetry(data, nzToday()) }
+  return { message: notice.message, retry: readDealRetry(data) }
 }
 
 function milestoneStamp(state: BookingsState, bookingId: string, kind: string): string | null {
@@ -202,9 +201,17 @@ function postDealRetry(
 ): Promise<boolean> {
   if (!entry) return Promise.resolve(false)
   const updatedAt = milestoneStamp(state, entry.bookingId, entry.kind)
-  if (!updatedAt) {
-    setNotice('找不到这一笔的最新记录，请刷新后再补记成交。')
+  const paidOn = storedPaidOn(state, entry.bookingId, entry.kind)
+  if (!updatedAt || !paidOn) {
+    setNotice('找不到这一笔记下的付款日，请刷新后再补记成交。')
     return Promise.resolve(false)
   }
-  return run(() => markPaid(clientId, entry.bookingId, entry.kind, updatedAt, entry.paidOn))
+  return run(() => markPaid(clientId, entry.bookingId, entry.kind, updatedAt, paidOn))
+}
+
+function storedPaidOn(state: BookingsState, bookingId: string, kind: string): string | null {
+  if (state.status !== 'ready') return null
+  const booking = state.bookings.find((item) => item.id === bookingId)
+  const paidOn = booking?.milestones.find((item) => item.kind === kind)?.paidOn
+  return typeof paidOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(paidOn) ? paidOn : null
 }

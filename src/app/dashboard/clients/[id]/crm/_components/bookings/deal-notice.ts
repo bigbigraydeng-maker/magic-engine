@@ -34,8 +34,8 @@ export interface DealRetryEntry {
   paidOn: string
 }
 
-/** Staff can retry only when the payment response names the booking and the milestone. */
-export function readDealRetry(data: unknown, paidOnFallback: string): DealRetryEntry | null {
+/** Staff can retry only when the stored milestone already has a paid date. */
+export function readDealRetry(data: unknown): DealRetryEntry | null {
   const notice = readDealNotice(data)
   if (!notice || dealSettled(notice)) return null
   const row = recordOf(data)
@@ -45,13 +45,9 @@ export function readDealRetry(data: unknown, paidOnFallback: string): DealRetryE
     ? booking.id
     : typeof row.bookingId === 'string' ? row.bookingId : null
   const kind = row.milestoneKind === 'deposit' || row.milestoneKind === 'balance' ? row.milestoneKind : null
-  if (!bookingId || !kind) return null
-  return {
-    message: notice.message,
-    bookingId,
-    kind,
-    paidOn: paidOnFrom(booking?.milestones, kind) ?? paidOnFallback,
-  }
+  const paidOn = kind ? paidOnFrom(booking?.milestones, kind) : null
+  if (!bookingId || !kind || !paidOn) return null
+  return { message: notice.message, bookingId, kind, paidOn }
 }
 
 function paidOnFrom(milestones: unknown, kind: string): string | null {
