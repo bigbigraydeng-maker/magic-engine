@@ -94,8 +94,7 @@ describe('号码好好的人，一个字都不该变', () => {
  * 🔴 缺的那两样都不是可选项：
  * · 「要记住的事」—— 今日待办有一条 `crm_important_due` 直接依赖它。抽屉里没有，
  *   销售在「今天要联系」页上就设不了提醒，得跳到另一页去设。
- * · NAL 的「确认已成交」—— 标成交要先录金额再回传广告转化。抽屉里没有，
- *   同一个客人在一页能标、另一页标不了。
+ * · 改阶段一律走确认框。成交金额不在这里录，点阶段不会弹出金额面板。
  *
  * `DncBanner.tsx` 的头注就是这个分裂的事故记录：「FDE 照着人工任务点进去，
  * 页面上根本没有任务里说的那个按钮」。
@@ -115,7 +114,7 @@ const openStagePanel = () => {
 }
 
 describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
-  const NAL = '4ae76381-cd45-43bd-85cd-98cfd7604007'
+  const CLIENT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
   const drawFor = (
     clientId: string,
@@ -150,44 +149,38 @@ describe('R1 · 抽屉补齐「全部客人」那边独有的两样', () => {
     expect(document.querySelector('input[type="date"]')).toBeTruthy()
   })
 
-  /**
-   * 🔴 判据必须跟「全部客人」那一页一模一样：**只有 NAL + 那一档营销动作是 won**。
-   * 两个方向都有代价：漏了 → NAL 标成交不录金额、广告转化回传不了；
-   * 过宽 → CTS 标成交时冒出一个它根本不该走的录金额面板（CTS 走 Google 表格那条）。
-   */
-  /**
-   * 🔴 这两条**刻意不用 `waitFor`**：点「已成交」只改本地 state，面板是同步就渲染出来的
-   * （实测点完那一刻 `document.body.textContent` 里已经有金额提示了）。
-   * 而在这个文件里套 `waitFor` 会让 body 变空 —— 等一件已经发生的事，只会把它等没了。
-   */
-  it('NAL 点「已成交」→ 先弹录金额，不直接改阶段', () => {
-    drawFor(NAL, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
+  it('点「已成交」走确认框，不弹金额', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    drawFor(CLIENT, {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
     openStagePanel()
     fireEvent.click(btn('已成交')!)
-    const body = document.body.textContent ?? ''
-    expect(body).toContain('这笔生意多少钱')
-    expect(body).toContain('确认已成交')
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
 
-  /**
-   * 🔴 判据是**两个条件都要满足**：是 NAL + 这一档的营销动作是「成交」。
-   *
-   * 少了后半个条件，NAL 标「已联系」也会弹录金额 —— 员工填个数字进去，
-   * 系统就往广告平台回传一笔**根本没发生的成交**，广告优化会照着假数据去找人。
-   * 变异实测：把 `s.marketingAction === 'won'` 那半去掉，原来那几条测试全绿（存活），
-   * 因为它们只点成交那一档。这一条专门钉后半个条件。
-   */
-  it('NAL 点的不是成交档（比如「已联系」）→ 不许弹录金额', () => {
-    drawFor(NAL, {}, [{ stageKey: 'contacted', label: '已联系', marketingAction: 'nurture' }])
+  it('点「已联系」同样不弹金额', () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    drawFor(CLIENT, {}, [{ stageKey: 'contacted', label: '已联系', marketingAction: 'nurture' }])
     openStagePanel()
     fireEvent.click(btn('已联系')!)
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
 
-  it('CTS 点同一档「已成交」→ 不该弹录金额（那是 NAL 专属通道）', () => {
-    drawFor('cts', {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
+  it('点「售后」也走确认框，不弹金额', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    drawFor(CLIENT, {}, [{ stageKey: 'postsale', label: '售后', marketingAction: 'postsale' }])
+    openStagePanel()
+    fireEvent.click(btn('售后')!)
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
+  })
+
+  it('另一个客户点「已成交」也不弹金额', () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    drawFor('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', {}, [{ stageKey: 'won', label: '已成交', marketingAction: 'won' }])
     openStagePanel()
     fireEvent.click(btn('已成交')!)
+    expect(confirmSpy).toHaveBeenCalled()
     expect(document.body.textContent ?? '').not.toContain('这笔生意多少钱')
   })
 })

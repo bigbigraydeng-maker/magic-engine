@@ -96,6 +96,7 @@ import { runAiAutoReviewForClient, MAX_BATCH_SIZE, type RunOptions, type RunSumm
 import { runFailedWritebackResend } from '@/lib/conversions/writeback-resend-run'
 import { metaCapiWriter } from '@/lib/meta/capi/writer'
 import { runPaymentEmailDetectionForEnabledClients } from '@/lib/conversions/payment-email-detect-wire'
+import { isSheetDealSyncEnabled } from '@/lib/conversions/sheet-deal-sync'
 
 export const CONVERSION_DAILY_PIPELINE_JOB = 'conversion-daily-pipeline'
 export const CONVERSION_DAILY_PIPELINE_TZ = 'Pacific/Auckland'
@@ -199,6 +200,11 @@ export type ConversionPipelineDeps = {
    * 可选：没传就不跑这一段（旧测试与本地试跑不受影响）。放在同步之后、AI 审核之前。
    */
   detectPayments?: (opts: { nowIso: string }) => Promise<unknown>
+  /**
+   * Sheet deal import. Omitted or false skips the chunks. Production passes
+   * the env flag, which is off unless explicitly turned on.
+   */
+  sheetSyncEnabled?: boolean
   /** 运行记录读写——默认真的 run-logger；本地 Inngest dev server 试跑时注入假的。 */
   runLog?: {
     start: (jobName: string) => Promise<string>
@@ -354,13 +360,15 @@ export async function runConversionDailyPipeline(
     deps.syncNalChunk,
     mergeNalMessengerSummaries,
   )
-  const ctsSync = await runSyncChunks<CtsCrmSyncCursor, CtsCrmSyncSummary>(
-    step,
-    'sync-cts',
-    { offset: 0, limit: CTS_SYNC_CHUNK_ROWS, insertedSoFar: 0 },
-    deps.syncCtsChunk,
-    mergeCtsCrmSummaries,
-  )
+  const ctsSync = deps.sheetSyncEnabled === true
+    ? await runSyncChunks<CtsCrmSyncCursor, CtsCrmSyncSummary>(
+        step,
+        'sync-cts',
+        { offset: 0, limit: CTS_SYNC_CHUNK_ROWS, insertedSoFar: 0 },
+        deps.syncCtsChunk,
+        mergeCtsCrmSummaries,
+      )
+    : await step.run('sync-cts-skipped', async () => ({ ok: true as const, reason: 'sheet_deal_sync_off' as const }))
   const detectPayments = deps.detectPayments
   const payments = detectPayments
     ? await step.run('detect-payments', () => timed('detect-payments', () => detectPayments({ nowIso })))
@@ -413,4 +421,5 @@ export const conversionDailyPipeline = createConversionDailyPipelineFunction({
       now: new Date(nowIso),
     }),
   detectPayments: ({ nowIso }) => runPaymentEmailDetectionForEnabledClients({ nowIso }),
+  sheetSyncEnabled: isSheetDealSyncEnabled(),
 })

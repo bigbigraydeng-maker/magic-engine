@@ -12,6 +12,8 @@ import {
   BOOKING_A1,
   BOOKING_B1,
   UPDATED_AT,
+  ENABLED_LEADS_CONFIG,
+  TOURS_TABLE,
 } from '@/lib/crm/__tests__/booking-fixtures'
 import {
   ADMIN_EMAIL,
@@ -459,6 +461,46 @@ describe('happy path rpc arguments', () => {
     const body = await jsonOf(res)
     expect(body.changed).toBe(false)
     expect(body.reason).toBe('already_paid')
+    expect(body.deal).toBeUndefined()
+  })
+
+  it('paid without a deal milestone does not attach a deal or insert a sale', async () => {
+    state().rpcData['crm_booking_set_paid'] = { changed: true, reason: null }
+    const res = await paidPOST(
+      request('POST', { expectedUpdatedAt: UPDATED_AT, paidOn: '2026-10-08' }),
+      params(CLIENT_A, { bookingId: BOOKING_A1, kind: 'deposit' }),
+    )
+    const body = await jsonOf(res)
+    expect(res.status).toBe(200)
+    expect(body.changed).toBe(true)
+    expect(body.deal).toBeUndefined()
+    expect(state().queries.some((q) => q.table === 'me_sale_outcomes')).toBe(false)
+  })
+
+  it('a failed deal record does not undo the payment', async () => {
+    state().rpcData['crm_booking_set_paid'] = { changed: true, reason: null }
+    const client = state().tables.clients.find((r) => r.id === CLIENT_A)
+    if (client) {
+      client.conversion_stage = 'live'
+      client.leads_config = { ...ENABLED_LEADS_CONFIG, capi_deal_milestone: 'deposit' }
+    }
+    const booking = state().tables.crm_bookings.find((r) => r.id === BOOKING_A1)
+    if (booking) booking.party_size = 2
+    const contact = state().tables.contacts.find((r) => r.id === CONTACT_A1)
+    if (contact) contact.primary_email = 'a@b.test'
+    const tour = state().tables[TOURS_TABLE].find((r) => r.id === TOUR_A1)
+    if (tour) tour.display_price_text = 'From NZD $100'
+    const res = await paidPOST(
+      request('POST', { expectedUpdatedAt: UPDATED_AT, paidOn: '2026-10-08' }),
+      params(CLIENT_A, { bookingId: BOOKING_A1, kind: 'deposit' }),
+    )
+    const body = await jsonOf(res)
+    expect(res.status).toBe(200)
+    expect(body.changed).toBe(true)
+    const deal = body.deal as { recorded: boolean; reason: string; message: string }
+    expect(deal.recorded).toBe(false)
+    expect(deal.reason).toBe('record_failed')
+    expect(deal.message).toContain('款已记下')
   })
 
   it('override-due sends the override date', async () => {
