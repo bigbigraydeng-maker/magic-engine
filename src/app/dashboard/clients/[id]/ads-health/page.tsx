@@ -21,6 +21,7 @@ import WarMapPanel from './war-map-panel'
 import LiveTodayPanel from './live-today-panel'
 import BreakdownPanel from './breakdown-panel'
 import EntityTreePanel from './entity-tree-panel'
+import OutsideChangePanel from './outside-change-panel'
 import AutoPausePanel from './auto-pause-panel'
 import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
@@ -594,6 +595,8 @@ export default function AdsHealthPage() {
         <h1 className="mt-2 text-2xl font-semibold text-gray-800">广告健康</h1>
         <p className="text-sm text-gray-400">每天自动体检 · 先看「今天看这里」，其余按需要点开</p>
       </div>
+
+      <OutsideChangePanel clientId={clientId} />
 
       <TabBar tab={tab} onChange={setTab} />
 
