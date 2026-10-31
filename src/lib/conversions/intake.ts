@@ -234,19 +234,19 @@ export function buildIntakeRow(input: IntakeInput, ctx: IntakeContext): IntakeRe
     }
   }
 
-  if (!email && !phone && !pageScopedUserId) {
+  const contactId = input.contactId && input.contactId !== '' ? input.contactId : null
+  if (!email && !phone && !pageScopedUserId && !metaLeadId) {
     errors.push(
       '至少要有邮箱、电话、或 Facebook 私信身份之一 —— 一个都没有的话，发给 Meta 100% 匹配不上',
     )
   }
 
   // 🔴 魏征评审：contact_id 为空会让 writeback-service.ts 的拒联检查整段静默跳过。
-  //    只靠邮箱/电话时这条风险本来就在（历史遗留），但只靠 PSID 时新开一条数据源，
+  //    只靠邮箱/电话时这条风险本来就在（历史遗留），但只靠 PSID 或线索编号时，
   //    不能再放过这个口子——这条路径下必须强制要求 contact_id。
-  const contactId = input.contactId && input.contactId !== '' ? input.contactId : null
-  if (!email && !phone && pageScopedUserId && !contactId) {
+  if (!email && !phone && (pageScopedUserId || metaLeadId) && !contactId) {
     errors.push(
-      '只有 Facebook 私信身份、没有邮箱电话时，contactId 必须提供——' +
+      '只有 Facebook 私信身份或线索编号、没有邮箱电话时，contactId 必须提供——' +
         '否则发送前的「客人是否拒联」检查会被整段跳过',
     )
   }

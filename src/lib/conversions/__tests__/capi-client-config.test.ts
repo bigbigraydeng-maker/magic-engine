@@ -3,6 +3,7 @@ import {
   DOCUMENTED_DEAL_ONLY_EVENTS,
   applyCapiSettingsWrite,
   capiEventNameForKind,
+  conversionLeadOptInError,
   decideCapiEventAllowed,
   normalizeCapiSettingsWrite,
   readCapiClientConfig,
@@ -123,5 +124,27 @@ describe('settings write', () => {
   it('rejects an event name the settings page does not offer', () => {
     const write = normalizeCapiSettingsWrite({ capiAllowedEvents: ['ViewContent'] })
     expect(write.touched && write.error).toBeTruthy()
+  })
+
+  it('an absent conversion-lead switch stays off, and a bad value is not treated as on', () => {
+    expect(readCapiClientConfig({}).conversionLeadsEnabled).toBe(false)
+    expect(readCapiClientConfig({ capi_conversion_leads: 'yes' }).conversionLeadsEnabled).toBe(false)
+    expect(readCapiClientConfig({ capi_conversion_leads: 'yes' }).conversionLeadsMalformed).toBe(true)
+    expect(decideCapiEventAllowed({ capi_conversion_leads: true }, 'Lead').allow).toBe(true)
+  })
+
+  it('opening the switch without both stage names is refused', () => {
+    const write = normalizeCapiSettingsWrite({ capiConversionLeads: true })
+    expect(readyCapiSettingsWrite(write)).toBe(true)
+    if (!readyCapiSettingsWrite(write)) return
+    const next = applyCapiSettingsWrite({}, write)
+    expect(conversionLeadOptInError(next)).toContain('合格咨询')
+  })
+
+  it('a mail-only write does not clear a saved conversion-lead switch', () => {
+    const write = normalizeCapiSettingsWrite({})
+    expect(write.touched).toBe(false)
+    const current = { capi_conversion_leads: true, capi_conversion_deal_stage_key: 'balance_received' }
+    expect(current.capi_conversion_leads).toBe(true)
   })
 })

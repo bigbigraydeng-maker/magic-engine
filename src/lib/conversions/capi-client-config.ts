@@ -10,10 +10,11 @@
  * send behaviour. The deal-only list below is documentation for the person who
  * sets production config; this module never applies it on its own.
  *
- * The qualified-lead stage is parsed so the setting has one home. Callers must
- * not send from it until that send path is explicitly approved. Matching the
- * stage does not look at who set it, and it does not choose Lead versus a
- * conversion-lead event.
+ * `capi_conversion_leads` turns on Conversion Leads for this client. The quoted
+ * event name is `capi_qualified_lead_stage_key`. The later deal step uses
+ * `capi_conversion_deal_stage_key`, which is not the hand-entered amount step.
+ * Matching the quoted stage does not look at who set it. An absent or unreadable
+ * switch stays off.
  */
 
 /** Staff mark and the conversation reader both count. The actor is not an input. */
@@ -52,6 +53,12 @@ export type CapiClientConfig = {
   dealMilestoneMalformed: boolean
   dealStageKey: string | null
   dealStageKeyMalformed: boolean
+  /** Absent, false, or unreadable: do not send Conversion Leads. */
+  conversionLeadsEnabled: boolean
+  conversionLeadsMalformed: boolean
+  /** CRM stage name for a deal that continues the same Meta lead. */
+  conversionDealStageKey: string | null
+  conversionDealStageMalformed: boolean
 }
 
 export type AllowDecision = { allow: true } | { allow: false; reason: string }
@@ -74,6 +81,8 @@ export function readCapiClientConfig(leadsConfig: unknown): CapiClientConfig {
   const qualified = readStageKey(cfg, 'capi_qualified_lead_stage_key')
   const milestone = readDealMilestone(cfg)
   const stage = readStageKey(cfg, 'capi_deal_stage_key')
+  const conversion = readFlag(cfg, 'capi_conversion_leads')
+  const conversionDeal = readStageKey(cfg, 'capi_conversion_deal_stage_key')
   return {
     allowedEvents: allowed.events,
     allowedEventsMalformed: allowed.malformed,
@@ -83,6 +92,10 @@ export function readCapiClientConfig(leadsConfig: unknown): CapiClientConfig {
     dealMilestoneMalformed: milestone.malformed,
     dealStageKey: stage.value,
     dealStageKeyMalformed: stage.malformed,
+    conversionLeadsEnabled: conversion.enabled,
+    conversionLeadsMalformed: conversion.malformed,
+    conversionDealStageKey: conversionDeal.value,
+    conversionDealStageMalformed: conversionDeal.malformed,
   }
 }
 
@@ -132,6 +145,10 @@ export type CapiSettingsView = {
   capiQualifiedLeadStageMalformed: boolean
   capiDealStageKey: string | null
   capiDealStageKeyMalformed: boolean
+  capiConversionLeads: boolean
+  capiConversionLeadsMalformed: boolean
+  capiConversionDealStageKey: string | null
+  capiConversionDealStageMalformed: boolean
 }
 
 export function capiSettingsView(leadsConfig: unknown): CapiSettingsView {
@@ -145,6 +162,10 @@ export function capiSettingsView(leadsConfig: unknown): CapiSettingsView {
     capiQualifiedLeadStageMalformed: cfg.qualifiedLeadStageMalformed,
     capiDealStageKey: cfg.dealStageKey,
     capiDealStageKeyMalformed: cfg.dealStageKeyMalformed,
+    capiConversionLeads: cfg.conversionLeadsEnabled,
+    capiConversionLeadsMalformed: cfg.conversionLeadsMalformed,
+    capiConversionDealStageKey: cfg.conversionDealStageKey,
+    capiConversionDealStageMalformed: cfg.conversionDealStageMalformed,
   }
 }
 
@@ -153,6 +174,8 @@ export type CapiSettingsWriteInput = {
   capiDealMilestone?: unknown
   capiQualifiedLeadStageKey?: unknown
   capiDealStageKey?: unknown
+  capiConversionLeads?: unknown
+  capiConversionDealStageKey?: unknown
 }
 
 export type CapiSettingsWrite =
@@ -165,6 +188,8 @@ export type CapiSettingsWrite =
       milestone?: DealMilestone | null
       qualified?: string | null
       dealStage?: string | null
+      conversionLeads?: boolean | null
+      conversionDeal?: string | null
     }
 
 const WRITABLE_EVENTS = new Set<string>(CAPI_EVENT_CHOICES.map((c) => c.name))
@@ -179,7 +204,17 @@ export function normalizeCapiSettingsWrite(input: CapiSettingsWriteInput): CapiS
   if ('error' in qualified) return { touched: true, error: qualified.error }
   const dealStage = readStageWrite(input.capiDealStageKey, '手录成交')
   if ('error' in dealStage) return { touched: true, error: dealStage.error }
-  const touched = allowed.value !== undefined || milestone.value !== undefined || qualified.value !== undefined || dealStage.value !== undefined
+  const conversionLeads = readFlagWrite(input.capiConversionLeads)
+  if ('error' in conversionLeads) return { touched: true, error: conversionLeads.error }
+  const conversionDeal = readStageWrite(input.capiConversionDealStageKey, '成交阶段')
+  if ('error' in conversionDeal) return { touched: true, error: conversionDeal.error }
+  const touched =
+    allowed.value !== undefined ||
+    milestone.value !== undefined ||
+    qualified.value !== undefined ||
+    dealStage.value !== undefined ||
+    conversionLeads.value !== undefined ||
+    conversionDeal.value !== undefined
   if (!touched) return { touched: false }
   return {
     touched: true,
@@ -187,7 +222,18 @@ export function normalizeCapiSettingsWrite(input: CapiSettingsWriteInput): CapiS
     milestone: milestone.value,
     qualified: qualified.value,
     dealStage: dealStage.value,
+    conversionLeads: conversionLeads.value,
+    conversionDeal: conversionDeal.value,
   }
+}
+
+/** Opening the switch needs both stage names. A closed switch does not. */
+export function conversionLeadOptInError(leadsConfig: unknown): string | null {
+  const cfg = readCapiClientConfig(leadsConfig)
+  if (!cfg.conversionLeadsEnabled) return null
+  if (!cfg.qualifiedLeadStageKey) return '打开线索阶段回传之前，先选哪一步算合格咨询'
+  if (!cfg.conversionDealStageKey) return '打开线索阶段回传之前，先选成交记在这条线索的哪一步'
+  return null
 }
 
 /** Success arm of {@link CapiSettingsWrite}. `error: ""` is still a failure — a falsy check does not narrow it. */
@@ -207,6 +253,8 @@ export function applyCapiSettingsWrite(
   assignOrDelete(next, 'capi_deal_milestone', write.milestone)
   assignOrDelete(next, 'capi_qualified_lead_stage_key', write.qualified)
   assignOrDelete(next, 'capi_deal_stage_key', write.dealStage)
+  assignOrDelete(next, 'capi_conversion_leads', write.conversionLeads)
+  assignOrDelete(next, 'capi_conversion_deal_stage_key', write.conversionDeal)
   return next
 }
 
@@ -237,6 +285,13 @@ function readMilestoneWrite(value: unknown): { value?: DealMilestone | null; err
   return { error: '哪一笔记成成交只能选定金或尾款，留空表示不自动记' }
 }
 
+function readFlagWrite(value: unknown): { value?: boolean | null; error?: string } {
+  if (value === undefined) return {}
+  if (value === null || value === false) return { value: null }
+  if (value === true) return { value: true }
+  return { error: '线索阶段回传只能开或关' }
+}
+
 function readStageWrite(value: unknown, label: string): { value?: string | null; error?: string } {
   if (value === undefined) return {}
   if (value === null || value === '') return { value: null }
@@ -260,9 +315,25 @@ function readAllowedEvents(cfg: Record<string, unknown> | null): { events: strin
   return { events, malformed: false }
 }
 
+type StageConfigKey =
+  | 'capi_qualified_lead_stage_key'
+  | 'capi_deal_stage_key'
+  | 'capi_conversion_deal_stage_key'
+
+function readFlag(
+  cfg: Record<string, unknown> | null,
+  key: 'capi_conversion_leads',
+): { enabled: boolean; malformed: boolean } {
+  if (!hasKey(cfg, key)) return { enabled: false, malformed: false }
+  const raw = cfg?.[key]
+  if (raw === true) return { enabled: true, malformed: false }
+  if (raw === false) return { enabled: false, malformed: false }
+  return { enabled: false, malformed: true }
+}
+
 function readStageKey(
   cfg: Record<string, unknown> | null,
-  key: 'capi_qualified_lead_stage_key' | 'capi_deal_stage_key',
+  key: StageConfigKey,
 ): { value: string | null; malformed: boolean } {
   if (!hasKey(cfg, key)) return { value: null, malformed: false }
   const raw = cfg?.[key]
