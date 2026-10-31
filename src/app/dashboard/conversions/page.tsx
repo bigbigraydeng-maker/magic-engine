@@ -99,11 +99,15 @@ function isHeldOutcome(o: Outcome): boolean {
   return wb?.status === 'queued' && wb.payload_preview?.held === true
 }
 
+function isHeldDeal(o: Outcome): boolean {
+  return isHeldOutcome(o) && (o.outcome_kind === 'purchase' || o.outcome_kind === 'balance')
+}
+
 function mergeStuck(failed: Outcome[], held: Outcome[]): Outcome[] {
   const rows = failed.filter(isRetryableFailure)
   const seen = new Set(rows.map((o) => o.id))
   for (const o of held) {
-    if (!isHeldOutcome(o) || seen.has(o.id)) continue
+    if (!isHeldDeal(o) || seen.has(o.id)) continue
     rows.push(o)
   }
   return rows
@@ -137,6 +141,7 @@ export default function ConversionsPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [flash, setFlash] = useState<{ id: string; text: string; ok: boolean } | null>(null)
   const [stuck, setStuck] = useState<Outcome[]>([])
+  const [heldInquiry, setHeldInquiry] = useState(false)
   const [rejecting, setRejecting] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState<string>('')
   const [rejectNote, setRejectNote] = useState('')
@@ -200,7 +205,9 @@ export default function ConversionsPage() {
       const stuckBody = await stuckRes.json()
       const heldBody = await heldRes.json()
       if (!heldRes.ok) throw new Error(heldBody.error ?? '读取失败')
-      setStuck(mergeStuck(stuckBody.outcomes ?? [], heldBody.outcomes ?? []))
+      const heldList: Outcome[] = heldBody.outcomes ?? []
+      setStuck(mergeStuck(stuckBody.outcomes ?? [], heldList))
+      setHeldInquiry(heldList.some((o) => isHeldOutcome(o) && o.outcome_kind === 'lead'))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -264,7 +271,9 @@ export default function ConversionsPage() {
         // writeback 时才塞 —— 跟 load() 里的防御过滤同一口径）
         const wb = found.me_conversion_writebacks?.[0]
         const held = wb?.status === 'queued' && wb.payload_preview?.held === true
-        if (found.review_status === 'approved' && wb && (wb.status === 'in_doubt' || wb.status === 'failed' || held)) {
+        if (held && found.outcome_kind === 'lead') {
+          setHeldInquiry(true)
+        } else if (found.review_status === 'approved' && wb && (wb.status === 'in_doubt' || wb.status === 'failed' || held)) {
           setStuck((s) => (s.some((r) => r.id === found.id) ? s : [found, ...s]))
           setTimeout(() => stuckSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0)
         }
@@ -568,6 +577,7 @@ export default function ConversionsPage() {
         <div className={box('success')}>没有待核对的记录 —— 都处理完了。</div>
       )}
 
+      {heldInquiry && <p className="text-sm text-me-charcoal/70">按名单不发，不用处理。</p>}
       {stuck.length > 0 && (
         <div ref={stuckSectionRef} className="space-y-2.5">
           <h2 className="font-display text-base font-bold text-me-charcoal">需要你动手（{stuck.length}）</h2>

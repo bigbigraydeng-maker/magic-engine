@@ -134,7 +134,16 @@ describe('名单停住的已批准成交', () => {
   const CLIENT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
   const clientNames = new Map([[CLIENT, { name: '示例客户' }]])
 
-  function held(id: string, over: { occurred_at?: string; review_status?: string; redacted_at?: string | null; payload?: Record<string, unknown> } = {}): Row {
+  function held(
+    id: string,
+    over: {
+      occurred_at?: string
+      review_status?: string
+      redacted_at?: string | null
+      payload?: Record<string, unknown>
+      outcome_kind?: 'purchase' | 'balance' | 'lead'
+    } = {},
+  ): Row {
     return {
       id: `wb-${id}`,
       outcome_id: id,
@@ -142,6 +151,7 @@ describe('名单停住的已批准成交', () => {
       payload_preview: over.payload ?? { held: true },
       me_sale_outcomes: {
         client_id: CLIENT,
+        outcome_kind: over.outcome_kind ?? 'purchase',
         occurred_at: over.occurred_at ?? '2026-09-20T00:00:00.000Z',
         review_status: over.review_status ?? 'approved',
         redacted_at: over.redacted_at ?? null,
@@ -180,5 +190,24 @@ describe('名单停住的已批准成交', () => {
       NOW,
     )
     expect(items).toHaveLength(0)
+  })
+
+  it('被名单停住的咨询不写成待处理的成交', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({
+        held: [held('deal', { outcome_kind: 'purchase' }), held('ask', { outcome_kind: 'lead' }), held('tail', { outcome_kind: 'balance' })],
+      }) as never,
+      items,
+      clientNames,
+      NOW,
+    )
+    const deals = items.find((i) => i.what.includes('笔已经批准的成交'))
+    const inquiry = items.find((i) => i.what.includes('按名单不发，不用处理'))
+    expect(deals?.what).toContain('2 笔已经批准的成交')
+    expect(deals?.what).not.toContain('3 笔')
+    expect(inquiry?.what).toBe('按名单不发，不用处理。')
+    expect(inquiry?.how).toContain('1 条已批准的咨询')
+    expect(inquiry?.how).toContain('不用改名单')
   })
 })

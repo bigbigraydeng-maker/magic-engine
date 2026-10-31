@@ -391,4 +391,25 @@ describe('授权失效的失败行说清「会自动补发」（2026-09-22 起�
     await screen.findByText(/收到定金/)
     expect(screen.queryByRole('heading', { name: /需要你动手/ })).toBeNull()
   })
+
+  it('被名单停住的咨询不进需要你动手，只留一句不用处理', async () => {
+    mountWith([
+      outcome({
+        id: 'held-lead',
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        me_conversion_writebacks: [{
+          id: 'wb-lead',
+          status: 'queued',
+          last_error: '名单里没有咨询',
+          last_error_code: null,
+          next_attempt_at: null,
+          payload_preview: { held: true },
+        }],
+      }),
+    ])
+    expect(await screen.findByText('按名单不发，不用处理。')).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: /需要你动手/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: '再试一次' })).toBeNull()
+  })
 })
