@@ -76,5 +76,29 @@ export async function PATCH(
     }
     return NextResponse.json({ error: result.error }, { status: result.status })
   }
-  return NextResponse.json({ stage: result.stage, changed: result.changed })
+  const qualifiedLead = result.changed
+    ? await noteQualifiedLead(supabaseAdmin, clientId, contactId, toStage, access.user.email ?? null)
+    : null
+  return NextResponse.json({
+    stage: result.stage,
+    changed: result.changed,
+    ...(qualifiedLead ? { qualifiedLead } : {}),
+  })
+}
+
+/** The stage is already saved. A send problem is reported, not rolled back. */
+async function noteQualifiedLead(
+  db: typeof supabaseAdmin,
+  clientId: string,
+  contactId: string,
+  stageKey: string,
+  actor: string | null,
+): Promise<{ message: string } | null> {
+  try {
+    const { recordQualifiedStageLead } = await import('@/lib/conversions/crm-qualified-lead')
+    const recorded = await recordQualifiedStageLead(db, { clientId, contactId, stageKey, actor })
+    return recorded.attempted ? { message: recorded.message } : null
+  } catch {
+    return { message: '阶段已经改了。发给广告平台这一步没完成，可以稍后再试，不会另发成普通咨询。' }
+  }
 }
