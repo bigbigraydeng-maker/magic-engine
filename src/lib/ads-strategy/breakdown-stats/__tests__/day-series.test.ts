@@ -3,7 +3,7 @@ import { buildDaySeries } from '../day-series'
 import type { ReportRow } from '../report-types'
 
 const row = (key: string, spend: number, leads: number | null): ReportRow => ({
-  key, spend, impressions: 1000, clicks: 20, leads,
+  key, spend, impressions: 1000, clicks: 20, linkClicks: 4, leads,
   costPerLead: null, expectedLeads: null, flag: null, spendShare: 0,
 })
 

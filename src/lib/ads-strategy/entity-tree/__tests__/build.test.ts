@@ -38,8 +38,8 @@ function snap(over: Partial<SnapshotRow> & Pick<SnapshotRow, 'level' | 'entityId
 describe('buildEntityTree', () => {
   it('builds a three-level tree with per-level sums', () => {
     const insights: InsightRow[] = [
-      insight({ level: 'campaign', entityId: 'c1', entityName: 'Camp', date: '2024-03-05', spend: 100, impressions: 10000, clicks: 300, leads: 10 }),
-      insight({ level: 'adset', entityId: 'sA', entityName: 'Set A', parentId: 'c1', date: '2024-03-05', spend: 40, impressions: 4000, clicks: 120, leads: 4 }),
+      insight({ level: 'campaign', entityId: 'c1', entityName: 'Camp', date: '2024-03-05', spend: 100, impressions: 10000, clicks: 800, linkClicks: 300, leads: 10 }),
+      insight({ level: 'adset', entityId: 'sA', entityName: 'Set A', parentId: 'c1', date: '2024-03-05', spend: 40, impressions: 4000, clicks: 400, linkClicks: 120, leads: 4 }),
       insight({ level: 'adset', entityId: 'sB', entityName: 'Set B', parentId: 'c1', date: '2024-03-05', spend: 30, impressions: 3000, clicks: 90, leads: 3 }),
       insight({ level: 'adset', entityId: 'sC', entityName: 'Set C', parentId: 'c1', date: '2024-03-05', spend: 30, impressions: 3000, clicks: 90, leads: 3 }),
       insight({ level: 'ad', entityId: 'aA', entityName: 'Ad A', parentId: 'sA', date: '2024-03-05', spend: 40, impressions: 4000, clicks: 120, leads: 4 }),

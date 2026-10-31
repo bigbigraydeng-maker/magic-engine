@@ -41,6 +41,7 @@ function baseView(): WarMapView {
     adjust: { headline: { light: 'green', sentence: '今天没有要调的' }, actions: [] },
     goalNote: null,
     prescriptionLine: null,
+    budgetHold: false,
   }
 }
 
@@ -49,6 +50,28 @@ function stubView(view: WarMapView) {
   vi.stubGlobal('fetch', fn)
   return fn
 }
+
+describe('WarMapPanel · 没人跟进', () => {
+  it('只显示条数和广告组，并链到现有客人名单', async () => {
+    const view = baseView()
+    view.adjust = {
+      headline: { light: 'yellow', sentence: '今天有 1 件要留意' },
+      actions: [{
+        key: 'ad-lead-followup',
+        severity: 'yellow',
+        what: '广告线索超过 24 小时没人跟进：3 条，另有更早的 1 条',
+        how: '春季组 3 条。打开客人名单逐条联系。',
+        owner: 'pm',
+      }],
+    }
+    stubView(view)
+    render(<WarMapPanel clientId="c1" />)
+    await waitFor(() => expect(screen.getByText(/超过 24 小时没人跟进：3 条/)).toBeTruthy())
+    expect(screen.getAllByText(/超过 24 小时没人跟进：3 条/)).toHaveLength(1)
+    expect(screen.getByRole('link', { name: '打开客人名单' }).getAttribute('href')).toBe('/dashboard/clients/c1/crm/all')
+    expect(screen.queryByText('王女士')).toBeNull()
+  })
+})
 
 describe('WarMapPanel · 处方一行', () => {
   it('有处方摘要就显示那一行', async () => {
