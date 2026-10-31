@@ -136,6 +136,7 @@ type ResendCall = { clientId: string; opts: { nowIso: string } }
 function makeDeps(over: Partial<ConversionPipelineDeps> = {}) {
   const calls = { nal: [] as unknown[], cts: [] as unknown[], review: [] as ReviewCall[], resend: [] as ResendCall[] }
   const deps: ConversionPipelineDeps = {
+    sheetSyncEnabled: true,
     syncNalChunk: async (cursor) => {
       calls.nal.push(cursor)
       const second = cursor.offset > 0
@@ -245,6 +246,14 @@ describe('分块循环怎么推进、怎么停', () => {
     expect(calls.resend.map((c) => c.clientId)).toEqual([NAL, CTS])
   })
 
+  it('表格成交同步默认关：不调用同步块，步骤名不能用 sync-cts- 前缀来判断', async () => {
+    const { harness, calls, result } = await run({ sheetSyncEnabled: false })
+    expect(calls.cts).toEqual([])
+    expect(harness.ranStepIds).toContain('sync-cts-skipped')
+    expect(harness.ranStepIds.filter((id) => /^sync-cts-\d/.test(id))).toEqual([])
+    expect(result.ctsSync).toEqual({ ok: true, reason: 'sheet_deal_sync_off' })
+  })
+
   it('邮箱付款识别段：同步之后、AI 审核之前跑，计入运行记录 7/7', async () => {
     const detect = vi.fn(async () => ({ ok: true }))
     const { harness, finish, result } = await run({ detectPayments: detect })
@@ -288,6 +297,7 @@ describe('分块循环怎么推进、怎么停', () => {
     expect(calls.nal[1]).toMatchObject({ offset: 1, insertedSoFar: 1 })
     // 跨块汇总是相加的
     expect(result.ctsSync).toMatchObject({ ok: true, chunks: 2, summary: { totalCrmRows: 2, insertedLeads: 2 } })
+    if (!('durationMs' in result.ctsSync)) throw new Error('sheet sync did not run')
     expect(result.ctsSync.durationMs).toHaveLength(2)
   })
 
