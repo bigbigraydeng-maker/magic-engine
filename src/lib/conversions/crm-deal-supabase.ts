@@ -17,6 +17,7 @@ import {
   type DealIo,
 } from './crm-deal-record'
 import type { DealMilestone } from './capi-client-config'
+import { readSourceDeal, restoreVoidedDeal } from './crm-deal-restore'
 import type { IntakeRow } from './intake'
 
 type Row = Record<string, unknown>
@@ -32,6 +33,8 @@ export function supabaseDealIo(db: SupabaseClient): DealIo {
     loadApprovedPurchases: (clientId, contactId) => loadApproved(db, clientId, contactId),
     loadDncTouches: (clientId, contactId) => loadTouches(db, clientId, contactId),
     insertOutcome: (row) => insertOutcome(db, row),
+    loadExistingSourceDeal: (clientId, sourceKind, sourceRef) => readSourceDeal(db, clientId, sourceKind, sourceRef),
+    restoreVoidedDeal: async (id, row, stoppedSendIds) => ({ ok: await restoreVoidedDeal(db, id, row, stoppedSendIds) }),
   }
 }
 
