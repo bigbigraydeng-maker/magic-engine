@@ -25,6 +25,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { capiEventNameForKind, decideCapiEventAllowed } from './capi-client-config'
+import { resolveConversionLead } from './conversion-lead'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
 import type {
@@ -85,6 +86,7 @@ type OutcomeRow = {
   page_scoped_user_id: string | null
   meta_lead_id: string | null
   source_kind: SourceKind
+  source_ref: string | null
 }
 
 function toOutcomeForSend(row: OutcomeRow): OutcomeForSend {
@@ -105,6 +107,39 @@ function toOutcomeForSend(row: OutcomeRow): OutcomeForSend {
     metaLeadId: row.meta_lead_id,
     actionSource: actionSourceForSourceKind(row.source_kind),
   }
+}
+
+async function refuseOutcome(
+  supabase: SupabaseClient,
+  writebackId: string,
+  message: string,
+): Promise<SendOutcomeResult> {
+  await casUpdate(supabase, writebackId, ['queued', 'failed'], {
+    status: 'failed_permanent',
+    last_error: message,
+  })
+  return { status: 'failed_permanent', message, writebackId }
+}
+
+async function holdUnlessAllowed(
+  supabase: SupabaseClient,
+  writebackId: string,
+  leadsConfig: unknown,
+  outcomeKind: OutcomeRow['outcome_kind'],
+): Promise<SendOutcomeResult | null> {
+  // 停在排队而不是试运行：试运行是终态，名单改好后也补发不了。
+  // 名单这个键不存在 = 保持今天的行为。格式读不出来 = 停住，不许发出去。
+  const allowed = decideCapiEventAllowed(leadsConfig, capiEventNameForKind(outcomeKind))
+  if (allowed.allow) return null
+  const preview = { held: true, reason: allowed.reason }
+  const held = await casUpdate(supabase, writebackId, ['queued', 'failed'], {
+    status: 'queued',
+    last_error: allowed.reason,
+    last_error_code: null,
+    payload_preview: preview,
+  })
+  if (!held) return await currentState(supabase, writebackId)
+  return { status: 'queued', message: allowed.reason, writebackId, preview }
 }
 
 export type SendDeps = {
@@ -135,7 +170,7 @@ export async function sendApprovedOutcome(
     .select(
       'id, client_id, contact_id, outcome_kind, customer_email, customer_phone, ' +
         'customer_first, customer_last, order_ref, amount_minor, currency, ' +
-        'occurred_at, review_status, redacted_at, page_scoped_user_id, meta_lead_id, source_kind',
+        'occurred_at, review_status, redacted_at, page_scoped_user_id, meta_lead_id, source_kind, source_ref',
     )
     .eq('id', outcomeId)
     .maybeSingle()
@@ -303,23 +338,23 @@ export async function sendApprovedOutcome(
     }
   }
 
-  // ── 5b. 客户允许的事件名单。不在名单里的继续排队，连预检请求都不发。 ──
-  // 停在排队而不是试运行：试运行是终态，名单改好后也补发不了。
-  // 名单这个键不存在 = 保持今天的行为。格式读不出来 = 停住，不许发出去。
-  const allowed = decideCapiEventAllowed(client.leads_config, capiEventNameForKind(outcome.outcome_kind))
-  if (!allowed.allow) {
-    const preview = { held: true, reason: allowed.reason }
-    const held = await casUpdate(supabase, wb.id, ['queued', 'failed'], {
-      status: 'queued',
-      last_error: allowed.reason,
-      last_error_code: null,
-      payload_preview: preview,
-    })
-    if (!held) return await currentState(supabase, wb.id)
-    return { status: 'queued', message: allowed.reason, writebackId: wb.id, preview }
+  // 合格咨询走线索阶段，不走普通 Lead 名单。成交仍先过成交/尾款名单，再决定信封。
+  const resolution = resolveConversionLead({
+    outcomeKind: outcome.outcome_kind,
+    sourceRef: outcome.source_ref ?? null,
+    metaLeadId: outcome.meta_lead_id,
+    leadsConfig: client.leads_config,
+  })
+  if (resolution.kind === 'refuse') return await refuseOutcome(supabase, wb.id, resolution.message)
+
+  const qualifiedStage = resolution.kind === 'stage' && outcome.outcome_kind === 'lead'
+  if (!qualifiedStage) {
+    const held = await holdUnlessAllowed(supabase, wb.id, client.leads_config, outcome.outcome_kind)
+    if (held) return held
   }
 
   const forSend = toOutcomeForSend(outcome)
+  if (resolution.kind === 'stage') forSend.conversionLeadEventName = resolution.eventName
 
   // ── 6. 试运行：只构造、只预检，不真发 ──────────────────────────────
   if (client.conversion_stage !== 'live') {
