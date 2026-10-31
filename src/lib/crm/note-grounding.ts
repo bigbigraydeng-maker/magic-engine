@@ -94,14 +94,149 @@ const CLAIM_RULES: ClaimRule[] = [
   { inSummary: /晚上/, inNote: /晚上|evening|night/i },
 ]
 
-/** 摘要说「已经发生」的事（已预订 / 已付款 / 已成交…），原话里必须有「已完成」的说法，光是想订不行。 */
-const COMPLETED_IN_SUMMARY_RE = /已预订|已订|订了|已付款|已支付|已付|已成交|已确认|已报名|已购买|已缴/
-const COMPLETED_IN_NOTE_RE = /已|订了|付了|定了|买了|成交|搞定|\b(booked|paid|confirmed|bought|signed|purchased|sorted|deposit\s*paid|paid\s*deposit)\b/i
+/**
+ * 摘要说某件具体的事已经发生（订了 / 付了 / 确认了）。
+ * 原话里必须是这件事本身完成了。「已发报价」里的「已」不能拿来证明「已预订」。
+ */
+const COMPLETION_RULES: ClaimRule[] = [
+  {
+    inSummary: /已预订|已订|订了|已报名/,
+    inNote: /已(?:经)?预订|已订|订了|(?<!决)定了|已报名|报名了|\bbooked\b|\breserved\b|\bsigned\b|signed\s*up/i,
+  },
+  {
+    inSummary: /已付款|已支付|已付|已缴/,
+    inNote: /已(?:经)?(?:付款|支付)|已付|付了|缴了|已缴|\bpaid\b|deposit\s*paid|paid\s*deposit/i,
+  },
+  {
+    inSummary: /已确认/,
+    inNote: /已(?:经)?确认|确认了|\bconfirmed\b/i,
+  },
+  {
+    inSummary: /已成交/,
+    inNote: /已(?:经)?成交|成交了|搞定/i,
+  },
+  {
+    inSummary: /已购买/,
+    inNote: /已(?:经)?购买|买了|\bbought\b|\bpurchased\b/i,
+  },
+]
+
+function firstUngroundedCompletion(summary: string, raw: string): string | null {
+  for (const rule of COMPLETION_RULES) {
+    const hit = summary.match(rule.inSummary)
+    if (hit && !rule.inNote.test(raw)) return hit[0]
+  }
+  return null
+}
 
 /** 否定 / 拒绝：原话里的写法。 */
 const NEG_NOTE_RE = /不|没|别|无|未|拒|算了|放弃|\bno\b|\bnot\b|n't|\bnever\b|without|cannot|decline|refus|unsubscribe/i
 /** 否定 / 拒绝：摘要里的写法（拒绝 / 放弃 里没有「不」字，要单列）。 */
 const NEG_SUMMARY_RE = /不|没|别|无|未|拒绝|婉拒|放弃/
+
+const CN_DEGREE = '太|很|比较|非常|十分|特别|那么|这么|有点|有些'
+const CN_PARTICLE = new Set(['了', '的', '着', '过', '吗', '呢', '吧', '啊', '呀', '嘛'])
+const EN_DEGREE = 'very|really|that|so|too|quite'
+const EN_STOP = new Set(['the', 'a', 'an', 'to', 'of', 'and', 'or', 'but', 'for', 'with', 'be', 'is', 'it', 'in', 'on', 'at'])
+
+type Polarity = 'pos' | 'neg' | 'both' | 'none'
+
+function polarityOf(neg: boolean, pos: boolean): Polarity {
+  if (neg && pos) return 'both'
+  if (neg) return 'neg'
+  if (pos) return 'pos'
+  return 'none'
+}
+
+function collectCnStems(tail: string): string[] {
+  if (!tail) return []
+  if (tail.length === 1) return CN_PARTICLE.has(tail) ? [] : [tail]
+  const max = Math.min(tail.length, 4)
+  const out: string[] = []
+  for (let n = 2; n <= max; n++) out.push(tail.slice(0, n))
+  return out
+}
+
+/** 否定字后面的那一小段，就是它修饰的判断。`没有空` 同时记下「有空」和「空」。 */
+function cnNegatedStems(text: string): string[] {
+  const degree = new RegExp(`^(?:${CN_DEGREE})`)
+  const out: string[] = []
+  for (const m of text.matchAll(/[不没别未无]([一-鿿]{1,8})/g)) {
+    const stripped = m[1].replace(degree, '')
+    out.push(...collectCnStems(stripped))
+    if (stripped.startsWith('有') && stripped.length > 1) out.push(...collectCnStems(stripped.slice(1)))
+  }
+  return out
+}
+
+function cnStemPolarity(text: string, stem: string): Polarity {
+  const negBefore = new RegExp(`[不没别未无](?:${CN_DEGREE}|有)?$`)
+  let neg = false
+  let pos = false
+  let from = 0
+  while (from < text.length) {
+    const i = text.indexOf(stem, from)
+    if (i < 0) break
+    const before = text.slice(Math.max(0, i - 6), i)
+    if (negBefore.test(before)) neg = true
+    else pos = true
+    from = i + stem.length
+  }
+  return polarityOf(neg, pos)
+}
+
+function enNegatedStems(text: string): string[] {
+  const out: string[] = []
+  const re = new RegExp(
+    `\\b(?:not|no|never|without)\\s+(?:(?:${EN_DEGREE})\\s+)?([a-z][a-z'-]{2,})|(?:n't)\\s+(?:(?:${EN_DEGREE})\\s+)?([a-z][a-z'-]{2,})`,
+    'gi',
+  )
+  for (const m of text.matchAll(re)) {
+    const stem = (m[1] ?? m[2] ?? '').toLowerCase()
+    if (stem && !EN_STOP.has(stem)) out.push(stem)
+  }
+  return out
+}
+
+function enStemPolarity(text: string, stem: string): Polarity {
+  const re = new RegExp(`\\b${stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi')
+  const negBefore = new RegExp(
+    `\\b(?:not|no|never|without)\\s+(?:(?:${EN_DEGREE})\\s+)?$|n't\\s+(?:(?:${EN_DEGREE})\\s+)?$`,
+    'i',
+  )
+  let neg = false
+  let pos = false
+  for (const m of text.matchAll(re)) {
+    const at = m.index ?? 0
+    const before = text.slice(Math.max(0, at - 16), at)
+    if (negBefore.test(before)) neg = true
+    else pos = true
+  }
+  return polarityOf(neg, pos)
+}
+
+/**
+ * 同一个判断在原话和摘要里极性相反（没空→有空、有兴趣→没兴趣）→ 意思被翻了。
+ * 一句里这个判断两种说法都有、对不上号时，宁可退回原话。
+ */
+function firstFlippedNegation(summary: string, raw: string): string | null {
+  const stems = [
+    ...new Set([
+      ...cnNegatedStems(summary),
+      ...cnNegatedStems(raw),
+      ...enNegatedStems(summary),
+      ...enNegatedStems(raw),
+    ]),
+  ]
+  for (const stem of stems) {
+    const latin = /[a-z]/i.test(stem)
+    const inNote = latin ? enStemPolarity(raw, stem) : cnStemPolarity(raw, stem)
+    const inSum = latin ? enStemPolarity(summary, stem) : cnStemPolarity(summary, stem)
+    if (inNote === 'both' || inSum === 'both') return '否定对不上'
+    if (inNote !== 'none' && inSum !== 'none' && inNote !== inSum) return '否定对不上'
+  }
+  return null
+}
 
 /** 摘要里的英文词（≥3 字母）：专名、团名，必须原样出现在原话里。 */
 function latinTokens(s: string): string[] {
@@ -137,15 +272,22 @@ export function cnNumeralsToArabic(s: string): string {
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 
+/** 原话里的英文月份（March / June / Sep…）→ 月份号。数字核对和出行时间依据共用这一处。 */
+function englishMonthNumbers(raw: string): string[] {
+  const low = raw.toLowerCase()
+  const out: string[] = []
+  MONTHS.forEach((m, i) => {
+    if (new RegExp(`\\b${m}[a-z]*\\b`).test(low)) out.push(String(i + 1))
+  })
+  return out
+}
+
 /** 原话里出现过的所有数字：阿拉伯数字 + 中文数字换算 + 英文月份名对应的月份号。 */
 function noteDigitSet(raw: string): Set<string> {
   const out = new Set<string>()
   for (const d of digitRuns(raw)) out.add(String(Number(d)))
   for (const d of digitRuns(cnNumeralsToArabic(raw))) out.add(String(Number(d)))
-  const low = raw.toLowerCase()
-  MONTHS.forEach((m, i) => {
-    if (new RegExp(`\\b${m}[a-z]*\\b`).test(low)) out.add(String(i + 1))
-  })
+  for (const month of englishMonthNumbers(raw)) out.add(month)
   return out
 }
 
@@ -204,16 +346,15 @@ export function firstUngroundedTerm(value: string, raw: string): string | null {
 export function firstUngroundedClaim(summary: string, raw: string): string | null {
   const term = firstUngroundedTerm(summary, raw)
   if (term !== null) return term
-  // 「已完成」的事实需要原话里有「已完成」的说法。
-  const done = summary.match(COMPLETED_IN_SUMMARY_RE)
-  if (done && !COMPLETED_IN_NOTE_RE.test(raw)) return done[0]
-  // 意思翻转：原话有否定、摘要没有（「不要报价」→「要求报价」「没兴趣」→「感兴趣」），
-  // 或摘要有否定 / 拒绝、原话一点否定都没有（「可能感兴趣」→「明确拒绝」）。宁可退回原话。
+  const done = firstUngroundedCompletion(summary, raw)
+  if (done !== null) return done
+  // 整句有没有否定：一边有、一边没有，仍然直接拦。
+  // 两边都有时，还要看否定是不是打在同一个判断上（没空/有兴趣不能对调）。
   const noteNeg = NEG_NOTE_RE.test(raw)
   const sumNeg = NEG_SUMMARY_RE.test(summary)
   if (noteNeg && !sumNeg) return '否定被丢了'
   if (sumNeg && !noteNeg) return '凭空出现否定'
-  return null
+  return firstFlippedNegation(summary, raw)
 }
 
 // ── 原话里的「具体词」：摘要不许丢 ───────────────────────────────────────
@@ -236,11 +377,15 @@ function includesLoose(hay: string, needle: string): boolean {
 // ── 下一步 / 回电：原话里得真有这类说法 ──────────────────────────────────
 
 const NEXT_STEP_CUE_RE =
-  /下周|明天|后天|今天|今晚|周[一二三四五六日天]|星期[一二三四五六日天]|礼拜|\d+\s*[月号日点]|[点:：]\d|再打|再联系|回电|回拨|跟进|稍后|过几天|call\s*(him|her|them|back)|callback|follow\s*up|tomorrow|tonight|next\s*week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\b\d{1,2}\s*(am|pm)\b|\d{1,2}[:.]\d{2}/i
+  /下周|明天|后天|今天|今晚|周[一二三四五六日天]|星期[一二三四五六日天]|礼拜|\d+\s*[月号日点]|[点:：]\d|再打|再联系|回电|回拨|跟进|稍后|过几天|早上|上午|中午|下午|晚上|傍晚|凌晨|明早|明晚|今早|今夜|(?<![有这那哪差])[零〇一二两三四五六七八九十]{1,3}点|call\s*(him|her|them|back)|callback|follow\s*up|tomorrow|tonight|next\s*week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\b\d{1,2}\s*(am|pm)\b|\d{1,2}[:.]\d{2}/i
 
-/** 出行时间：原话里要有时间性的词或数字。 */
+/** 出行时间：原话里要有时间性的词、数字，或英文月份（月份表见 englishMonthNumbers）。 */
 const TIME_CUE_RE =
   /\d|明年|今年|后年|下个?月|月|年|季|春|夏|秋|冬|周|next|year|month|spring|summer|autumn|winter|fall|christmas|easter|early|late|end of|later|soon/i
+
+function hasTravelTimeCue(note: string): boolean {
+  return TIME_CUE_RE.test(note) || englishMonthNumbers(note).length > 0
+}
 
 /**
  * 把 AI 的解析结果按原话「落地」：没有依据的事实一律拿掉。
@@ -256,7 +401,7 @@ export function groundNoteParse(raw: string, parsed: NoteParse): NoteParse {
   const competitor =
     parsed.competitor && includesLoose(note, parsed.competitor) ? parsed.competitor : null
   const travel =
-    parsed.travel_window && TIME_CUE_RE.test(note) && firstUngroundedTerm(parsed.travel_window, note) === null
+    parsed.travel_window && hasTravelTimeCue(note) && firstUngroundedTerm(parsed.travel_window, note) === null
       ? parsed.travel_window
       : null
   const hasCue = NEXT_STEP_CUE_RE.test(note)

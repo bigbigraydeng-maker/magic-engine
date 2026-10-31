@@ -162,3 +162,79 @@ describe('子牙 (c)：中文数字与地名', () => {
     expect(firstUngroundedClaim('客户想去北京。', 'want to visit Shanghai')).not.toBeNull()
   })
 })
+
+describe('Codex 复审 559352e：中文钟点、完成态、否定范围、英文月份', () => {
+  const at = '2026-11-02T20:00:00.000Z'
+
+  it.each(['明早十点联系', '下午三点联系', '十一点联系'])(
+    '「%s」经 parseNote 保留回电时间，到点后进 callback_due',
+    async (note) => {
+      create.mockResolvedValue({
+        output_text: JSON.stringify({
+          ...BASE,
+          callback_at: at,
+          mentioned_next_step: true,
+          summary: note,
+        }),
+      })
+      const r = await parseNote(note, { now: new Date('2026-10-31T02:00:00.000Z') })
+      expect(create).toHaveBeenCalled()
+      expect(r.callback_at).toBe(at)
+      expect(r.mentioned_next_step).toBe(true)
+
+      const c: ContactLike = {
+        id: 'c',
+        displayName: 'X',
+        doNotContact: false,
+        hasPhone: true,
+        touchpoints: [
+          {
+            channel: 'phone',
+            direction: 'outbound',
+            occurredAt: '2026-10-31T02:00:00.000Z',
+            source: 'me_manual',
+            outcome: 'callback_set',
+            callbackAt: r.callback_at,
+          },
+        ],
+      }
+      const seg = segmentContact(c, new Date('2026-11-02T22:00:00.000Z'))
+      expect(seg.segment).toBe('callback_due')
+    },
+  )
+
+  it('完成态按动作核对：报价已发不能证明预订、付款或确认', () => {
+    const cases: Array<[string, string]> = [
+      ['已发报价，客户想预订', '客户已预订。'],
+      ['已发报价，客户想付钱', '客户已付款。'],
+      ['已发报价，客户想确认', '客户已确认。'],
+    ]
+    for (const [note, summary] of cases) {
+      expect(firstUngroundedClaim(summary, note)).not.toBeNull()
+      expect(groundNoteParse(note, { ...BASE, summary }).summary).toBe(note)
+    }
+    expect(firstUngroundedClaim('客户已预订。', '客户已经订了 Silk Road')).toBeNull()
+    expect(firstUngroundedClaim('客户已付款。', '订金付了')).toBeNull()
+    expect(firstUngroundedClaim('客户已确认。', '客户确认了行程')).toBeNull()
+    expect(firstUngroundedClaim('已发报价，客户想预订。', '已发报价，客户想预订')).toBeNull()
+  })
+
+  it('否定必须修饰同一个判断；对不上就退回原话', () => {
+    const note = '客户没空，但有兴趣'
+    const flipped = '客户有空，但没兴趣'
+    expect(firstUngroundedClaim(flipped, note)).not.toBeNull()
+    expect(groundNoteParse(note, { ...BASE, summary: flipped }).summary).toBe(note)
+    expect(firstUngroundedClaim('客户有兴趣，但现在没空。', note)).toBeNull()
+    expect(
+      firstUngroundedClaim('Customer is free but not interested.', 'Customer is not free but interested'),
+    ).not.toBeNull()
+  })
+
+  it('英文月份算作出行时间依据', () => {
+    const keep = (note: string, travel: string) =>
+      groundNoteParse(note, { ...BASE, travel_window: travel, summary: note }).travel_window
+    expect(keep('wants to travel in March', 'March')).toBe('March')
+    expect(keep('going in June', 'June')).toBe('June')
+    expect(keep('wants to travel someday', 'March')).toBeNull()
+  })
+})
