@@ -60,11 +60,12 @@ function companionWriteback(o: Outcome): Writeback | undefined {
   return writebacks(o).find((wb) => (wb.event_id ?? '').endsWith(':conversion-stage'))
 }
 
-/** The send row a person should look at. A failed or held row wins over a confirmed one. */
+/** The send row a person should look at. An uncertain row wins, then a failed or held one. */
 export function sendState(o: Outcome): Writeback | null {
   const rows = writebacks(o)
   return (
-    rows.find(isFailedLike) ??
+    rows.find((wb) => wb.status === 'in_doubt') ??
+    rows.find((wb) => wb.status === 'failed') ??
     rows.find(isHeldWriteback) ??
     rows.find((wb) => wb.status === 'queued') ??
     rows[0] ??

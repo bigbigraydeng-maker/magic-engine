@@ -4,7 +4,7 @@ title: 「已报价」和有线索编号的成交，按同一条 Meta 线索的�
 status: decided
 owner: pm
 decided_on: 2026-11-01
-source: session:20261101-ray
+source: pr:3432
 verify_by: 2026-11-08
 verify_how: 客户在设置里打开回传并选好两步的名字后，有 Meta 表单编号的「已报价」带这个编号发出；同一条线索的成交再带金额发出。没有编号的报价不发，没有编号的成交仍按原来的成交或尾款发。
 ---
