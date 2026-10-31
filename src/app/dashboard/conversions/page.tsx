@@ -537,6 +537,7 @@ export default function ConversionsPage() {
           {stuck.map((o) => {
             const wb = sendState(o)
             const doubt = wb?.status === 'in_doubt'
+            const revoked = wb?.payload_preview?.paymentRevoked === true
             return (
               <div key={o.id} className="rounded-xl border border-status-attn/40 bg-me-gold/15 p-4">
                 <div className="text-[15px] font-semibold text-me-charcoal">
@@ -545,7 +546,7 @@ export default function ConversionsPage() {
                   {o.order_ref && <span className="font-normal text-me-charcoal/50"> · 单号 {o.order_ref}</span>}
                 </div>
                 <div className="my-2 text-sm leading-relaxed text-me-charcoal/70">{stuckExplanation(o)}</div>
-                {doubt ? (
+                {revoked ? null : doubt ? (
                   <div className="flex flex-wrap gap-2">
                     <button disabled={busy === o.id} onClick={() => void resolve(o, 'confirmed')} className={btnSolid('status-track')}>
                       平台后台看到了 · 记为已收到

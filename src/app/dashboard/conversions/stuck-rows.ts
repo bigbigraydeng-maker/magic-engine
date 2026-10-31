@@ -20,8 +20,8 @@ export type Writeback = {
   last_error_code: string | null
   next_attempt_at: string | null
   event_id?: string | null
-  /** 允许名单先停住时为 `{ held: true }`。没有这个标记的排队行不是「需要你动手」。 */
-  payload_preview?: { held?: boolean } | null
+  /** 允许名单先停住时为 `{ held: true }`。收款撤销后带 `paymentRevoked`。 */
+  payload_preview?: { held?: boolean; paymentRevoked?: boolean } | null
 }
 
 export type Outcome = {
@@ -136,8 +136,11 @@ export function showInStuck(o: Outcome): boolean {
 }
 
 export function stuckExplanation(o: Outcome): string {
-  if (companionNeedsRetry(o) && !isRetryableFailure(o) && !isHeldDeal(o)) return companionExplanation(o)
   const wb = sendState(o)
+  if (wb?.payload_preview?.paymentRevoked === true) {
+    return '收款已撤销。这笔可能已经发给广告平台，撤不回来，不要再发。'
+  }
+  if (companionNeedsRetry(o) && !isRetryableFailure(o) && !isHeldDeal(o)) return companionExplanation(o)
   if (!wb) return '这条已报价还没有发给广告平台。点「再试一次」会补发这一条，不会另记一笔。'
   return writebackExplanation(wb)
 }

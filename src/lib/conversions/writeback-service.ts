@@ -31,6 +31,7 @@ import {
   qualifiedLeadHoldReason,
   resolveConversionLead,
 } from './conversion-lead'
+import { paymentRevokedPreview } from './crm-deal-void'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
 import type {
@@ -389,7 +390,7 @@ async function deliverApprovedOutcome(
 
   const { data: wbData, error: wbErr } = await supabase
     .from('me_conversion_writebacks')
-    .select('id, status, receipt, attempts, last_attempt_at')
+    .select('id, status, receipt, attempts, last_attempt_at, payload_preview')
     .eq('destination', destination)
     .eq('event_id', eventId)
     .maybeSingle()
@@ -403,7 +404,11 @@ async function deliverApprovedOutcome(
     receipt: unknown
     attempts: number
     last_attempt_at: string | null
+    payload_preview?: unknown
   }
+
+  const revoked = await stopRevokedSend(supabase, wb)
+  if (revoked) return revoked
 
   // 已经是终态就到此为止 —— 包括 in_doubt（那一档只能由人来解）。
   if ((TERMINAL as readonly string[]).includes(wb.status)) {
@@ -668,6 +673,13 @@ export async function resolveDoubt(
   actor: string | null,
   supabase: SupabaseClient,
 ): Promise<{ ok: boolean; status: WritebackStatus; message: string }> {
+  if (resolution === 'resend' && await resendBlockedByRevoke(supabase, writebackId)) {
+    return {
+      ok: false,
+      status: 'in_doubt',
+      message: '收款已撤销。这笔可能已经发给广告平台，不能再发一次。',
+    }
+  }
   if (resolution === 'confirmed') {
     const ok = await casUpdate(supabase, writebackId, ['in_doubt'], {
       status: 'confirmed',
@@ -695,6 +707,32 @@ export async function resolveDoubt(
  * 条件更新：只有当前状态在 `from` 里才改。
  * 返回是否真的改到了（`false` = 别人抢先了，本次放弃）。
  */
+const REVOKED_UNSENT = '收款已撤销，这条还没发出去，已停住。'
+
+async function stopRevokedSend(
+  supabase: SupabaseClient,
+  wb: { id: string; status: string; payload_preview?: unknown },
+): Promise<SendOutcomeResult | null> {
+  if (!paymentRevokedPreview(wb.payload_preview)) return null
+  if (wb.status !== 'queued' && wb.status !== 'failed') return null
+  await casUpdate(supabase, wb.id, ['queued', 'failed'], {
+    status: 'failed_permanent',
+    last_error: REVOKED_UNSENT,
+    last_error_code: null,
+  })
+  return { status: 'failed_permanent', message: REVOKED_UNSENT, writebackId: wb.id }
+}
+
+async function resendBlockedByRevoke(supabase: SupabaseClient, writebackId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('payload_preview')
+    .eq('id', writebackId)
+    .maybeSingle()
+  if (error) return true
+  return paymentRevokedPreview((data as { payload_preview?: unknown } | null)?.payload_preview)
+}
+
 async function casUpdate(
   supabase: SupabaseClient,
   writebackId: string,
