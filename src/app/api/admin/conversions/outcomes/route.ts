@@ -20,6 +20,16 @@ import { buildIntakeRow, type IntakeInput } from '@/lib/conversions/intake'
 export const dynamic = 'force-dynamic'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const OUTCOME_KINDS = ['purchase', 'balance', 'lead'] as const
+
+/** 列表在截断之前按类型筛。逗号分隔，空着表示不限类型。 */
+function parseOutcomeKinds(raw: string | null): { ok: true; kinds: string[] } | { ok: false } {
+  if (!raw) return { ok: true, kinds: [] }
+  const kinds = raw.split(',').map((s) => s.trim()).filter(Boolean)
+  const allowed = new Set<string>(OUTCOME_KINDS)
+  if (kinds.some((k) => !allowed.has(k))) return { ok: false }
+  return { ok: true, kinds }
+}
 
 /** 审计里记请求来源。只有 reviewed_by 邮箱不够 —— 会话被劫也是同一个邮箱。 */
 function requestMeta(request: Request) {
@@ -146,6 +156,10 @@ export async function GET(request: Request) {
   const status = searchParams.get('review_status')
   const focusId = searchParams.get('id')
   const limit = Math.min(Math.max(parseInt(searchParams.get('limit') ?? '50', 10) || 50, 1), 200)
+  const parsedKinds = parseOutcomeKinds(searchParams.get('outcome_kind'))
+  if (!parsedKinds.ok) {
+    return NextResponse.json({ error: 'outcome_kind 只能是 purchase、balance、lead' }, { status: 400 })
+  }
 
   if (!clientId || !UUID_RE.test(clientId)) {
     return NextResponse.json({ error: 'client_id 必填且必须是 uuid' }, { status: 400 })
@@ -207,6 +221,9 @@ export async function GET(request: Request) {
   if (status) query = query.eq('review_status', status)
   if (sendStatuses.length > 0) query = query.in('me_conversion_writebacks.status', sendStatuses)
   if (heldOnly) query = query.contains('me_conversion_writebacks.payload_preview', { held: true })
+  // 类型必须进 SQL，不能等取回 limit 条再在页面上丢掉。否则更新的咨询会占满
+  // 窗口，还在补发期内的成交根本到不了「需要你动手」。
+  if (parsedKinds.kinds.length > 0) query = query.in('outcome_kind', parsedKinds.kinds)
 
   const { data, error } = await query
   if (error) {
