@@ -11,8 +11,16 @@
  * sets production config; this module never applies it on its own.
  *
  * The qualified-lead stage is parsed so the setting has one home. Callers must
- * not send from it until that send path is explicitly approved.
+ * not send from it until that send path is explicitly approved. Matching the
+ * stage does not look at who set it, and it does not choose Lead versus a
+ * conversion-lead event.
  */
+
+/** Staff mark and the conversation reader both count. The actor is not an input. */
+export function stageCountsAsQualifiedLead(stageKey: string | null, configuredStageKey: string | null): boolean {
+  if (stageKey == null || configuredStageKey == null) return false
+  return stageKey === configuredStageKey
+}
 
 export const DOCUMENTED_DEAL_ONLY_EVENTS = ['Purchase', 'BalancePaid'] as const
 

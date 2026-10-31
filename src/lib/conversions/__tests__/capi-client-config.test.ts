@@ -7,6 +7,7 @@ import {
   normalizeCapiSettingsWrite,
   readCapiClientConfig,
   readyCapiSettingsWrite,
+  stageCountsAsQualifiedLead,
 } from '../capi-client-config'
 
 describe('capi event names', () => {
@@ -86,6 +87,14 @@ describe('qualified lead and deal settings', () => {
     expect(cfg.dealStageKeyMalformed).toBe(true)
     expect(cfg.qualifiedLeadStageKey).toBeNull()
     expect(cfg.qualifiedLeadStageMalformed).toBe(true)
+  })
+
+  it('a quoted stage counts with no actor argument, so a person and the conversation reader are the same', () => {
+    expect(stageCountsAsQualifiedLead('quoted', 'quoted')).toBe(true)
+    expect(stageCountsAsQualifiedLead('quoted', 'won')).toBe(false)
+    expect(stageCountsAsQualifiedLead(null, 'quoted')).toBe(false)
+    expect(stageCountsAsQualifiedLead('quoted', null)).toBe(false)
+    expect(decideCapiEventAllowed({ capi_qualified_lead_stage_key: 'quoted' }, 'Lead').allow).toBe(true)
   })
 
   it('absent deal keys stay unset', () => {
