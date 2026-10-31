@@ -3,7 +3,16 @@
 
 export type ReadKind = 'account' | 'adsets' | 'insights' | 'ads';
 
-export type ReadVerdict = 'ok' | 'read_failed' | 'token_expired' | 'rate_limited';
+// 'empty_but_ok' = Graph read succeeded, no rows matched. For `adsets` this means every
+// adset is PAUSED/ARCHIVED (filtered out by the heartbeat status whitelist); it is a real
+// business state ("nothing live right now"), NOT a read failure. UIs render it with a
+// plain-language empty copy, never with "读不到".
+export type ReadVerdict =
+  | 'ok'
+  | 'empty_but_ok'
+  | 'read_failed'
+  | 'token_expired'
+  | 'rate_limited';
 
 export interface ClassifyReadInput {
   ok: boolean;

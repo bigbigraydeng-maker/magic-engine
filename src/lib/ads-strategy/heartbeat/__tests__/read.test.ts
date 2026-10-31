@@ -196,13 +196,13 @@ describe('readHeartbeatAccount', () => {
     expect(result.anyFailure).toBe(true)
   })
 
-  it('empty adset list is read_failed only when account has active campaigns', async () => {
+  it('empty adset list is empty_but_ok with active campaigns, ok without; neither counts as failure', async () => {
     const emptyFetchers = makeFetchers({
       adsets: vi.fn(async () => okResult<GraphHeartbeatAdset>([])),
     })
-    const failed = await readHeartbeatAccount(makeArgs(emptyFetchers, true))
-    expect(outcomeFor(failed.outcomes, 'adsets')!.verdict).toBe('read_failed')
-    expect(failed.anyFailure).toBe(true)
+    const emptyActive = await readHeartbeatAccount(makeArgs(emptyFetchers, true))
+    expect(outcomeFor(emptyActive.outcomes, 'adsets')!.verdict).toBe('empty_but_ok')
+    expect(emptyActive.anyFailure).toBe(false)
 
     const okFetchers = makeFetchers({
       adsets: vi.fn(async () => okResult<GraphHeartbeatAdset>([])),

@@ -51,6 +51,44 @@ describe('buildLiveAccountView', () => {
     expect(v.active[0].spendToday).toBe(500)
   })
 
+  it('ok + empty adset list → readState ok (not unreadable); UI will show the empty copy, not 读不到', () => {
+    // Regression for CTS 2026-10-26: both ad accounts had every adset PAUSED, so the
+    // heartbeat whitelist returned 0 rows and the "今日实时" card said "读不到".
+    // After the fix, empty_but_ok leaves readState=ok so the panel renders its
+    // "现在没有状态为「投放中」的广告组" branch instead.
+    const v = buildLiveAccountView(read({
+      adsets: [],
+      ads: [],
+      outcomes: [
+        { kind: 'account', verdict: 'ok', reason: 'ok', errorCode: null },
+        { kind: 'adsets', verdict: 'empty_but_ok', reason: 'empty_adset_list', errorCode: null },
+        { kind: 'ads', verdict: 'ok', reason: 'ok', errorCode: null },
+        { kind: 'insights', verdict: 'ok', reason: 'ok', errorCode: null },
+      ],
+      anyFailure: false,
+    }))
+    expect(v.readState).toBe('ok')
+    expect(v.reason).toBeNull()
+    expect(v.active).toEqual([])
+    expect(v.newToday).toEqual([])
+  })
+
+  it('real adsets read_failed → readState unreadable with 读取失败 reason (not confused with empty)', () => {
+    const v = buildLiveAccountView(read({
+      adsets: [],
+      ads: [],
+      outcomes: [
+        { kind: 'account', verdict: 'ok', reason: 'ok', errorCode: null },
+        { kind: 'adsets', verdict: 'read_failed', reason: 'read_failed', errorCode: 100 },
+        { kind: 'ads', verdict: 'ok', reason: 'ok', errorCode: null },
+        { kind: 'insights', verdict: 'ok', reason: 'ok', errorCode: null },
+      ],
+      anyFailure: true,
+    }))
+    expect(v.readState).toBe('unreadable')
+    expect(v.reason).toContain('adsets')
+  })
+
   it('failed reads are never shown as fine', () => {
     const aborted = buildLiveAccountView(read({ abortedBy: 'token_expired', anyFailure: true, adsets: [] }))
     expect(aborted.readState).toBe('unreadable')

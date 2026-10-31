@@ -109,7 +109,11 @@ export function buildLiveAccountView(read: HeartbeatAccountRead): LiveAccountVie
   }
   const all = read.adsets.map((a) => toLiveAdset(a, read, adCounts.get(a.adsetId) ?? 0));
   const adsetsOk = !read.outcomes.some(
-    (o) => o.kind === 'adsets' && o.verdict !== 'ok' && o.verdict !== 'skipped',
+    (o) =>
+      o.kind === 'adsets' &&
+      o.verdict !== 'ok' &&
+      o.verdict !== 'empty_but_ok' &&
+      o.verdict !== 'skipped',
   );
   const readState: LiveAccountView['readState'] =
     read.abortedBy !== null || !adsetsOk ? 'unreadable' : read.anyFailure ? 'partial' : 'ok';

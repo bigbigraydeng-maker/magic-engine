@@ -23,15 +23,28 @@ describe('classifyRead', () => {
     kind: 'adsets' as const,
   }
 
-  it('empty adset list with active campaigns → read_failed (empty_adset_list)', () => {
+  it('empty adset list with active campaigns → empty_but_ok (not a read failure)', () => {
+    // Previously classed as read_failed, which made the "今日实时" card say "读不到"
+    // whenever every adset was PAUSED/ARCHIVED. empty_but_ok lets the UI say
+    // "现在没有状态为「投放中」的广告组" instead.
     const r = classifyRead({ ...base, accountHasActiveCampaigns: true })
-    expect(r.verdict).toBe('read_failed')
+    expect(r.verdict).toBe('empty_but_ok')
     expect(r.reason).toBe('empty_adset_list')
   })
 
   it('empty adset list without active campaigns → ok', () => {
     const r = classifyRead({ ...base, accountHasActiveCampaigns: false })
     expect(r.verdict).toBe('ok')
+  })
+
+  it('non-empty adset list with active campaigns → ok', () => {
+    const r = classifyRead({ ...base, accountHasActiveCampaigns: true, rowCount: 3 })
+    expect(r.verdict).toBe('ok')
+  })
+
+  it('empty adset list with Graph error → read_failed (true failure wins over empty)', () => {
+    const r = classifyRead({ ...base, ok: false, accountHasActiveCampaigns: true, rowCount: 0 })
+    expect(r.verdict).toBe('read_failed')
   })
 
   it('errorCode 190 → token_expired', () => {
