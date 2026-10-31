@@ -133,7 +133,8 @@ export const facebookReelAdapter: PublishAdapter = {
       throw new Error(`FB upload 失败 ${upRes.status}: ${JSON.stringify(upJson)}`)
     }
 
-    // ③ finish + publish/draft
+    // ③ finish + publish/draft. The request flag is not proof: the receipt below
+    // comes from a read of the video object's published field.
     await graphPost(`/${pageId}/video_reels`, {
       access_token: accessToken,
       video_id: videoId,
@@ -142,26 +143,19 @@ export const facebookReelAdapter: PublishAdapter = {
       description,
     })
 
+    const confirmed = await confirmFinishState(videoId, accessToken, draft)
     // A draft is not public, so Graph cannot accept a comment yet. Live posts
     // receive the CTA in the first comment, using the stable work-order marker
     // to recover safely if the worker is interrupted after the Reel is live.
-    const firstCommentId = draft || !firstComment?.trim() ? undefined : await ensurePageFirstComment({
-      pageId,
-      videoId,
-      accessToken,
-      idempotencyTag,
-      message: firstComment,
-    })
-
-    // 拿 permalink(尽力,失败不阻塞——video_id 才是硬锚)
-    let permalink: string | undefined
-    try {
-      const meta = await fetch(`${GRAPH}/${videoId}?fields=permalink_url&access_token=${accessToken}`)
-      const mj = (await meta.json().catch(() => ({}))) as Record<string, unknown>
-      if (typeof mj['permalink_url'] === 'string') permalink = mj['permalink_url'] as string
-    } catch {
-      /* permalink 非关键 */
-    }
+    const firstCommentId = draft || confirmed.video_state !== 'PUBLISHED' || !firstComment?.trim()
+      ? undefined
+      : await ensurePageFirstComment({
+        pageId,
+        videoId,
+        accessToken,
+        idempotencyTag,
+        message: firstComment,
+      })
 
     return {
       platform: 'facebook',
@@ -169,9 +163,8 @@ export const facebookReelAdapter: PublishAdapter = {
       post_id: videoId, // Reel 的 media id 即 post 标识
       video_id: videoId,
       published_at: new Date().toISOString(),
-      permalink,
-      // 盖戳:草稿 vs 正式。publish-worker 只在 PUBLISHED 时 emit 发布信号,草稿绝不通知下游。
-      video_state: draft ? 'DRAFT' : 'PUBLISHED',
+      permalink: confirmed.permalink,
+      video_state: confirmed.video_state,
       ...(firstCommentId ? { first_comment_id: firstCommentId } : {}),
     }
   },
@@ -193,15 +186,49 @@ export const facebookReelAdapter: PublishAdapter = {
     if (!res.ok || !Array.isArray(json.data)) return null
     const hit = json.data.find((r) => typeof r['description'] === 'string' && (r['description'] as string).includes(tag))
     if (!hit) return null
+    const videoId = String(hit['id'])
+    const readback = await readVideoStateOnce(videoId, accessToken)
     return {
       platform: 'facebook',
       page_id: pageId,
-      post_id: String(hit['id']),
-      video_id: String(hit['id']),
+      post_id: videoId,
+      video_id: videoId,
       published_at: typeof hit['updated_time'] === 'string' ? (hit['updated_time'] as string) : new Date().toISOString(),
-      permalink: typeof hit['permalink_url'] === 'string' ? (hit['permalink_url'] as string) : undefined,
+      permalink: typeof readback['permalink_url'] === 'string' ? (readback['permalink_url'] as string) : undefined,
+      video_state: videoStateFromReadback(readback) ?? undefined,
     }
   },
+}
+
+/** Map a Graph video read to a receipt state. Missing `published` is not a confirmation. */
+export function videoStateFromReadback(body: Record<string, unknown>): 'DRAFT' | 'PUBLISHED' | null {
+  if (body['published'] === true) return 'PUBLISHED'
+  if (body['published'] === false) return 'DRAFT'
+  return null
+}
+
+async function readVideoStateOnce(videoId: string, accessToken: string): Promise<Record<string, unknown>> {
+  const info = await fetch(`${GRAPH}/${videoId}?fields=published,permalink_url&access_token=${accessToken}`)
+  const body = (await info.json().catch(() => ({}))) as Record<string, unknown>
+  if (!info.ok) throw new Error(`FB 回读公开状态失败 ${info.status}: ${JSON.stringify({ published: body['published'] ?? null })}`)
+  return body
+}
+
+/** Live finishes must read published=true. A draft request may come back already live. */
+async function confirmFinishState(
+  videoId: string,
+  accessToken: string,
+  draft: boolean,
+): Promise<{ video_state: 'DRAFT' | 'PUBLISHED'; permalink?: string }> {
+  const confirmed = draft
+    ? await readVideoStateOnce(videoId, accessToken)
+    : await readBackPublished(videoId, accessToken)
+  const video_state = videoStateFromReadback(confirmed)
+  if (!video_state || (!draft && video_state !== 'PUBLISHED')) {
+    throw new Error(`FB 未确认 Reel 已公开: ${JSON.stringify({ published: confirmed['published'] ?? null })}`)
+  }
+  const permalink = typeof confirmed['permalink_url'] === 'string' ? confirmed['permalink_url'] : undefined
+  return { video_state, permalink }
 }
 
 // 回读重试间隔:测试环境(VITEST)下置 0,免得单测白等 1.5s。

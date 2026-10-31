@@ -127,16 +127,16 @@ describe('writeThreeBooks draft vs published', () => {
     expect(summary).not.toContain('草稿')
   })
 
-  it('undefined video_state (legacy/recovered ref) behaves like PUBLISHED', async () => {
+  it('undefined video_state is not booked as sent', async () => {
     await writeThreeBooks(WO_ID, baseRef, CLIENT_ID, ANGLE)
 
-    const exec = findInserts('execution_items')
-    expect(exec).toHaveLength(1)
-    expect(exec[0].payload.status).toBe('completed')
+    expect(findInserts('execution_items')).toHaveLength(0)
 
     const logs = findInserts('fde_work_logs')
     expect(logs).toHaveLength(1)
-    expect(String(logs[0].payload.summary)).toContain('已发到')
+    const summary = String(logs[0].payload.summary)
+    expect(summary).toContain('公开状态未确认')
+    expect(summary).not.toContain('已发到')
   })
 
   it('flywheel row shape is identical apart from execution_item_id and video_state', async () => {

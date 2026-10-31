@@ -31,7 +31,7 @@ interface PublishOptions {
 
 interface PublishOutcome {
   order_id: string
-  result: 'published' | 'failed' | 'skipped_existing' | 'no_candidate'
+  result: 'published' | 'drafted' | 'failed' | 'skipped_existing' | 'no_candidate'
   detail?: string
 }
 
@@ -235,13 +235,12 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   if (priorRef && priorRef['provisional'] === true && priorRef['video_id']) {
     const recovered = await adapter.findExisting({ target, idempotencyTag: id }).catch(() => null)
     if (recovered) {
-      if (!opts.draft && adapter.ensureFirstComment && !recovered.first_comment_id) {
+      if (recovered.video_state === 'PUBLISHED' && !opts.draft && adapter.ensureFirstComment && !recovered.first_comment_id) {
         recovered.first_comment_id = await adapter.ensureFirstComment({
           target, videoId: String(recovered.video_id ?? priorRef['video_id']), idempotencyTag: id, message: firstComment.text,
         })
       }
-      await recordPublished(id, recovered, clientId, label)
-      return { order_id: id, result: 'skipped_existing', detail: 'recovered_after_interrupt' }
+      return settleConfirmed(id, recovered, clientId, label, attempts)
     }
     await supabaseAdmin
       .from('content_work_orders')
@@ -255,13 +254,12 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   try {
     const existing = await adapter.findExisting({ target, idempotencyTag: id })
     if (existing) {
-      if (!opts.draft && adapter.ensureFirstComment && !existing.first_comment_id) {
+      if (existing.video_state === 'PUBLISHED' && !opts.draft && adapter.ensureFirstComment && !existing.first_comment_id) {
         existing.first_comment_id = await adapter.ensureFirstComment({
           target, videoId: String(existing.video_id ?? existing.post_id), idempotencyTag: id, message: firstComment.text,
         })
       }
-      await recordPublished(id, existing, clientId, label)
-      return { order_id: id, result: 'skipped_existing', detail: existing.post_id }
+      return settleConfirmed(id, existing, clientId, label, attempts)
     }
   } catch (e) {
     // 对账失败不发(宁可不发也不冒双发风险)
@@ -310,15 +308,33 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
     return { order_id: id, result: 'failed', detail: 'publish_error' }
   }
 
-  // 硬事务:先落 published_ref + status(幂等锚,最优先)→ 再三落库(尽力,可后补)
+  return settleConfirmed(id, ref, clientId, label, attempts)
+}
+
+/** Meta must say DRAFT or PUBLISHED. Anything else is a failure, not a publish. */
+async function settleConfirmed(
+  id: string,
+  ref: PublishedRef,
+  clientId: string,
+  label: string,
+  attempts: number,
+): Promise<PublishOutcome> {
+  if (ref.video_state !== 'PUBLISHED' && ref.video_state !== 'DRAFT') {
+    await markFailed(id, attempts, 'Meta 没有确认这条 Reel 是已公开还是草稿', true)
+    return { order_id: id, result: 'failed', detail: 'publish_state_unconfirmed' }
+  }
   await recordPublished(id, ref, clientId, label)
-  // 发布信号(me/factory.reel.published):发完喊一声给下游自动建广告。
-  // 只在真·PUBLISHED 的 facebook Reel 上喊(草稿不可 promote 成广告,绝不喊)。best-effort,不阻塞返回。
+  if (ref.video_state === 'DRAFT') {
+    return { order_id: id, result: 'drafted', detail: ref.permalink ?? ref.post_id }
+  }
+  // 发布信号只在真·PUBLISHED 上喊。best-effort,不阻塞返回。
   await emitReelPublishedEvent(id, ref, clientId)
   return { order_id: id, result: 'published', detail: ref.permalink ?? ref.post_id }
 }
 
-// published_ref 硬事务 + 三落库尽力而为(魏征 B9:三落库失败不回滚 published,片已发出回滚会致重发)
+// published_ref 硬事务 + 三落库尽力而为。回执已经是 Meta 确认过的 DRAFT 或 PUBLISHED。
+// 工单 status 仍写 published:库里没有单独的草稿取值,转公开也要求 status=published 且 video_state=DRAFT。
+// 「已公开」只认 video_state=PUBLISHED(三本账、发布信号、发后读数都看这一戳)。
 async function recordPublished(
   id: string,
   ref: PublishedRef,
@@ -368,6 +384,17 @@ export async function projectPublishedReelExecutionItem(input: {
   return data.id
 }
 
+export function bookSummary(angle: string, channel: string, ref: PublishedRef): string {
+  const where = ref.permalink ?? ref.post_id
+  if (ref.video_state === 'PUBLISHED') {
+    return `【社媒｜工厂自动发布】Reel「${angle}」已发到 ${channel}。${where}`
+  }
+  if (ref.video_state === 'DRAFT') {
+    return `【社媒｜工厂自动发布】Reel「${angle}」草稿已上传到 ${channel}，未公开。${where}`
+  }
+  return `【社媒｜工厂自动发布】Reel「${angle}」已上传到 ${channel}，公开状态未确认。${where}`
+}
+
 // 三落库:CLAUDE.md 强约束——外部执行动作必落 fde_work_logs + execution_items + flywheel_actions + 归因链
 export async function writeThreeBooks(
   id: string,
@@ -376,8 +403,8 @@ export async function writeThreeBooks(
   angle: string,
 ): Promise<void> {
   const today = new Date().toISOString().slice(0, 10)
-  // A Facebook draft is uploaded but not public, so it must not be booked as sent.
-  const isDraft = ref.video_state === 'DRAFT'
+  // Only a Meta-confirmed live Reel is a completed send. Draft and unknown are not.
+  const isLive = ref.video_state === 'PUBLISHED'
   const execMode = 'in_house'
   const vendor = 'meta_graph' // channel (same label as reel-measurement adapter), not customer: client_id is already on every row
 
@@ -386,8 +413,8 @@ export async function writeThreeBooks(
 
   // Each receipt is independent: a board failure must not suppress the work log.
   let execId: string | null = null
-  // draft is not a completed action; flywheel row below stays so the promote-to-public step can find it.
-  if (!isDraft) {
+  // A draft still writes the flywheel row so the promote-to-public step can find it.
+  if (isLive) {
     try {
       execId = await projectPublishedReelExecutionItem({
         clientId, existingItemId: null,
@@ -414,9 +441,7 @@ export async function writeThreeBooks(
     if (error) console.error(`[publish-worker] flywheel_actions 落库失败 ${id}: ${error.message}`)
   }
   {
-    const summary = isDraft
-      ? `【社媒｜工厂自动发布】Reel「${angle}」草稿已上传到 ${channel}，未公开。${ref.permalink ?? ref.post_id}`
-      : `【社媒｜工厂自动发布】Reel「${angle}」已发到 ${channel}。${ref.permalink ?? ref.post_id}`
+    const summary = bookSummary(angle, channel, ref)
     const { error } = await supabaseAdmin.from('fde_work_logs').insert({
       client_id: clientId,
       log_date: today,

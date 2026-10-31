@@ -233,9 +233,9 @@ export interface PublishedRef {
   first_comment_id?: string
   /**
    * 这条回执对应的是真·公开发布(PUBLISHED)还是草稿(DRAFT)。
-   * 由 adapter 按 draft 参数盖戳 —— publish-worker 只在 PUBLISHED 时才 emit 发布信号,
-   * 草稿绝不通知下游建广告(草稿不可 promote 成广告)。undefined = 来路不明(如 findExisting
-   * 补记),保守当作"不确定" —— 不 emit、不补发,等真查过 video_state 再说。
+   * 只认 Meta 回读到的 published 字段:true=PUBLISHED,false=DRAFT。
+   * publish-worker 只在 PUBLISHED 时才记成已公开并发读数。undefined = 没确认,
+   * 记失败并写明原因,不当已发布。
    */
   video_state?: 'DRAFT' | 'PUBLISHED'
   /**
