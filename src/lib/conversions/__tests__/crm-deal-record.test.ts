@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { isPastEventWindow } from '../event-window'
 import {
   blockingApprovedPurchase,
   crmDealSourceRef,
@@ -173,6 +174,49 @@ describe('recordMilestoneDeal', () => {
     expect(io.inserted).toHaveLength(1)
   })
 
+  it('uses the stored paid date, so an old payment stays outside the send window', async () => {
+    const io = memory({
+      loadBooking: async () => ({
+        contactId: CONTACT,
+        partySize: 2,
+        tourId: 'tour',
+        departureId: 'dep',
+        paidOnByKind: { deposit: '2026-09-01' },
+      }),
+    })
+    const result = await recordMilestoneDeal(io, {
+      clientId: CLIENT,
+      bookingId: BOOKING,
+      kind: 'deposit',
+      paidOn: '2026-10-31',
+      actor: null,
+    }, NOW)
+    expect(result.recorded).toBe(true)
+    expect(io.inserted[0]?.occurred_at).toBe('2026-09-01T00:00:00.000Z')
+    expect(isPastEventWindow(io.inserted[0]?.occurred_at ?? '', NOW)).toBe(true)
+  })
+
+  it('refuses when the milestone rows were read and this kind has no paid date', async () => {
+    const io = memory({
+      loadBooking: async () => ({
+        contactId: CONTACT,
+        partySize: 2,
+        tourId: 'tour',
+        departureId: 'dep',
+        paidOnByKind: {},
+      }),
+    })
+    const result = await recordMilestoneDeal(io, {
+      clientId: CLIENT,
+      bookingId: BOOKING,
+      kind: 'deposit',
+      paidOn: '2026-10-31',
+      actor: null,
+    }, NOW)
+    expect(result).toMatchObject({ recorded: false, reason: 'paid_on_missing' })
+    expect(io.inserted).toHaveLength(0)
+  })
+
   it('an insert error does not pretend the deal was stored', async () => {
     const io = memory({ insertOutcome: async () => ({ ok: false, duplicate: false }) })
     const result = await recordMilestoneDeal(io, { clientId: CLIENT, bookingId: BOOKING, kind: 'deposit', paidOn: '2026-10-08', actor: null }, NOW)
@@ -181,6 +225,26 @@ describe('recordMilestoneDeal', () => {
 })
 
 describe('recordStageDeal', () => {
+  it('refuses when the booking belongs to a different contact', async () => {
+    const other = '22222222-2222-4222-8222-222222222222'
+    const io = memory({
+      loadBooking: async () => ({ contactId: other, partySize: 2, tourId: 'tour', departureId: 'dep' }),
+    })
+    const result = await recordStageDeal(io, {
+      clientId: CLIENT, contactId: CONTACT, stageKey: 'won', bookingId: BOOKING,
+      occurredAt: null, actor: null, staffAmount: null, staffCurrency: null,
+    }, NOW)
+    expect(result).toMatchObject({
+      attempted: true,
+      recorded: false,
+      advanceStage: false,
+      reason: 'contact_mismatch',
+    })
+    expect(result.message).toContain('不是同一人')
+    expect(io.inserted).toHaveLength(0)
+    expect(io.inserted.some((row) => row.contact_id === other)).toBe(false)
+  })
+
   it('does not advance when the stage is not the configured deal stage', async () => {
     const io = memory()
     const result = await recordStageDeal(io, {

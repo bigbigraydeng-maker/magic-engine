@@ -8,6 +8,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { DncTouch } from '@/lib/crm/dnc'
 import { loadDealPriceTexts } from '@/lib/tour-catalog/deal-price-facts'
 import {
+  CRM_STAGE_MANUAL_SOURCE,
+  DEAL_DEDUPE_WINDOW_MS,
   PAYMENT_DEAL_FAIL_MESSAGE,
   recordMilestoneDeal,
   type ApprovedPurchase,
@@ -93,7 +95,35 @@ async function loadBooking(db: SupabaseClient, clientId: string, bookingId: stri
     partySize: typeof row.party_size === 'number' ? row.party_size : null,
     tourId: str(row.tour_id),
     departureId: str(row.departure_id),
+    paidOnByKind: await loadPaidDates(db, clientId, bookingId),
   }
+}
+
+async function loadPaidDates(
+  db: SupabaseClient,
+  clientId: string,
+  bookingId: string,
+): Promise<Partial<Record<DealMilestone, string | null>>> {
+  const { data, error } = await db
+    .from('crm_booking_milestones')
+    .select('kind, paid_on')
+    .eq('client_id', clientId)
+    .eq('booking_id', bookingId)
+  if (error) throw new Error('crm_deal_read_failed')
+  const out: Partial<Record<DealMilestone, string | null>> = {}
+  for (const item of Array.isArray(data) ? data : []) {
+    const row = asRow(item)
+    const kind = str(row?.kind)
+    if (kind !== 'deposit' && kind !== 'balance') continue
+    out[kind] = dayOf(row?.paid_on)
+  }
+  return out
+}
+
+function dayOf(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const day = value.slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null
 }
 
 async function loadPsid(db: SupabaseClient, clientId: string, contactId: string): Promise<string | null> {
@@ -115,12 +145,18 @@ async function loadMetaLeadId(db: SupabaseClient, clientId: string, contactId: s
 }
 
 async function loadApproved(db: SupabaseClient, clientId: string, contactId: string): Promise<ApprovedPurchase[]> {
-  const rows = await many(db, 'me_sale_outcomes', 'source_kind, occurred_at, review_status, outcome_kind', [
-    ['client_id', clientId],
-    ['contact_id', contactId],
-    ['outcome_kind', 'purchase'],
-    ['review_status', 'approved'],
-  ])
+  const since = new Date(Date.now() - DEAL_DEDUPE_WINDOW_MS).toISOString()
+  const { data, error } = await db
+    .from('me_sale_outcomes')
+    .select('source_kind, occurred_at, review_status, outcome_kind')
+    .eq('client_id', clientId)
+    .eq('contact_id', contactId)
+    .eq('outcome_kind', 'purchase')
+    .eq('review_status', 'approved')
+    .neq('source_kind', CRM_STAGE_MANUAL_SOURCE)
+    .gte('occurred_at', since)
+  if (error) throw new Error('crm_deal_read_failed')
+  const rows = Array.isArray(data) ? data.map(asRow).filter((row): row is Row => row != null) : []
   return rows.map((row) => ({
     sourceKind: str(row.source_kind) ?? '',
     occurredAt: str(row.occurred_at) ?? '',

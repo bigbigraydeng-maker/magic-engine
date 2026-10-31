@@ -14,6 +14,7 @@ const NAL = '4ae76381-cd45-43bd-85cd-98cfd7604007'
 /**
  * 实测核实（对着 conversion-review-items.ts 源码查过）：三段查询分别是
  *   me_sale_outcomes: select → eq → is → order → limit → await
+ *   me_sale_outcomes（成交汇总）: select → eq → is → in → gte → order → limit → await
  *   me_conversion_writebacks（in_doubt）: select → eq → limit → await
  *   me_conversion_writebacks（auth）: select → eq → eq → limit → await
  *   me_conversion_writebacks（held）: select → eq → contains → eq → is → in → gte → order → limit → await
@@ -170,6 +171,22 @@ describe('成交待批准提醒', () => {
       NOW,
     )
     expect(items.some((i) => i.what.includes('笔成交待批准'))).toBe(false)
+  })
+
+  it('最老的 20 条都是咨询时，更新的成交仍被单独数进来', async () => {
+    const leads = Array.from({ length: 21 }, (_, i) =>
+      deal(`lead-${i}`, `2026-09-16T00:00:${String(i).padStart(2, '0')}.000Z`, 'lead'),
+    )
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(
+      fakeSupabase({ pending: [...leads, deal('fresh', '2026-09-21T00:00:00.000Z')] }) as never,
+      items,
+      names,
+      NOW,
+    )
+    const summary = items.find((i) => i.what.includes('笔成交待批准'))
+    expect(summary?.what).toContain('1 笔成交待批准')
+    expect(summary?.what).toContain('再过 6 天过期')
   })
 })
 
