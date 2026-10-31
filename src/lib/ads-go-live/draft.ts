@@ -10,6 +10,11 @@ export interface GoLiveIds {
   readonly campaignId: string
   readonly adSetId: string
   readonly adIds: readonly string[]
+  /**
+   * This campaign already existed. Go-live may switch the new ad set and ads,
+   * and must not turn the campaign on or off.
+   */
+  readonly reusedCampaign?: boolean
 }
 
 export interface PausedDraftView {
@@ -53,12 +58,15 @@ export function parsePausedDraft(payload: unknown): PausedDraftView | null {
   const campaignId = text(row.campaignId)
   const adSetId = text(row.adSetId)
   const adIds = idList(row.adIds)
+  const reusedCampaign = Boolean(body && text(body.existingCampaignId))
   return {
     status,
     kind: body ? text(body.kind) : null,
     dailyBudget: body ? finite(body.dailyBudget) : null,
     durationDays: body ? finite(body.durationDays) : null,
     accountLabel: text(row.accountLabel),
-    ids: campaignId && adSetId && adIds ? { campaignId, adSetId, adIds } : null,
+    ids: campaignId && adSetId && adIds
+      ? { campaignId, adSetId, adIds, ...(reusedCampaign ? { reusedCampaign: true } : {}) }
+      : null,
   }
 }
