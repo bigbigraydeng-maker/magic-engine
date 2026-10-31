@@ -173,22 +173,40 @@ export type SendDeps = {
 
 type StageCompanion = { eventId: string; eventName: string }
 
+/** Which send row to move. Omitted means the original sale and its stage row. */
+export type SendScope = { eventId: string }
+
 /**
  * 发送一条已批准的事实。**幂等**：重复调用不会重复发送。
  *
- * 有原始线索编号、并且打开了线索阶段的成交，会再发一条阶段记录。
- * 原来的成交或尾款照发。两条各有自己的发送记录，同一种不会发两次。
- * 阶段那条失败不掩盖成交那条的结果；下次再调会补发还没成功的那条。
+ * 不带范围时：原来的成交或尾款照发；有线索编号并且打开了阶段时，再发阶段那条。
+ * 两条各有自己的发送记录，同一种不会发两次。阶段那条失败不掩盖成交那条的结果。
+ *
+ * 带了范围时只推进那一条。每天的自动补发必须带上它选中的事件编号，
+ * 否则选中阶段那条时会把上次 5xx 的成交再发一遍。
  *
  * 调用方（路由）负责鉴权与审计；这里只管状态机与发送。
  */
 export async function sendApprovedOutcome(
   outcomeId: string,
   deps: SendDeps,
+  scope?: SendScope,
 ): Promise<SendOutcomeResult> {
+  if (scope?.eventId === dealStageEventId(outcomeId)) return sendScopedCompanion(outcomeId, deps)
   const result = await deliverApprovedOutcome(outcomeId, deps, null)
-  await sendDealStageCompanion(outcomeId, deps)
+  if (!scope) await sendDealStageCompanion(outcomeId, deps)
   return result
+}
+
+async function sendScopedCompanion(outcomeId: string, deps: SendDeps): Promise<SendOutcomeResult> {
+  const eventName = await readDealStageName(deps.supabase, outcomeId)
+  if (!eventName) {
+    return { status: 'failed', message: '这条阶段记录现在发不出去。', writebackId: null }
+  }
+  return deliverApprovedOutcome(outcomeId, deps, {
+    eventId: dealStageEventId(outcomeId),
+    eventName,
+  })
 }
 
 async function sendDealStageCompanion(outcomeId: string, deps: SendDeps): Promise<void> {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const send = vi.hoisted(() => vi.fn(async () => ({ status: 'confirmed', message: '已发给广告平台。', writebackId: 'wb-1' })))
+const send = vi.hoisted(() => vi.fn(async (_outcomeId: string) => ({ status: 'confirmed', message: '已发给广告平台。', writebackId: 'wb-1' })))
 vi.mock('../writeback-service', () => ({ sendApprovedOutcome: send }))
 vi.mock('@/lib/meta/capi/writer', () => ({ metaCapiWriter: { kind: 'meta_capi' } }))
 
@@ -143,7 +143,7 @@ describe('recordQualifiedStageLead', () => {
     expect(again.message).toContain('已发给广告平台')
     expect(db.tables.me_sale_outcomes).toHaveLength(1)
     expect(send).toHaveBeenCalledTimes(1)
-    expect(send.mock.calls[0]?.[0]).toBe(db.tables.me_sale_outcomes[0].id)
+    expect(send.mock.calls[0]?.[0]).toBe(String(db.tables.me_sale_outcomes[0].id))
   })
 
   it('states why a lead with no form id is not sent, and does not send an ordinary lead', async () => {

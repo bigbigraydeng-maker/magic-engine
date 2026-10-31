@@ -21,13 +21,21 @@ import { GET } from './route'
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
 const DEAL = 'd1000000-0000-0000-0000-000000000001'
 
-type Writeback = { status: string; payload_preview?: { held?: boolean } | null }
+type Writeback = {
+  status: string
+  event_id?: string | null
+  last_error_code?: string | null
+  payload_preview?: { held?: boolean } | null
+}
 type Row = {
   id: string
   client_id: string
   outcome_kind: string
   review_status: string
   occurred_at: string
+  source_ref?: string | null
+  meta_lead_id?: string | null
+  redacted_at?: string | null
   me_conversion_writebacks?: Writeback[]
 }
 
@@ -46,6 +54,10 @@ function matches(row: Row, op: string, col: string, val: unknown): boolean {
   if (op === 'contains') {
     return (row.me_conversion_writebacks ?? []).some((w) => w.payload_preview?.held === true)
   }
+  if (op === 'like') return String((row as Record<string, unknown>)[col] ?? '').startsWith(String(val).replace(/%$/, ''))
+  if (op === 'gte') return String((row as Record<string, unknown>)[col] ?? '') >= String(val)
+  if (op === 'is') return ((row as Record<string, unknown>)[col] ?? null) === val
+  if (op === 'not') return ((row as Record<string, unknown>)[col] ?? null) !== val
   return false
 }
 
@@ -57,7 +69,9 @@ function listRows(filters: Array<[string, string, unknown]>, limitN: number | nu
   return out
 }
 
-function fakeDb() {
+let clientConfig: unknown = null
+
+function fakeDb(table = 'me_sale_outcomes') {
   const filters: Array<[string, string, unknown]> = []
   let limitN: number | null = null
   const builder: Record<string, unknown> = {}
@@ -75,12 +89,29 @@ function fakeDb() {
     filters.push(['contains', col, val])
     return builder
   }
+  builder.like = (col: string, val: unknown) => {
+    filters.push(['like', col, val])
+    return builder
+  }
+  builder.gte = (col: string, val: unknown) => {
+    filters.push(['gte', col, val])
+    return builder
+  }
+  builder.is = (col: string, val: unknown) => {
+    filters.push(['is', col, val])
+    return builder
+  }
+  builder.not = (col: string, _op: string, val: unknown) => {
+    filters.push(['not', col, val])
+    return builder
+  }
   builder.order = self
   builder.limit = (n: number) => {
     limitN = n
     return builder
   }
   builder.maybeSingle = async () => {
+    if (table === 'clients') return { data: { leads_config: clientConfig }, error: null }
     const found = listRows(filters, null)[0] ?? null
     return { data: found, error: null }
   }
@@ -110,7 +141,8 @@ function seedCrowdedWindow() {
 
 beforeEach(() => {
   rows = []
-  vi.mocked(supabaseAdmin.from).mockImplementation(() => fakeDb() as never)
+  clientConfig = null
+  vi.mocked(supabaseAdmin.from).mockImplementation((table: string) => fakeDb(table) as never)
 })
 
 function get(query: string) {
@@ -154,5 +186,80 @@ describe('GET outcomes · 停发成交不被更新的咨询挤出窗口', () => 
   it('不认识的类型直接拒绝', async () => {
     const res = await get('outcome_kind=purchase,other')
     expect(res.status).toBe(400)
+  })
+})
+
+describe('GET outcomes · 已报价排队和成交下一步', () => {
+  const LEAD = '1687504185706630'
+
+  it('排队中或没有发送记录的已报价会返回，已经发出和普通成交不会', async () => {
+    rows = [
+      {
+        id: 'quoted-queued',
+        client_id: CLIENT,
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        source_ref: 'crm_qualified:c:quoted',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{ status: 'queued', payload_preview: null }],
+      },
+      {
+        id: 'quoted-missing',
+        client_id: CLIENT,
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        source_ref: 'crm_qualified:c:missing',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [],
+      },
+      {
+        id: 'quoted-sent',
+        client_id: CLIENT,
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        source_ref: 'crm_qualified:c:sent',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{ status: 'confirmed' }],
+      },
+      {
+        id: DEAL,
+        client_id: CLIENT,
+        outcome_kind: 'purchase',
+        review_status: 'approved',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{ status: 'queued' }],
+      },
+    ]
+    const res = await get('qualified_open=1')
+    const body = await res.json()
+    expect(body.outcomes.map((o: Row) => o.id).sort()).toEqual(['quoted-missing', 'quoted-queued'])
+  })
+
+  it('打开了下一步、又有线索编号、但还没那条发送记录的成交会被标出来', async () => {
+    clientConfig = { capi_conversion_leads: true, capi_conversion_deal_stage_key: 'balance_received' }
+    rows = [
+      {
+        id: DEAL,
+        client_id: CLIENT,
+        outcome_kind: 'purchase',
+        review_status: 'approved',
+        meta_lead_id: LEAD,
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{ status: 'confirmed', event_id: DEAL }],
+      },
+      {
+        id: 'no-lead',
+        client_id: CLIENT,
+        outcome_kind: 'purchase',
+        review_status: 'approved',
+        meta_lead_id: null,
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{ status: 'confirmed', event_id: 'no-lead' }],
+      },
+    ]
+    const res = await get('companion_open=1')
+    const body = await res.json()
+    expect(body.outcomes.map((o: Row) => o.id)).toEqual([DEAL])
+    expect(body.outcomes[0].companion_expected).toBe(true)
   })
 })

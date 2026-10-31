@@ -8,7 +8,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../writeback-service', () => ({
-  sendApprovedOutcome: vi.fn(async (outcomeId: string) => ({ status: 'confirmed', message: '已发送', writebackId: `wb-${outcomeId}` })),
+  sendApprovedOutcome: vi.fn(async (outcomeId: string, _deps?: unknown, _scope?: { eventId: string }) => ({
+    status: 'confirmed' as const,
+    message: '已发送',
+    writebackId: `wb-${outcomeId}`,
+  })),
 }))
 
 import { sendApprovedOutcome } from '../writeback-service'
@@ -80,6 +84,7 @@ function wb(over: Row): Row {
     last_error_code: 'auth',
     next_attempt_at: '2026-09-22T10:00:00.000Z',
     last_attempt_at: '2026-09-22T09:00:00.000Z',
+    event_id: over.outcome_id,
     ...over,
   }
 }
@@ -180,7 +185,21 @@ describe('runFailedWritebackResend', () => {
     expect(preflight).not.toHaveBeenCalled()
     expect(s).toMatchObject({ candidates: 1, inDoubt: 1 })
     expect(vi.mocked(sendApprovedOutcome).mock.calls.map((c) => c[0])).toEqual(['stuck'])
+    expect(vi.mocked(sendApprovedOutcome).mock.calls[0]?.[2]).toEqual({ eventId: 'stuck' })
     expect(audits[0]).toMatchObject({ detail: { trigger: 'stuck_sending' } })
+  })
+
+  it('选中阶段那条时，只把这一条的事件编号交给发送，不让整笔再走一遍', async () => {
+    writebacks.push(wb({
+      id: 'wb-stage',
+      outcome_id: 'o1',
+      event_id: 'o1:conversion-stage',
+    }))
+    outcomes.push(outcome('o1'))
+    await run(true).result
+    expect(sendApprovedOutcome).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(sendApprovedOutcome).mock.calls[0]?.[0]).toBe('o1')
+    expect(vi.mocked(sendApprovedOutcome).mock.calls[0]?.[2]).toEqual({ eventId: 'o1:conversion-stage' })
   })
 
   it('单条发送抛错不影响其它条，记进 errors', async () => {

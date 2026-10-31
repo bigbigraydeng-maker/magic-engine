@@ -514,4 +514,75 @@ describe('已报价发给广告平台没成功', () => {
     expect(gap?.how).toContain('再试一次')
     expect(gap?.what).not.toContain('回写')
   })
+
+  it('阶段那条卡在排队，或失败不是授权失效时，也进今日待办', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(fakeSupabase({
+      clients: [liveDealClient()],
+      deals: [dealRow('deal-queued'), dealRow('deal-failed')],
+      held: [
+        stageSend('deal-queued', { status: 'queued' }),
+        stageSend('deal-failed', { status: 'failed', last_error_code: 'retry' }),
+      ],
+    }) as never, items, names, NOW)
+    const gaps = items.filter((item) => item.what.includes('下一步还没记上'))
+    expect(gaps.map((item) => item.href)).toEqual([
+      companionHref('deal-queued'),
+      companionHref('deal-failed'),
+    ])
+  })
+
+  it('阶段那条已发出、被名单停住，或只是授权失效时，不进这条待办', async () => {
+    const items: ManualItem[] = []
+    await pushConversionReviewItems(fakeSupabase({
+      clients: [liveDealClient()],
+      deals: [dealRow('deal-sent'), dealRow('deal-held'), dealRow('deal-auth')],
+      held: [
+        stageSend('deal-sent', { status: 'confirmed' }),
+        stageSend('deal-held', { status: 'queued', payload_preview: { held: true } }),
+        stageSend('deal-auth', { status: 'failed', last_error_code: 'auth' }),
+      ],
+    }) as never, items, names, NOW)
+    expect(items.filter((item) => item.what.includes('下一步还没记上'))).toHaveLength(0)
+  })
 })
+
+function liveDealClient(): Row {
+  return {
+    id: CTS,
+    conversion_stage: 'live',
+    leads_config: {
+      capi_conversion_leads: true,
+      capi_qualified_lead_stage_key: 'quoted',
+      capi_conversion_deal_stage_key: 'balance_received',
+    },
+  }
+}
+
+function dealRow(id: string): Row {
+  return {
+    id,
+    client_id: CTS,
+    outcome_kind: 'purchase',
+    review_status: 'approved',
+    redacted_at: null,
+    meta_lead_id: '1687504185706630',
+    occurred_at: '2026-09-20T00:00:00.000Z',
+    order_ref: '84191',
+  }
+}
+
+function stageSend(dealId: string, over: Row): Row {
+  return {
+    outcome_id: dealId,
+    event_id: `${dealId}:conversion-stage`,
+    status: 'queued',
+    last_error_code: null,
+    payload_preview: null,
+    ...over,
+  }
+}
+
+function companionHref(dealId: string): string {
+  return `https://app.magicengine.com.au/dashboard/conversions?client=${CTS}&focus=${dealId}`
+}
