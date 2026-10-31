@@ -475,7 +475,7 @@ function makeEnvDeps(supabase: SupabaseClient, over: EnvDepsOverrides = {}): Env
 
 /** 一个能同时服务 clients / me_conversion_writebacks / cron_run_logs 的假库。 */
 interface EnvDbOptions {
-  clientRow?: { domain: string | null } | null
+  clientRow?: { domain: string | null; conversion_stage?: string | null } | null
   clientError?: string
   writebacks?: { status: string }[]
   writebacksError?: string
@@ -511,7 +511,7 @@ const PIXEL_ENV_KEY = 'META_PIXEL_ID_SHOP_EXAMPLE_TEST'
 describe('环境读取器：整体', () => {
   it('四张表都读得到 → 完整 facts 形状正确', async () => {
     const db = makeEnvDb({
-      clientRow: { domain: 'shop.example.test' },
+      clientRow: { domain: 'shop.example.test', conversion_stage: 'live' },
       writebacks: [
         { status: 'confirmed' },
         { status: 'confirmed' },
@@ -541,6 +541,7 @@ describe('环境读取器：整体', () => {
       capi_preflight: { ok: true, stage: 'token_ok', token_valid: true, pixel_visible: true },
       capi_events_7d: { confirmed: 2, in_doubt: 1, failed: 2 },
       meta_token_resolved: true,
+      conversion_stage: 'live',
       jobs: [
         { job: 'meta-leads-sync', max_age_hours: 3, last_finished_at: '2026-10-19T09:00:00Z', last_status: 'completed' },
         { job: 'messenger-sync-hourly', max_age_hours: 3, last_finished_at: '2026-10-19T09:30:00Z', last_status: 'completed' },
