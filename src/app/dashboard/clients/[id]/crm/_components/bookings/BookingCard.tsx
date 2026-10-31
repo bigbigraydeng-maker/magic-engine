@@ -32,6 +32,7 @@ export interface BookingCardProps {
   booking: BookingView
   busy: boolean
   run: RunAction
+  dealMilestone?: 'deposit' | 'balance' | null
 }
 
 type Panel = 'none' | 'edit' | 'cancel'
@@ -100,6 +101,7 @@ export function BookingCard({
   booking,
   busy,
   run,
+  dealMilestone = null,
 }: BookingCardProps): JSX.Element {
   const [panel, setPanel] = useState<Panel>('none')
   const editButtonRef = useRef<HTMLButtonElement>(null)
@@ -158,6 +160,7 @@ export function BookingCard({
                 milestone={milestone}
                 warnings={booking.warnings.filter((w) => w.kind === milestone.kind)}
                 busy={busy}
+                dealMilestone={dealMilestone}
                 run={run}
               />
             ))}
