@@ -1,0 +1,51 @@
+{
+ "built_on": "2026-10-16",
+ "built_for": "CTS March-tour reels v2 (window 106) — provenance check requested by 18/苏东坡",
+ "clips": [
+  {
+   "file": "v2_westlake_hangzhou.mp4",
+   "source": "Unsplash",
+   "id": "HlpRmaZlcv0",
+   "author": "Yuxiang Xia (@danielhsia)",
+   "license": "Unsplash License",
+   "location": "Hangzhou, Zhejiang, China",
+   "url": "https://unsplash.com/photos/a-house-sitting-on-top-of-a-body-of-water-HlpRmaZlcv0",
+   "location_evidence": "页面描述原文：The photo was taken in West lake,Hangzhou,China in March.；标签含 west lake、west lake hangzhou（2026-10-16 现抓）",
+   "verdict": "可以写 West Lake（有摄影师自述）",
+   "used_in": "BoC#2 v2（bb6b51b7）西湖那景"
+  },
+  {
+   "file": "v2b_suzhou_garden.mp4",
+   "source": "Unsplash",
+   "id": "Idmw1ePVUFE",
+   "author": "Fabrizzio Moncada (@fabrizziomoncada)",
+   "license": "Unsplash License",
+   "location": "Suzhou, Jiangsu, China",
+   "url": "https://unsplash.com/photos/a-pond-with-lily-pads-and-a-pavilion-in-the-background-Idmw1ePVUFE",
+   "location_evidence": "页面位置标签 Suzhou, Jiangsu, China；描述原文：A beautiful garden in Suzhou.；未写具体园名",
+   "verdict": "只能写泛称「A garden in Suzhou」，不能写 Master of the Nets Garden 等具体园名",
+   "used_in": "Shanghai#2 v2（46fb06b8）苏州那景；同图另有 v2_suzhou_garden.mp4 版本"
+  },
+  {
+   "file": "v3_bund_night_zoom.mp4",
+   "source": "Dropbox MagicLab_Studio/CTS/footage/stock",
+   "id": "36546365",
+   "license": "未登记",
+   "location": "上海外滩夜景（由画面判断）",
+   "location_evidence": "credits-v5.json 记：文件名带 stock id 36546365，stock credits.json 里没有这条",
+   "verdict": "来源/许可无法查到（库里 stock id 36546365，Pexels 页面 403、站内检索无命中，库存清单 rights_status=pending）→ 不再使用；Panorama 无价版片尾已换成 s10_shanghai_skyline_layg.mp4（v4）",
+   "used_in": "Panorama v2/v3 片尾"
+  },
+  {
+   "file": "s10_shanghai_skyline_layg.mp4",
+   "source": "Pexels",
+   "id": "33740447",
+   "author": "LayG Traveller",
+   "license": "Pexels License",
+   "url": "https://www.pexels.com/video/scenic-view-of-shanghai-skyline-with-skyline-33740447/",
+   "location_evidence": "标题 Scenic View of Shanghai Skyline；Codex 窗口的 render-receipt 记录了该源的 source_url、作者、sha256（7327e1702c7b…091485）与许可证据文件 source-and-license/source-evidence.txt",
+   "derived_from": "Dropbox 00_Inbox/industry-travel/2026-10-13_Shanghai_Landscape/originals/pexels_33740447.mp4（3840×2160，取 1.5–6.0 秒，中心偏左竖裁 1215×2160 → 1080×1920）",
+   "used_in": "Panorama v4 片尾背景（替换 v3_bund_night_zoom）"
+  }
+ ]
+}
