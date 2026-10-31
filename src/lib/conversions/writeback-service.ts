@@ -25,7 +25,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { capiEventNameForKind, decideCapiEventAllowed } from './capi-client-config'
-import { dealStageEventId, dealStageEventName, resolveConversionLead } from './conversion-lead'
+import {
+  dealStageEventId,
+  dealStageEventName,
+  qualifiedLeadHoldReason,
+  resolveConversionLead,
+} from './conversion-lead'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
 import type {
@@ -136,12 +141,32 @@ async function prepareOrdinarySend(
     leadsConfig,
   })
   if (resolution.kind === 'refuse') return refuseOutcome(supabase, writebackId, resolution.message)
-  const qualifiedStage = resolution.kind === 'stage' && outcome.outcome_kind === 'lead'
-  if (!qualifiedStage) {
+  const eventName = resolution.kind === 'stage' ? resolution.eventName : null
+  if (eventName && outcome.outcome_kind === 'lead') {
+    const reason = qualifiedLeadHoldReason(leadsConfig)
+    if (reason) return holdQualifiedSwitch(supabase, writebackId, reason)
+  } else {
     const held = await holdUnlessAllowed(supabase, writebackId, leadsConfig, outcome.outcome_kind)
     if (held) return held
   }
-  return { eventName: resolution.kind === 'stage' ? resolution.eventName : null }
+  return { eventName }
+}
+
+/** Closed switch: stay queued, keep the stage event, do not send a plain Lead. */
+async function holdQualifiedSwitch(
+  supabase: SupabaseClient,
+  writebackId: string,
+  reason: string,
+): Promise<SendOutcomeResult> {
+  const preview = { qualifiedSwitch: true, reason }
+  const held = await casUpdate(supabase, writebackId, ['queued', 'failed'], {
+    status: 'queued',
+    last_error: reason,
+    last_error_code: null,
+    payload_preview: preview,
+  })
+  if (!held) return await currentState(supabase, writebackId)
+  return { status: 'queued', message: reason, writebackId, preview }
 }
 
 async function holdUnlessAllowed(

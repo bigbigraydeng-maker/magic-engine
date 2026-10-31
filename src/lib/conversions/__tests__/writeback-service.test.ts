@@ -918,6 +918,121 @@ describe('同一条 Meta 线索', () => {
     expect(db.tables.me_conversion_writebacks).toHaveLength(2)
   })
 
+  it('回传开关关掉后，授权失败或中断的已报价不再发出，也不改成普通咨询', async () => {
+    for (const code of ['auth', 'retry'] as const) {
+      db = new FakeDb()
+      seed(db, {
+        outcome: {
+          outcome_kind: 'lead',
+          amount_minor: null,
+          currency: null,
+          source_ref: quotedRef,
+          meta_lead_id: leadId,
+        },
+        client: {
+          leads_config: {
+            capi_conversion_leads: code === 'auth' ? false : 'yes',
+            capi_allowed_events: ['Lead', 'Purchase'],
+          },
+        },
+      })
+      db.tables.me_conversion_writebacks.push({
+        id: 'wb-quoted',
+        outcome_id: OUTCOME,
+        destination: 'meta_capi',
+        event_id: OUTCOME,
+        status: 'failed',
+        last_error_code: code,
+        last_error: code === 'auth' ? '令牌失效' : 'HTTP 500',
+        attempts: 1,
+        post_started_at: null,
+      })
+      const build = vi.fn().mockReturnValue({ data: [] })
+      const writer = makeWriter({ build })
+      const scoped = code === 'auth' ? { eventId: OUTCOME } : undefined
+      const result = await sendApprovedOutcome(OUTCOME, deps(db, writer), scoped)
+      expect(result.status).toBe('queued')
+      expect(result.message).toContain('没有发给广告平台')
+      expect(result.message).toContain('普通咨询')
+      expect(build).not.toHaveBeenCalled()
+      expect(writer.sendSpy).not.toHaveBeenCalled()
+      expect(db.tables.me_sale_outcomes[0].source_ref).toBe(quotedRef)
+      expect(db.tables.me_conversion_writebacks[0]).toMatchObject({
+        status: 'queued',
+        last_error_code: null,
+        event_id: OUTCOME,
+      })
+    }
+  })
+
+  it('回传开关开着时，失败的已报价仍按原来的阶段名补发，不看普通咨询名单', async () => {
+    seed(db, {
+      outcome: {
+        outcome_kind: 'lead',
+        amount_minor: null,
+        currency: null,
+        source_ref: quotedRef,
+        meta_lead_id: leadId,
+      },
+      client: {
+        leads_config: { capi_conversion_leads: true, capi_allowed_events: ['Purchase'] },
+      },
+    })
+    db.tables.me_conversion_writebacks.push({
+      id: 'wb-quoted',
+      outcome_id: OUTCOME,
+      destination: 'meta_capi',
+      event_id: OUTCOME,
+      status: 'failed',
+      last_error_code: 'auth',
+      last_error: '令牌失效',
+      attempts: 1,
+      post_started_at: null,
+    })
+    const build = vi.fn().mockReturnValue({ data: [] })
+    const writer = makeWriter({ build })
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer), { eventId: OUTCOME })
+    expect(result.status).toBe('confirmed')
+    expect(writer.sendSpy).toHaveBeenCalledTimes(1)
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBe('quoted')
+    expect(build.mock.calls[0][0].outcomeKind).toBe('lead')
+  })
+
+  it('开关重新打开后，停住的已报价按原来的阶段名发出', async () => {
+    seed(db, {
+      outcome: {
+        outcome_kind: 'lead',
+        amount_minor: null,
+        currency: null,
+        source_ref: quotedRef,
+        meta_lead_id: leadId,
+      },
+      client: { leads_config: { capi_conversion_leads: false } },
+    })
+    db.tables.me_conversion_writebacks.push({
+      id: 'wb-quoted',
+      outcome_id: OUTCOME,
+      destination: 'meta_capi',
+      event_id: OUTCOME,
+      status: 'failed',
+      last_error_code: 'retry',
+      last_error: 'HTTP 500',
+      attempts: 1,
+      post_started_at: null,
+    })
+    const blocked = makeWriter()
+    const held = await sendApprovedOutcome(OUTCOME, deps(db, blocked))
+    expect(held.status).toBe('queued')
+    expect(blocked.sendSpy).not.toHaveBeenCalled()
+    db.tables.clients[0].leads_config = { capi_conversion_leads: true }
+    const build = vi.fn().mockReturnValue({ data: [] })
+    const writer = makeWriter({ build })
+    const sent = await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(sent.status).toBe('confirmed')
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBe('quoted')
+    expect(writer.sendSpy).toHaveBeenCalledTimes(1)
+  })
+
   it('开关关掉后，发到一半的阶段记录转成不确定，不自动重发', async () => {
     seed(db, {
       outcome: { meta_lead_id: leadId },
