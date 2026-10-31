@@ -4,7 +4,7 @@ title: 收款成交自动通过，缺人数要在今日待办里补
 status: decided
 owner: pm
 decided_on: 2026-11-01
-source: session:20261101-ray
+source: pr:3433
 verify_by: 2026-11-08
 verify_how: 配置了成交款并已开正式发送时，员工把那笔标成已付，成交直接通过并发送，不再等批准；7 天和 30 天去重仍在。没有人数时今日待办出现补填，手录成交和 NAL 手动标成交仍等审核。
 ---
