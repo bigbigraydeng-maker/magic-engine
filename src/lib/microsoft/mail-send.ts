@@ -53,7 +53,7 @@ import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
 import { MICROSOFT_MAIL_PROVIDER } from '@/lib/microsoft/mail-oauth'
 import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
 
-const GRAPH = 'https://graph.microsoft.com/v1.0'
+export const GRAPH = 'https://graph.microsoft.com/v1.0'
 
 /**
  * 邮件没有 Meta 那种 24 小时/7 天窗口概念——`sendMailReply` 本身的设计就是
@@ -135,7 +135,7 @@ async function lastInboundMessageId(conversationId: string): Promise<string | nu
   return (data?.message_id as string | undefined) ?? null
 }
 
-type GraphCallResult<T> = { ok: true; value: T } | { ok: false; status: number; error: string }
+export type GraphCallResult<T> = { ok: true; value: T } | { ok: false; status: number; error: string }
 
 /** 建一份回复草稿，回真实的消息 id——发之前就知道，才能跟下次同步对上号。 */
 async function createReplyDraft(
@@ -174,7 +174,7 @@ async function createReplyDraft(
  * 把草稿发出去。成功是 202，没有正文——这一步本身不返回 id，`Prefer` 请求头
  * 加不加不影响这次调用，但留着跟另外两处一致，别让读代码的人以为漏掉了。
  */
-async function sendDraft(token: string, draftId: string): Promise<GraphCallResult<null>> {
+export async function sendDraft(token: string, draftId: string): Promise<GraphCallResult<null>> {
   let res: Response
   try {
     res = await fetch(`${GRAPH}/me/messages/${encodeURIComponent(draftId)}/send`, {
@@ -194,7 +194,7 @@ async function sendDraft(token: string, draftId: string): Promise<GraphCallResul
  * ——`token-manager` 本身就是为这种情况留的 `forceRefresh`，强刷一次再重试
  * 一遍；不是 401 或者重试完还是 401，原样把结果交回去，不再猜第二次。
  */
-async function callWithRetry<T>(
+export async function callWithRetry<T>(
   connectionId: string,
   call: (token: string) => Promise<GraphCallResult<T>>,
 ): Promise<GraphCallResult<T> | { ok: false; status: 424; error: string }> {
@@ -218,7 +218,7 @@ async function callWithRetry<T>(
 }
 
 /** 补一笔「我们回过他了」的触点——跟 mail-ingest 用同一个幂等键，下次同步不会重复。 */
-async function writeTouchpoint(clientId: string, contactId: string, messageId: string, body: string): Promise<void> {
+export async function writeTouchpoint(clientId: string, contactId: string, messageId: string, body: string): Promise<void> {
   await supabaseAdmin.from('contact_touchpoints').upsert(
     {
       client_id: clientId,

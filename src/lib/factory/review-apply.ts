@@ -6,7 +6,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { approveBudgetWithinCap } from './review-actions'
 import {
   REEL_AUTO_CHECK_KEYS,
-  REEL_HUMAN_CHECK_KEYS_V2,
+  REEL_HUMAN_CHECK_KEYS_V3,
+  CHECKLIST_VERSION_V3,
   checklistPasses,
   hasChecklistFailure,
   isValidContentSourceRef,
@@ -14,6 +15,9 @@ import {
   type ContentCheckItemResult,
 } from '@/lib/social/content-review'
 import { computeReviewFeedbackDigest, RecipeConfigError, winnerRecipeFromBrief } from './recipe'
+import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from './deliverable'
+import { isRemotionBrief } from './render-mode'
+import type { RemotionMusicReplacement } from './remotion-music-options.mjs'
 import type { ReviewRejectCategory } from './types'
 
 export interface ReviewApplyResult {
@@ -21,6 +25,12 @@ export interface ReviewApplyResult {
   status: number
   error?: string
   data?: Record<string, unknown>
+}
+
+/** Which code path wrote the approval into review_ref, and whether the approver passed requireGlobalAdmin(). */
+export interface ApprovalMarker {
+  approval_source: 'me_review_route'
+  approver_scope: 'internal_staff' | 'scoped_admin'
 }
 
 type WO = Record<string, unknown>
@@ -69,12 +79,15 @@ export async function applyApprove(
   supabase: SupabaseClient,
   id: string,
   reviewer: string,
-  clientId?: string,
+  clientId: string | undefined,
   checklistHuman: unknown = null,
+  /** Required on purpose: every caller must decide. null = write no marker (the ledger will then refuse this approval). */
+  marker: ApprovalMarker | null,
 ): Promise<ReviewApplyResult> {
   const { wo, err } = await loadInReview(supabase, id, clientId)
   if (err) return err
-  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN')
+  if (isAssetOnly(wo!.brief)) return { ok: false, status: 409, error: ASSET_ONLY_NOT_PUBLISHABLE }
+  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS_V3, 'HUMAN')
   if (!checkedHuman.ok) return { ok: false, status: 400, error: checkedHuman.error }
   if (!checklistPasses(checkedHuman.items)) return { ok: false, status: 422, error: 'all human checklist items must PASS' }
   const sourceError = await validateChecklistSources(supabase, String(wo!.client_id), checkedHuman.items)
@@ -87,11 +100,22 @@ export async function applyApprove(
   const gate = approveBudgetWithinCap(reviewRef)
   if (!gate.ok) return { ok: false, status: 422, error: gate.error }
 
+  const nextReviewRef: Record<string, unknown> = { ...reviewRef }
+  delete nextReviewRef.approval_source
+  delete nextReviewRef.approver_scope
+
   const { data: upd, error } = await supabase
     .from('content_work_orders')
     .update({
       status: 'approved',
-      review_ref: { ...reviewRef, approved_by: reviewer, approved_at: new Date().toISOString(), checklist_human: checkedHuman.items },
+      review_ref: {
+        ...nextReviewRef,
+        approved_by: reviewer,
+        approved_at: new Date().toISOString(),
+        checklist_human: checkedHuman.items,
+        checklist_version: CHECKLIST_VERSION_V3,
+        ...(marker ? { approval_source: marker.approval_source, approver_scope: marker.approver_scope } : {}),
+      },
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
@@ -102,6 +126,36 @@ export async function applyApprove(
   return { ok: true, status: 200, data: { status: 'approved', budget_usd: gate.budget } }
 }
 
+/**
+ * 素材（asset_only）归档：in_review → archived，记 review_ref.asset_accepted_by/at。
+ * 只对 asset_only 工单、只对 in_review 生效；**不是发布授权**（发布只认 approved，而 asset_only 永远批不了）。
+ * 成片进广告素材池不走这里。入池只走三关验收，本函数会保留 review_ref 里已有字段。
+ */
+export async function applyAssetAccept(
+  supabase: SupabaseClient,
+  id: string,
+  reviewer: string,
+  clientId?: string,
+): Promise<ReviewApplyResult> {
+  const { wo, err } = await loadInReview(supabase, id, clientId)
+  if (err) return err
+  if (!isAssetOnly(wo!.brief)) return { ok: false, status: 409, error: 'only asset_only work orders can be accepted as material' }
+  const reviewRef = (wo!.review_ref ?? {}) as Record<string, unknown>
+  const { data: upd, error } = await supabase
+    .from('content_work_orders')
+    .update({
+      status: 'archived',
+      review_ref: { ...reviewRef, asset_accepted_by: reviewer, asset_accepted_at: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .eq('status', 'in_review')
+    .select('id')
+  if (error) return { ok: false, status: 500, error: error.message }
+  if (!upd || upd.length === 0) return { ok: false, status: 409, error: 'work order no longer in_review' }
+  return { ok: true, status: 200, data: { status: 'archived' } }
+}
+
 /** 打回·画面质量:老单 review_rejected + 重开新单,意见进新 brief */
 export async function applyQualityReject(
   supabase: SupabaseClient,
@@ -110,14 +164,33 @@ export async function applyQualityReject(
   reviewer: string,
   clientId?: string,
   checklistHuman: unknown = null,
+  musicId?: string,
 ): Promise<ReviewApplyResult> {
   const { wo, err } = await loadInReview(supabase, id, clientId)
   if (err) return err
-  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN')
+  const checkedHuman = validateContentChecklist(checklistHuman, REEL_HUMAN_CHECK_KEYS_V3, 'HUMAN')
   if (!checkedHuman.ok) return { ok: false, status: 400, error: checkedHuman.error }
   if (!hasChecklistFailure(checkedHuman.items)) return { ok: false, status: 400, error: 'quality rejection requires a failed checklist item' }
   const sourceError = await validateChecklistSources(supabase, String(wo!.client_id), checkedHuman.items)
   if (sourceError) return { ok: false, status: 422, error: sourceError }
+
+  const brief = (wo!.brief ?? {}) as Record<string, unknown>
+  let originallyHadRecipe = false
+  try {
+    originallyHadRecipe = winnerRecipeFromBrief(brief) !== null
+  } catch (e) {
+    // brief 里恰好带非法 creative_recipe:视作确实有 recipe(把它当 recipe 单处理,强制 replan)
+    if (e instanceof RecipeConfigError) originallyHadRecipe = true
+    else throw e
+  }
+  let musicOverride: RemotionMusicReplacement | null = null
+  if (musicId && !originallyHadRecipe) {
+    const { replaceRemotionMusic } = await import('./remotion-music-options.mjs')
+    musicOverride = replaceRemotionMusic(brief.remotion, musicId)
+  }
+  if (musicId && !musicOverride) {
+    return { ok: false, status: 422, error: '所选音乐不适用于这条工单，或无人声核验时长不足；工单未改动' }
+  }
 
   const { data: upd, error } = await supabase
     .from('content_work_orders')
@@ -133,24 +206,34 @@ export async function applyQualityReject(
   if (error) return { ok: false, status: 500, error: error.message }
   if (!upd || upd.length === 0) return { ok: false, status: 409, error: 'work order no longer in_review' }
 
-  const brief = (wo!.brief ?? {}) as Record<string, unknown>
+  // remotion 单被打回(没有换音乐):出片机不支持「同参数重渲」(reopened_from 会被拒成死单),所以只标 review_rejected,
+  // 不重开新单;打回理由要引导改下单参数(加内容 / 改标素材),由下单方另提新单。
+  // 换音乐的打回(musicOverride)保持 main 的行为:带新音乐重开。
+  if (isRemotionBrief(brief) && !musicOverride) {
+    return { ok: true, status: 200, data: { status: 'review_rejected', reopened_work_order_id: null } }
+  }
   // recipe 单被打回:清掉 stale creative_recipe/plan,打上结构化 replan-required marker。
   // worker 遇到 marker 会在任何 provider 之前 fail-closed,直到服务端产出新的合法 plan(合同 R3/R4)。
   // 无 recipe 的普通单:继承 review_feedback 直接进 queued,legacy 行为不变。
-  let originallyHadRecipe = false
-  try {
-    originallyHadRecipe = winnerRecipeFromBrief(brief) !== null
-  } catch (e) {
-    // brief 里恰好带非法 creative_recipe:视作确实有 recipe(把它当 recipe 单处理,强制 replan)
-    if (e instanceof RecipeConfigError) originallyHadRecipe = true
-    else throw e
-  }
   const newBrief: Record<string, unknown> = {
     ...brief,
     review_feedback: feedback.slice(0, 2000),
     review_feedback_by: reviewer,
     reopened_from: id,
     review_checklist_failed_items: checkedHuman.items.filter(item => item.outcome === 'FAIL').map(item => item.key),
+  }
+  if (musicOverride) {
+    newBrief.remotion = musicOverride.remotion
+    newBrief.review_overrides = {
+      ...(brief.review_overrides && typeof brief.review_overrides === 'object' ? brief.review_overrides as Record<string, unknown> : {}),
+      music: {
+        track_id: musicOverride.choice.id,
+        staged_file: (musicOverride.remotion.props as Record<string, unknown>).musicFile,
+        catalog_file: musicOverride.choice.file,
+        selected_by: reviewer,
+        selected_at: new Date().toISOString(),
+      },
+    }
   }
   if (originallyHadRecipe) {
     // 保留旧 recipe 供审计,但从 top-level 抹掉,worker/evaluate 都不再拿到可用 recipe

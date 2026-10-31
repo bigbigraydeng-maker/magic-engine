@@ -19,7 +19,10 @@ import type {
 } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import { getAnthropicClient, parseJsonResponse, MODEL_SONNET } from '@/lib/anthropic/client'
-import { loadNarrativesForRun, type NarrativeRow } from './synthesis/persistence'
+import { type NarrativeRow } from './synthesis/persistence'
+import { budgetAmountLabel, budgetCapInstruction, budgetCurrencyOf } from '@/lib/ads/budget-currency'
+import { adPlaysPromptSection, adPlaysSchemaExample } from '@/lib/ads-strategy/plan-seed/ad-plays-prompt'
+import { applyLlmAdPlays, dedupeAdPlayStepKeys } from '@/lib/ads-strategy/plan-seed/ad-plays'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -86,6 +89,8 @@ const SYSTEM_PROMPT = `你是 Magic Engine 平台的资深数字营销策略师�
   - 阶段 1 的快速动作要呼应竞品分析中的「benchmarking path」首步
   - summary 必须体现 market context 的核心趋势
 
+${adPlaysPromptSection()}
+
 ## KPI 目标的撰写要求
 
 - 每个 KPI 必须给出 current_value（从诊断分数推断）和 target_value（合理估算）
@@ -110,7 +115,8 @@ const SYSTEM_PROMPT = `你是 Magic Engine 平台的资深数字营销策略师�
         "title": "中文 Initiative 标题（跟 phase.name 一致或更精炼）",
         "posture": "offensive|defensive|fast|slow",
         "budget_percent": number,
-        "hypothesis": "中文 1–2 句战略假设（为什么押这一条，90 天后验证）"
+        "hypothesis": "中文 1–2 句战略假设（为什么押这一条，90 天后验证）",
+        ${adPlaysSchemaExample()}  // 可选：仅有广告投放的阶段才写，其它阶段整行省略
       },
       "actions": [
         {
@@ -145,43 +151,36 @@ const SYSTEM_PROMPT = `你是 Magic Engine 平台的资深数字营销策略师�
   ]
 }`
 
+/**
+ * LLM 直出的 JSON 不经 normalize：这里对每个阶段的 initiative_seed.ad_plays 清洗——
+ * 只读 play，step_key 由系统按「阶段号-序号-打法」生成；不合法整组删并 console.warn。
+ */
+export function stripInvalidAdPlays(content: PrescriptionContent): void {
+  if (!Array.isArray(content.phases)) return
+  for (const phase of content.phases) {
+    const seed = phase?.initiative_seed
+    if (!seed || typeof seed !== 'object') continue
+    // 嵌套在 initiative_seed 里的 plan_seed 同样只能由系统事实构建，LLM 夹带的一律丢弃
+    delete (seed as { plan_seed?: unknown }).plan_seed
+    if (seed.ad_plays === undefined) continue
+    applyLlmAdPlays(seed, seed.ad_plays, typeof phase.phase_number === 'number' ? phase.phase_number : 0)
+  }
+  dedupeAdPlayStepKeys(content.phases)
+}
+
 // ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
 
 export async function generatePrescription(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   runId: string,
   clientId: string,
-  intake: PrescriptionIntake,
+  _intake: PrescriptionIntake,
 ): Promise<GeneratePrescriptionResult> {
-  const [run, findings] = await fetchRunData(supabase, runId, clientId)
-  // P8.10.S3.6 — load Synthesis narratives if present; missing is non-fatal
-  const narratives = await loadNarrativesForRun(supabase, runId)
-  const prompt = buildPrescriptionPrompt(run, findings, intake, narratives)
-
-  // Init Anthropic client inside function (per CLAUDE.md — never at module top level)
-  const client = getAnthropicClient()
-  const message = await client.messages.create({
-    model: MODEL_SONNET,
-    max_tokens: 4096,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: prompt }],
-  })
-
-  const rawText = message.content
-    .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
-    .map(b => b.text)
-    .join('')
-
-  const content = parseJsonResponse<PrescriptionContent>(rawText)
-
-  // Clamp budget allocation so it never exceeds intake budget
-  clampBudgetAllocation(content, intake.monthly_budget_aud)
-
-  const prescriptionId = await savePrescription(supabase, { runId }, clientId, intake, content)
-
-  return { prescriptionId, content }
+  throw new Error(
+    `按体检编号开方已废弃，不再读取诊断分数和问题清单（run ${runId}, client ${clientId}）`,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -227,14 +226,14 @@ ${synthesisText}
 
 Business Goal: ${intake.business_goal}
 Timeline Urgency: ${intake.timeline_urgency}
-Monthly Budget: AUD ${intake.monthly_budget_aud}
+Monthly Budget: ${budgetAmountLabel(intake.monthly_budget_aud, budgetCurrencyOf(intake))}
 Priority Dimensions: ${priorityDims}
 Additional Notes: ${intake.notes ?? 'None'}
 
 ## Instructions
 
 Generate a 3-phase prescription JSON for this AU/NZ business.
-Budget: AUD ${intake.monthly_budget_aud}/month — allocations must NOT exceed this total.
+${budgetCapInstruction(intake.monthly_budget_aud, budgetCurrencyOf(intake))}
 Focus on the critical and high severity findings listed above.`
 }
 
@@ -305,35 +304,6 @@ export function formatNarrativesForPrompt(narratives: NarrativeRow[]): string {
 // Private helpers
 // ---------------------------------------------------------------------------
 
-async function fetchRunData(
-  supabase: SupabaseClient,
-  runId: string,
-  clientId: string,
-): Promise<[DiagnosticRun, DiagnosticFinding[]]> {
-  const [runRes, findingsRes] = await Promise.all([
-    supabase
-      .from('diagnostic_runs')
-      .select('id, overall_score, dimension_scores')
-      .eq('id', runId)
-      .single(),
-    supabase
-      .from('diagnostic_findings')
-      .select('*')
-      .eq('run_id', runId)
-      .eq('client_id', clientId)
-      .in('severity', ['critical', 'high']),
-  ])
-
-  if (runRes.error || !runRes.data) {
-    throw new Error(`Diagnostic run not found: ${runRes.error?.message ?? 'unknown'}`)
-  }
-
-  const run = runRes.data as DiagnosticRun
-  const findings = (findingsRes.data ?? []) as DiagnosticFinding[]
-
-  return [run, findings]
-}
-
 function clampBudgetAllocation(content: PrescriptionContent, maxBudget: number): void {
   if (!content.budget_allocation || content.budget_allocation.length === 0) return
 
@@ -355,6 +325,8 @@ async function savePrescription(
   intake: PrescriptionIntake,
   content: PrescriptionContent,
 ): Promise<string> {
+  // LLM 解析出的 content 里若夹带 plan_seed（假账户号/预算），一律丢弃；plan_seed 只能由系统事实构建
+  delete content.plan_seed
   const { data, error } = await supabase
     .from('prescriptions')
     .insert({
@@ -444,14 +416,14 @@ ${findingsText}
 
 Business Goal: ${intake.business_goal}
 Timeline Urgency: ${intake.timeline_urgency}
-Monthly Budget: AUD ${intake.monthly_budget_aud}
+Monthly Budget: ${budgetAmountLabel(intake.monthly_budget_aud, budgetCurrencyOf(intake))}
 Priority Dimensions: ${priorityDims}
 Additional Notes: ${intake.notes ?? 'None'}
 
 ## Instructions
 
 Generate a 3-phase prescription JSON for this AU/NZ business.
-Budget: AUD ${intake.monthly_budget_aud}/month — allocations must NOT exceed this total.
+${budgetCapInstruction(intake.monthly_budget_aud, budgetCurrencyOf(intake))}
 Focus on the crisis type and recommended actions listed above.`
 }
 
@@ -481,6 +453,7 @@ export async function generatePrescriptionFromDiscovery(
     .join('')
 
   const content = parseJsonResponse<PrescriptionContent>(rawText)
+  stripInvalidAdPlays(content)
   clampBudgetAllocation(content, intake.monthly_budget_aud)
 
   const prescriptionId = await savePrescription(

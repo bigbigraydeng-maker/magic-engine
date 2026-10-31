@@ -1,5 +1,57 @@
 # 社媒客户接入：真实状态与统一入口
 
+## 当前追加任务：Instagram 独立登录原生连接（仅账号资料）
+
+本节为当前唯一写入范围，替代此前已完成任务；根会话唯一写入，子牙、魏征、板桥只读审查。风险 A；频率高 / IMPACT 高 / 收入中 → P0。
+
+- 目标：复用既有客户守卫、加密连接表、状态投影和设置面板，新增 Instagram API with Instagram Login 专业账号连接。只请求 `instagram_business_basic`，不申请发布、评论或消息权限，不宣称可自动发布。
+- 基线：隔离工作区 `/private/tmp/magic-engine-social-channel-onboarding`，分支 `codex/instagram-native-onboarding`，起始 `46090e93275632e727f73b1d4594161e563702c4`；依赖尚未合并的 PR #2895；本次 fetch 后 main `3f1c24526dfbbc1b1823ac597a984a696fc20108`，新增仅广告说明。不编辑共享主工作区。
+- 写入：`instagram-oauth`；Instagram connect/callback 及客户 scoped DELETE；platform-oauth provider、窄读取、状态/健康投影/scope gate；设置面板/回跳及对应测试；CLI 已生成的 provider CHECK 迁移；ENV/.env.example、此说明与新台账。无新框架、表、依赖或后台任务。
+- Tier / Reuse：既有社媒 L3 Connector，handle 为 L4 配置；客户和行业不改变授权语义。连接只保存长期 token，真实期限与实际 granted permissions；没有刷新调用方，本轮不实现刷新，过期需重新连接。新 provider 没有既有客户需重连，Meta scope 不变。
+- 安全：默认关闭的独立开关和 Instagram product 凭据；随机 nonce/HMAC/短期 HttpOnly cookie 绑定浏览器、发起用户、客户与服务端规范 handle；交换前后重查身份/访问权/配置/开关；账号由长期 token 的 `/me.user_id` 字符串与精确 username 核验。取消、错配、异常不写库，不覆盖旧授权，不清除其他新尝试 cookie。
+- 允许本地实现、验证、提交推送和叠加 PR；不合并、部署、执行生产迁移、访问生产密钥、配置新应用或接受新授权，不发布/关注/读取私信。准备迁移并以本地隔离 PostgreSQL 验证。
+- 验证：协议/state/真实 handler cookie、隔离与等待期间变更、窄读取、错误脱敏、默认关闭、UI 回跳/撤销；本地 SQL；定向 Vitest、完整类型、lint、假配置 build、冻结代码 mutation、三方实施复审。Mock 不代表真实授权或平台审核完成。
+
+官方依据（2026-10-19，通过当前 Chrome 实读）：[Business Login](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/business-login)，页面更新 2026-03-13；[Get Started](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/get-started)，当前示例 v26.0。授权地址 `www.instagram.com/oauth/authorize`；code 交换为 api.instagram.com 的 multipart POST，示例为单项 data 数组含 access_token、字符串 user_id、permissions 逗号串；长期 token 交换为 graph.instagram.com/access_token，返回 access_token、bearer、expires_in；me 示例返回单项 data 数组中的字符串 user_id 与 username。id 是 app scoped，不能代替 user_id。生产接入仍需专业账号、独立 Instagram product 凭据、回调及平台审核/测试资格。
+
+### Instagram 本轮验证回执（2026-10-19，尚未上线）
+
+- 基线四文件 57 测试通过；最终恢复源文件后的定向回归含 Instagram、既有 Meta/TikTok/YouTube、客户守卫及台账：31 文件、518 测试通过，退出 0，日志 `/private/tmp/celine-ig-final-regression.log`。协议与 handler 使用真实 HMAC/NextRequest/cookie 边界，外部 API/DB 替身；不是生产授权验收。
+- 官方 CLI 创建迁移后，只在 `/private/tmp` 的一次性真实 PostgreSQL 应用：保留十个既有 provider、接受 Instagram、拒绝未知值、重放通过；Unix socket only，无 TCP 监听，完成已停止。未连接生产或执行生产迁移。CLI 的遥测写入及本地共享内存受沙箱限制后使用已批准提升；未修改数据库访问权限。
+- 最终源码 `npm run type-check`（Node 堆 8GB）、所有变更 TS/TSX 的显式 next lint、回环 URL/假 key 的 `npm run build` 全部退出 0；Kernel architecture 203/203，通过。临时预览路由移除后 build 重建类型文件，再跑完整 type-check；无残留测试入口。构建不替代独立类型/静态检查。
+- 对冻结的源码/测试/SQL集合执行九项 mutation：cookie、发起用户、最终目标、实际 scope、核验用户名、撤销客户过滤、末端开关、state 期限、token 期限，全部退出 1 且为断言失败；每轮恢复源字节。集合 SHA256 `041732ae9eaab04d9010a012931db51a659e4f7d11e67d57f6033d800926d40a` 恢复前后一致，提交时再核对；无变体残留。完整相关 21 文件套件用于每项变体；恢复后再跑上面的 31 文件回归。
+- 子牙/魏征两轮安全与架构审查收敛；板桥两项 P2（用户名规则矛盾、多授权客户循环）已批量修复，Round 2 通过。新增三例最后 DB 等待期间关闭开关/state 到期/token 到期的持久回归；魏征亦独立探针验证均零写入。不宣称跨系统原子或服务端严格一次 state 消费。
+- Chrome 合成数据检查真实组件的资格提示、最小权限、六卡与多授权无误导 CTA；本地截图在用户输出目录。Jev DNS 失败后原生继续，元数据观察记录已保存；不把私有授权页发给决策服务。没有真实账号新增 grant、发帖、DM 或生产变更。
+- 新功能默认关闭。真实可用仍需合并依赖 PR #2895 及本 PR、应用迁移、独立 Instagram product 凭据/HTTPS 回调/专业账号和平台审核或测试资格，再受控真实授权。此提交不代表 Celine 已连上，也不包含发布器。
+
+## 先前任务：浏览器实测后的授权修复
+
+本节替代下文已经完成的实现范围。唯一写入者为本 Codex 根会话，子牙和魏征只读审查。
+
+- 目标/验收：Meta Page 的成功及取消回调均绑定发起浏览器、用户、客户访问权和最初服务端目标；可信取消回原客户可见面板；不可信回调零平台请求、零写入。
+- 范围：meta-oauth/client.ts、Facebook connect/callback、三处对应测试、本说明与新台账。其余平台后台仅检查和准备，不访问生产密钥。
+- 基线：UTC 2026-10-18 已 fetch；工作区 `/private/tmp/magic-engine-social-channel-onboarding`，分支 `codex/social-oauth-remediation`，干净起点 HEAD/origin/main `9b9c68548a559ca5d8d3d25b3cc7b7b156d8828f`。Node/依赖沿用现有工作区。
+- 风险 A；频率高 / IMPACT 高 / 收入中 → P0。本地实现、测试、提交、推送 PR 在范围内；本轮不合并、部署、发帖、开自动化、扩大 scope 或接受新授权。
+- Tier / Reuse：既有社媒 L3 Connector 安全修复，账号目标 L4；CTS/Roman 和旅游/地产使用相同校验，无客户或行业语义。复用原 HMAC、客户 guard、连接存储与 FacebookPagePanel；不新增框架、表、依赖、能力线或 Inngest 事件。
+- 双审设计：随机 nonce、发起人及服务端目标签入 state；短期 HttpOnly cookie 绑定浏览器；先验证后处理取消/交换；当前尝试结束清 cookie，旧窗口错配不得清新尝试。旧 state 缺少新字段要求重新连接，不做兼容绕过。结果仍回真正显示 meta 提示的面板。
+- 基线验证：相同三处定向 Vitest 退出 0，3 文件 59 测试通过。后续扩展取消、cookie、切换身份、撤权、目标变化及读失败回归，再跑类型、lint、假配置 build、冻结代码 mutation 和双审。
+- 现场条件：ME TikTok 主应用已 In review；另建 Celine 应用是空草稿，不重复接入。Sandbox 目前只有 CTS 目标，新增 Celine 需要登录和具体授权。Google 原项目仍需验证；不绕过未验证提示。Facebook 当前身份没有列出 Celine，不能绑定其他客户 Page。IG/Threads/X 原生缺口单列，不伪造接通。
+
+类型基线追加：沿用用户此前“修复基线错误”的要求，仅允许修正 `src/lib/capabilities/ads/__tests__/envelope-facts.test.ts` 的测试辅助函数参数类型；不改广告生产代码或断言。未改动主干归档在相同依赖与 8GB Node 上执行 `npm run type-check` 也出现同一四条错误；该测试修改前 51 例通过。实际 resolver 契约接受字符串 actionKey，测试 helper 误限三个旧动作；从真实契约派生类型即可保留新旧动作测试，无须 any、强转或抑制。不是扩大广告业务范围。
+
+台账基线追加：同一未改动主干的 entries 检查也因 `2026-10-19-stop-loss-route-503-account-id-shape.md` 正文含两个完整账户号失败；仅将这两个正文示例替换为 `<account-id>`，前置字段及验收文字逐字不动，不更改台账检查或冻结规则。
+
+### 当前追加任务的验证与现场回执
+
+- 基线三文件 59 测试通过；实施后覆盖成功、取消、cookie/HMAC、切换用户、撤权、服务端目标变化、平台等待期间变更与写失败。新增四例真实 handler/HMAC/NextRequest 和响应 cookie 交接；外部平台与数据库用替身，不宣称真实平台授权成功。
+- 最终定向命令：`npm test -- src/lib/meta-oauth src/app/api/auth/facebook src/lib/platform-oauth src/lib/auth/__tests__/client-access.test.ts src/lib/capabilities/ads/__tests__/envelope-facts.test.ts src/lib/ledger`，退出 0，22 文件 412 测试通过，日志 `/private/tmp/celine-oauth-final-tests.log`。
+- 默认 type-check 因 Node 4GB 堆耗尽退出 134；同命令加 `NODE_OPTIONS=--max-old-space-size=8192`，修正上述测试类型后退出 0，日志 `/private/tmp/celine-oauth-final-types.log`。没有跳过或抑制类型检查。
+- 八个变更 TS 文件显式传入 `next lint --file`，退出 0。使用回环 Supabase URL/假 key 的 `npm run build` 退出 0，日志 `/private/tmp/celine-oauth-build.log`；未使用生产凭据。`git diff --check` 退出 0。
+- 子牙/魏征 Round 1 提出的落库前重查、持久化异常和旧回调擦新 cookie 均已修；Round 2 无新增 blocker/P1/P2。测试 helper 类型由子牙单独核对真实契约，通过。不是服务端严格单次 state 消费，也不声称外部授权与数据库配置跨系统原子。
+- Chrome 已将 Celine 登记的新 Facebook Page 配为发布目标，并刷新读回“发布目标已配”；自动出片关闭、收件箱未绑定、无发帖。当前 Facebook 身份的可管理主页搜索仍没有 Celine。TikTok 主应用审核中，添加沙盒目标要求重新登录，已保留用户登录窗口；未新增 grant。Google 审核准备页缺用途说明及 demo，已配置权限不含当前运行时请求的 YouTube 三项，需单独核对重提范围，未改全局项目。
+- 浏览器使用原生控制检查私有授权页面，未向外部决策服务传页面；一条纯元数据观察记录已保存。截屏/客户现场回执仅保存在用户本地输出目录，不提交仓库。
+- 本轮尚未合并/部署或完成任一新平台授权；后续 commit/PR、mutation 和发布决定以实际回执为准。
+
 ## 本轮权威任务说明
 
 - 目标：让客户与团队在同一入口识别六个平台的登记、授权记录、目标账户与下一步；复用已有授权及配置流程。

@@ -63,6 +63,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 广告自治被熔断器冻住了，要不要恢复自动动手是个决定；同 ads_auto_pause_pending 一档
   // （WP3.1b 重做 PR A，2026-09-28 合并主干时补——这份穷举表在那个 PR 分叉之后才建）
   ads_circuit_tripped: 'decide',
+  ads_service_pause_notice: 'decide', // 系列已暂停，要不要恢复由人点确认卡
   ads_account_not_active: 'one_click', // 去 Meta 付款设置结清欠款、补备用卡（系统进不去）
   ads_account_status_unreadable: 'dev', // 账户状态读不到：快照任务的问题，开发看，不占 PM 的清单
   ads_account_closed_weekly: 'decide', // 账户已关闭：要不要从客户名下解绑，由 PM 定（每周一提醒）
@@ -84,6 +85,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   promo_plan_watch: 'decide',
   lead_followup_check_failed: 'dev', // 「填了表没人回」这一栏没算出来：我们这边的欠账
   promo_plan_watch_broken: 'dev', // 每日检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
+  plan_draft_auto_failed: 'dev', // 同意前自动起草连续失败：系统没写成，不占批准决定
+  ads_tracking_preflight_fix: 'dev', // 开投前追踪检查的红灯怎么修：改官网 / 改配置，开发的活（PM 在推广计划页看灯，开投拍板走「到期阶段检查没过」）
+  ads_tracking_preflight_broken: 'dev', // 开投前追踪检查自己没跑成：我们这边的欠账，PM 那一栏会留一句「今天没查成」
 
   // ── 2 · 系统进不去、要人点一次的 ─────────────────────────────────────
   ai_provider_exhausted: 'one_click', // 充值
@@ -114,6 +118,10 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   calendar_closure_probe_failed: 'decide', // 自动核对没达预期：接着等还是关掉，要 PM 判断
   blog_publish_channel_broken: 'one_click', // 去设置里把网站发布通道接通
   factory_worker_idle: 'one_click', // 出片机器没开机，只有人能开
+  factory_render_worker_down: 'one_click', // 渲染引擎没就绪，要人在那台机器上修好
+  factory_review_overdue: 'review', // 片子待审超过 24 小时，审核的人看一眼
+  factory_dead_letter_stuck: 'one_click', // 死信不会再自动重跑，要人看这张工单
+  factory_material_check_failed: 'dev', // 待审/死信清单没读出来，是检查自己的欠账
   email_sync_stale: 'one_click', // 邮箱授权掉了 / 一个都没连上
   whatsapp_number_unclaimed: 'one_click', // 号码在发消息但没客户绑定它，去设置页绑一次
   client_doc_manual_task: 'one_click', // 方案文档里的一次性人工动作；条目可用 pmKind 换一类
@@ -188,7 +196,9 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 同 ai_tracker_all_failed 的 how 原文就写「这条不用你动手」，不该进 PM 动手栏
   // （Codex 复审 2026-09-28）。
   ai_tracker_all_failed_dev: 'dev',
-  diagnostic_synthesis_failing: 'dev', // 体检叙事没写成：我们的欠账，不用 PM 动手
+  diagnostic_synthesis_failing: 'dev',
+  seo_rank_verdict_overdue: 'dev', // 标题改动效果判定没出：我们的欠账
+  seo_rank_baseline_missing: 'dev', // 标题改动没记改前名次：我们的欠账 // 体检叙事没写成：我们的欠账，不用 PM 动手
   ai_gateway_broken: 'dev',
   playbook_reference_stale: 'dev',
   platform_connection_pipeline_down: 'dev',
@@ -231,7 +241,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
 
   // ── 知会 → 周一周报 ──────────────────────────────────────────────────
   calendar_closure_probe_passed: 'weekly', // 自动核对通过但只是部分证据：周报里报，窗口去补确认
-  prescription_updated: 'weekly', // 本周方案已自动落地
+  prescription_updated: 'weekly', // 本周已批准方案的进度复查
   diagnostic_findings: 'weekly', // 本周体检结果，已排成看板动作
   not_indexed: 'weekly', // 未收录页面汇总：SEO 日常活（FDE / 开发在修），周报里报进度
   auto_run_blocked: 'weekly', // 「多数情况下不用你动手，周二会自动重判」
@@ -274,6 +284,7 @@ export const BLIND_SPOT_NOTE: Partial<Record<ManualItemKind, string>> = {
   cron_not_running: '有自动任务没按时跑，它负责的那一栏今天可能不全',
   cron_silent_success: '有自动任务显示跑完了但一行没写，它负责的那一栏今天可能不全',
   promo_plan_watch_broken: '推广计划每日检查今天没跑成，计划有没有问题看不出来',
+  ads_tracking_preflight_broken: '开投前追踪检查今天没跑成，像素 / 落地页 / 留资有没有问题看不出来',
   libai_check_missing: '有文案生成后没做溯源检查，「未证实的句子」可能没列全',
 }
 

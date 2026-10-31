@@ -91,6 +91,8 @@ export interface BlocklistEntry {
 export interface ClipSlice {
   id: string
   scene_tag: string
+  /** Human-reviewed catalogue tags; legacy clips may not have any. */
+  tags?: string[]
   motion_type: string | null
   track: 'a_real' | 'b_generated'
   usage_count: number
@@ -206,7 +208,7 @@ export interface VerifiedOffer {
 
 /** 发布目标(clients.factory_config.publish_target 存,FDE 配)。缺 → 不发标失败,绝不猜/误发别客户页。 */
 export interface PublishTarget {
-  platform: 'facebook'
+  platform: 'facebook' | 'instagram'
   /** facebook:页 id(如 Oztop 748077268383005)。 */
   page_id?: string
   /**
@@ -221,7 +223,7 @@ export interface PublishTarget {
 
 /** 发布回执(存 published_ref):幂等对账锚(防"发出去没记上"重发)+ P1 measure 数据源。一次存全。 */
 export interface PublishedRef {
-  platform: 'facebook'
+  platform: 'facebook' | 'instagram'
   page_id?: string
   post_id: string
   video_id?: string
@@ -256,7 +258,7 @@ export interface PublishedRef {
  * 加新平台 = 多写个 adapter,worker 一行不改。
  */
 export interface PublishAdapter {
-  readonly platform: 'facebook'
+  readonly platform: 'facebook' | 'instagram'
   /**
    * 发布一条成片,返回回执。draft=true 只发草稿/不公开(首测验格式)。
    * onStarted(魏征 B9 防双发):拿到平台 video_id 的第一时间(上传/finish 之前)回调,
@@ -273,6 +275,11 @@ export interface PublishAdapter {
   }): Promise<PublishedRef>
   /** 幂等对账(魏征 B9 防双发):查平台侧该 wo(靠 idempotencyTag)是否已发。已发→回执,未发→null。 */
   findExisting(args: { target: PublishTarget; idempotencyTag: string }): Promise<PublishedRef | null>
+  /**
+   * 可选:平台侧「处理中」的临时回执(如 Instagram 容器)需要事后对账时由 adapter 提供;
+   * worker 暂不调用,Facebook 无此钩子。返回 null = 仍在处理或查不到,不得据此判定失败。
+   */
+  reconcile?(args: { target: PublishTarget; ref: PublishedRef; idempotencyTag: string }): Promise<PublishedRef | null>
   /** Create or recover the CTA first comment without duplicating it after a worker retry. */
   ensureFirstComment?(args: {
     target: PublishTarget
@@ -297,6 +304,8 @@ export interface WorkOrderBrief {
   clip_generation_plan: ClipGenerationPlanItem[]
   aspect_ratio: '9:16'
   notes: string
+  /** Set only when the signal asked for material and nothing publishable. */
+  remotion?: Record<string, unknown>
   /** A2:后端生成的广告文案(品牌接地)。worker 读它装配,不再自己写硬编 CTS 的文案。 */
   copy?: AdCopy
   /** B0 归因桩:这条产出预期服务的 Goal + 北极星指标。诸葛亮红线——每条片天生挂对 Goal
@@ -344,3 +353,7 @@ export type RejectReason =
   | 'unsupported_signal'
   /** 价格广告红线:verifiedOffer(真价)客户无真拍(a_real)素材,不许用 AI 底料背书真价 */
   | 'price_ad_needs_real_footage'
+  /** request.platform present but not a supported platform = rejected (missing is defaulted to the factory output platform). */
+  | 'platform_required'
+  /** request.creative_tags present but malformed. */
+  | 'creative_tags_invalid'

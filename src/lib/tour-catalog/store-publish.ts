@@ -11,6 +11,7 @@ import type { CatalogDeparture, CatalogTour } from './types'
 import { parseDepartureDisplay } from './dates'
 import { markPublishRequestsHandled } from './store-access'
 import { toFirstPartyTours } from './output'
+import { toPublishedTourFacts } from './published-facts'
 import {
   computeDiffHash,
   diffCatalog,
@@ -24,6 +25,7 @@ import type {
   PublishErrorCode,
   PublishPreviewResponse,
   PublishRequest,
+  PublishedTourFactsRead,
   PublishedVersionView,
   RevertPreviewResponse,
   RevertRequest,
@@ -163,6 +165,27 @@ export async function loadPublishedProducts(
     published: true,
     version: read.version,
     tours: toFirstPartyTours(read.tours, read.departures, today),
+  }
+}
+
+/**
+ * Email channel reader: the published snapshot only, in the shape the email feature needs (highlights,
+ * whole-tour sold-out flag, per-departure status). `loadPublishedProducts` is untouched — the website
+ * feed contract does not change.
+ */
+export async function loadPublishedTourFacts(
+  db: SupabaseClient,
+  clientId: string,
+  today: string,
+): Promise<PublishedTourFactsRead> {
+  const read = await loadPublished(db, clientId)
+  if (!read.published) {
+    return { published: false }
+  }
+  return {
+    published: true,
+    version: read.version,
+    tours: toPublishedTourFacts(read.tours, read.departures, today),
   }
 }
 

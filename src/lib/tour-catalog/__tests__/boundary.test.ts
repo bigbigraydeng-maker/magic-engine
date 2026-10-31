@@ -20,7 +20,19 @@ const CATALOG_PREFIXES = [
   'src/lib/tour-catalog/',
   'src/app/api/clients/[id]/tour-catalog/',
   'src/app/dashboard/clients/[id]/tour-catalog/',
+  // Published-snapshot read API. Same exemption as the client catalog API folder.
+  'src/app/api/public/tour-catalog/',
 ]
+
+/**
+ * Official public website feed. The folder is already inside the catalog
+ * exemption (same as the client catalog API). `loadPublishedProducts` returns
+ * the first-party shape and would change this JSON, so the route file stays.
+ * The pin test below still refuses any draft import.
+ */
+const PUBLISHED_WEBSITE_ROUTES = new Set([
+  'src/app/api/public/tour-catalog/[clientId]/route.ts',
+])
 
 const DB_OBJECT_PREFIX = ['tour', 'catalog', ''].join('_')
 
@@ -36,7 +48,12 @@ const DB_OBJECT_PREFIX = ['tour', 'catalog', ''].join('_')
 const OPEN_MODULES = new Set(['publish-contract', 'types', 'api-contract', 'catalog-contract', 'publish-request-feed', 'booking-facts', 'sales-facts'])
 /** store-publish is importable only for these names. */
 const PUBLISHED_READER_MODULE = 'store-publish'
-const PUBLISHED_READER_NAMES = new Set(['loadPublishedProducts', 'PublishedProductsRead'])
+const PUBLISHED_READER_NAMES = new Set([
+  'loadPublishedProducts',
+  'PublishedProductsRead',
+  'loadPublishedTourFacts',
+  'PublishedTourFactsRead',
+])
 
 const SOURCE_FILE = /\.(tsx?|mjs|js)$/
 
@@ -126,7 +143,7 @@ function violationsIn(path: string, text: string): string[] {
 function findViolations(): string[] {
   const violations: string[] = []
   for (const path of allSourceFiles()) {
-    if (isTestFile(path) || isInsideCatalog(path)) continue
+    if (isTestFile(path) || isInsideCatalog(path) || PUBLISHED_WEBSITE_ROUTES.has(path)) continue
     violations.push(...violationsIn(path, readFileSync(join(process.cwd(), path), 'utf8')))
   }
   return violations
@@ -200,6 +217,27 @@ describe('tour catalog draft boundary', () => {
     expect(violationsIn('x.ts', route).length).toBeGreaterThan(0)
   })
 
+  it('the public website route is allow-listed and still cannot reach a draft', () => {
+    const path = 'src/app/api/public/tour-catalog/[clientId]/route.ts'
+    const text = readFileSync(join(process.cwd(), path), 'utf8')
+    expect(PUBLISHED_WEBSITE_ROUTES.has(path)).toBe(true)
+    expect(isInsideCatalog(path)).toBe(true)
+    expect(violationsIn(path, text).length).toBeGreaterThan(0)
+    const imports = Array.from(text.matchAll(/from\s+['"]([^'"]+)['"]/g)).map((match) => match[1])
+    expect(imports).toEqual([
+      'next/server',
+      '@/lib/auth/api-key-access',
+      '@/lib/supabase',
+      '@/lib/tour-catalog/dates',
+      '@/lib/tour-catalog/store-publish',
+      '@/lib/tour-catalog/website-output',
+      '@/lib/meta/ai/contract',
+    ])
+    expect(text).toContain('{ loadPublished }')
+    expect(text).not.toContain('loadDraftCatalog')
+    expect(/\.(insert|update|upsert|delete|rpc)\(/.test(text)).toBe(false)
+  })
+
   it('the local trial page and its data are not tracked, and get no exemption if they ever are', () => {
     const tracked = trackedFiles()
     expect(tracked.length).toBeGreaterThan(100)
@@ -230,6 +268,8 @@ describe('tour catalog draft boundary', () => {
       `import { loadPublishedProducts } from '@/lib/tour-catalog/store-publish'`,
       `import { loadPublishedProducts, type PublishedProductsRead } from '@/lib/tour-catalog/store-publish'`,
       `import type { PublishedProductsRead } from '@/lib/tour-catalog/store-publish'`,
+      `import { loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'`,
+      `import type { PublishedTourFact } from '@/lib/tour-catalog/publish-contract'`,
       `import type { PublishChange } from '@/lib/tour-catalog/publish-contract'`,
       `import type { CatalogTour } from '@/lib/tour-catalog/types'`,
       `import type { CatalogResponse } from '../tour-catalog/api-contract'`,

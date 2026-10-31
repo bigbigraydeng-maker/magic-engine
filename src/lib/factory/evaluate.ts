@@ -3,6 +3,7 @@
 // 魏征 M1 评审修订:F2 语义去重直查 source_ad_id 无时间窗 / F4 部分失败收敛 /
 // F5 日配额含终态工单 + NZ 日界 / F6 brief 双轨兼容 / F9 余额 SQL 聚合 / F10 全体收进 try。
 
+import { stampPlatformAndTags } from './creative-tags'
 import { loadViralStructure } from './viral-structure'
 import { loadClientAssetPool } from './client-asset-pool'
 import { buildPromptHint } from './narrative-beats'
@@ -10,7 +11,8 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { FACTORY_ANGLE_DEDUPE_DAYS } from './constants'
 import { generateAdCopy } from './copy-generator'
 import { compactCreativeProfile, parseVerifiedCta, projectCreativeProfile } from './client-config'
-import { decideSignal, pickFactoryGoal } from './strategist'
+import { withAssetOnlyDeliverable } from './deliverable'
+import { decideSignal, goalForSignal } from './strategist'
 import {
   detectContentGoal,
   getViralClipDirective,
@@ -30,6 +32,7 @@ import {
   type WinnerRecipe,
 } from './recipe'
 import { FACTORY_CLIP_UNIT_COST_USD, FACTORY_ORDER_BUDGET_CAP_USD } from './constants'
+import { clipCanEnterFactoryPool, hasCurrentLicenseEvidence } from './clip-library'
 import type { AdCopy, DemandSignal, Decision, GateContext, GoalSlice, VerifiedOffer } from './types'
 import type { MasterBrief } from '@/types/magic-engine'
 
@@ -120,9 +123,8 @@ async function loadContext(
     .maybeSingle()
   if (cErr) throw new Error(`clients query failed: ${cErr.message}`)
 
-  // B0 Goal 圈定(诸葛亮红线:禁"选最新 Goal"盲量产,产出必须挂对客户真正想推的 Goal)。
-  // 一次查全部 active goal(desc),纯函数 pickFactoryGoal 挑:优先 factory_config.factory_goal_id,
-  // 指向的 goal 不在 active 列表(归档/删/换客户)则退回最新 active(fail-safe)。
+  // A named goal hangs on that goal only. If it is not active, do not fall back
+  // to a newer one. An unnamed signal still uses pickFactoryGoal.
   const { data: activeGoals, error: gErr } = await supabaseAdmin
     .from('goals')
     .select('id, title, primary_metric_key')
@@ -131,7 +133,11 @@ async function loadContext(
     .order('created_at', { ascending: false })
   if (gErr) throw new Error(`goals query failed: ${gErr.message}`)
   const configGoalId = ((client?.factory_config ?? {}) as Record<string, unknown>)['factory_goal_id']
-  const goal = pickFactoryGoal(configGoalId, (activeGoals ?? []) as GoalSlice[])
+  const goal = goalForSignal(
+    signal.evidence['goal_id'],
+    configGoalId,
+    (activeGoals ?? []) as GoalSlice[],
+  )
 
   const { data: blocklist, error: blErr } = await supabaseAdmin
     .from('factory_angle_blocklist')
@@ -158,7 +164,7 @@ async function loadContext(
 
   const { data: clips, error: clErr } = await supabaseAdmin
     .from('video_clips')
-    .select('id, scene_tag, motion_type, track, usage_count, last_used_at, storage_url, source_meta')
+    .select('id, scene_tag, tags, motion_type, track, usage_count, last_used_at, storage_url, source_meta, license_status, license_review_note, source_author, source_url, license_name, license_url, sha256, license_reviewed_by_user_id, reviewed_by_user_id')
     .eq('client_id', signal.client_id)
     .eq('status', 'active')
   if (clErr) throw new Error(`video_clips query failed: ${clErr.message}`)
@@ -172,14 +178,36 @@ async function loadContext(
     ((c.source_meta ?? null) as Record<string, unknown> | null) ?? {}
   const isStill = (c: { source_meta?: unknown }) => meta(c).is_still_image === true
   const allClips = clips ?? []
-  const videoClips = allClips.filter((c) => !isStill(c))
+  const licenseEvidenceMatches = (c: (typeof allClips)[number]) => hasCurrentLicenseEvidence({
+    licenseStatus: c.license_status,
+    licenseReviewNote: c.license_review_note,
+    sourceAuthor: c.source_author,
+    sourceUrl: c.source_url,
+    licenseName: c.license_name,
+    licenseUrl: c.license_url,
+    sha256: c.sha256,
+    licenseReviewedByUserId: c.license_reviewed_by_user_id,
+    reviewedByUserId: c.reviewed_by_user_id,
+  })
+  const clearedTransformedImages = allClips
+    .filter((c) => isStill(c) && meta(c).is_ai_transformed === true && licenseEvidenceMatches(c))
+    .map((c) => toPublicClipUrl(c.storage_url as string | null))
+    .filter((url): url is string => !!url)
+  const clearedTransformedImageUrls = new Set(clearedTransformedImages)
+  const videoClips = allClips.filter((c) => !isStill(c) && clipCanEnterFactoryPool({
+    track: c.track,
+    isStillImage: false,
+    isAiTransformed: meta(c).is_ai_transformed === true,
+    hasCurrentEvidence: licenseEvidenceMatches(c),
+    sourceImageUrl: typeof meta(c).source_image_url === 'string' ? meta(c).source_image_url as string : null,
+  }, clearedTransformedImageUrls))
 
   // 🔴 版权隔离:**只有 AI 改过的图能进出片池**。
   // 抓来的原图是别人的作品,只作为改图的输入留在库里,永远不进成片 ——
   // 这是 PM 定的「抓图 → AI 改图(防版权)→ 图转视频」里「防版权」那一步的落点。
   // 绝不能因为「改图失败了就先用原图顶上」而放宽:那等于把版权风险直接发给客户。
   const transformedPool = allClips
-    .filter((c) => isStill(c) && meta(c).is_ai_transformed === true)
+    .filter((c) => isStill(c) && meta(c).is_ai_transformed === true && licenseEvidenceMatches(c))
     .map((c) => toPublicClipUrl(c.storage_url as string | null))
     .filter((u): u is string => !!u)
 
@@ -310,6 +338,25 @@ async function persistDecision(
 
   const draft = decision.workOrder
 
+  // New orders carry the target platform (missing = defaulted with a warning, unrecognised =
+  // rejected) and optional self-reported creative tags.
+  // Old orders are never re-checked: this runs only on the create path.
+  const stamped = stampPlatformAndTags(draft.brief, signal.request)
+  if (!stamped.ok) {
+    const reason = `${stamped.reason}: ${stamped.detail}`
+    await supabaseAdmin
+      .from('content_demand_signals')
+      .update({ status: 'rejected', reject_reason: reason })
+      .eq('id', signal.id)
+    return { outcome: 'rejected', reject_reason: reason }
+  }
+  draft.brief = stamped.brief
+  if (stamped.platform_defaulted) {
+    console.warn(
+      `[factory] signal ${signal.id} (client ${signal.client_id}, source ${signal.source}) sent no request.platform; defaulted to ${stamped.brief.platform}`,
+    )
+  }
+
   // R5:recipe 路径的完整可执行 brief 必须在 insert 之前构造完毕。缺源图 = 用不了 recipe,
   // typed rejection(不再 accepted with undefined work_order_id · R6)。
   let recipeBriefApplied: Record<string, unknown> | null = null
@@ -373,6 +420,9 @@ async function persistDecision(
       budgetCapUsd: FACTORY_ORDER_BUDGET_CAP_USD,
     })
     draft.brief = { ...draft.brief, ...recipeBriefApplied }
+    if (signal.request['deliverable'] === 'asset_only') {
+      draft.brief = withAssetOnlyDeliverable(draft.brief)
+    }
     draft.clip_links = []
     // R5 defense-in-depth:即便 buildFullRecipeBrief 未来被绕过,只要走这条路径就必须 pass。
     // 任何 claim-critical 字段缺失都会 throw,外层 catch → 信号 rejected(recipe_config_invalid)。

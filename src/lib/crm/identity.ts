@@ -17,6 +17,8 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { cleanDisplayName } from '@/lib/crm/clean-display-name'
+import { assignNewContact } from '@/lib/crm/lead-assignee'
 import {
   firstTouchColumns,
   isAttributed,
@@ -114,6 +116,13 @@ export interface ResolveInput {
   /** 这次接触的时间；用于维护 last_seen_at。 */
   seenAt?: string
   /**
+   * 新建客人时按轮流规则自动分给跟进人（默认不分）。
+   * 只有「客人主动找上门」的渠道打开：Meta 表单 / 官网表单 / 邮件 / WhatsApp。
+   * 手工录入、外呼这类「员工自己发起」的不开——那是员工自己的客人。
+   * 只对**新建**生效，命中已有客人不动他原来的跟进人。
+   */
+  autoAssign?: boolean
+  /**
    * 这批身份同时命中两个已存在的人时怎么办。
    *
    *   'auto'（默认）  合并成一个 —— 渠道适配器用这个。Meta 表单里的电话和
@@ -130,6 +139,11 @@ export interface ResolveInput {
    * 手工录入传 false —— 打错电话撞到老客户时，不该把人家的名字改掉。
    */
   overwriteDisplayName?: boolean
+  /**
+   * 配合 `overwriteDisplayName: false` 用：命中已有联系人、且他**现在没有名字**时，才用这次的名字补上（已有名字绝不动）。
+   * 只给可信的内部入口（邮件同步）用；公开端点（官网表单等）不要传。
+   */
+  fillEmptyDisplayName?: boolean
   /**
    * 「他是哪条广告 / 哪条视频带来的」。
    *
@@ -179,6 +193,9 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
   }
 
   const seenAt = input.seenAt ?? new Date().toISOString()
+  // 名字不能是邮箱 / 电话 / 占位词（2026-10-22 PM）。所有渠道建人都走这里，清洗放这一处就覆盖全部；
+  // 清洗成 null = 这次没带来名字：新建的人名字留空，命中已有联系人时**不覆盖**原名。
+  const cleanedName = cleanDisplayName(input.displayName)
 
   const { data: hits } = await supabaseAdmin
     .from('contact_identities')
@@ -200,7 +217,7 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
       .from('contacts')
       .insert({
         client_id: clientId,
-        display_name: input.displayName ?? null,
+        display_name: cleanedName,
         primary_phone: identities.find((i) => i.kind === 'phone')?.value ?? null,
         primary_email: identities.find((i) => i.kind === 'email')?.value ?? null,
         first_seen_at: seenAt,
@@ -214,6 +231,10 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
     if (error || !data) throw new Error(`建 contact 失败: ${error?.message}`)
     contactId = data.id as string
     created = true
+    // 分配失败不抛、不挡建人（见 assignNewContact）。
+    if (input.autoAssign) {
+      await assignNewContact({ clientId, contactId, supabase: supabaseAdmin })
+    }
   } else {
     // 多个命中 = 之前被拆成了两个人，现在有证据说明是同一个。选最早的做主体。
     // 但「有证据」只对渠道适配器成立（同一次表单提交里的电话+邮箱）。手工录入
@@ -251,10 +272,17 @@ export async function resolveContact(input: ResolveInput): Promise<ResolveResult
       .from('contacts')
       .update({
         last_seen_at: seenAt,
-        ...(input.displayName && renameOk ? { display_name: input.displayName } : {}),
+        ...(cleanedName && renameOk ? { display_name: cleanedName } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq('id', contactId)
+
+    // 调用方明确要求「只补空」时（目前只有邮件同步——客户自己邮箱里读到的，不是公开端点），**原名是空的**才补；
+    // 已有名字绝不动。否则名字被清成 NULL 的老联系人之后永远补不上真名。
+    // 🔴 不对所有 overwriteDisplayName=false 的调用方放开：官网表单是公开端点，不许改已有客户的资料（原有测试钉死）。
+    if (cleanedName && !renameOk && input.fillEmptyDisplayName === true) {
+      await supabaseAdmin.from('contacts').update({ display_name: cleanedName }).eq('id', contactId).is('display_name', null)
+    }
 
     // first-touch 回填：**只在原来是空的时候**写。
     //

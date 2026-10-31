@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createAdsEnvelopeFactsResolver, hoursSinceOwnLastAction } from '../envelope-facts'
 import type { CapabilityImplementation } from '@/lib/kernel/types'
+import type { EnvelopeFactsResolver } from '@/lib/kernel/deps'
 
 const CLIENT = 'c-1'
 const ACCOUNT = 'act_1'
@@ -239,7 +240,7 @@ function resolve(
   t: Partial<Tables>,
   log: Log,
   at: 'authorize' | 'pre_provider' = 'authorize',
-  actionKey: 'ads.pause_unit' | 'ads.cut_campaign_budget' | 'ads.scale_unit_budget' = 'ads.pause_unit',
+  actionKey: Parameters<EnvelopeFactsResolver>[0]['actionKey'] = 'ads.pause_unit',
   input: Record<string, unknown> = { ad_account_id: ACCOUNT, adset_id: ADSET, cycle_date: '2026-09-27' },
 ) {
   const tables: Tables = {

@@ -42,6 +42,11 @@
 import { createHmac, timingSafeEqual } from 'crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import {
+  attributionColumns,
+  attributionFromWhatsAppReferral,
+  isAttributed,
+} from '@/lib/crm/attribution'
 import { buildIdentities, resolveContact } from '@/lib/crm/identity'
 import { isOptOutKeyword, recordOptOutKeywordTouch } from '@/lib/messenger-agent/optout'
 import { recordOptOutWriteFailure } from '@/lib/messenger-agent/optout-failures'
@@ -229,6 +234,10 @@ async function upsertConversation(
       overwriteDisplayName: false,
       source: 'whatsapp',
       seenAt: sentAt,
+      autoAssign: true,
+      // First-touch only (resolveContact fills empty columns), so a later ad never
+      // overwrites the one that brought the customer in. Empty without a referral.
+      attribution: attributionFromWhatsAppReferral(referral),
     })
     contactId = resolved.contactId
   } catch (err) {
@@ -300,12 +309,25 @@ async function recordInboundTouch(
   conversationId: string,
   contactId: string,
   at: string,
+  referral?: WhatsAppReferral,
 ): Promise<void> {
   const sourceRef = `${conversationId}:in`
   const body = {
     summary: '客人在 WhatsApp 上说了话',
     metadata: { thread_id: conversationId, sender: 'customer' },
   }
+  // Attribution + click id belong to the FIRST inbound touch only: the create below
+  // ignores duplicates and the advance update never rewrites these columns.
+  const attribution = attributionFromWhatsAppReferral(referral)
+  const firstTouch = isAttributed(attribution)
+    ? {
+        ...attributionColumns(attribution),
+        metadata: {
+          ...body.metadata,
+          ...(referral?.ctwa_clid ? { ctwa_clid: referral.ctwa_clid } : {}),
+        },
+      }
+    : {}
 
   // Create if absent, never overwrite — an existing row is the earlier contact.
   await supabaseAdmin.from('contact_touchpoints').upsert(
@@ -316,6 +338,7 @@ async function recordInboundTouch(
       direction: 'inbound',
       occurred_at: at,
       ...body,
+      ...firstTouch,
       source: 'whatsapp',
       source_ref: sourceRef,
     },
@@ -326,7 +349,7 @@ async function recordInboundTouch(
   // database, so concurrent deliveries cannot walk the timestamp backwards.
   await supabaseAdmin
     .from('contact_touchpoints')
-    .update({ occurred_at: at, ...body })
+    .update({ occurred_at: at, summary: body.summary })
     .eq('client_id', clientId)
     .eq('source', 'whatsapp')
     .eq('source_ref', sourceRef)
@@ -380,7 +403,7 @@ async function storeMessage(
   // Meta redeliver it — but it does mean a salesperson may not be prompted.
   if (contactId) {
     try {
-      await recordInboundTouch(clientId, conversationId, contactId, sentAt)
+      await recordInboundTouch(clientId, conversationId, contactId, sentAt, msg.referral)
     } catch (err) {
       console.error(`[webhooks/whatsapp] 记 CRM 触点失败（消息已入库，但可能不会出现在今日待办）:`, err)
     }

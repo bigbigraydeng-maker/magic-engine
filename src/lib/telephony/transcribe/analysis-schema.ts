@@ -19,16 +19,47 @@ export const FACT_KEYS = [
   'next_step', // 约定的下一步
   'callback_time', // 约定回电时间
   'do_not_contact', // 客人要求别再联系
+  'contact_email', // 通话中明确提供的邮箱（候选值，人工复核后才算数）
+  'not_ready_now', // 客人说现在还没准备好 / 改天再说 / 以后再说
+  'not_interested', // 客人明确说不感兴趣 / 不考虑
 ] as const
 export type FactKey = (typeof FACT_KEYS)[number]
 
-export const ANALYSIS_SCHEMA_VERSION = 1
+/**
+ * 客人在电话里对「现在要不要继续谈」的表态。CRM 分段靠它别把刚说过「改天再说」的人当热线索
+ * （PM 2026-10-29 Gavin Hall：37 秒通话，客人说 "I'm not ready for that. I'll talk to you another day."）。
+ */
+export const STANCE_FACT_KEYS: ReadonlySet<FactKey> = new Set<FactKey>(['not_ready_now', 'not_interested'])
+
+/** Version 2 adds sourced questions; completed version 1 analyses are not backfilled automatically. */
+export const ANALYSIS_SCHEMA_VERSION = 2
+
+const INQUIRY_TOPICS = ['tour_departures', 'availability', 'pricing', 'itinerary', 'other'] as const
+const QUESTION_SPEAKERS = ['customer', 'employee', 'unclear'] as const
+const ANSWER_SPEAKERS = ['customer', 'employee', 'unclear'] as const
+const ANSWER_STATUSES = ['answered', 'not_stated', 'unclear'] as const
+
+export const RawInquirySchema = z.object({
+  topic: z.enum(INQUIRY_TOPICS),
+  month: z.number().int().min(1).max(12).nullable(),
+  question: z.string().min(1).max(300),
+  questionQuote: z.string().min(1).max(500),
+  questionSpeaker: z.enum(QUESTION_SPEAKERS),
+  answer: z.string().max(500).nullable(),
+  answerQuote: z.string().max(500).nullable(),
+  answerSpeaker: z.enum(ANSWER_SPEAKERS).nullable(),
+  answerStatus: z.enum(ANSWER_STATUSES),
+  departureCount: z.number().int().min(0).max(100).nullable(),
+  confidence: z.number().min(0).max(1),
+})
+export type RawInquiry = z.infer<typeof RawInquirySchema>
 
 export const RawFactSchema = z.object({
   key: z.enum(FACT_KEYS),
   value: z.string().min(1).max(300),
   quote: z.string().min(1).max(500),
   confidence: z.number().min(0).max(1),
+  speaker: z.enum(QUESTION_SPEAKERS).optional(),
 })
 export type RawFact = z.infer<typeof RawFactSchema>
 
@@ -36,18 +67,28 @@ export const RawAnalysisSchema = z.object({
   summary: z.string().max(1200),
   language: z.string().max(40).nullable().default(null),
   facts: z.array(RawFactSchema).max(40).default([]),
+  inquiries: z.array(RawInquirySchema).max(40).default([]),
+  /** Invalid model rows are counted here so they remain visible after parsing. */
+  parseDroppedInquiries: z.number().int().min(0).default(0),
 })
-export type RawAnalysis = z.infer<typeof RawAnalysisSchema>
+type ParsedRawAnalysis = z.infer<typeof RawAnalysisSchema>
+export type RawAnalysis = Omit<ParsedRawAnalysis, 'inquiries' | 'parseDroppedInquiries'> & {
+  inquiries?: RawInquiry[]
+  parseDroppedInquiries?: number
+}
 
 export interface VerifiedAnalysis {
   summary: string
   language: string | null
   facts: RawFact[]
+  inquiries: RawInquiry[]
   /** 因为原话在转写里找不到而被丢掉的条数（可见，不静默）。 */
   droppedFacts: number
+  /** 原话、说话人或答复结构无法核实的问题条数。 */
+  droppedInquiries: number
 }
 
-const norm = (s: string) => s.toLowerCase().replace(/[\s\u3000"'“”‘’.,，。!！?？、:;；]+/g, '')
+export const norm = (s: string) => s.toLowerCase().replace(/[\s\u3000"'“”‘’.,，。!！?？、:;；]+/g, '')
 
 const CJK = /[\u4e00-\u9fff]/g
 
@@ -104,15 +145,110 @@ const currenciesIn = (text: string): string[] => {
 }
 const AMOUNT_CUE = /预算|budget|dollar|bucks|\$|万|k\b|元|块/i
 const PEOPLE_CUE = /people|person|persons|adult|adults|kids|children|child|pax|travell?ers|guests|位|个人|人|口/i
+const EMAIL_RE = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i
+const SPOKEN_EMAIL_CUE = /e-?mail|email address|(?:my|your) address|邮箱|电邮/i
+const COUNT_TOKEN = String.raw`(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|[零一二两三四五六七八九十]+)`
+const ENGLISH_TOUR_UNIT = String.raw`(?:tours?|groups?|departures?|coaches)`
+const EXPLICIT_EN_DEPARTURE_COUNT = new RegExp(String.raw`\b(${COUNT_TOKEN})\s+${ENGLISH_TOUR_UNIT}\b`, 'gi')
+const EXPLICIT_CN_DEPARTURE_COUNT = new RegExp(String.raw`(${COUNT_TOKEN})\s*(?:个)?(?:团|班期|班次)`, 'gi')
+const SHORT_COUNT_REPLY = new RegExp(String.raw`^(?:(?:we\s+(?:have|will\s+have|run|will\s+run)|there\s+(?:are|is)|only|in\s+total|total\s+of)\s+)?(${COUNT_TOKEN})$`, 'i')
+const MONTH_ALIASES: Record<number, string[]> = {
+  1: ['january', 'jan', '1月', '一月'], 2: ['february', 'feb', '2月', '二月'],
+  3: ['march', 'mar', '3月', '三月'], 4: ['april', 'apr', '4月', '四月'],
+  5: ['may', '5月', '五月'], 6: ['june', 'jun', '6月', '六月'],
+  7: ['july', 'jul', '7月', '七月'], 8: ['august', 'aug', '8月', '八月'],
+  9: ['september', 'sep', 'sept', '9月', '九月'], 10: ['october', 'oct', '10月', '十月'],
+  11: ['november', 'nov', '11月', '十一月'], 12: ['december', 'dec', '12月', '十二月'],
+}
+const TOUR_COUNT_CUE = /\b(?:tour|group|departure|coach)s?\b|团|班期|班次/i
 
 const NUMERIC_KEYS: ReadonlySet<FactKey> = new Set<FactKey>(['budget', 'party_size'])
 /** 第一人称的拒绝联系（不是任何含 stop/别再 的句子）。 */
 const NEGATION = /(don'?t|do not|please don'?t|stop)\s+(call|calling|contact|contacting|ring|phone)\s+(me|us)\b|别再(给我|联系我|打给我|打电话)|不要再(给我|联系我|打电话)|不用再(联系|打电话)|请勿(再)?联系(我|我们)|remove (me|my number|us) from/i
 const QUESTION = /[?？]|什么意思|为什么|why\b|是什么/i
+/**
+ * 表态原话里，**第一人称必须是那句拒绝的主语**（复审 2026-10-29 两轮）：
+ *   · I'm / I am / we're / we are（中间最多一个词）not（最多一个词）ready / interested
+ *   · I'll / I will / we'll / we will …（同一句内）another day / another time / some other time / later
+ *   · 我 / 我们（现在 / 暂时 / 目前）（还 / 也）没 / 不 + 准备 / 感兴趣 / 考虑 / 想 / 需要 / 打算 / 决定 / 定
+ * 只是句子里出现「I / we / 我」不够：员工的「We understand if you're not ready yet」
+ * 「No worries if you're not ready yet」「你现在还没准备好吗」都不能算成客人的表态。
+ */
+const STANCE_SUBJECT = new RegExp(
+  [
+    String.raw`\b(?:i[’']?m|i am|we[’']?re|we are)\s+(?:\w+\s+)?not\s+(?:\w+\s+)?(?:ready|interested)\b`,
+    String.raw`\b(?:i|we)(?:[’']ll|\s+will)\b[^.?!？。！]{0,60}\b(?:another day|another time|some other time|later)\b`,
+    String.raw`我们?(?:现在|暂时|目前)?(?:还|也)?(?:没|不)(?:有)?(?:准备|感兴趣|考虑|想|需要|打算|决定|定)`,
+  ].join('|'),
+  'i',
+)
+/** 一行转写以问号结尾，或中文以 吗/呢/么 收尾（标点可有可无）—— 这一行是问句。 */
+const QUESTION_LINE_END = /(?:[?？]|[吗呢么][。.!！]?)["'”’」』\s]*$/
+
+const CHANNEL_PREFIX = /^\s*(声道\d+)[：:]\s*/
+
+/** 同一声道连续的几行拼成一段（归一化后），记下每行在拼接文本里从哪开始。 */
+interface ChannelRun { text: string; starts: number[]; lines: string[] }
+
+/**
+ * 转写 → 若干段「同一声道连续行」。每通电话只建一次，所有表态事实共用（线性，长转写也快）。
+ * 行首的「声道N：」不算原话内容；不同声道的行不拼在一起（不许把员工半句和客人半句拼成一句）。
+ */
+export function buildChannelRuns(transcript: string): ChannelRun[] {
+  const runs: ChannelRun[] = []
+  let cur: (ChannelRun & { ch: string }) | null = null
+  for (const raw of transcript.split('\n')) {
+    const ch = raw.match(CHANNEL_PREFIX)?.[1] ?? ''
+    const text = raw.replace(CHANNEL_PREFIX, '')
+    if (!cur || cur.ch !== ch) {
+      cur = { ch, text: '', starts: [], lines: [] }
+      runs.push(cur)
+    }
+    cur.starts.push(cur.text.length)
+    cur.lines.push(text)
+    cur.text += norm(text)
+  }
+  return runs
+}
+
+/** 偏移落在第几行（starts 递增）。 */
+function lineAt(starts: number[], offset: number): number {
+  let lo = 0
+  let hi = starts.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (starts[mid] <= offset) lo = mid
+    else hi = mid - 1
+  }
+  return lo
+}
+
+/**
+ * 原话在转写里落在哪几行（可跨同一声道相邻几行：转写按句换行，Gavin 那两句可能占两行）。
+ * 每段只做一次 indexOf，没找到就是 null。norm() 会去掉问号，所以「是不是问句」要回到这几行原文看。
+ */
+function linesContaining(runs: ChannelRun[], quoteNorm: string): string[] | null {
+  for (const run of runs) {
+    const at = run.text.indexOf(quoteNorm)
+    if (at < 0) continue
+    return run.lines.slice(lineAt(run.starts, at), lineAt(run.starts, at + quoteNorm.length - 1) + 1)
+  }
+  return null
+}
+
+/** 表态事实：原话找得到，且所在的转写行不是问句（模型可能把问号去掉再交回来）。 */
+function stanceSupported(f: RawFact, runs: ChannelRun[]): boolean {
+  const found = linesContaining(runs, norm(f.quote))
+  if (!found) return false
+  return !found.some((line) => QUESTION_LINE_END.test(line.trim()))
+}
 
 /** 数值类事实：值里的数字必须有原话依据，且原话要像金额/人数，不是电话号码、日期、钟点。「别再联系」必须是第一人称的陈述句。 */
 function valueSupported(f: RawFact): boolean {
   if (f.key === 'do_not_contact') return NEGATION.test(f.quote) && !QUESTION.test(f.quote)
+  if (f.key === 'contact_email') return f.speaker === 'customer' && emailSupported(f.value, f.quote)
+  // 表态还要对照转写原句再判一次是不是问句，见 stanceSupported（在 verifyFacts 里做）。
+  if (STANCE_FACT_KEYS.has(f.key)) return !QUESTION.test(f.quote) && STANCE_SUBJECT.test(f.quote)
   if (!NUMERIC_KEYS.has(f.key)) return true
   const need = [...numbersIn(f.value)]
   if (need.length === 0 || need.some((n) => n > 10_000_000)) return false
@@ -126,20 +262,186 @@ function valueSupported(f: RawFact): boolean {
   return AMOUNT_CUE.test(f.quote) || quoteCur.length > 0
 }
 
+function normaliseEmailEvidence(text: string): string {
+  const tokens = text.toLowerCase()
+    .replace(/\b(?:at\s+sign|at)\b/g, ' @ ')
+    .replace(/\b(?:dot|period)\b/g, ' . ')
+    .replace(/\bunderscore\b/g, ' _ ')
+    .replace(/\b(?:hyphen|dash)\b/g, ' - ')
+    .replace(/\bplus\b/g, ' + ')
+    .replace(/[^a-z0-9@._%+-]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+  const result: string[] = []
+  let spelledLetters: string[] = []
+  const flush = () => {
+    if (spelledLetters.length > 1) result.push(spelledLetters.join(''))
+    else if (spelledLetters.length === 1) result.push(spelledLetters[0])
+    spelledLetters = []
+  }
+  for (const token of tokens) {
+    if (/^[a-z0-9]$/.test(token)) {
+      spelledLetters.push(token)
+    } else {
+      flush()
+      result.push(token)
+    }
+  }
+  flush()
+  return result.join(' ')
+}
+
+function emailSupported(value: string, quote: string): boolean {
+  const email = value.trim().toLowerCase()
+  if (!EMAIL_RE.test(email)) return false
+  const directAddress = quote.match(/[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}/i)?.[0]
+  if (directAddress?.toLowerCase() === email) return true
+  const spokenAddress = normaliseEmailEvidence(
+    email.replace('@', ' @ ').replace(/\./g, ' . ').replace(/_/g, ' _ ').replace(/-/g, ' - ').replace(/\+/g, ' + '),
+  )
+  return SPOKEN_EMAIL_CUE.test(quote) && ` ${normaliseEmailEvidence(quote)} `.includes(` ${spokenAddress} `)
+}
+
+function monthSupported(month: number, quote: string): boolean {
+  const raw = quote.toLowerCase()
+  const normalised = norm(quote)
+  return (MONTH_ALIASES[month] ?? []).some((alias) => {
+    if (month === 5 && alias === 'may') {
+      // “May” is also a modal verb; require a month-like preposition or a tour/date noun.
+      return /\b(?:in|for|during|of|from|through|until|by)\s+may\b|\bmay\s+(?:\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?|\d{4}|tours?|groups?|departures?|coaches|trips?|holidays?|dates?)\b/i.test(raw)
+    }
+    return /^[a-z]+$/i.test(alias)
+      ? new RegExp(`\\b${alias}\\b`, 'i').test(raw)
+      : normalised.includes(norm(alias))
+  })
+}
+
+function monthsMentioned(text: string): number[] {
+  return Object.keys(MONTH_ALIASES).map(Number).filter((month) => monthSupported(month, text))
+}
+
+function withoutMonths(text: string): string {
+  return Object.values(MONTH_ALIASES).flat().reduce((cleaned, alias) => {
+    const pattern = /^[a-z]+$/i.test(alias) ? new RegExp(`\\b${alias}\\b`, 'gi') : null
+    return pattern ? cleaned.replace(pattern, ' ') : cleaned.replaceAll(alias, ' ')
+  }, text)
+}
+
+function explicitDepartureCounts(text: string): number[] {
+  const matches = [
+    ...[...text.matchAll(EXPLICIT_EN_DEPARTURE_COUNT)].map((match) => match[1]),
+    ...[...text.matchAll(EXPLICIT_CN_DEPARTURE_COUNT)].map((match) => match[1]),
+  ]
+  return matches.flatMap((token) => [...numbersIn(token)])
+}
+
+function isShortCountReply(text: string, count: number): boolean {
+  const cleaned = withoutMonths(text)
+    .replace(/\b(?:in|for|during)\b/gi, ' ')
+    .replace(/[.,!?;:，。！？]/g, ' ')
+    .trim()
+  const match = cleaned.match(SHORT_COUNT_REPLY)
+  return Boolean(match && numbersIn(match[1]).has(count))
+}
+
+function verifiedDepartureCount(inquiry: RawInquiry): number | null {
+  if (inquiry.topic !== 'tour_departures' || inquiry.departureCount === null || !inquiry.answerQuote) return null
+  if (inquiry.answerSpeaker !== 'employee') return null
+  if (!TOUR_COUNT_CUE.test(`${inquiry.questionQuote} ${inquiry.answerQuote}`)) return null
+  if (explicitDepartureCounts(inquiry.answerQuote).includes(inquiry.departureCount)) return inquiry.departureCount
+  return isShortCountReply(inquiry.answerQuote, inquiry.departureCount) ? inquiry.departureCount : null
+}
+
+function verifyInquiry(inquiry: RawInquiry, transcriptNorm: string): RawInquiry | null {
+  const question = norm(inquiry.questionQuote)
+  if (!quoteLongEnough(question) || !transcriptNorm.includes(question) || inquiry.questionSpeaker === 'employee') return null
+  const answerQuote = inquiry.answerQuote && transcriptNorm.includes(norm(inquiry.answerQuote)) ? inquiry.answerQuote : null
+  const monthQuote = `${inquiry.questionQuote} ${answerQuote ?? ''}`
+  const month = inquiry.month !== null && monthSupported(inquiry.month, monthQuote) ? inquiry.month : null
+  const answerValid = inquiry.answerStatus === 'answered' && answerQuote !== null && Boolean(inquiry.answer?.trim()) && inquiry.answerSpeaker !== null
+  const answerMonths = answerQuote ? monthsMentioned(answerQuote) : []
+  const answerMatchesMonth = inquiry.topic !== 'tour_departures' || month === null || answerMonths.length === 0 || answerMonths.every((mentioned) => mentioned === month)
+  const answerStatus = inquiry.answerStatus === 'not_stated' ? 'not_stated' : answerValid && answerMatchesMonth ? 'answered' : 'unclear'
+  const answerSpeaker = answerStatus === 'not_stated' ? null : inquiry.answerSpeaker
+  const departureCount = answerStatus === 'answered' ? verifiedDepartureCount({ ...inquiry, answerQuote }) : null
+  return {
+    ...inquiry,
+    month,
+    answer: answerStatus === 'not_stated' ? null : inquiry.answer,
+    answerQuote: answerStatus === 'not_stated' ? null : answerQuote,
+    answerSpeaker,
+    answerStatus,
+    departureCount,
+  }
+}
+
+function verifyInquiries(raw: RawAnalysis, transcript: string): { inquiries: RawInquiry[]; droppedInquiries: number } {
+  const transcriptNorm = norm(transcript)
+  const rawInquiries = raw.inquiries ?? []
+  const inquiries = rawInquiries.flatMap((item) => {
+    const verified = verifyInquiry(item, transcriptNorm)
+    return verified ? [verified] : []
+  })
+  return { inquiries, droppedInquiries: (raw.parseDroppedInquiries ?? 0) + rawInquiries.length - inquiries.length }
+}
+
+function clipQuote(text: string, maxLength: number): string {
+  const compact = text.replace(/\s+/g, ' ').trim()
+  return compact.length <= maxLength ? compact : `${compact.slice(0, maxLength - 1)}…`
+}
+
+function summaryWithVerifiedEvidence(summary: string, facts: RawFact[], inquiries: RawInquiry[]): string {
+  const notes = facts
+    .filter((fact) => fact.key === 'contact_email')
+    .map((fact) => `客户提供邮箱：${clipQuote(fact.value, 100)}`)
+  const tourInquiries = inquiries.filter((inquiry) => inquiry.topic === 'tour_departures')
+  notes.push(...tourInquiries.slice(0, 4).map((inquiry) => {
+    const month = inquiry.month === null ? '月份未确认' : `${inquiry.month}月`
+    const question = clipQuote(inquiry.questionQuote, 70)
+    const answer = inquiry.answerQuote ? `；答复原话“${clipQuote(inquiry.answerQuote, 70)}”` : '；未找到可核实答复'
+    const count = inquiry.departureCount === null ? '；团数未核实' : `；明确${inquiry.departureCount}团`
+    return `${month}团期：客户问“${question}”${answer}${count}`
+  }))
+  if (tourInquiries.length > 4) notes.push(`另有${tourInquiries.length - 4}条团期问答`)
+  if (notes.length === 0) return summary.slice(0, 1200)
+
+  const evidence = `复核证据：${notes.join('；')}`
+  const base = summary.trim()
+  const separator = base ? '；' : ''
+  const available = Math.max(0, 1200 - evidence.length - separator.length)
+  const visibleBase = base.length > available
+    ? `${base.slice(0, Math.max(0, available - 1))}…`
+    : base
+  return `${visibleBase}${visibleBase ? separator : ''}${evidence}`.slice(0, 1200)
+}
+
 /** 事实的原话必须真的出现在转写里，且够分量；数值类和「别再联系」还要核对值与原话一致。 */
 export function verifyFacts(raw: RawAnalysis, transcript: string): VerifiedAnalysis {
   const t = norm(transcript)
+  // 只在真有表态事实时才建一次，所有表态事实共用
+  let runs: ChannelRun[] | null = null
   const kept = raw.facts.filter((f) => {
     const q = norm(f.quote)
-    return quoteLongEnough(q) && t.includes(q) && valueSupported(f)
+    const enoughEvidence = f.key === 'contact_email' ? q.length >= 6 : quoteLongEnough(q)
+    // 表态单独找原话所在行（可跨同一声道的相邻几行），顺带判问句；其余事实照旧在整段转写里找。
+    const found = STANCE_FACT_KEYS.has(f.key) ? stanceSupported(f, (runs ??= buildChannelRuns(transcript))) : t.includes(q)
+    return enoughEvidence && found && valueSupported(f)
   })
-  return { summary: raw.summary, language: raw.language, facts: kept, droppedFacts: raw.facts.length - kept.length }
+  const inquiryResult = verifyInquiries(raw, transcript)
+  return {
+    summary: summaryWithVerifiedEvidence(raw.summary, kept, inquiryResult.inquiries),
+    language: raw.language,
+    facts: kept,
+    inquiries: inquiryResult.inquiries,
+    droppedFacts: raw.facts.length - kept.length,
+    droppedInquiries: inquiryResult.droppedInquiries,
+  }
 }
 
 export const ANALYSIS_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['summary', 'language', 'facts'],
+  required: ['summary', 'language', 'facts', 'inquiries'],
   properties: {
     summary: { type: 'string' },
     language: { type: ['string', 'null'] },
@@ -148,12 +450,34 @@ export const ANALYSIS_JSON_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['key', 'value', 'quote', 'confidence'],
+        required: ['key', 'value', 'quote', 'confidence', 'speaker'],
         properties: {
           key: { type: 'string', enum: [...FACT_KEYS] },
           value: { type: 'string' },
           quote: { type: 'string' },
           confidence: { type: 'number' },
+          speaker: { type: 'string', enum: [...QUESTION_SPEAKERS] },
+        },
+      },
+    },
+    inquiries: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['topic', 'month', 'question', 'questionQuote', 'questionSpeaker', 'answer', 'answerQuote', 'answerSpeaker', 'answerStatus', 'departureCount', 'confidence'],
+        properties: {
+          topic: { type: 'string', enum: [...INQUIRY_TOPICS] },
+          month: { type: ['integer', 'null'], minimum: 1, maximum: 12 },
+          question: { type: 'string' },
+          questionQuote: { type: 'string' },
+          questionSpeaker: { type: 'string', enum: [...QUESTION_SPEAKERS] },
+          answer: { type: ['string', 'null'] },
+          answerQuote: { type: ['string', 'null'] },
+          answerSpeaker: { type: ['string', 'null'], enum: [...ANSWER_SPEAKERS, null] },
+          answerStatus: { type: 'string', enum: [...ANSWER_STATUSES] },
+          departureCount: { type: ['integer', 'null'], minimum: 0, maximum: 100 },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
         },
       },
     },

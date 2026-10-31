@@ -1,3 +1,4 @@
+import { getInstagramConfig } from '@/lib/instagram-oauth/client'
 import { NextRequest, NextResponse } from 'next/server'
 import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
@@ -31,7 +32,7 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
       facebookPublishPageId: target?.platform === 'facebook' ? target.page_id : null,
     }
     const now = new Date()
-    return NextResponse.json({ channels: buildSocialConnections(client, connections, now),
+    return NextResponse.json({ channels: buildSocialConnections(client, connections, now, Boolean(getInstagramConfig())),
       readAt: now.toISOString(), canManageConfiguration: admin.ok }, { headers: { 'Cache-Control': 'private, no-store' } })
   } catch {
     return NextResponse.json({ error: '暂时无法读取社媒授权记录，请稍后重试。' }, { status: 503 })

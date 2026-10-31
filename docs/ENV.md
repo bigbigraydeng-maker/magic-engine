@@ -190,6 +190,8 @@
 
 | 变量 | 用途 | 配在哪 |
 |---|---|---|
+| `AD_HEARTBEAT_MODE` | 广告心跳模式：`off` / `dry`（默认，每小时只读 Meta 并写状态行、不写报警）/ `live`（写报警行）。拼错会记成运行失败。**live 必须等心跳设计第⑤块上线后才能开**。改后要手动重新部署 | Render-web |
+| `AD_HEARTBEAT_CLIENT_IDS` | 广告心跳检查哪些客户（逗号分隔 client id）。默认空 = 一个客户都不查；live 模式下为空会记成运行失败。首批只填 CTS | Render-web |
 | `MOCK_EXTERNAL_SERVICES` | 测试时 mock 全部外部 API | 本地 / CI |
 | `FACTORY_PUBLISH_LIVE` | 🔴 Factory 是否真发布。**未配 = 静默发 DRAFT**（片子落库全绿但 FB 上没人看得见） | Render-web |
 | `DAILY_PLAN_AUTO_PUBLISH_LIVE` | 🔴 每日计划图文 Post 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部发布闸门、什么都不发也不写库，只在 cron_run_logs 留一行）。第一次真发必须 PM 明确说 go | Render-web |
@@ -198,6 +200,7 @@
 | `DAILY_PLAN_AUTO_PUBLISH_CLIENTS` | 🔴 允许自动真发的客户 id 白名单（逗号分隔，小写）。**不在名单里的客户永远只演练**，即使上面的总开关打开了 | Render-web |
 | `FACTORY_WORKER_CLIENT_IDS` | Factory 认领工单的客户白名单。**不是 worker 自己读的** —— worker 调 `/api/factory/worker/claim`，白名单在那条路由里由 `src/lib/factory/worker-guard.ts` 读并 fail-closed（未配则拒绝全部 claim） | Render-web |
 | `PROSPECTING_SWEEP_ENABLED` | 线索挖掘总闸（默认 **关**）。`/api/cron/prospecting-sweep` 路由里读 —— 那是 web 进程，prospecting-sweep 这个 cron 只负责 `curl` | Render-web |
+| `VIRAL_ANALYZER_ENABLED` | 爆款分析 + 爆款发现总闸（默认 **关**，必须严格等于 `true` 才跑）。`/api/cron/viral-analyzer-worker` 和 `/api/cron/viral-discovery-weekly` 里读 —— 都是 web 进程。后台手动按钮不读这个开关 | Render-web |
 | `JOB_SIGNAL_INGEST_ENABLED` / `JOB_SIGNAL_KEYWORDS` | 招聘信号采集开关（默认 **关**）+ 关键词。开关在 `/api/cron/job-boards-weekly` 路由里读，同样是 web 进程 | Render-web |
 | `ATTRIBUTION_DUAL_WINDOW_ENABLED` | 归因双窗口总闸（默认 **关**）。开了之后被转交的动作会同时按 GSC 的 28 天节奏和 pass 1 的窗口各算一次。**在 `src/lib/memory/` 的消费方（extractor / learning-rollup）改成按动作计样本、并且分页读全之前不许开**（那 5 条查询也没分页，光去重不分页等于没修） —— 这是唯一还没改的一类；本 PR 已经把其余读取方（行业基准、三个信心读取、后台聚合页 `/api/admin/flywheel/aggregate`、执行看板 `/api/clients/[id]/execution`）**既改成按动作折叠、也改成分页读全**（只折叠不分页照样错：折叠是在读到的行里挑代表，带目标指标那行被截掉就会挑错代表，那不是少算是算错） —— 现在开会让同一个动作在学习和行业基准里被重复计数（Issue #859）。关着的时候两个写入方还会顺手清掉自己在非权威窗口上的旧行（老版本留下的），因为只拒绝新写入挡不住已经存在的第二个窗口；这一步只在权威窗口真的写进去之后才做，所以还算不出结果的动作会暂时保留那一行，等算得出来那一轮再清。⚠️ 配在 **web service** 上：`attribution-cron` 只是 `curl` 打这个接口，读 env 的是接请求的 web 进程；配到 cron 上开关不会生效，而且是静默不生效 | Render-web |
 | `SOCIAL_COMMENT_AUTOREPLY_KILL` | 社媒评论自动回复紧急关停 | Render-web |
@@ -239,6 +242,8 @@
 | `NEXT_PUBLIC_GA_MEASUREMENT_ID` / `NEXT_PUBLIC_META_PIXEL_ID` | ME 自家营销页的 GA4 / Meta 像素 | Render-web |
 | `META_CAPI_VERSION` | Meta 转化回传用的 Graph 版本，默认 `v19.0` | Render-web（可不配） |
 | `META_SYSTEM_USER_TOKEN_<域名>` | 🔴 **每客户一把的 Meta 广告令牌，名字运行时拼出来**（`domainToEnvKey`，`src/lib/meta/token-selection.ts`），静态扫描扫不到，完整清单只在 Render 面板上 | Render-web |
+| `LAUNCH_SIGNOFF_SIGNERS` | 「上线签字」页能签字/撤销的人的邮箱（逗号分隔，大小写不敏感）。**未配 = 谁都不能签**（fail-closed）；只认真人登录会话，服务钥匙一律不行（`src/lib/launch-signoff/auth.ts`） | Render-web |
+| `LAUNCH_SIGNOFF_EXECUTOR_KEY` / `LAUNCH_SIGNOFF_REVIEWER_KEY` | 上线签字接口给「执行窗口 / 复核窗口」各一把**不同**的钥匙（请求头 `x-launch-signoff-key`）；角色由钥匙决定，所以「复核人≠执行人」由服务端强制。未配 = 对应窗口不能写（fail-closed） | Render-web |
 | `META_PIXEL_ID_<域名>` | 每客户像素 ID，同样是运行时拼名（`src/lib/meta/capi/config.ts`） | Render-web |
 | `CRM_NOTE_MODEL` / `CRM_STAGE_INFER_MODEL` / `MESSENGER_BRIEF_MODEL` / `MARKET_INTEL_MODEL` | 各功能的模型名覆盖，默认都是 `gpt-4o-mini` | Render-web（可不配） |
 | `CRM_FACTS_CLIENT_IDS` | 「AI 读对话存事实」要给哪些客户跑（逗号分隔的客户 UUID），**未配 = 全关**（fail-closed）。目前只该配 NAL；提示词里「具体货物」是物流语义，别的行业先别开 | Render-web |
@@ -257,3 +262,19 @@
 bash scripts/doctor.sh          # 全量：env + 外部 API + cron
 bash scripts/doctor.sh --env    # 只查 env（掩码输出，不打印值）
 ```
+
+
+## Instagram Login — 账号资料连接（默认关闭）
+
+此入口独立于 Facebook Login，**不能复用 Facebook App ID/Secret**。只申请 `instagram_business_basic`，不授予发布、评论、消息能力，也没有后台刷新。已有 Meta scope 和客户连接不变；新 provider 暂无既有客户需重连。
+
+| 变量 | 用途 |
+| --- | --- |
+| `INSTAGRAM_LOGIN_ENABLED` | 必须精确为 `true` 才显示/接受原生连接。默认缺省或 false；迁移和应用配置核实前保持关闭。 |
+| `INSTAGRAM_APP_ID` | Meta 应用中 Instagram product 的 App ID，服务端读取。 |
+| `INSTAGRAM_APP_SECRET` | 同一 Instagram product 的 Secret，仅存既有服务端秘密配置，不放客户端或仓库。 |
+| `NEXT_PUBLIC_APP_URL` | 规范 HTTPS 站点 origin；回调固定 `/api/auth/instagram/callback`，须在该 product 后台精确登记。 |
+
+上线顺序：审查并应用 `platform_oauth_add_instagram` 迁移 → 配置独立 product、回调及必要审核/测试账号资格 → 配置服务端变量 → 才打开开关。此文档不表示这些生产步骤已经执行。专业账号须为企业/创作者；标准访问仅适用合资格测试/自有账号，客户推广需平台批准相应访问级别。
+
+在客户设置「内容与社媒」登记 Instagram 用户名，再回「社媒授权与连接」点击连接；同意后必须与登记用户名精确对应。保存 `account_id = /me.user_id` 字符串，`location_name = verified username`；不是 exchange user_id 或 app-scoped id。保存实际授予权限及真实 token 期限；过期提示重新连接，不显示待自动刷新。管理员的断开只将 ME 内此客户/Instagram/legacy 记录标为 revoked，不宣称撤销平台端应用许可。完成连接尚不能发布。

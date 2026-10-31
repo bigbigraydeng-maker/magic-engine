@@ -17,6 +17,10 @@ import {
   DEFAULT_BASELINE_CONFIG,
 } from './baseline'
 import { prescribe, Prescription } from './prescription'
+import { loadOutcomeConfig } from './portfolio/outcome-config'
+import { countOutcome, type OutcomeStep } from './portfolio/outcome-ladder'
+import { D3_COST_MULTIPLE } from './portfolio/diagnostics/thresholds'
+import { linkClickRate } from './link-clicks'
 
 /** How many days of history to load for the baseline (needs ≥ 2 windows). */
 const HISTORY_DAYS = 30
@@ -31,6 +35,21 @@ interface InsightRow {
   spend: number | null
   impressions: number | null
   frequency_7d: number | null
+  /** 客户主结果口径的当天计数（countOutcome）；null / 缺省 = 归不上，冷启动不判。 */
+  primary_results?: number | null
+  /**
+   * Link clicks ÷ impressions for the strip. Undefined = caller did not supply it
+   * (tests keep the stored ctr). Null = actions were missing, so the strip shows unknown.
+   * Fatigue still uses `ctr` (all clicks). The 0.5% floor assumes that caliber.
+   */
+  link_ctr?: number | null
+}
+
+/** Raw columns needed to count the client's primary outcome (same shape countOutcome reads). */
+type RawInsightRow = InsightRow & {
+  reach: number | null
+  video_thruplays: number | null
+  actions: ReadonlyArray<{ action_type: string; value: string }> | null
 }
 
 export interface CampaignNarrative {
@@ -77,6 +96,55 @@ function worstVerdict(verdicts: Verdict[]): Verdict {
   return real.reduce((worst, v) => (VERDICT_RANK[v] > VERDICT_RANK[worst] ? v : worst), 'healthy')
 }
 
+/** 保守兜底：行里只有自定义像素事件时，countOutcome 会把留资记为 null（归不上）。 */
+const UNCERTAIN_GOAL = 'OFFSITE_CONVERSIONS'
+
+/**
+ * 广告系列的优化目标：旗下任何广告组是网站转化、或查不到广告组目标 → 按网站转化保护（宁可不判）。
+ * 否则取任一广告组目标（无自定义事件歧义时结果与目标无关）。
+ */
+export function campaignGoalFor(goals: ReadonlySet<string | null> | undefined): string {
+  if (!goals || goals.size === 0 || goals.has(null) || goals.has(UNCERTAIN_GOAL)) return UNCERTAIN_GOAL
+  return goals.values().next().value as string
+}
+
+export function primaryCountOf(
+  primary: OutcomeStep | null,
+  r: RawInsightRow,
+  optimizationGoal: string | null,
+): number | null {
+  if (primary === null) return null
+  return countOutcome(primary, r, { messagingReferralAvailable: false, optimizationGoal }).value
+}
+
+/** campaign_id → 旗下广告组优化目标集合（取每个广告组最新快照）。读失败返回空 Map（走保守兜底）。 */
+async function loadCampaignGoals(clientId: string): Promise<Map<string, Set<string | null>>> {
+  const out = new Map<string, Set<string | null>>()
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('ad_entity_snapshots')
+    .select('entity_id, campaign_id, optimization_goal, capture_reason')
+    .eq('client_id', clientId)
+    .eq('level', 'adset')
+    .gte('captured_at', since)
+    .order('captured_at', { ascending: false })
+    .order('id', { ascending: true })
+  if (error) {
+    console.warn('[ads-strategy/evaluate] 读广告组优化目标失败，冷启动按保守口径', { clientId, error: error.message })
+    return out
+  }
+  const seen = new Set<string>()
+  for (const r of (data ?? []) as Array<{ entity_id: string; campaign_id: string | null; optimization_goal: string | null; capture_reason: string }>) {
+    if (seen.has(r.entity_id)) continue
+    seen.add(r.entity_id)
+    if (r.capture_reason === 'disappeared' || !r.campaign_id) continue
+    const set = out.get(r.campaign_id) ?? new Set<string | null>()
+    set.add(r.optimization_goal ?? null)
+    out.set(r.campaign_id, set)
+  }
+  return out
+}
+
 /** Group flat insight rows by campaign into DailyPoint series. */
 function groupByCampaign(rows: InsightRow[]): Map<string, InsightRow[]> {
   const out = new Map<string, InsightRow[]>()
@@ -113,11 +181,34 @@ function shiftDateStr(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** 冷启动绝对线倍数：跟 D3 同一把尺子（花费与单次成本都 ≥ 2× 客户目标）。 */
+const COLD_START_COST_MULTIPLE = D3_COST_MULTIPLE
+
+/**
+ * 历史不满 14 天（baseline 判 insufficient_history）时的绝对线判定：近 7 天花费 ≥ 2× 目标，
+ * 且 0 结果或单次成本 > 2× 目标 → alert。目标没配（null）不判——不拿行业默认值代替（红线 7）。
+ */
+export function coldStartAlert(
+  spend7d: number,
+  results7d: number,
+  targetCost: number | null,
+): { headline: string } | null {
+  if (targetCost === null || !(targetCost > 0)) return null
+  const line = COLD_START_COST_MULTIPLE * targetCost
+  if (spend7d < line) return null
+  const spend = Math.round(spend7d * 100) / 100
+  if (results7d <= 0) return { headline: `冷启动按目标成本判：近 7 天花了 ${spend}，0 个结果（目标单次 ${targetCost}）` }
+  const cpr = Math.round((spend7d / results7d) * 100) / 100
+  if (cpr <= line) return null
+  return { headline: `冷启动按目标成本判：单次结果 ${cpr}，超过目标 ${targetCost} 的 ${COLD_START_COST_MULTIPLE} 倍` }
+}
+
 function buildCampaignNarrative(
   rows: InsightRow[],
   insightDate: string,
   cfg: BaselineConfig,
   industry: string | null,
+  targetCost: number | null = null,
 ): CampaignNarrative {
   const sorted = [...rows].sort((a, b) => (a.insight_date < b.insight_date ? -1 : 1))
 
@@ -130,6 +221,10 @@ function buildCampaignNarrative(
   const last7 = sorted.filter(r => r.insight_date >= windowStart && r.insight_date <= insightDate)
   const latestSpend7d   = last7.reduce((s, r) => s + (r.spend ?? 0), 0)
   const latestResults7d = last7.reduce((s, r) => s + (r.results ?? 0), 0)
+  // 冷启动用客户主结果口径，不用通用 results（max(leads,messaging)）；任何一天归不上 → null → 不判
+  const primaryResults7d = last7.every(r => r.primary_results != null)
+    ? last7.reduce((s, r) => s + (r.primary_results ?? 0), 0)
+    : null
 
   const lastDataDate = sorted[sorted.length - 1].insight_date
   const isPaused = lastDataDate < shiftDateStr(insightDate, -(PAUSED_AFTER_DAYS - 1))
@@ -150,7 +245,13 @@ function buildCampaignNarrative(
   }
 
   const points = toDailyPoints(sorted)
-  const judged = judgeCampaign(points, cfg, industry)
+  const baselineJudged = judgeCampaign(points, cfg, industry)
+  const cold = baselineJudged.verdict === 'insufficient_history' && primaryResults7d !== null
+    ? coldStartAlert(latestSpend7d, primaryResults7d, targetCost)
+    : null
+  const judged: CampaignVerdict = cold
+    ? { ...baselineJudged, verdict: 'alert', headline: cold.headline }
+    : baselineJudged
   // frequency_7d is sparse (only the newest day carries it); take the latest
   // non-null — but only from inside the current window, never a stale value.
   const freq7d = [...last7].reverse().find(r => r.frequency_7d != null)?.frequency_7d ?? null
@@ -161,11 +262,12 @@ function buildCampaignNarrative(
     verdict:       judged.verdict,
     headline:      judged.headline,
     metrics:       judged.metrics,
-    ctr_series:    last7.map(r => ({ date: r.insight_date, ctr: r.ctr })),
+    ctr_series:    last7.map(r => ({ date: r.insight_date, ctr: r.link_ctr !== undefined ? r.link_ctr : r.ctr })),
     latest_spend_7d:   Math.round(latestSpend7d * 100) / 100,
     latest_results_7d: latestResults7d,
     frequency_7d:      freq7d,
-    prescription: prescribe({ verdict: judged.verdict, metrics: judged.metrics, frequency_7d: freq7d, industry }),
+    // 冷启动 alert 没有基线指标可开方，不套疲劳处方
+    prescription: cold ? null : prescribe({ verdict: judged.verdict, metrics: judged.metrics, frequency_7d: freq7d, industry }),
   }
 }
 
@@ -195,10 +297,11 @@ export function buildNarrativePayload(
   insightDate: string,
   cfg: BaselineConfig = DEFAULT_BASELINE_CONFIG,
   industry: string | null = null,
+  targetCost: number | null = null,
 ): NarrativePayload {
   const campaigns = Array.from(rowsByCampaign.values())
     .filter(rows => rows.length > 0)
-    .map(rows => buildCampaignNarrative(rows, insightDate, cfg, industry))
+    .map(rows => buildCampaignNarrative(rows, insightDate, cfg, industry, targetCost))
     // Worst first; paused sinks to the bottom (rank -1).
     .sort((a, b) => VERDICT_RANK[b.verdict] - VERDICT_RANK[a.verdict])
 
@@ -230,7 +333,7 @@ export async function evaluateClientAdHealth(
 
     const { data, error } = await supabaseAdmin
       .from('ad_daily_insights')
-      .select('entity_id, entity_name, insight_date, ctr, cost_per_result, results, spend, impressions, frequency_7d')
+      .select('entity_id, entity_name, insight_date, ctr, cost_per_result, results, spend, impressions, frequency_7d, reach, video_thruplays, actions')
       .eq('client_id', clientId)
       .eq('level', 'campaign')
       .gte('insight_date', sinceStr)
@@ -239,8 +342,8 @@ export async function evaluateClientAdHealth(
 
     if (error) return { success: false, error: error.message }
 
-    const rows = (data ?? []) as InsightRow[]
-    if (rows.length === 0) {
+    const rawRows = (data ?? []) as RawInsightRow[]
+    if (rawRows.length === 0) {
       return { success: true, insight_date: insightDate, overall_verdict: 'insufficient_history', campaigns_evaluated: 0 }
     }
 
@@ -256,7 +359,16 @@ export async function evaluateClientAdHealth(
     }
     const industry = (clientRow as { industry?: string | null } | null)?.industry ?? null
 
-    const payload = buildNarrativePayload(groupByCampaign(rows), insightDate, cfg, industry)
+    // 读不到 / 没配目标或主结果 → 冷启动不判（loadOutcomeConfig 读失败返回空配置，不回落默认）
+    const { config } = await loadOutcomeConfig(clientId)
+    const targetCost = config.primary === null ? null : config.targetCostPerPrimary
+    const campaignGoals = config.primary === null ? new Map<string, Set<string | null>>() : await loadCampaignGoals(clientId)
+    const rows = rawRows.map(r => ({
+      ...r,
+      link_ctr: linkClickRate(r.actions, r.impressions),
+      primary_results: primaryCountOf(config.primary, r, campaignGoalFor(campaignGoals.get(r.entity_id))),
+    }))
+    const payload = buildNarrativePayload(groupByCampaign(rows), insightDate, cfg, industry, targetCost)
 
     const { error: upsertError } = await supabaseAdmin
       .from('ad_health_narratives')

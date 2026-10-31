@@ -3,13 +3,13 @@
 // 三动作:approve(通过并投放)/ reject_quality(打回·画面,一键理由)/ reject_budget(打回·预算)。
 
 import { FACTORY_PUBLISH_BUDGET_HARD_CAP_USD } from './constants'
-import { REEL_HUMAN_CHECK_KEYS_V2, validateContentChecklist, type ContentCheckItemResult } from '@/lib/social/content-review'
+import { REEL_HUMAN_CHECK_KEYS_V3, validateContentChecklist, type ContentCheckItemResult } from '@/lib/social/content-review'
 
 export type ReviewAction = 'approve' | 'reject_quality' | 'reject_budget'
 
 export type ParsedReview =
   | { ok: true; action: 'approve'; checklistHuman: ContentCheckItemResult[] }
-  | { ok: true; action: 'reject_quality'; feedback: string; checklistHuman: ContentCheckItemResult[] }
+  | { ok: true; action: 'reject_quality'; feedback: string; checklistHuman: ContentCheckItemResult[]; musicId?: string }
   | { ok: true; action: 'reject_budget'; newBudget: number }
   | { ok: false; error: string }
 
@@ -32,9 +32,19 @@ export function parseReviewBody(body: Record<string, unknown>): ParsedReview {
   if (action === 'reject_quality') {
     const feedback = asString(body.feedback)
     if (!feedback) return { ok: false, error: 'reject_quality requires feedback' }
-    const checklist = validateContentChecklist(body.checklist_human, REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN')
+    const checklist = validateContentChecklist(body.checklist_human, REEL_HUMAN_CHECK_KEYS_V3, 'HUMAN')
     if (!checklist.ok) return { ok: false, error: checklist.error }
-    return { ok: true, action, feedback: feedback.slice(0, 2000), checklistHuman: checklist.items }
+    const musicId = body.music_id
+    if (musicId !== undefined && (typeof musicId !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(musicId) || musicId.length > 40)) {
+      return { ok: false, error: 'music_id must be a valid catalog id' }
+    }
+    return {
+      ok: true,
+      action,
+      feedback: feedback.slice(0, 2000),
+      checklistHuman: checklist.items,
+      ...(typeof musicId === 'string' ? { musicId } : {}),
+    }
   }
   if (action === 'reject_budget') {
     const n = body.new_budget_usd
@@ -46,7 +56,7 @@ export function parseReviewBody(body: Record<string, unknown>): ParsedReview {
     }
     return { ok: true, action, newBudget: n }
   }
-  const checklist = validateContentChecklist(body.checklist_human, REEL_HUMAN_CHECK_KEYS_V2, 'HUMAN')
+  const checklist = validateContentChecklist(body.checklist_human, REEL_HUMAN_CHECK_KEYS_V3, 'HUMAN')
   if (!checklist.ok) return { ok: false, error: checklist.error }
   return { ok: true, action: 'approve', checklistHuman: checklist.items }
 }

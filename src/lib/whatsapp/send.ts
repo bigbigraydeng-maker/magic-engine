@@ -47,6 +47,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { resolveWhatsAppCredentials } from '@/lib/whatsapp/credentials'
+import { isAutomatedActor } from '@/lib/crm/actors'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
 
@@ -332,13 +333,13 @@ export async function sendWhatsApp(input: SendWhatsAppInput): Promise<SendWhatsA
     console.error(`[whatsapp/send] 会话 ${convo.id} 时间戳更新失败:`, bumpErr.message)
   }
 
-  await markContactFollowedUp(convo)
+  await markContactFollowedUp(convo, isAutomatedActor(input.sentByEmail))
 
   return { ok: true, whatsappMessageId: sent.messageId, window: window.kind }
 }
 
 /** 记 CRM 触点 —— 跟 `lib/messenger/send.ts` 里同名函数同一套幂等键逻辑，见那边的注释。 */
-async function markContactFollowedUp(convo: ConversationRow): Promise<void> {
+async function markContactFollowedUp(convo: ConversationRow, automated: boolean): Promise<void> {
   if (!convo.contact_id) return
 
   try {
@@ -350,7 +351,9 @@ async function markContactFollowedUp(convo: ConversationRow): Promise<void> {
         direction: 'outbound',
         occurred_at: new Date().toISOString(),
         summary: '我们在 WhatsApp 回复过',
-        metadata: { thread_id: convo.id, sender: 'page' },
+        // 机器发的（自动安抚 / AI 起草经人批准发出）标 automated：CRM 不把它算成「有人联系过他」
+        // （2026-10-22 PM）。人亲手发的不带这个键——同一个会话一行触点、upsert 会把旧的机器标记一并覆盖掉。
+        metadata: { thread_id: convo.id, sender: 'page', ...(automated ? { automated: true } : {}) },
         source: 'whatsapp',
         source_ref: `${convo.id}:out`,
       },

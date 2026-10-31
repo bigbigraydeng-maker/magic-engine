@@ -238,7 +238,12 @@ describe('CRON_REGISTRY 与 render.yaml 对账', () => {
   const parsed = parseRenderYaml()
 
   it('解析器真的解析到了东西（防止正则写歪导致后面全部空转成绿）', () => {
-    expect(parsed.length).toBeGreaterThan(30)
+    // 2026-10-24 起 blueprint 只留 3 条 dispatcher。少一条就等于调度器缺了一档。
+    expect(parsed.map((p) => p.service).sort()).toEqual([
+      'cron-dispatch-daily',
+      'cron-dispatch-frequent',
+      'cron-dispatch-weekly',
+    ])
   })
 
   it('🔴 render.yaml 里的每个 cron 都在清单里 —— 漏登记 = 脱离监控', () => {
@@ -508,9 +513,12 @@ describe('每个写运行记录的地方，都必须有人认领', () => {
  * 里那条 curl 的 URL 解出来，读取位置从路由源码里查，位置标注从 docs/ENV.md 的表格里
  * 按表头定位「配在哪」那一列取。所以它不是第二份变量清单 —— 没有一项事实是抄来的。
  */
-// job-boards-weekly 于 2026-10-07 暂停，其开关暂不对账，恢复时加回。
-const CRON_TRIGGERED_WEB_FLAGS: { env: string; service: string }[] = [
-  { env: 'PROSPECTING_SWEEP_ENABLED', service: 'prospecting-sweep' },
+// prospecting-sweep 不再是独立的 Render cron（2026-10-24 收进 dispatcher）。
+// 开关仍由 web 进程里的那条路由读取。对账改看路由源码，不再要求 yaml 里有同名服务。
+const CRON_TRIGGERED_WEB_FLAGS: { env: string; route: string }[] = [
+  { env: 'PROSPECTING_SWEEP_ENABLED', route: 'prospecting-sweep' },
+  { env: 'VIRAL_ANALYZER_ENABLED', route: 'viral-analyzer-worker' },
+  { env: 'VIRAL_ANALYZER_ENABLED', route: 'viral-discovery-weekly' },
 ]
 
 /**
@@ -558,11 +566,11 @@ describe('cron 触发、web 进程读取的开关：docs/ENV.md 的「配在哪�
   const parsed = parseRenderYaml()
 
   it('前提成立：解析器读到了 cron，也读到了 ENV.md 的表（正则写歪不许静默变绿）', () => {
-    expect(parsed.length).toBeGreaterThan(30)
+    expect(parsed.length).toBe(3)
     // 这里对 startCommand 只管本文件受检的那两条任务。**不**对全部 cron 设任何约束 ——
     // 无论是「必须 curl」还是「必须写成块格式」，都会让一条正当的新 cron 弄红一个跟它
     // 毫无关系的断言。受检任务自己的「只能 curl」在下面各自验。
-    const checked = CRON_TRIGGERED_WEB_FLAGS.map((f) => parsed.find((p) => p.service === f.service))
+    const checked = parsed
     expect(checked.filter((p) => (p?.startCommand ?? '').trim() === '')).toEqual([])
     // 块只能取到命令本身：吃到 envVars / - key 就是解析越界了（曾经真的越界过，
     // 只是当时把空白压平，整段还是以 curl 开头，所以一直没露馅）
@@ -620,26 +628,12 @@ describe('cron 触发、web 进程读取的开关：docs/ENV.md 的「配在哪�
     expect(isCurlOnly('curl -H "Authorization: Bearer ${CRON_SECRET}" https://x/y\n')).toBe(true)
   })
 
-  describe.each(CRON_TRIGGERED_WEB_FLAGS)('$env', ({ env, service }) => {
-    const svc = parsed.find((p) => p.service === service)
-
-    it(`${service} 这条 cron 还在，而且只是 curl —— 一旦它改成在自己进程里跑脚本，这个变量要挪回 Render-cron`, () => {
-      expect(svc, `render.yaml 里没有名为 ${service} 的 cron 了`).toBeDefined()
-      expect(
-        isCurlOnly(svc!.startCommand),
-        `${service} 的 startCommand 不再是纯 curl（拆开后有非 curl 的段）：${svc!.startCommand.trim()}`,
-      ).toBe(true)
-    })
-
-    it('确实是在它 curl 打的那条路由里 process.env 读的（路由路径从 render.yaml 推，不写死）', () => {
-      const hits = (svc?.routes ?? [])
-        .map((r) => path.join(ROOT, 'src/app/api/cron', r, 'route.ts'))
-        .filter((f) => existsSync(f))
-        .filter((f) => readFileSync(f, 'utf8').includes(`process.env.${env}`))
-      expect(
-        hits.length,
-        `${service} 打的路由里没有一条读 process.env.${env} —— 读取位置变了，配在哪要重新判定`,
-      ).toBeGreaterThan(0)
+  describe.each(CRON_TRIGGERED_WEB_FLAGS)('$env', ({ env, route }) => {
+    it('开关在 web 路由里读，dispatcher 的 curl 不会展开它', () => {
+      const file = path.join(ROOT, 'src/app/api/cron', route, 'route.ts')
+      expect(readFileSync(file, 'utf8')).toContain(`process.env.${env}`)
+      const leaking = parsed.filter((p) => p.startCommand.includes(env)).map((p) => p.service)
+      expect(leaking, `${env} 被写进了 cron 命令，cron 进程读不到业务开关`).toEqual([])
     })
 
     it('docs/ENV.md 标的是 Render-web', () => {
@@ -833,7 +827,7 @@ describe('docs/ENV.md 里带 cron 标注的变量，必须真的配得到 cron �
   const claimsCron = (where: string) => /Render-cron|全部 cron|\+\s*cron/.test(where)
 
   it('前提成立：两个解析器都读到了东西（走空不许静默变绿）', () => {
-    expect(parsed.length).toBeGreaterThan(30)
+    expect(parsed.length).toBe(3)
     expect(locations.size).toBeGreaterThan(50)
     expect(referenced.size).toBeGreaterThan(0)
     expect(claimsCron('Render-web + 全部 cron')).toBe(true)

@@ -5,10 +5,11 @@
  *    （魏征 2026-10-16 必改 3）。
  */
 
-import { dataStaleDays, DATA_STALE_DAYS } from './frequency'
+import { DATA_STALE_DAYS } from './frequency'
+import { budgetHoldFor, buildFollowupAction, withBudgetHold } from './followup'
 import { diffDays, nzDay, shortDay } from './util'
 import type {
-  AccountView, ActionRow, ActionSeverity, FrequencyRow, GrowthInput, Headline, PoolRow, WarMapInput,
+  AccountView, ActionRow, ActionSeverity, FollowupInput, FrequencyRow, GrowthInput, Headline, PoolRow, WarMapInput,
 } from './types'
 
 /** 账户状态是几个小时前读的；超过就不能说「正常」 */
@@ -85,28 +86,36 @@ function poolActions(rows: PoolRow[], videoIds: Set<string>): ActionRow[] {
   })
 }
 
-function growthActions(g: GrowthInput | null, input: WarMapInput, accountsUnhealthy: boolean): ActionRow[] {
+function suggestsMoreBudget(code: string, title: string, how: string | null): boolean {
+  if (code === 'O1') return true
+  return `${title} ${how ?? ''}`.includes('加预算')
+}
+
+function growthActions(g: GrowthInput | null, input: WarMapInput, accountsUnhealthy: boolean, hold: boolean): ActionRow[] {
   if (g === null) {
     return [{ key: 'growth-missing', severity: 'info', what: '经营视图一行都没有', how: '等每天巡察；持续没有就找开发', owner: 'dev' }]
   }
   const today = nzDay(input.now)
-  const stale = g.date !== today
+  // 经营视图的日期是「数据截至日」：每天早上巡察时写的是昨天，所以截至昨天也算新；落后 2 天以上才是旧的
+  const days = diffDays(g.date, today)
+  const stale = days > 1
   const tag = stale ? `（${shortDay(g.date)} 的旧数据）` : ''
   const out: ActionRow[] = []
   if (stale) {
-    const days = diffDays(g.date, today)
     out.push({
-      key: 'growth-stale', severity: days > 1 ? 'yellow' : 'info',
+      key: 'growth-stale', severity: 'yellow',
       what: `经营视图是 ${shortDay(g.date)} 的，今天还没跑`,
       how: '等今天巡察；超过一天没有就找开发', owner: 'dev',
     })
   }
   g.problems.forEach((p, i) => {
     if (p.code === 'D7' && accountsUnhealthy) return // 只是重复「账户欠款」这件事
-    out.push({ key: `growth-${p.code}-${i}`, severity: 'yellow', what: `${p.title}${tag}`, how: p.how ?? '见经营视图', owner: 'agent' })
+    const how = withBudgetHold(p.how ?? '见经营视图', hold && suggestsMoreBudget(p.code, p.title, p.how))
+    out.push({ key: `growth-${p.code}-${i}`, severity: 'yellow', what: `${p.title}${tag}`, how, owner: 'agent' })
   })
   g.opportunities.forEach((o, i) => {
-    out.push({ key: `opp-${o.code}-${i}`, severity: 'info', what: `${o.title}${tag}`, how: '经营视图里有详情；加预算要你本人批', owner: 'pm' })
+    const how = withBudgetHold('经营视图里有详情；加预算要你本人批', hold && suggestsMoreBudget(o.code, o.title, null))
+    out.push({ key: `opp-${o.code}-${i}`, severity: 'info', what: `${o.title}${tag}`, how, owner: 'pm' })
   })
   return out
 }
@@ -127,22 +136,27 @@ export interface AdjustContext {
   videoPoolIds: Set<string>
   frequencyRows: FrequencyRow[]
   upstream: Headline[]
+  /** 表头同一口径的数据日 / 停了几天 */
+  dataDay: string | null
+  staleDays: number | null
+  followup?: FollowupInput
 }
 
-function staleNote(input: WarMapInput): string {
-  const days = dataStaleDays(input)
-  const day = input.clocks.dataDay
-  return days !== null && days > DATA_STALE_DAYS && day ? `（数据停在 ${shortDay(day)}）` : ''
+function staleNote(ctx: AdjustContext): string {
+  const { staleDays, dataDay } = ctx
+  return staleDays !== null && staleDays > DATA_STALE_DAYS && dataDay ? `（数据停在 ${shortDay(dataDay)}）` : ''
 }
 
 export function buildAdjust(ctx: AdjustContext): { headline: Headline; actions: ActionRow[] } {
   const unhealthy = ctx.accounts.some(a => a.statusCode !== null && a.statusCode !== 1)
+  const hold = budgetHoldFor(ctx.followup)
   const actions = sortStable([
     ...accountActions(ctx.accounts),
     ...creativeActions(ctx.input.creativePoolApproved),
-    ...frequencyActions(ctx.frequencyRows, staleNote(ctx.input)),
+    ...(ctx.followup ? [buildFollowupAction(ctx.followup)] : []),
+    ...frequencyActions(ctx.frequencyRows, staleNote(ctx)),
     ...poolActions(ctx.poolRows, ctx.videoPoolIds),
-    ...growthActions(ctx.input.growth, ctx.input, unhealthy),
+    ...growthActions(ctx.input.growth, ctx.input, unhealthy, hold),
   ])
   const red = actions.filter(a => a.severity === 'red')
   const yellow = actions.filter(a => a.severity === 'yellow').length

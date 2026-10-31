@@ -18,6 +18,9 @@ import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playboo
 import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView } from './growth-panel'
 import WarMapPanel from './war-map-panel'
+import LiveTodayPanel from './live-today-panel'
+import BreakdownPanel from './breakdown-panel'
+import EntityTreePanel from './entity-tree-panel'
 import AutoPausePanel from './auto-pause-panel'
 import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
@@ -102,30 +105,17 @@ function shortDate(iso: string): string {
   return `${parseInt(m, 10)}/${parseInt(d, 10)}`
 }
 
-// ─── Raw 7-day CTR strip — the "see it yourself" trust element ─────────────────
-//
-// 板桥 P0: without the campaign's OWN best-week anchor and a plain-language note,
-// this strip reads as a flat, contradictory jumble ("you said 4.2%→3.0% but I
-// see 2.5%→…→2.5%"). We lead with the best-week baseline, then the recent days,
-// then one sentence that reconciles "bumpy but down vs its own peak".
+// ─── Last 7 days of link CTR (link clicks ÷ impressions) ───────────────────────
+// All-click "best week" is not shown beside these days: that baseline is a different count.
 
-function CtrStrip({ series, ctr }: { series: Array<{ date: string; ctr: number | null }>; ctr?: MetricVerdict }) {
+function CtrStrip({ series }: { series: Array<{ date: string; ctr: number | null }> }) {
   const points = series.filter(p => p.ctr != null)
-  if (points.length < 2) return null
-
-  const baseline = ctr?.baseline ?? null
-  const downPct = ctr?.ratio != null ? Math.round((1 - ctr.ratio) * 100) : null
-  const worrying = ctr?.verdict === 'alert' || ctr?.verdict === 'watch'
+  if (points.length < 1) return null
 
   return (
     <div className="mt-3">
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        {baseline != null && (
-          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-500 mr-1">
-            最好的一周 <span className="tabular-nums font-medium text-gray-700">{fmtPct(baseline)}</span>
-          </span>
-        )}
-        <span className="text-gray-400 mr-0.5">近 7 天:</span>
+        <span className="text-gray-400 mr-0.5">近 7 天链接点击率:</span>
         {points.map((p, i) => {
           const prev = i > 0 ? points[i - 1].ctr : null
           const down = prev != null && p.ctr != null && p.ctr < prev
@@ -142,12 +132,8 @@ function CtrStrip({ series, ctr }: { series: Array<{ date: string; ctr: number |
       </div>
       <div className="mt-1 text-[11px] text-gray-400">
         {shortDate(points[0].date)} → {shortDate(points[points.length - 1].date)}
+        <span className="ml-1">点进链接的次数 ÷ 曝光，不含点头像、评论那些。</span>
       </div>
-      {worrying && baseline != null && downPct != null && (
-        <p className="mt-2 text-xs text-gray-500 leading-relaxed">
-          这一周点击率忽高忽低是正常波动;但跟它自己<span className="font-medium text-gray-700">最好的一周（{fmtPct(baseline)}）</span>比,整体低了约 {downPct}% —— 这是被同一批人看腻、创意开始失效的信号。
-        </p>
-      )}
     </div>
   )
 }
@@ -197,9 +183,17 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
         })
         return
       }
+      if (res.status === 403) {
+        setResult({ kind: 'err', text: '需要内部账号操作。广告没有变更。' })
+        return
+      }
+      if (res.status === 429) {
+        setResult({ kind: 'err', text: '10 分钟内已补过,请稍后。' })
+        return
+      }
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
 
-      const n = (json.adsAdded ?? []).length
+      const n =(json.adsAdded ?? []).length
       setDone(true)
       setResult({
         kind: 'ok',
@@ -338,9 +332,14 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
         return
       }
 
+      if (action === 'pause' && pv.pausable === false) {
+        setResult({ kind: 'err', text: '这条广告现在已经不在投放中,不需要再停。广告没有变更。' })
+        return
+      }
+
       if (action === 'cut' && !pv.cuttable) {
-        // Not a dead end: pausing always works, so offer it as the next step
-        // rather than telling the PM to go into the ad platform himself.
+        // Not a dead end: offer pause as the next step (when the campaign is
+        // still ACTIVE; the server may also refuse it with no_active_goal).
         setResult({
           kind: 'err',
           text: `这条广告的每天预算改不了(它用的不是「每日预算」)。能立刻做的是先全停 —— 要停就点右边的「先全停」。`,
@@ -358,9 +357,13 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaign_id: c.campaign_id, action, request_id: globalThis.crypto.randomUUID() }),
       })
+      if (res.status === 403) {
+        setResult({ kind: 'err', text: '需要内部账号操作。广告没有变更。' })
+        return
+      }
       const json = await res.json()
       if (json.error === 'no_active_goal') {
-        setResult({ kind: 'err', text: '这个客户还没有生效的增长目标，所以系统没有把止损动作提交给执行内核。先补齐目标后再试。' })
+        setResult({ kind: 'err', text: '这个客户还没有生效的增长目标，暂停动作暂时提交不了，广告没有变更。先在「目标与设置」补上目标后再试。' })
         return
       }
       if (json.error === 'goal_unreadable' || json.error === 'adsets_unreadable' || json.error === 'timezone_unreadable') {
@@ -454,7 +457,6 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
 
 function CampaignCard({ clientId, c, playbook }: { clientId: string; c: CampaignNarrative; playbook: AdsPlaybook }) {
   const meta = VERDICT_META[c.verdict]
-  const ctrMetric = c.metrics.find(m => m.metric === 'ctr')
   // Cost per lead is always derivable from the 7-day aggregates when there are
   // results — show it directly so the PM doesn't have to divide in their head.
   const cpl = c.latest_results_7d > 0 ? c.latest_spend_7d / c.latest_results_7d : null
@@ -473,7 +475,7 @@ function CampaignCard({ clientId, c, playbook }: { clientId: string; c: Campaign
 
       <p className="mt-2 text-sm text-gray-600">{c.headline}</p>
 
-      <CtrStrip series={c.ctr_series} ctr={ctrMetric} />
+      <CtrStrip series={c.ctr_series} />
 
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-400">
         <span>近 7 天花费 <span className="text-gray-600 tabular-nums">${c.latest_spend_7d.toFixed(0)}</span></span>
@@ -580,6 +582,7 @@ export default function AdsHealthPage() {
       {tab === 'today' && (
         <>
           {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
+          <LiveTodayPanel clientId={clientId} part="today" />
           <WarMapPanel clientId={clientId} />
           {loading && <div className="text-gray-400 text-sm py-8 text-center">加载中…</div>}
           {error && (
@@ -613,6 +616,8 @@ export default function AdsHealthPage() {
 
       {tab === 'ads' && (
         <>
+          <LiveTodayPanel clientId={clientId} part="new" />
+          <EntityTreePanel clientId={clientId} />
           {loading && <div className="text-gray-400 text-sm py-12 text-center">加载中…</div>}
           {error && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">加载出错:{error}</div>
@@ -643,6 +648,8 @@ export default function AdsHealthPage() {
           )}
         </>
       )}
+
+      {tab === 'breakdown' && <BreakdownPanel clientId={clientId} />}
 
       {/*
         「等你点头」标签 —— 这个客户等人点头的广告动作，就在这一页批

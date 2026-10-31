@@ -8,6 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 import { packState, requireGlobalAdmin, type LitePackState, type LiteResult, type LiteServicePorts } from '../story-lite/service'
 import { isLiveFor, type LiteActor, type LiteChannel, type LiteItemStatus, type LiteMediaKind, type LiteRole, type LiteSwitches } from '../story-lite/types'
+import { factoryVideoUrl } from '../../factory/outlets'
 import { toPublishedView } from '../../factory/publish/publish-display'
 
 export interface OverviewStoryItem {
@@ -43,6 +44,11 @@ export interface OverviewReel {
   video_state: 'DRAFT' | 'PUBLISHED' | null
   music_file: string | null
   template: string | null
+  /**
+   * Public address of the finished video file in the factory bucket, so the page can show its first frame as a cover.
+   * null = this order has no usable file (or the storage address is not configured); absent = an older response.
+   */
+  video_url?: string | null
 }
 
 /** Read-only variety hint for a batch of Reels. Never blocks anything. */
@@ -94,21 +100,45 @@ interface ReelRow {
   published_ref: unknown
   music_file: string | null
   template: string | null
+  deliverable: string | null
+}
+
+const FACTORY_BUCKET_PATH = '/storage/v1/object/public/content-factory/'
+
+/**
+ * The factory keeps finished videos in one public bucket (the review page plays them from there). Only a plain path inside
+ * that bucket becomes an address. Anything that could lead out of it does not: a full address, a leading slash, "..",
+ * and also what the URL parser would turn into one ("%2e%2e", a backslash, a "?" or "#" tail).
+ */
+function videoUrlOf(path: string | null): string | null {
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!base || typeof path !== 'string' || path.length === 0) return null
+  if (path.startsWith('/') || path.includes('..') || path.includes('://')) return null
+  let url: URL
+  try {
+    url = new URL(factoryVideoUrl(path, base.replace(/\/+$/, '')))
+  } catch {
+    return null
+  }
+  if (!url.pathname.startsWith(FACTORY_BUCKET_PATH) || url.search !== '' || url.hash !== '') return null
+  return url.href
 }
 
 /** This client's factory Reels only (filtered in the query), newest first. Throws on a database error. */
 export async function listClientReels(db: SupabaseClient, clientId: string): Promise<OverviewReel[]> {
   const { data, error } = await db
     .from('content_work_orders')
-    .select('id, status, angle, created_at, video_path:output->>video_path, published_ref, music_file:brief->remotion->props->>musicFile, template:brief->remotion->>template')
+    .select('id, status, angle, created_at, video_path:output->>video_path, published_ref, music_file:brief->remotion->props->>musicFile, template:brief->remotion->>template, deliverable:brief->remotion->>deliverable')
     .eq('client_id', clientId)
     .not('status', 'in', `(${HIDDEN_REEL_STATUSES.join(',')})`)
     .not('output->>video_path', 'is', null)
+    // Filter asset_only in SQL so material orders cannot crowd real Reels out of the limit window.
+    .or('brief->remotion->>deliverable.is.null,brief->remotion->>deliverable.neq.asset_only')
     .order('created_at', { ascending: false })
     .limit(REEL_LIMIT)
   if (error) throw new Error(error.message)
   return ((data ?? []) as unknown as ReelRow[])
-    .filter((row) => typeof row.video_path === 'string' && row.video_path.length > 0)
+    .filter((row) => typeof row.video_path === 'string' && row.video_path.length > 0 && row.deliverable !== 'asset_only')
     .map((row) => {
       const published = toPublishedView(row.published_ref)
       return {
@@ -121,6 +151,7 @@ export async function listClientReels(db: SupabaseClient, clientId: string): Pro
         video_state: published?.video_state === 'DRAFT' || published?.video_state === 'PUBLISHED' ? published.video_state : null,
         music_file: typeof row.music_file === 'string' && row.music_file.trim().length > 0 ? row.music_file.trim() : null,
         template: typeof row.template === 'string' && row.template.length > 0 ? row.template : null,
+        video_url: videoUrlOf(row.video_path),
       }
     })
 }

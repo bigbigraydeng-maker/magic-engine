@@ -12,8 +12,9 @@ import { sanitizeFailReason } from './publish-display'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { buildReelPublishedEvent } from './reel-published-event'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
-import { REEL_AUTO_CHECK_KEYS, checklistPasses, humanKeysForStored, validateContentChecklist } from '@/lib/social/content-review'
+import { REEL_AUTO_CHECK_KEYS, checklistPasses, humanKeysForReviewRef, validateContentChecklist } from '@/lib/social/content-review'
 import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
+import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from '../deliverable'
 
 const MAX_PUBLISH_ATTEMPTS = 3
 const RETRY_BACKOFF_MIN = 10 // 失败退避基数(分钟)· 指数
@@ -183,11 +184,16 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   const brief = (wo['brief'] ?? {}) as Record<string, unknown>
   const output = (wo['output'] ?? {}) as Record<string, unknown>
 
+  if (isAssetOnly(brief)) {
+    await markFailed(id, attempts, ASSET_ONLY_NOT_PUBLISHABLE, true)
+    return { order_id: id, result: 'failed', detail: 'asset_only_not_publishable' }
+  }
+
   // Re-check the approval receipt at the last server boundary before any
   // provider lookup/upload. This also quarantines legacy `approved` rows that
   // predate structured review checklists.
   const reviewRef = (wo['review_ref'] ?? {}) as Record<string, unknown>
-  const humanChecklist = validateContentChecklist(reviewRef['checklist_human'], humanKeysForStored(reviewRef['checklist_human']), 'HUMAN')
+  const humanChecklist = validateContentChecklist(reviewRef['checklist_human'], humanKeysForReviewRef(reviewRef), 'HUMAN')
   const autoChecklist = validateContentChecklist(output['quality_checklist_auto'], REEL_AUTO_CHECK_KEYS, 'AUTO')
   if (!humanChecklist.ok || !autoChecklist.ok || !checklistPasses(humanChecklist.items) || !checklistPasses(autoChecklist.items)) {
     await markFailed(id, attempts, 'approval checklist missing, incomplete, failed, or not measured', true)
@@ -288,13 +294,15 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
       draft: opts.draft,
       // 上传前把 video_id 落本地当幂等锚(魏征 B9):中途崩后重来靠它判断,不盲目重发
       onStarted: async (videoId) => {
-        await supabaseAdmin
+        const { error } = await supabaseAdmin
           .from('content_work_orders')
           .update({
             published_ref: { provisional: true, platform: target.platform, page_id: target.page_id, video_id: videoId },
             updated_at: new Date().toISOString(),
           })
           .eq('id', id)
+        // 锚没落下就不许继续:否则崩溃后重来既没有本地锚、平台侧又可能已有这条,等于盲发。
+        if (error) throw new Error('幂等锚写入失败')
       },
     })
   } catch (e) {

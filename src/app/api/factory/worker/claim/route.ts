@@ -13,6 +13,7 @@ import {
   workerClientWhitelist,
 } from '@/lib/factory/worker-guard'
 import { deriveRecipeIntent } from '@/lib/factory/recipe'
+import { claimAspectUploads } from '@/lib/factory/video-aspects'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -193,6 +194,42 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // Extra ratios are opt-in. A bad list is returned to the worker (the row is already
+  // claimed) so it can fail the order instead of delivering a 9:16-only file.
+  const aspectPlan = claimAspectUploads(brief, clientId, workOrderId)
+  let aspectUploads: Array<{ aspect: string; path: string; width: number; height: number; signed_url: string; token: string }> | undefined
+  let aspectError: string | undefined
+  if (!aspectPlan.ok) {
+    aspectError = aspectPlan.error
+  } else if (aspectPlan.uploads.length > 0) {
+    const signedAspects = await Promise.all(
+      aspectPlan.uploads.map(async (spec) => {
+        const { data: u, error: uErr } = await supabaseAdmin.storage
+          .from(FACTORY_BUCKET)
+          .createSignedUploadUrl(spec.path, { upsert: true })
+        return { spec, u, uErr }
+      }),
+    )
+    aspectUploads = []
+    for (const { spec, u, uErr } of signedAspects) {
+      if (uErr || !u) {
+        // The row is already claimed. Return the id plus aspect_error so the worker
+        // fails this order, instead of a bare 500 that leaves it claimed until the sweeper.
+        aspectError = `额外画幅 ${spec.aspect} 的上传地址没签出来：${uErr?.message ?? 'unknown'}`
+        aspectUploads = undefined
+        break
+      }
+      aspectUploads.push({
+        aspect: spec.aspect,
+        path: spec.path,
+        width: spec.width,
+        height: spec.height,
+        signed_url: u.signedUrl,
+        token: u.token,
+      })
+    }
+  }
+
   return NextResponse.json({
     claimed: true,
     work_order_id: workOrderId,
@@ -201,6 +238,8 @@ export async function POST(req: NextRequest) {
     brief,
     clips,
     uploads,
+    ...(aspectUploads ? { aspect_uploads: aspectUploads } : {}),
+    ...(aspectError ? { aspect_error: aspectError } : {}),
     clip_uploads: clipUploads,
     // R3:worker 侧 assertClientRecipeIntentMatchesBrief 用它;意图非法则 worker 抛 CONFIG_INVALID。
     recipe_intent: recipeIntent,

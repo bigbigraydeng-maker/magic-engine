@@ -81,6 +81,7 @@ const BRIEF_ROWS: Record<string, Row[]> = { conversations: [], conversation_brie
 /** 一次查询链上记下来的东西。 */
 interface Recorded {
   table: string
+  columns?: string
   eqs: Array<[string, unknown]>
   ins: Array<[string, unknown[]]>
   ors: string[]
@@ -93,9 +94,13 @@ interface Recorded {
 let recorded: Recorded[]
 /** 排序扫描（不带 contact_id 的 .in）用的触点；默认就是 STALE_TOUCHES。 */
 let scanRows: Row[] | null = null
+let simulateStageFiltering = false
 /** 数据库函数的假返回；null = 函数还没装（报错，路由要退回老路径）。 */
 let rpcRows: Array<{ id: string; total: number }> | null = null
 let rpcCalls: Array<Record<string, unknown>> = []
+/** `clients.leads_config` 的假返回（view=priority 用它认「自己人」邮箱域名）。 */
+let clientsLeadsConfig: unknown = null
+let identityRows: Row[] = []
 
 /**
  * 假 builder。链式方法都返回自己，`then` 让它可 await。
@@ -108,6 +113,7 @@ function fakeDb(table: string) {
 
   const builder: Record<string, unknown> = {
     select: (_cols?: string, opts?: { count?: string; head?: boolean }) => {
+      rec.columns = _cols
       if (opts?.head) rec.countHead = true
       return builder
     },
@@ -134,13 +140,21 @@ function fakeDb(table: string) {
       rec.range = [from, to]
       return builder
     },
+    maybeSingle: () =>
+      Promise.resolve(table === 'clients' ? { data: { leads_config: clientsLeadsConfig }, error: null } : { data: null, error: null }),
     then: (resolve: (v: unknown) => unknown) => {
       if (table === 'contacts') {
         // count 查询（head）只回 count；取页查询回行。
         if (rec.countHead) return resolve({ data: null, count: CONTACTS.length, error: null })
-        return resolve({ data: CONTACTS, count: null, error: null })
+        const stages = rec.ins.find(([col]) => col === 'stage')?.[1]
+        const ids = rec.ins.find(([col]) => col === 'id')?.[1]
+        const data = simulateStageFiltering
+          ? CONTACTS.filter((contact) => (!stages || stages.includes(contact.stage)) && (!ids || ids.includes(contact.id)))
+          : CONTACTS
+        return resolve({ data, count: null, error: null })
       }
       if (table === 'client_pipeline_stages') return resolve({ data: STAGES, error: null })
+      if (table === 'contact_identities') return resolve({ data: identityRows, error: null })
       if (table === 'contact_touchpoints') {
         // 排序用的「最新触点」扫描没有 .in('contact_id', …)；取页用的有。
         const isScan = !rec.ins.some(([col]) => col === 'contact_id')
@@ -162,9 +176,12 @@ async function get(clientId: string, qs = '') {
 }
 
 beforeEach(() => {
+  identityRows = []
   resetBriefCacheForTests()
   recorded = []
   scanRows = null
+  simulateStageFiltering = false
+  clientsLeadsConfig = null
   rpcRows = null
   rpcCalls = []
   ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockImplementation(async (_name: string, args: Record<string, unknown>) => {
@@ -199,6 +216,17 @@ describe('GET contacts — 分页形状', () => {
     expect(body).toHaveProperty('columns')
     expect(body).not.toHaveProperty('totalContacts')
     expect(body).not.toHaveProperty('contacts')
+  })
+
+  it('阶段营销动作无效时与阶段接口一样回退到 suppress', async () => {
+    const original = STAGES[0].marketing_action
+    STAGES[0].marketing_action = 'invalid'
+    try {
+      const { body } = await get('cts', '?view=priority')
+      expect(body.stages).toEqual([{ stageKey: 'quoted', label: '已报价', marketingAction: 'suppress' }])
+    } finally {
+      STAGES[0].marketing_action = original
+    }
   })
 
   /**
@@ -254,6 +282,15 @@ describe('GET contacts — 分页形状', () => {
   })
 
   describe('数据库函数路径', () => {
+    it('平铺视图搜索次要联系方式时，将对应 ID 交给分页函数', async () => {
+      const id = '11111111-1111-4111-8111-111111111111'
+      identityRows = [{ contact_id: id }]
+      rpcRows = [{ id: 'a1', total: 1 }]
+      await get('client-a', '?page=1&q=guest%40example.nz')
+      expect(rpcCalls[0].p_q).toBeNull()
+      expect(rpcCalls[0].p_in_ids).toContain(id)
+      expect(recorded.find((r) => r.table === 'contact_identities')?.eqs).toContainEqual(['client_id', 'client-a'])
+    })
     it('函数可用 → 用它返回的 id 顺序和总数，不再取全客户 id 列表也不扫触点', async () => {
       rpcRows = [{ id: 'a3', total: 3 }, { id: 'a1', total: 3 }]
       const { body } = await get('client-a', '?page=1&perPage=2')
@@ -271,7 +308,8 @@ describe('GET contacts — 分页形状', () => {
       expect(rpcCalls[0]).toMatchObject({
         p_client_id: 'client-a',
         p_stages: ['quoted'],
-        p_q: 'Bob',
+        p_q: null,
+        p_in_ids: ['a1', 'a2', 'a3'],
         p_limit: 1,
         p_offset: 1,
       })
@@ -420,12 +458,224 @@ describe('GET contacts — 筛选落到 SQL', () => {
 })
 
 describe('GET contacts — view=priority（WP3 R5 接线）', () => {
+  it('数据库批次函数可用时，使用同客户的完整触点且不再发分页触点请求', async () => {
+    ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockImplementation(async (name: string, args: Record<string, unknown>) => {
+      expect(name).toBe('crm_priority_touchpoint_batch')
+      expect(args).toEqual({ p_client_id: 'cts', p_offset: 0 })
+      return { data: STALE_TOUCHES.map(({ summary: _summary, ...touch }) => ({ ...touch, created_at: touch.occurred_at })), error: null }
+    })
+    const { status, body } = await get('cts', '?view=priority&open=hot,cold')
+    expect(status).toBe(200)
+    const rows = (body.sections as Array<{ items: Array<{ contactId: string }> | null }>).flatMap((s) => s.items ?? [])
+    expect(rows.some((row) => row.contactId === 'a3')).toBe(true)
+    expect(recorded.some((r) => r.table === 'contact_touchpoints')).toBe(false)
+  })
+
+  it('批次读取保留补记时间，最近手记按创建时间显示', async () => {
+    const createdAt = new Date().toISOString()
+    ;(supabaseAdmin.rpc as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [{
+      id: 'backdated-note', contact_id: 'a2', channel: 'phone', direction: 'outbound',
+      occurred_at: '2020-01-01T00:00:00Z', created_at: createdAt,
+      raw: 'Recent entry', metadata: {}, source: 'me_manual',
+    }], error: null })
+    const { body } = await get('cts', '?view=priority')
+    expect(body.recentNotes).toEqual(expect.arrayContaining([expect.objectContaining({ contactId: 'a2', at: createdAt })]))
+    expect(recorded.some((r) => r.table === 'contact_touchpoints')).toBe(false)
+  })
+
+  it('按电话搜索时兼容本地格式，并将触点查询限制到命中的联系人', async () => {
+    const { status } = await get('cts', '?view=priority&q=021%20363%20598')
+    expect(status).toBe(200)
+    const contacts = recorded.find((r) => r.table === 'contacts' && r.ors.length > 0)
+    expect(contacts?.ors[0]).toContain('primary_phone.ilike.%+6421363598%')
+    const touchQueries = recorded.filter((r) => r.table === 'contact_touchpoints')
+    expect(touchQueries.length).toBeGreaterThan(0)
+    expect(touchQueries.every((r) => r.ins.some(([col]) => col === 'contact_id'))).toBe(true)
+  })
+
+  it('按邮箱搜索也会查同客户的其他联系方式', async () => {
+    const id = '11111111-1111-4111-8111-111111111111'
+    identityRows = [{ contact_id: id }]
+    const { status } = await get('cts', '?view=priority&q=example%40mail.nz')
+    expect(status).toBe(200)
+    const identities = recorded.find((r) => r.table === 'contact_identities')
+    expect(identities?.eqs).toContainEqual(['client_id', 'cts'])
+    expect(identities?.ors[0]).toContain('value.ilike.%example@mail.nz%')
+    expect(recorded.some((r) => r.table === 'contacts' && r.ins.some(([col, values]) => col === 'id' && values.includes(id)))).toBe(true)
+  })
+
+  it('只有次要邮箱命中时，仍把对应联系人返回到搜索结果', async () => {
+    const id = '11111111-1111-4111-8111-111111111111'
+    identityRows = [{ contact_id: id }]
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder = fakeDb(table)
+      const rec = recorded[recorded.length - 1]
+      if (table === 'contacts') {
+        builder.then = (resolve: (value: unknown) => unknown) => resolve({
+          data: rec.ins.some(([col, values]) => col === 'id' && values.includes(id))
+            ? [{ ...CONTACTS[0], id, display_name: 'Secondary Match' }]
+            : [],
+          error: null,
+        })
+      }
+      return builder
+    })
+    const { status, body } = await get('cts', '?view=priority&open=hot,cold&q=alt%40example.nz')
+    expect(status).toBe(200)
+    const rows = (body.sections as Array<{ items: Array<{ contactId: string }> | null }>).flatMap((s) => s.items ?? [])
+    expect(rows.map((row) => row.contactId)).toContain(id)
+  })
+
+  it('电话括号可搜索；带逗号的普通搜索仍拒绝', async () => {
+    expect((await get('cts', '?view=priority&q=%28021%29%20363%20598')).status).toBe(200)
+    expect((await get('cts', '?view=priority&q=abc%2Cdef')).status).toBe(400)
+  })
+  it('只读名单计算所需触点字段，并返回分段计时', async () => {
+    const req = new NextRequest('http://localhost/api/clients/cts/crm/contacts?view=priority')
+    const res = await GET(req, { params: { id: 'cts' } })
+    expect(res.status).toBe(200)
+    const touch = recorded.find((r) => r.table === 'contact_touchpoints')
+    expect(touch?.columns?.split(', ')).not.toContain('summary')
+    expect(touch?.columns?.split(', ')).toEqual(expect.arrayContaining(['raw', 'metadata']))
+    expect(touch?.columns?.split(', ')).toContain('created_at')
+    expect(touch?.eqs).toContainEqual(['client_id', 'cts'])
+    const timing = res.headers.get('Server-Timing') ?? ''
+    for (const step of ['gate', 'priority_reads', 'priority_enrich', 'priority_assemble', 'total']) {
+      expect(timing).toContain(`${step};dur=`)
+    }
+    expect(timing).not.toMatch(/cts|@/)
+  })
+
+  it('联系人还在读取时，并行开始补全资料和摘要查询', async () => {
+    let releaseContacts!: () => void
+    const contactsReady = new Promise<void>((resolve) => { releaseContacts = resolve })
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder = fakeDb(table)
+      if (table === 'contacts') {
+        const then = builder.then as (resolve: (v: unknown) => unknown) => unknown
+        builder.then = (resolve: (v: unknown) => unknown) => contactsReady.then(() => then(resolve))
+      }
+      return builder
+    })
+    const request = get('cts', '?view=priority')
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(recorded.some((r) => r.table === 'conversations' && r.columns?.includes('participant_name'))).toBe(true)
+      expect(recorded.some((r) => r.table === 'conversation_briefs')).toBe(true)
+    } finally {
+      releaseContacts()
+    }
+    expect((await request).status).toBe(200)
+  })
+
+  it('会话映射未返回时就开始读取摘要', async () => {
+    let releaseConversations!: () => void
+    const conversationsReady = new Promise<void>((resolve) => { releaseConversations = resolve })
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder = fakeDb(table)
+      if (table === 'conversations') {
+        const then = builder.then as (resolve: (v: unknown) => unknown) => unknown
+        builder.then = (resolve: (v: unknown) => unknown) => conversationsReady.then(() => then(resolve))
+      }
+      return builder
+    })
+    const request = get('cts', '?view=priority')
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(recorded.some((r) => r.table === 'conversation_briefs')).toBe(true)
+    } finally {
+      releaseConversations()
+    }
+    expect((await request).status).toBe(200)
+  })
+
+  it('优先名单复用同一客户的会话查询，同时保留摘要', async () => {
+    BRIEF_ROWS.conversations = [{ id: 'c3', contact_id: 'a3', channel: 'messenger', participant_name: 'Stan', subject: null }]
+    BRIEF_ROWS.conversation_briefs = [{ conversation_id: 'c3', intent_level: 'high', next_action: 'follow up', summary: 'recent', generated_at: '2026-10-01T00:00:00Z' }]
+    const { status, body } = await get('cts', '?view=priority&open=hot,cold')
+    expect(status).toBe(200)
+    const queries = recorded.filter((r) => r.table === 'conversations')
+    expect(queries).toHaveLength(1)
+    expect(queries[0].eqs).toContainEqual(['client_id', 'cts'])
+    const rows = (body.sections as Array<{ items: Array<{ contactId: string; aiSummary: string | null }> | null }>).flatMap((s) => s.items ?? [])
+    expect(rows.find((r) => r.contactId === 'a3')?.aiSummary).toBe('recent')
+  })
+
+  it('共享会话读取失败后，两条路径独立回退，不丢摘要', async () => {
+    BRIEF_ROWS.conversations = [{ id: 'c3', contact_id: 'a3', channel: 'messenger', participant_name: 'Stan', subject: null }]
+    BRIEF_ROWS.conversation_briefs = [{ conversation_id: 'c3', intent_level: 'high', next_action: 'follow up', summary: 'recent', generated_at: '2026-10-01T00:00:00Z' }]
+    let calls = 0
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder = fakeDb(table)
+      if (table === 'conversations' && ++calls === 1) {
+        builder.then = (resolve: (v: unknown) => unknown) => resolve({ data: null, error: { message: 'temporary failure' } })
+      }
+      return builder
+    })
+    const { status, body } = await get('cts', '?view=priority&open=hot,cold')
+    expect(status).toBe(200)
+    expect(calls).toBe(3)
+    const rows = (body.sections as Array<{ items: Array<{ contactId: string; aiSummary: string | null }> | null }>).flatMap((s) => s.items ?? [])
+    expect(rows.find((r) => r.contactId === 'a3')?.aiSummary).toBe('recent')
+  })
+
+  it('邮件消息补全失败不影响独立摘要', async () => {
+    BRIEF_ROWS.conversations = [{ id: 'c3', contact_id: 'a3', channel: 'email', participant_name: 'Stan', subject: 'hello' }]
+    BRIEF_ROWS.conversation_briefs = [{ conversation_id: 'c3', intent_level: 'high', next_action: 'follow up', summary: 'recent', generated_at: '2026-10-01T00:00:00Z' }]
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder = fakeDb(table)
+      if (table === 'conversation_messages') {
+        builder.then = (resolve: (v: unknown) => unknown) => resolve({ data: null, error: { message: 'message failure' } })
+      }
+      return builder
+    })
+    try {
+      const { status, body } = await get('cts', '?view=priority&open=hot,cold')
+      expect(status).toBe(200)
+      const rows = (body.sections as Array<{ items: Array<{ contactId: string; aiSummary: string | null }> | null }>).flatMap((s) => s.items ?? [])
+      expect(rows.find((r) => r.contactId === 'a3')?.aiSummary).toBe('recent')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('自己人（own_email_domains 里的邮箱域名）不进 hot / cold 任何一张名单；别人照常', async () => {
+    clientsLeadsConfig = { own_email_domains: ['example.com'] }
+    const { body } = await get('cts', '?view=priority&open=hot,cold')
+    const names = (body.sections as Array<{ items: Array<{ name: string }> | null }>).flatMap((s) => (s.items ?? []).map((i) => i.name))
+    expect(names).not.toContain('Bob')
+    expect(names).not.toContain('Sue')
+  })
+
+  it('同行（trade_domains 里的邮箱域名）不在「今天要联系」，挪到先放着并写明原因；人没有消失', async () => {
+    clientsLeadsConfig = { trade_domains: ['example.com'] }
+    const { body } = await get('cts', '?view=priority&open=hot,cold')
+    const secs = body.sections as Array<{ key: string; items: Array<{ name: string; reason: string }> | null }>
+    const hot = (secs.find((s) => s.key === 'hot')?.items ?? []).map((i) => i.name)
+    const cold = secs.find((s) => s.key === 'cold')?.items ?? []
+    expect(hot).not.toContain('Bob')
+    expect(hot).not.toContain('Sue')
+    const bob = cold.find((i) => i.name === 'Bob')
+    expect(bob).toBeTruthy()
+    expect(bob?.reason).toContain('同行')
+  })
+
+  it('没登记自己人域名时，同一批人照常出现（只有登记过的域名才会被排掉）', async () => {
+    clientsLeadsConfig = { own_email_domains: ['other.example'] }
+    const { body } = await get('cts', '?view=priority&open=hot,cold')
+    const names = (body.sections as Array<{ items: Array<{ name: string }> | null }>).flatMap((s) => (s.items ?? []).map((i) => i.name))
+    expect(names).toContain('Bob')
+    expect(names).toContain('Sue')
+  })
+
   it('?view=priority → 新形状 {view, focus, columns, sections}，两张名单顺序固定 hot / cold', async () => {
     const { status, body } = await get('cts', '?view=priority')
     expect(status).toBe(200)
     expect(body.view).toBe('priority')
     expect(body).toHaveProperty('focus')
     expect(body).toHaveProperty('columns')
+    expect(body.stages).toEqual([{ stageKey: 'quoted', label: '已报价', marketingAction: 'nurture' }])
     expect((body.sections as Array<{ key: string }>).map((s) => s.key)).toEqual(['hot', 'cold'])
   })
 
@@ -534,6 +784,40 @@ describe('GET contacts — view=priority（WP3 R5 接线）', () => {
     await get('cts', '?view=priority&stage=quoted')
     const contactQ = recorded.find((r) => r.table === 'contacts')
     expect(contactQ?.ins).toContainEqual(['stage', ['quoted']])
+  })
+
+  it('阶段筛选只缩小主名单，仍能找回最近记录但阶段不同的客户', async () => {
+    simulateStageFiltering = true
+    scanRows = [{
+      id: 'recent-sue', contact_id: 'a2', channel: 'phone', direction: 'outbound',
+      occurred_at: new Date(Date.now() - 60_000).toISOString(), created_at: new Date().toISOString(),
+      summary: 'Sue 等待我们发送 catalogue。', raw: '答应发送 catalogue', metadata: {}, source: 'me_manual',
+    }]
+    const { body } = await get('cts', '?view=priority&stage=quoted')
+    const listed = (body.sections as Array<{ items: Array<{ contactId: string }> | null }>).flatMap((section) => section.items ?? [])
+    expect(listed.map((row) => row.contactId)).toEqual(['a1'])
+    expect((body.recentNotes as Array<{ contactId: string }>).map((note) => note.contactId)).toEqual(['a2'])
+    expect((body.recentNotes as Array<{ touchpointId: string; aiSummary: string }>)[0]).toMatchObject({
+      touchpointId: 'recent-sue', aiSummary: 'Sue 等待我们发送 catalogue。',
+    })
+    const summaryQuery = recorded.find((r) => r.table === 'contact_touchpoints' && r.ins.some(([col]) => col === 'id'))
+    expect(summaryQuery?.columns).toBe('id, summary')
+    expect(summaryQuery?.eqs).toContainEqual(['client_id', 'cts'])
+    expect(summaryQuery?.ins).toContainEqual(['id', ['recent-sue']])
+    const contactQueries = recorded.filter((r) => r.table === 'contacts')
+    expect(contactQueries.some((r) => r.ins.some(([col]) => col === 'stage'))).toBe(true)
+    expect(contactQueries.some((r) => !r.ins.some(([col]) => col === 'stage') &&
+      r.eqs.some(([col, val]) => col === 'client_id' && val === 'cts'))).toBe(true)
+  })
+
+  it('搜索时收起最近手记，让匹配客户紧贴搜索框', async () => {
+    scanRows = [{
+      id: 'recent-sue', contact_id: 'a2', channel: 'phone', direction: 'outbound',
+      occurred_at: new Date().toISOString(), created_at: new Date().toISOString(),
+      summary: '已记通话', raw: '答应发送 catalogue', metadata: {}, source: 'me_manual',
+    }]
+    const { body } = await get('cts', '?view=priority&q=Bob')
+    expect(body.recentNotes).toEqual([])
   })
 })
 
@@ -704,6 +988,8 @@ describe('GET contacts — kind 筛选（WP-B3）', () => {
         eq: () => builder,
         in: () => builder,
         not: () => builder,
+        // `.or(...)`：找同行/员工时按域名收窄用的（2026-10-26 起只捞可能命中的行）。
+        or: () => builder,
         order: () => builder,
         range: () => builder,
         maybeSingle: () => Promise.resolve({ data: { leads_config: LEADS_CONFIG }, error: null }),
@@ -762,5 +1048,58 @@ describe('GET contacts — ?ids= 只取指定的客人', () => {
     expect((await get('c-1', '?ids=')).status).toBe(400)
     const many = Array.from({ length: 21 }, (_, i) => `a1a1a1a1-0000-4000-8000-${String(i).padStart(12, '0')}`).join(',')
     expect((await get('c-1', `?ids=${many}`)).status).toBe(400)
+  })
+})
+
+describe('客户配置里的域名含逗号/括号时，不许把过滤语法拼坏（复审 P3）', () => {
+  /** PostgREST 的 .or() 用逗号分隔、括号分组；域名里混进这些字符会把整条过滤串拼坏。 */
+  function dirtyConfigStore(domains: string[]) {
+    const seen: string[] = []
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockImplementation((table: string) => {
+      const builder: Record<string, unknown> = {
+        select: () => builder,
+        eq: () => builder,
+        in: () => builder,
+        not: () => builder,
+        order: () => builder,
+        range: () => builder,
+        or: (expr: string) => {
+          seen.push(expr)
+          return builder
+        },
+        maybeSingle: () =>
+          Promise.resolve({ data: { leads_config: { trade_domains: domains } }, error: null }),
+        then: (resolve: (v: unknown) => unknown) => resolve({ data: [], error: null, count: 0 }),
+      }
+      void table
+      return builder
+    })
+    return seen
+  }
+
+  it('干净配置：按域名收窄（过滤串里出现这个域名）', async () => {
+    const seen = dirtyConfigStore(['agency.co.nz'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('agency.co.nz'))).toBe(true)
+  })
+
+  it('脏配置（含逗号）：退回整表扫描，绝不把这个域名拼进过滤串', async () => {
+    const seen = dirtyConfigStore(['ab,cd.com'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('ab,cd.com'))).toBe(false)
+  })
+
+  it('脏配置（含括号）：同样退回整表扫描', async () => {
+    const seen = dirtyConfigStore(['x(y).com'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('x(y).com'))).toBe(false)
+  })
+
+  // 白名单守卫的意义就在这里：`%` 不会让过滤串语法崩，但它是 ilike 的通配符，
+  // 拼进去会悄悄改变匹配范围。黑名单（只挡逗号括号）放它过去，白名单挡住。
+  it('脏配置（含 ilike 通配符 %）：也退回整表扫描', async () => {
+    const seen = dirtyConfigStore(['%.com'])
+    await get('client-a', '?kind=trade')
+    expect(seen.some((e) => e.includes('%.com'))).toBe(false)
   })
 })

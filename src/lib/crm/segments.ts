@@ -27,8 +27,10 @@ export type Segment =
   | 'stale_conversation' // 聊过一轮就断了，没约下次
   | 'nurture_future'   // 说了以后才走，时候还没到
   | 'excluded'         // 别再联系 / 号码是坏的 / 明确没兴趣
+  | 'not_enquiry_suspect' // 看发件地址就不像客人来咨询（群发 / 供应商通知 / 推销 / 系统账号）
 
 import { resolveTravelDate, isDueToWake } from './travel-date'
+import { detectReturningLead, returningReason, type ReturningLead } from './returning-lead'
 // 「别再联系」的判据全仓只有一份 —— 这里要的是「什么时候被人推翻过」。
 import { withoutClearedDnc } from './dnc'
 
@@ -112,6 +114,11 @@ export const SEGMENT_ACTION_META: Record<Segment, SegmentActionMeta> = {
     howTo: '明确拒绝过 / 号码是坏的 / 已经成交。不要联系。',
     batch: 'none',
   },
+  not_enquiry_suspect: {
+    label: '看着不是客人来咨询',
+    howTo: '发件地址像群发 / 供应商通知 / 推销 / 平台系统账号。不用联系；如果其实是客人，把他的阶段往前推一步（例如标成「已联系」），之后机器就不会再把他放到这里。',
+    batch: 'none',
+  },
 }
 
 export interface TouchpointLike {
@@ -135,10 +142,8 @@ export interface TouchpointLike {
    * 要判「我们今天最后一次**真人**出手是几点」—— 拿一封 16:00 的群发当
    * 「我们出手了」，会把 15:00 客人的回信整个盖住，当天最热的线索被折叠掉。
    *
-   * ⚠️ **本文件的 `segmentContact` 目前不读它**（ROADMAP M2.7f）—— 一封群发
-   * 照样被它当成「我们最后一次出站」，于是「客人回话了」那条规则不成立，
-   * 人掉进别的桶。这里写明，是因为**一个只接了一半的概念会坑下一个人**，
-   * 而这个字段本身就是为了修那种坑才加的。
+   * `segmentContact` 读它：机器发的出站不进 `lastOutbound`（2026-10-22 起；之前这里写着
+   * 「目前不读它」，那是 ROADMAP M2.7f 的遗留，已补上）。
    */
   automated?: boolean
   /**
@@ -174,6 +179,25 @@ export interface TouchpointLike {
   outcome?: string | null
   travelWindow?: string | null
   callbackAt?: string | null
+  /**
+   * 通话分析从这通电话里读出的**客人表态**（`metadata.call_stance`；分析被人驳回时为 null）。
+   *
+   * 规则 6.5 用它：刚通完电话、客人亲口说「现在还没准备好 / 改天再说」或「不感兴趣」，
+   * 就不该再当「刚通完电话还没记下一步」挂在今天要联系里（PM 2026-10-29 Gavin Hall）。
+   */
+  callStance?: CallStance | null
+}
+
+/** 客人在电话里的表态：现在还没准备好（改天再说）/ 不感兴趣。 */
+export type CallStance = 'not_now' | 'not_interested'
+
+/** metadata → 表态。分析被人驳回过的不算数。今天名单 / 全部客人两个读模型共用这一份判据。 */
+export function callStanceFromMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+): CallStance | null {
+  if (!metadata || metadata.call_analysis_review === 'rejected') return null
+  const s = metadata.call_stance
+  return s === 'not_now' || s === 'not_interested' ? s : null
 }
 
 /**
@@ -244,6 +268,20 @@ export interface SegmentResult {
   temperature: Temperature
   /** 排序用，越小越靠前。 */
   priority: number
+  /**
+   * 「回头客」：之前咨询过、我们联系过，**今天又填了一张咨询表** —— 比普通的「客户回了」强得多。
+   *
+   * 为什么要单独标出来（PM 2026-10-27，看一个真实客人的抽屉时指出）：这类人在系统里
+   * 本来就落在「客户回了」那一档，但理由写的是通用的「客户来消息了，已经等了 2 小时」，
+   * 跟「随便回了一句邮件」长得一模一样，强意向没被表达出来。判据只有一份
+   * （`returning-lead.ts`），列表排序和抽屉展示共用。只在 `segment === 'replied'` 时才有。
+   */
+  returning?: ReturningLead | null
+  /**
+   * 「刚聊过」：我们刚打通电话聊上了，之后还没人记下一步（规则 6.5）。
+   * 动作就不该再是「打给他」—— 是「记下一步」（PM 2026-10-29，Chris Anthony）。只在这一条规则里为 true。
+   */
+  afterCall?: boolean
   /** 一句人话，告诉销售为什么这个人在今天的名单上。 */
   reason: string
   /**
@@ -299,6 +337,7 @@ export const SEGMENT_META: Record<Segment, { temperature: Temperature; priority:
   stale_conversation: { temperature: 'warm', priority: 7 },
   nurture_future:     { temperature: 'cold', priority: 8 },
   excluded:           { temperature: 'off',  priority: 9 },
+  not_enquiry_suspect:{ temperature: 'off',  priority: 10 },
 }
 
 /**
@@ -343,6 +382,11 @@ const DEAD_OUTCOMES = new Set(['not_interested', 'do_not_contact'])
  * 还没接上，再打的收益已经很低，那段时间应该还给真的有人在等的那一批。
  */
 const HANDOFF_AFTER_DAYS = 3
+
+/** 真人刚通完一通电话、还没记下一步的人，留在「今天要联系」多久（天）。 */
+const AFTER_CALL_WINDOW_DAYS = 3
+/** 第一次咨询距这通电话超过这么多天，就算「老客人重新聊热」。 */
+const REHEATED_MIN_DAYS = 14
 
 /**
  * 「进线了但从没人联系过」超过这个天数，就不再算「新客人」。
@@ -498,6 +542,17 @@ export function latestIntentVerdict(tps: TouchpointLike[]): string | null {
   return latest?.outcome ?? null
 }
 
+/**
+ * 触发规则 6.5 的那通电话（最后一通人打的、接通的）上，客人的表态。
+ * 只看那一通：更早一通里说过「改天再说」，不代表最近这通也这么说。
+ */
+function latestCallStance(spokeCalls: TouchpointLike[], lastSpokeMs: number): CallStance | null {
+  const latest = spokeCalls.filter((t) => ts(t.occurredAt) === lastSpokeMs)
+  if (latest.some((t) => t.callStance === 'not_interested')) return 'not_interested'
+  if (latest.some((t) => t.callStance === 'not_now')) return 'not_now'
+  return null
+}
+
 export function isPhoneVerdict(
   outcome: string | null | undefined,
   source?: string | null,
@@ -619,7 +674,13 @@ export function segmentContact(
   // 「客户回话了」，也不该把「等了几天」重置成 0。它只在下面的点击规则里用。
   const messages = tps.filter((t) => !t.engagement && !t.unansweredCall)
   const lastInbound = Math.max(0, ...messages.filter((t) => t.direction === 'inbound').map((t) => ts(t.occurredAt)))
-  const lastOutbound = Math.max(0, ...messages.filter((t) => t.direction === 'outbound').map((t) => ts(t.occurredAt)))
+  // 机器发的出站（群发、自动安抚、AI 起草经人批准发出的回复）不算「有人联系过他」——
+  // 2026-10-22 PM：昨天今天的 WhatsApp 咨询只收到一句自动安抚就被算成「已跟进」，从
+  // 「今天要联系」掉进「先放着」。判据在 lib/crm/automated-touch（metadata.automated / 群发来源）。
+  const lastOutbound = Math.max(
+    0,
+    ...messages.filter((t) => t.direction === 'outbound' && !t.automated).map((t) => ts(t.occurredAt)),
+  )
 
   /**
    * 最近一次「点了链接」，且**那之后没有任何真人联系过他**。
@@ -701,7 +762,19 @@ export function segmentContact(
     const label = contact.stageLabel?.trim()
     return make('excluded', label ? `已经是「${label}」了` : '已推进到不再联系的阶段', 'none')
   }
-  if (outcomes.some((o) => DEAD_OUTCOMES.has(o))) {
+  // 客人说过「不感兴趣」之后，**自己又找上门**（重新填表 / 回了消息 / 发了私信）—— 他重新有兴趣了，
+  // 不能再被那句旧话永远压在「不联系」里（PM 2026-10-30：Annette 8/31 被记 not interested，今天重新填了
+  // 表单，却一直躺在先放着）。只认**严格晚于**最后一次「不感兴趣」的真人来信：邮件打开/点链接是
+  // 行为信号不算（它们不在 `messages` 里）。**别再联系（do_not_contact）不在此列** —— 那是合规红线，
+  // 重新填表也不自动解除。
+  const lastDeclineAt = Math.max(
+    0,
+    ...withoutClearedDnc(tps)
+      .filter((t) => t.outcome === 'not_interested')
+      .map((t) => ts(t.occurredAt)),
+  )
+  const reEnquiredAfterDecline = lastDeclineAt > 0 && lastInbound > lastDeclineAt
+  if (outcomes.some((o) => DEAD_OUTCOMES.has(o) && !(o === 'not_interested' && reEnquiredAfterDecline))) {
     // 措辞按销售的说法写（板桥 2026-08-06）：
     //  · 「号码是坏的」不是人说的话（电池是坏的；号码是空号 / 停机）
     //  · 按钮上写「他不买了」，这里原先写「聊过了，明确没兴趣」——
@@ -727,6 +800,12 @@ export function segmentContact(
   //    · 客户的消息严格晚于我们最后一次外呼（相等不算：导入的历史数据里
   //      表单和通话共用同一个时间戳）
   if (lastOutbound > 0 && lastInbound > lastOutbound) {
+    // 回头客排在这一档的最前面（priority 0.5，普通「客户回了」是 1），理由也换成人话。
+    // 只是**更靠前、说得更清楚**，没有改变他属于哪一档，所以不影响任何按档位统计的地方。
+    const returning = detectReturningLead(tps)
+    if (returning) {
+      return { ...make('replied', returningReason(returning, now), 'phone'), priority: 0.5, returning }
+    }
     return make('replied', `客户来消息了，已经等了 ${humanGap(nowMs - lastInbound)}`, 'phone')
   }
 
@@ -839,6 +918,57 @@ export function segmentContact(
     return make('handoff_sop', `${when}打过，一直没接上 —— 交给系统跟`, 'email')
   }
 
+  // 6.5) 我们刚打通一通电话、聊上了，**之后没人记下一步**（没约回电、没发邮件、没写备注）——
+  //      留在今天要联系里提醒「记一笔或发后续」，最长挂 AFTER_CALL_WINDOW_DAYS 天。
+  //
+  //      PM 2026-10-29：Mercurio 通话 4 分钟，答应了整理方案发邮箱，随后被归成「聊过一轮就断了」
+  //      掉进先放着 —— 恰恰是最不该丢的人。只认**人打的**（`automated` 的 AI 外呼不算）、
+  //      **通话是最后一次人出手**（之后有邮件 / 备注 / 再次拨出就算有人跟了）、没有未到期的回电约定。
+  //      客人之后又来消息，规则 2 会接手；这里不重复。
+  //  🔴 员工手打的笔记（source = me_manual）不是「打通的电话」（PM 2026-10-30，CTS 员工 info@ 实测）：
+  //  `recordManualTouchpoint` 把每条笔记都写成 phone / outbound，分类兜底值又是 spoke，
+  //  所以员工刚记完一笔，这里仍把那条笔记当成「刚通完电话」→ 「还没记下一步」提醒永远不消，
+  //  员工以为没存上。只认真正的通话记录；笔记晚于通话时，下面 `lastSpoke >= lastOutbound`
+  //  自然为假 —— 这就是「有人跟了」。
+  const spokeCalls = tps.filter(
+    (t) =>
+      t.channel === 'phone' &&
+      t.direction === 'outbound' &&
+      !t.automated &&
+      t.source !== 'me_manual' &&
+      t.outcome === 'spoke',
+  )
+  const lastSpoke = Math.max(0, ...spokeCalls.map((t) => ts(t.occurredAt)))
+  const hasFutureCallback = tps.some((t) => t.callbackAt && ts(t.callbackAt) > nowMs)
+  if (
+    lastSpoke > 0 &&
+    lastSpoke >= lastOutbound &&
+    nowMs - lastSpoke <= AFTER_CALL_WINDOW_DAYS * 86_400_000 &&
+    !hasFutureCallback
+  ) {
+    const ago = humanGap(nowMs - lastSpoke)
+    // 客人在这通电话里亲口说了「现在还没准备好 / 改天再说」或「不感兴趣」（通话分析读出、没被驳回）——
+    // 他不是热线索，今天别再打（PM 2026-10-29 Gavin Hall：37 秒，"I'm not ready for that.
+    // I'll talk to you another day."）。挪去先放着，过了这几天按原规则回到「聊过一轮就断了」。
+    const stance = latestCallStance(spokeCalls, lastSpoke)
+    if (stance === 'not_now') {
+      return make('nurture_future', `刚通完电话（${ago}前），客人说现在还没准备好 —— 先放着，过阵子再联系`, 'email')
+    }
+    if (stance === 'not_interested') {
+      return make('nurture_future', `刚通完电话（${ago}前），客人说不感兴趣 —— 先放着`, 'email')
+    }
+    // 老客人被这通电话重新聊热了，要说出来（PM 2026-10-29：Chris Anthony 22 天前留的资料，今天才聊上）。
+    const firstInbound = Math.min(
+      ...messages.filter((t) => t.direction === 'inbound').map((t) => ts(t.occurredAt)).filter((v) => v > 0),
+    )
+    const ageDays = Number.isFinite(firstInbound) ? Math.floor((lastSpoke - firstInbound) / 86_400_000) : 0
+    const old = ageDays >= REHEATED_MIN_DAYS ? `老客人（${ageDays} 天前就咨询过）重新聊热了，` : ''
+    return {
+      ...make('callback_due', `刚通完电话（${ago}前），${old}还没记下一步 —— 记一笔或发后续`, 'phone'),
+      afterCall: true,
+    }
+  }
+
   // 7) 聊过一轮就断了、也没约下次 —— 温的，最该回头捞的一批。
   //    以前它被并进「以后才走」还贴上「打了是打扰」的标签埋进折叠区，
   //    等于系统亲手弄丢了这些人。现在单独成桶、进今天的名单。
@@ -893,7 +1023,14 @@ export function compareForWorklist(a: SegmentResult, b: SegmentResult): number {
   )
 }
 
-/** 各段人数，给页面顶部的统计条。 */
+/**
+ * 各段人数，给页面顶部的统计条。
+ *
+ * ⚠️ **这是未降级的口径**：它直接调 `segmentContact`，不过 `contact-list-view.ts` 的
+ * `demoteNonEnquirySender`（把看着不是客人来咨询的从「今天要联系」挪走那一步）。
+ * 所以它算出来的数会比「全部客人 → Magic Engine 智能」里看到的**多**。
+ * 要拿它当口径的人请先想清楚要的是哪一个；需要同口径就得在这里也走一遍降级。
+ */
 export function segmentCounts(
   contacts: ContactLike[],
   now: Date,
@@ -902,7 +1039,7 @@ export function segmentCounts(
   const out: Record<Segment, number> = {
     replied: 0, callback_due: 0, new_untouched: 0, handoff_sop: 0,
     clicked_link: 0, retry_channel: 0, stale_conversation: 0,
-    nurture_future: 0, excluded: 0,
+    nurture_future: 0, excluded: 0, not_enquiry_suspect: 0,
   }
   for (const c of contacts) out[segmentContact(c, now, playbook).segment]++
   return out

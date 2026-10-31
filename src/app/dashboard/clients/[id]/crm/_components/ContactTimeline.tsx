@@ -15,6 +15,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { humanizeFormCode, humanizeFormSummary } from '@/lib/crm/returning-lead'
 import { CallAnalysisCard, type CallAnalysisData } from './CallAnalysisCard'
 import {
   describeStageActor,
@@ -40,6 +41,12 @@ export interface TimelineEntry {
   channel?: string | null
   direction?: 'inbound' | 'outbound'
   summary?: string | null
+  /** 出站且是机器发的（Mailchimp 欢迎信 / 群发）：显示成「系统自动发出」，不算「我们说的最后一句」。 */
+  automated?: boolean
+  /** 表格里员工写的原话（没有 AI 摘要的同步记录才有）。 */
+  sheetNote?: string | null
+  /** 时间是近似的：表格不记具体时间，`at` 是客人填表的时间。 */
+  timeApproximate?: boolean
   /**
    * 销售真正敲进去的那句话 —— **跟 `summary` 不是一回事**，后者是 AI 摘要。
    * 只在判决行旁边展示，理由见 `VERDICT_ROW`。
@@ -56,6 +63,10 @@ export interface TimelineEntry {
    * 标成「原话」会让销售以为自己在看客人说的话。
    */
   rawKind?: 'verbatim' | 'ai_summary'
+  /** 员工自己手记的一笔（me_manual）：主行显示员工原话，AI 整理放次要行。 */
+  staffNote?: boolean
+  /** 谁记的（登录邮箱）。 */
+  loggedBy?: string | null
   tour?: string | null
   outcome?: string | null
   travelWindow?: string | null
@@ -75,11 +86,46 @@ export interface TimelineEntry {
   body?: string
 }
 
+/** AI 概况卡的数据。全部来自 conversation_briefs，**AI 生成、未经人工核实**。 */
+export interface TimelineAiBrief {
+  summary: string
+  customerNeeds: string[]
+  objections: string[]
+  promisesMade: string[]
+  nextAction: string | null
+  intentLevel: string | null
+  channel: string | null
+  generatedAt: string | null
+}
+
 interface Payload {
   contact: { name: string; phone: string | null; email: string | null; stageLabel: string | null }
   timeline: TimelineEntry[]
   omittedMessages?: number
+  /** 官网表单里「预计出发时间 / 每人预算」的一行人话；缺失 null（不显示）。 */
+  formFactsLine?: string | null
+  /** 回头客 / 往来一览，服务端用列表同一份判据算好。读不出来 null。 */
+  engagement?: TimelineEngagement | null
   error?: string
+}
+
+/** 抽屉顶部「🔥 她又回来了」和「往来一览」的数据（来自 timeline 接口，见 `lib/crm/returning-lead`）。 */
+export interface TimelineEngagement {
+  returning: {
+    firstEnquiryAt: string
+    latestFormAt: string
+    ourLastContactAt: string
+    ourContacts: number
+    earlierForms: number
+  } | null
+  /** 往来一览一行字：「我们联系过：邮件 2 封 ｜ 他：填过 2 次表」。 */
+  line: string | null
+  /** 回头客的故事线，按时间顺序，最后一句打头带火。不是回头客时是空数组。 */
+  story: string[]
+  /** 他最近一次主动动作（表单 / 消息 / 点链接）。AI 概况比它旧就要提醒。 */
+  lastActiveAt: string | null
+  /** 回头客的路线（逐步 + 间隔 + 为什么热）；不是回头客或旧接口时没有。 */
+  journey?: import('@/lib/crm/returning-journey').Journey | null
 }
 
 /** 渠道 → 一眼能认的图标。认不出的新渠道给中性圆点，绝不空白。 */
@@ -162,6 +208,8 @@ const OUTCOME_CHIP: Record<string, string> = {
  *
  * 记录少的时候不框：一屏就看完了，框起来反而多一层滚动条。
  */
+/** 折叠时直接露出的最近条数。 */
+const RECENT_WHEN_COLLAPSED = 5
 const LONG_TIMELINE = 6
 
 /**
@@ -186,6 +234,10 @@ export interface TimelineSummary {
    * 'order_system' 是给将来订单系统留的口子，今天没有任何代码会产生它。
    */
   stageSource: StageSource | null
+  /** 官网表单里「预计出发时间 · 每人预算」一行人话；只是事实，不参与冷热/阶段判断。 */
+  formFactsLine: string | null
+  /** 回头客 / 往来一览；服务端没给（或算失败）就是 null，抽屉不画这一块。 */
+  engagement: TimelineEngagement | null
 }
 
 /** changedBy → 来源。只认得出的才说；认不出的机器身份返回 null（宁可不显示，不许说错）。 */
@@ -199,8 +251,12 @@ export function stageSourceOf(changedBy: string | null | undefined): StageSource
 }
 
 /** 从整条线里提炼摘要。线是从旧到新的，所以后面的覆盖前面的。 */
-function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
-  if (timeline.length === 0) return null
+function summarise(
+  timeline: TimelineEntry[],
+  formFactsLine: string | null = null,
+  engagement: TimelineEngagement | null = null,
+): TimelineSummary | null {
+  if (timeline.length === 0 && !formFactsLine && !engagement) return null
   const s: TimelineSummary = {
     lastText: null,
     lastWho: null,
@@ -208,19 +264,24 @@ function summarise(timeline: TimelineEntry[]): TimelineSummary | null {
     tour: null,
     travelWindow: null,
     stageSource: null,
+    formFactsLine,
+    engagement,
   }
   for (const e of timeline) {
-    if (e.tour) s.tour = e.tour
+    // 表单下拉的原始代码（best_of_china_–_15_days）翻成人话再显示
+    if (e.tour) s.tour = humanizeFormCode(e.tour) ?? e.tour
     if (e.travelWindow) s.travelWindow = e.travelWindow
     if (e.kind === 'stage') s.stageSource = stageSourceOf(e.changedBy)
-    const text = e.kind === 'message' ? e.body : e.kind === 'touch' ? e.summary : null
-    if (text && text.trim()) {
-      s.lastText = text.trim()
+    // 员工手记：「上次说到这」用员工原话，不用 AI 改写（改写可能丢细节）。
+    const text = e.kind === 'message' ? e.body : e.kind === 'touch' ? (e.staffNote && e.raw ? e.raw : e.summary) : null
+    // 机器自动发出的信不是「最后一句」：不能盖掉客人真说的话。
+    if (text && text.trim() && !e.automated) {
+      s.lastText = (e.kind === 'touch' ? humanizeFormSummary(text) : null) ?? text.trim()
       s.lastWho = e.direction === 'inbound' ? (e.senderName || '客人') : '我们'
       s.lastAt = e.at
     }
   }
-  return s.lastText || s.tour || s.travelWindow || s.stageSource ? s : null
+  return s.lastText || s.tour || s.travelWindow || s.stageSource || s.formFactsLine || s.engagement ? s : null
 }
 
 /**
@@ -323,7 +384,7 @@ function Verdict({ e }: { e: TimelineEntry }) {
   const stop = verdict.tone === 'stop'
   return (
     <>
-      {e.raw && e.raw !== e.summary && (
+      {e.raw && e.raw !== e.summary && !e.staffNote && (
         <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-me-charcoal/[0.04] px-2 py-1.5 text-[12px] leading-relaxed text-me-charcoal/70">
           {/* 🔴 外呼那条路的 raw 是**模型生成**的通话摘要，不是逐字原话 —— 标错了，
               销售会以为自己在看客人说的话，然后据此决定要不要解除全渠道停联。 */}
@@ -360,7 +421,7 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
   const icon = CHANNEL_ICON[e.channel ?? ''] ?? '•'
   const name = CHANNEL_NAME[e.channel ?? ''] ?? e.channel ?? '接触'
   const chips = [
-    e.tour && `想去：${e.tour}`,
+    e.tour && (e.staffNote ? `员工记录里提到：${e.tour}` : `广告表单里点过：${humanizeFormCode(e.tour) ?? e.tour}`),
     e.travelWindow && `${e.travelWindow} 走`,
     e.competitor && `提到 ${e.competitor}`,
     e.callbackAt && '约了回电',
@@ -391,10 +452,38 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
     >
       <p className="text-[10px] font-bold text-me-charcoal/40">
         {icon} {name}
-        {e.direction === 'inbound' ? ' · 客人来的' : ''} · {when(e.at)}
+        {e.direction === 'inbound' ? ' · 客人来的' : e.automated ? ' · 系统自动发出' : ''} · {when(e.at)}
       </p>
-      {e.summary && (
-        <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/85">{e.summary}</p>
+      {e.staffNote && e.raw ? (
+        <>
+          {/* 员工写的字是最高置信度的证据：原样放主行，标明是谁记的；AI 整理只是旁边一行小字，
+              永远不替代、不盖住它（PM 2026-10-30：员工的原话被 AI 改写盖掉、细节丢了）。 */}
+          <p data-testid="staff-note" className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-me-charcoal/90">
+            <span className="mr-1 text-[11px] font-bold text-me-charcoal/45">
+              员工记录{e.loggedBy ? `（${e.loggedBy}）` : ''}：
+            </span>
+            {e.raw}
+          </p>
+          {e.summary && e.summary !== e.raw && (
+            <p data-testid="staff-note-ai" className="mt-0.5 text-[11px] leading-relaxed text-me-charcoal/45">
+              <span className="mr-1 font-bold">AI 整理：</span>
+              {e.summary}
+            </p>
+          )}
+        </>
+      ) : (
+        e.summary && (
+          <p className="mt-0.5 text-[13px] leading-relaxed text-me-charcoal/85">{humanizeFormSummary(e.summary) ?? e.summary}</p>
+        )
+      )}
+      {!e.summary && e.sheetNote && !verdict && (
+        <p data-testid="sheet-note" className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-me-charcoal/85">
+          <span className="mr-1 text-[11px] font-bold text-me-charcoal/45">员工在表格里写的：</span>
+          {e.sheetNote}
+        </p>
+      )}
+      {e.timeApproximate && (
+        <p className="mt-1 text-[10px] text-me-charcoal/35">表格没记具体时间，这里显示的是客人填表的时间</p>
       )}
       <Verdict e={e} />
       <Chips items={chips} />
@@ -432,6 +521,7 @@ function useTimeline(
   contactId: string,
   onSummary?: (s: TimelineSummary | null) => void,
   dialedAt?: number | null,
+  refreshKey?: number,
 ) {
   const [data, setData] = useState<Payload | null>(null)
   const [loading, setLoading] = useState(true)
@@ -472,7 +562,7 @@ function useTimeline(
         if (!alive.current) return
         dataRef.current = json
         setData(json)
-        onSummary?.(summarise(json.timeline ?? []))
+        onSummary?.(summarise(json.timeline ?? [], json.formFactsLine ?? null, json.engagement ?? null))
       } catch (e) {
         // 被自己 abort 掉的不是失败，什么都别改 —— 改了就是替一个已经作废的
         // 请求说话，而它说的正好是旧的。
@@ -491,7 +581,7 @@ function useTimeline(
       alive.current = false
       ctrl.abort()
     }
-  }, [clientId, contactId, onSummary, attempt])
+  }, [clientId, contactId, onSummary, attempt, refreshKey])
 
   return { data, loading, err, retry: () => setAttempt((n) => n + 1) }
 }
@@ -502,13 +592,16 @@ function useTimeline(
  * 用容器自己的 `scrollTop`，不用 `scrollIntoView` —— 后者会把**抽屉整体**
  * 一起滚下去，把上面的联系方式和摘要卡顶出屏幕，正好抵消这次改动的目的。
  */
-function useStickToLatest(data: Payload | null) {
+function useStickToLatest(data: Payload | null, visible: boolean) {
   const listRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    // `visible` 进依赖：折叠时列表没挂载、`listRef` 为空，effect 提前返回；
+    // 点开后 data 没变，少了这个依赖 effect 不会重跑，长时间线会停在最旧一条。
+    if (!visible) return
     const el = listRef.current
     if (!el || !data || data.timeline.length <= LONG_TIMELINE) return
     el.scrollTop = el.scrollHeight
-  }, [data])
+  }, [data, visible])
   return listRef
 }
 
@@ -539,11 +632,20 @@ export function ContactTimeline({
   contactId,
   onSummary,
   dialedAt,
+  refreshKey,
+  collapsible = false,
 }: {
   clientId: string
   contactId: string
   /** 员工刚点了拨打的时间（毫秒）；有它就自动刷新，直到这通电话变成正式记录。 */
   dialedAt?: number | null
+  /**
+   * 变了就重新取一次数据（发笔记 / 回消息 / 改阶段之后，抽屉把它加一）。
+   * 刻意不用 React 的 `key` 触发重取：`key` 一变整个组件重挂，「展开 / 收起」
+   * 状态跟着丢，员工刚展开原文回复了一条，时间线就缩回去、刚发的那条看不见。
+   * 换人才该重挂（由抽屉用 contactId 当 `key`）。
+   */
+  refreshKey?: number
   /**
    * 把摘要交给抽屉，让它渲染在**最上面**那张卡里。
    *
@@ -551,12 +653,49 @@ export function ContactTimeline({
    * 两处判据、以后必然走散。这里是唯一拉时间线的地方。
    */
   onSummary?: (s: TimelineSummary | null) => void
+  /**
+   * 可折叠：默认只显示「看完整往来原文（N 条）」一行，点开才铺原文。
+   * CTS 员工日常看顶部 AI 概况就够，要查证再展开。无论折叠与否都照常拉数据、
+   * 照常回传概况 —— 折叠只影响这段原文渲不渲染。
+   */
+  collapsible?: boolean
 }) {
-  const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary, dialedAt)
-  const listRef = useStickToLatest(data)
+  const { data, loading, err, retry } = useTimeline(clientId, contactId, onSummary, dialedAt, refreshKey)
+  // 折叠模式下默认收起。换人时不留上一个人的展开状态：抽屉给本组件挂了
+  // `key` 带 contactId（见 PersonDrawer），换人会整组件重挂、state 自然回到初值，
+  // 不靠 effect 重置（那样会先用旧状态渲染一帧）。
+  const [expanded, setExpanded] = useState(false)
+  // 折叠时列表没渲染；只有展开、或根本不可折叠时才需要滚到最新。
+  const listRef = useStickToLatest(data, !collapsible || expanded)
 
   if (loading || err || !data || data.timeline.length === 0) {
     return <Placeholder loading={loading} err={err} onRetry={retry} />
+  }
+
+  // 条数不超过折叠时露出的条数：全部已经摆在眼前，没有更多可展开 —— 再放一个展开按钮，
+  // 点了页面不变（PM 2026-10-29：「点击看完整往来原文，页面无反应」）。
+  const hasEarlier = data.timeline.length > RECENT_WHEN_COLLAPSED
+
+  if (collapsible && !expanded && hasEarlier) {
+    // 折叠时仍露出最近几条：员工要看「他最近说了什么 / 我们回了什么」，不该只剩一行按钮。
+    // PM 2026-10-28：打开抽屉看不到过往记录。更早的才折起来。
+    const recent = data.timeline.slice(-RECENT_WHEN_COLLAPSED)
+    const earlier = data.timeline.length - recent.length
+    return (
+      <div className="space-y-2.5" data-testid="timeline-recent">
+        {recent.map((e, i) => (
+          <Row key={i} e={e} clientId={clientId} />
+        ))}
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-2 text-[13px] font-bold text-me-charcoal/70 hover:bg-me-ivory"
+        >
+          {`看更早的往来（还有 ${earlier} 条）`}
+          <span aria-hidden>▾</span>
+        </button>
+      </div>
+    )
   }
 
   const origin = originOf(data.timeline)
@@ -589,6 +728,16 @@ export function ContactTimeline({
           </p>
         )}
       </div>
+      {collapsible && expanded && hasEarlier && (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-me-charcoal/15 px-3 py-1.5 text-[12px] font-bold text-me-charcoal/60 hover:bg-me-ivory"
+        >
+          收起往来原文
+          <span aria-hidden>▴</span>
+        </button>
+      )}
     </div>
   )
 }

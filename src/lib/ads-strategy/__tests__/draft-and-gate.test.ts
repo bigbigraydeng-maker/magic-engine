@@ -18,18 +18,25 @@ vi.mock('@/lib/meta/readback', () => ({
   fetchAdSetReadback: vi.fn(),
   fetchAdCreativesReadback: vi.fn(),
   fetchCampaignStatus: vi.fn(),
+  fetchAccountMinDailyBudget: vi.fn(),
+}))
+vi.mock('@/lib/meta/entity-settings', () => ({
+  fetchCustomAudiences: vi.fn(),
+  fetchCustomAudienceById: vi.fn(),
 }))
 vi.mock('@/lib/meta/asset-upload', () => ({
   waitForVideoReady: vi.fn(),
 }))
 
 import { publishDraftPaused, activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
-import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus } from '@/lib/meta/readback'
+import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
+import { fetchCustomAudiences, fetchCustomAudienceById } from '@/lib/meta/entity-settings'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import {
   createDraftForApproval,
   approveDraft,
   rejectDraft,
+  renderAudienceSummary,
   type DraftRecord,
 } from '../draft-and-gate'
 import type { AdDraft } from '../ad-draft'
@@ -42,6 +49,9 @@ const mAdSet = vi.mocked(fetchAdSetReadback)
 const mCreatives = vi.mocked(fetchAdCreativesReadback)
 const mCampaignStatus = vi.mocked(fetchCampaignStatus)
 const mWait = vi.mocked(waitForVideoReady)
+const mMinBudget = vi.mocked(fetchAccountMinDailyBudget)
+const mAudiences = vi.mocked(fetchCustomAudiences)
+const mAudienceById = vi.mocked(fetchCustomAudienceById)
 const mPause = vi.mocked(pausePublished)
 
 /** 记下每次写进账本的 payload，测试直接检查它。 */
@@ -132,6 +142,61 @@ beforeEach(() => {
   ])
 })
 
+describe('createDraftForApproval — 扩展草稿先停下，不去建', () => {
+  it('多个广告组：不调用发布器，也不读受众、不读最低预算', async () => {
+    const { sb } = fakeSupabase()
+    mPublish.mockClear()
+    mAudiences.mockClear()
+    mMinBudget.mockClear()
+    const r = await createDraftForApproval({
+      ...DRAFT,
+      adSetName: '',
+      geoCountries: [],
+      creatives: [],
+      budgetMode: 'ad_set',
+      adSets: [{
+        name: 'group-a',
+        dailyBudget: 30,
+        geoCountries: ['NZ'],
+        creatives: DRAFT.creatives,
+      }],
+    }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('多个广告组')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(mAudiences).not.toHaveBeenCalled()
+    expect(mMinBudget).not.toHaveBeenCalled()
+  })
+
+  it('扩量开关打开：不调用发布器', async () => {
+    const { sb } = fakeSupabase()
+    mPublish.mockClear()
+    const r = await createDraftForApproval({
+      ...DRAFT,
+      expansion: {
+        advantageAudience: true,
+        customAudienceRelaxed: false,
+        lookalikeRelaxed: false,
+        source: 'step-1',
+      },
+    }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('扩量')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('单个广告组把三个开关都写成关：仍走原来的建草稿', async () => {
+    const { sb } = fakeSupabase()
+    mPublish.mockClear()
+    const r = await createDraftForApproval({
+      ...DRAFT,
+      expansion: { advantageAudience: false, customAudienceRelaxed: false, lookalikeRelaxed: false },
+    }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPublish).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('createDraftForApproval', () => {
   it('干净的草案 → 等人点头，并且把买家会看到的话存下来', async () => {
     const { sb, inserted } = fakeSupabase()
@@ -192,6 +257,56 @@ describe('createDraftForApproval', () => {
     )
     expect(r.status).toBe('blocked')
     expect(r.findings.map((f) => f.code)).toContain('playback_placement_not_locked')
+  })
+
+  it('🔴 留资视频广告也要等转码；只有图的不等；转码超时 → failed 且不建', async () => {
+    const { sb } = fakeSupabase()
+    const leadVideo = { ...DRAFT, creatives: [{ name: 'V', primaryText: 'x', headline: 'y', videoId: 'v9', thumbnailImageHash: 'th' }] }
+    mWait.mockClear()
+    mWait.mockResolvedValue({ ok: false, error: '视频还没转码好' } as Awaited<ReturnType<typeof waitForVideoReady>>)
+    const r = await createDraftForApproval(leadVideo, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mWait).toHaveBeenCalledTimes(1)
+    expect(mWait.mock.calls[0][0]).toEqual(['v9'])
+    expect(r.status).toBe('failed')
+    mWait.mockClear()
+    await createDraftForApproval(DRAFT, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mWait).not.toHaveBeenCalled()
+  })
+
+  it('🔴 日预算低于账户最低日预算 → 不建，人话报错；读不到最低值 → 放行（Meta 兜底）', async () => {
+    const { sb, inserted } = fakeSupabase()
+    mPublish.mockClear()
+    mMinBudget.mockResolvedValueOnce({ minDailyBudgetMinor: 178, currency: 'NZD' })
+    const r = await createDraftForApproval({ ...DRAFT, dailyBudget: 1 }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('最低日预算 1.78 NZD')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted).toHaveLength(1)
+    expect(inserted[0].minBudgetChecked).toBe(178)
+    mMinBudget.mockResolvedValueOnce({ minDailyBudgetMinor: 178, currency: 'NZD' })
+    await createDraftForApproval({ ...DRAFT, dailyBudget: 2 }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mPublish).toHaveBeenCalledTimes(1)
+    mPublish.mockClear()
+    mMinBudget.mockResolvedValueOnce(null)
+    await createDraftForApproval({ ...DRAFT, dailyBudget: 1 }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mPublish).toHaveBeenCalledTimes(1)
+    // 没读到 → 账本记 null（不是 0、不是漏记）；读到 → 记数字
+    expect(inserted.at(-1)?.minBudgetChecked).toBeNull()
+    mMinBudget.mockResolvedValueOnce({ minDailyBudgetMinor: 178, currency: 'NZD' })
+    await createDraftForApproval({ ...DRAFT, dailyBudget: 2 }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(inserted.at(-1)?.minBudgetChecked).toBe(178)
+  })
+
+  it('🔴 带视频的草案建广告有整次时间预算；纯图的不限（与等转码同口径）', async () => {
+    const { sb } = fakeSupabase()
+    mWait.mockResolvedValue({ ok: true } as Awaited<ReturnType<typeof waitForVideoReady>>)
+    mPublish.mockClear()
+    const leadVideo = { ...DRAFT, creatives: [{ name: 'V', primaryText: 'x', headline: 'y', videoId: 'v9', thumbnailImageHash: 'th' }] }
+    await createDraftForApproval(leadVideo, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mPublish.mock.calls[0][3]).toMatchObject({ stopWritingAt: expect.any(Number) })
+    mPublish.mockClear()
+    await createDraftForApproval(DRAFT, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(mPublish.mock.calls[0][3]).toBeUndefined()
   })
 
   it('客户行业真的传进闸门文案（G11 接线）：travel 说「客户服务市场」，不说中性词', async () => {
@@ -308,6 +423,27 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain('别处处理过')
     expect(mActivate).not.toHaveBeenCalled()
+  })
+
+  it('确认卡开失败先占着，不退回等待批准', async () => {
+    mActivate.mockResolvedValue({ ok: false, error: '开 camp1 失败：HTTP 400' })
+    const { sb, updated } = fakeSupabase(READY)
+    const card = {
+      actorUserId: 'u-pm',
+      actorEmail: 'pm@magiclab.test',
+      basis: 'go_live_card' as const,
+      cardRunId: '11111111-1111-4111-8111-111111111111',
+    }
+    const r = await approveDraft('act1', sb, 'tok', card, 'go-live-card')
+    expect(r).toEqual({ ok: false, error: '开 camp1 失败：HTTP 400', holding: true })
+    expect(updated[0]?.status).toBe('activating')
+    expect(updated.at(-1)?.status).toBe('activating')
+    expect(updated.at(-1)?.activation).toMatchObject({
+      status: 'meta_failed',
+      error: '开 camp1 失败：HTTP 400',
+      card_run_id: card.cardRunId,
+    })
+    expect(updated.some((row) => row.status === 'awaiting_approval')).toBe(false)
   })
 
   it('占位之后开失败 → 退回等待批准并带失败回执，可重试', async () => {
@@ -642,5 +778,582 @@ describe('approveDraft — 私信广告现在不能用「开」按钮打开', ()
       const { sb } = fakeSupabase({ ...base, draft: { ...DRAFT, kind } })
       expect((await approveDraft('act1', sb, 'tok', PM)).ok, kind).toBe(true)
     }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 自定义受众（刀②）—— 建之前先查名单，回读再确认真的挂上了
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('createDraftForApproval — 自定义受众（刀②）', () => {
+  const AUD_DRAFT: AdDraft = { ...DRAFT, audienceIds: ['1111111'], excludedAudienceIds: ['2222222'] }
+  const deps = (sb: SupabaseClient) => ({ supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+  const row = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    name: id === '1111111' ? 'Site visitors' : 'Past leads',
+    subtype: 'CUSTOM',
+    approximate_count_lower_bound: 1000,
+    operation_status: { code: 200 },
+    delivery_status: { code: 200 },
+    ...over,
+  })
+  const ACCOUNT = [row('1111111'), row('2222222')]
+  const ok = (rows: object[]) => ({ rows, complete: true as const, error: null })
+
+  /** 回读里名单真的挂上了 —— 闸门该放行。 */
+  const ATTACHED_ADSET = {
+    id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+    targeting: {
+      geo_locations: { countries: ['NZ'] },
+      custom_audiences: [{ id: '1111111' }],
+      excluded_custom_audiences: [{ id: '2222222' }],
+      targeting_relaxation_types: { custom_audience: 0, lookalike: 0 },
+      targeting_automation: { advantage_audience: 0 },
+    },
+  }
+
+  beforeEach(() => {
+    mAdSet.mockResolvedValue(ATTACHED_ADSET)
+    // 默认：列表里没有的受众，按 id 直读也读不到（失败关闭）
+    mAudienceById.mockReset()
+    mAudienceById.mockResolvedValue({
+      rows: [], complete: false, error: { status: 404, code: 100, message: 'not found' },
+    } as Awaited<ReturnType<typeof fetchCustomAudienceById>>)
+  })
+
+  it('🔴 账户列表边漏掉的受众（实测相似受众会漏）：按 id 直读且所属账户对得上 → 算本账户的，放行', async () => {
+    mAudiences.mockResolvedValue(ok([row('2222222')]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    mAudienceById.mockResolvedValue({
+      rows: [row('1111111', { account_id: '1' })], complete: true, error: null,
+    } as unknown as Awaited<ReturnType<typeof fetchCustomAudienceById>>)
+    mPublish.mockResolvedValue(MSG_PUBLISH)
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(mAudienceById).toHaveBeenCalledTimes(1)
+    expect(mAudienceById.mock.calls[0][0]).toBe('1111111')
+    expect(r.status).not.toBe('failed')
+  })
+
+  it('🔴 按 id 直读到了，但所属账户是别的账户 → 仍然拒建', async () => {
+    mAudiences.mockResolvedValue(ok([row('2222222')]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    mAudienceById.mockResolvedValue({
+      rows: [row('1111111', { account_id: '999' })], complete: true, error: null,
+    } as unknown as Awaited<ReturnType<typeof fetchCustomAudienceById>>)
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('不属于这个广告账户')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('没给名单 → 根本不查 Meta，账本记 null', async () => {
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(DRAFT, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mAudiences).not.toHaveBeenCalled()
+    expect(inserted[0].audiencesChecked).toBeNull()
+  })
+
+  it('名单读不出来（Meta 报错、一条都没拿到）→ failed，不建', async () => {
+    mAudiences.mockResolvedValue({
+      rows: [], complete: false,
+      error: { status: 400, code: 190, message: 'Invalid OAuth access token' },
+    } as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('Meta 拒绝或出错')
+    expect(r.error).toContain('400')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].status).toBe('failed')
+    expect(inserted[0].audiencesChecked?.outcome).toBe('failed')
+    expect(typeof inserted[0].audiencesChecked?.reason).toBe('string')
+    expect(inserted[0].audiencesChecked?.reason?.length).toBeGreaterThan(0)
+  })
+
+  it('名单只读到一半（有错又有行）→ failed，说「读不全」', async () => {
+    mAudiences.mockResolvedValue({
+      rows: [row('1111111')], complete: false,
+      error: { status: 0, code: null, message: 'hit 25-page cap' },
+    } as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('读不全')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].status).toBe('failed')
+    expect(inserted[0].audiencesChecked?.outcome).toBe('failed')
+    expect(inserted[0].audiencesChecked?.reason).toBeTruthy()
+  })
+
+  it('行格式读不懂 → failed，不猜', async () => {
+    mAudiences.mockResolvedValue({
+      rows: [{ name: 'no id' }], complete: true, error: null,
+    } as unknown as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('格式读不懂')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].status).toBe('failed')
+    expect(inserted[0].audiencesChecked?.outcome).toBe('failed')
+    expect(inserted[0].audiencesChecked?.reason).toBeTruthy()
+  })
+
+  it('排除的名单不属于这个账户 → failed，并把查到的名单记下来', async () => {
+    mAudiences.mockResolvedValue(ok([row('1111111')]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('不属于这个广告账户')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].status).toBe('failed')
+    expect(inserted[0].audiencesChecked?.outcome).toBe('failed')
+    expect(inserted[0].audiencesChecked?.reason).toBeTruthy()
+    expect(inserted[0].audiencesChecked?.listed).toEqual([
+      { id: '1111111', name: 'Site visitors' },
+    ])
+  })
+
+  it('包含的名单不属于这个账户 → failed', async () => {
+    mAudiences.mockResolvedValue(ok([row('2222222')]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('不属于这个广告账户')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].status).toBe('failed')
+    expect(inserted[0].audiencesChecked?.outcome).toBe('failed')
+    expect(inserted[0].audiencesChecked?.reason).toBeTruthy()
+  })
+
+  it('包含的名单还没准备好（operation 400）→ failed', async () => {
+    mAudiences.mockResolvedValue(ok([
+      row('1111111', { operation_status: { code: 400 } }), row('2222222'),
+    ]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('还没准备好')
+    expect(r.error).toContain('400')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].status).toBe('failed')
+    expect(inserted[0].audiencesChecked?.outcome).toBe('failed')
+    expect(inserted[0].audiencesChecked?.reason).toBeTruthy()
+  })
+
+  it('包含的名单投放状态 400（operation 正常）→ failed', async () => {
+    mAudiences.mockResolvedValue(ok([
+      row('1111111', { delivery_status: { code: 400 } }), row('2222222'),
+    ]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('投放状态')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].status).toBe('failed')
+    expect(inserted[0].audiencesChecked?.outcome).toBe('failed')
+    expect(inserted[0].audiencesChecked?.reason).toBeTruthy()
+  })
+
+  it('包含的名单不足 100 人 → failed；正好 100 人 → 放行', async () => {
+    mAudiences.mockResolvedValue(ok([
+      row('1111111', { approximate_count_lower_bound: 99 }), row('2222222'),
+    ]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('不足 100 人')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].status).toBe('failed')
+    expect(inserted[0].audiencesChecked?.outcome).toBe('failed')
+    expect(inserted[0].audiencesChecked?.reason).toBeTruthy()
+
+    mAudiences.mockResolvedValue(ok([
+      row('1111111', { approximate_count_lower_bound: 100 }), row('2222222'),
+    ]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const second = fakeSupabase()
+    const r2 = await createDraftForApproval(AUD_DRAFT, deps(second.sb))
+    expect(r2.status).toBe('awaiting_approval')
+    expect(mPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('包含的名单人数 0 / -1（Meta 说「没报」）→ 不拦，账本记 null', async () => {
+    for (const count of [0, -1]) {
+      mPublish.mockClear()
+      mAudiences.mockResolvedValue(ok([
+        row('1111111', { approximate_count_lower_bound: count }), row('2222222'),
+      ]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+      const { sb, inserted } = fakeSupabase()
+      const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+      expect(r.status, String(count)).toBe('awaiting_approval')
+      expect(mPublish).toHaveBeenCalledTimes(1)
+      expect(inserted[0].audiencesChecked?.included[0].countLowerBound).toBeNull()
+    }
+  })
+
+  it('包含的名单状态和人数全读不到 → 不拦（Meta 兜底）', async () => {
+    mAudiences.mockResolvedValue(ok([
+      row('1111111', {
+        operation_status: undefined,
+        delivery_status: undefined,
+        approximate_count_lower_bound: undefined,
+      }),
+      row('2222222'),
+    ]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('排除的名单还没准备好（operation 400）→ failed，不建', async () => {
+    mAudiences.mockResolvedValue(ok([
+      row('1111111'), row('2222222', { operation_status: { code: 400 } }),
+    ]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('排除名单')
+    expect(r.error).toContain('老客人')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].status).toBe('failed')
+    expect(inserted[0].audiencesChecked?.outcome).toBe('failed')
+    expect(inserted[0].audiencesChecked?.reason).toBeTruthy()
+  })
+
+  it('排除的名单投放状态 400 → failed', async () => {
+    mAudiences.mockResolvedValue(ok([
+      row('1111111'), row('2222222', { delivery_status: { code: 400 } }),
+    ]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].status).toBe('failed')
+    expect(inserted[0].audiencesChecked?.outcome).toBe('failed')
+    expect(inserted[0].audiencesChecked?.reason).toBeTruthy()
+  })
+
+  it('排除的名单三项全读不到 → failed（排除名单读不到就不敢投）', async () => {
+    mAudiences.mockResolvedValue(ok([
+      row('1111111'),
+      row('2222222', {
+        operation_status: undefined,
+        delivery_status: undefined,
+        approximate_count_lower_bound: undefined,
+      }),
+    ]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('读不到排除名单')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted[0].status).toBe('failed')
+    expect(inserted[0].audiencesChecked?.outcome).toBe('failed')
+    expect(inserted[0].audiencesChecked?.reason).toBeTruthy()
+  })
+
+  it('排除的名单人数 0（状态正常）→ 放行（0 是「没报」不是「没人」）', async () => {
+    mAudiences.mockResolvedValue(ok([
+      row('1111111'), row('2222222', { approximate_count_lower_bound: 0 }),
+    ]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('排除的名单只有 5 个人（状态正常）→ 放行', async () => {
+    mAudiences.mockResolvedValue(ok([
+      row('1111111'), row('2222222', { approximate_count_lower_bound: 5 }),
+    ]) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('一切正常 → 等人点头，账本记下查到的名单事实', async () => {
+    mAudiences.mockResolvedValue(ok(ACCOUNT) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPublish).toHaveBeenCalledTimes(1)
+    expect(inserted[0].audiencesChecked).toEqual({
+      outcome: 'passed',
+      reason: null,
+      included: [
+        { id: '1111111', name: 'Site visitors', operationStatusCode: 200, deliveryStatusCode: 200, countLowerBound: 1000 },
+      ],
+      excluded: [
+        { id: '2222222', name: 'Past leads', operationStatusCode: 200, deliveryStatusCode: 200, countLowerBound: 1000 },
+      ],
+    })
+  })
+
+  it('回读里没撞坑也要把受众摘要摊给人看', async () => {
+    mAudiences.mockResolvedValue(ok(ACCOUNT) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.readback).toContain('受众：包含「Site visitors」约 1000 人（状态 200）；排除「Past leads」约 1000 人（状态 200）')
+    expect(r.readback).toContain('没撞上已知的坑')
+  })
+
+  it('回读里包含的名单没挂上 → blocked', async () => {
+    mAudiences.mockResolvedValue(ok(ACCOUNT) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    mAdSet.mockResolvedValue({
+      ...ATTACHED_ADSET,
+      targeting: {
+        ...ATTACHED_ADSET.targeting,
+        custom_audiences: [],
+      },
+    })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('audience_not_attached')
+  })
+
+  it('回读里排除的名单没挂上 → blocked，且是 blocker 级', async () => {
+    mAudiences.mockResolvedValue(ok(ACCOUNT) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    mAdSet.mockResolvedValue({
+      ...ATTACHED_ADSET,
+      targeting: {
+        ...ATTACHED_ADSET.targeting,
+        excluded_custom_audiences: [],
+      },
+    })
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(AUD_DRAFT, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('excluded_audience_not_attached')
+    expect(inserted[0].status).toBe('blocked')
+    expect(r.findings.some((f) => f.severity === 'blocker')).toBe(true)
+  })
+
+  it('只给排除名单：不硬说成重定向，但排除没挂上照样拦', async () => {
+    mAudiences.mockResolvedValue(ok(ACCOUNT) as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const onlyExcluded: AdDraft = { ...DRAFT, excludedAudienceIds: ['2222222'] }
+
+    const attached = fakeSupabase()
+    const r1 = await createDraftForApproval(onlyExcluded, deps(attached.sb))
+    expect(r1.status).toBe('awaiting_approval')
+    expect(r1.findings.map((f) => f.code)).not.toContain('retargeting_without_audience')
+
+    mAdSet.mockResolvedValue({
+      ...ATTACHED_ADSET,
+      targeting: {
+        ...ATTACHED_ADSET.targeting,
+        custom_audiences: [],
+        excluded_custom_audiences: [],
+      },
+    })
+    const detached = fakeSupabase()
+    const r2 = await createDraftForApproval(onlyExcluded, deps(detached.sb))
+    expect(r2.status).toBe('blocked')
+    expect(r2.findings.map((f) => f.code)).toContain('excluded_audience_not_attached')
+  })
+})
+
+describe('renderAudienceSummary', () => {
+  it('没有受众事实 → 空串', () => {
+    expect(renderAudienceSummary(null)).toBe('')
+    expect(renderAudienceSummary({ outcome: 'passed', reason: null, included: [], excluded: [] })).toBe('')
+  })
+
+  it('名字缺失 → 用 id 顶上', () => {
+    const s = renderAudienceSummary({
+      outcome: 'passed',
+      reason: null,
+      included: [{ id: '9', name: null, operationStatusCode: 200, deliveryStatusCode: 200, countLowerBound: 50 }],
+      excluded: [],
+    })
+    expect(s).toBe('受众：包含「9」约 50 人（状态 200）')
+  })
+
+  it('人数和状态都读不到 → 如实说读不到', () => {
+    const s = renderAudienceSummary({
+      outcome: 'passed',
+      reason: null,
+      included: [],
+      excluded: [{ id: '8', name: 'X', operationStatusCode: null, deliveryStatusCode: null, countLowerBound: null }],
+    })
+    expect(s).toBe('受众：排除「X」人数读不到（状态读不到）')
+  })
+})
+
+describe('approveDraft — 开之前复核受众还在', () => {
+  const AUD_READY: DraftRecord = {
+    status: 'awaiting_approval',
+    draft: { ...DRAFT, audienceIds: ['1111111'], excludedAudienceIds: ['2222222'] },
+    summary: 's',
+    campaignId: 'camp1',
+    adSetId: 'as1',
+    adIds: ['ad1'],
+  }
+
+  const ATTACHED = {
+    id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+    targeting: {
+      geo_locations: { countries: ['NZ'] },
+      custom_audiences: [{ id: '1111111' }],
+      excluded_custom_audiences: [{ id: '2222222' }],
+      targeting_relaxation_types: { custom_audience: 0, lookalike: 0 },
+      targeting_automation: { advantage_audience: 0 },
+    },
+  }
+
+  it('回读不到广告组 → 不开，退回等待批准并写明原因', async () => {
+    mAdSet.mockResolvedValue(null)
+    const { sb, updated } = fakeSupabase(AUD_READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('没法确认受众还挂着')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('awaiting_approval')
+    expect(updated.at(-1)?.error).toContain('读不到广告组')
+  })
+
+  it('排除的名单在回读里不见了 → 不开，状态改 blocked', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, excluded_custom_audiences: [] },
+    })
+    const { sb, updated } = fakeSupabase(AUD_READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error).toContain('没排除上')
+      expect(r.error).toContain('2222222')
+    }
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('blocked')
+    expect(updated.at(-1)?.error).toBeTruthy()
+  })
+
+  it('包含的名单在回读里不见了 → 不开', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, custom_audiences: [] },
+    })
+    const { sb, updated } = fakeSupabase(AUD_READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.error).toContain('没有挂上')
+      expect(r.error).toContain('1111111')
+    }
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('blocked')
+  })
+
+  it('名单还在但「允许投给名单外」被打开 → 不开，状态改 blocked', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, targeting_relaxation_types: { custom_audience: 1, lookalike: 0 } },
+    })
+    const { sb, updated } = fakeSupabase(AUD_READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('名单以外')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('blocked')
+  })
+
+  it('名单还在但优势受众被打开 → 不开，状态改 blocked', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, targeting_automation: { advantage_audience: 1 } },
+    })
+    const { sb, updated } = fakeSupabase(AUD_READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('优势受众')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('blocked')
+  })
+
+  it('只排除不包含 + 优势受众开着 → 不开（设置中途漂移，保守拦下），状态改 blocked', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, custom_audiences: [], targeting_automation: { advantage_audience: 1 } },
+    })
+    const { sb, updated } = fakeSupabase({ ...AUD_READY, draft: { ...DRAFT, excludedAudienceIds: ['2222222'] } })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('优势受众')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('blocked')
+  })
+
+  it('名单还在但「允许投给名单外」读不到（字段缺失）→ 不开，状态改 blocked（读不到≠安全）', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, targeting_relaxation_types: undefined },
+    })
+    const { sb, updated } = fakeSupabase(AUD_READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('blocked')
+  })
+
+  it('名单还在但优势受众读不到（targeting_automation 缺失）→ 不开', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, targeting_automation: undefined },
+    })
+    const { sb, updated } = fakeSupabase(AUD_READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('blocked')
+  })
+
+  it('只排除不包含 + 优势受众读不到 → 不开', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, custom_audiences: [], targeting_relaxation_types: undefined, targeting_automation: undefined },
+    })
+    const { sb, updated } = fakeSupabase({ ...AUD_READY, draft: { ...DRAFT, excludedAudienceIds: ['2222222'] } })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated.at(-1)?.status).toBe('blocked')
+  })
+
+  it('只排除不包含 + 设置干净 → 照开（不因没有包含名单误拦）', async () => {
+    mAdSet.mockResolvedValue({
+      ...ATTACHED,
+      targeting: { ...ATTACHED.targeting, custom_audiences: [], targeting_relaxation_types: undefined },
+    })
+    mActivate.mockResolvedValue({ ok: true })
+    const { sb } = fakeSupabase({ ...AUD_READY, draft: { ...DRAFT, excludedAudienceIds: ['2222222'] } })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(true)
+  })
+
+  it('名单都还挂着 → 正常开，只回读一次', async () => {
+    mAdSet.mockResolvedValue(ATTACHED)
+    mActivate.mockResolvedValue({ ok: true })
+    const { sb, updated } = fakeSupabase(AUD_READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(true)
+    expect(updated.at(-1)?.status).toBe('active')
+    expect(mAdSet).toHaveBeenCalledTimes(1)
+    expect(mActivate).toHaveBeenCalledTimes(1)
+  })
+
+  it('草案没带名单 → 不多查一次，照常开', async () => {
+    mActivate.mockResolvedValue({ ok: true })
+    const { sb } = fakeSupabase({
+      status: 'awaiting_approval', draft: DRAFT, summary: 's',
+      campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1'],
+    })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(true)
+    expect(mAdSet).not.toHaveBeenCalled()
+    expect(mActivate).toHaveBeenCalledTimes(1)
   })
 })

@@ -2,6 +2,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { ANALYSIS_SCHEMA_VERSION } from './analysis-schema'
+import { writeCallStance } from './call-stance'
 import type { AnalysisCall, AnalysisConnection, AnalysisStore } from './pipeline'
 
 const BUCKET = 'telephony-recordings'
@@ -10,7 +11,7 @@ export const supabaseAnalysisStore: AnalysisStore = {
   async getCall(clientId, provider, providerCallId) {
     const { data, error } = await supabaseAdmin
       .from('telephony_calls')
-      .select('id, client_id, connection_id, provider, provider_call_id, started_at, recording_status, transcript_status, summary_status, recording_raw_event_id, recording_storage_path, recording_attempts, transcript_attempts, analysis_attempts, touchpoint_id')
+      .select('id, client_id, connection_id, provider, provider_call_id, started_at, recording_status, transcript_status, summary_status, recording_raw_event_id, recording_storage_path, recording_attempts, transcript_attempts, analysis_attempts, touchpoint_id, contact_id')
       .eq('client_id', clientId)
       .eq('provider', provider)
       .eq('provider_call_id', providerCallId)
@@ -24,7 +25,27 @@ export const supabaseAnalysisStore: AnalysisStore = {
       recordingRawEventId: data.recording_raw_event_id, recordingStoragePath: data.recording_storage_path,
       recordingAttempts: data.recording_attempts ?? 0, transcriptAttempts: data.transcript_attempts ?? 0, analysisAttempts: data.analysis_attempts ?? 0,
       touchpointId: data.touchpoint_id,
+      contactId: data.contact_id ?? null,
     } as AnalysisCall
+  },
+
+  /**
+   * 这个客人已知的名字。**目前只读档案名 `contacts.display_name` 一个来源**
+   * （不是「所有身份里的名字」—— 身份表里存的是邮箱和电话，没有人名）。摘要核对闸拿它判断
+   * 「摘要里写的人名是不是这个客人」——真实事故里 AI 把 Sarju Dayal 写成
+   * Sergio Dyer，而那个错名字恰恰出现在转写里（是电话里说错的），
+   * 所以「在不在转写里」这种判法抓不到，必须跟档案比。
+   */
+  async getKnownNames(contactId) {
+    if (!contactId) return []
+    const { data, error } = await supabaseAdmin
+      .from('contacts')
+      .select('display_name')
+      .eq('id', contactId)
+      .maybeSingle()
+    if (error) throw new Error(`读客人姓名失败: ${error.message}`)
+    const name = (data?.display_name ?? '').trim()
+    return name === '' ? [] : [name]
   },
 
   async getConnection(id) {
@@ -115,6 +136,10 @@ export const supabaseAnalysisStore: AnalysisStore = {
   async markTouchpoint(touchpointId, clientId, analysisId) {
     const { error } = await supabaseAdmin.rpc('telephony_mark_touchpoint', { p_touchpoint_id: touchpointId, p_client_id: clientId, p_analysis_id: analysisId })
     if (error) throw new Error('标记触点失败')
+  },
+
+  markCallStance(touchpointId, clientId, analysisId, stance) {
+    return writeCallStance({ touchpointId, clientId, analysisId, stance })
   },
 
   async countTranscribedSince(connectionId, sinceIso) {

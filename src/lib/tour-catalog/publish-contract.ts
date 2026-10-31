@@ -89,6 +89,7 @@ export interface PublishRequest {
 export interface PublishResponse {
   ok: true
   version: number
+  websiteSync: 'revalidated' | 'not_configured' | 'failed'
 }
 
 export type PublishErrorCode =
@@ -154,3 +155,42 @@ export interface RevertRequest {
   acknowledgeHighRisk: boolean
   confirmSellableCount: number | null
 }
+
+/**
+ * One visible (open / limited, today or later) departure of a published tour, for outward channels
+ * that need more than the website feed carries (e.g. email). No `internal` data.
+ */
+export interface PublishedTourFactDeparture {
+  /** Calendar day, YYYY-MM-DD. */
+  departOn: string
+  /** Same display format as the website, e.g. "11 March 2027". */
+  displayDate: string
+  status: 'open' | 'limited'
+  priceTextOverride: string | null
+}
+
+/** A published tour as the email channel sees it: the published snapshot only, never the draft. */
+export interface PublishedTourFact {
+  id: string
+  slug: string
+  destination: string
+  tier: string
+  name: string
+  title: string | null
+  durationText: string | null
+  displayPriceText: string | null
+  highlights: string[]
+  inclusions: string[]
+  exclusions: string[]
+  singleSupplement: string | null
+  /** Whole-tour "sold out" banner, as published. */
+  soldOut: boolean
+  managesDepartures: boolean
+  /** Same sellable rule as the website feed: active, and (if it manages departures) at least one visible departure. */
+  isActive: boolean
+  departures: PublishedTourFactDeparture[]
+}
+
+export type PublishedTourFactsRead =
+  | { published: false }
+  | { published: true; version: number; tours: PublishedTourFact[] }

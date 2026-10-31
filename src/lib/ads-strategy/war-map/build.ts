@@ -9,12 +9,14 @@
  */
 
 import { buildAdjust, ACCOUNT_STALE_HOURS } from './actions'
+import { budgetHoldFor } from './followup'
 import { accountStatusHint, ACCOUNT_STATUS_ACTIVE, ACCOUNT_STATUS_UNSETTLED } from '@/lib/ads-strategy/account-status'
 import { buildFrequency } from './frequency'
-import { buildPools } from './pools'
-import { diffDays, hoursSince, nzDay, shortDay } from './util'
+import { computeFreshness, type Freshness } from './freshness'
+import { buildAccountSummaries, buildPools, unusableAccountNote } from './pools'
+import { diffDays, hoursSince, nzDay, shiftDay, shortDay } from './util'
 import type {
-  AccountView, CountdownView, GoalNote, PlanPhaseInput, WarMapInput, WarMapView,
+  AccountView, CampaignFrequencyInput, CountdownView, GoalNote, PlanPhaseInput, WarMapInput, WarMapView,
 } from './types'
 
 export { MAX_POOL_ROWS } from './pools'
@@ -29,8 +31,18 @@ export function pickPhase(phases: PlanPhaseInput[], today: string): PlanPhaseInp
 function buildCountdown(input: WarMapInput, today: string): CountdownView {
   const phase = input.plan ? pickPhase(input.plan.phases, today) : null
   if (!input.plan || !phase) {
-    return { planStatus: null, phaseName: null, launchDate: null, targetDate: null, daysToLaunch: null, daysToTarget: null }
+    return {
+      planStatus: null, phaseName: null, launchDate: null, targetDate: null, daysToLaunch: null, daysToTarget: null,
+      actualLaunchDay: null, planStale: false,
+    }
   }
+  // 🔴 「计划过时」＝计划写完**之后**才有广告开始跑，而且比计划写的开投日更早。
+  //    只比「开投日」会把「一直在跑的常驻广告 + 未来的新阶段计划」误判成「已开投」；
+  //    所以实际起跑日必须晚于计划记录最后更新的那天（读不到更新日才退回只比开投日）。
+  const updated = input.plan.recordUpdatedDay
+  const stale = input.runningSince !== null
+    && phase.startDate > input.runningSince
+    && (updated === null || input.runningSince > updated)
   return {
     planStatus: input.plan.status,
     phaseName: phase.name,
@@ -38,12 +50,15 @@ function buildCountdown(input: WarMapInput, today: string): CountdownView {
     targetDate: phase.endDate,
     daysToLaunch: diffDays(today, phase.startDate),
     daysToTarget: diffDays(today, phase.endDate),
+    actualLaunchDay: stale ? input.runningSince : null,
+    planStale: stale,
   }
 }
 
 function accountView(a: WarMapInput['accounts'][number], nowIso: string): AccountView {
   const name = a.name ?? a.adAccountId
   const base = { adAccountId: a.adAccountId, name, statusCode: a.statusCode, capturedAt: a.capturedAt }
+  if (a.statusCode === null && a.capturedAt === null) return { ...base, light: 'unknown', sentence: '已绑定，暂无数据' }
   if (a.statusCode === null) return { ...base, light: 'unknown', sentence: '读不到账户状态' }
   const age = hoursSince(a.capturedAt, nowIso)
   if (age === null || age > ACCOUNT_STALE_HOURS) {
@@ -80,12 +95,37 @@ function videoPoolIds(input: WarMapInput): Set<string> {
   return new Set(ids)
 }
 
+/** 在用账户（状态正常或读不到）的 id；欠款/关闭的账户不参与频率和新鲜度判断 */
+function usableAccountIds(input: WarMapInput): Set<string> {
+  return new Set(input.accounts.filter(a => unusableAccountNote(a.statusCode) === null).map(a => a.adAccountId))
+}
+
+/** 系列已停：所在账户全停，或它最后一次花钱比它所在账户的数据日早了 1 天以上（已停系列不参与最高频率） */
+function campaignStopped(input: WarMapInput, fresh: Freshness): (c: CampaignFrequencyInput) => boolean {
+  return c => {
+    if (fresh.dormantIds.has(c.adAccountId)) return true
+    const ownDay = input.accountDataDays[c.adAccountId] ?? fresh.dataDay
+    return !!c.lastSpendDay && ownDay !== null && c.lastSpendDay < shiftDay(ownDay, -1)
+  }
+}
+
 export function buildWarMap(input: WarMapInput): WarMapView {
   const today = nzDay(input.now)
   const accounts = input.accounts.map(a => accountView(a, input.now))
   const names = new Map(accounts.map(a => [a.adAccountId, a.name]))
-  const pools = buildPools(input, names)
-  const frequency = buildFrequency(input, names)
+  const usable = usableAccountIds(input)
+  const fresh = computeFreshness(input, usable, names)
+  const pools = buildPools(input, names, accounts)
+  const frequency = buildFrequency(
+    { ...input, campaigns: input.campaigns.filter(c => usable.has(c.adAccountId)) },
+    names,
+    {
+      dataDay: fresh.dataDay,
+      staleDays: fresh.staleDays,
+      windowEnd: input.clocks.dataDay,
+      isStopped: campaignStopped(input, fresh),
+    },
+  )
   const adjust = buildAdjust({
     input,
     accounts,
@@ -93,15 +133,22 @@ export function buildWarMap(input: WarMapInput): WarMapView {
     videoPoolIds: videoPoolIds(input),
     frequencyRows: frequency.rows,
     upstream: [pools.headline, frequency.headline],
+    dataDay: fresh.dataDay,
+    staleDays: fresh.staleDays,
+    followup: input.followup,
   })
   return {
     generatedAt: input.now,
     countdown: buildCountdown(input, today),
-    clocks: input.clocks,
+    // 表头的「数据日」「已 N 天」只看真在投的账户，取数断没断看最近一次取数时间。频率花费区间另用实际读取的窗口。
+    clocks: { ...input.clocks, dataDay: fresh.dataDay, staleDays: fresh.staleDays, note: fresh.note },
     accounts,
-    pools: { headline: pools.headline, rows: pools.rows, hiddenCount: pools.hiddenCount },
+    accountSummaries: buildAccountSummaries(input, accounts, pools.everyRow, today, fresh.dormantIds),
+    pools: { headline: pools.headline, rows: pools.rows, hiddenCount: pools.hiddenCount, unusableRows: pools.unusableRows },
     frequency,
     adjust,
     goalNote: buildGoalNote(input),
+    prescriptionLine: input.plan?.prescriptionLine ?? null,
+    budgetHold: budgetHoldFor(input.followup),
   }
 }

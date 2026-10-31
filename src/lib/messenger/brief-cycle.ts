@@ -22,17 +22,27 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { classifyThrownOpenAIError, needsHuman } from '@/lib/ai/provider-failure'
+import { AllProvidersFailedError } from '@/lib/ai/failover'
 import {
   shouldGenerateBrief,
   generateBrief,
   storeBrief,
+  nothingFromCustomerBrief,
   type BriefCandidate,
   type StoredMessage,
 } from '@/lib/messenger/brief'
 import { autoTagQualifiedBuyers, type AutoTagResult } from '@/lib/crm/qualified-buyer-autotag'
 import { inferStagesFromConversations, type StageInferResult } from '@/lib/crm/stage-infer'
+import { reviveScreenedOnNewInbound, type ReviveResult } from '@/lib/crm/enquiry-screen/revive'
+import { advanceNewLeadsAfterFollowUp, type CallAdvanceResult } from '@/lib/crm/advance-after-call'
 import { inferConversationFacts, type FactsRunResult } from '@/lib/crm/facts/infer'
 import { supabaseFactsIo } from '@/lib/crm/facts/io'
+import type { BriefChannel } from './brief-schema'
+import {
+  hasAnythingToSummarise,
+  resolveEmailBodies,
+  type FetchFullText,
+} from './email-brief-bodies'
 
 /**
  * 一轮最多写几张卡。**这是花钱的闸** —— 积压会顺着后面几轮慢慢排掉，
@@ -46,6 +56,12 @@ export const MAX_BRIEFS_PER_RUN = 50
  * 🔴 这个数字的唯一依据是**网关约 125 秒掐断**：实测每张卡约 3.2 秒
  *    （2026-08-22 那批运行：50 张 / 157~208 秒），12 张约 40 秒，留足三倍余量。
  *    调大到 40 张就会重新踩回这次事故的那条线。
+ *
+ * 🔴 2026-10-26 补记：OpenAI 断电、简报切到备用的 Claude 时，实测每张约 6~8 秒
+ *    （同一批真实 CTS 邮件对话：OpenAI 3~4 秒，Claude 5.5~7.7 秒），12 张约 80~90 秒，
+ *    已经贴着下面 `CHUNK_TIME_BUDGET_MS` 的 90 秒。**不用调小这个数**：超了由时间预算
+ *    把段提前返回、剩下的留给下一轮（那条闸本来就是为「每张变慢」设计的），
+ *    只是切换期间每段会少写一两张。上面那条「网关约 125 秒」的线仍然有三十多秒余量。
  */
 export const BRIEFS_PER_CHUNK = 12
 
@@ -90,6 +106,32 @@ const ABORT_REASON: Record<string, string> = {
   gateway_auth_failed: 'AI 调用卡在网关那一层，还没走到 OpenAI —— 要换网关令牌，这一轮剩下的都会同样失败，已当场停下',
 }
 
+const PROVIDER_FAILURE_LABEL: Record<string, string> = {
+  account_exhausted: '余额/额度用光',
+  credential_invalid: '钥匙不认了',
+  gateway_auth_failed: '卡在网关',
+}
+
+/**
+ * 这次失败要不要让整轮当场停下？要的话返回给人看的原因，不要返回 null。
+ *
+ * 🔴 为什么单独成函数（子牙 + 魏征两审都指出的最严重一条）：这里原来直接
+ *    `classifyThrownOpenAIError(err)` —— 它只认 OpenAI SDK 抛的原始异常。接上切换层之后，
+ *    三家都失败时抛的是聚合错误 `AllProvidersFailedError`，没有 `status`，会被判成 `other`，
+ *    于是整轮**不再当场停下**：对最多 500 条候选每条试三家、每条烧满 20 秒，
+ *    而运行记录里那句「余额用光，已当场停下」再也不出现。这正是 2026-09-23 事故的放大效应
+ *    换了个形状复活。所以聚合错误要在这里单独认。
+ */
+export function abortReasonFor(err: unknown): string | null {
+  if (err instanceof AllProvidersFailedError) {
+    if (!err.accountLevel) return null
+    const parts = Object.entries(err.kinds).map(([provider, kind]) => `${provider}：${PROVIDER_FAILURE_LABEL[kind ?? ''] ?? kind}`)
+    return `所有 AI 供应商都不可用（${parts.join('；')}）—— 充值或换钥匙之前这一轮剩下的都会同样失败，已当场停下`
+  }
+  const kind = classifyThrownOpenAIError(err)
+  return needsHuman(kind) ? (ABORT_REASON[kind] ?? null) : null
+}
+
 /** 候选池一次最多从库里捞多少条对话（挑之前的粗筛上限，不是写卡上限）。 */
 const CANDIDATE_POOL = 500
 
@@ -118,11 +160,19 @@ interface ConversationRow {
 export interface DueBrief extends BriefCandidate {
   /** 最后说话的是客人还是我们 —— 模型靠它决定「谁在等谁」。 */
   awaitingReply: boolean
+  /** 这段对话来自哪条渠道。决定提示词口径，以及要不要去拉邮件全文。 */
+  channel: BriefChannel
 }
 
 export interface BriefGenerationResult {
   generated: number
   failed: number
+  /**
+   * 邮件清洗完一个字都不剩的条数（客人只转发了我们自己的邮件、没写字）。
+   * 这些对话会拿到一张「客人没写内容」的卡（不调模型），所以不算进 `generated`，
+   * 也绝不算 `failed` —— 它不是故障。混进任何一边都会让运行记录说谎。
+   */
+  emptyThreads?: number
   /**
    * 这一段被提前掐掉的原因，正常跑完是 null。
    *
@@ -140,11 +190,25 @@ export interface GenerateDueBriefsOptions {
   perCandidateMs?: number
   /** 读表用的时钟，默认 `Date.now`。测试注入假表，不用真等 90 秒。 */
   clock?: () => number
+  /**
+   * 邮件渠道怎么**造**那个「按客户拿拉全文方法」的解析器。默认走生产那条
+   * （查邮箱连接 → 换令牌）。测试注入假的，整条链路不碰网络。
+   *
+   * 🔴 为什么注入的是**工厂**而不是解析器本身（复审 2026-10-26 的 P2，实测成立）：
+   *    令牌缓存必须「一轮一份」。如果只能注入解析器，测试就没法观察到
+   *    「每轮有没有新造一个」—— 实测把 `makeEmailFullTextResolver()` 提到模块顶层
+   *    （P1 那个 bug 的另一种写法），7 条测试照样全绿。注入工厂之后，
+   *    「这一轮问过工厂几次」就成了可断言的事实。
+   */
+  emailFullTextFactory?: () => (clientId: string) => Promise<FetchFullText | null>
 }
 
 export interface PostBriefSweepResult {
   qualifiedBuyers: AutoTagResult | { error: string }
   stageInfer: StageInferResult | { error: string }
+  /** 我们拨出并接通了电话、客人还停在「新线索」的，推进到「已联系」。 */
+  callAdvance: CallAdvanceResult | { error: string }
+  enquiryRevive: ReviveResult | { error: string }
   /** AI 读对话存事实（默认关，`CRM_FACTS_CLIENT_IDS` 列了客户才跑）。只写自己的表，不影响名单。 */
   conversationFacts: FactsRunResult | { error: string }
 }
@@ -179,7 +243,7 @@ function toCandidate(row: ConversationRow): BriefCandidate {
 async function loadMessages(conversationId: string, signal?: AbortSignal): Promise<StoredMessage[]> {
   let query = supabaseAdmin
     .from('conversation_messages')
-    .select('direction, sender_name, body, sent_at')
+    .select('direction, sender_name, body, sent_at, message_id')
     .eq('conversation_id', conversationId)
     .order('sent_at', { ascending: true })
   if (signal) query = query.abortSignal(signal)
@@ -192,6 +256,7 @@ async function loadMessages(conversationId: string, signal?: AbortSignal): Promi
     senderName: m.sender_name,
     body: m.body ?? '',
     sentAt: m.sent_at,
+    messageId: (m as { message_id?: string | null }).message_id ?? null,
   }))
 }
 
@@ -245,31 +310,171 @@ function withCandidateDeadline<T>(
  * 读失败**抛异常**而不是返回空：返回空跟「今天真的没人要写卡」长得一模一样，
  * 上游会把一次读库失败记成一次正常的空轮。
  */
-export async function loadDueBriefs(
-  now: Date,
-  cap: number = MAX_BRIEFS_PER_RUN,
-): Promise<DueBrief[]> {
-  const { data, error } = await supabaseAdmin
-    .from('conversations')
-    .select(
-      'id, client_id, message_count, last_message_at, last_message_from, conversation_briefs(source_message_count, regen_count, regen_count_date, knowledge_status)',
-    )
-    .gt('message_count', 0)
-    // 只认私信。这个任务写出来的是「Facebook 私信简报」，喂邮件进去会得到一张
-    // 说错渠道的卡，而销售会照着它去 Messenger 找一个从没在那说过话的人。
-    .eq('channel', 'messenger')
-    .order('last_message_at', { ascending: false })
-    .limit(CANDIDATE_POOL)
+const CANDIDATE_COLUMNS =
+  'id, client_id, message_count, last_message_at, last_message_from, conversation_briefs(source_message_count, regen_count, regen_count_date, knowledge_status)'
 
+/** 一条渠道的候选池。私信不带客户名单（所有客户都写卡），邮件只给开了开关的客户。 */
+async function loadChannelCandidates(
+  channel: BriefChannel,
+  now: Date,
+  clientIds: readonly string[] | null,
+): Promise<DueBrief[]> {
+  if (clientIds !== null && clientIds.length === 0) return []
+
+  let q = supabaseAdmin
+    .from('conversations')
+    .select(CANDIDATE_COLUMNS)
+    .gt('message_count', 0)
+    .eq('channel', channel)
+  if (clientIds !== null) q = q.in('client_id', clientIds)
+
+  const { data, error } = await q.order('last_message_at', { ascending: false }).limit(CANDIDATE_POOL)
+  // 读失败抛异常而不是返回空：返回空跟「今天真的没人要写卡」长得一模一样。
   if (error) throw new Error(error.message)
 
   return (data ?? [])
     .map((row) => {
       const r = row as ConversationRow
-      return { ...toCandidate(r), awaitingReply: r.last_message_from === 'customer' }
+      return { ...toCandidate(r), awaitingReply: r.last_message_from === 'customer', channel }
     })
     .filter((c) => shouldGenerateBrief(c, now))
-    .slice(0, cap)
+}
+
+/**
+ * 哪些客户开了「邮件也写简报」。没开的客户一段邮件都不会碰。
+ *
+ * 照 `payment-email-detect-wire.ts` 同一套写法：开关在 `clients.leads_config`，
+ * 不写死任何客户。读失败**当成没人开**（fail-closed）—— 宁可今天少写几张卡，
+ * 也不要因为读配置失败就给没打算开的客户花钱调模型。
+ */
+async function clientsWithEmailBriefs(): Promise<string[]> {
+  const { data, error } = await supabaseAdmin
+    .from('clients')
+    .select('id')
+    .filter('leads_config->email_briefs->>enabled', 'eq', 'true')
+  if (error) return []
+  return (data ?? []).map((r) => (r as { id: string }).id)
+}
+
+/**
+ * 挑出这一轮该写卡的对话。纯读库，不花钱、不写库。
+ *
+ * ## 为什么邮件单独一条查询
+ *
+ * 原来这里只认私信，注释写的理由是「喂邮件进去会得到一张说错渠道的卡」——
+ * 那个理由已经修掉了（提示词现在认渠道）。但还是**不把两条渠道合成一条查询**：
+ *
+ * 1. 私信这条路已经在给 525 段对话写卡。合成一条查询就等于改一条在跑的链路，
+ *    而这次要加的只是邮件。
+ * 2. 候选池是「按最后消息时间取最近 500 条」。两条渠道挤同一个池子，
+ *    消息多的那条会把另一条挤出去 —— 这种饿死不会报错，只会某天某条渠道
+ *    悄悄不写卡了。各给一个池，谁也挤不着谁。
+ *
+ * 配额按 `cap` 对半分，邮件那半用不完就还给私信。
+ */
+export async function loadDueBriefs(
+  now: Date,
+  cap: number = MAX_BRIEFS_PER_RUN,
+): Promise<DueBrief[]> {
+  const emailClients = await clientsWithEmailBriefs()
+  // 一个客户都没开 → 一条额外查询都不发，行为跟加这个功能之前逐字相同。
+  if (emailClients.length === 0) {
+    return (await loadChannelCandidates('messenger', now, null)).slice(0, cap)
+  }
+
+  const [messenger, email] = await Promise.all([
+    loadChannelCandidates('messenger', now, null),
+    loadChannelCandidates('email', now, emailClients),
+  ])
+  const emailShare = Math.min(email.length, Math.floor(cap / 2))
+  const taken = [...email.slice(0, emailShare), ...messenger.slice(0, cap - emailShare)]
+  // 回到「谁最近说话谁先写」的口径，跟只有私信时一致。
+  return taken.sort((a, b) => (b.lastMessageAt ?? '').localeCompare(a.lastMessageAt ?? '')).slice(0, cap)
+}
+
+
+/**
+ * 邮件渠道专用：把库里那 255 字摘要换成「清洗过的全文」。
+ *
+ * 为什么非做不可：`conversation_messages.body` 只存了 255 字（当初为省空间故意的），
+ * 实测 **73% 的客人来信在这里被截断**。拿半句话写卡，错得看不出来。
+ * 而全文又带着整段引用历史 —— 一封真实来信全文 3963 字，客人自己只写了 78 字，
+ * 剩下全是我们自己发的营销邮件被引用回来。所以必须拉全文 **再** 清洗，缺一步都不行。
+ *
+ * 返回 `null` 表示「清洗完没有任何可总结的内容」，调用方据此跳过不写卡。
+ */
+async function withEmailFullText(
+  candidate: DueBrief,
+  stored: readonly StoredMessage[],
+  fetchForClient: (clientId: string) => Promise<FetchFullText | null>,
+): Promise<StoredMessage[] | null> {
+  const fetchFullText = await fetchForClient(candidate.clientId)
+  // 取不到邮箱令牌（没连、已吊销）就按原样走：255 字摘要虽然短，
+  // 但它确实是这封信的开头，比不写卡更有用。不许把它当成失败。
+  if (fetchFullText === null) return [...stored]
+
+  const refs = stored.map((m) => ({ messageId: m.messageId ?? '', storedBody: m.body }))
+  const resolved = await resolveEmailBodies(refs, fetchFullText)
+  if (!hasAnythingToSummarise(resolved)) return null
+
+  return stored.map((m, i) => ({ ...m, body: resolved.bodies[i]?.text ?? m.body }))
+}
+
+/**
+ * 生产用的取全文方法：按客户找到在用的邮箱连接，换一个有效令牌。
+ *
+ * 跟 `payment-email-detect-wire.ts` 同一套（同一个 provider 常量、同一个状态常量、
+ * 同一个令牌管理器），不另起一条读邮箱的路。
+ *
+ * 🔴 **缓存必须是「一轮一份」，绝不能挂在模块顶层**（复审 2026-10-26 的 P1，实测成立）：
+ *    `getValidTokenForConnection` 的契约是「每次调用都给你一个没过期的令牌」，
+ *    它自己会在过期前换新。把它返回的**字符串**长期缓存，等于把这个保证作废 ——
+ *    Render 上进程常驻，令牌约一小时过期，于是第二轮之后每次拉全文都失败，
+ *    而失败被 `tryFetchFullText` 吞掉、退回 255 字摘要，运行记录里一点异常都没有。
+ *    结果是悄悄退回这个功能要解决的那个老问题：73% 的来信被截断，卡却看着正常。
+ *    缓存 `null` 一样有害：客户之后接上邮箱，不重启就永远不认。
+ */
+export function makeEmailFullTextResolver(
+  resolveOne: (clientId: string) => Promise<FetchFullText | null> = resolveEmailFetcher,
+): (clientId: string) => Promise<FetchFullText | null> {
+  const perRunCache = new Map<string, FetchFullText | null>()
+  return async (clientId: string) => {
+    const cached = perRunCache.get(clientId)
+    if (cached !== undefined) return cached
+    const resolved = await resolveOne(clientId)
+    perRunCache.set(clientId, resolved)
+    return resolved
+  }
+}
+
+async function resolveEmailFetcher(clientId: string): Promise<FetchFullText | null> {
+  let resolvedFetch: FetchFullText | null = null
+  try {
+    const { MICROSOFT_MAIL_PROVIDER } = await import('@/lib/microsoft/mail-oauth')
+    const { CONNECTION_STATUS } = await import('@/lib/platform-oauth/vocabulary')
+    const { data } = await supabaseAdmin
+      .from('platform_oauth_connections')
+      .select('id')
+      .eq('client_id', clientId)
+      .eq('provider', MICROSOFT_MAIL_PROVIDER)
+      .eq('status', CONNECTION_STATUS.ACTIVE)
+      .limit(1)
+      .maybeSingle()
+    const connectionId = (data as { id: string } | null)?.id ?? null
+    if (connectionId !== null) {
+      const { getValidTokenForConnection } = await import('@/lib/platform-oauth/token-manager')
+      const { fetchMessageText } = await import('@/lib/microsoft/mail-graph')
+      const token = await getValidTokenForConnection(connectionId)
+      resolvedFetch = async (messageId: string) => {
+        const r = await fetchMessageText(token, messageId)
+        return r.ok ? r.message.body : null
+      }
+    }
+  } catch {
+    // 换令牌失败就按「没有全文」走，上面会退回 255 字摘要。
+    resolvedFetch = null
+  }
+  return resolvedFetch
 }
 
 /**
@@ -297,6 +502,10 @@ export async function generateDueBriefs(
   opts: GenerateDueBriefsOptions = {},
 ): Promise<BriefGenerationResult> {
   const budgetMs = opts.budgetMs ?? CHUNK_TIME_BUDGET_MS
+  // 邮件清洗完没有任何客人原话的条数。单独记，不混进 failed —— 它不是故障。
+  let emptyThreads = 0
+  // 🔴 一轮一份的邮箱令牌缓存（见 makeEmailFullTextResolver 头上那条）。
+  const emailFullText = (opts.emailFullTextFactory ?? makeEmailFullTextResolver)()
   const perCandidateMs = opts.perCandidateMs ?? PER_CANDIDATE_BUDGET_MS
   const clock = opts.clock ?? Date.now
   const startedAt = clock()
@@ -331,20 +540,38 @@ export async function generateDueBriefs(
       // 外层硬闸 + 内层 signal 两层一起上，理由见 withCandidateDeadline。
       await withCandidateDeadline(
         (async () => {
-          const messages = await loadMessages(candidate.conversationId, signal)
-          if (messages.length === 0) return
-          const { brief, knowledgeStatus } = await generateBrief(
-            messages,
+          const stored = await loadMessages(candidate.conversationId, signal)
+          if (stored.length === 0) return
+          const prepared =
+            candidate.channel === 'email'
+              ? await withEmailFullText(candidate, stored, emailFullText)
+              : stored
+          // 邮件清洗完可能一个字都不剩（客人只把我们自己的推广邮件转回来、没写字）。
+          // 这种情况写一张**只陈述这个事实**的卡，不调模型、不编任何内容。
+          // 为什么不是直接跳过：跳过等于不往 conversation_briefs 写行，而「该不该写卡」
+          // 的判据看的就是那张表 —— 这段对话每小时都会被重新选中、重新拉最多 12 封全文，
+          // 还占着邮件那半配额。实测约一成邮件对话落到这里（553 段里约 55 段），
+          // 比每轮 25 段的配额还多，真会把配额占死、让存量永远跑不完。
+          if (prepared === null) {
+            await storeBrief(candidate, nothingFromCustomerBrief(), now, null, signal, 'rule:no-customer-text')
+            emptyThreads++
+            return
+          }
+          const { brief, knowledgeStatus, answeredBy } = await generateBrief(
+            prepared,
             candidate.clientId,
             {
               awaitingReply: candidate.awaitingReply,
               hoursSinceLastMessage: candidate.lastMessageAt
                 ? Math.round((now.getTime() - new Date(candidate.lastMessageAt).getTime()) / 3_600_000)
                 : 0,
+              channel: candidate.channel,
             },
-            { signal },
+            // 总预算 = 这一条候选的剩余时间。切换层按它给每一家切时间；
+            // 只传 signal 不传数字的话，它不知道总共有多少时间可以分。
+            { signal, budgetMs: candidateMs },
           )
-          await storeBrief(candidate, brief, now, knowledgeStatus, signal)
+          await storeBrief(candidate, brief, now, knowledgeStatus, signal, answeredBy?.model)
           generated++
         })(),
         candidateMs,
@@ -375,18 +602,17 @@ export async function generateDueBriefs(
 
       // 账户级失效（没钱 / 钥匙不认了 / 卡在网关）对这一批剩下的每一条都是同一个结论。
       // 判据原样用 `@/lib/ai/provider-failure` 那一份，这里不另立标准。
-      const kind = classifyThrownOpenAIError(err)
-      if (needsHuman(kind)) {
-        const reason = ABORT_REASON[kind]
+      const reason = abortReasonFor(err)
+      if (reason !== null) {
         console.error(`[messenger/brief] 账户级故障，这一轮当场停下：${reason}`, err)
-        return { generated, failed, aborted: reason }
+        return { generated, failed, emptyThreads, aborted: reason }
       }
       failed++
       console.error(`[messenger/brief] ${candidate.conversationId} failed:`, err)
     }
   }
 
-  return { generated, failed, aborted: null }
+  return { generated, failed, emptyThreads, aborted: null }
 }
 
 /**
@@ -412,6 +638,23 @@ export async function runPostBriefSweeps(now: Date): Promise<PostBriefSweepResul
     console.error('[crm/stage-infer] 读往来填阶段整轮失败:', err)
   }
 
+  let callAdvance: CallAdvanceResult | { error: string }
+  try {
+    callAdvance = await advanceNewLeadsAfterFollowUp(now)
+  } catch (err) {
+    callAdvance = { error: err instanceof Error ? err.message : String(err) }
+    console.error('[crm/advance-after-call] 通话接通推进阶段整轮失败:', err)
+  }
+
+  // 被机器判成「非咨询」的人又来了真消息 → 放回「新线索」。没有任何人被机器判过时什么都不做。
+  let enquiryRevive: ReviveResult | { error: string }
+  try {
+    enquiryRevive = await reviveScreenedOnNewInbound(now)
+  } catch (err) {
+    enquiryRevive = { error: err instanceof Error ? err.message : String(err) }
+    console.error('[crm/enquiry-revive] 非咨询放回名单整轮失败:', err)
+  }
+
   // 存「AI 读对话得出的事实」。只写 conversation_facts 这一张自己的表，这一版名单**不读它**
   // （PR2 才读）。整轮出错只记一笔，不影响上面两遍。
   let conversationFacts: FactsRunResult | { error: string }
@@ -422,7 +665,7 @@ export async function runPostBriefSweeps(now: Date): Promise<PostBriefSweepResul
     console.error('[crm/facts] 存对话事实整轮失败:', err)
   }
 
-  return { qualifiedBuyers, stageInfer, conversationFacts }
+  return { qualifiedBuyers, stageInfer, callAdvance, enquiryRevive, conversationFacts }
 }
 
 /** 把 due 列表切成每段 `BRIEFS_PER_CHUNK` 条。抽出来是为了能直测切法。 */

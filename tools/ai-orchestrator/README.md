@@ -32,18 +32,17 @@ pre-existing errors, so only a scoped check can be a gate:
 npx tsc -p tools/ai-orchestrator/tsconfig.json
 ```
 
-**CI**: `.github/workflows/ai-orchestrator-ci.yml` runs both of the above on
-**every** pull request. Ordinary read-only CI — `pull_request` only,
-`contents: read`, references no secret, calls no model, writes nothing. The check
-name is **`ai-orchestrator-tests`**; that is the string to require in the
-`Protect main` ruleset.
+**CI**: `.github/workflows/pr-light-checks.yml` runs both of the above on
+non-draft pull requests, in the same job as the other light checks. Ordinary
+read-only CI — `pull_request` only, the test job has no `checks: write`,
+references no secret, calls no model. The check name is still
+**`ai-orchestrator-tests`**; that is the string to require in the
+`Protect main` ruleset. Draft pull requests skip the job so it is not billed.
 
 It carries no `paths:` filter on purpose. GitHub does not run a workflow on a PR
 its filter excludes, so a filtered workflow used as a required check never
-reports — it sits Pending and blocks a PR that never touched this module. The job
-is read-only and takes about a minute, which is far cheaper than a repository-wide
-merge deadlock. The supply-chain suite fails the build if any event filter
-reappears.
+reports — it sits Pending and blocks a PR that never touched this module.
+The supply-chain suite fails the build if a path or branch filter reappears.
 
 It is not an orchestrator trigger: the orchestrator itself is still
 `workflow_dispatch`-only and still disabled by default.

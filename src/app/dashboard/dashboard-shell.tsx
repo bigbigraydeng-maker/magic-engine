@@ -7,6 +7,8 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { FeatureLockModal } from '@/components/auth/FeatureLockGate'
 import { industryFeatureFlags } from '@/lib/clients/industry-features'
+import { viewerFacts } from '@/lib/auth/home-entries'
+import { WorkspaceViewerProvider } from './workspace-viewer'
 
 interface Props {
   children: React.ReactNode
@@ -18,6 +20,8 @@ interface Props {
   /** 客户行业 —— 决定「房子」「行程单」这类行业专属入口显不显示。null = 认不出，一个都不给。 */
   clientIndustry: string | null
   roleLabel: string
+  /** 邮箱在 ADMIN_EMAILS 里，且不是受限管理员。由服务端算好，避免把名单打进浏览器包。 */
+  exactGlobalAdmin: boolean
 }
 
 // ── Nav definition ────────────────────────────────────────────────────────────
@@ -41,6 +45,7 @@ export const ADMIN_SECTIONS: NavSection[] = [
       { key: 'learning',  label: 'Agent 学习库', mark: 'LB', href: '/dashboard/learning' },
       { key: 'ad-approval',     label: '等你点头的广告',    mark: 'OK', href: '/dashboard/ad-approval' },
       { key: 'kernel-approvals', label: '等你点头的动作',   mark: 'KA', href: '/dashboard/kernel-approvals' },
+      { key: 'launch-signoff',  label: '上线签字',         mark: 'SG', href: '/dashboard/launch-signoff' },
       { key: 'clients',   label: 'Clients',  mark: 'CL', href: '/dashboard/clients' },
     ],
   },
@@ -84,6 +89,7 @@ export const ADMIN_SECTIONS: NavSection[] = [
       { key: 'viral-references', label: 'Viral References',mark: 'VR', href: '/dashboard/admin/viral-references' },
       { key: 'team-memory',     label: '团队工作记忆',     mark: 'TM', href: '/dashboard/team-memory' },
       { key: 'product-map',     label: 'ME2 产品地图',    mark: 'PM', href: '/dashboard/me2/product-map' },
+      { key: 'agents-docs',     label: 'Agent 与手册',     mark: 'AD', href: '/dashboard/admin/agents' },
     ],
   },
 ]
@@ -169,11 +175,11 @@ function buildSelfServeSections(clientId: string): NavSection[] {
         // ⚠️ 这里是 **self-serve 客户** 的导航,不是内部导航。
         // 「视频工厂」不能放这儿:middleware 对 client-viewer 只放行 /dashboard/clients/<自己>/**,
         // /dashboard/factory 会被直接 redirect 回工作台(点了没反应);就算放行,
-        // /api/factory/work-orders 是 guardAdmin,整页也只会是 403 红条。
+        // /api/factory/work-orders 要管理员登录态(requireAdminScope),整页也只会是 403 红条。
         // 内部人员的入口在 ADMIN_SECTIONS 里(不带 ?client=,跨客户总览)。
         { key: 'assets',  label: '素材库',   mark: 'AS', href: `/dashboard/clients/${clientId}/assets` },
-        { key: 'visuals', label: 'Visual Studio', mark: 'VS', href: '/dashboard/visuals' },
-        { key: 'content', label: 'Content',       mark: 'CT', href: '/dashboard/content' },
+        // 图片工厂(/dashboard/visuals)、内容日历(/dashboard/content)不放这儿:
+        // middleware 只对 paid_client 放行这两个地址,self_serve 点了会被弹回工作台。
       ],
     },
     {
@@ -181,7 +187,6 @@ function buildSelfServeSections(clientId: string): NavSection[] {
       items: [
         { key: 'goals',       label: 'Goals',       mark: 'GO', href: `/dashboard/clients/${clientId}/goals`,       paidOnlyFeature: 'Goals' },
         { key: 'strategy',    label: 'Strategy',    mark: 'ST', href: `/dashboard/clients/${clientId}/strategy`,    paidOnlyFeature: 'Strategy' },
-        { key: 'diagnostic',  label: 'Diagnostic',  mark: 'DG', href: `/dashboard/clients/${clientId}/diagnostic`,  paidOnlyFeature: 'Diagnostic' },
         { key: 'execution',   label: 'Execution',   mark: 'EX', href: `/dashboard/clients/${clientId}/execution`,   paidOnlyFeature: 'Execution' },
         { key: 'connectors',  label: 'Connectors',  mark: 'CN', href: `/dashboard/clients/${clientId}/settings?tab=connect`,  paidOnlyFeature: 'Connectors' },
       ],
@@ -220,7 +225,6 @@ function buildScopedAdminSections(clientId: string, industry: string | null): Na
       title: '诊断与策略',
       items: [
         { key: 'zhangqian',  label: '品牌扫描', mark: 'ZQ', href: at('/zhangqian') },
-        { key: 'diagnostic', label: '深度诊断', mark: 'DG', href: at('/diagnostic') },
         { key: 'goals',      label: '目标',     mark: 'GO', href: at('/goals') },
         { key: 'strategy',   label: '策略',     mark: 'ST', href: at('/strategy') },
         { key: 'execution',  label: '执行追踪', mark: 'EX', href: at('/execution') },
@@ -242,7 +246,7 @@ function buildScopedAdminSections(clientId: string, industry: string | null): Na
   ]
 }
 
-export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId, clientIndustry }: Props) {
+export default function DashboardShell({ children, userEmail, userRole, userTier, allowedClientId, clientIndustry, roleLabel, exactGlobalAdmin }: Props) {
   const pathname = usePathname()
   const [lockModalFeature, setLockModalFeature] = useState<string | null>(null)
 
@@ -250,6 +254,7 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
   const isSelfServe = isClientViewer && userTier === 'self_serve'
   // 受限管理员（DEMO_ADMINS）：FDE 视角，但只在一个客户范围内
   const isScopedAdmin = userRole === 'admin' && Boolean(allowedClientId)
+  const facts = viewerFacts(userRole, allowedClientId, exactGlobalAdmin)
 
   const sections: NavSection[] | null = isScopedAdmin && allowedClientId
     ? buildScopedAdminSections(allowedClientId, clientIndustry)
@@ -288,7 +293,7 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
               Magic Engine
             </span>
             <span className="mt-[3px] block text-[10px] tracking-[.04em] text-white/35">
-              Admin cockpit
+              {roleLabel}
             </span>
           </span>
         </Link>
@@ -379,7 +384,9 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
 
       {/* Main content */}
       <main className="min-w-0 flex-col">
-        {children}
+        <WorkspaceViewerProvider facts={facts}>
+          {children}
+        </WorkspaceViewerProvider>
       </main>
 
       {/* Phase X.S4 — upsell modal triggered by sidebar lock clicks. */}

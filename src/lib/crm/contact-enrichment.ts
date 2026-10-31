@@ -12,6 +12,8 @@
  */
 
 import type { ContactRow, TouchRow } from './contact-response-row'
+import { cleanDisplayName } from './clean-display-name'
+import { isAutomatedTouch } from './automated-touch'
 
 export interface ConversationHint {
   contactId: string
@@ -25,28 +27,18 @@ export interface OutboundEmailMsg {
   messageId: string
 }
 
-const MISSING_NAME_LITERALS = /^(whatsapp business|unknown|未知|未留姓名|未留名)$/i
+const SYSTEM_ACCOUNT_LITERAL = /^whatsapp business$/i
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
-/** 名字是不是「等于没有」—— 空、带 @、或是一眼假的占位串。 */
+/**
+ * 名字是不是「等于没有」—— 空、整串是邮箱 / 电话、占位词，或平台系统账号名（WhatsApp Business）。
+ * 判据只有一份：`cleanDisplayName`（`lib/crm/clean-display-name`）。
+ * 注意：以前「带 @ 就算缺名」，现在只有「整串是邮箱」才算——`kay@home` 这种昵称保留。
+ */
 export function isMissingName(name: string | null | undefined): boolean {
   if (name === null || name === undefined) return true
-  const trimmed = name.trim()
-  if (trimmed === '') return true
-  if (trimmed.includes('@')) return true
-  if (MISSING_NAME_LITERALS.test(trimmed)) return true
-  return false
-}
-
-/** 从邮箱里抠出一个人名：@ 前面那段，首字母大写，其余原样。 */
-export function nameFromEmail(email: string | null | undefined): string | null {
-  if (email === null || email === undefined) return null
-  const trimmed = email.trim()
-  const at = trimmed.indexOf('@')
-  if (at < 0) return null
-  const local = trimmed.slice(0, at).trim()
-  if (local.length < 2) return null
-  return local.charAt(0).toUpperCase() + local.slice(1)
+  if (SYSTEM_ACCOUNT_LITERAL.test(name.trim())) return true
+  return cleanDisplayName(name) === null
 }
 
 /** 会话参与者里，第一个长得像邮箱的，就是我们要的邮箱。 */
@@ -60,30 +52,25 @@ export function emailFromHints(hints: ConversationHint[]): string | null {
   return null
 }
 
-/** 名字的兜底链：真名 -> 会话参与者 -> 邮箱前缀 -> 名字本身是邮箱时取前缀 -> 没有。 */
+/**
+ * 名字的兜底链：真名 -> 会话参与者（各渠道上客人自己的昵称）-> 没有。
+ * 🔴 不再从邮箱前缀造名字（`brendam@…` -> 「Brendam」）：那是编出来的，PM 2026-10-22 明确不要。
+ */
 export function resolveDisplayName(args: {
   displayName: string | null
   email: string | null
   hints: ConversationHint[]
 }): string | null {
-  const { displayName, email, hints } = args
+  const { displayName, hints } = args
 
   if (!isMissingName(displayName)) {
-    return displayName === null ? null : displayName.trim()
+    return cleanDisplayName(displayName)
   }
 
   for (const hint of hints) {
     if (!isMissingName(hint.participantName)) {
-      return hint.participantName === null ? null : hint.participantName.trim()
+      return cleanDisplayName(hint.participantName)
     }
-  }
-
-  const fromEmail = nameFromEmail(email)
-  if (fromEmail !== null) return fromEmail
-
-  if (displayName !== null && displayName.includes('@')) {
-    const fromDisplay = nameFromEmail(displayName)
-    if (fromDisplay !== null) return fromDisplay
   }
 
   return null
@@ -130,17 +117,27 @@ export function sourcesOf(args: {
 }
 
 /**
- * 这个人**最早**是从哪个渠道进来的（来源）—— 最早的一条触点；没有触点就看会话渠道。
+ * 这个人**最早**是从哪个渠道进来的（来源）。
+ *
+ * 只认**客人自己发起**的触点：我们打出去的电话 / 发出去的邮件、群发工具记下的「打开了邮件」都不是
+ * 他「从哪里来」。2026-10-28 PM 发现 Hinemoa Taylor 来源显示「电话」——其实是 7 月导入跟进表时
+ * 记的一条「留言未回复」（我们打出去的，时间戳跟她的 Facebook 表单同一秒，排序时它排在前面），
+ * 而 CTS 根本没有电话打进来的渠道。
+ *
+ * 取舍：先在客人发起的触点里找最早的；一条都没有才退回「最早的任意触点」，再退回会话渠道。
  * 不是「来过哪些渠道」：很多人几个渠道都碰过，列出一串等于没说。
  */
 export function originOf(args: {
-  touches: Array<{ channel: string; occurred_at: string }>
+  touches: Array<{ channel: string; occurred_at: string; direction?: string | null; source?: string | null }>
   conversationChannels: string[]
 }): SourceKey | null {
   const byTime = [...args.touches].sort((a, b) => Date.parse(a.occurred_at) - Date.parse(b.occurred_at))
-  for (const t of byTime) {
-    const key = sourceKeyOf(t.channel)
-    if (key !== null) return key
+  const customerInitiated = byTime.filter((t) => t.direction === 'inbound' && !isAutomatedTouch(t.source, null))
+  for (const list of [customerInitiated, byTime]) {
+    for (const t of list) {
+      const key = sourceKeyOf(t.channel)
+      if (key !== null) return key
+    }
   }
   for (const c of args.conversationChannels) {
     const key = sourceKeyOf(c)
@@ -206,12 +203,19 @@ export function enrichContacts(args: {
 
     enrichedContacts.push({
       ...contact,
-      display_name: resolvedName ?? contact.display_name,
+      // 清洗后的名字或 null——**不回落原值**：原值可能就是邮箱，回落等于把邮箱又当名字露出来。
+      // 平台系统账号名（WhatsApp Business）原样保留：下游靠名字把它们挡在名单外，且它本来就是这个名字。
+      display_name: resolvedName ?? (SYSTEM_ACCOUNT_LITERAL.test((contact.display_name ?? '').trim()) ? contact.display_name : null),
       primary_email: resolvedEmail,
     })
 
+    // 机器发的（Mailchimp 欢迎信 / 群发）不算「我们回过他」——否则一封机器信一进来，
+    // 同事从 info@ 真回的信就不再补进时间线，名单会把已跟进的人当成没人联系过。
     const hasOutboundEmailTouch = contactTouches.some(
-      (t) => t.channel === 'email' && t.direction === 'outbound',
+      (t) =>
+        t.channel === 'email' &&
+        t.direction === 'outbound' &&
+        !isAutomatedTouch((t as { source?: string | null }).source, t.metadata as Record<string, unknown> | null),
     )
 
     if (contactEmails.length > 0 && !hasOutboundEmailTouch) {

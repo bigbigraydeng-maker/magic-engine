@@ -45,6 +45,8 @@ function baseInput(over: Partial<WarMapInput> = {}): WarMapInput {
     clocks: { dataDay: '2026-10-15', fetchedAt: '2026-10-15T17:00:00.000Z' },
     growth: null,
     plan: null,
+    runningSince: null,
+    accountDataDays: {},
     creativePoolApproved: 3,
     ...over,
   }
@@ -72,19 +74,42 @@ describe('倒计时', () => {
     { name: '回落', startDate: '2026-12-01', endDate: '2026-12-20' },
   ]
   it('取今天还没结束的第一个阶段，并带上计划是草稿', () => {
-    const plan: PlanInput = { status: 'draft', phases, goalTitle: null }
+    const plan: PlanInput = { status: 'draft', phases, goalTitle: null, recordUpdatedDay: '2026-10-14' }
     const c = buildWarMap(baseInput({ plan })).countdown
     expect(c).toMatchObject({ phaseName: '旺季', daysToLaunch: 5, daysToTarget: 45, planStatus: 'draft' })
   })
   it('第一阶段结束后改看下一个阶段', () => {
-    const plan: PlanInput = { status: 'approved', phases, goalTitle: null }
+    const plan: PlanInput = { status: 'approved', phases, goalTitle: null, recordUpdatedDay: '2026-10-14' }
     const c = buildWarMap(baseInput({ now: '2026-12-05T01:00:00.000Z', plan })).countdown
     expect(c.phaseName).toBe('回落')
   })
   it('没有计划时全是空', () => {
     expect(buildWarMap(baseInput()).countdown).toEqual({
       planStatus: null, phaseName: null, launchDate: null, targetDate: null, daysToLaunch: null, daysToTarget: null,
+      actualLaunchDay: null, planStale: false,
     })
+  })
+  it('计划写的开投日晚于实际已在跑的日子：标出计划过时', () => {
+    const plan: PlanInput = { status: 'approved', phases, goalTitle: null, recordUpdatedDay: '2026-10-14' }
+    const c = buildWarMap(baseInput({ plan, runningSince: '2026-10-15' })).countdown
+    expect(c.planStale).toBe(true)
+    expect(c.actualLaunchDay).toBe('2026-10-15')
+  })
+  it('没有在跑的：计划不算过时', () => {
+    const plan: PlanInput = { status: 'approved', phases, goalTitle: null, recordUpdatedDay: '2026-10-14' }
+    const c = buildWarMap(baseInput({ plan, runningSince: null })).countdown
+    expect(c.planStale).toBe(false)
+    expect(c.actualLaunchDay).toBeNull()
+  })
+  it('实际开投日就是计划开投日：不算过时', () => {
+    const plan: PlanInput = { status: 'approved', phases, goalTitle: null, recordUpdatedDay: '2026-10-14' }
+    const c = buildWarMap(baseInput({ plan, runningSince: '2026-10-21' })).countdown
+    expect(c.planStale).toBe(false)
+    expect(c.actualLaunchDay).toBeNull()
+  })
+  it('实际开投日晚于计划开投日：不算过时', () => {
+    const plan: PlanInput = { status: 'approved', phases, goalTitle: null, recordUpdatedDay: '2026-10-14' }
+    expect(buildWarMap(baseInput({ plan, runningSince: '2026-10-25' })).countdown.planStale).toBe(false)
   })
 })
 
@@ -233,6 +258,260 @@ describe('① 观众池', () => {
   })
 })
 
+describe('倒计时 · 计划过时必须是「计划写完之后才开始跑」', () => {
+  const phases = [{ name: '旺季', startDate: '2026-10-21', endDate: '2026-11-30' }]
+  const mk = (recordUpdatedDay: string | null): PlanInput => ({ status: 'approved', phases, goalTitle: null, recordUpdatedDay })
+
+  it('一直在跑的常驻广告（起跑日早于计划更新日）+ 未来的新阶段计划 → 不算过时，继续倒计时', () => {
+    // 反例：只比「计划开投日 > 实际起跑日」会把它误判成「已开投」，把未来阶段的倒计时藏掉
+    const c = buildWarMap(baseInput({ plan: mk('2026-10-14'), runningSince: '2026-09-01' })).countdown
+    expect(c.planStale).toBe(false)
+    expect(c.actualLaunchDay).toBeNull()
+    expect(c.daysToLaunch).toBe(5)
+  })
+  it('计划更新之后才开始跑，且早于计划写的开投日 → 过时', () => {
+    const c = buildWarMap(baseInput({ plan: mk('2026-10-14'), runningSince: '2026-10-15' })).countdown
+    expect(c.planStale).toBe(true)
+    expect(c.actualLaunchDay).toBe('2026-10-15')
+  })
+  it('起跑日与计划更新日同一天 → 不算过时（说不清谁先谁后，不下断言）', () => {
+    const c = buildWarMap(baseInput({ plan: mk('2026-10-15'), runningSince: '2026-10-15' })).countdown
+    expect(c.planStale).toBe(false)
+  })
+  it('读不到计划更新日 → 退回只比开投日', () => {
+    const c = buildWarMap(baseInput({ plan: mk(null), runningSince: '2026-09-01' })).countdown
+    expect(c.planStale).toBe(true)
+  })
+})
+
+describe('观众池 · 按账户分开', () => {
+  function twoAccounts(over: Partial<WarMapInput> = {}): WarMapInput {
+    return baseInput({
+      accounts: [
+        acct({ adAccountId: 'act_dead', name: '停用号', statusCode: 3 }),
+        acct({ adAccountId: 'act_ok', name: '在用号', statusCode: 1 }),
+      ],
+      audiences: [
+        aud({ id: 'big', adAccountId: 'act_dead', countLower: 44500 }),
+        aud({ id: 'small', adAccountId: 'act_ok', countLower: 9000 }),
+      ],
+      accountDataDays: { act_dead: '2026-10-15', act_ok: '2026-10-15' },
+      clocks: { dataDay: '2026-10-15', fetchedAt: '2026-10-15T17:00:00.000Z' },
+      ...over,
+    })
+  }
+  it('停用账户的大池子不算进「够用」，单列到 unusableRows', () => {
+    const v = buildWarMap(twoAccounts())
+    expect(v.pools.headline.sentence).toContain('9,000')
+    expect(v.pools.headline.sentence).toContain('在用号')
+    expect(v.pools.headline.sentence).not.toContain('44,500')
+    expect(v.pools.rows.map(r => r.id)).toEqual(['small'])
+    expect(v.pools.unusableRows.map(r => r.id)).toEqual(['big'])
+    expect(v.pools.unusableRows[0]).toMatchObject({ accountNote: '欠款停用·不可用', accountUsable: false })
+  })
+  it('每个账户一行小结，按 accounts 顺序', () => {
+    const v = buildWarMap(twoAccounts())
+    expect(v.accountSummaries).toHaveLength(2)
+    expect(v.accountSummaries.map(s => s.adAccountId)).toEqual(['act_dead', 'act_ok'])
+    expect(v.accountSummaries[0]).toMatchObject({
+      usable: false, light: 'red', note: '欠款停用·不可用', biggestPoolSize: 44500,
+    })
+    expect(v.accountSummaries[1]).toMatchObject({
+      usable: true, light: 'green', biggestPoolName: '池子', biggestPoolSize: 9000,
+    })
+  })
+  it('读不到状态的账户，池子照样显示', () => {
+    const v = buildWarMap(twoAccounts({
+      accounts: [acct({ adAccountId: 'act_ok', name: '在用号', statusCode: null })],
+      audiences: [aud({ id: 'small', adAccountId: 'act_ok', countLower: 9000 })],
+    }))
+    expect(v.pools.rows.map(r => r.id)).toEqual(['small'])
+    expect(v.pools.unusableRows).toHaveLength(0)
+  })
+  it('状态码 2 也标不可用，并写明状态码', () => {
+    const v = buildWarMap(twoAccounts({
+      accounts: [acct({ adAccountId: 'act_dead', name: '停用号', statusCode: 2 })],
+      audiences: [aud({ id: 'big', adAccountId: 'act_dead', countLower: 44500 })],
+    }))
+    expect(v.pools.unusableRows[0].accountNote).toContain('状态码 2')
+  })
+  it('所有账户都不可用：不许说够用', () => {
+    const v = buildWarMap(twoAccounts({
+      accounts: [acct({ adAccountId: 'act_dead', name: '停用号', statusCode: 3 })],
+      audiences: [aud({ id: 'big', adAccountId: 'act_dead', countLower: 44500 })],
+    }))
+    expect(v.pools.headline.light).toBe('unknown')
+    expect(v.pools.headline.sentence).toContain('没有观众池可判')
+  })
+})
+
+describe('数据停了不许绿', () => {
+  it('广告数据停了 10 天：表头报过期；观众池只看受众快照，快照新就照常判，不借日报日期', () => {
+    const v = buildWarMap(baseInput({
+      audiences: [aud()],
+      clocks: { dataDay: '2026-10-06', fetchedAt: '2026-10-06T17:00:00.000Z' },
+    }))
+    expect(v.clocks.staleDays).toBe(10)
+    expect(v.pools.headline.light).toBe('green')
+    expect(v.pools.headline.sentence).not.toContain('没更新')
+  })
+  it('受众快照自己过期了：观众池判不了', () => {
+    const v = buildWarMap(baseInput({ audiences: [aud({ capturedAt: '2026-10-10T00:00:00.000Z' })] }))
+    expect(v.pools.headline.light).toBe('unknown')
+  })
+  it('数据只落后 1 天：照常判', () => {
+    const v = buildWarMap(baseInput({
+      audiences: [aud()],
+      clocks: { dataDay: '2026-10-15', fetchedAt: '2026-10-15T17:00:00.000Z' },
+    }))
+    expect(v.pools.headline.light).toBe('green')
+    expect(v.clocks.staleDays).toBe(1)
+  })
+  it('没有数据日：staleDays 是 null', () => {
+    expect(buildWarMap(baseInput({ clocks: { dataDay: null, fetchedAt: null } })).clocks.staleDays).toBeNull()
+  })
+  it('账户自己的数据日太旧：小结照写落后天数，池子灯只看池子快照', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct({ adAccountId: 'act_ok', name: '在用号', statusCode: 1 })],
+      audiences: [aud({ id: 'small', adAccountId: 'act_ok', countLower: 9000 })],
+      accountDataDays: { act_ok: '2026-09-22' },
+    }))
+    const s = v.accountSummaries[0]
+    expect(s.staleDays).toBe(24)
+    expect(s.light).toBe('green')
+  })
+})
+
+// ── #3322：全停账户不参与新鲜度；取数断没断看取数时间；已停系列不参与最高频率 ──────────────
+const FETCH_TODAY = '2026-10-15T17:00:00.000Z' // 新西兰 10/16 06:00
+const FETCH_3D_AGO = '2026-10-13T01:00:00.000Z' // 新西兰 10/13
+
+function twoAccounts(over: Partial<WarMapInput> = {}): WarMapInput {
+  return baseInput({
+    accounts: [acct({ adAccountId: 'act_idle', name: '备用号' }), acct({ adAccountId: 'act_live', name: '主力号' })],
+    clocks: { dataDay: '2026-10-15', fetchedAt: FETCH_TODAY },
+    accountDataDays: { act_idle: '2026-10-13', act_live: '2026-10-15' },
+    accountFetchedAt: { act_idle: FETCH_TODAY, act_live: FETCH_TODAY },
+    accountActivity: {
+      act_idle: { lastSpendDay: '2026-10-13', hasActiveAdset: false },
+      act_live: { lastSpendDay: '2026-10-15', hasActiveAdset: true },
+    },
+    ...over,
+  })
+}
+
+describe('数据新鲜度只算真在投的账户（#3322）', () => {
+  it('一个账户全停、另一个在投：表头不判过期，并注明全停账户没新数据是正常的', () => {
+    const v = buildWarMap(twoAccounts({ audiences: [aud({ adAccountId: 'act_live' })] }))
+    expect(v.clocks.staleDays).toBe(0)
+    expect(v.clocks.dataDay).toBe('2026-10-15')
+    expect(v.clocks.note).toContain('备用号 没在投，没有新数据是正常的')
+    expect(v.accountSummaries.find(s => s.adAccountId === 'act_idle')?.dormant).toBe(true)
+    expect(v.accountSummaries.find(s => s.adAccountId === 'act_live')?.dormant).toBe(false)
+  })
+  it('两个账户都在投、其中一个取数断了 3 天：仍判过期', () => {
+    const v = twoAccounts({
+      accountFetchedAt: { act_idle: FETCH_3D_AGO, act_live: FETCH_TODAY },
+      accountActivity: {
+        act_idle: { lastSpendDay: '2026-10-13', hasActiveAdset: true },
+        act_live: { lastSpendDay: '2026-10-15', hasActiveAdset: true },
+      },
+    })
+    const view = buildWarMap(v)
+    expect(view.clocks.staleDays).toBe(3)
+    expect(view.clocks.dataDay).toBe('2026-10-13')
+    expect(view.accountSummaries.find(s => s.adAccountId === 'act_idle')?.dormant).toBe(false)
+  })
+  it('在投账户取数正常、只是这几天没花钱：不报取数挂了，只在说明里写清', () => {
+    const view = buildWarMap(twoAccounts({
+      accountFetchedAt: { act_idle: FETCH_TODAY, act_live: FETCH_TODAY },
+      accountDataDays: { act_idle: '2026-10-10', act_live: '2026-10-15' },
+      accountActivity: {
+        act_idle: { lastSpendDay: '2026-10-10', hasActiveAdset: true },
+        act_live: { lastSpendDay: '2026-10-15', hasActiveAdset: true },
+      },
+    }))
+    expect(view.clocks.staleDays).toBe(0)
+    expect(view.clocks.note).toContain('不是取数挂了')
+  })
+  it('受众快照新：观众池能正常判，哪怕日报日期很旧', () => {
+    const v = buildWarMap(twoAccounts({
+      audiences: [aud({ adAccountId: 'act_live' })],
+      accountDataDays: { act_idle: '2026-10-01', act_live: '2026-10-01' },
+      clocks: { dataDay: '2026-10-01', fetchedAt: FETCH_TODAY },
+    }))
+    expect(v.pools.headline.light).toBe('green')
+  })
+  it('取数超过 2 天没成功：不能把空的广告组窗口当成全停，单账户仍报数据陈旧', () => {
+    const v = buildWarMap(baseInput({
+      clocks: { dataDay: '2026-10-13', fetchedAt: FETCH_3D_AGO },
+      accountDataDays: { act_1: '2026-10-13' },
+      accountFetchedAt: { act_1: FETCH_3D_AGO },
+      accountActivity: { act_1: { lastSpendDay: '2026-10-13', hasActiveAdset: false } },
+      campaigns: [camp({ frequency7d: 1.4, lastSpendDay: '2026-10-13' })],
+    }))
+    expect(v.accountSummaries[0]?.dormant).toBe(false)
+    expect(v.clocks.staleDays).toBe(3)
+    expect(v.clocks.note ?? '').not.toContain('没在投')
+  })
+  it('没看到广告组快照：不能当成已停，哪怕最近花费日已经很旧', () => {
+    const v = buildWarMap(baseInput({
+      clocks: { dataDay: '2026-10-15', fetchedAt: FETCH_TODAY },
+      accountDataDays: { act_1: '2026-10-10' },
+      accountFetchedAt: { act_1: FETCH_TODAY },
+      accountActivity: { act_1: { lastSpendDay: '2026-10-10', hasActiveAdset: null } },
+    }))
+    expect(v.accountSummaries[0]?.dormant).toBe(false)
+    expect(v.clocks.staleDays).toBe(0)
+    expect(v.clocks.note ?? '').not.toContain('没在投')
+  })
+})
+
+describe('已停系列不参与最高频率（#3322）', () => {
+  it('停掉的系列频率再高也不拉红，单独放进「已停」，数据日与表头一致', () => {
+    const v = buildWarMap(twoAccounts({
+      campaigns: [
+        camp({ campaignId: 'run', campaignName: '在投系列', adAccountId: 'act_live', frequency7d: 1.6, lastSpendDay: '2026-10-15' }),
+        camp({ campaignId: 'old', campaignName: '已停系列', adAccountId: 'act_live', frequency7d: 2.33, lastSpendDay: '2026-10-13' }),
+        camp({ campaignId: 'idle', campaignName: '全停账户系列', adAccountId: 'act_idle', frequency7d: 3.4, lastSpendDay: '2026-10-13' }),
+      ],
+    }))
+    expect(v.frequency.rows.map(r => r.campaignId)).toEqual(['run'])
+    expect(v.frequency.stoppedRows.map(r => r.campaignId).sort()).toEqual(['idle', 'old'])
+    expect(v.frequency.headline.light).toBe('green')
+    expect(v.frequency.headline.sentence).toContain('最高 1.60')
+    expect(v.frequency.windowLabel).toBe('10/9–10/15')
+    expect(v.adjust.actions.some(a => a.key.startsWith('freq-'))).toBe(false)
+  })
+  it('两个在投账户数据日不同：频率区间用实际读取的全局数据日，不用较旧的那个', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct({ adAccountId: 'act_new', name: '新号' }), acct({ adAccountId: 'act_old', name: '旧号' })],
+      clocks: { dataDay: '2026-10-15', fetchedAt: FETCH_TODAY },
+      accountDataDays: { act_new: '2026-10-15', act_old: '2026-10-13' },
+      accountFetchedAt: { act_new: FETCH_TODAY, act_old: FETCH_TODAY },
+      accountActivity: {
+        act_new: { lastSpendDay: '2026-10-15', hasActiveAdset: true },
+        act_old: { lastSpendDay: '2026-10-13', hasActiveAdset: true },
+      },
+      campaigns: [
+        camp({ campaignId: 'new', adAccountId: 'act_new', frequency7d: 1.2, lastSpendDay: '2026-10-15' }),
+        camp({ campaignId: 'old', adAccountId: 'act_old', frequency7d: 1.4, lastSpendDay: '2026-10-13' }),
+      ],
+    }))
+    expect(v.clocks.dataDay).toBe('2026-10-13')
+    expect(v.frequency.windowLabel).toBe('10/9–10/15')
+  })
+})
+
+describe('经营视图的「旧数据」（#3322）', () => {
+  it('数据截至昨天算新：没有旧数据标记，也没有「今天还没跑」', () => {
+    const g = growth({ date: '2026-10-15', problems: [{ code: 'D3', title: '花钱没结果', how: null }] })
+    const v = buildWarMap(baseInput({ growth: g }))
+    expect(v.adjust.actions.some(a => a.key === 'growth-stale')).toBe(false)
+    expect(v.adjust.actions.find(a => a.key.startsWith('growth-D3'))?.what).not.toContain('旧数据')
+  })
+})
+
 describe('② 频率', () => {
   it('数据新：1.83 绿，写明真实日期区间', () => {
     const v = buildWarMap(baseInput({ campaigns: [camp({ frequency7d: 1.83 })] }))
@@ -332,24 +611,98 @@ describe('③ 今天要调什么', () => {
 describe('目标进度那一行只陈述事实', () => {
   const g = growth({ goalTitle: '圣诞团招募', paceReason: '落后线性节奏 65.7%' })
   it('计划挂的是另一个目标：两个标题并排写出来', () => {
-    const plan: PlanInput = { status: 'draft', phases: [], goalTitle: '三月四团招募' }
+    const plan: PlanInput = { status: 'draft', phases: [], goalTitle: '三月四团招募', recordUpdatedDay: null }
     const note = buildWarMap(baseInput({ growth: g, plan })).goalNote
     expect(note?.warning).toContain('《圣诞团招募》')
     expect(note?.warning).toContain('《三月四团招募》')
     expect(note?.warning).toContain('不是同一个')
   })
   it('就是同一个目标：不提', () => {
-    const plan: PlanInput = { status: 'draft', phases: [], goalTitle: '圣诞团招募' }
+    const plan: PlanInput = { status: 'draft', phases: [], goalTitle: '圣诞团招募', recordUpdatedDay: null }
     expect(buildWarMap(baseInput({ growth: g, plan })).goalNote).toBeNull()
   })
   it('没有计划、或计划的目标没读到：照实说，不下断言', () => {
     expect(buildWarMap(baseInput({ growth: g })).goalNote?.warning).toContain('跟任何计划无关')
-    const plan: PlanInput = { status: 'draft', phases: [], goalTitle: null }
+    const plan: PlanInput = { status: 'draft', phases: [], goalTitle: null, recordUpdatedDay: null }
     expect(buildWarMap(baseInput({ growth: g, plan })).goalNote?.warning).toContain('没读到')
+  })
+  it('计划上的处方一行原样带到视图；没有就空', () => {
+    const line = '处方 v1 · 草稿 · 2 条人工动作'
+    const plan: PlanInput = { status: 'draft', phases: [], goalTitle: null, recordUpdatedDay: null, prescriptionLine: line }
+    expect(buildWarMap(baseInput({ plan })).prescriptionLine).toBe(line)
+    expect(buildWarMap(baseInput()).prescriptionLine).toBeNull()
   })
   it('没有目标标题：不出这一段；共享代码里也不写客户事实', () => {
     expect(buildWarMap(baseInput({ growth: growth() })).goalNote).toBeNull()
     const note = buildWarMap(baseInput({ growth: g })).goalNote
     expect(JSON.stringify(note)).not.toMatch(/停投|3 月四团/)
+  })
+})
+
+describe('审查补断言 · 账户清单、新鲜度、频率按账户过滤', () => {
+  it('绑了但没有快照的账户：照样列出，写「已绑定，暂无数据」', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct(), acct({ adAccountId: 'act_2', name: '备用户', statusCode: null, capturedAt: null })],
+    }))
+    const row = v.accounts.find(a => a.adAccountId === 'act_2')
+    expect(row?.sentence).toBe('已绑定，暂无数据')
+    expect(row?.light).toBe('unknown')
+  })
+
+  it('读过快照却读不到状态：仍是「读不到账户状态」，不是「暂无数据」', () => {
+    const v = buildWarMap(baseInput({ accounts: [acct({ statusCode: null })] }))
+    expect(v.accounts[0]?.sentence).toBe('读不到账户状态')
+  })
+
+  it('两个在用账户数据日不同：表头以最旧的为准；观众池不借日报日期', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct(), acct({ adAccountId: 'act_2', name: '二号' })],
+      audiences: [aud(), aud({ id: 'aud_2', adAccountId: 'act_2' })],
+      audienceHistory: dailyHistory('aud_1', [44000, 44100, 44200, 44300, 44400, 44500]),
+      clocks: { dataDay: '2026-10-15', fetchedAt: '2026-10-15T17:00:00.000Z' },
+      accountDataDays: { act_1: '2026-10-15', act_2: '2026-10-10' },
+    }))
+    expect(v.clocks.dataDay).toBe('2026-10-10')
+    expect(v.clocks.staleDays).toBe(6)
+    expect(v.pools.headline.light).toBe('green')
+    expect(v.pools.headline.sentence).not.toContain('停在')
+    expect(v.pools.headline.sentence).not.toContain('没更新')
+  })
+
+  it('数据日落后正好 2 天不算停，3 天才算（边界）；观众池不借这个日期', () => {
+    const two = buildWarMap(baseInput({ clocks: { dataDay: '2026-10-14', fetchedAt: null }, accountDataDays: { act_1: '2026-10-14' }, audiences: [aud()] }))
+    const three = buildWarMap(baseInput({ clocks: { dataDay: '2026-10-13', fetchedAt: null }, accountDataDays: { act_1: '2026-10-13' }, audiences: [aud()] }))
+    expect(two.clocks.staleDays).toBe(2)
+    expect(three.clocks.staleDays).toBe(3)
+    expect(two.pools.headline.sentence).not.toContain('没更新')
+    expect(three.pools.headline.sentence).not.toContain('没更新')
+  })
+
+  it('欠款账户下的广告系列不进频率卡', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct(), acct({ adAccountId: 'act_9', name: '个人号', statusCode: 3 })],
+      campaigns: [camp(), camp({ campaignId: 'camp_9', adAccountId: 'act_9', frequency7d: 5 })],
+    }))
+    expect(v.frequency.rows.map(r => r.campaignId)).toEqual(['camp_1'])
+  })
+
+  it('状态码 8/9 不写成「不可用」，关闭类（2）写已关闭', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct({ statusCode: 8 }), acct({ adAccountId: 'act_2', statusCode: 2 })],
+    }))
+    const s8 = v.accountSummaries.find(s => s.adAccountId === 'act_1')
+    const s2 = v.accountSummaries.find(s => s.adAccountId === 'act_2')
+    expect(s8?.note).toContain('暂不计入判断')
+    expect(s8?.note).not.toContain('不可用')
+    expect(s2?.note).toContain('已关闭')
+  })
+
+  it('表头「数据日」和「已 N 天」同一口径：都是最旧的那个账户', () => {
+    const v = buildWarMap(baseInput({
+      accounts: [acct(), acct({ adAccountId: 'act_2', name: '二号' })],
+      accountDataDays: { act_1: '2026-10-15', act_2: '2026-10-10' },
+    }))
+    expect(v.clocks.dataDay).toBe('2026-10-10')
+    expect(v.clocks.staleDays).toBe(6)
   })
 })

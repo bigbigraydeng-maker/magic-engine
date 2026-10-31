@@ -23,6 +23,17 @@ export const LOGO_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
 /** Exactly 6 hex digits with a leading #. */
 export const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 
+/**
+ * Optional music gain multiplier. Default 1 (no boost). The 2.5 cap is an engineering limit, not a safe value:
+ * the gain is calibrated per track by measuring the render (one real track already reached -1.6 dBFS true peak at 1.9).
+ */
+export const musicGainSchema = z
+  .number()
+  .finite()
+  .min(1, { message: '音乐增益必须在 1 到 2.5 之间' })
+  .max(2.5, { message: '音乐增益必须在 1 到 2.5 之间' })
+  .optional();
+
 const NO_CONTROL_CHARS = /^[^\u0000-\u001f\u007f]*$/;
 
 /** Build a validator for a safe relative file name with an allowed extension. */
@@ -80,6 +91,36 @@ const PRICE = z
     dateLine: text(40).optional(),
     footnote: text(80),
     footnoteSize: z.number().int().min(30, { message: '脚注字号必须在 30 到 60 之间' }).max(60, { message: '脚注字号必须在 30 到 60 之间' }).optional(),
+    layout: z.enum(['center', 'corner']).optional(),
+    qualifierSize: z.number().int().min(30, { message: '限定语字号必须在 30 到 60 之间' }).max(60, { message: '限定语字号必须在 30 到 60 之间' }).optional(),
+    footnoteBackdrop: z.boolean().optional(),
+  })
+  .strict();
+
+const frameHookSpec = z
+  .object({
+    style: z.enum(['kinetic', 'stat', 'question'], {
+      message: '钩子样式只能是 kinetic、stat 或 question',
+    }).optional(),
+    text: text(80).optional(),
+    stat: text(16).optional(),
+    question: text(90).optional(),
+  })
+  .strict();
+
+const frameEndSpec = z
+  .object({
+    cta: text(48).optional(),
+    contact: text(80).optional(),
+    brandName: text(40).optional(),
+  })
+  .strict();
+
+/** Optional opening-hook and end-card switch. Omitted fields keep each template's own default. */
+export const frameSchema = z
+  .object({
+    hook: z.union([z.literal(false), frameHookSpec]).optional(),
+    endCard: z.union([z.literal(false), frameEndSpec]).optional(),
   })
   .strict();
 
@@ -107,6 +148,7 @@ export const ListReelPropsSchema = z
       .optional(),
     musicFile: relFile('音乐文件', MUSIC_EXTS).nullable(),
     musicStartSec: z.number().min(0).max(600).optional(),
+    musicGain: musicGainSchema,
     beats: z.array(z.number().finite().min(0).max(120)).max(80),
     hook: z
       .object({
@@ -119,11 +161,28 @@ export const ListReelPropsSchema = z
       .min(MIN_ITEMS, { message: '条目数量最少 3 个' })
       .max(MAX_ITEMS, { message: '条目数量最多 7 个' }),
     itemLabel: text(24),
+    itemLabelSize: z.number().int().min(30, { message: '条目标签字号必须在 30 到 64 之间' }).max(64, { message: '条目标签字号必须在 30 到 64 之间' }).optional(),
     revealTitle: text(40),
+    revealTitleSize: z.number().int().min(36, { message: '片尾标题字号必须在 36 到 60 之间' }).max(60, { message: '片尾标题字号必须在 36 到 60 之间' }).optional(),
     price: PRICE,
+    frame: frameSchema.optional(),
   })
   .strict()
   .superRefine((val, ctx) => {
+    // The corner card sits in the lower right (x 270-960, from y=820) and must stay inside the 1248 safe-zone
+    // floor and the 960 right edge, so its text blocks are capped to one line each.
+    if (val.price.layout === 'corner') {
+      const p = val.price;
+      const tooBig = (p.qualifierSize ?? 40) > 48 || (p.footnoteSize ?? 30) > 40;
+      const tooLong = p.qualifier.length > 26 || p.footnote.length > 26 || (p.dateLine ?? '').length > 24;
+      if (tooBig || tooLong) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['price', 'layout'],
+          message: '右下小卡版式：限定语≤26字且字号≤48、脚注≤26字且字号≤40、日期行≤24字（否则会超出安全区）',
+        });
+      }
+    }
     const beats = val.beats;
     for (let i = 1; i < beats.length; i++) {
       if (beats[i] <= beats[i - 1]) {

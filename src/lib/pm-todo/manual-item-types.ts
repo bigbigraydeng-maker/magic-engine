@@ -39,6 +39,7 @@ import type { LeadFollowupItemKind } from './lead-followup-items'
 import type { AdsAutonomyItemKind } from './ads-autonomy-items'
 import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
+import type { AdsServicePauseItemKind } from './ads-service-pause-items'
 import type { AdsAccountStatusItemKind } from './ads-account-status-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
@@ -62,6 +63,9 @@ import type { PmKind } from './five-kinds'
 //   我们的探活 fetch 很可能拿到 403 → 整条被当坏链接丢掉。而这两条恰恰是
 //   「全站 AI 在空跑」和「这套告警自己瞎了」—— 宁可让人自己找入口，也不能让它静默消失。
 export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
+  // 标题效果判定的两条欠账：链接是要登录的后台页，探活会判坏链接——不能因此静默消失（2026-10-29）。
+  'seo_rank_verdict_overdue',
+  'seo_rank_baseline_missing',
   // diagnostic_synthesis_failing：链接是需要登录的后台页，探活大概率判成坏链接 —— 这条正是要消灭「静默」的，不能被探活悄悄丢掉（魏征 2026-10-18）。
   'diagnostic_synthesis_failing',
   'cross_client_leak',
@@ -69,6 +73,8 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // facebook_sync_failing：Facebook 私信/留资同步连续失败 = 新客人进不了 CRM（2026-09-16 NAL 断了 9 天没人知道）。
   //   链接是需要登录的后台页，探活大概率判成坏链接 —— 宁可让人自己找入口，也不能让它静默消失。
   'facebook_sync_failing',
+  // ads_service_pause_notice：链接是登录后的广告健康页，探活容易判成坏链接。系列已经停了，这条不能静默丢掉。
+  'ads_service_pause_notice',
   // lead_followup_due：链接是登录后台页，探活易判成坏链接；这条丢了 = 有人填了表没人知道。
   'lead_followup_due',
   'lead_followup_check_failed',
@@ -98,6 +104,11 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 推广计划每日检查：链接是需要登录的页面，探活多半判成坏链接——这条里还有「检查自己没跑成」，绝不能静默消失。
   'promo_plan_watch',
   'promo_plan_watch_broken',
+  'plan_draft_auto_failed',
+  // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
+  // 这条里还有「检查自己没跑成」，绝不能因为链接问题静默消失。
+  'ads_tracking_preflight_fix',
+  'ads_tracking_preflight_broken',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -106,10 +117,19 @@ export const META_PENDING_STALE_DAYS = 3
 export const CRAWL_STALE_DAYS = CRAWL_FRESH_DAYS
 
 export type ManualItemKind =
+  /** 已上线标题改动超期没有效果判定 / 上线时没记改前名次 —— 开发欠账（2026-10-29）。 */
+  | 'seo_rank_verdict_overdue'
+  | 'seo_rank_baseline_missing'
   /** 体检的 AI 文字叙事没写成（保存失败/模型失败）—— 开发欠账，不用 PM 动手（2026-10-18）。 */
   | 'diagnostic_synthesis_failing'
   | 'promo_plan_watch'
   | 'promo_plan_watch_broken'
+  /** 同意前自动起草推广计划连续失败：系统没写成，开发看，不占批准决定 */
+  | 'plan_draft_auto_failed'
+  /** 开投前追踪检查里有硬门 / 软门红灯：具体怎么修（开发的活，不占 PM 的清单；PM 在推广计划页看灯） */
+  | 'ads_tracking_preflight_fix'
+  /** 开投前追踪检查自己没跑成 / 回执过期：没人在盯追踪（开发欠账） */
+  | 'ads_tracking_preflight_broken'
   | 'blog_pr_open'
   | 'not_indexed'
   | 'meta_stuck'
@@ -176,6 +196,14 @@ export type ManualItemKind =
   | 'prescription_updated'
   | 'leads_metric_untrusted'
   | 'factory_worker_idle'
+  /** 渲染引擎没就绪。领单程序还在，不等于片子能做出来。 */
+  | 'factory_render_worker_down'
+  /** 待审超过 24 小时，只催审核的人，不自动批准。 */
+  | 'factory_review_overdue'
+  /** 死信不会再自动重跑，或失败原因读不到。上报，不是批准。 */
+  | 'factory_dead_letter_stuck'
+  /** 待审或死信清单自己没读出来。没列出来不等于没有。 */
+  | 'factory_material_check_failed'
   | 'ad_readback_blocker'
   /** Mailchimp 出口 tally 里出现非预期失败（配置读不出来 / API key 失效 / 被限流 / provider 5xx） */
   | 'mailchimp_export_broken'
@@ -258,6 +286,8 @@ export type ManualItemKind =
   /** 每日广告巡检的广告级规则（D2 素材疲劳 / D10 点进去之后差了）：要人拍板改不改，系统不会自动改 */
   | AdsRuleFindingItemKind
   | AdsCircuitItemKind
+  /** 服务把一条在投的广告系列暂停了 —— 要不要恢复由人点确认卡 */
+  | AdsServicePauseItemKind
   /** Meta 广告账户状态不是正常超过 24 小时 / 状态读不到 / 账户已关闭（每周提醒一次） */
   | AdsAccountStatusItemKind
   /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */

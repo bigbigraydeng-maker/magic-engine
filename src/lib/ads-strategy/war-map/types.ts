@@ -51,6 +51,8 @@ export interface AdsetInput {
   /** Meta effective_status。注意：账户欠款时它仍可能是 ACTIVE，不等于真在投 */
   effectiveStatus: string | null
   includedAudienceIds: string[]
+  /** 所属广告账户；老调用方不带 = 不参与「账户在不在投」的判断 */
+  adAccountId?: string
 }
 
 export interface CampaignFrequencyInput {
@@ -61,6 +63,16 @@ export interface CampaignFrequencyInput {
   spend7d: number
   /** 窗口内最近一个非空的 7 天不重复频率；null = 没有 */
   frequency7d: number | null
+  /** 窗口内最近一个有花费的数据日；null = 窗口内没花过钱；不带 = 不判「已停」 */
+  lastSpendDay?: string | null
+}
+
+/** 一个账户现在在不在投：最近有花费，或设置里有 ACTIVE 广告组 */
+export interface AccountActivity {
+  /** 这个账户最近一个有花费的数据日；null = 从没花过 */
+  lastSpendDay: string | null
+  /** true = 看到 ACTIVE；false = 看到了广告组但没有 ACTIVE；null = 这两天没看到快照，不能当成没有 */
+  hasActiveAdset: boolean | null
 }
 
 export interface GrowthProblemInput {
@@ -94,6 +106,10 @@ export interface PlanInput {
   phases: PlanPhaseInput[]
   /** 计划挂的目标标题；读不到 = null */
   goalTitle: string | null
+  /** 这条计划记录最后一次更新是新西兰哪一天（YYYY-MM-DD）；读不到 = null。用来判断「计划写完之后才有广告开始跑」。 */
+  recordUpdatedDay: string | null
+  /** 该计划所挂目标的最新处方一行。没有处方时不填。 */
+  prescriptionLine?: string | null
 }
 
 export interface WarMapInput {
@@ -110,8 +126,18 @@ export interface WarMapInput {
   growth: GrowthInput | null
   /** null = 没有推广计划 */
   plan: PlanInput | null
+  /** 实际已经在跑的最早日子（新西兰日期 YYYY-MM-DD）：在用账户里有「系列开着且下面有在投广告组」的那个最早起算日。null = 没有在跑的，或读不到。用来判断「计划记录是不是过时了」。 */
+  runningSince: string | null
+  /** 每个绑定账户自己的数据日（该账户 ad_daily_insights 里最新的 insight_date）。键是 adAccountId；没有数据 = null。 */
+  accountDataDays: Record<string, string | null>
+  /** 每个绑定账户最近一次取数时间（ad_daily_insights.fetched_at 最大值）。不带 = 退回用数据日判断。 */
+  accountFetchedAt?: Record<string, string | null>
+  /** 每个绑定账户在不在投。不带 = 所有在用账户都算在投（老行为）。 */
+  accountActivity?: Record<string, AccountActivity>
   /** 素材池里「已批准」的条数；null = 读不到素材池 */
   creativePoolApproved: number | null
+  /** 广告线索跟进。不带 = 调用方还没接，清单里不加这张卡。 */
+  followup?: FollowupInput
 }
 
 // ── 输出（页面直接渲染）────────────────────────────────────────────────
@@ -130,6 +156,10 @@ export interface CountdownView {
   /** 距计划开投日几天；负数 = 已过；null = 没有计划 */
   daysToLaunch: number | null
   daysToTarget: number | null
+  /** 实际开投日：仅当计划开投日晚于它时才有值；否则 null */
+  actualLaunchDay: string | null
+  /** 计划记录是不是过时了（计划写的开投日晚于实际已在跑的日子） */
+  planStale: boolean
 }
 
 export interface AccountView {
@@ -146,6 +176,7 @@ export type PoolTrend = 'growing' | 'flat' | 'shrinking' | 'unknown'
 export interface PoolRow {
   id: string
   name: string
+  adAccountId: string
   accountName: string
   /** null = 判不了（没读到 / −1） */
   sizeLower: number | null
@@ -154,6 +185,31 @@ export interface PoolRow {
   trendNote: string
   /** 设置里有几个广告组把它当受众（账户欠款时不等于真在投） */
   usedByAdsets: number
+  /** 这个池子所属的广告账户现在能不能用（账户状态异常=不能用） */
+  accountUsable: boolean
+  /** 不能用时的一句话原因，例如「欠款停用·不可用」；能用时 null */
+  accountNote: string | null
+  light: Light
+}
+
+/** 一个绑定账户在观众池这一块的小结（每个账户一行） */
+export interface AccountPoolSummary {
+  adAccountId: string
+  name: string
+  statusCode: number | null
+  usable: boolean
+  /** 不可用原因，例如「欠款停用·不可用」；可用时 null */
+  note: string | null
+  /** 这个账户自己的数据日；null = 没有数据 */
+  dataDay: string | null
+  /** 这个账户的数据落后今天几天；null = 没有数据日 */
+  staleDays: number | null
+  /** 这个账户里最大的池子（读得准的才算）；没有 = null */
+  biggestPoolName: string | null
+  biggestPoolSize: number | null
+  /** 这个账户现在没在投：有够新且完整的停投证据；没有新数据是正常的 */
+  dormant: boolean
+  poolCount: number
   light: Light
 }
 
@@ -165,6 +221,20 @@ export interface FrequencyRow {
   spend7d: number
   light: Light
   note: string
+}
+
+export interface FollowupGroup {
+  label: string
+  count: number
+}
+
+export interface FollowupInput {
+  unreadable: boolean
+  groups: FollowupGroup[]
+  inWindow: number
+  outsideWindow: number
+  /** null = 还没有够老的线索，或这一段读不到。 */
+  rateWithin24h: number | null
 }
 
 export type ActionSeverity = 'red' | 'yellow' | 'info'
@@ -189,11 +259,17 @@ export interface GoalNote {
 export interface WarMapView {
   generatedAt: string
   countdown: CountdownView
-  clocks: { dataDay: string | null; fetchedAt: string | null }
+  /** note：不算「取数挂了」但值得说一句的事（全停账户没新数据 / 取数正常只是没花钱）；没有就是 null */
+  clocks: { dataDay: string | null; fetchedAt: string | null; staleDays: number | null; note: string | null }
   accounts: AccountView[]
-  pools: { headline: Headline; rows: PoolRow[]; hiddenCount: number }
-  /** windowLabel：花费和频率对应的真实日期区间（数据日往前 7 天），如「10/4–10/10」 */
-  frequency: { headline: Headline; rows: FrequencyRow[]; windowLabel: string | null }
+  accountSummaries: AccountPoolSummary[]
+  pools: { headline: Headline; rows: PoolRow[]; hiddenCount: number; unusableRows: PoolRow[] }
+  /** windowLabel：花费和频率对应的真实日期区间（实际读取的窗口往前 7 天），如「10/4–10/10」 */
+  frequency: { headline: Headline; rows: FrequencyRow[]; stoppedRows: FrequencyRow[]; windowLabel: string | null }
   adjust: { headline: Headline; actions: ActionRow[] }
   goalNote: GoalNote | null
+  /** 计划所挂目标的最新处方一行；没有就是 null */
+  prescriptionLine: string | null
+  /** 近 7 天广告线索的 24 小时跟进率低于 80%。 */
+  budgetHold: boolean
 }

@@ -26,6 +26,9 @@ import {
   type TouchpointForColumn,
 } from '@/lib/crm/table-columns'
 
+import { contactCardTitle } from './display-name'
+import { isAutomatedTouch } from './automated-touch'
+
 export interface ContactRow {
   id: string
   display_name: string | null
@@ -38,6 +41,12 @@ export interface ContactRow {
   pinned_at: string | null
   important_note: string | null
   important_due_at: string | null
+  /**
+   * 这条线索当前分给谁跟进 —— `client_portal_users.email` 字面值，null = 还没人管。
+   * 2026-10-26 part 2 加字段 + round-robin 自动分配进来；part 3 这里把它向列表 /
+   * 抽屉透出来，让员工看得见 + 改得动（issue #3158）。
+   */
+  assigned_to: string | null
 }
 
 export interface TouchRow {
@@ -46,6 +55,8 @@ export interface TouchRow {
   channel: string
   direction: 'inbound' | 'outbound'
   occurred_at: string
+  /** Staff-note write time can differ from the backfilled call time. */
+  created_at?: string | null
   summary: string | null
   /** 原话。存量结果值读的时候要靠它重判一次（见 reclassifyStoredOutcome）。 */
   raw: string | null
@@ -88,7 +99,7 @@ export function responseRowFor(
   stageMeta: Map<string, { label: string; suppressed: boolean }>,
   model: ReturnType<typeof buildContactModel>,
   seg: ReturnType<typeof segmentContact>,
-  brief?: { intent: IntentLevel | null; nextAction: string | null } | null,
+  brief?: { intent: IntentLevel | null; nextAction: string | null; summary?: string | null } | null,
 ): { row: Record<string, unknown>; custom: Record<CustomColumnKey, string | null> } {
   // 进线时间 = 真实最早一条触点（不是导入日期）；没触点退回 first_seen_at。
   // 最近联系 = 最晚一条触点；0 触点显式 null —— 绝不 fallback last_seen_at
@@ -99,6 +110,10 @@ export function responseRowFor(
     const v = ts(t.occurred_at)
     if (v > 0) {
       if (firstTouch === 0 || v < firstTouch) firstTouch = v
+      // 机器发出的邮件（Mailchimp 欢迎信 / 群发）不算「最近联系」：
+      // 否则每天早上 8:02 的欢迎信会让昨天进来的新客人被算成「今天已处理」（2026-08-02 同类事故）。
+      // 只针对邮件——AI 外呼也标了 automated，但那是一通真电话。
+      if (t.channel === 'email' && t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata)) continue
       if (v > lastTouch) lastTouch = v
     }
   }
@@ -107,6 +122,8 @@ export function responseRowFor(
     channel: t.channel,
     occurredAt: t.occurred_at,
     metadata: t.metadata,
+    source: t.source,
+    raw: t.raw,
   }))
   const custom = extractCustomColumns(forColumns)
 
@@ -114,7 +131,7 @@ export function responseRowFor(
     custom,
     row: {
       contactId: c.id,
-      name: c.display_name || '未留姓名',
+      name: contactCardTitle(c.display_name),
       firstSeenAt: firstTouch > 0 ? new Date(firstTouch).toISOString() : c.first_seen_at,
       lastTouchAt: lastTouch > 0 ? new Date(lastTouch).toISOString() : null,
       phone: c.primary_phone,
@@ -158,12 +175,21 @@ export function responseRowFor(
        */
       suggestedChannel: seg.suggestedChannel,
       reason: seg.reason,
+      // 回头客：同一份判据算出来的，原样带出去，列表标小标签、抽屉顶部画横幅都读它。
+      returning: seg.returning ?? null,
+      // 刚打通聊上、还没记下一步：列表在名字旁标「📞 刚聊过」。
+      afterCall: seg.afterCall === true,
       /**
        * 「该做什么」—— 三套状态（阶段 / 冷热 / 意向）合成的那一个概念（PM 2026-10-10）。
        * 列表只画这一行；stage / segment 字段仍返回，抽屉和筛选还在用。
        */
       nextAction: nextActionFor({ seg, intent: brief?.intent ?? null, aiNextAction: brief?.nextAction ?? null }),
+      // AI 对这位客人的摘要（有就在「该做什么」列显示，比规则那句「进线了」有用）。
+      aiSummary: brief?.summary ?? null,
       intent: brief?.intent ?? null,
+      // 跟进人（issue #3158 第二刀 part 3）：null = 未分配。前端据此在列表 /
+      // 抽屉里显示「跟进人」一列和下拉；跟 `assigned_to` 列同一个值，不作转换。
+      assignedTo: c.assigned_to,
       custom,
     },
   }

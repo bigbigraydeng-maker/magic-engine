@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { ZhugeWorkbenchFab } from '@/components/workbench/ZhugeWorkbenchFab'
+import { afterCrmListReady } from '@/lib/crm/list-ready'
 import { ZhugeWorkbenchDrawer } from '@/components/workbench/ZhugeWorkbenchDrawer'
 
 interface ClientMeta {
@@ -29,16 +30,18 @@ export function ZhugeGlobalFab({ clientId }: { clientId: string }) {
   // Fetch client metadata once so the panel can show a real label
   useEffect(() => {
     if (!clientId) return
-    void (async () => {
-      try {
-        const res = await fetch(`/api/clients/${clientId}`, { cache: 'no-store' })
-        if (!res.ok) return
-        const data = await res.json() as { client?: ClientMeta }
-        if (data.client) setClient(data.client)
-      } catch {
-        // non-fatal: panel will fall back to the id-slice label
-      }
-    })()
+    return afterCrmListReady(() => {
+      void (async () => {
+        try {
+          const res = await fetch(`/api/clients/${clientId}`, { cache: 'no-store' })
+          if (!res.ok) return
+          const data = await res.json() as { client?: ClientMeta }
+          if (data.client) setClient(data.client)
+        } catch {
+          // non-fatal: panel will fall back to the id-slice label
+        }
+      })()
+    })
   }, [clientId])
 
   // Defensive: if a parent layout forgets to pass clientId (e.g. wrong layout
@@ -54,7 +57,7 @@ export function ZhugeGlobalFab({ clientId }: { clientId: string }) {
     { label: '概览',         href: `/dashboard/clients/${clientId}` },
     { label: '执行看板',     href: `/dashboard/clients/${clientId}/execution` },
     { label: '每日计划',     href: `/dashboard/clients/${clientId}/daily-plan` },
-    { label: '诊断',         href: `/dashboard/clients/${clientId}/diagnostic` },
+    { label: '处方',         href: `/dashboard/clients/${clientId}/prescription/new` },
     { label: '内容策略',     href: `/dashboard/clients/${clientId}/strategy` },
     { label: 'AI 可见度',    href: `/dashboard/ai-visibility/${clientId}` },
   ]
@@ -86,8 +89,8 @@ function inferAreaLabel(pathname: string | null, clientId: string): string {
   if (pathname === base) return '客户概览'
   const tail = pathname.replace(base, '')
   if (tail.startsWith('/execution'))      return 'Execution 看板'
-  if (tail.startsWith('/diagnostic'))     return '华佗诊断'
-  if (tail.startsWith('/prescription'))   return '诸葛亮处方'
+  if (tail.startsWith('/diagnostic'))     return '已废弃的体检'
+  if (tail.startsWith('/prescription'))   return '处方'
   if (tail.startsWith('/zhangqian'))      return '张骞发现'
   if (tail.startsWith('/strategy'))       return '内容策略'
   if (tail.startsWith('/marketing-plan')) return 'Marketing Plan'

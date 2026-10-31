@@ -4,14 +4,18 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
-import { baseSpec, goodFacts, goodReconFacts } from '@/lib/marketing-plan/promo/__tests__/fixtures'
+import { baseSpec, goodFacts, goodReconFacts, NOW as FIXTURE_NOW } from '@/lib/marketing-plan/promo/__tests__/fixtures'
+import { HARD_GATE, PREFLIGHT_GATE_KEYS } from '@/lib/ads-tracking-preflight/types'
 import { promoContentHash } from '@/lib/marketing-plan/promo/content-hash'
 
 const m = vi.hoisted(() => ({
   access: vi.fn(),
   loadGoal: vi.fn(),
   loadPromoFacts: vi.fn(),
+  loadPrescription: vi.fn(),
+  loadClientPrescription: vi.fn(),
   loadOptions: vi.fn(),
+  liveAds: vi.fn(),
   dispatch: vi.fn(),
   plan: null as Record<string, unknown> | null,
   updates: [] as Record<string, unknown>[],
@@ -23,9 +27,16 @@ vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access, 
 vi.mock('@/lib/marketing-plan/task-dispatcher', () => ({ dispatchPlanTasks: m.dispatch, revokePlanTasks: vi.fn() }))
 vi.mock('@/lib/marketing-plan/promo/facts', async () => {
   const actual = await vi.importActual<typeof import('@/lib/marketing-plan/promo/facts')>('@/lib/marketing-plan/promo/facts')
-  return { ...actual, loadGoal: m.loadGoal, loadPromoFacts: m.loadPromoFacts }
+  return {
+    ...actual,
+    loadGoal: m.loadGoal,
+    loadPromoFacts: m.loadPromoFacts,
+    loadLatestGoalPrescription: m.loadPrescription,
+    loadLatestClientPrescription: m.loadClientPrescription,
+  }
 })
 vi.mock('@/lib/marketing-plan/promo/options', () => ({ loadPromoOptions: m.loadOptions }))
+vi.mock('@/lib/marketing-plan/promo/live-ads', () => ({ loadLiveAds: m.liveAds }))
 vi.mock('@/lib/supabase', () => {
   const chain = (): Record<string, unknown> => {
     const c: Record<string, unknown> = {}
@@ -47,6 +58,8 @@ import { GET, PUT } from '../route'
 import { POST as VERIFY } from '../verify/route'
 import { POST as ACK } from '../acknowledge/route'
 import { POST as APPROVE } from '../../approve/route'
+import { mapSeedToPromo } from '@/lib/marketing-plan/promo/plan-draft-map'
+import type { PlanSeed } from '@/lib/ads-strategy/plan-seed/types'
 
 const P = { id: 'client-1', planId: 'plan-1' }
 const req = (body: unknown, method = 'POST') =>
@@ -62,11 +75,45 @@ const loadedFacts = (gate = goodFacts(), recon = goodReconFacts()) => ({
   playbook: gate.playbook, today: '2026-11-12', timezone_known: true, gate, recon,
 })
 
+function autoDraftedPromo() {
+  const notes = [{ label: 'test', value: 'act_1', source: 'test', as_of: null }]
+  const seed: PlanSeed = {
+    schema_version: 1,
+    produced_by: 'ads-agent',
+    facts_as_of: '2026-10-26T00:00:00.000Z',
+    currency: 'AUD',
+    period: { start_date: '2026-11-01', end_date: '2026-11-30' },
+    captured_at: {},
+    ad_steps: [{
+      step_key: 'play-1',
+      play: 'lead_form_harvest',
+      page_id: { ok: true, value: 'page-1', basis: notes, notes: [] },
+      ad_account_id: { ok: true, value: 'act_1', basis: notes, notes: [] },
+      daily_budget_cents: { ok: true, value: 5000, basis: notes, notes: [] },
+    }],
+    skipped: [],
+    notes: [],
+  }
+  const mapped = mapSeedToPromo({
+    goalId: 'goal-1',
+    period: seed.period,
+    plays: [{ step_key: 'play-1' }],
+    seed,
+    country: 'AU',
+    accounts: [{ ad_account_id: 'act_1', currency: 'AUD', daily_cap_cents: 10000, owned_by_client: true }],
+    clientCapCents: 20000,
+  })
+  if (!mapped.ok) throw new Error(mapped.text)
+  return mapped.spec
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   m.updates = []; m.updateFilters = []; m.casMiss = false
   m.access.mockResolvedValue({ ok: true, user: { email: 'fde@example.com' } })
   m.loadGoal.mockResolvedValue({ status: 'active' })
+  m.loadPrescription.mockResolvedValue(null)
+  m.loadClientPrescription.mockResolvedValue(null)
   m.loadPromoFacts.mockResolvedValue(loadedFacts())
   m.loadOptions.mockResolvedValue({ goals: [{ id: 'g1', title: '目标一', period_start: '2026-11-01', period_end: '2026-12-31' }], accounts: [{ id: 'act_1', cap_cents: null }] })
   m.dispatch.mockResolvedValue({ marketing_plan_id: 'plan-1', tasks_created: 0, tasks_skipped: 0, task_ids: [], packages_created: 0, package_ids: [] })
@@ -106,6 +153,12 @@ describe('PUT promo — 保存时服务端校验', () => {
     m.loadPromoFacts.mockResolvedValue(loadedFacts(gate))
     expect((await PUT(req({ promo: baseSpec() }, 'PUT'), { params: P })).status).toBe(400)
   })
+  it('保存只做归属和确定的超限检查，不现读预算门（不去打 Meta）', async () => {
+    m.plan = planWith(undefined)
+    await PUT(req({ promo: baseSpec() }, 'PUT'), { params: P })
+    expect(m.loadPromoFacts).toHaveBeenCalled()
+    expect(m.loadPromoFacts.mock.calls[0][4]).toBeUndefined()
+  })
   it('上限读不到只是未核实：允许保存（批准时由检查清单挡）', async () => {
     const gate = goodFacts({ config: null })
     m.loadPromoFacts.mockResolvedValue(loadedFacts(gate))
@@ -137,6 +190,37 @@ describe('PUT promo — 保存时服务端校验', () => {
     const res = await PUT(req({ promo: baseSpec(), expected_updated_at: '2026-11-01T00:00:00Z' }, 'PUT'), { params: P })
     expect(res.status).toBe(409)
     expect((await res.json()).error).toContain('别处被改过')
+  })
+  it('自动起草生成的结构可以原样保存', async () => {
+    const spec = autoDraftedPromo()
+    const res = await PUT(req({ promo: spec }, 'PUT'), { params: P })
+    expect(res.status).toBe(200)
+    expect((m.updates[0].plan_data as { promo: unknown }).promo).toEqual(spec)
+  })
+})
+
+describe('GET promo — 在跑广告提示只给内部账号', () => {
+  beforeEach(() => { m.liveAds.mockResolvedValue({ ok: true, live_adsets: 1, spending_adsets: 1, by_account: [], currency: 'NZD', as_of: null, snapshot_age_hours: 0 }) })
+  it('内部账号（admin）：草稿计划返回 live_ads', async () => {
+    m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { email: 'fde@example.com' } })
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(json.live_ads_visible).toBe(true)
+    expect(json.live_ads.ok).toBe(true)
+    expect(m.liveAds).toHaveBeenCalledWith('client-1')
+  })
+  it('付费客户账号：不读也不返回 live_ads', async () => {
+    m.access.mockResolvedValue({ ok: true, tier: 'paid_client', user: { email: 'boss@client.example' } })
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(json.live_ads_visible).toBe(false)
+    expect(json.live_ads).toBeNull()
+    expect(m.liveAds).not.toHaveBeenCalled()
+  })
+  it('已批准的计划：内部账号也不读', async () => {
+    m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { email: 'fde@example.com' } })
+    m.plan = planWith(undefined, { status: 'approved' })
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(json.live_ads).toBeNull()
+    expect(m.liveAds).not.toHaveBeenCalled()
   })
 })
 
@@ -176,6 +260,56 @@ describe('GET promo — 一页纸', () => {
     expect(json.board.approval.can_approve).toBe(false) // 落地页还没人核实 → 灰 → 阻止
     expect(json.board.next_phase.phase.id).toBe('p1')
     expect(typeof json.board.reconcile.headline).toBe('string')
+  })
+  it('🔴 看板读事实时要求现读预算门（页面上「批准」按钮可不可点由这份清单决定，存档过期就永远灰）', async () => {
+    m.plan = planWith(baseSpec())
+    await GET(req(null, 'GET'), { params: P })
+    expect(m.loadPromoFacts).toHaveBeenCalledTimes(1)
+    expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({ liveBudget: 'if_needed' })
+  })
+  it('计划挂了目标：返回该目标最新处方（含草稿），并按路径里的客户去读', async () => {
+    const prescription = { id: 'rx-1', goal_id: 'goal-1', status: 'draft', version: 1, line: '处方 v1 · 草稿 · 2 条人工动作' }
+    m.loadPrescription.mockResolvedValue(prescription)
+    m.plan = planWith(baseSpec())
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(json.prescription).toEqual(prescription)
+    expect(m.loadPrescription).toHaveBeenCalledWith('client-1', 'goal-1')
+    expect(m.loadClientPrescription).not.toHaveBeenCalled()
+  })
+  it('已批准的计划同样返回处方', async () => {
+    m.plan = planWith(baseSpec(), { status: 'approved' })
+    m.loadPrescription.mockResolvedValue({ id: 'rx-2', status: 'approved', version: 3 })
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(json.prescription.version).toBe(3)
+    expect(m.loadPrescription).toHaveBeenCalledWith('client-1', 'goal-1')
+  })
+  it('空白草稿只记下目标、推广表单还是空的：按这个目标读处方', async () => {
+    m.plan = planWith(undefined, { generation_meta: { blank_draft: { goal_id: 'goal-draft' } } })
+    m.loadPrescription.mockResolvedValue({ id: 'rx-draft', goal_id: 'goal-draft' })
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(m.loadPrescription).toHaveBeenCalledWith('client-1', 'goal-draft')
+    expect(m.loadClientPrescription).not.toHaveBeenCalled()
+    expect(json.prescription.id).toBe('rx-draft')
+  })
+  it('没有目标和空白草稿挂载：改读客户最近一份处方', async () => {
+    m.loadClientPrescription.mockResolvedValue({ id: 'rx-latest', goal_id: 'goal-9' })
+    const json = await (await GET(req(null, 'GET'), { params: P })).json()
+    expect(m.loadPrescription).not.toHaveBeenCalled()
+    expect(m.loadClientPrescription).toHaveBeenCalledWith('client-1')
+    expect(json.prescription.id).toBe('rx-latest')
+  })
+  it('客户最近一份处方也读失败：整页仍 200，这一项是空', async () => {
+    m.loadClientPrescription.mockRejectedValue(new Error('db down'))
+    const res = await GET(req(null, 'GET'), { params: P })
+    expect(res.status).toBe(200)
+    expect((await res.json()).prescription).toBeNull()
+  })
+  it('处方读失败：整页仍 200，这一项是空，不当成一份空处方去展示', async () => {
+    m.plan = planWith(baseSpec())
+    m.loadPrescription.mockRejectedValue(new Error('db down'))
+    const res = await GET(req(null, 'GET'), { params: P })
+    expect(res.status).toBe(200)
+    expect((await res.json()).prescription).toBeNull()
   })
   it('计划不存在 → 404', async () => {
     m.plan = null
@@ -256,6 +390,12 @@ describe('POST acknowledge — 按计划继续', () => {
     expect(res.status).toBe(409)
     expect(m.updates).toHaveLength(0)
   })
+  it('读事实时不现读预算（留“没意见”记录不是授权动作，不去打 Meta）', async () => {
+    m.plan = approvedWithFingerprint()
+    await ACK(req({}), { params: P })
+    expect(m.loadPromoFacts).toHaveBeenCalled()
+    expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({})
+  })
   it('只在已批准时可点；记一条，按窗口起始日幂等', async () => {
     m.plan = planWith(baseSpec(), { status: 'draft' })
     expect((await ACK(req({}), { params: P })).status).toBe(409)
@@ -291,6 +431,40 @@ describe('POST approve — 推广计划批准前检查', () => {
     expect(json.blockers[0].how.length).toBeGreaterThan(0)
     expect(m.dispatch).not.toHaveBeenCalled()
     expect(m.updates).toHaveLength(0)
+  })
+  it('🔴 批准是授权动作：读事实时要求每次都现读预算门（always），不信最多 12 小时前的存档', async () => {
+    m.plan = planWith(baseSpec())
+    await APPROVE(req({}), { params: P })
+    expect(m.loadPromoFacts).toHaveBeenCalledTimes(1)
+    expect(m.loadPromoFacts.mock.calls[0][4]).toEqual({ liveBudget: 'always' })
+  })
+  it('🔴 批准回执里留底预算证据的来源和读取时间（现读 → live；存档 → receipt）；别的追踪门不带这两个字段', async () => {
+    const greenGates = PREFLIGHT_GATE_KEYS.map(key => ({
+      key, status: 'green' as const, reason: 'ok', how: '', evidence: {}, as_of: FIXTURE_NOW.toISOString(), hard: HARD_GATE[key],
+    }))
+    const snapshotOf = async (tracking: Record<string, unknown>) => {
+      m.updates.length = 0
+      m.loadPromoFacts.mockResolvedValue(loadedFacts(goodFacts({ manual_checks: verifiedChecks(), tracking: tracking as never })))
+      m.plan = planWith(baseSpec())
+      const res = await APPROVE(req({}), { params: P })
+      expect(res.status).toBe(200)
+      const meta = m.updates[0].generation_meta as { approval_receipt: { gate_snapshot: { results: { key: string; source?: string; as_of?: string | null }[] } } }
+      return meta.approval_receipt.gate_snapshot.results
+    }
+    const liveAt = new Date(FIXTURE_NOW.getTime() - 30_000).toISOString()
+    const live = await snapshotOf({
+      receipt: { checked_at: FIXTURE_NOW.toISOString(), gates: greenGates },
+      client_id: 'client-1', live_required: true,
+      live_budget: { ...greenGates.find(g => g.key === 'env.account_billing')!, as_of: liveAt },
+    })
+    expect(live.find(r => r.key === 'env.account_billing')).toMatchObject({ source: 'live', as_of: liveAt })
+    const pixel = live.find(r => r.key === 'tracking.pixel_alive')
+    expect(pixel).toBeDefined()
+    expect(pixel && 'source' in pixel).toBe(false)
+    expect(pixel && 'as_of' in pixel).toBe(false)
+
+    const stored = await snapshotOf({ receipt: { checked_at: FIXTURE_NOW.toISOString(), gates: greenGates } })
+    expect(stored.find(r => r.key === 'env.account_billing')).toMatchObject({ source: 'receipt', as_of: FIXTURE_NOW.toISOString() })
   })
   it('全部过关 → 批准，并把批准当时的灯快照写进回执', async () => {
     const spec = baseSpec()

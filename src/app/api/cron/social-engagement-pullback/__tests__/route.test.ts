@@ -16,7 +16,10 @@ vi.mock('@/lib/supabase', () => {
   return { supabaseAdmin: { from: vi.fn().mockReturnValue(chain) } }
 })
 
-vi.mock('@/lib/social/page-metrics-sync', () => ({ syncPageMetrics: mocks.syncPageMetrics }))
+vi.mock('@/lib/social/page-metrics-sync', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/social/page-metrics-sync')>()
+  return { ...actual, syncPageMetrics: mocks.syncPageMetrics }
+})
 
 vi.mock('@/lib/flywheel/adapters/TikTokAdapter', () => ({
   TikTokAdapter: class {
@@ -40,7 +43,14 @@ beforeEach(() => {
   vi.clearAllMocks()
   process.env.CRON_SECRET = 'test-secret'
   mocks.pullMetrics.mockResolvedValue([{ metric: 'followers' }])
-  mocks.syncPageMetrics.mockResolvedValue({ pages: 2, metrics_written: 6 })
+  mocks.syncPageMetrics.mockResolvedValue({
+    clients: 2,
+    synced: 2,
+    results: [
+      { client_id: 'c1', page_id: 'p1', outcome: 'synced', posts_seen: 1 },
+      { client_id: 'c2', page_id: 'p2', outcome: 'synced', posts_seen: 1 },
+    ],
+  })
 })
 
 describe('GET /api/cron/social-engagement-pullback', () => {
@@ -58,7 +68,8 @@ describe('GET /api/cron/social-engagement-pullback', () => {
     expect(mocks.pullMetrics).toHaveBeenCalledTimes(2)
     expect(mocks.syncPageMetrics).toHaveBeenCalledTimes(1)
     expect(body.tiktok).toEqual({ clients_processed: 2, tiktok_synced: 2, failed: 0 })
-    expect(body.page_metrics).toEqual({ pages: 2, metrics_written: 6 })
+    expect(body.page_metrics).toMatchObject({ clients: 2, synced: 2 })
+    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ failed: 0, completed: 4 }))
     // Former Publer engagement fields must be gone from the response.
     expect(body).not.toHaveProperty('total_posts')
     expect(body).not.toHaveProperty('updated')
@@ -73,5 +84,35 @@ describe('GET /api/cron/social-engagement-pullback', () => {
     const body = await res.json() as { page_metrics: unknown }
     expect(body.page_metrics).toEqual({ error: 'boom' })
     expect(mocks.pullMetrics).toHaveBeenCalledTimes(2)
+    expect(mocks.finish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failed: 1,
+        completed: 2,
+        error: '1 item(s) failed (see summary)',
+      }),
+    )
+  })
+
+  it('one bad page counts as failed; a known broken token does not', async () => {
+    mocks.syncPageMetrics.mockResolvedValue({
+      clients: 2,
+      synced: 1,
+      results: [
+        { client_id: 'c1', page_id: 'p1', outcome: 'synced', posts_seen: 1 },
+        { client_id: 'c2', page_id: 'p2', outcome: 'error', error: 'HTTP 500 boom' },
+      ],
+    })
+    const res = await GET(req())
+    expect(res.status).toBe(200)
+    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ failed: 1, completed: 3 }))
+
+    mocks.finish.mockClear()
+    mocks.syncPageMetrics.mockResolvedValue({
+      clients: 1,
+      synced: 0,
+      results: [{ client_id: 'c2', page_id: 'p2', outcome: 'error', error: 'connection_unhealthy' }],
+    })
+    await GET(req())
+    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ failed: 0, completed: 2 }))
   })
 })

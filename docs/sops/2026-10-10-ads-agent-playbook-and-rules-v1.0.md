@@ -1,4 +1,8 @@
+> 全平台规则看 [平台规则总索引](../registry/platform-rules-index.md)。本文件只是局部清单，不合并、不重写。
+
 # 广告 agent 操作手册与规则 v1.0
+
+> 负责 agent：卫青（`weiqing`）｜ 档案：[`docs/agents/11-weiqing.md`](../agents/11-weiqing.md) ｜ 索引：[agents 索引](../agents/README.md)
 
 > 状态：**草案，只写文档。** 不创建 / 修改 / 开启任何广告，不改生产库，不花钱，不联系客户，不写代码。需 PM 批准后，才按 §11 的建议分期派代码（代码一律由 DeepSeek 写）。
 > 起因：PM 2026-10-10 原话「最重要的是广告的策略，广告内容，广告效果等等都要包含在内，其中预算只是一部分」「先写好广告 agent 的 playbook、规则，然后再安排代码」。
@@ -384,7 +388,7 @@
 | 卫青人设 §四 | 「换素材（暂停状态入组）」「加否定关键词 / 调受众参数」列在「可自主开处方」；加预算 > 20% 才要 PM | 「可自主开处方」= 只**出**处方，不等于执行。本手册 §2.2：**改受众 = 档3**，加预算无论幅度一律档3；**换素材 = 系统自己换、事后报**（PM 2026-10-10，RL-03）。人设 §四要同步改（见 §11 行 D2） |
 | 52 号 §3.5 | 第 2 档含「换受众」；第 3 档含「开投、加预算、改在投素材」 | 换素材部分已被 PM 2026-10-10 取代（档1）；本手册按 PM 今天的指令把**改受众升到档3**。其余沿用 52 号 |
 | 记忆 9-24「全权自治」 | 加预算、开新广告、调定向「也自动」，只受日上限约束 | **与今天的红线冲突**。手册按今天的写；§10 第 1 问请你正式收窄 |
-| 卫青人设 §五 / §二 / §六 的疲劳与预警阈值 | CTR 掉破最好一周 50% 为 alert、频次 > 2.5 为 alert、「频次连续 3 天 > 2.0」预警；处方分界频次 < 2 或 > 2.5 | **以代码为准**：`baseline.ts` 0.80 / 0.70、`rules/fatigue.ts` 频次 3。人设数字是更早的写法，与代码不一致，§11 行 D2 一并更正 |
+| 卫青人设 §五 / §二 / §六 的疲劳与预警阈值 | 旧百分比和旧频次已废弃，本表不再抄 | **以代码为准**：判定词见 `src/lib/ads-strategy/baseline.ts` 的 `Verdict`；数字门槛见 `src/lib/ads-strategy/rules/fatigue.ts` 与同目录 `funnel.ts`。🟡 / 🔴 已废弃 |
 | 现有代码 | `autonomy/sync-policy.ts`：`bounded_auto` → **所有** `ads.*` 动作 `auto_approve`（实际还要先过 Kernel 信封判断，信封内才放行；信封在学习期读不到时会拒绝——所以 CTS / NAL **现在可能是被「碰巧挡住」，不是「已在自动加钱」**，本稿**未实跑核实**，见 §12 第 1 条；以下按**风险**写）；`kernel/registry-ads.ts` 里 `ads.scale_unit_budget`（加预算）、`ads.add_retargeting_adset`（新增花费）、`ads.swap_creative`（换素材）都是 `bounded` 审批。库里 CTS / NAL 的 `autonomy_mode` 在 9-24 被改成 `bounded_auto` | **这是代码缺口，不是手册问题**：红线要求开投 / 加预算 / 新增花费 / 改受众永远走档3（换素材走档1，只受已过审素材、读回、回滚、冻结这些机制闸约束），不管 `autonomy_mode` 是什么。§11 行 A1 |
 
 ### 2.4 三层归属（每条规则标在哪一层）
@@ -448,8 +452,8 @@
 
 | 编号 | 条件 → 动作 | 层 | 谁 | 证据来源 | 样本门槛 | 代码 |
 |---|---|---|---|---|---|---|
-| **C-01** | **疲劳判定 = 相对自身基线，不用绝对线**：每条在投广告取近 30 天日序列，基线 = **自身最好 7 天**的中位数，近况 = 最近 7 天中位数。点击率：近况 < 基线 × 0.80 → 🟡；< 0.70 → 🔴。每结果成本：> 基线 × 1.25 → 🟡；> 1.40 → 🔴。🟡 连续 7 个窗口未恢复升 🔴。基线点击率 < 0.5% 的（纯播放类）点击率无信号，判 `insufficient_history`，**不报 🔴**。历史 < 14 天 → `insufficient_history` | 通用（判据）/ 候选（数字） | 档1 | `baseline.ts` `DEFAULT_BASELINE_CONFIG`；ad-strategy-engine §12（Reborn 2026-07 回测：点击率 4.22% → 2.50%，频次一直 1.1，绝对线一条没响） | **1 个真实疲劳事件**回测；阈值数字**待更多客户验证** | **已有**：`baseline.ts`；日循环 `evaluate.ts` 在跑 |
-| **C-02** | **广告级疲劳（D2）**：点击率相对自身基线跌 ≥ 25%，且**基线段总曝光 ≥ 3,000、近期曝光 ≥ 500**（基线剔上线头 7 天）→ 命中；再用**所在系列、当天或前一天的 7 天去重频次**分类：> 3 → 受众疲劳；≤ 3 → 素材疲劳；**取不到 → 写「频次判不了」，禁止回落到日频次**（日频次几乎永不超 3，会把所有候选一律判成素材老化）。广告组层和广告层 `frequency_7d` 当前**写死 null**，只有系列层 | 通用 | 档1 | `rules/fatigue.ts`（`D2_MIN_CTR_DROP = 0.25`、`D2_MIN_BASE_IMPRESSIONS = 3000`、`D2_MIN_RECENT_IMPRESSIONS = 500`、`FATIGUE_FREQUENCY_HIGH = 3`）；通用手册 §八、§二十一 | 52 号 §2.2 #7 魏征降级：Xi'an 那条基线段仅约 1,360 曝光，**不够格当论据** | **已有**；缺口：广告 / 广告组层 `frequency_7d` 空（`daily-insights.ts`）；ROADMAP P2 |
+| **C-01** | **疲劳判定 = 相对自身基线，不用绝对线**：每条在投广告取一段日序列，基线是自身最好一个窗口的中位数，近况是最近一个窗口的中位数。窗口多长见 `DEFAULT_BASELINE_CONFIG.windowDays`，本行不抄天数。点击率、每结果成本的比例、连续窗口是否升级、纯播放信号地板、历史要多少天，一律见 `src/lib/ads-strategy/baseline.ts` 的 `DEFAULT_BASELINE_CONFIG`，本行不再抄数字。判定词只用代码那套：`healthy` / `watch` / `alert` / `insufficient_history` / `paused`。🟡 / 🔴 / 「黄」/「红」已废弃，不再当判定词 | 通用（判据）/ 候选（数字） | 档1 | `baseline.ts` `DEFAULT_BASELINE_CONFIG`；ad-strategy-engine §12（Reborn 2026-07 回测：点击率 4.22% → 2.50%，频次一直 1.1，绝对线一条没响） | **1 个真实疲劳事件**回测；阈值数字**待更多客户验证** | **已有**：`baseline.ts`；日循环 `evaluate.ts` 在跑 |
+| **C-02** | **广告级疲劳（D2）**：点击率跌幅、两段曝光门槛、频次分界，一律见 `src/lib/ads-strategy/rules/fatigue.ts`（`D2_MIN_CTR_DROP`、`D2_MIN_BASE_IMPRESSIONS`、`D2_MIN_RECENT_IMPRESSIONS`、`FATIGUE_FREQUENCY_HIGH`），本行不再抄数字。基线剔上线头几天见 `src/lib/ads-strategy/rules/funnel.ts` 的 `RULE_HONEYMOON_DAYS`。再用**所在系列、当天或前一天的 7 天去重频次**分类：高于 `FATIGUE_FREQUENCY_HIGH` → `audience`（受众疲劳）；否则 → `creative`（素材疲劳）；**取不到 → 写「频次判不了」，禁止回落到日频次**（日频次几乎永不超过 `FATIGUE_FREQUENCY_HIGH`，会把所有候选一律判成素材老化）。广告组层和广告层 `frequency_7d` 当前**写死 null**，只有系列层 | 通用 | 档1 | `src/lib/ads-strategy/rules/fatigue.ts`（数字以该文件为准，不在这里再写一遍）；通用手册 §八、§二十一 | 52 号 §2.2 #7 魏征降级：Xi'an 那条基线段仅约 1,360 曝光，**不够格当论据** | **已有**；缺口：广告 / 广告组层 `frequency_7d` 空（`daily-insights.ts`）；ROADMAP P2 |
 | **C-03** | **疲劳处方对应正确病因，别换错药**：CTR 走低 + 频次低 → **素材老化** → 同系列另建新组测新素材（RL-05）；CTR 走低 + 频次高 → **受众看腻** → 换受众 / 扩受众（档3）；CTR 稳定 + 每结果成本涨 → **先查落地页 / 报价 / 表单（`review_offer`）**，不是广告本身；**再先查是否「频繁改动 → 学习期被反复重置」**（C-04） | 通用 | 出处方档1；执行档2–3 | 通用手册 §八、§十三；`prescription.ts` | CTS Reborn 与 NAL 各 1 例 | **已有**：`prescription.ts`；**缺**：C-04 的前置排查 |
 | **C-04** | **「CTR 稳但每结果成本暴涨」第一嫌疑是学习期被反复重置**：先拉账户活动日志（`/act_<id>/activities`）看近 7–14 天有没有密集的 `update_ad_set_target_spec` / `update_campaign_budget` / `update_ad_set_run_status` / `create_ad_set`；交叉验证广告组自己的 `updated_time`；找整日零花费断档；看重启次日点击率是否掉到平日 1/10 再回来（学习期重置指纹）。**确诊后处方不是换素材，是「冻结 + 回调预算」：7 天内一个字都不改**；若客户 / FDE 也进后台，当面打招呼，否则冻结无意义 | 通用 | 档1（拉日志）；冻结是系统拦建议 | 通用手册 §十三；物流手册 §二（NAL 9 天被改 5 天，每次对话成本 $4.18 → $21.23） | **1 个客户 1 个案例** | **尚无代码**（52 号 W10 / W11） |
 | **C-05** | **判素材换没换过，只认三样**：①活动日志里 `update_ad_creative` 事件数；②读广告当前创意对象自己的 `name`（Meta 自动名带诞生日期）；③**绝不用 `ad.created_time` 反推**。不数 `update_ad_creative`，疲劳候选永远只是「候选」 | 通用 | 档1 | 通用手册 §十四（NAL：广告 8/17 创建，素材换过 9 次，最后 9/08） | 1 个案例 | **尚无代码**（52 号 W10；52 号 §10 第 3 条） |

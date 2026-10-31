@@ -27,6 +27,13 @@ vi.mock('@/lib/auth/client-access', () => ({
     tier: 'admin',
     allowedClientId: null,
   }),
+  requirePlanApproverAccess: vi.fn().mockResolvedValue({
+    ok: true,
+    user: { id: 'test-user', email: 'fde@magiclab.com' },
+    role: 'admin',
+    tier: 'admin',
+    allowedClientId: null,
+  }),
 }))
 
 const mockLand = vi.fn()
@@ -34,7 +41,13 @@ vi.mock('@/lib/diagnostic/prescription-landing', () => ({
   landPrescription: (...a: unknown[]) => mockLand(...a),
 }))
 
-import { PATCH } from '../route'
+const mockEmit = vi.fn()
+vi.mock('@/lib/factory/promotion-signal', () => ({
+  emitPromotionSignal: (...args: unknown[]) => mockEmit(...args),
+  readableError: (error: unknown) => (error instanceof Error && error.message.trim() ? error.message : '读不到'),
+}))
+
+import { GET, PATCH } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
 import { PRESCRIPTION_COLUMNS } from '@/lib/diagnostic/prescription-patch'
 
@@ -59,11 +72,21 @@ function makeRequest(body: unknown): NextRequest {
   })
 }
 
+const FILLED = {
+  summary: '三阶段方案',
+  phases: [],
+  kpi_targets: [],
+  budget_allocation: [],
+}
+
 /**
  * 第一次 from() = 取当前处方；之后每次 from() = 一次写/读回。
  * `result` 是写（或批准后读回）那一次的返回值。
  */
-function mockSupabase(result: { data: unknown; error: unknown }) {
+function mockSupabase(
+  result: { data: unknown; error: unknown },
+  current: Record<string, unknown> = DRAFT,
+) {
   const update = vi.fn().mockReturnValue({
     eq: vi.fn().mockReturnThis(),
     select: vi.fn().mockReturnThis(),
@@ -74,7 +97,7 @@ function mockSupabase(result: { data: unknown; error: unknown }) {
     .mockReturnValueOnce({
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: DRAFT, error: null }),
+      single: vi.fn().mockResolvedValue({ data: current, error: null }),
     })
     .mockReturnValue({
       update,
@@ -91,6 +114,7 @@ const ok = (status: string) => ({ data: { ...DRAFT, status }, error: null })
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mockEmit.mockResolvedValue({ ok: true, outcome: 'accepted', signal_id: 'sig-1' })
   mockLand.mockResolvedValue({
     initiativesInserted: 0,
     executionItems: 0,
@@ -138,8 +162,10 @@ describe('PATCH prescription — 打回', () => {
 })
 
 describe('PATCH prescription — 批准', () => {
-  it('批准人取自登录会话，不认前端传值', async () => {
-    mockSupabase(ok('approved'))
+  const draftWithContent = { ...DRAFT, content: FILLED }
+
+  it('草稿且有内容才放行，批准人取自登录会话', async () => {
+    mockSupabase(ok('approved'), draftWithContent)
 
     const res = await PATCH(
       makeRequest({ status: 'approved', approved_by: 'attacker@evil.com' }),
@@ -149,10 +175,35 @@ describe('PATCH prescription — 批准', () => {
     expect(res.status).toBe(200)
     expect(mockLand).toHaveBeenCalledTimes(1)
     expect(mockLand.mock.calls[0][2]).toBe('fde@magiclab.com')
+    expect(mockEmit).toHaveBeenCalledWith({
+      clientId: 'client-1',
+      prescriptionId: 'presc-1',
+      goalId: 'goal-1',
+      content: FILLED,
+    })
+    expect((await res.json()).promotion_signal).toMatchObject({ ok: true })
+  })
+
+  it('信号没发出去时，批准仍然成功，并且不把失败写成成功', async () => {
+    mockSupabase(ok('approved'), draftWithContent)
+    mockEmit.mockResolvedValue({ ok: false, reason: '读不到' })
+
+    const res = await PATCH(makeRequest({ status: 'approved' }), { params })
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.success).toBe(true)
+    expect(body.promotion_signal).toEqual({ ok: false, reason: '读不到' })
+  })
+
+  it('打回不发新推广信号', async () => {
+    mockSupabase(ok('rejected'))
+    await PATCH(makeRequest({ status: 'rejected', rejection_note: '先不批' }), { params })
+    expect(mockEmit).not.toHaveBeenCalled()
   })
 
   it('落地失败 → 500，处方不留在"已批准但没动作"', async () => {
-    mockSupabase(ok('approved'))
+    mockSupabase(ok('approved'), draftWithContent)
     mockLand.mockRejectedValue(new Error('生成执行项失败'))
 
     const res = await PATCH(makeRequest({ status: 'approved' }), { params })
@@ -160,11 +211,122 @@ describe('PATCH prescription — 批准', () => {
     expect(res.status).toBe(500)
     expect((await res.json()).error).toContain('生成执行计划失败')
   })
+
+  it('闸门之后状态被改成 rejected → 409，不会变成 approved', async () => {
+    mockSupabase(ok('approved'), draftWithContent)
+    mockLand.mockRejectedValue(
+      Object.assign(new Error('处方状态刚刚被改动，已不是草稿，没有同意。请刷新后再看'), {
+        code: 'prescription_status_changed',
+      }),
+    )
+
+    const res = await PATCH(makeRequest({ status: 'approved' }), { params })
+    const json = await res.json()
+
+    expect(res.status).toBe(409)
+    expect(json.success).toBe(false)
+    expect(json.error).toContain('不是草稿')
+    expect(mockLand.mock.calls[0][3]).toEqual({ requireStatus: 'draft' })
+  })
+
+  it.each([null, '', '   ', {}, { summary: '', phases: [], kpi_targets: [], budget_allocation: [] }])(
+    '草稿但内容为空 (%j) → 422，不写库',
+    async (content) => {
+      const update = mockSupabase(ok('approved'), { ...DRAFT, content })
+
+      const res = await PATCH(makeRequest({ status: 'approved' }), { params })
+      const json = await res.json()
+
+      expect(res.status).toBe(422)
+      expect(json.success).toBe(false)
+      expect(json.error).toBe('处方内容为空，不能同意')
+      expect(mockLand).not.toHaveBeenCalled()
+      expect(mockEmit).not.toHaveBeenCalled()
+      expect(update).not.toHaveBeenCalled()
+      expect(supabaseAdmin.from).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it.each(['rejected', 'failed', 'generating', 'superseded', 'published'])(
+    '%s → 409，不写库',
+    async (status) => {
+      const update = mockSupabase(ok('approved'), { ...DRAFT, status, content: FILLED })
+
+      const res = await PATCH(makeRequest({ status: 'approved' }), { params })
+      const json = await res.json()
+
+      expect(res.status).toBe(409)
+      expect(json.success).toBe(false)
+      expect(json.error).toContain(status)
+      expect(mockLand).not.toHaveBeenCalled()
+      expect(update).not.toHaveBeenCalled()
+      expect(supabaseAdmin.from).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('已经同意过 → 409，不写库', async () => {
+    const update = mockSupabase(ok('approved'), { ...DRAFT, status: 'approved', content: FILLED })
+
+    const res = await PATCH(makeRequest({ status: 'approved' }), { params })
+
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toContain('already approved')
+    expect(mockLand).not.toHaveBeenCalled()
+    expect(update).not.toHaveBeenCalled()
+    expect(supabaseAdmin.from).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('PATCH prescription — 入参校验', () => {
   it('status 不合法 → 400', async () => {
     const res = await PATCH(makeRequest({ status: 'maybe' }), { params })
     expect(res.status).toBe(400)
+  })
+})
+
+describe('GET prescription — 生成中过久判中断', () => {
+  const generating = (extra: Record<string, unknown>) => ({ ...DRAFT, status: 'generating', ...extra })
+
+  function mockGet(row: unknown, healError: unknown = null) {
+    const update = vi.fn().mockReturnValue({
+      eq: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          eq: vi.fn().mockResolvedValue({ error: healError }),
+        }),
+      }),
+    })
+    ;(supabaseAdmin.from as ReturnType<typeof vi.fn>).mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      single: vi.fn().mockResolvedValue({ data: row, error: null }),
+      update,
+    })
+    return update
+  }
+
+  const getReq = () => new NextRequest('http://test/api/clients/client-1/prescription/presc-1')
+
+  it('精修刚开始（generated_at 刚重置、带旧内容）不判失败', async () => {
+    const update = mockGet(generating({
+      content: { summary: 'old' },
+      generated_at: new Date(Date.now() - 5_000).toISOString(),
+    }))
+
+    const body = await (await GET(getReq(), { params })).json()
+
+    expect(body.prescription.status).toBe('generating')
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('停在生成中超过 10 分钟 → 标失败', async () => {
+    const update = mockGet(generating({
+      content: null,
+      generated_at: new Date(Date.now() - 11 * 60_000).toISOString(),
+    }))
+
+    const body = await (await GET(getReq(), { params })).json()
+
+    expect(body.prescription.status).toBe('failed')
+    expect(update).toHaveBeenCalledTimes(1)
   })
 })

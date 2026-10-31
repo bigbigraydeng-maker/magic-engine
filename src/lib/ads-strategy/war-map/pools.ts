@@ -11,8 +11,11 @@ import { windowDays } from '../portfolio/diagnostics/context'
 import { toLocalDate } from '../portfolio/diagnostics/d2-d10-ad-rules'
 import { D11_MAX_WEEKLY_SHRINK, dailyCounts, poolFlat } from '../portfolio/diagnostics/d11-audience-pool-starved'
 import type { AudienceCountPoint } from '../portfolio/diagnostics/types'
-import { fmtInt, hoursSince, shortDay } from './util'
-import type { AudienceInput, Headline, Light, PoolRow, PoolTrend, WarMapInput } from './types'
+import { ACCOUNT_STATUS_CLOSED_CODES } from '@/lib/ads-strategy/account-status'
+import { diffDays, fmtInt, hoursSince, shortDay } from './util'
+import type {
+  AccountPoolSummary, AccountView, AudienceInput, Headline, Light, PoolRow, PoolTrend, WarMapInput,
+} from './types'
 
 export const MAX_POOL_ROWS = 8
 /** 人数记录超过这么多小时没更新，就不能再说「至少 N 人」 */
@@ -84,7 +87,15 @@ function usedByAdsets(audienceId: string, input: WarMapInput): number {
   return input.adsets.filter(s => s.effectiveStatus === 'ACTIVE' && s.includedAudienceIds.includes(audienceId)).length
 }
 
-function buildRow(a: AudienceInput, input: WarMapInput, names: Map<string, string>): PoolRow {
+/** 账户状态异常时给一句「不可用」；读不到状态不算不可用（宁可显示也不隐藏） */
+export function unusableAccountNote(statusCode: number | null): string | null {
+  if (statusCode === null || statusCode === 1) return null
+  if (statusCode === 3) return '欠款停用·不可用'
+  if (ACCOUNT_STATUS_CLOSED_CODES.has(statusCode)) return `账户已关闭或停用（状态码 ${statusCode}）·不可用`
+  return `账户状态异常（状态码 ${statusCode}）·暂不计入判断`
+}
+
+function buildRow(a: AudienceInput, input: WarMapInput, names: Map<string, string>, accountNote: string | null): PoolRow {
   const size = computeSize(a, input.now)
   const trend = computeTrend(a, input, size)
   let light: Light = size.reliable ? 'green' : 'unknown'
@@ -93,12 +104,15 @@ function buildRow(a: AudienceInput, input: WarMapInput, names: Map<string, strin
   return {
     id: a.id,
     name: a.name ?? a.id,
+    adAccountId: a.adAccountId,
     accountName: names.get(a.adAccountId) ?? a.adAccountId,
     sizeLower: size.sizeLower,
     sizeNote: size.note,
     trend: trend.trend,
     trendNote: trend.note,
     usedByAdsets: usedByAdsets(a.id, input),
+    accountUsable: accountNote === null,
+    accountNote,
     light,
   }
 }
@@ -107,10 +121,19 @@ function isReliable(r: PoolRow): boolean {
   return r.light !== 'unknown' && r.sizeLower !== null && r.sizeLower > D4_AUDIENCE_FLOOR
 }
 
-export function poolsHeadline(rows: PoolRow[]): Headline {
+/** 🔴 观众池新不新只看受众快照自己的时间（POOL_STALE_HOURS，逐池判断），不借用广告日报的日期 */
+export function poolsHeadline(rows: PoolRow[], unusableCount: number): Headline {
   const collapsed = rows.filter(r => r.light === 'red')
   if (collapsed.length > 0) {
     return { light: 'red', sentence: `有 ${collapsed.length} 个池子近 7 天从大池子掉到了显示下限，要查有没有人在补` }
+  }
+  if (rows.length === 0) {
+    return {
+      light: 'unknown',
+      sentence: unusableCount > 0
+        ? '当前在用的广告账户里没有观众池可判（有账户已停用，见下方）'
+        : '观众池现在判不了：读不到，或者没有池子',
+    }
   }
   const reliable = rows.filter(isReliable)
   if (reliable.length === 0) return { light: 'unknown', sentence: '观众池现在判不了：读不到，或者只有显示下限，或者数据过期了' }
@@ -118,26 +141,74 @@ export function poolsHeadline(rows: PoolRow[]): Headline {
   if (inUse.length > 0 && !inUse.some(isReliable)) {
     return { light: 'unknown', sentence: `设置里在用的 ${inUse.length} 个池子，人数都判不了；别的池子最大的至少 ${fmtInt(Math.max(...reliable.map(r => r.sizeLower ?? 0)))} 人` }
   }
-  const biggest = Math.max(...reliable.map(r => r.sizeLower ?? 0))
+  const biggestRow = reliable.reduce((a, b) => ((b.sizeLower ?? 0) > (a.sizeLower ?? 0) ? b : a))
+  const biggest = biggestRow.sizeLower ?? 0
   const shrinking = rows.filter(r => r.trend === 'shrinking').length
   if (shrinking > 0) return { light: 'yellow', sentence: `有 ${shrinking} 个池子近 7 天在缩，最大的池子至少 ${fmtInt(biggest)} 人` }
   const unknownCount = rows.length - reliable.length
   const trendTail = reliable.every(r => r.trend === 'unknown') ? '，近 7 天长没长暂时判不了' : '，没有在缩'
   const unknownTail = unknownCount > 0 ? `；另有 ${unknownCount} 个池子判不了` : ''
-  return { light: 'green', sentence: `池子够用：最大的至少 ${fmtInt(biggest)} 人${trendTail}${unknownTail}` }
+  return { light: 'green', sentence: `池子够用：最大的至少 ${fmtInt(biggest)} 人（${biggestRow.accountName}）${trendTail}${unknownTail}` }
+}
+
+function bySizeDesc(a: PoolRow, b: PoolRow): number {
+  if (a.sizeLower === null && b.sizeLower === null) return 0
+  if (a.sizeLower === null) return 1
+  if (b.sizeLower === null) return -1
+  return b.sizeLower - a.sizeLower
 }
 
 export function buildPools(
   input: WarMapInput,
   names: Map<string, string>,
-): { headline: Headline; rows: PoolRow[]; hiddenCount: number; allRows: PoolRow[] } {
-  const allRows = input.audiences.map(a => buildRow(a, input, names))
-  const sorted = [...allRows].sort((a, b) => {
-    if (a.sizeLower === null && b.sizeLower === null) return 0
-    if (a.sizeLower === null) return 1
-    if (b.sizeLower === null) return -1
-    return b.sizeLower - a.sizeLower
-  })
+  accounts: AccountView[],
+): { headline: Headline; rows: PoolRow[]; hiddenCount: number; allRows: PoolRow[]; unusableRows: PoolRow[]; everyRow: PoolRow[] } {
+  const noteOf = new Map(accounts.map(a => [a.adAccountId, unusableAccountNote(a.statusCode)]))
+  const everyRow = input.audiences.map(a => buildRow(a, input, names, noteOf.get(a.adAccountId) ?? null))
+  const usable = everyRow.filter(r => r.accountUsable)
+  const unusableRows = everyRow.filter(r => !r.accountUsable).sort(bySizeDesc)
+  const sorted = [...usable].sort(bySizeDesc)
   const rows = sorted.slice(0, MAX_POOL_ROWS)
-  return { headline: poolsHeadline(allRows), rows, hiddenCount: sorted.length - rows.length, allRows }
+  return {
+    headline: poolsHeadline(usable, unusableRows.length),
+    rows,
+    hiddenCount: sorted.length - rows.length,
+    allRows: usable,
+    unusableRows,
+    everyRow,
+  }
+}
+
+export function buildAccountSummaries(
+  input: WarMapInput,
+  accounts: AccountView[],
+  allPoolRows: PoolRow[],
+  nowDay: string,
+  dormantIds: Set<string>,
+): AccountPoolSummary[] {
+  return accounts.map(a => {
+    const note = unusableAccountNote(a.statusCode)
+    const dataDay = input.accountDataDays[a.adAccountId] ?? null
+    const staleDays = dataDay ? diffDays(dataDay, nowDay) : null
+    const rows = allPoolRows.filter(r => r.adAccountId === a.adAccountId)
+    const reliable = rows.filter(r => r.light !== 'unknown' && r.sizeLower !== null && r.sizeLower > D4_AUDIENCE_FLOOR)
+    const biggest = reliable.length > 0 ? reliable.reduce((x, y) => ((y.sizeLower ?? 0) > (x.sizeLower ?? 0) ? y : x)) : null
+    let light: Light = 'unknown'
+    if (note !== null) light = 'red'
+    else if (biggest !== null) light = 'green'
+    return {
+      adAccountId: a.adAccountId,
+      name: a.name,
+      statusCode: a.statusCode,
+      usable: note === null,
+      note,
+      dataDay,
+      staleDays,
+      biggestPoolName: biggest?.name ?? null,
+      biggestPoolSize: biggest?.sizeLower ?? null,
+      dormant: dormantIds.has(a.adAccountId),
+      poolCount: rows.length,
+      light,
+    }
+  })
 }

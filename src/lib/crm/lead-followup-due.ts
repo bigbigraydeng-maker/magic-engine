@@ -119,6 +119,8 @@ export interface LeadCandidate {
   stage: string | null
   /** `contacts.snooze_until`，ISO 或 null */
   snoozeUntil: string | null
+  /** 最近一次表单留资上的广告组。没有就是 null。只给计数用，不进名单正文。 */
+  adsetId?: string | null
 }
 
 /** 挑出来的一条「填了表还没人回」。 */
@@ -128,6 +130,8 @@ export interface LeadDueItem {
   displayName: string | null
   interest: string | null
   leadAt: string
+  /** 最近一次表单留资上的广告组。没有就是 null。 */
+  adsetId?: string | null
 }
 
 export interface LeadPickResult {
@@ -179,6 +183,58 @@ export interface PickOptions {
   suppressedStages?: ReadonlySet<string>
 }
 
+/** 别再联系、已有结论、或还在「过阵子再提醒」里：两边的计数都不算这个人。 */
+function leadClosed(c: LeadCandidate, nowMs: number, suppressed: ReadonlySet<string>): boolean {
+  if (isDoNotContact(c.doNotContactFlag, toDncTouches(c.touches))) return true
+  if (c.stage && suppressed.has(c.stage)) return true
+  const until = ts(c.snoozeUntil)
+  return Number.isFinite(until) && until > nowMs
+}
+
+/** 留资之后 24 小时内有没有一笔真人跟进。判据就是 `isHumanFollowup`，不另写一套。 */
+export function followedWithinSla(c: LeadCandidate, leadMs: number): boolean {
+  const limit = leadMs + LEAD_SLA_HOURS * HOUR_MS
+  return c.touches.some((t) => {
+    const at = ts(t.occurredAt)
+    return Number.isFinite(at) && at >= leadMs && at <= limit && isHumanFollowup(t)
+  })
+}
+
+export interface FollowupSlaRate {
+  /** 窗口内、已超过 24 小时、且没有被排除的线索数。 */
+  scored: number
+  /** 其中 24 小时内有真人跟进的。 */
+  followedWithinSla: number
+  /** scored 为 0 时是 null，不能当成 0%。 */
+  rate: number | null
+}
+
+/**
+ * 24 小时内的跟进率。分母是窗口里已经超过 24 小时的广告表单线索
+ * （别再联系 / 已结案 / 稍后提醒的不算）。分子用 `isHumanFollowup`。
+ */
+export function rateLeadFollowupWithinSla(
+  candidates: LeadCandidate[],
+  now: Date,
+  opts: PickOptions = {},
+): FollowupSlaRate {
+  const windowDays = opts.windowDays ?? LEAD_WINDOW_DAYS
+  const suppressed = opts.suppressedStages ?? new Set<string>()
+  const nowMs = now.getTime()
+  const windowStart = nowMs - windowDays * DAY_MS
+  const slaCutoff = nowMs - LEAD_SLA_HOURS * HOUR_MS
+  let scored = 0
+  let followed = 0
+  for (const c of candidates) {
+    if (leadClosed(c, nowMs, suppressed)) continue
+    const leadMs = ts(c.leadAt)
+    if (!Number.isFinite(leadMs) || leadMs > slaCutoff || leadMs < windowStart) continue
+    scored++
+    if (followedWithinSla(c, leadMs)) followed++
+  }
+  return { scored, followedWithinSla: followed, rate: scored > 0 ? followed / scored : null }
+}
+
 /** 纯判据。给一批候选人，挑出「该提醒」的那些。 */
 export function pickLeadFollowupDue(
   candidates: LeadCandidate[],
@@ -197,10 +253,7 @@ export function pickLeadFollowupDue(
   let outsideWindow = 0
 
   for (const c of candidates) {
-    if (isDoNotContact(c.doNotContactFlag, toDncTouches(c.touches))) continue
-    if (c.stage && suppressed.has(c.stage)) continue
-    const until = ts(c.snoozeUntil)
-    if (Number.isFinite(until) && until > nowMs) continue
+    if (leadClosed(c, nowMs, suppressed)) continue
     if (c.touches.some(isHumanFollowup)) continue
 
     const leadMs = ts(c.leadAt)
@@ -224,6 +277,7 @@ export function pickLeadFollowupDue(
         displayName: c.displayName,
         interest: c.interest,
         leadAt: c.leadAt,
+        adsetId: c.adsetId ?? null,
       },
       leadMs,
     })
@@ -261,6 +315,7 @@ interface LeadRow {
   contact_id: string
   occurred_at: string
   metadata: Record<string, unknown> | null
+  attr_adset_id?: string | null
 }
 
 interface TouchRow {
@@ -323,7 +378,7 @@ async function loadLatestLeads(
   const rows = await fetchAll<LeadRow>((from, to) =>
     supabase
       .from('contact_touchpoints')
-      .select('contact_id, occurred_at, metadata')
+      .select('contact_id, occurred_at, metadata, attr_adset_id')
       .eq('client_id', clientId)
       .eq('channel', 'meta_lead_form')
       .gte('occurred_at', since)
@@ -442,6 +497,7 @@ export async function loadLeadCandidates(
       doNotContactFlag: c.do_not_contact === true,
       stage: c.stage,
       snoozeUntil: c.snooze_until,
+      adsetId: typeof lead.attr_adset_id === 'string' && lead.attr_adset_id.trim() ? lead.attr_adset_id.trim() : null,
     })
   }
   return { candidates, orphans }

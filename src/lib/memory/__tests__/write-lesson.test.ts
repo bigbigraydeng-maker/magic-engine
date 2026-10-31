@@ -155,3 +155,15 @@ describe('writeGlobalLessonOrThrow — 给 cron / 后台 agent 的强制版', ()
     expect(upserted).toHaveLength(1)
   })
 })
+
+describe('writeGlobalLesson — isActive', () => {
+  it('不给 isActive 时仍写成启用（老调用方行为不变）', async () => {
+    await writeGlobalLesson(fakeSupabase(), CLEAN)
+    expect(upserted[0].is_active).toBe(true)
+  })
+
+  it('isActive:false 写成未启用候选', async () => {
+    await writeGlobalLesson(fakeSupabase(), { ...CLEAN, isActive: false })
+    expect(upserted[0].is_active).toBe(false)
+  })
+})
