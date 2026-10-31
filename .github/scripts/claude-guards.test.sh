@@ -1,6 +1,7 @@
 #!/bin/bash
-# Shows the draft wrapper cannot open a non-draft PR, and the git wrapper
-# cannot be pointed at a local command. Uses a fake gh/git where the real
+# Shows the draft wrapper cannot open a non-draft PR, the git wrapper
+# cannot be pointed at a local command or make a branch outside claude/,
+# and the thread wrapper resolves only allowed threads on the pinned PR. Uses a fake gh/git where the real
 # command must not run. Branch creation uses real git.
 set -euo pipefail
 
@@ -27,6 +28,12 @@ sudo install -o root -g root -m 0644 /dev/null "$guard/empty-gitconfig"
 sudo install -o root -g root -m 0644 "$root/.github/scripts/git-command-config.sh" "$guard/git-command-config.sh"
 printf '%s\n' "https://github.com/bigbigraydeng-maker/magic-engine.git" > "$tmp/origin-url"
 sudo install -o root -g root -m 0644 "$tmp/origin-url" "$guard/origin-url"
+printf '%s\n' "bigbigraydeng-maker/magic-engine" > "$tmp/pin-repo"
+printf '%s\n' "3419" > "$tmp/pin-pr-number"
+printf '%s\n' "claude" > "$tmp/pin-authors"
+sudo install -o root -g root -m 0644 "$tmp/pin-repo" "$guard/repo"
+sudo install -o root -g root -m 0644 "$tmp/pin-pr-number" "$guard/pr-number"
+sudo install -o root -g root -m 0644 "$tmp/pin-authors" "$guard/resolve-thread-authors"
 
 install_copy() {
   local src="$1" dest="$2"
@@ -56,7 +63,16 @@ env > "$tmp/gh-env"
 /usr/bin/git status --porcelain >/dev/null
 exit 0
 EOF
-chmod 755 "$mock_bin/gh" "$mock_bin/git" "$mock_bin/gh-with-status"
+# Thread wrapper mock: the read prints $tmp/thread-facts, the write prints true.
+cat > "$mock_bin/gh-graphql" << EOF
+#!/bin/bash
+echo \$(( \$(cat "$calls") + 1 )) > "$calls"
+case "\$*" in
+  *resolveReviewThread*) echo mutation >> "$tmp/graphql-log"; echo true ;;
+  *) echo query >> "$tmp/graphql-log"; cat "$tmp/thread-facts" ;;
+esac
+EOF
+chmod 755 "$mock_bin/gh" "$mock_bin/git" "$mock_bin/gh-with-status" "$mock_bin/gh-graphql"
 
 install_copy "$root/.github/scripts/gh-pr-create-draft.sh" "$tmp/gh-pr-create-draft" \
   -e "s#/opt/claude-guards#$guard#g" \
@@ -69,6 +85,9 @@ install_copy "$root/.github/scripts/git-limited.sh" "$tmp/git-limited-mock" \
 install_copy "$root/.github/scripts/gh-pr-create-draft.sh" "$tmp/gh-pr-create-draft-status" \
   -e "s#/opt/claude-guards#$guard#g" \
   -e "s#/usr/bin/gh#$mock_bin/gh-with-status#g"
+install_copy "$root/.github/scripts/gh-resolve-thread.sh" "$tmp/gh-resolve-thread" \
+  -e "s#/opt/claude-guards#$guard#g" \
+  -e "s#GH_BIN=/usr/bin/gh#GH_BIN=$mock_bin/gh-graphql#g"
 
 reset_mock() {
   printf '0\n' > "$calls"
@@ -244,6 +263,63 @@ expect_draft "normal long flags" "$draft" --head feature --body text --title Hel
 expect_draft "equals form" "$draft" --head=feature --body=text --title=Hello
 expect_draft "fill bool" "$draft" --fill --title Hello --body text
 
+resolve="$tmp/gh-resolve-thread"
+facts() { printf '%s\n' "$1" > "$tmp/thread-facts"; rm -f "$tmp/graphql-log"; }
+good='PullRequestReviewThread|false|3419|bigbigraydeng-maker/magic-engine'
+expect_resolve_refused() {
+  local name="$1"
+  shift
+  set +e
+  "$resolve" "$@" >"$tmp/out" 2>"$tmp/err"
+  local status=$?
+  set -e
+  if [[ "$status" -eq 0 ]]; then
+    echo "$name: expected refusal" >&2
+    exit 1
+  fi
+  if grep -q mutation "$tmp/graphql-log" 2>/dev/null; then
+    echo "$name: mutation ran" >&2
+    exit 1
+  fi
+}
+facts "$good|claude"
+expect_resolve_refused "no id"
+expect_resolve_refused "two ids" PRRT_abc PRRT_def
+expect_resolve_refused "not a thread id" PR_kwDOabc
+expect_resolve_refused "injection" 'PRRT_a"){x}'
+expect_resolve_refused "flag" --method=POST
+facts "PullRequest|null|null||"
+expect_resolve_refused "node is a PR" PRRT_abc
+facts "PullRequestReviewThread|false|9999|bigbigraydeng-maker/magic-engine|claude"
+expect_resolve_refused "other PR" PRRT_abc
+facts "PullRequestReviewThread|false|3419|someone/else|claude"
+expect_resolve_refused "other repo" PRRT_abc
+facts "$good|bigbigraydeng-maker"
+expect_resolve_refused "human thread" PRRT_abc
+facts "$good|"
+expect_resolve_refused "ghost author" PRRT_abc
+facts "|null|null||"
+expect_resolve_refused "missing node" PRRT_abc
+facts "$good|claude"
+"$resolve" PRRT_abc >"$tmp/out"
+assert_eq "$(tr '\n' ' ' < "$tmp/graphql-log")" "query mutation " "claude thread resolves"
+facts "$good|chatgpt-codex-connector[bot]"
+expect_resolve_refused "codex thread" PRRT_kwDO-x_1
+facts "listing"
+"$resolve" --list >"$tmp/out"
+assert_eq "$(tr '\n' ' ' < "$tmp/graphql-log")" "query " "list is read only"
+expect_resolve_refused "list with extra arg" --list PRRT_abc
+facts "PullRequestReviewThread|true|3419|bigbigraydeng-maker/magic-engine|claude"
+"$resolve" PRRT_abc >"$tmp/out"
+assert_eq "$(tr '\n' ' ' < "$tmp/graphql-log")" "query " "already resolved does not write"
+printf '\n' > "$tmp/pin-pr-number"
+sudo install -o root -g root -m 0644 "$tmp/pin-pr-number" "$guard/pr-number"
+facts "$good|claude"
+expect_resolve_refused "issue run has no PR" PRRT_abc
+expect_resolve_refused "issue run cannot list" --list
+printf '%s\n' "3419" > "$tmp/pin-pr-number"
+sudo install -o root -g root -m 0644 "$tmp/pin-pr-number" "$guard/pr-number"
+
 git_real="$tmp/git-limited"
 git_mock="$tmp/git-limited-mock"
 repo="$tmp/repo"
@@ -272,6 +348,14 @@ expect_reject "switch upload-pack" "$git_real" switch --upload-pack="touch $mark
 expect_reject "switch config-looking name" "$git_real" switch -c "core.sshCommand=evil"
 expect_reject "cherry-pick --exec" "$git_real" cherry-pick --exec="touch $marker"
 expect_reject "cherry-pick -c" "$git_real" cherry-pick -c HEAD
+expect_reject "new branch outside claude/" "$git_real" switch -c feature-x
+expect_reject "checkout -b outside claude/" "$git_real" checkout -b feature-x
+expect_reject "ledger-verify lane" "$git_real" switch -c claude/ledger-verify-x
+expect_reject "upper case" "$git_real" switch -c claude/Feature
+expect_reject "nested segment" "$git_real" checkout -b claude/a/b
+expect_reject "bare prefix" "$git_real" switch -c claude/
+expect_reject "lock suffix" "$git_real" switch -c claude/x.lock
+expect_reject "dotdot" "$git_real" switch -c claude/a..b
 
 hook_dir="$tmp/hooks"
 mkdir -p "$hook_dir"
@@ -282,25 +366,25 @@ git -C "$repo" config core.hooksPath "$hook_dir"
 rm -f "$marker"
 (
   cd "$repo"
-  "$git_real" switch -c feature-a
-  "$git_real" checkout -b feature-b
-  "$git_real" checkout feature-a
+  "$git_real" switch -c claude/feature-a
+  "$git_real" checkout -b claude/feature-b
+  "$git_real" checkout claude/feature-a
   "$git_real" cherry-pick "$side_sha"
 )
 if [[ -e "$marker" ]]; then
   echo "checkout or commit hook ran" >&2
   exit 1
 fi
-assert_eq "$(git -C "$repo" branch --show-current)" "feature-a" "cherry-pick stays on feature-a"
+assert_eq "$(git -C "$repo" branch --show-current)" "claude/feature-a" "cherry-pick stays on claude/feature-a"
 assert_eq "$(git -C "$repo" log -1 --format=%s)" "second" "cherry-pick kept the commit subject"
 grep -q '^b$' <(git -C "$repo" show HEAD:a.txt)
-( cd "$repo" && "$git_real" checkout -b feature-from feature-a )
-assert_eq "$(git -C "$repo" branch --show-current)" "feature-from" "checkout -b accepts a start point"
+( cd "$repo" && "$git_real" checkout -b claude/feature-from claude/feature-a )
+assert_eq "$(git -C "$repo" branch --show-current)" "claude/feature-from" "checkout -b accepts a start point"
 
 git -C "$repo" config core.fsmonitor "touch $marker"
 rm -f "$marker"
 set +e
-( cd "$repo" && "$git_real" switch feature-b ) >"$tmp/out" 2>"$tmp/err"
+( cd "$repo" && "$git_real" switch claude/feature-b ) >"$tmp/out" 2>"$tmp/err"
 status=$?
 set -e
 if [[ "$status" -eq 0 ]]; then
@@ -332,7 +416,7 @@ git -C "$repo" config --unset remote.origin.uploadpack
 git -C "$repo" config alias.checkout "!touch $marker; exit 9"
 rm -f "$marker"
 set +e
-( cd "$repo" && "$git_real" checkout -b feature-alias ) >"$tmp/out" 2>"$tmp/err"
+( cd "$repo" && "$git_real" checkout -b claude/feature-alias ) >"$tmp/out" 2>"$tmp/err"
 status=$?
 set -e
 if [[ "$status" -eq 0 ]]; then
@@ -348,7 +432,7 @@ git -C "$repo" config --remove-section alias
 git -C "$repo" config diff.evil.command "touch $marker"
 rm -f "$marker"
 set +e
-( cd "$repo" && "$git_real" switch feature-a ) >"$tmp/out" 2>"$tmp/err"
+( cd "$repo" && "$git_real" switch claude/feature-a ) >"$tmp/out" 2>"$tmp/err"
 status=$?
 set -e
 if [[ "$status" -eq 0 ]]; then
@@ -414,6 +498,14 @@ expected="$(printf '%s\n' \
   '      actions: read # Required for Claude to read CI results on PRs' \
   '    steps:')"
 assert_eq "$perm" "$expected" "job permissions changed"
+if grep -F 'chatgpt-codex-connector' "$root/.github/workflows/claude.yml"; then
+  echo "resolve allowlist must not name Codex" >&2
+  exit 1
+fi
+if ! grep -F 'printf '\''%s\n'\'' "claude" > "$tmp/resolve-thread-authors"' "$root/.github/workflows/claude.yml" >/dev/null; then
+  echo "pinned resolve author list must be exactly claude" >&2
+  exit 1
+fi
 if grep -E -q 'Bash\(git (fetch|checkout|switch|cherry-pick):' "$root/.github/workflows/claude.yml"; then
   echo "raw git prefix is still allowed" >&2
   exit 1
@@ -509,22 +601,22 @@ cp "$config_backup" "$repo/.git/config"
 rm -f "$repo/.gitattributes" "$marker"
 
 printf '\n[diff "evil=x"]\n\ttextconv = touch %s\n' "$marker" >> "$repo/.git/config"
-expect_git_refused "diff textconv key with equals" "$git_real" switch feature-a
+expect_git_refused "diff textconv key with equals" "$git_real" switch claude/feature-a
 cp "$config_backup" "$repo/.git/config"
 git -C "$repo" config interactive.diffFilter "touch $marker"
-expect_git_refused "interactive diff filter" "$git_real" switch feature-a
+expect_git_refused "interactive diff filter" "$git_real" switch claude/feature-a
 git -C "$repo" config --unset interactive.diffFilter
 git -C "$repo" config pager.status "touch $marker"
-expect_git_refused "pager status command" "$git_real" switch feature-a
+expect_git_refused "pager status command" "$git_real" switch claude/feature-a
 git -C "$repo" config --unset pager.status
 git -C "$repo" config core.askPass "touch $marker"
-expect_git_refused "askpass command" "$git_real" switch feature-a
+expect_git_refused "askpass command" "$git_real" switch claude/feature-a
 git -C "$repo" config --unset core.askPass
 git -C "$repo" config imap.tunnel "touch $marker"
-expect_git_refused "imap tunnel" "$git_real" switch feature-a
+expect_git_refused "imap tunnel" "$git_real" switch claude/feature-a
 git -C "$repo" config --unset imap.tunnel
 printf '* diff=evil=x\n' > "$repo/.gitattributes"
-expect_git_refused "diff attribute value with equals" "$git_real" switch feature-a
+expect_git_refused "diff attribute value with equals" "$git_real" switch claude/feature-a
 rm -f "$repo/.gitattributes"
 git -C "$repo" config credential.helper "/tmp/not-a-helper"
 expect_git_refused "absolute credential helper" "$git_real" fetch
@@ -532,7 +624,7 @@ git -C "$repo" config --unset credential.helper
 inc="$tmp/included-filter"
 printf '[filter "hidden"]\n\tclean = touch %s\n' "$marker" > "$inc"
 git -C "$repo" config include.path "$inc"
-expect_git_refused "include path" "$git_real" switch feature-a
+expect_git_refused "include path" "$git_real" switch claude/feature-a
 if [[ -e "$marker" ]]; then
   echo "included filter ran" >&2
   exit 1
@@ -542,13 +634,13 @@ git -C "$repo" config --unset include.path
 # Strict attribute parse: a pattern is not an attribute, comments are not
 # applied, and this repo's timestamp-ours driver is not a program.
 printf 'filter=evil\n' > "$repo/.gitattributes"
-expect_git_ok "pattern only" "$git_real" switch feature-a
+expect_git_ok "pattern only" "$git_real" switch claude/feature-a
 printf '# filter=evil\n* merge=text\n* diff\n' > "$repo/.gitattributes"
-expect_git_ok "comment and builtin merge" "$git_real" switch feature-a
+expect_git_ok "comment and builtin merge" "$git_real" switch claude/feature-a
 cp "$root/.gitattributes" "$repo/.gitattributes"
-expect_git_ok "repo gitattributes" "$git_real" switch feature-a
+expect_git_ok "repo gitattributes" "$git_real" switch claude/feature-a
 printf '\n[merge "timestamp-ours"]\n\tdriver = touch %s\n' "$marker" >> "$repo/.git/config"
-expect_git_refused "timestamp driver command" "$git_real" switch feature-a
+expect_git_refused "timestamp driver command" "$git_real" switch claude/feature-a
 cp "$config_backup" "$repo/.git/config"
 rm -f "$repo/.gitattributes" "$marker"
 
@@ -557,13 +649,13 @@ printf '* filter=evil\n' > "$repo/.gitattributes"
 git -C "$repo" add .gitattributes
 git -C "$repo" commit -qm 'add attributes'
 rm -f "$repo/.gitattributes"
-expect_git_refused "index attributes" "$git_real" switch feature-a
+expect_git_refused "index attributes" "$git_real" switch claude/feature-a
 git -C "$repo" checkout -q -- .gitattributes
 rm -f "$repo/.gitattributes"
 git -C "$repo" reset -q HEAD -- .gitattributes >/dev/null 2>&1 || true
 
 printf '[merge "evil=x"]\n\tdriver = touch %s\n' "$marker" > "$repo/.git/config.worktree"
-expect_git_refused "worktree merge driver with equals" "$git_real" switch feature-a
+expect_git_refused "worktree merge driver with equals" "$git_real" switch claude/feature-a
 rm -f "$repo/.git/config.worktree" "$marker"
 
 echo "claude-guards tests passed"
