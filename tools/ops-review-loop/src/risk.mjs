@@ -197,6 +197,14 @@ export const A_RISK_RULES = [
   // --- Outward, hard-to-retract side effects ------------------------------
   { basenameIncludes: 'publisher', why: '对外发布 —— 发出去就撤不回来', category: RISK_CATEGORY.OUTWARD_WRITE },
   { prefix: 'src/lib/email/', why: '对外发信', category: RISK_CATEGORY.OUTWARD_WRITE },
+  // --- Triggered sends (P2): the gate, the authorization and the provider callbacks. Without these four rules the
+  // whole directory rated B and would auto-merge, even a change that turns signature checking into a pass-through.
+  { prefix: 'src/lib/messaging/', why: '触发型发送与供应商回执 —— 授权、发送关口、验签与入库，松了就会多发或漏拦', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { prefix: 'src/app/api/u/', why: '联系人级一键退订入口（公共入口）—— 令牌校验即安全边界', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { pattern: /^src\/app\/api\/clients\/[^/]+\/triggered-send\//, why: '触发型发送的授权 / 撤销入口 —— 只能 PM 本人写，权限判断即安全边界', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { prefix: 'src/lib/crm/email-templates/gates/', why: '销售手发邮件的频次 / 内容关口 —— 关口松了会多发', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { pattern: /^src\/lib\/crm\/email-templates\/(frequency-sources-prod|send-gates|send-gates-prod)\.ts$/, why: '销售手发邮件的频次来源与关口装配 —— 来源读不到按 0 就等于关掉频次闸', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { pattern: /^src\/lib\/crm\/(dnc|manual-send-dnc-gate|automated-touch)\.ts$/, why: '别再联系判据与机器信标记 —— 决定谁会被发信、什么算人工联系', category: RISK_CATEGORY.OUTWARD_WRITE },
   { basenameIncludes: 'guardrail', why: '花费 / 发布安全闸 —— 它松了别的全松', category: RISK_CATEGORY.OUTWARD_WRITE },
   // --- Music vocal gate: the registry IS the gate; a hand-written signature would otherwise pass as B ---
   { pattern: /^scripts\/factory-worker\/.*music[-_]?vocal[^/]*$/i, why: '音乐人声闸：登记表 music-vocals.json、闸模块、回填工具及其测试 —— 登记表就是闸本身，签字格式可被手写伪造，只能靠人审', category: RISK_CATEGORY.OUTWARD_WRITE },
