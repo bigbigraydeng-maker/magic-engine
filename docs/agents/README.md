@@ -65,10 +65,10 @@
 | [SEO 工作流与目标方案 v1](../sops/2026-10-14-seo-agent-workflow-and-goal-plan-v1.md) | 孔子 | **含客户层**：§6 是客户层数据，不当通用规则用 |
 | [`keyword-gap-attack-playbook`](../sops/keyword-gap-attack-playbook.md) | 孔子 | #3261 补充评论建议，待 PM 确认 |
 | [`brand-aliases-setup-for-gsc`](../sops/brand-aliases-setup-for-gsc.md) | 孔子 | #3261 补充评论建议，待 PM 确认 |
-| [社媒 agent 手册 v1.0](../sops/2026-10-19-social-agent-playbook-and-rules-v1.0.md) | 苏东坡 `sudongpo` | |
+| [社媒 agent 手册 v1.1](../sops/2026-10-19-social-agent-playbook-and-rules-v1.0.md) | 苏东坡 `sudongpo` | 正文已是 v1.1（2026-11-01 新增 §9）；文件名仍为 v1.0 |
 | [社媒平台运营思路 · Facebook v0.1](../sops/2026-10-28-social-platform-facebook-playbook-v0.1.md) | 苏东坡 `sudongpo` | 初稿，打法多为「候选」，待 PM 逐条确认 |
 | [社媒平台运营思路 · Instagram v0.1](../sops/2026-10-28-social-platform-instagram-playbook-v0.1.md) | 苏东坡 `sudongpo` | 只写事实与待验证问题，不写打法 |
-| [新客户社媒冷启动策略 v0.1](../sops/2026-10-29-social-new-client-cold-start-v0.1.md) | 苏东坡 `sudongpo` | 初稿，发什么 / 几点发 / 什么形式；数量与时间多为「建议」「候选」，待 PM 确认 |
+| [新客户社媒冷启动策略 v0.2](../sops/2026-10-29-social-new-client-cold-start-v0.1.md) | 苏东坡 `sudongpo` | v0.2 补阶段判据和三份行业模板起点，仍多为「建议」；文件名仍为 v0.1 |
 | [视频模板优化手册 v1.0](../sops/2026-10-27-video-factory-template-playbook-v1.0.md) | 苏东坡（主），马良（出片检查配合） | 见下「视频工厂手册归属」 |
 | [`messenger-ai-rollback`](../sops/messenger-ai-rollback.md) | 苏东坡 | #3261 补充评论建议，待 PM 确认；§4.4 苏东坡入口含 `src/lib/messenger/` |
 | [`tiktok-app-setup`](../sops/tiktok-app-setup.md)、[`tiktok-production-audit-checkpoint`](../sops/tiktok-production-audit-checkpoint.md)、[`tiktok-publishing-test-checkpoint`](../sops/tiktok-publishing-test-checkpoint.md) | 苏东坡 | #3261 补充评论建议，待 PM 确认（`tiktok-*`） |
