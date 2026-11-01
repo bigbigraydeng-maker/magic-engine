@@ -1,6 +1,7 @@
 /**
  * Reads stored snapshots and ME action rows for the ads-health outside-change tag.
  * Database only. Never calls Meta and never writes.
+ * New-entity checks also read one pre-window row per ad set and ad (indexed lookup).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
@@ -14,6 +15,7 @@ import {
 } from './detect'
 
 const PAGE_SIZE = 1000
+const PRIOR_BATCH = 20
 const LEVELS = ['campaign', 'adset', 'ad']
 const ACTION_KEYS = [
   'ads.scale_unit_budget',
@@ -91,6 +93,47 @@ function toRun(row: RawRun): ActionFact {
   return { key: row.action_key, occurredAt: row.finished_at ?? row.created_at, ids: idsInRecord(row.input), status: row.status }
 }
 
+function adAndAdsetTargets(facts: SnapshotFact[]): SnapshotFact[] {
+  const map = new Map<string, SnapshotFact>()
+  for (const row of facts) {
+    if ((row.level !== 'adset' && row.level !== 'ad') || !row.entityId) continue
+    const key = `${row.level}:${row.entityId}`
+    if (!map.has(key)) map.set(key, row)
+  }
+  return [...map.values()]
+}
+
+async function latestBeforeWindow(
+  clientId: string,
+  supabase: SupabaseClient,
+  since: string,
+  row: SnapshotFact,
+): Promise<SnapshotFact | null> {
+  const { data, error } = await supabase.from('ad_entity_snapshots').select(SNAP_COLS)
+    .eq('client_id', clientId).eq('platform', 'meta').eq('level', row.level).eq('entity_id', row.entityId)
+    .lt('captured_at', since).order('captured_at', { ascending: false }).limit(1)
+  if (error) throw new Error(error.message)
+  const raw = (data ?? [])[0] as RawSnap | undefined
+  return raw ? toSnapshot(raw) : null
+}
+
+/** One indexed row per entity. An ungrouped scan cannot prove an entity is new without reading its whole history. */
+async function historyBeforeWindow(
+  clientId: string,
+  supabase: SupabaseClient,
+  since: string,
+  facts: SnapshotFact[],
+): Promise<SnapshotFact[]> {
+  const targets = adAndAdsetTargets(facts)
+  const found: SnapshotFact[] = []
+  for (let i = 0; i < targets.length; i += PRIOR_BATCH) {
+    const batch = targets.slice(i, i + PRIOR_BATCH)
+    const rows = await Promise.all(batch.map((row) => latestBeforeWindow(clientId, supabase, since, row)))
+    for (const row of rows) if (row) found.push(row)
+  }
+  return found
+}
+
 async function pageAll<T>(
   fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
 ): Promise<T[]> {
@@ -127,5 +170,6 @@ export async function loadOutsideChanges(
       .gte('created_at', actionSince).order('created_at', { ascending: true }).range(from, to),
   )
   const facts = snapshots.map(toSnapshot).filter((row): row is SnapshotFact => row !== null)
-  return detectOutsideChanges(facts, [...flywheel.map(toFlywheel), ...runs.map(toRun)])
+  const history = await historyBeforeWindow(clientId, supabase, since, facts)
+  return detectOutsideChanges(facts, [...flywheel.map(toFlywheel), ...runs.map(toRun)], history)
 }

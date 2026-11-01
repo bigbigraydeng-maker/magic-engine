@@ -67,6 +67,22 @@ describe('detectOutsideChanges', () => {
     expect(found[1]).toMatchObject({ what: '新广告组，每天预算 NZD 30', where: '广告组 · South（系列 Spring）' })
   })
 
+  it('does not call an entity new when it was first seen before the comparison window', () => {
+    const beforeWindow = '2026-10-16T22:00:00.000Z'
+    const existing = snap({
+      level: 'adset', entityId: 'set-old', entityName: 'North', campaignId: 'camp-1',
+      capturedAt: T1, settingsHash: 'daily', dailyBudgetMinor: 5000,
+    })
+    const prior = snap({ ...existing, capturedAt: beforeWindow, settingsHash: 'prior' })
+    const created = snap({
+      level: 'adset', entityId: 'set-new', entityName: 'South', campaignId: 'camp-1',
+      capturedAt: T1, settingsHash: 'new-set', dailyBudgetMinor: 3000,
+    })
+    const found = detectOutsideChanges([campaign, existing, created], [], [prior])
+    expect(found.map((row) => row.entityId)).toEqual(['set-new'])
+    expect(found[0]).toMatchObject({ kind: 'new_adset', entityId: 'set-new' })
+  })
+
   it('does not call the first snapshot batch new', () => {
     const adset = snap({
       level: 'adset', entityId: 'set-1', entityName: 'North', capturedAt: T0, settingsHash: 'h1', dailyBudgetMinor: 5000,

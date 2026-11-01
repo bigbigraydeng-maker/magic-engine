@@ -6,6 +6,9 @@
  * A "consecutive" pair is two stored rows of the same entity in time order.
  * A new ad set or ad is one whose first stored row is later than some other
  * entity's row — the first snapshot of an account has nothing earlier to compare.
+ * `history` is snapshots from before the comparison window. An entity already
+ * stored there is not new, even when its first row inside the window is later
+ * than the window's earliest stamp.
  */
 
 export const OUTSIDE_TAG = 'ME 外改动'
@@ -186,13 +189,25 @@ function newWhat(row: SnapshotFact, kind: 'new_ad' | 'new_adset'): string {
   return `新广告组，每天预算 ${money(row.dailyBudgetMinor, row.currency)}`
 }
 
-function newCandidates(rows: SnapshotFact[]): Candidate[] {
+function seenBeforeWindow(history: readonly SnapshotFact[]): Set<string> {
+  const keys = new Set<string>()
+  for (const row of history) {
+    if (row.level !== 'adset' && row.level !== 'ad') continue
+    if (!row.entityId || !row.settingsHash) continue
+    keys.add(`${row.level}:${row.entityId}`)
+  }
+  return keys
+}
+
+function newCandidates(rows: SnapshotFact[], history: readonly SnapshotFact[]): Candidate[] {
   const firstAt = earliestStamp(rows)
   if (!firstAt) return []
+  const already = seenBeforeWindow(history)
   const out: Candidate[] = []
   for (const list of groups(rows, new Set(['adset', 'ad'])).values()) {
     const first = list[0]
-    if (!first || first.capturedAt <= firstAt) continue
+    if (!first || already.has(`${first.level}:${first.entityId}`)) continue
+    if (first.capturedAt <= firstAt) continue
     const kind = first.level === 'ad' ? 'new_ad' : 'new_adset'
     out.push({ kind, row: first, previousCapturedAt: latestBefore(rows, first.capturedAt), what: newWhat(first, kind) })
   }
@@ -261,9 +276,14 @@ function matched(candidate: Candidate, actions: ActionFact[]): boolean {
   })
 }
 
-export function detectOutsideChanges(snapshots: SnapshotFact[], actions: ActionFact[]): OutsideChange[] {
+export function detectOutsideChanges(
+  snapshots: SnapshotFact[],
+  actions: ActionFact[],
+  history: readonly SnapshotFact[] = [],
+): OutsideChange[] {
   const names = namesOf(snapshots)
-  const open = [...budgetCandidates(snapshots), ...newCandidates(snapshots)].filter((candidate) => !matched(candidate, actions))
+  const open = [...budgetCandidates(snapshots), ...newCandidates(snapshots, history)]
+    .filter((candidate) => !matched(candidate, actions))
   open.sort((a, b) => b.row.capturedAt.localeCompare(a.row.capturedAt) || a.row.entityId.localeCompare(b.row.entityId))
   return open.map((candidate) => ({
     kind: candidate.kind,
