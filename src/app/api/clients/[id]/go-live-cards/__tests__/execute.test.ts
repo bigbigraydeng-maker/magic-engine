@@ -407,7 +407,7 @@ describe('executeConfirmedGoLive', () => {
 
   it('does not turn a reused campaign on or off when read-back misses', async () => {
     const ids = { ...IDS, reusedCampaign: true as const }
-    m.fetchCampaignStatus.mockResolvedValue('PAUSED')
+    m.fetchCampaignStatus.mockResolvedValueOnce('ACTIVE').mockResolvedValue('PAUSED')
     const { sb } = fakeDb(owned('active'))
     const result = await executeConfirmedGoLive({
       supabase: sb as never,
@@ -417,7 +417,7 @@ describe('executeConfirmedGoLive', () => {
       ids,
     })
     expect(result.settle.outcome).toBe('held')
-    expect(m.fetchCampaignStatus.mock.calls.map((call) => call[0])).toEqual(['ad', 'set', 'ad', 'set'])
+    expect(m.fetchCampaignStatus.mock.calls.map((call) => call[0])).toEqual(['camp', 'ad', 'set', 'ad', 'set'])
     expect(m.activatePublished).toHaveBeenCalledTimes(1)
     expect(m.activatePublished).toHaveBeenCalledWith(
       { campaignId: 'camp', adSetId: 'set', adIds: ['ad'] },
@@ -430,7 +430,7 @@ describe('executeConfirmedGoLive', () => {
     )
   })
 
-  it('treats the new ad set as live without reading the reused campaign', async () => {
+  it('treats the new ad set as live when the reused campaign is already on', async () => {
     const ids = { ...IDS, reusedCampaign: true as const }
     m.fetchCampaignStatus.mockResolvedValue('ACTIVE')
     const { sb } = fakeDb(owned('active'))
@@ -442,14 +442,34 @@ describe('executeConfirmedGoLive', () => {
       ids,
     })
     expect(result.settle).toMatchObject({ outcome: 'live', attempts: 1 })
-    expect(m.fetchCampaignStatus.mock.calls.map((call) => call[0])).toEqual(['ad', 'set'])
+    expect(m.fetchCampaignStatus.mock.calls.map((call) => call[0])).toEqual(['camp', 'ad', 'set'])
+    expect(m.activatePublished).not.toHaveBeenCalled()
+    expect(m.pausePublished).not.toHaveBeenCalled()
+  })
+
+  it('does not call a paused reused campaign a launch', async () => {
+    const ids = { ...IDS, reusedCampaign: true as const }
+    m.fetchCampaignStatus.mockResolvedValue('PAUSED')
+    const { sb } = fakeDb(owned('awaiting_approval'))
+    const result = await executeConfirmedGoLive({
+      supabase: sb as never,
+      clientId: 'client-1',
+      draftId: 'draft-1',
+      authority: authority(),
+      ids,
+    })
+    expect(result.settle.outcome).toBe('held')
+    if (result.settle.outcome === 'live') return
+    expect(result.settle.readback).toBe('系列暂停，不会花钱')
+    expect(result.settle.reason).toContain('系列暂停，不会花钱')
+    expect(m.approveDraft).not.toHaveBeenCalled()
     expect(m.activatePublished).not.toHaveBeenCalled()
     expect(m.pausePublished).not.toHaveBeenCalled()
   })
 
   it('still skips the reused campaign when the retry itself throws', async () => {
     const ids = { ...IDS, reusedCampaign: true as const }
-    m.fetchCampaignStatus.mockResolvedValue(null)
+    m.fetchCampaignStatus.mockResolvedValueOnce('ACTIVE').mockResolvedValue(null)
     m.activatePublished.mockRejectedValue(new Error('network'))
     const { sb } = fakeDb(owned('activating'))
     const result = await executeConfirmedGoLive({
@@ -460,6 +480,11 @@ describe('executeConfirmedGoLive', () => {
       ids,
     })
     expect(result.settle).toMatchObject({ outcome: 'held', paused: true })
+    expect(m.activatePublished).toHaveBeenCalledWith(
+      { campaignId: 'camp', adSetId: 'set', adIds: ['ad'] },
+      'tok',
+      { skipIds: ['camp'] },
+    )
     expect(m.pausePublished).toHaveBeenCalledWith(
       expect.objectContaining({ reusedCampaign: true, campaignId: 'camp' }),
       'tok',

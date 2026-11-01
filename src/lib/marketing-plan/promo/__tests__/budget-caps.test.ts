@@ -79,6 +79,38 @@ describe('checkAdsBudget', () => {
     expect(r.verdict).toBe('over')
   })
 
+  it('已在投日预算加上本计划超过账户上限 → over，且不再说没纳入已在投', () => {
+    const r = checkAdsBudget(
+      stepsOf(specWithBudgets({ act_1: 3000 })),
+      [acct({ daily_cap_cents: 15000 })],
+      50000,
+      { act_1: 14500 },
+    )
+    expect(r.verdict).toBe('over')
+    expect(r.per_account_cents.act_1).toBe(3000)
+    expect(r.notes).toEqual([])
+    const atCap = checkAdsBudget(
+      stepsOf(specWithBudgets({ act_1: 500 })),
+      [acct({ daily_cap_cents: 15000 })],
+      15000,
+      { act_1: 14500 },
+    )
+    expect(atCap.verdict).toBe('ok')
+    const clientCap = checkAdsBudget(
+      stepsOf(specWithBudgets({ act_1: 3000 })),
+      [acct({ daily_cap_cents: null })],
+      15000,
+      { act_1: 14500 },
+    )
+    expect(clientCap.verdict).toBe('over')
+  })
+
+  it('已在投没读到 → unknown，不把它当成 0', () => {
+    const r = checkAdsBudget(stepsOf(specWithBudgets({ act_1: 1000 })), [acct()], 50000, null)
+    expect(r.verdict).toBe('unknown')
+    expect(r.reasons.join('')).toContain('已在投')
+  })
+
   it('按阶段汇总超上限时带上阶段名，读不到上限不算拒绝', () => {
     const over = collectPhaseBudgetProblems(baseSpec(), [acct({ daily_cap_cents: 100 })], 20000)
     expect(over[0]).toContain('阶段 1')
