@@ -21,7 +21,7 @@ import { runPublishWorker, reconcileMissingReelEvents } from './publish-worker'
 import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
-import { reelPublishedEventId } from './reel-published-event'
+import { FactoryReelPublishedEventSchema, reelPublishedEventId } from './reel-published-event'
 import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
@@ -37,7 +37,7 @@ const VIDEO_ID = '1707599651172223'
 let woUpdates: Record<string, unknown>[]
 
 /** runPublishWorker 全链路 mock(领单→发布→落库→emit)。 */
-function installWorkerMocks() {
+function installWorkerMocks(priorRef: Record<string, unknown> | null = null) {
   woUpdates = []
   let claimed = false
   mockFrom.mockImplementation((table: string) => {
@@ -50,7 +50,7 @@ function installWorkerMocks() {
             return {
               data: {
                 id: WO_ID, client_id: CLIENT_ID, master_brief_id: 'mb-1',
-                publish_attempts: 0, published_ref: null,
+                publish_attempts: 0, published_ref: priorRef,
                 output: {
                   video_path: 'renders/c/wo/final.mp4',
                   quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
@@ -127,6 +127,24 @@ describe('发布信号 emit(只在真·PUBLISHED 喊)', () => {
     // 回执落回 published_ref.event_ids(补发对账靠它判断喊过没)
     const withEvents = publishedRefUpdates().find((ref) => Array.isArray(ref.event_ids))
     expect(withEvents?.event_ids).toEqual(['evt_reel_1'])
+  })
+
+  it('恢复已公开的 Reel 时，把 Graph 的 +0000 时间写成 Z 再发读数事件', async () => {
+    installWorkerMocks({ provisional: true, platform: 'facebook', page_id: PAGE_ID, video_id: VIDEO_ID })
+    mockFindExisting.mockResolvedValue({
+      platform: 'facebook', page_id: PAGE_ID, post_id: VIDEO_ID, video_id: VIDEO_ID,
+      published_at: '2026-10-18T00:00:00+0000', permalink: 'https://facebook.com/reel/1', video_state: 'PUBLISHED',
+    } as never)
+
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+    expect(r.result).toBe('published')
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(mockSend).toHaveBeenCalledTimes(1)
+    const evt = mockSend.mock.calls[0][0] as { data: Record<string, unknown> }
+    expect(evt.data.published_at).toBe('2026-10-18T00:00:00.000Z')
+    expect(FactoryReelPublishedEventSchema.safeParse(evt.data).success).toBe(true)
+    const stored = publishedRefUpdates().find((ref) => ref.video_state === 'PUBLISHED')
+    expect(stored?.published_at).toBe('2026-10-18T00:00:00.000Z')
   })
 
   it('🔴 草稿(video_state=DRAFT)→ 绝不 emit(草稿不可 promote 成广告)', async () => {

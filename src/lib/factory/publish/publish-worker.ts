@@ -10,7 +10,7 @@ import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 import { scanRedlineHits } from '../worker-guard'
 import { sanitizeFailReason } from './publish-display'
 import { facebookReelAdapter } from './facebook-reel-adapter'
-import { buildReelPublishedEvent } from './reel-published-event'
+import { buildReelPublishedEvent, toUtcPublishedAt } from './reel-published-event'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { REEL_AUTO_CHECK_KEYS, checklistPasses, humanKeysForReviewRef, validateContentChecklist } from '@/lib/social/content-review'
 import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
@@ -323,13 +323,14 @@ async function settleConfirmed(
     await markFailed(id, attempts, 'Meta 没有确认这条 Reel 是已公开还是草稿', true)
     return { order_id: id, result: 'failed', detail: 'publish_state_unconfirmed' }
   }
-  await recordPublished(id, ref, clientId, label)
-  if (ref.video_state === 'DRAFT') {
-    return { order_id: id, result: 'drafted', detail: ref.permalink ?? ref.post_id }
+  const receipt: PublishedRef = { ...ref, published_at: toUtcPublishedAt(ref.published_at) }
+  await recordPublished(id, receipt, clientId, label)
+  if (receipt.video_state === 'DRAFT') {
+    return { order_id: id, result: 'drafted', detail: receipt.permalink ?? receipt.post_id }
   }
   // 发布信号只在真·PUBLISHED 上喊。best-effort,不阻塞返回。
-  await emitReelPublishedEvent(id, ref, clientId)
-  return { order_id: id, result: 'published', detail: ref.permalink ?? ref.post_id }
+  await emitReelPublishedEvent(id, receipt, clientId)
+  return { order_id: id, result: 'published', detail: receipt.permalink ?? receipt.post_id }
 }
 
 // published_ref 硬事务 + 三落库尽力而为。回执已经是 Meta 确认过的 DRAFT 或 PUBLISHED。
@@ -392,6 +393,8 @@ export function bookSummary(angle: string, channel: string, ref: PublishedRef): 
   if (ref.video_state === 'DRAFT') {
     return `【社媒｜工厂自动发布】Reel「${angle}」草稿已上传到 ${channel}，未公开。${where}`
   }
+  // settleConfirmed never books this state. The wording stays so a direct caller
+  // still cannot say the Reel was sent when Meta did not confirm it.
   return `【社媒｜工厂自动发布】Reel「${angle}」已上传到 ${channel}，公开状态未确认。${where}`
 }
 

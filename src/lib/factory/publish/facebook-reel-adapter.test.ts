@@ -129,6 +129,7 @@ describe('Facebook Reel finish 回读', () => {
     const found = await facebookReelAdapter.findExisting({ target, idempotencyTag: 'work-order-1' })
     expect(found?.video_state).toBe('DRAFT')
     expect(found?.video_id).toBe('video-9')
+    expect(found?.published_at).toBe('2026-10-18T00:00:00.000Z')
   })
 })
 

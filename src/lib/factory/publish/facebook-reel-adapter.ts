@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto'
 import { getStoredPageToken } from '@/lib/meta/token-manager'
 import { ensureFacebookFirstComment } from '@/lib/meta/first-comment'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
+import { toUtcPublishedAt } from './reel-published-event'
 
 export const GRAPH = 'https://graph.facebook.com/v25.0'
 const RUPLOAD = 'https://rupload.facebook.com/video-upload/v25.0'
@@ -193,7 +194,7 @@ export const facebookReelAdapter: PublishAdapter = {
       page_id: pageId,
       post_id: videoId,
       video_id: videoId,
-      published_at: typeof hit['updated_time'] === 'string' ? (hit['updated_time'] as string) : new Date().toISOString(),
+      published_at: toUtcPublishedAt(typeof hit['updated_time'] === 'string' ? (hit['updated_time'] as string) : undefined),
       permalink: typeof readback['permalink_url'] === 'string' ? (readback['permalink_url'] as string) : undefined,
       video_state: videoStateFromReadback(readback) ?? undefined,
     }
