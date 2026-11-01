@@ -267,3 +267,24 @@ export async function getActiveJob(
   const job = (data as DiscoveryJob | null) ?? null
   return job && !isStaleRunningJob(job) ? job : null
 }
+
+/**
+ * Close basic jobs still marked pending/running. Call only after `getActiveJob`
+ * returned null: whatever is left is stale, and the one-active-job-per-client
+ * unique index would otherwise make the next `createDiscoveryJob` fail.
+ */
+export async function closeStaleActiveJobs(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<void> {
+  await supabase
+    .from('client_discovery_jobs')
+    .update({
+      status: 'failed',
+      error_message: 'Timed out: the run never reported back',
+      completed_at: new Date().toISOString(),
+    })
+    .eq('client_id', clientId)
+    .eq('job_type', 'basic')
+    .in('status', ['pending', 'running'])
+}

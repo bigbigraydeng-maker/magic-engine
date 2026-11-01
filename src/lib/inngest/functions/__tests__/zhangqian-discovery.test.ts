@@ -9,7 +9,7 @@ vi.mock('@/lib/zhangqian/persistor', () => ({ getJob: (...a: unknown[]) => getJo
 vi.mock('@/lib/mtc/charge', () => ({ refundOnFail: (...a: unknown[]) => refundOnFail(...a) }))
 vi.mock('@/lib/zhangqian/run-discovery-job', () => ({ executeDiscoveryJob: vi.fn(), ZHANGQIAN_SERVICE_KEY: 'zhangqian_discover' }))
 
-import { closeUnfinishedDiscoveryJob, parseDiscoveryEvent, zhangqianDiscovery } from '../zhangqian-discovery'
+import { closeUnfinishedDiscoveryJob, parseDiscoveryEvent, shouldStartDiscoveryJob, zhangqianDiscovery } from '../zhangqian-discovery'
 import { buildDiscoveryRequestedEvent } from '@/lib/zhangqian/discovery-events'
 
 const data = parseDiscoveryEvent({ job_id: 'j1', client_id: 'c1', domain: 'a.com', semrush_db: 'nz', projected_mtc: 60 })!
@@ -51,5 +51,21 @@ describe('closeUnfinishedDiscoveryJob', () => {
     const opts = (zhangqianDiscovery as unknown as { opts: { retries: number; onFailure: unknown } }).opts
     expect(opts.retries).toBe(0)
     expect(typeof opts.onFailure).toBe('function')
+  })
+})
+
+describe('shouldStartDiscoveryJob', () => {
+  beforeEach(() => getJob.mockReset())
+  it('starts only a job that is still pending', async () => {
+    getJob.mockResolvedValue({ status: 'pending' })
+    expect(await shouldStartDiscoveryJob('j1')).toBe(true)
+  })
+  it.each(['failed', 'running', 'completed'])('skips a %s job', async (status) => {
+    getJob.mockResolvedValue({ status })
+    expect(await shouldStartDiscoveryJob('j1')).toBe(false)
+  })
+  it('skips when the job row is gone', async () => {
+    getJob.mockResolvedValue(null)
+    expect(await shouldStartDiscoveryJob('j1')).toBe(false)
   })
 })

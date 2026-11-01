@@ -54,6 +54,16 @@ export async function closeUnfinishedDiscoveryJob(
   return 'closed'
 }
 
+/**
+ * Only a job still `pending` may start. If the hand-off was reported as failed (the
+ * route already marked the job failed) but Inngest delivered the event anyway, the
+ * run must not go ahead and charge for a result the user was told did not start.
+ */
+export async function shouldStartDiscoveryJob(jobId: string): Promise<boolean> {
+  const job = await getJob(supabaseAdmin, jobId)
+  return job?.status === 'pending'
+}
+
 export const zhangqianDiscovery = inngest.createFunction(
   {
     id: `${CLOUD_FN_PREFIX}zhangqian-discovery`,
@@ -70,6 +80,9 @@ export const zhangqianDiscovery = inngest.createFunction(
   async ({ event, step }) => {
     const data = parseDiscoveryEvent(event.data)
     if (!data) return { status: 'skipped' as const }
+    if (!(await step.run('check-pending', () => shouldStartDiscoveryJob(data.job_id)))) {
+      return { status: 'skipped' as const, job_id: data.job_id }
+    }
     await step.run('discover', () =>
       executeDiscoveryJob(data.job_id, data.client_id, data.domain, data.projected_mtc, data.semrush_db),
     )

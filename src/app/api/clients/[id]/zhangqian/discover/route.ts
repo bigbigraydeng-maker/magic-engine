@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { createDiscoveryJob, getActiveJob, failJob } from '@/lib/zhangqian/persistor'
+import { createDiscoveryJob, getActiveJob, failJob, closeStaleActiveJobs } from '@/lib/zhangqian/persistor'
 import { precheckCharge } from '@/lib/mtc/charge'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { buildDiscoveryRequestedEvent } from '@/lib/zhangqian/discovery-events'
@@ -60,6 +60,9 @@ export async function POST(
         { status: 202 },
       )
     }
+
+    // Nothing live is left, so any pending/running row is stale; free the slot.
+    await closeStaleActiveJobs(supabaseAdmin, clientId)
 
     // MTC precheck — admin bypasses the deduction (internal QA runs shouldn't
     // burn the client's balance). Real users (paid_client / self_serve) get
