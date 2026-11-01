@@ -130,6 +130,17 @@ export interface AdDraftAdSet {
   firstComment?: string
 }
 
+/**
+ * 已有广告组真实在花的钱。
+ * `endTime` 是广告组上的绝对结束时间，原样保留，不按跨度重算、也不平移。
+ * `null` 表示这个组没有结束日。缺这个字段的是更早的确认，只剩 `durationDays`。
+ */
+export interface InheritedAdSetSpend {
+  dailyBudget: number
+  durationDays: number | null
+  endTime?: string | null
+}
+
 export interface AdDraft {
   kind: DraftKind
   clientId: string
@@ -141,6 +152,16 @@ export interface AdDraft {
    */
   existingCampaignId?: string
   adSetName: string
+  /**
+   * 已有广告组的编号。写了就不再新建系列和广告组，只在这个组里加暂停广告。
+   * 和已有系列编号不能同时写，两件事要分成两张卡。
+   */
+  existingAdSetId?: string
+  /**
+   * 服务端读到的已有广告组预算和排期。确认信息和上限检查用它。
+   * 浏览器自己带上来的值不算数，要等服务端读过再写上。
+   */
+  inheritedSpend?: InheritedAdSetSpend
   /**
    * 每天多少钱，客户账户的货币单位（元，不是分）。
    * 单个广告组时，这就是这一组的日预算。
@@ -484,6 +505,80 @@ export function metaTripletFor(kind: DraftKind): MetaObjectiveTriplet {
   return META_TRIPLET[kind]
 }
 
+/** 浏览器带上来的残缺对象不算读到。绝对结束时间原样留下，不改写成另一时区。 */
+export function inheritedSpendOf(d: AdDraft): InheritedAdSetSpend | null {
+  const raw = d.inheritedSpend
+  if (!raw || typeof raw.dailyBudget !== 'number' || !Number.isFinite(raw.dailyBudget) || raw.dailyBudget <= 0) {
+    return null
+  }
+  const endTime = readEndTime(raw)
+  if (endTime === 'bad') return null
+  const days = readDays(raw.durationDays)
+  if (days === 'bad' && endTime === undefined) return null
+  const spend: InheritedAdSetSpend = {
+    dailyBudget: raw.dailyBudget,
+    durationDays: days === 'bad' ? null : days,
+  }
+  if (endTime !== undefined) spend.endTime = endTime
+  return spend
+}
+
+/** 两边都有绝对结束时间时只比它。同一跨度、结束日被平移，不算同一份排期。 */
+export function sameInheritedSpend(a: InheritedAdSetSpend, b: InheritedAdSetSpend): boolean {
+  if (Math.round(a.dailyBudget * 100) !== Math.round(b.dailyBudget * 100)) return false
+  if (hasEndTime(a) && hasEndTime(b)) return a.endTime === b.endTime
+  if (hasEndTime(a) || hasEndTime(b)) return openEnded(a) && openEnded(b)
+  return a.durationDays === b.durationDays
+}
+
+function openEnded(spend: InheritedAdSetSpend): boolean {
+  return spend.endTime === null || (!hasEndTime(spend) && spend.durationDays === null)
+}
+
+/** 确认卡上的结束说明。有绝对结束时间就写那一天，不用起止相减得到的天数。 */
+export function inheritedScheduleText(spend: InheritedAdSetSpend): string {
+  if (typeof spend.endTime === 'string') {
+    const day = /^(\d{4}-\d{2}-\d{2})/.exec(spend.endTime)?.[1] ?? spend.endTime
+    return `跟这个广告组一起，到 ${day} 结束`
+  }
+  if (spend.endTime === null || spend.durationDays === null) return '这个广告组没有结束日'
+  return `跟这个广告组一起跑 ${spend.durationDays} 天`
+}
+
+function hasEndTime(spend: InheritedAdSetSpend): boolean {
+  return Object.prototype.hasOwnProperty.call(spend, 'endTime')
+}
+
+function readDays(days: number | null): number | null | 'bad' {
+  if (days === null) return null
+  if (!Number.isInteger(days) || days < 1) return 'bad'
+  return days
+}
+
+function readEndTime(raw: InheritedAdSetSpend): string | null | undefined | 'bad' {
+  if (!hasEndTime(raw)) return undefined
+  if (raw.endTime === null) return null
+  if (typeof raw.endTime !== 'string' || !Number.isFinite(Date.parse(raw.endTime))) return 'bad'
+  return raw.endTime
+}
+
+export function withoutInheritedSpend(d: AdDraft): AdDraft {
+  if (d.inheritedSpend === undefined) return d
+  const next = { ...d }
+  delete next.inheritedSpend
+  return next
+}
+
+export function withInheritedSpend(d: AdDraft, spend: InheritedAdSetSpend): AdDraft {
+  return { ...withoutInheritedSpend(d), inheritedSpend: spend }
+}
+
+/** 上限和最低日预算只看已经读到的真实每天金额。 */
+export function draftUsingInheritedBudget(d: AdDraft): AdDraft {
+  const spend = inheritedSpendOf(d)
+  return spend ? { ...d, dailyBudget: spend.dailyBudget } : d
+}
+
 /** 一句话说清这条广告在做什么 —— 审批页第一行。 */
 const DRAFT_WHAT: Readonly<Record<DraftKind, string>> = {
   lead_form: '收联系方式（填表单）',
@@ -492,11 +587,32 @@ const DRAFT_WHAT: Readonly<Record<DraftKind, string>> = {
 }
 
 export function describeDraft(d: AdDraft): string {
+  const inherited = d.existingAdSetId ? describeInheritedAdSet(d) : null
+  if (inherited) return inherited
   const total = d.dailyBudget * d.durationDays
   // 这一步在 `validateDraft` 之前就会被调（账本的摘要），所以 kind 可能是请求体里的任何值。
-  const what = isKnownDraftKind(d.kind) ? DRAFT_WHAT[d.kind] : '（不认识的广告类型）'
+  const what = draftWhat(d)
   const budget = d.budgetMode === 'campaign' ? '（系列预算）' : ''
   const sets = Array.isArray(d.adSets) ? `，${d.adSets.length} 个广告组` : ''
   const attached = d.existingCampaignId ? '，加到已有系列' : ''
   return `${what}，每天 $${d.dailyBudget}${budget}、跑 ${d.durationDays} 天，最多花 $${total}${sets}${attached}`
+}
+
+function draftWhat(d: AdDraft): string {
+  return isKnownDraftKind(d.kind) ? DRAFT_WHAT[d.kind] : '（不认识的广告类型）'
+}
+
+/** 草稿上的每天金额和天数不会写进已有广告组，不能拿来当实际花费。 */
+function describeInheritedAdSet(d: AdDraft): string {
+  const spend = inheritedSpendOf(d)
+  const what = draftWhat(d)
+  if (!spend) return `${what}，加到已有广告组，每天多少和结束日还没读到`
+  if (typeof spend.endTime === 'string') {
+    return `${what}，加到已有广告组，每天 $${spend.dailyBudget}，${inheritedScheduleText(spend)}`
+  }
+  if (spend.durationDays === null || spend.endTime === null) {
+    return `${what}，加到已有广告组，每天 $${spend.dailyBudget}，没有结束日`
+  }
+  const total = spend.dailyBudget * spend.durationDays
+  return `${what}，加到已有广告组，每天 $${spend.dailyBudget}、跟原组 ${spend.durationDays} 天，最多 $${total}`
 }

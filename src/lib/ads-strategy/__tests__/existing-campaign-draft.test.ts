@@ -49,9 +49,11 @@ describe('已有系列编号', () => {
   })
 
   it('已在投加上新组超过上限 → 红灯，刚好等于上限 → 通过', () => {
+    const account = REVIEW.accounts?.[0]
+    if (!account) throw new Error('fixture missing account')
     const cap = {
       ...REVIEW,
-      accounts: [{ ...REVIEW.accounts[0], daily_cap_cents: 15000 }],
+      accounts: [{ ...account, daily_cap_cents: 15000 }],
       clientCapCents: 20000,
       liveDeliveringCents: 14500,
     }

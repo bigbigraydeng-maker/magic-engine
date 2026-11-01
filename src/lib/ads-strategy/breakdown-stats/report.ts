@@ -19,6 +19,8 @@ export interface StatInput {
   spend: number
   impressions: number
   clicks: number
+  /** Null when this row did not store link clicks. */
+  link_clicks?: number | null
   meta_leads: number | null
 }
 
@@ -40,6 +42,7 @@ interface FlagInput {
   spend: number
   impressions: number
   clicks: number
+  linkClicks?: number | null
   leads: number | null
 }
 
@@ -68,6 +71,7 @@ export function flagRows(rows: FlagInput[]): ReportRow[] {
         spend: round2(r.spend),
         impressions: r.impressions,
         clicks: r.clicks,
+        linkClicks: r.linkClicks ?? null,
         leads: null,
         costPerLead: null,
         expectedLeads: null,
@@ -88,6 +92,7 @@ export function flagRows(rows: FlagInput[]): ReportRow[] {
       spend: round2(r.spend),
       impressions: r.impressions,
       clicks: r.clicks,
+      linkClicks: r.linkClicks ?? null,
       leads: r.leads,
       costPerLead,
       expectedLeads: round1(expectedLeads),
@@ -101,18 +106,28 @@ interface Acc {
   spend: number
   impressions: number
   clicks: number
+  linkClicks: number
+  linkSeen: boolean
   leads: number
 }
 
 function emptyAcc(): Acc {
-  return { spend: 0, impressions: 0, clicks: 0, leads: 0 }
+  return { spend: 0, impressions: 0, clicks: 0, linkClicks: 0, linkSeen: false, leads: 0 }
 }
 
 function addTo(acc: Acc, s: StatInput, leads: number): void {
   acc.spend += s.spend
   acc.impressions += s.impressions
   acc.clicks += s.clicks
+  if (s.link_clicks != null) {
+    acc.linkClicks += s.link_clicks
+    acc.linkSeen = true
+  }
   acc.leads += leads
+}
+
+function linkOf(acc: Acc): number | null {
+  return acc.linkSeen ? acc.linkClicks : null
 }
 
 function toFlagInput(key: string, acc: Acc): FlagInput {
@@ -121,6 +136,7 @@ function toFlagInput(key: string, acc: Acc): FlagInput {
     spend: acc.spend,
     impressions: acc.impressions,
     clicks: acc.clicks,
+    linkClicks: linkOf(acc),
     leads: acc.leads,
   }
 }
@@ -193,6 +209,7 @@ function buildHour(
       spend: acc.spend,
       impressions: acc.impressions,
       clicks: acc.clicks,
+      linkClicks: linkOf(acc),
       leads: leadCounts[h],
     })
   }
@@ -221,6 +238,7 @@ function buildWeekday(
       spend: acc.spend,
       impressions: acc.impressions,
       clicks: acc.clicks,
+      linkClicks: linkOf(acc),
       leads: leadCounts[wd],
     })
   }
@@ -238,7 +256,7 @@ function buildDay(
   const dates = new Set<string>([...map.keys(), ...leadCounts.keys()])
   const rows: FlagInput[] = [...dates].sort().reverse().map((date) => {
     const acc = map.get(date) ?? emptyAcc()
-    return { key: date, spend: acc.spend, impressions: acc.impressions, clicks: acc.clicks, leads: leadCounts.get(date) ?? 0 }
+    return { key: date, spend: acc.spend, impressions: acc.impressions, clicks: acc.clicks, linkClicks: linkOf(acc), leads: leadCounts.get(date) ?? 0 }
   })
   // A single day is too noisy to call costly or cheap: keep the numbers, drop the verdict.
   return flagRows(rows).map((r) => ({ ...r, expectedLeads: null, flag: null }))
@@ -292,6 +310,7 @@ function buildRegion(stats: readonly StatInput[]): ReportRow[] {
       spend: acc.spend,
       impressions: acc.impressions,
       clicks: acc.clicks,
+      linkClicks: linkOf(acc),
       leads: null,
     })
   }
@@ -319,6 +338,7 @@ interface Totals {
   spendLeadObjective: number
   impressionsLeadObjective: number
   clicksLeadObjective: number
+  linkClicksLeadObjective: number | null
   metaLeads: number
   crmLeads: number
   matchRate: number | null
@@ -334,6 +354,8 @@ function buildTotals(
   let spendLeadObjective = 0
   let impressionsLeadObjective = 0
   let clicksLeadObjective = 0
+  let linkClicksLeadObjective = 0
+  let sawLink = false
   let metaLeads = 0
   for (const s of placementDevice) {
     spendAll += s.spend
@@ -341,6 +363,10 @@ function buildTotals(
       spendLeadObjective += s.spend
       impressionsLeadObjective += s.impressions
       clicksLeadObjective += s.clicks
+      if (s.link_clicks != null) {
+        linkClicksLeadObjective += s.link_clicks
+        sawLink = true
+      }
       metaLeads += s.meta_leads ?? 0
     }
   }
@@ -351,6 +377,7 @@ function buildTotals(
     spendLeadObjective: round2(spendLeadObjective),
     impressionsLeadObjective,
     clicksLeadObjective,
+    linkClicksLeadObjective: sawLink ? linkClicksLeadObjective : null,
     metaLeads,
     crmLeads,
     matchRate,

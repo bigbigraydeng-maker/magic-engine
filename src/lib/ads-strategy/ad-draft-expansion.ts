@@ -84,9 +84,17 @@ export function expandedDraftProblems(d: AdDraft): DraftProblem[] {
 }
 
 function attachIdProblems(d: AdDraft): DraftProblem[] {
-  if (d.existingCampaignId === undefined) return []
-  if (isMetaObjectId(d.existingCampaignId)) return []
-  return [{ field: 'existingCampaignId', message: '已有系列编号必须是广告账户里的数字编号' }]
+  const problems: DraftProblem[] = []
+  if (d.existingCampaignId !== undefined && !isMetaObjectId(d.existingCampaignId)) {
+    problems.push({ field: 'existingCampaignId', message: '已有系列编号必须是广告账户里的数字编号' })
+  }
+  if (d.existingAdSetId !== undefined && !isMetaObjectId(d.existingAdSetId)) {
+    problems.push({ field: 'existingAdSetId', message: '已有广告组编号必须是广告账户里的数字编号' })
+  }
+  if (d.existingCampaignId && d.existingAdSetId) {
+    problems.push({ field: 'existingAdSetId', message: '加组和加广告要分成两张卡' })
+  }
+  return problems
 }
 
 /**

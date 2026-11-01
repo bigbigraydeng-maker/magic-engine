@@ -4,13 +4,16 @@
  * that "not checked" is never rendered as "found nothing".
  */
 import React from 'react'
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 
 import GrowthPanel, { type GrowthStateView } from '../growth-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 const base: ClientGrowthView = {
   viewer: 'client',
@@ -82,5 +85,20 @@ describe('GrowthPanel — 数据截至', () => {
   it('有 dataThrough 才显示这一天', () => {
     render(<GrowthPanel state={internalState('2026-09-15')} />)
     expect(screen.getByText(/数据截至2026-09-15/)).toBeTruthy()
+  })
+
+  it('跟进率不够时，加预算建议下面多一句，客户视图不出现这句', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ view: { budgetHold: true }, items: [] })))
+    const state = internalState()
+    state.payload = {
+      ...state.payload!,
+      opportunities: [{ code: 'O1', status: 'hit', title: '这条素材还可以加力' }],
+    }
+    render(<GrowthPanel state={state} clientId="client-1" />)
+    expect(await screen.findByText('先补跟进，暂不建议加预算')).toBeTruthy()
+    cleanup()
+    render(<GrowthPanel state={base} clientId="client-1" />)
+    expect(screen.queryByText('先补跟进，暂不建议加预算')).toBeNull()
+    expect(screen.queryByText(/预算/)).toBeNull()
   })
 })

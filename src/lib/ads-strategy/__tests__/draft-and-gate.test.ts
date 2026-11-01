@@ -9,6 +9,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+vi.mock('@/lib/meta/existing-adset-spend', () => ({
+  readExistingAdSetSpend: vi.fn(),
+}))
 vi.mock('@/lib/meta/ad-publisher', () => ({
   publishDraftPaused: vi.fn(),
   activatePublished: vi.fn(),
@@ -28,6 +31,7 @@ vi.mock('@/lib/meta/asset-upload', () => ({
   waitForVideoReady: vi.fn(),
 }))
 
+import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
 import { publishDraftPaused, activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
 import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
 import { fetchCustomAudiences, fetchCustomAudienceById } from '@/lib/meta/entity-settings'
@@ -44,6 +48,7 @@ import type { AdDraft } from '../ad-draft'
 const PM = { actorUserId: 'u-pm', actorEmail: 'pm@magiclab.test', basis: 'global_admin' as const }
 
 const mPublish = vi.mocked(publishDraftPaused)
+const mSpend = vi.mocked(readExistingAdSetSpend)
 const mActivate = vi.mocked(activatePublished)
 const mAdSet = vi.mocked(fetchAdSetReadback)
 const mCreatives = vi.mocked(fetchAdCreativesReadback)
@@ -132,6 +137,11 @@ const OK_PUBLISH = {
 beforeEach(() => {
   vi.resetAllMocks()
   mPublish.mockResolvedValue(OK_PUBLISH)
+  mSpend.mockResolvedValue({
+    ok: true,
+    campaignId: '900001',
+    spend: { dailyBudget: 100, durationDays: null },
+  })
   mAdSet.mockResolvedValue({
     id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION',
     destination_type: 'ON_AD',
@@ -1413,5 +1423,60 @@ describe('createDraftForApproval — 已有系列', () => {
     expect(r.status).toBe('blocked')
     expect(r.findings.map((f) => f.code)).toContain('attached_to_wrong_campaign')
     expect(mPause).not.toHaveBeenCalled()
+  })
+
+  it('已有广告组里的新广告不是暂停 → 拦住，补暂停不关原组和原系列', async () => {
+    mPublish.mockResolvedValue({
+      ok: true, campaignId: '900001', adSetId: '800001', adIds: ['ad9'], orphans: [],
+      reusedCampaign: true, reusedAdSet: true,
+    })
+    mAdSet.mockResolvedValue({
+      id: '800001', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      status: 'ACTIVE', campaign_id: '900001',
+      targeting: { geo_locations: { countries: ['NZ'] } },
+    })
+    mCreatives.mockResolvedValue([
+      { adId: 'ad-old', adName: 'old', status: 'ACTIVE', texts: ['old line'] },
+      { adId: 'ad9', adName: 'new', status: 'ACTIVE', texts: ['Brand new four bedroom home in Rothesay Bay'] },
+    ])
+    mPause.mockResolvedValue({ ok: true, failed: [] })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval({ ...DRAFT, existingAdSetId: '800001' }, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('not_paused')
+    expect(mPause).toHaveBeenCalledWith(
+      expect.objectContaining({ adSetId: '800001', reusedAdSet: true }),
+      'tok',
+      expect.any(Object),
+    )
+  })
+
+  it('已有广告组仍开着、新广告是暂停 → 可以进审批，不去关原组', async () => {
+    mPublish.mockResolvedValue({
+      ok: true, campaignId: '900001', adSetId: '800001', adIds: ['ad9'], orphans: [],
+      reusedCampaign: true, reusedAdSet: true,
+    })
+    mAdSet.mockResolvedValue({
+      id: '800001', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      status: 'ACTIVE', campaign_id: '900001',
+      targeting: { geo_locations: { countries: ['NZ'] } },
+    })
+    mCreatives.mockResolvedValue([
+      { adId: 'ad-old', adName: 'old', status: 'ACTIVE', texts: ['old line'] },
+      { adId: 'ad9', adName: 'new', status: 'PAUSED', texts: ['Brand new four bedroom home in Rothesay Bay'] },
+    ])
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval({ ...DRAFT, existingAdSetId: '800001' }, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPause).not.toHaveBeenCalled()
+    expect(inserted[0].adIds).toEqual(['ad9'])
+    expect(inserted[0].draft.existingAdSetId).toBe('800001')
+    expect(inserted[0].draft.inheritedSpend).toEqual({ dailyBudget: 100, durationDays: null })
+    expect(inserted[0].summary).toContain('没有结束日')
+    expect(inserted[0].summary).not.toContain('跑 7')
+    expect(mPublish.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      inheritedSpend: { dailyBudget: 100, durationDays: null },
+      existingAdSetId: '800001',
+    }))
   })
 })

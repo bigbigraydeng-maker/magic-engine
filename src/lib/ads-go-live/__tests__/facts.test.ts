@@ -105,6 +105,78 @@ describe('go-live facts', () => {
     expect(facts.scope).toBe('开到新的广告和广告组。原来的广告系列这次不改开关')
   })
 
+  it('uses the existing ad set budget instead of the unused draft numbers', () => {
+    const parsed = parsePausedDraft({
+      status: 'awaiting_approval',
+      campaignId: 'camp',
+      adSetId: 'set',
+      adIds: ['ad'],
+      draft: {
+        kind: 'video_thruplay',
+        existingAdSetId: 'set',
+        dailyBudget: 15,
+        durationDays: 7,
+        inheritedSpend: { dailyBudget: 100, durationDays: null },
+      },
+    })
+    expect(parsed?.dailyBudget).toBe(100)
+    expect(parsed?.durationDays).toBeNull()
+    expect(parsed?.inheritedSchedule).toBe(true)
+    expect(parsed?.ids?.reusedAdSet).toBe(true)
+    expect(parsed?.ids?.reusedCampaign).toBe(true)
+    const facts = buildGoLiveFacts({
+      draftId: 'draft-1',
+      view: view({
+        dailyBudget: parsed?.dailyBudget ?? null,
+        durationDays: parsed?.durationDays ?? null,
+        inheritedSchedule: true,
+        ids: parsed?.ids ?? null,
+      }),
+      gates: greenGates(),
+      boundLabels: [],
+    })
+    expect(facts.amount).toBe('每天 100，按这个广告账户自己的货币')
+    expect(facts.date).toBe('这个广告组没有结束日')
+    const dated = parsePausedDraft({
+      status: 'awaiting_approval',
+      campaignId: 'camp',
+      adSetId: 'set',
+      adIds: ['ad'],
+      draft: {
+        kind: 'video_thruplay',
+        existingAdSetId: 'set',
+        dailyBudget: 15,
+        durationDays: 7,
+        inheritedSpend: { dailyBudget: 100, durationDays: 31, endTime: '2026-11-01T00:00:00+0000' },
+      },
+    })
+    expect(dated?.endTime).toBe('2026-11-01T00:00:00+0000')
+    expect(buildGoLiveFacts({
+      draftId: 'draft-1',
+      view: view({
+        dailyBudget: dated?.dailyBudget ?? null,
+        durationDays: dated?.durationDays ?? null,
+        inheritedSchedule: true,
+        endTime: dated?.endTime,
+        ids: dated?.ids ?? null,
+      }),
+      gates: greenGates(),
+      boundLabels: [],
+    }).date).toBe('跟这个广告组一起，到 2026-11-01 结束')
+    expect(facts.scope).toBe('只开这次新加的广告。原来的广告组和广告系列这次不改开关')
+    expect(facts.hardChecks.every((row) => row.state === 'green')).toBe(true)
+
+    const unread = parsePausedDraft({
+      status: 'awaiting_approval',
+      campaignId: 'camp',
+      adSetId: 'set',
+      adIds: ['ad'],
+      draft: { kind: 'video_thruplay', existingAdSetId: 'set', dailyBudget: 15, durationDays: 7 },
+    })
+    expect(unread?.dailyBudget).toBeNull()
+    expect(unread?.durationDays).toBeNull()
+  })
+
   it('reads the optional account name and does not invent ids', () => {
     const parsed = parsePausedDraft({
       status: 'awaiting_approval',

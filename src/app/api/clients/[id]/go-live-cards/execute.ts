@@ -8,9 +8,10 @@ import type { SpendActivationAuthority } from '@/lib/ads/spend-activation'
 import type { ExecutionOutcome, SettleResult } from '@/lib/ads-go-live'
 import { settleGoLive, type ActivateAttempt, type LayerRead } from '@/lib/ads-go-live'
 import type { GoLiveIds } from '@/lib/ads-go-live/draft'
+import { existingAdSetCountsAsLive } from '@/lib/ads-go-live/existing-ad-set-live'
 import { approveDraft } from '@/lib/ads-strategy/draft-and-gate'
 import { activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
-import { fetchCampaignStatus } from '@/lib/meta/readback'
+import { fetchCampaignStatus, fetchEffectiveStatus } from '@/lib/meta/readback'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 
 function held(reason: string): ExecutionOutcome {
@@ -43,25 +44,42 @@ async function ownsGoLive(
   return activationRunId(current) === cardRunId
 }
 
-function targets(ids: GoLiveIds): { name: string; id: string }[] {
+type LiveTarget = { name: string; id: string; existingAdSet?: boolean }
+
+function targets(ids: GoLiveIds): LiveTarget[] {
   const ads = ids.adIds.map((id, index) => ({
     name: ids.adIds.length === 1 ? '广告' : `第${index + 1}条广告`,
     id,
   }))
-  // A reused campaign stays as it was. It is not part of the "is this live" read.
-  const campaign = ids.reusedCampaign ? [] : [{ name: '广告系列', id: ids.campaignId }]
-  return [...ads, { name: '广告组', id: ids.adSetId }, ...campaign]
+  // A reused campaign stays out of this read. A reused ad set stays switched as it was,
+  // but its effective status still decides whether the new ad is actually live.
+  const adSet: LiveTarget[] = [{
+    name: '广告组',
+    id: ids.adSetId,
+    ...(ids.reusedAdSet ? { existingAdSet: true } : {}),
+  }]
+  const campaign = ids.reusedCampaign || ids.reusedAdSet ? [] : [{ name: '广告系列', id: ids.campaignId }]
+  return [...ads, ...adSet, ...campaign]
 }
 
 function skipIds(ids: GoLiveIds): string[] {
-  return ids.reusedCampaign ? [ids.campaignId] : []
+  const skip: string[] = []
+  if (ids.reusedCampaign || ids.reusedAdSet) skip.push(ids.campaignId)
+  if (ids.reusedAdSet) skip.push(ids.adSetId)
+  return skip
+}
+
+async function layerStatus(target: LiveTarget, token: string): Promise<string | null> {
+  if (!target.existingAdSet) return fetchCampaignStatus(target.id, token)
+  const actual = await fetchEffectiveStatus(target.id, token)
+  return existingAdSetCountsAsLive(actual) ? 'ACTIVE' : actual
 }
 
 async function readLayers(ids: GoLiveIds, token: string): Promise<LayerRead[] | null> {
   try {
     return await Promise.all(targets(ids).map(async (target) => ({
       name: target.name,
-      status: await fetchCampaignStatus(target.id, token),
+      status: await layerStatus(target, token),
     })))
   } catch {
     return null
@@ -164,7 +182,11 @@ async function runSettle(
     readBack: () => readLayers(args.ids, token),
     stillOwns,
     keepPaused: () => pausePublished(
-      { ...ids, ...(args.ids.reusedCampaign ? { reusedCampaign: true } : {}) },
+      {
+        ...ids,
+        ...(args.ids.reusedCampaign ? { reusedCampaign: true } : {}),
+        ...(args.ids.reusedAdSet ? { reusedAdSet: true } : {}),
+      },
       token,
     ),
   }

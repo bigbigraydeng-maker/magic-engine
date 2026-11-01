@@ -187,6 +187,40 @@ describe('复审第二轮：推托不算「还要了东西」', () => {
   })
 })
 
+describe('小尾巴：回电请求不是推托；两行表态的第二行是问句', () => {
+  const fact = (key: RawFact['key'], value: string, quote: string): RawFact => ({ key, value, quote, confidence: 0.9, speaker: 'customer' })
+
+  it('"Call me back later this afternoon" / "call me tonight" / 下午再打给我 / 晚点打给我 → 是真回电请求，挡住表态', () => {
+    const cases: Array<[string, string]> = [
+      ['约下午回电', 'Call me back later this afternoon'],
+      ['约今晚回电', 'call me tonight'],
+      ['下午再打给我', '下午再打给我'],
+      ['晚点打给我', '晚点打给我'],
+    ]
+    for (const [value, quote] of cases) {
+      expect(callStanceFromFacts([notReady(), fact('callback_time', value, quote)])).toBeNull()
+      expect(callStanceFromFacts([notReady(), fact('next_step', value, quote)])).toBeNull()
+    }
+  })
+
+  it("客人说「别打给我 / don't call me」是拒绝回电，不当成回电请求（仍按推托处理）", () => {
+    expect(callStanceFromFacts([notReady(), fact('next_step', '以后再说', "please don't call me, maybe later")])).toBe('not_now')
+    expect(callStanceFromFacts([notReady(), fact('next_step', '以后再说', '先别打给我，以后再说')])).toBe('not_now')
+  })
+
+  it('表态原话跨两行、第二行是问句 → 丢掉（不能只看第一行）', () => {
+    const t = "声道1：Hi, about the China tour.\n声道2：I'm not ready for that.\n声道2：Can you call me next week?"
+    const v = verifyFacts({ summary: '', language: 'en', facts: [notReady({ quote: "I'm not ready for that. Can you call me next week" })] }, t)
+    expect(v.facts).toHaveLength(0)
+  })
+
+  it('同样两行，但第二行是陈述句 → 保留', () => {
+    const t = "声道1：Hi, about the China tour.\n声道2：I'm not ready for that.\n声道2：I'll talk to you another day."
+    const v = verifyFacts({ summary: '', language: 'en', facts: [notReady({ quote: "I'm not ready for that. I'll talk to you another day." })] }, t)
+    expect(v.facts).toHaveLength(1)
+  })
+})
+
 describe('长转写不能拖慢（子牙 2026-10-29 实测旧做法 1200 行约 2.7 秒）', () => {
   it('3000 行同一声道 + 编造的表态原话 → 远低于 200 毫秒', () => {
     const t = Array.from({ length: 3000 }, (_, i) => `声道1：This is sentence number ${i} about the tour.`).join('\n')

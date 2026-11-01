@@ -17,6 +17,7 @@ import { loadAccountStatusRows, latestPerAccount } from '@/lib/ads-strategy/acco
 import { loadLatestGoalPrescription } from '@/lib/marketing-plan/promo/goal-prescription'
 import { pickWarMapPlan } from '@/lib/marketing-plan/promo/plan-pick'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { loadAdFollowup } from './followup-load'
 import { unusableAccountNote } from './pools'
 import { nzDay } from './util'
 import { computeRunningSince, type SnapRowLite } from './running-since'
@@ -500,6 +501,13 @@ export async function loadWarMapInput(clientId: string, now: Date = new Date()):
     loadRunningSince(clientId, now, accounts),
     loadAccountFetchedAt(clientId, accounts),
   ])
+  let followup
+  try {
+    followup = await loadAdFollowup(supabaseAdmin, clientId, now)
+  } catch (err) {
+    console.warn('[war-map] 广告线索跟进读不到', { error: err instanceof Error ? err.message : 'unknown' })
+    followup = { unreadable: true, groups: [], inWindow: 0, outsideWindow: 0, rateWithin24h: null }
+  }
   const campaigns = await loadCampaigns(clientId, clocks.dataDay)
   // 账户清单是「哪些账户算数」的唯一来源：被隐藏的账户，它的池子/池子历史/系列频率也不能漏进来。
   // accounts 为空（没绑定）时不过滤，保持原行为。
@@ -523,5 +531,6 @@ export async function loadWarMapInput(clientId: string, now: Date = new Date()):
     accountFetchedAt,
     accountActivity: buildAccountActivity(accounts, visibleCampaigns, adsets),
     creativePoolApproved,
+    followup,
   }
 }

@@ -6,6 +6,8 @@ import { NextResponse } from 'next/server'
 import { publicError } from '@/lib/confirmation-card/http'
 import { issuePausedDraftCard } from '@/lib/ads-strategy/paused-draft-submit'
 import type { AdDraft } from '@/lib/ads-strategy/ad-draft'
+import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
+import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { cardContext, clientAds, kernel, pausedDraftGate } from './access'
 
 export async function POST(
@@ -31,6 +33,8 @@ export async function POST(
   delete (draft as { access_token?: unknown }).access_token
   try {
     const context = await cardContext(id, ads.adAccountId)
+    const readSpend = await spendReader(id, ads.adAccountId, draft)
+    if (!readSpend.ok) return readSpend.response
     const card = await issuePausedDraftCard({
       kernel: kernel(),
       clientId: id,
@@ -38,6 +42,7 @@ export async function POST(
       draft,
       accountLabel: context.accountLabel,
       review: context.review,
+      readSpend: readSpend.read,
     })
     return NextResponse.json(card)
   } catch (error) {
@@ -45,4 +50,20 @@ export async function POST(
     if (mapped.status === 500) console.error('[paused-draft-card] issue failed')
     return NextResponse.json({ error: mapped.message }, { status: mapped.status })
   }
+}
+
+async function spendReader(clientId: string, adAccountId: string, draft: AdDraft): Promise<
+  | { ok: true; read?: (row: AdDraft) => ReturnType<typeof readExistingAdSetSpend> }
+  | { ok: false; response: NextResponse }
+> {
+  if (!draft.existingAdSetId) return { ok: true }
+  const token = await getMetaTokenForClient(clientId)
+  if (!token) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: '拿不到这个客户的广告授权，没有出卡。' }, { status: 424 }),
+    }
+  }
+  const adSetId = draft.existingAdSetId
+  return { ok: true, read: () => readExistingAdSetSpend(adSetId, adAccountId, token) }
 }
