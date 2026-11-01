@@ -11,6 +11,7 @@ import { requireOperatorAccess, requirePaidClientAccess } from '@/lib/auth/clien
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
 import { loadLedger } from '@/lib/ledger/load'
+import { isDoNotContact } from '@/lib/crm/dnc'
 import {
   callbackItems,
   currentMonthNz,
@@ -23,6 +24,12 @@ import {
 } from '@/lib/crm/due-calendar'
 
 export const dynamic = 'force-dynamic'
+
+interface DncTouchRow {
+  contact_id: string
+  occurred_at: string
+  metadata: unknown
+}
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const clientId = params.id
@@ -47,21 +54,52 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     )
     const contactIds = Array.from(new Set(touches.map((t) => t.contact_id)))
     const contacts: CallbackContactRow[] = []
-    for (let i = 0; i < contactIds.length; i += 200) {
+    for (let i = 0; i < contactIds.length; i += 100) {
+      const ids = contactIds.slice(i, i + 100)
       const { data, error } = await supabaseAdmin
         .from('contacts')
         .select('id, display_name, primary_phone, do_not_contact')
         .eq('client_id', clientId)
-        .in('id', contactIds.slice(i, i + 200))
+        .in('id', ids)
       if (error) throw error
-      contacts.push(...((data ?? []) as CallbackContactRow[]))
+      // 「别再联系」以触点为准（见 lib/crm/dnc），contacts 列只是尽力维护的副本
+      const allTouches = await fetchAll<DncTouchRow>((from, to) =>
+        supabaseAdmin
+          .from('contact_touchpoints')
+          .select('contact_id, occurred_at, metadata')
+          .eq('client_id', clientId)
+          .in('contact_id', ids)
+          .order('id', { ascending: true })
+          .range(from, to),
+      )
+      const byContact = new Map<string, DncTouchRow[]>()
+      for (const t of allTouches) byContact.set(t.contact_id, [...(byContact.get(t.contact_id) ?? []), t])
+      for (const c of (data ?? []) as CallbackContactRow[]) {
+        const dnc = isDoNotContact(
+          c.do_not_contact,
+          (byContact.get(c.id) ?? []).map((t) => ({
+            outcome: ((t.metadata as { outcome?: unknown } | null)?.outcome as string) ?? null,
+            flagged: (t.metadata as { do_not_contact?: unknown } | null)?.do_not_contact === true,
+            occurredAt: t.occurred_at,
+          })),
+        )
+        contacts.push({ ...c, do_not_contact: dnc })
+      }
     }
 
     const items: DueItem[] = callbackItems(touches, contacts, month)
+    // 台账横跨所有客户：只给「不限客户的全局管理员」，演示 / 受限管理员只看自己客户的回电
     const operator = await requireOperatorAccess(clientId)
-    if (operator.ok) items.push(...ledgerDueItems(loadLedger().entries, month))
+    const includesLedger = operator.ok && operator.allowedClientId === null
+    if (includesLedger) {
+      try {
+        items.push(...ledgerDueItems(loadLedger().entries, month))
+      } catch (err) {
+        console.error('[crm/calendar] ledger unreadable, showing callbacks only', err)
+      }
+    }
 
-    return NextResponse.json({ month, items: sortDueItems(items), includesLedger: operator.ok })
+    return NextResponse.json({ month, items: sortDueItems(items), includesLedger })
   } catch (err) {
     console.error('[crm/calendar] failed', err)
     return NextResponse.json({ error: 'Failed to load calendar' }, { status: 500 })

@@ -39,6 +39,7 @@ export default function CrmCalendarPage({ params }: { params: { id: string } }) 
   useEffect(() => {
     let cancelled = false
     setState('loading')
+    setItems([])
     fetch(`/api/clients/${clientId}/crm/calendar?month=${month}`)
       .then(async (res) => {
         if (!res.ok) throw new Error(String(res.status))

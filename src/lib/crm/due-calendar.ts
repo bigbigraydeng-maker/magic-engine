@@ -33,7 +33,7 @@ export function currentMonthNz(now: Date = new Date()): string {
   return nzDateOf(now.toISOString()).slice(0, 7)
 }
 
-/** ISO 时间 → 新西兰日期 YYYY-MM-DD；无法解析返回 null */
+/** ISO 时间 → 新西兰日期 YYYY-MM-DD；无法解析返回空字符串 */
 export function nzDateOf(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return ''
