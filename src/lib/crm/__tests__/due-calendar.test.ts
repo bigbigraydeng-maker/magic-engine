@@ -39,8 +39,22 @@ describe('due-calendar', () => {
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ title: 'Ann', date: '2026-11-10', time: '10:00' })
   })
+  it('carries the contact assignee (lower-cased) so the page can filter to my callbacks', () => {
+    const contacts = [
+      { id: 'c1', display_name: 'Ann', primary_phone: null, do_not_contact: false, assigned_to: ' Info@CTSTours.co.nz ' },
+      { id: 'c2', display_name: 'Bob', primary_phone: null, do_not_contact: false, assigned_to: null },
+      { id: 'c3', display_name: 'Cat', primary_phone: null, do_not_contact: false },
+    ]
+    const touches = contacts.map((c) => ({
+      contact_id: c.id,
+      occurred_at: '2026-11-01T00:00:00Z',
+      metadata: { callback_at: '2026-11-05T21:00:00Z' },
+    }))
+    const byTitle = Object.fromEntries(callbackItems(touches, contacts, '2026-11').map((i) => [i.title, i.assignee]))
+    expect(byTitle).toEqual({ Ann: 'info@ctstours.co.nz', Bob: null, Cat: null })
+  })
   it('sorts by date then time, untimed last', () => {
-    const base = { kind: 'verify' as const, title: '', refId: '', phone: null, status: null }
+    const base = { kind: 'verify' as const, title: '', refId: '', phone: null, status: null, assignee: null }
     const sorted = sortDueItems([
       { ...base, date: '2026-11-02', time: null },
       { ...base, date: '2026-11-02', time: '09:00' },
