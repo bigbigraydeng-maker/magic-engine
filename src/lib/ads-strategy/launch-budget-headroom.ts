@@ -104,40 +104,9 @@ export function computeLaunchHeadroom(args: {
 
   const rows = latestPerEntity(args.rows)
   if (rows.length === 0) return { ok: false, reason: '没有读到任何快照，不能判余量' }
-
-  const currencies = new Set(rows.map((r) => (r.currency ?? '').trim().toUpperCase()))
-  if (currencies.size !== 1 || currencies.has('')) return { ok: false, reason: '币种缺失或混杂，不能把不同币种的预算相加' }
-  const currency = [...currencies][0]
-
-  const cboCampaigns = new Set(
-    rows.filter((r) => r.level === 'campaign' && r.budget_level === 'cbo').map((r) => r.entity_id),
-  )
-
-  const delivering: HeadroomUnit[] = []
-  const latent: HeadroomUnit[] = []
-  for (const r of rows) {
-    const status = r.effective_status ?? ''
-    const isDelivering = DELIVERING_STATUSES.has(status)
-    const isCbo = r.level === 'campaign' && r.budget_level === 'cbo'
-    const isAboAdset = r.level === 'adset' && !(r.campaign_id && cboCampaigns.has(r.campaign_id))
-    if (r.level === 'campaign' && r.budget_level !== 'cbo') {
-      if (isDelivering && r.budget_level !== 'abo') {
-        return { ok: false, reason: `在投系列 ${r.entity_id} 的预算层级读不到，不能判余量` }
-      }
-      continue
-    }
-    if (!isCbo && !isAboAdset) continue // CBO 旗下广告组：钱在系列那一层
-
-    const unit = { adAccountId: r.ad_account_id, level: r.level as 'campaign' | 'adset', entityId: r.entity_id }
-    if (isDelivering) {
-      if (!isValidBudget(r.daily_budget_minor)) {
-        return { ok: false, reason: `在投的${r.level === 'campaign' ? '系列' : '广告组'} ${r.entity_id} 日预算缺失或无效，不能判余量` }
-      }
-      delivering.push({ ...unit, dailyMinor: r.daily_budget_minor })
-    } else if (PAUSED_LIKE.has(status) && isValidBudget(r.daily_budget_minor)) {
-      latent.push({ ...unit, dailyMinor: r.daily_budget_minor })
-    }
-  }
+  const split = splitSpend(rows)
+  if (!split.ok) return split
+  const { currency, delivering, latent } = split
 
   const perAccountMinor: Record<string, number> = {}
   let deliveringTotalMinor = 0
@@ -165,4 +134,65 @@ export function computeLaunchHeadroom(args: {
     headroomAfterMinor: capMinor - projectedMinor,
     fits: projectedMinor <= capMinor,
   }
+}
+
+type SpendSplit =
+  | { ok: false; reason: string }
+  | { ok: true; currency: string; delivering: HeadroomUnit[]; latent: HeadroomUnit[] }
+
+/** 已在投的日预算合计（最小货币单位）。没有行 = 读到了、没有在投。读不全 = null，不能当成 0。 */
+export function sumDeliveringDailyMinor(rows: readonly HeadroomRow[]): number | null {
+  const latest = latestPerEntity(rows)
+  if (latest.length === 0) return 0
+  const split = splitSpend(latest)
+  if (!split.ok) return null
+  const minor = split.delivering.reduce((sum, unit) => sum + unit.dailyMinor, 0)
+  return Number.isSafeInteger(minor) ? minor : null
+}
+
+function splitSpend(rows: readonly HeadroomRow[]): SpendSplit {
+  const currencies = new Set(rows.map((r) => (r.currency ?? '').trim().toUpperCase()))
+  if (currencies.size !== 1 || currencies.has('')) {
+    return { ok: false, reason: '币种缺失或混杂，不能把不同币种的预算相加' }
+  }
+  const currency = [...currencies][0]
+  const cboCampaigns = new Set(
+    rows.filter((r) => r.level === 'campaign' && r.budget_level === 'cbo').map((r) => r.entity_id),
+  )
+  const delivering: HeadroomUnit[] = []
+  const latent: HeadroomUnit[] = []
+  for (const r of rows) {
+    const placed = placeRow(r, cboCampaigns)
+    if (placed === 'skip') continue
+    if (typeof placed === 'string') return { ok: false, reason: placed }
+    if (placed.bucket === 'delivering') delivering.push(placed.unit)
+    else latent.push(placed.unit)
+  }
+  return { ok: true, currency, delivering, latent }
+}
+
+function placeRow(
+  r: HeadroomRow,
+  cboCampaigns: ReadonlySet<string>,
+): 'skip' | string | { bucket: 'delivering' | 'latent'; unit: HeadroomUnit } {
+  const status = r.effective_status ?? ''
+  const isDelivering = DELIVERING_STATUSES.has(status)
+  const isCbo = r.level === 'campaign' && r.budget_level === 'cbo'
+  const isAboAdset = r.level === 'adset' && !(r.campaign_id && cboCampaigns.has(r.campaign_id))
+  if (r.level === 'campaign' && r.budget_level !== 'cbo') {
+    if (isDelivering && r.budget_level !== 'abo') return `在投系列 ${r.entity_id} 的预算层级读不到，不能判余量`
+    return 'skip'
+  }
+  if (!isCbo && !isAboAdset) return 'skip'
+  const unit = { adAccountId: r.ad_account_id, level: r.level as 'campaign' | 'adset', entityId: r.entity_id }
+  if (isDelivering) {
+    if (!isValidBudget(r.daily_budget_minor)) {
+      return `在投的${r.level === 'campaign' ? '系列' : '广告组'} ${r.entity_id} 日预算缺失或无效，不能判余量`
+    }
+    return { bucket: 'delivering', unit: { ...unit, dailyMinor: r.daily_budget_minor } }
+  }
+  if (PAUSED_LIKE.has(status) && isValidBudget(r.daily_budget_minor)) {
+    return { bucket: 'latent', unit: { ...unit, dailyMinor: r.daily_budget_minor } }
+  }
+  return 'skip'
 }

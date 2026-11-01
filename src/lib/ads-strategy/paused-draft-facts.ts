@@ -6,18 +6,28 @@
 import { canonicalHashOfInput } from '@/lib/kernel/canonical-hash'
 import type { AccountCapFacts } from '@/lib/marketing-plan/promo/budget-caps'
 import { confirmBlockReason, contentFingerprint, type CardFacts, type HardCheck } from '@/lib/confirmation-card/facts'
-import { MAX_AD_SETS, type AdDraft } from './ad-draft'
+import { isKnownDraftKind, MAX_AD_SETS, metaTripletFor, type AdDraft } from './ad-draft'
 import { draftNotYetBuildable, reviewDraftAgainstCaps, reviewDraftForBuild } from './ad-draft-expansion'
 import { PAUSED_DRAFT_WHAT } from './paused-draft-copy'
 
 export const PAUSED_DRAFT_SUBJECT_PREFIX = 'meta-paused-draft:'
 export const PAUSED_DRAFT_HOLD = 'ads.paused_draft_hold'
 
+export interface CampaignShape {
+  readonly entityId: string
+  readonly objective: string | null
+  readonly budgetLevel: 'cbo' | 'abo' | null
+}
+
 export interface PausedDraftReview {
   readonly adAccountId: string
   /** null = the cap list did not load. An empty list loaded and is empty. */
   readonly accounts: readonly AccountCapFacts[] | null
   readonly clientCapCents: number | null
+  /** null = delivering daily spend was not read. 0 = read, nothing is delivering. */
+  readonly liveDeliveringCents: number | null
+  /** null = campaign snapshots were not read. Empty = read, no campaigns. */
+  readonly campaignShapes: readonly CampaignShape[] | null
 }
 
 export interface PriorPausedFailure {
@@ -83,7 +93,10 @@ export function plainMetaError(error: string): string {
 }
 
 function hardChecks(draft: AdDraft, review: PausedDraftReview): HardCheck[] {
-  return [reviewCheck(draft), capCheck(draft, review), countCheck(draft), buildableCheck(draft)]
+  const checks = [reviewCheck(draft), capCheck(draft, review), countCheck(draft), buildableCheck(draft)]
+  const campaign = campaignCheck(draft, review)
+  if (campaign) checks.push(campaign)
+  return checks
 }
 
 function reviewCheck(draft: AdDraft): HardCheck {
@@ -96,10 +109,41 @@ function capCheck(draft: AdDraft, review: PausedDraftReview): HardCheck {
   if (!review.accounts) return { label: '日预算上限', state: 'unread', reason: '上限没读到' }
   const known = review.accounts.some((account) => account.ad_account_id === review.adAccountId && account.owned_by_client)
   if (!known) return { label: '日预算上限', state: 'unread', reason: '广告账户没读到' }
-  const verdict = reviewDraftAgainstCaps(draft, review.adAccountId, review.accounts, review.clientCapCents)
+  const live = Object.prototype.hasOwnProperty.call(review, 'liveDeliveringCents')
+    ? review.liveDeliveringCents
+    : null
+  const verdict = reviewDraftAgainstCaps(
+    draft,
+    review.adAccountId,
+    review.accounts,
+    review.clientCapCents,
+    live,
+  )
   if (verdict.verdict === 'ok') return { label: '日预算上限', state: 'green', reason: '' }
-  if (verdict.verdict === 'unknown') return { label: '日预算上限', state: 'unread', reason: '上限没核成' }
-  return { label: '日预算上限', state: 'red', reason: '每天要花的超过了这张卡上的上限' }
+  if (verdict.verdict === 'unknown') {
+    const unreadLive = verdict.reasons.some((reason) => reason.includes('已在投'))
+    return { label: '日预算上限', state: 'unread', reason: unreadLive ? '已在投的日预算没读到' : '上限没核成' }
+  }
+  return { label: '日预算上限', state: 'red', reason: '已在投的日预算加上这份草稿，超过了上限' }
+}
+
+function campaignCheck(draft: AdDraft, review: PausedDraftReview): HardCheck | null {
+  if (!draft.existingCampaignId) return null
+  const shape = review.campaignShapes?.find((row) => row.entityId === draft.existingCampaignId)
+  if (!review.campaignShapes || !shape?.objective || !shape.budgetLevel) {
+    return { label: '系列目标和预算', state: 'unread', reason: '这个系列的目标或预算方式没读到' }
+  }
+  if (shape.budgetLevel === 'cbo') {
+    return {
+      label: '系列目标和预算',
+      state: 'red',
+      reason: '这个系列用的是系列预算，这次不能加一个自己带日预算的广告组',
+    }
+  }
+  if (!isKnownDraftKind(draft.kind) || metaTripletFor(draft.kind).objective !== shape.objective) {
+    return { label: '系列目标和预算', state: 'red', reason: '系列目标和这份草稿不一致' }
+  }
+  return { label: '系列目标和预算', state: 'green', reason: '' }
 }
 
 function countCheck(draft: AdDraft): HardCheck {

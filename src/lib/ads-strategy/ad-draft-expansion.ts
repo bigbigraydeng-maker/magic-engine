@@ -4,7 +4,7 @@
  * 只检查 ME 自己手里的草稿。不读 Meta，不写 Meta，不删除已有广告。
  * 现在的发布器表达不了的字段，由 `draftNotYetBuildable` 在建之前拦住。
  */
-import type { AccountCapFacts, BudgetCheck } from '@/lib/marketing-plan/promo/budget-caps'
+import type { AccountCapFacts, BudgetCheck, LiveSpendByAccount } from '@/lib/marketing-plan/promo/budget-caps'
 import { checkAdsBudget } from '@/lib/marketing-plan/promo/budget-caps'
 import { parsePromoSpec, type AdsStep } from '@/lib/marketing-plan/promo/spec'
 import {
@@ -103,12 +103,16 @@ export function reviewDraftForBuild(d: AdDraft, ctx?: DraftBuildReviewContext): 
   return problems
 }
 
-/** 用现成的预算上限检查。只看这份草稿每天要花多少，不读账户、不写账户。 */
+/**
+ * 用现成的预算上限检查。不读账户、不写账户。
+ * 不传 liveDeliveringCents = 只比这份草稿。传数字 = 已在投 + 这份草稿。传 null = 已在投没读到。
+ */
 export function reviewDraftAgainstCaps(
   d: AdDraft,
   adAccountId: string,
   accounts: readonly AccountCapFacts[],
   clientCapCents: number | null,
+  liveDeliveringCents?: number | null,
 ): BudgetCheck {
   if (adAccountId.trim() === '') {
     return { verdict: 'unknown', reasons: ['没给出广告账户，预算上限核不成'], per_account_cents: {}, notes: [] }
@@ -117,7 +121,14 @@ export function reviewDraftAgainstCaps(
   if (!steps) {
     return { verdict: 'unknown', reasons: ['日预算不是能核对的正数'], per_account_cents: {}, notes: [] }
   }
-  return checkAdsBudget(steps, accounts, clientCapCents)
+  const live = liveSpend(adAccountId, liveDeliveringCents)
+  return checkAdsBudget(steps, accounts, clientCapCents, live)
+}
+
+function liveSpend(adAccountId: string, liveDeliveringCents: number | null | undefined): LiveSpendByAccount | undefined {
+  if (liveDeliveringCents === undefined) return undefined
+  if (liveDeliveringCents === null) return null
+  return { [adAccountId]: liveDeliveringCents }
 }
 
 /**

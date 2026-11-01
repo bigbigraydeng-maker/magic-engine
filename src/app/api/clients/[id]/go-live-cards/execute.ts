@@ -187,6 +187,30 @@ async function runSettle(
   }
 }
 
+/** A reused campaign is left as it is. If it is paused, nothing spends, so this is not a launch. */
+async function reusedCampaignPaused(ids: GoLiveIds, token: string): Promise<ExecutionOutcome | null> {
+  if (!ids.reusedCampaign) return null
+  let status: string | null = null
+  try {
+    status = await fetchCampaignStatus(ids.campaignId, token)
+  } catch {
+    status = null
+  }
+  if (status === 'ACTIVE') return null
+  if (status === 'PAUSED') {
+    return {
+      settle: {
+        outcome: 'held',
+        readback: '系列暂停，不会花钱',
+        reason: '系列暂停，不会花钱。',
+        paused: false,
+      },
+      note: null,
+    }
+  }
+  return held('读不到原系列是不是开着，没有开。')
+}
+
 function allowed(authority: SpendActivationAuthority): boolean {
   return authority.basis === 'go_live_card' && authority.actorEmail.trim().length > 0 && !!authority.cardRunId
 }
@@ -204,6 +228,18 @@ export async function executeConfirmedGoLive(args: {
   if (!allowed(args.authority)) return held('这次确认对不上，没有开，系列保持暂停。')
   const token = await getMetaTokenForClient(args.clientId)
   if (!token) return held('拿不到这个客户的广告授权，没有开，系列保持暂停。')
+  const blocked = await reusedCampaignPaused(ids, token)
+  if (blocked) {
+    const note = await writeMark(
+      args.supabase,
+      args.clientId,
+      args.draftId,
+      blocked.settle,
+      (args.now ?? new Date()).toISOString(),
+      args.authority.cardRunId ?? '',
+    )
+    return { settle: blocked.settle, note }
+  }
   const settled = await runSettle({ ...args, ids }, token)
   const note = await writeMark(
     args.supabase,

@@ -15,7 +15,7 @@
  */
 
 import type { AdDraft, AdDraftCreative } from '@/lib/ads-strategy/ad-draft'
-import { metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
+import { isKnownDraftKind, metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
 import { isPlaybackGoal, PLAYBACK_REQUIRED_PLATFORMS } from '@/lib/ads-strategy/launch-readback'
 import { assertOwnedByAccount } from './owned-ad-object'
 
@@ -368,9 +368,40 @@ async function resolveCampaignId(
     if ('ok' in campaign) return campaign
     return campaign.id
   }
-  const owned = await assertOwnedByAccount(d.existingCampaignId, adAccountId, accessToken, 'id,account_id')
+  const owned = await assertOwnedByAccount(
+    d.existingCampaignId,
+    adAccountId,
+    accessToken,
+    'id,account_id,objective,daily_budget,lifetime_budget',
+  )
   if (!owned.ok) return { ok: false, step: 'campaign', error: owned.error, orphans: [] }
+  const unfit = campaignUnfit(d, owned.body)
+  if (unfit) return { ok: false, step: 'campaign', error: unfit, orphans: [] }
   return d.existingCampaignId
+}
+
+/** 读到系列目标和预算方式之后才挂新组。读不到、对不上，就不写。 */
+function campaignUnfit(d: AdDraft, body: Record<string, unknown>): string | null {
+  const objective = typeof body.objective === 'string' ? body.objective.trim() : ''
+  if (!objective) return '读不到这个系列的目标，没有去建。'
+  const daily = budgetMinor(body, 'daily_budget')
+  const lifetime = budgetMinor(body, 'lifetime_budget')
+  if (daily === 'missing' || lifetime === 'missing') return '读不到这个系列的预算方式，没有去建。'
+  if (daily === 'bad' || lifetime === 'bad') return '读不懂这个系列的预算，没有去建。'
+  if (daily > 0 || lifetime > 0) return '这个系列用的是系列预算，这次不能加一个自己带日预算的广告组，没有去建。'
+  if (!isKnownDraftKind(d.kind) || objective !== metaTripletFor(d.kind).objective) {
+    return '系列目标和这份草稿不一致，没有去建。'
+  }
+  return null
+}
+
+function budgetMinor(body: Record<string, unknown>, key: string): number | 'missing' | 'bad' {
+  if (!Object.prototype.hasOwnProperty.call(body, key)) return 'missing'
+  const value = body[key]
+  if (value === null || value === '') return 0
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN
+  if (!Number.isFinite(n) || n < 0) return 'bad'
+  return n
 }
 
 async function publishAdSetAndAds(

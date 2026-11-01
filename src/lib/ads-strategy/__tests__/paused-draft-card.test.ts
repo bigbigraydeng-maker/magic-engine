@@ -29,6 +29,8 @@ const REVIEW = {
     owned_by_client: true,
   }],
   clientCapCents: 20000,
+  liveDeliveringCents: 0,
+  campaignShapes: null,
 }
 
 function draft(over: Partial<AdDraft> = {}): AdDraft {
@@ -346,6 +348,8 @@ describe('paused draft confirmation', () => {
       adAccountId: 'act_new',
       accounts: [{ ...REVIEW.accounts[0], ad_account_id: 'act_new' }],
       clientCapCents: REVIEW.clientCapCents,
+      liveDeliveringCents: 0,
+      campaignShapes: null,
     }
     resolveDeps.mockResolvedValue({
       supabase: f.supabase,
@@ -701,6 +705,64 @@ describe('paused draft helpers', () => {
     expect(loaded.accountLabel).toBe('主账户')
     expect(loaded.review.accounts?.[0]?.currency).toBe('NZD')
     expect(loaded.review.clientCapCents).toBe(20000)
+    expect(loaded.review.liveDeliveringCents).toBe(0)
+    expect(loaded.review.campaignShapes).toEqual([])
+  })
+
+  it('adds delivering daily budget and keeps a campaign-budget series visible', async () => {
+    const now = new Date().toISOString()
+    const sb = createFakeSupabase({
+      client_meta_ad_accounts: [{
+        client_id: CLIENT_A,
+        ad_account_id: 'act_test',
+        label: '主账户',
+        daily_budget_cap_cents: 15000,
+      }],
+      ad_strategy_configs: [{ client_id: CLIENT_A, daily_budget_cap_cents: 20000 }],
+      ad_entity_snapshots: [
+        {
+          client_id: CLIENT_A,
+          ad_account_id: 'act_test',
+          level: 'account',
+          currency: 'NZD',
+          captured_at: now,
+        },
+        {
+          client_id: CLIENT_A,
+          ad_account_id: 'act_test',
+          level: 'campaign',
+          entity_id: 'camp-1',
+          campaign_id: 'camp-1',
+          budget_level: 'abo',
+          objective: 'OUTCOME_LEADS',
+          effective_status: 'ACTIVE',
+          daily_budget_minor: null,
+          currency: 'NZD',
+          capture_reason: 'daily',
+          captured_at: now,
+        },
+        {
+          client_id: CLIENT_A,
+          ad_account_id: 'act_test',
+          level: 'adset',
+          entity_id: 'set-1',
+          campaign_id: 'camp-1',
+          budget_level: 'abo',
+          objective: null,
+          effective_status: 'ACTIVE',
+          daily_budget_minor: 14500,
+          currency: 'NZD',
+          capture_reason: 'daily',
+          captured_at: now,
+        },
+      ],
+      clients: [{ id: CLIENT_A, name: '客户甲' }],
+    })
+    const loaded = await loadPausedDraftContext(sb, CLIENT_A, 'act_test')
+    expect(loaded.review.liveDeliveringCents).toBe(14500)
+    expect(loaded.review.campaignShapes).toEqual([
+      { entityId: 'camp-1', objective: 'OUTCOME_LEADS', budgetLevel: 'abo' },
+    ])
   })
 
   it('is not wired into prescription agreement', () => {

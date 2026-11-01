@@ -6,6 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AccountCapFacts } from '@/lib/marketing-plan/promo/budget-caps'
 import type { PausedDraftReview } from './paused-draft-facts'
+import { spendFromSnapshots, type SnapshotSpendRow } from './paused-draft-spend'
 
 export interface PausedDraftContext {
   readonly accountLabel: string
@@ -17,12 +18,14 @@ export async function loadPausedDraftContext(
   clientId: string,
   adAccountId: string,
 ): Promise<PausedDraftContext> {
-  const [accounts, config, currency, clientName] = await Promise.all([
+  const [accounts, config, currency, clientName, spendRows] = await Promise.all([
     readAccounts(sb, clientId),
     readClientCap(sb, clientId),
     readCurrency(sb, clientId, adAccountId),
     readClientName(sb, clientId),
+    readSpendRows(sb, clientId, adAccountId),
   ])
+  const spend = spendFromSnapshots(spendRows)
   const label = accounts.rows.find((row) => row.ad_account_id === adAccountId)?.label
   return {
     accountLabel: label || clientName || '这位客户的广告账户',
@@ -30,6 +33,8 @@ export async function loadPausedDraftContext(
       adAccountId,
       accounts: accounts.ok ? accounts.rows.map((row) => toCap(row, adAccountId, currency)) : null,
       clientCapCents: config,
+      liveDeliveringCents: spend.liveDeliveringCents,
+      campaignShapes: spend.campaignShapes,
     },
   }
 }
@@ -62,6 +67,24 @@ async function readClientCap(sb: SupabaseClient, clientId: string): Promise<numb
   if (error || !data) return null
   const cap = (data as { daily_budget_cap_cents?: unknown }).daily_budget_cap_cents
   return typeof cap === 'number' ? cap : null
+}
+
+async function readSpendRows(
+  sb: SupabaseClient,
+  clientId: string,
+  adAccountId: string,
+): Promise<SnapshotSpendRow[] | null> {
+  const since = new Date(Date.now() - 4 * 86_400_000).toISOString()
+  const { data, error } = await sb
+    .from('ad_entity_snapshots')
+    .select('ad_account_id, level, entity_id, campaign_id, budget_level, daily_budget_minor, effective_status, currency, capture_reason, captured_at, objective')
+    .eq('client_id', clientId)
+    .eq('ad_account_id', adAccountId)
+    .in('level', ['campaign', 'adset'])
+    .gte('captured_at', since)
+    .limit(1000)
+  if (error) return null
+  return (data ?? []) as SnapshotSpendRow[]
 }
 
 async function readCurrency(sb: SupabaseClient, clientId: string, adAccountId: string): Promise<string | null> {
