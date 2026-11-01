@@ -680,3 +680,45 @@ describe('AutonomySettings · 客户总闸的「保存上限」按钮', () => {
     await waitFor(() => expect(screen.getByText('每天上限要填大于 0 的金额')).toBeTruthy())
   })
 })
+
+describe('AutonomySettings · 视频缩略图', () => {
+  function stubThumbs(thumbs: unknown, status = 200) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/labels')) return Response.json({ labels: {} })
+      if (String(url).endsWith('/thumbnails')) return Response.json({ thumbnails: thumbs }, { status })
+      return Response.json({ success: true, config })
+    }))
+  }
+
+  it('有缩略图的行显示图片，没有的行显示灰色占位，文字行都还在', async () => {
+    stubThumbs({ '111': { thumbnailUrl: 'https://cdn.example/111.jpg', title: 'Harbour cut', durationSeconds: 15 } })
+    const { container } = render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(container.querySelector('img')).toBeTruthy())
+    const img = container.querySelector('img') as HTMLImageElement
+    expect(img.getAttribute('src')).toBe('https://cdn.example/111.jpg')
+    expect(container.querySelectorAll('img')).toHaveLength(1)
+    expect(screen.getAllByTestId('video-thumb-placeholder')).toHaveLength(1)
+    expect(screen.getByText(/Meta 上的标题：Harbour cut/)).toBeTruthy()
+    expect(screen.getByText(/时长 15 秒/)).toBeTruthy()
+    expect(screen.getByText('111')).toBeTruthy()
+    expect(screen.getByText('222')).toBeTruthy()
+    expect(screen.getAllByText('批准')).toHaveLength(2)
+  })
+
+  it('读缩略图失败时全部显示占位，页面和批准按钮照常', async () => {
+    stubThumbs({}, 500)
+    const { container } = render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(screen.getAllByTestId('video-thumb-placeholder')).toHaveLength(2))
+    expect(container.querySelector('img')).toBeNull()
+    expect(screen.getAllByText('批准')).toHaveLength(2)
+  })
+
+  it('图片加载出错时退回占位', async () => {
+    stubThumbs({ '111': { thumbnailUrl: 'https://cdn.example/expired.jpg', title: null, durationSeconds: null } })
+    const { container } = render(<AutonomySettings clientId="c1" />)
+    await waitFor(() => expect(container.querySelector('img')).toBeTruthy())
+    fireEvent.error(container.querySelector('img') as HTMLImageElement)
+    await waitFor(() => expect(container.querySelector('img')).toBeNull())
+    expect(screen.getAllByTestId('video-thumb-placeholder')).toHaveLength(2)
+  })
+})
