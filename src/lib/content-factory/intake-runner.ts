@@ -4,6 +4,8 @@
 import { runActorAndGetResults } from '@/lib/apify/client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getIntakeConfig } from './intake-config'
+import { fetchNewsViralsForIntake } from './intake-news-feeds'
+import { mixIntakePicks } from './intake-pick-mix'
 import { generateCandidate, type ViralRef } from './topic-agent'
 
 type Row = Record<string, unknown>
@@ -86,9 +88,20 @@ export async function runIntakeForClient(clientId: string): Promise<IntakeRunRes
     else errors.push(`抖音抓取失败：${res.error ?? '未知'}`)
   }
 
-  // 已按热度排序，取前 rewriteCount 条改写（控成本）
+  let newsVirals: ViralRef[] = []
+  if (config.platforms.includes('news')) {
+    const news = await fetchNewsViralsForIntake({
+      keywords: config.keywords,
+      maxItems: config.scrapePerPlatform,
+    })
+    newsVirals = news.items
+    for (const w of news.warnings) {
+      console.warn(`[intake] ${clientId}: ${w}`)
+    }
+  }
+
   const seen = await existingSources(clientId)
-  const picks = virals.slice(0, Math.max(1, config.rewriteCount))
+  const picks = mixIntakePicks(virals, newsVirals, config.rewriteCount)
 
   let created = 0
   for (const v of picks) {
@@ -115,5 +128,5 @@ export async function runIntakeForClient(clientId: string): Promise<IntakeRunRes
     }
   }
 
-  return { scanned: virals.length, created, errors }
+  return { scanned: virals.length + newsVirals.length, created, errors }
 }

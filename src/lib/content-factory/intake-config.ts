@@ -3,13 +3,13 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 
-export type IntakePlatform = 'xiaohongshu' | 'douyin'
+export type IntakePlatform = 'xiaohongshu' | 'douyin' | 'news'
 export type IntakeCadence = 'off' | 'weekly' | 'daily'
 
 export interface IntakeConfig {
   enabled: boolean
   keywords: string[]          // 抓什么关键词 / 赛道
-  platforms: IntakePlatform[] // 小红书 / 抖音
+  platforms: IntakePlatform[] // 小红书 / 抖音 / 新闻 RSS（默认关）
   cadence: IntakeCadence      // 多久跑一次
   scrapePerPlatform: number   // 每平台抓几条（默认 20）
   rewriteCount: number        // 每次改写几条候选（默认 5，控成本）
