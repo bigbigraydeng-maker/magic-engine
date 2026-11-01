@@ -3,6 +3,7 @@
  * （2026-09-22）。拉模式：直接查库，不依赖补发步骤有没有跑。
  */
 import { describe, expect, it, vi } from 'vitest'
+import { qualifiedLeadSourceRef } from '@/lib/conversions/conversion-lead'
 import { pushConversionReviewItems } from '../conversion-review-items'
 import type { ManualItem } from '../manual-items'
 
@@ -386,6 +387,54 @@ describe('已报价发给广告平台没成功', () => {
     expect(items[0].href).toBe(
       `https://app.magicengine.com.au/dashboard/clients/${CTS}/crm/all?contact=${contactId}`,
     )
+  })
+
+  it('同一联系人两条线索：旧线索已记下，新线索没记上仍进待办', async () => {
+    const items: ManualItem[] = []
+    const contactId = '11111111-2222-3333-4444-555555555555'
+    const olderLead = '111111111111111'
+    const newerLead = '222222222222222'
+    await pushConversionReviewItems(
+      fakeSupabase({
+        contacts: [{
+          id: contactId,
+          client_id: CTS,
+          stage: 'quoted',
+          stage_updated_at: '2026-09-21T00:00:00.000Z',
+        }],
+        touchpoints: [
+          {
+            contact_id: contactId,
+            source: 'meta_lead_form',
+            source_ref: olderLead,
+            occurred_at: '2026-09-18T00:00:00.000Z',
+          },
+          {
+            contact_id: contactId,
+            source: 'meta_lead_form',
+            source_ref: newerLead,
+            occurred_at: '2026-09-20T00:00:00.000Z',
+          },
+        ],
+        clients: [liveDealClient()],
+        qualified: [quoted('old-row', {
+          contact_id: contactId,
+          source_ref: qualifiedLeadSourceRef(olderLead, 'quoted'),
+          meta_lead_id: olderLead,
+          occurred_at: '2026-09-18T00:00:00.000Z',
+        })],
+        doubts: [sendRow('old-row', { status: 'confirmed' })],
+      }) as never,
+      items,
+      names,
+      NOW,
+    )
+    const missing = items.filter((item) => item.what.includes('没记上'))
+    expect(missing).toHaveLength(1)
+    expect(missing[0].href).toBe(
+      `https://app.magicengine.com.au/dashboard/clients/${CTS}/crm/all?contact=${contactId}`,
+    )
+    expect(qualifiedLeadSourceRef(newerLead, 'quoted')).not.toBe(qualifiedLeadSourceRef(olderLead, 'quoted'))
   })
 
   it('没有线索编号的已报价不进待办', async () => {

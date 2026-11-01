@@ -13,7 +13,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
 import { readCapiClientConfig, stageCountsAsQualifiedLead } from '@/lib/conversions/capi-client-config'
-import { dealStageEventId, latestMetaLeadId, legalMetaLeadId, stageKeyFromQualifiedRef } from '@/lib/conversions/conversion-lead'
+import {
+  dealStageEventId,
+  latestMetaLeadId,
+  legalMetaLeadId,
+  qualifiedLeadSourceRef,
+  redactQualifiedSourceRef,
+} from '@/lib/conversions/conversion-lead'
 import { formatMoney } from '@/lib/conversions/money'
 import { DAY_MS, META_EVENT_WINDOW_DAYS, isPastEventWindow } from '@/lib/conversions/event-window'
 
@@ -345,8 +351,9 @@ function needsQualifiedRetry(outcomeId: string, writebacks: QualifiedWriteback[]
 }
 
 type StageContact = { id: string; client_id: string; stage: string | null; stage_updated_at: string | null }
+type LeadBackedContact = StageContact & { leadId: string }
 type ClientGate = { id: string; conversion_stage: string | null; leads_config: unknown }
-type QualifiedOutcomeRef = { contact_id: string | null; source_ref: string | null }
+type QualifiedOutcomeRef = { source_ref: string | null }
 
 /** Stage saved, but the qualified row never landed. The next stage scan will not try again. */
 async function pushQualifiedLeadsNeverRecorded(
@@ -359,10 +366,11 @@ async function pushQualifiedLeadsNeverRecorded(
   if (gates.length === 0) return
   const contacts = await loadQualifiedStageContacts(supabase, now, gates)
   if (contacts.length === 0) return
-  const recorded = await loadQualifiedOutcomeRefs(supabase, contacts.map((row) => row.id))
-  const waiting = contacts.filter((row) => !recorded.has(qualifiedRef(row)))
-  const withLead = await contactsWithMetaLead(supabase, waiting)
-  for (const row of withLead.slice(0, MAX_ITEMS)) items.push(missingQualifiedItem(row, clientNames))
+  const withLead = await contactsWithMetaLead(supabase, contacts)
+  if (withLead.length === 0) return
+  const recorded = await loadQualifiedOutcomeRefs(supabase, withLead.map((row) => row.id))
+  const waiting = withLead.filter((row) => !leadAlreadyRecorded(row, recorded))
+  for (const row of waiting.slice(0, MAX_ITEMS)) items.push(missingQualifiedItem(row, clientNames))
 }
 
 async function loadLiveQualifiedGates(supabase: SupabaseClient): Promise<ClientGate[]> {
@@ -416,7 +424,7 @@ function openStageContact(row: StageContact, now: Date): boolean {
   return !isPastEventWindow(row.stage_updated_at, now)
 }
 
-async function contactsWithMetaLead(supabase: SupabaseClient, rows: StageContact[]): Promise<StageContact[]> {
+async function contactsWithMetaLead(supabase: SupabaseClient, rows: StageContact[]): Promise<LeadBackedContact[]> {
   if (rows.length === 0) return []
   const { data, error } = await supabase
     .from('contact_touchpoints')
@@ -432,7 +440,12 @@ async function contactsWithMetaLead(supabase: SupabaseClient, rows: StageContact
     list.push(point)
     byContact.set(point.contact_id, list)
   }
-  return rows.filter((row) => latestMetaLeadId(byContact.get(row.id) ?? []) != null)
+  const found: LeadBackedContact[] = []
+  for (const row of rows) {
+    const leadId = latestMetaLeadId(byContact.get(row.id) ?? [])
+    if (leadId) found.push({ ...row, leadId })
+  }
+  return found
 }
 
 function contactWaitsForQualifiedRow(row: StageContact, gates: ClientGate[]): boolean {
@@ -446,7 +459,7 @@ function contactWaitsForQualifiedRow(row: StageContact, gates: ClientGate[]): bo
 async function loadQualifiedOutcomeRefs(supabase: SupabaseClient, contactIds: string[]): Promise<Set<string>> {
   const { data, error } = await supabase
     .from('me_sale_outcomes')
-    .select('contact_id, source_ref')
+    .select('source_ref')
     .eq('source_kind', 'crm_stage_manual')
     .eq('outcome_kind', 'lead')
     .in('contact_id', contactIds)
@@ -454,14 +467,16 @@ async function loadQualifiedOutcomeRefs(supabase: SupabaseClient, contactIds: st
   if (error) throw new Error(`已报价是否已记查询失败: ${error.message}`)
   const found = new Set<string>()
   for (const row of (data ?? []) as unknown as QualifiedOutcomeRef[]) {
-    const stage = stageKeyFromQualifiedRef(row.source_ref)
-    if (row.contact_id && stage) found.add(`${row.contact_id}:${stage}`)
+    const key = redactQualifiedSourceRef(row.source_ref)
+    if (key?.startsWith('crm_qualified:')) found.add(key)
   }
   return found
 }
 
-function qualifiedRef(row: StageContact): string {
-  return `${row.id}:${row.stage}`
+/** Same lead-id digest and stage as the row the send path would have written. */
+function leadAlreadyRecorded(row: LeadBackedContact, recorded: Set<string>): boolean {
+  if (!row.stage) return true
+  return recorded.has(qualifiedLeadSourceRef(row.leadId, row.stage))
 }
 
 function missingQualifiedItem(row: StageContact, clientNames: Map<string, { name: string }>): ManualItem {
