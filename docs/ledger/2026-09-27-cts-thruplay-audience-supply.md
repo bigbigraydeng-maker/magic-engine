@@ -1,7 +1,7 @@
 ---
 id: 2026-09-27-cts-thruplay-audience-supply
 title: CTS 再营销池断供 10 天，开顶层 ThruPlay 小额供血（每天 15 纽币），跑一天验版位和池子增长
-status: done
+status: verified
 owner: pm
 decided_on: 2026-09-27
 source: doc:docs/PITFALLS.md
@@ -9,8 +9,9 @@ done_on: 2026-09-27
 done_ref: doc:docs/ledger/2026-09-27-cts-thruplay-audience-supply.md
 verify_by: 2026-09-28
 verify_how: 三项全查。①版位干净：拉该广告组昨天的花费按版位拆（breakdowns=publisher_platform），audience_network 花费必须约等于 0，不为 0 立刻暂停该组并记事故。②池子开始涨：查 ad_entity_snapshots 里「看完视频的人」「看过 50% 的人」两个受众的人数下限，要比 9/26 的 2.22 万 / 3.78 万有上升；持平说明供血没生效，回头查视频有没有真进池。③真实完播成本：拉该组完播数和花费，算每次完播成本，跟历史被污染期的数字区别开（污染期完播率虚高到 90%+）。三项任一不达标就写进 check_note 并把结论交回 PM，不要自动加预算
-last_checked: 2026-10-30
-check_note: 10-30：生产库受众下限10-27已验涨(5万视频池 44200>37800、完播池 28100>22200)；版位拆分(audience_network≈0)与每次完播成本两项今晚仍无取数通道，三项缺二，不判verified，交PM
+last_checked: 2026-11-01
+check_note: 11-01：三项全达标——ThruPlay 组 9/27–10/31 版位 audience_network 花费 0（FB $192.09/IG $1.10）；视频50%池 44100>37800、完播池 28300>22200；每次完播约 NZ$0.02（样本 9621 次）
+verified_ref: doc:docs/ledger/evidence/2026-09-27-cts-thruplay-audience-supply--2026-11-01.md
 ---
 PM 2026-09-27「$15 先跑」。
 
