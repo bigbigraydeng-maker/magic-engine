@@ -280,11 +280,11 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
   })()
 
   return (
-    <div className="grid min-h-screen bg-[#FBF8F3] font-sans [grid-template-columns:248px_1fr] max-[720px]:grid-cols-1">
+    <div data-me-shell className="grid min-h-screen bg-[#FBF8F3] font-sans [grid-template-columns:248px_1fr] max-[720px]:grid-cols-1">
       <MeMarkDefs />
 
-      {/* Sidebar */}
-      <aside className="sticky top-0 hidden h-screen flex-col bg-[#0D0D0D] md:flex">
+      {/* Sidebar. data-me-shell / data-me-sidebar are hooks for the CRM workspace shell (crm/layout.tsx), which collapses the sidebar on CRM pages only. */}
+      <aside data-me-sidebar className="sticky top-0 hidden h-screen flex-col bg-[#0D0D0D] md:flex">
         {/* Logo */}
         <Link href="/dashboard" className="flex items-center gap-[11px] px-5 pb-5 pt-4">
           <MeMark className="h-7 w-8 flex-none" />

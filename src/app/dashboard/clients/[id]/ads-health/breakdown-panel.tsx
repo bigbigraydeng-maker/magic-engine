@@ -76,9 +76,10 @@ function hourLabel(key: string): string {
   return Number.isFinite(n) ? `${String(n).padStart(2, '0')}:00` : key
 }
 
-/** Click-through rate: clicks / impressions. */
-function ctrOf(clicks: number, impressions: number): number | null {
-  return impressions > 0 ? clicks / impressions : null
+/** Link click rate. Null clicks means the rows did not store link clicks. */
+function ctrOf(clicks: number | null, impressions: number): number | null {
+  if (clicks === null || impressions <= 0) return null
+  return clicks / impressions
 }
 
 /** Cost per 1000 impressions. */
@@ -126,7 +127,7 @@ function OverviewCard({ report }: { report: BreakdownReport }) {
         <tbody>
           <tr><td className="py-1 text-gray-500">总花费</td><td className="py-1 text-right">{money(t.spendAll, cur)}</td></tr>
           <tr><td className="py-1 text-gray-500">收表单系列花费</td><td className="py-1 text-right">{money(t.spendLeadObjective, cur)}</td></tr>
-          <tr><td className="py-1 text-gray-500">点击率（CTR，收表单系列）</td><td className="py-1 text-right">{pct(ctrOf(t.clicksLeadObjective, t.impressionsLeadObjective))}</td></tr>
+          <tr><td className="py-1 text-gray-500">链接点击率（收表单系列）</td><td className="py-1 text-right">{pct(ctrOf(t.linkClicksLeadObjective, t.impressionsLeadObjective))}</td></tr>
           <tr><td className="py-1 text-gray-500">千次展示费用（CPM，收表单系列）</td><td className="py-1 text-right">{money(cpmOf(t.spendLeadObjective, t.impressionsLeadObjective), cur)}</td></tr>
           <tr><td className="py-1 text-gray-500">CRM 进线</td><td className="py-1 text-right">{t.crmLeads}</td></tr>
           <tr><td className="py-1 text-gray-500">Meta 留资</td><td className="py-1 text-right">{t.metaLeads}</td></tr>
@@ -197,7 +198,7 @@ function RowTable({ rows, cur, label }: { rows: ReportRow[]; cur: string | null;
         <tr className="text-left text-xs text-gray-500">
           <th className="font-normal">名称</th>
           <th className="text-right font-normal">花费</th>
-          <th className="text-right font-normal">CTR</th>
+          <th className="text-right font-normal">链接点击率</th>
           <th className="text-right font-normal">CPM</th>
           <th className="text-right font-normal">进线</th>
           <th className="text-right font-normal">每条成本</th>
@@ -210,7 +211,7 @@ function RowTable({ rows, cur, label }: { rows: ReportRow[]; cur: string | null;
           <tr key={r.key} className="border-t border-gray-100">
             <td className="py-1.5 text-gray-700">{label(r.key)}</td>
             <td className="py-1.5 text-right">{money(r.spend, cur)}</td>
-            <td className="py-1.5 text-right">{pct(ctrOf(r.clicks, r.impressions))}</td>
+            <td className="py-1.5 text-right">{pct(ctrOf(r.linkClicks, r.impressions))}</td>
             <td className="py-1.5 text-right">{money(cpmOf(r.spend, r.impressions), cur)}</td>
             <td className="py-1.5 text-right">{r.leads === null ? '—' : r.leads}</td>
             <td className="py-1.5 text-right">{money(r.costPerLead, cur)}</td>
@@ -231,7 +232,7 @@ function BreakdownTable({ rows, cur }: { rows: ReportRow[]; cur: string | null }
           <th className="font-normal">名称</th>
           <th className="text-right font-normal">花费</th>
           <th className="text-right font-normal">花费占比</th>
-          <th className="text-right font-normal">CTR</th>
+          <th className="text-right font-normal">链接点击率</th>
           <th className="text-right font-normal">CPM</th>
           <th className="text-right font-normal">留资</th>
           <th className="text-right font-normal">每条成本</th>
@@ -244,7 +245,7 @@ function BreakdownTable({ rows, cur }: { rows: ReportRow[]; cur: string | null }
             <td className="py-1.5 text-gray-700">{r.key}</td>
             <td className="py-1.5 text-right">{money(r.spend, cur)}</td>
             <td className="py-1.5 text-right">{pct(r.spendShare)}</td>
-            <td className="py-1.5 text-right">{pct(ctrOf(r.clicks, r.impressions))}</td>
+            <td className="py-1.5 text-right">{pct(ctrOf(r.linkClicks, r.impressions))}</td>
             <td className="py-1.5 text-right">{money(cpmOf(r.spend, r.impressions), cur)}</td>
             <td className="py-1.5 text-right">{r.leads === null ? '—' : r.leads}</td>
             <td className="py-1.5 text-right">{money(r.costPerLead, cur)}</td>
@@ -264,14 +265,14 @@ function RegionTable({ rows, cur }: { rows: ReportRow[]; cur: string | null }) {
           <th className="font-normal">地区</th>
           <th className="text-right font-normal">花费</th>
           <th className="text-right font-normal">点击</th>
-          <th className="text-right font-normal">点击率</th>
+          <th className="text-right font-normal">链接点击率</th>
           <th className="text-right font-normal">每次点击</th>
           <th className="text-right font-normal">CPM</th>
         </tr>
       </thead>
       <tbody>
         {rows.map(r => {
-          const ctr = r.impressions > 0 ? r.clicks / r.impressions : null
+          const ctr = ctrOf(r.linkClicks, r.impressions)
           const cpc = r.clicks > 0 ? r.spend / r.clicks : null
           return (
             <tr key={r.key} className="border-t border-gray-100">

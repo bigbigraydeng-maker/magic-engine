@@ -176,6 +176,7 @@ interface RawStatRow {
   spend: number | string | null
   impressions: number | string | null
   clicks: number | string | null
+  link_clicks?: number | string | null
   meta_leads: number | string | null
 }
 
@@ -195,6 +196,7 @@ function toStatInput(r: RawStatRow): StatInput {
     spend: toNumber(r.spend),
     impressions: toNumber(r.impressions),
     clicks: toNumber(r.clicks),
+    link_clicks: r.link_clicks == null ? null : toNumber(r.link_clicks),
     meta_leads: r.meta_leads === null ? null : toNumber(r.meta_leads),
   }
 }
@@ -214,7 +216,7 @@ export async function loadStats(
     deps.supabase
       .from('ad_breakdown_stats')
       .select(
-        'ad_account_id, entity_id, campaign_id, stat_date, breakdown_key, breakdown_value, spend, impressions, clicks, meta_leads',
+        'ad_account_id, entity_id, campaign_id, stat_date, breakdown_key, breakdown_value, spend, impressions, clicks, link_clicks, meta_leads',
       )
       .in('ad_account_id', accountIds)
       .gte('stat_date', since)

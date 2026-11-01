@@ -9,6 +9,7 @@
  */
 
 import { buildAdjust, ACCOUNT_STALE_HOURS } from './actions'
+import { budgetHoldFor } from './followup'
 import { accountStatusHint, ACCOUNT_STATUS_ACTIVE, ACCOUNT_STATUS_UNSETTLED } from '@/lib/ads-strategy/account-status'
 import { buildFrequency } from './frequency'
 import { computeFreshness, type Freshness } from './freshness'
@@ -134,6 +135,7 @@ export function buildWarMap(input: WarMapInput): WarMapView {
     upstream: [pools.headline, frequency.headline],
     dataDay: fresh.dataDay,
     staleDays: fresh.staleDays,
+    followup: input.followup,
   })
   return {
     generatedAt: input.now,
@@ -147,5 +149,6 @@ export function buildWarMap(input: WarMapInput): WarMapView {
     adjust,
     goalNote: buildGoalNote(input),
     prescriptionLine: input.plan?.prescriptionLine ?? null,
+    budgetHold: budgetHoldFor(input.followup),
   }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { downloadTwilioRecording, MAX_RECORDING_BYTES, RecordingFetchError } from '../recording'
 import { numbersIn, verifyFacts, type RawAnalysis } from '../analysis-schema'
+import { verifyCustomerSpoke } from '../customer-spoke'
 import { planAnalysisSweep } from '@/lib/inngest/functions/telephony-analysis'
 import { TranscriptPendingError } from '../vendors'
 import { runCallAnalysis, MAX_STEP_ATTEMPTS, type AnalysisCall, type AnalysisConnection, type AnalysisStore } from '../pipeline'
@@ -124,6 +125,7 @@ function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<Analysis
   const receipts: string[] = []
   const marks: string[] = []
   const stances: string[] = []
+  const spokes: string[] = []
   const store: AnalysisStore = {
     async getCall() { return call },
     async getConnection() { return conn },
@@ -147,8 +149,9 @@ function makeStore(over: { call?: Partial<AnalysisCall>; conn?: Partial<Analysis
     async saveAnalysis(r) { analyses.push({ callId: r.callId, summary: r.analysis.summary, facts: r.analysis.facts, dropped: r.analysis.droppedFacts }); return 'an-1' },
     async markTouchpoint(tp, _c, an) { if (over.markFails) throw new Error('boom'); marks.push(`${tp}:${an}`) },
     async markCallStance(tp, _c, an, stance) { if (over.stanceFails) throw new Error('boom'); stances.push(`${tp}:${an}:${stance}`); return 'written' },
+    async markCustomerSpoke(tp, _c, an, verdict) { spokes.push(`${tp}:${an}:${verdict}`); return 'written' },
   }
-  return { store, call, files, transcripts, analyses, receipts, marks, stances }
+  return { store, call, files, transcripts, analyses, receipts, marks, stances, spokes }
 }
 
 const ref = { clientId: 'client-1', provider: 'twilio', providerCallId: 'CA1' }
@@ -480,5 +483,82 @@ describe('客人在电话里说「现在还没准备好」→ 记到 CRM 触点�
     await runCallAnalysis(gavinDeps(m.store), ref)
     expect(m.marks).toEqual(['tp-1:an-1'])
     expect(m.stances).toEqual([])
+  })
+})
+
+
+describe('客人开没开口（WP-1a）：语音信箱不能当成聊过', () => {
+  const VOICEMAIL = '声道2：Not available. At the tone, please record your message.\n声道1：Hi, this is Baker calling from China Travel Service about your enquiry.'
+  const CHAT = '声道2：Hello, yes this is Kam speaking.\n声道1：Hi Kam, this is Baker from China Travel Service.'
+  const rawWith = (customerSpoke: 'yes' | 'no' | 'unclear', customerSpokeQuote: string | null): RawAnalysis => ({
+    summary: '', language: 'en', facts: [], customerSpoke, customerSpokeQuote,
+  })
+
+  it('verifyFacts 带出核验后的结论；模型没给 → unclear', () => {
+    expect(verifyFacts(rawWith('yes', 'yes this is Kam speaking'), CHAT).customerSpoke).toBe('yes')
+    expect(verifyFacts({ summary: '', language: null, facts: [] }, CHAT).customerSpoke).toBe('unclear')
+  })
+
+  it('模型说 yes 但原话不在转写里 → unclear；原话是空/纯标点 → unclear', () => {
+    expect(verifyFacts(rawWith('yes', 'I would love to book'), CHAT).customerSpoke).toBe('unclear')
+    expect(verifyFacts(rawWith('yes', '...'), CHAT).customerSpoke).toBe('unclear')
+    expect(verifyFacts(rawWith('yes', null), CHAT).customerSpoke).toBe('unclear')
+  })
+
+  it('语音信箱：模型把问候语或员工留言当客人说话 → 降为 unclear（不声称聊过，也不下「没开口」的结论）', () => {
+    expect(verifyFacts(rawWith('yes', 'At the tone, please record your message'), VOICEMAIL).customerSpoke).toBe('unclear')
+    expect(verifyFacts(rawWith('yes', 'this is Baker calling from China Travel Service'), VOICEMAIL).customerSpoke).toBe('unclear')
+  })
+
+  it('反例：客人真说了话，原话里带 voicemail 字眼 → 不能判 no', () => {
+    const t = '声道2：Hi, I got your voicemail, calling back about the tour.\n声道1：Thanks for calling back!'
+    const v = verifyFacts(rawWith('yes', 'I got your voicemail, calling back about the tour'), t).customerSpoke
+    expect(v).not.toBe('no')
+    expect(v).toBe('unclear')
+  })
+
+  it('更多信箱问候语（you have reached / is not available / please leave …）也能识别', () => {
+    for (const greet of ['You have reached Sam, I am not around', 'Please leave me a message', 'The person you are calling is not available', 'We are unable to take your call']) {
+      const t = `声道2：${greet}\n声道1：Hi, this is Baker from CTS calling about your enquiry`
+      expect(verifyFacts(rawWith('no', null), t).customerSpoke).toBe('no')
+    }
+  })
+
+  it('转写带声道标记时，yes 的原话必须落在某一个声道里（跨声道拼出来的不算）；指定客人声道时必须在该声道', () => {
+    const t = '声道2：Hello yes this is Kam speaking\n声道1：Hi Kam this is Baker from CTS'
+    expect(verifyFacts(rawWith('yes', 'Kam speaking Hi Kam'), t).customerSpoke).toBe('unclear')
+    expect(verifyFacts(rawWith('yes', 'yes this is Kam speaking'), t).customerSpoke).toBe('yes')
+    expect(verifyCustomerSpoke({ customerSpoke: 'yes', customerSpokeQuote: 'yes this is Kam speaking' }, t, '2')).toBe('yes')
+    expect(verifyCustomerSpoke({ customerSpoke: 'yes', customerSpokeQuote: 'Hi Kam this is Baker from CTS' }, t, '2')).toBe('unclear')
+  })
+
+  it('裸的「I saw your voicemail」保持 unclear', () => {
+    const t = '声道2：I saw your voicemail\n声道1：Thanks for calling back'
+    expect(verifyFacts(rawWith('yes', 'I saw your voicemail'), t).customerSpoke).toBe('unclear')
+  })
+
+  it('模型说 no：有语音信箱问候语或只有一个声道出声 → no；两边都说了话却说 no → unclear（没证据不下结论）', () => {
+    expect(verifyFacts(rawWith('no', null), VOICEMAIL).customerSpoke).toBe('no')
+    expect(verifyFacts(rawWith('no', null), '声道2：Is available.').customerSpoke).toBe('no')
+    expect(verifyFacts(rawWith('no', null), CHAT).customerSpoke).toBe('unclear')
+    // 零个声道（转写空 / 格式不认识）说不清，不是 no
+    expect(verifyFacts(rawWith('no', null), 'no channel markers here').customerSpoke).toBe('unclear')
+  })
+
+  it('流水线把核验后的结论记到触点上', async () => {
+    const m = makeStore()
+    const analyze = async () => ({ raw: rawWith('no', null), model: 'm-a' })
+    await runCallAnalysis(goodDeps(m.store, { transcribe: async () => ({ text: VOICEMAIL, model: 'm-t' }), analyze }), ref)
+    expect(m.spokes).toEqual(['tp-1:an-1:no'])
+    expect(m.receipts).toContain('customer_spoke:written')
+  })
+
+  it('触点没标上分析（标记失败）→ 不写结论；分析失败 → 不写结论', async () => {
+    const m = makeStore({ markFails: true })
+    await runCallAnalysis(goodDeps(m.store), ref)
+    expect(m.spokes).toEqual([])
+    const m2 = makeStore()
+    await runCallAnalysis(goodDeps(m2.store, { analyze: async () => { throw new Error('vendor down') } }), ref)
+    expect(m2.spokes).toEqual([])
   })
 })

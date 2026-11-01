@@ -9,7 +9,9 @@
  */
 
 import React, { useEffect, useState } from 'react'
+import Link from 'next/link'
 import type { Light, WarMapView } from '@/lib/ads-strategy/war-map/types'
+import { FOLLOWUP_ACTION_KEY } from '@/lib/ads-strategy/war-map/followup'
 import { DATA_STALE_DAYS } from '@/lib/ads-strategy/war-map/frequency'
 
 const LIGHT_META: Record<Light, { dot: string; tint: string; text: string; label: string }> = {
@@ -200,7 +202,7 @@ const SEVERITY_META: Record<string, { label: string; bar: string; cls: string }>
 const OWNER_META: Record<string, string> = { pm: '你来', agent: '系统查', dev: '开发修' }
 
 function ActionCards({ view }: { view: WarMapView }) {
-  const all = view.adjust.actions
+  const all = view.adjust.actions.filter(a => a.key !== FOLLOWUP_ACTION_KEY)
   if (all.length === 0) return <p className="mt-3 text-xs text-gray-400">今天没有要调的</p>
   const hot = all.filter(a => a.severity !== 'info')
   const info = all.filter(a => a.severity === 'info')
@@ -266,6 +268,21 @@ function Timeline({ view }: { view: WarMapView }) {
       <div className="mt-1 flex justify-between text-[11px] text-gray-500">
         <span>开投 {fmtDay(c.launchDate)}</span><span>目标 {fmtDay(c.targetDate)}</span>
       </div>
+    </div>
+  )
+}
+
+function FollowupCard({ view, clientId }: { view: WarMapView; clientId: string }) {
+  const action = view.adjust.actions.find(a => a.key === FOLLOWUP_ACTION_KEY)
+  if (!action) return null
+  if (action.severity === 'info') {
+    return <p className="mt-3 text-xs text-gray-500">{action.what}</p>
+  }
+  return (
+    <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+      <p className="text-sm font-medium text-gray-800">{action.what}</p>
+      {action.how ? <p className="mt-1 text-xs text-gray-600">{action.how}</p> : null}
+      <Link href={`/dashboard/clients/${clientId}/crm/all`} className="mt-1 inline-block text-xs text-sky-700 underline">打开客人名单</Link>
     </div>
   )
 }
@@ -382,7 +399,8 @@ export default function WarMapPanel({ clientId }: { clientId: string }): JSX.Ele
           <details className="mt-3"><summary className="cursor-pointer text-xs text-gray-500">看每个广告</summary><FrequencyGauges view={view} /></details>
         </BigCard>
         <BigCard title="③ 今天调什么" light={view.adjust.headline.light} big={ab.big} unit={ab.unit} sentence={view.adjust.headline.sentence}>
-          <details className="mt-3" open={view.adjust.actions.some(a => a.severity !== 'info')}><summary className="cursor-pointer text-xs text-gray-500">看清单</summary><ActionCards view={view} /></details>
+          <FollowupCard view={view} clientId={clientId} />
+          <details className="mt-3" open={view.adjust.actions.some(a => a.severity !== 'info' && a.key !== FOLLOWUP_ACTION_KEY)}><summary className="cursor-pointer text-xs text-gray-500">看清单</summary><ActionCards view={view} /></details>
         </BigCard>
       </div>
 

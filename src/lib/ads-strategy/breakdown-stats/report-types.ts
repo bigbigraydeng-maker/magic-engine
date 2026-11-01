@@ -19,6 +19,8 @@ export interface ReportRow {
   spend: number
   impressions: number
   clicks: number
+  /** Link clicks. Null when the rows did not store them — do not fall back to all clicks. */
+  linkClicks: number | null
   /** Leads used for cost per lead: CRM form leads for hour/weekday, Meta-reported leads for others. null = no lead source for this cut. */
   leads: number | null
   costPerLead: number | null
@@ -52,6 +54,8 @@ export interface BreakdownReport {
     /** Impressions / clicks of the same lead-objective campaigns (for CTR and CPM). */
     impressionsLeadObjective: number
     clicksLeadObjective: number
+    /** Link clicks of the same lead-objective campaigns. Null when none of the rows stored them. */
+    linkClicksLeadObjective: number | null
     metaLeads: number
     crmLeads: number
     /** crmLeads / metaLeads; null when metaLeads is 0. */

@@ -20,6 +20,7 @@
  */
 
 import { z } from 'zod'
+import { groundNoteParse, noteIsContentFree } from './note-grounding'
 
 export const CONTACT_OUTCOMES = [
   'no_answer',      // 打了没人接 / 语音信箱 / 打不通
@@ -547,6 +548,14 @@ export async function parseNote(
     summary: raw.trim().slice(0, 120),
   }
 
+  // 没内容可整理（「测试数据」「ok」「.」）：不送 AI，摘要就是原话本身 ——
+  // 2026-10-30 事故：「测试数据」被 AI 整理成「客户下周一要求报价」存进了客人档案。
+  // 规则层只剩兜底值 `spoke`（没命中任何规则）时，一句没有内容的话不能算「真的聊上了」，
+  // 记成 `unknown`；规则明确命中的（没接 / 坏号 / 别再联系…）照旧。
+  if (noteIsContentFree(raw)) {
+    return { ...base, outcome: rules.outcome === 'spoke' ? 'unknown' : rules.outcome }
+  }
+
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey || !raw.trim()) return base
 
@@ -573,17 +582,19 @@ export async function parseNote(
       JSON.parse((res as { output_text?: string }).output_text ?? '{}'),
     )
 
+    // 模型说的每个事实都要能在员工原话里找到依据，否则拿掉 / 退回原话（见 note-grounding）。
+    const grounded = groundNoteParse(raw, parsed)
     return {
-      ...parsed,
+      ...grounded,
       // 规则赢。「别再联系」不交给 AI 判断，而且两边取并集。
       outcome: rules.outcome,
       do_not_contact: rules.do_not_contact || parsed.do_not_contact,
       // 模型的自由文本字段全部过一遍清洗 —— 实测它会返回字符串 "null"、
       // 把客户自己的团名当竞品、把销售的通话日期当出行时间。
-      travel_window: cleanTravelWindow(parsed.travel_window, now),
-      tour_interest: cleanNullish(parsed.tour_interest),
-      competitor: cleanCompetitor(parsed.competitor, brandTerms),
-      callback_at: saneCallbackInstant(cleanNullish(parsed.callback_at)),
+      travel_window: cleanTravelWindow(grounded.travel_window, now),
+      tour_interest: cleanNullish(grounded.tour_interest),
+      competitor: cleanCompetitor(grounded.competitor, brandTerms),
+      callback_at: saneCallbackInstant(cleanNullish(grounded.callback_at)),
     }
   } catch {
     // AI 挂了不能让整批导入失败 —— 规则版本已经覆盖了最要紧的三件事。

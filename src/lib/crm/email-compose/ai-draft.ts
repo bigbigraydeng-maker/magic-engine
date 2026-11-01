@@ -97,6 +97,8 @@ export function renderKnownContext(
     channel: t.channel,
     occurredAt: t.occurred_at,
     metadata: t.metadata,
+    source: (t as { source?: string | null }).source ?? null,
+    raw: (t as { raw?: string | null }).raw ?? null,
   }))
   const tour = extractCustomColumns(forColumns).tour_interest
   const lines: string[] = [`Customer name on file: ${contactName?.trim() || '(unknown)'}`]
