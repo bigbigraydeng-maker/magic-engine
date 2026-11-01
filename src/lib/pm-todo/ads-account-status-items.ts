@@ -46,7 +46,7 @@ export type AdsAccountStatusItemKind =
 /** 状态不是 1 至少持续这么久，才值得打扰人（欠款除外，见下）。 */
 export const ACCOUNT_NOT_ACTIVE_MIN_HOURS = 24
 
-/** 欠款（码 3）一读到就下发：不花钱、不出线索的每一小时都是损失，状态本身最慢也只隔约 2 小时才读一次。 */
+/** 欠款（码 3）一读到就下发：不花钱、不出线索的每一小时都是损失，状态本身最慢也只隔约 30 分钟才读一次。 */
 export const ACCOUNT_UNSETTLED_MIN_HOURS = 0
 
 function minHoursFor(status: number): number {

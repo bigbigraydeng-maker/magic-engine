@@ -28,6 +28,11 @@ describe('同步连续失败', () => {
     expect(syncFailureStreak([run('c1'), run('c1', 'HTTP 500')], 'c1')).toBe(0)
     expect(syncFailureStreak([{ summary: { results: [] } }, run('c1', 'HTTP 500')], 'c1')).toBe(0)
     expect(syncFailureStreak([run('other', 'HTTP 500')], 'c1')).toBe(0)
+    expect(syncFailureStreak([
+      { summary: { skipped: 'overlap' } },
+      run('c1', 'HTTP 500'),
+      run('c1', 'HTTP 500'),
+    ], 'c1')).toBe(2)
   })
 })
 

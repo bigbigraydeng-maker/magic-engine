@@ -22,6 +22,14 @@
  * （id / created_time / field_data）重试 —— 宁可丢归因，不丢人。
  */
 
+import {
+  LEAD_GRAPH_MAX_ATTEMPTS,
+  leadGraphBackoffMs,
+  leadGraphDelay,
+  metaGraphRateLimited,
+  pauseIfGraphUsageHot,
+  readGraphThrottleHints,
+} from './lead-graph-rate-limit'
 import { GRAPH_BASE } from './graph-base'
 
 /** 翻页上限，防跑飞用，不是真实业务上限。 */
@@ -62,6 +70,8 @@ export interface MetaLead {
 export interface GraphRead<T> {
   rows: T[]
   error: string | null
+  /** Set when Meta throttled the read. Callers must not immediately retry with another field set. */
+  rateLimited?: boolean
 }
 
 interface GraphList<T> {
@@ -69,24 +79,47 @@ interface GraphList<T> {
   paging?: { next?: string }
 }
 
-type GraphGet<T> = { json: T; error: null } | { json: null; error: string }
+type GraphGet<T> =
+  | { json: T; error: null; rateLimited?: false }
+  | { json: null; error: string; rateLimited: boolean }
 
-async function graphGet<T>(url: string, label: string): Promise<GraphGet<T>> {
+async function graphGetOnce<T>(url: string, label: string): Promise<GraphGet<T> & { hints?: ReturnType<typeof readGraphThrottleHints> }> {
   let res: Response
   try {
     res = await fetch(url)
   } catch (err) {
-    return { json: null, error: `${label} 网络错误: ${String(err)}` }
+    return { json: null, error: `${label} 网络错误: ${String(err)}`, rateLimited: false }
   }
+  const hints = readGraphThrottleHints(res.headers)
   if (!res.ok) {
     const body = await res.text().catch(() => '')
-    return { json: null, error: `${label} HTTP ${res.status}: ${body.slice(0, 400)}` }
+    return {
+      json: null,
+      error: `${label} HTTP ${res.status}: ${body.slice(0, 400)}`,
+      rateLimited: metaGraphRateLimited(res.status, body),
+      hints,
+    }
   }
   try {
-    return { json: (await res.json()) as T, error: null }
+    return { json: (await res.json()) as T, error: null, hints }
   } catch (err) {
-    return { json: null, error: `${label} 返回不是 JSON: ${String(err)}` }
+    return { json: null, error: `${label} 返回不是 JSON: ${String(err)}`, rateLimited: false }
   }
+}
+
+async function graphGet<T>(url: string, label: string): Promise<GraphGet<T>> {
+  let last: GraphGet<T> = { json: null, error: `${label} 没有发出请求`, rateLimited: false }
+  for (let attempt = 1; attempt <= LEAD_GRAPH_MAX_ATTEMPTS; attempt++) {
+    const got = await graphGetOnce<T>(url, label)
+    if (got.error === null) {
+      await pauseIfGraphUsageHot(got.hints?.usagePercent ?? null)
+      return { json: got.json, error: null }
+    }
+    last = { json: null, error: got.error, rateLimited: got.rateLimited }
+    if (!got.rateLimited || attempt === LEAD_GRAPH_MAX_ATTEMPTS) return last
+    await leadGraphDelay.sleep(leadGraphBackoffMs(attempt, got.hints ?? {}))
+  }
+  return last
 }
 
 /**
@@ -127,7 +160,7 @@ export async function fetchPageLeadForms(
     // 显式标类型：url 在循环里被 got 的结果重新赋值，不标就绕成循环推断（TS7022）。
     const got: GraphGet<GraphList<RawForm>> = await graphGet(url, 'leadgen_forms')
     // 必须 `!== null`：空串也是合法 string，真值判断收窄不掉出错那一支。
-    if (got.error !== null) return { rows, error: got.error }
+    if (got.error !== null) return { rows, error: got.error, rateLimited: got.rateLimited }
 
     for (const raw of got.json.data ?? []) {
       if (!raw.id) continue
@@ -213,7 +246,7 @@ async function walkLeads(firstUrl: string): Promise<LeadWalk> {
 
   for (let page = 0; page < MAX_PAGES && url; page++) {
     const got: GraphGet<GraphList<RawLead>> = await graphGet(url, 'leads')
-    if (got.error !== null) return { rows, error: got.error, truncated: false }
+    if (got.error !== null) return { rows, error: got.error, truncated: false, rateLimited: got.rateLimited }
 
     for (const raw of got.json.data ?? []) {
       const lead = parseLead(raw)
@@ -244,8 +277,10 @@ export async function fetchFormLeads(
   const sinceUnix = Math.floor(since.getTime() / 1000)
 
   const full = await walkLeads(leadsUrl(formId, pageAccessToken, sinceUnix, LEAD_FIELDS_FULL))
-  // 翻页截断换字段也救不了（结果太多，不是请求写错），原样回报即可。
-  if (!full.error || full.truncated) return { rows: full.rows, error: full.error }
+  // 翻页截断换字段也救不了（结果太多，不是请求写错）。限流后再换一套字段只会把配额再打一遍。
+  if (!full.error || full.truncated || full.rateLimited) {
+    return { rows: full.rows, error: full.error, rateLimited: full.rateLimited }
+  }
 
   console.warn(`[meta/lead-forms] 表单 ${formId} 完整字段失败，退回最小字段集：${full.error}`)
 

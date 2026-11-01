@@ -9,13 +9,30 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { leadGraphDelay } from '../lead-graph-rate-limit'
 import { fetchFormLeads, fetchPageLeadForms, normaliseGraphTime } from '../lead-forms'
 
-const okJson = (body: unknown) =>
-  ({ ok: true, json: async () => body, text: async () => JSON.stringify(body) }) as Response
+function headerBag(headers?: Record<string, string>) {
+  const bag = new Map(Object.entries(headers ?? {}).map(([key, value]) => [key.toLowerCase(), value]))
+  return { get: (name: string) => bag.get(name.toLowerCase()) ?? null }
+}
 
-const httpError = (status: number, body: string) =>
-  ({ ok: false, status, json: async () => ({}), text: async () => body }) as Response
+const okJson = (body: unknown, headers?: Record<string, string>) =>
+  ({
+    ok: true,
+    headers: headerBag(headers),
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  }) as Response
+
+const httpError = (status: number, body: string, headers?: Record<string, string>) =>
+  ({
+    ok: false,
+    status,
+    headers: headerBag(headers),
+    json: async () => ({}),
+    text: async () => body,
+  }) as Response
 
 let fetchMock: ReturnType<typeof vi.fn>
 
@@ -140,6 +157,47 @@ describe('fetchFormLeads', () => {
 
     const retryUrl = decodeURIComponent(String(fetchMock.mock.calls[1][0]))
     expect(retryUrl).toContain('fields=id,created_time,field_data')
+  })
+
+  it('限流先按 Retry-After 再试，不改去最小字段', async () => {
+    const sleep = vi.spyOn(leadGraphDelay, 'sleep').mockResolvedValue()
+    fetchMock
+      .mockResolvedValueOnce(
+        httpError(429, '{"error":{"message":"Application request limit reached","code":4}}', { 'retry-after': '2' }),
+      )
+      .mockResolvedValueOnce(okJson({ data: [rawLead] }))
+
+    const res = await fetchFormLeads('f1', 'tok', SINCE)
+    expect(res.error).toBeNull()
+    expect(res.rows).toHaveLength(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(sleep).toHaveBeenCalledWith(2000)
+    expect(decodeURIComponent(String(fetchMock.mock.calls[1][0]))).toContain('is_organic')
+  })
+
+  it('连续三次限流就停，不再打第四次', async () => {
+    vi.spyOn(leadGraphDelay, 'sleep').mockResolvedValue()
+    fetchMock.mockResolvedValue(
+      httpError(429, '{"error":{"message":"User request limit reached","code":17}}'),
+    )
+
+    const res = await fetchFormLeads('f1', 'tok', SINCE)
+    expect(res.rows).toEqual([])
+    expect(res.rateLimited).toBe(true)
+    expect(res.error).toContain('HTTP 429')
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    for (const call of fetchMock.mock.calls) {
+      expect(decodeURIComponent(String(call[0]))).toContain('is_organic')
+    }
+  })
+
+  it('用量到 90 就在下一页之前停一下', async () => {
+    const sleep = vi.spyOn(leadGraphDelay, 'sleep').mockResolvedValue()
+    fetchMock.mockResolvedValueOnce(okJson({ data: [] }, { 'x-app-usage': '{"call_count":95}' }))
+
+    const res = await fetchFormLeads('f1', 'tok', SINCE)
+    expect(res.error).toBeNull()
+    expect(sleep).toHaveBeenCalledWith(1000)
   })
 
   it('两次都失败才如实报错', async () => {
