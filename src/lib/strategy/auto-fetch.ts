@@ -26,9 +26,11 @@
  *                          the client's latest loaded day (all pages, not the
  *                          top-50 snapshot). Fails closed on stale / partial data.
  *
+ *   - social_followers_growth → TikTok daily followers in flywheel_metrics
+ *                               (social.tiktok.followers / tiktok_apify); FB pending token
+ *
  * Not yet supported (data source missing or complex):
  *   - conversion_rate    → derived GA4 (events/sessions)
- *   - social_followers_growth → no data source
  *   - cart_abandonment_rate → no data source
  *
  * Returns ok:false when unsupported or no data found.
@@ -47,6 +49,7 @@ import { resolveIndustryCode, matchAliases } from './industry-mapping'
 import { countOutcome, type OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
 import type { SeatDeparture } from '@/lib/crm/sales-progress/deposited-seats'
 import { fetchDepositedSeatProgress } from '@/lib/strategy/deposited-seat-fetch'
+import { SOCIAL_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 
 export type AutoFetchResult =
   | { ok: true;  value: number; source: string; snapshot_date: string; label: string }
@@ -138,6 +141,8 @@ export async function autoFetchMetricValue(
       return fetchAiVisibilityScore(supabase, clientId)
     case 'seo_gsc_clicks_28d':
       return fetchSeoGscClicks28d(supabase, clientId)
+    case 'social_followers_growth':
+      return fetchSocialFollowersGrowth(supabase, clientId, goalPeriod, now ?? new Date())
     default:
       return { ok: false, reason: `metric '${metricKey}' does not have an auto-fetch source yet` }
   }
@@ -973,6 +978,77 @@ async function fetchAdsOutcome(
  * clamped to today, so days before the start (and days that have not happened)
  * are not part of the sum.
  */
+const TIKTOK_FOLLOWERS_SOURCE = 'tiktok_apify'
+
+function distinctDayCount(rows: ReadonlyArray<{ measured_at: string }>): number {
+  return new Set(rows.map(r => r.measured_at.slice(0, 10))).size
+}
+
+async function fetchSocialFollowersGrowth(
+  supabase: SupabaseClient,
+  clientId: string,
+  goalPeriod: GoalPeriod | undefined,
+  now: Date,
+): Promise<AutoFetchResult> {
+  const goal = await resolveGoalPeriod(supabase, clientId, goalPeriod)
+  if (!goal.ok) return goal
+
+  const today = now.toISOString().slice(0, 10)
+  const window = clampPeriodEndToToday(goal.period, today)
+  const windowStart = `${window.period_start}T00:00:00.000Z`
+  const windowEnd = `${window.period_end}T23:59:59.999Z`
+
+  const { data, error } = await supabase
+    .from('flywheel_metrics')
+    .select('metric_value, measured_at')
+    .eq('client_id', clientId)
+    .eq('flywheel', 'social')
+    .eq('metric_key', SOCIAL_METRIC_KEY.TIKTOK_FOLLOWERS)
+    .eq('source', TIKTOK_FOLLOWERS_SOURCE)
+    .gte('measured_at', windowStart)
+    .lte('measured_at', windowEnd)
+    .order('measured_at', { ascending: true })
+
+  if (error) {
+    return { ok: false, reason: `flywheel_metrics query failed: ${error.message}`, unknown: true }
+  }
+
+  const numericRows = ((data ?? []) as Array<{ metric_value: number | null; measured_at: string }>)
+    .filter((row): row is { metric_value: number; measured_at: string } => typeof row.metric_value === 'number')
+
+  if (numericRows.length === 0) {
+    return {
+      ok: false,
+      unknown: true,
+      noData: true,
+      reason: 'No TikTok follower snapshots in this goal window — configure tiktok_handle and wait for the daily pull',
+    }
+  }
+
+  const dayCount = distinctDayCount(numericRows)
+  if (dayCount < 2) {
+    return {
+      ok: false,
+      unknown: true,
+      reason: `Only ${dayCount} distinct day(s) of TikTok follower data in window — need at least 2 to compute growth`,
+    }
+  }
+
+  const first = numericRows[0]
+  const last = numericRows[numericRows.length - 1]
+  const growth = last.metric_value - first.metric_value
+  const firstDay = first.measured_at.slice(0, 10)
+  const lastDay = last.measured_at.slice(0, 10)
+
+  return {
+    ok: true,
+    value: growth,
+    source: 'auto.tiktok_followers_growth',
+    snapshot_date: lastDay,
+    label: `${growth >= 0 ? '+' : ''}${growth.toLocaleString()} TikTok followers (${formatDate(firstDay)} → ${formatDate(lastDay)})`,
+  }
+}
+
 async function fetchDatedLeadCount(
   supabase: SupabaseClient,
   clientId: string,
