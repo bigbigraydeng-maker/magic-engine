@@ -260,6 +260,23 @@ async function currentStatus(clientId: string, planId: string): Promise<string |
   return data.status
 }
 
+async function otherApprovedForGoal(args: {
+  clientId: string
+  planId: string
+  approving?: Pick<MarketingPlan, 'id' | 'plan_data' | 'generation_meta'>
+}): Promise<boolean> {
+  if (!args.approving) return false
+  const goalId = planLinkedGoalId(args.approving)
+  if (goalId === '') return false
+  try {
+    const listed = await listApproved(args.clientId)
+    if (!listed) return false
+    return listed.some(row => row.id !== args.planId && planLinkedGoalId(row) === goalId)
+  } catch {
+    return false
+  }
+}
+
 /**
  * Put archived plans back unless the new plan is already approved
  * (another request won the race and the archive should stand).
@@ -268,6 +285,7 @@ export async function releaseSupersedeUnlessApproved(args: {
   clientId: string
   planId: string
   approvingId: string
+  approving?: Pick<MarketingPlan, 'id' | 'plan_data' | 'generation_meta'>
   archived: readonly PriorApprovedRow[]
 }): Promise<{ ok: true; planNowApproved: boolean } | { ok: false; error: string }> {
   if (args.archived.length === 0) return { ok: true, planNowApproved: false }
@@ -278,6 +296,9 @@ export async function releaseSupersedeUnlessApproved(args: {
     status = null
   }
   if (status === 'approved') return { ok: true, planNowApproved: true }
+  // Another draft for this goal may have been approved while ours failed.
+  // Putting the old plans back would then leave two approved plans.
+  if (await otherApprovedForGoal(args)) return { ok: true, planNowApproved: false }
   const rolledBack = await restoreAll(args.archived, args.approvingId)
   if (!rolledBack) return { ok: false, error: UNDO_STUCK }
   return { ok: true, planNowApproved: false }

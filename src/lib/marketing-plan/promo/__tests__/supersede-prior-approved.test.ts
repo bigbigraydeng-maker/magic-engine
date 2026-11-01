@@ -318,6 +318,25 @@ describe('approvePlan archives the previous approved plan for the same goal', ()
     }
   })
 
+  it('does not put the old plan back when another draft was approved while this one failed', async () => {
+    h.rows = [
+      planRow({ id: 'plan-a', status: 'draft' }),
+      planRow({ id: 'plan-b', status: 'draft' }),
+      planRow({ id: 'plan-old', status: 'approved' }),
+    ]
+    h.afterFirstArchive = async () => {
+      const second = await approvePlan({ clientId: 'client-1', planId: 'plan-b', approvedBy: 'ray@example.com' })
+      expect(second.kind).toBe('approved')
+      byId('plan-a').updated_at = 'edited-meanwhile' // plan-a's own approval will not save
+    }
+    const first = await approvePlan({ clientId: 'client-1', planId: 'plan-a', approvedBy: 'ray@example.com' })
+    expect(first.kind).toBe('conflict')
+    expect(byId('plan-a').status).toBe('draft')
+    expect(byId('plan-b').status).toBe('approved')
+    expect(byId('plan-old').status).toBe('archived')
+    expect(h.rows.filter(row => row.status === 'approved')).toHaveLength(1)
+  })
+
   it('keeps the same plan when two reconciles both see two approvals', async () => {
     h.rows = [
       planRow({ id: 'plan-a', status: 'approved' }),

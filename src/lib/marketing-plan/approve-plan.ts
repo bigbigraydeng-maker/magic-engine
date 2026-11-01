@@ -220,6 +220,7 @@ async function abandonFlip(
     clientId,
     planId: plan.id,
     approvingId: plan.id,
+    approving: plan,
     archived: held.archived,
   })
   if (!released.ok) return { kind: 'conflict', status: 500, error: released.error }
