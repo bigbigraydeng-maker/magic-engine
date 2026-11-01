@@ -14,6 +14,7 @@ import {
 } from '@/lib/factory/worker-guard'
 import { deriveRecipeIntent } from '@/lib/factory/recipe'
 import { claimAspectUploads } from '@/lib/factory/video-aspects'
+import { assessEngineReport } from '@/lib/factory/engine-catalog.mjs'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -57,6 +58,17 @@ export async function POST(req: NextRequest) {
   const claimClientIds = workerClaimClientIds(body, whitelist)
   if (!claimClientIds) {
     return NextResponse.json({ error: 'client_id must be allowlisted when provided' }, { status: 403 })
+  }
+
+  // Old machines stay out of the queue. The order is not claimed, so it cannot
+  // fall into the dead-letter pile, and a machine that already reports the
+  // current catalog can still take it.
+  const engine = assessEngineReport(body.engine)
+  if (!engine.ok) {
+    return NextResponse.json(
+      { claimed: false, stale_engine: true, message: engine.message },
+      { status: 200 },
+    )
   }
 
   const { data, error } = await supabaseAdmin.rpc('factory_claim_work_order', {

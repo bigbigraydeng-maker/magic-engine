@@ -15,16 +15,26 @@ vi.mock('@/lib/supabase', () => ({
   },
 }))
 
+import { ENGINE_CATALOG_ID, REQUIRED_ENGINE_CAPABILITIES } from '@/lib/factory/engine-catalog.mjs'
 import { POST } from './route'
+
+const CURRENT_ENGINE = {
+  engine_rev: 'b'.repeat(40),
+  catalog_id: ENGINE_CATALOG_ID,
+  capabilities: [...REQUIRED_ENGINE_CAPABILITIES],
+}
 
 const CLIENT = '10000000-0000-0000-0000-000000000001'
 const WO = '20000000-0000-0000-0000-000000000002'
 
 function claimRequest(body: unknown) {
+  const payload = body && typeof body === 'object' && !Array.isArray(body)
+    ? { engine: CURRENT_ENGINE, ...(body as Record<string, unknown>) }
+    : body
   return new NextRequest('http://localhost/api/factory/worker/claim', {
     method: 'POST',
     headers: { authorization: 'Bearer test-worker-token', 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   })
 }
 
