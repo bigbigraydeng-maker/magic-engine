@@ -13,12 +13,13 @@
  *   PM 在盘问第 1 问里加的那句「同时让我作为系统的设计者也了解」，落地就是这个
  *   按钮 —— **能看见 + 能关掉，才叫可撤回。**
  *
- * 只允许改 `is_active`。经验正文的修改走脱敏重写流程（要过 lesson-shareability
- * 那道闸），不从这里改，免得绕开闸门。
+ * 只允许切换 `is_active`，并在首次采纳时给 evidence 留下 adopted 状态。
+ * 经验正文的修改走脱敏重写流程（要过 lesson-shareability 那道闸）。
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardGlobalAdmin } from '@/lib/auth/require-admin'
+import { isAdoptionCandidate, TUNE_ADOPTED_STATUS } from '@/lib/memory/tune-candidate'
 
 export async function PATCH(
   req: NextRequest,
@@ -49,10 +50,37 @@ export async function PATCH(
     )
   }
 
-  const { data, error } = await supabaseAdmin
+  const { data: current, error: readError } = await supabaseAdmin
     .from('global_learned_lessons')
-    .update({ is_active: isActive, updated_at: new Date().toISOString() })
+    .select('lesson_key, is_active, evidence, updated_at')
     .eq('lesson_key', key)
+    .maybeSingle()
+  if (readError) {
+    return NextResponse.json({ success: false, error: readError.message }, { status: 500 })
+  }
+  if (!current) {
+    return NextResponse.json({ success: false, error: `No lesson named "${key}"` }, { status: 404 })
+  }
+
+  const evidence = current.evidence && typeof current.evidence === 'object' && !Array.isArray(current.evidence)
+    ? current.evidence as Record<string, unknown>
+    : null
+  // An active legacy candidate was already adopted, even if its old metadata still says candidate.
+  const markAdopted = evidence && (isAdoptionCandidate(false, evidence)) && (isActive || current.is_active)
+  const patch = {
+    is_active: isActive,
+    updated_at: new Date().toISOString(),
+    ...(markAdopted ? { evidence: { ...evidence, status: TUNE_ADOPTED_STATUS } } : {}),
+  }
+  let update = supabaseAdmin
+    .from('global_learned_lessons')
+    .update(patch)
+    .eq('lesson_key', key)
+    .eq('is_active', current.is_active)
+  update = current.updated_at === null
+    ? update.is('updated_at', null)
+    : update.eq('updated_at', current.updated_at)
+  const { data, error } = await update
     .select('lesson_key, is_active')
     .maybeSingle()
 
@@ -60,7 +88,7 @@ export async function PATCH(
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
   if (!data) {
-    return NextResponse.json({ success: false, error: `No lesson named "${key}"` }, { status: 404 })
+    return NextResponse.json({ success: false, error: '经验刚刚被改过。请刷新后再点。' }, { status: 409 })
   }
 
   return NextResponse.json({ success: true, lesson: data })
