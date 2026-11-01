@@ -86,6 +86,10 @@ function bucketTouchpoints(rows: readonly HourlyLeadTouch[]): Map<string, number
   return byDay
 }
 
+export function buildDayBuckets(rows: readonly HourlyLeadTouch[]): Map<string, number[]> {
+  return bucketTouchpoints(rows)
+}
+
 function sumHours(hours: readonly number[], throughHour: number): number {
   let n = 0
   for (let h = 0; h <= throughHour && h < 24; h++) n += hours[h] ?? 0
