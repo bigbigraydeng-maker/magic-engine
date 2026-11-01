@@ -192,7 +192,7 @@ async function flipToApproved(
   clientId: string,
   approvedAt: string,
   receipt: ApprovalReceipt,
-): Promise<{ ok: true; plan: MarketingPlan } | { ok: false; error: unknown; missed: boolean }> {
+): Promise<{ ok: true; plan: MarketingPlan } | { ok: false; error: unknown; missed: boolean; duplicate: boolean }> {
   const { data: updated, error } = await supabaseAdmin
     .from('marketing_plans')
     .update({
@@ -207,14 +207,21 @@ async function flipToApproved(
     .select('*')
     .maybeSingle()
   if (!error && updated) return { ok: true, plan: updated as MarketingPlan }
-  return { ok: false, error, missed: !error && !updated }
+  return { ok: false, error, missed: !error && !updated, duplicate: isUniqueViolation(error) }
 }
+
+/** Postgres 23505: the one-approved-plan-per-goal index refused a second approved plan. */
+function isUniqueViolation(error: unknown): boolean {
+  return !!error && typeof error === 'object' && (error as { code?: unknown }).code === '23505'
+}
+
+const OTHER_APPROVED = '同一目标已经有另一份已批准的计划，这份没有批准。请刷新后查看。'
 
 async function abandonFlip(
   plan: MarketingPlan,
   clientId: string,
   held: Extract<ArchiveSameGoalResult, { ok: true }>,
-  flipped: { error: unknown; missed: boolean },
+  flipped: { error: unknown; missed: boolean; duplicate: boolean },
 ): Promise<ApprovePlanResult> {
   const released = await releaseSupersedeUnlessApproved({
     clientId,
@@ -226,6 +233,10 @@ async function abandonFlip(
   if (!released.ok) return { kind: 'conflict', status: 500, error: released.error }
   if (released.planNowApproved) {
     return { kind: 'conflict', status: 409, error: '这份计划刚刚已经被批准了，本次请求没有重复处理。' }
+  }
+  if (flipped.duplicate) {
+    await revokePlanTasks(plan.id, clientId)
+    return { kind: 'conflict', status: 409, error: OTHER_APPROVED }
   }
   if (flipped.missed) return loseRace(plan.id, clientId)
   console.error('[marketing-plan approve] status update failed, revoking dispatch:', flipped.error)

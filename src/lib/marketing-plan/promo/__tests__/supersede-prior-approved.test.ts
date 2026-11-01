@@ -29,7 +29,7 @@ interface Row {
 
 const h = vi.hoisted(() => ({
   rows: [] as Row[],
-  failApprove: null as null | 'error' | 'winner',
+  failApprove: null as null | 'error' | 'winner' | 'duplicate',
   failArchiveIds: new Set<string>(),
   afterFirstArchive: null as null | (() => Promise<void>),
   dispatch: vi.fn(),
@@ -71,6 +71,9 @@ vi.mock('@/lib/supabase', () => {
       }
       if (patch.approved_at && h.failApprove === 'error') {
         return { data: null, error: { message: 'approve failed' } }
+      }
+      if (patch.approved_at && h.failApprove === 'duplicate') {
+        return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } }
       }
       if (patch.approved_at && h.failApprove === 'winner') {
         hit.status = 'approved'
@@ -333,6 +336,41 @@ describe('approvePlan archives the previous approved plan for the same goal', ()
     expect(first.kind).toBe('conflict')
     expect(byId('plan-a').status).toBe('draft')
     expect(byId('plan-b').status).toBe('approved')
+    expect(byId('plan-old').status).toBe('archived')
+    expect(h.rows.filter(row => row.status === 'approved')).toHaveLength(1)
+  })
+
+  it('answers with a plain message and puts the old plan back when the database refuses a second approved plan', async () => {
+    h.rows = [
+      planRow({ id: 'plan-new', status: 'draft' }),
+      planRow({ id: 'plan-old', status: 'approved' }),
+    ]
+    h.failApprove = 'duplicate'
+    const result = await approvePlan({ clientId: 'client-1', planId: 'plan-new', approvedBy: 'ray@example.com' })
+    expect(result.kind).toBe('conflict')
+    if (result.kind === 'conflict') {
+      expect(result.status).toBe(409)
+      expect(result.error).toContain('已经有另一份已批准')
+    }
+    expect(byId('plan-new').status).toBe('draft')
+    expect(byId('plan-old').status).toBe('approved')
+    expect(h.revoke).toHaveBeenCalled()
+  })
+
+  it('does not put the old plan back when the refusal came from another approved draft', async () => {
+    h.rows = [
+      planRow({ id: 'plan-a', status: 'draft' }),
+      planRow({ id: 'plan-b', status: 'draft' }),
+      planRow({ id: 'plan-old', status: 'approved' }),
+    ]
+    h.afterFirstArchive = async () => {
+      const second = await approvePlan({ clientId: 'client-1', planId: 'plan-b', approvedBy: 'ray@example.com' })
+      expect(second.kind).toBe('approved')
+      h.failApprove = 'duplicate' // the index refuses plan-a's own approval
+    }
+    const first = await approvePlan({ clientId: 'client-1', planId: 'plan-a', approvedBy: 'ray@example.com' })
+    expect(first.kind).toBe('conflict')
+    if (first.kind === 'conflict') expect(first.status).toBe(409)
     expect(byId('plan-old').status).toBe('archived')
     expect(h.rows.filter(row => row.status === 'approved')).toHaveLength(1)
   })
