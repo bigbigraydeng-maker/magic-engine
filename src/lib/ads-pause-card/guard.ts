@@ -13,14 +13,22 @@ export interface LiveObject {
   readonly adsetId: string | null
 }
 
+export interface SuccessorLive {
+  readonly readable: boolean
+  readonly accountId: string | null
+  readonly campaignId: string | null
+  readonly adsetId: string | null
+  readonly effectiveStatus: string | null
+}
+
 export interface LiveFacts {
   readonly registeredAccountIds: readonly string[] | null
   readonly object: LiveObject | null
   readonly campaignAds: readonly LiveAd[] | null
-  /** null when this order does not replace anything, or when the new ad could not be read. */
-  readonly successorEffectiveStatus: string | null
-  readonly successorReadable: boolean
+  readonly successor: SuccessorLive
 }
+
+const SUCCESSOR_LABEL = '新广告在投'
 
 export interface GuardResult {
   readonly checks: readonly HardCheck[]
@@ -79,13 +87,36 @@ function metricCheck(order: PauseOrder): HardCheck {
 
 function successorChecks(order: PauseOrder, live: LiveFacts): HardCheck[] {
   if (!order.successorAdId) return []
-  if (!live.successorReadable || !live.successorEffectiveStatus) {
-    return [{ label: '新广告在投', state: 'unread', reason: '新广告的状态读不到，先不能停旧的' }]
+  if (!live.successor.readable) return [successorUnread()]
+  const gap = successorGap(order, live)
+  if (gap) return [gap]
+  if (live.successor.effectiveStatus !== 'ACTIVE') {
+    return [{ label: SUCCESSOR_LABEL, state: 'red', reason: '新广告还没回读到在投，先不能停旧的' }]
   }
-  if (live.successorEffectiveStatus !== 'ACTIVE') {
-    return [{ label: '新广告在投', state: 'red', reason: '新广告还没回读到在投，先不能停旧的' }]
+  return [{ label: SUCCESSOR_LABEL, state: 'green', reason: '新广告已回读为在投' }]
+}
+
+function successorUnread(): HardCheck {
+  return { label: SUCCESSOR_LABEL, state: 'unread', reason: '新广告的状态读不到，先不能停旧的' }
+}
+
+function successorGap(order: PauseOrder, live: LiveFacts): HardCheck | null {
+  const next = live.successor
+  if (!next.accountId || !next.campaignId || !next.adsetId || !next.effectiveStatus) {
+    return { label: SUCCESSOR_LABEL, state: 'red', reason: '新广告的账户、系列、广告组或状态不全，先不能停旧的' }
   }
-  return [{ label: '新广告在投', state: 'green', reason: '新广告已回读为在投' }]
+  if (successorPlaced(order, live)) return null
+  return { label: SUCCESSOR_LABEL, state: 'red', reason: '新广告不在同一个已登记账户和系列里，先不能停旧的' }
+}
+
+/** Same registered account and campaign. A different ad set still counts. */
+function successorPlaced(order: PauseOrder, live: LiveFacts): boolean {
+  const next = live.successor
+  if (!live.registeredAccountIds || !next.accountId || !next.campaignId) return false
+  const known = listed(live.registeredAccountIds, next.accountId)
+    && listed(live.registeredAccountIds, order.adAccountId)
+    && sameAcct(next.accountId, order.adAccountId)
+  return known && next.campaignId === order.campaignId
 }
 
 /** Active ads that would still be running. null = could not tell. */

@@ -8,7 +8,7 @@ import { pauseAd } from '@/lib/meta/ads-manager'
 import { setAdSetStatus } from '@/lib/meta/adsets'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import type { LiveFacts } from './guard'
+import type { LiveFacts, SuccessorLive } from './guard'
 import type { LiveAd, PauseOrder } from './order'
 import type { PauseRuntime } from './flow'
 
@@ -56,16 +56,32 @@ async function readLive(
     registeredAccountIds: registered.error ? null : registered.ids,
     object,
     campaignAds: ads,
-    successorEffectiveStatus: successor.status,
-    successorReadable: successor.readable,
+    successor,
   }
 }
 
-async function readSuccessor(order: PauseOrder, token: string): Promise<{ readable: boolean; status: string | null }> {
-  if (!order.successorAdId) return { readable: true, status: null }
-  const row = await graphGet(order.successorAdId, token, 'effective_status')
-  if (!row) return { readable: false, status: null }
-  return { readable: true, status: typeof row.effective_status === 'string' ? row.effective_status : null }
+const SUCCESSOR_FIELDS = 'account_id,campaign_id,adset_id,effective_status'
+
+async function readSuccessor(order: PauseOrder, token: string): Promise<SuccessorLive> {
+  if (!order.successorAdId) return blankSuccessor(true)
+  const row = await graphGet(order.successorAdId, token, SUCCESSOR_FIELDS)
+  if (!row) return blankSuccessor(false)
+  return {
+    readable: true,
+    accountId: textField(row, 'account_id'),
+    campaignId: textField(row, 'campaign_id'),
+    adsetId: textField(row, 'adset_id'),
+    effectiveStatus: textField(row, 'effective_status'),
+  }
+}
+
+function blankSuccessor(readable: boolean): SuccessorLive {
+  return { readable, accountId: null, campaignId: null, adsetId: null, effectiveStatus: null }
+}
+
+function textField(row: Record<string, unknown>, key: string): string | null {
+  const value = row[key]
+  return typeof value === 'string' && value.length > 0 ? value : null
 }
 
 async function readObject(order: PauseOrder, token: string): Promise<LiveFacts['object']> {

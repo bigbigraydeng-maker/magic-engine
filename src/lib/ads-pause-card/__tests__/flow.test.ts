@@ -6,7 +6,7 @@ import { CLIENT_A, makeFixture } from '@/lib/kernel/__tests__/fixtures'
 import type { CardClicker } from '@/lib/confirmation-card/actor'
 import { issuePauseOrder, submitPauseCard, type PauseRuntime } from '../flow'
 import { PAUSE_CARD_POLICY_KEY } from '../switch'
-import type { LiveFacts } from '../guard'
+import type { LiveFacts, SuccessorLive } from '../guard'
 import type { PauseOrder } from '../order'
 
 const OPC: CardClicker = { kind: 'opc', email: 'opc@example.com' }
@@ -34,10 +34,13 @@ function facts(patch: Partial<LiveFacts> = {}): LiveFacts {
       { id: '300', adsetId: '200', effectiveStatus: 'ACTIVE' },
       { id: '301', adsetId: '201', effectiveStatus: 'ACTIVE' },
     ],
-    successorEffectiveStatus: null,
-    successorReadable: true,
+    successor: { readable: true, accountId: null, campaignId: null, adsetId: null, effectiveStatus: null },
     ...patch,
   }
+}
+
+function placed(patch: Partial<SuccessorLive> = {}): SuccessorLive {
+  return { readable: true, accountId: '42', campaignId: '100', adsetId: '200', effectiveStatus: 'ACTIVE', ...patch }
 }
 
 function runtime(liveFacts: LiveFacts, readback: string | null): PauseRuntime & { pauses: number } {
@@ -134,11 +137,11 @@ describe('pause card issue and execute', () => {
   it('does not pause the old ad until the new one reads back active, then pauses once', async () => {
     const f = fixture()
     const replacing = { ...order, successorAdId: '400' }
-    const waiting = runtime(facts({ successorEffectiveStatus: 'PAUSED', successorReadable: true }), 'PAUSED')
+    const waiting = runtime(facts({ successor: placed({ effectiveStatus: 'PAUSED' }) }), 'PAUSED')
     const held = await issuePauseOrder({ kernel: f.kernel, clientId: CLIENT_A, clicker: OPC, order: replacing, runtime: waiting })
     expect(held.confirmEnabled).toBe(false)
     expect(waiting.pauses).toBe(0)
-    const readyRuntime = runtime(facts({ successorEffectiveStatus: 'ACTIVE', successorReadable: true }), 'PAUSED')
+    const readyRuntime = runtime(facts({ successor: placed() }), 'PAUSED')
     const ready = await issuePauseOrder({ kernel: f.kernel, clientId: CLIENT_A, clicker: OPC, order: replacing, runtime: readyRuntime })
     expect(ready.confirmEnabled).toBe(true)
     const done = await submitPauseCard({

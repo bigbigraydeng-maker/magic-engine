@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { extractPauseOrders, type PauseOrder } from '../order'
-import { guardPause, type LiveFacts } from '../guard'
+import { guardPause, type LiveFacts, type SuccessorLive } from '../guard'
 
 const order: PauseOrder = {
   sourceKind: 'plan_step',
@@ -24,10 +24,17 @@ function live(patch: Partial<LiveFacts> = {}): LiveFacts {
       { id: '300', adsetId: '200', effectiveStatus: 'ACTIVE' },
       { id: '301', adsetId: '201', effectiveStatus: 'ACTIVE' },
     ],
-    successorEffectiveStatus: null,
-    successorReadable: true,
+    successor: blankSuccessor(),
     ...patch,
   }
+}
+
+function blankSuccessor(): SuccessorLive {
+  return { readable: true, accountId: null, campaignId: null, adsetId: null, effectiveStatus: null }
+}
+
+function placed(patch: Partial<SuccessorLive> = {}): SuccessorLive {
+  return { readable: true, accountId: '42', campaignId: '100', adsetId: '200', effectiveStatus: 'ACTIVE', ...patch }
 }
 
 describe('pause card guards', () => {
@@ -56,11 +63,51 @@ describe('pause card guards', () => {
 
   it('waits until the replacement ad reads back as active', () => {
     const replacing = { ...order, successorAdId: '400' }
-    const waiting = guardPause(replacing, live({ successorEffectiveStatus: 'PAUSED', successorReadable: true }), false)
+    const waiting = guardPause(replacing, live({ successor: placed({ effectiveStatus: 'PAUSED' }) }), false)
     expect(waiting.block).toContain('还没回读到在投')
-    const ready = guardPause(replacing, live({ successorEffectiveStatus: 'ACTIVE', successorReadable: true }), false)
+    const ready = guardPause(replacing, live({ successor: placed({ accountId: 'act_42' }) }), false)
     expect(ready.block).toBeNull()
     expect(ready.checks.find((check) => check.label === '新广告在投')?.state).toBe('green')
+  })
+
+  it('does not unlock a pause when an active ad is in another account or campaign', () => {
+    const replacing = { ...order, successorAdId: '400' }
+    const otherAccount = guardPause(replacing, live({
+      registeredAccountIds: ['act_42', 'act_77'],
+      successor: placed({ accountId: '77' }),
+    }), false)
+    expect(otherAccount.checks.find((check) => check.label === '新广告在投')?.state).toBe('red')
+    expect(otherAccount.block).toContain('同一个已登记账户')
+    const otherCampaign = guardPause(replacing, live({ successor: placed({ campaignId: '999' }) }), false)
+    expect(otherCampaign.checks.find((check) => check.label === '新广告在投')?.state).toBe('red')
+    expect(otherCampaign.block).toContain('同一个已登记账户')
+    const unlisted = guardPause(replacing, live({
+      registeredAccountIds: ['act_99'],
+      successor: placed(),
+    }), false)
+    expect(unlisted.checks.find((check) => check.label === '新广告在投')?.state).toBe('red')
+  })
+
+  it('stays red when the replacement is missing an account, campaign, ad set, or status', () => {
+    const replacing = { ...order, successorAdId: '400' }
+    const gaps: Array<Partial<SuccessorLive>> = [
+      { accountId: null },
+      { campaignId: null },
+      { adsetId: null },
+      { effectiveStatus: null },
+    ]
+    for (const gap of gaps) {
+      const result = guardPause(replacing, live({ successor: placed(gap) }), false)
+      expect(result.checks.find((check) => check.label === '新广告在投')?.state).toBe('red')
+      expect(result.block).toContain('不全')
+    }
+  })
+
+  it('still allows a replacement in another ad set of the same campaign', () => {
+    const replacing = { ...order, successorAdId: '400' }
+    const result = guardPause(replacing, live({ successor: placed({ adsetId: '201' }) }), false)
+    expect(result.checks.find((check) => check.label === '新广告在投')?.state).toBe('green')
+    expect(result.block).toBeNull()
   })
 })
 
