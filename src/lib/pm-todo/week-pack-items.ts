@@ -121,8 +121,8 @@ async function loadWeekPackTodoSource(
 ): Promise<WeekPackTodoSource> {
   const [configs, pending, handled, held, unpublished] = await Promise.all([
     loadConfigs(supabase, nameOf, clientIds),
-    loadPending(supabase),
-    loadHandled(supabase),
+    loadPending(supabase, clientIds, now),
+    loadHandled(supabase, clientIds, now),
     loadHeld(supabase, now, clientIds),
     loadUnpublished(supabase, now, clientIds),
   ])
@@ -142,16 +142,13 @@ async function loadConfigs(
   })
 }
 
-async function loadPending(supabase: SupabaseClient): Promise<WeekPackTodoSource['pending']> {
-  const { data, error } = await supabase
-    .from('action_runs')
-    .select('client_id, input')
-    .eq('action_key', CONFIRMATION_ACTION_KEY)
-    .eq('status', 'pending_approval')
-    .limit(LOOK_CAP)
-  if (error) return 'unread'
-  const rows = data ?? []
-  if (rows.length >= LOOK_CAP) return 'unread'
+async function loadPending(
+  supabase: SupabaseClient,
+  clientIds: readonly string[],
+  now: Date,
+): Promise<WeekPackTodoSource['pending']> {
+  const rows = await readPackRuns(supabase, clientIds, ['pending_approval'], weekSubjects(clientIds, now))
+  if (rows === 'unread') return 'unread'
   return rows.flatMap((row) => readPending(row as { client_id?: unknown; input?: unknown }))
 }
 
@@ -236,15 +233,13 @@ function mergeHeld(stories: Map<string, number>, reels: Map<string, number>): He
   }))
 }
 
-async function loadHandled(supabase: SupabaseClient): Promise<WeekPackTodoSource['handled']> {
-  const { data, error } = await supabase
-    .from('action_runs')
-    .select('client_id, status, input, authorization_decision_id')
-    .eq('action_key', CONFIRMATION_ACTION_KEY)
-    .in('status', ['authorized', 'denied'])
-    .limit(LOOK_CAP)
-  if (error || (data ?? []).length >= LOOK_CAP) return 'unread'
-  const rows = (data ?? []) as Array<Record<string, unknown>>
+async function loadHandled(
+  supabase: SupabaseClient,
+  clientIds: readonly string[],
+  now: Date,
+): Promise<WeekPackTodoSource['handled']> {
+  const rows = await readPackRuns(supabase, clientIds, ['authorized', 'denied'], weekSubjects(clientIds, now))
+  if (rows === 'unread') return 'unread'
   const reasons = await decisionReasons(supabase, rows)
   if (reasons === 'unread') return 'unread'
   return rows.flatMap((row) => {
@@ -395,7 +390,7 @@ async function loadUnpublished(
   now: Date,
   clientIds: readonly string[],
 ): Promise<WeekPackTodoSource['unpublished']> {
-  const cards = await loadAuthorizedCards(supabase)
+  const cards = await loadAuthorizedCards(supabase, clientIds)
   if (cards === 'unread') return 'unread'
   const notes = notesForClients(cards, clientIds, now)
   if (notes === 'unread') return 'unread'
@@ -404,15 +399,68 @@ async function loadUnpublished(
   return openUnpublishedNotes(notes, facts)
 }
 
-async function loadAuthorizedCards(supabase: SupabaseClient): Promise<PackEvidenceRow[] | 'unread'> {
-  const { data, error } = await supabase
-    .from('action_runs')
-    .select('client_id, input, evidence')
+async function loadAuthorizedCards(
+  supabase: SupabaseClient,
+  clientIds: readonly string[],
+): Promise<PackEvidenceRow[] | 'unread'> {
+  const rows = await readPackRuns(supabase, clientIds, ['authorized'], 'all-weeks')
+  if (rows === 'unread') return 'unread'
+  return rows.flatMap((row) => readCard(row as { client_id?: unknown; input?: unknown; evidence?: unknown }))
+}
+
+function weekSubjects(clientIds: readonly string[], now: Date): string[] {
+  const week = targetWeek(now)
+  return clientIds.map((id) => weekPackSubject(id, week.weekStart))
+}
+
+type PackRunQuery = {
+  eq: (column: string, value: unknown) => PackRunQuery
+  in: (column: string, values: readonly unknown[]) => PackRunQuery
+  like: (column: string, pattern: string) => PackRunQuery
+  order: (column: string, options: { ascending: boolean }) => PackRunQuery
+  range: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>
+}
+
+/** Other clients and other confirmation cards stay out of this read, and a full page is not “unreadable”. */
+async function readPackRuns(
+  supabase: SupabaseClient,
+  clientIds: readonly string[],
+  statuses: readonly string[],
+  subjects: readonly string[] | 'all-weeks',
+): Promise<Array<Record<string, unknown>> | 'unread'> {
+  if (clientIds.length === 0 || (subjects !== 'all-weeks' && subjects.length === 0)) return []
+  const rows: Array<Record<string, unknown>> = []
+  for (let page = 0; page < 25; page += 1) {
+    const from = page * LOOK_CAP
+    const { data, error } = await packRunQuery(supabase, clientIds, statuses, subjects).range(from, from + LOOK_CAP - 1)
+    if (error) return 'unread'
+    const batch = (data ?? []) as Array<Record<string, unknown>>
+    rows.push(...batch)
+    if (batch.length < LOOK_CAP) return rows
+  }
+  return 'unread'
+}
+
+function packRunQuery(
+  supabase: SupabaseClient,
+  clientIds: readonly string[],
+  statuses: readonly string[],
+  subjects: readonly string[] | 'all-weeks',
+): PackRunQuery {
+  const query = runs(supabase)
     .eq('action_key', CONFIRMATION_ACTION_KEY)
-    .eq('status', 'authorized')
-    .limit(LOOK_CAP)
-  if (error || (data ?? []).length >= LOOK_CAP) return 'unread'
-  return ((data ?? []) as Array<{ client_id?: unknown; input?: unknown; evidence?: unknown }>).flatMap(readCard)
+    .in('client_id', clientIds)
+    .in('status', statuses)
+  const scoped = subjects === 'all-weeks'
+    ? query.like('input->>subject_key', 'social:week-pack:%')
+    : query.in('input->>subject_key', subjects)
+  return scoped.order('id', { ascending: true })
+}
+
+function runs(supabase: SupabaseClient): PackRunQuery {
+  return supabase
+    .from('action_runs')
+    .select('client_id, status, input, evidence, authorization_decision_id') as unknown as PackRunQuery
 }
 
 function readCard(row: { client_id?: unknown; input?: unknown; evidence?: unknown }): PackEvidenceRow[] {

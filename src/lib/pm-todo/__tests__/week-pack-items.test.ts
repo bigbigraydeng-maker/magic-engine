@@ -170,6 +170,25 @@ describe('week pack todos', () => {
     expect(stillNeedsReminder(comment, null)).toBe(true)
   })
 
+  it('still reads this client when other cards pass the old cap', async () => {
+    const subject = weekPackSubject(CLIENT, targetWeek(FRIDAY_NZ).weekStart)
+    const otherPeople = Array.from({ length: 201 }, (_, index) => noiseCard(
+      OTHER, `social:week-pack:${OTHER}:old-${index}`, '别的客户的旧卡',
+    ))
+    const otherWeeks = Array.from({ length: 201 }, (_, index) => noiseCard(
+      CLIENT, `social:week-pack:${CLIENT}:old-${index}`, null,
+    ))
+    const open = await todosFor([...otherPeople, ...otherWeeks])
+    expect(open.join('\n')).toContain('还没批')
+    expect(open.join('\n')).not.toContain('读不到')
+    expect(open.join('\n')).not.toContain('别的客户的旧卡')
+    const kept = await todosFor([...otherPeople, ...otherWeeks, approvedCard(subject)])
+    expect(kept.join('\n')).not.toContain('读不到')
+    expect(kept.join('\n')).not.toContain('还没批')
+    expect(kept.join('\n')).toContain('还没预览')
+    expect(kept.join('\n')).not.toContain('别的客户的旧卡')
+  })
+
   it('does not treat an unreadable recovery check as zero failures', async () => {
     const bucket: Array<{ what: string }> = []
     await pushWeekPackItems(todoDb({
@@ -227,32 +246,79 @@ function reelFact(
   return { clientId, storyAuthorizedAt: null, storyRevokedAt: null, videoState, commentPending }
 }
 
+function noiseCard(clientId: string, subjectKey: string, text: string | null) {
+  return {
+    client_id: clientId,
+    status: 'authorized',
+    action_key: 'governance.p0_confirmation',
+    input: { subject_key: subjectKey },
+    evidence: text ? heldBlock([line('story', PACK, 'story_forbidden', text)]) : null,
+  }
+}
+
+async function todosFor(actionRuns: Array<Record<string, unknown>>): Promise<string[]> {
+  const bucket: Array<{ what: string }> = []
+  await pushWeekPackItems(todoDb({
+    clients: { rows: [{ id: CLIENT, publishing_calendar_config: null }] },
+    action_runs: { rows: actionRuns },
+    story_items: { rows: [] },
+    story_packs: { rows: [] },
+    content_work_orders: { rows: [] },
+  }) as never, bucket as never, FRIDAY_NZ, () => '示例客户', { WEEKLY_PACK_APPROVAL_ENABLED: 'true' }, [CLIENT])
+  return bucket.map((item) => item.what)
+}
+
 function todoDb(tables: Record<string, { rows: Array<Record<string, unknown>>; error?: { message: string } }>) {
   return {
     from(table: string) {
       const spec = tables[table] ?? { rows: [] }
       const filters: Array<(row: Record<string, unknown>) => boolean> = []
+      let start = 0
+      let end = Number.POSITIVE_INFINITY
       const chain = {
         select: () => chain,
         eq: (column: string, value: unknown) => {
-          filters.push((row) => row[column] === value)
+          filters.push((row) => cell(row, column) === value)
           return chain
         },
         in: (column: string, values: readonly unknown[]) => {
-          filters.push((row) => values.includes(row[column]))
+          filters.push((row) => values.includes(cell(row, column)))
+          return chain
+        },
+        like: (column: string, pattern: string) => {
+          filters.push((row) => likeMatch(cell(row, column), pattern))
           return chain
         },
         gte: () => chain,
         lt: () => chain,
         limit: () => chain,
         order: () => chain,
+        range: (from: number, to: number) => {
+          start = from
+          end = to
+          return chain
+        },
         maybeSingle: async () => ({ data: null, error: spec.error ?? null }),
         then: (resolve: (value: { data: Array<Record<string, unknown>>; error: { message: string } | null }) => void) => {
-          const data = spec.error ? [] : spec.rows.filter((row) => filters.every((keep) => keep(row)))
+          const matched = spec.error ? [] : spec.rows.filter((row) => filters.every((keep) => keep(row)))
+          const data = matched.slice(start, Number.isFinite(end) ? end + 1 : undefined)
           resolve({ data, error: spec.error ?? null })
         },
       }
       return chain
     },
   }
+}
+
+function cell(row: Record<string, unknown>, column: string): unknown {
+  if (column !== 'input->>subject_key') return row[column]
+  const input = row.input
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+  return (input as { subject_key?: unknown }).subject_key
+}
+
+function likeMatch(value: unknown, pattern: string): boolean {
+  if (typeof value !== 'string') return false
+  const expression = new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*')}$`)
+  return expression.test(value)
 }
