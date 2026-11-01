@@ -59,7 +59,24 @@ function overview(overrides: Partial<WeekOverview> = {}): WeekOverview {
 function mockFetch(body: unknown, status = 200) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })),
+    vi.fn(async (url: unknown) => {
+      if (String(url).includes('/week-pack')) {
+        return new Response(JSON.stringify({
+          success: true,
+          enabled: false,
+          reel_go_public: false,
+          headline: '整包批准还没打开',
+          lines: ['打开之前不会授权，也不会把视频公开。'],
+          posts_line: '图文尚未接入。这一周不会授权图文，也不会把它显示成 0 条。',
+          cadence_line: '周四出草稿，周五批，周一起按计划发。时间是新西兰时间。',
+          message: null,
+          card: null,
+          reels: [],
+          receipt_lines: [],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+    }),
   )
 }
 
@@ -188,7 +205,8 @@ describe('WeekOverviewPanel', () => {
     })
     const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
     await screen.findByText(/真发已开/)
-    expect(container.textContent).not.toMatch(/信封|素材池|指纹|哈希|hash|fingerprint|库里|平台状态未核|尚未接入|放行规则|BGM|价格屏|工单 |PM 在工厂/i)
+    expect(container.textContent).not.toMatch(/信封|素材池|指纹|哈希|hash|fingerprint|库里|平台状态未核|放行规则|BGM|价格屏|工单 |PM 在工厂/i)
+    expect(screen.getAllByText(/尚未接入/).length).toBeGreaterThan(0)
   })
 
   it('shows used/limit per day from the client config, the role, the quotas and the coming-soon line', async () => {

@@ -10,4 +10,4 @@ verify_how: Ray 2026-11-01 17:34 NZDT 已拍板 §14；编码须 Ray 明确 go �
 ---
 
 Ray 已定：图文 v1 不接入；Reel 公开等 #2817；CTS 默认四/五/一（NZ）；部分失败不回滚；审批人维持现状；问价/投诉自动回复策略见设计稿 §14.2。
-编码：A 级 L4，等 Ray 说 go。指针：docs/specs/2026-11-01-publishing-calendar-design-v0.4-weekly-pack-approval.md
+编码：A 级 L4。Ray 2026-11-01 17:38 NZDT 已说 go，实现见 2026-11-01-weekly-social-pack-approval-v1。指针：docs/specs/2026-11-01-publishing-calendar-design-v0.4-weekly-pack-approval.md
