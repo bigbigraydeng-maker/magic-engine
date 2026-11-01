@@ -48,7 +48,13 @@ function targets(ids: GoLiveIds): { name: string; id: string }[] {
     name: ids.adIds.length === 1 ? '广告' : `第${index + 1}条广告`,
     id,
   }))
-  return [...ads, { name: '广告组', id: ids.adSetId }, { name: '广告系列', id: ids.campaignId }]
+  // A reused campaign stays as it was. It is not part of the "is this live" read.
+  const campaign = ids.reusedCampaign ? [] : [{ name: '广告系列', id: ids.campaignId }]
+  return [...ads, { name: '广告组', id: ids.adSetId }, ...campaign]
+}
+
+function skipIds(ids: GoLiveIds): string[] {
+  return ids.reusedCampaign ? [ids.campaignId] : []
 }
 
 async function readLayers(ids: GoLiveIds, token: string): Promise<LayerRead[] | null> {
@@ -150,10 +156,17 @@ async function runSettle(
     claimAndActivate: async () => fromWrite(await approveDraft(
       args.draftId, args.supabase, token, args.authority, 'go-live-card',
     )),
-    activateOnly: async () => fromWrite(await activatePublished(ids, token)),
+    activateOnly: async () => fromWrite(await activatePublished(
+      ids,
+      token,
+      skipIds(args.ids).length > 0 ? { skipIds: skipIds(args.ids) } : undefined,
+    )),
     readBack: () => readLayers(args.ids, token),
     stillOwns,
-    keepPaused: () => pausePublished(ids, token),
+    keepPaused: () => pausePublished(
+      { ...ids, ...(args.ids.reusedCampaign ? { reusedCampaign: true } : {}) },
+      token,
+    ),
   }
   try {
     return await settleGoLive(ports)
@@ -174,6 +187,30 @@ async function runSettle(
   }
 }
 
+/** A reused campaign is left as it is. If it is paused, nothing spends, so this is not a launch. */
+async function reusedCampaignPaused(ids: GoLiveIds, token: string): Promise<ExecutionOutcome | null> {
+  if (!ids.reusedCampaign) return null
+  let status: string | null = null
+  try {
+    status = await fetchCampaignStatus(ids.campaignId, token)
+  } catch {
+    status = null
+  }
+  if (status === 'ACTIVE') return null
+  if (status === 'PAUSED') {
+    return {
+      settle: {
+        outcome: 'held',
+        readback: '系列暂停，不会花钱',
+        reason: '系列暂停，不会花钱。',
+        paused: false,
+      },
+      note: null,
+    }
+  }
+  return held('读不到原系列是不是开着，没有开。')
+}
+
 function allowed(authority: SpendActivationAuthority): boolean {
   return authority.basis === 'go_live_card' && authority.actorEmail.trim().length > 0 && !!authority.cardRunId
 }
@@ -191,6 +228,18 @@ export async function executeConfirmedGoLive(args: {
   if (!allowed(args.authority)) return held('这次确认对不上，没有开，系列保持暂停。')
   const token = await getMetaTokenForClient(args.clientId)
   if (!token) return held('拿不到这个客户的广告授权，没有开，系列保持暂停。')
+  const blocked = await reusedCampaignPaused(ids, token)
+  if (blocked) {
+    const note = await writeMark(
+      args.supabase,
+      args.clientId,
+      args.draftId,
+      blocked.settle,
+      (args.now ?? new Date()).toISOString(),
+      args.authority.cardRunId ?? '',
+    )
+    return { settle: blocked.settle, note }
+  }
   const settled = await runSettle({ ...args, ids }, token)
   const note = await writeMark(
     args.supabase,

@@ -45,6 +45,8 @@ export interface RawMetaAdSet {
   destination_type?: unknown
   /** 配置的开关状态（ACTIVE / PAUSED…）。缺失 = 没读到，不是「暂停着」。 */
   status?: unknown
+  /** 这个广告组属于哪个系列。缺失 = 没读到。 */
+  campaign_id?: unknown
   targeting?: RawMetaTargeting
 }
 

@@ -4,7 +4,7 @@
  * 只检查 ME 自己手里的草稿。不读 Meta，不写 Meta，不删除已有广告。
  * 现在的发布器表达不了的字段，由 `draftNotYetBuildable` 在建之前拦住。
  */
-import type { AccountCapFacts, BudgetCheck } from '@/lib/marketing-plan/promo/budget-caps'
+import type { AccountCapFacts, BudgetCheck, LiveSpendByAccount } from '@/lib/marketing-plan/promo/budget-caps'
 import { checkAdsBudget } from '@/lib/marketing-plan/promo/budget-caps'
 import { parsePromoSpec, type AdsStep } from '@/lib/marketing-plan/promo/spec'
 import {
@@ -24,6 +24,7 @@ import {
   type DraftKind,
   type DraftProblem,
 } from './ad-draft'
+import { isMetaObjectId } from '@/lib/meta/owned-ad-object'
 import { audienceReadinessError, type AudienceFact } from './draft-audiences'
 
 const CTA_FOR_KIND: Readonly<Record<DraftKind, string>> = {
@@ -75,7 +76,17 @@ export function draftNotYetBuildable(d: AdDraft): string | null {
 
 /** `validateDraft` 里多出来的那部分。旧草稿一个新字段都没有时，返回空。 */
 export function expandedDraftProblems(d: AdDraft): DraftProblem[] {
-  return [...budgetProblems(d), ...(Array.isArray(d.adSets) ? adSetListProblems(d) : singleSetExtraProblems(d))]
+  return [
+    ...budgetProblems(d),
+    ...attachIdProblems(d),
+    ...(Array.isArray(d.adSets) ? adSetListProblems(d) : singleSetExtraProblems(d)),
+  ]
+}
+
+function attachIdProblems(d: AdDraft): DraftProblem[] {
+  if (d.existingCampaignId === undefined) return []
+  if (isMetaObjectId(d.existingCampaignId)) return []
+  return [{ field: 'existingCampaignId', message: '已有系列编号必须是广告账户里的数字编号' }]
 }
 
 /**
@@ -92,12 +103,18 @@ export function reviewDraftForBuild(d: AdDraft, ctx?: DraftBuildReviewContext): 
   return problems
 }
 
-/** 用现成的预算上限检查。只看这份草稿每天要花多少，不读账户、不写账户。 */
+/**
+ * 用现成的预算上限检查。不读账户、不写账户。
+ * 不传 = 只比这份草稿。传数字 = 这个账户的已在投 + 这份草稿。
+ * 传各地图 = 每个账户的已在投都算进客户总上限，包括这次没有新草稿的账户。
+ * 传 null = 已在投没读到。
+ */
 export function reviewDraftAgainstCaps(
   d: AdDraft,
   adAccountId: string,
   accounts: readonly AccountCapFacts[],
   clientCapCents: number | null,
+  liveDeliveringCents?: number | null | LiveSpendByAccount,
 ): BudgetCheck {
   if (adAccountId.trim() === '') {
     return { verdict: 'unknown', reasons: ['没给出广告账户，预算上限核不成'], per_account_cents: {}, notes: [] }
@@ -106,7 +123,17 @@ export function reviewDraftAgainstCaps(
   if (!steps) {
     return { verdict: 'unknown', reasons: ['日预算不是能核对的正数'], per_account_cents: {}, notes: [] }
   }
-  return checkAdsBudget(steps, accounts, clientCapCents)
+  const live = liveSpend(adAccountId, liveDeliveringCents)
+  return checkAdsBudget(steps, accounts, clientCapCents, live)
+}
+
+function liveSpend(
+  adAccountId: string,
+  liveDeliveringCents: number | null | LiveSpendByAccount | undefined,
+): LiveSpendByAccount | undefined {
+  if (typeof liveDeliveringCents !== 'number') return liveDeliveringCents
+  if (!Number.isSafeInteger(liveDeliveringCents) || liveDeliveringCents < 0) return null
+  return { [adAccountId]: liveDeliveringCents }
 }
 
 /**
