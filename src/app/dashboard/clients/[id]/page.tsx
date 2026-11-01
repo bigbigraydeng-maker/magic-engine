@@ -20,6 +20,9 @@ import { GoalBanner } from './_components/GoalBanner';
 import { WorkLogPanel } from './_components/WorkLogPanel';
 import { clientWorkflowSteps, prescriptionEntryHref } from './prescription-entry';
 import { industryFeatureFlags } from '@/lib/clients/industry-features';
+import { kindFeatureFlags, readEffectiveClientKind } from '@/lib/clients/kind-features';
+import type { ClientKind } from '@/types/diagnostic';
+import { PersonalIpOverviewSection } from './_components/PersonalIpOverviewSection';
 import { homeEntryVisible, type HomeEntry } from '@/lib/auth/home-entries';
 import { useWorkspaceViewer } from '@/app/dashboard/workspace-viewer';
 
@@ -389,6 +392,8 @@ export default function ClientDetailPage() {
   const showEntry = (entry: HomeEntry) => homeEntryVisible(viewer, entry);
 
   const [client, setClient] = useState<Client | null>(null);
+  /** 客户资料 client_kind；读不到 = 普通客户。 */
+  const [clientKind, setClientKind] = useState<ClientKind>('standard');
   const [loading, setLoading] = useState(true);
   const [hasActiveBrief, setHasActiveBrief] = useState<boolean | null>(null);
   const [discoveryStatus, setDiscoveryStatus] = useState<DiscoveryStatus>('none');
@@ -425,8 +430,9 @@ export default function ClientDetailPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [clientRes, briefRes, discoveryRes, prescriptionRes] = await Promise.all([
+      const [clientRes, kindRes, briefRes, discoveryRes, prescriptionRes] = await Promise.all([
         fetch(`/api/clients/${clientId}`),
+        fetch(`/api/clients/${clientId}/client-kind`).catch(() => null),
         fetch(`/api/clients/${clientId}/brief?status=active`),
         fetch(`/api/clients/${clientId}/zhangqian/latest`).catch(() => null),
         fetch(`/api/clients/${clientId}/prescriptions/latest-draft`).catch(() => null),
@@ -434,6 +440,12 @@ export default function ClientDetailPage() {
       if (clientRes.ok) {
         const { client: c } = await clientRes.json();
         setClient(c);
+      }
+      if (kindRes?.ok) {
+        const kindBody = await kindRes.json() as { client_kind?: unknown };
+        setClientKind(readEffectiveClientKind(kindBody?.client_kind));
+      } else {
+        setClientKind('standard');
       }
       if (briefRes.ok) {
         const { brief } = await briefRes.json();
@@ -492,6 +504,8 @@ export default function ClientDetailPage() {
       </div>
     );
   }
+
+  const overviewFlags = kindFeatureFlags(clientKind);
 
   return (
     <div className="min-h-screen space-y-5 bg-[#f6f7f2] px-4 py-5 md:px-6">
@@ -552,24 +566,32 @@ export default function ClientDetailPage() {
       {/* ── 概览 tab ──────────────────────────────────────────────────────────── */}
       {activeTab === 'overview' && (
         <>
-          {/* Workflow progress bar — 3-step overview */}
+          {overviewFlags.personal_ip_metrics && (
+            <PersonalIpOverviewSection clientId={clientId} />
+          )}
+
+          {overviewFlags.workflow_progress && (
           <WorkflowProgress
             discoveryConfirmed={discoveryConfirmed}
             hasPrescription={prescriptionStatus !== 'none'}
             prescriptionId={prescriptionStatus === 'none' ? null : prescriptionId}
             clientId={clientId}
           />
+          )}
 
+          {overviewFlags.next_step && (
           <NextStepCard
             discoveryStatus={discoveryStatus}
             prescriptionStatus={prescriptionStatus}
             clientId={clientId}
           />
+          )}
 
           {/* Brand Health (left) + Zhuge Priority Actions (right) — side-by-side cards */}
-          {discoveryStatus === 'confirmed' ? (
+          {overviewFlags.brand_health && discoveryStatus === 'confirmed' ? (
             <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[320px_1fr]">
               <BrandHealthWidget clientId={clientId} />
+              {overviewFlags.zhuge_priority && (
               <ZhugePriorityWidget
                 clientId={clientId}
                 discoveryConfirmed={discoveryConfirmed}
@@ -577,8 +599,9 @@ export default function ClientDetailPage() {
                 freshOutput={zhugeFreshOutput}
                 onAskZhuge={() => setZhugeDrawerOpen(true)}
               />
+              )}
             </div>
-          ) : (
+          ) : overviewFlags.zhuge_priority ? (
             <ZhugePriorityWidget
               clientId={clientId}
               discoveryConfirmed={discoveryConfirmed}
@@ -586,13 +609,14 @@ export default function ClientDetailPage() {
               freshOutput={zhugeFreshOutput}
               onAskZhuge={() => setZhugeDrawerOpen(true)}
             />
+          ) : null}
+
+          {overviewFlags.intelligence_summary && (
+          <IntelligenceSummarySection clientId={clientId} variant="full" />
           )}
 
-          {/* Data Intelligence — 7 trend cards + insights */}
-          <IntelligenceSummarySection clientId={clientId} variant="full" />
-
           {/* Master Brief warning banner */}
-          {hasActiveBrief === false && (
+          {overviewFlags.brief_banner && hasActiveBrief === false && (
             <div className="flex items-start gap-3 rounded-xl border border-me-ochre/30 bg-me-ochre/10 px-4 py-3">
               <span className="mt-1 h-2 w-2 rounded-full bg-me-ochre" />
               <div className="flex-1">
