@@ -1,9 +1,9 @@
 /**
  * 「主页评论要人回」→ 今日待办（只读分流，不改自动回复）。
  *
- * 读 `social_comment_engagements` 里 `needs_human = true` 且还没人处理的行，
- * 用 `routeComment` 筛出 `route = human` 的，按客户汇总成一条待办。
- * 待办文字不含评论原文和留言人全名（会被截图转发）。
+ * 只读 `social_comment_engagements` 里 `needs_human = true` 且还没人处理的行。
+ * 关键词路由仅用于待办文案分桶；引擎已标 needs_human 的行一律进待办，
+ * auto_ok 关键词结果升级为「待你判断」。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -11,7 +11,7 @@ import { fetchAll } from '@/lib/supabase-paginate'
 import type { ManualItem } from './manual-items'
 import type { ClientRow } from './client-roster'
 import { APP_BASE } from './binding-request-items'
-import { routeComment, type CommentIntent } from '@/lib/social/comment-routing'
+import { intentForNeedsHumanRow, type CommentIntent } from '@/lib/social/comment-routing'
 
 export const WINDOW_DAYS = 14
 
@@ -24,6 +24,7 @@ export interface CommentEngagementRow {
   author_name: string | null
   reviewed_by: string | null
   created_at: string
+  needs_human: boolean
 }
 
 const INTENT_LABEL: Record<CommentIntent, string> = {
@@ -42,16 +43,23 @@ function auditHref(clientId: string): string {
   return `${APP_BASE}/dashboard/clients/${encodeURIComponent(clientId)}/settings?tab=content`
 }
 
-function containsAuthorName(text: string, authorName: string | null): boolean {
-  if (!authorName || authorName.trim().length < 2) return false
-  return text.includes(authorName.trim())
-}
-
 function containsCommentSnippet(text: string, commentText: string | null): boolean {
   if (!commentText) return false
   const snippet = commentText.trim().slice(0, 24)
   if (snippet.length < 8) return false
   return text.includes(snippet)
+}
+
+/** Template what/how must not echo stored comment text (PII-safe). */
+export function commentHumanTodoTextLooksSafe(
+  item: Pick<ManualItem, 'what' | 'how'>,
+  rowsForClient: readonly CommentEngagementRow[],
+): boolean {
+  for (const row of rowsForClient) {
+    if (containsCommentSnippet(item.what, row.comment_text)) return false
+    if (containsCommentSnippet(item.how, row.comment_text)) return false
+  }
+  return true
 }
 
 function summarizeIntents(counts: Partial<Record<CommentIntent, number>>): string {
@@ -77,6 +85,18 @@ const HOW_BASE =
 const HOW_PRICE =
   '问价类：公开评论里不要报具体价格，引导客人发私信；系统若已自动私信过，公开回一句「已私信你」即可。'
 
+function checkFailedItem(clientId: string, clientName: string, detail: string): ManualItem {
+  return {
+    kind: 'comment_human_check_failed',
+    client_id: clientId,
+    client_name: clientName,
+    what:
+      `主页评论「要人回」待办没能安全下发（${detail}）—— 不等于没有待处理评论，别当成今天没事。`,
+    how: '这条不用你动手 —— 回我一句「修一下评论待办读取」我去查模板或读库。',
+    href: clientId ? auditHref(clientId) : '',
+  }
+}
+
 /** 纯函数： engagement 行 → 每个客户最多一条待办。 */
 export function buildCommentHumanTodos(
   rows: readonly CommentEngagementRow[],
@@ -87,15 +107,20 @@ export function buildCommentHumanTodos(
   for (const row of rows) {
     if (!row || typeof row.client_id !== 'string') continue
     if (!activeClientIds.has(row.client_id)) continue
+    if (row.needs_human !== true) continue
     if (row.reviewed_by !== null && row.reviewed_by !== undefined && String(row.reviewed_by).trim() !== '') {
       continue
     }
-    const routing = routeComment({ category: row.category, comment_text: row.comment_text })
-    if (routing.route !== 'human') continue
+
+    const intent = intentForNeedsHumanRow({
+      category: row.category,
+      comment_text: row.comment_text,
+      needs_human: row.needs_human,
+    })
 
     const cur = byClient.get(row.client_id) ?? { total: 0, intents: {} }
     cur.total += 1
-    cur.intents[routing.intent] = (cur.intents[routing.intent] ?? 0) + 1
+    cur.intents[intent] = (cur.intents[intent] ?? 0) + 1
     byClient.set(row.client_id, cur)
   }
 
@@ -123,23 +148,6 @@ export function buildCommentHumanTodos(
   return items
 }
 
-export function assertCommentHumanTodoSafe(item: ManualItem, rowsForClient: CommentEngagementRow[]): void {
-  if (containsAuthorName(item.what, rowsForClient[0]?.author_name ?? null)) {
-    throw new Error('what must not contain commenter name')
-  }
-  if (containsAuthorName(item.how, rowsForClient[0]?.author_name ?? null)) {
-    throw new Error('how must not contain commenter name')
-  }
-  for (const row of rowsForClient) {
-    if (containsCommentSnippet(item.what, row.comment_text)) {
-      throw new Error('what must not contain comment text')
-    }
-    if (containsCommentSnippet(item.how, row.comment_text)) {
-      throw new Error('how must not contain comment text')
-    }
-  }
-}
-
 export async function pushCommentHumanItems(
   supabase: SupabaseClient,
   items: ManualItem[],
@@ -154,7 +162,9 @@ export async function pushCommentHumanItems(
     rows = await fetchAll<CommentEngagementRow>((from, to) =>
       supabase
         .from('social_comment_engagements')
-        .select('client_id, category, comment_text, author_name, reviewed_by, created_at')
+        .select(
+          'client_id, category, comment_text, author_name, reviewed_by, created_at, needs_human',
+        )
         .eq('needs_human', true)
         .is('reviewed_by', null)
         .gte('created_at', since)
@@ -177,9 +187,13 @@ export async function pushCommentHumanItems(
 
   const built = buildCommentHumanTodos(rows, activeIds)
   for (const item of built) {
-    item.client_name = clients.get(item.client_id)?.name ?? '未知客户'
+    const clientName = clients.get(item.client_id)?.name ?? '未知客户'
+    item.client_name = clientName
     const clientRows = rows.filter((r) => r.client_id === item.client_id)
-    assertCommentHumanTodoSafe(item, clientRows)
+    if (!commentHumanTodoTextLooksSafe(item, clientRows)) {
+      items.push(checkFailedItem(item.client_id, clientName, '待办文案自检未通过'))
+      continue
+    }
     items.push(item)
   }
 }
