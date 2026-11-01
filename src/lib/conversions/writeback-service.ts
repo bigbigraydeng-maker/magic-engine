@@ -529,6 +529,10 @@ async function deliverApprovedOutcome(
     post_started_at: null,
     last_attempt_at: now.toISOString(),
     attempts: wb.attempts + 1,
+    // 发出去之前记下这次真正用的事件名。之后客户改了阶段设置，不确定那一档仍对得上。
+    payload_preview: {
+      事件类型: forSend.conversionLeadEventName?.trim() || capiEventNameForKind(forSend.outcomeKind),
+    },
   })
   if (!marked) {
     // 别人抢先了。读回真值，不猜。

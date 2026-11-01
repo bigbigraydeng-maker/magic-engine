@@ -10,6 +10,7 @@ import {
   latestMetaLeadId,
   NO_META_LEAD_MESSAGE,
   qualifiedLeadSourceRef,
+  redactQualifiedSourceRef,
   stageKeyFromQualifiedRef,
 } from './conversion-lead'
 import { buildIntakeRow, type IntakeInput } from './intake'
@@ -155,7 +156,7 @@ async function writeAudit(db: SupabaseClient, outcomeId: string, actor: string |
       outcome_id: outcomeId,
       action: 'created',
       actor: actor ?? CRM_QUALIFIED_LEAD_ACTOR,
-      detail: { source_kind: 'crm_stage_manual', source_ref: row.source_ref ?? null },
+      detail: { source_kind: 'crm_stage_manual', source_ref: redactQualifiedSourceRef(text(row.source_ref)) },
     })
   } catch {
     // The lead row is the receipt. A missing audit line must not block the send.

@@ -25,7 +25,7 @@ type Writeback = {
   status: string
   event_id?: string | null
   last_error_code?: string | null
-  payload_preview?: { held?: boolean } | null
+  payload_preview?: { held?: boolean; 事件类型?: string } | null
 }
 type Row = {
   id: string
@@ -335,8 +335,8 @@ describe('GET outcomes · 已报价排队和成交下一步', () => {
     expect(body.outcomes[0].companion_expected).toBe(true)
   })
 
-  it('阶段发送带上设置里的阶段名，方便和平台上的那一条对上', async () => {
-    clientConfig = { capi_conversion_leads: true, capi_conversion_deal_stage_key: 'balance_received' }
+  it('不确定的阶段名用发送前记下的事件名，不看客户现在的阶段设置', async () => {
+    clientConfig = { capi_conversion_leads: true, capi_conversion_deal_stage_key: 'renamed_later' }
     rows = [
       {
         id: DEAL,
@@ -346,8 +346,12 @@ describe('GET outcomes · 已报价排队和成交下一步', () => {
         meta_lead_id: LEAD,
         occurred_at: new Date().toISOString(),
         me_conversion_writebacks: [
-          { status: 'confirmed', event_id: DEAL },
-          { status: 'in_doubt', event_id: `${DEAL}:conversion-stage` },
+          { status: 'confirmed', event_id: DEAL, payload_preview: { 事件类型: 'Purchase' } },
+          {
+            status: 'in_doubt',
+            event_id: `${DEAL}:conversion-stage`,
+            payload_preview: { 事件类型: 'balance_received' },
+          },
         ],
       },
     ]

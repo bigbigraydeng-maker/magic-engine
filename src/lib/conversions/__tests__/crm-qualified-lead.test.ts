@@ -4,6 +4,7 @@ const send = vi.hoisted(() => vi.fn(async (_outcomeId: string) => ({ status: 'co
 vi.mock('../writeback-service', () => ({ sendApprovedOutcome: send }))
 vi.mock('@/lib/meta/capi/writer', () => ({ metaCapiWriter: { kind: 'meta_capi' } }))
 
+import { qualifiedLeadSourceRef, redactQualifiedSourceRef } from '../conversion-lead'
 import { recordQualifiedStageLead } from '../crm-qualified-lead'
 
 const CLIENT = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
@@ -100,7 +101,9 @@ describe('recordQualifiedStageLead', () => {
     const row = db.tables.me_sale_outcomes[0]
     expect(row.review_status).toBe('approved')
     expect(row.reviewed_by).toBe('system:crm-qualified-lead')
-    expect(row.source_ref).toBe(`crm_qualified:${LEAD}:quoted`)
+    expect(row.source_ref).toBe(qualifiedLeadSourceRef(LEAD, 'quoted'))
+    expect(String(row.source_ref)).not.toContain(LEAD)
+    expect(JSON.stringify(db.tables.me_conversion_audit)).not.toContain(LEAD)
     expect(row.outcome_kind).toBe('lead')
     expect(row.meta_lead_id).toBe(LEAD)
     expect(send).toHaveBeenCalledTimes(1)
@@ -176,7 +179,8 @@ describe('recordQualifiedStageLead', () => {
     expect(again.message).toContain('已发给广告平台')
     expect(db.tables.me_sale_outcomes).toHaveLength(2)
     expect(db.tables.me_sale_outcomes[1].meta_lead_id).toBe(nextLead)
-    expect(db.tables.me_sale_outcomes[1].source_ref).toBe(`crm_qualified:${nextLead}:quoted`)
+    expect(db.tables.me_sale_outcomes[1].source_ref).toBe(qualifiedLeadSourceRef(nextLead, 'quoted'))
+    expect(String(db.tables.me_sale_outcomes[1].source_ref)).not.toContain(nextLead)
     expect(send).toHaveBeenCalledTimes(1)
   })
 
@@ -231,6 +235,36 @@ describe('recordQualifiedStageLead', () => {
     expect(again.message).toContain('已经记过')
     expect(db.tables.me_sale_outcomes).toHaveLength(1)
     expect(send).not.toHaveBeenCalled()
+  })
+
+  it('after redaction the form id cannot be read back, and the same stage still dedupes', async () => {
+    const db = fakeDb()
+    db.tables.clients.push(liveClient())
+    db.tables.contacts.push({ id: CONTACT, client_id: CLIENT, primary_email: 'a@b.co', primary_phone: '+64 21 000 000' })
+    db.tables.contact_touchpoints.push({
+      contact_id: CONTACT, client_id: CLIENT, source: 'meta_lead_form', source_ref: LEAD, occurred_at: '2026-10-02T00:00:00.000Z',
+    })
+    const input = { clientId: CLIENT, contactId: CONTACT, stageKey: 'quoted', actor: 'roman@example.com' }
+    await recordQualifiedStageLead(db as never, input)
+    const row = db.tables.me_sale_outcomes[0]
+    row.meta_lead_id = null
+    row.customer_email = null
+    row.customer_phone = null
+    row.customer_first = null
+    row.customer_last = null
+    row.source_ref = redactQualifiedSourceRef(typeof row.source_ref === 'string' ? row.source_ref : null)
+    const stored = JSON.stringify({ outcomes: db.tables.me_sale_outcomes, audits: db.tables.me_conversion_audit })
+    expect(stored).not.toContain(LEAD)
+    db.tables.me_conversion_writebacks.push({
+      outcome_id: row.id,
+      destination: 'meta_capi',
+      event_id: row.id,
+      status: 'redacted',
+    })
+    const again = await recordQualifiedStageLead(db as never, input)
+    expect(again.message).toContain('已经记过')
+    expect(db.tables.me_sale_outcomes).toHaveLength(1)
+    expect(send).toHaveBeenCalledTimes(1)
   })
 
   it('states why a lead with no form id is not sent, and does not send an ordinary lead', async () => {

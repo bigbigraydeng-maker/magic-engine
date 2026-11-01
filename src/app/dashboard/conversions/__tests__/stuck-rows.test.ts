@@ -83,6 +83,34 @@ describe('doubt check names the send that is still unconfirmed', () => {
     expect(doubtConfirm(row, 'confirmed')).toContain('发送编号：mixed')
   })
 
+  it('uses the event name saved before send, not a later stage label', () => {
+    const row = purchase({
+      me_conversion_writebacks: [
+        {
+          id: 'primary',
+          status: 'confirmed',
+          last_error: null,
+          last_error_code: null,
+          next_attempt_at: null,
+          event_id: 'mixed',
+        },
+        {
+          id: 'stage',
+          status: 'in_doubt',
+          last_error: '断了',
+          last_error_code: null,
+          next_attempt_at: null,
+          event_id: STAGE_ID,
+          stage_name: 'renamed_later',
+          payload_preview: { 事件类型: 'balance_received' },
+        },
+      ],
+    })
+    expect(doubtCheck(row)?.stageName).toBe('balance_received')
+    expect(doubtExplanation(row)).toContain('balance_received')
+    expect(doubtExplanation(row)).not.toContain('renamed_later')
+  })
+
   it('reads a qualified-lead stage name from the recorded ref', () => {
     const row = purchase({
       outcome_kind: 'lead',

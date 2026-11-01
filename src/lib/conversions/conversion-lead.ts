@@ -7,6 +7,7 @@
  * Nothing here is a production stage name.
  */
 
+import { createHash } from 'node:crypto'
 import { readCapiClientConfig } from './capi-client-config'
 
 export const CONVERSION_EVENT_SOURCE = 'crm'
@@ -16,6 +17,7 @@ export const NO_META_LEAD_MESSAGE =
   '这条不是从 Meta 表单来的，没有原始线索编号，不能按线索阶段回传，也没有改发成普通咨询。'
 
 const QUALIFIED_PREFIX = 'crm_qualified:'
+const LEAD_DIGEST_PREFIX = 'ld_'
 const LEAD_ID_RE = /^\d{15,17}$/
 const STAGE_KEY_RE = /^[a-z0-9_]{1,64}$/
 
@@ -24,9 +26,30 @@ export function legalMetaLeadId(value: string | null | undefined): string | null
   return value
 }
 
-/** One row per Meta lead id and stage. The stage key is the event name sent later. */
+/** One row per Meta lead and stage. The lead id is stored only as a one-way digest. */
 export function qualifiedLeadSourceRef(leadId: string, stageKey: string): string {
-  return `${QUALIFIED_PREFIX}${leadId}:${stageKey}`
+  return `${QUALIFIED_PREFIX}${leadDigest(leadId)}:${stageKey}`
+}
+
+/**
+ * Replace a raw lead id still sitting in a qualified ref. A digest, or any
+ * other source ref, is left unchanged so dedupe keys stay stable.
+ */
+export function redactQualifiedSourceRef(sourceRef: string | null | undefined): string | null {
+  if (sourceRef == null) return null
+  if (!sourceRef.startsWith(QUALIFIED_PREFIX)) return sourceRef
+  const rest = sourceRef.slice(QUALIFIED_PREFIX.length)
+  const sep = rest.indexOf(':')
+  if (sep < 0) return sourceRef
+  const token = rest.slice(0, sep)
+  const stageKey = rest.slice(sep + 1)
+  if (!legalMetaLeadId(token) || !STAGE_KEY_RE.test(stageKey)) return sourceRef
+  return qualifiedLeadSourceRef(token, stageKey)
+}
+
+function leadDigest(leadId: string): string {
+  const hex = createHash('sha256').update(leadId, 'utf8').digest('hex')
+  return `${LEAD_DIGEST_PREFIX}${hex}`
 }
 
 export function isQualifiedLeadSource(sourceRef: string | null | undefined): boolean {

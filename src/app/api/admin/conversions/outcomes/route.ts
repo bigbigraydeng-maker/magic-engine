@@ -16,7 +16,6 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin, requireAdmin } from '@/lib/auth/require-admin'
 import { assertClientScope } from '@/lib/conversions/route-guard'
 import { buildIntakeRow, type IntakeInput } from '@/lib/conversions/intake'
-import { readCapiClientConfig } from '@/lib/conversions/capi-client-config'
 import { dealStageEventId, dealStageEventName, legalMetaLeadId } from '@/lib/conversions/conversion-lead'
 import { META_EVENT_WINDOW_DAYS } from '@/lib/conversions/event-window'
 
@@ -207,7 +206,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
     }
     const marked = data ? await markOpenCompanions(clientId, [data as unknown as ListedOutcome]) : []
-    const outcomes = await labelStageSends(clientId, marked)
+    const outcomes = labelStageSends(marked)
     return NextResponse.json({ outcomes, count: outcomes.length })
   }
 
@@ -244,7 +243,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
   }
 
-  const outcomes = await labelStageSends(clientId, (data ?? []) as unknown as ListedOutcome[])
+  const outcomes = labelStageSends((data ?? []) as unknown as ListedOutcome[])
   return NextResponse.json({ outcomes, count: outcomes.length })
 }
 
@@ -253,7 +252,7 @@ type ListedWriteback = {
   status?: string
   last_error_code?: string | null
   stage_name?: string | null
-  payload_preview?: { held?: boolean } | null
+  payload_preview?: { held?: boolean; 事件类型?: unknown } | null
 }
 
 type ListedOutcome = {
@@ -277,7 +276,7 @@ async function listQualifiedOpen(clientId: string, limit: number, columns: strin
     qualifiedStillOpen,
   )
   if (found.error) return NextResponse.json({ error: found.error }, { status: 500 })
-  const outcomes = await labelStageSends(clientId, found.rows)
+  const outcomes = labelStageSends(found.rows)
   return NextResponse.json({ outcomes, count: outcomes.length })
 }
 
@@ -315,7 +314,7 @@ async function listCompanionOpen(clientId: string, limit: number, columns: strin
     (row) => companionStillOpen(row, config.leadsConfig),
   )
   if (found.error) return NextResponse.json({ error: found.error }, { status: 500 })
-  const labeled = await labelStageSends(clientId, found.rows)
+  const labeled = labelStageSends(found.rows)
   const outcomes = labeled.map((row) => ({ ...row, companion_expected: true }))
   return NextResponse.json({ outcomes, count: outcomes.length })
 }
@@ -372,26 +371,37 @@ async function readLeadConfig(
   return { ok: true, leadsConfig: row?.leads_config }
 }
 
-async function labelStageSends(clientId: string, rows: ListedOutcome[]): Promise<ListedOutcome[]> {
+const PLATFORM_EVENT_NAMES = new Set(['Purchase', 'BalancePaid', 'Lead'])
+
+function labelStageSends(rows: ListedOutcome[]): ListedOutcome[] {
   if (!rows.some((row) => (row.me_conversion_writebacks ?? []).some(isStageSendRow))) return rows
-  const config = await readLeadConfig(clientId)
-  if (!config.ok) return rows
-  const stageName = readCapiClientConfig(config.leadsConfig).conversionDealStageKey
-  if (!stageName) return rows
-  return rows.map((row) => labelStageRow(row, stageName))
+  return rows.map(labelStageRow)
 }
 
 function isStageSendRow(wb: ListedWriteback): boolean {
   return (wb.event_id ?? '').endsWith(':conversion-stage')
 }
 
-function labelStageRow(row: ListedOutcome, stageName: string): ListedOutcome {
+function labelStageRow(row: ListedOutcome): ListedOutcome {
   const writes = row.me_conversion_writebacks
   if (!writes?.some(isStageSendRow)) return row
   return {
     ...row,
-    me_conversion_writebacks: writes.map((wb) => (isStageSendRow(wb) ? { ...wb, stage_name: stageName } : wb)),
+    me_conversion_writebacks: writes.map((wb) => {
+      if (!isStageSendRow(wb)) return wb
+      const stageName = savedStageName(wb.payload_preview)
+      return stageName ? { ...wb, stage_name: stageName } : wb
+    }),
   }
+}
+
+function savedStageName(preview: ListedWriteback['payload_preview']): string | null {
+  if (!preview) return null
+  const named = preview.事件类型
+  if (typeof named !== 'string') return null
+  const trimmed = named.trim()
+  if (trimmed === '' || PLATFORM_EVENT_NAMES.has(trimmed)) return null
+  return trimmed
 }
 
 function companionStillOpen(row: ListedOutcome, leadsConfig: unknown): boolean {

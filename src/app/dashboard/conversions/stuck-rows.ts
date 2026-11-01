@@ -202,7 +202,7 @@ function confirmedTail(stage: boolean): string {
 }
 
 function stageNameFor(wb: Writeback, fromRef: string | null): string | null {
-  return cleanText(wb.stage_name) ?? previewStageName(wb.payload_preview) ?? fromRef
+  return previewStageName(wb.payload_preview) ?? cleanText(wb.stage_name) ?? fromRef
 }
 
 function previewStageName(preview: Writeback['payload_preview']): string | null {

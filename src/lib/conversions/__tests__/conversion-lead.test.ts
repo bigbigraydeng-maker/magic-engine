@@ -6,6 +6,7 @@ import {
   latestMetaLeadId,
   qualifiedLeadSourceRef,
   qualifiedLeadHoldReason,
+  redactQualifiedSourceRef,
   resolveConversionLead,
   stageKeyFromQualifiedRef,
 } from '../conversion-lead'
@@ -62,6 +63,21 @@ describe('resolveConversionLead', () => {
     expect(qualifiedLeadHoldReason({ capi_conversion_leads: false })).toContain('现在是关的')
     expect(qualifiedLeadHoldReason({ capi_conversion_leads: 'yes' })).toContain('读不出来')
     expect(qualifiedLeadHoldReason({})).toContain('现在是关的')
+  })
+
+  it('the dedupe ref is a stable digest and does not keep the form id', () => {
+    const quoted = qualifiedLeadSourceRef(LEAD, 'quoted')
+    expect(quoted).toBe(qualifiedLeadSourceRef(LEAD, 'quoted'))
+    expect(quoted.startsWith('crm_qualified:ld_')).toBe(true)
+    expect(quoted).not.toContain(LEAD)
+    expect(stageKeyFromQualifiedRef(quoted)).toBe('quoted')
+    expect(qualifiedLeadSourceRef(LEAD, 'won')).not.toBe(quoted)
+    expect(qualifiedLeadSourceRef('222222222222222', 'quoted')).not.toBe(quoted)
+    const raw = `crm_qualified:${LEAD}:quoted`
+    expect(redactQualifiedSourceRef(raw)).toBe(quoted)
+    expect(redactQualifiedSourceRef(quoted)).toBe(quoted)
+    expect(redactQualifiedSourceRef('crm_deal:1')).toBe('crm_deal:1')
+    expect(redactQualifiedSourceRef(null)).toBeNull()
   })
 
   it('a qualified row keeps its stage name even after the switch is turned off', () => {

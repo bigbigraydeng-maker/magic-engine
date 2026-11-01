@@ -1033,6 +1033,41 @@ describe('同一条 Meta 线索', () => {
     expect(writer.sendSpy).toHaveBeenCalledTimes(1)
   })
 
+  it('正式发送前记下实际事件名，客户后来改了阶段设置也不改写', async () => {
+    seed(db, {
+      outcome: { meta_lead_id: leadId, amount_minor: 388000, currency: 'NZD' },
+      client: {
+        leads_config: {
+          capi_allowed_events: ['Purchase'],
+          capi_conversion_leads: true,
+          capi_conversion_deal_stage_key: 'balance_received',
+        },
+      },
+    })
+    const seen: string[] = []
+    const sendSpy = vi.fn(async () => {
+      const sending = db.tables.me_conversion_writebacks.filter((row) => row.status === 'sending')
+      expect(sending).toHaveLength(1)
+      const preview = sending[0].payload_preview as { 事件类型?: string }
+      seen.push(preview.事件类型 ?? '')
+      return { ok: false, errorName: 'AbortError', errorMessage: '断了', latencyMs: 5 }
+    })
+    const writer = makeWriter({
+      send: sendSpy as never,
+      accept: () => ({ kind: 'in_doubt', detail: '断了' }),
+    })
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(result.status).toBe('in_doubt')
+    expect(seen).toEqual(['Purchase', 'balance_received'])
+    db.tables.clients[0].leads_config = {
+      capi_conversion_leads: true,
+      capi_conversion_deal_stage_key: 'renamed_later',
+    }
+    const stage = db.tables.me_conversion_writebacks.find((row) => row.event_id === `${OUTCOME}:conversion-stage`)
+    expect(stage?.status).toBe('in_doubt')
+    expect(stage?.payload_preview).toMatchObject({ 事件类型: 'balance_received' })
+  })
+
   it('开关关掉后，发到一半的阶段记录转成不确定，不自动重发', async () => {
     seed(db, {
       outcome: { meta_lead_id: leadId },

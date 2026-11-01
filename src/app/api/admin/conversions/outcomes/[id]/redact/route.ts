@@ -12,6 +12,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin, requireAdmin } from '@/lib/auth/require-admin'
+import { redactQualifiedSourceRef } from '@/lib/conversions/conversion-lead'
 import { assertClientScope } from '@/lib/conversions/route-guard'
 
 export const dynamic = 'force-dynamic'
@@ -33,14 +34,14 @@ export async function POST(request: Request, { params }: { params: { id: string 
 
   const { data, error } = await supabaseAdmin
     .from('me_sale_outcomes')
-    .select('id, client_id, redacted_at')
+    .select('id, client_id, redacted_at, source_ref')
     .eq('id', params.id)
     .maybeSingle()
 
   if (error) return NextResponse.json({ error: `读取失败: ${error.message}` }, { status: 500 })
   if (!data) return NextResponse.json({ error: '记录不存在' }, { status: 404 })
 
-  const outcome = data as { id: string; client_id: string; redacted_at: string | null }
+  const outcome = data as { id: string; client_id: string; redacted_at: string | null; source_ref: string | null }
 
   const denied = assertClientScope(actor, outcome.client_id)
   if (denied) return denied
@@ -81,6 +82,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
       page_scoped_user_id: null,
       // Facebook 线索编号能反查到具体那条表单提交（含姓名电话），同样必须清空。
       meta_lead_id: null,
+      // 合格阶段的去重编号若还嵌着原始线索编号，换成不可逆摘要。摘要仍能挡住同一条再记一次。
+      source_ref: redactQualifiedSourceRef(outcome.source_ref),
       redacted_at: now,
       redaction_reason: reason || '客人要求删除',
       updated_at: now,
