@@ -1,3 +1,4 @@
+import { storedEffectCard, type EffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 import type { ClientKind, PrescriptionContent, PrescriptionIntake } from '@/types/diagnostic'
 import { readClientKind } from '@/lib/huatuo/personal-ip'
 import type { SelfGrade } from '@/lib/huatuo/types'
@@ -13,6 +14,7 @@ export interface DialogPrescription {
   selfGrade: SelfGrade | null
   intake: PrescriptionIntake | null
   manual: boolean
+  effectCard: EffectJudgmentCard | null
 }
 
 export interface LoadedDialog {
@@ -97,6 +99,7 @@ export function toDialogPrescription(row: Record<string, unknown>): DialogPrescr
     selfGrade: isRecord(row.self_grade) ? row.self_grade as unknown as SelfGrade : null,
     intake: isRecord(row.intake) ? row.intake as unknown as PrescriptionIntake : null,
     manual: isRecord(row.generation_meta) && row.generation_meta.source === 'manual',
+    effectCard: storedEffectCard(row.generation_meta) ?? null,
   }
 }
 

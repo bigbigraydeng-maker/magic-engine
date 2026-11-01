@@ -254,7 +254,7 @@ async function countInPeriodReportDays(
 }
 
 /** 目标对应的系列：线索目标 = 配置里的表单留资系列，私信目标 = WhatsApp 系列；没配置 = 不限系列（只按结果类型区分）。 */
-function goalCampaignIds(clientId: string, metric: CostMetric): string[] | undefined {
+export function goalCampaignIds(clientId: string, metric: CostMetric): string[] | undefined {
   const kind = metric === 'leads' ? 'lead_form' : metric === 'messaging' ? 'whatsapp' : null
   if (!kind) return undefined
   const series = getTrackingClientConfig(clientId)?.objective_watch?.series ?? []

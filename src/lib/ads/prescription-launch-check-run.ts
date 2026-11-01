@@ -3,6 +3,7 @@
  * The caller supplies the database. This file does not talk to Meta.
  */
 
+import type { EffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 import {
   judgeLaunch, linesForCard, matchLaunch, parseExecutedLaunches, planOutcomeWrites,
   type ActionRow, type InsightRef, type KpiRef, type LaunchAssessment, type PlanRef,
@@ -12,6 +13,8 @@ import {
 export interface StoredPrescription extends PrescriptionRef {
   clientId: string
   kpis: KpiRef[]
+  /** Null when the prescription was saved before the effect-judgment card. */
+  effectCard: EffectJudgmentCard | null
 }
 
 export interface ExistingOutcomeRow {
@@ -75,6 +78,7 @@ export async function readOneLaunch(store: LaunchCheckStore, input: {
   clientId: string
   prescription: PrescriptionRef
   kpis: readonly KpiRef[]
+  effectCard?: EffectJudgmentCard | null
   now: Date
 }): Promise<{ lines: string[] }> {
   const parsed = parseExecutedLaunches(await store.listClientActions(input.clientId))
@@ -90,6 +94,7 @@ export async function readOneLaunch(store: LaunchCheckStore, input: {
     launch: match.launch,
     insights: await store.listInsights(input.clientId, match.launch.campaignId),
     kpis: input.kpis,
+    effectCard: input.effectCard ?? null,
     now: input.now,
     accountTimezone: await store.readAccountTimezone(input.clientId, match.launch.campaignId),
   })
@@ -140,6 +145,7 @@ async function checkOne(
       launch: match.launch,
       insights: await store.listInsights(prescription.clientId, match.launch.campaignId),
       kpis: prescription.kpis,
+      effectCard: prescription.effectCard,
       now,
       accountTimezone: await store.readAccountTimezone(prescription.clientId, match.launch.campaignId),
     })

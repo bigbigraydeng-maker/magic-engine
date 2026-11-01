@@ -72,6 +72,9 @@ describe('plan draft hook in the Huatuo background job', () => {
   it('generation: calls the hook after the draft is saved, with the same prescription id', async () => {
     await executePrescriptionGeneration(generation)
     expect(updates.some((u) => u.status === 'draft')).toBe(true)
+    const saved = updates.find((u) => u.status === 'draft')
+    const measure = (saved?.generation_meta as { measure?: { v?: number; blocked?: boolean } } | undefined)?.measure
+    expect(measure).toMatchObject({ v: 1, blocked: true })
     expect(mockHook).toHaveBeenCalledTimes(1)
     expect(mockHook).toHaveBeenCalledWith({ clientId: 'c1', prescriptionId: 'p1' })
   })
