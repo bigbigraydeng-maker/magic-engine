@@ -13,9 +13,11 @@
  * 只改同时满足下面全部条件的人：
  *   · 当前阶段是 `contacted`，且没有被标「不要再联系」
  *   · 有一封**人发的**一对一外发邮件（来源是同事邮箱同步，排除群发和自动回执，判据 `isAutomatedTouch`），
- *     主题同时点名「推荐 / 建议」和「出发日 / 具体团」（见 `isQuoteEmailSubject`）；转发（Fw / Fwd）不算
+ *     **真实邮件主题**（`metadata.subject`，不是 `summary`——从 CRM 里发出的邮件 `summary` 存的是正文前 120 字）
+ *     同时点名「推荐 / 建议」和「出发日」（见 `isQuoteEmailSubject`）；转发（Fw / Fwd）不算
  *   · 如果最近一次改阶段是**人**手动做的、而且比这封邮件还晚——人已经重新定过了，不碰
- *   · 这个客户的阶段配置里确实有 `quoted`
+ *   · 这个客户的阶段配置里确实有 `quoted`；并且只对旅游漏斗开（`loadClientsWithSafeStages` 要求 `traveling_soon` 等整套阶段齐全，
+ *     物流 / 地产漏斗没有，所以 NAL 的「运价建议 + 船期」邮件不会被误判成报价）
  * 只往前推这一档，永远不往回退；拿不准的（主题没点名团 / 日期）一律不动，仍归同事判断。
  *
  * 落库方式与 `advance-after-call.ts` 一致：UPDATE 的 WHERE 再判一次阶段和阶段时间没变，留痕写不上就把阶段退回去。
@@ -34,7 +36,8 @@ const PAGE_SIZE = 200
 /** 一轮最多真的改这么多人，防止某天数据暴涨变成一次大批量改动。 */
 const MAX_ADVANCE_PER_RUN = 100
 const MAX_SCAN_PER_RUN = 5000
-const IN_CHUNK = 100
+/** 一次查 25 个人：PostgREST 单次最多返回 1000 行且不报错，人多了阶段记录 / 邮件会被悄悄截断，「人手改过」的保护就会失效。 */
+const IN_CHUNK = 25
 
 export interface QuoteAdvanceResult {
   /** 阶段是「已联系」、被拿来检查的人数。 */
@@ -79,12 +82,12 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return out
 }
 
-/** 每个人最近一次改阶段是谁、什么时候改的。 */
-async function latestStageChange(
+/** 每个人**最近一次由人手动改**阶段的时间（机器后来又改过也不影响：人的决定仍然算数）。 */
+async function latestHumanStageChange(
   db: SupabaseClient,
   contactIds: string[],
-): Promise<Map<string, { changed_by: string | null; created_at: string }>> {
-  const latest = new Map<string, { changed_by: string | null; created_at: string }>()
+): Promise<Map<string, string>> {
+  const latest = new Map<string, string>()
   const { data, error } = await db
     .from('contact_stage_events')
     .select('contact_id, changed_by, created_at')
@@ -92,7 +95,9 @@ async function latestStageChange(
     .order('created_at', { ascending: false })
   if (error) throw new Error(`读阶段变更失败: ${error.message}`)
   for (const e of (data ?? []) as { contact_id: string; changed_by: string | null; created_at: string }[]) {
-    if (!latest.has(e.contact_id)) latest.set(e.contact_id, e)
+    if (isHumanActor(e.changed_by) && !isAutomatedActor(e.changed_by) && !latest.has(e.contact_id)) {
+      latest.set(e.contact_id, e.created_at)
+    }
   }
   return latest
 }
@@ -104,7 +109,7 @@ async function quoteMailsSent(
 ): Promise<Map<string, { subject: string; occurred_at: string }>> {
   const { data, error } = await db
     .from('contact_touchpoints')
-    .select('contact_id, source, summary, metadata, occurred_at')
+    .select('contact_id, source, metadata, occurred_at')
     .in('contact_id', contactIds)
     .eq('direction', 'outbound')
     .eq('channel', 'email')
@@ -114,25 +119,21 @@ async function quoteMailsSent(
   for (const t of (data ?? []) as {
     contact_id: string
     source: string | null
-    summary: string | null
     metadata: Record<string, unknown> | null
     occurred_at: string
   }[]) {
     if (out.has(t.contact_id)) continue
-    if (isAutomatedTouch(t.source, t.metadata) || !isQuoteEmailSubject(t.summary)) continue
-    out.set(t.contact_id, { subject: (t.summary ?? '').trim(), occurred_at: t.occurred_at })
+    // 只认真实主题：没有 metadata.subject 就不动（宁可漏，不拿正文前 120 字去猜）。
+    const subject = typeof t.metadata?.subject === 'string' ? t.metadata.subject.trim() : ''
+    if (isAutomatedTouch(t.source, t.metadata) || !isQuoteEmailSubject(subject)) continue
+    out.set(t.contact_id, { subject, occurred_at: t.occurred_at })
   }
   return out
 }
 
 /** 人在这封邮件之后又手动定过阶段 → 尊重他，不碰。 */
-function humanDecidedAfter(
-  change: { changed_by: string | null; created_at: string } | undefined,
-  mailAt: string,
-): boolean {
-  if (!change) return false
-  if (!isHumanActor(change.changed_by) || isAutomatedActor(change.changed_by)) return false
-  return new Date(change.created_at).getTime() > new Date(mailAt).getTime()
+function humanDecidedAfter(humanAt: string | undefined, mailAt: string): boolean {
+  return humanAt !== undefined && new Date(humanAt).getTime() > new Date(mailAt).getTime()
 }
 
 async function applyQuoted(db: SupabaseClient, row: CandidateRow, subject: string, now: Date): Promise<boolean> {
@@ -158,13 +159,14 @@ async function applyQuoted(db: SupabaseClient, row: CandidateRow, subject: strin
   })
   if (aErr) {
     // 留痕写不上就不留一个没有来历的阶段：条件卡死在我们刚写的值上，中间被改过就不会误伤。
-    await db
+    const { error: rbErr } = await db
       .from('contacts')
       .update({ stage: FROM_STAGE, stage_updated_at: row.stage_updated_at })
       .eq('id', row.id)
       .eq('client_id', row.client_id)
       .eq('stage', TO_STAGE)
       .eq('stage_updated_at', nowIso)
+    if (rbErr) throw new Error(`留痕失败且退回也失败（人需要手动核对 ${row.id}）: ${aErr.message} / ${rbErr.message}`)
     throw new Error(`留痕失败，已把阶段退回: ${aErr.message}`)
   }
   return true
@@ -203,11 +205,11 @@ export async function advanceContactedAfterQuoteEmail(
 
       for (const part of chunk(rows, IN_CHUNK)) {
         const ids = part.map((r) => r.id)
-        const [mails, changes] = await Promise.all([quoteMailsSent(db, ids), latestStageChange(db, ids)])
+        const [mails, humanAt] = await Promise.all([quoteMailsSent(db, ids), latestHumanStageChange(db, ids)])
         for (const row of part) {
           if (result.advanced >= MAX_ADVANCE_PER_RUN) break
           const mail = mails.get(row.id)
-          if (!mail || humanDecidedAfter(changes.get(row.id), mail.occurred_at)) continue
+          if (!mail || humanDecidedAfter(humanAt.get(row.id), mail.occurred_at)) continue
           try {
             if (await applyQuoted(db, row, mail.subject, now)) result.advanced++
           } catch (err) {

@@ -23,7 +23,7 @@ const QUOTE_SUBJECT = 'My recommendation for your travel to China - Best of Chin
 interface Touch {
   contact_id: string
   source: string | null
-  summary: string | null
+  summary?: string | null
   metadata: Record<string, unknown> | null
   occurred_at: string
 }
@@ -63,7 +63,7 @@ function chain(result: () => unknown) {
 }
 
 function mail(over: Partial<Touch> = {}): Touch {
-  return { contact_id: 'c1', source: 'microsoft_mail', summary: QUOTE_SUBJECT, metadata: null, occurred_at: MAIL_AT, ...over }
+  return { contact_id: 'c1', source: 'microsoft_mail', metadata: { subject: QUOTE_SUBJECT }, occurred_at: MAIL_AT, ...over }
 }
 
 function stubDb(over: Partial<Fake> = {}): SupabaseClient {
@@ -158,7 +158,7 @@ describe('advanceContactedAfterQuoteEmail', () => {
   })
 
   it('does nothing when the subject only names the departure (not a recommendation)', async () => {
-    const db = stubDb({ touches: [mail({ summary: 'Shanghai & Beyond Tour departing on 25 March 2027' })] })
+    const db = stubDb({ touches: [mail({ metadata: { subject: 'Shanghai & Beyond Tour departing on 25 March 2027' } })] })
     expect((await advanceContactedAfterQuoteEmail(NOW, db)).advanced).toBe(0)
     expect(updates).toHaveLength(0)
   })
@@ -166,9 +166,25 @@ describe('advanceContactedAfterQuoteEmail', () => {
   it('ignores a bulk / automated email even with a matching subject', async () => {
     const bulk = stubDb({ touches: [mail({ source: 'mailchimp' })] })
     expect((await advanceContactedAfterQuoteEmail(NOW, bulk)).advanced).toBe(0)
-    const auto = stubDb({ touches: [mail({ metadata: { automated: true } })] })
+    const auto = stubDb({ touches: [mail({ metadata: { subject: QUOTE_SUBJECT, automated: true } })] })
     expect((await advanceContactedAfterQuoteEmail(NOW, auto)).advanced).toBe(0)
     expect(updates).toHaveLength(0)
+  })
+
+  it('ignores a CRM-sent mail whose summary (body start) looks like a quote but has no real subject', async () => {
+    const db = stubDb({ touches: [mail({ metadata: null, summary: 'My recommendation: Best of China departing on 11 March 2027 is filling fast' })] })
+    expect((await advanceContactedAfterQuoteEmail(NOW, db)).advanced).toBe(0)
+    expect(updates).toHaveLength(0)
+  })
+
+  it('a human decision still counts after a later machine change', async () => {
+    const db = stubDb({
+      events: [
+        { contact_id: 'c1', changed_by: CALL_REACHED_ACTOR, created_at: STAGE_AT },
+        { contact_id: 'c1', changed_by: 'info@ctstours.co.nz', created_at: '2026-10-09T00:00:00Z' },
+      ],
+    })
+    expect((await advanceContactedAfterQuoteEmail(NOW, db)).advanced).toBe(0)
   })
 
   it('leaves the contact alone when a human set the stage after the quote email', async () => {
