@@ -537,6 +537,86 @@ describe('试运行模式', () => {
   })
 })
 
+describe('允许发送的事件名单', () => {
+  it('名单里没有的事件继续排队，不预检也不发送，不是终态试运行', async () => {
+    seed(db, {
+      client: { leads_config: { capi_allowed_events: ['Purchase', 'BalancePaid'] } },
+      outcome: { outcome_kind: 'lead', amount_minor: null, currency: null },
+    })
+    const preflight = vi.fn(async () => ({ ok: true, detail: {} }))
+    const w = makeWriter({ preflight })
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.status).toBe('queued')
+    expect(r.message).toContain('Lead')
+    expect(r.message).toContain('排队')
+    expect(r.message).not.toContain('试运行')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+    expect(preflight).not.toHaveBeenCalled()
+    const row = db.tables.me_conversion_writebacks[0]
+    expect(row.status).toBe('queued')
+    expect(row.last_error_code).toBeNull()
+    expect(row.payload_preview).toMatchObject({ held: true })
+  })
+
+  it('名单改好之后，还在 7 天内的下一次发送会真的发出去', async () => {
+    seed(db, {
+      client: { leads_config: { capi_allowed_events: ['Purchase'] } },
+      outcome: { outcome_kind: 'lead', amount_minor: null, currency: null },
+    })
+    const w = makeWriter()
+    const first = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(first.status).toBe('queued')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+
+    db.tables.clients[0].leads_config = { capi_allowed_events: ['Purchase', 'Lead'] }
+    const second = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(second.status).toBe('confirmed')
+    expect(w.sendSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('名单里有的事件，正式客户照常发送', async () => {
+    seed(db, { client: { leads_config: { capi_allowed_events: ['Purchase', 'BalancePaid'] } } })
+    const w = makeWriter()
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.status).toBe('confirmed')
+    expect(w.sendSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('没填名单时保持原来的行为，咨询事件也会发送', async () => {
+    seed(db, { outcome: { outcome_kind: 'lead', amount_minor: null, currency: null } })
+    const w = makeWriter()
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.status).toBe('confirmed')
+    expect(w.sendSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('名单格式不对就停住，即使客户已是正式模式', async () => {
+    seed(db, { client: { leads_config: { capi_allowed_events: 'Purchase' } } })
+    const w = makeWriter()
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.status).toBe('queued')
+    expect(r.message).toContain('格式不对')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+    expect(db.tables.me_conversion_writebacks[0].status).not.toBe('dry_run')
+  })
+
+  it('还在试运行的客户，事件不在名单里时原因写的是名单，不是普通试运行', async () => {
+    seed(db, {
+      client: {
+        conversion_stage: 'dry_run',
+        leads_config: { capi_allowed_events: ['Purchase'] },
+      },
+      outcome: { outcome_kind: 'balance' },
+    })
+    const preflight = vi.fn(async () => ({ ok: true, detail: {} }))
+    const w = makeWriter({ preflight })
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.message).toContain('BalancePaid')
+    expect(r.message).not.toContain('预检')
+    expect(preflight).not.toHaveBeenCalled()
+  })
+})
+
 // ─────────────────────────────────────────────────────────────────────────
 describe('各种失败分档落到正确状态', () => {
   const cases: Array<[string, SendVerdict, string, boolean]> = [
@@ -686,5 +766,337 @@ describe('人工裁决「不确定」', () => {
       expect(r.ok, `状态 ${status} 不该被人工裁决改动`).toBe(false)
       expect(db.tables.me_conversion_writebacks[0].status).toBe(status)
     }
+  })
+})
+
+describe('同一条 Meta 线索', () => {
+  const leadId = '1687504185706630'
+  const quotedRef = 'crm_qualified:11111111-2222-3333-4444-555555555555:quoted'
+
+  it('合格咨询没有线索编号时停住，不调用发送，也不改成普通咨询', async () => {
+    seed(db, {
+      outcome: { outcome_kind: 'lead', amount_minor: null, currency: null, source_ref: quotedRef, meta_lead_id: null },
+      client: { leads_config: { capi_allowed_events: ['Purchase'] } },
+    })
+    const build = vi.fn()
+    const writer = makeWriter({ build })
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(result.status).toBe('failed_permanent')
+    expect(result.message).toContain('没有原始线索编号')
+    expect(result.message).toContain('普通咨询')
+    expect(build).not.toHaveBeenCalled()
+    expect(writer.sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('有线索编号的成交两条都发，各自只发一次', async () => {
+    seed(db, {
+      outcome: { meta_lead_id: leadId, amount_minor: 388000, currency: 'NZD' },
+      client: {
+        leads_config: {
+          capi_allowed_events: ['Purchase'],
+          capi_conversion_leads: true,
+          capi_conversion_deal_stage_key: 'balance_received',
+        },
+      },
+    })
+    const build = vi.fn().mockReturnValue({ data: [] })
+    const writer = makeWriter({ build })
+    const first = await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(first.status).toBe('confirmed')
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBeUndefined()
+    expect(build.mock.calls[0][0].outcomeKind).toBe('purchase')
+    expect(build.mock.calls[0][0].platformEventId).toBeUndefined()
+    expect(build.mock.calls[0][0].amountMinor).toBe(388000)
+    expect(build.mock.calls[0][0].metaLeadId).toBe(leadId)
+    expect(build.mock.calls[1][0].conversionLeadEventName).toBe('balance_received')
+    expect(build.mock.calls[1][0].platformEventId).toBe(`${OUTCOME}:conversion-stage`)
+    expect(build.mock.calls[1][0].amountMinor).toBe(388000)
+    expect(build.mock.calls[1][0].metaLeadId).toBe(leadId)
+    expect(writer.sendSpy).toHaveBeenCalledTimes(2)
+    const ids = db.tables.me_conversion_writebacks.map((row) => row.event_id)
+    expect(ids).toEqual([OUTCOME, `${OUTCOME}:conversion-stage`])
+    expect(db.tables.me_conversion_writebacks.every((row) => row.status === 'confirmed')).toBe(true)
+
+    build.mockClear()
+    writer.sendSpy.mockClear()
+    const second = await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(second.status).toBe('confirmed')
+    expect(second.message).toContain('不会重复发送')
+    expect(build).not.toHaveBeenCalled()
+    expect(writer.sendSpy).not.toHaveBeenCalled()
+    expect(db.tables.me_conversion_writebacks).toHaveLength(2)
+  })
+
+  it('没有线索编号的成交仍按原来的方式发', async () => {
+    seed(db, {
+      client: {
+        leads_config: { capi_conversion_leads: true, capi_conversion_deal_stage_key: 'balance_received' },
+      },
+    })
+    const build = vi.fn().mockReturnValue({ data: [] })
+    const writer = makeWriter({ build })
+    await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(build).toHaveBeenCalledTimes(1)
+    expect(writer.sendSpy).toHaveBeenCalledTimes(1)
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBeUndefined()
+    expect(build.mock.calls[0][0].outcomeKind).toBe('purchase')
+  })
+
+  it('成交不在允许名单里时成交那条停住，阶段那条仍发一次', async () => {
+    seed(db, {
+      outcome: { meta_lead_id: leadId, amount_minor: 388000, currency: 'NZD' },
+      client: {
+        leads_config: {
+          capi_allowed_events: ['BalancePaid'],
+          capi_conversion_leads: true,
+          capi_conversion_deal_stage_key: 'balance_received',
+        },
+      },
+    })
+    const build = vi.fn().mockReturnValue({ data: [] })
+    const writer = makeWriter({ build })
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(result.status).toBe('queued')
+    expect(build).toHaveBeenCalledTimes(1)
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBe('balance_received')
+    expect(writer.sendSpy).toHaveBeenCalledTimes(1)
+    const purchase = db.tables.me_conversion_writebacks.find((row) => row.event_id === OUTCOME)
+    const stage = db.tables.me_conversion_writebacks.find((row) => row.event_id === `${OUTCOME}:conversion-stage`)
+    expect(purchase?.status).toBe('queued')
+    expect(stage?.status).toBe('confirmed')
+
+    writer.sendSpy.mockClear()
+    await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(writer.sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('只补发阶段那条时，上次 5xx 的成交不会再发', async () => {
+    seed(db, {
+      outcome: { meta_lead_id: leadId, amount_minor: 388000, currency: 'NZD' },
+      client: {
+        leads_config: {
+          capi_allowed_events: ['Purchase'],
+          capi_conversion_leads: true,
+          capi_conversion_deal_stage_key: 'balance_received',
+        },
+      },
+    })
+    db.tables.me_conversion_writebacks.push(
+      {
+        id: 'wb-purchase',
+        outcome_id: OUTCOME,
+        destination: 'meta_capi',
+        event_id: OUTCOME,
+        status: 'failed',
+        last_error_code: 'retry',
+        last_error: 'HTTP 500',
+        attempts: 1,
+        post_started_at: null,
+      },
+      {
+        id: 'wb-stage',
+        outcome_id: OUTCOME,
+        destination: 'meta_capi',
+        event_id: `${OUTCOME}:conversion-stage`,
+        status: 'failed',
+        last_error_code: 'auth',
+        last_error: '令牌失效',
+        attempts: 1,
+        post_started_at: null,
+      },
+    )
+    const writer = makeWriter()
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer), {
+      eventId: `${OUTCOME}:conversion-stage`,
+    })
+    expect(result.status).toBe('confirmed')
+    expect(writer.sendSpy).toHaveBeenCalledTimes(1)
+    const purchase = db.tables.me_conversion_writebacks.find((row) => row.event_id === OUTCOME)
+    const stage = db.tables.me_conversion_writebacks.find((row) => row.event_id === `${OUTCOME}:conversion-stage`)
+    expect(purchase).toMatchObject({ status: 'failed', last_error_code: 'retry' })
+    expect(stage?.status).toBe('confirmed')
+    expect(db.tables.me_conversion_writebacks).toHaveLength(2)
+  })
+
+  it('回传开关关掉后，授权失败或中断的已报价不再发出，也不改成普通咨询', async () => {
+    for (const code of ['auth', 'retry'] as const) {
+      db = new FakeDb()
+      seed(db, {
+        outcome: {
+          outcome_kind: 'lead',
+          amount_minor: null,
+          currency: null,
+          source_ref: quotedRef,
+          meta_lead_id: leadId,
+        },
+        client: {
+          leads_config: {
+            capi_conversion_leads: code === 'auth' ? false : 'yes',
+            capi_allowed_events: ['Lead', 'Purchase'],
+          },
+        },
+      })
+      db.tables.me_conversion_writebacks.push({
+        id: 'wb-quoted',
+        outcome_id: OUTCOME,
+        destination: 'meta_capi',
+        event_id: OUTCOME,
+        status: 'failed',
+        last_error_code: code,
+        last_error: code === 'auth' ? '令牌失效' : 'HTTP 500',
+        attempts: 1,
+        post_started_at: null,
+      })
+      const build = vi.fn().mockReturnValue({ data: [] })
+      const writer = makeWriter({ build })
+      const scoped = code === 'auth' ? { eventId: OUTCOME } : undefined
+      const result = await sendApprovedOutcome(OUTCOME, deps(db, writer), scoped)
+      expect(result.status).toBe('queued')
+      expect(result.message).toContain('没有发给广告平台')
+      expect(result.message).toContain('普通咨询')
+      expect(build).not.toHaveBeenCalled()
+      expect(writer.sendSpy).not.toHaveBeenCalled()
+      expect(db.tables.me_sale_outcomes[0].source_ref).toBe(quotedRef)
+      expect(db.tables.me_conversion_writebacks[0]).toMatchObject({
+        status: 'queued',
+        last_error_code: null,
+        event_id: OUTCOME,
+      })
+    }
+  })
+
+  it('回传开关开着时，失败的已报价仍按原来的阶段名补发，不看普通咨询名单', async () => {
+    seed(db, {
+      outcome: {
+        outcome_kind: 'lead',
+        amount_minor: null,
+        currency: null,
+        source_ref: quotedRef,
+        meta_lead_id: leadId,
+      },
+      client: {
+        leads_config: { capi_conversion_leads: true, capi_allowed_events: ['Purchase'] },
+      },
+    })
+    db.tables.me_conversion_writebacks.push({
+      id: 'wb-quoted',
+      outcome_id: OUTCOME,
+      destination: 'meta_capi',
+      event_id: OUTCOME,
+      status: 'failed',
+      last_error_code: 'auth',
+      last_error: '令牌失效',
+      attempts: 1,
+      post_started_at: null,
+    })
+    const build = vi.fn().mockReturnValue({ data: [] })
+    const writer = makeWriter({ build })
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer), { eventId: OUTCOME })
+    expect(result.status).toBe('confirmed')
+    expect(writer.sendSpy).toHaveBeenCalledTimes(1)
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBe('quoted')
+    expect(build.mock.calls[0][0].outcomeKind).toBe('lead')
+  })
+
+  it('开关重新打开后，停住的已报价按原来的阶段名发出', async () => {
+    seed(db, {
+      outcome: {
+        outcome_kind: 'lead',
+        amount_minor: null,
+        currency: null,
+        source_ref: quotedRef,
+        meta_lead_id: leadId,
+      },
+      client: { leads_config: { capi_conversion_leads: false } },
+    })
+    db.tables.me_conversion_writebacks.push({
+      id: 'wb-quoted',
+      outcome_id: OUTCOME,
+      destination: 'meta_capi',
+      event_id: OUTCOME,
+      status: 'failed',
+      last_error_code: 'retry',
+      last_error: 'HTTP 500',
+      attempts: 1,
+      post_started_at: null,
+    })
+    const blocked = makeWriter()
+    const held = await sendApprovedOutcome(OUTCOME, deps(db, blocked))
+    expect(held.status).toBe('queued')
+    expect(blocked.sendSpy).not.toHaveBeenCalled()
+    db.tables.clients[0].leads_config = { capi_conversion_leads: true }
+    const build = vi.fn().mockReturnValue({ data: [] })
+    const writer = makeWriter({ build })
+    const sent = await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(sent.status).toBe('confirmed')
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBe('quoted')
+    expect(writer.sendSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('正式发送前记下实际事件名，客户后来改了阶段设置也不改写', async () => {
+    seed(db, {
+      outcome: { meta_lead_id: leadId, amount_minor: 388000, currency: 'NZD' },
+      client: {
+        leads_config: {
+          capi_allowed_events: ['Purchase'],
+          capi_conversion_leads: true,
+          capi_conversion_deal_stage_key: 'balance_received',
+        },
+      },
+    })
+    const seen: string[] = []
+    const sendSpy = vi.fn(async () => {
+      const sending = db.tables.me_conversion_writebacks.filter((row) => row.status === 'sending')
+      expect(sending).toHaveLength(1)
+      const preview = sending[0].payload_preview as { 事件类型?: string }
+      seen.push(preview.事件类型 ?? '')
+      return { ok: false, errorName: 'AbortError', errorMessage: '断了', latencyMs: 5 }
+    })
+    const writer = makeWriter({
+      send: sendSpy as never,
+      accept: () => ({ kind: 'in_doubt', detail: '断了' }),
+    })
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer))
+    expect(result.status).toBe('in_doubt')
+    expect(seen).toEqual(['Purchase', 'balance_received'])
+    db.tables.clients[0].leads_config = {
+      capi_conversion_leads: true,
+      capi_conversion_deal_stage_key: 'renamed_later',
+    }
+    const stage = db.tables.me_conversion_writebacks.find((row) => row.event_id === `${OUTCOME}:conversion-stage`)
+    expect(stage?.status).toBe('in_doubt')
+    expect(stage?.payload_preview).toMatchObject({ 事件类型: 'balance_received' })
+  })
+
+  it('开关关掉后，发到一半的阶段记录转成不确定，不自动重发', async () => {
+    seed(db, {
+      outcome: { meta_lead_id: leadId },
+      client: {
+        leads_config: {
+          capi_conversion_leads: false,
+          capi_conversion_deal_stage_key: 'balance_received',
+        },
+      },
+    })
+    const started = new Date(Date.now() - 10 * 60_000).toISOString()
+    db.tables.me_conversion_writebacks.push({
+      id: 'wb-stage',
+      outcome_id: OUTCOME,
+      destination: 'meta_capi',
+      event_id: `${OUTCOME}:conversion-stage`,
+      status: 'sending',
+      attempts: 1,
+      post_started_at: started,
+      last_attempt_at: started,
+    })
+    const writer = makeWriter()
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer), {
+      eventId: `${OUTCOME}:conversion-stage`,
+    })
+    expect(writer.sendSpy).not.toHaveBeenCalled()
+    expect(result.status).toBe('in_doubt')
+    expect(result.message).toContain('不会自动重发')
+    expect(db.tables.me_conversion_writebacks).toHaveLength(1)
+    expect(db.tables.me_conversion_writebacks[0].status).toBe('in_doubt')
   })
 })

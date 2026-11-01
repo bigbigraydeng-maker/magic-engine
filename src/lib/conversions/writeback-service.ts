@@ -24,6 +24,13 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
+import { capiEventNameForKind, decideCapiEventAllowed } from './capi-client-config'
+import {
+  dealStageEventId,
+  dealStageEventName,
+  qualifiedLeadHoldReason,
+  resolveConversionLead,
+} from './conversion-lead'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
 import type {
@@ -31,6 +38,7 @@ import type {
   DestinationWriter,
   OutcomeForSend,
 } from './destination-writer'
+import { parkStuckStageSend } from './stuck-stage-send'
 
 /** 终态：任何自动路径都不许再改。 */
 const TERMINAL = [
@@ -84,6 +92,7 @@ type OutcomeRow = {
   page_scoped_user_id: string | null
   meta_lead_id: string | null
   source_kind: SourceKind
+  source_ref: string | null
 }
 
 function toOutcomeForSend(row: OutcomeRow): OutcomeForSend {
@@ -106,6 +115,81 @@ function toOutcomeForSend(row: OutcomeRow): OutcomeForSend {
   }
 }
 
+async function refuseOutcome(
+  supabase: SupabaseClient,
+  writebackId: string,
+  message: string,
+): Promise<SendOutcomeResult> {
+  await casUpdate(supabase, writebackId, ['queued', 'failed'], {
+    status: 'failed_permanent',
+    last_error: message,
+  })
+  return { status: 'failed_permanent', message, writebackId }
+}
+
+/** Stop the ordinary send, or name the stage envelope. Deals stay unnamed here. */
+async function prepareOrdinarySend(
+  supabase: SupabaseClient,
+  writebackId: string,
+  outcome: OutcomeRow,
+  leadsConfig: unknown,
+): Promise<SendOutcomeResult | { eventName: string | null }> {
+  const resolution = resolveConversionLead({
+    outcomeKind: outcome.outcome_kind,
+    sourceRef: outcome.source_ref ?? null,
+    metaLeadId: outcome.meta_lead_id,
+    leadsConfig,
+  })
+  if (resolution.kind === 'refuse') return refuseOutcome(supabase, writebackId, resolution.message)
+  const eventName = resolution.kind === 'stage' ? resolution.eventName : null
+  if (eventName && outcome.outcome_kind === 'lead') {
+    const reason = qualifiedLeadHoldReason(leadsConfig)
+    if (reason) return holdQualifiedSwitch(supabase, writebackId, reason)
+  } else {
+    const held = await holdUnlessAllowed(supabase, writebackId, leadsConfig, outcome.outcome_kind)
+    if (held) return held
+  }
+  return { eventName }
+}
+
+/** Closed switch: stay queued, keep the stage event, do not send a plain Lead. */
+async function holdQualifiedSwitch(
+  supabase: SupabaseClient,
+  writebackId: string,
+  reason: string,
+): Promise<SendOutcomeResult> {
+  const preview = { qualifiedSwitch: true, reason }
+  const held = await casUpdate(supabase, writebackId, ['queued', 'failed'], {
+    status: 'queued',
+    last_error: reason,
+    last_error_code: null,
+    payload_preview: preview,
+  })
+  if (!held) return await currentState(supabase, writebackId)
+  return { status: 'queued', message: reason, writebackId, preview }
+}
+
+async function holdUnlessAllowed(
+  supabase: SupabaseClient,
+  writebackId: string,
+  leadsConfig: unknown,
+  outcomeKind: OutcomeRow['outcome_kind'],
+): Promise<SendOutcomeResult | null> {
+  // 停在排队而不是试运行：试运行是终态，名单改好后也补发不了。
+  // 名单这个键不存在 = 保持今天的行为。格式读不出来 = 停住，不许发出去。
+  const allowed = decideCapiEventAllowed(leadsConfig, capiEventNameForKind(outcomeKind))
+  if (allowed.allow) return null
+  const preview = { held: true, reason: allowed.reason }
+  const held = await casUpdate(supabase, writebackId, ['queued', 'failed'], {
+    status: 'queued',
+    last_error: allowed.reason,
+    last_error_code: null,
+    payload_preview: preview,
+  })
+  if (!held) return await currentState(supabase, writebackId)
+  return { status: 'queued', message: allowed.reason, writebackId, preview }
+}
+
 export type SendDeps = {
   supabase: SupabaseClient
   writer: DestinationWriter<unknown>
@@ -113,14 +197,86 @@ export type SendDeps = {
   now?: Date
 }
 
+type StageCompanion = { eventId: string; eventName: string }
+
+/** Which send row to move. Omitted means the original sale and its stage row. */
+export type SendScope = { eventId: string }
+
 /**
  * 发送一条已批准的事实。**幂等**：重复调用不会重复发送。
+ *
+ * 不带范围时：原来的成交或尾款照发；有线索编号并且打开了阶段时，再发阶段那条。
+ * 两条各有自己的发送记录，同一种不会发两次。阶段那条失败不掩盖成交那条的结果。
+ *
+ * 带了范围时只推进那一条。每天的自动补发必须带上它选中的事件编号，
+ * 否则选中阶段那条时会把上次 5xx 的成交再发一遍。
  *
  * 调用方（路由）负责鉴权与审计；这里只管状态机与发送。
  */
 export async function sendApprovedOutcome(
   outcomeId: string,
   deps: SendDeps,
+  scope?: SendScope,
+): Promise<SendOutcomeResult> {
+  if (scope?.eventId === dealStageEventId(outcomeId)) return sendScopedCompanion(outcomeId, deps)
+  const result = await deliverApprovedOutcome(outcomeId, deps, null)
+  if (!scope) await sendDealStageCompanion(outcomeId, deps)
+  return result
+}
+
+async function sendScopedCompanion(outcomeId: string, deps: SendDeps): Promise<SendOutcomeResult> {
+  const eventName = await readDealStageName(deps.supabase, outcomeId)
+  if (eventName) {
+    return deliverApprovedOutcome(outcomeId, deps, {
+      eventId: dealStageEventId(outcomeId),
+      eventName,
+    })
+  }
+  // Switch off: do not send. A request that already left still becomes in_doubt.
+  const parked = await parkStuckStageSend(
+    deps.supabase, deps.writer.kind, dealStageEventId(outcomeId), deps.now ?? new Date(), STUCK_SENDING_MS,
+  )
+  return parked ?? { status: 'failed', message: '这条阶段记录现在发不出去。', writebackId: null }
+}
+
+async function sendDealStageCompanion(outcomeId: string, deps: SendDeps): Promise<void> {
+  try {
+    const eventName = await readDealStageName(deps.supabase, outcomeId)
+    if (!eventName) return
+    await deliverApprovedOutcome(outcomeId, deps, {
+      eventId: dealStageEventId(outcomeId),
+      eventName,
+    })
+  } catch (error) {
+    console.info(JSON.stringify({
+      receipt: 'deal_stage_companion',
+      outcome_id: outcomeId,
+      status: 'error',
+      message: error instanceof Error ? error.message : String(error),
+    }))
+  }
+}
+
+async function readDealStageName(supabase: SupabaseClient, outcomeId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('me_sale_outcomes')
+    .select('outcome_kind, meta_lead_id, client_id')
+    .eq('id', outcomeId)
+    .maybeSingle()
+  if (error || !data) return null
+  const row = data as { outcome_kind?: string; meta_lead_id?: string | null; client_id?: string }
+  if (row.outcome_kind !== 'purchase' && row.outcome_kind !== 'balance') return null
+  if (!row.client_id) return null
+  const client = await supabase.from('clients').select('leads_config').eq('id', row.client_id).maybeSingle()
+  if (client.error || !client.data) return null
+  const cfg = client.data as { leads_config?: unknown }
+  return dealStageEventName(cfg.leads_config, row.meta_lead_id ?? null)
+}
+
+async function deliverApprovedOutcome(
+  outcomeId: string,
+  deps: SendDeps,
+  companion: StageCompanion | null,
 ): Promise<SendOutcomeResult> {
   // 可被重复调用：批准时调一次，之后人在页面上点「再试一次」/「重新发送」还会调。
   // 幂等由下面四道闸保证，不靠调用方克制。
@@ -134,7 +290,7 @@ export async function sendApprovedOutcome(
     .select(
       'id, client_id, contact_id, outcome_kind, customer_email, customer_phone, ' +
         'customer_first, customer_last, order_ref, amount_minor, currency, ' +
-        'occurred_at, review_status, redacted_at, page_scoped_user_id, meta_lead_id, source_kind',
+        'occurred_at, review_status, redacted_at, page_scoped_user_id, meta_lead_id, source_kind, source_ref',
     )
     .eq('id', outcomeId)
     .maybeSingle()
@@ -143,6 +299,7 @@ export async function sendApprovedOutcome(
   if (!outcomeData) throw new Error('成交记录不存在')
 
   const outcome = outcomeData as unknown as OutcomeRow
+  const eventId = companion?.eventId ?? outcome.id
 
   if (outcome.review_status !== 'approved') {
     return { status: 'queued', message: '这条还没有被批准，不会发送', writebackId: null }
@@ -197,7 +354,7 @@ export async function sendApprovedOutcome(
   // ── 3. 读客户配置 ──────────────────────────────────────────────────
   const { data: clientData, error: clientErr } = await supabase
     .from('clients')
-    .select('id, default_phone_country, conversion_stage, facebook_page_id')
+    .select('id, default_phone_country, conversion_stage, facebook_page_id, leads_config')
     .eq('id', outcome.client_id)
     .maybeSingle()
 
@@ -208,6 +365,7 @@ export async function sendApprovedOutcome(
     default_phone_country: string | null
     conversion_stage: string | null
     facebook_page_id: string | null
+    leads_config: unknown
   }
   const config: ClientSendConfig = {
     clientId: outcome.client_id,
@@ -219,7 +377,7 @@ export async function sendApprovedOutcome(
   const { error: insertErr } = await supabase.from('me_conversion_writebacks').insert({
     outcome_id: outcome.id,
     destination,
-    event_id: outcome.id,
+    event_id: eventId,
     status: 'queued',
   })
   // 冲突说明已经有人建过了 —— 正常，往下读回它当前的状态。
@@ -233,7 +391,7 @@ export async function sendApprovedOutcome(
     .from('me_conversion_writebacks')
     .select('id, status, receipt, attempts, last_attempt_at')
     .eq('destination', destination)
-    .eq('event_id', outcome.id)
+    .eq('event_id', eventId)
     .maybeSingle()
 
   if (wbErr) throw new Error(`读取发送记录失败：${wbErr.message}`)
@@ -301,7 +459,17 @@ export async function sendApprovedOutcome(
     }
   }
 
+  // 合格咨询走线索阶段，不走普通 Lead 名单。成交仍先过成交/尾款名单。
+  // 阶段那条是另一次发送：不看成交名单，也不把成交那条换成阶段名。
   const forSend = toOutcomeForSend(outcome)
+  if (companion) {
+    forSend.conversionLeadEventName = companion.eventName
+    forSend.platformEventId = companion.eventId
+  } else {
+    const prepared = await prepareOrdinarySend(supabase, wb.id, outcome, client.leads_config)
+    if (!('eventName' in prepared)) return prepared
+    if (prepared.eventName) forSend.conversionLeadEventName = prepared.eventName
+  }
 
   // ── 6. 试运行：只构造、只预检，不真发 ──────────────────────────────
   if (client.conversion_stage !== 'live') {
@@ -361,6 +529,10 @@ export async function sendApprovedOutcome(
     post_started_at: null,
     last_attempt_at: now.toISOString(),
     attempts: wb.attempts + 1,
+    // 发出去之前记下这次真正用的事件名。之后客户改了阶段设置，不确定那一档仍对得上。
+    payload_preview: {
+      事件类型: forSend.conversionLeadEventName?.trim() || capiEventNameForKind(forSend.outcomeKind),
+    },
   })
   if (!marked) {
     // 别人抢先了。读回真值，不猜。

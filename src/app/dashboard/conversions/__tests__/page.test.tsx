@@ -295,8 +295,10 @@ describe('邮件深链 ?focus= 和 ?status= 支持', () => {
     expect(targetCard).toBeTruthy()
     expect(targetCard!.className).toContain('border-me-ochre')
 
-    // scrollIntoView 被调过
-    expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+    // 跳转发生在数据到手之后的下一拍，等滚动被调过再断言
+    await waitFor(() => {
+      expect(Element.prototype.scrollIntoView).toHaveBeenCalled()
+    })
   })
 
   it('?focus= 指向不存在的 id → 静默不动，不弹错', async () => {
@@ -348,4 +350,290 @@ describe('授权失效的失败行说清「会自动补发」（2026-09-22 起�
     expect(await screen.findByText(/上次发送没成功：平台忙/)).toBeTruthy()
     expect(screen.queryByText(/自动补发/)).toBeNull()
   })
+
+  it('名单停住的排队行出现在需要你动手，再试一次会重新走发送', async () => {
+    mountWith([
+      outcome({
+        id: 'held-1',
+        review_status: 'approved',
+        me_conversion_writebacks: [{
+          id: 'wb-h',
+          status: 'queued',
+          last_error: '名单里没有这一类',
+          last_error_code: null,
+          next_attempt_at: null,
+          payload_preview: { held: true },
+        }],
+      }),
+    ])
+    expect(await screen.findByRole('heading', { name: /需要你动手/ })).toBeTruthy()
+    expect(screen.getByText(/先停住了/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '再试一次' }))
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((c) => String(c[0]).includes('/outcomes/held-1/send'))
+      expect(calls).toHaveLength(1)
+      expect(calls[0][1]).toMatchObject({ method: 'POST' })
+    })
+  })
+
+  it('普通排队、没有停住标记的行不进需要你动手', async () => {
+    mountWith([
+      outcome({
+        id: 'queued-1',
+        review_status: 'approved',
+        me_conversion_writebacks: [{
+          id: 'wb-q',
+          status: 'queued',
+          last_error: null,
+          last_error_code: null,
+          next_attempt_at: null,
+        }],
+      }),
+    ])
+    await screen.findByText(/收到定金/)
+    expect(screen.queryByRole('heading', { name: /需要你动手/ })).toBeNull()
+  })
+
+  it('被名单停住的咨询不进需要你动手，只留一句不用处理', async () => {
+    mountWith([
+      outcome({
+        id: 'held-lead',
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        me_conversion_writebacks: [{
+          id: 'wb-lead',
+          status: 'queued',
+          last_error: '名单里没有咨询',
+          last_error_code: null,
+          next_attempt_at: null,
+          payload_preview: { held: true },
+        }],
+      }),
+    ])
+    expect(await screen.findByText('按名单不发，不用处理。')).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: /需要你动手/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: '再试一次' })).toBeNull()
+  })
+
+  it('排队中或没有发送记录的已报价可以再试一次', async () => {
+    mountWith([
+      outcome({
+        id: 'quoted-q',
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        source_ref: 'crm_qualified:person:quoted',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [{
+          id: 'wb-q',
+          status: 'queued',
+          last_error: null,
+          last_error_code: null,
+          next_attempt_at: null,
+        }],
+      }),
+      outcome({
+        id: 'quoted-missing',
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        source_ref: 'crm_qualified:person:missing',
+        occurred_at: new Date().toISOString(),
+        me_conversion_writebacks: [],
+      }),
+    ])
+    expect(await screen.findByRole('heading', { name: /需要你动手/ })).toBeTruthy()
+    expect(screen.getByText(/还没有发给广告平台/)).toBeTruthy()
+    expect(screen.getAllByRole('button', { name: '再试一次' })).toHaveLength(2)
+  })
+
+  it('两条发送记录时，失败的那条不会被已经成功的那条盖住', async () => {
+    mountWith([
+      outcome({
+        id: 'two-sends',
+        review_status: 'approved',
+        me_conversion_writebacks: [
+          { id: 'primary', status: 'confirmed', last_error: null, last_error_code: null, next_attempt_at: null, event_id: 'two-sends' },
+          { id: 'stage', status: 'failed', last_error: '阶段没发出去', last_error_code: 'retry', next_attempt_at: null, event_id: 'two-sends:conversion-stage' },
+        ],
+      }),
+    ])
+    expect(await screen.findByText(/阶段没发出去/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: '再试一次' })).toBeTruthy()
+  })
+
+  it('原发送失败、阶段记录不确定时，先给出人工核对', async () => {
+    mountWith([
+      outcome({
+        id: 'mixed',
+        review_status: 'approved',
+        me_conversion_writebacks: [
+          { id: 'primary', status: 'failed', last_error: '平台忙', last_error_code: 'retry', next_attempt_at: null, event_id: 'mixed' },
+          { id: 'stage', status: 'in_doubt', last_error: '断了', last_error_code: null, next_attempt_at: null, event_id: 'mixed:conversion-stage' },
+        ],
+      }),
+    ])
+    expect(await screen.findByRole('button', { name: '平台后台看到了 · 记为已收到' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '确认没收到 · 重新发送' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '再试一次' })).toBeNull()
+    expect(screen.getByText(/不确定平台收到没有/)).toBeTruthy()
+  })
+
+  it('成交已收到、阶段还不确定时，核对提示和确认框写明是阶段事件', async () => {
+    const eventId = 'owed:conversion-stage'
+    mountWith([
+      outcome({
+        id: 'owed',
+        review_status: 'approved',
+        order_ref: '84191',
+        me_conversion_writebacks: [
+          {
+            id: 'primary',
+            status: 'confirmed',
+            last_error: null,
+            last_error_code: null,
+            next_attempt_at: null,
+            event_id: 'owed',
+          },
+          {
+            id: 'stage',
+            status: 'in_doubt',
+            last_error: '断了',
+            last_error_code: null,
+            next_attempt_at: null,
+            event_id: eventId,
+            stage_name: 'balance_received',
+          },
+        ],
+      }),
+    ])
+    expect(await screen.findByText(/要核对的是阶段事件，不是原来的这笔成交/)).toBeTruthy()
+    expect(screen.getByText(/阶段 balance_received/)).toBeTruthy()
+    expect(screen.getAllByText(new RegExp(eventId)).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText(/阶段是「balance_received」/)).toBeTruthy()
+
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    fireEvent.click(screen.getByRole('button', { name: '平台后台看到了 · 记为已收到' }))
+    const prompt = String(confirmSpy.mock.calls[0]?.[0] ?? '')
+    expect(prompt).toContain('后面那个阶段事件')
+    expect(prompt).toContain('阶段：balance_received')
+    expect(prompt).toContain(`发送编号：${eventId}`)
+    expect(prompt).toContain('不要把它当成这一条')
+    expect(prompt).not.toContain('event_id')
+  })
+
+  it('成交下一步还没记上时可以再试一次，普通排队成交仍然不出现', async () => {
+    mountWith([
+      outcome({
+        id: 'owed',
+        review_status: 'approved',
+        companion_expected: true,
+        me_conversion_writebacks: [{
+          id: 'primary',
+          status: 'confirmed',
+          last_error: null,
+          last_error_code: null,
+          next_attempt_at: null,
+          event_id: 'owed',
+        }],
+      }),
+    ])
+    expect(await screen.findByText(/下一步还没发出去/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '再试一次' }))
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter((c) => String(c[0]).includes('/outcomes/owed/send'))
+      expect(calls).toHaveLength(1)
+    })
+  })
 })
+
+function heldWriteback(id: string) {
+  return [{
+    id,
+    status: 'queued',
+    last_error: '名单里没有这一类',
+    last_error_code: null,
+    next_attempt_at: null,
+    payload_preview: { held: true },
+  }]
+}
+
+describe('停发成交不被更新的咨询挤出「需要你动手」', () => {
+  it('成交和咨询分开取：200 条更新咨询仍在时，更老的成交还在，咨询只留一句提示', async () => {
+    const deal = outcome({
+      id: 'deal-old',
+      outcome_kind: 'purchase',
+      review_status: 'approved',
+      order_ref: 'DEAL-OLD',
+      occurred_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+      me_conversion_writebacks: heldWriteback('wb-deal'),
+    })
+    const leads = Array.from({ length: 200 }, (_, i) =>
+      outcome({
+        id: `lead-${i}`,
+        outcome_kind: 'lead',
+        review_status: 'approved',
+        amount_minor: null,
+        currency: null,
+        order_ref: null,
+        occurred_at: new Date(Date.now() - 60_000).toISOString(),
+        me_conversion_writebacks: heldWriteback(`wb-lead-${i}`),
+      }),
+    )
+
+    fetchMock = vi.fn().mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.includes('outcome_kind=purchase,balance')) {
+        return Promise.resolve({ ok: true, json: async () => ({ outcomes: [deal], count: 1 }) })
+      }
+      if (u.includes('outcome_kind=lead')) {
+        return Promise.resolve({ ok: true, json: async () => ({ outcomes: [leads[0]], count: 1 }) })
+      }
+      if (u.includes('held=1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ outcomes: leads, count: leads.length }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ outcomes: [], count: 0 }) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.pushState({}, '', `/dashboard/conversions?client=${CLIENT}`)
+    render(<ConversionsPage />)
+
+    expect(await screen.findByRole('heading', { name: /需要你动手/ })).toBeTruthy()
+    expect(screen.getByText(/单号 DEAL-OLD/)).toBeTruthy()
+    expect(screen.getByText('按名单不发，不用处理。')).toBeTruthy()
+
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]))
+    const dealUrl = urls.find((u) => u.includes('outcome_kind=purchase,balance'))
+    const leadUrl = urls.find((u) => u.includes('outcome_kind=lead'))
+    expect(dealUrl).toContain('held=1')
+    expect(dealUrl).toContain('limit=200')
+    expect(leadUrl).toContain('limit=1')
+    expect(urls.filter((u) => u.includes('held=1')).every((u) => u.includes('outcome_kind='))).toBe(true)
+  })
+
+  it('待核对和需要你动手都是空的时，邮件深链仍按 id 把停发成交找出来', async () => {
+    Element.prototype.scrollIntoView = vi.fn()
+    const deal = outcome({
+      id: 'focus-deal',
+      outcome_kind: 'purchase',
+      review_status: 'approved',
+      order_ref: 'FOCUS-DEAL',
+      occurred_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+      me_conversion_writebacks: heldWriteback('wb-focus'),
+    })
+
+    fetchMock = vi.fn().mockImplementation((url: string) => {
+      const u = String(url)
+      if (u.includes('id=focus-deal')) {
+        return Promise.resolve({ ok: true, json: async () => ({ outcomes: [deal], count: 1 }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ outcomes: [], count: 0 }) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    window.history.pushState({}, '', `/dashboard/conversions?client=${CLIENT}&focus=focus-deal`)
+    render(<ConversionsPage />)
+
+    expect(await screen.findByText(/单号 FOCUS-DEAL/)).toBeTruthy()
+    expect(screen.getByRole('heading', { name: /需要你动手/ })).toBeTruthy()
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('id=focus-deal'))).toBe(true)
+  })
+})
+

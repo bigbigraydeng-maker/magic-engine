@@ -18,6 +18,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { formatMoney } from '@/lib/conversions/money'
 import { isPastEventWindow, META_EVENT_WINDOW_DAYS } from '@/lib/conversions/event-window'
+import {
+  doubtCheck,
+  doubtConfirm,
+  isHeldOutcome,
+  mergeStuck,
+  sendState,
+  showInStuck,
+  stuckExplanation,
+  type Outcome,
+} from './stuck-rows'
 
 /**
  * Meta 只收 7 天内的事件（官方硬限制）。
@@ -27,43 +37,10 @@ import { isPastEventWindow, META_EVENT_WINDOW_DAYS } from '@/lib/conversions/eve
  */
 const MAX_AGE_DAYS = META_EVENT_WINDOW_DAYS
 
-type Writeback = {
-  id: string
-  status: string
-  last_error: string | null
-  /** 'auth' = 授权失效，系统会在令牌修好后自动补发（2026-09-22）；其它值走「再试一次」文案。 */
-  last_error_code: string | null
-  next_attempt_at: string | null
-}
-
-type Outcome = {
-  id: string
-  outcome_kind: 'purchase' | 'balance' | 'lead'
-  order_ref: string | null
-  amount_minor: number | null
-  currency: string | null
-  occurred_at: string
-  review_status: string
-  reject_reason: string | null
-  redacted_at: string | null
-  source_kind: string
-  created_at: string
-  /** contact_id 本身不是 PII（一个内部 UUID），用来跳转去客户管理页看这个人是谁。 */
-  contact_id: string | null
-  /** 存的是规范化过的小写形式（给 Meta 哈希用），显示前要转成首字母大写。 */
-  customer_first: string | null
-  me_conversion_writebacks?: Writeback[]
-}
-
 /** customer_first 存库时全小写（给 Meta 哈希用），这里只管显示好看，不改数据。 */
 function displayName(name: string | null): string | null {
   if (!name) return null
   return name.replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-/** 这条记录当前的发送状态（一个事实目前只发一个平台，取第一条即可）。 */
-function sendState(o: Outcome): Writeback | null {
-  return o.me_conversion_writebacks?.[0] ?? null
 }
 
 const REJECT_REASONS: Array<{ value: string; label: string }> = [
@@ -102,6 +79,9 @@ export default function ConversionsPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [flash, setFlash] = useState<{ id: string; text: string; ok: boolean } | null>(null)
   const [stuck, setStuck] = useState<Outcome[]>([])
+  const [heldInquiry, setHeldInquiry] = useState(false)
+  /** 这一轮列表请求已经结束（含两边都是空）。深链定位要等它，不能把「还没读」当成「没有」。 */
+  const [listsReady, setListsReady] = useState(false)
   const [rejecting, setRejecting] = useState<string | null>(null)
   const [rejectReason, setRejectReason] = useState<string>('')
   const [rejectNote, setRejectNote] = useState('')
@@ -129,16 +109,25 @@ export default function ConversionsPage() {
   const load = useCallback(async () => {
     if (!clientId) return
     setLoading(true)
+    setListsReady(false)
     setError(null)
     setWritebackDisabled(false)
     try {
-      const base = `/api/admin/conversions/outcomes?client_id=${encodeURIComponent(clientId)}&limit=200`
+      const root = `/api/admin/conversions/outcomes?client_id=${encodeURIComponent(clientId)}`
       // 已批准但没走完的：发出去没下文的、失败可重试的。send_status 交给接口在 SQL
       // 层筛（不是先按最新 200 条截断再筛）—— 否则堆积超过 200 条时，卡住的老记录
       // 会先被"最新 N 条"的窗口挤掉，压根轮不到这一步筛选。
-      const [pendingRes, stuckRes] = await Promise.all([
-        fetch(`${base}&review_status=pending_review`),
-        fetch(`${base}&review_status=approved&send_status=in_doubt,failed`),
+      // 停发的成交和咨询必须分开取：咨询只用来显示「不用处理」，混在同一次 limit 里
+      // 会把还在 7 天内的成交挤出「需要你动手」。
+      const [pendingRes, stuckRes, heldDealRes, heldLeadRes, qualifiedRes, companionRes] = await Promise.all([
+        fetch(`${root}&limit=200&review_status=pending_review`),
+        fetch(`${root}&limit=200&review_status=approved&send_status=in_doubt,failed`),
+        fetch(`${root}&limit=200&review_status=approved&send_status=queued&held=1&outcome_kind=purchase,balance`),
+        fetch(`${root}&limit=1&review_status=approved&send_status=queued&held=1&outcome_kind=lead`),
+        // 已报价：排队中、或根本没有发送记录。这两类不在上面的失败/停发查询里。
+        fetch(`${root}&limit=200&qualified_open=1`),
+        // 成交已经发出、同一条线索的下一步还没发出。接口只返回确实欠着这一步的行。
+        fetch(`${root}&limit=200&companion_open=1`),
       ])
       const pending = await pendingRes.json()
       if (!pendingRes.ok) {
@@ -162,14 +151,28 @@ export default function ConversionsPage() {
       //    只返回 outcome 主表，渲染时 `sendState(o)!` 会 crash 整页。
       //    再挡一次：stuck 里只放**真有 writeback**的 outcome。
       const stuckBody = await stuckRes.json()
-      const stuckRows: Outcome[] = (stuckBody.outcomes ?? []).filter(
-        (o: Outcome) => (o.me_conversion_writebacks?.length ?? 0) > 0,
-      )
-      setStuck(stuckRows)
+      const heldDealBody = await heldDealRes.json()
+      const heldLeadBody = await heldLeadRes.json()
+      const qualifiedBody = await qualifiedRes.json()
+      const companionBody = await companionRes.json()
+      if (!heldDealRes.ok) throw new Error(heldDealBody.error ?? '读取失败')
+      if (!heldLeadRes.ok) throw new Error(heldLeadBody.error ?? '读取失败')
+      if (!qualifiedRes.ok) throw new Error(qualifiedBody.error ?? '读取失败')
+      if (!companionRes.ok) throw new Error(companionBody.error ?? '读取失败')
+      const heldDeals: Outcome[] = heldDealBody.outcomes ?? []
+      const heldLeads: Outcome[] = heldLeadBody.outcomes ?? []
+      setStuck(mergeStuck(
+        stuckBody.outcomes ?? [],
+        heldDeals,
+        qualifiedBody.outcomes ?? [],
+        companionBody.outcomes ?? [],
+      ))
+      setHeldInquiry(heldLeads.some((o) => isHeldOutcome(o) && o.outcome_kind === 'lead'))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
+      setListsReady(true)
     }
   }, [clientId])
 
@@ -185,9 +188,7 @@ export default function ConversionsPage() {
    * 静默不动，用户看到普通列表，不弹错。跳完清空 focusOutcomeId，同一 URL 不会二次跳。
    */
   useEffect(() => {
-    if (!focusOutcomeId) return
-    // rows / stuck 都还没读回来，等 —— 先返回，等某一边填了再触发本 effect
-    if (rows.length === 0 && stuck.length === 0) return
+    if (!focusOutcomeId || !listsReady) return
     const id = focusOutcomeId
 
     // 先在两个列表里找
@@ -206,8 +207,8 @@ export default function ConversionsPage() {
       return
     }
 
-    // 两边都没有 —— 按 id 直查一次（可能被 200 条窗口挤掉），拿回来后按
-    // review_status 决定塞 rows 还是 stuck。
+    // 两边都没有（含列表本身就是空的）—— 按 id 直查一次。待核对或停发成交
+    // 比默认窗口更老时，不查这一下邮件链接会落空。
     if (!clientId) return
     let cancelled = false
     void (async () => {
@@ -225,10 +226,9 @@ export default function ConversionsPage() {
           setTimeout(() => outcomeRefs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0)
           return
         }
-        // approved + 卡在 in_doubt/failed 的 outcome：走 stuck 展示（只当它真有
-        // writeback 时才塞 —— 跟 load() 里的防御过滤同一口径）
-        const wb = found.me_conversion_writebacks?.[0]
-        if (found.review_status === 'approved' && wb && (wb.status === 'in_doubt' || wb.status === 'failed')) {
+        if (isHeldOutcome(found) && found.outcome_kind === 'lead' && !showInStuck(found)) {
+          setHeldInquiry(true)
+        } else if (showInStuck(found)) {
           setStuck((s) => (s.some((r) => r.id === found.id) ? s : [found, ...s]))
           setTimeout(() => stuckSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0)
         }
@@ -239,7 +239,7 @@ export default function ConversionsPage() {
     return () => {
       cancelled = true
     }
-  }, [focusOutcomeId, rows, stuck, clientId])
+  }, [focusOutcomeId, rows, stuck, clientId, listsReady])
 
   /**
    * 邮件深链 ?status=in_doubt：数据到手后 scroll 到「需要你动手」区块，
@@ -248,7 +248,8 @@ export default function ConversionsPage() {
    */
   useEffect(() => {
     // 2026-09-22 起今日待办「授权失效发不出去」那条链接带 ?status=failed，同样滚到这个区块。
-    if ((autoScrollStatus !== 'in_doubt' && autoScrollStatus !== 'failed') || stuck.length === 0) return
+    const scrolls = autoScrollStatus === 'in_doubt' || autoScrollStatus === 'failed' || autoScrollStatus === 'held'
+    if (!scrolls || stuck.length === 0) return
     setTimeout(() => stuckSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0)
     setAutoScrollStatus(null)
   }, [autoScrollStatus, stuck])
@@ -325,20 +326,8 @@ export default function ConversionsPage() {
     async (o: Outcome, resolution: 'confirmed' | 'resend') => {
       const wb = sendState(o)
       if (!wb) return
-      if (resolution === 'confirmed') {
-        const ok = window.confirm(
-          '你在广告平台后台确认看到这一笔了吗？\n\n' +
-            '看到了才点确定 —— 记成"已收到"之后就不会再发了。',
-        )
-        if (!ok) return
-      } else {
-        const ok = window.confirm(
-          '确认平台**没有**收到，要重新发一次吗？\n\n' +
-            '⚠️ 如果其实已经收到了，这一下会让同一笔算成两笔，而且撤不回。\n' +
-            '请先在平台后台确认真的没有再点。',
-        )
-        if (!ok) return
-      }
+      const ok = window.confirm(doubtConfirm(o, resolution))
+      if (!ok) return
 
       setBusy(o.id)
       try {
@@ -372,7 +361,8 @@ export default function ConversionsPage() {
       try {
         const res = await fetch(`/api/admin/conversions/outcomes/${o.id}/send`, { method: 'POST' })
         const body = await res.json()
-        setFlash({ id: o.id, text: body.message ?? (res.ok ? '已重试' : '出错了'), ok: res.ok })
+        const finished = body.send_status !== 'queued' && body.send_status !== 'error'
+        setFlash({ id: o.id, text: body.message ?? (res.ok ? '已重试' : '出错了'), ok: res.ok && finished })
         if (res.ok) void load()
       } catch (e) {
         setFlash({ id: o.id, text: e instanceof Error ? e.message : String(e), ok: false })
@@ -530,12 +520,14 @@ export default function ConversionsPage() {
         <div className={box('success')}>没有待核对的记录 —— 都处理完了。</div>
       )}
 
+      {heldInquiry && <p className="text-sm text-me-charcoal/70">按名单不发，不用处理。</p>}
       {stuck.length > 0 && (
         <div ref={stuckSectionRef} className="space-y-2.5">
           <h2 className="font-display text-base font-bold text-me-charcoal">需要你动手（{stuck.length}）</h2>
           {stuck.map((o) => {
-            const wb = sendState(o)!
-            const doubt = wb.status === 'in_doubt'
+            const wb = sendState(o)
+            const doubt = wb?.status === 'in_doubt'
+            const check = doubt ? doubtCheck(o) : null
             return (
               <div key={o.id} className="rounded-xl border border-status-attn/40 bg-me-gold/15 p-4">
                 <div className="text-[15px] font-semibold text-me-charcoal">
@@ -543,13 +535,14 @@ export default function ConversionsPage() {
                   {o.outcome_kind !== 'lead' && ` · ${money(o)}`}
                   {o.order_ref && <span className="font-normal text-me-charcoal/50"> · 单号 {o.order_ref}</span>}
                 </div>
-                <div className="my-2 text-sm leading-relaxed text-me-charcoal/70">
-                  {doubt
-                    ? '这一笔发出去时断线了，不确定平台收到没有。系统不会自己重发 —— 重发一次就是把同一笔算成两笔，撤不回。'
-                    : wb.last_error_code === 'auth'
-                      ? '连接广告平台的授权失效了，这条还没发出去。重新连接授权后，系统每天早上会自动补发（7 天内有效）；连好后也可以现在点「再试一次」。'
-                      : `上次发送没成功：${wb.last_error ?? '未知原因'}。可以再试一次。`}
-                </div>
+                {check && (
+                  <div className="mt-1 text-sm text-me-charcoal">
+                    {check.which === 'stage' ? '要核对的是阶段事件，不是原来的这笔成交' : '要核对的是原来的这笔成交，不是后面的阶段事件'}
+                    {check.stageName ? ` · 阶段 ${check.stageName}` : ''}
+                    {check.eventId ? ` · 发送编号 ${check.eventId}` : ''}
+                  </div>
+                )}
+                <div className="my-2 text-sm leading-relaxed text-me-charcoal/70">{stuckExplanation(o)}</div>
                 {doubt ? (
                   <div className="flex flex-wrap gap-2">
                     <button disabled={busy === o.id} onClick={() => void resolve(o, 'confirmed')} className={btnSolid('status-track')}>
