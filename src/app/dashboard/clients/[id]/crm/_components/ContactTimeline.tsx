@@ -43,6 +43,8 @@ export interface TimelineEntry {
   summary?: string | null
   /** 出站且是机器发的（Mailchimp 欢迎信 / 群发）：显示成「系统自动发出」，不算「我们说的最后一句」。 */
   automated?: boolean
+  /** 同事发的信（不是发给客人的）：显示成「同事内部邮件」，不写「系统自动发出」。 */
+  staffInternal?: boolean
   /** 表格里员工写的原话（没有 AI 摘要的同步记录才有）。 */
   sheetNote?: string | null
   /** 时间是近似的：表格不记具体时间，`at` 是客人填表的时间。 */
@@ -452,7 +454,7 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
     >
       <p className="text-[10px] font-bold text-me-charcoal/40">
         {icon} {name}
-        {e.direction === 'inbound' ? ' · 客人来的' : e.automated ? ' · 系统自动发出' : ''} · {when(e.at)}
+        {e.direction === 'inbound' ? ' · 客人来的' : e.staffInternal ? ' · 同事内部邮件' : e.automated ? ' · 系统自动发出' : ''} · {when(e.at)}
       </p>
       {e.staffNote && e.raw ? (
         <>

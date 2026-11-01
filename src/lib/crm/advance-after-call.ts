@@ -15,6 +15,8 @@
  *   · 这个阶段是系统放进去的（最近一条阶段变更的操作者是 `ai:conversation-read`、建档时的 `system:new-lead`，或被机器判成非咨询后又来了新消息而放回的 `system:enquiry-revived`）——
  *     人手动标过的一律不碰
  *   · 有一通外呼电话被判定为「接通」（触点 `metadata.reached === true`，判据在 `call-plan.ts`），或对方接起了但很快挂断（`metadata.answered === true`），
+ *     （电话这一类还要加一条：通话分析确认客人本人开过口，`metadata.customer_spoke === 'yes'`；语音信箱、对方没出声、
+ *     分析还没出结果或分析失败 → 一律不推进，人留在今天名单里、不被藏起来），
  *     或有一封**人发的**外发邮件（排除群发和自动回执，判据 `isAutomatedTouch`）——
  *     2026-10-28 PM 发现 Yvonne McDiarmid：同事 10/23 就回过邮件，她仍显示「新线索」
  *   · 这个客户的阶段配置里确实有 `contacted`
@@ -27,6 +29,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { isAutomatedTouch } from './automated-touch'
+import { callProvesCustomerSpoke } from './customer-spoke'
 import { CALL_REACHED_ACTOR, ENQUIRY_REVIVE_ACTOR, NEW_LEAD_ACTOR, STAGE_INFER_ACTOR } from './actors'
 import { loadClientsWithSafeStages, loadConfiguredStages } from './stage-infer'
 
@@ -103,7 +106,8 @@ async function followedUp(db: SupabaseClient, contactIds: string[]): Promise<Map
       // PM 2026-10-29：这类拨出了，状态却还停在新线索。只是铃响没人接的不算（那是要再试一次的人）。
       const reached = t.metadata?.reached === true
       const pickedUp = t.metadata?.answered === true
-      if ((!reached && !pickedUp) || calls.has(t.contact_id)) continue
+      // 线路接通不等于客人说了话：语音信箱也会报 answered。必须分析确认客人本人开过口才算。
+      if (!callProvesCustomerSpoke(t.metadata) || (!reached && !pickedUp) || calls.has(t.contact_id)) continue
       const secs = t.metadata?.talk_seconds
       calls.set(
         t.contact_id,

@@ -26,6 +26,12 @@ const MAYBE_DEFERRAL_KEYS: ReadonlySet<string> = new Set(['next_step', 'callback
  * 哪怕原话跟表态是同一句（"I'm not ready to book yet but send me the brochure"）。
  */
 const REAL_REQUEST = /\b(?:send|email|e-mail|mail|text)\b|brochure|catalog(?:ue)?|\binfo(?:rmation)?\b|details|itinerar|quote|\bcall me\b.*\b(?:on|at|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d)|发(?:给)?我|寄|邮件|邮箱|资料|行程|报价|(?:周|星期|礼拜)[一二三四五六日天]|\d+\s*点/i
+/**
+ * 客人直接要求「给我回电话」：Call me back later this afternoon / call me tonight / 下午再打给我 / 晚点打给我。
+ * 这是真的回电请求，不是礼貌推托 —— 哪怕句子里带 later / 晚点，也不能因此把人记成「先放着」。
+ * 前面带「别 / 不要 / don't」的（别打给我）是拒绝回电，不在此列。
+ */
+const CALLBACK_REQUEST = /(?<!(?:don'?t|do not|never|not|stop)\s)\b(?:call|ring|phone)\s+me\b|\bgive\s+me\s+a\s+(?:call|ring)\b|(?<![不别勿没])(?:打电话给我|打给我|给我打个?电话|回我电话|回电话给我|给我回电)/i
 /** 只是推托：改天 / 以后 / 再联系。（复审 2026-10-29：模型会从 Gavin 那句里再抽一条「改天再聊」当下一步。） */
 const DEFERRAL_ONLY = /another day|another time|some other time|\blater\b|\bsome ?time\b|get back to you|be in touch|改天|以后再说|下次再说|回头再说|再联系|过阵子|以后/i
 
@@ -40,7 +46,7 @@ function overlaps(a: string, b: string): boolean {
 function isJustDeferral(f: RawFact, stanceQuotes: readonly string[]): boolean {
   if (!MAYBE_DEFERRAL_KEYS.has(f.key)) return false
   const text = `${f.value} ${f.quote}`
-  if (REAL_REQUEST.test(text)) return false
+  if (REAL_REQUEST.test(text) || CALLBACK_REQUEST.test(text)) return false
   return stanceQuotes.some((q) => overlaps(q, f.quote)) || DEFERRAL_ONLY.test(text)
 }
 

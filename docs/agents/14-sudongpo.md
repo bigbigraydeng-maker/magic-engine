@@ -125,8 +125,9 @@
 
 ## 操作手册
 
-- [社媒 Agent 操作手册与规则 v1.0](../sops/2026-10-19-social-agent-playbook-and-rules-v1.0.md)
-- 平台运营思路（每个平台一份）：[Facebook v0.1](../sops/2026-10-28-social-platform-facebook-playbook-v0.1.md) · [Instagram v0.1](../sops/2026-10-28-social-platform-instagram-playbook-v0.1.md)
+- [社媒 Agent 操作手册与规则 v1.1](../sops/2026-10-19-social-agent-playbook-and-rules-v1.0.md)（v1.1 = 2026-11-01 新增 §9 PM 决定）
+- 平台运营思路（每个平台一份）：[Facebook v0.2](../sops/2026-10-28-social-platform-facebook-playbook-v0.1.md) · [Instagram v0.1](../sops/2026-10-28-social-platform-instagram-playbook-v0.1.md)
+- 新客户冷启动（发什么 / 几点发 / 什么形式）：[新客户社媒冷启动策略 v0.1](../sops/2026-10-29-social-new-client-cold-start-v0.1.md)
 - [视频模板优化手册 v1.0](../sops/2026-10-27-video-factory-template-playbook-v1.0.md)（视频工厂；索引见[视频工厂索引](../sops/video-factory-index.md)）
 - [Messenger AI 回滚](../sops/messenger-ai-rollback.md)
 - TikTok：[应用设置](../sops/tiktok-app-setup.md) · [生产审核检查点](../sops/tiktok-production-audit-checkpoint.md) · [发布测试检查点](../sops/tiktok-publishing-test-checkpoint.md)
