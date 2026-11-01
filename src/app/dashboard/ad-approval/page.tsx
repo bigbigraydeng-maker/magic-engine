@@ -16,7 +16,7 @@ import Link from 'next/link'
 import { supabaseAdmin } from '@/lib/supabase'
 import { ADS_CREATE_ACTION, type DraftRecord } from '@/lib/ads-strategy/draft-and-gate'
 import { describeDraft, isApprovableKind } from '@/lib/ads-strategy/ad-draft'
-import { GoLiveCardPanel } from '@/components/go-live-card/GoLiveCardPanel'
+import { BeforeGoLive } from '@/components/landing-verify/BeforeGoLive'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,6 +85,7 @@ export default async function AdApprovalPage() {
       <p className="mt-2 text-sm text-slate-600">
         下面每条都已经建好了，<strong>但都是暂停的，一分钱没花</strong>。
         点确认卡上的「确认」才开始花钱。聊天里说确认不算。
+        开投之前会先核实落地页或表单。没通过、或者系统查不了、又没有人确认，开投确认按不下去。
       </p>
 
       {/* ── 等点头 ─────────────────────────────────────────────── */}
@@ -156,7 +157,7 @@ export default async function AdApprovalPage() {
 
                   {p.error ? <p className="mt-3 text-sm text-red-700">{p.error}</p> : null}
                   {isApprovableKind(p.draft?.kind) ? (
-                    <GoLiveCardPanel clientId={r.client_id} draftId={r.id} />
+                    <BeforeGoLive clientId={r.client_id} draftId={r.id} />
                   ) : (
                     <p className="mt-4 rounded-lg bg-slate-100 p-3 text-sm text-slate-600">
                       暂不可开：这种广告要等「PM 授权 + 每日总预算检查」上线之后才能开。

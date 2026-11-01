@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ConfirmationCardError } from '@/lib/confirmation-card'
+import { ConfirmationCardError, type HardCheck } from '@/lib/confirmation-card'
 import { chooseAccountLabel } from '../account'
 import { goLiveSubjectKey, parsePausedDraft, type PausedDraftView } from '../draft'
 import { buildGoLiveFacts } from '../facts'
@@ -7,6 +7,8 @@ import { gatesFromReceipt } from '../checks'
 import { PREFLIGHT_GATE_KEYS } from '@/lib/ads-tracking-preflight/types'
 
 const NOW = new Date('2026-10-28T12:00:00.000Z')
+const LANDED: HardCheck = { label: '落地页已核实', state: 'green', reason: '能打开，而且是这一页' }
+const UNCHECKED: HardCheck = { label: '落地页已核实', state: 'unread', reason: '还没有查过这条广告的去处' }
 
 function greenGates() {
   return gatesFromReceipt({
@@ -39,6 +41,7 @@ describe('go-live facts', () => {
       view: view(),
       gates: greenGates(),
       boundLabels: [],
+      landing: LANDED,
     })).toThrow(ConfirmationCardError)
   })
 
@@ -48,14 +51,16 @@ describe('go-live facts', () => {
       view: view(),
       gates: greenGates(),
       boundLabels: [],
+      landing: LANDED,
     })
     expect(facts.what).toBe('开投：把暂停的广告改成在投')
     expect(facts.account).toBe('演示广告账户')
     expect(facts.amount).toBe('每天 40，按这个广告账户自己的货币')
     expect(facts.date).toBe('从点下去的这一天开始，计划跑 7 天')
-    expect(facts.scope).toBe('开到广告、广告组和广告系列这三层')
+    expect(facts.scope).toBe('开到广告、广告组和广告系列这三层。落地页已核实：能打开，而且是这一页')
     expect(facts.hardChecks).toEqual([
       { label: '开投前十道检查', state: 'green', reason: '十道都是绿灯' },
+      LANDED,
     ])
   })
 
@@ -76,6 +81,7 @@ describe('go-live facts', () => {
       }),
       gates: greenGates(),
       boundLabels: null,
+      landing: UNCHECKED,
     })
     expect(facts.account).toBe('读不到广告账户')
     expect(facts.amount).toBe('每天多少钱读不到')
