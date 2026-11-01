@@ -48,10 +48,18 @@ export interface VerifyResendSignatureArgs {
 export function verifyResendSignature(
   args: VerifyResendSignatureArgs,
 ): { valid: true } | { valid: false; reason: SignatureFailure } {
+  // 只认官方格式的 v1 签名项：官方库要求 "v1," 前缀，而已有验签工具会把不带前缀的裸签名也拿去比对，
+  // 这里先过滤掉，避免我们比官方库更宽松。头存在但一个 v1 项都没有 → 当签名不符。
+  let signature: string | undefined = args.svixSignature ?? undefined
+  if (signature) {
+    const v1Items = signature.split(/\s+/).filter((item) => item.startsWith('v1,'))
+    if (v1Items.length === 0) return { valid: false, reason: 'signature_mismatch' }
+    signature = v1Items.join(' ')
+  }
   const headers: Record<string, string | undefined> = {
     'webhook-id': args.svixId ?? undefined,
     'webhook-timestamp': args.svixTimestamp ?? undefined,
-    'webhook-signature': args.svixSignature ?? undefined,
+    'webhook-signature': signature,
   }
 
   const result =

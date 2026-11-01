@@ -156,8 +156,8 @@ describe('B. rejection paths', () => {
     expect(result).toEqual({ valid: false, reason: 'bad_timestamp' })
   })
 
-  it('7a. timestamp now-299 is inside window', () => {
-    const ts = String(nowSec() - 299)
+  it('7a. timestamp now-290 is inside window', () => {
+    const ts = String(nowSec() - 290)
     const body = '{"type":"email.delivered"}'
     const sig = signIndependent(SECRET, ID, ts, body)
     const result = verifyResendSignature({
@@ -170,8 +170,8 @@ describe('B. rejection paths', () => {
     expect(result).toEqual({ valid: true })
   })
 
-  it('7b. timestamp now-301 is outside window', () => {
-    const ts = String(nowSec() - 301)
+  it('7b. timestamp now-310 is outside window', () => {
+    const ts = String(nowSec() - 310)
     const body = '{"type":"email.delivered"}'
     const sig = signIndependent(SECRET, ID, ts, body)
     const result = verifyResendSignature({
@@ -184,8 +184,8 @@ describe('B. rejection paths', () => {
     expect(result).toEqual({ valid: false, reason: 'outside_window' })
   })
 
-  it('7c. timestamp now+299 is inside window', () => {
-    const ts = String(nowSec() + 299)
+  it('7c. timestamp now+290 is inside window', () => {
+    const ts = String(nowSec() + 290)
     const body = '{"type":"email.delivered"}'
     const sig = signIndependent(SECRET, ID, ts, body)
     const result = verifyResendSignature({
@@ -198,8 +198,8 @@ describe('B. rejection paths', () => {
     expect(result).toEqual({ valid: true })
   })
 
-  it('7d. timestamp now+301 is outside window (future side)', () => {
-    const ts = String(nowSec() + 301)
+  it('7d. timestamp now+310 is outside window (future side)', () => {
+    const ts = String(nowSec() + 310)
     const body = '{"type":"email.delivered"}'
     const sig = signIndependent(SECRET, ID, ts, body)
     const result = verifyResendSignature({
@@ -210,6 +210,44 @@ describe('B. rejection paths', () => {
       secret: SECRET,
     })
     expect(result).toEqual({ valid: false, reason: 'outside_window' })
+  })
+
+  it('7e. deterministic boundary: exactly 300s on both sides is inside window', () => {
+    // 固定时钟，避免真实时钟跨秒带来的抖动。
+    const fixedNow = 1730000000
+    const body = '{"type":"email.delivered"}'
+    for (const offset of [-300, 300]) {
+      const ts = String(fixedNow + offset)
+      const sig = signIndependent(SECRET, ID, ts, body)
+      const result = verifyResendSignature({
+        bodyText: body,
+        svixId: ID,
+        svixTimestamp: ts,
+        svixSignature: sig,
+        secret: SECRET,
+        nowSec: fixedNow,
+      })
+      expect(result).toEqual({ valid: true })
+    }
+  })
+
+  it('7f. deterministic boundary: exactly 301s on both sides is outside window', () => {
+    // 固定时钟，避免真实时钟跨秒带来的抖动。
+    const fixedNow = 1730000000
+    const body = '{"type":"email.delivered"}'
+    for (const offset of [-301, 301]) {
+      const ts = String(fixedNow + offset)
+      const sig = signIndependent(SECRET, ID, ts, body)
+      const result = verifyResendSignature({
+        bodyText: body,
+        svixId: ID,
+        svixTimestamp: ts,
+        svixSignature: sig,
+        secret: SECRET,
+        nowSec: fixedNow,
+      })
+      expect(result).toEqual({ valid: false, reason: 'outside_window' })
+    }
   })
 
   it('8a. wrong signature first, correct second still verifies', () => {
@@ -255,6 +293,90 @@ describe('B. rejection paths', () => {
       secret: SECRET,
     })
     expect(result.valid).toBe(false)
+  })
+
+  it('8d. bare signature without v1 prefix is rejected', () => {
+    const ts = String(nowSec())
+    const body = '{"type":"email.delivered"}'
+    const good = signIndependent(SECRET, ID, ts, body)
+    const bare = good.replace(/^v1,/, '')
+    const result = verifyResendSignature({
+      bodyText: body,
+      svixId: ID,
+      svixTimestamp: ts,
+      svixSignature: bare,
+      secret: SECRET,
+    })
+    expect(result).toEqual({ valid: false, reason: 'signature_mismatch' })
+  })
+
+  it('8e. v2 prefix on bare signature is rejected', () => {
+    const ts = String(nowSec())
+    const body = '{"type":"email.delivered"}'
+    const good = signIndependent(SECRET, ID, ts, body)
+    const bare = good.replace(/^v1,/, '')
+    const result = verifyResendSignature({
+      bodyText: body,
+      svixId: ID,
+      svixTimestamp: ts,
+      svixSignature: 'v2,' + bare,
+      secret: SECRET,
+    })
+    expect(result).toEqual({ valid: false, reason: 'signature_mismatch' })
+  })
+
+  it('8f. whitespace-only signature header is rejected', () => {
+    const ts = String(nowSec())
+    const body = '{"type":"email.delivered"}'
+    const result = verifyResendSignature({
+      bodyText: body,
+      svixId: ID,
+      svixTimestamp: ts,
+      svixSignature: '   ',
+      secret: SECRET,
+    })
+    expect(result).toEqual({ valid: false, reason: 'signature_mismatch' })
+  })
+
+  it('8g. v1 prefix with empty signature content is rejected', () => {
+    const ts = String(nowSec())
+    const body = '{"type":"email.delivered"}'
+    const result = verifyResendSignature({
+      bodyText: body,
+      svixId: ID,
+      svixTimestamp: ts,
+      svixSignature: 'v1,',
+      secret: SECRET,
+    })
+    expect(result).toEqual({ valid: false, reason: 'signature_mismatch' })
+  })
+
+  it('8h. junk item before correct v1 still verifies', () => {
+    const ts = String(nowSec())
+    const body = '{"type":"email.delivered"}'
+    const good = signIndependent(SECRET, ID, ts, body)
+    const result = verifyResendSignature({
+      bodyText: body,
+      svixId: ID,
+      svixTimestamp: ts,
+      svixSignature: `junk ${good}`,
+      secret: SECRET,
+    })
+    expect(result).toEqual({ valid: true })
+  })
+
+  it('8i. correct v1 followed by v2 item still verifies', () => {
+    const ts = String(nowSec())
+    const body = '{"type":"email.delivered"}'
+    const good = signIndependent(SECRET, ID, ts, body)
+    const result = verifyResendSignature({
+      bodyText: body,
+      svixId: ID,
+      svixTimestamp: ts,
+      svixSignature: `${good} v2,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`,
+      secret: SECRET,
+    })
+    expect(result).toEqual({ valid: true })
   })
 })
 
@@ -368,6 +490,30 @@ describe('D. cross-check against official Resend SDK', () => {
       id: ID,
       timestamp: nowTs,
       signature: '',
+      secret: SECRET,
+    },
+    {
+      name: 'bare signature without v1 prefix',
+      body: baseBody,
+      id: ID,
+      timestamp: nowTs,
+      signature: goodSig.replace(/^v1,/, ''),
+      secret: SECRET,
+    },
+    {
+      name: 'junk item plus correct v1',
+      body: baseBody,
+      id: ID,
+      timestamp: nowTs,
+      signature: `junk ${goodSig}`,
+      secret: SECRET,
+    },
+    {
+      name: 'whitespace-only signature header',
+      body: baseBody,
+      id: ID,
+      timestamp: nowTs,
+      signature: '   ',
       secret: SECRET,
     },
   ]

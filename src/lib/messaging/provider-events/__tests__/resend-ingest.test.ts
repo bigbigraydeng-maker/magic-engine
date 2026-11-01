@@ -126,6 +126,71 @@ function calls(level: 'info' | 'warn' | 'error'): unknown[][] {
   return (spy as unknown as { mock: { calls: unknown[][] } }).mock.calls
 }
 
+// 递归收集所有字符串值以及所有对象的键名
+function collectTexts(v: unknown): string[] {
+  const out: string[] = []
+  const walk = (x: unknown): void => {
+    if (typeof x === 'string') {
+      out.push(x)
+      return
+    }
+    if (Array.isArray(x)) {
+      for (const item of x) walk(item)
+      return
+    }
+    if (x !== null && typeof x === 'object') {
+      for (const [k, val] of Object.entries(x)) {
+        out.push(k)
+        walk(val)
+      }
+    }
+  }
+  walk(v)
+  return out
+}
+
+// 按 UTF-16 码元检查是否存在孤立代理
+function hasLoneSurrogate(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const next = i + 1 < s.length ? s.charCodeAt(i + 1) : -1
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return true
+      i++
+    } else if (c >= 0xdc00 && c <= 0xdfff) {
+      const prev = i > 0 ? s.charCodeAt(i - 1) : -1
+      if (!(prev >= 0xd800 && prev <= 0xdbff)) return true
+    }
+  }
+  return false
+}
+
+// 日志卫生检查：每次调用恰好一个字符串参数，且为合法 JSON 结构、不含敏感信息
+function assertLogsClean(): void {
+  const allowedKeys = new Set(['evt', 'code', 'account', 'type', 'dbCode'])
+  const secretBody = SECRET.replace(/^whsec_/, '')
+  for (const level of ['info', 'warn', 'error'] as const) {
+    for (const args of calls(level)) {
+      expect(args).toHaveLength(1)
+      const line = args[0]
+      expect(typeof line).toBe('string')
+      if (typeof line !== 'string') continue
+      const parsed: unknown = JSON.parse(line)
+      expect(parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)).toBe(true)
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+      const obj = parsed as Record<string, unknown>
+      expect(obj.evt).toBe('provider_webhook')
+      for (const [k, val] of Object.entries(obj)) {
+        expect(allowedKeys.has(k)).toBe(true)
+        expect(typeof val).toBe('string')
+      }
+      expect(line).not.toContain('@')
+      expect(line).not.toContain('whsec_')
+      expect(line).not.toContain(secretBody)
+    }
+  }
+}
+
 beforeEach(() => {
   vi.spyOn(console, 'info').mockImplementation(() => {})
   vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -133,6 +198,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  assertLogsClean()
   vi.restoreAllMocks()
 })
 
@@ -170,11 +236,12 @@ describe('handleResendWebhook - 密钥读取', () => {
       expect(res.body).toEqual({ ok: false, error: 'unavailable' })
       expect(insert).not.toHaveBeenCalled()
     }
-    // 每个坏密钥各产生一次 warn
-    expect(calls('warn')).toHaveLength(badSecrets.length)
-    for (const args of calls('warn')) {
+    // 每个坏密钥各产生恰好一次 error（共 badSecrets.length 次），代号都是 secret_unavailable，且不再有 warn
+    expect(calls('error')).toHaveLength(badSecrets.length)
+    for (const args of calls('error')) {
       expect(String(args[0])).toContain('"code":"secret_unavailable"')
     }
+    expect(calls('warn')).toHaveLength(0)
   })
 })
 
@@ -210,7 +277,7 @@ describe('handleResendWebhook - 签名不符', () => {
 
 describe('handleResendWebhook - 时间窗', () => {
   it('rejects timestamps outside the replay window', async () => {
-    for (const offset of [-301, 301]) {
+    for (const offset of [-310, 310]) {
       const { store, insert } = makeStore()
       const ts = String(nowSec() + offset)
       const res = await call(store, eventBody(), { ts })
@@ -225,13 +292,37 @@ describe('handleResendWebhook - 时间窗', () => {
   })
 
   it('accepts timestamps inside the replay window', async () => {
-    for (const offset of [-299, 299]) {
+    for (const offset of [-290, 290]) {
       const { store, rows } = makeStore()
       const ts = String(nowSec() + offset)
       const res = await call(store, eventBody(), { ts })
       expect(res.status).toBe(200)
       expect(res.body).toEqual({ ok: true })
       expect(rows).toHaveLength(1)
+    }
+  })
+
+  it('handles exact window boundaries deterministically', async () => {
+    const base = 1730000000
+    // 边界内：±300 秒应被接受
+    for (const ts of [base - 300, base + 300]) {
+      const { store, rows } = makeStore()
+      const res = await call(store, eventBody(), { ts: String(ts), nowSec: base })
+      expect(res.status).toBe(200)
+      expect(res.body).toEqual({ ok: true })
+      expect(rows).toHaveLength(1)
+    }
+    // 边界外：±301 秒应被拒绝
+    for (const ts of [base - 301, base + 301]) {
+      const { store, insert } = makeStore()
+      const res = await call(store, eventBody(), { ts: String(ts), nowSec: base })
+      expect(res.status).toBe(401)
+      expect(res.body).toEqual({ ok: false, error: 'invalid_signature' })
+      expect(insert).not.toHaveBeenCalled()
+    }
+    expect(calls('warn')).toHaveLength(2)
+    for (const args of calls('warn')) {
+      expect(String(args[0])).toContain('"code":"outside_window"')
     }
   })
 
@@ -282,6 +373,24 @@ describe('handleResendWebhook - 坏载荷', () => {
   it('returns 400 for invalid svix-id shape', async () => {
     const { store, insert } = makeStore()
     const res = await call(store, eventBody(), { id: 'msg id!' })
+    expect(res.status).toBe(400)
+    expect(res.body).toEqual({ ok: false, error: 'bad_payload' })
+    expect(insert).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleResendWebhook - svix-id 长度', () => {
+  it('accepts svix-id of 200 chars', async () => {
+    const { store, rows } = makeStore()
+    const res = await call(store, eventBody(), { id: 'm'.repeat(200) })
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true })
+    expect(rows).toHaveLength(1)
+  })
+
+  it('rejects svix-id of 201 chars', async () => {
+    const { store, insert } = makeStore()
+    const res = await call(store, eventBody(), { id: 'm'.repeat(201) })
     expect(res.status).toBe(400)
     expect(res.body).toEqual({ ok: false, error: 'bad_payload' })
     expect(insert).not.toHaveBeenCalled()
@@ -463,10 +572,11 @@ describe('handleResendWebhook - 毒事件清洗', () => {
     expect(res.body).toEqual({ ok: true })
     expect(rows).toHaveLength(1)
 
-    const serialized = JSON.stringify(rows[0].payload)
-    expect(serialized).not.toMatch(/\u0000/)
-    expect(serialized).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/)
-    expect(serialized).not.toMatch(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/)
+    const texts = collectTexts(rows[0].payload)
+    for (const t of texts) {
+      expect(t).not.toContain(NUL)
+      expect(hasLoneSurrogate(t)).toBe(false)
+    }
 
     const data = rows[0].payload.data as Record<string, unknown>
     const bounce = data.bounce as Record<string, unknown>
@@ -474,6 +584,93 @@ describe('handleResendWebhook - 毒事件清洗', () => {
     expect(Object.prototype.hasOwnProperty.call(data, 'key')).toBe(true)
     const tags = data.tags as string[]
     expect(tags[0]).toBe('x\uFFFDy')
+  })
+
+  it('replaces lone low surrogate with U+FFFD', async () => {
+    const body = JSON.stringify({
+      type: 'email.delivered',
+      created_at: '2026-11-01T01:02:03.000Z',
+      data: { email_id: 'em_1', note: 'a' + String.fromCharCode(0xdc00) + 'b' },
+    })
+    const { store, rows } = makeStore()
+    const res = await call(store, body)
+    expect(res.status).toBe(200)
+    const data = rows[0].payload.data as Record<string, unknown>
+    expect(data.note).toBe('a' + String.fromCharCode(0xfffd) + 'b')
+  })
+
+  it('replaces trailing lone high surrogate with U+FFFD', async () => {
+    const body = JSON.stringify({
+      type: 'email.delivered',
+      created_at: '2026-11-01T01:02:03.000Z',
+      data: { email_id: 'em_1', note: 'x' + String.fromCharCode(0xd800) },
+    })
+    const { store, rows } = makeStore()
+    const res = await call(store, body)
+    expect(res.status).toBe(200)
+    const data = rows[0].payload.data as Record<string, unknown>
+    expect(data.note).toBe('x' + String.fromCharCode(0xfffd))
+  })
+
+  it('keeps valid surrogate pairs intact', async () => {
+    const emoji = 'ok ' + String.fromCodePoint(0x1f600) + ' done'
+    const body = JSON.stringify({
+      type: 'email.delivered',
+      created_at: '2026-11-01T01:02:03.000Z',
+      data: { email_id: 'em_1', note: emoji },
+    })
+    const { store, rows } = makeStore()
+    const res = await call(store, body)
+    expect(res.status).toBe(200)
+    const data = rows[0].payload.data as Record<string, unknown>
+    expect(data.note).toBe(emoji)
+  })
+
+  it('strips NUL from email_id in row and payload', async () => {
+    const body = JSON.stringify({
+      type: 'email.delivered',
+      created_at: '2026-11-01T01:02:03.000Z',
+      data: { email_id: 'em' + String.fromCharCode(0) + 'x' },
+    })
+    const { store, rows } = makeStore()
+    const res = await call(store, body)
+    expect(res.status).toBe(200)
+    expect(rows[0].providerMessageId).toBe('emx')
+    const data = rows[0].payload.data as Record<string, unknown>
+    expect(data.email_id).toBe('emx')
+  })
+
+  it('checks email_id length after sanitization', async () => {
+    const body = JSON.stringify({
+      type: 'email.delivered',
+      created_at: '2026-11-01T01:02:03.000Z',
+      data: { email_id: 'x'.repeat(200) + String.fromCharCode(0) },
+    })
+    const { store, rows } = makeStore()
+    const res = await call(store, body)
+    expect(res.status).toBe(200)
+    expect(rows[0].providerMessageId).toBe('x'.repeat(200))
+  })
+
+  it('drops subject even when key contains NUL', async () => {
+    const body = JSON.stringify({
+      type: 'email.delivered',
+      created_at: '2026-11-01T01:02:03.000Z',
+      data: {
+        email_id: 'em_1',
+        ['sub' + String.fromCharCode(0) + 'ject']: 'secret subject',
+        subject: 'real subject',
+      },
+    })
+    const { store, rows } = makeStore()
+    const res = await call(store, body)
+    expect(res.status).toBe(200)
+    const data = rows[0].payload.data as Record<string, unknown>
+    const keys = Object.keys(data)
+    expect(keys).not.toContain('subject')
+    for (const k of keys) {
+      expect(k).not.toContain(String.fromCharCode(0))
+    }
   })
 })
 

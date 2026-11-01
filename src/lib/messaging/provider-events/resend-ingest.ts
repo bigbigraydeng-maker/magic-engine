@@ -1,5 +1,8 @@
 // Resend 回调入库主流程：验签 → 校验 → 清洗 → 落库。
 import {
+  EVENT_TYPE_MAX,
+  PROVIDER_EVENT_ID_MAX,
+  PROVIDER_MESSAGE_ID_MAX,
   isResendAccount,
   isStoredResendEventType,
   type ProviderEventInput,
@@ -9,7 +12,7 @@ import {
 } from './types'
 import { loadResendWebhookSecret, verifyResendSignature } from './resend-signature'
 
-const SVIX_ID_RE = /^[A-Za-z0-9_-]{1,200}$/
+const SVIX_ID_RE = new RegExp(`^[A-Za-z0-9_-]{1,${PROVIDER_EVENT_ID_MAX}}$`)
 const DB_CODE_RE = /^[A-Za-z0-9_]{1,16}$/
 const FAILED_CODE_RE = /failed: ([A-Za-z0-9_]{1,16})$/
 
@@ -107,7 +110,8 @@ export async function handleResendWebhook(
   // 2. 读取密钥
   const secret = loadResendWebhookSecret(account, input.env)
   if (secret === null) {
-    log('warn', 'secret_unavailable')
+    // error 级：密钥被删 / 配坏时所有真事件都会被拒，和签名不符一样要醒目
+    log('error', 'secret_unavailable')
     return { status: 503, body: { ok: false, error: 'unavailable' } }
   }
 
@@ -152,7 +156,7 @@ export async function handleResendWebhook(
 
   // 6. 事件类型白名单
   if (!isStoredResendEventType(eventType)) {
-    log('info', 'ignored_type', { type: eventType.slice(0, 80) })
+    log('info', 'ignored_type', { type: eventType.slice(0, EVENT_TYPE_MAX) })
     return { status: 200, body: { ok: true, ignored: true } }
   }
 
@@ -177,7 +181,7 @@ export async function handleResendWebhook(
   let providerMessageId: string | null = null
   if (isPlainObject(data)) {
     const emailId = data.email_id
-    if (typeof emailId === 'string' && emailId.length >= 1 && emailId.length <= 200) {
+    if (typeof emailId === 'string' && emailId.length >= 1 && emailId.length <= PROVIDER_MESSAGE_ID_MAX) {
       providerMessageId = emailId
     }
   }

@@ -81,9 +81,34 @@ describe('POST /api/webhooks/resend/[account]', () => {
     expect(row.providerEventId).toBe('msg_r1')
   })
 
+  it('preserves the raw request body for signature verification', async () => {
+    // 原始体不是 JSON.stringify 产出：含多余空格、换行，且 note 里是转义文本 a\u003cb
+    const rawBody =
+      '{ "type" : "email.delivered",\n "created_at": "2026-11-01T01:02:03.000Z",\n "data": { "email_id": "em_raw", "note": "a\\u003cb" } }'
+    const ts = String(Math.floor(Date.now() / 1000))
+    const req = makeReq(rawBody, validHeaders('msg_raw', ts, rawBody))
+    const res = await route.POST(req, ctx('system'))
+    expect(res.status).toBe(200)
+    expect(insertMock).toHaveBeenCalledTimes(1)
+    const row = insertMock.mock.calls[0][0] as Record<string, unknown>
+    const payload = row.payload as Record<string, unknown>
+    const data = payload.data as Record<string, unknown>
+    expect(data.note).toBe('a<b')
+  })
+
   it('returns 404 for an unknown account', async () => {
     const ts = String(Math.floor(Date.now() / 1000))
     const req = makeReq(body, validHeaders('msg_r1', ts, body))
+    const res = await route.POST(req, ctx('client'))
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ ok: false, error: 'not_found' })
+    expect(insertMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects an unknown account before reading the body', async () => {
+    // 未知账号应在读体之前返回 404，而不是因体积超限返回 413
+    const oversized = 'x'.repeat(256 * 1024 + 1)
+    const req = makeReq(oversized, { 'content-length': String(oversized.length) })
     const res = await route.POST(req, ctx('client'))
     expect(res.status).toBe(404)
     expect(await res.json()).toEqual({ ok: false, error: 'not_found' })

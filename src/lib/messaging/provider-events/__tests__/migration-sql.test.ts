@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { PROVIDER_EVENT_ID_MAX, PROVIDER_MESSAGE_ID_MAX, EVENT_TYPE_MAX } from '../types'
 
 // 读取迁移 SQL 原文
 const SQL = readFileSync(
@@ -90,14 +91,16 @@ describe('provider_webhook_events migration structure', () => {
   })
 
   it('makes the trigger function raise unconditionally', () => {
-    expect(CLEAN).toContain("errcode = 'restrict_violation'")
-    // 提取 begin ... end 之间的函数体，确认没有 if 条件分支
-    const beginIdx = CLEAN.indexOf('begin')
-    const endIdx = CLEAN.lastIndexOf('end')
-    expect(beginIdx).toBeGreaterThan(-1)
-    expect(endIdx).toBeGreaterThan(beginIdx)
-    const body = CLEAN.slice(beginIdx + 'begin'.length, endIdx)
-    expect(body).not.toContain('if ')
+    // 用正则从 $$ ... $$ 之间取出函数体，避免按 'end' 截取时误截到 append_only 里的 end
+    const match = CLEAN.match(
+      /create or replace function public\.provider_webhook_events_append_only\(\)[^$]*as \$\$([\s\S]*?)\$\$/,
+    )
+    expect(match).not.toBeNull()
+    const body = (match?.[1] ?? '').trim()
+    // 函数体必须与期望完全一致，任何多余语句（例如提前 return）都会让测试变红
+    expect(body).toBe(
+      "begin raise exception '% is append-only: % is not allowed', tg_table_name, tg_op using errcode = 'restrict_violation'; end;",
+    )
   })
 
   it('avoids forbidden constructs', () => {
@@ -121,6 +124,53 @@ describe('provider_webhook_events migration structure', () => {
         'provider_event_id text not null check (char_length(provider_event_id) between 1 and 200)',
       ),
     )
+  })
+
+  it('defines each column with its exact CHECK constraint', () => {
+    // 逐列精确断言 CHECK 子句，期望串同样做归一化处理
+    expect(CLEAN).toContain(
+      normalize("provider text not null check (provider ~ '^[a-z][a-z0-9_]{1,30}$')"),
+    )
+    expect(CLEAN).toContain(
+      normalize("account text not null check (account ~ '^[a-z][a-z0-9_]{1,30}$')"),
+    )
+    expect(CLEAN).toContain(
+      normalize(
+        'provider_event_id text not null check (char_length(provider_event_id) between 1 and 200)',
+      ),
+    )
+    expect(CLEAN).toContain(
+      normalize(
+        'event_type text not null check (char_length(event_type) between 1 and 80)',
+      ),
+    )
+    expect(CLEAN).toContain(
+      normalize(
+        'provider_message_id text check (provider_message_id is null or char_length(provider_message_id) between 1 and 200)',
+      ),
+    )
+    expect(CLEAN).toContain(
+      normalize("payload jsonb not null check (jsonb_typeof(payload) = 'object')"),
+    )
+  })
+
+  it('keeps length limits in sync with shared constants', () => {
+    // 从 SQL 中取出三个长度上限，与共享常量比对，防止常量漂移
+    const eventIdMatch = CLEAN.match(
+      /char_length\(provider_event_id\) between 1 and (\d+)/,
+    )
+    const messageIdMatch = CLEAN.match(
+      /char_length\(provider_message_id\) between 1 and (\d+)/,
+    )
+    const eventTypeMatch = CLEAN.match(/char_length\(event_type\) between 1 and (\d+)/)
+
+    expect(eventIdMatch).not.toBeNull()
+    expect(messageIdMatch).not.toBeNull()
+    expect(eventTypeMatch).not.toBeNull()
+
+    expect(Number(eventIdMatch?.[1])).toBe(PROVIDER_EVENT_ID_MAX)
+    expect(Number(messageIdMatch?.[1])).toBe(PROVIDER_MESSAGE_ID_MAX)
+    expect(Number(eventTypeMatch?.[1])).toBe(EVENT_TYPE_MAX)
   })
 
   it('creates exactly one table', () => {

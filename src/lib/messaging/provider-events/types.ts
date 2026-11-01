@@ -23,6 +23,11 @@ export function isStoredResendEventType(value: string): boolean {
   return (RESEND_STORED_EVENT_TYPES as readonly string[]).includes(value)
 }
 
+/** 与迁移里 CHECK 的长度上限保持一致；有测试逐个比对迁移文件和这里的常量，防止两边悄悄漂移。 */
+export const PROVIDER_EVENT_ID_MAX = 200
+export const PROVIDER_MESSAGE_ID_MAX = 200
+export const EVENT_TYPE_MAX = 80
+
 export interface ProviderEventInput {
   provider: 'resend'
   account: ResendAccount
