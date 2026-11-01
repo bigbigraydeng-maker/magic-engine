@@ -81,6 +81,9 @@ describe('week pack todos', () => {
     expect(readHandledPack({
       clientId: CLIENT, status: 'denied', subjectKey: subject, reason: '要确认的内容变了，这张旧卡作废',
     })).toBeNull()
+    expect(readHandledPack({
+      clientId: CLIENT, status: 'denied', subjectKey: subject, reason: '系统 点了不做：整包已停，这张还没点的卡作废',
+    })).toBeNull()
   })
 
   it('reminds about each unpublished failure after the pack was already approved', () => {

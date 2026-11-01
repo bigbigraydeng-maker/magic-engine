@@ -76,7 +76,7 @@ export function readHandledPack(row: {
 }): HandledPack | null {
   if (!row.clientId || !row.subjectKey.startsWith('social:week-pack:')) return null
   if (row.status === 'authorized') return { clientId: row.clientId, subjectKey: row.subjectKey }
-  if (row.status === 'denied' && row.reason.includes('不做')) {
+  if (row.status === 'denied' && row.reason.includes('不做') && !row.reason.includes('整包已停')) {
     return { clientId: row.clientId, subjectKey: row.subjectKey }
   }
   return null

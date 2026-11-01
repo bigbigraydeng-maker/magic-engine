@@ -17,6 +17,7 @@ import type { WeekPackPorts, RevokeStoryResult } from './flow'
 import { promotedReelLine, type ReelPromoteResult, type StoryAuthResult } from './lines'
 import { loadWeekPackManifest, readClientPackSettings, type ClientPackSettings } from './load'
 import { recordUnpublishedOnCard } from './persist-held'
+import { voidPendingWeekPackCards } from './void-pending'
 import { promoteReelGated } from './promote-guard'
 import { reelGoPublicOnApproveEnabled, type WeekPackEnv } from './switches'
 
@@ -59,6 +60,7 @@ export function createWeekPackPorts(input: WireInput): WeekPackPorts & { setting
     recordUnpublished: ({ runId, clientId, lines }) => recordUnpublishedOnCard(input.db, {
       runId, clientId, lines, now: input.now,
     }),
+    voidPending: (subjectKey) => voidPendingWeekPackCards(input.kernel, input.clientId, subjectKey),
     promoteReel: (workOrderId, previewToken) => promoteReelGated({
       enabled: reelGoPublic,
       allowedClientId: input.actor.allowedClientId,

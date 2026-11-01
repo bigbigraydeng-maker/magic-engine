@@ -38,6 +38,7 @@ export interface WeekPackPorts {
   revokeStory(packId: string, reason: string): Promise<RevokeStoryResult>
   promoteReel(workOrderId: string, previewToken: string): Promise<ReelPromoteResult>
   recordUnpublished(input: { runId: string; clientId: string; lines: WeekPackLine[] }): Promise<'saved' | 'failed'>
+  voidPending(subjectKey: string): Promise<'voided' | 'failed'>
 }
 
 export interface FlowResult {
@@ -140,6 +141,16 @@ export async function revokeWeekPack(args: {
   if (gate) return gate
   const manifest = await args.ports.loadManifest(args.clientId)
   const subject = weekPackSubject(manifest.client_id, manifest.week_start)
+  const voided = await args.ports.voidPending(subject)
+  if (voided !== 'voided') {
+    return {
+      httpStatus: 409,
+      message: '没能作废还没点的确认卡，没有停。请再点一次。',
+      manifest,
+      card: null,
+      receipt: receiptOf(args.clientId, subject, null, []),
+    }
+  }
   if (manifest.story.read_state !== 'ok') {
     return {
       httpStatus: 409,

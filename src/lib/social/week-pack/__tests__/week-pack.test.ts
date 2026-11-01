@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { decideConfirmationCard } from '@/lib/confirmation-card/decide'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
+import { issueConfirmationCard } from '@/lib/confirmation-card/issue'
+import { createCapabilities } from '@/lib/capabilities'
+import { ACTION_REGISTRY } from '@/lib/kernel/registry'
+import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
+import { CLIENT_A, CLIENT_B, makeFixture } from '@/lib/kernel/__tests__/fixtures'
 import type { CardClicker } from '@/lib/confirmation-card/actor'
 import type { ConfirmationCardView } from '@/lib/confirmation-card/view'
 import { InMemoryLiteStore } from '@/lib/social/story-lite/in-memory-store'
@@ -9,12 +15,13 @@ import type { NewLiteItem } from '@/lib/social/story-lite/types'
 
 import { cadenceFromConfig, cadenceSentence, DEFAULT_WEEKLY_PACK_CADENCE, isWeekday, targetWeek } from '../cadence'
 import { storyAuthorizeLifetime } from '../lifetime'
-import { buildWeekPackFacts, scopeHasDigest, scopeLine } from '../facts'
+import { buildWeekPackFacts, scopeHasDigest, scopeLine, weekPackSubject } from '../facts'
 import { manifestDigest } from '../fingerprint'
 import { confirmWeekPack, declineWeekPack, openWeekPack, revokeWeekPack, type WeekPackPorts } from '../flow'
 import { promotedReelLine } from '../lines'
 import { loadWeekPackManifest } from '../load'
 import { readHeldEvidence, recordUnpublishedOnCard, unpublishedFailures } from '../persist-held'
+import { voidPendingWeekPackCards } from '../void-pending'
 import { createWeekPackPorts } from '../wire'
 import { buildManifest, emptyStory, selectReels, unreadStory, type ReelInput } from '../manifest'
 import { promoteReelGated } from '../promote-guard'
@@ -76,7 +83,7 @@ function ports(manifest: WeekPackManifest, hooks?: {
   revoke?: WeekPackPorts['revokeStory']
   decide?: WeekPackPorts['decideCard']
   issue?: WeekPackPorts['issueCard']
-}): { ports: WeekPackPorts; authorize: ReturnType<typeof vi.fn>; promote: ReturnType<typeof vi.fn>; revoke: ReturnType<typeof vi.fn>; decide: ReturnType<typeof vi.fn>; issue: ReturnType<typeof vi.fn>; record: ReturnType<typeof vi.fn> } {
+}): { ports: WeekPackPorts; authorize: ReturnType<typeof vi.fn>; promote: ReturnType<typeof vi.fn>; revoke: ReturnType<typeof vi.fn>; decide: ReturnType<typeof vi.fn>; issue: ReturnType<typeof vi.fn>; record: ReturnType<typeof vi.fn>; voidPending: ReturnType<typeof vi.fn> } {
   const built = buildWeekPackFacts({ manifest, accountLabel: '示例客户', reelGoPublic: false })
   const authorize = vi.fn(hooks?.authorize ?? (async () => ({ ok: true as const, code: 'story_authorized' as const })))
   const promote = vi.fn(hooks?.promote ?? (async () => { throw new Error('promote must not run') }))
@@ -86,8 +93,9 @@ function ports(manifest: WeekPackManifest, hooks?: {
   )))
   const issue = vi.fn(hooks?.issue ?? (async () => viewCard(built.fingerprint, 'waiting')))
   const record = vi.fn(async () => 'saved' as const)
+  const voidPending = vi.fn(async () => 'voided' as const)
   return {
-    authorize, promote, revoke, decide, issue, record,
+    authorize, promote, revoke, decide, issue, record, voidPending,
     ports: {
       loadManifest: async () => manifest,
       accountLabel: async () => '示例客户',
@@ -99,8 +107,40 @@ function ports(manifest: WeekPackManifest, hooks?: {
       revokeStory: revoke,
       promoteReel: promote,
       recordUnpublished: record,
+      voidPending,
     },
   }
+}
+
+function videoOnly(clientId: string): WeekPackManifest {
+  return {
+    client_id: clientId,
+    week_start: '2026-11-09',
+    week_end: '2026-11-15',
+    assembled_at: '2026-11-06T00:00:00.000Z',
+    story: { read_state: 'ok', pack_id: null, title: null, state: null, content_hash: null, items: [] },
+    posts: { connected: false, label: '尚未接入' },
+    reels: {
+      read_state: 'ok', truncated: false,
+      items: [{
+        work_order_id: '33333333-3333-4333-8333-333333333333',
+        title: '一条视频',
+        fingerprint: 'f'.repeat(64),
+        scheduled_at_iso: '2026-11-10',
+        video_state: 'DRAFT',
+        date_state: 'in_week',
+      }],
+    },
+  }
+}
+
+function cardFixture() {
+  const f = makeFixture({
+    registry: ACTION_REGISTRY,
+    startAt: FRIDAY_NZ.toISOString(),
+    capabilities: (sb) => ({ [CONFIRMATION_ACTION_KEY]: createCapabilities(sb)[CONFIRMATION_ACTION_KEY] }),
+  })
+  return { f }
 }
 
 describe('switches and cadence', () => {
@@ -242,6 +282,56 @@ describe('orchestration', () => {
     expect(result.receipt?.lines.map((line) => line.text).join(' ')).toContain('已经发出 1 条收不回')
     expect(result.receipt?.lines.map((line) => line.code)).toContain('reel_not_recalled')
     expect(fake.promote).not.toHaveBeenCalled()
+    expect(fake.voidPending).toHaveBeenCalledWith(weekPackSubject(CLIENT, '2026-11-09'))
+  })
+
+  it('does not stop the pack when the unclicked cards cannot be voided', async () => {
+    const manifest = sample()
+    const fake = ports(manifest)
+    fake.voidPending.mockResolvedValue('failed')
+    const result = await revokeWeekPack({ enabled: true, clientId: CLIENT, clicker: OPC, ports: fake.ports })
+    expect(result.httpStatus).toBe(409)
+    expect(result.message).toContain('作废')
+    expect(fake.revoke).not.toHaveBeenCalled()
+    expect(fake.promote).not.toHaveBeenCalled()
+  })
+
+  it('refuses a voided card on a video-only week and publishes nothing', async () => {
+    const reelId = '33333333-3333-4333-8333-333333333333'
+    const manifest = videoOnly(CLIENT_A)
+    const built = buildWeekPackFacts({ manifest, accountLabel: '示例客户', reelGoPublic: true })
+    const { f } = cardFixture()
+    const card = await issueConfirmationCard(f.kernel, {
+      clientId: CLIENT_A, clicker: OPC, facts: built.facts, now: FRIDAY_NZ,
+    })
+    const otherWeek = await issueConfirmationCard(f.kernel, {
+      clientId: CLIENT_A, clicker: OPC, facts: { ...built.facts, subjectKey: weekPackSubject(CLIENT_A, '2026-11-02') }, now: FRIDAY_NZ,
+    })
+    const otherClient = await issueConfirmationCard(f.kernel, {
+      clientId: CLIENT_B, clicker: OPC, facts: built.facts, now: FRIDAY_NZ,
+    })
+    const promote = vi.fn(async () => ({ ok: true as const, code: 'reel_promoted' as const, text: '公开了' }))
+    const fake = ports(manifest)
+    fake.ports.reelGoPublic = true
+    fake.ports.promoteReel = promote
+    fake.ports.voidPending = (subject) => voidPendingWeekPackCards(f.kernel, CLIENT_A, subject)
+    fake.ports.decideCard = (input) => decideConfirmationCard(f.kernel, {
+      clientId: CLIENT_A, clicker: OPC, now: FRIDAY_NZ, ...input,
+    })
+    const stopped = await revokeWeekPack({ enabled: true, clientId: CLIENT_A, clicker: OPC, ports: fake.ports })
+    expect(stopped.httpStatus).toBe(200)
+    expect(f.tables.action_runs.find((row) => row.id === card.runId)?.status).toBe('denied')
+    expect(f.tables.action_runs.find((row) => row.id === otherWeek.runId)?.status).toBe('pending_approval')
+    expect(f.tables.action_runs.find((row) => row.id === otherClient.runId)?.status).toBe('pending_approval')
+    const again = await confirmWeekPack({
+      enabled: true, clientId: CLIENT_A, clicker: OPC, runId: card.runId,
+      expectedDecisionId: card.expectedDecisionId, fingerprint: card.fingerprint,
+      tokens: new Map([[reelId, 'preview-token']]), ports: fake.ports,
+    })
+    expect(again.httpStatus).toBe(409)
+    expect(again.message).toBe('这张卡已经作废，不能再用来发布。')
+    expect(promote).not.toHaveBeenCalled()
+    expect(fake.authorize).not.toHaveBeenCalled()
   })
 
   it('does not roll back Story when promote fails', async () => {
