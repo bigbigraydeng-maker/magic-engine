@@ -3,6 +3,7 @@
  * Every other confirmation card still only records the click.
  */
 
+import { reuseLiveAuthorization } from '@/lib/kernel/authorize'
 import type { KernelDeps } from '@/lib/kernel/deps'
 import type { ActionRun } from '@/lib/kernel/types'
 import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
@@ -63,6 +64,13 @@ function isThisPlanCard(run: ActionRun, clientId: string, stored: StoredCard | n
 
 function expiredCard(): ConfirmationCardError {
   return new ConfirmationCardError('stale', PLAN_CARD_EXPIRED)
+}
+
+/** Recorded click, plan write not applied yet. A dead allow must not approve. */
+async function assertRetryAuthorization(deps: KernelDeps, run: ActionRun): Promise<void> {
+  const live = await reuseLiveAuthorization(deps, run)
+  if (live) return
+  throw new ConfirmationCardError('stale', '这份确认已经失效，请重新出一张卡。批准状态没有改。')
 }
 
 function refusal(result: ApprovePlanResult): ConfirmationCardError {
@@ -221,6 +229,8 @@ async function confirmPlan(
   if (!dates) throw new ConfirmationCardError('invalid', '这张卡没有准确的计划日期，不能批准。请到推广计划页处理。')
   const closed = await appliedCardOutcome(deps, args, run, parsed.planId, parsed.contentHash, dates, now)
   if (closed) return closed
+  // The click is already recorded. Re-check the allow before any plan write.
+  if (run.status === 'authorized') await assertRetryAuthorization(deps, run)
   // Read first. The click is recorded only when this would approve. The write comes after.
   const preview = await approvePlan(planArgs(args, parsed.planId, parsed.contentHash, dates, false))
   const blocked = previewBlock(preview)
@@ -229,6 +239,8 @@ async function confirmPlan(
     ? await showCard(deps, run, args.clicker, now)
     : await decideConfirmationCard(deps, decisionArgs(args, now))
   if (card.status !== 'confirmed') return card
+  // Read the allow again at the write. The preview above does not change the plan.
+  if (run.status === 'authorized') await assertRetryAuthorization(deps, run)
   let result: ApprovePlanResult
   try {
     result = await approvePlan(planArgs(args, parsed.planId, parsed.contentHash, dates, true))

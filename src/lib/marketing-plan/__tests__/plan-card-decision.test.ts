@@ -101,6 +101,20 @@ function runStatus(f: Fixture, runId: string): string | undefined {
   return f.tables.action_runs.find((row) => row.id === runId)?.status as string | undefined
 }
 
+function commitCount(): number {
+  return mockApprove.mock.calls.filter((call) => call[0].commit === true).length
+}
+
+async function failSaveThen(f: Fixture, card: { runId: string; expectedDecisionId: string; fingerprint: string }) {
+  mockApprove.mockImplementation(async (args: { commit?: boolean }) => (
+    args.commit === false ? { kind: 'ready' } : { kind: 'conflict', status: 500, error: '暂时没保存成功。' }
+  ))
+  const failed = await click(f, card, 'confirm')
+  expect(failed.status).toBe('pending_application')
+  expect(runStatus(f, card.runId)).toBe('authorized')
+  return failed
+}
+
 beforeEach(() => {
   mockApprove.mockReset()
   mockApprove.mockImplementation(async (args: { commit?: boolean }) => (
@@ -266,6 +280,39 @@ describe('plan confirmation card', () => {
     expect(done.find((view) => view.runId === card.runId)).toMatchObject({ status: 'confirmed', confirmEnabled: false })
   })
 
+  it.each([
+    ['the confirmation rule is removed', (f: Fixture) => {
+      f.tables.client_automation_policies.splice(0, f.tables.client_automation_policies.length)
+    }],
+    ['the confirmation rule now forbids it', (f: Fixture) => {
+      f.tables.client_automation_policies[0].mode = 'deny'
+    }],
+    ['the confirmation rule version changed', (f: Fixture) => {
+      f.tables.client_automation_policies[0].policy_version = 2
+    }],
+    ['the recorded approval has expired', (f: Fixture) => {
+      const allow = f.tables.authorization_decisions.find((row) => row.verdict === 'allow')
+      expect(typeof allow?.expires_at).toBe('string')
+      f.clock.now = new Date(Date.parse(String(allow?.expires_at)) + 1000)
+    }],
+  ])('does not retry the plan write when %s', async (_name, spoil) => {
+    const f = planFixture()
+    const card = await issuePlan(f)
+    const failed = await failSaveThen(f, card)
+    const writes = commitCount()
+    spoil(f)
+    mockApprove.mockImplementation(async (args: { commit?: boolean }) => (
+      args.commit === false ? { kind: 'ready' } : approved()
+    ))
+    await expect(click(f, failed, 'confirm')).rejects.toMatchObject({
+      code: 'stale',
+      message: '这份确认已经失效，请重新出一张卡。批准状态没有改。',
+    })
+    expect(commitCount()).toBe(writes)
+    expect(f.tables.marketing_plans[0].status).toBe('draft')
+    expect(runStatus(f, card.runId)).toBe('authorized')
+  })
+
   it('keeps approval failure visible when the plan write throws', async () => {
     const f = fixture()
     const card = await issuePlan(f)
@@ -277,6 +324,37 @@ describe('plan confirmation card', () => {
     expect(failed.status).toBe('pending_application')
     expect(failed.statusLine).toContain('尚未批准')
     expect(runStatus(f, card.runId)).toBe('authorized')
+  })
+
+  it('does not approve again after a successful approval is returned to the same draft', async () => {
+    const f = planFixture()
+    const card = await issuePlan(f)
+    const plan = f.tables.marketing_plans[0]
+    const before = {
+      status: plan.status,
+      start: plan.start_date,
+      end: plan.end_date,
+      hash: (plan.plan_data as { promo: { testHash: string } }).promo.testHash,
+    }
+    const first = await click(f, card, 'confirm')
+    expect(first.status).toBe('confirmed')
+    expect(commitCount()).toBe(1)
+    const run = f.tables.action_runs.find((row) => row.id === card.runId)
+    expect(run?.evidence).toMatchObject({
+      plan_approval_applied: { plan_id: PLAN, content_hash: HASH },
+    })
+    plan.status = 'approved'
+    plan.status = 'draft' // sent back; content and dates stay as they were
+    expect(plan.start_date).toBe(before.start)
+    expect(plan.end_date).toBe(before.end)
+    expect((plan.plan_data as { promo: { testHash: string } }).promo.testHash).toBe(before.hash)
+    expect(before.status).toBe('draft')
+
+    await expect(click(f, card, 'confirm')).rejects.toMatchObject({ code: 'stale', message: '这张卡已过期' })
+    expect(commitCount()).toBe(1)
+    expect(plan.status).toBe('draft')
+    expect(plan.start_date).toBe(before.start)
+    expect(plan.end_date).toBe(before.end)
   })
 
   it('does not restore a revoked, archived, or replaced plan from the old card', async () => {
