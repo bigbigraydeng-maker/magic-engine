@@ -1,16 +1,16 @@
 ---
 id: 2026-10-31-claude-resolve-own-threads
-title: Claude 只能解决自己开的审查对话，新建分支只能在 claude/ 下
+title: Claude 不再解决审查对话，新建分支仍只在 claude/ 下
 status: done
 owner: agent
-decided_on: 2026-10-31
+decided_on: 2026-11-02
 source: session:679e38ca
 verify_by: 2026-11-07
-verify_how: Ray 亲手合入后，在非 A 级 PR 上让 Claude 列出并只解决它自己开的对话，并新建一条 claude/ 分支；人开的或 Codex 开的对话应被拒。
-done_on: 2026-10-31
+verify_how: Ray 亲手合入后，确认 Claude 仍能在 claude/ 下建分支并开草稿 PR，且不能用 gh api 或 graphql 解决审查对话。
+done_on: 2026-11-02
 done_ref: pr:3446
 ---
-包装命令写死一条解决对话的请求，并核对线程、本仓库、触发本次的 PR、未解决、作者是 claude。
-新建分支只允许 claude/ 加一段小写名字，拒绝 claude/ledger-verify-。
+Ray 2026-11-02 决定去掉解决审查对话，包括只解决自己开的对话。
+只留：在 claude/ 加一段小写名字下建分支（仍拒 claude/ledger-verify-）、开草稿 PR、跑测试。
 不改这个自动任务的权限，仍禁止合并、强推、改写历史、批准、标成可合并、删分支。
-合这个改动要 Ray 亲手合：这是给 Claude 自己加权限。
+合这个改动要 Ray 亲手合。本 PR 保持草稿。

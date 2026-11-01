@@ -1,8 +1,7 @@
 #!/bin/bash
-# Shows the draft wrapper cannot open a non-draft PR, the git wrapper
-# cannot be pointed at a local command or make a branch outside claude/,
-# and the thread wrapper resolves only allowed threads on the pinned PR. Uses a fake gh/git where the real
-# command must not run. Branch creation uses real git.
+# Shows the draft wrapper cannot open a non-draft PR, and the git wrapper
+# cannot be pointed at a local command or make a branch outside claude/.
+# Uses a fake gh/git where the real command must not run. Branch creation uses real git.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -28,12 +27,6 @@ sudo install -o root -g root -m 0644 /dev/null "$guard/empty-gitconfig"
 sudo install -o root -g root -m 0644 "$root/.github/scripts/git-command-config.sh" "$guard/git-command-config.sh"
 printf '%s\n' "https://github.com/bigbigraydeng-maker/magic-engine.git" > "$tmp/origin-url"
 sudo install -o root -g root -m 0644 "$tmp/origin-url" "$guard/origin-url"
-printf '%s\n' "bigbigraydeng-maker/magic-engine" > "$tmp/pin-repo"
-printf '%s\n' "3419" > "$tmp/pin-pr-number"
-printf '%s\n' "claude" > "$tmp/pin-authors"
-sudo install -o root -g root -m 0644 "$tmp/pin-repo" "$guard/repo"
-sudo install -o root -g root -m 0644 "$tmp/pin-pr-number" "$guard/pr-number"
-sudo install -o root -g root -m 0644 "$tmp/pin-authors" "$guard/resolve-thread-authors"
 
 install_copy() {
   local src="$1" dest="$2"
@@ -63,16 +56,7 @@ env > "$tmp/gh-env"
 /usr/bin/git status --porcelain >/dev/null
 exit 0
 EOF
-# Thread wrapper mock: the read prints $tmp/thread-facts, the write prints true.
-cat > "$mock_bin/gh-graphql" << EOF
-#!/bin/bash
-echo \$(( \$(cat "$calls") + 1 )) > "$calls"
-case "\$*" in
-  *resolveReviewThread*) echo mutation >> "$tmp/graphql-log"; echo true ;;
-  *) echo query >> "$tmp/graphql-log"; cat "$tmp/thread-facts" ;;
-esac
-EOF
-chmod 755 "$mock_bin/gh" "$mock_bin/git" "$mock_bin/gh-with-status" "$mock_bin/gh-graphql"
+chmod 755 "$mock_bin/gh" "$mock_bin/git" "$mock_bin/gh-with-status"
 
 install_copy "$root/.github/scripts/gh-pr-create-draft.sh" "$tmp/gh-pr-create-draft" \
   -e "s#/opt/claude-guards#$guard#g" \
@@ -85,9 +69,6 @@ install_copy "$root/.github/scripts/git-limited.sh" "$tmp/git-limited-mock" \
 install_copy "$root/.github/scripts/gh-pr-create-draft.sh" "$tmp/gh-pr-create-draft-status" \
   -e "s#/opt/claude-guards#$guard#g" \
   -e "s#/usr/bin/gh#$mock_bin/gh-with-status#g"
-install_copy "$root/.github/scripts/gh-resolve-thread.sh" "$tmp/gh-resolve-thread" \
-  -e "s#/opt/claude-guards#$guard#g" \
-  -e "s#GH_BIN=/usr/bin/gh#GH_BIN=$mock_bin/gh-graphql#g"
 
 reset_mock() {
   printf '0\n' > "$calls"
@@ -262,63 +243,6 @@ expect_reject "editor" "$draft" --editor --title Hello
 expect_draft "normal long flags" "$draft" --head feature --body text --title Hello
 expect_draft "equals form" "$draft" --head=feature --body=text --title=Hello
 expect_draft "fill bool" "$draft" --fill --title Hello --body text
-
-resolve="$tmp/gh-resolve-thread"
-facts() { printf '%s\n' "$1" > "$tmp/thread-facts"; rm -f "$tmp/graphql-log"; }
-good='PullRequestReviewThread|false|3419|bigbigraydeng-maker/magic-engine'
-expect_resolve_refused() {
-  local name="$1"
-  shift
-  set +e
-  "$resolve" "$@" >"$tmp/out" 2>"$tmp/err"
-  local status=$?
-  set -e
-  if [[ "$status" -eq 0 ]]; then
-    echo "$name: expected refusal" >&2
-    exit 1
-  fi
-  if grep -q mutation "$tmp/graphql-log" 2>/dev/null; then
-    echo "$name: mutation ran" >&2
-    exit 1
-  fi
-}
-facts "$good|claude"
-expect_resolve_refused "no id"
-expect_resolve_refused "two ids" PRRT_abc PRRT_def
-expect_resolve_refused "not a thread id" PR_kwDOabc
-expect_resolve_refused "injection" 'PRRT_a"){x}'
-expect_resolve_refused "flag" --method=POST
-facts "PullRequest|null|null||"
-expect_resolve_refused "node is a PR" PRRT_abc
-facts "PullRequestReviewThread|false|9999|bigbigraydeng-maker/magic-engine|claude"
-expect_resolve_refused "other PR" PRRT_abc
-facts "PullRequestReviewThread|false|3419|someone/else|claude"
-expect_resolve_refused "other repo" PRRT_abc
-facts "$good|bigbigraydeng-maker"
-expect_resolve_refused "human thread" PRRT_abc
-facts "$good|"
-expect_resolve_refused "ghost author" PRRT_abc
-facts "|null|null||"
-expect_resolve_refused "missing node" PRRT_abc
-facts "$good|claude"
-"$resolve" PRRT_abc >"$tmp/out"
-assert_eq "$(tr '\n' ' ' < "$tmp/graphql-log")" "query mutation " "claude thread resolves"
-facts "$good|chatgpt-codex-connector[bot]"
-expect_resolve_refused "codex thread" PRRT_kwDO-x_1
-facts "listing"
-"$resolve" --list >"$tmp/out"
-assert_eq "$(tr '\n' ' ' < "$tmp/graphql-log")" "query " "list is read only"
-expect_resolve_refused "list with extra arg" --list PRRT_abc
-facts "PullRequestReviewThread|true|3419|bigbigraydeng-maker/magic-engine|claude"
-"$resolve" PRRT_abc >"$tmp/out"
-assert_eq "$(tr '\n' ' ' < "$tmp/graphql-log")" "query " "already resolved does not write"
-printf '\n' > "$tmp/pin-pr-number"
-sudo install -o root -g root -m 0644 "$tmp/pin-pr-number" "$guard/pr-number"
-facts "$good|claude"
-expect_resolve_refused "issue run has no PR" PRRT_abc
-expect_resolve_refused "issue run cannot list" --list
-printf '%s\n' "3419" > "$tmp/pin-pr-number"
-sudo install -o root -g root -m 0644 "$tmp/pin-pr-number" "$guard/pr-number"
 
 git_real="$tmp/git-limited"
 git_mock="$tmp/git-limited-mock"
@@ -498,12 +422,17 @@ expected="$(printf '%s\n' \
   '      actions: read # Required for Claude to read CI results on PRs' \
   '    steps:')"
 assert_eq "$perm" "$expected" "job permissions changed"
-if grep -F 'chatgpt-codex-connector' "$root/.github/workflows/claude.yml"; then
-  echo "resolve allowlist must not name Codex" >&2
+if [[ -e "$root/.github/scripts/gh-resolve-thread.sh" ]]; then
+  echo "resolve-thread wrapper must stay deleted" >&2
   exit 1
 fi
-if ! grep -F 'printf '\''%s\n'\'' "claude" > "$tmp/resolve-thread-authors"' "$root/.github/workflows/claude.yml" >/dev/null; then
-  echo "pinned resolve author list must be exactly claude" >&2
+if grep -F 'gh-resolve-thread' "$root/.github/workflows/claude.yml"; then
+  echo "workflow still installs or allows resolving review threads" >&2
+  exit 1
+fi
+tools_line="$(grep -F -- '--allowedTools' "$root/.github/workflows/claude.yml")"
+if grep -E -q 'gh api|graphql|resolveReviewThread' <<<"$tools_line"; then
+  echo "allowed tools still include gh api or graphql" >&2
   exit 1
 fi
 if grep -E -q 'Bash\(git (fetch|checkout|switch|cherry-pick):' "$root/.github/workflows/claude.yml"; then

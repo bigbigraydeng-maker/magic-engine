@@ -36,11 +36,6 @@ jobs:
       # them. Tradeoff: the merged default-branch files are trusted. This job
       # does not verify a signature, and it does not add a separate sandbox.
       - name: Install Claude command guards
-        env:
-          # Only a PR-triggered run gets a PR number. An issue run pins an
-          # empty file, and gh-resolve-thread then refuses every call.
-          PR_NUMBER: ${{ github.event.pull_request.number || (github.event.issue.pull_request && github.event.issue.number) || '' }}
-          REPO_FULL_NAME: ${{ github.repository }}
         run: |
           set -euo pipefail
           default_branch="${{ github.event.repository.default_branch }}"
@@ -49,36 +44,17 @@ jobs:
           git show "FETCH_HEAD:.github/scripts/gh-pr-create-draft.sh" > "$tmp/gh-pr-create-draft.sh"
           git show "FETCH_HEAD:.github/scripts/git-limited.sh" > "$tmp/git-limited.sh"
           git show "FETCH_HEAD:.github/scripts/git-command-config.sh" > "$tmp/git-command-config.sh"
-          git show "FETCH_HEAD:.github/scripts/gh-resolve-thread.sh" > "$tmp/gh-resolve-thread.sh"
-          if [[ -n "$PR_NUMBER" && ! "$PR_NUMBER" =~ ^[1-9][0-9]{0,9}$ ]]; then
-            echo "unexpected PR number" >&2
-            exit 1
-          fi
-          printf '%s\n' "$PR_NUMBER" > "$tmp/pr-number"
-          printf '%s\n' "$REPO_FULL_NAME" > "$tmp/repo"
-          # Threads Claude may resolve: only those it opened itself.
-          # GraphQL login, no [bot] suffix. A person or Codex stays unresolved.
-          # Ray 2026-10-31: the pinned list is exactly this one login.
-          printf '%s\n' "claude" > "$tmp/resolve-thread-authors"
           printf '%s\n' "https://github.com/${{ github.repository }}.git" > "$tmp/origin-url"
           : > "$tmp/empty-gitconfig"
           sudo install -d -o root -g root -m 0755 /opt/claude-guards /opt/claude-guards/empty-gh
           sudo install -o root -g root -m 0755 "$tmp/gh-pr-create-draft.sh" /opt/claude-guards/gh-pr-create-draft
           sudo install -o root -g root -m 0755 "$tmp/git-limited.sh" /opt/claude-guards/git-limited
-          sudo install -o root -g root -m 0755 "$tmp/gh-resolve-thread.sh" /opt/claude-guards/gh-resolve-thread
-          sudo install -o root -g root -m 0644 "$tmp/pr-number" /opt/claude-guards/pr-number
-          sudo install -o root -g root -m 0644 "$tmp/repo" /opt/claude-guards/repo
-          sudo install -o root -g root -m 0644 "$tmp/resolve-thread-authors" /opt/claude-guards/resolve-thread-authors
           sudo install -o root -g root -m 0644 "$tmp/git-command-config.sh" /opt/claude-guards/git-command-config.sh
           sudo install -o root -g root -m 0644 "$tmp/origin-url" /opt/claude-guards/origin-url
           sudo install -o root -g root -m 0644 "$tmp/empty-gitconfig" /opt/claude-guards/empty-gitconfig
           rm -rf "$tmp"
           test "$(stat -c '%U:%a' /opt/claude-guards/gh-pr-create-draft)" = "root:755"
           test "$(stat -c '%U:%a' /opt/claude-guards/git-limited)" = "root:755"
-          test "$(stat -c '%U:%a' /opt/claude-guards/gh-resolve-thread)" = "root:755"
-          test "$(stat -c '%U:%a' /opt/claude-guards/pr-number)" = "root:644"
-          test "$(stat -c '%U:%a' /opt/claude-guards/repo)" = "root:644"
-          test "$(stat -c '%U:%a' /opt/claude-guards/resolve-thread-authors)" = "root:644"
           test "$(stat -c '%U:%a' /opt/claude-guards/git-command-config.sh)" = "root:644"
           test "$(stat -c '%U:%a' /opt/claude-guards/origin-url)" = "root:644"
           test "$(stat -c '%U:%a' /opt/claude-guards/empty-gitconfig)" = "root:644"
@@ -86,7 +62,7 @@ jobs:
           test "$(stat -c '%U:%a' /opt/claude-guards)" = "root:755"
           test -x /usr/bin/gh
           test -x /usr/bin/git
-          if [[ -w /opt/claude-guards || -w /opt/claude-guards/gh-pr-create-draft || -w /opt/claude-guards/git-limited || -w /opt/claude-guards/git-command-config.sh || -w /opt/claude-guards/empty-gh || -w /opt/claude-guards/origin-url || -w /opt/claude-guards/empty-gitconfig || -w /opt/claude-guards/gh-resolve-thread || -w /opt/claude-guards/pr-number || -w /opt/claude-guards/repo || -w /opt/claude-guards/resolve-thread-authors ]]; then
+          if [[ -w /opt/claude-guards || -w /opt/claude-guards/gh-pr-create-draft || -w /opt/claude-guards/git-limited || -w /opt/claude-guards/git-command-config.sh || -w /opt/claude-guards/empty-gh || -w /opt/claude-guards/origin-url || -w /opt/claude-guards/empty-gitconfig ]]; then
             echo "guard path is writable by the job user" >&2
             exit 1
           fi
@@ -113,9 +89,7 @@ jobs:
           # caller args, and rejects flags that can turn draft off. Raw
           # `gh pr create` is not allowed. No merge, no force-push, no raw
           # gh api / gh api graphql, no approve, no ready-for-review.
-          # Review threads are resolved only through gh-resolve-thread: one
-          # fixed mutation, one PRRT_ id, only on the PR that started this
-          # run, only threads opened by the pinned login (claude).
+          # Review threads are not resolved from this job.
           # fetch / checkout / switch / cherry-pick go through git-limited.
           # New branches (checkout -b / switch -c) must be claude/<name>.
           # Raw git prefixes are not allowed: flags such as --upload-pack run
@@ -136,6 +110,6 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/v1/docs/usage.md
           # and https://github.com/anthropics/claude-code-action/blob/v1/docs/configuration.md
           claude_args: |
-            --allowedTools "Bash(/opt/claude-guards/git-limited:*),Bash(/opt/claude-guards/gh-pr-create-draft:*),Bash(/opt/claude-guards/gh-resolve-thread:*),Bash(gh pr view:*),Bash(npm ci),Bash(npm test),Bash(npm run type-check)"
-            --append-system-prompt "This runner has guarded commands. Raw git checkout/switch/fetch/cherry-pick, raw gh api and gh pr create are refused. To make a new branch, run from the repo root: /opt/claude-guards/git-limited switch -c claude/<short-name> (lower case, one segment after claude/), then push with the push wrapper named in your instructions. Only make a new branch when the comment asks for a new branch or a new PR; otherwise push to the existing PR branch. To open a PR use /opt/claude-guards/gh-pr-create-draft (always a draft). To see unresolved review threads on this PR, run /opt/claude-guards/gh-resolve-thread --list. To resolve a thread you have actually fixed and pushed, run /opt/claude-guards/gh-resolve-thread PRRT_<id>; it only works on this PR and only on threads whose opener is claude. Threads opened by a person or by Codex are refused. Never resolve a thread you did not fix, and list every thread you resolved in your comment."
+            --allowedTools "Bash(/opt/claude-guards/git-limited:*),Bash(/opt/claude-guards/gh-pr-create-draft:*),Bash(gh pr view:*),Bash(npm ci),Bash(npm test),Bash(npm run type-check)"
+            --append-system-prompt "This runner has guarded commands. Raw git checkout/switch/fetch/cherry-pick, raw gh api and gh pr create are refused. To make a new branch, run from the repo root: /opt/claude-guards/git-limited switch -c claude/<short-name> (lower case, one segment after claude/), then push with the push wrapper named in your instructions. Only make a new branch when the comment asks for a new branch or a new PR; otherwise push to the existing PR branch. To open a PR use /opt/claude-guards/gh-pr-create-draft (always a draft). Do not resolve review threads. gh api and graphql stay refused."
 
