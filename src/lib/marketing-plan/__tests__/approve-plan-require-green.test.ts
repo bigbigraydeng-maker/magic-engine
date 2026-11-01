@@ -112,6 +112,19 @@ beforeEach(() => {
 })
 
 describe('approvePlan requireAllGreen', () => {
+  it('refuses an old card when the displayed plan dates changed but the promo hash did not', async () => {
+    const promo = draft(socialSpec())
+    const args = {
+      clientId: 'client-1', planId: 'plan-1', approvedBy: 'ray@example.com',
+      expectedContentHash: promoContentHash(promo),
+      expectedPlanStart: '2026-11-01', expectedPlanEnd: '2026-11-30',
+    }
+    expect((await approvePlan({ ...args, commit: false })).kind).toBe('ready')
+    h.plan!.start_date = '2026-11-02'
+    expect((await approvePlan(args)).kind).toBe('stale')
+    expect(h.updates).toHaveLength(0)
+  })
+
   it('approves a draft whose applicable checks are all green, and only writes plan status', async () => {
     draft(socialSpec())
     const result = await approvePlan({ clientId: 'client-1', planId: 'plan-1', approvedBy: 'ray@example.com', requireAllGreen: true })
@@ -140,6 +153,7 @@ describe('approvePlan requireAllGreen', () => {
       expect(result.checks.map(check => ({ key: check.key, light: check.light, phase_id: check.phase_id }))).toEqual([
         { key: 'ads.budget_within_caps', light: 'yellow', phase_id: 'p2' },
       ])
+      expect(result.contentHash).toBe(promoContentHash(promo))
     }
     expect(h.updates).toHaveLength(0)
     expect(h.dispatch).not.toHaveBeenCalled()
@@ -188,6 +202,62 @@ describe('approvePlan requireAllGreen', () => {
     expect(result.kind).toBe('approved')
     expect(h.dispatch).not.toHaveBeenCalled()
     expect(h.updates[0]).toMatchObject({ status: 'approved' })
+  })
+
+  it('approves a yellow draft from the plan card when the content stamp matches', async () => {
+    const promo = draft(baseSpec())
+    h.gate = landingVerified(promo)
+    const result = await approvePlan({
+      clientId: 'client-1',
+      planId: 'plan-1',
+      approvedBy: 'ray@example.com',
+      requireAllGreen: false,
+      expectedContentHash: promoContentHash(promo),
+    })
+    expect(result.kind).toBe('approved')
+    expect(h.updates).toHaveLength(1)
+    expect(h.dispatch).not.toHaveBeenCalled()
+  })
+
+  it('a preview does not write the approval', async () => {
+    const promo = draft(baseSpec())
+    h.gate = landingVerified(promo)
+    const result = await approvePlan({
+      clientId: 'client-1',
+      planId: 'plan-1',
+      approvedBy: 'ray@example.com',
+      commit: false,
+      expectedContentHash: promoContentHash(promo),
+    })
+    expect(result.kind).toBe('ready')
+    expect(h.updates).toHaveLength(0)
+    expect(h.dispatch).not.toHaveBeenCalled()
+  })
+
+  it('does not approve a card whose plan content changed', async () => {
+    draft(socialSpec())
+    const result = await approvePlan({
+      clientId: 'client-1',
+      planId: 'plan-1',
+      approvedBy: 'ray@example.com',
+      expectedContentHash: '0000000000000000',
+    })
+    expect(result.kind).toBe('stale')
+    expect(h.updates).toHaveLength(0)
+    expect(h.dispatch).not.toHaveBeenCalled()
+  })
+
+  it('does not treat an already-approved plan as the card when the content changed', async () => {
+    const promo = draft(socialSpec(), 'approved')
+    const result = await approvePlan({
+      clientId: 'client-1',
+      planId: 'plan-1',
+      approvedBy: 'ray@example.com',
+      expectedContentHash: '0000000000000000',
+    })
+    expect(result.kind).toBe('stale')
+    expect(promoContentHash(promo)).not.toBe('0000000000000000')
+    expect(h.updates).toHaveLength(0)
   })
 
   it('does not approve a plan that is already approved', async () => {

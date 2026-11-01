@@ -6,6 +6,7 @@ import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
 import type { CardClicker } from './actor'
 import { assertMayIssue } from './actor'
 import { contentFingerprint, normalizeFacts, type CardFacts } from './facts'
+import { isPlanApprovalCard } from '@/lib/marketing-plan/plan-card-subject'
 import { ensureConfirmationPolicy } from './policy'
 import { listPendingCards } from './records'
 import { ConfirmationCardError } from './errors'
@@ -91,11 +92,14 @@ async function openRun(
 
 export async function issueConfirmationCard(
   deps: KernelDeps,
-  args: { clientId: string; clicker: CardClicker; facts: CardFacts; now?: Date },
+  args: { clientId: string; clicker: CardClicker; facts: CardFacts; now?: Date; allowPlanApproval?: boolean },
 ): Promise<ConfirmationCardView> {
   assertMayIssue(args.clicker, args.clientId)
   const now = args.now ?? deps.now()
   const facts = normalizeFacts(args.facts)
+  if (isPlanApprovalCard(facts.subjectKey) && args.allowPlanApproval !== true) {
+    throw new ConfirmationCardError('invalid', '计划批准卡不能从这里开。请从处方的同意里出。')
+  }
   const fingerprint = contentFingerprint(facts)
   await ensureConfirmationPolicy(deps.supabase, args.clientId, issuerName(args.clicker), now)
   const fresh = await retireOld(deps, args.clientId, facts.subjectKey, fingerprint, now)

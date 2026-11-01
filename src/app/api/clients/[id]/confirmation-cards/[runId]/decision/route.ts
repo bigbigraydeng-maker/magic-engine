@@ -3,8 +3,9 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { createKernel } from '@/lib/kernel'
 import { isUuid } from '@/lib/validation-utils'
-import { assertMayClick, clickerFromSession, decideConfirmationCard } from '@/lib/confirmation-card'
+import { assertMayClick, clickerFromSession } from '@/lib/confirmation-card'
 import { parseDecisionBody, publicError } from '@/lib/confirmation-card/http'
+import { applyConfirmationDecision } from '@/lib/marketing-plan/plan-card-decision'
 
 export async function POST(
   req: Request,
@@ -34,13 +35,14 @@ export async function POST(
       return NextResponse.json({ error: '请求内容读不懂，没有收下。' }, { status: 400 })
     }
     const body = parseDecisionBody(raw)
-    const card = await decideConfirmationCard(createKernel(supabaseAdmin), {
+    const card = await applyConfirmationDecision(createKernel(supabaseAdmin), {
       clientId: params.id,
       runId: params.runId,
       clicker,
       resolution: body.resolution,
       expectedDecisionId: body.expectedDecisionId,
       fingerprint: body.fingerprint,
+      approvedBy: access.user.email ?? null,
     })
     return NextResponse.json(card)
   } catch (error) {
