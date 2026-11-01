@@ -88,7 +88,7 @@ describe('detectOutsideChanges', () => {
     expect(detectOutsideChanges([before, after], [pause, otherEntity, tooEarly, failed])).toHaveLength(1)
   })
 
-  it('drops new entities when the create action is a paused ME draft (awaiting_approval / blocked / rejected)', () => {
+  it('drops new entities when the create action is a paused ME draft (awaiting_approval / blocked / rejected / activating)', () => {
     const adset = snap({
       level: 'adset', entityId: 'set-draft', entityName: 'Draft set', campaignId: 'camp-1',
       capturedAt: T1, settingsHash: 'draft-set', dailyBudgetMinor: 2000,
@@ -97,7 +97,7 @@ describe('detectOutsideChanges', () => {
       level: 'ad', entityId: 'ad-draft', entityName: 'Draft ad', adsetId: 'set-draft',
       capturedAt: T1, settingsHash: 'draft-ad',
     })
-    for (const status of ['awaiting_approval', 'blocked', 'rejected'] as const) {
+    for (const status of ['awaiting_approval', 'blocked', 'rejected', 'activating'] as const) {
       const created = action({
         key: 'ads.create_ad',
         occurredAt: '2026-10-30T09:40:00.000Z',
@@ -106,6 +106,36 @@ describe('detectOutsideChanges', () => {
       })
       expect(detectOutsideChanges([campaign, adset, ad], [created])).toEqual([])
     }
+  })
+
+  it('drops new entities when create failed but the receipt row carries entity ids', () => {
+    const adset = snap({
+      level: 'adset', entityId: 'set-part', entityName: 'Part set', campaignId: 'camp-1',
+      capturedAt: T1, settingsHash: 'part-set', dailyBudgetMinor: 2000,
+    })
+    const created = action({
+      key: 'ads.create_ad',
+      occurredAt: '2026-10-30T09:40:00.000Z',
+      ids: idsInRecord({ status: 'failed', campaignId: 'camp-1', adSetId: 'set-part' }),
+      status: 'failed',
+    })
+    expect(detectOutsideChanges([campaign, adset], [created])).toEqual([])
+  })
+
+  it('still tags ME 外 when create failed without entity ids on the receipt row', () => {
+    const adset = snap({
+      level: 'adset', entityId: 'set-orphan', entityName: 'Orphan set', campaignId: 'camp-1',
+      capturedAt: T1, settingsHash: 'orphan-set', dailyBudgetMinor: 2000,
+    })
+    const created = action({
+      key: 'ads.create_ad',
+      occurredAt: '2026-10-30T09:40:00.000Z',
+      ids: [],
+      status: 'failed',
+    })
+    expect(detectOutsideChanges([campaign, adset], [created])).toEqual([
+      expect.objectContaining({ kind: 'new_adset', entityId: 'set-orphan' }),
+    ])
   })
 
   it('drops a change when a finished action record matches the entity in the gap (match)', () => {

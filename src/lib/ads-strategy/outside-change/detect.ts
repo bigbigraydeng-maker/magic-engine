@@ -27,8 +27,11 @@ const CREATE_KEYS = new Set([
   'ads.swap_creative',
 ])
 const DONE_STATUS = new Set(['succeeded', 'active', 'executed'])
-/** ME paused draft ledger rows — not live yet, but still ME-created (not outside Meta edits). */
-const PENDING_DRAFT_STATUS = new Set(['awaiting_approval', 'blocked', 'rejected'])
+/**
+ * ME paused draft ledger rows — not live yet, but still ME-created (not outside Meta edits).
+ * `activating`: approved, waiting for Meta to finish creating the entity.
+ */
+const PENDING_DRAFT_STATUS = new Set(['awaiting_approval', 'blocked', 'rejected', 'activating'])
 const ID_KEYS = new Set([
   'entity_id', 'entityId',
   'campaign_id', 'campaignId',
@@ -237,6 +240,10 @@ function statusExplains(action: ActionFact, createAction: boolean): boolean {
   if (!action.status) return true
   if (DONE_STATUS.has(action.status)) return true
   if (createAction && PENDING_DRAFT_STATUS.has(action.status)) return true
+  // Partial create failures can leave entities on Meta; only treat as ME-built when the row
+  // carries entity ids — otherwise we cannot tie the receipt to the snapshot and must not
+  // suppress the outside-change tag.
+  if (createAction && action.status === 'failed' && action.ids.length > 0) return true
   return false
 }
 
