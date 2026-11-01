@@ -55,5 +55,6 @@ export async function listConfirmationCards(
     clicker,
     views,
     new Map(runs.map((run) => [run.id, run.input])),
+    new Map(runs.map((run) => [run.id, run.evidence])),
   )
 }

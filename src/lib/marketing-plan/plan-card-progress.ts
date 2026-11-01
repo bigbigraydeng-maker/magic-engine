@@ -34,12 +34,36 @@ export function pendingPlanView(
   }
 }
 
+/** Shown when confirm must not touch the plan: revoked, archived, or replaced. */
+export const PLAN_CARD_EXPIRED = '这张卡已过期'
+
+/** Set on the run once this card's confirm has been applied to the plan. */
+export const PLAN_APPROVAL_APPLIED_KEY = 'plan_approval_applied'
+
+export function planApprovalApplied(evidence: unknown): boolean {
+  if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return false
+  const mark = (evidence as Record<string, unknown>)[PLAN_APPROVAL_APPLIED_KEY]
+  return !!mark && typeof mark === 'object' && !Array.isArray(mark)
+}
+
+export function expiredPlanView(card: ConfirmationCardView): ConfirmationCardView {
+  return {
+    ...card,
+    status: 'expired',
+    statusLine: PLAN_CARD_EXPIRED,
+    confirmEnabled: false,
+    declineEnabled: false,
+    blockedReason: null,
+  }
+}
+
 export async function reconcilePlanCardViews(
   sb: SupabaseClient,
   clientId: string,
   clicker: CardClicker,
   cards: readonly ConfirmationCardView[],
   inputs: ReadonlyMap<string, Record<string, unknown>>,
+  evidenceByRun: ReadonlyMap<string, unknown>,
 ): Promise<ConfirmationCardView[]> {
   const subjects = new Map<string, { planId: string; contentHash: string; start: string | null; end: string | null }>()
   for (const card of cards) {
@@ -61,19 +85,34 @@ export async function reconcilePlanCardViews(
   return cards.map((card) => {
     const subject = subjects.get(card.runId)
     if (!subject) return card
-    if (!subject.start || !subject.end) {
-      return pendingPlanView(card, clicker, '这张卡没有准确日期，不能再用于批准。', false)
-    }
-    const plan = plans.get(subject.planId)
-    if (!plan) return pendingPlanView(card, clicker, '找不到卡上这份计划，请到计划页核实。', false)
-    if (contentHashOf(plan) !== subject.contentHash) {
-      return pendingPlanView(card, clicker, '计划内容已变，这张卡不能再用于批准。', false)
-    }
-    if (plan.start_date !== subject.start || plan.end_date !== subject.end) {
-      return pendingPlanView(card, clicker, '计划日期已变，这张卡不能再用于批准。', false)
-    }
-    if (plan.status === 'approved') return approvedPlanView(card)
-    if (plan.status === 'draft') return pendingPlanView(card, clicker, '请再次点确认重试批准。', true)
-    return pendingPlanView(card, clicker, '计划已不是草稿，请到计划页核实。', false)
+    return viewForPlan(
+      card,
+      clicker,
+      planApprovalApplied(evidenceByRun.get(card.runId)),
+      subject,
+      plans.get(subject.planId),
+    )
   })
+}
+
+function viewForPlan(
+  card: ConfirmationCardView,
+  clicker: CardClicker,
+  applied: boolean,
+  subject: { contentHash: string; start: string | null; end: string | null },
+  plan: MarketingPlan | undefined,
+): ConfirmationCardView {
+  if (!subject.start || !subject.end || !plan) {
+    return applied
+      ? expiredPlanView(card)
+      : pendingPlanView(card, clicker, '找不到卡上这份计划，或日期对不上，请到计划页核实。', false)
+  }
+  const sameContent = contentHashOf(plan) === subject.contentHash
+  const sameDates = plan.start_date === subject.start && plan.end_date === subject.end
+  if (!sameContent || !sameDates || plan.status === 'archived') return expiredPlanView(card)
+  if (plan.status === 'approved') return approvedPlanView(card)
+  // A draft after this card already applied the approval is a revoke, not a failed save.
+  if (plan.status === 'draft' && applied) return expiredPlanView(card)
+  if (plan.status === 'draft') return pendingPlanView(card, clicker, '请再次点确认重试批准。', true)
+  return pendingPlanView(card, clicker, '计划已不是草稿，请到计划页核实。', false)
 }

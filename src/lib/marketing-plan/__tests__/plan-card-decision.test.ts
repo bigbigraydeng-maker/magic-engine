@@ -50,6 +50,23 @@ function fixture(): Fixture {
   })
 }
 
+function planFixture(status = 'draft'): Fixture {
+  return makeFixture({
+    registry: ACTION_REGISTRY,
+    capabilities: (sb) => createCapabilities(sb),
+    startAt: START,
+    options: {
+      extraTables: {
+        marketing_plans: [{
+          id: PLAN, client_id: CLIENT_A, status,
+          start_date: '2026-11-01', end_date: '2026-11-30',
+          plan_data: { promo: { testHash: HASH } },
+        }],
+      },
+    },
+  })
+}
+
 function approved() {
   return { kind: 'approved', plan: { id: PLAN }, dispatch: { tasks_created: 0 }, receipt: { content_hash: HASH } }
 }
@@ -179,14 +196,10 @@ describe('plan confirmation card', () => {
   })
 
   it('a second confirm does not approve again', async () => {
-    const f = fixture()
+    const f = planFixture()
     let wrote = false
     mockApprove.mockImplementation(async (args: { commit?: boolean }) => {
-      if (args.commit === false) {
-        return wrote
-          ? { kind: 'already_approved', plan: { id: PLAN }, existingTaskCount: 1 }
-          : { kind: 'ready' }
-      }
+      if (args.commit === false) return { kind: 'ready' }
       if (!wrote) {
         wrote = true
         return approved()
@@ -195,13 +208,13 @@ describe('plan confirmation card', () => {
     })
     const card = await issuePlan(f)
     const first = await click(f, card, 'confirm')
+    f.tables.marketing_plans[0].status = 'approved'
     const second = await click(f, card, 'confirm')
     expect(first.status).toBe('confirmed')
     expect(second.status).toBe('confirmed')
     expect(wrote).toBe(true)
     const commits = mockApprove.mock.calls.filter((call) => call[0].commit === true)
-    expect(commits).toHaveLength(2)
-    expect(commits[1][0]).toMatchObject({ planId: PLAN })
+    expect(commits).toHaveLength(1)
     expect(runStatus(f, card.runId)).toBe('authorized')
   })
 
@@ -216,20 +229,7 @@ describe('plan confirmation card', () => {
   })
 
   it('shows a retry state when approval fails after the card click, including after reload', async () => {
-    const f = makeFixture({
-      registry: ACTION_REGISTRY,
-      capabilities: (sb) => createCapabilities(sb),
-      startAt: START,
-      options: {
-        extraTables: {
-          marketing_plans: [{
-            id: PLAN, client_id: CLIENT_A, status: 'draft',
-            start_date: '2026-11-01', end_date: '2026-11-30',
-            plan_data: { promo: { testHash: HASH } },
-          }],
-        },
-      },
-    })
+    const f = planFixture()
     const card = await issuePlan(f)
     mockApprove.mockImplementation(async (args: { commit?: boolean }) => (
       args.commit === false ? { kind: 'ready' } : { kind: 'conflict', status: 500, error: '暂时没保存成功。' }
@@ -251,7 +251,7 @@ describe('plan confirmation card', () => {
     f.tables.marketing_plans[0].start_date = '2026-11-02'
     const changed = await listConfirmationCards(f.kernel, CLIENT_A, OPC)
     expect(changed.find((view) => view.runId === card.runId)).toMatchObject({
-      status: 'pending_application', confirmEnabled: false,
+      status: 'expired', statusLine: '这张卡已过期', confirmEnabled: false,
     })
     f.tables.marketing_plans[0].start_date = '2026-11-01'
 
@@ -277,6 +277,48 @@ describe('plan confirmation card', () => {
     expect(failed.status).toBe('pending_application')
     expect(failed.statusLine).toContain('尚未批准')
     expect(runStatus(f, card.runId)).toBe('authorized')
+  })
+
+  it('does not restore a revoked, archived, or replaced plan from the old card', async () => {
+    const f = planFixture()
+    const card = await issuePlan(f)
+    const first = await click(f, card, 'confirm')
+    expect(first.status).toBe('confirmed')
+    const commits = () => mockApprove.mock.calls.filter((call) => call[0].commit === true).length
+    expect(commits()).toBe(1)
+    f.tables.marketing_plans[0].status = 'draft'
+    mockApprove.mockImplementation(async (args: { commit?: boolean }) => (
+      args.commit === false ? { kind: 'ready' } : approved()
+    ))
+
+    await expect(click(f, card, 'confirm')).rejects.toMatchObject({ code: 'stale', message: '这张卡已过期' })
+    expect(commits()).toBe(1)
+    expect(f.tables.marketing_plans[0].status).toBe('draft')
+    const revoked = await listConfirmationCards(f.kernel, CLIENT_A, OPC)
+    expect(revoked.find((view) => view.runId === card.runId)).toMatchObject({
+      status: 'expired', statusLine: '这张卡已过期', confirmEnabled: false,
+    })
+
+    f.tables.marketing_plans[0].status = 'archived'
+    await expect(click(f, card, 'confirm')).rejects.toMatchObject({ message: '这张卡已过期' })
+    expect(commits()).toBe(1)
+
+    f.tables.marketing_plans[0].status = 'approved'
+    f.tables.marketing_plans[0].plan_data = { promo: { testHash: 'ffffffffffffffff' } }
+    await expect(click(f, card, 'confirm')).rejects.toMatchObject({ message: '这张卡已过期' })
+    expect(commits()).toBe(1)
+    expect(mockApprove.mock.calls.filter((call) => call[0].commit === true)).toHaveLength(1)
+  })
+
+  it('rejects a fresh card when the plan is already archived or replaced', async () => {
+    const f = fixture()
+    const card = await issuePlan(f)
+    mockApprove.mockResolvedValue({ kind: 'not_draft', status: 'archived' })
+    await expect(click(f, card, 'confirm')).rejects.toMatchObject({ code: 'stale', message: '这张卡已过期' })
+    mockApprove.mockResolvedValue({ kind: 'stale' })
+    await expect(click(f, card, 'confirm')).rejects.toMatchObject({ code: 'stale', message: '这张卡已过期' })
+    expect(mockApprove.mock.calls.every((call) => call[0].commit === false)).toBe(true)
+    expect(runStatus(f, card.runId)).toBe('pending_approval')
   })
 
   it.each([
