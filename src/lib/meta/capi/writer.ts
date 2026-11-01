@@ -37,22 +37,11 @@ import type {
 import { hashEmail, hashName, hashPhone } from '@/lib/pii/hasher'
 import { maskForPreview } from './preview'
 import { resolveCapiConfig, type CapiCredentials } from './config'
+import { capiEventNameForKind } from '@/lib/conversions/capi-client-config'
 import { toMajorUnits } from '@/lib/conversions/money'
 
 const GRAPH_VERSION = process.env.META_CAPI_VERSION ?? 'v19.0'
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`
-
-/** Meta 标准事件名。业务事实 → 事件名的映射只发生在这里。 */
-const EVENT_NAME: Record<OutcomeForSend['outcomeKind'], string> = {
-  // 收到定金 = 一笔成交（PM 2026-09-05 定义：与出发日无关）
-  purchase: 'Purchase',
-  // 🔴 尾款**不是** Purchase。PM 明令："定金算成交，坚决不能记成 2 笔。"
-  //    Meta 不按 order_id 合并，发两次 Purchase 会让成交数翻倍、每单成本看起来减半。
-  //    自定义事件名照收，但不计入标准成交口径。
-  balance: 'BalancePaid',
-  // 有效咨询 = 对话过或邮件过
-  lead: 'Lead',
-}
 
 export type MetaCapiPayload = {
   data: Array<{
@@ -153,7 +142,7 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
     }
 
     const event: MetaCapiPayload['data'][number] = {
-      event_name: EVENT_NAME[outcome.outcomeKind],
+      event_name: capiEventNameForKind(outcome.outcomeKind),
       event_time: Math.floor(new Date(outcome.occurredAt).getTime() / 1000),
       // 幂等键 = 事实行的 uuid（不可变）。
       // 注意：Meta 只在 pixel↔server 之间用它去重，服务端之间不去重 ——
@@ -187,7 +176,7 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
 
   preview(outcome: OutcomeForSend, config: ClientSendConfig): Record<string, unknown> {
     return maskForPreview(outcome, config, {
-      eventName: EVENT_NAME[outcome.outcomeKind],
+      eventName: capiEventNameForKind(outcome.outcomeKind),
       maxEventAgeDays: this.maxEventAgeDays,
     })
   }

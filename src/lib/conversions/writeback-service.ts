@@ -24,6 +24,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
+import { capiEventNameForKind, decideCapiEventAllowed } from './capi-client-config'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
 import type {
@@ -197,7 +198,7 @@ export async function sendApprovedOutcome(
   // ── 3. 读客户配置 ──────────────────────────────────────────────────
   const { data: clientData, error: clientErr } = await supabase
     .from('clients')
-    .select('id, default_phone_country, conversion_stage, facebook_page_id')
+    .select('id, default_phone_country, conversion_stage, facebook_page_id, leads_config')
     .eq('id', outcome.client_id)
     .maybeSingle()
 
@@ -208,6 +209,7 @@ export async function sendApprovedOutcome(
     default_phone_country: string | null
     conversion_stage: string | null
     facebook_page_id: string | null
+    leads_config: unknown
   }
   const config: ClientSendConfig = {
     clientId: outcome.client_id,
@@ -299,6 +301,20 @@ export async function sendApprovedOutcome(
       message: `早了 ${Math.floor(ageDays)} 天 —— 广告平台只收 ${writer.maxEventAgeDays} 天内的，这条发不出去`,
       writebackId: wb.id,
     }
+  }
+
+  // ── 5b. 客户允许的事件名单。不在名单里的停在试运行，连预检请求都不发。 ──
+  // 名单这个键不存在 = 保持今天的行为。格式读不出来 = 停住，不许发出去。
+  const allowed = decideCapiEventAllowed(client.leads_config, capiEventNameForKind(outcome.outcome_kind))
+  if (!allowed.allow) {
+    const preview = { held: true, reason: allowed.reason }
+    const held = await casUpdate(supabase, wb.id, ['queued', 'failed'], {
+      status: 'dry_run',
+      last_error: allowed.reason,
+      payload_preview: preview,
+    })
+    if (!held) return await currentState(supabase, wb.id)
+    return { status: 'dry_run', message: allowed.reason, writebackId: wb.id, preview }
   }
 
   const forSend = toOutcomeForSend(outcome)
