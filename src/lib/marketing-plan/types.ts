@@ -284,6 +284,11 @@ export interface MarketingPlan {
     blank_draft?: { goal_id: string }
     /** 广告 Agent 保存未批准草稿时由服务端写入。调用方传了这一段则整单拒绝。*/
     agent_draft?: { key_id: string; prescription_id: string; saved_at: string }
+    /**
+     * 同一目标下有更新的计划被批准时写上：这份已批准计划被归档，并记下替换它的计划和时间。
+     * 页面只展示人话，不把这段原样倒出来。
+     */
+    superseded_by?: { plan_id: string; at: string }
   } | null
   approved_at: string | null
   created_at: string
