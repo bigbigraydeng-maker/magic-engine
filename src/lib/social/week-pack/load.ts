@@ -12,6 +12,7 @@ import { computeItemFingerprint, computePackContentHash } from '@/lib/social/sto
 import { packState, type LiteServicePorts } from '@/lib/social/story-lite/service'
 
 import { nzDateKey, targetWeek } from './cadence'
+import { lifetimeDaysCoveringWeek } from './lifetime'
 import {
   buildManifest,
   emptyStory,
@@ -25,7 +26,6 @@ import {
 } from './manifest'
 import type { ManifestStory, WeekPackManifest } from './types'
 
-const STORY_LIFETIME_DAYS = 7
 const REEL_CAP = 30
 
 export interface ClientPackSettings {
@@ -82,7 +82,7 @@ async function loadStory(
       pack_id: current.pack.id,
       title: current.pack.title,
       state: packState(current.pack, now),
-      content_hash: computePackContentHash(items, STORY_LIFETIME_DAYS),
+      content_hash: computePackContentHash(items, lifetimeDaysCoveringWeek(now, weekEnd)),
       items: items.map((item) => ({
         item_id: item.item_id,
         channel: item.channel,

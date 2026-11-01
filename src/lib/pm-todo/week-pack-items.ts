@@ -29,19 +29,40 @@ export interface HeldCount {
   reels: number
 }
 
+export interface HandledPack {
+  clientId: string
+  subjectKey: string
+}
+
 export interface WeekPackTodoSource {
   configs: Array<{ id: string; name: string; config: unknown }> | 'unread'
   pending: PendingCard[] | 'unread'
+  handled: HandledPack[] | 'unread'
   held: HeldCount[] | 'unread'
+}
+
+/** A pack this client and week already agreed to, or already turned down. Expired and voided cards are not handled. */
+export function readHandledPack(row: {
+  clientId: string
+  status: string
+  subjectKey: string
+  reason: string
+}): HandledPack | null {
+  if (!row.clientId || !row.subjectKey.startsWith('social:week-pack:')) return null
+  if (row.status === 'authorized') return { clientId: row.clientId, subjectKey: row.subjectKey }
+  if (row.status === 'denied' && row.reason.includes('不做')) {
+    return { clientId: row.clientId, subjectKey: row.subjectKey }
+  }
+  return null
 }
 
 export function buildWeekPackTodoItems(source: WeekPackTodoSource, now: Date, enabled: boolean): ManualItem[] {
   if (!enabled) return []
   const items: ManualItem[] = []
-  if (source.configs === 'unread' || source.pending === 'unread') {
+  if (source.configs === 'unread' || source.pending === 'unread' || source.handled === 'unread') {
     items.push(unreadable('今天读不到整包该不该批，不要当成没有人待批。', '打开一位客户的本周总览看「批下一周」。'))
   } else {
-    items.push(...approvalItems(source.configs, source.pending, now))
+    items.push(...approvalItems(source.configs, source.pending, source.handled, now))
   }
   if (source.held === 'unread') {
     items.push(unreadable('今天读不到有几条被单独拦住，不要当成 0 条。', '打开本周总览和 Story 页看被拦住的内容。'))
@@ -70,12 +91,13 @@ async function loadWeekPackTodoSource(
   nameOf: (id: string) => string,
   clientIds: readonly string[],
 ): Promise<WeekPackTodoSource> {
-  const [configs, pending, held] = await Promise.all([
+  const [configs, pending, handled, held] = await Promise.all([
     loadConfigs(supabase, nameOf, clientIds),
     loadPending(supabase),
+    loadHandled(supabase),
     loadHeld(supabase, now, clientIds),
   ])
-  return { configs, pending, held }
+  return { configs, pending, handled, held }
 }
 
 async function loadConfigs(
@@ -185,9 +207,62 @@ function mergeHeld(stories: Map<string, number>, reels: Map<string, number>): He
   }))
 }
 
+async function loadHandled(supabase: SupabaseClient): Promise<WeekPackTodoSource['handled']> {
+  const { data, error } = await supabase
+    .from('action_runs')
+    .select('client_id, status, input, authorization_decision_id')
+    .eq('action_key', CONFIRMATION_ACTION_KEY)
+    .in('status', ['authorized', 'denied'])
+    .limit(LOOK_CAP)
+  if (error || (data ?? []).length >= LOOK_CAP) return 'unread'
+  const rows = (data ?? []) as Array<Record<string, unknown>>
+  const reasons = await decisionReasons(supabase, rows)
+  if (reasons === 'unread') return 'unread'
+  return rows.flatMap((row) => {
+    const packed = readHandledPack(handledFields(row, reasons))
+    return packed ? [packed] : []
+  })
+}
+
+function handledFields(row: Record<string, unknown>, reasons: ReadonlyMap<string, string>): {
+  clientId: string
+  status: string
+  subjectKey: string
+  reason: string
+} {
+  const input = row.input && typeof row.input === 'object' ? row.input as Record<string, unknown> : null
+  const decisionId = typeof row.authorization_decision_id === 'string' ? row.authorization_decision_id : ''
+  return {
+    clientId: typeof row.client_id === 'string' ? row.client_id : '',
+    status: typeof row.status === 'string' ? row.status : '',
+    subjectKey: typeof input?.subject_key === 'string' ? input.subject_key : '',
+    reason: reasons.get(decisionId) ?? '',
+  }
+}
+
+async function decisionReasons(
+  supabase: SupabaseClient,
+  rows: Array<Record<string, unknown>>,
+): Promise<Map<string, string> | 'unread'> {
+  const ids = rows.flatMap((row) => (
+    row.status === 'denied' && typeof row.authorization_decision_id === 'string'
+      ? [row.authorization_decision_id]
+      : []
+  ))
+  if (ids.length === 0) return new Map()
+  const { data, error } = await supabase.from('authorization_decisions').select('id, reason').in('id', ids)
+  if (error) return 'unread'
+  const reasons = new Map<string, string>()
+  for (const row of (data ?? []) as Array<{ id?: unknown; reason?: unknown }>) {
+    if (typeof row.id === 'string') reasons.set(row.id, typeof row.reason === 'string' ? row.reason : '')
+  }
+  return reasons
+}
+
 function approvalItems(
   configs: Array<{ id: string; name: string; config: unknown }>,
   pending: PendingCard[],
+  handled: HandledPack[],
   now: Date,
 ): ManualItem[] {
   const week = targetWeek(now)
@@ -195,6 +270,7 @@ function approvalItems(
   for (const client of configs) {
     const cadence = cadenceFromConfig(client.config)
     const subject = weekPackSubject(client.id, week.weekStart)
+    if (handled.some((row) => row.clientId === client.id && row.subjectKey === subject)) continue
     const card = pending.find((row) => row.clientId === client.id && row.subjectKey === subject)
     const age = card ? now.getTime() - Date.parse(card.issuedAt) : null
     const fresh = age != null && age >= 0 && age < EXPIRING_MS

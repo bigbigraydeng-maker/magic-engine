@@ -12,6 +12,7 @@ import { authorizeLitePack, revokeLitePack, type LiteResult, type LiteServicePor
 import type { LiteActor } from '@/lib/social/story-lite/types'
 
 import { cadenceFromConfig, type WeeklyPackCadence } from './cadence'
+import { storyAuthorizeLifetime } from './lifetime'
 import type { WeekPackPorts, RevokeStoryResult } from './flow'
 import type { ReelPromoteResult, StoryAuthResult } from './lines'
 import { loadWeekPackManifest, readClientPackSettings, type ClientPackSettings } from './load'
@@ -74,6 +75,7 @@ async function authorizeStory(input: WireInput, packId: string, contentHash: str
     clientId: input.clientId,
     actor: input.actor,
     confirm: true,
+    lifetimeDays: storyAuthorizeLifetime(input.now),
     expectedContentHash: contentHash,
     now: input.now,
   })

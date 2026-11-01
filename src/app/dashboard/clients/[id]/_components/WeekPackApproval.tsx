@@ -6,6 +6,8 @@
 
 import { useEffect, useState } from 'react'
 
+import { ReelGoPublicPreviewPanel, type ReelGoPublicPreview } from '@/app/dashboard/factory/_components/PromoteReelButton'
+
 interface CardView {
   run_id: string
   expected_decision_id: string
@@ -39,6 +41,21 @@ function asText(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() && !/[{}[\]]/.test(value) ? value : fallback
 }
 
+function readPreview(value: unknown): ReelGoPublicPreview | null {
+  if (!value || typeof value !== 'object') return null
+  const row = value as Record<string, unknown>
+  if (typeof row.preview_token !== 'string' || row.preview_token.length < 8) return null
+  const text = (item: unknown) => (typeof item === 'string' ? item : '')
+  return {
+    preview_token: row.preview_token,
+    page_id: text(row.page_id),
+    video_id: text(row.video_id),
+    caption: text(row.caption),
+    first_comment: text(row.first_comment),
+    mode: text(row.mode),
+  }
+}
+
 function isPage(value: unknown): value is PackPage {
   if (!value || typeof value !== 'object') return false
   const row = value as Partial<PackPage>
@@ -49,7 +66,8 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
   const [load, setLoad] = useState<Load>({ kind: 'loading' })
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
-  const [previewed, setPreviewed] = useState<Record<string, string>>({})
+  const [seen, setSeen] = useState<Record<string, string>>({})
+  const [openPreview, setOpenPreview] = useState<(ReelGoPublicPreview & { work_order_id: string }) | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -75,7 +93,7 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
     setBusy(true)
     setNote(null)
     try {
-      const preview_tokens = Object.entries(previewed).map(([work_order_id, preview_token]) => ({ work_order_id, preview_token }))
+      const preview_tokens = Object.entries(seen).map(([work_order_id, preview_token]) => ({ work_order_id, preview_token }))
       const res = await fetch(`/api/clients/${clientId}/week-pack`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -94,7 +112,8 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
         return
       }
       setLoad({ kind: 'ready', page: json })
-      setPreviewed({})
+      setSeen({})
+      setOpenPreview(null)
     } catch {
       setNote('没点成，请刷新后再试。')
     } finally {
@@ -112,13 +131,18 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
         body: JSON.stringify({ confirm: false }),
       })
       const json: unknown = await res.json().catch(() => null)
-      const token = json && typeof json === 'object' ? (json as { preview_token?: unknown }).preview_token : null
-      if (!res.ok || typeof token !== 'string') {
+      const preview = readPreview(json)
+      if (!res.ok || !preview) {
         const error = json && typeof json === 'object' ? asText((json as { error?: unknown }).error, '') : ''
         setNote(error || '预览没做成，请再到视频工厂点一次。')
         return
       }
-      setPreviewed((current) => ({ ...current, [workOrderId]: token }))
+      setSeen((current) => {
+        const next = { ...current }
+        delete next[workOrderId]
+        return next
+      })
+      setOpenPreview({ ...preview, work_order_id: workOrderId })
     } catch {
       setNote('预览没做成，请再到视频工厂点一次。')
     } finally {
@@ -157,11 +181,29 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
             <li key={reel.work_order_id} className="flex flex-wrap items-center gap-2 text-sm">
               <span className="text-me-charcoal">{reel.title}</span>
               <button type="button" disabled={busy} onClick={() => void preview(reel.work_order_id)} className="rounded-lg border border-black/15 px-2 py-1 text-xs font-semibold">
-                {previewed[reel.work_order_id] ? '已预览' : '先预览'}
+                {seen[reel.work_order_id] ? '已看过' : '先预览'}
               </button>
             </li>
           ))}
-          <li className="text-xs text-me-charcoal/70">还没预览的视频不会公开。预览只有几分钟，过了要再点一次。</li>
+          {openPreview && (
+            <li>
+              <ReelGoPublicPreviewPanel
+                preview={openPreview}
+                actions={(
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setSeen((current) => ({ ...current, [openPreview.work_order_id]: openPreview.preview_token }))
+                      setOpenPreview(null)
+                    }}
+                    className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                  >我看过了</button>
+                )}
+              />
+            </li>
+          )}
+          <li className="text-xs text-me-charcoal/70">看过公开内容之后，这条才会算预览过。还没看过的不会公开。预览只有几分钟，过了要再点一次。</li>
         </ul>
       )}
       {page.receipt_lines.length > 0 && (

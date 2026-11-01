@@ -4,14 +4,16 @@ import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import type { CardClicker } from '@/lib/confirmation-card/actor'
 import type { ConfirmationCardView } from '@/lib/confirmation-card/view'
 import { InMemoryLiteStore } from '@/lib/social/story-lite/in-memory-store'
-import type { LiteServicePorts } from '@/lib/social/story-lite/service'
+import { authorizeLitePack, buildLitePreview, type LiteServicePorts } from '@/lib/social/story-lite/service'
 import type { NewLiteItem } from '@/lib/social/story-lite/types'
 
 import { cadenceFromConfig, cadenceSentence, DEFAULT_WEEKLY_PACK_CADENCE, isWeekday, targetWeek } from '../cadence'
+import { storyAuthorizeLifetime } from '../lifetime'
 import { buildWeekPackFacts, scopeHasDigest, scopeLine } from '../facts'
 import { manifestDigest } from '../fingerprint'
 import { confirmWeekPack, declineWeekPack, openWeekPack, revokeWeekPack, type WeekPackPorts } from '../flow'
 import { loadWeekPackManifest } from '../load'
+import { createWeekPackPorts } from '../wire'
 import { buildManifest, emptyStory, selectReels, unreadStory, type ReelInput } from '../manifest'
 import { promoteReelGated } from '../promote-guard'
 import { reelGoPublicOnApproveEnabled, weeklyPackApprovalEnabled } from '../switches'
@@ -349,6 +351,59 @@ describe('load', () => {
     expect(manifest.reels.items).toHaveLength(0)
     expect(calls).toContainEqual(['client_id', CLIENT])
     expect(scopeLine(manifest, manifestDigest(manifest))).toContain('Reel 读不到')
+  })
+
+  it('authorises a Friday click that includes the following Sunday', async () => {
+    const store = new InMemoryLiteStore()
+    store.seedClient(CLIENT, { facebook_page_id: 'page-fixture', client_status: 'active' })
+    const sunday = '2026-11-15T06:00:00.000Z'
+    await store.insertPack(
+      { id: 'pack-sun', client_id: CLIENT, title: '下一周', now: new Date('2026-11-01T00:00:00.000Z') },
+      [storyItem('sun-1', sunday)],
+    )
+    const litePorts: LiteServicePorts = {
+      store,
+      adminEmails: { has: (email) => email === 'admin@example.com' },
+      checkFile: async () => 'OK',
+      sendEvent: async () => {},
+    }
+    const actor = { id: 'user-1', email: 'admin@example.com', allowedClientId: null }
+    const lifetime = storyAuthorizeLifetime(FRIDAY_NZ)
+    expect(lifetime).toBeGreaterThan(7)
+    expect(lifetime).toBeLessThanOrEqual(14)
+    const short = await buildLitePreview({
+      ports: litePorts, packId: 'pack-sun', clientId: CLIENT, actor, now: FRIDAY_NZ, lifetimeDays: 7,
+    })
+    expect(short.ok).toBe(true)
+    if (!short.ok) return
+    expect(short.value.items[0]?.problems).toContain('SLOT_AFTER_EXPIRY')
+    expect(short.value.can_authorize).toBe(false)
+    const refused = await authorizeLitePack({
+      ports: litePorts, packId: 'pack-sun', clientId: CLIENT, actor, confirm: true,
+      lifetimeDays: 7, expectedContentHash: short.value.content_hash, now: FRIDAY_NZ,
+    })
+    expect(refused).toMatchObject({ ok: false, status: 422, error: 'PACK_NOT_AUTHORIZABLE' })
+
+    const manifest = await loadWeekPackManifest({
+      ports: litePorts,
+      db: { from: () => ({ select: () => ({ eq: () => ({ in: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) }) }) } as never,
+      clientId: CLIENT,
+      now: FRIDAY_NZ,
+    })
+    expect(manifest.story.content_hash).toBeTruthy()
+    const wired = createWeekPackPorts({
+      litePorts,
+      db: {} as never,
+      kernel: {} as never,
+      clicker: OPC,
+      actor,
+      clientId: CLIENT,
+      now: FRIDAY_NZ,
+      env: {},
+      settings: { label: '示例客户', config: null, configReadable: true },
+    })
+    const authorised = await wired.authorizeStory(manifest.story.pack_id ?? '', manifest.story.content_hash ?? '')
+    expect(authorised).toEqual({ ok: true, code: 'story_authorized' })
   })
 })
 
