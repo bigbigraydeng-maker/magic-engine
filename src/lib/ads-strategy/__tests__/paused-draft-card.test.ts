@@ -8,7 +8,7 @@ import { createFakeSupabase } from '@/lib/kernel/__tests__/fake-supabase'
 import type { CardClicker } from '@/lib/confirmation-card'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import type { AdDraft } from '../ad-draft'
-import { loadPausedDraftContext } from '../paused-draft-context'
+import { joinSpendPages, loadPausedDraftContext, readPaged } from '../paused-draft-context'
 import { pausedDraftClickUrl, PAUSED_DRAFT_WHAT } from '../paused-draft-copy'
 import { pausedDraftRetry } from '../paused-draft-facts'
 import { issuePausedDraftCard, submitPausedDraftCard } from '../paused-draft-submit'
@@ -667,6 +667,31 @@ describe('paused draft confirmation', () => {
   })
 })
 
+function freshCaptures(at: string) {
+  return (['campaign', 'adset'] as const).map((level) => ({
+    client_id: CLIENT_A,
+    ad_account_id: 'act_test',
+    level,
+    complete: true,
+    skipped_shared: false,
+    error: null,
+    captured_at: at,
+  }))
+}
+
+function spendBase(adAccountId: string) {
+  return {
+    client_meta_ad_accounts: [{
+      client_id: CLIENT_A,
+      ad_account_id: adAccountId,
+      label: '主账户',
+      daily_budget_cap_cents: 20000,
+    }],
+    ad_strategy_configs: [{ client_id: CLIENT_A, daily_budget_cap_cents: 20000 }],
+    clients: [{ id: CLIENT_A, name: '客户甲' }],
+  }
+}
+
 describe('paused draft helpers', () => {
   it('allows one changed retry and then stops on the same error class', () => {
     expect(pausedDraftRetry([], 'a')).toBe('allow')
@@ -700,12 +725,13 @@ describe('paused draft helpers', () => {
         captured_at: '2026-10-27T00:00:00.000Z',
       }],
       clients: [{ id: CLIENT_A, name: '客户甲' }],
+      ad_snapshot_captures: [],
     })
     const loaded = await loadPausedDraftContext(sb, CLIENT_A, 'act_test')
     expect(loaded.accountLabel).toBe('主账户')
     expect(loaded.review.accounts?.[0]?.currency).toBe('NZD')
     expect(loaded.review.clientCapCents).toBe(20000)
-    expect(loaded.review.liveDeliveringCents).toBe(0)
+    expect(loaded.review.liveDeliveringCents).toBeNull()
     expect(loaded.review.campaignShapes).toEqual([])
   })
 
@@ -757,12 +783,117 @@ describe('paused draft helpers', () => {
         },
       ],
       clients: [{ id: CLIENT_A, name: '客户甲' }],
+      ad_snapshot_captures: freshCaptures(now),
     })
     const loaded = await loadPausedDraftContext(sb, CLIENT_A, 'act_test')
     expect(loaded.review.liveDeliveringCents).toBe(14500)
     expect(loaded.review.campaignShapes).toEqual([
       { entityId: 'camp-1', objective: 'OUTCOME_LEADS', budgetLevel: 'abo' },
     ])
+  })
+
+  it('does not treat a stale snapshot or a mismatched account id as zero delivering', async () => {
+    const stale = new Date(Date.now() - 3 * 86_400_000).toISOString()
+    const old = createFakeSupabase({
+      ...spendBase('act_10001'),
+      ad_entity_snapshots: [{
+        client_id: CLIENT_A,
+        ad_account_id: 'act_10001',
+        level: 'adset',
+        entity_id: 'set-old',
+        campaign_id: 'camp-old',
+        budget_level: 'abo',
+        effective_status: 'ACTIVE',
+        daily_budget_minor: 9000,
+        currency: 'NZD',
+        capture_reason: 'daily',
+        captured_at: stale,
+      }],
+      ad_snapshot_captures: freshCaptures(new Date().toISOString()).map((row) => ({ ...row, ad_account_id: 'act_10001' })),
+    })
+    const staleRead = await loadPausedDraftContext(old, CLIENT_A, 'act_10001')
+    expect(staleRead.review.liveDeliveringCents).toBeNull()
+
+    const now = new Date().toISOString()
+    const mismatch = createFakeSupabase({
+      ...spendBase('act_10001'),
+      ad_entity_snapshots: [{
+        client_id: CLIENT_A,
+        ad_account_id: '10001',
+        level: 'adset',
+        entity_id: 'set-other',
+        campaign_id: 'camp-other',
+        budget_level: 'abo',
+        effective_status: 'ACTIVE',
+        daily_budget_minor: 8000,
+        currency: 'NZD',
+        capture_reason: 'daily',
+        captured_at: now,
+      }],
+      ad_snapshot_captures: freshCaptures(now).map((row) => ({ ...row, ad_account_id: 'act_10001' })),
+    })
+    const mismatched = await loadPausedDraftContext(mismatch, CLIENT_A, 'act_10001')
+    expect(mismatched.review.liveDeliveringCents).toBeNull()
+  })
+
+  it('does not treat a missing ad set capture as zero, and reads past the first snapshot page', async () => {
+    const now = new Date().toISOString()
+    const older = new Date(Date.now() - 60_000).toISOString()
+    const campaigns = Array.from({ length: 1000 }, (_, index) => ({
+      client_id: CLIENT_A,
+      ad_account_id: 'act_10001',
+      level: 'campaign',
+      entity_id: `camp-${String(index).padStart(4, '0')}`,
+      campaign_id: `camp-${String(index).padStart(4, '0')}`,
+      budget_level: 'abo',
+      objective: 'OUTCOME_LEADS',
+      effective_status: 'ACTIVE',
+      daily_budget_minor: null,
+      currency: 'NZD',
+      capture_reason: 'daily',
+      captured_at: now,
+    }))
+    const sb = createFakeSupabase({
+      ...spendBase('act_10001'),
+      ad_entity_snapshots: [
+        ...campaigns,
+        {
+          client_id: CLIENT_A,
+          ad_account_id: 'act_10001',
+          level: 'adset',
+          entity_id: 'set-page-2',
+          campaign_id: 'camp-0000',
+          budget_level: 'abo',
+          effective_status: 'ACTIVE',
+          daily_budget_minor: 5000,
+          currency: 'NZD',
+          capture_reason: 'daily',
+          captured_at: older,
+        },
+      ],
+      ad_snapshot_captures: freshCaptures(now).map((row) => ({ ...row, ad_account_id: 'act_10001' })),
+    })
+    const paged = await loadPausedDraftContext(sb, CLIENT_A, 'act_10001')
+    expect(paged.review.liveDeliveringCents).toBe(5000)
+
+    const incomplete = createFakeSupabase({
+      ...spendBase('act_10001'),
+      ad_entity_snapshots: campaigns,
+      ad_snapshot_captures: freshCaptures(now).map((row) => (
+        row.level === 'adset' ? { ...row, ad_account_id: 'act_10001', complete: false, error: 'page failed' } : { ...row, ad_account_id: 'act_10001' }
+      )),
+    })
+    const missingAdSets = await loadPausedDraftContext(incomplete, CLIENT_A, 'act_10001')
+    expect(missingAdSets.review.liveDeliveringCents).toBeNull()
+    expect(missingAdSets.review.campaignShapes?.length).toBe(1000)
+  })
+
+  it('treats a full snapshot page without a following short page as unread', async () => {
+    const full = Array.from({ length: 1000 }, (_, index) => index)
+    expect(joinSpendPages([full], 1000)).toBeNull()
+    expect(joinSpendPages([full, full.slice(0, 1)], 1000)).toEqual([...full, 0])
+    const failed = await readPaged<number>(async (from) => (from === 0 ? full : null), 1000)
+    expect(failed).toBeNull()
   })
 
   it('is not wired into prescription agreement', () => {

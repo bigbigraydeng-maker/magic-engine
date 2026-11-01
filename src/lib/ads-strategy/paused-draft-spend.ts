@@ -8,6 +8,9 @@ import { sumDeliveringDailyMinor, type HeadroomRow } from './launch-budget-headr
 import type { CampaignShape } from './paused-draft-facts'
 
 const CAPTURE = new Set(['first_seen', 'changed', 'daily', 'disappeared', 'kernel_pre', 'kernel_post'])
+/** Same window as promo-draft coverage: older than this, the delivering total is not current. */
+export const SPEND_FRESH_MS = 2 * 86_400_000
+const NEEDED_LEVELS = ['campaign', 'adset'] as const
 
 export interface SnapshotSpendRow {
   ad_account_id: unknown
@@ -23,23 +26,89 @@ export interface SnapshotSpendRow {
   objective: unknown
 }
 
+export interface SnapshotCaptureRow {
+  level: unknown
+  complete: unknown
+  skipped_shared: unknown
+  error: unknown
+  captured_at: unknown
+}
+
 export interface SpendRead {
   readonly liveDeliveringCents: number | null
   readonly campaignShapes: readonly CampaignShape[] | null
 }
 
-/** null rows = the snapshot query failed. An empty list was read and is empty. */
-export function spendFromSnapshots(rows: readonly SnapshotSpendRow[] | null): SpendRead {
+interface ParsedCapture {
+  level: 'campaign' | 'adset'
+  complete: boolean
+  skippedShared: boolean
+  error: string | null
+  at: number
+}
+
+/** null rows = the snapshot query failed. No rows is not "nothing is delivering". */
+export function spendFromSnapshots(
+  rows: readonly SnapshotSpendRow[] | null,
+  captures: readonly SnapshotCaptureRow[] | null,
+  nowMs = Date.now(),
+): SpendRead {
   if (!rows) return { liveDeliveringCents: null, campaignShapes: null }
+  const shapes = campaignShapes(rows)
+  if (rows.length === 0 || !capturesCover(captures, nowMs)) {
+    return { liveDeliveringCents: null, campaignShapes: shapes }
+  }
   const parsed: HeadroomRow[] = []
   for (const row of rows) {
     const one = toHeadroom(row)
     if (one === 'bad') return { liveDeliveringCents: null, campaignShapes: null }
     if (one) parsed.push(one)
   }
+  return { liveDeliveringCents: sumDeliveringDailyMinor(parsed), campaignShapes: shapes }
+}
+
+/** Newest entity row must be inside the fresh window. No rows is not fresh. */
+export function spendRowsAreFresh(rows: readonly { captured_at: unknown }[], nowMs: number): boolean {
+  let newest = Number.NEGATIVE_INFINITY
+  if (rows.length === 0) return false
+  for (const row of rows) {
+    if (typeof row.captured_at !== 'string') return false
+    const at = Date.parse(row.captured_at)
+    if (!Number.isFinite(at)) return false
+    if (at > newest) newest = at
+  }
+  return nowMs - newest <= SPEND_FRESH_MS
+}
+
+function capturesCover(rows: readonly SnapshotCaptureRow[] | null, nowMs: number): boolean {
+  if (!rows) return false
+  const latest = new Map<ParsedCapture['level'], ParsedCapture>()
+  for (const row of rows) {
+    const parsed = parseCapture(row)
+    if (!parsed) continue
+    const prev = latest.get(parsed.level)
+    if (!prev || parsed.at > prev.at) latest.set(parsed.level, parsed)
+  }
+  return NEEDED_LEVELS.every((level) => validCapture(latest.get(level), nowMs))
+}
+
+function validCapture(row: ParsedCapture | undefined, nowMs: number): boolean {
+  if (!row || !row.complete || row.skippedShared || row.error) return false
+  return nowMs - row.at <= SPEND_FRESH_MS
+}
+
+function parseCapture(row: SnapshotCaptureRow): ParsedCapture | null {
+  if (row.level !== 'campaign' && row.level !== 'adset') return null
+  if (typeof row.captured_at !== 'string' || typeof row.complete !== 'boolean') return null
+  const at = Date.parse(row.captured_at)
+  if (!Number.isFinite(at)) return null
+  const error = typeof row.error === 'string' && row.error.trim() ? row.error.trim() : null
   return {
-    liveDeliveringCents: sumDeliveringDailyMinor(parsed),
-    campaignShapes: campaignShapes(rows),
+    level: row.level,
+    complete: row.complete,
+    skippedShared: row.skipped_shared === true,
+    error,
+    at,
   }
 }
 

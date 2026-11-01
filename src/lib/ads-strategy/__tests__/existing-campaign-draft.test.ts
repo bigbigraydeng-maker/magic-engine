@@ -67,7 +67,9 @@ describe('已有系列编号', () => {
       '账户',
       { ...REVIEW, liveDeliveringCents: null },
     )
-    expect(unread.hardChecks.find((check) => check.label === '日预算上限')?.state).toBe('unread')
+    const cap = unread.hardChecks.find((check) => check.label === '日预算上限')
+    expect(cap).toMatchObject({ state: 'unread', reason: '读不到在投预算' })
+    expect(cap?.state).not.toBe('green')
     const cbo = pausedDraftFacts(draft({ existingCampaignId: '900001' }), '账户', {
       ...REVIEW,
       campaignShapes: [{ entityId: '900001', objective: 'OUTCOME_LEADS', budgetLevel: 'cbo' }],

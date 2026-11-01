@@ -122,7 +122,7 @@ function capCheck(draft: AdDraft, review: PausedDraftReview): HardCheck {
   if (verdict.verdict === 'ok') return { label: '日预算上限', state: 'green', reason: '' }
   if (verdict.verdict === 'unknown') {
     const unreadLive = verdict.reasons.some((reason) => reason.includes('已在投'))
-    return { label: '日预算上限', state: 'unread', reason: unreadLive ? '已在投的日预算没读到' : '上限没核成' }
+    return { label: '日预算上限', state: 'unread', reason: unreadLive ? '读不到在投预算' : '上限没核成' }
   }
   return { label: '日预算上限', state: 'red', reason: '已在投的日预算加上这份草稿，超过了上限' }
 }

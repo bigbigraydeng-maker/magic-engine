@@ -140,10 +140,14 @@ type SpendSplit =
   | { ok: false; reason: string }
   | { ok: true; currency: string; delivering: HeadroomUnit[]; latent: HeadroomUnit[] }
 
-/** 已在投的日预算合计（最小货币单位）。没有行 = 读到了、没有在投。读不全 = null，不能当成 0。 */
+/**
+ * 已在投的日预算合计（最小货币单位）。
+ * 没有任何可用快照行 = null，不能当成「读到了、没有在投」。
+ * 有行但都不在投 = 0。预算缺失、币种混杂、合计溢出 = null。
+ */
 export function sumDeliveringDailyMinor(rows: readonly HeadroomRow[]): number | null {
   const latest = latestPerEntity(rows)
-  if (latest.length === 0) return 0
+  if (latest.length === 0) return null
   const split = splitSpend(latest)
   if (!split.ok) return null
   const minor = split.delivering.reduce((sum, unit) => sum + unit.dailyMinor, 0)

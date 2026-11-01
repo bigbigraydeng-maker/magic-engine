@@ -480,6 +480,11 @@ describe('executeConfirmedGoLive', () => {
       ids,
     })
     expect(result.settle).toMatchObject({ outcome: 'held', paused: true })
+    expect(m.activatePublished).toHaveBeenCalledWith(
+      { campaignId: 'camp', adSetId: 'set', adIds: ['ad'] },
+      'tok',
+      { skipIds: ['camp'] },
+    )
     expect(m.pausePublished).toHaveBeenCalledWith(
       expect.objectContaining({ reusedCampaign: true, campaignId: 'camp' }),
       'tok',
