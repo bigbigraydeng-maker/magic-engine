@@ -4,11 +4,12 @@ import { readClientKind, readWeeklyShootCount } from './personal-ip'
 
 /** clients.client_kind；读不到、空值都按普通客户。 */
 export async function loadClientKind(supabase: SupabaseClient, clientId: string): Promise<ClientKind> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('clients')
     .select('client_kind')
     .eq('id', clientId)
     .maybeSingle<{ client_kind: string | null }>()
+  if (error) return 'standard'
   return readClientKind(data?.client_kind)
 }
 
