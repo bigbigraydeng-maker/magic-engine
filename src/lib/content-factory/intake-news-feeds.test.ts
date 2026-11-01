@@ -27,4 +27,30 @@ describe('fetchNewsViralsForIntake', () => {
     expect(items[0].title).toBe('OpenAI ships tool')
     expect(items[0].engagement).toContain('新闻热点')
   })
+
+  it('falls back to recent items when keywords do not match', async () => {
+    const fetchFeedFn = vi.fn().mockResolvedValue([
+      {
+        title: 'Unrelated headline in English',
+        url: 'https://example.com/b',
+        publishedAt: '2026-10-01T00:00:00Z',
+        excerpt: 'body',
+      },
+      {
+        title: 'Newer unrelated',
+        url: 'https://example.com/c',
+        publishedAt: '2026-11-01T00:00:00Z',
+        excerpt: 'body',
+      },
+    ])
+
+    const { items } = await fetchNewsViralsForIntake({
+      keywords: ['出海'],
+      maxItems: 2,
+      feedUrls: ['https://example.com/feed'],
+      fetchFeedFn,
+    })
+
+    expect(items.map((i) => i.title)).toEqual(['Newer unrelated', 'Unrelated headline in English'])
+  })
 })

@@ -24,6 +24,11 @@ const SAVE_TOOL: Anthropic.Tool = {
       scrapePerPlatform: { type: 'number', description: '每平台抓几条' },
       rewriteCount: { type: 'number', description: '每次改写几条候选' },
       preferences:  { type: 'string', description: '客户的内容喜好/风格（自由文本，累积保存）' },
+      news_feeds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '新闻 RSS/Atom 地址（仅 platforms 含 news 时用；http/https，每客户自配）',
+      },
     },
   },
 }

@@ -94,13 +94,18 @@ export async function runIntakeForClient(clientId: string): Promise<IntakeRunRes
 
   let newsVirals: ViralRef[] = []
   if (config.platforms.includes('news')) {
-    const news = await fetchNewsViralsForIntake({
-      keywords: config.keywords,
-      maxItems: config.scrapePerPlatform,
-    })
-    newsVirals = news.items
-    for (const w of news.warnings) {
-      console.warn(`[intake] ${clientId}: ${w}`)
+    if (config.news_feeds.length === 0) {
+      console.warn(`[intake] ${clientId}: news 平台已开但未配置 news_feeds，跳过 RSS`)
+    } else {
+      const news = await fetchNewsViralsForIntake({
+        keywords: config.keywords,
+        maxItems: config.scrapePerPlatform,
+        feedUrls: config.news_feeds,
+      })
+      newsVirals = news.items
+      for (const w of news.warnings) {
+        console.warn(`[intake] ${clientId}: ${w}`)
+      }
     }
   }
 

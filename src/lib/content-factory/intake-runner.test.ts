@@ -10,6 +10,7 @@ const m = vi.hoisted(() => ({
     scrapePerPlatform: 20,
     rewriteCount: 5,
     preferences: '',
+    news_feeds: [] as string[],
   },
   apify: vi.fn(),
   newsFetch: vi.fn(),
@@ -72,6 +73,7 @@ beforeEach(() => {
     scrapePerPlatform: 20,
     rewriteCount: 5,
     preferences: '',
+    news_feeds: [],
   }
   m.existingSources = []
   m.inserts = []
@@ -118,6 +120,7 @@ describe('runIntakeForClient news hotspot', () => {
 
   it('fetches and rewrites deduped news when platform news is on', async () => {
     m.intakeConfig.platforms = ['news']
+    m.intakeConfig.news_feeds = ['https://example.com/feed.xml']
     m.intakeConfig.rewriteCount = 2
     m.apify.mockResolvedValue({ success: true, data: [] })
     m.newsFetch.mockResolvedValue({
@@ -126,6 +129,9 @@ describe('runIntakeForClient news hotspot', () => {
     })
     const result = await runIntakeForClient('client-1')
     expect(m.newsFetch).toHaveBeenCalledOnce()
+    expect(m.newsFetch.mock.calls[0][0]).toMatchObject({
+      feedUrls: ['https://example.com/feed.xml'],
+    })
     expect(m.generate).toHaveBeenCalledTimes(1)
     expect(result.created).toBe(1)
     expect(m.inserts[0]).toMatchObject({ source: '抓自：AI headline' })
@@ -134,6 +140,7 @@ describe('runIntakeForClient news hotspot', () => {
   it('does not waste the news slot on an already-seen headline before mix', async () => {
     m.existingSources = ['抓自：News1']
     m.intakeConfig.platforms = ['xiaohongshu', 'news']
+    m.intakeConfig.news_feeds = ['https://example.com/feed.xml']
     m.intakeConfig.rewriteCount = 3
     m.apify.mockResolvedValue({
       success: true,
@@ -148,8 +155,20 @@ describe('runIntakeForClient news hotspot', () => {
     expect(m.generate.mock.calls.map((c) => (c[1] as ViralRef).title)).toEqual(['V1', 'V2', 'V3'])
   })
 
+  it('skips news fetch when news is on but news_feeds is empty', async () => {
+    m.intakeConfig.platforms = ['news']
+    m.intakeConfig.news_feeds = []
+    m.apify.mockResolvedValue({ success: true, data: [] })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await runIntakeForClient('client-1')
+    expect(m.newsFetch).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('news_feeds'))
+    warn.mockRestore()
+  })
+
   it('uses mix so one news slot plus viral slots within rewriteCount', async () => {
     m.intakeConfig.platforms = ['xiaohongshu', 'news']
+    m.intakeConfig.news_feeds = ['https://example.com/feed.xml']
     m.intakeConfig.rewriteCount = 3
     m.apify.mockResolvedValue({
       success: true,
@@ -165,6 +184,7 @@ describe('runIntakeForClient news hotspot', () => {
 
   it('continues intake when news fetch reports failures', async () => {
     m.intakeConfig.platforms = ['news']
+    m.intakeConfig.news_feeds = ['https://example.com/feed']
     m.newsFetch.mockResolvedValue({
       items: [],
       warnings: ['新闻 RSS 跳过 https://example.com/feed：timeout'],

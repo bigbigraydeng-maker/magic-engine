@@ -2,13 +2,6 @@ import { fetchFeed } from '@/lib/market-intel/rss'
 import type { RawFeedItem } from '@/lib/market-intel/types'
 import type { ViralRef } from './topic-agent'
 
-/** Free public RSS feeds for AI / martech news (no API keys). Overridable later via client config. */
-export const DEFAULT_INTAKE_NEWS_FEED_URLS: readonly string[] = [
-  'https://openai.com/news/rss.xml',
-  'https://techcrunch.com/category/artificial-intelligence/feed/',
-  'https://venturebeat.com/category/ai/feed/',
-]
-
 const DEFAULT_WINDOW_HOURS = 72
 
 type FetchFeedFn = (feedUrl: string, windowHours?: number) => Promise<RawFeedItem[]>
@@ -51,8 +44,8 @@ function dedupeByTitle(items: RawFeedItem[]): RawFeedItem[] {
 export interface FetchNewsViralsOptions {
   keywords: string[]
   maxItems: number
+  feedUrls: readonly string[]
   windowHours?: number
-  feedUrls?: readonly string[]
   fetchFeedFn?: FetchFeedFn
 }
 
@@ -61,13 +54,15 @@ export async function fetchNewsViralsForIntake(
   opts: FetchNewsViralsOptions,
 ): Promise<{ items: ViralRef[]; warnings: string[] }> {
   const warnings: string[] = []
-  const feedUrls = opts.feedUrls ?? DEFAULT_INTAKE_NEWS_FEED_URLS
+  if (opts.feedUrls.length === 0) {
+    return { items: [], warnings }
+  }
   const fetchFeedFn = opts.fetchFeedFn ?? fetchFeed
   const windowHours = opts.windowHours ?? DEFAULT_WINDOW_HOURS
   const maxItems = Math.max(1, opts.maxItems)
 
   const batches = await Promise.all(
-    feedUrls.map(async (url) => {
+    opts.feedUrls.map(async (url) => {
       try {
         return await fetchFeedFn(url, windowHours)
       } catch (e) {
