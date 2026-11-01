@@ -156,8 +156,18 @@ function judgeAccountDatasetAligned(input: JudgeInput): TrackingGateReceipt {
 
 type PixelState = 'alive' | 'lagging' | 'dead' | 'unknown'
 
+/**
+ * 事件统计「读成功了却是空的」，而 Meta 说这个数据集刚触发过：两句话互相矛盾，
+ * 说明这次统计读到的是空响应（瞬时故障），不是「一条事件都没有」。当「没读到」处理（灰），不当红。
+ */
+function statsReadLooksEmpty(d: MetaDatasetFact | undefined, now: Date): boolean {
+  if (!d || d.events_7d === null || Object.keys(d.events_7d).length > 0) return false
+  return d.last_fired_at !== null && ageHours(d.last_fired_at, now) <= PIXEL_ALIVE_WINDOW_HOURS
+}
+
 function pixelState(d: MetaDatasetFact | undefined, now: Date): PixelState {
   if (!d || d.events_24h === null) return 'unknown'
+  if (statsReadLooksEmpty(d, now)) return 'unknown'
   const pv = d.events_24h['PageView'] ?? 0
   if (pv === 0) return 'dead'
   const firedRecently = d.last_fired_at !== null && ageHours(d.last_fired_at, now) <= PIXEL_ALIVE_WINDOW_HOURS
@@ -218,7 +228,7 @@ function judgeLeadEventSeen(input: JudgeInput): TrackingGateReceipt {
   if (total >= 1) {
     return receipt(key, 'green', `近 7 天收到 ${total} 条留资事件`, '', evidence, as_of)
   }
-  const unknown = ds.filter(d => !d || d.events_7d === null).length
+  const unknown = ds.filter(d => !d || d.events_7d === null || statsReadLooksEmpty(d, input.now)).length
   if (unknown > 0) {
     return receipt(key, 'gray', '事件统计没读到，没法确认是否收到留资事件', '确认 Meta 事件统计能读到', evidence, as_of)
   }
