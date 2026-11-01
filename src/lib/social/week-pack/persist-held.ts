@@ -22,6 +22,7 @@ const FAILURE_CODES = new Set([
   'reel_failed',
   'reel_forbidden',
   'reel_unread',
+  'first_comment_failed',
 ])
 
 export function unpublishedFailures(lines: readonly WeekPackLine[]): WeekPackLine[] {

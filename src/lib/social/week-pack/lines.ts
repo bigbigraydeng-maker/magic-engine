@@ -11,8 +11,20 @@ export interface StoryAuthResult {
 
 export interface ReelPromoteResult {
   ok: boolean
-  code: 'reel_promoted' | 'reel_failed' | 'reel_forbidden' | 'skipped_switch_off' | 'preview_required'
+  code: 'reel_promoted' | 'reel_failed' | 'reel_forbidden' | 'skipped_switch_off' | 'preview_required' | 'first_comment_failed'
   text: string
+}
+
+/** The video is already public. A failed first comment is its own failure, not a full success. */
+export function promotedReelLine(status: 'ok' | 'failed'): ReelPromoteResult {
+  if (status === 'failed') {
+    return {
+      ok: false,
+      code: 'first_comment_failed',
+      text: '视频已经公开，第一条评论没有发出去。',
+    }
+  }
+  return { ok: true, code: 'reel_promoted', text: '这条视频已按预览转公开。' }
 }
 
 const STORY_TEXT: Record<StoryAuthResult['code'], string> = {

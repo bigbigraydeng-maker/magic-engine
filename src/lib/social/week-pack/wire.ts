@@ -14,7 +14,7 @@ import type { LiteActor } from '@/lib/social/story-lite/types'
 import { cadenceFromConfig, type WeeklyPackCadence } from './cadence'
 import { storyAuthorizeLifetime } from './lifetime'
 import type { WeekPackPorts, RevokeStoryResult } from './flow'
-import type { ReelPromoteResult, StoryAuthResult } from './lines'
+import { promotedReelLine, type ReelPromoteResult, type StoryAuthResult } from './lines'
 import { loadWeekPackManifest, readClientPackSettings, type ClientPackSettings } from './load'
 import { recordUnpublishedOnCard } from './persist-held'
 import { promoteReelGated } from './promote-guard'
@@ -115,7 +115,10 @@ async function callRunPromote(workOrderId: string, previewToken: string, adminEm
     orderId: workOrderId, adminEmail, confirm: true, previewToken,
   })
   if (!result.ok) return { ok: false, code: 'reel_failed', text: safePromoteText(result.error) }
-  return { ok: true, code: 'reel_promoted', text: '这条视频已按预览转公开。' }
+  if (result.kind !== 'promoted' && result.kind !== 'synced') {
+    return { ok: false, code: 'reel_failed', text: '这条视频没能转公开。' }
+  }
+  return promotedReelLine(result.data.first_comment_status)
 }
 
 function safePromoteText(error: string): string {

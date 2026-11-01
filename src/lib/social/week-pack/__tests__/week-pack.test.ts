@@ -12,6 +12,7 @@ import { storyAuthorizeLifetime } from '../lifetime'
 import { buildWeekPackFacts, scopeHasDigest, scopeLine } from '../facts'
 import { manifestDigest } from '../fingerprint'
 import { confirmWeekPack, declineWeekPack, openWeekPack, revokeWeekPack, type WeekPackPorts } from '../flow'
+import { promotedReelLine } from '../lines'
 import { loadWeekPackManifest } from '../load'
 import { readHeldEvidence, recordUnpublishedOnCard, unpublishedFailures } from '../persist-held'
 import { createWeekPackPorts } from '../wire'
@@ -271,6 +272,42 @@ describe('orchestration', () => {
     expect(result.receipt?.lines.find((line) => line.kind === 'story')?.ok).toBe(true)
     expect(result.receipt?.lines.find((line) => line.code === 'reel_failed')?.ok).toBe(false)
     expect(fake.record.mock.calls[0][0].lines.map((line: { code: string }) => line.code)).toEqual(['reel_failed'])
+  })
+
+  it('records a failed first comment without treating the public video as a full success', async () => {
+    const failed = promotedReelLine('failed')
+    expect(promotedReelLine('ok')).toMatchObject({ ok: true, code: 'reel_promoted' })
+    expect(failed).toMatchObject({ ok: false, code: 'first_comment_failed' })
+    expect(failed.text).toContain('已经公开')
+    expect(failed.text).toContain('第一条评论')
+    expect(failed.text).not.toContain('这条视频没有')
+    expect(failed.text).not.toMatch(/https?:|permalink|page_id/)
+    const reelId = '33333333-3333-4333-8333-333333333333'
+    const manifest = sample({
+      reels: {
+        read_state: 'ok', truncated: false,
+        items: [{
+          work_order_id: reelId, title: '一条视频', fingerprint: 'f'.repeat(64),
+          scheduled_at_iso: '2026-11-10', video_state: 'DRAFT', date_state: 'in_week',
+        }],
+      },
+    })
+    const built = buildWeekPackFacts({ manifest, accountLabel: '示例客户', reelGoPublic: true })
+    const fake = ports(manifest, { promote: async () => failed })
+    fake.ports.reelGoPublic = true
+    const result = await confirmWeekPack({
+      enabled: true, clientId: CLIENT, clicker: OPC, runId: 'run-1', expectedDecisionId: 'dec-1',
+      fingerprint: built.fingerprint,
+      tokens: new Map([[reelId, 'preview-token']]),
+      ports: fake.ports,
+    })
+    expect(result.receipt?.rolled_back).toBe(false)
+    expect(result.receipt?.lines.find((line) => line.kind === 'story')?.ok).toBe(true)
+    expect(result.receipt?.lines.find((line) => line.stable_id === reelId)).toMatchObject({
+      ok: false, code: 'first_comment_failed',
+    })
+    expect(fake.revoke).not.toHaveBeenCalled()
+    expect(fake.record.mock.calls[0][0].lines.map((line: { code: string }) => line.code)).toEqual(['first_comment_failed'])
   })
 
   it('keeps the Story authorisation when the reminder cannot be saved', async () => {

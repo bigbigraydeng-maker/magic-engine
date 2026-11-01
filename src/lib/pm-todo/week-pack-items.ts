@@ -5,11 +5,13 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
+import { toPublishedView } from '@/lib/factory/publish/publish-display'
 import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
 import { cadenceFromConfig, isWeekday, nzDateKey, targetWeek } from '@/lib/social/week-pack/cadence'
 import { weekPackSubject } from '@/lib/social/week-pack/facts'
 import { readHeldEvidence } from '@/lib/social/week-pack/persist-held'
 import { weeklyPackApprovalEnabled, type WeekPackEnv } from '@/lib/social/week-pack/switches'
+import type { WeekPackLine } from '@/lib/social/week-pack/types'
 
 import { APP_BASE } from './binding-request-items'
 import type { ManualItem } from './manual-item-types'
@@ -39,6 +41,22 @@ export interface UnpublishedNote {
   clientId: string
   kind: 'story' | 'post' | 'reel'
   text: string
+  stableId?: string | null
+  code?: string
+}
+
+export interface PackEvidenceRow {
+  clientId: string
+  subjectKey: string
+  evidence: unknown
+}
+
+export interface ItemRecovery {
+  clientId: string
+  storyAuthorizedAt: string | null
+  storyRevokedAt: string | null
+  videoState: 'DRAFT' | 'PUBLISHED' | null
+  commentPending: boolean
 }
 
 export interface WeekPackTodoSource {
@@ -305,13 +323,88 @@ function needsApproval(client: { id: string; name: string }, expiring: boolean):
   }
 }
 
+const STORY_OPEN_CODES = new Set(['story_forbidden', 'story_failed'])
+const REEL_OPEN_CODES = new Set(['preview_required', 'reel_failed', 'reel_forbidden', 'first_comment_failed'])
+
+/**
+ * Keep every pack failure for this client until that item recovers.
+ * `now` does not choose a week: Friday's card must still show on Monday.
+ */
+export function notesForClients(
+  rows: readonly PackEvidenceRow[],
+  clientIds: readonly string[],
+  now: Date,
+): UnpublishedNote[] | 'unread' {
+  if (Number.isNaN(now.getTime())) return 'unread'
+  const allowed = new Set(clientIds)
+  const notes: UnpublishedNote[] = []
+  for (const row of rows) {
+    if (!allowed.has(row.clientId)) continue
+    if (!row.subjectKey.startsWith(`social:week-pack:${row.clientId.toLowerCase()}:`)) continue
+    const parsed = readHeldEvidence(row.evidence)
+    if (parsed === 'invalid') return 'unread'
+    if (parsed === 'none') continue
+    for (const line of parsed) notes.push(noteFromLine(row.clientId, line))
+  }
+  return notes
+}
+
+export function recoveryKey(clientId: string, kind: UnpublishedNote['kind'], stableId: string): string {
+  return `${clientId.toLowerCase()}:${kind}:${stableId}`
+}
+
+export function stillNeedsReminder(note: UnpublishedNote, fact: ItemRecovery | null): boolean {
+  if (!note.stableId || !note.code) return true
+  if (!fact || fact.clientId !== note.clientId) return true
+  if (STORY_OPEN_CODES.has(note.code)) return !storyRecovered(fact)
+  if (note.code === 'first_comment_failed') return !commentRecovered(fact)
+  if (REEL_OPEN_CODES.has(note.code)) return fact.videoState !== 'PUBLISHED'
+  return true
+}
+
+export function openUnpublishedNotes(
+  notes: readonly UnpublishedNote[],
+  facts: ReadonlyMap<string, ItemRecovery>,
+): UnpublishedNote[] {
+  return notes.filter((note) => stillNeedsReminder(note, factFor(note, facts)))
+}
+
+function noteFromLine(clientId: string, line: WeekPackLine): UnpublishedNote {
+  return { clientId, kind: line.kind, text: line.text, stableId: line.stable_id, code: line.code }
+}
+
+function storyRecovered(fact: ItemRecovery): boolean {
+  return filled(fact.storyAuthorizedAt) && !filled(fact.storyRevokedAt)
+}
+
+function commentRecovered(fact: ItemRecovery): boolean {
+  return fact.videoState === 'PUBLISHED' && fact.commentPending !== true
+}
+
+function filled(value: string | null): boolean {
+  return typeof value === 'string' && value.length > 0
+}
+
+function factFor(note: UnpublishedNote, facts: ReadonlyMap<string, ItemRecovery>): ItemRecovery | null {
+  if (!note.stableId) return null
+  return facts.get(recoveryKey(note.clientId, note.kind, note.stableId)) ?? null
+}
+
 async function loadUnpublished(
   supabase: SupabaseClient,
   now: Date,
   clientIds: readonly string[],
 ): Promise<WeekPackTodoSource['unpublished']> {
-  const week = targetWeek(now)
-  const allowed = new Set(clientIds)
+  const cards = await loadAuthorizedCards(supabase)
+  if (cards === 'unread') return 'unread'
+  const notes = notesForClients(cards, clientIds, now)
+  if (notes === 'unread') return 'unread'
+  const facts = await loadRecoveryFacts(supabase, notes, clientIds)
+  if (facts === 'unread') return 'unread'
+  return openUnpublishedNotes(notes, facts)
+}
+
+async function loadAuthorizedCards(supabase: SupabaseClient): Promise<PackEvidenceRow[] | 'unread'> {
   const { data, error } = await supabase
     .from('action_runs')
     .select('client_id, input, evidence')
@@ -319,18 +412,119 @@ async function loadUnpublished(
     .eq('status', 'authorized')
     .limit(LOOK_CAP)
   if (error || (data ?? []).length >= LOOK_CAP) return 'unread'
-  const notes: UnpublishedNote[] = []
-  for (const row of (data ?? []) as Array<{ client_id?: unknown; input?: unknown; evidence?: unknown }>) {
-    if (typeof row.client_id !== 'string' || !allowed.has(row.client_id)) continue
-    const input = row.input && typeof row.input === 'object' ? row.input as Record<string, unknown> : null
-    const subject = typeof input?.subject_key === 'string' ? input.subject_key : ''
-    if (subject !== weekPackSubject(row.client_id, week.weekStart)) continue
-    const parsed = readHeldEvidence(row.evidence)
-    if (parsed === 'invalid') return 'unread'
-    if (parsed === 'none') continue
-    for (const line of parsed) notes.push({ clientId: row.client_id, kind: line.kind, text: line.text })
+  return ((data ?? []) as Array<{ client_id?: unknown; input?: unknown; evidence?: unknown }>).flatMap(readCard)
+}
+
+function readCard(row: { client_id?: unknown; input?: unknown; evidence?: unknown }): PackEvidenceRow[] {
+  if (typeof row.client_id !== 'string') return []
+  const input = row.input && typeof row.input === 'object' ? row.input as Record<string, unknown> : null
+  const subjectKey = typeof input?.subject_key === 'string' ? input.subject_key : ''
+  if (!subjectKey.startsWith('social:week-pack:')) return []
+  return [{ clientId: row.client_id, subjectKey, evidence: row.evidence }]
+}
+
+async function loadRecoveryFacts(
+  supabase: SupabaseClient,
+  notes: readonly UnpublishedNote[],
+  clientIds: readonly string[],
+): Promise<Map<string, ItemRecovery> | 'unread'> {
+  const storyIds = idsFor(notes, 'story', STORY_OPEN_CODES)
+  const reelIds = idsFor(notes, 'reel', REEL_OPEN_CODES)
+  if (storyIds.length > LOOK_CAP || reelIds.length > LOOK_CAP) return 'unread'
+  const [stories, reels] = await Promise.all([
+    readStoryFacts(supabase, storyIds, clientIds),
+    readReelFacts(supabase, reelIds, clientIds),
+  ])
+  if (stories === 'unread' || reels === 'unread') return 'unread'
+  return new Map([...stories, ...reels])
+}
+
+function idsFor(
+  notes: readonly UnpublishedNote[],
+  kind: UnpublishedNote['kind'],
+  codes: ReadonlySet<string>,
+): string[] {
+  const ids = new Set<string>()
+  for (const note of notes) {
+    if (note.kind === kind && note.stableId && note.code && codes.has(note.code)) ids.add(note.stableId)
   }
-  return notes
+  return [...ids]
+}
+
+async function readStoryFacts(
+  supabase: SupabaseClient,
+  ids: readonly string[],
+  clientIds: readonly string[],
+): Promise<Map<string, ItemRecovery> | 'unread'> {
+  if (ids.length === 0) return new Map()
+  const { data, error } = await supabase
+    .from('story_packs')
+    .select('id, client_id, authorized_at, revoked_at')
+    .in('id', [...ids])
+    .in('client_id', [...clientIds])
+    .limit(LOOK_CAP)
+  if (error || (data ?? []).length >= LOOK_CAP) return 'unread'
+  return factsFrom(data, 'story', storyFact)
+}
+
+async function readReelFacts(
+  supabase: SupabaseClient,
+  ids: readonly string[],
+  clientIds: readonly string[],
+): Promise<Map<string, ItemRecovery> | 'unread'> {
+  if (ids.length === 0) return new Map()
+  const { data, error } = await supabase
+    .from('content_work_orders')
+    .select('id, client_id, published_ref')
+    .in('id', [...ids])
+    .in('client_id', [...clientIds])
+    .limit(LOOK_CAP)
+  if (error || (data ?? []).length >= LOOK_CAP) return 'unread'
+  return factsFrom(data, 'reel', reelFact)
+}
+
+function factsFrom(
+  data: unknown,
+  kind: UnpublishedNote['kind'],
+  read: (row: Record<string, unknown>) => { id: string; clientId: string; recovery: ItemRecovery } | null,
+): Map<string, ItemRecovery> {
+  const facts = new Map<string, ItemRecovery>()
+  for (const row of (data ?? []) as Array<Record<string, unknown>>) {
+    const fact = read(row)
+    if (fact) facts.set(recoveryKey(fact.clientId, kind, fact.id), fact.recovery)
+  }
+  return facts
+}
+
+function storyFact(row: Record<string, unknown>): { id: string; clientId: string; recovery: ItemRecovery } | null {
+  if (typeof row.id !== 'string' || typeof row.client_id !== 'string') return null
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    recovery: {
+      clientId: row.client_id,
+      storyAuthorizedAt: typeof row.authorized_at === 'string' ? row.authorized_at : null,
+      storyRevokedAt: typeof row.revoked_at === 'string' ? row.revoked_at : null,
+      videoState: null,
+      commentPending: false,
+    },
+  }
+}
+
+function reelFact(row: Record<string, unknown>): { id: string; clientId: string; recovery: ItemRecovery } | null {
+  if (typeof row.id !== 'string' || typeof row.client_id !== 'string') return null
+  const view = toPublishedView(row.published_ref)
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    recovery: {
+      clientId: row.client_id,
+      storyAuthorizedAt: null,
+      storyRevokedAt: null,
+      videoState: view?.video_state ?? null,
+      commentPending: view?.first_comment_pending === true,
+    },
+  }
 }
 
 function unpublishedItems(notes: UnpublishedNote[], configs: Array<{ id: string; name: string }>): ManualItem[] {
@@ -339,14 +533,31 @@ function unpublishedItems(notes: UnpublishedNote[], configs: Array<{ id: string;
     kind: 'week_pack_items_held' as const,
     client_id: note.clientId,
     client_name: names.get(note.clientId) ?? '这位客户',
-    what: `整包已经点过同意，这一条没有发出去。${note.text}`,
-    how: note.kind === 'reel'
-      ? '打开本周总览的「批下一周」。视频要先看过预览；没公开的去视频工厂逐条处理。'
-      : '打开 Story 页。这一条要全局管理员才能授权，别的已经成功的不撤回。',
-    href: note.kind === 'reel'
-      ? `${APP_BASE}/dashboard/clients/${encodeURIComponent(note.clientId)}/daily-plan?tab=overview#approve-week`
-      : `${APP_BASE}/dashboard/clients/${encodeURIComponent(note.clientId)}/story`,
+    what: heldWhat(note),
+    how: heldHow(note),
+    href: heldHref(note),
   }))
+}
+
+function heldWhat(note: UnpublishedNote): string {
+  if (note.code === 'first_comment_failed') {
+    return `整包已经点过同意。视频已经公开，第一条评论没有发出去。${note.text}`
+  }
+  return `整包已经点过同意，这一条没有发出去。${note.text}`
+}
+
+function heldHow(note: UnpublishedNote): string {
+  if (note.code === 'first_comment_failed') return '视频已经公开。打开视频工厂，给这条补发第一条评论。'
+  if (note.kind === 'reel') return '打开本周总览的「批下一周」。视频要先看过预览；没公开的去视频工厂逐条处理。'
+  return '打开 Story 页。这一条要全局管理员才能授权，别的已经成功的不撤回。'
+}
+
+function heldHref(note: UnpublishedNote): string {
+  if (note.code === 'first_comment_failed') return `${APP_BASE}/dashboard/factory`
+  const path = note.kind === 'reel'
+    ? `/dashboard/clients/${encodeURIComponent(note.clientId)}/daily-plan?tab=overview#approve-week`
+    : `/dashboard/clients/${encodeURIComponent(note.clientId)}/story`
+  return `${APP_BASE}${path}`
 }
 
 function heldItems(held: HeldCount[], configs: Array<{ id: string; name: string }>): ManualItem[] {
