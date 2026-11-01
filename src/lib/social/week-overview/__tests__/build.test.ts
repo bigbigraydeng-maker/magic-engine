@@ -123,6 +123,35 @@ describe('buildWeekOverview', () => {
     expect(result.value.story?.newer_draft_title).toBe('newer draft')
   })
 
+  it('counts Story slots in this Auckland week across packs, not the whole pack on screen', async () => {
+    const now = new Date('2026-11-01T11:30:00.000Z')
+    const store = new InMemoryLiteStore()
+    await store.insertPack(
+      { id: 'shown', client_id: CLIENT, title: 'shown', now: new Date('2026-10-20T00:00:00Z') },
+      [
+        item('sun-a', '2026-10-31T23:00:00.000Z'),
+        item('sun-b', '2026-10-31T22:00:00.000Z'),
+        item('mon', '2026-11-01T19:00:00.000Z'),
+      ],
+    )
+    await store.authorizePack({
+      packId: 'shown', clientId: CLIENT, byEmail: 'a@b.c', byUserId: 'u', now: new Date('2026-10-21T00:00:00Z'),
+      expiresAt: new Date('2026-11-20T00:00:00Z'), contentHash: 'c'.repeat(64),
+      fingerprints: { 'sun-a': 'f'.repeat(64), 'sun-b': 'e'.repeat(64), mon: 'd'.repeat(64) },
+    })
+    await store.insertPack(
+      { id: 'other', client_id: CLIENT, title: 'other', now: new Date('2026-10-22T00:00:00Z') },
+      [item('wed', '2026-11-03T23:00:00.000Z')],
+    )
+    const { db } = fakeDb([])
+    const result = await buildWeekOverview({ ports: ports(store), db, clientId: CLIENT, actor: ADMIN, switches: OFF, now })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.story?.title).toBe('shown')
+    expect(result.value.story?.items).toHaveLength(3)
+    expect(result.value.story_week_count).toBe(2)
+  })
+
   it('a failed Story read says so and still shows the Reels', async () => {
     const store = new InMemoryLiteStore()
     store.listPacksForClient = async () => { throw new Error('db down') }
@@ -142,8 +171,31 @@ describe('readPublishingQuota', () => {
     return { from: () => chain } as never
   }
   it('reads the client\'s own numbers and treats bad values as not configured', async () => {
-    const q = await readPublishingQuota(quotaDb({ data: { publishing_calendar_config: { quota: { post_per_day: 2, story_per_day: 3, reel_per_week: 'x' } } }, error: null }), CLIENT)
-    expect(q).toEqual({ post_per_day: 2, story_per_day: 3, reel_per_week: null })
+    const stored = { quota: { post_per_day: 2, story_per_day: 3, reel_per_week: 'x', story_per_week: 18, post_per_week: 4 } }
+    const q = await readPublishingQuota(quotaDb({ data: { publishing_calendar_config: stored }, error: null }), CLIENT)
+    expect(q).toEqual({
+      post_per_day: 2,
+      story_per_day: 3,
+      reel_per_week: null,
+      post_per_week: null,
+      story_per_week: null,
+      post_period: 'day',
+      story_period: 'day',
+      reel_period: null,
+    })
+  })
+  it('weekly numbers win only when the switch is exactly true', async () => {
+    const stored = { quota: { post_per_day: 2, story_per_day: 3, reel_per_week: 3, story_per_week: 18, post_per_week: 4 } }
+    const db = quotaDb({ data: { publishing_calendar_config: stored }, error: null })
+    const off = await readPublishingQuota(db, CLIENT, { SOCIAL_WEEKLY_QUOTA_ENABLED: 'TRUE' })
+    const on = await readPublishingQuota(db, CLIENT, { SOCIAL_WEEKLY_QUOTA_ENABLED: 'true' })
+    expect(off?.story_period).toBe('day')
+    expect(off?.story_per_day).toBe(3)
+    expect(on?.story_period).toBe('week')
+    expect(on?.story_per_week).toBe(18)
+    expect(on?.story_per_day).toBeNull()
+    expect(on?.post_per_week).toBe(4)
+    expect(on?.story_period).not.toBe(off?.story_period)
   })
   it('no config, empty config or a missing column is "not configured" (null), never zeros', async () => {
     expect(await readPublishingQuota(quotaDb({ data: { publishing_calendar_config: null }, error: null }), CLIENT)).toBeNull()

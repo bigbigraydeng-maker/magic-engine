@@ -16,6 +16,8 @@ import {
   thumbnailUrl,
 } from '@/lib/social/story-lite/page-text'
 import type { LitePackState } from '@/lib/social/story-lite/service'
+import { phraseFor, quotaPhrase, usagePhrase } from '@/lib/social/publishing-quota/format'
+import { kindCap } from '@/lib/social/publishing-quota/parse'
 import type { OverviewStoryItem, PublishingQuota, WeekOverview } from '@/lib/social/week-overview/build'
 import { REEL_QUERY_LIMIT, countReelWorks, describeVarietyAdvice, groupReelWorks, type ReelWork, type StatusKind } from '@/lib/social/week-overview/reel-works'
 import { describeStoryChips, describeStoryItemState, describeStoryPackLine } from '@/lib/social/week-overview/story-view'
@@ -44,15 +46,6 @@ const KIND_LABEL: Record<StatusKind, string> = {
   closed: '旧记录',
 }
 const KIND_ORDER: StatusKind[] = ['review', 'problem', 'approved', 'making', 'draft', 'uploaded', 'sent', 'closed']
-
-/** "用了 3/3" or "名额未配置": a missing quota is never shown as 0. */
-function usedOf(used: number, limit: number | null | undefined): string {
-  return typeof limit === 'number' ? `用了 ${used}/${limit}` : `${used} 条（名额未配置）`
-}
-
-function quotaOf(label: string, limit: number | null | undefined): string {
-  return typeof limit === 'number' ? `${label}名额 ${limit} 条` : `${label}名额未配置`
-}
 
 type LoadState = 'loading' | 'ready' | 'forbidden' | 'error'
 
@@ -151,7 +144,7 @@ function ReelTile({ data, works }: { data: WeekOverview; works: ReelWork[] | nul
           </div>
         </>
       )}
-      <p className="text-xs text-me-charcoal/70">{quotaOf('每周', data.quota?.reel_per_week)}</p>
+      <p className="text-xs text-me-charcoal/70">{phraseFor(data.quota, 'reel', 'week')}</p>
     </Tile>
   )
 }
@@ -160,6 +153,7 @@ function StoryTile({ data, now }: { data: WeekOverview; now: Date }) {
   const story = data.story
   const tally = tallyStoryItems(story?.items ?? [], story?.state ?? 'DRAFT', now)
   const chips = describeStoryChips(tally)
+  const storyCap = kindCap(data.quota, 'story')
   return (
     <Tile title="Story">
       {data.story_error ? (
@@ -184,13 +178,19 @@ function StoryTile({ data, now }: { data: WeekOverview; now: Date }) {
       {story?.newer_draft_title && (
         <p className="text-xs font-medium text-me-charcoal">另外还有一个新的周包「{story.newer_draft_title}」还没授权，上面说的是已经授权的那个。</p>
       )}
-      <p className="text-xs text-me-charcoal/70">{quotaOf('每天', data.quota?.story_per_day)}</p>
+      <p className="text-xs text-me-charcoal/70">{phraseFor(data.quota, 'story', 'day')}</p>
+      {storyCap?.period === 'week' && !data.story_error && typeof data.story_week_count === 'number' && (
+        <p className="text-xs text-me-charcoal/70" title="新西兰时间，周一到周日。最近的周包里，落在这一周的条数，不是眼前这个包的总条数。">
+          本周{usagePhrase(data.story_week_count, storyCap, 'week')}
+        </p>
+      )}
     </Tile>
   )
 }
 
 function StoryDays({ data, now }: { data: WeekOverview; now: Date }) {
   const quota: PublishingQuota | null = data.quota
+  const storyCap = kindCap(quota, 'story')
   const story = data.story
   const today = nzDateKey(now.toISOString())
   const days = useMemo(() => {
@@ -217,7 +217,7 @@ function StoryDays({ data, now }: { data: WeekOverview; now: Date }) {
               <h3 className="text-sm font-bold text-me-charcoal">{describeNzDay(day.key)}</h3>
               {day.key === today && <StatusTag kind="review">今天</StatusTag>}
             </div>
-            <p className="text-xs font-semibold text-me-charcoal/70">Story（{usedOf(day.items.length, quota?.story_per_day)}）</p>
+            <p className="text-xs font-semibold text-me-charcoal/70">Story（{usagePhrase(day.items.length, storyCap, 'day')}）</p>
             <ul className="space-y-2">
               {day.items.map((item) => (
                 <StoryRow key={item.item_id} item={item} packState={story?.state ?? 'DRAFT'} now={now} />
@@ -292,6 +292,7 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
   }
 
   const story = data.story
+  const postCap = kindCap(data.quota, 'post')
   const tally = tallyStoryItems(story?.items ?? [], story?.state ?? 'DRAFT', now)
   const todo = buildTodoSummary({
     clientId,
@@ -314,6 +315,9 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
       </div>
       <StoryDays data={data} now={now} />
       <ReelSection data={data} works={works} clientId={clientId} />
+      {postCap?.period === 'week' && (
+        <p className="text-xs text-me-charcoal/70">图文{quotaPhrase(postCap, 'week')}</p>
+      )}
       <p className="rounded-xl border border-dashed border-black/15 px-3 py-2 text-xs text-me-charcoal/70">
         即将上线：图文帖子排进每天日历 · 整周画面复核 · 被规则拦下内容的清单
       </p>
