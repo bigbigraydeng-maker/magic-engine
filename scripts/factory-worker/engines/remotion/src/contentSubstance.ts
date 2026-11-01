@@ -3,8 +3,11 @@ import { computeTimingFromProps } from './timing.ts';
 import { computePostcardTiming } from './postcard.ts';
 import { computeDataCardTiming } from './datacard.ts';
 import { computeAtmosphereTiming } from './atmosphere.ts';
+import { computeCompareTiming } from './compare.ts';
 import { montageFrameOf } from './montage.ts';
 import { overlayWindows, resolveFramePlan, type ResolvedHook } from './frame.ts';
+import { styledPostcardTiming } from './styles/rules.ts';
+import { styledDataCardTiming, styledListTiming, styledMontageTiming, type CraftLook } from './styles/template-craft.ts';
 
 export type SubstanceKind =
   | 'place_or_tour'
@@ -108,9 +111,21 @@ function asNumber(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null;
 }
 
+function craftLook(props: Record<string, unknown>): CraftLook | null {
+  const look = asRecord(props.look);
+  const craft = look ? asRecord(look.craft) : null;
+  const rules = look ? asRecord(look.rules) : null;
+  if (!look || !craft || !rules || typeof craft.shotSec !== 'number') return null;
+  return look as unknown as CraftLook;
+}
+
 function collectList(props: Record<string, unknown>): SubstanceElement[] {
   const out: SubstanceElement[] = [];
-  const timing = computeTimingFromProps(props as never);
+  const look = craftLook(props);
+  const items = asArray(props.items);
+  const timing = look
+    ? styledListTiming(items.length, look, FPS, props.logoMode === 'always' ? 'always' : 'last_beats')
+    : computeTimingFromProps(props as never);
   const hook = asRecord(props.hook);
   const hookLines = hook ? asArray(hook.lines) : [];
   const hookEnd = timing.hookFrames / FPS;
@@ -120,7 +135,6 @@ function collectList(props: Record<string, unknown>): SubstanceElement[] {
     const text = typeof line.text === 'string' ? line.text : '';
     out.push({ kind: 'hook_text', text, startSec: 0, endSec: hookEnd });
   }
-  const items = asArray(props.items);
   for (let i = 0; i < items.length; i++) {
     const item = asRecord(items[i]);
     if (!item) continue;
@@ -142,7 +156,21 @@ function collectList(props: Record<string, unknown>): SubstanceElement[] {
     startSec: timing.revealFrom / FPS,
     endSec: timing.totalFrames / FPS,
   });
+  if (look) {
+    const first = asRecord(items[0]);
+    const point = first && typeof first.text === 'string' ? first.text : revealTitle;
+    out.push({ kind: 'selling_line', text: point, startSec: 0, endSec: timing.totalFrames / FPS });
+  }
   return out;
+}
+
+function postcardClock(props: Record<string, unknown>) {
+  const look = asRecord(props.look);
+  const rules = look ? asRecord(look.rules) : null;
+  const craft = look ? asRecord(look.craft) : null;
+  if (!rules || !craft || typeof craft.shotSec !== 'number') return null;
+  const shotSec = rules.shotFromBrief === true && typeof rules.shotSec === 'number' ? rules.shotSec : craft.shotSec;
+  return styledPostcardTiming(props as never, rules as never, FPS, shotSec);
 }
 
 function hookTexts(hook: ResolvedHook): string[] {
@@ -152,12 +180,11 @@ function hookTexts(hook: ResolvedHook): string[] {
   return texts;
 }
 
-function collectPostcard(props: Record<string, unknown>): SubstanceElement[] {
+function collectPlainPostcard(props: Record<string, unknown>): SubstanceElement[] {
   const out: SubstanceElement[] = [];
   const timing = computePostcardTiming(props as never);
   const plan = resolveFramePlan('postcard', props);
-  const hook = asRecord(props.hook);
-  const hookLines = hook ? asArray(hook.lines) : [];
+  const hookLines = asArray(asRecord(props.hook)?.lines);
   const hookEnd = timing.hookFrames / FPS;
   const shownHook = plan.hook ? hookTexts(plan.hook) : hookLines.map((raw) => (typeof raw === 'string' ? raw : ''));
   for (const text of shownHook) {
@@ -203,9 +230,9 @@ function collectPostcard(props: Record<string, unknown>): SubstanceElement[] {
   return out;
 }
 
-function collectDataCard(props: Record<string, unknown>): SubstanceElement[] {
+function collectStyledPostcard(props: Record<string, unknown>): SubstanceElement[] {
+  const timing = postcardClock(props) ?? computePostcardTiming(props as never);
   const out: SubstanceElement[] = [];
-  const timing = computeDataCardTiming(props as never);
   const hook = asRecord(props.hook);
   const hookLines = hook ? asArray(hook.lines) : [];
   const hookEnd = timing.hookFrames / FPS;
@@ -213,7 +240,76 @@ function collectDataCard(props: Record<string, unknown>): SubstanceElement[] {
     const text = typeof raw === 'string' ? raw : '';
     out.push({ kind: 'hook_text', text, startSec: 0, endSec: hookEnd });
   }
+  const scenes = asArray(props.scenes);
+  for (let i = 0; i < scenes.length; i++) {
+    const scene = asRecord(scenes[i]);
+    if (!scene) continue;
+    const from = timing.sceneFrom[i];
+    const dur = timing.sceneDur[i];
+    if (from === undefined || dur === undefined) continue;
+    const startSec = from / FPS;
+    const endSec = (from + dur) / FPS;
+    const place = typeof scene.place === 'string' ? scene.place : '';
+    out.push({ kind: 'place_or_tour', text: place, startSec, endSec });
+    const sourced = isNonEmptyString(scene.sourceUrl) && isNonEmptyString(scene.sourceQuote);
+    if (sourced) {
+      const line = typeof scene.line === 'string' ? scene.line : '';
+      out.push({ kind: 'selling_line', text: line, startSec, endSec });
+    }
+  }
+  const end = asRecord(props.end);
+  if (end) {
+    const title = typeof end.title === 'string' ? end.title : '';
+    out.push({ kind: 'brand_card', text: title, startSec: timing.priceFrom / FPS, endSec: timing.totalFrames / FPS });
+  }
+  const first = asRecord(scenes[0]);
+  const point = first && typeof first.line === 'string' ? first.line : '';
+  out.push({ kind: 'selling_line', text: point, startSec: 0, endSec: timing.totalFrames / FPS });
+  return out;
+}
+
+function collectPostcard(props: Record<string, unknown>): SubstanceElement[] {
+  return postcardClock(props) ? collectStyledPostcard(props) : collectPlainPostcard(props);
+}
+
+function collectCompare(props: Record<string, unknown>): SubstanceElement[] {
+  const look = asRecord(props.look);
+  const rules = look ? asRecord(look.rules) : null;
+  const craft = look ? asRecord(look.craft) : null;
+  const shotSec = rules?.shotFromBrief === true && typeof rules.shotSec === 'number'
+    ? rules.shotSec
+    : (craft && typeof craft.shotSec === 'number' ? craft.shotSec : undefined);
+  const plan = computeCompareTiming(rules as never, shotSec);
+  const out: SubstanceElement[] = [];
+  const point = typeof props.point === 'string' ? props.point : '';
+  out.push({ kind: 'selling_line', text: point, startSec: 0, endSec: plan.totalFrames / FPS });
+  for (const shot of plan.shots) {
+    const beat = asRecord(props[shot.lineKey]);
+    const line = beat && typeof beat.line === 'string' ? beat.line : '';
+    out.push({
+      kind: 'selling_line',
+      text: line,
+      startSec: shot.from / FPS,
+      endSec: (shot.from + shot.frames) / FPS,
+    });
+  }
+  return out;
+}
+
+function collectDataCard(props: Record<string, unknown>): SubstanceElement[] {
+  const out: SubstanceElement[] = [];
+  const look = craftLook(props);
   const rows = asArray(props.rows);
+  const timing = look
+    ? styledDataCardTiming(rows.map((row) => ({ value: String((asRecord(row) ?? {}).value ?? '') })), look, FPS)
+    : computeDataCardTiming(props as never);
+  const hook = asRecord(props.hook);
+  const hookLines = hook ? asArray(hook.lines) : [];
+  const hookEnd = timing.hookFrames / FPS;
+  for (const raw of hookLines) {
+    const text = typeof raw === 'string' ? raw : '';
+    out.push({ kind: 'hook_text', text, startSec: 0, endSec: hookEnd });
+  }
   for (let i = 0; i < rows.length; i++) {
     const row = asRecord(rows[i]);
     if (!row) continue;
@@ -251,7 +347,21 @@ function collectAtmosphere(props: Record<string, unknown>): SubstanceElement[] {
 
 function collectMontage(props: Record<string, unknown>): SubstanceElement[] {
   const out: SubstanceElement[] = [];
+  const look = craftLook(props);
   const beats = asArray(props.beats).filter((b): b is number => typeof b === 'number');
+  if (look) {
+    const words = asArray(props.words);
+    const clips = asArray(props.clips);
+    const plan = styledMontageTiming(clips.length, words.length, look, FPS);
+    words.forEach((raw, i) => {
+      const word = asRecord(raw);
+      const text = word && typeof word.text === 'string' ? word.text : '';
+      const from = plan.shots === 1 ? 0 : (i % plan.shots) * plan.shotFrames;
+      const to = plan.shots === 1 ? plan.totalFrames : from + plan.shotFrames;
+      out.push({ kind: 'kinetic_words', text, startSec: from / FPS, endSec: to / FPS });
+    });
+    return out;
+  }
   if (beats.length === 0) return out;
   const words = asArray(props.words);
   for (const raw of words) {
@@ -308,6 +418,9 @@ export function contentSubstanceOf(template: string, props: unknown): ContentSub
       break;
     case 'atmosphere':
       elements = collectAtmosphere(record);
+      break;
+    case 'compare':
+      elements = collectCompare(record);
       break;
     case 'montage':
       elements = collectMontage(record);

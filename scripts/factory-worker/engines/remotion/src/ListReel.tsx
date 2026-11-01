@@ -10,6 +10,11 @@ import { parseListReelProps, type ListReelProps } from './schema'
 import { useStage } from './stage'
 import { computeTimingFromProps, FPS } from './timing'
 import { fontFamily } from './theme'
+import { useStyleFamily } from './styles/fonts'
+import { peelStyle } from './styles/select'
+import { StyledList } from './styles/StyledList'
+import { styledListTiming } from './styles/template-craft'
+import type { ResolvedLook } from './styles/types'
 
 const Hook: React.FC<{ props: ListReelProps; shared: ResolvedHook | null }> = ({ props, shared }) => {
   const frame = useCurrentFrame()
@@ -67,7 +72,7 @@ const Item: React.FC<{ props: ListReelProps; index: number; dur: number }> = ({ 
   )
 }
 
-export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
+const ListReelMain: React.FC<Record<string, unknown>> = (rawProps) => {
   const props = parseListReelProps(templateProps(rawProps))
   const timing = computeTimingFromProps(props)
   const plan = resolveFramePlan('list', props)
@@ -94,4 +99,35 @@ export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
       {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )
+}
+
+function carriedLook(rawProps: Record<string, unknown>): ResolvedLook | null {
+  const look = peelStyle(rawProps).look
+  return look == null ? null : (look as ResolvedLook)
+}
+
+function plainProps(rawProps: Record<string, unknown>): Record<string, unknown> {
+  const body = peelStyle(rawProps).body
+  return body === rawProps ? rawProps : (body as Record<string, unknown>)
+}
+
+const ListStyled: React.FC<{ rawProps: Record<string, unknown>; look: ResolvedLook }> = ({ rawProps, look }) => {
+  const family = useStyleFamily(look)
+  const props = parseListReelProps(templateProps(peelStyle(rawProps).body))
+  const timing = styledListTiming(props.items.length, look, FPS, props.logoMode)
+  const frame = useCurrentFrame()
+  const vol = interpolate(frame, [0, 8, timing.totalFrames - 36, timing.totalFrames - 4], [0, 1, 1, 0], { extrapolateRight: 'clamp' })
+  if (family === null) return null
+  return (
+    <AbsoluteFill style={{ background: '#000' }}>
+      <StyledList props={props} look={look} family={family} timing={timing} />
+      {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
+    </AbsoluteFill>
+  )
+}
+
+export const ListReel: React.FC<Record<string, unknown>> = (rawProps) => {
+  const look = carriedLook(rawProps)
+  if (look) return <ListStyled rawProps={rawProps} look={look} />
+  return <ListReelMain rawProps={plainProps(rawProps)} />
 }
