@@ -12,6 +12,7 @@ import {
   metaTripletFor,
   type AdDraft,
   inheritedSpendOf,
+  inheritedScheduleText,
   draftUsingInheritedBudget,
 } from './ad-draft'
 import { draftNotYetBuildable, reviewDraftAgainstCaps, reviewDraftForBuild } from './ad-draft-expansion'
@@ -196,8 +197,7 @@ function dateLine(draft: AdDraft): string {
   if (draft.existingAdSetId) {
     const spend = inheritedSpendOf(draft)
     if (!spend) return '结束日读不到'
-    if (spend.durationDays === null) return '这个广告组没有结束日'
-    return `跟这个广告组一起跑 ${spend.durationDays} 天`
+    return inheritedScheduleText(spend)
   }
   return `一共 ${durationDays(draft)} 天，从点确认当天算起`
 }

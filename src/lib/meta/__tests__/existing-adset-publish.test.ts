@@ -131,7 +131,7 @@ describe('往已有广告组加暂停视频广告', () => {
     const r = await publishDraftPaused(DRAFT, 'act_1', 'tok')
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.inheritedSpend).toEqual({ dailyBudget: 100, durationDays: null })
+    expect(r.inheritedSpend).toEqual({ dailyBudget: 100, durationDays: null, endTime: null })
     expect(posts().some((c) => c.body.has('daily_budget') || c.body.has('end_time'))).toBe(false)
   })
 
@@ -169,6 +169,6 @@ describe('往已有广告组加暂停视频广告', () => {
     const r = await publishDraftPaused(DRAFT, 'act_1', 'tok')
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.inheritedSpend).toEqual({ dailyBudget: 100, durationDays: null })
+    expect(r.inheritedSpend).toEqual({ dailyBudget: 100, durationDays: null, endTime: null })
   })
 })

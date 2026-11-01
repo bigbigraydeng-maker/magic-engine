@@ -130,10 +130,15 @@ export interface AdDraftAdSet {
   firstComment?: string
 }
 
-/** 已有广告组真实在花的钱。`durationDays === null` 表示这个组没有结束日。 */
+/**
+ * 已有广告组真实在花的钱。
+ * `endTime` 是广告组上的绝对结束时间，原样保留，不按跨度重算、也不平移。
+ * `null` 表示这个组没有结束日。缺这个字段的是更早的确认，只剩 `durationDays`。
+ */
 export interface InheritedAdSetSpend {
   dailyBudget: number
   durationDays: number | null
+  endTime?: string | null
 }
 
 export interface AdDraft {
@@ -500,19 +505,61 @@ export function metaTripletFor(kind: DraftKind): MetaObjectiveTriplet {
   return META_TRIPLET[kind]
 }
 
-/** 浏览器带上来的残缺对象不算读到。 */
+/** 浏览器带上来的残缺对象不算读到。绝对结束时间原样留下，不改写成另一时区。 */
 export function inheritedSpendOf(d: AdDraft): InheritedAdSetSpend | null {
   const raw = d.inheritedSpend
   if (!raw || typeof raw.dailyBudget !== 'number' || !Number.isFinite(raw.dailyBudget) || raw.dailyBudget <= 0) {
     return null
   }
-  if (raw.durationDays === null) return { dailyBudget: raw.dailyBudget, durationDays: null }
-  if (!Number.isInteger(raw.durationDays) || raw.durationDays < 1) return null
-  return { dailyBudget: raw.dailyBudget, durationDays: raw.durationDays }
+  const endTime = readEndTime(raw)
+  if (endTime === 'bad') return null
+  const days = readDays(raw.durationDays)
+  if (days === 'bad' && endTime === undefined) return null
+  const spend: InheritedAdSetSpend = {
+    dailyBudget: raw.dailyBudget,
+    durationDays: days === 'bad' ? null : days,
+  }
+  if (endTime !== undefined) spend.endTime = endTime
+  return spend
 }
 
+/** 两边都有绝对结束时间时只比它。同一跨度、结束日被平移，不算同一份排期。 */
 export function sameInheritedSpend(a: InheritedAdSetSpend, b: InheritedAdSetSpend): boolean {
-  return Math.round(a.dailyBudget * 100) === Math.round(b.dailyBudget * 100) && a.durationDays === b.durationDays
+  if (Math.round(a.dailyBudget * 100) !== Math.round(b.dailyBudget * 100)) return false
+  if (hasEndTime(a) && hasEndTime(b)) return a.endTime === b.endTime
+  if (hasEndTime(a) || hasEndTime(b)) return openEnded(a) && openEnded(b)
+  return a.durationDays === b.durationDays
+}
+
+function openEnded(spend: InheritedAdSetSpend): boolean {
+  return spend.endTime === null || (!hasEndTime(spend) && spend.durationDays === null)
+}
+
+/** 确认卡上的结束说明。有绝对结束时间就写那一天，不用起止相减得到的天数。 */
+export function inheritedScheduleText(spend: InheritedAdSetSpend): string {
+  if (typeof spend.endTime === 'string') {
+    const day = /^(\d{4}-\d{2}-\d{2})/.exec(spend.endTime)?.[1] ?? spend.endTime
+    return `跟这个广告组一起，到 ${day} 结束`
+  }
+  if (spend.endTime === null || spend.durationDays === null) return '这个广告组没有结束日'
+  return `跟这个广告组一起跑 ${spend.durationDays} 天`
+}
+
+function hasEndTime(spend: InheritedAdSetSpend): boolean {
+  return Object.prototype.hasOwnProperty.call(spend, 'endTime')
+}
+
+function readDays(days: number | null): number | null | 'bad' {
+  if (days === null) return null
+  if (!Number.isInteger(days) || days < 1) return 'bad'
+  return days
+}
+
+function readEndTime(raw: InheritedAdSetSpend): string | null | undefined | 'bad' {
+  if (!hasEndTime(raw)) return undefined
+  if (raw.endTime === null) return null
+  if (typeof raw.endTime !== 'string' || !Number.isFinite(Date.parse(raw.endTime))) return 'bad'
+  return raw.endTime
 }
 
 export function withoutInheritedSpend(d: AdDraft): AdDraft {
@@ -560,7 +607,12 @@ function describeInheritedAdSet(d: AdDraft): string {
   const spend = inheritedSpendOf(d)
   const what = draftWhat(d)
   if (!spend) return `${what}，加到已有广告组，每天多少和结束日还没读到`
-  if (spend.durationDays === null) return `${what}，加到已有广告组，每天 $${spend.dailyBudget}，没有结束日`
+  if (typeof spend.endTime === 'string') {
+    return `${what}，加到已有广告组，每天 $${spend.dailyBudget}，${inheritedScheduleText(spend)}`
+  }
+  if (spend.durationDays === null || spend.endTime === null) {
+    return `${what}，加到已有广告组，每天 $${spend.dailyBudget}，没有结束日`
+  }
   const total = spend.dailyBudget * spend.durationDays
   return `${what}，加到已有广告组，每天 $${spend.dailyBudget}、跟原组 ${spend.durationDays} 天，最多 $${total}`
 }

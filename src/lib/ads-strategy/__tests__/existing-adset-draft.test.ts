@@ -8,6 +8,8 @@ const REVIEW: PausedDraftReview = {
     ad_account_id: 'act_1', currency: 'NZD', daily_cap_cents: 10000, owned_by_client: true,
   }],
   clientCapCents: 20000,
+  liveDeliveringCents: 0,
+  campaignShapes: [],
 }
 
 function draft(over: Partial<AdDraft> = {}): AdDraft {
@@ -64,5 +66,19 @@ describe('已有广告组编号', () => {
     )
     expect(under.hardChecks.find((row) => row.label === '日预算上限')?.state).toBe('green')
     expect(under.date).toBe('跟这个广告组一起跑 7 天')
+  })
+
+  it('确认卡保留广告组的绝对结束日，不把整段跨度当成还要跑的天数', () => {
+    const end = '2026-11-01T00:00:00+0000'
+    const facts = pausedDraftFacts(
+      draft({
+        existingAdSetId: '800001',
+        inheritedSpend: { dailyBudget: 40, durationDays: 31, endTime: end },
+      }),
+      '账户',
+      REVIEW,
+    )
+    expect(facts.date).toBe('跟这个广告组一起，到 2026-11-01 结束')
+    expect(facts.date).not.toContain('31')
   })
 })

@@ -28,6 +28,8 @@ export interface PausedDraftView {
   readonly ids: GoLiveIds | null
   /** The daily amount and span were read from an existing ad set, not the draft request. */
   readonly inheritedSchedule?: boolean
+  /** Absolute end time copied from the ad set. Null means that ad set has no end. */
+  readonly endTime?: string | null
 }
 
 export function goLiveSubjectKey(draftId: string): string | null {
@@ -72,6 +74,7 @@ export function parsePausedDraft(payload: unknown): PausedDraftView | null {
     durationDays: reusedAdSet ? (spend ? spend.days : null) : (body ? finite(body.durationDays) : null),
     accountLabel: text(row.accountLabel),
     inheritedSchedule: Boolean(spend),
+    ...(spend && spend.endTime !== undefined ? { endTime: spend.endTime } : {}),
     ids: campaignId && adSetId && adIds
       ? {
           campaignId,
@@ -84,15 +87,28 @@ export function parsePausedDraft(payload: unknown): PausedDraftView | null {
   }
 }
 
-function storedSpend(body: Record<string, unknown> | null): { daily: number; days: number | null } | null {
+function storedSpend(
+  body: Record<string, unknown> | null,
+): { daily: number; days: number | null; endTime?: string | null } | null {
   if (!body) return null
   const raw = body.inheritedSpend
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const row = raw as Record<string, unknown>
   const daily = finite(row.dailyBudget)
   if (daily === null || daily <= 0) return null
-  if (row.durationDays === null) return { daily, days: null }
+  const endTime = storedEnd(row)
+  if (endTime === 'bad') return null
+  const end = endTime === undefined ? {} : { endTime }
+  if (row.durationDays === null) return { daily, days: null, ...end }
   const days = finite(row.durationDays)
-  if (days === null || !Number.isInteger(days) || days < 1) return null
-  return { daily, days }
+  if ((days === null || !Number.isInteger(days) || days < 1) && endTime === undefined) return null
+  const kept = days !== null && Number.isInteger(days) && days >= 1 ? days : null
+  return { daily, days: kept, ...end }
+}
+
+function storedEnd(row: Record<string, unknown>): string | null | undefined | 'bad' {
+  if (!Object.prototype.hasOwnProperty.call(row, 'endTime')) return undefined
+  if (row.endTime === null) return null
+  if (typeof row.endTime !== 'string' || !Number.isFinite(Date.parse(row.endTime))) return 'bad'
+  return row.endTime
 }
