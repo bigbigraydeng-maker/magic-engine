@@ -52,6 +52,16 @@ describe('routeComment', () => {
     )
   })
 
+  it('词形变化：refunds / refunded / cancelled / scammed / charges', () => {
+    expect(routeComment({ category: 'question', comment_text: 'I want refunds' }).intent).toBe('refund')
+    expect(routeComment({ category: 'question', comment_text: 'I was refunded yesterday' }).intent).toBe(
+      'refund',
+    )
+    expect(routeComment({ category: 'question', comment_text: 'My trip was cancelled' }).intent).toBe('refund')
+    expect(routeComment({ category: 'other', comment_text: 'We got scammed' }).intent).toBe('complaint')
+    expect(routeComment({ category: 'question', comment_text: 'What are the charges?' }).intent).toBe('price')
+  })
+
   it('英文子串误伤：accurate / costume / ideal 不判成问价', () => {
     expect(routeComment({ category: 'other', comment_text: 'Your info was accurate' }).intent).not.toBe(
       'price',

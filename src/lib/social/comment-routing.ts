@@ -33,6 +33,9 @@ export interface CommentRoutingResult {
 
 const REFUND_ASCII = [
   'refund',
+  'refunds',
+  'refunded',
+  'cancelled',
   'chargeback',
   'money back',
   'get my money back',
@@ -80,6 +83,7 @@ const COMPLAINT_ASCII = [
   'not happy',
   'disappointed',
   'worst',
+  'scammed',
 ]
 const COMPLAINT_CJK = [
   '投诉',
@@ -110,6 +114,7 @@ const PRICE_ASCII = [
   'deposit',
   'charge',
   'charged',
+  'charges',
   'overcharged',
   'cheap',
   'expensive',
