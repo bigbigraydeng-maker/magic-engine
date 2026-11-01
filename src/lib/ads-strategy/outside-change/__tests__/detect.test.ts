@@ -88,6 +88,26 @@ describe('detectOutsideChanges', () => {
     expect(detectOutsideChanges([before, after], [pause, otherEntity, tooEarly, failed])).toHaveLength(1)
   })
 
+  it('drops new entities when the create action is a paused ME draft (awaiting_approval / blocked / rejected)', () => {
+    const adset = snap({
+      level: 'adset', entityId: 'set-draft', entityName: 'Draft set', campaignId: 'camp-1',
+      capturedAt: T1, settingsHash: 'draft-set', dailyBudgetMinor: 2000,
+    })
+    const ad = snap({
+      level: 'ad', entityId: 'ad-draft', entityName: 'Draft ad', adsetId: 'set-draft',
+      capturedAt: T1, settingsHash: 'draft-ad',
+    })
+    for (const status of ['awaiting_approval', 'blocked', 'rejected'] as const) {
+      const created = action({
+        key: 'ads.create_ad',
+        occurredAt: '2026-10-30T09:40:00.000Z',
+        ids: idsInRecord({ status, campaignId: 'camp-1', adSetId: 'set-draft', adIds: ['ad-draft'] }),
+        status,
+      })
+      expect(detectOutsideChanges([campaign, adset, ad], [created])).toEqual([])
+    }
+  })
+
   it('drops a change when a finished action record matches the entity in the gap (match)', () => {
     const before = snap({
       level: 'campaign', entityId: 'camp-1', entityName: 'Spring', capturedAt: T0, settingsHash: 'c1', dailyBudgetMinor: 5000,

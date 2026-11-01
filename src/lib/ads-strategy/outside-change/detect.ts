@@ -27,6 +27,8 @@ const CREATE_KEYS = new Set([
   'ads.swap_creative',
 ])
 const DONE_STATUS = new Set(['succeeded', 'active', 'executed'])
+/** ME paused draft ledger rows — not live yet, but still ME-created (not outside Meta edits). */
+const PENDING_DRAFT_STATUS = new Set(['awaiting_approval', 'blocked', 'rejected'])
 const ID_KEYS = new Set([
   'entity_id', 'entityId',
   'campaign_id', 'campaignId',
@@ -231,11 +233,22 @@ function inWindow(action: ActionFact, previous: string | null, capturedAt: strin
   return at >= from && at <= seen + MATCH_AFTER_MS
 }
 
+function statusExplains(action: ActionFact, createAction: boolean): boolean {
+  if (!action.status) return true
+  if (DONE_STATUS.has(action.status)) return true
+  if (createAction && PENDING_DRAFT_STATUS.has(action.status)) return true
+  return false
+}
+
 function matched(candidate: Candidate, actions: ActionFact[]): boolean {
   const keys = candidate.kind === 'budget' ? BUDGET_KEYS : CREATE_KEYS
   return actions.some((action) => {
     if (!keys.has(action.key)) return false
-    if (action.status && !DONE_STATUS.has(action.status)) return false
+    const createAction = CREATE_KEYS.has(action.key)
+    // TODO(Ray): matched() ignores adopted.source today. Rows sourced as manual_meta_adopted
+    // (post-hoc adoption of hand-made Meta edits) still count as ME-explained. Decide whether
+    // those should be treated as outside changes instead; suggested default: mark as ME 外改动.
+    if (!statusExplains(action, createAction)) return false
     if (!action.ids.includes(candidate.row.entityId)) return false
     return inWindow(action, candidate.previousCapturedAt, candidate.row.capturedAt)
   })
