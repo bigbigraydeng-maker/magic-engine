@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-11-02
 done_on: 2026-11-02
-done_ref: pr:3498
+done_ref: pr:3508
 source: session:96dc6edf
 verify_by: 2026-11-04
 verify_how: 合并部署后用 CTS 员工账号打开 /crm/calendar：顶部出现「全公司 / 只看我的」；默认全公司，回电数量与之前一致；点「只看我的」只剩跟进人是自己的回电；没人跟进的客人只出现在全公司。接口返回含 viewerEmail，每条回电含 assignee。
