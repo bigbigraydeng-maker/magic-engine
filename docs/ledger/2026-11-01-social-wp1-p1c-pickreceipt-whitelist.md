@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-11-01
 source: doc:docs/specs/2026-10-29-social-wp1-readback-implementation-brief-v2.md
 done_on: 2026-11-01
-done_ref: pr:pending
+done_ref: pr:3491
 verify_how: npm test 跑 post-measurement-contract 与 post-performance；变异：去掉白名单或 W3 允许 48 时 T15 应变红
 ---
 
