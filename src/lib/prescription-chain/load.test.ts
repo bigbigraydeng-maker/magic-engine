@@ -41,7 +41,7 @@ describe('loadChainFacts', () => {
   it('turns a failed snapshot read into unread and does not invent a time', async () => {
     const facts = await loadChainFacts(reader({
       prescriptions: { data: prescription, error: null },
-      goals: { data: { target_value: 1, baseline_value: 0, current_value: null, period_start: '2026-10-01', period_end: '2026-10-31' }, error: null },
+      goals: { data: { title: '线索目标', target_value: 1, baseline_value: 0, current_value: null, period_start: '2026-10-01', period_end: '2026-10-31' }, error: null },
       ad_strategy_configs: { data: null, error: { message: 'relation missing' } },
       marketing_plans: { data: [], error: null },
       content_work_orders: { data: [], error: null },

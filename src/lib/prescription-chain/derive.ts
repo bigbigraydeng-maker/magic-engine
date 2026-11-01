@@ -33,7 +33,23 @@ function deriveInspect(facts: ChainFacts): { step: ChainStep; stale: boolean } {
 function deriveConfirm(facts: ChainFacts): ChainStep {
   const rx = prescriptionOf(facts)
   if (rx === 'unread' || rx === null) return unreadStep('confirm')
-  if (!rx.intake) return chainStep('confirm', 'active', '客户需求还没记在这份处方里。')
+  if (!rx.intake) {
+    if (rx.manual && rx.status === 'approved') {
+      const goal = facts.goal.read === 'ok' ? facts.goal.value : null
+      const goalReady = goal !== null
+        && goal.title !== null
+        && goal.targetValue !== null
+        && goal.periodStart !== null
+        && goal.periodEnd !== null
+      const plan = linkedPlan(facts)
+      const planReady = plan !== null && plan !== 'unread' && plan !== 'no-goal'
+        && (plan.status === 'approved' || plan.status === 'completed')
+      if (goalReady && planReady) {
+        return chainStep('confirm', 'done', '需求按目标和已批准计划登记（人工处方）。')
+      }
+    }
+    return chainStep('confirm', 'active', '客户需求还没记在这份处方里。')
+  }
   const goalOk = rx.intake.businessGoal !== null
   const budgetOk = rx.intake.monthlyBudget !== null && rx.intake.monthlyBudget > 0
   if (goalOk && budgetOk) return chainStep('confirm', 'done', '需求已经记在处方里。')
@@ -51,6 +67,14 @@ function derivePrescribe(facts: ChainFacts): ChainStep {
     return chainStep('prescribe', 'blocked', '这份处方已经被新版本换掉了。')
   }
   if (!rx.contentPresent) return chainStep('prescribe', 'active', '处方正文还没写出来。')
+  if (rx.adPlayCount < 1 && rx.status === 'approved') {
+    const plan = linkedPlan(facts)
+    if (plan !== null && plan !== 'unread' && plan !== 'no-goal'
+      && (plan.status === 'approved' || plan.status === 'completed')
+      && plan.adsStepCount > 0) {
+      return chainStep('prescribe', 'done', '广告打法写在已批准的推广计划里')
+    }
+  }
   if (rx.adPlayCount < 1 && rx.intake?.personalIp) {
     return chainStep('prescribe', 'done', '这份以内容为主，没有广告打法。')
   }

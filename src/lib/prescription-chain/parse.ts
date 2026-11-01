@@ -1,3 +1,4 @@
+import { manualSource, MANUAL_PRESCRIPTION_AGENT } from '@/lib/diagnostic/manual-prescription'
 import { collectAdPlays } from '@/lib/ads-strategy/plan-seed/attach'
 import { parseCreativePool } from '@/lib/ads-strategy/config'
 import { allAdsSteps, readPromoSpec } from '@/lib/marketing-plan/promo/spec'
@@ -19,6 +20,8 @@ import type {
 
 const DATE = /^\d{4}-\d{2}-\d{2}/
 const COST_METRIC = /成本|cost/i
+const COST_THRESHOLD_METRIC = /暂停线|停投|止损|上限|保本|pause|stop|kill|cap|ceiling|break.?even/i
+const EXPLICIT_TARGET_COST_METRIC = /目标线索成本|目标成本|target (lead )?cost|target cpl/i
 const CENTS_UNIT = /分|cent/i
 
 export function finiteNumber(value: unknown): number | null {
@@ -55,19 +58,33 @@ function intakeFrom(raw: unknown): IntakeFact | null {
   }
 }
 
+function costAmountFromKpi(kpi: Record<string, unknown>): number | null {
+  const amount = finiteNumber(kpi.target_value)
+  if (amount === null) return null
+  const unit = String(kpi.unit ?? '')
+  return CENTS_UNIT.test(unit) ? amount / 100 : amount
+}
+
 function targetCosts(content: Record<string, unknown>): number[] {
   const rows = content.kpi_targets
   if (!Array.isArray(rows)) return []
-  const costs: number[] = []
+  const explicit: number[] = []
+  const fallback: number[] = []
   for (const row of rows) {
     const kpi = asRecord(row)
-    if (!kpi || !COST_METRIC.test(String(kpi.metric ?? ''))) continue
-    const amount = finiteNumber(kpi.target_value)
+    if (!kpi) continue
+    const metric = String(kpi.metric ?? '')
+    if (!COST_METRIC.test(metric)) continue
+    const amount = costAmountFromKpi(kpi)
     if (amount === null) continue
-    const unit = String(kpi.unit ?? '')
-    costs.push(CENTS_UNIT.test(unit) ? amount / 100 : amount)
+    if (COST_THRESHOLD_METRIC.test(metric)) continue
+    if (EXPLICIT_TARGET_COST_METRIC.test(metric)) {
+      explicit.push(amount)
+      continue
+    }
+    fallback.push(amount)
   }
-  return costs
+  return explicit.length > 0 ? explicit : fallback
 }
 
 function reviewAnchor(content: Record<string, unknown>): string | null {
@@ -80,12 +97,14 @@ export function parsePrescription(row: unknown): PrescriptionFact | null {
   if (!record || typeof record.status !== 'string') return null
   const content = asRecord(record.content)
   const plays = content ? collectAdPlays(content as unknown as PrescriptionContent) : []
+  const manual = record.agent_name === MANUAL_PRESCRIPTION_AGENT || manualSource(record.generation_meta)
   return {
     status: record.status,
     goalId: textOrNull(record.goal_id),
     approvedAt: textOrNull(record.approved_at),
     errorMessage: textOrNull(record.error_message),
     intake: intakeFrom(record.intake),
+    manual,
     contentPresent: content !== null,
     adPlayCount: plays.length,
     targetCosts: content ? targetCosts(content) : [],
@@ -97,6 +116,7 @@ export function parseGoal(row: unknown): GoalFact | null {
   const record = asRecord(row)
   if (!record) return null
   return {
+    title: textOrNull(record.title),
     targetValue: finiteNumber(record.target_value),
     baselineValue: finiteNumber(record.baseline_value),
     currentValue: finiteNumber(record.current_value),
