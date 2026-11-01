@@ -131,6 +131,23 @@ describe('runIntakeForClient news hotspot', () => {
     expect(m.inserts[0]).toMatchObject({ source: '抓自：AI headline' })
   })
 
+  it('does not waste the news slot on an already-seen headline before mix', async () => {
+    m.existingSources = ['抓自：News1']
+    m.intakeConfig.platforms = ['xiaohongshu', 'news']
+    m.intakeConfig.rewriteCount = 3
+    m.apify.mockResolvedValue({
+      success: true,
+      data: [
+        { title: 'V1', desc: 'd', engagement: { liked_count: 1 } },
+        { title: 'V2', desc: 'd', engagement: { liked_count: 1 } },
+        { title: 'V3', desc: 'd', engagement: { liked_count: 1 } },
+      ],
+    })
+    m.newsFetch.mockResolvedValue({ items: [viral('News1')], warnings: [] })
+    await runIntakeForClient('client-1')
+    expect(m.generate.mock.calls.map((c) => (c[1] as ViralRef).title)).toEqual(['V1', 'V2', 'V3'])
+  })
+
   it('uses mix so one news slot plus viral slots within rewriteCount', async () => {
     m.intakeConfig.platforms = ['xiaohongshu', 'news']
     m.intakeConfig.rewriteCount = 3

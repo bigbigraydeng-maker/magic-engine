@@ -15,6 +15,10 @@ const num = (v: unknown): number => (typeof v === 'number' ? v : 0)
 // 去重键：只用标题，不带点赞数（点赞会变，带上就永远命中不了、同一条反复改写烧钱）
 const sourceKey = (title: string): string => `抓自：${title}`.trim()
 
+function unseenRefs(refs: ViralRef[], seen: Set<string>): ViralRef[] {
+  return refs.filter((v) => !seen.has(sourceKey(v.title)))
+}
+
 // content_posts 里已有的、来自同一爆款的 source，避免重复抓同一条反复改写
 async function existingSources(clientId: string): Promise<Set<string>> {
   const { data } = await supabaseAdmin
@@ -101,7 +105,11 @@ export async function runIntakeForClient(clientId: string): Promise<IntakeRunRes
   }
 
   const seen = await existingSources(clientId)
-  const picks = mixIntakePicks(virals, newsVirals, config.rewriteCount)
+  const picks = mixIntakePicks(
+    unseenRefs(virals, seen),
+    unseenRefs(newsVirals, seen),
+    config.rewriteCount,
+  )
 
   let created = 0
   for (const v of picks) {
