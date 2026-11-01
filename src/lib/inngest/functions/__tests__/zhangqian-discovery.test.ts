@@ -30,21 +30,16 @@ describe('zhangqian discovery event', () => {
 describe('closeUnfinishedDiscoveryJob', () => {
   beforeEach(() => { getJob.mockReset(); failJob.mockReset(); refundOnFail.mockReset() })
 
-  it('fails the job and refunds when the run never finished', async () => {
+  it('fails the job without refunding when the run never finished', async () => {
     getJob.mockResolvedValue({ status: 'running' })
     expect(await closeUnfinishedDiscoveryJob(data, 'boom')).toBe('closed')
     expect(failJob).toHaveBeenCalledOnce()
-    expect(refundOnFail).toHaveBeenCalledWith('c1', 'zhangqian_discover', 60, expect.anything())
+    expect(refundOnFail).not.toHaveBeenCalled()
   })
   it('does nothing when the job already ended', async () => {
     getJob.mockResolvedValue({ status: 'completed' })
     expect(await closeUnfinishedDiscoveryJob(data, 'boom')).toBe('already_terminal')
     expect(failJob).not.toHaveBeenCalled()
-    expect(refundOnFail).not.toHaveBeenCalled()
-  })
-  it('does not refund admin runs (projected_mtc 0)', async () => {
-    getJob.mockResolvedValue({ status: 'pending' })
-    await closeUnfinishedDiscoveryJob({ ...data, projected_mtc: 0 }, 'boom')
     expect(refundOnFail).not.toHaveBeenCalled()
   })
   it('never retries the paid run, and is registered with a failure handler', () => {

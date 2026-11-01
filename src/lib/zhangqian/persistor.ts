@@ -269,22 +269,23 @@ export async function getActiveJob(
 }
 
 /**
- * Close basic jobs still marked pending/running. Call only after `getActiveJob`
- * returned null: whatever is left is stale, and the one-active-job-per-client
- * unique index would otherwise make the next `createDiscoveryJob` fail.
+ * Fail basic jobs that are stale (see `isStaleRunningJob`) so the one-active-job-per-client
+ * unique index does not block the next `createDiscoveryJob`. A live job is never touched,
+ * so a concurrent second click cannot kill the run another request just started.
  */
 export async function closeStaleActiveJobs(
   supabase: SupabaseClient,
   clientId: string,
 ): Promise<void> {
-  await supabase
+  const { data } = await supabase
     .from('client_discovery_jobs')
-    .update({
-      status: 'failed',
-      error_message: 'Timed out: the run never reported back',
-      completed_at: new Date().toISOString(),
-    })
+    .select('id, status, started_at, created_at')
     .eq('client_id', clientId)
     .eq('job_type', 'basic')
     .in('status', ['pending', 'running'])
+  const stale = ((data ?? []) as { id: string; status: string; started_at: string | null; created_at: string }[])
+    .filter(isStaleRunningJob)
+  for (const job of stale) {
+    await failJob(supabase, job.id, 'Timed out: the run never reported back')
+  }
 }

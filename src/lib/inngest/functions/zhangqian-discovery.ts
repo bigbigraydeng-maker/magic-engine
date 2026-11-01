@@ -13,9 +13,8 @@
 
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
-import { executeDiscoveryJob, ZHANGQIAN_SERVICE_KEY } from '@/lib/zhangqian/run-discovery-job'
+import { executeDiscoveryJob } from '@/lib/zhangqian/run-discovery-job'
 import { failJob, getJob } from '@/lib/zhangqian/persistor'
-import { refundOnFail } from '@/lib/mtc/charge'
 import {
   ZHANGQIAN_DISCOVERY_REQUESTED,
   type ZhangqianDiscoveryRequestedData,
@@ -37,20 +36,16 @@ export function parseDiscoveryEvent(raw: unknown): ZhangqianDiscoveryRequestedDa
   }
 }
 
-/** Close a job the run never finished. No-op when it already reached a terminal state. */
+/** Close a job the run never finished (nothing was charged, so nothing is refunded). No-op when it already reached a terminal state. */
 export async function closeUnfinishedDiscoveryJob(
   data: ZhangqianDiscoveryRequestedData,
   message: string,
 ): Promise<'closed' | 'already_terminal'> {
   const job = await getJob(supabaseAdmin, data.job_id)
   if (job && job.status !== 'pending' && job.status !== 'running') return 'already_terminal'
+  // No refund: precheckCharge only checks the balance, and commitCharge runs after the
+  // job is marked completed. A job still pending/running here was never debited.
   await failJob(supabaseAdmin, data.job_id, `Agent error: ${message}`)
-  if (data.projected_mtc > 0) {
-    await refundOnFail(data.client_id, ZHANGQIAN_SERVICE_KEY, data.projected_mtc, {
-      referenceId: data.job_id,
-      reason: `zhangqian run did not finish: ${message}`,
-    })
-  }
   return 'closed'
 }
 
