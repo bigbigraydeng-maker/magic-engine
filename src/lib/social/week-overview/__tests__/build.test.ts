@@ -123,6 +123,35 @@ describe('buildWeekOverview', () => {
     expect(result.value.story?.newer_draft_title).toBe('newer draft')
   })
 
+  it('counts Story slots in this Auckland week across packs, not the whole pack on screen', async () => {
+    const now = new Date('2026-11-01T11:30:00.000Z')
+    const store = new InMemoryLiteStore()
+    await store.insertPack(
+      { id: 'shown', client_id: CLIENT, title: 'shown', now: new Date('2026-10-20T00:00:00Z') },
+      [
+        item('sun-a', '2026-10-31T23:00:00.000Z'),
+        item('sun-b', '2026-10-31T22:00:00.000Z'),
+        item('mon', '2026-11-01T19:00:00.000Z'),
+      ],
+    )
+    await store.authorizePack({
+      packId: 'shown', clientId: CLIENT, byEmail: 'a@b.c', byUserId: 'u', now: new Date('2026-10-21T00:00:00Z'),
+      expiresAt: new Date('2026-11-20T00:00:00Z'), contentHash: 'c'.repeat(64),
+      fingerprints: { 'sun-a': 'f'.repeat(64), 'sun-b': 'e'.repeat(64), mon: 'd'.repeat(64) },
+    })
+    await store.insertPack(
+      { id: 'other', client_id: CLIENT, title: 'other', now: new Date('2026-10-22T00:00:00Z') },
+      [item('wed', '2026-11-03T23:00:00.000Z')],
+    )
+    const { db } = fakeDb([])
+    const result = await buildWeekOverview({ ports: ports(store), db, clientId: CLIENT, actor: ADMIN, switches: OFF, now })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.value.story?.title).toBe('shown')
+    expect(result.value.story?.items).toHaveLength(3)
+    expect(result.value.story_week_count).toBe(2)
+  })
+
   it('a failed Story read says so and still shows the Reels', async () => {
     const store = new InMemoryLiteStore()
     store.listPacksForClient = async () => { throw new Error('db down') }

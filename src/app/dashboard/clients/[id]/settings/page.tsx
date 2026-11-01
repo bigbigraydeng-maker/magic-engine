@@ -56,6 +56,7 @@ import { ProductsPanel } from './_components/ProductsPanel'
 import { UploadLinkPanel } from './_components/UploadLinkPanel'
 import { FactoryConfigPanel } from './_components/FactoryConfigPanel'
 import { CommentAutoReplyPanel } from './_components/CommentAutoReplyPanel'
+import { PublishingQuotaPanel } from './_components/PublishingQuotaPanel'
 import { LeadsConfigPanel } from './_components/LeadsConfigPanel'
 import { MailchimpAudiencePanel } from './_components/MailchimpAudiencePanel'
 import { LeadNotifyEmailsPanel } from './_components/LeadNotifyEmailsPanel'
@@ -224,6 +225,9 @@ function TabBody({
           </SettingsSection>
           <SettingsSection icon="🏷️" title="社媒资料登记（不授予发布权限）" id="social-profiles" defaultOpen={focusSection === 'social-profiles'}>
             <SocialHandlesPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="📅" title="发布名额（每天 / 每周各发几条）" id="publishing-quota" defaultOpen={focusSection === 'publishing-quota'}>
+            <PublishingQuotaPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="📝" title="每周自动 Blog（SEO 盯梢）">
             <WeeklyBlogPanel clientId={clientId} />

@@ -56,6 +56,7 @@ function overview(overrides: Partial<WeekOverview> = {}): WeekOverview {
     reels_error: null,
     reel_variety: { same_track_max: 0, same_track_file: null, price_screen_count: 0, total: 1 },
     post: { connected: false },
+    story_week_count: 2,
     ...overrides,
   }
 }
@@ -217,11 +218,13 @@ describe('WeekOverviewPanel', () => {
           post_per_week: 4, story_per_week: 18,
           post_period: 'week', story_period: 'week', reel_period: 'week',
         },
+        story_week_count: 1,
       }),
     })
     const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
     expect(await screen.findByText('每周名额 18 条')).toBeTruthy()
-    expect(screen.getByText('本周用了 2/18')).toBeTruthy()
+    expect(screen.getByText('本周用了 1/18')).toBeTruthy()
+    expect(container.textContent).not.toContain('本周用了 2/18')
     expect(screen.getByText('图文每周名额 4 条')).toBeTruthy()
     expect(screen.getByText('Story（2 条）')).toBeTruthy()
     expect(container.textContent).not.toContain('每天名额 3 条')

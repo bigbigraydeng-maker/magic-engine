@@ -179,8 +179,10 @@ function StoryTile({ data, now }: { data: WeekOverview; now: Date }) {
         <p className="text-xs font-medium text-me-charcoal">另外还有一个新的周包「{story.newer_draft_title}」还没授权，上面说的是已经授权的那个。</p>
       )}
       <p className="text-xs text-me-charcoal/70">{phraseFor(data.quota, 'story', 'day')}</p>
-      {storyCap?.period === 'week' && !data.story_error && (
-        <p className="text-xs text-me-charcoal/70">本周{usagePhrase(tally.total, storyCap, 'week')}</p>
+      {storyCap?.period === 'week' && !data.story_error && typeof data.story_week_count === 'number' && (
+        <p className="text-xs text-me-charcoal/70" title="新西兰时间，周一到周日。最近的周包里，落在这一周的条数，不是眼前这个包的总条数。">
+          本周{usagePhrase(data.story_week_count, storyCap, 'week')}
+        </p>
       )}
     </Tile>
   )
