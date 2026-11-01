@@ -10,6 +10,7 @@ import {
   FactoryReelPublishedEventSchema,
   buildReelPublishedEvent,
   reelPublishedEventId,
+  toUtcPublishedAt,
 } from './reel-published-event'
 
 const BASE = {
@@ -22,6 +23,17 @@ const BASE = {
   requestId: 'f0f0f0f0-1111-2222-3333-444444444444',
   createdAt: '2026-09-06T20:00:01.000Z',
 }
+
+describe('toUtcPublishedAt', () => {
+  it('turns Graph +0000 into the Z timestamp this event accepts', () => {
+    expect(toUtcPublishedAt('2026-10-18T00:00:00+0000')).toBe('2026-10-18T00:00:00.000Z')
+    expect(FactoryReelPublishedEventSchema.shape.published_at.safeParse('2026-10-18T00:00:00.000Z').success).toBe(true)
+    expect(FactoryReelPublishedEventSchema.shape.published_at.safeParse('2026-10-18T00:00:00+0000').success).toBe(false)
+  })
+  it('uses the supplied clock when the platform time cannot be read', () => {
+    expect(toUtcPublishedAt('not-a-time', new Date('2026-10-18T01:02:03.000Z'))).toBe('2026-10-18T01:02:03.000Z')
+  })
+})
 
 describe('reelPublishedEventId', () => {
   it('幂等 id 由 work_order + video 决定,稳定可复现(正常路径与补发路径同 id → Inngest 去重)', () => {

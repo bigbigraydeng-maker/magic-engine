@@ -84,6 +84,15 @@ export function reelPublishedEventId(workOrderId: string, videoId: string): stri
   return `me-factory-reel-${workOrderId}-${videoId}`
 }
 
+/**
+ * Graph `updated_time` often looks like `2026-10-18T00:00:00+0000`.
+ * This event only accepts a UTC `Z` timestamp. Unparseable values fall back to `now`.
+ */
+export function toUtcPublishedAt(raw: string | undefined, now: Date = new Date()): string {
+  const parsed = raw ? new Date(raw) : new Date(NaN)
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : now.toISOString()
+}
+
 export interface BuildReelPublishedEventInput {
   workOrderId: string
   clientId: string
