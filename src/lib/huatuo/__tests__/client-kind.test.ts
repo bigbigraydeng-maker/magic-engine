@@ -37,6 +37,18 @@ describe('resolveIntakeClientKind', () => {
     expect((await resolveIntakeClientKind(client, 'c1', intake)).client_kind).toBe('standard')
   })
 
+  it('treats a client_kind query error as standard', async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({
+      data: null,
+      error: { message: 'column clients.client_kind does not exist' },
+    })
+    const client = {
+      from: vi.fn(() => ({ select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle })) })) })),
+    } as unknown as SupabaseClient
+    const { loadClientKind } = await import('../client-kind')
+    expect(await loadClientKind(client, 'c1')).toBe('standard')
+  })
+
   it('lets the request switch a personal IP client back to standard without reading the row', async () => {
     const { client, reads } = supabaseWith('personal_ip')
     const out = await resolveIntakeClientKind(client, 'c1', { ...intake, client_kind: 'standard' })
