@@ -8,6 +8,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
 import { cadenceFromConfig, isWeekday, nzDateKey, targetWeek } from '@/lib/social/week-pack/cadence'
 import { weekPackSubject } from '@/lib/social/week-pack/facts'
+import { readHeldEvidence } from '@/lib/social/week-pack/persist-held'
 import { weeklyPackApprovalEnabled, type WeekPackEnv } from '@/lib/social/week-pack/switches'
 
 import { APP_BASE } from './binding-request-items'
@@ -34,11 +35,18 @@ export interface HandledPack {
   subjectKey: string
 }
 
+export interface UnpublishedNote {
+  clientId: string
+  kind: 'story' | 'post' | 'reel'
+  text: string
+}
+
 export interface WeekPackTodoSource {
   configs: Array<{ id: string; name: string; config: unknown }> | 'unread'
   pending: PendingCard[] | 'unread'
   handled: HandledPack[] | 'unread'
   held: HeldCount[] | 'unread'
+  unpublished: UnpublishedNote[] | 'unread'
 }
 
 /** A pack this client and week already agreed to, or already turned down. Expired and voided cards are not handled. */
@@ -64,10 +72,12 @@ export function buildWeekPackTodoItems(source: WeekPackTodoSource, now: Date, en
   } else {
     items.push(...approvalItems(source.configs, source.pending, source.handled, now))
   }
-  if (source.held === 'unread') {
+  if (source.held === 'unread' || source.unpublished === 'unread') {
     items.push(unreadable('今天读不到有几条被单独拦住，不要当成 0 条。', '打开本周总览和 Story 页看被拦住的内容。'))
   } else {
-    items.push(...heldItems(source.held, source.configs === 'unread' ? [] : source.configs))
+    const names = source.configs === 'unread' ? [] : source.configs
+    items.push(...heldItems(source.held, names))
+    items.push(...unpublishedItems(source.unpublished, names))
   }
   return items
 }
@@ -91,13 +101,14 @@ async function loadWeekPackTodoSource(
   nameOf: (id: string) => string,
   clientIds: readonly string[],
 ): Promise<WeekPackTodoSource> {
-  const [configs, pending, handled, held] = await Promise.all([
+  const [configs, pending, handled, held, unpublished] = await Promise.all([
     loadConfigs(supabase, nameOf, clientIds),
     loadPending(supabase),
     loadHandled(supabase),
     loadHeld(supabase, now, clientIds),
+    loadUnpublished(supabase, now, clientIds),
   ])
-  return { configs, pending, handled, held }
+  return { configs, pending, handled, held, unpublished }
 }
 
 async function loadConfigs(
@@ -292,6 +303,50 @@ function needsApproval(client: { id: string; name: string }, expiring: boolean):
     how: '打开本周总览，拉到「批下一周」，看完再点同意或先不发。',
     href: `${APP_BASE}/dashboard/clients/${encodeURIComponent(client.id)}/daily-plan?tab=overview#approve-week`,
   }
+}
+
+async function loadUnpublished(
+  supabase: SupabaseClient,
+  now: Date,
+  clientIds: readonly string[],
+): Promise<WeekPackTodoSource['unpublished']> {
+  const week = targetWeek(now)
+  const allowed = new Set(clientIds)
+  const { data, error } = await supabase
+    .from('action_runs')
+    .select('client_id, input, evidence')
+    .eq('action_key', CONFIRMATION_ACTION_KEY)
+    .eq('status', 'authorized')
+    .limit(LOOK_CAP)
+  if (error || (data ?? []).length >= LOOK_CAP) return 'unread'
+  const notes: UnpublishedNote[] = []
+  for (const row of (data ?? []) as Array<{ client_id?: unknown; input?: unknown; evidence?: unknown }>) {
+    if (typeof row.client_id !== 'string' || !allowed.has(row.client_id)) continue
+    const input = row.input && typeof row.input === 'object' ? row.input as Record<string, unknown> : null
+    const subject = typeof input?.subject_key === 'string' ? input.subject_key : ''
+    if (subject !== weekPackSubject(row.client_id, week.weekStart)) continue
+    const parsed = readHeldEvidence(row.evidence)
+    if (parsed === 'invalid') return 'unread'
+    if (parsed === 'none') continue
+    for (const line of parsed) notes.push({ clientId: row.client_id, kind: line.kind, text: line.text })
+  }
+  return notes
+}
+
+function unpublishedItems(notes: UnpublishedNote[], configs: Array<{ id: string; name: string }>): ManualItem[] {
+  const names = new Map(configs.map((client) => [client.id, client.name]))
+  return notes.map((note) => ({
+    kind: 'week_pack_items_held' as const,
+    client_id: note.clientId,
+    client_name: names.get(note.clientId) ?? '这位客户',
+    what: `整包已经点过同意，这一条没有发出去。${note.text}`,
+    how: note.kind === 'reel'
+      ? '打开本周总览的「批下一周」。视频要先看过预览；没公开的去视频工厂逐条处理。'
+      : '打开 Story 页。这一条要全局管理员才能授权，别的已经成功的不撤回。',
+    href: note.kind === 'reel'
+      ? `${APP_BASE}/dashboard/clients/${encodeURIComponent(note.clientId)}/daily-plan?tab=overview#approve-week`
+      : `${APP_BASE}/dashboard/clients/${encodeURIComponent(note.clientId)}/story`,
+  }))
 }
 
 function heldItems(held: HeldCount[], configs: Array<{ id: string; name: string }>): ManualItem[] {

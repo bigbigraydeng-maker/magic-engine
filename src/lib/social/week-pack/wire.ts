@@ -16,6 +16,7 @@ import { storyAuthorizeLifetime } from './lifetime'
 import type { WeekPackPorts, RevokeStoryResult } from './flow'
 import type { ReelPromoteResult, StoryAuthResult } from './lines'
 import { loadWeekPackManifest, readClientPackSettings, type ClientPackSettings } from './load'
+import { recordUnpublishedOnCard } from './persist-held'
 import { promoteReelGated } from './promote-guard'
 import { reelGoPublicOnApproveEnabled, type WeekPackEnv } from './switches'
 
@@ -55,6 +56,9 @@ export function createWeekPackPorts(input: WireInput): WeekPackPorts & { setting
     }),
     authorizeStory: (packId, contentHash) => authorizeStory(input, packId, contentHash),
     revokeStory: (packId, reason) => revokeStory(input, packId, reason),
+    recordUnpublished: ({ runId, clientId, lines }) => recordUnpublishedOnCard(input.db, {
+      runId, clientId, lines, now: input.now,
+    }),
     promoteReel: (workOrderId, previewToken) => promoteReelGated({
       enabled: reelGoPublic,
       allowedClientId: input.actor.allowedClientId,

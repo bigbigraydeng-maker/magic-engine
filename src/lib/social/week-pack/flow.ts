@@ -11,6 +11,7 @@ import type { ConfirmationCardView } from '@/lib/confirmation-card/view'
 import type { WeeklyPackCadence } from './cadence'
 import { buildWeekPackFacts, scopeHasDigest, weekPackSubject } from './facts'
 import { postLine, runReelLines, runStoryLine, type ReelPromoteResult, type StoryAuthResult } from './lines'
+import { unpublishedFailures } from './persist-held'
 import type { WeekPackLine, WeekPackManifest, WeekPackReceipt } from './types'
 
 export interface RevokeStoryResult {
@@ -36,6 +37,7 @@ export interface WeekPackPorts {
   authorizeStory(packId: string, contentHash: string): Promise<StoryAuthResult>
   revokeStory(packId: string, reason: string): Promise<RevokeStoryResult>
   promoteReel(workOrderId: string, previewToken: string): Promise<ReelPromoteResult>
+  recordUnpublished(input: { runId: string; clientId: string; lines: WeekPackLine[] }): Promise<'saved' | 'failed'>
 }
 
 export interface FlowResult {
@@ -93,6 +95,7 @@ export async function confirmWeekPack(args: {
   }
   if (card.status !== 'confirmed') return stopped(args.clientId, manifest, card, built.facts.subjectKey)
   const lines = await applyConfirmed(manifest, args.ports, args.tokens)
+  await rememberFailures(args.ports, args.clientId, card.runId, lines)
   return done(args.clientId, manifest, card, built.facts.subjectKey, lines)
 }
 
@@ -169,6 +172,29 @@ async function factsFor(clientId: string, manifest: WeekPackManifest, ports: Wee
 
 function sameList(built: { fingerprint: string; digest: string; facts: CardFacts }, fingerprint: string): boolean {
   return built.fingerprint === fingerprint && scopeHasDigest(built.facts.scope, built.digest)
+}
+
+async function rememberFailures(
+  ports: WeekPackPorts,
+  clientId: string,
+  runId: string,
+  lines: WeekPackLine[],
+): Promise<void> {
+  const failures = unpublishedFailures(lines).map((line) => ({ ...line }))
+  if (failures.length === 0) return
+  try {
+    const saved = await ports.recordUnpublished({ runId, clientId, lines: failures })
+    if (saved === 'saved') return
+  } catch {
+    // The items already succeeded or failed. Losing the reminder must not undo them.
+  }
+  lines.push({
+    kind: 'story',
+    stable_id: null,
+    code: 'reminder_not_saved',
+    ok: false,
+    text: '这几条没发出去，但提醒没能记下。请先按上面的句子处理，刷新后可能看不到。',
+  })
 }
 
 async function applyConfirmed(

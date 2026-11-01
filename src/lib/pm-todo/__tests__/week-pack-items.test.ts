@@ -13,6 +13,7 @@ function source(overrides: Partial<WeekPackTodoSource> = {}): WeekPackTodoSource
     pending: [],
     handled: [],
     held: [],
+    unpublished: [],
     ...overrides,
   }
 }
@@ -67,6 +68,27 @@ describe('week pack todos', () => {
     expect(readHandledPack({
       clientId: CLIENT, status: 'denied', subjectKey: subject, reason: '要确认的内容变了，这张旧卡作废',
     })).toBeNull()
+  })
+
+  it('reminds about each unpublished failure after the pack was already approved', () => {
+    const subject = weekPackSubject(CLIENT, '2026-11-09')
+    const items = buildWeekPackTodoItems(source({
+      handled: [{ clientId: CLIENT, subjectKey: subject }],
+      unpublished: [
+        { clientId: CLIENT, kind: 'story', text: 'Story 没授权：这一点仍要全局管理员来点。' },
+        { clientId: CLIENT, kind: 'reel', text: '有一条视频还没预览，没有公开。' },
+      ],
+    }), FRIDAY_NZ, true)
+    expect(items.map((item) => item.kind)).toEqual(['week_pack_items_held', 'week_pack_items_held'])
+    expect(items[0].what).toContain('已经点过同意')
+    expect(items[0].what).toContain('全局管理员')
+    expect(items[0].href).toContain('/story')
+    expect(items[1].what).toContain('还没预览')
+    expect(items[1].href).toContain('#approve-week')
+    const quietDay = buildWeekPackTodoItems(source({
+      unpublished: [{ clientId: CLIENT, kind: 'reel', text: '有一条视频还没预览，没有公开。' }],
+    }), MONDAY_NZ, true)
+    expect(quietDay).toHaveLength(1)
   })
 
   it('does not touch the database when the switch is off', async () => {

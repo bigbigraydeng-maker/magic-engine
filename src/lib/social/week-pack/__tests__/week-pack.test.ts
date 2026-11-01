@@ -13,6 +13,7 @@ import { buildWeekPackFacts, scopeHasDigest, scopeLine } from '../facts'
 import { manifestDigest } from '../fingerprint'
 import { confirmWeekPack, declineWeekPack, openWeekPack, revokeWeekPack, type WeekPackPorts } from '../flow'
 import { loadWeekPackManifest } from '../load'
+import { readHeldEvidence, recordUnpublishedOnCard, unpublishedFailures } from '../persist-held'
 import { createWeekPackPorts } from '../wire'
 import { buildManifest, emptyStory, selectReels, unreadStory, type ReelInput } from '../manifest'
 import { promoteReelGated } from '../promote-guard'
@@ -74,7 +75,7 @@ function ports(manifest: WeekPackManifest, hooks?: {
   revoke?: WeekPackPorts['revokeStory']
   decide?: WeekPackPorts['decideCard']
   issue?: WeekPackPorts['issueCard']
-}): { ports: WeekPackPorts; authorize: ReturnType<typeof vi.fn>; promote: ReturnType<typeof vi.fn>; revoke: ReturnType<typeof vi.fn>; decide: ReturnType<typeof vi.fn>; issue: ReturnType<typeof vi.fn> } {
+}): { ports: WeekPackPorts; authorize: ReturnType<typeof vi.fn>; promote: ReturnType<typeof vi.fn>; revoke: ReturnType<typeof vi.fn>; decide: ReturnType<typeof vi.fn>; issue: ReturnType<typeof vi.fn>; record: ReturnType<typeof vi.fn> } {
   const built = buildWeekPackFacts({ manifest, accountLabel: '示例客户', reelGoPublic: false })
   const authorize = vi.fn(hooks?.authorize ?? (async () => ({ ok: true as const, code: 'story_authorized' as const })))
   const promote = vi.fn(hooks?.promote ?? (async () => { throw new Error('promote must not run') }))
@@ -83,8 +84,9 @@ function ports(manifest: WeekPackManifest, hooks?: {
     viewCard(input.fingerprint, input.resolution === 'confirm' ? 'confirmed' : 'declined')
   )))
   const issue = vi.fn(hooks?.issue ?? (async () => viewCard(built.fingerprint, 'waiting')))
+  const record = vi.fn(async () => 'saved' as const)
   return {
-    authorize, promote, revoke, decide, issue,
+    authorize, promote, revoke, decide, issue, record,
     ports: {
       loadManifest: async () => manifest,
       accountLabel: async () => '示例客户',
@@ -95,6 +97,7 @@ function ports(manifest: WeekPackManifest, hooks?: {
       authorizeStory: authorize,
       revokeStory: revoke,
       promoteReel: promote,
+      recordUnpublished: record,
     },
   }
 }
@@ -212,6 +215,9 @@ describe('orchestration', () => {
     ])
     expect(fake.promote).not.toHaveBeenCalled()
     expect(fake.revoke).not.toHaveBeenCalled()
+    expect(fake.record).toHaveBeenCalledTimes(1)
+    const recorded = fake.record.mock.calls[0][0].lines.map((line: { code: string }) => line.code)
+    expect(recorded).toEqual(['preview_required'])
     expect(scopeHasDigest(built.facts.scope, built.digest)).toBe(true)
   })
 
@@ -264,6 +270,25 @@ describe('orchestration', () => {
     expect(result.receipt?.rolled_back).toBe(false)
     expect(result.receipt?.lines.find((line) => line.kind === 'story')?.ok).toBe(true)
     expect(result.receipt?.lines.find((line) => line.code === 'reel_failed')?.ok).toBe(false)
+    expect(fake.record.mock.calls[0][0].lines.map((line: { code: string }) => line.code)).toEqual(['reel_failed'])
+  })
+
+  it('keeps the Story authorisation when the reminder cannot be saved', async () => {
+    const manifest = sample()
+    const built = buildWeekPackFacts({ manifest, accountLabel: '示例客户', reelGoPublic: false })
+    const fake = ports(manifest, {
+      authorize: async () => ({ ok: false, code: 'story_forbidden' }),
+    })
+    fake.record.mockResolvedValue('failed')
+    const result = await confirmWeekPack({
+      enabled: true, clientId: CLIENT, clicker: OPC, runId: 'run-1', expectedDecisionId: 'dec-1',
+      fingerprint: built.fingerprint, tokens: new Map(), ports: fake.ports,
+    })
+    expect(fake.revoke).not.toHaveBeenCalled()
+    expect(result.receipt?.rolled_back).toBe(false)
+    expect(result.receipt?.lines.map((line) => line.code)).toContain('story_forbidden')
+    expect(result.receipt?.lines.map((line) => line.code)).toContain('reminder_not_saved')
+    expect(fake.record.mock.calls[0][0].lines.map((line: { code: string }) => line.code)).toEqual(['story_forbidden'])
   })
 
   it('does not authorise when the card itself rejects the click', async () => {
@@ -404,6 +429,50 @@ describe('load', () => {
     })
     const authorised = await wired.authorizeStory(manifest.story.pack_id ?? '', manifest.story.content_hash ?? '')
     expect(authorised).toEqual({ ok: true, code: 'story_authorized' })
+  })
+
+  it('writes only the unpublished lines onto the approved card and keeps other evidence', async () => {
+    const lines = [
+      { kind: 'story' as const, stable_id: 'pack-1', code: 'story_authorized', ok: true, text: 'Story 已授权。' },
+      { kind: 'reel' as const, stable_id: '33333333-3333-4333-8333-333333333333', code: 'preview_required', ok: false, text: '有一条视频还没预览，没有公开。' },
+    ]
+    expect(unpublishedFailures(lines).map((line) => line.code)).toEqual(['preview_required'])
+    const row = {
+      id: 'run-1', client_id: CLIENT, action_key: 'governance.p0_confirmation', status: 'authorized',
+      evidence: { keep: 'yes' },
+    }
+    let updates = 0
+    const db = {
+      from(table: string) {
+        const chain = {
+          select: () => chain,
+          eq: () => chain,
+          maybeSingle: async () => (table === 'action_runs' ? { data: row, error: null } : { data: null, error: { message: 'no' } }),
+          update(patch: { evidence: Record<string, unknown> }) {
+            updates += 1
+            expect(patch.evidence.keep).toBe('yes')
+            row.evidence = patch.evidence
+            return chain
+          },
+          then(resolve: (value: { data: Array<{ id: string }>; error: null }) => void) {
+            resolve({ data: [{ id: row.id }], error: null })
+          },
+        }
+        return chain
+      },
+    }
+    const saved = await recordUnpublishedOnCard(db as never, {
+      runId: 'run-1', clientId: CLIENT, lines, now: FRIDAY_NZ,
+    })
+    expect(saved).toBe('saved')
+    expect(updates).toBe(1)
+    const read = readHeldEvidence(row.evidence)
+    expect(read).not.toBe('none')
+    expect(read).not.toBe('invalid')
+    if (read === 'none' || read === 'invalid') return
+    expect(read.map((line) => line.code)).toEqual(['preview_required'])
+    expect(readHeldEvidence({ week_pack_unpublished: { items: 'nope' } })).toBe('invalid')
+    expect(readHeldEvidence({})).toBe('none')
   })
 })
 
