@@ -105,14 +105,16 @@ export function reviewDraftForBuild(d: AdDraft, ctx?: DraftBuildReviewContext): 
 
 /**
  * 用现成的预算上限检查。不读账户、不写账户。
- * 不传 liveDeliveringCents = 只比这份草稿。传数字 = 已在投 + 这份草稿。传 null = 已在投没读到。
+ * 不传 = 只比这份草稿。传数字 = 这个账户的已在投 + 这份草稿。
+ * 传各地图 = 每个账户的已在投都算进客户总上限，包括这次没有新草稿的账户。
+ * 传 null = 已在投没读到。
  */
 export function reviewDraftAgainstCaps(
   d: AdDraft,
   adAccountId: string,
   accounts: readonly AccountCapFacts[],
   clientCapCents: number | null,
-  liveDeliveringCents?: number | null,
+  liveDeliveringCents?: number | null | LiveSpendByAccount,
 ): BudgetCheck {
   if (adAccountId.trim() === '') {
     return { verdict: 'unknown', reasons: ['没给出广告账户，预算上限核不成'], per_account_cents: {}, notes: [] }
@@ -125,9 +127,12 @@ export function reviewDraftAgainstCaps(
   return checkAdsBudget(steps, accounts, clientCapCents, live)
 }
 
-function liveSpend(adAccountId: string, liveDeliveringCents: number | null | undefined): LiveSpendByAccount | undefined {
-  if (liveDeliveringCents === undefined) return undefined
-  if (liveDeliveringCents === null) return null
+function liveSpend(
+  adAccountId: string,
+  liveDeliveringCents: number | null | LiveSpendByAccount | undefined,
+): LiveSpendByAccount | undefined {
+  if (typeof liveDeliveringCents !== 'number') return liveDeliveringCents
+  if (!Number.isSafeInteger(liveDeliveringCents) || liveDeliveringCents < 0) return null
   return { [adAccountId]: liveDeliveringCents }
 }
 

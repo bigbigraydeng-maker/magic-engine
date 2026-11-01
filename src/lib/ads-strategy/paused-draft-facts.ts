@@ -4,7 +4,7 @@
  */
 
 import { canonicalHashOfInput } from '@/lib/kernel/canonical-hash'
-import type { AccountCapFacts } from '@/lib/marketing-plan/promo/budget-caps'
+import type { AccountCapFacts, LiveSpendByAccount } from '@/lib/marketing-plan/promo/budget-caps'
 import { confirmBlockReason, contentFingerprint, type CardFacts, type HardCheck } from '@/lib/confirmation-card/facts'
 import { isKnownDraftKind, MAX_AD_SETS, metaTripletFor, type AdDraft } from './ad-draft'
 import { draftNotYetBuildable, reviewDraftAgainstCaps, reviewDraftForBuild } from './ad-draft-expansion'
@@ -26,6 +26,11 @@ export interface PausedDraftReview {
   readonly clientCapCents: number | null
   /** null = delivering daily spend was not read. 0 = read, nothing is delivering. */
   readonly liveDeliveringCents: number | null
+  /**
+   * Every client ad account. null = the client total could not be read.
+   * Absent = older callers, which only have liveDeliveringCents for this account.
+   */
+  readonly liveByAccount?: LiveSpendByAccount
   /** null = campaign snapshots were not read. Empty = read, no campaigns. */
   readonly campaignShapes: readonly CampaignShape[] | null
 }
@@ -109,15 +114,12 @@ function capCheck(draft: AdDraft, review: PausedDraftReview): HardCheck {
   if (!review.accounts) return { label: '日预算上限', state: 'unread', reason: '上限没读到' }
   const known = review.accounts.some((account) => account.ad_account_id === review.adAccountId && account.owned_by_client)
   if (!known) return { label: '日预算上限', state: 'unread', reason: '广告账户没读到' }
-  const live = Object.prototype.hasOwnProperty.call(review, 'liveDeliveringCents')
-    ? review.liveDeliveringCents
-    : null
   const verdict = reviewDraftAgainstCaps(
     draft,
     review.adAccountId,
     review.accounts,
     review.clientCapCents,
-    live,
+    capLive(review),
   )
   if (verdict.verdict === 'ok') return { label: '日预算上限', state: 'green', reason: '' }
   if (verdict.verdict === 'unknown') {
@@ -125,6 +127,12 @@ function capCheck(draft: AdDraft, review: PausedDraftReview): HardCheck {
     return { label: '日预算上限', state: 'unread', reason: unreadLive ? '读不到在投预算' : '上限没核成' }
   }
   return { label: '日预算上限', state: 'red', reason: '已在投的日预算加上这份草稿，超过了上限' }
+}
+
+function capLive(review: PausedDraftReview): number | LiveSpendByAccount {
+  if (Object.prototype.hasOwnProperty.call(review, 'liveByAccount')) return review.liveByAccount ?? null
+  if (Object.prototype.hasOwnProperty.call(review, 'liveDeliveringCents')) return review.liveDeliveringCents
+  return null
 }
 
 function campaignCheck(draft: AdDraft, review: PausedDraftReview): HardCheck | null {

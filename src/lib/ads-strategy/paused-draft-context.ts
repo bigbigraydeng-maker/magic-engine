@@ -4,7 +4,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { AccountCapFacts } from '@/lib/marketing-plan/promo/budget-caps'
+import type { AccountCapFacts, LiveSpendByAccount } from '@/lib/marketing-plan/promo/budget-caps'
 import type { PausedDraftReview } from './paused-draft-facts'
 import {
   spendFromSnapshots,
@@ -24,24 +24,70 @@ export async function loadPausedDraftContext(
   clientId: string,
   adAccountId: string,
 ): Promise<PausedDraftContext> {
-  const [accounts, config, currency, clientName, spend] = await Promise.all([
+  const [accounts, config, clientName, spend] = await Promise.all([
     readAccounts(sb, clientId),
     readClientCap(sb, clientId),
-    readCurrency(sb, clientId, adAccountId),
     readClientName(sb, clientId),
     readDeliveringSpend(sb, clientId, adAccountId),
   ])
+  const budget = await readClientBudget(sb, clientId, adAccountId, accounts.ok, accounts.rows, spend)
   const label = accounts.rows.find((row) => row.ad_account_id === adAccountId)?.label
   return {
     accountLabel: label || clientName || '这位客户的广告账户',
     review: {
       adAccountId,
-      accounts: accounts.ok ? accounts.rows.map((row) => toCap(row, adAccountId, currency)) : null,
+      accounts: accounts.ok ? accounts.rows.map((row) => toCap(row, budget.currencies)) : null,
       clientCapCents: config,
       liveDeliveringCents: spend.liveDeliveringCents,
+      liveByAccount: budget.liveByAccount,
       campaignShapes: spend.campaignShapes,
     },
   }
+}
+
+async function readClientBudget(
+  sb: SupabaseClient,
+  clientId: string,
+  adAccountId: string,
+  accountsOk: boolean,
+  rows: readonly AccountRow[],
+  current: SpendRead,
+): Promise<{ currencies: ReadonlyMap<string, string | null>; liveByAccount: LiveSpendByAccount }> {
+  if (!accountsOk) return { currencies: new Map(), liveByAccount: null }
+  const ids = rows.map((row) => row.ad_account_id)
+  const [currencies, liveByAccount] = await Promise.all([
+    readCurrencyMap(sb, clientId, ids),
+    liveAcrossAccounts(sb, clientId, adAccountId, ids, current),
+  ])
+  return { currencies, liveByAccount }
+}
+
+async function readCurrencyMap(
+  sb: SupabaseClient,
+  clientId: string,
+  accountIds: readonly string[],
+): Promise<Map<string, string | null>> {
+  const pairs = await Promise.all(accountIds.map(async (id) => [id, await readCurrency(sb, clientId, id)] as const))
+  return new Map(pairs)
+}
+
+async function liveAcrossAccounts(
+  sb: SupabaseClient,
+  clientId: string,
+  currentId: string,
+  accountIds: readonly string[],
+  current: SpendRead,
+): Promise<LiveSpendByAccount> {
+  if (current.liveDeliveringCents === null) return null
+  const others = accountIds.filter((id) => id !== currentId)
+  const reads = await Promise.all(others.map((id) => readDeliveringSpend(sb, clientId, id)))
+  const live: Record<string, number> = { [currentId]: current.liveDeliveringCents }
+  for (const [index, id] of others.entries()) {
+    const cents = reads[index]?.liveDeliveringCents
+    if (cents === null || cents === undefined) return null
+    live[id] = cents
+  }
+  return live
 }
 
 interface AccountRow {
@@ -224,10 +270,10 @@ async function readClientName(sb: SupabaseClient, clientId: string): Promise<str
   return typeof name === 'string' ? name : null
 }
 
-function toCap(row: AccountRow, adAccountId: string, currency: string | null): AccountCapFacts {
+function toCap(row: AccountRow, currencies: ReadonlyMap<string, string | null>): AccountCapFacts {
   return {
     ad_account_id: row.ad_account_id,
-    currency: row.ad_account_id === adAccountId ? currency : null,
+    currency: currencies.get(row.ad_account_id) ?? null,
     daily_cap_cents: typeof row.daily_budget_cap_cents === 'number' ? row.daily_budget_cap_cents : null,
     owned_by_client: true,
   }

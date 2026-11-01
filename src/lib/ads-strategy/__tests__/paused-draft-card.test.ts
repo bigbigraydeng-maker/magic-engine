@@ -10,7 +10,7 @@ import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import type { AdDraft } from '../ad-draft'
 import { joinSpendPages, loadPausedDraftContext, readPaged } from '../paused-draft-context'
 import { pausedDraftClickUrl, PAUSED_DRAFT_WHAT } from '../paused-draft-copy'
-import { pausedDraftRetry } from '../paused-draft-facts'
+import { pausedDraftFacts, pausedDraftRetry } from '../paused-draft-facts'
 import { issuePausedDraftCard, submitPausedDraftCard } from '../paused-draft-submit'
 import type { CreateDraftDeps, CreateDraftOutcome } from '../draft-and-gate'
 
@@ -790,6 +790,50 @@ describe('paused draft helpers', () => {
     expect(loaded.review.campaignShapes).toEqual([
       { entityId: 'camp-1', objective: 'OUTCOME_LEADS', budgetLevel: 'abo' },
     ])
+  })
+
+  it('counts live budget on an account with no new draft, and blocks when the client total is over', async () => {
+    const now = new Date().toISOString()
+    const account = (adAccountId: string, label: string) => ({
+      client_id: CLIENT_A,
+      ad_account_id: adAccountId,
+      label,
+      daily_budget_cap_cents: null,
+    })
+    const snap = (adAccountId: string, level: string, entityId: string, minor: number | null) => ({
+      client_id: CLIENT_A,
+      ad_account_id: adAccountId,
+      level,
+      entity_id: entityId,
+      campaign_id: level === 'account' ? null : `camp-${adAccountId}`,
+      budget_level: level === 'account' ? null : 'abo',
+      objective: level === 'campaign' ? 'OUTCOME_LEADS' : null,
+      effective_status: 'ACTIVE',
+      daily_budget_minor: minor,
+      currency: 'NZD',
+      capture_reason: 'daily',
+      captured_at: now,
+    })
+    const captures = (adAccountId: string) => freshCaptures(now).map((item) => ({ ...item, ad_account_id: adAccountId }))
+    const sb = createFakeSupabase({
+      client_meta_ad_accounts: [account('act_a', '甲'), account('act_b', '乙')],
+      ad_strategy_configs: [{ client_id: CLIENT_A, daily_budget_cap_cents: 10000 }],
+      ad_entity_snapshots: [
+        snap('act_a', 'account', 'acct-a', null),
+        snap('act_b', 'account', 'acct-b', null),
+        snap('act_a', 'campaign', `camp-act_a`, null),
+        snap('act_b', 'campaign', `camp-act_b`, null),
+        snap('act_a', 'adset', 'set-a', 2000),
+        snap('act_b', 'adset', 'set-b', 8000),
+      ],
+      clients: [{ id: CLIENT_A, name: '客户甲' }],
+      ad_snapshot_captures: [...captures('act_a'), ...captures('act_b')],
+    })
+    const loaded = await loadPausedDraftContext(sb, CLIENT_A, 'act_a')
+    expect(loaded.review.liveByAccount).toEqual({ act_a: 2000, act_b: 8000 })
+    const cap = pausedDraftFacts(draft({ dailyBudget: 30 }), '甲', loaded.review)
+      .hardChecks.find((check) => check.label === '日预算上限')
+    expect(cap?.state).toBe('red')
   })
 
   it('does not treat a stale snapshot or a mismatched account id as zero delivering', async () => {

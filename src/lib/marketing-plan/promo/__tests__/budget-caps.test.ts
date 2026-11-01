@@ -105,6 +105,21 @@ describe('checkAdsBudget', () => {
     expect(clientCap.verdict).toBe('over')
   })
 
+  it('没有新草稿的账户，已在投仍计入客户总上限，超了就拦', () => {
+    const r = checkAdsBudget(
+      stepsOf(specWithBudgets({ act_a: 3000 })),
+      [
+        acct({ ad_account_id: 'act_a', daily_cap_cents: null }),
+        acct({ ad_account_id: 'act_b', daily_cap_cents: null }),
+      ],
+      10000,
+      { act_a: 2000, act_b: 8000 },
+    )
+    expect(r.verdict).toBe('over')
+    expect(r.reasons.join('')).toContain('13000')
+    expect(r.per_account_cents).toEqual({ act_a: 3000 })
+  })
+
   it('已在投没读到 → unknown，不把它当成 0', () => {
     const r = checkAdsBudget(stepsOf(specWithBudgets({ act_1: 1000 })), [acct()], 50000, null)
     expect(r.verdict).toBe('unknown')
