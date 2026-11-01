@@ -27,6 +27,7 @@ import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { CommentReplyScopeTodoKind } from './comment-reply-scope-items'
+import type { CommentHumanTodoKind } from './comment-human-items'
 import type { CommentAutoreplyRunFailingTodo } from './comment-autoreply-run-failing-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { DeployHealthItemKind } from './deploy-health-items'
@@ -263,6 +264,8 @@ export type ManualItemKind =
   | ToolLeadItemKind
   | CommentScopeTodoKind
   | CommentReplyScopeTodoKind
+  /** 主页评论分流后仍要 FDE 公开回复（不含评论原文） */
+  | CommentHumanTodoKind
   /** 评论自动回复连续多轮整轮没扫完 —— 以前被记成「完成」，约一个月没人发现 */
   | CommentAutoreplyRunFailingTodo['kind']
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
