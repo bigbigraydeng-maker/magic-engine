@@ -174,6 +174,8 @@ it('non-billable measurement modules cannot acquire a charging/provider wrapper 
     '@/lib/supabase', '@/lib/workflows/inngest-event', '@/lib/campaign/daily-plan-publish',
     '@/lib/meta/token-manager', '@/lib/meta/post-engagement', '@/lib/social/post-measurement-store',
     '@/lib/factory/publish/reel-published-event', './daily-plan-post-measurement',
+    // Outcome rows only. No Graph, billing, or publish call.
+    '@/lib/social/readback-outcome-record',
     // 9-23 统一 Graph 版本常量时引入：meta/graph-base.ts 只有 Graph 基础地址常量和分页读取工具，自己没有任何 import
     //（下面把它也加进被检查文件，保证它将来不会悄悄引入计费/provider 包装依赖），不属于「计费或 provider 包装」。
     './graph-base'])

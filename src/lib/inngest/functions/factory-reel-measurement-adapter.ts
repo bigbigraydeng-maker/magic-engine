@@ -33,6 +33,10 @@ import {
 } from './daily-plan-post-measurement'
 import { SOCIAL_PUBLISH_ACTION_TYPE } from '@/lib/social/post-measurement-store'
 import { measurementEventId } from '@/lib/campaign/daily-plan-publish'
+import {
+  socialReadbackOutcomeEnabled,
+  writeReadbackOutcome,
+} from '@/lib/social/readback-outcome-record'
 
 const UNIQUE_VIOLATION = '23505'
 
@@ -64,28 +68,27 @@ export type ReelActionRebindResult =
   | { ok: true; permalink: string | null }
   | {
       ok: false
-      reason: 'action_not_found' | 'client_mismatch' | 'page_mismatch' | 'video_mismatch' | 'not_published' | 'published_at_mismatch'
+      reason:
+        | 'action_not_found'
+        | 'client_mismatch'
+        | 'page_mismatch'
+        | 'video_mismatch'
+        | 'not_published'
+        | 'published_at_mismatch'
+        | 'multiple_traffic_rows'
     }
 
-/**
- * 独立回读 `factory_reel_publish` action 做第二道身份闸。
- * event.data 来自 Inngest（可被伪造），action row 来自 publish-worker（可信）。
- * 任一字段不一致 fail-closed，不发测量事件。
- */
-export async function rebindFactoryReelAction(
-  supabase: SupabaseClient,
-  claim: { clientId: string; workOrderId: string; pageId: string; videoId: string; publishedAt: string },
-): Promise<ReelActionRebindResult> {
-  const { data, error } = await supabase
-    .from('flywheel_actions')
-    .select('id, client_id, payload')
-    .eq('action_type', 'factory_reel_publish')
-    .eq('payload->>work_order_id', claim.workOrderId)
-    .maybeSingle()
-  if (error) throw new Error(`rebindFactoryReelAction: db error — ${error.message}`)
-  if (!data) return { ok: false, reason: 'action_not_found' }
+type ReelTrafficClaim = {
+  clientId: string
+  workOrderId: string
+  pageId: string
+  videoId: string
+  publishedAt: string
+}
 
-  const row = data as { client_id: string; payload: Record<string, unknown> | null }
+type ReelTrafficRow = { client_id: string; payload: Record<string, unknown> | null }
+
+function judgeReelTrafficRow(row: ReelTrafficRow, claim: ReelTrafficClaim): ReelActionRebindResult {
   const p = (row.payload ?? {}) as Record<string, unknown>
   if (row.client_id !== claim.clientId) return { ok: false, reason: 'client_mismatch' }
   if (p.page_id !== claim.pageId) return { ok: false, reason: 'page_mismatch' }
@@ -100,9 +103,41 @@ export async function rebindFactoryReelAction(
       Date.parse(p.published_at) !== Date.parse(claim.publishedAt)) {
     return { ok: false, reason: 'published_at_mismatch' }
   }
-
   const permalink = typeof p.permalink === 'string' ? p.permalink : null
   return { ok: true, permalink }
+}
+
+/**
+ * 独立回读 `factory_reel_publish` action 做第二道身份闸。
+ * event.data 来自 Inngest（可被伪造），action row 来自 publish-worker（可信）。
+ * 任一字段不一致 fail-closed，不发测量事件。
+ *
+ * 开关默认关：沿用 maybeSingle。打开后按客户过滤，最多看 2 行；
+ * 两行记 multiple_traffic_rows，不把数据库的「多行」错误抛出去。
+ */
+export async function rebindFactoryReelAction(
+  supabase: SupabaseClient,
+  claim: ReelTrafficClaim,
+): Promise<ReelActionRebindResult> {
+  const query = supabase
+    .from('flywheel_actions')
+    .select('id, client_id, payload')
+    .eq('action_type', 'factory_reel_publish')
+    .eq('payload->>work_order_id', claim.workOrderId)
+
+  if (!socialReadbackOutcomeEnabled()) {
+    const { data, error } = await query.maybeSingle()
+    if (error) throw new Error(`rebindFactoryReelAction: db error — ${error.message}`)
+    if (!data) return { ok: false, reason: 'action_not_found' }
+    return judgeReelTrafficRow(data as ReelTrafficRow, claim)
+  }
+
+  const { data, error } = await query.eq('client_id', claim.clientId).limit(2)
+  if (error) throw new Error(`rebindFactoryReelAction: db error — ${error.message}`)
+  const rows = (data ?? []) as ReelTrafficRow[]
+  if (rows.length > 1) return { ok: false, reason: 'multiple_traffic_rows' }
+  if (rows.length === 0) return { ok: false, reason: 'action_not_found' }
+  return judgeReelTrafficRow(rows[0], claim)
 }
 
 // ── social.publish_post 登记 ─────────────────────────────────────────────────
@@ -201,6 +236,26 @@ export function reelPublishIdentityMismatch(
 
 // ── Inngest fan-out ────────────────────────────────────────────────────────
 
+type RefusalStep = { run: (id: string, fn: () => Promise<void>) => Promise<unknown> }
+
+/** 开关关着时什么都不写。打开后同一轮只记一次，重放命中 step 缓存不再插第二行。 */
+async function recordReelReadbackRefusal(
+  step: RefusalStep,
+  supabase: SupabaseClient,
+  input: { clientId: string; subjectRef: string; reason: string },
+): Promise<void> {
+  if (!socialReadbackOutcomeEnabled()) return
+  await step.run('record-readback-refusal', () =>
+    writeReadbackOutcome(supabase, {
+      clientId: input.clientId,
+      subjectKind: 'reel',
+      subjectRef: input.subjectRef,
+      outcome: `reel_rebind_refused:${input.reason}`,
+      reason: input.reason,
+    }),
+  )
+}
+
 export function createFactoryReelMeasurementAdapter(deps: { supabase: SupabaseClient }) {
   return inngest.createFunction(
     {
@@ -217,11 +272,20 @@ export function createFactoryReelMeasurementAdapter(deps: { supabase: SupabaseCl
       const d = parsed.data
       const postId = reelPostId(d.page_id, d.video_id)
 
+      const refusal = (reason: string) => recordReelReadbackRefusal(step, deps.supabase, {
+        clientId: d.client_id,
+        subjectRef: postId,
+        reason,
+      })
+
       const isolation = await step.run('isolation-check', async () => {
         const registered = await readRegisteredPageId(deps.supabase, d.client_id)
         return checkIsolation(registered, { page_id: d.page_id, post_id: postId })
       })
-      if (!isolation.ok) return { ok: false, reason: isolation.reason }
+      if (!isolation.ok) {
+        await refusal(isolation.reason)
+        return { ok: false, reason: isolation.reason }
+      }
 
       const rebind = await step.run('rebind-factory-action-v2', () =>
         rebindFactoryReelAction(deps.supabase, {
@@ -232,7 +296,10 @@ export function createFactoryReelMeasurementAdapter(deps: { supabase: SupabaseCl
           publishedAt: d.published_at,
         }),
       )
-      if (!rebind.ok) return { ok: false, reason: rebind.reason }
+      if (!rebind.ok) {
+        await refusal(rebind.reason)
+        return { ok: false, reason: rebind.reason }
+      }
 
       const idempotencyKey = reelMeasurementIdempotencyKey(d.work_order_id, d.video_id)
       const measureAt = reelMeasureAt(d.published_at)
@@ -247,7 +314,13 @@ export function createFactoryReelMeasurementAdapter(deps: { supabase: SupabaseCl
           measureAt,
         }),
       )
-      if (!registration.ok) return { ok: false, reason: registration.reason, field: registration.field }
+      if (!registration.ok) {
+        const reason = registration.field
+          ? `${registration.reason}:${registration.field}`
+          : registration.reason
+        await refusal(reason)
+        return { ok: false, reason: registration.reason, field: registration.field }
+      }
 
       const eventIds = await step.run('fan-out-windows', async () => {
         const ids: string[] = []

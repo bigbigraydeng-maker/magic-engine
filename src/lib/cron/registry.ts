@@ -523,6 +523,11 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
   'team-memory-sweeper': '2026-10-07 暂停（上游已停 6 周的空跑），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
 
+  // 社媒读回链拒绝回执（src/lib/social/readback-outcome-record.ts）。
+  // 由接线函数在拒绝时写一行，没有排班。放进带 schedule 的登记表会让健康检查
+  // 天天报「从没跑过」。对账扫描只认 startCronRunId，所以同文件有一个只给扫描器看的声明。
+  'social-readback-outcome': '按需事件触发（读回链拒绝时写一行失败回执），非周期任务，不适用 CRON_REGISTRY 的排班对账',
+
   // Render 上这条从 2026-10-24 审计起已是暂停、30 天没有运行。不进 dispatcher。
   // 路由留着给人手补跑。恢复时要重新加登记、加进 DISPATCH_CATALOG，并在 Render 打开它。
   'oztop-seo-optimizer': '2026-10-24 审计时 Render 上已暂停且 30 天无运行，不进 dispatcher',

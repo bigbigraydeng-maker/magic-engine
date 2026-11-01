@@ -30,6 +30,8 @@ import { deployCheckFailedItem, pushDeployHealthItems } from './deploy-health-it
 import { pushMessengerDraftItems } from './messenger-draft-items'
 import { pushKnowledgeFactExpiringItems } from './knowledge-fact-expiring-items'
 import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
+import { pushSocialReadbackItems } from './social-readback-items'
+import { socialReadbackOutcomeEnabled } from '@/lib/social/readback-outcome-record'
 import { pushPriceFactItems } from './price-fact-items'
 import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-request-items'
 import { pushAutoPublishItems } from './auto-publish-items'
@@ -261,6 +263,14 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushDailyPlanMeasurementItems(supabase, b, now, clients).catch((e) =>
       console.warn('[manual-items] 帖子成绩回收失败检查读取失败（不阻塞其他待办）:', e),
     ),
+    // 读回链拒绝（草稿 / 时间对不上）以前直接 return，今日待办看不见。
+    // 开关默认关：没打开就不查这张表。
+    (b) => {
+      if (!socialReadbackOutcomeEnabled()) return Promise.resolve()
+      return pushSocialReadbackItems(supabase, b, now, clients).catch((e) =>
+        console.warn('[manual-items] 读回链拒绝记录读取失败（不阻塞其他待办）:', e),
+      )
+    },
     // 正在花钱的广告撞上了已知的坑 —— 每天扫一遍的结果，不下发就等于没扫
     (b) => pushAdReadbackItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 广告闸门结果读取失败（不阻塞其他待办）:', e),
