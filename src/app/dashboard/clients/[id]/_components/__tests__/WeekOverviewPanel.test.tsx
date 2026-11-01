@@ -16,7 +16,11 @@ function reel(overrides: Partial<OverviewReel> & { id: string; angle: string }):
 function overview(overrides: Partial<WeekOverview> = {}): WeekOverview {
   return {
     live: false,
-    quota: { post_per_day: 2, story_per_day: 3, reel_per_week: 3 },
+    quota: {
+      post_per_day: 2, story_per_day: 3, reel_per_week: 3,
+      post_per_week: null, story_per_week: null,
+      post_period: 'day', story_period: 'day', reel_period: 'week',
+    },
     story: {
       newer_draft_title: null,
       pack_id: 'p1',
@@ -202,6 +206,27 @@ describe('WeekOverviewPanel', () => {
     expect(screen.getAllByText(/即将上线：/).length).toBe(1)
     expect(screen.queryByText('没能进日历')).toBeNull()
     expect(screen.queryByText('这一周的画面复核')).toBeNull()
+  })
+
+  it('a weekly cap replaces the daily line, and a day is not scored against the weekly number', async () => {
+    mockFetch({
+      success: true,
+      ...overview({
+        quota: {
+          post_per_day: null, story_per_day: null, reel_per_week: 3,
+          post_per_week: 4, story_per_week: 18,
+          post_period: 'week', story_period: 'week', reel_period: 'week',
+        },
+      }),
+    })
+    const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
+    expect(await screen.findByText('每周名额 18 条')).toBeTruthy()
+    expect(screen.getByText('本周用了 2/18')).toBeTruthy()
+    expect(screen.getByText('图文每周名额 4 条')).toBeTruthy()
+    expect(screen.getByText('Story（2 条）')).toBeTruthy()
+    expect(container.textContent).not.toContain('每天名额 3 条')
+    expect(container.textContent).not.toContain('用了 2/3')
+    expect(container.textContent).not.toContain('Story（用了 2/18）')
   })
 
   it('a missing quota says "名额未配置" and never pretends to be 0', async () => {

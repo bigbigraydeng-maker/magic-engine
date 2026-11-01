@@ -142,8 +142,31 @@ describe('readPublishingQuota', () => {
     return { from: () => chain } as never
   }
   it('reads the client\'s own numbers and treats bad values as not configured', async () => {
-    const q = await readPublishingQuota(quotaDb({ data: { publishing_calendar_config: { quota: { post_per_day: 2, story_per_day: 3, reel_per_week: 'x' } } }, error: null }), CLIENT)
-    expect(q).toEqual({ post_per_day: 2, story_per_day: 3, reel_per_week: null })
+    const stored = { quota: { post_per_day: 2, story_per_day: 3, reel_per_week: 'x', story_per_week: 18, post_per_week: 4 } }
+    const q = await readPublishingQuota(quotaDb({ data: { publishing_calendar_config: stored }, error: null }), CLIENT)
+    expect(q).toEqual({
+      post_per_day: 2,
+      story_per_day: 3,
+      reel_per_week: null,
+      post_per_week: null,
+      story_per_week: null,
+      post_period: 'day',
+      story_period: 'day',
+      reel_period: null,
+    })
+  })
+  it('weekly numbers win only when the switch is exactly true', async () => {
+    const stored = { quota: { post_per_day: 2, story_per_day: 3, reel_per_week: 3, story_per_week: 18, post_per_week: 4 } }
+    const db = quotaDb({ data: { publishing_calendar_config: stored }, error: null })
+    const off = await readPublishingQuota(db, CLIENT, { SOCIAL_WEEKLY_QUOTA_ENABLED: 'TRUE' })
+    const on = await readPublishingQuota(db, CLIENT, { SOCIAL_WEEKLY_QUOTA_ENABLED: 'true' })
+    expect(off?.story_period).toBe('day')
+    expect(off?.story_per_day).toBe(3)
+    expect(on?.story_period).toBe('week')
+    expect(on?.story_per_week).toBe(18)
+    expect(on?.story_per_day).toBeNull()
+    expect(on?.post_per_week).toBe(4)
+    expect(on?.story_period).not.toBe(off?.story_period)
   })
   it('no config, empty config or a missing column is "not configured" (null), never zeros', async () => {
     expect(await readPublishingQuota(quotaDb({ data: { publishing_calendar_config: null }, error: null }), CLIENT)).toBeNull()

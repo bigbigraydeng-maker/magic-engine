@@ -250,6 +250,23 @@ describe('DailyPlanReelsPanel — quota and variety hint', () => {
     expect(second.container.textContent).not.toMatch(/名额 0 条/)
   })
 
+  it('does not treat a weekly post or story cap as the Reel cap', async () => {
+    mockFetch({
+      success: true,
+      reels: [reel()],
+      reels_error: null,
+      quota: {
+        post_per_day: null, story_per_day: null, reel_per_week: null,
+        post_per_week: 4, story_per_week: 18,
+        post_period: 'week', story_period: 'week', reel_period: null,
+      },
+    })
+    const { container } = render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)
+    await screen.findByText(/每周名额未配置/)
+    expect(container.textContent).not.toContain('每周名额 4 条')
+    expect(container.textContent).not.toContain('每周名额 18 条')
+  })
+
   it('speaks plainly about a repeated track, only when the existing rule says something is off', async () => {
     mockFetch({ success: true, reels: [reel()], reels_error: null, reel_variety: { same_track_max: 4, same_track_file: 'a.mp3', price_screen_count: 0, total: 6 } })
     const first = render(<DailyPlanReelsPanel clientId={CLIENT_ID} />)

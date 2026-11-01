@@ -6,10 +6,13 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { packState, requireGlobalAdmin, type LitePackState, type LiteResult, type LiteServicePorts } from '../story-lite/service'
-import { isLiveFor, type LiteActor, type LiteChannel, type LiteItemStatus, type LiteMediaKind, type LiteRole, type LiteSwitches } from '../story-lite/types'
 import { factoryVideoUrl } from '../../factory/outlets'
 import { toPublishedView } from '../../factory/publish/publish-display'
+import { parsePublishingQuota, quotaRecordFromConfig, weeklyQuotaEnabled, type PublishingQuota } from '../publishing-quota/parse'
+import { packState, requireGlobalAdmin, type LitePackState, type LiteResult, type LiteServicePorts } from '../story-lite/service'
+import { isLiveFor, type LiteActor, type LiteChannel, type LiteItemStatus, type LiteMediaKind, type LiteRole, type LiteSwitches } from '../story-lite/types'
+
+export type { PublishingQuota }
 
 export interface OverviewStoryItem {
   item_id: string
@@ -61,13 +64,6 @@ export interface ReelVariety {
   price_screen_count: number
   /** Total number of Reels looked at. */
   total: number
-}
-
-/** How many of each kind the client wants per day / week. A kind that is not configured is null ("not configured"), never 0. */
-export interface PublishingQuota {
-  post_per_day: number | null
-  story_per_day: number | null
-  reel_per_week: number | null
 }
 
 export interface WeekOverview {
@@ -174,15 +170,16 @@ export function summariseReelVariety(reels: ReadonlyArray<Pick<OverviewReel, 'mu
   return { same_track_max, same_track_file, price_screen_count, total: reels.length }
 }
 
-function wholeNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null
-}
-
 /**
- * The client's own quotas from `clients.publishing_calendar_config` = { quota: { post_per_day, story_per_day, reel_per_week } }.
+ * The client's quotas from `clients.publishing_calendar_config.quota`.
+ * Per-day keys keep working. Per-week keys win only when the env switch is exactly `true`.
  * No config (or the column not created yet) = null: the page says "未配置", it never pretends the quota is 0.
  */
-export async function readPublishingQuota(db: SupabaseClient, clientId: string): Promise<PublishingQuota | null> {
+export async function readPublishingQuota(
+  db: SupabaseClient,
+  clientId: string,
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): Promise<PublishingQuota | null> {
   const { data, error } = await db.from('clients').select('publishing_calendar_config').eq('id', clientId).maybeSingle()
   if (error) {
     // the config column is added by a separate, approved migration: before that, "not configured"
@@ -190,15 +187,7 @@ export async function readPublishingQuota(db: SupabaseClient, clientId: string):
     throw new Error(error.message)
   }
   const raw = (data as { publishing_calendar_config?: unknown } | null)?.publishing_calendar_config
-  const quota = raw && typeof raw === 'object' ? (raw as { quota?: unknown }).quota : null
-  if (!quota || typeof quota !== 'object') return null
-  const q = quota as Record<string, unknown>
-  const result: PublishingQuota = {
-    post_per_day: wholeNumber(q.post_per_day),
-    story_per_day: wholeNumber(q.story_per_day),
-    reel_per_week: wholeNumber(q.reel_per_week),
-  }
-  return result.post_per_day === null && result.story_per_day === null && result.reel_per_week === null ? null : result
+  return parsePublishingQuota(quotaRecordFromConfig(raw), weeklyQuotaEnabled(env))
 }
 
 async function readStory(ports: LiteServicePorts, clientId: string, now: Date): Promise<OverviewStoryPack | null> {
