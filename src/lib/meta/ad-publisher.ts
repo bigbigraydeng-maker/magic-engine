@@ -14,12 +14,19 @@
  * 所以失败时按这次新建的逆序删回去，不删原来就有的系列。删不掉的如实报出来。
  */
 
-import type { AdDraft, AdDraftCreative } from '@/lib/ads-strategy/ad-draft'
-import { metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
+import {
+  inheritedSpendOf,
+  metaTripletFor,
+  MESSENGER_CTA_TYPE,
+  sameInheritedSpend,
+  type AdDraft,
+  type AdDraftCreative,
+  type InheritedAdSetSpend,
+} from '@/lib/ads-strategy/ad-draft'
 import { isPlaybackGoal, PLAYBACK_REQUIRED_PLATFORMS } from '@/lib/ads-strategy/launch-readback'
+import { lockPlacements, targetingPlacement } from '@/lib/ads-strategy/placement-lock'
 import { assertOwnedByAccount } from './owned-ad-object'
 import { readExistingAdSetSpend } from './existing-adset-spend'
-import { inheritedSpendOf, sameInheritedSpend, type InheritedAdSetSpend } from '@/lib/ads-strategy/ad-draft'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 
@@ -149,10 +156,7 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
     geo_locations: geo,
     age_min: d.ageMin ?? 25,
     age_max: d.ageMax ?? 65,
-    // 看完类视频必须手动锁版位，否则 Meta 把钱导向 Audience Network 奖励视频（PITFALLS D9）。
-    ...(isPlaybackGoal(metaTripletFor(d.kind).optimizationGoal)
-      ? { publisher_platforms: [...PLAYBACK_REQUIRED_PLATFORMS] }
-      : {}),
+    ...placementOverlay(d),
     // 明确关掉 Meta 的自动放宽。**这不代表它一定关着** —— Meta 可能照样开，
     // 所以建完还要回读一遍（这正是闸门存在的理由）。
     targeting_automation: { advantage_audience: 0 },
@@ -168,6 +172,28 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
   }
 
   return targeting
+}
+
+/** 计划写了版位就用计划的。没写时，看完类视频仍锁 Facebook + Instagram。 */
+function placementOverlay(d: AdDraft): Record<string, unknown> {
+  const locked = lockPlacements(d.placements ?? [])
+  if (locked.ok && locked.lock) return targetingPlacement(locked.lock)
+  if (isPlaybackGoal(metaTripletFor(d.kind).optimizationGoal)) {
+    return { publisher_platforms: [...PLAYBACK_REQUIRED_PLATFORMS] }
+  }
+  return {}
+}
+
+/** 版位认不出，或想在已有广告组上改版位：一次都不写。 */
+function refuseBadPlacements(d: AdDraft): PublishFailure | null {
+  const named = (d.placements?.length ?? 0) > 0
+  if (d.existingAdSetId && named) {
+    return { ok: false, step: 'adset', error: '往已有广告组加广告不会改它的版位。版位要在新建广告组时锁。', orphans: [] }
+  }
+  if (d.existingAdSetId) return null
+  const locked = lockPlacements(d.placements ?? [])
+  if (!locked.ok) return { ok: false, step: 'adset', error: locked.message, orphans: [] }
+  return null
 }
 
 function assertNever(x: never): never {
@@ -448,6 +474,8 @@ export async function publishDraftPaused(
   accessToken: string,
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
+  const refused = refuseBadPlacements(d)
+  if (refused) return refused
   const run = newRun(accessToken, opts)
   if (d.existingAdSetId) return publishOnExistingAdSet(d, adAccountId, accessToken, run)
   const campaignId = await resolveCampaignId(d, adAccountId, accessToken, run)

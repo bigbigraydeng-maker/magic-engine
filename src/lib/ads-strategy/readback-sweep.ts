@@ -40,6 +40,7 @@ import {
 } from '@/lib/meta/readback'
 import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, type LaunchFinding } from './launch-readback'
+import { expectedPlacement } from './placement-lock'
 
 /** 一个广告组扫完的结果。 */
 export interface SweptAdSet {
@@ -77,13 +78,19 @@ export interface SweepClient {
 /** 一个组最多回读多少条广告的文案 —— 上游 `fetchAdCreativesReadback` 已限 50。 */
 const MAX_ADSETS_PER_CLIENT = 100
 
+/** 与 `draft-and-gate` 的 `ADS_CREATE_ACTION` 同一条账。巡检只读，不另开一种动作。 */
+const PLAN_ACTION = 'ads.create_ad'
+
 /**
  * 扫一个客户。
  *
  * 单个广告组回读失败**不中断**其余组：一个组查不出来不该让今天整个客户都不扫。
  * 但失败的组会留一条 `readback_failed`，免得它悄悄从统计里消失。
  */
-export async function sweepClient(client: SweepClient): Promise<ClientSweepResult> {
+export async function sweepClient(
+  client: SweepClient,
+  supabase?: SupabaseClient,
+): Promise<ClientSweepResult> {
   const base = {
     clientId: client.id,
     clientName: client.name,
@@ -108,8 +115,10 @@ export async function sweepClient(client: SweepClient): Promise<ClientSweepResul
     return { ...base, error: '列不出在投的广告组（Meta 没给结果）' }
   }
 
+  const page = rawAdSets.slice(0, MAX_ADSETS_PER_CLIENT)
+  const planned = await plannedPlacements(supabase, client.id, page.map((raw) => raw.id))
   const swept: SweptAdSet[] = []
-  for (const raw of rawAdSets.slice(0, MAX_ADSETS_PER_CLIENT)) {
+  for (const raw of page) {
     const name = typeof raw.name === 'string' ? raw.name : raw.id
 
     const creatives = await fetchAdCreativesReadback(raw.id, token)
@@ -134,6 +143,7 @@ export async function sweepClient(client: SweepClient): Promise<ClientSweepResul
     const report = checkLaunch({
       ...adaptMetaAdSet(raw, creatives, { expectedGeo: client.expected_geo ?? null }),
       industry: client.industry ?? null,
+      ...expectedPlacement(planned.get(raw.id)),
     })
     swept.push({
       adSetId: raw.id,
@@ -181,7 +191,7 @@ export async function sweepAllClients(
     const accountIds = await getClientAdAccountIds(c.id)
     for (const accountId of accountIds) {
       try {
-        results.push(await sweepClient({ ...c, meta_ad_account_id: accountId }))
+        results.push(await sweepClient({ ...c, meta_ad_account_id: accountId }, supabase))
       } catch (err) {
         // 一个客户 / 一个账户炸了不能让其余的今天都不扫。
         results.push({
@@ -216,4 +226,82 @@ export function blockerSummary(r: ClientSweepResult): string | null {
     return `「${s.adSetName}」：${why}`
   })
   return lines.join('\n')
+}
+
+interface PlanRow {
+  created_at?: unknown
+  payload?: unknown
+}
+
+/**
+ * 广告组对应草稿上的投放位置。同一组有多条记录时用最新一条写了位置的。
+ * 没写、不是一列文字、或这次没读到账，都当没写 —— 调用方保持原来的检查。
+ */
+async function plannedPlacements(
+  supabase: SupabaseClient | undefined,
+  clientId: string,
+  adSetIds: readonly string[],
+): Promise<Map<string, readonly string[]>> {
+  if (!supabase || adSetIds.length === 0) return new Map()
+  return placementsFromRows(await loadPlanRows(supabase, clientId, adSetIds))
+}
+
+async function loadPlanRows(
+  supabase: SupabaseClient,
+  clientId: string,
+  adSetIds: readonly string[],
+): Promise<PlanRow[]> {
+  try {
+    const { data, error } = await supabase
+      .from('flywheel_actions')
+      .select('payload, created_at')
+      .eq('client_id', clientId)
+      .eq('action_type', PLAN_ACTION)
+      .in('payload->>adSetId', [...adSetIds])
+      .order('created_at', { ascending: false })
+    if (error) {
+      console.warn(`[readback-sweep] 读不到计划版位，这次按没写版位检查：${error.message}`)
+      return []
+    }
+    return (data ?? []) as PlanRow[]
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn(`[readback-sweep] 读不到计划版位，这次按没写版位检查：${message}`)
+    return []
+  }
+}
+
+function placementsFromRows(rows: PlanRow[]): Map<string, readonly string[]> {
+  const found = new Map<string, readonly string[]>()
+  const ordered = [...rows].sort((a, b) => stamp(b).localeCompare(stamp(a)))
+  for (const row of ordered) {
+    const adSetId = adSetIdOf(row.payload)
+    if (!adSetId || found.has(adSetId)) continue
+    const tokens = stringList(placementsOf(row.payload))
+    if (tokens) found.set(adSetId, tokens)
+  }
+  return found
+}
+
+function stamp(row: PlanRow): string {
+  return typeof row.created_at === 'string' ? row.created_at : ''
+}
+
+function adSetIdOf(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== 'object') return undefined
+  const id = (payload as { adSetId?: unknown }).adSetId
+  return typeof id === 'string' && id.length > 0 ? id : undefined
+}
+
+function placementsOf(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object') return undefined
+  const draft = (payload as { draft?: unknown }).draft
+  if (!draft || typeof draft !== 'object') return undefined
+  return (draft as { placements?: unknown }).placements
+}
+
+function stringList(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined
+  if (!value.every((item) => typeof item === 'string')) return undefined
+  return value
 }
