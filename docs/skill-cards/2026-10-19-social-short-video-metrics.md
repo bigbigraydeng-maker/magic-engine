@@ -27,9 +27,9 @@ YouTube 文档区分 Shorts 的 Views 与 Engaged views，并列出 “Stayed to
 候选分析口径；不新增连接器。
 
 ## 效果回写
-尚无。
+2026-10-19 首轮只读验证：判 cannot_check。YouTube 连接 1 条（权限：youtube.readonly / force-ssl / upload，无 yt-analytics 类权限；按 YouTube 公开文档 Engaged views 在 Analytics 接口，待核）；代码库 src 里没有 engagedViews 读取；youtube_publish_receipts 0 行。不把空值当零。
 
 ## 机器索引
 ```json
-{"pillar":"social","points":[{"key":"shorts_views_vs_engaged","text":"YouTube Shorts Views 与 Engaged views 定义不同，应分开呈现且不跨平台直接比较。","state":"learning","note":"需验证 ME 当前只读接口字段与可见性。"}]}
+{"pillar":"social","points":[{"key":"shorts_views_vs_engaged","text":"YouTube Shorts Views 与 Engaged views 定义不同，应分开呈现且不跨平台直接比较。","state":"cannot_check","note":"YouTube 连接只有读取/上传权限，没有分析接口权限，代码里也没读 Engaged views；Shorts 回执 0 行。"}]}
 ```
