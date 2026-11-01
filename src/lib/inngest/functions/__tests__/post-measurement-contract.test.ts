@@ -18,7 +18,12 @@ vi.mock('@/lib/meta/token-manager', () => ({ getStoredPageToken: mocks.token }))
 vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: mocks.send }))
 
 import { createMeasureFunction, MeasureDueSchema } from '../daily-plan-post-measurement'
-import { createFactoryReelMeasurementAdapter, reelMeasureAt } from '../factory-reel-measurement-adapter'
+import { createFactoryReelMeasurementAdapter, reelMeasureAt, REEL_MEASURE_WINDOWS } from '../factory-reel-measurement-adapter'
+import {
+  PUBLISH_MEASUREMENT_OFFSETS_HOURS,
+  PUBLISH_MEASUREMENT_WINDOW_SET,
+} from '@/lib/campaign/daily-plan-publish'
+import { pickReceipt, type ReceiptRow } from '@/lib/social/post-performance'
 
 const client = 'aaaaaaaa-1111-4111-8111-111111111111'
 const work = 'bbbbbbbb-1111-4111-8111-111111111111'
@@ -78,6 +83,63 @@ function measurement(row: unknown = action(), body: unknown = { reactions: { sum
   return { ...db, fetcher, fn, step: steps() }
 }
 beforeEach(() => { vi.clearAllMocks(); mocks.token.mockResolvedValue('synthetic-token'); mocks.send.mockResolvedValue({ event_ids: ['event-1'] }) })
+
+const canonicalMeasurementWindows = (): Set<number> =>
+  new Set<number>(PUBLISH_MEASUREMENT_OFFSETS_HOURS)
+
+function contractReceipt(over: Partial<ReceiptRow> = {}): ReceiptRow {
+  return {
+    action_id: 'a1',
+    window_hours: 4,
+    status: 'ok',
+    measured_at: '2024-01-01T00:00:00Z',
+    values: {},
+    missing: {},
+    reason: null,
+    ...over,
+  }
+}
+
+describe('T15 measurement window set contract (W1/W3/W4/W5/W6)', () => {
+  it('W1/W6 exported set matches canonical [4, 72]', () => {
+    expect(PUBLISH_MEASUREMENT_WINDOW_SET).toEqual(canonicalMeasurementWindows())
+  })
+
+  it('W5 REEL_MEASURE_WINDOWS matches W1', () => {
+    expect(new Set<number>(REEL_MEASURE_WINDOWS)).toEqual(canonicalMeasurementWindows())
+  })
+
+  it('W3 MeasureDueSchema only accepts W1 windows', () => {
+    for (const hours of PUBLISH_MEASUREMENT_OFFSETS_HOURS) {
+      expect(MeasureDueSchema.safeParse({ ...due(), window_hours: hours }).success).toBe(true)
+    }
+    expect(MeasureDueSchema.safeParse({ ...due(), window_hours: 48 }).success).toBe(false)
+    // Mutation: if W3 allowed 48, this assertion would fail while W1 still says [4, 72].
+  })
+
+  it('W4 hasFixedMeasurementWindows rejects a [4, 48] schedule (must stay [4, 72])', async () => {
+    const anchor = publishedAt
+    const badWindows = [
+      { hours: 4, at: new Date(Date.parse(anchor) + 4 * 3600_000).toISOString() },
+      { hours: 48, at: new Date(Date.parse(anchor) + 48 * 3600_000).toISOString() },
+    ]
+    const row = action()
+    row.payload.measure_at = badWindows as typeof schedule
+    const t = measurement(row)
+    await expect(t.fn.handler({ event: { data: due() }, step: t.step })).resolves.toMatchObject({
+      reason: 'measurement_window_mismatch',
+    })
+  })
+
+  it('W6 pickReceipt uses W1 whitelist (72 beats 168; 4-only; 168-only → null)', () => {
+    const ok72 = contractReceipt({ window_hours: 72, status: 'ok' })
+    const ok168 = contractReceipt({ window_hours: 168, status: 'ok' })
+    expect(pickReceipt([ok72, ok168])).toBe(ok72)
+    const ok4 = contractReceipt({ window_hours: 4, status: 'ok' })
+    expect(pickReceipt([ok4])).toBe(ok4)
+    expect(pickReceipt([ok168])).toBeNull()
+  })
+})
 
 describe('non-billable fixed measurement contract', () => {
   it.each([0, 1, 24, 48, 73, 4.5])('rejects window %s before token/Graph/storage', async hours => {
