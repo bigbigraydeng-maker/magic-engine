@@ -2,7 +2,7 @@
  * 「今天每小时进线」图 —— 纯函数：把 contact_touchpoints.occurred_at 按新西兰钟点分桶。
  */
 
-import { nzToday } from '@/lib/ads-strategy/promo-window'
+import { nzDayMinus, nzToday } from '@/lib/ads-strategy/promo-window'
 
 const NZ = 'Pacific/Auckland'
 
@@ -59,12 +59,10 @@ export function nzHourFromIso(iso: string): number | null {
   return Number.isFinite(n) && n >= 0 && n <= 23 ? n : null
 }
 
-function isoDayMinus(day: string, days: number): string {
-  const ms = Date.parse(`${day}T12:00:00Z`) - days * 86_400_000
-  return nzDateFromMs(ms)
+/** @deprecated 使用 nzDayMinus；保留导出名供路由 import 不变 */
+export function isoDayMinus(day: string, days: number): string {
+  return nzDayMinus(day, days)
 }
-
-export { isoDayMinus }
 
 function emptyDayMap(): number[] {
   return Array.from({ length: 24 }, () => 0)
@@ -95,7 +93,7 @@ function sumHours(hours: readonly number[], throughHour: number): number {
 function avgPast7SameHour(byDay: Map<string, number[]>, today: string, hour: number): number {
   const samples: number[] = []
   for (let d = 1; d <= 7; d++) {
-    const day = isoDayMinus(today, d)
+    const day = nzDayMinus(today, d)
     const hours = byDay.get(day)
     samples.push(hours ? (hours[hour] ?? 0) : 0)
   }
@@ -115,8 +113,8 @@ export function buildHourlyLeadChart(
 
   const byDay = bucketTouchpoints(rows)
   const todayHours = byDay.get(today) ?? emptyDayMap()
-  const yesterday = isoDayMinus(today, 1)
-  const lastWeek = isoDayMinus(today, 7)
+  const yesterday = nzDayMinus(today, 1)
+  const lastWeek = nzDayMinus(today, 7)
   const yHours = byDay.get(yesterday) ?? emptyDayMap()
   const lwHours = byDay.get(lastWeek) ?? emptyDayMap()
 
