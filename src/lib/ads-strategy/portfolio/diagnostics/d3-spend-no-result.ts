@@ -5,6 +5,8 @@
  * not_comparable（只在有获客/再营销花费、本可能命中时才出，健康日不出）：
  *   - 客户没配目标单次成本 / 没配主结果（不许回落行业默认值，红线 7）
  *   - 主结果 UNKNOWN（归不到广告单位，§14 M8）
+ *   - 广告组自己出的结果跟客户主结果不是一种（WhatsApp 开聊组 vs 主结果留资）：按主结果数永远是 0，
+ *     只能判不了（2026-11-03 生产库：CTS 的 WhatsApp 组连着 6 天被误报）。结果种类复用 rules/core-metric.ts
  * Meta 实验中的广告组不判（§14 M7）。
  *
  * 候选范围：获客 / 再营销（可进自动暂停建议）；另有类似人群（expansion）和流量组
@@ -15,6 +17,7 @@
 import type { AccountContext } from './context'
 import { adsetRows, money, sumSpend, unitOf } from './context'
 import { countOutcome, OUTCOME_STEP_LABEL } from '../outcome-ladder'
+import { CORE_METRIC_NOUN, resolveCoreMetric } from '../../rules/core-metric'
 import type { EntitySnapshotRow } from '../snapshot'
 import type { Diagnosis, DiagnosisInput } from './types'
 import { D3_COST_MULTIPLE } from './thresholds'
@@ -103,6 +106,23 @@ export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput
     }))
     const unit = unitOf(ctx, 'adset', s.entity_id)
     const alertOnly = isAlertOnlyScope(ctx.roles.get(s.entity_id)?.role, s.optimization_goal)
+    // 只在客户主结果本身就是留资 / 开聊时比：主结果是合格询盘、成交这类，照旧走下面的「归不上」。
+    // 流量组这类自己不出留资也不出开聊的（metric = null）照旧按主结果判、只提醒，不在这里拦
+    const metric = resolveCoreMetric({ destinationType: s.destination_type, optimizationGoal: s.optimization_goal, clientPrimary: outcome.primary })
+    const primaryIsCoreMetric = outcome.primary === 'lead' || outcome.primary === 'messaging_started'
+    if (primaryIsCoreMetric && metric !== null && metric !== outcome.primary) {
+      if (spend < threshold) continue
+      out.push({
+        code: 'D3', status: 'not_comparable', notComparableReason: 'result_type_mismatch',
+        title: `花钱没结果这条判不了：这个广告组出的是${CORE_METRIC_NOUN[metric]}，客户主结果是${OUTCOME_STEP_LABEL[outcome.primary]}`,
+        units: [unit],
+        evidence: { window_start: ctx.window[0], window_end: ctx.date, spend, target_cost: target, unit_result: metric },
+        sample: [{ label: '有花费的天数', value: rows.filter(r => r.spend > 0).length }],
+        reasons: ['按客户主结果数这个组永远是 0；要判它得另设这种结果的目标成本'],
+        clientVisible: true,
+      })
+      continue
+    }
     if (counts.some(c => c.value === null)) {
       if (spend < threshold) continue
       out.push({

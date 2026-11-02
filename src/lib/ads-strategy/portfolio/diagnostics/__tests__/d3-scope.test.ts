@@ -150,3 +150,61 @@ describe('【考卷3】止损提议不被最近的设置改动压住', () => {
     expect(d.units[0].id).toBe('as_1')
   })
 })
+
+/**
+ * 广告组自己出的结果跟客户主结果不是一种（2026-11-03 生产库：CTS 主结果是留资，WhatsApp 开聊组 …493473
+ * 10-25 → 10-30 连着 6 天被判「花钱没结果」）。这种组按客户主结果数永远是 0，只能出「判不了」，不能出命中。
+ * 结果种类跟广告组目的地走，复用 rules/core-metric.ts（D2 / D10 已经这么判）。
+ */
+describe('结果种类对不上：不出命中，只出判不了', () => {
+  function runUnit(opts: { goal: string; destination?: string; primary: 'lead' | 'messaging_started'; spend: number; messages?: number }) {
+    const g: GraphAdsetSettings = { ...adset('as_1', opts.goal), ...(opts.destination ? { destination_type: opts.destination } : {}) }
+    const row: DailyRow = {
+      ...dayRow('as_1', opts.spend),
+      actions: opts.messages ? [{ action_type: 'onsite_conversion.messaging_conversation_started_7d', value: String(opts.messages) }] : [],
+    }
+    const account: AccountInput = {
+      adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
+      snapshots: [snap(g)], daily: [row], hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
+    }
+    const ctx = buildAccountContext(account, DATE)
+    const input: DiagnosisInput = {
+      clientId: 'c', date: DATE, evaluatedAt: `${DATE}T20:00:00Z`,
+      outcome: { leading: null, primary: opts.primary, targetCostPerPrimary: 11, minPrimaryPerUnit: 5 },
+      outcomeConfigured: true, messagingReferralAvailable: false, digestRecipients: [], accounts: [account],
+    }
+    return diagnoseSpendNoResult(ctx, input)
+  }
+
+  it('客户主结果是留资、WhatsApp 开聊组花 $100 聊了 30 个 → 不是命中，是判不了（结果种类对不上）', () => {
+    const out = runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'lead', spend: 100, messages: 30 })
+    expect(out.filter(d => d.status === 'hit')).toEqual([])
+    expect(out).toEqual([expect.objectContaining({ code: 'D3', status: 'not_comparable', notComparableReason: 'result_type_mismatch' })])
+    expect(out[0].title).toContain('开聊')
+    expect(out[0].title).toContain('留资')
+  })
+
+  it('客户主结果是开聊、表单留资组（ON_AD）→ 同样判不了', () => {
+    const out = runUnit({ goal: 'LEAD_GENERATION', destination: 'ON_AD', primary: 'messaging_started', spend: 100 })
+    expect(out).toEqual([expect.objectContaining({ status: 'not_comparable', notComparableReason: 'result_type_mismatch' })])
+  })
+
+  it('花费没到 2× 目标 → 健康日不出（跟其它判不了一样）', () => {
+    expect(runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'lead', spend: 21 })).toEqual([])
+  })
+
+  it('结果种类对得上的照旧：主结果开聊、WhatsApp 组花 $100 零开聊 → 命中', () => {
+    const [d] = runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'messaging_started', spend: 100 })
+    expect(d).toMatchObject({ code: 'D3', status: 'hit' })
+  })
+
+  it('Messenger 里的表单（目的地私信 + 目标留资）跟着客户配置走：主结果留资 → 照常按留资判，命中', () => {
+    const [d] = runUnit({ goal: 'LEAD_GENERATION', destination: 'MESSENGER', primary: 'lead', spend: 100 })
+    expect(d).toMatchObject({ status: 'hit' })
+  })
+
+  it('流量组（点击类，自己不出留资也不出开聊）行为不变：照旧命中、只提醒', () => {
+    expect(runUnit({ goal: 'LINK_CLICKS', destination: 'WEBSITE', primary: 'lead', spend: 152 })[0])
+      .toMatchObject({ status: 'hit', autoPauseEligible: false })
+  })
+})
