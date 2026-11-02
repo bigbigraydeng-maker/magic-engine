@@ -113,6 +113,8 @@ export interface TranscriptLine {
   body: string
   /** 'email' | 'messenger' | 'phone'… 原样带过去，模型据此知道这句话是怎么发生的。 */
   channel: string
+  /** 写入方明确标了「机器发的」。缺省 = 不知道，不当成机器。 */
+  automated?: boolean
 }
 
 /**
@@ -218,6 +220,55 @@ export function usableStage(
 const FORM_CHANNELS: ReadonlySet<string> = new Set(['meta_lead_form', 'web_form'])
 
 /**
+ * 🔴 **表单的回声也不是「他回话了」**（2026-11-03，生产 CTS 实测）。
+ *
+ * Facebook 表单提交后，平台会在私信里生成一句「我填了表单，想了解更多」，它进的是
+ * 私信通道、方向是入站 —— 上面按通道排除表单的规则拦不住它。结果 297 位只填过表的人
+ * 被判成「已联系」，模型引用的「原话」就是这句系统生成的话。
+ * 按句式认：这类话不是客人自己开口说的。
+ */
+const FORM_ECHO = /(?:filled (?:out|in) (?:your|the) form|would like to know more about your business)/i
+
+function isFormLine(l: TranscriptLine): boolean {
+  return FORM_CHANNELS.has(l.channel) || (l.direction === 'inbound' && FORM_ECHO.test(l.body))
+}
+
+/**
+ * 我们发出的这一句，是不是机器自动回的。
+ *
+ * 判据与行业无关：私信里紧跟在客人那条消息之后两分钟内发出的，是自动回复（真人打字回不了这么快）。
+ * 触点写入方明确标了 automated 的也算。
+ */
+const AUTO_REPLY_WINDOW_MS = 120_000
+
+/**
+ * 这段往来里有没有**真人**联系过他（电话 / 邮件 / 私信里人手发的）。
+ *
+ * 「已联系」「已报价」必须有这个；没有的话，模型读出来的只是「客人表达了兴趣」，
+ * 不是「我们联系了他」（见 docs/specs/2026-09-27-crm-contacted-means-a-human-did-it.md）。
+ * 库里查不到真人联系 ≠ 没人联系过（电话可能没入库），所以这里只拦「写入已联系」，
+ * 他会落进潜在客户池，一旦有真人联系记录进来再重判。
+ */
+export function hasHumanOutbound(lines: TranscriptLine[]): boolean {
+  const ordered = [...lines]
+    .filter((l) => l.body.trim().length > 0)
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
+  let lastInboundAt = Number.NEGATIVE_INFINITY
+  for (const l of ordered) {
+    const t = new Date(l.at).getTime()
+    if (l.direction === 'inbound') {
+      lastInboundAt = t
+      continue
+    }
+    if (l.automated === true) continue
+    // 只对私信通道按时间认自动回复：电话 / 邮件触点的时间戳可能就是导入线索的那一刻（表单跟进电话），不能按时间判。
+    if (l.channel === 'message' && t - lastInboundAt <= AUTO_REPLY_WINDOW_MS) continue
+    return true
+  }
+  return false
+}
+
+/**
  * 值不值得为这个人花一次模型调用。
  *
  * 只有我们单方面发过东西、对方一个字都没回过的，读了也读不出什么 ——
@@ -225,7 +276,7 @@ const FORM_CHANNELS: ReadonlySet<string> = new Set(['meta_lead_form', 'web_form'
  */
 export function worthReading(lines: TranscriptLine[]): boolean {
   return lines.some(
-    (l) => l.direction === 'inbound' && !FORM_CHANNELS.has(l.channel) && l.body.trim().length > 0,
+    (l) => l.direction === 'inbound' && !isFormLine(l) && l.body.trim().length > 0,
   )
 }
 
@@ -270,7 +321,7 @@ export function ruleOnlyStage(lines: TranscriptLine[], now: Date): 'no_response'
    *
    * 这种情况不归规则管，交给模型去读那份表单里写了什么。
    */
-  if (latest((l) => FORM_CHANNELS.has(l.channel)) > lastOutbound) return null
+  if (latest((l) => isFormLine(l)) > lastOutbound) return null
 
   return 'no_response'
 }
