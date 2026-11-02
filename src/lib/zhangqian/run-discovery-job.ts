@@ -19,7 +19,7 @@ import {
 import type { DiscoveryWarning } from '@/lib/zhangqian/types'
 import { locationCodeFor } from '@/lib/dataforseo/client'
 import { loadMemoryForClient } from '@/lib/memory'
-import { commitCharge, refundOnFail } from '@/lib/mtc/charge'
+import { commitCharge } from '@/lib/mtc/charge'
 
 export const ZHANGQIAN_SERVICE_KEY = 'zhangqian_discover' as const
 
@@ -105,12 +105,7 @@ export async function executeDiscoveryJob(
         `Validation failed: ${validation_error}. Partial cost: $${report.meta.cost_usd}.`,
         raw_output,
       )
-      if (projectedMtc > 0) {
-        await refundOnFail(clientId, ZHANGQIAN_SERVICE_KEY, projectedMtc, {
-          referenceId: jobId,
-          reason: `zhangqian validation failed: ${validation_error}`,
-        })
-      }
+      // No refund: nothing is debited until commitCharge, after the job completes.
       return
     }
 
@@ -179,11 +174,6 @@ export async function executeDiscoveryJob(
         ? { costUsd: err.costUsd, toolCalls: err.toolCalls }
         : undefined
     await failJob(supabaseAdmin, jobId, `Agent error: ${message}`, undefined, spend)
-    if (projectedMtc > 0) {
-      await refundOnFail(clientId, ZHANGQIAN_SERVICE_KEY, projectedMtc, {
-        referenceId: jobId,
-        reason: `zhangqian agent error: ${message}`,
-      })
-    }
+    // No refund: nothing is debited until commitCharge, after the job completes.
   }
 }
