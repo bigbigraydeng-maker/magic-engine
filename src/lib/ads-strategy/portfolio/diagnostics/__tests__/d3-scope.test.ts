@@ -8,7 +8,7 @@ import { normalizeAdset, normalizeCampaign, settingsHash, type EntitySnapshotRow
 import type { RoleVerdict } from '../../roles'
 import { buildAccountContext } from '../context'
 import { diagnoseSpendNoResult } from '../d3-spend-no-result'
-import type { AccountInput, DailyRow, DiagnosisInput } from '../types'
+import type { AccountInput, DailyRow, DiagnosisInput, SettingChange } from '../types'
 
 const CTX = { clientId: 'c', adAccountId: 'act_1', currency: 'NZD', sharedAccount: false }
 const DATE = '2026-10-24'
@@ -39,11 +39,13 @@ function run(
   spend: number,
   target: number | null = 11,
   role?: RoleVerdict['role'],
+  settingChanges?: SettingChange[],
 ) {
   const account: AccountInput = {
     adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
     snapshots: [snap(adset('as_1', goal))], daily: [dayRow('as_1', spend)],
     hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
+    ...(settingChanges ? { settingChanges } : {}),
   }
   const ctx = buildAccountContext(account, DATE)
   if (role) {
@@ -131,5 +133,20 @@ describe('D3 候选范围', () => {
     const [d] = run('LEAD_GENERATION', 100)
     expect(d.title).toContain('广告组「as_1」')
     expect(d.title).not.toContain('系列合计')
+  })
+})
+
+// 【考卷3】Agent 闭环升级第 0 步（设计稿 §3.1 / §4「收放分开」）。
+// 「收」类提议（止损、暂停）永远不被「刚动过设置」压住：钱在流失时，冷却期只能多加一行标注，
+// 不能把止损信号藏起来。现在 D3 不看 settingChanges，这道题是护栏——
+// 第 1 步加「冷却 / 上次结果」后处理后，这道必须仍然通过。
+describe('【考卷3】止损提议不被最近的设置改动压住', () => {
+  it('6 小时前刚改过这个广告组，花 $100、0 线索、目标 $11 → D3 照样命中，仍可进自动暂停建议', () => {
+    const [d] = run('LEAD_GENERATION', 100, 11, undefined, [
+      { level: 'adset', entity_id: 'as_1', captured_at: `${DATE}T04:00:00Z` },
+    ])
+    expect(d).toMatchObject({ code: 'D3', status: 'hit' })
+    expect(d.autoPauseEligible).toBeUndefined()
+    expect(d.units[0].id).toBe('as_1')
   })
 })
