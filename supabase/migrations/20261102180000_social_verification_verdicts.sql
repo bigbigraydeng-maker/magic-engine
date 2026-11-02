@@ -87,9 +87,13 @@ CREATE TABLE public.social_verification_verdicts (
       AND ( (verdict = 'counted'      AND observed_value IS NOT NULL AND reason IS NULL)
          OR (verdict = 'not_readable' AND observed_value IS NULL     AND reason IS NOT NULL) ))),
 
+  -- `boost_status = verdict` is NULL when boost_status is NULL, and CHECK accepts NULL.
+  -- Require the status so a missing one cannot occupy the append-only identity.
   CONSTRAINT svv_boost_shape_chk CHECK (
     record_type <> 'boost_check'
-    OR (boost_status = verdict AND observed_value IS NULL
+    OR (boost_status IS NOT NULL
+        AND boost_status = verdict
+        AND observed_value IS NULL
         AND (verdict <> 'boost_unknown' OR reason IS NOT NULL))),
 
   CONSTRAINT svv_not_comparable_reason_chk CHECK (

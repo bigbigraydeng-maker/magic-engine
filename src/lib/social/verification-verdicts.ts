@@ -89,6 +89,12 @@ export function socialVerificationVerdictsEnabled(env: NodeJS.ProcessEnv = proce
   return env[SOCIAL_VERIFICATION_VERDICTS_ENV] === 'true'
 }
 
+function requireBoostStatus(input: VerdictInsertInput): void {
+  if (input.recordType === 'boost_check' && input.boostStatus == null) {
+    throw new Error('insertSocialVerificationVerdict: boost_check requires boostStatus')
+  }
+}
+
 function requireSubject(input: VerdictInsertInput): void {
   if (!input.clientId || !input.requestId || !input.subjectRef) {
     throw new Error('insertSocialVerificationVerdict: clientId, requestId, and subjectRef are required')
@@ -176,6 +182,7 @@ export async function insertSocialVerificationVerdict(
 ): Promise<VerdictWriteResult> {
   if (!socialVerificationVerdictsEnabled(env)) return { status: 'disabled' }
   requireSubject(input)
+  requireBoostStatus(input)
   const row = toVerdictInsert(input)
   const { error } = await supabase.from(TABLE).insert(row)
   if (!error) return { status: 'inserted' }

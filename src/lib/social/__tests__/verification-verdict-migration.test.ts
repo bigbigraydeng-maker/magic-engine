@@ -53,6 +53,7 @@ describe('social verification verdict migration', () => {
     expect(CLEAN).toContain('on delete restrict')
     expect(CLEAN).not.toContain('security definer')
     expect(CLEAN).toContain("check (platform in ('facebook','instagram'))")
+    expect(CLEAN).toContain('boost_status is not null')
   })
 
   it('does not touch publish switches', () => {

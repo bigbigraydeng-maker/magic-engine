@@ -234,6 +234,9 @@ select pg_temp.put_verdict(
 select pg_temp.want_state('T14-02 boost_unknown without reason', $$
   select pg_temp.put_verdict('cccccccc-cccc-4ccc-8ccc-cccccccccc23','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1','boost_check','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1',null,'facebook','boost_unknown','t4b',null,'boost_unknown',null,null,null,null,null,null,'wp1.v3')
 $$, '23514');
+select pg_temp.want_state('T14-02 boost_status null rejected', $$
+  select pg_temp.put_verdict('cccccccc-cccc-4ccc-8ccc-cccccccccc25','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1','boost_check','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1',null,'facebook','boosted','t4f',null,null,null,null,null,null,null,null,'wp1.v4')
+$$, '23514');
 select pg_temp.want_state('T14-02 boost observed forbidden', $$
   select pg_temp.put_verdict('cccccccc-cccc-4ccc-8ccc-cccccccccc24','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1','boost_check','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1',null,'facebook','not_boosted','t4c',null,'not_boosted',null,1,null,null,null,null,'wp1.v3')
 $$, '23514');

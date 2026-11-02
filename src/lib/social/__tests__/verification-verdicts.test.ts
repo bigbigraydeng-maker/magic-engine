@@ -173,6 +173,16 @@ describe('insertSocialVerificationVerdict — T14 ⑦', () => {
     expect(calls.fromCalls).toBe(0)
   })
 
+  it('rejects boost_check with an empty boost status before insert', async () => {
+    const { supabase, calls } = verdictClient({})
+    await expect(insertSocialVerificationVerdict(supabase, input({
+      verdict: 'boosted',
+      boostStatus: null,
+    }), ON)).rejects.toThrow(/boostStatus/)
+    expect(calls.fromCalls).toBe(0)
+    expect(calls.verdictInserts).toHaveLength(0)
+  })
+
   it('inserts without a generated subject key', async () => {
     const { supabase, calls } = verdictClient({})
     const result = await insertSocialVerificationVerdict(supabase, input(), ON)
