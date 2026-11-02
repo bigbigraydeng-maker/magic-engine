@@ -74,7 +74,13 @@ function request(body: unknown): NextRequest {
   })
 }
 
-function mockDb(options: { goal?: unknown; run?: unknown; version?: unknown } = {}) {
+function mockDb(options: {
+  goal?: unknown
+  run?: unknown
+  version?: unknown
+  approvedId?: string | null
+  approvedByGoal?: Record<string, string | null>
+} = {}) {
   const inserts: Array<Record<string, unknown>> = []
   const tables: string[] = []
   const queries: RecordedQuery[] = []
@@ -85,6 +91,17 @@ function mockDb(options: { goal?: unknown; run?: unknown; version?: unknown } = 
     if (table === 'goals') return chain(options.goal === undefined ? { id: 'goal-1', client_id: 'client-1' } : options.goal, query)
     if (table === 'diagnostic_runs') return chain(options.run === undefined ? { id: 'run-9' } : options.run, query)
     const builder = chain(options.version === undefined ? { version: 4 } : options.version, query)
+    builder.maybeSingle = async () => {
+      if (!query.filters.includes('status=approved')) {
+        return { data: options.version === undefined ? { version: 4 } : options.version, error: null }
+      }
+      if (options.approvedByGoal) {
+        const goalFilter = query.filters.find((filter) => filter.startsWith('goal_id=')) ?? ''
+        const id = options.approvedByGoal[goalFilter.slice('goal_id='.length)]
+        return { data: id ? { id } : null, error: null }
+      }
+      return { data: options.approvedId ? { id: options.approvedId } : null, error: null }
+    }
     builder.insert = (row: Record<string, unknown>) => {
       inserts.push(row)
       return { select: () => ({ single: async () => ({ data: { id: 'rx-new' }, error: null }) }) }
@@ -169,6 +186,37 @@ describe('POST /prescriptions/manual', () => {
     expect(tables).toContain('diagnostic_runs')
     expect(tables).not.toContain('diagnostic_findings')
     expect(tables).toContain('prescriptions')
+  })
+
+  it('sets supersedes_id to the latest approved prescription for the same goal without landing', async () => {
+    const { inserts, queries } = mockDb({ approvedId: 'rx-approved' })
+    const res = await POST(request(payload()), { params })
+    expect(res.status).toBe(200)
+    expect(inserts[0]).toMatchObject({ status: 'draft', goal_id: 'goal-1', supersedes_id: 'rx-approved' })
+    const approvedQuery = queries.find((query) => query.filters.includes('status=approved'))
+    expect(approvedQuery?.select).toBe('id')
+    expect(approvedQuery?.filters).toEqual(expect.arrayContaining([
+      'client_id=client-1',
+      'goal_id=goal-1',
+      'status=approved',
+      'order:approved_at:desc',
+      'order:version:desc',
+      'limit:1',
+    ]))
+    expect(mockLand).not.toHaveBeenCalled()
+  })
+
+  it('leaves supersedes_id null for a different goal', async () => {
+    const { inserts, queries } = mockDb({
+      approvedByGoal: { 'goal-1': 'rx-other-goal', 'goal-2': null },
+    })
+    const res = await POST(request({ ...payload(), goal_id: 'goal-2' }), { params })
+    expect(res.status).toBe(200)
+    expect(inserts[0]).toMatchObject({ goal_id: 'goal-2', supersedes_id: null, status: 'draft' })
+    const approvedQuery = queries.find((query) => query.filters.includes('status=approved'))
+    expect(approvedQuery?.filters).toContain('goal_id=goal-2')
+    expect(approvedQuery?.filters).not.toContain('goal_id=goal-1')
+    expect(mockLand).not.toHaveBeenCalled()
   })
 
   it('starts at version 1 when the goal has no prescription yet', async () => {
