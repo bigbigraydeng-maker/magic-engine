@@ -190,7 +190,8 @@ function withTimeout<T>(p: Promise<T>, budgetMs: number): Promise<T | 'timeout'>
 
 // Leaves out the mails of exempt templates, found by provider message id (the mailbox record, the audit row and the touchpoint of one
 // mail carry the same id). De-duplication can fold an unrelated record into the wrong mail, so two readings are worked out and the
-// LARGER list wins; then a record folded into the wrong mail can never make the count too small.
+// LARGER list wins. The result is never below the count before exemptions existed minus the number of exempt mails present, so a
+// record folded into the wrong mail cannot make it too small; it can only be above the ideal count.
 //   A: drop the exempt records first, then de-duplicate the rest.
 //   B: de-duplicate everything first (the count as it was before exemptions existed), then drop the groups whose representative carries an exempt id.
 // A record that carries no id still counts: counting too much can only block a send, counting too little would let the cap be exceeded.

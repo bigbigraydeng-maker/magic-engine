@@ -332,7 +332,9 @@ async function attachRenderHash(
   // A render with gaps cannot be compared with what was sent: leave the edit flag unknown.
   if (rendered.missing.length > 0 || rendered.problems.length > 0) return
   meta.renderedSha256 = sha256(`${rendered.subject}\n${rendered.body}`)
-  meta.editedAfterRender = meta.renderedSha256 !== meta.finalSha256
+  // Values the staff member typed into input boxes are part of the render: the text is then not the template's own, so the edit flag stays unknown.
+  const usesTypedInputs = rendered.usedVariables.some((name) => name.startsWith('input.'))
+  meta.editedAfterRender = usesTypedInputs ? null : meta.renderedSha256 !== meta.finalSha256
 }
 
 function contentFailure(blocks: readonly GateViolation[], meta: SendMeta): GateFailure {

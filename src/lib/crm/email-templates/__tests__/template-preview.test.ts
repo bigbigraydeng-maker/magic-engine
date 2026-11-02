@@ -390,4 +390,31 @@ describe('previewTemplate: exempt templates', () => {
     )
     expect(typeof vi.mocked(evaluateFrequency).mock.calls.at(-1)?.[0].loadExemptIds).toBe('function')
   })
+
+  it('a template that uses typed-in input boxes is never exempt', async () => {
+    const data = makeData({
+      loadTemplate: vi.fn(async () => template({ body: `${template().body}\n\nNote: {{input.note}}` })),
+      loadContactView: vi.fn(async () => ({ displayName: 'Amy Lee', addresses: ['amy@gmail.com', 'amy.lee@work.com'], callEvidenceAt: '2026-10-28T01:00:00Z' })),
+    })
+    const res = await previewTemplate(
+      args({ config: config({ capExemptTemplateKeys: ['post-call-single-tour'] }), request: request({ inputs: { note: 'Half price this week' } }) }),
+      data,
+    )
+    expect(res.ok && res.frequency.state).toBe('ok')
+  })
+
+  it('whitespace the real send cleans away does not make it an edited mail', async () => {
+    const data = makeData({
+      loadContactView: vi.fn(async () => ({ displayName: 'Amy Lee', addresses: ['amy@gmail.com', 'amy.lee@work.com'], callEvidenceAt: '2026-10-28T01:00:00Z' })),
+    })
+    const cfg = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
+    const first = await previewTemplate(args({ config: cfg }), data)
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    const res = await previewTemplate(
+      args({ config: cfg, request: request({ subject: `${first.rendered.subject} `, body: `${first.rendered.body}\n` }) }),
+      data,
+    )
+    expect(res.ok && res.frequency.state).toBe('exempt')
+  })
 })

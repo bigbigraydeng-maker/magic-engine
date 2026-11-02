@@ -141,7 +141,11 @@ function makeData(over: Partial<SendGateData> = {}): SendGateData {
 }
 
 // Render the template with the real provider so the final body matches what the staff would see.
-function renderedText(tpl: EmailTemplateVersion, tours: PublishedTourFact[] = [tour()]): { subject: string; body: string } {
+function renderedText(
+  tpl: EmailTemplateVersion,
+  tours: PublishedTourFact[] = [tour()],
+  inputs: Record<string, string> = {},
+): { subject: string; body: string } {
   const provider = getProvider('published_tours')
   if (provider === null) throw new Error('published_tours provider missing')
   const resolved = provider.resolvePicks(tours, [{ tourId: 't1', departOn: '2027-03-11' }], {}, 'one')
@@ -150,7 +154,7 @@ function renderedText(tpl: EmailTemplateVersion, tours: PublishedTourFact[] = [t
     contactName: 'Amy Lee',
     senderDisplayName: 'Lisa Zhang',
     callWhen: null,
-    inputs: {},
+    inputs,
     facts: {
       tours,
       picks: resolved.picks,
@@ -954,6 +958,48 @@ describe('inLock: weekly cap and exempt templates', () => {
     const exemptConfig = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
     const result = await gates.inLock(
       inArgs(state, { ...meta, editedAfterRender: null }, { config: exemptConfig }),
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.reason).toBe('frequency_cap')
+  })
+
+  it('a render that used staff-typed input boxes leaves the edit flag unknown, even when the text was not touched', async () => {
+    const tpl = template({ body: `${template().body}\n\nNote: {{input.note}}` })
+    const inputs = { note: 'Half price this week' }
+    const rendered = renderedText(tpl, [tour()], inputs)
+    const data = makeData({ loadTemplate: vi.fn(async () => tpl) })
+    const result = await createSendGates(data).preLock(
+      preArgs({ subject: rendered.subject, body: rendered.body, template: templateReq({ inputs }) }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.meta.editedAfterRender).toBeNull()
+    expect(result.meta.renderedSha256).not.toBeNull()
+  })
+
+  it('an exempt template that used input boxes is an ordinary mail: the cap blocks it', async () => {
+    const tpl = template({ body: `${template().body}\n\nNote: {{input.note}}` })
+    const inputs = { note: 'Half price this week' }
+    const rendered = renderedText(tpl, [tour()], inputs)
+    const sources = emptySources()
+    sources.sentItems = vi.fn(async () => ({
+      ok: true as const,
+      items: [
+        outboundItem({ id: 'a', at: '2026-10-27T00:00:00Z' }),
+        outboundItem({ id: 'b', at: '2026-10-26T00:00:00Z' }),
+      ],
+    }))
+    const data = makeData({ loadTemplate: vi.fn(async () => tpl), frequencySources: sources })
+    const { state, meta } = await successfulPreLock(data, {
+      subject: rendered.subject,
+      body: rendered.body,
+      template: templateReq({ inputs }),
+    })
+    const gates = createSendGates(data)
+    const result = await gates.inLock(
+      inArgs(state, meta, { config: config({ capExemptTemplateKeys: ['post-call-single-tour'] }) }),
     )
     expect(result.ok).toBe(false)
     if (result.ok) return

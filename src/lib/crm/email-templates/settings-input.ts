@@ -39,6 +39,10 @@ export function parseSettingsWrite(raw: unknown): ParsedSettingsWrite {
     return bad('变更说明不对（最多 300 字）。')
   }
   if (confirmUnrestricted !== undefined && typeof confirmUnrestricted !== 'boolean') return bad('确认字段不对。')
+  // Pages opened before the exemption list existed do not send it; accepting that would silently clear the list.
+  if (isRecord(raw.settings) && !('cap_exempt_template_keys' in raw.settings)) {
+    return bad('设置里缺少「不占名额的模板」这一项（cap_exempt_template_keys）。这个页面可能是更新前打开的，请刷新页面后再保存。')
+  }
   const parsed = parseEmailSettingsStrict(raw.settings)
   if (!parsed.ok) return bad(`设置不合格：${parsed.errors.slice(0, 3).join('；')}`, parsed.errors)
   return {

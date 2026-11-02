@@ -5,6 +5,7 @@
  * 预览不写任何东西、不碰 Graph 之外的外部服务。
  */
 
+import { sanitizeBody, sanitizeSubject } from '@/lib/crm/email-compose/validate'
 import { getProvider } from './facts/registry'
 import type { FactProvider, PickInput, PickOption, RenderFacts } from './facts/types'
 import type { EffectiveEmailConfig } from './effective-config'
@@ -207,10 +208,13 @@ export async function previewTemplate(
     provider: state.provider,
     facts: state.facts,
   })
-  // Same notion as the real send (attachRenderHash in send-gates.ts): "unedited" = a clean render equal to the text that goes out.
+  // Same notion as the real send (attachRenderHash in send-gates.ts): "unedited" = a clean render, built without staff-typed input boxes,
+  // equal to the text that goes out after the same cleaning the real send applies (sanitizeSubject / sanitizeBody).
   const clean = rendered.missing.length === 0 && rendered.problems.length === 0
-  const unedited =
-    clean && (args.request.subject ?? rendered.subject) === rendered.subject && (args.request.body ?? rendered.body) === rendered.body
+  const usesTypedInputs = rendered.usedVariables.some((name) => name.startsWith('input.'))
+  const finalSubject = sanitizeSubject(args.request.subject ?? rendered.subject)
+  const finalBody = sanitizeBody(args.request.body ?? rendered.body)
+  const unedited = clean && !usesTypedInputs && finalSubject === rendered.subject && finalBody === rendered.body
   const frequency = await frequencyFor(args, view.addresses, data, unedited)
 
   return {
