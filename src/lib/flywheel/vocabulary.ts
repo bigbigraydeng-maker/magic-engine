@@ -228,6 +228,9 @@ export const ADS_ACTION_TYPE = {
   /** Adjust bid for an ad set (third_party, meta) */
   ADJUST_BID: 'ads.adjust_bid',
 
+  /** Change one ad set daily budget after a person confirms the card. */
+  ADJUST_ADSET_DAILY_BUDGET: 'ads.adjust_adset_daily_budget',
+
   /** Add a negative keyword to stop wasted spend (third_party, meta) */
   ADD_NEGATIVE_KEYWORD: 'ads.add_negative_keyword',
 
