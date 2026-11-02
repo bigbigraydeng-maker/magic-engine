@@ -42,7 +42,7 @@ describe('realSettingChanges', () => {
       }),
     ]
     expect(realSettingChanges(rows)).toEqual([
-      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T03:00:00Z' },
+      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T03:00:00Z', kind: 'other' },
     ])
   })
 
@@ -70,7 +70,7 @@ describe('realSettingChanges', () => {
       }),
     ]
     expect(realSettingChanges(budgetChanged)).toEqual([
-      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T05:00:00Z' },
+      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T05:00:00Z', kind: 'budget_up', budget_before_minor: 2000, budget_after_minor: 3000 },
     ])
   })
 
@@ -85,7 +85,7 @@ describe('realSettingChanges', () => {
       }),
     ]
     expect(realSettingChanges(rows)).toEqual([
-      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T00:00:00Z' },
+      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T00:00:00Z', kind: 'budget_up', budget_before_minor: 2000, budget_after_minor: 3000 },
     ])
   })
 
@@ -98,7 +98,7 @@ describe('realSettingChanges', () => {
       }),
     ]
     expect(realSettingChanges(recent)).toEqual([
-      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-10T20:00:00Z' },
+      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-10T20:00:00Z', kind: 'other' },
     ])
 
     const stale = [
@@ -131,7 +131,7 @@ describe('realSettingChanges', () => {
       }),
     ]
     expect(realSettingChanges(rows)).toEqual([
-      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T03:00:00Z' },
+      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T03:00:00Z', kind: 'other' },
     ])
   })
 
@@ -153,8 +153,8 @@ describe('realSettingChanges', () => {
       snap({ captured_at: '2026-09-10T00:00:00Z', capture_reason: 'daily', entity_id: 'as1' }),
     ]
     expect(realSettingChanges(rows)).toEqual([
-      { level: 'adset', entity_id: 'as2', captured_at: '2026-09-11T03:00:00Z' },
-      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T04:00:00Z' },
+      { level: 'adset', entity_id: 'as2', captured_at: '2026-09-11T03:00:00Z', kind: 'other' },
+      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T04:00:00Z', kind: 'other' },
     ])
   })
 
@@ -169,7 +169,25 @@ describe('realSettingChanges', () => {
       }),
     ]
     expect(realSettingChanges(rows)).toEqual([
-      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T03:00:00Z' },
+      { level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T03:00:00Z', kind: 'other' },
     ])
+  })
+
+  it('records what changed: pause / activate / budget up or down; anything else is other', () => {
+    const prev = snap({ captured_at: '2026-09-10T00:00:00Z', capture_reason: 'daily' })
+    const next = (p: Partial<EntitySnapshotRow>) =>
+      realSettingChanges([prev, snap({ captured_at: '2026-09-11T00:00:00Z', capture_reason: 'changed', source_updated_time: '2026-09-11T03:00:00Z', ...p })])[0]
+    expect(next({ status: 'PAUSED' })).toMatchObject({ kind: 'pause' })
+    expect(realSettingChanges([
+      snap({ captured_at: '2026-09-10T00:00:00Z', capture_reason: 'daily', status: 'PAUSED' }),
+      snap({ captured_at: '2026-09-11T00:00:00Z', capture_reason: 'changed', source_updated_time: '2026-09-11T03:00:00Z' }),
+    ])[0]).toMatchObject({ kind: 'activate' })
+    expect(next({ daily_budget_minor: 1500 })).toEqual({
+      level: 'adset', entity_id: 'as1', captured_at: '2026-09-11T03:00:00Z', kind: 'budget_down', budget_before_minor: 2000, budget_after_minor: 1500,
+    })
+    expect(next({ status: 'ARCHIVED' })).toMatchObject({ kind: 'other' })
+    expect(next({ daily_budget_minor: null })).toMatchObject({ kind: 'other' })
+    // 状态和预算同一次都变了：按状态算（暂停了，预算改多少都不花钱）
+    expect(next({ status: 'PAUSED', daily_budget_minor: 9000 })).toMatchObject({ kind: 'pause' })
   })
 })

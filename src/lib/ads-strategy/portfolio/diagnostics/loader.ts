@@ -63,6 +63,22 @@ function isRealChange(prev: EntitySnapshotRow | null, row: EntitySnapshotRow): b
   return keyFieldsChanged(prev, row)
 }
 
+/** 改了什么：只认状态（暂停 / 开启）和日预算（加 / 减），其余一律 'other'。 */
+function changeKind(prev: EntitySnapshotRow | null, row: EntitySnapshotRow): Pick<SettingChange, 'kind' | 'budget_before_minor' | 'budget_after_minor'> {
+  if (!prev) return { kind: 'other' }
+  if (prev.status !== row.status) {
+    if (row.status === 'PAUSED') return { kind: 'pause' }
+    if (row.status === 'ACTIVE') return { kind: 'activate' }
+    return { kind: 'other' }
+  }
+  const before = prev.daily_budget_minor
+  const after = row.daily_budget_minor
+  if (typeof before === 'number' && typeof after === 'number' && before !== after) {
+    return { kind: after > before ? 'budget_up' : 'budget_down', budget_before_minor: before, budget_after_minor: after }
+  }
+  return { kind: 'other' }
+}
+
 /**
  * 从近 35 天快照里抽「真改过」的设置变更（D2/D10 的学习期剔除用）。
  * 🔴 快照的 changed 不等于 Meta 那边真改了：我们自己加字段、两个写入程序序列化不一致都会记成 changed
@@ -92,7 +108,7 @@ export function realSettingChanges(rows: readonly EntitySnapshotRow[]): SettingC
         if (list[j].capture_reason !== 'disappeared') { prev = list[j]; break }
       }
       if (!isRealChange(prev, row)) continue
-      out.push({ level: row.level, entity_id: row.entity_id, captured_at: row.source_updated_time ?? row.captured_at })
+      out.push({ level: row.level, entity_id: row.entity_id, captured_at: row.source_updated_time ?? row.captured_at, ...changeKind(prev, row) })
     }
   }
   return out

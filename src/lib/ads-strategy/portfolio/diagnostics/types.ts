@@ -123,7 +123,17 @@ export interface SettingChange {
   level: 'account' | 'campaign' | 'adset' | 'ad' | 'audience'
   entity_id: string
   captured_at: string
+  /**
+   * 改了什么（改动回看用，见 portfolio/change-review.ts）。只比状态和日预算；
+   * 找不到前一行、或改的是别的字段 → 'other'。老 fixture 没有这个字段 = 当 'other'。
+   */
+  kind?: SettingChangeKind
+  /** 日预算（分），只在 budget_up / budget_down 时有 */
+  budget_before_minor?: number
+  budget_after_minor?: number
 }
+
+export type SettingChangeKind = 'pause' | 'activate' | 'budget_up' | 'budget_down' | 'other'
 
 /** 某个受众某次抓取时的人数下限（Meta 显示值，按百取整；≤1000 = 显示下限，判不了）。 */
 export interface AudienceCountPoint {

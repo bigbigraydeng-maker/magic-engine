@@ -68,6 +68,7 @@ import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
 import { runPortfolioDiagnostics } from '@/lib/ads-strategy/portfolio/run-daily'
 import type { RecentChangeShadow } from '@/lib/ads-strategy/portfolio/recent-change-shadow'
+import type { ChangeReviewSummary } from '@/lib/ads-strategy/portfolio/change-review'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { ADS_DIAGNOSTICS_COMPLETED_EVENT } from '@/lib/inngest/functions/ads-d3-auto-pause'
 import { snapshotTablesExist } from '@/lib/ads-strategy/portfolio/snapshot-sync'
@@ -111,7 +112,7 @@ interface ClientResult {
   /** P21.K.4 daily email digest decision + send outcome. */
   ad_digest?: { sent: boolean; decision: string; error?: string }
   /** ads IMPACT 阶段 1：只读诊断 + 内部版日报 */
-  ad_diagnostics?: { success: boolean; hits: number; not_comparable: number; excluded: number; digest_decision?: string; digest_sent?: boolean; recipients_dropped?: number; error?: string; shadow?: RecentChangeShadow | { error: string } }
+  ad_diagnostics?: { success: boolean; hits: number; not_comparable: number; excluded: number; digest_decision?: string; digest_sent?: boolean; recipients_dropped?: number; error?: string; shadow?: RecentChangeShadow | { error: string }; change_review?: ChangeReviewSummary | { error: string } }
   /**
    * 广告引擎配置**读失败**（不是没配置行）。2026-09-25 事故：读配置每次 400，
    * 下面的诊断 / 经营状态 / 日报全按 fallback 静默跳过，运行记录里一个字没有。
@@ -743,13 +744,18 @@ export async function GET(req: NextRequest) {
     shadow_clients: shadowRows.filter((r) => r.o1 || r.d3).length,
     clients: shadowRows.filter((r) => differs(r.o1) || differs(r.d3)),
   }
+  /** 同一步的改动回看：只留今天有满 7 天改动、或回看出错的客户（见 change-review.ts）。只读、不改任何输出。 */
+  const changeReview = results
+    .map((r) => ({ client_id: r.client_id, review: r.ad_diagnostics?.change_review }))
+    .filter((r): r is { client_id: string; review: ChangeReviewSummary | { error: string } } =>
+      !!r.review && ('error' in r.review || r.review.reviewed > 0 || r.review.skipped_no_spend > 0))
 
   await cronRun.finish({
     processed: results.length,
     completed: results.length - failed,
     error: errorMessage,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes, recent_change_shadow: recentChangeShadow },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes, recent_change_shadow: recentChangeShadow, change_review: changeReview },
   })
   return NextResponse.json({
     success:           true,
