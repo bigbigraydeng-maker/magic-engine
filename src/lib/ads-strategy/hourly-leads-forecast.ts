@@ -48,10 +48,23 @@ function sumThroughHour(hours: readonly number[], through: number): number {
   return n
 }
 
-function sampleStdDev(values: readonly number[], mean: number): number {
+export function sampleStdDev(values: readonly number[], mean: number): number {
   if (values.length < 2) return 0
   const variance = values.reduce((acc, v) => acc + (v - mean) ** 2, 0) / values.length
   return Math.sqrt(variance)
+}
+
+/** 日均进线条数区间（与全天预测同一套 mean±std 思路）。 */
+export function leadCountRangeFromSamples(
+  samples: readonly number[],
+  minSamples: number,
+): { low: number; high: number; sampleCount: number } | null {
+  if (samples.length < minSamples) return null
+  const mean = samples.reduce((a, b) => a + b, 0) / samples.length
+  const std = sampleStdDev(samples, mean)
+  const low = Math.max(0, Math.floor(mean - std))
+  const high = Math.max(low, Math.ceil(mean + std))
+  return { low, high, sampleCount: samples.length }
 }
 
 export function todayArrivedForForecast(todayHours: readonly number[], currentHour: number): number {

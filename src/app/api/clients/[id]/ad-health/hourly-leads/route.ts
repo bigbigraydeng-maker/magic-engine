@@ -11,6 +11,7 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { endOfNzDayMs, nzToday } from '@/lib/ads-strategy/promo-window'
 import { buildHourlyLeadChart, isoDayMinus } from '@/lib/ads-strategy/hourly-meta-leads'
 import { buildLeadForecastFromRows } from '@/lib/ads-strategy/hourly-leads-forecast'
+import { buildWeeklyLeadForecastFromRows } from '@/lib/ads-strategy/weekly-leads-forecast'
 import { toClientHourlyLeadsView } from '@/lib/ads-strategy/agents/hourly-leads-client-view'
 
 export const dynamic = 'force-dynamic'
@@ -96,12 +97,14 @@ export async function GET(
   }
 
   const forecast = buildLeadForecastFromRows(touchRes.rows, now)
+  const weekForecast = buildWeeklyLeadForecastFromRows(touchRes.rows, now)
 
   const payload = {
     success: true,
     unreadable: false,
     chart: built.chart,
     forecast,
+    weekForecast,
     lastSyncAt,
     jobName: META_LEADS_SYNC_JOB,
   }
