@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   checkRequiredMailboxes,
   listClientsWithOpenAuthorization,
+  loadContactsByIds,
   loadLeadContacts,
   loadOpenAuthorization,
 } from '../shadow-reads-prod'
@@ -538,5 +539,111 @@ describe('checkRequiredMailboxes', () => {
   it('returns unreadable when nothing is required', async () => {
     const result = await checkRequiredMailboxes(async () => [], 'client-1', [])
     expect(result).toEqual({ ok: false, reason: 'unreadable', detail: 'no required mailbox configured' })
+  })
+})
+
+describe('loadContactsByIds', () => {
+  const inArg = (calls: readonly Call[]): string[] => {
+    const hit = calls.find((c) => c.method === 'in')
+    return (hit?.args[1] as string[] | undefined) ?? []
+  }
+
+  it('makes no query for an empty list', async () => {
+    const fake = makeFakeClient(() => ({ data: [], error: null }))
+    expect(await loadContactsByIds(fake.db, { clientId: 'c1', contactIds: [] })).toEqual({ ok: true, contacts: [] })
+    expect(fake.callsFor('contacts')).toHaveLength(0)
+    expect(fake.callsFor('contact_identities')).toHaveLength(0)
+  })
+
+  it('reads the contacts and their e-mail identities with the exact filters, normalised and oldest first', async () => {
+    const fake = makeFakeClient((table, calls) => {
+      if (table === 'contacts') {
+        return {
+          data: [
+            { id: 'b', created_at: '2026-11-02T02:00:00Z', primary_email: ' B@Example.com ' },
+            { id: 'a', created_at: '2026-11-02T01:00:00Z', primary_email: 'a@example.com' },
+          ],
+          error: null,
+        }
+      }
+      // the identities are asked for in the order the contacts came back
+      expect(inArg(calls)).toEqual(['b', 'a'])
+      return {
+        data: [
+          { contact_id: 'a', value: 'A@Example.com' },
+          { contact_id: 'a', value: 'a.second@example.com' },
+          { contact_id: 'b', value: '   ' },
+        ],
+        error: null,
+      }
+    })
+    const read = await loadContactsByIds(fake.db, { clientId: 'c1', contactIds: ['a', 'b'] })
+    expect(read).toEqual({
+      ok: true,
+      contacts: [
+        { contactId: 'a', createdAt: '2026-11-02T01:00:00Z', primaryEmail: 'a@example.com', addresses: ['a@example.com', 'a.second@example.com'] },
+        { contactId: 'b', createdAt: '2026-11-02T02:00:00Z', primaryEmail: 'b@example.com', addresses: ['b@example.com'] },
+      ],
+    })
+    expect(fake.callsFor('contacts')[0]).toEqual([
+      { method: 'select', args: ['id, created_at, primary_email'] },
+      { method: 'eq', args: ['client_id', 'c1'] },
+      { method: 'in', args: ['id', ['a', 'b']] },
+    ])
+    expect(fake.callsFor('contact_identities')[0]).toEqual([
+      { method: 'select', args: ['contact_id, value'] },
+      { method: 'eq', args: ['client_id', 'c1'] },
+      { method: 'eq', args: ['kind', 'email'] },
+      { method: 'in', args: ['contact_id', ['b', 'a']] },
+    ])
+  })
+
+  it('does not require the audience filter: a contact without any touchpoint is still returned', async () => {
+    const fake = makeFakeClient((table) =>
+      table === 'contacts'
+        ? { data: [{ id: 'a', created_at: '2026-11-02T01:00:00Z', primary_email: 'a@example.com' }], error: null }
+        : { data: [], error: null },
+    )
+    const read = await loadContactsByIds(fake.db, { clientId: 'c1', contactIds: ['a'] })
+    expect(read.ok && read.contacts.map((c) => c.contactId)).toEqual(['a'])
+    expect(fake.callsFor('contact_touchpoints')).toHaveLength(0)
+  })
+
+  it('chunks 250 ids into 100/100/50 and returns only the contacts that still exist', async () => {
+    const ids = Array.from({ length: 250 }, (_, i) => `id-${String(i).padStart(3, '0')}`)
+    const fake = makeFakeClient((table, calls) => {
+      if (table === 'contacts') {
+        // every id exists except id-003
+        return {
+          data: inArg(calls)
+            .filter((id) => id !== 'id-003')
+            .map((id) => ({ id, created_at: '2026-11-02T01:00:00Z', primary_email: `${id}@example.com` })),
+          error: null,
+        }
+      }
+      return { data: [], error: null }
+    })
+    const read = await loadContactsByIds(fake.db, { clientId: 'c1', contactIds: ids })
+    expect(fake.callsFor('contacts').map((calls) => inArg(calls).length)).toEqual([100, 100, 50])
+    expect(fake.callsFor('contact_identities').map((calls) => inArg(calls).length)).toEqual([100, 100, 49])
+    expect(read.ok && read.contacts.length).toBe(249)
+    expect(read.ok && read.contacts.some((c) => c.contactId === 'id-003')).toBe(false)
+  })
+
+  it('returns ok:false when the contacts query fails, when the identities query fails, and on a thrown exception', async () => {
+    const failContacts = makeFakeClient(() => ({ data: null, error: { message: 'contacts down' } }))
+    expect(await loadContactsByIds(failContacts.db, { clientId: 'c1', contactIds: ['a'] })).toEqual({ ok: false, error: 'contacts down' })
+
+    const failIdentities = makeFakeClient((table) =>
+      table === 'contacts'
+        ? { data: [{ id: 'a', created_at: '2026-11-02T01:00:00Z', primary_email: 'a@example.com' }], error: null }
+        : { data: null, error: { message: 'identities down' } },
+    )
+    expect(await loadContactsByIds(failIdentities.db, { clientId: 'c1', contactIds: ['a'] })).toEqual({ ok: false, error: 'identities down' })
+
+    const throwing = makeFakeClient(() => {
+      throw new Error('kaboom')
+    })
+    expect(await loadContactsByIds(throwing.db, { clientId: 'c1', contactIds: ['a'] })).toEqual({ ok: false, error: 'kaboom' })
   })
 })

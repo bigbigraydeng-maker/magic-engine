@@ -449,14 +449,14 @@ const CRON_REGISTRY_ENTRIES = [
   { service: 'inngest:cloud-story-lite-publish', jobName: 'story-lite-publish', schedule: '*/10 * * * *', logsRuns: true, scheduler: 'inngest' },
 
   // Triggered-send (welcome e-mail) SHADOW run: records what ME WOULD send each morning; it never sends anything.
-  // Runs at 08:15 New Zealand time (the Inngest cron carries TZ=Pacific/Auckland); a second trigger at 10:15 retries what
-  // could not be read in the morning run, and is not watched separately. Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §5.
+  // Runs at 09:00 New Zealand time (the Inngest cron carries TZ=Pacific/Auckland; after the old 08:01 batch, so Mailchimp's
+  // report of it has settled); a second trigger at 11:00 retries what could not be read, and is not watched separately. Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §5.
   // 🔴 schedule must not be hand-copied: the only definition is TRIGGERED_SEND_SWEEP_CRON in
   //    src/lib/inngest/functions/triggered-send-welcome-sweep.ts (its test asserts the two are equal).
-  { service: 'inngest:cloud-triggered-send-welcome-dispatch', jobName: 'triggered-send-welcome-dispatch', schedule: '15 8 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-02' },
+  { service: 'inngest:cloud-triggered-send-welcome-dispatch', jobName: 'triggered-send-welcome-dispatch', schedule: '0 9 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-02' },
   // The per-client sweeps ordered by the dispatch above (event-triggered, so they follow its schedule). A morning without
   // new leads legitimately writes no ledger row, hence emptyRoundsAreLegitimate (processed = contacts to decide).
-  { service: 'inngest:cloud-triggered-send-welcome-sweep', jobName: 'triggered-send-welcome-sweep', schedule: '15 8 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-02',
+  { service: 'inngest:cloud-triggered-send-welcome-sweep', jobName: 'triggered-send-welcome-sweep', schedule: '0 9 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-02',
     outputTables: [{ table: 'triggered_sends', freshnessHours: 26, timestampColumn: 'created_at', emptyRoundsAreLegitimate: true }] },
 
   // Render 上只留这三条。它们自己很快返回，到点的旧接口在 web 进程里接着跑。

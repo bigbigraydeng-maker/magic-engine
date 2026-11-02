@@ -1,9 +1,18 @@
 import { describe, it, expect, vi } from 'vitest'
-import { runShadowSweep, type SweepDeps } from '../shadow-sweep'
+import {
+  CHUNK_SIZE,
+  chunkIds,
+  decideChunk,
+  finalizeSweep,
+  prepareSweep,
+  runShadowSweep,
+  type SweepDeps,
+} from '../shadow-sweep'
 import { ruleSha256, type TriggeredSendRule } from '../rule'
 import { addressSha256, type ShadowRowInput } from '../shadow-store'
 import type {
   AuthorizationRead,
+  ChunkResult,
   ContactsRead,
   LegacyBatchSeen,
   MailboxCheck,
@@ -11,6 +20,7 @@ import type {
   ShadowContact,
   ShadowGatePorts,
   ShadowRowsRead,
+  SweepPlan,
 } from '../types'
 
 const NOW = new Date('2026-11-02T20:15:00Z')
@@ -82,6 +92,7 @@ function makePorts(opts: FakePortsOptions = {}): ShadowGatePorts {
 interface FakeDepsOptions {
   auth?: AuthorizationRead
   contacts?: ContactsRead
+  contactsByIds?: ContactsRead
   shadowRows?: ShadowRowsRead
   mailbox?: MailboxCheck
   ports?: ShadowGatePorts
@@ -94,6 +105,7 @@ interface FakeDeps {
   deps: SweepDeps
   loadAuthorization: ReturnType<typeof vi.fn>
   loadContacts: ReturnType<typeof vi.fn>
+  loadContactsByIds: ReturnType<typeof vi.fn>
   findContactsWithShadowRows: ReturnType<typeof vi.fn>
   checkMailboxes: ReturnType<typeof vi.fn>
   createPorts: ReturnType<typeof vi.fn>
@@ -103,6 +115,12 @@ interface FakeDeps {
 function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
   const loadAuthorization = vi.fn(async (): Promise<AuthorizationRead> => opts.auth ?? { ok: true, row: makeAuth() })
   const loadContacts = vi.fn(async (): Promise<ContactsRead> => opts.contacts ?? { ok: true, contacts: [] })
+  // The chunk steps read their contacts again by id; the fake answers from the same list.
+  const loadContactsByIds = vi.fn(async (a: { contactIds: readonly string[] }): Promise<ContactsRead> => {
+    if (opts.contactsByIds) return opts.contactsByIds
+    const all = opts.contacts && opts.contacts.ok ? opts.contacts.contacts : []
+    return { ok: true, contacts: all.filter((c) => a.contactIds.includes(c.contactId)) }
+  })
   const findContactsWithShadowRows = vi.fn(
     async (): Promise<ShadowRowsRead> => opts.shadowRows ?? { ok: true, contactIds: new Set() },
   )
@@ -128,12 +146,13 @@ function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
     now: () => NOW,
     loadAuthorization,
     loadContacts,
+    loadContactsByIds,
     findContactsWithShadowRows,
     checkMailboxes,
     createPorts,
     insertShadowRows,
   }
-  return { deps, loadAuthorization, loadContacts, findContactsWithShadowRows, checkMailboxes, createPorts, insertShadowRows }
+  return { deps, loadAuthorization, loadContacts, loadContactsByIds, findContactsWithShadowRows, checkMailboxes, createPorts, insertShadowRows }
 }
 
 describe('runShadowSweep — authorization and rule', () => {
@@ -217,8 +236,9 @@ describe('runShadowSweep — happy path', () => {
     expect(receipt.skipped_by_reason).toEqual({ dnc: 1, stale: 1 }) // b, c
     expect(receipt.deferred_by_reason).toEqual({})
 
-    expect(f.insertShadowRows).toHaveBeenCalledTimes(1)
-    const rows = f.insertShadowRows.mock.calls[0][0] as ShadowRowInput[]
+    // every row is written as soon as it is decided: one call per row
+    expect(f.insertShadowRows).toHaveBeenCalledTimes(3)
+    const rows = f.insertShadowRows.mock.calls.flatMap((c) => c[0] as ShadowRowInput[])
     expect(rows).toHaveLength(3)
 
     const byId = new Map(rows.map((r) => [r.contactId, r]))
@@ -491,10 +511,251 @@ describe('runShadowSweep - added after the mutation probe', () => {
         ok: true,
         contacts: [contact('a', '2026-11-02T00:00:00Z'), contact('b', '2026-11-02T00:00:00Z')],
       },
-      insert: { ok: true, inserted: 1 },
     })
+    // the first row was already there (the database ignored the duplicate), the second is new
+    f.insertShadowRows.mockImplementationOnce(async () => ({ ok: true as const, inserted: 0 }))
     const receipt = await runShadowSweep({ clientId: 'client-1', dryRun: false, deps: f.deps })
     expect(receipt.decided).toBe(2)
     expect(receipt.inserted).toBe(1)
+  })
+})
+
+// ── the sweep in phases (what the Inngest function runs as separate steps) ─────────────────────────────
+
+describe('chunkIds', () => {
+  it('splits into chunks of CHUNK_SIZE and keeps the order', () => {
+    expect(CHUNK_SIZE).toBe(4)
+    expect(chunkIds(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'])).toEqual([['a', 'b', 'c', 'd'], ['e', 'f', 'g', 'h'], ['i']])
+    expect(chunkIds([])).toEqual([])
+    expect(chunkIds(['a', 'b', 'c'], 2)).toEqual([['a', 'b'], ['c']])
+  })
+})
+
+function leadContacts(n: number): ShadowContact[] {
+  return Array.from({ length: n }, (_, i) => contact(`k${String(i).padStart(2, '0')}`, '2026-11-02T00:00:00Z'))
+}
+
+async function planOf(f: FakeDeps, dryRun = false): Promise<SweepPlan> {
+  const prepared = await prepareSweep({ clientId: 'client-1', dryRun, deps: f.deps })
+  if (prepared.kind !== 'plan') throw new Error(`expected a plan, got ${prepared.receipt.status}`)
+  return prepared.plan
+}
+
+describe('prepareSweep', () => {
+  it('returns a finished receipt when there is no open proposal', async () => {
+    const prepared = await prepareSweep({ clientId: 'client-1', dryRun: false, deps: makeDeps({ auth: { ok: true, row: null } }).deps })
+    expect(prepared.kind).toBe('done')
+    if (prepared.kind === 'done') expect(prepared.receipt.status).toBe('no_open_proposal')
+  })
+
+  it('returns a plan with ids and counters only: plain JSON without any e-mail address', async () => {
+    const f = makeDeps({
+      contacts: {
+        ok: true,
+        contacts: [
+          contact('a', '2026-11-02T00:00:00Z'),
+          contact('c', '2026-10-30T06:00:00Z'), // stale
+          contact('d', '2026-11-02T20:00:00Z'), // not yet
+          contact('f', '2026-11-02T00:00:00Z'), // already holds a row
+        ],
+      },
+      shadowRows: { ok: true, contactIds: new Set(['f']) },
+    })
+    const plan = await planOf(f)
+    expect(plan).toMatchObject({
+      clientId: 'client-1',
+      dryRun: false,
+      authorizationId: 'auth-1',
+      sweepDay: SWEEP_DAY,
+      candidateIds: ['a'],
+      staleIds: ['c'],
+      to_decide: 2,
+      ignored: 2,
+      deferred: 0,
+      status: 'swept',
+      error: null,
+    })
+    expect(JSON.stringify(plan)).not.toContain('@')
+    expect(JSON.parse(JSON.stringify(plan))).toEqual(plan)
+    expect(f.createPorts).not.toHaveBeenCalled()
+    expect(f.insertShadowRows).not.toHaveBeenCalled()
+    expect(f.loadContactsByIds).not.toHaveBeenCalled()
+  })
+
+  it('sets the candidates aside when a required mailbox is missing but keeps the stale ones', async () => {
+    const f = makeDeps({
+      contacts: { ok: true, contacts: [contact('a', '2026-11-02T00:00:00Z'), contact('c', '2026-10-30T06:00:00Z')] },
+      mailbox: { ok: false, reason: 'missing', detail: 'missing: sales@example.com' },
+    })
+    const plan = await planOf(f)
+    expect(plan.status).toBe('mailbox_unreadable')
+    expect(plan.error).toBe('missing: sales@example.com')
+    expect(plan.candidateIds).toEqual([])
+    expect(plan.staleIds).toEqual(['c'])
+    expect(plan.deferred).toBe(1)
+    expect(plan.deferred_by_reason).toEqual({ mailbox_unreadable: 1 })
+    expect(plan.to_decide).toBe(2)
+  })
+})
+
+describe('decideChunk', () => {
+  it('writes every decided row at once (one insert per contact, in order) and counts them', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(3) }, ports: makePorts({ dncBlocked: (id) => id === 'k01' }) })
+    const plan = await planOf(f)
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: f.deps })
+    expect(result).toMatchObject({ decided: 3, deferred: 0, inserted: 3, would_send: 2, skipped_by_reason: { dnc: 1 }, error: null, error_status: null })
+    expect(f.insertShadowRows.mock.calls.map((c) => (c[0] as ShadowRowInput[]).map((r) => r.contactId))).toEqual([['k00'], ['k01'], ['k02']])
+    expect(f.createPorts).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the rows already written when a later write fails, stops there and defers the rest', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(4) } })
+    const plan = await planOf(f)
+    f.insertShadowRows
+      .mockImplementationOnce(async (rows: ShadowRowInput[]) => ({ ok: true as const, inserted: rows.length }))
+      .mockImplementationOnce(async () => ({ ok: false as const, error: 'db down' }))
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: f.deps })
+    expect(result.inserted).toBe(1)
+    expect(result.decided).toBe(2)
+    expect(result.error).toBe('db down')
+    expect(result.error_status).toBe('write_failed')
+    expect(result.deferred).toBe(2)
+    expect(result.deferred_by_reason).toEqual({ write_failed: 2 })
+    expect(f.insertShadowRows).toHaveBeenCalledTimes(2)
+  })
+
+  it('does nothing when the proposal was revoked or replaced since the plan was made', async () => {
+    for (const auth of [
+      { ok: true as const, row: null },
+      { ok: true as const, row: makeAuth({ id: 'auth-2' }) },
+    ]) {
+      const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(2) } })
+      const plan = await planOf(f)
+      const later = makeDeps({ auth, contacts: { ok: true, contacts: leadContacts(2) } })
+      const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: later.deps })
+      expect(result).toMatchObject({ decided: 0, deferred: 2, inserted: 0, deferred_by_reason: { proposal_changed: 2 } })
+      expect(later.createPorts).not.toHaveBeenCalled()
+      expect(later.insertShadowRows).not.toHaveBeenCalled()
+      expect(later.loadContactsByIds).not.toHaveBeenCalled()
+    }
+  })
+
+  it('defers everything when the authorization or the contacts cannot be read', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(2) } })
+    const plan = await planOf(f)
+    const noAuth = makeDeps({ auth: { ok: false, error: 'auth down' } })
+    expect(await decideChunk({ plan, kind: 'candidates', contactIds: ['k00', 'k01'], deps: noAuth.deps })).toMatchObject({
+      deferred: 2, error: 'auth down', error_status: 'read_failed', deferred_by_reason: { read_failed: 2 },
+    })
+    const noContacts = makeDeps({ contactsByIds: { ok: false, error: 'contacts down' } })
+    expect(await decideChunk({ plan, kind: 'candidates', contactIds: ['k00', 'k01'], deps: noContacts.deps })).toMatchObject({
+      deferred: 2, error: 'contacts down', error_status: 'read_failed',
+    })
+    expect(noContacts.insertShadowRows).not.toHaveBeenCalled()
+  })
+
+  it('counts contacts that cannot be found any more as deferred, not as an error', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(2) } })
+    const plan = await planOf(f)
+    const gone = makeDeps({ contactsByIds: { ok: true, contacts: [leadContacts(2)[0]] } })
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: ['k00', 'k01'], deps: gone.deps })
+    expect(result).toMatchObject({ decided: 1, deferred: 1, deferred_by_reason: { contact_missing: 1 }, error: null })
+  })
+
+  it('writes nothing in a dry run', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(2) } })
+    const plan = await planOf(f, true)
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: f.deps })
+    expect(result).toMatchObject({ decided: 2, would_send: 2, inserted: 0 })
+    expect(f.insertShadowRows).not.toHaveBeenCalled()
+  })
+
+  it('freezes stale contacts without creating ports (no external read)', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: [contact('c', '2026-10-30T06:00:00Z')] } })
+    const plan = await planOf(f)
+    const result = await decideChunk({ plan, kind: 'stale', contactIds: plan.staleIds, deps: f.deps })
+    expect(result).toMatchObject({ decided: 1, inserted: 1, skipped_by_reason: { stale: 1 } })
+    expect(f.createPorts).not.toHaveBeenCalled()
+  })
+
+  it('does not touch anything for an empty chunk', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(1) } })
+    const plan = await planOf(f)
+    const later = makeDeps()
+    expect(await decideChunk({ plan, kind: 'candidates', contactIds: [], deps: later.deps })).toMatchObject({ decided: 0, deferred: 0, inserted: 0 })
+    expect(later.loadAuthorization).not.toHaveBeenCalled()
+  })
+
+  it('never throws, even when a dependency throws', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(1) } })
+    const plan = await planOf(f)
+    f.loadContactsByIds.mockImplementationOnce(async () => {
+      throw new Error('kaboom')
+    })
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: f.deps })
+    expect(result.error).toBe('unexpected: kaboom')
+    expect(result.error_status).toBe('read_failed')
+  })
+})
+
+describe('finalizeSweep', () => {
+  const chunk = (over: Partial<ChunkResult>): ChunkResult => ({
+    decided: 0, deferred: 0, inserted: 0, would_send: 0, skipped_by_reason: {}, deferred_by_reason: {}, legacy_batches: [], error: null, error_status: null, ...over,
+  })
+  const basePlan: SweepPlan = {
+    clientId: 'client-1', dryRun: false, authorizationId: 'auth-1', sweepDay: SWEEP_DAY, candidateIds: [], staleIds: [],
+    to_decide: 6, ignored: 2, deferred: 1, deferred_by_reason: { mailbox_unreadable: 1 }, status: 'swept', error: null,
+    createdAt: NOW.toISOString(),
+  }
+
+  it('adds the chunk results up and merges the reason counters', () => {
+    const receipt = finalizeSweep(basePlan, [
+      chunk({ decided: 3, inserted: 3, would_send: 2, skipped_by_reason: { dnc: 1 }, deferred: 1, deferred_by_reason: { evidence_unverifiable: 1 } }),
+      chunk({ decided: 2, inserted: 1, would_send: 1, skipped_by_reason: { dnc: 1, stale: 0 }, deferred: 0 }),
+    ])
+    expect(receipt).toMatchObject({
+      status: 'swept', client_id: 'client-1', authorization_id: 'auth-1', to_decide: 6, ignored: 2, decided: 5, inserted: 4, would_send: 3,
+      deferred: 2, skipped_by_reason: { dnc: 2, stale: 0 }, deferred_by_reason: { mailbox_unreadable: 1, evidence_unverifiable: 1 },
+      no_send: true, provider_impact: 'NONE', error: null, created_at: NOW.toISOString(),
+    })
+  })
+
+  it('shows the first failing chunk as the status, but keeps a plan-level status that is already shown', () => {
+    const failed = chunk({ error: 'db down', error_status: 'write_failed' })
+    expect(finalizeSweep(basePlan, [chunk({}), failed])).toMatchObject({ status: 'write_failed', error: 'db down' })
+    expect(finalizeSweep(basePlan, [chunk({ error: 'x', error_status: 'read_failed' })])).toMatchObject({ status: 'read_failed', error: 'x' })
+    expect(finalizeSweep({ ...basePlan, status: 'mailbox_unreadable', error: 'missing: sales@example.com' }, [failed])).toMatchObject({
+      status: 'mailbox_unreadable', error: 'missing: sales@example.com',
+    })
+  })
+
+  it('merges the old-batch campaigns by id and sorts them by send time (unknown time last)', () => {
+    const b = (campaignId: string, sentAt: string | null): LegacyBatchSeen => ({ campaignId, title: `legacy_batch_${campaignId}`, sentAt, emailsSent: 5 })
+    const receipt = finalizeSweep(basePlan, [
+      chunk({ legacy_batches: [b('z', '2026-11-02T08:00:00Z'), b('n', null)] }),
+      chunk({ legacy_batches: [b('z', '2026-11-02T08:00:00Z'), b('y', '2026-11-01T08:00:00Z')] }),
+    ])
+    expect(receipt.legacy_batches.map((x) => x.campaignId)).toEqual(['y', 'z', 'n'])
+  })
+})
+
+describe('runShadowSweep in chunks', () => {
+  it('decides 9 candidates in 3 chunks (4/4/1), creating the ports once per chunk and writing 9 rows', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(9) } })
+    const receipt = await runShadowSweep({ clientId: 'client-1', dryRun: false, deps: f.deps })
+    expect(receipt).toMatchObject({ status: 'swept', to_decide: 9, decided: 9, inserted: 9, would_send: 9, deferred: 0 })
+    expect(f.createPorts).toHaveBeenCalledTimes(3)
+    expect(f.loadContactsByIds.mock.calls.map((c) => (c[0] as { contactIds: string[] }).contactIds.length)).toEqual([4, 4, 1])
+    expect(f.insertShadowRows).toHaveBeenCalledTimes(9)
+  })
+})
+
+describe('runShadowSweep order', () => {
+  it('writes the stale rows first, then the decided candidates (no external read is needed for the stale ones)', async () => {
+    const f = makeDeps({
+      contacts: { ok: true, contacts: [contact('a', '2026-11-02T00:00:00Z'), contact('c', '2026-10-30T06:00:00Z')] },
+    })
+    await runShadowSweep({ clientId: 'client-1', dryRun: false, deps: f.deps })
+    expect(f.insertShadowRows.mock.calls.map((c) => (c[0] as ShadowRowInput[])[0].contactId)).toEqual(['c', 'a'])
   })
 })

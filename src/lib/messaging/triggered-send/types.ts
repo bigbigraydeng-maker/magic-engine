@@ -150,3 +150,46 @@ export interface SweepReceipt {
   error: string | null
   created_at: string
 }
+
+// ── The sweep in chunks (one Inngest step per chunk, so no single step runs long) ─────────────────────────
+
+/**
+ * What the first step of a stepped sweep hands to the chunk steps. Plain JSON and NO personal data: only ids,
+ * counters and the day. Every chunk step re-reads what it needs from the database.
+ */
+export interface SweepPlan {
+  clientId: string
+  dryRun: boolean
+  authorizationId: string
+  /** The client-local day of the sweep (YYYY-MM-DD). */
+  sweepDay: string
+  /** Contacts to decide with the external reads. */
+  candidateIds: string[]
+  /** Contacts too old to welcome: frozen as skipped:stale without any external read. */
+  staleIds: string[]
+  to_decide: number
+  ignored: number
+  deferred: number
+  deferred_by_reason: Record<string, number>
+  /** 'swept', or 'mailbox_unreadable' when the candidates were set aside. */
+  status: SweepStatus
+  error: string | null
+  createdAt: string
+}
+
+export type PrepareResult = { kind: 'done'; receipt: SweepReceipt } | { kind: 'plan'; plan: SweepPlan }
+
+/** What one chunk step did. Plain JSON, no personal data. */
+export interface ChunkResult {
+  decided: number
+  deferred: number
+  inserted: number
+  would_send: number
+  skipped_by_reason: Record<string, number>
+  deferred_by_reason: Record<string, number>
+  legacy_batches: LegacyBatchSeen[]
+  /** Set when the chunk could not read or write what it needs; what was not decided is counted as deferred. */
+  error: string | null
+  /** Which kind of failure `error` is (null when there is none). */
+  error_status: 'read_failed' | 'write_failed' | null
+}

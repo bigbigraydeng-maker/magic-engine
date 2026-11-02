@@ -635,3 +635,49 @@ describe('added after the mutation probe', () => {
     })
   })
 })
+
+describe('mailbox pages are read once per ports object', () => {
+  function sentItemsEvaluate() {
+    // Like the real evaluateFrequency: it asks the sent-items source of every contact with the same window.
+    return vi.fn(async (args: { sources: FrequencySources; addresses: readonly string[] }): Promise<FrequencyVerdict> => {
+      const res = await args.sources.sentItems(args.addresses, '2026-10-26T00:00:00.000Z')
+      if (!res.ok) return { ok: false, reason: 'frequency_unverifiable', error: res.error }
+      return { ok: true, count: res.items.length, items: res.items }
+    })
+  }
+  const page = { ok: true as const, json: { value: [] } }
+  const boxes = async () => [{ connectionId: 'conn-1', account: 'sales@example.com' }]
+
+  it('reads the same page once for two contacts', async () => {
+    const graphGetPage = vi.fn(async () => page)
+    const { ports } = createShadowGatePorts(
+      makeDeps({ evaluate: sentItemsEvaluate() as never, listActiveMailboxes: boxes, graphGetPage }),
+    )
+    expect((await ports.evidence(CONTACT)).ok).toBe(true)
+    expect((await ports.evidence({ ...CONTACT, contactId: 'c-2' })).ok).toBe(true)
+    expect(graphGetPage).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not keep a failed read: the next contact tries the page again', async () => {
+    const graphGetPage = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false as const, error: 'graph down' })
+      .mockResolvedValue(page)
+    const { ports } = createShadowGatePorts(
+      makeDeps({ evaluate: sentItemsEvaluate() as never, listActiveMailboxes: boxes, graphGetPage }),
+    )
+    expect(await ports.evidence(CONTACT)).toMatchObject({ ok: false })
+    expect((await ports.evidence({ ...CONTACT, contactId: 'c-2' })).ok).toBe(true)
+    expect(graphGetPage).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not keep a rejected read either', async () => {
+    const graphGetPage = vi.fn().mockRejectedValueOnce(new Error('network')).mockResolvedValue(page)
+    const { ports } = createShadowGatePorts(
+      makeDeps({ evaluate: sentItemsEvaluate() as never, listActiveMailboxes: boxes, graphGetPage }),
+    )
+    expect(await ports.evidence(CONTACT)).toMatchObject({ ok: false })
+    expect((await ports.evidence({ ...CONTACT, contactId: 'c-2' })).ok).toBe(true)
+    expect(graphGetPage).toHaveBeenCalledTimes(2)
+  })
+})

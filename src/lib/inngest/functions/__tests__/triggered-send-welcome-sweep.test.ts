@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { cronRunIdFromInngestRun } from '@/lib/cron/run-logger'
-import type { SweepReceipt, SweepStatus } from '@/lib/messaging/triggered-send/types'
+import type { ChunkResult, PrepareResult, SweepPlan, SweepReceipt, SweepStatus } from '@/lib/messaging/triggered-send/types'
 import {
   TRIGGERED_SEND_DISPATCH_ID,
   TRIGGERED_SEND_DISPATCH_JOB,
@@ -22,7 +22,7 @@ import {
 const CLIENT_A = '11111111-2222-3333-4444-555555555555'
 const CLIENT_B = '66666666-7777-8888-9999-aaaaaaaaaaaa'
 const RUN_ID = 'run_abc123'
-const NOW = new Date('2026-11-02T19:15:00Z') // 08:15 Pacific/Auckland (UTC+13)
+const NOW = new Date('2026-11-02T20:00:00Z') // 09:00 Pacific/Auckland on 2026-11-03 (UTC+13)
 
 interface FakeStep extends StepTools {
   readonly ids: string[]
@@ -90,8 +90,8 @@ describe('triggered-send-welcome-sweep constants', () => {
   it('uses the cloud prefix and the documented cron', () => {
     expect(TRIGGERED_SEND_DISPATCH_ID.startsWith('cloud-')).toBe(true)
     expect(TRIGGERED_SEND_SWEEP_ID.startsWith('cloud-')).toBe(true)
-    expect(TRIGGERED_SEND_SWEEP_CRON).toBe('15 8 * * *')
-    expect(TRIGGERED_SEND_RETRY_CRON).toBe('15 10 * * *')
+    expect(TRIGGERED_SEND_SWEEP_CRON).toBe('0 9 * * *')
+    expect(TRIGGERED_SEND_RETRY_CRON).toBe('0 11 * * *')
   })
 
   it('exports both Inngest functions', () => {
@@ -110,15 +110,15 @@ describe('runDispatch', () => {
     expect(result.events_sent).toBe(2)
     expect(result.clients).toBe(2)
     expect(result.no_send).toBe(true)
-    expect(result.slot).toBe('2026-11-03T08')
+    expect(result.slot).toBe('2026-11-03T09')
     expect(result.job).toBe(TRIGGERED_SEND_DISPATCH_JOB)
 
     expect(step.sent).toHaveLength(1)
     expect(step.sent[0].id).toBe('dispatch-sweeps')
     const events = step.sent[0].events as Array<{ id: string }>
     expect(events.map((e) => e.id)).toEqual([
-      `triggered_send_sweep:${CLIENT_A}:2026-11-03T08`,
-      `triggered_send_sweep:${CLIENT_B}:2026-11-03T08`,
+      `triggered_send_sweep:${CLIENT_A}:2026-11-03T09`,
+      `triggered_send_sweep:${CLIENT_B}:2026-11-03T09`,
     ])
 
     const runLogId = cronRunIdFromInngestRun(RUN_ID)
@@ -164,66 +164,131 @@ describe('runDispatch', () => {
 })
 
 describe('runSweepOrder', () => {
-  function sweepDeps(sweep: SweepRunDeps['sweep']): {
-    deps: SweepRunDeps
-    startRun: ReturnType<typeof vi.fn>
-    finishRun: ReturnType<typeof vi.fn>
-  } {
-    const startRun = vi.fn(async () => undefined)
-    const finishRun = vi.fn(async () => undefined)
+  const PAYLOAD = { client_id: CLIENT_A, trigger_key: 'welcome', dry_run: false }
+
+  function plan(overrides: Partial<SweepPlan> = {}): SweepPlan {
     return {
-      deps: { startRun, finishRun, sweep, now: () => NOW },
-      startRun,
-      finishRun,
+      clientId: CLIENT_A, dryRun: false, authorizationId: 'auth-1', sweepDay: '2026-11-03',
+      candidateIds: [], staleIds: [], to_decide: 0, ignored: 0, deferred: 0, deferred_by_reason: {},
+      status: 'swept', error: null, createdAt: NOW.toISOString(), ...overrides,
     }
+  }
+
+  function chunkResult(overrides: Partial<ChunkResult> = {}): ChunkResult {
+    return {
+      decided: 0, deferred: 0, inserted: 0, would_send: 0, skipped_by_reason: {}, deferred_by_reason: {},
+      legacy_batches: [], error: null, error_status: null, ...overrides,
+    }
+  }
+
+  function sweepDeps(prepared: PrepareResult, overrides: Partial<SweepRunDeps> = {}) {
+    const startRun: ReturnType<typeof vi.fn> = vi.fn(async () => undefined)
+    const finishRun: ReturnType<typeof vi.fn> = vi.fn(async () => undefined)
+    const prepare = vi.fn(async (): Promise<PrepareResult> => prepared)
+    const decideChunk = vi.fn(
+      async (_args: { plan: SweepPlan; kind: 'candidates' | 'stale'; contactIds: string[] }): Promise<ChunkResult> =>
+        chunkResult({ decided: 1 }),
+    )
+    const finalize = vi.fn((_plan: SweepPlan, results: ChunkResult[]): SweepReceipt =>
+      receipt({ decided: results.reduce((n, r) => n + r.decided, 0) }),
+    )
+    const deps: SweepRunDeps = { startRun, finishRun, prepare, decideChunk, finalize, now: () => NOW, ...overrides }
+    return { deps, startRun, finishRun, prepare, decideChunk, finalize }
   }
 
   it('returns invalid_payload without any step or log', async () => {
     const step = fakeStep()
-    const sweep = vi.fn(async () => receipt())
-    const { deps, startRun, finishRun } = sweepDeps(sweep)
+    const { deps, startRun, finishRun, prepare } = sweepDeps({ kind: 'done', receipt: receipt() })
     const result = await runSweepOrder(step, deps, { client_id: 'nope' }, RUN_ID)
 
     expect(result).toEqual({ status: 'invalid_payload', reason: expect.any(String) })
     expect(step.ids).toHaveLength(0)
     expect(startRun).not.toHaveBeenCalled()
     expect(finishRun).not.toHaveBeenCalled()
-    expect(sweep).not.toHaveBeenCalled()
+    expect(prepare).not.toHaveBeenCalled()
   })
 
   it('defaults a manual payload without dry_run to dryRun true', async () => {
-    const step = fakeStep()
-    const sweep = vi.fn(async () => receipt())
-    const { deps } = sweepDeps(sweep)
-    await runSweepOrder(step, deps, { client_id: CLIENT_A, trigger_key: 'welcome' }, RUN_ID)
-    expect(sweep).toHaveBeenCalledWith({ clientId: CLIENT_A, dryRun: true })
+    const { deps, prepare } = sweepDeps({ kind: 'done', receipt: receipt() })
+    await runSweepOrder(fakeStep(), deps, { client_id: CLIENT_A, trigger_key: 'welcome' }, RUN_ID)
+    expect(prepare).toHaveBeenCalledWith({ clientId: CLIENT_A, dryRun: true })
   })
 
   it('honours an explicit dry_run false', async () => {
-    const step = fakeStep()
-    const sweep = vi.fn(async () => receipt())
-    const { deps } = sweepDeps(sweep)
-    await runSweepOrder(step, deps, { client_id: CLIENT_A, trigger_key: 'welcome', dry_run: false }, RUN_ID)
-    expect(sweep).toHaveBeenCalledWith({ clientId: CLIENT_A, dryRun: false })
+    const { deps, prepare } = sweepDeps({ kind: 'done', receipt: receipt() })
+    await runSweepOrder(fakeStep(), deps, PAYLOAD, RUN_ID)
+    expect(prepare).toHaveBeenCalledWith({ clientId: CLIENT_A, dryRun: false })
   })
 
-  it('returns the receipt and finishes the run log with sweepFinishOpts', async () => {
+  it('finishes straight away when the preparation already has a receipt (nothing to decide)', async () => {
     const step = fakeStep()
-    const r = receipt()
-    const sweep = vi.fn(async () => r)
-    const { deps, startRun, finishRun } = sweepDeps(sweep)
-    const result = await runSweepOrder(step, deps, { client_id: CLIENT_A, trigger_key: 'welcome', dry_run: false }, RUN_ID)
+    const r = receipt({ status: 'no_open_proposal' })
+    const { deps, startRun, finishRun, decideChunk, finalize } = sweepDeps({ kind: 'done', receipt: r })
+    const result = await runSweepOrder(step, deps, PAYLOAD, RUN_ID)
 
-    expect(result).
-
-
-toBe(r)
+    expect(result).toBe(r)
+    expect(step.ids).toEqual(['log-start', 'prepare', 'log-finish'])
+    expect(decideChunk).not.toHaveBeenCalled()
+    expect(finalize).not.toHaveBeenCalled()
     const runLogId = cronRunIdFromInngestRun(RUN_ID)
     expect(startRun).toHaveBeenCalledWith(runLogId)
-    expect(finishRun).toHaveBeenCalledTimes(1)
     const [finishId, , opts] = finishRun.mock.calls[0] as [string, number, Record<string, unknown>]
     expect(finishId).toBe(runLogId)
     expect(opts).toEqual(sweepFinishOpts(r))
+  })
+
+  it('runs one step per chunk of 4 contacts, stale ones first, with deterministic step ids', async () => {
+    const step = fakeStep()
+    const p = plan({
+      staleIds: ['s1', 's2'],
+      candidateIds: ['c1', 'c2', 'c3', 'c4', 'c5', 'c6'],
+      to_decide: 8,
+    })
+    const { deps, decideChunk, finalize, finishRun } = sweepDeps({ kind: 'plan', plan: p })
+    const result = await runSweepOrder(step, deps, PAYLOAD, RUN_ID)
+
+    expect(step.ids).toEqual(['log-start', 'prepare', 'decide-stale-0', 'decide-candidates-1', 'decide-candidates-2', 'log-finish'])
+    expect(decideChunk.mock.calls.map((c) => c[0])).toEqual([
+      { plan: p, kind: 'stale', contactIds: ['s1', 's2'] },
+      { plan: p, kind: 'candidates', contactIds: ['c1', 'c2', 'c3', 'c4'] },
+      { plan: p, kind: 'candidates', contactIds: ['c5', 'c6'] },
+    ])
+    expect(finalize).toHaveBeenCalledTimes(1)
+    const [finalPlan, results] = finalize.mock.calls[0] as [SweepPlan, ChunkResult[]]
+    expect(finalPlan).toBe(p)
+    expect(results).toHaveLength(3)
+    expect(result).toMatchObject({ status: 'swept', decided: 3 })
+    const [, , opts] = finishRun.mock.calls[0] as [string, number, Record<string, unknown>]
+    expect(opts).toEqual(sweepFinishOpts(result as SweepReceipt))
+  })
+
+  it('runs the chunks one after the other, never in parallel', async () => {
+    const events: string[] = []
+    const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+    let n = 0
+    const p = plan({ candidateIds: ['c1', 'c2', 'c3', 'c4', 'c5'], to_decide: 5 })
+    const { deps } = sweepDeps({ kind: 'plan', plan: p }, {
+      decideChunk: async () => {
+        const mine = (n += 1)
+        events.push(`start:${mine}`)
+        await delay(10)
+        events.push(`end:${mine}`)
+        return chunkResult()
+      },
+    })
+    await runSweepOrder(fakeStep(), deps, PAYLOAD, RUN_ID)
+    expect(events).toEqual(['start:1', 'end:1', 'start:2', 'end:2'])
+  })
+
+  it('lets a failing chunk fail the run (Inngest retries that step) and leaves the run log to onFailure', async () => {
+    const p = plan({ candidateIds: ['c1'], to_decide: 1 })
+    const { deps, finishRun } = sweepDeps({ kind: 'plan', plan: p }, {
+      decideChunk: async () => {
+        throw new Error('chunk exploded')
+      },
+    })
+    await expect(runSweepOrder(fakeStep(), deps, PAYLOAD, RUN_ID)).rejects.toThrow('chunk exploded')
+    expect(finishRun).not.toHaveBeenCalled()
   })
 })
 

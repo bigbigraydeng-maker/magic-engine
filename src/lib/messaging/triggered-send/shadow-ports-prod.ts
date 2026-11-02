@@ -209,11 +209,33 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
       baseMailchimp.getCampaignRecipientStatus(apiKey, campaignId, email),
   }
 
+  // The mailbox sent-items pages are the same for every contact of this ports object (same window, same mailbox):
+  // read each page once. A failed read is not kept, so the next contact tries again.
+  type GraphPage = Awaited<ReturnType<FrequencySourceDeps['graphGetPage']>>
+  const pageCache = new Map<string, Promise<GraphPage>>()
+  const graphGetPage: FrequencySourceDeps['graphGetPage'] = (connectionId, pathOrUrl) => {
+    const key = `${connectionId}|${pathOrUrl}`
+    const cached = pageCache.get(key)
+    if (cached !== undefined) return cached
+    const promise = deps.graphGetPage(connectionId, pathOrUrl).then(
+      (page) => {
+        if (!page.ok) pageCache.delete(key)
+        return page
+      },
+      (err: unknown) => {
+        pageCache.delete(key)
+        throw err
+      },
+    )
+    pageCache.set(key, promise)
+    return promise
+  }
+
   const sources = createFrequencySources({
     db: deps.db,
     clientId: deps.clientId,
     listActiveMailboxes: deps.listActiveMailboxes,
-    graphGetPage: deps.graphGetPage,
+    graphGetPage,
     mailchimp: wrappedMailchimp,
   })
 

@@ -31,6 +31,62 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return out
 }
 
+type ContactRow = { id: string; created_at: string; primary_email: unknown }
+
+/** Every e-mail identity of the given contacts (normalised), by contact id. */
+async function loadEmailIdentities(
+  db: SupabaseClient,
+  clientId: string,
+  contactIds: readonly string[],
+): Promise<{ ok: true; byContact: Map<string, string[]> } | { ok: false; error: string }> {
+  const byContact = new Map<string, string[]>()
+  for (const ids of chunk(contactIds, CHUNK_SIZE)) {
+    const res = await db
+      .from('contact_identities')
+      .select('contact_id, value')
+      .eq('client_id', clientId)
+      .eq('kind', 'email')
+      .in('contact_id', ids)
+    if (res.error) return { ok: false, error: errorMessage(res.error) }
+    const rows = (res.data ?? []) as Array<{ contact_id: string; value: unknown }>
+    for (const row of rows) {
+      const email = normaliseEmail(row.value)
+      if (email === null) continue
+      const list = byContact.get(row.contact_id)
+      if (list) list.push(email)
+      else byContact.set(row.contact_id, [email])
+    }
+  }
+  return { ok: true, byContact }
+}
+
+/** Contact rows + identities -> ShadowContact: primary e-mail first, unique addresses, oldest contact first. */
+function assembleContacts(rows: readonly ContactRow[], identitiesByContact: Map<string, string[]>): ShadowContact[] {
+  const contacts: ShadowContact[] = rows.map((row) => {
+    const primaryEmail = normaliseEmail(row.primary_email)
+    const addresses: string[] = []
+    const seen = new Set<string>()
+    if (primaryEmail !== null) {
+      addresses.push(primaryEmail)
+      seen.add(primaryEmail)
+    }
+    for (const email of identitiesByContact.get(row.id) ?? []) {
+      if (seen.has(email)) continue
+      seen.add(email)
+      addresses.push(email)
+    }
+    return { contactId: row.id, createdAt: row.created_at, primaryEmail, addresses }
+  })
+  contacts.sort((a, b) => {
+    if (a.createdAt < b.createdAt) return -1
+    if (a.createdAt > b.createdAt) return 1
+    if (a.contactId < b.contactId) return -1
+    if (a.contactId > b.contactId) return 1
+    return 0
+  })
+  return contacts
+}
+
 export async function listClientsWithOpenAuthorization(
   db: SupabaseClient,
 ): Promise<{ ok: true; clientIds: string[] } | { ok: false; error: string }> {
@@ -124,49 +180,36 @@ export async function loadLeadContacts(
     if (kept.length === 0) return { ok: true, contacts: [] }
 
     // Step 3: collect every e-mail identity of the kept contacts.
-    const identitiesByContact = new Map<string, string[]>()
-    for (const ids of chunk(kept.map((r) => r.id), CHUNK_SIZE)) {
+    const identities = await loadEmailIdentities(db, clientId, kept.map((r) => r.id))
+    if (!identities.ok) return identities
+    return { ok: true, contacts: assembleContacts(kept, identities.byContact) }
+  } catch (err) {
+    return { ok: false, error: errorMessage(err) }
+  }
+}
+
+/** Specific contacts again (used inside a chunk step, so no e-mail address travels between steps). */
+export async function loadContactsByIds(
+  db: SupabaseClient,
+  args: { clientId: string; contactIds: readonly string[] },
+): Promise<ContactsRead> {
+  const { clientId, contactIds } = args
+  if (contactIds.length === 0) return { ok: true, contacts: [] }
+  try {
+    const rows: ContactRow[] = []
+    for (const ids of chunk(contactIds, CHUNK_SIZE)) {
       const res = await db
-        .from('contact_identities')
-        .select('contact_id, value')
+        .from('contacts')
+        .select('id, created_at, primary_email')
         .eq('client_id', clientId)
-        .eq('kind', 'email')
-        .in('contact_id', ids)
+        .in('id', ids)
       if (res.error) return { ok: false, error: errorMessage(res.error) }
-      const rows = (res.data ?? []) as Array<{ contact_id: string; value: unknown }>
-      for (const row of rows) {
-        const email = normaliseEmail(row.value)
-        if (email === null) continue
-        const list = identitiesByContact.get(row.contact_id)
-        if (list) list.push(email)
-        else identitiesByContact.set(row.contact_id, [email])
-      }
+      rows.push(...((res.data ?? []) as ContactRow[]))
     }
-
-    const contacts: ShadowContact[] = kept.map((row) => {
-      const primaryEmail = normaliseEmail(row.primary_email)
-      const addresses: string[] = []
-      const seen = new Set<string>()
-      if (primaryEmail !== null) {
-        addresses.push(primaryEmail)
-        seen.add(primaryEmail)
-      }
-      for (const email of identitiesByContact.get(row.id) ?? []) {
-        if (seen.has(email)) continue
-        seen.add(email)
-        addresses.push(email)
-      }
-      return { contactId: row.id, createdAt: row.created_at, primaryEmail, addresses }
-    })
-
-    contacts.sort((a, b) => {
-      if (a.createdAt < b.createdAt) return -1
-      if (a.createdAt > b.createdAt) return 1
-      if (a.contactId < b.contactId) return -1
-      if (a.contactId > b.contactId) return 1
-      return 0
-    })
-    return { ok: true, contacts }
+    if (rows.length === 0) return { ok: true, contacts: [] }
+    const identities = await loadEmailIdentities(db, clientId, rows.map((r) => r.id))
+    if (!identities.ok) return identities
+    return { ok: true, contacts: assembleContacts(rows, identities.byContact) }
   } catch (err) {
     return { ok: false, error: errorMessage(err) }
   }

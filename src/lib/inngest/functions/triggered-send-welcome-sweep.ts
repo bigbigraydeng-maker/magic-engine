@@ -2,12 +2,20 @@
  * Magic Engine 2.0 · Inngest cloud consumers of the triggered-send SHADOW run (rehearsal).
  *
  * Two functions, one dispatches and one works:
- *   · `cloud-triggered-send-welcome-dispatch` — runs at 08:15 and again at 10:15 Pacific/Auckland (two cron triggers),
+ *   · `cloud-triggered-send-welcome-dispatch` — runs at 09:00 and again at 11:00 Pacific/Auckland (two cron triggers),
  *     lists the clients with an open welcome-email proposal, sends one
  *     `crm.triggered_send.sweep_requested` per client, and ends. It calls no provider itself.
- *   · `cloud-triggered-send-welcome-sweep` — takes one client and runs `runShadowSweep`.
+ *   · `cloud-triggered-send-welcome-sweep` — takes one client and sweeps it in steps: one `prepare` step, then one
+ *     step per chunk of at most CHUNK_SIZE contacts, then the run log.
  *
  * 🔴 **Nothing is ever sent**: the sweep only writes shadow rows (`no_send: true`).
+ *
+ * 🔴 **Why steps of a few contacts**: Render cuts a request after roughly two minutes; one step that loops over every
+ *    new lead (10–30 a day) would be killed. Each chunk step writes its rows the moment they are decided and no
+ *    personal data travels between steps (only contact ids and counters).
+ *
+ * 🔴 **Why 09:00, not 08:01**: the old daily batch goes out at 08:01 and Mailchimp's per-recipient report of it needs
+ *    a little while to settle; reading it too early would freeze "not welcomed" for people who were.
  *
  * 🔴 **Two runs a day on purpose**: the second run retries what failed to read in the first.
  *    De-duplication is by the shadow rows themselves, not by event ids.
@@ -37,12 +45,19 @@ import {
   listClientsWithOpenAuthorization,
   loadOpenAuthorization,
   loadLeadContacts,
+  loadContactsByIds,
   checkRequiredMailboxes,
 } from '@/lib/messaging/triggered-send/shadow-reads-prod'
 import { findContactsWithShadowRows, insertShadowRows } from '@/lib/messaging/triggered-send/shadow-store'
 import { createShadowGatePorts } from '@/lib/messaging/triggered-send/shadow-ports-prod'
-import { runShadowSweep, type SweepDeps } from '@/lib/messaging/triggered-send/shadow-sweep'
-import type { SweepReceipt } from '@/lib/messaging/triggered-send/types'
+import {
+  chunkIds,
+  decideChunk,
+  finalizeSweep,
+  prepareSweep,
+  type SweepDeps,
+} from '@/lib/messaging/triggered-send/shadow-sweep'
+import type { ChunkResult, PrepareResult, SweepPlan, SweepReceipt } from '@/lib/messaging/triggered-send/types'
 import {
   CRM_TRIGGERED_SEND_SWEEP_REQUESTED,
   buildSweepEvent,
@@ -55,10 +70,10 @@ export const TRIGGERED_SEND_DISPATCH_JOB = 'triggered-send-welcome-dispatch'
 export const TRIGGERED_SEND_SWEEP_JOB = 'triggered-send-welcome-sweep'
 export const TRIGGERED_SEND_DISPATCH_ID = `${CLOUD_FN_PREFIX}triggered-send-welcome-dispatch`
 export const TRIGGERED_SEND_SWEEP_ID = `${CLOUD_FN_PREFIX}triggered-send-welcome-sweep`
-/** The morning run, 08:15 local time. This is the schedule the cron registry watches. */
-export const TRIGGERED_SEND_SWEEP_CRON = '15 8 * * *'
-/** The second run, 10:15 local time: retries what failed to read in the morning run. */
-export const TRIGGERED_SEND_RETRY_CRON = '15 10 * * *'
+/** The morning run, 09:00 local time. This is the schedule the cron registry watches. */
+export const TRIGGERED_SEND_SWEEP_CRON = '0 9 * * *'
+/** The second run, 11:00 local time: retries what failed to read in the morning run. */
+export const TRIGGERED_SEND_RETRY_CRON = '0 11 * * *'
 /** One run time for all clients in this first version (documented limitation). */
 export const TRIGGERED_SEND_SWEEP_TZ = 'Pacific/Auckland'
 
@@ -176,13 +191,18 @@ export async function runDispatch(step: StepTools, deps: DispatchDeps, runId: st
 export interface SweepRunDeps {
   startRun(runLogId: string): Promise<void>
   finishRun(runLogId: string, startedAtMs: number, opts: CronRunFinishOpts): Promise<void>
-  sweep(args: { clientId: string; dryRun: boolean }): Promise<SweepReceipt>
+  prepare(args: { clientId: string; dryRun: boolean }): Promise<PrepareResult>
+  decideChunk(args: { plan: SweepPlan; kind: 'candidates' | 'stale'; contactIds: string[] }): Promise<ChunkResult>
+  finalize(plan: SweepPlan, results: ChunkResult[]): SweepReceipt
   now(): Date
 }
 
 export type SweepOrderResult = SweepReceipt | { status: 'invalid_payload'; reason: string }
 
-/** Run one sweep order: parse, sweep, write one run log (its id derived from the Inngest run id). */
+/**
+ * Run one sweep order as steps: parse, prepare, one step per chunk of contacts (stale ones first), one run log.
+ * Step ids are deterministic (`decide-<kind>-<n>`) so a replay finds the finished chunks.
+ */
 export async function runSweepOrder(
   step: Pick<StepTools, 'run'>,
   deps: SweepRunDeps,
@@ -198,9 +218,28 @@ export async function runSweepOrder(
     return { runLogId, startedAtMs: deps.now().getTime() }
   })
 
-  const receipt = await step.run('sweep', async () =>
-    deps.sweep({ clientId: parsed.clientId, dryRun: parsed.dryRun }),
-  )
+  const prepared = await step.run('prepare', async () => deps.prepare({ clientId: parsed.clientId, dryRun: parsed.dryRun }))
+
+  let receipt: SweepReceipt
+  if (prepared.kind === 'done') {
+    receipt = prepared.receipt
+  } else {
+    const plan = prepared.plan
+    const jobs = [
+      ...chunkIds(plan.staleIds).map((contactIds) => ({ kind: 'stale' as const, contactIds })),
+      ...chunkIds(plan.candidateIds).map((contactIds) => ({ kind: 'candidates' as const, contactIds })),
+    ]
+    const results: ChunkResult[] = []
+    for (let index = 0; index < jobs.length; index += 1) {
+      const job = jobs[index]
+      results.push(
+        await step.run(`decide-${job.kind}-${index}`, async () =>
+          deps.decideChunk({ plan, kind: job.kind, contactIds: job.contactIds }),
+        ),
+      )
+    }
+    receipt = deps.finalize(plan, results)
+  }
 
   await step.run('log-finish', async () => {
     await deps.finishRun(started.runLogId, started.startedAtMs, sweepFinishOpts(receipt))
@@ -250,6 +289,7 @@ export function createProdSweepDeps(): SweepDeps {
     now: () => new Date(),
     loadAuthorization: (clientId) => loadOpenAuthorization(supabaseAdmin, clientId),
     loadContacts: (a) => loadLeadContacts(supabaseAdmin, a),
+    loadContactsByIds: (a) => loadContactsByIds(supabaseAdmin, a),
     findContactsWithShadowRows: (clientId, ids) => findContactsWithShadowRows(supabaseAdmin, clientId, ids),
     checkMailboxes: (clientId, required) => checkRequiredMailboxes(store.listActiveMailboxes, clientId, required),
     createPorts: ({ clientId, rule, now }) =>
@@ -305,7 +345,7 @@ export const triggeredSendWelcomeDispatch = inngest.createFunction(
     ),
 )
 
-/** The sweep worker: one order per client at a time, at most 2 orders in flight overall. */
+/** The sweep worker: one order per client at a time, at most 2 orders in flight overall; each order runs in steps. */
 export const triggeredSendWelcomeSweep = inngest.createFunction(
   {
     id: TRIGGERED_SEND_SWEEP_ID,
@@ -332,7 +372,9 @@ export const triggeredSendWelcomeSweep = inngest.createFunction(
       {
         startRun: (id) => startCronRunWithId(TRIGGERED_SEND_SWEEP_JOB, id),
         finishRun: (id, startedAtMs, opts) => cronRunHandle(TRIGGERED_SEND_SWEEP_JOB, id, startedAtMs).finish(opts),
-        sweep: ({ clientId, dryRun }) => runShadowSweep({ clientId, dryRun, deps: createProdSweepDeps() }),
+        prepare: ({ clientId, dryRun }) => prepareSweep({ clientId, dryRun, deps: createProdSweepDeps() }),
+        decideChunk: ({ plan, kind, contactIds }) => decideChunk({ plan, kind, contactIds, deps: createProdSweepDeps() }),
+        finalize: finalizeSweep,
         now: () => new Date(),
       },
       event.data,
