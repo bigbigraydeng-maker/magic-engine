@@ -88,7 +88,7 @@ function useBudgetHold(clientId: string | undefined, enabled: boolean): boolean 
   return hold
 }
 
-function FindingCard({ f, kind, clientId, cycleDate, budgetHold }: { f: GrowthFinding; kind: 'problem' | 'opportunity'; clientId?: string; cycleDate?: string; budgetHold?: boolean }) {
+function FindingCard({ f, kind, clientId, cycleDate, budgetHold, onPendingAdsChanged }: { f: GrowthFinding; kind: 'problem' | 'opportunity'; clientId?: string; cycleDate?: string; budgetHold?: boolean; onPendingAdsChanged?: () => void }) {
   const isHit = f.status === 'hit'
   const tint = !isHit ? 'border-gray-200 bg-gray-50'
     : kind === 'problem' ? 'border-amber-200 bg-amber-50' : 'border-sky-200 bg-sky-50'
@@ -111,14 +111,33 @@ function FindingCard({ f, kind, clientId, cycleDate, budgetHold }: { f: GrowthFi
         <p className="mt-1 text-xs text-amber-800">{BUDGET_HOLD_NOTE}</p>
       )}
       {kind === 'opportunity' && f.code === 'O1' && clientId && f.units?.map(unit => (
-        <O1Approval key={unit.id} clientId={clientId} adsetId={unit.id} cycleDate={cycleDate} o1Evidence={f.evidence ?? {}} />
+        <O1Approval
+          key={unit.id}
+          clientId={clientId}
+          adsetId={unit.id}
+          cycleDate={cycleDate}
+          o1Evidence={f.evidence ?? {}}
+          onPendingAdsChanged={onPendingAdsChanged}
+        />
       ))}
     </div>
   )
 }
 
 interface O1Run { id: string; status: string; input: Record<string, unknown>; evidence: Record<string, unknown>; authorization_decision_id: string | null }
-function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: string; adsetId: string; cycleDate?: string; o1Evidence: Record<string, unknown> }) {
+function O1Approval({
+  clientId,
+  adsetId,
+  cycleDate,
+  o1Evidence,
+  onPendingAdsChanged,
+}: {
+  clientId: string
+  adsetId: string
+  cycleDate?: string
+  o1Evidence: Record<string, unknown>
+  onPendingAdsChanged?: () => void
+}) {
   const [runs, setRuns] = useState<O1Run[]>([])
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -149,6 +168,7 @@ function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: st
       const json = await response.json() as { error?: string }
       setMessage(response.ok ? (resolution === 'approve' ? '已批准，正在排队执行；完成后会记录 Meta 回读结果。' : '已驳回。') : json.error ?? '处理失败。')
       await refresh()
+      if (response.ok) onPendingAdsChanged?.()
     } catch { setMessage('网络暂时不可用，请稍后重试。') }
     finally { setBusy(false) }
   }
@@ -227,7 +247,15 @@ function ClientGrowthPanel({ view }: { view: ClientGrowthView }) {
 /**
  * @param state  null = 今天还没巡察过；undefined = 这一段读不到（接口出错）
  */
-export default function GrowthPanel({ state, clientId }: { state: GrowthStateView | ClientGrowthView | null | undefined; clientId?: string }) {
+export default function GrowthPanel({
+  state,
+  clientId,
+  onPendingAdsChanged,
+}: {
+  state: GrowthStateView | ClientGrowthView | null | undefined
+  clientId?: string
+  onPendingAdsChanged?: () => void
+}) {
   const clientView = state != null && isClientView(state)
   const budgetHold = useBudgetHold(clientId, state != null && !clientView)
   if (state === undefined) {
@@ -283,7 +311,17 @@ export default function GrowthPanel({ state, clientId }: { state: GrowthStateVie
             ? <p className="text-xs text-gray-400">数据不全，这天没判。</p>
             : opportunities.length === 0
               ? <p className="text-xs text-gray-400">今天没发现明显还有空间的地方。</p>
-            : <div className="space-y-2">{opportunities.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="opportunity" clientId={clientId} cycleDate={state.date} budgetHold={budgetHold} />)}</div>}
+            : <div className="space-y-2">{opportunities.map((f, i) => (
+              <FindingCard
+                key={`${f.code}-${i}`}
+                f={f}
+                kind="opportunity"
+                clientId={clientId}
+                cycleDate={state.date}
+                budgetHold={budgetHold}
+                onPendingAdsChanged={onPendingAdsChanged}
+              />
+            ))}</div>}
         </section>
       </div>
 

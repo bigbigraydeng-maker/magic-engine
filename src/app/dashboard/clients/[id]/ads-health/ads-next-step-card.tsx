@@ -45,7 +45,13 @@ function rowText<T>(
   return renderOk(row.data)
 }
 
-export default function AdsNextStepCard({ clientId }: { readonly clientId: string }) {
+export default function AdsNextStepCard({
+  clientId,
+  refreshKey = 0,
+}: {
+  readonly clientId: string
+  readonly refreshKey?: number
+}) {
   const [loadStatus, setLoadStatus] = useState<LoadStatus>('loading')
   const [view, setView] = useState<AdsNextStepView | null>(null)
 
@@ -73,7 +79,7 @@ export default function AdsNextStepCard({ clientId }: { readonly clientId: strin
         if (alive) setLoadStatus('failed')
       })
     return () => { alive = false }
-  }, [clientId])
+  }, [clientId, refreshKey])
 
   return (
     <section

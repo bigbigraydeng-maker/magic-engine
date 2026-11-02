@@ -10,7 +10,7 @@
  * the daily cron; this page only reads ad_health_narratives.
  */
 
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 // Pure data module (no server imports) — safe in a client component.
@@ -550,6 +550,11 @@ export default function AdsHealthPage() {
     setTab(tabFromQuery(searchParams.get('tab')))
   }, [searchParams])
 
+  const [nextStepRefreshKey, setNextStepRefreshKey] = useState(0)
+  const bumpNextStepCard = useCallback(() => {
+    setNextStepRefreshKey((k) => k + 1)
+  }, [])
+
   useEffect(() => {
     let alive = true
     setLoading(true)
@@ -584,7 +589,7 @@ export default function AdsHealthPage() {
         <p className="text-sm text-gray-400">每天自动体检 · 先看「今天看这里」，其余按需要点开</p>
       </div>
 
-      <AdsNextStepCard clientId={clientId} />
+      <AdsNextStepCard clientId={clientId} refreshKey={nextStepRefreshKey} />
 
       <TabBar tab={tab} onChange={setTab} />
 
@@ -689,13 +694,19 @@ export default function AdsHealthPage() {
             通用审批页对这类动作只签字、不执行（那边是批不了的），要批就在这里。
           </p>
           {/* 从旧的专属页整段搬来；两个接口的网址、方法、请求体一个字没动。 */}
-          <AutoPausePanel clientId={clientId} />
+          <AutoPausePanel clientId={clientId} onPendingAdsChanged={bumpNextStepCard} />
         </div>
       )}
 
       {tab === 'settings' && (
         <div className="space-y-6">
-          {!loading && !error && <GrowthPanel state={data ? data.growth : undefined} clientId={clientId} />}
+          {!loading && !error && (
+            <GrowthPanel
+              state={data ? data.growth : undefined}
+              clientId={clientId}
+              onPendingAdsChanged={bumpNextStepCard}
+            />
+          )}
           <AutonomySettings clientId={clientId} />
         </div>
       )}

@@ -57,8 +57,7 @@ async function loadHealthRedLights(
     const run = payload?.portfolio_diagnoses
     if (!run || !Array.isArray(run.diagnoses)) return { kind: 'empty' }
 
-    let hits = sortHits(run.diagnoses)
-    hits = hits.filter((d) => d.clientVisible === true)
+    const hits = sortHits(run.diagnoses)
     const titles = hits.slice(0, 3).map((d) => d.title.trim()).filter((t) => t.length > 0)
     if (titles.length === 0) return { kind: 'empty' }
     return { kind: 'ok', data: { items: titles } }

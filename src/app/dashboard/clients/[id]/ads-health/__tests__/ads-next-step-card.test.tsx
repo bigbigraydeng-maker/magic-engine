@@ -58,4 +58,16 @@ describe('AdsNextStepCard', () => {
     render(<AdsNextStepCard clientId="client-1" />)
     await waitFor(() => expect(screen.getAllByText('没读到').length).toBe(3))
   })
+
+  it('refreshKey 变化时重新拉取汇总', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ view: okView }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { rerender } = render(<AdsNextStepCard clientId="client-1" refreshKey={0} />)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    rerender(<AdsNextStepCard clientId="client-1" refreshKey={1} />)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+  })
 })

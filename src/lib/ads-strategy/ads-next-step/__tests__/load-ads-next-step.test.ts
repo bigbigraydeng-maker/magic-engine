@@ -257,7 +257,7 @@ describe('loadAdsNextStepView', () => {
     expect(view.healthRedLights).toEqual({ kind: 'staff_only' })
   })
 
-  it('staffView=true 时 clientVisible 缺省或为 false 的命中不出现在红灯列表', async () => {
+  it('staffView=true 时员工可见仅内部诊断（clientVisible:false 仍列出）', async () => {
     const sb = createFakeSupabase({
       ad_health_narratives: [{
         client_id: CLIENT,
@@ -266,19 +266,9 @@ describe('loadAdsNextStepView', () => {
           portfolio_diagnoses: {
             diagnoses: [
               {
-                code: 'D3',
-                status: 'hit',
-                title: '客户可见',
-                units: [],
-                evidence: {},
-                sample: [],
-                reasons: [],
-                clientVisible: true,
-              },
-              {
                 code: 'D11',
                 status: 'hit',
-                title: '仅内部 D11',
+                title: '人群池异常',
                 units: [],
                 evidence: {},
                 sample: [],
@@ -288,11 +278,12 @@ describe('loadAdsNextStepView', () => {
               {
                 code: 'D7',
                 status: 'hit',
-                title: '缺 clientVisible 字段',
+                title: '读不到这个广告账户',
                 units: [],
                 evidence: {},
                 sample: [],
                 reasons: [],
+                clientVisible: false,
               },
             ],
           },
@@ -306,7 +297,7 @@ describe('loadAdsNextStepView', () => {
     const view = await loadAdsNextStepView(sb, CLIENT, { staffView: true })
     expect(view.healthRedLights).toEqual({
       kind: 'ok',
-      data: { items: ['客户可见'] },
+      data: { items: ['人群池异常', '读不到这个广告账户'] },
     })
   })
 

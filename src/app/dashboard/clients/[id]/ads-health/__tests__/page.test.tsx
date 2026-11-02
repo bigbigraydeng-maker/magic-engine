@@ -485,6 +485,68 @@ describe('「等你点头」标签', () => {
     expect(body).toEqual({ resolution: 'reject', expectedDecisionId: 'dec-1', reason: '这个组我要留着' })
   })
 
+  it('批准暂停后顶部「广告下一步」待批行会重新拉取', async () => {
+    let nextStepLoads = 0
+    let autoPauseItems = 1
+    const fn = vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('/ad-health/next-step')) {
+        nextStepLoads += 1
+        const pending = nextStepLoads === 1
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            view: {
+              healthRedLights: { kind: 'empty' },
+              pendingActions: pending
+                ? {
+                  kind: 'ok',
+                  data: {
+                    count: 1,
+                    items: [{ summary: '待批暂停', href: '/dashboard/clients/x/ads-health?tab=approvals' }],
+                  },
+                }
+                : { kind: 'empty' },
+              prescription: { kind: 'empty' },
+            },
+          }),
+        })
+      }
+      if (url.includes('/ad-health/auto-pause/') && init?.method === 'POST') {
+        autoPauseItems = 0
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, kind: 'done' }) })
+      }
+      if (url.includes('/ad-health/auto-pause')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            items: autoPauseItems > 0
+              ? [{
+                runId: 'run-1',
+                expectedDecisionId: 'dec-1',
+                adsetId: '123',
+                adsetName: '物流组',
+                adAccountId: 'act_1',
+                diagnosisTitle: '花钱没结果',
+                insightDate: '2026-10-17',
+                createdAt: '2026-10-17T00:00:00Z',
+              }]
+              : [],
+            hasMore: false,
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(respond([])) })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getByText('待批暂停')).toBeTruthy())
+    await userEvent.click(await screen.findByText('等你点头'))
+    await waitFor(() => expect(screen.getByText('物流组', { exact: false })).toBeTruthy())
+    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+    await waitFor(() => expect(nextStepLoads).toBeGreaterThanOrEqual(2))
+    await waitFor(() => expect(screen.getByText('目前没有等人批的广告动作')).toBeTruthy())
+  })
+
 
   it('网址带 ?tab=approvals 时直接落在这个标签上', async () => {
     searchParamsValue = new URLSearchParams('tab=approvals')
