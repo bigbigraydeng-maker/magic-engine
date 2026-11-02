@@ -13,7 +13,7 @@ import type { FactProvider, PickInput, PublishedTourFact, RenderFacts } from './
 import { evaluateContentGates } from './gates/content-gates'
 import { evaluateFollowUp } from './gates/follow-up'
 import { evaluateFrequency } from './gates/frequency'
-import type { FrequencySources, GateViolation } from './gates/types'
+import type { ExemptIdLoader, FrequencySources, GateViolation } from './gates/types'
 import { renderTemplate } from './render'
 import { checkTemplateSendable } from './template-store'
 import { DEFAULT_TIME_ZONE, isValidTimeZone } from './time-zone'
@@ -167,6 +167,8 @@ export interface SendGateData {
   loadContactView(clientId: string, contactId: string, callWindowHours: number, now: Date): Promise<ContactView | null>
   loadSenderName(clientId: string, email: string): Promise<string | null>
   sentTemplateReceiptsSince(clientId: string, contactId: string, sinceIso: string): Promise<StoredReceipt[]>
+  /** Provider message ids of the mails these templates sent to this guest since `sinceIso`; throws when it cannot list them all. */
+  exemptMessageIdsSince(clientId: string, contactId: string, templateKeys: readonly string[], sinceIso: string): Promise<string[]>
   frequencySources: FrequencySources
   /** The client's own time zone ("today" differs between Sydney and Auckland). Absent = the default zone. */
   loadTimeZone?(clientId: string): Promise<string>
@@ -330,7 +332,11 @@ async function attachRenderHash(
   // A render with gaps cannot be compared with what was sent: leave the edit flag unknown.
   if (rendered.missing.length > 0 || rendered.problems.length > 0) return
   meta.renderedSha256 = sha256(`${rendered.subject}\n${rendered.body}`)
-  meta.editedAfterRender = meta.renderedSha256 !== meta.finalSha256
+  const changed = meta.renderedSha256 !== meta.finalSha256
+  // Values the staff member typed into input boxes are part of the render, so "unchanged" is then no claim that the text is the template's own:
+  // the flag stays unknown (null). A changed text is recorded as changed either way.
+  const usesTypedInputs = rendered.usedVariables.some((name) => name.startsWith('input.'))
+  meta.editedAfterRender = changed ? true : usesTypedInputs ? null : false
 }
 
 function contentFailure(blocks: readonly GateViolation[], meta: SendMeta): GateFailure {
@@ -407,15 +413,38 @@ async function followUpStage(args: InLockArgs, data: SendGateData): Promise<Gate
   return fail(409, violation.code === 'already_followed_up' ? 'already_followed_up' : 'duplicate_template', meta)
 }
 
+/** A reply to a guest's own enquiry, sent as the template wrote it: the weekly cap neither blocks it nor counts it. */
+export function isCapExempt(
+  config: Pick<EffectiveEmailConfig, 'capExemptTemplateKeys'>,
+  templateKey: string | null,
+  unedited: boolean,
+): boolean {
+  return unedited && templateKey !== null && config.capExemptTemplateKeys.includes(templateKey)
+}
+
+/** Reads which earlier mails the cap leaves out; undefined when no template is exempt (then nothing extra is read). */
+export function exemptIdLoaderFor(
+  config: Pick<EffectiveEmailConfig, 'capExemptTemplateKeys'>,
+  data: Pick<SendGateData, 'exemptMessageIdsSince'>,
+  clientId: string,
+  contactId: string,
+): ExemptIdLoader | undefined {
+  const keys = config.capExemptTemplateKeys
+  if (keys.length === 0) return undefined
+  return (sinceIso) => data.exemptMessageIdsSince(clientId, contactId, keys, sinceIso)
+}
+
 async function frequencyStage(args: InLockArgs, data: SendGateData, tz: string): Promise<GateFailure | null> {
   const cap = args.config.frequencyCap
   if (cap === null) return null
+  if (isCapExempt(args.config, args.state.templateKey, args.meta.editedAfterRender === false)) return null
   const verdict = await evaluateFrequency({
     cap,
     now: args.now,
     addresses: args.state.addresses,
     contactId: args.contactId,
     sources: data.frequencySources,
+    loadExemptIds: exemptIdLoaderFor(args.config, data, args.clientId, args.contactId),
   })
   if (verdict.ok) return null
   if (verdict.reason === 'frequency_unverifiable') {

@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import {
   NO_VERDICT,
   SAFE_STAGES,
+  hasHumanOutbound,
   quoteIsGrounded,
   renderTranscript,
   ruleOnlyStage,
@@ -216,5 +217,72 @@ describe('新填的表单挡住「无下文」', () => {
     expect(ruleOnlyStage([form('2026-06-01T00:00:00Z'), out('2026-07-01T00:00:00Z')], NOW)).toBe(
       'no_response',
     )
+  })
+})
+
+
+describe('表单回声不算客人开口 / 已联系必须有真人联系记录（2026-11-03）', () => {
+  const NOW = new Date('2026-08-16T00:00:00Z')
+  const echo = (at: string): TranscriptLine => ({
+    at,
+    direction: 'inbound',
+    channel: 'message',
+    body: 'Hello! I filled out your form and would like to know more about your business. Email: a@b.c',
+  })
+  const botGreeting = (at: string): TranscriptLine => ({
+    at,
+    direction: 'outbound',
+    channel: 'message',
+    body: 'Hi there! Thank you for contacting us. Which tour are you interested in?',
+  })
+
+  it('私信通道里的表单回声不值得读（不算客人说话）', () => {
+    expect(worthReading([echo('2026-09-19T11:13:47Z')])).toBe(false)
+    expect(worthReading([echo('2026-09-19T11:13:47Z'), botGreeting('2026-09-19T11:13:50Z')])).toBe(false)
+  })
+
+  it('客人真的开口了仍然值得读', () => {
+    expect(worthReading([echo('2026-09-19T11:13:47Z'), line({ at: '2026-09-21T03:40:10Z' })])).toBe(true)
+  })
+
+  it('表单回声比我们最后一次联系还新 = 他又来了，不判无下文', () => {
+    const lines = [
+      line({ direction: 'outbound', at: '2026-07-01T00:00:00Z', body: 'Following up' }),
+      echo('2026-08-20T00:00:00Z'),
+    ]
+    expect(ruleOnlyStage(lines, NOW)).toBeNull()
+  })
+
+  it('只有客人的表单回声 + 两分钟内的自动回复 = 没有真人联系', () => {
+    expect(hasHumanOutbound([echo('2026-09-19T11:13:47Z'), botGreeting('2026-09-19T11:13:50Z')])).toBe(false)
+  })
+
+  it('私信里隔了很久才发的回复算真人', () => {
+    expect(hasHumanOutbound([echo('2026-09-19T11:13:47Z'), botGreeting('2026-09-20T01:00:00Z')])).toBe(true)
+  })
+
+  it('真人电话 / 邮件触点算真人，哪怕时间戳和表单是同一秒（导入线索的那一刻）', () => {
+    const call: TranscriptLine = {
+      at: '2026-09-19T11:13:27Z',
+      direction: 'outbound',
+      channel: 'phone',
+      body: 'Called, left details',
+    }
+    expect(hasHumanOutbound([call, echo('2026-09-19T11:13:27Z')])).toBe(true)
+  })
+
+  it('写入方标了 automated 的出站不算真人', () => {
+    const mail: TranscriptLine = {
+      at: '2026-09-19T20:00:00Z',
+      direction: 'outbound',
+      channel: 'email',
+      body: 'Welcome',
+      automated: true,
+    }
+    expect(hasHumanOutbound([mail])).toBe(false)
+  })
+
+  it('空对话没有真人联系', () => {
+    expect(hasHumanOutbound([])).toBe(false)
   })
 })

@@ -349,8 +349,8 @@ export function CommentAutoReplyPanel({ clientId }: Props) {
       {/* Category toggles */}
       <div className="mt-3 divide-y divide-slate-100 border-t border-slate-100">
         <Toggle label="回复夸赞评论" hint="AI 起草暖回复（过 claim 过滤器后才发）" checked={draft.auto_reply_praise} onChange={v => set('auto_reply_praise', v)} disabled={saving} />
-        <Toggle label="回应提问评论" hint="固定安全话术「已私信你」+ 转人工，绝不 AI 作答" checked={draft.auto_reply_question} onChange={v => set('auto_reply_question', v)} disabled={saving} />
-        <Toggle label="回应负面评论" hint="共情话术 + 私信转真人处理" checked={draft.auto_reply_complaint} onChange={v => set('auto_reply_complaint', v)} disabled={saving} />
+        <Toggle label="回应提问评论" hint="只自动回问候和常见问答。问价、投诉、退款和夸赞交给人。垃圾评论自动隐藏。" checked={draft.auto_reply_question} onChange={v => set('auto_reply_question', v)} disabled={saving} />
+        <Toggle label="回应负面评论" hint="只自动回问候和常见问答。问价、投诉、退款和夸赞交给人。垃圾评论自动隐藏。" checked={draft.auto_reply_complaint} onChange={v => set('auto_reply_complaint', v)} disabled={saving} />
         <Toggle label="自动隐藏垃圾评论" hint="默认关（保守）" checked={draft.auto_hide_spam} onChange={v => set('auto_hide_spam', v)} disabled={saving} />
         <Toggle label="允许私信引导" hint="对有购买意向的评论发私信引导（Meta 7 天窗内）" checked={draft.private_reply_enabled} onChange={v => set('private_reply_enabled', v)} disabled={saving} />
       </div>

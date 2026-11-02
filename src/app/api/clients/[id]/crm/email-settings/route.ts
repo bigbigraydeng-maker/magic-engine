@@ -32,7 +32,14 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     if (loaded.kind === 'invalid') {
       return NextResponse.json({ state: 'invalid', version: loaded.version, settings: null, errors: loaded.errors, history })
     }
-    return NextResponse.json({ state: 'ok', version: loaded.version, settings: serialiseEmailSettings(loaded.settings), errors: [], history })
+    // The stored form leaves the key out when the list is empty; the API always shows it so the response can be saved back as it is.
+    return NextResponse.json({
+      state: 'ok',
+      version: loaded.version,
+      settings: { cap_exempt_template_keys: [], ...serialiseEmailSettings(loaded.settings) },
+      errors: [],
+      history,
+    })
   } catch (err) {
     console.error('[crm/email-settings] 读取失败:', err instanceof Error ? err.message : err)
     return NextResponse.json({ error: '发信设置暂时读不到，请联系 Magic Lab 团队。' }, { status: 503 })

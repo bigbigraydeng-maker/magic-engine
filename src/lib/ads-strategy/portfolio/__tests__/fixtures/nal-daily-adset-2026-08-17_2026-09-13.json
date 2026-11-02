@@ -1,15 +1,15 @@
 [
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "0.28",
+  "spend": "0.33",
   "impressions": "20",
   "reach": "19",
   "clicks": "0",
   "frequency": "1.052632",
-  "cpm": "14",
+  "cpm": "16.380000",
   "video_play_actions": [
    {
     "action_type": "video_view",
@@ -26,16 +26,16 @@
   "date_stop": "2026-08-17"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "5.82",
+  "spend": "6.81",
   "impressions": "264",
   "reach": "223",
   "clicks": "14",
   "frequency": "1.183857",
-  "cpm": "22.045455",
+  "cpm": "25.793182",
   "actions": [
    {
     "action_type": "link_click",
@@ -138,16 +138,16 @@
   "date_stop": "2026-08-17"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "11.71",
+  "spend": "13.70",
   "impressions": "515",
   "reach": "387",
   "clicks": "8",
   "frequency": "1.330749",
-  "cpm": "22.737864",
+  "cpm": "26.603301",
   "actions": [
    {
     "action_type": "link_click",
@@ -234,16 +234,16 @@
   "date_stop": "2026-08-18"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "8.18",
+  "spend": "9.57",
   "impressions": "401",
   "reach": "285",
   "clicks": "14",
   "frequency": "1.407018",
-  "cpm": "20.399002",
+  "cpm": "23.866832",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -386,16 +386,16 @@
   "date_stop": "2026-08-18"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "11",
+  "spend": "12.87",
   "impressions": "369",
   "reach": "309",
   "clicks": "8",
   "frequency": "1.194175",
-  "cpm": "29.810298",
+  "cpm": "34.878049",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -522,16 +522,16 @@
   "date_stop": "2026-08-19"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "3.25",
+  "spend": "3.80",
   "impressions": "154",
   "reach": "122",
   "clicks": "5",
   "frequency": "1.262295",
-  "cpm": "21.103896",
+  "cpm": "24.691558",
   "actions": [
    {
     "action_type": "link_click",
@@ -638,16 +638,16 @@
   "date_stop": "2026-08-19"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "26.33",
+  "spend": "30.81",
   "impressions": "761",
   "reach": "600",
   "clicks": "14",
   "frequency": "1.268333",
-  "cpm": "34.599212",
+  "cpm": "40.481078",
   "actions": [
    {
     "action_type": "link_click",
@@ -762,16 +762,16 @@
   "date_stop": "2026-08-20"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "12.96",
+  "spend": "15.16",
   "impressions": "670",
   "reach": "538",
   "clicks": "20",
   "frequency": "1.245353",
-  "cpm": "19.343284",
+  "cpm": "22.631642",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -910,16 +910,16 @@
   "date_stop": "2026-08-20"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "28.58",
+  "spend": "33.44",
   "impressions": "896",
   "reach": "709",
   "clicks": "17",
   "frequency": "1.263752",
-  "cpm": "31.897321",
+  "cpm": "37.319866",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -1050,16 +1050,16 @@
   "date_stop": "2026-08-21"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "11.26",
+  "spend": "13.17",
   "impressions": "535",
   "reach": "434",
   "clicks": "15",
   "frequency": "1.232719",
-  "cpm": "21.046729",
+  "cpm": "24.624673",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -1198,16 +1198,16 @@
   "date_stop": "2026-08-21"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "27.61",
+  "spend": "32.30",
   "impressions": "820",
   "reach": "682",
   "clicks": "14",
   "frequency": "1.202346",
-  "cpm": "33.670732",
+  "cpm": "39.394756",
   "actions": [
    {
     "action_type": "link_click",
@@ -1282,16 +1282,16 @@
   "date_stop": "2026-08-22"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "10.81",
+  "spend": "12.65",
   "impressions": "590",
   "reach": "464",
   "clicks": "19",
   "frequency": "1.271552",
-  "cpm": "18.322034",
+  "cpm": "21.436780",
   "actions": [
    {
     "action_type": "link_click",
@@ -1418,16 +1418,16 @@
   "date_stop": "2026-08-22"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "23.97",
+  "spend": "28.04",
   "impressions": "554",
   "reach": "476",
   "clicks": "13",
   "frequency": "1.163866",
-  "cpm": "43.267148",
+  "cpm": "50.622563",
   "actions": [
    {
     "action_type": "link_click",
@@ -1534,16 +1534,16 @@
   "date_stop": "2026-08-23"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "16.88",
+  "spend": "19.75",
   "impressions": "685",
   "reach": "547",
   "clicks": "20",
   "frequency": "1.252285",
-  "cpm": "24.642336",
+  "cpm": "28.831533",
   "actions": [
    {
     "action_type": "link_click",
@@ -1670,16 +1670,16 @@
   "date_stop": "2026-08-23"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "19.42",
+  "spend": "22.72",
   "impressions": "560",
   "reach": "450",
   "clicks": "3",
   "frequency": "1.244444",
-  "cpm": "34.678571",
+  "cpm": "40.573928",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -1786,16 +1786,16 @@
   "date_stop": "2026-08-24"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "12.27",
+  "spend": "14.36",
   "impressions": "480",
   "reach": "411",
   "clicks": "12",
   "frequency": "1.167883",
-  "cpm": "25.5625",
+  "cpm": "29.908125",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -1954,16 +1954,16 @@
   "date_stop": "2026-08-24"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "10.13",
+  "spend": "11.85",
   "impressions": "281",
   "reach": "251",
   "clicks": "7",
   "frequency": "1.119522",
-  "cpm": "36.049822",
+  "cpm": "42.178292",
   "actions": [
    {
     "action_type": "link_click",
@@ -2050,16 +2050,16 @@
   "date_stop": "2026-08-25"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "18.48",
+  "spend": "21.62",
   "impressions": "972",
   "reach": "779",
   "clicks": "18",
   "frequency": "1.247754",
-  "cpm": "19.012346",
+  "cpm": "22.244445",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -2210,16 +2210,16 @@
   "date_stop": "2026-08-25"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "22.54",
+  "spend": "26.37",
   "impressions": "1096",
   "reach": "863",
   "clicks": "28",
   "frequency": "1.269988",
-  "cpm": "20.565693",
+  "cpm": "24.061861",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -2406,16 +2406,16 @@
   "date_stop": "2026-08-26"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "15.04",
+  "spend": "17.60",
   "impressions": "552",
   "reach": "435",
   "clicks": "20",
   "frequency": "1.268966",
-  "cpm": "27.246377",
+  "cpm": "31.878261",
   "actions": [
    {
     "action_type": "link_click",
@@ -2546,16 +2546,16 @@
   "date_stop": "2026-08-27"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "1.73",
+  "spend": "2.02",
   "impressions": "65",
   "reach": "58",
   "clicks": "0",
   "frequency": "1.12069",
-  "cpm": "26.615385",
+  "cpm": "31.140000",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -2598,16 +2598,16 @@
   "date_stop": "2026-08-28"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "24.22",
+  "spend": "28.34",
   "impressions": "967",
   "reach": "744",
   "clicks": "26",
   "frequency": "1.299731",
-  "cpm": "25.046536",
+  "cpm": "29.304447",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -2766,16 +2766,16 @@
   "date_stop": "2026-08-28"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "8.31",
+  "spend": "9.72",
   "impressions": "231",
   "reach": "201",
   "clicks": "2",
   "frequency": "1.149254",
-  "cpm": "35.974026",
+  "cpm": "42.089610",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -2842,16 +2842,16 @@
   "date_stop": "2026-08-29"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "27.75",
+  "spend": "32.47",
   "impressions": "1407",
   "reach": "1095",
   "clicks": "33",
   "frequency": "1.284932",
-  "cpm": "19.722815",
+  "cpm": "23.075694",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -3010,16 +3010,16 @@
   "date_stop": "2026-08-29"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "9",
+  "spend": "10.53",
   "impressions": "245",
   "reach": "214",
   "clicks": "5",
   "frequency": "1.14486",
-  "cpm": "36.734694",
+  "cpm": "42.979592",
   "actions": [
    {
     "action_type": "link_click",
@@ -3118,16 +3118,16 @@
   "date_stop": "2026-08-30"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "34.83",
+  "spend": "40.75",
   "impressions": "1523",
   "reach": "1187",
   "clicks": "30",
   "frequency": "1.283067",
-  "cpm": "22.869337",
+  "cpm": "26.757124",
   "actions": [
    {
     "action_type": "link_click",
@@ -3266,16 +3266,16 @@
   "date_stop": "2026-08-30"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589907084325",
+  "campaign_id": "52902974440554",
+  "adset_id": "52143863593432",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "3PL新潜在客户广告组",
-  "spend": "4.45",
+  "spend": "5.21",
   "impressions": "141",
   "reach": "116",
   "clicks": "1",
   "frequency": "1.215517",
-  "cpm": "31.560284",
+  "cpm": "36.925532",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -3342,16 +3342,16 @@
   "date_stop": "2026-08-31"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "13.53",
+  "spend": "15.83",
   "impressions": "405",
   "reach": "327",
   "clicks": "11",
   "frequency": "1.238532",
-  "cpm": "33.407407",
+  "cpm": "39.086666",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -3514,16 +3514,16 @@
   "date_stop": "2026-08-31"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "18.17",
+  "spend": "21.26",
   "impressions": "655",
   "reach": "511",
   "clicks": "16",
   "frequency": "1.2818",
-  "cpm": "27.740458",
+  "cpm": "32.456336",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -3658,16 +3658,16 @@
   "date_stop": "2026-09-01"
  },
  {
-  "campaign_id": "52593506024125",
-  "adset_id": "52593506023925",
+  "campaign_id": "52412100843565",
+  "adset_id": "52429223893140",
   "campaign_name": "新潜在客户广告系列-3PL",
   "adset_name": "新潜在客户广告组-9月1日",
-  "spend": "14.19",
+  "spend": "16.60",
   "impressions": "689",
   "reach": "567",
   "clicks": "10",
   "frequency": "1.215168",
-  "cpm": "20.595065",
+  "cpm": "24.096226",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -3790,16 +3790,16 @@
   "date_stop": "2026-09-01"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "26.22",
+  "spend": "30.68",
   "impressions": "978",
   "reach": "687",
   "clicks": "25",
   "frequency": "1.423581",
-  "cpm": "26.809816",
+  "cpm": "31.367485",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -3970,16 +3970,16 @@
   "date_stop": "2026-09-02"
  },
  {
-  "campaign_id": "52593506024125",
-  "adset_id": "52593506023925",
+  "campaign_id": "52412100843565",
+  "adset_id": "52429223893140",
   "campaign_name": "新潜在客户广告系列-3PL",
   "adset_name": "新潜在客户广告组-9月1日",
-  "spend": "20.91",
+  "spend": "24.46",
   "impressions": "913",
   "reach": "726",
   "clicks": "14",
   "frequency": "1.257576",
-  "cpm": "22.902519",
+  "cpm": "26.795947",
   "actions": [
    {
     "action_type": "link_click",
@@ -4054,16 +4054,16 @@
   "date_stop": "2026-09-02"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "22.91",
+  "spend": "26.80",
   "impressions": "758",
   "reach": "584",
   "clicks": "20",
   "frequency": "1.297945",
-  "cpm": "30.224274",
+  "cpm": "35.362401",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -4222,16 +4222,16 @@
   "date_stop": "2026-09-03"
  },
  {
-  "campaign_id": "52593506024125",
-  "adset_id": "52593506023925",
+  "campaign_id": "52412100843565",
+  "adset_id": "52429223893140",
   "campaign_name": "新潜在客户广告系列-3PL",
   "adset_name": "新潜在客户广告组-9月1日",
-  "spend": "14.17",
+  "spend": "16.58",
   "impressions": "225",
   "reach": "190",
   "clicks": "5",
   "frequency": "1.184211",
-  "cpm": "62.977778",
+  "cpm": "73.684000",
   "actions": [
    {
     "action_type": "link_click",
@@ -4318,16 +4318,16 @@
   "date_stop": "2026-09-03"
  },
  {
-  "campaign_id": "52594661605725",
-  "adset_id": "52594661606125",
+  "campaign_id": "52025872830354",
+  "adset_id": "52580503500399",
   "campaign_name": "物流广告组-WhatsApp",
   "adset_name": "新潜在客户广告组-WhatsApp",
-  "spend": "5.12",
+  "spend": "5.99",
   "impressions": "266",
   "reach": "214",
   "clicks": "6",
   "frequency": "1.242991",
-  "cpm": "19.24812",
+  "cpm": "22.520300",
   "actions": [
    {
     "action_type": "link_click",
@@ -4422,16 +4422,16 @@
   "date_stop": "2026-09-03"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "20.9",
+  "spend": "24.45",
   "impressions": "805",
   "reach": "613",
   "clicks": "36",
   "frequency": "1.313214",
-  "cpm": "25.962733",
+  "cpm": "30.376398",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -4610,16 +4610,16 @@
   "date_stop": "2026-09-04"
  },
  {
-  "campaign_id": "52594661605725",
-  "adset_id": "52594661606125",
+  "campaign_id": "52025872830354",
+  "adset_id": "52580503500399",
   "campaign_name": "物流广告组-WhatsApp",
   "adset_name": "新潜在客户广告组-WhatsApp",
-  "spend": "10.04",
+  "spend": "11.75",
   "impressions": "523",
   "reach": "357",
   "clicks": "9",
   "frequency": "1.464986",
-  "cpm": "19.196941",
+  "cpm": "22.460421",
   "actions": [
    {
     "action_type": "link_click",
@@ -4714,16 +4714,16 @@
   "date_stop": "2026-09-04"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "17.71",
+  "spend": "20.72",
   "impressions": "757",
   "reach": "599",
   "clicks": "21",
   "frequency": "1.263773",
-  "cpm": "23.39498",
+  "cpm": "27.372127",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -4878,16 +4878,16 @@
   "date_stop": "2026-09-05"
  },
  {
-  "campaign_id": "52594661605725",
-  "adset_id": "52594661606125",
+  "campaign_id": "52025872830354",
+  "adset_id": "52580503500399",
   "campaign_name": "物流广告组-WhatsApp",
   "adset_name": "新潜在客户广告组-WhatsApp",
-  "spend": "7.8",
+  "spend": "9.13",
   "impressions": "514",
   "reach": "392",
   "clicks": "20",
   "frequency": "1.311224",
-  "cpm": "15.175097",
+  "cpm": "17.754863",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -5030,16 +5030,16 @@
   "date_stop": "2026-09-05"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "18.63",
+  "spend": "21.80",
   "impressions": "838",
   "reach": "686",
   "clicks": "29",
   "frequency": "1.221574",
-  "cpm": "22.231504",
+  "cpm": "26.010860",
   "actions": [
    {
     "action_type": "link_click",
@@ -5178,16 +5178,16 @@
   "date_stop": "2026-09-06"
  },
  {
-  "campaign_id": "52594661605725",
-  "adset_id": "52594661606125",
+  "campaign_id": "52025872830354",
+  "adset_id": "52580503500399",
   "campaign_name": "物流广告组-WhatsApp",
   "adset_name": "新潜在客户广告组-WhatsApp",
-  "spend": "12.54",
+  "spend": "14.67",
   "impressions": "691",
   "reach": "502",
   "clicks": "9",
   "frequency": "1.376494",
-  "cpm": "18.147612",
+  "cpm": "21.232706",
   "actions": [
    {
     "action_type": "link_click",
@@ -5302,16 +5302,16 @@
   "date_stop": "2026-09-06"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "16.22",
+  "spend": "18.98",
   "impressions": "597",
   "reach": "468",
   "clicks": "17",
   "frequency": "1.275641",
-  "cpm": "27.169179",
+  "cpm": "31.787939",
   "actions": [
    {
     "action_type": "link_click",
@@ -5438,16 +5438,16 @@
   "date_stop": "2026-09-07"
  },
  {
-  "campaign_id": "52594661605725",
-  "adset_id": "52594661606125",
+  "campaign_id": "52025872830354",
+  "adset_id": "52580503500399",
   "campaign_name": "物流广告组-WhatsApp",
   "adset_name": "新潜在客户广告组-WhatsApp",
-  "spend": "13.06",
+  "spend": "15.28",
   "impressions": "712",
   "reach": "543",
   "clicks": "19",
   "frequency": "1.311234",
-  "cpm": "18.342697",
+  "cpm": "21.460955",
   "actions": [
    {
     "action_type": "link_click",
@@ -5562,16 +5562,16 @@
   "date_stop": "2026-09-07"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "23.28",
+  "spend": "27.24",
   "impressions": "824",
   "reach": "612",
   "clicks": "12",
   "frequency": "1.346405",
-  "cpm": "28.252427",
+  "cpm": "33.055340",
   "actions": [
    {
     "action_type": "link_click",
@@ -5678,16 +5678,16 @@
   "date_stop": "2026-09-08"
  },
  {
-  "campaign_id": "52594661605725",
-  "adset_id": "52594661606125",
+  "campaign_id": "52025872830354",
+  "adset_id": "52580503500399",
   "campaign_name": "物流广告组-WhatsApp",
   "adset_name": "新潜在客户广告组-WhatsApp",
-  "spend": "10.78",
+  "spend": "12.61",
   "impressions": "623",
   "reach": "457",
   "clicks": "16",
   "frequency": "1.363239",
-  "cpm": "17.303371",
+  "cpm": "20.244944",
   "actions": [
    {
     "action_type": "link_click",
@@ -5782,16 +5782,16 @@
   "date_stop": "2026-09-08"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "26.1",
+  "spend": "30.54",
   "impressions": "876",
   "reach": "687",
   "clicks": "25",
   "frequency": "1.275109",
-  "cpm": "29.794521",
+  "cpm": "34.859590",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -5946,16 +5946,16 @@
   "date_stop": "2026-09-09"
  },
  {
-  "campaign_id": "52594661605725",
-  "adset_id": "52594661606125",
+  "campaign_id": "52025872830354",
+  "adset_id": "52580503500399",
   "campaign_name": "物流广告组-WhatsApp",
   "adset_name": "新潜在客户广告组-WhatsApp",
-  "spend": "9.22",
+  "spend": "10.79",
   "impressions": "397",
   "reach": "323",
   "clicks": "8",
   "frequency": "1.229102",
-  "cpm": "23.224181",
+  "cpm": "27.172292",
   "actions": [
    {
     "action_type": "link_click",
@@ -6046,16 +6046,16 @@
   "date_stop": "2026-09-09"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "19.61",
+  "spend": "22.94",
   "impressions": "664",
   "reach": "508",
   "clicks": "16",
   "frequency": "1.307087",
-  "cpm": "29.533133",
+  "cpm": "34.553766",
   "actions": [
    {
     "action_type": "link_click",
@@ -6178,16 +6178,16 @@
   "date_stop": "2026-09-10"
  },
  {
-  "campaign_id": "52594661605725",
-  "adset_id": "52594661606125",
+  "campaign_id": "52025872830354",
+  "adset_id": "52580503500399",
   "campaign_name": "物流广告组-WhatsApp",
   "adset_name": "新潜在客户广告组-WhatsApp",
-  "spend": "9.07",
+  "spend": "10.61",
   "impressions": "495",
   "reach": "419",
   "clicks": "7",
   "frequency": "1.181384",
-  "cpm": "18.323232",
+  "cpm": "21.438181",
   "actions": [
    {
     "action_type": "link_click",
@@ -6290,16 +6290,16 @@
   "date_stop": "2026-09-10"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "18.49",
+  "spend": "21.63",
   "impressions": "801",
   "reach": "617",
   "clicks": "26",
   "frequency": "1.298217",
-  "cpm": "23.083645",
+  "cpm": "27.007865",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -6458,16 +6458,16 @@
   "date_stop": "2026-09-11"
  },
  {
-  "campaign_id": "52594661605725",
-  "adset_id": "52594661606125",
+  "campaign_id": "52025872830354",
+  "adset_id": "52580503500399",
   "campaign_name": "物流广告组-WhatsApp",
   "adset_name": "新潜在客户广告组-WhatsApp",
-  "spend": "7.91",
+  "spend": "9.25",
   "impressions": "394",
   "reach": "309",
   "clicks": "9",
   "frequency": "1.275081",
-  "cpm": "20.076142",
+  "cpm": "23.489086",
   "actions": [
    {
     "action_type": "omni_purchase",
@@ -6570,16 +6570,16 @@
   "date_stop": "2026-09-11"
  },
  {
-  "campaign_id": "52596931528325",
-  "adset_id": "52596931528525",
+  "campaign_id": "52119647569063",
+  "adset_id": "52426144644352",
   "campaign_name": "Thruplay-物流-2KG",
   "adset_name": "新互动广告组",
-  "spend": "4.02",
+  "spend": "4.70",
   "impressions": "773",
   "reach": "738",
   "clicks": "3",
   "frequency": "1.047425",
-  "cpm": "5.200517",
+  "cpm": "6.084605",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -6646,16 +6646,16 @@
   "date_stop": "2026-09-11"
  },
  {
-  "campaign_id": "52596939123525",
-  "adset_id": "52596939123725",
+  "campaign_id": "52028365152823",
+  "adset_id": "52104815523595",
   "campaign_name": "Thruplay-物流-200/cbm",
   "adset_name": "ThruPlay_物流_200/cbm",
-  "spend": "4.57",
+  "spend": "5.35",
   "impressions": "447",
   "reach": "334",
   "clicks": "3",
   "frequency": "1.338323",
-  "cpm": "10.223714",
+  "cpm": "11.961745",
   "actions": [
    {
     "action_type": "link_click",
@@ -6726,16 +6726,16 @@
   "date_stop": "2026-09-11"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "16.94",
+  "spend": "19.82",
   "impressions": "796",
   "reach": "672",
   "clicks": "15",
   "frequency": "1.184524",
-  "cpm": "21.281407",
+  "cpm": "24.899246",
   "actions": [
    {
     "action_type": "link_click",
@@ -6858,16 +6858,16 @@
   "date_stop": "2026-09-12"
  },
  {
-  "campaign_id": "52594661605725",
-  "adset_id": "52594661606125",
+  "campaign_id": "52025872830354",
+  "adset_id": "52580503500399",
   "campaign_name": "物流广告组-WhatsApp",
   "adset_name": "新潜在客户广告组-WhatsApp",
-  "spend": "7.26",
+  "spend": "8.49",
   "impressions": "425",
   "reach": "346",
   "clicks": "8",
   "frequency": "1.228324",
-  "cpm": "17.082353",
+  "cpm": "19.986353",
   "actions": [
    {
     "action_type": "onsite_conversion.lead",
@@ -6998,16 +6998,16 @@
   "date_stop": "2026-09-12"
  },
  {
-  "campaign_id": "52596931528325",
-  "adset_id": "52596931528525",
+  "campaign_id": "52119647569063",
+  "adset_id": "52426144644352",
   "campaign_name": "Thruplay-物流-2KG",
   "adset_name": "新互动广告组",
-  "spend": "9.29",
+  "spend": "10.87",
   "impressions": "1769",
   "reach": "1612",
   "clicks": "21",
   "frequency": "1.097395",
-  "cpm": "5.251555",
+  "cpm": "6.144319",
   "actions": [
    {
     "action_type": "link_click",
@@ -7098,16 +7098,16 @@
   "date_stop": "2026-09-12"
  },
  {
-  "campaign_id": "52596939123525",
-  "adset_id": "52596939123725",
+  "campaign_id": "52028365152823",
+  "adset_id": "52104815523595",
   "campaign_name": "Thruplay-物流-200/cbm",
   "adset_name": "ThruPlay_物流_200/cbm",
-  "spend": "8.35",
+  "spend": "9.77",
   "impressions": "567",
   "reach": "280",
   "clicks": "1",
   "frequency": "2.025",
-  "cpm": "14.726631",
+  "cpm": "17.230158",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -7174,16 +7174,16 @@
   "date_stop": "2026-09-12"
  },
  {
-  "campaign_id": "52589907084125",
-  "adset_id": "52589967398925",
+  "campaign_id": "52902974440554",
+  "adset_id": "52886694875449",
   "campaign_name": "新亚8月广告系列-物流",
   "adset_name": "物流潜在客户广告组",
-  "spend": "20.82",
+  "spend": "24.36",
   "impressions": "947",
   "reach": "772",
   "clicks": "25",
   "frequency": "1.226684",
-  "cpm": "21.985216",
+  "cpm": "25.722703",
   "actions": [
    {
     "action_type": "link_click",
@@ -7310,16 +7310,16 @@
   "date_stop": "2026-09-13"
  },
  {
-  "campaign_id": "52594661605725",
-  "adset_id": "52594661606125",
+  "campaign_id": "52025872830354",
+  "adset_id": "52580503500399",
   "campaign_name": "物流广告组-WhatsApp",
   "adset_name": "新潜在客户广告组-WhatsApp",
-  "spend": "9.04",
+  "spend": "10.58",
   "impressions": "561",
   "reach": "466",
   "clicks": "13",
   "frequency": "1.203863",
-  "cpm": "16.114082",
+  "cpm": "18.853476",
   "actions": [
    {
     "action_type": "link_click",
@@ -7426,16 +7426,16 @@
   "date_stop": "2026-09-13"
  },
  {
-  "campaign_id": "52596931528325",
-  "adset_id": "52596931528525",
+  "campaign_id": "52119647569063",
+  "adset_id": "52426144644352",
   "campaign_name": "Thruplay-物流-2KG",
   "adset_name": "新互动广告组",
-  "spend": "11.11",
+  "spend": "13.00",
   "impressions": "2294",
   "reach": "2125",
   "clicks": "27",
   "frequency": "1.079529",
-  "cpm": "4.843069",
+  "cpm": "5.666391",
   "actions": [
    {
     "action_type": "link_click",
@@ -7530,16 +7530,16 @@
   "date_stop": "2026-09-13"
  },
  {
-  "campaign_id": "52596939123525",
-  "adset_id": "52596939123725",
+  "campaign_id": "52028365152823",
+  "adset_id": "52104815523595",
   "campaign_name": "Thruplay-物流-200/cbm",
   "adset_name": "ThruPlay_物流_200/cbm",
-  "spend": "13.85",
+  "spend": "16.20",
   "impressions": "778",
   "reach": "237",
   "clicks": "0",
   "frequency": "3.2827",
-  "cpm": "17.802057",
+  "cpm": "20.828407",
   "actions": [
    {
     "action_type": "post_engagement",
