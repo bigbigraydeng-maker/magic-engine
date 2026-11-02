@@ -10,6 +10,7 @@ import { writeFile, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { safeProbeRemoteFile } from '@/lib/factory/safe-remote-fetch'
+import { reconcileTextOnlyMiss } from '@/lib/maliang/text-compare'
 
 export const NINE_GRID_PCTS = [0, 12.5, 25, 37.5, 50, 62.5, 75, 87.5, 100] as const
 export const MALIANG_MODEL = 'gemini-2.5-flash'
@@ -42,12 +43,18 @@ export interface MaliangCheck {
   reasons: string[]
   frames: NineGridFrame[]
   model: string | null
+  /** Untruncated on-screen lines the text recheck compared against. */
+  expected_text?: string[]
+  /** Set when a text-only miss matched the picture after normalizing case and line breaks. */
+  text_recheck?: 'false_positive' | null
 }
 
 export interface NineGridInput {
   title: string
   brandName: string
   expectedCaptions: string[]
+  /** Lines used for the text recheck. Falls back to expectedCaptions when omitted. */
+  compareLines?: string[]
   visualNotes: string[]
   logoExpected: boolean
 }
@@ -366,7 +373,11 @@ export async function runNineGridCheck(params: {
       return unverifiable(`模型回答格式不对：${msg}`)
     }
 
-    const verdict = decideVerdict(parsed, input.logoExpected)
+    const verdict = reconcileTextOnlyMiss(
+      decideVerdict(parsed, input.logoExpected),
+      parsed.frames,
+      input.compareLines ?? input.expectedCaptions,
+    )
     return {
       status: verdict.status,
       checked_at: checkedAt,
@@ -374,6 +385,8 @@ export async function runNineGridCheck(params: {
       reasons: verdict.reasons,
       frames: parsed.frames,
       model: MALIANG_MODEL,
+      expected_text: input.compareLines ?? input.expectedCaptions,
+      text_recheck: verdict.text_recheck,
     }
   } finally {
     if (tmpPath) unlink(tmpPath).catch(() => {})

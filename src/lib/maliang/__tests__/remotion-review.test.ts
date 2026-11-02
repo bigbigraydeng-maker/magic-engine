@@ -9,7 +9,7 @@ vi.mock('@/lib/cron/run-logger', () => ({
 }))
 
 import { dispositionOf, notMachineReviewedCheck, runCheckWithTimeout, stampWorkOrderOutput } from '../review-disposition'
-import { logoExpectedFromRemotionBrief, onScreenLines, remotionVisualNotes } from '../remotion-review-input'
+import { logoExpectedFromRemotionBrief, onScreenLines, remotionNineGridInput, remotionVisualNotes, sceneCopyLines } from '../remotion-review-input'
 import { enqueueRemotionMaliangReview, remotionPublicVideoUrl } from '../enqueue-remotion-review'
 import { maliangReviewNote } from '../review-note'
 import { writeWorkOrderVerdict } from '../work-order-review'
@@ -106,6 +106,27 @@ describe('remotion review input', () => {
     ])
   })
 
+  it('keeps the full scene line for the text recheck', () => {
+    const line = 'West Lake and the Legend of the White Snake'
+    const brief = {
+      remotion: {
+        template: 'postcard',
+        props: {
+          hook: { lines: ['OPEN'] },
+          scenes: [{ place: 'West Lake', line }],
+          end: { title: 'END TITLE' },
+        },
+      },
+    }
+    expect(sceneCopyLines(brief)).toEqual(['OPEN', 'West Lake', line, 'END TITLE'])
+    expect(remotionNineGridInput({ title: 't', brandName: '示例客户', brief, caption: '' }).compareLines).toEqual([
+      'OPEN',
+      'West Lake',
+      line,
+      'END TITLE',
+    ])
+  })
+
   it('does not expect a logo when the brief has none', () => {
     expect(logoExpectedFromRemotionBrief({ remotion: { template: 'list', props: {} } })).toBe(false)
     expect(logoExpectedFromRemotionBrief(null)).toBe(false)
@@ -199,6 +220,26 @@ describe('maliangReviewNote', () => {
       maliang_check: { ...PASS, status: 'unverifiable', reasons: ['超时'], model: null },
       machine_reviewed: false,
     })?.text).toContain('还没经过机器审')
+  })
+
+  it('shows the expected line next to what the picture showed, and marks a recheck', () => {
+    const fail = maliangReviewNote({
+      maliang_check: {
+        ...PASS,
+        status: 'fail',
+        reasons: ['第 3 镜文字：少了 Snake'],
+        expected_text: ['West Lake and the Legend of the White Snake'],
+        frames: [{ text_seen: 'West Lake and the Legend of the White' }],
+      },
+    })
+    expect(fail?.text.startsWith('马良没过')).toBe(true)
+    expect(fail?.text).toContain('预期：West Lake and the Legend of the White Snake')
+    expect(fail?.text).toContain('画面看到：West Lake and the Legend of the White')
+    const rechecked = maliangReviewNote({
+      maliang_check: { ...PASS, text_recheck: 'false_positive' },
+    })
+    expect(rechecked?.text).toContain('已复核为模型误报')
+    expect(rechecked?.text.startsWith('马良没过')).toBe(false)
   })
 
   it('stays quiet for orders that were never marked', () => {
