@@ -18,7 +18,7 @@ afterEach(() => {
 const base: ClientGrowthView = {
   viewer: 'client',
   date: '2026-09-27',
-  goal: { title: '九月留资', label: '留资', target: 100, dayIndex: 15, totalDays: 30 },
+  goal: { title: '九月留资', label: '留资', target: 100, dayIndex: 15, totalDays: 30, progressPending: false },
   goal_pace: {
     expectedToDate: 50, actualToDate: 30, gapPct: -40, projectedEnd: 40,
     verdict: 'unreachable_within_caps', reason: '按现在的速度，到期可能达不到目标。',

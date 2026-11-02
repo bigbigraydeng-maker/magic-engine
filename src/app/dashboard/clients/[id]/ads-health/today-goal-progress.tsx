@@ -20,6 +20,7 @@ type GoalView = {
   dayIndex: number
   totalDays: number
   primaryMetricKey?: string
+  progressPending?: boolean
 }
 
 export type TodayGoalGrowth =
@@ -34,7 +35,10 @@ function isClientView(state: TodayGoalGrowth): state is ClientGrowthView {
 
 function pickGoal(state: TodayGoalGrowth): GoalView | null {
   if (state == null) return null
-  if (isClientView(state)) return state.goal
+  if (isClientView(state)) {
+    if (!state.goal) return null
+    return { ...state.goal }
+  }
   const g = state.payload?.goal
   if (!g) return null
   return {
@@ -89,8 +93,9 @@ export function TodayGoalProgress({
   const goal = pickGoal(state)
   const pace = pickPace(state)
   const metricKey = goal?.primaryMetricKey
+  const pending = goal?.progressPending === true || isGoalProgressPending(metricKey)
 
-  if (goal && isGoalProgressPending(metricKey)) {
+  if (goal && pending) {
     return (
       <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
         <p>{goal.title} · 还没设目标</p>

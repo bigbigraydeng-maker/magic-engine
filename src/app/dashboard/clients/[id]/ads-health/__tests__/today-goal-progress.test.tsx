@@ -45,7 +45,7 @@ function staffState(over: Partial<GrowthStateView> = {}): GrowthStateView {
 const clientBase: ClientGrowthView = {
   viewer: 'client',
   date: '2026-10-20',
-  goal: { title: '示例留资目标', label: '留资', target: 300, dayIndex: 8, totalDays: 37 },
+  goal: { title: '示例留资目标', label: '留资', target: 300, dayIndex: 8, totalDays: 37, progressPending: false },
   goal_pace: {
     expectedToDate: 65,
     actualToDate: 101,
@@ -122,6 +122,14 @@ describe('TodayGoalProgress', () => {
   })
 
   it('client view omits staff-only links and internal field names', () => {
+    const pendingClient: ClientGrowthView = {
+      ...clientBase,
+      goal: { title: '定金', label: '报名', target: 30, dayIndex: 2, totalDays: 30, progressPending: true },
+      goal_pace: null,
+    }
+    render(<TodayGoalProgress state={pendingClient} clientId={CLIENT} />)
+    expect(screen.getByText(/还没设目标/)).toBeTruthy()
+
     const { container } = render(
       <TodayGoalProgress state={clientBase} clientId={CLIENT} todayCrmLeads={2} />,
     )
