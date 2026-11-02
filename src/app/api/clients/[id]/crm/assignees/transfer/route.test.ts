@@ -49,6 +49,20 @@ describe('POST /crm/assignees/transfer', () => {
     expect(calls).toHaveLength(0)
   })
 
+  it('rejects wildcard / non-email from and an empty-string to', async () => {
+    for (const from of ['*', 'a*', '%', 'not-an-email']) {
+      expect((await post({ from, to: 'new@x.com' })).status).toBe(400)
+    }
+    expect((await post({ from: 'old@x.com', to: '' })).status).toBe(400)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('writes the roster spelling of the target email (keeps round-robin counting aligned)', async () => {
+    listAssignees.mockResolvedValue([{ email: 'New@X.com' }])
+    await post({ from: 'old@x.com', to: 'new@x.com' })
+    expect(calls.find((c) => c.op === 'contacts.update')?.args[0]).toEqual({ assigned_to: 'New@X.com' })
+  })
+
   it('dry run counts without writing', async () => {
     result = { count: 7 }
     const body = await (await post({ from: 'Old@x.com', to: 'new@x.com', dryRun: true })).json()

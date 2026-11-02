@@ -22,9 +22,11 @@ export const dynamic = 'force-dynamic'
 function cleanEmail(value: unknown): string | null | undefined {
   if (value === null) return null
   if (typeof value !== 'string') return undefined
-  const v = value.toLowerCase().trim()
-  return v.length === 0 ? null : v
+  return value.toLowerCase().trim()
 }
+
+/** 只认普通邮箱：挡掉 * 之类的通配符（数据库接口会把 * 当成任意字符，一填就匹配全公司） */
+const EMAIL_RE = /^[^\s@*%,()]+@[^\s@*%,()]+$/
 
 /** ilike 里 % _ \\ 是通配符；邮箱常含下划线，不转义会误伤别人 */
 function exactIlike(email: string): string {
@@ -44,17 +46,22 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
   const from = cleanEmail(body.from)
   const to = cleanEmail(body.to)
-  if (!from) return NextResponse.json({ error: 'from 必须是邮箱' }, { status: 400 })
-  if (to === undefined) return NextResponse.json({ error: 'to 必须是邮箱或 null' }, { status: 400 })
+  if (!from || !EMAIL_RE.test(from)) return NextResponse.json({ error: 'from 必须是邮箱' }, { status: 400 })
+  // 只有明确传 null 才是「清空」；空字符串多半是表单漏填，不能悄悄清空整批
+  if (to === undefined || (to !== null && !EMAIL_RE.test(to))) {
+    return NextResponse.json({ error: 'to 必须是邮箱或 null' }, { status: 400 })
+  }
   if (to === from) return NextResponse.json({ error: '转出和转入是同一个人' }, { status: 400 })
   const dryRun = body.dryRun === true
 
   try {
+    // 写入名单里原样的邮箱（自动分配也是原样写，大小写保持一致，「谁手上少」才数得准）
+    let storedTo: string | null = null
     if (to !== null) {
       const candidates = await listAssignees({ clientId, supabase: supabaseAdmin })
-      if (!candidates.some((c) => c.email.toLowerCase() === to)) {
-        return NextResponse.json({ error: '这个邮箱不在当前客户的跟进人名单里' }, { status: 400 })
-      }
+      const hit = candidates.find((c) => c.email.toLowerCase() === to)
+      if (!hit) return NextResponse.json({ error: '这个邮箱不在当前客户的跟进人名单里' }, { status: 400 })
+      storedTo = hit.email
     }
 
     if (dryRun) {
@@ -69,7 +76,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const { data, error } = await supabaseAdmin
       .from('contacts')
-      .update({ assigned_to: to })
+      .update({ assigned_to: storedTo })
       .eq('client_id', clientId)
       .ilike('assigned_to', exactIlike(from))
       .select('id')
