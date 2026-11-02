@@ -164,6 +164,8 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   story_stalled: 'review', // 某条 Story 没发出去：看原因、决定重发还是改
   story_unknown_outcome: 'truth', // 系统判不了真假：Story 到底有没有发出去，只有看主页的人知道
   story_unarmed: 'review', // 已授权却没动静：发布器可能没跑
+  week_pack_needs_approval: 'review', // 下一周整包还没批
+  week_pack_items_held: 'review', // 有条目被单独拦住
   auto_publish_record_conflict: 'truth', // 记录说撤回了、回执说又发了：帖子到底在不在主页，只有看主页的人知道
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────

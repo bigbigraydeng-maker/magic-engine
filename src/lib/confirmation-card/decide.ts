@@ -37,6 +37,14 @@ async function presentSettled(
   })
 }
 
+async function closedMessage(deps: KernelDeps, decisionId: string | null): Promise<string> {
+  if (!decisionId) return '这张卡已经有结果了，不能再点。'
+  const notes = await notesFor(deps.supabase, [decisionId])
+  const reason = notes.get(decisionId)?.reason ?? ''
+  if (reason.includes('整包已停')) return '这张卡已经作废，不能再用来发布。'
+  return '这张卡已经有结果了，不能再点。'
+}
+
 function assertFingerprint(stored: string, given: string): void {
   if (given !== stored) {
     throw new ConfirmationCardError('stale', '你看到的内容已经不是这一张卡了。请刷新后再点。')
@@ -87,7 +95,7 @@ export async function decideConfirmationCard(
     return presentSettled(deps, run.id, args.clicker, now)
   }
   if (run.status !== 'pending_approval') {
-    throw new ConfirmationCardError('not_waiting', '这张卡已经有结果了，不能再点。')
+    throw new ConfirmationCardError('not_waiting', await closedMessage(deps, run.authorization_decision_id))
   }
   if (args.resolution === 'confirm') {
     const block = confirmBlockReason(stored.hardChecks)

@@ -36,6 +36,7 @@ import { pushPriceFactItems } from './price-fact-items'
 import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-request-items'
 import { pushAutoPublishItems } from './auto-publish-items'
 import { pushStoryLiteItems } from './story-lite-items'
+import { pushWeekPackItems } from './week-pack-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushLeadFollowupItems } from './lead-followup-items'
 import { pushBindingRequestItems } from './binding-request-items'
@@ -359,6 +360,12 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // Story 自动发布没发出去 / 不知道发没发出去 / 已授权却没动静
     (b) => pushStoryLiteItems(supabase, b, now, nameOf, { live: process.env.STORY_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
       console.warn('[manual-items] Story 自动发布待办检查失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushWeekPackItems(supabase, b, now, nameOf, {
+      WEEKLY_PACK_APPROVAL_ENABLED: process.env.WEEKLY_PACK_APPROVAL_ENABLED,
+      WEEKLY_PACK_REEL_GO_PUBLIC: process.env.WEEKLY_PACK_REEL_GO_PUBLIC,
+    }, ids).catch((e) =>
+      console.warn('[manual-items] 每周整包待办检查失败（不阻塞其他待办）:', e),
     ),
     // 本周已批准方案的进度复查 —— 只通知建议，不要求按这条去改方案
     (b) => pushPrescriptionItems(supabase, b, now, nameOf).catch((e) =>
