@@ -16,6 +16,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
+import { ApprovalContextNotes } from './approval-context-notes'
 
 interface PendingItem {
   runId: string
@@ -121,6 +122,7 @@ export default function AutoPausePanel({ clientId }: { readonly clientId: string
           <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
             广告组：{it.adsetName ?? '（名字没记下）'}（编号 {it.adsetId ?? '未知'}）· 诊断日：{it.insightDate ?? '未知'}
           </div>
+          <ApprovalContextNotes clientId={clientId} adsetId={it.adsetId} runId={it.runId} runStatus="pending_approval" />
           {!it.expectedDecisionId && (
             <div style={{ fontSize: 12, color: '#b91c1c', marginBottom: 8 }}>
               这条的审批记录对不上，先别点——它不会自己执行。回我一句「查一下这条暂停建议」我来理顺。
