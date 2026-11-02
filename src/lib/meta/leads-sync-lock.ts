@@ -10,6 +10,11 @@
  * A yielded run deletes its own `running` row. If that delete fails, it
  * finishes as completed with `summary.skipped = 'overlap'` so the row cannot
  * stay `running`, and readers skip that summary when they judge streaks.
+ *
+ * The insert's `started_at` is the database clock, which is later than the
+ * timestamp captured at request entry. The second read therefore judges rows
+ * with a clock taken after that read returns. Using the entry timestamp drops
+ * both new rows (`age < 0`) and both runs continue.
  */
 
 import type { CronRunFinishOpts } from '@/lib/cron/run-logger'
@@ -63,7 +68,10 @@ export async function claimMetaLeadsSyncRun(deps: {
   const started = await deps.start()
   const second = await deps.listRunning()
   if (second.readError) return { proceed: true, finish: started.finish }
-  const owner = pickRunningOwner(second.rows, deps.now, deps.freshForMs)
+  // One decision against the post-insert snapshot. `Date.now` here is after
+  // both inserts are visible, so a row written a moment after request entry
+  // still counts. The oldest fresh row is the only one that continues.
+  const owner = pickRunningOwner(second.rows, new Date(Date.now()), deps.freshForMs)
   if (!owner || owner.id === started.id) return { proceed: true, finish: started.finish }
 
   const releaseError = await deps.release(started.id)

@@ -52,6 +52,7 @@ describe('claimMetaLeadsSyncRun', () => {
   })
 
   it('yields and deletes its own row when another run is older', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW.getTime())
     const finish = vi.fn()
     const release = vi.fn(async () => null)
     let calls = 0
@@ -78,6 +79,7 @@ describe('claimMetaLeadsSyncRun', () => {
   })
 
   it('finishes an overlap summary when the delete fails', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(NOW.getTime())
     const finish = vi.fn(async () => undefined)
     let calls = 0
     const claim = await claimMetaLeadsSyncRun({
@@ -104,6 +106,65 @@ describe('claimMetaLeadsSyncRun', () => {
       summary: { skipped: 'overlap', activeRunId: 'run-old' },
     })
     expect(claim).toEqual({ proceed: false, activeRunId: 'run-old' })
+  })
+
+  it('lets only the older insert continue when two claims both miss the first read', async () => {
+    const requestNow = new Date('2026-11-01T02:25:00.000Z')
+    const insertedAt = new Date(requestNow.getTime() + 100).toISOString()
+    vi.spyOn(Date, 'now').mockReturnValue(requestNow.getTime() + 200)
+
+    const rows: { id: string; startedAt: string }[] = []
+    let firstReads = 0
+    let openFirst: () => void = () => {}
+    const firstGate = new Promise<void>((resolve) => {
+      openFirst = resolve
+    })
+    let inserts = 0
+    let openInserts: () => void = () => {}
+    const insertGate = new Promise<void>((resolve) => {
+      openInserts = resolve
+    })
+    const finishes = new Map<string, ReturnType<typeof vi.fn>>()
+    const released: string[] = []
+
+    const listRunning = vi.fn(async () => {
+      if (firstReads < 2) {
+        firstReads += 1
+        if (firstReads === 2) openFirst()
+        await firstGate
+        return { rows: [] as { id: string; startedAt: string }[], readError: null }
+      }
+      return { rows: rows.slice(), readError: null }
+    })
+
+    const start = vi.fn(async () => {
+      inserts += 1
+      const id = inserts === 1 ? 'run-a' : 'run-b'
+      rows.push({ id, startedAt: insertedAt })
+      const finish = vi.fn(async () => undefined)
+      finishes.set(id, finish)
+      if (inserts === 2) openInserts()
+      await insertGate
+      return { id, finish }
+    })
+
+    const claim = () => claimMetaLeadsSyncRun({
+      now: requestNow,
+      freshForMs: FRESH,
+      listRunning,
+      start,
+      release: async (id) => {
+        released.push(id)
+        return null
+      },
+    })
+
+    const [left, right] = await Promise.all([claim(), claim()])
+    const continued = [left, right].filter((result) => result.proceed)
+    expect(continued).toHaveLength(1)
+    expect(continued[0]).toMatchObject({ proceed: true, finish: finishes.get('run-a') })
+    expect(released).toEqual(['run-b'])
+    expect(finishes.get('run-b')).not.toHaveBeenCalled()
   })
 
   it('continues when the lock read fails', async () => {
