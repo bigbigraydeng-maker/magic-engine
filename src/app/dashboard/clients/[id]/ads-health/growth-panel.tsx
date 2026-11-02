@@ -15,6 +15,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { BUDGET_HOLD_NOTE } from '@/lib/ads-strategy/war-map/followup'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
+import { ApprovalContextNotes } from './approval-context-notes'
 
 export type GrowthVerdict = 'on_track' | 'behind' | 'unreachable_within_caps' | 'unknown'
 
@@ -167,6 +168,14 @@ function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: st
     <div className="mt-3 rounded-lg border border-sky-200 bg-white p-3 text-xs text-gray-700">
       <p>这是系统建议，不会自动加预算。批准后最多上调 20%，并受客户预算上限约束。</p>
       {typeof before === 'number' && typeof after === 'number' && <p className="mt-1">当前{budgetTarget}日预算 {money(before)} → 建议 {money(after)}</p>}
+      {(pending ?? active ?? terminal) && (
+        <ApprovalContextNotes
+          clientId={clientId}
+          adsetId={adsetId}
+          runId={(pending ?? active ?? terminal)!.id}
+          runStatus={(pending ?? active ?? terminal)!.status}
+        />
+      )}
       {typeof o1Evidence.ctr_by_day === 'string' && <p className="mt-1 text-gray-500">最近三天 CTR：{o1Evidence.ctr_by_day.split('|').join(' / ')}；账户中位数：{String(o1Evidence.median_by_day ?? '—').split('|').join(' / ')}</p>}
       {pending ? (
         <>
