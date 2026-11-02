@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest'
 
 import {
   UNREADABLE_DISPLAY,
+  MAX_ACTION_ROWS,
+  MAX_PAGE_METRIC_ROWS,
+  assertNoError,
   buildPageRollupSnapshot,
   buildSocialPlanningContextFromRows,
   buildT72PostSnapshots,
@@ -189,6 +192,67 @@ describe('buildSocialPlanningContextFromRows — empty client', () => {
     })
     expect(ctx.page_rollup.metrics.posts_7d.display).toBe(UNREADABLE_DISPLAY)
     expect(ctx.page_rollup.metrics.reactions_7d.display).toBe(UNREADABLE_DISPLAY)
+    expect(ctx.truncated).toEqual({ window_actions: false, page_metrics: false })
+  })
+})
+
+describe('buildSocialPlanningContextFromRows — measured zero through aggregation', () => {
+  it('T+72 receipt zeros and posts_7d zero stay kind value; shares_7d stays unreadable', () => {
+    const ctx = buildSocialPlanningContextFromRows(
+      baseRows({
+        windowActions: [
+          {
+            id: 'act-zero',
+            executed_at: '2026-10-22T08:00:00.000Z',
+            payload: {
+              source: 'daily_plan',
+              idempotency_key: 'post-zero',
+              published_at: '2026-10-22T08:00:00.000Z',
+            },
+          },
+        ],
+        receipts: [
+          {
+            action_id: 'act-zero',
+            window_hours: 72,
+            status: 'ok',
+            measured_at: '2026-10-25T08:00:00.000Z',
+            values: { likes: 0, comments: 0, shares: 0 },
+            missing: {},
+            reason: null,
+          },
+        ],
+        pageMetrics: [
+          {
+            metric_key: 'social.fb.posts_7d',
+            metric_value: 0,
+            measured_at: '2026-10-27T04:00:00.000Z',
+          },
+          {
+            metric_key: 'social.fb.shares_7d',
+            metric_value: 0,
+            measured_at: '2026-10-27T04:00:00.000Z',
+          },
+        ],
+      }),
+    )
+
+    const row = ctx.t72.posts[0]
+    expect(row.likes).toEqual({ display: '0', kind: 'value' })
+    expect(row.comments).toEqual({ display: '0', kind: 'value' })
+    expect(row.shares).toEqual({ display: '0', kind: 'value' })
+
+    expect(ctx.page_rollup.metrics.posts_7d).toEqual({ display: '0', kind: 'value' })
+    expect(ctx.page_rollup.metrics.shares_7d.display).toBe(UNREADABLE_DISPLAY)
+    expect(ctx.page_rollup.metrics.shares_7d.kind).toBe('unreadable')
+  })
+})
+
+describe('assertNoError', () => {
+  it('throws with table name when error is set', () => {
+    expect(() => assertNoError('flywheel_actions', { message: 'connection reset' })).toThrow(
+      'loadSocialPlanningContext: flywheel_actions — connection reset',
+    )
   })
 })
 
@@ -207,10 +271,40 @@ describe('loadSocialPlanningContext', () => {
     ) => void
   }
 
-  function makeFake(config: Record<string, { data: unknown; error: null }>): { from: (t: string) => FakeQuery } {
+  type TableResult = { data: unknown; error: { message: string } | null }
+
+  function makeFake(config: Record<string, TableResult>): { from: (t: string) => FakeQuery } {
     return {
       from: (table: string) => {
         const row = config[table] ?? { data: [], error: null }
+        const query: FakeQuery = {
+          select: () => query,
+          eq: () => query,
+          gte: () => query,
+          lte: () => query,
+          in: () => query,
+          like: () => query,
+          order: () => query,
+          limit: () => query,
+          then: (resolve) => resolve(row),
+        }
+        return query
+      },
+    }
+  }
+
+  function makeSequentialFlywheelActionsFake(
+    windowData: unknown,
+    tuneData: unknown,
+    other: Record<string, TableResult> = {},
+  ): { from: (t: string) => FakeQuery } {
+    let flywheelCalls = 0
+    return {
+      from: (table: string) => {
+        const row: TableResult =
+          table === 'flywheel_actions'
+            ? { data: ++flywheelCalls === 1 ? windowData : tuneData, error: null }
+            : (other[table] ?? { data: [], error: null })
         const query: FakeQuery = {
           select: () => query,
           eq: () => query,
@@ -238,5 +332,127 @@ describe('loadSocialPlanningContext', () => {
     expect(ctx.client_id).toBe(CLIENT)
     expect(ctx.t72.posts).toEqual([])
     expect(ctx.page_rollup.metrics.top_post_score.display).toBe(UNREADABLE_DISPLAY)
+    expect(ctx.truncated).toEqual({ window_actions: false, page_metrics: false })
+  })
+
+  it('throws when the first flywheel_actions query errors', async () => {
+    await expect(
+      loadSocialPlanningContext(
+        makeFake({
+          flywheel_actions: { data: null, error: { message: 'timeout' } },
+        }) as never,
+        {
+          clientId: CLIENT,
+          since: new Date(WINDOW_SINCE),
+          until: new Date(WINDOW_UNTIL),
+        },
+      ),
+    ).rejects.toThrow('loadSocialPlanningContext: flywheel_actions — timeout')
+  })
+
+  it('runs the campaignId tune branch and evaluates suggestions', async () => {
+    const supabase = makeSequentialFlywheelActionsFake(
+      [
+        {
+          id: 'win-1',
+          executed_at: '2026-10-22T08:00:00.000Z',
+          payload: { source: 'daily_plan', idempotency_key: 'win-post' },
+        },
+      ],
+      [
+        {
+          id: 'tune-1',
+          payload: {
+            source: 'daily_plan',
+            idempotency_key: 't1',
+            campaign_id: CAMPAIGN,
+          },
+        },
+        {
+          id: 'tune-2',
+          payload: {
+            source: 'daily_plan',
+            idempotency_key: 't2',
+            campaign_id: CAMPAIGN,
+          },
+        },
+        {
+          id: 'tune-3',
+          payload: {
+            source: 'daily_plan',
+            idempotency_key: 't3',
+            campaign_id: CAMPAIGN,
+          },
+        },
+        {
+          id: 'tune-4',
+          payload: {
+            source: 'daily_plan',
+            idempotency_key: 't4',
+            campaign_id: CAMPAIGN,
+          },
+        },
+      ],
+      {
+        flywheel_metrics: { data: [], error: null },
+        social_post_measurement_receipts: {
+          data: [
+            {
+              action_id: 'win-1',
+              window_hours: 72,
+              status: 'ok',
+              measured_at: '2026-10-25T08:00:00.000Z',
+              values: { likes: 1 },
+              missing: {},
+              reason: null,
+            },
+            { action_id: 'tune-1', window_hours: 72, status: 'ok', values: { likes: 20, comments: 1 }, missing: {} },
+            { action_id: 'tune-2', window_hours: 72, status: 'ok', values: { likes: 10, comments: 1 }, missing: {} },
+            { action_id: 'tune-3', window_hours: 72, status: 'ok', values: { likes: 10, comments: 1 }, missing: {} },
+            { action_id: 'tune-4', window_hours: 72, status: 'ok', values: { likes: 10, comments: 1 }, missing: {} },
+          ],
+          error: null,
+        },
+      },
+    )
+
+    const ctx = await loadSocialPlanningContext(supabase as never, {
+      clientId: CLIENT,
+      campaignId: CAMPAIGN,
+      since: new Date(WINDOW_SINCE),
+      until: new Date(WINDOW_UNTIL),
+    })
+
+    expect(ctx.tune.available).toBe(true)
+    expect(ctx.tune.by_idempotency_key.t1?.decision).toBe('REPEAT')
+    expect(ctx.t72.with_t72_receipt_count).toBe(1)
+  })
+
+  it('sets truncated when row caps are hit', async () => {
+    const windowActions = Array.from({ length: MAX_ACTION_ROWS }, (_, i) => ({
+      id: `act-${i}`,
+      executed_at: '2026-10-22T08:00:00.000Z',
+      payload: { source: 'daily_plan', idempotency_key: `p-${i}` },
+    }))
+    const pageMetrics = Array.from({ length: MAX_PAGE_METRIC_ROWS }, (_, i) => ({
+      metric_key: 'social.fb.posts_7d',
+      metric_value: i,
+      measured_at: new Date(Date.UTC(2026, 9, 1, 0, 0, i)).toISOString(),
+    }))
+
+    const ctx = await loadSocialPlanningContext(
+      makeFake({
+        flywheel_actions: { data: windowActions, error: null },
+        flywheel_metrics: { data: pageMetrics, error: null },
+        social_post_measurement_receipts: { data: [], error: null },
+      }) as never,
+      {
+        clientId: CLIENT,
+        since: new Date(WINDOW_SINCE),
+        until: new Date(WINDOW_UNTIL),
+      },
+    )
+
+    expect(ctx.truncated).toEqual({ window_actions: true, page_metrics: true })
   })
 })

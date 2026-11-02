@@ -27,8 +27,17 @@ export const UNREADABLE_DISPLAY = '没读到'
 export const T72_WINDOW_HOURS = 72
 const DAILY_PLAN_SOURCE = 'daily_plan'
 const TUNE_ACTION_LIMIT = 50
-const MAX_ACTION_ROWS = 200
-const MAX_PAGE_METRIC_ROWS = 500
+/** Window flywheel_actions query cap — at-limit rows may omit older publishes. */
+export const MAX_ACTION_ROWS = 200
+/** Page rollup flywheel_metrics query cap — at-limit rows may omit older snapshots. */
+export const MAX_PAGE_METRIC_ROWS = 500
+
+export interface PlanningContextTruncated {
+  /** `flywheel_actions` window query returned MAX_ACTION_ROWS rows. */
+  window_actions: boolean
+  /** `flywheel_metrics` query returned MAX_PAGE_METRIC_ROWS rows. */
+  page_metrics: boolean
+}
 
 export interface MetricDisplay {
   display: string
@@ -89,6 +98,8 @@ export interface SocialPlanningContext {
     measured_at: string | null
     metrics: PageRollupMetrics
   }
+  /** Set when a loader query hit its row cap (may be incomplete). */
+  truncated: PlanningContextTruncated
 }
 
 export interface LoadSocialPlanningContextInput {
@@ -241,6 +252,7 @@ export interface PlanningContextRows {
   pageMetrics: PageMetricRow[]
   tuneActions: CampaignActionRow[]
   tuneReceipts: CampaignReceiptRow[]
+  truncated?: PlanningContextTruncated
 }
 
 export function buildSocialPlanningContextFromRows(input: PlanningContextRows): SocialPlanningContext {
@@ -260,6 +272,7 @@ export function buildSocialPlanningContextFromRows(input: PlanningContextRows): 
   const tuneSummary = summarizeTuneSuggestions(tuneSuggestions)
 
   const page_rollup = buildPageRollupSnapshot(input.pageMetrics)
+  const truncated = input.truncated ?? { window_actions: false, page_metrics: false }
 
   return {
     client_id: input.clientId,
@@ -277,6 +290,7 @@ export function buildSocialPlanningContextFromRows(input: PlanningContextRows): 
       by_idempotency_key: tuneSummary.by_idempotency_key,
     },
     page_rollup,
+    truncated,
   }
 }
 
@@ -285,7 +299,8 @@ function toRows<T>(data: unknown): T[] {
   return data
 }
 
-function assertNoError(table: string, error: { message: string } | null): void {
+/** Throws when Supabase returned an error — load path must not render empty as success. */
+export function assertNoError(table: string, error: { message: string } | null): void {
   if (error) throw new Error(`loadSocialPlanningContext: ${table} — ${error.message}`)
 }
 
@@ -401,5 +416,9 @@ export async function loadSocialPlanningContext(
     pageMetrics,
     tuneActions,
     tuneReceipts,
+    truncated: {
+      window_actions: windowActions.length >= MAX_ACTION_ROWS,
+      page_metrics: pageMetrics.length >= MAX_PAGE_METRIC_ROWS,
+    },
   })
 }
