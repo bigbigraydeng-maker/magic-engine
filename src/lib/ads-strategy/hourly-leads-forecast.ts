@@ -60,11 +60,16 @@ export function todayArrivedForForecast(todayHours: readonly number[], currentHo
   return sumThroughHour(todayHours, lastReliableHour)
 }
 
+function historyReliableHour(currentHour: number): number {
+  return currentHour - FORECAST_PROVISIONAL_HOURS
+}
+
 export function computeDailyLeadForecast(
   byDay: ReadonlyMap<string, number[]>,
   today: string,
   currentHour: number,
 ): LeadForecast {
+  const lastReliableHour = historyReliableHour(currentHour)
   const proportions: number[] = []
   for (let d = 1; d <= FORECAST_HISTORY_DAYS; d++) {
     const day = isoDayMinus(today, d)
@@ -72,7 +77,8 @@ export function computeDailyLeadForecast(
     if (!hours) continue
     const total = dayTotal(hours)
     if (total < FORECAST_MIN_DAY_TOTAL) continue
-    const through = sumThroughHour(hours, currentHour)
+    if (lastReliableHour < 0) continue
+    const through = sumThroughHour(hours, lastReliableHour)
     proportions.push(through / total)
   }
 

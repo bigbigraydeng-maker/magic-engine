@@ -50,7 +50,7 @@ describe('todayArrivedForForecast', () => {
 
 describe('computeDailyLeadForecast thresholds', () => {
   it(`needs at least ${FORECAST_MIN_ELIGIBLE_DAYS} eligible history days`, () => {
-    const byDay = seedHistory(TODAY, FORECAST_MIN_ELIGIBLE_DAYS - 1, 8, CURRENT_HOUR)
+    const byDay = seedHistory(TODAY, FORECAST_MIN_ELIGIBLE_DAYS - 1, 8, CURRENT_HOUR - 2)
     byDay.set(TODAY, emptyDay())
     const r = computeDailyLeadForecast(byDay, TODAY, CURRENT_HOUR)
     expect(r.status).toBe('insufficient')
@@ -68,8 +68,25 @@ describe('computeDailyLeadForecast thresholds', () => {
     expect(r.status).toBe('insufficient')
   })
 
+  it('20% 门槛与「已到」同样截掉最近 2 小时（勿用当前 hour 算历史占比）', () => {
+    const byDay = new Map<string, number[]>()
+    for (let d = 1; d <= 20; d++) {
+      const day = isoDayMinus(TODAY, d)
+      const hours = emptyDay()
+      for (let h = 0; h <= 14; h++) hours[h] = 1
+      hours[15] = 40
+      hours[16] = 40
+      byDay.set(day, hours)
+    }
+    const todayHours = emptyDay()
+    for (let h = 0; h <= 14; h++) todayHours[h] = 1
+    byDay.set(TODAY, todayHours)
+    const r = computeDailyLeadForecast(byDay, TODAY, CURRENT_HOUR)
+    expect(r.status).toBe('insufficient')
+  })
+
   it(`needs today arrived ≥ ${FORECAST_MIN_TODAY_ARRIVED} (after provisional cut)`, () => {
-    const byDay = seedHistory(TODAY, 20, 10, CURRENT_HOUR)
+    const byDay = seedHistory(TODAY, 20, 10, CURRENT_HOUR - 2)
     const todayHours = emptyDay()
     todayHours[10] = FORECAST_MIN_TODAY_ARRIVED - 1
     byDay.set(TODAY, todayHours)
@@ -80,7 +97,7 @@ describe('computeDailyLeadForecast thresholds', () => {
 
 describe('computeDailyLeadForecast range maths', () => {
   it('returns a range only (no point field)', () => {
-    const byDay = seedHistory(TODAY, 20, 10, CURRENT_HOUR)
+    const byDay = seedHistory(TODAY, 20, 10, CURRENT_HOUR - 2)
     const todayHours = emptyDay()
     todayHours[10] = 6
     byDay.set(TODAY, todayHours)
