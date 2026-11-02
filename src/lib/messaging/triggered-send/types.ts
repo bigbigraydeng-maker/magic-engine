@@ -31,9 +31,14 @@ export type DncRead = { ok: true; blocked: boolean } | { ok: false; error: strin
 /**
  * The contact's state in the client's Mailchimp audience.
  * `suppressed` = unsubscribed / cleaned / archived; `not_applicable` = the client has no Mailchimp audience.
+ * `tags` = the member's tags (empty when there is no member).
  */
 export type MemberRead =
-  | { ok: true; state: 'active' | 'suppressed' | 'not_in_audience' | 'not_applicable' }
+  | {
+      ok: true
+      state: 'active' | 'suppressed' | 'not_in_audience' | 'not_applicable'
+      tags: readonly string[]
+    }
   | { ok: false; error: string }
 
 /** What the old daily welcome batch did for one contact, read from its Mailchimp campaigns. */
@@ -72,6 +77,7 @@ export type SkipReason =
   | 'not_in_allowlist'
   | 'dnc'
   | 'mailchimp_suppressed'
+  | 'excluded_tag'
   | 'no_consent_basis'
   | 'sales_email_exists'
   | 'frequency_full'
@@ -106,7 +112,7 @@ export type ShadowDecision =
       consentBasis: string | null
       sourceRef: string | null
     }
-  | { kind: 'defer'; reasonCode: DeferReason }
+  | { kind: 'defer'; reasonCode: DeferReason; detail: string }
 
 // ── Loaders and the sweep (the orchestration around the pure gates) ─────────────────────────────────────
 
@@ -163,6 +169,8 @@ export interface SweepReceipt {
   would_send: number
   skipped_by_reason: Record<string, number>
   deferred_by_reason: Record<string, number>
+  /** The first error text seen per deferral reason, e-mail addresses removed and cut short (to find out WHY reads fail). */
+  deferred_samples: Record<string, string>
   legacy_batches: LegacyBatchSeen[]
   no_send: true
   provider_impact: 'NONE'
@@ -208,6 +216,7 @@ export interface ChunkResult {
   would_send: number
   skipped_by_reason: Record<string, number>
   deferred_by_reason: Record<string, number>
+  deferred_samples: Record<string, string>
   legacy_batches: LegacyBatchSeen[]
   /** Set when the chunk could not read or write what it needs; what was not decided is counted as deferred. */
   error: string | null

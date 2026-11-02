@@ -91,6 +91,7 @@ function receipt(overrides: Partial<SweepReceipt> = {}): SweepReceipt {
     would_send: 2,
     skipped_by_reason: { stale: 2 },
     deferred_by_reason: { dnc_unverifiable: 1 },
+    deferred_samples: {},
     legacy_batches: [],
     no_send: true,
     provider_impact: 'NONE',
@@ -191,7 +192,7 @@ describe('runSweepOrder', () => {
   function chunkResult(overrides: Partial<ChunkResult> = {}): ChunkResult {
     return {
       decided: 0, already_decided: 0, deferred: 0, inserted: 0, would_send: 0, skipped_by_reason: {}, deferred_by_reason: {},
-      legacy_batches: [], error: null, error_status: null, ...overrides,
+      deferred_samples: {}, legacy_batches: [], error: null, error_status: null, ...overrides,
     }
   }
 
@@ -395,10 +396,17 @@ describe('createProdSweepDeps', () => {
     schedule: { timezone: 'Pacific/Auckland' },
     frequency_cap: { max: 2, window_days: 7 },
     consent: { accepted_bases: ['basis'] },
-    legacy: { mailchimp_campaign_title_prefix: 'legacy_' },
+    legacy: { mailchimp_campaign_title_prefix: 'legacy_', excluded_tags: [] },
     human_mail: { required_mailboxes: ['sales@example.org'] },
     recipient_allowlist: null,
   }
+
+  it('measures the step time with a real clock', () => {
+    const before = Date.now()
+    const reading = createProdSweepDeps().clockMs()
+    expect(reading).toBeGreaterThanOrEqual(before)
+    expect(reading).toBeLessThanOrEqual(Date.now())
+  })
 
   // A refresh that fails while the rehearsal reads the sales mailbox must not flip that connection to "error":
   // that would stop the sales team's own mail sync until somebody reconnects it.

@@ -75,7 +75,7 @@ describe('judgeLead', () => {
     expect(judgeLead(row('c1', null, { would_send: false, legacy_welcomed: true }))).toBe('unexplained')
   })
 
-  it.each(['sales_email_exists', 'dnc', 'mailchimp_suppressed', 'frequency_full'])(
+  it.each(['sales_email_exists', 'dnc', 'mailchimp_suppressed', 'excluded_tag'])(
     'returns explained for the state-dependent reason %s when the batch welcomed and ME would not',
     (reason) => {
       expect(judgeLead(row('c1', reason, { would_send: false, legacy_welcomed: true }))).toBe('explained')
@@ -83,7 +83,7 @@ describe('judgeLead', () => {
   )
 
   // These come from ME's rule or from the data, so a difference they cause is one the PM has to see.
-  it.each(['bad_email', 'system_address', 'not_in_allowlist', 'no_consent_basis'])(
+  it.each(['bad_email', 'system_address', 'not_in_allowlist', 'no_consent_basis', 'frequency_full'])(
     'returns unexplained for the rule/data reason %s when the batch welcomed and ME would not',
     (reason) => {
       expect(judgeLead(row('c1', reason, { would_send: false, legacy_welcomed: true }))).toBe('unexplained')

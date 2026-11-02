@@ -19,7 +19,7 @@ const RULE: TriggeredSendRule = {
   schedule: { timezone: 'Europe/Berlin' },
   frequency_cap: { max: 2, window_days: 14 },
   consent: { accepted_bases: ['marketing'] },
-  legacy: { mailchimp_campaign_title_prefix: 'Welcome Batch' },
+  legacy: { mailchimp_campaign_title_prefix: 'Welcome Batch', excluded_tags: ['sales_active'] },
   human_mail: { required_mailboxes: ['sales@example.org'] },
   recipient_allowlist: null,
 }
@@ -311,6 +311,30 @@ describe('dnc port — the strict default reader', () => {
     expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: false })
   })
 
+  // The old batch skips members carrying `suppressed_do_not_email`, which the CRM puts on "do not contact" AND "not interested".
+  it('is blocked by a touchpoint whose outcome is not_interested', async () => {
+    const { ports } = portsFor({
+      contact_touchpoints: {
+        data: [{ occurred_at: '2026-10-01T00:00:00.000Z', metadata: { outcome: 'not_interested' } }],
+        error: null,
+      },
+    })
+    expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: true })
+  })
+
+  it('a later "do-not-contact cleared" verdict does not clear "not interested"', async () => {
+    const { ports } = portsFor({
+      contact_touchpoints: {
+        data: [
+          { occurred_at: '2026-10-01T00:00:00.000Z', metadata: { outcome: 'not_interested' } },
+          { occurred_at: '2026-10-02T00:00:00.000Z', metadata: { outcome: 'dnc_cleared' } },
+        ],
+        error: null,
+      },
+    })
+    expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: true })
+  })
+
   it('is blocked by a conversation-level opt-out that was never linked to the contact', async () => {
     const { ports } = portsFor({ conversations: { data: [{ id: 'conv-1' }], error: null } })
     expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: true })
@@ -400,7 +424,7 @@ describe('member port', () => {
         }),
       }),
     )
-    expect(await ports.member('lead@example.org')).toEqual({ ok: true, state: 'suppressed' })
+    expect(await ports.member('lead@example.org')).toEqual({ ok: true, state: 'suppressed', tags: [] })
   })
 
   it.each(['subscribed', 'pending', 'transactional'])('maps %s to active', async (status) => {
@@ -412,12 +436,36 @@ describe('member port', () => {
         }),
       }),
     )
-    expect(await ports.member('lead@example.org')).toEqual({ ok: true, state: 'active' })
+    expect(await ports.member('lead@example.org')).toEqual({ ok: true, state: 'active', tags: [] })
+  })
+
+  it('passes the member tags through (a copy)', async () => {
+    const tags = ['fb_lead', 'sales_active']
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        findMember: async () => ({ status: 'found', member: { email: 'lead@example.org', status: 'subscribed', tags } }),
+      }),
+    )
+    const read = await ports.member('lead@example.org')
+    expect(read).toEqual({ ok: true, state: 'active', tags: ['fb_lead', 'sales_active'] })
+    expect(read.ok && read.tags).not.toBe(tags)
+  })
+
+  it('keeps the tags of a suppressed member too', async () => {
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        findMember: async () => ({
+          status: 'found',
+          member: { email: 'lead@example.org', status: 'unsubscribed', tags: ['nurture_2027'] },
+        }),
+      }),
+    )
+    expect(await ports.member('lead@example.org')).toEqual({ ok: true, state: 'suppressed', tags: ['nurture_2027'] })
   })
 
   it('maps not_in_audience', async () => {
     const { ports } = createShadowGatePorts(makeDeps({ findMember: async () => ({ status: 'not_in_audience' }) }))
-    expect(await ports.member('lead@example.org')).toEqual({ ok: true, state: 'not_in_audience' })
+    expect(await ports.member('lead@example.org')).toEqual({ ok: true, state: 'not_in_audience', tags: [] })
   })
 
   it('maps a findMember error to ok:false with the reason', async () => {
@@ -431,7 +479,7 @@ describe('member port', () => {
     const { ports } = createShadowGatePorts(
       makeDeps({ mailchimp: makeMailchimpPort({ readAudience: async () => ({ ok: true, audienceId: '' }) }) }),
     )
-    expect(await ports.member('lead@example.org')).toEqual({ ok: true, state: 'not_applicable' })
+    expect(await ports.member('lead@example.org')).toEqual({ ok: true, state: 'not_applicable', tags: [] })
   })
 
   it('returns ok:false when the audience read fails', async () => {
@@ -695,23 +743,38 @@ describe('the old daily batch', () => {
     expect(calls).toEqual(['camp-edge'])
   })
 
-  it('"seen recently" means a batch campaign sent within the last 20 hours, to the millisecond', async () => {
-    async function batchSeenFor(sentAt: string): Promise<boolean | undefined> {
-      const { ports } = createShadowGatePorts(
-        makeDeps({
-          evaluate: mailchimpEvaluate(),
-          mailchimp: makeMailchimpPort({
-            listSentCampaigns: async () => [campaign({ id: 'camp-t', title: 'Welcome Batch t', sentAt })],
-          }),
+  async function batchSeenFor(sentAt: string, rule: TriggeredSendRule = RULE): Promise<boolean | undefined> {
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        rule,
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({
+          listSentCampaigns: async () => [campaign({ id: 'camp-t', title: 'Welcome Batch t', sentAt })],
         }),
-      )
-      const read = await ports.evidence(CONTACT)
-      return read.ok ? read.legacy.batchSeen : undefined
-    }
-    expect(await batchSeenFor('2026-11-01T12:00:00.000Z')).toBe(true) // exactly 20 h before NOW
-    expect(await batchSeenFor('2026-11-01T11:59:59.999Z')).toBe(false)
+      }),
+    )
+    const read = await ports.evidence(CONTACT)
+    return read.ok ? read.legacy.batchSeen : undefined
+  }
+
+  // The rule's zone is Europe/Berlin (UTC+1 on 2026-11-02): local midnight of that day is 2026-11-01T23:00:00Z.
+  it('"the batch has run" means one of its campaigns went out TODAY in the rule time zone, and not in the future', async () => {
+    expect(await batchSeenFor('2026-11-01T23:00:00.000Z')).toBe(true) // the first moment of today
+    expect(await batchSeenFor('2026-11-01T22:59:59.999Z')).toBe(false) // the last moment of yesterday
     expect(await batchSeenFor('2026-11-02T08:00:00.000Z')).toBe(true) // sent at this very moment
     expect(await batchSeenFor('2026-11-02T08:00:00.001Z')).toBe(false) // dated in the future: not trusted
+  })
+
+  it('judges "today" in the rule time zone, not in UTC', async () => {
+    const auckland: TriggeredSendRule = { ...RULE, schedule: { timezone: 'Pacific/Auckland' } }
+    // NOW is 21:00 on 2026-11-02 in Auckland (UTC+13); that day began at 2026-11-01T11:00:00Z
+    expect(await batchSeenFor('2026-11-01T11:00:00.000Z', auckland)).toBe(true)
+    expect(await batchSeenFor('2026-11-01T10:59:59.999Z', auckland)).toBe(false)
+  })
+
+  it('an unusable time zone means the batch can never be called seen', async () => {
+    const broken: TriggeredSendRule = { ...RULE, schedule: { timezone: 'Not/AZone' } }
+    expect(await batchSeenFor('2026-11-02T06:00:00.000Z', broken)).toBe(false)
   })
 
   it('does not trip over a campaign with an unreadable send time', async () => {
@@ -743,6 +806,33 @@ describe('the old daily batch', () => {
     const read = await ports.evidence(CONTACT)
     expect(read).toMatchObject({ ok: true, legacy: { welcomed: false, batchSeen: false } })
     if (read.ok) expect(read.items.map((i) => i.id)).toEqual(['mc:camp-like:lead@example.org'])
+  })
+
+  it('still refuses a full page of campaigns, counted before the batch ones are taken out', async () => {
+    const page = (batchCount: number, total: number): MailchimpCampaign[] =>
+      Array.from({ length: total }, (_, i) =>
+        campaign({
+          id: `camp-${i}`,
+          title: i < batchCount ? `Welcome Batch ${i}` : `Newsletter ${i}`,
+          sentAt: '2026-11-01T06:00:00.000Z',
+        }),
+      )
+    async function readWith(campaigns: MailchimpCampaign[]) {
+      const { ports } = createShadowGatePorts(
+        makeDeps({
+          evaluate: mailchimpEvaluate(),
+          mailchimp: makeMailchimpPort({ listSentCampaigns: async () => campaigns }),
+        }),
+      )
+      return ports.evidence(CONTACT)
+    }
+    // 100 returned (10 of them the batch): the API may have more that we did not see
+    expect(await readWith(page(10, 100))).toEqual({
+      ok: false,
+      error: 'too many Mailchimp campaigns in the window to check them all',
+    })
+    // 99 returned: complete
+    expect((await readWith(page(10, 99))).ok).toBe(true)
   })
 
   it('fails the read (does not guess) when the batch report cannot be read', async () => {
@@ -850,6 +940,55 @@ describe('mailbox pages are read once per ports object', () => {
     expect(await ports.evidence(CONTACT)).toMatchObject({ ok: false })
     expect((await ports.evidence({ ...CONTACT, contactId: 'c-2' })).ok).toBe(true)
     expect(graphGetPage).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('slow answers are cut off', () => {
+  it('gives up on the Mailchimp member lookup after 10 seconds', async () => {
+    vi.useFakeTimers()
+    try {
+      const { ports } = createShadowGatePorts(makeDeps({ findMember: () => new Promise(() => undefined) }))
+      const read = ports.member('lead@example.org')
+      await vi.advanceTimersByTimeAsync(9_999)
+      let settled = false
+      void read.then(() => {
+        settled = true
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(2)
+      expect(await read).toEqual({ ok: false, error: 'Mailchimp member lookup timed out' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('gives up on the old-batch check after 10 seconds', async () => {
+    vi.useFakeTimers()
+    try {
+      const BATCH = campaign({ id: 'camp-batch', title: 'Welcome Batch 2026-11-02', sentAt: '2026-11-02T06:00:00.000Z' })
+      const { ports } = createShadowGatePorts(
+        makeDeps({
+          evaluate: mailchimpEvaluate(),
+          mailchimp: makeMailchimpPort({
+            listSentCampaigns: async () => [BATCH],
+            getCampaignRecipientStatus: () => new Promise(() => undefined),
+          }),
+        }),
+      )
+      const read = ports.evidence(CONTACT)
+      await vi.advanceTimersByTimeAsync(9_999)
+      let settled = false
+      void read.then(() => {
+        settled = true
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(settled).toBe(false)
+      await vi.advanceTimersByTimeAsync(2)
+      expect(await read).toEqual({ ok: false, error: 'old-batch check timed out' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

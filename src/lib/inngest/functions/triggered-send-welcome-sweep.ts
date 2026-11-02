@@ -288,6 +288,7 @@ export function createProdSweepDeps(): SweepDeps {
   const store = createMailNewStore()
   return {
     now: () => new Date(),
+    clockMs: () => Date.now(),
     loadAuthorization: (clientId) => loadOpenAuthorization(supabaseAdmin, clientId),
     loadContacts: (a) => loadLeadContacts(supabaseAdmin, a),
     loadContactsByIds: (a) => loadContactsByIds(supabaseAdmin, a),

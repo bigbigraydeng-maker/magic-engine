@@ -7,7 +7,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 
-import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
+import type { DncTouch } from '@/lib/crm/dnc'
+import { needsSuppression } from '@/lib/mailchimp/suppression-sync'
 import { readAudienceId, type AudienceIdRead } from '@/lib/mailchimp/audience-config'
 import { findMemberByEmail, type FindMemberResult } from '@/lib/mailchimp/tags'
 import {
@@ -22,6 +23,7 @@ import {
 } from '@/lib/crm/email-templates/frequency-sources-prod'
 import { evaluateFrequency } from '@/lib/crm/email-templates/gates/frequency'
 
+import { localDay } from './candidates'
 import type { TriggeredSendRule } from './rule'
 import type {
   ConsentRead,
@@ -60,14 +62,32 @@ const SUPPRESSED_STATUSES = new Set(['unsubscribed', 'cleaned', 'archived'])
 /** One contact's e-mail evidence may take this long. A chunk step holds a few contacts and the host cuts a request after ~2 min. */
 const EVIDENCE_BUDGET_MS = 15_000
 
-/** The old batch counts as "has run recently" if one of its campaigns went out in the last 20 hours (today's, not yesterday's). */
-const BATCH_FRESH_MS = 20 * 3_600_000
+/** The batch check and the Mailchimp member lookup have no timeout of their own: bound them, so one slow answer cannot eat the whole chunk step. */
+const LEGACY_BUDGET_MS = 10_000
+const MEMBER_BUDGET_MS = 10_000
 
 /** A batch campaign sent before the lead came in (minus a margin for clock differences) cannot have welcomed that lead. */
 const BATCH_BEFORE_LEAD_MARGIN_MS = 10 * 60_000
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** Rejects with `message` if `work` has not settled after `ms` (the work itself is not cancelled). */
+function withDeadline<T>(work: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    work.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (err: unknown) => {
+        clearTimeout(timer)
+        reject(err)
+      },
+    )
+  })
 }
 
 // ── consent ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -123,11 +143,14 @@ async function readConsent(
 // ── do-not-contact ──────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Same question and same judge as `isContactOptedOutAnyChannel` (messenger-agent/optout.ts): the contact column, the
- * touchpoint verdicts (`isDoNotContact`, the single source of the verdict) and a conversation-level opt-out that was
- * never linked to a contact. The difference is the ONLY one that matters here: that function answers "blocked" when a
- * read fails (right for sending, because it fails closed), which in the shadow run would freeze an innocent lead as
- * "do not contact" forever. Here a failed read stays a failed read, and the contact is tried again later.
+ * Same question as `isContactOptedOutAnyChannel` (messenger-agent/optout.ts: the contact column, the touchpoint verdicts and
+ * a conversation-level opt-out that was never linked to a contact), with two differences:
+ *  - the judge is `needsSuppression` (do-not-contact OR "not interested"): exactly what puts the old batch's skip tag
+ *    `suppressed_do_not_email` on a member (suppression-sync.ts), so ME skips the same people;
+ *  - that function answers "blocked" when a read fails (right for sending, because it fails closed), which in the shadow
+ *    run would freeze an innocent lead as "do not contact" forever. Here a failed read stays a failed read, and the contact
+ *    is tried again later.
+ * If `isContactOptedOutAnyChannel` gains a new signal, add it here too (it is copied on purpose: that file is not ours).
  */
 async function readDncStrict(db: SupabaseClient, clientId: string, contactId: string): Promise<DncRead> {
   try {
@@ -158,7 +181,7 @@ async function readDncStrict(db: SupabaseClient, clientId: string, contactId: st
       }
     })
     const unlinkedOptOut = Array.isArray(unlinkedResult.data) && unlinkedResult.data.length > 0
-    return { ok: true, blocked: unlinkedOptOut || isDoNotContact(contactFlag, touches) }
+    return { ok: true, blocked: unlinkedOptOut || needsSuppression({ doNotContactFlag: contactFlag, touches }) }
   } catch (err) {
     return { ok: false, error: errorMessage(err) }
   }
@@ -228,6 +251,11 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
       const promise = baseMailchimp
         .listSentCampaigns(apiKey, opts)
         .then((campaigns) => {
+          // The evidence source refuses a full page (there may be more campaigns than it saw). The old batch's own campaigns
+          // are taken out below, so the page must be judged by what the API returned, not by what is left of it.
+          if (campaigns.length >= opts.count) {
+            throw new Error('too many Mailchimp campaigns in the window to check them all')
+          }
           for (const campaign of campaigns) {
             if (!isBatchCampaign(campaign)) continue
             legacyBatchById.set(campaign.id, {
@@ -295,11 +323,17 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
   async function readLegacy(contact: ShadowContact): Promise<LegacyEvidence> {
     const batches = [...legacyBatchById.values()].sort(compareLegacyBatches)
     const nowMs = deps.now.getTime()
-    const batchSeen = batches.some((batch) => {
-      if (batch.sentAt === null) return false
-      const age = nowMs - Date.parse(batch.sentAt)
-      return age >= 0 && age <= BATCH_FRESH_MS
-    })
+    // "The old batch has run" = one of its campaigns went out today (in the rule's time zone) and not in the future.
+    // A sweep before the batch's usual time, or on a day it did not run, cannot say "not welcomed".
+    const timeZone = deps.rule.schedule.timezone
+    const sweepDay = localDay(deps.now, timeZone)
+    const batchSeen =
+      sweepDay !== null &&
+      batches.some((batch) => {
+        if (batch.sentAt === null) return false
+        const sentMs = Date.parse(batch.sentAt)
+        return !Number.isNaN(sentMs) && sentMs <= nowMs && localDay(batch.sentAt, timeZone) === sweepDay
+      })
 
     const leadMs = Date.parse(contact.createdAt)
     const relevant = batches.filter((batch) => {
@@ -328,7 +362,7 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
     try {
       const audience = await readAudienceOnce()
       if (!audience.ok) return { ok: false, error: `audience: ${audience.message}` }
-      if (audience.audienceId === '') return { ok: true, state: 'not_applicable' }
+      if (audience.audienceId === '') return { ok: true, state: 'not_applicable', tags: [] }
       const apiKey = baseMailchimp.apiKey()
       if (typeof apiKey !== 'string' || apiKey.length === 0) {
         return { ok: false, error: 'MAILCHIMP_API_KEY is not set' }
@@ -338,8 +372,8 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
         email,
       )
       if (result.status === 'error') return { ok: false, error: result.reason }
-      if (result.status === 'not_in_audience') return { ok: true, state: 'not_in_audience' }
-      return { ok: true, state: mapMemberStatus(result.member.status) }
+      if (result.status === 'not_in_audience') return { ok: true, state: 'not_in_audience', tags: [] }
+      return { ok: true, state: mapMemberStatus(result.member.status), tags: [...result.member.tags] }
     } catch (err) {
       return { ok: false, error: errorMessage(err) }
     }
@@ -357,7 +391,7 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
       })
       if (!verdict.ok && verdict.reason === 'frequency_unverifiable') return { ok: false, error: verdict.error }
       // The cap is unreachable on purpose, so a verdict always carries the de-duplicated items.
-      const legacy = await readLegacy(contact)
+      const legacy = await withDeadline(readLegacy(contact), LEGACY_BUDGET_MS, 'old-batch check timed out')
       return { ok: true, items: verdict.items, legacy }
     } catch (err) {
       return { ok: false, error: errorMessage(err) }
@@ -367,7 +401,13 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
   const ports: ShadowGatePorts = {
     consent: (contactId) => readConsent(deps.db, deps.clientId, contactId),
     dnc: (contactId) => readDnc(checkDnc, deps.clientId, contactId),
-    member: (email) => readMember(email),
+    member: async (email) => {
+      try {
+        return await withDeadline(readMember(email), MEMBER_BUDGET_MS, 'Mailchimp member lookup timed out')
+      } catch (err) {
+        return { ok: false, error: errorMessage(err) }
+      }
+    },
     evidence: (contact) => readEvidence(contact),
   }
 

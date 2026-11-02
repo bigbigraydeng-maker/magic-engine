@@ -11,7 +11,8 @@ export interface TriggeredSendRule {
   schedule: { timezone: string }
   frequency_cap: { max: number; window_days: number }
   consent: { accepted_bases: string[] }
-  legacy: { mailchimp_campaign_title_prefix: string }
+  /** The old daily batch: how to recognise its campaigns, and the member tags it skips (ME honours the same tags). */
+  legacy: { mailchimp_campaign_title_prefix: string; excluded_tags: string[] }
   human_mail: { required_mailboxes: string[] }
   recipient_allowlist: string[] | null
 }
@@ -35,7 +36,7 @@ const AUDIENCE_KEYS = ['sources', 'max_age_days', 'min_age'] as const
 const SCHEDULE_KEYS = ['timezone'] as const
 const FREQUENCY_CAP_KEYS = ['max', 'window_days'] as const
 const CONSENT_KEYS = ['accepted_bases'] as const
-const LEGACY_KEYS = ['mailchimp_campaign_title_prefix'] as const
+const LEGACY_KEYS = ['mailchimp_campaign_title_prefix', 'excluded_tags'] as const
 const HUMAN_MAIL_KEYS = ['required_mailboxes'] as const
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -221,6 +222,26 @@ export function parseRule(input: unknown): RuleParseResult {
       return fail('legacy.mailchimp_campaign_title_prefix must be at most 80 characters')
     }
 
+    // Member tags the old batch skips. Compared ignoring case, so the list itself must not repeat a tag in another case.
+    const tagsRaw = legacyRaw.excluded_tags
+    if (!Array.isArray(tagsRaw)) {
+      return fail('legacy.excluded_tags must be an array')
+    }
+    if (tagsRaw.length > 20) {
+      return fail('legacy.excluded_tags must have at most 20 entries')
+    }
+    for (const tag of tagsRaw) {
+      if (!isNonEmptyString(tag) || tag !== tag.trim()) {
+        return fail('legacy.excluded_tags entries must be non-empty strings without surrounding spaces')
+      }
+      if (tag.length > 80) {
+        return fail('legacy.excluded_tags entries must be at most 80 characters')
+      }
+    }
+    if (new Set(tagsRaw.map((tag: string) => tag.toLowerCase())).size !== tagsRaw.length) {
+      return fail('legacy.excluded_tags must contain unique tags (ignoring case)')
+    }
+
     // human_mail
     const humanMailRaw = input.human_mail
     if (!isPlainObject(humanMailRaw)) {
@@ -268,7 +289,7 @@ export function parseRule(input: unknown): RuleParseResult {
       schedule: { timezone },
       frequency_cap: { max: freqMax, window_days: windowDays },
       consent: { accepted_bases: basesRaw.slice() },
-      legacy: { mailchimp_campaign_title_prefix: prefix },
+      legacy: { mailchimp_campaign_title_prefix: prefix, excluded_tags: tagsRaw.slice() },
       human_mail: { required_mailboxes: mailboxesRaw.slice() },
       recipient_allowlist: allowlist,
     }

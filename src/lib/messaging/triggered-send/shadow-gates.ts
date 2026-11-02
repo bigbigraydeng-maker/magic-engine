@@ -107,7 +107,7 @@ export async function decideShadow(args: {
   const dncPromise: Promise<Safe<DncRead>> = safe(() => ports.dnc(contact.contactId))
   const memberPromise: Promise<Safe<MemberRead>> = shouldReadMember
     ? safe(() => ports.member(primaryEmail as string))
-    : Promise.resolve<Safe<MemberRead>>({ ok: true, state: 'not_applicable' })
+    : Promise.resolve<Safe<MemberRead>>({ ok: true, state: 'not_applicable', tags: [] })
   const evidencePromise: Promise<Safe<EvidenceRead>> = shouldReadEvidence
     ? safe(() => ports.evidence(contact))
     : // No address at all: the old batch could not have mailed this contact and there is nothing to count.
@@ -126,16 +126,16 @@ export async function decideShadow(args: {
 
   // STEP 2: any failed read defers, in priority order.
   if (isFailed(dnc)) {
-    return defer('dnc_unverifiable')
+    return defer('dnc_unverifiable', dnc.error)
   }
   if (isFailed(consent)) {
-    return defer('consent_unreadable')
+    return defer('consent_unreadable', consent.error)
   }
   if (isFailed(member)) {
-    return defer('legacy_unverifiable')
+    return defer('legacy_unverifiable', member.error)
   }
   if (isFailed(evidence)) {
-    return defer('evidence_unverifiable')
+    return defer('evidence_unverifiable', evidence.error)
   }
 
   // STEP 3: derived facts.
@@ -149,6 +149,10 @@ export async function decideShadow(args: {
     rule.recipient_allowlist !== null &&
     primaryEmail !== null &&
     rule.recipient_allowlist.includes(primaryEmail)
+
+  // The tags the old batch skips (sales is on it, not interested, "next year"): ME skips the same people.
+  const excludedTags = new Set(rule.legacy.excluded_tags.map((tag) => tag.toLowerCase()))
+  const hasExcludedTag = member.tags.some((tag) => excludedTags.has(tag.toLowerCase()))
 
   const matchedBasis =
     consent.bases.find((basis) => rule.consent.accepted_bases.includes(basis)) ?? null
@@ -165,6 +169,8 @@ export async function decideShadow(args: {
     reason = 'dnc'
   } else if (member.state === 'suppressed') {
     reason = 'mailchimp_suppressed'
+  } else if (hasExcludedTag) {
+    reason = 'excluded_tag'
   } else if (!allowlisted && matchedBasis === null) {
     reason = 'no_consent_basis'
   } else if (salesEmail) {
@@ -195,6 +201,6 @@ export async function decideShadow(args: {
   }
 }
 
-function defer(reasonCode: DeferReason): ShadowDecision {
-  return { kind: 'defer', reasonCode }
+function defer(reasonCode: DeferReason, detail: string): ShadowDecision {
+  return { kind: 'defer', reasonCode, detail }
 }

@@ -19,7 +19,7 @@ function validFixture(): TriggeredSendRule {
     schedule: { timezone: 'Pacific/Auckland' },
     frequency_cap: { max: 2, window_days: 7 },
     consent: { accepted_bases: ['form_disclosure_attested'] },
-    legacy: { mailchimp_campaign_title_prefix: 'legacy_batch_' },
+    legacy: { mailchimp_campaign_title_prefix: 'legacy_batch_', excluded_tags: ['sales_active', 'nurture_2027'] },
     human_mail: { required_mailboxes: ['sales@example.com'] },
     recipient_allowlist: null,
   }
@@ -146,6 +146,9 @@ describe('parseRule - top-level shape', () => {
       },
       (f) => {
         delete (f.legacy as Record<string, unknown>).mailchimp_campaign_title_prefix
+      },
+      (f) => {
+        delete (f.legacy as Record<string, unknown>).excluded_tags
       },
       (f) => {
         delete (f.human_mail as Record<string, unknown>).required_mailboxes
@@ -405,6 +408,47 @@ describe('parseRule - legacy.mailchimp_campaign_title_prefix', () => {
   })
 })
 
+describe('parseRule - legacy.excluded_tags', () => {
+  function withTags(value: unknown): unknown {
+    return { ...validFixture(), legacy: { mailchimp_campaign_title_prefix: 'legacy_batch_', excluded_tags: value } }
+  }
+
+  it('accepts an empty list (a client whose old batch skips nobody)', () => {
+    expect(parseRule(withTags([])).ok).toBe(true)
+  })
+
+  it('returns a copy of the list, not the same array', () => {
+    const tags = ['a', 'b']
+    const result = parseRule(withTags(tags))
+    expect(result.ok && result.rule.legacy.excluded_tags).toEqual(['a', 'b'])
+    expect(result.ok && result.rule.legacy.excluded_tags).not.toBe(tags)
+  })
+
+  it.each([[null], ['sales_active'], [{}], [5]])('rejects %j (not an array)', (value) => {
+    expectReject(withTags(value))
+  })
+
+  it('accepts 20 tags, rejects 21', () => {
+    const tags = Array.from({ length: 21 }, (_, i) => `tag_${i}`)
+    expect(parseRule(withTags(tags.slice(0, 20))).ok).toBe(true)
+    expectReject(withTags(tags))
+  })
+
+  it.each([[''], [' '], [' padded'], ['padded '], [5], [null]])('rejects the entry %j', (entry) => {
+    expectReject(withTags(['ok_tag', entry]))
+  })
+
+  it('accepts an 80-character tag, rejects 81', () => {
+    expect(parseRule(withTags(['x'.repeat(80)])).ok).toBe(true)
+    expectReject(withTags(['x'.repeat(81)]))
+  })
+
+  it('rejects the same tag twice, also in another case (they are compared ignoring case)', () => {
+    expectReject(withTags(['sales_active', 'sales_active']))
+    expectReject(withTags(['sales_active', 'Sales_Active']))
+  })
+})
+
 describe('parseRule - human_mail.required_mailboxes', () => {
   it('rejects an empty array', () => {
     const f = validFixture()
@@ -588,6 +632,9 @@ describe('ruleSha256', () => {
       },
       (r) => {
         r.legacy.mailchimp_campaign_title_prefix = 'other_prefix_'
+      },
+      (r) => {
+        r.legacy.excluded_tags = ['other_tag']
       },
       (r) => {
         r.human_mail.required_mailboxes = ['other@example.com']

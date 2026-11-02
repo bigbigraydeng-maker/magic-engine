@@ -21,7 +21,8 @@ function makeRule(overrides: Partial<TriggeredSendRule> = {}): TriggeredSendRule
     schedule: { timezone: 'Pacific/Auckland' },
     frequency_cap: { max: 2, window_days: 7 },
     consent: { accepted_bases: ['form_disclosure_attested'] },
-    legacy: { mailchimp_campaign_title_prefix: 'legacy_batch_' },
+    // mixed case on purpose: tags are compared ignoring case
+    legacy: { mailchimp_campaign_title_prefix: 'legacy_batch_', excluded_tags: ['sales_active', 'Nurture_2027'] },
     human_mail: { required_mailboxes: ['sales@example.com'] },
     recipient_allowlist: null,
   }
@@ -67,7 +68,7 @@ function makePorts(opts: PortsOptions = {}): {
     opts.consent ?? { ok: true, bases: ['form_disclosure_attested'], sourceRef: 'lead-1' },
   )
   const dnc = vi.fn(async (): Promise<DncRead> => opts.dnc ?? { ok: true, blocked: false })
-  const member = vi.fn(async (): Promise<MemberRead> => opts.member ?? { ok: true, state: 'active' })
+  const member = vi.fn(async (): Promise<MemberRead> => opts.member ?? { ok: true, state: 'active', tags: [] })
   const evidence = vi.fn(
     async (): Promise<EvidenceRead> =>
       opts.evidence ?? { ok: true, items: [], legacy: NOT_WELCOMED },
@@ -238,13 +239,44 @@ describe('decideShadow', () => {
   })
 
   it('reason 5: mailchimp_suppressed', async () => {
-    const { ports } = makePorts({ member: { ok: true, state: 'suppressed' } })
+    const { ports } = makePorts({ member: { ok: true, state: 'suppressed', tags: [] } })
     const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
     expect(decision.kind).toBe('write')
     if (decision.kind !== 'write') return
     expect(decision.status).toBe('skipped')
     expect(decision.reasonCode).toBe('mailchimp_suppressed')
     expect(decision.annotations.would_send).toBe(false)
+  })
+
+  it('reason 5b: excluded_tag (a tag the old batch skips)', async () => {
+    const { ports } = makePorts({ member: { ok: true, state: 'active', tags: ['fb_lead', 'sales_active'] } })
+    const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
+    expect(decision.kind).toBe('write')
+    if (decision.kind !== 'write') return
+    expect(decision.status).toBe('skipped')
+    expect(decision.reasonCode).toBe('excluded_tag')
+    expect(decision.annotations.would_send).toBe(false)
+  })
+
+  it('matches the tags ignoring case, on both sides', async () => {
+    for (const tag of ['SALES_ACTIVE', 'nurture_2027']) {
+      const { ports } = makePorts({ member: { ok: true, state: 'active', tags: [tag] } })
+      const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
+      expect(decision.kind === 'write' && decision.reasonCode).toBe('excluded_tag')
+    }
+  })
+
+  it('does not skip for a tag that is not on the list, or when the list is empty', async () => {
+    const other = makePorts({ member: { ok: true, state: 'active', tags: ['fb_lead', 'paid_customer'] } })
+    const d1 = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: other.ports })
+    expect(d1.kind === 'write' && d1.reasonCode).toBeNull()
+
+    const none = makePorts({ member: { ok: true, state: 'active', tags: ['sales_active'] } })
+    const noTags = makeRule({
+      legacy: { mailchimp_campaign_title_prefix: 'legacy_batch_', excluded_tags: [] },
+    })
+    const d2 = await decideShadow({ contact: makeContact(), rule: noTags, ports: none.ports })
+    expect(d2.kind === 'write' && d2.reasonCode).toBeNull()
   })
 
   it('reason 6: no_consent_basis', async () => {
@@ -335,9 +367,30 @@ describe('decideShadow', () => {
       expect(decision.reasonCode).toBe('sales_email_exists')
     })
 
+    it('mailchimp_suppressed beats excluded_tag, and excluded_tag beats no_consent_basis, sales_email_exists and frequency_full', async () => {
+      const both = makePorts({ member: { ok: true, state: 'suppressed', tags: ['sales_active'] } })
+      const d1 = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: both.ports })
+      expect(d1.kind === 'write' && d1.reasonCode).toBe('mailchimp_suppressed')
+
+      const crowded = makePorts({
+        member: { ok: true, state: 'active', tags: ['sales_active'] },
+        consent: { ok: true, bases: [], sourceRef: null },
+        evidence: {
+          ok: true,
+          items: [
+            makeItem({ id: 'a', source: 'sent_items', at: '2026-11-02T00:00:00Z' }),
+            makeItem({ id: 'b', source: 'audit', at: '2026-11-02T01:00:00Z' }),
+          ],
+          legacy: NOT_WELCOMED,
+        },
+      })
+      const d2 = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: crowded.ports })
+      expect(d2.kind === 'write' && d2.reasonCode).toBe('excluded_tag')
+    })
+
     it('mailchimp_suppressed beats no_consent_basis', async () => {
       const { ports } = makePorts({
-        member: { ok: true, state: 'suppressed' },
+        member: { ok: true, state: 'suppressed', tags: [] },
         consent: { ok: true, bases: [], sourceRef: null },
       })
       const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
@@ -521,25 +574,25 @@ describe('decideShadow', () => {
     it('dnc failure defers with dnc_unverifiable', async () => {
       const { ports } = makePorts({ dnc: { ok: false, error: 'boom' } })
       const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
-      expect(decision).toEqual({ kind: 'defer', reasonCode: 'dnc_unverifiable' })
+      expect(decision).toEqual({ kind: 'defer', reasonCode: 'dnc_unverifiable', detail: 'boom' })
     })
 
     it('consent failure defers with consent_unreadable', async () => {
       const { ports } = makePorts({ consent: { ok: false, error: 'boom' } })
       const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
-      expect(decision).toEqual({ kind: 'defer', reasonCode: 'consent_unreadable' })
+      expect(decision).toEqual({ kind: 'defer', reasonCode: 'consent_unreadable', detail: 'boom' })
     })
 
     it('member failure defers with legacy_unverifiable', async () => {
       const { ports } = makePorts({ member: { ok: false, error: 'boom' } })
       const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
-      expect(decision).toEqual({ kind: 'defer', reasonCode: 'legacy_unverifiable' })
+      expect(decision).toEqual({ kind: 'defer', reasonCode: 'legacy_unverifiable', detail: 'boom' })
     })
 
     it('evidence failure defers with evidence_unverifiable', async () => {
       const { ports } = makePorts({ evidence: { ok: false, error: 'boom' } })
       const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
-      expect(decision).toEqual({ kind: 'defer', reasonCode: 'evidence_unverifiable' })
+      expect(decision).toEqual({ kind: 'defer', reasonCode: 'evidence_unverifiable', detail: 'boom' })
     })
 
     it('thrown/rejected ports also defer', async () => {
@@ -548,7 +601,7 @@ describe('decideShadow', () => {
         throw new Error('network')
       })
       const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
-      expect(decision).toEqual({ kind: 'defer', reasonCode: 'dnc_unverifiable' })
+      expect(decision).toEqual({ kind: 'defer', reasonCode: 'dnc_unverifiable', detail: 'network' })
     })
 
     it('priority: dnc beats consent beats member beats evidence', async () => {
@@ -559,7 +612,7 @@ describe('decideShadow', () => {
         evidence: { ok: false, error: 'x' },
       })
       const d1 = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: all.ports })
-      expect(d1).toEqual({ kind: 'defer', reasonCode: 'dnc_unverifiable' })
+      expect(d1).toEqual({ kind: 'defer', reasonCode: 'dnc_unverifiable', detail: 'x' })
 
       const noDnc = makePorts({
         consent: { ok: false, error: 'x' },
@@ -567,18 +620,18 @@ describe('decideShadow', () => {
         evidence: { ok: false, error: 'x' },
       })
       const d2 = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: noDnc.ports })
-      expect(d2).toEqual({ kind: 'defer', reasonCode: 'consent_unreadable' })
+      expect(d2).toEqual({ kind: 'defer', reasonCode: 'consent_unreadable', detail: 'x' })
 
       const noConsent = makePorts({
         member: { ok: false, error: 'x' },
         evidence: { ok: false, error: 'x' },
       })
       const d3 = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: noConsent.ports })
-      expect(d3).toEqual({ kind: 'defer', reasonCode: 'legacy_unverifiable' })
+      expect(d3).toEqual({ kind: 'defer', reasonCode: 'legacy_unverifiable', detail: 'x' })
 
       const noMember = makePorts({ evidence: { ok: false, error: 'x' } })
       const d4 = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: noMember.ports })
-      expect(d4).toEqual({ kind: 'defer', reasonCode: 'evidence_unverifiable' })
+      expect(d4).toEqual({ kind: 'defer', reasonCode: 'evidence_unverifiable', detail: 'x' })
     })
 
     it('never returns a write decision when a read failed', async () => {
@@ -594,7 +647,7 @@ describe('decideShadow', () => {
       throw new Error('sync boom')
     }) as unknown as ShadowGatePorts['consent']
     const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
-    expect(decision).toEqual({ kind: 'defer', reasonCode: 'consent_unreadable' })
+    expect(decision).toEqual({ kind: 'defer', reasonCode: 'consent_unreadable', detail: 'sync boom' })
   })
 })
 
@@ -602,7 +655,7 @@ describe('decideShadow · precedence and consent basis (added after the mutation
   it('reports dnc before mailchimp_suppressed when both apply', async () => {
     const { ports } = makePorts({
       dnc: { ok: true, blocked: true },
-      member: { ok: true, state: 'suppressed' },
+      member: { ok: true, state: 'suppressed', tags: [] },
     })
     const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
     expect(decision).toMatchObject({ kind: 'write', status: 'skipped', reasonCode: 'dnc' })
@@ -637,13 +690,13 @@ describe('decideShadow · precedence and consent basis (added after the mutation
 
 describe('decideShadow - behaviours the mutation probe found unpinned', () => {
   it('a lead that is not in the Mailchimp audience yet is NOT suppressed', async () => {
-    const { ports } = makePorts({ member: { ok: true, state: 'not_in_audience' } })
+    const { ports } = makePorts({ member: { ok: true, state: 'not_in_audience', tags: [] } })
     const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
     expect(decision).toMatchObject({ kind: 'write', status: 'shadow', reasonCode: null })
   })
 
   it('a client without a Mailchimp audience is not suppressed either', async () => {
-    const { ports } = makePorts({ member: { ok: true, state: 'not_applicable' } })
+    const { ports } = makePorts({ member: { ok: true, state: 'not_applicable', tags: [] } })
     const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
     expect(decision).toMatchObject({ kind: 'write', status: 'shadow', reasonCode: null })
   })

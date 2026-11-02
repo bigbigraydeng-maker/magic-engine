@@ -34,6 +34,8 @@ import { addressSha256, type ShadowRowInput } from './shadow-store'
 
 export interface SweepDeps {
   now(): Date
+  /** A clock in milliseconds that only moves forward (Date.now in production): measures how long a chunk step has run. */
+  clockMs(): number
   loadAuthorization(clientId: string): Promise<AuthorizationRead>
   /** The audience members created since a time (the candidate window). */
   loadContacts(args: { clientId: string; sinceIso: string; sources: readonly string[] }): Promise<ContactsRead>
@@ -50,6 +52,20 @@ export interface SweepDeps {
 
 /** Contacts per chunk step: small enough that a chunk stays well inside the host's request time limit. */
 export const CHUNK_SIZE = 4
+
+/**
+ * No new contact is started once a chunk step has run this long: the host cuts a request after about two minutes and the
+ * contact in progress needs its own time (every read of it is bounded to a few seconds). The rest is tried on the next run.
+ */
+export const CHUNK_START_DEADLINE_MS = 60_000
+
+const SAMPLE_MAX_LENGTH = 160
+
+/** A read error as it may be shown in a receipt: e-mail addresses removed, one line, cut short. */
+export function redactDetail(text: string): string {
+  const cleaned = text.replace(/\S+@\S+/g, '<email>').replace(/\s+/g, ' ').trim()
+  return cleaned.length > SAMPLE_MAX_LENGTH ? `${cleaned.slice(0, SAMPLE_MAX_LENGTH)}…` : cleaned
+}
 
 const DAY_MS = 86_400_000
 
@@ -68,6 +84,7 @@ function emptyReceipt(clientId: string, dryRun: boolean, createdAt: string): Swe
     would_send: 0,
     skipped_by_reason: {},
     deferred_by_reason: {},
+    deferred_samples: {},
     legacy_batches: [],
     no_send: true,
     provider_impact: 'NONE',
@@ -258,6 +275,7 @@ function emptyChunk(): ChunkResult {
     would_send: 0,
     skipped_by_reason: {},
     deferred_by_reason: {},
+    deferred_samples: {},
     legacy_batches: [],
     error: null,
     error_status: null,
@@ -331,8 +349,15 @@ export async function decideChunk(args: {
 
     const now = deps.now()
     const created = kind === 'candidates' ? deps.createPorts({ clientId: plan.clientId, rule, now }) : null
+    const chunkStartedMs = deps.clockMs()
 
     for (let index = 0; index < contacts.length; index += 1) {
+      if (index > 0 && deps.clockMs() - chunkStartedMs > CHUNK_START_DEADLINE_MS) {
+        const left = contacts.length - index
+        result.deferred += left
+        bump(result.deferred_by_reason, 'chunk_time_budget', left)
+        break
+      }
       const contact = contacts[index]
       let decision: ShadowDecision
       if (kind === 'stale') {
@@ -346,6 +371,9 @@ export async function decideChunk(args: {
       if (decision.kind === 'defer') {
         result.deferred += 1
         bump(result.deferred_by_reason, decision.reasonCode)
+        if (result.deferred_samples[decision.reasonCode] === undefined) {
+          result.deferred_samples[decision.reasonCode] = redactDetail(decision.detail)
+        }
         continue
       }
 
@@ -422,6 +450,9 @@ export function finalizeSweep(plan: SweepPlan, results: readonly ChunkResult[]):
     receipt.would_send += result.would_send
     mergeCounts(receipt.skipped_by_reason, result.skipped_by_reason)
     mergeCounts(receipt.deferred_by_reason, result.deferred_by_reason)
+    for (const [reason, sample] of Object.entries(result.deferred_samples)) {
+      if (receipt.deferred_samples[reason] === undefined) receipt.deferred_samples[reason] = sample
+    }
     for (const batch of result.legacy_batches) batches.set(batch.campaignId, batch)
   }
   // The first failing chunk names the failure; a plan-level problem (mailbox) that is already shown is kept.

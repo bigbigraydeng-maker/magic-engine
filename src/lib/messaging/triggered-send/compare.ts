@@ -22,15 +22,16 @@ export type LeadVerdict = 'agree' | 'explained' | 'unexplained' | 'unavailable'
 
 /**
  * Reasons that explain "the batch welcomed them, ME would not": they depend on the person's state (a salesperson wrote
- * to them after 08:01, they unsubscribed, they hit ME's e-mail cap). Reasons that come from the rule or from the data
- * (bad address, system address, allow-list, consent basis) are NOT here: a difference caused by them is a difference
- * between ME's rule and the old behaviour, and the person who authorizes the switch has to see it.
+ * to them after 08:01, they unsubscribed, a tag the batch skips was put on them, they asked not to be contacted).
+ * Reasons that come from ME's rule or from the data (bad address, system address, allow-list, consent basis, ME's own
+ * e-mail cap: the old batch has none) are NOT here: a difference caused by them is a difference between ME's rule and the
+ * old behaviour, and the person who authorizes the switch has to see it.
  */
 const EXPLAINED_REASONS: ReadonlySet<string> = new Set([
   'sales_email_exists',
   'dnc',
   'mailchimp_suppressed',
-  'frequency_full',
+  'excluded_tag',
 ])
 
 const LEAD_LOCAL_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/

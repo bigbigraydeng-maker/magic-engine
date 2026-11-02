@@ -1,10 +1,12 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   CHUNK_SIZE,
+  CHUNK_START_DEADLINE_MS,
   chunkIds,
   decideChunk,
   finalizeSweep,
   prepareSweep,
+  redactDetail,
   runShadowSweep,
   type SweepDeps,
 } from '../shadow-sweep'
@@ -34,7 +36,7 @@ function makeRule(): TriggeredSendRule {
     schedule: { timezone: 'Pacific/Auckland' },
     frequency_cap: { max: 2, window_days: 7 },
     consent: { accepted_bases: ['form_disclosure_attested'] },
-    legacy: { mailchimp_campaign_title_prefix: 'legacy_batch_' },
+    legacy: { mailchimp_campaign_title_prefix: 'legacy_batch_', excluded_tags: [] },
     human_mail: { required_mailboxes: ['sales@example.com'] },
     recipient_allowlist: null,
   }
@@ -77,7 +79,7 @@ function makePorts(opts: FakePortsOptions = {}): ShadowGatePorts {
     consent: (contactId) =>
       wrap(contactId, 'consent', { ok: true, bases: ['form_disclosure_attested'], sourceRef: null }),
     dnc: (contactId) => wrap(contactId, 'dnc', { ok: true, blocked: opts.dncBlocked?.(contactId) ?? false }),
-    member: (contactId) => wrap(contactId, 'member', { ok: true, state: 'active' }),
+    member: (contactId) => wrap(contactId, 'member', { ok: true, state: 'active', tags: [] }),
     evidence: (contact) =>
       opts.evidenceFail?.(contact.contactId)
         ? wrap(contact.contactId, 'evidence', { ok: false, error: 'evidence down' })
@@ -99,6 +101,8 @@ interface FakeDepsOptions {
   legacyBatches?: LegacyBatchSeen[]
   insert?: { ok: true; inserted: number } | { ok: false; error: string }
   onCall?: (contactId: string, method: string) => void
+  /** The clock that measures how long a chunk step has run (never moves unless a test moves it). */
+  clockMs?: () => number
 }
 
 interface FakeDeps {
@@ -144,6 +148,7 @@ function makeDeps(opts: FakeDepsOptions = {}): FakeDeps {
   )
   const deps: SweepDeps = {
     now: () => NOW,
+    clockMs: opts.clockMs ?? (() => 0),
     loadAuthorization,
     loadContacts,
     loadContactsByIds,
@@ -492,7 +497,7 @@ describe('runShadowSweep - added after the mutation probe', () => {
     const ports: ShadowGatePorts = {
       consent: async () => ({ ok: true, bases: ['form_disclosure_attested'], sourceRef: null }),
       dnc: async () => ({ ok: true, blocked: false }),
-      member: async () => ({ ok: true, state: 'active' }),
+      member: async () => ({ ok: true, state: 'active', tags: [] }),
       evidence: async (c) => {
         events.push(`start:${c.contactId}`)
         await delay(15)
@@ -794,9 +799,95 @@ describe('decideChunk — retries and a second run', () => {
   })
 })
 
+describe('decideChunk — how long a step may run', () => {
+  /** A chunk whose first contact takes `firstTakes` ms on the step clock. */
+  async function runWithSlowFirst(firstTakes: number, count = 3) {
+    const clock = { ms: 1_000_000 }
+    let evidenceCalls = 0
+    const base = makePorts()
+    const ports: ShadowGatePorts = {
+      ...base,
+      evidence: async (contact) => {
+        evidenceCalls += 1
+        if (evidenceCalls === 1) clock.ms += firstTakes
+        return base.evidence(contact)
+      },
+    }
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(count) }, ports, clockMs: () => clock.ms })
+    const plan = await planOf(f)
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: f.deps })
+    return { f, result }
+  }
+
+  it('starts no further contact once the step has run longer than the deadline; the rest waits for the next run', async () => {
+    expect(CHUNK_START_DEADLINE_MS).toBe(60_000)
+    const { f, result } = await runWithSlowFirst(60_001)
+    expect(result).toMatchObject({
+      decided: 1, inserted: 1, deferred: 2, deferred_by_reason: { chunk_time_budget: 2 }, error: null, error_status: null,
+    })
+    expect(f.insertShadowRows).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps going when the step has run exactly as long as the deadline', async () => {
+    const { result } = await runWithSlowFirst(60_000)
+    expect(result).toMatchObject({ decided: 3, inserted: 3, deferred: 0 })
+  })
+
+  it('always decides the first contact of a chunk', async () => {
+    const { result } = await runWithSlowFirst(10 * 60_000, 1)
+    expect(result).toMatchObject({ decided: 1, deferred: 0 })
+  })
+})
+
+describe('decideChunk — why reads fail', () => {
+  it('keeps the first error text per deferral reason, one line, without e-mail addresses', async () => {
+    const f = makeDeps({
+      contacts: { ok: true, contacts: leadContacts(3) },
+      ports: {
+        ...makePorts(),
+        // the text differs per contact, so only the FIRST contact's text may be kept
+        evidence: async (contact) => ({
+          ok: false,
+          error: `graph said no for ${contact.primaryEmail}\nretry later (${contact.contactId})`,
+        }),
+      },
+    })
+    const plan = await planOf(f)
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: f.deps })
+    expect(result.deferred).toBe(3)
+    expect(result.deferred_samples).toEqual({ evidence_unverifiable: 'graph said no for <email> retry later (k00)' })
+  })
+
+  it('records the sample of the reason that decided the deferral (dnc outranks consent)', async () => {
+    const f = makeDeps({
+      contacts: { ok: true, contacts: leadContacts(2) },
+      ports: {
+        ...makePorts(),
+        dnc: async () => ({ ok: false, error: 'dnc down' }),
+        consent: async () => ({ ok: false, error: 'consent down' }),
+      },
+    })
+    const plan = await planOf(f)
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: f.deps })
+    // dnc outranks consent, so only the dnc reason shows up
+    expect(result.deferred_samples).toEqual({ dnc_unverifiable: 'dnc down' })
+  })
+})
+
+describe('redactDetail', () => {
+  it('removes e-mail addresses and collapses white space', () => {
+    expect(redactDetail('  a@b.co   failed\n\tfor x.y@z.org  ')).toBe('<email> failed for <email>')
+  })
+
+  it('cuts long text at 160 characters and says so', () => {
+    expect(redactDetail('x'.repeat(160))).toBe('x'.repeat(160))
+    expect(redactDetail('x'.repeat(161))).toBe('x'.repeat(160) + '…')
+  })
+})
+
 describe('finalizeSweep', () => {
   const chunk = (over: Partial<ChunkResult>): ChunkResult => ({
-    decided: 0, already_decided: 0, deferred: 0, inserted: 0, would_send: 0, skipped_by_reason: {}, deferred_by_reason: {}, legacy_batches: [], error: null, error_status: null, ...over,
+    decided: 0, already_decided: 0, deferred: 0, inserted: 0, would_send: 0, skipped_by_reason: {}, deferred_by_reason: {}, deferred_samples: {}, legacy_batches: [], error: null, error_status: null, ...over,
   })
   const basePlan: SweepPlan = {
     clientId: 'client-1', dryRun: false, authorizationId: 'auth-1', sweepDay: SWEEP_DAY, candidateIds: [], staleIds: [],
@@ -813,6 +904,18 @@ describe('finalizeSweep', () => {
       status: 'swept', client_id: 'client-1', authorization_id: 'auth-1', to_decide: 6, ignored: 2, decided: 5, inserted: 4, would_send: 3,
       deferred: 2, skipped_by_reason: { dnc: 2, stale: 0 }, deferred_by_reason: { mailbox_unreadable: 1, evidence_unverifiable: 1 },
       no_send: true, provider_impact: 'NONE', error: null, created_at: NOW.toISOString(),
+    })
+  })
+
+  it('keeps the first sample per reason across chunks', () => {
+    const receipt = finalizeSweep(basePlan, [
+      chunk({ deferred_samples: { evidence_unverifiable: 'first', dnc_unverifiable: 'dnc one' } }),
+      chunk({ deferred_samples: { evidence_unverifiable: 'second', consent_unreadable: 'consent one' } }),
+    ])
+    expect(receipt.deferred_samples).toEqual({
+      evidence_unverifiable: 'first',
+      dnc_unverifiable: 'dnc one',
+      consent_unreadable: 'consent one',
     })
   })
 
