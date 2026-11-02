@@ -246,6 +246,7 @@ describe('pause adapter source', () => {
     const flow = readFileSync('src/lib/ads-pause-card/flow.ts', 'utf8')
     expect(meta.includes('ACTIVE')).toBe(false)
     expect(flow.includes('ACTIVE')).toBe(false)
-    expect(ACTION_KEYS.some((key) => key === PAUSE_CARD_POLICY_KEY)).toBe(false)
+    const policyKey: string = PAUSE_CARD_POLICY_KEY
+    expect(ACTION_KEYS.some((key) => key === policyKey)).toBe(false)
   })
 })
