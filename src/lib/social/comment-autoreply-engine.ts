@@ -8,10 +8,12 @@
  * the result. Claim-before-send is the idempotency lock: a comment can never be
  * replied to twice even if two cron runs overlap or a later step fails.
  *
- * Send gate: before any Meta write (public reply, private reply, or hide),
- * `routeComment` must return a greeting or FAQ. Anything else — price,
- * complaint, refund, booking change, unknown, or a routing throw — is recorded
- * for the existing human queue and does not call Meta.
+ * Send gate: before a public reply or private reply, `routeComment` must return
+ * a greeting or FAQ. Price, complaint, refund, booking change, praise that is
+ * not a greeting or FAQ, unknown, or a routing throw is recorded for the
+ * existing human queue and does not call Meta. Spam the classifier marks with
+ * shouldHide is still hidden, as before. If classification throws, nothing is
+ * hidden or sent — the comment waits for a person.
  *
  * DM-first: when a send is allowed, the DM goes out before the public reply, so
  * the public "we've messaged you" wording is only used when the DM actually
@@ -364,8 +366,9 @@ export type CommentAutoReplyGate =
   | { send: false; block: CommentAutoReplyBlock }
 
 /**
- * Fail closed. A throw, an unknown intent, or any route other than greeting/FAQ
- * means do not write to Meta. `route === 'auto_ok'` is not enough on its own.
+ * Fail closed for replies and DMs. A throw, an unknown intent, or any route
+ * other than greeting/FAQ means do not reply. `route === 'auto_ok'` is not
+ * enough on its own. Spam hiding is decided separately, before this gate.
  */
 export function assessCommentAutoReply(
   commentText: string,
@@ -390,6 +393,21 @@ function handoffDecision(decision: CommentDecision, block: CommentAutoReplyBlock
   return { ...decision, needsHuman: true, shouldHide: false, guardrailFlags: flags }
 }
 
+/** Classification threw. Do not hide and do not guess a reply. */
+function classifierErrorDecision(): CommentDecision {
+  return {
+    category: 'other',
+    confidence: 0,
+    publicReply: null,
+    publicReplyAfterDm: null,
+    privateReply: null,
+    shouldHide: false,
+    needsHuman: true,
+    guardrailFlags: ['classifier_error'],
+    replySource: 'none',
+  }
+}
+
 /** Classify a claimed comment, act (DM-first), and finalise its row. */
 async function processClaimedComment(
   comment: PageComment,
@@ -403,25 +421,35 @@ async function processClaimedComment(
     siteUrl: ctxBase.siteUrl,
     authorFirstName: firstName(comment.fromName),
   }
-  const decision = await classifyComment(comment.message, ctx, seedFrom(comment.commentId))
-
-  // Greeting/FAQ only. Price, complaint, refund, unknown, and routing errors
-  // never hide, reply, or DM — they join the existing needs_human queue.
-  const gate = assessCommentAutoReply(comment.message, decision.category)
-  if (!gate.send) {
-    await finalise(claim.rowId, handoffDecision(decision, gate.block), {
+  let decision: CommentDecision
+  try {
+    decision = await classifyComment(comment.message, ctx, seedFrom(comment.commentId))
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown'
+    console.error('[autoreply-engine] classifyComment failed; not hiding or sending:', message)
+    await finalise(claim.rowId, classifierErrorDecision(), {
       status: 'pending', hidden: false, dmSent: false, publicReplyId: null, publicText: null,
     })
     return { publicReplied: false, dmSent: false, hidden: false, needsHuman: true, failed: false }
   }
 
-  // Spam → hide (if enabled). No reply. Only reachable for greeting/FAQ text.
+  // Spam the classifier marked for hiding. Same path as before the reply gate.
   if (decision.shouldHide) {
     const hidden = config.auto_hide_spam ? await hideComment(comment.commentId, pageToken) : false
     await finalise(claim.rowId, decision, {
       status: hidden ? 'hidden' : 'skipped', hidden, dmSent: false, publicReplyId: null, publicText: null,
     })
     return { publicReplied: false, dmSent: false, hidden, needsHuman: false, failed: false }
+  }
+
+  // Greeting/FAQ only. Praise, price, complaint, refund, unknown, and routing
+  // errors are not replied to or DM'd — they join the existing needs_human queue.
+  const gate = assessCommentAutoReply(comment.message, decision.category)
+  if (!gate.send) {
+    await finalise(claim.rowId, handoffDecision(decision, gate.block), {
+      status: 'pending', hidden: false, dmSent: false, publicReplyId: null, publicText: null,
+    })
+    return { publicReplied: false, dmSent: false, hidden: false, needsHuman: true, failed: false }
   }
 
   // Category disabled → record classification, take no send action.

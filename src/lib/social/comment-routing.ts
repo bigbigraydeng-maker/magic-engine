@@ -1,8 +1,9 @@
 /**
  * Keyword routing for one Facebook page comment. Pure: no DB and no Meta writes.
  *
- * The auto-reply engine calls `routeComment` before any public reply, private
- * reply, or hide, and only continues when the result is a greeting or FAQ.
+ * The auto-reply engine calls `routeComment` before any public reply or private
+ * reply, and only continues when the result is a greeting or FAQ. Spam hiding
+ * stays on the classifier and does not use this function.
  * PM todo copy uses the same function. Rows with `needs_human=true` that look
  * "auto_ok" here are upgraded to `unknown` in comment-human-items.ts.
  */

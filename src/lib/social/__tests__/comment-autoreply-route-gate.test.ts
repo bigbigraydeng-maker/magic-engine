@@ -1,8 +1,9 @@
 /**
  * Auto-reply must ask routeComment before any Meta write.
- * Price, complaint, refund, an unknown route, and a routing throw
- * record the existing human handoff and do not reply, DM, or hide.
- * A greeting and an FAQ still use the previous send path.
+ * Price, complaint, refund, praise that is not a greeting or FAQ, an unknown
+ * route, and a routing throw record the existing human handoff and do not
+ * reply or DM. Confident spam is still hidden. A classifier throw does not
+ * hide and is queued. A greeting and an FAQ still use the previous send path.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -128,8 +129,9 @@ function wouldSend(over: Partial<CommentDecision> = {}): CommentDecision {
   }
 }
 
-async function run(message: string, decision: CommentDecision) {
-  vi.mocked(classifyComment).mockResolvedValue(decision)
+async function run(message: string, decision: CommentDecision | Error) {
+  if (decision instanceof Error) vi.mocked(classifyComment).mockRejectedValue(decision)
+  else vi.mocked(classifyComment).mockResolvedValue(decision)
   vi.mocked(fetchPagePosts).mockResolvedValue([{
     postId: 'post-1',
     fullId: POST,
@@ -175,6 +177,7 @@ function expectNoMetaWrite(): void {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   engagementUpdates.length = 0
   flywheelInserts.length = 0
   delete process.env.SOCIAL_COMMENT_AUTOREPLY_KILL
@@ -232,9 +235,24 @@ describe('comment auto-reply route gate', () => {
     expect(res.needs_human).toBe(1)
   })
 
-  it('a price question the classifier calls spam is not hidden', async () => {
-    const res = await run('How much is this tour?', wouldSend({
+  it('pure praise that is not a greeting or FAQ goes to a human with no thank-you', async () => {
+    const res = await run('What a wonderful day out', wouldSend({
+      category: 'praise',
+      publicReply: 'thanks-template',
+      publicReplyAfterDm: null,
+      privateReply: null,
+      needsHuman: false,
+      replySource: 'llm',
+    }))
+    expectNoMetaWrite()
+    expect(res).toMatchObject({ public_replies: 0, private_replies: 0, hidden: 0, needs_human: 1 })
+    expect(engagementUpdates[0]).toMatchObject({ guardrail_flags: ['not_greeting_or_faq'], needs_human: true })
+  })
+
+  it('confident spam is hidden and not replied to', async () => {
+    const res = await run('Follow this page for daily photos', wouldSend({
       category: 'spam',
+      confidence: 0.95,
       publicReply: null,
       publicReplyAfterDm: null,
       privateReply: null,
@@ -242,8 +260,32 @@ describe('comment auto-reply route gate', () => {
       needsHuman: false,
       replySource: 'none',
     }))
+    expect(replyToComment).not.toHaveBeenCalled()
+    expect(sendPrivateReply).not.toHaveBeenCalled()
+    expect(hideComment).toHaveBeenCalledTimes(1)
+    expect(hideComment).toHaveBeenCalledWith('comment-1', 'page-token')
+    expect(flywheelInserts).toEqual([])
+    expect(res).toMatchObject({ public_replies: 0, private_replies: 0, hidden: 1, needs_human: 0, failed: 0 })
+    expect(engagementUpdates[0]).toMatchObject({
+      reply_status: 'hidden',
+      hidden: true,
+      needs_human: false,
+      public_reply_id: null,
+      private_reply_sent: false,
+    })
+  })
+
+  it('a classifier error does not hide and is queued', async () => {
+    const res = await run('Follow this page for daily photos', new Error('classifier blew up'))
     expectNoMetaWrite()
-    expect(res.hidden).toBe(0)
+    expect(res).toMatchObject({ public_replies: 0, private_replies: 0, hidden: 0, needs_human: 1 })
+    expect(engagementUpdates[0]).toMatchObject({
+      category: 'other',
+      needs_human: true,
+      reply_status: 'pending',
+      hidden: false,
+      guardrail_flags: ['classifier_error'],
+    })
   })
 
   it('a greeting still gets the public reply', async () => {
