@@ -10,6 +10,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { endOfNzDayMs, nzToday } from '@/lib/ads-strategy/promo-window'
 import { buildHourlyLeadChart, isoDayMinus } from '@/lib/ads-strategy/hourly-meta-leads'
+import { buildLeadForecastFromRows } from '@/lib/ads-strategy/hourly-leads-forecast'
 import { toClientHourlyLeadsView } from '@/lib/ads-strategy/agents/hourly-leads-client-view'
 
 export const dynamic = 'force-dynamic'
@@ -65,7 +66,7 @@ export async function GET(
 
   const now = new Date()
   const today = nzToday(now.getTime())
-  const sinceDay = isoDayMinus(today, 8)
+  const sinceDay = isoDayMinus(today, 28)
   const sinceIso = new Date(startOfNzDayMs(sinceDay)).toISOString()
 
   const [touchRes, lastSyncAt] = await Promise.all([
@@ -94,10 +95,13 @@ export async function GET(
     return NextResponse.json(fullView ? body : toClientHourlyLeadsView(body))
   }
 
+  const forecast = buildLeadForecastFromRows(touchRes.rows, now)
+
   const payload = {
     success: true,
     unreadable: false,
     chart: built.chart,
+    forecast,
     lastSyncAt,
     jobName: META_LEADS_SYNC_JOB,
   }
