@@ -77,10 +77,14 @@ export function o1PendingMatchesGrowthCycleDate(
   return d === growthCycleDate
 }
 
+type GrowthCycleDateRead =
+  | { readonly ok: true; readonly date: string | null }
+  | { readonly ok: false }
+
 async function loadLatestGrowthCycleDate(
   sb: SupabaseClient,
   clientId: string,
-): Promise<string | null> {
+): Promise<GrowthCycleDateRead> {
   const { data, error } = await sb
     .from('ads_growth_states')
     .select('date')
@@ -88,9 +92,11 @@ async function loadLatestGrowthCycleDate(
     .order('date', { ascending: false })
     .limit(1)
     .maybeSingle()
-  if (error || !data) return null
+  if (error) return { ok: false }
+  if (!data) return { ok: true, date: null }
   const date = (data as { date?: unknown }).date
-  return typeof date === 'string' && date.length > 0 ? date : null
+  const cycleDate = typeof date === 'string' && date.length > 0 ? date : null
+  return { ok: true, date: cycleDate }
 }
 
 async function loadPendingActions(
@@ -100,7 +106,13 @@ async function loadPendingActions(
 ): Promise<AdsNextStepView['pendingActions']> {
   try {
     const d3 = await listPendingAdsAutoPauseForClient(sb, clientId)
-    const growthCycleDate = staffView ? await loadLatestGrowthCycleDate(sb, clientId) : null
+    let growthCycleDate: string | null = null
+    if (staffView) {
+      const cycle = await loadLatestGrowthCycleDate(sb, clientId)
+      // 巡察日读失败时不能把还在等的 O1 滤成「没有待批」。
+      if (!cycle.ok) return { kind: 'unreadable' }
+      growthCycleDate = cycle.date
+    }
     const o1 = staffView
       ? await listPendingRunsForActionForClient(sb, ADS_O1_BUDGET_SCALE_ACTION_KEY, clientId)
       : { items: [], hasMore: false }

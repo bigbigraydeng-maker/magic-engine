@@ -154,6 +154,53 @@ describe('loadAdsNextStepView', () => {
     expect(view.prescription.kind).toBe('ok')
   })
 
+  it('ads_growth_states 读失败 → 待批 unreadable，不当成没有待批', async () => {
+    const o1Decision = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const o1Run = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    const sb = createFakeSupabase(
+      {
+        ad_health_narratives: [narrativeWithHits(['账户授权异常'])],
+        ads_growth_states: [{ client_id: CLIENT, date: '2026-11-02' }],
+        action_runs: [{
+          id: o1Run,
+          client_id: CLIENT,
+          action_key: O1,
+          action_version: 1,
+          idempotency_key: 'k-growth-down',
+          status: 'pending_approval',
+          authorization_decision_id: o1Decision,
+          input: { adset_id: 'adset-1', ad_account_id: 'act_1' },
+          evidence: { date: '2026-11-02' },
+          rationale: '加预算还在等批准',
+          created_at: '2026-11-02T00:00:00Z',
+        }],
+        authorization_decisions: [{
+          id: o1Decision,
+          action_run_id: o1Run,
+          client_id: CLIENT,
+          action_key: O1,
+          action_version: 1,
+          idempotency_key: 'k-growth-down',
+          verdict: 'require_approval',
+        }],
+        flywheel_actions: [],
+        prescriptions: [{
+          client_id: CLIENT,
+          version: 1,
+          status: 'draft',
+          approved_at: null,
+          created_at: '2026-11-01T00:00:00Z',
+        }],
+      },
+      { failOn: [{ table: 'ads_growth_states', op: 'select', message: 'timeout' }] },
+    )
+
+    const view = await loadAdsNextStepView(sb, CLIENT, { staffView: true })
+    expect(view.healthRedLights.kind).toBe('ok')
+    expect(view.pendingActions.kind).toBe('unreadable')
+    expect(view.prescription.kind).toBe('ok')
+  })
+
   it('ad_health_narratives 读失败 → 体检红灯 unreadable', async () => {
     const sb = createFakeSupabase(
       {
