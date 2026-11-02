@@ -979,6 +979,23 @@ describe('inLock: weekly cap and exempt templates', () => {
     expect(result.meta.renderedSha256).not.toBeNull()
   })
 
+  it('a changed text of a template that uses input boxes is still recorded as changed', async () => {
+    const tpl = template({ body: `${template().body}\n\nNote: {{input.note}}` })
+    const inputs = { note: 'Half price this week' }
+    const rendered = renderedText(tpl, [tour()], inputs)
+    const data = makeData({ loadTemplate: vi.fn(async () => tpl) })
+    const result = await createSendGates(data).preLock(
+      preArgs({
+        subject: rendered.subject,
+        body: `${rendered.body}\n\nP.S. see you soon.`,
+        template: templateReq({ inputs }),
+      }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.meta.editedAfterRender).toBe(true)
+  })
+
   it('an exempt template that used input boxes is an ordinary mail: the cap blocks it', async () => {
     const tpl = template({ body: `${template().body}\n\nNote: {{input.note}}` })
     const inputs = { note: 'Half price this week' }
