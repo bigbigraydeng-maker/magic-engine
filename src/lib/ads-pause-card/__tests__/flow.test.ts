@@ -177,7 +177,67 @@ describe('pause card issue and execute', () => {
     expect(done.status).toBe('executed')
     expect(calls.pauses).toBe(1)
   })
+
+  it('does not pause when the successor is the ad being paused or sits in the paused ad set', async () => {
+    const self = fixture()
+    const selfCalls = runtime(facts({ successor: placed() }), 'PAUSED')
+    const selfCard = await issuePauseOrder({
+      kernel: self.kernel, clientId: CLIENT_A, clicker: OPC,
+      order: { ...order, successorAdId: '300' }, runtime: selfCalls,
+    })
+    const selfDone = await submit(self, selfCard, selfCalls)
+    expect(selfCard.confirmEnabled).toBe(false)
+    expect(selfDone.status).toBe('blocked')
+    expect(selfDone.reason).toContain('一起停掉')
+    expect(selfCalls.pauses).toBe(0)
+
+    const set = fixture()
+    const setOrder = { ...order, level: 'ad_set' as const, adId: null, successorAdId: '400' }
+    const setCalls = runtime(facts({ successor: placed({ adsetId: '200' }) }), 'PAUSED')
+    const setCard = await issuePauseOrder({
+      kernel: set.kernel, clientId: CLIENT_A, clicker: OPC, order: setOrder, runtime: setCalls,
+    })
+    const setDone = await submit(set, setCard, setCalls)
+    expect(setDone.status).toBe('blocked')
+    expect(setDone.reason).toContain('一起停掉')
+    expect(setCalls.pauses).toBe(0)
+  })
+
+  it('does not pause or unlock the empty-campaign check after the card expires', async () => {
+    const f = fixture()
+    const calls = runtime(facts(), 'PAUSED')
+    const card = await issuePauseOrder({ kernel: f.kernel, clientId: CLIENT_A, clicker: OPC, order, runtime: calls })
+    f.clock.now = new Date(Date.parse(START) + 31 * 60 * 1000)
+    const late = await submit(f, card, calls)
+    expect(late.status).toBe('done')
+    expect(late.wroteMeta).toBe(false)
+    expect(calls.pauses).toBe(0)
+    expect(f.tables.action_runs.find((row) => row.id === card.runId)?.status).toBe('denied')
+
+    const empty = runtime(facts({ campaignAds: [{ id: '300', adsetId: '200', effectiveStatus: 'ACTIVE' }] }), 'PAUSED')
+    const held = await issuePauseOrder({ kernel: f.kernel, clientId: CLIENT_A, clicker: OPC, order, runtime: empty })
+    f.clock.now = new Date(Date.parse(START) + 62 * 60 * 1000)
+    const ack = await submit(f, {
+      runId: held.emptyAckRunId, expectedDecisionId: held.emptyAckDecisionId, fingerprint: held.emptyAckFingerprint,
+    }, empty)
+    expect(ack.wroteMeta).toBe(false)
+    const ackRow = f.tables.flywheel_actions.find((item) => item.action_type === 'ads.pause_empty_ack' && (item.payload as { cardRunId?: string }).cardRunId === held.emptyAckRunId)
+    expect((ackRow?.payload as { status?: string }).status).not.toBe('confirmed')
+    const again = await issuePauseOrder({ kernel: f.kernel, clientId: CLIENT_A, clicker: OPC, order, runtime: empty })
+    expect(again.confirmEnabled).toBe(false)
+    expect(empty.pauses).toBe(0)
+  })
 })
+
+const START = '2026-11-01T00:00:00.000Z'
+
+function submit(f: ReturnType<typeof fixture>, card: { runId?: string; expectedDecisionId?: string; fingerprint?: string }, calls: PauseRuntime) {
+  return submitPauseCard({
+    kernel: f.kernel, clientId: CLIENT_A, runId: card.runId ?? '', clicker: OPC,
+    resolution: 'confirm', expectedDecisionId: card.expectedDecisionId ?? '', fingerprint: card.fingerprint ?? '',
+    runtime: calls,
+  })
+}
 
 describe('pause adapter source', () => {
   it('never names an activate status', async () => {

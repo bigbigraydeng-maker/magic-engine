@@ -87,6 +87,7 @@ function metricCheck(order: PauseOrder): HardCheck {
 
 function successorChecks(order: PauseOrder, live: LiveFacts): HardCheck[] {
   if (!order.successorAdId) return []
+  if (pauseAlsoStopsSuccessor(order, live)) return [successorStopped()]
   if (!live.successor.readable) return [successorUnread()]
   const gap = successorGap(order, live)
   if (gap) return [gap]
@@ -109,10 +110,21 @@ function successorGap(order: PauseOrder, live: LiveFacts): HardCheck | null {
   return { label: SUCCESSOR_LABEL, state: 'red', reason: '新广告不在同一个已登记账户和系列里，先不能停旧的' }
 }
 
-/** Same registered account and campaign. A different ad set still counts. */
+function successorStopped(): HardCheck {
+  return { label: SUCCESSOR_LABEL, state: 'red', reason: '新广告会被这次暂停一起停掉，先不能停旧的' }
+}
+
+/** The successor is the ad being paused, or it sits in the ad set being paused. */
+function pauseAlsoStopsSuccessor(order: PauseOrder, live: LiveFacts): boolean {
+  if (order.level === 'ad' && order.successorAdId === order.adId) return true
+  return order.level === 'ad_set' && live.successor.adsetId === order.adsetId
+}
+
+/** Same registered account and campaign, and not covered by this pause. */
 function successorPlaced(order: PauseOrder, live: LiveFacts): boolean {
   const next = live.successor
   if (!live.registeredAccountIds || !next.accountId || !next.campaignId) return false
+  if (pauseAlsoStopsSuccessor(order, live)) return false
   const known = listed(live.registeredAccountIds, next.accountId)
     && listed(live.registeredAccountIds, order.adAccountId)
     && sameAcct(next.accountId, order.adAccountId)

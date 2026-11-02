@@ -109,6 +109,15 @@ describe('pause card guards', () => {
     expect(result.checks.find((check) => check.label === '新广告在投')?.state).toBe('green')
     expect(result.block).toBeNull()
   })
+
+  it('marks red when pausing an ad set would also stop the successor', () => {
+    const setOrder: PauseOrder = { ...order, level: 'ad_set', adId: null, successorAdId: '400' }
+    const sameSet = guardPause(setOrder, live({ successor: placed({ adsetId: '200' }) }), false)
+    expect(sameSet.checks.find((check) => check.label === '新广告在投')?.state).toBe('red')
+    expect(sameSet.block).toContain('一起停掉')
+    const otherSet = guardPause(setOrder, live({ successor: placed({ adsetId: '201' }) }), false)
+    expect(otherSet.checks.find((check) => check.label === '新广告在投')?.state).toBe('green')
+  })
 })
 
 describe('pause orders from a plan or prescription', () => {
@@ -144,6 +153,17 @@ describe('pause orders from a plan or prescription', () => {
     })
     expect(missing.orders).toHaveLength(0)
     expect(missing.blocked[0]?.reason).toContain('没有预期指标')
+  })
+
+  it('rejects a successor that is the ad being paused', () => {
+    const self = extractPauseOrders('plan_step', 'plan-1', 'approved', {
+      ad_pause_orders: [{ ...row, successor_ad_id: row.ad_id }],
+    })
+    expect(self.orders).toHaveLength(0)
+    expect(self.blocked[0]?.reason).toContain('要暂停的那条')
+    const direct = guardPause({ ...order, successorAdId: order.adId }, live({ successor: placed() }), false)
+    expect(direct.checks.find((check) => check.label === '新广告在投')?.state).toBe('red')
+    expect(direct.block).toContain('一起停掉')
   })
 
   it('does not invent a metric or a basis', () => {

@@ -124,6 +124,7 @@ function parseOrder(
   if (!stepId) return { ok: false, stepId, reason: '没有步骤编号，没有出卡。' }
   const successor = text(row.successor_ad_id)
   if (successor && !OBJECT_ID_RE.test(successor)) return { ok: false, stepId, reason: '新广告编号不对，没有出卡。' }
+  if (successor && successor === ids.adId) return { ok: false, stepId, reason: '新广告不能就是要暂停的那条，没有出卡。' }
   return {
     ok: true,
     order: {

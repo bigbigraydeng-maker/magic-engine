@@ -133,7 +133,7 @@ async function confirmPause(args: Parameters<typeof submitPauseCard>[0], row: Ho
   const acked = await ackIsConfirmed(args.kernel.supabase, args.clientId, row.payload.orderKey)
   const guard = guardPause(row.payload.order, live, acked)
   if (guard.block) return { status: 'blocked', reason: guard.block, wroteMeta: false, readback: null }
-  const decided = await confirmDecision(args)
+  const decided = await decisionAuthorized(args)
   if (!decided) return { status: 'done', reason: '这张卡没有确认成功，没有去暂停。', wroteMeta: false, readback: null }
   const claimed = await claimPause(args.kernel.supabase, args.clientId, row)
   if (!claimed) {
@@ -143,10 +143,10 @@ async function confirmPause(args: Parameters<typeof submitPauseCard>[0], row: Ho
   return writeOnce(args, row)
 }
 
-async function confirmDecision(args: Parameters<typeof submitPauseCard>[0]): Promise<boolean> {
+async function decisionAuthorized(args: Parameters<typeof submitPauseCard>[0]): Promise<boolean> {
   try {
-    await decideConfirmationCard(args.kernel, decisionArgs(args))
-    return true
+    const view = await decideConfirmationCard(args.kernel, decisionArgs(args))
+    return view.status === 'confirmed'
   } catch (error) {
     if (!(error instanceof ConfirmationCardError) || error.code !== 'not_waiting') throw error
     const run = await args.kernel.requireRun(args.runId)
@@ -180,7 +180,8 @@ async function submitAck(
 ): Promise<PauseSubmitResult> {
   if (row.payload.status !== 'holding') return already(row.payload)
   if (args.resolution === 'decline') return decline(args, row)
-  await decideConfirmationCard(args.kernel, decisionArgs(args))
+  const authorized = await decisionAuthorized(args)
+  if (!authorized) return { status: 'done', reason: '这张卡没有确认成功，没有去暂停。', wroteMeta: false, readback: null }
   const payload: PauseHoldPayload = {
     ...row.payload,
     status: 'confirmed',
