@@ -31,9 +31,9 @@
 
 **风险（要你知道，不是要你现在决定）**：①Facebook 表单留资用的是「勾选退出」式同意，Resend 条款要求「明确同意」，是否被认可只能在实际发信中看出来——所以用独立账号隔离，并盯退信/投诉（超线自动停）；②新增两个对外入口（一键退订页、Resend 回执接收口扩展），按 A 级审；③要改两处别的窗口（127 / 76 的 CRM 发信关口）的代码，各一小处且只加严（§6.4、§6.3），会写进改动单并通知它们；④现在的合并闸**看不住**这批新代码（会把它们判成「普通改动」自动合并），所以第一条改动单里要同时把它们加进「高风险名单」（§10 P2-1a）。
 
-**我需要你回答的两件事（一次一个）**
-1. ✅ **已答（11-02，PM 回「只用info」）**：CTS 销售发客人邮件只用 **info@** 这一个邮箱。所以规则快照里的「必须可读的销售邮箱清单」= `info@`；ME 里已断开的 bdm@ 连接不在清单内、被忽略（若以后 bdm@ 也开始用，必须先重新连接并**重新授权**）。
-2. **欢迎信内容怎么定？**（回完才定第二步的模板）我的建议：第一版用**短的纯文字信**（只带客人名字、不写团名和价格），内容由 CTS / 126 号窗口写、你确认——因为现在 8:01 批次那封是带图和团价的网页式邮件，要照搬就得先做「图文邮件 + 没名字时的兜底称呼 + 每天核对价格」，工作量大得多，建议放到第二版。
+**你已答的两件事（11-02）**
+1. ✅ **PM 回「只用info」**：CTS 销售发客人邮件只用 **info@** 这一个邮箱。所以规则快照里的「必须可读的销售邮箱清单」= `info@`；ME 里已断开的 bdm@ 连接不在清单内、被忽略（若以后 bdm@ 也开始用，必须先重新连接并**重新授权**）。
+2. ✅ **PM 回「可以」**：欢迎信**第一版用短的纯文字信**（只带客人名字、不写团名和价格），内容由 CTS / 126 号窗口写、**你确认后**才进授权。原因：现在 8:01 批次那封是带图和团价的网页式邮件，要照搬就得先做「图文邮件 + 没名字时的兜底称呼 + 每天核对价格」，工作量大得多，放到第二版。
 
 ## 1. 范围与不做
 
@@ -62,6 +62,7 @@
 | D1 | 同意「常设授权」：PM 本人一次批准一组绑死条件，任何一项变了自动作废；真发之前先影子运行 | §3.1、§4 |
 | D2 | 新线索第一天：销售已发过邮件的，ME 不再自动发欢迎信（销售那封算第一封）；没发过的才在第二天早上自动发 | §5.2 第 J 步、§5.3 |
 | D3 | CTS 销售发客人邮件只用 info@ 一个邮箱（PM 回「只用info」，审查员问「销售用哪些邮箱」的答案）| §3.1 `human_mail.required_mailboxes`、§5.2 F 步、§9-8 |
+| D4 | 欢迎信第一版用短的纯文字信（只带客人名字、不写团名价格），内容由 CTS / 126 号窗口写、PM 确认后才进授权；图文版 + 团价 + 兜底称呼放第二版（PM 回「可以」）| §6.2 |
 
 ## 3. 数据
 
@@ -76,7 +77,7 @@
 | `id` uuid pk；`request_id` uuid unique | 命令幂等键 |
 | `client_id`（外键 clients）；`trigger_key` text **check in ('welcome')**；`channel` text check in ('email')；`account` text | 触发名（P2 只有欢迎信，将来加触发靠迁移放开）、渠道、Resend 账号标签 |
 | `rule` jsonb；`rule_sha256` char(64) | **规则快照**，规范化 JSON 的 SHA-256。字段见下表 |
-| `template_version` int、`template_sha256` char(64)（提案时可空，**批准时必须非空**，CHECK 钉死） | 127 模板表里**当前版**的版本号与内容指纹（`subject｜body｜fact_source｜pick_*` 的 SHA-256） |
+| `template_version` int、`template_sha256` char(64)（提案时可空，**批准时必须非空**，CHECK 钉死；**模板留空的提案永远批不了——绑定列批准前后都不可改——须撤销后重新提案**） | 127 模板表里**当前版**的版本号与内容指纹（`subject｜body｜fact_source｜pick_*` 的 SHA-256） |
 | `daily_cap` int check 1..50 | 每天最多真发几封（上限 50 是代码与数据库双重硬顶） |
 | `proposed_by_email`、`proposed_at` | 谁提的案（可以是 agent/FDE；**提案不等于授权**） |
 | `created_at` | |
@@ -107,12 +108,14 @@
 | `activated_at` | 授权事件发出后才写；发送方把 null 当作「未武装」 |
 | `revoked_at`、`revoked_by`、`revoked_reason` | PM 撤销，或系统自动作废（`revoked_by = 'system:<代号>'`，代号如 `TEMPLATE_CHANGED`、`GATE_CHANGED`、`HEALTH_BREAKER`、`PROVIDER_FAILURE`） |
 
+**时间由数据库定（v2）**：`authorized_at / activated_at / revoked_at` 由触发器覆盖成数据库的 `now()`，客户端传来的值一律被忽略（实测：客户端填 400 天后的批准时刻，曾能把有效期撑到 454 天）；**批准与武装必须分两条语句**（先批准，授权事件发出后再武装），同一条语句里两者都写会被拒。
+
 **约束与触发器（数据库层强制，不只靠代码自觉）**
 - **`BEFORE INSERT` 触发器**：新行的生命周期列必须全为空——**一条 INSERT 直接写成「已批准 + 已武装」会被拒**（魏征原型实测：没有这一条就能写进去）。
-- **`BEFORE UPDATE` 触发器用「整行白名单比对」**：把新旧两行都去掉生命周期列后转成 jsonb，必须完全相等——所以**以后新加的列默认就是不可变的**，不用逐列维护黑名单；生命周期列只许「从空写一次」；**已撤销的行不许再批准**。
+- **`BEFORE UPDATE` 触发器用「整行白名单比对」**：把新旧两行都去掉生命周期列后转成 jsonb，必须完全相等——所以**以后新加的列默认就是不可变的**，不用逐列维护黑名单；生命周期列只许「从空写一次」；**已撤销的行不许再批准**（判据与「时间由数据库定」一致：只要批准相关的任一列被写入就算批准，不能靠「不填 `authorized_at`」绕过——第二轮审查两位都发现过这条漏洞）。
 - 部分唯一索引：同一 `(client_id, trigger_key, channel)` 至多一份**已批准且未撤销**、至多一份**待批提案**（未批准且未撤销）。已过期但没撤销的授权仍占着「生效」的位置，所以**续期命令的第一步是显式撤销过期的那份，再写新的**；中间没有授权是安全方向。新提案自动撤销旧提案（`SUPERSEDED`）。
 - `BEFORE DELETE / TRUNCATE` 一律拒（与 P1、127 同做法）。
-- RLS：`enable row level security` + `for all to service_role`（必须带 `TO service_role`）+ `revoke all … from anon, authenticated`。
+- RLS：`enable row level security` + `for all to service_role`（必须带 `TO service_role`）+ `revoke all … from anon, authenticated`；**另对 service_role 收回 `trigger / references / truncate` 权限**（魏征实测：有直连能力的人能建一个排在守卫之后的触发器，把终态改回去）。
 
 ### 3.2 `triggered_sends` —— 发送状态账本
 
@@ -125,9 +128,9 @@
 | `bounce_kind` | `permanent` / `transient` / `undetermined` / 空（来自回执） |
 | `authorization_id` | 产生这一行的授权/提案（影子行指向提案，真发行指向生效授权） |
 | `template_key`、`template_version`、`template_sha256`、`rendered_sha256` | 渲染后内容指纹（认领时写入，之后不可变） |
-| `to_email_sha256` char(64) | 收件地址小写后的 SHA-256；**不存邮箱明文、不存正文**。用于「同一地址硬退信过就别再发」「同一地址终身只欢迎一次」 |
+| `to_address_sha256` char(64) | 收件地址小写后的 SHA-256；**不存邮箱明文、不存正文**。用于「同一地址硬退信过就别再发」「同一地址终身只欢迎一次」 |
 | `provider_account`、`provider_message_id`、`idempotency_key` | 发信账号标签、Resend 邮件 id、传给 Resend 的幂等键（**写一次不可变**） |
-| `provider_impact` | `NONE` / `RESEND_ACCEPTED` / `RESEND_UNKNOWN`（回执字段，CLAUDE.md §3） |
+| `provider_impact` | `NONE` / `PROVIDER_ACCEPTED` / `PROVIDER_UNKNOWN`（回执字段，CLAUDE.md §3） |
 | `consent_basis`、`source_ref` | 同意依据（读自触点元数据，`src/lib/crm/meta-lead.ts:337`）、线索来源记录号（追溯用，不含个人信息） |
 | `annotations` jsonb | 影子对照用的批注（`would_send`、`sales_email`、`legacy_welcomed` 等布尔），**不含个人信息** |
 | `local_day` date | 认领当天的客户本地日（由函数用 `now()` 与规则时区算，日上限按它数） |
@@ -135,24 +138,28 @@
 | `sent_at`、`last_event_type`、`last_event_at`、`created_at`、`updated_at` | `updated_at` 由触发器维护 |
 
 **唯一性与触发器**
-- 部分唯一索引（**终身同址只欢迎一次**）：`(client_id, trigger_key, channel, to_email_sha256)`，条件 `dedupe_scope='lifetime'` 且状态为「已经或可能发出过」（`pending / unknown_outcome / sent / delivery_delayed / delivered / suppressed / bounced / complained`）。→ 同一邮箱挂在两条联系人记录上也只会收到一封（`mail-send-new.ts:116-121` 注释写明这种双发风险）。
+- 部分唯一索引（**终身同址只欢迎一次**）：`(client_id, trigger_key, channel, to_address_sha256)`，条件 `dedupe_scope='lifetime'` 且状态为「已经或可能发出过」（`pending / unknown_outcome / sent / delivery_delayed / delivered / suppressed / bounced / complained`）。→ 同一邮箱挂在两条联系人记录上也只会收到一封（`mail-send-new.ts:116-121` 注释写明这种双发风险）。
 - `(provider_account, provider_message_id)` 在非空时唯一。
-- 状态转移触发器：只许按 §4.2 的规则前进；`idempotency_key`、`first_attempt_at`、`provider_message_id`、`provider_account`、`to_email_sha256`、`rendered_sha256`、`template_*` 一旦写入不可改（「从空写一次」）。
+- **已认领状态的 CHECK（v2）**：`pending` 及之后的状态，`idempotency_key / first_attempt_at / to_address_sha256 / rendered_sha256 / template_key / template_version / template_sha256 / authorization_id / local_day / claimed_at / lease_expires_at` 共 11 列必须齐全（实测：地址指纹传空，两个联系人都认领成功，「终身同址只欢迎一次」就失效）。
+- **认领标记（v2）**：真发行的 `pending` 只能由认领函数写入——函数先设事务级标记 `app.triggered_send_claim='on'`、写完立刻复位，INSERT 守卫与 UPDATE 守卫都查它（实测：不加这条，绕过函数直接插 pending 能突破日上限、伪造 `first_attempt_at` 使 20 小时规则失效）。
+- **普通 `failed`（供应商确定拒收）/ `skipped` 会释放同址**：同址唯一索引的状态集合不含它们（确定没发出去的信不该占着地址）；`suppressed` 不释放。**例外：`failed` 且 `reason_code='not_sent_confirmed'`（人标的「没发出」）不释放**——它之后仍可能被迟到的真实回执覆盖，若地址已被同址的另一个联系人认领，迟到的送达 / 投诉回执会撞唯一索引、写不进账本（第二轮魏征复现）。唯一索引与认领函数的同址计数用同一个谓词。**`failed` 状态下 `reason_code` 只许写一次**（防止先改成 `not_sent_confirmed` 再借例外把状态往前推）。代价（有意接受）：被人标了「没发出」的那个地址，以后不会再被自动欢迎——要补发由销售手发；这比「地址放出来、迟到的回执写不进账本」安全。回归测试钉死；改状态集合前必须先看。
+- 状态转移触发器：只许按 §4.2 的规则前进；`idempotency_key`、`first_attempt_at`、`claimed_at`、`authorization_id`、`provider_message_id`、`provider_account`、`to_address_sha256`、`rendered_sha256`、`template_*`、`consent_basis`、`source_ref`、`local_day` 认领之后一旦写入不可改（「从空写一次」）。
 - `BEFORE DELETE / TRUNCATE` 拒；RLS 同上。
 
 ### 3.3 `triggered_send_claim(...)` —— 原子认领函数
 
-入参：`p_authorization_id、p_contact_id、p_to_email_sha256、p_idempotency_key、p_template_version、p_template_sha256、p_rendered_sha256、p_source_ref、p_consent_basis`。**日上限、授权是否有效、客户本地日一律在函数里自己读/自己算，不信调用方传的值**：
+入参：`p_authorization_id、p_contact_id、p_to_address_sha256、p_idempotency_key、p_template_key、p_template_version、p_template_sha256、p_rendered_sha256、p_source_ref、p_consent_basis、p_lease_minutes(缺省 10)`。**日上限、授权是否有效、客户本地日一律在函数里自己读/自己算，不信调用方传的值**。返回 `(outcome, send_id, row_status, row_idempotency_key)`。步骤（v2，按这个顺序）：
 
-1. 函数开头第一句 `pg_advisory_xact_lock(hashtextextended(client_id || trigger_key, 0))`，并断言 `current_setting('transaction_isolation') = 'read committed'`（魏征原型实测：REPEATABLE READ 下两个并发认领都会成功；PostgREST 默认就是 READ COMMITTED，断言防的是以后有人换隔离级别）。
-2. 读授权行（`FOR SHARE`）：`revoked_at is null and activated_at is not null and expires_at > now()`，否则返回 `auth_inactive`；`daily_cap` 取行里的值；`local_day := (now() at time zone rule.timezone)::date`。
-3. 已有真发行：
-   - 终态（`skipped` 或已发出之后的状态）→ `exists_terminal`；
-   - `pending` 且 `now() − first_attempt_at > 20 小时` → 把它置为 `unknown_outcome`，返回 `expired_unknown`（**绝不再发**）；
-   - `pending` 且租约未过 → `in_flight`；租约已过 → `takeover`（**沿用原幂等键，不重置 `first_attempt_at`**）；
-   - `blocked` → 重新认领成 `pending`。
-4. 无行：先查地址唯一（同址已有「发出过」的行 → `address_duplicate`），再数当天（`local_day`）已占日上限的真发行（`pending / unknown_outcome / sent / delivery_delayed / delivered / suppressed / bounced / complained`）≥ `daily_cap` → `cap_reached`（不动数据），否则插入 `pending`。
-5. 返回 `{ outcome ∈ {claimed, exists_terminal, in_flight, takeover, expired_unknown, cap_reached, address_duplicate, auth_inactive}, send_id, status }`；**测试必须断言「返回 claimed 时行确实落库」**（魏征原型踩到的 plpgsql `FOUND` 被 `count` 覆盖的坑）。
+1. 断言 `current_setting('transaction_isolation') = 'read committed'`（魏征原型实测：REPEATABLE READ 下两个并发认领都会成功；PostgREST 默认就是 READ COMMITTED，断言防的是以后有人换隔离级别）。
+2. **入参校验**：除 `p_source_ref / p_consent_basis` 外任何一个为空、或租约不在 1–30 分钟，直接 `raise`（`invalid_parameter_value`），不写任何行。
+3. 读授权行取 `client_id / trigger_key / channel`（不存在 → `auth_inactive`），然后 `pg_advisory_xact_lock(hashtextextended(client_id || ':' || trigger_key, 0))`。
+4. 找已有真发行（`FOR UPDATE`）。**先判 20 小时**：`pending` 且 `now() − first_attempt_at > 20 小时` → 置 `unknown_outcome`，返回 `expired_unknown`（**授权已撤销也照样转**；绝不再发）。
+5. 在锁内重读授权行（`FOR SHARE`）：`revoked_at is null and activated_at is not null and expires_at > now()`，否则 `auth_inactive`。
+6. **规则缺时区、或时区不是 `pg_timezone_names` 里的 IANA 名字 → `rule_invalid`**（不回落默认、不再靠报错；`'+13'`、`'UTC+13'` 这类 POSIX 写法正负号是反的，曾实测把本地日算错一天）；`local_day := (now() at time zone rule.timezone)::date`。
+7. **模板指纹必须与授权绑定的一致**：`p_template_version / p_template_sha256` 与授权行不一致 → `template_mismatch`（D1「模板改一个字授权就作废」在库里多一层）。
+8. 已有行：`pending` 且租约未过 → `in_flight`；租约已过 → 先比对：**授权 id 或渲染指纹与这次传入的不一致 → `in_flight`（不接管、不重发；行留在 `pending`，20 小时后转 `unknown_outcome` 由人核对）**，一致才 `takeover`（**沿用原幂等键、不重置 `first_attempt_at`，并把原幂等键回传**）；其余终态 → `exists_terminal`；`blocked` → 往下重新认领。
+9. 同址已有「发出过」的行（别的联系人）→ `address_duplicate`；当天（`local_day`）已占日上限的真发行数 ≥ 授权行里的 `daily_cap` → `cap_reached`（不改数据）。
+10. 设认领标记 → 认领（`blocked` 行重新认领时**清掉陈旧字段**：`reason_code / last_block_reason / bounce_kind / sent_at / last_event_*`）→ 复位标记 → 返回 `claimed`（带传入的幂等键）。**测试必须断言「返回 claimed 时行确实落库」**（魏征原型踩到的 plpgsql `FOUND` 被 `count` 覆盖的坑）。
 - 函数 `security invoker`、`set search_path = public`，`revoke execute … from public, anon, authenticated`，只授权 service_role。
 - **影子行不走这个函数**：影子是 `dedupe_scope='shadow'` 的普通插入（`on conflict do nothing`），**不抢锁、不数日上限、不升级成真发行**（§5.4）。
 
@@ -177,7 +184,7 @@
 | 等级 | 状态 | 说明 |
 |---|---|---|
 | 1 | `pending` | 已认领，供应商调用未完成 |
-| 2 | `unknown_outcome` | 调用结果不明（超时/409/超过 20 小时）。**出口**：①按 `provider_message_id` 或（客户账号下）`to_email_sha256` + 时间窗对上回执，自动前进；②PM 在授权页标「已发出」（→ `sent`）或「没发出」（→ `failed`，`reason_code=not_sent_confirmed`） |
+| 2 | `unknown_outcome` | 调用结果不明（超时/409/超过 20 小时）。**出口**：①按 `provider_message_id` 或（客户账号下）`to_address_sha256` + 时间窗对上回执，自动前进；②PM 在授权页标「已发出」（→ `sent`）或「没发出」（→ `failed`，`reason_code=not_sent_confirmed`） |
 | 3 | `sent` | 供应商已受理（记 `provider_message_id`） |
 | 4 | `delivery_delayed` | |
 | 5 | `delivered` | |
@@ -185,6 +192,8 @@
 | 7 | `bounced` | 硬/软退信（`bounce_kind` 区分） |
 | 8 | `complained` | 投诉，最高 |
 
+- **例外**：PM 标「没发出」（`failed` + `reason_code='not_sent_confirmed'`）之后，如果后来真有送达/退信/投诉回执（等级 ≥ `sent`），允许覆盖——否则 PM 误标会让真实回执被拒、信息丢失。
+- **倒退与非法用不同的提示**：状态倒退报 `hint='status_regress'`（回执消费方可据此忽略过期回执），非法转移报 `hint='status_illegal'`（真 bug）。**写 `provider_message_id` 与推进状态要用「取等级较大者」的单条 UPDATE**（否则回执先把行推进到 `delivered` 后，发送方「`sent` + message id」合写会被整条拒掉、message id 丢失）。
 - 因此**回执乱序最终收敛**：先 `delivered` 后 `bounced` 能前进，先 `bounced` 后 `delivered` 被拒（保持 `bounced`）。
 - **`pending` 行遇到被拦的关口**（接管时撞到静默时段、锁忙等）：**只写 `last_block_reason`，状态不动**（修掉「pending → blocked 被触发器拒」的毒行）。D2 判定**不在接管时重判**（决定在认领时已经做了，接管只重验频次）。
 
@@ -212,7 +221,7 @@
 |---|---|---|---|
 | A | **武装 + 授权**：真发要 `TRIGGERED_SEND_LIVE` + 客户在白名单，且生效授权通过 `judgeStandingAuthorization`；只有提案 → 影子 | `not_armed/auth_*/template_changed/gate_changed`（影子不是错误） | §4 |
 | B | **候选窗口**（§5.1）：本地日、`live_from`、`max_age_days` | `skipped:stale` | |
-| C | **收件人**：邮箱格式；不是系统/自动地址；**若 `recipient_allowlist` 非空，只许清单内地址**；同一地址（`to_email_sha256`）没有硬退信记录 | `bad_email/system_address/not_in_allowlist/hard_bounced_address` | `src/lib/crm/identity.ts:83` 只验格式 |
+| C | **收件人**：邮箱格式；不是系统/自动地址；**若 `recipient_allowlist` 非空，只许清单内地址**；同一地址（`to_address_sha256`）没有硬退信记录 | `bad_email/system_address/not_in_allowlist/hard_bounced_address` | `src/lib/crm/identity.ts:83` 只验格式 |
 | D | **别再联系 / 已退订 / Mailchimp 侧抑制 / 旧批次**：①`checkManualSendDncForContact`（异常=拦，`src/lib/crm/manual-send-dnc-gate.ts:77`）；②本表 `complained`；③**`email_unsubscribed` 触点**（§6.3，与 DNC 分开记）；④Mailchimp `findMemberByEmail`（`src/lib/mailchimp/tags.ts:80`，返回 `found{status,tags}` / `not_in_audience` / `error{retryable}`）：`status` 为 `unsubscribed/cleaned/archived` → 终态跳过 `mailchimp_suppressed`；标签以 `legacy.mailchimp_tag_prefix` 开头 → **真发模式终态跳过 `legacy_welcomed`**，**影子模式只做批注、不拦**（影子要拿来和批次对照）；`error` → 拦（`legacy_unverifiable`，按 `retryable` 重试）| `dnc/dnc_unverifiable/complained/email_unsubscribed/mailchimp_suppressed/legacy_welcomed/legacy_unverifiable` | §9-1 已核实：函数存在 |
 | E | **同意依据**：联系人带 `meta_lead_form` 触点且 `metadata.consent_basis ∈ consent.accepted_bases`；**白名单内的内部地址免此项** | `no_consent_basis` | `src/lib/crm/meta-lead.ts:337,360`（代码里的依据是 CTS 的实际情形，所以放进每客户规则，不写死） |
 | F | **销售邮箱可读**：`human_mail.required_mailboxes` 里任一邮箱的连接不是 `active`（`platform_oauth_connections`，`mail-send-new-prod.ts:89-97`）→ **整批拦**（读不到 ≠ 没人发过）| `mailbox_unreadable` | 提案时校验清单非空且都是 `active` |
@@ -264,7 +273,7 @@
 
 - 欢迎信模板 = 127 模板表里的一份模板，**用 127 的渲染器**与「是否可发」检查（`checkTemplateSendable`）。
 - **第一版只许**：占位符只有 `first_name`、`fact_source='none'`、`pick_mode='none'`、不含价格/团名/日期。校验在「提案」时和「发送前每一封」各做一次；不符 = 不进授权 / 拦这一封。
-- **现状差距（魏征核实）**：现在 8:01 批次那封（v2）是图文邮件，含团名价格，并有「没名字时的兜底称呼」；127 渲染器**没有缺名兜底语法**（`src/lib/crm/email-templates/placeholders.ts:17`），也只发纯文字。所以第一版**不照搬 v2**，内容由 CTS / 126 写、PM 确认（§0 问题 2）；要图文版 + 团价 + 兜底称呼，需另做「图文渲染 + 每日事实对账」，放第二版。
+- **现状差距（魏征核实）**：现在 8:01 批次那封（v2）是图文邮件，含团名价格，并有「没名字时的兜底称呼」；127 渲染器**没有缺名兜底语法**（`src/lib/crm/email-templates/placeholders.ts:17`），也只发纯文字。所以第一版**不照搬 v2**，内容由 CTS / 126 写、PM 确认（PM 11-02 已回「可以」，决定 D4）；要图文版 + 团价 + 兜底称呼，需另做「图文渲染 + 每日事实对账」，放第二版。
 - **模板内容谁写 / 谁录**：我不会自己往生产库写模板；由你们（或我起草、你们确认）把正文放进 ME 的模板管理。**对外内容先 grounding CTS 官网**（CLAUDE.md §8）。
 
 ### 6.3 联系人级一键退订入口（新公共入口，A 级）
@@ -343,9 +352,10 @@ P1 设计稿 §3.8 与台账卡 `2026-11-01-provider-webhook-events-retention-jo
 | P2-1b | 共享库（授权判定/关口/状态机/欢迎信定义）+ `propose` 路由 + 扫描函数（**只影子**）+ 对照 + 待办 + 共享开关小工具 | A | 无。**必须等 P2-1a 的迁移已应用到生产库才能合**（代码引用新表） |
 | P2-2a | Resend 适配器 + 触点写入 + 频次的最小改动（§6.4）+ 销售手发关口的「已退订邮件」检查 | A | ①独立 Resend 账号 + 钥匙 ②CTS 域名解析 |
 | P2-2b | 回执消费 + 路由补事件（**先消费、后发事件**）+ 一键退订入口 + 每日对账 + **保留期清理** | A | 填 `UNSUBSCRIBE_SIGNING_SECRET`、新账号回调密钥（只能你本人） |
-| P2-2c | 授权写入口 + 授权页 + 武装开关 + 受控试跑（§6.6） | A | 在 CRM 手建内部测试联系人；看影子对照 → 点「授权」（先试跑版、再正式版）→ 填 `TRIGGERED_SEND_LIVE` / `TRIGGERED_SEND_CLIENTS` 并手动部署 |
+| P2-2c | 授权写入口 + 授权页（「标没发出」按钮旁必须写明后果：该地址以后不再自动收到欢迎信，补发由销售手发）+ 武装开关 + 受控试跑（§6.6） | A | 在 CRM 手建内部测试联系人；看影子对照 → 点「授权」（先试跑版、再正式版）→ 填 `TRIGGERED_SEND_LIVE` / `TRIGGERED_SEND_CLIENTS` 并手动部署 |
 | P2-3 | 切换（人做）+ 7 天验证 | — | 改表格脚本触发器；7 天后看「没有人收到 2 封」 |
 
+- P2-1a 的 DB 行为试跑脚本入库（`scripts/db-behavior/triggered-send-ledger.sh` + 环境桩），不进 CI（CI 只重放迁移与安全不变量），留作以后改表/函数时的回归与审查员复用。
 - 每批：先本机验证（含 DB 行为、真 PostgREST 端到端、变异探针），**实现审各一轮（子牙+魏征）**，再开改动单；推送攒到批末一次；每批 PR 正文写「## 当场试跑」。
 - **当场试跑**：P2-1b 的扫描函数在生产**手动触发一次影子**（不外发）；P2-2c 的试跑**只发白名单内的 hello@**（§6.6）。
 - 回滚：撤销授权（一条记录）即停；表与函数留着无害；不复活旧批次（总设计 §4.11-5）。
@@ -394,6 +404,18 @@ P1 设计稿 §3.8 与台账卡 `2026-11-01-provider-webhook-events-retention-jo
 - `triggered_send_claim(...) → { outcome, send_id, status }`（§3.3）。
 - 回执消费：`applyProviderEvent(row, event) → 新状态 | 'ignore' | 'retry'`。
 
+**写入方须遵守的契约（审查发现库里管不了、只能由 P2-1b / P2-2 的代码与专测钉住）**
+- **联系人属于授权客户**：认领前由发送关口断言联系人确属授权所属客户（联系人是软引用，库里查不了）；专测：授权属 C1、传 C2 的联系人必须在关口被拦。
+- **授权路由的时间用数据库时间**：同一请求里先取库的 `now()`，`live_from = now() − 5 秒`、`expires_at = min(请求值, now() + 90 天 − 5 秒)`；应用时钟比库快 1 秒就会撞 CHECK（授权失败）。
+- **提案路由校验时区**：`rule.schedule.timezone` 必须是 IANA 名字，**区分大小写**（`pacific/auckland` 会被认领函数拒绝），校验名单必须与库里 `pg_timezone_names` 同源；认领函数在库里再拒一次（`rule_invalid`）。
+- **渲染必须对同一联系人确定**（只用定格输入，不读当前时间 / 可变事实）：租约过期后重渲染的指纹变了，认领函数不会接管（返回 `in_flight`，20 小时后转 `unknown_outcome`）。
+- **标 `sent` 时不要清 `lease_expires_at`**：已认领状态的 CHECK 要求它非空。
+- **「取等级较大者」的单条 UPDATE**：PostgREST 写不出这种带比较的更新。P2-2b 的回执消费者走一个库函数（新迁移），或拆成两条并接受「message id 写入因回执先到而被拒 → 重读重试」；在 P2-2b 的设计里钉死，P2-1a 不做。
+- **每日对账任务（P2-2b）把超过 20 小时的 `pending` 转成 `unknown_outcome`**，不依赖授权是否仍有效，也不依赖应用还会不会调认领函数（授权撤销后发送方在关口 A 就停了，不会再来认领）。
+- **加锁顺序**：advisory lock → 账本行 → 授权行；以后在同一事务里同时改两张表的函数必须按此顺序。
+- **写 `failed` 必须在同一条 UPDATE 里带 `reason_code`**：库里不许事后补写（`failed` 下原因不许改）；先改状态、后改原因，原因会冻成 `expired_20h`（或空）、地址被放出，且改不回；先写一个没有原因的 `failed` 同样用不上迟到回执的例外。专测钉住（P2-2b）。
+- **`not_sent_confirmed` 只许在 `unknown_outcome → failed` 那一步写**；回执消费者**不得**把 `delivered` 及以上的行转成 `failed`。库里目前只靠状态等级单调挡，没有专门禁止「在非 failed 行先写 `reason_code='not_sent_confirmed'` 再转 failed 借例外退回 sent」这种有意构造的顺序（魏征第三轮实测，写入方是自家受信代码，列为 P2）；P2-2b 的专测钉住「消费者不会走这条路」，必要时再补库内约束。
+
 ## 14. 验证计划
 
 **本机（每批改动单前必须做完并留证）**
@@ -425,7 +447,7 @@ P1 设计稿 §3.8 与台账卡 `2026-11-01-provider-webhook-events-retention-jo
 | 2 | P0 | 首个真发日会把影子期积压的旧线索补发；`created_after` 写在提案还是授权矛盾；影子行「升级成 pending」；没有最长时限（W1、Z5） | **采纳**：`live_from` 批准时写（生命周期列）；`max_age_days` + `skipped:stale`；影子与真发用 `dedupe_scope` 分开、**永不升级**；旧标签读不到时真发拦（§5.1、§3.1、§3.3） |
 | 3 | P1 | 认领函数的日上限/授权由调用方传；不复核授权；INSERT 可预填「已批准+已武装」（Z2、W4） | **采纳**：函数里读授权行、复核有效性、自己算本地日与日上限；`BEFORE INSERT` 触发器禁预填；READ COMMITTED 断言（§3.1、§3.3） |
 | 4 | P1 | D2 判定在锁外；S3 改法会把 `me_send` 当销售信；接管 `pending` 行判「销售已发」成毒行；S1 只读 active 邮箱（Z3、W2） | **采纳**：D2 与频次在锁内用同一次证据判；排除 `me_send`；接管不重判 D2、`pending` 被拦只写 `last_block_reason`；`required_mailboxes` 非 active 整批拦；§0 问题 1（销售用哪些邮箱） |
-| 5 | P1 | 只拿联系人锁、只按联系人去重（W3） | **采纳**：加收件地址锁；`to_email_sha256` 终身唯一（部分唯一索引） |
+| 5 | P1 | 只拿联系人锁、只按联系人去重（W3） | **采纳**：加收件地址锁；`to_address_sha256` 终身唯一（部分唯一索引） |
 | 6 | P1 | 防重发：20 小时锚点没定；409 被归为拒收；退订令牌签发时间使重放载荷必变；pending/unknown 不写触点（W5） | **采纳**：`first_attempt_at` 不可变并由函数强制；409 归结果不明；重放用定格输入并核对 `rendered_sha256`；认领时就写触点（确定被拒再标 `cancelled`） |
 | 7 | P1 | SDK 无超时；空钥匙回落系统钥匙（W6） | **采纳**：适配器 15 秒超时；先校验分账号钥匙、空值不进构造函数（§6.1） |
 | 8 | P1 | 回执：乱序丢退信；没有 `bounce_kind`；缺每日对账；找不到行重试后永久丢弃，投诉也丢；`system` 账号事件白退避（Z8、W7） | **采纳**：只按等级单调；加 `bounce_kind`；每日对账与「回执缺失」待办；地址指纹兜底配对 + 对不上由待办兜住；只对客户账号发事件（§6.5） |
@@ -440,4 +462,52 @@ P1 设计稿 §3.8 与台账卡 `2026-11-01-provider-webhook-events-retention-jo
 | 17 | P2 | 平台与流程：`isLiveFor` 第三份拷贝；「与 126 对齐」被降成通知；保留期清理卡没接；回执缺 `provider_impact`/来源记录号；看门狗在没新线索日误报；定时触发不带客户键；P2-1b 须等迁移已应用（Z12） | **采纳**：共享开关小工具；§1 差别 6、§11；§7 保留期清理；§8 回执字段；看门狗按 `candidates=N`；cron 按客户分发事件；§10 写明次序 |
 | 18 | P2 | 自家闸线按 CTS 2.5% 退信率会有约 40% 概率误停；1 次投诉就停；授权续期被「过期未撤销」挡住（W12） | **采纳**：闸线改为样本≥50 且硬退信≥3 个且率 >4%；投诉≥2 次才自动撤销、单次投诉出待办；续期先显式撤销过期的（§3.1、§4.3） |
 
-**二轮**：不单独再审设计稿，改在 P2-1a 的**真迁移 SQL** 写出后，由子牙 / 魏征做「实现审」一轮（魏征用本机 Postgres 重跑并发原型）——这是总设计要求的实现审，不增加第三轮（Gates #964：普通最多两轮）。
+### 16.2 实现审（P2-1a 迁移，2026-11-02；子牙、魏征对真迁移 SQL 各审一轮，都判「需改后再审」）
+
+子牙用本机库逐条复现；魏征独立重跑 115 项行为检查与 35 个变异（全部被杀），并实测了 upsert / MERGE / COPY / TRUNCATE / 直连建触发器等绕过路径。发现与处理（Z = 子牙，W = 魏征）：
+
+| # | 级别 | 发现（谁） | 处理 |
+|---|---|---|---|
+| 1 | P1 | 直接 INSERT `pending` 行、或把 `blocked` 直接 UPDATE 成 `pending`，能绕过认领函数：日上限设 1 实测出现 2 条 pending；`first_attempt_at` 填十年后使 20 小时规则失效（Z1） | **采纳**：认领标记 `app.triggered_send_claim`，INSERT / UPDATE 两个守卫都查；认领函数写完立刻复位（§3.2） |
+| 2 | P1 | 认领函数接受空入参：地址指纹传空，两个联系人都认领成功，「终身同址只欢迎一次」失效；模板与渲染指纹全空也能认领（Z2、W-1、W-6） | **采纳**：入参校验（`invalid_parameter_value`）+ 已认领状态的 CHECK 扩到 11 列（§3.2、§3.3） |
+| 3 | P1 | `authorization_id` 不在认领后写一次清单：已发出的行能改成空，查不到哪份授权放行（Z3） | **采纳**，另加 `claimed_at` |
+| 4 | P1 | 认领函数不比对模板指纹：授权绑 `b…`，认领传 `e…` 照样成功（Z4） | **采纳**：`template_mismatch` |
+| 5 | P1 | 规则缺时区时静默按 `Pacific/Auckland` 算，违背「缺键不回落默认」与平台化铁律（Z5） | **采纳**：`rule_invalid` |
+| 6 | P1 | 合并闸漏 `src/lib/platform/live-switch.ts` 与 `src/lib/inngest/functions/` 下的扫描 / 回执函数（实测判 B）；send-gates / dnc / automated-touch 三个分支没有各自的测试（Z6） | **采纳**：`risk.mjs` 加两条规则 + 逐分支测试（424 项，逐条删规则必变红） |
+| 7 | P2 | 状态倒退时整条 UPDATE 报同一个 23001，回执消费方分不清「过期回执可忽略」还是真 bug；回执先到时发送方「sent + message id」合写会被拒（Z7） | **采纳**：`hint = status_regress / status_illegal`；「取等级较大者」的单条 UPDATE 写法写进 §4.2 |
+| 8 | P2 | 时间和租约没钉死：`authorized_at` 可填未来（实测有效期 454 天）；批准与武装可一条语句完成；租约空或负数使下一次认领立刻接管；授权撤销后超 20 小时的 pending 永远不转 unknown；接管不回传原幂等键（Z8、W-3） | **采纳**：三个时间戳由触发器覆盖成 `now()`；批准与武装分两条语句；租约夹在 1–30 分钟（越界直接报错）；20 小时判定先于授权检查；认领返回已存的幂等键 |
+| 9 | P2 | 模板留空的提案永远批不了（绑定列不可变）；PM 误标「没发出」后真实送达回执被拒（Z9） | **采纳**：§3.1 写明「须重新提案」；`failed + not_sent_confirmed` 可被后来的真实回执覆盖 |
+| 10 | P2 | 共享表写死第一个渠道 / 供应商（`to_email_sha256`、`RESEND_*` 取值）；两个状态辅助函数的执行权只靠默认授权；行为试跑不在仓库里（Z10） | **采纳**：改名 `to_address_sha256`、`provider_impact` 取 `NONE / PROVIDER_ACCEPTED / PROVIDER_UNKNOWN`；显式 `grant … to service_role`；行为脚本入库（`scripts/db-behavior/`） |
+| 11 | P2 | 三张 `done` 台账卡验法只核设计稿文字，夜巡会把「写进设计稿」翻成已验（Z11） | **采纳**：验法改为 P2-1b 的测试覆盖，`verify_by` 改 11-20 |
+| 12 | P2 | `service_role` 能 `CREATE TRIGGER`：直连时可建一个排在守卫之后的触发器，把终态 `skipped` 改回 `pending` 并伪造幂等键（W-2；经 PostgREST 走不到，仅直连） | **采纳**：`revoke trigger, references, truncate … from service_role` |
+| 13 | P2 | 认领不校验联系人属于授权客户：授权属 C1、传 C2 的联系人也能认领，行记成 C1（W-4；联系人是软引用，库里查不了） | **不在库里做**：写成 P2-1b 发送关口的契约（认领前断言联系人归属授权客户）并加专测（§13） |
+| 14 | P2 | `blocked` 行重新认领时陈旧 `bounce_kind / sent_at / last_event_*` 残留（W-5） | **采纳**：认领时一并清掉 |
+| 15 | P2 | 证据可信度：作者日志里 M28 记「存活」（W-7） | **说明**：M28（删账本的 scope/status CHECK）起初确实存活——我的用例被另一道 CHECK 先拦；补「带齐认领列」的用例后杀掉。第二版重跑时 M28 与 N06 又各存活一次，查明仍是测试自身的缺陷（见 §16.3 末段），已修；变异检验最终扩到 75 个，以 §16.3 的实跑数字为准 |
+| — | — | `failed` / `skipped` 会释放同址，须有回归测试钉死（W） | **采纳**：行为脚本里「failed 释放同址、suppressed 不释放」两条 |
+
+**第二版验证**：见 §16.3（第二轮复核后又改了一版，以最后一版为准）。
+
+### 16.3 第二轮复核（只看差异；2026-11-02；子牙、魏征各一次，都判「需改后再审」）
+
+两位都确认上一轮的 P1 已堵住（各自新建库逐条复现）；各找到 1 条新的 P1 和若干 P2，处理如下（Z = 子牙，W = 魏征）：
+
+| # | 级别 | 发现 | 处理 |
+|---|---|---|---|
+| 1 | P1 | 「已撤销的提案不许再批准」的判据只看 `authorized_at`：不填它、只写其它批准列，已撤销的提案也能被批准（批准时间晚于撤销时间；武装与认领仍被拒，发不了信，但审计上像撤销之后又批准）（Z、W-P2-1） | **采纳**：判据改成与「时间由数据库定」一致（任一批准列被写入即算批准）；专测 + 变异 |
+| 2 | P1 | 「没发出」例外 × 「failed 释放同址」叠加：A 被标「没发出」→ 同址的 B 认领 → A 的真实送达 / 投诉回执写入撞同址唯一索引（23505），投诉写不进账本，地址实际收到两封；另可先把 `reason_code` 改成 `not_sent_confirmed`，再借例外把供应商拒收的 `failed` 推到 `suppressed`（W，Z-P2） | **采纳**：`failed + not_sent_confirmed` 不释放同址（唯一索引与认领函数的同址计数用同一个谓词）；`failed` 状态下 `reason_code` 只许写一次；专测（含「绕过函数直插仍撞唯一索引」）+ 3 个变异 |
+| 3 | P2 | 接管不比对授权与渲染：换了授权或重渲染的结果变了，仍会用旧内容 + 原幂等键重发（Z、W-7） | **采纳**：授权 id 或渲染指纹与这次传入的不一致 → `in_flight`，不接管；专测 + 2 个变异 |
+| 4 | P2 | 时区写成 `'+13'` / `'UTC+13'`（POSIX 写法，正负号反）→ 本地日算错一天（W-3） | **采纳**：只接受 `pg_timezone_names` 里的名字，否则 `rule_invalid`（原先非法名字是抛错，现统一返回结果）；专测 + 变异 |
+| 5 | P2 | 应用时钟比库快 1 秒 → 批准撞 CHECK（Z、W-2） | **契约**：授权路由用库时间（§13） |
+| 6 | P2 | 标 `sent` 时不能清租约；「取等级较大者」的单条 UPDATE 走 PostgREST 写不出；授权撤销后应用停在关口 A，超 20 小时的 `pending` 不会转 `unknown_outcome`（Z、W-4、W-5） | **契约**：§13（P2-2 写入方遵守）+ 每日对账任务 |
+| 7 | P2 | 加锁顺序（先账本行后授权行）要告诉后来者；文件头应注明「只能经认领函数」挡不住直连 SQL（W-6、W-8） | **采纳**：写进认领函数那一节的标题注释 |
+| 8 | P2 | 合并闸按文件名前缀判：函数文件放进子目录或改名会判 B（Z） | **采纳**：规则改为路径前缀（文件或 `triggered-send/` 子目录都算 A），加专测并验证删规则必变红 |
+| 9 | P2 | §16.2 说 §3.1 已写「须重新提案」，实际没写（Z） | **采纳**：已补进 §3.1 |
+
+**测试自身的缺陷（变异检验揪出，已修）**：第二版第一次全量变异时，M28 与 N06 又存活。查明是**测试写得不严**，不是建表文件的问题：①影子行用例引用了文件后面才定义的变量（空串），先触发「哈希格式」CHECK，等于没测 scope/status；②「每个认领列单独为空」用例生成的假哈希只有 61 位，十个列的用例都因哈希不合法而「报对了错」。修法：夹具前移并校验长度；新增同时断言**错误码与约束名**的 `expect_chk`；并发用例改成「闸门法」（用顾问锁把认领会话停在事务中间，再观察第二个会话是否停在锁上），不再靠固定等待（机器忙时固定等待曾让 M05 假存活）；逐个核对了全部 72 条「期望报错」用例实际报的是哪条错，都对得上；变异检验扩到 75 个（逐列 9 个、两条 TRUNCATE 触发器、本轮 7 个）。
+
+**第 2.1 版验证**：见 PR 正文「验证」一节的实跑数字（行为试跑、变异、重放、PostgREST 端到端、结构测试、合并闸测试、台账测试）。
+
+**第三轮（对 2.1 改动的窄确认，不是新一轮完整审查）**：子牙、魏征各自新建库应用 v2.1，逐条复现上面第 1–4 项：**都判「通过」，没有新的 P0 / P1**。各留的小项（P2）处理：
+- 子牙：①「failed 下原因只写一次」实际是「failed 下原因不许改」，先写没有原因的 `failed` 会释放地址 → 写入方契约（§13：同一条 UPDATE 带原因，P2-2b 专测）；②被标「没发出」的地址以后不再自动收欢迎信 → 授权页必须写明后果（§10 P2-2c）。
+- 魏征：①在非 `failed` 行先写 `not_sent_confirmed` 再转 `failed` 可借例外退回；`delivered` 转别的原因的 `failed` 仍放出同址 → 写入方契约（§13，消费者不得走这条路，P2-2b 专测；必要时再补库内约束）；②分两句写 `failed`（先状态后原因）原因会冻成 `expired_20h` → 同上契约；③时区名区分大小写 → 提案路由用同一份名单（§13）。
+这些都不是 P2-1a 要在库里再改的东西；建表文件定稿为 v2.1（应用到生产之后不得再改）。

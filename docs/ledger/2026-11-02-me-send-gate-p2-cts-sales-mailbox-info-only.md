@@ -5,8 +5,8 @@ status: done
 owner: agent
 decided_on: 2026-11-02
 source: session:33ebcd0b
-verify_by: 2026-11-09
-verify_how: 看第二步设计稿 docs/specs/2026-11-02-me-send-gate-p2-design-v0.md 的 §3.1（规则快照的必须可读邮箱清单）与 §5.2 F 步是否写明清单 = info@、清单内任一邮箱连接不是 active 就整批拦、清单外断开的邮箱忽略；以后若销售开始用别的邮箱，必须先重新连接并重新授权
+verify_by: 2026-11-20
+verify_how: 看第二步 P2-1b 的改动单是否已合并，且它的测试覆盖了：规则快照里「必须可读的销售邮箱清单」= info@、清单内任一邮箱连接不是 active 就整批拦、清单外已断开的邮箱（bdm@）被忽略；以后若销售开始用别的邮箱，必须先重新连接并重新授权。只写进设计稿不算落地
 done_on: 2026-11-02
 done_ref: doc:docs/specs/2026-11-02-me-send-gate-p2-design-v0.md
 ---

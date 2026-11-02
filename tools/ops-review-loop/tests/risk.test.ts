@@ -77,6 +77,13 @@ const A_PATHS: Array<[string, string]> = [
   ['src/lib/crm/email-templates/frequency-sources-prod.ts', 'staff-send frequency sources'],
   ['src/lib/crm/email-templates/send-gates-prod.ts', 'staff-send gate assembly'],
   ['src/lib/crm/manual-send-dnc-gate.ts', 'do-not-contact gate'],
+  ['src/lib/crm/email-templates/send-gates.ts', 'staff-send gate assembly (send-gates alternative)'],
+  ['src/lib/crm/dnc.ts', 'do-not-contact verdict source (dnc alternative)'],
+  ['src/lib/crm/automated-touch.ts', 'machine-touch marker (automated-touch alternative)'],
+  ['src/lib/platform/live-switch.ts', 'live-send arming switch'],
+  // Planned for P2-1b (does not exist yet): the rule must already rate it A when it lands.
+  ['src/lib/inngest/functions/triggered-send-welcome-sweep.ts', 'triggered-send inngest functions'],
+  ['src/lib/inngest/functions/triggered-send/welcome-sweep.ts', 'triggered-send inngest functions (subdirectory)'],
   ['src/lib/meta/guardrails.ts', 'spend guardrail'],
   ['scripts/factory-worker/engines/remotion/catalog/music-vocals.json', 'music vocal registry'],
   ['scripts/factory-worker/music-vocal-gate.mjs', 'music vocal gate'],

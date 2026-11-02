@@ -213,13 +213,101 @@ describe('triggered_send ledger migration structure', () => {
     expect(CLEAN).toContain("interval '36 hours'")
   })
 
-  it('raises every exception with restrict_violation except the row-count guard', () => {
-    // 只有 'expected to update exactly one row' 这一处不带 errcode
-    const raiseMatches = CLEAN.match(/raise exception/g)
-    const errcodeMatches = CLEAN.match(/errcode = 'restrict_violation'/g)
-    const raiseCount = raiseMatches?.length ?? 0
-    const errcodeCount = errcodeMatches?.length ?? 0
-    expect(raiseCount - errcodeCount).toBe(1)
+  it('raises every exception with restrict_violation except two named ones', () => {
+    // 例外只有两处：入参无效（invalid_parameter_value）与「必须恰好更新一行」（不带 errcode）
+    const raiseCount = CLEAN.match(/raise exception/g)?.length ?? 0
+    const restrictCount = CLEAN.match(/errcode = 'restrict_violation'/g)?.length ?? 0
+    expect(CLEAN).toContain("using errcode = 'invalid_parameter_value'")
+    expect(CLEAN).toContain("raise exception 'triggered_send_claim: expected to update exactly one row'")
+    expect(raiseCount - restrictCount).toBe(2)
+  })
+
+  it('only lets the claim function write live pending rows (claim marker on both guards)', () => {
+    const marker = "coalesce(current_setting('app.triggered_send_claim', true), '') <> 'on'"
+    expect(CLEAN.split(marker).length - 1).toBe(2)
+    // 认领函数先设标记、写完立刻复位
+    expect(CLEAN).toContain("perform set_config('app.triggered_send_claim', 'on', true)")
+    expect(CLEAN).toContain("perform set_config('app.triggered_send_claim', '', true)")
+  })
+
+  it('requires every claim column on claimed statuses', () => {
+    const start = CLEAN.indexOf('constraint triggered_sends_claimed_columns check')
+    expect(start).toBeGreaterThanOrEqual(0)
+    const block = CLEAN.slice(start, CLEAN.indexOf(');', start))
+    for (const column of [
+      'idempotency_key',
+      'first_attempt_at',
+      'to_address_sha256',
+      'rendered_sha256',
+      'template_key',
+      'template_version',
+      'template_sha256',
+      'authorization_id',
+      'local_day',
+      'claimed_at',
+      'lease_expires_at',
+    ]) {
+      expect(block).toContain(`${column} is not null`)
+    }
+  })
+
+  it('claim function validates inputs and the rule before writing', () => {
+    expect(CLEAN).toContain('p_lease_minutes not between 1 and 30')
+    expect(CLEAN).toContain('p_to_address_sha256 is null')
+    expect(CLEAN).toContain("'template_mismatch'")
+    expect(CLEAN).toContain("'rule_invalid'")
+    expect(CLEAN).toContain("'expired_unknown'")
+    // 缺时区不回落默认
+    expect(CLEAN).not.toContain("'pacific/auckland')")
+  })
+
+  it('pins authorization timestamps in the database and splits authorize from activate', () => {
+    expect(CLEAN).toContain('new.authorized_at := now()')
+    expect(CLEAN).toContain('new.activated_at := now()')
+    expect(CLEAN).toContain('new.revoked_at := now()')
+    expect(CLEAN).toContain('activation requires an already authorized row')
+  })
+
+  it('removes trigger, references and truncate privileges from service_role and grants helpers explicitly', () => {
+    expect(CLEAN).toContain(
+      'revoke trigger, references, truncate on public.triggered_send_authorizations, public.triggered_sends from service_role',
+    )
+    expect(CLEAN).toContain('grant execute on function public.triggered_send_status_rank(text) to service_role')
+    expect(CLEAN).toContain('grant execute on function public.triggered_send_status_edge_ok(text, text) to service_role')
+  })
+
+  it('separates status regress from illegal transitions with a hint', () => {
+    expect(CLEAN).toContain("'status_regress'")
+    expect(CLEAN).toContain("'status_illegal'")
+    expect(CLEAN).toContain("old.reason_code = 'not_sent_confirmed'")
+  })
+
+  it('keeps provider- and channel-neutral column names', () => {
+    expect(CLEAN).toContain('to_address_sha256')
+    expect(CLEAN).not.toContain('to_email_sha256')
+    expect(CLEAN).toContain("provider_impact in ('none','provider_accepted','provider_unknown')")
+  })
+
+  it('closes the second-round review findings in the SQL text', () => {
+    // 已撤销的提案：批准相关的任一列被写入都算批准（判据与时间钉死那一段一致，不能靠不填 authorized_at 绕过）
+    expect(CLEAN).toContain(
+      normalize(
+        "if old.revoked_at is not null and old.authorized_at is null and (new.authorized_at is not null or new.authorized_by_email is not null or new.authorized_by_user_id is not null or new.live_from is not null or new.expires_at is not null) then raise exception 'triggered_send_authorizations: revoked proposal cannot be authorized'",
+      ),
+    )
+    // failed + not_sent_confirmed 不释放同址：唯一索引与认领函数的同址计数用同一谓词（各出现一次）
+    const keepsAddress = normalize("(status = 'failed' and reason_code = 'not_sent_confirmed')")
+    expect(CLEAN.split(keepsAddress).length - 1).toBe(2)
+    // failed 状态下 reason_code 只许写一次
+    expect(CLEAN).toContain(
+      "old.status = 'failed' and new.status = 'failed' and new.reason_code is distinct from old.reason_code",
+    )
+    // 接管只在「同一份授权、同一份渲染结果」时发生
+    expect(CLEAN).toContain(
+      'if v_row.authorization_id is distinct from p_authorization_id or v_row.rendered_sha256 is distinct from p_rendered_sha256 then',
+    )
+    // 规则时区必须是 IANA 名字
+    expect(CLEAN).toContain('pg_catalog.pg_timezone_names')
   })
 
   it('declares the status value list exactly as designed', () => {
