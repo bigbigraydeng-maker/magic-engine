@@ -15,11 +15,20 @@ const SAVE_TOOL: Anthropic.Tool = {
     properties: {
       enabled:   { type: 'boolean', description: '是否开启自动进料' },
       keywords:  { type: 'array', items: { type: 'string' }, description: '抓什么关键词/赛道' },
-      platforms: { type: 'array', items: { type: 'string', enum: ['xiaohongshu', 'douyin'] }, description: '抓哪些平台' },
+      platforms: {
+        type: 'array',
+        items: { type: 'string', enum: ['xiaohongshu', 'douyin', 'news'] },
+        description: '抓哪些平台（news=免费 RSS 新闻热点，默认关）',
+      },
       cadence:   { type: 'string', enum: ['off', 'weekly', 'daily'], description: '多久跑一次' },
       scrapePerPlatform: { type: 'number', description: '每平台抓几条' },
       rewriteCount: { type: 'number', description: '每次改写几条候选' },
       preferences:  { type: 'string', description: '客户的内容喜好/风格（自由文本，累积保存）' },
+      news_feeds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '新闻 RSS/Atom 地址（仅 platforms 含 news 时用；http/https，每客户自配）',
+      },
     },
   },
 }
