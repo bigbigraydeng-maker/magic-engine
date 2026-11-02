@@ -17,7 +17,8 @@
 import type { AccountContext } from './context'
 import { adsetRows, money, sumSpend, unitOf } from './context'
 import { countOutcome, OUTCOME_STEP_LABEL } from '../outcome-ladder'
-import { CORE_METRIC_NOUN, resolveCoreMetric } from '../../rules/core-metric'
+import { CORE_METRIC_NOUN, resolveCoreMetric, type CoreMetric } from '../../rules/core-metric'
+import type { OutcomeStep } from '../outcome-ladder'
 import type { EntitySnapshotRow } from '../snapshot'
 import type { Diagnosis, DiagnosisInput } from './types'
 import { D3_COST_MULTIPLE } from './thresholds'
@@ -37,6 +38,16 @@ function isAlertOnlyScope(role: string | undefined, optimizationGoal: string | n
 }
 
 /**
+ * 广告组自己出的结果种类跟客户主结果对不上时，返回它自己的那种（复用 rules/core-metric.ts，D2 / D10 同一个口径）；
+ * 对得上、或客户主结果不是留资 / 开聊（合格询盘、成交这类）、或这个组自己认不出种类时返回 null，照旧按主结果数。
+ */
+function mismatchedMetric(adset: EntitySnapshotRow, primary: OutcomeStep): CoreMetric | null {
+  if (primary !== 'lead' && primary !== 'messaging_started') return null
+  const metric = resolveCoreMetric({ destinationType: adset.destination_type, optimizationGoal: adset.optimization_goal, clientPrimary: primary })
+  return metric !== null && metric !== primary ? metric : null
+}
+
+/**
  * 标题要写明是哪个广告组；同系列下还有别的有花费的广告组时，再补一段系列合计，
  * 免得把「这个组」的数当成整个系列的数（合计 = 各组花费之和 / 各组结果之和）。
  */
@@ -48,6 +59,8 @@ function campaignTotalTail(ctx: AccountContext, input: DiagnosisInput, adset: En
     .map(s => ({ s, rows: adsetRows(ctx, [s.entity_id]) }))
     .filter(x => sumSpend(x.rows) > 0)
   if (withSpend.length < 2) return ''
+  // 系列里混着出另一种结果的组（WhatsApp 开聊组 + 表单组）：按主结果加总会把开聊组的钱算进分母，不写
+  if (withSpend.some(x => mismatchedMetric(x.s, primary) !== null)) return ''
   let spend = 0
   let results = 0
   for (const { s, rows } of withSpend) {
@@ -100,34 +113,22 @@ export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput
   const threshold = D3_COST_MULTIPLE * target
   for (const { s, rows } of spending) {
     const spend = sumSpend(rows)
-    const counts = rows.map(r => countOutcome(outcome.primary!, r, {
+    // 出的结果跟客户主结果不是一种（WhatsApp 开聊组 vs 主结果留资）：改数它自己的结果。零个照样是白花钱
+    // （照常命中、照常可进自动暂停，魏征复审），有结果才判不了——留资的目标成本量不了开聊
+    // （2026-11-03：CTS WhatsApp 组聊着天却被连报 6 天）。其余情况照旧按主结果数（见 mismatchedMetric）。
+    const ownMetric = mismatchedMetric(s, outcome.primary)
+    const step = ownMetric ?? outcome.primary
+    const counts = rows.map(r => countOutcome(step, r, {
       messagingReferralAvailable: input.messagingReferralAvailable,
       optimizationGoal: s.optimization_goal,
     }))
     const unit = unitOf(ctx, 'adset', s.entity_id)
     const alertOnly = isAlertOnlyScope(ctx.roles.get(s.entity_id)?.role, s.optimization_goal)
-    // 只在客户主结果本身就是留资 / 开聊时比：主结果是合格询盘、成交这类，照旧走下面的「归不上」。
-    // 流量组这类自己不出留资也不出开聊的（metric = null）照旧按主结果判、只提醒，不在这里拦
-    const metric = resolveCoreMetric({ destinationType: s.destination_type, optimizationGoal: s.optimization_goal, clientPrimary: outcome.primary })
-    const primaryIsCoreMetric = outcome.primary === 'lead' || outcome.primary === 'messaging_started'
-    if (primaryIsCoreMetric && metric !== null && metric !== outcome.primary) {
-      if (spend < threshold) continue
-      out.push({
-        code: 'D3', status: 'not_comparable', notComparableReason: 'result_type_mismatch',
-        title: `花钱没结果这条判不了：这个广告组出的是${CORE_METRIC_NOUN[metric]}，客户主结果是${OUTCOME_STEP_LABEL[outcome.primary]}`,
-        units: [unit],
-        evidence: { window_start: ctx.window[0], window_end: ctx.date, spend, target_cost: target, unit_result: metric },
-        sample: [{ label: '有花费的天数', value: rows.filter(r => r.spend > 0).length }],
-        reasons: ['按客户主结果数这个组永远是 0；要判它得另设这种结果的目标成本'],
-        clientVisible: true,
-      })
-      continue
-    }
     if (counts.some(c => c.value === null)) {
       if (spend < threshold) continue
       out.push({
         code: 'D3', status: 'not_comparable', notComparableReason: 'primary_result_unknown',
-        title: `花钱没结果这条判不了：${OUTCOME_STEP_LABEL[outcome.primary]}归不到这个广告组`,
+        title: `花钱没结果这条判不了：${OUTCOME_STEP_LABEL[step]}归不到这个广告组`,
         units: [unit],
         evidence: { window_start: ctx.window[0], window_end: ctx.date, spend, target_cost: target },
         sample: [{ label: '主结果归不上的天数', value: counts.filter(c => c.value === null).length }],
@@ -139,6 +140,18 @@ export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput
     const results = counts.reduce((a, c) => a + (c.value ?? 0), 0)
     const cpr = results > 0 ? round2(spend / results) : null
     if (spend < threshold) continue
+    if (ownMetric !== null && results > 0) {
+      out.push({
+        code: 'D3', status: 'not_comparable', notComparableReason: 'result_type_mismatch',
+        title: `花钱没结果这条判不了：这个广告组出的是${CORE_METRIC_NOUN[ownMetric]}（近 7 天 ${results} 个），客户主结果是${OUTCOME_STEP_LABEL[outcome.primary]}`,
+        units: [unit],
+        evidence: { window_start: ctx.window[0], window_end: ctx.date, spend, results, unit_result: step, target_cost: target },
+        sample: [{ label: OUTCOME_STEP_LABEL[step], value: results }, { label: '有花费的天数', value: rows.filter(r => r.spend > 0).length }],
+        reasons: ['目标单次成本只按客户主结果设了一个，量不了这种结果，所以这个组暂时不按成本判；它自己一个结果都没有时照样会报'],
+        clientVisible: true,
+      })
+      continue
+    }
     if (cpr !== null && cpr < threshold) continue
     const noteOnly = alertOnly ? '（只提醒，不会自动暂停）' : ''
     const who = `广告组「${s.entity_name ?? s.entity_id}」`
@@ -147,11 +160,11 @@ export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput
       code: 'D3', status: 'hit',
       ...(alertOnly ? { autoPauseEligible: false } : {}),
       title: results === 0
-        ? `花钱没结果${noteOnly}：${who}近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[outcome.primary]} 0 个${tail}`
-        : `花钱结果太少${noteOnly}：${who}近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[outcome.primary]} ${results} 个，每个 ${money(ctx, cpr)}（目标 ${money(ctx, target)}）${tail}`,
+        ? `花钱没结果${noteOnly}：${who}近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[step]} 0 个${tail}`
+        : `花钱结果太少${noteOnly}：${who}近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[step]} ${results} 个，每个 ${money(ctx, cpr)}（目标 ${money(ctx, target)}）${tail}`,
       units: [unit],
       evidence: { window_start: ctx.window[0], window_end: ctx.date, spend, results, cost_per_result: cpr, target_cost: target, multiple: D3_COST_MULTIPLE },
-      sample: [{ label: OUTCOME_STEP_LABEL[outcome.primary], value: results }, { label: '有花费的天数', value: rows.filter(r => r.spend > 0).length }],
+      sample: [{ label: OUTCOME_STEP_LABEL[step], value: results }, { label: '有花费的天数', value: rows.filter(r => r.spend > 0).length }],
       reasons: [`花费 ≥ ${D3_COST_MULTIPLE}× 目标，且单次成本 ≥ ${D3_COST_MULTIPLE}× 目标`],
       clientVisible: true,
     })

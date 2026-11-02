@@ -157,11 +157,11 @@ describe('【考卷3】止损提议不被最近的设置改动压住', () => {
  * 结果种类跟广告组目的地走，复用 rules/core-metric.ts（D2 / D10 已经这么判）。
  */
 describe('结果种类对不上：不出命中，只出判不了', () => {
-  function runUnit(opts: { goal: string; destination?: string; primary: 'lead' | 'messaging_started'; spend: number; messages?: number }) {
+  function runUnit(opts: { goal: string; destination?: string; primary: 'lead' | 'messaging_started' | 'qualified_enquiry'; spend: number; messages?: number; nullActions?: boolean }) {
     const g: GraphAdsetSettings = { ...adset('as_1', opts.goal), ...(opts.destination ? { destination_type: opts.destination } : {}) }
     const row: DailyRow = {
       ...dayRow('as_1', opts.spend),
-      actions: opts.messages ? [{ action_type: 'onsite_conversion.messaging_conversation_started_7d', value: String(opts.messages) }] : [],
+      actions: opts.nullActions ? null : opts.messages ? [{ action_type: 'onsite_conversion.messaging_conversation_started_7d', value: String(opts.messages) }] : [],
     }
     const account: AccountInput = {
       adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
@@ -184,9 +184,31 @@ describe('结果种类对不上：不出命中，只出判不了', () => {
     expect(out[0].title).toContain('留资')
   })
 
-  it('客户主结果是开聊、表单留资组（ON_AD）→ 同样判不了', () => {
-    const out = runUnit({ goal: 'LEAD_GENERATION', destination: 'ON_AD', primary: 'messaging_started', spend: 100 })
-    expect(out).toEqual([expect.objectContaining({ status: 'not_comparable', notComparableReason: 'result_type_mismatch' })])
+  it('🔴 结果种类对不上、但这个组自己的结果也是 0：WhatsApp 组花 $500 零开聊 → 照样命中，照样可进自动暂停（魏征）', () => {
+    const [d] = runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'lead', spend: 500 })
+    expect(d).toMatchObject({ code: 'D3', status: 'hit', evidence: { results: 0 } })
+    expect(d.autoPauseEligible).toBeUndefined()
+    expect(d.title).toContain('私信开聊 0 个')
+  })
+
+  it('客户主结果是开聊、表单留资组（ON_AD）零留资 → 照样命中（NAL 那种）', () => {
+    const out = runUnit({ goal: 'LEAD_GENERATION', destination: 'ON_AD', primary: 'messaging_started', spend: 500 })
+    expect(out).toEqual([expect.objectContaining({ status: 'hit' })])
+  })
+
+  it('这个组自己的结果数不出来（数据没拉到）→ 判不了，理由是归不上，不是结果种类不对', () => {
+    const out = runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'lead', spend: 100, nullActions: true })
+    expect(out).toEqual([expect.objectContaining({ status: 'not_comparable', notComparableReason: 'primary_result_unknown' })])
+  })
+
+  it('主结果是合格询盘（不是留资 / 开聊）+ WhatsApp 组 → 照旧走归不上，不按结果种类拦', () => {
+    const out = runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'qualified_enquiry', spend: 100, messages: 30 })
+    expect(out).toEqual([expect.objectContaining({ status: 'not_comparable', notComparableReason: 'primary_result_unknown' })])
+  })
+
+  it('WhatsApp 目的地的点击组（LINK_CLICKS）零开聊 → 照旧命中、只提醒', () => {
+    expect(runUnit({ goal: 'LINK_CLICKS', destination: 'WHATSAPP', primary: 'lead', spend: 152 })[0])
+      .toMatchObject({ status: 'hit', autoPauseEligible: false })
   })
 
   it('花费没到 2× 目标 → 健康日不出（跟其它判不了一样）', () => {
@@ -206,5 +228,29 @@ describe('结果种类对不上：不出命中，只出判不了', () => {
   it('流量组（点击类，自己不出留资也不出开聊）行为不变：照旧命中、只提醒', () => {
     expect(runUnit({ goal: 'LINK_CLICKS', destination: 'WEBSITE', primary: 'lead', spend: 152 })[0])
       .toMatchObject({ status: 'hit', autoPauseEligible: false })
+  })
+})
+
+describe('系列合计不把两种结果混着加', () => {
+  it('同系列一个表单组命中、一个 WhatsApp 组在聊：标题不写系列合计', () => {
+    const form = snap({ ...adset('as_form', 'LEAD_GENERATION'), destination_type: 'ON_AD' })
+    const wa = snap({ ...adset('as_wa', 'CONVERSATIONS'), destination_type: 'WHATSAPP' })
+    const account: AccountInput = {
+      adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
+      snapshots: [form, wa],
+      daily: [dayRow('as_form', 100), { ...dayRow('as_wa', 80), actions: [{ action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '20' }] }],
+      hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
+    }
+    const ctx = buildAccountContext(account, DATE)
+    const input: DiagnosisInput = {
+      clientId: 'c', date: DATE, evaluatedAt: `${DATE}T20:00:00Z`,
+      outcome: { leading: null, primary: 'lead', targetCostPerPrimary: 11, minPrimaryPerUnit: 5 },
+      outcomeConfigured: true, messagingReferralAvailable: false, digestRecipients: [], accounts: [account],
+    }
+    const out = diagnoseSpendNoResult(ctx, input)
+    const hit = out.find(d => d.status === 'hit')
+    expect(hit?.units[0].id).toBe('as_form')
+    expect(hit?.title).not.toContain('系列合计')
+    expect(out.find(d => d.units[0].id === 'as_wa')).toMatchObject({ status: 'not_comparable', notComparableReason: 'result_type_mismatch' })
   })
 })
