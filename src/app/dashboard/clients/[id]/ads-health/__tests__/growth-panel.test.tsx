@@ -5,7 +5,8 @@
  */
 import React from 'react'
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
 import GrowthPanel, { type GrowthStateView } from '../growth-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
@@ -97,5 +98,37 @@ describe('GrowthPanel — 数据截至', () => {
     render(<GrowthPanel state={base} clientId="client-1" />)
     expect(screen.queryByText('先补跟进，暂不建议加预算')).toBeNull()
     expect(screen.queryByText(/预算/)).toBeNull()
+  })
+})
+
+describe('GrowthPanel — O1 提交', () => {
+  it('提交预算建议成功后通知顶部合并卡刷新', async () => {
+    const onPendingAdsChanged = vi.fn()
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/ad-health/war-map')) {
+        return Response.json({ view: { budgetHold: false } })
+      }
+      if (url.includes('/o1-scale') && init?.method === 'POST') {
+        return Response.json({ ok: true })
+      }
+      if (url.includes('/o1-scale')) {
+        return Response.json({ items: [] })
+      }
+      return Response.json({})
+    }))
+    const state = internalState('2026-11-02')
+    state.payload = {
+      ...state.payload!,
+      opportunities: [{
+        code: 'O1',
+        status: 'hit',
+        title: '这条素材还可以加力',
+        units: [{ id: 'adset-1', name: '组1' }],
+        evidence: { date: '2026-11-02' },
+      }],
+    }
+    render(<GrowthPanel state={state} clientId="client-1" onPendingAdsChanged={onPendingAdsChanged} />)
+    await userEvent.click(await screen.findByText('提交预算建议供审批'))
+    await waitFor(() => expect(onPendingAdsChanged).toHaveBeenCalledTimes(1))
   })
 })

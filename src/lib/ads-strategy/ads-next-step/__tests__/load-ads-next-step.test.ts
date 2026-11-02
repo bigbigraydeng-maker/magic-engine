@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createFakeSupabase, type Row } from '@/lib/kernel/__tests__/fake-supabase'
-import { loadAdsNextStepView } from '../load-ads-next-step'
+import { loadAdsNextStepView, o1PendingMatchesGrowthCycleDate } from '../load-ads-next-step'
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
 const D3 = 'ads.auto_pause_on_d3'
@@ -27,12 +27,21 @@ function narrativeWithHits(titles: string[]): Row {
   }
 }
 
+describe('o1PendingMatchesGrowthCycleDate', () => {
+  it('evidence.date 须与 growth 巡察日一致', () => {
+    expect(o1PendingMatchesGrowthCycleDate({ evidence: { date: '2026-11-02' } }, '2026-11-02')).toBe(true)
+    expect(o1PendingMatchesGrowthCycleDate({ evidence: { date: '2026-11-01' } }, '2026-11-02')).toBe(false)
+    expect(o1PendingMatchesGrowthCycleDate({ evidence: {} }, '2026-11-02')).toBe(false)
+  })
+})
+
 describe('loadAdsNextStepView', () => {
   it('三块都有数据时合并成功', async () => {
     const decisionId = '11111111-1111-4111-8111-111111111111'
     const runId = '22222222-2222-4222-8222-222222222222'
     const sb = createFakeSupabase({
       ad_health_narratives: [narrativeWithHits(['花钱没结果', '投放卡住'])],
+      ads_growth_states: [],
       action_runs: [{
         id: runId,
         client_id: CLIENT,
@@ -107,6 +116,7 @@ describe('loadAdsNextStepView', () => {
           },
         },
       }],
+      ads_growth_states: [],
       action_runs: [],
       authorization_decisions: [],
       flywheel_actions: [],
@@ -123,6 +133,7 @@ describe('loadAdsNextStepView', () => {
     const sb = createFakeSupabase(
       {
         ad_health_narratives: [narrativeWithHits(['账户授权异常'])],
+        ads_growth_states: [],
         action_runs: [],
         authorization_decisions: [],
         flywheel_actions: [],
@@ -147,6 +158,7 @@ describe('loadAdsNextStepView', () => {
     const sb = createFakeSupabase(
       {
         ad_health_narratives: [narrativeWithHits(['x'])],
+        ads_growth_states: [],
         action_runs: [],
         authorization_decisions: [],
         flywheel_actions: [],
@@ -209,6 +221,7 @@ describe('loadAdsNextStepView', () => {
     const runId = '55555555-5555-4555-8555-555555555555'
     const sb = createFakeSupabase({
       ad_health_narratives: [],
+      ads_growth_states: [{ client_id: CLIENT, date: '2026-11-01' }],
       action_runs: [{
         id: runId,
         client_id: CLIENT,
@@ -218,6 +231,7 @@ describe('loadAdsNextStepView', () => {
         status: 'pending_approval',
         authorization_decision_id: decisionId,
         input: { adset_id: 'adset-1', ad_account_id: 'act_1' },
+        evidence: { date: '2026-11-01' },
         rationale: '内部才该看到的 O1 依据句',
         created_at: '2026-11-01T00:00:00Z',
       }],
@@ -306,6 +320,7 @@ describe('loadAdsNextStepView', () => {
     const o1Run = '77777777-7777-4777-8777-777777777777'
     const sb = createFakeSupabase({
       ad_health_narratives: [],
+      ads_growth_states: [{ client_id: CLIENT, date: '2026-11-02' }],
       action_runs: [{
         id: o1Run,
         client_id: CLIENT,
@@ -315,6 +330,7 @@ describe('loadAdsNextStepView', () => {
         status: 'pending_approval',
         authorization_decision_id: o1Decision,
         input: { adset_id: 'adset-1', ad_account_id: 'act_1' },
+        evidence: { date: '2026-11-02' },
         rationale: 'secret',
         created_at: '2026-11-01T00:00:00Z',
       }],
@@ -331,6 +347,41 @@ describe('loadAdsNextStepView', () => {
       prescriptions: [],
     })
     const view = await loadAdsNextStepView(sb, CLIENT, { staffView: false })
+    expect(view.pendingActions.kind).toBe('empty')
+  })
+
+  it('O1 待批日与当前 growth 巡察日不一致时不进合并卡', async () => {
+    const o1Decision = '88888888-8888-4888-8888-888888888888'
+    const o1Run = '99999999-9999-4999-8999-999999999999'
+    const sb = createFakeSupabase({
+      ad_health_narratives: [],
+      ads_growth_states: [{ client_id: CLIENT, date: '2026-11-02' }],
+      action_runs: [{
+        id: o1Run,
+        client_id: CLIENT,
+        action_key: O1,
+        action_version: 1,
+        idempotency_key: 'k-stale',
+        status: 'pending_approval',
+        authorization_decision_id: o1Decision,
+        input: { adset_id: 'adset-1', ad_account_id: 'act_1' },
+        evidence: { date: '2026-11-01' },
+        rationale: '旧日 O1',
+        created_at: '2026-11-01T00:00:00Z',
+      }],
+      authorization_decisions: [{
+        id: o1Decision,
+        action_run_id: o1Run,
+        client_id: CLIENT,
+        action_key: O1,
+        action_version: 1,
+        idempotency_key: 'k-stale',
+        verdict: 'require_approval',
+      }],
+      flywheel_actions: [],
+      prescriptions: [],
+    })
+    const view = await loadAdsNextStepView(sb, CLIENT, { staffView: true })
     expect(view.pendingActions.kind).toBe('empty')
   })
 })

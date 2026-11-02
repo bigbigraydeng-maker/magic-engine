@@ -157,6 +157,7 @@ function O1Approval({
       const json = await response.json() as { error?: string }
       setMessage(response.ok ? '已提交，等待负责人核对并批准。' : json.error ?? '暂时无法提交。')
       await refresh()
+      if (response.ok) onPendingAdsChanged?.()
     } catch { setMessage('网络暂时不可用，请稍后重试。') }
     finally { setBusy(false) }
   }

@@ -6,6 +6,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import type { ActionRun } from '@/lib/kernel/types'
 import { listPendingAdsAutoPauseForClient } from '@/lib/ads-strategy/auto-pause-pending'
 import { listPendingRunsForActionForClient } from '@/lib/kernel-approval/action-pending'
 import { ADS_O1_BUDGET_SCALE_ACTION_KEY } from '@/lib/action-submission/ads-o1-budget-scale'
@@ -66,6 +67,32 @@ async function loadHealthRedLights(
   }
 }
 
+/** 与 growth-panel O1Approval 一致：只列当前巡察日能在设置里批准的那批。 */
+export function o1PendingMatchesGrowthCycleDate(
+  run: Pick<ActionRun, 'evidence'>,
+  growthCycleDate: string | null,
+): boolean {
+  if (!growthCycleDate) return false
+  const d = (run.evidence as { date?: unknown } | null | undefined)?.date
+  return d === growthCycleDate
+}
+
+async function loadLatestGrowthCycleDate(
+  sb: SupabaseClient,
+  clientId: string,
+): Promise<string | null> {
+  const { data, error } = await sb
+    .from('ads_growth_states')
+    .select('date')
+    .eq('client_id', clientId)
+    .order('date', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error || !data) return null
+  const date = (data as { date?: unknown }).date
+  return typeof date === 'string' && date.length > 0 ? date : null
+}
+
 async function loadPendingActions(
   sb: SupabaseClient,
   clientId: string,
@@ -73,6 +100,7 @@ async function loadPendingActions(
 ): Promise<AdsNextStepView['pendingActions']> {
   try {
     const d3 = await listPendingAdsAutoPauseForClient(sb, clientId)
+    const growthCycleDate = staffView ? await loadLatestGrowthCycleDate(sb, clientId) : null
     const o1 = staffView
       ? await listPendingRunsForActionForClient(sb, ADS_O1_BUDGET_SCALE_ACTION_KEY, clientId)
       : { items: [], hasMore: false }
@@ -84,6 +112,7 @@ async function loadPendingActions(
       items.push({ summary, href: approvalsHref(clientId) })
     }
     for (const row of o1.items) {
+      if (!o1PendingMatchesGrowthCycleDate(row.run, growthCycleDate)) continue
       const rationale =
         staffView
         && typeof row.run.rationale === 'string'
