@@ -20,6 +20,7 @@ import GrowthPanel, { type GrowthStateView, goalLiveNote } from './growth-panel'
 import { TodayGoalProgress } from './today-goal-progress'
 import WarMapPanel from './war-map-panel'
 import LiveTodayPanel from './live-today-panel'
+import HourlyLeadsPanel from './hourly-leads-panel'
 import BreakdownPanel from './breakdown-panel'
 import EntityTreePanel from './entity-tree-panel'
 import AutoPausePanel from './auto-pause-panel'
@@ -596,6 +597,7 @@ export default function AdsHealthPage() {
               }
             />
           )}
+          <HourlyLeadsPanel clientId={clientId} />
           {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
           <LiveTodayPanel clientId={clientId} part="today" />
           <WarMapPanel clientId={clientId} />
