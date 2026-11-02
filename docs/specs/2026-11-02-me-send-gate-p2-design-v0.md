@@ -511,3 +511,11 @@ P1 设计稿 §3.8 与台账卡 `2026-11-01-provider-webhook-events-retention-jo
 - 子牙：①「failed 下原因只写一次」实际是「failed 下原因不许改」，先写没有原因的 `failed` 会释放地址 → 写入方契约（§13：同一条 UPDATE 带原因，P2-2b 专测）；②被标「没发出」的地址以后不再自动收欢迎信 → 授权页必须写明后果（§10 P2-2c）。
 - 魏征：①在非 `failed` 行先写 `not_sent_confirmed` 再转 `failed` 可借例外退回；`delivered` 转别的原因的 `failed` 仍放出同址 → 写入方契约（§13，消费者不得走这条路，P2-2b 专测；必要时再补库内约束）；②分两句写 `failed`（先状态后原因）原因会冻成 `expired_20h` → 同上契约；③时区名区分大小写 → 提案路由用同一份名单（§13）。
 这些都不是 P2-1a 要在库里再改的东西；建表文件定稿为 v2.1（应用到生产之后不得再改）。
+
+### 16.4 应用到生产（2026-11-02）
+PM 读完 §16.3 的改动说明后回「go apply」。步骤与结果：
+1. **只读预检**（目标库 CrazyContent，项目号 `glbdnayojixmexgofbsd`）：P1 的 `provider_webhook_events` 在、`clients.id` 是 uuid、`anon / authenticated / service_role` 三个角色在、没有任何同名表 / 函数 / 触发器 / 策略 / 索引、没有长事务、`clients` 上没有重锁、这条迁移还没被记录过。
+2. **指纹预检（零副作用）**：把要应用的原文交给线上库算 SHA-256，等于本机文件与 PR 头提交里的文件：`5d1343d176882a131f07577975c37ce723f429df19a2baee7bb788aa689036a6`，41,526 字节。
+3. **应用**：Supabase 账本记录 version `20261102015123`、name `triggered_send_ledger`（version 是应用时刻的 UTC 时间戳，与仓库文件名不同，同 P1）；记录里的语句指纹与仓库文件**逐字一致**。
+4. **读回**：两表行级安全开启；触发器 4 + 4 全部启用；策略各 1 条且 `TO service_role`；索引 11；外键 3；两表 0 行；`anon / authenticated` 对两表与 9 个函数全无权限；`service_role` 对表只有读 / 写 / 改 / 删（没有 TRUNCATE / REFERENCES / TRIGGER）；用不存在的授权号现场调用认领函数 → `auth_inactive`，不写任何行；Supabase 安全扫描与应用前完全一致（没有新增告警）。
+5. **从现在起，`supabase/migrations/20261102130000_triggered_send_ledger.sql` 不得再改**；要改表或函数，另开新迁移。P2-1b 现在可以开工（每一批仍要 PM 点头）。
