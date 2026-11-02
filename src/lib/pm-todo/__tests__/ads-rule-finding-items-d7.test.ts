@@ -5,8 +5,15 @@
  * 以前它只进内部日报邮件和广告健康页，不进今日待办：2026-11-03 生产库里 4 个账户的
  * 「广告结果怎么算没设置」连着 29 天没人处理（"管道不许断头"，见 CLAUDE.md §3）。
  */
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { describe, expect, it } from 'vitest'
-import { buildAdsRuleFindingItems, type GrowthStateRow, type RuleFinding } from '../ads-rule-finding-items'
+import type { ManualItem } from '../manual-item-types'
+import {
+  buildAdsRuleFindingItems,
+  pushAdsRuleFindingItems,
+  type GrowthStateRow,
+  type RuleFinding,
+} from '../ads-rule-finding-items'
 
 const MONDAY = new Date('2026-11-02T06:00:00Z')
 const SUNDAY = new Date('2026-11-01T06:00:00Z')
@@ -23,7 +30,15 @@ function d7(what: string, how: string, href: string | null = '/dashboard/clients
   }
 }
 
-const OUTCOME_UNSET = d7('这个客户的领先结果 / 主结果 / 目标单次成本没设置。', '在客户设置页「广告结果怎么算」里选好两级结果、填目标单次成本。')
+// evidence 跟生产库里诊断写的一样：只有这一条带 outcome_configured
+const OUTCOME_UNSET: RuleFinding = {
+  ...d7('这个客户的领先结果 / 主结果 / 目标单次成本没设置。', '在客户设置页「广告结果怎么算」里选好两级结果、填目标单次成本。'),
+  evidence: { outcome_configured: false, primary: null, target_cost: null },
+}
+const DATA_STALE: RuleFinding = {
+  ...d7('广告账户有 1 个单位显示在投，但数据停在 2026-08-18。', '打开 Ads Manager 看有没有花费。', 'https://adsmanager.facebook.com/x'),
+  evidence: { delivering_units: 1, last_insight_date: '2026-08-18' },
+}
 
 function d3(adsetId: string): RuleFinding {
   return {
@@ -117,5 +132,63 @@ describe('D7 并入今日待办', () => {
     expect(items).toHaveLength(2)
     expect(items.filter((i) => i.what.includes('目标单次成本没设置'))).toHaveLength(1)
     expect(items.filter((i) => i.what.includes('D3 as1'))).toHaveLength(1)
+  })
+})
+
+describe('没在投广告的客户不提醒「结果怎么算没设置」', () => {
+  it('近 14 天零花费 → 这条不出', () => {
+    const rows = daily('c1', '2026-11-01', 3, [OUTCOME_UNSET])
+    expect(buildAdsRuleFindingItems(rows, MONDAY, nameOf, new Set(['c1']))).toEqual([])
+  })
+
+  it('零花费但还有「显示在投却没数据」→ 只出那一条（那条是真问题）', () => {
+    const rows = daily('c1', '2026-11-01', 3, [DATA_STALE, OUTCOME_UNSET])
+    const items = buildAdsRuleFindingItems(rows, MONDAY, nameOf, new Set(['c1']))
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('数据停在 2026-08-18')
+    expect(items[0].what).not.toContain('目标单次成本没设置')
+  })
+
+  it('只挡零花费的客户，在花钱的客户照出', () => {
+    const rows = [...daily('c1', '2026-11-01', 2, [OUTCOME_UNSET]), ...daily('c2', '2026-11-01', 2, [OUTCOME_UNSET])]
+    const items = buildAdsRuleFindingItems(rows, MONDAY, nameOf, new Set(['c1']))
+    expect(items.map((i) => i.client_id)).toEqual(['c2'])
+  })
+})
+
+/** 只够 pushAdsRuleFindingItems 用的假库：growth 表回 rows，花费表按客户回有没有花钱、或报错。 */
+function fakeDb(rows: GrowthStateRow[], spend: Record<string, boolean | 'error'>): SupabaseClient {
+  const spendQuery = () => {
+    let clientId = ''
+    const q = {
+      select: () => q,
+      eq: (_col: string, v: string) => { clientId = v; return q },
+      gte: () => q,
+      gt: () => q,
+      limit: async () =>
+        spend[clientId] === 'error'
+          ? { data: null, error: { message: 'boom' } }
+          : { data: spend[clientId] ? [{ client_id: clientId }] : [], error: null },
+    }
+    return q
+  }
+  const growthQuery = () => {
+    const q = { select: () => q, gte: () => q, order: async () => ({ data: rows, error: null }) }
+    return q
+  }
+  return { from: (table: string) => (table === 'ad_daily_insights' ? spendQuery() : growthQuery()) } as unknown as SupabaseClient
+}
+
+describe('pushAdsRuleFindingItems 读花费', () => {
+  const rows = [
+    ...daily('spends', '2026-11-01', 2, [OUTCOME_UNSET]),
+    ...daily('idle', '2026-11-01', 2, [OUTCOME_UNSET]),
+    ...daily('broken', '2026-11-01', 2, [OUTCOME_UNSET]),
+  ]
+
+  it('在花钱的出、零花费的不出、花费读失败的照出（宁可多提醒）', async () => {
+    const items: ManualItem[] = []
+    await pushAdsRuleFindingItems(fakeDb(rows, { spends: true, idle: false, broken: 'error' }), items, MONDAY, nameOf)
+    expect(items.map((i) => i.client_id).sort()).toEqual(['broken', 'spends'])
   })
 })
