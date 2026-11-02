@@ -164,14 +164,14 @@ function prescriptionFrom(row: Loaded<unknown>): ChainFacts['prescription'] {
 export async function loadChainFacts(db: ChainReader, input: LoadChainInput): Promise<ChainFacts> {
   const prescription = prescriptionFrom(await readMaybe(
     db.from('prescriptions')
-      .select('status, goal_id, approved_at, error_message, intake, content')
+      .select('status, goal_id, approved_at, error_message, intake, content, agent_name, generation_meta')
       .eq('id', input.prescriptionId)
       .eq('client_id', input.clientId),
   ))
   const goalId = prescription.read === 'ok' ? prescription.value?.goalId ?? null : null
   const [goal, config, plans, orders, rawDrafts, snapshot] = await Promise.all([
     goalId
-      ? readMaybe(db.from('goals').select('target_value, baseline_value, current_value, period_start, period_end').eq('id', goalId).eq('client_id', input.clientId))
+      ? readMaybe(db.from('goals').select('title, target_value, baseline_value, current_value, period_start, period_end').eq('id', goalId).eq('client_id', input.clientId))
       : Promise.resolve({ read: 'skipped' as const }),
     readMaybe(db.from('ad_strategy_configs').select('daily_budget_cap_cents, creative_pool, target_cost_per_primary').eq('client_id', input.clientId)),
     readList(db.from('marketing_plans').select('id, status, plan_data, generation_meta, created_at').eq('client_id', input.clientId).order('created_at', { ascending: false })),
