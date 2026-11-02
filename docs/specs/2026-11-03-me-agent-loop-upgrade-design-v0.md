@@ -2,8 +2,8 @@
 
 日期：2026-11-03
 状态：设计稿，等 PM 回「开工」才进第 0 步。v0.1 吸收了魏征复审的 14 条意见（见 §9）。
-风险：本文件 **C**（只加文档和一个只读查询脚本）。第 0 步 **B**（只加测试）。第 1 步碰定时任务路由和广告 Inngest 函数，**A**。
-写入者：Claude Code 会话 `claude/agent-loop-optimization-23e235`（本文件、`scripts/agent-loop-baseline.sql`）
+风险：本文件 **C**（只加文档；基线查询放在附录 C，全是只读）。第 0 步 **B**（只加测试）。第 1 步碰定时任务路由和广告 Inngest 函数，**A**。
+写入者：Claude Code 会话 `claude/agent-loop-optimization-23e235`（本文件）
 基线：`main` = `origin/main` = `4e891c5bd`（本地记录，未 fetch）。生产库 `glbdnayojixmexgofbsd` 只读查询，2026-11-03（NZDT）。
 
 不做：新表、新 agent、新的大模型调用、新定时任务、自我进化、改模型、把对外写入一次性迁进内核。理由见 §6。
@@ -45,7 +45,7 @@ ME 现在是「每天跑规则 → 出建议 → 人批 → 执行」的流水�
 
 ## 2. 基线 B0（2026-11-03 实测）
 
-复跑用 `scripts/agent-loop-baseline.sql`。
+复跑用附录 C 的只读查询。
 
 ### 2.1 指标
 
@@ -212,7 +212,7 @@ ME 现在是「每天跑规则 → 出建议 → 人批 → 执行」的流水�
 
 ## 7. 时间与回执
 
-- **第 0 步结束**：复跑基线脚本，结果写进台账卡。
+- **第 0 步结束**：复跑附录 C 的查询，结果写进台账卡。
 - **第 1 步影子期开始那天**：建日历提醒，在第 14 天上午看周报，决定继续影子期还是开开关。
 - **每步结束**：交一段短记录，包括改了哪些文件、考卷通过数、基线前后对照、没跑的项。
 
@@ -284,3 +284,70 @@ ME 现在是「每天跑规则 → 出建议 → 人批 → 执行」的流水�
 - 08-20 之后有没有「已批准、有案例记录」的处方走到观察节点。
 - D7 的人工待办是否真的推到了今日待办（第 0 步查）。
 - 讲稿：6 份完全读不出文字（赵雨森、张凯寓、泠乐、货拉拉、王上淇、桑木），4 份只读到目录（温睦宁、吴垚、李俊、曹一凡），这些讲稿的细节没有采用。
+
+## 附录 C：基线查询（只读）
+
+在老应用库（`glbdnayojixmexgofbsd`）用任何只读身份运行。每一句都是 SELECT。每步结束复跑一次，和 §2 的 B0 对照。只记汇总数字，不把客户级明细贴进仓库。
+
+```sql
+-- Output is aggregate counts only; do not paste client-level rows into the public repo.
+
+-- M1 + M2: actions per pillar (90d), how many got any outcome row, how many got a decided verdict.
+select a.flywheel::text as pillar,
+       count(distinct a.id) as actions_90d,
+       count(distinct a.id) filter (where o.id is not null) as with_outcome,
+       count(distinct a.id) filter (where o.verdict::text in ('confirmed', 'reversed')) as decided
+from flywheel_actions a
+left join flywheel_outcomes o on o.action_id = a.id
+where a.created_at > now() - interval '90 days'
+group by 1
+order by 2 desc;
+
+-- M1 detail: why outcomes are inconclusive (site-level metric keys are forced to inconclusive).
+select coalesce(evaluator_key, '(none)') as evaluator, metric_key, verdict::text as verdict, count(*) as n
+from flywheel_outcomes
+where created_at > now() - interval '30 days'
+group by 1, 2, 3
+order by n desc;
+
+-- M5: action naming. Distinct action_type values vs rows, and rows tied to a real executed item.
+select flywheel::text as pillar,
+       count(*) as rows_90d,
+       count(distinct action_type) as distinct_action_types,
+       count(*) filter (where action_run_id is not null) as with_kernel_run,
+       count(*) filter (where execution_item_id is not null) as with_execution_item,
+       count(*) filter (where execution_mode::text = 'external_manual') as external_manual
+from flywheel_actions
+where created_at > now() - interval '90 days'
+group by 1
+order by 2 desc;
+
+-- M6: freshness of the learning inputs.
+select 'client_learned_preferences_30d' as k, count(*)::text as v from client_learned_preferences where created_at > now() - interval '30 days'
+union all select 'prescription_outcomes_last_write', max(created_at)::text from prescription_outcomes
+union all select 'social_post_measurement_receipts_last_write', max(created_at)::text from social_post_measurement_receipts
+union all select 'social_verification_verdicts_rows', count(*)::text from social_verification_verdicts
+union all select 'seo_meta_log_last_change', max(optimised_at)::text from seo_meta_log
+union all select 'seo_meta_log_rank_verdicts_90d', count(*) filter (where rank_verdict is not null)::text from seo_meta_log where created_at > now() - interval '90 days'
+union all select 'kernel_action_runs_ads_all_time', count(*)::text from action_runs where action_key like 'ads.%'
+union all select 'kernel_readback_steps_all_time', count(*)::text from action_run_steps where step_key ilike '%readback%';
+
+-- M7: ads patrol problems that stay flagged day after day (30d). Long runs = loop stalled at a human step.
+-- Filter on `date` (rows are overwritten daily, created_at does not move). Several D7 variants share
+-- one code and one account unit, so group by title as well.
+with p as (
+  select s.client_id, s.date, pr->>'code' as code, pr->>'title' as title, u->>'id' as unit_id
+  from ads_growth_states s,
+       jsonb_array_elements(s.payload->'problems') pr,
+       jsonb_array_elements(coalesce(pr->'units', '[]'::jsonb)) u
+  where s.date > current_date - 30 and pr->>'status' = 'hit'
+), runs as (
+  select client_id, code, title, unit_id, count(distinct date) as days_flagged
+  from p group by 1, 2, 3, 4
+)
+select code, left(title, 40) as title, count(*) as problem_units, round(avg(days_flagged), 1) as avg_days_flagged,
+       count(*) filter (where days_flagged >= 7) as flagged_7plus_days
+from runs
+group by 1, 2
+order by problem_units desc;
+```
