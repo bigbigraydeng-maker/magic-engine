@@ -5,6 +5,8 @@ status: done
 owner: agent
 decided_on: 2026-11-02
 source: pr:3503
+verify_by: 2026-11-09
+verify_how: 合并后 npm test -- hourly-meta-leads 与 promo-window 全绿；nzDayMinus 对 2026-01-16 减 1 天得 2026-01-15；buildHourlyLeadChart 在日界样例下 yesterdaySameTime 只计新西兰昨日桶。
 done_on: 2026-11-02
 done_ref: pr:3503
 ---

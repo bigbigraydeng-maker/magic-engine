@@ -5,6 +5,8 @@ status: done
 owner: agent
 decided_on: 2026-11-02
 source: pr:3504
+verify_by: 2026-11-09
+verify_how: 合并后 npm test -- hourly-leads-forecast 全绿；「20% 门槛与已到同样截最近 2 小时」用例为 insufficient；其余 ok 用例 rangeMin≤rangeMax 且不含单点预测字段。
 done_on: 2026-11-02
 done_ref: pr:3504
 ---
