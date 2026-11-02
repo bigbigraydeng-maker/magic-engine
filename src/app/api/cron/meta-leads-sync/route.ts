@@ -1,7 +1,7 @@
 /**
  * GET/POST /api/cron/meta-leads-sync
  *
- * 每小时把 Facebook 即时表单里的新人搬进 CRM。
+ * 每 30 分钟把 Facebook 即时表单里的新人搬进 CRM（每小时第 25 分和第 55 分）。
  *
  * 在这之前这条路**只有人手一条**：导 CSV → 跑 `scripts/import-cts-fb-leads.ts`。
  * 2026-07-30 查 CTS 的实测后果：CRM 里最后一个新人停在 7/25，Meta 后台 7/26–7/30
@@ -22,7 +22,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { syncClientMetaLeads, type MetaLeadsSyncClient } from '@/lib/meta/leads-sync'
+import { abandonAfterMs } from '@/lib/cron/expected-duration'
 import { startCronRun } from '@/lib/cron/run-logger'
+import { claimMetaLeadsSyncRun, type RunningLeadSync } from '@/lib/meta/leads-sync-lock'
 import { buildLeadsSyncReceipts, summariseSyncProblems } from '@/lib/meta/leads-sync-alert'
 import {
   probeAllAccountStatuses,
@@ -33,10 +35,50 @@ import {
 // 一个客户可能有多个表单，每个表单还要翻页；给足时间。
 export const maxDuration = 600
 
+async function listRunningLeadSyncs(): Promise<{ rows: RunningLeadSync[]; readError: string | null }> {
+  const since = new Date(Date.now() - abandonAfterMs('meta-leads-sync')).toISOString()
+  const { data, error } = await supabaseAdmin
+    .from('cron_run_logs')
+    .select('id, started_at')
+    .eq('job_name', 'meta-leads-sync')
+    .eq('status', 'running')
+    .gte('started_at', since)
+  if (error) return { rows: [], readError: error.message }
+  const rows: RunningLeadSync[] = []
+  for (const raw of data ?? []) {
+    const row = raw as { id?: unknown; started_at?: unknown }
+    if (typeof row.id === 'string' && typeof row.started_at === 'string') {
+      rows.push({ id: row.id, startedAt: row.started_at })
+    }
+  }
+  return { rows, readError: null }
+}
+
+async function releaseRunningLeadSync(id: string): Promise<string | null> {
+  const { error } = await supabaseAdmin
+    .from('cron_run_logs')
+    .delete()
+    .eq('id', id)
+    .eq('job_name', 'meta-leads-sync')
+    .eq('status', 'running')
+  return error ? error.message : null
+}
+
 async function run(): Promise<NextResponse> {
   // 整轮共享截止时间：线索同步和探测共用 maxDuration，探测只能用剩下的（并为回执预留时间）。
-  const routeDeadlineMs = Date.now() + maxDuration * 1000
-  const cronRun = await startCronRun('meta-leads-sync')
+  const nowMs = Date.now()
+  const routeDeadlineMs = nowMs + maxDuration * 1000
+  const claim = await claimMetaLeadsSyncRun({
+    now: new Date(nowMs),
+    freshForMs: abandonAfterMs('meta-leads-sync'),
+    listRunning: listRunningLeadSyncs,
+    release: releaseRunningLeadSync,
+    start: async () => startCronRun('meta-leads-sync'),
+  })
+  if (!claim.proceed) {
+    return NextResponse.json({ ok: true, skipped: 'overlap', activeRunId: claim.activeRunId })
+  }
+  const cronRun = { finish: claim.finish }
 
   const { data: clients, error } = await supabaseAdmin
     .from('clients')
@@ -70,7 +112,7 @@ async function run(): Promise<NextResponse> {
     }
   }
 
-  // 顺带探一遍广告账户状态（只读 Meta、只写账户级快照），把欠款发现的最坏延迟从 6 小时缩到约 2 小时。
+  // 顺带探一遍广告账户状态（只读 Meta、只写账户级快照）。跟着本任务走，最坏大约 30 分钟读到一次。
   // 探测自己吞异常；它出什么事都不能影响线索同步的结论。
   const probeBudgetMs = probeBudgetFromDeadline(routeDeadlineMs)
   const accountStatusProbe: AccountStatusProbeSummary =

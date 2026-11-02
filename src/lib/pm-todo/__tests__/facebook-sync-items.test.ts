@@ -229,6 +229,32 @@ describe('pushFacebookSyncFailingItems', () => {
     expect(items).toEqual([])
   })
 
+  it('让路那一轮不算进连续失败', async () => {
+    const items: ManualItem[] = []
+    const overlap: SyncRunRow = {
+      finished_at: new Date(NOW.getTime() - 0.5 * 3_600_000).toISOString(),
+      summary: { skipped: 'overlap' } as unknown as SyncRunRow['summary'],
+    }
+    const supabase = fakeRuns({
+      'messenger-sync-hourly': [
+        run(1, [{ clientId: NAL, clientName: 'New Asian Logistics' }]),
+        run(2, [{ clientId: NAL, clientName: 'New Asian Logistics' }]),
+        run(3, [{ clientId: NAL, clientName: 'New Asian Logistics' }]),
+      ],
+      'meta-leads-sync': [
+        overlap,
+        run(1, [{ clientId: NAL, clientName: 'New Asian Logistics', error: LEADS_190 }]),
+        run(2, [{ clientId: NAL, clientName: 'New Asian Logistics', error: LEADS_190 }]),
+        run(3, [{ clientId: NAL, clientName: 'New Asian Logistics', error: LEADS_190 }]),
+      ],
+    })
+
+    await pushFacebookSyncFailingItems(supabase, items, NOW)
+
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('表单留资同步')
+  })
+
   it('取数失败直接抛，由调用方 catch', async () => {
     await expect(pushFacebookSyncFailingItems(fakeRuns({}, 'permission denied'), [], NOW)).rejects.toThrow(
       'permission denied',

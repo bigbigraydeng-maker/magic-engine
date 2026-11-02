@@ -20,9 +20,17 @@ describe('expectedIntervalHours —— 只认本仓真正用到的写法', () =>
     expect(expectedIntervalHours('0 */6 * * *')).toBe(6)
   })
 
-  it('每小时第 N 分钟（messenger / meta-leads 这样写，避开整点拥堵）', () => {
+  it('每小时第 N 分钟（messenger 这样写，避开整点拥堵）', () => {
     expect(expectedIntervalHours('10 * * * *')).toBe(1)
     expect(expectedIntervalHours('25 * * * *')).toBe(1)
+  })
+
+  it('每小时两个固定分钟（表单同步：25 分和 55 分）', () => {
+    expect(expectedIntervalHours('25,55 * * * *')).toBe(0.5)
+    expect(overdueThresholdHours('25,55 * * * *')).toBe(1.5)
+    expect(expectedIntervalHours('25,99 * * * *')).toBeNull()
+    expect(expectedIntervalHours('25,55 1 * * *')).toBeNull()
+    expect(expectedIntervalHours('25,25 * * * *')).toBeNull()
   })
 
   it('每天固定时刻', () => {

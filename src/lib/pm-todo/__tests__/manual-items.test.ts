@@ -179,6 +179,31 @@ describe('pushMailchimpExportItems', () => {
     expect(items).toEqual([])
   })
 
+  it('最近一轮是让路，改看更早那轮真实出口故障', async () => {
+    const items: ManualItem[] = []
+    const rows = [
+      { finished_at: '2026-09-03T08:40:00Z', summary: { skipped: 'overlap' } },
+      {
+        finished_at: '2026-09-03T08:00:00Z',
+        summary: { results: [{ clientId: 'c-broken', clientName: 'CTS', mailchimp: { 'failed:auth': 1 } }] },
+      },
+    ]
+    const chain = {
+      select: () => chain,
+      eq: () => chain,
+      not: () => chain,
+      in: () => chain,
+      order: () => chain,
+      limit: async (n: number) => ({ data: rows.slice(0, n), error: null }),
+    }
+    const supabase = { from: () => chain } as unknown as SupabaseClient
+
+    await pushMailchimpExportItems(supabase, items, NOW)
+
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ kind: 'mailchimp_export_broken', client_id: 'c-broken' })
+  })
+
   it('压根没有运行记录 → 不报', async () => {
     const items: ManualItem[] = []
     await pushMailchimpExportItems(fakeLastRun(null), items, NOW)

@@ -27,8 +27,12 @@ export function expectedIntervalHours(schedule: string): number | null {
   const everyNHour = hour.match(/^\*\/(\d+)$/)
   if (everyNHour) return Number(everyNHour[1])
 
-  // N * * * *  —— 每小时第 N 分钟（messenger / meta-leads 用这个，避开整点拥堵）
+  // N * * * *  —— 每小时第 N 分钟（messenger 用这个，避开整点拥堵）
   if (/^\d+$/.test(min) && hour === '*') return 1
+
+  // N,M * * * * —— 每小时几个固定分钟。间隔取相邻分钟的最大间隙（含跨小时）。
+  const minuteList = minuteListIntervalHours(min, hour, dom, dow)
+  if (minuteList !== null) return minuteList
 
   // 固定时刻：看星期字段决定是每天还是每周
   if (/^\d+$/.test(min) && /^\d+$/.test(hour) && dom === '*') {
@@ -46,6 +50,19 @@ export function expectedIntervalHours(schedule: string): number | null {
   }
 
   return null
+}
+
+/** `25,55 * * * *` → 0.5 小时。分钟不在 0–59、有重复、或不是「每小时」则认不了。 */
+function minuteListIntervalHours(min: string, hour: string, dom: string, dow: string): number | null {
+  if (hour !== '*' || dom !== '*' || dow !== '*') return null
+  if (!/^\d{1,2}(,\d{1,2})+$/.test(min)) return null
+  const minutes = min.split(',').map((part) => Number(part))
+  if (minutes.some((n) => !Number.isInteger(n) || n < 0 || n > 59)) return null
+  const unique = [...new Set(minutes)].sort((a, b) => a - b)
+  if (unique.length !== minutes.length || unique.length < 2) return null
+  let maxGap = unique[0] + 60 - unique[unique.length - 1]
+  for (let i = 1; i < unique.length; i++) maxGap = Math.max(maxGap, unique[i] - unique[i - 1])
+  return maxGap / 60
 }
 
 /**

@@ -6,6 +6,7 @@
 
 import { loadAdStrategyConfigWithSource } from '@/lib/ads-strategy/config'
 import { classifyLeadsSyncOutcome } from '@/lib/meta/leads-sync-alert'
+import { isOverlapSkipSummary } from '@/lib/meta/leads-sync-lock'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
 import { resolveMetaToken } from '@/lib/meta/token-selection'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -116,6 +117,7 @@ function syncState(summary: unknown, clientId: string): 'ok' | 'blocked' | 'fail
 export function syncFailureStreak(runs: readonly { summary?: unknown }[], clientId: string): number {
   let streak = 0
   for (const run of runs) {
+    if (isOverlapSkipSummary(run.summary)) continue
     const state = syncState(run.summary, clientId)
     if (state !== 'failed' && state !== 'blocked') break
     streak += 1

@@ -479,7 +479,12 @@ interface EnvDbOptions {
   clientError?: string
   writebacks?: { status: string }[]
   writebacksError?: string
-  cronRows?: Record<string, { status: string | null; finished_at: string | null; started_at: string | null } | null>
+  cronRows?: Record<
+    string,
+    | { status: string | null; finished_at: string | null; started_at: string | null; summary?: unknown }
+    | Array<{ status: string | null; finished_at: string | null; started_at: string | null; summary?: unknown }>
+    | null
+  >
   cronError?: Record<string, string>
 }
 
@@ -498,9 +503,9 @@ function makeEnvDb(opts: EnvDbOptions = {}): FakeDb {
       if (typeof job === 'string' && opts.cronError && opts.cronError[job]) {
         return fail(opts.cronError[job])
       }
-      const row = typeof job === 'string' ? opts.cronRows?.[job] ?? null : null
-      // 真实的 limit(1) 返回数组，假库要跟真实形状一致
-      return ok(row ? [row] : [])
+      const stored = typeof job === 'string' ? opts.cronRows?.[job] ?? null : null
+      const rows = stored == null ? [] : Array.isArray(stored) ? stored : [stored]
+      return ok(rows)
     }
     return fail(`不该读这张表：${q.table}`)
   })
@@ -814,7 +819,41 @@ describe('环境读取器：jobs', () => {
     ])
   })
 
-  it('cron_run_logs 查询的过滤条件正确（eq job_name、neq running、按 started_at 倒序、limit 1）', async () => {
+  it('让路那一轮不算最近一次完成', async () => {
+    const db = makeEnvDb({
+      cronRows: {
+        'meta-leads-sync': [
+          {
+            status: 'completed',
+            finished_at: '2026-10-19T09:30:00Z',
+            started_at: '2026-10-19T09:25:00Z',
+            summary: { skipped: 'overlap' },
+          },
+          {
+            status: 'completed',
+            finished_at: '2026-10-19T09:00:00Z',
+            started_at: '2026-10-19T08:55:00Z',
+            summary: { results: [] },
+          },
+        ],
+        'messenger-sync-hourly': {
+          status: 'completed',
+          finished_at: '2026-10-19T09:30:00Z',
+          started_at: '2026-10-19T09:25:00Z',
+        },
+      },
+    })
+    const spy = makeEnvDeps(db.supabase)
+    const { facts } = await readEnvFacts({ clientId: 'c1', now: NOW }, spy.deps)
+    expect(facts.jobs[0]).toEqual({
+      job: 'meta-leads-sync',
+      max_age_hours: 3,
+      last_finished_at: '2026-10-19T09:00:00Z',
+      last_status: 'completed',
+    })
+  })
+
+  it('cron_run_logs 查询的过滤条件正确（eq job_name、neq running、按 started_at 倒序、limit 5）', async () => {
     const db = makeEnvDb({
       cronRows: {
         'meta-leads-sync': null,
@@ -830,7 +869,7 @@ describe('环境读取器：jobs', () => {
       expect(q.filters.some(f => f.op === 'eq' && f.column === 'job_name')).toBe(true)
       expect(q.filters.some(f => f.op === 'neq' && f.column === 'status' && f.value === 'running')).toBe(true)
       expect(q.order).toEqual({ column: 'started_at', ascending: false })
-      expect(q.limit).toBe(1)
+      expect(q.limit).toBe(5)
     }
   })
 })
