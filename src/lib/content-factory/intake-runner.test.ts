@@ -112,6 +112,22 @@ describe('mixIntakePicks', () => {
 })
 
 describe('runIntakeForClient news hotspot', () => {
+  it('default xiaohongshu-only config (CTS-like) never touches news', async () => {
+    m.intakeConfig = {
+      enabled: true,
+      keywords: ['tours'],
+      platforms: ['xiaohongshu'],
+      cadence: 'weekly',
+      scrapePerPlatform: 20,
+      rewriteCount: 5,
+      preferences: '',
+      news_feeds: [],
+    }
+    await runIntakeForClient('cts-like-client')
+    expect(m.newsFetch).not.toHaveBeenCalled()
+    expect(m.apify).toHaveBeenCalled()
+  })
+
   it('does not fetch news when platform news is off', async () => {
     m.intakeConfig.platforms = ['xiaohongshu']
     await runIntakeForClient('client-1')

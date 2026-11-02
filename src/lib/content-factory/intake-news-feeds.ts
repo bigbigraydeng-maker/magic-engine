@@ -1,4 +1,4 @@
-import { fetchFeed } from '@/lib/market-intel/rss'
+import { fetchNewsFeedItemsSafe } from './intake-news-feed-url'
 import type { RawFeedItem } from '@/lib/market-intel/types'
 import type { ViralRef } from './topic-agent'
 
@@ -57,7 +57,7 @@ export async function fetchNewsViralsForIntake(
   if (opts.feedUrls.length === 0) {
     return { items: [], warnings }
   }
-  const fetchFeedFn = opts.fetchFeedFn ?? fetchFeed
+  const fetchFeedFn = opts.fetchFeedFn ?? fetchNewsFeedItemsSafe
   const windowHours = opts.windowHours ?? DEFAULT_WINDOW_HOURS
   const maxItems = Math.max(1, opts.maxItems)
 

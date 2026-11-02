@@ -2,6 +2,7 @@
 // 存在 clients.factory_config->'topic_intake'（jsonb 合并，不覆盖已有的广告工厂配置），零 migration。
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { validateNewsFeedUrl } from './intake-news-feed-url'
 
 export type IntakePlatform = 'xiaohongshu' | 'douyin' | 'news'
 export type IntakeCadence = 'off' | 'weekly' | 'daily'
@@ -46,14 +47,9 @@ export function normalizeNewsFeedUrls(raw: unknown): string[] {
     if (typeof entry !== 'string') continue
     const trimmed = entry.trim()
     if (!trimmed) continue
-    let url: URL
-    try {
-      url = new URL(trimmed)
-    } catch {
-      continue
-    }
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') continue
-    const href = url.href
+    const check = validateNewsFeedUrl(trimmed)
+    if (!check.ok) continue
+    const href = check.url
     if (seen.has(href)) continue
     seen.add(href)
     out.push(href)
