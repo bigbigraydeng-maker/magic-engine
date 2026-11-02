@@ -33,6 +33,8 @@ export interface DigestGoalContext {
   target: number       // goals.target_value
   dayIndex: number     // 今天是目标期第几天（1-based）
   totalDays: number
+  /** goals.primary_metric_key —— 看板用来区分「还没设目标」类指标；客户版不下发 */
+  primaryMetricKey: string
   pace: GoalPace
   /** 读广告设置失败时的原始报错（只在内部账本里，客户版不下发） */
   configReadError?: string

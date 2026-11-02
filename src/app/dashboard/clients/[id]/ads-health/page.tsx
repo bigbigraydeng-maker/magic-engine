@@ -16,7 +16,8 @@ import Link from 'next/link'
 // Pure data module (no server imports) — safe in a client component.
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
 import AutonomySettings from './autonomy-settings'
-import GrowthPanel, { type GrowthStateView } from './growth-panel'
+import GrowthPanel, { type GrowthStateView, goalLiveNote } from './growth-panel'
+import { TodayGoalProgress } from './today-goal-progress'
 import WarMapPanel from './war-map-panel'
 import LiveTodayPanel from './live-today-panel'
 import BreakdownPanel from './breakdown-panel'
@@ -79,6 +80,8 @@ interface AdHealthResponse {
   industry?: string | null
   /** 卫青巡察当天的经营状态。null = 今天还没跑；缺字段 = 这一段读不到（接口出错）。 */
   growth?: GrowthStateView | ClientGrowthView | null
+  /** 今天 CRM 表单进线（新西兰日）；null = 读不到 */
+  today_crm_leads?: number | null
 }
 
 // ─── Verdict styling (colour = conclusion, per 板桥) ───────────────────────────
@@ -581,6 +584,18 @@ export default function AdsHealthPage() {
 
       {tab === 'today' && (
         <>
+          {!loading && !error && (
+            <TodayGoalProgress
+              state={data?.growth}
+              clientId={clientId}
+              todayCrmLeads={data?.today_crm_leads}
+              liveNote={
+                data?.growth && 'goal_live' in data.growth
+                  ? goalLiveNote(data.growth.goal_live)
+                  : undefined
+              }
+            />
+          )}
           {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
           <LiveTodayPanel clientId={clientId} part="today" />
           <WarMapPanel clientId={clientId} />
