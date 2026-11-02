@@ -257,6 +257,17 @@ describe('graphGetPage', () => {
     expect(init.signal).toBeInstanceOf(AbortSignal)
   })
 
+  it('hands the optional "do not mark the connection as failed" switch to callWithRetry (and nothing when it is not given)', async () => {
+    stubFetch()
+    const { callWithRetry } = await import('@/lib/microsoft/mail-send')
+    const spy = callWithRetry as unknown as ReturnType<typeof vi.fn>
+    spy.mockClear()
+    await graphGetPage('conn-1', '/me/messages')
+    expect(spy.mock.calls[0][2]).toBeUndefined()
+    await graphGetPage('conn-1', '/me/messages', { markErrorOnFailure: false })
+    expect(spy.mock.calls[1][2]).toEqual({ markErrorOnFailure: false })
+  })
+
   it('follows a next-page link on the Graph host without doubling the prefix', async () => {
     const fetchMock = stubFetch()
     await graphGetPage('conn-1', 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=abc')

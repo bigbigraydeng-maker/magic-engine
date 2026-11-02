@@ -44,7 +44,7 @@ describe('constants', () => {
   })
 
   it('exposes the allowed audience sources', () => {
-    expect(ALLOWED_AUDIENCE_SOURCES).toEqual(['meta_lead_form', 'crm_manual'])
+    expect(ALLOWED_AUDIENCE_SOURCES).toEqual(['meta_lead_form'])
   })
 })
 
@@ -67,22 +67,13 @@ describe('parseRule - happy path', () => {
     expect(result.rule.audience.sources).not.toBe(fixture.audience.sources)
   })
 
-  it('accepts crm_manual when a non-empty allowlist is present', () => {
+  it('accepts an allowlist of lower-case addresses', () => {
     const fixture = validFixture()
-    fixture.audience.sources = ['crm_manual']
     fixture.recipient_allowlist = ['ops@example.com']
     const result = parseRule(fixture)
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.rule.audience.sources).toEqual(['crm_manual'])
     expect(result.rule.recipient_allowlist).toEqual(['ops@example.com'])
-  })
-
-  it('accepts both sources together with an allowlist', () => {
-    const fixture = validFixture()
-    fixture.audience.sources = ['meta_lead_form', 'crm_manual']
-    fixture.recipient_allowlist = ['ops@example.com']
-    expect(parseRule(fixture).ok).toBe(true)
   })
 })
 
@@ -219,10 +210,11 @@ describe('parseRule - audience.sources', () => {
     expectReject(f)
   })
 
-  it('rejects crm_manual without an allowlist', () => {
+  it('rejects crm_manual: not an allowed source (no touchpoint with that source is written today)', () => {
     const f = validFixture()
     f.audience.sources = ['crm_manual']
-    f.recipient_allowlist = null
+    expectReject(f)
+    f.recipient_allowlist = ['ops@example.com']
     expectReject(f)
   })
 })
@@ -240,9 +232,10 @@ describe('parseRule - audience.max_age_days boundaries', () => {
     expect(parseRule(f).ok).toBe(true)
   })
 
-  it('accepts 14', () => {
+  it('accepts 14 (with an e-mail window of at least 14 days)', () => {
     const f = validFixture()
     f.audience.max_age_days = 14
+    f.frequency_cap.window_days = 14
     expect(parseRule(f).ok).toBe(true)
   })
 
@@ -326,9 +319,24 @@ describe('parseRule - frequency_cap.window_days boundaries', () => {
     expectReject(f)
   })
 
-  it('accepts 1', () => {
+  it('accepts 1 (when leads may be at most 1 day old)', () => {
     const f = validFixture()
+    f.audience.max_age_days = 1
     f.frequency_cap.window_days = 1
+    expect(parseRule(f).ok).toBe(true)
+  })
+
+  it('rejects a window shorter than the oldest lead that is still welcomed', () => {
+    const f = validFixture()
+    f.audience.max_age_days = 3
+    f.frequency_cap.window_days = 2
+    expectReject(f)
+  })
+
+  it('accepts a window exactly as long as the oldest lead that is still welcomed', () => {
+    const f = validFixture()
+    f.audience.max_age_days = 3
+    f.frequency_cap.window_days = 3
     expect(parseRule(f).ok).toBe(true)
   })
 
@@ -561,7 +569,6 @@ describe('ruleSha256', () => {
         r.gate_contract_version = 2
       },
       (r) => {
-        r.audience.sources = ['crm_manual']
         r.recipient_allowlist = ['ops@example.com']
       },
       (r) => {

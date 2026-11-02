@@ -84,7 +84,7 @@ function makePorts(opts: FakePortsOptions = {}): ShadowGatePorts {
         : wrap(contact.contactId, 'evidence', {
             ok: true,
             items: [],
-            isLegacyBatchItem: () => false,
+            legacy: { welcomed: false, batchSeen: true, campaignIds: [] },
           }),
   }
 }
@@ -230,6 +230,7 @@ describe('runShadowSweep — happy path', () => {
     expect(receipt.to_decide).toBe(3) // a, b, c
     expect(receipt.ignored).toBe(2) // d (not_yet), f (already has a row)
     expect(receipt.decided).toBe(3)
+    expect(receipt.already_decided).toBe(0)
     expect(receipt.deferred).toBe(0)
     expect(receipt.inserted).toBe(3)
     expect(receipt.would_send).toBe(1) // a
@@ -308,12 +309,12 @@ describe('runShadowSweep — happy path', () => {
         ok: true,
         contacts: [contact('a', '2026-11-02T00:00:00Z'), contact('c', '2026-10-30T06:00:00Z')],
       },
-      mailbox: { ok: false, reason: 'missing', detail: 'sales@example.com missing' },
+      mailbox: { ok: false, reason: 'missing', detail: '1 of 1 required mailboxes are not connected' },
     })
     const receipt = await runShadowSweep({ clientId: 'client-1', dryRun: false, deps: f.deps })
 
     expect(receipt.status).toBe('mailbox_unreadable')
-    expect(receipt.error).toBe('sales@example.com missing')
+    expect(receipt.error).toBe('1 of 1 required mailboxes are not connected')
     expect(receipt.to_decide).toBe(2)
     expect(receipt.decided).toBe(1)
     expect(receipt.deferred).toBe(1)
@@ -394,6 +395,11 @@ describe('runShadowSweep — failures', () => {
     expect(receipt.status).toBe('write_failed')
     expect(receipt.error).toBe('insert down')
     expect(receipt.inserted).toBe(0)
+    // nothing was stored, so nothing counts as decided: the contact is tried again by the next run
+    expect(receipt.decided).toBe(0)
+    expect(receipt.would_send).toBe(0)
+    expect(receipt.deferred).toBe(1)
+    expect(receipt.deferred_by_reason).toEqual({ write_failed: 1 })
   })
 })
 
@@ -491,7 +497,7 @@ describe('runShadowSweep - added after the mutation probe', () => {
         events.push(`start:${c.contactId}`)
         await delay(15)
         events.push(`end:${c.contactId}`)
-        return { ok: true, items: [], isLegacyBatchItem: () => false }
+        return { ok: true, items: [], legacy: { welcomed: false, batchSeen: true, campaignIds: [] } }
       },
     }
     const f = makeDeps({
@@ -512,10 +518,12 @@ describe('runShadowSweep - added after the mutation probe', () => {
         contacts: [contact('a', '2026-11-02T00:00:00Z'), contact('b', '2026-11-02T00:00:00Z')],
       },
     })
-    // the first row was already there (the database ignored the duplicate), the second is new
+    // the first row appeared meanwhile (the database ignored the duplicate), the second is new
     f.insertShadowRows.mockImplementationOnce(async () => ({ ok: true as const, inserted: 0 }))
     const receipt = await runShadowSweep({ clientId: 'client-1', dryRun: false, deps: f.deps })
-    expect(receipt.decided).toBe(2)
+    expect(receipt.decided).toBe(1)
+    expect(receipt.already_decided).toBe(1)
+    expect(receipt.would_send).toBe(1)
     expect(receipt.inserted).toBe(1)
   })
 })
@@ -585,11 +593,11 @@ describe('prepareSweep', () => {
   it('sets the candidates aside when a required mailbox is missing but keeps the stale ones', async () => {
     const f = makeDeps({
       contacts: { ok: true, contacts: [contact('a', '2026-11-02T00:00:00Z'), contact('c', '2026-10-30T06:00:00Z')] },
-      mailbox: { ok: false, reason: 'missing', detail: 'missing: sales@example.com' },
+      mailbox: { ok: false, reason: 'missing', detail: '1 of 1 required mailboxes are not connected' },
     })
     const plan = await planOf(f)
     expect(plan.status).toBe('mailbox_unreadable')
-    expect(plan.error).toBe('missing: sales@example.com')
+    expect(plan.error).toBe('1 of 1 required mailboxes are not connected')
     expect(plan.candidateIds).toEqual([])
     expect(plan.staleIds).toEqual(['c'])
     expect(plan.deferred).toBe(1)
@@ -616,11 +624,13 @@ describe('decideChunk', () => {
       .mockImplementationOnce(async () => ({ ok: false as const, error: 'db down' }))
     const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: f.deps })
     expect(result.inserted).toBe(1)
-    expect(result.decided).toBe(2)
+    // only the stored row counts as decided; the failed contact and the two after it are tried again later
+    expect(result.decided).toBe(1)
+    expect(result.would_send).toBe(1)
     expect(result.error).toBe('db down')
     expect(result.error_status).toBe('write_failed')
-    expect(result.deferred).toBe(2)
-    expect(result.deferred_by_reason).toEqual({ write_failed: 2 })
+    expect(result.deferred).toBe(3)
+    expect(result.deferred_by_reason).toEqual({ write_failed: 3 })
     expect(f.insertShadowRows).toHaveBeenCalledTimes(2)
   })
 
@@ -698,9 +708,95 @@ describe('decideChunk', () => {
   })
 })
 
+describe('decideChunk — retries and a second run', () => {
+  it('does not decide a contact again that already holds a shadow row', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(3) } })
+    const plan = await planOf(f)
+    const retry = makeDeps({
+      contacts: { ok: true, contacts: leadContacts(3) },
+      shadowRows: { ok: true, contactIds: new Set(['k01']) },
+    })
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: retry.deps })
+    expect(result).toMatchObject({ decided: 2, already_decided: 1, inserted: 2, would_send: 2, deferred: 0, error: null })
+    expect(retry.findContactsWithShadowRows).toHaveBeenCalledWith('client-1', ['k00', 'k01', 'k02'])
+    // the contact that holds a row is neither read nor decided nor written again
+    expect(retry.loadContactsByIds.mock.calls[0][0]).toEqual({
+      clientId: 'client-1',
+      contactIds: ['k00', 'k02'],
+      sources: ['meta_lead_form'],
+    })
+    expect(retry.insertShadowRows.mock.calls.map((c) => (c[0] as ShadowRowInput[])[0].contactId)).toEqual(['k00', 'k02'])
+  })
+
+  it('reads and decides nothing when every contact of the chunk already holds a row', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(2) } })
+    const plan = await planOf(f)
+    const retry = makeDeps({ shadowRows: { ok: true, contactIds: new Set(['k00', 'k01']) } })
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: retry.deps })
+    expect(result).toMatchObject({ decided: 0, already_decided: 2, deferred: 0, inserted: 0, error: null })
+    expect(retry.loadContactsByIds).not.toHaveBeenCalled()
+    expect(retry.createPorts).not.toHaveBeenCalled()
+    expect(retry.insertShadowRows).not.toHaveBeenCalled()
+  })
+
+  it('defers the whole chunk when it cannot be checked which contacts already hold a row', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(2) } })
+    const plan = await planOf(f)
+    const broken = makeDeps({ shadowRows: { ok: false, error: 'rows down' } })
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: broken.deps })
+    expect(result).toMatchObject({
+      decided: 0, deferred: 2, error: 'rows down', error_status: 'read_failed', deferred_by_reason: { read_failed: 2 },
+    })
+    expect(broken.insertShadowRows).not.toHaveBeenCalled()
+  })
+
+  it('keeps the count of already-decided contacts when the remaining ones cannot be read', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(3) } })
+    const plan = await planOf(f)
+    const broken = makeDeps({
+      shadowRows: { ok: true, contactIds: new Set(['k00']) },
+      contactsByIds: { ok: false, error: 'contacts down' },
+    })
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: broken.deps })
+    expect(result).toMatchObject({ decided: 0, already_decided: 1, deferred: 2, error: 'contacts down' })
+  })
+
+  it('counts a row that appeared between the check and the write as already decided, not as decided', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(3) } })
+    const plan = await planOf(f)
+    f.insertShadowRows
+      .mockImplementationOnce(async () => ({ ok: true as const, inserted: 1 }))
+      .mockImplementationOnce(async () => ({ ok: true as const, inserted: 0 }))
+      .mockImplementationOnce(async () => ({ ok: true as const, inserted: 1 }))
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: f.deps })
+    expect(result).toMatchObject({ decided: 2, already_decided: 1, inserted: 2, would_send: 2 })
+  })
+
+  it('still looks at the existing rows in a dry run (a read), and writes nothing', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: leadContacts(2) } })
+    const plan = await planOf(f, true)
+    const dry = makeDeps({ shadowRows: { ok: true, contactIds: new Set(['k00']) }, contacts: { ok: true, contacts: leadContacts(2) } })
+    const result = await decideChunk({ plan, kind: 'candidates', contactIds: plan.candidateIds, deps: dry.deps })
+    expect(result).toMatchObject({ decided: 1, already_decided: 1, inserted: 0 })
+    expect(dry.insertShadowRows).not.toHaveBeenCalled()
+  })
+
+  it('does the same for the stale chunks', async () => {
+    const f = makeDeps({ contacts: { ok: true, contacts: [contact('c', '2026-10-30T06:00:00Z'), contact('e', '2026-10-30T07:00:00Z')] } })
+    const plan = await planOf(f)
+    const retry = makeDeps({
+      shadowRows: { ok: true, contactIds: new Set(['c']) },
+      contacts: { ok: true, contacts: [contact('c', '2026-10-30T06:00:00Z'), contact('e', '2026-10-30T07:00:00Z')] },
+    })
+    const result = await decideChunk({ plan, kind: 'stale', contactIds: plan.staleIds, deps: retry.deps })
+    expect(result).toMatchObject({ decided: 1, already_decided: 1, inserted: 1, skipped_by_reason: { stale: 1 } })
+    expect(retry.createPorts).not.toHaveBeenCalled()
+  })
+})
+
 describe('finalizeSweep', () => {
   const chunk = (over: Partial<ChunkResult>): ChunkResult => ({
-    decided: 0, deferred: 0, inserted: 0, would_send: 0, skipped_by_reason: {}, deferred_by_reason: {}, legacy_batches: [], error: null, error_status: null, ...over,
+    decided: 0, already_decided: 0, deferred: 0, inserted: 0, would_send: 0, skipped_by_reason: {}, deferred_by_reason: {}, legacy_batches: [], error: null, error_status: null, ...over,
   })
   const basePlan: SweepPlan = {
     clientId: 'client-1', dryRun: false, authorizationId: 'auth-1', sweepDay: SWEEP_DAY, candidateIds: [], staleIds: [],
@@ -720,12 +816,17 @@ describe('finalizeSweep', () => {
     })
   })
 
+  it('adds the already-decided counts up', () => {
+    const receipt = finalizeSweep(basePlan, [chunk({ already_decided: 2 }), chunk({ already_decided: 3, decided: 1 })])
+    expect(receipt).toMatchObject({ already_decided: 5, decided: 1 })
+  })
+
   it('shows the first failing chunk as the status, but keeps a plan-level status that is already shown', () => {
     const failed = chunk({ error: 'db down', error_status: 'write_failed' })
     expect(finalizeSweep(basePlan, [chunk({}), failed])).toMatchObject({ status: 'write_failed', error: 'db down' })
     expect(finalizeSweep(basePlan, [chunk({ error: 'x', error_status: 'read_failed' })])).toMatchObject({ status: 'read_failed', error: 'x' })
-    expect(finalizeSweep({ ...basePlan, status: 'mailbox_unreadable', error: 'missing: sales@example.com' }, [failed])).toMatchObject({
-      status: 'mailbox_unreadable', error: 'missing: sales@example.com',
+    expect(finalizeSweep({ ...basePlan, status: 'mailbox_unreadable', error: '1 of 1 required mailboxes are not connected' }, [failed])).toMatchObject({
+      status: 'mailbox_unreadable', error: '1 of 1 required mailboxes are not connected',
     })
   })
 
@@ -746,6 +847,7 @@ describe('runShadowSweep in chunks', () => {
     expect(receipt).toMatchObject({ status: 'swept', to_decide: 9, decided: 9, inserted: 9, would_send: 9, deferred: 0 })
     expect(f.createPorts).toHaveBeenCalledTimes(3)
     expect(f.loadContactsByIds.mock.calls.map((c) => (c[0] as { contactIds: string[] }).contactIds.length)).toEqual([4, 4, 1])
+    expect(f.loadContactsByIds.mock.calls.every((c) => (c[0] as { sources: string[] }).sources.join() === 'meta_lead_form')).toBe(true)
     expect(f.insertShadowRows).toHaveBeenCalledTimes(9)
   })
 })

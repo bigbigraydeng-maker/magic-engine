@@ -11,6 +11,9 @@ import type {
 } from '../types'
 import { decideShadow, isPlausibleEmail, isSystemAddress, staleDecision } from '../shadow-gates'
 
+// What the old batch did for a contact it did NOT mail (and it had run recently, so that can be trusted).
+const NOT_WELCOMED = { welcomed: false, batchSeen: true, campaignIds: [] as string[] }
+
 function makeRule(overrides: Partial<TriggeredSendRule> = {}): TriggeredSendRule {
   const base: TriggeredSendRule = {
     gate_contract_version: 1,
@@ -67,7 +70,7 @@ function makePorts(opts: PortsOptions = {}): {
   const member = vi.fn(async (): Promise<MemberRead> => opts.member ?? { ok: true, state: 'active' })
   const evidence = vi.fn(
     async (): Promise<EvidenceRead> =>
-      opts.evidence ?? { ok: true, items: [], isLegacyBatchItem: () => false },
+      opts.evidence ?? { ok: true, items: [], legacy: NOT_WELCOMED },
   )
   const ports: ShadowGatePorts = { consent, dnc, member, evidence }
   return { ports, consent, dnc, member, evidence }
@@ -125,6 +128,8 @@ describe('staleDecision', () => {
         gate_contract_version: 1,
         would_send: false,
         legacy_welcomed: null,
+        legacy_batch_seen: null,
+        legacy_campaign_ids: null,
         sales_email: null,
         frequency_count: null,
         lead_local_day: '2026-11-02',
@@ -147,6 +152,8 @@ describe('decideShadow', () => {
         gate_contract_version: 1,
         would_send: true,
         legacy_welcomed: false,
+        legacy_batch_seen: true,
+        legacy_campaign_ids: [],
         sales_email: false,
         frequency_count: 0,
         lead_local_day: '2026-11-02',
@@ -168,9 +175,11 @@ describe('decideShadow', () => {
     expect(decision.status).toBe('skipped')
     expect(decision.reasonCode).toBe('bad_email')
     expect(decision.annotations.would_send).toBe(false)
-    expect(decision.annotations.legacy_welcomed).toBeNull()
-    expect(decision.annotations.sales_email).toBeNull()
-    expect(decision.annotations.frequency_count).toBeNull()
+    // no address at all: the old batch could not have mailed this contact, and there is nothing to count
+    expect(decision.annotations.legacy_welcomed).toBe(false)
+    expect(decision.annotations.legacy_batch_seen).toBe(true)
+    expect(decision.annotations.sales_email).toBe(false)
+    expect(decision.annotations.frequency_count).toBe(0)
     expect(member).not.toHaveBeenCalled()
     expect(evidence).not.toHaveBeenCalled()
   })
@@ -253,7 +262,7 @@ describe('decideShadow', () => {
       evidence: {
         ok: true,
         items: [makeItem({ source: 'sent_items', at: '2026-11-02T00:00:00Z' })],
-        isLegacyBatchItem: () => false,
+        legacy: NOT_WELCOMED,
       },
     })
     const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
@@ -273,7 +282,7 @@ describe('decideShadow', () => {
           makeItem({ id: 'a', source: 'audit', at: '2026-10-01T00:00:00Z' }),
           makeItem({ id: 'b', source: 'audit', at: '2026-10-02T00:00:00Z' }),
         ],
-        isLegacyBatchItem: () => false,
+        legacy: NOT_WELCOMED,
       },
     })
     const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
@@ -317,7 +326,7 @@ describe('decideShadow', () => {
             makeItem({ id: 'a', source: 'sent_items', at: '2026-11-02T00:00:00Z' }),
             makeItem({ id: 'b', source: 'audit', at: '2026-10-01T00:00:00Z' }),
           ],
-          isLegacyBatchItem: () => false,
+          legacy: NOT_WELCOMED,
         },
       })
       const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
@@ -373,7 +382,7 @@ describe('decideShadow', () => {
         evidence: {
           ok: true,
           items: [makeItem({ source: 'mailchimp', at: '2026-11-02T00:00:00Z' })],
-          isLegacyBatchItem: () => false,
+          legacy: NOT_WELCOMED,
         },
       })
       const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
@@ -385,22 +394,35 @@ describe('decideShadow', () => {
       expect(decision.annotations.legacy_welcomed).toBe(false)
     })
 
-    it('legacy batch item sets legacy_welcomed and is not counted', async () => {
-      const batchItem = makeItem({ source: 'mailchimp', at: '2026-11-02T00:00:00Z' })
+    it('an old-batch welcome is reported as legacy_welcomed with its campaign ids and is never counted toward the cap', async () => {
       const { ports } = makePorts({
-        evidence: {
-          ok: true,
-          items: [batchItem],
-          isLegacyBatchItem: (item) => item === batchItem,
-        },
+        evidence: { ok: true, items: [], legacy: { welcomed: true, batchSeen: true, campaignIds: ['camp-1', 'camp-2'] } },
       })
-      const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
+      // cap of 1: if the batch mail were counted, this lead could not be welcomed
+      const decision = await decideShadow({
+        contact: makeContact(),
+        rule: makeRule({ frequency_cap: { max: 1, window_days: 7 } }),
+        ports,
+      })
       expect(decision.kind).toBe('write')
       if (decision.kind !== 'write') return
       expect(decision.reasonCode).toBeNull()
       expect(decision.annotations.legacy_welcomed).toBe(true)
+      expect(decision.annotations.legacy_batch_seen).toBe(true)
+      expect(decision.annotations.legacy_campaign_ids).toEqual(['camp-1', 'camp-2'])
       expect(decision.annotations.frequency_count).toBe(0)
       expect(decision.annotations.sales_email).toBe(false)
+    })
+
+    it('records that the old batch had not run when it did not (so "not welcomed" cannot be trusted)', async () => {
+      const { ports } = makePorts({
+        evidence: { ok: true, items: [], legacy: { welcomed: false, batchSeen: false, campaignIds: [] } },
+      })
+      const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
+      expect(decision.kind).toBe('write')
+      if (decision.kind !== 'write') return
+      expect(decision.annotations.legacy_welcomed).toBe(false)
+      expect(decision.annotations.legacy_batch_seen).toBe(false)
     })
 
     it('sent_items before createdAt does not set sales_email but counts toward frequency', async () => {
@@ -408,7 +430,7 @@ describe('decideShadow', () => {
         evidence: {
           ok: true,
           items: [makeItem({ source: 'sent_items', at: '2026-10-01T00:00:00Z' })],
-          isLegacyBatchItem: () => false,
+          legacy: NOT_WELCOMED,
         },
       })
       const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
@@ -424,7 +446,22 @@ describe('decideShadow', () => {
         evidence: {
           ok: true,
           items: [makeItem({ source: 'sent_items', at: '2026-11-02T00:00:00Z' })],
-          isLegacyBatchItem: () => false,
+          legacy: NOT_WELCOMED,
+        },
+      })
+      const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
+      expect(decision.kind).toBe('write')
+      if (decision.kind !== 'write') return
+      expect(decision.reasonCode).toBe('sales_email_exists')
+      expect(decision.annotations.sales_email).toBe(true)
+    })
+
+    it('an e-mail sent at the very moment the lead came in counts as a sales e-mail (boundary included)', async () => {
+      const { ports } = makePorts({
+        evidence: {
+          ok: true,
+          items: [makeItem({ source: 'sent_items', at: makeContact().createdAt })],
+          legacy: NOT_WELCOMED,
         },
       })
       const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
@@ -439,7 +476,7 @@ describe('decideShadow', () => {
         evidence: {
           ok: true,
           items: [makeItem({ source: 'sent_items', at: 'not-a-date' })],
-          isLegacyBatchItem: () => false,
+          legacy: NOT_WELCOMED,
         },
       })
       const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
@@ -454,7 +491,7 @@ describe('decideShadow', () => {
         evidence: {
           ok: true,
           items: [makeItem({ id: 'a', source: 'audit', at: '2026-10-01T00:00:00Z' })],
-          isLegacyBatchItem: () => false,
+          legacy: NOT_WELCOMED,
         },
       })
       const d1 = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: one.ports })
@@ -470,7 +507,7 @@ describe('decideShadow', () => {
             makeItem({ id: 'a', source: 'audit', at: '2026-10-01T00:00:00Z' }),
             makeItem({ id: 'b', source: 'audit', at: '2026-10-02T00:00:00Z' }),
           ],
-          isLegacyBatchItem: () => false,
+          legacy: NOT_WELCOMED,
         },
       })
       const d2 = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: two.ports })
@@ -595,5 +632,45 @@ describe('decideShadow · precedence and consent basis (added after the mutation
       reasonCode: null,
       consentBasis: 'form_disclosure_attested',
     })
+  })
+})
+
+describe('decideShadow - behaviours the mutation probe found unpinned', () => {
+  it('a lead that is not in the Mailchimp audience yet is NOT suppressed', async () => {
+    const { ports } = makePorts({ member: { ok: true, state: 'not_in_audience' } })
+    const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
+    expect(decision).toMatchObject({ kind: 'write', status: 'shadow', reasonCode: null })
+  })
+
+  it('a client without a Mailchimp audience is not suppressed either', async () => {
+    const { ports } = makePorts({ member: { ok: true, state: 'not_applicable' } })
+    const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
+    expect(decision).toMatchObject({ kind: 'write', status: 'shadow', reasonCode: null })
+  })
+
+  it.each(['audit', 'touchpoint'] as const)('a %s item after the lead came in is a human e-mail', async (source) => {
+    const { ports } = makePorts({
+      evidence: { ok: true, items: [makeItem({ source, at: '2026-11-02T05:00:00Z' })], legacy: NOT_WELCOMED },
+    })
+    const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
+    expect(decision).toMatchObject({ kind: 'write', status: 'skipped', reasonCode: 'sales_email_exists' })
+  })
+
+  it('a human e-mail 30 minutes after the lead came in counts (no blind spot right after creation)', async () => {
+    const { ports } = makePorts({
+      evidence: { ok: true, items: [makeItem({ source: 'sent_items', at: '2026-11-01T20:30:00Z' })], legacy: NOT_WELCOMED },
+    })
+    const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
+    expect(decision).toMatchObject({ reasonCode: 'sales_email_exists' })
+  })
+
+  it('the allowlist is matched against the PRIMARY address only', async () => {
+    const { ports } = makePorts()
+    const decision = await decideShadow({
+      contact: makeContact({ addresses: ['lead@example.org', 'other@example.org'] }),
+      rule: makeRule({ recipient_allowlist: ['other@example.org'] }),
+      ports,
+    })
+    expect(decision).toMatchObject({ kind: 'write', reasonCode: 'not_in_allowlist' })
   })
 })

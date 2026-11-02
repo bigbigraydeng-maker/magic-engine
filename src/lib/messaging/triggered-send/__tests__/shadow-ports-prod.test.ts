@@ -1,19 +1,14 @@
 import { describe, it, expect, vi } from 'vitest'
-import type { SupabaseClient } from '@supabase/supabase-js'
 
-import type { ManualSendDncGate } from '@/lib/crm/manual-send-dnc-gate'
 import type { AudienceIdRead } from '@/lib/mailchimp/audience-config'
 import type { FindMemberResult } from '@/lib/mailchimp/tags'
 import type { MailchimpCampaign } from '@/lib/mailchimp/client'
 import type { MailchimpPort } from '@/lib/crm/email-templates/frequency-sources-prod'
-import type {
-  FrequencySources,
-  FrequencyVerdict,
-  OutboundItem,
-} from '@/lib/crm/email-templates/gates/types'
+import type { evaluateFrequency } from '@/lib/crm/email-templates/gates/frequency'
+import type { FrequencyVerdict, OutboundItem } from '@/lib/crm/email-templates/gates/types'
 
 import type { TriggeredSendRule } from '../rule'
-import type { ShadowContact } from '../types'
+import type { DncRead, ShadowContact } from '../types'
 import { createShadowGatePorts, type ShadowPortsDeps } from '../shadow-ports-prod'
 
 // ── fixtures ───────────────────────────────────────────────────────────────────────────────────────────
@@ -37,6 +32,8 @@ const CONTACT: ShadowContact = {
   primaryEmail: 'lead@example.org',
   addresses: ['lead@example.org'],
 }
+
+type EvaluateArgs = Parameters<typeof evaluateFrequency>[0]
 
 interface FakeQuery {
   select: ReturnType<typeof vi.fn>
@@ -67,12 +64,54 @@ function makeFakeDb(result: { data: unknown[] | null; error: { message: string }
   return { from, query }
 }
 
+interface TableResult {
+  data: unknown
+  error: { message: string } | null
+}
+
+/** A fake database that answers per table and remembers every `.eq()` filter of every query. */
+function makeTableDb(results: Record<string, TableResult>) {
+  const queries: Array<{ table: string; eq: Array<[string, unknown]> }> = []
+  const from = vi.fn((table: string) => {
+    const entry = { table, eq: [] as Array<[string, unknown]> }
+    queries.push(entry)
+    const result = results[table] ?? { data: [], error: null }
+    const query = {
+      select: vi.fn(() => query),
+      eq: vi.fn((column: string, value: unknown) => {
+        entry.eq.push([column, value])
+        return query
+      }),
+      order: vi.fn(() => query),
+      limit: vi.fn(() => query),
+      maybeSingle: vi.fn(() => Promise.resolve(result)),
+      then: (resolve: (v: unknown) => void, reject: (e: unknown) => void) => Promise.resolve(result).then(resolve, reject),
+    }
+    return query
+  })
+  return { from, queries }
+}
+
 function makeMailchimpPort(overrides: Partial<MailchimpPort> = {}): MailchimpPort {
   return {
     apiKey: () => 'test-key',
     readAudience: async (): Promise<AudienceIdRead> => ({ ok: true, audienceId: 'aud-1' }),
     listSentCampaigns: async (): Promise<MailchimpCampaign[]> => [],
     getCampaignRecipientStatus: async () => 'not_recipient',
+    ...overrides,
+  }
+}
+
+function campaign(overrides: Partial<MailchimpCampaign> & { id: string; title: string }): MailchimpCampaign {
+  return {
+    subject: 'subject',
+    sentAt: '2026-11-02T06:00:00.000Z',
+    emailsSent: 10,
+    opens: 0,
+    uniqueOpens: 0,
+    clicks: 0,
+    openRate: 0,
+    clickRate: 0,
     ...overrides,
   }
 }
@@ -86,12 +125,41 @@ function makeDeps(overrides: Partial<ShadowPortsDeps> = {}): ShadowPortsDeps {
     now: NOW,
     listActiveMailboxes: async () => [],
     graphGetPage: async () => ({ ok: true, json: {} }),
-    checkDnc: async (): Promise<ManualSendDncGate> => ({ blocked: false }),
+    checkDnc: async (): Promise<DncRead> => ({ ok: true, blocked: false }),
     mailchimp: makeMailchimpPort(),
     findMember: async (): Promise<FindMemberResult> => ({ status: 'not_in_audience' }),
     evaluate: async (): Promise<FrequencyVerdict> => ({ ok: true, count: 0, items: [] }),
     ...overrides,
   }
+}
+
+function item(overrides: Partial<OutboundItem>): OutboundItem {
+  return {
+    source: 'sent_items',
+    id: 'x',
+    at: '2026-10-30T10:00:00.000Z',
+    subject: 'hi',
+    address: 'lead@example.org',
+    ...overrides,
+  }
+}
+
+/** An evaluate that, like the real one, asks the Mailchimp source and returns what it found. */
+function mailchimpEvaluate() {
+  return vi.fn(async (args: EvaluateArgs): Promise<FrequencyVerdict> => {
+    const res = await args.sources.mailchimp(args.addresses, '2026-10-26T00:00:00.000Z')
+    if (!res.ok) return { ok: false, reason: 'frequency_unverifiable', error: res.error }
+    return { ok: true, count: res.items.length, items: res.items }
+  })
+}
+
+/** An evaluate that, like the real one, asks the sent-items source (the mailbox). */
+function sentItemsEvaluate() {
+  return vi.fn(async (args: EvaluateArgs): Promise<FrequencyVerdict> => {
+    const res = await args.sources.sentItems(args.addresses, '2026-10-26T00:00:00.000Z')
+    if (!res.ok) return { ok: false, reason: 'frequency_unverifiable', error: res.error }
+    return { ok: true, count: res.items.length, items: res.items }
+  })
 }
 
 // ── consent ────────────────────────────────────────────────────────────────────────────────────────────
@@ -110,9 +178,7 @@ describe('consent port', () => {
       ],
       error: null,
     })
-    const { ports } = createShadowGatePorts(
-      makeDeps({ db: db as never }),
-    )
+    const { ports } = createShadowGatePorts(makeDeps({ db: db as never }))
     const read = await ports.consent('c-1')
     expect(read).toEqual({ ok: true, bases: ['marketing', 'transactional'], sourceRef: 'ref-1' })
     expect(db.from).toHaveBeenCalledWith('contact_touchpoints')
@@ -126,9 +192,7 @@ describe('consent port', () => {
 
   it('returns empty bases and null sourceRef when there are no rows', async () => {
     const db = makeFakeDb({ data: [], error: null })
-    const { ports } = createShadowGatePorts(
-      makeDeps({ db: db as never }),
-    )
+    const { ports } = createShadowGatePorts(makeDeps({ db: db as never }))
     expect(await ports.consent('c-1')).toEqual({ ok: true, bases: [], sourceRef: null })
   })
 
@@ -137,21 +201,13 @@ describe('consent port', () => {
       data: [{ source_ref: '', metadata: { consent_basis: 'marketing' }, occurred_at: 't1' }],
       error: null,
     })
-    const { ports } = createShadowGatePorts(
-      makeDeps({ db: db as never }),
-    )
-    expect(await ports.consent('c-1')).toEqual({
-      ok: true,
-      bases: ['marketing'],
-      sourceRef: null,
-    })
+    const { ports } = createShadowGatePorts(makeDeps({ db: db as never }))
+    expect(await ports.consent('c-1')).toEqual({ ok: true, bases: ['marketing'], sourceRef: null })
   })
 
   it('turns a query error into ok:false', async () => {
     const db = makeFakeDb({ data: null, error: { message: 'boom' } })
-    const { ports } = createShadowGatePorts(
-      makeDeps({ db: db as never }),
-    )
+    const { ports } = createShadowGatePorts(makeDeps({ db: db as never }))
     expect(await ports.consent('c-1')).toEqual({ ok: false, error: 'boom' })
   })
 
@@ -161,48 +217,28 @@ describe('consent port', () => {
         throw new Error('kaboom')
       }),
     }
-    const { ports } = createShadowGatePorts(
-      makeDeps({ db: db as never }),
-    )
+    const { ports } = createShadowGatePorts(makeDeps({ db: db as never }))
     expect(await ports.consent('c-1')).toEqual({ ok: false, error: 'kaboom' })
   })
 })
 
 // ── dnc ────────────────────────────────────────────────────────────────────────────────────────────────
 
-describe('dnc port', () => {
-  it('maps not blocked', async () => {
-    const { ports } = createShadowGatePorts(
-      makeDeps({ checkDnc: async () => ({ blocked: false }) }),
-    )
+describe('dnc port — the injected checker', () => {
+  it('passes a not-blocked answer through', async () => {
+    const checkDnc = vi.fn(async (): Promise<DncRead> => ({ ok: true, blocked: false }))
+    const { ports } = createShadowGatePorts(makeDeps({ checkDnc }))
     expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: false })
+    expect(checkDnc).toHaveBeenCalledWith('client-1', 'c-1')
   })
 
-  it('maps do_not_contact to blocked', async () => {
-    const { ports } = createShadowGatePorts(
-      makeDeps({
-        checkDnc: async () => ({
-          blocked: true,
-          status: 403,
-          reason: 'do_not_contact',
-          error: 'on the list',
-        }),
-      }),
-    )
+  it('passes a blocked answer through', async () => {
+    const { ports } = createShadowGatePorts(makeDeps({ checkDnc: async () => ({ ok: true, blocked: true }) }))
     expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: true })
   })
 
-  it('maps dnc_check_failed to ok:false', async () => {
-    const { ports } = createShadowGatePorts(
-      makeDeps({
-        checkDnc: async () => ({
-          blocked: true,
-          status: 503,
-          reason: 'dnc_check_failed',
-          error: 'lookup failed',
-        }),
-      }),
-    )
+  it('passes a failed lookup through as ok:false', async () => {
+    const { ports } = createShadowGatePorts(makeDeps({ checkDnc: async () => ({ ok: false, error: 'lookup failed' }) }))
     expect(await ports.dnc('c-1')).toEqual({ ok: false, error: 'lookup failed' })
   })
 
@@ -218,13 +254,132 @@ describe('dnc port', () => {
   })
 })
 
+describe('dnc port — the strict default reader', () => {
+  const clean = {
+    contacts: { data: { do_not_contact: false }, error: null },
+    contact_touchpoints: { data: [], error: null },
+    conversations: { data: [], error: null },
+  }
+  function portsFor(results: Record<string, TableResult>) {
+    const db = makeTableDb({ ...clean, ...results })
+    const deps = makeDeps({ db: db as never })
+    delete deps.checkDnc
+    return { ports: createShadowGatePorts(deps).ports, db }
+  }
+
+  it('is not blocked for a clean contact', async () => {
+    const { ports } = portsFor({})
+    expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: false })
+  })
+
+  it('is blocked by the contact flag', async () => {
+    const { ports } = portsFor({ contacts: { data: { do_not_contact: true }, error: null } })
+    expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: true })
+  })
+
+  it('is blocked by a touchpoint whose outcome is do_not_contact', async () => {
+    const { ports } = portsFor({
+      contact_touchpoints: {
+        data: [{ occurred_at: '2026-10-01T00:00:00.000Z', metadata: { outcome: 'do_not_contact' } }],
+        error: null,
+      },
+    })
+    expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: true })
+  })
+
+  it('is blocked by a touchpoint that carries the do_not_contact flag', async () => {
+    const { ports } = portsFor({
+      contact_touchpoints: {
+        data: [{ occurred_at: '2026-10-01T00:00:00.000Z', metadata: { do_not_contact: true } }],
+        error: null,
+      },
+    })
+    expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: true })
+  })
+
+  it('is not blocked when a person cleared the verdict afterwards, even if the contact flag is still set', async () => {
+    const { ports } = portsFor({
+      contacts: { data: { do_not_contact: true }, error: null },
+      contact_touchpoints: {
+        data: [
+          { occurred_at: '2026-10-01T00:00:00.000Z', metadata: { outcome: 'do_not_contact' } },
+          { occurred_at: '2026-10-02T00:00:00.000Z', metadata: { outcome: 'dnc_cleared' } },
+        ],
+        error: null,
+      },
+    })
+    expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: false })
+  })
+
+  it('is blocked by a conversation-level opt-out that was never linked to the contact', async () => {
+    const { ports } = portsFor({ conversations: { data: [{ id: 'conv-1' }], error: null } })
+    expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: true })
+  })
+
+  it('reads a missing metadata as no verdict', async () => {
+    const { ports } = portsFor({
+      contact_touchpoints: { data: [{ occurred_at: '2026-10-01T00:00:00.000Z', metadata: null }], error: null },
+    })
+    expect(await ports.dnc('c-1')).toEqual({ ok: true, blocked: false })
+  })
+
+  // The old check answered "blocked" on any read error, which would freeze an innocent lead as do-not-contact for good.
+  it.each([
+    ['contacts', { contacts: { data: null, error: { message: 'statement timeout' } } }],
+    ['touchpoints', { contact_touchpoints: { data: null, error: { message: 'statement timeout' } } }],
+    ['conversations', { conversations: { data: null, error: { message: 'statement timeout' } } }],
+  ])('a failed %s read stays a failed read (never "blocked")', async (label, results) => {
+    const { ports } = portsFor(results)
+    expect(await ports.dnc('c-1')).toEqual({ ok: false, error: `${label}: statement timeout` })
+  })
+
+  it('a contact that is not found for this client is a failed read, not "blocked" and not "clear"', async () => {
+    const { ports } = portsFor({ contacts: { data: null, error: null } })
+    expect(await ports.dnc('c-1')).toEqual({ ok: false, error: 'contact not found for this client' })
+  })
+
+  it('scopes every query to the client and the contact', async () => {
+    const { ports, db } = portsFor({})
+    await ports.dnc('c-1')
+    const byTable = (table: string) => db.queries.find((q) => q.table === table)?.eq ?? []
+    expect(byTable('contacts')).toEqual(
+      expect.arrayContaining([
+        ['id', 'c-1'],
+        ['client_id', 'client-1'],
+      ]),
+    )
+    expect(byTable('contact_touchpoints')).toEqual(
+      expect.arrayContaining([
+        ['contact_id', 'c-1'],
+        ['client_id', 'client-1'],
+      ]),
+    )
+    expect(byTable('conversations')).toEqual(
+      expect.arrayContaining([
+        ['contact_id', 'c-1'],
+        ['client_id', 'client-1'],
+        ['optout_unlinked', true],
+      ]),
+    )
+  })
+
+  it('turns a thrown error into ok:false', async () => {
+    const db = {
+      from: vi.fn(() => {
+        throw new Error('kaboom')
+      }),
+    }
+    const deps = makeDeps({ db: db as never })
+    delete deps.checkDnc
+    expect(await createShadowGatePorts(deps).ports.dnc('c-1')).toEqual({ ok: false, error: 'kaboom' })
+  })
+})
+
 // ── member ────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('member port', () => {
   it('reads the audience only once for two calls', async () => {
-    const readAudience = vi.fn(
-      async (): Promise<AudienceIdRead> => ({ ok: true, audienceId: 'aud-1' }),
-    )
+    const readAudience = vi.fn(async (): Promise<AudienceIdRead> => ({ ok: true, audienceId: 'aud-1' }))
     const { ports } = createShadowGatePorts(
       makeDeps({
         mailchimp: makeMailchimpPort({ readAudience }),
@@ -261,60 +416,39 @@ describe('member port', () => {
   })
 
   it('maps not_in_audience', async () => {
-    const { ports } = createShadowGatePorts(
-      makeDeps({ findMember: async () => ({ status: 'not_in_audience' }) }),
-    )
-    expect(await ports.member('lead@example.org')).toEqual({
-      ok: true,
-      state: 'not_in_audience',
-    })
+    const { ports } = createShadowGatePorts(makeDeps({ findMember: async () => ({ status: 'not_in_audience' }) }))
+    expect(await ports.member('lead@example.org')).toEqual({ ok: true, state: 'not_in_audience' })
   })
 
   it('maps a findMember error to ok:false with the reason', async () => {
     const { ports } = createShadowGatePorts(
-      makeDeps({
-        findMember: async () => ({ status: 'error', reason: 'rate limited', retryable: true }),
-      }),
+      makeDeps({ findMember: async () => ({ status: 'error', reason: 'rate limited', retryable: true }) }),
     )
     expect(await ports.member('lead@example.org')).toEqual({ ok: false, error: 'rate limited' })
   })
 
   it('returns not_applicable when the client has no audience', async () => {
     const { ports } = createShadowGatePorts(
-      makeDeps({
-        mailchimp: makeMailchimpPort({
-          readAudience: async () => ({ ok: true, audienceId: '' }),
-        }),
-      }),
+      makeDeps({ mailchimp: makeMailchimpPort({ readAudience: async () => ({ ok: true, audienceId: '' }) }) }),
     )
-    expect(await ports.member('lead@example.org')).toEqual({
-      ok: true,
-      state: 'not_applicable',
-    })
+    expect(await ports.member('lead@example.org')).toEqual({ ok: true, state: 'not_applicable' })
   })
 
   it('returns ok:false when the audience read fails', async () => {
     const { ports } = createShadowGatePorts(
-      makeDeps({
-        mailchimp: makeMailchimpPort({
-          readAudience: async () => ({ ok: false, message: 'no config' }),
-        }),
-      }),
+      makeDeps({ mailchimp: makeMailchimpPort({ readAudience: async () => ({ ok: false, message: 'no config' }) }) }),
     )
-    expect(await ports.member('lead@example.org')).toEqual({
-      ok: false,
-      error: 'audience: no config',
-    })
+    expect(await ports.member('lead@example.org')).toEqual({ ok: false, error: 'audience: no config' })
   })
 
   it('returns ok:false when the API key is missing', async () => {
-    const { ports } = createShadowGatePorts(
-      makeDeps({ mailchimp: makeMailchimpPort({ apiKey: () => undefined }) }),
-    )
-    expect(await ports.member('lead@example.org')).toEqual({
-      ok: false,
-      error: 'MAILCHIMP_API_KEY is not set',
-    })
+    const { ports } = createShadowGatePorts(makeDeps({ mailchimp: makeMailchimpPort({ apiKey: () => undefined }) }))
+    expect(await ports.member('lead@example.org')).toEqual({ ok: false, error: 'MAILCHIMP_API_KEY is not set' })
+  })
+
+  it('treats an empty API key like a missing one', async () => {
+    const { ports } = createShadowGatePorts(makeDeps({ mailchimp: makeMailchimpPort({ apiKey: () => '' }) }))
+    expect(await ports.member('lead@example.org')).toEqual({ ok: false, error: 'MAILCHIMP_API_KEY is not set' })
   })
 
   it('turns a thrown error into ok:false', async () => {
@@ -331,17 +465,6 @@ describe('member port', () => {
 
 // ── evidence ──────────────────────────────────────────────────────────────────────────────────────────
 
-function item(overrides: Partial<OutboundItem>): OutboundItem {
-  return {
-    source: 'sent_items',
-    id: 'x',
-    at: '2026-10-30T10:00:00.000Z',
-    subject: 'hi',
-    address: 'lead@example.org',
-    ...overrides,
-  }
-}
-
 describe('evidence port', () => {
   it('returns the items from evaluate as given', async () => {
     const items: OutboundItem[] = [
@@ -355,23 +478,20 @@ describe('evidence port', () => {
     if (read.ok) expect(read.items).toEqual(items)
   })
 
-  it('passes the unreachable cap, addresses, contactId and now to evaluate', async () => {
-    const evaluate = vi.fn(
-      async (_args: {
-        cap: { max: number; windowDays: number }
-        now: Date
-        addresses: readonly string[]
-        contactId: string
-      }): Promise<FrequencyVerdict> => ({ ok: true, count: 0, items: [] }),
-    )
-    const { ports } = createShadowGatePorts(makeDeps({ evaluate: evaluate as never }))
-    await ports.evidence(CONTACT)
+  it('passes the unreachable cap, the window, addresses, contactId, now and a time budget to evaluate', async () => {
+    const evaluate = vi.fn(async (_args: EvaluateArgs): Promise<FrequencyVerdict> => ({ ok: true, count: 0, items: [] }))
+    const { ports } = createShadowGatePorts(makeDeps({ evaluate }))
+    // every address of the contact is asked about, not only the primary one
+    const contact: ShadowContact = { ...CONTACT, addresses: ['lead@example.org', 'second@example.org'] }
+    await ports.evidence(contact)
     expect(evaluate).toHaveBeenCalledTimes(1)
     const arg = evaluate.mock.calls[0][0]
     expect(arg.cap).toEqual({ max: Number.MAX_SAFE_INTEGER, windowDays: RULE.frequency_cap.window_days })
-    expect(arg.addresses).toEqual(CONTACT.addresses)
+    expect(arg.addresses).toEqual(['lead@example.org', 'second@example.org'])
     expect(arg.contactId).toBe(CONTACT.contactId)
     expect(arg.now).toBe(NOW)
+    // 4 contacts per chunk step x this budget must stay well inside the host's ~2 minute request limit.
+    expect(arg.budgetMs).toBe(15_000)
   })
 
   it('treats frequency_cap as ok:true (items still returned)', async () => {
@@ -393,11 +513,7 @@ describe('evidence port', () => {
 
   it('maps frequency_unverifiable to ok:false', async () => {
     const evaluate = vi.fn(
-      async (): Promise<FrequencyVerdict> => ({
-        ok: false,
-        reason: 'frequency_unverifiable',
-        error: 'graph down',
-      }),
+      async (): Promise<FrequencyVerdict> => ({ ok: false, reason: 'frequency_unverifiable', error: 'graph down' }),
     )
     const { ports } = createShadowGatePorts(makeDeps({ evaluate }))
     expect(await ports.evidence(CONTACT)).toEqual({ ok: false, error: 'graph down' })
@@ -411,63 +527,10 @@ describe('evidence port', () => {
     expect(await ports.evidence(CONTACT)).toEqual({ ok: false, error: 'kaboom' })
   })
 
-  it('classifies legacy batch items by campaign id', async () => {
-    const batchCampaignId = 'camp-batch'
-    const otherCampaignId = 'camp-other'
-    const items: OutboundItem[] = [
-      item({ source: 'mailchimp', id: `mc:${batchCampaignId}:lead@example.org` }),
-      item({ source: 'mailchimp', id: `mc:${otherCampaignId}:lead@example.org` }),
-      item({ source: 'sent_items', id: `mc:${batchCampaignId}:lead@example.org` }),
-    ]
-    // evaluate calls the wrapped listSentCampaigns so the batch campaign is remembered
-    const evaluate = vi.fn(
-      async (args: {
-        sources: FrequencySources
-      }): Promise<FrequencyVerdict> => {
-        await args.sources.mailchimp(['lead@example.org'], '2026-10-26T00:00:00.000Z')
-        return { ok: true, count: items.length, items }
-      },
-    )
-    const listSentCampaigns = vi.fn(
-      async (): Promise<MailchimpCampaign[]> => [
-        {
-          id: batchCampaignId,
-          title: 'Welcome Batch 2026-10-15',
-          subject: 'welcome',
-          sentAt: '2026-10-15T09:00:00.000Z',
-          emailsSent: 100,
-          opens: 0,
-          uniqueOpens: 0,
-          clicks: 0,
-          openRate: 0,
-          clickRate: 0,
-        },
-        {
-          id: otherCampaignId,
-          title: 'Newsletter',
-          subject: 'news',
-          sentAt: '2026-10-20T09:00:00.000Z',
-          emailsSent: 200,
-          opens: 0,
-          uniqueOpens: 0,
-          clicks: 0,
-          openRate: 0,
-          clickRate: 0,
-        },
-      ],
-    )
-    const { ports } = createShadowGatePorts(
-      makeDeps({
-        evaluate: evaluate as never,
-        mailchimp: makeMailchimpPort({ listSentCampaigns }),
-      }),
-    )
+  it('with no old-batch campaign in sight, the contact is not welcomed and the batch is not seen', async () => {
+    const { ports } = createShadowGatePorts(makeDeps())
     const read = await ports.evidence(CONTACT)
-    expect(read.ok).toBe(true)
-    if (!read.ok) return
-    expect(read.isLegacyBatchItem(items[0])).toBe(true)
-    expect(read.isLegacyBatchItem(items[1])).toBe(false)
-    expect(read.isLegacyBatchItem(items[2])).toBe(false)
+    expect(read).toEqual({ ok: true, items: [], legacy: { welcomed: false, batchSeen: false, campaignIds: [] } })
   })
 
   it('memoises listSentCampaigns and retries after a rejection', async () => {
@@ -477,185 +540,293 @@ describe('evidence port', () => {
       if (calls === 1) throw new Error('transient')
       return []
     })
-    // Like the real evaluateFrequency: a failing source makes the whole verdict unverifiable.
-    const evaluate = vi.fn(
-      async (args: { sources: FrequencySources }): Promise<FrequencyVerdict> => {
-        const res = await args.sources.mailchimp(['lead@example.org'], '2026-10-26T00:00:00.000Z')
-        if (!res.ok) return { ok: false, reason: 'frequency_unverifiable', error: res.error }
-        return { ok: true, count: 0, items: [] }
-      },
-    )
     const { ports } = createShadowGatePorts(
-      makeDeps({
-        evaluate: evaluate as never,
-        mailchimp: makeMailchimpPort({ listSentCampaigns }),
-      }),
+      makeDeps({ evaluate: mailchimpEvaluate(), mailchimp: makeMailchimpPort({ listSentCampaigns }) }),
     )
     // first call rejects
     await expect(ports.evidence(CONTACT)).resolves.toEqual({ ok: false, error: 'transient' })
     // second call retries and succeeds
-    await expect(ports.evidence(CONTACT)).resolves.toEqual({
-      ok: true,
-      items: [],
-      isLegacyBatchItem: expect.any(Function),
-    })
+    await expect(ports.evidence(CONTACT)).resolves.toMatchObject({ ok: true, items: [] })
     // third call is memoised
     await ports.evidence(CONTACT)
     expect(listSentCampaigns).toHaveBeenCalledTimes(2)
   })
-
-  it('legacyBatches lists only title-prefix campaigns, sorted by sentAt then id', async () => {
-    const listSentCampaigns = vi.fn(
-      async (): Promise<MailchimpCampaign[]> => [
-        {
-          id: 'b-late',
-          title: 'Welcome Batch 2026-10-20',
-          subject: 'w',
-          sentAt: '2026-10-20T09:00:00.000Z',
-          emailsSent: 10,
-          opens: 0,
-          uniqueOpens: 0,
-          clicks: 0,
-          openRate: 0,
-          clickRate: 0,
-        },
-        {
-          id: 'b-null',
-          title: 'Welcome Batch (unsent)',
-          subject: 'w',
-          sentAt: null,
-          emailsSent: 0,
-          opens: 0,
-          uniqueOpens: 0,
-          clicks: 0,
-          openRate: 0,
-          clickRate: 0,
-        },
-        {
-          id: 'b-early',
-          title: 'Welcome Batch 2026-10-10',
-          subject: 'w',
-          sentAt: '2026-10-10T09:00:00.000Z',
-          emailsSent: 5,
-          opens: 0,
-          uniqueOpens: 0,
-          clicks: 0,
-          openRate: 0,
-          clickRate: 0,
-        },
-        {
-          id: 'n-1',
-          title: 'Newsletter',
-          subject: 'n',
-          sentAt: '2026-10-01T09:00:00.000Z',
-          emailsSent: 1,
-          opens: 0,
-          uniqueOpens: 0,
-          clicks: 0,
-          openRate: 0,
-          clickRate: 0,
-        },
-      ],
-    )
-    const evaluate = vi.fn(
-      async (args: { sources: FrequencySources }): Promise<FrequencyVerdict> => {
-        await args.sources.mailchimp(['lead@example.org'], '2026-10-26T00:00:00.000Z')
-        return { ok: true, count: 0, items: [] }
-      },
-    )
-    const { ports, legacyBatches } = createShadowGatePorts(
-      makeDeps({
-        evaluate: evaluate as never,
-        mailchimp: makeMailchimpPort({ listSentCampaigns }),
-      }),
-    )
-    await ports.evidence(CONTACT)
-    expect(legacyBatches()).toEqual([
-      {
-        campaignId: 'b-early',
-        title: 'Welcome Batch 2026-10-10',
-        sentAt: '2026-10-10T09:00:00.000Z',
-        emailsSent: 5,
-      },
-      {
-        campaignId: 'b-late',
-        title: 'Welcome Batch 2026-10-20',
-        sentAt: '2026-10-20T09:00:00.000Z',
-        emailsSent: 10,
-      },
-      {
-        campaignId: 'b-null',
-        title: 'Welcome Batch (unsent)',
-        sentAt: null,
-        emailsSent: 0,
-      },
-    ])
-  })
 })
 
-describe('added after the mutation probe', () => {
-  it('does not treat a mailchimp item without the mc: id prefix as a batch item', async () => {
-    const items: OutboundItem[] = [item({ source: 'mailchimp', id: 'foocamp-batch:lead@example.org' })]
-    const evaluate = vi.fn(async (args: { sources: FrequencySources }): Promise<FrequencyVerdict> => {
-      await args.sources.mailchimp(['lead@example.org'], '2026-10-26T00:00:00.000Z')
-      return { ok: true, count: 1, items }
-    })
-    const listSentCampaigns = vi.fn(
-      async (): Promise<MailchimpCampaign[]> => [
-        {
-          id: 'camp-batch',
-          title: 'Welcome Batch 2026-10-15',
-          subject: 's',
-          sentAt: '2026-10-15T09:00:00.000Z',
-          emailsSent: 1,
-          opens: 0,
-          uniqueOpens: 0,
-          clicks: 0,
-          openRate: 0,
-          clickRate: 0,
-        },
-      ],
-    )
+describe('the old daily batch', () => {
+  const BATCH = campaign({ id: 'camp-batch', title: 'Welcome Batch 2026-11-02', sentAt: '2026-11-02T06:00:00.000Z' })
+  const OTHER = campaign({ id: 'camp-other', title: 'Newsletter', sentAt: '2026-11-01T06:00:00.000Z' })
+
+  it('takes the batch campaigns out of what the e-mail evidence sees, before anything is counted', async () => {
+    const getCampaignRecipientStatus = vi.fn(async () => 'sent' as const)
     const { ports } = createShadowGatePorts(
-      makeDeps({ evaluate: evaluate as never, mailchimp: makeMailchimpPort({ listSentCampaigns }) }),
+      makeDeps({
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({ listSentCampaigns: async () => [BATCH, OTHER], getCampaignRecipientStatus }),
+      }),
     )
     const read = await ports.evidence(CONTACT)
     expect(read.ok).toBe(true)
     if (!read.ok) return
-    expect(read.isLegacyBatchItem(items[0])).toBe(false)
+    expect(read.items.map((i) => i.id)).toEqual(['mc:camp-other:lead@example.org'])
   })
 
-  it('treats an empty API key like a missing one', async () => {
-    const { ports } = createShadowGatePorts(
-      makeDeps({ mailchimp: makeMailchimpPort({ apiKey: () => '' }) }),
+  it('reads whether the batch e-mailed the contact itself, from the batch campaigns', async () => {
+    const getCampaignRecipientStatus = vi.fn(async (_key: string, campaignId: string) =>
+      campaignId === 'camp-batch' ? ('sent' as const) : ('not_recipient' as const),
     )
-    expect(await ports.member('lead@example.org')).toEqual({
-      ok: false,
-      error: 'MAILCHIMP_API_KEY is not set',
-    })
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({ listSentCampaigns: async () => [BATCH, OTHER], getCampaignRecipientStatus }),
+      }),
+    )
+    const read = await ports.evidence(CONTACT)
+    expect(read).toMatchObject({ ok: true, legacy: { welcomed: true, batchSeen: true, campaignIds: ['camp-batch'] } })
+    expect(getCampaignRecipientStatus).toHaveBeenCalledWith('test-key', 'camp-batch', 'lead@example.org')
+  })
+
+  it.each([
+    ['sent', true],
+    ['soft', true],
+    ['hard', false],
+    ['not_recipient', false],
+  ] as const)('a recipient status of %s means welcomed=%s', async (status, welcomed) => {
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({
+          listSentCampaigns: async () => [BATCH],
+          getCampaignRecipientStatus: async () => status,
+        }),
+      }),
+    )
+    const read = await ports.evidence(CONTACT)
+    expect(read).toMatchObject({ ok: true, legacy: { welcomed, batchSeen: true } })
+  })
+
+  it('checks every address of the contact and names the campaign once', async () => {
+    const contact: ShadowContact = { ...CONTACT, addresses: ['a@example.org', 'b@example.org'] }
+    const getCampaignRecipientStatus = vi.fn(async (_key: string, _campaign: string, email: string) =>
+      email === 'b@example.org' ? ('sent' as const) : ('not_recipient' as const),
+    )
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({ listSentCampaigns: async () => [BATCH], getCampaignRecipientStatus }),
+      }),
+    )
+    const read = await ports.evidence(contact)
+    expect(read).toMatchObject({ ok: true, legacy: { welcomed: true, campaignIds: ['camp-batch'] } })
+  })
+
+  it('names the campaign once even when the batch mailed several of the contact addresses', async () => {
+    const contact: ShadowContact = { ...CONTACT, addresses: ['a@example.org', 'b@example.org'] }
+    const getCampaignRecipientStatus = vi.fn(async () => 'sent' as const)
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({ listSentCampaigns: async () => [BATCH], getCampaignRecipientStatus }),
+      }),
+    )
+    const read = await ports.evidence(contact)
+    expect(read).toMatchObject({ ok: true, legacy: { welcomed: true, campaignIds: ['camp-batch'] } })
+    // once a campaign is known to have mailed the contact, its other addresses are not asked about
+    expect(getCampaignRecipientStatus.mock.calls.filter((call) => (call as unknown[])[1] === 'camp-batch')).toHaveLength(1)
+  })
+
+  it('needs no API key when there is no batch campaign to check', async () => {
+    const { ports } = createShadowGatePorts(
+      makeDeps({ mailchimp: makeMailchimpPort({ apiKey: () => undefined }) }),
+    )
+    expect(await ports.evidence(CONTACT)).toMatchObject({ ok: true, legacy: { welcomed: false } })
+  })
+
+  it('asks nothing about a contact without any address, key or not', async () => {
+    const getCampaignRecipientStatus = vi.fn(async () => 'sent' as const)
+    let keyCalls = 0
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({
+          apiKey: () => {
+            keyCalls += 1
+            return keyCalls === 1 ? 'test-key' : undefined
+          },
+          listSentCampaigns: async () => [BATCH],
+          getCampaignRecipientStatus,
+        }),
+      }),
+    )
+    const read = await ports.evidence({ ...CONTACT, primaryEmail: null, addresses: [] })
+    expect(read).toMatchObject({ ok: true, legacy: { welcomed: false, batchSeen: true } })
+    expect(getCampaignRecipientStatus).not.toHaveBeenCalled()
+  })
+
+  it('ignores a batch campaign that went out before the lead came in', async () => {
+    const early = campaign({ id: 'camp-early', title: 'Welcome Batch 2026-10-30', sentAt: '2026-10-31T06:00:00.000Z' })
+    const getCampaignRecipientStatus = vi.fn(async () => 'sent' as const)
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({ listSentCampaigns: async () => [early], getCampaignRecipientStatus }),
+      }),
+    )
+    const read = await ports.evidence(CONTACT)
+    expect(read).toMatchObject({ ok: true, legacy: { welcomed: false, campaignIds: [] } })
+    expect(getCampaignRecipientStatus).not.toHaveBeenCalled()
+  })
+
+  it('allows ten minutes of clock difference before the lead time, not a millisecond more', async () => {
+    const calls: string[] = []
+    const status = async (_key: string, campaignId: string) => {
+      calls.push(campaignId)
+      return 'not_recipient' as const
+    }
+    const onTime = campaign({ id: 'camp-edge', title: 'Welcome Batch edge', sentAt: '2026-11-01T09:50:00.000Z' })
+    const tooEarly = campaign({ id: 'camp-too-early', title: 'Welcome Batch early', sentAt: '2026-11-01T09:49:59.999Z' })
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({ listSentCampaigns: async () => [onTime, tooEarly], getCampaignRecipientStatus: status }),
+      }),
+    )
+    await ports.evidence(CONTACT)
+    expect(calls).toEqual(['camp-edge'])
+  })
+
+  it('"seen recently" means a batch campaign sent within the last 20 hours, to the millisecond', async () => {
+    async function batchSeenFor(sentAt: string): Promise<boolean | undefined> {
+      const { ports } = createShadowGatePorts(
+        makeDeps({
+          evaluate: mailchimpEvaluate(),
+          mailchimp: makeMailchimpPort({
+            listSentCampaigns: async () => [campaign({ id: 'camp-t', title: 'Welcome Batch t', sentAt })],
+          }),
+        }),
+      )
+      const read = await ports.evidence(CONTACT)
+      return read.ok ? read.legacy.batchSeen : undefined
+    }
+    expect(await batchSeenFor('2026-11-01T12:00:00.000Z')).toBe(true) // exactly 20 h before NOW
+    expect(await batchSeenFor('2026-11-01T11:59:59.999Z')).toBe(false)
+    expect(await batchSeenFor('2026-11-02T08:00:00.000Z')).toBe(true) // sent at this very moment
+    expect(await batchSeenFor('2026-11-02T08:00:00.001Z')).toBe(false) // dated in the future: not trusted
+  })
+
+  it('does not trip over a campaign with an unreadable send time', async () => {
+    const odd = campaign({ id: 'camp-odd', title: 'Welcome Batch odd', sentAt: 'not-a-date' })
+    const none = campaign({ id: 'camp-none', title: 'Welcome Batch none', sentAt: null })
+    const getCampaignRecipientStatus = vi.fn(async () => 'sent' as const)
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({ listSentCampaigns: async () => [odd, none], getCampaignRecipientStatus }),
+      }),
+    )
+    const read = await ports.evidence(CONTACT)
+    expect(read).toMatchObject({ ok: true, legacy: { welcomed: false, batchSeen: false } })
+    expect(getCampaignRecipientStatus).not.toHaveBeenCalled()
+  })
+
+  it('a campaign whose title merely CONTAINS the prefix is not the batch', async () => {
+    const lookalike = campaign({ id: 'camp-like', title: 'Our Welcome Batch story', sentAt: '2026-11-02T06:00:00.000Z' })
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({
+          listSentCampaigns: async () => [lookalike],
+          getCampaignRecipientStatus: async () => 'sent',
+        }),
+      }),
+    )
+    const read = await ports.evidence(CONTACT)
+    expect(read).toMatchObject({ ok: true, legacy: { welcomed: false, batchSeen: false } })
+    if (read.ok) expect(read.items.map((i) => i.id)).toEqual(['mc:camp-like:lead@example.org'])
+  })
+
+  it('fails the read (does not guess) when the batch report cannot be read', async () => {
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({
+          listSentCampaigns: async () => [BATCH],
+          getCampaignRecipientStatus: async (_key, campaignId) => {
+            if (campaignId === 'camp-batch') throw new Error('mailchimp 503')
+            return 'not_recipient'
+          },
+        }),
+      }),
+    )
+    expect(await ports.evidence(CONTACT)).toEqual({ ok: false, error: 'mailchimp 503' })
+  })
+
+  it('fails the read when there is a batch to check but no API key', async () => {
+    let keyCalls = 0
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        // the evidence source reads the key first (it must succeed to list the campaigns); the batch check reads it again
+        evaluate: mailchimpEvaluate(),
+        mailchimp: makeMailchimpPort({
+          apiKey: () => {
+            keyCalls += 1
+            return keyCalls === 1 ? 'test-key' : undefined
+          },
+          listSentCampaigns: async () => [BATCH],
+        }),
+      }),
+    )
+    expect(await ports.evidence(CONTACT)).toEqual({ ok: false, error: 'MAILCHIMP_API_KEY is not set' })
+  })
+
+  it('legacyBatches lists only title-prefix campaigns, sorted by sentAt then id, nulls last', async () => {
+    const listSentCampaigns = vi.fn(async (): Promise<MailchimpCampaign[]> => [
+      campaign({ id: 'b-late', title: 'Welcome Batch 2026-10-20', sentAt: '2026-10-20T09:00:00.000Z', emailsSent: 10 }),
+      campaign({ id: 'b-null', title: 'Welcome Batch (unsent)', sentAt: null, emailsSent: 0 }),
+      campaign({ id: 'b-early', title: 'Welcome Batch 2026-10-10', sentAt: '2026-10-10T09:00:00.000Z', emailsSent: 5 }),
+      campaign({ id: 'b-twin', title: 'Welcome Batch 2026-10-10 b', sentAt: '2026-10-10T09:00:00.000Z', emailsSent: 6 }),
+      campaign({ id: 'n-1', title: 'Newsletter', sentAt: '2026-10-01T09:00:00.000Z', emailsSent: 1 }),
+    ])
+    const { ports, legacyBatches } = createShadowGatePorts(
+      makeDeps({ evaluate: mailchimpEvaluate(), mailchimp: makeMailchimpPort({ listSentCampaigns }) }),
+    )
+    await ports.evidence(CONTACT)
+    expect(legacyBatches()).toEqual([
+      { campaignId: 'b-early', title: 'Welcome Batch 2026-10-10', sentAt: '2026-10-10T09:00:00.000Z', emailsSent: 5 },
+      { campaignId: 'b-twin', title: 'Welcome Batch 2026-10-10 b', sentAt: '2026-10-10T09:00:00.000Z', emailsSent: 6 },
+      { campaignId: 'b-late', title: 'Welcome Batch 2026-10-20', sentAt: '2026-10-20T09:00:00.000Z', emailsSent: 10 },
+      { campaignId: 'b-null', title: 'Welcome Batch (unsent)', sentAt: null, emailsSent: 0 },
+    ])
   })
 })
 
+// ── the mailbox ───────────────────────────────────────────────────────────────────────────────────────
+
 describe('mailbox pages are read once per ports object', () => {
-  function sentItemsEvaluate() {
-    // Like the real evaluateFrequency: it asks the sent-items source of every contact with the same window.
-    return vi.fn(async (args: { sources: FrequencySources; addresses: readonly string[] }): Promise<FrequencyVerdict> => {
-      const res = await args.sources.sentItems(args.addresses, '2026-10-26T00:00:00.000Z')
-      if (!res.ok) return { ok: false, reason: 'frequency_unverifiable', error: res.error }
-      return { ok: true, count: res.items.length, items: res.items }
-    })
-  }
   const page = { ok: true as const, json: { value: [] } }
-  const boxes = async () => [{ connectionId: 'conn-1', account: 'sales@example.com' }]
+  const boxes = async () => [{ connectionId: 'conn-1', account: 'sales@example.org' }]
 
   it('reads the same page once for two contacts', async () => {
     const graphGetPage = vi.fn(async () => page)
     const { ports } = createShadowGatePorts(
-      makeDeps({ evaluate: sentItemsEvaluate() as never, listActiveMailboxes: boxes, graphGetPage }),
+      makeDeps({ evaluate: sentItemsEvaluate(), listActiveMailboxes: boxes, graphGetPage }),
     )
     expect((await ports.evidence(CONTACT)).ok).toBe(true)
     expect((await ports.evidence({ ...CONTACT, contactId: 'c-2' })).ok).toBe(true)
     expect(graphGetPage).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the pages of two mailboxes apart', async () => {
+    const graphGetPage = vi.fn(async (_connectionId: string, _path: string) => page)
+    const twoBoxes = async () => [
+      { connectionId: 'conn-1', account: 'sales@example.org' },
+      { connectionId: 'conn-2', account: 'other@example.org' },
+    ]
+    const { ports } = createShadowGatePorts(
+      makeDeps({ evaluate: sentItemsEvaluate(), listActiveMailboxes: twoBoxes, graphGetPage }),
+    )
+    expect((await ports.evidence(CONTACT)).ok).toBe(true)
+    expect(graphGetPage.mock.calls.map((call) => call[0]).sort()).toEqual(['conn-1', 'conn-2'])
   })
 
   it('does not keep a failed read: the next contact tries the page again', async () => {
@@ -664,7 +835,7 @@ describe('mailbox pages are read once per ports object', () => {
       .mockResolvedValueOnce({ ok: false as const, error: 'graph down' })
       .mockResolvedValue(page)
     const { ports } = createShadowGatePorts(
-      makeDeps({ evaluate: sentItemsEvaluate() as never, listActiveMailboxes: boxes, graphGetPage }),
+      makeDeps({ evaluate: sentItemsEvaluate(), listActiveMailboxes: boxes, graphGetPage }),
     )
     expect(await ports.evidence(CONTACT)).toMatchObject({ ok: false })
     expect((await ports.evidence({ ...CONTACT, contactId: 'c-2' })).ok).toBe(true)
@@ -674,10 +845,43 @@ describe('mailbox pages are read once per ports object', () => {
   it('does not keep a rejected read either', async () => {
     const graphGetPage = vi.fn().mockRejectedValueOnce(new Error('network')).mockResolvedValue(page)
     const { ports } = createShadowGatePorts(
-      makeDeps({ evaluate: sentItemsEvaluate() as never, listActiveMailboxes: boxes, graphGetPage }),
+      makeDeps({ evaluate: sentItemsEvaluate(), listActiveMailboxes: boxes, graphGetPage }),
     )
     expect(await ports.evidence(CONTACT)).toMatchObject({ ok: false })
     expect((await ports.evidence({ ...CONTACT, contactId: 'c-2' })).ok).toBe(true)
     expect(graphGetPage).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('the required mailbox must still be connected when the sent items are read', () => {
+  const page = { ok: true as const, json: { value: [] } }
+
+  it('fails the read (it does not read "less") when a required mailbox dropped out', async () => {
+    const graphGetPage = vi.fn(async () => page)
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: sentItemsEvaluate(),
+        listActiveMailboxes: async () => [{ connectionId: 'conn-9', account: 'someone-else@example.org' }],
+        graphGetPage,
+      }),
+    )
+    const read = await ports.evidence(CONTACT)
+    expect(read.ok).toBe(false)
+    if (!read.ok) {
+      expect(read.error).toContain('required mailbox')
+      expect(read.error).not.toContain('sales@example.org') // no mailbox address travels into plans and logs
+    }
+    expect(graphGetPage).not.toHaveBeenCalled()
+  })
+
+  it('compares the mailbox names ignoring case and spaces', async () => {
+    const { ports } = createShadowGatePorts(
+      makeDeps({
+        evaluate: sentItemsEvaluate(),
+        listActiveMailboxes: async () => [{ connectionId: 'conn-1', account: ' SALES@Example.org ' }],
+        graphGetPage: async () => page,
+      }),
+    )
+    expect((await ports.evidence(CONTACT)).ok).toBe(true)
   })
 })

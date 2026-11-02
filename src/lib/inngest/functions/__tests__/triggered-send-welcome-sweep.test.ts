@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { cronRunIdFromInngestRun } from '@/lib/cron/run-logger'
+import { graphGetPage } from '@/lib/microsoft/mail-send-new-prod'
+import { createShadowGatePorts } from '@/lib/messaging/triggered-send/shadow-ports-prod'
+import type { TriggeredSendRule } from '@/lib/messaging/triggered-send/rule'
 import type { ChunkResult, PrepareResult, SweepPlan, SweepReceipt, SweepStatus } from '@/lib/messaging/triggered-send/types'
 import {
   TRIGGERED_SEND_DISPATCH_ID,
@@ -8,6 +11,7 @@ import {
   TRIGGERED_SEND_RETRY_CRON,
   TRIGGERED_SEND_SWEEP_ID,
   TRIGGERED_SEND_SWEEP_JOB,
+  createProdSweepDeps,
   handleTriggeredSendFailure,
   runDispatch,
   runSweepOrder,
@@ -18,6 +22,15 @@ import {
   type StepTools,
   type SweepRunDeps,
 } from '../triggered-send-welcome-sweep'
+
+// The production wiring (createProdSweepDeps) is checked against these two doubles; no other test here touches them.
+vi.mock('@/lib/microsoft/mail-send-new-prod', () => ({
+  createMailNewStore: vi.fn(() => ({ listActiveMailboxes: vi.fn(async () => []) })),
+  graphGetPage: vi.fn(async () => ({ ok: true, json: {} })),
+}))
+vi.mock('@/lib/messaging/triggered-send/shadow-ports-prod', () => ({
+  createShadowGatePorts: vi.fn(() => ({ ports: {}, legacyBatches: () => [] })),
+}))
 
 const CLIENT_A = '11111111-2222-3333-4444-555555555555'
 const CLIENT_B = '66666666-7777-8888-9999-aaaaaaaaaaaa'
@@ -72,6 +85,7 @@ function receipt(overrides: Partial<SweepReceipt> = {}): SweepReceipt {
     to_decide: 5,
     ignored: 1,
     decided: 4,
+    already_decided: 0,
     deferred: 1,
     inserted: 4,
     would_send: 2,
@@ -176,7 +190,7 @@ describe('runSweepOrder', () => {
 
   function chunkResult(overrides: Partial<ChunkResult> = {}): ChunkResult {
     return {
-      decided: 0, deferred: 0, inserted: 0, would_send: 0, skipped_by_reason: {}, deferred_by_reason: {},
+      decided: 0, already_decided: 0, deferred: 0, inserted: 0, would_send: 0, skipped_by_reason: {}, deferred_by_reason: {},
       legacy_batches: [], error: null, error_status: null, ...overrides,
     }
   }
@@ -302,6 +316,11 @@ describe('sweepFinishOpts', () => {
     expect(opts.summary).toEqual(receipt({ status: 'swept', deferred: 2, to_decide: 5, decided: 3 }))
   })
 
+  it('counts contacts that already held a row as completed, so processed = completed + failed', () => {
+    const opts = sweepFinishOpts(receipt({ status: 'swept', to_decide: 6, decided: 3, already_decided: 2, deferred: 1 }))
+    expect(opts).toMatchObject({ processed: 6, completed: 5, failed: 1 })
+  })
+
   it('treats no_open_proposal as a normal completion', () => {
     const opts = sweepFinishOpts(receipt({ status: 'no_open_proposal' }))
     expect(opts.error).toBeUndefined()
@@ -366,5 +385,29 @@ describe('cron registry entries of the shadow run', () => {
     expect(CRON_REGISTRY.find((e) => e.service === 'inngest:cloud-triggered-send-welcome-sweep')?.jobName).toBe(
       TRIGGERED_SEND_SWEEP_JOB,
     )
+  })
+})
+
+describe('createProdSweepDeps', () => {
+  const RULE: TriggeredSendRule = {
+    gate_contract_version: 1,
+    audience: { sources: ['meta_lead_form'], max_age_days: 3, min_age: 'previous_local_day' },
+    schedule: { timezone: 'Pacific/Auckland' },
+    frequency_cap: { max: 2, window_days: 7 },
+    consent: { accepted_bases: ['basis'] },
+    legacy: { mailchimp_campaign_title_prefix: 'legacy_' },
+    human_mail: { required_mailboxes: ['sales@example.org'] },
+    recipient_allowlist: null,
+  }
+
+  // A refresh that fails while the rehearsal reads the sales mailbox must not flip that connection to "error":
+  // that would stop the sales team's own mail sync until somebody reconnects it.
+  it('reads the mailbox without ever marking the connection as errored', async () => {
+    createProdSweepDeps().createPorts({ clientId: CLIENT_A, rule: RULE, now: NOW })
+    const given = vi.mocked(createShadowGatePorts).mock.calls[0][0]
+    await given.graphGetPage('conn-1', '/me/mailFolders/sentitems/messages')
+    expect(vi.mocked(graphGetPage)).toHaveBeenCalledWith('conn-1', '/me/mailFolders/sentitems/messages', {
+      markErrorOnFailure: false,
+    })
   })
 })

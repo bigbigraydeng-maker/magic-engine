@@ -78,6 +78,20 @@ describe('triggered-send-events', () => {
       expect(parsed.ok).toBe(false)
     })
 
+    // The worker's concurrency key is the raw client_id text: an upper-case spelling would be a second key.
+    it('rejects an upper-case uuid but accepts the same uuid in lower case', () => {
+      const lower = 'abcdef12-3456-7890-abcd-ef1234567890'
+      expect(parseSweepRequest({ client_id: lower.toUpperCase(), trigger_key: 'welcome', dry_run: true })).toEqual({
+        ok: false,
+        reason: 'client_id is not a lower-case uuid',
+      })
+      expect(parseSweepRequest({ client_id: lower, trigger_key: 'welcome', dry_run: true })).toEqual({
+        ok: true,
+        clientId: lower,
+        dryRun: true,
+      })
+    })
+
     it('rejects a non-boolean dry_run', () => {
       const parsed = parseSweepRequest({ client_id: CLIENT, trigger_key: 'welcome', dry_run: 'yes' })
       expect(parsed.ok).toBe(false)

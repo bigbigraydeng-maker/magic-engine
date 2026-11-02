@@ -75,7 +75,9 @@ export type ParsedSweepRequest =
   | { ok: true; clientId: string; dryRun: boolean }
   | { ok: false; reason: string }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+// Lower-case only: the worker's per-client concurrency key is the raw client_id text, so "ABC..." and "abc..." would
+// be two different keys and two sweeps of one client could run side by side.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** Strict parse of an event payload. Never throws. A manual event (no dry_run key) is dry by default. */
 export function parseSweepRequest(data: unknown): ParsedSweepRequest {
@@ -85,7 +87,7 @@ export function parseSweepRequest(data: unknown): ParsedSweepRequest {
   const record = data as Record<string, unknown>
   const clientId = record.client_id
   if (typeof clientId !== 'string' || !UUID_RE.test(clientId)) {
-    return { ok: false, reason: 'client_id is not a uuid' }
+    return { ok: false, reason: 'client_id is not a lower-case uuid' }
   }
   if (record.trigger_key !== 'welcome') {
     return { ok: false, reason: 'trigger_key is not welcome' }

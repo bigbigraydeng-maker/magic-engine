@@ -9,7 +9,10 @@ import type { OutboundItem } from '@/lib/crm/email-templates/gates/types'
 /** A lead contact as the shadow run sees it. */
 export interface ShadowContact {
   contactId: string
-  /** ISO timestamp of contacts.created_at. */
+  /**
+   * ISO timestamp of when the LEAD came in: the earlier of the contact's creation and its first lead-form touchpoint.
+   * (A lead that a sync catches up on weeks later is created today but is old: its age must not look new.)
+   */
   createdAt: string
   /** Lower-cased, trimmed; null when the contact has no usable primary e-mail. */
   primaryEmail: string | null
@@ -33,14 +36,24 @@ export type MemberRead =
   | { ok: true; state: 'active' | 'suppressed' | 'not_in_audience' | 'not_applicable' }
   | { ok: false; error: string }
 
+/** What the old daily welcome batch did for one contact, read from its Mailchimp campaigns. */
+export interface LegacyEvidence {
+  /** The old batch e-mailed one of the contact's addresses. */
+  welcomed: boolean
+  /** The old batch has sent a campaign recently, so "not welcomed" can be trusted (it ran). */
+  batchSeen: boolean
+  /** Ids of the batch campaigns that welcomed the contact. Campaign ids only, no personal data. */
+  campaignIds: string[]
+}
+
 /**
- * Every e-mail we sent to the contact's addresses in the cap window, from the four frequency sources
+ * Every e-mail we sent to the contact's addresses in the evidence window, from the four frequency sources
  * (mailbox sent items, audit rows, outbound touchpoints, Mailchimp campaigns), de-duplicated.
- * `isLegacyBatchItem` tells which Mailchimp items belong to the old daily welcome batch (they are NOT counted
- * against the cap, because after the switch-over that batch no longer exists).
+ * The old batch's campaigns are NOT in `items` (they are taken out BEFORE de-duplication and counting, because after
+ * the switch-over that batch no longer exists); what the batch did is reported separately in `legacy`.
  */
 export type EvidenceRead =
-  | { ok: true; items: readonly OutboundItem[]; isLegacyBatchItem: (item: OutboundItem) => boolean }
+  | { ok: true; items: readonly OutboundItem[]; legacy: LegacyEvidence }
   | { ok: false; error: string }
 
 /** Everything the gates read. Read-only by construction: there is no write method on purpose. */
@@ -70,8 +83,12 @@ export type DeferReason = 'dnc_unverifiable' | 'consent_unreadable' | 'legacy_un
 export interface ShadowAnnotations {
   gate_contract_version: number
   would_send: boolean
-  /** The old batch welcomed this contact (from the Mailchimp campaigns). null = not known (stale / not read). */
+  /** The old batch welcomed this contact (from the Mailchimp campaigns). null = not known (stale). */
   legacy_welcomed: boolean | null
+  /** The old batch had sent a campaign recently when this was decided. false = "not welcomed" may only mean it was late or skipped. */
+  legacy_batch_seen: boolean | null
+  /** Ids of the old-batch campaigns that welcomed this contact (to reconcile with each campaign's own total). */
+  legacy_campaign_ids: string[] | null
   /** A human e-mail to this contact exists since the lead was created. null = not known. */
   sales_email: boolean | null
   /** Number of counted e-mails in the cap window (old batch excluded). null = not known. */
@@ -139,6 +156,8 @@ export interface SweepReceipt {
   /** Contacts looked at but not decided: too new, before the proposal, bad date, or already holding a shadow row. */
   ignored: number
   decided: number
+  /** Contacts that turned out to hold a shadow row already when their chunk ran (a retry, or another run was faster). */
+  already_decided: number
   deferred: number
   inserted: number
   would_send: number
@@ -182,6 +201,8 @@ export type PrepareResult = { kind: 'done'; receipt: SweepReceipt } | { kind: 'p
 /** What one chunk step did. Plain JSON, no personal data. */
 export interface ChunkResult {
   decided: number
+  /** Contacts in the chunk that already held a shadow row (not decided again; the stored row stays). */
+  already_decided: number
   deferred: number
   inserted: number
   would_send: number

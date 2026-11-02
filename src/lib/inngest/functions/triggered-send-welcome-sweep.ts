@@ -257,7 +257,8 @@ export function sweepFinishOpts(receipt: SweepReceipt): CronRunFinishOpts {
   const isNormal = receipt.status === 'swept' || receipt.status === 'no_open_proposal'
   const opts: CronRunFinishOpts = {
     processed: receipt.to_decide,
-    completed: receipt.decided,
+    // Contacts that are stored now: decided by this run, or already holding a row from an earlier attempt.
+    completed: receipt.decided + receipt.already_decided,
     failed: receipt.deferred,
     summary: { ...receipt },
   }
@@ -299,7 +300,9 @@ export function createProdSweepDeps(): SweepDeps {
         rule,
         now,
         listActiveMailboxes: store.listActiveMailboxes,
-        graphGetPage,
+        // Read-only means read-only: a failed token refresh must not flip the mailbox connection to "error"
+        // (that would stop the sales team's mail sync until someone reconnects it).
+        graphGetPage: (connectionId, pathOrUrl) => graphGetPage(connectionId, pathOrUrl, { markErrorOnFailure: false }),
       }),
     insertShadowRows: (rows) => insertShadowRows(supabaseAdmin, rows),
   }

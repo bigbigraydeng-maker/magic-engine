@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
 
 export const GATE_CONTRACT_VERSION = 1
-export const ALLOWED_AUDIENCE_SOURCES = ['meta_lead_form', 'crm_manual'] as const
+// Only sources whose lead-form touchpoints are known to exist. A source for hand-made test contacts is added with the
+// controlled-trial batch, once the exact name the CRM writes for them has been verified.
+export const ALLOWED_AUDIENCE_SOURCES = ['meta_lead_form'] as const
 
 export interface TriggeredSendRule {
   gate_contract_version: number
@@ -250,9 +252,10 @@ export function parseRule(input: unknown): RuleParseResult {
       allowlist = allowlistRaw.slice()
     }
 
-    // crm_manual requires a non-empty allowlist
-    if (sourcesRaw.includes('crm_manual') && allowlist === null) {
-      return fail("audience.sources 'crm_manual' requires a non-empty recipient_allowlist")
+    // The e-mail evidence window must reach back at least as far as a lead can be old, else a human e-mail sent
+    // before the window opens would be missed and the lead judged "nobody wrote yet".
+    if (windowDays < maxAgeDays) {
+      return fail('frequency_cap.window_days must be at least audience.max_age_days')
     }
 
     const rule: TriggeredSendRule = {

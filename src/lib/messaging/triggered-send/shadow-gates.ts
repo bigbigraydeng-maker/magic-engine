@@ -1,5 +1,6 @@
 import type { OutboundItem } from '@/lib/crm/email-templates/gates/types'
 import type { TriggeredSendRule } from './rule'
+import { localDay } from './candidates'
 import type {
   ConsentRead,
   DeferReason,
@@ -29,8 +30,6 @@ const SYSTEM_LOCAL_PARTS: ReadonlySet<string> = new Set([
   'notifications',
 ])
 
-const LEAD_DAY_RE = /^\d{4}-\d{2}-\d{2}$/
-
 export function isPlausibleEmail(email: string): boolean {
   if (typeof email !== 'string') return false
   if (email.length === 0 || email.length > MAX_EMAIL_LENGTH) return false
@@ -46,18 +45,7 @@ export function isSystemAddress(email: string): boolean {
 }
 
 function leadLocalDay(contact: ShadowContact, rule: TriggeredSendRule): string {
-  try {
-    const formatted = new Intl.DateTimeFormat('en-CA', {
-      timeZone: rule.schedule.timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).format(new Date(contact.createdAt))
-    if (!LEAD_DAY_RE.test(formatted)) return 'unknown'
-    return formatted
-  } catch {
-    return 'unknown'
-  }
+  return localDay(contact.createdAt, rule.schedule.timezone) ?? 'unknown'
 }
 
 export function staleDecision(args: { contact: ShadowContact; rule: TriggeredSendRule }): ShadowDecision {
@@ -66,6 +54,8 @@ export function staleDecision(args: { contact: ShadowContact; rule: TriggeredSen
     gate_contract_version: rule.gate_contract_version,
     would_send: false,
     legacy_welcomed: null,
+    legacy_batch_seen: null,
+    legacy_campaign_ids: null,
     sales_email: null,
     frequency_count: null,
     lead_local_day: leadLocalDay(contact, rule),
@@ -120,10 +110,11 @@ export async function decideShadow(args: {
     : Promise.resolve<Safe<MemberRead>>({ ok: true, state: 'not_applicable' })
   const evidencePromise: Promise<Safe<EvidenceRead>> = shouldReadEvidence
     ? safe(() => ports.evidence(contact))
-    : Promise.resolve<Safe<EvidenceRead>>({
+    : // No address at all: the old batch could not have mailed this contact and there is nothing to count.
+      Promise.resolve<Safe<EvidenceRead>>({
         ok: true,
         items: [],
-        isLegacyBatchItem: () => false,
+        legacy: { welcomed: false, batchSeen: true, campaignIds: [] },
       })
 
   const [consent, dnc, member, evidence] = await Promise.all([
@@ -148,8 +139,8 @@ export async function decideShadow(args: {
   }
 
   // STEP 3: derived facts.
-  const batchHit = evidence.items.some((item) => evidence.isLegacyBatchItem(item))
-  const counted = evidence.items.filter((item) => !evidence.isLegacyBatchItem(item))
+  // The old batch's campaigns are not among the items (taken out before counting), so every item counts.
+  const counted = evidence.items
   const createdAtMs = Date.parse(contact.createdAt)
   const salesEmail = counted.some((item) => isSalesEmailItem(item, createdAtMs))
   const frequencyCount = counted.length
@@ -186,9 +177,11 @@ export async function decideShadow(args: {
   const annotations: ShadowAnnotations = {
     gate_contract_version: rule.gate_contract_version,
     would_send: reason === null,
-    legacy_welcomed: shouldReadEvidence ? batchHit : null,
-    sales_email: shouldReadEvidence ? salesEmail : null,
-    frequency_count: shouldReadEvidence ? frequencyCount : null,
+    legacy_welcomed: evidence.legacy.welcomed,
+    legacy_batch_seen: evidence.legacy.batchSeen,
+    legacy_campaign_ids: [...evidence.legacy.campaignIds],
+    sales_email: salesEmail,
+    frequency_count: frequencyCount,
     lead_local_day: leadLocalDay(contact, rule),
   }
 

@@ -38,7 +38,7 @@ export interface SweepDeps {
   /** The audience members created since a time (the candidate window). */
   loadContacts(args: { clientId: string; sinceIso: string; sources: readonly string[] }): Promise<ContactsRead>
   /** Specific contacts again, inside a chunk step (so no e-mail address has to travel between steps). */
-  loadContactsByIds(args: { clientId: string; contactIds: readonly string[] }): Promise<ContactsRead>
+  loadContactsByIds(args: { clientId: string; contactIds: readonly string[]; sources: readonly string[] }): Promise<ContactsRead>
   findContactsWithShadowRows(clientId: string, contactIds: readonly string[]): Promise<ShadowRowsRead>
   checkMailboxes(clientId: string, required: readonly string[]): Promise<MailboxCheck>
   createPorts(args: { clientId: string; rule: TriggeredSendRule; now: Date }): {
@@ -62,6 +62,7 @@ function emptyReceipt(clientId: string, dryRun: boolean, createdAt: string): Swe
     to_decide: 0,
     ignored: 0,
     decided: 0,
+    already_decided: 0,
     deferred: 0,
     inserted: 0,
     would_send: 0,
@@ -251,6 +252,7 @@ export async function prepareSweep(args: { clientId: string; dryRun: boolean; de
 function emptyChunk(): ChunkResult {
   return {
     decided: 0,
+    already_decided: 0,
     deferred: 0,
     inserted: 0,
     would_send: 0,
@@ -263,8 +265,9 @@ function emptyChunk(): ChunkResult {
 }
 
 /** Everything in the chunk is set aside for a later run (nothing was decided). */
-function deferAll(contactIds: readonly string[], reason: string, error: string | null): ChunkResult {
+function deferAll(contactIds: readonly string[], reason: string, error: string | null, alreadyDecided = 0): ChunkResult {
   const result = emptyChunk()
+  result.already_decided = alreadyDecided
   result.deferred = contactIds.length
   if (contactIds.length > 0) bump(result.deferred_by_reason, reason, contactIds.length)
   if (error !== null) {
@@ -277,7 +280,8 @@ function deferAll(contactIds: readonly string[], reason: string, error: string |
 /**
  * Phase 2: decide a few contacts and write each shadow row the moment it is decided.
  * `kind` 'stale' needs no external read; 'candidates' runs the gates with freshly created ports.
- * Re-reads the rule and the contacts itself, so nothing personal travels between steps.
+ * Re-reads the rule, the contacts and which of them already hold a shadow row, so nothing personal travels between
+ * steps and a retried chunk (or a second run) does not decide the same contact twice.
  */
 export async function decideChunk(args: {
   plan: SweepPlan
@@ -299,12 +303,29 @@ export async function decideChunk(args: {
     if (!ruleRead.ok) return deferAll(contactIds, 'rule_invalid', ruleRead.error)
     const rule = ruleRead.rule
 
-    const contactsRead = await deps.loadContactsByIds({ clientId: plan.clientId, contactIds })
-    if (!contactsRead.ok) return deferAll(contactIds, 'read_failed', contactsRead.error)
+    // A killed and retried chunk, or a second run, may find rows already written: the stored row stays, nothing is
+    // decided (or read from outside) twice.
+    const rowsRead = await deps.findContactsWithShadowRows(plan.clientId, contactIds)
+    if (!rowsRead.ok) return deferAll(contactIds, 'read_failed', rowsRead.error)
+    const remaining = contactIds.filter((id) => !rowsRead.contactIds.has(id))
+    const alreadyDecided = contactIds.length - remaining.length
+    if (remaining.length === 0) {
+      const result = emptyChunk()
+      result.already_decided = alreadyDecided
+      return result
+    }
+
+    const contactsRead = await deps.loadContactsByIds({
+      clientId: plan.clientId,
+      contactIds: remaining,
+      sources: rule.audience.sources,
+    })
+    if (!contactsRead.ok) return deferAll(remaining, 'read_failed', contactsRead.error, alreadyDecided)
     const contacts = contactsRead.contacts
     const result = emptyChunk()
+    result.already_decided = alreadyDecided
     // A contact that cannot be read any more (deleted) is simply not decided; it is not an error.
-    const missing = contactIds.length - contacts.length
+    const missing = remaining.length - contacts.length
     if (missing > 0) bump(result.deferred_by_reason, 'contact_missing', missing)
     result.deferred += Math.max(missing, 0)
 
@@ -328,39 +349,46 @@ export async function decideChunk(args: {
         continue
       }
 
+      if (!plan.dryRun) {
+        const email = contact.primaryEmail
+        const written = await deps.insertShadowRows([
+          {
+            clientId: plan.clientId,
+            authorizationId: plan.authorizationId,
+            contactId: contact.contactId,
+            status: decision.status,
+            reasonCode: decision.reasonCode,
+            annotations: { ...decision.annotations },
+            consentBasis: decision.consentBasis,
+            sourceRef: decision.sourceRef,
+            toAddressSha256: email !== null && isPlausibleEmail(email) ? addressSha256(email) : null,
+            localDay: plan.sweepDay,
+          },
+        ])
+        if (!written.ok) {
+          // Stop here: this contact and the rest are not stored yet, so they are not counted as decided and are
+          // decided again by the retry or the next run.
+          result.error = written.error
+          result.error_status = 'write_failed'
+          const left = contacts.length - index
+          result.deferred += left
+          bump(result.deferred_by_reason, 'write_failed', left)
+          break
+        }
+        if (written.inserted === 0) {
+          // The row appeared between the check above and this write (another run was faster): its decision stands.
+          result.already_decided += 1
+          continue
+        }
+        result.inserted += written.inserted
+      }
+
       result.decided += 1
       if (decision.status === 'shadow') {
         result.would_send += 1
       } else if (decision.reasonCode !== null) {
         bump(result.skipped_by_reason, decision.reasonCode)
       }
-
-      if (plan.dryRun) continue
-      const email = contact.primaryEmail
-      const written = await deps.insertShadowRows([
-        {
-          clientId: plan.clientId,
-          authorizationId: plan.authorizationId,
-          contactId: contact.contactId,
-          status: decision.status,
-          reasonCode: decision.reasonCode,
-          annotations: { ...decision.annotations },
-          consentBasis: decision.consentBasis,
-          sourceRef: decision.sourceRef,
-          toAddressSha256: email !== null && isPlausibleEmail(email) ? addressSha256(email) : null,
-          localDay: plan.sweepDay,
-        },
-      ])
-      if (!written.ok) {
-        // Stop here: what is not written yet is decided again by the retry or the next run.
-        result.error = written.error
-        result.error_status = 'write_failed'
-        const left = contacts.length - index - 1
-        result.deferred += left
-        if (left > 0) bump(result.deferred_by_reason, 'write_failed', left)
-        break
-      }
-      result.inserted += written.inserted
     }
 
     if (created !== null) result.legacy_batches = created.legacyBatches()
@@ -388,6 +416,7 @@ export function finalizeSweep(plan: SweepPlan, results: readonly ChunkResult[]):
   const batches = new Map<string, LegacyBatchSeen>()
   for (const result of results) {
     receipt.decided += result.decided
+    receipt.already_decided += result.already_decided
     receipt.deferred += result.deferred
     receipt.inserted += result.inserted
     receipt.would_send += result.would_send
