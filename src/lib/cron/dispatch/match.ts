@@ -26,6 +26,11 @@ export function bucketForSchedule(schedule: string): DispatchBucket | null {
 }
 
 function fieldMatches(field: string, value: number): boolean {
+  if (field.includes(',')) {
+    const parts = field.split(',')
+    if (parts.length < 2 || parts.some((part) => part.length === 0)) return false
+    return parts.some((part) => fieldMatches(part, value))
+  }
   if (field === '*') return true
   const step = field.match(/^\*\/(\d+)$/)
   if (step) {

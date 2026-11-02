@@ -16,6 +16,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { isOverlapSkipSummary } from '@/lib/meta/leads-sync-lock'
 import { APP_BASE } from './binding-request-items'
 import type { ManualItem } from './manual-item-types'
 
@@ -112,10 +113,12 @@ async function loadRuns(supabase: SupabaseClient, job: string): Promise<SyncRunR
     .not('finished_at', 'is', null)
     .in('status', ['completed', 'partial', 'failed'])
     .order('finished_at', { ascending: false })
-    .limit(FACEBOOK_SYNC_FAILURE_RUNS)
+    .limit(FACEBOOK_SYNC_FAILURE_RUNS + 5)
 
   if (error) throw new Error(`cron_run_logs query failed (${job}): ${error.message}`)
-  return (data ?? []) as SyncRunRow[]
+  return ((data ?? []) as SyncRunRow[])
+    .filter((row) => !isOverlapSkipSummary(row.summary))
+    .slice(0, FACEBOOK_SYNC_FAILURE_RUNS)
 }
 
 export async function pushFacebookSyncFailingItems(

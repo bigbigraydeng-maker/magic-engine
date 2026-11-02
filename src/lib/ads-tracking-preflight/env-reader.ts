@@ -9,6 +9,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { pixelEnvVar } from '@/lib/meta/capi/config'
+import { isOverlapSkipSummary } from '@/lib/meta/leads-sync-lock'
 import type { CronJobFact, EnvFacts } from './types'
 import { retryOnce, type Sleep } from './retry'
 import { sanitizeError } from './sanitize'
@@ -207,11 +208,11 @@ async function readOneJob(
     async () => {
       const r = await deps.supabase
         .from('cron_run_logs')
-        .select('status, finished_at, started_at')
+        .select('status, finished_at, started_at, summary')
         .eq('job_name', job.job)
         .neq('status', 'running')
         .order('started_at', { ascending: false })
-        .limit(1)
+        .limit(5)
       return { data: r.data, error: r.error ? { message: r.error.message } : null }
     },
     { sleep: deps.sleep, retryResult: r => r.error !== null },
@@ -223,7 +224,9 @@ async function readOneJob(
   }
 
   const rows = Array.isArray(data) ? data : []
-  const row = rows[0] as { status?: unknown; finished_at?: unknown } | undefined
+  const row = rows.find((item) => !isOverlapSkipSummary((item as { summary?: unknown }).summary)) as
+    | { status?: unknown; finished_at?: unknown }
+    | undefined
   if (!row) return empty
 
   return {
