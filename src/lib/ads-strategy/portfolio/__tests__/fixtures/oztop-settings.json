@@ -1,22 +1,22 @@
 {
  "captured": "2026-09-14 Meta Graph v21.0 read-only GET (ads re-read with creative fields)",
- "ad_account_id": "act_1735240120460765",
+ "ad_account_id": "act_1731350146235259",
  "account": {
-  "id": "act_1735240120460765",
+  "id": "act_1731350146235259",
   "name": "1. General",
   "account_status": 1,
   "disable_reason": 0,
   "spend_cap": "0",
-  "amount_spent": "422231",
+  "amount_spent": "494010",
   "currency": "AUD",
   "timezone_name": "Australia/Brisbane",
   "timezone_offset_hours_utc": 10,
-  "min_daily_budget": 140,
+  "min_daily_budget": 164,
   "is_prepay_account": false
  },
  "campaigns": [
   {
-   "id": "120254128856580790",
+   "id": "123722414134420488",
    "name": "OZ · 1-Step Free Measure · BNE-GC · 202609",
    "objective": "OUTCOME_LEADS",
    "status": "PAUSED",
@@ -30,7 +30,7 @@
    "updated_time": "2026-09-03T13:49:37+1000"
   },
   {
-   "id": "120252742855760790",
+   "id": "124402261590905043",
    "name": "OZ-REACH-Warmpool-BNE-GC",
    "objective": "OUTCOME_AWARENESS",
    "status": "PAUSED",
@@ -44,7 +44,7 @@
    "updated_time": "2026-07-25T00:02:40+1000"
   },
   {
-   "id": "120252643974900790",
+   "id": "122395194351255552",
    "name": "Oztop — WhatsApp — RETARGET Warm Pool — 20260710",
    "objective": "OUTCOME_ENGAGEMENT",
    "status": "PAUSED",
@@ -58,7 +58,7 @@
    "updated_time": "2026-07-10T19:19:33+1000"
   },
   {
-   "id": "120252620658990790",
+   "id": "128935235445693327",
    "name": "Oztop — WhatsApp — Cold Broad — 20260709",
    "objective": "OUTCOME_ENGAGEMENT",
    "status": "ACTIVE",
@@ -72,13 +72,13 @@
    "updated_time": "2026-07-09T08:23:20+1000"
   },
   {
-   "id": "120252612541630790",
+   "id": "124880535491333552",
    "name": "Oztop — Lead Form — Cold Broad — 20260709",
    "objective": "OUTCOME_LEADS",
    "status": "PAUSED",
    "effective_status": "PAUSED",
-   "daily_budget": "6000",
-   "budget_remaining": "6000",
+   "daily_budget": "7020",
+   "budget_remaining": "7020",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "buying_type": "AUCTION",
    "special_ad_categories": [],
@@ -88,7 +88,7 @@
    "updated_time": "2026-08-18T07:20:20+1000"
   },
   {
-   "id": "120252422464760790",
+   "id": "124532415366484353",
    "name": "New Leads campaign Jul 26",
    "objective": "OUTCOME_LEADS",
    "status": "PAUSED",
@@ -102,7 +102,7 @@
    "updated_time": "2026-07-08T10:21:19+1000"
   },
   {
-   "id": "120252412058510790",
+   "id": "120940315782125204",
    "name": "OZ-THRU-S1-hooktest-202607",
    "objective": "OUTCOME_ENGAGEMENT",
    "status": "PAUSED",
@@ -116,13 +116,13 @@
    "updated_time": "2026-07-18T06:52:50+1000"
   },
   {
-   "id": "120252382876550790",
+   "id": "122881359453517056",
    "name": "OZTOP | Leads | Brisbane Flooring | Jul2026",
    "objective": "OUTCOME_LEADS",
    "status": "ARCHIVED",
    "effective_status": "ARCHIVED",
-   "daily_budget": "1500",
-   "budget_remaining": "1500",
+   "daily_budget": "1755",
+   "budget_remaining": "1755",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "buying_type": "AUCTION",
    "special_ad_categories": [],
@@ -132,7 +132,7 @@
    "updated_time": "2026-07-02T20:31:55+1000"
   },
   {
-   "id": "120251166292160790",
+   "id": "123156511945316323",
    "name": "Raptor-02 · Home Reno · Brisbane",
    "objective": "OUTCOME_LEADS",
    "status": "PAUSED",
@@ -146,7 +146,7 @@
    "updated_time": "2026-06-25T17:09:20+1000"
   },
   {
-   "id": "120250860014220790",
+   "id": "128601431077301255",
    "name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
    "objective": "OUTCOME_LEADS",
    "status": "ACTIVE",
@@ -160,13 +160,13 @@
    "updated_time": "2026-07-25T02:21:48+1000"
   },
   {
-   "id": "120238854619530790",
+   "id": "126033102015545323",
    "name": "Prospecting CBO",
    "objective": "OUTCOME_SALES",
    "status": "PAUSED",
    "effective_status": "PAUSED",
-   "daily_budget": "2300",
-   "budget_remaining": "2300",
+   "daily_budget": "2691",
+   "budget_remaining": "2691",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "buying_type": "AUCTION",
    "special_ad_categories": [],
@@ -176,13 +176,13 @@
    "updated_time": "2026-01-26T19:06:24+1000"
   },
   {
-   "id": "120231725135400790",
+   "id": "123176515402851075",
    "name": "Flooring Transformation",
    "objective": "OUTCOME_LEADS",
    "status": "PAUSED",
    "effective_status": "PAUSED",
-   "daily_budget": "4500",
-   "budget_remaining": "4500",
+   "daily_budget": "5265",
+   "budget_remaining": "5265",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "buying_type": "AUCTION",
    "special_ad_categories": [],
@@ -194,13 +194,13 @@
  ],
  "adsets": [
   {
-   "id": "120254128869310790",
+   "id": "121259157353054933",
    "name": "OZ · Broad 25-65 · BNE+GC 40km · Lead",
-   "campaign_id": "120254128856580790",
+   "campaign_id": "123722414134420488",
    "optimization_goal": "OFFSITE_CONVERSIONS",
    "billing_event": "IMPRESSIONS",
    "destination_type": "UNDEFINED",
-   "daily_budget": "5000",
+   "daily_budget": "5850",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -247,19 +247,19 @@
     "standard"
    ],
    "promoted_object": {
-    "pixel_id": "1320907320075995",
+    "pixel_id": "1301218199417201",
     "custom_event_type": "LEAD",
     "smart_pse_enabled": false
    }
   },
   {
-   "id": "120252742860150790",
+   "id": "124852317152232046",
    "name": "OZ-REACH-S4-BNE-GC-home",
-   "campaign_id": "120252742855760790",
+   "campaign_id": "124402261590905043",
    "optimization_goal": "REACH",
    "billing_event": "IMPRESSIONS",
    "destination_type": "UNDEFINED",
-   "daily_budget": "1500",
+   "daily_budget": "1755",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -316,13 +316,13 @@
    ]
   },
   {
-   "id": "120252643974920790",
+   "id": "121668273531412522",
    "name": "新互动广告组",
-   "campaign_id": "120252643974900790",
+   "campaign_id": "122395194351255552",
    "optimization_goal": "CONVERSATIONS",
    "billing_event": "IMPRESSIONS",
    "destination_type": "WHATSAPP",
-   "daily_budget": "3000",
+   "daily_budget": "3510",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -330,11 +330,11 @@
     "age_min": 18,
     "custom_audiences": [
      {
-      "id": "120252445512480790",
+      "id": "121099382092184231",
       "name": "Oztop Video Viewers 25% - Retarget"
      },
      {
-      "id": "120252445605260790",
+      "id": "124412709017815454",
       "name": "Oztop Page Engagers 365d - Retarget"
      }
     ],
@@ -385,18 +385,18 @@
     "standard"
    ],
    "promoted_object": {
-    "page_id": "748077268383005",
+    "page_id": "741373842505669",
     "smart_pse_enabled": false
    }
   },
   {
-   "id": "120252620658980790",
+   "id": "122484593700717559",
    "name": "新互动广告组",
-   "campaign_id": "120252620658990790",
+   "campaign_id": "128935235445693327",
    "optimization_goal": "CONVERSATIONS",
    "billing_event": "IMPRESSIONS",
    "destination_type": "UNDEFINED",
-   "daily_budget": "2500",
+   "daily_budget": "2925",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -449,14 +449,14 @@
     "standard"
    ],
    "promoted_object": {
-    "page_id": "748077268383005",
+    "page_id": "741373842505669",
     "smart_pse_enabled": false
    }
   },
   {
-   "id": "120252612541620790",
+   "id": "125444453533343654",
    "name": "新潜在客户广告组",
-   "campaign_id": "120252612541630790",
+   "campaign_id": "124880535491333552",
    "optimization_goal": "LEAD_GENERATION",
    "billing_event": "IMPRESSIONS",
    "destination_type": "ON_AD",
@@ -512,18 +512,18 @@
    "created_time": "2026-07-09T07:10:55+1000",
    "updated_time": "2026-07-09T21:51:59+1000",
    "promoted_object": {
-    "page_id": "748077268383005",
+    "page_id": "741373842505669",
     "smart_pse_enabled": false
    }
   },
   {
-   "id": "120252557279220790",
+   "id": "121627794319130403",
    "name": "OZ-THRU-S3-Promo-BNE-GC",
-   "campaign_id": "120252412058510790",
+   "campaign_id": "120940315782125204",
    "optimization_goal": "THRUPLAY",
    "billing_event": "IMPRESSIONS",
    "destination_type": "ON_VIDEO",
-   "daily_budget": "2500",
+   "daily_budget": "2925",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -583,13 +583,13 @@
    ]
   },
   {
-   "id": "120252526551730790",
+   "id": "122992771939214112",
    "name": "OZ-THRU-S2-LeadReels-BNE-GC",
-   "campaign_id": "120252412058510790",
+   "campaign_id": "120940315782125204",
    "optimization_goal": "THRUPLAY",
    "billing_event": "IMPRESSIONS",
    "destination_type": "ON_VIDEO",
-   "daily_budget": "2500",
+   "daily_budget": "2925",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -649,13 +649,13 @@
    ]
   },
   {
-   "id": "120252422464770790",
+   "id": "123424225443421020",
    "name": "New Leads ad set",
-   "campaign_id": "120252422464760790",
+   "campaign_id": "124532415366484353",
    "optimization_goal": "LEAD_GENERATION",
    "billing_event": "IMPRESSIONS",
    "destination_type": "LEAD_FORM_MESSENGER",
-   "daily_budget": "3000",
+   "daily_budget": "3510",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -734,18 +734,18 @@
     "standard"
    ],
    "promoted_object": {
-    "page_id": "748077268383005",
+    "page_id": "741373842505669",
     "smart_pse_enabled": false
    }
   },
   {
-   "id": "120252412058520790",
+   "id": "120296502060247708",
    "name": "OZ-THRU-S1-BNE-GC",
-   "campaign_id": "120252412058510790",
+   "campaign_id": "120940315782125204",
    "optimization_goal": "THRUPLAY",
    "billing_event": "IMPRESSIONS",
    "destination_type": "ON_VIDEO",
-   "daily_budget": "2500",
+   "daily_budget": "2925",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -802,9 +802,9 @@
    ]
   },
   {
-   "id": "120252382876540790",
+   "id": "121644705123550284",
    "name": "New Leads ad set",
-   "campaign_id": "120252382876550790",
+   "campaign_id": "122881359453517056",
    "optimization_goal": "OFFSITE_CONVERSIONS",
    "billing_event": "IMPRESSIONS",
    "destination_type": "WEBSITE_AND_LEAD_FORM",
@@ -843,19 +843,19 @@
    "created_time": "2026-07-01T23:23:38+1000",
    "updated_time": "2026-07-01T23:33:22+1000",
    "promoted_object": {
-    "pixel_id": "1320907320075995",
+    "pixel_id": "1301218199417201",
     "custom_event_type": "LEAD",
     "smart_pse_enabled": false
    }
   },
   {
-   "id": "120251166292180790",
+   "id": "122005145197278641",
    "name": "Raptor-02 · Home Reno · Brisbane",
-   "campaign_id": "120251166292160790",
+   "campaign_id": "123156511945316323",
    "optimization_goal": "LEAD_GENERATION",
    "billing_event": "IMPRESSIONS",
    "destination_type": "ON_AD",
-   "daily_budget": "2500",
+   "daily_budget": "2925",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -869,15 +869,15 @@
      {
       "interests": [
        {
-        "id": "6003199112065",
+        "id": "6065224256423",
         "name": "家居维修（家居装饰）"
        },
        {
-        "id": "6003234413249",
+        "id": "6034005525818",
         "name": "家居装修（家居园艺）"
        },
        {
-        "id": "6004176050895",
+        "id": "6072930403010",
         "name": "维护、修理和大修（建筑业）"
        }
       ]
@@ -920,18 +920,18 @@
     "standard"
    ],
    "promoted_object": {
-    "page_id": "748077268383005",
+    "page_id": "741373842505669",
     "smart_pse_enabled": false
    }
   },
   {
-   "id": "120250860014210790",
+   "id": "120003040608477028",
    "name": "Raptor-01 · Home Reno · Brisbane",
-   "campaign_id": "120250860014220790",
+   "campaign_id": "128601431077301255",
    "optimization_goal": "LEAD_GENERATION",
    "billing_event": "IMPRESSIONS",
    "destination_type": "ON_AD",
-   "daily_budget": "2000",
+   "daily_budget": "2340",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -945,15 +945,15 @@
      {
       "interests": [
        {
-        "id": "6003199112065",
+        "id": "6065224256423",
         "name": "家居维修（家居装饰）"
        },
        {
-        "id": "6003234413249",
+        "id": "6034005525818",
         "name": "家居装修（家居园艺）"
        },
        {
-        "id": "6004176050895",
+        "id": "6072930403010",
         "name": "维护、修理和大修（建筑业）"
        }
       ]
@@ -996,14 +996,14 @@
     "standard"
    ],
    "promoted_object": {
-    "page_id": "748077268383005",
+    "page_id": "741373842505669",
     "smart_pse_enabled": false
    }
   },
   {
-   "id": "120238854619520790",
+   "id": "120341420309894524",
    "name": "Broad Pack 1. Before/ After",
-   "campaign_id": "120238854619530790",
+   "campaign_id": "126033102015545323",
    "optimization_goal": "OFFSITE_CONVERSIONS",
    "billing_event": "IMPRESSIONS",
    "destination_type": "UNDEFINED",
@@ -1016,7 +1016,7 @@
     ],
     "excluded_custom_audiences": [
      {
-      "id": "120238453802750790",
+      "id": "123855331432202533",
       "name": "Website Visitors"
      }
     ],
@@ -1024,15 +1024,15 @@
      {
       "interests": [
        {
-        "id": "6003199112065",
+        "id": "6065224256423",
         "name": "家居维修（家居装饰）"
        },
        {
-        "id": "6003321193914",
+        "id": "6096047250710",
         "name": "地板（工业材料和设备）"
        },
        {
-        "id": "6003437629554",
+        "id": "6083561943105",
         "name": "家居装修 (家居装修)"
        }
       ]
@@ -1081,15 +1081,15 @@
    "created_time": "2025-12-12T11:42:47+1000",
    "updated_time": "2026-01-28T16:19:50+1000",
    "promoted_object": {
-    "pixel_id": "1320907320075995",
+    "pixel_id": "1301218199417201",
     "custom_event_type": "CONTENT_VIEW",
     "smart_pse_enabled": false
    }
   },
   {
-   "id": "120231725136090790",
+   "id": "127646897134140952",
    "name": "Ad Set",
-   "campaign_id": "120231725135400790",
+   "campaign_id": "123176515402851075",
    "optimization_goal": "OFFSITE_CONVERSIONS",
    "billing_event": "IMPRESSIONS",
    "destination_type": "UNDEFINED",
@@ -1102,7 +1102,7 @@
     ],
     "excluded_custom_audiences": [
      {
-      "id": "120238453802750790",
+      "id": "123855331432202533",
       "name": "Website Visitors"
      }
     ],
@@ -1110,15 +1110,15 @@
      {
       "interests": [
        {
-        "id": "6003199112065",
+        "id": "6065224256423",
         "name": "家居维修（家居装饰）"
        },
        {
-        "id": "6003321193914",
+        "id": "6096047250710",
         "name": "地板（工业材料和设备）"
        },
        {
-        "id": "6003437629554",
+        "id": "6083561943105",
         "name": "家居装修 (家居装修)"
        }
       ]
@@ -1167,7 +1167,7 @@
    "created_time": "2025-12-05T14:20:59+1000",
    "updated_time": "2026-01-21T14:56:59+1000",
    "promoted_object": {
-    "pixel_id": "1320907320075995",
+    "pixel_id": "1301218199417201",
     "custom_event_type": "CONTENT_VIEW",
     "smart_pse_enabled": false
    }
@@ -1175,730 +1175,730 @@
  ],
  "ads": [
   {
-   "id": "120253053175980790",
+   "id": "128613117329346045",
    "name": "OZ-FMQ-A-cost-showroom-202607",
-   "adset_id": "120250860014210790",
-   "campaign_id": "120250860014220790",
+   "adset_id": "120003040608477028",
+   "campaign_id": "128601431077301255",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-07-25T02:11:09+1000",
    "updated_time": "2026-08-01T10:13:53+1000",
    "creative": {
-    "video_id": "1530197908591781",
-    "effective_object_story_id": "748077268383005_122190964346943042",
+    "video_id": "1508190523397017",
+    "effective_object_story_id": "741373842505669_124855324417571306",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "2452960388557383"
+      "video_id": "2470567314797979"
      }
     },
-    "id": "1587162969673460"
+    "id": "1514564970021821"
    }
   },
   {
-   "id": "120252612541610790",
+   "id": "125313206444312242",
    "name": "新潜在客户广告",
-   "adset_id": "120252612541620790",
-   "campaign_id": "120252612541630790",
+   "adset_id": "125444453533343654",
+   "campaign_id": "124880535491333552",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-07-09T07:10:57+1000",
    "updated_time": "2026-07-23T15:55:38+1000",
    "creative": {
-    "video_id": "1595978145430111",
-    "effective_object_story_id": "748077268383005_122188143812943042",
+    "video_id": "1548629838022112",
+    "effective_object_story_id": "741373842505669_127174041805533336",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1677108553576075"
+      "video_id": "1654304160032530"
      }
     },
-    "id": "2409535349524376"
+    "id": "2454307576484216"
    }
   },
   {
-   "id": "120252742872140790",
+   "id": "120203353250540898",
    "name": "OZ-REACH-SR02",
-   "adset_id": "120252742860150790",
-   "campaign_id": "120252742855760790",
+   "adset_id": "124852317152232046",
+   "campaign_id": "124402261590905043",
    "status": "ACTIVE",
    "effective_status": "CAMPAIGN_PAUSED",
    "created_time": "2026-07-13T15:18:14+1000",
    "updated_time": "2026-07-13T18:33:18+1000",
    "creative": {
-    "video_id": "1571571231031569",
-    "effective_object_story_id": "748077268383005_122188889024943042",
+    "video_id": "1580323574192489",
+    "effective_object_story_id": "741373842505669_123871513960478716",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1336745795254432"
+      "video_id": "1321567424601002"
      }
     },
-    "id": "1300272018580315"
+    "id": "1300862125117375"
    }
   },
   {
-   "id": "120252424319430790",
+   "id": "121478541246917922",
    "name": "OZ-S1-B-warp",
-   "adset_id": "120252412058520790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "120296502060247708",
+   "campaign_id": "120940315782125204",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-07-02T22:18:14+1000",
    "updated_time": "2026-07-13T18:16:29+1000",
    "creative": {
-    "video_id": "2446039952473057",
-    "effective_object_story_id": "748077268383005_122188498040943042",
+    "video_id": "2453838247582244",
+    "effective_object_story_id": "741373842505669_125140394823919196",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "27692257990405551"
+      "video_id": "27754132422518678"
      }
     },
-    "id": "1407589094547369"
+    "id": "1402719281679026"
    }
   },
   {
-   "id": "120252412058530790",
+   "id": "120412722037049300",
    "name": "OZ-S1-A-spill",
-   "adset_id": "120252412058520790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "120296502060247708",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "CAMPAIGN_PAUSED",
    "created_time": "2026-07-02T22:01:52+1000",
    "updated_time": "2026-07-13T18:09:27+1000",
    "creative": {
-    "video_id": "1009888008349686",
-    "effective_object_story_id": "748077268383005_122188390238943042",
+    "video_id": "1074500129405444",
+    "effective_object_story_id": "741373842505669_123445622384608135",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "2605452336518464"
+      "video_id": "2639944437523545"
      }
     },
-    "id": "1407432921212432"
+    "id": "1409471207364503"
    }
   },
   {
-   "id": "120252742876560790",
+   "id": "121183223012078913",
    "name": "OZ-REACH-SR04",
-   "adset_id": "120252742860150790",
-   "campaign_id": "120252742855760790",
+   "adset_id": "124852317152232046",
+   "campaign_id": "124402261590905043",
    "status": "ACTIVE",
    "effective_status": "CAMPAIGN_PAUSED",
    "created_time": "2026-07-13T15:18:47+1000",
    "updated_time": "2026-07-13T15:21:53+1000",
    "creative": {
-    "video_id": "1338152218466802",
-    "effective_object_story_id": "748077268383005_122188889090943042",
+    "video_id": "1303533237445230",
+    "effective_object_story_id": "741373842505669_126740085293200355",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "2452960388557383"
+      "video_id": "2470567314797979"
      }
     },
-    "id": "1518472139302733"
+    "id": "1505003332159937"
    }
   },
   {
-   "id": "120252742868250790",
+   "id": "124021751422051396",
    "name": "OZ-REACH-SR01",
-   "adset_id": "120252742860150790",
-   "campaign_id": "120252742855760790",
+   "adset_id": "124852317152232046",
+   "campaign_id": "124402261590905043",
    "status": "ACTIVE",
    "effective_status": "CAMPAIGN_PAUSED",
    "created_time": "2026-07-13T15:17:42+1000",
    "updated_time": "2026-07-13T15:19:54+1000",
    "creative": {
-    "video_id": "968531146238025",
-    "effective_object_story_id": "748077268383005_122188885922943042",
+    "video_id": "966470474069757",
+    "effective_object_story_id": "741373842505669_125244983344116698",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1393293722829832"
+      "video_id": "1304120247459274"
      }
     },
-    "id": "987276060969342"
+    "id": "985105820017384"
    }
   },
   {
-   "id": "120252424319420790",
+   "id": "128458944232039363",
    "name": "OZ-S1-C-alex",
-   "adset_id": "120252412058520790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "120296502060247708",
+   "campaign_id": "120940315782125204",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-07-02T22:19:27+1000",
    "updated_time": "2026-07-13T15:03:51+1000",
    "creative": {
-    "video_id": "808105225626209",
-    "effective_object_story_id": "748077268383005_122188498076943042",
+    "video_id": "805356046002595",
+    "effective_object_story_id": "741373842505669_124342712464181100",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "2597793657304991"
+      "video_id": "2516416362012647"
      }
     },
-    "id": "27158025770566341"
+    "id": "27820183204223920"
    }
   },
   {
-   "id": "120252741347540790",
+   "id": "122019204403837353",
    "name": "OZ-S1-D-Showroom-SR01",
-   "adset_id": "120252412058520790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "120296502060247708",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "CAMPAIGN_PAUSED",
    "created_time": "2026-07-13T14:54:11+1000",
    "updated_time": "2026-07-13T15:03:43+1000",
    "creative": {
-    "video_id": "968531146238025",
-    "effective_object_story_id": "748077268383005_122188885922943042",
+    "video_id": "966470474069757",
+    "effective_object_story_id": "741373842505669_125244983344116698",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1393293722829832"
+      "video_id": "1304120247459274"
      }
     },
-    "id": "987276060969342"
+    "id": "985105820017384"
    }
   },
   {
-   "id": "120252643974910790",
+   "id": "129655510451580208",
    "name": "新互动广告",
-   "adset_id": "120252643974920790",
-   "campaign_id": "120252643974900790",
+   "adset_id": "121668273531412522",
+   "campaign_id": "122395194351255552",
    "status": "ACTIVE",
    "effective_status": "CAMPAIGN_PAUSED",
    "created_time": "2026-07-10T11:26:50+1000",
    "updated_time": "2026-07-11T21:56:15+1000",
    "creative": {
-    "video_id": "1318921176896852",
-    "effective_object_story_id": "748077268383005_122188533062943042",
+    "video_id": "1340131370922195",
+    "effective_object_story_id": "741373842505669_124481255552072050",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1677108553576075"
+      "video_id": "1654304160032530"
      }
     },
-    "id": "2434708407008013"
+    "id": "2448659537206060"
    }
   },
   {
-   "id": "120252526551720790",
+   "id": "122424254341575010",
    "name": "OZ-S2-R4-lifestylefit",
-   "adset_id": "120252526551730790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "122992771939214112",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-07T11:18:02+1000",
    "updated_time": "2026-07-11T21:48:38+1000",
    "creative": {
-    "video_id": "2480278482452798",
-    "effective_object_story_id": "748077268383005_122188496054943042",
+    "video_id": "2471901027814994",
+    "effective_object_story_id": "741373842505669_125714304168535966",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1538653297697401"
+      "video_id": "1592611145187985"
      }
     },
-    "id": "2043074636294324"
+    "id": "2080443338037956"
    }
   },
   {
-   "id": "120252528609620790",
+   "id": "125522179404030305",
    "name": "OZ-S2-R9-rentvslive",
-   "adset_id": "120252526551730790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "122992771939214112",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-07T11:18:02+1000",
    "updated_time": "2026-07-11T21:47:56+1000",
    "creative": {
-    "video_id": "1318227203813222",
-    "effective_object_story_id": "748077268383005_122188497434943042",
+    "video_id": "1354421126459160",
+    "effective_object_story_id": "741373842505669_126446180243719112",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "853081664270582"
+      "video_id": "851226173426221"
      }
     },
-    "id": "1682875279632980"
+    "id": "1632148991002220"
    }
   },
   {
-   "id": "120252526551710790",
+   "id": "125351426242354288",
    "name": "OZ-S2-R3-avoidproblems",
-   "adset_id": "120252526551730790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "122992771939214112",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-07T11:18:02+1000",
    "updated_time": "2026-07-11T18:40:20+1000",
    "creative": {
-    "video_id": "2344924795914003",
-    "effective_object_story_id": "748077268383005_122188495490943042",
+    "video_id": "2329873403633652",
+    "effective_object_story_id": "741373842505669_122134581223200311",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1309664007903849"
+      "video_id": "1318015304962902"
      }
     },
-    "id": "3414085545426426"
+    "id": "3454340931321368"
    }
   },
   {
-   "id": "120252528609600790",
+   "id": "125659830426249575",
    "name": "OZ-S2-R6-kidsdog",
-   "adset_id": "120252526551730790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "122992771939214112",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-07T11:18:02+1000",
    "updated_time": "2026-07-11T18:40:14+1000",
    "creative": {
-    "video_id": "1816517999757547",
-    "effective_object_story_id": "748077268383005_122188496078943042",
+    "video_id": "1893285249108314",
+    "effective_object_story_id": "741373842505669_122652423614254761",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1677108553576075"
+      "video_id": "1654304160032530"
      }
     },
-    "id": "1566242465211723"
+    "id": "1500724903173521"
    }
   },
   {
-   "id": "120252526551740790",
+   "id": "124616310575438555",
    "name": "OZ-S2-R5-coastaltiles",
-   "adset_id": "120252526551730790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "122992771939214112",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-07T11:18:02+1000",
    "updated_time": "2026-07-11T18:39:48+1000",
    "creative": {
-    "video_id": "2220188065462085",
-    "effective_object_story_id": "748077268383005_122188496066943042",
+    "video_id": "2255094303355140",
+    "effective_object_story_id": "741373842505669_127790083075021794",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "2029948944580657"
+      "video_id": "2068553402542665"
      }
     },
-    "id": "2560701994347165"
+    "id": "2524354200578202"
    }
   },
   {
-   "id": "120252620658970790",
+   "id": "128575586653159044",
    "name": "新互动广告",
-   "adset_id": "120252620658980790",
-   "campaign_id": "120252620658990790",
+   "adset_id": "122484593700717559",
+   "campaign_id": "128935235445693327",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-09T08:23:22+1000",
    "updated_time": "2026-07-11T17:28:23+1000",
    "creative": {
-    "video_id": "2751399725229414",
-    "effective_object_story_id": "748077268383005_122188532618943042",
+    "video_id": "2764744023603510",
+    "effective_object_story_id": "741373842505669_128724272611535157",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1677108553576075"
+      "video_id": "1654304160032530"
      }
     },
-    "id": "2439722343104086"
+    "id": "2419176986270104"
    }
   },
   {
-   "id": "120252528609610790",
+   "id": "121854578212240432",
    "name": "OZ-S2-R7-urgency",
-   "adset_id": "120252526551730790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "122992771939214112",
+   "campaign_id": "120940315782125204",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-07-07T11:18:02+1000",
    "updated_time": "2026-07-11T10:21:43+1000",
    "creative": {
-    "video_id": "1206071332588381",
-    "effective_object_story_id": "748077268383005_122188498130943042",
+    "video_id": "1204734625631119",
+    "effective_object_story_id": "741373842505669_121005842750744705",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "2597793657304991"
+      "video_id": "2516416362012647"
      }
     },
-    "id": "2223881825044542"
+    "id": "2242202411764614"
    }
   },
   {
-   "id": "120252528609630790",
+   "id": "128007443099047788",
    "name": "OZ-S2-R10-reviews",
-   "adset_id": "120252526551730790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "122992771939214112",
+   "campaign_id": "120940315782125204",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-07-07T11:18:02+1000",
    "updated_time": "2026-07-11T10:19:31+1000",
    "creative": {
-    "video_id": "4383233561991408",
-    "effective_object_story_id": "748077268383005_122188498088943042",
+    "video_id": "4375634043744960",
+    "effective_object_story_id": "741373842505669_121718500942523961",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "2597793657304991"
+      "video_id": "2516416362012647"
      }
     },
-    "id": "2158034554772876"
+    "id": "2122323414333161"
    }
   },
   {
-   "id": "120252528609590790",
+   "id": "125344151499252425",
    "name": "OZ-S2-Rx-spcwaterproof",
-   "adset_id": "120252526551730790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "122992771939214112",
+   "campaign_id": "120940315782125204",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-07-07T11:18:02+1000",
    "updated_time": "2026-07-11T10:18:00+1000",
    "creative": {
-    "video_id": "2212018469576003",
-    "effective_object_story_id": "748077268383005_122188498238943042",
+    "video_id": "2233320148194004",
+    "effective_object_story_id": "741373842505669_122023521312920776",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "2597793657304991"
+      "video_id": "2516416362012647"
      }
     },
-    "id": "1545897817020463"
+    "id": "1585842935322447"
    }
   },
   {
-   "id": "120252557279230790",
+   "id": "120843644453824311",
    "name": "OZ-S3-T2-spillpromo",
-   "adset_id": "120252557279220790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "121627794319130403",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-07T14:38:56+1000",
    "updated_time": "2026-07-10T18:12:40+1000",
    "creative": {
-    "video_id": "1024540399964027",
-    "effective_object_story_id": "748077268383005_122188357598943042",
+    "video_id": "1052787283483942",
+    "effective_object_story_id": "741373842505669_120103733791825343",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "2561226134311169"
+      "video_id": "2575517311401922"
      }
     },
-    "id": "1764816834541173"
+    "id": "1717049200101191"
    }
   },
   {
-   "id": "120252557279210790",
+   "id": "129845012985300511",
    "name": "OZ-S3-T1-savingsmath",
-   "adset_id": "120252557279220790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "121627794319130403",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-07T14:38:56+1000",
    "updated_time": "2026-07-10T18:09:16+1000",
    "creative": {
-    "video_id": "2117016272216660",
-    "effective_object_story_id": "748077268383005_122188357568943042",
+    "video_id": "2104323458847325",
+    "effective_object_story_id": "741373842505669_124028110606606012",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1370713574957309"
+      "video_id": "1377040142443559"
      }
     },
-    "id": "1035544022223159"
+    "id": "1072086520504228"
    }
   },
   {
-   "id": "120252557279300790",
+   "id": "128464970821302955",
    "name": "OZ-S3-W3-texture",
-   "adset_id": "120252557279220790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "121627794319130403",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-07T14:38:56+1000",
    "updated_time": "2026-07-10T18:06:57+1000",
    "creative": {
-    "video_id": "2086051179012845",
-    "effective_object_story_id": "748077268383005_122188357526943042",
+    "video_id": "2063463507221033",
+    "effective_object_story_id": "741373842505669_120105110954144043",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1439680607945357"
+      "video_id": "1401620451274241"
      }
     },
-    "id": "2811495035893113"
+    "id": "2844632704452602"
    }
   },
   {
-   "id": "120252557279240790",
+   "id": "122436094219128246",
    "name": "OZ-S3-T3-julyspecial",
-   "adset_id": "120252557279220790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "121627794319130403",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-07T14:38:56+1000",
    "updated_time": "2026-07-10T15:01:03+1000",
    "creative": {
-    "video_id": "2515974402183138",
-    "effective_object_story_id": "748077268383005_122188357550943042",
+    "video_id": "2518234503586291",
+    "effective_object_story_id": "741373842505669_124434594030529327",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1329677458819480"
+      "video_id": "1344346188518300"
      }
     },
-    "id": "910654082065991"
+    "id": "910411853223636"
    }
   },
   {
-   "id": "120252557279280790",
+   "id": "122378015508710907",
    "name": "OZ-S3-W2-stockscale",
-   "adset_id": "120252557279220790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "121627794319130403",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-07T14:38:56+1000",
    "updated_time": "2026-07-10T15:00:59+1000",
    "creative": {
-    "video_id": "28063141829958134",
-    "effective_object_story_id": "748077268383005_122188357532943042",
+    "video_id": "28215349950590353",
+    "effective_object_story_id": "741373842505669_127358629183861003",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1551585226522222"
+      "video_id": "1554736385618145"
      }
     },
-    "id": "1551582289789666"
+    "id": "1502643941072865"
    }
   },
   {
-   "id": "120252620372110790",
+   "id": "128618343529166589",
    "name": "新潜在客户广告 - 广告副本",
-   "adset_id": "120252612541620790",
-   "campaign_id": "120252612541630790",
+   "adset_id": "125444453533343654",
+   "campaign_id": "124880535491333552",
    "status": "ACTIVE",
    "effective_status": "CAMPAIGN_PAUSED",
    "created_time": "2026-07-09T07:21:24+1000",
    "updated_time": "2026-07-09T21:53:53+1000",
    "creative": {
-    "video_id": "2273033426843689",
-    "effective_object_story_id": "748077268383005_122188144886943042",
+    "video_id": "2213812257892956",
+    "effective_object_story_id": "741373842505669_120434345550075573",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1677108553576075"
+      "video_id": "1654304160032530"
      }
     },
-    "id": "1948628799592550"
+    "id": "1957311360953184"
    }
   },
   {
-   "id": "120252557279270790",
+   "id": "121971279232045957",
    "name": "OZ-S3-W1-pricetag",
-   "adset_id": "120252557279220790",
-   "campaign_id": "120252412058510790",
+   "adset_id": "121627794319130403",
+   "campaign_id": "120940315782125204",
    "status": "ACTIVE",
    "effective_status": "ADSET_PAUSED",
    "created_time": "2026-07-07T14:38:56+1000",
    "updated_time": "2026-07-08T12:02:28+1000",
    "creative": {
-    "video_id": "1182108887411438",
-    "effective_object_story_id": "748077268383005_122187989312943042",
+    "video_id": "1147904018143349",
+    "effective_object_story_id": "741373842505669_125345541539803705",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "894729150352023"
+      "video_id": "893341254723295"
      }
     },
-    "id": "2503062973544781"
+    "id": "2546633150038121"
    }
   },
   {
-   "id": "120252422464750790",
+   "id": "120074105572277104",
    "name": "New Leads ad",
-   "adset_id": "120252422464770790",
-   "campaign_id": "120252422464760790",
+   "adset_id": "123424225443421020",
+   "campaign_id": "124532415366484353",
    "status": "ACTIVE",
    "effective_status": "CAMPAIGN_PAUSED",
    "created_time": "2026-07-02T21:17:41+1000",
    "updated_time": "2026-07-08T09:17:00+1000",
    "creative": {
-    "video_id": "964391103290917",
-    "effective_object_story_id": "748077268383005_122187198284943042",
+    "video_id": "962375380250114",
+    "effective_object_story_id": "741373842505669_121237202518360822",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1011389991620361"
+      "video_id": "1036232552664074"
      }
     },
-    "id": "1376706004369360"
+    "id": "1399765504522511"
    }
   },
   {
-   "id": "120251531686910790",
+   "id": "129013501675913613",
    "name": "Raptor-01 slip dog tile vs floor",
-   "adset_id": "120250860014210790",
-   "campaign_id": "120250860014220790",
+   "adset_id": "120003040608477028",
+   "campaign_id": "128601431077301255",
    "status": "ARCHIVED",
    "effective_status": "ARCHIVED",
    "created_time": "2026-06-23T19:50:57+1000",
    "updated_time": "2026-07-02T20:34:12+1000",
    "creative": {
-    "video_id": "2127374778175525",
-    "effective_object_story_id": "748077268383005_122185366628943042",
-    "id": "2215973052496329"
+    "video_id": "2181833481132200",
+    "effective_object_story_id": "741373842505669_123542520840805495",
+    "id": "2295314044071170"
    }
   },
   {
-   "id": "120250860014200790",
+   "id": "122254845332348345",
    "name": "Raptor-01 · Free Measure · Video-A",
-   "adset_id": "120250860014210790",
-   "campaign_id": "120250860014220790",
+   "adset_id": "120003040608477028",
+   "campaign_id": "128601431077301255",
    "status": "ARCHIVED",
    "effective_status": "ARCHIVED",
    "created_time": "2026-06-18T00:23:58+1000",
    "updated_time": "2026-07-02T20:33:46+1000",
    "creative": {
-    "video_id": "2201410137339290",
-    "effective_object_story_id": "748077268383005_122184713084943042",
-    "id": "1684180909544539"
+    "video_id": "2231071012954111",
+    "effective_object_story_id": "741373842505669_123163800504104405",
+    "id": "1694346041210393"
    }
   },
   {
-   "id": "120252382876530790",
+   "id": "121150341911634553",
    "name": "New Leads ad",
-   "adset_id": "120252382876540790",
-   "campaign_id": "120252382876550790",
+   "adset_id": "121644705123550284",
+   "campaign_id": "122881359453517056",
    "status": "ARCHIVED",
    "effective_status": "ARCHIVED",
    "created_time": "2026-07-01T23:31:37+1000",
    "updated_time": "2026-07-01T23:33:22+1000",
    "creative": {
-    "effective_object_story_id": "748077268383005_122186949896943042",
+    "effective_object_story_id": "741373842505669_120739435557570374",
     "object_story_spec": {
-     "page_id": "748077268383005"
+     "page_id": "741373842505669"
     },
-    "id": "1327105739005408"
+    "id": "1332600905528156"
    }
   },
   {
-   "id": "120251166292170790",
+   "id": "121224027930151540",
    "name": "Raptor-02 · Free Measure · Video-A",
-   "adset_id": "120251166292180790",
-   "campaign_id": "120251166292160790",
+   "adset_id": "122005145197278641",
+   "campaign_id": "123156511945316323",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-06-20T12:11:24+1000",
    "updated_time": "2026-06-29T16:29:55+1000",
    "creative": {
-    "video_id": "2191629801681268",
-    "effective_object_story_id": "748077268383005_122185113998943042",
-    "id": "1752007799300909"
+    "video_id": "2115729262411145",
+    "effective_object_story_id": "741373842505669_126010407321230355",
+    "id": "1752221957035827"
    }
   },
   {
-   "id": "120238854619510790",
+   "id": "121983045851051534",
    "name": "Floor Levelling",
-   "adset_id": "120238854619520790",
-   "campaign_id": "120238854619530790",
+   "adset_id": "120341420309894524",
+   "campaign_id": "126033102015545323",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-01-22T12:40:34+1000",
    "updated_time": "2026-01-28T16:23:06+1000",
    "creative": {
-    "video_id": "761292883407965",
-    "effective_object_story_id": "748077268383005_122133731342943042",
-    "id": "25527210613647764"
+    "video_id": "763333632472621",
+    "effective_object_story_id": "741373842505669_126204409910555772",
+    "id": "25556041041035357"
    }
   },
   {
-   "id": "120239040779660790",
+   "id": "126655903580411302",
    "name": "Height Difference Approach",
-   "adset_id": "120238854619520790",
-   "campaign_id": "120238854619530790",
+   "adset_id": "120341420309894524",
+   "campaign_id": "126033102015545323",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2025-12-15T12:27:01+1000",
    "updated_time": "2026-01-28T16:20:19+1000",
    "creative": {
-    "effective_object_story_id": "748077268383005_122156551172943042",
+    "effective_object_story_id": "741373842505669_122473387962182304",
     "object_story_spec": {
-     "page_id": "748077268383005"
+     "page_id": "741373842505669"
     },
-    "id": "904221882070667"
+    "id": "900557670550273"
    }
   },
   {
-   "id": "120239039392280790",
+   "id": "122363401030013533",
    "name": "6.5mm SPC Range",
-   "adset_id": "120238854619520790",
-   "campaign_id": "120238854619530790",
+   "adset_id": "120341420309894524",
+   "campaign_id": "126033102015545323",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2025-12-15T12:29:12+1000",
    "updated_time": "2026-01-28T16:20:19+1000",
    "creative": {
-    "effective_object_story_id": "748077268383005_122156550314943042",
+    "effective_object_story_id": "741373842505669_121220878590045208",
     "object_story_spec": {
-     "page_id": "748077268383005"
+     "page_id": "741373842505669"
     },
-    "id": "1269016788466604"
+    "id": "1204723650324141"
    }
   },
   {
-   "id": "120240602551270790",
+   "id": "124247121402262613",
    "name": "Flooring Transformation (chapel hill)",
-   "adset_id": "120238854619520790",
-   "campaign_id": "120238854619530790",
+   "adset_id": "120341420309894524",
+   "campaign_id": "126033102015545323",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-01-22T16:00:58+1000",
    "updated_time": "2026-01-28T16:20:06+1000",
    "creative": {
-    "video_id": "1469805201150423",
-    "effective_object_story_id": "748077268383005_1469805201150423",
+    "video_id": "1480832838494404",
+    "effective_object_story_id": "741373842505669_1480832838494404",
     "object_story_spec": {
-     "page_id": "748077268383005",
+     "page_id": "741373842505669",
      "video_data": {
-      "video_id": "1575524830435303"
+      "video_id": "1502665089514533"
      }
     },
-    "id": "1427606202272589"
+    "id": "1425382058384910"
    }
   },
   {
-   "id": "120231725136800790",
+   "id": "120820391605304135",
    "name": "Floor Prep",
-   "adset_id": "120231725136090790",
-   "campaign_id": "120231725135400790",
+   "adset_id": "127646897134140952",
+   "campaign_id": "123176515402851075",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2025-12-05T14:21:01+1000",
    "updated_time": "2026-01-21T14:58:42+1000",
    "creative": {
-    "video_id": "761292883407965",
-    "effective_object_story_id": "748077268383005_122133731342943042",
-    "id": "1569855154207354"
+    "video_id": "763333632472621",
+    "effective_object_story_id": "741373842505669_126204409910555772",
+    "id": "1536900512371840"
    }
   }
  ],
  "audiences": [
   {
-   "id": "120252445643140790",
+   "id": "120262578110415662",
    "name": "Oztop Form Openers 90d - Retarget",
    "subtype": "ENGAGEMENT",
    "approximate_count_lower_bound": 1000,
    "approximate_count_upper_bound": 1000,
    "time_created": 1783050890,
    "time_updated": 1783050890,
-   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"lead\",\"id\":2129625830942339,\"owner_id\":748077268383005},{\"type\":\"ig_lead_generation\",\"id\":2129625830942339,\"owner_id\":748077268383005}],\"retention_seconds\":7776000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"lead_generation_dropoff\"}]}}]}}",
+   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"lead\",\"id\":2170115742201123,\"owner_id\":741373842505669},{\"type\":\"ig_lead_generation\",\"id\":2170115742201123,\"owner_id\":741373842505669}],\"retention_seconds\":7776000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"lead_generation_dropoff\"}]}}]}}",
    "retention_days": 90,
    "operation_status": {
     "code": 200,
@@ -1910,14 +1910,14 @@
    }
   },
   {
-   "id": "120252445605260790",
+   "id": "124412709017815454",
    "name": "Oztop Page Engagers 365d - Retarget",
    "subtype": "ENGAGEMENT",
    "approximate_count_lower_bound": 1000,
    "approximate_count_upper_bound": 1000,
    "time_created": 1783050615,
    "time_updated": 1783050615,
-   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"page\",\"id\":748077268383005}],\"retention_seconds\":31536000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"page_engaged\"}]}}]}}",
+   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"page\",\"id\":741373842505669}],\"retention_seconds\":31536000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"page_engaged\"}]}}]}}",
    "retention_days": 365,
    "operation_status": {
     "code": 200,
@@ -1929,14 +1929,14 @@
    }
   },
   {
-   "id": "120252445512480790",
+   "id": "121099382092184231",
    "name": "Oztop Video Viewers 25% - Retarget",
    "subtype": "ENGAGEMENT",
    "approximate_count_lower_bound": 1200,
    "approximate_count_upper_bound": 1400,
    "time_created": 1783050199,
    "time_updated": 1786981587,
-   "rule": "[{\"event_name\":\"video_view_25_percent\",\"object_id\":2201410137339290},{\"event_name\":\"video_view_25_percent\",\"object_id\":964391103290917},{\"event_name\":\"video_view_25_percent\",\"object_id\":2454561404957018},{\"event_name\":\"video_view_25_percent\",\"object_id\":1904288590209550},{\"event_name\":\"video_view_25_percent\",\"object_id\":1018483021032153},{\"event_name\":\"video_view_25_percent\",\"object_id\":2446039952473057},{\"event_name\":\"video_view_25_percent\",\"object_id\":1765937077749551},{\"event_name\":\"video_view_25_percent\",\"object_id\":1687191775834083},{\"event_name\":\"video_view_25_percent\",\"object_id\":1040387065100377},{\"event_name\":\"video_view_25_percent\",\"object_id\":1009161975357455},{\"event_name\":\"video_view_25_percent\",\"object_id\":1537712584502929},{\"event_name\":\"video_view_25_percent\",\"object_id\":1300075262207626},{\"event_name\":\"video_view_25_percent\",\"object_id\":1499333188546183},{\"event_name\":\"video_view_25_percent\",\"object_id\":2107339083550997},{\"event_name\":\"video_view_25_percent\",\"object_id\":1913610732655891},{\"event_name\":\"video_view_25_percent\",\"object_id\":1586443513197661},{\"event_name\":\"video_view_25_percent\",\"object_id\":2078937886018346},{\"event_name\":\"video_view_25_percent\",\"object_id\":2212018469576003},{\"event_name\":\"video_view_25_percent\",\"object_id\":1206071332588381},{\"event_name\":\"video_view_25_percent\",\"object_id\":4383233561991408},{\"event_name\":\"video_view_25_percent\",\"object_id\":808105225626209},{\"event_name\":\"video_view_25_percent\",\"object_id\":1515413897027589},{\"event_name\":\"video_view_25_percent\",\"object_id\":4567752460161420},{\"event_name\":\"video_view_25_percent\",\"object_id\":1300143091983675},{\"event_name\":\"video_view_25_percent\",\"object_id\":1535036498318955},{\"event_name\":\"video_view_25_percent\",\"object_id\":3546824878813190},{\"event_name\":\"video_view_25_percent\",\"object_id\":1003087579280290},{\"event_name\":\"video_view_25_percent\",\"object_id\":2446035652560824},{\"event_name\":\"video_view_25_percent\",\"object_id\":1722604965548112},{\"event_name\":\"video_view_25_percent\",\"object_id\":1545864300418026},{\"event_name\":\"video_view_25_percent\",\"object_id\":1374923891203669},{\"event_name\":\"video_view_25_percent\",\"object_id\":1343942604470761},{\"event_name\":\"video_view_25_percent\",\"object_id\":2546353252481941}]",
+   "rule": "[{\"event_name\":\"video_view_25_percent\",\"object_id\":2231071012954111},{\"event_name\":\"video_view_25_percent\",\"object_id\":962375380250114},{\"event_name\":\"video_view_25_percent\",\"object_id\":2470815129728535},{\"event_name\":\"video_view_25_percent\",\"object_id\":1903132426150453},{\"event_name\":\"video_view_25_percent\",\"object_id\":1025466463577302},{\"event_name\":\"video_view_25_percent\",\"object_id\":2453838247582244},{\"event_name\":\"video_view_25_percent\",\"object_id\":1761699001605049},{\"event_name\":\"video_view_25_percent\",\"object_id\":1661042650155501},{\"event_name\":\"video_view_25_percent\",\"object_id\":1024036434600005},{\"event_name\":\"video_view_25_percent\",\"object_id\":1090060322612899},{\"event_name\":\"video_view_25_percent\",\"object_id\":1557817282867082},{\"event_name\":\"video_view_25_percent\",\"object_id\":1333401423439593},{\"event_name\":\"video_view_25_percent\",\"object_id\":1433501245268036},{\"event_name\":\"video_view_25_percent\",\"object_id\":2149310084333123},{\"event_name\":\"video_view_25_percent\",\"object_id\":1933940020376820},{\"event_name\":\"video_view_25_percent\",\"object_id\":1568547503302822},{\"event_name\":\"video_view_25_percent\",\"object_id\":2023575710121255},{\"event_name\":\"video_view_25_percent\",\"object_id\":2233320148194004},{\"event_name\":\"video_view_25_percent\",\"object_id\":1204734625631119},{\"event_name\":\"video_view_25_percent\",\"object_id\":4375634043744960},{\"event_name\":\"video_view_25_percent\",\"object_id\":805356046002595},{\"event_name\":\"video_view_25_percent\",\"object_id\":1579232920542168},{\"event_name\":\"video_view_25_percent\",\"object_id\":4518826069403344},{\"event_name\":\"video_view_25_percent\",\"object_id\":1355711114950502},{\"event_name\":\"video_view_25_percent\",\"object_id\":1579254423982513},{\"event_name\":\"video_view_25_percent\",\"object_id\":3581231407312558},{\"event_name\":\"video_view_25_percent\",\"object_id\":1053491441046063},{\"event_name\":\"video_view_25_percent\",\"object_id\":2453751253054464},{\"event_name\":\"video_view_25_percent\",\"object_id\":1704531041141373},{\"event_name\":\"video_view_25_percent\",\"object_id\":1503292138033313},{\"event_name\":\"video_view_25_percent\",\"object_id\":1353501730744521},{\"event_name\":\"video_view_25_percent\",\"object_id\":1310115325467435},{\"event_name\":\"video_view_25_percent\",\"object_id\":2532315394939329}]",
    "retention_days": 365,
    "operation_status": {
     "code": 200,
@@ -1948,14 +1948,14 @@
    }
   },
   {
-   "id": "120238453802750790",
+   "id": "123855331432202533",
    "name": "Website Visitors",
    "subtype": "WEBSITE",
    "approximate_count_lower_bound": 20,
    "approximate_count_upper_bound": 20,
    "time_created": 1764907368,
    "time_updated": 1764907368,
-   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"pixel\",\"id\":1320907320075995}],\"retention_seconds\":2592000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"url\",\"operator\":\"i_contains\",\"value\":\"\"}]},\"template\":\"ALL_VISITORS\"}]}}",
+   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"pixel\",\"id\":1301218199417201}],\"retention_seconds\":2592000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"url\",\"operator\":\"i_contains\",\"value\":\"\"}]},\"template\":\"ALL_VISITORS\"}]}}",
    "retention_days": 30,
    "operation_status": {
     "code": 450,
