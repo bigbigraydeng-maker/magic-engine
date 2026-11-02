@@ -36,11 +36,19 @@ function handlerOf(fn: ReturnType<typeof createStoryPublishActionReconcile>) {
 
 function storyDb(items: ReturnType<typeof row>[], registered: string[] = []) {
   const inserts: { table: string; row: Record<string, unknown> }[] = []
-  const ranges: number[] = []
+  const pageSizes: number[] = []
   let sawSince = false
   const supabase = {
     from(table: string) {
-      const state = { start: 0, end: null as number | null, ranged: false, since: null as string | null }
+      const state = {
+        start: 0,
+        end: null as number | null,
+        ranged: false,
+        since: null as string | null,
+        limit: null as number | null,
+        afterSent: null as string | null,
+        afterId: null as string | null,
+      }
       const builder = {
         select: () => builder,
         eq: () => builder,
@@ -51,11 +59,20 @@ function storyDb(items: ReturnType<typeof row>[], registered: string[] = []) {
         },
         order: () => builder,
         in: () => builder,
+        or: (expr: string) => {
+          state.afterId = expr.match(/item_id\.gt\."([0-9a-f-]+)"/i)?.[1] ?? null
+          state.afterSent = expr.match(/sent_at\.gt\."([^"]+)"/)?.[1] ?? null
+          return builder
+        },
+        limit: (n: number) => {
+          if (table === 'story_items') pageSizes.push(n)
+          state.limit = n
+          return builder
+        },
         range: (start: number, end: number) => {
           state.ranged = true
           state.start = start
           state.end = end
-          ranges.push(end - start + 1)
           return builder
         },
         insert: (body: Record<string, unknown>) => {
@@ -69,17 +86,24 @@ function storyDb(items: ReturnType<typeof row>[], registered: string[] = []) {
         then: (resolve: (value: unknown) => unknown) => {
           if (table === 'flywheel_actions') {
             const data = registered.map((key) => ({ client_id: CLIENT, payload: { idempotency_key: key } }))
-            return Promise.resolve({ data, error: null }).then(resolve)
+            const page = state.ranged && state.end !== null ? data.slice(state.start, state.end + 1) : data
+            return Promise.resolve({ data: page, error: null }).then(resolve)
           }
-          const eligible = state.since ? items.filter((item) => item.sent_at >= state.since!) : items
-          const page = state.ranged && state.end !== null ? eligible.slice(state.start, state.end + 1) : eligible
+          let eligible = state.since ? items.filter((item) => item.sent_at >= state.since!) : items.slice()
+          eligible.sort((a, b) => a.sent_at.localeCompare(b.sent_at) || a.item_id.localeCompare(b.item_id))
+          if (state.afterSent && state.afterId) {
+            const afterSent = state.afterSent
+            const afterId = state.afterId
+            eligible = eligible.filter((item) => item.sent_at > afterSent || (item.sent_at === afterSent && item.item_id > afterId))
+          }
+          const page = state.limit !== null ? eligible.slice(0, state.limit) : eligible
           return Promise.resolve({ data: page, error: null }).then(resolve)
         },
       }
       return builder
     },
   }
-  return { supabase: supabase as never, inserts, ranges, sawSince: () => sawSince }
+  return { supabase: supabase as never, inserts, pageSizes, sawSince: () => sawSince }
 }
 
 describe('story publish reconcile', () => {
@@ -112,7 +136,23 @@ describe('story publish reconcile', () => {
     const fn = createStoryPublishActionReconcile({ supabase: store.supabase, enabled: () => true, now: () => NOW })
     await expect(handlerOf(fn)({ step })).resolves.toMatchObject({ considered: 50, registered: 50, refused: 0 })
     expect(store.inserts.filter((row) => row.table === 'flywheel_actions')).toHaveLength(50)
-    expect(store.ranges.every((width) => width === 50)).toBe(true)
+    expect(store.pageSizes.every((width) => width === 50)).toBe(true)
+    expect(store.pageSizes.length).toBeGreaterThan(0)
+  })
+
+  it('a gap after the first 1000 registered stories is still registered', async () => {
+    const items = Array.from({ length: 1001 }, (_, index) => row(index))
+    const registered = items.slice(0, 1000).map((item) => storyPublishIdempotencyKey(item.item_id))
+    const listed = await listUnregisteredSentStories(storyDb(items, registered).supabase, NOW)
+    expect(listed.map((item) => item.item_id)).toEqual([itemId(1000)])
+
+    const store = storyDb(items, registered)
+    const step = { run: vi.fn(async (_id: string, fn: () => Promise<unknown>) => fn()) }
+    const fn = createStoryPublishActionReconcile({ supabase: store.supabase, enabled: () => true, now: () => NOW })
+    await expect(handlerOf(fn)({ step })).resolves.toMatchObject({ considered: 1, registered: 1, refused: 0 })
+    const writes = store.inserts.filter((entry) => entry.table === 'flywheel_actions')
+    expect(writes).toHaveLength(1)
+    expect(writes[0]?.row.payload).toMatchObject({ item_id: itemId(1000) })
   })
 
   it('already-registered rows do not crowd out a later missing story', async () => {
