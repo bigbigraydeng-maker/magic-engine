@@ -205,6 +205,8 @@ export const A_RISK_RULES = [
   { exact: 'src/lib/platform/live-switch.ts', why: '真发武装开关 —— 严格等于 true 的判断，松了就会误武装', category: RISK_CATEGORY.OUTWARD_WRITE },
   // Prefix, not a file-name pattern: a function file renamed or moved into a triggered-send/ subdirectory must stay A.
   { prefix: 'src/lib/inngest/functions/triggered-send', why: '触发型发送的扫描与回执函数 —— 决定谁收到信、状态怎么走', category: RISK_CATEGORY.OUTWARD_WRITE },
+  // The events that wake those functions: `dry_run` defaulting to true for a hand-sent event is a safety rule, so the file must not rate B.
+  { prefix: 'src/lib/inngest/triggered-send', why: '触发型发送的事件定义与解析 —— 手动事件缺省只演练，这条判断松了手动事件就可能真跑', category: RISK_CATEGORY.OUTWARD_WRITE },
   { prefix: 'src/lib/crm/email-templates/gates/', why: '销售手发邮件的频次 / 内容关口 —— 关口松了会多发', category: RISK_CATEGORY.OUTWARD_WRITE },
   { pattern: /^src\/lib\/crm\/email-templates\/(frequency-sources-prod|send-gates|send-gates-prod)\.ts$/, why: '销售手发邮件的频次来源与关口装配 —— 来源读不到按 0 就等于关掉频次闸', category: RISK_CATEGORY.OUTWARD_WRITE },
   { pattern: /^src\/lib\/crm\/(dnc|manual-send-dnc-gate|automated-touch)\.ts$/, why: '别再联系判据与机器信标记 —— 决定谁会被发信、什么算人工联系', category: RISK_CATEGORY.OUTWARD_WRITE },

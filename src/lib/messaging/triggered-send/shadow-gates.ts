@@ -1,0 +1,207 @@
+import type { OutboundItem } from '@/lib/crm/email-templates/gates/types'
+import type { TriggeredSendRule } from './rule'
+import type {
+  ConsentRead,
+  DeferReason,
+  DncRead,
+  EvidenceRead,
+  MemberRead,
+  ShadowAnnotations,
+  ShadowContact,
+  ShadowDecision,
+  ShadowGatePorts,
+  SkipReason,
+} from './types'
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const MAX_EMAIL_LENGTH = 254
+
+const SYSTEM_LOCAL_PARTS: ReadonlySet<string> = new Set([
+  'noreply',
+  'no-reply',
+  'donotreply',
+  'do-not-reply',
+  'mailer-daemon',
+  'postmaster',
+  'bounce',
+  'bounces',
+  'notification',
+  'notifications',
+])
+
+const LEAD_DAY_RE = /^\d{4}-\d{2}-\d{2}$/
+
+export function isPlausibleEmail(email: string): boolean {
+  if (typeof email !== 'string') return false
+  if (email.length === 0 || email.length > MAX_EMAIL_LENGTH) return false
+  return EMAIL_RE.test(email)
+}
+
+export function isSystemAddress(email: string): boolean {
+  if (typeof email !== 'string') return false
+  const at = email.indexOf('@')
+  if (at <= 0) return false
+  const local = email.slice(0, at).toLowerCase()
+  return SYSTEM_LOCAL_PARTS.has(local)
+}
+
+function leadLocalDay(contact: ShadowContact, rule: TriggeredSendRule): string {
+  try {
+    const formatted = new Intl.DateTimeFormat('en-CA', {
+      timeZone: rule.schedule.timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(contact.createdAt))
+    if (!LEAD_DAY_RE.test(formatted)) return 'unknown'
+    return formatted
+  } catch {
+    return 'unknown'
+  }
+}
+
+export function staleDecision(args: { contact: ShadowContact; rule: TriggeredSendRule }): ShadowDecision {
+  const { contact, rule } = args
+  const annotations: ShadowAnnotations = {
+    gate_contract_version: rule.gate_contract_version,
+    would_send: false,
+    legacy_welcomed: null,
+    sales_email: null,
+    frequency_count: null,
+    lead_local_day: leadLocalDay(contact, rule),
+  }
+  return {
+    kind: 'write',
+    status: 'skipped',
+    reasonCode: 'stale',
+    annotations,
+    consentBasis: null,
+    sourceRef: null,
+  }
+}
+
+type Safe<T> = T | { ok: false; error: string }
+
+async function safe<T>(fn: () => Promise<T>): Promise<Safe<T>> {
+  try {
+    return await fn()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown error'
+    return { ok: false, error: message }
+  }
+}
+
+function isFailed<T extends { ok: boolean }>(value: Safe<T>): value is { ok: false; error: string } {
+  return value.ok === false
+}
+
+function isSalesEmailItem(item: OutboundItem, createdAtMs: number): boolean {
+  if (item.source === 'mailchimp') return false
+  const atMs = Date.parse(item.at)
+  if (Number.isNaN(atMs)) return true
+  return atMs >= createdAtMs
+}
+
+export async function decideShadow(args: {
+  contact: ShadowContact
+  rule: TriggeredSendRule
+  ports: ShadowGatePorts
+}): Promise<ShadowDecision> {
+  const { contact, rule, ports } = args
+
+  const primaryEmail = contact.primaryEmail
+  const shouldReadMember = primaryEmail !== null && isPlausibleEmail(primaryEmail)
+  const shouldReadEvidence = contact.addresses.length > 0
+
+  const consentPromise: Promise<Safe<ConsentRead>> = safe(() => ports.consent(contact.contactId))
+  const dncPromise: Promise<Safe<DncRead>> = safe(() => ports.dnc(contact.contactId))
+  const memberPromise: Promise<Safe<MemberRead>> = shouldReadMember
+    ? safe(() => ports.member(primaryEmail as string))
+    : Promise.resolve<Safe<MemberRead>>({ ok: true, state: 'not_applicable' })
+  const evidencePromise: Promise<Safe<EvidenceRead>> = shouldReadEvidence
+    ? safe(() => ports.evidence(contact))
+    : Promise.resolve<Safe<EvidenceRead>>({
+        ok: true,
+        items: [],
+        isLegacyBatchItem: () => false,
+      })
+
+  const [consent, dnc, member, evidence] = await Promise.all([
+    consentPromise,
+    dncPromise,
+    memberPromise,
+    evidencePromise,
+  ])
+
+  // STEP 2: any failed read defers, in priority order.
+  if (isFailed(dnc)) {
+    return defer('dnc_unverifiable')
+  }
+  if (isFailed(consent)) {
+    return defer('consent_unreadable')
+  }
+  if (isFailed(member)) {
+    return defer('legacy_unverifiable')
+  }
+  if (isFailed(evidence)) {
+    return defer('evidence_unverifiable')
+  }
+
+  // STEP 3: derived facts.
+  const batchHit = evidence.items.some((item) => evidence.isLegacyBatchItem(item))
+  const counted = evidence.items.filter((item) => !evidence.isLegacyBatchItem(item))
+  const createdAtMs = Date.parse(contact.createdAt)
+  const salesEmail = counted.some((item) => isSalesEmailItem(item, createdAtMs))
+  const frequencyCount = counted.length
+
+  const allowlisted =
+    rule.recipient_allowlist !== null &&
+    primaryEmail !== null &&
+    rule.recipient_allowlist.includes(primaryEmail)
+
+  const matchedBasis =
+    consent.bases.find((basis) => rule.consent.accepted_bases.includes(basis)) ?? null
+
+  // STEP 4: first matching reason wins.
+  let reason: SkipReason | null = null
+  if (primaryEmail === null || !isPlausibleEmail(primaryEmail)) {
+    reason = 'bad_email'
+  } else if (isSystemAddress(primaryEmail)) {
+    reason = 'system_address'
+  } else if (rule.recipient_allowlist !== null && !allowlisted) {
+    reason = 'not_in_allowlist'
+  } else if (dnc.blocked) {
+    reason = 'dnc'
+  } else if (member.state === 'suppressed') {
+    reason = 'mailchimp_suppressed'
+  } else if (!allowlisted && matchedBasis === null) {
+    reason = 'no_consent_basis'
+  } else if (salesEmail) {
+    reason = 'sales_email_exists'
+  } else if (frequencyCount >= rule.frequency_cap.max) {
+    reason = 'frequency_full'
+  }
+
+  // STEP 5: build the write decision.
+  const annotations: ShadowAnnotations = {
+    gate_contract_version: rule.gate_contract_version,
+    would_send: reason === null,
+    legacy_welcomed: shouldReadEvidence ? batchHit : null,
+    sales_email: shouldReadEvidence ? salesEmail : null,
+    frequency_count: shouldReadEvidence ? frequencyCount : null,
+    lead_local_day: leadLocalDay(contact, rule),
+  }
+
+  return {
+    kind: 'write',
+    status: reason === null ? 'shadow' : 'skipped',
+    reasonCode: reason,
+    annotations,
+    consentBasis: matchedBasis,
+    sourceRef: consent.sourceRef,
+  }
+}
+
+function defer(reasonCode: DeferReason): ShadowDecision {
+  return { kind: 'defer', reasonCode }
+}
