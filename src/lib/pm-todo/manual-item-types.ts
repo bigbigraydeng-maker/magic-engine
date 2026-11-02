@@ -22,6 +22,7 @@ import {
 import type { AttributionItemKind } from './attribution-items'
 import type { ClientRosterItemKind } from './client-roster'
 import type { DailyPlanMeasurementItemKind } from './daily-plan-measurement-items'
+import type { SocialReadbackItemKind } from './social-readback-items'
 import type { EmailReplyItemKind } from './email-reply-items'
 import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
@@ -328,6 +329,8 @@ export type ManualItemKind =
   | PageBindingItemKind
   /** 排期发的 Facebook 帖子发出去了，但一直拿不到帖子编号 —— 成绩收不回来 */
   | DailyPlanMeasurementItemKind
+  /** 读回链拒绝开始记成绩（草稿 / 时间对不上 / 多条流量记录）。开关关掉时不会产出。 */
+  | SocialReadbackItemKind
   /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率过高 / 退订登记写入失败 */
   | 'conversation_health_alert'
   /** 同一个心跳查出「AI 起草回复一直报错」—— 这条只有我们能修（开发的活） */
