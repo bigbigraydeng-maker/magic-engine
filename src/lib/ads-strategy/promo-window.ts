@@ -81,6 +81,19 @@ export function nzToday(nowMs: number): string {
   return `${year}-${month}-${day}`
 }
 
+/** 新西兰日历 YYYY-MM-DD 往前减 n 天（不用 UTC 正午锚点）。 */
+export function nzDayMinus(day: string, days: number): string {
+  if (!isRealDate(day)) return day
+  if (days <= 0) return day
+  const year = Number(day.slice(0, 4))
+  const month = Number(day.slice(5, 7))
+  const date = Number(day.slice(8, 10))
+  const ms = Date.UTC(year, month - 1, date - days)
+  const d = new Date(ms)
+  const out = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+  return isRealDate(out) ? out : day
+}
+
 /**
  * 判定推广期。顺序不许变：
  * undeclared → evergreen ok → expired → not_started → expires_before_use_end → ok。
