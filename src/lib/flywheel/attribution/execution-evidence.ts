@@ -56,9 +56,14 @@ export interface EvaluabilityEvidence extends ExecutionEvidence {
  * Action types written at proposal time, and the `payload.status` values that mean the
  * change really happened. D3 auto-pause: the decision route sets `paused` only after the
  * kernel run succeeded, and the kernel only succeeds after the read-back showed PAUSED.
+ * Budget cut: the Inngest receipt maps the kernel outcome to `succeeded` only on success
+ * (or an idempotent hit of an earlier success).
  */
 const PROPOSAL_ROW_EXECUTED_STATUSES: Readonly<Record<string, readonly string[]>> = {
   'ads.auto_pause_on_d3': ['paused'],
+  // 减预算回执（inngest/functions/ads-campaign-budget.ts）不论成败都写、而且带观察指标：
+  // denied / dead_letter / workflow_failed 的行以前会被当成「已执行」去算结论（魏征 2026-11-03）
+  'ads.adjust_bid': ['succeeded'],
 }
 
 /** True when the row is a proposal whose status says nothing was carried out. */
