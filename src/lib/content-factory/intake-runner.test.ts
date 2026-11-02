@@ -105,9 +105,14 @@ describe('mixIntakePicks', () => {
     expect(mixed.slice(1).map((x) => x.title)).toEqual(['v1', 'v2', 'v3', 'v4'])
   })
 
-  it('does not reserve news when rewriteCount is 1', () => {
+  it('does not reserve news when rewriteCount is 1 and social exists', () => {
     const mixed = mixIntakePicks([viral('v1')], [viral('news')], 1)
     expect(mixed.map((x) => x.title)).toEqual(['v1'])
+  })
+
+  it('news-only source with rewriteCount 1 yields one unseen news pick', () => {
+    const mixed = mixIntakePicks([], [viral('only-news')], 1)
+    expect(mixed.map((x) => x.title)).toEqual(['only-news'])
   })
 })
 
