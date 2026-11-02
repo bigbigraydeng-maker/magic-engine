@@ -13,6 +13,7 @@ function settings(over: Partial<EmailSettings>): EmailSettings {
     footer: null,
     limits: { perUserPerHour: 30, perUserPerDay: 100, perMailboxPerDay: 200 },
     frequencyCap: null,
+    capExemptTemplateKeys: [],
     recipientAllowlist: null,
     sameTemplateCooldownHours: 24,
     callPromptHours: 48,
@@ -62,6 +63,7 @@ function dataReturning(receipts: StoredReceipt[], seenSince: string[]): SendGate
       seenSince.push(since)
       return receipts.filter((r) => r.createdAt >= since)
     },
+    exemptMessageIdsSince: async () => [],
     frequencySources: {
       sentItems: async () => ({ ok: true, items: [] }),
       audit: async () => ({ ok: true, items: [] }),
