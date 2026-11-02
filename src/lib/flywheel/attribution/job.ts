@@ -193,6 +193,8 @@ function evaluabilityOf(action: ActionRow) {
     execution_item_id: action.execution_item_id ?? null,
     action_run_id: action.action_run_id ?? null,
     vendor: action.vendor ?? null,
+    action_type: action.action_type ?? null,
+    payload_status: payloadText(action.payload, 'status'),
   }
 }
 

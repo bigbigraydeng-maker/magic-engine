@@ -111,7 +111,15 @@ describe('approveAndExecuteAdsAutoPause', () => {
     const result = await approveAndExecuteAdsAutoPause(dummyDeps, 'run-1', 'fde@magicengine.cloud', SEEN.toUpperCase())
     // 归一成小写：库里读出来的 id 永远是小写，大写会被误判成过期
     expect(approveAndRun).toHaveBeenCalledWith(dummyDeps, 'run-1', 'fde@magicengine.cloud', { expectedDecisionId: SEEN })
-    expect(result).toEqual({ runId: 'run-1', kind: 'succeeded', humanReason: null })
+    expect(result).toEqual({ runId: 'run-1', kind: 'succeeded', humanReason: null, finishedAt: null })
+  })
+
+  it('执行结束时间原样带出来（账表靠它把观察窗从真正暂停那一刻算起）', async () => {
+    approveAndRun.mockResolvedValueOnce({
+      kind: 'succeeded', run: fakeRun({ status: 'succeeded', finished_at: '2026-11-03T01:00:00.000Z' }), decision: null, execution: null, humanReason: null,
+    } satisfies ActionRunOutcome)
+    const result = await approveAndExecuteAdsAutoPause(dummyDeps, 'run-1', 'fde@magicengine.cloud', SEEN)
+    expect(result.finishedAt).toBe('2026-11-03T01:00:00.000Z')
   })
 
   it('执行失败 → dead_letter 原样透传，不粉饰成成功', async () => {

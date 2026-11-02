@@ -11,12 +11,15 @@
  * such a row with both link fields empty was never executed, and a before/after
  * difference measured from its `executed_at` says nothing about any real change.
  *
+ * Some writers store a row at PROPOSAL time and record what happened later in
+ * `payload.status` (`PROPOSAL_ROW_EXECUTED_STATUSES` below). For those action types only
+ * the listed statuses are real executions; dry runs, blocked, failed, awaiting-approval
+ * and rejected proposals never changed anything.
+ *
  * Everything else counts as executed: ads stop-loss, the ad execute routes, page
- * upgrades, kernel runs. NOTE for future writers: the D3 auto-pause flow keeps its run
- * id inside `payload` (not in `action_run_id`) and ad drafts / proposals awaiting
- * approval are stored as actions too — today none of them carries a success metric, so
- * counting them as executed is harmless. Before giving any of them an expected metric,
- * distinguish them by `payload.status` here.
+ * upgrades, kernel runs. NOTE for future writers: ad drafts / budget proposals are stored
+ * as actions too and are NOT listed yet — today none of them carries a success metric.
+ * Before giving any of them an expected metric, list its action type here.
  */
 
 /** The fields the rule reads. Loaders select the two payload keys as plain columns. */
@@ -43,6 +46,25 @@ export interface EvaluabilityEvidence extends ExecutionEvidence {
   discovery_id: string | null
   /** `vendor` column — a real provider name (meta, meta_graph, google_ads ...) is execution evidence. */
   vendor: string | null
+  /** `action_type` column. */
+  action_type: string | null
+  /** `payload->>status` — what happened to a row written at proposal time. */
+  payload_status: string | null
+}
+
+/**
+ * Action types written at proposal time, and the `payload.status` values that mean the
+ * change really happened. D3 auto-pause: the decision route sets `paused` only after the
+ * kernel run succeeded, and the kernel only succeeds after the read-back showed PAUSED.
+ */
+const PROPOSAL_ROW_EXECUTED_STATUSES: Readonly<Record<string, readonly string[]>> = {
+  'ads.auto_pause_on_d3': ['paused'],
+}
+
+/** True when the row is a proposal whose status says nothing was carried out. */
+export function isUnexecutedProposal(action: Pick<EvaluabilityEvidence, 'action_type' | 'payload_status'>): boolean {
+  const executed = PROPOSAL_ROW_EXECUTED_STATUSES[action.action_type ?? '']
+  return executed !== undefined && !executed.includes(action.payload_status ?? '')
 }
 
 /**
@@ -52,6 +74,7 @@ export interface EvaluabilityEvidence extends ExecutionEvidence {
  */
 export function isNotEvaluable(action: EvaluabilityEvidence): boolean {
   if (isUnexecutedSuggestion(action)) return true
+  if (isUnexecutedProposal(action)) return true
   const fromDiscovery = action.discovery_id !== null && action.discovery_id !== ''
   const hasProvider = action.vendor !== null && action.vendor !== ''
   return fromDiscovery && !hasProvider && action.execution_item_id === null && action.action_run_id === null

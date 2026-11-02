@@ -67,6 +67,7 @@ import { resolveClientEvaluationDate } from '@/lib/ads-strategy/account-timezone
 import { evaluateClientAdHealth } from '@/lib/ads-strategy/evaluate'
 import { sendAdHealthDigest } from '@/lib/ads-strategy/digest'
 import { runPortfolioDiagnostics } from '@/lib/ads-strategy/portfolio/run-daily'
+import type { RecentChangeShadow } from '@/lib/ads-strategy/portfolio/recent-change-shadow'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { ADS_DIAGNOSTICS_COMPLETED_EVENT } from '@/lib/inngest/functions/ads-d3-auto-pause'
 import { snapshotTablesExist } from '@/lib/ads-strategy/portfolio/snapshot-sync'
@@ -110,7 +111,7 @@ interface ClientResult {
   /** P21.K.4 daily email digest decision + send outcome. */
   ad_digest?: { sent: boolean; decision: string; error?: string }
   /** ads IMPACT 阶段 1：只读诊断 + 内部版日报 */
-  ad_diagnostics?: { success: boolean; hits: number; not_comparable: number; excluded: number; digest_decision?: string; digest_sent?: boolean; recipients_dropped?: number; error?: string }
+  ad_diagnostics?: { success: boolean; hits: number; not_comparable: number; excluded: number; digest_decision?: string; digest_sent?: boolean; recipients_dropped?: number; error?: string; shadow?: RecentChangeShadow | { error: string } }
   /**
    * 广告引擎配置**读失败**（不是没配置行）。2026-09-25 事故：读配置每次 400，
    * 下面的诊断 / 经营状态 / 日报全按 fallback 静默跳过，运行记录里一个字没有。
@@ -120,7 +121,7 @@ interface ClientResult {
   /** Ads D3 自动暂停：诊断完成后发给 Inngest 的事件（consumer 自己判要不要出手）。 */
   ad_auto_pause_event?: { sent: boolean; error?: string }
   /** 卫青巡察：问题 + 机会 + 目标节奏 → ads_growth_states 一行（spec 2026-09-24 §4）。 */
-  ads_growth_state?: { success: boolean; date?: string; problems?: number; opportunities?: number; completeness?: string; error?: string }
+  ads_growth_state?: { success: boolean; date?: string; problems?: number; opportunities?: number; completeness?: string; error?: string; shadow?: RecentChangeShadow | { error: string } }
   /** WP3.1a 每日 reconcile：给同步 worker 发一次叫醒铃（同一幂等 id，Inngest 24h 去重）。best-effort，不进 failed。 */
   autonomy_sync?: { sent: boolean; events: number; error?: string }
   /**
@@ -730,12 +731,25 @@ export async function GET(req: NextRequest) {
       return 'error' in p || p.skipped === null
     })
 
+  /**
+   * 闭环升级第 1 步的影子回执（docs/specs/2026-11-03-me-agent-loop-upgrade-design-v0.md §3.2）：
+   * 「刚动过的组」碰上 O1 加预算（本该压住）/ D3 止损（本该标注）。**只读、不改任何输出**；
+   * 只留有差异或出错的客户，`shadow_clients` 记这一轮一共判了几个客户，好算影子期的样本量。
+   */
+  const shadowRows = results.map((r) => ({ client_id: r.client_id, o1: r.ads_growth_state?.shadow, d3: r.ad_diagnostics?.shadow }))
+  const differs = (s: RecentChangeShadow | { error: string } | undefined): boolean =>
+    !!s && ('error' in s || s.would_suppress > 0 || s.would_annotate > 0)
+  const recentChangeShadow = {
+    shadow_clients: shadowRows.filter((r) => r.o1 || r.d3).length,
+    clients: shadowRows.filter((r) => differs(r.o1) || differs(r.d3)),
+  }
+
   await cronRun.finish({
     processed: results.length,
     completed: results.length - failed,
     error: errorMessage,
     failed,
-    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes },
+    summary: { gsc_synced: gscSynced, ga4_synced: ga4Synced, meta_synced: metaSynced, meta_idle: metaIdle, google_ads_synced: googleAdsSynced, ad_daily_synced: adDailySynced, ad_daily_rows: adDailyRows, ad_level_synced: adLevelSynced, ad_level_rows: adLevelRows, ad_health_synced: adHealthSynced, ad_health_alerts: adHealthAlerts, video_columns_written: withVideo, errors, circuit_probe: circuitProbes, recent_change_shadow: recentChangeShadow },
   })
   return NextResponse.json({
     success:           true,
