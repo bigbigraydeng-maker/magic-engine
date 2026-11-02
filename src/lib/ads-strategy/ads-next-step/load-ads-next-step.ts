@@ -12,7 +12,7 @@ import { ADS_O1_BUDGET_SCALE_ACTION_KEY } from '@/lib/action-submission/ads-o1-b
 import type { Diagnosis, DiagnosisRun } from '@/lib/ads-strategy/portfolio/diagnostics/types'
 import type { Prescription } from '@/types/diagnostic'
 import { prescriptionStatusLabel } from './prescription-labels'
-import type { AdsNextStepPendingItem, AdsNextStepView } from './types'
+import type { AdsNextStepPendingItem, AdsNextStepView, HealthRedLightsView } from './types'
 
 /** D 系列命中展示优先级（越靠前越「红灯」）。 */
 const DIAGNOSIS_HIT_PRIORITY: readonly string[] = [
@@ -38,7 +38,10 @@ async function loadHealthRedLights(
   sb: SupabaseClient,
   clientId: string,
   staffView: boolean,
-): Promise<AdsNextStepView['healthRedLights']> {
+): Promise<HealthRedLightsView> {
+  if (!staffView) {
+    return { kind: 'staff_only' }
+  }
   try {
     const { data, error } = await sb
       .from('ad_health_narratives')
@@ -55,7 +58,7 @@ async function loadHealthRedLights(
     if (!run || !Array.isArray(run.diagnoses)) return { kind: 'empty' }
 
     let hits = sortHits(run.diagnoses)
-    if (!staffView) hits = hits.filter((d) => d.clientVisible !== false)
+    hits = hits.filter((d) => d.clientVisible === true)
     const titles = hits.slice(0, 3).map((d) => d.title.trim()).filter((t) => t.length > 0)
     if (titles.length === 0) return { kind: 'empty' }
     return { kind: 'ok', data: { items: titles } }
@@ -70,10 +73,10 @@ async function loadPendingActions(
   staffView: boolean,
 ): Promise<AdsNextStepView['pendingActions']> {
   try {
-    const [d3, o1] = await Promise.all([
-      listPendingAdsAutoPauseForClient(sb, clientId),
-      listPendingRunsForActionForClient(sb, ADS_O1_BUDGET_SCALE_ACTION_KEY, clientId),
-    ])
+    const d3 = await listPendingAdsAutoPauseForClient(sb, clientId)
+    const o1 = staffView
+      ? await listPendingRunsForActionForClient(sb, ADS_O1_BUDGET_SCALE_ACTION_KEY, clientId)
+      : { items: [], hasMore: false }
     const items: AdsNextStepPendingItem[] = []
 
     for (const row of d3.items) {

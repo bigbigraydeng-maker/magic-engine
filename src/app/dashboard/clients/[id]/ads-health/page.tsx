@@ -541,11 +541,14 @@ export default function AdsHealthPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   /**
-   * 初值从网址 `?tab=` 取，这样待办和书签能直接落到某个标签上
-   * （`…/ads-health?tab=approvals`）。之后由用户点击接管，不再跟着网址变 ——
-   * 页面没有把标签写回网址，所以这里只读一次就够。
+   * 初值从网址 `?tab=` 取；待办 deep link 和合并卡链接会改 query，
+   * 需要跟着 searchParams 同步标签（不只 mount 读一次）。
    */
   const [tab, setTab] = useState<PageTab>(() => tabFromQuery(searchParams.get('tab')))
+
+  useEffect(() => {
+    setTab(tabFromQuery(searchParams.get('tab')))
+  }, [searchParams])
 
   useEffect(() => {
     let alive = true

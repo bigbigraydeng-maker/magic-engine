@@ -22,6 +22,8 @@ let searchParamsValue = new URLSearchParams()
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84' }),
   useSearchParams: () => searchParamsValue,
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => '/dashboard/clients/d5c98811-1c1d-4ded-bdf0-4cefec6afb84/ads-health',
 }))
 
 vi.mock('next/link', () => ({
@@ -503,7 +505,16 @@ describe('「等你点头」标签', () => {
    */
   it('?tab= 给了认不出的值，落回「今天看这里」而不是空白', async () => {
     searchParamsValue = new URLSearchParams('tab=nonsense')
-    vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([]) }))
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': respond([]),
+      '/ad-health/next-step': {
+        view: {
+          healthRedLights: { kind: 'staff_only' },
+          pendingActions: { kind: 'empty' },
+          prescription: { kind: 'empty' },
+        },
+      },
+    }))
     render(<AdsHealthPage />)
 
     // 断言「哪个标签是选中态」，而不是断言某块面板的文字 ——
@@ -512,5 +523,28 @@ describe('「等你点头」标签', () => {
     expect(active.className).toContain('border-gray-800')
     expect(screen.getByTitle('这个客户等人点头的广告动作').className).toContain('border-transparent')
     expect(screen.queryByText(/系统发现这些广告组连续花钱没结果/)).toBeNull()
+  })
+
+  it('searchParams 的 ?tab= 变化后标签状态跟着更新（合并卡 deep link 回归）', async () => {
+    searchParamsValue = new URLSearchParams('tab=today')
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': respond([]),
+      '/ad-health/next-step': {
+        view: {
+          healthRedLights: { kind: 'staff_only' },
+          pendingActions: { kind: 'empty' },
+          prescription: { kind: 'empty' },
+        },
+      },
+    }))
+    const { rerender } = render(<AdsHealthPage />)
+    await screen.findByTitle('三句话：池子、频率、今天调什么')
+
+    searchParamsValue = new URLSearchParams('tab=settings')
+    rerender(<AdsHealthPage />)
+
+    await waitFor(() => {
+      expect(screen.getByTitle('每天预算上限、自动化、可投视频').className).toContain('border-gray-800')
+    })
   })
 })

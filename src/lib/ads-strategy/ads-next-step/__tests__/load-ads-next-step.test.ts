@@ -236,11 +236,110 @@ describe('loadAdsNextStepView', () => {
     const staff = await loadAdsNextStepView(sb, CLIENT, { staffView: true })
     const client = await loadAdsNextStepView(sb, CLIENT, { staffView: false })
     expect(staff.pendingActions.kind).toBe('ok')
-    expect(client.pendingActions.kind).toBe('ok')
-    if (staff.pendingActions.kind === 'ok' && client.pendingActions.kind === 'ok') {
+    expect(client.pendingActions.kind).toBe('empty')
+    if (staff.pendingActions.kind === 'ok') {
       expect(staff.pendingActions.data.items[0].summary).toContain('内部才该看到')
-      expect(client.pendingActions.data.items[0].summary).toBe('加预算建议等人批准')
-      expect(client.pendingActions.data.items[0].summary).not.toContain('内部')
     }
+  })
+
+  it('staffView=false 不读 portfolio_diagnoses，返回 staff_only', async () => {
+    const sb = createFakeSupabase(
+      {
+        ad_health_narratives: [narrativeWithHits(['内部 D11 不应下发'])],
+        action_runs: [],
+        authorization_decisions: [],
+        flywheel_actions: [],
+        prescriptions: [],
+      },
+      { failOn: [{ table: 'ad_health_narratives', op: 'select', message: 'must not query' }] },
+    )
+    const view = await loadAdsNextStepView(sb, CLIENT, { staffView: false })
+    expect(view.healthRedLights).toEqual({ kind: 'staff_only' })
+  })
+
+  it('staffView=true 时 clientVisible 缺省或为 false 的命中不出现在红灯列表', async () => {
+    const sb = createFakeSupabase({
+      ad_health_narratives: [{
+        client_id: CLIENT,
+        insight_date: '2026-11-01',
+        payload: {
+          portfolio_diagnoses: {
+            diagnoses: [
+              {
+                code: 'D3',
+                status: 'hit',
+                title: '客户可见',
+                units: [],
+                evidence: {},
+                sample: [],
+                reasons: [],
+                clientVisible: true,
+              },
+              {
+                code: 'D11',
+                status: 'hit',
+                title: '仅内部 D11',
+                units: [],
+                evidence: {},
+                sample: [],
+                reasons: [],
+                clientVisible: false,
+              },
+              {
+                code: 'D7',
+                status: 'hit',
+                title: '缺 clientVisible 字段',
+                units: [],
+                evidence: {},
+                sample: [],
+                reasons: [],
+              },
+            ],
+          },
+        },
+      }],
+      action_runs: [],
+      authorization_decisions: [],
+      flywheel_actions: [],
+      prescriptions: [],
+    })
+    const view = await loadAdsNextStepView(sb, CLIENT, { staffView: true })
+    expect(view.healthRedLights).toEqual({
+      kind: 'ok',
+      data: { items: ['客户可见'] },
+    })
+  })
+
+  it('staffView=false 不列出 O1 待批（即使库里有）', async () => {
+    const o1Decision = '66666666-6666-4666-8666-666666666666'
+    const o1Run = '77777777-7777-4777-8777-777777777777'
+    const sb = createFakeSupabase({
+      ad_health_narratives: [],
+      action_runs: [{
+        id: o1Run,
+        client_id: CLIENT,
+        action_key: O1,
+        action_version: 1,
+        idempotency_key: 'k-o1-only',
+        status: 'pending_approval',
+        authorization_decision_id: o1Decision,
+        input: { adset_id: 'adset-1', ad_account_id: 'act_1' },
+        rationale: 'secret',
+        created_at: '2026-11-01T00:00:00Z',
+      }],
+      authorization_decisions: [{
+        id: o1Decision,
+        action_run_id: o1Run,
+        client_id: CLIENT,
+        action_key: O1,
+        action_version: 1,
+        idempotency_key: 'k-o1-only',
+        verdict: 'require_approval',
+      }],
+      flywheel_actions: [],
+      prescriptions: [],
+    })
+    const view = await loadAdsNextStepView(sb, CLIENT, { staffView: false })
+    expect(view.pendingActions.kind).toBe('empty')
   })
 })

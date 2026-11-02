@@ -2,9 +2,33 @@
 
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
-import type { AdsNextStepRow, AdsNextStepView } from '@/lib/ads-strategy/ads-next-step/types'
+import type { AdsNextStepRow, AdsNextStepView, HealthRedLightsView } from '@/lib/ads-strategy/ads-next-step/types'
 
 type LoadStatus = 'loading' | 'done' | 'failed'
+
+function healthRowText(
+  status: LoadStatus,
+  row: HealthRedLightsView | undefined,
+): React.ReactNode {
+  if (status === 'loading') return <span className="text-gray-500">读取中…</span>
+  if (status === 'failed' || row === undefined) {
+    return <span className="text-gray-500">没读到</span>
+  }
+  if (row.kind === 'staff_only') {
+    return (
+      <span className="text-gray-500">
+        详细体检结论仅内部可见；请看下方「今天看这里」和每条广告。
+      </span>
+    )
+  }
+  return rowText(status, row, (data) => (
+    <ul className="list-disc pl-4 space-y-0.5">
+      {data.items.map((line) => (
+        <li key={line}>{line}</li>
+      ))}
+    </ul>
+  ), '今天没有需要优先处理的体检红灯')
+}
 
 function rowText<T>(
   status: LoadStatus,
@@ -32,6 +56,7 @@ export default function AdsNextStepCard({ clientId }: { readonly clientId: strin
     fetch(`/api/clients/${clientId}/ad-health/next-step`)
       .then(async (res) => {
         if (!res.ok) {
+          if (!alive) return
           setLoadStatus('failed')
           return
         }
@@ -61,13 +86,7 @@ export default function AdsNextStepCard({ clientId }: { readonly clientId: strin
         <div>
           <dt className="text-xs font-medium text-slate-500">体检红灯</dt>
           <dd className="mt-0.5 text-slate-800">
-            {rowText(loadStatus, view?.healthRedLights, (data) => (
-              <ul className="list-disc pl-4 space-y-0.5">
-                {data.items.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            ), '今天没有需要优先处理的体检红灯')}
+            {healthRowText(loadStatus, view?.healthRedLights)}
           </dd>
         </div>
         <div>
