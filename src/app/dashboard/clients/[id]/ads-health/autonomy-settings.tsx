@@ -60,6 +60,17 @@ interface LabelsResponse {
   labels?: Record<string, CreativeLabel>
 }
 
+/** Live from Meta on every page load (the URLs expire, so the server never stores them). */
+interface CreativeThumbnail {
+  thumbnailUrl: string | null
+  title: string | null
+  durationSeconds: number | null
+}
+
+interface ThumbnailsResponse {
+  thumbnails?: Record<string, CreativeThumbnail>
+}
+
 /** Stored in cents; shown to people in whole currency units. */
 function centsToDisplay(cents: number | null): string {
   if (cents == null) return ''
@@ -193,26 +204,70 @@ function ModeField({
   )
 }
 
-function VideoRow({ entry, label }: { entry: CreativePoolEntry; label: CreativeLabel | undefined }) {
+function VideoThumb({ url }: { url: string | null | undefined }) {
+  const [failed, setFailed] = useState(false)
+  if (url && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- signed Meta URL, not optimisable
+      <img
+        src={url}
+        alt="视频缩略图"
+        width={64}
+        height={114}
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="h-[114px] w-16 shrink-0 rounded-md bg-gray-100 object-cover"
+      />
+    )
+  }
+  return (
+    <div
+      data-testid="video-thumb-placeholder"
+      className="flex h-[114px] w-16 shrink-0 items-center justify-center rounded-md bg-gray-100 text-center text-[10px] leading-tight text-gray-400"
+    >
+      暂无缩略图
+    </div>
+  )
+}
+
+function VideoRow({
+  entry,
+  label,
+  media,
+}: {
+  entry: CreativePoolEntry
+  label: CreativeLabel | undefined
+  media?: CreativeThumbnail
+}) {
   const number = videoNumber(entry)
   const fbUrl = label?.url ?? (/^\d+$/.test(number) ? `https://www.facebook.com/reel/${number}` : null)
   return (
-    <div className="min-w-0">
-      <p className="truncate text-gray-800">
-        {label ? label.title : <span className="text-amber-700">未能识别，请核对</span>}
-        {label?.subtitle && <span className="text-gray-500"> · {label.subtitle}</span>}
-      </p>
-      <p className="text-xs text-gray-400">
-        发布日期 {formatDate(label?.publishedAt ?? null)} · 编号 <span className="tabular-nums">{number}</span>
-        {fbUrl && (
-          <>
-            {' '}·{' '}
-            <a href={fbUrl} target="_blank" rel="noreferrer" className="text-gray-500 underline hover:text-gray-700">
-              在 Facebook 打开
-            </a>
-          </>
+    <div className="flex min-w-0 items-center gap-3">
+      <VideoThumb url={media?.thumbnailUrl} />
+      <div className="min-w-0">
+        <p className="truncate text-gray-800">
+          {label ? label.title : <span className="text-amber-700">未能识别，请核对</span>}
+          {label?.subtitle && <span className="text-gray-500"> · {label.subtitle}</span>}
+        </p>
+        {(media?.title || media?.durationSeconds) && (
+          <p className="truncate text-xs text-gray-500">
+            {media.title && <>Meta 上的标题：{media.title}</>}
+            {media.title && media.durationSeconds ? ' · ' : ''}
+            {media.durationSeconds ? `时长 ${media.durationSeconds} 秒` : ''}
+          </p>
         )}
-      </p>
+        <p className="text-xs text-gray-400">
+          发布日期 {formatDate(label?.publishedAt ?? null)} · 编号 <span className="tabular-nums">{number}</span>
+          {fbUrl && (
+            <>
+              {' '}·{' '}
+              <a href={fbUrl} target="_blank" rel="noreferrer" className="text-gray-500 underline hover:text-gray-700">
+                在 Facebook 打开
+              </a>
+            </>
+          )}
+        </p>
+      </div>
     </div>
   )
 }
@@ -231,6 +286,7 @@ function CreativePoolList({
   const [busyRef, setBusyRef] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [labels, setLabels] = useState<Record<string, CreativeLabel>>({})
+  const [thumbs, setThumbs] = useState<Record<string, CreativeThumbnail>>({})
   const refKey = entries.map(e => e.ref).join(',')
 
   useEffect(() => {
@@ -240,6 +296,16 @@ function CreativePoolList({
       .then(r => (r.ok ? (r.json() as Promise<LabelsResponse>) : { labels: {} }))
       .then(j => { if (alive) setLabels(j.labels ?? {}) })
       .catch(() => { /* names stay "unrecognised"; never block approval UI */ })
+    return () => { alive = false }
+  }, [clientId, refKey])
+
+  useEffect(() => {
+    if (refKey === '') return
+    let alive = true
+    fetch(`/api/clients/${clientId}/ad-strategy-config/creative-pool/thumbnails`)
+      .then(r => (r.ok ? (r.json() as Promise<ThumbnailsResponse>) : { thumbnails: {} }))
+      .then(j => { if (alive) setThumbs(j.thumbnails ?? {}) })
+      .catch(() => { /* grey placeholder stays; never block approval UI */ })
     return () => { alive = false }
   }, [clientId, refKey])
 
@@ -277,7 +343,7 @@ function CreativePoolList({
     <div className="space-y-2.5">
       {entries.map(e => (
         <div key={`${e.kind}:${e.ref}`} className="flex items-center justify-between gap-3 text-sm">
-          <VideoRow entry={e} label={labels[e.ref]} />
+          <VideoRow entry={e} label={labels[e.ref]} media={thumbs[e.ref]} />
           <div className="flex shrink-0 items-center gap-2">
             <span className={`text-xs ${e.status === 'approved' ? 'text-emerald-600' : 'text-gray-400'}`}>
               {e.status === 'approved'
