@@ -3,6 +3,7 @@ import {
   parseEmailSettingsStrict,
   serialiseEmailSettings,
 } from '@/lib/crm/email-templates/settings'
+import { effectiveFromSettings } from '@/lib/crm/email-templates/effective-config'
 import type { EmailSettings } from '@/lib/crm/email-templates/types'
 
 function validRaw(): Record<string, unknown> {
@@ -402,5 +403,187 @@ describe('parseEmailSettingsStrict', () => {
       const result = parseEmailSettingsStrict(raw)
       expect(result.ok).toBe(false)
     }
+  })
+})
+
+describe('cap_exempt_template_keys', () => {
+  it('a version stored before the key existed still parses, with an empty list', () => {
+    const raw = validRaw()
+    expect('cap_exempt_template_keys' in raw).toBe(false)
+    const settings = parseOk(raw)
+    expect(settings.capExemptTemplateKeys).toEqual([])
+  })
+
+  it('a list of template keys parses in order', () => {
+    const raw = validRaw()
+    raw.cap_exempt_template_keys = [
+      'tour-enquiry-reply',
+      'catalogue-request-reply',
+    ]
+    const settings = parseOk(raw)
+    expect(settings.capExemptTemplateKeys).toEqual([
+      'tour-enquiry-reply',
+      'catalogue-request-reply',
+    ])
+  })
+
+  it('duplicates collapse, first one kept', () => {
+    const raw = validRaw()
+    raw.cap_exempt_template_keys = [
+      'tour-enquiry-reply',
+      'catalogue-request-reply',
+      'tour-enquiry-reply',
+    ]
+    const settings = parseOk(raw)
+    expect(settings.capExemptTemplateKeys).toEqual([
+      'tour-enquiry-reply',
+      'catalogue-request-reply',
+    ])
+  })
+
+  it.each(['tour-enquiry-reply', null, {}])(
+    'refuses a value that is not an array %p',
+    (value) => {
+      const raw = validRaw()
+      raw.cap_exempt_template_keys = value
+      const result = parseEmailSettingsStrict(raw)
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(
+          result.errors.some((e) =>
+            e.includes(
+              'cap_exempt_template_keys: must be an array of template keys',
+            ),
+          ),
+        ).toBe(true)
+      }
+    },
+  )
+
+  it.each([[5], ['Tour Enquiry'], ['a'], ['-x'], [''], [null]])(
+    'refuses entries that are not template keys %p',
+    (value) => {
+      const raw = validRaw()
+      raw.cap_exempt_template_keys = [value]
+      const result = parseEmailSettingsStrict(raw)
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(
+          result.errors.some((e) =>
+            e.includes(
+              'cap_exempt_template_keys[0]: must be a template key',
+            ),
+          ),
+        ).toBe(true)
+      }
+    },
+  )
+
+  it('reports the index of a bad key after a good one', () => {
+    const raw = validRaw()
+    raw.cap_exempt_template_keys = ['tour-enquiry-reply', 'Tour Enquiry']
+    const result = parseEmailSettingsStrict(raw)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(
+        result.errors.some((e) =>
+          e.includes('cap_exempt_template_keys[1]: must be a template key'),
+        ),
+      ).toBe(true)
+    }
+  })
+
+  it('refuses more than 20 keys', () => {
+    const raw = validRaw()
+    raw.cap_exempt_template_keys = Array.from(
+      { length: 21 },
+      (_, i) => `key-${String(i + 1).padStart(2, '0')}`,
+    )
+    const result = parseEmailSettingsStrict(raw)
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(
+        result.errors.some((e) => e.includes('must have at most 20 entries')),
+      ).toBe(true)
+    }
+  })
+
+  it('accepts exactly 20 keys', () => {
+    const raw = validRaw()
+    raw.cap_exempt_template_keys = Array.from(
+      { length: 20 },
+      (_, i) => `key-${String(i + 1).padStart(2, '0')}`,
+    )
+    const settings = parseOk(raw)
+    expect(settings.capExemptTemplateKeys).toHaveLength(20)
+  })
+
+  it('still refuses an unknown top-level key and a missing required key', () => {
+    const withBogus = validRaw()
+    withBogus.bogus = 1
+    const bogusResult = parseEmailSettingsStrict(withBogus)
+    expect(bogusResult.ok).toBe(false)
+    if (!bogusResult.ok) {
+      expect(
+        bogusResult.errors.some((e) => e.includes('root.bogus: unknown key')),
+      ).toBe(true)
+    }
+
+    const missingFooter = validRaw()
+    delete missingFooter.footer
+    const missingResult = parseEmailSettingsStrict(missingFooter)
+    expect(missingResult.ok).toBe(false)
+    if (!missingResult.ok) {
+      expect(
+        missingResult.errors.some((e) =>
+          e.includes('root.footer: is required'),
+        ),
+      ).toBe(true)
+    }
+  })
+
+  it('serialise always writes the key and the result parses back to the same settings', () => {
+    const raw = validRaw()
+    raw.cap_exempt_template_keys = [
+      'tour-enquiry-reply',
+      'catalogue-request-reply',
+    ]
+    const settings = parseOk(raw)
+    const serialised = serialiseEmailSettings(settings)
+    expect(serialised.cap_exempt_template_keys).toEqual([
+      'tour-enquiry-reply',
+      'catalogue-request-reply',
+    ])
+    const keys = Object.keys(serialised)
+    expect(keys.indexOf('cap_exempt_template_keys')).toBe(
+      keys.indexOf('frequency_cap') + 1,
+    )
+
+    const reparsed = parseEmailSettingsStrict(serialised)
+    expect(reparsed.ok).toBe(true)
+    if (!reparsed.ok) return
+    expect(reparsed.settings).toEqual(settings)
+  })
+
+  it('serialise writes an empty list when there are no exempt keys', () => {
+    const settings = parseOk(validRaw())
+    const serialised = serialiseEmailSettings(settings)
+    expect('cap_exempt_template_keys' in serialised).toBe(true)
+    expect(serialised.cap_exempt_template_keys).toEqual([])
+  })
+
+  it('effectiveFromSettings copies the list', () => {
+    const raw = validRaw()
+    raw.cap_exempt_template_keys = [
+      'tour-enquiry-reply',
+      'catalogue-request-reply',
+    ]
+    const settings = parseOk(raw)
+    const eff = effectiveFromSettings(settings, 3)
+    expect(eff.capExemptTemplateKeys).toEqual([
+      'tour-enquiry-reply',
+      'catalogue-request-reply',
+    ])
+    expect(eff.capExemptTemplateKeys).not.toBe(settings.capExemptTemplateKeys)
   })
 })

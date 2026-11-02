@@ -229,3 +229,91 @@ describe('preview and send use the same functions', () => {
     }
   })
 })
+
+describe('previewTemplate: exempt templates', () => {
+  it('an exempt template shows state exempt with the cap numbers and asks no source', async () => {
+    const data = makeData()
+    const res = await previewTemplate(args({ config: config({ capExemptTemplateKeys: ['post-call-single-tour'] }) }), data)
+    expect(res.ok && res.frequency).toMatchObject({
+      state: 'exempt',
+      count: null,
+      max: 2,
+      windowDays: 7,
+      nextAllowedAt: null,
+      items: [],
+      error: null,
+    })
+    expect(data.frequencySources.sentItems).not.toHaveBeenCalled()
+    expect(vi.mocked(evaluateFrequency)).not.toHaveBeenCalled()
+    expect(data.exemptMessageIdsSince).not.toHaveBeenCalled()
+  })
+
+  it('it stays exempt even when the guest is at the cap', async () => {
+    const data = makeData()
+    vi.mocked(data.frequencySources.sentItems).mockResolvedValueOnce({
+      ok: true,
+      items: [item('m1', '2026-10-27T01:00:00Z'), item('m2', '2026-10-27T05:00:00Z')],
+    })
+    const res = await previewTemplate(args({ config: config({ capExemptTemplateKeys: ['post-call-single-tour'] }) }), data)
+    expect(res.ok && res.frequency.state).toBe('exempt')
+    expect(data.frequencySources.sentItems).not.toHaveBeenCalled()
+  })
+
+  it('no cap at all is still off, not exempt', async () => {
+    const data = makeData()
+    const res = await previewTemplate(
+      args({ config: config({ frequencyCap: null, capExemptTemplateKeys: ['post-call-single-tour'] }) }),
+      data,
+    )
+    expect(res.ok && res.frequency.state).toBe('off')
+  })
+
+  it('for another template the exempt mails do not count', async () => {
+    const data = makeData({ exemptMessageIdsSince: vi.fn(async () => ['m1']) })
+    vi.mocked(data.frequencySources.sentItems).mockResolvedValueOnce({
+      ok: true,
+      items: [item('m1', '2026-10-27T01:00:00Z'), item('m2', '2026-10-27T05:00:00Z')],
+    })
+    const res = await previewTemplate(args({ config: config({ capExemptTemplateKeys: ['some-other-template'] }) }), data)
+    expect(res.ok && res.frequency).toMatchObject({ state: 'ok', count: 1 })
+    expect(res.ok && res.frequency.items.map((i) => i.subject)).toEqual(['Subject m2'])
+  })
+
+  it('a lookup that fails makes the count unverifiable', async () => {
+    const data = makeData({
+      exemptMessageIdsSince: vi.fn(async () => {
+        throw new Error('receipts down')
+      }),
+    })
+    const res = await previewTemplate(args({ config: config({ capExemptTemplateKeys: ['some-other-template'] }) }), data)
+    expect(res.ok && res.frequency).toMatchObject({ state: 'unverifiable', count: null })
+    expect(res.ok && res.frequency.error).toContain('exempt ids')
+  })
+
+  it('changing the exempt list is not hidden by the 60 s cache', async () => {
+    const data = makeData()
+    await previewTemplate(args({ config: config({ capExemptTemplateKeys: ['some-other-template'] }) }), data)
+    await previewTemplate(
+      args({ config: config({ capExemptTemplateKeys: [] }), now: new Date(NOW.getTime() + 10_000) }),
+      data,
+    )
+    expect(data.frequencySources.sentItems).toHaveBeenCalledTimes(2)
+
+    clearPreviewCache() // the cache is shared by every call; the control must start from an empty one
+    const control = makeData()
+    await previewTemplate(args({ config: config({ capExemptTemplateKeys: ['some-other-template'] }) }), control)
+    await previewTemplate(
+      args({ config: config({ capExemptTemplateKeys: ['some-other-template'] }), now: new Date(NOW.getTime() + 10_000) }),
+      control,
+    )
+    expect(control.frequencySources.sentItems).toHaveBeenCalledTimes(1)
+  })
+
+  it('the loader is passed only when something is exempt', async () => {
+    await previewTemplate(args({ config: config({ capExemptTemplateKeys: [] }) }), makeData())
+    expect(vi.mocked(evaluateFrequency).mock.calls.at(-1)?.[0].loadExemptIds).toBeUndefined()
+
+    await previewTemplate(args({ config: config({ capExemptTemplateKeys: ['some-other-template'] }) }), makeData())
+    expect(typeof vi.mocked(evaluateFrequency).mock.calls.at(-1)?.[0].loadExemptIds).toBe('function')
+  })
+})

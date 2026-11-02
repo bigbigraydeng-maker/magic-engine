@@ -1,4 +1,5 @@
 import type {
+  ExemptIdLoader,
   FrequencySources,
   FrequencyVerdict,
   OutboundItem,
@@ -96,6 +97,17 @@ async function safeCall(fn: () => Promise<SourceResult>): Promise<SourceResult> 
   }
 }
 
+type IdsResult = { ok: true; ids: readonly string[] } | { ok: false; error: string }
+
+async function safeIds(load: ExemptIdLoader | undefined, sinceIso: string): Promise<IdsResult> {
+  if (load === undefined) return { ok: true, ids: [] }
+  try {
+    return { ok: true, ids: await load(sinceIso) }
+  } catch (err) {
+    return { ok: false, error: `exempt ids: ${toError(err)}` }
+  }
+}
+
 function filterItems(
   items: readonly OutboundItem[],
   addresses: ReadonlySet<string>,
@@ -114,6 +126,7 @@ function filterItems(
 interface Collected {
   ok: true
   items: OutboundItem[]
+  exemptIds: Set<string>
 }
 
 interface Failed {
@@ -127,14 +140,16 @@ async function collect(
     contactId: string
     sinceIso: string
     sources: FrequencySources
+    loadExemptIds: ExemptIdLoader | undefined
   },
 ): Promise<Collected | Failed> {
-  const { addresses, contactId, sinceIso, sources } = args
-  const [sent, audit, touch, mail] = await Promise.all([
+  const { addresses, contactId, sinceIso, sources, loadExemptIds } = args
+  const [sent, audit, touch, mail, exempt] = await Promise.all([
     safeCall(() => sources.sentItems(addresses, sinceIso)),
     safeCall(() => sources.audit(contactId, sinceIso)),
     safeCall(() => sources.touchpoints(contactId, sinceIso)),
     safeCall(() => sources.mailchimp(addresses, sinceIso)),
+    safeIds(loadExemptIds, sinceIso),
   ])
   const results: SourceResult[] = [sent, audit, touch, mail]
   const errors: string[] = []
@@ -146,8 +161,9 @@ async function collect(
       errors.push(r.error)
     }
   }
+  if (!exempt.ok) errors.push(exempt.error)
   if (errors.length > 0) return { ok: false, error: errors.join('; ') }
-  return { ok: true, items }
+  return { ok: true, items, exemptIds: new Set(exempt.ok ? exempt.ids : []) }
 }
 
 function withTimeout<T>(p: Promise<T>, budgetMs: number): Promise<T | 'timeout'> {
@@ -173,6 +189,7 @@ export async function evaluateFrequency(args: {
   contactId: string
   sources: FrequencySources
   budgetMs?: number
+  loadExemptIds?: ExemptIdLoader
 }): Promise<FrequencyVerdict> {
   const { cap, now, addresses, contactId, sources } = args
   const budgetMs = args.budgetMs ?? DEFAULT_BUDGET_MS
@@ -181,7 +198,7 @@ export async function evaluateFrequency(args: {
   const sinceIso = new Date(sinceMs).toISOString()
 
   const collected = await withTimeout(
-    collect({ addresses, contactId, sinceIso, sources }),
+    collect({ addresses, contactId, sinceIso, sources, loadExemptIds: args.loadExemptIds }),
     budgetMs,
   )
   if (collected === 'timeout') {
@@ -198,7 +215,13 @@ export async function evaluateFrequency(args: {
     item.address === '' && primary !== '' ? { ...item, address: primary } : item,
   )
   const filtered = filterItems(scoped, addressSet, sinceMs, nowMs)
-  const items = dedupeItems(filtered)
+  // A mail sent by an exempt template is left out wherever it shows up (the mailbox, the audit row and the touchpoint all carry the same id).
+  // A record that does not carry the id still counts: counting too much can only block a send, counting too little would let the cap be exceeded.
+  const counted =
+    collected.exemptIds.size === 0
+      ? filtered
+      : filtered.filter((item) => item.id === null || !collected.exemptIds.has(item.id))
+  const items = dedupeItems(counted)
   const count = items.length
 
   if (count >= cap.max) {

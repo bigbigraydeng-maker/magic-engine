@@ -568,6 +568,13 @@ function PickList(props: {
 function FrequencyLine(props: { frequency: PreviewFrequency }): JSX.Element | null {
   const { frequency } = props
   if (frequency.state === 'off') return null
+  if (frequency.state === 'exempt') {
+    return (
+      <p className="mt-2 text-xs text-me-charcoal/60">
+        这封是回复客人自己的来信：不受「每 {frequency.windowDays} 天最多 {frequency.max} 封」的限制，也不占名额
+      </p>
+    )
+  }
   if (frequency.state === 'ok') {
     return (
       <p className="mt-2 text-xs text-me-charcoal/60">

@@ -16,6 +16,8 @@ import {
   DEFAULT_TIME_ZONE,
   computeCallWhen,
   decideCallBasis,
+  exemptIdLoaderFor,
+  isCapExempt,
   resolveTimeZone,
   todayInZone,
   type SendGateData,
@@ -43,7 +45,7 @@ export interface PreviewArgs {
 }
 
 export interface PreviewFrequency {
-  state: 'off' | 'ok' | 'capped' | 'unverifiable'
+  state: 'off' | 'ok' | 'capped' | 'unverifiable' | 'exempt'
   count: number | null
   max: number | null
   windowDays: number | null
@@ -82,10 +84,20 @@ const refuse = (status: 404 | 409 | 503, reason: string, error: string): Preview
 async function frequencyFor(args: PreviewArgs, addresses: string[], data: SendGateData): Promise<PreviewFrequency> {
   const cap = args.config.frequencyCap
   if (cap === null) return { state: 'off', count: null, max: null, windowDays: null, nextAllowedAt: null, items: [], error: null }
-  const key = `${args.clientId}:${args.contactId}`
+  if (isCapExempt(args.config, args.request.key)) {
+    return { state: 'exempt', count: null, max: cap.max, windowDays: cap.windowDays, nextAllowedAt: null, items: [], error: null }
+  }
+  const key = `${args.clientId}:${args.contactId}:${args.config.capExemptTemplateKeys.join(',')}`
   const cached = frequencyCache.get(key)
   if (cached !== undefined && args.now.getTime() - cached.at < FREQUENCY_CACHE_MS) return cached.value
-  const verdict = await evaluateFrequency({ cap, now: args.now, addresses, contactId: args.contactId, sources: data.frequencySources })
+  const verdict = await evaluateFrequency({
+    cap,
+    now: args.now,
+    addresses,
+    contactId: args.contactId,
+    sources: data.frequencySources,
+    loadExemptIds: exemptIdLoaderFor(args.config, data, args.clientId, args.contactId),
+  })
   let value: PreviewFrequency
   if (verdict.ok) {
     value = { state: 'ok', count: verdict.count, max: cap.max, windowDays: cap.windowDays, nextAllowedAt: null, items: [], error: null }

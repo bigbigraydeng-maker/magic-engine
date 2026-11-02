@@ -13,7 +13,7 @@ import type { FactProvider, PickInput, PublishedTourFact, RenderFacts } from './
 import { evaluateContentGates } from './gates/content-gates'
 import { evaluateFollowUp } from './gates/follow-up'
 import { evaluateFrequency } from './gates/frequency'
-import type { FrequencySources, GateViolation } from './gates/types'
+import type { ExemptIdLoader, FrequencySources, GateViolation } from './gates/types'
 import { renderTemplate } from './render'
 import { checkTemplateSendable } from './template-store'
 import { DEFAULT_TIME_ZONE, isValidTimeZone } from './time-zone'
@@ -167,6 +167,8 @@ export interface SendGateData {
   loadContactView(clientId: string, contactId: string, callWindowHours: number, now: Date): Promise<ContactView | null>
   loadSenderName(clientId: string, email: string): Promise<string | null>
   sentTemplateReceiptsSince(clientId: string, contactId: string, sinceIso: string): Promise<StoredReceipt[]>
+  /** Provider message ids of the mails these templates sent to this guest since `sinceIso`; throws when it cannot list them all. */
+  exemptMessageIdsSince(clientId: string, contactId: string, templateKeys: readonly string[], sinceIso: string): Promise<string[]>
   frequencySources: FrequencySources
   /** The client's own time zone ("today" differs between Sydney and Auckland). Absent = the default zone. */
   loadTimeZone?(clientId: string): Promise<string>
@@ -407,15 +409,34 @@ async function followUpStage(args: InLockArgs, data: SendGateData): Promise<Gate
   return fail(409, violation.code === 'already_followed_up' ? 'already_followed_up' : 'duplicate_template', meta)
 }
 
+/** A reply to a guest's own enquiry: the weekly cap neither blocks it nor counts it. */
+export function isCapExempt(config: Pick<EffectiveEmailConfig, 'capExemptTemplateKeys'>, templateKey: string | null): boolean {
+  return templateKey !== null && config.capExemptTemplateKeys.includes(templateKey)
+}
+
+/** Reads which earlier mails the cap leaves out; undefined when no template is exempt (then nothing extra is read). */
+export function exemptIdLoaderFor(
+  config: Pick<EffectiveEmailConfig, 'capExemptTemplateKeys'>,
+  data: Pick<SendGateData, 'exemptMessageIdsSince'>,
+  clientId: string,
+  contactId: string,
+): ExemptIdLoader | undefined {
+  const keys = config.capExemptTemplateKeys
+  if (keys.length === 0) return undefined
+  return (sinceIso) => data.exemptMessageIdsSince(clientId, contactId, keys, sinceIso)
+}
+
 async function frequencyStage(args: InLockArgs, data: SendGateData, tz: string): Promise<GateFailure | null> {
   const cap = args.config.frequencyCap
   if (cap === null) return null
+  if (isCapExempt(args.config, args.state.templateKey)) return null
   const verdict = await evaluateFrequency({
     cap,
     now: args.now,
     addresses: args.state.addresses,
     contactId: args.contactId,
     sources: data.frequencySources,
+    loadExemptIds: exemptIdLoaderFor(args.config, data, args.clientId, args.contactId),
   })
   if (verdict.ok) return null
   if (verdict.reason === 'frequency_unverifiable') {

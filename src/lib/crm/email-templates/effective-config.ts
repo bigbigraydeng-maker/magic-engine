@@ -10,6 +10,7 @@ export interface EffectiveEmailConfig extends EmailComposeConfig {
   source: 'legacy' | 'settings'
   settingsVersion: number | null
   frequencyCap: EmailSettings['frequencyCap']
+  capExemptTemplateKeys: readonly string[]
   recipientAllowlist: string[] | null
   sameTemplateCooldownHours: number
   callPromptHours: number
@@ -27,6 +28,7 @@ export function effectiveFromSettings(settings: EmailSettings, version: number):
     source: 'settings',
     settingsVersion: version,
     frequencyCap: settings.frequencyCap,
+    capExemptTemplateKeys: [...settings.capExemptTemplateKeys],
     recipientAllowlist: settings.recipientAllowlist,
     sameTemplateCooldownHours: settings.sameTemplateCooldownHours,
     callPromptHours: settings.callPromptHours,
@@ -42,6 +44,7 @@ export function effectiveFromLegacy(leadsConfig: unknown): EffectiveEmailConfig 
     source: 'legacy',
     settingsVersion: null,
     frequencyCap: null,
+    capExemptTemplateKeys: [],
     recipientAllowlist: null,
     sameTemplateCooldownHours: 0,
     callPromptHours: 24,
