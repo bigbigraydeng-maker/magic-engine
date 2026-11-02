@@ -20,6 +20,7 @@ function settings(overrides: Partial<EmailSettings> = {}): EmailSettings {
     footer: null,
     limits: { perUserPerHour: 10, perUserPerDay: 50, perMailboxPerDay: 200 },
     frequencyCap: null,
+    capExemptTemplateKeys: [],
     recipientAllowlist: null,
     sameTemplateCooldownHours: 24,
     callPromptHours: 24,
