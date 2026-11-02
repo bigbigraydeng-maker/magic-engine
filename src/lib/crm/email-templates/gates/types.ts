@@ -52,6 +52,13 @@ export interface FrequencySources {
   ): Promise<SourceResult | { ok: true; items: []; applicable: false }>
 }
 
+/**
+ * Lists the provider message ids (Graph ids) of mails that must NOT count toward the cap: replies to a guest's own
+ * enquiry, sent by templates the settings mark as exempt. It throws when it cannot list them all, and then the cap
+ * fails closed (frequency_unverifiable); a failure is never read as "there are none".
+ */
+export type ExemptIdLoader = (sinceIso: string) => Promise<readonly string[]>
+
 export type FrequencyVerdict =
   | { ok: true; count: number; items: OutboundItem[] }
   | {

@@ -231,7 +231,7 @@ export function normalizeAd(ctx: Ctx, a: GraphAdSettings): RowWithoutHash {
 
 /**
  * 受众规则里的 object_id / 事件名。两种真实形状（2026-09-14 实拉）：
- *   - 视频受众：`[{"event_name":"video_completed","object_id":2354728365274921}, ...]`
+ *   - 视频受众：`[{"event_name":"video_completed","object_id":2312024039213026}, ...]`
  *   - 主页/表单/像素受众：`{"inclusions":{"rules":[{"event_sources":[{"id":...,"type":"page"}], "filter":...}]}}`
  * 解析不了就返回空数组——D4 会把「规则读不懂」当成「无法按 object_id 匹配」，不会按名字猜。
  */

@@ -4,6 +4,7 @@
  * 只读：只读 `ads_growth_states`、生成待办；系统不会自动改广告。
  * 同一条广告同一个问题按 remind-cadence 节奏提醒（前 3 天每天、之后只周日），不天天刷屏。
  * 数据没拉全（partial）的那天不出 —— 趋势判断在缺数据日最容易假报。
+ * 例外是 D7（授权 / 数据 / 配置体检）：它报的就是数据和配置坏了，不看 partial，见 d7Item。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -12,8 +13,10 @@ import { APP_BASE } from './binding-request-items'
 import { shouldRemindToday } from './remind-cadence'
 import {
   ADS_RULE_STALE_DAYS,
+  ADS_RULE_STREAK_GAP_DAYS,
   ADS_RULE_MIN_STREAK,
   ADS_RULE_CODES,
+  dayGap,
   findingKey,
   pmRuleHits,
   streakFor,
@@ -105,6 +108,79 @@ function configGapItem(
   }
 }
 
+type D7Task = RuleFinding & { manualTask: NonNullable<RuleFinding['manualTask']> }
+
+/** D7（授权 / 数据 / 配置体检）里带人工任务的命中。永不进客户版。 */
+function d7TasksOf(row: GrowthStateRow): D7Task[] {
+  return (row.payload?.problems ?? []).filter(
+    (p): p is D7Task => p.code === 'D7' && p.status === 'hit' && !!p.manualTask,
+  )
+}
+
+/** 从最新一行往回数，连着几天有 D7 人工任务（断连规则同 streakForReason）。 */
+function d7Streak(rowsNewestFirst: readonly GrowthStateRow[]): number {
+  let streak = 0
+  let lastHitDate: string | null = null
+  for (const row of rowsNewestFirst) {
+    if (d7TasksOf(row).length === 0) break
+    if (lastHitDate !== null && dayGap(row.date, lastHitDate) > ADS_RULE_STREAK_GAP_DAYS) break
+    streak += 1
+    lastHitDate = row.date
+  }
+  return streak
+}
+
+function absoluteHref(href: string | null, fallback: string): string {
+  if (!href) return fallback
+  return href.startsWith('/') ? `${APP_BASE}${href}` : href
+}
+
+/**
+ * D7 → 每个客户最多一条待办（里面列出这个客户所有 D7 任务）。
+ *
+ * D7 只发现、不自动改授权和设置，所以必须下发给人（CLAUDE.md §3「管道不许断头」）。
+ * 跟 D2/D3/D10/D11 的区别：**不看 partial**——数据没拉全、读不到账户，正是 D7 要报的事；
+ * 只卡「巡察自己停了」（最新一行太旧）。同样要连着 ADS_RULE_MIN_STREAK 天，提醒节奏同其它规则。
+ */
+function d7Item(
+  clientId: string,
+  clientRows: readonly GrowthStateRow[],
+  now: Date,
+  nameOf: (id: string) => string,
+): ManualItem | null {
+  const newest = clientRows[0]
+  if (!newest || dayGap(newest.date, now.toISOString().slice(0, 10)) > ADS_RULE_STALE_DAYS) return null
+  const tasks = d7TasksOf(newest)
+  if (tasks.length === 0) return null
+  const streak = d7Streak(clientRows)
+  if (streak < ADS_RULE_MIN_STREAK || !shouldRemindToday(streak - ADS_RULE_MIN_STREAK + 1, 0, now)) return null
+
+  const fallback = adsHealthHref(clientId)
+  const listed = tasks.slice(0, ADS_RULE_MAX_LISTED)
+  const first = listed[0].manualTask
+  const rest = tasks.length - listed.length
+  const how =
+    tasks.length === 1
+      ? `${first.how}\n这件事已经连着 ${streak} 天没处理。`
+      : [
+          ...listed.flatMap((t) => [
+            `• ${t.manualTask.what}`,
+            `  怎么办：${t.manualTask.how}`,
+            `  链接：${absoluteHref(t.manualTask.href, fallback)}`,
+          ]),
+          ...(rest > 0 ? [`…另有 ${rest} 条，进广告健康页「要看的事」里看`] : []),
+          `这些问题已经连着 ${streak} 天没处理。`,
+        ].join('\n')
+  return {
+    kind: 'ads_rule_finding',
+    client_id: clientId,
+    client_name: nameOf(clientId),
+    what: tasks.length === 1 ? first.what : `${tasks.length} 件广告体检的配置 / 数据问题要你处理：${first.what}`,
+    how,
+    href: absoluteHref(first.href, fallback),
+  }
+}
+
 function findingLines(f: RuleFinding, prevFirst?: string): string[] {
   const lines = [`• ${f.title}`]
   const first = f.reasons?.[0]
@@ -126,7 +202,8 @@ function buildHow(kept: readonly RuleFinding[]): string {
 }
 
 /**
- * 纯函数：把**所有**行（任意客户、任意顺序）变成每个客户最多一条待办。
+ * 纯函数：把**所有**行（任意客户、任意顺序）变成待办：每个客户最多 3 条——
+ * D2/D3/D10/D11 合成 1 条、客户级配置缺口（没登记主页）1 条、D7 体检任务 1 条。
  * 每个客户：按日期倒序；最新一行必须在 ADS_RULE_STALE_DAYS 天内（拿 YYYY-MM-DD 跟 now 的 UTC 日期比）
  * 且 payload.dataCompleteness 不是 'partial'，否则跳过。
  * 候选 = 最新一行里 ruleHits 且有 findingKey 的，保留 shouldRemindToday(streakFor(key, rows), 0, now) 为真的。
@@ -140,7 +217,13 @@ export function buildAdsRuleFindingItems(
   const items: ManualItem[] = []
   for (const [clientId, clientRows] of groupByClient(rows)) {
     const newest = clientRows[0]
-    if (!newest || !isUsableNewest(newest, now)) continue
+    if (!newest) continue
+
+    // D7 不看 partial（见 d7Item），所以排在「最新一行可用」检查之前
+    const d7 = d7Item(clientId, clientRows, now, nameOf)
+    if (d7) items.push(d7)
+
+    if (!isUsableNewest(newest, now)) continue
 
     const candidates = orderCandidates(pmRuleHits(newest).filter((f) => findingKey(f) !== null))
     // daysSinceLatest 恒传 0：候选只取最新一行，新鲜度由 ADS_RULE_STALE_DAYS 单独卡（巡察记录的日期本来就比今天晚一天）。

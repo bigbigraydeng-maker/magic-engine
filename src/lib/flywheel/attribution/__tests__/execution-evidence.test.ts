@@ -87,3 +87,23 @@ describe('isNotEvaluable', () => {
     }
   })
 })
+
+// 【考卷1】Agent 闭环升级第 0 步（docs/specs/2026-11-03-me-agent-loop-upgrade-design-v0.md §3.1）。
+// 广告自动暂停在「提议那一刻」就写一行 flywheel_actions（vendor='meta'，状态在 payload.status 里），
+// 演练、被拦、失败、等批准的行没有任何东西真的发生过。给这些行补上观察指标之前，
+// 结论计算必须先把它们认成「没执行」——现在认不出来，所以下面四道是「已知待修·第 1 步」：
+// 第 1 步修好后把 it.fails 改成 it。输入里的 payload_status 是第 1 步要加的字段名（暂定）。
+describe('【考卷1】广告自动暂停的提议行不算「已执行」', () => {
+  const base: EvaluabilityEvidence = { ...none, discovery_id: null, vendor: 'meta' }
+
+  for (const status of ['dry_run_logged', 'blocked', 'failed', 'awaiting_approval']) {
+    it.fails(`【已知待修·第1步】payload.status=${status} 的暂停提议行应判为不可评估`, () => {
+      const row = { ...base, payload_status: status }
+      expect(isNotEvaluable(row)).toBe(true)
+    })
+  }
+
+  it('真执行的暂停（行上有内核运行编号）算可评估', () => {
+    expect(isNotEvaluable({ ...base, action_run_id: 'run-1' })).toBe(false)
+  })
+})

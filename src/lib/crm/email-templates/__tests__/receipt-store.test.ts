@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   findReceiptByRequest,
+  findSentMessageIdsOfTemplates,
   findSentTemplateReceiptsSince,
   insertReceipt,
   listRecentReceipts,
@@ -315,6 +316,100 @@ describe('mapReceiptRow', () => {
     delete (bad as Record<string, unknown>).outcome
     tables[TABLE] = [bad]
     await expect(listRecentReceipts(db, CLIENT_ID)).rejects.toThrow('unreadable row')
+  })
+})
+
+describe('findSentMessageIdsOfTemplates', () => {
+  const SINCE = '2024-01-01T00:00:00.000Z'
+
+  it('returns the message ids of the unedited sent mails of the listed templates for this guest', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = [
+      rowFor('r1', '2024-02-01T00:00:00.000Z', { template_key: 'exempt-a', provider_message_id: 'm1' }),
+      rowFor('r2', '2024-02-01T00:00:00.000Z', { template_key: 'exempt-b', provider_message_id: 'm2' }),
+      rowFor('r3', '2024-02-01T00:00:00.000Z', { template_key: 'other-template', provider_message_id: 'm3' }),
+      rowFor('r4', '2024-02-01T00:00:00.000Z', {
+        template_key: 'exempt-a',
+        outcome: 'blocked',
+        block_reason: 'frequency_cap',
+        provider_message_id: 'm6',
+      }),
+      rowFor('r5', '2024-02-01T00:00:00.000Z', {
+        template_key: 'exempt-a',
+        outcome: 'failed',
+        block_reason: 'graph_failed',
+        provider_message_id: 'm7',
+      }),
+      rowFor('r6', '2024-02-01T00:00:00.000Z', {
+        template_key: 'exempt-a',
+        contact_id: OTHER_CONTACT_ID,
+        provider_message_id: 'm4',
+      }),
+      rowFor('r7', '2024-02-01T00:00:00.000Z', {
+        template_key: 'exempt-a',
+        client_id: 'client-other',
+        provider_message_id: 'm5',
+      }),
+      rowFor('r8', '2024-02-01T00:00:00.000Z', {
+        template_key: 'exempt-a',
+        provider_message_id: 'm8',
+        edited_after_render: true,
+      }),
+      rowFor('r9', '2024-02-01T00:00:00.000Z', {
+        template_key: 'exempt-a',
+        provider_message_id: 'm9',
+        edited_after_render: null,
+      }),
+    ]
+    const result = await findSentMessageIdsOfTemplates(db, CLIENT_ID, CONTACT_ID, ['exempt-a', 'exempt-b'], SINCE)
+    expect(result.sort()).toEqual(['m1', 'm2'])
+  })
+
+  it('leaves out a sent mail from before the cut-off', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = [
+      rowFor('old', '2023-12-31T00:00:00.000Z', { template_key: 'exempt-a', provider_message_id: 'old-id' }),
+      rowFor('new', '2024-02-01T00:00:00.000Z', { template_key: 'exempt-a', provider_message_id: 'new-id' }),
+    ]
+    const result = await findSentMessageIdsOfTemplates(db, CLIENT_ID, CONTACT_ID, ['exempt-a'], SINCE)
+    expect(result).toEqual(['new-id'])
+  })
+
+  it('a sent mail with no message id is not returned', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = [
+      rowFor('r1', '2024-02-01T00:00:00.000Z', { template_key: 'exempt-a', provider_message_id: null }),
+    ]
+    const result = await findSentMessageIdsOfTemplates(db, CLIENT_ID, CONTACT_ID, ['exempt-a'], SINCE)
+    expect(result).toEqual([])
+  })
+
+  it('no keys: returns an empty list and asks the database nothing', async () => {
+    const { db } = makeDb({ failTable: TABLE })
+    await expect(findSentMessageIdsOfTemplates(db, CLIENT_ID, CONTACT_ID, [], SINCE)).resolves.toEqual([])
+  })
+
+  it('a database error throws and names the cause', async () => {
+    const { db } = makeDb({ failTable: TABLE })
+    await expect(findSentMessageIdsOfTemplates(db, CLIENT_ID, CONTACT_ID, ['exempt-a'], SINCE)).rejects.toThrow(
+      'sent ids of templates',
+    )
+  })
+
+  it('exactly 200 mails are listed, 201 are refused', async () => {
+    const { db, tables } = makeDb()
+    tables[TABLE] = Array.from({ length: 200 }, (_, i) =>
+      rowFor(`r${i}`, '2024-02-01T00:00:00.000Z', { template_key: 'exempt-a', provider_message_id: `id-${i}` }),
+    )
+    const result = await findSentMessageIdsOfTemplates(db, CLIENT_ID, CONTACT_ID, ['exempt-a'], SINCE)
+    expect(result).toHaveLength(200)
+
+    tables[TABLE] = Array.from({ length: 201 }, (_, i) =>
+      rowFor(`r${i}`, '2024-02-01T00:00:00.000Z', { template_key: 'exempt-a', provider_message_id: `id-${i}` }),
+    )
+    await expect(findSentMessageIdsOfTemplates(db, CLIENT_ID, CONTACT_ID, ['exempt-a'], SINCE)).rejects.toThrow(
+      'too many mails',
+    )
   })
 })
 
