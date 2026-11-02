@@ -67,4 +67,42 @@ describe('parsePrescription targetCosts', () => {
     })?.manual).toBe(true)
     expect(parsePrescription({ ...baseRow, agent_name: 'huatuo' })?.manual).toBe(false)
   })
+
+  it('keeps Cost per capture as a target and still skips English threshold phrases', () => {
+    const capture = parsePrescription({
+      ...baseRow,
+      content: {
+        ...baseRow.content,
+        kpi_targets: [{ metric: 'Cost per capture', target_value: 11, unit: 'NZD' }],
+      },
+    })
+    expect(capture?.targetCosts).toEqual([11])
+
+    const cap = parsePrescription({
+      ...baseRow,
+      content: {
+        ...baseRow.content,
+        kpi_targets: [{ metric: 'cost cap', target_value: 20, unit: 'NZD' }],
+      },
+    })
+    expect(cap?.targetCosts).toEqual([])
+
+    const stop = parsePrescription({
+      ...baseRow,
+      content: {
+        ...baseRow.content,
+        kpi_targets: [{ metric: 'stop line CPL', target_value: 20, unit: 'NZD' }],
+      },
+    })
+    expect(stop?.targetCosts).toEqual([])
+
+    const pause = parsePrescription({
+      ...baseRow,
+      content: {
+        ...baseRow.content,
+        kpi_targets: [{ metric: '一条线索的成本，暂停线', target_value: 14.63, unit: 'NZD' }],
+      },
+    })
+    expect(pause?.targetCosts).toEqual([])
+  })
 })

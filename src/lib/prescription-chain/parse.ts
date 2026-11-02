@@ -20,7 +20,7 @@ import type {
 
 const DATE = /^\d{4}-\d{2}-\d{2}/
 const COST_METRIC = /成本|cost/i
-const COST_THRESHOLD_METRIC = /暂停线|停投|止损|上限|保本|pause|stop|kill|cap|ceiling|break.?even/i
+const COST_THRESHOLD_METRIC = /暂停线|停投|止损|上限|保本|\b(?:pause|stop|kill|cap|ceiling)\b|\bbreak[\s-]?even\b/i
 const EXPLICIT_TARGET_COST_METRIC = /目标线索成本|目标成本|target (lead )?cost|target cpl/i
 const CENTS_UNIT = /分|cent/i
 
