@@ -53,11 +53,17 @@ function parseBody(body: unknown): DecisionBody | { error: string } {
 }
 
 /** 这次决定之后，把对应的 flywheel_actions 记录改成一个终态——待办列表靠这个消失。 */
+/**
+ * 🔴 `paused` 时把内核运行编号和执行完成时间补到列上：这一行是在「提议那一刻」写的，
+ *    `executed_at` 原本是提议时间。结论计算只认 paused 的行（`execution-evidence.ts`），
+ *    观察窗必须从真正暂停那一刻算起，lineage 也靠 `action_run_id` 这一列连上内核记录。
+ */
 async function updateLedgerStatus(
   clientId: string,
   runId: string,
   status: 'paused' | 'rejected' | 'failed',
   extra: Record<string, unknown>,
+  finishedAt: string | null = null,
 ): Promise<void> {
   const { data } = await supabaseAdmin
     .from('flywheel_actions')
@@ -69,9 +75,10 @@ async function updateLedgerStatus(
     .maybeSingle()
   const row = data as { id: string; payload: Record<string, unknown> } | null
   if (!row) return
+  const executed = status === 'paused' ? { action_run_id: runId, ...(finishedAt ? { executed_at: finishedAt } : {}) } : {}
   await supabaseAdmin
     .from('flywheel_actions')
-    .update({ payload: { ...row.payload, ...extra, status } })
+    .update({ payload: { ...row.payload, ...extra, status }, ...executed })
     .eq('id', row.id)
 }
 
@@ -125,7 +132,7 @@ async function decide(kernel: Kernel, params: RouteParams['params'], body: Decis
     //    真正未定的只有 in_progress（另一个执行者还没跑完）——结果未定就不动账，
     //    由真正执行的那一方记，这里记「失败」会是假账（广告马上就会停）。
     const status = outcome.kind === 'succeeded' || outcome.kind === 'idempotent_hit' ? 'paused' : outcome.kind === 'dead_letter' || outcome.kind === 'denied' ? 'failed' : null
-    if (status) await updateLedgerStatus(params.id, params.runId, status, { reason: outcome.humanReason })
+    if (status) await updateLedgerStatus(params.id, params.runId, status, { reason: outcome.humanReason }, outcome.finishedAt)
     return NextResponse.json({ ok: outcome.kind === 'succeeded' || outcome.kind === 'idempotent_hit', kind: outcome.kind, humanReason: outcome.humanReason })
   } catch (e) {
     if (e instanceof KernelError) {

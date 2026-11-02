@@ -18,6 +18,7 @@ const RUN_ID = 'aaaaaaaa-0000-4000-8000-000000000001'
 const SEEN = '11111111-2222-4333-8444-555555555555'
 
 const ledgerWrites: string[] = vi.hoisted(() => [])
+const ledgerPatches: Array<Record<string, unknown>> = vi.hoisted(() => [])
 
 const m = vi.hoisted(() => ({
   access: vi.fn(),
@@ -38,8 +39,9 @@ vi.mock('@/lib/supabase', () => {
   // 账表回写：有一行账；update 收到的 payload 记进 ledgerWrites，好断言记了什么
   const chain: Record<string, unknown> = {}
   for (const k of ['select', 'eq']) chain[k] = () => chain
-  chain.update = (patch: { payload: { status: string } }) => {
+  chain.update = (patch: { payload: { status: string } } & Record<string, unknown>) => {
     ledgerWrites.push(patch.payload.status)
+    ledgerPatches.push(patch)
     return chain
   }
   chain.maybeSingle = async () => ({ data: { id: 'fa-1', payload: {} }, error: null })
@@ -70,9 +72,10 @@ beforeEach(() => {
     id: RUN_ID, client_id: CLIENT, action_key: 'ads.auto_pause_on_d3',
     action_version: ACTION_REGISTRY.get('ads.auto_pause_on_d3')!.version,
   })
-  m.approve.mockResolvedValue({ runId: RUN_ID, kind: 'succeeded', humanReason: null })
-  m.reject.mockResolvedValue({ runId: RUN_ID, kind: 'denied', humanReason: '不批准' })
+  m.approve.mockResolvedValue({ runId: RUN_ID, kind: 'succeeded', humanReason: null, finishedAt: '2026-11-03T01:00:00.000Z' })
+  m.reject.mockResolvedValue({ runId: RUN_ID, kind: 'denied', humanReason: '不批准', finishedAt: null })
   ledgerWrites.length = 0
+  ledgerPatches.length = 0
 })
 
 describe('① 没带看到的那份 → 400，连 Kernel 都不建', () => {
@@ -163,6 +166,20 @@ describe('账表只记确定的结果', () => {
     const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
     expect(ledgerWrites).toEqual([status])
     expect((await res.json()).ok).toBe(ok)
+  })
+
+  it('真暂停了 → 内核运行编号和执行完成时间补到列上（观察窗从暂停那一刻算）', async () => {
+    const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
+    expect(res.status).toBe(200)
+    expect(ledgerPatches).toHaveLength(1)
+    expect(ledgerPatches[0]).toMatchObject({ action_run_id: RUN_ID, executed_at: '2026-11-03T01:00:00.000Z' })
+  })
+
+  it('失败的执行不补运行编号和执行时间（它没有改动任何东西）', async () => {
+    m.approve.mockResolvedValueOnce({ runId: RUN_ID, kind: 'dead_letter', humanReason: '回读不是 PAUSED', finishedAt: '2026-11-03T01:00:00.000Z' })
+    await post({ resolution: 'approve', expectedDecisionId: SEEN })
+    expect(ledgerPatches[0]).not.toHaveProperty('action_run_id')
+    expect(ledgerPatches[0]).not.toHaveProperty('executed_at')
   })
 
   it('🔴 in_progress（别人刚批了、正在执行）→ 不记「失败」，账一个字不动', async () => {

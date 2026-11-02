@@ -8,7 +8,8 @@ import type { GraphAdsetSettings } from '@/lib/meta/entity-settings'
 import { normalizeAdset, settingsHash, type EntitySnapshotRow } from '../../snapshot'
 import { buildAccountContext } from '../../diagnostics/context'
 import { findHotCreatives, O1_MIN_DAYS } from '../o1-hot-creative'
-import type { AccountInput, DailyRow } from '../../diagnostics/types'
+import type { AccountInput, DailyRow, DiagnosisInput } from '../../diagnostics/types'
+import { recentChangeShadow } from '../../recent-change-shadow'
 
 const CTX = { clientId: 'c', adAccountId: 'act_1', currency: 'NZD', sharedAccount: false }
 const DATE = '2026-09-22'
@@ -112,31 +113,38 @@ describe('O1 潜在爆款', () => {
   })
 })
 
-// 【考卷2】Agent 闭环升级第 0 步（设计稿 §3.1 / §4「放类」）。
+// 【考卷2】Agent 闭环升级（docs/specs/2026-11-03-me-agent-loop-upgrade-design-v0.md §3.1 / §4「放类」）。
 // O1 是「加预算」类建议。刚动过设置的广告组还在消化改动，72 小时内不该再被提「加预算」。
-// 现在 O1 完全不看 settingChanges（DiagnosisInput 里已有这份数据，D2/D10/D11 在用），
-// 所以第一道是「已知待修·第 1 步」；第 1 步修好后把 it.fails 改成 it。
+// 第 1 步先影子跑：O1 自己照常命中，「刚动过」由 recentChangeShadow 标成「本该压住」，只进运行日志；
+// 影子期满、PM 看过结果，另开改动单才真的压住（那时把下面第一条改成「不出 O1 命中」）。
 describe('【考卷2】O1 加预算建议避开刚动过设置的广告组', () => {
-  const hotAccount = (changedAt: string) => {
+  const hotAccount = (changedAt: string): AccountInput => {
     const daily = [
       ...dailyFor('as_hot', 1000, 40, 5),
       ...dailyFor('as_a', 1000, 10, 50),
       ...dailyFor('as_b', 1000, 10, 50),
     ]
     const snapshots = [adset('as_hot', 'Hot'), adset('as_a', 'A'), adset('as_b', 'B')].map(snapshotFromGraph)
-    return buildAccountContext(
-      { ...account(snapshots, daily), settingChanges: [{ level: 'adset', entity_id: 'as_hot', captured_at: changedAt }] },
-      DATE,
-    )
+    return { ...account(snapshots, daily), settingChanges: [{ level: 'adset', entity_id: 'as_hot', captured_at: changedAt }] }
   }
-
-  it.fails('【已知待修·第1步】72 小时内设置变过的广告组 → 不出 O1 命中', () => {
-    expect(findHotCreatives(hotAccount('2026-09-22T02:00:00Z'))).toHaveLength(0)
+  const inputOf = (acc: AccountInput): DiagnosisInput => ({
+    clientId: 'c', date: DATE, evaluatedAt: `${DATE}T20:00:00Z`,
+    outcome: { leading: null, primary: 'lead', targetCostPerPrimary: 20, minPrimaryPerUnit: 5 },
+    outcomeConfigured: true, messagingReferralAvailable: false, digestRecipients: [], accounts: [acc],
   })
 
-  it('设置变化已经是 6 天前 → 不压制 O1，照常命中', () => {
-    const hits = findHotCreatives(hotAccount('2026-09-16T02:00:00Z'))
+  it('72 小时内设置变过的广告组 → O1 照常命中，影子判断标成「本该压住」', () => {
+    const acc = hotAccount('2026-09-22T02:00:00Z')
+    const hits = findHotCreatives(buildAccountContext(acc, DATE))
+    expect(hits).toHaveLength(1)
+    expect(recentChangeShadow(inputOf(acc), hits)).toMatchObject({ scale_up_hits: 1, would_suppress: 1 })
+  })
+
+  it('设置变化已经是 6 天前 → 不压制 O1，影子也不标', () => {
+    const acc = hotAccount('2026-09-16T02:00:00Z')
+    const hits = findHotCreatives(buildAccountContext(acc, DATE))
     expect(hits).toHaveLength(1)
     expect(hits[0]).toMatchObject({ code: 'O1', status: 'hit' })
+    expect(recentChangeShadow(inputOf(acc), hits).would_suppress).toBe(0)
   })
 })

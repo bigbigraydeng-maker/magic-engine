@@ -104,6 +104,8 @@ export interface ApproveAndExecuteResult {
   readonly runId: string
   readonly kind: ActionRunOutcome['kind']
   readonly humanReason: string | null
+  /** `action_runs.finished_at`：执行（含回读验证）真正结束的时间；没结束为 null。 */
+  readonly finishedAt: string | null
 }
 
 /**
@@ -136,7 +138,7 @@ export async function approveAndExecuteAdsAutoPause(
 ): Promise<ApproveAndExecuteResult> {
   const seen = requireSeenDecisionId(expectedDecisionId)
   const outcome = await approveAndRun(deps, runId, approvedByUser, { expectedDecisionId: seen })
-  return { runId: outcome.run.id, kind: outcome.kind, humanReason: outcome.humanReason }
+  return { runId: outcome.run.id, kind: outcome.kind, humanReason: outcome.humanReason, finishedAt: outcome.run.finished_at ?? null }
 }
 
 /** PM/FDE 点「驳回」——只签拒绝，不执行任何东西。拒的也必须是人看到的那份。 */
@@ -149,5 +151,5 @@ export async function rejectAdsAutoPause(
 ): Promise<ApproveAndExecuteResult> {
   const seen = requireSeenDecisionId(expectedDecisionId)
   const outcome = await rejectPendingRun(deps, runId, rejectedByUser, reason, { expectedDecisionId: seen })
-  return { runId: outcome.run.id, kind: outcome.kind, humanReason: outcome.humanReason }
+  return { runId: outcome.run.id, kind: outcome.kind, humanReason: outcome.humanReason, finishedAt: outcome.run.finished_at ?? null }
 }

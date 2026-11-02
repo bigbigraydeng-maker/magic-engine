@@ -41,7 +41,7 @@ describe('isUnexecutedSuggestion', () => {
 })
 
 describe('isNotEvaluable', () => {
-  const base: EvaluabilityEvidence = { ...none, discovery_id: null, vendor: null }
+  const base: EvaluabilityEvidence = { ...none, discovery_id: null, vendor: null, action_type: null, payload_status: null }
 
   it('a Zhuge suggestion is not evaluable', () => {
     expect(isNotEvaluable({ ...base, zhuge_session_key: 'session-1' })).toBe(true)
@@ -82,28 +82,36 @@ describe('isNotEvaluable', () => {
       none,
     ]
     for (const row of rows) {
-      expect(isNotEvaluable({ ...row, discovery_id: null, vendor: null }))
+      expect(isNotEvaluable({ ...row, discovery_id: null, vendor: null, action_type: null, payload_status: null }))
         .toBe(isUnexecutedSuggestion(row))
     }
   })
 })
 
-// 【考卷1】Agent 闭环升级第 0 步（docs/specs/2026-11-03-me-agent-loop-upgrade-design-v0.md §3.1）。
+// 【考卷1】Agent 闭环升级（docs/specs/2026-11-03-me-agent-loop-upgrade-design-v0.md §3.1）。
 // 广告自动暂停在「提议那一刻」就写一行 flywheel_actions（vendor='meta'，状态在 payload.status 里），
-// 演练、被拦、失败、等批准的行没有任何东西真的发生过。给这些行补上观察指标之前，
-// 结论计算必须先把它们认成「没执行」——现在认不出来，所以下面四道是「已知待修·第 1 步」：
-// 第 1 步修好后把 it.fails 改成 it。输入里的 payload_status 是第 1 步要加的字段名（暂定）。
+// 演练、被拦、失败、等批准、被驳回的行没有任何东西真的发生过，结论计算必须认成「没执行」。
+// 第 0 步时这四道是「已知待修」（it.fails），第 1 步修好后翻成正式题。
 describe('【考卷1】广告自动暂停的提议行不算「已执行」', () => {
-  const base: EvaluabilityEvidence = { ...none, discovery_id: null, vendor: 'meta' }
+  const base: EvaluabilityEvidence = {
+    ...none, discovery_id: null, vendor: 'meta', action_type: 'ads.auto_pause_on_d3', payload_status: null,
+  }
 
-  for (const status of ['dry_run_logged', 'blocked', 'failed', 'awaiting_approval']) {
-    it.fails(`【已知待修·第1步】payload.status=${status} 的暂停提议行应判为不可评估`, () => {
-      const row = { ...base, payload_status: status }
-      expect(isNotEvaluable(row)).toBe(true)
+  for (const status of ['dry_run_logged', 'blocked', 'failed', 'awaiting_approval', 'rejected']) {
+    it(`payload.status=${status} 的暂停提议行判为不可评估`, () => {
+      expect(isNotEvaluable({ ...base, payload_status: status })).toBe(true)
     })
   }
 
-  it('真执行的暂停（行上有内核运行编号）算可评估', () => {
-    expect(isNotEvaluable({ ...base, action_run_id: 'run-1' })).toBe(false)
+  it('没有状态的暂停行也不算执行（宁可不评，不拿提议时间当执行时间）', () => {
+    expect(isNotEvaluable(base)).toBe(true)
+  })
+
+  it('批准后真暂停了（paused，行上有内核运行编号）算可评估', () => {
+    expect(isNotEvaluable({ ...base, payload_status: 'paused', action_run_id: 'run-1' })).toBe(false)
+  })
+
+  it('别的动作类型不受这条规则影响（payload.status=failed 的社媒帖子照旧）', () => {
+    expect(isNotEvaluable({ ...base, action_type: 'social.publish_post', vendor: 'meta_graph', payload_status: 'failed' })).toBe(false)
   })
 })

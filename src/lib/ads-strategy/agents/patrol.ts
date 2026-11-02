@@ -18,6 +18,7 @@ import { loadDiagnosisInput } from '../portfolio/diagnostics/loader'
 import { runDiagnostics } from '../portfolio/diagnostics/run'
 import { runOpportunities, type DataCompleteness } from '../portfolio/opportunities/run'
 import { buildDigestGoalContext } from '../portfolio/goal-context'
+import { safeRecentChangeShadow, type RecentChangeShadow } from '../portfolio/recent-change-shadow'
 import type { AccountInput, AdLevelCoverage, Diagnosis, ExcludedEntity } from '../portfolio/diagnostics/types'
 import type { DigestGoalContext } from '../portfolio/internal-digest'
 
@@ -146,6 +147,8 @@ export interface BuildGrowthStateResult {
   opportunities?: number
   completeness?: DataCompleteness
   error?: string
+  /** 闭环升级第 1 步影子判断（O1 加预算碰上刚动过的组）。只进运行日志，不影响上面任何一项。 */
+  shadow?: RecentChangeShadow | { error: string }
 }
 
 /** 一句人话结论。确定性模板，不调 LLM —— 日报和看板的第一行不该依赖一次可能失败的外部调用。 */
@@ -241,6 +244,8 @@ export async function buildGrowthState(
       problems: payload.problems.filter(d => d.status === 'hit').length,
       opportunities: payload.opportunities.filter(d => d.status === 'hit').length,
       completeness: completeness.completeness,
+      // 落库之后才算，只读已有的输入和结论，出错只记一句（见 recent-change-shadow.ts）
+      shadow: safeRecentChangeShadow(input, opportunityRun.opportunities),
     }
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) }

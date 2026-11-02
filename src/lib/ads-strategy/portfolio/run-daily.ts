@@ -7,6 +7,7 @@ import { loadDiagnosisInput } from './diagnostics/loader'
 import { runDiagnostics } from './diagnostics/run'
 import { buildDigestGoalContext } from './goal-context'
 import { persistAndSendInternalDigest } from './internal-digest'
+import { safeRecentChangeShadow, type RecentChangeShadow } from './recent-change-shadow'
 
 export interface DailyDiagnosticsResult {
   success: boolean
@@ -17,6 +18,8 @@ export interface DailyDiagnosticsResult {
   digest_sent?: boolean
   recipients_dropped?: number
   error?: string
+  /** 闭环升级第 1 步影子判断（D3 止损碰上刚动过的组，只标注不压）。只进运行日志。 */
+  shadow?: RecentChangeShadow | { error: string }
 }
 
 export async function runPortfolioDiagnostics(
@@ -40,6 +43,8 @@ export async function runPortfolioDiagnostics(
       digest_sent: digest.sent,
       recipients_dropped: digest.recipients_dropped,
       error: digest.error,
+      // 日报发完之后才算，只读已有的输入和结论，出错只记一句（见 recent-change-shadow.ts）
+      shadow: safeRecentChangeShadow(input, run.diagnoses),
     }
   } catch (err) {
     return { success: false, hits: 0, not_comparable: 0, excluded: 0, error: err instanceof Error ? err.message : String(err) }
