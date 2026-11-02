@@ -314,7 +314,7 @@ export async function findSentTemplateReceiptsSince(
 const SENT_IDS_LIMIT = 200
 
 /**
- * The provider message ids of the mails these templates sent to one guest since `sinceIso` (outcome `sent` only).
+ * The provider message ids of the mails these templates sent to one guest since `sinceIso` (outcome `sent` only, and only mails sent exactly as the template wrote them: `edited_after_render` is false).
  * The weekly cap leaves these mails out of its count. It throws when the list cannot be vouched for (query error,
  * unreadable row, or more rows than the limit): the cap then fails closed instead of reading a failure as "none".
  */
@@ -333,6 +333,7 @@ export async function findSentMessageIdsOfTemplates(
     .eq('contact_id', contactId)
     .in('template_key', [...templateKeys])
     .eq('outcome', 'sent')
+    .eq('edited_after_render', false)
     .not('provider_message_id', 'is', null)
     .gte('created_at', sinceIso)
     .limit(SENT_IDS_LIMIT + 1)

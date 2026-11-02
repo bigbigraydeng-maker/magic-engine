@@ -322,7 +322,7 @@ describe('mapReceiptRow', () => {
 describe('findSentMessageIdsOfTemplates', () => {
   const SINCE = '2024-01-01T00:00:00.000Z'
 
-  it('returns the message ids of the sent mails of the listed templates for this guest', async () => {
+  it('returns the message ids of the unedited sent mails of the listed templates for this guest', async () => {
     const { db, tables } = makeDb()
     tables[TABLE] = [
       rowFor('r1', '2024-02-01T00:00:00.000Z', { template_key: 'exempt-a', provider_message_id: 'm1' }),
@@ -349,6 +349,16 @@ describe('findSentMessageIdsOfTemplates', () => {
         template_key: 'exempt-a',
         client_id: 'client-other',
         provider_message_id: 'm5',
+      }),
+      rowFor('r8', '2024-02-01T00:00:00.000Z', {
+        template_key: 'exempt-a',
+        provider_message_id: 'm8',
+        edited_after_render: true,
+      }),
+      rowFor('r9', '2024-02-01T00:00:00.000Z', {
+        template_key: 'exempt-a',
+        provider_message_id: 'm9',
+        edited_after_render: null,
       }),
     ]
     const result = await findSentMessageIdsOfTemplates(db, CLIENT_ID, CONTACT_ID, ['exempt-a', 'exempt-b'], SINCE)

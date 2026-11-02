@@ -767,6 +767,7 @@ describe('inLock: weekly cap and exempt templates', () => {
     const { state, meta } = await successfulPreLock(data)
     const gates = createSendGates(data)
     const exemptConfig = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
+    expect(meta.editedAfterRender).toBe(false)
     const result = await gates.inLock(inArgs(state, meta, { config: exemptConfig }))
     expect(result.ok).toBe(true)
     expect(sources.sentItems).not.toHaveBeenCalled()
@@ -800,10 +801,10 @@ describe('inLock: weekly cap and exempt templates', () => {
     expect(result.reason).toBe('frequency_cap')
     expect(data.exemptMessageIdsSince).toHaveBeenCalledTimes(1)
     expect(data.exemptMessageIdsSince).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.any(String),
+      'client-a',
+      'contact-1',
       ['some-other-template'],
-      expect.any(String),
+      '2026-10-21T02:00:00.000Z',
     )
   })
 
@@ -914,5 +915,49 @@ describe('inLock: weekly cap and exempt templates', () => {
     expect(result.ok).toBe(true)
     expect(data.exemptMessageIdsSince).not.toHaveBeenCalled()
     expect(sources.sentItems).not.toHaveBeenCalled()
+  })
+
+  it('an exempt template whose text was changed after rendering is an ordinary mail: the cap blocks it', async () => {
+    const sources = emptySources()
+    sources.sentItems = vi.fn(async () => ({
+      ok: true as const,
+      items: [
+        outboundItem({ id: 'a', at: '2026-10-27T00:00:00Z' }),
+        outboundItem({ id: 'b', at: '2026-10-26T00:00:00Z' }),
+      ],
+    }))
+    const data = makeData({ frequencySources: sources })
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const exemptConfig = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
+    const result = await gates.inLock(
+      inArgs(state, { ...meta, editedAfterRender: true }, { config: exemptConfig }),
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.reason).toBe('frequency_cap')
+  })
+
+  it('an exempt template whose text could not be compared (flag unknown) is an ordinary mail', async () => {
+    const sources = emptySources()
+    sources.sentItems = vi.fn(async () => ({
+      ok: true as const,
+      items: [
+        outboundItem({ id: 'a', at: '2026-10-27T00:00:00Z' }),
+        outboundItem({ id: 'b', at: '2026-10-26T00:00:00Z' }),
+      ],
+    }))
+    const data = makeData({ frequencySources: sources })
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const exemptConfig = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
+    const result = await gates.inLock(
+      inArgs(state, { ...meta, editedAfterRender: null }, { config: exemptConfig }),
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.reason).toBe('frequency_cap')
   })
 })

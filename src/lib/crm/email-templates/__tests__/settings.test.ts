@@ -542,7 +542,7 @@ describe('cap_exempt_template_keys', () => {
     }
   })
 
-  it('serialise always writes the key and the result parses back to the same settings', () => {
+  it('serialise writes the key, right after frequency_cap, when there are exempt keys, and the result parses back to the same settings', () => {
     const raw = validRaw()
     raw.cap_exempt_template_keys = [
       'tour-enquiry-reply',
@@ -565,11 +565,21 @@ describe('cap_exempt_template_keys', () => {
     expect(reparsed.settings).toEqual(settings)
   })
 
-  it('serialise writes an empty list when there are no exempt keys', () => {
+  it('serialise leaves the key out when there are no exempt keys, and that still parses to an empty list', () => {
     const settings = parseOk(validRaw())
     const serialised = serialiseEmailSettings(settings)
-    expect('cap_exempt_template_keys' in serialised).toBe(true)
-    expect(serialised.cap_exempt_template_keys).toEqual([])
+    expect(serialised).not.toHaveProperty('cap_exempt_template_keys')
+    const reparsed = parseEmailSettingsStrict(serialised)
+    expect(reparsed.ok).toBe(true)
+    if (!reparsed.ok) return
+    expect(reparsed.settings.capExemptTemplateKeys).toEqual([])
+  })
+
+  it('a stored empty list still parses', () => {
+    const raw = validRaw()
+    raw.cap_exempt_template_keys = []
+    const settings = parseOk(raw)
+    expect(settings.capExemptTemplateKeys).toEqual([])
   })
 
   it('effectiveFromSettings copies the list', () => {

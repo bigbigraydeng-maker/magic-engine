@@ -81,10 +81,10 @@ export function clearPreviewCache(): void {
 
 const refuse = (status: 404 | 409 | 503, reason: string, error: string): PreviewResult => ({ ok: false, status, reason, error })
 
-async function frequencyFor(args: PreviewArgs, addresses: string[], data: SendGateData): Promise<PreviewFrequency> {
+async function frequencyFor(args: PreviewArgs, addresses: string[], data: SendGateData, unedited: boolean): Promise<PreviewFrequency> {
   const cap = args.config.frequencyCap
   if (cap === null) return { state: 'off', count: null, max: null, windowDays: null, nextAllowedAt: null, items: [], error: null }
-  if (isCapExempt(args.config, args.request.key)) {
+  if (isCapExempt(args.config, args.request.key, unedited)) {
     return { state: 'exempt', count: null, max: cap.max, windowDays: cap.windowDays, nextAllowedAt: null, items: [], error: null }
   }
   const key = `${args.clientId}:${args.contactId}:${args.config.capExemptTemplateKeys.join(',')}`
@@ -207,7 +207,11 @@ export async function previewTemplate(
     provider: state.provider,
     facts: state.facts,
   })
-  const frequency = await frequencyFor(args, view.addresses, data)
+  // Same notion as the real send (attachRenderHash in send-gates.ts): "unedited" = a clean render equal to the text that goes out.
+  const clean = rendered.missing.length === 0 && rendered.problems.length === 0
+  const unedited =
+    clean && (args.request.subject ?? rendered.subject) === rendered.subject && (args.request.body ?? rendered.body) === rendered.body
+  const frequency = await frequencyFor(args, view.addresses, data, unedited)
 
   return {
     ok: true,

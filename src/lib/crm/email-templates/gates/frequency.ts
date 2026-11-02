@@ -99,10 +99,16 @@ async function safeCall(fn: () => Promise<SourceResult>): Promise<SourceResult> 
 
 type IdsResult = { ok: true; ids: readonly string[] } | { ok: false; error: string }
 
+function isStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
+}
+
 async function safeIds(load: ExemptIdLoader | undefined, sinceIso: string): Promise<IdsResult> {
   if (load === undefined) return { ok: true, ids: [] }
   try {
-    return { ok: true, ids: await load(sinceIso) }
+    const ids: unknown = await load(sinceIso)
+    if (!isStringList(ids)) return { ok: false, error: 'exempt ids: the lookup did not return a list of ids' }
+    return { ok: true, ids }
   } catch (err) {
     return { ok: false, error: `exempt ids: ${toError(err)}` }
   }
@@ -182,6 +188,19 @@ function withTimeout<T>(p: Promise<T>, budgetMs: number): Promise<T | 'timeout'>
   })
 }
 
+// Leaves out the mails of exempt templates, found by provider message id (the mailbox record, the audit row and the touchpoint of one
+// mail carry the same id). De-duplication can fold an unrelated record into the wrong mail, so two readings are worked out and the
+// LARGER list wins; then a record folded into the wrong mail can never make the count too small.
+//   A: drop the exempt records first, then de-duplicate the rest.
+//   B: de-duplicate everything first (the count as it was before exemptions existed), then drop the groups whose representative carries an exempt id.
+// A record that carries no id still counts: counting too much can only block a send, counting too little would let the cap be exceeded.
+function countWithoutExempt(items: readonly OutboundItem[], exemptIds: ReadonlySet<string>): OutboundItem[] {
+  const isExempt = (item: OutboundItem): boolean => item.id !== null && exemptIds.has(item.id)
+  const dropFirst = dedupeItems(items.filter((item) => !isExempt(item)))
+  const dedupeFirst = dedupeItems(items).filter((item) => !isExempt(item))
+  return dropFirst.length >= dedupeFirst.length ? dropFirst : dedupeFirst
+}
+
 export async function evaluateFrequency(args: {
   cap: { max: number; windowDays: number }
   now: Date
@@ -215,13 +234,7 @@ export async function evaluateFrequency(args: {
     item.address === '' && primary !== '' ? { ...item, address: primary } : item,
   )
   const filtered = filterItems(scoped, addressSet, sinceMs, nowMs)
-  // A mail sent by an exempt template is left out wherever it shows up (the mailbox, the audit row and the touchpoint all carry the same id).
-  // A record that does not carry the id still counts: counting too much can only block a send, counting too little would let the cap be exceeded.
-  const counted =
-    collected.exemptIds.size === 0
-      ? filtered
-      : filtered.filter((item) => item.id === null || !collected.exemptIds.has(item.id))
-  const items = dedupeItems(counted)
+  const items = collected.exemptIds.size === 0 ? dedupeItems(filtered) : countWithoutExempt(filtered, collected.exemptIds)
   const count = items.length
 
   if (count >= cap.max) {

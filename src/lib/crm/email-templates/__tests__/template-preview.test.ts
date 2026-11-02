@@ -232,7 +232,9 @@ describe('preview and send use the same functions', () => {
 
 describe('previewTemplate: exempt templates', () => {
   it('an exempt template shows state exempt with the cap numbers and asks no source', async () => {
-    const data = makeData()
+    const data = makeData({
+      loadContactView: vi.fn(async () => ({ displayName: 'Amy Lee', addresses: ['amy@gmail.com', 'amy.lee@work.com'], callEvidenceAt: '2026-10-28T01:00:00Z' })),
+    })
     const res = await previewTemplate(args({ config: config({ capExemptTemplateKeys: ['post-call-single-tour'] }) }), data)
     expect(res.ok && res.frequency).toMatchObject({
       state: 'exempt',
@@ -249,7 +251,9 @@ describe('previewTemplate: exempt templates', () => {
   })
 
   it('it stays exempt even when the guest is at the cap', async () => {
-    const data = makeData()
+    const data = makeData({
+      loadContactView: vi.fn(async () => ({ displayName: 'Amy Lee', addresses: ['amy@gmail.com', 'amy.lee@work.com'], callEvidenceAt: '2026-10-28T01:00:00Z' })),
+    })
     vi.mocked(data.frequencySources.sentItems).mockResolvedValueOnce({
       ok: true,
       items: [item('m1', '2026-10-27T01:00:00Z'), item('m2', '2026-10-27T05:00:00Z')],
@@ -314,6 +318,76 @@ describe('previewTemplate: exempt templates', () => {
     expect(vi.mocked(evaluateFrequency).mock.calls.at(-1)?.[0].loadExemptIds).toBeUndefined()
 
     await previewTemplate(args({ config: config({ capExemptTemplateKeys: ['some-other-template'] }) }), makeData())
+    expect(typeof vi.mocked(evaluateFrequency).mock.calls.at(-1)?.[0].loadExemptIds).toBe('function')
+  })
+
+  it('the unchanged text sent back as the render stays exempt', async () => {
+    const data = makeData({
+      loadContactView: vi.fn(async () => ({ displayName: 'Amy Lee', addresses: ['amy@gmail.com', 'amy.lee@work.com'], callEvidenceAt: '2026-10-28T01:00:00Z' })),
+    })
+    const cfg = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
+    const first = await previewTemplate(args({ config: cfg }), data)
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    const res = await previewTemplate(
+      args({ config: cfg, request: request({ subject: first.rendered.subject, body: first.rendered.body }) }),
+      data,
+    )
+    expect(res.ok && res.frequency.state).toBe('exempt')
+  })
+
+  it('a changed text under an exempt template is an ordinary mail', async () => {
+    const data = makeData({
+      loadContactView: vi.fn(async () => ({ displayName: 'Amy Lee', addresses: ['amy@gmail.com', 'amy.lee@work.com'], callEvidenceAt: '2026-10-28T01:00:00Z' })),
+    })
+    const cfg = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
+    const res = await previewTemplate(args({ config: cfg, request: request({ body: 'Something else entirely' }) }), data)
+    expect(res.ok && res.frequency.state).toBe('ok')
+
+    clearPreviewCache()
+    vi.mocked(data.frequencySources.sentItems).mockResolvedValueOnce({
+      ok: true,
+      items: [item('m1', '2026-10-27T01:00:00Z'), item('m2', '2026-10-27T05:00:00Z')],
+    })
+    const capped = await previewTemplate(args({ config: cfg, request: request({ body: 'Something else entirely' }) }), data)
+    expect(capped.ok && capped.frequency.state).toBe('capped')
+  })
+
+  it('a render with a gap is never exempt', async () => {
+    const data = makeData()
+    const res = await previewTemplate(
+      args({ config: config({ capExemptTemplateKeys: ['post-call-single-tour'] }), request: request({ callBasis: 'none' }) }),
+      data,
+    )
+    expect(res.ok && res.frequency.state).toBe('ok')
+  })
+
+  it('a changed subject under an exempt template is an ordinary mail', async () => {
+    const data = makeData({
+      loadContactView: vi.fn(async () => ({ displayName: 'Amy Lee', addresses: ['amy@gmail.com', 'amy.lee@work.com'], callEvidenceAt: '2026-10-28T01:00:00Z' })),
+    })
+    const cfg = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
+    const first = await previewTemplate(args({ config: cfg }), data)
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+
+    clearPreviewCache()
+    const res = await previewTemplate(
+      args({ config: cfg, request: request({ subject: 'Another subject entirely', body: first.rendered.body }) }),
+      data,
+    )
+    expect(res.ok && res.frequency.state).toBe('ok')
+    expect(res.ok && res.frequency.state).not.toBe('exempt')
+  })
+
+  it('a changed text still leaves the exempt mails of the guest out of its count', async () => {
+    const data = makeData({
+      loadContactView: vi.fn(async () => ({ displayName: 'Amy Lee', addresses: ['amy@gmail.com', 'amy.lee@work.com'], callEvidenceAt: '2026-10-28T01:00:00Z' })),
+    })
+    await previewTemplate(
+      args({ config: config({ capExemptTemplateKeys: ['post-call-single-tour'] }), request: request({ body: 'Something else entirely' }) }),
+      data,
+    )
     expect(typeof vi.mocked(evaluateFrequency).mock.calls.at(-1)?.[0].loadExemptIds).toBe('function')
   })
 })

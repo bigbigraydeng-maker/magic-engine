@@ -409,9 +409,13 @@ async function followUpStage(args: InLockArgs, data: SendGateData): Promise<Gate
   return fail(409, violation.code === 'already_followed_up' ? 'already_followed_up' : 'duplicate_template', meta)
 }
 
-/** A reply to a guest's own enquiry: the weekly cap neither blocks it nor counts it. */
-export function isCapExempt(config: Pick<EffectiveEmailConfig, 'capExemptTemplateKeys'>, templateKey: string | null): boolean {
-  return templateKey !== null && config.capExemptTemplateKeys.includes(templateKey)
+/** A reply to a guest's own enquiry, sent as the template wrote it: the weekly cap neither blocks it nor counts it. */
+export function isCapExempt(
+  config: Pick<EffectiveEmailConfig, 'capExemptTemplateKeys'>,
+  templateKey: string | null,
+  unedited: boolean,
+): boolean {
+  return unedited && templateKey !== null && config.capExemptTemplateKeys.includes(templateKey)
 }
 
 /** Reads which earlier mails the cap leaves out; undefined when no template is exempt (then nothing extra is read). */
@@ -429,7 +433,7 @@ export function exemptIdLoaderFor(
 async function frequencyStage(args: InLockArgs, data: SendGateData, tz: string): Promise<GateFailure | null> {
   const cap = args.config.frequencyCap
   if (cap === null) return null
-  if (isCapExempt(args.config, args.state.templateKey)) return null
+  if (isCapExempt(args.config, args.state.templateKey, args.meta.editedAfterRender === false)) return null
   const verdict = await evaluateFrequency({
     cap,
     now: args.now,

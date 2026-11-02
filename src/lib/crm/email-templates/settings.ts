@@ -686,7 +686,10 @@ export function serialiseEmailSettings(
     frequency_cap: settings.frequencyCap
       ? { max: settings.frequencyCap.max, window_days: settings.frequencyCap.windowDays }
       : null,
-    cap_exempt_template_keys: [...settings.capExemptTemplateKeys],
+    // Written only when used: a version without exemptions stays readable by the previous release (its parser refuses unknown keys).
+    ...(settings.capExemptTemplateKeys.length > 0
+      ? { cap_exempt_template_keys: [...settings.capExemptTemplateKeys] }
+      : {}),
     recipient_allowlist: settings.recipientAllowlist
       ? [...settings.recipientAllowlist]
       : null,
