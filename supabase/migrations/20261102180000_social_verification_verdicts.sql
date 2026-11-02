@@ -5,10 +5,15 @@
 --
 -- Story 重复行：建唯一索引之前只数 social.publish_story 里
 -- (client_id, payload.idempotency_key) 相同的组。有一组多于一行就报错停下。
--- 不删、不改。整份迁移必须在一个事务里跑（Supabase 默认如此），预检失败会连同新表一起回滚。
+-- 不删、不改。本文件自己 BEGIN/COMMIT：重放入口按语句自动提交，事务外 LOCK 会失败。
+-- 预检报错则锁、新表和索引一起回滚。生产 apply 与仓库里其他显式事务迁移相同，整份执行。
 -- 防重复键的取值约定是 story-lite:<item_id>（P3 才写入）；索引只认键本身，不解析前缀。
 
--- ── Story 重复预检（只读）。必须写在唯一索引之前。──────────────────────────
+-- ── 一个事务：锁、重复预检、建表、索引。任一步失败整份回滚。────────────────
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+
+-- Story 重复预检（只读）。必须写在唯一索引之前。
 LOCK TABLE public.flywheel_actions IN SHARE ROW EXCLUSIVE MODE;
 
 DO $$
@@ -137,3 +142,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS flywheel_actions_social_publish_story_idempote
 
 COMMENT ON TABLE public.social_verification_verdicts IS
   'Append-only social verification verdicts. WP1 P2. Do not update or delete; client removal is a separate authorised procedure.';
+
+COMMIT;

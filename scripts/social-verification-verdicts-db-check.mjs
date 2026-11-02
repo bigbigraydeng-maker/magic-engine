@@ -3,6 +3,10 @@
  * Throwaway Postgres checks for the WP1 P2 verdict migration.
  * Never reads DATABASE_URL. Never contacts a hosted database. Deletes nothing
  * in the duplicate scenario: the migration must abort and leave both rows.
+ *
+ * Apply the file the same way scripts/db-replay-and-verify.sh does:
+ * `psql -v ON_ERROR_STOP=1 -f` with autocommit, and no --single-transaction.
+ * A LOCK outside an explicit BEGIN fails on that path.
  */
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -94,7 +98,7 @@ async function main() {
     await psqlFile('verdicts_clean', parents + storyRow('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb01', 'story-lite:one') + storyRow('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb02', 'story-lite:two'))
     await psqlFile('verdicts_dupes', parents + storyRow('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb11', 'story-lite:same') + storyRow('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbb12', 'story-lite:same'))
 
-    const clean = await psql('verdicts_clean', ['-1', '-f', migration])
+    const clean = await psql('verdicts_clean', ['-f', migration])
     console.log('clean migration exit 0')
     if (!clean.stdout.includes('CREATE INDEX') && !clean.stderr.includes('CREATE INDEX')) {
       console.log(clean.stdout)
@@ -102,7 +106,7 @@ async function main() {
     const tested = await psql('verdicts_clean', ['-f', checks])
     const notice = tested.stderr.split('\n').filter((line) => line.includes('T14 passed') || line.toLowerCase().includes('notice'))
     console.log(notice.join('\n') || tested.stderr)
-    const dupes = await psql('verdicts_dupes', ['-1', '-f', migration]).then(
+    const dupes = await psql('verdicts_dupes', ['-f', migration]).then(
       () => { throw new Error('duplicate precheck did not abort') },
       (error) => error,
     )
