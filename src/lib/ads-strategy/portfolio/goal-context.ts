@@ -316,6 +316,7 @@ export async function buildDigestGoalContext(
       target: goal.target_value,
       dayIndex,
       totalDays,
+      primaryMetricKey: goal.primary_metric_key,
       pace,
       ...(source === 'fallback' ? { configReadError: configError ?? 'unknown error' } : {}),
     }

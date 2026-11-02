@@ -40,7 +40,14 @@ export async function overlayLiveGoal<T extends GrowthRowLike>(
     ...row,
     payload: {
       ...payload,
-      goal: { title: ctx.title, label: ctx.label, target: ctx.target, dayIndex: ctx.dayIndex, totalDays: ctx.totalDays },
+      goal: {
+        title: ctx.title,
+        label: ctx.label,
+        target: ctx.target,
+        dayIndex: ctx.dayIndex,
+        totalDays: ctx.totalDays,
+        primaryMetricKey: ctx.primaryMetricKey,
+      },
     },
     goal_pace: ctx.pace,
     goal_live: { live: true, readAtIso },

@@ -95,10 +95,35 @@ describe('toClientGrowthView', () => {
 
   it('goal and pace are whitelisted; internal pace reason replaced with neutral words', () => {
     const view = toClientGrowthView([row('2026-09-27', [])], NOW)!
-    expect(view.goal).toEqual({ title: '九月留资', label: '留资', target: 100, dayIndex: 15, totalDays: 30 })
+    expect(view.goal).toEqual({
+      title: '九月留资',
+      label: '留资',
+      target: 100,
+      dayIndex: 15,
+      totalDays: 30,
+      progressPending: false,
+    })
     expect(view.goal_pace?.verdict).toBe('unreachable_within_caps')
     expect(view.goal_pace?.reason).not.toContain('预算')
     expect(view.goal_pace?.actualToDate).toBe(30)
+  })
+
+  it('signups metric → progressPending without leaking primaryMetricKey', () => {
+    const view = toClientGrowthView([
+      row('2026-09-27', [], {
+        goal: {
+          title: '定金座位',
+          label: '报名',
+          target: 30,
+          dayIndex: 3,
+          totalDays: 60,
+          primaryMetricKey: 'signups_count',
+        },
+      }),
+    ], NOW)!
+    expect(view.goal?.progressPending).toBe(true)
+    expect(JSON.stringify(view)).not.toContain('signups_count')
+    expect(JSON.stringify(view)).not.toContain('primaryMetricKey')
   })
 
   it('clientVisible missing or the string "true" counts as internal', () => {

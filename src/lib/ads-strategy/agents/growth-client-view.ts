@@ -21,6 +21,7 @@ import {
 } from '@/lib/ads-strategy/rules/client-copy'
 import type { GrowthStateRow } from '@/lib/ads-strategy/rules/patrol-findings'
 import type { GoalPaceVerdict } from '@/lib/ads-strategy/goal-pace'
+import { isGoalProgressPending } from '@/lib/ads-strategy/goal-progress-display'
 
 /** 客户版往回读几行（连续命中要看前几天；跟 Magic Bridge 的 14 天回看同量级） */
 export const CLIENT_GROWTH_LOOKBACK_ROWS = 14
@@ -40,6 +41,8 @@ export interface ClientGoalView {
   target: number
   dayIndex: number
   totalDays: number
+  /** 定金/成交等尚未接入进度条时为 true；不下发指标 key */
+  progressPending: boolean
 }
 
 export interface ClientGoalPaceView {
@@ -88,7 +91,15 @@ function pickGoal(payload: unknown): ClientGoalView | null {
   const totalDays = finiteOrNull(g.totalDays)
   if (typeof g.title !== 'string' || typeof g.label !== 'string') return null
   if (target === null || dayIndex === null || totalDays === null) return null
-  return { title: g.title, label: g.label, target, dayIndex, totalDays }
+  const metricKey = typeof g.primaryMetricKey === 'string' ? g.primaryMetricKey : null
+  return {
+    title: g.title,
+    label: g.label,
+    target,
+    dayIndex,
+    totalDays,
+    progressPending: isGoalProgressPending(metricKey),
+  }
 }
 
 function pickGoalPace(raw: unknown): ClientGoalPaceView | null {
