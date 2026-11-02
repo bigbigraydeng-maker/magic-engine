@@ -9,7 +9,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { runZhangqian, ZhangqianRunError } from '@/lib/zhangqian/agent'
-import { completeJob, failJob, updateJobProgress } from '@/lib/zhangqian/persistor'
+import { completeJob, failJob, getJob, updateJobProgress } from '@/lib/zhangqian/persistor'
 import {
   DataForSeoTaskError,
   getDomainMetrics,
@@ -97,6 +97,11 @@ export async function executeDiscoveryJob(
         await updateJobProgress(supabaseAdmin, jobId, { progress_note: note })
       },
     })
+
+    // The status route fails a run after the 12-minute stale timeout and tells the user
+    // to retry. If this run is still alive then, the retry owns the client now: do not
+    // complete this one or charge for it, or the same client pays twice.
+    if ((await getJob(supabaseAdmin, jobId))?.status !== 'running') return
 
     if (validation_error) {
       await failJob(
