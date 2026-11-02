@@ -13,8 +13,8 @@ import type { EntitySnapshotRow } from '../../snapshot'
 
 const DATE = '2026-09-24'
 const EVAL = '2026-09-25T03:00:00Z'
-const OWN = '1616575215312482'
-const OTHER = '748077268383005'
+const OWN = '1606507503425425'
+const OTHER = '741373842505669'
 
 function snap(p: Partial<EntitySnapshotRow> & Pick<EntitySnapshotRow, 'level' | 'entity_id'>): EntitySnapshotRow {
   return {
@@ -241,7 +241,7 @@ describe('scopeAccountToClient', () => {
   })
 
   it('主页 id 是脏数据（全角数字、零宽字符、前导零）也要认得出，不能把客户自己的广告判成别家（Codex 2026-09-27）', () => {
-    const dirtyClientPageId = '​００​1616575215312482 ' // 零宽字符 + 全角数字 + 前导零 + 尾随空格
+    const dirtyClientPageId = '​００​1606507503425425 ' // 零宽字符 + 全角数字 + 前导零 + 尾随空格
     const snaps = [campaign('c1'), adset('as1', 'c1'), ad('ad1', 'as1', 'c1', OWN)]
     const scoped = scopeAccountToClient(account(snaps, [adsetRow('as1', 'c1', DATE, 10)]), dirtyClientPageId, DATE, EVAL)
     expect(scoped.account.snapshots.some(r => r.entity_id === 'as1')).toBe(true)
