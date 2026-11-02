@@ -94,6 +94,32 @@ export function dealStageEventId(outcomeId: string): string {
 }
 
 /**
+ * Scope for one existing send row. An empty id means the caller did not name
+ * one event. Any other id is refused, so a resolved stage cannot fall through
+ * and resend the original deal as well.
+ */
+export function singleEventSendScope(
+  outcomeId: string,
+  eventId: unknown,
+): { scope?: { eventId: string } } | null {
+  if (eventId == null || eventId === '') return {}
+  if (typeof eventId !== 'string') return null
+  const id = eventId.trim()
+  if (id === '') return {}
+  if (id !== outcomeId && id !== dealStageEventId(outcomeId)) return null
+  return { scope: { eventId: id } }
+}
+
+/** Event name saved on a send row. Missing or not a stage key means there is none. */
+export function storedEventName(preview: unknown): string | null {
+  if (!preview || typeof preview !== 'object' || Array.isArray(preview)) return null
+  const name = (preview as { 事件类型?: unknown }).事件类型
+  if (typeof name !== 'string') return null
+  const trimmed = name.trim()
+  return STAGE_KEY_RE.test(trimmed) ? trimmed : null
+}
+
+/**
  * Stage name for the companion event on a deal that already has a Meta lead id.
  * Null means do not send the companion. The original purchase or balance still sends.
  */

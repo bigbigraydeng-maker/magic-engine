@@ -339,7 +339,11 @@ export default function ConversionsPage() {
         const body = await res.json()
         if (res.ok && resolution === 'resend') {
           // 放回队列还不算发出去 —— 真正再发一次走这个接口。
-          const sendRes = await fetch(`/api/admin/conversions/outcomes/${o.id}/send`, { method: 'POST' })
+          const sendRes = await fetch(`/api/admin/conversions/outcomes/${o.id}/send`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ event_id: wb.event_id }),
+          })
           const sendBody = await sendRes.json()
           setFlash({ id: o.id, text: sendBody.message ?? '已重新发送', ok: sendRes.ok })
         } else {

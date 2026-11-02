@@ -24,12 +24,13 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
-import { capiEventNameForKind, decideCapiEventAllowed } from './capi-client-config'
+import { capiEventNameForKind, decideCapiEventAllowed, readCapiClientConfig } from './capi-client-config'
 import {
   dealStageEventId,
   dealStageEventName,
   qualifiedLeadHoldReason,
   resolveConversionLead,
+  storedEventName,
 } from './conversion-lead'
 import { actionSourceForSourceKind, type SourceKind } from './intake'
 import { eventAgeMs, isPastEventWindow, DAY_MS } from './event-window'
@@ -225,7 +226,7 @@ export async function sendApprovedOutcome(
 }
 
 async function sendScopedCompanion(outcomeId: string, deps: SendDeps): Promise<SendOutcomeResult> {
-  const eventName = await readDealStageName(deps.supabase, outcomeId)
+  const eventName = await readDealStageName(deps.supabase, outcomeId, deps.writer.kind)
   if (eventName) {
     return deliverApprovedOutcome(outcomeId, deps, {
       eventId: dealStageEventId(outcomeId),
@@ -241,7 +242,7 @@ async function sendScopedCompanion(outcomeId: string, deps: SendDeps): Promise<S
 
 async function sendDealStageCompanion(outcomeId: string, deps: SendDeps): Promise<void> {
   try {
-    const eventName = await readDealStageName(deps.supabase, outcomeId)
+    const eventName = await readDealStageName(deps.supabase, outcomeId, deps.writer.kind)
     if (!eventName) return
     await deliverApprovedOutcome(outcomeId, deps, {
       eventId: dealStageEventId(outcomeId),
@@ -257,7 +258,11 @@ async function sendDealStageCompanion(outcomeId: string, deps: SendDeps): Promis
   }
 }
 
-async function readDealStageName(supabase: SupabaseClient, outcomeId: string): Promise<string | null> {
+async function readDealStageName(
+  supabase: SupabaseClient,
+  outcomeId: string,
+  destination: string,
+): Promise<string | null> {
   const { data, error } = await supabase
     .from('me_sale_outcomes')
     .select('outcome_kind, meta_lead_id, client_id')
@@ -265,12 +270,28 @@ async function readDealStageName(supabase: SupabaseClient, outcomeId: string): P
     .maybeSingle()
   if (error || !data) return null
   const row = data as { outcome_kind?: string; meta_lead_id?: string | null; client_id?: string }
-  if (row.outcome_kind !== 'purchase' && row.outcome_kind !== 'balance') return null
-  if (!row.client_id) return null
+  if ((row.outcome_kind !== 'purchase' && row.outcome_kind !== 'balance') || !row.client_id) return null
   const client = await supabase.from('clients').select('leads_config').eq('id', row.client_id).maybeSingle()
   if (client.error || !client.data) return null
-  const cfg = client.data as { leads_config?: unknown }
-  return dealStageEventName(cfg.leads_config, row.meta_lead_id ?? null)
+  const leadsConfig = (client.data as { leads_config?: unknown }).leads_config
+  if (!readCapiClientConfig(leadsConfig).conversionLeadsEnabled) return null
+  const saved = await savedStageEventName(supabase, destination, dealStageEventId(outcomeId))
+  return saved ?? dealStageEventName(leadsConfig, row.meta_lead_id ?? null)
+}
+
+async function savedStageEventName(
+  supabase: SupabaseClient,
+  destination: string,
+  eventId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('payload_preview')
+    .eq('destination', destination)
+    .eq('event_id', eventId)
+    .maybeSingle()
+  if (error || !data) return null
+  return storedEventName((data as { payload_preview?: unknown }).payload_preview)
 }
 
 async function deliverApprovedOutcome(

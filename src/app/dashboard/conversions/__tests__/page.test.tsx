@@ -477,6 +477,31 @@ describe('授权失效的失败行说清「会自动补发」（2026-09-22 起�
     expect(screen.getByText(/不确定平台收到没有/)).toBeTruthy()
   })
 
+  it('只核对阶段之后，重新发送带上这一条的发送编号', async () => {
+    const eventId = 'mixed:conversion-stage'
+    mountWith([
+      outcome({
+        id: 'mixed',
+        review_status: 'approved',
+        me_conversion_writebacks: [
+          { id: 'primary', status: 'failed', last_error: '平台忙', last_error_code: 'retry', next_attempt_at: null, event_id: 'mixed' },
+          { id: 'stage', status: 'in_doubt', last_error: '断了', last_error_code: null, next_attempt_at: null, event_id: eventId },
+        ],
+      }),
+    ])
+    expect(await screen.findByRole('button', { name: '确认没收到 · 重新发送' })).toBeTruthy()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: '确认没收到 · 重新发送' }))
+    await waitFor(() => {
+      const send = fetchMock.mock.calls.find((c) => String(c[0]).includes('/outcomes/mixed/send'))
+      expect(send).toBeTruthy()
+      const body = JSON.parse((send![1] as RequestInit).body as string)
+      expect(body).toEqual({ event_id: eventId })
+    })
+    const doubt = fetchMock.mock.calls.find((c) => String(c[0]).includes('/writebacks/stage/resolve-doubt'))
+    expect(doubt).toBeTruthy()
+  })
+
   it('成交已收到、阶段还不确定时，核对提示和确认框写明是阶段事件', async () => {
     const eventId = 'owed:conversion-stage'
     mountWith([

@@ -918,6 +918,56 @@ describe('同一条 Meta 线索', () => {
     expect(db.tables.me_conversion_writebacks).toHaveLength(2)
   })
 
+  it('重试已有阶段记录时沿用保存的事件名，不改用当前配置', async () => {
+    seed(db, {
+      outcome: { meta_lead_id: leadId, amount_minor: 388000, currency: 'NZD' },
+      client: {
+        leads_config: {
+          capi_allowed_events: ['Purchase'],
+          capi_conversion_leads: true,
+          capi_conversion_deal_stage_key: 'renamed_later',
+        },
+      },
+    })
+    db.tables.me_conversion_writebacks.push(
+      {
+        id: 'wb-purchase',
+        outcome_id: OUTCOME,
+        destination: 'meta_capi',
+        event_id: OUTCOME,
+        status: 'failed',
+        last_error_code: 'retry',
+        last_error: 'HTTP 500',
+        attempts: 1,
+        post_started_at: null,
+      },
+      {
+        id: 'wb-stage',
+        outcome_id: OUTCOME,
+        destination: 'meta_capi',
+        event_id: `${OUTCOME}:conversion-stage`,
+        status: 'failed',
+        last_error_code: 'auth',
+        last_error: '令牌失效',
+        attempts: 1,
+        post_started_at: null,
+        payload_preview: { 事件类型: 'balance_received' },
+      },
+    )
+    const build = vi.fn().mockReturnValue({ data: [] })
+    const writer = makeWriter({ build })
+    const result = await sendApprovedOutcome(OUTCOME, deps(db, writer), {
+      eventId: `${OUTCOME}:conversion-stage`,
+    })
+    expect(result.status).toBe('confirmed')
+    expect(writer.sendSpy).toHaveBeenCalledTimes(1)
+    expect(build.mock.calls[0][0].conversionLeadEventName).toBe('balance_received')
+    const purchase = db.tables.me_conversion_writebacks.find((row) => row.event_id === OUTCOME)
+    const stage = db.tables.me_conversion_writebacks.find((row) => row.event_id === `${OUTCOME}:conversion-stage`)
+    expect(purchase).toMatchObject({ status: 'failed', last_error_code: 'retry' })
+    expect(stage?.payload_preview).toMatchObject({ 事件类型: 'balance_received' })
+  })
+
   it('回传开关关掉后，授权失败或中断的已报价不再发出，也不改成普通咨询', async () => {
     for (const code of ['auth', 'retry'] as const) {
       db = new FakeDb()
