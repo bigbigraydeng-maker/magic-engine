@@ -18,11 +18,13 @@ import {
   YAxis,
 } from 'recharts'
 import type { HourlyLeadChart } from '@/lib/ads-strategy/hourly-meta-leads'
+import type { LeadForecast } from '@/lib/ads-strategy/hourly-leads-forecast'
 
 type StaffPayload = {
   unreadable: boolean
   message?: string
   chart?: HourlyLeadChart
+  forecast?: LeadForecast | null
   lastSyncAt?: string | null
   jobName?: string
 }
@@ -32,6 +34,7 @@ type ClientPayload = {
   unreadable: boolean
   message?: string
   chart?: HourlyLeadChart
+  forecast?: LeadForecast | null
   lastSyncLabel?: string | null
 }
 
@@ -163,13 +166,28 @@ export default function HourlyLeadsPanel({ clientId }: { clientId: string }) {
         <p className="mt-1 text-xs text-gray-500">表单最后一次同步：{syncLabel}（新西兰时间）</p>
       )}
 
-      {/* 需求 ② 预测：产品拍板后再接 */}
-      <div
-        className="mt-4 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-3 py-2 text-xs text-gray-400"
-        aria-hidden
-      >
-        全天预测（按历史钟点规律）将显示在这里 —— 等产品定稿后再做。
-      </div>
+      <ForecastBlock forecast={data.forecast ?? null} />
+    </div>
+  )
+}
+
+function ForecastBlock({ forecast }: { forecast: LeadForecast | null }) {
+  if (!forecast) {
+    return (
+      <p className="mt-4 text-sm text-gray-500">全天估算：数据不足，不预测</p>
+    )
+  }
+  if (forecast.status === 'insufficient') {
+    return (
+      <p className="mt-4 text-sm text-gray-600">{forecast.message}</p>
+    )
+  }
+  return (
+    <div className="mt-4 rounded-lg border border-gray-100 bg-gray-50 px-3 py-3 text-sm text-gray-700">
+      <p>
+        预计全天 <b>{forecast.rangeMin}–{forecast.rangeMax}</b> 条（估算）
+      </p>
+      <p className="mt-1 text-xs text-gray-500">{forecast.disclaimer}</p>
     </div>
   )
 }
