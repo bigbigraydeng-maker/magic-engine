@@ -128,6 +128,24 @@ describe('runIntakeForClient news hotspot', () => {
     expect(m.apify).toHaveBeenCalled()
   })
 
+  it('without news, only rewrites within top rewriteCount heat picks (main parity)', async () => {
+    m.intakeConfig.platforms = ['xiaohongshu']
+    m.intakeConfig.rewriteCount = 5
+    m.existingSources = ['抓自：V1', '抓自：V2', '抓自：V3']
+    m.apify.mockResolvedValue({
+      success: true,
+      data: ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7'].map((title) => ({
+        title,
+        desc: 'd',
+        engagement: { liked_count: 1 },
+      })),
+    })
+    const result = await runIntakeForClient('client-1')
+    expect(m.generate).toHaveBeenCalledTimes(2)
+    expect(m.generate.mock.calls.map((c) => (c[1] as ViralRef).title)).toEqual(['V4', 'V5'])
+    expect(result.created).toBe(2)
+  })
+
   it('does not fetch news when platform news is off', async () => {
     m.intakeConfig.platforms = ['xiaohongshu']
     await runIntakeForClient('client-1')

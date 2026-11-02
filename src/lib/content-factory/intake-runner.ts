@@ -111,7 +111,7 @@ export async function runIntakeForClient(clientId: string): Promise<IntakeRunRes
 
   const seen = await existingSources(clientId)
   const picks = mixIntakePicks(
-    unseenRefs(virals, seen),
+    virals,
     unseenRefs(newsVirals, seen),
     config.rewriteCount,
   )
