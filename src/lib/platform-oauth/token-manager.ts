@@ -327,7 +327,7 @@ export async function getValidToken(
  */
 export async function getValidTokenForConnection(
   connectionId: string,
-  opts?: { forceRefresh?: boolean },
+  opts?: { forceRefresh?: boolean; markErrorOnFailure?: boolean },
 ): Promise<string> {
   const { data, error } = await supabaseAdmin
     .from('platform_oauth_connections')
@@ -350,7 +350,11 @@ export async function getValidTokenForConnection(
   try {
     refreshed = await callProviderRefresh(row.provider, decryptToken(row.refresh_token_enc))
   } catch (err) {
-    await markConnectionError(row.id, err instanceof Error ? err.message : String(err))
+    // A read-only background reader (the triggered-send shadow run) passes `markErrorOnFailure: false`: a refresh that
+    // fails once must not take the mailbox offline for the people who send from it. Every other caller keeps the default.
+    if (opts?.markErrorOnFailure !== false) {
+      await markConnectionError(row.id, err instanceof Error ? err.message : String(err))
+    }
     throw err
   }
 

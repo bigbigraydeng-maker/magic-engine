@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ─── Hoisted mocks ────────────────────────────────────────────────────────────
 
@@ -27,6 +27,7 @@ vi.mock('../vocabulary', async (importOriginal) => {
 
 import {
   getValidToken,
+  getValidTokenForConnection,
   PlatformConnectionNotFoundError,
   PlatformTokenRefreshError,
 } from '../token-manager'
@@ -298,5 +299,64 @@ describe('刷新请求的形状（根因闸门，改之前先读 PITFALLS F11）
     expect(body.get('scope')).toBe(MICROSOFT_MAIL_SCOPES.join(' '))
     // offline_access 少了就换不回刷新能力，下一小时安静地断
     expect(body.get('scope')).toContain('offline_access')
+  })
+})
+
+/**
+ * A read-only background reader (the triggered-send shadow run) must be able to read a mailbox WITHOUT ever taking it
+ * offline: when its token refresh fails once, the connection must stay `active` for the people who send from it.
+ * Every other caller keeps the old behaviour (a failed refresh marks the connection as error).
+ */
+describe('getValidTokenForConnection — markErrorOnFailure', () => {
+  const MS_ROW = { ...VALID_ROW, provider: 'microsoft_mail', purpose: 'legacy' }
+
+  function setup() {
+    const eqAfterUpdate = vi.fn().mockResolvedValue({ error: null })
+    const update = vi.fn().mockReturnValue({ eq: eqAfterUpdate })
+    const chain: Record<string, unknown> = {}
+    for (const m of ['select', 'eq']) chain[m] = vi.fn().mockReturnValue(chain)
+    chain['maybeSingle'] = vi.fn().mockResolvedValue({ data: MS_ROW, error: null })
+    chain['update'] = update
+    mocks.from.mockReset()
+    mocks.from.mockReturnValue(chain)
+    return { update }
+  }
+
+  beforeEach(() => {
+    process.env.MICROSOFT_CLIENT_ID = 'ms-client'
+    process.env.MICROSOFT_CLIENT_SECRET = 'ms-secret'
+    mocks.isTokenExpired.mockReturnValue(true)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const failRefresh = () =>
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'temporarily_unavailable' }), { status: 503 })))
+
+  it('by default a failed refresh marks the connection as error (behaviour unchanged for every other caller)', async () => {
+    const { update } = setup()
+    failRefresh()
+    await expect(getValidTokenForConnection('conn-1')).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+  })
+
+  it('with markErrorOnFailure:false a failed refresh still throws but leaves the connection alone', async () => {
+    const { update } = setup()
+    failRefresh()
+    await expect(getValidTokenForConnection('conn-1', { markErrorOnFailure: false })).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('with markErrorOnFailure:false a successful refresh is still saved (the token has to be kept fresh)', async () => {
+    const { update } = setup()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ access_token: 'new-token', expires_in: 3600 }) }),
+    )
+    await expect(getValidTokenForConnection('conn-1', { markErrorOnFailure: false })).resolves.toBe('new-token')
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ access_token_enc: 'enc:new-token' }))
+    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
   })
 })
