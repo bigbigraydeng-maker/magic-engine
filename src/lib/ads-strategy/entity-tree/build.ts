@@ -3,6 +3,8 @@
  * Read-only, no I/O, no clock, no randomness.
  */
 
+import { pickWinnerBaseline, type FunnelRates } from './funnel-baseline'
+
 export interface InsightRow {
   level: 'campaign' | 'adset' | 'ad'
   entityId: string
@@ -14,6 +16,9 @@ export interface InsightRow {
   clicks: number
   leads: number
   messagingConversations: number
+  /** Link clicks from actions. Null = this row did not store actions (do not treat as zero). */
+  linkClicks?: number | null
+  video3sViews?: number | null
 }
 
 export interface SnapshotRow {
@@ -45,7 +50,10 @@ export interface EntityMetrics {
   clicks: number
   leads: number
   messagingConversations: number
+  linkClicks: number
+  video3sViews: number
   costPerLead: number | null
+  /** Link clicks ÷ impressions. Null when link clicks were not stored. */
   ctr: number | null
   activeDays: number
 }
@@ -88,6 +96,8 @@ export interface EntityTree {
   window: { since: string; until: string; days: number }
   snapshotAt: string | null
   campaigns: CampaignNode[]
+  /** Account winner (an ad with at least 20 leads). Null = 样本不足. */
+  winnerBaseline: FunnelRates | null
 }
 
 type Level = 'campaign' | 'adset' | 'ad'
@@ -129,6 +139,8 @@ function emptyMetrics(): EntityMetrics {
     clicks: 0,
     leads: 0,
     messagingConversations: 0,
+    linkClicks: 0,
+    video3sViews: 0,
     costPerLead: null,
     ctr: null,
     activeDays: 0,
@@ -138,17 +150,23 @@ function emptyMetrics(): EntityMetrics {
 function metricsOf(rows: InsightRow[]): EntityMetrics {
   const m = emptyMetrics()
   const dates = new Set<string>()
+  let sawLink = false
   for (const r of rows) {
     m.spend += r.spend
     m.impressions += r.impressions
     m.clicks += r.clicks
     m.leads += r.leads
     m.messagingConversations += r.messagingConversations
+    if (r.linkClicks != null) {
+      m.linkClicks += r.linkClicks
+      sawLink = true
+    }
+    m.video3sViews += r.video3sViews ?? 0
     if (r.spend > 0) dates.add(r.date)
   }
   m.activeDays = dates.size
   m.costPerLead = m.leads > 0 ? m.spend / m.leads : null
-  m.ctr = m.impressions > 0 ? m.clicks / m.impressions : null
+  m.ctr = m.impressions > 0 && sawLink ? m.linkClicks / m.impressions : null
   return m
 }
 
@@ -393,9 +411,7 @@ export function buildEntityTree(insights: InsightRow[], snapshots: SnapshotRow[]
     ))
   }
 
-  return {
-    window,
-    snapshotAt,
-    campaigns: sortByStateThenSpend(campaignNodes),
-  }
+  const ranked = sortByStateThenSpend(campaignNodes)
+  const adMetrics = ranked.flatMap((c) => c.adsets.flatMap((s) => s.ads.map((a) => a.metrics)))
+  return { window, snapshotAt, campaigns: ranked, winnerBaseline: pickWinnerBaseline(adMetrics) }
 }

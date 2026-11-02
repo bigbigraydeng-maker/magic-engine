@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   growthLimit: null as number | null,
   latest: null as unknown,
   latestError: null as { message: string } | null,
+  insights: [] as unknown[],
 }))
 
 vi.mock('@/lib/ads-strategy/agents/growth-live-goal', () => ({
@@ -28,6 +29,8 @@ vi.mock('@/lib/supabase', () => {
     const q = {
       select: () => q,
       eq: () => q,
+      gte: () => q,
+      lte: () => q,
       order: () => q,
       limit: (n: number) => {
         if (table === 'ads_growth_states') m.growthLimit = n
@@ -43,7 +46,9 @@ vi.mock('@/lib/supabase', () => {
         Promise.resolve(
           table === 'ads_growth_states'
             ? { data: m.growthError ? null : m.growthRows, error: m.growthError }
-            : { data: [], error: null },
+            : table === 'ad_daily_insights'
+              ? { data: m.insights, error: null }
+              : { data: [], error: null },
         ).then(resolve),
     }
     return q
@@ -105,6 +110,7 @@ describe('GET ad-health — growth visibility by viewer', () => {
     m.growthLimit = null
     m.latest = null
     m.latestError = null
+    m.insights = []
   })
   afterEach(() => vi.useRealTimers())
 
@@ -198,6 +204,12 @@ describe('GET ad-health — growth visibility by viewer', () => {
 
     beforeEach(() => {
       m.latest = narrative
+      m.insights = [{
+        entity_id: 'cp1',
+        insight_date: '2026-09-26',
+        impressions: 1000,
+        actions: [{ action_type: 'link_click', value: '4' }],
+      }]
     })
 
     it('paid client and scoped admin never receive portfolio_diagnoses; page fields stay', async () => {
@@ -226,7 +238,7 @@ describe('GET ad-health — growth visibility by viewer', () => {
         'latest_spend_7d', 'metrics', 'prescription', 'verdict',
       ])
       expect(c.metrics).toEqual([{ metric: 'ctr', verdict: 'alert', baseline: 0.02, ratio: 0.5 }])
-      expect(c.ctr_series).toEqual([{ date: '2026-09-26', ctr: 0.01 }])
+      expect(c.ctr_series).toEqual([{ date: '2026-09-26', ctr: 0.004 }])
       expect(c.prescription).toEqual({ kind: 'refresh_creatives', title: '换素材', why: '看腻了', executable: true, execute_hint: '补 3 条' })
     })
 

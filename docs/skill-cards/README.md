@@ -6,6 +6,9 @@
 ## 索引（每张卡的裁决一眼看）
 | 卡 | 状态 | 裁决摘要 |
 |---|---|---|
+| [2026-11-01 Mark Builds Brands：新概念比变体更重要、一概念一组](2026-11-01-meta-ads-concept-per-adset-cbo-mark-builds-brands.md) | candidate | 待验证：新概念优先于变体、关掉自动增强（并入已有交接卡，第三位独立作者）；忽略：CBO 做测试（与 S-12、AT§4 原文冲突）、10 美元/条与 50 美元/天（无出处，E-06） |
+| [2026-11-01 Sam Piliero：新人/互动/老客户三条线 + 每批一个新组](2026-11-01-meta-ads-prospect-scale-retarget-packs-sam-piliero.md) | candidate | **待验证（优先）**：再营销组有没有开着「扩展到更广受众」（新开交接卡，交 119）；待验证：三层花费拆分、广告组花费下限（并入已有交接卡）；吸收（已有一致）：拉新排除已转化、新批次另开新组；忽略：80/20、放量系列、兴趣定向（网店规模打法） |
+| [2026-11-01 咔咔的老吴：素材覆盖上中下三层](2026-11-01-meta-ads-three-layer-funnel-creative-laowu.md) | candidate | 待验证：素材覆盖不同认知阶段（并入已有交接卡）；存疑：「算法要求三层」未引 Meta 原文；忽略：下层限时折扣/免运费（与 C-11、PM 10-14 冲突）；PM 拍板项：真人体验/横向评测（外部创作者） |
 | [2026-10-20 Meta 事件管理工具追踪体检](2026-10-20-meta-events-manager-tracking-health.md) | candidate | 吸收：四屏只读体检、同一事件名至多一条服务器来源；不吸收：Meta 宣传数字、经向导再加第三条回传（只限某客户）；待验证：接口读诊断警告 / 集成清单（目前读不到）、11-12 设备端衡量通知 |
 | [2026-10-18 Facebook 素材先行测试顺序](2026-10-18-meta-ads-creative-first-test-order.md) | candidate | 部分吸收（待验证）：测试≠放量；忽略：1:4:1（对 CTS）、点击率选赢家；吸收：ABO 测/CBO 放量（已有） |
 | [2026-10-18 Facebook 广告入门六步与指标线](2026-10-18-meta-ads-beginner-setup-and-metrics.md) | candidate | 吸收（已有一致）：落地页/盈亏CPA/加预算幅度；~~忽略：Advantage+开启~~（已更正为吸收，见卡内复核更正）；忽略：电商数字线（依据是 E-06）；待验证：开始时间次日0点、点击率×点击成本矩阵 |
@@ -26,7 +29,7 @@
 | [2026-10-18 TikTok Dante Brunelli：投放三段流程与认知阶段](2026-10-18-meta-ads-andromeda-pipeline-awareness-dante-brunelli.md) | candidate | **待验证（优先）**：太像的素材被当成一条（并入 Post-Andromeda 卡，CTS 已排 10/19–10/20 核）；待验证：落地页一致、教育类广告、隐藏率；忽略：至少 25 条素材 |
 
 
-每月汇总：[2026-10](monthly/2026-10.md)。
+每月汇总：[2026-11](monthly/2026-11.md) · [2026-10](monthly/2026-10.md)。
 
 新增卡必须在此表加一行，写明裁决。没有裁决的卡不算完成。
 

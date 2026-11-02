@@ -3,6 +3,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { ANALYSIS_SCHEMA_VERSION } from './analysis-schema'
 import { writeCallStance } from './call-stance'
+import { writeCustomerSpoke } from './customer-spoke-write'
 import type { AnalysisCall, AnalysisConnection, AnalysisStore } from './pipeline'
 
 const BUCKET = 'telephony-recordings'
@@ -140,6 +141,10 @@ export const supabaseAnalysisStore: AnalysisStore = {
 
   markCallStance(touchpointId, clientId, analysisId, stance) {
     return writeCallStance({ touchpointId, clientId, analysisId, stance })
+  },
+
+  markCustomerSpoke(touchpointId, clientId, analysisId, verdict) {
+    return writeCustomerSpoke({ touchpointId, clientId, analysisId, verdict })
   },
 
   async countTranscribedSince(connectionId, sinceIso) {

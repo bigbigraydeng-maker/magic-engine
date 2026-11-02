@@ -49,6 +49,7 @@ import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-a
 import { planDraftFromPrescription } from './plan-draft-from-prescription'
 import { crmEmailSendReceipt } from './crm-email-send-receipt'
 import { clientWeeklyReportFanOut, clientWeeklyReportRunOne } from './client-weekly-report'
+import { zhangqianDiscovery } from './zhangqian-discovery'
 
 export const cloudFunctions = [
   promoPlanDailyWatch,
@@ -117,6 +118,7 @@ export const cloudFunctions = [
   telephonyCallAnalysisSweep,
   planDraftFromPrescription,
   crmEmailSendReceipt,
+  zhangqianDiscovery,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

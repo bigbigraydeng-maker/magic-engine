@@ -4,18 +4,21 @@
  * that "not checked" is never rendered as "found nothing".
  */
 import React from 'react'
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup } from '@testing-library/react'
 
 import GrowthPanel, { type GrowthStateView } from '../growth-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 const base: ClientGrowthView = {
   viewer: 'client',
   date: '2026-09-27',
-  goal: { title: '九月留资', label: '留资', target: 100, dayIndex: 15, totalDays: 30 },
+  goal: { title: '九月留资', label: '留资', target: 100, dayIndex: 15, totalDays: 30, progressPending: false },
   goal_pace: {
     expectedToDate: 50, actualToDate: 30, gapPct: -40, projectedEnd: 40,
     verdict: 'unreachable_within_caps', reason: '按现在的速度，到期可能达不到目标。',
@@ -31,12 +34,13 @@ const base: ClientGrowthView = {
 }
 
 describe('GrowthPanel — client view', () => {
-  it('shows goal and the client-copy card; no opportunities column, no codes, no budget wording', () => {
+  it('shows the client-copy card; goal bar lives on Today tab', () => {
     const { container } = render(<GrowthPanel state={base} />)
     expect(screen.getByText('我们正在跟进的广告（1 条）')).toBeTruthy()
     expect(screen.getByText('Spring Lead Ad')).toBeTruthy()
-    expect(screen.getByText(/九月留资 · 按现在的速度可能到不了/)).toBeTruthy()
+    expect(screen.getByText(/今天看这里/)).toBeTruthy()
     const text = container.textContent ?? ''
+    expect(text).not.toContain('九月留资 · 按现在的速度可能到不了')
     expect(text).not.toContain('可以加力的地方')
     expect(text).not.toContain('要看的事')
     expect(text).not.toMatch(/\b[DO]\d{1,2}\b/)
@@ -49,10 +53,10 @@ describe('GrowthPanel — client view', () => {
     expect(screen.queryByText(/今天没发现/)).toBeNull()
   })
 
-  it('no goal → client wording, not "这个客户"', () => {
+  it('no goal → client wording on settings tab points to Today', () => {
     render(<GrowthPanel state={{ ...base, goal: null }} />)
-    expect(screen.getByText('这段时间还没有设定广告目标，设好后这里会显示进度。')).toBeTruthy()
-    expect(screen.queryByText(/这个客户/)).toBeNull()
+    expect(screen.queryByText('这段时间还没有设定广告目标，设好后这里会显示进度。')).toBeNull()
+    expect(screen.getByText(/今天看这里/)).toBeTruthy()
   })
 })
 
@@ -74,13 +78,24 @@ function internalState(dataThrough?: string): GrowthStateView {
 }
 
 describe('GrowthPanel — 数据截至', () => {
-  it('没有 dataThrough 时不显示「数据截至昨天」', () => {
-    const { container } = render(<GrowthPanel state={internalState()} />)
+  it('goal pace details moved to Today tab — settings panel does not repeat dataThrough', () => {
+    const { container } = render(<GrowthPanel state={internalState('2026-09-15')} />)
     expect(container.textContent ?? '').not.toContain('数据截至')
+    expect(screen.getByText(/今天看这里/)).toBeTruthy()
   })
 
-  it('有 dataThrough 才显示这一天', () => {
-    render(<GrowthPanel state={internalState('2026-09-15')} />)
-    expect(screen.getByText(/数据截至2026-09-15/)).toBeTruthy()
+  it('跟进率不够时，加预算建议下面多一句，客户视图不出现这句', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ view: { budgetHold: true }, items: [] })))
+    const state = internalState()
+    state.payload = {
+      ...state.payload!,
+      opportunities: [{ code: 'O1', status: 'hit', title: '这条素材还可以加力' }],
+    }
+    render(<GrowthPanel state={state} clientId="client-1" />)
+    expect(await screen.findByText('先补跟进，暂不建议加预算')).toBeTruthy()
+    cleanup()
+    render(<GrowthPanel state={base} clientId="client-1" />)
+    expect(screen.queryByText('先补跟进，暂不建议加预算')).toBeNull()
+    expect(screen.queryByText(/预算/)).toBeNull()
   })
 })

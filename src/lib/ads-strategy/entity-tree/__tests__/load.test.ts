@@ -10,6 +10,7 @@ describe('entity-tree load helpers', () => {
     expect(row).toEqual({
       level: 'adset', entityId: 'a1', entityName: 'A', parentId: 'c1', date: '2026-10-28',
       spend: 12.5, impressions: 1000, clicks: 30, leads: 2, messagingConversations: 0,
+      linkClicks: null, video3sViews: 0,
     })
     expect(toInsightRow({ level: 'account', entity_id: 'x', entity_name: null, parent_id: null, insight_date: '2026-10-28', spend: 1, impressions: 1, clicks: 1, leads: 0, messaging_conversations: 0 })).toBeNull()
   })

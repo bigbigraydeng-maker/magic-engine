@@ -16,7 +16,8 @@ import Link from 'next/link'
 // Pure data module (no server imports) — safe in a client component.
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
 import AutonomySettings from './autonomy-settings'
-import GrowthPanel, { type GrowthStateView } from './growth-panel'
+import GrowthPanel, { type GrowthStateView, goalLiveNote } from './growth-panel'
+import { TodayGoalProgress } from './today-goal-progress'
 import WarMapPanel from './war-map-panel'
 import LiveTodayPanel from './live-today-panel'
 import BreakdownPanel from './breakdown-panel'
@@ -79,6 +80,8 @@ interface AdHealthResponse {
   industry?: string | null
   /** 卫青巡察当天的经营状态。null = 今天还没跑；缺字段 = 这一段读不到（接口出错）。 */
   growth?: GrowthStateView | ClientGrowthView | null
+  /** 今天 CRM 表单进线（新西兰日）；null = 读不到 */
+  today_crm_leads?: number | null
 }
 
 // ─── Verdict styling (colour = conclusion, per 板桥) ───────────────────────────
@@ -105,30 +108,17 @@ function shortDate(iso: string): string {
   return `${parseInt(m, 10)}/${parseInt(d, 10)}`
 }
 
-// ─── Raw 7-day CTR strip — the "see it yourself" trust element ─────────────────
-//
-// 板桥 P0: without the campaign's OWN best-week anchor and a plain-language note,
-// this strip reads as a flat, contradictory jumble ("you said 4.2%→3.0% but I
-// see 2.5%→…→2.5%"). We lead with the best-week baseline, then the recent days,
-// then one sentence that reconciles "bumpy but down vs its own peak".
+// ─── Last 7 days of link CTR (link clicks ÷ impressions) ───────────────────────
+// All-click "best week" is not shown beside these days: that baseline is a different count.
 
-function CtrStrip({ series, ctr }: { series: Array<{ date: string; ctr: number | null }>; ctr?: MetricVerdict }) {
+function CtrStrip({ series }: { series: Array<{ date: string; ctr: number | null }> }) {
   const points = series.filter(p => p.ctr != null)
-  if (points.length < 2) return null
-
-  const baseline = ctr?.baseline ?? null
-  const downPct = ctr?.ratio != null ? Math.round((1 - ctr.ratio) * 100) : null
-  const worrying = ctr?.verdict === 'alert' || ctr?.verdict === 'watch'
+  if (points.length < 1) return null
 
   return (
     <div className="mt-3">
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        {baseline != null && (
-          <span className="rounded bg-gray-100 px-1.5 py-0.5 text-gray-500 mr-1">
-            最好的一周 <span className="tabular-nums font-medium text-gray-700">{fmtPct(baseline)}</span>
-          </span>
-        )}
-        <span className="text-gray-400 mr-0.5">近 7 天:</span>
+        <span className="text-gray-400 mr-0.5">近 7 天链接点击率:</span>
         {points.map((p, i) => {
           const prev = i > 0 ? points[i - 1].ctr : null
           const down = prev != null && p.ctr != null && p.ctr < prev
@@ -145,12 +135,8 @@ function CtrStrip({ series, ctr }: { series: Array<{ date: string; ctr: number |
       </div>
       <div className="mt-1 text-[11px] text-gray-400">
         {shortDate(points[0].date)} → {shortDate(points[points.length - 1].date)}
+        <span className="ml-1">点进链接的次数 ÷ 曝光，不含点头像、评论那些。</span>
       </div>
-      {worrying && baseline != null && downPct != null && (
-        <p className="mt-2 text-xs text-gray-500 leading-relaxed">
-          这一周点击率忽高忽低是正常波动;但跟它自己<span className="font-medium text-gray-700">最好的一周（{fmtPct(baseline)}）</span>比,整体低了约 {downPct}% —— 这是被同一批人看腻、创意开始失效的信号。
-        </p>
-      )}
     </div>
   )
 }
@@ -474,7 +460,6 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
 
 function CampaignCard({ clientId, c, playbook }: { clientId: string; c: CampaignNarrative; playbook: AdsPlaybook }) {
   const meta = VERDICT_META[c.verdict]
-  const ctrMetric = c.metrics.find(m => m.metric === 'ctr')
   // Cost per lead is always derivable from the 7-day aggregates when there are
   // results — show it directly so the PM doesn't have to divide in their head.
   const cpl = c.latest_results_7d > 0 ? c.latest_spend_7d / c.latest_results_7d : null
@@ -493,7 +478,7 @@ function CampaignCard({ clientId, c, playbook }: { clientId: string; c: Campaign
 
       <p className="mt-2 text-sm text-gray-600">{c.headline}</p>
 
-      <CtrStrip series={c.ctr_series} ctr={ctrMetric} />
+      <CtrStrip series={c.ctr_series} />
 
       <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-gray-400">
         <span>近 7 天花费 <span className="text-gray-600 tabular-nums">${c.latest_spend_7d.toFixed(0)}</span></span>
@@ -599,6 +584,18 @@ export default function AdsHealthPage() {
 
       {tab === 'today' && (
         <>
+          {!loading && !error && (
+            <TodayGoalProgress
+              state={data?.growth}
+              clientId={clientId}
+              todayCrmLeads={data?.today_crm_leads}
+              liveNote={
+                data?.growth && 'goal_live' in data.growth
+                  ? goalLiveNote(data.growth.goal_live)
+                  : undefined
+              }
+            />
+          )}
           {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
           <LiveTodayPanel clientId={clientId} part="today" />
           <WarMapPanel clientId={clientId} />

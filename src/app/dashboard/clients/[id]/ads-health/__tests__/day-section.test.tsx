@@ -16,7 +16,7 @@ beforeAll(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 const row = (key: string, spend: number, leads: number): ReportRow => ({
-  key, spend, impressions: 1000, clicks: 30, leads,
+  key, spend, impressions: 1000, clicks: 30, linkClicks: 6, leads,
   costPerLead: leads > 0 ? spend / leads : null, expectedLeads: null, flag: null, spendShare: 0,
 })
 
@@ -24,7 +24,7 @@ const report: BreakdownReport = {
   window: { since: '2026-10-26', until: '2026-10-28', days: 3 },
   accounts: [{ adAccountId: 'act_1', currency: 'NZD', timezone: 'Pacific/Auckland', latestStatDate: '2026-10-28', lastFetchedAt: null }],
   totals: {
-    spendAll: 170, spendLeadObjective: 170, impressionsLeadObjective: 3000, clicksLeadObjective: 90, metaLeads: 11, crmLeads: 11,
+    spendAll: 170, spendLeadObjective: 170, impressionsLeadObjective: 3000, clicksLeadObjective: 90, linkClicksLeadObjective: 18, metaLeads: 11, crmLeads: 11,
     matchRate: 1, costPerCrmLead: 15, crmLeadsUnmatched: 0,
   },
   nonLeadSpend: [], hour: [], weekday: [], placement: [], device: [], ageGender: [], region: [],

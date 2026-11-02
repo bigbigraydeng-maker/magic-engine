@@ -122,6 +122,7 @@ summary 另有三条硬规矩（2026-10-25 真实事故：把客人 Sarju Dayal 
   二、**不许给客人下判断性描述**，例如首次 / 第一次 / 初次 / 从未 / 没去过 / first time / never been。这类说法要么写成带原话的 fact，要么不写。
   三、数字（日期、天数、价格、人数）只写文字里真出现过的；没把握就不写数字。
 summary 违反以上任何一条会被系统拦下、换成由已核实事实拼出来的句子，等于你写的被丢掉。
+customerSpoke：判断这通电话里**对方（客人或接电话的真人）**有没有真的开口说话。yes = 有真人用自己的话说了话；no = 只有语音信箱问候语 / 系统提示音 / 自动应答（例如 "at the tone, please record your message"、"the person you are calling is not available"），或者对方自始至终没出声；unclear = 看不出来。员工自己对着语音信箱留的言、员工单方面的说话都不算对方开口。customerSpoke 为 yes 时，customerSpokeQuote 必须从通话文字里原样摘出一句**真人**说的话（不是录音问候语、不是员工说的）；其他情况 customerSpokeQuote 填 null。
 客人明确说「别再打了 / 不要再联系」才输出 do_not_contact。
 只有**客人本人**明确说现在还没准备好 / 改天再说 / 以后再说（例如 "I'm not ready for that" "talk to you another day"）才输出 not_ready_now，quote 用客人原话，speaker 写 customer；员工说的、或问句，一律不输出。
 只有**客人本人**明确说不感兴趣 / 不考虑（例如 "I'm not interested"）才输出 not_interested，quote 用客人原话，speaker 写 customer；员工说的、或问句，一律不输出。
@@ -148,7 +149,7 @@ export const deepseekAnalyzer: Analyzer = async (transcript) => {
       response_format: { type: 'json_object' },
       temperature: 0,
       messages: [
-        { role: 'system', content: `${SYSTEM}\n输出必须是符合下面 JSON Schema 的 json 对象。示例：{\"summary\":\"客人询问三月团期，员工明确说有两个团。\",\"language\":\"en\",\"facts\":[{\"key\":\"contact_email\",\"value\":\"name@example.com\",\"quote\":\"My email is name at example dot com\",\"speaker\":\"customer\",\"confidence\":0.9}],\"inquiries\":[{\"topic\":\"tour_departures\",\"month\":3,\"question\":\"客人询问三月有几团\",\"questionQuote\":\"How many tours run in March?\",\"questionSpeaker\":\"customer\",\"answer\":\"员工说三月有两团\",\"answerQuote\":\"We have two tours in March.\",\"answerSpeaker\":\"employee\",\"answerStatus\":\"answered\",\"departureCount\":2,\"confidence\":0.9}]}\nJSON Schema：\n${JSON.stringify(ANALYSIS_JSON_SCHEMA)}` },
+        { role: 'system', content: `${SYSTEM}\n输出必须是符合下面 JSON Schema 的 json 对象。示例：{\"summary\":\"客人询问三月团期，员工明确说有两个团。\",\"language\":\"en\",\"customerSpoke\":\"yes\",\"customerSpokeQuote\":\"Hi, this is Sam speaking\",\"facts\":[{\"key\":\"contact_email\",\"value\":\"name@example.com\",\"quote\":\"My email is name at example dot com\",\"speaker\":\"customer\",\"confidence\":0.9}],\"inquiries\":[{\"topic\":\"tour_departures\",\"month\":3,\"question\":\"客人询问三月有几团\",\"questionQuote\":\"How many tours run in March?\",\"questionSpeaker\":\"customer\",\"answer\":\"员工说三月有两团\",\"answerQuote\":\"We have two tours in March.\",\"answerSpeaker\":\"employee\",\"answerStatus\":\"answered\",\"departureCount\":2,\"confidence\":0.9}]}\nJSON Schema：\n${JSON.stringify(ANALYSIS_JSON_SCHEMA)}` },
         { role: 'user', content: `<<<TRANSCRIPT\n${stripDelimiters(transcript.slice(0, 60_000))}\nTRANSCRIPT>>>` },
       ],
     }),

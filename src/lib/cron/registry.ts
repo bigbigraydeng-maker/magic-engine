@@ -1,4 +1,5 @@
 import { DISPATCH_OWNED_SERVICES } from './dispatch/catalog'
+import { META_LEADS_SYNC_SCHEDULE } from '@/lib/meta/leads-sync-schedule'
 
 /**
  * 全部定时任务清单（2026-08-03 自动从 render.yaml + 各接口代码生成）。
@@ -250,8 +251,10 @@ const CRON_REGISTRY_ENTRIES = [
       // 的 `run.finish({ processed: due.list.length })`），语义对得上，可以当判据。
       emptyRoundsAreLegitimate: true,
     }] },
-  // 服务名叫 hourly，但 2026-09-16（commit 2a17a85f2）起实际是每 2 小时一轮（偶数 UTC 小时的第 25 分）。
-  { service: 'meta-leads-hourly', jobName: 'meta-leads-sync', schedule: '25 */2 * * *', logsRuns: true },
+  // 服务名仍叫 hourly。2026-11-01 起每 30 分钟一轮（每小时第 25 分和第 55 分），
+  // 避开整点的评论读取和每小时第 10 分的私信同步。真正生效的是这条 schedule，
+  // 由 cron-dispatch-frequent 每 5 分钟来对，不在 render.yaml 里单列。
+  { service: 'meta-leads-hourly', jobName: 'meta-leads-sync', schedule: META_LEADS_SYNC_SCHEDULE, logsRuns: true },
   { service: 'pm-daily-todo', jobName: 'pm-daily-todo', schedule: '0 19 * * 0-4', logsRuns: true },
   { service: 'poll-visual-jobs', jobName: 'poll-visual-jobs', schedule: '15 * * * *', logsRuns: true },
   // ME2 Product Map 每日全量对账(webhook 的兜底)。表未 apply 前它会天天报 failed ——
@@ -526,6 +529,11 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // 2026-10-07 PM 拍板暂停：上游已停 6 周的空跑。render.yaml 那段已整块注释掉，
   // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
   'team-memory-sweeper': '2026-10-07 暂停（上游已停 6 周的空跑），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
+
+  // 社媒读回链拒绝回执（src/lib/social/readback-outcome-record.ts）。
+  // 由接线函数在拒绝时写一行，没有排班。放进带 schedule 的登记表会让健康检查
+  // 天天报「从没跑过」。对账扫描只认 startCronRunId，所以同文件有一个只给扫描器看的声明。
+  'social-readback-outcome': '按需事件触发（读回链拒绝时写一行失败回执），非周期任务，不适用 CRON_REGISTRY 的排班对账',
 
   // Render 上这条从 2026-10-24 审计起已是暂停、30 天没有运行。不进 dispatcher。
   // 路由留着给人手补跑。恢复时要重新加登记、加进 DISPATCH_CATALOG，并在 Render 打开它。

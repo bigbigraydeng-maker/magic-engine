@@ -22,11 +22,13 @@ import {
 import type { AttributionItemKind } from './attribution-items'
 import type { ClientRosterItemKind } from './client-roster'
 import type { DailyPlanMeasurementItemKind } from './daily-plan-measurement-items'
+import type { SocialReadbackItemKind } from './social-readback-items'
 import type { EmailReplyItemKind } from './email-reply-items'
 import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { CommentReplyScopeTodoKind } from './comment-reply-scope-items'
+import type { CommentHumanTodoKind } from './comment-human-items'
 import type { CommentAutoreplyRunFailingTodo } from './comment-autoreply-run-failing-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { DeployHealthItemKind } from './deploy-health-items'
@@ -105,6 +107,9 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'promo_plan_watch',
   'promo_plan_watch_broken',
   'plan_draft_auto_failed',
+  // 整包批准：链接是要登录的后台页，探活多半判成坏链接。没人看见 = 这一周不会批。
+  'week_pack_needs_approval',
+  'week_pack_items_held',
   // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
   // 这条里还有「检查自己没跑成」，绝不能因为链接问题静默消失。
   'ads_tracking_preflight_fix',
@@ -233,6 +238,10 @@ export type ManualItemKind =
   | 'story_unknown_outcome'
   /** Story 自动发布：已授权的周包到点了，却没有任何发布 / 演练记录 —— 发布器可能没在跑 */
   | 'story_unarmed'
+  /** 下一周的社媒整包该批了，或确认卡快过期 */
+  | 'week_pack_needs_approval'
+  /** 整包里有条目被单独拦住，没有整包撤回 */
+  | 'week_pack_items_held'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
@@ -263,6 +272,8 @@ export type ManualItemKind =
   | ToolLeadItemKind
   | CommentScopeTodoKind
   | CommentReplyScopeTodoKind
+  /** 主页评论分流后仍要 FDE 公开回复（不含评论原文） */
+  | CommentHumanTodoKind
   /** 评论自动回复连续多轮整轮没扫完 —— 以前被记成「完成」，约一个月没人发现 */
   | CommentAutoreplyRunFailingTodo['kind']
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
@@ -325,6 +336,8 @@ export type ManualItemKind =
   | PageBindingItemKind
   /** 排期发的 Facebook 帖子发出去了，但一直拿不到帖子编号 —— 成绩收不回来 */
   | DailyPlanMeasurementItemKind
+  /** 读回链拒绝开始记成绩（草稿 / 时间对不上 / 多条流量记录）。开关关掉时不会产出。 */
+  | SocialReadbackItemKind
   /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率过高 / 退订登记写入失败 */
   | 'conversation_health_alert'
   /** 同一个心跳查出「AI 起草回复一直报错」—— 这条只有我们能修（开发的活） */

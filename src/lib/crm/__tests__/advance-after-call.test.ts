@@ -58,7 +58,7 @@ function stubDb(over: Partial<Fake> = {}): SupabaseClient {
     stages: ['new', 'contacted', 'quoted', 'deferred', 'no_response', 'traveling_soon'],
     contacts: [{ id: 'c1', client_id: CLIENT, stage_updated_at: STAGE_AT }],
     events: [{ contact_id: 'c1', changed_by: STAGE_INFER_ACTOR, to_stage: 'new', created_at: STAGE_AT }],
-    touches: [{ contact_id: 'c1', channel: 'phone', metadata: { reached: true, talk_seconds: 39 } }],
+    touches: [{ contact_id: 'c1', channel: 'phone', metadata: { reached: true, talk_seconds: 39, customer_spoke: 'yes' } }],
     updated: 1,
     ...over,
   }
@@ -151,9 +151,35 @@ describe('advanceNewLeadsAfterFollowUp', () => {
   })
 
   it('also advances when the customer picked up but hung up almost at once (answered, not reached)', async () => {
-    const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'phone', metadata: { reached: false, answered: true, talk_seconds: 0 } }] })
+    const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'phone', metadata: { reached: false, answered: true, talk_seconds: 0, customer_spoke: 'yes' } }] })
     expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(1)
     expect(audits[0].note).toContain('很快挂断')
+  })
+
+  // WP-1a：线路接通 ≠ 客人说了话。语音信箱的问候语也会让 Twilio 报 answered / reached。
+  it.each([
+    ['analysis says the customer did not speak (voicemail)', { reached: true, answered: true, talk_seconds: 36, customer_spoke: 'no' }],
+    ['analysis could not tell', { reached: true, answered: true, talk_seconds: 36, customer_spoke: 'unclear' }],
+    ['analysis not available yet / failed (no customer_spoke at all)', { reached: true, answered: true, talk_seconds: 36 }],
+    ['a human rejected the analysis', { reached: true, answered: true, talk_seconds: 36, customer_spoke: 'yes', call_analysis_review: 'rejected' }],
+    ['picked up then hung up, but customer never spoke', { reached: false, answered: true, talk_seconds: 3, customer_spoke: 'no' }],
+  ])('does not advance when %s', async (_why, metadata) => {
+    const db = stubDb({ touches: [{ contact_id: 'c1', channel: 'phone', metadata }] })
+    const r = await advanceNewLeadsAfterFollowUp(NOW, db)
+    expect(r).toEqual({ candidates: 1, advanced: 0, failed: 0 })
+    expect(updates).toHaveLength(0)
+    expect(audits).toHaveLength(0)
+  })
+
+  it('a voicemail call does not hide a real conversation recorded on another call', async () => {
+    const db = stubDb({
+      touches: [
+        { contact_id: 'c1', channel: 'phone', metadata: { reached: true, answered: true, talk_seconds: 30, customer_spoke: 'no' } },
+        { contact_id: 'c1', channel: 'phone', metadata: { reached: true, answered: true, talk_seconds: 120, customer_spoke: 'yes' } },
+      ],
+    })
+    expect((await advanceNewLeadsAfterFollowUp(NOW, db)).advanced).toBe(1)
+    expect(String(audits[0].note)).toContain('120 秒')
   })
 
   it('does nothing for a call that just rang out (not answered, not reached)', async () => {

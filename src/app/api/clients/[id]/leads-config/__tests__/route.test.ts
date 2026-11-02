@@ -206,3 +206,60 @@ describe('PATCH ownPhoneNumbers', () => {
     expect((await res.json()).config.ownPhoneNumbers).toEqual(['+64210000000'])
   })
 })
+
+describe('own_email_domains 里的点名员工地址（WP-1a，魏征 P1）', () => {
+  const STORED = { own_email_domains: ['ctstours.co.nz', 'op3@asiascapeholidays.com'], trade_domains: ['asiascapeholidays.com'] }
+
+  it('GET 同时返回域名和点名地址', async () => {
+    mockClients(STORED)
+    const json = await (await GET(new NextRequest('http://localhost/x'), params)).json()
+    expect(json.config.ownEmailDomains).toEqual(['ctstours.co.nz'])
+    expect(json.config.ownAddresses).toEqual(['op3@asiascapeholidays.com'])
+  })
+
+  it('只保存域名框：已存的员工地址一个都不丢', async () => {
+    const updates = mockClients(STORED)
+    const res = await PATCH(patchReq({ ownEmailDomains: 'ctstours.co.nz\nchinatravel.co.nz' }), params)
+    expect(res.status).toBe(200)
+    const saved = (updates[0].leads_config as Record<string, unknown>).own_email_domains
+    expect(saved).toEqual(['ctstours.co.nz', 'chinatravel.co.nz', 'op3@asiascapeholidays.com'])
+  })
+
+  it('保存地址框：地址原样保留（不退化成整个域名），域名不动', async () => {
+    const updates = mockClients(STORED)
+    const res = await PATCH(patchReq({ ownAddresses: 'Op3@AsiaScapeHolidays.com, op1@asiascapeholidays.com' }), params)
+    expect(res.status).toBe(200)
+    const saved = (updates[0].leads_config as Record<string, unknown>).own_email_domains as string[]
+    expect(saved).toEqual(['ctstours.co.nz', 'op3@asiascapeholidays.com', 'op1@asiascapeholidays.com'])
+    expect(saved).not.toContain('asiascapeholidays.com')
+  })
+
+  it('域名框里顺手打了完整邮箱 → 当精确地址存，不扩成整个域名', async () => {
+    const updates = mockClients({ own_email_domains: ['ctstours.co.nz'] })
+    await PATCH(patchReq({ ownEmailDomains: 'ctstours.co.nz\nop1@asiascapeholidays.com' }), params)
+    const saved = (updates[0].leads_config as Record<string, unknown>).own_email_domains as string[]
+    expect(saved).toEqual(['ctstours.co.nz', 'op1@asiascapeholidays.com'])
+  })
+
+  it('地址格式不对 → 退回，不存', async () => {
+    const updates = mockClients({})
+    const json = await (await PATCH(patchReq({ ownAddresses: 'not-an-email, ok@x.co.nz' }), params)).json()
+    expect(json.rejected).toContain('not-an-email')
+    expect((updates[0].leads_config as Record<string, unknown>).own_email_domains).toEqual(['ok@x.co.nz'])
+  })
+
+  it('Gmail 整域名塌缩：自家域名和同行域名里的 gmail.com / outlook.com / yahoo.co.nz 一律退回', async () => {
+    const updates = mockClients({})
+    const json = await (await PATCH(patchReq({ ownEmailDomains: 'gmail.com\nctstours.co.nz\noutlook.com', tradeDomains: 'yahoo.co.nz, hot.co.nz, icloud.com' }), params)).json()
+    const saved = updates[0].leads_config as Record<string, unknown>
+    expect(saved.own_email_domains).toEqual(['ctstours.co.nz'])
+    expect(saved.trade_domains).toEqual(['hot.co.nz'])
+    expect(json.rejected).toEqual(expect.arrayContaining(['gmail.com', 'outlook.com', 'yahoo.co.nz', 'icloud.com']))
+  })
+
+  it('读：库里已有的 gmail.com 整域名条目也不当自家域名', async () => {
+    mockClients({ own_email_domains: ['gmail.com', 'ctstours.co.nz'] })
+    const json = await (await GET(new NextRequest('http://localhost/x'), params)).json()
+    expect(json.config.ownEmailDomains).toEqual(['ctstours.co.nz'])
+  })
+})

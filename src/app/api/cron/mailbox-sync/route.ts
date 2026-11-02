@@ -89,14 +89,18 @@ export async function GET(req: NextRequest) {
   const targets: MailboxTarget[] = connections
     // 连接指向一个查不到的客户（删过客户但连接还在）—— 跳过，不为它报错。
     .filter((c) => byClient.has(c.client_id))
-    .map((c) => ({
-      clientId: c.client_id,
-      clientName: byClient.get(c.client_id)?.name ?? null,
-      domain: byClient.get(c.client_id)?.domain ?? null,
-      connectionId: c.id,
-      mailbox: c.account_id,
-      ownDomains: readDomainRules(byClient.get(c.client_id)?.leads_config).own,
-    }))
+    .map((c) => {
+      const rules = readDomainRules(byClient.get(c.client_id)?.leads_config)
+      return {
+        clientId: c.client_id,
+        clientName: byClient.get(c.client_id)?.name ?? null,
+        domain: byClient.get(c.client_id)?.domain ?? null,
+        connectionId: c.id,
+        mailbox: c.account_id,
+        // 员工点名地址跟自家域名一起交给邮件同步（同事发的信不能记成客人来信）。
+        ownDomains: [...rules.own, ...(rules.ownAddresses ?? [])],
+      }
+    })
 
   const results = []
   for (const target of targets) {

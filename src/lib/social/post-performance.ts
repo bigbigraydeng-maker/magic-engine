@@ -1,4 +1,5 @@
 import type { FieldRead } from '@/lib/meta/post-engagement'
+import { PUBLISH_MEASUREMENT_WINDOW_SET } from '@/lib/campaign/daily-plan-publish'
 import { SOCIAL_PLATFORMS, normalizePlatform, type SocialPlatform } from '@/lib/social/platforms'
 
 // ---------------------------------------------------------------------------
@@ -200,6 +201,7 @@ export function pickReceipt(receipts: ReceiptRow[]): ReceiptRow | null {
   let bestAny: ReceiptRow | null = null
 
   for (const r of receipts) {
+    if (!PUBLISH_MEASUREMENT_WINDOW_SET.has(r.window_hours)) continue
     if (bestAny === null || r.window_hours > bestAny.window_hours) bestAny = r
     if (r.status === 'ok' || r.status === 'partial') {
       if (bestOk === null || r.window_hours > bestOk.window_hours) bestOk = r

@@ -13,6 +13,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
+import { BUDGET_HOLD_NOTE } from '@/lib/ads-strategy/war-map/followup'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
 export type GrowthVerdict = 'on_track' | 'behind' | 'unreachable_within_caps' | 'unknown'
@@ -52,26 +53,11 @@ export interface GrowthStateView {
     opportunities?: GrowthFinding[]
     opportunitiesSkippedReason?: string | null
     problemsSupersededByOpportunities?: number
-    goal?: { title: string; label: string; target: number; dayIndex: number; totalDays: number } | null
+    goal?: { title: string; label: string; target: number; dayIndex: number; totalDays: number; primaryMetricKey?: string } | null
   } | null
 }
 
-const PACE_TONE: Record<GrowthVerdict, { dot: string; text: string; tint: string; label: string }> = {
-  on_track:                { dot: 'bg-emerald-500', text: 'text-emerald-700', tint: 'border-emerald-200 bg-emerald-50', label: '按节奏走' },
-  behind:                  { dot: 'bg-amber-500',   text: 'text-amber-700',   tint: 'border-amber-200 bg-amber-50',     label: '进度落后' },
-  unreachable_within_caps: { dot: 'bg-red-500',     text: 'text-red-700',     tint: 'border-red-200 bg-red-50',         label: '按现在的预算到不了' },
-  unknown:                 { dot: 'bg-gray-300',    text: 'text-gray-600',    tint: 'border-gray-200 bg-gray-50',       label: '未判' },
-}
-
-/** 客户版：「按现在的预算到不了」带加钱暗示，换成中性说法。 */
-const CLIENT_PACE_LABEL: Record<GrowthVerdict, string> = {
-  on_track: '按节奏走',
-  behind: '进度落后',
-  unreachable_within_caps: '按现在的速度可能到不了',
-  unknown: '暂时判断不了',
-}
-
-function goalLiveNote(meta: GrowthStateView['goal_live']): string | undefined {
+export function goalLiveNote(meta: GrowthStateView['goal_live']): string | undefined {
   if (!meta) return undefined
   if (!meta.live) return '实时没读到生效中的目标（读取失败或已无目标），这张卡显示的是昨晚的缓存，可能不是最新。'
   const t = new Date(meta.readAtIso)
@@ -79,62 +65,30 @@ function goalLiveNote(meta: GrowthStateView['goal_live']): string | undefined {
   return `页面打开时现算 · ${t.toLocaleTimeString('en-NZ', { timeZone: 'Pacific/Auckland', hour: '2-digit', minute: '2-digit', hour12: false })}`
 }
 
-type GoalView = { title: string; label: string; target: number; dayIndex: number; totalDays: number }
-
-function GoalBar({ goal, pace, clientView = false, liveNote }: { goal: GoalView | null; pace: GoalPaceView | null; clientView?: boolean; liveNote?: string }) {
-  if (!goal || !pace) {
-    return (
-      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
-        {clientView
-          ? '这段时间还没有设定广告目标，设好后这里会显示进度。'
-          : '这个客户还没有生效中的目标 —— 设了目标之后，这里会显示「还差多少、来不来得及」。'}
-      </div>
-    )
-  }
-  const tone = PACE_TONE[pace.verdict]
-  const label = clientView ? CLIENT_PACE_LABEL[pace.verdict] : tone.label
-  // 未判时进度条不画：画一条 0% 的条会被读成「一个都没有」。
-  const pct = pace.verdict === 'unknown' || pace.actualToDate === null
-    ? null
-    : Math.max(0, Math.min(100, Math.round((pace.actualToDate / goal.target) * 100)))
-
-  return (
-    <div className={`rounded-xl border p-5 ${tone.tint}`}>
-      <div className="flex items-center gap-2.5">
-        <span className={`inline-block w-3 h-3 rounded-full ${tone.dot}`} />
-        <span className={`text-base font-semibold ${tone.text}`}>{goal.title} · {label}</span>
-      </div>
-
-      {pct === null ? (
-        <p className="mt-2 text-sm text-gray-600">{pace.reason}</p>
-      ) : (
-        <>
-          <div className="mt-3 h-2 w-full rounded-full bg-white/70 overflow-hidden">
-            <div className={`h-full ${tone.dot}`} style={{ width: `${pct}%` }} />
-          </div>
-          <p className="mt-2 text-sm text-gray-700">
-            目标 {goal.target} {goal.label} · 第 {goal.dayIndex}/{goal.totalDays} 天 · 已到{' '}
-            <b>{pace.actualToDate}</b>
-            {pace.projectedEnd !== null && <> · 按现在的速度到期约 <b>{pace.projectedEnd}</b></>}
-          </p>
-          <p className="mt-1 text-xs text-gray-500">{pace.reason}</p>
-          {!clientView && pace.reachableAtCap !== undefined && (
-            <p className="mt-1 text-xs text-gray-500">
-              到期最多约：按日预算上限 <b>{pace.reachableAtCap}</b>
-              {pace.reachableAtActualSpend !== undefined && <> · 按近几天实际花费 <b>{pace.reachableAtActualSpend}</b></>}
-            </p>
-          )}
-        </>
-      )}
-      {!clientView && pace.dataThrough && (
-        <p className="mt-2 text-xs text-gray-500">数据截至{pace.dataThrough}（Meta 日报，最多慢一天）</p>
-      )}
-      {liveNote && <p className="mt-2 text-xs text-gray-500">{liveNote}</p>}
-    </div>
-  )
+function suggestsMoreBudget(f: GrowthFinding): boolean {
+  if (f.code === 'O1') return true
+  return `${f.title} ${(f.reasons ?? []).join(' ')}`.includes('加预算')
 }
 
-function FindingCard({ f, kind, clientId, cycleDate }: { f: GrowthFinding; kind: 'problem' | 'opportunity'; clientId?: string; cycleDate?: string }) {
+function useBudgetHold(clientId: string | undefined, enabled: boolean): boolean {
+  const [hold, setHold] = useState(false)
+  useEffect(() => {
+    if (!clientId || !enabled) {
+      setHold(false)
+      return
+    }
+    let alive = true
+    setHold(false)
+    fetch(`/api/clients/${clientId}/ad-health/war-map`)
+      .then(async (response) => response.ok ? response.json() as Promise<{ view?: { budgetHold?: boolean } }> : null)
+      .then((json) => { if (alive) setHold(json?.view?.budgetHold === true) })
+      .catch(() => { /* 读不到就不加这句，跟进卡自己会说读不到 */ })
+    return () => { alive = false }
+  }, [clientId, enabled])
+  return hold
+}
+
+function FindingCard({ f, kind, clientId, cycleDate, budgetHold }: { f: GrowthFinding; kind: 'problem' | 'opportunity'; clientId?: string; cycleDate?: string; budgetHold?: boolean }) {
   const isHit = f.status === 'hit'
   const tint = !isHit ? 'border-gray-200 bg-gray-50'
     : kind === 'problem' ? 'border-amber-200 bg-amber-50' : 'border-sky-200 bg-sky-50'
@@ -152,6 +106,9 @@ function FindingCard({ f, kind, clientId, cycleDate }: { f: GrowthFinding; kind:
       )}
       {f.reasons && f.reasons.length > 0 && (
         <p className="mt-1 text-xs text-gray-500">{f.reasons[0]}</p>
+      )}
+      {budgetHold && suggestsMoreBudget(f) && (
+        <p className="mt-1 text-xs text-amber-800">{BUDGET_HOLD_NOTE}</p>
       )}
       {kind === 'opportunity' && f.code === 'O1' && clientId && f.units?.map(unit => (
         <O1Approval key={unit.id} clientId={clientId} adsetId={unit.id} cycleDate={cycleDate} o1Evidence={f.evidence ?? {}} />
@@ -235,7 +192,7 @@ function ClientGrowthPanel({ view }: { view: ClientGrowthView }) {
   const cards = view.adCards
   return (
     <div className="space-y-4">
-      <GoalBar goal={view.goal} pace={view.goal_pace} clientView />
+      <p className="text-xs text-gray-500">目标进度在「今天看这里」标签最上方。</p>
 
       <section>
         {cards ? (
@@ -271,6 +228,8 @@ function ClientGrowthPanel({ view }: { view: ClientGrowthView }) {
  * @param state  null = 今天还没巡察过；undefined = 这一段读不到（接口出错）
  */
 export default function GrowthPanel({ state, clientId }: { state: GrowthStateView | ClientGrowthView | null | undefined; clientId?: string }) {
+  const clientView = state != null && isClientView(state)
+  const budgetHold = useBudgetHold(clientId, state != null && !clientView)
   if (state === undefined) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -286,7 +245,7 @@ export default function GrowthPanel({ state, clientId }: { state: GrowthStateVie
     )
   }
 
-  if (isClientView(state)) return <ClientGrowthPanel view={state} />
+  if (state != null && isClientView(state)) return <ClientGrowthPanel view={state} />
 
   const problems = (state.payload?.problems ?? []).filter(f => f.status === 'hit')
   const opportunities = (state.payload?.opportunities ?? []).filter(f => f.status === 'hit')
@@ -294,7 +253,7 @@ export default function GrowthPanel({ state, clientId }: { state: GrowthStateVie
 
   return (
     <div className="space-y-4">
-      <GoalBar goal={state.payload?.goal ?? null} pace={state.goal_pace} liveNote={goalLiveNote(state.goal_live)} />
+      <p className="text-xs text-gray-500">目标进度在「今天看这里」标签最上方。</p>
 
       {partial && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
@@ -315,7 +274,7 @@ export default function GrowthPanel({ state, clientId }: { state: GrowthStateVie
           <h3 className="mb-2 text-sm font-semibold text-gray-700">要看的事（{problems.length}）</h3>
           {problems.length === 0
             ? <p className="text-xs text-gray-400">今天没发现要紧的问题。</p>
-            : <div className="space-y-2">{problems.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="problem" />)}</div>}
+            : <div className="space-y-2">{problems.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="problem" budgetHold={budgetHold} />)}</div>}
         </section>
 
         <section>
@@ -324,7 +283,7 @@ export default function GrowthPanel({ state, clientId }: { state: GrowthStateVie
             ? <p className="text-xs text-gray-400">数据不全，这天没判。</p>
             : opportunities.length === 0
               ? <p className="text-xs text-gray-400">今天没发现明显还有空间的地方。</p>
-            : <div className="space-y-2">{opportunities.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="opportunity" clientId={clientId} cycleDate={state.date} />)}</div>}
+            : <div className="space-y-2">{opportunities.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="opportunity" clientId={clientId} cycleDate={state.date} budgetHold={budgetHold} />)}</div>}
         </section>
       </div>
 

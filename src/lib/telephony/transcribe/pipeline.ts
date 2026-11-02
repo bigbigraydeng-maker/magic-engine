@@ -12,6 +12,7 @@ import { verifySummary, fallbackSummaryFromFacts } from './summary-gate'
 import { SECRET_REF_PATTERN } from '@/lib/telephony/twilio/ingest'
 import { TranscriptPendingError, type Analyzer, type Transcriber } from './vendors'
 import { callStanceFromFacts } from './call-stance'
+import type { CustomerSpokeVerdict } from './customer-spoke'
 import type { CallStance } from '@/lib/crm/segments'
 import type { MetadataMergeOutcome } from '@/lib/crm/touchpoint-metadata'
 
@@ -77,6 +78,8 @@ export interface AnalysisStore {
    * 可选：没接的实现就不写（CRM 照旧按原规则走）。
    */
   markCallStance?: (touchpointId: string, clientId: string, analysisId: string, stance: CallStance) => Promise<MetadataMergeOutcome>
+  /** 把核验后的「客人开没开口」记到触点上，供 CRM 区分真聊过和语音信箱。可选：没接的实现就不写。 */
+  markCustomerSpoke?: (touchpointId: string, clientId: string, analysisId: string, verdict: CustomerSpokeVerdict) => Promise<MetadataMergeOutcome>
   /** 这个连接从某时刻起已经转写了多少通（日上限用）。 */
   countTranscribedSince(connectionId: string, sinceIso: string): Promise<number>
 }
@@ -177,6 +180,7 @@ export async function runCallAnalysis(
   let analysisId = await store.getAnalysisId(call.id)
   // 只有这一轮新做出来的分析才拿来记表态：已存在的那份可能已被人复核 / 驳回，这里看不到它的事实。
   let freshFacts: VerifiedAnalysis['facts'] | null = null
+  let freshCustomerSpoke: CustomerSpokeVerdict | null = null
   if (!analysisId) {
     try {
       const out = await deps.analyze(transcript)
@@ -201,6 +205,7 @@ export async function runCallAnalysis(
 
       analysisId = await store.saveAnalysis({ callId: call.id, clientId: call.clientId, model: out.model, analysis: gated })
       freshFacts = gated.facts
+      freshCustomerSpoke = gated.customerSpoke ?? null
       const truncated = transcript.length > 60_000 ? ' truncated=1' : ''
       // 被闸掉的事实和被换掉的摘要都留痕：否则只看到一个数字，分不清是闸太严还是模型在编。
       const droppedKeys = out.raw.facts
@@ -239,6 +244,7 @@ export async function runCallAnalysis(
     }
     // 表态只写在已经标上这份分析的触点上（写入前提就是 call_analysis_id 对得上）。
     if (marked) await recordCallStance(store, call, call.touchpointId, analysisId, freshFacts)
+    if (marked) await recordCustomerSpoke(store, call, call.touchpointId, analysisId, freshCustomerSpoke)
   }
   return { status: 'done' }
 }
@@ -261,5 +267,19 @@ async function recordCallStance(
     await store.patchCall(call.id, {}, { stage: 'call_stance', status: outcome, detail: stance })
   } catch {
     await store.patchCall(call.id, {}, { stage: 'call_stance', status: 'failed', detail: stance })
+  }
+}
+
+/**
+ * 客人到底开没开口 → 记到触点上（CRM 据此不把语音信箱当成聊过）。
+ * 只有这一轮新做出来的分析才有结论（已存在的那份这里看不到）；写不上只记回执，不影响分析本身。回执只写结果码。
+ */
+async function recordCustomerSpoke(store: AnalysisStore, call: AnalysisCall, touchpointId: string, analysisId: string, verdict: CustomerSpokeVerdict | null): Promise<void> {
+  if (!verdict || !store.markCustomerSpoke) return
+  try {
+    const outcome = await store.markCustomerSpoke(touchpointId, call.clientId, analysisId, verdict)
+    await store.patchCall(call.id, {}, { stage: 'customer_spoke', status: outcome, detail: verdict })
+  } catch {
+    await store.patchCall(call.id, {}, { stage: 'customer_spoke', status: 'failed', detail: verdict })
   }
 }

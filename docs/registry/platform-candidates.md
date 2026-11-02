@@ -1,3 +1,5 @@
+> 全平台规则看 [平台规则总索引](./platform-rules-index.md)。本文件只是局部清单，不合并、不重写。
+
 # ME 平台候选清单（L1 / L2 Candidates）
 
 > **载体地位**：本文件是 [me-platform-tier-gate](../../.claude/skills/me-platform-tier-gate/SKILL.md) 强制候选登记的**唯一权威载体**。skill 判定为"L1 / L2 候选但证据不足"时，必须登记进本表，不许"下发到日志里"。

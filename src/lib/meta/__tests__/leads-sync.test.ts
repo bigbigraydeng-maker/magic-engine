@@ -164,6 +164,12 @@ describe('getLeadWatermark', () => {
     expect(since.toISOString()).toBe('2026-06-30T00:00:00.000Z')
   })
 
+  it('中间几轮没写下新触点，窗口仍从最新一条往回 24 小时', async () => {
+    mockWatermark('2026-07-29T22:00:00.000Z')
+    const since = await getLeadWatermark('client-cts', NOW)
+    expect(since.toISOString()).toBe('2026-07-28T22:00:00.000Z')
+  })
+
   it('水位线再老也不往回超过 90 天', async () => {
     mockWatermark('2020-01-01T00:00:00.000Z')
     const since = await getLeadWatermark('client-cts', NOW)
