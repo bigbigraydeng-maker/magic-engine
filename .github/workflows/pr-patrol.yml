@@ -1,0 +1,50 @@
+# PR patrol workflow — TEMPLATE, not active (issue #3478 PR-1).
+# The Claude GitHub App cannot write under .github/workflows, so a human with
+# permission copies this file to .github/workflows/pr-patrol.yml.
+# Read-only: no contents write, no merge, no deploy, no secrets beyond github.token.
+name: PR patrol
+
+on:
+  schedule:
+    # Working hours (UTC; roughly 08:00-19:00 NZ), every 30 min, Mon-Fri.
+    - cron: '*/30 19-23,0-6 * * 0-4'
+    # Off hours / weekends: every 3 hours.
+    - cron: '0 */3 * * 0,6'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print instead of writing to the tracking issue'
+        type: boolean
+        default: true
+
+permissions:
+  pull-requests: read
+  checks: read
+  issues: write # only to edit this patrol's own comment on the tracking issue
+
+concurrency:
+  group: pr-patrol
+  cancel-in-progress: false
+
+jobs:
+  patrol:
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      # Always from main; the patrol script is never taken from a PR head.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Patrol
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PATROL_ISSUE: '3087'
+          PATROL_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}
+          PATROL_MENTION: ${{ vars.PATROL_MENTION }}
+        run: node scripts/ci/pr-patrol.mjs
