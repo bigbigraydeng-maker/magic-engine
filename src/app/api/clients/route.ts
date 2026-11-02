@@ -137,18 +137,22 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json()
-    const { name, domain, website_url } = body
+    const { name, domain, website_url, semrush_db } = body
 
     if (!name) {
       return NextResponse.json({ error: 'name is required' }, { status: 400 })
     }
+
+    // Market is set at creation so discovery never runs against the wrong country
+    // (a follow-up PATCH that failed silently left NZ clients on AU data).
+    const market = semrush_db === 'nz' ? 'nz' : 'au'
 
     const { data, error } = await supabaseAdmin
       .from('clients')
       .insert({
         name,
         domain: domain || website_url || null,
-        semrush_db: 'au',
+        semrush_db: market,
         monthly_quota: 1000,
         plan_tier: 'starter',
       })

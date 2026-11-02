@@ -1159,7 +1159,7 @@ export function TechStackCard({ data }: { data: TechStackData }) {
           </div>
         )}
 
-        {data.domain_rank !== null && (
+        {data.domain_rank != null && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500 w-16 shrink-0">域名权重</span>
             <span className="text-sm font-semibold text-gray-700">{data.domain_rank}</span>
@@ -1203,13 +1203,13 @@ export function DomainWhoisCard({ data }: { data: DomainWhoisData }) {
   const formatDate = (iso: string | null) =>
     iso ? new Date(iso).toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'
 
-  const formatNum = (n: number | null) =>
-    n !== null ? n.toLocaleString() : '—'
+  const formatNum = (n: number | null | undefined) =>
+    n != null ? n.toLocaleString() : '—'
 
   return (
     <CardShell title="域名健康">
       <div className="flex flex-col gap-2">
-        {data.domain_age_years !== null && (
+        {data.domain_age_years != null && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-gray-500 w-20 shrink-0">域名年龄</span>
             <span className="text-sm font-semibold text-gray-700">{data.domain_age_years} 年</span>
@@ -1300,8 +1300,9 @@ export function OnPageAuditCard({ data }: { data: OnPageAuditData }) {
     data.checks.broken_links    && '有断链',
   ].filter(Boolean) as string[]
 
-  const formatMs = (ms: number | null) => (ms !== null ? `${ms.toFixed(0)} ms` : '—')
-  const formatNum = (n: number | null) => (n !== null ? n.toLocaleString() : '—')
+  // `!= null`: fields the agent could not collect are sometimes missing (undefined), not only null.
+  const formatMs = (ms: number | null | undefined) => (ms != null ? `${ms.toFixed(0)} ms` : '—')
+  const formatNum = (n: number | null | undefined) => (n != null ? n.toLocaleString() : '—')
 
   return (
     <CardShell title="页面 SEO 审计">
@@ -1349,7 +1350,7 @@ export function OnPageAuditCard({ data }: { data: OnPageAuditData }) {
               {[
                 { label: 'LCP', value: formatMs(data.core_web_vitals.lcp), warn: (data.core_web_vitals.lcp ?? 0) > 2500 },
                 { label: 'TBT', value: formatMs(data.core_web_vitals.tbt), warn: (data.core_web_vitals.tbt ?? 0) > 200 },
-                { label: 'CLS', value: data.core_web_vitals.cls !== null ? data.core_web_vitals.cls.toFixed(3) : '—', warn: (data.core_web_vitals.cls ?? 0) > 0.1 },
+                { label: 'CLS', value: data.core_web_vitals.cls != null ? data.core_web_vitals.cls.toFixed(3) : '—', warn: (data.core_web_vitals.cls ?? 0) > 0.1 },
               ].map(({ label, value, warn }) => (
                 <div key={label} className="text-center">
                   <p className={`text-sm font-bold ${warn ? 'text-amber-600' : 'text-gray-700'}`}>{value}</p>
