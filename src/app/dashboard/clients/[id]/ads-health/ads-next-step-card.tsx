@@ -4,31 +4,51 @@ import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { AdsNextStepRow, AdsNextStepView } from '@/lib/ads-strategy/ads-next-step/types'
 
+type LoadStatus = 'loading' | 'done' | 'failed'
+
 function rowText<T>(
-  row: AdsNextStepRow<T>,
+  status: LoadStatus,
+  row: AdsNextStepRow<T> | undefined,
   renderOk: (data: T) => React.ReactNode,
   emptyLabel: string,
 ): React.ReactNode {
+  if (status === 'loading') return <span className="text-gray-500">读取中…</span>
+  if (status === 'failed' || row === undefined) {
+    return <span className="text-gray-500">没读到</span>
+  }
   if (row.kind === 'unreadable') return <span className="text-gray-500">没读到</span>
   if (row.kind === 'empty') return <span className="text-gray-500">{emptyLabel}</span>
   return renderOk(row.data)
 }
 
 export default function AdsNextStepCard({ clientId }: { readonly clientId: string }) {
+  const [loadStatus, setLoadStatus] = useState<LoadStatus>('loading')
   const [view, setView] = useState<AdsNextStepView | null>(null)
 
   useEffect(() => {
     let alive = true
+    setLoadStatus('loading')
+    setView(null)
     fetch(`/api/clients/${clientId}/ad-health/next-step`)
-      .then(async (res) => (res.ok ? res.json() as Promise<{ view?: AdsNextStepView }> : null))
-      .then((json) => { if (alive && json?.view) setView(json.view) })
-      .catch(() => { /* 保持 null → 三行都显示没读到 */ })
+      .then(async (res) => {
+        if (!res.ok) {
+          setLoadStatus('failed')
+          return
+        }
+        const json = await res.json() as { view?: AdsNextStepView }
+        if (!alive) return
+        if (!json.view) {
+          setLoadStatus('failed')
+          return
+        }
+        setView(json.view)
+        setLoadStatus('done')
+      })
+      .catch(() => {
+        if (alive) setLoadStatus('failed')
+      })
     return () => { alive = false }
   }, [clientId])
-
-  const health = view?.healthRedLights ?? { kind: 'unreadable' as const }
-  const pending = view?.pendingActions ?? { kind: 'unreadable' as const }
-  const rx = view?.prescription ?? { kind: 'unreadable' as const }
 
   return (
     <section
@@ -41,7 +61,7 @@ export default function AdsNextStepCard({ clientId }: { readonly clientId: strin
         <div>
           <dt className="text-xs font-medium text-slate-500">体检红灯</dt>
           <dd className="mt-0.5 text-slate-800">
-            {rowText(health, (data) => (
+            {rowText(loadStatus, view?.healthRedLights, (data) => (
               <ul className="list-disc pl-4 space-y-0.5">
                 {data.items.map((line) => (
                   <li key={line}>{line}</li>
@@ -53,7 +73,7 @@ export default function AdsNextStepCard({ clientId }: { readonly clientId: strin
         <div>
           <dt className="text-xs font-medium text-slate-500">待批动作</dt>
           <dd className="mt-0.5 text-slate-800">
-            {rowText(pending, (data) => (
+            {rowText(loadStatus, view?.pendingActions, (data) => (
               <ul className="space-y-1">
                 {data.items.map((item) => (
                   <li key={`${item.href}:${item.summary}`}>
@@ -69,7 +89,7 @@ export default function AdsNextStepCard({ clientId }: { readonly clientId: strin
         <div>
           <dt className="text-xs font-medium text-slate-500">处方状态</dt>
           <dd className="mt-0.5 text-slate-800">
-            {rowText(rx, (data) => {
+            {rowText(loadStatus, view?.prescription, (data) => {
               const when = data.approvedAt
                 ? ` · 批准 ${new Date(data.approvedAt).toLocaleDateString('en-NZ', { timeZone: 'Pacific/Auckland' })}`
                 : ''

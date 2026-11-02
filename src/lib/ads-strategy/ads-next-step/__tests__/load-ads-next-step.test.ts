@@ -142,4 +142,105 @@ describe('loadAdsNextStepView', () => {
     expect(view.pendingActions.kind).toBe('unreadable')
     expect(view.prescription.kind).toBe('ok')
   })
+
+  it('ad_health_narratives 读失败 → 体检红灯 unreadable', async () => {
+    const sb = createFakeSupabase(
+      {
+        ad_health_narratives: [narrativeWithHits(['x'])],
+        action_runs: [],
+        authorization_decisions: [],
+        flywheel_actions: [],
+        prescriptions: [],
+      },
+      { failOn: [{ table: 'ad_health_narratives', op: 'select', message: 'down' }] },
+    )
+    const view = await loadAdsNextStepView(sb, CLIENT, { staffView: true })
+    expect(view.healthRedLights.kind).toBe('unreadable')
+    expect(view.pendingActions.kind).toBe('empty')
+  })
+
+  it('prescriptions 读失败 → 处方 unreadable', async () => {
+    const sb = createFakeSupabase(
+      {
+        ad_health_narratives: [],
+        action_runs: [],
+        authorization_decisions: [],
+        flywheel_actions: [],
+        prescriptions: [{ client_id: CLIENT, version: 1, status: 'draft', created_at: '2026-11-01' }],
+      },
+      { failOn: [{ table: 'prescriptions', op: 'select', message: 'down' }] },
+    )
+    const view = await loadAdsNextStepView(sb, CLIENT, { staffView: true })
+    expect(view.prescription.kind).toBe('unreadable')
+  })
+
+  it('最新 rejected 处方会显示「已驳回」而不是更早的 approved', async () => {
+    const sb = createFakeSupabase({
+      ad_health_narratives: [],
+      action_runs: [],
+      authorization_decisions: [],
+      flywheel_actions: [],
+      prescriptions: [
+        {
+          client_id: CLIENT,
+          version: 3,
+          status: 'rejected',
+          approved_at: null,
+          created_at: '2026-11-02T00:00:00Z',
+        },
+        {
+          client_id: CLIENT,
+          version: 2,
+          status: 'approved',
+          approved_at: '2026-10-01T00:00:00Z',
+          created_at: '2026-10-01T00:00:00Z',
+        },
+      ],
+    })
+    const view = await loadAdsNextStepView(sb, CLIENT, { staffView: true })
+    expect(view.prescription).toEqual({
+      kind: 'ok',
+      data: { version: 3, statusLabel: '已驳回', approvedAt: null },
+    })
+  })
+
+  it('paid_client 看不到 O1 内核 rationale，只用通用文案', async () => {
+    const decisionId = '44444444-4444-4444-8444-444444444444'
+    const runId = '55555555-5555-4555-8555-555555555555'
+    const sb = createFakeSupabase({
+      ad_health_narratives: [],
+      action_runs: [{
+        id: runId,
+        client_id: CLIENT,
+        action_key: O1,
+        action_version: 1,
+        idempotency_key: 'k-o1',
+        status: 'pending_approval',
+        authorization_decision_id: decisionId,
+        input: { adset_id: 'adset-1', ad_account_id: 'act_1' },
+        rationale: '内部才该看到的 O1 依据句',
+        created_at: '2026-11-01T00:00:00Z',
+      }],
+      authorization_decisions: [{
+        id: decisionId,
+        action_run_id: runId,
+        client_id: CLIENT,
+        action_key: O1,
+        action_version: 1,
+        idempotency_key: 'k-o1',
+        verdict: 'require_approval',
+      }],
+      flywheel_actions: [],
+      prescriptions: [],
+    })
+    const staff = await loadAdsNextStepView(sb, CLIENT, { staffView: true })
+    const client = await loadAdsNextStepView(sb, CLIENT, { staffView: false })
+    expect(staff.pendingActions.kind).toBe('ok')
+    expect(client.pendingActions.kind).toBe('ok')
+    if (staff.pendingActions.kind === 'ok' && client.pendingActions.kind === 'ok') {
+      expect(staff.pendingActions.data.items[0].summary).toContain('内部才该看到')
+      expect(client.pendingActions.data.items[0].summary).toBe('加预算建议等人批准')
+      expect(client.pendingActions.data.items[0].summary).not.toContain('内部')
+    }
+  })
 })

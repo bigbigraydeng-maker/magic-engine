@@ -39,30 +39,35 @@ async function loadHealthRedLights(
   clientId: string,
   staffView: boolean,
 ): Promise<AdsNextStepView['healthRedLights']> {
-  const { data, error } = await sb
-    .from('ad_health_narratives')
-    .select('payload')
-    .eq('client_id', clientId)
-    .order('insight_date', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (error) return { kind: 'unreadable' }
-  if (!data) return { kind: 'empty' }
+  try {
+    const { data, error } = await sb
+      .from('ad_health_narratives')
+      .select('payload')
+      .eq('client_id', clientId)
+      .order('insight_date', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (error) return { kind: 'unreadable' }
+    if (!data) return { kind: 'empty' }
 
-  const payload = data.payload as { portfolio_diagnoses?: DiagnosisRun } | null
-  const run = payload?.portfolio_diagnoses
-  if (!run || !Array.isArray(run.diagnoses)) return { kind: 'empty' }
+    const payload = data.payload as { portfolio_diagnoses?: DiagnosisRun } | null
+    const run = payload?.portfolio_diagnoses
+    if (!run || !Array.isArray(run.diagnoses)) return { kind: 'empty' }
 
-  let hits = sortHits(run.diagnoses)
-  if (!staffView) hits = hits.filter((d) => d.clientVisible !== false)
-  const titles = hits.slice(0, 3).map((d) => d.title.trim()).filter((t) => t.length > 0)
-  if (titles.length === 0) return { kind: 'empty' }
-  return { kind: 'ok', data: { items: titles } }
+    let hits = sortHits(run.diagnoses)
+    if (!staffView) hits = hits.filter((d) => d.clientVisible !== false)
+    const titles = hits.slice(0, 3).map((d) => d.title.trim()).filter((t) => t.length > 0)
+    if (titles.length === 0) return { kind: 'empty' }
+    return { kind: 'ok', data: { items: titles } }
+  } catch {
+    return { kind: 'unreadable' }
+  }
 }
 
 async function loadPendingActions(
   sb: SupabaseClient,
   clientId: string,
+  staffView: boolean,
 ): Promise<AdsNextStepView['pendingActions']> {
   try {
     const [d3, o1] = await Promise.all([
@@ -78,10 +83,12 @@ async function loadPendingActions(
     }
     for (const row of o1.items) {
       const rationale =
-        typeof row.run.rationale === 'string' && row.run.rationale.trim().length > 0
-          ? row.run.rationale.trim()
+        staffView
+        && typeof row.run.rationale === 'string'
+        && row.run.rationale.trim().length > 0
+          ? row.run.rationale.trim().slice(0, 120)
           : '加预算建议等人批准'
-      items.push({ summary: rationale.slice(0, 120), href: settingsHref(clientId) })
+      items.push({ summary: rationale, href: settingsHref(clientId) })
     }
 
     if (items.length === 0) return { kind: 'empty' }
@@ -95,25 +102,29 @@ async function loadPrescription(
   sb: SupabaseClient,
   clientId: string,
 ): Promise<AdsNextStepView['prescription']> {
-  const { data, error } = await sb
-    .from('prescriptions')
-    .select('version, status, approved_at')
-    .eq('client_id', clientId)
-    .in('status', ['draft', 'generating', 'failed', 'approved', 'superseded'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle<Pick<Prescription, 'version' | 'status' | 'approved_at'>>()
+  try {
+    const { data, error } = await sb
+      .from('prescriptions')
+      .select('version, status, approved_at')
+      .eq('client_id', clientId)
+      .in('status', ['draft', 'generating', 'failed', 'approved', 'rejected', 'superseded'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle<Pick<Prescription, 'version' | 'status' | 'approved_at'>>()
 
-  if (error) return { kind: 'unreadable' }
-  if (!data) return { kind: 'empty' }
+    if (error) return { kind: 'unreadable' }
+    if (!data) return { kind: 'empty' }
 
-  return {
-    kind: 'ok',
-    data: {
-      version: data.version,
-      statusLabel: prescriptionStatusLabel(data.status),
-      approvedAt: data.approved_at,
-    },
+    return {
+      kind: 'ok',
+      data: {
+        version: data.version,
+        statusLabel: prescriptionStatusLabel(data.status),
+        approvedAt: data.approved_at,
+      },
+    }
+  } catch {
+    return { kind: 'unreadable' }
   }
 }
 
@@ -124,7 +135,7 @@ export async function loadAdsNextStepView(
 ): Promise<AdsNextStepView> {
   const [healthRedLights, pendingActions, prescription] = await Promise.all([
     loadHealthRedLights(sb, clientId, options.staffView),
-    loadPendingActions(sb, clientId),
+    loadPendingActions(sb, clientId, options.staffView),
     loadPrescription(sb, clientId),
   ])
   return { healthRedLights, pendingActions, prescription }
