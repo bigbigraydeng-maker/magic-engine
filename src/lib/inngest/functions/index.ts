@@ -44,6 +44,8 @@ import { toolsLabLeadFollowUp, toolsLabReportEmailReceipt } from './tools-lab-le
 import { dailyPlanAutoPublish } from './daily-plan-auto-publish'
 import { youtubeStaging, youtubePublicStep } from './youtube-publish'
 import { storyLitePublish } from './story-lite-publish'
+import { storyPublishActionRecorder } from './story-publish-action-recorder'
+import { storyPublishActionReconcile } from './story-publish-action-reconcile'
 import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-voipline'
 import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
 import { planDraftFromPrescription } from './plan-draft-from-prescription'
@@ -109,6 +111,8 @@ export const cloudFunctions = [
   youtubeStaging,
   youtubePublicStep,
   storyLitePublish,
+  storyPublishActionRecorder,
+  storyPublishActionReconcile,
   telephonyVoiplineProcess,
   telephonyVoiplineSweep,
   telephonyCallAnalysis,
