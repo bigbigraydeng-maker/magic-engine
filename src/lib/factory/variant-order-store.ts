@@ -83,6 +83,7 @@ export async function listVariantBases(
     )
     .in('status', [...VARIANT_BASE_STATUSES])
     .not('brief->remotion', 'is', null)
+    .eq('brief->>engine', 'remotion')
   if (clientId) query = query.eq('client_id', clientId)
   const { data, error } = await query.order('created_at', { ascending: false }).limit(80)
   if (error) return { ok: false, status: 500, error: error.message }

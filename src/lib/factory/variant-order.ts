@@ -160,7 +160,8 @@ export function buildVariantBrief(baseBrief: unknown, baseId: string, change: Va
   if (!isPlainObject(baseBrief)) {
     return { ok: false, error: '这条视频不是模板出片，暂时不能照它下单' }
   }
-  if (Object.prototype.hasOwnProperty.call(baseBrief, 'creative_recipe')) {
+  // Same routing rule as the worker (resolveEngine): only engine 'remotion' goes down the template branch.
+  if (baseBrief.engine !== 'remotion' || Object.prototype.hasOwnProperty.call(baseBrief, 'creative_recipe')) {
     return { ok: false, error: '这条视频不是模板出片，暂时不能照它下单' }
   }
   const copy: Record<string, unknown> = { ...baseBrief }

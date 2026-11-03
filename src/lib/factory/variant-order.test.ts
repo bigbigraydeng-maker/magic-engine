@@ -219,6 +219,13 @@ describe('buildVariantBrief', () => {
     if (!r.ok) expect(r.error).toContain('不是模板出片')
   })
 
+  it('rejects a brief whose engine is not remotion (the worker would route it to the legacy branch)', () => {
+    const { engine: _engine, ...withoutEngine } = baseBrief()
+    const r = buildVariantBrief(withoutEngine, BASE_ID, { kind: 'hook', lines: okLines })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('不是模板出片')
+  })
+
   it('rejects a brief that has a creative_recipe', () => {
     const brief = baseBrief()
     brief.creative_recipe = {}
