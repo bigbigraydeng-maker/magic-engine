@@ -634,6 +634,13 @@ describe('每日广告成绩单（第 1 刀 ②）', () => {
     expect(screen.queryByText('每个组这 7 天的成绩')).toBeNull()
   })
 
+  it('成绩单带「合格客人」那一块时，员工在下面看到它', async () => {
+    const qualified = { window: { start: '2026-10-04', end: '2026-11-02' }, observeDays: 14, configured: false, staleStageKeys: [], rows: [], unattributedQualified: 0 }
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h', scorecard: { ...SCORECARD, qualified } } } } }))
+    render(<AdsHealthPage />)
+    expect(await screen.findByText('近 30 天带来的客人质量')).toBeTruthy()
+  })
+
   it('老的巡察行没有成绩单 → 说还没有，不画空表', async () => {
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h' } } } }))
     render(<AdsHealthPage />)

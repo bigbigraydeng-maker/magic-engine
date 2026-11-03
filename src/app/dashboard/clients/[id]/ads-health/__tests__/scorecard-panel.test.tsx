@@ -155,8 +155,8 @@ describe('面板', () => {
       unit({ id: 'V', name: '视频组', spend: 1, role: 'awareness', resultType: null, results: null, costPerResult: null, vsTarget: 'no_target', targetCost: null, sampleGap: null, separate: 'not_result_unit' }),
     ], budget: [verdict({ state: 'mismatch', under: ['120200001234'] })] })} />)
     const rows = [...container.querySelectorAll('tbody tr')].map(r => [...r.querySelectorAll('td')].map(td => td.textContent))
-    expect(rows[0][0]).toBe('未命名组 …1234')
-    expect(screen.getByText('花得多、结果少：未命名组 …1234')).toBeTruthy()
+    expect(rows[0][0]).toBe('未命名组 …001234')
+    expect(screen.getByText('花得多、结果少：未命名组 …001234')).toBeTruthy()
     expect(rows[1][2]).toBe('—')
   })
 

@@ -73,6 +73,28 @@ export function isAutomatedActor(actor: string | null | undefined): boolean {
   return a.startsWith('ai:') || a.startsWith('system:') || a === 'system'
 }
 
+/** 阶段记录的写入者归哪一类（广告成绩单「合格客人」用）。 */
+export type StageWriterKind = 'human' | 'system' | 'ai' | 'unknown'
+
+/**
+ * 给「谁把客人推进了这个阶段」分类。以 `isAutomatedActor` 为底，补上它不认的机器写法；
+ * 那个函数本身不改（有效咨询筛选、WhatsApp 跟进记录、时间线显示都在用它）。
+ *
+ * 🔴 认不出的一律 `unknown`，不兜底算人：「人确认」是最被信任的数，宁可少算。
+ *    例如 agent 代写的 `PM-2026-10-12 via claude (…)` 归 unknown。
+ * 设计：docs/specs/2026-11-03-ads-scorecard-qualified-column-v0.md §3。
+ */
+export function classifyStageWriter(actor: string | null | undefined): StageWriterKind {
+  if (!actor) return 'unknown'
+  const a = actor.trim().toLowerCase()
+  if (a === '') return 'unknown'
+  if (a.startsWith('ai:')) return 'ai'
+  if (isAutomatedActor(a) || a.startsWith('auto:') || a.endsWith('@system')) return 'system'
+  if (a.startsWith('human:')) return 'human'
+  if (a.includes('@')) return 'human'
+  return 'unknown'
+}
+
 /**
  * 把「谁改的阶段」翻成员工看得懂的一句话。
  *

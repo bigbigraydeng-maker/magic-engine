@@ -18,6 +18,7 @@ import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playboo
 import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView, goalLiveNote } from './growth-panel'
 import ScorecardPanel from './scorecard-panel'
+import QualifiedPanel from './qualified-panel'
 import { TodayGoalProgress } from './today-goal-progress'
 import WarMapPanel from './war-map-panel'
 import LiveTodayPanel from './live-today-panel'
@@ -614,6 +615,9 @@ export default function AdsHealthPage() {
           {/* 每日广告成绩单：只给内部员工（客户版没有 payload，见 growth-client-view 白名单）；今天还没巡察就不显示 */}
           {!loading && !error && data?.growth && !('viewer' in data.growth) && (
             <ScorecardPanel scorecard={data.growth.payload?.scorecard} />
+          )}
+          {!loading && !error && data?.growth && !('viewer' in data.growth) && data.growth.payload?.scorecard && !('error' in data.growth.payload.scorecard) && (
+            <QualifiedPanel block={data.growth.payload.scorecard.qualified} />
           )}
           {loading && <div className="text-gray-400 text-sm py-8 text-center">加载中…</div>}
           {error && (

@@ -19,6 +19,7 @@ import { runDiagnostics } from '../portfolio/diagnostics/run'
 import { runOpportunities, type DataCompleteness } from '../portfolio/opportunities/run'
 import { buildDigestGoalContext } from '../portfolio/goal-context'
 import { safeBuildAdsScorecard, type AdsScorecard } from '../portfolio/scorecard'
+import { loadQualifiedBlock } from '../portfolio/qualified-leads-loader'
 import type { AccountInput, AdLevelCoverage, Diagnosis, ExcludedEntity } from '../portfolio/diagnostics/types'
 import type { DigestGoalContext } from '../portfolio/internal-digest'
 
@@ -212,6 +213,10 @@ export async function buildGrowthState(
       opportunityRun.opportunities,
     )
 
+    // 成绩单 + 近 30 天合格客人（另读 CRM；出错只写进那一块，不挡巡察）
+    const scorecard = safeBuildAdsScorecard(input, completeness.completeness)
+    if (!('error' in scorecard)) scorecard.qualified = await loadQualifiedBlock(input)
+
     const payload: GrowthStatePayload = {
       headline: buildHeadline(problems, opportunityRun.opportunities, completeness.completeness, goal),
       dataCompleteness: completeness.completeness,
@@ -224,7 +229,7 @@ export async function buildGrowthState(
       adLevelCoverage: diagnosisRun.adLevelCoverage ?? [],
       goal,
       evaluatedAt,
-      scorecard: safeBuildAdsScorecard(input, completeness.completeness),
+      scorecard,
     }
 
     const { error } = await supabaseAdmin.from('ads_growth_states').upsert(
