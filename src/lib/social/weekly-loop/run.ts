@@ -481,7 +481,7 @@ function buildTasks(
     tasks.push({
       code: 'unreviewed_by_maliang',
       what: `有 ${counts.unreviewed} 条审过的视频还没有马良的审片记录，这周不会进卡。`,
-      how: '打开内容工厂，找到这几条视频，看有没有审片记录；没有记录的请重新出片让马良自检，自检通过后下个出稿日会自动排进去。',
+      how: '不用你动手的部分：每周出稿时程序会自动请马良补审，每周有花费上限，没补到的下个出稿日继续补。要你处理的：打开内容工厂找到这几条，视频文件打不开或丢了的请重新出片；补审通过后会自动排进去。',
       href: taskHref(clientId, 'content-factory'),
     })
   }

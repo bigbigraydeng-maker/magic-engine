@@ -49,6 +49,9 @@ function makeDeps(
     startRun: vi.fn(async () => 'run-1'),
     finishRun: vi.fn(async () => undefined),
     send: vi.fn(async () => undefined),
+    loadMaliangSpend: vi.fn(async () => 0),
+    reviewVideo: vi.fn(async () => { throw new Error('reviewVideo not expected in this test') }),
+    supabaseUrl: () => 'https://abc.supabase.co',
     ...over,
   }
 }

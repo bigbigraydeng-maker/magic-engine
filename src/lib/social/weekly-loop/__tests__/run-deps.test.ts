@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   createWeeklyLoopDbDeps,
   listWeeklyLoopClients,
+  loadWeeklyMaliangSpend,
   parseOrderRow,
   weeklyLoopEnabled,
   WEEKLY_LOOP_ORDER_CAP,
@@ -280,5 +281,37 @@ describe('loadClient', () => {
     const state = baseState({ readError: true })
     const deps = createWeeklyLoopDbDeps(makeDb(state))
     await expect(deps.loadClient('c1')).rejects.toThrow('client_read_failed')
+  })
+})
+
+describe('loadWeeklyMaliangSpend', () => {
+  function spendDb(result: { data: unknown; error: unknown }, calls: Array<[string, unknown]>): SupabaseClient {
+    const chain = {
+      select: (cols: string) => (calls.push(['select', cols]), chain),
+      eq: (col: string, val: unknown) => (calls.push([`eq:${col}`, val]), chain),
+      gte: (col: string, val: unknown) => (calls.push([`gte:${col}`, val]), chain),
+      limit: () => Promise.resolve(result),
+    }
+    const db = { from: (table: string) => (calls.push(['from', table]), chain) }
+    return db as never
+  }
+
+  it('sums this client weekly-loop receipts since the given time', async () => {
+    const calls: Array<[string, unknown]> = []
+    const db = spendDb(
+      { data: [{ summary: { maliang_backfill: { spent_usd: 0.1 } } }, { summary: null }, { summary: { maliang_backfill: { spent_usd: 0.15 } } }], error: null },
+      calls,
+    )
+    const since = new Date('2026-10-29T00:00:00Z')
+    expect(await loadWeeklyMaliangSpend(db, 'c1', since)).toBeCloseTo(0.25)
+    expect(calls).toContainEqual(['from', 'cron_run_logs'])
+    expect(calls).toContainEqual(['eq:job_name', 'social-weekly-draft'])
+    expect(calls).toContainEqual(['eq:summary->>client_id', 'c1'])
+    expect(calls).toContainEqual(['gte:started_at', since.toISOString()])
+  })
+
+  it('throws when the receipts cannot be read (caller treats that as no budget)', async () => {
+    const db = spendDb({ data: null, error: { message: 'down' } }, [])
+    await expect(loadWeeklyMaliangSpend(db, 'c1', new Date())).rejects.toThrow('maliang_spend_read_failed')
   })
 })

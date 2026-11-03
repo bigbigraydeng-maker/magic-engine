@@ -78,6 +78,15 @@ PM 每周批一张卡。第一阶段只做 CTS 的 Facebook；行业与阶段规
 - **算分**：该拦的拦住了没有（要求一条不漏）+ 好内容被错拦几条。
 - 马良现有判法先拿练习题打底分（已知两条和人工结论不一致：f868fb79、f4bdd5f6）。
 
+### 2.4a 马良补审接线（G3 实现，2026-11-04 补）
+11-04 试跑：23 条候选里 16 条没有马良记录——它们是马良上线前出的片，出片那一刻的自检（只在 `in_review` 时跑）永远不会再补。所以每周编排里补一步：
+- **补谁**：先空跑一遍循环，只挑「唯一原因是马良没审」的条目（`excluded_reason = unreviewed` 且事实核对 `pass`）。事实没过的不花钱审。
+- **怎么审**：复用 `runReviewCheckV2`（v2 九宫格 + 镜头表 + 声音 + 人脸）、`remotionNineGridInput`、`remotionPublicVideoUrl(output.video_path)`、`runCheckWithTimeout`（180 秒）；每条一个 Inngest 步骤，不重试。
+- **花钱上限**：单客户每周 `weekly_loop.maliang_weekly_cap_usd`（缺省 0.5 美元，上限 5），每次最多 6 条；已花的钱从近 7 天本任务回执 `summary.maliang_backfill.spent_usd` 累加——读不到就当没额度（不审）。每次实际调模型按 0.05 美元记。
+- **什么时候花**：只有写库模式自动补审；演练模式只报「要补几条、估计多少钱」，除非手动事件明确带 `maliang_review: true`（当场试跑用）。
+- **写回**：写库模式下，把 v2 结论盖到最新 `output.maliang_check`（`toWorkOrderSnapshotV2`），带 `updated_at` 条件写；没写上的不算审过。演练模式只在内存里叠加，用来算这张卡会排几条。
+- **回执**：`maliang_backfill` 段写清：开没开 / 为什么没开、挑中几条、逐条结论、写上几条、跳过原因（没片 / 额度 / 单次上限）、花前花后金额。
+
 ### 2.5 客户规则放哪
 复用已有：`clients.brand_redline_phrases`、`master_briefs.excluded_topics`（发布正文红线闸已在读）。人脸规则等新增项放 `clients.publishing_calendar_config` 里新键，不进共享代码。
 

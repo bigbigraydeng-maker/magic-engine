@@ -64,6 +64,9 @@ function makeDeps(
     startRun: vi.fn(async () => 'run-1'),
     finishRun: vi.fn(async () => undefined),
     send: vi.fn(async () => undefined),
+    loadMaliangSpend: vi.fn(async () => 0),
+    reviewVideo: vi.fn(async () => { throw new Error('reviewVideo not expected in this test') }),
+    supabaseUrl: () => 'https://abc.supabase.co',
     ...over,
   }
 }
@@ -176,7 +179,9 @@ describe('social-weekly-draft function', () => {
     expect(out.kind).toBe('client_run')
     expect(out.status).toBe('completed')
     expect(out.mode).toBe('dry_run')
-    expect(loop.loadOrders).toHaveBeenCalledTimes(1)
+    // Once for the 马良 backfill plan (a read-only preview), once for the loop itself.
+    expect(loop.loadOrders).toHaveBeenCalledTimes(2)
+    expect(deps.reviewVideo).not.toHaveBeenCalled()
     expect(deps.finishRun).toHaveBeenCalledTimes(1)
   })
 
