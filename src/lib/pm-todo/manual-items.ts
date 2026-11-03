@@ -54,6 +54,7 @@ import { pushAdsCircuitItems } from './ads-circuit-items'
 import { pushAdsServicePauseItems } from './ads-service-pause-items'
 import { pushAdsAccountStatusItems } from './ads-account-status-items'
 import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
+import { pushWeeklyLoopItems } from './social-weekly-loop-items'
 import { pushPlanDraftFailureItems } from './plan-draft-failure-items'
 import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
@@ -441,6 +442,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 推广计划每日检查：草稿等批准 / 批准后被改 / 到期阶段没过 / 对账偏差 / 检查自己没跑成
     (b) => pushPromoPlanWatchItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 推广计划每日检查待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 社媒每周出稿：只读写库模式回执里的待办（没东西可排 / 全被刷掉 / 读不到团目录 / 马良没审）
+    (b) => pushWeeklyLoopItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 社媒每周出稿待办生成失败（不阻塞其他待办）:', e),
     ),
     (b) => pushPlanDraftFailureItems(supabase, b, ids, nameOf).catch((e) =>
       console.warn('[manual-items] 推广计划草稿失败待办生成失败（不阻塞其他待办）:', e),

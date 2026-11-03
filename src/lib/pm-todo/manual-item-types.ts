@@ -111,6 +111,8 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 整包批准：链接是要登录的后台页，探活多半判成坏链接。没人看见 = 这一周不会批。
   'week_pack_needs_approval',
   'week_pack_items_held',
+  // 社媒每周出稿：链接是要登录的后台页，探活多半判成坏链接。没人看见 = 下周的卡是空的。
+  'social_weekly_loop_needs_human',
   // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
   // 这条里还有「检查自己没跑成」，绝不能因为链接问题静默消失。
   'ads_tracking_preflight_fix',
@@ -243,6 +245,8 @@ export type ManualItemKind =
   | 'week_pack_needs_approval'
   /** 整包里有条目被单独拦住，没有整包撤回 */
   | 'week_pack_items_held'
+  /** 社媒每周出稿：没东西可排 / 全被刷掉 / 读不到团目录 / 马良没审（读写库模式的回执） */
+  | 'social_weekly_loop_needs_human'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
