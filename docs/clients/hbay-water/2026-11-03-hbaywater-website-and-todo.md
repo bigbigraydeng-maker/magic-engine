@@ -37,8 +37,8 @@ hbaywater.com 与客户自己的 nzmiracle.com **并存**，不互相替代。�
 
 | # | 事 | 现状 | 打分 |
 |---|---|---|---|
-| 9 | 开放搜索收录 | 全站 noindex；没有 robots.txt、sitemap；不存在的页面返回首页（软 404）；没有 canonical、分享图 | 频率高 / IMPACT 高 / 收入中 → P0 |
-| 10 | 装数据追踪 | 没有 GA4、Meta 像素、Search Console；Cookie 横幅是照搬的、点了不生效 | 频率高 / IMPACT 高 / 收入中 → P0 |
+| 9 | 开放搜索收录 | 全站 noindex（要 PM 本人点头才能去，SEO 手册档 3）；sitemap.xml 11-03 已加但**还没提交给 Google**；robots.txt 仍没有；不存在的页面返回首页（软 404）；没有 canonical、分享图 | 频率高 / IMPACT 高 / 收入中 → P0 |
+| 10 | 装数据追踪 | **GA4 已装（11-03）**、**搜索控制台已验证（11-03，域名级）**；ME 授权 Google 还没做（卡在授权范围，见下）；Meta 像素没装（没投广告）；Cookie 横幅是照搬的、点了不生效；隐私政策要补一句「使用访问统计」 | 频率高 / IMPACT 高 / 收入中 → P0 |
 | 11 | 批发询盘进 ME | 「Trade Enquiries」跳 nzmiracle.com 联系页，询盘 ME 看不到；并存后可保留跳转，但要先在本站留一个能进 ME 的询盘入口 | 频率中 / IMPACT 高 / 收入高 → P0 |
 | 12 | 订阅框能用 | 填邮箱不会保存到任何地方 | 频率中 / IMPACT 高 / 收入中 → P2 |
 | 13 | AI 可见度底子 | 页面没有正文大标题（H1）；没有品牌/产品结构化数据；AI 可见度上次实测 0/3 | 频率中 / IMPACT 中 / 收入中 → P2 |
@@ -53,3 +53,13 @@ hbaywater.com 与客户自己的 nzmiracle.com **并存**，不互相替代。�
 16. 客户档案补第一份 master_brief（现在 0 份，没有 brief 按红线不能做任何对外内容）。
 17. 账号到位后接社媒、广告、口碑三条线。
 18. 新站上线后重测 AI 可见度，作为起点。
+
+## 数据测量（2026-11-03 已做，PM 回「可以」）
+
+- **GA4**：属性名 HBay Water，建在 Google Analytics 的「Magic Engine」账号下（和 Park Homes 同账号，没另开账号，免新条款）；网站数据流 hbaywater.com；衡量 ID G-ZL3CZPGQ35 已装进 index / privacy / terms 三页，实测实时报告收到访问（页面标题对、page_view 在）。
+- **搜索控制台**：域名级属性 hbaywater.com，用 Cloudflare 里加一条 TXT 记录验证通过。**那条 TXT 不要删**，删了会失去验证。没有授权 Google 去读 Cloudflare 账号（选了手动那条路）。
+- **不设关键动作（key event）**：品牌形象站没有收银台，也没有留联系方式的表单；点「Find in store」只是跳去超市搜索页，看不到后续成交，不算。GA4 自动记点击出站链接，不用另设。以后只有批发/出口询盘提交值得设，要等询盘入口建好并能进 ME；投广告后也可再加。
+- **主数字**：①品牌词搜索量（GSC，ME 里 HBay 品牌词别名已填 4 个）；②AI 可见度（8 月实测 0/3，作起点）；GA4 只当背景（来多少人、从哪来）。
+- **账号归属**：PM 定——GA4 和搜索控制台建在我们名下，客户当管理员，合同写退出移交（对应上面「要 PM 拍板」第 2 条）。**邀请客户当管理员还没发**（要外发邀请，等 PM 点头和客户邮箱）。
+- **ME 授权 Google（卡住）**：设置页那个「连接 Google 网站数据」跳到的 Google 授权页，要的权限比「搜索控制台 + GA4」多：还含商家资料管理、表格读写、网址索引提交；而且 Google 提示「此应用未经验证」（开发者是 bigbigraydeng@gmail.com）。我没点继续，等 PM 对授权范围点头。
+- **sitemap.xml**：已上线（3 个网址），**先不提交给 Google**：网站仍是 noindex，开放收录要 PM 本人点头。
