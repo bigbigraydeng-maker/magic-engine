@@ -104,6 +104,14 @@
 
 **部署方式**：Cloudflare wrangler + 专属 API token(`ME NZCPE Pages Deploy`，权限限定 Cloudflare Pages:Edit，账号 bigbigraydeng)，不用共享的全局 CLI 登录（本机多窗口并行时全局登录会被别的窗口切走，踩过坑）。
 
+## 官网换中英文全称 logo + 网站源文件找回（2026-11-03，已上线）
+
+- PM 给的新 logo（中英文全称版）已换到全站 17 个页面的页眉和页脚（页脚深色底，logo 放白色圆角底板上）；线上发布 `5b78b178`。
+- **原网站源文件随旧电脑丢失**，这次从线上发布整份取回（75 个文件 + 跳转规则 + 网页头设置），现存 Dropbox `Magic Engine/by-client/07_NZCPE/site-source/`，以后改网站从这里改，里面 README 写了发布命令。
+- **报名表单后台（`/api/register`）源码也丢了**，已按现有通知邮件格式重建，放在同一目录 `functions/`。上线后两次测试报名都到了 bigbigraydeng@gmail.com，格式与此前一致。改动一处：发信失败时不再假装成功，网页会提示报名人直接发邮件到 info@nzcpe.co.nz。
+- ⚠️ 以后发布绝不能只传网页文件夹不带 `functions/`，那会删掉报名后台；`/assets/*` 浏览器缓存一年，改图/样式要换文件名或加版本号。
+- 上面「部署方式」里说的专用发布钥匙在旧电脑上，新电脑没有；这次用 bigbigraydeng 账号临时授权发布。
+
 ## 待办（已回写 [docs/ROADMAP.md](../../ROADMAP.md) → 「近期待办 › NZCPE 2026」段，编号 NZCPE-1…5）
 
 1. **推广方向口径待 PM 一句话定死**（NZCPE-1）——见上面「推广方向」那节，SEO 已转 B2B、广告仍 To C
