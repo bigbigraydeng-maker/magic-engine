@@ -1,11 +1,15 @@
 /**
- * 当周进线预测：本周已有 + 余下各天按近 28 天同星期几日均估算（区间）。
+ * 当周进线预测：本周已有 + 今天补全到同星期几 + 之后各天按近 28 天同星期几日均（区间）。
  */
 
 import {
   FORECAST_HISTORY_DAYS,
   FORECAST_MIN_DAY_TOTAL,
+  dayTotal,
+  emptyDayMap,
   leadCountRangeFromSamples,
+  sumThroughHour,
+  todayArrivedForForecast,
 } from '@/lib/ads-strategy/hourly-leads-forecast'
 import {
   buildDayBuckets,
@@ -32,20 +36,6 @@ export interface WeeklyLeadForecastInsufficient {
 }
 
 export type WeeklyLeadForecast = WeeklyLeadForecastOk | WeeklyLeadForecastInsufficient
-
-function emptyDayMap(): number[] {
-  return Array.from({ length: 24 }, () => 0)
-}
-
-function dayTotal(hours: readonly number[]): number {
-  return hours.reduce((a, b) => a + b, 0)
-}
-
-function sumThroughHour(hours: readonly number[], through: number): number {
-  let n = 0
-  for (let h = 0; h <= through && h < 24; h++) n += hours[h] ?? 0
-  return n
-}
 
 /** 新西兰日历日：周一=0 … 周日=6 */
 export function nzWeekdayMondayZero(day: string): number {
@@ -94,6 +84,33 @@ function weekdayHistorySamples(
   return samples
 }
 
+function weekdayBand(
+  byDay: ReadonlyMap<string, number[]>,
+  today: string,
+  weekday: number,
+): { low: number; high: number; sampleCount: number } | null {
+  return leadCountRangeFromSamples(
+    weekdayHistorySamples(byDay, today, weekday),
+    WEEK_FORECAST_MIN_WEEKDAY_SAMPLES,
+  )
+}
+
+function observedThroughToday(
+  byDay: ReadonlyMap<string, number[]>,
+  weekStart: string,
+  today: string,
+  todayWd: number,
+  currentHour: number,
+): number {
+  let total = 0
+  for (let wd = 0; wd <= todayWd; wd++) {
+    const day = nzDayPlus(weekStart, wd)
+    const hours = byDay.get(day) ?? emptyDayMap()
+    total += day === today ? sumThroughHour(hours, currentHour) : dayTotal(hours)
+  }
+  return total
+}
+
 export function computeWeeklyLeadForecast(
   byDay: ReadonlyMap<string, number[]>,
   today: string,
@@ -101,39 +118,37 @@ export function computeWeeklyLeadForecast(
 ): WeeklyLeadForecast {
   const weekStart = nzWeekStartMonday(today)
   const todayWd = nzWeekdayMondayZero(today)
+  const todayHours = byDay.get(today) ?? emptyDayMap()
+  // 拟合用的「今天已到」去掉最近暂定小时，与全天预测的 todayArrivedForForecast 相同。
+  // weekSoFar 仍是已经进库的条数；发布区间最后不低于它。
+  const settledToday = todayArrivedForForecast(todayHours, currentHour)
+  const weekSoFar = observedThroughToday(byDay, weekStart, today, todayWd, currentHour)
 
-  let weekSoFar = 0
-  for (let wd = 0; wd <= todayWd; wd++) {
-    const day = nzDayPlus(weekStart, wd)
-    const hours = byDay.get(day) ?? emptyDayMap()
-    if (day === today) {
-      weekSoFar += sumThroughHour(hours, currentHour)
-    } else {
-      weekSoFar += dayTotal(hours)
-    }
-  }
+  const todayBand = weekdayBand(byDay, today, todayWd)
+  if (!todayBand) return { status: 'insufficient', message: '数据不足' }
 
-  let rangeMin = weekSoFar
-  let rangeMax = weekSoFar
-  let minSampleCount = FORECAST_HISTORY_DAYS
+  let rangeMin = Math.max(settledToday, todayBand.low)
+  let rangeMax = Math.max(settledToday, todayBand.high)
+  let minSampleCount = todayBand.sampleCount
 
   for (let wd = todayWd + 1; wd <= 6; wd++) {
-    const samples = weekdayHistorySamples(byDay, today, wd)
-    const band = leadCountRangeFromSamples(samples, WEEK_FORECAST_MIN_WEEKDAY_SAMPLES)
-    if (!band) {
-      return { status: 'insufficient', message: '数据不足' }
-    }
+    const band = weekdayBand(byDay, today, wd)
+    if (!band) return { status: 'insufficient', message: '数据不足' }
     minSampleCount = Math.min(minSampleCount, band.sampleCount)
     rangeMin += band.low
     rangeMax += band.high
   }
+
+  const past = weekSoFar - sumThroughHour(todayHours, currentHour)
+  rangeMin = Math.max(past + rangeMin, weekSoFar)
+  rangeMax = Math.max(past + rangeMax, weekSoFar)
 
   return {
     status: 'ok',
     rangeMin: Math.min(rangeMin, rangeMax),
     rangeMax: Math.max(rangeMin, rangeMax),
     weekSoFar,
-    historyDays: minSampleCount === FORECAST_HISTORY_DAYS ? FORECAST_HISTORY_DAYS : minSampleCount,
+    historyDays: minSampleCount,
     disclaimer: `按近 ${FORECAST_HISTORY_DAYS} 天同星期几的日均推算，预算或广告一变就会不准`,
   }
 }

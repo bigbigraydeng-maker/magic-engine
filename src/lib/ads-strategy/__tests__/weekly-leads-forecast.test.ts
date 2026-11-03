@@ -50,7 +50,8 @@ describe('weekday averaging', () => {
     for (let d = 1; d <= 28; d++) {
       const day = isoDayMinus(today, d)
       const wd = nzWeekdayMondayZero(day)
-      if (wd === 3) setDayTotal(byDay, day, 12)
+      if (wd === 2) setDayTotal(byDay, day, 10)
+      else if (wd === 3) setDayTotal(byDay, day, 12)
       else if (wd === 4) setDayTotal(byDay, day, 14)
       else if (wd === 5) setDayTotal(byDay, day, 16)
       else if (wd === 6) setDayTotal(byDay, day, 6)
@@ -73,8 +74,10 @@ describe('paused-day exclusion', () => {
       setDayTotal(byDay, d, 6)
     }
     const todayHours = emptyDay()
-    todayHours[11] = 3
+    todayHours[11] = 5
     byDay.set(today, todayHours)
+    setDayTotal(byDay, '2026-10-17', 5)
+    setDayTotal(byDay, '2026-10-10', 5)
 
     setDayTotal(byDay, '2026-10-18', 12)
     setDayTotal(byDay, '2026-10-11', 14)
@@ -83,7 +86,76 @@ describe('paused-day exclusion', () => {
     const r = computeWeeklyLeadForecast(byDay, today, CURRENT_HOUR)
     expect(r.status).toBe('ok')
     if (r.status !== 'ok') return
+    expect(r.rangeMin).toBe(r.weekSoFar + 12)
+    expect(r.rangeMax).toBe(r.weekSoFar + 14)
+  })
+})
+
+describe('rest of today', () => {
+  it('Sunday with no usable samples returns 数据不足', () => {
+    const today = '2026-10-25'
+    const byDay = new Map<string, number[]>()
+    setDayTotal(byDay, '2026-10-19', 8)
+    const todayHours = emptyDay()
+    todayHours[9] = 4
+    byDay.set(today, todayHours)
+    const r = computeWeeklyLeadForecast(byDay, today, CURRENT_HOUR)
+    expect(r.status).toBe('insufficient')
+    if (r.status === 'insufficient') expect(r.message).toBe('数据不足')
+  })
+
+  it('Sunday range is above week-so-far once same-weekday samples exist', () => {
+    const today = '2026-10-25'
+    const byDay = new Map<string, number[]>()
+    for (const day of ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-24']) {
+      setDayTotal(byDay, day, 3)
+    }
+    const todayHours = emptyDay()
+    todayHours[10] = 4
+    byDay.set(today, todayHours)
+    setDayTotal(byDay, '2026-10-18', 20)
+    setDayTotal(byDay, '2026-10-11', 20)
+
+    const r = computeWeeklyLeadForecast(byDay, today, CURRENT_HOUR)
+    expect(r.status).toBe('ok')
+    if (r.status !== 'ok') return
+    expect(r.weekSoFar).toBe(22)
+    expect(r.rangeMin).toBeGreaterThan(r.weekSoFar)
     expect(r.rangeMax).toBeGreaterThan(r.weekSoFar)
+  })
+
+  it('Monday range is above week-so-far', () => {
+    const today = '2026-10-19'
+    const byDay = new Map<string, number[]>()
+    const todayHours = emptyDay()
+    todayHours[9] = 2
+    byDay.set(today, todayHours)
+    for (let d = 1; d <= 28; d++) setDayTotal(byDay, isoDayMinus(today, d), 10)
+
+    const r = computeWeeklyLeadForecast(byDay, today, CURRENT_HOUR)
+    expect(r.status).toBe('ok')
+    if (r.status !== 'ok') return
+    expect(r.weekSoFar).toBe(2)
+    expect(r.rangeMin).toBeGreaterThan(r.weekSoFar)
+    expect(r.rangeMax).toBeGreaterThan(r.weekSoFar)
+  })
+
+  it('provisional hours stay out of the fit, and the range stays >= observed', () => {
+    const today = '2026-10-25'
+    const byDay = new Map<string, number[]>()
+    const todayHours = emptyDay()
+    todayHours[10] = 4
+    todayHours[15] = 30
+    byDay.set(today, todayHours)
+    setDayTotal(byDay, '2026-10-18', 6)
+    setDayTotal(byDay, '2026-10-11', 6)
+
+    const r = computeWeeklyLeadForecast(byDay, today, CURRENT_HOUR)
+    expect(r.status).toBe('ok')
+    if (r.status !== 'ok') return
+    expect(r.weekSoFar).toBe(34)
+    expect(r.rangeMin).toBeGreaterThanOrEqual(r.weekSoFar)
+    expect(r.rangeMax).toBeGreaterThanOrEqual(r.weekSoFar)
   })
 })
 

@@ -13,6 +13,7 @@ import { buildHourlyLeadChart, isoDayMinus } from '@/lib/ads-strategy/hourly-met
 import { buildLeadForecastFromRows } from '@/lib/ads-strategy/hourly-leads-forecast'
 import { buildWeeklyLeadForecastFromRows } from '@/lib/ads-strategy/weekly-leads-forecast'
 import { toClientHourlyLeadsView } from '@/lib/ads-strategy/agents/hourly-leads-client-view'
+import { fetchAll } from '@/lib/supabase-paginate'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,16 +27,23 @@ async function loadTouchpoints(clientId: string, sinceIso: string): Promise<
   | { ok: true; rows: Array<{ occurred_at: string }> }
   | { ok: false; error: string }
 > {
-  const { data, error } = await supabaseAdmin
-    .from('contact_touchpoints')
-    .select('occurred_at')
-    .eq('client_id', clientId)
-    .eq('channel', 'meta_lead_form')
-    .gte('occurred_at', sinceIso)
-    .order('occurred_at', { ascending: true })
-    .limit(20_000)
-  if (error) return { ok: false, error: error.message }
-  return { ok: true, rows: (data ?? []) as Array<{ occurred_at: string }> }
+  try {
+    const rows = await fetchAll<{ occurred_at: string }>((from, to) =>
+      supabaseAdmin
+        .from('contact_touchpoints')
+        .select('occurred_at')
+        .eq('client_id', clientId)
+        .eq('channel', 'meta_lead_form')
+        .gte('occurred_at', sinceIso)
+        .order('created_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, to),
+    )
+    return { ok: true, rows }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, error: message }
+  }
 }
 
 async function lastMetaLeadsSyncFinishedAt(): Promise<string | null> {

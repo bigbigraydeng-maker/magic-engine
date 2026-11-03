@@ -112,6 +112,26 @@ describe('computeDailyLeadForecast range maths', () => {
     expect(Object.keys(r)).not.toContain('mid')
   })
 
+  it('全天区间不低于今天已观测总数（含暂定小时）', () => {
+    const byDay = new Map<string, number[]>()
+    for (let d = 1; d <= 20; d++) {
+      const day = isoDayMinus(TODAY, d)
+      const hours = emptyDay()
+      hours[10] = 10
+      byDay.set(day, hours)
+    }
+    const todayHours = emptyDay()
+    todayHours[10] = 6
+    todayHours[15] = 30
+    byDay.set(TODAY, todayHours)
+    const r = computeDailyLeadForecast(byDay, TODAY, 16)
+    expect(r.status).toBe('ok')
+    if (r.status !== 'ok') return
+    expect(r.rangeMin).toBeGreaterThanOrEqual(36)
+    expect(r.rangeMax).toBeGreaterThanOrEqual(36)
+    expect(r.rangeMin).toBeLessThanOrEqual(r.rangeMax)
+  })
+
   it('range widens when historical cumulative shares vary more', () => {
     const byDay = new Map<string, number[]>()
     for (let d = 1; d <= 20; d++) {
