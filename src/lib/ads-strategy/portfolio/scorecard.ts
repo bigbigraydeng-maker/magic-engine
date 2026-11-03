@@ -17,6 +17,7 @@ import { benjaminiHochberg, binomialTwoSidedP } from './diagnostics/d5-budget-re
 import { D5_FDR_Q, D5_MIN_SHARE_GAP } from './diagnostics/thresholds'
 import type { DiagnosisInput } from './diagnostics/types'
 import type { DataCompleteness } from './opportunities/run'
+import type { QualifiedBlock } from './qualified-leads'
 
 export const BUDGET_GAP_THRESHOLD = D5_MIN_SHARE_GAP
 
@@ -67,6 +68,8 @@ export interface AdsScorecard {
   units: ScorecardUnit[]
   budget: BudgetVerdict[]
   accountsSkipped: Array<{ adAccountId: string; reason: 'shared' | 'account_level_only' }>
+  /** 近 30 天每个组带来的客人质量（第 1 刀 ③）；巡察另读 CRM 后挂上，不进预算判断。老行没有。 */
+  qualified?: QualifiedBlock | { error: string }
 }
 
 // ---------- unit result type / counting ----------

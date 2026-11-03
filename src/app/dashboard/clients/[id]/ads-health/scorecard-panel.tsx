@@ -22,7 +22,8 @@ const ROLE_LABEL: Record<FunnelRole, string> = {
 const money = (n: number) => `$${n.toFixed(2)}`
 const pct = (x: number) => `${Math.round(x * 100)}%`
 const tail = (id: string) => '…' + id.slice(-4)
-const unnamed = (id: string) => `未命名组 ${tail(id)}`
+// 组编号取尾 6 位：CTS 的组编号尾 4 位全是同一串，分不出来（账户号仍取尾 4 位）
+const unnamed = (id: string) => `未命名组 …${id.slice(-6)}`
 
 export function unitNote(u: ScorecardUnit): string {
   switch (u.separate) {
