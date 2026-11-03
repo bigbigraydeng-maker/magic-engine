@@ -71,3 +71,24 @@ describe('switch off', () => {
     expect(summary.reasons).toEqual(['总开关没开'])
   })
 })
+
+describe('switch on but the client list cannot be read', () => {
+  it('writes a failed run log with the reason instead of hanging in "running" (子牙 P1)', async () => {
+    const llm = vi.fn()
+    const db = { from: () => { throw new Error('db down') } }
+    const fn = createBaozhengWeeklyFunction({
+      db: db as never,
+      llm,
+      loadTranscript: vi.fn(),
+      now: () => new Date('2026-11-04T21:00:00Z'),
+      env: () => ({ BAOZHENG_ENABLED: 'true' }),
+    })
+    const h = fakeStep()
+    const receipt = (await internals(fn).fn({ step: h.step })) as { status: string }
+    expect(receipt.status).toBe('failed')
+    expect(llm).not.toHaveBeenCalled()
+    const opts = finish.mock.calls[0]?.[0] as { failed: number; error: string }
+    expect(opts.failed).toBe(1)
+    expect(opts.error).toContain('db down')
+  })
+})

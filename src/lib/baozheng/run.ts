@@ -53,6 +53,8 @@ export const DISAGREEMENT_CAP = 5
 export const POOL_SAMPLE = 5
 /** 每个客户每周花在复核模型上的上限；到了就停，剩下的记「没复核」 */
 export const WEEKLY_COST_CAP_USD = 2
+/** 报错没复核成的原因前缀（读库 / 调模型抛错）；跟「原文可能被改过」这类正常跳过分开 */
+const REVIEW_ERROR_PREFIX = '复核失败：'
 const LOOKBACK_DAYS = 7
 const ACCURACY_LOOKBACK_DAYS = 56
 const MS_PER_DAY = 86_400_000
@@ -155,7 +157,7 @@ export function planReviews(
   seedKey: string,
   weekStartMs: number,
   nowMs: number,
-): { tasks: ReviewTask[]; poolWrites: number } {
+): { tasks: ReviewTask[]; poolWrites: number; population: ClientRunSummary['sample_population'] } {
   const lastWeek = judgments.filter((j) => inRange(j.createdAt, weekStartMs, nowMs))
   const byId = new Map(lastWeek.map((j) => [j.id, j]))
   const sample = pickStratified(lastWeek.map((j) => ({ id: j.id, stage: j.toStage })), WEEKLY_CAP, seedKey)
@@ -176,7 +178,11 @@ export function planReviews(
   for (const ev of pickRandom(pool, POOL_SAMPLE, `${seedKey}:pool`)) {
     tasks.push({ event: ev, kind: 'pool', aiStage: POOL_STAGE })
   }
-  return { tasks, poolWrites: poolWritesAll.length }
+  return {
+    tasks,
+    poolWrites: poolWritesAll.length,
+    population: { population_by_stage: sample.populationByStage, picked_by_stage: sample.pickedByStage },
+  }
 }
 
 function stored(task: ReviewTask, nowIso: string, patch: Pick<StoredReview, 'review_stage' | 'result' | 'reason'>): StoredReview {
@@ -222,7 +228,7 @@ async function reviewOne(
       : compareStages(task.aiStage, verdict.stage, config)
     return { review: stored(task, nowIso, { review_stage: verdict.stage, result, reason: verdict.reason }), costUsd: verdict.costUsd }
   } catch (e) {
-    return skip(`复核失败：${errText(e)}`)
+    return skip(`${REVIEW_ERROR_PREFIX}${errText(e)}`)
   }
 }
 
@@ -245,7 +251,7 @@ function toReviewedItems(reviews: readonly StoredReview[], rulings: ReadonlyMap<
 function failedClient(clientId: string, reason: string): ClientRunSummary {
   return {
     client_id: clientId, status: 'failed', reason, outcomes: null, pool_writes_last_week: 0,
-    reviews: [], accuracy: [], suspected_missed: 0, cost_usd: 0,
+    reviews: [], accuracy: [], suspected_missed: 0, sample_population: null, cost_usd: 0,
   }
 }
 
@@ -299,6 +305,11 @@ export async function runClient(
     const scan = scanOutcomes(judgments, events, config, mails, weekStartMs, nowMs)
     const plan = planReviews(events, judgments, scan.recentDisagreements, `${clientId}:${week}`, weekStartMs, nowMs)
     const done = await runReviews(deps, clientId, plan.tasks, options, config, nowIso)
+    // 一半以上是报错没复核成 → 这个客户记失败进待办，不许看起来「复核了、没分歧」（魏征 P1）
+    const errored = done.reviews.filter((r) => r.result === 'not_reviewed' && (r.reason ?? '').startsWith(REVIEW_ERROR_PREFIX)).length
+    if (done.reviews.length > 0 && errored * 2 > done.reviews.length) {
+      return { ...failedClient(clientId, `一半以上复核报错（${errored}/${done.reviews.length}）`), cost_usd: done.costUsd }
+    }
 
     const sinceIso = new Date(nowMs - ACCURACY_LOOKBACK_DAYS * MS_PER_DAY).toISOString()
     const past = await loadPastReviews(deps.db, BAOZHENG_JOB, clientId, sinceIso)
@@ -307,7 +318,8 @@ export async function runClient(
     const suspected = done.reviews.filter((r) => r.kind === 'pool' && isSuspectedMiss(r.review_stage, config)).length
     return {
       client_id: clientId, status: 'reviewed', reason: null, outcomes: scan.counts,
-      pool_writes_last_week: plan.poolWrites, reviews: done.reviews, accuracy, suspected_missed: suspected, cost_usd: done.costUsd,
+      pool_writes_last_week: plan.poolWrites, reviews: done.reviews, accuracy, suspected_missed: suspected,
+      sample_population: plan.population, cost_usd: done.costUsd,
     }
   } catch (e) {
     return failedClient(clientId, `读库失败：${errText(e)}`)

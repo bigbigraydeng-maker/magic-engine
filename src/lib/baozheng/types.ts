@@ -47,6 +47,8 @@ export interface ClientRunSummary {
   accuracy: StageAccuracy[]
   /** kind = pool 里复核判成「深入在谈 / 已成交」的个数 */
   suspected_missed: number
+  /** 本周下结论的判断各阶段原本有几条 / 抽中几条（超过上限分层抽时，8 周合算要按它加权） */
+  sample_population: { population_by_stage: Record<string, number>; picked_by_stage: Record<string, number> } | null
   cost_usd: number
 }
 

@@ -1,4 +1,4 @@
-# CRM 规则手册 · AI 判断复核（包拯）v1.2
+# CRM 规则手册 · AI 判断复核（包拯）v1.3
 
 > 2026-11-03 · Claude Code 会话 f765a75f 起草 · 第 2 关（写规则）凭证 · **A 级规则书**（改正文要子牙签字 + PM 合；学习任务只写候选区）。
 > 上游：`docs/specs/2026-11-03-ads-agent-fix-plan-v0.md` 第 1b 刀；立项卡 `docs/agents/intake/2026-11-03-baozheng.md`；标准流程 `docs/specs/2026-10-18-me-agent-standard-process-v1.0.md` §3。
@@ -115,10 +115,10 @@
 
 ### 4.3 后来的证据怎么算
 
-**看的顺序（BZ-06）**：从这次判断往后，按时间一条条看：
-1. **同阶段重写**（阶段没变）→ 跳过，往下看；
-2. 碰到修正脚本的记录（BZ-03）→ 按 BZ-07 定完，停；
-3. 碰到这个 AI 的**任何**其他写入（下一次判断、读不出来落「新线索」、规则判「无下文」）→ 停，「说明不了」（后面的事归新那次）；
+**看的顺序（BZ-06）**：从这次判断往后，按时间一条条看（v1.3：同一个 AI 的检查挪到最前，魏征代码审查 P2——AI 重判成同一阶段时，旧那次判断也该停）：
+1. 碰到修正脚本的记录（BZ-03）、而且改了阶段 → 按 BZ-07 定完，停；
+2. 碰到这个 AI 的**任何**其他写入（下一次判断——**含判成同一阶段**、读不出来落「新线索」、规则判「无下文」）→ 停，「说明不了」（后面的事归新那次）；
+3. 别人的**同阶段重写**（阶段没变）→ 跳过，往下看；
 4. 碰到**改了阶段的批量操作**（BZ-05 ③）→ 停，「说明不了」；
 5. **碰到第一条其他记录 → 就在这一条上定结论（判对 / 判错 / 说明不了），然后停**。
 
@@ -237,11 +237,11 @@
 | BZ-15、BZ-16 | `sample.ts` `pickStratified` / `pickRandom`；`run.ts` `planReviews` | 已实现 |
 | BZ-17 | `stage-infer.ts` `loadTranscriptLines(…, { ingestedBefore })`；`load.ts` `hasRewrittenTouchpoints`；`prompts.ts` | 已实现 |
 | BZ-18 | `review.ts` `compareStages`；`pm-todo/baozheng-items.ts`（`truth` 车道，what / how 不带客人信息） | 已实现 |
-| BZ-19 | `ruling.ts` + 复核页 `/dashboard/clients/[id]/baozheng/[judgmentId]` + `POST /api/clients/[id]/baozheng/[judgmentId]/ruling`；裁定存 `crm_segment_feedback`（`segment = baozheng:<判断记录 id>`），不写客人、不写阶段记录 | 已实现，不改表 |
+| BZ-19 | 只有包拯复核过的判断才能裁定；复核页标出「原文后来被改写过」；`ruling.ts` + 复核页 `/dashboard/clients/[id]/baozheng/[judgmentId]` + `POST /api/clients/[id]/baozheng/[judgmentId]/ruling`；裁定存 `crm_segment_feedback`（`segment = baozheng:<判断记录 id>`），不写客人、不写阶段记录。**以后谁按 `segment` 统计「这批分错了」，要排除 `baozheng:` 开头的行** | 已实现，不改表 |
 | BZ-20 | `accuracy.ts` `computeAccuracy` | 已实现 |
 | BZ-21 | 运行记录里的个数 | 只数个数 |
 | BZ-22～25 | — | 按 §4.5 等触发再写 |
-| BZ-26、BZ-27 | `src/lib/inngest/functions/baozheng-weekly.ts`（每周三 10:00 新西兰时间，`BAOZHENG_ENABLED` 默认关、关着也写一行 skipped；同一周跑过不再调模型）；登记 `cron/registry.ts` | 已实现 |
+| BZ-26、BZ-27 | `src/lib/inngest/functions/baozheng-weekly.ts`（每周三 10:00 新西兰时间，`BAOZHENG_ENABLED` 默认关、关着也写一行 skipped；按客户去重：本周已复核完的客户不再调模型，skipped 行和没复核成的客户不算；列客户读库失败写一条失败记录）；登记 `cron/registry.ts`；一个客户一半以上复核报错 → 记失败进待办；今日待办读近 14 天真跑过的回执合并 | 已实现 |
 | BZ-28 | — | **没做**：停止线先靠每周闭环巡检人看，触发过一次再写代码 |
 | 花费上限 | `run.ts` `WEEKLY_COST_CAP_USD = 2`：每个客户每周到 2 美元就停；模型答歪了的那次也照样记花费 | 已实现（规则书外加的保险） |
 

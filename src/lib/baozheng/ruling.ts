@@ -7,7 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { STAGE_INFER_ACTOR } from '@/lib/crm/actors'
 import type { TranscriptLine } from '@/lib/crm/stage-from-conversation'
 import type { Ruling } from './accuracy'
-import { loadPastReviews, loadRulings } from './load'
+import { hasRewrittenTouchpoints, loadPastReviews, loadRulings } from './load'
 import { BAOZHENG_JOB, RULINGS, RULING_SEGMENT_PREFIX, type StoredReview } from './types'
 
 export const RULING_LOOKBACK_DAYS = 70
@@ -33,6 +33,8 @@ export interface RulingView {
   review: StoredReview | null
   reviewStageLabel: string | null
   lines: RulingLine[]
+  /** some ingested record was rewritten in place later: what is shown may differ from what the AI saw */
+  sourceMayBeRewritten: boolean
   ruling: Ruling | null
 }
 
@@ -160,6 +162,7 @@ export async function loadRulingView(
 
   const labels = await loadStageLabels(db, clientId)
 
+  const sourceMayBeRewritten = await hasRewrittenTouchpoints(db, clientId, row.contact_id, row.created_at)
   const raw = await loadTranscript(clientId, row.contact_id, row.created_at)
   const lines = sortLines(raw).map(toRulingLine)
 
@@ -181,6 +184,7 @@ export async function loadRulingView(
     review,
     reviewStageLabel,
     lines,
+    sourceMayBeRewritten,
     ruling,
   }
 }
@@ -198,6 +202,10 @@ export async function saveRuling(
 ): Promise<'saved' | 'not_found'> {
   const row = await loadJudgmentEvent(db, clientId, judgmentId)
   if (row === null) return 'not_found'
+  // Only judgments baozheng actually reviewed can be ruled (otherwise the ruling has nothing to settle).
+  const sinceIso = new Date(Date.now() - RULING_LOOKBACK_DAYS * MS_PER_DAY).toISOString()
+  const reviews = await loadPastReviews(db, BAOZHENG_JOB, clientId, sinceIso)
+  if (pickReview(reviews, judgmentId) === null) return 'not_found'
 
   const { error } = await db.from('crm_segment_feedback').insert({
     client_id: clientId,

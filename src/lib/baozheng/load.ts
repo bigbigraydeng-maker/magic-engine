@@ -186,14 +186,15 @@ export function resolveMailIngestedAt(
   const eventMs = Date.parse(e.createdAt)
   if (Number.isNaN(eventMs)) return null
 
+  // Earliest matching mail: if any quote mail was in before the judgment, the AI could have seen it.
   let best: SentMail | null = null
-  let bestMs = Number.NEGATIVE_INFINITY
+  let bestMs = Number.POSITIVE_INFINITY
   for (const m of mails) {
     if (m.contactId !== e.contactId) continue
     if (!m.subject.trim().startsWith(wanted)) continue
     const occurredMs = Date.parse(m.occurredAt)
     if (Number.isNaN(occurredMs) || occurredMs > eventMs) continue
-    if (occurredMs > bestMs) {
+    if (occurredMs < bestMs) {
       bestMs = occurredMs
       best = m
     }

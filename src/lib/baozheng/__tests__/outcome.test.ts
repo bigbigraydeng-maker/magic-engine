@@ -151,6 +151,14 @@ describe('judgeOutcome — reading order (BZ-06)', () => {
     expect(r.outcome).toBe('inconclusive')
   })
 
+  it('same AI re-judging the SAME stage also stops (the new judgment takes over) — 魏征 P2', () => {
+    const r = judge(judgment('contacted'), [
+      ev({ id: 'again', toStage: 'contacted', changedBy: JUDGE, daysAfter: 3 }),
+      ev({ toStage: 'not_enquiry', daysAfter: 4 }),
+    ])
+    expect(r).toMatchObject({ outcome: 'inconclusive', decidingEventId: 'again' })
+  })
+
   it('a batch that changed the stage stops as inconclusive', () => {
     const r = judge(judgment('contacted'), [
       ev({ id: 'bat', toStage: 'quoted', daysAfter: 3 }),
@@ -224,5 +232,20 @@ describe('parseBaozhengConfig', () => {
       baozheng: { enabled: true, stage_categories: { a: 'deep', b: 'nonsense', '': 'won' }, human_writer_prefixes: [' PM- ', '', 3] },
     })
     expect(c).toEqual({ enabled: true, stageCategories: { a: 'deep' }, humanWriterPrefixes: ['PM-'] })
+  })
+})
+
+describe('resolveMailIngestedAt (BZ-10 evidence time)', () => {
+  it('uses the EARLIEST matching quote mail sent before the event', async () => {
+    const { resolveMailIngestedAt } = await import('../load')
+    const e: StageEvent = { id: 'q', contactId: 'c1', fromStage: 'contacted', toStage: 'quoted', changedBy: 'system:quote-email-sent', note: '同事已一对一发出推荐邮件「Re: Your China trip」，已联系自动改为已报价', createdAt: '2026-11-01T00:00:00Z' }
+    const mails = [
+      { contactId: 'c1', subject: 'Re: Your China trip', occurredAt: '2026-10-20T00:00:00Z', createdAt: '2026-10-20T01:00:00Z' },
+      { contactId: 'c1', subject: 'Re: Your China trip', occurredAt: '2026-10-30T00:00:00Z', createdAt: '2026-10-30T01:00:00Z' },
+      { contactId: 'c1', subject: 'Re: Your China trip', occurredAt: '2026-11-05T00:00:00Z', createdAt: '2026-11-05T01:00:00Z' },
+      { contactId: 'c2', subject: 'Re: Your China trip', occurredAt: '2026-10-01T00:00:00Z', createdAt: '2026-10-01T01:00:00Z' },
+    ]
+    expect(resolveMailIngestedAt(e, mails)).toBe('2026-10-20T01:00:00Z')
+    expect(resolveMailIngestedAt({ ...e, note: 'no subject here' }, mails)).toBeNull()
   })
 })

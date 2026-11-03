@@ -145,6 +145,15 @@ describe('runClient', () => {
     expect(r.reviews.filter((x) => x.reason === '本周复核花费到上限')).toHaveLength(2)
   })
 
+  it('more than half of the reviews erroring → the client is failed, not "reviewed with no disagreement" (魏征 P1)', async () => {
+    load.events = [ev({ toStage: 'contacted', daysAgo: 1 }), ev({ toStage: 'contacted', daysAgo: 1 })]
+    const d = deps(() => ({ text: '{"stage":"contacted","reason":"x"}', cost_usd: 0 }))
+    d.loadTranscript = async () => { throw new Error('db down') }
+    const r = await runClient(d, 'client-1', '2026-W45')
+    expect(r.status).toBe('failed')
+    expect(r.reason).toContain('一半以上复核报错')
+  })
+
   it('pool review flags only suspected misses (deep / won) as disagree', async () => {
     load.events = [
       ev({ toStage: 'new', daysAgo: 1, note: '读往来记录判的：他还没跟我们说过话' }),

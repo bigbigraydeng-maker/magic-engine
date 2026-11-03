@@ -213,11 +213,10 @@ export function judgeOutcome(input: JudgeOutcomeInput): OutcomeResult {
     })
 
   for (const e of later) {
-    if (e.toStage === judgment.toStage) continue
-
     const w = classifyWriter(e.changedBy, judgeActor, config.humanWriterPrefixes)
 
-    if (w === 'same_ai' && e.fromStage !== null) {
+    // Any write by the same AI ends this judgment's story, even the same stage (a re-judgment takes over).
+    if (w === 'same_ai' && e.fromStage !== null && e.toStage !== judgment.toStage) {
       const eCat = categoryOf(config, e.toStage)
       if (eCat !== undefined && isUntouchedOrLower(eCat, jCat)) {
         return { outcome: 'dev_fix', decidingEventId: e.id, reason: 'correction script moved lower' }
@@ -228,6 +227,8 @@ export function judgeOutcome(input: JudgeOutcomeInput): OutcomeResult {
     if (w === 'same_ai') {
       return { outcome: 'inconclusive', decidingEventId: e.id, reason: 'same AI wrote again' }
     }
+
+    if (e.toStage === judgment.toStage) continue
 
     if (batchIds.has(e.id)) {
       return { outcome: 'inconclusive', decidingEventId: e.id, reason: 'batch operation' }

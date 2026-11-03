@@ -3,7 +3,7 @@
  *
  * 每周三 10:00 新西兰时间（避开周五、周六；今日待办那两天不跑）。
  * 总开关 BAOZHENG_ENABLED 默认关：关着也写一行 skipped 运行记录，「没开」和「没通电」才分得开。
- * 同一周已经跑完过 → 不再调模型（周编号去重，首次为准）。
+ * 同一周已经复核完的客户不再调模型（按客户、按周编号去重，首次为准）；跳过的那几行不算「跑过」。
  *
  * 只读 + 调复核模型（花钱，档 1，PM 11-03 回「自动跑」）；不写客人、不写阶段记录、不对外发任何东西。
  * 结构照 libai-prompt-library-monthly.ts：依赖注入版 create...Function(deps)，每一处副作用都在 step 里
@@ -38,17 +38,47 @@ export interface BaozhengReceipt {
   readonly no_publish: true
 }
 
-/** 这一周有没有已经跑完的一轮（completed / partial 且 summary.week 相同）。 */
-export async function alreadyRanThisWeek(db: SupabaseClient, week: string): Promise<boolean> {
+/**
+ * 这一周已经复核完的客户。只认真跑过的行（summary.skipped = false）里 status = 'reviewed' 的客户：
+ * 开关关着时写的 skipped 行、没复核成的客户都不算，打开 / 修好后同一周还能补跑（子牙、魏征 P1）。
+ */
+export async function clientsReviewedThisWeek(db: SupabaseClient, week: string): Promise<Set<string>> {
   const { data, error } = await db
     .from('cron_run_logs')
-    .select('id')
+    .select('summary')
     .eq('job_name', BAOZHENG_JOB)
     .in('status', ['completed', 'partial'])
     .eq('summary->>week', week)
-    .limit(1)
+    .eq('summary->>skipped', 'false')
+    .limit(50)
   if (error) throw new Error(`读运行记录失败: ${error.message}`)
-  return (data ?? []).length > 0
+  const done = new Set<string>()
+  for (const row of (data ?? []) as { summary: unknown }[]) {
+    const clients = typeof row.summary === 'object' && row.summary !== null ? (row.summary as { clients?: unknown }).clients : null
+    if (!Array.isArray(clients)) continue
+    for (const c of clients) {
+      if (typeof c !== 'object' || c === null) continue
+      const { client_id: id, status } = c as { client_id?: unknown; status?: unknown }
+      if (typeof id === 'string' && status === 'reviewed') done.add(id)
+    }
+  }
+  return done
+}
+
+type Plan = { kind: 'skip'; reason: string; status: 'skipped_disabled' | 'skipped_already_ran' } | { kind: 'go'; clientIds: string[] } | { kind: 'error'; reason: string }
+
+/** 总开关 → 哪些客户开了 → 去掉本周已复核完的。读失败不抛，变成一条带原因的失败记录（子牙 P1）。 */
+async function planWeek(deps: { db: SupabaseClient; env: () => Readonly<Record<string, string | undefined>> }, week: string): Promise<Plan> {
+  if (!isGloballyEnabled(deps.env())) return { kind: 'skip', reason: '总开关没开', status: 'skipped_disabled' }
+  try {
+    const enabled = await listEnabledClients(deps.db)
+    const done = await clientsReviewedThisWeek(deps.db, week)
+    const clientIds = enabled.filter((id) => !done.has(id))
+    if (enabled.length > 0 && clientIds.length === 0) return { kind: 'skip', reason: '本周已经复核过', status: 'skipped_already_ran' }
+    return { kind: 'go', clientIds }
+  } catch (e) {
+    return { kind: 'error', reason: (e instanceof Error ? e.message : String(e)).slice(0, 200) }
+  }
 }
 
 export function createBaozhengWeeklyFunction(deps: BaozhengDeps & { env: () => Readonly<Record<string, string | undefined>> }) {
@@ -70,20 +100,23 @@ export function createBaozhengWeeklyFunction(deps: BaozhengDeps & { env: () => R
       const run = cronRunHandle(BAOZHENG_JOB, started.runId, started.startedAt)
       const base = { job: BAOZHENG_JOB, week: started.week, no_publish: true as const }
 
-      const gate = await step.run('gate', async () => {
-        if (!isGloballyEnabled(deps.env())) return 'disabled' as const
-        return (await alreadyRanThisWeek(deps.db, started.week)) ? ('already_ran' as const) : ('go' as const)
-      })
-      if (gate !== 'go') {
-        const reason = gate === 'disabled' ? '总开关没开' : '本周已经跑过'
+      const plan = await step.run('plan', async () => planWeek(deps, started.week))
+      if (plan.kind === 'skip') {
         await step.run('log-finish-skipped', async () => {
-          await run.finish({ processed: 0, summary: { ...buildRunSummary(started.week, [], [reason]), skipped: true } })
+          await run.finish({ processed: 0, summary: { ...buildRunSummary(started.week, [], [plan.reason]), skipped: true } })
           return null
         })
-        return { ...base, status: gate === 'disabled' ? 'skipped_disabled' : 'skipped_already_ran', clients: 0, cost_usd: 0 }
+        return { ...base, status: plan.status, clients: 0, cost_usd: 0 }
+      }
+      if (plan.kind === 'error') {
+        await step.run('log-finish-error', async () => {
+          await run.finish({ processed: 0, failed: 1, error: `列客户失败：${plan.reason}`, summary: { ...buildRunSummary(started.week, [], [`列客户失败：${plan.reason}`]), skipped: false } })
+          return null
+        })
+        return { ...base, status: 'failed', clients: 0, cost_usd: 0 }
       }
 
-      const clientIds = await step.run('list-clients', async () => listEnabledClients(deps.db))
+      const clientIds = plan.clientIds
       const results: ClientRunSummary[] = []
       for (const clientId of clientIds) {
         results.push(await step.run(`client-${clientId}`, async () => runClient(deps, clientId, started.week)))

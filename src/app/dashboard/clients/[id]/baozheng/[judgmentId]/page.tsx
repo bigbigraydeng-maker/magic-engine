@@ -133,6 +133,9 @@ export default async function BaozhengRulingPage({
       <h1 className="mb-4 text-lg font-semibold text-me-charcoal">这位客人那时候到了哪一步？</h1>
       <Facts view={view} />
       <p className="mb-4 text-sm text-me-charcoal/80">{HOW}</p>
+      {view.sourceMayBeRewritten ? (
+        <Notice text="注意：这位客人有记录后来被原样改写过，下面看到的可能跟 AI 当时看到的不一样。" />
+      ) : null}
       <div className="mb-6">
         <RulingButtons clientId={params.id} judgmentId={params.judgmentId} current={view.ruling} />
       </div>

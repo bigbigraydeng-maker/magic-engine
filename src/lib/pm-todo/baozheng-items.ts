@@ -91,27 +91,29 @@ export function buildDisagreeTodo(
   }
 }
 
-interface LatestRun {
+interface RunRow {
   status: string | null
   finished_at: string | null
   summary: unknown
 }
 
-/** 读最近一次周检回执。查询失败 → 抛错（由调用方隔离）。 */
-async function loadLatestRun(supabase: SupabaseClient): Promise<LatestRun | null> {
+/**
+ * 近 14 天真跑过的回执（跳过的 skipped 行不算），新的在前。查询失败 → 抛错（由调用方隔离）。
+ * 读多行而不是只读最新一行：重跑或跳过一次不许把还没裁定的分歧清掉（子牙、魏征 P1）。
+ */
+async function loadRecentRuns(supabase: SupabaseClient, now: Date): Promise<RunRow[]> {
+  const sinceIso = new Date(now.getTime() - RULING_EXPIRE_DAYS * MS_PER_DAY).toISOString()
   const { data, error } = await supabase
     .from('cron_run_logs')
     .select('status, finished_at, summary')
     .eq('job_name', BAOZHENG_JOB)
+    .eq('summary->>skipped', 'false')
+    .gte('started_at', sinceIso)
     .order('started_at', { ascending: false })
-    .limit(1)
+    .limit(20)
 
   if (error) throw new Error(error.message)
-
-  const row = (data ?? [])[0] as
-    | { status: string | null; finished_at: string | null; summary: unknown }
-    | undefined
-  return row ?? null
+  return (data ?? []) as RunRow[]
 }
 
 interface ClientBlock {
@@ -207,29 +209,39 @@ async function clientDisagreeTodos(
   return todos
 }
 
-/** 拉最近一次回执，逐客户判。 */
+/** 同一客户、同一判断在几轮回执里出现，只留最新那条（新的在前，先到先得）。 */
+export function mergeBlocks(runs: readonly RunRow[]): Map<string, StoredReview[]> {
+  const byClient = new Map<string, Map<string, StoredReview>>()
+  for (const run of runs) {
+    for (const block of readClientBlocks(run.summary)) {
+      if (block.status !== 'reviewed') continue
+      const seen = byClient.get(block.clientId) ?? new Map<string, StoredReview>()
+      for (const r of block.reviews) if (!seen.has(r.judgment_id)) seen.set(r.judgment_id, r)
+      byClient.set(block.clientId, seen)
+    }
+  }
+  return new Map(Array.from(byClient.entries()).map(([id, m]) => [id, Array.from(m.values())]))
+}
+
+/** 失败只看最新一轮：它够新、整轮失败或某个客户失败，才报。 */
+export function failureTodos(latest: RunRow | undefined, now: Date): BaozhengTodo[] {
+  if (!latest) return []
+  const age = daysSince(latest.finished_at, now)
+  if (age === null || age > BAOZHENG_RECEIPT_FRESH_DAYS) return []
+  if (latest.status === 'failed' && readClientBlocks(latest.summary).length === 0) return [runFailedTodo()]
+  return readClientBlocks(latest.summary).filter((b) => b.status === 'failed').map(clientFailedTodo)
+}
+
+/** 近 14 天的回执合起来出分歧待办，再加最新一轮的失败待办。 */
 export async function fetchBaozhengTodos(
   supabase: SupabaseClient,
   now: Date,
 ): Promise<BaozhengTodo[]> {
-  const run = await loadLatestRun(supabase)
-  if (!run) return []
-  // 先看新不新：一张几周前的失败回执不该天天报
-  const age = daysSince(run.finished_at, now)
-  if (age === null || age > BAOZHENG_RECEIPT_FRESH_DAYS) return []
-  if (run.status === 'failed') return [runFailedTodo()]
-
-  const blocks = readClientBlocks(run.summary)
+  const runs = await loadRecentRuns(supabase, now)
+  const todos = failureTodos(runs[0], now)
   const nowMs = now.getTime()
-  const todos: BaozhengTodo[] = []
-  for (const block of blocks) {
-    if (block.status === 'failed') {
-      todos.push(clientFailedTodo(block))
-      continue
-    }
-    if (block.status !== 'reviewed') continue
-    const clientTodos = await clientDisagreeTodos(supabase, block, nowMs)
-    todos.push(...clientTodos)
+  for (const [clientId, reviews] of mergeBlocks(runs)) {
+    todos.push(...(await clientDisagreeTodos(supabase, { clientId, status: 'reviewed', reason: null, reviews }, nowMs)))
   }
   return todos
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDisagreeTodo, needsRuling, readClientBlocks, rulingUrl } from '../baozheng-items'
+import { buildDisagreeTodo, failureTodos, mergeBlocks, needsRuling, readClientBlocks, rulingUrl } from '../baozheng-items'
 import { LANE_OF_KIND } from '../five-kinds'
 import type { StoredReview } from '@/lib/baozheng/types'
 
@@ -51,6 +51,26 @@ describe('readClientBlocks', () => {
     const blocks = readClientBlocks({ clients: [{ client_id: 'a', status: 'reviewed', reviews: [review(), { nope: 1 }] }, 'junk', { status: 'x' }] })
     expect(blocks).toHaveLength(1)
     expect(blocks[0]?.reviews).toHaveLength(1)
+  })
+})
+
+describe('mergeBlocks / failureTodos (子牙、魏征 P1)', () => {
+  const now = new Date(NOW)
+  const run = (status: string, clients: unknown[], daysAgo = 1) => ({ status, finished_at: new Date(NOW - daysAgo * DAY).toISOString(), summary: { clients } })
+
+  it('keeps last week\'s unruled disagreement after a newer run, newest copy wins', () => {
+    const older = run('completed', [{ client_id: 'a', status: 'reviewed', reviews: [review({ judgment_id: 'j1', review_stage: 'quoted' })] }], 8)
+    const newer = run('completed', [{ client_id: 'a', status: 'reviewed', reviews: [review({ judgment_id: 'j2' }), review({ judgment_id: 'j1', review_stage: 'deposit_paid' })] }], 1)
+    const merged = mergeBlocks([newer, older]).get('a') ?? []
+    expect(merged.map((r) => r.judgment_id).sort()).toEqual(['j1', 'j2'])
+    expect(merged.find((r) => r.judgment_id === 'j1')?.review_stage).toBe('deposit_paid')
+  })
+
+  it('failures come only from the latest run and only when fresh', () => {
+    expect(failureTodos(run('failed', []), now).map((t) => t.client_id)).toEqual(['infra'])
+    expect(failureTodos(run('partial', [{ client_id: 'b', status: 'failed', reason: '读库失败', reviews: [] }]), now).map((t) => t.client_id)).toEqual(['b'])
+    expect(failureTodos(run('failed', [], 10), now)).toEqual([])
+    expect(failureTodos(undefined, now)).toEqual([])
   })
 })
 
