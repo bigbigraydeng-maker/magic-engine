@@ -1,6 +1,6 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { createWriteStream, mkdtempSync, rmSync } from 'fs'
+import { createWriteStream, mkdtempSync, rmSync, statSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { pipeline } from 'stream/promises'
@@ -9,11 +9,26 @@ import type { ContentCheckItemResult } from '@/lib/social/content-review'
 import { REEL_AUTO_CHECK_KEYS } from '@/lib/social/content-review'
 import { buildReelPublishAutoChecks } from '@/lib/social/reel-publishing'
 import type { MaliangCheck } from '@/lib/maliang/render-check'
-import { EXTERNAL_UPLOAD_ENGINE, readTalentConsent, type ConsentUse } from '@/lib/factory/talent-consent'
+import {
+  EXTERNAL_UPLOAD_ENGINE,
+  readTalentConsent,
+  identifiableFaceCount,
+  type ConsentUse,
+} from '@/lib/factory/talent-consent'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 
 const exec = promisify(execFile)
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Same name as MALIANG_RENDER_READY_EVENT in inngest/functions/maliang-render-check.ts (kept local to avoid an import cycle; a test pins them equal). */
+export const ADMIT_REVIEW_EVENT = 'me/maliang.render.ready'
+/** 马良 refuses to download more than this (render-check.ts). Reject at admit time instead of failing later. */
+export const ADMIT_MAX_VIDEO_BYTES = 80 * 1024 * 1024
+/** Orders in these states are dead; a new admit of the same path creates a fresh order. */
+const DEAD_STATUSES = new Set(['review_rejected', 'publish_failed', 'failed', 'dead_letter', 'archived', 'superseded'])
+
+const CONSENT_USES: readonly ConsentUse[] = ['facebook_organic', 'meta_ads', 'tiktok_organic']
 
 export interface AdmitInput {
   clientId: string
@@ -34,18 +49,32 @@ export interface AdmitDeps {
   now?: () => Date
 }
 
-/** Only a relative path inside the content-factory bucket: no scheme, no protocol-relative, no '..' segment. Returns the path without leading slashes, or null. */
-export function normalizeStoragePath(raw: string): string | null {
+/** Asks 马良 to look at an admitted order. The id carries the time so a deliberate re-review is not dropped by Inngest's 24 h de-duplication. */
+export async function sendAdmitReview(
+  data: { client_id: string; work_order_id: string; output_url: string },
+  now: Date = new Date(),
+): Promise<void> {
+  await sendInngestEvent({
+    id: `maliang-admit:${data.work_order_id}:${now.getTime()}`,
+    name: ADMIT_REVIEW_EVENT,
+    data,
+  })
+}
+
+/** Only a relative path inside the content-factory bucket under <client_id>/external/: no scheme, no protocol-relative, no '..' segment, no '%' or '\\'. Returns the path without leading slashes, or null. */
+export function normalizeStoragePath(raw: string, clientId: string): string | null {
   const trimmed = raw.trim()
   if (!trimmed) return null
   if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null
   if (trimmed.startsWith('//')) return null
+  if (trimmed.includes('%') || trimmed.includes('\\')) return null
   const cleaned = trimmed.replace(/^\/+/, '')
   if (!cleaned) return null
   const segments = cleaned.split('/')
   for (const segment of segments) {
     if (segment === '..' || segment === '.' || segment === '') return null
   }
+  if (!cleaned.startsWith(`${clientId}/external/`)) return null
   return cleaned
 }
 
@@ -193,6 +222,7 @@ export type AdmitResult =
       deduped: boolean
       reviewQueued: boolean
       reviewError: string | null
+      consentUpdated: boolean
     }
   | { ok: false; status: number; error: string }
 
@@ -220,7 +250,17 @@ function buildConsent(input: AdmitInput, deps: AdmitDeps): BuiltConsent | null |
 
 interface ExistingAdmit {
   id: string
+  status: string
+  brief: Record<string, unknown>
+  output: Record<string, unknown>
+  updatedAt: string
   autoChecklist: ContentCheckItemResult[]
+}
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : {}
 }
 
 async function findExistingAdmit(
@@ -230,35 +270,250 @@ async function findExistingAdmit(
 ): Promise<{ ok: true; row: ExistingAdmit | null } | { ok: false; error: string }> {
   const { data, error } = await supabase
     .from('content_work_orders')
-    .select('id, output')
+    .select('id, status, brief, output, updated_at')
     .eq('client_id', clientId)
     .eq('output->>video_path', storagePath)
+    .not('status', 'in', '(review_rejected,publish_failed,failed,dead_letter,archived,superseded)')
     .limit(1)
   if (error) return { ok: false, error: error.message }
-  const row = (data ?? [])[0] as { id?: unknown; output?: unknown } | undefined
+  const row = (data ?? [])[0] as
+    | { id?: unknown; status?: unknown; brief?: unknown; output?: unknown; updated_at?: unknown }
+    | undefined
   if (!row || typeof row.id !== 'string') return { ok: true, row: null }
-  const output = typeof row.output === 'object' && row.output !== null
-    ? row.output as Record<string, unknown>
-    : {}
+  if (typeof row.status !== 'string' || DEAD_STATUSES.has(row.status)) return { ok: true, row: null }
+  const output = asRecord(row.output)
   const rawChecklist = output.quality_checklist_auto
   const autoChecklist = Array.isArray(rawChecklist)
     ? (rawChecklist as ContentCheckItemResult[])
     : []
-  return { ok: true, row: { id: row.id, autoChecklist } }
+  return {
+    ok: true,
+    row: {
+      id: row.id,
+      status: row.status,
+      brief: asRecord(row.brief),
+      output,
+      updatedAt: typeof row.updated_at === 'string' ? row.updated_at : '',
+      autoChecklist,
+    },
+  }
 }
 
 async function queueReview(
   deps: AdmitDeps,
   data: { client_id: string; work_order_id: string; output_url: string },
 ): Promise<{ reviewQueued: boolean; reviewError: string | null }> {
-  if (!deps.sendReview) return { reviewQueued: false, reviewError: null }
+  const send = deps.sendReview ?? sendAdmitReview
   try {
-    await deps.sendReview(data)
+    await send(data)
     return { reviewQueued: true, reviewError: null }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { reviewQueued: false, reviewError: msg.slice(0, 300) }
   }
+}
+
+const CONSENT_EDITABLE_STATUSES = new Set(['in_review', 'approved', 'published'])
+
+async function updateExistingConsent(
+  supabase: SupabaseClient,
+  input: AdmitInput,
+  existing: ExistingAdmit,
+  consent: BuiltConsent,
+  deps: AdmitDeps,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  if (!CONSENT_EDITABLE_STATUSES.has(existing.status)) {
+    return {
+      ok: false,
+      status: 409,
+      error: `consent can only be recorded while the order is in review, approved or published (now ${existing.status})`,
+    }
+  }
+  const now = (deps.now ?? (() => new Date()))()
+  const nextUpdatedAt = new Date(
+    Math.max(now.getTime(), Date.parse(existing.updatedAt) + 1),
+  ).toISOString()
+  const { data, error } = await supabase
+    .from('content_work_orders')
+    .update({
+      brief: { ...existing.brief, talent_consent: consent },
+      updated_at: nextUpdatedAt,
+    })
+    .eq('id', existing.id)
+    .eq('client_id', input.clientId)
+    .eq('updated_at', existing.updatedAt)
+    .select('id')
+  if (error) return { ok: false, status: 500, error: `consent update failed: ${error.message}` }
+  if (!data || data.length === 0) {
+    return { ok: false, status: 409, error: 'work order changed meanwhile; refresh and retry' }
+  }
+  return { ok: true }
+}
+
+async function handleExistingAdmit(
+  supabase: SupabaseClient,
+  input: AdmitInput,
+  existing: ExistingAdmit,
+  consent: BuiltConsent | null,
+  deps: AdmitDeps,
+  publicUrl: string,
+): Promise<AdmitResult> {
+  let consentUpdated = false
+  if (consent) {
+    const current = existing.brief.talent_consent ?? null
+    if (JSON.stringify(current) !== JSON.stringify(consent)) {
+      const updated = await updateExistingConsent(supabase, input, existing, consent, deps)
+      if (!updated.ok) return updated
+      consentUpdated = true
+    }
+  }
+
+  let reviewQueued = false
+  let reviewError: string | null = null
+  if (existing.status === 'in_review' && identifiableFaceCount(existing.output) === null) {
+    const review = await queueReview(deps, {
+      client_id: input.clientId,
+      work_order_id: existing.id,
+      output_url: publicUrl,
+    })
+    reviewQueued = review.reviewQueued
+    reviewError = review.reviewError
+  }
+
+  return {
+    ok: true,
+    workOrderId: existing.id,
+    autoChecklist: existing.autoChecklist,
+    deduped: true,
+    reviewQueued,
+    reviewError,
+    consentUpdated,
+  }
+}
+
+interface InsertArgs {
+  supabase: SupabaseClient
+  input: AdmitInput
+  goalId: string
+  masterBriefId: string
+  storagePath: string
+  probe: ProbeResult
+  consent: BuiltConsent | null
+}
+
+async function insertAdmittedOrder(
+  args: InsertArgs,
+): Promise<{ ok: true; workOrderId: string; autoChecklist: ContentCheckItemResult[] } | { ok: false; status: number; error: string }> {
+  const { supabase, input, goalId, masterBriefId, storagePath, probe, consent } = args
+  const tempId = crypto.randomUUID()
+  const autoChecklist = buildAdmitAutoChecklist(probe, {
+    workOrderId: tempId,
+    caption: input.caption,
+    endcard: input.endcard,
+  })
+
+  const brief: Record<string, unknown> = {
+    engine: EXTERNAL_UPLOAD_ENGINE,
+    copy: {
+      caption: input.caption,
+      endcard: { cta: input.endcard.cta, url: input.endcard.url },
+    },
+  }
+  if (consent) brief.talent_consent = consent
+
+  const { data: inserted, error } = await supabase
+    .from('content_work_orders')
+    .insert({
+      id: tempId,
+      client_id: input.clientId,
+      goal_id: goalId,
+      master_brief_id: masterBriefId,
+      order_type: 'fresh_angle',
+      angle: input.angle,
+      angle_source: {
+        source: 'me_upload_entry',
+        uploaded_at: new Date().toISOString(),
+      },
+      rationale_one_liner: input.rationale || input.angle,
+      brief,
+      budget_cap_usd: 0,
+      actual_cost_usd: 0,
+      status: 'in_review',
+      output: {
+        video_path: storagePath,
+        quality_checklist_auto: autoChecklist,
+        probe: {
+          width: probe.width,
+          height: probe.height,
+          duration_seconds: probe.durationSeconds,
+          has_audio: probe.hasAudio,
+        },
+      },
+    })
+    .select('id')
+    .single()
+
+  if (error) return { ok: false, status: 500, error: `insert failed: ${error.message}` }
+  return { ok: true, workOrderId: inserted.id as string, autoChecklist }
+}
+
+async function resolveGoalId(
+  supabase: SupabaseClient,
+  input: AdmitInput,
+  client: { factory_config?: unknown },
+): Promise<string | null> {
+  if (input.goalId) return input.goalId
+  const configGoalId = asRecord(client.factory_config)['factory_goal_id']
+  if (typeof configGoalId === 'string' && UUID_RE.test(configGoalId)) return configGoalId
+  const { data: goals } = await supabase
+    .from('goals')
+    .select('id')
+    .eq('client_id', input.clientId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return (goals?.id as string | undefined) ?? null
+}
+
+async function resolveMasterBriefId(
+  supabase: SupabaseClient,
+  input: AdmitInput,
+): Promise<string | null> {
+  if (input.masterBriefId) return input.masterBriefId
+  const { data: brief } = await supabase
+    .from('master_briefs')
+    .select('id')
+    .eq('client_id', input.clientId)
+    .or('status.eq.active,is_active.eq.true')
+    .order('version', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  return (brief?.id as string | undefined) ?? null
+}
+
+async function downloadAndProbe(
+  publicUrl: string,
+  localFile: string,
+): Promise<{ ok: true; probe: ProbeResult } | { ok: false; status: number; error: string }> {
+  const res = await fetch(publicUrl)
+  if (!res.ok || !res.body) {
+    return { ok: false, status: 422, error: `failed to download video: ${res.status} ${res.statusText}` }
+  }
+  const dest = createWriteStream(localFile)
+  // @ts-expect-error ReadableStream → NodeJS.ReadableStream bridge
+  await pipeline(res.body, dest)
+
+  if (statSync(localFile).size > ADMIT_MAX_VIDEO_BYTES) {
+    return {
+      ok: false,
+      status: 422,
+      error: 'video is larger than 80 MB; 马良 cannot review it — export a smaller file',
+    }
+  }
+
+  const probe = await probeUploadedVideo(localFile)
+  return { ok: true, probe }
 }
 
 export async function admitFinishedVideo(
@@ -276,9 +531,13 @@ export async function admitFinishedVideo(
     return { ok: false, status: 400, error: 'missing endcard.cta and endcard.url for publish checks' }
   }
 
-  const storagePath = normalizeStoragePath(input.storagePath)
+  const storagePath = normalizeStoragePath(input.storagePath, input.clientId)
   if (!storagePath) {
-    return { ok: false, status: 400, error: 'storage_path must be a relative path inside the content-factory bucket' }
+    return {
+      ok: false,
+      status: 400,
+      error: 'storage_path must be <client_id>/external/<file> inside the content-factory bucket',
+    }
   }
 
   const consent = buildConsent(input, deps)
@@ -293,141 +552,122 @@ export async function admitFinishedVideo(
     .maybeSingle()
   if (!client) return { ok: false, status: 404, error: 'client not found' }
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  if (!supabaseUrl) return { ok: false, status: 500, error: 'NEXT_PUBLIC_SUPABASE_URL not configured' }
+  const publicUrl = `${supabaseUrl}/storage/v1/object/public/content-factory/${storagePath}`
+
   const existing = await findExistingAdmit(supabase, input.clientId, storagePath)
   if (!existing.ok) {
     return { ok: false, status: 500, error: `dedupe check failed: ${existing.error}` }
   }
   if (existing.row) {
-    return {
-      ok: true,
-      workOrderId: existing.row.id,
-      autoChecklist: existing.row.autoChecklist,
-      deduped: true,
-      reviewQueued: false,
-      reviewError: null,
-    }
+    return handleExistingAdmit(supabase, input, existing.row, consent, deps, publicUrl)
   }
 
-  let goalId = input.goalId
-  if (!goalId) {
-    const configGoalId = ((client.factory_config ?? {}) as Record<string, unknown>)['factory_goal_id']
-    if (typeof configGoalId === 'string' && UUID_RE.test(configGoalId)) {
-      goalId = configGoalId
-    } else {
-      const { data: goals } = await supabase
-        .from('goals')
-        .select('id')
-        .eq('client_id', input.clientId)
-        .eq('status', 'active')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      goalId = goals?.id as string | undefined
-    }
-    if (!goalId) return { ok: false, status: 422, error: 'no active goal found for this client — pass goal_id explicitly' }
-  }
+  const goalId = await resolveGoalId(supabase, input, client)
+  if (!goalId) return { ok: false, status: 422, error: 'no active goal found for this client — pass goal_id explicitly' }
 
-  let masterBriefId = input.masterBriefId
-  if (!masterBriefId) {
-    const { data: brief } = await supabase
-      .from('master_briefs')
-      .select('id')
-      .eq('client_id', input.clientId)
-      .or('status.eq.active,is_active.eq.true')
-      .order('version', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    masterBriefId = brief?.id as string | undefined
-    if (!masterBriefId) return { ok: false, status: 422, error: 'no active master brief found for this client — pass master_brief_id explicitly' }
-  }
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  if (!supabaseUrl) return { ok: false, status: 500, error: 'NEXT_PUBLIC_SUPABASE_URL not configured' }
-
-  const publicUrl = `${supabaseUrl}/storage/v1/object/public/content-factory/${storagePath}`
+  const masterBriefId = await resolveMasterBriefId(supabase, input)
+  if (!masterBriefId) return { ok: false, status: 422, error: 'no active master brief found for this client — pass master_brief_id explicitly' }
 
   const tempDir = mkdtempSync(join(tmpdir(), 'admit-'))
   const localFile = join(tempDir, 'video.mp4')
   try {
-    const res = await fetch(publicUrl)
-    if (!res.ok || !res.body) {
-      return { ok: false, status: 422, error: `failed to download video: ${res.status} ${res.statusText}` }
-    }
-    const dest = createWriteStream(localFile)
-    // @ts-expect-error ReadableStream → NodeJS.ReadableStream bridge
-    await pipeline(res.body, dest)
+    const downloaded = await downloadAndProbe(publicUrl, localFile)
+    if (!downloaded.ok) return downloaded
 
-    const probe = await probeUploadedVideo(localFile)
-
-    const tempId = crypto.randomUUID()
-    const autoChecklist = buildAdmitAutoChecklist(probe, {
-      workOrderId: tempId,
-      caption: input.caption,
-      endcard: input.endcard,
+    const inserted = await insertAdmittedOrder({
+      supabase,
+      input,
+      goalId,
+      masterBriefId,
+      storagePath,
+      probe: downloaded.probe,
+      consent,
     })
+    if (!inserted.ok) return inserted
 
-    const brief: Record<string, unknown> = {
-      engine: EXTERNAL_UPLOAD_ENGINE,
-      copy: {
-        caption: input.caption,
-        endcard: { cta: input.endcard.cta, url: input.endcard.url },
-      },
-    }
-    if (consent) brief.talent_consent = consent
-
-    const { data: inserted, error } = await supabase
-      .from('content_work_orders')
-      .insert({
-        id: tempId,
-        client_id: input.clientId,
-        goal_id: goalId,
-        master_brief_id: masterBriefId,
-        order_type: 'fresh_angle',
-        angle: input.angle,
-        angle_source: {
-          source: 'me_upload_entry',
-          uploaded_at: new Date().toISOString(),
-        },
-        rationale_one_liner: input.rationale || input.angle,
-        brief,
-        budget_cap_usd: 0,
-        actual_cost_usd: 0,
-        status: 'in_review',
-        output: {
-          video_path: storagePath,
-          quality_checklist_auto: autoChecklist,
-          probe: {
-            width: probe.width,
-            height: probe.height,
-            duration_seconds: probe.durationSeconds,
-            has_audio: probe.hasAudio,
-          },
-        },
-      })
-      .select('id')
-      .single()
-
-    if (error) return { ok: false, status: 500, error: `insert failed: ${error.message}` }
-
-    const workOrderId = inserted.id as string
     const review = await queueReview(deps, {
       client_id: input.clientId,
-      work_order_id: workOrderId,
+      work_order_id: inserted.workOrderId,
       output_url: publicUrl,
     })
 
     return {
       ok: true,
-      workOrderId,
-      autoChecklist,
+      workOrderId: inserted.workOrderId,
+      autoChecklist: inserted.autoChecklist,
       deduped: false,
       reviewQueued: review.reviewQueued,
       reviewError: review.reviewError,
+      consentUpdated: false,
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { ok: false, status: 500, error: `probe/insert failed: ${msg}` }
   } finally {
     try { rmSync(tempDir, { recursive: true, force: true }) } catch { /* cleanup best-effort */ }
+  }
+}
+
+function isConsentUse(v: unknown): v is ConsentUse {
+  return CONSENT_USES.some((use) => use === v)
+}
+
+function parseBodyConsent(raw: unknown): { ok: true; value: AdmitInput['talentConsent'] } | { ok: false; error: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: undefined }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: 'talent_consent must be an object' }
+  }
+  const record = raw as Record<string, unknown>
+  const status = record.status
+  if (status !== 'granted' && status !== 'not_needed') {
+    return { ok: false, error: 'talent_consent.status must be granted or not_needed' }
+  }
+  const scopeRaw = record.scope
+  if (!Array.isArray(scopeRaw)) {
+    return { ok: false, error: 'talent_consent.scope must be an array' }
+  }
+  const scope: ConsentUse[] = []
+  for (const entry of scopeRaw) {
+    if (!isConsentUse(entry)) {
+      return { ok: false, error: 'talent_consent.scope has an unknown use' }
+    }
+    if (!scope.includes(entry)) scope.push(entry)
+  }
+  const subject = record.subject
+  const evidence = record.evidence
+  if (typeof subject !== 'string' || typeof evidence !== 'string') {
+    return { ok: false, error: 'talent_consent.subject and talent_consent.evidence must be strings' }
+  }
+  return { ok: true, value: { status, scope, subject, evidence } }
+}
+
+/** Builds AdmitInput from a request body. confirmedBy comes from the caller (logged-in admin), never from the body; malformed talent_consent is an error, not "no consent". */
+export function admitInputFromBody(
+  body: Record<string, unknown>,
+  confirmedBy: string,
+): { ok: true; input: AdmitInput } | { ok: false; error: string } {
+  const endcard = asRecord(body.endcard)
+  const consent = parseBodyConsent(body.talent_consent)
+  if (!consent.ok) return consent
+
+  return {
+    ok: true,
+    input: {
+      clientId: String(body.client_id ?? ''),
+      storagePath: String(body.storage_path ?? ''),
+      angle: String(body.angle ?? ''),
+      rationale: String(body.rationale ?? body.angle ?? ''),
+      caption: String(body.caption ?? ''),
+      endcard: {
+        cta: String(endcard.cta ?? ''),
+        url: String(endcard.url ?? ''),
+      },
+      masterBriefId: typeof body.master_brief_id === 'string' ? body.master_brief_id : undefined,
+      goalId: typeof body.goal_id === 'string' ? body.goal_id : undefined,
+      confirmedBy,
+      talentConsent: consent.value,
+    },
   }
 }

@@ -1,6 +1,6 @@
 export const EXTERNAL_UPLOAD_ENGINE = 'external_upload'
 
-export type ConsentUse = 'facebook_organic' | 'meta_ads'
+export type ConsentUse = 'facebook_organic' | 'meta_ads' | 'tiktok_organic'
 
 export interface TalentConsent {
   status: 'granted' | 'not_needed'
@@ -21,7 +21,7 @@ export type ConsentBlockReason =
 
 export type ConsentVerdict = { ok: true } | { ok: false; reason: ConsentBlockReason }
 
-const CONSENT_USES: readonly ConsentUse[] = ['facebook_organic', 'meta_ads']
+const CONSENT_USES: readonly ConsentUse[] = ['facebook_organic', 'meta_ads', 'tiktok_organic']
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -108,24 +108,17 @@ export function consentVerdict(input: { brief: unknown; output: unknown; use: Co
   const external = isExternalUpload(input.brief)
   const faces = identifiableFaceCount(input.output)
 
-  if (external && consent === null) return { ok: false, reason: 'consent_missing' }
-  if (external && faces === null) return { ok: false, reason: 'faces_unchecked' }
+  // Factory videos are not gated yet: they have no consent entry point, and the weekly 马良 backfill
+  // (v2) would block every factory reel showing tourists or stock people with no way to clear it.
+  // Known gap, ledger 2026-11-04-consent-gate-known-gaps.
+  if (!external) return { ok: true }
 
-  if (faces !== null && faces > 0) {
-    if (consent === null) return { ok: false, reason: 'face_consent_missing' }
-    if (consent.status === 'not_needed') return { ok: false, reason: 'consent_conflict' }
-    if (!consent.scope.includes(input.use)) return { ok: false, reason: 'consent_scope' }
-  }
-
-  if (
-    consent !== null &&
-    consent.status === 'granted' &&
-    !consent.scope.includes(input.use) &&
-    (external || (faces !== null && faces > 0))
-  ) {
+  if (consent === null) return { ok: false, reason: 'consent_missing' }
+  if (faces === null) return { ok: false, reason: 'faces_unchecked' }
+  if (faces > 0 && consent.status === 'not_needed') return { ok: false, reason: 'consent_conflict' }
+  if (consent.status === 'granted' && !consent.scope.includes(input.use)) {
     return { ok: false, reason: 'consent_scope' }
   }
-
   return { ok: true }
 }
 

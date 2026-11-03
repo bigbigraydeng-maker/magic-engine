@@ -89,10 +89,22 @@ describe('consentVerdict', () => {
     expect(consentVerdict({ brief: {}, output: {}, use: 'facebook_organic' })).toEqual({ ok: true })
   })
 
-  it('10. factory brief {}, v2 pass 1 face, no consent → face_consent_missing', () => {
-    expect(consentVerdict({ brief: {}, output: v2(1), use: 'facebook_organic' })).toEqual({
+  it('10. factory brief {}, v2 pass 1 face, no consent → ok (factory videos not gated yet, known gap)', () => {
+    expect(consentVerdict({ brief: {}, output: v2(1), use: 'facebook_organic' })).toEqual({ ok: true })
+  })
+
+  it('10b. external, consent scoped to ads only, v2 pass 0 faces, use facebook_organic → consent_scope', () => {
+    const consent = { ...GRANTED, scope: ['meta_ads'] }
+    expect(consentVerdict({ brief: ext(consent), output: v2(0), use: 'facebook_organic' })).toEqual({
       ok: false,
-      reason: 'face_consent_missing',
+      reason: 'consent_scope',
+    })
+  })
+
+  it('10c. external, Facebook-only consent cannot be used for TikTok', () => {
+    expect(consentVerdict({ brief: ext(GRANTED), output: v2(1), use: 'tiktok_organic' })).toEqual({
+      ok: false,
+      reason: 'consent_scope',
     })
   })
 

@@ -68,6 +68,13 @@ describe('ordinary completed video TikTok publishing gate',()=>{
   expect((await POST(new Request('https://test',{method:'POST'}),context)).status).toBe(403)
   expect(m.single).not.toHaveBeenCalled();expect(m.publish).not.toHaveBeenCalled()
  })
+ it('refuses an external upload without TikTok consent before contacting TikTok',async()=>{
+  m.single.mockResolvedValue({data:{id:'order',client_id:'cts',status:'approved',updated_at:'2026-10-13T00:00:00.000Z',brief:{engine:'external_upload',talent_consent:{status:'granted',scope:['facebook_organic'],subject:'guest',confirmed_by:'system:pm-chat',confirmed_at:'2026-11-04T00:00:00.000Z',evidence:'PM chat'}},output:{video_path:'renders/video.mp4',maliang_check:{check_version:'v2',status:'pass',identifiable_faces:[{t_start:0,t_end:2,count:1}]}}}})
+  const result=await POST(new Request('https://test',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}),context)
+  expect(result.status).toBe(409)
+  expect(JSON.stringify(await result.json())).toContain('出镜授权')
+  expect(m.creator).not.toHaveBeenCalled();expect(m.publish).not.toHaveBeenCalled()
+ })
  it('rejects unreviewed video without uploading',async()=>{
   m.single.mockResolvedValue({data:{id:'order',client_id:'cts',status:'in_review',output:{video_path:'renders/video.mp4'}}})
   expect((await POST(new Request('https://test',{method:'POST'}),context)).status).toBe(409)
