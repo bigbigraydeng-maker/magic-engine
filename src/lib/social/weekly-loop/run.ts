@@ -643,7 +643,9 @@ async function scheduleEligible(
     dryRun: args.mode !== 'write',
   })
   if (result.ok === false) {
-    args.errors.push('schedule_' + result.reason)
+    // A card already open for this week is the guard working (PM is reviewing it), not a breakage:
+    // count the skips but do not raise a "run incomplete" task.
+    if (result.reason !== 'card_open') args.errors.push('schedule_' + result.reason)
     for (let i = 0; i < plan.assignments.length; i += 1) {
       bump(args.counts.skipped_by_reason, result.reason)
     }
