@@ -52,6 +52,8 @@ interface Scenario {
   checklistVersion?: string
   /** review_ref.approved_at(切换日用例) */
   approvedAt?: string
+  /** brief.engine = external_upload with no talent_consent (consent gate cases) */
+  externalNoConsent?: boolean
 }
 
 /** 记录所有对 content_work_orders 的 update payload,用来断言最终状态 */
@@ -95,7 +97,7 @@ function installMocks(s: Scenario) {
                     quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
                   }),
                 },
-                brief: { ...(s.noAngle ? {} : { angle: 'X' }), ...(s.deliverable === undefined ? {} : { remotion: { deliverable: s.deliverable } }), copy: { segments: [{ caption: 'Explore with us' }], endcard: s.endcard } },
+                brief: { ...(s.externalNoConsent ? { engine: 'external_upload' } : {}), ...(s.noAngle ? {} : { angle: 'X' }), ...(s.deliverable === undefined ? {} : { remotion: { deliverable: s.deliverable } }), copy: { segments: [{ caption: 'Explore with us' }], endcard: s.endcard } },
               },
               error: null,
             }
@@ -202,6 +204,22 @@ describe('发布正文红线闸', () => {
     expect(mockPublish).toHaveBeenCalledTimes(1)
     expect(r.result).toBe('published')
     expect(finalStatus()!.status).toBe('published')
+  })
+
+  it('🔴 live publish of an external upload without on-camera consent is refused before any provider call', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, externalNoConsent: true })
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('consent_blocked')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('a draft publish of the same external upload is allowed (drafts are not public)', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, externalNoConsent: true })
+    await run()
+
+    expect(mockPublish).toHaveBeenCalledTimes(1)
   })
 
   it('legacy approved row without checklist is quarantined before provider access', async () => {

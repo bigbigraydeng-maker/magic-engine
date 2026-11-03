@@ -8,6 +8,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ContentCheckItemResult } from '@/lib/social/content-review'
 import { REEL_AUTO_CHECK_KEYS } from '@/lib/social/content-review'
 import { buildReelPublishAutoChecks } from '@/lib/social/reel-publishing'
+import type { MaliangCheck } from '@/lib/maliang/render-check'
+import { EXTERNAL_UPLOAD_ENGINE, readTalentConsent, type ConsentUse } from '@/lib/factory/talent-consent'
 
 const exec = promisify(execFile)
 
@@ -22,6 +24,29 @@ export interface AdmitInput {
   endcard: { cta: string; url: string }
   masterBriefId?: string
   goalId?: string
+  /** Who confirmed the on-camera consent. Routes pass the logged-in admin email; scripts pass a fixed service identity. Never taken from a request body. */
+  confirmedBy: string
+  talentConsent?: { status: 'granted' | 'not_needed'; scope: ConsentUse[]; subject: string; evidence: string }
+}
+
+export interface AdmitDeps {
+  sendReview?: (data: { client_id: string; work_order_id: string; output_url: string }) => Promise<void>
+  now?: () => Date
+}
+
+/** Only a relative path inside the content-factory bucket: no scheme, no protocol-relative, no '..' segment. Returns the path without leading slashes, or null. */
+export function normalizeStoragePath(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed) return null
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return null
+  if (trimmed.startsWith('//')) return null
+  const cleaned = trimmed.replace(/^\/+/, '')
+  if (!cleaned) return null
+  const segments = cleaned.split('/')
+  for (const segment of segments) {
+    if (segment === '..' || segment === '.' || segment === '') return null
+  }
+  return cleaned
 }
 
 interface ProbeResult {
@@ -100,16 +125,16 @@ export function buildAdmitAutoChecklist(
   const subtitleCheck: ContentCheckItemResult = {
     key: REEL_AUTO_CHECK_KEYS[2],
     judge: 'AUTO',
-    outcome: 'PASS',
-    detail: 'Uploaded finished video — subtitles are burned in by the creator.',
+    outcome: 'NOT_MEASURED',
+    detail: 'Waiting for the 马良 review of the uploaded video.',
     source_ref: null,
   }
 
   const coverCheck: ContentCheckItemResult = {
     key: REEL_AUTO_CHECK_KEYS[3],
     judge: 'AUTO',
-    outcome: 'PASS',
-    detail: 'Uploaded finished video — cover frame verified by uploader.',
+    outcome: 'NOT_MEASURED',
+    detail: 'Waiting for the 马良 review of the uploaded video.',
     source_ref: null,
   }
 
@@ -130,13 +155,116 @@ export function buildAdmitAutoChecklist(
   return [audioCheck, resolutionCheck, subtitleCheck, coverCheck, formatCheck, ...publishChecks]
 }
 
+/** After 马良 looked at an uploaded video, settle the subtitle and cover items from its frames. Unverifiable or no frames: leave them NOT_MEASURED. */
+export function applyMaliangToAdmitChecklist(
+  items: readonly ContentCheckItemResult[],
+  check: MaliangCheck,
+): ContentCheckItemResult[] {
+  if (check.status === 'unverifiable' || check.frames.length === 0) {
+    return items.map((item) => ({ ...item }))
+  }
+
+  const first = check.frames[0]
+  const coverOutcome = first.image_ok ? 'PASS' : 'FAIL'
+  const coverDetail = `马良 first frame: ${first.image_note || (first.image_ok ? 'ok' : 'not ok')}`
+
+  const failing = check.frames.filter((frame) => !frame.text_ok)
+  const subtitleOutcome = failing.length === 0 ? 'PASS' : 'FAIL'
+  const subtitleDetail = failing.length === 0
+    ? `all ${check.frames.length} frames text ok`
+    : `text not ok at ${failing.map((frame) => `${frame.t_pct}%`).join(', ')}`
+
+  return items.map((item) => {
+    if (item.key === REEL_AUTO_CHECK_KEYS[3]) {
+      return { ...item, outcome: coverOutcome, detail: coverDetail }
+    }
+    if (item.key === REEL_AUTO_CHECK_KEYS[2]) {
+      return { ...item, outcome: subtitleOutcome, detail: subtitleDetail }
+    }
+    return { ...item }
+  })
+}
+
 export type AdmitResult =
-  | { ok: true; workOrderId: string; autoChecklist: ContentCheckItemResult[] }
+  | {
+      ok: true
+      workOrderId: string
+      autoChecklist: ContentCheckItemResult[]
+      deduped: boolean
+      reviewQueued: boolean
+      reviewError: string | null
+    }
   | { ok: false; status: number; error: string }
+
+type BuiltConsent = {
+  status: 'granted' | 'not_needed'
+  scope: ConsentUse[]
+  subject: string
+  confirmed_by: string
+  confirmed_at: string
+  evidence: string
+}
+
+function buildConsent(input: AdmitInput, deps: AdmitDeps): BuiltConsent | null | 'invalid' {
+  if (!input.talentConsent) return null
+  const now = deps.now ?? (() => new Date())
+  const consent = {
+    ...input.talentConsent,
+    confirmed_by: input.confirmedBy,
+    confirmed_at: now().toISOString(),
+  }
+  const parsed = readTalentConsent({ talent_consent: consent })
+  if (parsed === 'invalid' || parsed === null) return 'invalid'
+  return parsed
+}
+
+interface ExistingAdmit {
+  id: string
+  autoChecklist: ContentCheckItemResult[]
+}
+
+async function findExistingAdmit(
+  supabase: SupabaseClient,
+  clientId: string,
+  storagePath: string,
+): Promise<{ ok: true; row: ExistingAdmit | null } | { ok: false; error: string }> {
+  const { data, error } = await supabase
+    .from('content_work_orders')
+    .select('id, output')
+    .eq('client_id', clientId)
+    .eq('output->>video_path', storagePath)
+    .limit(1)
+  if (error) return { ok: false, error: error.message }
+  const row = (data ?? [])[0] as { id?: unknown; output?: unknown } | undefined
+  if (!row || typeof row.id !== 'string') return { ok: true, row: null }
+  const output = typeof row.output === 'object' && row.output !== null
+    ? row.output as Record<string, unknown>
+    : {}
+  const rawChecklist = output.quality_checklist_auto
+  const autoChecklist = Array.isArray(rawChecklist)
+    ? (rawChecklist as ContentCheckItemResult[])
+    : []
+  return { ok: true, row: { id: row.id, autoChecklist } }
+}
+
+async function queueReview(
+  deps: AdmitDeps,
+  data: { client_id: string; work_order_id: string; output_url: string },
+): Promise<{ reviewQueued: boolean; reviewError: string | null }> {
+  if (!deps.sendReview) return { reviewQueued: false, reviewError: null }
+  try {
+    await deps.sendReview(data)
+    return { reviewQueued: true, reviewError: null }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { reviewQueued: false, reviewError: msg.slice(0, 300) }
+  }
+}
 
 export async function admitFinishedVideo(
   supabase: SupabaseClient,
   input: AdmitInput,
+  deps: AdmitDeps = {},
 ): Promise<AdmitResult> {
   if (!UUID_RE.test(input.clientId)) {
     return { ok: false, status: 400, error: 'invalid client_id' }
@@ -148,12 +276,37 @@ export async function admitFinishedVideo(
     return { ok: false, status: 400, error: 'missing endcard.cta and endcard.url for publish checks' }
   }
 
+  const storagePath = normalizeStoragePath(input.storagePath)
+  if (!storagePath) {
+    return { ok: false, status: 400, error: 'storage_path must be a relative path inside the content-factory bucket' }
+  }
+
+  const consent = buildConsent(input, deps)
+  if (consent === 'invalid') {
+    return { ok: false, status: 400, error: 'talent_consent is invalid (status, scope, subject, evidence and confirmedBy are required)' }
+  }
+
   const { data: client } = await supabase
     .from('clients')
     .select('id, name, factory_config')
     .eq('id', input.clientId)
     .maybeSingle()
   if (!client) return { ok: false, status: 404, error: 'client not found' }
+
+  const existing = await findExistingAdmit(supabase, input.clientId, storagePath)
+  if (!existing.ok) {
+    return { ok: false, status: 500, error: `dedupe check failed: ${existing.error}` }
+  }
+  if (existing.row) {
+    return {
+      ok: true,
+      workOrderId: existing.row.id,
+      autoChecklist: existing.row.autoChecklist,
+      deduped: true,
+      reviewQueued: false,
+      reviewError: null,
+    }
+  }
 
   let goalId = input.goalId
   if (!goalId) {
@@ -191,9 +344,7 @@ export async function admitFinishedVideo(
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   if (!supabaseUrl) return { ok: false, status: 500, error: 'NEXT_PUBLIC_SUPABASE_URL not configured' }
 
-  const publicUrl = /^https?:\/\//i.test(input.storagePath)
-    ? input.storagePath
-    : `${supabaseUrl}/storage/v1/object/public/content-factory/${input.storagePath.replace(/^\/+/, '')}`
+  const publicUrl = `${supabaseUrl}/storage/v1/object/public/content-factory/${storagePath}`
 
   const tempDir = mkdtempSync(join(tmpdir(), 'admit-'))
   const localFile = join(tempDir, 'video.mp4')
@@ -216,12 +367,13 @@ export async function admitFinishedVideo(
     })
 
     const brief: Record<string, unknown> = {
-      engine: 'external_upload',
+      engine: EXTERNAL_UPLOAD_ENGINE,
       copy: {
         caption: input.caption,
         endcard: { cta: input.endcard.cta, url: input.endcard.url },
       },
     }
+    if (consent) brief.talent_consent = consent
 
     const { data: inserted, error } = await supabase
       .from('content_work_orders')
@@ -242,7 +394,7 @@ export async function admitFinishedVideo(
         actual_cost_usd: 0,
         status: 'in_review',
         output: {
-          video_path: input.storagePath,
+          video_path: storagePath,
           quality_checklist_auto: autoChecklist,
           probe: {
             width: probe.width,
@@ -256,7 +408,22 @@ export async function admitFinishedVideo(
       .single()
 
     if (error) return { ok: false, status: 500, error: `insert failed: ${error.message}` }
-    return { ok: true, workOrderId: inserted.id as string, autoChecklist }
+
+    const workOrderId = inserted.id as string
+    const review = await queueReview(deps, {
+      client_id: input.clientId,
+      work_order_id: workOrderId,
+      output_url: publicUrl,
+    })
+
+    return {
+      ok: true,
+      workOrderId,
+      autoChecklist,
+      deduped: false,
+      reviewQueued: review.reviewQueued,
+      reviewError: review.reviewError,
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     return { ok: false, status: 500, error: `probe/insert failed: ${msg}` }

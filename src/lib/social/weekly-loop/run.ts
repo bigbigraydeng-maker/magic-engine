@@ -12,6 +12,7 @@ import { toPublishedView } from '@/lib/factory/publish/publish-display'
 import { isAssetOnly } from '@/lib/factory/deliverable'
 import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
 import { APP_BASE } from '@/lib/pm-todo/binding-request-items'
+import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 
 /** cron_run_logs.job_name for every receipt of the weekly loop (daily fan-out and per-client runs). */
 export const WEEKLY_LOOP_JOB = 'social-weekly-draft'
@@ -61,6 +62,7 @@ export type WeeklyLoopTaskCode =
   | 'fact_source_unreadable'
   | 'unreviewed_by_maliang'
   | 'run_incomplete'
+  | 'consent_blocked'
 
 export interface WeeklyLoopManualTask {
   code: WeeklyLoopTaskCode
@@ -93,6 +95,7 @@ export interface WeeklyLoopCounts {
   fact_needs_human: number
   unreviewed: number
   maliang_fail: number
+  consent_blocked: number
   eligible: number
   already_scheduled: number
   scheduled: number
@@ -196,6 +199,7 @@ function emptyCounts(): WeeklyLoopCounts {
     fact_needs_human: 0,
     unreviewed: 0,
     maliang_fail: 0,
+    consent_blocked: 0,
     eligible: 0,
     already_scheduled: 0,
     scheduled: 0,
@@ -390,7 +394,9 @@ function reviewKept(
     if (maliang.state === 'missing') counts.unreviewed += 1
     if (maliang.state === 'fail' || maliang.state === 'unverifiable') counts.maliang_fail += 1
     const productKey = fact.targetTourId
-    const excluded = exclusionOf(fact.verdict, maliang.state)
+    const consent = consentVerdict({ brief: c.row.brief, output: c.row.output, use: 'facebook_organic' })
+    const excluded = exclusionOf(fact.verdict, maliang.state) ?? (consent.ok ? null : consent.reason)
+    if (!consent.ok && excluded === consent.reason) counts.consent_blocked += 1
     items.push({
       id: c.row.id,
       title: reelTitle(c.row.angle),
@@ -448,6 +454,7 @@ function reelQuota(
 
 /** Plain-language labels for the to-do text. Unknown codes fall back to the code itself. */
 const REASON_ZH: Record<string, string> = {
+  ...CONSENT_REASON_ZH,
   unreviewed: '马良还没审',
   maliang_fail: '马良没过',
   fact_fail: '和团目录对不上',
@@ -482,6 +489,14 @@ function buildTasks(
       code: 'unreviewed_by_maliang',
       what: `有 ${counts.unreviewed} 条审过的视频还没有马良的审片记录，这周不会进卡。`,
       how: '和团目录对得上的那几条，程序写库模式下每个出稿日会请马良补审（每周有花费上限，没轮到的下次继续）；对不上目录的不会补审，要先改字幕或文案。这条待办下次出稿还在 = 补审没开或没补上，打开内容工厂看这几条视频能不能正常播放，打不开的请重新出片。',
+      href: taskHref(clientId, 'content-factory'),
+    })
+  }
+  if (counts.consent_blocked > 0) {
+    tasks.push({
+      code: 'consent_blocked',
+      what: `有 ${counts.consent_blocked} 条视频里可能有能认出来的真人，但没有登记好出镜授权，这周不会进卡、也不能转公开。`,
+      how: '打开内容工厂找到这几条：问客户要到出镜授权后，在成片登记里补上授权记录（谁同意、同意用在哪里、凭什么）；片里其实没有能认出的人的，找开发核对马良的结论。',
       href: taskHref(clientId, 'content-factory'),
     })
   }
