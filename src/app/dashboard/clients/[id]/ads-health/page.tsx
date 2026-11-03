@@ -614,7 +614,7 @@ export default function AdsHealthPage() {
           <WarMapPanel clientId={clientId} />
           {/* 每日广告成绩单：只给内部员工（客户版没有 payload，见 growth-client-view 白名单）；今天还没巡察就不显示 */}
           {!loading && !error && data?.growth && !('viewer' in data.growth) && (
-            <ScorecardPanel scorecard={data.growth.payload?.scorecard} />
+            <ScorecardPanel scorecard={data.growth.payload?.scorecard} clientId={clientId} />
           )}
           {!loading && !error && data?.growth && !('viewer' in data.growth) && data.growth.payload?.scorecard && !('error' in data.growth.payload.scorecard) && (
             <QualifiedPanel block={data.growth.payload.scorecard.qualified} />
