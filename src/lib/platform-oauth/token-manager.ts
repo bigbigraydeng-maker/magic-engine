@@ -261,6 +261,20 @@ async function persistRefreshedToken(
   }
 }
 
+/**
+ * 刷新失败是不是**临时的**：对方服务器出错（HTTP 5xx）、限流（429）、网络断一下（fetch failed / 连接被重置 / 超时）。
+ *
+ * 🔴 临时失败绝不能把连接标成 error（2026-11-03 实查）：CTS 的 GA4 在 10-31 刷新时谷歌回了一次 500 internal_failure，
+ *    NAL 的 GA4 在 11-02 碰上一次 fetch failed，两条连接都被永久标成 error，之后每天的谷歌数据回拉都直接跳过它们
+ *    （GA4 一连几天没数）。同一刷新令牌事后实测换得到访问令牌——令牌是好的，坏的只是那一次请求。
+ *    只有对方明确拒绝（invalid_grant 之类的 4xx、缺配置）才是「这条连接真的断了」，那时才标 error。
+ */
+export function isTransientRefreshFailure(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  if (/\bHTTP (5\d\d|429)\b/.test(message)) return true
+  return /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network/i.test(message)
+}
+
 async function markConnectionError(connectionId: string, message: string): Promise<void> {
   try {
     await supabaseAdmin
@@ -283,7 +297,7 @@ async function markConnectionError(connectionId: string, message: string): Promi
  * Transparently refreshes the token if expired.
  *
  * @throws {PlatformConnectionNotFoundError}  No active connection exists.
- * @throws {PlatformTokenRefreshError}         Refresh call failed (connection marked error).
+ * @throws {PlatformTokenRefreshError}         Refresh call failed (connection marked error unless the failure was transient).
  */
 export async function getValidToken(
   clientId: string,
@@ -309,7 +323,8 @@ export async function getValidToken(
     refreshed = await callProviderRefresh(provider, refreshTokenPlain)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    await markConnectionError(row.id, msg)
+    // 临时失败只抛给调用方（这一轮读不到），不把连接标坏；下一轮会再试
+    if (!isTransientRefreshFailure(err)) await markConnectionError(row.id, msg)
     throw err
   }
 
@@ -352,7 +367,7 @@ export async function getValidTokenForConnection(
   } catch (err) {
     // A read-only background reader (the triggered-send shadow run) passes `markErrorOnFailure: false`: a refresh that
     // fails once must not take the mailbox offline for the people who send from it. Every other caller keeps the default.
-    if (opts?.markErrorOnFailure !== false) {
+    if (opts?.markErrorOnFailure !== false && !isTransientRefreshFailure(err)) {
       await markConnectionError(row.id, err instanceof Error ? err.message : String(err))
     }
     throw err
