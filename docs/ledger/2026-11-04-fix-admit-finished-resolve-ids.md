@@ -6,6 +6,7 @@ owner: agent
 decided_on: 2026-11-04
 source: session:90a50c3b
 risk: C
+verify_how: "部署后调 admit-finished 接口不传 goal_id 和 master_brief_id，确认自动查到并成功建工单"
 done_on: 2026-11-04
 done_ref: pr:3580
 ---
