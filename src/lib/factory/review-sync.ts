@@ -243,7 +243,7 @@ export async function applyApprove(wo: Record<string, unknown>, rec: AirtableRec
 }
 
 /** 打回·画面质量:老单 review_rejected + 重开新单,打回意见进新单 brief(M2 验收②) */
-async function applyQualityReject(
+export async function applyQualityReject(
   wo: Record<string, unknown>,
   feedback: string,
   reviewer: string,
@@ -268,6 +268,8 @@ async function applyQualityReject(
   if (!upd || upd.length === 0) return false
 
   const brief = (wo.brief ?? {}) as Record<string, unknown>
+  const reopenedBrief: Record<string, unknown> = { ...brief, review_feedback: feedback, review_feedback_by: reviewer, reopened_from: wo.id, review_checklist_failed_items: human.items.filter(item => item.outcome === 'FAIL').map(item => item.key) }
+  delete reopenedBrief.weekly_pack
   const { error: insErr } = await supabaseAdmin.from('content_work_orders').insert({
     client_id: wo.client_id,
     signal_id: wo.signal_id,
@@ -278,13 +280,7 @@ async function applyQualityReject(
     angle: wo.angle,
     angle_source: wo.angle_source,
     rationale_one_liner: wo.rationale_one_liner,
-    brief: {
-      ...brief,
-      review_feedback: feedback,
-      review_feedback_by: reviewer,
-      reopened_from: wo.id,
-      review_checklist_failed_items: human.items.filter(item => item.outcome === 'FAIL').map(item => item.key),
-    },
+    brief: reopenedBrief,
     budget_cap_usd: wo.budget_cap_usd,
     source_ad_id: wo.source_ad_id,
     status: 'queued',

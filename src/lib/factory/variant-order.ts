@@ -20,6 +20,7 @@ const STRIPPED_KEYS = [
   'previous_creative_recipe',
   'variant_of',
   'review_overrides',
+  'weekly_pack',
 ] as const
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
