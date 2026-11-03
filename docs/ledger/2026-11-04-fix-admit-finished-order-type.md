@@ -8,7 +8,7 @@ source: session:90a50c3b
 risk: C
 verify_how: "部署后调 admit-finished 接口，确认工单成功写入数据库不再报 order_type 约束错误"
 done_on: 2026-11-04
-done_ref: pr:pending
+done_ref: pr:3581
 ---
 
 admit-finished 接口试跑时写入 `order_type: 'reel'`，但数据库只允许
