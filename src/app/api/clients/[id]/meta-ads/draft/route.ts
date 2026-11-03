@@ -13,10 +13,12 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { createDraftForApproval } from '@/lib/ads-strategy/draft-and-gate'
 import type { AdDraft } from '@/lib/ads-strategy/ad-draft'
+import { loadDraftRedlines } from '@/lib/ads-strategy/draft-redlines'
 
 export const maxDuration = 120
 
@@ -25,6 +27,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   const { id: clientId } = await params
+  const denied = await rejectAgentAdsBearer(req, { clientId, action: 'write_meta' })
+  if (denied) return denied
 
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
@@ -73,10 +77,15 @@ export async function POST(
     pageId: registeredPageId,
   }
 
+  // 客户禁用词：读库失败返回 null → 当「没加载」传下去（私信类型会因此拒建，
+  // 其它类型沿用旧行为），绝不退化成「空名单 = 查过没有」。
+  const brandRedlines = await loadDraftRedlines(supabaseAdmin, clientId)
+
   const outcome = await createDraftForApproval(draft, {
     supabase: supabaseAdmin,
     adAccountId,
     accessToken,
+    brandRedlines: brandRedlines ?? undefined,
     expectedGeo: (client as { country?: string } | null)?.country ?? null,
     industry: (client as { industry?: string | null } | null)?.industry ?? null,
   })

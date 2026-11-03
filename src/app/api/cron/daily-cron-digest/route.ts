@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { Resend } from 'resend'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
-import { failureCell, isDigestFailure, summaryFailureDetail } from '@/lib/cron/digest-cells'
+import { failureCell, isAbandonedDigestRow, isDigestFailure, summaryFailureDetail } from '@/lib/cron/digest-cells'
 import { failureSignature } from '@/lib/cron/failure-signature'
 import { reconcile } from '@/lib/todo-reconciliation/reconcile'
 import type { RawWorkItem } from '@/lib/todo-reconciliation/types'
@@ -40,6 +40,7 @@ export async function GET(req: NextRequest) {
   // 判据抽在 digest-cells.ts 里（`isDigestFailure`），那边有直接的断言覆盖。
   // 它比原来多接住一类：停在 `running` 的行 —— 原筛选两边都接不住它。
   const failedRuns = (runs ?? []).filter((r) => isDigestFailure(r, now))
+  const abandonedCount = (runs ?? []).filter((r) => isAbandonedDigestRow(r)).length
 
   // Only send email if there are failures
   if (failedRuns.length === 0) {
@@ -112,7 +113,9 @@ export async function GET(req: NextRequest) {
     <div style="font-family:sans-serif;max-width:700px;margin:0 auto;padding:24px">
       <h2 style="margin:0 0 8px;font-size:18px;color:#0f172a">⚠ Cron Job Failures — Last 24 Hours</h2>
       <p style="margin:0 0 20px;font-size:14px;color:#64748b">
-        ${failedRuns.length} job run(s) reported failures, collapsed into ${clusters.length} distinct problem(s). Check Render logs for full details.
+        ${failedRuns.length} job run(s) reported failures, collapsed into ${clusters.length} distinct problem(s).
+        ${abandonedCount > 0 ? ` ${abandonedCount} run(s) were closed as abandoned (still running past twice their expected duration).` : ''}
+        Check Render logs for full details.
       </p>
       <table style="width:100%;border-collapse:collapse;font-size:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden">
         <thead>
@@ -148,7 +151,7 @@ export async function GET(req: NextRequest) {
     processed: runs?.length ?? 0,
     completed: 1,
     failed: 0,
-    summary: { email_sent: true, failed_jobs: failedRuns.length, distinct_problems: clusters.length },
+    summary: { email_sent: true, failed_jobs: failedRuns.length, distinct_problems: clusters.length, abandoned: abandonedCount },
   })
 
   return NextResponse.json({

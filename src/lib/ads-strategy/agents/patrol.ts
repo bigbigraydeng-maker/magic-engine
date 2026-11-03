@@ -18,6 +18,7 @@ import { loadDiagnosisInput } from '../portfolio/diagnostics/loader'
 import { runDiagnostics } from '../portfolio/diagnostics/run'
 import { runOpportunities, type DataCompleteness } from '../portfolio/opportunities/run'
 import { buildDigestGoalContext } from '../portfolio/goal-context'
+import { safeBuildAdsScorecard, type AdsScorecard } from '../portfolio/scorecard'
 import type { AccountInput, AdLevelCoverage, Diagnosis, ExcludedEntity } from '../portfolio/diagnostics/types'
 import type { DigestGoalContext } from '../portfolio/internal-digest'
 
@@ -137,6 +138,11 @@ export interface GrowthStatePayload {
   adLevelCoverage: AdLevelCoverage[]
   goal: DigestGoalContext | null
   evaluatedAt: string
+  /**
+   * 每日广告成绩单（规则手册 v1.1 E-19 / E-20）：每个单位一行 + 预算判断三态。只读，算错只记一句不挡巡察。
+   * 只给员工版：客户版走 growth-client-view 的白名单，不含这一栏。老行没有这个字段。
+   */
+  scorecard?: AdsScorecard | { error: string }
 }
 
 export interface BuildGrowthStateResult {
@@ -218,6 +224,7 @@ export async function buildGrowthState(
       adLevelCoverage: diagnosisRun.adLevelCoverage ?? [],
       goal,
       evaluatedAt,
+      scorecard: safeBuildAdsScorecard(input, completeness.completeness),
     }
 
     const { error } = await supabaseAdmin.from('ads_growth_states').upsert(

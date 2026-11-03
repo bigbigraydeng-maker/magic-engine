@@ -4,7 +4,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
-import { judgeWorkerPresence, judgeQueueByClient } from '@/lib/factory/worker-presence'
+import { renderWorkerDownReason, type AlivePing } from '@/lib/factory/render-worker-report'
+import { judgeWorkerPresence, judgeQueueByClient, latestAliveAt } from '@/lib/factory/worker-presence'
 import { containsPriceClaim } from '@/lib/content/price-claim'
 import { judgeOutgoingPost } from '@/lib/content/price-claim-gate'
 import { SOURCE_LABELS } from '@/lib/assets/provenance'
@@ -102,8 +103,8 @@ export async function pushCreatomateRenderItems(
 /**
  * 审批过了但发不出去的帖子 —— 文案报了价，配图来源却背不了真价。
  *
- * 为什么必须下发：`/api/publer/create-post` 是 Airtable 审批过就自动跑的，人不在场。
- * 那道闸拦下来只会往 webhook 回一个 409，**没有任何人会看到** —— 帖子就永远停在
+ * 为什么必须下发：Airtable 审批过的帖子会自动往外发，人不在场。
+ * 那道闸拦下来**没有任何人会看到** —— 帖子就永远停在
  * approved，看起来像「排着排着就没了」。发现死在日志里 = 管道断头。
  *
  * 不落新状态、不加新表：判定条件跟闸本身同源，改好文案或确认好素材，这条自己就消失。
@@ -214,6 +215,14 @@ export async function pushFactoryWorkerItems(
 
   // 心跳按客户查 —— 判定层解释了为什么不能用全局最新的（judgeQueueByClient 头注）。
   const clientIds = Array.from(new Set(queued.map((q) => q.client_id)))
+  // 空闲时的存活信号（worker 空闲时每 ~4 分钟、干活时跟着工单心跳 ping 一次，复用 cron_run_logs，一台 worker 一行）。
+  const { data: aliveData, error: aliveError } = await supabase
+    .from('cron_run_logs')
+    .select('started_at, summary')
+    .eq('job_name', 'factory-worker-alive')
+  if (aliveError) throw new Error(`factory alive-ping query failed: ${aliveError.message}`)
+  const pings = (aliveData ?? []) as Array<AlivePing & { started_at: string }>
+
   const latestHbByClient = new Map<string, string>()
   for (const clientId of clientIds) {
     // A busy client's history must not crowd another client's latest heartbeat out of a global limit.
@@ -226,13 +235,27 @@ export async function pushFactoryWorkerItems(
       .limit(1)
     if (hbError) throw new Error(`factory heartbeat query failed: ${hbError.message}`)
     const latest = (hbRows ?? [])[0] as { heartbeat_at: string } | undefined
-    if (latest) latestHbByClient.set(clientId, latest.heartbeat_at)
+    const alive = latestAliveAt(latest?.heartbeat_at, pings, clientId)
+    if (alive) latestHbByClient.set(clientId, alive)
   }
 
   // 一个客户一条：不同客户的 worker 在线状态是独立的，合成一条会把两种
   // 完全不同的处置（这家去开机 / 那家去查报错）搅在一起。
   for (const { clientId, verdict } of judgeQueueByClient(queued, latestHbByClient, now)) {
     pushOneFactoryWorkerItem(items, verdict, clientNames.get(clientId)?.name ?? '未知客户')
+  }
+  for (const clientId of clientIds) {
+    const reason = renderWorkerDownReason(pings, clientId)
+    if (!reason) continue
+    const clientName = clientNames.get(clientId)?.name ?? '未知客户'
+    items.push({
+      kind: 'factory_render_worker_down',
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: `【${clientName}】有片子在排队，但这台机器报渲染工人没就绪：${reason}。领单的程序还在，不等于片子能做出来。`,
+      how: '按上面那句原因修这台机器上的渲染环境。不要找做片的人，也不要找审核的人。修好之后这条会自己消失。',
+      href: 'https://app.magicengine.com.au/dashboard/factory',
+    })
   }
 }
 
@@ -283,7 +306,8 @@ function pushOneFactoryWorkerItem(
         ? `。另外这些工单上次失败过，系统报的原因是：「${verdict.sampleReason}」`
         : ''),
     how:
-      '在那台 Mac 上跑 `node scripts/factory-worker/worker.mjs --loop`，它会自己把排队的活领走。' +
+      '在那台 Mac 的终端里，已装开机自启的话跑 `launchctl kickstart -k gui/$(id -u)/com.magicengine.factory-worker`（把它重启）；' +
+      '没装的话跑 `node scripts/factory-worker/worker.mjs --loop`。起来之后它会自己把排队的活领走，这条待办也会自己消失。如果那台 Mac 只是合盖睡着了，唤醒它就行。' +
       (verdict.sampleReason
         ? '开机之后如果这些工单还是过不去，就是上面那条原因（写着余额不足就去充值），回我一句我来查。'
         : '') +

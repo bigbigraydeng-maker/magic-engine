@@ -60,6 +60,27 @@ export function canonicalAccountDigits(id: string): string {
 }
 
 /**
+ * Meta Graph 返回的 campaign.account_id 是**纯数字**；我们的库（快照、登记表）和内核
+ * 都用 `act_` 形式。路由在把账户号交给「按 act_ 形式查库的东西」之前，必须过这一道。
+ *
+ * 2026-10-19 生产事故：止损路由没过这道，拿纯数字去查时区 → 对任何客户都 503
+ * `timezone_unreadable`；同类写法还有 meta-ads/execute。账户号至少 10 位、不以 0 开头
+ * （与 `parseAdAccountInput` 同口径）。形状不认识返回 null，**调用方必须 fail-closed**，
+ * 不许回落成空串。
+ *
+ * ⚠️ 这里是「补前缀」，不是「取登记表原值」：生产登记表 / 旧字段 / 快照 2026-10-19
+ * 实查全是 `act_` 形式（0 行例外），但迁移注释允许别的写法——若将来出现纯数字登记，
+ * 要改成按 `canonicalAccountDigits` 去登记表里找原值。
+ */
+export function toActAccountId(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const compact = raw.replace(/\s+/g, '')
+  if (/^act_[1-9]\d{9,24}$/.test(compact)) return compact
+  if (/^[1-9]\d{9,24}$/.test(compact)) return `act_${compact}`
+  return null
+}
+
+/**
  * 登记表里存的值可能是后台手填的脏数据（全角数字、零宽字符、`act-`、多个号用
  * 逗号拼在一起…）。重复检查必须对这些**也认得出**，否则就是 fail-open：
  * NFKC 归一（全角 → 半角），去掉空白和零宽字符，再按其余非数字切段，每段去前导零，任一段等于目标即算命中。

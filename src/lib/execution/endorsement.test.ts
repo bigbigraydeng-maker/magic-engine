@@ -182,6 +182,8 @@ describe('deriveEndorsement —— 营销计划这根锚', () => {
     status: string
     approved_at: string | null
     end_date: string | null
+    promo_hash_approved?: string | null
+    promo_hash_now?: string | null
   }) =>
     deriveEndorsement(
       input({ source: 'marketing_plan', marketingPlanId: 'm1', marketingPlan: plan }),
@@ -228,6 +230,64 @@ describe('deriveEndorsement —— 营销计划这根锚', () => {
       NOW,
     )
     expect(e.kind).toBe('unendorsed')
+  })
+
+  it('🔴 批准之后推广内容被改过（指纹对不上）→ stale，批准的不是现在这一版', () => {
+    const e = planItem({
+      client_id: CLIENT_ID,
+      status: 'approved',
+      approved_at: daysAgo(5),
+      end_date: null,
+      promo_hash_approved: 'aaa',
+      promo_hash_now: 'bbb',
+    })
+    expect(e.kind).toBe('stale_marketing_plan')
+  })
+
+  it('🔴 现在读不出推广内容（指纹为 null）→ stale，读不出来就不能当背书', () => {
+    const e = planItem({
+      client_id: CLIENT_ID,
+      status: 'approved',
+      approved_at: daysAgo(5),
+      end_date: null,
+      promo_hash_approved: 'aaa',
+      promo_hash_now: null,
+    })
+    expect(e.kind).toBe('stale_marketing_plan')
+  })
+
+  it('🔴 带推广结构却没有批准指纹（绕过批准接口或指纹上线前批的）→ stale', () => {
+    const e = planItem({
+      client_id: CLIENT_ID,
+      status: 'approved',
+      approved_at: daysAgo(5),
+      end_date: null,
+      promo_hash_approved: null,
+      promo_hash_now: 'bbb',
+    })
+    expect(e.kind).toBe('stale_marketing_plan')
+  })
+
+  it('指纹一致 → current，批准的就是现在这一版', () => {
+    const e = planItem({
+      client_id: CLIENT_ID,
+      status: 'approved',
+      approved_at: daysAgo(5),
+      end_date: null,
+      promo_hash_approved: 'aaa',
+      promo_hash_now: 'aaa',
+    })
+    expect(e.kind).toBe('current_marketing_plan')
+  })
+
+  it('旧回执没有 promo_hash_approved → 行为不变，仍算 current', () => {
+    const e = planItem({
+      client_id: CLIENT_ID,
+      status: 'approved',
+      approved_at: daysAgo(5),
+      end_date: null,
+    })
+    expect(e.kind).toBe('current_marketing_plan')
   })
 })
 

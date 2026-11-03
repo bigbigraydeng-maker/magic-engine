@@ -226,3 +226,66 @@ export async function getJob(
   }
   return (data as DiscoveryJob | null) ?? null
 }
+
+// ─── getActiveJob ────────────────────────────────────────────────────────────
+
+// ⚠️ 必须 > 张骞的最坏运行时长(见 agent.ts 的 call budget 段,约 520 s)。
+// status 路由和"防重复派遣"共用这一个数,别各写一份。
+export const STALE_JOB_TIMEOUT_MS = 12 * 60 * 1000
+
+export function isStaleRunningJob(job: {
+  status: string
+  started_at: string | null
+  created_at: string
+}): boolean {
+  if (job.status !== 'pending' && job.status !== 'running') return false
+  const started = job.started_at ? Date.parse(job.started_at) : Date.parse(job.created_at)
+  return Number.isFinite(started) && Date.now() - started > STALE_JOB_TIMEOUT_MS
+}
+
+/**
+ * The basic discovery job still in flight for this client, if any.
+ * Used to stop a second paid dispatch and to let a refreshed page re-attach.
+ */
+export async function getActiveJob(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<DiscoveryJob | null> {
+  const { data, error } = await supabase
+    .from('client_discovery_jobs')
+    .select('*')
+    .eq('client_id', clientId)
+    .eq('job_type', 'basic')
+    .in('status', ['pending', 'running'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error) {
+    throw new Error(`Failed to read active discovery job: ${error.message}`)
+  }
+  const job = (data as DiscoveryJob | null) ?? null
+  return job && !isStaleRunningJob(job) ? job : null
+}
+
+/**
+ * Fail basic jobs that are stale (see `isStaleRunningJob`) so the one-active-job-per-client
+ * unique index does not block the next `createDiscoveryJob`. A live job is never touched,
+ * so a concurrent second click cannot kill the run another request just started.
+ */
+export async function closeStaleActiveJobs(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<void> {
+  const { data } = await supabase
+    .from('client_discovery_jobs')
+    .select('id, status, started_at, created_at')
+    .eq('client_id', clientId)
+    .eq('job_type', 'basic')
+    .in('status', ['pending', 'running'])
+  const stale = ((data ?? []) as { id: string; status: string; started_at: string | null; created_at: string }[])
+    .filter(isStaleRunningJob)
+  for (const job of stale) {
+    await failJob(supabase, job.id, 'Timed out: the run never reported back')
+  }
+}

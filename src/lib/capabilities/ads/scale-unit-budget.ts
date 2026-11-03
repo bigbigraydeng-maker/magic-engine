@@ -248,7 +248,7 @@ export function createScaleUnitBudgetCapability(sb: SupabaseClient): CapabilityI
         const currentCents = current.daily_budget ? parseInt(current.daily_budget, 10) : null
         const verification = makeReadbackVerification({ daily_budget: newCents }, { daily_budget: currentCents })
         return {
-          output: { adset_id: id, daily_budget_now: currentCents },
+          output: { applied: true, adset_id: id, daily_budget_now: currentCents },
           verification,
         }
       },

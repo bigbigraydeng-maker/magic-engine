@@ -33,7 +33,11 @@ export interface DigestGoalContext {
   target: number       // goals.target_value
   dayIndex: number     // 今天是目标期第几天（1-based）
   totalDays: number
+  /** goals.primary_metric_key —— 看板用来区分「还没设目标」类指标；客户版不下发 */
+  primaryMetricKey: string
   pace: GoalPace
+  /** 读广告设置失败时的原始报错（只在内部账本里，客户版不下发） */
+  configReadError?: string
 }
 
 const APP_BASE = 'https://app.magicengine.com.au'
@@ -65,6 +69,7 @@ const NOT_COMPARABLE_LABEL: Record<string, string> = {
   target_cost_not_configured: '没设置目标单次成本',
   outcome_not_configured: '没设置结果怎么算',
   primary_result_unknown: '真实生意归不到广告',
+  result_type_mismatch: '这个组出的结果跟主结果不是一种',
   primary_not_attributable: '真实生意归不到广告',
   audience_below_floor: '受众人数太少看不准',
   audience_too_new: '受众刚建',
@@ -145,7 +150,8 @@ function goalSection(goal: DigestGoalContext | null | undefined): string {
   }
   const { title, label, target, dayIndex, totalDays, pace } = goal
   if (pace.verdict === 'unknown') {
-    return `<p style="font-size:13px;color:#64748b">目标进度：${esc(title)} — 归属数据不足，未判（${esc(pace.reason)}）</p>`
+    const why = goal.configReadError ? '' : '归属数据不足，'
+    return `<p style="font-size:13px;color:#64748b">目标进度：${esc(title)} — ${why}未判（${esc(pace.reason)}）</p>`
   }
   const gap = pace.gapPct === null
     ? '差距未判'

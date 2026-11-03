@@ -69,4 +69,17 @@ describe('buildGrowthState 落库 payload', () => {
     const [row] = mocks.upsert.mock.calls[0] as [{ payload: { adLevelCoverage: unknown } }]
     expect(row.payload.adLevelCoverage).toEqual([])
   })
+
+  it('把成绩单写进 payload，并带上当天数据全不全', async () => {
+    await buildGrowthState('c', '2026-09-24', SYNC)
+    const [row] = mocks.upsert.mock.calls[0] as [{ payload: { scorecard: unknown; dataCompleteness: string } }]
+    expect(row.payload.scorecard).toMatchObject({ completeness: row.payload.dataCompleteness, units: [], budget: [] })
+  })
+
+  it('广告组级日数据没拉成 → 成绩单标「不全」，跟机会判断收到的是同一个值', async () => {
+    await buildGrowthState('c', '2026-09-24', [{ campaign: { success: true }, adset: { success: false }, ad: { success: true } }])
+    const [row] = mocks.upsert.mock.calls[0] as [{ payload: { scorecard: { completeness: string } } }]
+    expect(row.payload.scorecard.completeness).toBe('partial')
+    expect(mocks.runOpportunities).toHaveBeenCalledWith(expect.anything(), 'partial')
+  })
 })

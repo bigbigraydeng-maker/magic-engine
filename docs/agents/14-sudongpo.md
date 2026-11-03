@@ -38,17 +38,17 @@
 | 数据 / 工具 | 权限 | 用途 |
 |---|---|---|
 | Meta 主页（发帖、评论、私信） | 写（**目标：只经 Kernel**） | 发布、回评、私信 |
-| Publer（封装名 Publishing Hub） | 写（**目标：只经 Kernel**） | 排期发布 |
+| Publer（封装名 Publishing Hub） | 写（**目标：只经 Kernel**） | 排期发布（Publer 已于 2026-10 删除） |
 | Visual Studio / Video Studio（封装名） | 调用 | 出图、出片（AI 媒体只走 Muapi） |
 | `viral_reference_library` | 只读 | 爆款配方 |
 | Supabase `social_plans` / 工厂工单 / `flywheel_actions` | 读写 | 本 agent 的数据资产 |
-| 经验手册 `docs/playbooks/social/`（迁移前在开发侧记忆 `playbook-social-general.md`） | 读；学习任务只写候选区 | 规则先验 |
+| 经验手册 [`docs/playbooks/social/README.md`](../playbooks/social/README.md) | 读；学习任务只写候选区 | 规则先验 |
 
 ## 四、Fix vs Talk to Us 边界（强制）
 
 | ✅ 苏东坡可自主做 | 🔴 必须人点头 |
 |---|---|
-| 生成候选、配方对账、分镜自检 | **任何发布**（帖子、Reel、讲课片、Publer 排期） |
+| 生成候选、配方对账、分镜自检 | **任何发布**（帖子、Reel、讲课片、Publer 排期）（Publer 已于 2026-10 删除） |
 | 评论：隐藏明显垃圾、按已审模板公开回复——**仅当**该客户已授权 `bounded`、content-guard 通过、未超每帖 / 每人频率上限 | 模板外的回复、涉及价格 / 售后 / 投诉的回复 |
 | 私信：固定安抚话术一条（已审模板、按人限频） | AI 起草的私信（人审后发） |
 | 4h / 72h 回看 | 加钱推广、建广告（不归本 agent） |
@@ -86,7 +86,7 @@
 | 读 | 客户纠错学习（`clients.factory_config.lecture`，`lecture-learning.ts`） | 已有，保留 |
 | 写 | `flywheel_actions`（带**预期指标**）→ `flywheel_outcomes`（按帖） | **目标**；现状发帖故意不写预期指标（`post-measurement-store.ts:10-17`），单帖成绩进不了记忆 |
 | 写（经 extractor） | `client_proven_patterns` / `client_failed_experiments`（`flywheel='social'`） | 只收动作级结论 |
-| 写 | 手册候选区 `docs/playbooks/social/inbox.md` | 每周四学习任务；升正文须子牙签字 + PM 合 |
+| 写 | 手册候选区 `docs/playbooks/social/inbox.md`（候选区文件待建） | 每周四学习任务；升正文须子牙签字 + PM 合 |
 
 ## 九、跟其他 Agent 的接力
 
@@ -104,7 +104,7 @@
 ## 十一、现状缺口（2026-09-28 调研，设计 §4.3）
 
 1. Kernel 注册表里**零个**社媒动作；发帖、Reel、回评、隐藏评论、私信、加钱推广、建广告都在 Kernel 外直写。
-2. `boundaries.ts` 只拦了 `publer/client`，`meta/page-posts`、`meta/comments`、`messenger/send`、`factory/publish/*` 都没登记。
+2. `boundaries.ts` 只拦了 `publer/client`，`meta/page-posts`、`meta/comments`、`messenger/send`、`factory/publish/*` 都没登记。（Publer 已于 2026-10 删除）
 3. 发布授权是请求字段 / 状态字段 / 环境变量，不是 Kernel 回执（「状态字段当发布授权」反模式）。
 4. 单帖成绩进不了记忆；效果判断结论不落库；工厂生成不读记忆和成绩。
 5. 部分定时任务名实不符（评论自动回复注释写 30 分钟、实际每小时；「爆款发现」每天跑却叫 weekly），winner-reel 无漏跑报警。
@@ -120,3 +120,17 @@
 - 设计：`docs/specs/2026-09-28-pillar-agents-capability-memory-kernel-v0.1.md`
 - 样板：卫青 `docs/agents/11-weiqing.md`；视觉：马良 `docs/agents/60-maliang.md`；文案：李白 `docs/agents/70-libai.md`
 - 平行：孔子 `docs/agents/13-kongzi.md`；孟子 `docs/agents/15-mengzi.md`
+
+---
+
+## 操作手册
+
+- [社媒 Agent 操作手册与规则 v1.1](../sops/2026-10-19-social-agent-playbook-and-rules-v1.0.md)（v1.1 = 2026-11-01 新增 §9 PM 决定）
+- 平台运营思路（每个平台一份）：[Facebook v0.2](../sops/2026-10-28-social-platform-facebook-playbook-v0.1.md) · [Instagram v0.1](../sops/2026-10-28-social-platform-instagram-playbook-v0.1.md)
+- 新客户冷启动（发什么 / 几点发 / 什么形式）：[新客户社媒冷启动策略 v0.2](../sops/2026-10-29-social-new-client-cold-start-v0.1.md)（v0.2：2026-11-02 阶段判据按建议数定为起步版本；首批模板是旅游和物流；文件名仍为 v0.1）
+- [视频模板优化手册 v1.0](../sops/2026-10-27-video-factory-template-playbook-v1.0.md)（视频工厂；索引见[视频工厂索引](../sops/video-factory-index.md)）
+- [Messenger AI 回滚](../sops/messenger-ai-rollback.md)
+- TikTok：[应用设置](../sops/tiktok-app-setup.md) · [生产审核检查点](../sops/tiktok-production-audit-checkpoint.md) · [发布测试检查点](../sops/tiktok-publishing-test-checkpoint.md)
+- [YouTube 回执：内容帖 go-apply](../sops/2026-10-21-youtube-receipts-content-post-go-apply.md)
+
+索引：[agents 索引](./README.md)。

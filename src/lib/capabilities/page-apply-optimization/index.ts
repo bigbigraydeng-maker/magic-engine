@@ -40,6 +40,7 @@ import {
   extractGithubFieldValue,
 } from '@/lib/page-optimization'
 import { resolveStaticHtmlPath, patchStaticHtmlPage } from '@/lib/cms/static-html-page-upgrade'
+import { identityFromUrl, mergeIdentities, ProtectedPageError } from '@/lib/seo/protected-pages'
 import type { PageApplyOptimizationDeps } from './deps'
 import { defaultDeps } from './deps'
 import { branchNameForRun, canonicalDiffHash, idempotencyKeyFromInput } from './hash'
@@ -67,6 +68,7 @@ interface RunInput {
 // ── Prior-step outputs (schema stays internal — kernel just passes them along) ──
 
 interface PrepareOutput {
+  readonly page_url: string
   readonly repo_owner: string
   readonly repo_name: string
   readonly default_branch: string
@@ -161,6 +163,29 @@ async function loadDecisionExists(sb: SupabaseClient, decisionId: string): Promi
   return ((data ?? []) as unknown as Array<{ id: string }>).length === 1
 }
 
+// ── Protected-page gate ───────────────────────────────────────────────────────
+
+/** Throws KernelError('INVALID_INPUT') when the page is protected / unknown — this capability has no override. */
+async function assertPageWritable(
+  deps: PageApplyOptimizationDeps,
+  clientId: string,
+  pageUrl: string,
+  filePath: string | null,
+): Promise<void> {
+  const identity = mergeIdentities(
+    identityFromUrl(pageUrl),
+    ...(filePath ? [identityFromUrl(filePath, 'file')] : []),
+  )
+  try {
+    await deps.createPageGuard(clientId).assert(identity, { targetType: 'static_html_page' })
+  } catch (err) {
+    if (err instanceof ProtectedPageError) {
+      throw new KernelError('INVALID_INPUT', `protected_page：该页在保护名单内（或名单无法核实），自动流程不得改动（${err.decision}）`)
+    }
+    throw err
+  }
+}
+
 // ── Step: prepare ─────────────────────────────────────────────────────────────
 
 async function stepPrepare(
@@ -178,6 +203,8 @@ async function stepPrepare(
   }
 
   const pathResult = resolveStaticHtmlPath(input.page_url, [...conn.contentPaths])
+  // Protected-page gate FIRST (also before reporting a path failure): the SYSTEM actor can never override.
+  await assertPageWritable(deps, args.clientId, input.page_url, pathResult.ok ? pathResult.filePath : null)
   if (!pathResult.ok) {
     throw new KernelError('INVALID_INPUT', `解析目标文件路径失败：${pathResult.reason}`)
   }
@@ -256,6 +283,7 @@ async function stepPrepare(
 
   const idKey = idempotencyKeyFromInput(input.page_url, input.page_version_token, input.validated_diff_hash)
   const output: PrepareOutput = {
+    page_url: input.page_url,
     repo_owner: conn.repoOwner,
     repo_name: conn.repoName,
     default_branch: conn.defaultBranch,
@@ -285,6 +313,9 @@ async function stepCommit(
 
   const conn = await deps.resolveGithubConnection(args.clientId)
   if (!conn) throw new KernelError('INVALID_INPUT', '客户 GitHub 连接消失')
+
+  // Re-check right before the first write: the list may have changed since prepare ran.
+  await assertPageWritable(deps, args.clientId, prep.page_url, prep.content_path)
 
   const gh = deps.createGithubClient(conn.plainToken)
 

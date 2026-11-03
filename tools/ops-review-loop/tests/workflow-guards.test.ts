@@ -22,7 +22,7 @@ const ROOT = join(process.cwd(), '.github/workflows')
 const REQUEST_PATH = join(ROOT, 'ops-codex-request-review.yml')
 const FIX_PATH = join(ROOT, 'ops-codex-to-claude-fix.yml')
 const SMOKE_PATH = join(ROOT, 'ops-codex-smoke-test.yml')
-const SCOPE_PATH = join(ROOT, 'ops-fix-scope-guard.yml')
+const LIGHT_PATH = join(ROOT, 'pr-light-checks.yml')
 
 interface WorkflowStep {
   id?: string
@@ -31,6 +31,7 @@ interface WorkflowStep {
   run?: string
   if?: string
   with?: Record<string, unknown>
+  env?: Record<string, string>
 }
 interface WorkflowJob {
   if?: string
@@ -62,8 +63,8 @@ function load(path: string) {
 const request = load(REQUEST_PATH)
 const fix = load(FIX_PATH)
 const smoke = load(SMOKE_PATH)
-const scope = load(SCOPE_PATH)
-const all = [request, fix, smoke, scope]
+const light = load(LIGHT_PATH)
+const all = [request, fix, smoke]
 
 const FORBIDDEN_WRITE_SCOPES = ['workflows', 'actions', 'administration', 'deployments', 'packages', 'security-events']
 const DANGEROUS_SUBSTRINGS = [
@@ -304,17 +305,20 @@ describe('the auto-fix blast-radius guard (the real boundary)', () => {
   // check that judges the resulting diff. These assertions pin the properties
   // that make it a boundary rather than a suggestion.
   it('runs on pull_request so it cannot be skipped by not asking for it', () => {
-    expect(Object.keys(scope.triggers)).toEqual(['pull_request'])
+    expect(Object.keys(light.triggers)).toEqual(['pull_request'])
+    const trigger = (light.triggers.pull_request ?? {}) as { paths?: unknown }
+    expect(trigger.paths).toBeUndefined()
   })
 
-  it('checks itself out from main, so a PR cannot edit the guard that judges it', () => {
-    const checkout = scope.steps.find((s) => s.uses?.startsWith('actions/checkout'))
-    expect(checkout?.with?.ref).toBe('main')
+  it('checks the guard script out from main, so a PR cannot edit the guard that judges it', () => {
+    const checkout = light.steps.find((s) => s.with?.ref === 'main' && s.with?.path === '.guard-main')
+    expect(checkout?.with?.['persist-credentials']).toBe(false)
   })
 
-  it('is read-only — it judges, it never writes', () => {
-    expect(scope.doc.permissions?.contents).toBe('read')
-    expect(scope.doc.permissions?.['pull-requests']).toBe('read')
+  it('is read-only in the job that runs the guard — it judges, it never writes the repo', () => {
+    expect(light.doc.jobs?.tests?.permissions?.contents).toBe('read')
+    expect(light.doc.jobs?.tests?.permissions?.['pull-requests']).toBe('read')
+    expect(light.doc.jobs?.tests?.permissions?.checks).toBeUndefined()
   })
 
   it('guards exactly the lane the auto-fix leg can push to', () => {
@@ -348,7 +352,8 @@ describe('the auto-fix blast-radius guard (the real boundary)', () => {
       expect(existsSync(join(process.cwd(), file)), `${file} 没了 —— 爆炸半径闸门会静默放行`).toBe(true)
     }
     // and the workflow must still be the thing that runs it
-    expect(scope.source).toContain('tools/ops-review-loop/src/check-fix-scope.mjs')
+    expect(light.source).toContain('tools/ops-review-loop/src/check-fix-scope.mjs')
+    expect(light.source).toContain('.guard-main')
   })
 
   it('narrows the action tool surface too, while not pretending that is the boundary', () => {

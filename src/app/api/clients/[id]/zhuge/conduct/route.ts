@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { textAsksToSpend } from '@/lib/zhuge/drawer-spend-ask'
 import { assembleZhugeInput } from '@/lib/zhuge/assembler'
 import { conductPriorityActions } from '@/lib/zhuge/conductor'
 import { persistZhugeActions, type PersistZhugeActionsResult } from '@/lib/zhuge/action-persister'
@@ -59,6 +60,13 @@ export async function POST(
   // FDE callers omit it (defaults to 'long', backward-compat).
   const promptMode: ZhugePromptMode | undefined =
     body.promptMode === 'short' || body.promptMode === 'long' ? body.promptMode : undefined
+
+  if (textAsksToSpend(body)) {
+    return NextResponse.json(
+      { success: false, error: '建议链不能花钱、发布或改广告。请在对话框里出确认卡。' },
+      { status: 409 },
+    )
+  }
 
   // Assemble ZhugeInput from real DB data
   let assembled: Awaited<ReturnType<typeof assembleZhugeInput>>
@@ -124,7 +132,7 @@ export async function POST(
     persisted = await persistZhugeActions(supabaseAdmin, {
       clientId,
       discoveryId: assembled.discovery_id,
-      diagnosticRunId: assembled.diagnostic_run_id,
+      diagnosticRunId: null,
       // DAPE W5 (spec §2.4.3): hand the latest prescription_id to the persister
       // so kanban cards carry their P→E attribution. NULL is valid.
       prescriptionId: assembled.prescription_id,
@@ -140,8 +148,8 @@ export async function POST(
     output,
     context_used: {
       discovery_id: assembled.discovery_id,
-      diagnostic_run_id: assembled.diagnostic_run_id,
-      findings_count: assembled.findings_count,
+      diagnostic_run_id: null,
+      findings_count: 0,
       prompt_mode: promptMode ?? 'long',
       memory_loaded: memoryContext.has_content,
       memory_stats: {

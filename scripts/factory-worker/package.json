@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22.4.0"
+    "node": ">=22.18.0"
   },
   "scripts": {
     "inngest:pilot": "node inngest-pilot.mjs",

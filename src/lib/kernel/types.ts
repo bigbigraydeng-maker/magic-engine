@@ -44,6 +44,11 @@ export type ActionKey =
   | 'ads.budget_move_plan'
   | 'ads.add_retargeting_adset'
   | 'ads.swap_creative'
+  /**
+   * P0 confirmation card. Approval is recorded here.
+   * The capability refuses to run, so a click never spends or publishes.
+   */
+  | 'governance.p0_confirmation'
 
 /** 一个 run 为了什么而跑。决定它需不需要挂 Goal。 */
 export type ActionPurpose =

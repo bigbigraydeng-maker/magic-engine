@@ -38,6 +38,7 @@ interface Card {
   script: string
   pillar: string
   visualBrief: string
+  youtubeStage?: { status: string; videoId: string | null; createdAt: string } | null
   mode?: string          // '讲课式' 等制作形态
   rendering?: boolean    // 流水线正在给这条做片 —— 做片中不给挂片入口
 }
@@ -155,28 +156,42 @@ export default function ContentFactoryBoardPage() {
       const data = (await r.json().catch(() => ({}))) as {
         error?: string
         render?: { error?: string }
-        publish?: { publerJobId: string }
       }
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`)
       setSelected(null)
       setError(null)
       // 给运营一句能安心的反馈（做片要 15-30 分钟，别让人以为丢了）
       if (action === 'confirm') {
-        if (data.publish) {
-          // LinkedIn 进度贴没有做片环节，"确认"这一步已经是真的发布了——
-          // 不能走下面视频那套"正在做片"的话术，那是假消息。
-          setNotice('已确认 · 已经发布，不需要做片')
-        } else {
-          // data.render.error 现在是常态(旧拼片管线已退役)，不是偶发失败——不能再提示
-          // "再点一次确认重试"：这张卡片的状态已经改成 approved，进了「备料」列，选题段的
-          // 确认按钮不会再出现，重试没有入口。真正能做的是去「备料」列手动传成片/粘视频链接。
-          setNotice(data.render?.error
-            ? '已确认 · 已进「备料」列，旧自动做片管线已退役，请在「备料」列打开这张卡片手动传成片或粘视频链接'
-            : '已确认 · 正在做片，约 15-30 分钟后会出现在「出片」列')
-        }
+        // data.render.error 现在是常态(旧拼片管线已退役)，不是偶发失败——不能再提示
+        // "再点一次确认重试"：这张卡片的状态已经改成 approved，进了「备料」列，选题段的
+        // 确认按钮不会再出现，重试没有入口。真正能做的是去「备料」列手动传成片/粘视频链接。
+        setNotice(data.render?.error
+          ? '已确认 · 已进「备料」列，旧自动做片管线已退役，请在「备料」列打开这张卡片手动传成片或粘视频链接'
+          : '已确认 · 正在做片，约 15-30 分钟后会出现在「出片」列')
       } else if (action === 'schedule') {
         setNotice('已通过 · 已进「发布」列')
       }
+      await load()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setActing(false)
+    }
+  }
+
+  async function stageOnYouTube() {
+    if (!selected || !clientId) return
+    setActing(true)
+    setError(null)
+    try {
+      const r = await fetch(`/api/clients/${clientId}/youtube/stage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contentPostId: selected.id }),
+      })
+      const data = (await r.json().catch(() => ({}))) as { error?: string }
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`)
+      setNotice('YouTube 私密暂存已排队 · 视频不会公开，处理完成后刷新看板查看回执')
       await load()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -273,6 +288,10 @@ export default function ContentFactoryBoardPage() {
     <div className="p-6 max-w-[1400px] mx-auto text-me-charcoal">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-display font-bold">内容工厂</h1>
+        <button onClick={() => void load()} disabled={loading} className="text-xs border border-me-stone rounded-full px-3 py-1 hover:border-me-ochre disabled:opacity-50">
+          {loading ? '刷新中…' : '刷新状态'}
+        </button>
+        {clientId && <Link href={`/dashboard/clients/${clientId}/content-factory/series`} className="text-xs border border-me-stone rounded-full px-3 py-1 hover:border-me-ochre">系列视频与播放数据</Link>}
         {clientId && (
           <Link href={`/dashboard/clients/${clientId}/content-factory/settings`}
             className="text-xs text-me-charcoal border border-me-stone rounded-full px-3 py-1 hover:border-me-ochre">
@@ -409,6 +428,13 @@ export default function ContentFactoryBoardPage() {
 
             <h2 className="text-base font-display font-bold leading-snug mb-3">{selected.title}</h2>
 
+            {(selected.platforms ?? []).some((p) => ['youtube', 'youtube_shorts', 'youtube-shorts'].includes(p.toLowerCase())) && (
+              <Link className="mb-3 block rounded-xl border border-me-ochre px-3 py-2 text-sm font-semibold text-me-ochre"
+                href={`/dashboard/clients/${clientId}/content-factory/alignment/${selected.id}`}>
+                查看 / 补齐 YouTube 主题对齐卡 →
+              </Link>
+            )}
+
             {selected.videoUrl && (
               <div className="mb-3">
                 <div className="text-[11px] font-semibold text-me-taupe mb-1">成片</div>
@@ -418,6 +444,17 @@ export default function ContentFactoryBoardPage() {
                   playsInline
                   className="w-full max-h-[420px] rounded-xl bg-black"
                 />
+              </div>
+            )}
+
+            {selected.youtubeStage && (
+              <div className="mb-3 rounded-xl border border-me-stone bg-me-ivory p-3 text-sm">
+                <div className="font-semibold">YouTube 私密暂存：{({ staged: '已暂存（仍为私密）', failed: '处理失败', blocked: '未通过安全检查' } as Record<string, string>)[selected.youtubeStage.status] ?? selected.youtubeStage.status}</div>
+                {selected.youtubeStage.videoId && (
+                  <a className="text-me-ochre underline" href={`https://studio.youtube.com/video/${selected.youtubeStage.videoId}/edit`} target="_blank" rel="noreferrer">
+                    在 YouTube Studio 核对私密视频
+                  </a>
+                )}
               </div>
             )}
 
@@ -567,6 +604,20 @@ export default function ContentFactoryBoardPage() {
                     换一条
                   </button>
                 )}
+              </div>
+            )}
+
+            {selected.stage === '发布' && selected.status === 'scheduled' &&
+              (selected.platforms ?? []).some((p) => ['youtube', 'youtube_shorts', 'youtube-shorts'].includes(p.toLowerCase())) && (
+              <div className="sticky bottom-0 bg-white pt-3 border-t border-me-stone">
+                <p className="text-[11px] text-me-taupe mb-2">只上传到 CTS 频道的私密草稿，公开前仍须完成发布检查并单独授权。</p>
+                <button
+                  disabled={acting || selected.youtubeStage?.status === 'staged'}
+                  onClick={() => void stageOnYouTube()}
+                  className="w-full text-sm font-semibold text-white bg-status-track rounded-xl py-2.5 disabled:opacity-50"
+                >
+                  {acting ? '处理中…' : selected.youtubeStage?.status === 'staged' ? '已私密暂存' : '暂存到 YouTube（私密）'}
+                </button>
               </div>
             )}
           </div>

@@ -16,6 +16,8 @@ import { supabaseAdmin } from '../../supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
 import type { OutcomeVerdict } from '../adapters/types'
 import { dualWindowEnabled } from './dual-window-gate'
+import { isNotEvaluable } from './execution-evidence'
+import { getMetricPolarity } from '../polarity'
 import {
   OUTCOME_CONFLICT_TARGET,
   OUTCOME_EVALUATOR,
@@ -88,6 +90,12 @@ export interface AttributionJobResult {
   /** First few unattributable action ids, for diagnosis. Bounded on purpose. */
   unattributableSamples: string[]
   /**
+   * Actions that were never executed (AI suggestions, discovery recommendations), so a before/after
+   * comparison would measure nothing. Counted only: no outcome row is written, no existing row is
+   * touched and no to-do is raised. Deliberately NOT part of `unattributable`, whose path deletes rows.
+   */
+  not_evaluable?: number
+  /**
    * Reconciliation failures — claiming a row an older deployment left unsigned,
    * or retiring a non-authoritative window.
    *
@@ -131,7 +139,7 @@ async function loadAttributableActions(
   return fetchAll<ActionRow>((from, to) => {
     let query = supabaseAdmin
       .from('flywheel_actions')
-      .select('id, client_id, flywheel, action_type, payload, expected_metric, expected_delta, executed_at')
+      .select('id, client_id, flywheel, action_type, payload, expected_metric, expected_delta, executed_at, execution_item_id, action_run_id, vendor')
       .not('expected_metric', 'is', null)
       // A stable, unique sort — `range` without one repeats or drops rows at
       // page boundaries.
@@ -167,8 +175,26 @@ function emptyResult(): AttributionJobResult {
  * report — which is how the deferral path went quiet until round 20.
  */
 type ActionOutcome =
-  | { kind: 'deferred' | 'unattributable' | 'written' | 'skipped'; reconcileErrors: string[] }
+  | { kind: 'deferred' | 'unattributable' | 'written' | 'skipped' | 'not_evaluable'; reconcileErrors: string[] }
   | { kind: 'failed'; message: string }
+
+/** A non-empty string from an untyped payload value, else null. */
+function payloadText(payload: Record<string, unknown> | null, key: string): string | null {
+  const v = payload?.[key]
+  return typeof v === 'string' && v !== '' ? v : null
+}
+
+/** The execution evidence of one loaded action. Missing columns read as null. */
+function evaluabilityOf(action: ActionRow) {
+  return {
+    zhuge_session_key: payloadText(action.payload, 'zhuge_session_key'),
+    payload_source: payloadText(action.payload, 'source'),
+    discovery_id: payloadText(action.payload, 'discovery_id'),
+    execution_item_id: action.execution_item_id ?? null,
+    action_run_id: action.action_run_id ?? null,
+    vendor: action.vendor ?? null,
+  }
+}
 
 /**
  * Arbitration plus attribution for a single action.
@@ -189,6 +215,10 @@ async function attributeOne(
   action: ActionRow,
   windowDays: number,
 ): Promise<ActionOutcome> {
+  // Not evaluable actions return before any reconcile call, so no stored
+  // outcome row is deleted and no to-do is raised for work that never happened.
+  if (isNotEvaluable(evaluabilityOf(action))) return { kind: 'not_evaluable', reconcileErrors: [] }
+
   const routing = resolveAttributionRouting(action)
 
   if (routing === 'defer') {
@@ -227,6 +257,7 @@ export async function runAttributionJob(
 
   const r = emptyResult()
   const pass2Clients = new Set<string>()
+  let notEvaluable = 0
 
   for (const action of actions) {
     const outcome = await attributeOne(action, windowDays)
@@ -243,6 +274,11 @@ export async function runAttributionJob(
         r.reconcileErrorSamples.push(`action ${action.id}: ${msg}`)
       }
       console.error(`Attribution job: action ${action.id} — ${msg}`)
+    }
+
+    if (outcome.kind === 'not_evaluable') {
+      notEvaluable++
+      continue
     }
 
     if (outcome.kind === 'written') r.written++
@@ -263,6 +299,7 @@ export async function runAttributionJob(
   }
 
   r.processed = actions.length
+  r.not_evaluable = notEvaluable
   r.pass2ClientIds = Array.from(pass2Clients)
   return r
 }
@@ -278,6 +315,9 @@ interface ActionRow {
   expected_metric: string
   expected_delta: number | null
   executed_at: string
+  execution_item_id: string | null
+  action_run_id: string | null
+  vendor: string | null
 }
 
 /** What one action's attribution produced, and what reconciliation could not do. */
@@ -543,6 +583,10 @@ async function retireExtraWindows(
  * every other action in the window, so it cannot say whether THIS action worked.
  * The caller still stores baseline / after / delta. Everything else goes through
  * `computeVerdict`. Both evaluators (this file and gsc-bridge.ts) call this.
+ *
+ * With no expected_delta, direction comes from the polarity table: lower-is-better
+ * metrics are flipped, and neutral metrics (e.g. spend) are always inconclusive.
+ * An explicit expected_delta is never touched.
  */
 export function computeOutcomeVerdict(
   metricKey: string,
@@ -551,7 +595,12 @@ export function computeOutcomeVerdict(
   expectedDelta: number | null,
 ): { verdict: OutcomeVerdict; confidence: number } {
   if (isSiteLevelUnattributable(metricKey)) return { verdict: 'inconclusive', confidence: 0 }
-  return computeVerdict(delta, deltaPct, expectedDelta)
+
+  const polarity = expectedDelta === null ? getMetricPolarity(metricKey) : 'higher_is_better'
+  if (polarity === 'neutral') return { verdict: 'inconclusive', confidence: 0 }
+
+  const flip = polarity === 'lower_is_better'
+  return computeVerdict(flip ? -delta : delta, flip && deltaPct !== null ? -deltaPct : deltaPct, expectedDelta)
 }
 
 /**

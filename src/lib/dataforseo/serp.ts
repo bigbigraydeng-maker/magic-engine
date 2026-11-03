@@ -156,13 +156,11 @@ export async function getSerpPage(
           rating?:                number | null
           reviews_count?:         number | null
           address?:               string | null
-          ai_overview?: {
-            text?:         string | null
-            references?: Array<{
-              url?:   string | null
-              title?: string | null
-            }>
-          } | null
+          // type 'ai_overview' (verified against a live response 2026-10-05):
+          // text lives in items[].text, sources in top-level references[].
+          markdown?:              string | null
+          items?:                 Array<{ text?: string | null }> | null
+          references?:            Array<{ url?: string | null }> | null
         }>
       }>
     }>
@@ -203,10 +201,14 @@ export async function getSerpPage(
   ))
 
   const aiItem = items.find(it => it.type === 'ai_overview')
-  const aiOverviewText    = aiItem?.ai_overview?.text ?? null
-  const aiOverviewSources = (aiItem?.ai_overview?.references ?? [])
-    .map(r => r.url ?? '')
+  const aiBody = (aiItem?.items ?? [])
+    .map(e => e.text ?? '')
     .filter(Boolean)
+    .join('\n\n')
+  const aiOverviewText    = aiItem ? (aiBody || aiItem.markdown || null) : null
+  const aiOverviewSources = Array.from(new Set(
+    (aiItem?.references ?? []).map(r => r.url ?? '').filter(Boolean),
+  ))
 
   const localPack = items
     .filter(it => it.type === 'local_pack')
@@ -233,6 +235,118 @@ export async function getSerpPage(
     ai_overview_sources:     aiOverviewSources,
     ...(localPack.length > 0      && { local_pack:       localPack }),
     ...(peopleAlsoAsk.length > 0  && { people_also_ask:  peopleAlsoAsk }),
+  }
+}
+
+// ─── Organic rank snapshot (SEO meta-cycle rank verification) ────────────────
+
+/**
+ * One organic result as Google ranked it.
+ *
+ * `rankGroup` is the position among ORGANIC results only. `rankAbsolute`
+ * (what `getSerpPage` exposes as `position`) counts every SERP block — AI
+ * Overview, People-also-ask, video carousels — so it shifts by 1–3 whenever
+ * Google adds a block, with no real ranking change. A before/after rank
+ * comparison must use `rankGroup`.
+ */
+export interface OrganicRankItem {
+  rankGroup:    number
+  rankAbsolute: number | null
+  url:          string
+  domain:       string | null
+}
+
+export interface OrganicRankSnapshot {
+  query:     string
+  /** Depth requested — every later sample compared against this one must use the same value. */
+  depth:     number
+  /** Unfiltered organic results (no .gov/.org/.edu filtering, no top-10 cut) in the order Google returned them. May contain duplicate URLs. */
+  items:     OrganicRankItem[]
+  /** DataForSEO's own per-task cost in USD when reported, else null. */
+  cost:      number | null
+  fetchedAt: string
+}
+
+/** DataForSEO bills per 10 results and the live endpoint caps at 700; 100 is far more than any rank check needs. */
+const MAX_RANK_DEPTH = 100
+
+/**
+ * Live organic ranks for one query, for rank-before/after comparisons.
+ *
+ * Deliberately a separate function from `getSerpPage`: that one filters
+ * non-commercial domains and truncates to 10, both of which would corrupt a
+ * rank number. Request parameters are fixed (country-level location, desktop,
+ * `en`, explicit depth) so two calls are comparable.
+ */
+export async function getOrganicRanks(
+  query: string,
+  countryCode: 'au' | 'nz',
+  options: { depth: number; language?: string },
+): Promise<OrganicRankSnapshot> {
+  const { depth } = options
+  if (!Number.isInteger(depth) || depth < 10 || depth > MAX_RANK_DEPTH) {
+    throw new Error(`getOrganicRanks: depth must be an integer in [10, ${MAX_RANK_DEPTH}], got ${depth}`)
+  }
+
+  const res = await fetch(
+    `${DATAFORSEO_API_BASE}/serp/google/organic/live/advanced`,
+    {
+      method:  'POST',
+      headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
+      body: JSON.stringify([
+        {
+          keyword:       query,
+          location_code: LOCATION_CODE[countryCode],
+          language_code: options.language ?? 'en',
+          device:        'desktop',
+          depth,
+          se_domain:     countryCode === 'nz' ? 'google.co.nz' : 'google.com.au',
+        },
+      ]),
+    },
+  )
+
+  if (!res.ok) throw new Error(`DataForSEO SERP error: ${res.status}`)
+
+  const json = await res.json() as {
+    tasks?: Array<{
+      status_code?:    number
+      status_message?: string
+      cost?:           number
+      result?: Array<{
+        items?: Array<{
+          type?:          string
+          rank_group?:    number
+          rank_absolute?: number
+          url?:           string | null
+          domain?:        string | null
+        }>
+      }>
+    }>
+  }
+
+  const task = json.tasks?.[0]
+  if (task?.status_code !== 20000) {
+    throw new Error(
+      `DataForSEO SERP task ${task?.status_code ?? 'missing'}: ${task?.status_message ?? 'unknown'}`,
+    )
+  }
+
+  const items: OrganicRankItem[] = (task.result?.[0]?.items ?? [])
+    .filter(it => it.type === 'organic' && typeof it.rank_group === 'number' && typeof it.url === 'string' && it.url !== '')
+    .map(it => ({
+      rankGroup:    it.rank_group as number,
+      rankAbsolute: typeof it.rank_absolute === 'number' ? it.rank_absolute : null,
+      url:          it.url as string,
+      domain:       it.domain ?? null,
+    }))
+
+  return {
+    query,
+    depth,
+    items,
+    cost: typeof task.cost === 'number' ? task.cost : null,
+    fetchedAt: new Date().toISOString(),
   }
 }
 

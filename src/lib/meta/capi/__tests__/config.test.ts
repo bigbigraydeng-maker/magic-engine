@@ -10,9 +10,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const maybeSingle = vi.fn()
+// 实测：mock 按表名分流；platform_oauth_connections 返回空使 DB 查找落空、走 env-var 路径
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
-    from: () => ({ select: () => ({ eq: () => ({ maybeSingle }) }) }),
+    from: (table: string) => {
+      if (table === 'platform_oauth_connections') {
+        const c: Record<string, unknown> = {}
+        c.select = () => c; c.eq = () => c; c.order = () => c; c.limit = () => c
+        c.maybeSingle = async () => ({ data: null, error: null })
+        return c
+      }
+      return { select: () => ({ eq: () => ({ maybeSingle }) }) }
+    },
   }),
 }))
 

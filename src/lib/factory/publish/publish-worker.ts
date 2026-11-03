@@ -2,22 +2,25 @@
 // 状态机:approved →(原子领取)→ publishing → published / publish_failed。
 // 护栏(子牙 B8 + 魏征 B9):原子领取防双发 · 幂等对账防"发了没记上" · 防误发三断言 · 视频 URL 校验 ·
 //   published_ref 硬事务(先落回执再三落库,三落库尽力而为可后补)。
-// P0.1a 只实现 FacebookReelAdapter(Oztop);加 CTS = 多注册个 PublerAdapter,主体不改。
+// P0.1a 只实现 FacebookReelAdapter(Oztop);加新平台 = 多注册个 adapter,主体不改。
 
 import { randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { PublishAdapter, PublishTarget, PublishedRef } from '../types'
 import { scanRedlineHits } from '../worker-guard'
+import { sanitizeFailReason } from './publish-display'
 import { facebookReelAdapter } from './facebook-reel-adapter'
 import { buildReelPublishedEvent } from './reel-published-event'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { REEL_AUTO_CHECK_KEYS, checklistPasses, humanKeysForReviewRef, validateContentChecklist } from '@/lib/social/content-review'
+import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
+import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from '../deliverable'
 
 const MAX_PUBLISH_ATTEMPTS = 3
 const RETRY_BACKOFF_MIN = 10 // 失败退避基数(分钟)· 指数
 
 const ADAPTERS: Record<string, PublishAdapter> = {
   facebook: facebookReelAdapter,
-  // publer: publerAdapter,  // P0.1b
 }
 
 interface PublishOptions {
@@ -61,7 +64,7 @@ async function claimOne(workerId: string): Promise<Record<string, unknown> | nul
 }
 
 // ── 防误发三断言 + 视频 URL 校验 ──────────────────────────────────────────────
-async function resolveTarget(clientId: string): Promise<PublishTarget | null> {
+export async function resolveTarget(clientId: string): Promise<PublishTarget | null> {
   const { data: client } = await supabaseAdmin
     .from('clients')
     .select('factory_config')
@@ -71,7 +74,7 @@ async function resolveTarget(clientId: string): Promise<PublishTarget | null> {
   const raw = cfg['publish_target']
   if (!raw || typeof raw !== 'object') return null
   const t = raw as PublishTarget
-  if (t.platform !== 'facebook' && t.platform !== 'publer') return null
+  if (t.platform !== 'facebook') return null
   // 防误发(魏征 B9):带上客户真实品牌名,adapter 校验 FB 页名 ~ 此值。品牌名取权威源 master_briefs。
   if (!t.expect_brand) {
     const { data: mb } = await supabaseAdmin
@@ -99,7 +102,7 @@ async function resolveTarget(clientId: string): Promise<PublishTarget | null> {
  * fail-closed:查不到红线 ≠ 没有红线,查询出错一律当拦截处理(与 complete-work-order 同规矩)。
  * 返回 null = 放行;返回字符串 = 拦截原因。
  */
-async function scanPublishCaption(
+export async function scanPublishCaption(
   clientId: string,
   masterBriefId: unknown,
   caption: string,
@@ -130,7 +133,7 @@ async function scanPublishCaption(
   return hits.length > 0 ? `发布正文命中品牌红线: ${hits.join(' / ')}` : null
 }
 
-async function validateVideoUrl(url: string): Promise<string | null> {
+export async function validateVideoUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, { method: 'HEAD' })
     if (!res.ok) return `视频 URL 不可达 (${res.status})`
@@ -144,7 +147,7 @@ async function validateVideoUrl(url: string): Promise<string | null> {
   }
 }
 
-const PUBLIC_BASE = () =>
+export const PUBLIC_BASE = () =>
   `${process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''}/storage/v1/object/public/content-factory`
 
 // ── 失败落库(退避重试 / terminal)───────────────────────────────────────────
@@ -162,6 +165,7 @@ async function markFailed(
     .from('content_work_orders')
     .update({
       status: 'publish_failed',
+      reject_reason: sanitizeFailReason(reason), // PM sees why on the dashboard; token-free
       publish_attempts: attempts + 1,
       // terminal:next_retry_at 置空 = 不再自动重试,等 PM 决策;否则退避后重试
       next_retry_at: terminal ? null : new Date(Date.now() + backoffMin * 60_000).toISOString(),
@@ -169,7 +173,7 @@ async function markFailed(
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
-  console.error(`[publish-worker] ${id} failed (attempt ${attempts + 1}${terminal ? ',terminal' : ''}): ${reason}`)
+  console.error(`[publish-worker] ${id} failed (attempt ${attempts + 1}${terminal ? ',terminal' : ''}): ${sanitizeFailReason(reason)}`)
 }
 
 // ── 处理一条 ──────────────────────────────────────────────────────────────────
@@ -179,6 +183,22 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   const attempts = Number(wo['publish_attempts'] ?? 0)
   const brief = (wo['brief'] ?? {}) as Record<string, unknown>
   const output = (wo['output'] ?? {}) as Record<string, unknown>
+
+  if (isAssetOnly(brief)) {
+    await markFailed(id, attempts, ASSET_ONLY_NOT_PUBLISHABLE, true)
+    return { order_id: id, result: 'failed', detail: 'asset_only_not_publishable' }
+  }
+
+  // Re-check the approval receipt at the last server boundary before any
+  // provider lookup/upload. This also quarantines legacy `approved` rows that
+  // predate structured review checklists.
+  const reviewRef = (wo['review_ref'] ?? {}) as Record<string, unknown>
+  const humanChecklist = validateContentChecklist(reviewRef['checklist_human'], humanKeysForReviewRef(reviewRef), 'HUMAN')
+  const autoChecklist = validateContentChecklist(output['quality_checklist_auto'], REEL_AUTO_CHECK_KEYS, 'AUTO')
+  if (!humanChecklist.ok || !autoChecklist.ok || !checklistPasses(humanChecklist.items) || !checklistPasses(autoChecklist.items)) {
+    await markFailed(id, attempts, 'approval checklist missing, incomplete, failed, or not measured', true)
+    return { order_id: id, result: 'failed', detail: 'approval_checklist_incomplete' }
+  }
 
   const target = await resolveTarget(clientId)
   if (!target) {
@@ -194,15 +214,38 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   // 本地幂等锚(魏征 B9 防双发):本工单之前已 start 过(published_ref.provisional + video_id)→ 说明上次
   // 发到一半崩了。**绝不盲目重发**:先对账,确认已发→补记;确认不了→ terminal 标失败推人工核对,宁可不发不双发。
   const priorRef = (wo['published_ref'] ?? null) as Record<string, unknown> | null
+  const angleOf = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
+  const label = angleOf(brief['angle']) || angleOf(wo['angle']) || target.expect_brand || 'Reel'
+  const copy = (brief['copy'] ?? {}) as Record<string, unknown>
+  const endcard = (copy['endcard'] ?? {}) as Record<string, unknown>
+  const firstComment = buildReelFirstComment(endcard, id)
+  if (!firstComment) {
+    await markFailed(id, attempts, '首评 CTA 或 HTTPS 追踪链接无效', true)
+    return { order_id: id, result: 'failed', detail: 'invalid_first_comment' }
+  }
+  const caption = buildReelPostCaption(copy)
+  // Check both strings before an idempotency recovery can add the first comment
+  // to a Reel that was already started in a previous attempt.
+  const redlineErr = await scanPublishCaption(clientId, wo['master_brief_id'], `${caption}\n${firstComment.text}`)
+  if (redlineErr) {
+    await markFailed(id, attempts, redlineErr, true)
+    return { order_id: id, result: 'failed', detail: 'redline_hit' }
+  }
+
   if (priorRef && priorRef['provisional'] === true && priorRef['video_id']) {
     const recovered = await adapter.findExisting({ target, idempotencyTag: id }).catch(() => null)
     if (recovered) {
-      await recordPublished(id, recovered, clientId, brief)
+      if (!opts.draft && adapter.ensureFirstComment && !recovered.first_comment_id) {
+        recovered.first_comment_id = await adapter.ensureFirstComment({
+          target, videoId: String(recovered.video_id ?? priorRef['video_id']), idempotencyTag: id, message: firstComment.text,
+        })
+      }
+      await recordPublished(id, recovered, clientId, label)
       return { order_id: id, result: 'skipped_existing', detail: 'recovered_after_interrupt' }
     }
     await supabaseAdmin
       .from('content_work_orders')
-      .update({ status: 'publish_failed', next_retry_at: null, publishing_started_at: null, updated_at: new Date().toISOString() })
+      .update({ status: 'publish_failed', reject_reason: '上次发布中途中断,平台侧未确认是否已发出,请人工核对 Facebook 主页', next_retry_at: null, publishing_started_at: null, updated_at: new Date().toISOString() })
       .eq('id', id)
     console.error(`[publish-worker] ${id} 上次 start(video_id=${priorRef['video_id']})后中断且平台侧未确认→不重发,待人工核对`)
     return { order_id: id, result: 'failed', detail: 'interrupted_verify_manual' }
@@ -212,7 +255,12 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   try {
     const existing = await adapter.findExisting({ target, idempotencyTag: id })
     if (existing) {
-      await recordPublished(id, existing, clientId, brief)
+      if (!opts.draft && adapter.ensureFirstComment && !existing.first_comment_id) {
+        existing.first_comment_id = await adapter.ensureFirstComment({
+          target, videoId: String(existing.video_id ?? existing.post_id), idempotencyTag: id, message: firstComment.text,
+        })
+      }
+      await recordPublished(id, existing, clientId, label)
       return { order_id: id, result: 'skipped_existing', detail: existing.post_id }
     }
   } catch (e) {
@@ -234,37 +282,27 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
     return { order_id: id, result: 'failed', detail: 'bad_video_url' }
   }
 
-  // caption:品牌接地文案(endcard.url 已锁客户域名)
-  const copy = (brief['copy'] ?? {}) as Record<string, unknown>
-  const endcard = (copy['endcard'] ?? {}) as Record<string, unknown>
-  const caption = buildCaption(copy, endcard)
-
-  // 发布正文红线闸(补 B10):这串字跟审片时扫过的不是同一串,发出去前必须自己过一次。
-  // 命中 → 终态失败不重试(重试只会每轮重扫同一串文案、每次都命中),等人工改文案或改红线。
-  const redlineErr = await scanPublishCaption(clientId, wo['master_brief_id'], caption)
-  if (redlineErr) {
-    await markFailed(id, attempts, redlineErr, true)
-    return { order_id: id, result: 'failed', detail: 'redline_hit' }
-  }
-
   // 发布(draft 由 opts 控制:首测=草稿不公开)
   let ref: PublishedRef
   try {
     ref = await adapter.publish({
       videoUrl,
       caption,
+      firstComment: firstComment.text,
       target,
       idempotencyTag: id,
       draft: opts.draft,
       // 上传前把 video_id 落本地当幂等锚(魏征 B9):中途崩后重来靠它判断,不盲目重发
       onStarted: async (videoId) => {
-        await supabaseAdmin
+        const { error } = await supabaseAdmin
           .from('content_work_orders')
           .update({
             published_ref: { provisional: true, platform: target.platform, page_id: target.page_id, video_id: videoId },
             updated_at: new Date().toISOString(),
           })
           .eq('id', id)
+        // 锚没落下就不许继续:否则崩溃后重来既没有本地锚、平台侧又可能已有这条,等于盲发。
+        if (error) throw new Error('幂等锚写入失败')
       },
     })
   } catch (e) {
@@ -273,18 +311,11 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   }
 
   // 硬事务:先落 published_ref + status(幂等锚,最优先)→ 再三落库(尽力,可后补)
-  await recordPublished(id, ref, clientId, brief)
+  await recordPublished(id, ref, clientId, label)
   // 发布信号(me/factory.reel.published):发完喊一声给下游自动建广告。
   // 只在真·PUBLISHED 的 facebook Reel 上喊(草稿不可 promote 成广告,绝不喊)。best-effort,不阻塞返回。
   await emitReelPublishedEvent(id, ref, clientId)
   return { order_id: id, result: 'published', detail: ref.permalink ?? ref.post_id }
-}
-
-function buildCaption(copy: Record<string, unknown>, endcard: Record<string, unknown>): string {
-  const cta = typeof endcard['cta'] === 'string' ? (endcard['cta'] as string) : ''
-  const url = typeof endcard['url'] === 'string' ? (endcard['url'] as string) : ''
-  const offer = Array.isArray(endcard['offer']) ? (endcard['offer'] as string[]).join(' · ') : ''
-  return [cta, offer, url].filter(Boolean).join('\n')
 }
 
 // published_ref 硬事务 + 三落库尽力而为(魏征 B9:三落库失败不回滚 published,片已发出回滚会致重发)
@@ -292,59 +323,82 @@ async function recordPublished(
   id: string,
   ref: PublishedRef,
   clientId: string,
-  brief: Record<string, unknown>,
+  label: string,
 ): Promise<void> {
   await supabaseAdmin
     .from('content_work_orders')
-    .update({ status: 'published', published_ref: ref, next_retry_at: null, updated_at: new Date().toISOString() })
+    .update({ status: 'published', published_ref: ref, reject_reason: null, next_retry_at: null, updated_at: new Date().toISOString() })
     .eq('id', id)
   // 三落库(fde_work_logs + execution_items + flywheel_actions)best-effort,不阻塞、失败可后补
-  await writeThreeBooks(id, ref, clientId, brief).catch((e) =>
+  await writeThreeBooks(id, ref, clientId, label).catch((e) =>
     console.error(`[publish-worker] 三落库失败(片已发出,不回滚) ${id}: ${e instanceof Error ? e.message : e}`),
   )
 }
 
+/** Completed Reel projection shared by initial publish and promote receipts. No provider calls. */
+export async function projectPublishedReelExecutionItem(input: {
+  clientId: string
+  existingItemId: string | null
+  title: string
+  description: string
+}): Promise<string> {
+  const nowIso = new Date().toISOString()
+  if (input.existingItemId) {
+    const { data, error } = await supabaseAdmin
+      .from('execution_items')
+      .update({ status: 'completed', completed_at: nowIso, updated_at: nowIso })
+      .eq('id', input.existingItemId)
+      .eq('client_id', input.clientId)
+      .select('id')
+    if (error) throw error
+    if (!Array.isArray(data) || data.length !== 1) throw new Error('执行事项更新没有命中任何行')
+    return input.existingItemId
+  }
+  const { data, error } = await supabaseAdmin
+    .from('execution_items')
+    .insert({
+      client_id: input.clientId, title: input.title.slice(0, 200), description: input.description,
+      dimension: 'social', status: 'completed', fix_type: 'me_auto', source: 'proactive_signal',
+      completed_at: nowIso, created_at: nowIso, updated_at: nowIso,
+    })
+    .select('id')
+    .maybeSingle()
+  if (error) throw error
+  if (typeof data?.id !== 'string' || !data.id) throw new Error('执行事项创建后没有返回 id')
+  return data.id
+}
+
 // 三落库:CLAUDE.md 强约束——外部执行动作必落 fde_work_logs + execution_items + flywheel_actions + 归因链
-async function writeThreeBooks(
+export async function writeThreeBooks(
   id: string,
   ref: PublishedRef,
   clientId: string,
-  brief: Record<string, unknown>,
+  angle: string,
 ): Promise<void> {
-  const angle = typeof brief['angle'] === 'string' ? (brief['angle'] as string) : 'factory reel'
   const today = new Date().toISOString().slice(0, 10)
-  const execMode = ref.platform === 'facebook' ? 'in_house' : 'third_party'
-  const vendor = ref.platform === 'facebook' ? 'oztop_facebook' : 'cts_publer'
+  const execMode = 'in_house'
+  const vendor = 'meta_graph' // channel (same label as reel-measurement adapter), not customer: client_id is already on every row
 
-  const nowIso = new Date().toISOString()
-  // 三张表各自独立写:一张挂不拖累另两张(魏征 P1-3),尤其 fde_work_logs(PM 主看板)必须落。
+  const actionType = 'factory_reel_publish'
+  const channel = vendor // 给人看的渠道名(待办/日志里显示);vendor 仍是机器标签
+
+  // Each receipt is independent: a board failure must not suppress the work log.
   let execId: string | null = null
-  {
-    // source 用 'proactive_signal'(系统主动信号→自动发布);'factory_auto' 撞 CHECK(魏征 P1-3)
-    const { data, error } = await supabaseAdmin
-      .from('execution_items')
-      .insert({
-        client_id: clientId,
-        title: `【社媒 ${today}】工厂自动发布 Reel — ${angle}`.slice(0, 200),
-        description: `工厂自动发布 Reel「${angle}」→ ${vendor}(${ref.permalink ?? ref.post_id})`,
-        dimension: 'social',
-        status: 'completed',
-        fix_type: 'me_auto',
-        source: 'proactive_signal',
-        completed_at: nowIso,
-        created_at: nowIso,
-        updated_at: nowIso,
-      })
-      .select('id')
-      .maybeSingle()
-    if (error) console.error(`[publish-worker] execution_items 落库失败 ${id}: ${error.message}`)
-    else execId = data?.id ?? null
+  try {
+    execId = await projectPublishedReelExecutionItem({
+      clientId, existingItemId: null,
+      title: `【社媒 ${today}】工厂自动发布 Reel — ${angle}`,
+      description: `工厂自动发布 Reel「${angle}」→ ${channel}(${ref.permalink ?? ref.post_id})`,
+    })
+  } catch (error) {
+    const message = error && typeof error === 'object' && 'message' in error ? error.message : error
+    console.error(`[publish-worker] execution_items 落库失败 ${id}: ${sanitizeFailReason(String(message))}`)
   }
   {
     const { error } = await supabaseAdmin.from('flywheel_actions').insert({
       client_id: clientId,
       flywheel: 'social',
-      action_type: 'factory_reel_publish',
+      action_type: actionType,
       execution_mode: execMode,
       vendor,
       payload: { work_order_id: id, ...ref },
@@ -358,7 +412,7 @@ async function writeThreeBooks(
     const { error } = await supabaseAdmin.from('fde_work_logs').insert({
       client_id: clientId,
       log_date: today,
-      summary: `【社媒｜工厂自动发布】Reel「${angle}」已发到 ${vendor}。${ref.permalink ?? ref.post_id}`,
+      summary: `【社媒｜工厂自动发布】Reel「${angle}」已发到 ${channel}。${ref.permalink ?? ref.post_id}`,
       author_email: 'factory@magicengine.com.au',
     })
     if (error) console.error(`[publish-worker] fde_work_logs 落库失败 ${id}: ${error.message}`)

@@ -195,12 +195,38 @@ export function attributionFromUtm(input: {
   else if (medium === 'email' || source === 'mailchimp') platform = 'email'
   else if (medium === 'referral') platform = 'referral'
 
+  // Meta 动态参数 {{ad.id}} 填进 utm_content 时是纯数字 —— 那是广告 id,不是素材指纹。
+  // 只在 Meta 来源时认;人手写的 'reel-food-01' 仍是 creativeRef。
+  const content = clean(input.utm_content)
+  const contentIsAdId = platform === 'meta' && content !== null && /^\d{6,}$/.test(content)
+
   return {
     platform,
     campaignId: clean(input.utm_campaign),
     adsetId: null,
-    adId: null,
+    adId: contentIsAdId ? content : null,
     adName: null,
-    creativeRef: clean(input.utm_content),
+    creativeRef: contentIsAdId ? null : content,
   }
+}
+
+/**
+ * WhatsApp 点击广告(CTWA)带来的 referral → 归因。
+ *
+ * referral 里有 Meta 给的广告来源(source_id)或点击 id(ctwa_clid)= 这条会话是从
+ * Meta 广告点进来的(platform='meta')。只有 source_type='ad' 时 source_id 才是 ad id;
+ * campaign / adset 不猜。ctwa_clid 是点击 id 不是素材,不进 creativeRef。
+ * 没有 referral 返回空归因(留白是事实)。
+ */
+export function attributionFromWhatsAppReferral(
+  ref:
+    | { source_id?: string | null; source_type?: string | null; ctwa_clid?: string | null }
+    | null
+    | undefined,
+): Attribution {
+  if (!ref) return EMPTY_ATTRIBUTION
+  const isAd = clean(ref.source_type)?.toLowerCase() === 'ad'
+  const adId = isAd ? clean(ref.source_id) : null
+  if (!adId && !clean(ref.ctwa_clid)) return EMPTY_ATTRIBUTION
+  return { ...EMPTY_ATTRIBUTION, platform: 'meta', adId }
 }

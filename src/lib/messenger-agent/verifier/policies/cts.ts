@@ -55,6 +55,7 @@ import { containsPhrase, normalizeAngle } from '@/lib/factory/strategist'
 import type { KnowledgeEntry, KnowledgeReadResult } from '@/lib/knowledge'
 import type { Gate, VerifierResult } from '../framework'
 import { runVerifierGates } from '../framework'
+import { evaluateClaims } from '../content-claims-gate'
 import { callJev, type JevQuestion } from '@/lib/jev/client'
 
 // ─── Identity guard ─────────────────────────────────────────────────────────
@@ -609,6 +610,26 @@ function urlAllowlistGate(): Gate<CtsVerifierContext> {
   }
 }
 
+/**
+ * Gate 8 · content claims (price / date / duration / promise / visa / availability / discount),
+ * language-independent. Unlike `number_claim` (only `$3,880` and ISO dates) this scans Chinese
+ * and English wording through the shared scanner and BLOCKS (not just flags) anything not
+ * backed by a confirmed active product fact. Design: docs/specs/2026-10-14-outbound-gate-consolidation-design.md §4.
+ */
+function contentClaimsGate(): Gate<CtsVerifierContext> {
+  return {
+    id: 'content_claims',
+    check(ctx) {
+      const products = parseActiveProductFacts(ctx.knowledge.entries)
+      return evaluateClaims({
+        text: ctx.agentOutput.reply_text,
+        validPrices: new Set(products.map((t) => t.price_nzd)),
+        validDates: new Set(products.flatMap((t) => t.departure_dates.map((d) => d.slice(0, 10)))),
+      })
+    },
+  }
+}
+
 // ─── Pipeline ────────────────────────────────────────────────────────────────
 
 export const ctsVerifierGates: ReadonlyArray<Gate<CtsVerifierContext>> = [
@@ -619,6 +640,7 @@ export const ctsVerifierGates: ReadonlyArray<Gate<CtsVerifierContext>> = [
   provenanceGate(),
   lengthGate(),
   urlAllowlistGate(),
+  contentClaimsGate(),
 ]
 
 /**

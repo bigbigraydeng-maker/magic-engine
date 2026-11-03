@@ -11,23 +11,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { failJob, getJob } from '@/lib/zhangqian/persistor'
-
-// First-time discovery should never make a user wait beyond this. GLOBAL_TIMEOUT_MS
-// in agent.ts caps the tool-use loop at 5 min, but the final synthesis call adds up
-// to CLAUDE_FINAL_TIMEOUT_MS (90 s) on top. 6 min covers both with headroom.
-// Deeper analysis lives behind connector authorisation (Phase 8.10.S5).
-// ⚠️ 必须 > 张骞的最坏运行时长(GLOBAL_TIMEOUT_MS 380 s + 收尾 MIN_REPORT_MS 140 s
-// = 520 s),否则会把还在正常干活的任务判成卡死。2026-08-25 之前这里是 6 min,
-// 比当时的最坏时长还短 —— 只因为 sweeper 每小时才跑一次才没真出事。
-// 改这个数之前先看 src/lib/zhangqian/agent.ts 的 call budget 段。
-const STALE_JOB_TIMEOUT_MS = 12 * 60 * 1000
-
-function isStaleRunningJob(job: { status: string; started_at: string | null; created_at: string }): boolean {
-  if (job.status !== 'pending' && job.status !== 'running') return false
-  const started = job.started_at ? Date.parse(job.started_at) : Date.parse(job.created_at)
-  return Number.isFinite(started) && Date.now() - started > STALE_JOB_TIMEOUT_MS
-}
+import {
+  failJob,
+  getActiveJob,
+  getJob,
+  isStaleRunningJob,
+  STALE_JOB_TIMEOUT_MS,
+} from '@/lib/zhangqian/persistor'
 
 export async function GET(
   req: NextRequest,
@@ -41,6 +31,12 @@ export async function GET(
 
   try {
     const url = new URL(req.url)
+    // ?active=1 — a refreshed page asks "is a run already in flight?" without a job id.
+    if (url.searchParams.get('active') === '1') {
+      const active = await getActiveJob(supabaseAdmin, clientId)
+      return NextResponse.json({ success: true, job: active })
+    }
+
     const jobId = url.searchParams.get('job_id')
     if (!jobId) {
       return NextResponse.json(

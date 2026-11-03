@@ -66,7 +66,7 @@ export function DncBanner({
       const json = (await res.json()) as { blockingStageLabel?: string | null }
       onSaved(
         json.blockingStageLabel
-          ? `✓ 放回来了，但他还停在「${json.blockingStageLabel}」这一档 —— 用下面的「跟进到哪步」改掉才会出现在名单上`
+          ? `✓ 放回来了，但他还停在「${json.blockingStageLabel}」这一档 —— 用下面的「到哪一步了」改掉才会出现在名单上`
           : `✓ ${name} 放回名单了 —— 明天起会正常出现`,
       )
     } catch {

@@ -61,19 +61,11 @@ const CONNECTOR_CATALOGUE = [
     setupHint: '通过 GA4 Data API 接入。接入后，飞轮归因直接从 GA4 拉取，不再依赖估算。',
   },
   {
-    anchor: 'publer',
-    name: 'Publer 发布器',
-    emoji: '🚀',
-    description: '社媒内容统一调度、定时发布、跨平台分发',
-    setupHint: 'Magic Engine 自有 Publer workspace 已连接。客户社媒账号需在 Publer 后台单独授权。',
-    docsUrl: 'https://publer.io',
-  },
-  {
     anchor: 'social',
     name: '客户社媒账号',
     emoji: '📱',
     description: 'Instagram Business / Facebook Page / TikTok Business 等',
-    setupHint: '客户社媒账号通过 Publer 授权后，Magic Engine 即可读取真实指标和调度发布。',
+    setupHint: '请在「社媒授权与连接」中逐个平台授权。登记用户名或确认标记不代表已获得授权。',
   },
 ]
 
@@ -109,7 +101,7 @@ export async function GET(
 
   const connectors = CONNECTOR_CATALOGUE.map(c => {
     const row = statusMap.get(c.anchor)
-    const status = row?.status ?? 'not_connected'
+    const status = c.anchor === 'social' && row?.status === 'connected' ? 'partial' : row?.status ?? 'not_connected'
     return {
       anchor: c.anchor,
       name: c.name,
@@ -118,7 +110,7 @@ export async function GET(
       setupHint: c.setupHint,
       docsUrl: (c as { docsUrl?: string }).docsUrl,
       status: status as 'connected' | 'not_connected' | 'partial' | 'error',
-      statusLabel:
+      statusLabel: c.anchor === 'social' ? '按平台核验授权' :
         status === 'connected' ? '已连接' :
         status === 'partial'   ? '部分配置' :
         status === 'error'     ? '连接有问题' : '未连接',

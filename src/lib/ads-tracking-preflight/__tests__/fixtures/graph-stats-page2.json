@@ -1,0 +1,7 @@
+{
+  "data": [
+    { "start_time": "2026-10-18T22:00:00+1300", "aggregation": "event", "data": [{ "value": "PageView", "count": 30 }, { "value": "Lead", "count": 2 }] },
+    { "start_time": "2026-10-19T09:00:00+1300", "aggregation": "event", "data": [{ "value": "PageView", "count": 11 }] }
+  ],
+  "paging": { "cursors": { "before": "BEFORE2", "after": "AFTER2" } }
+}

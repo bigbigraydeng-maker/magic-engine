@@ -3,7 +3,7 @@
  *
  * ## 跟 probe-crm-priority-view.ts 的分工
  *
- * 那一个验的是**算得对不对**（4 段人数之和 = 总人数，分段只是分组没有改判）。
+ * 那一个验的是**算得对不对**（两张名单人数之和 = 总人数，分段只是分组没有改判）。
  * 这一个验的是**画得出来没有**：同一份真数据喂进真页面，员工眼睛看到的到底是什么。
  *
  * 分开是因为两者会各自坏：接口算对了、页面把收起来的段整段吞掉，名单上照样凭空
@@ -45,7 +45,7 @@
  *
  * ## 它检查什么
  *
- * 1. 4 段的**段头全都画出来了** —— 包括收起来的那两段（收起来 ≠ 不显示）。
+ * 1. 两张名单的**段头全都画出来了** —— 包括收起来的那一张（收起来 ≠ 不显示）。
  * 2. 段头上的人数 = 接口给的 `total`，不是「这一页拿到几行」。
  * 3. 展开的段，画出来的行数 = 该段 `items` 条数；收起来的段一行都没画。
  * 4. 点一下收起来的段 → 页面确实拿它的 key 重新去要数据，**而且那一段的人真的画出来了**。
@@ -74,6 +74,7 @@ import {
 } from '@/lib/crm/contact-response-row'
 import { visibleCustomColumns, type CustomColumnKey } from '@/lib/crm/table-columns'
 import type { SectionKey } from '@/lib/crm/list-sections'
+import { loadLatestBriefByContact } from '@/lib/crm/brief-lookup'
 
 /** 默认客户 = CTS。脚本参数的缺省值，不是判据 —— 共享代码里没有客户事实。 */
 const DEFAULT_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
@@ -84,12 +85,12 @@ const CLIENT_ID = process.argv[2] ?? DEFAULT_CLIENT_ID
  * 差别只有「不包 NextResponse、不过登录闸」。
  */
 async function loadPriorityResponse(clientId: string, open?: Partial<Record<SectionKey, boolean>>) {
-  const [contacts, touches, stageRows] = await Promise.all([
+  const [contacts, touches, stageRows, briefs] = await Promise.all([
     fetchAll<ContactRow>((from, to) =>
       supabaseAdmin
         .from('contacts')
         .select(
-          'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at',
+          'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at, assigned_to',
         )
         .eq('client_id', clientId)
         .order('id', { ascending: true })
@@ -112,6 +113,7 @@ async function loadPriorityResponse(clientId: string, open?: Partial<Record<Sect
         .order('sort_order', { ascending: true })
         .range(from, to),
     ),
+    loadLatestBriefByContact(clientId),
   ])
 
   const stageMeta = stageMetaOf(stageRows)
@@ -125,14 +127,14 @@ async function loadPriorityResponse(clientId: string, open?: Partial<Record<Sect
 
   const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
   const { sections, focus } = buildPriorityView(
-    { contacts, touchpoints: touches, stageMeta, now: new Date(), perPage: 100, open },
+    { contacts, touchpoints: touches, stageMeta, now: new Date(), perPage: 100, open, briefs },
     (row, ranked) => {
       const tps = byContact.get(row.id) ?? []
       // 跟线上 getPriority 同一句 —— 这里的 contacts 本来就是 ContactRow[]，
       // buildPriorityView 只是把它放宽成了 ContactRowLike 传回来。
       const full = byId.get(row.id)
       if (!full) throw new Error(`装配时找不到联系人 ${row.id}`)
-      const built = responseRowFor(full, tps, stageMeta, buildContactModel(row, tps, stageMeta), ranked.seg)
+      const built = responseRowFor(full, tps, stageMeta, buildContactModel(row, tps, stageMeta), ranked.seg, briefs.get(row.id) ?? null)
       customPerContact.push(built.custom)
       return built.row
     },
@@ -195,11 +197,9 @@ function check(ok: boolean, label: string, detail: string): void {
 async function main(): Promise<void> {
   console.log(`\n【分段视图页面 · 当场试跑】客户 ${CLIENT_ID}\n`)
 
-  // 一次性把四段全展开拿回来，下面的假服务端再按请求里的 `open=` 切 —— 桩必须比真服务端
+  // 一次性把两张名单全展开拿回来，下面的假服务端再按请求里的 `open=` 切 —— 桩必须比真服务端
   // 严，不能对任何 URL 都回同一份（第一版就是那样，于是「点开一段」只验到 URL 对不对）。
-  const full = await loadPriorityResponse(CLIENT_ID, {
-    waiting: true, acted: true, queued: true, off_list: true,
-  })
+  const full = await loadPriorityResponse(CLIENT_ID, { hot: true, cold: true })
   const payload = await loadPriorityResponse(CLIENT_ID)
   const urls: string[] = []
 

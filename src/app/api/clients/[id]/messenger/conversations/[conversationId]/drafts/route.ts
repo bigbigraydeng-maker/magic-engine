@@ -10,7 +10,7 @@
  *
  * Same ownership rule as the sibling `messages` route: the conversation id
  * comes from the URL, so it is re-proven against this client and channel
- * rather than trusted from the access guard alone.
+ * rather than trusted from the access guard alone. Channels: messenger + whatsapp.
  *
  * Responses:
  *   200  { drafts: [...] }
@@ -86,7 +86,9 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     .select('id')
     .eq('id', params.conversationId)
     .eq('client_id', params.id)
-    .eq('channel', 'messenger')
+    // WhatsApp 的草稿也走同一套批准流程（2026-10-21：原来写死 messenger，WhatsApp 通过安全检查的草稿
+    // 没有任何地方能批准）。批准动作的 reply 路由本身不限渠道，这里放开到 whatsapp。
+    .in('channel', ['messenger', 'whatsapp'])
     .maybeSingle()
 
   if (!convo) {

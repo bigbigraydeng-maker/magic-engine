@@ -4,10 +4,10 @@
  * 只内部员工（guardGlobalAdmin 判据）。
  */
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadAdStrategyConfig, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { loadAdStrategyConfig, loadConfigVersion, loadConfigWithVersion, writeConfigCas, type CreativePoolEntry } from '@/lib/ads-strategy/config'
+import { promoVerdict, nzToday } from '@/lib/ads-strategy/promo-window'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,12 +53,33 @@ export async function POST(
   const parsed = parseApproveBody(raw)
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
 
+  // 先读版本再读内容：整数组读改写，写的时候带版本比较，防并发保存互相覆盖。
+  const loadedVersion = await loadConfigVersion(clientId)
+  if (!loadedVersion.ok) return NextResponse.json({ error: loadedVersion.error }, { status: 503 })
   const config = await loadAdStrategyConfig(clientId)
   const entry = config.creative_pool.find(e => e.ref === parsed.ref)
   if (!entry) return NextResponse.json({ error: 'ref not in creative_pool' }, { status: 404 })
 
   if (entry.status === 'approved') {
-    return NextResponse.json({ success: true, config, idempotent: true })
+    // 幂等分支：用已经读到的版本，不再读一次（读完 config 之后再读版本会拿到「旧内容 + 新版本号」）。
+    const version = loadedVersion.version.exists ? loadedVersion.version.updatedAt : null
+    return NextResponse.json({ success: true, config, idempotent: true, version })
+  }
+
+  // 只有 candidate 能手动批准。扩展状态（质检中/测试中/…）归自动流程管，手动批准会绕过流程结论。
+  if (entry.status !== 'candidate') {
+    return NextResponse.json(
+      { error: 'status_not_approvable', message: '这条素材现在处于自动流程状态，不能用手动批准；请等流程结论或联系管理员。' },
+      { status: 409 },
+    )
+  }
+
+  const verdict = promoVerdict(entry.promo_window, nzToday(Date.now()))
+  if (verdict === 'undeclared') {
+    return NextResponse.json({ error: 'promo_window_undeclared', message: '这条素材还没有声明推广期，不能批准：请先声明起止日期，或明确声明长期有效。' }, { status: 422 })
+  }
+  if (verdict === 'expired') {
+    return NextResponse.json({ error: 'promo_window_expired', message: '这条素材的推广期已经过了，不能批准入池。' }, { status: 422 })
   }
 
   const nextPool: CreativePoolEntry[] = config.creative_pool.map(e =>
@@ -67,14 +88,21 @@ export async function POST(
       : e,
   )
 
-  const { error } = await supabaseAdmin
-    .from('ad_strategy_configs')
-    .upsert(
-      { client_id: clientId, creative_pool: nextPool, updated_at: new Date().toISOString() },
-      { onConflict: 'client_id' },
-    )
+  const written = await writeConfigCas(clientId, { creative_pool: nextPool }, loadedVersion.version)
+  if (!written.ok) {
+    if (written.kind === 'conflict') {
+      return NextResponse.json({ error: 'creative_pool_changed_concurrently', message: '素材池刚被别处改过，请刷新后重试。' }, { status: 409 })
+    }
+    return NextResponse.json({ error: written.message }, { status: 500 })
+  }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-
-  return NextResponse.json({ success: true, config: await loadAdStrategyConfig(clientId) })
+  const loaded = await loadConfigWithVersion(clientId)
+  if (!loaded.ok) {
+    return NextResponse.json({
+      success: true,
+      config: await loadAdStrategyConfig(clientId),
+      version_unreadable: true,
+    })
+  }
+  return NextResponse.json({ success: true, config: loaded.config, version: loaded.version })
 }

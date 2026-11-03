@@ -97,11 +97,11 @@ const STUCK_AFTER_MS = 60 * 60 * 1000
 /**
  * 往回看多久的卡死记录。
  *
- * 🔴 这个窗口是**唯一的边界**，不能不写：孤儿行永远不会被谁改好 ——
- *    没有任何代码会回头给 `status='running'` 的行补 `finished_at`，
- *    而清理任务只删「7 天以上 + `status='completed'` + 什么都没留下」的行
- *    （20260907000001），碰不到它们，只有 180 天硬上限才删。
- *    不设窗口 = 这条待办会把几个月的陈年孤儿行天天摆一遍。
+ * 🔴 这个窗口是**唯一的边界**，不能不写。每天的 cron-run-logs-cleanup 会把
+ *    超过预计时长两倍仍停在 `running` 的行收成 `abandoned`（迁移未应用时写成
+ *    `failed` 且错误以 `abandoned:` 开头）。两次清理之间，体检仍要看见还没被
+ *    收口的卡死行。清理任务本身只删「7 天以上 + `status='completed'` + 什么都没留下」
+ *    的行（20260907000001），不删失败史。不设窗口 = 这条待办会把几个月的陈年行天天摆一遍。
  */
 const STUCK_WINDOW_MS = 48 * 60 * 60 * 1000
 
@@ -479,7 +479,12 @@ export async function checkCronHealth(
     overdue: bad.filter((h) => h.state === 'overdue'),
     unknown: bad.filter((h) => h.state === 'unknown_schedule'),
     failing: CRON_REGISTRY
-      .filter((e) => outcomes.get(e.jobName)?.status === 'failed')
+      .filter((e) => {
+        const outcome = outcomes.get(e.jobName)
+        if (!outcome) return false
+        if (outcome.status === 'failed' || outcome.status === 'partial' || outcome.status === 'abandoned') return true
+        return (outcome.error ?? '').startsWith('abandoned:')
+      })
       .map((e) => ({ service: e.service, lastError: outcomes.get(e.jobName)?.error ?? null })),
     stuck,
     silentSuccess,

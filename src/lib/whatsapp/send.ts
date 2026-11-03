@@ -6,9 +6,18 @@
  * Messenger tokens are per-client (client connected their own Page via OAuth).
  * WhatsApp numbers get shared into the Magic Engine business portfolio instead
  * (#1300 — client keeps owning the WABA, ME is only a granted user), so a single
- * ME-wide System User token can read/send across every shared number. That is
- * why this file reads `WHATSAPP_ACCESS_TOKEN` directly instead of calling
- * `getMetaTokenForClient`.
+ * ME-wide System User token can read/send across every shared number.
+ *
+ * ## Token resolution — per-number first, env only as a legacy fallback
+ *
+ * The token is resolved by `resolveWhatsAppCredentials` (see
+ * `lib/whatsapp/credentials.ts`): it looks up the client's own WhatsApp
+ * connection for this number in `platform_oauth_connections` (provider
+ * 'whatsapp') first, and only when there is no such row falls back to the
+ * legacy `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` env pair (and
+ * only when the env number matches the number this client owns). A row that
+ * exists but is non-active or has an unreadable token fails closed — it never
+ * silently falls back to env.
  *
  * ## Sender identity — why this reads the DB and not just the env var
  *
@@ -37,6 +46,8 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { resolveWhatsAppCredentials } from '@/lib/whatsapp/credentials'
+import { isAutomatedActor } from '@/lib/crm/actors'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
 
@@ -210,12 +221,6 @@ export async function sendWhatsApp(input: SendWhatsAppInput): Promise<SendWhatsA
     }
   }
 
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
-  if (!accessToken || !phoneNumberId) {
-    return { ok: false, status: 424, error: 'WhatsApp 授权未配置，无法发送', reason: 'no_token' }
-  }
-
   // Which number does this conversation's client actually own? Sending from a
   // number that belongs to a different client is the one failure here that
   // reaches a real customer wearing the wrong business's identity.
@@ -235,18 +240,23 @@ export async function sendWhatsApp(input: SendWhatsAppInput): Promise<SendWhatsA
   }
 
   const ownedNumberId = owner?.whatsapp_phone_number_id ?? null
-  if (!ownedNumberId || ownedNumberId !== phoneNumberId) {
-    // Fail closed on both "this client has no number bound" and "the bound
-    // number is not the one we hold a token for".
+  if (!ownedNumberId) {
     return {
       ok: false,
       status: 424,
-      error: ownedNumberId
-        ? '这个客户的 WhatsApp 号码跟当前配置的发送号码不一致，已阻止发送（避免用别的客户号码发给客人）'
-        : '这个客户还没有绑定 WhatsApp 号码，不能发送',
+      error: '这个客户还没有绑定 WhatsApp 号码，不能发送',
       reason: 'no_token',
     }
   }
+
+  // Resolve the token for THIS number: the client's own connection first, the
+  // legacy env pair only as a fallback when the number matches. A non-active
+  // or unreadable connection fails closed rather than falling back to env.
+  const creds = await resolveWhatsAppCredentials(convo.client_id, ownedNumberId)
+  if (!creds.ok) {
+    return { ok: false, status: 424, error: creds.error, reason: 'no_token' }
+  }
+  const { accessToken, phoneNumberId } = creds.credentials
 
   // Audit BEFORE the send, and refuse to send if the audit row cannot be
   // written: this module speaks to a real customer as the client, so "who said
@@ -304,7 +314,7 @@ export async function sendWhatsApp(input: SendWhatsAppInput): Promise<SendWhatsA
     conversation_id: convo.id,
     message_id: sent.messageId ?? `me-${auditId}`,
     direction: 'outbound',
-    sender_id: phoneNumberId,
+    sender_id: creds.credentials.phoneNumberId,
     sender_name: input.sentByEmail,
     body,
     sent_at: nowIso,
@@ -323,13 +333,13 @@ export async function sendWhatsApp(input: SendWhatsAppInput): Promise<SendWhatsA
     console.error(`[whatsapp/send] 会话 ${convo.id} 时间戳更新失败:`, bumpErr.message)
   }
 
-  await markContactFollowedUp(convo)
+  await markContactFollowedUp(convo, isAutomatedActor(input.sentByEmail))
 
   return { ok: true, whatsappMessageId: sent.messageId, window: window.kind }
 }
 
 /** 记 CRM 触点 —— 跟 `lib/messenger/send.ts` 里同名函数同一套幂等键逻辑，见那边的注释。 */
-async function markContactFollowedUp(convo: ConversationRow): Promise<void> {
+async function markContactFollowedUp(convo: ConversationRow, automated: boolean): Promise<void> {
   if (!convo.contact_id) return
 
   try {
@@ -341,7 +351,9 @@ async function markContactFollowedUp(convo: ConversationRow): Promise<void> {
         direction: 'outbound',
         occurred_at: new Date().toISOString(),
         summary: '我们在 WhatsApp 回复过',
-        metadata: { thread_id: convo.id, sender: 'page' },
+        // 机器发的（自动安抚 / AI 起草经人批准发出）标 automated：CRM 不把它算成「有人联系过他」
+        // （2026-10-22 PM）。人亲手发的不带这个键——同一个会话一行触点、upsert 会把旧的机器标记一并覆盖掉。
+        metadata: { thread_id: convo.id, sender: 'page', ...(automated ? { automated: true } : {}) },
         source: 'whatsapp',
         source_ref: `${convo.id}:out`,
       },

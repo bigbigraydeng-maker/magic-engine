@@ -28,6 +28,7 @@ afterEach(() => {
 })
 
 const CLIENT = '5a3fb2b7-72c3-471e-a5e7-1a528c0f776c'
+const INPUT = { clientId: CLIENT, userId: 'operator-one', targetPageId: '778899' }
 
 /** Sign an arbitrary base64url payload with the stubbed app secret, so a test
  *  can build a validly-signed state carrying fields buildState would not emit. */
@@ -38,11 +39,11 @@ function signPayload(payload: string): string {
 
 describe('meta-oauth state', () => {
   it('round-trips the client id it was built with', () => {
-    expect(verifyState(buildState(CLIENT))).toEqual({ clientId: CLIENT })
+    expect(verifyState(buildState(INPUT))).toEqual({ ...INPUT, nonce: expect.stringMatching(/^[0-9a-f]{32}$/) })
   })
 
   it('rejects a state whose payload was swapped for another client', () => {
-    const state = buildState(CLIENT)
+    const state = buildState(INPUT)
     const sig = state.slice(state.lastIndexOf('.'))
     const forged = Buffer.from(
       JSON.stringify({ clientId: 'c0000000-0000-0000-0000-000000000000', exp: Date.now() + 60_000 }),
@@ -52,14 +53,14 @@ describe('meta-oauth state', () => {
   })
 
   it('rejects a state signed with a different app secret', () => {
-    const state = buildState(CLIENT)
+    const state = buildState(INPUT)
     vi.stubEnv('FACEBOOK_APP_SECRET', 'someone-elses-secret')
     expect(verifyState(state)).toBeNull()
   })
 
   it('rejects a state past its ten-minute life', () => {
     vi.useFakeTimers()
-    const state = buildState(CLIENT)
+    const state = buildState(INPUT)
     vi.advanceTimersByTime(11 * 60 * 1000)
     expect(verifyState(state)).toBeNull()
   })
@@ -71,23 +72,42 @@ describe('meta-oauth state', () => {
   })
 
   it('round-trips the publishing intent when one is set', () => {
-    expect(verifyState(buildState(CLIENT, 'publishing'))).toEqual({
-      clientId: CLIENT,
+    expect(verifyState(buildState({ ...INPUT, intent: 'publishing' }))).toEqual({
+      ...INPUT, nonce: expect.any(String),
       intent: 'publishing',
     })
   })
 
-  it('an intent-less state stays exactly the old shape — no intent key leaks in', () => {
-    // The inbox connect must be untouched: same signed payload, no intent.
-    expect(verifyState(buildState(CLIENT))).toEqual({ clientId: CLIENT })
+  it('an inbox state omits intent while retaining actor, browser nonce and target', () => {
+    expect(verifyState(buildState(INPUT))).toEqual({ ...INPUT, nonce: expect.any(String) })
   })
 
-  it('ignores an unrecognised intent rather than trusting it', () => {
+  it('rejects an unrecognised intent rather than downgrading it to inbox access', () => {
     const forgedPayload = Buffer.from(
-      JSON.stringify({ clientId: CLIENT, exp: Date.now() + 60_000, intent: 'delete_everything' }),
+      JSON.stringify({ ...INPUT, nonce: 'a'.repeat(32), exp: Date.now() + 60_000, intent: 'delete_everything' }),
     ).toString('base64url')
     // Validly signed — we are testing intent validation, not the HMAC.
-    expect(verifyState(signPayload(forgedPayload))).toEqual({ clientId: CLIENT })
+    expect(verifyState(signPayload(forgedPayload))).toBeNull()
+  })
+
+  it('generates independent states even for two starts in the same millisecond', () => {
+    vi.useFakeTimers()
+    expect(buildState(INPUT)).not.toBe(buildState(INPUT))
+  })
+
+  it.each(['userId', 'nonce', 'targetPageId'])('rejects legacy or incomplete state missing %s', key => {
+    const value: Record<string, unknown> = { ...INPUT, nonce: 'a'.repeat(32), exp: Date.now() + 60_000 }
+    delete value[key]
+    expect(verifyState(signPayload(Buffer.from(JSON.stringify(value)).toString('base64url')))).toBeNull()
+  })
+
+  it.each([
+    { clientId: '../other' }, { userId: '' }, { nonce: 'short' },
+    { targetPageId: 'not-a-page' }, { targetPageId: null, intent: 'publishing' },
+    { exp: Date.now() + 3_600_000 }, { exp: null },
+  ])('rejects invalid signed binding fields %j', fields => {
+    const value = { ...INPUT, nonce: 'a'.repeat(32), exp: Date.now() + 60_000, ...fields }
+    expect(verifyState(signPayload(Buffer.from(JSON.stringify(value)).toString('base64url')))).toBeNull()
   })
 })
 

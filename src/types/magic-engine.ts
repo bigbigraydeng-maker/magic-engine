@@ -240,7 +240,6 @@ export interface ContentPost {
   status: ContentStatus
   scheduled_at?: string
   published_at?: string
-  publer_post_id?: string
   generation_context_snapshot?: Record<string, unknown> | null
   quality_score?: number | null      // 0–10, written after quality rubric check
 }

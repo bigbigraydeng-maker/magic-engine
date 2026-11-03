@@ -40,6 +40,8 @@ const contact = (id: string, name: string) => ({
   segment: 'nurture',
   segmentLabel: '慢慢养',
   temperature: 'cold',
+  nextAction: { list: 'cold', verb: 'system_watching', verbLabel: '系统盯着', line: '系统盯着 —— 聊过一轮断了', reason: '聊过一轮断了', aiSuggestion: null, intentBoost: false },
+  intent: null,
   custom: {},
 })
 
@@ -73,6 +75,8 @@ function stubFetch(contacts: ReturnType<typeof contact>[]) {
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   mockClientId = NAL
+  // 这页默认进「今天先联系」；本文件测的是平铺名单里的阶段按钮。
+  window.history.replaceState({}, '', '/dashboard/clients/nal/crm/all?view=all')
 })
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -85,7 +89,9 @@ describe('NAL 点"已成交"档 → 弹金额面板，不是普通确认框', ()
     render(<CrmAllContactsPage />)
 
     fireEvent.click(await screen.findByText('Jordan Example'))
-    fireEvent.click(await screen.findByRole('button', { name: /现在：/ }))
+    // 改阶段收在「更多」里了（PM 2026-10-10 按钮精简）——先展开再点。
+    fireEvent.click(await screen.findByRole('button', { name: /更多/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /改「到哪一步了」/ }))
     fireEvent.click(await withinDrawer().findByText('已成交'))
 
     expect(await screen.findByText(/这笔生意多少钱/)).toBeTruthy()
@@ -97,7 +103,9 @@ describe('NAL 点"已成交"档 → 弹金额面板，不是普通确认框', ()
     render(<CrmAllContactsPage />)
 
     fireEvent.click(await screen.findByText('Jordan Example'))
-    fireEvent.click(await screen.findByRole('button', { name: /现在：/ }))
+    // 改阶段收在「更多」里了（PM 2026-10-10 按钮精简）——先展开再点。
+    fireEvent.click(await screen.findByRole('button', { name: /更多/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /改「到哪一步了」/ }))
     fireEvent.click(await withinDrawer().findByText('已成交'))
     await screen.findByText(/这笔生意多少钱/)
 
@@ -123,7 +131,9 @@ describe('别的客户点同名档位——普通确认框，不弹金额面板�
     render(<CrmAllContactsPage />)
 
     fireEvent.click(await screen.findByText('Jordan Example'))
-    fireEvent.click(await screen.findByRole('button', { name: /现在：/ }))
+    // 改阶段收在「更多」里了（PM 2026-10-10 按钮精简）——先展开再点。
+    fireEvent.click(await screen.findByRole('button', { name: /更多/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /改「到哪一步了」/ }))
     fireEvent.click(await withinDrawer().findByText('已成交'))
 
     expect(confirmSpy).toHaveBeenCalled()

@@ -12,23 +12,23 @@ describe('分段模式', () => {
     direction: 'next',
     loadedIds: ['a', 'b', 'c'],
     currentIndex: 0,
-    sectionKey: 'waiting',
-    sectionTitle: '客人在等你',
+    sectionKey: 'hot',
+    sectionTitle: '今天要联系',
     sectionPage: 1,
     perPage: 100,
     sectionTotal: 217,
-    nextSection: { key: 'acted', title: '已经回过', total: 73 },
+    nextSection: { key: 'cold', title: '先放着', total: 73 },
     ...over,
   })
 
   it('还在已加载的这批里 → 直接换人，位置是全局序号（段内页码换算过）', () => {
     const step = nextNavStep(base({ sectionPage: 1, currentIndex: 0, perPage: 100 }))
-    expect(step).toEqual({ kind: 'move', contactId: 'b', positionLabel: '客人在等你 · 第 2 位 / 共 217 位' })
+    expect(step).toEqual({ kind: 'move', contactId: 'b', positionLabel: '今天要联系 · 第 2 位 / 共 217 位' })
   })
 
   it('跨页的位置换算是对的——第 2 页第 0 个 = 全局第 101 位', () => {
     const step = nextNavStep(base({ sectionPage: 2, currentIndex: 0, perPage: 100 }))
-    expect(step).toEqual({ kind: 'move', contactId: 'b', positionLabel: '客人在等你 · 第 102 位 / 共 217 位' })
+    expect(step).toEqual({ kind: 'move', contactId: 'b', positionLabel: '今天要联系 · 第 102 位 / 共 217 位' })
   })
 
   it('这一页走完、全段还没完 → need_more，要打开新一页的第一个', () => {
@@ -43,7 +43,7 @@ describe('分段模式', () => {
     )
     expect(step.kind).toBe('end_of_section')
     expect((step as { message: string }).message).toContain('217 位看完了')
-    expect((step as { message: string }).message).toContain('已经回过')
+    expect((step as { message: string }).message).toContain('先放着')
     expect((step as { message: string }).message).toContain('73 位')
   })
 
@@ -128,15 +128,15 @@ describe('currentPositionLabel —— 抽屉打开那一刻就要有值，不等
       direction: 'next',
       loadedIds: ['a', 'b', 'c'],
       currentIndex: 1,
-      sectionKey: 'waiting',
-      sectionTitle: '客人在等你',
+      sectionKey: 'hot',
+      sectionTitle: '今天要联系',
       sectionPage: 2,
       perPage: 100,
       sectionTotal: 217,
       nextSection: null,
     })
     // 第 2 页第 1 个（0-based）= 全局第 102 位
-    expect(label).toBe('客人在等你 · 第 102 位 / 共 217 位')
+    expect(label).toBe('今天要联系 · 第 102 位 / 共 217 位')
   })
 
   it('平铺模式：只给本页序号，不出现"共"字', () => {

@@ -17,7 +17,7 @@ import { validateRegistry } from '../validate'
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..')
 
 /** 防空跑:总数 + 每泳道最小数(漏 import 一个泳道文件立刻红,总数断言盖不住这种)。 */
-const LANE_MINIMUMS = { shared: 5, geo: 5, seo: 6, social: 2, ads: 2 } as const
+const LANE_MINIMUMS = { shared: 5, geo: 5, seo: 6, social: 1, ads: 2 } as const
 
 describe('登记册规模(防清单被腰斩后静默全绿)', () => {
   it('总数 ≥ 20', () => {

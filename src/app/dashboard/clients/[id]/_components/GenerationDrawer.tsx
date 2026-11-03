@@ -231,7 +231,7 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
               <div className="mt-3">
                 {campaigns.length === 0 ? (
                   <p className="text-xs text-me-ochre bg-me-ochre/10 rounded-lg px-3 py-2">
-                    当前无进行中的活动。请先在「推广活动」tab 中创建活动。
+                    当前无进行中的活动。请先在客户的「推广活动」页面创建活动。
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -311,13 +311,13 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
                 ✓ 已保存 {savedCount} 条内容草稿
               </p>
               <p className="text-xs text-[#5C8A4A]">
-                前往内容板批量检查和审批
+                前往每日计划检查和审批
               </p>
               <a
-                href={`/dashboard/content?client=${clientId}`}
+                href={`/dashboard/clients/${clientId}/daily-plan`}
                 className="inline-block text-xs bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white px-4 py-2 rounded-lg font-medium transition-colors"
               >
-                前往内容板 →
+                前往每日计划 →
               </a>
             </div>
           )}
@@ -347,7 +347,7 @@ export function GenerationDrawer({ clientId, open, onClose, executionItemId }: P
             </button>
           )}
           <p className="text-center text-xs text-me-charcoal/45">
-            批量生成请前往「推广活动」tab 使用一键生成
+            批量生成请前往客户的「推广活动」页面使用一键生成
           </p>
         </div>
         </BriefGateBanner>

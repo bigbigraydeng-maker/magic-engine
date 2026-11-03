@@ -76,6 +76,29 @@ Tier Classification：把广告支柱已落地的「信封内自治 + PM 日检�
 
 子牙、诸葛亮 + PM 自己的构建控制室。其余 agent 不占窗口。
 
+### 4.4 代码对照（五列，2026-10-18 补）
+
+> 来源：`docs/specs/2026-10-18-me-agent-standard-process-v1.0.md` 地基块 1。**只加列，不改上面 §4.1–§4.3 PM 已认的内容。** 只覆盖 §4.1 的运行时 Agent 和常驻的诸葛亮；§4.2 审查团产品里本来就没有代码，不填。
+> 叫醒登记一列取自 `src/lib/cron/registry.ts` 的 `CRON_REGISTRY`（写 `jobName`，体检按它查 `cron_run_logs`）或 `src/lib/inngest/functions/index.ts` 的函数，2026-10-18 逐个核过；**没查到的写「未核」，不猜**。谁留谁撤谁改名由 PM 定。
+
+| 名单上的人 | 代码入口 | 叫醒登记在哪 | 调不调模型 | 兼审查 | 代码实际在做 vs 名单写的 |
+|---|---|---|---|---|---|
+| 卫青 | `src/lib/ads-strategy/` | `google-data-pullback-daily`（定时，`registry.ts:157`）；D3 自动暂停为 Inngest 事件函数 `adsD3AutoPause`（不在登记表） | 不调（全目录零个文件调模型） | 否 | 名单目标一致；手册 `11-weiqing.md` 开头写用 Sonnet / Haiku，与代码不符 |
+| 孔子 | `src/lib/seo-meta/` 等 | `seo-patrol-daily`（`:254`）；标题周循环 `seo-meta-cycle-step6-completed`（Inngest 定时，`:329`） | 未核 | 否 | 代码里不出现这个名字 |
+| 孟子 | `src/lib/ai-tracker/` 等 | `ai-tracker-weekly`（`:121`） | 未核 | 否 | 同上 |
+| 苏东坡 | `src/lib/factory/`、社媒 | `factory-publish-sweeper` / `factory-publish-worker`（`:147-148`）；日计划自动发帖 `cloud-daily-plan-auto-publish`（Inngest 定时，新西兰时间每小时第 20 分；不在定时登记表） | 未核 | **是** | 社媒发布全在内核外 |
+| 司马迁 | `src/lib/inngest/functions/simaqian-reputation-weekly.ts` | `simaqian-reputation-weekly`（Inngest 定时，`:366`） | 未核 | 否 | — |
+| 张骞 | `src/lib/zhangqian/` | `zhangqian-sweeper`（`:270`）；另有 discover / public-scan / register 接口触发 | 是 | 否 | 一致 |
+| 华佗 | `src/lib/huatuo/` | **无闹钟**：处方生成 / refine 接口触发 | 是 | 否 | 名单写「6 支柱打分」，代码是开处方；6 维打分实际在 `src/lib/diagnostic/runner.ts` |
+| 鲁班 | `src/lib/luban/`（入口 `execution/[itemId]/luban`、`clients/[id]/luban`） | **无闹钟**：人在执行项页面对话触发 | 是 | 否 | 名单写「只做已授权的」不准确：大模型可直接调 `publish_to_gbp` 发谷歌商家帖子，绕过内核（台账 `2026-10-18-luban-gbp-publish-bypasses-kernel`；目前无授权、零调用） |
+| 马良 | `src/lib/maliang/render-check.ts`、`src/lib/assets/vision-analyzer.ts`、`storyboard-generator.ts`、`case-library/` | `maliang-render-check`（Inngest，`:436-438`） | 是（出片检查 Gemini，视觉分析 GPT-4o-mini） | **是** | 名单一致 |
+| 李白 | `src/lib/blog/`、`src/lib/geo/`、`content/prompt-library-audit.ts` | `libai-prompt-library-monthly`（Inngest 定时，每月，`registry.ts:362`） | 是 | 否 | 待扩展 |
+| 诸葛亮（常驻） | `src/lib/zhuge/` | `zhuge-weekly-recalculate`（`:271`）；另有 conduct 接口 | 是 | 否 | 两条路径：conduct 带记忆与工具，每周重算两样都不带 |
+
+**名单上没有、代码里有**：孙子（`src/lib/seo-agent/`，只被 `seo-agent/plan` 接口调）——收不收由 PM 定。**CLAUDE.md 里有、名单和代码都没有**：司马徽（DAPE「发现」段）——留不留由 PM 定。
+
+**两道开关前置闸**（地基块 4）：接通谷歌商家授权前，台账 `2026-10-18-luban-gbp-publish-bypasses-kernel` 须 verified；关广告演练开关前，台账 `2026-09-28-envelope-facts-cooldown-blind-to-kernel-own-changes` 须 verified。
+
 ## 5. 分批与风险分级（§11 三维打分已亮出）
 
 | 批 | 内容 | 频率 / IMPACT / 收入 → 优先级 | 风险级 | 执行 | 复审 |

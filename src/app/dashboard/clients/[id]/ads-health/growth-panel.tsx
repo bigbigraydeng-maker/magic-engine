@@ -13,7 +13,10 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
+import { BUDGET_HOLD_NOTE } from '@/lib/ads-strategy/war-map/followup'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
+import type { AdsScorecard } from '@/lib/ads-strategy/portfolio/scorecard'
+import { ApprovalContextNotes } from './approval-context-notes'
 
 export type GrowthVerdict = 'on_track' | 'behind' | 'unreachable_within_caps' | 'unknown'
 
@@ -24,6 +27,9 @@ export interface GoalPaceView {
   projectedEnd: number | null
   verdict: GrowthVerdict
   reason: string
+  reachableAtCap?: number
+  reachableAtActualSpend?: number
+  dataThrough?: string
 }
 
 export interface GrowthFinding {
@@ -38,6 +44,8 @@ export interface GrowthFinding {
 
 export interface GrowthStateView {
   date: string
+  /** 目标卡是不是刚读出来的（员工版）；缺省 = 旧接口，按「每日缓存」处理 */
+  goal_live?: { live: boolean; readAtIso: string }
   data_completeness: 'complete' | 'partial'
   goal_pace: GoalPaceView | null
   payload: {
@@ -47,71 +55,44 @@ export interface GrowthStateView {
     opportunities?: GrowthFinding[]
     opportunitiesSkippedReason?: string | null
     problemsSupersededByOpportunities?: number
-    goal?: { title: string; label: string; target: number; dayIndex: number; totalDays: number } | null
+    goal?: { title: string; label: string; target: number; dayIndex: number; totalDays: number; primaryMetricKey?: string } | null
+    /** 每日广告成绩单（2026-11-03 起写入；老行没有） */
+    scorecard?: AdsScorecard | { error: string }
   } | null
 }
 
-const PACE_TONE: Record<GrowthVerdict, { dot: string; text: string; tint: string; label: string }> = {
-  on_track:                { dot: 'bg-emerald-500', text: 'text-emerald-700', tint: 'border-emerald-200 bg-emerald-50', label: '按节奏走' },
-  behind:                  { dot: 'bg-amber-500',   text: 'text-amber-700',   tint: 'border-amber-200 bg-amber-50',     label: '进度落后' },
-  unreachable_within_caps: { dot: 'bg-red-500',     text: 'text-red-700',     tint: 'border-red-200 bg-red-50',         label: '按现在的预算到不了' },
-  unknown:                 { dot: 'bg-gray-300',    text: 'text-gray-600',    tint: 'border-gray-200 bg-gray-50',       label: '未判' },
+export function goalLiveNote(meta: GrowthStateView['goal_live']): string | undefined {
+  if (!meta) return undefined
+  if (!meta.live) return '实时没读到生效中的目标（读取失败或已无目标），这张卡显示的是昨晚的缓存，可能不是最新。'
+  const t = new Date(meta.readAtIso)
+  if (Number.isNaN(t.getTime())) return '页面打开时现算'
+  return `页面打开时现算 · ${t.toLocaleTimeString('en-NZ', { timeZone: 'Pacific/Auckland', hour: '2-digit', minute: '2-digit', hour12: false })}`
 }
 
-/** 客户版：「按现在的预算到不了」带加钱暗示，换成中性说法。 */
-const CLIENT_PACE_LABEL: Record<GrowthVerdict, string> = {
-  on_track: '按节奏走',
-  behind: '进度落后',
-  unreachable_within_caps: '按现在的速度可能到不了',
-  unknown: '暂时判断不了',
+function suggestsMoreBudget(f: GrowthFinding): boolean {
+  if (f.code === 'O1') return true
+  return `${f.title} ${(f.reasons ?? []).join(' ')}`.includes('加预算')
 }
 
-type GoalView = { title: string; label: string; target: number; dayIndex: number; totalDays: number }
-
-function GoalBar({ goal, pace, clientView = false }: { goal: GoalView | null; pace: GoalPaceView | null; clientView?: boolean }) {
-  if (!goal || !pace) {
-    return (
-      <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
-        {clientView
-          ? '这段时间还没有设定广告目标，设好后这里会显示进度。'
-          : '这个客户还没有生效中的目标 —— 设了目标之后，这里会显示「还差多少、来不来得及」。'}
-      </div>
-    )
-  }
-  const tone = PACE_TONE[pace.verdict]
-  const label = clientView ? CLIENT_PACE_LABEL[pace.verdict] : tone.label
-  // 未判时进度条不画：画一条 0% 的条会被读成「一个都没有」。
-  const pct = pace.verdict === 'unknown' || pace.actualToDate === null
-    ? null
-    : Math.max(0, Math.min(100, Math.round((pace.actualToDate / goal.target) * 100)))
-
-  return (
-    <div className={`rounded-xl border p-5 ${tone.tint}`}>
-      <div className="flex items-center gap-2.5">
-        <span className={`inline-block w-3 h-3 rounded-full ${tone.dot}`} />
-        <span className={`text-base font-semibold ${tone.text}`}>{goal.title} · {label}</span>
-      </div>
-
-      {pct === null ? (
-        <p className="mt-2 text-sm text-gray-600">{pace.reason}</p>
-      ) : (
-        <>
-          <div className="mt-3 h-2 w-full rounded-full bg-white/70 overflow-hidden">
-            <div className={`h-full ${tone.dot}`} style={{ width: `${pct}%` }} />
-          </div>
-          <p className="mt-2 text-sm text-gray-700">
-            目标 {goal.target} {goal.label} · 第 {goal.dayIndex}/{goal.totalDays} 天 · 已到{' '}
-            <b>{pace.actualToDate}</b>
-            {pace.projectedEnd !== null && <> · 按现在的速度到期约 <b>{pace.projectedEnd}</b></>}
-          </p>
-          <p className="mt-1 text-xs text-gray-500">{pace.reason}</p>
-        </>
-      )}
-    </div>
-  )
+function useBudgetHold(clientId: string | undefined, enabled: boolean): boolean {
+  const [hold, setHold] = useState(false)
+  useEffect(() => {
+    if (!clientId || !enabled) {
+      setHold(false)
+      return
+    }
+    let alive = true
+    setHold(false)
+    fetch(`/api/clients/${clientId}/ad-health/war-map`)
+      .then(async (response) => response.ok ? response.json() as Promise<{ view?: { budgetHold?: boolean } }> : null)
+      .then((json) => { if (alive) setHold(json?.view?.budgetHold === true) })
+      .catch(() => { /* 读不到就不加这句，跟进卡自己会说读不到 */ })
+    return () => { alive = false }
+  }, [clientId, enabled])
+  return hold
 }
 
-function FindingCard({ f, kind, clientId, cycleDate }: { f: GrowthFinding; kind: 'problem' | 'opportunity'; clientId?: string; cycleDate?: string }) {
+function FindingCard({ f, kind, clientId, cycleDate, budgetHold, onPendingAdsChanged }: { f: GrowthFinding; kind: 'problem' | 'opportunity'; clientId?: string; cycleDate?: string; budgetHold?: boolean; onPendingAdsChanged?: () => void }) {
   const isHit = f.status === 'hit'
   const tint = !isHit ? 'border-gray-200 bg-gray-50'
     : kind === 'problem' ? 'border-amber-200 bg-amber-50' : 'border-sky-200 bg-sky-50'
@@ -130,15 +111,37 @@ function FindingCard({ f, kind, clientId, cycleDate }: { f: GrowthFinding; kind:
       {f.reasons && f.reasons.length > 0 && (
         <p className="mt-1 text-xs text-gray-500">{f.reasons[0]}</p>
       )}
+      {budgetHold && suggestsMoreBudget(f) && (
+        <p className="mt-1 text-xs text-amber-800">{BUDGET_HOLD_NOTE}</p>
+      )}
       {kind === 'opportunity' && f.code === 'O1' && clientId && f.units?.map(unit => (
-        <O1Approval key={unit.id} clientId={clientId} adsetId={unit.id} cycleDate={cycleDate} o1Evidence={f.evidence ?? {}} />
+        <O1Approval
+          key={unit.id}
+          clientId={clientId}
+          adsetId={unit.id}
+          cycleDate={cycleDate}
+          o1Evidence={f.evidence ?? {}}
+          onPendingAdsChanged={onPendingAdsChanged}
+        />
       ))}
     </div>
   )
 }
 
 interface O1Run { id: string; status: string; input: Record<string, unknown>; evidence: Record<string, unknown>; authorization_decision_id: string | null }
-function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: string; adsetId: string; cycleDate?: string; o1Evidence: Record<string, unknown> }) {
+function O1Approval({
+  clientId,
+  adsetId,
+  cycleDate,
+  o1Evidence,
+  onPendingAdsChanged,
+}: {
+  clientId: string
+  adsetId: string
+  cycleDate?: string
+  o1Evidence: Record<string, unknown>
+  onPendingAdsChanged?: () => void
+}) {
   const [runs, setRuns] = useState<O1Run[]>([])
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -158,6 +161,7 @@ function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: st
       const json = await response.json() as { error?: string }
       setMessage(response.ok ? '已提交，等待负责人核对并批准。' : json.error ?? '暂时无法提交。')
       await refresh()
+      if (response.ok) onPendingAdsChanged?.()
     } catch { setMessage('网络暂时不可用，请稍后重试。') }
     finally { setBusy(false) }
   }
@@ -169,6 +173,7 @@ function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: st
       const json = await response.json() as { error?: string }
       setMessage(response.ok ? (resolution === 'approve' ? '已批准，正在排队执行；完成后会记录 Meta 回读结果。' : '已驳回。') : json.error ?? '处理失败。')
       await refresh()
+      if (response.ok) onPendingAdsChanged?.()
     } catch { setMessage('网络暂时不可用，请稍后重试。') }
     finally { setBusy(false) }
   }
@@ -187,6 +192,14 @@ function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: st
     <div className="mt-3 rounded-lg border border-sky-200 bg-white p-3 text-xs text-gray-700">
       <p>这是系统建议，不会自动加预算。批准后最多上调 20%，并受客户预算上限约束。</p>
       {typeof before === 'number' && typeof after === 'number' && <p className="mt-1">当前{budgetTarget}日预算 {money(before)} → 建议 {money(after)}</p>}
+      {(pending ?? active ?? terminal) && (
+        <ApprovalContextNotes
+          clientId={clientId}
+          adsetId={adsetId}
+          runId={(pending ?? active ?? terminal)!.id}
+          runStatus={(pending ?? active ?? terminal)!.status}
+        />
+      )}
       {typeof o1Evidence.ctr_by_day === 'string' && <p className="mt-1 text-gray-500">最近三天 CTR：{o1Evidence.ctr_by_day.split('|').join(' / ')}；账户中位数：{String(o1Evidence.median_by_day ?? '—').split('|').join(' / ')}</p>}
       {pending ? (
         <>
@@ -212,7 +225,7 @@ function ClientGrowthPanel({ view }: { view: ClientGrowthView }) {
   const cards = view.adCards
   return (
     <div className="space-y-4">
-      <GoalBar goal={view.goal} pace={view.goal_pace} clientView />
+      <p className="text-xs text-gray-500">目标进度在「今天看这里」标签最上方。</p>
 
       <section>
         {cards ? (
@@ -247,7 +260,17 @@ function ClientGrowthPanel({ view }: { view: ClientGrowthView }) {
 /**
  * @param state  null = 今天还没巡察过；undefined = 这一段读不到（接口出错）
  */
-export default function GrowthPanel({ state, clientId }: { state: GrowthStateView | ClientGrowthView | null | undefined; clientId?: string }) {
+export default function GrowthPanel({
+  state,
+  clientId,
+  onPendingAdsChanged,
+}: {
+  state: GrowthStateView | ClientGrowthView | null | undefined
+  clientId?: string
+  onPendingAdsChanged?: () => void
+}) {
+  const clientView = state != null && isClientView(state)
+  const budgetHold = useBudgetHold(clientId, state != null && !clientView)
   if (state === undefined) {
     return (
       <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -263,7 +286,7 @@ export default function GrowthPanel({ state, clientId }: { state: GrowthStateVie
     )
   }
 
-  if (isClientView(state)) return <ClientGrowthPanel view={state} />
+  if (state != null && isClientView(state)) return <ClientGrowthPanel view={state} />
 
   const problems = (state.payload?.problems ?? []).filter(f => f.status === 'hit')
   const opportunities = (state.payload?.opportunities ?? []).filter(f => f.status === 'hit')
@@ -271,7 +294,7 @@ export default function GrowthPanel({ state, clientId }: { state: GrowthStateVie
 
   return (
     <div className="space-y-4">
-      <GoalBar goal={state.payload?.goal ?? null} pace={state.goal_pace} />
+      <p className="text-xs text-gray-500">目标进度在「今天看这里」标签最上方。</p>
 
       {partial && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
@@ -292,7 +315,7 @@ export default function GrowthPanel({ state, clientId }: { state: GrowthStateVie
           <h3 className="mb-2 text-sm font-semibold text-gray-700">要看的事（{problems.length}）</h3>
           {problems.length === 0
             ? <p className="text-xs text-gray-400">今天没发现要紧的问题。</p>
-            : <div className="space-y-2">{problems.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="problem" />)}</div>}
+            : <div className="space-y-2">{problems.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="problem" budgetHold={budgetHold} />)}</div>}
         </section>
 
         <section>
@@ -301,7 +324,17 @@ export default function GrowthPanel({ state, clientId }: { state: GrowthStateVie
             ? <p className="text-xs text-gray-400">数据不全，这天没判。</p>
             : opportunities.length === 0
               ? <p className="text-xs text-gray-400">今天没发现明显还有空间的地方。</p>
-            : <div className="space-y-2">{opportunities.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="opportunity" clientId={clientId} cycleDate={state.date} />)}</div>}
+            : <div className="space-y-2">{opportunities.map((f, i) => (
+              <FindingCard
+                key={`${f.code}-${i}`}
+                f={f}
+                kind="opportunity"
+                clientId={clientId}
+                cycleDate={state.date}
+                budgetHold={budgetHold}
+                onPendingAdsChanged={onPendingAdsChanged}
+              />
+            ))}</div>}
         </section>
       </div>
 

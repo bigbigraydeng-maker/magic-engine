@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ from: vi.fn(), finish: vi.fn(), token: vi.fn()
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: mocks.from } }))
 vi.mock('@/lib/cron/run-logger', () => ({ startCronRun: async () => ({ finish: mocks.finish }) }))
 vi.mock('@/lib/platform-oauth/token-manager', () => ({ getValidTokenForConnection: mocks.token }))
-vi.mock('@/lib/microsoft/mail-graph', () => ({ fetchMailSince: mocks.mails }))
+vi.mock('@/lib/microsoft/mail-graph', () => ({ fetchMailSince: mocks.mails, fetchFormNoticeSource: vi.fn() }))
 import { GET } from './route'
 
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks() })

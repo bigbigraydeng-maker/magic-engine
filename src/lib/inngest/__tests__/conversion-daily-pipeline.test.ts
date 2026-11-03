@@ -14,6 +14,7 @@
  *   · 每个 step 的返回值里不含邮箱/完整电话（PII 不进 Inngest 云端）
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { MAX_BATCH_SIZE } from '@/lib/conversions/ai-auto-review-run'
 
 const failOpenCronRuns = vi.fn<(job: string, message: string, opts: { startedBefore: Date }) => Promise<number>>(async () => 1)
 vi.mock('@/lib/cron/run-logger', () => ({
@@ -96,6 +97,9 @@ function ctsSummary(over: Partial<CtsCrmSyncSummary> = {}): CtsCrmSyncSummary {
     totalCrmRows: 0,
     excludedNoPhone: 0,
     excludedByNotes: 0,
+    excludedNoInterest: 0,
+    excludedNoConversation: 0,
+    rejectedStaleLeads: 0,
     excludedNoDate: 0,
     insertedLeads: 0,
     insertedPurchases: 0,
@@ -104,6 +108,7 @@ function ctsSummary(over: Partial<CtsCrmSyncSummary> = {}): CtsCrmSyncSummary {
     contactNotLinked: 0,
     insertErrors: [],
     cappedAtMaxInserts: false,
+    qualifiedFromConversation: 0, conversationReadFailed: 0, skippedPastWindow: 0,
     ...over,
   }
 }
@@ -240,6 +245,39 @@ describe('分块循环怎么推进、怎么停', () => {
     expect(calls.resend.map((c) => c.clientId)).toEqual([NAL, CTS])
   })
 
+  it('邮箱付款识别段：同步之后、AI 审核之前跑，计入运行记录 7/7', async () => {
+    const detect = vi.fn(async () => ({ ok: true }))
+    const { harness, finish, result } = await run({ detectPayments: detect })
+    expect(harness.ranStepIds).toEqual([
+      'log-start',
+      'sync-nal-1',
+      'sync-nal-2',
+      'sync-cts-1',
+      'sync-cts-2',
+      'detect-payments',
+      'ai-review-nal-1',
+      'ai-review-cts-1',
+      'resend-failed-nal',
+      'resend-failed-cts',
+      'log-finish',
+    ])
+    expect(detect).toHaveBeenCalledTimes(1)
+    expect(result).toHaveProperty('payments')
+    expect(finish).toHaveBeenCalledWith('run-1', expect.any(Number), expect.objectContaining({ processed: 7, completed: 7, failed: 0 }))
+  })
+
+  it('邮箱付款识别段失败 → 记失败，但同步已完成、审核与补发照常（互不连坐）', async () => {
+    const { result, harness, finish } = await run({
+      detectPayments: async () => {
+        throw new Error('模拟 Graph 读取失败')
+      },
+    })
+    expect(result.payments).toMatchObject({ ok: false, error: expect.stringContaining('模拟 Graph 读取失败') })
+    expect(harness.ranStepIds).toContain('ai-review-cts-1')
+    expect(harness.ranStepIds).toContain('resend-failed-cts')
+    expect(finish).toHaveBeenCalledWith('run-1', expect.any(Number), expect.objectContaining({ processed: 7, completed: 6, failed: 1 }))
+  })
+
   it('游标靠上一块的返回值推进：offset / insertedSoFar 跨块传递，且经过了 JSON 序列化', async () => {
     const { calls, result } = await run()
     expect(calls.cts).toEqual([
@@ -277,13 +315,13 @@ describe('分块循环怎么推进、怎么停', () => {
     expect(harness.ranStepIds.at(-1)).toBe('log-finish')
   })
 
-  it('审核块 processed 满一块就再来一块，不满就停；日上限仍是 50 条（10 块 × 5）', async () => {
+  it('审核块 processed 满一块就再来一块，不满就停；日上限是 MAX_BATCH_SIZE 条（60 = 12 块 × 5）', async () => {
     const { harness, calls } = await run({
       reviewClient: async (clientId) => (clientId === CTS ? ranSummary(AI_REVIEW_CHUNK_SIZE) : ranSummary(1)),
     })
     expect(harness.ranStepIds.filter((id) => id.startsWith('ai-review-nal'))).toEqual(['ai-review-nal-1'])
-    expect(harness.ranStepIds.filter((id) => id.startsWith('ai-review-cts'))).toHaveLength(50 / AI_REVIEW_CHUNK_SIZE)
-    expect(calls.review.filter((c) => c.clientId === CTS)).toHaveLength(10)
+    expect(harness.ranStepIds.filter((id) => id.startsWith('ai-review-cts'))).toHaveLength(MAX_BATCH_SIZE / AI_REVIEW_CHUNK_SIZE)
+    expect(calls.review.filter((c) => c.clientId === CTS)).toHaveLength(MAX_BATCH_SIZE / AI_REVIEW_CHUNK_SIZE)
   })
 
   it('🔴 审核块之间 carried = 前几块累计批准的条数/金额；首块不带 carried（首块才做熔断预检）', async () => {

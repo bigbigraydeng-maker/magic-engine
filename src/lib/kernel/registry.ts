@@ -13,6 +13,7 @@
 
 import type { ActionDefinition, ActionKey } from './types'
 import { ADS_ACTION_DEFINITIONS } from './registry-ads'
+import { CONFIRMATION_HOLD_DEFINITION } from './registry-confirmation'
 
 /**
  * `seo.build_publish_package` —— Kernel v1 的 safe capability。
@@ -316,6 +317,7 @@ const DEFINITIONS: Readonly<Record<ActionKey, ActionDefinition>> = {
   'ads.auto_pause_on_d3': ADS_AUTO_PAUSE_ON_D3,
   // 广告支柱受限自治六件（spec 2026-09-24 §3 G4/G5）。定义在 registry-ads.ts，避免本文件继续膨胀。
   ...ADS_ACTION_DEFINITIONS,
+  'governance.p0_confirmation': CONFIRMATION_HOLD_DEFINITION,
 }
 
 export interface ActionRegistry {

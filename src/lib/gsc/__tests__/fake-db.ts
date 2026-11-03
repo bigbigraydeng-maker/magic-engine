@@ -75,6 +75,7 @@ export interface FakeDb {
 /** Composite primary keys; every other table uses ['id']. */
 export const PRIMARY_KEYS: Readonly<Record<string, readonly string[]>> = {
   gsc_page_daily: ['client_id', 'day', 'page_url'],
+  gsc_query_page_daily: ['client_id', 'day', 'query', 'page_url'],
 }
 
 /** Internal view: the failure queue is shared with the queries but not part of the public API. */
@@ -106,7 +107,7 @@ function defaultsFor(table: string): Row {
   if (table === 'cron_run_logs') {
     base.started_at = new Date().toISOString()
   }
-  if (table === 'gsc_page_fetch_receipts') {
+  if (table === 'gsc_page_fetch_receipts' || table === 'gsc_query_page_fetch_receipts') {
     base.status = 'running'
     base.row_count = 0
     base.request_count = 0

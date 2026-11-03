@@ -15,6 +15,10 @@
  *  3. 一行放得下。看板一列只有 260px。
  */
 
+import { cleanDisplayName } from './clean-display-name'
+
+export { cleanDisplayName } from './clean-display-name'
+
 /** 至少要有一个「能读出来」的字，才算说了点什么。 */
 const MEANINGFUL = /[0-9A-Za-z\u00C0-\u024F\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/
 
@@ -49,7 +53,8 @@ export function contactCardTitle(
   displayName: string | null | undefined,
   firstInboundBody?: string | null,
 ): string {
-  const name = (displayName ?? '').trim()
+  // 邮箱 / 电话 / 占位词不是名字（2026-10-22 PM：不能拿邮箱当名字）——清洗掉，落到「问：…」或「未留姓名」。
+  const name = cleanDisplayName(displayName)
   if (name) return name
 
   const said = cleanup(firstInboundBody ?? '')

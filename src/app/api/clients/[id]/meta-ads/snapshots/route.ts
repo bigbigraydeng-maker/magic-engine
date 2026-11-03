@@ -7,7 +7,8 @@
  * Query params:
  *   limit  — max rows returned (default 12, max 36)
  *
- * Returns: { success, snapshots: [...], latest: snapshot | null }
+ * Returns: { success, snapshots, latest, currency }
+ * currency is the ad account's currency, else the client's country. Never a hardcoded dollar.
  *
  * Reference: ROADMAP.md P17.B.1
  */
@@ -15,6 +16,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { resolveClientAdCurrency } from '@/lib/ads/account-currency'
+import { readObjectiveCosts } from '@/lib/ads/spend-figures'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,7 +39,7 @@ export async function GET(
     .select(
       'id, ad_account_id, period_start, period_end, ' +
       'spend, impressions, clicks, conversions, roas, cpc, ctr, ' +
-      'campaigns, fetched_at, created_at',
+      'campaigns, raw_data, fetched_at, created_at',
     )
     .eq('client_id', clientId)
     .order('period_start', { ascending: false })
@@ -46,9 +49,22 @@ export async function GET(
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 
+  const rows = (data ?? []) as Array<Record<string, unknown>>
+  const latestAccount = typeof rows[0]?.ad_account_id === 'string' ? rows[0].ad_account_id : null
+  const currency = await resolveClientAdCurrency(clientId, latestAccount)
+  const snapshots = rows.map(row => presentSnapshot(row, currency))
+
   return NextResponse.json({
     success:   true,
-    snapshots: data ?? [],
-    latest:    (data ?? [])[0] ?? null,
+    currency,
+    snapshots,
+    latest:    snapshots[0] ?? null,
   })
+}
+
+function presentSnapshot(row: Record<string, unknown>, currency: string | null) {
+  const costs = readObjectiveCosts(row.raw_data)
+  const rest = { ...row }
+  delete rest.raw_data
+  return { ...rest, currency, ...costs }
 }

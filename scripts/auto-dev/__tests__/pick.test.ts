@@ -155,8 +155,11 @@ describe('pickIssues', () => {
     );
     const issue = makeIssue({ body });
     const result = pickIssues(makeInput(issue));
-    expect(result[0].skip).toBe(true);
-    expect(result[0].reason).toContain('验证命令不合规');
+    expect(result[0]).toMatchObject({
+      number: 1,
+      skip: true,
+      reason: expect.stringContaining('验证命令不合规'),
+    });
   });
 
   it('skips file overlap with open PR', () => {

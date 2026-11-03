@@ -13,6 +13,7 @@ import {
   attributionColumns,
   attributionFromMetaLeadRow,
   attributionFromUtm,
+  attributionFromWhatsAppReferral,
   firstTouchColumns,
   isAttributed,
   normalisePlatform,
@@ -166,5 +167,40 @@ describe('attributionFromUtm：官网表单只到 campaign 级', () => {
 
   it('utm_content 当素材指纹用（落地页上是我们自己填的）', () => {
     expect(attributionFromUtm({ utm_content: 'reel-food-01' }).creativeRef).toBe('reel-food-01')
+  })
+
+  it('Meta 来源 + utm_content 纯数字 → 当 ad id（{{ad.id}}），不当素材指纹', () => {
+    const a = attributionFromUtm({ utm_source: 'facebook', utm_content: '52558384510073' })
+    expect(a.adId).toBe('52558384510073')
+    expect(a.creativeRef).toBeNull()
+  })
+
+  it('非 Meta 来源的数字 utm_content 不冒充 ad id', () => {
+    const a = attributionFromUtm({ utm_source: 'google', utm_content: '52558384510073' })
+    expect(a.adId).toBeNull()
+    expect(a.creativeRef).toBe('52558384510073')
+  })
+})
+
+describe('attributionFromWhatsAppReferral', () => {
+  it('ad + source_id → meta + adId，campaign/adset/creative 不猜', () => {
+    expect(attributionFromWhatsAppReferral({ source_type: 'ad', source_id: '123', ctwa_clid: 'c' })).toEqual({
+      platform: 'meta', campaignId: null, adsetId: null, adId: '123', adName: null, creativeRef: null,
+    })
+  })
+
+  it('只有 ctwa_clid → meta，adId 空', () => {
+    const a = attributionFromWhatsAppReferral({ ctwa_clid: 'c' })
+    expect(a.platform).toBe('meta')
+    expect(a.adId).toBeNull()
+  })
+
+  it('source_type=post 的 source_id 不是 ad id', () => {
+    expect(attributionFromWhatsAppReferral({ source_type: 'post', source_id: '9', ctwa_clid: 'c' }).adId).toBeNull()
+  })
+
+  it('空 / 缺失 referral → 空归因', () => {
+    expect(isAttributed(attributionFromWhatsAppReferral(undefined))).toBe(false)
+    expect(isAttributed(attributionFromWhatsAppReferral({}))).toBe(false)
   })
 })

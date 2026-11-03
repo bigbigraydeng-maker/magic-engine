@@ -79,6 +79,7 @@ function due(n: number): DueBrief[] {
     regenCount: 0,
     regenCountDate: null,
     awaitingReply: true,
+    channel: 'messenger' as const,
   }))
 }
 

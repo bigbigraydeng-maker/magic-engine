@@ -59,9 +59,8 @@ export const AD_CREATION_PATHS: Readonly<Record<AdCreationPath, string>> = {
 /**
  * creative_ref 指向哪张表。
  *
- * 只有一个值不是写漏了:reels_drafts 那条线走 Publer 发布,Publer 只回 job_id、
- * 不回平台帖子 id(见 src/app/api/clients/[id]/reels/[draftId]/publish/route.ts),
- * 所以那条线上的片子**现在接不上**。等 Publer 回执里能拿到 post_id 再加
+ * 只有一个值不是写漏了:reels_drafts 那条线的第三方发布通道已退役(没有平台帖子 id 回执),
+ * 所以那条线上的片子**现在接不上**。等有新的发布通道能拿到 post_id 再加
  * 'reels_draft' —— 提前声明一个没人产出的值,正是 CLAUDE.md 说的 enum 漂移。
  */
 export type CreativeSource = 'content_work_order'

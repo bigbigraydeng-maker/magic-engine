@@ -24,6 +24,10 @@ export interface TouchpointForColumn {
   channel: string
   occurredAt: string
   metadata: Record<string, unknown> | null
+  /** 触点来源（`contact_touchpoints.source`）。只用来认「员工手记」（me_manual）。可选：不传按非手记算。 */
+  source?: string | null
+  /** 员工原话（`contact_touchpoints.raw`）。员工手记的团名要在它里面找得到才采信。可选。 */
+  raw?: string | null
 }
 
 export interface CustomColumnDef {
@@ -32,6 +36,8 @@ export interface CustomColumnDef {
   label: string
   /** 从这个人的全部触点里抽出该列的值；没有就 null。 */
   extract: (touchpoints: TouchpointForColumn[]) => string | null
+  /** false = 值照算，但横表不画这一列。缺省 = 画。 */
+  showInList?: boolean
 }
 
 export interface CustomColumnMeta {
@@ -61,7 +67,11 @@ function cleanValue(v: unknown): string | null {
  * 感兴趣的团。确定性两级取值（钉死成一个规则，防提示词一改就漂）：
  *   ① meta_lead_form 触点上的 tour_interest_raw —— 客户自己在 FB 表单下拉选的，
  *      最干净、最该信；多条取最近一条非空。
- *   ② 没有再退回手工笔记解析出的 metadata.tour_interest（最近一条非空）。
+ *   ② 没有再取**员工手记**（source = me_manual）解析出的 metadata.tour_interest（最近一条非空）。
+ *   ③ 再没有才取其他来源（AI 通话整理等，未经员工核实）解析出的值。
+ *
+ *   员工亲手写的笔记是最高置信度的证据（PM 2026-10-30）：它的值永远压过 AI 通话分析
+ *   这类待复核的来源，哪怕后者更新 —— 不做成「谁新听谁的」。
  * 实务上①覆盖几乎所有 FB 来源，②只对纯手工联系人生效。都没有就 null。
  */
 function extractTourInterest(touchpoints: TouchpointForColumn[]): string | null {
@@ -73,16 +83,30 @@ function extractTourInterest(touchpoints: TouchpointForColumn[]): string | null 
       if (raw) return raw
     }
   }
+  // 员工手记的团名要在原话里找得到才采信：存量里可能有 AI 在「事实后验」上线前编出来的团名
+  // （魏征复审 PR #3417 P3）。原话缺失（读不到）时不拦。
+  const grounded = (t: TouchpointForColumn, v: string): boolean => {
+    if (t.source !== 'me_manual' || typeof t.raw !== 'string') return true
+    const norm = (x: string) => x.toLowerCase().replace(/\s+/g, '')
+    return norm(t.raw).includes(norm(v))
+  }
+  for (const t of byRecent) {
+    if (t.source !== 'me_manual') continue
+    const staff = cleanValue(t.metadata?.tour_interest)
+    if (staff && grounded(t, staff)) return staff
+  }
   for (const t of byRecent) {
     const parsed = cleanValue(t.metadata?.tour_interest)
-    if (parsed) return parsed
+    if (parsed && grounded(t, parsed)) return parsed
   }
   return null
 }
 
 /** 可用自定义列注册表。加列：在这里追加 + 扩 CustomColumnKey 联合类型。 */
 export const CUSTOM_COLUMNS: CustomColumnDef[] = [
-  { key: 'tour_interest', label: '感兴趣的团', extract: extractTourInterest },
+  // 横表不画（PM 2026-10-29）：这是客人在 FB 广告表单下拉里随手点的，最后订哪个团常常不是它，
+  // 摆成一整列会让人当真。抽屉时间线里那条表单记录仍会写出来。
+  { key: 'tour_interest', label: '感兴趣的团', extract: extractTourInterest, showInList: false },
 ]
 
 /** 一个联系人的全部自定义列值（GET 逐人算，横表逐格渲染）。 */
@@ -101,7 +125,9 @@ export function extractCustomColumns(
 export function visibleCustomColumns(
   perContact: Array<Record<CustomColumnKey, string | null>>,
 ): CustomColumnMeta[] {
-  return CUSTOM_COLUMNS.filter((col) => perContact.some((v) => v[col.key] != null)).map((col) => ({
+  return CUSTOM_COLUMNS.filter(
+    (col) => col.showInList !== false && perContact.some((v) => v[col.key] != null),
+  ).map((col) => ({
     key: col.key,
     label: col.label,
   }))

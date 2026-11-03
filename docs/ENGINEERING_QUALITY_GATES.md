@@ -75,7 +75,7 @@ Magic Engine 不采用“一切改动都用最高强度验证”，也不回到�
 | 回归测试 | 必须 | 必须 | 视影响范围 |
 | Mutation | 只做关键安全/状态/身份/并发判据；冻结 head 跑一次完整相关套件 | 默认不做；高价值判据可做少量 targeted probe | 不做 |
 | Type / lint / build | 必须，按已知基线判断新增错误 | 必须 | build 或相关检查 |
-| 人工审查 | 按 `CLAUDE.md` 大任务规则；安全核心加攻击验证 | 一次集中 review | 自审或一次轻量 review |
+| 人工审查 | Codex Astra 审查 + Claude Code 独立复核。两签齐，合并闸才绿；仍不自动合 | 必过检查全绿即自动合。子牙 / 魏征 / 狄仁杰 只做可选抽查，缺席不挡 | 必过检查全绿即自动合 |
 | 最终证据 | 冻结 head、测试、CI、未解决 blocker、限制 | 测试、build、review 结论 | 截图/smoke/build 结果 |
 
 “全部 mock”不是 A 级边界测试的同义词。若关键主张是“实际 socket 使用了已验证 IP”“真实数据库锁住了行”或“TLS 仍校验证书”，测试必须越过被证明的那一层；同时必须保持隔离，不访问生产、不消费 provider 预算。
@@ -170,6 +170,7 @@ Magic Engine 不采用“一切改动都用最高强度验证”，也不回到�
 
 - 输入是 PR 的**实际改动文件清单**，不是 PR 描述。
 - 命中受保护路径清单中任意一条即为 **A**（migration / `.sql`、`.github/workflows/`、`tools/ops-review-loop/`、`tools/ai-orchestrator/`、`render.yaml`、`src/middleware.ts`、`src/lib/auth/`、`src/app/api/auth/`、`src/app/api/webhooks/`、RLS、隔离判定、`src/lib/kernel/`、`src/app/api/kernel/`、`src/lib/execution/`、计费 / 支付 / 额度、cron 注册与路由、对外发布器、对外发信、花费与发布 guardrail、SSRF 边界、凭证、`package.json` / `package-lock.json`；2026-09-27 补：任意目录的 `.env*`（不分大小写，只放过根目录模板 `.env.example`）与 `.gitignore` / `.dockerignore`、`next.config.*`、`middleware` 各种写法、`instrumentation*`、`Dockerfile*`、`supabase/config.toml`、`.nvmrc` / `.node-version` / `.tool-versions`、`tools/local-executor-bridge/`、`tsconfig*.json`、`vitest.config|setup|workspace|projects.*`、`playwright.config.*` / `jest.config.*`、`postcss|tailwind.config.*`、`.babelrc*` / `babel.config.*` / `.swcrc`、`eslint.config.*` / `.eslintrc*`、`.husky/`、数据库红线检查脚本 `scripts/check-policy-to-clause.mjs` / `scripts/db-replay-and-verify.sh`、任意目录的 `package.json` 与依赖锁、`.npmrc` —— 这些以前判 B、会无人自动合，一行就能泄密钥、关检查或改生产运行方式）。
+- **改动行里的鉴权也是 A**（2026-10-25，#3123）：路径不在上一清单里，但增删行碰到登录、权限或客户访问校验（`requireSession`、`requireDashboardClientAccess`、`requirePaidClientAccess`、`requirePlanApproverAccess`、`requireAdmin` 这类，或从 `auth/require-session`、`auth/client-access`、`auth/require-admin` 引入）的，定为 A（鉴权隔离）。没改这些校验的业务改动仍按路径定级。源文件有改动行数但 GitHub 没给 patch（不是 0 行的纯改名）时，没法判断是否改了鉴权，也定为 A。
 - **C 是白名单，不是兜底**：只有文档、样式、图片、纯测试文件命中低风险清单；一个 diff 里**每一个**文件都命中才算 C。没认出来的一律 **B**。
 - **读不到就是 A**：清单拿不到、为空、某一项没有文件名 —— 全部按 A 处理并注明「读不到」。「我们没看」和「我们看了没问题」不许长得一样。「读不到」这条理由永远排在原因列表最前面，不会被条数上限截掉。
 - **rename 两头都算**：GitHub 把 `git mv .github/workflows/guard.yml docs/guard.yml` 报成一条记录 —— 新路径在 `filename`，受保护的旧路径在 `previous_filename`。只看 `filename` 会把「悄悄停用控制面」判成改文档，所以新旧路径都定级、取更高的一档。标成 `renamed` / `copied` 却说不出原路径的记录按读不到处理。
@@ -179,6 +180,8 @@ Magic Engine 不采用“一切改动都用最高强度验证”，也不回到�
 ### 10.2 抽样：`sampling.mjs`
 
 C 级不必每次都请 Codex，但也不能一次都不请。按 `(PR 号, head commit)` 做**稳定** 20% 抽样：同一个 commit 永远得到同一个答案，重跑工作流、重复投递事件、作者反复重试都改不了结果。用 FNV-1a 而不是随机数，正是为了这一点。A / B 一律必审；级别认不出来也按必审处理。
+
+B 级另有一条**不挡合并**的抽查：子牙 / 魏征 / 狄仁杰 用同一个稳定抽样看大约 20% 的 B 级提交。抽中与否只写在摘要里。A 级不靠这三人，只认 Codex Astra 与 Claude Code 两方签字。C 级不抽这三人。缺席不改变 B / C「检查全绿就自动合」。
 
 ### 10.3 轮次上限：`maxRoundsForRisk`
 

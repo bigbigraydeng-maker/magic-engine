@@ -8,6 +8,8 @@
 
 import { MetricSparkline } from './MetricSparkline'
 import type { MetricSummaryTile } from '@/lib/flywheel/intelligence/types'
+import { formatAdMoney } from '@/lib/ads/spend-figures'
+import { ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 
 interface TrendCardProps {
   tile: MetricSummaryTile
@@ -16,13 +18,14 @@ interface TrendCardProps {
 export function TrendCard({ tile }: TrendCardProps) {
   const { label, unit, direction, currentValue, deltaPct7d, sparkline } = tile
 
-  const formatted = formatValue(currentValue, unit)
+  const formatted = formatValue(tile)
+  const shownLabel = tile.periodLabel ? `${label} · ${tile.periodLabel}` : label
   const deltaInfo = getDeltaInfo(deltaPct7d, direction)
 
   return (
     <div className="flex flex-col gap-1 p-3 rounded-lg bg-white border border-gray-100 shadow-sm min-w-0">
       {/* Metric label */}
-      <span className="text-[11px] font-medium text-gray-500 truncate">{label}</span>
+      <span className="text-[11px] font-medium text-gray-500 truncate">{shownLabel}</span>
 
       {/* Value row */}
       <div className="flex items-end justify-between gap-2">
@@ -53,8 +56,9 @@ export function TrendCard({ tile }: TrendCardProps) {
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
 
-function formatValue(value: number | null, unit: MetricSummaryTile['unit']): string {
-  if (value === null) return '—'
+function formatValue(tile: MetricSummaryTile): string {
+  const { currentValue: value, unit, metricKey, currency } = tile
+  if (value === null) return metricKey === ADS_METRIC_KEY.ROAS ? '不适用' : '—'
 
   switch (unit) {
     case 'count':
@@ -69,9 +73,7 @@ function formatValue(value: number | null, unit: MetricSummaryTile['unit']): str
       return `${Math.round(value)}`
 
     case 'currency':
-      return value >= 1000
-        ? `$${(value / 1000).toFixed(1)}k`
-        : `$${value.toFixed(2)}`
+      return formatAdMoney(value, currency)
 
     case 'ratio':
       return `${value.toFixed(2)}×`

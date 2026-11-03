@@ -55,79 +55,79 @@ const OZ = materialise(oztop)
 
 describe('classifyAdsetRole — 真实账户', () => {
   it('NAL ThruPlay 两组（冷流量、优化 THRUPLAY）→ 破冰 · 高', () => {
-    for (const id of ['52596939123725', '52596931528525']) {
+    for (const id of ['52104815523595', '52426144644352']) {
       expect(classifyAdsetRole(NAL.input(id))).toMatchObject({ role: 'awareness', confidence: 'high' })
     }
   })
 
   it('NAL 9/13 手工再营销组（包含视频观众池、Advantage+=0、扩展=0）→ 再营销 · 高，并带出受众 id', () => {
-    const v = classifyAdsetRole(NAL.input('52597304727125'))
-    expect(v).toMatchObject({ role: 'retargeting', confidence: 'high', retargetingAudienceIds: ['52597304640525'] })
+    const v = classifyAdsetRole(NAL.input('52567871115731'))
+    expect(v).toMatchObject({ role: 'retargeting', confidence: 'high', retargetingAudienceIds: ['52438409830467'] })
   })
 
   it('NAL 私信留资组 / WhatsApp 组 / 3PL 表单组 → 获客', () => {
-    for (const id of ['52589967398925', '52594661606125', '52593506023925']) {
+    for (const id of ['52886694875449', '52580503500399', '52429223893140']) {
       expect(classifyAdsetRole(NAL.input(id)).role).toBe('acquisition')
     }
   })
 
   it('CTS 顶层 ThruPlay 组（只排除名单）→ 破冰 · 高', () => {
-    expect(classifyAdsetRole(CTS.input('52549857906273'))).toMatchObject({ role: 'awareness', confidence: 'high' })
+    expect(classifyAdsetRole(CTS.input('52510454332891'))).toMatchObject({ role: 'awareness', confidence: 'high' })
   })
 
   it('CTS A/B 实验两组（包含「看完 95%」、扩展全关）→ 再营销', () => {
-    expect(classifyAdsetRole(CTS.input('52551117304473')).role).toBe('retargeting')
-    expect(classifyAdsetRole(CTS.input('52551118124873')).role).toBe('retargeting')
+    expect(classifyAdsetRole(CTS.input('52149073923601')).role).toBe('retargeting')
+    expect(classifyAdsetRole(CTS.input('52151282553412')).role).toBe('retargeting')
   })
 
   it('特殊广告类别读系列自己的字段（CTS 系列为空数组）', () => {
-    expect(classifyAdsetRole(CTS.input('52549857906273')).specialAdCategories).toEqual([])
+    expect(classifyAdsetRole(CTS.input('52510454332891')).specialAdCategories).toEqual([])
   })
 
   it('CTS LAL 实验组（OUTCOME_LEADS 系列里优化 LINK_CLICKS）→ 目标错位判 mixed · 低', () => {
-    expect(classifyAdsetRole(CTS.input('52549843017273'))).toMatchObject({ role: 'mixed', confidence: 'low' })
+    expect(classifyAdsetRole(CTS.input('52749531035243'))).toMatchObject({ role: 'mixed', confidence: 'low' })
   })
 })
 
 describe('设计 §10 三个专门用例', () => {
   it('① ThruPlay 投视频观众名单 → 以包含受众优先判再营销，可信度「中」', () => {
     // 形状取 NAL 真实再营销组，只把优化目标换成 THRUPLAY、挂到真实的 ThruPlay（OUTCOME_ENGAGEMENT）系列下
-    const base = NAL.input('52597304727125')
+    const base = NAL.input('52567871115731')
     const input: RoleInput = {
       ...base,
-      adset: { ...base.adset, optimization_goal: 'THRUPLAY', campaign_id: '52596939123525' },
-      campaign: NAL.get('campaign', '52596939123525'),
+      adset: { ...base.adset, optimization_goal: 'THRUPLAY', campaign_id: '52028365152823' },
+      campaign: NAL.get('campaign', '52028365152823'),
     }
     expect(classifyAdsetRole(input)).toMatchObject({ role: 'retargeting', confidence: 'medium' })
   })
 
   it('② 获客组只有排除名单（Oztop「Broad Pack 1」排除网站访客）→ 冷流量 = 获客，不当再营销', () => {
-    const v = classifyAdsetRole(OZ.input('120238854619520790'))
+    const v = classifyAdsetRole(OZ.input('120341420309894524'))
     expect(v.role).toBe('acquisition')
     expect(v.retargetingAudienceIds).toEqual([])
   })
 
   it('③ Advantage+ 受众开着的再营销（Oztop WhatsApp 暖池组，advantage_audience=1）→ mixed · 低', () => {
-    const v = classifyAdsetRole(OZ.input('120252643974920790'))
+    const v = classifyAdsetRole(OZ.input('121668273531412522'))
     expect(v).toMatchObject({ role: 'mixed', confidence: 'low' })
     expect(v.reasons.join('')).toContain('实际在投冷流量')
   })
 
   it('③b 名单外扩展开着（custom_audience=1）也降为 mixed', () => {
-    const base = NAL.input('52597304727125')
+    const base = NAL.input('52567871115731')
     const input = { ...base, adset: { ...base.adset, targeting_relaxation: { lookalike: 0, custom_audience: 1 } } }
     expect(classifyAdsetRole(input).role).toBe('mixed')
   })
 
   it('③c 扩展字段读不到（Meta 没返回）→ 不能确认已关闭，按 mixed 处理', () => {
-    const base = NAL.input('52597304727125')
+    const base = NAL.input('52567871115731')
     const input = { ...base, adset: { ...base.adset, targeting_relaxation: null } }
     expect(classifyAdsetRole(input).role).toBe('mixed')
   })
 })
 
 describe('复审补测：每道闸单独变红（2026-09-14 子牙/魏征）', () => {
-  const retarget = () => NAL.input('52597304727125')
+  const retarget = () => NAL.input('52567871115731')
 
   it('Advantage+=1 但名单外扩展=0（只开 Advantage+）→ mixed', () => {
     const b = retarget()
@@ -146,27 +146,27 @@ describe('复审补测：每道闸单独变红（2026-09-14 子牙/魏征）', (
   })
 
   it('Advantage+ 购物系列（smart_promotion_type=AUTOMATED_SHOPPING_ADS）→ mixed', () => {
-    const b = NAL.input('52589967398925')
+    const b = NAL.input('52886694875449')
     const campaign = { ...b.campaign!, smart_promotion_type: 'AUTOMATED_SHOPPING_ADS' }
     expect(classifyAdsetRole({ ...b, campaign }).role).toBe('mixed')
   })
 
   it('特殊广告类别原样读系列自己的字段；系列快照缺失 → null（未知，不是确认没有）', () => {
-    const b = NAL.input('52589967398925')
+    const b = NAL.input('52886694875449')
     const housing = { ...b.campaign!, special_ad_categories: ['HOUSING'] }
     expect(classifyAdsetRole({ ...b, campaign: housing }).specialAdCategories).toEqual(['HOUSING'])
     expect(classifyAdsetRole({ ...b, campaign: null }).specialAdCategories).toBeNull()
   })
 
   it('名字像再营销但设置是冷流量 → 可信度降为「中」', () => {
-    const b = NAL.input('52596939123725')
+    const b = NAL.input('52104815523595')
     const v = classifyAdsetRole({ ...b, adset: { ...b.adset, entity_name: '再营销 · ThruPlay' } })
     expect(v).toMatchObject({ role: 'awareness', confidence: 'medium' })
   })
 
   it('同时包含再营销类受众和类似人群 → mixed · 低（§3.1 双命中，只有破冰+再营销例外）', () => {
-    const b = CTS.input('52551117304473')
-    const lookalike = '52549838527273' // CTS 真实类似人群受众
+    const b = CTS.input('52149073923601')
+    const lookalike = '52611581539253' // CTS 真实类似人群受众
     const v = classifyAdsetRole({ ...b, adset: { ...b.adset, included_audience_ids: [...b.adset.included_audience_ids, lookalike] } })
     expect(v).toMatchObject({ role: 'mixed', confidence: 'low' })
   })
@@ -174,8 +174,8 @@ describe('复审补测：每道闸单独变红（2026-09-14 子牙/魏征）', (
 
 describe('rollupCampaignRole — CBO 系列作为预算单位', () => {
   it('组内角色一致 → 该角色；不一致 → mixed', () => {
-    const a = classifyAdsetRole(NAL.input('52589967398925'))
-    const r = classifyAdsetRole(NAL.input('52597304727125'))
+    const a = classifyAdsetRole(NAL.input('52886694875449'))
+    const r = classifyAdsetRole(NAL.input('52567871115731'))
     expect(rollupCampaignRole([a, a]).role).toBe('acquisition')
     expect(rollupCampaignRole([a, r]).role).toBe('mixed')
     expect(rollupCampaignRole([]).role).toBe('unknown')

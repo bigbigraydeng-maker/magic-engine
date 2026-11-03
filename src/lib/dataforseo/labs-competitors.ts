@@ -10,6 +10,7 @@ import {
   DEFAULT_LANGUAGE_CODE,
   authHeader,
   deriveIntent,
+  DataForSeoTaskError,
   type LabsCompetitor,
   type LabsKeyword,
 } from './labs-types'
@@ -46,6 +47,8 @@ export async function getSerpCompetitors(
 
   const json = await res.json() as {
     tasks?: Array<{
+      status_code?:    number
+      status_message?: string
       result?: Array<{
         items?: Array<{
           domain?:       string
@@ -62,7 +65,16 @@ export async function getSerpCompetitors(
     }>
   }
 
-  const items = json.tasks?.[0]?.result?.[0]?.items ?? []
+
+  const task = json.tasks?.[0]
+  if ((task?.status_code ?? 0) !== 20000) {
+    throw new DataForSeoTaskError(
+      task?.status_code,
+      `DataForSEO competitors_domain task error ${task?.status_code ?? 'missing'}: ${task?.status_message ?? 'unknown'}`,
+    )
+  }
+
+  const items = task?.result?.[0]?.items ?? []
 
   return items
     .filter(it => it.domain && it.domain !== domain)
@@ -96,7 +108,21 @@ export async function getKeywordsGap(
   locationCode: number = DEFAULT_LOCATION_CODE,
   limit: number = 100,
 ): Promise<LabsKeyword[]> {
-  if (competitorDomains.length === 0) return []
+  return (await getKeywordsGapWithStatus(clientDomain, competitorDomains, locationCode, limit)).keywords
+}
+
+/**
+ * Same as getKeywordsGap, but also reports how many per-competitor
+ * domain_intersection calls failed so callers can tell a genuinely empty gap
+ * (failedCount 0) from a degraded one (failedCount > 0).
+ */
+export async function getKeywordsGapWithStatus(
+  clientDomain: string,
+  competitorDomains: string[],
+  locationCode: number = DEFAULT_LOCATION_CODE,
+  limit: number = 100,
+): Promise<{ keywords: LabsKeyword[]; failedCount: number }> {
+  if (competitorDomains.length === 0) return { keywords: [], failedCount: 0 }
 
   const perCompetitor = await Promise.allSettled(
     competitorDomains.map(competitor =>
@@ -105,6 +131,7 @@ export async function getKeywordsGap(
   )
 
   // Merge competitor results, keeping the highest-volume entry per keyword.
+  let failedCount = perCompetitor.filter(r => r.status !== 'fulfilled').length
   const byKeyword = new Map<string, LabsKeyword>()
   for (const settled of perCompetitor) {
     if (settled.status !== 'fulfilled') continue
@@ -136,6 +163,8 @@ export async function getKeywordsGap(
         }
       }
     } catch (err) {
+      // KD stays null for these keywords: count as a failed call so callers never cache it.
+      failedCount += 1
       console.warn('[labs/getKeywordsGap] KD enrichment failed', {
         clientDomain,
         competitorCount: competitorDomains.length,
@@ -145,7 +174,7 @@ export async function getKeywordsGap(
     }
   }
 
-  return sorted
+  return { keywords: sorted, failedCount }
 }
 
 /**
@@ -182,6 +211,8 @@ async function fetchDomainIntersectionGap(
 
   const json = await res.json() as {
     tasks?: Array<{
+      status_code?:    number
+      status_message?: string
       result?: Array<{
         items?: Array<{
           keyword_data?: {
@@ -200,7 +231,16 @@ async function fetchDomainIntersectionGap(
     }>
   }
 
-  const items = json.tasks?.[0]?.result?.[0]?.items ?? []
+
+  const task = json.tasks?.[0]
+  if ((task?.status_code ?? 0) !== 20000) {
+    throw new DataForSeoTaskError(
+      task?.status_code,
+      `DataForSEO domain_intersection task error ${task?.status_code ?? 'missing'}: ${task?.status_message ?? 'unknown'}`,
+    )
+  }
+
+  const items = task?.result?.[0]?.items ?? []
 
   return items
     .filter(it => it.keyword_data?.keyword)

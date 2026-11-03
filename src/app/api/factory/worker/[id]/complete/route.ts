@@ -11,12 +11,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { completeWorkOrder } from '@/lib/factory/complete-work-order'
+import { isRemotionBrief } from '@/lib/factory/render-mode'
+import { enqueueRemotionMaliangReview } from '@/lib/maliang/enqueue-remotion-review'
+import { inngest } from '@/lib/inngest/client'
+import type { ReelMediaEvidence } from '@/lib/social/reel-media-checks'
 import {
   isWorkerAuthorized,
   validateClipPath,
   validateRenderPath,
   workerIdFromBody,
 } from '@/lib/factory/worker-guard'
+import { resolveAspectDelivery } from '@/lib/factory/video-aspects'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
@@ -54,6 +59,62 @@ function parseNewClips(raw: unknown): NewClipInput[] | null {
   return out
 }
 
+function parseMediaEvidence(raw: unknown): ReelMediaEvidence | null | undefined {
+  if (raw === undefined) return undefined
+  if (raw === null) return null
+  if (typeof raw !== 'object' || Array.isArray(raw)) return null
+  const value = raw as Record<string, unknown>
+  const out: ReelMediaEvidence = {}
+  for (const key of ['audio_stream_present', 'cover_placeholder_detected'] as const) {
+    if (value[key] !== undefined) {
+      if (typeof value[key] !== 'boolean') return null
+      out[key] = value[key]
+    }
+  }
+  for (const key of ['audio_loudness_lufs', 'width', 'height', 'duration_seconds', 'cover_mean_luma', 'cover_luma_range'] as const) {
+    if (value[key] !== undefined) {
+      if (typeof value[key] !== 'number' || !Number.isFinite(value[key])) return null
+      out[key] = value[key]
+    }
+  }
+  if (value.subtitle_cues !== undefined) {
+    if (!Array.isArray(value.subtitle_cues)) return null
+    const cues: NonNullable<ReelMediaEvidence['subtitle_cues']> = []
+    for (const rawCue of value.subtitle_cues) {
+      if (!rawCue || typeof rawCue !== 'object' || Array.isArray(rawCue)) return null
+      const cue = rawCue as Record<string, unknown>
+      if (typeof cue.start_seconds !== 'number' || !Number.isFinite(cue.start_seconds)
+        || typeof cue.end_seconds !== 'number' || !Number.isFinite(cue.end_seconds)
+        || typeof cue.text !== 'string') return null
+      cues.push({ start_seconds: cue.start_seconds, end_seconds: cue.end_seconds, text: cue.text })
+    }
+    out.subtitle_cues = cues
+  }
+  // Informational fields: a malformed or null value is dropped, never a reason to reject the whole
+  // delivery (the render cost is already spent).
+  if (Array.isArray(value.capabilities)
+    && value.capabilities.length <= 20
+    && value.capabilities.every((c) => typeof c === 'string' && c.length > 0 && c.length <= 64)) {
+    out.capabilities = value.capabilities as string[]
+  }
+  const substance = value.content_substance
+  if (substance && typeof substance === 'object' && !Array.isArray(substance)) {
+    const s = substance as Record<string, unknown>
+    if ((s.verdict === 'pass' || s.verdict === 'asset_only' || s.verdict === 'fail')
+      && Array.isArray(s.kinds) && s.kinds.length <= 10 && s.kinds.every((k) => typeof k === 'string' && k.length <= 40)
+      && typeof s.textSeconds === 'number' && Number.isFinite(s.textSeconds) && s.textSeconds >= 0
+      && typeof s.reason === 'string') {
+      out.content_substance = {
+        verdict: s.verdict,
+        kinds: s.kinds as string[],
+        textSeconds: s.textSeconds,
+        reason: s.reason.slice(0, 500),
+      }
+    }
+  }
+  return out
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -80,6 +141,10 @@ export async function POST(
   const newClips = parseNewClips(body.new_clips)
   if (newClips === null) {
     return NextResponse.json({ error: 'new_clips malformed' }, { status: 400 })
+  }
+  const mediaEvidence = parseMediaEvidence(body.media_evidence)
+  if (body.media_evidence != null && mediaEvidence === null) {
+    return NextResponse.json({ error: 'media_evidence malformed' }, { status: 400 })
   }
   // 归属校验(魏征 M2-P1-1)
   const workerId = workerIdFromBody(body)
@@ -145,6 +210,15 @@ export async function POST(
     }
   }
 
+  const aspectDelivery = resolveAspectDelivery(wo.brief, body.aspect_outputs, {
+    clientId: wo.client_id,
+    workOrderId: wo.id,
+    primaryPath: videoPath,
+  })
+  if (!aspectDelivery.ok) {
+    return NextResponse.json({ error: aspectDelivery.error }, { status: 422 })
+  }
+
   // ②–④ 多表写编排(红线复扫 + B轨白名单 + clip 幂等入库 + 台账 + 工单转 in_review)抽到 lib(A3)
   // blocker 1:透传 recipe_receipt（recipe 单必填,legacy 单可缺）;body 无该字段 = undefined
   const result = await completeWorkOrder(supabaseAdmin, {
@@ -157,8 +231,23 @@ export async function POST(
     actualCost,
     newClips,
     recipeReceipt: body.recipe_receipt,
+    mediaEvidence,
+    ...(aspectDelivery.outputs ? { aspectOutputs: aspectDelivery.outputs } : {}),
   })
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
+  if (isRemotionBrief(wo.brief)) {
+    const queued = await enqueueRemotionMaliangReview({
+      brief: wo.brief,
+      clientId: wo.client_id,
+      workOrderId: wo.id,
+      videoPath,
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+      send: (event) => inngest.send(event),
+    })
+    if (!queued.sent) {
+      console.error(`[factory worker] maliang review not queued for ${id}: ${queued.reason ?? 'unknown'}`)
+    }
+  }
   return NextResponse.json({
     ok: true,
     status: result.status,

@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { HeldCards } from '@/components/confirmation-card/HeldCards'
 
 interface ChatMessage {
   role: 'user' | 'assistant'
@@ -26,6 +27,7 @@ export function ZhugeWorkbenchDrawer({ clientId, isOpen, onClose }: Props) {
   const [sending, setSending] = useState(false)
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [cardTick, setCardTick] = useState(0)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -74,11 +76,12 @@ export function ZhugeWorkbenchDrawer({ clientId, isOpen, onClose }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: trimmed }),
       })
-      const data = await res.json() as { success?: boolean; reply?: string; error?: string }
+      const data = await res.json() as { success?: boolean; reply?: string; error?: string; held?: boolean }
       if (!res.ok || !data.success) {
         throw new Error(data.error ?? `HTTP ${res.status}`)
       }
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply ?? '' }])
+      if (data.held) setCardTick((tick) => tick + 1)
     } catch (err) {
       setError(err instanceof Error ? err.message : '诸葛亮暂时无法回复')
       setMessages(prev => prev.slice(0, -1))
@@ -180,6 +183,8 @@ export function ZhugeWorkbenchDrawer({ clientId, isOpen, onClose }: Props) {
               {error}
             </div>
           )}
+
+          <HeldCards clientId={clientId} refreshKey={cardTick} hideWhenEmpty />
 
           <div ref={bottomRef} />
         </div>

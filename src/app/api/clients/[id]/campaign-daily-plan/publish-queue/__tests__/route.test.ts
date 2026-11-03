@@ -9,6 +9,7 @@ import { POST } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import type { ContentCheckItemResult } from '@/lib/social/content-review'
 
 const mockAccess = vi.mocked(requirePaidClientAccess)
 const mockFrom = vi.mocked(supabaseAdmin.from)
@@ -22,6 +23,15 @@ const PLAN_REVISION = '2026-09-01T15:00:04.513Z'
 const REVIEW_REVISION = '10000000-0000-0000-0000-000000000001'
 const DATES = ['2026-09-03', '2026-09-04']
 const ASSETS = ['e0000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000002']
+const POST_CHECK_KEYS = [
+  'factual_claims_have_source', 'factual_claims_source_verified', 'logo_watermark_present',
+  'asset_provenance_labeled', 'asset_provenance_matches_claim_context',
+]
+const POST_AUTO_KEYS = ['cta_in_first_comment_not_body', 'first_comment_link_has_tracking_params']
+const PASS_POST_CHECKLIST = [
+  ...POST_CHECK_KEYS.map(key => ({ key, judge: 'HUMAN', outcome: 'PASS', detail: null, source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null })),
+  ...POST_AUTO_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
+]
 
 function request(overrides: Record<string, unknown> = {}) {
   return new NextRequest(`http://localhost/api/clients/${CLIENT_ID}/campaign-daily-plan/publish-queue`, {
@@ -71,6 +81,8 @@ function planData(overrides: Record<string, unknown> = {}) {
         reason: null,
         reviewed_at: '2026-09-01T15:05:00.000Z',
         reviewed_by_user_id: USER_ID,
+        reviewer_role: 'admin',
+        checklist: PASS_POST_CHECKLIST,
       }])),
     },
     ...overrides,
@@ -170,17 +182,27 @@ describe('campaign daily publish queue — no-publish Inngest handoff', () => {
       },
     })
     stubLatestPlan(data)
-    const assets = chain('in', {
-      data: ASSETS.map(id => ({ id, storage_url: `https://assets.test/${id}.jpg`, mime_type: 'image/jpeg', status: 'analyzed', archived_at: null })),
-      error: null,
-    })
-    mockFrom.mockReturnValueOnce(assets as never)
 
     const response = await POST(request(), params())
     const json = await response.json()
 
     expect(response.status).toBe(422)
     expect(json.error).toBe('POSTS_NOT_READY_FOR_PUBLISH_QUEUE')
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
+  })
+
+  it('fails closed when first-comment checks are NOT_MEASURED', async () => {
+    const data = planData()
+    const decision = data.review_meta.posts[DATES[0]] as unknown as { checklist: ContentCheckItemResult[] }
+    decision.checklist = decision.checklist.map(item => item.judge === 'AUTO'
+      ? { ...item, outcome: 'NOT_MEASURED', detail: 'first-comment publishing unavailable' }
+      : item)
+    stubLatestPlan(data)
+
+    const response = await POST(request(), params())
+
+    expect(response.status).toBe(422)
+    expect((await response.json()).error).toBe('POSTS_NOT_READY_FOR_PUBLISH_QUEUE')
     expect(mockSendInngestEvent).not.toHaveBeenCalled()
   })
 

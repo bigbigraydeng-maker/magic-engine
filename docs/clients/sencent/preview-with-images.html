@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SENCENT · 森诺 — 全球运营平台</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=Inter:wght@300;400;500;600&family=Noto+Serif+SC:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#061C17; --ink-2:#08261F; --ink-3:#0C342B; --line:rgba(211,176,102,0.14); --line-strong:rgba(211,176,102,0.28);
+    --gold:#D3B066; --gold-2:#B38F4A; --gold-3:#E8CF95; --teal:#1E6B57; --cream:#EFE6CC;
+    --text:#DFD6BF; --muted:#8E9A91; --mute-2:#6E7A72;
+    --serif:'Noto Serif SC','Cormorant Garamond',Georgia,serif;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+  html{scroll-behavior:smooth}
+  body{background:var(--ink);color:var(--text);font-family:var(--sans);line-height:1.65;overflow-x:hidden}
+  a{color:var(--gold);text-decoration:none;transition:color .3s}
+  img{display:block;max-width:100%;height:auto}
+  .wrap{max-width:1280px;margin:0 auto;padding:0 40px}
+  .en{font-family:var(--sans);letter-spacing:4px;font-weight:400;text-transform:uppercase}
+  .cn-serif{font-family:var(--serif);font-weight:500;letter-spacing:3px}
+
+  /* Ambient background orbs */
+  body::before,body::after{content:'';position:fixed;border-radius:50%;filter:blur(120px);opacity:.35;pointer-events:none;z-index:0}
+  body::before{width:600px;height:600px;background:radial-gradient(circle,rgba(30,107,87,0.6),transparent 70%);top:-200px;right:-200px;animation:drift1 24s ease-in-out infinite}
+  body::after{width:500px;height:500px;background:radial-gradient(circle,rgba(211,176,102,0.25),transparent 70%);bottom:-150px;left:-150px;animation:drift2 30s ease-in-out infinite}
+  @keyframes drift1{0%,100%{transform:translate(0,0)}50%{transform:translate(-80px,60px)}}
+  @keyframes drift2{0%,100%{transform:translate(0,0)}50%{transform:translate(60px,-50px)}}
+
+  /* Nav */
+  header{position:sticky;top:0;z-index:100;background:rgba(6,28,23,0.75);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);border-bottom:1px solid var(--line)}
+  nav{display:flex;align-items:center;justify-content:space-between;padding:22px 0}
+  .brand{display:flex;align-items:center;gap:14px}
+  .brand .orb{width:38px;height:38px;position:relative;flex:0 0 38px}
+  .brand .orb svg{width:100%;height:100%}
+  .brand .orb .ring{animation:rot 18s linear infinite;transform-origin:center}
+  @keyframes rot{to{transform:rotate(360deg)}}
+  .brand .names{display:flex;flex-direction:column;gap:2px}
+  .brand .names b{color:var(--cream);font-size:15px;letter-spacing:5px;font-weight:500}
+  .brand .names span{color:var(--mute-2);font-size:10px;letter-spacing:4px;font-family:var(--serif)}
+  nav ul{display:flex;gap:34px;list-style:none}
+  nav a.navlink{color:#C7C3B4;font-size:13px;letter-spacing:2px;position:relative;padding:4px 0}
+  nav a.navlink::after{content:'';position:absolute;left:50%;bottom:-6px;width:0;height:1px;background:var(--gold);transition:all .3s;transform:translateX(-50%)}
+  nav a.navlink:hover{color:var(--gold)}
+  nav a.navlink:hover::after{width:100%}
+  .cta{padding:11px 22px;border:1px solid var(--gold);border-radius:999px;color:var(--gold);font-size:12px;letter-spacing:2px;transition:all .3s;position:relative;overflow:hidden}
+  .cta::before{content:'';position:absolute;inset:0;background:var(--gold);transform:translateY(100%);transition:transform .3s}
+  .cta:hover{color:var(--ink)}
+  .cta:hover::before{transform:translateY(0)}
+  .cta span{position:relative;z-index:1}
+
+  /* Hero */
+  .hero{position:relative;overflow:hidden;padding:100px 0 120px;z-index:1}
+  .hero-grid{display:grid;grid-template-columns:1.1fr 1fr;gap:64px;align-items:center}
+  .hero .eyebrow{display:inline-flex;align-items:center;gap:10px;color:var(--gold);font-size:11px;letter-spacing:5px;margin-bottom:28px;text-transform:uppercase}
+  .hero .eyebrow::before{content:'';width:28px;height:1px;background:var(--gold)}
+  .hero h1{font-family:var(--serif);font-size:62px;line-height:1.15;color:var(--cream);font-weight:500;letter-spacing:4px;margin-bottom:28px}
+  .hero h1 em{color:var(--gold);font-style:normal;position:relative;display:inline-block}
+  .hero h1 em::after{content:'';position:absolute;left:0;right:0;bottom:-6px;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent)}
+  .hero .en-line{color:var(--gold-2);font-size:14px;letter-spacing:4px;margin-bottom:20px;font-weight:300}
+  .hero p.lead{color:#B8B9AC;font-size:16px;max-width:540px;margin-bottom:40px;line-height:1.9}
+  .hero-btns{display:flex;gap:16px;align-items:center}
+  .btn-primary{padding:15px 32px;background:linear-gradient(135deg,var(--gold) 0%,var(--gold-3) 50%,var(--gold) 100%);background-size:200% 200%;color:var(--ink);border-radius:3px;font-size:13px;letter-spacing:3px;font-weight:600;transition:background-position .5s;box-shadow:0 10px 30px -10px rgba(211,176,102,0.4)}
+  .btn-primary:hover{background-position:100% 100%}
+  .btn-ghost{padding:14px 28px;border:1px solid var(--line-strong);color:var(--cream);border-radius:3px;font-size:13px;letter-spacing:3px;transition:all .3s;display:inline-flex;align-items:center;gap:10px}
+  .btn-ghost:hover{border-color:var(--gold);color:var(--gold);transform:translateX(4px)}
+  .btn-ghost svg{transition:transform .3s}
+  .btn-ghost:hover svg{transform:translateX(4px)}
+
+  .hero-visual{position:relative;aspect-ratio:4/5}
+  .hero-visual .frame{position:absolute;inset:0;border-radius:4px;overflow:hidden;border:1px solid var(--line-strong)}
+  .hero-visual .frame img{width:100%;height:100%;object-fit:cover;filter:saturate(1.05)}
+  .hero-visual .frame::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 50%,rgba(6,28,23,0.6))}
+  .hero-visual .corner{position:absolute;width:60px;height:60px;border:1px solid var(--gold)}
+  .hero-visual .corner.tl{top:-14px;left:-14px;border-right:none;border-bottom:none}
+  .hero-visual .corner.br{bottom:-14px;right:-14px;border-left:none;border-top:none}
+  .hero-visual .tag{position:absolute;top:30px;left:30px;color:var(--gold);font-size:10px;letter-spacing:4px;z-index:2;background:rgba(6,28,23,0.6);padding:8px 14px;border:1px solid var(--line-strong);backdrop-filter:blur(10px)}
+
+  .hero-stats{margin-top:60px;display:grid;grid-template-columns:repeat(4,1fr);gap:24px;padding-top:32px;border-top:1px solid var(--line)}
+  .stat .num{font-family:var(--serif);font-size:38px;color:var(--gold);font-weight:400;letter-spacing:1px;margin-bottom:4px}
+  .stat .lbl{color:var(--muted);font-size:11px;letter-spacing:3px;text-transform:uppercase}
+
+  /* Section base */
+  section{position:relative;padding:110px 0;z-index:1}
+  section + section{border-top:1px solid var(--line)}
+  .eyebrow{display:inline-flex;align-items:center;gap:10px;color:var(--gold);font-size:11px;letter-spacing:5px;margin-bottom:20px;text-transform:uppercase}
+  .eyebrow::before{content:'';width:28px;height:1px;background:var(--gold)}
+  h2{font-family:var(--serif);font-size:44px;color:var(--cream);font-weight:500;letter-spacing:3px;margin-bottom:18px;line-height:1.3}
+  h2 em{color:var(--gold);font-style:normal}
+  .section-lead{color:var(--muted);font-size:15px;max-width:640px;margin-bottom:60px;line-height:1.9}
+
+  /* Pair layout */
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:72px;align-items:center}
+  .pair.rev .copy{order:2}
+  .pair .copy h3{font-family:var(--serif);color:var(--cream);font-size:28px;margin-bottom:16px;font-weight:500;letter-spacing:2px}
+  .pair .copy > p{color:var(--muted);font-size:15px;margin-bottom:14px;line-height:1.9}
+  .pair .copy ul{list-style:none;margin-top:28px}
+  .pair .copy li{color:var(--text);font-size:14px;padding:16px 0;border-top:1px solid var(--line);display:flex;gap:14px;align-items:flex-start;transition:padding-left .3s}
+  .pair .copy li:hover{padding-left:8px}
+  .pair .copy li:last-child{border-bottom:1px solid var(--line)}
+  .pair .copy li .idx{color:var(--gold);font-family:var(--serif);font-size:14px;letter-spacing:1px;flex:0 0 36px}
+  .pair .shot{position:relative;aspect-ratio:4/3}
+  .pair .shot .frame{position:relative;height:100%;border-radius:4px;overflow:hidden;border:1px solid var(--line-strong);box-shadow:0 30px 60px -30px rgba(0,0,0,0.6)}
+  .pair .shot .frame img{width:100%;height:100%;object-fit:cover}
+  .pair .shot .accent{position:absolute;width:160px;height:160px;border:1px solid var(--gold);border-radius:50%;opacity:.4}
+  .pair .shot .accent.a{top:-30px;right:-30px}
+  .pair .shot .accent.b{bottom:-30px;left:-30px;width:100px;height:100px}
+
+  /* Partner cards */
+  .partners{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}
+  .pcard{background:linear-gradient(180deg,var(--ink-2),var(--ink));border:1px solid var(--line);border-radius:4px;padding:36px 28px;transition:all .4s;position:relative;overflow:hidden}
+  .pcard::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent);transform:translateX(-100%);transition:transform .5s}
+  .pcard:hover{border-color:var(--gold);transform:translateY(-4px)}
+  .pcard:hover::before{transform:translateX(100%)}
+  .pcard .num{font-family:var(--serif);color:var(--gold);font-size:12px;letter-spacing:3px;margin-bottom:14px}
+  .pcard h4{color:var(--cream);font-size:18px;margin-bottom:10px;font-weight:500;letter-spacing:1px}
+  .pcard p{color:var(--muted);font-size:13px;line-height:1.8}
+  .pcard .arrow{margin-top:20px;color:var(--gold);font-size:18px;transition:transform .3s;display:inline-block}
+  .pcard:hover .arrow{transform:translateX(6px)}
+
+  /* Products */
+  .products{display:grid;grid-template-columns:repeat(2,1fr);gap:30px}
+  .pr{background:var(--ink-2);border:1px solid var(--line);border-radius:4px;overflow:hidden;display:flex;flex-direction:column;transition:all .4s;position:relative}
+  .pr:hover{border-color:var(--line-strong);transform:translateY(-4px)}
+  .pr .thumb{aspect-ratio:16/10;overflow:hidden;position:relative}
+  .pr .thumb img{width:100%;height:100%;object-fit:cover;transition:transform .8s}
+  .pr:hover .thumb img{transform:scale(1.06)}
+  .pr .thumb::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 60%,rgba(6,28,23,0.4));pointer-events:none}
+  .pr .body{padding:28px 30px 32px}
+  .pr h4{font-family:var(--serif);color:var(--cream);font-size:22px;margin-bottom:10px;font-weight:500;letter-spacing:2px}
+  .pr p{color:var(--muted);font-size:14px;line-height:1.8}
+  .pr .tag{display:inline-block;color:var(--gold);font-size:10px;letter-spacing:4px;margin-bottom:12px;text-transform:uppercase;padding:4px 10px;border:1px solid var(--line-strong);border-radius:2px}
+
+  /* Banner */
+  .band{position:relative;padding:0;border:none}
+  .band + section{border-top:1px solid var(--line)}
+  .band .img{aspect-ratio:21/8;overflow:hidden;position:relative}
+  .band .img img{width:100%;height:100%;object-fit:cover;opacity:.4;filter:saturate(1.2)}
+  .band .caption{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;background:radial-gradient(ellipse at center,rgba(6,28,23,0.3),rgba(6,28,23,0.85));padding:0 24px;text-align:center}
+  .band .caption .eyebrow{margin-bottom:16px}
+  .band h3{font-family:var(--serif);color:var(--cream);font-size:42px;font-weight:500;letter-spacing:6px;margin-bottom:16px;max-width:900px}
+  .band .en-sub{color:var(--gold);letter-spacing:5px;font-size:13px;text-transform:uppercase;font-weight:300}
+
+  /* News */
+  .news-grid{display:grid;grid-template-columns:2fr 1fr 1fr;grid-template-rows:1fr 1fr;gap:20px}
+  .n{background:var(--ink-2);border:1px solid var(--line);border-radius:4px;overflow:hidden;position:relative;min-height:220px;transition:all .4s}
+  .n.big{grid-row:span 2;min-height:460px}
+  .n img{width:100%;height:100%;object-fit:cover;position:absolute;inset:0;transition:transform .8s}
+  .n:hover{border-color:var(--line-strong)}
+  .n:hover img{transform:scale(1.05)}
+  .n .meta{position:absolute;inset:auto 0 0 0;padding:22px 24px;background:linear-gradient(0deg,rgba(6,28,23,0.98) 20%,rgba(6,28,23,0));color:var(--cream);z-index:2}
+  .n .meta .date{color:var(--gold);font-size:10px;letter-spacing:3px;margin-bottom:8px;font-family:var(--serif)}
+  .n .meta .ttl{font-size:14px;line-height:1.5;color:var(--cream);font-family:var(--serif);font-weight:500}
+  .n.big .meta{padding:30px 32px}
+  .n.big .meta .ttl{font-size:22px;letter-spacing:1px}
+  .n.big .meta .date{font-size:11px;margin-bottom:12px}
+
+  /* About */
+  .about-grid{display:grid;grid-template-columns:1fr 1fr;gap:72px;align-items:center}
+  .brand-chain{list-style:none;margin-top:30px}
+  .brand-chain li{display:grid;grid-template-columns:60px 1fr;gap:20px;padding:22px 0;border-top:1px solid var(--line);align-items:center}
+  .brand-chain li:last-child{border-bottom:1px solid var(--line)}
+  .brand-chain .glyph{width:48px;height:48px;border:1px solid var(--gold);border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--gold);font-family:var(--serif);font-size:18px}
+  .brand-chain .nm{color:var(--cream);font-size:16px;font-family:var(--serif);letter-spacing:2px;font-weight:500;margin-bottom:4px}
+  .brand-chain .desc{color:var(--muted);font-size:13px}
+
+  /* Contact — WeChat QR only */
+  .contact{display:grid;grid-template-columns:1fr 1fr;gap:72px;align-items:center}
+  .contact .copy h3{font-family:var(--serif);color:var(--cream);font-size:46px;line-height:1.25;font-weight:500;letter-spacing:4px;margin-bottom:28px}
+  .contact .copy p{color:var(--muted);font-size:15px;line-height:1.9;max-width:460px;margin-bottom:14px}
+  .contact .copy .note{color:var(--mute-2);font-size:13px;line-height:1.9;max-width:460px;margin-top:24px;padding-top:24px;border-top:1px solid var(--line)}
+  .qrcard{position:relative;background:linear-gradient(165deg,rgba(239,230,204,0.08) 0%,rgba(239,230,204,0.03) 40%,rgba(211,176,102,0.06) 100%);border:1px solid rgba(239,230,204,0.18);border-radius:14px;padding:52px 44px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 40px 80px -40px rgba(0,0,0,0.7),inset 0 1px 0 rgba(239,230,204,0.08);text-align:center;overflow:hidden}
+  .qrcard::before{content:'';position:absolute;top:-1px;left:-1px;right:-1px;height:60%;background:linear-gradient(180deg,rgba(239,230,204,0.12),transparent);border-radius:14px 14px 0 0;pointer-events:none}
+  .qrcard .wx-icon{width:72px;height:72px;margin:0 auto 18px;position:relative}
+  .qrcard .wx-icon .glow{position:absolute;inset:-8px;background:radial-gradient(circle,rgba(30,107,87,0.5),transparent 70%);filter:blur(10px)}
+  .qrcard .wx-icon svg{position:relative;width:100%;height:100%;filter:drop-shadow(0 6px 12px rgba(0,0,0,0.4))}
+  .qrcard .eyebrow-wx{color:var(--mute-2);font-size:11px;letter-spacing:5px;margin-bottom:10px;font-family:var(--sans)}
+  .qrcard h4{font-family:var(--serif);color:var(--cream);font-size:34px;letter-spacing:6px;font-weight:500;margin-bottom:14px}
+  .qrcard .sub-cn{color:var(--text);font-size:14px;letter-spacing:2px;margin-bottom:2px}
+  .qrcard .sub-en{color:var(--mute-2);font-size:11px;letter-spacing:2px;margin-bottom:32px;font-family:var(--sans)}
+  .qrcard .qr{width:260px;height:260px;margin:0 auto;background:#fff;padding:16px;border-radius:8px;position:relative;box-shadow:0 20px 40px -15px rgba(0,0,0,0.5)}
+  .qrcard .qr svg{width:100%;height:100%;display:block}
+  .qrcard .qr .center{position:absolute;left:50%;top:50%;width:48px;height:48px;background:#1AAD19;border-radius:8px;transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
+  .qrcard .qr .center svg{width:32px;height:32px}
+  .qrcard .scan-btn{display:inline-flex;align-items:center;gap:12px;margin-top:30px;padding:14px 32px;color:var(--cream);font-size:13px;letter-spacing:3px;border:1px solid rgba(239,230,204,0.22);border-radius:999px;background:rgba(239,230,204,0.04);transition:all .3s;cursor:pointer}
+  .qrcard .scan-btn:hover{border-color:var(--gold);color:var(--gold)}
+  .qrcard .scan-btn .arr{transition:transform .3s}
+  .qrcard .scan-btn:hover .arr{transform:translateX(4px)}
+
+  /* Footer */
+  footer{padding:60px 0 40px;color:var(--muted);font-size:12px;letter-spacing:1px;border-top:1px solid var(--line);position:relative;z-index:1}
+  footer .top{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:40px;margin-bottom:40px;padding-bottom:40px;border-bottom:1px solid var(--line)}
+  footer h5{color:var(--cream);font-family:var(--serif);font-size:14px;letter-spacing:3px;margin-bottom:16px;font-weight:500}
+  footer ul{list-style:none}
+  footer li{padding:6px 0}
+  footer li a{color:var(--muted);font-size:12px}
+  footer li a:hover{color:var(--gold)}
+  footer .row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+  footer .warn{color:var(--mute-2);font-size:11px;margin-top:20px;line-height:1.8}
+
+  /* Reveal on scroll */
+  .reveal{opacity:0;transform:translateY(24px);transition:opacity 1s cubic-bezier(.2,.6,.2,1),transform 1s cubic-bezier(.2,.6,.2,1)}
+  .reveal.in{opacity:1;transform:translateY(0)}
+
+  @media (max-width:960px){
+    .hero{padding:60px 0 80px}
+    .hero-grid,.pair,.about-grid,.contact{grid-template-columns:1fr;gap:40px}
+    .pair.rev .copy{order:0}
+    .hero h1{font-size:36px;letter-spacing:2px}
+    h2{font-size:28px;letter-spacing:2px}
+    .partners{grid-template-columns:1fr}
+    .products{grid-template-columns:1fr}
+    .news-grid{grid-template-columns:1fr;grid-template-rows:auto}
+    .n.big{grid-row:auto;min-height:260px}
+    nav ul{display:none}
+    .hero-stats{grid-template-columns:repeat(2,1fr);gap:20px}
+    .band h3{font-size:24px;letter-spacing:3px}
+    footer .top{grid-template-columns:1fr 1fr}
+    .wrap{padding:0 24px}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <nav>
+      <a href="#" class="brand">
+        <div class="orb">
+          <svg viewBox="0 0 40 40">
+            <circle cx="20" cy="20" r="18" fill="none" stroke="rgba(211,176,102,0.3)" stroke-width="1"/>
+            <g class="ring">
+              <circle cx="20" cy="20" r="13" fill="none" stroke="rgba(211,176,102,0.5)" stroke-width="1" stroke-dasharray="2 3"/>
+            </g>
+            <circle cx="20" cy="20" r="4" fill="#D3B066"/>
+          </svg>
+        </div>
+        <div class="names"><b>SENCENT</b><span>森诺科技 · GLOBAL</span></div>
+      </a>
+      <ul>
+        <li><a class="navlink" href="#global">全球运营</a></li>
+        <li><a class="navlink" href="#partner">全球合作</a></li>
+        <li><a class="navlink" href="#products">产品 · 方案</a></li>
+        <li><a class="navlink" href="#academy">健康学院</a></li>
+        <li><a class="navlink" href="#news">新闻与洞察</a></li>
+        <li><a class="navlink" href="#about">关于森诺</a></li>
+      </ul>
+      <a class="cta" href="#contact"><span>提交合作申请</span></a>
+    </nav>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div class="reveal">
+      <div class="eyebrow">Global Operations · AI Health Ecosystem</div>
+      <h1>以<em>全球运营</em><br>连接 AI 健康生态</h1>
+      <div class="en-line">Global operations for a connected AI health ecosystem</div>
+      <p class="lead">森诺科技全球运营平台，面向国家 / 区域代理、机构、渠道与生态伙伴，提供市场进入、运营支持、培训赋能与国际协同。</p>
+      <div class="hero-btns">
+        <a class="btn-primary" href="#contact">提交全球合作申请</a>
+        <a class="btn-ghost" href="#global">了解平台 <svg width="18" height="12" viewBox="0 0 18 12" fill="none"><path d="M1 6h16M12 1l5 5-5 5" stroke="currentColor" stroke-width="1.2"/></svg></a>
+      </div>
+    </div>
+    <div class="hero-visual reveal">
+      <div class="corner tl"></div>
+      <div class="corner br"></div>
+      <div class="tag">SENCENT · 2026</div>
+      <div class="frame"><img src="images/网站占位图/首页.png" alt="全球运营平台"></div>
+    </div>
+  </div>
+  <div class="wrap hero-stats reveal">
+    <div class="stat"><div class="num">6</div><div class="lbl">合作入口</div></div>
+    <div class="stat"><div class="num">∞</div><div class="lbl">全球协同</div></div>
+    <div class="stat"><div class="num">24/7</div><div class="lbl">运营支持</div></div>
+    <div class="stat"><div class="num">AI</div><div class="lbl">健康生态</div></div>
+  </div>
+</section>
+
+<section id="global">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">Global Operations · 全球运营</div>
+      <h2>一个平台，<em>承接全球多角色的协同</em></h2>
+      <p class="section-lead">从代理到机构，从市场到供应链——用统一的流程、工具与数据，支持跨地区的落地与持续运营。</p>
+    </div>
+    <div class="pair reveal">
+      <div class="shot">
+        <div class="accent a"></div>
+        <div class="accent b"></div>
+        <div class="frame"><img src="images/网站占位图/全球运营.jpg" alt="全球运营"></div>
+      </div>
+      <div class="copy">
+        <h3>全球运营平台</h3>
+        <p>把分散在聊天、文件与海报里的招商与运营信息，收敛到结构化的内容与申请体系；让每一次合作都从同一张地图开始。</p>
+        <ul>
+          <li><span class="idx">01</span><span>国家 / 区域代理体系</span></li>
+          <li><span class="idx">02</span><span>机构合作与渠道管理</span></li>
+          <li><span class="idx">03</span><span>市场运营与培训赋能</span></li>
+          <li><span class="idx">04</span><span>供应链与生态合作</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="partner" style="background:linear-gradient(180deg,var(--ink-2),var(--ink))">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">Global Partnership · 全球合作</div>
+      <h2>找到适合你的<em>合作路径</em></h2>
+      <p class="section-lead">不同类型的合作伙伴，对应不同的进入方式——先看合作形态，再决定下一步。</p>
+    </div>
+    <div class="partners reveal">
+      <div class="pcard"><div class="num">01 · AGENCY</div><h4>国家 / 区域代理</h4><p>获取独家区域经营权，承担本地化市场建设、团队培训与运营落地。</p><span class="arrow">→</span></div>
+      <div class="pcard"><div class="num">02 · INSTITUTION</div><h4>机构合作</h4><p>医疗、健康管理、教育培训与行业机构的深度合作与解决方案共建。</p><span class="arrow">→</span></div>
+      <div class="pcard"><div class="num">03 · CHANNEL</div><h4>渠道合作</h4><p>面向连锁、分销、零售与服务终端的渠道合作与赋能。</p><span class="arrow">→</span></div>
+      <div class="pcard"><div class="num">04 · SUPPLY</div><h4>供应链 / 技术</h4><p>产品、模型、数据与设备的供应链伙伴与技术合作。</p><span class="arrow">→</span></div>
+      <div class="pcard"><div class="num">05 · MEDIA</div><h4>媒体 / 公益</h4><p>品牌与行业内容合作、公益与社会责任项目的联动。</p><span class="arrow">→</span></div>
+      <div class="pcard"><div class="num">06 · ACADEMY</div><h4>健康学院</h4><p>课程、认证与持续学习，面向代理、机构与渠道的赋能体系。</p><span class="arrow">→</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="products">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">Products &amp; Solutions · 产品与解决方案</div>
+      <h2>小趣 AI · <em>Matrix AI</em></h2>
+      <p class="section-lead">面向个人、家庭、门店、机构与健康管理场景的 AI 健康产品与服务。</p>
+    </div>
+    <div class="products reveal">
+      <div class="pr">
+        <div class="thumb"><img src="images/网站占位图/面向真实场景的AI 健康评估.jpg" alt="AI 健康评估"></div>
+        <div class="body"><span class="tag">AI Health</span><h4>面向真实场景的 AI 健康评估</h4><p>融合多模态数据，提供可解释的健康画像与管理建议，适配个人与机构的真实使用链路。</p></div>
+      </div>
+      <div class="pr">
+        <div class="thumb"><img src="images/网站占位图/小趣AI 产品示意图.jpg" alt="小趣AI 产品"></div>
+        <div class="body"><span class="tag">Product · Matrix AI</span><h4>小趣 AI 产品矩阵</h4><p>端到端的 AI 健康产品线，可独立使用，也可组合成为门店、机构与渠道的解决方案。</p></div>
+      </div>
+      <div class="pr">
+        <div class="thumb"><img src="images/网站占位图/产品与解决方案.png" alt="产品与解决方案"></div>
+        <div class="body"><span class="tag">Solutions</span><h4>行业解决方案</h4><p>按客户场景组织的落地包，覆盖评估、设备、流程、培训与运营支持。</p></div>
+      </div>
+      <div class="pr" id="academy">
+        <div class="thumb"><img src="images/网站占位图/健康学院.png" alt="健康学院"></div>
+        <div class="body"><span class="tag">Academy</span><h4>健康学院</h4><p>面向代理、机构与渠道的培训赋能体系，提供课程、认证与持续学习资源。</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band">
+  <div class="img"><img src="images/网站占位图/连接全球合作伙伴 ，支持本地运营.jpg" alt=""></div>
+  <div class="caption reveal">
+    <div class="eyebrow">Our Promise</div>
+    <h3>连接全球合作伙伴<br>支持本地运营</h3>
+    <div class="en-sub">Global Partners · Local Operations</div>
+  </div>
+</section>
+
+<section id="news">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">News &amp; Insights · 新闻与洞察</div>
+      <h2>关注<em>全球运营</em>与行业动态</h2>
+      <p class="section-lead">持续发布经审核的全球业务进展、行业内容与合作案例。</p>
+    </div>
+    <div class="news-grid reveal">
+      <a class="n big" href="#"><img src="images/网站占位图/新闻与洞察.jpg" alt=""><div class="meta"><div class="date">2026 · 10 · 18</div><div class="ttl">森诺全球运营平台正式启动，面向国家 / 区域代理开放首批合作</div></div></a>
+      <a class="n" href="#"><img src="images/网站占位图/新闻与洞察1.jpg" alt=""><div class="meta"><div class="date">2026 · 10</div><div class="ttl">AI 健康评估能力更新</div></div></a>
+      <a class="n" href="#"><img src="images/网站占位图/新闻与洞察2.jpg" alt=""><div class="meta"><div class="date">2026 · 10</div><div class="ttl">机构合作培训首期开课</div></div></a>
+      <a class="n" href="#"><img src="images/网站占位图/新闻洞察3.jpg" alt=""><div class="meta"><div class="date">2026 · 09</div><div class="ttl">供应链合作伙伴签约</div></div></a>
+      <a class="n" href="#"><img src="images/网站占位图/新闻与洞察4.jpg" alt=""><div class="meta"><div class="date">2026 · 09</div><div class="ttl">区域代理落地案例</div></div></a>
+    </div>
+  </div>
+</section>
+
+<section id="about" style="background:linear-gradient(180deg,var(--ink-2),var(--ink))">
+  <div class="wrap about-grid">
+    <div class="reveal">
+      <div class="eyebrow">About · 关于森诺</div>
+      <h2>森诺是<em>全球运营平台</em></h2>
+      <p style="color:var(--muted);font-size:15px;line-height:1.9;margin-bottom:14px">森诺科技承载品牌认知、全球合作、市场运营、新闻发布与内容沉淀；由宜邦科技作为品牌与总代理背书；小趣AI / Matrix AI 作为产品与服务品牌。</p>
+      <ul class="brand-chain">
+        <li><div class="glyph">森</div><div><div class="nm">森诺 · SENCENT</div><div class="desc">全球运营与国际协同平台</div></div></li>
+        <li><div class="glyph">宜</div><div><div class="nm">宜邦</div><div class="desc">品牌与企业背书，小趣AI 总代理</div></div></li>
+        <li><div class="glyph">AI</div><div><div class="nm">小趣AI · Matrix AI</div><div class="desc">AI 健康产品与服务品牌</div></div></li>
+      </ul>
+    </div>
+    <div class="pair reveal" style="display:block">
+      <div class="shot" style="aspect-ratio:4/5">
+        <div class="accent a"></div>
+        <div class="frame"><img src="images/网站占位图/关于森诺.png" alt="关于森诺"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="contact">
+  <div class="wrap">
+    <div class="reveal">
+      <div class="eyebrow">Partner with Us · 提交合作申请</div>
+      <h2>告诉我们<em>你想从哪里开始</em></h2>
+      <p class="section-lead">填写合作申请，我们会在收到后由对应的区域 / 行业团队与你联系。</p>
+    </div>
+    <div class="contact reveal">
+      <div class="copy">
+        <h3>与我们一起<br>连接全球</h3>
+        <p>每一份合作申请都会由对应的区域 / 行业团队核对后回复——我们重视你的时间，也重视这段合作的开始。</p>
+        <p class="note">扫描右侧二维码添加森诺官方微信，面向中国与亚洲地区的国家 / 区域代理、机构、渠道与生态伙伴，获取合作资料与申请路径。</p>
+      </div>
+      <div class="qrcard">
+        <div class="wx-icon">
+          <div class="glow"></div>
+          <svg viewBox="0 0 72 72">
+            <defs>
+              <radialGradient id="wxg" cx="35%" cy="30%" r="70%">
+                <stop offset="0%" stop-color="#4CBF4A"/>
+                <stop offset="55%" stop-color="#1AAD19"/>
+                <stop offset="100%" stop-color="#0E6F1A"/>
+              </radialGradient>
+              <radialGradient id="wxh" cx="30%" cy="20%" r="40%">
+                <stop offset="0%" stop-color="rgba(255,255,255,0.7)"/>
+                <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
+              </radialGradient>
+            </defs>
+            <circle cx="36" cy="36" r="34" fill="url(#wxg)"/>
+            <circle cx="36" cy="36" r="34" fill="url(#wxh)"/>
+            <circle cx="36" cy="36" r="34" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="0.8"/>
+            <!-- WeChat chat bubbles -->
+            <g fill="#fff">
+              <path d="M26 25c-6 0-11 4-11 9 0 3 2 5 4 7l-1 4 5-2c1 0 2 1 3 1 0-5 5-9 11-9h1c-1-6-6-10-12-10zm-4 7a1.5 1.5 0 110 3 1.5 1.5 0 010-3zm8 0a1.5 1.5 0 110 3 1.5 1.5 0 010-3z"/>
+              <path d="M46 34c-5 0-10 3-10 8 0 3 2 5 4 7l-1 3 4-2c1 0 2 1 3 1 5 0 10-4 10-9s-5-8-10-8zm-3 6a1.2 1.2 0 110 2.5 1.2 1.2 0 010-2.5zm6 0a1.2 1.2 0 110 2.5 1.2 1.2 0 010-2.5z"/>
+            </g>
+          </svg>
+        </div>
+        <div class="eyebrow-wx">WECHAT</div>
+        <h4>微信</h4>
+        <div class="sub-cn">中国及亚洲合作</div>
+        <div class="sub-en">China &amp; Asia partnerships</div>
+        <div class="qr">
+          <svg viewBox="0 0 29 29" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
+            <rect width="29" height="29" fill="#fff"/>
+            <g fill="#000">
+              <!-- Three finder patterns -->
+              <path d="M0 0h7v7h-7zM1 1v5h5v-5zM2 2h3v3h-3z"/>
+              <path d="M22 0h7v7h-7zM23 1v5h5v-5zM24 2h3v3h-3z"/>
+              <path d="M0 22h7v7h-7zM1 23v5h5v-5zM2 24h3v3h-3z"/>
+              <!-- Timing patterns + data (synthesized decorative) -->
+              <rect x="8" y="0" width="1" height="1"/><rect x="10" y="0" width="2" height="1"/><rect x="13" y="0" width="1" height="1"/><rect x="15" y="0" width="2" height="1"/><rect x="18" y="0" width="1" height="1"/><rect x="20" y="0" width="1" height="1"/>
+              <rect x="8" y="1" width="2" height="1"/><rect x="11" y="1" width="1" height="1"/><rect x="14" y="1" width="2" height="1"/><rect x="17" y="1" width="1" height="1"/><rect x="19" y="1" width="2" height="1"/>
+              <rect x="9" y="2" width="1" height="1"/><rect x="11" y="2" width="3" height="1"/><rect x="15" y="2" width="1" height="1"/><rect x="17" y="2" width="2" height="1"/><rect x="20" y="2" width="1" height="1"/>
+              <rect x="8" y="3" width="1" height="1"/><rect x="10" y="3" width="1" height="1"/><rect x="13" y="3" width="2" height="1"/><rect x="16" y="3" width="1" height="1"/><rect x="18" y="3" width="1" height="1"/><rect x="20" y="3" width="1" height="1"/>
+              <rect x="9" y="4" width="2" height="1"/><rect x="12" y="4" width="1" height="1"/><rect x="14" y="4" width="1" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="19" y="4" width="2" height="1"/>
+              <rect x="8" y="5" width="1" height="1"/><rect x="11" y="5" width="1" height="1"/><rect x="13" y="5" width="1" height="1"/><rect x="15" y="5" width="1" height="1"/><rect x="17" y="5" width="1" height="1"/><rect x="19" y="5" width="1" height="1"/><rect x="21" y="5" width="1" height="1"/>
+              <rect x="9" y="6" width="1" height="1"/><rect x="11" y="6" width="2" height="1"/><rect x="14" y="6" width="2" height="1"/><rect x="17" y="6" width="2" height="1"/><rect x="20" y="6" width="2" height="1"/>
+              <rect x="0" y="8" width="1" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="1" height="1"/><rect x="7" y="8" width="2" height="1"/><rect x="10" y="8" width="1" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="15" y="8" width="1" height="1"/><rect x="18" y="8" width="2" height="1"/><rect x="21" y="8" width="1" height="1"/><rect x="23" y="8" width="2" height="1"/><rect x="26" y="8" width="1" height="1"/><rect x="28" y="8" width="1" height="1"/>
+              <rect x="1" y="9" width="2" height="1"/><rect x="4" y="9" width="1" height="1"/><rect x="6" y="9" width="2" height="1"/><rect x="9" y="9" width="1" height="1"/><rect x="11" y="9" width="2" height="1"/><rect x="14" y="9" width="2" height="1"/><rect x="17" y="9" width="1" height="1"/><rect x="19" y="9" width="2" height="1"/><rect x="22" y="9" width="1" height="1"/><rect x="24" y="9" width="2" height="1"/><rect x="27" y="9" width="1" height="1"/>
+              <rect x="0" y="10" width="2" height="1"/><rect x="3" y="10" width="1" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="8" y="10" width="1" height="1"/><rect x="10" y="10" width="2" height="1"/><rect x="13" y="10" width="1" height="1"/><rect x="15" y="10" width="2" height="1"/><rect x="18" y="10" width="2" height="1"/><rect x="21" y="10" width="1" height="1"/><rect x="23" y="10" width="2" height="1"/><rect x="26" y="10" width="1" height="1"/><rect x="28" y="10" width="1" height="1"/>
+              <rect x="2" y="11" width="1" height="1"/><rect x="4" y="11" width="2" height="1"/><rect x="7" y="11" width="1" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="1" height="1"/><rect x="14" y="11" width="2" height="1"/><rect x="17" y="11" width="2" height="1"/><rect x="20" y="11" width="1" height="1"/><rect x="22" y="11" width="2" height="1"/><rect x="25" y="11" width="1" height="1"/><rect x="27" y="11" width="2" height="1"/>
+              <rect x="0" y="12" width="1" height="1"/><rect x="3" y="12" width="2" height="1"/><rect x="6" y="12" width="1" height="1"/><rect x="8" y="12" width="2" height="1"/><rect x="11" y="12" width="1" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="1" height="1"/><rect x="18" y="12" width="2" height="1"/><rect x="21" y="12" width="1" height="1"/><rect x="23" y="12" width="2" height="1"/><rect x="26" y="12" width="1" height="1"/>
+              <rect x="1" y="13" width="2" height="1"/><rect x="5" y="13" width="1" height="1"/><rect x="7" y="13" width="2" height="1"/><rect x="10" y="13" width="2" height="1"/><rect x="14" y="13" width="1" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="19" y="13" width="1" height="1"/><rect x="21" y="13" width="2" height="1"/><rect x="25" y="13" width="2" height="1"/><rect x="28" y="13" width="1" height="1"/>
+              <rect x="0" y="14" width="2" height="1"/><rect x="3" y="14" width="1" height="1"/><rect x="6" y="14" width="2" height="1"/><rect x="9" y="14" width="1" height="1"/><rect x="12" y="14" width="2" height="1"/><rect x="15" y="14" width="2" height="1"/><rect x="18" y="14" width="1" height="1"/><rect x="20" y="14" width="2" height="1"/><rect x="24" y="14" width="1" height="1"/><rect x="26" y="14" width="2" height="1"/>
+              <rect x="2" y="15" width="1" height="1"/><rect x="4" y="15" width="2" height="1"/><rect x="7" y="15" width="1" height="1"/><rect x="10" y="15" width="2" height="1"/><rect x="13" y="15" width="1" height="1"/><rect x="16" y="15" width="2" height="1"/><rect x="19" y="15" width="2" height="1"/><rect x="22" y="15" width="1" height="1"/><rect x="24" y="15" width="2" height="1"/><rect x="27" y="15" width="1" height="1"/>
+              <rect x="0" y="16" width="1" height="1"/><rect x="3" y="16" width="2" height="1"/><rect x="6" y="16" width="1" height="1"/><rect x="8" y="16" width="2" height="1"/><rect x="11" y="16" width="2" height="1"/><rect x="15" y="16" width="1" height="1"/><rect x="17" y="16" width="2" height="1"/><rect x="20" y="16" width="1" height="1"/><rect x="22" y="16" width="2" height="1"/><rect x="25" y="16" width="2" height="1"/><rect x="28" y="16" width="1" height="1"/>
+              <rect x="1" y="17" width="2" height="1"/><rect x="4" y="17" width="1" height="1"/><rect x="7" y="17" width="2" height="1"/><rect x="10" y="17" width="1" height="1"/><rect x="12" y="17" width="2" height="1"/><rect x="16" y="17" width="2" height="1"/><rect x="19" y="17" width="1" height="1"/><rect x="21" y="17" width="2" height="1"/><rect x="24" y="17" width="1" height="1"/><rect x="26" y="17" width="2" height="1"/>
+              <rect x="0" y="18" width="2" height="1"/><rect x="5" y="18" width="1" height="1"/><rect x="7" y="18" width="2" height="1"/><rect x="11" y="18" width="1" height="1"/><rect x="13" y="18" width="2" height="1"/><rect x="17" y="18" width="1" height="1"/><rect x="19" y="18" width="2" height="1"/><rect x="22" y="18" width="1" height="1"/><rect x="25" y="18" width="2" height="1"/><rect x="28" y="18" width="1" height="1"/>
+              <rect x="2" y="19" width="1" height="1"/><rect x="4" y="19" width="2" height="1"/><rect x="8" y="19" width="1" height="1"/><rect x="10" y="19" width="2" height="1"/><rect x="14" y="19" width="1" height="1"/><rect x="16" y="19" width="2" height="1"/><rect x="20" y="19" width="2" height="1"/><rect x="23" y="19" width="1" height="1"/><rect x="25" y="19" width="2" height="1"/>
+              <rect x="0" y="20" width="1" height="1"/><rect x="3" y="20" width="1" height="1"/><rect x="5" y="20" width="2" height="1"/><rect x="9" y="20" width="2" height="1"/><rect x="12" y="20" width="1" height="1"/><rect x="15" y="20" width="2" height="1"/><rect x="18" y="20" width="1" height="1"/><rect x="22" y="20" width="2" height="1"/><rect x="26" y="20" width="1" height="1"/><rect x="28" y="20" width="1" height="1"/>
+              <rect x="8" y="22" width="1" height="1"/><rect x="10" y="22" width="2" height="1"/><rect x="13" y="22" width="1" height="1"/><rect x="15" y="22" width="2" height="1"/><rect x="18" y="22" width="2" height="1"/><rect x="21" y="22" width="1" height="1"/><rect x="23" y="22" width="1" height="1"/><rect x="26" y="22" width="2" height="1"/>
+              <rect x="9" y="23" width="2" height="1"/><rect x="12" y="23" width="2" height="1"/><rect x="16" y="23" width="1" height="1"/><rect x="18" y="23" width="1" height="1"/><rect x="20" y="23" width="2" height="1"/><rect x="24" y="23" width="2" height="1"/><rect x="28" y="23" width="1" height="1"/>
+              <rect x="8" y="24" width="2" height="1"/><rect x="11" y="24" width="1" height="1"/><rect x="13" y="24" width="2" height="1"/><rect x="16" y="24" width="2" height="1"/><rect x="19" y="24" width="1" height="1"/><rect x="21" y="24" width="2" height="1"/><rect x="25" y="24" width="1" height="1"/><rect x="27" y="24" width="1" height="1"/>
+              <rect x="10" y="25" width="1" height="1"/><rect x="12" y="25" width="2" height="1"/><rect x="15" y="25" width="1" height="1"/><rect x="17" y="25" width="2" height="1"/><rect x="20" y="25" width="1" height="1"/><rect x="22" y="25" width="2" height="1"/><rect x="26" y="25" width="1" height="1"/><rect x="28" y="25" width="1" height="1"/>
+              <rect x="8" y="26" width="1" height="1"/><rect x="11" y="26" width="2" height="1"/><rect x="14" y="26" width="1" height="1"/><rect x="16" y="26" width="2" height="1"/><rect x="19" y="26" width="2" height="1"/><rect x="23" y="26" width="1" height="1"/><rect x="25" y="26" width="1" height="1"/><rect x="27" y="26" width="2" height="1"/>
+              <rect x="9" y="27" width="2" height="1"/><rect x="12" y="27" width="1" height="1"/><rect x="15" y="27" width="2" height="1"/><rect x="18" y="27" width="1" height="1"/><rect x="20" y="27" width="2" height="1"/><rect x="24" y="27" width="1" height="1"/><rect x="26" y="27" width="2" height="1"/>
+              <rect x="8" y="28" width="2" height="1"/><rect x="11" y="28" width="1" height="1"/><rect x="13" y="28" width="2" height="1"/><rect x="17" y="28" width="1" height="1"/><rect x="19" y="28" width="2" height="1"/><rect x="22" y="28" width="2" height="1"/><rect x="25" y="28" width="2" height="1"/><rect x="28" y="28" width="1" height="1"/>
+            </g>
+          </svg>
+          <div class="center">
+            <svg viewBox="0 0 32 32" fill="#fff"><path d="M12 10c-4 0-7 3-7 6 0 2 1 4 3 5l-1 2 3-1 2 1h1c-1-4 3-7 7-7h2c-1-4-5-6-10-6zm-3 4a1 1 0 110 2 1 1 0 010-2zm5 0a1 1 0 110 2 1 1 0 010-2z"/><path d="M22 15c-4 0-7 2-7 5s3 5 7 5l2-1 3 1-1-2c1-1 3-2 3-4 0-3-3-4-7-4zm-2 3a1 1 0 110 2 1 1 0 010-2zm4 0a1 1 0 110 2 1 1 0 010-2z"/></svg>
+          </div>
+        </div>
+        <a class="scan-btn" href="#">扫码联系我们 <span class="arr">→</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <div class="brand" style="margin-bottom:18px">
+          <div class="orb"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="18" fill="none" stroke="rgba(211,176,102,0.3)" stroke-width="1"/><circle cx="20" cy="20" r="4" fill="#D3B066"/></svg></div>
+          <div class="names"><b>SENCENT</b><span>森诺科技 · GLOBAL</span></div>
+        </div>
+        <p style="color:var(--muted);font-size:12px;line-height:1.9;max-width:320px">全球运营平台，连接 AI 健康生态。<br>Global operations for a connected AI health ecosystem.</p>
+      </div>
+      <div><h5>平台</h5><ul><li><a href="#global">全球运营</a></li><li><a href="#partner">全球合作</a></li><li><a href="#products">产品 · 方案</a></li><li><a href="#academy">健康学院</a></li></ul></div>
+      <div><h5>内容</h5><ul><li><a href="#news">新闻与洞察</a></li><li><a href="#about">关于森诺</a></li><li><a href="#">品牌与媒体</a></li><li><a href="#">公益项目</a></li></ul></div>
+      <div><h5>合作</h5><ul><li><a href="#contact">提交合作申请</a></li><li><a href="#contact">区域代理</a></li><li><a href="#contact">机构合作</a></li><li><a href="#contact">媒体合作</a></li></ul></div>
+    </div>
+    <div class="row">
+      <div>© 2026 森诺科技 · SENCENT TECH · 全球运营平台</div>
+      <div>Powered by Magic Engine · Preview</div>
+    </div>
+    <div class="warn">
+      预览版声明：本页仅用于视觉与结构预览，所有图片均为占位素材，所有文案未定稿。品牌英文名（SENCENT / SENRUO）、公司法律主体、产品描述与合作口径均以甲方最终确认为准；小趣AI / Matrix AI 不作诊断、治疗、疗效或收益保证。
+    </div>
+  </div>
+</footer>
+
+<script>
+  const io = new IntersectionObserver((es)=>es.forEach(e=>e.isIntersecting&&e.target.classList.add('in')),{threshold:0.08});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script>
+</body>
+</html>

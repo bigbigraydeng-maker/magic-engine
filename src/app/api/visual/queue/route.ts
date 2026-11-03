@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { GENERATION_CONFIG } from '@/lib/visual/generation-config'
+import { requireSession } from '@/lib/auth/require-session'
 
 /**
  * GET /api/visual/queue
@@ -7,6 +8,10 @@ import { GENERATION_CONFIG } from '@/lib/visual/generation-config'
  * Primarily for debugging and future server-side queue management.
  */
 export async function GET(_req: NextRequest) {
+  const session = await requireSession()
+  if (!session.ok) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+  }
   try {
     return NextResponse.json({
       success: true,

@@ -16,23 +16,50 @@ import { conversationInboundDraft } from './conversation-inbound-draft'
 import { conversationHealthHeartbeat } from './conversation-health-heartbeat'
 import { postPublishFanOut, postPublishCheck } from './seo-post-publish-monitor'
 import { seoMetaCycleFanOut, seoMetaCycleRunOne } from './seo-meta-cycle'
+import { seoMetaRankSamplerFanOut, seoMetaRankSamplerOne } from './seo-meta-rank-sampler'
 import { competitorWatchWeeklyFanOut, competitorWatchRunOne } from './competitor-watch-weekly'
 import { aiVisibilityWeeklyFanOut, aiVisibilityTrackerRunOne } from './ai-visibility-weekly'
 import { reelBatchRender } from './reel-batch-render'
 import { adsD3AutoPause } from './ads-d3-auto-pause'
 import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
+import { calendarClosureAudit } from './calendar-closure-audit'
+import { promoPlanDailyWatch } from './promo-plan-daily-watch'
+import { adHeartbeat } from './ad-heartbeat'
+import { adBreakdownCapture } from './ad-breakdown-capture'
+import { adsTrackingPreflight } from './ads-tracking-preflight'
+import { adsTrackingLaunchWatch } from './ads-tracking-launch-watch'
+import { adsServicePauseNotify } from './ads-service-pause-notify'
 import { crmLeadFollowupDigest } from './crm-lead-followup-digest'
 import { adsAutonomySyncFunction } from './ads-autonomy-sync'
 import { adsCampaignBudgetDecrease } from './ads-campaign-budget'
 import { adsO1BudgetScale } from './ads-o1-budget-scale'
 import { maliangRenderCheck } from './maliang-render-check'
+import { assetDualReview } from './asset-dual-review'
 import { libaiCopyProvenance } from './libai-copy-provenance'
 import { libaiPromptLibraryMonthly } from './libai-prompt-library-monthly'
 import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
 import { gscPageDailyFanOut, gscPageDailyPull } from './gsc-page-daily'
+import { gscQueryPageDailyFanOut, gscQueryPageDailyPull } from './gsc-query-page-daily'
 import { toolsLabLeadFollowUp, toolsLabReportEmailReceipt } from './tools-lab-lead-followup'
+import { dailyPlanAutoPublish } from './daily-plan-auto-publish'
+import { youtubeStaging, youtubePublicStep } from './youtube-publish'
+import { storyLitePublish } from './story-lite-publish'
+import { storyPublishActionRecorder } from './story-publish-action-recorder'
+import { storyPublishActionReconcile } from './story-publish-action-reconcile'
+import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-voipline'
+import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
+import { planDraftFromPrescription } from './plan-draft-from-prescription'
+import { crmEmailSendReceipt } from './crm-email-send-receipt'
+import { zhangqianDiscovery } from './zhangqian-discovery'
+import { triggeredSendWelcomeDispatch, triggeredSendWelcomeSweep } from './triggered-send-welcome-sweep'
 
 export const cloudFunctions = [
+  promoPlanDailyWatch,
+  adHeartbeat,
+  adBreakdownCapture,
+  adsTrackingPreflight,
+  adsTrackingLaunchWatch,
+  adsServicePauseNotify,
   webIntelligenceCapture,
   webIntelligenceDue,
   webIntelligenceTrafficDue,
@@ -55,6 +82,8 @@ export const cloudFunctions = [
   postPublishCheck,
   seoMetaCycleFanOut,
   seoMetaCycleRunOne,
+  seoMetaRankSamplerFanOut,
+  seoMetaRankSamplerOne,
   competitorWatchWeeklyFanOut,
   competitorWatchRunOne,
   aiVisibilityWeeklyFanOut,
@@ -63,18 +92,37 @@ export const cloudFunctions = [
   adsD3AutoPause,
   leadSheetSyncFanOut,
   leadSheetSyncOne,
+  calendarClosureAudit,
   crmLeadFollowupDigest,
   adsAutonomySyncFunction,
   adsCampaignBudgetDecrease,
   adsO1BudgetScale,
   maliangRenderCheck,
+  assetDualReview,
   libaiCopyProvenance,
   libaiPromptLibraryMonthly,
   simaqianReputationWeekly,
   gscPageDailyFanOut,
   gscPageDailyPull,
+  gscQueryPageDailyFanOut,
+  gscQueryPageDailyPull,
   toolsLabLeadFollowUp,
   toolsLabReportEmailReceipt,
+  dailyPlanAutoPublish,
+  youtubeStaging,
+  youtubePublicStep,
+  storyLitePublish,
+  storyPublishActionRecorder,
+  storyPublishActionReconcile,
+  telephonyVoiplineProcess,
+  telephonyVoiplineSweep,
+  telephonyCallAnalysis,
+  telephonyCallAnalysisSweep,
+  planDraftFromPrescription,
+  crmEmailSendReceipt,
+  zhangqianDiscovery,
+  triggeredSendWelcomeDispatch,
+  triggeredSendWelcomeSweep,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

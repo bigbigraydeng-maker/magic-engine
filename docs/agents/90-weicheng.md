@@ -125,7 +125,7 @@ Codex → 产出代码变更
 子牙 → 读魏征报告，决定是否 merge 或打回 Codex
 ```
 
-**Codex 产出的任何代码必须经过魏征两层才能 merge。** 子牙不亲自审 Codex 代码，交魏征。
+**2026-10-25 起，合并闸不再要求魏征签字。** A 级由 Codex Astra 审查、Claude Code 独立复核。魏征只参与 B 级可选抽查，缺席不挡合并。上面的流程图是旧协作方式，不再当作合并条件。
 
 ---
 
@@ -157,3 +157,9 @@ Codex → 产出代码变更
 - 子牙手册（调用者）：`docs/agents/10-ziya.md`
 - 达芬奇手册（已撤 2026-09-24，历史参考；设计挑战并入子牙 `10-ziya.md` §四b）：`docs/agents/80-davinci.md`
 - 测试套件：`TESTING.md`
+
+---
+
+## 操作手册
+
+暂无。索引：[agents 索引](./README.md)（合并闸签字 role 写作 `weizheng`，与本档案代号 `weicheng` 的对应见索引）。

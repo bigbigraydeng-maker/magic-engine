@@ -45,6 +45,7 @@ import { cronRunHandle, cronRunIdFromInngestRun, finishCronRunIfOpen, startCronR
 import { GscApiError, type GscAnalyticsRow, type GscDayRange, type GscRowsQuery } from './client'
 import { addDays, GSC_PAGE_DAILY_PULL_JOB, type PullOrder } from './page-daily-plan'
 import {
+  PAGE_FETCH_RECEIPTS_TABLE,
   closeReceipt,
   closeReceiptIfRunning,
   openReceipt,
@@ -68,8 +69,41 @@ export interface PullStep {
   run<T>(id: string, fn: () => Promise<T>): Promise<T>
 }
 
+/**
+ * What differs between per-page and per-(query, page) daily stores: the Search Analytics dimensions, the table the
+ * rows go to, the receipts table, and the run-log job name. Absent in `PullDeps` = the per-page store, exactly as
+ * before — existing callers and tests do not change.
+ */
+export interface PullDataset {
+  readonly dimensions: readonly string[]
+  readonly pullJob: string
+  /**
+   * Opens this data set's run-log row. A function of the data set (not `startCronRunWithId(dataset.pullJob, …)` at
+   * the call site) because the CRON_REGISTRY coverage test reads job names from literal / top-level-constant
+   * arguments — each data set therefore opens its own row with its own constant.
+   */
+  startRun(runLogId: string): Promise<void>
+  readonly receiptsTable: string
+  upsertDay(
+    supabase: SupabaseClient,
+    clientId: string,
+    day: string,
+    rows: readonly GscAnalyticsRow[],
+  ): Promise<{ written: number; skippedLongUrls: number }>
+}
+
+export const PAGE_DATASET: PullDataset = {
+  dimensions: ['page'],
+  pullJob: GSC_PAGE_DAILY_PULL_JOB,
+  startRun: (runLogId) => startCronRunWithId(GSC_PAGE_DAILY_PULL_JOB, runLogId),
+  receiptsTable: PAGE_FETCH_RECEIPTS_TABLE,
+  upsertDay: upsertPageDayRows,
+}
+
 export interface PullDeps {
   readonly supabase: SupabaseClient
+  /** Which store this pull feeds; the per-page store when absent. */
+  readonly dataset?: PullDataset
   /** The client's current GSC property, or null when it is no longer connected. */
   loadSiteUrl(clientId: string): Promise<string | null>
   /** Rows for one query; null when no usable token exists. May throw GscApiError. */
@@ -160,12 +194,13 @@ async function pullPage(
   page: number,
 ): Promise<PageResult> {
   const t0 = Date.now()
+  const dataset = deps.dataset ?? PAGE_DATASET
   let rows: GscAnalyticsRow[] | null
   try {
     rows = await deps.fetchRows(clientId, siteUrl, {
       startDate: day,
       endDate: day,
-      dimensions: ['page'],
+      dimensions: dataset.dimensions,
       rowLimit: PAGE_ROW_LIMIT,
       startRow: (page - 1) * PAGE_ROW_LIMIT,
     })
@@ -173,7 +208,7 @@ async function pullPage(
     throw toStepError(err)
   }
   if (rows === null) throw noTokenError()
-  const written = await upsertPageDayRows(deps.supabase, clientId, day, rows)
+  const written = await dataset.upsertDay(deps.supabase, clientId, day, rows)
   return {
     rows: written.written,
     skippedLongUrls: written.skippedLongUrls,
@@ -251,7 +286,7 @@ async function pullRange(
         throw toStepError(err)
       }
       if (r === null) throw noTokenError()
-      await recordFinalizedRange(deps.supabase, receiptId, r)
+      await recordFinalizedRange(deps.supabase, receiptId, r, (deps.dataset ?? PAGE_DATASET).receiptsTable)
       return { firstDay: r.firstDay, lastDay: r.lastDay, ms: Date.now() - t0 }
     })
     acc.range = { firstDay: range.firstDay, lastDay: range.lastDay }
@@ -366,17 +401,21 @@ function openReceiptStep(
   return step.run('open-receipt', async (): Promise<{ siteUrl: string | null }> => {
     const siteUrl = await deps.loadSiteUrl(order.client_id)
     if (!siteUrl) return { siteUrl: null }
-    await openReceipt(deps.supabase, {
-      id: started.runLogId,
-      client_id: order.client_id,
-      site_url: siteUrl,
-      kind: order.kind,
-      request_start_day: order.start_day,
-      request_end_day: order.end_day,
-      inngest_run_id: ctx.runId,
-      inngest_event_id: ctx.eventId,
-      started_at: new Date(started.startedAt).toISOString(),
-    })
+    await openReceipt(
+      deps.supabase,
+      {
+        id: started.runLogId,
+        client_id: order.client_id,
+        site_url: siteUrl,
+        kind: order.kind,
+        request_start_day: order.start_day,
+        request_end_day: order.end_day,
+        inngest_run_id: ctx.runId,
+        inngest_event_id: ctx.eventId,
+        started_at: new Date(started.startedAt).toISOString(),
+      },
+      (deps.dataset ?? PAGE_DATASET).receiptsTable,
+    )
     return { siteUrl }
   })
 }
@@ -396,7 +435,7 @@ function closeReceiptStep(
       request_count: outcome.request_count,
       skipped_long_urls: outcome.skipped_long_urls,
       error: outcome.error,
-    })
+    }, new Date(), (deps.dataset ?? PAGE_DATASET).receiptsTable)
     return null
   })
 }
@@ -411,7 +450,7 @@ export async function runPageDailyPull(
   // The id is derived from the Inngest run id, so onFailure can find this exact row (and receipt) again.
   const started = await step.run('log-start', async () => {
     const runLogId = cronRunIdFromInngestRun(ctx.runId)
-    await startCronRunWithId(GSC_PAGE_DAILY_PULL_JOB, runLogId)
+    await (deps.dataset ?? PAGE_DATASET).startRun(runLogId)
     return { runLogId, startedAt: Date.now() }
   })
 
@@ -419,7 +458,7 @@ export async function runPageDailyPull(
 
   const finish = async (outcome: PullOutcome): Promise<PullOutcome> => {
     await step.run('log-finish', async () => {
-      await cronRunHandle(GSC_PAGE_DAILY_PULL_JOB, started.runLogId, started.startedAt).finish(
+      await cronRunHandle((deps.dataset ?? PAGE_DATASET).pullJob, started.runLogId, started.startedAt).finish(
         runLogFinishOpts(outcome),
       )
       return null
@@ -445,6 +484,7 @@ export async function runPageDailyPull(
 export async function handlePullFailure(
   supabase: SupabaseClient,
   input: { runId: string | null; message: string; failedAt: Date },
+  dataset: PullDataset = PAGE_DATASET,
 ): Promise<{ receiptClosed: boolean; runLog: 'closed' | 'already_terminal' | 'no_run_id' }> {
   if (!input.runId) {
     console.error('[gsc/page-daily-pull] onFailure without a run id — nothing closed:', input.message)
@@ -453,11 +493,17 @@ export async function handlePullFailure(
   const id = cronRunIdFromInngestRun(input.runId)
   const kind = failureKindOf(input.message)
   const error = `retries exhausted: ${input.message}`
-  const receipt = await closeReceiptIfRunning(supabase, id, { failure_kind: kind, error })
+  const receipt = await closeReceiptIfRunning(
+    supabase,
+    id,
+    { failure_kind: kind, error },
+    new Date(),
+    dataset.receiptsTable,
+  )
   const receiptStartMs = receipt ? Date.parse(receipt.started_at) : Number.NaN
   const failed = kind !== 'auth'
   const runLog = await finishCronRunIfOpen(
-    GSC_PAGE_DAILY_PULL_JOB,
+    dataset.pullJob,
     id,
     {
       processed: 1,

@@ -1,3 +1,5 @@
+import type { LecturePublishRequest } from './lecture-post'
+import type { PostReview } from '@/lib/tiktok/post-review'
 // 讲课片发布执行 —— 由后台 cron 调用，不在网页请求里跑。
 //
 // 为什么必须放后台:发布要等 Facebook 把几十 MB 视频从我们的存储拉过去，
@@ -7,8 +9,9 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter, promoteReelToPublished } from './publish/facebook-reel-adapter'
 import { checkTikTokStatus, humanTikTokError, publishToTikTok } from './publish/tiktok-adapter'
+import { TikTokAmbiguousConnectionError } from '@/lib/tiktok/token'
 import type { PublishTarget } from './types'
-import { loadLecturePost, recordPublished, setPublishRequest } from './lecture-post'
+import { claimLecturePublish, loadLecturePost, recordPublished, setPublishRequest } from './lecture-post'
 
 /** 把接口报错翻成客户能行动的话(原始报错留日志给我们排查)。 */
 export function humanPublishError(raw: string): string {
@@ -31,6 +34,7 @@ export interface PublishOutcome {
   draft?: boolean
   error?: string
   /** 这一轮什么都没发——之前已经发过了。留在运行记录里,重复触发看得见。 */
+  processing?: boolean
   alreadyPublished?: boolean
 }
 
@@ -42,56 +46,43 @@ export interface PublishOutcome {
  *    「系统说发了、TikTok 上找不到」这种最难查的情况。所以这里等它一小会儿。
  */
 async function publishLectureToTikTok(params: {
-  clientId: string
-  postId: string
-  videoUrl: string
-  caption: string
-  live: boolean
+  clientId: string; postId: string; videoUrl: string; caption: string
+  request: LecturePublishRequest
 }): Promise<PublishOutcome> {
-  const { clientId, postId, videoUrl, caption, live } = params
+  const { clientId, postId, videoUrl, caption } = params
+  let request = params.request
   try {
-    const result = await publishToTikTok({
-      clientId, videoUrl, caption,
-      privacy: live ? 'PUBLIC_TO_EVERYONE' : 'SELF_ONLY',
-    })
-
-    // 等转码。最多约 2 分钟——还没好也不算失败(TikTok 会自己发完),
-    // 只是回执上要说清「还在处理」,而不是假装已经在线上了。
-    let status = await checkTikTokStatus(clientId, result.publishId)
-    for (let i = 0; i < 12 && status.status === 'processing'; i++) {
-      await new Promise((r) => setTimeout(r, 10_000))
-      status = await checkTikTokStatus(clientId, result.publishId)
+    if (!request.tiktokPublishId) {
+      const result = await publishToTikTok({
+        clientId, videoUrl, caption, privacy: request.tiktokReview?.privacy ?? 'SELF_ONLY',
+        review: request.tiktokReview,
+        onInitialized: async (publishId, accountId) => {
+          request = { ...request, tiktokPublishId: publishId, tiktokAccountId: accountId }
+          await setPublishRequest({ clientId, postId, request })
+        },
+      })
+      request = { ...request, tiktokPublishId: result.publishId, status: 'processing' }
+      await setPublishRequest({ clientId, postId, request })
     }
+    // One status query per sweep: a slow provider must not consume the shared worker budget.
+    const status = await checkTikTokStatus(clientId, request.tiktokPublishId!, request.tiktokAccountId)
     if (status.status === 'failed') {
-      throw new Error(`TikTok 处理失败: ${status.detail ?? ''}`)
+      await setPublishRequest({ clientId, postId, request: { ...request, status:'failed', finishedAt:new Date().toISOString(), error:humanTikTokError(status.detail ?? '') } })
+      return { postId, ok:false, error:humanTikTokError(status.detail ?? '') }
     }
-
-    await recordPublished({
-      clientId, postId,
-      entry: {
-        platform: 'tiktok',
-        pageId: '',
-        videoId: result.publishId,
-        draft: result.privacy !== 'PUBLIC_TO_EVERYONE',
-        at: new Date().toISOString(),
-      },
-    })
-    await setPublishRequest({ clientId, postId, request: null })
-    return { postId, ok: true, draft: result.privacy !== 'PUBLIC_TO_EVERYONE' }
+    if (status.status === 'processing') {
+      await setPublishRequest({ clientId, postId, request:{ ...request, status:'processing' } })
+      return { postId, ok:false, processing:true }
+    }
+    const draft = request.tiktokReview?.privacy !== 'PUBLIC_TO_EVERYONE'
+    await recordPublished({ clientId, postId, entry:{ platform:'tiktok',pageId:'',videoId:request.tiktokPublishId!,draft,at:new Date().toISOString() } })
+    await setPublishRequest({ clientId, postId, request:null })
+    return { postId, ok:true,draft }
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e)
-    console.error(`[lecture-publish/tiktok] ${postId} 失败:`, raw)
-    await setPublishRequest({
-      clientId, postId,
-      request: {
-        platform: 'tiktok',
-        status: 'failed',
-        requestedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
-        error: humanTikTokError(raw),
-      },
-    }).catch(() => { /* 回写失败也别把异常吞了 */ })
-    return { postId, ok: false, error: humanTikTokError(raw) }
+    // Uncertain provider outcome stays recoverable. Never auto-create another task.
+    await setPublishRequest({ clientId, postId, request:{ ...request,status:request.tiktokPublishId ? 'processing' : 'failed',error:request.tiktokPublishId || e instanceof TikTokAmbiguousConnectionError ? humanTikTokError(raw) : '发布结果未确认，请联系管理员核验后再试' } }).catch(() => {})
+    return { postId, ok:false,error:humanTikTokError(raw) }
   }
 }
 
@@ -106,24 +97,25 @@ export async function runOneLecturePublish(params: {
 
   // 这一条要真发还是只发草稿。每条片自己带(审片通过是针对这一条的决定),
   // 全局环境开关只当兜底默认值——它一开会把所有客户都变成真发,不该拿它当日常开关。
-  const live = loaded.publishRequest?.live === true || process.env.FACTORY_PUBLISH_LIVE === 'true'
+  const platform = loaded.publishRequest?.platform ?? 'facebook'
+  const live = platform === 'tiktok' ? loaded.publishRequest?.tiktokReview?.privacy === 'PUBLIC_TO_EVERYONE' : loaded.publishRequest?.live === true || process.env.FACTORY_PUBLISH_LIVE === 'true'
   const draft = !live
 
   // 🔴 本地防重发闸。发布是不可逆的对外动作,「宁可漏发一次让人再点,也不能重复发」。
   // 真实事故(2026-08-04):同一条讲课片被连发三次——上游读到过期状态就会反复触发,
   // 而这里当时对「已经发过了」毫无察觉,来一次发一次。
   // 注意只在「已经是要的那个状态」时才拦:草稿→公开是一次正当的状态推进,不能被当成重发挡掉。
-  const platform = loaded.publishRequest?.platform ?? 'facebook'
   const already = loaded.published.find((p) => p.platform === platform)
   if (already && already.draft === draft) {
     await setPublishRequest({ clientId, postId, request: null })
     return { postId, ok: true, draft: already.draft, alreadyPublished: true }
   }
 
-  await setPublishRequest({
-    clientId, postId,
-    request: { platform, status: 'sending', requestedAt: loaded.publishRequest?.requestedAt ?? new Date().toISOString(), startedAt: new Date().toISOString() },
-  })
+  const pending = loaded.publishRequest
+  if (!pending) return { postId, ok:false, error:'没有待发布请求' }
+  if (platform === 'tiktok' && pending.status !== 'pending' && !pending.tiktokPublishId) return { postId, ok:false,error:'上次发布结果未确认，请先人工核验' }
+  const request: LecturePublishRequest = { ...pending, platform, status:'sending', startedAt:new Date().toISOString() }
+  if (!await claimLecturePublish(clientId, postId, loaded.post.generation_context_snapshot, request, loaded.post.updated_at)) return { postId,ok:false,error:'另一个任务已领取发布' }
 
   try {
     if (!loaded.post.source_video_url) throw new Error('还没有成片')
@@ -133,7 +125,7 @@ export async function runOneLecturePublish(params: {
         clientId, postId,
         videoUrl: loaded.post.source_video_url,
         caption: loaded.lecture.ctaVariants?.fbTiktok ?? loaded.lecture.title,
-        live,
+        request,
       })
     }
 
@@ -238,7 +230,7 @@ interface SweepRow {
   id: string
   client_id: string
   generation_context_snapshot: {
-    lecture_publish_request?: { status?: string; startedAt?: string } | null
+    lecture_publish_request?: { platform?: string; tiktokPublishId?: string; status?: string; startedAt?: string } | null
   } | null
 }
 
@@ -254,7 +246,9 @@ export function selectPendingPublishes(
   return rows.filter((p) => {
     const req = p.generation_context_snapshot?.lecture_publish_request
     if (req?.status === 'pending') return true
+    if (req?.status === 'processing' && req.tiktokPublishId) return true
     if (req?.status === 'sending') {
+      if (req.platform === 'tiktok' && !req.tiktokPublishId) return false
       const started = req.startedAt ? Date.parse(req.startedAt) : NaN
       // 时间读不出来也当卡死处理——宁可重发一次(有幂等标记兜着)，也不要永远挂在那
       return !Number.isFinite(started) || nowMs - started > STALE_SENDING_MS

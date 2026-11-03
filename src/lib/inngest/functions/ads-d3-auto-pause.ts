@@ -39,7 +39,11 @@ import { createHash } from 'crypto'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { createKernel } from '@/lib/kernel'
-import { loadAdStrategyConfigWithSource, type AdStrategyConfig } from '@/lib/ads-strategy/config'
+import {
+  loadAdStrategyConfigWithSource,
+  type AdStrategyConfig,
+  type LoadedAdStrategyConfig,
+} from '@/lib/ads-strategy/config'
 import { findSharedAdAccounts } from '@/lib/meta/client-ad-accounts'
 import type { Diagnosis, DiagnosisRun } from '@/lib/ads-strategy/portfolio/diagnostics/types'
 import { submitAdsAutoPauseCandidate } from '@/lib/action-submission/ads-auto-pause'
@@ -76,7 +80,8 @@ export function computeD3AutoPauseIdempotencyKey(args: {
 
 export interface D3AutoPauseDeps {
   supabase: SupabaseClient
-  loadConfig: (clientId: string) => Promise<AdStrategyConfig>
+  /** 带来源：读失败（source='fallback'）时拿到的是默认值，不是真开关——调用方必须按读失败处理。 */
+  loadConfig: (clientId: string) => Promise<LoadedAdStrategyConfig>
   loadDiagnosisRun: (clientId: string, insightDate: string) => Promise<DiagnosisRun | null>
   isSharedAccount: (clientId: string, adAccountId: string) => Promise<boolean>
   /** 这个广告组是不是这个客户的（名下广告全挂客户登记的主页）。读失败 / 判不了必须返回非 own。 */
@@ -197,7 +202,7 @@ export async function verifyAdsetOwnership(
 export function createD3AutoPauseDeps(): D3AutoPauseDeps {
   return {
     supabase: supabaseAdmin,
-    loadConfig: (clientId) => loadAdStrategyConfigWithSource(clientId).then((r) => r.config),
+    loadConfig: loadAdStrategyConfigWithSource,
     loadDiagnosisRun: (clientId, insightDate) => loadDiagnosisRun(supabaseAdmin, clientId, insightDate),
     isSharedAccount: (clientId, adAccountId) => isSharedAccount(supabaseAdmin, clientId, adAccountId),
     verifyAdsetOwnership: async (clientId, adAccountId, adsetId) => {
@@ -220,6 +225,7 @@ export interface D3HitOutcome {
     | 'skipped_shared_account'
     | 'skipped_not_client_owned'
     | 'skipped_already_recorded'
+    | 'skipped_config_read_failed'
     | 'kernel_denied'
     | 'kernel_dead_letter'
     | 'kernel_unexpected'
@@ -360,8 +366,22 @@ export async function processD3Hit(
     ownership: { verdict: 'own', ads_checked: ownership.adsChecked, client_page_id: ownership.clientPageId },
   }
 
-  const freshConfig = await deps.loadConfig(args.clientId)
-  if (freshConfig.autopilot_dry_run) {
+  const fresh = await deps.loadConfig(args.clientId)
+  if (fresh.source === 'fallback') {
+    // 🔴 读不出开关 = 不知道客户现在允不允许出手：不提交 Kernel（fail closed），
+    //    但也不能记成 dry_run_logged——那会让人以为是客户开着演练模式。
+    //    记 failed 不记 blocked：跟归属闸同一口径，「系统没法核实」≠「查过了、被拦下」。
+    const error = fresh.error ?? 'unknown error'
+    console.error(`[ads-d3-auto-pause] ad_strategy_configs 读失败，不出手：${args.clientId}: ${error}`)
+    await recordFlywheelAction(deps.supabase, args.clientId, {
+      ...basePayload,
+      status: 'failed' satisfies string,
+      reason: '读不出这个客户的广告自动化开关，这次不出手（等下一次诊断日报再判）',
+      config_read_error: error,
+    })
+    return { adset_id: unit.id, outcome: 'skipped_config_read_failed' }
+  }
+  if (fresh.config.autopilot_dry_run) {
     await recordFlywheelAction(deps.supabase, args.clientId, {
       ...basePayload,
       status: 'dry_run_logged' satisfies string,
@@ -390,6 +410,7 @@ export async function processD3Hit(
     await recordFlywheelAction(deps.supabase, args.clientId, {
       ...basePayload,
       status: 'awaiting_approval' satisfies string,
+      reason: '花钱没结果：已提交，等你批准后才会暂停这个广告组',
       action_run_id: result.runId,
       authorization_decision_id: result.authorizationDecisionId,
     })
@@ -439,7 +460,27 @@ export function createD3AutoPauseFunction(deps: D3AutoPauseDeps) {
       if (!parsed.success) return { ok: false, reason: 'invalid_payload' as const }
       const d = parsed.data
 
-      const config = await step.run('load-config', () => deps.loadConfig(d.client_id))
+      const loaded = await step.run('load-config', () => deps.loadConfig(d.client_id))
+      if (loaded.source === 'fallback') {
+        // 读失败时 loaded.config 是默认值（autopilot_enabled=false），照读会被记成
+        // 「客户没开自动化」——方向安全但原因是错的。单独报出来，别跟 autopilot_disabled 混。
+        // 回执跟单条读失败同一种（failed + config_read_error），今日待办从这里捞；
+        // 只写日志的话诊断完成事件只发一次，当天这个客户的 D3 就没人知道被跳过了。
+        const error = loaded.error ?? 'unknown error'
+        console.error(`[ads-d3-auto-pause] ad_strategy_configs 读失败，整条跳过：${d.client_id}: ${error}`)
+        await step.run('record-config-read-failure', () =>
+          recordFlywheelAction(deps.supabase, d.client_id, {
+            status: 'failed' satisfies string,
+            diagnosis_code: 'D3',
+            diagnostic_run_id: d.diagnostic_run_id,
+            insight_date: d.insight_date,
+            reason: '读不出这个客户的广告自动化开关，今天的「花钱没结果」一条都没判（等下一次诊断日报再判）',
+            config_read_error: error,
+          }),
+        )
+        return { ok: false, reason: 'config_read_failed' as const, error, processed: 0 }
+      }
+      const config = loaded.config
       if (!config.autopilot_enabled) {
         return { ok: true, skipped: 'autopilot_disabled' as const, processed: 0 }
       }
@@ -447,7 +488,7 @@ export function createD3AutoPauseFunction(deps: D3AutoPauseDeps) {
       const run = await step.run('load-diagnosis-run', () => deps.loadDiagnosisRun(d.client_id, d.insight_date))
       if (!run) return { ok: true, skipped: 'diagnosis_run_not_found' as const, processed: 0 }
 
-      const hits = run.diagnoses.filter((x) => x.code === 'D3' && x.status === 'hit')
+      const hits = run.diagnoses.filter((x) => x.code === 'D3' && x.status === 'hit' && x.autoPauseEligible !== false)
       if (hits.length === 0) return { ok: true, processed: 0 }
 
       const outcomes: D3HitOutcome[] = []

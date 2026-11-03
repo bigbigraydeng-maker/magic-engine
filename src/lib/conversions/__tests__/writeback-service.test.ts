@@ -23,12 +23,16 @@ class FakeDb {
     contact_touchpoints: [],
   }
 
+  /** 记录每次 select 点名了哪些列，测「某列被悄悄从查询里删掉」这类静默回归。 */
+  selectLog: Array<{ table: string; columns: string }> = []
+
   /** 按表名注入一次性查询失败，测「查不到就当放行」这类假开的坑。 */
   errorOn: Partial<Record<string, { message: string }>> = {}
 
   from(table: string) {
     const failure = this.errorOn[table]
     const rows = this.tables[table] ?? []
+    const selectLog = this.selectLog
     const q: {
       _filters: Array<(r: Row) => boolean>
       _op: 'select' | 'update' | 'insert'
@@ -47,7 +51,8 @@ class FakeDb {
       _filters: [],
       _op: 'select',
       _patch: {},
-      select() {
+      select(...a: unknown[]) {
+        selectLog.push({ table, columns: typeof a[0] === 'string' ? a[0] : '' })
         return q
       },
       eq(col: string, val: unknown) {
@@ -157,6 +162,7 @@ function seed(
     review_status: 'approved',
     redacted_at: null,
     page_scoped_user_id: null,
+    meta_lead_id: null,
     source_kind: 'manual_seed',
     ...over.outcome,
   })
@@ -475,6 +481,36 @@ describe('Facebook 私信身份（PSID）匹配键 —— NAL 数据源', () => 
 })
 
 // ─────────────────────────────────────────────────────────────────────────
+describe('Facebook 线索编号 —— 从库到 writer.build()', () => {
+  it('DB 里的 meta_lead_id 原样递给 writer.build()', async () => {
+    seed(db, { outcome: { meta_lead_id: '1687504185706630' } })
+    const buildSpy = vi.fn().mockReturnValue({ data: [] })
+    const w = makeWriter({ build: buildSpy })
+    await sendApprovedOutcome(OUTCOME, deps(db, w))
+
+    expect(buildSpy).toHaveBeenCalledTimes(1)
+    expect(buildSpy.mock.calls[0][0].metaLeadId).toBe('1687504185706630')
+  })
+
+  it('🔴 读 me_sale_outcomes 的 select 列表点名了 meta_lead_id —— 以后被人悄悄删掉，这里先红', async () => {
+    seed(db)
+    await sendApprovedOutcome(OUTCOME, deps(db, makeWriter({ build: vi.fn().mockReturnValue({ data: [] }) })))
+
+    const reads = db.selectLog.filter((s) => s.table === 'me_sale_outcomes')
+    expect(reads.length).toBeGreaterThan(0)
+    expect(reads.some((s) => s.columns.includes('meta_lead_id'))).toBe(true)
+  })
+
+  it('没有线索编号的旧记录：metaLeadId 恒为 null', async () => {
+    seed(db)
+    const buildSpy = vi.fn().mockReturnValue({ data: [] })
+    const w = makeWriter({ build: buildSpy })
+    await sendApprovedOutcome(OUTCOME, deps(db, w))
+
+    expect(buildSpy.mock.calls[0][0].metaLeadId).toBeNull()
+  })
+})
+
 describe('试运行模式', () => {
   it('不真发，只存打码预览', async () => {
     seed(db, { client: { conversion_stage: 'dry_run' } })

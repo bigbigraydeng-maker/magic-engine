@@ -129,3 +129,20 @@ describe('checkManualSendDnc', () => {
     })
   })
 })
+
+describe('checkManualSendDncForContact', () => {
+  it('allows when the contact is not opted out', async () => {
+    const { checkManualSendDncForContact } = await import('../manual-send-dnc-gate')
+    expect(await checkManualSendDncForContact('k', 'c', { isOptedOut: async () => false })).toEqual({ blocked: false })
+  })
+  it('blocks 403 when opted out', async () => {
+    const { checkManualSendDncForContact } = await import('../manual-send-dnc-gate')
+    const r = await checkManualSendDncForContact('k', 'c', { isOptedOut: async () => true })
+    expect(r).toMatchObject({ blocked: true, status: 403, reason: 'do_not_contact' })
+  })
+  it('fails closed (503) when the check throws', async () => {
+    const { checkManualSendDncForContact } = await import('../manual-send-dnc-gate')
+    const r = await checkManualSendDncForContact('k', 'c', { isOptedOut: async () => { throw new Error('db down') } })
+    expect(r).toMatchObject({ blocked: true, status: 503, reason: 'dnc_check_failed' })
+  })
+})

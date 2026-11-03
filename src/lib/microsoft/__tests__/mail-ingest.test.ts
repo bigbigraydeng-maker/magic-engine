@@ -329,3 +329,111 @@ describe('公司自己的域名', () => {
     )
   })
 })
+
+// WP-1a：方向由文件夹定（收件箱 = 客人来信），但同事从自己的邮箱发信、抄送到公司收件箱时
+// 也躺在收件箱里。CTS 出票同事的机票报价曾因此被记成「客人回了话」。
+describe('⑤ 同事发的信不能记成客人来信', () => {
+  const STAFF = ['ctstours.co.nz', 'op3@asiascapeholidays.com']
+  const customerFirst = mail({ direction: 'inbound', receivedAt: '2026-08-01T01:00:00.000Z' })
+
+  it('客人来信之后，自家域名的同事回复（落在收件箱）按「我们发出的」记，线程最后一句不是客人', () => {
+    const plan = planMailIngest(
+      [
+        customerFirst,
+        mail({
+          direction: 'inbound',
+          receivedAt: '2026-08-01T02:00:00.000Z',
+          counterparty: { address: 'ticketing@ctstours.co.nz', name: 'Ticketing' },
+          subject: 'Air fare quote',
+        }),
+      ],
+      { ownDomains: STAFF },
+    )
+    expect(plan.threads).toHaveLength(1)
+    const [first, quote] = plan.threads[0].messages
+    expect(first.direction).toBe('inbound')
+    expect(quote.direction).toBe('outbound')
+    expect(quote.staffSender).toBe('ticketing@ctstours.co.nz')
+    expect(plan.threads[0].lastFrom).toBe('customer') // 同事的信不动「最后一句是谁说的」
+  })
+
+  it('点名的员工地址同样生效；同域的其他人不受影响（仍是客人来信）', () => {
+    const plan = planMailIngest(
+      [
+        customerFirst,
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T02:00:00.000Z', counterparty: { address: 'op3@asiascapeholidays.com', name: 'Summer' } }),
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T03:00:00.000Z', counterparty: { address: 'other@asiascapeholidays.com', name: 'Other' } }),
+      ],
+      { ownDomains: STAFF },
+    )
+    expect(plan.threads[0].messages.map((m) => m.direction)).toEqual(['inbound', 'outbound', 'inbound'])
+    expect(plan.threads[0].lastFrom).toBe('customer')
+  })
+
+  it('线程里只有客人来信时 hasInbound 照旧；只有同事的信不会让线程变成「客人开过口」', () => {
+    const onlyStaff = planMailIngest(
+      [
+        customerFirst,
+        mail({ direction: 'outbound', receivedAt: '2026-08-01T01:30:00.000Z' }),
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T02:00:00.000Z', counterparty: { address: 'ticketing@ctstours.co.nz', name: 'T' } }),
+      ],
+      { ownDomains: STAFF },
+    )
+    expect(onlyStaff.threads[0].hasInbound).toBe(true) // 第一封是真客人
+    const staffReplyOnly = planMailIngest(
+      [
+        mail({ direction: 'outbound', receivedAt: '2026-08-01T01:30:00.000Z' }),
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T02:00:00.000Z', counterparty: { address: 'ticketing@ctstours.co.nz', name: 'T' } }),
+      ],
+      { ownDomains: STAFF },
+    )
+    expect(staffReplyOnly.threads[0].hasInbound).toBe(false)
+  })
+
+  it('没配自家域名 → 不猜，方向照文件夹', () => {
+    const plan = planMailIngest(
+      [customerFirst, mail({ direction: 'inbound', receivedAt: '2026-08-01T02:00:00.000Z', counterparty: { address: 'ticketing@ctstours.co.nz', name: 'T' } })],
+      { ownDomains: [] },
+    )
+    expect(plan.threads[0].messages.map((m) => m.direction)).toEqual(['inbound', 'inbound'])
+  })
+
+  it('员工自动回执（Automatic reply）按出站自动回执处理，不算有人跟进', () => {
+    const plan = planMailIngest(
+      [
+        customerFirst,
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T02:00:00.000Z', counterparty: { address: 'ticketing@ctstours.co.nz', name: 'T' }, subject: 'Automatic reply: Options' }),
+      ],
+      { ownDomains: STAFF },
+    )
+    expect(plan.threads[0].messages[1]).toMatchObject({ direction: 'outbound', automated: true })
+  })
+})
+
+describe('⑤b 同事的信不算「有人跟进过客人」（子牙 P1-1）', () => {
+  it('同事发的信照存，但标 automated：看不到收件人，不能证明发给了客人', () => {
+    const plan = planMailIngest(
+      [
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T01:00:00.000Z' }),
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T02:00:00.000Z', counterparty: { address: 'ticketing@ctstours.co.nz', name: 'T' }, subject: 'RE: quote' }),
+      ],
+      { ownDomains: ['ctstours.co.nz'] },
+    )
+    expect(plan.threads[0].messages[1]).toMatchObject({ direction: 'outbound', automated: true, staffSender: 'ticketing@ctstours.co.nz' })
+  })
+})
+
+describe('⑤c 同事的信不动线程的「最后一句是谁说的 / 几点」（子牙复审 P1）', () => {
+  it('客人来信后跟一封同事内部信 → lastFrom 仍是 customer，lastAt 仍是客人那封', () => {
+    const plan = planMailIngest(
+      [
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T01:00:00.000Z' }),
+        mail({ direction: 'inbound', receivedAt: '2026-08-01T05:00:00.000Z', counterparty: { address: 'ticketing@ctstours.co.nz', name: 'T' } }),
+      ],
+      { ownDomains: ['ctstours.co.nz'] },
+    )
+    expect(plan.threads[0].messages).toHaveLength(2) // 信照存
+    expect(plan.threads[0].lastFrom).toBe('customer')
+    expect(plan.threads[0].lastAt).toBe('2026-08-01T01:00:00.000Z')
+  })
+})

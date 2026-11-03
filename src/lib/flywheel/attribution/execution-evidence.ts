@@ -36,3 +36,23 @@ export function isUnexecutedSuggestion(action: ExecutionEvidence): boolean {
     action.payload_source === 'proactive_signal'
   return isSuggestion && action.execution_item_id === null && action.action_run_id === null
 }
+
+/** Fields the attribution job reads to decide whether an action can be scored. */
+export interface EvaluabilityEvidence extends ExecutionEvidence {
+  /** `payload->>discovery_id` — set when the action came from the discovery step as a recommendation. */
+  discovery_id: string | null
+  /** `vendor` column — a real provider name (meta, meta_graph, google_ads ...) is execution evidence. */
+  vendor: string | null
+}
+
+/**
+ * True when a before/after measurement of this action says nothing about any real change:
+ * an AI suggestion that was never carried out, or a recommendation that came from the discovery
+ * step and has no execution link and no provider. Rows with a card id, a run id or a vendor are real work.
+ */
+export function isNotEvaluable(action: EvaluabilityEvidence): boolean {
+  if (isUnexecutedSuggestion(action)) return true
+  const fromDiscovery = action.discovery_id !== null && action.discovery_id !== ''
+  const hasProvider = action.vendor !== null && action.vendor !== ''
+  return fromDiscovery && !hasProvider && action.execution_item_id === null && action.action_run_id === null
+}

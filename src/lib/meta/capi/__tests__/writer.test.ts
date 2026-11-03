@@ -43,6 +43,7 @@ function outcome(over: Partial<OutcomeForSend> = {}): OutcomeForSend {
     currency: 'NZD',
     occurredAt: '2026-09-03T10:00:00Z',
     pageScopedUserId: null,
+    metaLeadId: null,
     actionSource: 'email',
     ...over,
   }
@@ -155,6 +156,37 @@ describe('build · Facebook 私信身份（PSID）匹配键', () => {
       CONFIG,
     )
     expect(messenger.data[0].action_source).toBe('business_messaging')
+  })
+})
+
+describe('build · Facebook 线索编号（lead_id）匹配键', () => {
+  it('原样落进 user_data.lead_id，不哈希 —— Meta 参数表标注 Do not hash', () => {
+    const p = writer.build(outcome({ metaLeadId: '1687504185706630' }), CONFIG)
+    expect(p.data[0].user_data.lead_id).toBe('1687504185706630')
+    // 同时邮箱仍然哈希发送，互不影响。
+    expect(p.data[0].user_data.em).toHaveLength(1)
+    expect(String(p.data[0].user_data.em)).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('没有线索编号时不出现 lead_id（CTS 之外的客户、旧记录不受影响）', () => {
+    const p = writer.build(outcome(), CONFIG)
+    expect(p.data[0].user_data.lead_id).toBeUndefined()
+  })
+
+  it('🔴 第二道闸：就算库里存了脏值，格式不对也绝不发给 Meta', () => {
+    for (const bad of ['l:1687504185706630', '12345', '168750418570663x', '123456789012345678', ' 1687504185706630']) {
+      const p = writer.build(outcome({ metaLeadId: bad }), CONFIG)
+      expect(p.data[0].user_data.lead_id, bad).toBeUndefined()
+    }
+  })
+
+  it('不改变事件名、action_source、金额 —— 只是多一把匹配键', () => {
+    const base = writer.build(outcome(), CONFIG).data[0]
+    const withId = writer.build(outcome({ metaLeadId: '1687504185706630' }), CONFIG).data[0]
+    expect(withId.event_name).toBe(base.event_name)
+    expect(withId.action_source).toBe(base.action_source)
+    expect(withId.custom_data).toEqual(base.custom_data)
+    expect(withId.event_id).toBe(base.event_id)
   })
 })
 

@@ -14,6 +14,7 @@
 import { Resend } from 'resend'
 import { meMailFrom } from '@/lib/email/sender'
 import { describeSendError } from '@/lib/ads-strategy/digest'
+import { contactCardTitle } from './display-name'
 
 /** 后台入口（登录后可见），拼客人记录的直达链接用。 */
 export const APP_BASE = 'https://app.magicengine.com.au'
@@ -39,6 +40,22 @@ const EMAIL_TOKEN = /[^\s<>()]+@[^\s<>()]+\.[^\s<>()]+/g
 export function stripAddress(name: string): string {
   const out = name.replace(EMAIL_TOKEN, (addr) => addr.slice(0, addr.indexOf('@'))).trim()
   return out || '未留姓名'
+}
+
+/**
+ * 摘要邮件里这个人叫什么（给销售内部看，用来认人，**不是**客人的名字字段）。
+ *
+ * 名字本身是邮箱的老数据：`contactCardTitle` 现在会把它清洗成「未留姓名」，但一封摘要里
+ * 一排「未留姓名」销售认不出先回谁——所以这里**只在摘要里**退回 @ 前那一截（见 `stripAddress`）。
+ * 数据库里的名字清掉之后（PM 2026-10-22 的历史整理），这里自然落到「未留姓名」。
+ */
+export function digestName(displayName: string | null | undefined): string {
+  const title = contactCardTitle(displayName)
+  const raw = (displayName ?? '').trim()
+  if ((title === '未留姓名' || title.startsWith('问：')) && /[^\s<>()]+@[^\s<>()]+\.[^\s<>()]+/.test(raw)) {
+    return stripAddress(raw)
+  }
+  return stripAddress(title)
 }
 
 /** 连着 7 位以上的数字 —— 电话号码的形状。 */

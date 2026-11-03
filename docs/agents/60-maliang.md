@@ -1,5 +1,6 @@
 # 马良 — Agent 手册
 
+> ⚠️ 与代码不符，见 [`agent-autonomy-operating-plan-v1` §4.4](../specs/2026-09-24-agent-autonomy-operating-plan-v1.md)：马良代码在 `src/lib/maliang/`（`render-check.ts`），不是旧写法 `src/lib/visual/`。正文未改。
 > 模型：GPT-4o-mini vision（视觉分析）/ Claude Sonnet（学习与策略）  
 > 代码入口：  
 > - `src/lib/assets/vision-analyzer.ts` — 视觉分析引擎 ✅ 已建  
@@ -193,3 +194,11 @@ await saveProvenPattern(supabase, {
 - 李白手册：`docs/agents/70-libai.md`
 - 鲁班手册：`docs/agents/50-luban.md`
 - 提示词库：`docs/agents/prompt-library/`
+
+---
+
+## 操作手册
+
+- 配合：[视频模板优化手册 v1.0](../sops/2026-10-27-video-factory-template-playbook-v1.0.md)（主负责是苏东坡，出片检查一侧归马良）
+
+索引：[agents 索引](./README.md)。

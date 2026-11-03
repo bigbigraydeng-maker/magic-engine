@@ -11,7 +11,13 @@ vi.mock('@/lib/supabase', () => ({
   },
 }))
 
-import { defaultConfig, resolveDigestRecipients, loadAdStrategyConfigWithSource } from '../config'
+import {
+  defaultConfig,
+  resolveDigestRecipients,
+  loadAdStrategyConfigWithSource,
+  parseCreativePool,
+  CREATIVE_POOL_EXTENDED_STATUSES,
+} from '../config'
 
 describe('loadAdStrategyConfigWithSource — asymmetric fail-open', () => {
   beforeEach(() => { maybeSingle.mockReset(); vi.spyOn(console, 'warn').mockImplementation(() => {}) })
@@ -76,6 +82,24 @@ describe('loadAdStrategyConfigWithSource — asymmetric fail-open', () => {
     const { config } = await loadAdStrategyConfigWithSource('c1')
     expect(config.autonomy_mode).toBe('observe')
     expect(config.daily_budget_cap_cents).toBeNull()
+  })
+})
+
+describe('parseCreativePool — 扩展状态只为读而容忍', () => {
+  it.each(CREATIVE_POOL_EXTENDED_STATUSES)('keeps an entry with status %s', status => {
+    const pool = parseCreativePool([{ kind: 'meta_video', ref: 'v1', status }])
+    expect(pool).toHaveLength(1)
+    expect(pool[0].status).toBe(status)
+  })
+
+  it('none of the extended statuses equals approved', () => {
+    for (const status of CREATIVE_POOL_EXTENDED_STATUSES) {
+      expect(status).not.toBe('approved')
+    }
+  })
+
+  it('still drops an unknown status string', () => {
+    expect(parseCreativePool([{ kind: 'meta_video', ref: 'v1', status: 'yolo' }])).toEqual([])
   })
 })
 

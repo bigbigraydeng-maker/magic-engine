@@ -35,8 +35,11 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
 import { fetchMailSince, type MailFolder, type MailMessage } from '@/lib/microsoft/mail-graph'
-import { classifySender } from '@/lib/microsoft/mail-sender'
+import { classifySender, isOwnAddress } from '@/lib/microsoft/mail-sender'
+import { applyFormNotices, emptyFormStats, mirrorFormThread, type FormEnquiryStats } from '@/lib/microsoft/mail-form-ingest'
+import type { FormNoticeLead } from '@/lib/microsoft/mail-form-notice'
 import { resolveContact } from '@/lib/crm/identity'
+import { isAutoReply } from './auto-reply'
 import { contactKindOf, readDomainRules, type DomainRules } from '@/lib/crm/contact-kind'
 import { extractAgentCustomers } from '@/lib/crm/travel-agent-customer-extract'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
@@ -53,6 +56,10 @@ export interface PlannedMessage {
   receivedAt: string
   /** 这封是自动回复（不算「有人跟过他」）。 */
   automated: boolean
+  /** 网站表单通知里提取出的客人（见 mail-form-ingest）。有它时对方已被改写成这位客人。 */
+  formLead?: FormNoticeLead
+  /** 这封信的发件人其实是自己人（同事 / 点名的员工地址）：虽然躺在收件箱里，但不是客人说的话，已按「我们发出的」记。值为发件地址。 */
+  staffSender?: string
 }
 
 export interface PlannedThread {
@@ -80,36 +87,7 @@ export interface MailPlan {
   skipped: SkippedSender[]
 }
 
-/**
- * 自动回复的主题前缀。
- *
- * 只看主题、只看开头，跟 mail-sender 里同一套保守做法：一封真回信的主题几乎
- * 不可能以这些词开头，而「包含」会把「Re: 关于 out of office 期间的行程」误伤。
- * 认不出来就当成真回信 —— 漏判一封自动回复只是让一张卡早一天变灰，
- * 误判一封真回信却会让销售以为自己没跟过、重复联系客人。
- */
-const AUTO_REPLY_SUBJECTS = [
-  'automatic reply',
-  'auto reply',
-  'auto-reply',
-  'automatic response',
-  'out of office',
-  'out-of-office',
-  'ooo:',
-  'undeliverable',
-  'delivery status notification',
-  '自动回复',
-  '自動回覆',
-]
-
-/** 这封出站邮件是机器发的自动回执，不是人写的回信。 */
-export function isAutoReply(subject: string | null): boolean {
-  const s = (subject ?? '').trim().toLowerCase()
-  if (!s) return false
-  // 去掉转发/回复前缀再判 —— 「Re: Automatic reply: …」仍然是自动回执。
-  const stripped = s.replace(/^((re|fw|fwd|回复|轉寄)\s*:\s*)+/i, '')
-  return AUTO_REPLY_SUBJECTS.some((p) => stripped.startsWith(p))
-}
+export { isAutoReply }
 
 /**
  * 线程编号。Graph 一般会给 `conversationId`，给不出时退回「这封信自成一条线程」
@@ -117,6 +95,8 @@ export function isAutoReply(subject: string | null): boolean {
  * conversations 表和同一个 (client_id, conversation_id) 唯一键。
  */
 export function threadKey(m: MailMessage): string {
+  // 网站表单通知每封自成一条线程：同主题的两位客人不能被 Exchange 的会话分组并到一起。
+  if (m.formLead) return `mail-form:${m.id}`
   return m.conversationId ? `mail:${m.conversationId}` : `mail-msg:${m.id}`
 }
 
@@ -184,21 +164,35 @@ export function planMailIngest(messages: MailMessage[], opts: PlanOptions): Mail
     }
 
     const thread = threads.get(key)!
+    // 方向本来由文件夹决定（收件箱 = 客人来信），但同事从自己的邮箱发信、抄送到
+    // 公司收件箱时也躺在收件箱里；若只看文件夹，会把同事的报价当成客人回了话
+    // （CTS 出票同事的机票报价事故）。线程的第一封信仍按原规则判（自己人发起的
+    // 线程整条丢，见上面 `if (!existing)`）。
+    const staffSent = m.direction === 'inbound' && isOwnAddress(m.counterparty.address, opts.ownDomains)
+    const direction: 'inbound' | 'outbound' = staffSent ? 'outbound' : m.direction
     thread.messages.push({
       id: m.id,
-      direction: m.direction,
+      direction,
       subject: m.subject,
       preview: m.preview,
       receivedAt: m.receivedAt,
       // 只有出站才可能是自动回执；客人那边发来的自动回复不归我们管，
       // 而且把它标成 automated 会让一条真的来信从「他回话了」里消失。
-      automated: m.direction === 'outbound' && isAutoReply(m.subject),
+      // 同事发的信一律标 automated：同步看不到收件人，没法证明这封信真的发给了客人
+      // （例如回复全部时去掉了客人的内部往来），不能算「有人跟进过他」。信照存。
+      automated: staffSent || (direction === 'outbound' && isAutoReply(m.subject)),
+      formLead: m.formLead,
+      staffSender: staffSent ? m.counterparty.address : undefined,
     })
-    if (m.direction === 'inbound') thread.hasInbound = true
+    if (direction === 'inbound') thread.hasInbound = true
     // 主题以**最新一封**为准 —— 线程标题跟着最后一次来回走，跟邮箱里看到的一致。
     if (m.subject) thread.subject = m.subject
-    thread.lastAt = m.receivedAt
-    thread.lastFrom = m.direction === 'inbound' ? 'customer' : 'page'
+    // 同事的信只存触点，不动线程的「最后一句是谁说的 / 几点」：否则同事内部往来会让
+    // 「客人写了超过一天没人回」这条提醒把客人丢掉（子牙复审 P1）。
+    if (!staffSent) {
+      thread.lastAt = m.receivedAt
+      thread.lastFrom = direction === 'inbound' ? 'customer' : 'page'
+    }
   }
 
   return { threads: Array.from(threads.values()), skipped: Array.from(skipped.values()) }
@@ -273,6 +267,8 @@ export interface MailSyncResult {
    * 进 CRM，而 cron 还记这次成功。宁可这一轮少读一点，下一轮重来。
    */
   stoppedEarly?: string
+  /** 网站表单通知的处理结果（只有这个邮箱出现过表单通知才有）。 */
+  formEnquiries?: FormEnquiryStats
   error?: string
 }
 
@@ -525,7 +521,8 @@ async function emitNewInboundMessageEvents(
 ): Promise<void> {
   if (insertedMessageIds.length === 0) return
   const insertedIds = new Set(insertedMessageIds)
-  const newInbound = thread.messages.filter((m) => m.direction === 'inbound' && insertedIds.has(m.id))
+  // 网站表单通知默认不触发自动回复相关事件（客人之后的真回复不带 formLead，仍正常触发）。
+  const newInbound = thread.messages.filter((m) => m.direction === 'inbound' && insertedIds.has(m.id) && !m.formLead)
 
   for (const m of newInbound) {
     try {
@@ -600,6 +597,8 @@ async function writeTouchpoints(
           automated: m.automated,
           // 邮件同步不知道是哪位同事按的发送 —— 留空，不假装。
           logged_by: null,
+          // 同事发的信（不是客人说的话），留下发件地址方便回查。
+          ...(m.staffSender ? { staff_sender: m.staffSender } : {}),
         },
         source: 'microsoft_mail',
         source_ref: m.id,
@@ -679,9 +678,28 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     truncated = truncated || res.truncated
   }
 
-  const plan = planMailIngest(all, {
-    ownDomains: ownDomainsOf(target.mailbox, target.domain, target.ownDomains ?? []),
+  const ownDomains = ownDomainsOf(target.mailbox, target.domain, target.ownDomains ?? [])
+
+  // 网站表单通知（发件人是本邮箱自己）：识别 → 提取客人 → 改写对方。认不出的丢掉并计数。
+  const formStats = emptyFormStats()
+  const readable = await applyFormNotices({
+    token,
+    mailbox: target.mailbox,
+    clientId: target.clientId,
+    // 表单通知认证只认真域名；点名的员工地址（含 @）不能当成整个域名交过去。
+    ownDomains: ownDomains.filter((d) => !d.includes('@')),
+    messages: all,
+    stats: formStats,
   })
+
+  // 官网改了出发时间/预算的选项文案 → 映射不到稳定代码（已存空）：不能静默，留一条日志（不含任何客人信息）。
+  if (formStats.unknownExtras > 0) {
+    console.warn(
+      `[mail-form] ${formStats.unknownExtras} 封网站表单的出发时间/预算选项映射不到稳定代码（官网可能改了选项），已存空；邮箱 ${target.mailbox}`,
+    )
+  }
+
+  const plan = planMailIngest(readable, { ownDomains })
 
   // **从旧到新处理**，配合下面「一条失败就停」。
   //
@@ -702,7 +720,31 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
       messages += stored.newMessages
 
       let contactId = stored.contactId
-      if (!contactId) {
+      const hasFormLead = thread.messages.some((m) => m.formLead)
+      if (hasFormLead) {
+        // 网站表单：走 mirrorWebFormLead（reject 策略、不覆盖老客人姓名、写 web_form 触点），
+        // 不走下面默认的 resolveContact。放在 `!contactId` 判断之外：线程可能已被员工回复挂到老联系人上，
+        // 放里面会漏写 web_form 触点（写入靠 source_ref 幂等）。
+        // 只在这条会话还没挂上联系人时做：表单线程每小时都会被重读，对已挂好的会话再 mirror 一次
+        // 会把已有联系人的 last_seen_at 回退到旧通知的时间（魏征 2026-10-19 复审 R2）。
+        // mirror 失败（抛错）→ 会话没挂人 → 下一轮自然重试。
+        if (!stored.contactId) {
+          const formContact = await mirrorFormThread({ clientId: target.clientId, messages: thread.messages })
+          contactId = formContact
+          if (contactId) {
+            await supabaseAdmin
+              .from('conversations')
+              .update({ contact_id: contactId, updated_at: new Date().toISOString() })
+              .eq('id', stored.conversationId)
+              .is('contact_id', null)
+          } else {
+            // 识别成功却没认到人（邮箱被身份规则拒绝）：不静默 —— 记日志并计入回执。
+            console.error('[mail-form] 表单通知识别成功但没能挂上联系人:', thread.key)
+            formStats.failed += 1
+            formStats.failedReasons.no_contact = (formStats.failedReasons.no_contact ?? 0) + 1
+          }
+        }
+      } else if (!contactId) {
         if (thread.hasInbound) {
           // 客人自己开过口 —— 认人，认不到就按邮箱新建（判断②）。
           // 只带**一个**身份，所以结构上不可能触发两个真人的不可逆合并。
@@ -710,8 +752,12 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
             clientId: target.clientId,
             identities: [{ kind: 'email', value: thread.counterparty.address }],
             displayName: thread.counterparty.name,
+            // 邮件显示名质量最差（对方没设时 Graph 给的就是邮箱），不覆盖已有名字（子牙 B2）。
+            overwriteDisplayName: false,
+            fillEmptyDisplayName: true,
             source: 'email',
             seenAt: thread.lastAt,
+            autoAssign: true,
           })
           contactId = res.contactId
           if (res.created) newContacts += 1
@@ -742,8 +788,10 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
       )
 
       if (contactId) {
-        touchpoints += await writeTouchpoints(target.clientId, contactId, thread)
-        await runAgentCustomerHook(target.clientId, contactId, thread, stored.conversationId, domainRules)
+        // 表单通知只写 web_form 触点（上面已写），不再写一条邮件触点 —— 同一封信不重复计数。
+        const emailThread = { ...thread, messages: thread.messages.filter((m) => !m.formLead) }
+        touchpoints += await writeTouchpoints(target.clientId, contactId, emailThread)
+        await runAgentCustomerHook(target.clientId, contactId, emailThread, stored.conversationId, domainRules)
       }
       done += 1
     } catch (err) {
@@ -765,6 +813,7 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     skipped: plan.skipped,
     truncated,
     stoppedEarly,
+    ...(formStats.recognised > 0 ? { formEnquiries: formStats } : {}),
   }
 }
 

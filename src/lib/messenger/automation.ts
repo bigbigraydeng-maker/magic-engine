@@ -231,12 +231,27 @@ export interface ThreadMessage {
    * 机器身份（自动安抚）经 ME 发出的要传 false。
    */
   sentByHumanViaMe?: boolean
+  /**
+   * ME's own F1 auto-acknowledgement. Never a human reply, and it does not change
+   * who has the thread.
+   */
+  viaMeAutoAck?: boolean
+}
+
+/** What kind of reply a single outbound message is. */
+export type PageReplyKind = 'human' | 'automated' | 'notice' | 'me_autoack'
+
+/** One outbound message's classification, keyed by its `sentAt`. */
+export interface PageReplyVerdict {
+  sentAt: string
+  kind: PageReplyKind
 }
 
 /**
- * 整条会话走一遍，返回**最后一次真人回复**的时间；一次都没有则 null。
+ * 整条会话走一遍，给**每条出站消息**定档（inbound 不产出 verdict）。
  *
  * 判定顺序（对每条出站消息）：
+ *   0. `viaMeAutoAck === true` → ME 自己的 F1 自动安抚。不算真人，也不改变谁在回话。
  *   1. `sentByHumanViaMe === true` → 真人。不管 AI 是否在接管、也不管是不是秒回。
  *   2. 是已知系统通知 → **不算真人**，但按 mode 切换「谁在回话」。
  *   3. AI 接管期间 → 机器。包括第 60 / 120 分钟那种「还感兴趣吗」追问 ——
@@ -246,7 +261,7 @@ export interface ThreadMessage {
  * 不认识的通知文案落到第 4 步，也就是默认真人 —— 跟本文件既有的 deny-list 原则一致：
  * 错杀真人（线索多露一次面）远比错信机器是真人（热线索被埋）轻。
  */
-export function lastHumanPageReplyAt(messages: readonly ThreadMessage[]): string | null {
+export function classifyPageReplies(messages: readonly ThreadMessage[]): PageReplyVerdict[] {
   // 🔴 按**时刻**排，不能按字符串排（魏征复审 2026-09-26 抓到，已复现）。
   // ISO 时间的写法不止一种：`…T10:00:00Z` 和 `…T22:00:00+12:00` 是同一时刻，
   // 但字符串比较会把后者排到前者后面很远。实测一条：客人 09:59Z 来信 →
@@ -264,7 +279,7 @@ export function lastHumanPageReplyAt(messages: readonly ThreadMessage[]): string
   /** 最近一条 `human_on` 通知的时间 —— 用来判「转移给你」后 5 秒内的收尾话。 */
   let humanOnAt: number | null = null
   let lastInboundAt: number | null = null
-  let lastHuman: string | null = null
+  const verdicts: PageReplyVerdict[] = []
 
   for (const m of ordered) {
     const at = Date.parse(m.sentAt)
@@ -275,9 +290,15 @@ export function lastHumanPageReplyAt(messages: readonly ThreadMessage[]): string
       continue
     }
 
+    // 0) ME 自己的 F1 自动安抚 —— 不算真人，也不改变谁在回话。
+    if (m.viaMeAutoAck === true) {
+      verdicts.push({ sentAt: m.sentAt, kind: 'me_autoack' })
+      continue
+    }
+
     // 1) 我们自己的发送记录说这是真人发的 —— 最硬的证据，先判。
     if (m.sentByHumanViaMe === true) {
-      lastHuman = m.sentAt
+      verdicts.push({ sentAt: m.sentAt, kind: 'human' })
       continue
     }
 
@@ -293,16 +314,21 @@ export function lastHumanPageReplyAt(messages: readonly ThreadMessage[]): string
         // 他 5 秒内发出的话算他自己的（见 closingWindow 注释里的实测）。
         humanOnAt = notice.closingWindow === true ? atMs : null
       }
+      verdicts.push({ sentAt: m.sentAt, kind: 'notice' })
       continue
     }
 
     // 3) 「转移给你」之后极短窗口内那条，仍是 AI 的收尾话。
     if (humanOnAt !== null && atMs !== null && atMs - humanOnAt <= AI_TAKEOVER_CLOSING_WINDOW_MS) {
+      verdicts.push({ sentAt: m.sentAt, kind: 'automated' })
       continue
     }
 
     // 4) AI 接管期间的出站一律算机器（含长间隔的追问）。
-    if (aiHasTheThread) continue
+    if (aiHasTheThread) {
+      verdicts.push({ sentAt: m.sentAt, kind: 'automated' })
+      continue
+    }
 
     // 5) 其余交给既有判据。
     const automated = isAutomatedPageMessage({
@@ -310,8 +336,17 @@ export function lastHumanPageReplyAt(messages: readonly ThreadMessage[]): string
       hasPriorInbound: lastInboundAt !== null,
       msSincePriorInbound: lastInboundAt !== null && atMs !== null ? atMs - lastInboundAt : null,
     })
-    if (!automated) lastHuman = m.sentAt
+    verdicts.push({ sentAt: m.sentAt, kind: automated ? 'automated' : 'human' })
   }
 
+  return verdicts
+}
+
+/** Returns the time of the last human reply in the thread, or null if there is none. */
+export function lastHumanPageReplyAt(messages: readonly ThreadMessage[]): string | null {
+  let lastHuman: string | null = null
+  for (const v of classifyPageReplies(messages)) {
+    if (v.kind === 'human') lastHuman = v.sentAt
+  }
   return lastHuman
 }

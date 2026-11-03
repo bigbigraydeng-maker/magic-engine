@@ -8,7 +8,14 @@
  * the result. Claim-before-send is the idempotency lock: a comment can never be
  * replied to twice even if two cron runs overlap or a later step fails.
  *
- * DM-first: for questions/complaints the DM is sent before the public reply, so
+ * Send gate: before a public reply or private reply, `routeComment` must return
+ * a greeting or FAQ. Price, complaint, refund, booking change, praise that is
+ * not a greeting or FAQ, unknown, or a routing throw is recorded for the
+ * existing human queue and does not call Meta. Spam the classifier marks with
+ * shouldHide is still hidden, as before. If classification throws, nothing is
+ * hidden or sent — the comment waits for a person.
+ *
+ * DM-first: when a send is allowed, the DM goes out before the public reply, so
  * the public "we've messaged you" wording is only used when the DM actually
  * landed (otherwise a no-DM public variant is used — never a false claim).
  *
@@ -19,7 +26,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { fetchPagePosts, fetchPageReels } from '@/lib/meta/page-posts'
+import { fetchPagePosts, fetchPageReels, type HalvingStats } from '@/lib/meta/page-posts'
 import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
 import { fetchAdStoryIds } from '@/lib/meta/ads-posts'
 import { fetchPostCommentsResult, replyToComment, sendPrivateReply, hideComment, PageComment } from '@/lib/meta/comments'
@@ -33,6 +40,7 @@ import {
 } from './comment-post-skips'
 import { classifyComment, CommentDecision, CommentCategory } from './comment-classifier'
 import { ReplyContext } from './comment-guardrails'
+import { routeComment, type CommentIntent } from './comment-routing'
 
 export interface CommentConfig {
   client_id: string
@@ -73,6 +81,10 @@ export interface ClientRunResult {
   permission_denied_count?: number
   /** A few of those post ids, so a human can spot-check. Not the whole list. */
   permission_denied_sample?: string[]
+  /** Times Meta said "too much data" and the post-list page size was halved to retry. */
+  list_halvings?: number
+  /** Page size that finally worked for the post list (100 = no halving was needed). */
+  list_page_size?: number
   /** Set when the token itself was rejected — the scan stops, nothing else works. */
   token_invalid?: string
 }
@@ -122,9 +134,11 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
     const cutoff = Date.now() - config.lookback_days * 86_400_000
     // Scan recent feed posts + Reels (whose comments live on the video object,
     // not the /published_posts representation) + any pinned evergreen posts.
+    const postStats: HalvingStats = { halvings: 0, finalLimit: 100 }
+    const reelStats: HalvingStats = { halvings: 0, finalLimit: 100 }
     const [recent, reels] = await Promise.all([
-      fetchPagePosts(config.fb_page_id, pageToken, 100),
-      fetchPageReels(config.fb_page_id, pageToken, 100),
+      fetchPagePosts(config.fb_page_id, pageToken, 100, { stats: postStats }),
+      fetchPageReels(config.fb_page_id, pageToken, 100, { stats: reelStats }),
     ])
     // 🔴 用 fullId（`<page_id>_<post_id>`），不是拆过的 postId。
     //    /comments 边上给裸 id，Graph 会把它当成老式 singular status 对象，
@@ -202,6 +216,8 @@ export async function processClientComments(config: CommentConfig): Promise<Clie
       ok: !tokenInvalid,
       page_id: config.fb_page_id,
       posts_scanned: postIds.size,
+      list_halvings: postStats.halvings + reelStats.halvings,
+      list_page_size: Math.min(postStats.finalLimit, reelStats.finalLimit),
       posts_skipped: scan.skipped,
       posts_unreadable: scan.unreadable,
       permission_denied_count: scan.permissionDenied.length,
@@ -335,6 +351,63 @@ function categoryAllowed(category: CommentCategory, config: CommentConfig): bool
   return false // 'spam' handled via auto_hide_spam; 'other' never auto-replies
 }
 
+/** Intents that may receive an automatic public reply or DM. Everything else waits for a person. */
+const GREETING_OR_FAQ: ReadonlySet<CommentIntent> = new Set([
+  'greeting',
+  'faq_itinerary',
+  'faq_visa',
+  'faq_signup',
+])
+
+export type CommentAutoReplyBlock = 'not_greeting_or_faq' | 'routing_error'
+
+export type CommentAutoReplyGate =
+  | { send: true }
+  | { send: false; block: CommentAutoReplyBlock }
+
+/**
+ * Fail closed for replies and DMs. A throw, an unknown intent, or any route
+ * other than greeting/FAQ means do not reply. `route === 'auto_ok'` is not
+ * enough on its own. Spam hiding is decided separately, before this gate.
+ */
+export function assessCommentAutoReply(
+  commentText: string,
+  category: string | null,
+): CommentAutoReplyGate {
+  try {
+    const routing = routeComment({ category, comment_text: commentText })
+    if (routing.route === 'auto_ok' && GREETING_OR_FAQ.has(routing.intent)) return { send: true }
+    return { send: false, block: 'not_greeting_or_faq' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown'
+    console.error('[autoreply-engine] routeComment failed; not sending:', message)
+    return { send: false, block: 'routing_error' }
+  }
+}
+
+function handoffDecision(decision: CommentDecision, block: CommentAutoReplyBlock): CommentDecision {
+  const flag = block === 'routing_error' ? 'routing_error' : 'not_greeting_or_faq'
+  const flags = decision.guardrailFlags.includes(flag)
+    ? decision.guardrailFlags
+    : [...decision.guardrailFlags, flag]
+  return { ...decision, needsHuman: true, shouldHide: false, guardrailFlags: flags }
+}
+
+/** Classification threw. Do not hide and do not guess a reply. */
+function classifierErrorDecision(): CommentDecision {
+  return {
+    category: 'other',
+    confidence: 0,
+    publicReply: null,
+    publicReplyAfterDm: null,
+    privateReply: null,
+    shouldHide: false,
+    needsHuman: true,
+    guardrailFlags: ['classifier_error'],
+    replySource: 'none',
+  }
+}
+
 /** Classify a claimed comment, act (DM-first), and finalise its row. */
 async function processClaimedComment(
   comment: PageComment,
@@ -348,15 +421,35 @@ async function processClaimedComment(
     siteUrl: ctxBase.siteUrl,
     authorFirstName: firstName(comment.fromName),
   }
-  const decision = await classifyComment(comment.message, ctx, seedFrom(comment.commentId))
+  let decision: CommentDecision
+  try {
+    decision = await classifyComment(comment.message, ctx, seedFrom(comment.commentId))
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'unknown'
+    console.error('[autoreply-engine] classifyComment failed; not hiding or sending:', message)
+    await finalise(claim.rowId, classifierErrorDecision(), {
+      status: 'pending', hidden: false, dmSent: false, publicReplyId: null, publicText: null,
+    })
+    return { publicReplied: false, dmSent: false, hidden: false, needsHuman: true, failed: false }
+  }
 
-  // Spam → hide (if enabled). No reply.
+  // Spam the classifier marked for hiding. Same path as before the reply gate.
   if (decision.shouldHide) {
     const hidden = config.auto_hide_spam ? await hideComment(comment.commentId, pageToken) : false
     await finalise(claim.rowId, decision, {
       status: hidden ? 'hidden' : 'skipped', hidden, dmSent: false, publicReplyId: null, publicText: null,
     })
     return { publicReplied: false, dmSent: false, hidden, needsHuman: false, failed: false }
+  }
+
+  // Greeting/FAQ only. Praise, price, complaint, refund, unknown, and routing
+  // errors are not replied to or DM'd — they join the existing needs_human queue.
+  const gate = assessCommentAutoReply(comment.message, decision.category)
+  if (!gate.send) {
+    await finalise(claim.rowId, handoffDecision(decision, gate.block), {
+      status: 'pending', hidden: false, dmSent: false, publicReplyId: null, publicText: null,
+    })
+    return { publicReplied: false, dmSent: false, hidden: false, needsHuman: true, failed: false }
   }
 
   // Category disabled → record classification, take no send action.

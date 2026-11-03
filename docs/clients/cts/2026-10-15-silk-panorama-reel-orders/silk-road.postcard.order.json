@@ -1,0 +1,86 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Silk Road postcard v1: no price on screen (74 rule), 3 verified stock places, end title card",
+ "angle_source": {
+  "source": "manual_remotion_cts_may2027",
+  "authorized_by": "18 号统筹 2026-10-15：Silk/Panorama 画面不出价格，等 postcard 合并+出片机升级后重出；PM 2026-10-15 授权补丝路素材；只出片到 in_review，不发布",
+  "facts_checked": "ctstours.co.nz/tours/china/signature/silk-road, 2026-10-15：18 天/15 晚；NZD 7,999 pp twin share；单人房差 NZD 1,488；国际+国内机票、4–5 星酒店、英语导游；38 餐；行程含 Zhangye、Jiayuguan、Dunhuang、Turpan、Urumqi。班期页写 13–30 May 与出发表 5/29 差一天，故片内与文案都不写日期。",
+  "note": "简报要求的第一人称 Baker Gu 叙述：做不到，不替真人编亲身经历（客户红线）；本片无旁白，质检的口吻标记按误报处理；PM 若给 Baker 认可的稿再做。"
+ },
+ "rationale_one_liner": "丝路 postcard 无价版：钩子=兵马俑坑全景，景点=嘉峪关要塞/莫高窟/天池（每景带官网出处），片尾=标题卡，价格只留首评链接；只存草稿。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "postcard",
+   "props": {
+    "brandColor": "#B61E2E",
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "musicFile": "music/road-afar.m4a",
+    "musicStartSec": 0,
+    "scrim": 0.55,
+    "cardOpacity": 0.55,
+    "cardSide": "center",
+    "accent": "#FFD27A",
+    "hook": {
+     "clip": "clips/s3_terracotta_pit.mp4",
+     "lines": [
+      "STEP ONTO",
+      "THE SILK",
+      "ROAD"
+     ]
+    },
+    "scenes": [
+     {
+      "clip": "clips/s2b_jiayuguan_fortress.mp4",
+      "place": "Jiayuguan Fortress",
+      "line": "Day 9: Zhangye to Jiayuguan.",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/signature/silk-road",
+      "sourceQuote": "Zhangye — Jiayuguan",
+      "placeSourceQuote": "Jiayuguan Fortress & Hanging Great Wall"
+     },
+     {
+      "clip": "clips/s4_mogao_caves.mp4",
+      "place": "Mogao Caves",
+      "line": "Day 11: Dunhuang.",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/signature/silk-road",
+      "sourceQuote": "Dunhuang",
+      "placeSourceQuote": "Mogao Caves at Dunhuang"
+     },
+     {
+      "clip": "clips/s6_tianchi_lake.mp4",
+      "place": "Heavenly Lake",
+      "line": "Day 15: Urumqi to Heavenly Lake.",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/signature/silk-road",
+      "sourceQuote": "Urumqi — Heavenly Lake",
+      "placeSourceQuote": "Heavenly Lake in the Tianshan Mountains"
+     }
+    ],
+    "price": null,
+    "end": {
+     "backdropClip": "clips/s1b_zhangye_ridges.mp4",
+     "title": "18 DAYS. ONE ROAD."
+    },
+    "timing": {
+     "hookSec": 3.2,
+     "sceneSec": 3.6,
+     "priceSec": 6
+    }
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Eighteen days along the Silk Road, from Xi'an through Jiayuguan, Dunhuang and Turpan to Urumqi. International and domestic flights, 4-5 star hotels, an English-speaking tour guide and the 38 meals listed in the itinerary are included. Travel insurance, visa fee if required, and tips are not included.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/signature/silk-road",
+    "offer": [
+     "18 days along the Silk Road"
+    ]
+   }
+  }
+ }
+}

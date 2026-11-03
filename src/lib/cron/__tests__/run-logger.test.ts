@@ -28,6 +28,8 @@ const state = vi.hoisted(() => ({
   failInsert: null as PgError | null,
   failUpdate: null as PgError | null,
   failUpsert: null as PgError | null,
+  /** 这些 status 一律被 CHECK 拒绝（模拟迁移还没应用）。 */
+  rejectStatuses: [] as string[],
   insertAttempts: 0,
   updateAttempts: 0,
   upsertAttempts: 0,
@@ -35,7 +37,7 @@ const state = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/supabase', () => {
-  const STATUSES = ['running', 'completed', 'failed']
+  const STATUSES = ['running', 'completed', 'partial', 'failed', 'abandoned']
 
   function from(table: string) {
     if (table !== 'cron_run_logs') throw new Error(`假件只建模了 cron_run_logs，收到 ${table}`)
@@ -50,7 +52,7 @@ vi.mock('@/lib/supabase', () => {
     // 真表上的两条约束 —— 少写 job_name 或写错 status，库里是会拒的。insert 和 upsert 都要过这一关。
     function checkConstraints(row: Row): PgError | null {
       if (!row.job_name) return { message: 'null value in column "job_name"', code: '23502' }
-      if (!STATUSES.includes(String(row.status))) {
+      if (!STATUSES.includes(String(row.status)) || state.rejectStatuses.includes(String(row.status))) {
         return { message: 'violates check constraint "cron_run_logs_status_check"', code: '23514' }
       }
       return null
@@ -141,6 +143,7 @@ beforeEach(() => {
   state.failInsert = null
   state.failUpdate = null
   state.failUpsert = null
+  state.rejectStatuses = []
   state.insertAttempts = 0
   state.updateAttempts = 0
   state.upsertAttempts = 0
@@ -157,15 +160,51 @@ describe('startCronRun', () => {
     expect(state.rows[0].job_name).toBe('demo-job')       // 锚点：假件确实被打中了
     expect(state.rows[0].status).toBe('running')
 
-    await run.finish({ processed: 3, completed: 2, failed: 1 })
+    await run.finish({ processed: 3, completed: 3, failed: 0 })
 
     expect(state.rows).toHaveLength(1)                     // 收尾是 update，不是再插一行
     expect(state.rows[0].status).toBe('completed')
     expect(state.rows[0].processed).toBe(3)
-    expect(state.rows[0].completed_count).toBe(2)
-    expect(state.rows[0].failed_count).toBe(1)
+    expect(state.rows[0].completed_count).toBe(3)
+    expect(state.rows[0].failed_count).toBe(0)
     expect(state.rows[0].finished_at).toEqual(expect.any(String))
     expect(spy).not.toHaveBeenCalled()                     // 顺路的时候不许刷屏
+  })
+
+  it('部分条目失败：failed_count 照记，状态是 partial，不能再写成 completed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const run = await startCronRun('demo-job')
+    await run.finish({ processed: 3, completed: 2, failed: 1 })
+    expect(state.rows[0].status).toBe('partial')
+    expect(state.rows[0].failed_count).toBe(1)
+    expect(state.rows[0].completed_count).toBe(2)
+  })
+
+  it('条目全失败、调用方没另传 error：状态是 failed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const run = await startCronRun('demo-job')
+    await run.finish({ processed: 2, completed: 0, failed: 2 })
+    expect(state.rows[0].status).toBe('failed')
+    expect(state.rows[0].failed_count).toBe(2)
+  })
+
+  it('有的成了有的没成，同时又带了 error 原文：仍是 partial，原文留在 error_message', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const run = await startCronRun('demo-job')
+    await run.finish({ completed: 1, failed: 1, error: 'page A: boom' })
+    expect(state.rows[0].status).toBe('partial')
+    expect(state.rows[0].error_message).toBe('page A: boom')
+  })
+
+  it('约束还不接受 partial：改写成 failed，不能把这一行留在 running', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    state.rejectStatuses = ['partial']
+    const run = await startCronRun('demo-job')
+    await run.finish({ processed: 3, completed: 2, failed: 1 })
+    expect(state.rows[0].status).toBe('failed')
+    expect(String(state.rows[0].error_message)).toContain('partial:')
+    expect(state.rows[0].failed_count).toBe(1)
+    expect(said(spy)).toContain('还不接受 status=partial')
   })
 
   it('任务自己失败：记录落成 failed 并带上原因', async () => {

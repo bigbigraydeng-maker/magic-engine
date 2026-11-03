@@ -19,6 +19,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { uploadSecret, verifyUploadToken } from '@/lib/uploads/client-upload-token'
+import { readLimitedBody } from '@/lib/uploads/read-limited-body'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -44,37 +45,6 @@ const BUCKET = 'visual-assets'
 const RATE_WINDOW_MIN = 10
 const RATE_LIMIT_FILES = 300
 
-
-/**
- * 边读边数,超过上限立刻断流并返回 null。
- *
- * 存在的理由:`content-length` 是客户端说了算的,chunked 请求干脆没有它。
- * 要真挡住 OOM,只能自己数 —— 而且必须在**读的过程中**断,读完再判等于已经吃进内存了。
- *
- * 返回读到的字节(供重建请求体用);超限返回 null。
- */
-async function measureBody(
-  body: ReadableStream<Uint8Array>,
-  limit: number,
-): Promise<Uint8Array | null> {
-  const reader = body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
-    if (total > limit) {
-      await reader.cancel().catch(() => {})
-      return null
-    }
-    chunks.push(value)
-  }
-  const out = new Uint8Array(total)
-  let off = 0
-  for (const c of chunks) { out.set(c, off); off += c.byteLength }
-  return out
-}
 
 export async function POST(
   req: NextRequest,
@@ -121,7 +91,7 @@ export async function POST(
     return NextResponse.json({ error: '这一批太大了,请分几次传' }, { status: 413 })
   }
   if (!declaredLength && req.body) {
-    const counted = await measureBody(req.body, MAX_REQUEST_BYTES)
+    const counted = await readLimitedBody(req.body, MAX_REQUEST_BYTES)
     if (counted === null) {
       return NextResponse.json({ error: '这一批太大了,请分几次传' }, { status: 413 })
     }

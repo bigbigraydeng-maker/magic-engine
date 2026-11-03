@@ -69,13 +69,16 @@ interface RefreshResult {
   refreshToken?: string
 }
 
-async function refreshGoogleToken(refreshTokenPlain: string): Promise<RefreshResult> {
+async function refreshGoogleToken(
+  refreshTokenPlain: string,
+  provider: PlatformProvider = PLATFORM_PROVIDERS.GOOGLE_GBP,
+): Promise<RefreshResult> {
   const clientId     = process.env.GOOGLE_CLIENT_ID
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET
 
   if (!clientId || !clientSecret) {
     throw new PlatformTokenRefreshError(
-      PLATFORM_PROVIDERS.GOOGLE_GBP,
+      provider,
       'GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured',
     )
   }
@@ -95,7 +98,7 @@ async function refreshGoogleToken(refreshTokenPlain: string): Promise<RefreshRes
 
   if (!res.ok) {
     const text = await res.text().catch(() => '(unreadable body)')
-    throw new PlatformTokenRefreshError(PLATFORM_PROVIDERS.GOOGLE_GBP, `HTTP ${res.status}: ${text}`)
+    throw new PlatformTokenRefreshError(provider, `HTTP ${res.status}: ${text}`)
   }
 
   const data = (await res.json()) as {
@@ -107,7 +110,7 @@ async function refreshGoogleToken(refreshTokenPlain: string): Promise<RefreshRes
 
   if (!data.access_token) {
     const detail = data.error_description ?? data.error ?? 'missing access_token in response'
-    throw new PlatformTokenRefreshError(PLATFORM_PROVIDERS.GOOGLE_GBP, detail)
+    throw new PlatformTokenRefreshError(provider, detail)
   }
 
   const expiresAt = new Date(Date.now() + (data.expires_in ?? 3600) * 1000)
@@ -185,7 +188,8 @@ function isGoogleProvider(provider: PlatformProvider): boolean {
     provider === PLATFORM_PROVIDERS.GOOGLE_GSC ||
     provider === PLATFORM_PROVIDERS.GOOGLE_ADS ||
     provider === PLATFORM_PROVIDERS.GOOGLE_GA4 ||
-    provider === PLATFORM_PROVIDERS.GOOGLE_GTM
+    provider === PLATFORM_PROVIDERS.GOOGLE_GTM ||
+    provider === PLATFORM_PROVIDERS.GOOGLE_YOUTUBE
   )
 }
 
@@ -194,7 +198,7 @@ async function callProviderRefresh(
   refreshTokenPlain: string,
 ): Promise<RefreshResult> {
   if (isGoogleProvider(provider)) {
-    return refreshGoogleToken(refreshTokenPlain)
+    return refreshGoogleToken(refreshTokenPlain, provider)
   }
   if (provider === PLATFORM_PROVIDERS.MICROSOFT_MAIL) {
     return refreshMicrosoftToken(refreshTokenPlain)
@@ -323,7 +327,7 @@ export async function getValidToken(
  */
 export async function getValidTokenForConnection(
   connectionId: string,
-  opts?: { forceRefresh?: boolean },
+  opts?: { forceRefresh?: boolean; markErrorOnFailure?: boolean },
 ): Promise<string> {
   const { data, error } = await supabaseAdmin
     .from('platform_oauth_connections')
@@ -346,7 +350,11 @@ export async function getValidTokenForConnection(
   try {
     refreshed = await callProviderRefresh(row.provider, decryptToken(row.refresh_token_enc))
   } catch (err) {
-    await markConnectionError(row.id, err instanceof Error ? err.message : String(err))
+    // A read-only background reader (the triggered-send shadow run) passes `markErrorOnFailure: false`: a refresh that
+    // fails once must not take the mailbox offline for the people who send from it. Every other caller keeps the default.
+    if (opts?.markErrorOnFailure !== false) {
+      await markConnectionError(row.id, err instanceof Error ? err.message : String(err))
+    }
     throw err
   }
 

@@ -24,7 +24,7 @@ import {
 } from './recipe'
 import type { CreatomateTemplateContract } from '@/lib/creatomate/types'
 
-/** 只有 facebook 有真实 adapter;publer 在 publish-worker.ts 仍是注释状态。
+/** 只有 facebook 有真实 adapter;其它平台都没有 adapter。
  *  放开别的平台 = 配了个必然 markFailed('no_adapter') 的目标。 */
 export const SUPPORTED_PLATFORMS = ['facebook'] as const
 

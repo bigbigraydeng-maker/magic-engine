@@ -6,7 +6,7 @@
  *    或者在 setup 里把断言改成空操作 —— 检查照样是绿的，还会被自动合并。
  *    这份配置放在 A 级路径 src/lib/kernel/ 下，改它要过 A 级审。
  *
- * 用法见 .github/workflows/kernel-architecture.yml；本地照旧可以用根配置跑同一个文件。
+ * 用法见 .github/workflows/pr-light-checks.yml；本地照旧可以用根配置跑同一个文件。
  */
 import { defineConfig } from 'vitest/config'
 import path from 'path'
@@ -29,6 +29,8 @@ export default defineConfig({
       SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
     },
     setupFiles: [],
+    // Vitest 3.2.4 没有按条过滤。globalSetup 只放过精确的 onTaskUpdate 超时。
+    globalSetup: [path.join(ROOT, 'src/lib/kernel/__tests__/architecture-global-setup.ts')],
     passWithNoTests: false,
     allowOnly: false,
   },

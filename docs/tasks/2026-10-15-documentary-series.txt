@@ -1,0 +1,28 @@
+目标：将已确认 CTS China, Up Close 和新增 Winter 队列接入现有内容工厂，支持播放预览、系列/状态筛选、关联平台链接与真实播放数据。
+权威说明：本文件；唯一写入者：本会话 Codex。Review agents 只读。
+基线：/Users/raydeng/Projects/magic-engine-cts-series，codex/cts-series-performance，HEAD/origin/main=8f4a86f2144022d083ad5bb557e5dc90c1768910；本次未 fetch。初始无改动。现有主工作区有无关改动，隔离保留。
+风险：B，沿用 requireDashboardClientAccess；不更改鉴权、权限清单、表或发布流程。新增受现有客户访问检查保护的业务读写端点。若触碰安全核心升级 A。
+Tier：既有社媒内容工厂 + L3 YouTube Data API 读取扩展；CTS 系列 manifest 为 config/clients/cts 客户配置 L4。不上新支柱/候选。不新建共享智能层。
+实现：server-only 客户 manifest 注册；共7条常规（上海已确认）+5条Winter选题。内容工厂增加“系列视频与播放数据”入口；新页包含系列过滤、制作状态、脚本重点、素材缺口、视频预览、平台链接、数据状态。通过 clients.factory_config.documentary_links 持久保存关联（乐观并发不覆盖其它配置），只保存客户端URL白名单内的YouTube/TikTok链接和https成片URL。GET复用YouTube metadata helper取公开播放/点赞；无key/不可读保持null并区分错误，绝不把缺失写0。TikTok没有video.list则明确缺权限，不改OAuth scopes。公开累计播放数不等于Analytics留存/CTR；不合并跨平台播放。
+不做：发片、排程、自动生成、计费、OAuth重新授权、保留率/CTR伪造、定时同步、生产数据库改写、合并部署。成片尚在本地时清楚显示待接入预览，不暴露本机路径；由UI支持填入已托管预览链接。
+数据行为：GET为单次同步平台只读，不写外部；POST仅保存本客户链接设置，不调用发布平台。没有跨步骤异步接力，不需要新增Inngest；同步结果仅本次读取，不宣称已定时归档。
+验收：Winter清单在后台展示；可按系列/状态筛选；保存本客户链接，乐观并发拒绝覆盖；链接后读取YouTube累计播放；源失败/未发布/权限缺口正确显示；未授权不能读写；其他客户不获得CTS配置；本地组件与API集成、targeted tests、type/lint/build及diff检查，报告实际限制。
+权限：本地实现测试；未授权提交推送合并部署/真实客户数据库写入。测试仅假凭据/隔离替身。发布审批为最后一步。
+
+Checkpoint: local implementation complete. HEAD=8f4a86f2144022d083ad5bb557e5dc90c1768910; shared origin/main moved by another session to d835c1c725ded9d58e63d62f0b0d242d84471ac6 (2 behind), no fetch here.
+104 targeted tests passed. Two independent design/implementation reviews now GO. Related lint passed. Offline build passed before CAS edit; final rebuild in progress. Full type-check has unchanged baseline errors. Browser fixture preview verified Winter filter (5), refresh and unknown counters; Jev/native select observations saved. No production credentials/data used; no commit/push/merge/deploy.
+Reuse: existing content-factory navigation, client-access guard, clients.factory_config, YouTube metadata provider file. No new intelligence layer/table/scopes/cron. CTS episodes and editorial facts are client configuration only. Synchronous read and reference saving, no async workflow/provider writes; no Inngest needed.
+
+Final checks: final offline build exit 0; targeted lint exit 0; full type-check exit 2 with byte-identical diagnostics to the pre-change baseline; git diff --check exit 0. No new errors in changed files. Targeted 104 tests and both second-round reviews GO. Production connection and actual DB/provider integration not tested.
+
+User follow-up: add covers. Reused locked cts-documentary-covers v1 master. Generated 11 draft covers plus unchanged approved Shanghai, each with PNG/SVG/JPEG/mobile/evidence. Harbin historical photo explicitly labelled; no current-season claim. Added cover metadata to CTS config and image/full-size/credit links to cards. No new API, schema or publication. Local cover package: outputs/cts-cover-batch-20261015 in the original video workspace.
+
+Cover verification: 12/12 full-size and mobile designs visually reviewed, all configured paths exist, full JPEG 1920x1080 and <2MB. Related 16 tests passed, lint passed, type-check baseline unchanged=True. Browser fixture shows Winter covers and draft labels; real production not changed. Final offline build rerun in progress.
+Cover final offline build exit 0. No commit/push/merge/deploy or production changes.
+
+AUTHORIZATION UPDATE 2026-10-15: user explicitly approved arranging go-live and continuing video production. Commit/push/PR/merge/deploy for this reviewed series feature now authorized, plus necessary verification and linking approved review assets. No social publishing authorization inferred. Continue Chongqing documentary after deployment using the approved style; platform/data permission changes remain excluded.
+
+Release check: Risk gate treated photo-credits filenames as credential/credit budget paths. Renamed these attribution-only text files to explicit *-attribution.txt (contents unchanged) and updated references. No gate rules or protections changed.
+
+2026-10-15 production checkpoint: ME series dashboard is live; authenticated page shows 12 episode plans and covers. Shanghai YouTube link xJld_NaRQBU saved via existing UI and public counts read successfully. Production release commit observed live: 676add1ea5eb10bc4a7bd960af6b67a1bd9e3007.
+Narrow cover correction: old Hangzhou gazebo photo resembles Shanghai Yuyuan; remove from Hangzhou display. Sole writer this Codex session; only three Hangzhou JPG renditions and attribution text plus this task/ledger evidence. Replacement: existing real Pexels 39955168 frame at 1s, LayG Traveller, source explicitly identifies Leifeng Pagoda, Hangzhou. Reuse locked cover master; no API, schema, permissions, workflow or client-link writes. Checked 1920x1080, 960x540, 320x180 decode and visual QA. Architecture reviewer GO; no application tests/build locally: static image/attribution correction only. Publishing authorization remains as already granted by user for this series.

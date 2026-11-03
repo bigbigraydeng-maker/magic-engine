@@ -23,3 +23,31 @@ export interface AdsClientEventData {
 export function adsAutonomySyncEventId(clientId: string, sourceUpdatedAt: string): string {
   return `autonomy_sync:${clientId}:${sourceUpdatedAt}`
 }
+
+// ─── 开投前「追踪与环境就绪」检查（docs/specs/2026-10-19-ads-tracking-preflight-workflow.md §3）──────────
+
+/**
+ * 请求一次开投前追踪检查（人手触发，或开投前 T-24h / T-2h 的定时叫醒）。
+ * payload 见 AdsTrackingPreflightRequestedData：不带 client_id = 所有配置了追踪检查的客户。
+ * 🔴 只读检查：不发布、不扣费、不外发。
+ */
+export const ADS_TRACKING_PREFLIGHT_REQUESTED = 'ads.tracking_preflight.requested'
+
+/** 一个客户查完的机器可读回执（事件 id = 回执 request_id，同一份回执重试时不会重复发出）。 */
+export const ADS_TRACKING_PREFLIGHT_CHECKED = 'ads.tracking_preflight.checked'
+
+/** 开投后读回（T+1h / T+24h）。开投时刻只有点开投的那一刻才知道，所以由开投动作或人手发出。 */
+export const ADS_TRACKING_POSTLAUNCH_REQUESTED = 'ads.tracking_postlaunch.requested'
+
+export interface AdsTrackingPreflightRequestedData {
+  readonly client_id?: string
+  /** 谁叫醒的 / 为什么，例如 'T-24h'、'manual'；只进日志，不影响检查内容 */
+  readonly reason?: string
+}
+
+export interface AdsTrackingPostLaunchRequestedData {
+  readonly client_id: string
+  readonly phase: 't1h' | 't24h'
+  /** 开投时刻（ISO） */
+  readonly launched_at: string
+}

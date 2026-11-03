@@ -74,7 +74,6 @@ interface InsertableRow {
 }
 
 const TABLE = 'diagnostic_narratives'
-const ON_CONFLICT = 'run_id,kind,dimension'
 
 // ---------------------------------------------------------------------------
 // Save helpers — one per synthesis module
@@ -109,7 +108,7 @@ export async function saveCompetitorAnalysis(
       generated_at: result.generated_at,
     },
   ]
-  return upsertRows(supabase, rows)
+  return replaceRows(supabase, rows)
 }
 
 export async function saveDimensionNarrative(
@@ -128,7 +127,7 @@ export async function saveDimensionNarrative(
     cost_usd: result.cost_usd,
     generated_at: result.generated_at,
   }
-  return upsertRows(supabase, [row])
+  return replaceRows(supabase, [row])
 }
 
 export async function saveDimensionNarratives(
@@ -148,7 +147,7 @@ export async function saveDimensionNarratives(
     cost_usd: r.cost_usd,
     generated_at: r.generated_at,
   }))
-  return upsertRows(supabase, rows)
+  return replaceRows(supabase, rows)
 }
 
 export async function saveScoreExplanations(
@@ -171,7 +170,7 @@ export async function saveScoreExplanations(
     cost_usd: exp.target === 'overall' ? result.cost_usd : 0,
     generated_at: result.generated_at,
   }))
-  return upsertRows(supabase, rows)
+  return replaceRows(supabase, rows)
 }
 
 export async function saveMarketContext(
@@ -206,7 +205,7 @@ export async function saveMarketContext(
     cost_usd: result.cost_usd,
     generated_at: result.generated_at,
   }
-  return upsertRows(supabase, [row])
+  return replaceRows(supabase, [row])
 }
 
 // ---------------------------------------------------------------------------
@@ -239,28 +238,45 @@ export async function loadNarrativesForRun(
 }
 
 // ---------------------------------------------------------------------------
-// Internal — upsert with shared error swallowing
+// Internal — replace-by-key with shared error swallowing
+//
+// We cannot use upsert: the only unique index on diagnostic_narratives is an
+// expression index UNIQUE (run_id, kind, COALESCE(dimension, '')), which
+// Postgres rejects as an ON CONFLICT target (42P10). So we delete the matching
+// key(s) first, then insert.
 // ---------------------------------------------------------------------------
 
-async function upsertRows(
+async function replaceRows(
   supabase: SupabaseClient,
   rows: InsertableRow[],
 ): Promise<PersistResult> {
   if (rows.length === 0) return { ok: true, rows_written: 0 }
 
   try {
-    const { error } = await supabase
-      .from(TABLE)
-      .upsert(rows, { onConflict: ON_CONFLICT })
+    for (const row of rows) {
+      let del = supabase
+        .from(TABLE)
+        .delete()
+        .eq('run_id', row.run_id)
+        .eq('kind', row.kind)
+      del = row.dimension === null ? del.is('dimension', null) : del.eq('dimension', row.dimension)
 
-    if (error) {
-      console.warn('[synthesis-persistence] upsert failed:', error.message)
-      return { ok: false, rows_written: 0, error: error.message }
+      const { error: delError } = await del
+      if (delError) {
+        console.warn('[synthesis-persistence] delete failed:', delError.message)
+        return { ok: false, rows_written: 0, error: delError.message }
+      }
+    }
+
+    const { error: insError } = await supabase.from(TABLE).insert(rows)
+    if (insError) {
+      console.warn('[synthesis-persistence] insert failed:', insError.message)
+      return { ok: false, rows_written: 0, error: insError.message }
     }
     return { ok: true, rows_written: rows.length }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.warn('[synthesis-persistence] upsert threw:', message)
+    console.warn('[synthesis-persistence] replace threw:', message)
     return { ok: false, rows_written: 0, error: message }
   }
 }

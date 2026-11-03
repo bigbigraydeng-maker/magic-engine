@@ -94,4 +94,64 @@ describe('pushDailyPlanMeasurementItems', () => {
     const { client } = fakeSupabase([], { message: 'timeout' })
     await expect(pushDailyPlanMeasurementItems(client as SupabaseClient, [], NOW, new Map())).rejects.toThrow(/timeout/)
   })
+
+  it('🔴 a failed first comment becomes its own item with the exact comment text to copy', async () => {
+    const { client } = fakeSupabase([
+      failure({
+        outcome: 'first_comment_failed',
+        reason: 'graph_error',
+        first_comment_text: 'Send an enquiry\nhttps://example.test/x',
+        photo_id: undefined,
+        post_id: '1616575215312482_1750835520181969',
+      }),
+    ])
+    const items: ManualItem[] = []
+    await pushDailyPlanMeasurementItems(client as SupabaseClient, items, NOW, new Map([[CLIENT, { name: 'Acme Tours' }]]))
+
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('daily_plan_first_comment_failed')
+    expect(items[0].what).toContain('第一条评论')
+    expect(items[0].how).toContain('Send an enquiry\nhttps://example.test/x')
+    expect(items[0].how).toContain('graph_error')
+    expect(items[0].href).toBe('https://www.facebook.com/1616575215312482_1750835520181969')
+  })
+
+  it('🔴 the same Post can produce both a first-comment item and a measurement item', async () => {
+    const { client } = fakeSupabase([
+      failure({ outcome: 'first_comment_failed', reason: 'graph_error', first_comment_text: 'Send an enquiry\nhttps://example.test/x' }),
+      failure(),
+    ])
+    const items: ManualItem[] = []
+    await pushDailyPlanMeasurementItems(client as SupabaseClient, items, NOW, new Map())
+
+    expect(items).toHaveLength(2)
+    expect(items.map((i) => i.kind).sort()).toEqual(['daily_plan_first_comment_failed', 'daily_plan_post_unmeasured'])
+  })
+
+  it('a first-comment failure with no recorded text tells the PM to rewrite it', async () => {
+    const { client } = fakeSupabase([failure({ outcome: 'first_comment_failed', reason: 'graph_error', first_comment_text: undefined })])
+    const items: ManualItem[] = []
+    await pushDailyPlanMeasurementItems(client as SupabaseClient, items, NOW, new Map())
+    expect(items).toHaveLength(1)
+    expect(items[0].how).toContain('内容没记录')
+  })
+
+  it('🔴 a measurement failure with recorded comment text warns the first comment may be missing', async () => {
+    const { client } = fakeSupabase([failure({ first_comment_text: 'Send an enquiry\nhttps://example.test/x' })])
+    const items: ManualItem[] = []
+    await pushDailyPlanMeasurementItems(client as SupabaseClient, items, NOW, new Map())
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('daily_plan_post_unmeasured')
+    expect(items[0].how).toContain('首评')
+    expect(items[0].how).toContain('Send an enquiry\nhttps://example.test/x')
+  })
+
+  it('a measurement failure with no recorded comment text does not mention the first comment', async () => {
+    const { client } = fakeSupabase([failure({ first_comment_text: undefined })])
+    const items: ManualItem[] = []
+    await pushDailyPlanMeasurementItems(client as SupabaseClient, items, NOW, new Map())
+    expect(items).toHaveLength(1)
+    expect(items[0].kind).toBe('daily_plan_post_unmeasured')
+    expect(items[0].how).not.toContain('首评')
+  })
 })

@@ -1,20 +1,21 @@
 /**
- * 处方「落地」—— 把一份方案变成执行看板上的动作。
+ * 处方「落地」—— 把一份方案挂到目标下的阶段，并标成已批准。
  *
  * 这段逻辑原本只长在 PATCH /api/clients/[id]/prescription/[pId] 里（人工点批准）。
- * 现在周更也要落地处方（PM 2026-08-04 拍板：方案自动落地，只在待办里通知一声），
- * 所以抽出来给两边共用 —— 复制一份等于以后修 bug 要修两处，必漏一处。
+ * 周更（auto-prescribe.ts）也走这里，所以两边共用同一段，避免修一处漏一处。
  *
- * 顺序是有讲究的，别改：
- *   派生 Initiative → 生成执行项 → 归档上一版（含它没人动过的动作）→ 最后才标 approved
- * 执行项生成失败时处方保持 draft —— 宁可"没批准"，也不能"已批准但看板上没动作"，
- * 后者从界面上完全看不出来，等于把问题藏起来。
+ * 顺序别改：
+ *   派生 Initiative（目标下的阶段）→ 归档上一版（含它没人动过的旧看板动作）→ 最后才标 approved
+ *   例外：传 requireStatus 时先标 approved（带草稿条件占住）再做前两步，见 landPrescription
+ *
+ * 2026-10-25：批准不再调用 generateExecutionItems，不往 execution_items 插行。
+ * 看板生成失败因此也不会再挡住批准。阶段挂不上仍然不挡住批准。
+ * 标记已批准失败仍然 throw，处方保持未批准。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Prescription } from '@/types/diagnostic'
 import { deriveInitiativesFromPrescription } from './initiative-derive'
-import { generateExecutionItems } from './execution-generator'
 import { buildPrescriptionDecisionPatch } from './prescription-patch'
 
 /** 落地一份处方需要的最小字段集 —— 调用方自己 select 这几列即可。 */
@@ -127,9 +128,12 @@ async function supersedeUntouchedItems(
 }
 
 export interface LandPrescriptionResult {
-  /** 派生出的 Initiative 数。**0 表示这批动作没挂到任何目标下** —— 调用方要照实说 */
+  /** 派生出的 Initiative 数。**0 表示阶段没挂到任何目标下** —— 调用方要照实说 */
   initiativesInserted: number
-  /** 生成的执行项数 —— 这是「方案有没有真的变成活儿」的唯一硬指标 */
+  /**
+   * 本轮新插入的看板待办数。批准不再生成待办，所以恒为 0。
+   * 字段留着：周更回执和批准日志还在读它，删掉会对不上。
+   */
   executionItems: number
   /** 归档上一版时顺带作废的旧动作数 */
   supersededItems: number
@@ -141,19 +145,32 @@ export interface LandPrescriptionResult {
 async function updateOneRow(
   supabase: SupabaseClient,
   patch: Record<string, unknown>,
-  where: { id: string; clientId: string },
-): Promise<{ ok: true } | { ok: false; why: string }> {
-  const { data, error } = await supabase
+  where: { id: string; clientId: string; onlyIfStatus?: string },
+): Promise<{ ok: true } | { ok: false; why: string; noMatch?: boolean }> {
+  let query = supabase
     .from('prescriptions')
     .update(patch)
     .eq('id', where.id)
     .eq('client_id', where.clientId)
-    .select('id')
+  // 状态条件写在 UPDATE 本身里：读到写之间状态被别人改了，就一行都命不中。
+  if (where.onlyIfStatus) query = query.eq('status', where.onlyIfStatus)
+  const { data, error } = await query.select('id')
   if (error) return { ok: false, why: error.message }
   // 🔴 命中 0 行也是 error:null —— 不显式检查的话，"什么都没写进去"会被当成成功。
   //    团队记忆里那条「PATCH 匹配 0 行前后都 204，探针分辨不出两种结果」就是这个形状。
-  if (!data || data.length === 0) return { ok: false, why: '没有匹配到这条处方（id 或客户对不上）' }
+  if (!data || data.length === 0) {
+    return { ok: false, why: '没有匹配到这条处方（id 或客户对不上）', noMatch: true }
+  }
   return { ok: true }
+}
+
+/** 标已批准时处方已不是草稿（读到写之间被别人退回/改状态）。路由据 code 返 409。 */
+export class PrescriptionStatusChangedError extends Error {
+  readonly code = 'prescription_status_changed'
+  constructor() {
+    super('处方状态刚刚被改动，已不是草稿，没有同意。请刷新后再看')
+    this.name = 'PrescriptionStatusChangedError'
+  }
 }
 
 /**
@@ -168,17 +185,35 @@ export async function landPrescription(
   supabase: SupabaseClient,
   prescription: LandablePrescription,
   approvedBy?: string,
+  /** 传 'draft' = 第一步先带 status 条件标已批准（占住）；不是草稿则 throw PrescriptionStatusChangedError，不做任何后续写入 */
+  options: { requireStatus?: 'draft' } = {},
 ): Promise<LandPrescriptionResult> {
   const notes: string[] = []
   let initiativesInserted = 0
   let supersededItems = 0
-  let initiativeIdsByPhase: Record<number, string> = {}
+
+  const markApproved = async () => {
+    const marked = await updateOneRow(
+      supabase,
+      buildPrescriptionDecisionPatch({ status: 'approved', approved_by: approvedBy }),
+      { id: prescription.id, clientId: prescription.client_id, onlyIfStatus: options.requireStatus },
+    )
+    if (!marked.ok && marked.noMatch && options.requireStatus) throw new PrescriptionStatusChangedError()
+    if (!marked.ok) throw new Error(`标记处方已批准失败：${marked.why}`)
+  }
+
+  // 要求草稿时，「仍是草稿」的判断先于所有落地写入：第一步就用带 status 条件的单条
+  // UPDATE 把这份处方占住（标已批准）。命中 0 行 = 已被别人改状态，直接 throw，
+  // 后面的派生阶段 / 归档上一版 / 作废旧待办一概不做。占住之后的步骤都是非致命的
+  // （各自吞错只记 notes），所以不会出现"已批准但落地中途 throw"。
+  // 不传 requireStatus 的调用方保持原顺序：最后才标已批准。
+  const claimFirst = options.requireStatus != null
+  if (claimFirst) await markApproved()
 
   // Initiative 派生失败**不阻塞**落地 —— 沿用原路由的既定行为：
-  // 派生只是把方案的阶段挂到目标下，挂不上不代表动作做不了。
+  // 派生只是把方案的阶段挂到目标下，挂不上不代表这份方案不能标成已批准。
   try {
     const r = await deriveInitiativesFromPrescription(supabase, prescription)
-    initiativeIdsByPhase = r.initiativeIdsByPhase
     initiativesInserted = r.inserted
     notes.push(`派生 Initiative ${r.inserted} 个（跳过 ${r.skipped} 个）`)
     notes.push(...r.notes)
@@ -187,11 +222,9 @@ export async function landPrescription(
     notes.push(`Initiative 派生失败（不阻塞）：${e instanceof Error ? e.message : String(e)}`)
   }
 
-  // 执行项生成失败**必须**阻塞 —— 没有执行项的"已批准处方"是幽灵
-  const items = await generateExecutionItems(supabase, prescription.id, prescription.client_id, {
-    initiativeIdsByPhase,
-  })
-  notes.push(`生成执行项 ${items.length} 条`)
+  // 不再生成看板上的待办。以前这里调用 generateExecutionItems，
+  // 插入失败会让整次批准失败、处方停在草稿。那条失败路径已去掉。
+  notes.push('不往看板上生成待办')
 
   // 归档上一版。不做的话看板会一周一层往上堆，且新旧动作长得一模一样、分不出哪条还算数。
   if (prescription.supersedes_id) {
@@ -223,14 +256,9 @@ export async function landPrescription(
     }
   }
 
-  const marked = await updateOneRow(
-    supabase,
-    buildPrescriptionDecisionPatch({ status: 'approved', approved_by: approvedBy }),
-    { id: prescription.id, clientId: prescription.client_id },
-  )
-  if (!marked.ok) throw new Error(`标记处方已批准失败：${marked.why}`)
+  if (!claimFirst) await markApproved()
 
   if (approvedBy) notes.push(`批准人：${approvedBy}`)
 
-  return { initiativesInserted, executionItems: items.length, supersededItems, notes }
+  return { initiativesInserted, executionItems: 0, supersededItems, notes }
 }

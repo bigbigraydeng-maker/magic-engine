@@ -21,7 +21,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 /** 能自动取值的指标 —— 只有这些才谈得上「起点和现值口径是否一致」。 */
-const AUTO_METRICS = ['organic_traffic', 'brand_search_volume', 'form_submissions', 'leads_count', 'ai_visibility_score']
+const AUTO_METRICS = ['organic_traffic', 'brand_search_volume', 'form_submissions', 'leads_count', 'ai_visibility_score', 'seo_gsc_clicks_28d']
 
 export interface BaselineSuspect {
   goalId: string
