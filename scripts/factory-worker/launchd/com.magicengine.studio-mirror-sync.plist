@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  出片机素材镜像自动同步模板。每 5 分钟把 Dropbox 里新增/更新的素材补进出片机读的本机镜像，只补不删。
+  不含任何密钥，也不需要密钥：只读 Dropbox、只写本机镜像目录。
+  三个占位符安装前要替换（见同目录 README.md「素材镜像自动同步」）：
+    __NODE__  node 的绝对路径（要 22.18 以上）
+    __REPO__  出片机跑的那份代码目录的绝对路径
+    __HOME__  你的用户目录，例如 /Users/xxx
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.magicengine.studio-mirror-sync</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE__</string>
+    <string>__REPO__/scripts/factory-worker/tools/sync-studio-mirror.mjs</string>
+    <string>--apply</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+
+  <!-- 登录就跑一次，之后每 300 秒一次；跑完就退出，不常驻 -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>300</integer>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/magicengine-studio-mirror-sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/magicengine-studio-mirror-sync.log</string>
+</dict>
+</plist>
