@@ -315,6 +315,9 @@ export const SOCIAL_ACTION_TYPE = {
 
   /** Publish a post immediately (third_party, historical vendor tag) */
   PUBLISH_POST: 'social.publish_post',
+
+  /** A Story was sent. Registration only — no measurement windows on the row. */
+  PUBLISH_STORY: 'social.publish_story',
 } as const
 
 export type SocialActionType = (typeof SOCIAL_ACTION_TYPE)[keyof typeof SOCIAL_ACTION_TYPE]

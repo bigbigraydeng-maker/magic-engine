@@ -16,6 +16,7 @@ function validSettings(): EmailSettings {
     footer: null,
     limits: { perUserPerHour: 30, perUserPerDay: 100, perMailboxPerDay: 200 },
     frequencyCap: { max: 2, windowDays: 7 },
+    capExemptTemplateKeys: [],
     recipientAllowlist: ['test@example.com'],
     sameTemplateCooldownHours: 24,
     callPromptHours: 24,

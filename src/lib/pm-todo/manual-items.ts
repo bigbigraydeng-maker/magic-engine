@@ -30,10 +30,13 @@ import { deployCheckFailedItem, pushDeployHealthItems } from './deploy-health-it
 import { pushMessengerDraftItems } from './messenger-draft-items'
 import { pushKnowledgeFactExpiringItems } from './knowledge-fact-expiring-items'
 import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
+import { pushSocialReadbackItems } from './social-readback-items'
+import { socialReadbackOutcomeEnabled } from '@/lib/social/readback-outcome-record'
 import { pushPriceFactItems } from './price-fact-items'
 import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-request-items'
 import { pushAutoPublishItems } from './auto-publish-items'
 import { pushStoryLiteItems } from './story-lite-items'
+import { pushWeekPackItems } from './week-pack-items'
 import { pushEmailReplyItems } from './email-reply-items'
 import { pushLeadFollowupItems } from './lead-followup-items'
 import { pushBindingRequestItems } from './binding-request-items'
@@ -88,6 +91,7 @@ import { fetchAutoRunTodos } from '@/lib/pm-todo/auto-run-items'
 import { fetchCommentScopeTodos } from '@/lib/pm-todo/comment-scope-items'
 import { fetchCommentReplyScopeTodos } from '@/lib/pm-todo/comment-reply-scope-items'
 import { fetchCommentAutoreplyRunFailingTodos } from '@/lib/pm-todo/comment-autoreply-run-failing-items'
+import { pushCommentHumanItems } from '@/lib/pm-todo/comment-human-items'
 import { fetchKernelHandoffTodos } from '@/lib/kernel/handoff'
 import { auditCrossClientLeaks } from '@/lib/clients/cross-client-audit'
 import {
@@ -261,6 +265,14 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushDailyPlanMeasurementItems(supabase, b, now, clients).catch((e) =>
       console.warn('[manual-items] 帖子成绩回收失败检查读取失败（不阻塞其他待办）:', e),
     ),
+    // 读回链拒绝（草稿 / 时间对不上）以前直接 return，今日待办看不见。
+    // 开关默认关：没打开就不查这张表。
+    (b) => {
+      if (!socialReadbackOutcomeEnabled()) return Promise.resolve()
+      return pushSocialReadbackItems(supabase, b, now, clients).catch((e) =>
+        console.warn('[manual-items] 读回链拒绝记录读取失败（不阻塞其他待办）:', e),
+      )
+    },
     // 正在花钱的广告撞上了已知的坑 —— 每天扫一遍的结果，不下发就等于没扫
     (b) => pushAdReadbackItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 广告闸门结果读取失败（不阻塞其他待办）:', e),
@@ -349,6 +361,12 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushStoryLiteItems(supabase, b, now, nameOf, { live: process.env.STORY_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
       console.warn('[manual-items] Story 自动发布待办检查失败（不阻塞其他待办）:', e),
     ),
+    (b) => pushWeekPackItems(supabase, b, now, nameOf, {
+      WEEKLY_PACK_APPROVAL_ENABLED: process.env.WEEKLY_PACK_APPROVAL_ENABLED,
+      WEEKLY_PACK_REEL_GO_PUBLIC: process.env.WEEKLY_PACK_REEL_GO_PUBLIC,
+    }, ids).catch((e) =>
+      console.warn('[manual-items] 每周整包待办检查失败（不阻塞其他待办）:', e),
+    ),
     // 本周已批准方案的进度复查 —— 只通知建议，不要求按这条去改方案
     (b) => pushPrescriptionItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 方案复查通知读取失败（不阻塞其他待办）:', e),
@@ -370,6 +388,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 评论读不到（缺权限 / 令牌被拒）—— 只有人能补，日志里那行 console.error 没人会看
     (b) => pushCommentScopeItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 评论权限待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 主页评论 needs_human 读时分流 → 今日待办（独立通道，评论权限待办失败也不挡）
+    (b) => pushCommentHumanItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] 评论要人回待办生成失败（不阻塞其他待办）:', e),
     ),
     // 马良：Creatomate 成片的 9 宫格自检结果——过关等审片（署名）、不过关问返工还是放弃、
     // 检不了 / 出片 2 小时后没检进系统欠账栏。拉模式读工单 + 快照，事件丢了也照样出得来

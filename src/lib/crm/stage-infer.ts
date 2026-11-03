@@ -25,6 +25,7 @@ import {
   StageVerdictSchema,
   SAFE_STAGES,
   POOL_STAGE,
+  hasHumanOutbound,
   renderTranscript,
   ruleOnlyStage,
   usableStage,
@@ -224,7 +225,15 @@ export async function loadTranscriptLines(
     if (t.channel === 'email' && t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata)) continue
     // 电话触点的原话在 raw；raw 空的（FB 表单之类）退回 summary。
     const body = (t.raw ?? t.summary ?? '').trim()
-    if (body) lines.push({ at: t.occurred_at, direction: t.direction, body, channel: t.channel })
+    if (body) {
+      lines.push({
+        at: t.occurred_at,
+        direction: t.direction,
+        body,
+        channel: t.channel,
+        automated: t.direction === 'outbound' && isAutomatedTouch(t.source, t.metadata),
+      })
+    }
   }
 
   const convIds = ((convs ?? []) as { id: string }[]).map((c) => c.id)
@@ -477,6 +486,13 @@ export async function inferStagesFromConversations(
       if (!stage || !verdict) {
         result.rejected++
         await toPool('看过往来记录，还看不出他到哪一步')
+        continue
+      }
+
+      // 「已联系 / 已报价」必须有真人联系过他的记录；只有客人自己的话（含表单回声）不行。
+      if ((stage === 'contacted' || stage === 'quoted') && !hasHumanOutbound(lines)) {
+        result.rejected++
+        await toPool('库里没有真人联系过他的记录')
         continue
       }
 

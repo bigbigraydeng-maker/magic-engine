@@ -13,9 +13,20 @@
  */
 
 import React, { useEffect, useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { AdNode, AdsetNode, CampaignNode, DeliveryState, EntityMetrics } from '@/lib/ads-strategy/entity-tree/build'
 import { ratesFromMetrics, type FunnelRates } from '@/lib/ads-strategy/entity-tree/funnel-baseline'
 import type { EntityTreeResult } from '@/lib/ads-strategy/entity-tree/load'
+
+export type EntityTreeShowMode = 'running' | 'all'
+
+/** 网址 `?show=`：默认只看在投；只认 running / all。 */
+export function showFromQuery(raw: string | null): EntityTreeShowMode {
+  return raw === 'all' ? 'all' : 'running'
+}
+
+/** 相对赢家基线差 ≥30% 才算「偏差大」（CPM 越高越差；完成率 / 播放率越低越差）。 */
+export const FUNNEL_LARGE_DEVIATION_RATIO = 0.3
 
 const STATE_META: Record<DeliveryState, { label: string; dot: string; text: string }> = {
   running: { label: '在投', dot: 'bg-emerald-500', text: 'text-emerald-700' },
@@ -60,38 +71,169 @@ function money1(n: number | null): string {
   return n === null ? '—' : `$${n.toFixed(1)}`
 }
 
+function isStoppedDelivery(state: DeliveryState): boolean {
+  return state === 'stopped'
+}
+
+export interface RunningFilterResult {
+  campaign: CampaignNode
+  hiddenAdsetCount: number
+  hiddenAdCount: number
+  hiddenAdsets: AdsetNode[]
+  hiddenAdsUnderRunningAdsets: AdNode[]
+}
+
+/** 在投系列下藏已停广告组 / 已停广告；状态不明的不当已停。 */
+export function applyRunningEntityFilter(c: CampaignNode): RunningFilterResult {
+  const hiddenAdsets: AdsetNode[] = []
+  const hiddenAdsUnderRunningAdsets: AdNode[] = []
+  const visibleAdsets: AdsetNode[] = []
+  let hiddenAdsetCount = 0
+  let hiddenAdCount = 0
+
+  for (const s of c.adsets) {
+    if (isStoppedDelivery(s.state)) {
+      hiddenAdsetCount++
+      hiddenAdCount += s.ads.length
+      hiddenAdsets.push(s)
+      continue
+    }
+    const visibleAds = s.ads.filter(a => !isStoppedDelivery(a.state))
+    const stoppedAds = s.ads.filter(a => isStoppedDelivery(a.state))
+    hiddenAdCount += stoppedAds.length
+    hiddenAdsUnderRunningAdsets.push(...stoppedAds)
+    visibleAdsets.push({ ...s, ads: visibleAds })
+  }
+
+  return {
+    campaign: { ...c, adsets: visibleAdsets },
+    hiddenAdsetCount,
+    hiddenAdCount,
+    hiddenAdsets,
+    hiddenAdsUnderRunningAdsets,
+  }
+}
+
+export function funnelMetricDeviationClass(
+  own: number | null,
+  winner: number | null,
+  higherIsBetter: boolean,
+): string {
+  if (own === null || winner === null || winner === 0) return 'text-gray-600'
+  const ratio = FUNNEL_LARGE_DEVIATION_RATIO
+  const bad = higherIsBetter
+    ? own < winner * (1 - ratio)
+    : own > winner * (1 + ratio)
+  return bad ? 'text-amber-800 font-medium' : 'text-gray-600'
+}
+
 function versus(own: string, winner: FunnelRates | null, base: number | null, fmt: (n: number) => string): string {
   if (winner === null) return `${own}（样本不足）`
   return `${own}（赢家 ${base === null ? '—' : fmt(base)}）`
 }
 
-function linkCtrText(ctr: number | null, winner: FunnelRates | null): string {
-  if (ctr === null) return '暂无数据'
-  return versus(pct(ctr), winner, winner?.linkCtr ?? null, pct)
-}
-
-function AdFunnel({ ad, winner }: { ad: AdNode; winner: FunnelRates | null }) {
+function CollapsedFunnelMetrics({ ad, winner }: { ad: AdNode; winner: FunnelRates | null }) {
   const rates = ratesFromMetrics(ad.metrics)
   return (
-    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
-      <span>千次展示费用 {versus(money1(rates.cpm), winner, winner?.cpm ?? null, money1)}</span>
-      <span>链接点击率 {linkCtrText(ad.metrics.ctr, winner)}</span>
-      <span>表单完成率 {versus(pct(rates.completion), winner, winner?.completion ?? null, pct)}</span>
-      <span>3 秒播放率 {versus(pct(rates.hook), winner, winner?.hook ?? null, pct)}</span>
+    <details className="text-[11px]">
+      <summary className="cursor-pointer text-gray-400 select-none">千次展示费用 · 表单完成率 · 3 秒播放率</summary>
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 pl-1">
+        <span className={funnelMetricDeviationClass(rates.cpm, winner?.cpm ?? null, false)}>
+          千次展示费用 {versus(money1(rates.cpm), winner, winner?.cpm ?? null, money1)}
+        </span>
+        <span className={funnelMetricDeviationClass(rates.completion, winner?.completion ?? null, true)}>
+          表单完成率 {versus(pct(rates.completion), winner, winner?.completion ?? null, pct)}
+        </span>
+        <span className={funnelMetricDeviationClass(rates.hook, winner?.hook ?? null, true)}>
+          3 秒播放率 {versus(pct(rates.hook), winner, winner?.hook ?? null, pct)}
+        </span>
+      </div>
+    </details>
+  )
+}
+
+function AdTable({ ads, winner }: { ads: AdNode[]; winner: FunnelRates | null }) {
+  if (ads.length === 0) return null
+  return (
+    <div className="mt-2 overflow-x-auto">
+      <table className="w-full min-w-[520px] text-xs tabular-nums">
+        <thead>
+          <tr className="border-b border-gray-100 text-left text-gray-400">
+            <th className="py-1 pr-2 font-normal w-[72px]">状态</th>
+            <th className="py-1 pr-2 font-normal">广告名</th>
+            <th className="py-1 pr-2 font-normal text-right w-[56px]">花费</th>
+            <th className="py-1 pr-2 font-normal text-right w-[44px]">留资</th>
+            <th className="py-1 pr-2 font-normal text-right w-[64px]">每条成本</th>
+            <th className="py-1 font-normal text-right w-[72px]">链接点击率</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ads.map(ad => (
+            <React.Fragment key={ad.id}>
+              <tr className="text-gray-700">
+                <td className="py-1.5 pr-2 align-top"><StateBadge state={ad.state} status={ad.effectiveStatus} /></td>
+                <td className="py-1.5 pr-2 align-top max-w-[200px]">
+                  <span className="block truncate" title={ad.name}>{ad.name}</span>
+                </td>
+                <td className="py-1.5 pr-2 text-right align-top">{usd(ad.metrics.spend)}</td>
+                <td className="py-1.5 pr-2 text-right align-top">{ad.metrics.leads}</td>
+                <td className="py-1.5 pr-2 text-right align-top">
+                  {ad.metrics.costPerLead === null ? '—' : `$${ad.metrics.costPerLead.toFixed(1)}`}
+                </td>
+                <td className="py-1.5 text-right align-top">
+                  {ad.metrics.ctr === null ? '—' : `${(ad.metrics.ctr * 100).toFixed(1)}%`}
+                </td>
+              </tr>
+              <tr>
+                <td colSpan={6} className="pb-2 pl-2">
+                  <CollapsedFunnelMetrics ad={ad} winner={winner} />
+                </td>
+              </tr>
+            </React.Fragment>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
 
-function AdRow({ ad, winner }: { ad: AdNode; winner: FunnelRates | null }) {
+function HiddenStoppedSummary({
+  hiddenAdsetCount,
+  hiddenAdCount,
+  hiddenAdsets,
+  hiddenAdsUnderRunningAdsets,
+  winner,
+}: {
+  hiddenAdsetCount: number
+  hiddenAdCount: number
+  hiddenAdsets: AdsetNode[]
+  hiddenAdsUnderRunningAdsets: AdNode[]
+  winner: FunnelRates | null
+}) {
+  if (hiddenAdsetCount === 0 && hiddenAdCount === 0) return null
   return (
-    <div className="ml-5 mt-1.5 border-l border-gray-100 pl-3">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm text-gray-600 truncate" title={ad.name}>广告 · {ad.name}</span>
-        <StateBadge state={ad.state} status={ad.effectiveStatus} />
+    <details className="mt-2 text-xs text-gray-500">
+      <summary className="cursor-pointer select-none">
+        另有 {hiddenAdsetCount} 个已停广告组、{hiddenAdCount} 条已停广告（点开看）
+      </summary>
+      <div className="mt-2 space-y-2 border-l-2 border-gray-100 pl-3">
+        {hiddenAdsets.map(s => (
+          <div key={s.id}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium text-gray-600 truncate" title={s.name}>广告组 · {s.name}</span>
+              <StateBadge state={s.state} status={s.effectiveStatus} />
+            </div>
+            <AdTable ads={s.ads} winner={winner} />
+          </div>
+        ))}
+        {hiddenAdsUnderRunningAdsets.length > 0 && (
+          <div>
+            <p className="text-gray-400 mb-1">在投广告组里的已停广告</p>
+            <AdTable ads={hiddenAdsUnderRunningAdsets} winner={winner} />
+          </div>
+        )}
       </div>
-      <Numbers m={ad.metrics} />
-      <AdFunnel ad={ad} winner={winner} />
-    </div>
+    </details>
   )
 }
 
@@ -106,28 +248,77 @@ function AdsetRow({ s, winner }: { s: AdsetNode; winner: FunnelRates | null }) {
         {s.dailyBudget === null ? '每天预算：设在系列上，或读不到' : `每天预算 ${s.currency ?? ''} ${s.dailyBudget.toFixed(0)}`}
       </div>
       <Numbers m={s.metrics} />
-      {s.ads.map(ad => <AdRow key={ad.id} ad={ad} winner={winner} />)}
+      <AdTable ads={s.ads} winner={winner} />
     </div>
   )
 }
 
-function CampaignBlock({ c, winner }: { c: CampaignNode; winner: FunnelRates | null }) {
+function CampaignBlock({
+  c,
+  winner,
+  runningOnly,
+}: {
+  c: CampaignNode
+  winner: FunnelRates | null
+  runningOnly: boolean
+}) {
+  const filtered = runningOnly ? applyRunningEntityFilter(c) : null
+  const view = filtered ?? {
+    campaign: c,
+    hiddenAdsetCount: 0,
+    hiddenAdCount: 0,
+    hiddenAdsets: [] as AdsetNode[],
+    hiddenAdsUnderRunningAdsets: [] as AdNode[],
+  }
+
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-medium text-gray-800 truncate" title={c.name}>系列 · {c.name}</span>
-        <StateBadge state={c.state} status={c.effectiveStatus} />
+        <span className="font-medium text-gray-800 truncate" title={view.campaign.name}>系列 · {view.campaign.name}</span>
+        <StateBadge state={view.campaign.state} status={view.campaign.effectiveStatus} />
       </div>
-      <p className="text-xs text-gray-400">在投 {c.runningAdsets} 个广告组、{c.runningAds} 条广告</p>
-      {c.metricsShared
+      <p className="text-xs text-gray-400">在投 {view.campaign.runningAdsets} 个广告组、{view.campaign.runningAds} 条广告</p>
+      {view.campaign.metricsShared
         ? <p className="text-xs text-amber-700">这个系列的合计里混着不是这个客户的广告组，系列合计不显示；看下面各广告组的数字。</p>
-        : <Numbers m={c.metrics} />}
-      {c.unplacedAds.count > 0 && (
+        : <Numbers m={view.campaign.metrics} />}
+      {view.campaign.unplacedAds.count > 0 && (
         <p className="text-xs text-gray-400">
-          另有 {c.unplacedAds.count} 条广告（多半已删除）花了 {usd(c.unplacedAds.spend)}、留资 {c.unplacedAds.leads}，归不到具体广告组，已含在上面广告组的数字里。
+          另有 {view.campaign.unplacedAds.count} 条广告（多半已删除）花了 {usd(view.campaign.unplacedAds.spend)}、留资 {view.campaign.unplacedAds.leads}，归不到具体广告组，已含在上面广告组的数字里。
         </p>
       )}
-      {c.adsets.map(s => <AdsetRow key={s.id} s={s} winner={winner} />)}
+      {view.campaign.adsets.map(s => (
+        <AdsetRow key={s.id} s={s} winner={winner} />
+      ))}
+      {runningOnly && (
+        <HiddenStoppedSummary
+          hiddenAdsetCount={view.hiddenAdsetCount}
+          hiddenAdCount={view.hiddenAdCount}
+          hiddenAdsets={view.hiddenAdsets}
+          hiddenAdsUnderRunningAdsets={view.hiddenAdsUnderRunningAdsets}
+          winner={winner}
+        />
+      )}
+    </div>
+  )
+}
+
+function ShowModeToggle({ mode, onChange }: { mode: EntityTreeShowMode; onChange: (m: EntityTreeShowMode) => void }) {
+  const btn = (key: EntityTreeShowMode, label: string) => (
+    <button
+      type="button"
+      onClick={() => onChange(key)}
+      className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+        mode === key ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+      }`}
+    >
+      {label}
+    </button>
+  )
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2">
+      <span className="text-xs text-gray-500">显示范围</span>
+      {btn('running', '只看在投')}
+      {btn('all', '全部')}
     </div>
   )
 }
@@ -136,6 +327,18 @@ export default function EntityTreePanel({ clientId }: { clientId: string }) {
   const [result, setResult] = useState<EntityTreeResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [hidden, setHidden] = useState(false)
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const showMode = showFromQuery(searchParams.get('show'))
+  const runningOnly = showMode === 'running'
+
+  function setShowMode(mode: EntityTreeShowMode) {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set('show', mode)
+    const q = params.toString()
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false })
+  }
 
   useEffect(() => {
     let alive = true
@@ -164,21 +367,24 @@ export default function EntityTreePanel({ clientId }: { clientId: string }) {
   return (
     <section className="mb-6">
       <h2 className="text-base font-semibold text-gray-800">广告组和广告（近 {tree.window.days} 天）</h2>
+      <ShowModeToggle mode={showMode} onChange={setShowMode} />
       <p className="mb-3 text-xs text-gray-400">
         {tree.window.since} 到 {tree.window.until}
-        {tree.snapshotAt ? ` · 开关状态来自系统定期快照（最近一次记录 ${fmtNzTime(tree.snapshotAt)}），刚开关的几个小时内可能还没反映` : ' · 没有状态快照，开关状态读不到'}
+        {tree.snapshotAt
+          ? ` · 开关状态来自 ${fmtNzTime(tree.snapshotAt)} 快照 · 今天在 Ads Manager 里刚开关的，明早 01:30 以后才会反映`
+          : ' · 没有状态快照，开关状态读不到'}
       </p>
       {noPageRegistered && <p className="mb-3 text-sm text-amber-700">这个客户没有登记 Facebook 主页，没法确认哪些广告是它的，所以一条都没列出。</p>}
       {hiddenAdsets > 0 && <p className="mb-3 text-xs text-gray-400">另有 {hiddenAdsets} 个广告组没有列出（属于别的主页，或确认不了归属），不代表它们没在投。</p>}
       {running.length === 0 && !noPageRegistered && <p className="text-sm text-gray-500">能确认是这个客户的广告组里，快照显示现在没有在投的。</p>}
       <div className="grid gap-3">
-        {running.map(c => <CampaignBlock key={c.id} c={c} winner={winner} />)}
+        {running.map(c => <CampaignBlock key={c.id} c={c} winner={winner} runningOnly={runningOnly} />)}
       </div>
       {unclear.length > 0 && (
         <div className="mt-3">
           <p className="mb-2 text-sm text-amber-700">状态还没确认的系列 {unclear.length} 个（审核中、有问题或还没有快照，不能说它们停了）</p>
           <div className="grid gap-3">
-            {unclear.map(c => <CampaignBlock key={c.id} c={c} winner={winner} />)}
+            {unclear.map(c => <CampaignBlock key={c.id} c={c} winner={winner} runningOnly={runningOnly} />)}
           </div>
         </div>
       )}
@@ -186,7 +392,7 @@ export default function EntityTreePanel({ clientId }: { clientId: string }) {
         <details className="mt-3">
           <summary className="cursor-pointer text-sm text-gray-500">已停的系列 {stopped.length} 个（点开看）</summary>
           <div className="mt-3 grid gap-3">
-            {stopped.map(c => <CampaignBlock key={c.id} c={c} winner={winner} />)}
+            {stopped.map(c => <CampaignBlock key={c.id} c={c} winner={winner} runningOnly={runningOnly} />)}
           </div>
         </details>
       )}

@@ -508,6 +508,30 @@ export default function ZhangqianPage() {
     pollRef.current = setInterval(() => { void poll() }, 3000)
   }, [clientId, fetchLatest, stopPolling])
 
+  // ── Re-attach to a run already in flight (page refreshed mid-run) ───────────
+  // Runs once, after the first fetchLatest settles, so it is not overwritten by it.
+  const reattachedRef = useRef(false)
+  useEffect(() => {
+    if (pageLoading || reattachedRef.current) return
+    reattachedRef.current = true
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/clients/${clientId}/zhangqian/status?active=1`)
+        if (!res.ok || cancelled) return
+        const data = await res.json() as { success: boolean; job: DiscoveryJob | null }
+        if (!data.success || !data.job || cancelled) return
+        setJobId(data.job.id)
+        if (data.job.progress_note) setProgressNote(data.job.progress_note)
+        setPageState('running')
+        startPolling(data.job.id)
+      } catch {
+        // non-fatal: the page falls back to the normal idle/reviewing view
+      }
+    })()
+    return () => { cancelled = true }
+  }, [clientId, pageLoading, startPolling])
+
   // ── Dispatch ────────────────────────────────────────────────────────────────
 
   const handleDispatch = async () => {

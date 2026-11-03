@@ -10,18 +10,20 @@
  * the daily cron; this page only reads ad_health_narratives.
  */
 
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 // Pure data module (no server imports) — safe in a client component.
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
 import AutonomySettings from './autonomy-settings'
-import GrowthPanel, { type GrowthStateView } from './growth-panel'
+import GrowthPanel, { type GrowthStateView, goalLiveNote } from './growth-panel'
+import { TodayGoalProgress } from './today-goal-progress'
 import WarMapPanel from './war-map-panel'
 import LiveTodayPanel from './live-today-panel'
 import BreakdownPanel from './breakdown-panel'
 import EntityTreePanel from './entity-tree-panel'
 import AutoPausePanel from './auto-pause-panel'
+import AdsNextStepCard from './ads-next-step-card'
 import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
@@ -79,6 +81,8 @@ interface AdHealthResponse {
   industry?: string | null
   /** 卫青巡察当天的经营状态。null = 今天还没跑；缺字段 = 这一段读不到（接口出错）。 */
   growth?: GrowthStateView | ClientGrowthView | null
+  /** 今天 CRM 表单进线（新西兰日）；null = 读不到 */
+  today_crm_leads?: number | null
 }
 
 // ─── Verdict styling (colour = conclusion, per 板桥) ───────────────────────────
@@ -537,11 +541,19 @@ export default function AdsHealthPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   /**
-   * 初值从网址 `?tab=` 取，这样待办和书签能直接落到某个标签上
-   * （`…/ads-health?tab=approvals`）。之后由用户点击接管，不再跟着网址变 ——
-   * 页面没有把标签写回网址，所以这里只读一次就够。
+   * 初值从网址 `?tab=` 取；待办 deep link 和合并卡链接会改 query，
+   * 需要跟着 searchParams 同步标签（不只 mount 读一次）。
    */
   const [tab, setTab] = useState<PageTab>(() => tabFromQuery(searchParams.get('tab')))
+
+  useEffect(() => {
+    setTab(tabFromQuery(searchParams.get('tab')))
+  }, [searchParams])
+
+  const [nextStepRefreshKey, setNextStepRefreshKey] = useState(0)
+  const bumpNextStepCard = useCallback(() => {
+    setNextStepRefreshKey((k) => k + 1)
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -577,10 +589,24 @@ export default function AdsHealthPage() {
         <p className="text-sm text-gray-400">每天自动体检 · 先看「今天看这里」，其余按需要点开</p>
       </div>
 
+      <AdsNextStepCard clientId={clientId} refreshKey={nextStepRefreshKey} />
+
       <TabBar tab={tab} onChange={setTab} />
 
       {tab === 'today' && (
         <>
+          {!loading && !error && (
+            <TodayGoalProgress
+              state={data?.growth}
+              clientId={clientId}
+              todayCrmLeads={data?.today_crm_leads}
+              liveNote={
+                data?.growth && 'goal_live' in data.growth
+                  ? goalLiveNote(data.growth.goal_live)
+                  : undefined
+              }
+            />
+          )}
           {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
           <LiveTodayPanel clientId={clientId} part="today" />
           <WarMapPanel clientId={clientId} />
@@ -668,13 +694,19 @@ export default function AdsHealthPage() {
             通用审批页对这类动作只签字、不执行（那边是批不了的），要批就在这里。
           </p>
           {/* 从旧的专属页整段搬来；两个接口的网址、方法、请求体一个字没动。 */}
-          <AutoPausePanel clientId={clientId} />
+          <AutoPausePanel clientId={clientId} onPendingAdsChanged={bumpNextStepCard} />
         </div>
       )}
 
       {tab === 'settings' && (
         <div className="space-y-6">
-          {!loading && !error && <GrowthPanel state={data ? data.growth : undefined} clientId={clientId} />}
+          {!loading && !error && (
+            <GrowthPanel
+              state={data ? data.growth : undefined}
+              clientId={clientId}
+              onPendingAdsChanged={bumpNextStepCard}
+            />
+          )}
           <AutonomySettings clientId={clientId} />
         </div>
       )}

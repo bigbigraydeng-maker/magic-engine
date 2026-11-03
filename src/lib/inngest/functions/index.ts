@@ -44,10 +44,14 @@ import { toolsLabLeadFollowUp, toolsLabReportEmailReceipt } from './tools-lab-le
 import { dailyPlanAutoPublish } from './daily-plan-auto-publish'
 import { youtubeStaging, youtubePublicStep } from './youtube-publish'
 import { storyLitePublish } from './story-lite-publish'
+import { storyPublishActionRecorder } from './story-publish-action-recorder'
+import { storyPublishActionReconcile } from './story-publish-action-reconcile'
 import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-voipline'
 import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
 import { planDraftFromPrescription } from './plan-draft-from-prescription'
 import { crmEmailSendReceipt } from './crm-email-send-receipt'
+import { zhangqianDiscovery } from './zhangqian-discovery'
+import { triggeredSendWelcomeDispatch, triggeredSendWelcomeSweep } from './triggered-send-welcome-sweep'
 
 export const cloudFunctions = [
   promoPlanDailyWatch,
@@ -108,12 +112,17 @@ export const cloudFunctions = [
   youtubeStaging,
   youtubePublicStep,
   storyLitePublish,
+  storyPublishActionRecorder,
+  storyPublishActionReconcile,
   telephonyVoiplineProcess,
   telephonyVoiplineSweep,
   telephonyCallAnalysis,
   telephonyCallAnalysisSweep,
   planDraftFromPrescription,
   crmEmailSendReceipt,
+  zhangqianDiscovery,
+  triggeredSendWelcomeDispatch,
+  triggeredSendWelcomeSweep,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

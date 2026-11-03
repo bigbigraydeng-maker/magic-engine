@@ -33,6 +33,7 @@ import {
   type NarrativeRowForClient,
 } from '@/lib/ads-strategy/narrative-client-view'
 import { overlayLiveGoal } from '@/lib/ads-strategy/agents/growth-live-goal'
+import { countMetaLeadFormTouchpointsToday } from '@/lib/crm/meta-lead-form-count'
 import { overlayLinkCtrSeries, type LinkCtrCampaign, type LinkCtrInsight } from '@/lib/ads-strategy/link-clicks'
 
 export const dynamic = 'force-dynamic'
@@ -161,6 +162,8 @@ export async function GET(
   const latestRaw = (latestRes.data ?? null) as NarrativeRowForClient | null
   const latestOverlaid = await withLinkCtr(clientId, latestRaw)
 
+  const todayCrmLeads = await countMetaLeadFormTouchpointsToday(clientId, new Date())
+
   return NextResponse.json({
     success: true,
     // Non-staff get a whitelisted payload: portfolio_diagnoses (D11 etc.) stays internal.
@@ -172,5 +175,6 @@ export async function GET(
     industry: (clientRes.data as { industry?: string | null } | null)?.industry ?? null,
     // 🔴 读失败与「今天还没跑」必须分得开：前者页面要说「读不到」，后者说「今天还没巡察」。
     growth,
+    today_crm_leads: todayCrmLeads,
   })
 }

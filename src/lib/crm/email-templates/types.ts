@@ -95,6 +95,8 @@ export interface EmailSettings {
   footer: string | null
   limits: { perUserPerHour: number; perUserPerDay: number; perMailboxPerDay: number }
   frequencyCap: { max: number; windowDays: number } | null
+  /** Template keys whose mails are replies to a guest's own enquiry: the weekly cap neither blocks them nor counts them. */
+  capExemptTemplateKeys: string[]
   recipientAllowlist: string[] | null
   sameTemplateCooldownHours: number
   callPromptHours: number

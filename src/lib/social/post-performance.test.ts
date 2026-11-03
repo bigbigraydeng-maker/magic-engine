@@ -25,7 +25,7 @@ import {
 function receipt(over: Partial<ReceiptRow> = {}): ReceiptRow {
   return {
     action_id: 'a1',
-    window_hours: 24,
+    window_hours: 72,
     status: 'ok',
     measured_at: '2024-01-01T00:00:00Z',
     values: {},
@@ -143,11 +143,30 @@ describe('fieldReadToReading', () => {
 // ---------------------------------------------------------------------------
 
 describe('pickReceipt', () => {
-  it('prefers largest window among ok/partial even if a larger window is unmeasurable', () => {
+  it('T15: prefers largest whitelisted window among ok/partial (72 over ignored 168)', () => {
+    const ok72 = receipt({ window_hours: 72, status: 'ok' })
+    const ok168 = receipt({ window_hours: 168, status: 'ok' })
+    expect(pickReceipt([ok72, ok168])).toBe(ok72)
+    // Mutation: reverting to global max without whitelist would return ok168.
+  })
+
+  it('T15: returns the 4h receipt when it is the only whitelisted reading', () => {
+    const ok4 = receipt({ window_hours: 4, status: 'ok' })
     const ok24 = receipt({ window_hours: 24, status: 'ok' })
-    const partial48 = receipt({ window_hours: 48, status: 'partial' })
+    expect(pickReceipt([ok4, ok24])).toBe(ok4)
+  })
+
+  it('T15: returns null when only non-whitelisted windows exist (e.g. 168)', () => {
+    expect(pickReceipt([receipt({ window_hours: 168, status: 'ok' })])).toBeNull()
+    // Mutation: removing whitelist filter would return the 168 receipt.
+  })
+
+  it('prefers largest whitelisted ok/partial; falls back to whitelisted unmeasurable', () => {
+    const ok4 = receipt({ window_hours: 4, status: 'ok' })
     const unmeasurable72 = receipt({ window_hours: 72, status: 'unmeasurable' })
-    expect(pickReceipt([ok24, partial48, unmeasurable72])).toBe(partial48)
+    const partial48 = receipt({ window_hours: 48, status: 'partial' })
+    expect(pickReceipt([ok4, partial48, unmeasurable72])).toBe(ok4)
+    expect(pickReceipt([partial48, unmeasurable72])).toBe(unmeasurable72)
   })
 
   it('returns null for empty list', () => {

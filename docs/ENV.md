@@ -153,6 +153,7 @@
 | 变量 | 用途 | 配在哪 | 登记 |
 |---|---|---|---|
 | `RESEND_API_KEY` | 全部事务邮件 | Render-web | ✅ |
+| `RESEND_WEBHOOK_SECRET_SYSTEM` | Resend 回调验签（`/api/webhooks/resend/system`，ME 系统邮件账号的送达回执入库口）。值是 Resend 后台建回调后给出的 `whsec_…`；**缺了或格式不对，回调一律回 503**。**Render 里尚未配**（等 PM 放行，只能 PM 本人填），设计稿 `docs/specs/2026-11-01-me-provider-event-intake-p1-design-v0.md` §6 | Render-web | ✅ |
 | `ME_MAIL_FROM` / `ME_MAIL_TO` | ME 内部通知收发件人 | Render-web | ❌ |
 | `FACTORY_REVIEWER_EMAILS` | Factory 审核通知收件人 | Render-web | ❌ |
 | `OUTREACH_FROM_EMAIL` / `_REPLY_EMAIL` | 线索外联邮件收发地址（P35） | Render-web | ❌ |
@@ -197,6 +198,10 @@
 | `DAILY_PLAN_AUTO_PUBLISH_LIVE` | 🔴 每日计划图文 Post 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部发布闸门、什么都不发也不写库，只在 cron_run_logs 留一行）。第一次真发必须 PM 明确说 go | Render-web |
 | `STORY_AUTO_PUBLISH_LIVE` | 🔴 Story 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部检查、什么都不发，只记检查结果）。真发还要客户在 `STORY_AUTO_PUBLISH_CLIENTS` 名单里；第一次真发必须 PM 明确说 go | Render-web |
 | `STORY_AUTO_PUBLISH_CLIENTS` | Story 自动发布允许真发的客户 id，逗号分隔、小写。**未配或不在名单 = 只演练** | Render-web |
+| `SOCIAL_STORY_PUBLISH_REGISTER_ENABLED` | 新发 Story 登记进读回链。必须严格等于 `true`。**未配 = 关**：监听函数不查库、不写动作行，和现在一样 | Render-web |
+| `SOCIAL_STORY_PUBLISH_RECONCILE_ENABLED` | 补登记最近已发、但还没有动作行的 Story。必须严格等于 `true`。**未配 = 关**：发布扫一遍不发补登记事件，补登记函数即使被投递也不查库、不写行。写历史数据前要另批 | Render-web |
+| `WEEKLY_PACK_APPROVAL_ENABLED` | 每周整包批准总闸。必须严格等于 `true`。**未配 = 关**：本周总览不发出确认卡，点同意也不会授权 Story。 | Render-web |
+| `WEEKLY_PACK_REEL_GO_PUBLIC` | Reel「批准即转公开」闸。必须严格等于 `true`。**未配 = 关**。关掉时整包同意不会调用转公开；要等草稿被记成已发布的问题合并后再开。 | Render-web |
 | `DAILY_PLAN_AUTO_PUBLISH_CLIENTS` | 🔴 允许自动真发的客户 id 白名单（逗号分隔，小写）。**不在名单里的客户永远只演练**，即使上面的总开关打开了 | Render-web |
 | `FACTORY_WORKER_CLIENT_IDS` | Factory 认领工单的客户白名单。**不是 worker 自己读的** —— worker 调 `/api/factory/worker/claim`，白名单在那条路由里由 `src/lib/factory/worker-guard.ts` 读并 fail-closed（未配则拒绝全部 claim） | Render-web |
 | `PROSPECTING_SWEEP_ENABLED` | 线索挖掘总闸（默认 **关**）。`/api/cron/prospecting-sweep` 路由里读 —— 那是 web 进程，prospecting-sweep 这个 cron 只负责 `curl` | Render-web |
