@@ -29,7 +29,13 @@ interface PendingItem {
   createdAt: string
 }
 
-export default function AutoPausePanel({ clientId }: { readonly clientId: string }) {
+export default function AutoPausePanel({
+  clientId,
+  onPendingAdsChanged,
+}: {
+  readonly clientId: string
+  readonly onPendingAdsChanged?: () => void
+}) {
   const [items, setItems] = useState<PendingItem[] | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -72,6 +78,7 @@ export default function AutoPausePanel({ clientId }: { readonly clientId: string
       if (res.status === 409) {
         setError(`${json.error ?? '这条已经变了'}（列表已刷新，请再看一遍）`)
         await load()
+        onPendingAdsChanged?.()
         return
       }
       if (!res.ok || json.error) {
@@ -86,6 +93,7 @@ export default function AutoPausePanel({ clientId }: { readonly clientId: string
         setError(`没暂停成：${json.humanReason ?? '原因未知'}——广告还在投`)
       }
       await load()
+      onPendingAdsChanged?.()
     } finally {
       setBusyRunId(null)
     }
