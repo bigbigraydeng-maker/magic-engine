@@ -8,7 +8,7 @@ source: session:f765a75f
 verify_by: 2026-11-07
 verify_how: 合并部署后打开 CTS 广告健康页「每条广告」标签点「全部」，组 C 四条素材写「还不能比（点击 65/150）」等、组 A 主力素材写「够数了」；打开 NAL 同一页，WhatsApp 系列和组显示「开聊」不是「留资 0」；表格在 954 宽窗口里不撑出卡片
 done_on: 2026-11-04
-done_ref: pr:PR_NUMBER
+done_ref: pr:3583
 ---
 PM 11-04 回「做」。设计稿 docs/specs/2026-11-04-ads-knife5-creative-scorecard-design.md。
 门槛只有旅游行业有（150 次链接点击，手册 §9.1 ⑧ 候选）；其他行业写「门槛未定」。表单中途换、每条广告推哪个团，库里都没记，页面明说查不出来。
