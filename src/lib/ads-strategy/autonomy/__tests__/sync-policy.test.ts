@@ -15,8 +15,8 @@ import {
   AUTONOMY_TO_POLICY_MODE,
   listAdsActionKeys,
   planAutonomySync,
-  syncActorLabel,
-} from '../sync-policy'
+  syncActorLabel, targetModeFor } from '../sync-policy'
+import { ACTION_REGISTRY } from '@/lib/kernel/registry'
 
 describe('AUTONOMY_TO_POLICY_MODE', () => {
   it('observe → require_approval', () => {
@@ -50,6 +50,8 @@ describe('listAdsActionKeys', () => {
   })
 })
 
+const SPEND_INCREASE_KEYS = new Set(listAdsActionKeys().filter((k) => ACTION_REGISTRY.get(k)?.spendIncrease === true))
+
 describe('planAutonomySync', () => {
   it('没有历史回执时：每个键一条，全部不跳过', () => {
     const plan = planAutonomySync({
@@ -60,8 +62,36 @@ describe('planAutonomySync', () => {
     expect(plan.map((i) => i.key)).toEqual([...listAdsActionKeys()])
     for (const item of plan) {
       expect(item.skip).toBeNull()
-      expect(item.mode).toBe('auto_approve')
+      // 🔴 第 3 刀 3a：加钱类不管自治程度，一律要审批（只有 PM 本人能批）
+      expect(item.mode).toBe(SPEND_INCREASE_KEYS.has(item.key) ? 'require_approval' : 'auto_approve')
     }
+  })
+
+  it('🔴 加钱类动作在 bounded_auto 下也是 require_approval（第 3 刀 3a 第 1 道闸）', () => {
+    for (const key of ['ads.scale_unit_budget', 'ads.budget_move_plan', 'ads.add_retargeting_adset']) {
+      expect(SPEND_INCREASE_KEYS.has(key)).toBe(true)
+      expect(targetModeFor(key, 'bounded_auto')).toBe('require_approval')
+    }
+    // 刹车不受影响
+    for (const key of ['ads.pause_unit', 'ads.pause_campaign', 'ads.cut_unit_budget', 'ads.cut_campaign_budget']) {
+      expect(targetModeFor(key, 'bounded_auto')).toBe('auto_approve')
+    }
+  })
+
+  it('🔴 同步规则改过（上次写的目标模式不同）→ 不看时间也要重写：部署后旧的 auto_approve 行会被改过来', () => {
+    const plan = planAutonomySync({
+      autonomyMode: 'bounded_auto',
+      sourceUpdatedAt: '2026-09-25T10:00:00.000Z',
+      lastSynced: new Map([
+        ['ads.scale_unit_budget', { sourceUpdatedAt: '2026-10-01T00:00:00.000Z', toMode: 'auto_approve' }],
+        ['ads.pause_unit', { sourceUpdatedAt: '2026-10-01T00:00:00.000Z', toMode: 'auto_approve' }],
+        ['ads.cut_unit_budget', { sourceUpdatedAt: '2026-10-01T00:00:00.000Z', toMode: null }],
+      ]),
+    })
+    const byKey = new Map(plan.map((i) => [i.key, i]))
+    expect(byKey.get('ads.scale_unit_budget')).toMatchObject({ mode: 'require_approval', skip: null })
+    expect(byKey.get('ads.pause_unit')?.skip).toBe('already_synced')
+    expect(byKey.get('ads.cut_unit_budget')?.skip).toBeNull() // 读不到目标模式 = 当没同步过
   })
 
   it('observe 模式下每个键都是 require_approval', () => {
@@ -81,9 +111,9 @@ describe('planAutonomySync', () => {
       autonomyMode: 'bounded_auto',
       sourceUpdatedAt,
       lastSynced: new Map([
-        ['ads.pause_unit', '2026-09-25T10:00:00.000Z'], // 相等 → 跳过
-        ['ads.cut_unit_budget', '2026-09-25T09:59:59.000Z'], // 更旧 → 不跳过
-        ['ads.scale_unit_budget', '2026-09-26T00:00:00.000Z'], // 更新 → 跳过
+        ['ads.pause_unit', { sourceUpdatedAt: '2026-09-25T10:00:00.000Z', toMode: 'auto_approve' }], // 相等 → 跳过
+        ['ads.cut_unit_budget', { sourceUpdatedAt: '2026-09-25T09:59:59.000Z', toMode: 'auto_approve' }], // 更旧 → 不跳过
+        ['ads.scale_unit_budget', { sourceUpdatedAt: '2026-09-26T00:00:00.000Z', toMode: 'require_approval' }], // 更新 → 跳过
       ]),
     })
     const byKey = new Map(plan.map((i) => [i.key, i.skip]))
@@ -100,7 +130,7 @@ describe('planAutonomySync', () => {
     const plan = planAutonomySync({
       autonomyMode: 'bounded_auto',
       sourceUpdatedAt: '2026-09-25T00:00:00+13:00',
-      lastSynced: new Map([['ads.pause_unit', '2026-09-24T12:00:00Z']]),
+      lastSynced: new Map([['ads.pause_unit', { sourceUpdatedAt: '2026-09-24T12:00:00Z', toMode: 'auto_approve' }]]),
     })
     const item = plan.find((i) => i.key === 'ads.pause_unit')
     expect(item?.skip).toBe('already_synced')
@@ -110,7 +140,7 @@ describe('planAutonomySync', () => {
     const plan = planAutonomySync({
       autonomyMode: 'bounded_auto',
       sourceUpdatedAt: '2026-09-25T10:00:00.000Z',
-      lastSynced: new Map([['ads.pause_unit', 'garbage']]),
+      lastSynced: new Map([['ads.pause_unit', { sourceUpdatedAt: 'garbage', toMode: 'auto_approve' }]]),
     })
     const item = plan.find((i) => i.key === 'ads.pause_unit')
     expect(item?.skip).toBeNull()

@@ -21,6 +21,7 @@ import type { AccessTier } from '@/lib/auth/access-types'
 import type { ActionDefinition, ActionRun } from '@/lib/kernel/types'
 import { ACTION_REGISTRY } from '@/lib/kernel/registry'
 import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entries'
+import { isSpendIncreaseAction } from '@/lib/kernel/spend-approval'
 import { approveRun, rejectRun } from '@/lib/kernel/human-approval'
 import { KernelError } from '@/lib/kernel/errors'
 import { createKernelDeps, type KernelDeps } from '@/lib/kernel/deps'
@@ -145,7 +146,7 @@ export interface ApprovalPermissions {
   /** 🔴 拒绝永远允许 —— 留成字段是为了让界面读到的是**事实**，不是一句约定。 */
   readonly canReject: true
   /** 批不了的原因；能批时是 null。给界面用来说人话，不是让它自己判。 */
-  readonly approveBlockedReason: BaseApproveBlock | 'dedicated_entry' | null
+  readonly approveBlockedReason: SpecialApproveBlock | null
   /**
    * 这个动作有专属审批入口时，那个入口在哪（界面画「去那里处理」的链接用）；否则 null。
    * 来自 `kernel/dedicated-approval-entries.ts` —— 全仓唯一那张登记表。
@@ -154,6 +155,12 @@ export interface ApprovalPermissions {
 }
 
 type BaseApproveBlock = 'unknown_action' | 'unknown_action_version' | 'insufficient_tier'
+/**
+ * `spend_increase`：加钱类动作（第 3 刀 3a）——通用面只签不执行、也不核 PM 本人，一律不给批，
+ * 去广告健康页由 PM 本人批（那里批完会执行）。不登记进专属入口表：那张表会把它从通用待办里
+ * 摘掉，而加预算目前没有自己的待办，摘掉就从所有待办里消失了。
+ */
+type SpecialApproveBlock = BaseApproveBlock | 'dedicated_entry' | 'spend_increase'
 
 /** 基础判定：版本 + 档次，全部读注册表。专属入口的路由也只过这一段。 */
 function baseApproveBlock(run: ActionRun, actorTier: AccessTier): BaseApproveBlock | null {
@@ -170,7 +177,11 @@ export function approvalPermissionsFor(
   const entry = dedicatedApprovalEntryFor(run.action_key)
   // 🔴 有专属入口的动作，这里一律不给批：通用面只签不执行，批了事情也不会发生，
   //    专属页那条反而再也批不了。拒绝照旧允许（上面那段不对称的理由不变）。
-  const blocked = entry ? 'dedicated_entry' : baseApproveBlock(run, actorTier)
+  const blocked = entry
+    ? 'dedicated_entry'
+    : isSpendIncreaseAction(ACTION_REGISTRY.get(run.action_key))
+      ? 'spend_increase'
+      : baseApproveBlock(run, actorTier)
   return {
     canApprove: blocked === null,
     canReject: true,
@@ -179,7 +190,11 @@ export function approvalPermissionsFor(
   }
 }
 
-function blockedMessage(run: ActionRun, reason: BaseApproveBlock | 'dedicated_entry'): string {
+function blockedMessage(run: ActionRun, reason: SpecialApproveBlock): string {
+  if (reason === 'spend_increase') {
+    return '这条会让客户多花钱，只有 PM 本人能在「广告健康」页批 —— 那里批完会执行；这里只签不执行。' +
+      '**你仍然可以点「不做」**'
+  }
   if (reason === 'dedicated_entry') {
     const label = dedicatedApprovalEntryFor(run.action_key)?.label ?? '它自己的批准页'
     return `这条要去「${label}」批 —— 那里批完会立刻执行；这里只签不执行，批了事情也不会发生。` +
@@ -201,7 +216,7 @@ function blockedMessage(run: ActionRun, reason: BaseApproveBlock | 'dedicated_en
 function throwBlocked(
   run: ActionRun,
   actorTier: AccessTier | null, // null = 调用方手里没有档次（decideApproval 那一道），不编一个
-  reason: BaseApproveBlock | 'dedicated_entry',
+  reason: SpecialApproveBlock,
 ): never {
   throw new ApprovalError('forbidden_tier', blockedMessage(run, reason), {
     runId: run.id,
@@ -632,6 +647,9 @@ export async function decideApproval(
   // 🔴 不只靠路由那一行：任何调到这里的批准，只要动作有专属入口，一律不签（见 approvalPermissionsFor）。
   if (input.resolution === 'approve' && dedicatedApprovalEntryFor(run.action_key)) {
     throwBlocked(run, null, 'dedicated_entry')
+  }
+  if (input.resolution === 'approve' && isSpendIncreaseAction(ACTION_REGISTRY.get(run.action_key))) {
+    throwBlocked(run, null, 'spend_increase')
   }
   try {
     const outcome =

@@ -13,6 +13,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createCapabilities } from '@/lib/capabilities'
 import { createAdsEnvelopeFactsResolver } from '@/lib/capabilities/ads/envelope-facts'
+import { isSpendApproverEmail } from '@/lib/auth/whitelist'
 import { createKernelDeps, type KernelDeps, type KernelDepsInit } from './deps'
 import { ACTION_REGISTRY } from './registry'
 
@@ -49,6 +50,11 @@ export function createKernel(
     resolveEnvelopeFacts:
       overrides.resolveEnvelopeFacts ??
       createAdsEnvelopeFactsResolver({ sb: supabase, capabilities }),
+    /**
+     * 🔴 默认装加钱批准人判定（第 3 刀 3a）。理由同上：缺它 = 加钱类一律批不了，
+     *    任何忘了传的调用点都会让加预算静默变成批不了。测试可用 overrides 换掉。
+     */
+    isSpendApprover: overrides.isSpendApprover ?? isSpendApproverEmail,
   })
 }
 

@@ -66,6 +66,10 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     })
     return NextResponse.json({ ok: true, kind: 'queued', runId: run.id }, { status: 202 })
   } catch (error) {
+    // 加钱类只有 PM 本人能批（第 3 刀 3a）：别人点批准是权限问题，答 403 而不是「状态冲突」。
+    if (error instanceof KernelError && error.code === 'NOT_AUTHORIZED' && error.detail?.reason === 'spend_approver_only') {
+      return NextResponse.json({ error: error.humanReason, code: error.code }, { status: 403 })
+    }
     if (error instanceof KernelError) return NextResponse.json({ error: error.humanReason, code: error.code }, { status: 409 })
     console.error('[ad-health/o1-scale/decision] failed:', error)
     return NextResponse.json({ error: '批准已记录，但暂时无法排入执行队列；可以刷新后重试' }, { status: 503 })

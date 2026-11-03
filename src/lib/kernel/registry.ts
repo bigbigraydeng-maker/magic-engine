@@ -272,6 +272,8 @@ const ADS_AUTO_PAUSE_ON_D3: ActionDefinition<'ads.auto_pause_on_d3'> = {
   sideEffect: 'outward',
   reversible: true,
 
+  // 暂停：刹车，不进 PM 本人闸
+  spendIncrease: false,
   outwardAuthorization: {
     declaredIn: 'docs/specs/2026-09-22-me2-ads-d3-auto-pause-v1.0.md',
     approval: { mode: 'human_only' },
