@@ -277,6 +277,23 @@ describe('结果种类不一样的组进了预算比较 → 标出来（规则 E
     expect(acquisition(card(inp))).toMatchObject({ state: 'not_comparable', reason: 'primary_not_attributable', notLikeForLike: ['W'] })
   })
 
+  it('网站转化组（判不出结果种类）：单位行写「种类判不出」并按主结果数（跟预算判断同口径），预算判断标出来', () => {
+    const inp = input([campaign(), adset('A'), adset('W', 'OFFSITE_CONVERSIONS', 'WEBSITE')], [...week('A', 50, 10), ...week('W', 50, 1)])
+    const s = card(inp)
+    expect(s.units.find(u => u.id === 'W')).toMatchObject({ resultType: null, separate: 'result_type_unknown', results: 7, vsTarget: 'no_target' })
+    expect(acquisition(s)!.notLikeForLike).toEqual(['W'])
+  })
+
+  it('系列本身角色就不能比（下面一个留资组一个视频播放组）：写「不出结果」，不按主结果数', () => {
+    const inp = input(
+      [campaign(), adset('A'), campaign('cbo', true), adset('K1', 'LEAD_GENERATION', 'ON_AD', 'cbo', false), adset('K2', 'THRUPLAY', 'UNDEFINED', 'cbo', false)],
+      [...week('A', 10, 2), ...week('K1', 10, 2, 'lead', 'cbo'), ...week('K2', 10, 0, 'video_view', 'cbo')],
+    )
+    const row = card(inp).units.find(u => u.id === 'cbo')!
+    expect(row.role).not.toBe('acquisition')
+    expect(row).toMatchObject({ separate: 'not_result_unit', results: null, sampleGap: null })
+  })
+
   it('全是同类的组 → 什么都不标', () => {
     expect(acquisition(card(input([campaign(), adset('A'), adset('C')], [...week('A', 10, 2), ...week('C', 10, 2)])))!.notLikeForLike).toEqual([])
   })

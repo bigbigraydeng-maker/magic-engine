@@ -24,7 +24,7 @@ const COMPARABLE_ROLES: readonly FunnelRole[] = ['acquisition', 'retargeting', '
 const round2 = (n: number) => Math.round(n * 100) / 100
 const round3 = (n: number) => Math.round(n * 1000) / 1000
 
-export type ScorecardSeparate = 'result_type_differs' | 'mixed_result_types' | 'not_result_unit' | 'experiment'
+export type ScorecardSeparate = 'result_type_differs' | 'mixed_result_types' | 'result_type_unknown' | 'not_result_unit' | 'experiment'
 
 export interface ScorecardUnit {
   adAccountId: string
@@ -57,7 +57,7 @@ export interface BudgetVerdict {
   /** 数据不全的日子：D5 报了「结果占比明显高过花费占比」的单位，但 O3 那天不跑，不下「该加钱」的结论，只列出来。数据齐的日子永远是空。 */
   overHeld: string[]
   thin: BudgetThinUnit[]
-  /** 进了这次比较、但结果种类跟客户主结果不一样（或系列下各组种类混着）的单位：D5 按主结果数它们，不是同类比较（规则 E-19）。 */
+  /** 进了这次比较、但结果种类跟客户主结果不一样（或系列下各组种类混着、或判不出种类，如网站转化组）的单位：D5 按主结果数它们，不是同类比较（规则 E-19）。 */
   notLikeForLike: string[]
 }
 
@@ -94,9 +94,9 @@ function campaignHasMixedTypes(ctx: AccountContext, u: BudgetUnit, primary: Outc
 }
 
 function notLikeForLike(ctx: AccountContext, u: BudgetUnit, primary: OutcomeStep): boolean {
-  if (campaignHasMixedTypes(ctx, u, primary)) return true
   const type = unitResultType(ctx, u, primary)
-  return type !== null && (primary === 'lead' || primary === 'messaging_started') && type !== primary
+  if (type === null) return true
+  return (primary === 'lead' || primary === 'messaging_started') && type !== primary
 }
 
 function countUnitResults(ctx: AccountContext, u: BudgetUnit, step: OutcomeStep | null, input: DiagnosisInput): number | null {
@@ -116,8 +116,9 @@ function countUnitResults(ctx: AccountContext, u: BudgetUnit, step: OutcomeStep 
 
 function separateOf(u: BudgetUnit, resultType: CoreMetric | null, primary: OutcomeStep | null, isExperiment: boolean, mixed: boolean): ScorecardSeparate | null {
   if (isExperiment) return 'experiment'
+  if (!COMPARABLE_ROLES.includes(u.role)) return 'not_result_unit'
   if (mixed) return 'mixed_result_types'
-  if (!COMPARABLE_ROLES.includes(u.role) || resultType === null) return 'not_result_unit'
+  if (resultType === null) return 'result_type_unknown'
   if ((primary === 'lead' || primary === 'messaging_started') && resultType !== primary) return 'result_type_differs'
   return null
 }
