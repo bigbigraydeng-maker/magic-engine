@@ -8,6 +8,7 @@ import type { MaliangCheck } from '@/lib/maliang/render-check'
 import { stampWorkOrderOutput } from '@/lib/maliang/review-disposition'
 import { remotionNineGridInput } from '@/lib/maliang/remotion-review-input'
 import { isAssetOnly } from '@/lib/factory/deliverable'
+import type { MaliangCheckV2 } from '@/lib/maliang/render-check-v2'
 
 export interface WorkOrderReady {
   client_id: string
@@ -93,4 +94,13 @@ export async function writeWorkOrderVerdict(
     .eq('id', workOrderId)
     .eq('status', 'in_review')
   if (outputUpdate.error) throw new Error(`写回工单裁决失败：${outputUpdate.error.message}`)
+}
+
+/**
+ * v2 variant of the output snapshot: same SNAPSHOT_KEY ('maliang_check') and the same
+ * machine_reviewed stamp as v1, but the stored object is the v2 check (check_version 'v2').
+ * Pure; the v1 write path (writeWorkOrderVerdict) is unchanged.
+ */
+export function toWorkOrderSnapshotV2(current: unknown, check: MaliangCheckV2): Record<string, unknown> {
+  return stampWorkOrderOutput(current, check)
 }
