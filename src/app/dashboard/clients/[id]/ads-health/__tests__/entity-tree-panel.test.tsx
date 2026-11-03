@@ -8,10 +8,13 @@ import EntityTreePanel, {
 } from '../entity-tree-panel'
 import type { AdNode, EntityMetrics, EntityTree } from '@/lib/ads-strategy/entity-tree/build'
 import type { EntityTreeResult } from '@/lib/ads-strategy/entity-tree/load'
+import type { CreativeVerdict } from '@/lib/ads-strategy/entity-tree/creative-compare'
+
+const creative: CreativeVerdict = { resultType: 'lead', results: 0, costPerResult: null, linkClicks: 30, minLinkClicks: 150, comparability: 'too_few_clicks' }
 
 const metrics = (spend: number, leads: number): EntityMetrics => ({
   spend, impressions: 1000, clicks: 80, linkClicks: 30, video3sViews: 200, leads, messagingConversations: 0,
-  costPerLead: leads > 0 ? spend / leads : null, ctr: 0.03, activeDays: 7,
+  costPerLead: leads > 0 ? spend / leads : null, ctr: 0.03, activeDays: 7, linkClicksStored: true,
 })
 
 const tree: EntityTree = {
@@ -22,8 +25,8 @@ const tree: EntityTree = {
     {
       id: 'c1', name: '运行中系列', state: 'running', effectiveStatus: 'ACTIVE', metrics: metrics(167, 11), runningAdsets: 2, runningAds: 2, metricsShared: false, unplacedAds: { count: 0, spend: 0, leads: 0 },
       adsets: [
-        { id: 's1', name: '组A', state: 'running', effectiveStatus: 'ACTIVE', dailyBudget: 50, currency: 'NZD', metrics: metrics(91, 5), ads: [{ id: 'a1', name: '兵马俑视频', state: 'running', effectiveStatus: 'ACTIVE', metrics: metrics(91, 5) }] },
-        { id: 's2', name: '组C', state: 'running', effectiveStatus: 'ACTIVE', dailyBudget: null, currency: null, metrics: metrics(34, 4), ads: [{ id: 'a2', name: '短表单版', state: 'unknown', effectiveStatus: 'IN_PROCESS', metrics: metrics(3, 0) }] },
+        { id: 's1', name: '组A', state: 'running', effectiveStatus: 'ACTIVE', dailyBudget: 50, currency: 'NZD', metrics: metrics(91, 5), resultType: 'lead', audienceChangedOn: null, targetKnown: true, ads: [{ id: 'a1', name: '兵马俑视频', state: 'running', effectiveStatus: 'ACTIVE', metrics: metrics(91, 5), creative }] },
+        { id: 's2', name: '组C', state: 'running', effectiveStatus: 'ACTIVE', dailyBudget: null, currency: null, metrics: metrics(34, 4), resultType: 'lead', audienceChangedOn: null, targetKnown: true, ads: [{ id: 'a2', name: '短表单版', state: 'unknown', effectiveStatus: 'IN_PROCESS', metrics: metrics(3, 0), creative }] },
       ],
     },
     { id: 'c2', name: '早停的系列', state: 'stopped', effectiveStatus: 'PAUSED', metrics: metrics(0, 0), runningAdsets: 0, runningAds: 0, adsets: [], metricsShared: false, unplacedAds: { count: 0, spend: 0, leads: 0 } },
@@ -59,7 +62,7 @@ describe('showFromQuery', () => {
 
 describe('applyRunningEntityFilter', () => {
   const stoppedAd = (id: string, name: string): AdNode => ({
-    id, name, state: 'stopped', effectiveStatus: 'PAUSED', metrics: metrics(10, 0),
+    id, name, state: 'stopped', effectiveStatus: 'PAUSED', metrics: metrics(10, 0), creative,
   })
 
   it('hides stopped ad sets and ads but keeps unknown-status ads visible', () => {
@@ -69,15 +72,15 @@ describe('applyRunningEntityFilter', () => {
       adsets: [
         campaign.adsets[0],
         {
-          id: 's-stop', name: '已停组', state: 'stopped', effectiveStatus: 'PAUSED', dailyBudget: 20, currency: 'NZD', metrics: metrics(40, 2),
+          id: 's-stop', name: '已停组', state: 'stopped', effectiveStatus: 'PAUSED', dailyBudget: 20, currency: 'NZD', metrics: metrics(40, 2), resultType: 'lead', audienceChangedOn: null, targetKnown: true,
           ads: [stoppedAd('x1', '停1'), stoppedAd('x2', '停2'), stoppedAd('x3', '停3'), stoppedAd('x4', '停4')],
         },
         {
           ...campaign.adsets[0],
-          id: 's-mix', name: '混合组', state: 'running', effectiveStatus: 'ACTIVE', dailyBudget: 30, currency: 'NZD', metrics: metrics(50, 3),
+          id: 's-mix', name: '混合组', state: 'running', effectiveStatus: 'ACTIVE', dailyBudget: 30, currency: 'NZD', metrics: metrics(50, 3), resultType: 'lead', audienceChangedOn: null, targetKnown: true,
           ads: [
-            { id: 'r1', name: '在投广告', state: 'running', effectiveStatus: 'ACTIVE', metrics: metrics(30, 2) },
-            { id: 'u1', name: '不明广告', state: 'unknown', effectiveStatus: 'IN_PROCESS', metrics: metrics(5, 0) },
+            { id: 'r1', name: '在投广告', state: 'running', effectiveStatus: 'ACTIVE', metrics: metrics(30, 2), creative },
+            { id: 'u1', name: '不明广告', state: 'unknown', effectiveStatus: 'IN_PROCESS', metrics: metrics(5, 0), creative },
             stoppedAd('s1', '组内已停'),
           ],
         },
@@ -97,7 +100,7 @@ describe('EntityTreePanel', () => {
   })
 
   it('lists running campaign with its ad sets and ads, and says when the status is from', async () => {
-    mockFetch(200, { success: true, tree, hiddenAdsets: 0, noPageRegistered: false } satisfies Partial<EntityTreeResult> & { success: boolean })
+    mockFetch(200, { success: true, tree, hiddenAdsets: 0, noPageRegistered: false, compare: { minLinkClicks: 150, offerNoun: null } } satisfies Partial<EntityTreeResult> & { success: boolean })
     render(<EntityTreePanel clientId="c" />)
     expect(await screen.findByText(/系列 · 运行中系列/)).toBeTruthy()
     expect(screen.getByText(/广告组 · 组A/)).toBeTruthy()
@@ -117,7 +120,7 @@ describe('EntityTreePanel', () => {
       ...tree,
       winnerBaseline: { cpm: 12, linkCtr: 0.02, completion: 0.25, hook: 0.3 },
     }
-    mockFetch(200, { success: true, tree: withWinner, hiddenAdsets: 0, noPageRegistered: false })
+    mockFetch(200, { success: true, tree: withWinner, hiddenAdsets: 0, noPageRegistered: false, compare: { minLinkClicks: 150, offerNoun: null } })
     render(<EntityTreePanel clientId="c" />)
     expect((await screen.findAllByText(/赢家 \$12.0/)).length).toBeGreaterThan(0)
     expect(screen.queryByText(/样本不足/)).toBeNull()
@@ -138,7 +141,7 @@ describe('EntityTreePanel', () => {
         }],
       }],
     }
-    mockFetch(200, { success: true, tree: withUnknown, hiddenAdsets: 0, noPageRegistered: false })
+    mockFetch(200, { success: true, tree: withUnknown, hiddenAdsets: 0, noPageRegistered: false, compare: { minLinkClicks: 150, offerNoun: null } })
     render(<EntityTreePanel clientId="c" />)
     await screen.findByText('兵马俑视频')
     const rows = screen.getAllByRole('row')
@@ -148,14 +151,14 @@ describe('EntityTreePanel', () => {
   })
 
   it('puts stopped campaigns behind a collapsed section', async () => {
-    mockFetch(200, { success: true, tree, hiddenAdsets: 0, noPageRegistered: false } satisfies Partial<EntityTreeResult> & { success: boolean })
+    mockFetch(200, { success: true, tree, hiddenAdsets: 0, noPageRegistered: false, compare: { minLinkClicks: 150, offerNoun: null } } satisfies Partial<EntityTreeResult> & { success: boolean })
     render(<EntityTreePanel clientId="c" />)
     expect(await screen.findByText(/已停的系列 1 个/)).toBeTruthy()
   })
 
   it('does not call a pending-review campaign "stopped": it gets its own group', async () => {
     const pending: EntityTree = { ...tree, campaigns: [{ ...tree.campaigns[1], id: 'c3', name: '审核中系列', state: 'unknown', effectiveStatus: 'IN_PROCESS' }] }
-    mockFetch(200, { success: true, tree: pending, hiddenAdsets: 0, noPageRegistered: false })
+    mockFetch(200, { success: true, tree: pending, hiddenAdsets: 0, noPageRegistered: false, compare: { minLinkClicks: 150, offerNoun: null } })
     render(<EntityTreePanel clientId="c" />)
     expect(await screen.findByText(/状态还没确认的系列 1 个/)).toBeTruthy()
     expect(screen.queryByText(/已停的系列/)).toBeNull()
@@ -163,21 +166,21 @@ describe('EntityTreePanel', () => {
 
   it('says how many ad sets were left out instead of claiming nothing runs', async () => {
     const empty: EntityTree = { ...tree, campaigns: [] }
-    mockFetch(200, { success: true, tree: empty, hiddenAdsets: 3, noPageRegistered: false })
+    mockFetch(200, { success: true, tree: empty, hiddenAdsets: 3, noPageRegistered: false, compare: { minLinkClicks: 150, offerNoun: null } })
     render(<EntityTreePanel clientId="c" />)
     expect(await screen.findByText(/另有 3 个广告组没有列出/)).toBeTruthy()
   })
 
   it('explains when the client has no registered page', async () => {
     const empty: EntityTree = { ...tree, campaigns: [] }
-    mockFetch(200, { success: true, tree: empty, hiddenAdsets: 0, noPageRegistered: true })
+    mockFetch(200, { success: true, tree: empty, hiddenAdsets: 0, noPageRegistered: true, compare: { minLinkClicks: 150, offerNoun: null } })
     render(<EntityTreePanel clientId="c" />)
     expect(await screen.findByText(/没有登记 Facebook 主页/)).toBeTruthy()
   })
 
   it('hides campaign totals that contain someone else\'s ad sets, and shows unplaced ads', async () => {
     const shared: EntityTree = { ...tree, campaigns: [{ ...tree.campaigns[0], metricsShared: true, unplacedAds: { count: 2, spend: 60, leads: 1 } }] }
-    mockFetch(200, { success: true, tree: shared, hiddenAdsets: 0, noPageRegistered: false })
+    mockFetch(200, { success: true, tree: shared, hiddenAdsets: 0, noPageRegistered: false, compare: { minLinkClicks: 150, offerNoun: null } })
     render(<EntityTreePanel clientId="c" />)
     expect(await screen.findByText(/系列合计不显示/)).toBeTruthy()
     expect(screen.getByText(/另有 2 条广告（多半已删除）花了 \$60/)).toBeTruthy()
@@ -198,7 +201,7 @@ describe('EntityTreePanel', () => {
 
   it('默认只看在投：藏已停广告组与已停广告，并显示另有提示', async () => {
     const stoppedAd = (id: string, name: string): AdNode => ({
-      id, name, state: 'stopped', effectiveStatus: 'PAUSED', metrics: metrics(8, 0),
+      id, name, state: 'stopped', effectiveStatus: 'PAUSED', metrics: metrics(8, 0), creative,
     })
     const filteredTree: EntityTree = {
       ...tree,
@@ -207,13 +210,13 @@ describe('EntityTreePanel', () => {
         adsets: [
           tree.campaigns[0].adsets[0],
           {
-            id: 's-hidden', name: '已停广告组', state: 'stopped', effectiveStatus: 'PAUSED', dailyBudget: 10, currency: 'NZD', metrics: metrics(32, 1),
+            id: 's-hidden', name: '已停广告组', state: 'stopped', effectiveStatus: 'PAUSED', dailyBudget: 10, currency: 'NZD', metrics: metrics(32, 1), resultType: 'lead', audienceChangedOn: null, targetKnown: true,
             ads: [stoppedAd('h1', '停广一'), stoppedAd('h2', '停广二'), stoppedAd('h3', '停广三'), stoppedAd('h4', '停广四')],
           },
         ],
       }],
     }
-    mockFetch(200, { success: true, tree: filteredTree, hiddenAdsets: 0, noPageRegistered: false })
+    mockFetch(200, { success: true, tree: filteredTree, hiddenAdsets: 0, noPageRegistered: false, compare: { minLinkClicks: 150, offerNoun: null } })
     render(<EntityTreePanel clientId="c" />)
     await screen.findByText(/系列 · 运行中系列/)
     expect(screen.getByText(/广告组 · 组A/)).toBeTruthy()
@@ -229,7 +232,7 @@ describe('EntityTreePanel', () => {
   it('切到全部后展示已停广告组，与原先一致', async () => {
     searchParamsValue = new URLSearchParams('show=all')
     const stoppedAd = (id: string, name: string): AdNode => ({
-      id, name, state: 'stopped', effectiveStatus: 'PAUSED', metrics: metrics(8, 0),
+      id, name, state: 'stopped', effectiveStatus: 'PAUSED', metrics: metrics(8, 0), creative,
     })
     const filteredTree: EntityTree = {
       ...tree,
@@ -238,13 +241,13 @@ describe('EntityTreePanel', () => {
         adsets: [
           tree.campaigns[0].adsets[0],
           {
-            id: 's-hidden', name: '已停广告组', state: 'stopped', effectiveStatus: 'PAUSED', dailyBudget: 10, currency: 'NZD', metrics: metrics(32, 1),
+            id: 's-hidden', name: '已停广告组', state: 'stopped', effectiveStatus: 'PAUSED', dailyBudget: 10, currency: 'NZD', metrics: metrics(32, 1), resultType: 'lead', audienceChangedOn: null, targetKnown: true,
             ads: [stoppedAd('h1', '停广一')],
           },
         ],
       }],
     }
-    mockFetch(200, { success: true, tree: filteredTree, hiddenAdsets: 0, noPageRegistered: false })
+    mockFetch(200, { success: true, tree: filteredTree, hiddenAdsets: 0, noPageRegistered: false, compare: { minLinkClicks: 150, offerNoun: null } })
     render(<EntityTreePanel clientId="c" />)
     await screen.findByText(/广告组 · 已停广告组/)
     expect(screen.getByText('停广一')).toBeTruthy()
@@ -252,7 +255,7 @@ describe('EntityTreePanel', () => {
   })
 
   it('点击全部会把 show=all 写进网址', async () => {
-    mockFetch(200, { success: true, tree, hiddenAdsets: 0, noPageRegistered: false })
+    mockFetch(200, { success: true, tree, hiddenAdsets: 0, noPageRegistered: false, compare: { minLinkClicks: 150, offerNoun: null } })
     render(<EntityTreePanel clientId="c" />)
     await screen.findByText(/系列 · 运行中系列/)
     await userEvent.click(screen.getByRole('button', { name: '全部' }))
