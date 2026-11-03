@@ -5,6 +5,11 @@
 
 ---
 
+### 2026-11-03（包拯：每周复核 AI 判客人阶段准不准，CTS 已打开）
+
+PR [#3557](https://github.com/bigbigraydeng-maker/magic-engine/pull/3557)（合并 `073d8501e`；A 级，PM 回「合 3557」后 `--admin`；修复方案第 1b 刀）。新 agent「包拯」每周三新西兰 10:00 把上周 CRM「AI 读对话判阶段」的判断交给 Claude Sonnet，按判断那一刻已入库的对话独立再判一次，算 8 周准确率区间；两个模型判得不一样的进今日待办「系统判不了真假、要你认一下的」，复核页 `/dashboard/clients/<id>/baozheng/<判断编号>`（只给内部员工）点「原来的 AI 对 / 复核的对 / 都不对」，只记结论（`crm_segment_feedback`），**不改客人阶段**。另每周从「读不出来、放进新线索」里抽 5 个查漏判。规则书 `docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md`。
+PM 回「开包拯」后：CTS 客户设置 `leads_config.baozheng` 写入阶段归类；生产服务 `BAOZHENG_ENABLED=true` 并重新部署（`dep-dbkodfd9fdbs73btp6t0`，07:05 UTC live）。当场执行定时函数本身：运行记录 `faff84c6` 状态完成，复核 14 条、6 条分歧、0 报错、$0.037；今日待办算出 6 条分歧条目（无客人姓名原话）；复核页打开正常。本周（W45）CTS 已复核，周三排班那次会跳过 CTS。**关掉**：Render 把 `BAOZHENG_ENABLED` 删掉或改非 true 后重新部署；或把 CTS `leads_config.baozheng.enabled` 改 false（立即生效）。台账卡 `2026-11-03-baozheng-1b-weekly-review`（11/10 验）。
+
 ### 2026-11-03（视频工厂页能直接下单做一条视频变体）
 
 PR [#3556](https://github.com/bigbigraydeng-maker/magic-engine/pull/3556)（合并 `2f3ac3369`；A 级，PM 回「合 3556」后 `--admin`）。工厂页新增「下单做一条视频（照已有视频改一样）」：选一条已出片的模板视频当底稿，只改开场字或换配乐，成片停在待审，不发布、不进素材池；同一客户 24 小时最多 10 单。当场试跑：正式库下单 2a423cdf（换配乐）出片到待审；中途查出出片电脑本机曲库镜像缺 Music 文件夹，已补。内容工厂卡片上的「生成视频」按钮没做。台账卡 `2026-11-03-me-factory-variant-order-entry`（11/10 验）。
