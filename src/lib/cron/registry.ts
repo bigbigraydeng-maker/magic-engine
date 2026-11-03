@@ -399,6 +399,9 @@ const CRON_REGISTRY_ENTRIES = [
   // 李白 · 提示词库月检（agent 自治计划 B2）：cron 每周二 NZ 09:00 醒，函数里只在当月 1–7 号
   // 真跑（标准 cron 的日/周字段是「或」，写不出「第一个周二」），其余周二写一条 skipped 回执。
   // 所以按「每周二」对账是对的：每周都有一行。周期与代码常量 LIBAI_PROMPT_AUDIT_CRON 一致。
+  // 包拯 · 每周复核 AI 判客人阶段（修复方案第 1b 刀）：每周三新西兰 10:00；总开关关着也写一行 skipped 回执，
+  // 所以每周都有一行。周期与代码常量 BAOZHENG_WEEKLY_CRON 一致。规则书 docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md。
+  { service: 'inngest:cloud-baozheng-weekly', jobName: 'baozheng-weekly', schedule: '0 10 * * 3', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-03' },
   { service: 'inngest:cloud-libai-prompt-library-monthly', jobName: 'libai-prompt-library-monthly', schedule: '0 9 * * 2', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-25' },
   // 司马迁 · 口碑周巡（agent 自治计划 B2）：每周四新西兰 09:00 读本周新 Google 评价、起草回复，
   // 一律不发，只写回执给今日待办拉。周期与 src/lib/inngest/functions/simaqian-reputation-weekly.ts

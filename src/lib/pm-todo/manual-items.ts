@@ -106,6 +106,7 @@ import { pushWhatsappUnclaimedItems } from './whatsapp-unclaimed-items'
 import { pushLedgerItems } from './ledger-items'
 import { pushMaliangRenderItems } from './maliang-render-items'
 import { pushLibaiItems } from './libai-items'
+import { pushBaozhengItems } from './baozheng-items'
 import { pushSimaqianReviewItems } from './simaqian-review-items'
 
 /**
@@ -402,6 +403,11 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 另有提示词库月检结果（只报告不改）。拉模式读库和回执，事件丢了也照样出得来
     (b) => pushLibaiItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 李白待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 包拯：每周复核 AI 判客人阶段，两个 AI 判得不一样的进「认一下」栏；周检没跑成进系统欠账。
+    // 拉模式读它的回执（规则书 docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md BZ-18）
+    (b) => pushBaozhengItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 包拯待办读取失败（不阻塞其他待办）:', e),
     ),
     // 司马迁每周四起草的 Google 评价回复草稿（一律没发）—— 拉模式读它的回执，
     // 事件送达失败也照样出得来；巡不成的那条进系统欠账栏，不静默
