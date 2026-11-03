@@ -18,7 +18,7 @@ import {
   ADS_AUTONOMY_SYNC_FN_ID,
 } from '../ads-autonomy-sync'
 import { ADS_AUTONOMY_MODE_CHANGED } from '../../ads-events'
-import { listAdsActionKeys } from '@/lib/ads-strategy/autonomy/sync-policy'
+import { listAdsActionKeys, targetModeFor } from '@/lib/ads-strategy/autonomy/sync-policy'
 import { cloudFunctions } from '../index'
 import { CLOUD_FN_PREFIX, WORKER_OWNED_EVENTS } from '../../client'
 
@@ -52,6 +52,8 @@ interface PriorReceipt {
   source_updated_at: string
   skipped_reason: string | null
   synced_at: string
+  /** 第 3 刀 3a 起去重要看上次写的目标模式；缺省 = 旧回执没这一列 */
+  to_mode?: string | null
 }
 
 interface FakeOpts {
@@ -232,15 +234,19 @@ describe('ads-autonomy-sync handler', () => {
     for (const call of rpc.mock.calls) {
       expect(call[0]).toBe('ads_sync_autonomy_policy')
       const params = call[1] as Record<string, unknown>
-      expect(params.p_mode).toBe('auto_approve')
+      // 🔴 第 3 刀 3a：加钱类在 bounded_auto 下也写 require_approval
+      expect(params.p_mode).toBe(targetModeFor(String(params.p_action_key), 'bounded_auto'))
       expect(params.p_client_id).toBe(CLIENT)
       expect(params.p_updated_by).toBe(`autonomy-sync:pm@example.test:${updatedAt}`)
     }
 
     expect(receipts).toHaveLength(keys.length)
+    expect(receipts.filter((r) => r.to_mode === 'require_approval').map((r) => r.action_key).sort()).toEqual(
+      ['ads.add_retargeting_adset', 'ads.budget_move_plan', 'ads.scale_unit_budget'],
+    )
     for (const row of receipts) {
       expect(row.client_id).toBe(CLIENT)
-      expect(row.to_mode).toBe('auto_approve')
+      expect(row.to_mode).toBe(targetModeFor(String(row.action_key), 'bounded_auto'))
       expect(row.from_mode).toBeNull()
       expect(row.skipped_reason).toBeNull()
       expect(row.source_updated_at).toBe(updatedAt)
@@ -278,6 +284,7 @@ describe('ads-autonomy-sync handler', () => {
       source_updated_at: updatedAt,
       skipped_reason: null,
       synced_at: updatedAt,
+      to_mode: targetModeFor(key, 'bounded_auto'),
     }))
     const { sb, receipts, rpc } = fakeSupabase({
       config: {
@@ -292,6 +299,27 @@ describe('ads-autonomy-sync handler', () => {
     expect(result.skipped).toBe(listAdsActionKeys().length)
     expect(rpc).not.toHaveBeenCalled()
     expect(receipts).toHaveLength(0)
+  })
+
+  it('🔴 第 3 刀 3a：部署前的旧回执写的是 auto_approve → 设置没人动也会把加钱类改成 require_approval', async () => {
+    const updatedAt = '2026-09-25T10:00:00+00:00'
+    const priorReceipts: PriorReceipt[] = listAdsActionKeys().map((key) => ({
+      action_key: key,
+      source_updated_at: updatedAt,
+      skipped_reason: null,
+      synced_at: updatedAt,
+      to_mode: 'auto_approve',
+    }))
+    const { sb, rpc } = fakeSupabase({
+      config: { autonomy_mode: 'bounded_auto', updated_at: updatedAt, autonomy_mode_updated_by: null },
+      priorReceipts,
+      rpcOutcome: () => 'updated',
+    })
+    const result = (await run(sb)) as { applied: number; skipped: number }
+    const rewritten = rpc.mock.calls.map((c) => (c[1] as Record<string, unknown>).p_action_key).sort()
+    expect(rewritten).toEqual(['ads.add_retargeting_adset', 'ads.budget_move_plan', 'ads.scale_unit_budget'])
+    for (const call of rpc.mock.calls) expect((call[1] as Record<string, unknown>).p_mode).toBe('require_approval')
+    expect(result.applied).toBe(3)
   })
 
   it('🔴 sync_failed 回执不算「已同步」—— 一次失败不能把键永久锁死', async () => {

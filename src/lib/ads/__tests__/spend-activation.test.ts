@@ -13,7 +13,7 @@ vi.mock('@/lib/auth/require-session', () => ({
 
 import { requireSpendActivationAuthority, buildSpendActivationReceipt } from '@/lib/ads/spend-activation'
 
-const ENV = ['ADMIN_EMAILS', 'ADMIN_EMAIL_DOMAIN', 'DEMO_ADMINS', 'CLIENT_VIEWERS'] as const
+const ENV = ['ADMIN_EMAILS', 'ADMIN_EMAIL_DOMAIN', 'DEMO_ADMINS', 'CLIENT_VIEWERS', 'ADS_SPEND_APPROVER_EMAILS'] as const
 const saved: Record<string, string | undefined> = {}
 const CLIENT = 'aaaaaaaa-0000-0000-0000-000000000001'
 
@@ -22,7 +22,8 @@ beforeEach(() => {
     saved[k] = process.env[k]
     delete process.env[k]
   }
-  process.env.ADMIN_EMAILS = 'pm@magiclab.test'
+  process.env.ADMIN_EMAILS = 'pm@magiclab.test,staff2@magiclab.test'
+  process.env.ADS_SPEND_APPROVER_EMAILS = 'pm@magiclab.test'
   process.env.ADMIN_EMAIL_DOMAIN = 'staff.magiclab.test'
   process.env.DEMO_ADMINS = `demo@x.test:${CLIENT}`
   h.email = null
@@ -77,7 +78,20 @@ describe('requireSpendActivationAuthority', () => {
     expect(result).toMatchObject({ ok: false, status: 500, code: 'activation_auth_failed' })
   })
 
-  it('exact ADMIN_EMAILS member → allowed with actor identity', async () => {
+  it('🔴 第 3 刀 3a：在 ADMIN_EMAILS 里但不在加钱批准人名单 → 403（只有 PM 本人能开投）', async () => {
+    h.email = 'staff2@magiclab.test'
+    const result = await requireSpendActivationAuthority()
+    expect(result).toMatchObject({ ok: false, status: 403, code: 'activation_requires_pm' })
+  })
+
+  it('🔴 加钱批准人名单没配 → 谁都开不了投，不回落到 ADMIN_EMAILS', async () => {
+    delete process.env.ADS_SPEND_APPROVER_EMAILS
+    h.email = 'pm@magiclab.test'
+    const result = await requireSpendActivationAuthority()
+    expect(result).toMatchObject({ ok: false, status: 403, code: 'activation_requires_pm' })
+  })
+
+  it('spend approver (exact list member) → allowed with actor identity', async () => {
     h.email = 'PM@MagicLab.test'
     const result = await requireSpendActivationAuthority()
     expect(result).toEqual({

@@ -136,6 +136,7 @@
 | 变量 | 用途 | 配在哪 | 登记 |
 |---|---|---|---|
 | `ADMIN_EMAILS` | 管理员白名单 | Render-web | ✅ |
+| `ADS_SPEND_APPROVER_EMAILS` | 加钱批准人精确名单（批加预算 / 挪预算 / 新建再营销组、重开暂停的广告）。**没配 = 谁都批不了**，不回落到 `ADMIN_EMAILS`。PM 11-03 定只放 PM 本人 | Render-web | ✅ |
 | `ADMIN_EMAIL_DOMAIN` | 管理员邮箱域白名单 | Render-web | ✅ |
 | `CLIENT_VIEWERS` | 客户只读账号白名单 | Render-web | ✅ |
 | `PROTECTED_PAGE_OVERRIDE_EMAILS` | 谁有权改「保护名单」里的页（逗号分隔、邮箱精确匹配，不认域名；必须是已验证邮箱）。**没设 = 谁都不能改保护页**（安全默认）。只管人点按钮的三条路（seo-fix / update-page / update-post）；自动流程永远不能改保护页 | Render-web | ✅ |
