@@ -12,4 +12,4 @@ done_ref: pr:3589
 ---
 PM 11-04 要求：「把海量 ppt 做成一个藏经阁的提示词，便于其他窗口开发 agent 的时候读取」。
 放在 .claude/skills/me-agent-cangjingge/。讲稿做法全部标「候选」，只有 ME 真跑出证据的写进「ME 已踩过」。
-Codex 窗口没有 Skill 调用接口，要直接读 SKILL.md；CLAUDE.md 里还没有指向它的一行。
+PM 11-04 回「加」：CLAUDE.md 开头加了一行指向藏经阁，Codex 窗口直接读 SKILL.md。
