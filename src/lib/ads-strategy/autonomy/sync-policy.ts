@@ -20,9 +20,16 @@
  *     部署后下一次对账就会把旧行改过来——只按时间去重的话，设置没人动就永远不会重写。
  *   · **加钱类动作**（注册表 `spendIncrease: true`）不管自治程度是什么，一律写
  *     `require_approval`：只有 PM 本人能批（第 3 刀 3a 第 1 道闸，内核另有四道）。
+ *   · **只能人点头的对外动作**（动作定义 `outwardAuthorization.approval.mode` 是
+ *     `human_only` 或没声明）不管自治程度是什么，一律写 `require_approval`：内核
+ *     `authorize.ts` ⑥b 对这类动作 + `auto_approve` 策略**直接拒**，不会改判成等批。
+ *     同步写 `auto_approve` = 客户一开受限自动档，这些建议就全被拒、PM 待办里看不到
+ *     （2026-11-04 135 号窗口查出 `ads.auto_pause_on_d3` 就是这样，只是演练开关挡着没炸）。
+ *     判据从动作定义读，不按名单：以后新加的 human_only 广告动作自动走这条。
  *
  * 本文件是**纯模块**：不 import supabase、不 import `@/lib/kernel/**` 的运行时
- * 代码（只取注册表的 `ACTION_KEYS` 常量和动作定义里的 `spendIncrease` 声明）、无副作用。所有 I/O 归 worker。
+ * 代码（只取注册表的 `ACTION_KEYS` 常量和动作定义里的 `spendIncrease` / `sideEffect` /
+ * `outwardAuthorization` 声明）、无副作用。所有 I/O 归 worker。
  */
 
 import { ACTION_KEYS, ACTION_REGISTRY } from '@/lib/kernel/registry'
@@ -50,9 +57,24 @@ export interface LastSyncedReceipt {
   readonly toMode: string | null
 }
 
-/** 这个广告动作在本轮该同步成什么模式。加钱类永远要审批（只有 PM 本人能批）。 */
+/**
+ * 这个动作在内核眼里是不是「`auto_approve` 策略一律拒」的那类：对外、且没声明成信封内自治。
+ *
+ * 🔴 跟 `authorize.ts` ⑥b 用**同一条**判据（`outward` + approval 缺失或 `human_only`）。
+ *    两边写法一旦分叉，就会回到「同步写自动、内核拒绝」的老问题。
+ *    认不出的键当成要人点头（fail closed）。
+ */
+export function requiresHumanApprovalPolicy(key: string): boolean {
+  const definition = ACTION_REGISTRY.get(key)
+  if (definition === null) return true
+  if (definition.sideEffect !== 'outward') return false
+  return definition.outwardAuthorization?.approval.mode !== 'bounded'
+}
+
+/** 这个广告动作在本轮该同步成什么模式。加钱类、只能人点头的对外动作永远要审批。 */
 export function targetModeFor(key: string, autonomyMode: AutonomyMode): PolicyMode {
   if (ACTION_REGISTRY.get(key)?.spendIncrease === true) return 'require_approval'
+  if (requiresHumanApprovalPolicy(key)) return 'require_approval'
   return AUTONOMY_TO_POLICY_MODE[autonomyMode]
 }
 

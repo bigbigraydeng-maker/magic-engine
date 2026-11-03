@@ -320,6 +320,8 @@ export type ManualItemKind =
   | 'conversion_capi_token_dead'
   /** D3 诊断建议暂停广告组，Kernel 待批准——PM 不点头不暂停 */
   | 'ads_auto_pause_pending'
+  /** D3 暂停建议被内核或安全闸拦下，没进「等你点头」，广告照常花钱（2026-11-04） */
+  | 'ads_auto_pause_blocked'
   /** AI 全自动审核发现异常，已经自动暂停发送（PM 拍板 2026-09-15："要有异常刹车"） */
   | 'ai_auto_review_circuit_breaker'
   /** AI 客服回复草稿写好了，等人批准发送（issue #1589） */

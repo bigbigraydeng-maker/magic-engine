@@ -15,6 +15,7 @@ import {
   AUTONOMY_TO_POLICY_MODE,
   listAdsActionKeys,
   planAutonomySync,
+  requiresHumanApprovalPolicy,
   syncActorLabel, targetModeFor } from '../sync-policy'
 import { ACTION_REGISTRY } from '@/lib/kernel/registry'
 
@@ -51,6 +52,14 @@ describe('listAdsActionKeys', () => {
 })
 
 const SPEND_INCREASE_KEYS = new Set(listAdsActionKeys().filter((k) => ACTION_REGISTRY.get(k)?.spendIncrease === true))
+/** 直接读动作定义（不经被测函数）：对外 + approval 不是 bounded = 内核对 auto_approve 一律拒。 */
+const HUMAN_ONLY_KEYS = new Set(
+  listAdsActionKeys().filter((k) => {
+    const d = ACTION_REGISTRY.get(k)
+    return d?.sideEffect === 'outward' && d.outwardAuthorization?.approval.mode !== 'bounded'
+  }),
+)
+const MUST_ASK = (k: string) => SPEND_INCREASE_KEYS.has(k) || HUMAN_ONLY_KEYS.has(k)
 
 describe('planAutonomySync', () => {
   it('没有历史回执时：每个键一条，全部不跳过', () => {
@@ -62,8 +71,9 @@ describe('planAutonomySync', () => {
     expect(plan.map((i) => i.key)).toEqual([...listAdsActionKeys()])
     for (const item of plan) {
       expect(item.skip).toBeNull()
-      // 🔴 第 3 刀 3a：加钱类不管自治程度，一律要审批（只有 PM 本人能批）
-      expect(item.mode).toBe(SPEND_INCREASE_KEYS.has(item.key) ? 'require_approval' : 'auto_approve')
+      // 🔴 第 3 刀 3a：加钱类不管自治程度，一律要审批（只有 PM 本人能批）；
+      //    只能人点头的对外动作同理（内核 ⑥b 对它们 + auto_approve 直接拒）
+      expect(item.mode).toBe(MUST_ASK(item.key) ? 'require_approval' : 'auto_approve')
     }
   })
 
@@ -76,6 +86,41 @@ describe('planAutonomySync', () => {
     for (const key of ['ads.pause_unit', 'ads.pause_campaign', 'ads.cut_unit_budget', 'ads.cut_campaign_budget']) {
       expect(targetModeFor(key, 'bounded_auto')).toBe('auto_approve')
     }
+  })
+
+  it('🔴 只能人点头的对外动作（D3 自动暂停）在 bounded_auto 下也写 require_approval，不写 auto_approve', () => {
+    // 守卫：注册表里确实有这类动作，且 D3 自动暂停就在其中——不然下面的断言是空转
+    expect(HUMAN_ONLY_KEYS.has('ads.auto_pause_on_d3')).toBe(true)
+    expect(ACTION_REGISTRY.get('ads.auto_pause_on_d3')?.outwardAuthorization?.approval.mode).toBe('human_only')
+    for (const key of HUMAN_ONLY_KEYS) {
+      expect(requiresHumanApprovalPolicy(key), key).toBe(true)
+      for (const mode of ['bounded_auto', 'observe'] as const) {
+        expect(targetModeFor(key, mode), `${key} @ ${mode}`).toBe('require_approval')
+      }
+    }
+    const plan = planAutonomySync({ autonomyMode: 'bounded_auto', sourceUpdatedAt: '2026-11-04T00:00:00.000Z', lastSynced: new Map() })
+    expect(plan.find((i) => i.key === 'ads.auto_pause_on_d3')?.mode).toBe('require_approval')
+  })
+
+  it('信封内自治（bounded）的刹车动作不受影响：bounded_auto 下仍是 auto_approve', () => {
+    for (const key of ['ads.pause_unit', 'ads.pause_campaign', 'ads.cut_unit_budget', 'ads.cut_campaign_budget', 'ads.swap_creative']) {
+      expect(requiresHumanApprovalPolicy(key), key).toBe(false)
+      expect(targetModeFor(key, 'bounded_auto'), key).toBe('auto_approve')
+    }
+  })
+
+  it('认不出的动作键当成要人点头（fail closed）', () => {
+    expect(requiresHumanApprovalPolicy('ads.not_a_real_action')).toBe(true)
+    expect(targetModeFor('ads.not_a_real_action', 'bounded_auto')).toBe('require_approval')
+  })
+
+  it('🔴 D3 自动暂停旧回执写的是 auto_approve（部署前）→ 设置没人动也要重写成 require_approval', () => {
+    const plan = planAutonomySync({
+      autonomyMode: 'bounded_auto',
+      sourceUpdatedAt: '2026-09-25T10:00:00.000Z',
+      lastSynced: new Map([['ads.auto_pause_on_d3', { sourceUpdatedAt: '2026-10-01T00:00:00.000Z', toMode: 'auto_approve' }]]),
+    })
+    expect(plan.find((i) => i.key === 'ads.auto_pause_on_d3')).toMatchObject({ mode: 'require_approval', skip: null })
   })
 
   it('🔴 同步规则改过（上次写的目标模式不同）→ 不看时间也要重写：部署后旧的 auto_approve 行会被改过来', () => {
