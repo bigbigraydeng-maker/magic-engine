@@ -24,10 +24,11 @@ describe('buildAdmitAutoChecklist', () => {
     }
   })
 
-  it('all 7 pass for a good 9:16 video with audio and valid endcard', () => {
+  it('a good 9:16 video passes every probe check; subtitle and cover wait for 马良', () => {
     const checks = buildAdmitAutoChecklist(GOOD_PROBE, PUBLISH_INPUT)
+    const waiting = new Set(['subtitle_timing_aligned', 'cover_frame_not_blank_or_placeholder'])
     for (const c of checks) {
-      expect(c.outcome, `${c.key} should PASS`).toBe('PASS')
+      expect(c.outcome, `${c.key}`).toBe(waiting.has(c.key) ? 'NOT_MEASURED' : 'PASS')
       expect(c.judge).toBe('AUTO')
     }
   })
@@ -66,18 +67,13 @@ describe('buildAdmitAutoChecklist', () => {
     expect(res.detail).toContain('resolution too low')
   })
 
-  it('subtitle check always passes with burned-in note', () => {
+  it('subtitle and cover are never self-passed at upload (they wait for 马良)', () => {
     const checks = buildAdmitAutoChecklist(GOOD_PROBE, PUBLISH_INPUT)
-    const sub = checks.find(c => c.key === 'subtitle_timing_aligned')!
-    expect(sub.outcome).toBe('PASS')
-    expect(sub.detail).toContain('burned in')
-  })
-
-  it('cover check always passes with uploader-verified note', () => {
-    const checks = buildAdmitAutoChecklist(GOOD_PROBE, PUBLISH_INPUT)
-    const cover = checks.find(c => c.key === 'cover_frame_not_blank_or_placeholder')!
-    expect(cover.outcome).toBe('PASS')
-    expect(cover.detail).toContain('uploader')
+    for (const key of ['subtitle_timing_aligned', 'cover_frame_not_blank_or_placeholder']) {
+      const item = checks.find(c => c.key === key)!
+      expect(item.outcome).toBe('NOT_MEASURED')
+      expect(item.detail).toContain('马良')
+    }
   })
 
   it('publish checks fail when endcard URL is missing', () => {

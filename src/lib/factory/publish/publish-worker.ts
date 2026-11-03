@@ -15,6 +15,7 @@ import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { REEL_AUTO_CHECK_KEYS, checklistPasses, humanKeysForReviewRef, validateContentChecklist } from '@/lib/social/content-review'
 import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
 import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from '../deliverable'
+import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 
 const MAX_PUBLISH_ATTEMPTS = 3
 const RETRY_BACKOFF_MIN = 10 // 失败退避基数(分钟)· 指数
@@ -198,6 +199,16 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   if (!humanChecklist.ok || !autoChecklist.ok || !checklistPasses(humanChecklist.items) || !checklistPasses(autoChecklist.items)) {
     await markFailed(id, attempts, 'approval checklist missing, incomplete, failed, or not measured', true)
     return { order_id: id, result: 'failed', detail: 'approval_checklist_incomplete' }
+  }
+
+  // Only a live publish shows the reel to the public; drafts stay private. The consent gate is shared
+  // with the weekly loop and the go-public precheck (lib/factory/talent-consent.ts).
+  if (!opts.draft) {
+    const consent = consentVerdict({ brief, output, use: 'facebook_organic' })
+    if (!consent.ok) {
+      await markFailed(id, attempts, `出镜授权不满足:${CONSENT_REASON_ZH[consent.reason]}`, true)
+      return { order_id: id, result: 'failed', detail: 'consent_blocked' }
+    }
   }
 
   const target = await resolveTarget(clientId)

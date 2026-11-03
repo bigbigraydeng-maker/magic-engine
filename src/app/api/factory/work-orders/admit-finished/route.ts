@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { admitFinishedVideo, type AdmitInput } from '@/lib/factory/admit-finished'
+import { admitFinishedVideo, admitInputFromBody } from '@/lib/factory/admit-finished'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: Request) {
   const admin = await requireGlobalAdmin()
   if (!admin.ok) return NextResponse.json({ error: admin.error }, { status: admin.status })
+
+  const confirmedBy = admin.user.email ?? ''
+  if (!confirmedBy) return NextResponse.json({ error: 'admin email missing' }, { status: 403 })
 
   let body: Record<string, unknown>
   try {
@@ -16,30 +19,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 })
   }
 
-  const endcard = typeof body.endcard === 'object' && body.endcard !== null
-    ? body.endcard as Record<string, unknown>
-    : {}
+  const parsed = admitInputFromBody(body, confirmedBy)
+  if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 })
 
-  const input: AdmitInput = {
-    clientId: String(body.client_id ?? ''),
-    storagePath: String(body.storage_path ?? ''),
-    angle: String(body.angle ?? ''),
-    rationale: String(body.rationale ?? body.angle ?? ''),
-    caption: String(body.caption ?? ''),
-    endcard: {
-      cta: String(endcard.cta ?? ''),
-      url: String(endcard.url ?? ''),
-    },
-    masterBriefId: typeof body.master_brief_id === 'string' ? body.master_brief_id : undefined,
-    goalId: typeof body.goal_id === 'string' ? body.goal_id : undefined,
-  }
-
-  const result = await admitFinishedVideo(supabaseAdmin, input)
+  const result = await admitFinishedVideo(supabaseAdmin, parsed.input)
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
 
   return NextResponse.json({
     ok: true,
     work_order_id: result.workOrderId,
+    deduped: result.deduped,
+    review_queued: result.reviewQueued,
+    review_error: result.reviewError,
+    consent_updated: result.consentUpdated,
     auto_checklist_summary: result.autoChecklist.map(c => ({
       key: c.key,
       outcome: c.outcome,

@@ -31,6 +31,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set([
   'fact_source_unreadable',
   'unreviewed_by_maliang',
   'run_incomplete',
+  'consent_blocked',
 ])
 
 function isRecord(v: unknown): v is Record<string, unknown> {
