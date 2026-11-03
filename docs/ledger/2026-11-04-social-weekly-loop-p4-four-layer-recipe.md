@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-11-04
 source: pr:3571
 done_on: 2026-11-04
-done_ref: pr:PENDING
+done_ref: pr:3577
 verify_by: 2026-11-18
 verify_how: 合并后 npx vitest run src/lib/social/recipe 全绿；第一阶段试跑时用 CTS 真配置算一次 Facebook 周方子，客户名额（每周 3 条 Reel）原样保留、来源标 client；行业模板与阶段不同处只出建议
 ---
