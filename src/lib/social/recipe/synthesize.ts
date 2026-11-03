@@ -254,6 +254,26 @@ function buildHumanReplyTopics(
   return result
 }
 
+function resolveQuotas(
+  stage: Parameters<typeof layerQuotas>[0],
+  template: Parameters<typeof layerQuotas>[1],
+  clientConfig: SynthesizeInput['clientConfig'],
+  suggestions: RecipeSuggestion[],
+) {
+  const layer = layerQuotas(stage, template)
+  const quotaConfig = clientConfig?.quota ?? null
+  const clientPostPerDay = readClientNumber(quotaConfig?.post_per_day)
+  const clientPost: ClientValue =
+    clientPostPerDay.filled && clientPostPerDay.value !== null
+      ? { filled: true, value: clientPostPerDay.value * 7 }
+      : { filled: false, value: null }
+  return {
+    reel: resolveQuota('reelPerWeek', readClientNumber(quotaConfig?.reel_per_week), layer.reelPerWeek, suggestions),
+    post: resolveQuota('postPerWeek', clientPost, layer.postPerWeek, suggestions),
+    story: resolveQuota('storyPerDay', readClientNumber(quotaConfig?.story_per_day), layer.storyPerDay, suggestions),
+  }
+}
+
 export function synthesizeWeeklyRecipe(input: SynthesizeInput): SynthesizeResult {
   const { platform, industryKey, stageSignals, clientConfig } = input
   const rules = platformRulesFor(platform)
@@ -268,20 +288,7 @@ export function synthesizeWeeklyRecipe(input: SynthesizeInput): SynthesizeResult
   const { stage, reasons } = computeStage(stageSignals)
   const template = industryTemplateFor(industryKey)
   const suggestions: RecipeSuggestion[] = []
-
-  const layer = layerQuotas(stage, template)
-  const quotaConfig = clientConfig?.quota ?? null
-  const clientReel = readClientNumber(quotaConfig?.reel_per_week)
-  const clientStory = readClientNumber(quotaConfig?.story_per_day)
-  const clientPostPerDay = readClientNumber(quotaConfig?.post_per_day)
-  const clientPost: ClientValue =
-    clientPostPerDay.filled && clientPostPerDay.value !== null
-      ? { filled: true, value: clientPostPerDay.value * 7 }
-      : { filled: false, value: null }
-
-  const reel = resolveQuota('reelPerWeek', clientReel, layer.reelPerWeek, suggestions)
-  const post = resolveQuota('postPerWeek', clientPost, layer.postPerWeek, suggestions)
-  const story = resolveQuota('storyPerDay', clientStory, layer.storyPerDay, suggestions)
+  const { reel, post, story } = resolveQuotas(stage, template, clientConfig, suggestions)
 
   const clientMix = buildClientMix(clientConfig?.content_pillars)
   const templateMix = buildTemplateMix(template)
