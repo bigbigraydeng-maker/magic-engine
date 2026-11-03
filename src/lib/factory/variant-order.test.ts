@@ -172,6 +172,15 @@ describe('buildVariantBrief', () => {
     expect(at(brief, 'copy')).toEqual({ caption: 'Fictional caption' })
   })
 
+  it('strips weekly_pack from the variant brief', () => {
+    const input = { ...baseBrief(), weekly_pack: { publish_on: '2026-11-10' } }
+    const r = buildVariantBrief(input, BASE_ID, { kind: 'hook', lines: okLines })
+    expect(r.ok).toBe(true)
+    if (!r.ok) throw new Error(r.error)
+    expect((r.brief as Record<string, unknown>).weekly_pack).toBeUndefined()
+    expect('weekly_pack' in r.brief).toBe(false)
+  })
+
   it('rejects an unchanged hook', () => {
     const r = buildVariantBrief(baseBrief(), BASE_ID, {
       kind: 'hook',
