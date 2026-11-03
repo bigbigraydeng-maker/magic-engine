@@ -8,6 +8,8 @@
  *   - 广告组自己出的结果跟客户主结果不是一种（WhatsApp 开聊组 vs 主结果留资）：按主结果数永远是 0，
  *     只能判不了（2026-11-03 生产库：CTS 的 WhatsApp 组连着 6 天被误报）。结果种类复用 rules/core-metric.ts
  * Meta 实验中的广告组不判（§14 M7）。
+ * 已经不在投放的广告组（暂停 / 系列被暂停 / 审核中）不判：钱已经不在流了，红灯只会误导；
+ * 有结果但结果数和有花费的天数都不到 D3_SMALL_SAMPLE → 样本太小先观察（0 结果照旧报）。
  *
  * 候选范围：获客 / 再营销（可进自动暂停建议）；另有类似人群（expansion）和流量组
  * （优化目标 LINK_CLICKS / LANDING_PAGE_VIEWS，任何角色）——这两类只提醒，`autoPauseEligible: false`，
@@ -15,13 +17,16 @@
  */
 
 import type { AccountContext } from './context'
-import { adsetRows, money, sumSpend, unitOf } from './context'
+import { adsetRows, isDelivering, money, sumSpend, unitOf } from './context'
 import { countOutcome, OUTCOME_STEP_LABEL } from '../outcome-ladder'
 import { CORE_METRIC_NOUN, resolveCoreMetric, type CoreMetric } from '../../rules/core-metric'
 import type { OutcomeStep } from '../outcome-ladder'
 import type { EntitySnapshotRow } from '../snapshot'
 import type { Diagnosis, DiagnosisInput } from './types'
 import { D3_COST_MULTIPLE } from './thresholds'
+
+/** 结果不到这么多个、且有花费的天数也不到这么多天：样本太小，先观察不报（零结果的白花钱不受这条限制） */
+export const D3_SMALL_SAMPLE = 3
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
@@ -82,6 +87,8 @@ function campaignTotalTail(ctx: AccountContext, input: DiagnosisInput, adset: En
 export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput): Diagnosis[] {
   const candidates = Array.from(ctx.adsets.values()).filter(s => {
     if (ctx.experimentIds.has(s.entity_id)) return false
+    // effective_status 读不到（null）时不当作已停：宁可多报一次，也不让读失败把整条诊断悄悄关掉
+    if (s.effective_status !== null && !isDelivering(s)) return false
     const role = ctx.roles.get(s.entity_id)?.role
     return isAutoPauseScope(role) || isAlertOnlyScope(role, s.optimization_goal)
   })
@@ -153,6 +160,8 @@ export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput
       continue
     }
     if (cpr !== null && cpr < threshold) continue
+    const spendDays = rows.filter(r => r.spend > 0).length
+    if (results > 0 && results < D3_SMALL_SAMPLE && spendDays < D3_SMALL_SAMPLE) continue
     const noteOnly = alertOnly ? '（只提醒，不会自动暂停）' : ''
     const who = `广告组「${s.entity_name ?? s.entity_id}」`
     const tail = campaignTotalTail(ctx, input, s)
@@ -160,11 +169,11 @@ export function diagnoseSpendNoResult(ctx: AccountContext, input: DiagnosisInput
       code: 'D3', status: 'hit',
       ...(alertOnly ? { autoPauseEligible: false } : {}),
       title: results === 0
-        ? `花钱没结果${noteOnly}：${who}近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[step]} 0 个${tail}`
-        : `花钱结果太少${noteOnly}：${who}近 7 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[step]} ${results} 个，每个 ${money(ctx, cpr)}（目标 ${money(ctx, target)}）${tail}`,
+        ? `花钱没结果${noteOnly}：${who}投放 ${spendDays} 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[step]} 0 个${tail}`
+        : `花钱结果太少${noteOnly}：${who}投放 ${spendDays} 天花了 ${money(ctx, spend)}，${OUTCOME_STEP_LABEL[step]} ${results} 个，每个 ${money(ctx, cpr)}（目标 ${money(ctx, target)}）${tail}`,
       units: [unit],
       evidence: { window_start: ctx.window[0], window_end: ctx.date, spend, results, cost_per_result: cpr, target_cost: target, multiple: D3_COST_MULTIPLE },
-      sample: [{ label: OUTCOME_STEP_LABEL[step], value: results }, { label: '有花费的天数', value: rows.filter(r => r.spend > 0).length }],
+      sample: [{ label: OUTCOME_STEP_LABEL[step], value: results }, { label: '有花费的天数', value: spendDays }],
       reasons: [`花费 ≥ ${D3_COST_MULTIPLE}× 目标，且单次成本 ≥ ${D3_COST_MULTIPLE}× 目标`],
       clientVisible: true,
     })

@@ -99,6 +99,9 @@ export function replaySnapshots(opts: {
   const ctx = { clientId, adAccountId: fixture.ad_account_id, currency: fixture.account.currency ?? null, sharedAccount: false }
   const rewinds = budgetRewinds(opts.activities, asOfIso)
   const spentNearDate = (ids: string[]) => daily.some(r => ids.includes(r.entity_id) && (r.insight_date === date || r.insight_date === shiftDate(date, -1)) && r.spend > 0)
+  // 广告组：窗口（date 往前 7 天）内花过钱就当「在投」。D3 只判在投的组，回放的是「当天它还在花钱时」的判断；
+  // 只看当天和前一天会把 8/21–8/25 花钱、8/26 才停的组当成已暂停，把 D3 的正例回放整个静音
+  const spentInWindow = (ids: string[]) => daily.some(r => ids.includes(r.entity_id) && r.insight_date >= shiftDate(date, -6) && r.insight_date <= date && r.spend > 0)
   const studiesOn = asOf >= Date.parse(opts.studies?.createdAtIso ?? '9999-01-01')
 
   const adsets = fixture.adsets.filter(s => existed(s.created_time))
@@ -115,7 +118,7 @@ export function replaySnapshots(opts: {
     const raw = rw ? { ...s, daily_budget: rw.oldMinor === null ? undefined : String(rw.oldMinor) } : s
     const withStudies = studiesOn && opts.studies?.byAdsetId[s.id] ? { ...raw, ad_studies: { data: opts.studies.byAdsetId[s.id] } } : raw
     const row = normalizeAdset(ctx, withStudies)
-    const live = spentNearDate([s.id])
+    const live = spentInWindow([s.id])
     drafts.push({ ...row, effective_status: live ? 'ACTIVE' : 'PAUSED', status: live ? 'ACTIVE' : 'PAUSED' })
   }
   for (const a of fixture.ads.filter(a => existed(a.created_time))) drafts.push(normalizeAd(ctx, a))

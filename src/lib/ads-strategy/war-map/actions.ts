@@ -63,7 +63,7 @@ function frequencyActions(rows: FrequencyRow[], staleNote: string): ActionRow[] 
     return [{
       key: `freq-${r.campaignId}`, severity: 'red',
       what: `${r.campaignName} 频率 ${r.frequency7d.toFixed(2)}，高于 3${staleNote}`,
-      how: '先换受众（扩大或轮换），再考虑降预算；改动前先看点击率有没有在掉', owner: 'agent',
+      how: '需要你决定：是换受众（扩大或轮换）还是降预算；改动前先看点击率有没有在掉。系统不会自动改这一项', owner: 'pm',
     }]
   })
 }
