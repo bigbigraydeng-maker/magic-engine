@@ -398,6 +398,16 @@ describe('临时刷新失败不把连接标坏（2026-11-03 CTS / NAL 的 GA4 �
     expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured'))).toBe(false)
   })
 
+  it('a 400 rejection whose body merely mentions network / HTTP 500 stays permanent (魏征补审 P2-1)', () => {
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('microsoft_mail', 'HTTP 400: {"error_description":"AADSTS70000: network policy blocked this grant"}'))).toBe(false)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 400: {"error":"invalid_grant","error_description":"see HTTP 500 docs"}'))).toBe(false)
+  })
+
+  it('a response cut off halfway (JSON parse error / terminated) is transient, not a dead connection', () => {
+    expect(isTransientRefreshFailure(new SyntaxError('Unexpected end of JSON input'))).toBe(true)
+    expect(isTransientRefreshFailure(new TypeError('terminated'))).toBe(true)
+  })
+
   it('a 500 from the provider throws but leaves the connection active', async () => {
     const { update } = setup()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'internal_failure' }), { status: 500 })))
