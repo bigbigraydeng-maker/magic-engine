@@ -5,6 +5,14 @@
 
 ---
 
+### 2026-11-04（广告成绩单每行可以调预算：加要 PM 本人批，减点了就改）
+
+PR [#3570](https://github.com/bigbigraydeng-maker/magic-engine/pull/3570)（合并 `15eed5847`；A 级，PM 回「合 3570」后 `--admin`；修复方案第 3 刀 3b）。广告健康页成绩单每行加「调预算」：确认框当场读 Meta 当前预算和上次修改时间，写客户日上限余量、+10% / +20% 能不能点和原因、能减到的最低金额、系统没法自动核对的几条。**加**：只提交，进成绩单下方新增的「等 PM 批的加预算」一栏，PM 本人批了才改；72 小时内 Meta 上改过（含人工）不让加；系列预算只在系列下恰好一个在投组时能加。**减**：复用人工止损，管理员点了就改，一次最多减 20%。顺带修了 ABO 广告组加预算原本提交不了的问题（幂等键去掉 campaign_id）。**已知限制**：内核核对客户预算合计时只认最新一轮快照写进去的行，新西兰白天加预算几乎总被拒，待另修。部署 12:16 UTC live；未登录访问新接口返回 401。台账卡 `2026-11-04-ads-knife3b-scorecard-budget-buttons`（11/10 验）。
+
+### 2026-11-04（加钱只有 PM 本人能批）
+
+PR [#3567](https://github.com/bigbigraydeng-maker/magic-engine/pull/3567)（合并 `085ac97b5`；A 级，PM 回「合 3567」后 `--admin`；修复方案第 3 刀 3a）。加预算 / 挪预算 / 新建再营销组（注册表 `spendIncrease: true`）不管客户策略写的是不是自动，只有 `ADS_SPEND_APPROVER_EMAILS` 名单里的人能批（PM 11-03 定只放 PM 本人 gmail）；内核五道闸（策略同步、授权预检、签批准、复用旧授权、执行前复核）。重开暂停的广告也改用同一名单。暂停、减预算不受影响。部署后手动触发同步：CTS 三条加钱类策略 `auto_approve` → `require_approval`（v3→v4），NAL 同三条（v1→v2），其余广告策略没动。台账卡 `2026-11-03-ads-knife3a-spend-gate-pm-only`（11/06 验）。
+
 ### 2026-11-03（包拯：每周复核 AI 判客人阶段准不准，CTS 已打开）
 
 PR [#3557](https://github.com/bigbigraydeng-maker/magic-engine/pull/3557)（合并 `073d8501e`；A 级，PM 回「合 3557」后 `--admin`；修复方案第 1b 刀）。新 agent「包拯」每周三新西兰 10:00 把上周 CRM「AI 读对话判阶段」的判断交给 Claude Sonnet，按判断那一刻已入库的对话独立再判一次，算 8 周准确率区间；两个模型判得不一样的进今日待办「系统判不了真假、要你认一下的」，复核页 `/dashboard/clients/<id>/baozheng/<判断编号>`（只给内部员工）点「原来的 AI 对 / 复核的对 / 都不对」，只记结论（`crm_segment_feedback`），**不改客人阶段**。另每周从「读不出来、放进新线索」里抽 5 个查漏判。规则书 `docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md`。
