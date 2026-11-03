@@ -7,6 +7,19 @@ export type ScaleKind = keyof typeof SCALE_STEPS // 'up10' | 'up20'
 /** B-04：同一对象 72 小时内只改一次（Meta 后台人工改的也算） */
 export const B04_MIN_HOURS = 72
 
+/**
+ * 加完的金额：向下取整（分）。四舍五入在个位是 3/4/8/9 时会多出 1 分，+20% 变成 20.004%，
+ * 内核 ±20% 闸会拒、执行时也会报错（魏征 11-04）。
+ */
+export function scaledAfterCents(currentCents: number, kind: ScaleKind): number {
+  return Math.floor(currentCents * SCALE_STEPS[kind])
+}
+
+/** 一次最多减 20% 时最低能减到多少：向上取整（分），避免多减 1 分变成 20.004%。 */
+export function minReduceCents(currentCents: number): number {
+  return Math.ceil(currentCents * (1 - STOP_LOSS_CUT_RATIO))
+}
+
 /** 规则手册里系统还没法自动核对的几条；预览里逐条写「没核对」，不假装查过。 */
 export const NOT_CHECKED_RULES: readonly string[] = [
   'E-13 ①：30 / 14 / 7 天三个窗口的单个结果成本都不高于客户目标',
@@ -83,7 +96,7 @@ function capHeadroom(cap: number | null, total: number | null): number | null {
 function cooldownReason(hours: number | null): string | null {
   if (hours === null) return '读不到 Meta 上次修改这个对象的时间，按刚改过处理'
   if (hours < B04_MIN_HOURS) {
-    return `Meta 上显示 ${hours} 小时前刚改过，72 小时内不再加（反复改会打乱 Meta 学习）`
+    return `Meta 上显示 ${hours} 小时前刚改过（改名、开关、改受众也算），72 小时内不再加（反复改会打乱 Meta 学习）`
   }
   return null
 }
@@ -107,7 +120,7 @@ function planScale(
   currentCents: number,
   hours: number | null,
 ): ScaleOption {
-  const afterCents = Math.round(currentCents * SCALE_STEPS[kind])
+  const afterCents = scaledAfterCents(currentCents, kind)
   const reasons: string[] = []
   if (facts.scaleBlockedReason !== null) reasons.push(facts.scaleBlockedReason)
   const cooldown = cooldownReason(hours)
@@ -118,7 +131,7 @@ function planScale(
 }
 
 function planReduce(currentCents: number): ReduceOption {
-  const minAfterCents = Math.round(currentCents * (1 - STOP_LOSS_CUT_RATIO))
+  const minAfterCents = minReduceCents(currentCents)
   if (minAfterCents < MIN_VIABLE_DAILY_CENTS) {
     return {
       minAfterCents: null,

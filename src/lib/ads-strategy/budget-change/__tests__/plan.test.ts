@@ -141,4 +141,13 @@ describe('validateReduceTarget', () => {
     const r = validateReduceTarget(plan, 8500.5)
     expect(r.ok).toBe(false)
   })
+
+  it('🔴 金额取整不越 20%：10003 分加 20% 是 12003（向下取整），最低减到 8003（向上取整）', () => {
+    const plan = planBudgetChange({ ...base, currentCents: 10003 })
+    expect(plan.up20.afterCents).toBe(12003)
+    expect(plan.up10.afterCents).toBe(11003)
+    expect(plan.reduce.minAfterCents).toBe(8003)
+    expect(((plan.up20.afterCents ?? 0) - 10003) / 10003).toBeLessThanOrEqual(0.2)
+    expect((10003 - (plan.reduce.minAfterCents ?? 0)) / 10003).toBeLessThanOrEqual(0.2)
+  })
 })

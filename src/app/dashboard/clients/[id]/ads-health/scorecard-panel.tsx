@@ -10,6 +10,7 @@ import type { AdsScorecard, BudgetVerdict, ScorecardUnit } from '@/lib/ads-strat
 import type { FunnelRole } from '@/lib/ads-strategy/portfolio/roles'
 import { OUTCOME_STEP_LABEL } from '@/lib/ads-strategy/portfolio/outcome-ladder'
 import BudgetChangeDialog, { type BudgetChangeDialogUnit } from './budget-change-dialog'
+import PendingScalePanel from './pending-scale-panel'
 
 const ROLE_LABEL: Record<FunnelRole, string> = {
   awareness: '认知',
@@ -113,6 +114,7 @@ function sampleText(u: ScorecardUnit): string {
 
 export default function ScorecardPanel({ scorecard, clientId }: { scorecard: AdsScorecard | { error: string } | undefined; clientId?: string }) {
   const [editing, setEditing] = React.useState<BudgetChangeDialogUnit | null>(null)
+  const [refreshKey, setRefreshKey] = React.useState(0)
 
   if (scorecard === undefined) {
     return (
@@ -237,12 +239,14 @@ export default function ScorecardPanel({ scorecard, clientId }: { scorecard: Ads
         </div>
       )}
 
+      {clientId && <PendingScalePanel clientId={clientId} refreshKey={refreshKey} />}
+
       <p className="text-xs text-gray-500">
         预算判断跟系统每天的「钱花多了 / 该多给钱」两条规则用的是同一套算法，这里只是把它写出来。
       </p>
 
       {clientId && editing && (
-        <BudgetChangeDialog clientId={clientId} unit={editing} onClose={() => setEditing(null)} />
+        <BudgetChangeDialog clientId={clientId} unit={editing} onClose={() => { setEditing(null); setRefreshKey(k => k + 1) }} />
       )}
     </section>
   )

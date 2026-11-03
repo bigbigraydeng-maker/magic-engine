@@ -17,6 +17,8 @@ import { requireStopLossAccess, submitStopLossThroughKernel } from '@/lib/action
 import { resolveAccountTimezone, accountDayKey } from '@/lib/ads-strategy/account-timezone'
 import { loadBudgetChange, type BudgetChangeUnit } from '@/lib/ads-strategy/budget-change/load'
 import { validateReduceTarget } from '@/lib/ads-strategy/budget-change/plan'
+import { assertCampaignOwnedByClient } from '@/lib/meta/campaign-ownership'
+import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 
 export const dynamic = 'force-dynamic'
 type Params = { params: { id: string } }
@@ -26,7 +28,12 @@ function parseUnit(level: unknown, unitId: unknown, adAccountId: unknown): Budge
   if (level !== 'adset' && level !== 'campaign') return null
   if (typeof unitId !== 'string' || !/^\d{1,32}$/.test(unitId)) return null
   if (typeof adAccountId !== 'string' || !/^(act_)?\d{1,32}$/.test(adAccountId)) return null
-  return { level, id: unitId, adAccountId }
+  return { level, id: unitId, adAccountId: actId(adAccountId) }
+}
+
+/** 广告账户编号统一带 act_ 前缀（快照、成绩单、内核输入都是这个写法）。 */
+function actId(adAccountId: string): string {
+  return adAccountId.startsWith('act_') ? adAccountId : `act_${adAccountId}`
 }
 
 export async function GET(req: NextRequest, { params }: Params): Promise<NextResponse> {
@@ -88,7 +95,8 @@ async function submitScale(clientId: string, unit: BudgetChangeUnit, kind: Exclu
     beforeCents: before, afterCents: option.afterCents, source: 'ads_health_scorecard',
     evidence: { kind, currency: loaded.plan.currency, target_level: unit.level, not_checked: loaded.plan.notChecked },
   })
-  if (outcome.kind !== 'pending_approval') {
+  // 同一天同一改动再点一次：内核拿回已在等批的那一条（幂等），也算提交成功
+  if (outcome.kind !== 'pending_approval' && outcome.kind !== 'idempotent_hit') {
     return NextResponse.json({ error: outcome.humanReason ?? '系统没有建立待批请求', kind: outcome.kind, runId: outcome.run.id }, { status: 409 })
   }
   return NextResponse.json({ ok: true, status: 'awaiting_approval', runId: outcome.run.id, beforeCents: before, afterCents: option.afterCents }, { status: 202 })
@@ -107,21 +115,29 @@ async function submitReduce(clientId: string, unit: BudgetChangeUnit, targetCent
   if (!check.ok || loaded.plan.currentCents === null || !loaded.target.campaignId) {
     return NextResponse.json({ error: check.ok ? '读不到这个组所属的系列' : check.reason }, { status: 409 })
   }
+  // 跟老止损路由一样，再核一次这个系列属于客户登记的广告账户（内核降预算能力本身不查归属）
+  const token = await getMetaTokenForClient(clientId)
+  if (!token) return NextResponse.json({ error: '暂时连不上这个客户的 Meta 账户' }, { status: 424 })
+  const ownership = await assertCampaignOwnedByClient(loaded.target.campaignId, clientId, token)
+  if (!ownership.ok) return NextResponse.json({ error: ownership.error }, { status: 403 })
   const goal = unit.level === 'adset' ? await activeGoalId(clientId) : null
   if (goal && 'error' in goal) return goal.error
-  const timezone = await resolveAccountTimezone(unit.adAccountId.startsWith('act_') ? unit.adAccountId : `act_${unit.adAccountId}`)
+  const timezone = await resolveAccountTimezone(unit.adAccountId)
   if (!timezone) return NextResponse.json({ error: '读不到广告账户时区' }, { status: 503 })
   const submitted = await submitStopLossThroughKernel(createKernel(supabaseAdmin), {
     clientId, access, goalId: goal?.id, campaignId: loaded.target.campaignId,
-    adAccountId: unit.adAccountId.startsWith('act_') ? unit.adAccountId : `act_${unit.adAccountId}`,
+    adAccountId: unit.adAccountId,
     requestId, cycleDate: accountDayKey(timezone, new Date()),
     action: unit.level === 'campaign' ? 'cut_campaign' : 'cut_unit',
     targets: [{ id: unit.id, name: unit.id, currentCents: loaded.plan.currentCents, afterCents: target }],
   })
   const run = submitted.runs[0]
   const executed = run?.kind === 'succeeded' || run?.kind === 'idempotent_hit'
+  // 跟老止损路由对齐：等批准 / 正在处理不是失败
+  const waiting = run?.kind === 'pending_approval' || run?.kind === 'in_progress'
+  const status = executed ? 'executed' : run?.kind === 'pending_approval' ? 'awaiting_approval' : run?.kind ?? 'refused'
   return NextResponse.json(
-    { ok: executed, status: executed ? 'executed' : run?.kind ?? 'refused', runId: run?.runId ?? null, reason: run?.humanReason ?? null, warnings: run?.warnings ?? [], beforeCents: loaded.plan.currentCents, afterCents: target },
-    { status: executed ? 200 : 409 },
+    { ok: executed || waiting, status, runId: run?.runId ?? null, reason: run?.humanReason ?? null, warnings: run?.warnings ?? [], beforeCents: loaded.plan.currentCents, afterCents: target },
+    { status: executed ? 200 : waiting ? 202 : 409 },
   )
 }

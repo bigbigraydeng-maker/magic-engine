@@ -225,7 +225,7 @@ function ReduceSection(props: {
           onChange={e => setDollars(e.target.value)}
           disabled={disabled || !plan.reduce.allowed}
           className="w-28 rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 disabled:opacity-50"
-          placeholder="美元"
+          placeholder={`每天金额（${cur ?? '账户币种'}）`}
         />
         <button
           type="button"
@@ -314,7 +314,7 @@ function ResultView(props: { state: SubmitState; onClose: () => void }) {
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
       <div className="max-w-md w-full rounded-xl bg-white p-4 space-y-3">
         {state.kind === 'pending' && (
-          <p className="text-xs text-gray-700">已提交，等 PM 本人批（在本页「O1 预算建议」那一栏批）</p>
+          <p className="text-xs text-gray-700">已提交，等 PM 本人批（在成绩单下方「等 PM 批的加预算」那一栏批）</p>
         )}
         {state.kind === 'done' && (
           <div className="space-y-1">

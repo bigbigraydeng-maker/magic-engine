@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   submitStop: vi.fn(),
   scaleAccess: vi.fn(),
   stopAccess: vi.fn(),
+  owned: vi.fn(),
   goal: { data: { id: 'goal-1' } as { id: string } | null, error: null as { message: string } | null },
 }))
 
@@ -23,6 +24,8 @@ vi.mock('@/lib/action-submission/stop-loss', () => ({
   requireStopLossAccess: h.stopAccess, submitStopLossThroughKernel: h.submitStop,
 }))
 vi.mock('@/lib/kernel', () => ({ createKernel: () => ({}) }))
+vi.mock('@/lib/meta/token-manager', () => ({ getMetaTokenForClient: async () => 'tok' }))
+vi.mock('@/lib/meta/campaign-ownership', () => ({ assertCampaignOwnedByClient: h.owned }))
 vi.mock('@/lib/ads-strategy/account-timezone', () => ({
   resolveAccountTimezone: async () => 'Pacific/Auckland', accountDayKey: () => '2026-11-04',
 }))
@@ -61,6 +64,7 @@ beforeEach(() => {
   h.load.mockResolvedValue(loaded())
   h.scaleAccess.mockResolvedValue(admin)
   h.stopAccess.mockResolvedValue(admin)
+  h.owned.mockResolvedValue({ ok: true, campaign: { id: '789' } })
   h.goal = { data: { id: 'goal-1' }, error: null }
   h.submitScale.mockResolvedValue({ kind: 'pending_approval', run: { id: 'run-1' }, humanReason: null })
   h.submitStop.mockResolvedValue({ action: 'cut_unit', runs: [{ entityId: '456', name: '456', runId: 'run-2', kind: 'succeeded', humanReason: null, warnings: [] }] })
@@ -133,5 +137,27 @@ describe('POST 减预算', () => {
 
   it('request_id 不是 UUID → 400', async () => {
     expect((await post({ ...unitBody, kind: 'down_to', target_cents: 8000, request_id: 'x' })).status).toBe(400)
+  })
+
+  it('🔴 系列不属于客户登记的广告账户 → 403，不执行', async () => {
+    h.owned.mockResolvedValue({ ok: false, error: '不属于这个客户' })
+    const res = await post({ ...unitBody, kind: 'down_to', target_cents: 8000, request_id: rid })
+    expect(res.status).toBe(403)
+    expect(h.submitStop).not.toHaveBeenCalled()
+  })
+
+  it('减系列预算 → 走系列降预算，不要求增长目标', async () => {
+    h.goal = { data: null, error: null }
+    h.load.mockResolvedValue({ ...loaded(), target: { level: 'campaign', id: '789', adAccountId: 'act_123', scaleAdsetId: null, campaignId: '789', cycleDate: '2026-11-03' } })
+    const res = await post({ level: 'campaign', unit_id: '789', ad_account_id: 'act_123', kind: 'down_to', target_cents: 8000, request_id: rid })
+    expect(res.status).toBe(200)
+    expect(h.submitStop).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'cut_campaign', goalId: undefined }))
+  })
+
+  it('内核要人批（规则不是自动）→ 202 等批，不当失败', async () => {
+    h.submitStop.mockResolvedValue({ action: 'cut_unit', runs: [{ entityId: '456', name: '456', runId: 'run-3', kind: 'pending_approval', humanReason: null, warnings: [] }] })
+    const res = await post({ ...unitBody, kind: 'down_to', target_cents: 8000, request_id: rid })
+    expect(res.status).toBe(202)
+    expect((await res.json()).status).toBe('awaiting_approval')
   })
 })

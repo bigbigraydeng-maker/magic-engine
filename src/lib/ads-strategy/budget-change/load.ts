@@ -13,12 +13,11 @@ import { createCapabilities } from '@/lib/capabilities'
 import { createAdsEnvelopeFactsResolver } from '@/lib/capabilities/ads/envelope-facts'
 import { isWithinPmScaleEnvelope, type EnvelopeVerdict } from '@/lib/kernel/autonomy-envelope'
 import { ACTION_REGISTRY } from '@/lib/kernel/registry'
-import { listAdSetsInCampaign } from '@/lib/meta/adsets'
+import { findSingleDeliveringChild } from './cbo-single-child'
 import { getBudgetEntityLive, type BudgetEntityLive } from '@/lib/meta/budget-entity-live'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 import type { AdsScorecard } from '@/lib/ads-strategy/portfolio/scorecard'
-import { planBudgetChange, SCALE_STEPS, type BudgetChangePlan, type ScaleKind } from './plan'
+import { planBudgetChange, scaledAfterCents, type BudgetChangePlan, type ScaleKind } from './plan'
 
 export interface BudgetChangeUnit {
   readonly level: 'adset' | 'campaign'
@@ -38,6 +37,7 @@ export type LoadBudgetChangeResult =
   | { readonly ok: true; readonly plan: BudgetChangePlan; readonly target: BudgetChangeTarget }
   | { readonly ok: false; readonly status: 403 | 409 | 424 | 500; readonly error: string }
 
+const SCORECARD_MAX_AGE_MS = 36 * 60 * 60 * 1000
 const fail = (status: 403 | 409 | 424 | 500, error: string): LoadBudgetChangeResult => ({ ok: false, status, error })
 const bare = (accountId: string) => accountId.replace(/^act_/, '')
 
@@ -45,11 +45,14 @@ const bare = (accountId: string) => accountId.replace(/^act_/, '')
 async function findInLatestScorecard(
   sb: SupabaseClient, clientId: string, unit: BudgetChangeUnit,
 ): Promise<{ found: true; date: string } | { found: false; error: string; status: 409 | 500 }> {
-  const { data, error } = await sb.from('ads_growth_states').select('date, payload')
+  const { data, error } = await sb.from('ads_growth_states').select('date, updated_at, payload')
     .eq('client_id', clientId).order('date', { ascending: false }).limit(1).maybeSingle()
   if (error) return { found: false, status: 500, error: '暂时读不到最新成绩单' }
   const scorecard = (data?.payload as { scorecard?: AdsScorecard | { error: string } } | null)?.scorecard
   if (!data || !scorecard || 'error' in scorecard) return { found: false, status: 409, error: '最新成绩单还没出来，暂时不能调' }
+  // 跟 O1 同一把尺子：成绩单超过 36 小时没更新就不认（旧日期会被当成这次调整的周期日期）
+  const age = Date.now() - Date.parse(String((data as { updated_at?: unknown }).updated_at ?? ''))
+  if (!Number.isFinite(age) || age < 0 || age > SCORECARD_MAX_AGE_MS) return { found: false, status: 409, error: '最新成绩单已经超过 36 小时没更新，等新一轮巡察后再调' }
   const hit = scorecard.units.some(u => u.level === unit.level && u.id === unit.id && u.adAccountId === unit.adAccountId)
   return hit ? { found: true, date: String(data.date) } : { found: false, status: 409, error: '这个组不在最新成绩单里（可能不是这个客户的，或这 7 天没花钱）' }
 }
@@ -63,13 +66,12 @@ async function resolveScaleSource(
     if (!live.daily_budget) return { scaleAdsetId: null, campaignId, blocked: '这个组的预算设在系列上，不能单独改这个组' }
     return { scaleAdsetId: unit.id, campaignId, blocked: null }
   }
-  const children = await listAdSetsInCampaign(unit.id, token)
-  if (!children) return { scaleAdsetId: null, campaignId: unit.id, blocked: '读不全这个系列下的广告组，先不让加' }
-  const delivering = children.filter(c => DELIVERING_STATUSES.has(c.effective_status ?? ''))
-  if (delivering.length !== 1 || !delivering[0]) {
-    return { scaleAdsetId: null, campaignId: unit.id, blocked: `这个系列下有 ${delivering.length} 个在投广告组，系统目前只支持「系列下只有一个在投组」时加系列预算；要加请先在 Meta 后台处理` }
-  }
-  return { scaleAdsetId: delivering[0].id, campaignId: unit.id, blocked: null }
+  const child = await findSingleDeliveringChild(unit.id, unit.adAccountId, token)
+  if (child.ok) return { scaleAdsetId: child.adsetId, campaignId: unit.id, blocked: null }
+  const blocked = child.reason === 'not_single'
+    ? `这个系列下有 ${child.deliveringCount ?? 0} 个在投广告组，系统目前只支持「系列下只有一个在投组」时加系列预算；要加请先在 Meta 后台处理`
+    : `${child.detail}，先不让加`
+  return { scaleAdsetId: null, campaignId: unit.id, blocked }
 }
 
 interface EnvelopeRead {
@@ -90,7 +92,7 @@ async function readEnvelope(
   const verdicts: Record<ScaleKind, EnvelopeVerdict | null> = { up10: null, up20: null }
   let caps = { cap: null as number | null, total: null as number | null }
   for (const kind of ['up10', 'up20'] as const) {
-    const afterCents = Math.round(currentCents * SCALE_STEPS[kind])
+    const afterCents = scaledAfterCents(currentCents, kind)
     const input: Record<string, unknown> = {
       cycle_date: target.cycleDate, ad_account_id: target.adAccountId, adset_id: target.scaleAdsetId,
       ...(target.level === 'campaign' && target.campaignId ? { campaign_id: target.campaignId } : {}),

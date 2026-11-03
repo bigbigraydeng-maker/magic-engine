@@ -26,9 +26,9 @@ const scorecardUnits = [
   { level: 'campaign', id: '789', adAccountId: 'act_123' },
 ]
 
-function db(units: unknown[] = scorecardUnits) {
+function db(units: unknown[] = scorecardUnits, updatedAt: string = new Date().toISOString()) {
   return createFakeSupabase({
-    ads_growth_states: [{ client_id: CLIENT, date: '2026-11-03', payload: { scorecard: { units } } }],
+    ads_growth_states: [{ client_id: CLIENT, date: '2026-11-03', updated_at: updatedAt, payload: { scorecard: { units } } }],
     ad_entity_snapshots: [
       { client_id: CLIENT, level: 'adset', entity_id: '456', currency: 'NZD', captured_at: '2026-11-03T00:00:00Z' },
       { client_id: CLIENT, level: 'campaign', entity_id: '789', currency: 'NZD', captured_at: '2026-11-03T00:00:00Z' },
@@ -82,7 +82,7 @@ describe('loadBudgetChange', () => {
 
   it('系列下两个在投组 → 不能加（写明原因），减照常', async () => {
     h.live.mockResolvedValue({ id: '789', daily_budget: '20000', updated_time: '2026-10-30T00:00:00+0000', account_id: '123' })
-    h.children.mockResolvedValue([{ id: 'a', effective_status: 'ACTIVE' }, { id: 'b', effective_status: 'ACTIVE' }])
+    h.children.mockResolvedValue([{ id: 'a', effective_status: 'ACTIVE', account_id: '123' }, { id: 'b', effective_status: 'ACTIVE', account_id: '123' }])
     const r = await loadBudgetChange(db(), CLIENT, { level: 'campaign', id: '789', adAccountId: 'act_123' }, NOW)
     if (!r.ok) throw new Error(r.error)
     expect(r.plan.up10.allowed).toBe(false)
@@ -93,7 +93,7 @@ describe('loadBudgetChange', () => {
 
   it('系列下只有一个在投组 → 用那个组去问信封，并带上 campaign_id', async () => {
     h.live.mockResolvedValue({ id: '789', daily_budget: '20000', updated_time: '2026-10-30T00:00:00+0000', account_id: '123' })
-    h.children.mockResolvedValue([{ id: 'a', effective_status: 'ACTIVE' }, { id: 'b', effective_status: 'PAUSED' }])
+    h.children.mockResolvedValue([{ id: 'a', effective_status: 'ACTIVE', account_id: '123' }, { id: 'b', effective_status: 'PAUSED', account_id: '123' }])
     const r = await loadBudgetChange(db(), CLIENT, { level: 'campaign', id: '789', adAccountId: 'act_123' }, NOW)
     if (!r.ok) throw new Error(r.error)
     expect(r.target.scaleAdsetId).toBe('a')
@@ -106,5 +106,37 @@ describe('loadBudgetChange', () => {
     if (!r.ok) throw new Error(r.error)
     expect(r.plan.up10.allowed).toBe(false)
     expect(r.plan.up10.reasons.join()).toContain('facts:读不到客户日上限')
+  })
+
+  it('🔴 成绩单里同编号但广告账户或层级不同 → 不认', async () => {
+    const other = [{ level: 'adset', id: '456', adAccountId: 'act_999' }, { level: 'campaign', id: '456', adAccountId: 'act_123' }]
+    const r = await loadBudgetChange(db(other), CLIENT, { level: 'adset', id: '456', adAccountId: 'act_123' }, NOW)
+    expect(r).toMatchObject({ ok: false, status: 409 })
+    expect(h.live).not.toHaveBeenCalled()
+  })
+
+  it('🔴 别的客户的成绩单里有这个组 → 不认（按客户过滤）', async () => {
+    const sb = createFakeSupabase({
+      ads_growth_states: [{ client_id: 'other-client', date: '2026-11-03', updated_at: new Date().toISOString(), payload: { scorecard: { units: scorecardUnits } } }],
+      ad_entity_snapshots: [],
+    })
+    const r = await loadBudgetChange(sb, CLIENT, { level: 'adset', id: '456', adAccountId: 'act_123' }, NOW)
+    expect(r).toMatchObject({ ok: false, status: 409 })
+  })
+
+  it('🔴 成绩单超过 36 小时没更新 → 不认', async () => {
+    const stale = new Date(Date.now() - 37 * 3_600_000).toISOString()
+    const r = await loadBudgetChange(db(scorecardUnits, stale), CLIENT, { level: 'adset', id: '456', adAccountId: 'act_123' }, NOW)
+    expect(r).toMatchObject({ ok: false, status: 409 })
+    expect(r.ok ? '' : r.error).toContain('36 小时')
+  })
+
+  it('系列下的组归属认不出 → 不能加，原因写明', async () => {
+    h.live.mockResolvedValue({ id: '789', daily_budget: '20000', updated_time: '2026-10-30T00:00:00+0000', account_id: '123' })
+    h.children.mockResolvedValue([{ id: 'a', effective_status: 'ACTIVE', account_id: '999' }])
+    const r = await loadBudgetChange(db(), CLIENT, { level: 'campaign', id: '789', adAccountId: 'act_123' }, NOW)
+    if (!r.ok) throw new Error(r.error)
+    expect(r.plan.up10.allowed).toBe(false)
+    expect(r.plan.up10.reasons[0]).toContain('归属或投放状态无法确认')
   })
 })

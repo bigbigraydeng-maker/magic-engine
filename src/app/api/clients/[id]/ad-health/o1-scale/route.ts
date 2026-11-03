@@ -3,17 +3,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { createKernel } from '@/lib/kernel'
 import { ADS_O1_BUDGET_SCALE_ACTION_KEY, requireAdsO1BudgetScaleAccess, submitAdsO1BudgetScale } from '@/lib/action-submission/ads-o1-budget-scale'
-import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
-import { listAdSetsInCampaign } from '@/lib/meta/adsets'
+import { findSingleDeliveringChild } from '@/lib/ads-strategy/budget-change/cbo-single-child'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 
 export const dynamic = 'force-dynamic'
 type Params = { params: { id: string } }
-const KNOWN_ADSET_STATUSES = new Set([
-  'ACTIVE', 'PAUSED', 'DELETED', 'ARCHIVED', 'PENDING_REVIEW', 'DISAPPROVED',
-  'PREAPPROVED', 'PENDING_BILLING_INFO', 'CAMPAIGN_PAUSED', 'ADSET_PAUSED',
-  'IN_PROCESS', 'WITH_ISSUES', 'INACTIVE',
-])
 
 async function requireStaff(clientId: string) {
   const access = await requireAdsO1BudgetScaleAccess(clientId)
@@ -102,14 +96,10 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     // Stored setting snapshots are incremental, so unchanged children may not
     // have a row for this round. Read the complete live list; the helper returns
     // null if any Meta page fails or its cursor cannot be trusted.
-    const siblings = await listAdSetsInCampaign(campaignId, token)
-    if (!siblings) return NextResponse.json({ error: '无法完整读取该系列下的广告组，未创建审批请求' }, { status: 409 })
-    if (siblings.some(row => row.account_id !== adAccountId.replace(/^act_/, '')
-      || !KNOWN_ADSET_STATUSES.has(row.effective_status ?? ''))) {
-      return NextResponse.json({ error: '该系列有广告组归属或投放状态无法确认，未创建审批请求' }, { status: 409 })
-    }
-    const deliveringChildren = siblings.filter(row => DELIVERING_STATUSES.has(row.effective_status ?? ''))
-    if (deliveringChildren.length !== 1 || deliveringChildren[0]?.id !== adsetId) {
+    const child = await findSingleDeliveringChild(campaignId, adAccountId, token)
+    if (!child.ok && child.reason === 'unreadable') return NextResponse.json({ error: '无法完整读取该系列下的广告组，未创建审批请求' }, { status: 409 })
+    if (!child.ok && child.reason === 'unknown_child') return NextResponse.json({ error: '该系列有广告组归属或投放状态无法确认，未创建审批请求' }, { status: 409 })
+    if (!child.ok || child.adsetId !== adsetId) {
       return NextResponse.json({ error: '该系列还有其他在投广告组，不能仅凭这一组的表现提高整个系列预算' }, { status: 409 })
     }
     budgetMinor = campaign.daily_budget_minor
