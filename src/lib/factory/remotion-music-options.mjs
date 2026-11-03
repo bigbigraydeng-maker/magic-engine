@@ -136,6 +136,18 @@ export function remotionMusicClearance(rawBriefRemotion) {
   return { verdict: 'pass', reason: '配乐已核无人声', track_id: track.id, clean_until_sec: cleanUntilSec }
 }
 
+/** Validate a remotion brief with the same template loader the worker runs, so bad props fail at order time, not render time. */
+export function checkRemotionProps(rawBriefRemotion) {
+  const brief = propsRecord(rawBriefRemotion)
+  if (!brief || !isTemplateId(brief.template)) return { ok: false, error: '未知模板' }
+  try {
+    loadTemplate(brief.template, brief.props)
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export function replaceRemotionMusic(rawBriefRemotion, musicId) {
   const brief = propsRecord(rawBriefRemotion)
   if (!brief || !isTemplateId(brief.template)) return null

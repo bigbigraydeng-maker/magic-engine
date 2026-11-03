@@ -29,6 +29,10 @@ export function remotionMusicChoices(rawBriefRemotion: unknown): RemotionMusicCh
 
 export function remotionMusicClearance(rawBriefRemotion: unknown): RemotionMusicClearance
 
+export function checkRemotionProps(
+  rawBriefRemotion: unknown,
+): { ok: true } | { ok: false; error: string }
+
 export function replaceRemotionMusic(
   rawBriefRemotion: unknown,
   musicId: string,
