@@ -189,6 +189,8 @@ def spec_insets(spec,x0,y0):
 
 def mobile_insets(spec,y):
     ins=spec.get('insets',[])
+    if len(ins)==1:
+        i=ins[0]; return inset(30,y,740,150,i['title'],i['nodes'],i['segs'],finish=i.get('finish'))
     return '\n'.join(inset(30+k*380,y,360,150,i['title'],i['nodes'],i['segs'],finish=i.get('finish')) for k,i in enumerate(ins))
 
 def legend(x,y,modes,maxw=592):

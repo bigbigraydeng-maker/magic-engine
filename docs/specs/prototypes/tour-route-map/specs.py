@@ -8,7 +8,7 @@ C = {
  'Dunhuang':(40.1421,94.6618),'Turpan':(42.9476,89.1841),'Urumqi':(43.8256,87.6168),
  'Chongqing':(29.5630,106.5516),'Chengdu':(30.5728,104.0668),'Dali':(25.6065,100.2676),
  'Kunming':(24.8801,102.8329),'Guilin':(25.2736,110.2907),'Yangshuo':(24.7784,110.4903),
- 'Guangzhou':(23.1291,113.2644),'Yangtze Cruise':(30.70,110.50),
+ 'Guangzhou':(23.1291,113.2644),'Zhangjiajie':(29.1170,110.4790),'Yangtze Cruise':(30.70,110.50),
 }
 def S(city,nights,acts,name=None):
     lat,lon=C[city]
@@ -118,6 +118,30 @@ TOURS['grand-tour'] = {
    {'dx':179,'dy':14,'w':155,'h':152,'title':'SHANGHAI AREA',
     'nodes':[('Shanghai','2 nights',0.2,0.68),('Suzhou','1 night',0.5,0.36),('Hangzhou','2 nights',0.8,0.68)],
     'segs':[(0,1,'coach',-22),(1,2,'coach',-22),(2,0,'coach',-22)],'finish':0},
+ ],
+}
+
+# Natural China (catalog v12/13): train Shanghai->Yichang, Yangtze cruise to Chongqing,
+# train to Chengdu, train to Zhangjiajie, flight back to Shanghai then Auckland.
+TOURS['landscapes'] = {
+ 'title':'NATURAL CHINA','subtitle':'19 Days · Shanghai · Three Gorges · Chengdu · Zhangjiajie · Fully inclusive',
+ 'origin':'Auckland','return_to':'Auckland','start_idx':0,'finish_idx':0,
+ 'cards':[
+   S('Shanghai','3 nights',['City God Temple & Yu Garden','Zhujiajiao Water Town','Jade Buddha Temple & Shanghai Museum East']),
+   S('Yangtze Cruise','4 nights',['5-star Three Gorges cruise','Yichang to Chongqing']),
+   S('Chongqing','2 nights',['Dazu Rock Carvings (UNESCO)','Liziba Light Rail']),
+   S('Chengdu','4 nights',['Giant panda breeding base','Leshan Giant Buddha',"People's Park tea culture"]),
+   S('Zhangjiajie','3 nights',['National Forest Park & Bailong Elevator','Golden Whip Stream','Grand Canyon glass bridge']),
+ ],
+ 'stops':[
+   S('Shanghai','3 nights',[]),
+   dict(S('Chongqing','13 nights',[],name='Three Gorges to Zhangjiajie'),lbl_off=(0,60)),
+ ],
+ 'segments':[{'a':0,'b':1,'mode':'train','off':-50},{'a':1,'b':0,'mode':'flight','off':-50}],
+ 'insets':[
+   {'dx':12,'dy':14,'w':330,'h':120,'title':'CENTRAL CHINA ROUTE',
+    'nodes':[('Yichang','4 nights',0.1,0.5),('Chongqing','2 nights',0.37,0.5),('Chengdu','4 nights',0.64,0.5),('Zhangjiajie','3 nights',0.9,0.5)],
+    'segs':[(0,1,'cruise',0),(1,2,'train',0),(2,3,'train',0)]},
  ],
 }
 
