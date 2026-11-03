@@ -11,4 +11,6 @@ export const LOGISTICS_ADS_PLAYBOOK: AdsPlaybook = {
   resultNoun: '真实询价',
   costPerResultLabel: '每个询价',
   expectedGeoNoun: '服务地区',
+  creativeCompareMinLinkClicks: null,
+  creativeOfferNoun: null,
 }
