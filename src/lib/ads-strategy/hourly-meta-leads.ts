@@ -45,18 +45,58 @@ export function nzDateFromIso(iso: string): string | null {
   return nzDateFromMs(ms)
 }
 
-export function nzHourFromIso(iso: string): number | null {
+interface NzClock {
+  hour: number
+  minute: number
+  second: number
+}
+
+function nzPart(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPartTypes): number | null {
+  const raw = parts.find(p => p.type === type)?.value
+  if (raw === undefined) return null
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : null
+}
+
+/** 新西兰钟点、分、秒。同一时刻比较用，避免只截到整点。 */
+export function nzClockFromIso(iso: string): NzClock | null {
   const ms = Date.parse(iso)
   if (Number.isNaN(ms)) return null
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: NZ,
     hour: 'numeric',
-    hour12: false,
+    minute: 'numeric',
+    second: 'numeric',
+    hourCycle: 'h23',
   }).formatToParts(new Date(ms))
-  const h = parts.find(p => p.type === 'hour')?.value
-  if (h === undefined) return null
-  const n = Number(h)
-  return Number.isFinite(n) && n >= 0 && n <= 23 ? n : null
+  const hour = nzPart(parts, 'hour')
+  const minute = nzPart(parts, 'minute')
+  const second = nzPart(parts, 'second')
+  if (hour === null || minute === null || second === null) return null
+  const h = hour === 24 ? 0 : hour
+  if (h < 0 || h > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) return null
+  return { hour: h, minute, second }
+}
+
+export function nzHourFromIso(iso: string): number | null {
+  return nzClockFromIso(iso)?.hour ?? null
+}
+
+function clockAtOrBefore(clock: NzClock, cutoff: NzClock): boolean {
+  if (clock.hour !== cutoff.hour) return clock.hour < cutoff.hour
+  if (clock.minute !== cutoff.minute) return clock.minute < cutoff.minute
+  return clock.second <= cutoff.second
+}
+
+/** 历史日累计：只计新西兰时分秒不晚于 cutoff 的记录。 */
+function sumDayThroughClock(rows: readonly HourlyLeadTouch[], day: string, cutoff: NzClock): number {
+  let n = 0
+  for (const row of rows) {
+    if (nzDateFromIso(row.occurred_at) !== day) continue
+    const clock = nzClockFromIso(row.occurred_at)
+    if (clock && clockAtOrBefore(clock, cutoff)) n += 1
+  }
+  return n
 }
 
 /** @deprecated 使用 nzDayMinus；保留导出名供路由 import 不变 */
@@ -112,15 +152,14 @@ export function buildHourlyLeadChart(
 ): HourlyLeadBuildResult {
   if (!Number.isFinite(now.getTime())) return { ok: false, reason: '时间无效' }
   const today = nzToday(now.getTime())
-  const currentHour = nzHourFromIso(now.toISOString())
-  if (currentHour === null) return { ok: false, reason: '钟点读不到' }
+  const cutoff = nzClockFromIso(now.toISOString())
+  if (cutoff === null) return { ok: false, reason: '钟点读不到' }
+  const currentHour = cutoff.hour
 
   const byDay = bucketTouchpoints(rows)
   const todayHours = byDay.get(today) ?? emptyDayMap()
   const yesterday = nzDayMinus(today, 1)
   const lastWeek = nzDayMinus(today, 7)
-  const yHours = byDay.get(yesterday) ?? emptyDayMap()
-  const lwHours = byDay.get(lastWeek) ?? emptyDayMap()
 
   const bars: HourlyLeadBar[] = []
   for (let hour = 0; hour <= currentHour; hour++) {
@@ -140,8 +179,8 @@ export function buildHourlyLeadChart(
       bars,
       totals: {
         todaySoFar: sumHours(todayHours, currentHour),
-        yesterdaySameTime: sumHours(yHours, currentHour),
-        lastWeekSameWeekdaySameTime: sumHours(lwHours, currentHour),
+        yesterdaySameTime: sumDayThroughClock(rows, yesterday, cutoff),
+        lastWeekSameWeekdaySameTime: sumDayThroughClock(rows, lastWeek, cutoff),
       },
     },
   }

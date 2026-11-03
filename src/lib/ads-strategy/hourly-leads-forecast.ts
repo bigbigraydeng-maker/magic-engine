@@ -48,6 +48,32 @@ function sumThroughHour(hours: readonly number[], through: number): number {
   return n
 }
 
+function historyCumulativeShares(
+  byDay: ReadonlyMap<string, number[]>,
+  today: string,
+  lastReliableHour: number,
+): number[] {
+  const proportions: number[] = []
+  for (let d = 1; d <= FORECAST_HISTORY_DAYS; d++) {
+    const day = isoDayMinus(today, d)
+    const hours = byDay.get(day)
+    if (!hours) continue
+    const total = dayTotal(hours)
+    if (total < FORECAST_MIN_DAY_TOTAL || lastReliableHour < 0) continue
+    proportions.push(sumThroughHour(hours, lastReliableHour) / total)
+  }
+  return proportions
+}
+
+function clampRangeToObserved(rawMin: number, rawMax: number, observed: number): { rangeMin: number; rangeMax: number } {
+  const rangeMin = Math.max(observed, rawMin)
+  const rangeMax = Math.max(observed, rawMax)
+  return {
+    rangeMin: Math.min(rangeMin, rangeMax),
+    rangeMax: Math.max(rangeMin, rangeMax),
+  }
+}
+
 function sampleStdDev(values: readonly number[], mean: number): number {
   if (values.length < 2) return 0
   const variance = values.reduce((acc, v) => acc + (v - mean) ** 2, 0) / values.length
@@ -70,17 +96,7 @@ export function computeDailyLeadForecast(
   currentHour: number,
 ): LeadForecast {
   const lastReliableHour = historyReliableHour(currentHour)
-  const proportions: number[] = []
-  for (let d = 1; d <= FORECAST_HISTORY_DAYS; d++) {
-    const day = isoDayMinus(today, d)
-    const hours = byDay.get(day)
-    if (!hours) continue
-    const total = dayTotal(hours)
-    if (total < FORECAST_MIN_DAY_TOTAL) continue
-    if (lastReliableHour < 0) continue
-    const through = sumThroughHour(hours, lastReliableHour)
-    proportions.push(through / total)
-  }
+  const proportions = historyCumulativeShares(byDay, today, lastReliableHour)
 
   if (proportions.length < FORECAST_MIN_ELIGIBLE_DAYS) {
     return { status: 'insufficient', message: '数据不足，不预测' }
@@ -101,14 +117,15 @@ export function computeDailyLeadForecast(
   const lowShare = Math.max(meanShare - std, 0.01)
   const highShare = Math.min(meanShare + std, 0.99)
 
-  const rangeMax = Math.max(0, Math.ceil(arrived / lowShare))
-  const rangeMin = Math.max(0, Math.floor(arrived / highShare))
+  const rawMax = Math.max(0, Math.ceil(arrived / lowShare))
+  const rawMin = Math.max(0, Math.floor(arrived / highShare))
+  const bounded = clampRangeToObserved(rawMin, rawMax, dayTotal(todayHours))
 
   const n = proportions.length
   return {
     status: 'ok',
-    rangeMin: Math.min(rangeMin, rangeMax),
-    rangeMax: Math.max(rangeMin, rangeMax),
+    rangeMin: bounded.rangeMin,
+    rangeMax: bounded.rangeMax,
     historyDays: n,
     disclaimer: `按过去 ${n} 天的每小时规律推算，预算或广告一变就会不准`,
   }

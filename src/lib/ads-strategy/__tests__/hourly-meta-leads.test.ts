@@ -73,4 +73,21 @@ describe('buildHourlyLeadChart', () => {
   it('invalid now → not ok (unreadable path)', () => {
     expect(buildHourlyLeadChart([], new Date(Number.NaN)).ok).toBe(false)
   })
+
+  it('昨天/上周同一时间截到新西兰时分秒，不把当前整点算完', () => {
+    // 2026-10-20 03:30:00Z = 16:30:00 NZDT
+    const rows = [
+      { occurred_at: '2026-10-19T03:59:00.000Z' }, // 昨天 16:59 — 不计
+      { occurred_at: '2026-10-19T03:30:01.000Z' }, // 昨天 16:30:01 — 不计
+      { occurred_at: '2026-10-19T03:30:00.000Z' }, // 昨天 16:30:00 — 计
+      { occurred_at: '2026-10-19T02:00:00.000Z' }, // 昨天 15:00 — 计
+      { occurred_at: '2026-10-13T03:59:00.000Z' }, // 上周同一天 16:59 — 不计
+      { occurred_at: '2026-10-13T03:29:00.000Z' }, // 上周同一天 16:29 — 计
+    ]
+    const r = buildHourlyLeadChart(rows, NOW)
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.chart.totals.yesterdaySameTime).toBe(2)
+    expect(r.chart.totals.lastWeekSameWeekdaySameTime).toBe(1)
+  })
 })
