@@ -23,7 +23,7 @@ import type { DiagnosisInput } from './diagnostics/types'
 const ID_CHUNK = 100
 
 interface StageRow { id: string; stage_key: string | null }
-interface ContactRow { id: string; stage: string | null; attr_adset_id: string | null; created_at: string }
+interface ContactRow { id: string; stage: string | null; attr_adset_id: string | null; attr_campaign_id: string | null; created_at: string }
 interface EventRow { id: string; contact_id: string; to_stage: string; changed_by: string | null; created_at: string }
 interface TouchRow {
   id: string
@@ -93,7 +93,7 @@ async function loadContacts(clientId: string, startIso: string, endIso: string):
   return fetchAll<ContactRow>((from, to) =>
     supabaseAdmin
       .from('contacts')
-      .select('id, stage, attr_adset_id, created_at')
+      .select('id, stage, attr_adset_id, attr_campaign_id, created_at')
       .eq('client_id', clientId)
       .gte('created_at', startIso)
       .lte('created_at', endIso)
@@ -170,6 +170,7 @@ function buildContacts(
   return contacts.map(c => ({
     id: c.id,
     adsetId: c.attr_adset_id,
+    campaignId: c.attr_campaign_id,
     createdAt: c.created_at,
     stage: c.stage,
     events: (eventsByContact.get(c.id) ?? []).map(toEvent),
@@ -181,7 +182,8 @@ export async function loadQualifiedBlock(input: DiagnosisInput): Promise<Qualifi
   try {
     const tz = input.accounts[0]?.timezone ?? null
     const windowStart = shiftDate(input.date, -(QUALIFIED_WINDOW_DAYS - 1))
-    const startIso = new Date(localDayEndUtc(shiftDate(windowStart, -1), tz) + 1).toISOString()
+    // 跟成绩单同一种切法（context.ts：前一天最后一刻 + 1000 毫秒）
+    const startIso = new Date(localDayEndUtc(shiftDate(windowStart, -1), tz) + 1000).toISOString()
     const endMs = localDayEndUtc(input.date, tz)
     const endIso = new Date(endMs).toISOString()
 
@@ -214,6 +216,8 @@ export async function loadQualifiedBlock(input: DiagnosisInput): Promise<Qualifi
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e)
-    return { error: '合格客人这一块没算出来：' + message }
+    // 原始报错只进日志；页面上只给人话
+    console.error('[qualified-leads] load failed', { clientId: input.clientId, date: input.date, message })
+    return { error: '读库出错' }
   }
 }

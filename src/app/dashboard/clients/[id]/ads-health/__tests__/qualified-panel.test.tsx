@@ -36,9 +36,14 @@ describe('面板', () => {
     const rows = [...container.querySelectorAll('tbody tr')].map(r => [...r.querySelectorAll('td')].map(td => td.textContent))
     expect(rows[0]).toEqual(['组A', '61', '5（人 2 · 系统 3）', '0', '43', '13'])
     expect(rows[1]).toEqual(['未命名组 …190307近 7 天已停投', '27', '4（人 4）', '0', '21', '2'])
-    expect(screen.getByText('另有 18 个合格客人对不上是哪个广告组带来的，不在表里。')).toBeTruthy()
+    expect(screen.getByText('另有 18 个合格客人不是由广告组带来的（官网、邮件、WhatsApp 等，或来源没记下），不在表里。')).toBeTruthy()
     expect(screen.getByText('ME 里没跟进记录')).toBeTruthy()
     expect(screen.getByText(/在 ME 外面打的电话、发的消息看不到/)).toBeTruthy()
+  })
+
+  it('不在今天快照里的组写「投放状态不明」，不冒充停投', () => {
+    const { container } = render(<QualifiedPanel block={block({ rows: [row({ name: '组Z', stoppedLast7d: null })] })} />)
+    expect(container.querySelector('tbody td')!.textContent).toBe('组Z不在今天的广告快照里，投放状态不明')
   })
 
   it('还没设置哪些阶段算合格 → 说去哪设置，不画表', () => {

@@ -41,8 +41,9 @@ type Err = { code?: string; message: string } | null
 
 function fake(opts: { row?: Row | null; readError?: Err; updateError?: Err } = {}) {
   let row: Row | null = opts.row === undefined ? { client_id: CLIENT, primary_result: 'lead', outcome_config_updated_by: 'old@x.com' } : opts.row
+  const filters: Array<[string, string, string]> = []
   const update = vi.fn((patch: Row) => ({
-    eq: () => ({
+    eq: (col: string, val: string) => (filters.push(['ad_strategy_configs:update', col, val]), {
       select: async () => {
         if (opts.updateError) return { data: null, error: opts.updateError }
         if (!row) return { data: [], error: null }
@@ -54,11 +55,11 @@ function fake(opts: { row?: Row | null; readError?: Err; updateError?: Err } = {
   const insertLike = vi.fn()
   mockFrom.mockImplementation(((table: string) => {
     if (table === 'client_pipeline_stages') {
-      return { select: () => ({ eq: () => ({ order: async () => ({ data: STAGES, error: null }) }) }) }
+      return { select: () => ({ eq: (col: string, val: string) => (filters.push(['client_pipeline_stages', col, val]), { order: async () => ({ data: STAGES, error: null }) }) }) }
     }
     if (table === 'ad_strategy_configs') {
       return {
-        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: opts.readError ? null : row, error: opts.readError ?? null }) }) }),
+        select: () => ({ eq: (col: string, val: string) => (filters.push(['ad_strategy_configs:select', col, val]), { maybeSingle: async () => ({ data: opts.readError ? null : row, error: opts.readError ?? null }) }) }),
         update,
         upsert: insertLike,
         insert: insertLike,
@@ -66,7 +67,7 @@ function fake(opts: { row?: Row | null; readError?: Err; updateError?: Err } = {
     }
     throw new Error(`unexpected table ${table}`)
   }) as never)
-  return { update, insertLike, current: () => row }
+  return { update, insertLike, filters, current: () => row }
 }
 
 const params = () => ({ params: { id: CLIENT } })
@@ -116,6 +117,14 @@ describe('PATCH', () => {
     expect(patch.qualified_stages_updated_by).toBe(STAFF)
     expect(t.current()).toMatchObject({ primary_result: 'lead', outcome_config_updated_by: 'old@x.com' })
     expect((await res.json()).selected).toEqual(['quoted', 'deposit_paid'])
+  })
+
+  it('读、写都只按路径里这个客户筛（不会改到别人的行）', async () => {
+    const t = fake()
+    await PATCH(patchReq({ qualified_stage_keys: ['quoted'] }), params())
+    expect(t.filters.length).toBeGreaterThanOrEqual(3)
+    expect(t.filters.every(([, col, val]) => col === 'client_id' && val === CLIENT)).toBe(true)
+    expect(t.filters.map(f => f[0])).toContain('ad_strategy_configs:update')
   })
 
   it('空列表 = 清空，存成 null', async () => {

@@ -17,8 +17,10 @@ export interface QualifiedEvent { toStage: string; changedBy: string | null; cre
 
 export interface QualifiedContact {
   id: string
-  /** contacts.attr_adset_id：第一次是哪个广告组带来的；null = 对不上组 */
+  /** contacts.attr_adset_id：第一次是哪个广告组带来的；null = 不是广告组带来的（或没记下） */
   adsetId: string | null
+  /** contacts.attr_campaign_id：组不在今天的快照里时，用它找「整个系列分钱」的系列 */
+  campaignId?: string | null
   createdAt: string
   stage: string | null
   events: QualifiedEvent[]
@@ -40,8 +42,8 @@ export interface QualifiedRow {
   id: string
   name: string | null
   level: 'campaign' | 'adset'
-  /** 近 7 天没花钱（或不在今天的广告快照里） */
-  stoppedLast7d: boolean
+  /** 近 7 天没花钱；null = 不在今天的广告快照里，投放状态不明 */
+  stoppedLast7d: boolean | null
   /** 近 30 天这个组带来的新客人 */
   leads: number
   qualified: { total: number } & QualifiedByWriter
@@ -61,7 +63,7 @@ export interface QualifiedBlock {
   /** 设置里登记了、但客户阶段表里已经没有的阶段（计算时忽略） */
   staleStageKeys: string[]
   rows: QualifiedRow[]
-  /** 合格、但对不上是哪个广告组带来的客人数 */
+  /** 合格、但不是由广告组带来的（官网、邮件、WhatsApp 等，或来源没记下）客人数 */
   unattributedQualified: number
 }
 
@@ -81,6 +83,15 @@ export interface QualifiedComputeArgs {
 
 const MS_PER_DAY = 86_400_000
 
+/** 电话记了「没接通 / 空号 / 客人打来没人接」= 没联系上，不算跟进（设计 §3；isHumanFollowup 本身不改，CRM 别处在用）。 */
+const UNREACHED_PHONE_OUTCOMES: ReadonlySet<string> = new Set(['no_answer', 'bad_number', 'missed_inbound'])
+
+function reachedFollowup(t: LeadTouch): boolean {
+  if (!isHumanFollowup(t)) return false
+  const outcome = t.metadata?.outcome
+  return !(t.channel === 'phone' && typeof outcome === 'string' && UNREACHED_PHONE_OUTCOMES.has(outcome))
+}
+
 function emptyByWriter(): QualifiedByWriter {
   return { human: 0, system: 0, ai: 0, unknown: 0 }
 }
@@ -96,11 +107,15 @@ function buildUnitMap(units: QualifiedUnitRef[]): Map<string, QualifiedUnitRef> 
 
 function resolveUnit(
   adsetId: string,
+  campaignId: string | null,
   unitMap: Map<string, QualifiedUnitRef>,
   synthetic: Map<string, QualifiedUnitRef>,
 ): QualifiedUnitRef {
   const found = unitMap.get(adsetId)
   if (found) return found
+  // 组不在快照里、但它的系列是「整个系列分钱」的单位 → 并进系列
+  const viaCampaign = campaignId ? unitMap.get(campaignId) : undefined
+  if (viaCampaign && viaCampaign.level === 'campaign') return viaCampaign
   const existing = synthetic.get(adsetId)
   if (existing) return existing
   const created: QualifiedUnitRef = {
@@ -114,19 +129,19 @@ function resolveUnit(
   return created
 }
 
-function firstFollowupMs(contact: QualifiedContact): number | null {
+function firstFollowupMs(contact: QualifiedContact, endUtcMs: number): number | null {
   const createdMs = Date.parse(contact.createdAt)
   let first: number | null = null
   for (const touch of contact.touches) {
-    if (!isHumanFollowup(touch)) continue
+    if (!reachedFollowup(touch)) continue
     const ms = Date.parse(touch.occurredAt)
-    if (ms < createdMs) continue
+    if (ms < createdMs || ms > endUtcMs) continue
     if (first === null || ms < first) first = ms
   }
   for (const event of contact.events) {
     if (classifyStageWriter(event.changedBy) !== 'human') continue
     const ms = Date.parse(event.createdAt)
-    if (ms < createdMs) continue
+    if (ms < createdMs || ms > endUtcMs) continue
     if (first === null || ms < first) first = ms
   }
   return first
@@ -138,19 +153,35 @@ interface ContactOutcome {
   bucket: 'followedNotQualified' | 'noFollowup' | 'observing' | null
 }
 
+/**
+ * 窗口结束那一刻客人在哪个阶段：之后再没变过就是现在的阶段；之后变过就取结束前最后一条记录
+ * （巡察清早算「昨天」时，凌晨刚被标的阶段不能算进昨天，也不能因此丢掉谁标的）。
+ */
+function stageAtEnd(contact: QualifiedContact, endUtcMs: number): string | null {
+  const changedAfterEnd = contact.events.some((e) => Date.parse(e.createdAt) > endUtcMs)
+  if (!changedAfterEnd) return contact.stage
+  let last: QualifiedEvent | null = null
+  for (const e of contact.events) {
+    if (Date.parse(e.createdAt) > endUtcMs) continue
+    if (last === null || Date.parse(e.createdAt) > Date.parse(last.createdAt)) last = e
+  }
+  return last ? last.toStage : null
+}
+
 function classifyContact(
   contact: QualifiedContact,
   valid: Set<string>,
   endUtcMs: number,
   observeDays: number,
 ): ContactOutcome {
+  // 只认窗口结束之前发生的事：回放旧日子时要跟当天看到的一致
   const qualifyingEvents = contact.events
-    .filter((e) => valid.has(e.toStage))
+    .filter((e) => valid.has(e.toStage) && Date.parse(e.createdAt) <= endUtcMs)
     .slice()
     .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
 
-  const isQualified =
-    (contact.stage !== null && valid.has(contact.stage)) || qualifyingEvents.length > 0
+  const stage = stageAtEnd(contact, endUtcMs)
+  const isQualified = (stage !== null && valid.has(stage)) || qualifyingEvents.length > 0
 
   if (isQualified) {
     const writer =
@@ -158,7 +189,7 @@ function classifyContact(
     return { qualified: true, writer, bucket: null }
   }
 
-  const first = firstFollowupMs(contact)
+  const first = firstFollowupMs(contact, endUtcMs)
   if (first === null) return { qualified: false, writer: 'unknown', bucket: 'noFollowup' }
   if (first > endUtcMs - observeDays * MS_PER_DAY) {
     return { qualified: false, writer: 'unknown', bucket: 'observing' }
@@ -168,6 +199,8 @@ function classifyContact(
 
 interface RowAccumulator {
   unit: QualifiedUnitRef
+  /** false = 组不在今天的广告快照里（临时建的行），投放状态不明 */
+  inSnapshot: boolean
   leads: number
   qualified: { total: number } & QualifiedByWriter
   followedNotQualified: number
@@ -175,9 +208,10 @@ interface RowAccumulator {
   observing: number
 }
 
-function newAccumulator(unit: QualifiedUnitRef): RowAccumulator {
+function newAccumulator(unit: QualifiedUnitRef, inSnapshot: boolean): RowAccumulator {
   return {
     unit,
+    inSnapshot,
     leads: 0,
     qualified: { total: 0, ...emptyByWriter() },
     followedNotQualified: 0,
@@ -203,7 +237,7 @@ function toRow(acc: RowAccumulator): QualifiedRow {
     id: acc.unit.id,
     name: acc.unit.name,
     level: acc.unit.level,
-    stoppedLast7d: !acc.unit.spentLast7d,
+    stoppedLast7d: acc.inSnapshot ? !acc.unit.spentLast7d : null,
     leads: acc.leads,
     qualified: acc.qualified,
     followedNotQualified: acc.followedNotQualified,
@@ -231,10 +265,10 @@ export function computeQualifiedBlock(args: QualifiedComputeArgs): QualifiedBloc
       continue
     }
 
-    const unit = resolveUnit(contact.adsetId, unitMap, synthetic)
+    const unit = resolveUnit(contact.adsetId, contact.campaignId ?? null, unitMap, synthetic)
     let acc = accumulators.get(unit.id)
     if (!acc) {
-      acc = newAccumulator(unit)
+      acc = newAccumulator(unit, !synthetic.has(unit.id))
       accumulators.set(unit.id, acc)
     }
     applyOutcome(acc, outcome)

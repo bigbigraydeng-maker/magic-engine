@@ -49,7 +49,7 @@ export default function QualifiedPanel({ block }: { block: QualifiedBlock | { er
       <h3 className="text-sm font-semibold text-gray-800">近 30 天带来的客人质量</h3>
 
       <p className="text-xs text-gray-500">
-        {win.start} → {win.end} 新进的客人，按第一次是哪个组带来的算 · 只给内部员工看 · 不进预算判断
+        {win.start} → {win.end} 第一次进 ME 的客人，按第一次是哪个组带来的算（老客人被广告重新带回来的不算在内）· 只给内部员工看 · 不进预算判断
       </p>
 
       {staleStageKeys.length > 0 && (
@@ -78,7 +78,8 @@ export default function QualifiedPanel({ block }: { block: QualifiedBlock | { er
                 <tr key={`${row.level}-${row.id}`}>
                   <td className="pr-3 py-1 align-top text-gray-700 min-w-[8rem]">
                     <span>{row.name ?? `未命名组 ${tail(row.id)}`}{row.level === 'campaign' ? '（整个系列分钱）' : ''}</span>
-                    {row.stoppedLast7d && <span className="block text-gray-500">近 7 天已停投</span>}
+                    {row.stoppedLast7d === true && <span className="block text-gray-500">近 7 天已停投</span>}
+                    {row.stoppedLast7d === null && <span className="block text-gray-500">不在今天的广告快照里，投放状态不明</span>}
                   </td>
                   <td className="pr-3 py-1 align-top text-gray-700 whitespace-nowrap">{row.leads}</td>
                   <td className="pr-3 py-1 align-top text-gray-700 whitespace-nowrap">{qualifiedCell(row.qualified)}</td>
@@ -94,12 +95,12 @@ export default function QualifiedPanel({ block }: { block: QualifiedBlock | { er
 
       {unattributedQualified > 0 && (
         <p className="text-xs text-gray-500">
-          另有 {unattributedQualified} 个合格客人对不上是哪个广告组带来的，不在表里。
+          另有 {unattributedQualified} 个合格客人不是由广告组带来的（官网、邮件、WhatsApp 等，或来源没记下），不在表里。
         </p>
       )}
 
       <p className="text-xs text-gray-500">
-        「ME 里没跟进记录」「观察中」只数还没合格的客人；跟进只认 ME 里记下的电话、一对一邮件和员工改的阶段，在 ME 外面打的电话、发的消息看不到。观察中 = 第一次跟进还不满 {observeDays} 天。这一块只看个数，不排名，不进「钱花多了 / 该多给钱」的判断。AI 判得准不准：待上线。
+        「ME 里没跟进记录」「观察中」只数还没合格的客人；跟进只认 ME 里记下的、联系上了的电话，一对一邮件、WhatsApp，和员工改的阶段；没接通、空号不算；在 ME 外面打的电话、发的消息看不到。观察中 = 第一次跟进还不满 {observeDays} 天。这一块只看个数，不排名，不进「钱花多了 / 该多给钱」的判断。AI 判得准不准：待上线。
       </p>
     </section>
   )

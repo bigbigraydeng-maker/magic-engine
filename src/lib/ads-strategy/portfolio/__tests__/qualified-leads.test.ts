@@ -90,6 +90,24 @@ describe('没合格的：跟进过没合格 / 没人跟进 / 观察中', () => {
     expect(rowOf(b, 'A')).toMatchObject({ followedNotQualified: 1, noFollowup: 2 })
   })
 
+  it('只打过没接通 / 空号的电话 → 没联系上，满 14 天也算「ME 里没跟进记录」', () => {
+    const noAnswer = { channel: 'phone', direction: 'outbound', occurredAt: at(20), source: 'sheet_followup', metadata: { outcome: 'no_answer' } }
+    const badNumber = { ...noAnswer, metadata: { outcome: 'bad_number' } }
+    const spoke = { ...noAnswer, metadata: { outcome: 'spoke' } }
+    const b = run([contact('c1', { touches: [noAnswer] }), contact('c2', { touches: [badNumber] }), contact('c3', { touches: [noAnswer, spoke] })])
+    expect(rowOf(b, 'A')).toMatchObject({ noFollowup: 2, followedNotQualified: 1 })
+  })
+
+  it('窗口结束之后才发生的报价、跟进不算（回放旧日子时要跟当天一致）', () => {
+    const b = run([
+      // 现在的阶段已经是「已报价」，但那是窗口结束之后才标的
+      contact('c1', { stage: 'quoted', events: [{ toStage: 'contacted', changedBy: 'system:new-lead', createdAt: at(10) }, { toStage: 'quoted', changedBy: 'human:a@x.com', createdAt: at(-1) }] }),
+      contact('c2', { touches: [phoneCall(-2)] }),
+    ])
+    expect(rowOf(b, 'A')).toMatchObject({ noFollowup: 2, observing: 0 })
+    expect(rowOf(b, 'A').qualified.total).toBe(0)
+  })
+
   it('合格优先：已经合格的客人不再算进观察中', () => {
     const b = run([contact('c1', { stage: 'quoted', touches: [phoneCall(3)], events: [{ toStage: 'quoted', changedBy: 'human:a@x.com', createdAt: at(3) }] })])
     expect(rowOf(b, 'A')).toMatchObject({ leads: 1, observing: 0, noFollowup: 0, followedNotQualified: 0 })
@@ -98,13 +116,19 @@ describe('没合格的：跟进过没合格 / 没人跟进 / 观察中', () => {
 })
 
 describe('按组归', () => {
-  it('整个系列分钱的组按系列合计；不在今天快照里的组单列并标停投；在花钱的不标', () => {
+  it('组不在快照里、但它的系列是整个系列分钱的单位 → 并进系列', () => {
+    const b = run([contact('c1', { adsetId: 'K9', campaignId: 'cbo' })])
+    expect(rowOf(b, 'cbo').leads).toBe(1)
+    expect(b.rows.map(r => r.id)).toEqual(['cbo'])
+  })
+
+  it('整个系列分钱的组按系列合计；不在今天快照里的组单列、投放状态不明（不冒充停投）；在花钱的不标', () => {
     const b = run([
       contact('c1', { adsetId: 'K1' }), contact('c2', { adsetId: 'K2' }),
       contact('c3', { adsetId: 'OLD' }), contact('c4', { adsetId: 'A' }),
     ])
     expect(rowOf(b, 'cbo')).toMatchObject({ level: 'campaign', name: '系列X', leads: 2, stoppedLast7d: false })
-    expect(rowOf(b, 'OLD')).toMatchObject({ level: 'adset', name: null, leads: 1, stoppedLast7d: true })
+    expect(rowOf(b, 'OLD')).toMatchObject({ level: 'adset', name: null, leads: 1, stoppedLast7d: null })
     expect(rowOf(b, 'A').stoppedLast7d).toBe(false)
   })
 
