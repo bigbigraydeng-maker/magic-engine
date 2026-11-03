@@ -271,8 +271,20 @@ async function persistRefreshedToken(
  */
 export function isTransientRefreshFailure(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err)
-  if (/\bHTTP (5\d\d|429)\b/.test(message)) return true
-  return /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network/i.test(message)
+  if (err instanceof PlatformTokenRefreshError) {
+    // 对方回了话：只认我们自己拼的开头「Token refresh failed for <平台>: HTTP <状态码>」里的状态码。
+    // 🔴 不许在整段错误原文里找字样——对方 400 拒绝的说明里碰巧带 "network" / "HTTP 500"，会把被拒绝的授权误当临时故障，
+    //    连接就永远不进 error（魏征补审 P2-1，2026-11-03）。
+    const m = /^Token refresh failed for [^:]+: HTTP (\d{3})\b/.exec(message)
+    if (m === null) return false
+    const status = Number(m[1])
+    return status >= 500 || status === 429
+  }
+  // 请求根本没拿到完整回应（fetch 自己抛的错、回应读到一半断了 / 内容不是 JSON）：只在这种「没拿到回应」的错误上认网络字样
+  return (
+    err instanceof SyntaxError ||
+    /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|terminated|network/i.test(message)
+  )
 }
 
 async function markConnectionError(connectionId: string, message: string): Promise<void> {
