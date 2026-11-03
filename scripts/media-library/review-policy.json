@@ -1,0 +1,35 @@
+{
+  "policy_version": "2026-11-04.1",
+  "rights": {
+    "auto_hosts": ["pexels.com", "unsplash.com", "pixabay.com"],
+    "reject_hosts": ["plus.unsplash.com"],
+    "reject_url_substrings": ["premium"],
+    "hold_phrases": ["待审核", "另需", "仍需", "抽查", "待核", "no_publish"],
+    "search_evidence_phrases": ["搜索页", "search page", "search result"]
+  },
+  "brand_none_values": ["none", "none clear", "无", "no"],
+  "alcohol_terms": ["alcohol", "beer", "wine", "liquor", "酒"],
+  "child_terms": ["child", "children", "kid", "kids", "boy", "girl", "baby", "toddler", "孩子", "儿童", "小孩", "未成年"],
+  "derived_crop_markers": ["横版", "竖版", "crop", "cropped", "裁"],
+  "location": {
+    "source_stated": ["source_text_stated"],
+    "generic": ["not_applicable_generic_scene", "non_specific"]
+  },
+  "quality": { "portrait_min_width": 1080, "landscape_min_height": 1080, "video_min_seconds": 3 },
+  "vision": {
+    "default_model": "claude-haiku-5-5",
+    "allowed_models": ["claude-haiku-5-5", "claude-sonnet-5-5"],
+    "usd_per_million": {
+      "claude-haiku-5-5": { "input": 0.10, "output": 0.50 },
+      "claude-sonnet-5-5": { "input": 2.00, "output": 10.00 }
+    },
+    "max_long_edge": 1568,
+    "frame_step_seconds": 2.5,
+    "min_frames": 3,
+    "max_frames": 12,
+    "long_video_seconds": 30,
+    "max_output_tokens": 400,
+    "reserve_tokens_per_frame": 3300,
+    "reserve_prompt_tokens": 800
+  }
+}
