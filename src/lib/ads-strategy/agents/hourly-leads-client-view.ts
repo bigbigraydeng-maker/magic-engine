@@ -4,6 +4,7 @@
 
 import type { HourlyLeadChart } from '@/lib/ads-strategy/hourly-meta-leads'
 import type { LeadForecast } from '@/lib/ads-strategy/hourly-leads-forecast'
+import type { WeeklyLeadForecast } from '@/lib/ads-strategy/weekly-leads-forecast'
 
 export interface StaffHourlyLeadsResponse {
   success: boolean
@@ -11,6 +12,7 @@ export interface StaffHourlyLeadsResponse {
   message?: string
   chart?: HourlyLeadChart
   forecast?: LeadForecast | null
+  weekForecast?: WeeklyLeadForecast | null
   lastSyncAt: string | null
   jobName?: string
 }
@@ -22,6 +24,7 @@ export interface ClientHourlyLeadsView {
   message?: string
   chart?: HourlyLeadChart
   forecast?: LeadForecast | null
+  weekForecast?: WeeklyLeadForecast | null
   /** 格式化后的同步时间（不含 job 名等内部字段） */
   lastSyncLabel: string | null
 }
@@ -48,6 +51,7 @@ export function toClientHourlyLeadsView(raw: StaffHourlyLeadsResponse): ClientHo
     message: raw.message,
     chart: raw.chart,
     forecast: raw.forecast ?? null,
+    weekForecast: raw.weekForecast ?? null,
     lastSyncLabel: formatSyncLabel(raw.lastSyncAt),
   }
 }
