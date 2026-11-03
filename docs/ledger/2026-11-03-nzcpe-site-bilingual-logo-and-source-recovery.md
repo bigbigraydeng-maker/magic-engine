@@ -11,5 +11,4 @@ done_on: 2026-11-03
 done_ref: doc:docs/clients/nzcpe/client-brief.md
 ---
 源文件位置、发布命令和两条禁忌（不带 functions 发布会删报名后台、assets 缓存一年）见客户档案 2026-11-03 一节。
-同日补充：首页标题改用 NZ China Products Expo、过期日期和 2,200+ 措辞、页脚空链接已修（发布 8994556d），仍待项见客户档案。
 后续事项：访客表单「兴趣」、买家表单「品类」多选框没有值，通知邮件里只显示 on，看不出客人勾了什么。
