@@ -17,6 +17,7 @@ import Link from 'next/link'
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
 import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView, goalLiveNote } from './growth-panel'
+import ScorecardPanel from './scorecard-panel'
 import { TodayGoalProgress } from './today-goal-progress'
 import WarMapPanel from './war-map-panel'
 import LiveTodayPanel from './live-today-panel'
@@ -610,6 +611,10 @@ export default function AdsHealthPage() {
           {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
           <LiveTodayPanel clientId={clientId} part="today" />
           <WarMapPanel clientId={clientId} />
+          {/* 每日广告成绩单：只给内部员工（客户版没有 payload，见 growth-client-view 白名单）；今天还没巡察就不显示 */}
+          {!loading && !error && data?.growth && !('viewer' in data.growth) && (
+            <ScorecardPanel scorecard={data.growth.payload?.scorecard} />
+          )}
           {loading && <div className="text-gray-400 text-sm py-8 text-center">加载中…</div>}
           {error && (
             <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">加载出错:{error}</div>

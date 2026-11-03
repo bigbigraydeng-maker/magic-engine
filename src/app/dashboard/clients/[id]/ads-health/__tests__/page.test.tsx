@@ -610,3 +610,33 @@ describe('「等你点头」标签', () => {
     })
   })
 })
+
+describe('每日广告成绩单（第 1 刀 ②）', () => {
+  const SCORECARD = {
+    window: { start: '2026-10-26', end: '2026-11-01' }, completeness: 'complete', accountsSkipped: [],
+    units: [{ adAccountId: 'act_7274', level: 'adset', id: 'A', name: '组A', role: 'acquisition', spend: 398.12, resultType: 'lead', results: 67, costPerResult: 5.94, targetCost: 11, vsTarget: 'at_or_below', sampleGap: 0, separate: null }],
+    budget: [{ adAccountId: 'act_7274', role: 'acquisition', state: 'not_comparable', reason: 'single_unit', threshold: 0.15, fdrQ: 0.1, maxGap: null, under: [], over: [], overHeld: [], thin: [], notLikeForLike: [] }],
+  }
+  const staffGrowth = { date: '2026-11-01', data_completeness: 'complete', goal_pace: null, payload: { headline: 'h', scorecard: SCORECARD } }
+
+  it('内部员工在「今天看这里」看到成绩单', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: staffGrowth } }))
+    render(<AdsHealthPage />)
+    expect(await screen.findByText('每个组这 7 天的成绩')).toBeTruthy()
+    expect(screen.getByText('获客：只有一个组在花钱，没得比')).toBeTruthy()
+  })
+
+  it('客户账号（客户版接口）看不到成绩单', async () => {
+    const clientGrowth = { viewer: 'client', date: '2026-11-01', goal: null, goal_pace: null, adCards: null, adNote: null }
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: clientGrowth } }))
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getByText(/过去 7 天花了/)).toBeTruthy())
+    expect(screen.queryByText('每个组这 7 天的成绩')).toBeNull()
+  })
+
+  it('老的巡察行没有成绩单 → 说还没有，不画空表', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h' } } } }))
+    render(<AdsHealthPage />)
+    expect(await screen.findByText('今天还没有成绩单：每天的广告巡察跑过一次才会出现。')).toBeTruthy()
+  })
+})
