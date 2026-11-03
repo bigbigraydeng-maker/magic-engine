@@ -1,9 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 const loadMock = vi.fn()
-vi.mock('@/lib/tour-catalog/store-publish', () => ({
-  loadPublishedTourFacts: (...args: unknown[]) => loadMock(...args),
-}))
+vi.mock('@/lib/tour-catalog/store-publish', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/tour-catalog/store-publish')>(
+    '@/lib/tour-catalog/store-publish',
+  )
+  return {
+    loadPublishedNameHistory: actual.loadPublishedNameHistory,
+    loadPublishedTourFacts: (...args: unknown[]) => loadMock(...args),
+  }
+})
 
 import { deriveAliases, loadSocialFactSource, nameSuffix } from '../fact-aliases'
 import type { SupabaseClient } from '@supabase/supabase-js'

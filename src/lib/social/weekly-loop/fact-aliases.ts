@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
+import { loadPublishedNameHistory, loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
 import type { PublishedTourFact } from '@/lib/tour-catalog/publish-contract'
 
 export interface NamedTour {
@@ -102,70 +102,12 @@ export type SocialFactSource =
     }
   | { ok: false; reason: string }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function parseNamedTour(value: unknown): NamedTour | null {
-  if (!isPlainObject(value)) return null
-  const id = value.id
-  const name = value.name
-  if (typeof id !== 'string' || id.length === 0) return null
-  if (typeof name !== 'string' || name.length === 0) return null
-  const titleRaw = value.title
-  let title: string | null | undefined
-  if (titleRaw === undefined) {
-    title = undefined
-  } else if (titleRaw === null) {
-    title = null
-  } else if (typeof titleRaw === 'string') {
-    title = titleRaw
-  } else {
-    return null
-  }
-  return { id, name, title }
-}
-
-function parseSnapshotRow(row: unknown): TourNameSnapshot | null {
-  if (!isPlainObject(row)) return null
-  const version = row.version
-  if (typeof version !== 'number' || !Number.isFinite(version)) return null
-  const snapshot = row.snapshot
-  if (!isPlainObject(snapshot)) return null
-  const toursRaw = snapshot.tours
-  if (!Array.isArray(toursRaw)) return null
-
-  const tours: NamedTour[] = []
-  for (const entry of toursRaw) {
-    const parsed = parseNamedTour(entry)
-    if (parsed !== null) tours.push(parsed)
-  }
-  return { version, tours }
-}
-
-function parseSnapshotRows(rows: unknown[]): TourNameSnapshot[] {
-  const snapshots: TourNameSnapshot[] = []
-  for (const row of rows) {
-    const parsed = parseSnapshotRow(row)
-    if (parsed !== null) snapshots.push(parsed)
-  }
-  return snapshots
-}
-
 async function readSnapshots(
   db: SupabaseClient,
   clientId: string,
 ): Promise<TourNameSnapshot[] | null> {
-  const res = await db
-    .from('tour_catalog_published')
-    .select('version, snapshot')
-    .eq('client_id', clientId)
-    .order('version', { ascending: false })
-    .limit(SNAPSHOT_LIMIT)
-
-  if (res.error) return null
-  const rows: unknown[] = Array.isArray(res.data) ? res.data : []
-  return parseSnapshotRows(rows)
+  const read = await loadPublishedNameHistory(db, clientId, SNAPSHOT_LIMIT)
+  return read.ok ? read.versions : null
 }
 
 export async function loadSocialFactSource(
