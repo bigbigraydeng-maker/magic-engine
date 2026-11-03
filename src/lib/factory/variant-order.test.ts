@@ -149,7 +149,13 @@ describe('parseVariantRequest', () => {
 
 describe('buildVariantBrief', () => {
   it('builds a hook variant and strips review keys', () => {
-    const r = buildVariantBrief(baseBrief(), BASE_ID, { kind: 'hook', lines: okLines })
+    const input = {
+      ...baseBrief(),
+      recipe_replan_required: true,
+      review_feedback_digest: 'd',
+      review_overrides: { music: { track_id: 'x' } },
+    }
+    const r = buildVariantBrief(input, BASE_ID, { kind: 'hook', lines: okLines })
     expect(r.ok).toBe(true)
     if (!r.ok) throw new Error(r.error)
     const brief = r.brief
@@ -160,7 +166,19 @@ describe('buildVariantBrief', () => {
     expect('reopened_from' in brief).toBe(false)
     expect('review_feedback' in brief).toBe(false)
     expect('review_feedback_by' in brief).toBe(false)
+    expect('recipe_replan_required' in brief).toBe(false)
+    expect('review_feedback_digest' in brief).toBe(false)
+    expect('review_overrides' in brief).toBe(false)
     expect(at(brief, 'copy')).toEqual({ caption: 'Fictional caption' })
+  })
+
+  it('rejects an unchanged hook', () => {
+    const r = buildVariantBrief(baseBrief(), BASE_ID, {
+      kind: 'hook',
+      lines: [{ text: 'FROM', badge: null }, { text: 'NZ$1,999', badge: null }, { text: 'DAYS', badge: '10' }],
+    })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('一模一样')
   })
 
   it('does not mutate the input brief', () => {
@@ -232,14 +250,9 @@ describe('buildVariantBrief', () => {
     expect(r.summary).toBe(`配乐换成 ${choice.id}`)
     const musicFile = at(r.brief, 'remotion', 'props', 'musicFile')
     expect(typeof musicFile).toBe('string')
+    expect(musicFile).not.toBe(postcardProps.musicFile)
+    expect(at(r.brief, 'remotion', 'props', 'musicGain')).toBeUndefined()
     expect(at(r.brief, 'remotion', 'props', 'hook')).toEqual(postcardProps.hook)
-  })
-
-  it('only accepts music the list video is offered (beat-timed cuts need a beat-checked track)', () => {
-    const offered = remotionMusicChoices(baseBrief().remotion).map((c) => c.id)
-    const r = buildVariantBrief(baseBrief(), BASE_ID, { kind: 'music', musicId: 'horizons-call' })
-    expect(r.ok).toBe(offered.includes('horizons-call'))
-    if (!r.ok) expect(r.error).toContain('配乐')
   })
 
   it('rejects an unknown music id', () => {

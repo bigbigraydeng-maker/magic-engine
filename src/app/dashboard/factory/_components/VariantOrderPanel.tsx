@@ -252,13 +252,27 @@ function OrderForm({ detail, onSubmitted }: OrderFormProps) {
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
 
   const updateLine = (index: number, next: HookLine) => {
+    setDone(null)
     setLines((prev) => prev.map((line, i) => (i === index ? next : line)))
   }
 
+  const selectMusic = (id: string) => {
+    setDone(null)
+    setMusicId(id)
+  }
+
+  const hookChanged =
+    initialLines === null ||
+    lines.some(
+      (line, i) =>
+        line.text.trim() !== initialLines[i].text.trim() || line.badge.trim() !== initialLines[i].badge.trim(),
+    )
   const hookValid =
     hookAllowed &&
+    hookChanged &&
     lines.every((line) => line.text.trim().length > 0 && hookWidth(line) <= detail.max_hook_chars)
   const musicValid = detail.music_choices.length > 0 && musicId !== ''
   const canSubmit = !submitting && (mode === 'hook' ? hookValid : musicValid)
@@ -280,9 +294,10 @@ function OrderForm({ detail, onSubmitted }: OrderFormProps) {
       if (!res.ok) throw new Error(readError(json, `下单失败 (${res.status})`))
       const order = parseOrder(json)
       if (!order) throw new Error('下单失败：返回格式异常')
-      onSubmitted(
-        `已排队，单号 ${order.id.slice(0, 8)}：${order.summary}。出片大约几分钟，好了会出现在上面的待审列表，不会自动发布。`,
-      )
+      const message = `已排队，单号 ${order.id.slice(0, 8)}：${order.summary}。出片大约几分钟，好了会出现在上面的待审列表，不会自动发布。`
+      onSubmitted(message)
+      setDone(message)
+      if (initialLines !== null) setLines(initialLines)
       setMusicId('')
       setNote('')
     } catch (e) {
@@ -322,19 +337,27 @@ function OrderForm({ detail, onSubmitted }: OrderFormProps) {
       )}
 
       {mode === 'hook' ? (
-        <HookEditor lines={lines} maxChars={detail.max_hook_chars} onChange={updateLine} />
+        <>
+          <HookEditor lines={lines} maxChars={detail.max_hook_chars} onChange={updateLine} />
+          {!hookChanged && (
+            <p className="text-xs text-slate-500">先改一行字再下单（和底稿一样的不用下）</p>
+          )}
+        </>
       ) : (
         <MusicPicker
           choices={detail.music_choices}
           currentMusic={detail.current_music}
           selected={musicId}
-          onSelect={setMusicId}
+          onSelect={selectMusic}
         />
       )}
 
       <textarea
         value={note}
-        onChange={(e) => setNote(e.target.value.slice(0, 300))}
+        onChange={(e) => {
+          setDone(null)
+          setNote(e.target.value.slice(0, 300))
+        }}
         maxLength={300}
         placeholder="备注（可空，写这条想测什么）"
         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -342,6 +365,8 @@ function OrderForm({ detail, onSubmitted }: OrderFormProps) {
       />
 
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+      {done && <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-800">{done}</p>}
 
       <button
         onClick={() => void submit()}
@@ -365,6 +390,7 @@ export function VariantOrderPanel({ clientId }: { clientId: string | null }) {
   const [detailError, setDetailError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const loadedOnce = useRef(false)
+  const latestBaseRequest = useRef<string | null>(null)
 
   const loadBases = useCallback(async () => {
     setLoadingBases(true)
@@ -398,6 +424,7 @@ export function VariantOrderPanel({ clientId }: { clientId: string | null }) {
   }
 
   const selectBase = async (id: string) => {
+    latestBaseRequest.current = id
     setSelectedId(id)
     setDetail(null)
     setDetailError(null)
@@ -406,14 +433,17 @@ export function VariantOrderPanel({ clientId }: { clientId: string | null }) {
     try {
       const res = await fetch(`/api/factory/work-orders/variant?base=${encodeURIComponent(id)}`)
       const json: unknown = await res.json().catch(() => ({}))
+      if (latestBaseRequest.current !== id) return
       if (!res.ok) throw new Error(readError(json, `加载失败 (${res.status})`))
       const parsed = parseDetail(json)
       if (!parsed) throw new Error('加载失败：返回格式异常')
-      setDetail(parsed)
+      if (latestBaseRequest.current === id) setDetail(parsed)
     } catch (e) {
-      setDetailError(e instanceof Error ? e.message : '加载失败')
+      if (latestBaseRequest.current === id) {
+        setDetailError(e instanceof Error ? e.message : '加载失败')
+      }
     } finally {
-      setLoadingDetail(false)
+      if (latestBaseRequest.current === id) setLoadingDetail(false)
     }
   }
 

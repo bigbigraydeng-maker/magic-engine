@@ -19,6 +19,7 @@ const STRIPPED_KEYS = [
   'recipe_replan_reason',
   'previous_creative_recipe',
   'variant_of',
+  'review_overrides',
 ] as const
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -114,6 +115,19 @@ function buildHookChange(
   const hook = props.hook
   if (!isPlainObject(hook) || !Array.isArray(hook.lines)) {
     return { ok: false, error: '这条视频没有开场文字' }
+  }
+  const baseLines = hook.lines
+  const unchanged =
+    baseLines.length === lines.length &&
+    lines.every((line, i) => {
+      const b: unknown = baseLines[i]
+      const baseText = isPlainObject(b) && typeof b.text === 'string' ? b.text : ''
+      const baseBadge =
+        isPlainObject(b) && typeof b.badge === 'string' && b.badge.trim() !== '' ? b.badge.trim() : null
+      return line.text === baseText && line.badge === baseBadge
+    })
+  if (unchanged) {
+    return { ok: false, error: '开场文字和底稿一模一样，没有改动，不用下单' }
   }
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
