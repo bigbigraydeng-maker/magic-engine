@@ -182,17 +182,22 @@ export async function loadConfiguredStages(clientId: string): Promise<Set<string
 export async function loadTranscriptLines(
   clientId: string,
   contactId: string,
+  /**
+   * 只要这一刻之前**已经入库**的（按 created_at，不按发生时间）——复核旧判断时还原
+   * 「当时模型看得到什么」，后补导入的不算（`docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md` BZ-17）。
+   */
+  opts: { ingestedBefore?: string } = {},
 ): Promise<TranscriptLine[]> {
+  let touchQuery = supabaseAdmin
+    .from('contact_touchpoints')
+    .select('channel, direction, occurred_at, raw, summary, source, metadata')
+    .eq('client_id', clientId)
+    .eq('contact_id', contactId)
+    .neq('channel', 'messenger')
+  if (opts.ingestedBefore) touchQuery = touchQuery.lte('created_at', opts.ingestedBefore)
   const [{ data: convs, error: cErr }, { data: touches, error: tErr }] = await Promise.all([
     supabaseAdmin.from('conversations').select('id').eq('client_id', clientId).eq('contact_id', contactId),
-    supabaseAdmin
-      .from('contact_touchpoints')
-      .select('channel, direction, occurred_at, raw, summary, source, metadata')
-      .eq('client_id', clientId)
-      .eq('contact_id', contactId)
-      .neq('channel', 'messenger')
-      .order('occurred_at', { ascending: false })
-      .limit(200),
+    touchQuery.order('occurred_at', { ascending: false }).limit(200),
   ])
 
   /**
@@ -238,12 +243,12 @@ export async function loadTranscriptLines(
 
   const convIds = ((convs ?? []) as { id: string }[]).map((c) => c.id)
   if (convIds.length > 0) {
-    const { data: msgs, error: mErr } = await supabaseAdmin
+    let msgQuery = supabaseAdmin
       .from('conversation_messages')
       .select('direction, body, sent_at')
       .in('conversation_id', convIds)
-      .order('sent_at', { ascending: false })
-      .limit(500)
+    if (opts.ingestedBefore) msgQuery = msgQuery.lte('created_at', opts.ingestedBefore)
+    const { data: msgs, error: mErr } = await msgQuery.order('sent_at', { ascending: false }).limit(500)
     // 同上：邮件 / 私信原文正是这套东西存在的理由，读不到就别判。
     if (mErr) throw new Error(`读往来原文失败: ${mErr.message}`)
     for (const m of (msgs ?? []) as {

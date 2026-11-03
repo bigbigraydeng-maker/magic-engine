@@ -46,6 +46,7 @@ import type { AdsAccountStatusItemKind } from './ads-account-status-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
+import type { BaozhengItemKind } from './baozheng-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
 import type { ToolLeadItemKind } from './tool-lead-items'
 import type { PmKind } from './five-kinds'
@@ -355,6 +356,7 @@ export type ManualItemKind =
   | MaliangItemKind
   /** 李白 · 文案溯源：「未证实」句待改 / 检不了 / 没检；提示词库月检疑似过期（只报告不改） */
   | LibaiItemKind
+  | BaozhengItemKind
   /** 司马迁 · 口碑周巡：每周四起草的 Google 评价回复草稿（一律没发）/ 本周没巡成 */
   | SimaqianItemKind
   /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */

@@ -153,6 +153,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   linkedin_progress_needs_review: 'review', // 历史：LinkedIn 自动发帖已下线，仅夹具使用
   maliang_render_passed: 'review',
   libai_copy_unverified: 'review',
+  baozheng_review_disagree: 'truth', // 两个 AI 判一位客人判得不一样：系统判不了真假，要人认一下谁对（只记结论，不改客人）
   simaqian_review_drafts: 'review',
   messenger_draft_pending_approval: 'review',
   messenger_draft_escalation: 'review',
@@ -216,6 +217,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   libai_check_unverifiable: 'dev',
   libai_check_missing: 'dev',
   libai_prompt_library_stale: 'dev',
+  baozheng_run_failed: 'dev', // 包拯周检没跑成：开发查，PM 那一栏留「没查成」
   simaqian_patrol_failed: 'dev',
   meta_token_check_failed: 'dev',
   deploy_check_failed: 'dev', // 「合了没上线」这个检查自己没跑成 —— how 写「不用你动手 / 回我一句我去修」
@@ -291,6 +293,7 @@ export const BLIND_SPOT_NOTE: Partial<Record<ManualItemKind, string>> = {
   promo_plan_watch_broken: '推广计划每日检查今天没跑成，计划有没有问题看不出来',
   ads_tracking_preflight_broken: '开投前追踪检查今天没跑成，像素 / 落地页 / 留资有没有问题看不出来',
   libai_check_missing: '有文案生成后没做溯源检查，「未证实的句子」可能没列全',
+  baozheng_run_failed: '包拯这周没复核成，「两个 AI 判得不一样」可能没列出来',
   comment_human_check_failed: '主页评论「要人回」清单今天没读成，可能漏报',
 }
 

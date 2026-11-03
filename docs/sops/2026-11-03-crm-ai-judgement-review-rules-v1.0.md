@@ -223,6 +223,28 @@
 
 **第三轮（v1.2）**：子牙「过」（P2：方案 :182 旧口径加删除线，已改）；魏征「过」（抽查 BZ-05③ 在四批记录上的归类与表一致；P2：合并重复卡见 §6 第 8 条）。**第 2 关通过。**
 
+## 7b. 第 3 关代码对照（2026-11-03 实现，分支 `feat/baozheng-1b`）
+
+上面各条「代码」栏写的是起草时的状态；实现后以本表为准。
+
+| 规则 | 代码 | 状态 |
+|---|---|---|
+| BZ-01、BZ-02 | `src/lib/baozheng/outcome.ts` `isJudgment`；`run.ts` `planReviews`（落池只认判法自己的 `POOL_STAGE`） | 已实现 |
+| BZ-03 | — | **没做**：判法版本号要改原判法写库，留后续 |
+| BZ-04、BZ-05 | `config.ts` `parseBaozhengConfig`（`clients.leads_config.baozheng`）；`outcome.ts` `classifyWriter` / `findBatchEventIds` | 已实现 |
+| BZ-06～13 | `outcome.ts` `judgeOutcome`；判低了的证据时间 `load.ts` `resolveMailIngestedAt`（目前只认推荐邮件） | 已实现 |
+| BZ-14 | `types.ts` `ClientRunSummary.outcomes` 只出个数 | 已实现 |
+| BZ-15、BZ-16 | `sample.ts` `pickStratified` / `pickRandom`；`run.ts` `planReviews` | 已实现 |
+| BZ-17 | `stage-infer.ts` `loadTranscriptLines(…, { ingestedBefore })`；`load.ts` `hasRewrittenTouchpoints`；`prompts.ts` | 已实现 |
+| BZ-18 | `review.ts` `compareStages`；`pm-todo/baozheng-items.ts`（`truth` 车道，what / how 不带客人信息） | 已实现 |
+| BZ-19 | `ruling.ts` + 复核页 `/dashboard/clients/[id]/baozheng/[judgmentId]` + `POST /api/clients/[id]/baozheng/[judgmentId]/ruling`；裁定存 `crm_segment_feedback`（`segment = baozheng:<判断记录 id>`），不写客人、不写阶段记录 | 已实现，不改表 |
+| BZ-20 | `accuracy.ts` `computeAccuracy` | 已实现 |
+| BZ-21 | 运行记录里的个数 | 只数个数 |
+| BZ-22～25 | — | 按 §4.5 等触发再写 |
+| BZ-26、BZ-27 | `src/lib/inngest/functions/baozheng-weekly.ts`（每周三 10:00 新西兰时间，`BAOZHENG_ENABLED` 默认关、关着也写一行 skipped；同一周跑过不再调模型）；登记 `cron/registry.ts` | 已实现 |
+| BZ-28 | — | **没做**：停止线先靠每周闭环巡检人看，触发过一次再写代码 |
+| 花费上限 | `run.ts` `WEEKLY_COST_CAP_USD = 2`：每个客户每周到 2 美元就停；模型答歪了的那次也照样记花费 | 已实现（规则书外加的保险） |
+
 ## 8. Reuse Statement
 
 - 复用：`contact_stage_events`（错题来源，不新建表）、`classifyStageWriter`、`stage-infer.ts` / `stage-from-conversation.ts` 的取数和纯函数、`anthropic/client.ts`、`cron_run_logs`、今日待办 `truth` 车道、`clients.leads_config`。
