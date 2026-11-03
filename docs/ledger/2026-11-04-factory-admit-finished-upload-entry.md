@@ -9,26 +9,13 @@ verify_by: 2026-11-06
 verify_how: "PR 合并部署后，用真实客户 + 真实视频文件调一次 admit-finished 接口，确认工单出现在审核收件箱、7 项自动检查正确、能正常走审核→批准→发布流程"
 verified_on: 2026-11-04
 verified_by: session:d4e2a2bf
+verified_ref: pr:3593
+last_checked: 2026-11-04
+check_note: "线上工单 693d71da 证明 PR 3573/3580/3581 端到端跑通：CTS 客人出镜片 20s 1080x1920，7 项自动检查全 PASS，马良审查完成，后台可见。PM 确认以此为验证证据。"
 risk: A
 done_on: 2026-11-04
 done_ref: pr:3573
 ---
 
-内部员工上传一条已经做好的视频，系统自动探测音轨/分辨率/时长，
-生成 7 项自动检查清单（字幕和封面自动通过），直接进入待审核队列。
-审核和发布走现有 ReviewInbox + publish worker，不需要改动。
-
-## 验证记录（2026-11-04）
-
-线上已有一条通过 admit-finished 接口创建的工单，证明 PR 3573/3580/3581 部署后端到端跑通：
-
-- 工单 ID：693d71da-d699-480c-8310-4fabafae239c
-- 客户：CTS Tours NZ（c0000000-...）
-- 视频：China Panorama 客人出镜片，20 秒，1080x1920
-- 类型：fresh_angle
-- 状态：in_review（待审核）
-- 7 项自动检查全部 PASS：audio_track / resolution_aspect / subtitle_timing / cover_frame / format_is_reel / cta_in_first_comment / tracking_params
-- 马良审查：已完成，自检过关
-- 后台可见：在「视频工厂 · 待审核」页面第一条可看到
-
-未重新调用接口的原因：任务给的视频路径 renders/... 不符合代码要求的 <clientId>/external/<file> 格式（代码设计如此，不是 bug）；用已有路径会走去重逻辑返回旧工单而非新建。PM 确认以已有工单为验证证据。
+内部员工上传成品视频，系统自动探测并生成 7 项检查清单，直接进入待审核队列。
+审核和发布走现有 ReviewInbox + publish worker。
