@@ -150,10 +150,43 @@ export async function admitFinishedVideo(
 
   const { data: client } = await supabase
     .from('clients')
-    .select('id, name')
+    .select('id, name, factory_config')
     .eq('id', input.clientId)
     .maybeSingle()
   if (!client) return { ok: false, status: 404, error: 'client not found' }
+
+  let goalId = input.goalId
+  if (!goalId) {
+    const configGoalId = ((client.factory_config ?? {}) as Record<string, unknown>)['factory_goal_id']
+    if (typeof configGoalId === 'string' && UUID_RE.test(configGoalId)) {
+      goalId = configGoalId
+    } else {
+      const { data: goals } = await supabase
+        .from('goals')
+        .select('id')
+        .eq('client_id', input.clientId)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      goalId = goals?.id as string | undefined
+    }
+    if (!goalId) return { ok: false, status: 422, error: 'no active goal found for this client — pass goal_id explicitly' }
+  }
+
+  let masterBriefId = input.masterBriefId
+  if (!masterBriefId) {
+    const { data: brief } = await supabase
+      .from('master_briefs')
+      .select('id')
+      .eq('client_id', input.clientId)
+      .or('status.eq.active,is_active.eq.true')
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    masterBriefId = brief?.id as string | undefined
+    if (!masterBriefId) return { ok: false, status: 422, error: 'no active master brief found for this client — pass master_brief_id explicitly' }
+  }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
   if (!supabaseUrl) return { ok: false, status: 500, error: 'NEXT_PUBLIC_SUPABASE_URL not configured' }
@@ -195,8 +228,8 @@ export async function admitFinishedVideo(
       .insert({
         id: tempId,
         client_id: input.clientId,
-        goal_id: input.goalId ?? null,
-        master_brief_id: input.masterBriefId ?? null,
+        goal_id: goalId,
+        master_brief_id: masterBriefId,
         order_type: 'reel',
         angle: input.angle,
         angle_source: {
