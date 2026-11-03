@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-11-03
 source: session:8044207b
 verify_by: 2026-11-05
-verify_how: 只读查三件：①hbaywater.com 首页源码含 G-ZL3CZPGQ35；②Google Analytics 里 HBay Water 属性有真实访客数据（数字小正常）；③ME 里 HBay 的 GA4 数据不是 0（这条要等「ME 授权 Google」那张卡做完，没做完就写明卡在那里，别判失败）。①②对算成。
+verify_how: 只读查三件：①hbaywater.com 首页源码含 G-ZL3CZPGQ35；②Google Analytics 里 HBay Water 属性有真实访客数据（数字小正常）；③ME 里 HBay 的 GA4 快照用户数大于 0（授权已于 11-03 完成，见 2026-11-03-hbay-ga4-gsc-m-auth）。三条都对算成。
 done_on: 2026-11-03
 done_ref: doc:docs/clients/hbay-water/2026-11-03-hbaywater-website-and-todo.md
 ---
