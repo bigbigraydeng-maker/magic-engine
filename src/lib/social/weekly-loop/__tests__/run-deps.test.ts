@@ -22,6 +22,7 @@ interface FakeState {
   readError: boolean
   updates: RecordedUpdate[]
   limits: number[]
+  ors: string[]
 }
 
 type BuilderMode = 'select' | 'update'
@@ -30,6 +31,7 @@ interface Builder {
   select: (cols?: string) => Builder
   eq: (col: string, val: unknown) => Builder
   in: (col: string, vals: unknown[]) => Builder
+  or: (filter: string) => Builder
   order: (col: string, opts?: { ascending?: boolean }) => Builder
   limit: (n: number) => Builder
   update: (patch: Record<string, unknown>) => Builder
@@ -73,6 +75,10 @@ function makeDb(state: FakeState): SupabaseClient {
         return builder
       },
       in: (_col, _vals) => builder,
+      or: (filter) => {
+        state.ors.push(filter)
+        return builder
+      },
       order: (_col, _opts) => builder,
       limit: (n) => {
         state.limits.push(n)
@@ -112,6 +118,7 @@ function baseState(overrides: Partial<FakeState> = {}): FakeState {
     readError: false,
     updates: [],
     limits: [],
+    ors: [],
     ...overrides,
   }
 }
@@ -190,6 +197,15 @@ describe('loadOrders', () => {
     expect(result.truncated).toBe(true)
     expect(result.rows).toHaveLength(WEEKLY_LOOP_ORDER_CAP)
     expect(state.limits).toContain(WEEKLY_LOOP_ORDER_CAP + 1)
+  })
+
+  it('🔴 excludes already-public reels in the query so they do not eat the read cap', async () => {
+    const state = baseState({ orders: [orderRow()] })
+    const deps = createWeeklyLoopDbDeps(makeDb(state))
+    await deps.loadOrders('c1')
+    expect(state.ors).toEqual([
+      'published_ref->>video_state.is.null,published_ref->>video_state.neq.PUBLISHED',
+    ])
   })
 })
 

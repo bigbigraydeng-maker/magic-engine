@@ -2,7 +2,7 @@
  * 社媒每周出稿编排。每天新西兰 08:30 醒一次：总开关 SOCIAL_WEEKLY_LOOP_ENABLED 不是 'true' 就只写一行 disabled 回执；
  * 开着就给「开了每周闭环、今天是出稿日」的客户各发一个 social/week_pack.draft_due 事件。
  * 事件处理按客户跑 runWeeklyLoop，写一行 cron_run_logs 回执。
- * 写库开关 SOCIAL_WEEKLY_LOOP_WRITE 不是 'true' 时一律演练（只算不写）。
+ * 写库要三样同时成立：总开关 SOCIAL_WEEKLY_LOOP_ENABLED、写库开关 SOCIAL_WEEKLY_LOOP_WRITE 都是 'true'，且客户开了每周闭环；少一样一律演练（只算不写）。
  * 手动发 dry_run 事件不看总开关，这是当场试跑的入口。不发布、不扣费、不外发。
  * 新增函数部署后必须去 Inngest 后台 Sync 一次。
  */
@@ -11,7 +11,7 @@ import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
 import { cadenceFromConfig, isoDate, nzCalendar } from '@/lib/social/week-pack/cadence'
-import { runWeeklyLoop, WEEKLY_LOOP_JOB, type WeeklyLoopDeps, type WeeklyLoopMode, type WeeklyLoopReceipt } from '@/lib/social/weekly-loop/run'
+import { buildRunIncompleteTask, incompleteReasons, runWeeklyLoop, WEEKLY_LOOP_JOB, type WeeklyLoopDeps, type WeeklyLoopMode, type WeeklyLoopReceipt } from '@/lib/social/weekly-loop/run'
 import { createWeeklyLoopDbDeps, listWeeklyLoopClients, loadWeeklyLoopClientConfig, weeklyLoopEnabled } from '@/lib/social/weekly-loop/run-deps'
 
 export const SOCIAL_WEEKLY_DRAFT_FUNCTION_ID = `${CLOUD_FN_PREFIX}social-weekly-draft`
@@ -28,14 +28,14 @@ export function loopWriteAllowed(env: LoopEnv): boolean {
   return env.SOCIAL_WEEKLY_LOOP_WRITE === 'true'
 }
 
-/** Write only when asked for write, the write switch is on and the client is in the loop. Anything else is a dry run. */
+/** Write only when asked for write, both ENABLED and WRITE switches are on and the client is in the loop. Anything else is a dry run. */
 export function resolveMode(
   requested: unknown,
   env: LoopEnv,
   clientEnabled: boolean,
 ): { mode: WeeklyLoopMode; forced: boolean } {
   if (requested === 'write') {
-    if (loopWriteAllowed(env) && clientEnabled) return { mode: 'write', forced: false }
+    if (loopEnabledGlobally(env) && loopWriteAllowed(env) && clientEnabled) return { mode: 'write', forced: false }
     return { mode: 'dry_run', forced: true }
   }
   return { mode: 'dry_run', forced: false }
@@ -79,6 +79,11 @@ export interface ClientRunReceipt
   requested_mode: string
   mode: WeeklyLoopMode
   mode_forced: boolean
+  trigger: 'cron' | 'manual_event'
+  event_id: string | null
+  triggered_at: string
+  /** Why the run did not finish its job; empty = nothing broke. Drives the run log's failed count. */
+  failures: string[]
   status: 'completed' | 'stopped' | 'failed'
   error: string | null
   no_publish: true
@@ -201,14 +206,21 @@ async function handleCron(deps: SocialWeeklyDraftDeps, step: StepLike): Promise<
   return receipt
 }
 
-async function handleDue(deps: SocialWeeklyDraftDeps, data: unknown, step: StepLike): Promise<ClientRunReceipt> {
+async function handleDue(
+  deps: SocialWeeklyDraftDeps,
+  event: { id?: unknown; ts?: unknown; data?: unknown },
+  step: StepLike,
+): Promise<ClientRunReceipt> {
   const started = await step.run('start-run', async () => ({
     runId: await deps.startRun(),
     startedAt: Date.now(),
   }))
 
   const receipt = await step.run('run-loop', async (): Promise<ClientRunReceipt> => {
-    const record = isRecord(data) ? data : {}
+    const record = isRecord(event.data) ? event.data : {}
+    const trigger: 'cron' | 'manual_event' = record.source === 'cron' ? 'cron' : 'manual_event'
+    const event_id = typeof event.id === 'string' && event.id ? event.id : null
+    const triggered_at = typeof event.ts === 'number' ? new Date(event.ts).toISOString() : deps.now().toISOString()
     const rawClientId = record.clientId
     const clientId = typeof rawClientId === 'string' && rawClientId.trim() ? rawClientId : ''
     const requested = record.mode
@@ -221,6 +233,10 @@ async function handleDue(deps: SocialWeeklyDraftDeps, data: unknown, step: StepL
         requested_mode: requestedMode,
         mode: 'dry_run',
         mode_forced: false,
+        trigger,
+        event_id,
+        triggered_at,
+        failures: ['invalid_event: clientId missing'],
         status: 'failed',
         error: 'invalid_event: clientId missing',
         no_publish: true,
@@ -243,17 +259,28 @@ async function handleDue(deps: SocialWeeklyDraftDeps, data: unknown, step: StepL
         kind: 'client_run',
         requested_mode: String(requested ?? 'dry_run'),
         mode_forced: forced,
+        trigger,
+        event_id,
+        triggered_at,
+        failures: incompleteReasons(loop),
         error: null,
       }
     } catch (e) {
+      const message = errorMessage(e, 300)
       return {
         kind: 'client_run',
         client_id: clientId,
         requested_mode: String(requested ?? 'dry_run'),
         mode,
         mode_forced: forced,
+        trigger,
+        event_id,
+        triggered_at,
+        failures: [message],
         status: 'failed',
-        error: errorMessage(e, 300),
+        error: message,
+        manual_tasks: mode === 'write' ? [buildRunIncompleteTask(clientId, [message])] : [],
+        manual_tasks_delivered: mode === 'write',
         no_publish: true,
       }
     }
@@ -262,7 +289,7 @@ async function handleDue(deps: SocialWeeklyDraftDeps, data: unknown, step: StepL
   await step.run('finish-run', async () => {
     const processed = receipt.counts?.candidates ?? 0
     const completed = receipt.counts?.scheduled ?? 0
-    const failed = receipt.status === 'failed' ? 1 : 0
+    const failed = receipt.failures.length
     await deps.finishRun({
       runId: started.runId,
       startedAt: started.startedAt,
@@ -270,7 +297,7 @@ async function handleDue(deps: SocialWeeklyDraftDeps, data: unknown, step: StepL
       completed,
       failed,
       summary: { ...receipt },
-      error: receipt.status === 'failed' ? (receipt.error ?? 'failed') : undefined,
+      error: failed > 0 ? receipt.failures.join('; ').slice(0, 500) : undefined,
     })
     return null
   })
@@ -289,7 +316,7 @@ export function createSocialWeeklyDraftFunction(deps: SocialWeeklyDraftDeps) {
     [{ cron: SOCIAL_WEEKLY_DRAFT_CRON }, { event: SOCIAL_WEEKLY_DRAFT_DUE_EVENT }],
     async ({ event, step }) =>
       event.name === SOCIAL_WEEKLY_DRAFT_DUE_EVENT
-        ? handleDue(deps, event.data, step)
+        ? handleDue(deps, event, step)
         : handleCron(deps, step),
   )
 }

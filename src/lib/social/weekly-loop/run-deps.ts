@@ -100,6 +100,8 @@ export function createWeeklyLoopDbDeps(db: SupabaseClient): WeeklyLoopDeps {
         .select('id, status, created_at, updated_at, angle, brief, output, review_ref, published_ref')
         .eq('client_id', clientId)
         .in('status', ['approved', 'published', 'in_review'])
+        // Already-public reels can never be scheduled; drop them in the query so they do not eat the read cap.
+        .or('published_ref->>video_state.is.null,published_ref->>video_state.neq.PUBLISHED')
         .order('created_at', { ascending: false })
         .limit(WEEKLY_LOOP_ORDER_CAP + 1)
       if (error) throw new Error(`orders_read_failed: ${error.message}`)

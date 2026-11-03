@@ -202,8 +202,8 @@
 | `SOCIAL_STORY_PUBLISH_REGISTER_ENABLED` | 新发 Story 登记进读回链。必须严格等于 `true`。**未配 = 关**：监听函数不查库、不写动作行，和现在一样 | Render-web |
 | `SOCIAL_STORY_PUBLISH_RECONCILE_ENABLED` | 补登记最近已发、但还没有动作行的 Story。必须严格等于 `true`。**未配 = 关**：发布扫一遍不发补登记事件，补登记函数即使被投递也不查库、不写行。写历史数据前要另批 | Render-web |
 | `WEEKLY_PACK_APPROVAL_ENABLED` | 每周整包批准总闸。必须严格等于 `true`。**未配 = 关**：本周总览不发出确认卡，点同意也不会授权 Story。 | Render-web |
-| `SOCIAL_WEEKLY_LOOP_ENABLED` | 社媒每周出稿编排（Inngest `cloud-social-weekly-draft`）每天的自动派发总开关。必须严格等于 `true`。**未配 = 关**：每天只写一行 disabled 回执，不给任何客户派活。手动发 `dry_run` 事件当场试跑不受它限制。 | Render-web |
-| `SOCIAL_WEEKLY_LOOP_WRITE` | 社媒每周出稿是否**写库**（写排期日期 `brief.weekly_pack.publish_on`、写事实核对结果 `output.fact_check`）。必须严格等于 `true`，且客户配置 `weekly_loop.enabled` 为 true。**未配 = 只演练**（只算不写，回执里带预览）。不发布、不扣费。 | Render-web |
+| `SOCIAL_WEEKLY_LOOP_ENABLED` | 社媒每周出稿编排（Inngest `cloud-social-weekly-draft`）每天的自动派发总开关。必须严格等于 `true`。**未配 = 关**：每天只写一行 disabled 回执，不给任何客户派活。手动发 `dry_run` 事件当场试跑不受它限制；但它没开时任何写库都不会发生（手动发 `write` 事件也会被降成演练）。 | Render-web |
+| `SOCIAL_WEEKLY_LOOP_WRITE` | 社媒每周出稿是否**写库**（写排期日期 `brief.weekly_pack.publish_on`、写事实核对结果 `output.fact_check`）。必须严格等于 `true`，且总开关 `SOCIAL_WEEKLY_LOOP_ENABLED` 也是 `true`、客户配置 `weekly_loop.enabled` 为 true，三样缺一都只演练。**未配 = 只演练**（只算不写，回执里带预览）。不发布、不扣费。 | Render-web |
 | `WEEKLY_PACK_REEL_GO_PUBLIC` | Reel「批准即转公开」闸。必须严格等于 `true`。**未配 = 关**。关掉时整包同意不会调用转公开；要等草稿被记成已发布的问题合并后再开。 | Render-web |
 | `DAILY_PLAN_AUTO_PUBLISH_CLIENTS` | 🔴 允许自动真发的客户 id 白名单（逗号分隔，小写）。**不在名单里的客户永远只演练**，即使上面的总开关打开了 | Render-web |
 | `FACTORY_WORKER_CLIENT_IDS` | Factory 认领工单的客户白名单。**不是 worker 自己读的** —— worker 调 `/api/factory/worker/claim`，白名单在那条路由里由 `src/lib/factory/worker-guard.ts` 读并 fail-closed（未配则拒绝全部 claim） | Render-web |

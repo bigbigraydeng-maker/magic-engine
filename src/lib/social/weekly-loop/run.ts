@@ -55,7 +55,12 @@ export interface WeeklyLoopDeps {
   writeSchedule(args: WriteReelScheduleArgs): Promise<WriteReelScheduleResult>
 }
 
-export type WeeklyLoopTaskCode = 'zero_eligible' | 'all_filtered' | 'fact_source_unreadable' | 'unreviewed_by_maliang'
+export type WeeklyLoopTaskCode =
+  | 'zero_eligible'
+  | 'all_filtered'
+  | 'fact_source_unreadable'
+  | 'unreviewed_by_maliang'
+  | 'run_incomplete'
 
 export interface WeeklyLoopManualTask {
   code: WeeklyLoopTaskCode
@@ -453,6 +458,7 @@ const REASON_ZH: Record<string, string> = {
   publish_state_unverified: '看不出是否已经公开',
   over_quota: '超过每周名额',
   product_adjacent: '同一个团不能连着发',
+  fact_check_not_persisted: '事实核对结果没存上',
 }
 
 function buildTasks(
@@ -500,6 +506,51 @@ function buildTasks(
   return tasks
 }
 
+/** Schedule-writer skip reasons that mean a check or a write broke (not a content decision). */
+export const ERROR_SKIP_REASONS: readonly string[] = ['card_check_failed', 'promote_check_failed', 'write_failed']
+
+export interface IncompleteSource {
+  errors?: readonly string[]
+  fact_check_writes?: { failed: number }
+  counts?: { skipped_by_reason: Record<string, number> }
+}
+
+/** Why this run did not finish its job. Empty = nothing broke. */
+export function incompleteReasons(r: IncompleteSource): string[] {
+  const out: string[] = [...(r.errors ?? [])]
+  const failed = r.fact_check_writes?.failed ?? 0
+  if (failed > 0) out.push(`fact_check_write_failed:${failed}`)
+  const skipped = r.counts?.skipped_by_reason ?? {}
+  for (const reason of ERROR_SKIP_REASONS) {
+    const n = skipped[reason] ?? 0
+    if (n > 0) out.push(`schedule_skip_${reason}:${n}`)
+  }
+  return out
+}
+
+/** The to-do task for a run that broke part-way. Shared by the loop, the Inngest handler and the to-do reader. */
+export function buildRunIncompleteTask(clientId: string, reasons: readonly string[]): WeeklyLoopManualTask {
+  return {
+    code: 'run_incomplete',
+    what: `本周排期没跑完整：程序这次有一步出错或没读全（${reasons.join('、')}），下周的卡可能少排了视频。`,
+    how: '这条不用你改视频。先打开内容工厂看下周已经排上的视频；少排的部分等开发查明原因后重跑一次出稿。把这条转给开发即可。',
+    href: taskHref(clientId, 'content-factory'),
+  }
+}
+
+function finalTasks(
+  clientId: string,
+  counts: WeeklyLoopCounts,
+  stopReason: string | null,
+  errors: readonly string[],
+  factCheckWrites: { failed: number },
+): WeeklyLoopManualTask[] {
+  const tasks = buildTasks(clientId, counts, stopReason)
+  const reasons = incompleteReasons({ errors, fact_check_writes: factCheckWrites, counts })
+  if (reasons.length > 0) tasks.push(buildRunIncompleteTask(clientId, reasons))
+  return tasks
+}
+
 // ---------- step 9: write fact checks ----------
 
 async function writeFactChecks(
@@ -507,8 +558,9 @@ async function writeFactChecks(
   clientId: string,
   reviewed: Reviewed[],
   checkedAt: string,
-): Promise<{ written: number; conflict: number; failed: number }> {
+): Promise<{ tally: { written: number; conflict: number; failed: number }; writtenIds: Set<string> }> {
   const tally = { written: 0, conflict: 0, failed: 0 }
+  const writtenIds = new Set<string>()
   for (const r of reviewed) {
     const record: FactCheckRecord = {
       catalog_version: r.fact.catalogVersion,
@@ -525,14 +577,16 @@ async function writeFactChecks(
         readUpdatedAt: r.c.row.updated_at,
         output,
       })
-      if (outcome === 'written') tally.written += 1
-      else if (outcome === 'conflict') tally.conflict += 1
+      if (outcome === 'written') {
+        tally.written += 1
+        writtenIds.add(r.c.row.id)
+      } else if (outcome === 'conflict') tally.conflict += 1
       else tally.failed += 1
     } catch {
       tally.failed += 1
     }
   }
-  return tally
+  return { tally, writtenIds }
 }
 
 // ---------- step 10: schedule ----------
@@ -546,6 +600,9 @@ interface ScheduleArgs {
   mode: WeeklyLoopMode
   counts: WeeklyLoopCounts
   errors: string[]
+  items: WeeklyLoopItem[]
+  /** Write mode: ids whose fact_check write succeeded. null in dry_run (nothing is written). */
+  persistedIds: ReadonlySet<string> | null
 }
 
 async function scheduleEligible(
@@ -559,6 +616,12 @@ async function scheduleEligible(
     if (r.c.scheduledOn !== null) {
       alreadyScheduled.push({ id: r.c.row.id, publishOn: r.c.scheduledOn, productKey: r.productKey })
     } else {
+      if (args.persistedIds !== null && !args.persistedIds.has(r.c.row.id)) {
+        bump(args.counts.skipped_by_reason, 'fact_check_not_persisted')
+        const item = args.items.find((i) => i.id === r.c.row.id && i.excluded_reason === null)
+        if (item) item.excluded_reason = 'fact_check_not_persisted'
+        continue
+      }
       candidates.push({ id: r.c.row.id, productKey: r.productKey, rankAt: r.c.row.created_at })
     }
   }
@@ -643,6 +706,7 @@ export async function runWeeklyLoop(
   }
 
   const { rows, truncated } = await deps.loadOrders(input.clientId)
+  if (truncated) errors.push('orders_truncated')
   const candidates = selectCandidates(rows, week.weekStart, week.weekEnd, items, counts)
   const kept = keepLatestVersions(candidates, items, counts)
 
@@ -655,7 +719,7 @@ export async function runWeeklyLoop(
       status: 'stopped',
       stop_reason: stopReason,
       truncated,
-      manual_tasks: buildTasks(input.clientId, counts, stopReason),
+      manual_tasks: finalTasks(input.clientId, counts, stopReason, errors, { failed: 0 }),
     }
   }
 
@@ -663,8 +727,11 @@ export async function runWeeklyLoop(
   const quota = reelQuota(client, source.tours.length, counts.eligible)
 
   let factCheckWrites = { written: 0, conflict: 0, failed: 0 }
+  let persistedIds: Set<string> | null = null
   if (input.mode === 'write') {
-    factCheckWrites = await writeFactChecks(deps, input.clientId, reviewed, input.now.toISOString())
+    const res = await writeFactChecks(deps, input.clientId, reviewed, input.now.toISOString())
+    factCheckWrites = res.tally
+    persistedIds = res.writtenIds
   }
 
   const scheduled = await scheduleEligible(deps, {
@@ -676,6 +743,8 @@ export async function runWeeklyLoop(
     mode: input.mode,
     counts,
     errors,
+    items,
+    persistedIds,
   })
 
   const receipt = baseReceipt(input, week, counts, items, errors)
@@ -689,6 +758,6 @@ export async function runWeeklyLoop(
     recipe_stage: quota.stage,
     scheduled,
     fact_check_writes: factCheckWrites,
-    manual_tasks: buildTasks(input.clientId, counts, null),
+    manual_tasks: finalTasks(input.clientId, counts, null, errors, factCheckWrites),
   }
 }

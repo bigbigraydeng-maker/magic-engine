@@ -194,7 +194,7 @@ describe('social-weekly-draft function', () => {
   })
 
   it('resolveMode unit cases', () => {
-    expect(resolveMode('write', { SOCIAL_WEEKLY_LOOP_WRITE: 'true' }, true)).toEqual({ mode: 'write', forced: false })
+    expect(resolveMode('write', { SOCIAL_WEEKLY_LOOP_ENABLED: 'true', SOCIAL_WEEKLY_LOOP_WRITE: 'true' }, true)).toEqual({ mode: 'write', forced: false })
     expect(resolveMode('write', { SOCIAL_WEEKLY_LOOP_WRITE: 'TRUE' }, true)).toEqual({ mode: 'dry_run', forced: true })
     expect(resolveMode('dry_run', { SOCIAL_WEEKLY_LOOP_WRITE: 'true' }, true)).toEqual({ mode: 'dry_run', forced: false })
     expect(resolveMode(undefined, {}, true)).toEqual({ mode: 'dry_run', forced: false })

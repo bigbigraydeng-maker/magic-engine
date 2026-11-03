@@ -2,15 +2,19 @@
  * 今日待办里的「社媒每周出稿」栏。
  *
  * 只读 cron_run_logs 里 social-weekly-draft 的回执翻成待办，不自己现算。
- * 只认「写库模式」的客户回执（manual_tasks_delivered = true）；演练回执里的待办只给 PM 预览，不进清单。
- * 同一客户只看最新一份写库回执：最新那份没有待办 = 已经好了。
+ * 只认「写库模式」的客户回执（manual_tasks_delivered = true，或写库模式下整轮跑挂了 status = 'failed'）；演练回执里的待办只给 PM 预览，不进清单。
+ * 同一客户只看最新一份写库回执：最新那份没有待办 = 已经好了；最新那份跑挂了 = 出「本周排期没跑完整」，不再显示更早的旧待办。
  *
  * 🔴 本文件一行写库都没有。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
-import { WEEKLY_LOOP_JOB, type WeeklyLoopManualTask } from '@/lib/social/weekly-loop/run'
+import {
+  WEEKLY_LOOP_JOB,
+  buildRunIncompleteTask,
+  type WeeklyLoopManualTask,
+} from '@/lib/social/weekly-loop/run'
 
 export const WEEKLY_LOOP_TODO_KIND = 'social_weekly_loop_needs_human' as const
 /** Weekly job: look back a little over a week. */
@@ -26,6 +30,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set([
   'all_filtered',
   'fact_source_unreadable',
   'unreviewed_by_maliang',
+  'run_incomplete',
 ])
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -51,10 +56,16 @@ export function readDeliveredTasks(
   if (!isRecord(summary)) return null
   if (summary.kind !== 'client_run') return null
   if (summary.mode !== 'write') return null
-  if (summary.manual_tasks_delivered !== true) return null
   if (!isNonEmptyString(summary.client_id)) return null
-  if (!Array.isArray(summary.manual_tasks)) return null
-  const tasks = summary.manual_tasks.filter(isManualTask)
+  const failed = summary.status === 'failed'
+  if (summary.manual_tasks_delivered !== true && !failed) return null
+  if (!Array.isArray(summary.manual_tasks) && !failed) return null
+  const raw: unknown[] = Array.isArray(summary.manual_tasks) ? summary.manual_tasks : []
+  const tasks = raw.filter(isManualTask)
+  if (failed && !tasks.some((t) => t.code === 'run_incomplete')) {
+    const reason = isNonEmptyString(summary.error) ? summary.error : 'failed'
+    tasks.push(buildRunIncompleteTask(summary.client_id, [reason]))
+  }
   return { clientId: summary.client_id, tasks }
 }
 
