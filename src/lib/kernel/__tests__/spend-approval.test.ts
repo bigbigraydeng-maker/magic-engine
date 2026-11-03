@@ -148,7 +148,8 @@ describe('PM 放量信封：只放宽「学习期读不到」这一条', () => {
 
 describe('第 1 道（同步）在 sync-policy 测试里；第 2 道：授权预检', () => {
   it('🔴 策略是自动批准 → 加钱类直接拒，一次都不写 Meta', async () => {
-    const f = fixture({ mode: 'auto_approve' })
+    // 学习期读到了 SUCCESS：AI 信封本身会放行——删掉第 2 道就会真的写 Meta（魏征 11-03：测试要硬）
+    const f = fixture({ mode: 'auto_approve', facts: { ...okFacts, learningStage: 'SUCCESS' } })
     const outcome = await runAction(f.kernel, f.input)
     expect(outcome.kind).toBe('denied')
     expect(f.tables.authorization_decisions.at(-1)?.deny_code).toBe('outward_requires_human_policy')
@@ -212,7 +213,7 @@ describe('第 4 道：复用旧授权', () => {
 
 describe('第 5 道：执行前复核', () => {
   it('🔴 放行决策被改成别人签的 → Gateway 停手，零写入', async () => {
-    const f = fixture({ mode: 'require_approval' })
+    const f = fixture({ mode: 'require_approval', facts: { ...okFacts, learningStage: 'SUCCESS' } })
     const runId = await pending(f)
     const approved = await approveRun(f.kernel, runId, PM)
     if (approved.verdict !== 'allow' || !approved.ctx) throw new Error('expected allow')
@@ -232,10 +233,63 @@ describe('第 5 道：执行前复核', () => {
 })
 
 describe('刹车不受影响', () => {
-  it('提交本身照旧（submitActionRun 不看批准人）', async () => {
+  it('🔴 人按的减预算：没有 PM 名单判定、策略是自动，照样执行到 Meta', async () => {
+    const base = ACTION_REGISTRY.get('ads.cut_unit_budget')
+    if (!base) throw new Error('Missing production ads definition')
+    const definition: ActionDefinition = { ...base, verification: null }
+    const write = vi.fn(async () => ({ output: { applied: true } }))
+    const f = makeFixture({
+      registry: makeRegistry([definition]),
+      options: { policy: { action_key: 'ads.cut_unit_budget', mode: 'auto_approve' } },
+      capabilities: () => ({ 'ads.cut_unit_budget': {
+        actionKey: 'ads.cut_unit_budget', version: 1,
+        rollback: async () => ({ ok: true, rollbackKind: 'noop' as const, detail: {} }),
+        steps: { snapshot_pre: async () => ({ output: {} }), apply: write, readback: async () => ({ output: { applied: true } }) },
+      } }),
+    })
+    // 不注入 isSpendApprover：刹车根本不该问名单
+    const kernel = { ...f.kernel, resolveEnvelopeFacts: async () => ({ request: { kind: 'budget_change' as const, afterCents: 800 }, facts: okFacts }) }
+    const outcome = await runAction(kernel, {
+      clientId: CLIENT_A, goalId: GOAL_A, purpose: 'growth', actionKey: 'ads.cut_unit_budget', triggeredBy: 'human',
+      input: { cycle_date: '2026-11-03', ad_account_id: '123', adset_id: '456', after_cents: 800 },
+    })
+    expect(outcome.kind, JSON.stringify(outcome)).toBe('succeeded')
+    expect(write).toHaveBeenCalledTimes(1)
+  })
+
+  it('加钱类提交本身照旧挂起等批（submitActionRun 不看批准人）', async () => {
     const f = fixture({ mode: 'require_approval' })
     const { run } = await submitActionRun(f.kernel, f.input)
     const auth = await authorizeRun(f.kernel, run)
     expect(auth.verdict).toBe('require_approval')
+  })
+})
+
+describe('🔴 批准人来源：approveRun / approveAndRun 的生产调用点是白名单', () => {
+  // 第 3–5 道闸都信 approvedByUser 这个字符串。每个调用点都必须从登录会话（或已核实的授权凭证）取，
+  // 不许从请求体取。新增调用点 = 这条测试红 = 必须有人看过它的身份来源再登记（魏征 / 子牙 11-03）。
+  const ALLOWED: Record<string, RegExp> = {
+    'src/app/api/clients/[id]/ad-health/o1-scale/[runId]/decision/route.ts': /approveRun\(kernel, run\.id, access\.user\.email,/,
+    'src/lib/confirmation-card/decide.ts': /approveRun\(deps, runId, grant\.email,/,
+    'src/lib/action-submission/ads-auto-pause.ts': /approveAndRun\(deps, runId, approvedByUser,/,
+    'src/lib/kernel-approval/service.ts': /approveRun\(deps, run\.id, actorEmail,/,
+    'src/lib/kernel/runner.ts': /approveRun\(deps, runId, approvedByUser, options\)/,
+  }
+
+  it('仓库里调 approveRun / approveAndRun 的生产文件恰好是登记过的这几个，且实参形状没变', async () => {
+    const { execSync } = await import('node:child_process')
+    const out = execSync(
+      "git grep -lE '(approveRun|approveAndRun)\\(' -- 'src/**/*.ts' 'src/**/*.tsx'",
+      { encoding: 'utf8' },
+    )
+    const files = out.split('\n').filter(Boolean)
+      .filter((f) => !f.includes('__tests__') && !/\.test\.tsx?$/.test(f))
+      .filter((f) => f !== 'src/lib/kernel/human-approval.ts')
+    const { readFileSync } = await import('node:fs')
+    const callers = files.filter((f) => /(approveRun|approveAndRun)\((?!\s*$)/m.test(readFileSync(f, 'utf8').replace(/export async function (approveRun|approveAndRun)\(/g, '')))
+    expect(callers.sort()).toEqual(Object.keys(ALLOWED).sort())
+    for (const [file, shape] of Object.entries(ALLOWED)) {
+      expect(readFileSync(file, 'utf8'), file).toMatch(shape)
+    }
   })
 })

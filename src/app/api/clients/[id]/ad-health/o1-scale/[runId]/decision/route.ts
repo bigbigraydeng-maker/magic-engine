@@ -50,7 +50,11 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
         return NextResponse.json({ error: '批准前请先核对更长周期表现和 Meta 变更记录' }, { status: 400 })
       }
       assertActorMayApproveAction(run, access.tier)
-      await approveRun(kernel, run.id, access.user.email, { expectedDecisionId })
+      const approval = await approveRun(kernel, run.id, access.user.email, { expectedDecisionId })
+      // 批准时预跑信封判不过（例如 72 小时内改过）：把具体原因告诉批的人，不吞成一句「不能执行」。
+      if (approval.verdict !== 'allow') {
+        return NextResponse.json({ error: approval.decision.reason, code: 'approval_denied' }, { status: 409 })
+      }
       run = await kernel.requireRun(run.id)
     }
     if (run.status !== 'authorized' || !run.authorization_decision_id) {

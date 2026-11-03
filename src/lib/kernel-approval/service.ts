@@ -192,7 +192,8 @@ export function approvalPermissionsFor(
 
 function blockedMessage(run: ActionRun, reason: SpecialApproveBlock): string {
   if (reason === 'spend_increase') {
-    return '这条会让客户多花钱，只有 PM 本人能在「广告健康」页批 —— 那里批完会执行；这里只签不执行。' +
+    return '这条会让客户多花钱，只有 PM 本人能批，这里只签不执行、不给批。' +
+      '加预算去「广告健康」页批（那里批完会执行）；挪预算、新建再营销组目前没有批准入口。' +
       '**你仍然可以点「不做」**'
   }
   if (reason === 'dedicated_entry') {
