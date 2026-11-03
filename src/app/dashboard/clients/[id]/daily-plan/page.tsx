@@ -9,6 +9,7 @@ import { CampaignDailyPlanPanel } from '../_components/CampaignDailyPlanPanel'
 import { CampaignPicker } from '../_components/CampaignPicker'
 import { DailyPlanReelsPanel } from '../_components/DailyPlanReelsPanel'
 import { WeekOverviewPanel } from '../_components/WeekOverviewPanel'
+import { SocialReadbackPanel } from '../_components/SocialReadbackPanel'
 import { pickDefaultCampaignId } from './pick-default-campaign'
 import { homeEntryVisible } from '@/lib/auth/home-entries'
 import { useWorkspaceViewer } from '@/app/dashboard/workspace-viewer'
@@ -122,7 +123,10 @@ export default function DailyPlanPage() {
       </div>
 
       {tab === 'overview' && showOverview ? (
-        <WeekOverviewPanel clientId={clientId} />
+        <div className="space-y-5">
+          <WeekOverviewPanel clientId={clientId} />
+          <SocialReadbackPanel clientId={clientId} />
+        </div>
       ) : tab === 'reels' && showReels ? (
         <DailyPlanReelsPanel clientId={clientId} />
       ) : campaigns.length === 0 ? (
