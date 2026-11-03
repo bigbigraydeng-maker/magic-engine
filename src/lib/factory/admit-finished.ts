@@ -230,7 +230,7 @@ export async function admitFinishedVideo(
         client_id: input.clientId,
         goal_id: goalId,
         master_brief_id: masterBriefId,
-        order_type: 'reel',
+        order_type: 'fresh_angle',
         angle: input.angle,
         angle_source: {
           source: 'me_upload_entry',
