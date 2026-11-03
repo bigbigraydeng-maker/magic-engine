@@ -224,7 +224,7 @@ export async function buildGrowthState(
       adLevelCoverage: diagnosisRun.adLevelCoverage ?? [],
       goal,
       evaluatedAt,
-      scorecard: safeBuildAdsScorecard(input),
+      scorecard: safeBuildAdsScorecard(input, completeness.completeness),
     }
 
     const { error } = await supabaseAdmin.from('ads_growth_states').upsert(
