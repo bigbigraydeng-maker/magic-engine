@@ -132,8 +132,9 @@ def map_group(spec, box, clip_id, node_r=9, gw_r=10, label_fs=22, sub_fs=15, hal
         w=max(len(t)*fs*0.6 for t,fs,_,_ in lines)
         lh=[fs*1.28 for t,fs,_,_ in lines]; h=sum(lh)
         chosen=None
+        dirs_i=([s['dir']]+[d for d in dirs if d!=s['dir']]) if s.get('dir') else dirs
         for mult in (1.0,1.6,2.4,3.4,4.6,6.0):
-            for dx,dy in dirs:
+            for dx,dy in dirs_i:
                 r=(max(h,w)/2+18)*mult
                 cxl=p[0]+dx*r; cyl=p[1]+dy*r
                 rect=(cxl-w/2,cyl-h/2,cxl+w/2,cyl+h/2)
@@ -141,6 +142,8 @@ def map_group(spec, box, clip_id, node_r=9, gw_r=10, label_fs=22, sub_fs=15, hal
             if chosen: break
         if not chosen:
             cxl=p[0]+22+w/2; cyl=p[1]; chosen=(cxl,cyl,(cxl-w/2,cyl-h/2,cxl+w/2,cyl+h/2))
+        if s.get('lbl_off'):
+            cxl=p[0]+s['lbl_off'][0]; cyl=p[1]+s['lbl_off'][1]; chosen=(cxl,cyl,(cxl-w/2,cyl-h/2,cxl+w/2,cyl+h/2))
         cxl,cyl,rect=chosen; placed.append(rect)
         # leader line if far
         if math.hypot(cxl-p[0],cyl-p[1])>28:
@@ -150,6 +153,43 @@ def map_group(spec, box, clip_id, node_r=9, gw_r=10, label_fs=22, sub_fs=15, hal
             yy+=h1
             lbl.append(f'<text x="{cxl:.0f}" y="{yy-4:.0f}" fill="{col}" font-size="{fs}" font-weight="{wt}" text-anchor="middle" paint-order="stroke" stroke="{halo}" stroke-width="4">{t}</text>')
     return f'<clipPath id="{clip_id}"><rect x="{x0}" y="{y0}" width="{x1-x0}" height="{y1-y0}" rx="10"/></clipPath>', '\n'.join(body+lbl)
+
+
+def inset(x,y,w,h,title,nodes,segs,start=None,finish=None):
+    """Schematic (not-to-scale) zoom box for tightly clustered cities.
+    nodes: [(label, nights, fx, fy)] with fractional positions; segs: [(a,b,mode,off)]."""
+    out=[f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="10" fill="#FFFFFF" stroke="{LANDS}" stroke-width="1.5"/>',
+         f'<text x="{x+w/2}" y="{y+21}" fill="{DEEP}" font-size="13" font-weight="800" text-anchor="middle">{esc(title)}</text>']
+    top=y+30; ph=h-30
+    pts=[(x+fx*w, top+fy*ph) for _,_,fx,fy in nodes]
+    icons=[]; arrows=[]
+    for a,b,mode,off in segs:
+        c,qp,ang=curve(pts[a],pts[b],off)
+        out.append(f'<path d="M {pts[a][0]:.1f},{pts[a][1]:.1f} Q {c[0]:.1f},{c[1]:.1f} {pts[b][0]:.1f},{pts[b][1]:.1f}" fill="none" stroke="{RED}" stroke-width="4" stroke-linecap="round"/>')
+        m=qp(0.5); ap=qp(0.72); aa=ang(0.72)
+        icons.append((m,ICON[mode])); arrows.append((ap,aa))
+    for ap,aa in arrows:
+        out.append(f'<g transform="translate({ap[0]:.1f},{ap[1]:.1f}) rotate({aa:.1f}) scale(0.8)"><use href="#arrow"/></g>')
+    for m,ic in icons:
+        out.append(f'<circle cx="{m[0]:.1f}" cy="{m[1]:.1f}" r="13" fill="#FFFFFF"/><use href="#{ic}" x="{m[0]:.1f}" y="{m[1]:.1f}"/>')
+    for i,((lab,nt,fx,fy),p) in enumerate(zip(nodes,pts)):
+        fin = (i==finish)
+        out.append(f'<circle cx="{p[0]:.1f}" cy="{p[1]:.1f}" r="12" fill="none" stroke="{RED}" stroke-width="3"/><circle cx="{p[0]:.1f}" cy="{p[1]:.1f}" r="7" fill="{RED if fin else DEEP}" stroke="#FFFFFF" stroke-width="2"/>')
+        if fy<0.4:
+            out.append(f'<text x="{p[0]:.0f}" y="{p[1]-26:.0f}" fill="{DEEP}" font-size="14" font-weight="800" text-anchor="middle">{esc(lab)}</text>')
+            out.append(f'<text x="{p[0]:.0f}" y="{p[1]-12:.0f}" fill="{MUTED}" font-size="12" font-weight="700" text-anchor="middle">{esc(nt)}</text>')
+            continue
+        ty = p[1]+24 if fy>0.5 else p[1]+30
+        out.append(f'<text x="{p[0]:.0f}" y="{ty:.0f}" fill="{DEEP}" font-size="14" font-weight="800" text-anchor="middle">{esc(lab)}</text>')
+        out.append(f'<text x="{p[0]:.0f}" y="{ty+15:.0f}" fill="{MUTED}" font-size="12" font-weight="700" text-anchor="middle">{esc(nt)}</text>')
+    return '\n'.join(out)
+
+def spec_insets(spec,x0,y0):
+    return '\n'.join(inset(x0+i['dx'],y0+i['dy'],i['w'],i['h'],i['title'],i['nodes'],i['segs'],finish=i.get('finish')) for i in spec.get('insets',[]))
+
+def mobile_insets(spec,y):
+    ins=spec.get('insets',[])
+    return '\n'.join(inset(30+k*380,y,360,150,i['title'],i['nodes'],i['segs'],finish=i.get('finish')) for k,i in enumerate(ins))
 
 def legend(x,y,modes,maxw=592):
     used=[]
@@ -203,8 +243,8 @@ def card(x,y,w,h,city,nights,acts,name_fs=27):
 def render_pc(spec):
     W,H=1200,850
     clip,mapbody=map_group(spec,(40,150,680,760),'mapClipPC')
-    modes={s['mode'] for s in spec['segments']}
-    stops=spec['stops']
+    modes={s['mode'] for s in spec['segments']}|{sg[2] for i in spec.get('insets',[]) for sg in i['segs']}
+    stops=spec.get('cards',spec['stops'])
     N=len(stops)
     col_x=715; col_w=445; col_y=150; col_h=610
     gap = 14 if N<=5 else 10 if N<=8 else 8
@@ -224,6 +264,7 @@ def render_pc(spec):
 <defs>{clip}</defs>
 <rect x="40" y="150" width="640" height="610" rx="10" fill="{SEA}" stroke="#C7D6DF" stroke-width="1.5"/>
 {mapbody}
+{spec_insets(spec,40,150)}
 {legend(64,738,modes)}
 {''.join(cards)}
 <line x1="40" y1="792" x2="1160" y2="792" stroke="#E0E0E0" stroke-width="1.5"/>
@@ -234,12 +275,13 @@ def render_pc(spec):
 
 def render_mobile(spec):
     W=800
-    stops=spec['stops']; N=len(stops)
+    stops=spec.get('cards',spec['stops']); N=len(stops)
     map_y0=178; map_h=512
     clip,mapbody=map_group(spec,(30,map_y0,770,map_y0+map_h),'mapClipM',halo=SEA)
-    modes={s['mode'] for s in spec['segments']}
+    modes={s['mode'] for s in spec['segments']}|{sg[2] for i in spec.get('insets',[]) for sg in i['segs']}
     # cards stacked full width
-    cards=[]; cy=map_y0+map_h+50
+    extra=166 if spec.get('insets') else 0
+    cards=[]; cy=map_y0+map_h+50+extra
     card_gap=16
     for s in stops:
         acts=s['activities']
@@ -258,7 +300,8 @@ def render_mobile(spec):
 <defs>{clip}</defs>
 <rect x="30" y="{map_y0}" width="740" height="{map_h}" rx="10" fill="{SEA}" stroke="#C7D6DF" stroke-width="1.5"/>
 {mapbody}
-{legend(60,map_y0+map_h+24,modes)}
+{mobile_insets(spec,map_y0+map_h+12)}
+{legend(60,map_y0+map_h+24+extra,modes)}
 {''.join(cards)}
 <line x1="30" y1="{footer_y}" x2="770" y2="{footer_y}" stroke="#E0E0E0" stroke-width="1.5"/>
 <text x="40" y="{footer_y+30}" fill="{DEEP}" font-size="17" font-weight="700" font-style="italic">Experience The Real Asia</text>
