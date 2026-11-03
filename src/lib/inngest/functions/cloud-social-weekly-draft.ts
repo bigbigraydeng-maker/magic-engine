@@ -5,6 +5,7 @@
  * 写库要三样同时成立：总开关 SOCIAL_WEEKLY_LOOP_ENABLED、写库开关 SOCIAL_WEEKLY_LOOP_WRITE 都是 'true'，且客户开了每周闭环；少一样一律演练（只算不写）。
  * 手动发 dry_run 事件不看总开关，这是当场试跑的入口。不发布、不扣费、不外发。
  * 跑循环前先补审：只在写库模式（或手动事件带 maliang_review: true）时，给「只差马良没审、事实已核过」的片调马良 v2，单客户每周有花费上限，每条一个步骤、不重试。
+ * 补审的钱在每次调模型前先记到本次运行的日志行上，并在每个步骤里重查周预算；没配模型 key 就不开跑；「看不了」的结论一律不落库，下周再试。
  * 新增函数部署后必须去 Inngest 后台 Sync 一次。
  */
 import type { GetStepTools } from 'inngest'
@@ -13,12 +14,12 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
 import { cadenceFromConfig, isoDate, nzCalendar } from '@/lib/social/week-pack/cadence'
 import { buildRunIncompleteTask, incompleteReasons, runWeeklyLoop, WEEKLY_LOOP_JOB, type FactCheckWriteOutcome, type WeeklyLoopDeps, type WeeklyLoopMode, type WeeklyLoopReceipt } from '@/lib/social/weekly-loop/run'
-import { createWeeklyLoopDbDeps, listWeeklyLoopClients, loadWeeklyLoopClientConfig, loadWeeklyMaliangSpend, weeklyLoopEnabled } from '@/lib/social/weekly-loop/run-deps'
+import { createWeeklyLoopDbDeps, listWeeklyLoopClients, loadWeeklyLoopClientConfig, loadWeeklyMaliangSpend, reserveWeeklyMaliangSpend, weeklyLoopEnabled } from '@/lib/social/weekly-loop/run-deps'
 import type { MaliangCheck } from '@/lib/maliang/render-check'
 import { allowedVideoHosts } from '@/lib/maliang/render-check'
-import { REVIEW_V2_ESTIMATE_USD, runReviewCheckV2 } from '@/lib/maliang/render-check-v2'
+import { REVIEW_V2_ESTIMATE_USD, runReviewCheckV2, withinWeeklyBudget } from '@/lib/maliang/render-check-v2'
 import { REMOTION_REVIEW_TIMEOUT_MS, runCheckWithTimeout, stampWorkOrderOutput } from '@/lib/maliang/review-disposition'
-import { MALIANG_BACKFILL_MAX_PER_RUN, maliangWeeklyCapUsd, overlayReviews, pickBackfillTargets, type BackfillTarget, type MaliangBackfillReceipt } from '@/lib/social/weekly-loop/maliang-backfill'
+import { MALIANG_BACKFILL_MAX_PER_RUN, maliangWeeklyCapUsd, overlayReviews, pickBackfillTargets, type BackfillPersisted, type BackfillTarget, type MaliangBackfillReceipt } from '@/lib/social/weekly-loop/maliang-backfill'
 
 export const SOCIAL_WEEKLY_DRAFT_FUNCTION_ID = `${CLOUD_FN_PREFIX}social-weekly-draft`
 export const SOCIAL_WEEKLY_DRAFT_CRON = 'TZ=Pacific/Auckland 30 8 * * *'
@@ -126,6 +127,10 @@ export interface SocialWeeklyDraftDeps {
   /** One 马良 v2 review. Must not throw: errors and timeouts come back as an unverifiable check. */
   reviewVideo: (target: BackfillTarget) => Promise<MaliangCheck>
   supabaseUrl: () => string | undefined
+  /** false when the model key is missing: the backfill does not start (no review, no charge). */
+  reviewReady: () => boolean
+  /** Books cumulative 马良 spend of this run on its own log row; throws when it cannot. Called before every model call. */
+  reserveMaliangSpend: (input: { runId: string; clientId: string; spentUsd: number }) => Promise<void>
 }
 
 type StepLike = GetStepTools<typeof inngest>
@@ -177,10 +182,25 @@ interface BackfillPlan {
   outputs: Record<string, unknown>
 }
 
+type ReviewSkip = 'budget' | 'spend_unreadable' | 'reserve_failed'
+
 interface BackfillReview {
   id: string
-  check: MaliangCheck
-  persisted: FactCheckWriteOutcome | 'not_written'
+  /** null when the step skipped before calling the model. */
+  check: MaliangCheck | null
+  persisted: BackfillPersisted | null
+  /** true once the money was booked and the model was called. */
+  charged: boolean
+  skipped: ReviewSkip | null
+}
+
+interface ReviewContext {
+  clientId: string
+  mode: WeeklyLoopMode
+  runId: string
+  capUsd: number
+  /** Reviews already charged earlier in this run. */
+  chargedSoFar: number
 }
 
 function emptyPlan(off_reason: string, cap_usd: number, spent_before_usd: number): BackfillPlan {
@@ -241,31 +261,35 @@ async function planBackfill(
     if (row) outputs[target.id] = row.output
   }
 
+  const off_reason = !enabled
+    ? 'dry_run_without_maliang_review'
+    : !deps.reviewReady()
+      ? 'no_api_key'
+      : null
+
   return {
-    off_reason: enabled ? null : 'dry_run_without_maliang_review',
+    off_reason,
     cap_usd: cap,
     spent_before_usd: spent,
-    targets: enabled ? picked.targets : [],
+    targets: off_reason === null ? picked.targets : [],
     target_count: picked.targets.length,
     skipped: picked.skipped,
     outputs,
   }
 }
 
-async function reviewOne(
+async function writeVerdict(
   deps: SocialWeeklyDraftDeps,
-  clientId: string,
-  mode: WeeklyLoopMode,
+  ctx: ReviewContext,
   target: BackfillTarget,
   baseOutput: unknown,
-): Promise<BackfillReview> {
-  const check = await deps.reviewVideo(target)
-  if (mode !== 'write') return { id: target.id, check, persisted: 'not_written' }
+  check: MaliangCheck,
+): Promise<BackfillPersisted> {
   const output = stampWorkOrderOutput(baseOutput, check)
   let persisted: FactCheckWriteOutcome | 'failed'
   try {
     persisted = await deps.loopDeps().writeFactCheck({
-      clientId,
+      clientId: ctx.clientId,
       id: target.id,
       readUpdatedAt: target.readUpdatedAt,
       output,
@@ -273,7 +297,74 @@ async function reviewOne(
   } catch {
     persisted = 'failed'
   }
-  return { id: target.id, check, persisted }
+  return persisted
+}
+
+async function reviewOne(
+  deps: SocialWeeklyDraftDeps,
+  ctx: ReviewContext,
+  target: BackfillTarget,
+  baseOutput: unknown,
+): Promise<BackfillReview> {
+  const skip = (s: ReviewSkip): BackfillReview => ({
+    id: target.id,
+    check: null,
+    persisted: null,
+    charged: false,
+    skipped: s,
+  })
+
+  let spent: number
+  try {
+    spent = await deps.loadMaliangSpend(ctx.clientId, new Date(deps.now().getTime() - WEEK_MS))
+  } catch {
+    return skip('spend_unreadable')
+  }
+  if (!withinWeeklyBudget(spent, ctx.capUsd, REVIEW_V2_ESTIMATE_USD)) return skip('budget')
+
+  try {
+    await deps.reserveMaliangSpend({
+      runId: ctx.runId,
+      clientId: ctx.clientId,
+      spentUsd: (ctx.chargedSoFar + 1) * REVIEW_V2_ESTIMATE_USD,
+    })
+  } catch {
+    return skip('reserve_failed')
+  }
+
+  const check = await deps.reviewVideo(target)
+  const charged = { id: target.id, check, charged: true, skipped: null }
+  if (check.status === 'unverifiable') return { ...charged, persisted: 'unverifiable_not_written' }
+  if (ctx.mode !== 'write') return { ...charged, persisted: 'not_written' }
+  const persisted = await writeVerdict(deps, ctx, target, baseOutput, check)
+  return { ...charged, persisted }
+}
+
+function buildBackfillReceipt(
+  plan: BackfillPlan,
+  reviews: readonly BackfillReview[],
+): MaliangBackfillReceipt {
+  const skipped: Record<string, number> = { ...plan.skipped }
+  for (const review of reviews) {
+    if (review.skipped === null) continue
+    skipped[review.skipped] = (skipped[review.skipped] ?? 0) + 1
+  }
+  const reviewed: MaliangBackfillReceipt['reviewed'] = []
+  for (const review of reviews) {
+    if (review.check === null || review.persisted === null) continue
+    reviewed.push({ id: review.id, status: review.check.status, persisted: review.persisted })
+  }
+  return {
+    enabled: plan.off_reason === null,
+    off_reason: plan.off_reason,
+    cap_usd: plan.cap_usd,
+    spent_before_usd: plan.spent_before_usd,
+    spent_usd: reviews.filter((r) => r.charged).length * REVIEW_V2_ESTIMATE_USD,
+    estimated_usd: plan.target_count * REVIEW_V2_ESTIMATE_USD,
+    targets: plan.target_count,
+    skipped,
+    reviewed,
+  }
 }
 
 async function runMaliangBackfill(
@@ -282,33 +373,34 @@ async function runMaliangBackfill(
   clientId: string,
   mode: WeeklyLoopMode,
   optIn: boolean,
+  runId: string,
 ): Promise<{ receipt: MaliangBackfillReceipt; overlay: Record<string, MaliangCheck> }> {
   const plan = await step.run('maliang-plan', () => planBackfillSafe(deps, clientId, mode, optIn))
 
   const reviews: BackfillReview[] = []
   for (const target of plan.targets) {
+    const chargedSoFar = reviews.filter((r) => r.charged).length
     const review = await step.run(`maliang-review-${target.id}`, () =>
-      reviewOne(deps, clientId, mode, target, plan.outputs[target.id]),
+      reviewOne(
+        deps,
+        { clientId, mode, runId, capUsd: plan.cap_usd, chargedSoFar },
+        target,
+        plan.outputs[target.id],
+      ),
     )
     reviews.push(review)
   }
 
   const overlay: Record<string, MaliangCheck> = {}
   if (mode !== 'write') {
-    for (const review of reviews) overlay[review.id] = review.check
+    for (const review of reviews) {
+      if (review.persisted !== 'not_written') continue
+      if (review.check === null) continue
+      overlay[review.id] = review.check
+    }
   }
 
-  const receipt: MaliangBackfillReceipt = {
-    enabled: plan.off_reason === null,
-    off_reason: plan.off_reason,
-    cap_usd: plan.cap_usd,
-    spent_before_usd: plan.spent_before_usd,
-    spent_usd: reviews.length * REVIEW_V2_ESTIMATE_USD,
-    targets: plan.target_count,
-    skipped: plan.skipped,
-    reviewed: reviews.map((r) => ({ id: r.id, status: r.check.status, persisted: r.persisted })),
-  }
-  return { receipt, overlay }
+  return { receipt: buildBackfillReceipt(plan, reviews), overlay }
 }
 
 function invalidEventReceipt(ctx: DueContext): ClientRunReceipt {
@@ -328,13 +420,25 @@ function invalidEventReceipt(ctx: DueContext): ClientRunReceipt {
   }
 }
 
-/** Backfill breakages (not content decisions): an unreadable budget, a failed plan read, verdicts that did not save. */
+/** Backfill breakages and money wasted without a stored verdict (not content decisions). */
 export function backfillFailures(backfill: MaliangBackfillReceipt): string[] {
   const out: string[] = []
   const off = backfill.off_reason ?? ''
-  if (off === 'spend_unreadable' || off.startsWith('plan_failed')) out.push(`maliang_${off}`)
-  const writeFailed = backfill.reviewed.filter((r) => r.persisted === 'failed').length
+  if (off === 'spend_unreadable' || off === 'no_api_key' || off.startsWith('plan_failed')) {
+    out.push(`maliang_${off}`)
+  }
+  for (const reason of ['spend_unreadable', 'reserve_failed'] as const) {
+    const n = backfill.skipped[reason] ?? 0
+    if (n > 0) out.push(`maliang_review_skip_${reason}:${n}`)
+  }
+  const countPersisted = (value: BackfillPersisted): number =>
+    backfill.reviewed.filter((r) => r.persisted === value).length
+  const writeFailed = countPersisted('failed')
   if (writeFailed > 0) out.push(`maliang_write_failed:${writeFailed}`)
+  const writeConflict = countPersisted('conflict')
+  if (writeConflict > 0) out.push(`maliang_write_conflict:${writeConflict}`)
+  const unverifiable = countPersisted('unverifiable_not_written')
+  if (unverifiable > 0) out.push(`maliang_unverifiable:${unverifiable}`)
   return out
 }
 
@@ -493,7 +597,14 @@ async function handleDue(
       return resolveMode(ctx.requested, deps.env(), clientEnabled)
     })
 
-    const backfill = await runMaliangBackfill(deps, step, ctx.clientId, resolved.mode, ctx.maliangReview)
+    const backfill = await runMaliangBackfill(
+      deps,
+      step,
+      ctx.clientId,
+      resolved.mode,
+      ctx.maliangReview,
+      started.runId,
+    )
 
     receipt = await step.run('run-loop', async (): Promise<ClientRunReceipt> => {
       const base = deps.loopDeps()
@@ -577,4 +688,6 @@ export const socialWeeklyDraft = createSocialWeeklyDraftFunction({
       target.videoUrl,
     ),
   supabaseUrl: () => process.env.NEXT_PUBLIC_SUPABASE_URL,
+  reviewReady: () => Boolean(process.env.GEMINI_API_KEY?.trim()),
+  reserveMaliangSpend: (input) => reserveWeeklyMaliangSpend(supabaseAdmin, input),
 })

@@ -36,6 +36,8 @@ const PASS: MaliangCheck = {
   model: 'm',
 }
 
+const UNVERIFIABLE: MaliangCheck = { status: 'unverifiable', checked_at: '2026-11-05T00:00:00.000Z', video_url: 'v', reasons: ['马良自检超时'], frames: [], model: null }
+
 const WRITE_ENV = { SOCIAL_WEEKLY_LOOP_ENABLED: 'true', SOCIAL_WEEKLY_LOOP_WRITE: 'true' }
 
 function row(id: string, over: Partial<WeeklyLoopOrderRow> = {}): WeeklyLoopOrderRow {
@@ -99,6 +101,8 @@ function makeDeps(
     loadMaliangSpend: vi.fn(async () => 0),
     reviewVideo: vi.fn(async () => PASS),
     supabaseUrl: () => 'https://abc.supabase.co',
+    reviewReady: () => true,
+    reserveMaliangSpend: vi.fn(async () => undefined),
     ...over,
   }
 }
@@ -156,10 +160,12 @@ describe('social-weekly-draft · 马良 backfill', () => {
       reviewed: [{ id: 'w1', status: 'pass', persisted: 'written' }],
     })
 
-    expect(deps.loadMaliangSpend).toHaveBeenCalledTimes(1)
-    const [spendClientId, spendSince] = vi.mocked(deps.loadMaliangSpend).mock.calls[0]
-    expect(spendClientId).toBe('c1')
-    expect(spendSince.getTime()).toBe(NOW.getTime() - WEEK_MS)
+    // Once in the plan, once again inside the review step right before booking the money.
+    expect(deps.loadMaliangSpend).toHaveBeenCalledTimes(2)
+    for (const [spendClientId, spendSince] of vi.mocked(deps.loadMaliangSpend).mock.calls) {
+      expect(spendClientId).toBe('c1')
+      expect(spendSince.getTime()).toBe(NOW.getTime() - WEEK_MS)
+    }
   })
 
   it('cron-style dry run reports the target but spends nothing', async () => {
@@ -222,7 +228,7 @@ describe('social-weekly-draft · 马良 backfill', () => {
     expect(receipt.maliang_backfill?.skipped).toEqual({ budget: 1 })
   })
 
-  it('a lost race is a conflict (not a failure); a thrown write is a failure', async () => {
+  it('a lost race and a thrown write are both reported (money spent, verdict not stored)', async () => {
     const conflictImpl = async (a: Parameters<WeeklyLoopDeps['writeFactCheck']>[0]) =>
       'fact_check' in a.output ? ('written' as const) : ('conflict' as const)
     const conflictLoop = makeLoopDeps(conflictImpl)
@@ -231,6 +237,10 @@ describe('social-weekly-draft · 马良 backfill', () => {
 
     expect(conflictReceipt.maliang_backfill?.reviewed[0].persisted).toBe('conflict')
     expect(conflictReceipt.failures.some((f) => f.startsWith('maliang_write_failed'))).toBe(false)
+    expect(conflictReceipt.failures).toContain('maliang_write_conflict:1')
+    // The verdict did not stick, so the loop must not schedule w1 on an in-memory pass.
+    expect((conflictReceipt.scheduled ?? []).map((x) => x.id)).not.toContain('w1')
+    expect(conflictReceipt.items?.find((i) => i.id === 'w1')?.excluded_reason).toBe('unreviewed')
 
     const throwImpl = async (a: Parameters<WeeklyLoopDeps['writeFactCheck']>[0]) => {
       if ('fact_check' in a.output) return 'written' as const
@@ -257,5 +267,95 @@ describe('social-weekly-draft · 马良 backfill', () => {
     expect(receipt.maliang_backfill?.off_reason?.startsWith('plan_failed')).toBe(true)
     expect(receipt.failures.some((f) => f.startsWith('maliang_plan_failed'))).toBe(true)
     expect(deps.finishRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('an unverifiable verdict is charged but never stored, and is reported', async () => {
+    const loop = makeLoopDeps()
+    const deps = makeDeps(WRITE_ENV, loop, { reviewVideo: vi.fn(async () => UNVERIFIABLE) })
+    const receipt = await run(deps, due({ mode: 'write' }))
+
+    expect(deps.reviewVideo).toHaveBeenCalledTimes(1)
+    expect(maliangWrites(loop)).toHaveLength(0)
+    expect(receipt.maliang_backfill?.spent_usd).toBe(0.05)
+    expect(receipt.maliang_backfill?.reviewed).toEqual([
+      { id: 'w1', status: 'unverifiable', persisted: 'unverifiable_not_written' },
+    ])
+    expect(receipt.failures).toContain('maliang_unverifiable:1')
+    expect(receipt.items?.find((i) => i.id === 'w1')?.excluded_reason).toBe('unreviewed')
+  })
+
+  it('no model key: nothing reviewed, nothing charged, reported', async () => {
+    const loop = makeLoopDeps()
+    const deps = makeDeps(WRITE_ENV, loop, { reviewReady: () => false })
+    const receipt = await run(deps, due({ mode: 'write' }))
+
+    expect(deps.reviewVideo).not.toHaveBeenCalled()
+    expect(deps.reserveMaliangSpend).not.toHaveBeenCalled()
+    expect(receipt.maliang_backfill?.off_reason).toBe('no_api_key')
+    expect(receipt.maliang_backfill?.spent_usd).toBe(0)
+    expect(receipt.failures).toContain('maliang_no_api_key')
+  })
+
+  it('money is booked on the run row before the model is called', async () => {
+    const loop = makeLoopDeps()
+    const deps = makeDeps(WRITE_ENV, loop)
+    await run(deps, due({ mode: 'write' }))
+
+    expect(deps.reserveMaliangSpend).toHaveBeenCalledTimes(1)
+    expect(deps.reserveMaliangSpend).toHaveBeenCalledWith({ runId: 'run-1', clientId: 'c1', spentUsd: 0.05 })
+    expect(vi.mocked(deps.reserveMaliangSpend).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(deps.reviewVideo).mock.invocationCallOrder[0],
+    )
+  })
+
+  it('booking fails → no model call, reported', async () => {
+    const loop = makeLoopDeps()
+    const deps = makeDeps(WRITE_ENV, loop, {
+      reserveMaliangSpend: vi.fn(async () => {
+        throw new Error('db')
+      }),
+    })
+    const receipt = await run(deps, due({ mode: 'write' }))
+
+    expect(deps.reviewVideo).not.toHaveBeenCalled()
+    expect(receipt.maliang_backfill?.spent_usd).toBe(0)
+    expect(receipt.maliang_backfill?.skipped.reserve_failed).toBe(1)
+    expect(receipt.failures).toContain('maliang_review_skip_reserve_failed:1')
+  })
+
+  it('the budget is re-checked inside the review step (another run spent it meanwhile)', async () => {
+    const loop = makeLoopDeps()
+    const deps = makeDeps(WRITE_ENV, loop, {
+      loadMaliangSpend: vi.fn().mockResolvedValueOnce(0).mockResolvedValue(0.5),
+    })
+    const receipt = await run(deps, due({ mode: 'write' }))
+
+    expect(deps.reviewVideo).not.toHaveBeenCalled()
+    expect(deps.reserveMaliangSpend).not.toHaveBeenCalled()
+    expect(receipt.maliang_backfill?.skipped.budget).toBe(1)
+    expect(receipt.maliang_backfill?.spent_usd).toBe(0)
+  })
+
+  it('second review books the cumulative amount of this run', async () => {
+    const loop = makeLoopDeps()
+    loop.loadOrders = vi.fn(async () => ({ rows: [row('w1'), row('w4')], truncated: false }))
+    const deps = makeDeps(WRITE_ENV, loop)
+    const receipt = await run(deps, due({ mode: 'write' }))
+
+    expect(deps.reviewVideo).toHaveBeenCalledTimes(2)
+    const booked = vi.mocked(deps.reserveMaliangSpend).mock.calls.map(([a]) => a.spentUsd)
+    expect(booked).toHaveLength(2)
+    expect(booked[0]).toBeCloseTo(0.05)
+    expect(booked[1]).toBeCloseTo(0.1)
+    expect(receipt.maliang_backfill?.spent_usd).toBeCloseTo(0.1)
+  })
+
+  it('dry run without opt-in shows the estimated cost', async () => {
+    const loop = makeLoopDeps()
+    const deps = makeDeps({}, loop)
+    const receipt = await run(deps, due({ mode: 'dry_run' }))
+
+    expect(receipt.maliang_backfill?.estimated_usd).toBeCloseTo(0.05)
+    expect(deps.reserveMaliangSpend).not.toHaveBeenCalled()
   })
 })

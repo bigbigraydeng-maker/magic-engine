@@ -5,6 +5,7 @@ import {
   listWeeklyLoopClients,
   loadWeeklyMaliangSpend,
   parseOrderRow,
+  reserveWeeklyMaliangSpend,
   weeklyLoopEnabled,
   WEEKLY_LOOP_ORDER_CAP,
 } from '../run-deps'
@@ -290,6 +291,7 @@ describe('loadWeeklyMaliangSpend', () => {
       select: (cols: string) => (calls.push(['select', cols]), chain),
       eq: (col: string, val: unknown) => (calls.push([`eq:${col}`, val]), chain),
       gte: (col: string, val: unknown) => (calls.push([`gte:${col}`, val]), chain),
+      order: () => chain,
       limit: () => Promise.resolve(result),
     }
     const db = { from: (table: string) => (calls.push(['from', table]), chain) }
@@ -313,5 +315,40 @@ describe('loadWeeklyMaliangSpend', () => {
   it('throws when the receipts cannot be read (caller treats that as no budget)', async () => {
     const db = spendDb({ data: null, error: { message: 'down' } }, [])
     await expect(loadWeeklyMaliangSpend(db, 'c1', new Date())).rejects.toThrow('maliang_spend_read_failed')
+  })
+})
+
+describe('reserveWeeklyMaliangSpend', () => {
+  function reserveDb(result: { data: unknown; error: unknown }, calls: Array<[string, unknown]>): SupabaseClient {
+    const chain = {
+      update: (patch: unknown) => (calls.push(['update', patch]), chain),
+      eq: (col: string, val: unknown) => (calls.push([`eq:${col}`, val]), chain),
+      select: () => Promise.resolve(result),
+    }
+    return { from: (table: string) => (calls.push(['from', table]), chain) } as never
+  }
+
+  it('books the spend on this run row only while it is still running', async () => {
+    const calls: Array<[string, unknown]> = []
+    await reserveWeeklyMaliangSpend(reserveDb({ data: [{ id: 'run-1' }], error: null }, calls), {
+      runId: 'run-1',
+      clientId: 'c1',
+      spentUsd: 0.1,
+    })
+    expect(calls).toContainEqual(['from', 'cron_run_logs'])
+    expect(calls).toContainEqual(['eq:id', 'run-1'])
+    expect(calls).toContainEqual(['eq:job_name', 'social-weekly-draft'])
+    expect(calls).toContainEqual(['eq:status', 'running'])
+    const patch = calls.find(([k]) => k === 'update')?.[1] as { summary: Record<string, unknown> }
+    expect(patch.summary).toMatchObject({ client_id: 'c1', maliang_backfill: { spent_usd: 0.1 } })
+  })
+
+  it('throws when no row was booked, so the caller does not call the model', async () => {
+    await expect(
+      reserveWeeklyMaliangSpend(reserveDb({ data: [], error: null }, []), { runId: 'x', clientId: 'c1', spentUsd: 0.05 }),
+    ).rejects.toThrow('maliang_spend_reserve_failed')
+    await expect(
+      reserveWeeklyMaliangSpend(reserveDb({ data: null, error: { message: 'down' } }, []), { runId: 'x', clientId: 'c1', spentUsd: 0.05 }),
+    ).rejects.toThrow('maliang_spend_reserve_failed')
   })
 })

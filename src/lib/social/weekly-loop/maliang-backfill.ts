@@ -35,10 +35,18 @@ export interface MaliangBackfillReceipt {
   spent_before_usd: number
   /** Model calls made in this run x REVIEW_V2_ESTIMATE_USD. */
   spent_usd: number
+  /** Targets x REVIEW_V2_ESTIMATE_USD: what this run would spend if every target is reviewed. */
+  estimated_usd: number
   targets: number
   skipped: Record<string, number>
-  reviewed: Array<{ id: string; status: string; persisted: 'written' | 'conflict' | 'failed' | 'not_written' }>
+  reviewed: Array<{ id: string; status: string; persisted: BackfillPersisted }>
 }
+
+/**
+ * not_written: dry run (verdict only kept in memory).
+ * unverifiable_not_written: 马良 could not look (timeout / download / parse); not stored so the reel stays "unreviewed" and is retried next week.
+ */
+export type BackfillPersisted = 'written' | 'conflict' | 'failed' | 'not_written' | 'unverifiable_not_written'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
