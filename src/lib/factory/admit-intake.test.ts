@@ -302,6 +302,25 @@ describe('admitFinishedVideo', () => {
     expect(brief.talent_consent).toMatchObject({ status: 'granted', confirmed_by: 'system:pm-chat', evidence: 'PM chat' })
   })
 
+  it('a publish_failed order is not treated as dead (it may still be retried or already be public)', async () => {
+    const { db } = fakeDb([{ id: 'pf', status: 'publish_failed', brief: { engine: 'external_upload' }, updated_at: '2026-11-04T00:00:00.000Z', output: {} }])
+    const plain = await admitFinishedVideo(db, input(), { sendReview: vi.fn(async () => undefined) })
+    expect(plain.ok && plain.workOrderId).toBe('pf')
+    const consent = { status: 'granted' as const, scope: ['tiktok_organic' as const], subject: 'guest', evidence: 'PM chat' }
+    const withConsent = await admitFinishedVideo(db, input({ talentConsent: consent }), { sendReview: vi.fn(async () => undefined) })
+    expect(withConsent.ok).toBe(false)
+    if (!withConsent.ok) expect(withConsent.status).toBe(409)
+  })
+
+  it('re-admitting the same consent does not rewrite the order', async () => {
+    const stored = { status: 'granted', scope: ['facebook_organic'], subject: 'guest', confirmed_by: 'system:pm-chat', confirmed_at: '2026-11-01T00:00:00.000Z', evidence: 'PM chat' }
+    const { db } = fakeDb([{ id: 'e', status: 'approved', brief: { engine: 'external_upload', talent_consent: stored }, updated_at: '2026-11-04T00:00:00.000Z', output: {} }])
+    const consent = { status: 'granted' as const, scope: ['facebook_organic' as const], subject: 'guest', evidence: 'PM chat' }
+    const result = await admitFinishedVideo(db, input({ talentConsent: consent }), { sendReview: vi.fn(async () => undefined) })
+    expect(result.ok && result.consentUpdated).toBe(false)
+    expect(updates).toHaveLength(0)
+  })
+
   it('a dead order (rejected) is not reused: the admit goes on to create a new one', async () => {
     const { db } = fakeDb([{ id: 'old', status: 'review_rejected', brief: {}, updated_at: 'x', output: {} }])
     const result = await admitFinishedVideo(db, input(), { sendReview: vi.fn(async () => undefined) })

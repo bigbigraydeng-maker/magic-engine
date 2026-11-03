@@ -25,8 +25,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export const ADMIT_REVIEW_EVENT = 'me/maliang.render.ready'
 /** 马良 refuses to download more than this (render-check.ts). Reject at admit time instead of failing later. */
 export const ADMIT_MAX_VIDEO_BYTES = 80 * 1024 * 1024
-/** Orders in these states are dead; a new admit of the same path creates a fresh order. */
-const DEAD_STATUSES = new Set(['review_rejected', 'publish_failed', 'failed', 'dead_letter', 'archived', 'superseded'])
+/**
+ * Orders in these states are dead; a new admit of the same path creates a fresh order.
+ * publish_failed is NOT dead: the worker may still retry it, or an interrupted publish may already be public.
+ */
+const DEAD_STATUSES = new Set(['review_rejected', 'failed', 'dead_letter', 'archived', 'superseded'])
 
 const CONSENT_USES: readonly ConsentUse[] = ['facebook_organic', 'meta_ads', 'tiktok_organic']
 
@@ -273,7 +276,7 @@ async function findExistingAdmit(
     .select('id, status, brief, output, updated_at')
     .eq('client_id', clientId)
     .eq('output->>video_path', storagePath)
-    .not('status', 'in', '(review_rejected,publish_failed,failed,dead_letter,archived,superseded)')
+    .not('status', 'in', '(review_rejected,failed,dead_letter,archived,superseded)')
     .limit(1)
   if (error) return { ok: false, error: error.message }
   const row = (data ?? [])[0] as
@@ -350,6 +353,19 @@ async function updateExistingConsent(
   return { ok: true }
 }
 
+/** Same consent apart from when it was confirmed (a re-admit always stamps a new time). */
+function sameConsent(stored: unknown, next: BuiltConsent): boolean {
+  const current = readTalentConsent({ talent_consent: stored })
+  if (current === null || current === 'invalid') return false
+  return (
+    current.status === next.status &&
+    JSON.stringify(current.scope) === JSON.stringify(next.scope) &&
+    current.subject === next.subject &&
+    current.confirmed_by === next.confirmed_by &&
+    current.evidence === next.evidence
+  )
+}
+
 async function handleExistingAdmit(
   supabase: SupabaseClient,
   input: AdmitInput,
@@ -360,8 +376,7 @@ async function handleExistingAdmit(
 ): Promise<AdmitResult> {
   let consentUpdated = false
   if (consent) {
-    const current = existing.brief.talent_consent ?? null
-    if (JSON.stringify(current) !== JSON.stringify(consent)) {
+    if (!sameConsent(existing.brief.talent_consent, consent)) {
       const updated = await updateExistingConsent(supabase, input, existing, consent, deps)
       if (!updated.ok) return updated
       consentUpdated = true
