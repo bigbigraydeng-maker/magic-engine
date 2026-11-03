@@ -4,7 +4,7 @@ title: 社媒每周闭环 P1：版本归组 + 新版本不继承发布日期
 status: done
 owner: agent
 decided_on: 2026-11-04
-source: doc:docs/specs/2026-11-04-social-agent-weekly-loop-design-v1.md
+source: pr:3571
 done_on: 2026-11-04
 done_ref: pr:3574
 verify_by: 2026-11-18
