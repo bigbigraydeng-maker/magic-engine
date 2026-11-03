@@ -43,7 +43,13 @@ const name = (id: string) => ({ A: '组A', C: '组C', W: '组W' }[id] ?? id)
 
 describe('预算判断写成人话', () => {
   it('没错配：写出最大差距和门槛', () => {
-    expect(budgetLines(verdict({}), name)).toEqual(['钱分得跟结果对得上（各组最大差距 14%，超过 15% 才算错配）'])
+    expect(budgetLines(verdict({}), name)).toEqual(['钱分得跟结果对得上（各组最大差距 14%，差距超过 15% 且统计上站得住才算错配）'])
+  })
+
+  it('差距过了门槛、但统计上站不住（样本小）→ 不写「对得上」', () => {
+    const lines = budgetLines(verdict({ maxGap: 0.215 }), name)
+    expect(lines).toEqual(['没判错配：各组最大差距 22%，超过 15%，但结果数还少，统计上还不能确定是错配'])
+    expect(lines.join('')).not.toContain('对得上')
   })
 
   it('错配：花多了 / 给少了分开写', () => {
@@ -60,8 +66,9 @@ describe('预算判断写成人话', () => {
 
   it('对得上 / 对不上时，样本不够、没进比较的组也写出来', () => {
     const thin = [{ id: 'C', name: '组C', results: 0, need: 5, suspicious: true, notLikeForLike: false }]
-    expect(budgetLines(verdict({ thin }), name)[1]).toBe('样本还不够、没进这次比较：组C 还差 5 个')
-    expect(budgetLines(verdict({ state: 'mismatch', under: ['A'], thin }), name)).toContain('样本还不够、没进这次比较：组C 还差 5 个')
+    expect(budgetLines(verdict({ thin }), name)[1]).toBe('样本还不够、没进这次比较：组C 还差 5 个（看起来差距大，数量太少还判不了）')
+    expect(budgetLines(verdict({ thin: [{ ...thin[0], suspicious: false }] }), name)[1]).toBe('样本还不够、没进这次比较：组C 还差 5 个')
+    expect(budgetLines(verdict({ state: 'mismatch', under: ['A'], thin }), name)).toContain('样本还不够、没进这次比较：组C 还差 5 个（看起来差距大，数量太少还判不了）')
     expect(budgetLines(verdict({ state: 'insufficient', thin }), name)).toEqual(['样本还不够，判不了', '组C 还差 5 个'])
   })
 
@@ -78,7 +85,7 @@ describe('预算判断写成人话', () => {
 
   it('非同类组进了比较：任何状态都补一句「只作参考」', () => {
     const lines = budgetLines(verdict({ notLikeForLike: ['W'] }), name)
-    expect(lines[1]).toBe('注意：组W 结果种类跟主结果不一样，系统仍按主结果拿它比，这条结论只作参考')
+    expect(lines[1]).toBe('注意：组W 结果种类跟主结果不同或判不出，系统仍按主结果拿它比，这条结论只作参考')
   })
 })
 
@@ -90,7 +97,7 @@ describe('单列的组写清楚为什么', () => {
   })
 
   it('其余几种单列', () => {
-    expect(unitNote(unit({ separate: 'result_type_differs' }))).toBe('结果种类跟客户主结果不一样，单列')
+    expect(unitNote(unit({ separate: 'result_type_differs' }))).toBe('结果种类跟客户主结果不一样（预算比较里仍按主结果数，只作参考）')
     expect(unitNote(unit({ separate: 'mixed_result_types' }))).toBe('系列下各组结果种类混着，按主结果数')
     expect(unitNote(unit({ separate: 'result_type_unknown' }))).toBe('判不出结果种类（比如网站转化），按主结果数')
     expect(unitNote(unit({ separate: 'experiment' }))).toBe('对照测试中，不进预算比较')
@@ -113,7 +120,7 @@ describe('面板', () => {
     const rows = [...container.querySelectorAll('tbody tr')].map(r => [...r.querySelectorAll('td')].map(td => td.textContent))
     expect(rows[0]).toEqual(['组A', '$398.12', '67 个留资（表单）', '$5.94', '不高于目标 $11.00', '够了'])
     expect(rows[1]).toEqual(['组D', '$50.51', '4 个留资（表单）', '$12.63', '高于目标 $11.00', '还差 1 个'])
-    expect(screen.getByText('获客：钱分得跟结果对得上（各组最大差距 14%，超过 15% 才算错配）')).toBeTruthy()
+    expect(screen.getByText('获客：钱分得跟结果对得上（各组最大差距 14%，差距超过 15% 且统计上站得住才算错配）')).toBeTruthy()
   })
 
   it('结果未知就写未知，不写 0；系列分钱、按主结果数的组标出来', () => {
@@ -137,9 +144,20 @@ describe('面板', () => {
       budget: [verdict({}), verdict({ adAccountId: 'act_9999', state: 'not_comparable', reason: 'single_unit', maxGap: null })],
       accountsSkipped: [{ adAccountId: 'act_5555', reason: 'shared' }],
     })} />)
-    expect(screen.getByText('获客 · 账户 …7274：钱分得跟结果对得上（各组最大差距 14%，超过 15% 才算错配）')).toBeTruthy()
+    expect(screen.getByText('获客 · 账户 …7274：钱分得跟结果对得上（各组最大差距 14%，差距超过 15% 且统计上站得住才算错配）')).toBeTruthy()
     expect(screen.getByText('获客 · 账户 …9999：只有一个组在花钱，没得比')).toBeTruthy()
     expect(screen.getByText(/账户 …5555 没算：这个账户登记给了不止一个客户/)).toBeTruthy()
+  })
+
+  it('没名字的组写「未命名组 …尾号」，视频播放组的结果格写「—」不写未知', () => {
+    const { container } = render(<ScorecardPanel scorecard={card({ units: [
+      unit({ id: '120200001234', name: null }),
+      unit({ id: 'V', name: '视频组', spend: 1, role: 'awareness', resultType: null, results: null, costPerResult: null, vsTarget: 'no_target', targetCost: null, sampleGap: null, separate: 'not_result_unit' }),
+    ], budget: [verdict({ state: 'mismatch', under: ['120200001234'] })] })} />)
+    const rows = [...container.querySelectorAll('tbody tr')].map(r => [...r.querySelectorAll('td')].map(td => td.textContent))
+    expect(rows[0][0]).toBe('未命名组 …1234')
+    expect(screen.getByText('花得多、结果少：未命名组 …1234')).toBeTruthy()
+    expect(rows[1][2]).toBe('—')
   })
 
   it('错配那条判断用组名，不用编号', () => {

@@ -22,13 +22,14 @@ const ROLE_LABEL: Record<FunnelRole, string> = {
 const money = (n: number) => `$${n.toFixed(2)}`
 const pct = (x: number) => `${Math.round(x * 100)}%`
 const tail = (id: string) => '…' + id.slice(-4)
+const unnamed = (id: string) => `未命名组 ${tail(id)}`
 
 export function unitNote(u: ScorecardUnit): string {
   switch (u.separate) {
     case null:
       return ''
     case 'result_type_differs':
-      return '结果种类跟客户主结果不一样，单列'
+      return '结果种类跟客户主结果不一样（预算比较里仍按主结果数，只作参考）'
     case 'mixed_result_types':
       return '系列下各组结果种类混着，按主结果数'
     case 'result_type_unknown':
@@ -48,7 +49,10 @@ export function budgetLines(v: BudgetVerdict, nameOf: (id: string) => string): s
 
   switch (v.state) {
     case 'no_mismatch':
-      lines.push(`钱分得跟结果对得上（各组最大差距 ${pct(v.maxGap ?? 0)}，超过 ${pct(v.threshold)} 才算错配）`)
+      // 错配要同时满足：差距超过门槛、且统计上站得住；样本小时差距过门槛也判「没错配」，不能写成「对得上」
+      lines.push((v.maxGap ?? 0) >= v.threshold
+        ? `没判错配：各组最大差距 ${pct(v.maxGap ?? 0)}，超过 ${pct(v.threshold)}，但结果数还少，统计上还不能确定是错配`
+        : `钱分得跟结果对得上（各组最大差距 ${pct(v.maxGap ?? 0)}，差距超过 ${pct(v.threshold)} 且统计上站得住才算错配）`)
       break
     case 'mismatch':
       lines.push('钱跟结果对不上')
@@ -70,11 +74,11 @@ export function budgetLines(v: BudgetVerdict, nameOf: (id: string) => string): s
 
   // 样本不够的组没进比较；「对得上 / 对不上」时也要写出来，免得被当成「都看过了」
   if ((v.state === 'no_mismatch' || v.state === 'mismatch') && v.thin.length > 0) {
-    lines.push(`样本还不够、没进这次比较：${v.thin.map(t => `${nameOf(t.id)} 还差 ${t.need} 个`).join('、')}`)
+    lines.push(`样本还不够、没进这次比较：${v.thin.map(t => `${nameOf(t.id)} 还差 ${t.need} 个${t.suspicious ? '（看起来差距大，数量太少还判不了）' : ''}`).join('、')}`)
   }
 
   if (v.notLikeForLike.length > 0) {
-    lines.push(`注意：${names(v.notLikeForLike)} 结果种类跟主结果不一样，系统仍按主结果拿它比，这条结论只作参考`)
+    lines.push(`注意：${names(v.notLikeForLike)} 结果种类跟主结果不同或判不出，系统仍按主结果拿它比，这条结论只作参考`)
   }
 
   return lines
@@ -94,7 +98,7 @@ function vsTargetText(u: ScorecardUnit): string {
 }
 
 function resultsText(u: ScorecardUnit): string {
-  if (u.results === null) return '未知'
+  if (u.results === null) return u.separate === 'not_result_unit' ? '—' : '未知'
   if (u.resultType !== null) return `${u.results} 个${OUTCOME_STEP_LABEL[u.resultType]}`
   return `${u.results} 个（按主结果数）`
 }
@@ -130,7 +134,7 @@ export default function ScorecardPanel({ scorecard }: { scorecard: AdsScorecard 
 
   const nameOfFor = (adAccountId: string) => (id: string) => {
     const u = units.find(x => x.id === id && x.adAccountId === adAccountId)
-    return u?.name ?? id
+    return u?.name ?? unnamed(id)
   }
 
   return (
@@ -200,7 +204,7 @@ export default function ScorecardPanel({ scorecard }: { scorecard: AdsScorecard 
               {sortedUnits.map(u => (
                 <tr key={`${u.adAccountId}-${u.level}-${u.id}`}>
                   <td className="pr-3 py-1 align-top text-gray-700 min-w-[8rem]">
-                    <span>{u.name ?? u.id}{u.level === 'campaign' ? ' （整个系列分钱）' : ''}</span>
+                    <span>{u.name ?? unnamed(u.id)}{u.level === 'campaign' ? ' （整个系列分钱）' : ''}</span>
                     {u.separate !== null && <span className="block text-gray-500">{unitNote(u)}</span>}
                   </td>
                   <td className="pr-3 py-1 align-top text-gray-700 whitespace-nowrap">{money(u.spend)}</td>
