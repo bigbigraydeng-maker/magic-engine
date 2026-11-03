@@ -50,7 +50,7 @@ rm ~/Library/LaunchAgents/com.magicengine.factory-worker.plist
 
 **为什么要它**：出片机不读 Dropbox，读的是本机镜像 `~/Library/Application Support/magicengine/studio/`（Dropbox「仅云端」的文件读不出来）。这份镜像以前只靠人手抄，Dropbox 里新加的片段、配乐一直进不去，下单就报「找不到文件」。2026-11-03 实查：CTS 缺 5 段片段和 8 首配乐，当天另一张单因镜像缺曲子失败两次。
 
-**它做什么**：每 5 分钟跑一次 `tools/sync-studio-mirror.mjs --apply`。对每个客户文件夹的 `remotion-assets`、`brandkit`，以及共享的 `Music`、`_shared/music`：
+**它做什么**：每天早上 8:00 跑一次 `tools/sync-studio-mirror.mjs --apply`（电脑当时在睡眠，醒来后补跑；开机登录时也跑一次）。当天急用刚放进 Dropbox 的素材，手动跑一次 `node scripts/factory-worker/tools/sync-studio-mirror.mjs --apply` 即可。PM 2026-11-04 定：不需要高频，每天一次足够。对每个客户文件夹的 `remotion-assets`、`brandkit`，以及共享的 `Music`、`_shared/music`：
 - Dropbox 有、镜像没有 → 补进去；Dropbox 的版本更新且内容不同 → 覆盖成新的。
 - 大小一样只是修改时间新 → 先比内容，一样就只对齐时间，不重抄。
 - 镜像里的版本更新（有人直接改了镜像）→ 不覆盖，日志里标 `!`。
