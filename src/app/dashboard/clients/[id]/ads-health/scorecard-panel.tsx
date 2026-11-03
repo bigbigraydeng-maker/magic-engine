@@ -1,7 +1,7 @@
 'use client'
 
 /**
- * 成绩单面板（只读，只给内部员工）：把每天巡察算出的 scorecard 原样写出来，不取数、不带按钮。
+ * 成绩单面板（只读，只给内部员工）：把每天巡察算出的 scorecard 原样写出来，不取数、每行可点「调预算」打开确认框（第 3 刀 3b）。
  * 规则手册 v1.1 E-19 / E-20；修复方案第 1 刀 ②。客户版接口不含这一栏（growth-client-view 白名单）。
  */
 
@@ -9,6 +9,7 @@ import React from 'react'
 import type { AdsScorecard, BudgetVerdict, ScorecardUnit } from '@/lib/ads-strategy/portfolio/scorecard'
 import type { FunnelRole } from '@/lib/ads-strategy/portfolio/roles'
 import { OUTCOME_STEP_LABEL } from '@/lib/ads-strategy/portfolio/outcome-ladder'
+import BudgetChangeDialog, { type BudgetChangeDialogUnit } from './budget-change-dialog'
 
 const ROLE_LABEL: Record<FunnelRole, string> = {
   awareness: '认知',
@@ -110,7 +111,9 @@ function sampleText(u: ScorecardUnit): string {
   return `还差 ${u.sampleGap} 个`
 }
 
-export default function ScorecardPanel({ scorecard }: { scorecard: AdsScorecard | { error: string } | undefined }) {
+export default function ScorecardPanel({ scorecard, clientId }: { scorecard: AdsScorecard | { error: string } | undefined; clientId?: string }) {
+  const [editing, setEditing] = React.useState<BudgetChangeDialogUnit | null>(null)
+
   if (scorecard === undefined) {
     return (
       <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
@@ -143,7 +146,7 @@ export default function ScorecardPanel({ scorecard }: { scorecard: AdsScorecard 
       <h3 className="text-sm font-semibold text-gray-800">每个组这 7 天的成绩</h3>
 
       <p className="text-xs text-gray-500">
-        {win.start} → {win.end} · 每个组按它自己那种结果数 · 只读，不会自动改预算
+        {win.start} → {win.end} · 每个组按它自己那种结果数 · 系统不会自动改预算；要调就点每行的「调预算」
       </p>
 
       {completeness === 'partial' && (
@@ -199,6 +202,9 @@ export default function ScorecardPanel({ scorecard }: { scorecard: AdsScorecard 
                 <th className="text-left text-gray-500 font-normal pr-3 pb-1 whitespace-nowrap">单个成本</th>
                 <th className="text-left text-gray-500 font-normal pr-3 pb-1 whitespace-nowrap">跟目标比</th>
                 <th className="text-left text-gray-500 font-normal pr-3 pb-1 whitespace-nowrap">样本</th>
+                {clientId && (
+                  <th className="text-left text-gray-500 font-normal pr-3 pb-1 whitespace-nowrap">调预算</th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -213,6 +219,17 @@ export default function ScorecardPanel({ scorecard }: { scorecard: AdsScorecard 
                   <td className="pr-3 py-1 align-top text-gray-700 whitespace-nowrap">{u.costPerResult === null ? '—' : money(u.costPerResult)}</td>
                   <td className="pr-3 py-1 align-top text-gray-700 whitespace-nowrap">{vsTargetText(u)}</td>
                   <td className="pr-3 py-1 align-top text-gray-700 whitespace-nowrap">{sampleText(u)}</td>
+                  {clientId && (
+                    <td className="pr-3 py-1 align-top whitespace-nowrap">
+                      <button
+                        type="button"
+                        className="rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-700 hover:bg-gray-50"
+                        onClick={() => setEditing({ level: u.level, id: u.id, adAccountId: u.adAccountId, name: u.name })}
+                      >
+                        调预算
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -223,6 +240,10 @@ export default function ScorecardPanel({ scorecard }: { scorecard: AdsScorecard 
       <p className="text-xs text-gray-500">
         预算判断跟系统每天的「钱花多了 / 该多给钱」两条规则用的是同一套算法，这里只是把它写出来。
       </p>
+
+      {clientId && editing && (
+        <BudgetChangeDialog clientId={clientId} unit={editing} onClose={() => setEditing(null)} />
+      )}
     </section>
   )
 }

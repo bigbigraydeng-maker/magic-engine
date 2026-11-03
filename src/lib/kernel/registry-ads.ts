@@ -254,7 +254,10 @@ const ADS_SCALE_UNIT_BUDGET: ActionDefinition<'ads.scale_unit_budget'> = {
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
     rollback: 'provider_native',
   },
-  idempotency: { keyFields: ['cycle_date', 'adset_id', 'campaign_id', 'before_cents', 'after_cents'], scope: 'client' },
+  // 🔴 不含 campaign_id（第 3 刀 3b，2026-11-04）：ABO 广告组加预算时 input 不能带 campaign_id
+  //    （envelope-facts 见到 campaign_id 就按 CBO 系列判），而幂等键缺字段直接抛错 —— 原来 ABO 加预算
+  //    根本提交不了。adset_id 已唯一确定所属系列，去掉不丢区分度。改前生产库这个动作 0 条记录（已查）。
+  idempotency: { keyFields: ['cycle_date', 'adset_id', 'before_cents', 'after_cents'], scope: 'client' },
   costModel: {
     kind: 'fixed',
     estimate: () => 0,
