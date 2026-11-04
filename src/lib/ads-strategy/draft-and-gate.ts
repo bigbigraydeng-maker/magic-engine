@@ -21,6 +21,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AdDraft } from './ad-draft'
 import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
 import { draftNotYetBuildable } from './ad-draft-expansion'
+import { linkPromotedAds } from '@/lib/ads/link-promoted-posts'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
@@ -213,7 +214,10 @@ export async function createDraftForApproval(
   if (audiences.error) return failedOutcome(deps, draft, { ...base, error: audiences.error })
 
   // ── 0.4 日预算低于账户最低日预算 → Meta 一定拒，别浪费一次真实创建 ──────
-  const budget = await checkMinDailyBudget(draft, deps)
+  // 往已有广告组加暂停广告时不写预算，不用「新建组的最低日预算」把这一步拦住。
+  const budget = draft.existingAdSetId
+    ? { error: null, checked: null }
+    : await checkMinDailyBudget(draft, deps)
   base.minBudgetChecked = budget.checked
   if (budget.error) return failedOutcome(deps, draft, { ...base, error: budget.error })
 
@@ -230,6 +234,7 @@ export async function createDraftForApproval(
     const orphans = published.orphans.length > 0 ? published.orphans : undefined
     return failedOutcome(deps, draft, { ...base, error, orphans })
   }
+  if (draft.existingAdSetId) await linkPromotedAds(draft, published.adIds)
 
   // ── 2+3. 回读 → 闸门 ────────────────────────────────────────────────
   return gateReadback(draft, published, deps, {
@@ -410,7 +415,9 @@ async function gateReadback(
 
   const report = launchReportFor(draft, deps, rawAdSet, ads)
   const extra = expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps)
-  const autoPause = extra.some((f) => f.code === 'not_paused')
+  // 加到已有广告组时，回读看到的是原来那一组。它本来就可能是开着的。
+  // 这里绝不能把整组暂停，否则会停掉客户正在跑的广告。
+  const autoPause = !draft.existingAdSetId && extra.some((f) => f.code === 'not_paused')
     ? await pausePublished(published, deps.accessToken, {
         deadlineAt: ctx.startedAt + BUDGET.giveUpPauseMs, now: ctx.now,
       })
@@ -432,7 +439,11 @@ async function recordGate(
   merged: LaunchReadbackReport,
   autoPause: { ok: boolean; failed: string[] } | undefined,
 ): Promise<CreateDraftOutcome> {
-  const status: DraftStatus = merged.safeToActivate ? 'awaiting_approval' : 'blocked'
+  // 往已有广告组加的广告只保持暂停，不进「可以打开」的队列。
+  // 打开队列会连原来的广告组和系列一起开，那不是这张卡答应的事。
+  const status: DraftStatus = draft.existingAdSetId
+    ? 'blocked'
+    : merged.safeToActivate ? 'awaiting_approval' : 'blocked'
   const audienceSummary = renderAudienceSummary(ctx.audiencesChecked)
   const readback =
     renderReadback(merged) +
@@ -488,6 +499,12 @@ export async function approveDraft(
   const p = (data as { payload: DraftRecord | null }).payload
   if (!p) return { ok: false, error: '这条草案没有内容' }
   // 白名单：不在名单里（私信广告、账本里 kind 缺失或写了陌生值的旧记录）一律不开，零 Meta 调用。
+  if (p.draft?.existingAdSetId) {
+    return {
+      ok: false,
+      error: '这条是在已有广告组里加的暂停广告。确认只负责建成暂停，不会打开它，也不会打开原来的广告组。',
+    }
+  }
   if (!isApprovableKind(p.draft?.kind)) {
     return {
       ok: false,

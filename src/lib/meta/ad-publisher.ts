@@ -354,8 +354,103 @@ async function publishCreatives(
   return adIds
 }
 
+function bareAccount(id: string): string {
+  return id.startsWith('act_') ? id.slice(4) : id
+}
+
+function accountPath(id: string): string {
+  return id.startsWith('act_') ? id : `act_${id}`
+}
+
+interface PromotionTarget {
+  accountId: string
+  campaignId: string
+  dailyBudgetMinor: number
+}
+
+async function readPromotionTarget(
+  adSetId: string,
+  accessToken: string,
+): Promise<{ ok: true; target: PromotionTarget } | { ok: false; error: string }> {
+  const params = new URLSearchParams({
+    fields: 'account_id,campaign_id,daily_budget',
+    access_token: accessToken,
+  })
+  let res: Response
+  try {
+    res = await fetch(`${GRAPH_BASE}/${adSetId}?${params}`, { signal: AbortSignal.timeout(WRITE_TIMEOUT_MS) })
+  } catch {
+    return { ok: false, error: '读不到这个广告组，没有去建' }
+  }
+  if (!res.ok) return { ok: false, error: '读不到这个广告组，没有去建' }
+  let json: { account_id?: unknown; campaign_id?: unknown; daily_budget?: unknown }
+  try {
+    json = await res.json() as { account_id?: unknown; campaign_id?: unknown; daily_budget?: unknown }
+  } catch {
+    return { ok: false, error: '读不到这个广告组，没有去建' }
+  }
+  if (typeof json.account_id !== 'string' || typeof json.campaign_id !== 'string') {
+    return { ok: false, error: '这个广告组的账户或系列读不齐，没有去建' }
+  }
+  if (typeof json.daily_budget !== 'string' || !/^\d+$/.test(json.daily_budget)) {
+    return { ok: false, error: '这个广告组的每天预算读不到，没有加预算，也没有去建' }
+  }
+  return {
+    ok: true,
+    target: { accountId: json.account_id, campaignId: json.campaign_id, dailyBudgetMinor: Number(json.daily_budget) },
+  }
+}
+
+function promotionRefused(d: AdDraft, accountId: string, target: PromotionTarget): string | null {
+  if (d.adSets !== undefined || d.budgetMode === 'campaign' || d.campaignDailyBudget !== undefined) {
+    return '这份草稿还写了别的结构，没有往已有广告组里加'
+  }
+  if (bareAccount(target.accountId) !== bareAccount(accountId)) {
+    return '这个广告组不在这张卡的广告账户里，没有去建'
+  }
+  const wanted = Math.round(d.dailyBudget * 100)
+  if (!Number.isFinite(wanted) || wanted <= 0 || wanted !== target.dailyBudgetMinor) {
+    return '这个广告组的每天预算和确认卡上的不一样，没有加预算，也没有去建'
+  }
+  if (!d.creatives.every((c) => typeof c.promotedPostId === 'string' && c.promotedPostId.length > 0)) {
+    return '没有可以加的已发布帖子，没有去建'
+  }
+  return null
+}
+
+/**
+ * Add paused ads that promote existing posts. No campaign, no ad set, no budget write.
+ * Status is always PAUSED. A mismatch on account or budget writes nothing.
+ */
+async function publishPromotedPosts(
+  d: AdDraft,
+  adAccountId: string,
+  accessToken: string,
+  opts: PublishOptions,
+): Promise<PublishResult> {
+  const adSetId = d.existingAdSetId ?? ''
+  const read = await readPromotionTarget(adSetId, accessToken)
+  if (!read.ok) return { ok: false, step: 'adset', error: read.error, orphans: [] }
+  const refused = promotionRefused(d, adAccountId, read.target)
+  if (refused) return { ok: false, step: 'ad', error: refused, orphans: [] }
+  const run = newRun(accessToken, opts)
+  const adIds: string[] = []
+  for (const c of d.creatives) {
+    const ad = await run.make('ad', '广告', c.name, `${accountPath(adAccountId)}/ads`, {
+      name: c.name,
+      adset_id: adSetId,
+      creative: JSON.stringify({ object_story_id: c.promotedPostId }),
+      status: 'PAUSED',
+    })
+    if ('ok' in ad) return ad
+    adIds.push(ad.id)
+  }
+  return { ok: true, campaignId: read.target.campaignId, adSetId, adIds, orphans: [] }
+}
+
 /**
  * 建。全程 `status: PAUSED`。
+ * 写了 `existingAdSetId` 时，只在那个已有广告组里加暂停广告，不新建系列、不加预算。
  *
  * @param adAccountId `act_<digits>`
  */
@@ -365,6 +460,7 @@ export async function publishDraftPaused(
   accessToken: string,
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
+  if (d.existingAdSetId) return publishPromotedPosts(d, adAccountId, accessToken, opts)
   const run = newRun(accessToken, opts)
 
   // ── 1. 广告系列 ──────────────────────────────────────────────────────

@@ -58,6 +58,7 @@ export async function GET(request: Request) {
       status: r.status,
       added: r.adsAdded.length,
       paused: r.adsPaused.length,
+      card: Boolean(r.cardRunId),
       guards: r.guardsHit,
       error: r.errorMessage ?? null,
     })

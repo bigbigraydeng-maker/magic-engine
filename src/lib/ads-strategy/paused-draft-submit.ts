@@ -251,6 +251,9 @@ async function recordOutcome(
 
 function outcomeLine(who: string | null, outcome: CreateDraftOutcome): string {
   const name = who ?? '有人'
+  if (outcome.summary.includes('不新建系列') && outcome.status !== 'failed') {
+    return `${name} 点了确认。已经在原来的广告组里加上暂停广告。不会自动开投，也不会加预算。`
+  }
   if (outcome.status === 'awaiting_approval') return `${name} 点了确认。暂停草稿已进审批队列。`
   if (outcome.status === 'blocked') return `${name} 点了确认。已经建成暂停，回读对不上，保持暂停，不删除。`
   return `${name} 点了确认。${plainMetaError(outcome.error ?? '没有建成')}`
@@ -472,6 +475,19 @@ function asHold(row: { id?: unknown; payload?: unknown }): HoldRow[] {
   const payload = row.payload as HoldPayload
   if (payload.cardRunId && payload.fingerprint && payload.draft) return [{ id: row.id, payload }]
   return []
+}
+
+export async function pausedDraftHoldAccount(
+  sb: SupabaseClient,
+  clientId: string,
+  runId: string,
+): Promise<string | null> {
+  try {
+    const hold = await holdForRun(sb, clientId, runId)
+    return hold.payload.adAccountId || null
+  } catch {
+    return null
+  }
 }
 
 export async function pausedDraftResultLines(

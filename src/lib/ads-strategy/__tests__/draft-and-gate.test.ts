@@ -195,6 +195,31 @@ describe('createDraftForApproval — 扩展草稿先停下，不去建', () => {
     expect(r.status).toBe('awaiting_approval')
     expect(mPublish).toHaveBeenCalledTimes(1)
   })
+
+  it('加到已有广告组：建成后保持暂停，不进开投队列，也不暂停原来的组', async () => {
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval({
+      kind: 'video_thruplay',
+      clientId: 'c1',
+      campaignName: '赢家素材暂停草稿',
+      adSetName: 'Pool',
+      dailyBudget: 20,
+      durationDays: 0,
+      geoCountries: [],
+      pageId: '11111',
+      existingAdSetId: '123456',
+      creatives: [{
+        name: 'Reel',
+        primaryText: 'hello world reel',
+        headline: 'hello world reel',
+        promotedPostId: '11111_12345678',
+      }],
+    }, { supabase: sb, adAccountId: 'act_1', accessToken: 'tok' })
+    expect(r.status).toBe('blocked')
+    expect(r.summary).toContain('不加预算')
+    expect(mPause).not.toHaveBeenCalled()
+    expect(mActivate).not.toHaveBeenCalled()
+  })
 })
 
 describe('createDraftForApproval', () => {
@@ -358,6 +383,18 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
     const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r.ok).toBe(false)
     expect(mActivate).not.toHaveBeenCalled()
+  })
+
+  it('往已有广告组加的暂停广告不能被打开，原来的组也不动', async () => {
+    const { sb } = fakeSupabase({
+      ...READY,
+      draft: { ...DRAFT, existingAdSetId: '123456' },
+    })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('不会打开')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(mPause).not.toHaveBeenCalled()
   })
 
   it('Meta 那边开失败 → 不许把状态改成在投', async () => {
