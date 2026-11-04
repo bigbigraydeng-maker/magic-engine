@@ -33,6 +33,7 @@ import {
 } from './recipe'
 import { FACTORY_CLIP_UNIT_COST_USD, FACTORY_ORDER_BUDGET_CAP_USD } from './constants'
 import { clipCanEnterFactoryPool, hasCurrentLicenseEvidence } from './clip-library'
+import { loadUsableWinners } from './winner-gate'
 import type { AdCopy, DemandSignal, Decision, GateContext, GoalSlice, VerifiedOffer } from './types'
 import type { MasterBrief } from '@/types/magic-engine'
 
@@ -145,12 +146,8 @@ async function loadContext(
     .eq('client_id', signal.client_id)
   if (blErr) throw new Error(`blocklist query failed: ${blErr.message}`)
 
-  const { data: winners, error: wErr } = await supabaseAdmin
-    .from('winner_structures')
-    .select('id, hook_segment, middle_segment, cta_segment, win_reason_tags, cost_per_thruplay, current_frequency, status')
-    .eq('client_id', signal.client_id)
-    .eq('status', 'active')
-  if (wErr) throw new Error(`winner_structures query failed: ${wErr.message}`)
+  // 只认程序复核过 + 有权的人点过「认」的赢家（winner-gate，关闭即失败）
+  const winners = await loadUsableWinners(supabaseAdmin, signal.client_id, now)
 
   // 余额(护栏 10):SQL 层聚合,避免 supabase-js 1000 行静默截断(魏征 M1-F9)
   const { data: balance, error: lErr } = await supabaseAdmin.rpc('factory_balance_usd')
@@ -242,7 +239,7 @@ async function loadContext(
     brandRedlines: client ? (client.brand_redline_phrases ?? []) : null,
     recentAngles: (recentOrders ?? []).map((o) => o.angle).filter(Boolean),
     blocklist: blocklist ?? [],
-    activeWinners: winners ?? [],
+    activeWinners: winners,
     balanceUsd: typeof balance === 'number' ? balance : Number(balance ?? NaN) || null,
     dailyOrderCount,
     dailyCostUsd,

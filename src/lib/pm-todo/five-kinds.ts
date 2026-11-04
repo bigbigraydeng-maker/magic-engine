@@ -155,6 +155,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   maliang_render_passed: 'review',
   libai_copy_unverified: 'review',
   baozheng_review_disagree: 'truth', // 两个 AI 判一位客人判得不一样：系统判不了真假，要人认一下谁对（只记结论，不改客人）
+  factory_winner_confirm: 'truth', // 这条广告算不算「赢家样板」系统定不了，要人认（认了工厂才照它出片；不发布不花钱）
   simaqian_review_drafts: 'review',
   messenger_draft_pending_approval: 'review',
   messenger_draft_escalation: 'review',

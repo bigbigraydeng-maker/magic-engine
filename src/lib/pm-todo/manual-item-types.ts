@@ -47,6 +47,7 @@ import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
 import type { BaozhengItemKind } from './baozheng-items'
+import type { FactoryWinnerItemKind } from './factory-winner-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
 import type { ToolLeadItemKind } from './tool-lead-items'
 import type { PmKind } from './five-kinds'
@@ -367,6 +368,8 @@ export type ManualItemKind =
   /** 李白 · 文案溯源：「未证实」句待改 / 检不了 / 没检；提示词库月检疑似过期（只报告不改） */
   | LibaiItemKind
   | BaozhengItemKind
+  /** 视频工厂 · 广告赢家（工厂照着学的样板片）复核过、等人点「认 / 不认」 */
+  | FactoryWinnerItemKind
   /** 司马迁 · 口碑周巡：每周四起草的 Google 评价回复草稿（一律没发）/ 本周没巡成 */
   | SimaqianItemKind
   /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */

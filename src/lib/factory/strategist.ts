@@ -257,9 +257,11 @@ export function pickWinner(ctx: GateContext): WinnerSlice | null {
   const reuse = ctx.signal.request['reuse_winner_structure']
   if (reuse === false) return null
   if (ctx.signal.signal_type === 'new_campaign' || ctx.signal.signal_type === 'asset_gap') return null
+  // 按该赢家广告组自己结果种类的单次成本挑（留资广告 = 每个留资多少钱），不再按「看完视频成本」。
+  // 缺这个数的赢家在 winner-gate 已判不可用，进不到这里。
   const active = ctx.activeWinners
-    .filter((w) => w.status === 'active')
-    .sort((a, b) => (a.cost_per_thruplay ?? Infinity) - (b.cost_per_thruplay ?? Infinity))
+    .filter((w) => w.status === 'active' && Number.isFinite(w.cost_per_result) && w.cost_per_result > 0)
+    .sort((a, b) => a.cost_per_result - b.cost_per_result)
   return active[0] ?? null
 }
 

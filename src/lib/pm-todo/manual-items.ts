@@ -109,6 +109,7 @@ import { pushLedgerItems } from './ledger-items'
 import { pushMaliangRenderItems } from './maliang-render-items'
 import { pushLibaiItems } from './libai-items'
 import { pushBaozhengItems } from './baozheng-items'
+import { pushFactoryWinnerItems } from './factory-winner-items'
 import { pushSimaqianReviewItems } from './simaqian-review-items'
 
 /**
@@ -410,6 +411,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 拉模式读它的回执（规则书 docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md BZ-18）
     (b) => pushBaozhengItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 包拯待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 视频工厂赢家：复核过、等人点「认 / 不认」的样板片；每客户最多一条，两周后不再提醒（只留工厂页）
+    (b) => pushFactoryWinnerItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 工厂赢家待办读取失败（不阻塞其他待办）:', e),
     ),
     // 司马迁每周四起草的 Google 评价回复草稿（一律没发）—— 拉模式读它的回执，
     // 事件送达失败也照样出得来；巡不成的那条进系统欠账栏，不静默

@@ -169,6 +169,7 @@ describe('角度溯源 + 去重(护栏 2/7)', () => {
       cta_segment: {},
       win_reason_tags: ['scenery_first'],
       cost_per_thruplay: 0.01,
+      cost_per_result: 5,
       status: 'active',
     }
     // new_campaign 强制 fresh angle(不挂骨架),避免 winner 被选为骨架
@@ -197,6 +198,7 @@ describe('骨架 + 工单组装', () => {
             cta_segment: {},
             win_reason_tags: ['price_hook'],
             cost_per_thruplay: 0.0148,
+            cost_per_result: 4.57,
             current_frequency: 1.2,
             status: 'active',
           },

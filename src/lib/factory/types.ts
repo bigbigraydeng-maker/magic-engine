@@ -78,6 +78,8 @@ export interface WinnerSlice {
   cta_segment: Record<string, unknown>
   win_reason_tags: string[]
   cost_per_thruplay: number | null
+  /** 该赢家所在广告组自己结果种类的单次成本（winner-gate 只放有这个数的进来） */
+  cost_per_result: number
   current_frequency: number | null
   status: string
 }

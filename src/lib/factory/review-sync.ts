@@ -393,6 +393,11 @@ interface IntakeResult {
   errors: string[]
 }
 
+/** 名字精确查到的客户：恰好一个才收，零个或多个都不收。 */
+export function intakeClientMatch(rows: ReadonlyArray<{ id: string }> | null): { id: string } | null {
+  return rows && rows.length === 1 ? rows[0] : null
+}
+
 export async function pullWinnerIntake(): Promise<IntakeResult> {
   const result: IntakeResult = { imported: [], failed: [], errors: [] }
   const rows = await listRecords(
@@ -409,17 +414,18 @@ export async function pullWinnerIntake(): Promise<IntakeResult> {
         // 三必填缺一不入库,不标失败(FDE 可能还在填)
         continue
       }
-      const { data: client, error: cErr } = await supabaseAdmin
+      // 客户按名字**精确**匹配、唯一命中才收（Intake 表没有客户编号列）。模糊匹配会把赢家记到别的客户名下。
+      const { data: clientRows, error: cErr } = await supabaseAdmin
         .from('clients')
         .select('id')
-        .ilike('name', `%${clientName}%`)
-        .limit(1)
-        .maybeSingle()
+        .eq('name', clientName)
+        .limit(2)
       if (cErr) throw new Error(cErr.message)
+      const client = intakeClientMatch(clientRows)
       if (!client) {
         await patchRecord(WINNER_INTAKE_TABLE_ID, rec.id, { [W.syncStatus]: '入库失败' })
         result.failed.push(adName)
-        console.warn(`[factory-review-sweeper] winner intake client not found: "${clientName}"`)
+        console.warn(`[factory-review-sweeper] winner intake client not uniquely matched: "${clientName}" (${clientRows?.length ?? 0} hits)`)
         continue
       }
       const cpt = Number(rec.fields[W.cpt])
@@ -434,6 +440,7 @@ export async function pullWinnerIntake(): Promise<IntakeResult> {
           cta_segment: { description: String(rec.fields[W.cta] ?? '').trim() },
           win_reason_tags: Array.isArray(rec.fields[W.tags]) ? (rec.fields[W.tags] as string[]) : [],
           cost_per_thruplay: Number.isFinite(cpt) && cpt > 0 ? cpt : null,
+          // 不写 program_check / pm_decision：人工录入的赢家进来就是「待复核、待确认」，winner-gate 判不可用
           performance: {
             notes: String(rec.fields[W.perfNote] ?? '').trim(),
             source: 'winner_intake_airtable',
