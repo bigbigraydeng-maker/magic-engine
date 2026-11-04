@@ -17,7 +17,7 @@ const VIEWS = new Set(['看完数', '视频看完数', 'thruplays', 'video_views
 const COST_PHRASES = ['线索的成本', '线索成本', '单条成本', '每条成本', '留资成本', 'CPL', 'cpl']
 const LEAD_PHRASES = ['留资', '线索']
 // 比例、上限、筛选过的线索都不是「线索条数越多越好」，不能拿总条数去比（复审 P1）
-const NOT_A_LEAD_COUNT = ['率', '占比', '比例', '%', '上限', '不超过', '≤', '无效', '合格']
+const NOT_A_LEAD_COUNT = ['率', '占比', '比例', '%', '上限', '不超过', '最多', '低于', '以内', '≤', '无效', '合格']
 const LEAD_COUNT_UNITS = new Set(['', '条', '个', '人', 'leads'])
 // 整个周期（日期范围）、结算线、每天的上限：开投后这几个时间点判不了
 const PERIOD_RANGE = /\d{4}-\d{1,2}-\d{1,2}\s*至/
