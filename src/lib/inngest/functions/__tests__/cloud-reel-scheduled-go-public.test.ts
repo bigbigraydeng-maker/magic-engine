@@ -115,7 +115,7 @@ describe('reel-scheduled-go-public function', () => {
     const deps = makeDeps(env, {
       now: () => new Date('2026-11-08T20:00:00Z'),
       listClients: vi.fn(async () => [
-        { id: 'c1', config: { publishing_calendar_config: { weekly_pack: { publish_hour: 9 } } } },
+        { id: 'c1', config: { weekly_loop: { enabled: true }, weekly_pack: { publish_hour: 9 } } },
       ]),
       loadDueOrderIds: vi.fn(async () => ['o1']),
     })
@@ -155,11 +155,33 @@ describe('reel-scheduled-go-public function', () => {
     for (const [, opts] of calls) expect(opts.dryRun).toBe(true)
   })
 
+  it('🔴 manual event with switch ON is still a practice run, and the date override reaches the lookup and the executor', async () => {
+    const deps = makeDeps({ WEEKLY_PACK_REEL_SCHEDULED_PUBLIC: 'true' })
+    const fn = createReelScheduledFunction(deps)
+    const out = (await handlerOf(fn)({ event: dueEvent({ clientId: 'c1', date: '2026-11-11' }), step: fakeStep() })) as {
+      dry_run: boolean
+      nz_date: string
+      no_publish: boolean
+    }
+    expect(out).toMatchObject({ dry_run: true, nz_date: '2026-11-11', no_publish: true })
+    expect(deps.loadDueOrderIds).toHaveBeenCalledWith('c1', '2026-11-11')
+    const calls = (deps.runOne as unknown as { mock: { calls: [string, { dryRun: boolean; asOf?: string }][] } }).mock.calls
+    expect(calls.length).toBe(2)
+    for (const [, opts] of calls) expect(opts).toMatchObject({ dryRun: true, asOf: '2026-11-11' })
+  })
+
+  it('manual event ignores a malformed date and uses today', async () => {
+    const deps = makeDeps({})
+    const fn = createReelScheduledFunction(deps)
+    const out = (await handlerOf(fn)({ event: dueEvent({ clientId: 'c1', date: '11/11/2026' }), step: fakeStep() })) as { nz_date: string }
+    expect(out.nz_date).toBe('2026-11-09')
+  })
+
   it('publishHourOf unit cases', () => {
     expect(publishHourOf({})).toBe(DEFAULT_PUBLISH_HOUR)
-    expect(publishHourOf({ publishing_calendar_config: { weekly_pack: { publish_hour: 7 } } })).toBe(7)
-    expect(publishHourOf({ publishing_calendar_config: { weekly_pack: { publish_hour: 24 } } })).toBe(DEFAULT_PUBLISH_HOUR)
-    expect(publishHourOf({ publishing_calendar_config: { weekly_pack: { publish_hour: '7' } } })).toBe(DEFAULT_PUBLISH_HOUR)
+    expect(publishHourOf({ weekly_pack: { publish_hour: 7 } })).toBe(7)
+    expect(publishHourOf({ weekly_pack: { publish_hour: 24 } })).toBe(DEFAULT_PUBLISH_HOUR)
+    expect(publishHourOf({ weekly_pack: { publish_hour: '7' } })).toBe(DEFAULT_PUBLISH_HOUR)
   })
 
   it('nzHour(new Date("2026-11-09T05:00:00Z")) === 18', () => {

@@ -7,11 +7,11 @@ import { executeClaimed } from './action'
 import { computeFingerprint } from './guards'
 import { mutatePayload, readAuth, withAuth } from './payload-lock'
 import {
-  checkGrant, claimedGrant, grantWithStatus, isLeaseExpired, nzToday, readGrant, withGrant,
+  FIRST_COMMENT_FAILED, checkGrant, claimedGrant, grantWithStatus, isLeaseExpired, nzToday, readGrant, withGrant,
   type ScheduledGrant, type ScheduledGrantStatus,
 } from './scheduled-grant'
 import { readPublishOn } from '@/lib/social/week-pack/manifest'
-import type { PromoteDeps, PromoteOrder, TrafficRow } from './types'
+import { CLAIM_LEASE_MS, type PromoteDeps, type PromoteOrder, type TrafficRow } from './types'
 
 export type ScheduledOutcome =
   | 'published' | 'synced' | 'dry_run_ok' | 'not_due'
@@ -31,6 +31,8 @@ export interface ScheduledInput {
   executedBy: string
   isApprover: (email: string) => boolean
   dryRun: boolean
+  /** Practice runs only: check as if today were this NZ date (YYYY-MM-DD). Ignored for real runs. */
+  asOf?: string
 }
 
 const result = (order_id: string, outcome: ScheduledOutcome, reason: string, needs_person: boolean): ScheduledResult =>
@@ -70,9 +72,10 @@ async function settleWithoutClaim(
     if (!input.dryRun) await setGrant(deps, row, 'consumed_manual', 'promoted_by_a_person')
     return result(order.id, 'consumed_manual', 'promoted_by_a_person', false)
   }
-  if (isLeaseExpired(grant, deps.now())) {
-    if (!input.dryRun) await setGrant(deps, row, 'unknown', 'executor_interrupted')
-    return result(order.id, 'unknown', 'executor_interrupted', true)
+  if (isLeaseExpired(grant, deps.now()) && !input.dryRun) {
+    // An earlier attempt died part-way. Re-arm and carry on: the run reads Facebook first, so a reel that did go
+    // public is only synced (never published twice), and one that did not is promoted now.
+    await setGrant(deps, row, 'armed', 'rearmed_after_interrupt')
   }
   return null
 }
@@ -80,7 +83,7 @@ async function settleWithoutClaim(
 async function claimAndRun(deps: PromoteDeps, order: PromoteOrder, row: TrafficRow, input: ScheduledInput): Promise<ScheduledResult> {
   const ctx = await buildContext(deps, order)
   if ('ok' in ctx) return contextFailed(deps, order, row, ctx.status, ctx.error, input.dryRun)
-  const today = nzToday(deps.now())
+  const today = input.dryRun && input.asOf ? input.asOf : nzToday(deps.now())
   const publishOn = readPublishOn(order.brief)
   const current = {
     today,
@@ -98,18 +101,33 @@ async function claimAndRun(deps: PromoteDeps, order: PromoteOrder, row: TrafficR
   if (claimed.kind !== 'claimed') return claimed.result
   const done = await executeClaimed(deps, ctx, claimed.payload, requestId)
   if (!done.ok) {
-    await setGrant(deps, row, 'failed', done.error.slice(0, 200))
-    return result(order.id, 'failed', done.error.slice(0, 200), true)
+    // Facebook already called = it may be public now: say "unknown", never "still a draft".
+    const called = await platformWasCalled(deps, row)
+    const status: ScheduledGrantStatus = called ? 'unknown' : 'failed'
+    await setGrant(deps, row, status, done.error.slice(0, 200))
+    return result(order.id, status, done.error.slice(0, 200), true)
   }
-  await setGrant(deps, row, 'consumed', done.kind)
-  return result(order.id, done.kind === 'synced' ? 'synced' : 'published', done.kind, false)
+  // Public, but the first comment (the booking link) did not post: a person has to add it.
+  const commentFailed = 'first_comment_status' in done.data && done.data.first_comment_status === 'failed'
+  await setGrant(deps, row, 'consumed', commentFailed ? FIRST_COMMENT_FAILED : done.kind)
+  return result(order.id, done.kind === 'synced' ? 'synced' : 'published', commentFailed ? FIRST_COMMENT_FAILED : done.kind, commentFailed)
+}
+
+async function platformWasCalled(deps: PromoteDeps, row: TrafficRow): Promise<boolean> {
+  const fresh = await deps.store.loadTrafficRow(row.id, row.client_id).catch(() => null)
+  // Cannot tell = assume it was called (report "unknown", the safe side). A clean Facebook refusal clears
+  // promote_called_at; a public video whose bookkeeping failed is left as meta_published_db_pending.
+  if (fresh === null) return true
+  const auth = readAuth(fresh.payload)
+  return typeof auth.promote_called_at === 'string' || auth.status === 'meta_published_db_pending'
 }
 
 /** A gate failed before claiming. Unreadable catalog = try again at the next wake-up; anything else needs a person. */
 async function contextFailed(
   deps: PromoteDeps, order: PromoteOrder, row: TrafficRow, status: number, error: string, dryRun: boolean,
 ): Promise<ScheduledResult> {
-  if (status === 503) return result(order.id, 'blocked_retry', error.slice(0, 200), false)
+  // Unreadable catalog (503) or a passing Facebook read error (502): try again at the next wake-up; past the day it becomes "missed".
+  if (status === 503 || status === 502) return result(order.id, 'blocked_retry', error.slice(0, 200), false)
   const next: ScheduledGrantStatus = status === 422 || status === 409 ? 'stale' : 'failed'
   if (!dryRun) await setGrant(deps, row, next, error.slice(0, 200))
   return result(order.id, next, error.slice(0, 200), true)
@@ -139,7 +157,8 @@ async function claimUnderGrant(
     }
     if (!grant) return 'no_grant'
     const prior = readAuth(cur)
-    if (prior.status === 'claimed' || prior.status === 'consumed') return `promote_${prior.status}`
+    const leaseLive = prior.status === 'claimed' && Date.parse(prior.claimed_at ?? '') + CLAIM_LEASE_MS > deps.now().getTime()
+    if (leaseLive || prior.status === 'consumed') return `promote_${prior.status}`
     const nowIso = deps.now().toISOString()
     const withClaim = withGrant(cur, claimedGrant(grant, requestId, executedBy, deps.now()))
     return withAuth(withClaim, {
@@ -149,6 +168,7 @@ async function claimUnderGrant(
     })
   }, 1)
   if (settled) return { kind: 'done', result: settled }
-  if (!res.ok) return { kind: 'done', result: result(ctx.order.id, 'not_due', res.message, false) }
+  // Lost the write race or another request holds the reel: try again at the next wake-up, but let a person see it.
+  if (!res.ok) return { kind: 'done', result: result(ctx.order.id, 'not_due', res.message, res.message !== 'not_today') }
   return { kind: 'claimed', payload: res.payload }
 }

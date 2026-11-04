@@ -18,9 +18,22 @@ const STATUS_ZH: Record<string, string> = {
   stale: '批后内容或日子变了，没发',
   missed: '错过了发布日，没发',
   failed: '发失败，仍是草稿',
-  unknown: '结果不明，请到 Facebook 核对',
+  unknown: '结果不明（可能已公开），请到 Facebook 核对',
 }
 const REAUTH = new Set(['stale', 'missed', 'failed', 'unknown'])
+const REASON_ZH: Record<string, string> = {
+  missed_day: '那天没发出去（系统没跑或被挡住），不会自动补发',
+  publish_day_changed: '批了以后发布日被改了，要按新日子重批',
+  content_changed: '批了以后文案或首评变了，要按新内容重批',
+  approver_not_admin: '批准人已经不是管理员，要重批',
+  rearmed_after_interrupt: '上次执行中断，已重新排上',
+}
+
+/** Known codes in Chinese; free text (already Chinese from the pipeline) passes through; anything code-like is hidden. */
+function reasonText(reason: string): string | null {
+  if (REASON_ZH[reason]) return REASON_ZH[reason]
+  return /^[a-z0-9_]+$/.test(reason) ? null : reason
+}
 
 function readGrants(json: unknown): GrantView[] | null {
   if (!json || typeof json !== 'object') return null
@@ -36,6 +49,7 @@ export function ReelGrantsPanel({ clientId }: { clientId: string }) {
 
   const load = useCallback(async () => {
     const res = await fetch(base).catch(() => null)
+    if (res?.status === 403) { setError(null); setGrants([]); return } // not an admin: nothing to manage here
     const json: unknown = res ? await res.json().catch(() => null) : null
     const list = res?.ok ? readGrants(json) : null
     if (list === null) { setError('授权列表没读出来，不要当成没有。'); return }
@@ -69,8 +83,8 @@ export function ReelGrantsPanel({ clientId }: { clientId: string }) {
       <ul className="space-y-2">
         {grants.map(({ work_order_id: id, grant }) => (
           <li key={id} className="text-xs text-slate-700 space-y-1">
-            <p>{grant.publish_on} · {STATUS_ZH[grant.status] ?? grant.status} · 批准人 {grant.authorized_by}</p>
-            {grant.reason && grant.status !== 'armed' && <p className="text-slate-500">{grant.reason}</p>}
+            <p>{grant.publish_on} · 工单 {id.slice(0, 8)} · {STATUS_ZH[grant.status] ?? '状态不明'} · 批准人 {grant.authorized_by}</p>
+            {grant.reason && reasonText(grant.reason) && <p className="text-slate-500">{reasonText(grant.reason)}</p>}
             <div className="flex gap-2">
               {grant.status !== 'claimed' && <button type="button" className="underline" onClick={() => void post({ action: 'revoke', work_order_id: id })}>撤回</button>}
               {REAUTH.has(grant.status) && <button type="button" className="underline" onClick={() => void startPreview(id)}>重新预览并授权</button>}

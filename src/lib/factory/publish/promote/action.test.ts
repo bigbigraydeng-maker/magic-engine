@@ -945,15 +945,92 @@ describe('按日公开:批卡授权 → 到日执行', async () => {
     expect(w.log).not.toContain('meta.promote')
   })
 
-  it('上一次执行抢到后中断(租约过期)→ 标结果不明,要人核对', async () => {
-    withPublishOn(DAY)
-    await approve()
+  function interrupted(): void {
     const g = grant()
     if (!g || !w.row) throw new Error('no grant')
-    w.row.payload['scheduled_go_public'] = { ...g, status: 'claimed', claimed_at: '2026-10-19T00:00:00.000Z' }
+    const stale = '2026-10-19T00:00:00.000Z'
+    w.row.payload['scheduled_go_public'] = { ...g, status: 'claimed', claimed_at: stale }
+    w.row.payload['promote_authorization'] = { ...auth(), status: 'claimed', claimed_at: stale, authorized_by: ADMIN }
+  }
+
+  it('上一次执行抢到后中断(租约过期)、Facebook 上还是草稿 → 重新执行,公开一次', async () => {
+    withPublishOn(DAY)
+    await approve()
+    interrupted()
     const r = await run()
+    expect(r.outcome).toBe('published')
+    expect(w.log.filter((l) => l === 'meta.promote').length).toBe(1)
+    expect(grant()?.status).toBe('consumed')
+  })
+
+  it('上一次中断前其实已经公开 → 只补记账,不再调 Facebook', async () => {
+    withPublishOn(DAY)
+    await approve()
+    interrupted()
+    w.meta.published = true
+    const r = await run()
+    expect(r.outcome).toBe('synced')
+    expect(w.log).not.toContain('meta.promote')
+    expect(grant()?.status).toBe('consumed')
+  })
+
+  it('Facebook 已调用、记账失败 → 标结果不明要人核对,不说「仍是草稿」', async () => {
+    withPublishOn(DAY)
+    await approve()
+    w.failCas = 99
+    const r = await run()
+    expect(w.log).toContain('meta.promote')
     expect(r.outcome).toBe('unknown')
     expect(r.needs_person).toBe(true)
+  })
+
+  it('Facebook 拒绝转公开 → 标失败要人处理', async () => {
+    withPublishOn(DAY)
+    await approve()
+    w.promoteError = new Error('meta said no')
+    const r = await run()
+    expect(r.outcome).toBe('failed')
+    expect(r.needs_person).toBe(true)
+  })
+
+  it('公开了但首评没发上 → 记下原因,要人补链接', async () => {
+    withPublishOn(DAY)
+    await approve()
+    w.commentError = new Error('comment refused')
+    const r = await run()
+    expect(r.outcome).toBe('published')
+    expect(r.needs_person).toBe(true)
+    expect(grant()?.status).toBe('consumed')
+    expect(grant()?.reason).toBe('first_comment_failed')
+  })
+
+  it('人手转公开正在进行(租约未过期)→ 定时这边不再调 Facebook', async () => {
+    withPublishOn(DAY)
+    await approve()
+    w.row!.payload['promote_authorization'] = { ...auth(), status: 'claimed', claimed_at: new Date(w.now).toISOString(), authorized_by: ADMIN }
+    const r = await run()
+    expect(r.outcome).toBe('not_due')
+    expect(r.needs_person).toBe(true)
+    expect(w.log).not.toContain('meta.promote')
+    expect(grant()?.status).toBe('armed')
+  })
+
+  it('读 Facebook 偶发出错 → 下一轮再试,不作废授权', async () => {
+    withPublishOn(DAY)
+    await approve()
+    w.readError = new Error('graph timeout')
+    const r = await run()
+    expect(r.outcome).toBe('blocked_retry')
+    expect(grant()?.status).toBe('armed')
+  })
+
+  it('演练可指定日期:按那天核', async () => {
+    withPublishOn('2026-10-21')
+    await approve()
+    const r = await runScheduledPromote(deps, { orderId: ORDER_ID, executedBy: 'system:week-card:t', isApprover, dryRun: true, asOf: '2026-10-21' })
+    expect(r.outcome).toBe('dry_run_ok')
+    const real = await runScheduledPromote(deps, { orderId: ORDER_ID, executedBy: 'system:week-card:t', isApprover, dryRun: false, asOf: '2026-10-21' })
+    expect(real.outcome).toBe('not_due')
     expect(w.log).not.toContain('meta.promote')
   })
 

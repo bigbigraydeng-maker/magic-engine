@@ -8,6 +8,7 @@ import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
 import { listWeeklyLoopClients } from '@/lib/social/weekly-loop/run-deps'
+import { DEFAULT_PUBLISH_HOUR, publishHourOf } from '@/lib/factory/publish/promote/scheduled-grant'
 import { runScheduledPromote, type ScheduledResult } from '@/lib/factory/publish/promote/scheduled-action'
 import { createProductionPromoteDeps } from '@/lib/factory/publish/promote/deps'
 import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
@@ -17,7 +18,7 @@ export const REEL_SCHEDULED_FUNCTION_ID = `${CLOUD_FN_PREFIX}reel-scheduled-go-p
 export const REEL_SCHEDULED_CRON = 'TZ=Pacific/Auckland */30 * * * *'
 export const REEL_SCHEDULED_EVENT = 'social/reel.scheduled_go_public.due'
 export const REEL_SCHEDULED_JOB = 'reel-scheduled-go-public'
-export const DEFAULT_PUBLISH_HOUR = 18
+export { DEFAULT_PUBLISH_HOUR, publishHourOf }
 
 export type ReelEnv = Readonly<Record<string, string | undefined>>
 
@@ -27,18 +28,6 @@ export function scheduledPublicEnabled(env: ReelEnv): boolean {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
-
-/** Client publish hour from publishing_calendar_config.weekly_pack.publish_hour (integer 0-23), else DEFAULT_PUBLISH_HOUR. */
-export function publishHourOf(config: unknown): number {
-  if (!isRecord(config)) return DEFAULT_PUBLISH_HOUR
-  const calendar = config.publishing_calendar_config
-  if (!isRecord(calendar)) return DEFAULT_PUBLISH_HOUR
-  const pack = calendar.weekly_pack
-  if (!isRecord(pack)) return DEFAULT_PUBLISH_HOUR
-  const hour = pack.publish_hour
-  if (typeof hour !== 'number' || !Number.isInteger(hour) || hour < 0 || hour > 23) return DEFAULT_PUBLISH_HOUR
-  return hour
 }
 
 const NZ_HOUR_FMT = new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland', hour: '2-digit', hourCycle: 'h23' })
@@ -66,7 +55,7 @@ export interface ReelScheduledDeps {
   listClients: () => Promise<Array<{ id: string; config: unknown }>>
   /** Work order ids whose traffic row holds a grant with status armed or claimed and publish_on <= today. */
   loadDueOrderIds: (clientId: string, today: string) => Promise<string[]>
-  runOne: (orderId: string, opts: { dryRun: boolean; executedBy: string }) => Promise<ScheduledResult>
+  runOne: (orderId: string, opts: { dryRun: boolean; executedBy: string; asOf?: string }) => Promise<ScheduledResult>
   startRun: () => Promise<string>
   finishRun: (input: {
     runId: string
@@ -108,12 +97,13 @@ async function runOrders(
   orderIds: readonly string[],
   dryRun: boolean,
   executedBy: string,
+  asOf?: string,
 ): Promise<ScheduledResult[]> {
   const results: ScheduledResult[] = []
   for (const orderId of orderIds) {
     const r = await step.run(`reel-${orderId}`, async () => {
       try {
-        return await deps.runOne(orderId, { dryRun, executedBy })
+        return await deps.runOne(orderId, { dryRun, executedBy, asOf })
       } catch (e) {
         return failedResult(orderId, e)
       }
@@ -213,22 +203,9 @@ async function handleCron(deps: ReelScheduledDeps, step: StepLike): Promise<Tick
 
   const receipt = plan.receipt
   if (receipt.status === 'done') {
-    const today = receipt.nz_date
     const executedBy = `system:week-card:${started.runId}`
     for (const client of plan.due) {
-      const clientReceipt = await step.run(`due-${client.id}`, async (): Promise<ClientReceipt> => {
-        try {
-          const ids = await deps.loadDueOrderIds(client.id, today)
-          return { client_id: client.id, due: ids.length, results: [], error: null }
-        } catch (e) {
-          return { client_id: client.id, due: 0, results: [], error: errorMessage(e, 200) }
-        }
-      })
-      if (clientReceipt.error === null && clientReceipt.due > 0) {
-        const ids = await step.run(`load-${client.id}`, () => deps.loadDueOrderIds(client.id, today))
-        clientReceipt.results = await runOrders(deps, step, ids, false, executedBy)
-      }
-      receipt.clients.push(clientReceipt)
+      receipt.clients.push(await runClient(deps, step, client.id, { today: receipt.nz_date, dryRun: false, executedBy }))
     }
     receipt.failures = collectFailures(receipt.clients)
     receipt.no_publish = false
@@ -238,15 +215,35 @@ async function handleCron(deps: ReelScheduledDeps, step: StepLike): Promise<Tick
   return receipt
 }
 
+/** One client: find today's approved reels, then one step per reel. */
+async function runClient(
+  deps: ReelScheduledDeps,
+  step: StepLike,
+  clientId: string,
+  opts: { today: string; dryRun: boolean; executedBy: string; asOf?: string },
+): Promise<ClientReceipt> {
+  const found = await step.run(`due-${clientId}`, async (): Promise<{ ids: string[]; error: string | null }> => {
+    try {
+      return { ids: await deps.loadDueOrderIds(clientId, opts.today), error: null }
+    } catch (e) {
+      return { ids: [], error: errorMessage(e, 200) }
+    }
+  })
+  const results = found.ids.length > 0 ? await runOrders(deps, step, found.ids, opts.dryRun, opts.executedBy, opts.asOf) : []
+  return { client_id: clientId, due: found.ids.length, results, error: found.error }
+}
+
 interface DueEventData {
   clientId: string
-  dry_run?: boolean
+  /** Practice runs only: check as if it were this NZ date (YYYY-MM-DD). */
+  date: string | null
 }
 
 function parseEventData(data: unknown): DueEventData {
   const record = isRecord(data) ? data : {}
   const clientId = typeof record.clientId === 'string' ? record.clientId : ''
-  return { clientId, dry_run: record.dry_run === true }
+  const date = typeof record.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(record.date) ? record.date : null
+  return { clientId, date }
 }
 
 async function handleDue(
@@ -260,8 +257,9 @@ async function handleDue(
   }))
 
   const data = await step.run('parse-event', async () => parseEventData(event.data))
-  const dryRun = data.dry_run === true || !scheduledPublicEnabled(deps.env())
-  const nz_date = nzDate(deps.now())
+  // A manual event never publishes: real publishing only happens on the timed wake-up, at the client's publish hour.
+  const dryRun = true
+  const nz_date = data.date ?? nzDate(deps.now())
   const executedBy = `system:week-card:${started.runId}`
 
   const receipt: TickReceipt = {
@@ -277,19 +275,7 @@ async function handleDue(
   if (!data.clientId) {
     receipt.failures = ['invalid_event: clientId missing']
   } else {
-    const clientReceipt = await step.run(`due-${data.clientId}`, async (): Promise<ClientReceipt> => {
-      try {
-        const ids = await deps.loadDueOrderIds(data.clientId, nz_date)
-        return { client_id: data.clientId, due: ids.length, results: [], error: null }
-      } catch (e) {
-        return { client_id: data.clientId, due: 0, results: [], error: errorMessage(e, 200) }
-      }
-    })
-    if (clientReceipt.error === null && clientReceipt.due > 0) {
-      const ids = await step.run(`load-${data.clientId}`, () => deps.loadDueOrderIds(data.clientId, nz_date))
-      clientReceipt.results = await runOrders(deps, step, ids, dryRun, executedBy)
-    }
-    receipt.clients.push(clientReceipt)
+    receipt.clients.push(await runClient(deps, step, data.clientId, { today: nz_date, dryRun, executedBy, asOf: data.date ?? undefined }))
     receipt.failures = collectFailures(receipt.clients)
   }
 
@@ -346,6 +332,7 @@ export const reelScheduledGoPublic = createReelScheduledFunction({
       executedBy: opts.executedBy,
       isApprover: isGlobalAdminEmail,
       dryRun: opts.dryRun,
+      asOf: opts.asOf,
     }),
   startRun: () => startCronRunId(REEL_SCHEDULED_JOB),
   finishRun: async ({ runId, startedAt, ...rest }) => {

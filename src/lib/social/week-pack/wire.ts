@@ -68,7 +68,7 @@ export function createWeekPackPorts(input: WireInput): WeekPackPorts & { setting
       allowedClientId: input.actor.allowedClientId,
       email: input.actor.email,
       run: () => reelMode === 'scheduled'
-        ? callAuthorizeScheduled(workOrderId, previewToken, input.actor.email)
+        ? callAuthorizeScheduled(workOrderId, previewToken, input.actor.email, settings)
         : callRunPromote(workOrderId, previewToken, input.actor.email),
     }),
   }
@@ -127,8 +127,11 @@ async function callRunPromote(workOrderId: string, previewToken: string, adminEm
   return promotedReelLine(result.data.first_comment_status)
 }
 
-async function callAuthorizeScheduled(workOrderId: string, previewToken: string, adminEmail: string): Promise<ReelPromoteResult> {
+async function callAuthorizeScheduled(
+  workOrderId: string, previewToken: string, adminEmail: string, settings: Promise<ClientPackSettings>,
+): Promise<ReelPromoteResult> {
   const { authorizeScheduledReel } = await import('@/lib/factory/publish/promote/scheduled-authorize')
+  const { publishHourOf } = await import('@/lib/factory/publish/promote/scheduled-grant')
   const { createProductionPromoteDeps } = await import('@/lib/factory/publish/promote/deps')
   const result = await authorizeScheduledReel(createProductionPromoteDeps(), {
     orderId: workOrderId, adminEmail, previewToken, source: 'week-card',
@@ -137,7 +140,7 @@ async function callAuthorizeScheduled(workOrderId: string, previewToken: string,
   return {
     ok: true,
     code: 'reel_scheduled',
-    text: `已授权：${result.publishOn} 新西兰时间 18:00 自动公开，当天公开前会再核一遍。`,
+    text: `已授权：${result.publishOn} 新西兰时间 ${publishHourOf((await settings).config)}:00 自动公开，当天公开前会再核一遍。`,
   }
 }
 

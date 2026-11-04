@@ -140,3 +140,17 @@ export function revokedGrant(grant: ScheduledGrant | null, by: string, now: Date
 export function grantWithStatus(grant: ScheduledGrant, status: ScheduledGrantStatus, reason: string, now: Date): ScheduledGrant {
   return { ...grant, status, reason, updated_at: now.toISOString() }
 }
+
+/** NZ hour a client's approved reels go public. */
+export const DEFAULT_PUBLISH_HOUR = 18
+
+/** Reads publishing_calendar_config.weekly_pack.publish_hour (integer 0-23); the argument IS that calendar config. */
+export function publishHourOf(calendarConfig: unknown): number {
+  const rec = (v: unknown): Record<string, unknown> | null =>
+    typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+  const hour = rec(rec(calendarConfig)?.weekly_pack)?.publish_hour
+  return typeof hour === 'number' && Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : DEFAULT_PUBLISH_HOUR
+}
+
+/** Grant reason when the reel went public but its first comment (the booking link) failed; the to-do reads it. */
+export const FIRST_COMMENT_FAILED = 'first_comment_failed'
