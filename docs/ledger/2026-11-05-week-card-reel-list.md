@@ -6,7 +6,7 @@ owner: agent
 decided_on: 2026-11-05
 source: pr:3620
 verify_by: 2026-11-06
-verify_how: 合并部署后管理员打开 CTS「社媒日常 → 本周总览」，「批下一周」里列出 11/9、11/11、11/13 三条（带周几和 18:00、正文、首评、看片），没排日子的不出现，没有「确认后立刻公开」字样；PM 点「同意这一周」后 flywheel_actions 里这三条的 scheduled_go_public.status 变成 armed、card_run_id 以 daily-list: 开头
+verify_how: 合并部署后管理员打开 CTS「社媒日常 → 本周总览」，「批下一周」里列出 11/9、11/11、11/13 三条（带周几和 18:00、正文、首评、看片），没排日子的不出现，没有「确认后立刻公开」字样；PM 点「同意这一周」后 flywheel_actions 里这三条的 scheduled_go_public.status 变成 armed、card_run_id 以 daily-list 加冒号开头
 done_on: 2026-11-05
 done_ref: pr:3620
 ---
