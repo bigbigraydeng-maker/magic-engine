@@ -53,7 +53,7 @@
 ```
 Kia ora {first_name},
 
-Your Best of China tour is about three months away. Here is a note on the weather, what is current right now, and one thing to do at home.
+Your Best of China tour is about three months away. Here's a note on the weather, what's current right now, and one thing to do at home.
 
 **What March will feel like**
 You fly out on 11 March and reach Beijing the next day. Here are the long-term March averages for the main cities on your route (based on China Meteorological Administration averages, 1991 to 2020):
@@ -70,7 +70,7 @@ Take a warm jacket, scarf and gloves for the cold mornings in the north, and a p
 **One thing to do at home**
 Set up your phone for China before you leave. Google Maps doesn't work well there, so we suggest Amap (Gaode) or Baidu Maps. Alipay and WeChat Pay are widely used in the cities and can increasingly be set up with a foreign card, although the rules change. So carry some Chinese yuan in cash too, and tell your New Zealand bank your travel dates. Google, Facebook and Instagram are blocked in China. VPN rules and reliability change, so check the current position and arrange anything you need before you travel. Our guide to the essential apps has more: https://www.ctstours.co.nz/blog/essential-travel-apps-china-navigation-communication-payment?utm_source=mailchimp&utm_medium=email&utm_campaign=predeparture_m3_202612
 
-If you have any questions at all, just reply to this email or call us on 0800 287 888. We are glad to help.
+If you have any questions at all, just reply to this email or call us on 0800 287 888. We're glad to help.
 
 Warm regards,
 Baker Gu
@@ -80,7 +80,7 @@ China Travel Specialist, CTS Tours
 ### 3.2 变体 B（3 月团·A Tale of Two Cities·1 位）——替换「开头一句」「天气」两段，其余与变体 A 相同
 
 ```
-Your A Tale of Two Cities tour is about three months away. Here is a note on the weather, what is current right now, and one thing to do at home.
+Your A Tale of Two Cities tour is about three months away. Here's a note on the weather, what's current right now, and one thing to do at home.
 
 **What March will feel like**
 You fly out on 18 March and reach Beijing the next day. Here are the long-term March averages for both cities on your route (based on China Meteorological Administration averages, 1991 to 2020):
@@ -117,7 +117,7 @@ Good to know: China doesn't change its clocks. While you are there it will be 4 
 2. Arrange travel insurance. New Zealand's SafeTravel service advises comprehensive cover that includes medical evacuation by air, and we strongly recommend it too.
 3. Register your trip on SafeTravel, the New Zealand government's travel advice website, so the Ministry of Foreign Affairs and Trade can send you updates about the places you are visiting. As at 2 December, its advice for China (page updated 27 August 2026) is to "exercise increased caution", the second of its four advice levels. Among other things, it points to theft, especially on public transport and in tourist areas, and to scams aimed at tourists. https://www.safetravel.govt.nz/destinations/china
 
-If you have any questions at all, just reply to this email or call us on 0800 287 888. We are glad to help.
+If you have any questions at all, just reply to this email or call us on 0800 287 888. We're glad to help.
 
 Warm regards,
 Baker Gu
