@@ -723,3 +723,79 @@ describe('发前团目录复核', () => {
     expect(w.log).not.toContain('comment')
   })
 })
+
+describe('发前团目录复核:真团对不上', () => {
+  const tour = (durationText: string) => ({
+    id: 't1', slug: 'tour', name: 'Acme Signature — Grand Tour', destination: 'china', tier: 'signature', title: null,
+    durationText, displayPriceText: null, highlights: [], inclusions: [], exclusions: [], singleSupplement: null,
+    soldOut: false, managesDepartures: false, isActive: true, departures: [],
+  })
+  const sourceWith = (durationText: string) => async () => ({ ok: true as const, catalogVersion: 13, tours: [tour(durationText)], aliasesByTourId: {} })
+  const CLAIM = '16 days in China with Acme'
+
+  function withCaption(caption: string): void {
+    const base = deps.store.loadOrder.bind(deps.store)
+    w.meta.description = caption
+    deps = {
+      ...deps,
+      store: {
+        ...deps.store,
+        async loadOrder(id: string) {
+          const o = await base(id)
+          return o ? { ...o, brief: { copy: { caption, endcard: { cta: 'Book now', url: 'https://example.com/tour' } } } } : o
+        },
+      },
+    }
+  }
+
+  it('片里写 16 天、目录是 19 天 → 预览 422,写明天数,不碰 Meta 转公开', async () => {
+    withCaption(CLAIM)
+    deps = { ...deps, loadFactSource: sourceWith('19 Days') }
+    const r = await preview()
+    expect(!r.ok && r.status).toBe(422)
+    expect(err(r)).toContain('天数')
+    expect(err(r)).toContain('重新预览')
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('同一条片:目录还是 16 天时放行,目录改成 19 天后确认被拦', async () => {
+    withCaption(CLAIM)
+    deps = { ...deps, loadFactSource: sourceWith('16 Days') }
+    const token = await tokenOf()
+    deps = { ...deps, loadFactSource: sourceWith('19 Days') }
+    const r = await confirm(token)
+    expect(!r.ok && r.status).toBe(422)
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('预览后目录只换了版本(核对仍通过)→ 确认要求重新预览,并说明可能是团目录变了', async () => {
+    withCaption(CLAIM)
+    deps = { ...deps, loadFactSource: sourceWith('16 Days') }
+    const token = await tokenOf()
+    deps = { ...deps, loadFactSource: async () => ({ ok: true as const, catalogVersion: 14, tours: [tour('16 Days')], aliasesByTourId: {} }) }
+    const r = await confirm(token)
+    expect(!r.ok && r.status).toBe(409)
+    expect(err(r)).toContain('团目录')
+  })
+
+  it('已被人手动公开且对不上 → 照样同步记录,但不发首评', async () => {
+    withCaption(CLAIM)
+    w.meta.published = true
+    deps = { ...deps, loadFactSource: sourceWith('19 Days') }
+    const r = await confirm(await tokenOf())
+    expect(r.ok && r.kind).toBe('synced')
+    expect(w.log).not.toContain('comment')
+    expect(auth().first_comment_status).toBe('failed')
+  })
+
+  it('补收尾(已公开、回执没写完)时首评对不上 → 回执照写,只是不发首评', async () => {
+    await confirm(await tokenOf())
+    w.row!.payload['promote_authorization'] = { ...auth(), status: 'meta_published_db_pending' }
+    w.log.length = 0
+    deps = { ...deps, loadFactSource: async () => ({ ok: false as const, reason: 'load_failed' }) }
+    const r = await confirm(await tokenOf())
+    expect(r.ok && r.kind).toBe('synced')
+    expect(w.log).not.toContain('comment')
+    expect(auth().status).toBe('consumed')
+  })
+})

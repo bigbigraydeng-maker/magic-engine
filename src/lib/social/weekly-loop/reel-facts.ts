@@ -86,7 +86,8 @@ const STRIPPED_CHARS = /[()\[\]{}<>]/g
 function cleanLine(line: string): string {
   const stripped = line.replace(STRIPPED_CHARS, '')
   const collapsed = stripped.replace(/\s+/g, ' ').trim()
-  return collapsed.length > 80 ? collapsed.slice(0, 80) : collapsed
+  // Short lines: the week card cuts a whole error at 160 chars, and the "edit, then preview again" tail must survive.
+  return collapsed.length > 40 ? collapsed.slice(0, 40) : collapsed
 }
 
 /**

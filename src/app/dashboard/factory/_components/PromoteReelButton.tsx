@@ -73,7 +73,7 @@ export function ReelGoPublicPreviewPanel({
       {preview.fact_check && (
         <div className="text-xs text-slate-700">
           <p>{factCheckLine(preview.fact_check)}</p>
-          {preview.fact_check.problems.map((line) => <p key={line} className="text-red-700">{line}</p>)}
+          {preview.fact_check.problems.map((line, i) => <p key={i} className="text-red-700">{line}</p>)}
           {preview.fact_check.note && <p className="text-slate-500">{preview.fact_check.note}</p>}
         </div>
       )}

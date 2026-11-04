@@ -78,7 +78,7 @@ function checkToken(deps: PromoteDeps, input: PromoteInput, t: ClaimTarget, payl
   if (slot.used) return fail(409, '这个确认令牌已经用过了,请重新预览')
   if (Date.parse(slot.expires_at) <= deps.now().getTime()) return fail(409, '确认令牌已过期(5 分钟),请重新预览')
   if (slot.work_order_id !== t.orderId) return fail(403, '确认令牌不是给这个工单的')
-  if (slot.fingerprint !== t.fingerprint) return fail(409, '预览之后内容变了(草稿文案/首评/审片记录),请重新预览')
+  if (slot.fingerprint !== t.fingerprint) return fail(409, '预览之后内容变了(草稿文案/首评/审片记录/团目录),请重新预览')
   return null
 }
 
@@ -127,6 +127,7 @@ async function confirmStage(deps: PromoteDeps, input: PromoteInput, ctx: Promote
   const done = await finishStage(deps, {
     orderId: ctx.order.id, clientId: ctx.order.client_id, masterBriefId: ctx.order.master_brief_id ?? '',
     target: ctx.target, videoId: ctx.videoId, firstComment: ctx.firstComment, rowId: ctx.row.id,
+    commentBlockedReason: ctx.commentBlockedReason,
   }, requestId)
   if (done.closed === 'fenced') return fail(409, '收尾被另一个请求接管了,请刷新页面查看结果')
   const data: PromotedData = {

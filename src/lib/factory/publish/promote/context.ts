@@ -27,6 +27,8 @@ export interface PromoteContext {
   firstComment: string
   fingerprint: string
   factCheck: FactRecheckSummary
+  /** Already public and no longer matching the catalog: record what happened, but do not send the first comment. */
+  commentBlockedReason: string | null
 }
 
 type Fail = Extract<PromoteResult, { ok: false }>
@@ -58,14 +60,15 @@ async function checkDraftContent(deps: PromoteDeps, order: PromoteOrder, view: M
 
 /** Re-check the reel against the catalog published right now. A reel already public on Facebook is only synced,
  *  so a mismatch is flagged (alert) rather than blocking the record of what already happened. */
-async function recheckFacts(deps: PromoteDeps, order: PromoteOrder, view: MetaReelView): Promise<FactRecheckSummary | Fail> {
+async function recheckFacts(
+  deps: PromoteDeps, order: PromoteOrder, view: MetaReelView,
+): Promise<{ summary: FactRecheckSummary; commentBlockedReason: string | null } | Fail> {
   const recheck = await recheckReelFacts({ loadFactSource: deps.loadFactSource, order, now: deps.now() })
-  if (!recheck.ok) {
-    // Already public on Facebook (sync only): do not block recording what happened; flag it instead.
-    if (!view.published) return fail(recheck.status, recheck.error)
-    deps.alert(`已公开的 Reel 与团目录对不上: ${order.id} ${recheck.error}`)
-  }
-  return recheck.summary
+  if (recheck.ok) return { summary: recheck.summary, commentBlockedReason: null }
+  // Already public on Facebook (sync only): do not block recording what happened; flag it and hold the first comment.
+  if (!view.published) return fail(recheck.status, recheck.error)
+  deps.alert(`已公开的 Reel 与团目录对不上: ${order.id} ${recheck.error}`)
+  return { summary: recheck.summary, commentBlockedReason: recheck.error }
 }
 
 export async function buildContext(deps: PromoteDeps, order: PromoteOrder): Promise<PromoteContext | Fail> {
@@ -91,7 +94,7 @@ export async function buildContext(deps: PromoteDeps, order: PromoteOrder): Prom
 
   const fingerprint = computeFingerprint({
     videoId: pre.videoId, description: view.description, firstComment: first.text, approvedAt: pre.approvedAt,
-    catalogVersion: factCheck.catalog_version,
+    catalogVersion: factCheck.summary.catalog_version,
   })
-  return { order, target, port, row: pre.row, videoId: pre.videoId, pageId: pre.pageId, approvedAt: pre.approvedAt, view, caption, firstComment: first.text, fingerprint, factCheck }
+  return { order, target, port, row: pre.row, videoId: pre.videoId, pageId: pre.pageId, approvedAt: pre.approvedAt, view, caption, firstComment: first.text, fingerprint, factCheck: factCheck.summary, commentBlockedReason: factCheck.commentBlockedReason }
 }

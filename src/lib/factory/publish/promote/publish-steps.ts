@@ -126,6 +126,8 @@ export interface FinishInput {
   videoId: string
   firstComment: string
   rowId: string
+  /** Set when the first comment must not go out (e.g. it no longer matches the tour catalog); the rest of the finish still runs. */
+  commentBlockedReason?: string | null
 }
 
 export interface FinishOutcome {
@@ -137,6 +139,7 @@ export interface FinishOutcome {
 
 /** 首评在发出前无条件过红线(不论是新转公开还是已被人手公开的分支)。返回拦截原因或 null。 */
 async function firstCommentBlocked(deps: PromoteDeps, f: FinishInput): Promise<string | null> {
+  if (f.commentBlockedReason) return f.commentBlockedReason
   try {
     return await deps.scanRedline(f.clientId, f.masterBriefId, redlineSurface(f.firstComment))
   } catch (e) {
@@ -145,7 +148,7 @@ async function firstCommentBlocked(deps: PromoteDeps, f: FinishInput): Promise<s
 }
 
 async function sendFirstComment(deps: PromoteDeps, f: FinishInput, blocked: string | null): Promise<string | null> {
-  if (blocked) { deps.alert(`首评命中红线,未发送 order=${f.orderId}: ${blocked}`); return null }
+  if (blocked) { deps.alert(`${f.commentBlockedReason ? '首评与团目录对不上' : '首评命中红线'},未发送 order=${f.orderId}: ${blocked}`); return null }
   try {
     return await deps.meta.ensureFirstComment({ target: f.target, videoId: f.videoId, idempotencyTag: f.orderId, message: f.firstComment })
   } catch (e) {

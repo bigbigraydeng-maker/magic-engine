@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { loadPublishedNameHistory, loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
+import { hasPublishedCatalog, loadPublishedNameHistory, loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
 import type { PublishedTourFact } from '@/lib/tour-catalog/publish-contract'
 
 export interface NamedTour {
@@ -118,7 +118,11 @@ export async function loadSocialFactSource(
   try {
     const published = await loadPublishedTourFacts(db, clientId, today)
     if (!published.published) {
-      return { ok: false, reason: 'catalog_not_published' }
+      // "Not published" from the reader also covers a published version it could not parse: only
+      // an empty published table means this client really has no catalog.
+      const presence = await hasPublishedCatalog(db, clientId)
+      if (!presence.ok) return { ok: false, reason: 'presence_read_failed' }
+      return { ok: false, reason: presence.present ? 'catalog_unreadable' : 'catalog_not_published' }
     }
     if (published.tours.length === 0) {
       return { ok: false, reason: 'catalog_empty' }

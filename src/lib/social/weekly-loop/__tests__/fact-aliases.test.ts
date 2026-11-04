@@ -7,6 +7,7 @@ vi.mock('@/lib/tour-catalog/store-publish', async () => {
   )
   return {
     loadPublishedNameHistory: actual.loadPublishedNameHistory,
+    hasPublishedCatalog: actual.hasPublishedCatalog,
     loadPublishedTourFacts: (...args: unknown[]) => loadMock(...args),
   }
 })
@@ -207,6 +208,24 @@ describe('loadSocialFactSource', () => {
     const result = await loadSocialFactSource(db, 'client-1', '2024-01-01')
 
     expect(result).toEqual({ ok: false, reason: 'catalog_not_published' })
+  })
+
+  it('a published version that cannot be read is unreadable, not "no catalog"', async () => {
+    loadMock.mockResolvedValue({ published: false })
+    const { db } = makeFakeDb({ data: [{ version: 13 }], error: null })
+
+    const result = await loadSocialFactSource(db, 'client-1', '2024-01-01')
+
+    expect(result).toEqual({ ok: false, reason: 'catalog_unreadable' })
+  })
+
+  it('a failed presence read fails closed', async () => {
+    loadMock.mockResolvedValue({ published: false })
+    const { db } = makeFakeDb({ data: null, error: { message: 'down' } })
+
+    const result = await loadSocialFactSource(db, 'client-1', '2024-01-01')
+
+    expect(result).toEqual({ ok: false, reason: 'presence_read_failed' })
   })
 
   it('returns catalog_empty when there are no tours', async () => {
