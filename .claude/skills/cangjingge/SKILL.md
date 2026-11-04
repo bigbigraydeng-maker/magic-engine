@@ -1,9 +1,9 @@
 ---
-name: me-agent-cangjingge
+name: cangjingge
 description: 藏经阁——设计或改造 ME 任何 agent / agent loop 之前必读的参考库。来源是 PM 发的 75 份 QCon 2026 讲稿（大厂 agent 落地实践），已逐份读过、按 ME 体量（量小、反馈慢、花钱发布要人批）筛成 16 部「经」，每部写明出处讲稿、在 ME 里是什么意思、ME 自己踩过的同类坑。触发词：藏经阁、新建 agent、设计 agent、agent loop、闭环、Harness、自我进化、Tune、评测、考卷、回放、记忆分层、经验沉淀、授权分级、自动化放权、多 agent 协作、验证、回执、讲稿、QCon、海量 ppt。只给原则和出处；不写代码、不改任何客户数据；落成 capability 前仍要走 me-platform-tier-gate。
 ---
 
-# 藏经阁（me-agent-cangjingge）
+# 藏经阁（cangjingge）
 
 **层级判定（me-platform-tier-gate）**：既有 L1「记忆 / 验证」下的**参考技能**，不新增能力线、不碰 `src/`。讲稿里的做法一律是「候选」，在 ME 真跑过、有证据的才算「已验证」。
 **来源**：PM 2026-11-04 要求把「海量 ppt」做成其他窗口开发 agent 时可读的提示词。原件在 PM 本机 `~/Downloads/173/`（75 份 PDF，不进仓库）；逐份笔记在 [references/notes/](./references/notes/)，一行一份的索引在 [references/lectures-index.md](./references/lectures-index.md)。

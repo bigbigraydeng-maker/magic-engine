@@ -75,7 +75,7 @@
 - 裁决 3：实验方案留在本卡，台账卡 `2026-11-04-skill-card-laocao-creative-testing` 等 PM 批或否；批了再由 74 号按 AT §4 建 A/B 测试。
 - 裁决 4、6：已有一致，不改任何规则。
 - 裁决 5：候选，写进记忆 `playbook-ads-meta-general.md` 末尾（标「候选·单来源·未在 ME 验证」）。
-- 登记：藏经阁 `.claude/skills/me-agent-cangjingge/references/external-tactics-index.md`。
+- 登记：藏经阁 `.claude/skills/cangjingge/references/external-tactics-index.md`。
 
 ## 效果回写
 （空）
