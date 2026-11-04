@@ -336,7 +336,7 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
   const nameOf = (id: string) => clients.get(id)?.name ?? '未知客户'
   return [
     // 广告 D3（花钱没结果）自动暂停建议等人批准——点一下就执行，不用去 Meta 后台
-    (b) => pushAdsAutoPauseItems(supabase, b, nameOf).catch((e) =>
+    (b) => pushAdsAutoPauseItems(supabase, b, nameOf, now).catch((e) =>
       console.warn('[manual-items] Ads D3 自动暂停待批准读取失败（不阻塞其他待办）:', e),
     ),
     // 已上线的标题改动一直没有效果判定 —— 9-28 起「改了有没有用」整条静默，没人知道（2026-10-29）。
