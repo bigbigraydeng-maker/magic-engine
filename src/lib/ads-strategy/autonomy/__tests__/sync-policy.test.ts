@@ -16,6 +16,7 @@ import {
   listAdsActionKeys,
   planAutonomySync,
   requiresHumanApprovalPolicy,
+  definitionRequiresHumanPolicy,
   syncActorLabel, targetModeFor } from '../sync-policy'
 import { ACTION_REGISTRY } from '@/lib/kernel/registry'
 
@@ -107,6 +108,16 @@ describe('planAutonomySync', () => {
       expect(requiresHumanApprovalPolicy(key), key).toBe(false)
       expect(targetModeFor(key, 'bounded_auto'), key).toBe('auto_approve')
     }
+  })
+
+  it('🔴 对外动作没声明审批方式（outwardAuthorization 为空）→ 当成要人点头，跟内核 ⑥b 一致', () => {
+    const d3 = ACTION_REGISTRY.get('ads.auto_pause_on_d3')!
+    const pause = ACTION_REGISTRY.get('ads.pause_unit')!
+    expect(definitionRequiresHumanPolicy({ sideEffect: 'outward', outwardAuthorization: null })).toBe(true)
+    expect(definitionRequiresHumanPolicy({ sideEffect: d3.sideEffect, outwardAuthorization: d3.outwardAuthorization })).toBe(true)
+    expect(definitionRequiresHumanPolicy({ sideEffect: pause.sideEffect, outwardAuthorization: pause.outwardAuthorization })).toBe(false)
+    // 内部动作不受影响（内核 ⑥b 只管对外）
+    expect(definitionRequiresHumanPolicy({ sideEffect: 'internal_write', outwardAuthorization: null })).toBe(false)
   })
 
   it('认不出的动作键当成要人点头（fail closed）', () => {

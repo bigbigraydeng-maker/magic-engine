@@ -9,6 +9,7 @@
  *
  *    登记在这里 = 声明「这个动作的批准只走它自己的入口」。消费方：
  *      · `handoff.ts`         —— 等批准的这类 run 不再发通用待办（查询层就排除）；
+ *                               标了 `ownsDeniedTodo` 的，被拒的也不再发；
  *      · `kernel-approval/`   —— 通用审批面对这类 run 服务端拒绝批准，界面给专属页链接；
  *      · 动作自己的待办生成器 —— 链接从这里取，不另写一份路径。
  *
@@ -27,6 +28,12 @@ export interface DedicatedApprovalEntry {
   readonly label: string
   /** 站内路径（不含域名）。入参只有 clientId。 */
   readonly path: (clientId: string) => string
+  /**
+   * true = 被拒（denied）的 run 也由专属待办列（它同样从 `action_runs` 读 denied 真相），
+   * 通用 handoff 对这个动作的 denied 不再发「开发欠账」——否则同一件事 PM 看到两条。
+   * 不写 = 被拒仍走通用 handoff。
+   */
+  readonly ownsDeniedTodo?: true
 }
 
 export const DEDICATED_APPROVAL_ENTRIES: readonly DedicatedApprovalEntry[] = [
@@ -45,6 +52,8 @@ export const DEDICATED_APPROVAL_ENTRIES: readonly DedicatedApprovalEntry[] = [
      * 旧网址保留为跳转，已经发出去的待办邮件不会失效。
      */
     path: (clientId) => `/dashboard/clients/${encodeURIComponent(clientId)}/ads-health?tab=approvals`,
+    // 2026-11-04：被拒的暂停建议由 `pm-todo/ads-auto-pause-items.ts` 的「被拦下」一栏列（读 action_runs denied）
+    ownsDeniedTodo: true,
   },
 ]
 
@@ -54,4 +63,9 @@ export function dedicatedApprovalEntryFor(actionKey: string): DedicatedApprovalE
 
 export function dedicatedApprovalActionKeys(): string[] {
   return DEDICATED_APPROVAL_ENTRIES.map((e) => e.actionKey)
+}
+
+/** 被拒的 run 也由专属待办负责的动作（通用 handoff 跳过它们的 denied）。 */
+export function dedicatedDeniedActionKeys(): string[] {
+  return DEDICATED_APPROVAL_ENTRIES.filter((e) => e.ownsDeniedTodo === true).map((e) => e.actionKey)
 }

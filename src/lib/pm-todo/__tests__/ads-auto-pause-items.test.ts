@@ -76,9 +76,12 @@ describe('🔴 专属待办读失败也要下发，不只打日志', () => {
     const sb = createFakeSupabase(tables(), opts)
     const items: ManualItem[] = []
     await pushAdsAutoPauseItems(sb, items, () => 'x')
-    expect(items).toHaveLength(1)
-    expect(items[0].what).toContain('读不出来')
-    expect(items[0].how).toContain('回我一句')
+    // 两栏都读 action_runs（被拦那栏从 2026-11-04 起也读被拒 run），各报一条「读不出来」
+    expect(items.map((i) => i.kind)).toEqual(['ads_auto_pause_pending', 'ads_auto_pause_blocked'])
+    for (const item of items) {
+      expect(item.what).toContain('读不出来')
+      expect(item.how).toContain('回我一句')
+    }
   })
 })
 
@@ -141,11 +144,21 @@ const kernelBlocked = (createdAt: string, extra: Record<string, unknown> = {}) =
     ...extra,
   }, createdAt)
 
-async function blockedOnly(rows: Row[]): Promise<ManualItem[]> {
-  const sb = createFakeSupabase({ action_runs: [], authorization_decisions: [], flywheel_actions: rows })
+async function blockedOnly(rows: Row[], extraRuns: Row[] = []): Promise<ManualItem[]> {
+  const sb = createFakeSupabase({ action_runs: extraRuns, authorization_decisions: [], flywheel_actions: rows })
   const items: ManualItem[] = []
   await pushAdsAutoPauseItems(sb, items, () => 'CTS Tours NZ', BLOCKED_NOW)
   return items.filter((i) => i.kind === 'ads_auto_pause_blocked')
+}
+
+function deniedRun(id: string, adsetId: string, updatedAt: string): Row {
+  return {
+    id, client_id: CLIENT, action_key: D3, action_version: 1, idempotency_key: `k-${id}`,
+    status: 'denied', needs_human: true, authorization_decision_id: null,
+    last_error: '这个客户的规则却配成了「自动执行」。先把规则改成「要审批」，在那之前一律不做',
+    input: { ad_account_id: 'act_1', adset_id: adsetId, diagnosis_code: 'D3', insight_date: '2026-11-03' },
+    rationale: '花钱没结果', created_at: updatedAt, updated_at: updatedAt,
+  }
 }
 
 describe('🔴 被拦下的暂停建议进今日待办（不再只躺在账表里）', () => {
@@ -156,11 +169,18 @@ describe('🔴 被拦下的暂停建议进今日待办（不再只躺在账表�
     expect(item.client_id).toBe(CLIENT)
     expect(item.what).toContain('北京团 · 兴趣人群')
     expect(item.what).toContain('被拦下')
-    expect(item.what).toContain('照常花钱')
+    expect(item.what).toContain('系统没能出手暂停它')
+    expect(item.what).not.toContain('照常花钱') // 没核实过的说法不写
     expect(item.what).toContain('规则却配成了「自动执行」') // 原因原文要带上
-    expect(item.how).toContain('目标与设置')
     expect(item.how).toContain('回我一句')
-    expect(item.href).toBe(`https://app.magicengine.com.au/dashboard/clients/${CLIENT}/ads-health?tab=settings`)
+    expect(item.href).toBe(`https://app.magicengine.com.au/dashboard/clients/${CLIENT}/ads-health?tab=ads`)
+  })
+
+  it('🔴 how 不让 PM 去改规则：原因里「改成要审批」由系统同步做', async () => {
+    const [item] = await blockedOnly([kernelBlocked(ago(1))])
+    expect(item.how).toContain('你不用去改规则')
+    expect(item.how).toContain('同步')
+    expect(item.how).not.toMatch(/去(设置|后台)里?把规则改/)
   })
 
   it('安全闸拦的（没有内核 run）→ 也进，但说清不是规则配错，链接去「每条广告」', async () => {
@@ -171,6 +191,13 @@ describe('🔴 被拦下的暂停建议进今日待办（不再只躺在账表�
     expect(items[0].what).toContain('共用账户')
     expect(items[0].how).toContain('安全闸')
     expect(items[0].href).toBe(`https://app.magicengine.com.au/dashboard/clients/${CLIENT}/ads-health?tab=ads`)
+  })
+
+  it('🔴 核实过是别人主页的组（other_page）不进待办；客户没登记主页（client_page_unknown）照进', async () => {
+    const other = ledgerRow({ status: 'blocked', adset_id: 'adset-o', adset_name: '别人的组', ownership_verdict: 'other_page', reason: 'x' }, ago(1))
+    const unknown = ledgerRow({ status: 'blocked', adset_id: 'adset-u', adset_name: '没登记主页', ownership_verdict: 'client_page_unknown', reason: '客户没登记 Facebook 主页' }, ago(1))
+    const items = await blockedOnly([other, unknown])
+    expect(items.map((i) => i.what.includes('没登记主页'))).toEqual([true])
   })
 
   it('内部代号翻成人话，不把 kernel_inconsistent_pending_approval 原样甩给 PM', async () => {
@@ -212,7 +239,7 @@ describe('🔴 被拦下的暂停建议进今日待办（不再只躺在账表�
     expect(blocked[0].what).toContain('读不出来')
   })
 
-  it('🔴 等批准那一栏行为不变：pending + 一条 blocked → 各一条，pending 链接仍是「等你点头」', async () => {
+  it('🔴 等批准那一栏行为不变：pending + 别的广告组一条 blocked → 各一条，pending 链接仍是「等你点头」', async () => {
     const t = tables()
     t.flywheel_actions = [kernelBlocked(ago(1))]
     const sb = createFakeSupabase(t)
@@ -222,13 +249,54 @@ describe('🔴 被拦下的暂停建议进今日待办（不再只躺在账表�
     expect(items[0].href).toBe(`https://app.magicengine.com.au/dashboard/clients/${CLIENT}/ads-health?tab=approvals`)
     expect(items[0].what).toContain('圣诞团')
   })
+})
 
-  it('已经在「等你点头」里的同一个 run 不重复列成「被拦」', async () => {
-    const t = tables()
-    t.flywheel_actions = [kernelBlocked(ago(1), { action_run_id: RUN })]
+describe('🔴 被拦下按「客户 + 广告组」去重', () => {
+  it('同一广告组已有等批准（不同 run）→ 不再列「被拦下」', async () => {
+    const t = tables() // 等批准的是 adset-9
+    t.flywheel_actions = [kernelBlocked(ago(2), { adset_id: 'adset-9', action_run_id: '00000000-0000-4000-8000-0000000000c9' })]
     const sb = createFakeSupabase(t)
     const items: ManualItem[] = []
     await pushAdsAutoPauseItems(sb, items, () => 'CTS Tours NZ', BLOCKED_NOW)
     expect(items.map((i) => i.kind)).toEqual(['ads_auto_pause_pending'])
+  })
+
+  it('同一广告组在被拦之后又有非 blocked 的账（演练 / 等批准 / 失败…）→ 不列；之前的非 blocked 账不影响', async () => {
+    for (const status of ['dry_run_logged', 'awaiting_approval', 'failed']) {
+      const later = ledgerRow({ status, adset_id: 'adset-7', reason: 'x' }, ago(1))
+      expect(await blockedOnly([kernelBlocked(ago(2)), later]), status).toHaveLength(0)
+    }
+    const earlier = ledgerRow({ status: 'dry_run_logged', adset_id: 'adset-7', reason: 'x' }, ago(3))
+    expect(await blockedOnly([kernelBlocked(ago(2)), earlier])).toHaveLength(1)
+  })
+
+  it('别的客户的同名广告组不算同一组', async () => {
+    const otherClient = '00000000-0000-4000-8000-0000000000ee'
+    const later = ledgerRow({ status: 'dry_run_logged', adset_id: 'adset-7', reason: 'x' }, ago(1), otherClient)
+    expect(await blockedOnly([kernelBlocked(ago(2)), later])).toHaveLength(1)
+  })
+})
+
+describe('🔴 内核被拒的 run 以 action_runs 为真相（通用 handoff 不再发这条）', () => {
+  it('账表漏记的被拒 run → 照样一条「被拦下」，原因取 run 的 last_error', async () => {
+    const items = await blockedOnly([], [deniedRun('00000000-0000-4000-8000-0000000000d1', 'adset-21', ago(1))])
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('adset-21')
+    expect(items[0].what).toContain('规则却配成了「自动执行」')
+  })
+
+  it('被拒 run 账表也记了 → 只出一条（用账表的广告组名）', async () => {
+    const runId = '00000000-0000-4000-8000-0000000000d2'
+    const items = await blockedOnly(
+      [kernelBlocked(ago(1), { action_run_id: runId, adset_id: 'adset-22', adset_name: '杭州团' })],
+      [deniedRun(runId, 'adset-22', ago(1))],
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('杭州团')
+    expect(items[0].what).not.toContain('被拦了 2 次')
+  })
+
+  it('8 天前被拒的 run 不收', async () => {
+    expect(await blockedOnly([], [deniedRun('00000000-0000-4000-8000-0000000000d3', 'adset-23', ago(8))])).toHaveLength(0)
   })
 })

@@ -34,6 +34,9 @@
 
 import { ACTION_KEYS, ACTION_REGISTRY } from '@/lib/kernel/registry'
 
+/** 动作定义的类型从注册表推出来——本文件只许 import 注册表（架构测试 ⑤）。 */
+type ActionDefinition = NonNullable<ReturnType<typeof ACTION_REGISTRY.get>>
+
 /** 意向源的值域（`ad_strategy_configs.autonomy_mode` 的 CHECK 约束）。 */
 export type AutonomyMode = 'observe' | 'bounded_auto'
 
@@ -65,7 +68,11 @@ export interface LastSyncedReceipt {
  *    认不出的键当成要人点头（fail closed）。
  */
 export function requiresHumanApprovalPolicy(key: string): boolean {
-  const definition = ACTION_REGISTRY.get(key)
+  return definitionRequiresHumanPolicy(ACTION_REGISTRY.get(key))
+}
+
+/** 同上，直接看动作定义。没声明审批方式（`outwardAuthorization` 为空）的对外动作 = 要人点头。 */
+export function definitionRequiresHumanPolicy(definition: Pick<ActionDefinition, 'sideEffect' | 'outwardAuthorization'> | null): boolean {
   if (definition === null) return true
   if (definition.sideEffect !== 'outward') return false
   return definition.outwardAuthorization?.approval.mode !== 'bounded'

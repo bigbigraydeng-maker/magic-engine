@@ -14,7 +14,11 @@
  *
  * 🔴 **被拦下的也要下发**（2026-11-04）：内核拒了、安全闸拦了的暂停建议只记在
  *    `flywheel_actions`（payload.status='blocked'），从来不进「等你点头」——广告照常
- *    花钱、PM 看不到。这里把近 7 天的 blocked 也收进来（同一个广告组只出一条）。
+ *    PM 看不到。这里把近 7 天的 blocked 也收进来（同一个客户的同一个广告组只出一条）：
+ *      · 内核拒的以 `action_runs`（status='denied'）为真相，账表只补广告组名——账表漏记的照样列；
+ *        通用 handoff 对这个动作的 denied 不再发「开发欠账」（登记在 `dedicated-approval-entries.ts`）；
+ *      · 同一广告组已在「等你点头」，或之后又有任何非 blocked 的账（批准 / 执行 / 演练…）→ 不列；
+ *      · 核实过是别人主页的组（ownership_verdict='other_page'）→ 不列：那本来就不该停，不是待办。
  *    只收 blocked：`dry_run_logged`（演练）要不要也报是 PM 另一个决定，不在这里加。
  */
 
@@ -33,7 +37,7 @@ export const BLOCKED_LOOKBACK_DAYS = 7
 /** 一次最多读这么多行被拦记录；读满了要说出来，不静默截掉。 */
 export const BLOCKED_READ_LIMIT = 200
 
-function adsHealthHref(clientId: string, tab: 'settings' | 'ads'): string {
+function adsHealthHref(clientId: string, tab: 'ads'): string {
   return `${APP_BASE}/dashboard/clients/${encodeURIComponent(clientId)}/ads-health?tab=${tab}`
 }
 
@@ -68,11 +72,15 @@ export async function pushAdsAutoPauseItems(
   nameOf: (id: string) => string,
   now: Date = new Date(),
 ): Promise<void> {
-  const pendingRunIds = await pushPendingItems(supabase, items, nameOf)
-  await pushBlockedItems(supabase, items, nameOf, now, pendingRunIds)
+  const pendingAdsets = await pushPendingItems(supabase, items, nameOf)
+  await pushBlockedItems(supabase, items, nameOf, now, pendingAdsets)
 }
 
-/** 等批准的那一栏；返回已列出的 run id（被拦那一栏用来去重）。 */
+function adsetKey(clientId: string, adsetId: string): string {
+  return `${clientId}:${adsetId}`
+}
+
+/** 等批准的那一栏；返回已列出的「客户:广告组」（被拦那一栏用来去重）。 */
 async function pushPendingItems(
   supabase: SupabaseClient,
   items: ManualItem[],
@@ -104,23 +112,32 @@ async function pushPendingItems(
       href: '',
     })
   }
-  return new Set(pending.items.map((p) => p.runId))
+  return new Set(pending.items.flatMap((p) => (p.adsetId ? [adsetKey(p.clientId, p.adsetId)] : [])))
 }
 
-// ── 被拦下的暂停建议（payload.status='blocked'）──────────────────────────────
+// ── 被拦下的暂停建议 ─────────────────────────────────────────────────────────
 
-interface BlockedPayload {
+interface LedgerPayload {
   status?: unknown
   adset_id?: unknown
   adset_name?: unknown
   reason?: unknown
   action_run_id?: unknown
+  ownership_verdict?: unknown
 }
 
-interface BlockedRow {
+interface LedgerRow {
   client_id: string
   created_at: string
-  payload: BlockedPayload | null
+  payload: LedgerPayload | null
+}
+
+interface DeniedRunRow {
+  id: string
+  client_id: string
+  input: { adset_id?: unknown } | null
+  last_error: string | null
+  updated_at: string
 }
 
 function text(v: unknown): string | null {
@@ -134,22 +151,39 @@ function plainReason(raw: string | null): string {
   return raw.length > 200 ? `${raw.slice(0, 200)}…` : raw
 }
 
-async function readRecentBlocked(supabase: SupabaseClient, now: Date): Promise<BlockedRow[]> {
-  const since = new Date(now.getTime() - BLOCKED_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString()
+/** 近 7 天这个动作的全部账（任何状态）——被拦的要列，之后的非 blocked 账用来判「后来已经处理过」。 */
+async function readRecentLedger(supabase: SupabaseClient, sinceIso: string): Promise<LedgerRow[]> {
   const { data, error } = await supabase
     .from('flywheel_actions')
     .select('client_id, created_at, payload')
     .eq('flywheel', 'ads')
     .eq('action_type', ADS_AUTO_PAUSE_ACTION_KEY)
-    .eq('payload->>status', 'blocked')
-    .gte('created_at', since)
+    .gte('created_at', sinceIso)
     .order('created_at', { ascending: false })
     .limit(BLOCKED_READ_LIMIT)
   if (error) throw new Error(error.message)
-  return (data ?? []) as BlockedRow[]
+  return (data ?? []) as LedgerRow[]
 }
 
-function toBlockedItem(row: BlockedRow, times: number, nameOf: (id: string) => string): ManualItem {
+/** 内核真相：近 7 天被拒的 run。账表漏记的那条也要列，换成账表同样的形状。 */
+async function readRecentDeniedRuns(supabase: SupabaseClient, sinceIso: string): Promise<LedgerRow[]> {
+  const { data, error } = await supabase
+    .from('action_runs')
+    .select('id, client_id, input, last_error, updated_at')
+    .eq('action_key', ADS_AUTO_PAUSE_ACTION_KEY)
+    .eq('status', 'denied')
+    .gte('updated_at', sinceIso)
+    .order('updated_at', { ascending: false })
+    .limit(BLOCKED_READ_LIMIT)
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as DeniedRunRow[]).map((r) => ({
+    client_id: r.client_id,
+    created_at: r.updated_at,
+    payload: { status: 'blocked', adset_id: r.input?.adset_id, action_run_id: r.id, reason: r.last_error },
+  }))
+}
+
+function toBlockedItem(row: LedgerRow, times: number, nameOf: (id: string) => string): ManualItem {
   const p = row.payload ?? {}
   const adsetLabel = text(p.adset_name) ?? text(p.adset_id) ?? '一个广告组'
   const byKernel = text(p.action_run_id) !== null
@@ -159,13 +193,47 @@ function toBlockedItem(row: BlockedRow, times: number, nameOf: (id: string) => s
     client_id: row.client_id,
     client_name: nameOf(row.client_id),
     what:
-      `「${adsetLabel}」花钱没结果，系统想暂停它，但这条建议被拦下了，没进「等你点头」${repeat}——这个广告组还在照常花钱。` +
+      `「${adsetLabel}」花钱没结果，系统建议暂停，但这条建议被拦下了，没进「等你点头」${repeat}——系统没能出手暂停它。` +
       `被拦的原因：${plainReason(text(p.reason))}`,
     how: byKernel
-      ? '这类暂停按规矩应该进「等你点头」，被拦说明执行规则跟设置对不上。链接打开的是这个客户广告健康页的「目标与设置」，能看到它现在的自动化设置；执行规则不用你去改 —— 回我一句「查一下这条暂停被拦」，我去核这个客户的执行规则。'
+      ? '这类暂停本该进「等你点头」。看到这条，多半是这个客户的执行规则还没被同步成「要审批」—— 原因里说的「改成要审批」由系统同步自动做，你不用去改规则。' +
+        '回我一句「查一下这条暂停被拦」，我去触发一次同步并核对；这个广告组停不停你来定，链接打开的是它所在的「每条广告」。'
       : '这是系统的安全闸拦下的（确认不了广告组归属或是共用账户），不是规则配错。打开广告健康页「每条广告」看这个广告组，停不停你来定；拿不准就回我一句「查一下这条暂停被拦」。',
-    href: adsHealthHref(row.client_id, byKernel ? 'settings' : 'ads'),
+    href: adsHealthHref(row.client_id, 'ads'),
   }
+}
+
+/** 账表 + 内核被拒 run 合并成「该不该列」的被拦清单：每组 = 同一客户的同一广告组。 */
+function groupBlocked(
+  ledger: readonly LedgerRow[],
+  deniedRuns: readonly LedgerRow[],
+  pendingAdsets: ReadonlySet<string>,
+): Array<{ row: LedgerRow; times: number }> {
+  const ledgerRunIds = new Set(ledger.flatMap((r) => text(r.payload?.action_run_id) ?? []))
+  const candidates = [...ledger, ...deniedRuns.filter((r) => !ledgerRunIds.has(text(r.payload?.action_run_id) ?? ''))]
+    .filter((r) => r.payload?.status === 'blocked' && r.payload.ownership_verdict !== 'other_page')
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+  const groups = new Map<string, { row: LedgerRow; times: number }>()
+  for (const row of candidates) {
+    const adsetId = text(row.payload?.adset_id)
+    const key = adsetId ? adsetKey(row.client_id, adsetId) : `${row.client_id}:?:${row.created_at}`
+    const seen = groups.get(key)
+    if (seen) seen.times += 1
+    else groups.set(key, { row, times: 1 })
+  }
+  return [...groups.entries()]
+    .filter(([key, g]) => !pendingAdsets.has(key) && !handledLater(ledger, key, g.row.created_at))
+    .map(([, g]) => g)
+}
+
+/** 这个广告组在最近一次被拦之后，又有过任何非 blocked 的账（批准 / 执行 / 演练…）= 后来已经有下文。 */
+function handledLater(ledger: readonly LedgerRow[], key: string, blockedAt: string): boolean {
+  const t = Date.parse(blockedAt)
+  return ledger.some((r) => {
+    const adsetId = text(r.payload?.adset_id)
+    return adsetId !== null && adsetKey(r.client_id, adsetId) === key &&
+      r.payload?.status !== 'blocked' && Date.parse(r.created_at) > t
+  })
 }
 
 async function pushBlockedItems(
@@ -173,11 +241,12 @@ async function pushBlockedItems(
   items: ManualItem[],
   nameOf: (id: string) => string,
   now: Date,
-  pendingRunIds: ReadonlySet<string>,
+  pendingAdsets: ReadonlySet<string>,
 ): Promise<void> {
-  let rows: BlockedRow[]
+  const sinceIso = new Date(now.getTime() - BLOCKED_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString()
+  let read: [LedgerRow[], LedgerRow[]]
   try {
-    rows = await readRecentBlocked(supabase, now)
+    read = await Promise.all([readRecentLedger(supabase, sinceIso), readRecentDeniedRuns(supabase, sinceIso)])
   } catch (e) {
     const message = (e instanceof Error ? e.message : String(e)).slice(0, 160)
     items.push({
@@ -190,25 +259,15 @@ async function pushBlockedItems(
     })
     return
   }
-  // 同一个客户的同一个广告组只出一条（取最新那次），已在「等你点头」里的 run 不重复列
-  const latest = new Map<string, { row: BlockedRow; times: number }>()
-  for (const row of rows) {
-    const p = row.payload ?? {}
-    const runId = text(p.action_run_id)
-    if (runId !== null && pendingRunIds.has(runId)) continue
-    const key = `${row.client_id}:${text(p.adset_id) ?? text(p.adset_name) ?? row.created_at}`
-    const seen = latest.get(key)
-    if (seen) seen.times += 1
-    else latest.set(key, { row, times: 1 })
-  }
-  for (const { row, times } of latest.values()) items.push(toBlockedItem(row, times, nameOf))
-  if (rows.length >= BLOCKED_READ_LIMIT) {
+  const [ledger, deniedRuns] = read
+  for (const { row, times } of groupBlocked(ledger, deniedRuns, pendingAdsets)) items.push(toBlockedItem(row, times, nameOf))
+  if (ledger.length >= BLOCKED_READ_LIMIT || deniedRuns.length >= BLOCKED_READ_LIMIT) {
     items.push({
       kind: 'ads_auto_pause_blocked',
       client_id: 'infra',
       client_name: 'Magic Engine 后台',
-      what: `近 ${BLOCKED_LOOKBACK_DAYS} 天被拦下的广告暂停建议超过 ${BLOCKED_READ_LIMIT} 条，这里只按最新的 ${BLOCKED_READ_LIMIT} 条列了，更早的没显示。`,
-      how: '被拦这么多不正常 —— 回我一句「暂停建议被拦太多了」，我去看是哪条规则在挡。',
+      what: `近 ${BLOCKED_LOOKBACK_DAYS} 天广告自动暂停的记录超过 ${BLOCKED_READ_LIMIT} 条，这里只按最新的 ${BLOCKED_READ_LIMIT} 条判了，更早的被拦建议可能没显示。`,
+      how: '记录这么多不正常 —— 回我一句「暂停建议记录太多了」，我去看是哪里在刷。',
       href: '',
     })
   }
