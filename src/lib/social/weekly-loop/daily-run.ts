@@ -5,10 +5,36 @@
  */
 import { fillSlots } from './schedule'
 import type { WriteReelScheduleArgs, WriteReelScheduleResult } from './schedule-writer'
-import { mondayOf, occupiedDays, poolDepthDays } from './daily-schedule'
+import { mondayOf, occupiedDays, poolDepthDays, type DatedRow } from './daily-schedule'
+import { checkReelFacts, reelOverlayOf, type OkFactSource } from './reel-facts'
+import { readPublishOn } from '@/lib/social/week-pack/manifest'
 import { readSocialAgentSettings, type SocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
 
 export const DAILY_SCHEDULED_BY = 'social-daily-agent'
+
+/**
+ * Knife 1: a week whose card was already approved is also off limits. Items put there now could not be
+ * approved before knife 2 (per-day list card) and would silently expire. Knife 2 turns this on.
+ */
+export const DAILY_BLOCK_ONLY_PENDING = false
+
+/**
+ * Rows the candidate selection left out but that carry a date (today, past, beyond the look window, any status).
+ * They occupy their day and taint their version group, so nothing is booked twice and no second version is dated.
+ */
+export function datedOutsideCandidates(
+  rows: ReadonlyArray<{ id: string; created_at: string; brief: unknown; output: unknown }>,
+  candidateIds: ReadonlySet<string>,
+): DatedRow[] {
+  const out: DatedRow[] = []
+  for (const r of rows) {
+    if (candidateIds.has(r.id)) continue
+    const on = readPublishOn(r.brief)
+    if (typeof on !== 'string' || on === 'invalid') continue
+    out.push({ id: r.id, created_at: r.created_at, brief: r.brief, overlay: reelOverlayOf(r.output), scheduledOn: on })
+  }
+  return out
+}
 
 export interface DailyEntry {
   id: string
@@ -45,6 +71,8 @@ export function dailyEntries(
   candidates: ReadonlyArray<{ id: string; scheduledOn: string | null; createdAt: string }>,
   reviewed: ReadonlyArray<{ id: string; excluded: string | null; productKey: string | null }>,
   persistedIds: ReadonlySet<string> | null,
+  /** Product key for rows that were not reviewed in this run (dated rows outside the candidates). */
+  fallbackKey: (id: string) => string | null = () => null,
 ): { entries: DailyEntry[]; notPersisted: number } {
   const byId = new Map(reviewed.map((r) => [r.id, r]))
   let notPersisted = 0
@@ -53,9 +81,22 @@ export function dailyEntries(
     const passed = r !== undefined && r.excluded === null
     const stored = persistedIds === null || persistedIds.has(c.id)
     if (passed && c.scheduledOn === null && !stored) notPersisted += 1
-    return { id: c.id, scheduledOn: c.scheduledOn, productKey: r?.productKey ?? null, rankAt: c.createdAt, eligible: passed && stored }
+    return { id: c.id, scheduledOn: c.scheduledOn, productKey: r ? r.productKey : fallbackKey(c.id), rankAt: c.createdAt, eligible: passed && stored }
   })
   return { entries, notPersisted }
+}
+
+/** Product key of a dated row outside the candidates, so a same-tour reel is not put next to it. */
+export function outsideTourKey(
+  rows: ReadonlyArray<{ id: string; brief: unknown; output: unknown }>,
+  outside: readonly DatedRow[],
+  id: string,
+  source: OkFactSource,
+  today: string,
+): string | null {
+  if (!outside.some((o) => o.id === id)) return null
+  const row = rows.find((r) => r.id === id)
+  return row ? checkReelFacts({ brief: row.brief, output: row.output, orderId: row.id, source, today }).result.targetTourId : null
 }
 
 export async function scheduleDaily(
@@ -88,7 +129,7 @@ export async function scheduleDaily(
       weekStart: mondayOf(a.publishOn),
       assignments: [a],
       dryRun: args.dryRun,
-      blockOnlyPending: true,
+      blockOnlyPending: DAILY_BLOCK_ONLY_PENDING,
       scheduledBy: DAILY_SCHEDULED_BY,
     })
     if (res.ok === false) {

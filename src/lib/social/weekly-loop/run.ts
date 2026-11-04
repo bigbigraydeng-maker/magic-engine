@@ -12,8 +12,8 @@ import { isAssetOnly } from '@/lib/factory/deliverable'
 import { APP_BASE } from '@/lib/pm-todo/binding-request-items'
 import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 import { checkReelFacts, factCheckToday, reelOverlayOf, type OkFactSource } from './reel-facts'
-import { dailyVersionDecisions, dailyWindows } from './daily-schedule'
-import { dailyEntries, dailySettings, scheduleDaily } from './daily-run'
+import { dailyVersionDecisions, dailyWindows, type DatedRow } from './daily-schedule'
+import { dailyEntries, dailySettings, datedOutsideCandidates, outsideTourKey, scheduleDaily } from './daily-run'
 
 /** cron_run_logs.job_name for every receipt of the weekly loop (daily fan-out and per-client runs). */
 export const WEEKLY_LOOP_JOB = 'social-weekly-draft'
@@ -316,10 +316,11 @@ function pushExcluded(items: WeeklyLoopItem[], row: WeeklyLoopOrderRow, reason: 
   })
 }
 
-function keepVersionsDaily(candidates: Candidate[], items: WeeklyLoopItem[], counts: WeeklyLoopCounts): Candidate[] {
-  const { keep, excluded } = dailyVersionDecisions(
-    candidates.map((c) => ({ id: c.row.id, created_at: c.row.created_at, brief: c.row.brief, overlay: reelOverlayOf(c.row.output), scheduledOn: c.scheduledOn })),
-  )
+function keepVersionsDaily(candidates: Candidate[], outside: readonly DatedRow[], items: WeeklyLoopItem[], counts: WeeklyLoopCounts): Candidate[] {
+  const { keep, excluded } = dailyVersionDecisions([
+    ...candidates.map((c) => ({ id: c.row.id, created_at: c.row.created_at, brief: c.row.brief, overlay: reelOverlayOf(c.row.output), scheduledOn: c.scheduledOn })),
+    ...outside,
+  ])
   const kept: Candidate[] = []
   for (const c of candidates) {
     const reason = excluded.get(c.row.id) ?? (keep.has(c.row.id) ? null : 'ambiguous_version')
@@ -721,7 +722,8 @@ export async function runWeeklyLoop(
   const { rows, truncated } = await deps.loadOrders(input.clientId)
   if (truncated) errors.push('orders_truncated')
   const candidates = selectCandidates(rows, look.weekStart, look.weekEnd, items, counts)
-  const kept = daily ? keepVersionsDaily(candidates, items, counts) : keepLatestVersions(candidates, items, counts)
+  const outside = daily ? datedOutsideCandidates(rows, new Set(candidates.map((c) => c.row.id))) : []
+  const kept = daily ? keepVersionsDaily(candidates, outside, items, counts) : keepLatestVersions(candidates, items, counts)
 
   const source = await deps.loadFactSource(input.clientId, today)
   if (source.ok === false) {
@@ -750,9 +752,10 @@ export async function runWeeklyLoop(
   if (daily) {
     const reelPerDay = quota.stage === 'paused' ? 0 : agent.reelPerDay
     const { entries, notPersisted } = dailyEntries(
-      candidates.map((c) => ({ id: c.row.id, scheduledOn: c.scheduledOn, createdAt: c.row.created_at })),
+      [...candidates.map((c) => ({ id: c.row.id, scheduledOn: c.scheduledOn, createdAt: c.row.created_at })), ...outside.map((o) => ({ id: o.id, scheduledOn: o.scheduledOn, createdAt: o.created_at }))],
       reviewed.map((r) => ({ id: r.c.row.id, excluded: r.excluded, productKey: r.productKey })),
       persistedIds,
+      (id) => outsideTourKey(rows, outside, id, source, today),
     )
     const plan = await scheduleDaily(deps.writeSchedule, { clientId: input.clientId, slotDates: daily.slotDates, reelPerDay, entries, dryRun: input.mode !== 'write' })
     for (let i = 0; i < notPersisted; i += 1) bump(counts.skipped_by_reason, 'fact_check_not_persisted')

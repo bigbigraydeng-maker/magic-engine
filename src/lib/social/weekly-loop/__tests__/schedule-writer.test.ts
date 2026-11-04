@@ -307,6 +307,22 @@ describe('writeReelSchedule', () => {
     expect(deniedResult.ok).toBe(true)
   })
 
+  it('blockOnlyPending: an approved card no longer blocks, a card under review still does; scheduled_by is stamped', async () => {
+    const authorized = baseState({
+      cards: [{ id: 'a2', status: 'authorized', input: { subject_key: 'social:week-pack:c1:2026-11-09' } }],
+    })
+    const r = await writeReelSchedule(makeDb(authorized), { ...ARGS, blockOnlyPending: true, scheduledBy: 'social-daily-agent' })
+    expect(r.ok).toBe(true)
+    expect(authorized.updates).toHaveLength(1)
+    const brief = authorized.updates[0].patch.brief as { weekly_pack: { scheduled_by: string } }
+    expect(brief.weekly_pack.scheduled_by).toBe('social-daily-agent')
+
+    const pending = baseState({
+      cards: [{ id: 'a1', status: 'pending_approval', input: { subject_key: 'social:week-pack:c1:2026-11-09' } }],
+    })
+    expect(await writeReelSchedule(makeDb(pending), { ...ARGS, blockOnlyPending: true })).toEqual({ ok: false, reason: 'card_open' })
+  })
+
   it('fails closed when the card check errors', async () => {
     const state = baseState({ cardError: true })
     const result = await writeReelSchedule(makeDb(state), ARGS)
