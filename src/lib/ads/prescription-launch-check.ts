@@ -13,6 +13,18 @@ const COSTS = new Set(['成本', 'cpl', 'cost'])
 const CONVERSATIONS = new Set(['对话数', '私信对话数', 'conversations', 'dm_conversations'])
 const VIEWS = new Set(['看完数', '视频看完数', 'thruplays', 'video_views'])
 
+// 营销计划流程写下的 KPI 是中文长句，靠关键词认。
+const COST_PHRASES = ['线索的成本', '线索成本', '单条成本', '每条成本', '留资成本', 'CPL', 'cpl']
+const LEAD_PHRASES = ['留资', '线索']
+// 比例、上限、筛选过的线索都不是「线索条数越多越好」，不能拿总条数去比（复审 P1）
+const NOT_A_LEAD_COUNT = ['率', '占比', '比例', '%', '上限', '不超过', '最多', '低于', '以内', '≤', '无效', '合格']
+const LEAD_COUNT_UNITS = new Set(['', '条', '个', '人', 'leads'])
+// 整个周期（日期范围）、结算线、每天的上限：开投后这几个时间点判不了
+const PERIOD_RANGE = /\d{4}-\d{1,2}-\d{1,2}\s*至/
+// 只有说的是花费、留资、成交这类的长句，才因为时间范围被放到检查之外；认不出的仍然报「认不出来」
+const PLAN_LEVEL_WORDS = ['花费', '预算', '成本', '留资', '线索', '保本', '单']
+const RECENT_DAYS = /最近\s*(\d+)\s*天/
+
 const HOURS = [
   { kpiMetric: 'launch_check_24h', label: '24 小时', hours: 24 },
   { kpiMetric: 'launch_check_48h', label: '48 小时', hours: 48 },
@@ -73,6 +85,8 @@ export interface KpiRef {
   metric: string
   target: number | null
   unit: string
+  /** 考核时间范围，例如「最近 7 天」「2026-10-25 至 2026-11-30」「每天」。缺省为 ''。 */
+  timeframe?: string
 }
 
 export interface ActionRow {
@@ -141,7 +155,8 @@ export function kpisFromContent(content: unknown): KpiRef[] {
     const metric = typeof row?.metric === 'string' ? row.metric.trim() : ''
     if (metric === '') continue
     const unit = typeof row?.unit === 'string' ? row.unit.trim() : ''
-    out.push({ metric, target: readMetric(row?.target_value), unit })
+    const timeframe = typeof row?.timeframe === 'string' ? row.timeframe.trim() : ''
+    out.push({ metric, target: readMetric(row?.target_value), unit, timeframe })
   }
   return out
 }
@@ -226,6 +241,38 @@ export function pickLatestCase(rows: readonly { id: string; createdAt: string }[
   return sorted[0]?.id ?? null
 }
 
+/**
+ * 开投后检查能用的指标种类。
+ * 先按精确词认（保持旧行为），再按营销计划写下的中文长句认。
+ * 整个周期的总数、结算线、每天的上限不在开投后这个时间点检查。
+ */
+export function launchKpiKind(
+  kpi: KpiRef,
+): 'leads' | 'cost' | 'conversations' | 'views' | 'out_of_scope' | 'other' {
+  const exact = metricKind(kpi.metric)
+  if (exact !== 'other') return exact
+  const timeframe = kpi.timeframe ?? ''
+  const planLevel = PERIOD_RANGE.test(timeframe) || timeframe.includes('结算') || timeframe.startsWith('每天')
+  if (planLevel && PLAN_LEVEL_WORDS.some(word => kpi.metric.includes(word))) return 'out_of_scope'
+  if (COST_PHRASES.some(word => kpi.metric.includes(word))) return 'cost'
+  if (LEAD_PHRASES.some(word => kpi.metric.includes(word)) && !kpi.metric.includes('成本')
+    && LEAD_COUNT_UNITS.has(kpi.unit) && !NOT_A_LEAD_COUNT.some(word => kpi.metric.includes(word))) return 'leads'
+  return 'other'
+}
+
+/**
+ * 长句里的条数目标（例如「最近 7 天 新增留资 50 条」）只在窗口天数刚好对上时比：
+ * 第 14 天拿 14 天的累计去比 7 天的目标会假达标，24 小时拿 1 天去比会假不达标（复审 P1）。
+ * 精确词写的旧目标、成本这类比值不受影响。
+ */
+function inWindow(kpi: KpiRef, windowDays: number): boolean {
+  if (metricKind(kpi.metric) !== 'other') return true
+  const kind = launchKpiKind(kpi)
+  if (kind === 'cost' || kind === 'other' || kind === 'out_of_scope') return true
+  const match = RECENT_DAYS.exec(kpi.timeframe ?? '')
+  return match !== null && Number(match[1]) === windowDays
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -268,9 +315,21 @@ function classifyLaunches(
     else if (mark === 'match') matches.push(launch)
   }
   if (tie) return { kind: 'unmatched', lines: ['不知道。同一时间通过了不止一份处方，对不上是哪一份。'] }
-  if (matches.length > 1) return { kind: 'unmatched', lines: ['不知道。对上了不止一条已开投的广告。'] }
+  if (matches.length > 1) {
+    // 同一支广告暂停后又开投，会有多条开投记录；同一 campaign 只算一次，从最早那次算起。
+    const campaignId = matches[0].campaignId
+    if (matches.every(launch => launch.campaignId === campaignId)) {
+      return { kind: 'matched', launch: earliestLaunch(matches) }
+    }
+    return { kind: 'unmatched', lines: ['不知道。对上了不止一条已开投的广告。'] }
+  }
   if (matches.length === 1) return { kind: 'matched', launch: matches[0] }
   return { kind: 'unmatched', lines: ['不知道。已开投的广告对不上这份处方。'] }
+}
+
+function earliestLaunch(launches: readonly LaunchRef[]): LaunchRef {
+  return launches.reduce((earliest, launch) =>
+    Date.parse(launch.authorizedAt) < Date.parse(earliest.authorizedAt) ? launch : earliest)
 }
 
 function siblingPool(prescription: PrescriptionRef, siblings: readonly SiblingRef[]): SiblingRef[] {
@@ -404,11 +463,27 @@ function judgeNumbers(
   }
   const parts: string[] = []
   const comparisons: boolean[] = []
-  pushReadable(windowed, kpis, parts, comparisons)
+  const windowDays = dayCount(launchDay, endDay)
+  const checkable = kpis.filter(kpi => inWindow(kpi, windowDays))
+  pushReadable(windowed, checkable, parts, comparisons)
   if (dateGap) parts.push('有几天的日期读不出来。')
-  for (const kpi of kpis) pushUnrecognized(kpi, parts)
+  for (const kpi of checkable) pushUnrecognized(kpi, parts)
   if (kpis.length === 0) parts.push('这份处方没有写下能对照的线索或成本目标。')
-  return { verdict: verdictOf(comparisons, parts.length > comparisons.length), parts }
+  // 先定结论，再补「另有 N 项不在这个时间点检查」的说明，免得整周期的目标把结论拖成不知道。
+  const verdict = verdictOf(comparisons, parts.length > comparisons.length)
+  const outOfScope = kpis.filter(kpi => launchKpiKind(kpi) === 'out_of_scope').length
+  if (outOfScope > 0) {
+    parts.push(`另有 ${outOfScope} 项是整个周期的总数、结算线或每天的上限，不在开投后这个时间点检查。`)
+  }
+  const offWindow = kpis.length - checkable.length
+  if (offWindow > 0) parts.push(`另有 ${offWindow} 项条数目标的时间范围跟这个时间点对不上，这次不比。`)
+  return { verdict, parts }
+}
+
+function dayCount(from: string, to: string): number {
+  let count = 0
+  for (let day = from; day <= to; day = addCalendarDays(day, 1)) count += 1
+  return count
 }
 
 function missingDays(rows: readonly InsightRef[], from: string, to: string): string[] {
@@ -431,7 +506,7 @@ function pushReadable(
   const views = sumColumn(rows, 'videoThruplays')
   const conversations = sumColumn(rows, 'messagingConversations')
   for (const kpi of kpis) {
-    const kind = metricKind(kpi.metric)
+    const kind = launchKpiKind(kpi)
     if (kind === 'leads') pushLead(kpi, leads, parts, comparisons)
     else if (kind === 'conversations') pushCount(kpi, '对话数', conversations, parts, comparisons)
     else if (kind === 'views') pushCount(kpi, '看完数', views, parts, comparisons)
@@ -513,7 +588,7 @@ function pushCost(
 }
 
 function pushUnrecognized(kpi: KpiRef, parts: string[]): void {
-  if (metricKind(kpi.metric) !== 'other') return
+  if (launchKpiKind(kpi) !== 'other') return
   parts.push(`有一个指标认不出来：${kpi.metric}。`)
 }
 
