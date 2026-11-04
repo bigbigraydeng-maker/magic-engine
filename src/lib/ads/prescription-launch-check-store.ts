@@ -18,6 +18,7 @@ import {
 const PAGE = 500
 const CAP = 5000
 const OURS = new Set<string>(LAUNCH_CHECK_METRICS)
+const PLAN_STATUSES = new Set(['approved', 'archived', 'completed'])
 
 interface TableApi {
   select(columns: string): TableApi
@@ -85,10 +86,10 @@ async function listAllActions(): Promise<{ rows: ActionRow[]; partial: boolean }
   return { rows, partial: true }
 }
 
+// A plan version that was in force at launch time stays valid evidence after it is archived by a later revision.
 async function listApprovedPlans(clientId: string): Promise<PlanRef[]> {
   const data = await eqRows('marketing_plans', 'status, approved_at, plan_data', [
     ['client_id', clientId],
-    ['status', 'approved'],
   ])
   return data.map(planFrom).filter((row): row is PlanRef => row !== null)
 }
@@ -205,8 +206,10 @@ function actionFrom(value: unknown): ActionRow | null {
 function planFrom(value: unknown): PlanRef | null {
   const row = asRecord(value)
   const approvedAt = text(row?.approved_at)
+  const status = text(row?.status)
   const goalId = goalFromPlan(row?.plan_data)
   if (approvedAt === '' || goalId === '') return null
+  if (!PLAN_STATUSES.has(status)) return null
   return { goalId, approvedAt }
 }
 
