@@ -4,6 +4,7 @@ import { winnerDecisionEventId, type WinnerRow } from '@/lib/factory/winner-gate
 import { createFakeSupabase, type Tables } from '@/lib/kernel/__tests__/fake-supabase'
 import type { ManualItem } from '../manual-item-types'
 import { laneOf } from '../five-kinds'
+import { winnerBoardUrl } from '@/lib/factory/winner-links'
 
 const DAY = 86_400_000
 const NOW = Date.parse('2026-11-05T09:00:00Z')
@@ -55,7 +56,8 @@ describe('待办文案', () => {
     expect(item.what).toContain('Demo Client')
     expect(item.what).toContain('最后一轮')
     expect(item.how).toContain('Demo Client 自己的员工')
-    expect(item.href).toContain('/dashboard/factory?client=c1')
+    expect(item.href).toBe(winnerBoardUrl('c1'))
+    expect(item.href).toContain('/dashboard/clients/c1/ads-health?tab=winners')
     expect(laneOf(item)).toBe('truth')
   })
 })

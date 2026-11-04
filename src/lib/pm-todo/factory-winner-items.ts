@@ -15,16 +15,13 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
 import { WINNER_COLUMNS, confirmIsPmOnly, pmOnlyFrom, readPmDecision, readProgramCheck, type WinnerRow } from '@/lib/factory/winner-gate'
 import { mergePerformance } from '@/lib/factory/winner-decision'
+import { winnerBoardUrl } from '@/lib/factory/winner-links'
 
 export type FactoryWinnerItemKind = 'factory_winner_confirm' | 'factory_winner_pm_only_unsynced'
 
 const MS_PER_DAY = 86_400_000
 export const WINNER_TODO_ROUND_DAYS = 7
 export const WINNER_TODO_MAX_ROUNDS = 2
-
-export function winnerBoardUrl(clientId: string): string {
-  return `https://app.magicengine.com.au/dashboard/factory?client=${clientId}#current-winner`
-}
 
 export interface WinnerConfirmTodo {
   client_id: string
