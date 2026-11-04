@@ -74,9 +74,14 @@ export function buildGoLiveFacts(input: {
     account: 'label' in account ? account.label : account.problem,
     amount: money.text,
     date: date.text,
-    scope: '开到广告、广告组和广告系列这三层',
+    scope: scopeLine(input.view),
     hardChecks: hardChecksForGoLive(input.gates, extraProblems(input.view, accountProblem)),
   })
+}
+
+function scopeLine(view: PausedDraftView): string {
+  if (view.ids?.reusedCampaign) return '开到新的广告和广告组。原来的广告系列这次不改开关'
+  return '开到广告、广告组和广告系列这三层'
 }
 
 export function cardFingerprint(facts: CardFacts): string {

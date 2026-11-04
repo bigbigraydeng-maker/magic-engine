@@ -135,6 +135,11 @@ export interface AdDraft {
   clientId: string
   /** 广告系列名 —— 会出现在 Meta 后台，写人看得懂的。 */
   campaignName: string
+  /**
+   * 已有系列的编号。写了就不再新建系列，只在这个系列下加一个暂停广告组。
+   * 必须是这张卡上的广告账户里的数字编号，对不上就不建。
+   */
+  existingCampaignId?: string
   adSetName: string
   /**
    * 每天多少钱，客户账户的货币单位（元，不是分）。
@@ -492,5 +497,6 @@ export function describeDraft(d: AdDraft): string {
   const what = isKnownDraftKind(d.kind) ? DRAFT_WHAT[d.kind] : '（不认识的广告类型）'
   const budget = d.budgetMode === 'campaign' ? '（系列预算）' : ''
   const sets = Array.isArray(d.adSets) ? `，${d.adSets.length} 个广告组` : ''
-  return `${what}，每天 $${d.dailyBudget}${budget}、跑 ${d.durationDays} 天，最多花 $${total}${sets}`
+  const attached = d.existingCampaignId ? '，加到已有系列' : ''
+  return `${what}，每天 $${d.dailyBudget}${budget}、跑 ${d.durationDays} 天，最多花 $${total}${sets}${attached}`
 }

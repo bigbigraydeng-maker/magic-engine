@@ -85,6 +85,26 @@ describe('go-live facts', () => {
     expect(facts.hardChecks.every((row) => row.state !== 'green')).toBe(true)
   })
 
+  it('keeps a reused campaign out of the switch promise', () => {
+    const parsed = parsePausedDraft({
+      status: 'awaiting_approval',
+      campaignId: 'camp',
+      adSetId: 'set',
+      adIds: ['ad'],
+      draft: { kind: 'lead_form', existingCampaignId: 'camp', dailyBudget: 40, durationDays: 7 },
+    })
+    expect(parsed?.ids).toEqual({
+      campaignId: 'camp', adSetId: 'set', adIds: ['ad'], reusedCampaign: true,
+    })
+    const facts = buildGoLiveFacts({
+      draftId: 'draft-1',
+      view: view({ ids: parsed?.ids ?? null }),
+      gates: greenGates(),
+      boundLabels: [],
+    })
+    expect(facts.scope).toBe('开到新的广告和广告组。原来的广告系列这次不改开关')
+  })
+
   it('reads the optional account name and does not invent ids', () => {
     const parsed = parsePausedDraft({
       status: 'awaiting_approval',

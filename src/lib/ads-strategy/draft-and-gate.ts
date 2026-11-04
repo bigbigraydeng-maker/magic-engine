@@ -22,6 +22,7 @@ import type { AdDraft } from './ad-draft'
 import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
 import { draftNotYetBuildable } from './ad-draft-expansion'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
+import { attachReadbackFindings } from './attach-readback'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
 import { checkAudiences, renderAudienceSummary, type AudienceFact, type AudiencesChecked } from './draft-audiences'
@@ -342,6 +343,7 @@ function expectedFindings(
       brandRedlines: deps.brandRedlines ?? [],
     },
     { campaignStatus: readback.campaignStatus, adSet: readback.adSet, ads: readback.ads },
+    { campaign: !published.reusedCampaign, adSet: true },
   )
 }
 
@@ -409,7 +411,10 @@ async function gateReadback(
   }
 
   const report = launchReportFor(draft, deps, rawAdSet, ads)
-  const extra = expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps)
+  const extra = [
+    ...expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps),
+    ...attachReadbackFindings(draft, rawAdSet),
+  ]
   const autoPause = extra.some((f) => f.code === 'not_paused')
     ? await pausePublished(published, deps.accessToken, {
         deadlineAt: ctx.startedAt + BUDGET.giveUpPauseMs, now: ctx.now,
@@ -538,9 +543,11 @@ export async function approveDraft(
     return { ok: false, error: '这条刚被别处处理过（可能已经被开启或否决），这次没有再开。' }
   }
 
+  const skipIds = p.draft.existingCampaignId ? [p.campaignId] : []
   const r = await activatePublished(
     { campaignId: p.campaignId, adSetId: p.adSetId, adIds: p.adIds },
     accessToken,
+    skipIds.length > 0 ? { skipIds } : undefined,
   )
   if (!r.ok && entry === 'go-live-card') return noteHeldActivation(actionId, supabase, p, receipt, r.error)
   if (!r.ok) {

@@ -42,10 +42,15 @@ const isPaused = (s: unknown): boolean =>
 const show = (s: unknown): string =>
   typeof s === 'string' && s.trim() ? s.trim() : '读不到'
 
-function pausedFindings(got: CreatedReadback): LaunchFinding[] {
+function pausedFindings(
+  got: CreatedReadback,
+  requirePaused: { campaign?: boolean; adSet?: boolean },
+): LaunchFinding[] {
   const bad: string[] = []
-  if (!isPaused(got.campaignStatus)) bad.push(`广告系列（${show(got.campaignStatus)}）`)
-  if (!isPaused(got.adSet.status)) bad.push(`广告组（${show(got.adSet.status)}）`)
+  if (requirePaused.campaign !== false && !isPaused(got.campaignStatus)) {
+    bad.push(`广告系列（${show(got.campaignStatus)}）`)
+  }
+  if (requirePaused.adSet !== false && !isPaused(got.adSet.status)) bad.push(`广告组（${show(got.adSet.status)}）`)
   for (const ad of got.ads) {
     if (!isPaused(ad.status)) bad.push(`广告 ${show(ad.adName)}（${show(ad.status)}）`)
   }
@@ -107,9 +112,10 @@ function redlineFindings(exp: CreatedExpectation, got: CreatedReadback): LaunchF
 export function checkCreatedAsExpected(
   exp: CreatedExpectation,
   got: CreatedReadback,
+  requirePaused: { campaign?: boolean; adSet?: boolean } = {},
 ): LaunchFinding[] {
   return [
-    ...pausedFindings(got),
+    ...pausedFindings(got, requirePaused),
     ...targetFindings(exp, got.adSet),
     ...countFindings(exp, got),
     ...redlineFindings(exp, got),

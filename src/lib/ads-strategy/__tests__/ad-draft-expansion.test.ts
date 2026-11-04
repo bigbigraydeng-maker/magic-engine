@@ -235,6 +235,16 @@ describe('建前复核用已经读到的数，自己不读 Meta', () => {
   it('没给广告账户 → 核不成，不编一个账户', () => {
     expect(reviewDraftAgainstCaps(multi(), '  ', [], null).verdict).toBe('unknown')
   })
+
+  it('已在投 145 加新组 30，上限 150 → 超；已在投没读到 → 不能当成没在花钱', () => {
+    const accounts = [{ ad_account_id: 'act_1', currency: 'AUD', daily_cap_cents: 15000, owned_by_client: true }]
+    const over = reviewDraftAgainstCaps(multi(), 'act_1', accounts, 20000, 14500)
+    expect(over.verdict).toBe('over')
+    expect(over.notes).toEqual([])
+    const fits = reviewDraftAgainstCaps(multi({ dailyBudget: 5, adSets: [adSet({ dailyBudget: 5 })] }), 'act_1', accounts, 20000, 14500)
+    expect(fits.verdict).toBe('ok')
+    expect(reviewDraftAgainstCaps(multi(), 'act_1', accounts, 20000, null).verdict).toBe('unknown')
+  })
 })
 
 describe('从计划步骤投影广告组', () => {

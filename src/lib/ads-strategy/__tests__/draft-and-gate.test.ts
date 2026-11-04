@@ -1345,6 +1345,25 @@ describe('approveDraft — 开之前复核受众还在', () => {
     expect(mActivate).toHaveBeenCalledTimes(1)
   })
 
+  it('挂已有系列的草案开投时不把那个系列一起打开', async () => {
+    mActivate.mockResolvedValue({ ok: true })
+    const { sb } = fakeSupabase({
+      status: 'awaiting_approval',
+      draft: { ...DRAFT, existingCampaignId: '900001' },
+      summary: 's',
+      campaignId: '900001',
+      adSetId: 'as1',
+      adIds: ['ad1'],
+    })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(true)
+    expect(mActivate).toHaveBeenCalledWith(
+      { campaignId: '900001', adSetId: 'as1', adIds: ['ad1'] },
+      'tok',
+      { skipIds: ['900001'] },
+    )
+  })
+
   it('草案没带名单 → 不多查一次，照常开', async () => {
     mActivate.mockResolvedValue({ ok: true })
     const { sb } = fakeSupabase({
@@ -1355,5 +1374,44 @@ describe('approveDraft — 开之前复核受众还在', () => {
     expect(r.ok).toBe(true)
     expect(mAdSet).not.toHaveBeenCalled()
     expect(mActivate).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('createDraftForApproval — 已有系列', () => {
+  it('新组回读不是暂停 → 拦住，补暂停时带着「别关原系列」', async () => {
+    mPublish.mockResolvedValue({
+      ok: true, campaignId: '900001', adSetId: 'as1', adIds: ['ad1'], orphans: [], reusedCampaign: true,
+    })
+    mAdSet.mockResolvedValue({
+      id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      status: 'ACTIVE', campaign_id: '900001',
+      targeting: { geo_locations: { countries: ['NZ'] } },
+    })
+    mPause.mockResolvedValue({ ok: true, failed: [] })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval({ ...DRAFT, existingCampaignId: '900001' }, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('not_paused')
+    expect(mPause).toHaveBeenCalledWith(
+      expect.objectContaining({ campaignId: '900001', reusedCampaign: true }),
+      'tok',
+      expect.objectContaining({ deadlineAt: T0 + 92_000 }),
+    )
+  })
+
+  it('新组挂错系列 → 拦住，不去补暂停原系列', async () => {
+    mPublish.mockResolvedValue({
+      ok: true, campaignId: '900001', adSetId: 'as1', adIds: ['ad1'], orphans: [], reusedCampaign: true,
+    })
+    mAdSet.mockResolvedValue({
+      id: 'as1', name: 'North Shore', optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+      status: 'PAUSED', campaign_id: '800001',
+      targeting: { geo_locations: { countries: ['NZ'] } },
+    })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval({ ...DRAFT, existingCampaignId: '900001' }, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('attached_to_wrong_campaign')
+    expect(mPause).not.toHaveBeenCalled()
   })
 })
