@@ -20,6 +20,10 @@ import { recordUnpublishedOnCard } from './persist-held'
 import { voidPendingWeekPackCards } from './void-pending'
 import { promoteReelGated } from './promote-guard'
 import { reelCardMode, type WeekPackEnv } from './switches'
+import { targetWeek } from './cadence'
+import { reelListLines } from './reel-list-lines'
+import type { ReelListApproval, WeekPackLine } from './types'
+import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 
 export interface WireInput {
   litePorts: LiteServicePorts
@@ -71,7 +75,28 @@ export function createWeekPackPorts(input: WireInput): WeekPackPorts & { setting
         ? callAuthorizeScheduled(workOrderId, previewToken, input.actor.email, settings)
         : callRunPromote(workOrderId, previewToken, input.actor.email),
     }),
+    approveReels: (approvals) => approveReelsFromWeekList(input, reelMode === 'scheduled', approvals),
   }
+}
+
+/** Week card, scheduled mode: the ticked reels are approved against the server-rebuilt list for next week. */
+export async function approveReelsFromWeekList(
+  input: Pick<WireInput, 'actor' | 'clientId' | 'now' | 'db'>, scheduled: boolean, approvals: readonly ReelListApproval[],
+): Promise<WeekPackLine[]> {
+  if (!scheduled) return [{ kind: 'reel', stable_id: null, code: 'skipped_switch_off', ok: true, text: '按日公开没打开，视频这一周不授权。' }]
+  if (input.actor.allowedClientId !== null || !isGlobalAdminEmail(input.actor.email)) {
+    return [{ kind: 'reel', stable_id: null, code: 'reel_forbidden', ok: false, text: '批视频仍要全局管理员。视频这一周没有授权，其他内容照常。' }]
+  }
+  if (approvals.length === 0) return [{ kind: 'reel', stable_id: null, code: 'reel_none', ok: true, text: '这次没勾视频，没有新批视频；之前已经批过的照常按日公开。' }]
+  const { decideDailyList } = await import('@/lib/social/daily-list/decide')
+  const { createDailyListPorts } = await import('@/lib/social/daily-list/db')
+  const { createProductionPromoteDeps } = await import('@/lib/factory/publish/promote/deps')
+  const { weekStart, weekEnd } = targetWeek(input.now)
+  const receipt = await decideDailyList(createDailyListPorts(input.db, createProductionPromoteDeps()), {
+    clientId: input.clientId, adminEmail: input.actor.email, switchOn: true, agentOn: true, approve: [...approvals], exclude: [],
+    dryRun: false, now: input.now, requestId: crypto.randomUUID(), window: { from: weekStart, to: weekEnd },
+  })
+  return reelListLines(receipt)
 }
 
 function cadenceOf(settings: ClientPackSettings | undefined): WeeklyPackCadence {

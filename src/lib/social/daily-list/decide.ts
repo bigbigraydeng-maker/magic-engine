@@ -68,11 +68,11 @@ async function excludeOne(ports: DecidePorts, clientId: string, onList: Map<stri
 
 export async function decideDailyList(
   ports: DecidePorts,
-  input: { clientId: string; adminEmail: string; switchOn: boolean; agentOn: boolean; approve: ApproveRequest[]; exclude: ExcludeRequest[]; dryRun: boolean; now: Date; requestId: string },
+  input: { clientId: string; adminEmail: string; switchOn: boolean; agentOn: boolean; approve: ApproveRequest[]; exclude: ExcludeRequest[]; dryRun: boolean; now: Date; requestId: string; window?: { from: string; to: string } },
 ): Promise<DecisionReceipt & { receipt_saved: boolean }> {
   // A practice run checks every publishing gate even while the switches are off; it still writes nothing.
   const gates = input.dryRun ? { switchOn: true, agentOn: true } : { switchOn: input.switchOn, agentOn: input.agentOn }
-  const list = await buildDailyList(ports, { clientId: input.clientId, now: input.now, ...gates })
+  const list = await buildDailyList(ports, { clientId: input.clientId, now: input.now, ...gates, window: input.window })
   const onList = new Map(list.items.map((i) => [i.work_order_id, i]))
   const excludeIds = new Set(input.exclude.map((e) => e.work_order_id))
   // The list id covers only submitted items that match the rebuilt list (same content and day, tickable).

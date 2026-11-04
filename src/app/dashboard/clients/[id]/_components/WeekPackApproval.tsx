@@ -4,9 +4,10 @@
  * 「批下一周」：给人看的句子。开关关闭时没有同意按钮，也不会去授权。
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { ReelGoPublicPreviewPanel, readFactCheck, type ReelGoPublicPreview } from '@/app/dashboard/factory/_components/PromoteReelButton'
+import { ReelListRows, defaultChecked, readReelList, type ReelListItem } from './ReelListRows'
 
 interface CardView {
   run_id: string
@@ -25,6 +26,7 @@ interface PackPage {
   success: true
   enabled: boolean
   reel_go_public: boolean
+  reel_scheduled?: boolean
   headline: string
   lines: string[]
   posts_line: string
@@ -69,6 +71,36 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
   const [note, setNote] = useState<string | null>(null)
   const [seen, setSeen] = useState<Record<string, string>>({})
   const [openPreview, setOpenPreview] = useState<(ReelGoPublicPreview & { work_order_id: string }) | null>(null)
+  const [weekReels, setWeekReels] = useState<{ publishHour: number; items: ReelListItem[] } | null>(null)
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const [reelsError, setReelsError] = useState<string | null>(null)
+  // Only the latest list request may write state (a slow first read must not overwrite a newer one).
+  const reelsSeq = useRef(0)
+
+  async function loadWeekReels() {
+    const seq = ++reelsSeq.current
+    setWeekReels(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/daily-list?scope=week`)
+      if (seq !== reelsSeq.current) return
+      if (res.status === 403) {
+        setReelsError('批视频要全局管理员：你这次点同意只会批 Story，视频不会批。')
+        return
+      }
+      const json: unknown = await res.json().catch(() => null)
+      if (seq !== reelsSeq.current) return
+      const parsed = readReelList(json)
+      if (!res.ok || parsed === null) {
+        setReelsError('下周的视频清单没读出来，不要当成没有视频。现在点同意只会批 Story，视频不会批；刷新后再批视频。')
+        return
+      }
+      setWeekReels({ publishHour: parsed.publishHour, items: parsed.items })
+      setChecked(defaultChecked(parsed.items))
+      setReelsError(null)
+    } catch {
+      if (seq === reelsSeq.current) setReelsError('下周的视频清单没读出来，不要当成没有视频。现在点同意只会批 Story，视频不会批；刷新后再批视频。')
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -83,18 +115,42 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
           return
         }
         setLoad({ kind: 'ready', page: json })
+        if (json.reel_scheduled === true) void loadWeekReels()
       } catch {
         if (!cancelled) setLoad({ kind: 'error', text: '整包这一栏读不到，请刷新。不要当成这一周没有内容。' })
       }
     })()
     return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientId])
+
+  function toggle(id: string) {
+    setChecked((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   async function send(action: 'confirm' | 'decline' | 'revoke', card: CardView | null) {
     setBusy(true)
     setNote(null)
     try {
-      const preview_tokens = Object.entries(seen).map(([work_order_id, preview_token]) => ({ work_order_id, preview_token }))
+      const reelScheduled = load.kind === 'ready' && load.page.reel_scheduled === true
+      const reel_approvals =
+        reelScheduled && action === 'confirm' && weekReels
+          ? weekReels.items
+              .filter((item) => checked.has(item.work_order_id) && item.selectable && item.fingerprint)
+              .map((item) => ({
+                work_order_id: item.work_order_id,
+                fingerprint: item.fingerprint,
+                publish_on: item.publish_on,
+              }))
+          : []
+      const preview_tokens = reelScheduled
+        ? []
+        : Object.entries(seen).map(([work_order_id, preview_token]) => ({ work_order_id, preview_token }))
       const res = await fetch(`/api/clients/${clientId}/week-pack`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -104,6 +160,7 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
           fingerprint: card?.fingerprint,
           expected_decision_id: card?.expected_decision_id,
           preview_tokens,
+          reel_approvals,
         }),
       })
       const json: unknown = await res.json().catch(() => null)
@@ -115,6 +172,7 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
       setLoad({ kind: 'ready', page: json })
       setSeen({})
       setOpenPreview(null)
+      if (json.reel_scheduled === true) void loadWeekReels()
     } catch {
       setNote('没点成，请刷新后再试。')
     } finally {
@@ -155,6 +213,11 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
   if (load.kind === 'error') return <section id="approve-week" className="rounded-2xl border border-[#8F2B22]/30 bg-white p-4 text-sm font-medium text-[#8F2B22]">{load.text}</section>
 
   const page = load.page
+  // While the list is still loading the click would send no reels and read as "send none": wait for it.
+  const reelsLoading = page.reel_scheduled === true && weekReels === null && reelsError === null
+  const checkedReelCount = weekReels
+    ? weekReels.items.filter((item) => checked.has(item.work_order_id) && item.selectable && item.fingerprint).length
+    : 0
   return (
     <section id="approve-week" className="space-y-3 rounded-2xl border border-black/10 bg-white p-4">
       <div>
@@ -176,36 +239,59 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
           {page.card.blocked_reason && <p className="text-[#8F2B22]">{page.card.blocked_reason}</p>}
         </div>
       )}
-      {page.reel_go_public && page.reels.length > 0 && (
-        <ul className="space-y-2">
-          {page.reels.map((reel) => (
-            <li key={reel.work_order_id} className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-me-charcoal">{reel.title}</span>
-              <button type="button" disabled={busy} onClick={() => void preview(reel.work_order_id)} className="rounded-lg border border-black/15 px-2 py-1 text-xs font-semibold">
-                {seen[reel.work_order_id] ? '已看过' : '先预览'}
-              </button>
-            </li>
-          ))}
-          {openPreview && (
-            <li>
-              <ReelGoPublicPreviewPanel
-                preview={openPreview}
-                actions={(
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      setSeen((current) => ({ ...current, [openPreview.work_order_id]: openPreview.preview_token }))
-                      setOpenPreview(null)
-                    }}
-                    className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                  >我看过了</button>
-                )}
-              />
-            </li>
+      {page.reel_scheduled ? (
+        <div className="space-y-2">
+          <h3 className="text-sm font-bold text-me-charcoal">下周的视频{weekReels ? `（${weekReels.items.length} 条）` : ''}</h3>
+          {reelsError && <p className="text-sm font-medium text-[#8F2B22]">{reelsError}</p>}
+          {weekReels === null && !reelsError && (
+            <p className="text-sm text-me-charcoal/70">正在读下周的视频。</p>
           )}
-          <li className="text-xs text-me-charcoal/70">看过公开内容之后，这条才会算预览过。还没看过的不会公开。预览只有几分钟，过了要再点一次。</li>
-        </ul>
+          {weekReels && weekReels.items.length === 0 && (
+            <p className="text-sm text-me-charcoal/70">下周还没有排了日子的视频。</p>
+          )}
+          {weekReels && weekReels.items.length > 0 && (
+            <ReelListRows
+              items={weekReels.items}
+              publishHour={weekReels.publishHour}
+              checked={checked}
+              onToggle={toggle}
+              disabled={busy}
+            />
+          )}
+          <p className="text-xs text-me-charcoal/70">勾上的视频会在各自那天 {weekReels?.publishHour ?? 18}:00 自动公开到主页；没勾的这一周不发。公开前可以在「已授权、还没公开」里撤回。</p>
+        </div>
+      ) : (
+        page.reel_go_public && page.reels.length > 0 && (
+          <ul className="space-y-2">
+            {page.reels.map((reel) => (
+              <li key={reel.work_order_id} className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-me-charcoal">{reel.title}</span>
+                <button type="button" disabled={busy} onClick={() => void preview(reel.work_order_id)} className="rounded-lg border border-black/15 px-2 py-1 text-xs font-semibold">
+                  {seen[reel.work_order_id] ? '已看过' : '先预览'}
+                </button>
+              </li>
+            ))}
+            {openPreview && (
+              <li>
+                <ReelGoPublicPreviewPanel
+                  preview={openPreview}
+                  actions={(
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setSeen((current) => ({ ...current, [openPreview.work_order_id]: openPreview.preview_token }))
+                        setOpenPreview(null)
+                      }}
+                      className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                    >我看过了</button>
+                  )}
+                />
+              </li>
+            )}
+            <li className="text-xs text-me-charcoal/70">看过公开内容之后，这条才会算预览过。还没看过的不会公开。预览只有几分钟，过了要再点一次。</li>
+          </ul>
+        )
       )}
       {page.receipt_lines.length > 0 && (
         <ul className="space-y-1 text-sm text-me-charcoal">
@@ -216,8 +302,8 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
       {page.enabled && (
         <div className="flex flex-wrap gap-2">
           {page.card && (
-            <button type="button" disabled={busy || !page.card.confirm_enabled} onClick={() => void send('confirm', page.card)} className="rounded-lg bg-me-ochre px-3 py-1.5 text-sm font-bold text-me-charcoal disabled:opacity-40">
-              同意这一周
+            <button type="button" disabled={busy || !page.card.confirm_enabled || reelsLoading} onClick={() => void send('confirm', page.card)} className="rounded-lg bg-me-ochre px-3 py-1.5 text-sm font-bold text-me-charcoal disabled:opacity-40">
+              {!page.reel_scheduled ? '同意这一周' : reelsError ? '同意这一周（只批 Story，视频这次不批）' : `同意这一周（视频 ${checkedReelCount} 条）`}
             </button>
           )}
           {page.card && (

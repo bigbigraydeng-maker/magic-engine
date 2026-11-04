@@ -54,7 +54,7 @@ function reelCheck(manifest: WeekPackManifest, reelGoPublic: boolean, scheduled 
   }
   if (!reelGoPublic) return { label: 'Reel', state: 'green', reason: '本版不在这里转公开' }
   if (scheduled) {
-    return { label: 'Reel', state: 'green', reason: '批了之后按每条的日子、在这位客户设定的发布时间（默认新西兰 18:00）公开；没预览或没排日子的不授权' }
+    return { label: 'Reel', state: 'green', reason: '只批下面勾上的视频；每条按它的日子、在这位客户设定的发布时间（默认新西兰 18:00）公开；没勾、没排日子的不授权' }
   }
   return { label: 'Reel', state: 'green', reason: '只会处理已经预览过的，没预览的单独拦住' }
 }

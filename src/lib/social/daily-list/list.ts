@@ -32,6 +32,8 @@ export interface DailyListItem {
   default_checked: boolean
   /** Shown next to a tickable item that needs a second look (e.g. revoked before). */
   note: string | null
+  /** Storage path of the finished video (the page turns it into a playable link). */
+  video_path: string | null
 }
 
 export interface DailyListPorts {
@@ -80,7 +82,8 @@ export function listBlock(input: { switchOn: boolean; agentOn: boolean }): strin
 
 async function toItem(ports: DailyListPorts, order: PromoteOrder, angle: unknown, block: string | null, revoked: Revoked | null): Promise<DailyListItem> {
   const publishOn = String(readPublishOn(order.brief))
-  const base = { work_order_id: order.id, title: reelTitle(angle), publish_on: publishOn }
+  const videoPath = typeof order.output.video_path === 'string' ? order.output.video_path : null
+  const base = { work_order_id: order.id, title: reelTitle(angle), publish_on: publishOn, video_path: videoPath }
   const ctx = await buildContext(ports.promote, order)
   if ('ok' in ctx) {
     return { ...base, caption: '', first_comment: '', fact_summary: null, fingerprint: null, selectable: false, blocked_reason: ctx.error, default_checked: false, note: null }
@@ -106,9 +109,10 @@ async function toItem(ports: DailyListPorts, order: PromoteOrder, angle: unknown
 /** Builds the list. Items whose gates fail are shown, never ticked, never auto-excluded. */
 export async function buildDailyList(
   ports: DailyListPorts,
-  input: { clientId: string; now: Date; switchOn: boolean; agentOn: boolean },
+  input: { clientId: string; now: Date; switchOn: boolean; agentOn: boolean; window?: { from: string; to: string } },
 ): Promise<{ from: string; to: string; items: DailyListItem[] }> {
-  const { from, to } = listWindow(input.now)
+  // Default: today..day after tomorrow (daily list). The week card passes its own week.
+  const { from, to } = input.window ?? listWindow(input.now)
   const orders = await ports.listDatedOrders(input.clientId, from, to)
   const items: DailyListItem[] = []
   for (const { order, angle } of orders) {
