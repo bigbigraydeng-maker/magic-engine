@@ -295,3 +295,130 @@ test('runVision rejects disallowed model', async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test.skipIf(!hasFfmpeg)('runVision stops on fatal 401', async () => {
+  const root = makeStudio();
+  try {
+    addVideo(root, 'f1', 8);
+    const fatal = Object.assign(new Error('unauthorized'), { status: 401 });
+    const client = fakeClient([fatal]);
+    const code = await runVision([root, '--budget-usd', '10'], { clientFactory: () => client });
+    expect(code).toBe(1);
+    const runs = readdirSync(join(root, '99_Catalog', 'vision-runs'));
+    const summary = JSON.parse(readFileSync(join(root, '99_Catalog', 'vision-runs', runs[0]), 'utf8'));
+    expect(summary.stopped_reason).toBe('provider_fatal');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(!hasFfmpeg)('runVision skips a stronger model result', async () => {
+  const root = makeStudio();
+  try {
+    const record = addVideo(root, 'g1', 8);
+    const recordSha = sha256File(join(root, '99_Catalog', 'asset-records', 'g1.json'));
+    const checksDir = join(root, '99_Catalog', 'vision-checks');
+    mkdirSync(checksDir, { recursive: true });
+    writeFileSync(join(checksDir, 'g1.json'), JSON.stringify({
+      status: 'ok', record_sha256: recordSha, asset_id: record.asset_id,
+      prompt_sha256: PROMPT_SHA, model: 'claude-sonnet-5-5',
+    }));
+    const client = fakeClient([]);
+    const code = await runVision([root, '--budget-usd', '10'], { clientFactory: () => client });
+    expect(code).toBe(0);
+    expect(client.calls.length).toBe(0);
+    const runs = readdirSync(join(root, '99_Catalog', 'vision-runs'));
+    const summary = JSON.parse(readFileSync(join(root, '99_Catalog', 'vision-runs', runs[0]), 'utf8'));
+    expect(summary.skipped_existing).toBe(1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(!hasFfmpeg)('runVision does not overwrite a good result with a failure', async () => {
+  const root = makeStudio();
+  try {
+    const record = addVideo(root, 'h1', 8);
+    const recordSha = sha256File(join(root, '99_Catalog', 'asset-records', 'h1.json'));
+    const checksDir = join(root, '99_Catalog', 'vision-checks');
+    mkdirSync(checksDir, { recursive: true });
+    const existing = {
+      status: 'ok', record_sha256: recordSha, asset_id: record.asset_id,
+      prompt_sha256: PROMPT_SHA, model: 'claude-haiku-5-5',
+    };
+    writeFileSync(join(checksDir, 'h1.json'), JSON.stringify(existing));
+    const overloaded = Object.assign(new Error('overloaded'), { status: 529 });
+    const client = fakeClient([overloaded]);
+    const code = await runVision(
+      [root, '--budget-usd', '10', '--model', 'claude-sonnet-5-5'],
+      { clientFactory: () => client },
+    );
+    expect(code).toBe(0);
+    expect(client.calls.length).toBe(1);
+    const onDisk = JSON.parse(readFileSync(join(checksDir, 'h1.json'), 'utf8'));
+    expect(onDisk.status).toBe('ok');
+    const runs = readdirSync(join(root, '99_Catalog', 'vision-runs'));
+    const summary = JSON.parse(readFileSync(join(root, '99_Catalog', 'vision-runs', runs[0]), 'utf8'));
+    expect(summary.kept_existing).toBe(1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(!hasFfmpeg)('runVision stops on total budget', async () => {
+  const root = makeStudio();
+  try {
+    addVideo(root, 'j1', 8);
+    const runsDir = join(root, '99_Catalog', 'vision-runs');
+    mkdirSync(runsDir, { recursive: true });
+    writeFileSync(join(runsDir, 'old.json'), JSON.stringify({ spent_usd: 9.9999 }));
+    const client = fakeClient([]);
+    const code = await runVision([root, '--budget-usd', '5'], { clientFactory: () => client });
+    expect(code).toBe(0);
+    expect(client.calls.length).toBe(0);
+    const runs = readdirSync(runsDir).filter((n) => n !== 'old.json');
+    const summary = JSON.parse(readFileSync(join(runsDir, runs[0]), 'utf8'));
+    expect(summary.stopped_reason).toBe('total_budget');
+    expect(summary.historical_spent_usd).toBe(9.9999);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(!hasFfmpeg)('runVision stops on provider_unstable', async () => {
+  const root = makeStudio();
+  try {
+    addVideo(root, 'k1', 8);
+    addVideo(root, 'k2', 8);
+    addVideo(root, 'k3', 8);
+    addVideo(root, 'k4', 8);
+    const err = () => Object.assign(new Error('overloaded'), { status: 529 });
+    const client = fakeClient([err(), err(), err(), err()]);
+    const code = await runVision([root, '--budget-usd', '10'], { clientFactory: () => client });
+    expect(code).toBe(0);
+    expect(client.calls.length).toBe(3);
+    const runs = readdirSync(join(root, '99_Catalog', 'vision-runs'));
+    const summary = JSON.parse(readFileSync(join(root, '99_Catalog', 'vision-runs', runs[0]), 'utf8'));
+    expect(summary.stopped_reason).toBe('provider_unstable');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(!hasFfmpeg)('provider_error result carries estimated cost', async () => {
+  const root = makeStudio();
+  try {
+    const record = addVideo(root, 'l1', 8);
+    const recordSha = sha256File(join(root, '99_Catalog', 'asset-records', 'l1.json'));
+    const err = Object.assign(new Error('overloaded'), { status: 529 });
+    const client = fakeClient([err]);
+    const result = await checkAsset({
+      record, recordSha, studioRoot: root, client, model: 'claude-haiku-5-5', v, now: 'now',
+    });
+    expect(result.error).toBe('provider_error');
+    expect(result.cost_estimated).toBe(true);
+    expect(result.cost_usd).toBe(reserveUsd('claude-haiku-5-5', 3, v));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

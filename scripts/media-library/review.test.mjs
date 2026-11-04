@@ -13,6 +13,7 @@ import {
   buildSelection,
   run,
 } from './review.mjs';
+import { PROMPT_SHA } from './vision-prompt.mjs';
 
 function makeStudio() {
   const root = mkdtempSync(join(tmpdir(), 'media-review-'));
@@ -65,6 +66,13 @@ function addCollection(root, assets) {
   );
 }
 
+function addCollectionWithMeta(root, meta, assets) {
+  writeFileSync(
+    join(root, '00_Inbox', 'industry-x', '2026-11-03_Batch', 'collection-record.json'),
+    JSON.stringify({ ...meta, assets }, null, 2) + '\n',
+  );
+}
+
 function addCollectionInBatch(root, batch, assets) {
   const dir = join(root, '00_Inbox', 'industry-x', batch);
   mkdirSync(dir, { recursive: true });
@@ -76,7 +84,14 @@ function addVision(root, assetId, recordSha, result, status = 'ok') {
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, assetId + '.json'),
-    JSON.stringify({ asset_id: assetId, record_sha256: recordSha, status, result }, null, 2) + '\n',
+    JSON.stringify({
+      asset_id: assetId,
+      record_sha256: recordSha,
+      status,
+      result,
+      prompt_sha256: PROMPT_SHA,
+      model: 'claude-haiku-5-5',
+    }, null, 2) + '\n',
   );
 }
 
@@ -481,6 +496,157 @@ test('buildSelection drops pairs whose recordSha differs from review', () => {
     const { review } = reviewOne(root, policy);
     const selection = buildSelection([{ record: entry.record, recordSha: '0'.repeat(64), review }]);
     expect(selection.assets).toEqual([]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('vision watermark yes or unsure is present_or_unsure and not eligible', () => {
+  for (const verdict of ['yes', 'unsure']) {
+    const root = makeStudio();
+    try {
+      const policy = loadPolicy();
+      addCollection(root, [cleanCollectionAsset()]);
+      const record = addRecord(root);
+      const records = readRecords(root);
+      const entry = records.find((r) => r.record.asset_id === record.asset_id);
+      addVision(root, record.asset_id, entry.recordSha, { ...cleanVision(), watermark: verdict });
+      const { review } = reviewOne(root, policy);
+      expect(review.watermark).toBe('present_or_unsure');
+      expect(review.eligible_portrait).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('vision children yes blocks eligibility', () => {
+  const root = makeStudio();
+  try {
+    const policy = loadPolicy();
+    addCollection(root, [cleanCollectionAsset()]);
+    const record = addRecord(root);
+    const records = readRecords(root);
+    const entry = records.find((r) => r.record.asset_id === record.asset_id);
+    addVision(root, record.asset_id, entry.recordSha, { ...cleanVision(), children: 'yes' });
+    const { review } = reviewOne(root, policy);
+    expect(review.human_reasons).toContain('vision_child');
+    expect(review.eligible_portrait).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('vision brand unsure is third_party_brand and not eligible', () => {
+  const root = makeStudio();
+  try {
+    const policy = loadPolicy();
+    addCollection(root, [cleanCollectionAsset()]);
+    const record = addRecord(root);
+    const records = readRecords(root);
+    const entry = records.find((r) => r.record.asset_id === record.asset_id);
+    addVision(root, record.asset_id, entry.recordSha, {
+      ...cleanVision(),
+      brand: { verdict: 'unsure', seen_text: '' },
+    });
+    const { review } = reviewOne(root, policy);
+    expect(review.brand).toBe('third_party_brand');
+    expect(review.eligible_portrait).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('vision file with old prompt_sha256 is invalid', () => {
+  const root = makeStudio();
+  try {
+    const policy = loadPolicy();
+    addCollection(root, [cleanCollectionAsset()]);
+    const record = addRecord(root);
+    const records = readRecords(root);
+    const entry = records.find((r) => r.record.asset_id === record.asset_id);
+    addVision(root, record.asset_id, entry.recordSha, cleanVision());
+    const file = join(root, '99_Catalog', 'vision-checks', record.asset_id + '.json');
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...parsed, prompt_sha256: 'old' }, null, 2) + '\n');
+    const { review } = reviewOne(root, policy);
+    expect(review.brand).toBe('unknown');
+    expect(review.watermark).toBe('unknown');
+    expect(review.eligible_portrait).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('vision file with disallowed model is invalid', () => {
+  const root = makeStudio();
+  try {
+    const policy = loadPolicy();
+    addCollection(root, [cleanCollectionAsset()]);
+    const record = addRecord(root);
+    const records = readRecords(root);
+    const entry = records.find((r) => r.record.asset_id === record.asset_id);
+    addVision(root, record.asset_id, entry.recordSha, cleanVision());
+    const file = join(root, '99_Catalog', 'vision-checks', record.asset_id + '.json');
+    const parsed = JSON.parse(readFileSync(file, 'utf8'));
+    writeFileSync(file, JSON.stringify({ ...parsed, model: 'gpt-4o' }, null, 2) + '\n');
+    const { review } = reviewOne(root, policy);
+    expect(review.brand).toBe('unknown');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('batch-level review_status hold phrase forces needs_human', () => {
+  const root = makeStudio();
+  try {
+    const policy = loadPolicy();
+    addCollectionWithMeta(root, { review_status: '待审核' }, [cleanCollectionAsset()]);
+    const { review } = reviewOne(root, policy);
+    expect(review.rights).toBe('needs_human');
+    expect(review.human_reasons).toContain('rights:intake_marked_pending');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('brand_or_alcohol_flags present is third_party_brand', () => {
+  const root = makeStudio();
+  try {
+    const policy = loadPolicy();
+    addCollection(root, [cleanCollectionAsset({
+      visible_third_party_logos: 'none',
+      brand_or_alcohol_flags: 'ZIM container',
+    })]);
+    const { review } = reviewOne(root, policy);
+    expect(review.brand).toBe('third_party_brand');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('selection entry for an image has null duration and new fields', () => {
+  const root = makeStudio();
+  try {
+    const policy = loadPolicy();
+    addCollection(root, [cleanCollectionAsset({ file_path: 'originals/clip.jpg' })]);
+    const record = addRecord(root, {
+      filename: 'clip.jpg', mime_type: 'image/jpeg', duration_seconds: undefined,
+      width: 1920, height: 1080, native_aspect: 'landscape',
+    });
+    const records = readRecords(root);
+    const entry = records.find((r) => r.record.asset_id === record.asset_id);
+    addVision(root, record.asset_id, entry.recordSha, cleanVision());
+    const { review } = reviewOne(root, policy, {
+      filename: 'clip.jpg', mime_type: 'image/jpeg', duration_seconds: undefined,
+      width: 1920, height: 1080, native_aspect: 'landscape',
+    });
+    const selection = buildSelection([{ record: entry.record, recordSha: entry.recordSha, review }]);
+    expect(selection.assets.length).toBe(1);
+    const asset = selection.assets[0];
+    expect(asset.duration_seconds).toBeNull();
+    expect(asset.vision_check_sha256).toBe(review.vision_check_sha256);
+    expect(asset.tags).toEqual(entry.record.tags);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

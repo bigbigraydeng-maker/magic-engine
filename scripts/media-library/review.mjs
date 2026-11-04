@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, rename
 import { join, resolve, dirname, basename } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { PROMPT_SHA } from './vision-prompt.mjs';
 
 export function sha256Bytes(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -25,6 +26,11 @@ export function readRecords(studioRoot) {
     });
 }
 
+function batchMeta(parsed) {
+  const { assets, ...batch } = parsed;
+  return batch;
+}
+
 export function indexCollections(studioRoot) {
   const index = new Map();
   const inbox = join(studioRoot, '00_Inbox');
@@ -43,10 +49,11 @@ export function indexCollections(studioRoot) {
         continue;
       }
       if (!parsed || !Array.isArray(parsed.assets)) continue;
+      const batch = batchMeta(parsed);
       for (const asset of parsed.assets) {
         if (!asset || typeof asset.source_url !== 'string') continue;
         const list = index.get(asset.source_url) ?? [];
-        list.push({ batchDir: batchDir.name, asset });
+        list.push({ batchDir: batchDir.name, asset, batch });
         index.set(asset.source_url, list);
       }
     }
@@ -72,12 +79,15 @@ function stringify(value) {
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-export function evidenceText(record, asset) {
+export function evidenceText(record, asset, batch) {
   const parts = [
     record.license_evidence,
     asset?.license_evidence,
     asset?.license_scope,
     asset?.review_status,
+    batch?.review_status,
+    batch?.license_scope,
+    batch?.license_evidence,
   ];
   return parts
     .filter((part) => part !== null && part !== undefined)
@@ -85,7 +95,7 @@ export function evidenceText(record, asset) {
     .join('\n');
 }
 
-export function rightsVerdict(record, asset, policy) {
+export function rightsVerdict(record, asset, policy, batch) {
   const reasons = [];
   let url;
   try {
@@ -105,8 +115,8 @@ export function rightsVerdict(record, asset, policy) {
   if (typeof record.license_evidence !== 'string' || !record.license_evidence.trim()) {
     reasons.push('no_license_evidence');
   }
-  const evidence = evidenceText(record, asset);
-  if (includesAny(evidence, rules.hold_phrases) || asset?.no_publish === true) {
+  const evidence = evidenceText(record, asset, batch);
+  if (includesAny(evidence, rules.hold_phrases) || asset?.no_publish === true || batch?.no_publish === true) {
     reasons.push('intake_marked_pending');
   }
   if (includesAny(evidence, rules.search_evidence_phrases)) {
@@ -115,8 +125,7 @@ export function rightsVerdict(record, asset, policy) {
   return { rights: reasons.length === 0 ? 'auto_approved_by_policy' : 'needs_human', reasons };
 }
 
-export function intakeBrand(asset, policy) {
-  const value = asset?.visible_third_party_logos ?? asset?.brand_or_alcohol_flags;
+function classifyBrandValue(value, policy) {
   if (value === undefined || value === null) return { state: 'unchecked', text: null };
   if (typeof value === 'string') {
     const trimmed = value.trim();
@@ -132,8 +141,27 @@ export function intakeBrand(asset, policy) {
   return { state: 'present', text: stringify(value) };
 }
 
-export function visionValid(vision, recordSha) {
-  return Boolean(vision && vision.status === 'ok' && vision.record_sha256 === recordSha && vision.result);
+export function intakeBrand(asset, policy) {
+  const fields = [
+    classifyBrandValue(asset?.visible_third_party_logos, policy),
+    classifyBrandValue(asset?.brand_or_alcohol_flags, policy),
+  ];
+  const present = fields.filter((f) => f.state === 'present');
+  if (present.length > 0) {
+    return { state: 'present', text: present.map((f) => f.text).join('; ') };
+  }
+  const none = fields.find((f) => f.state === 'none');
+  if (none) return { state: 'none', text: none.text };
+  return { state: 'unchecked', text: null };
+}
+
+export function visionValid(vision, recordSha, policy) {
+  return Boolean(
+    vision && vision.status === 'ok' && vision.record_sha256 === recordSha &&
+    vision.prompt_sha256 === PROMPT_SHA &&
+    policy.vision.allowed_models.includes(vision.model) &&
+    vision.result,
+  );
 }
 
 export function brandVerdict(intake, vision, valid) {
@@ -224,29 +252,12 @@ export function meOwnership(scope) {
   return scope === 'enterprise' ? 'client_exclusive' : 'industry_shared';
 }
 
-export function reviewAsset({ record, recordSha, match, vision, visionSha, policy, runId, now }) {
-  const asset = match.asset;
+function collectHumanReasons({ match, rightsResult, brand, watermark, people, quality }) {
   const human_reasons = [];
   if (match.error) human_reasons.push('collection_' + match.error);
-
-  const rightsResult = rightsVerdict(record, asset, policy);
   if (rightsResult.rights === 'needs_human') {
     for (const reason of rightsResult.reasons) human_reasons.push('rights:' + reason);
   }
-
-  const intake = intakeBrand(asset, policy);
-  const valid = visionValid(vision, recordSha);
-  const brand = brandVerdict(intake, vision, valid);
-  const watermark = watermarkVerdict(vision, valid);
-  const people = peopleVerdict(record, asset, vision, valid, policy);
-  const alcohol = alcoholFlag(record, asset, intake, policy);
-  const loc = locationVerdict(asset, policy);
-  const quality = qualityVerdict(record, asset, policy);
-
-  const restrictions = ['no_resale_as_is'];
-  if (people.people_present) restrictions.push('no_endorsement');
-  if (alcohol) restrictions.push('alcohol');
-
   if (brand === 'third_party_brand') human_reasons.push('brand_present');
   if (brand === 'unknown') human_reasons.push('brand_unknown');
   if (watermark === 'present_or_unsure') human_reasons.push('watermark');
@@ -255,10 +266,33 @@ export function reviewAsset({ record, recordSha, match, vision, visionSha, polic
   if (quality.portrait === 'hold:possible_derived_crop' || quality.landscape === 'hold:possible_derived_crop') {
     human_reasons.push('possible_derived_crop');
   }
+  return human_reasons;
+}
 
-  const base = rightsResult.rights === 'auto_approved_by_policy' &&
+function isEligibleBase({ rightsResult, brand, watermark, people, match }) {
+  return rightsResult.rights === 'auto_approved_by_policy' &&
     brand === 'none' && watermark === 'none' &&
     people.human_reasons.length === 0 && !match.error;
+}
+
+export function reviewAsset({ record, recordSha, match, vision, visionSha, policy, runId, now }) {
+  const asset = match.asset;
+  const batch = match.batch;
+  const rightsResult = rightsVerdict(record, asset, policy, batch);
+  const intake = intakeBrand(asset, policy);
+  const valid = visionValid(vision, recordSha, policy);
+  const brand = brandVerdict(intake, vision, valid);
+  const watermark = watermarkVerdict(vision, valid);
+  const people = peopleVerdict(record, asset, vision, valid, policy);
+  const alcohol = alcoholFlag(record, asset, intake, policy);
+  const loc = locationVerdict(asset, policy);
+  const quality = qualityVerdict(record, asset, policy);
+  const human_reasons = collectHumanReasons({ match, rightsResult, brand, watermark, people, quality });
+  const base = isEligibleBase({ rightsResult, brand, watermark, people, match });
+
+  const restrictions = ['no_resale_as_is'];
+  if (people.people_present) restrictions.push('no_endorsement');
+  if (alcohol) restrictions.push('alcohol');
 
   return {
     asset_id: record.asset_id,
@@ -282,8 +316,14 @@ export function reviewAsset({ record, recordSha, match, vision, visionSha, polic
     eligible_landscape: base && quality.landscape === 'ok',
     me_source: meSource(record.source),
     me_ownership: meOwnership(record.scope),
+    author_or_rightsholder: asset?.author_or_rightsholder ?? null,
     human_reasons,
   };
+}
+
+function selectionDuration(record) {
+  const mime = String(record.mime_type ?? '');
+  return mime.startsWith('video/') ? record.duration_seconds : null;
 }
 
 export function selectionEntry(record, review) {
@@ -300,7 +340,7 @@ export function selectionEntry(record, review) {
     mime_type: record.mime_type,
     width: record.width,
     height: record.height,
-    duration_seconds: record.duration_seconds,
+    duration_seconds: selectionDuration(record),
     native_aspect: record.native_aspect,
     eligible_portrait: review.eligible_portrait,
     eligible_landscape: review.eligible_landscape,
@@ -309,6 +349,10 @@ export function selectionEntry(record, review) {
     location_evidence: review.location_evidence,
     source_url: record.source_url,
     record_sha256: review.record_sha256,
+    vision_check_sha256: review.vision_check_sha256,
+    tags: record.tags ?? null,
+    size_bytes: record.size_bytes ?? null,
+    author_or_rightsholder: review.author_or_rightsholder,
   };
 }
 
