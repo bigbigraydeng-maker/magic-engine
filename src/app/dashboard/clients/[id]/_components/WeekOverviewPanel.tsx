@@ -23,6 +23,7 @@ import { buildTodoSummary } from '@/lib/social/week-overview/todo'
 
 import { ReelWorkGroups, StatusTag, TodoStrip } from './SocialDailyParts'
 import { WeekPackApproval } from './WeekPackApproval'
+import { ReelGrantsPanel } from './ReelGrantsPanel'
 
 const ROLE_LABEL: Record<string, string> = {
   inspiration: '灵感',
@@ -318,6 +319,7 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
       <TodoStrip summary={todo} />
       <SafetyBanner live={data.live} clientId={clientId} />
       <WeekPackApproval clientId={clientId} />
+      <ReelGrantsPanel clientId={clientId} />
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <ReelTile data={data} works={works} />
         <StoryTile data={data} now={now} />

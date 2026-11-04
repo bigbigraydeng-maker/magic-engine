@@ -27,6 +27,8 @@ export interface WeekPackPorts {
   accountLabel(clientId: string): Promise<string>
   cadence(): WeeklyPackCadence
   reelGoPublic: boolean
+  /** Card confirm arms a publish-on-its-day grant instead of publishing now. */
+  reelScheduled?: boolean
   issueCard(facts: CardFacts): Promise<ConfirmationCardView>
   decideCard(input: {
     runId: string
@@ -178,7 +180,7 @@ function gateClick(clicker: CardClicker, clientId: string, enabled: boolean): Fl
 
 async function factsFor(clientId: string, manifest: WeekPackManifest, ports: WeekPackPorts) {
   const accountLabel = await ports.accountLabel(clientId)
-  return buildWeekPackFacts({ manifest, accountLabel, reelGoPublic: ports.reelGoPublic })
+  return buildWeekPackFacts({ manifest, accountLabel, reelGoPublic: ports.reelGoPublic, reelScheduled: ports.reelScheduled })
 }
 
 function sameList(built: { fingerprint: string; digest: string; facts: CardFacts }, fingerprint: string): boolean {

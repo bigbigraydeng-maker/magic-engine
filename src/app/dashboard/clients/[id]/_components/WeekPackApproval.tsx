@@ -41,7 +41,7 @@ function asText(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() && !/[{}[\]]/.test(value) ? value : fallback
 }
 
-function readPreview(value: unknown): ReelGoPublicPreview | null {
+export function readPreview(value: unknown): ReelGoPublicPreview | null {
   if (!value || typeof value !== 'object') return null
   const row = value as Record<string, unknown>
   if (typeof row.preview_token !== 'string' || row.preview_token.length < 8) return null

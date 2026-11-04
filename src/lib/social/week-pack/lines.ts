@@ -11,7 +11,7 @@ export interface StoryAuthResult {
 
 export interface ReelPromoteResult {
   ok: boolean
-  code: 'reel_promoted' | 'reel_failed' | 'reel_forbidden' | 'skipped_switch_off' | 'preview_required' | 'first_comment_failed'
+  code: 'reel_promoted' | 'reel_scheduled' | 'reel_failed' | 'reel_forbidden' | 'skipped_switch_off' | 'preview_required' | 'first_comment_failed'
   text: string
 }
 

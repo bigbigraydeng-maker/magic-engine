@@ -12,7 +12,7 @@ import { createLiteServicePorts } from '@/lib/social/story-lite/ports'
 import type { LiteActor } from '@/lib/social/story-lite/types'
 import { handleWeekPackGet, handleWeekPackPost, parseWeekPackCommand } from '@/lib/social/week-pack/http'
 import { readClientPackSettings } from '@/lib/social/week-pack/load'
-import { readWeekPackEnv, reelGoPublicOnApproveEnabled, weeklyPackApprovalEnabled } from '@/lib/social/week-pack/switches'
+import { readWeekPackEnv, reelCardMode, weeklyPackApprovalEnabled } from '@/lib/social/week-pack/switches'
 import { createWeekPackPorts } from '@/lib/social/week-pack/wire'
 import { isUuid } from '@/lib/validation-utils'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -59,7 +59,7 @@ async function context(req: Request, clientId: string) {
     ok: true as const,
     ctx: {
       enabled: weeklyPackApprovalEnabled(env),
-      reelGoPublic: reelGoPublicOnApproveEnabled(env),
+      reelGoPublic: reelCardMode(env) !== 'off',
       configReadable: settings.configReadable,
       clientId,
       clicker,
