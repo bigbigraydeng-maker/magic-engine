@@ -125,6 +125,7 @@ function makeDeps(w: World): PromoteDeps {
       },
     },
     resolveTarget: async () => (w.target ? { ...w.target } : null),
+    loadFactSource: async () => ({ ok: false as const, reason: 'catalog_not_published' }),
     scanRedline: async (_c, _m, text) => (text.toLowerCase().includes(w.redlineWord) ? `命中红线: ${w.redlineWord}` : null),
     now: () => new Date(w.now),
     uuid: () => `00000000-0000-4000-8000-${String(++w.seq).padStart(12, '0')}`,
@@ -654,5 +655,147 @@ describe('books_written_at 章', () => {
     expect(auth().books_written_at).toBeUndefined()
     expect(String(auth().books_error)).toContain('没有命中任何行')
     expect(auth().needs_attention).toBe(true)
+  })
+})
+
+describe('发前团目录复核', () => {
+  const okSource = (version: number) => async () => ({ ok: true as const, catalogVersion: version, tours: [], aliasesByTourId: {} })
+
+  it('目录读不到 → 预览就拦(503),不碰 Meta 转公开', async () => {
+    deps = { ...deps, loadFactSource: async () => ({ ok: false as const, reason: 'load_failed' }) }
+    const r = await preview()
+    expect(!r.ok && r.status).toBe(503)
+    expect(err(r)).toContain('读不到团目录')
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('目录读取本身抛错 → 一样拦,不当成没问题', async () => {
+    deps = { ...deps, loadFactSource: async () => { throw new Error('db down') } }
+    const r = await preview()
+    expect(!r.ok && r.status).toBe(503)
+  })
+
+  it('没有已发布团目录的客户 → 不适用,照常预览,预览里写明', async () => {
+    const r = await preview()
+    expect(r.ok && r.kind === 'preview' ? r.data.fact_check?.verdict : '').toBe('not_applicable')
+  })
+
+  it('核对通过 → 预览带出目录版本', async () => {
+    deps = { ...deps, loadFactSource: okSource(13) }
+    const r = await preview()
+    expect(r.ok && r.kind === 'preview' ? r.data.fact_check?.catalog_version : null).toBe(13)
+  })
+
+  it('预览之后目录发了新版 → 确认被拒,要求重新预览', async () => {
+    deps = { ...deps, loadFactSource: okSource(13) }
+    const token = await tokenOf()
+    deps = { ...deps, loadFactSource: okSource(14) }
+    const r = await confirm(token)
+    expect(r.ok).toBe(false)
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('确认时目录读不到 → 不转公开', async () => {
+    const token = await tokenOf()
+    deps = { ...deps, loadFactSource: async () => ({ ok: false as const, reason: 'snapshot_read_failed' }) }
+    const r = await confirm(token)
+    expect(!r.ok && r.status).toBe(503)
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('已被人在 Facebook 上手动公开(只同步记录)→ 读不到目录也不拦同步,但发告警', async () => {
+    w.meta.published = true
+    deps = { ...deps, loadFactSource: async () => ({ ok: false as const, reason: 'load_failed' }) }
+    const r = await preview()
+    expect(r.ok && r.kind === 'preview' ? r.data.mode : '').toBe('sync_only')
+    expect(w.alerts.join('|')).toContain('团目录')
+  })
+
+  it('补发首评前也复核首评:目录读不到 → 不发首评', async () => {
+    w.commentError = new Error('comment boom')
+    await confirm(await tokenOf())
+    w.commentError = null
+    w.log.length = 0
+    deps = { ...deps, loadFactSource: async () => ({ ok: false as const, reason: 'load_failed' }) }
+    const r = await preview()
+    expect(r.ok).toBe(false)
+    expect(err(r)).toContain('首评')
+    expect(w.log).not.toContain('comment')
+  })
+})
+
+describe('发前团目录复核:真团对不上', () => {
+  const tour = (durationText: string) => ({
+    id: 't1', slug: 'tour', name: 'Acme Signature — Grand Tour', destination: 'china', tier: 'signature', title: null,
+    durationText, displayPriceText: null, highlights: [], inclusions: [], exclusions: [], singleSupplement: null,
+    soldOut: false, managesDepartures: false, isActive: true, departures: [],
+  })
+  const sourceWith = (durationText: string) => async () => ({ ok: true as const, catalogVersion: 13, tours: [tour(durationText)], aliasesByTourId: {} })
+  const CLAIM = '16 days in China with Acme'
+
+  function withCaption(caption: string): void {
+    const base = deps.store.loadOrder.bind(deps.store)
+    w.meta.description = caption
+    deps = {
+      ...deps,
+      store: {
+        ...deps.store,
+        async loadOrder(id: string) {
+          const o = await base(id)
+          return o ? { ...o, brief: { copy: { caption, endcard: { cta: 'Book now', url: 'https://example.com/tour' } } } } : o
+        },
+      },
+    }
+  }
+
+  it('片里写 16 天、目录是 19 天 → 预览 422,写明天数,不碰 Meta 转公开', async () => {
+    withCaption(CLAIM)
+    deps = { ...deps, loadFactSource: sourceWith('19 Days') }
+    const r = await preview()
+    expect(!r.ok && r.status).toBe(422)
+    expect(err(r)).toContain('天数')
+    expect(err(r)).toContain('重新预览')
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('同一条片:目录还是 16 天时放行,目录改成 19 天后确认被拦', async () => {
+    withCaption(CLAIM)
+    deps = { ...deps, loadFactSource: sourceWith('16 Days') }
+    const token = await tokenOf()
+    deps = { ...deps, loadFactSource: sourceWith('19 Days') }
+    const r = await confirm(token)
+    expect(!r.ok && r.status).toBe(422)
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('预览后目录只换了版本(核对仍通过)→ 确认要求重新预览,并说明可能是团目录变了', async () => {
+    withCaption(CLAIM)
+    deps = { ...deps, loadFactSource: sourceWith('16 Days') }
+    const token = await tokenOf()
+    deps = { ...deps, loadFactSource: async () => ({ ok: true as const, catalogVersion: 14, tours: [tour('16 Days')], aliasesByTourId: {} }) }
+    const r = await confirm(token)
+    expect(!r.ok && r.status).toBe(409)
+    expect(err(r)).toContain('团目录')
+  })
+
+  it('已被人手动公开且对不上 → 照样同步记录,但不发首评', async () => {
+    withCaption(CLAIM)
+    w.meta.published = true
+    deps = { ...deps, loadFactSource: sourceWith('19 Days') }
+    const r = await confirm(await tokenOf())
+    expect(r.ok && r.kind).toBe('synced')
+    expect(w.log).not.toContain('comment')
+    expect(auth().first_comment_status).toBe('failed')
+  })
+
+  it('补收尾(已公开、回执没写完)时首评对不上 → 回执照写,只是不发首评', async () => {
+    await confirm(await tokenOf())
+    w.row!.payload['promote_authorization'] = { ...auth(), status: 'meta_published_db_pending' }
+    w.log.length = 0
+    deps = { ...deps, loadFactSource: async () => ({ ok: false as const, reason: 'load_failed' }) }
+    const r = await confirm(await tokenOf())
+    expect(r.ok && r.kind).toBe('synced')
+    expect(w.log).not.toContain('comment')
+    expect(auth().status).toBe('consumed')
   })
 })

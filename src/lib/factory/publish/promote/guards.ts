@@ -63,13 +63,15 @@ export function computeFingerprint(input: {
   description: string
   firstComment: string
   approvedAt: string
+  catalogVersion?: number | null
 }): string {
-  const payload = [
+  const payload: (string | number)[] = [
     input.videoId,
     normalizeForCompare(input.description),
     normalizeForCompare(input.firstComment),
     input.approvedAt,
   ]
+  if (typeof input.catalogVersion === 'number') payload.push(input.catalogVersion)
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex')
 }
 

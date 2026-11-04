@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from 'react'
 
-import { ReelGoPublicPreviewPanel, type ReelGoPublicPreview } from '@/app/dashboard/factory/_components/PromoteReelButton'
+import { ReelGoPublicPreviewPanel, readFactCheck, type ReelGoPublicPreview } from '@/app/dashboard/factory/_components/PromoteReelButton'
 
 interface CardView {
   run_id: string
@@ -53,6 +53,7 @@ function readPreview(value: unknown): ReelGoPublicPreview | null {
     caption: text(row.caption),
     first_comment: text(row.first_comment),
     mode: text(row.mode),
+    fact_check: readFactCheck(row.fact_check),
   }
 }
 

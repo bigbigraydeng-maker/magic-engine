@@ -1,18 +1,17 @@
 import type { FactItem } from './fact-check'
-import { checkFacts } from './fact-check'
 import type { SocialFactSource } from './fact-aliases'
 import { groupVersions, type VersionRow } from './version-groups'
 import { planReelSchedule, type ScheduleCandidate, type ScheduledItem } from './schedule'
 import type { WriteReelScheduleArgs, WriteReelScheduleResult } from './schedule-writer'
 import { synthesizeWeeklyRecipe } from '@/lib/social/recipe/synthesize'
 import type { StageSignals } from '@/lib/social/recipe/stage'
-import { isoDate, nzCalendar, targetWeek } from '@/lib/social/week-pack/cadence'
+import { targetWeek } from '@/lib/social/week-pack/cadence'
 import { readApprovedAt, readPublishOn, reelTitle, selectReels, type ReelInput } from '@/lib/social/week-pack/manifest'
 import { toPublishedView } from '@/lib/factory/publish/publish-display'
 import { isAssetOnly } from '@/lib/factory/deliverable'
-import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
 import { APP_BASE } from '@/lib/pm-todo/binding-request-items'
 import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
+import { checkReelFacts, factCheckToday, reelOverlayOf, type OkFactSource } from './reel-facts'
 
 /** cron_run_logs.job_name for every receipt of the weekly loop (daily fan-out and per-client runs). */
 export const WEEKLY_LOOP_JOB = 'social-weekly-draft'
@@ -148,30 +147,6 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-function overlayOf(output: unknown): string | null {
-  if (!isRecord(output)) return null
-  const caption = output.caption
-  if (typeof caption !== 'string') return null
-  const trimmed = caption.trim()
-  return trimmed ? trimmed : null
-}
-
-function copyOf(brief: unknown): Record<string, unknown> {
-  if (!isRecord(brief)) return {}
-  const copy = brief.copy
-  return isRecord(copy) ? copy : {}
-}
-
-function endcardOf(copy: Record<string, unknown>): Record<string, unknown> {
-  const endcard = copy.endcard
-  return isRecord(endcard) ? endcard : {}
-}
-
-function linkUrlOf(endcard: Record<string, unknown>): string | null {
-  const url = endcard.url
-  return typeof url === 'string' && url.trim() ? url : null
-}
-
 export function readMaliang(output: unknown): { state: MaliangState; questions: string[] } {
   if (!isRecord(output)) return { state: 'missing', questions: [] }
   const check = output.maliang_check
@@ -292,7 +267,7 @@ function keepLatestVersions(
     id: c.row.id,
     created_at: c.row.created_at,
     brief: c.row.brief,
-    overlay: overlayOf(c.row.output),
+    overlay: reelOverlayOf(c.row.output),
   }))
   const { groups, ambiguous } = groupVersions(versionRows)
   counts.groups = groups.length
@@ -337,22 +312,12 @@ function pushExcluded(items: WeeklyLoopItem[], row: WeeklyLoopOrderRow, reason: 
 
 // ---------- step 4: fact check one ----------
 
-type OkSource = Extract<SocialFactSource, { ok: true }>
-
-function checkOne(c: Candidate, source: OkSource, today: string) {
-  const copy = copyOf(c.row.brief)
-  const endcard = endcardOf(copy)
-  const firstComment = buildReelFirstComment(endcard, c.row.id)
-  const fact = checkFacts({
-    texts: {
-      overlay: overlayOf(c.row.output),
-      caption: buildReelPostCaption(copy),
-      firstComment: firstComment?.text ?? null,
-    },
-    linkUrl: linkUrlOf(endcard),
-    tours: source.tours,
-    aliasesByTourId: source.aliasesByTourId,
-    catalogVersion: source.catalogVersion,
+function checkOne(c: Candidate, source: OkFactSource, today: string) {
+  const { result: fact } = checkReelFacts({
+    brief: c.row.brief,
+    output: c.row.output,
+    orderId: c.row.id,
+    source,
     today,
   })
   const maliang = readMaliang(c.row.output)
@@ -373,14 +338,14 @@ function exclusionOf(verdict: 'pass' | 'fail' | 'needs_human', maliang: MaliangS
 
 interface Reviewed {
   c: Candidate
-  fact: ReturnType<typeof checkFacts>
+  fact: ReturnType<typeof checkReelFacts>['result']
   productKey: string | null
   excluded: string | null
 }
 
 function reviewKept(
   kept: Candidate[],
-  source: OkSource,
+  source: OkFactSource,
   today: string,
   items: WeeklyLoopItem[],
   counts: WeeklyLoopCounts,
@@ -711,7 +676,7 @@ export async function runWeeklyLoop(
   input: RunWeeklyLoopInput,
 ): Promise<WeeklyLoopReceipt> {
   const week = targetWeek(input.now)
-  const today = isoDate(nzCalendar(input.now))
+  const today = factCheckToday(input.now)
   const counts = emptyCounts()
   const items: WeeklyLoopItem[] = []
   const errors: string[] = []

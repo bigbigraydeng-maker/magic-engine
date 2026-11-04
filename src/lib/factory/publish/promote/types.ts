@@ -2,7 +2,9 @@
 // 设计稿:docs/specs/2026-10-18-reel-promote-to-public-design-v0.2.md
 // 平台共享:不含客户名/工单 id;所有外部依赖(库、Meta、红线闸、时钟)走端口,便于不碰真账号地完整试跑。
 
+import type { SocialFactSource } from '@/lib/social/weekly-loop/fact-aliases'
 import type { PublishTarget, PublishedRef } from '../../types'
+import type { FactRecheckSummary } from './fact-recheck'
 
 /** 流量记录(flywheel_actions, action_type='factory_reel_publish')。 */
 export interface TrafficRow {
@@ -113,6 +115,8 @@ export interface PromoteDeps {
   resolveTarget(clientId: string): Promise<PublishTarget | null>
   /** 红线闸:返回 null = 放行,字符串 = 拦截原因(fail-closed)。 */
   scanRedline(clientId: string, masterBriefId: string, text: string): Promise<string | null>
+  /** Published tour catalog for the pre-publish fact re-check (same loader as the weekly loop). */
+  loadFactSource(clientId: string, today: string): Promise<SocialFactSource>
   now(): Date
   uuid(): string
   /** 加密级随机令牌(明文只回给点预览的管理员)。 */
@@ -142,6 +146,7 @@ export interface PreviewData {
   caption: string
   first_comment: string
   checklist_passed_at: string | null
+  fact_check?: FactRecheckSummary
 }
 
 export interface PromotedData {

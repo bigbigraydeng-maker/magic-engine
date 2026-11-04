@@ -161,6 +161,19 @@ export async function loadPublishedNameHistory(
   return { ok: true, versions }
 }
 
+export type PublishedCatalogPresence = { ok: true; present: boolean } | { ok: false }
+
+/**
+ * Whether this client has ever published a catalog (any row in the published table). Lets a caller tell
+ * "never published" apart from "published but the latest version cannot be read" — the second must never
+ * be treated as the first. Fails closed: a read error is `ok: false`.
+ */
+export async function hasPublishedCatalog(db: SupabaseClient, clientId: string): Promise<PublishedCatalogPresence> {
+  const res = await db.from('tour_catalog_published').select('version').eq('client_id', clientId).limit(1)
+  if (res.error) return { ok: false }
+  return { ok: true, present: rowsOf(res.data).length > 0 }
+}
+
 function namedTourOf(raw: unknown): Array<{ id: string; name: string; title: string | null }> {
   const tour = asRecord(raw)
   const id = asString(tour.id)
