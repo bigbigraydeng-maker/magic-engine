@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { loadWinnerBoard } from '@/lib/factory/winner-decision'
-import { confirmIsPmOnly, isGlobalAdminByEmail } from '@/lib/factory/winner-gate'
+import { isGlobalAdminByEmail, loadPmOnly } from '@/lib/factory/winner-gate'
 
 export const dynamic = 'force-dynamic'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -18,14 +18,12 @@ export async function GET(req: Request) {
   if (!access.ok) return NextResponse.json({ error: access.error, reason: access.reason }, { status: access.status })
 
   try {
-    const [winners, cfg] = await Promise.all([
-      loadWinnerBoard(supabaseAdmin, client),
-      supabaseAdmin.from('clients').select('factory_config').eq('id', client).maybeSingle(),
-    ])
-    if (cfg.error) throw new Error(cfg.error.message)
+    const [winners, pm] = await Promise.all([loadWinnerBoard(supabaseAdmin, client), loadPmOnly(supabaseAdmin, client)])
     return NextResponse.json({
       winners,
-      pm_only: confirmIsPmOnly(cfg.data?.factory_config ?? null),
+      pm_only: pm.pmOnly,
+      // 「只认 PM」已经生效（赢家行有标记），但客户配置里的开关没写上 → 界面标红，待办里出开发欠账
+      pm_only_unsynced: pm.pmOnly && !pm.configFlag,
       viewer_role: isGlobalAdminByEmail(access.user.email ?? '') ? 'magic_lab' : 'client_staff',
     })
   } catch (err) {

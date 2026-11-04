@@ -8,7 +8,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
 import { loadWinnerRow, recordWinnerDecision } from '@/lib/factory/winner-decision'
-import { confirmIsPmOnly, loadStaffEmails, PM_DECISIONS, type ConfirmerRole, type PmDecisionValue } from '@/lib/factory/winner-gate'
+import { loadPmOnly, loadStaffEmails, PM_DECISIONS, type ConfirmerRole, type PmDecisionValue } from '@/lib/factory/winner-gate'
 
 export const dynamic = 'force-dynamic'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -54,12 +54,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!row.ok) return NextResponse.json({ error: row.error }, { status: row.status })
   const clientId = row.data.client_id
 
-  const cfg = await supabaseAdmin.from('clients').select('factory_config').eq('id', clientId).maybeSingle()
-  if (cfg.error) return NextResponse.json({ error: cfg.error.message }, { status: 500 })
-
   let who: Confirmer
   try {
-    who = await resolveConfirmer(clientId, confirmIsPmOnly(cfg.data?.factory_config ?? null))
+    const { pmOnly } = await loadPmOnly(supabaseAdmin, clientId)
+    who = await resolveConfirmer(clientId, pmOnly)
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
   }

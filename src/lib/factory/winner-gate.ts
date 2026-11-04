@@ -1,7 +1,7 @@
 /**
  * 赢家闸：工厂只认「程序复核通过 + 有权的人点过认」的赢家（设计稿 2026-11-05 §3.3，第 1 刀）。
  *
- * 照赢家出片（pickWinner）只许拿 `loadUsableWinners` 的结果，不许各自查表。
+ * 照赢家出片（pickWinner）只许拿 `usableWinnerSlices` 的结果（evaluate.ts 读一次行、同一批行再算题材护栏），不许各自查表。
  * 判定是关闭即失败：缺键、解析失败、取值不在固定集合、复核不是 passed、确认人对不上 = 不可用。
  * （「别撞在跑赢家的题材」那道护栏不走这道闸，读全部 status=active 的行，见 evaluate.ts。）
  *
@@ -10,6 +10,8 @@
  *   pm_decision          = { decision, by, role, event_id, at }      最新一次人的决定（即确认回执）
  *   pm_decision_history  = PmDecision[]                              之前的决定，只追加
  *   cost_per_result + result_type                                    该广告组自己结果种类的单次成本
+ *   pm_only_required     = { by, at, reason }                         PM 推翻员工认过的赢家时随决定一起写（和决定同一次带锁写入）
+ * 「只认 PM」= 客户配置 winner_confirm_pm_only，或该客户任何一条赢家带 pm_only_required：员工确认的一律不算。
  * 确认人在读取时再核一次：magic_lab 必须是全局管理员；client_staff 必须在该客户的员工名单里。
  */
 
@@ -65,6 +67,8 @@ export interface PmDecision {
 export interface ConfirmerDirectory {
   isGlobalAdmin: (email: string) => boolean
   staffEmails: ReadonlySet<string>
+  /** 这个客户目前只认 PM：员工确认的一律判不可用（设计 §4「之后只认 PM」） */
+  pmOnly: boolean
 }
 
 export interface WinnerRow {
@@ -149,6 +153,7 @@ export function receiptMatches(winnerId: string, d: PmDecision, nowMs: number): 
 export function confirmerAuthorized(d: PmDecision, dir: ConfirmerDirectory): boolean {
   const email = d.by.toLowerCase().trim()
   if (d.role === 'magic_lab') return dir.isGlobalAdmin(email)
+  if (dir.pmOnly) return false
   return !dir.isGlobalAdmin(email) && dir.staffEmails.has(email)
 }
 
@@ -200,14 +205,31 @@ export async function loadStaffEmails(sb: SupabaseClient, clientId: string): Pro
   return out
 }
 
-export async function loadConfirmerDirectory(sb: SupabaseClient, clientId: string): Promise<ConfirmerDirectory> {
-  return { isGlobalAdmin: isGlobalAdminByEmail, staffEmails: await loadStaffEmails(sb, clientId) }
+/** 这个客户是不是只认 PM：客户配置的开关，或该客户任何一条赢家带 pm_only_required 标记。 */
+export function pmOnlyFrom(rows: readonly Pick<WinnerRow, 'performance'>[], factoryConfig: unknown): boolean {
+  if (confirmIsPmOnly(factoryConfig)) return true
+  return rows.some((r) => isRecord(r.performance) && isRecord(r.performance.pm_only_required))
 }
 
-/** 照赢家出片的唯一入口：只返回可用赢家，按结果种类分组、组内按单次成本从低到高。 */
-export async function loadUsableWinners(sb: SupabaseClient, clientId: string, now: Date = new Date()): Promise<WinnerSlice[]> {
-  const [rows, dir] = await Promise.all([loadWinnerRows(sb, clientId), loadConfirmerDirectory(sb, clientId)])
-  return usableWinnerSlices(rows, now.getTime(), dir)
+async function loadFactoryConfig(sb: SupabaseClient, clientId: string): Promise<unknown> {
+  const { data, error } = await sb.from('clients').select('factory_config').eq('id', clientId).maybeSingle()
+  if (error) throw new Error(`clients query failed: ${error.message}`)
+  return data?.factory_config ?? null
+}
+
+export async function loadConfirmerDirectory(
+  sb: SupabaseClient,
+  clientId: string,
+  rows: readonly Pick<WinnerRow, 'performance'>[],
+): Promise<ConfirmerDirectory> {
+  const [staffEmails, cfg] = await Promise.all([loadStaffEmails(sb, clientId), loadFactoryConfig(sb, clientId)])
+  return { isGlobalAdmin: isGlobalAdminByEmail, staffEmails, pmOnly: pmOnlyFrom(rows, cfg) }
+}
+
+/** 该客户当前是不是只认 PM（决定接口用；读不出就抛，调用方按拒绝处理）。 */
+export async function loadPmOnly(sb: SupabaseClient, clientId: string): Promise<{ pmOnly: boolean; configFlag: boolean }> {
+  const [rows, cfg] = await Promise.all([loadWinnerRows(sb, clientId), loadFactoryConfig(sb, clientId)])
+  return { pmOnly: pmOnlyFrom(rows, cfg), configFlag: confirmIsPmOnly(cfg) }
 }
 
 export function usableWinnerSlices(rows: readonly WinnerRow[], nowMs: number, dir: ConfirmerDirectory): WinnerSlice[] {

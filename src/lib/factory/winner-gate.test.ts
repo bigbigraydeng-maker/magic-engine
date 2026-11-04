@@ -4,6 +4,7 @@ import {
   confirmIsPmOnly,
   confirmerAuthorized,
   isGlobalAdminByEmail,
+  pmOnlyFrom,
   judgeWinner,
   shouldRevertToPmOnly,
   staffCannotOverride,
@@ -19,6 +20,7 @@ const AT = '2026-11-05T08:00:00.000Z'
 const DIR: ConfirmerDirectory = {
   isGlobalAdmin: (e) => e === 'pm@magiclab.nz',
   staffEmails: new Set(['lisa@ctstours.co.nz']),
+  pmOnly: false,
 }
 
 function decision(over: Partial<PmDecision> = {}): PmDecision {
@@ -82,7 +84,25 @@ describe('确认人名单', () => {
     expect(confirmerAuthorized(decision({ by: 'pm@magiclab.nz' }), {
       isGlobalAdmin: () => true,
       staffEmails: new Set(['pm@magiclab.nz']),
+      pmOnly: false,
     })).toBe(false)
+  })
+})
+
+describe('只认 PM：员工确认的一律不可用，Magic Lab 确认的不受影响', () => {
+  const PM_ONLY: ConfirmerDirectory = { ...DIR, pmOnly: true }
+  it('员工确认的赢家在 pmOnly 下不可用（confirmer_not_authorized）', () => {
+    expect(judgeWinner(row(ok), NOW, DIR)).toMatchObject({ usable: true })
+    expect(judgeWinner(row(ok), NOW, PM_ONLY)).toEqual({ usable: false, reason: 'confirmer_not_authorized' })
+  })
+  it('Magic Lab 确认的在 pmOnly 下照常可用', () => {
+    const r = row({ ...ok, pm_decision: decision({ by: 'pm@magiclab.nz', role: 'magic_lab' }) })
+    expect(judgeWinner(r, NOW, PM_ONLY).usable).toBe(true)
+  })
+  it('pmOnly 来自客户配置开关，或该客户任一条赢家的 pm_only_required 标记', () => {
+    expect(pmOnlyFrom([{ performance: {} }], { winner_confirm_pm_only: true })).toBe(true)
+    expect(pmOnlyFrom([{ performance: {} }, { performance: { pm_only_required: { by: 'pm@magiclab.nz' } } }], null)).toBe(true)
+    expect(pmOnlyFrom([{ performance: {} }, { performance: 'x' }], { auto_order_enabled: false })).toBe(false)
   })
 })
 

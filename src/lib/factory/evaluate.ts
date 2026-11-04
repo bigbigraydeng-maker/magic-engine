@@ -149,7 +149,7 @@ async function loadContext(
   // 照赢家出片只认程序复核通过 + 有权的人点过「认」的（winner-gate，关闭即失败）；
   // 题材防撞护栏仍看全部 status=active 的行，没认的赢家题材也照样避开。
   const winnerRows = await loadWinnerRows(supabaseAdmin, signal.client_id)
-  const winnerDir = await loadConfirmerDirectory(supabaseAdmin, signal.client_id)
+  const winnerDir = await loadConfirmerDirectory(supabaseAdmin, signal.client_id, winnerRows)
   const winners = usableWinnerSlices(winnerRows, now.getTime(), winnerDir)
   const winnerThemeGuards = winnerRows
     .filter((w) => w.status === 'active')

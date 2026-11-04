@@ -91,14 +91,14 @@ it('只认 PM 的客户有提示；复核中 / 不可用的不给按钮', async 
   await mount({
     winners: [
       { ...WINNER, id: 'a', state: 'needs_check', program_check: null },
-      { ...WINNER, id: 'b', state: 'unusable', reason: 'receipt_invalid', program_check: null },
+      { ...WINNER, id: 'b', state: 'unusable', reason: 'program_check_not_passed', program_check: null },
     ],
     pm_only: true,
     viewer_role: 'client_staff',
   })
   const text = document.body.textContent ?? ''
   expect(text).toContain('只有 Magic Lab 内部账号能点「认」')
-  expect(text).toContain('确认记录对不上，要重新认')
+  expect(text).toContain('程序复核没通过，现在不能用')
   expect(btn('认')).toBeUndefined()
   expect(btn('不认')).toBeUndefined()
 })
@@ -109,4 +109,38 @@ it('没有客户时不渲染', async () => {
     createRoot(div).render(<CurrentWinnerPanel clientId={null} />)
   })
   expect(div.innerHTML).toBe('')
+})
+
+it('客户设置里的「只认 PM」没写上 → 面板标红，说明这条已按只认 PM 处理', async () => {
+  await mount({ winners: [WINNER], pm_only: true, pm_only_unsynced: true, viewer_role: 'magic_lab' })
+  const text = document.body.textContent ?? ''
+  expect(text).toContain('「只认 PM」没有写进客户设置')
+  expect(text).toContain('请联系开发')
+})
+
+it('点不认后回执带 pm_only_failed → 面板标红', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: { method?: string }) => {
+      if (init?.method === 'POST') return { ok: true, status: 200, json: async () => ({ receipt: { by: 'pm@magiclab.example', pm_only_failed: true } }) }
+      return { ok: true, status: 200, json: async () => ({ winners: [{ ...WINNER, program_check: { state: 'passed', at: '2026-11-04T12:46:39.651Z', reason: null } }], pm_only: false, viewer_role: 'magic_lab' }) }
+    }),
+  )
+  const div = document.body.appendChild(document.createElement('div'))
+  await act(async () => {
+    createRoot(div).render(<CurrentWinnerPanel clientId="c1" />)
+  })
+  await flush()
+  await click(btn('不认'))
+  await flush()
+  expect(document.body.textContent).toContain('「只认 PM」没有写进客户设置')
+})
+
+it('认的记录对不上 / 确认人没权限 → 写明请 PM 重新认，并且给认按钮（真的能重新认）', async () => {
+  await mount({
+    winners: [{ ...WINNER, state: 'needs_confirm', reason: 'confirmer_not_authorized', program_check: { state: 'passed', at: '2026-11-04T12:46:39.651Z', reason: null } }],
+    pm_only: true, viewer_role: 'magic_lab',
+  })
+  expect(document.body.textContent).toContain('请 PM 重新认')
+  expect(btn('认')).toBeDefined()
 })

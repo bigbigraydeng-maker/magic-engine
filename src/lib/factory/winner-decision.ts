@@ -39,7 +39,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-export type PerformanceKey = 'pm_decision' | 'pm_decision_history' | 'program_check' | 'frames' | 'todo_pushes'
+export type PerformanceKey =
+  | 'pm_decision' | 'pm_decision_history' | 'pm_only_required' | 'program_check' | 'frames' | 'todo_pushes'
 
 /** 只改 performance 里指定的几段；updated_at 对不上 = 中间被改过，返回 409。 */
 export async function mergePerformance(
@@ -88,8 +89,11 @@ export interface DecisionReceipt {
   cost_usd: number
   event_sent: boolean
   event_error: string | null
-  /** PM 推翻员工认过的赢家 → 已把该客户改成只认 PM（设计稿 §4） */
-  pm_only_written: boolean
+  /** PM 推翻员工认过的赢家 → 这条赢家已带「只认 PM」标记（和决定同一次写入，必然生效） */
+  pm_only_marked: boolean
+  /** 同步写进客户配置开关；失败时 pm_only_failed=true（界面标红、待办里出开发欠账），标记照样生效 */
+  pm_only_config_written: boolean
+  pm_only_failed: boolean
   pm_only_error: string | null
 }
 
@@ -126,11 +130,15 @@ export async function recordWinnerDecision(sb: SupabaseClient, input: DecisionIn
     event_id: winnerDecisionEventId(row.id, input.decision, at),
     at,
   }
-  const written = await mergePerformance(sb, row, { pm_decision: decision, pm_decision_history: historyOf(row.performance, previous) }, at)
+  const revert = shouldRevertToPmOnly(previous, decision)
+  const patch: Partial<Record<PerformanceKey, unknown>> = {
+    pm_decision: decision,
+    pm_decision_history: historyOf(row.performance, previous),
+  }
+  if (revert) patch.pm_only_required = { by: decision.by, at, reason: 'pm_overturned_staff_approval', event_id: decision.event_id }
+  const written = await mergePerformance(sb, row, patch, at)
   if (!written.ok) return written
-  const pmOnly = shouldRevertToPmOnly(previous, decision)
-    ? await writePmOnly(sb, row, decision)
-    : { written: false, error: null }
+  const pmOnly = revert ? await writePmOnly(sb, row, decision) : { written: false, error: null }
   const sent = await emitDecisionEvent(row, decision, input.send ?? sendInngestEvent)
   return {
     ok: true,
@@ -145,27 +153,34 @@ export async function recordWinnerDecision(sb: SupabaseClient, input: DecisionIn
       cost_usd: 0,
       event_sent: sent === null,
       event_error: sent,
-      pm_only_written: pmOnly.written,
+      pm_only_marked: revert,
+      pm_only_config_written: pmOnly.written,
+      pm_only_failed: revert && !pmOnly.written,
       pm_only_error: pmOnly.error,
     },
   }
 }
 
-/** 把客户配置改成只认 PM：比对整份原配置再写（别处刚改过就不写，回执里说明）。 */
+/**
+ * 把「只认 PM」同步写进客户配置（设置页看得见的那个开关）。
+ * 🔴 不再把整份旧配置序列化塞进网址做比对：CTS 的配置约 4.9KB 含中文，编码后可能超长被网关拒，
+ *    而且拒了没人知道。这里读到什么就在那份上只加两个键再写回；clients 表没有 updated_at / 版本号，
+ *    真正的原子合并要新建数据库函数（迁移，A 级），记在后续事项。
+ * 失败不吞：返回 error，由调用方标 pm_only_failed。生效靠赢家行上的 pm_only_required 标记，不靠这里。
+ */
 async function writePmOnly(sb: SupabaseClient, row: WinnerRow, d: PmDecision): Promise<{ written: boolean; error: string | null }> {
   const { data, error } = await sb.from('clients').select('factory_config').eq('id', row.client_id).maybeSingle()
   if (error || !data) return { written: false, error: error?.message ?? 'client not found' }
   const cfg = isRecord(data.factory_config) ? data.factory_config : {}
+  if (cfg.winner_confirm_pm_only === true) return { written: true, error: null }
   const next = {
     ...cfg,
     winner_confirm_pm_only: true,
     winner_confirm_pm_only_receipt: { by: d.by, at: d.at, winner_id: row.id, event_id: d.event_id, reason: 'pm_overturned_staff_approval' },
   }
-  let update = sb.from('clients').update({ factory_config: next }).eq('id', row.client_id)
-  update = data.factory_config === null ? update.is('factory_config', null) : update.filter('factory_config', 'eq', JSON.stringify(data.factory_config))
-  const saved = await update.select('id')
+  const saved = await sb.from('clients').update({ factory_config: next }).eq('id', row.client_id).select('id')
   if (saved.error) return { written: false, error: saved.error.message }
-  if (!saved.data || saved.data.length !== 1) return { written: false, error: 'factory_config changed concurrently' }
+  if (!saved.data || saved.data.length !== 1) return { written: false, error: 'clients row not updated' }
   return { written: true, error: null }
 }
 
@@ -219,11 +234,14 @@ function text(v: unknown): string {
   return isRecord(v) && typeof v.description === 'string' ? v.description : ''
 }
 
+const REAUTHORIZABLE: ReadonlySet<WinnerUnusableReason> = new Set(['pm_decision_missing', 'receipt_invalid', 'confirmer_not_authorized'])
+
 export function boardStateOf(row: WinnerRow, nowMs: number, dir: ConfirmerDirectory): { state: WinnerBoardState; reason: WinnerUnusableReason | null } {
   const verdict = judgeWinner(row, nowMs, dir)
   if (verdict.usable) return { state: 'confirmed', reason: null }
   if (verdict.reason === 'program_check_missing') return { state: 'needs_check', reason: verdict.reason }
-  if (verdict.reason === 'pm_decision_missing') return { state: 'needs_confirm', reason: verdict.reason }
+  // 复核通过、但没人认 / 认的记录现在对不上或确认人已无资格：PM 可以（重新）认，所以都算「等你认」
+  if (REAUTHORIZABLE.has(verdict.reason)) return { state: 'needs_confirm', reason: verdict.reason }
   return { state: 'unusable', reason: verdict.reason }
 }
 
@@ -252,6 +270,7 @@ export function toBoardItem(row: WinnerRow, nowMs: number, dir: ConfirmerDirecto
 }
 
 export async function loadWinnerBoard(sb: SupabaseClient, clientId: string, now: Date = new Date()): Promise<WinnerBoardItem[]> {
-  const [rows, dir] = await Promise.all([loadWinnerRows(sb, clientId), loadConfirmerDirectory(sb, clientId)])
+  const rows = await loadWinnerRows(sb, clientId)
+  const dir = await loadConfirmerDirectory(sb, clientId, rows)
   return rows.filter((r) => r.status === 'active').map((r) => toBoardItem(r, now.getTime(), dir))
 }

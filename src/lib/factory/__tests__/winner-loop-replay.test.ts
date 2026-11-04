@@ -15,7 +15,7 @@ import type { DemandSignal, GateContext, WinnerSlice } from '../types'
 
 const NOW = Date.parse('2026-11-05T09:00:00Z')
 const AT = '2026-11-05T08:00:00.000Z'
-const DIR: ConfirmerDirectory = { isGlobalAdmin: (e) => e === 'pm@example.com', staffEmails: new Set() }
+const DIR: ConfirmerDirectory = { isGlobalAdmin: (e) => e === 'pm@example.com', staffEmails: new Set(), pmOnly: false }
 
 function signal(over: Partial<DemandSignal> = {}): DemandSignal {
   return {

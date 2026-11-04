@@ -45,6 +45,7 @@ interface WinnerItem {
 interface WinnersResponse {
   winners: WinnerItem[]
   pm_only: boolean
+  pm_only_unsynced: boolean
   viewer_role: Role
 }
 
@@ -52,10 +53,10 @@ const REASON_LABELS: Record<string, string> = {
   not_active: '已退役',
   performance_unreadable: '数据读不出',
   program_check_not_passed: '程序复核没通过，现在不能用',
-  confirmer_not_authorized: '点认的人已经没有这个权限，要重新认',
+  confirmer_not_authorized: '之前点认的人现在没有权限（或这个客户已改成只认 PM），请 PM 重新认',
   result_type_unknown: '不知道这条按什么结果算，没法比',
   pm_decision_rejected: '已被点了不认',
-  receipt_invalid: '确认记录对不上，要重新认',
+  receipt_invalid: '确认记录对不上，请 PM 重新认',
   cost_per_result_missing: '缺每个结果的成本，没法排序',
 }
 
@@ -156,6 +157,7 @@ function parseWinners(json: unknown): WinnersResponse | null {
   return {
     winners,
     pm_only: json.pm_only === true,
+    pm_only_unsynced: json.pm_only_unsynced === true,
     viewer_role: isRole(json.viewer_role) ? json.viewer_role : 'client_staff',
   }
 }
@@ -204,6 +206,9 @@ function StatusBadge({ winner }: { winner: WinnerItem }) {
       )}
       {winner.state === 'unusable' && (
         <span className="text-xs text-red-700">{reasonLabel(winner.reason)}</span>
+      )}
+      {winner.state === 'needs_confirm' && winner.reason !== 'pm_decision_missing' && (
+        <span className="text-xs text-amber-800">{reasonLabel(winner.reason)}</span>
       )}
     </div>
   )
@@ -279,7 +284,7 @@ function DecisionButtons({ submitting, onDecide }: DecisionButtonsProps) {
 
 interface WinnerCardProps {
   winner: WinnerItem
-  onDecided: (message: string) => void
+  onDecided: (message: string, pmOnlyFailed: boolean) => void
 }
 
 function WinnerCard({ winner, onDecided }: WinnerCardProps) {
@@ -298,8 +303,9 @@ function WinnerCard({ winner, onDecided }: WinnerCardProps) {
       })
       const json: unknown = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(readError(json, `提交失败 (${res.status})`))
-      const by = isRecord(json) && isRecord(json.receipt) ? readString(json.receipt.by) : null
-      onDecided(`已记下：${decision === 'approved' ? '认' : '不认'}，记录人 ${by ?? '（未知）'}`)
+      const receipt = isRecord(json) && isRecord(json.receipt) ? json.receipt : null
+      const by = receipt ? readString(receipt.by) : null
+      onDecided(`已记下：${decision === 'approved' ? '认' : '不认'}，记录人 ${by ?? '（未知）'}`, receipt?.pm_only_failed === true)
     } catch (e) {
       setError(e instanceof Error ? e.message : '提交失败')
     } finally {
@@ -351,6 +357,7 @@ export function CurrentWinnerPanel({ clientId }: { clientId: string | null }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [pmOnlyFailed, setPmOnlyFailed] = useState(false)
 
   const load = useCallback(async () => {
     if (!clientId) return
@@ -376,10 +383,12 @@ export function CurrentWinnerPanel({ clientId }: { clientId: string | null }) {
 
   if (!clientId) return null
 
-  const onDecided = (message: string) => {
+  const onDecided = (message: string, failed: boolean) => {
     setSuccess(message)
+    if (failed) setPmOnlyFailed(true)
     void load()
   }
+  const showUnsynced = pmOnlyFailed || data?.pm_only_unsynced === true
 
   return (
     <section id="current-winner" className="mt-8">
@@ -391,6 +400,12 @@ export function CurrentWinnerPanel({ clientId }: { clientId: string | null }) {
       {data?.pm_only && (
         <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
           这个客户目前只有 Magic Lab 内部账号能点「认」。
+        </p>
+      )}
+
+      {showUnsynced && (
+        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+          「只认 PM」没有写进客户设置（这条赢家本身已按只认 PM 处理），请联系开发
         </p>
       )}
 
