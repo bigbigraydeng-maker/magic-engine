@@ -19,7 +19,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AdDraft } from './ad-draft'
-import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind } from './ad-draft'
+import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind, adSetViews, allCreatives } from './ad-draft'
 import { draftNotYetBuildable } from './ad-draft-expansion'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
@@ -29,6 +29,7 @@ import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
 import { checkCreatedAsExpected } from './created-as-expected'
+import { checkMultiCreated, fetchMultiReadback, mergeMultiReports } from './draft-gate-multi'
 import {
   buildSpendActivationReceipt,
   type SpendActivationAuthority,
@@ -82,6 +83,11 @@ export interface DraftRecord {
   summary: string
   campaignId?: string
   adSetId?: string
+  /**
+   * 多个广告组的草稿记在这里，**不写 adSetId**：开投、go-live 卡都只认单个 adSetId，
+   * 没有它们就读不出 id、开不了——多组草稿不走「开」按钮，只能由 PM 点名到层逐层开。
+   */
+  adSetIds?: string[]
   adIds?: string[]
   findings?: LaunchFinding[]
   /** 买家会看到的每一句，原样存下来给人过目。 */
@@ -271,12 +277,14 @@ async function checkMinDailyBudget(
 ): Promise<{ error: string | null; checked: number | null }> {
   const min = await fetchAccountMinDailyBudget(deps.adAccountId, deps.accessToken)
   if (!min) return { error: null, checked: null }
-  const draftMinor = Math.round(draft.dailyBudget * 100)
+  // 多个广告组：每一组各自要够，按最低的那一组比。单组 = 草稿自己。
+  const lowest = adSetViews(draft).reduce((a, v) => (v.dailyBudget < a.dailyBudget ? v : a))
+  const draftMinor = Math.round(lowest.dailyBudget * 100)
   if (draftMinor >= min.minDailyBudgetMinor) return { error: null, checked: min.minDailyBudgetMinor }
   const shown = (min.minDailyBudgetMinor / 100).toFixed(2)
   return {
     checked: min.minDailyBudgetMinor,
-    error: `每天预算 ${draft.dailyBudget} ${min.currency} 低于这个广告账户 Meta 要求的最低日预算 ${shown} ${min.currency}，Meta 一定会拒收；请把日预算调到不低于 ${shown}。`,
+    error: `每天预算 ${lowest.dailyBudget} ${min.currency} 低于这个广告账户 Meta 要求的最低日预算 ${shown} ${min.currency}，Meta 一定会拒收；请把日预算调到不低于 ${shown}。`,
   }
 }
 
@@ -286,7 +294,7 @@ async function waitForTranscode(
   deps: CreateDraftDeps,
   now: () => number,
 ): Promise<string | null> {
-  const videoIds = draft.creatives.map((c) => c.videoId).filter((v): v is string => !!v)
+  const videoIds = [...new Set(allCreatives(draft).map((c) => c.videoId).filter((v): v is string => !!v))]
   if (videoIds.length === 0) return null
   const ready = await waitForVideoReady(
     videoIds,
@@ -298,7 +306,7 @@ async function waitForTranscode(
 
 /** 私信类型和任一创意带视频的草案有整次请求的时间预算（与 waitForTranscode 同口径）；其它沿用旧行为（不限）。 */
 function publishBudgetFor(draft: AdDraft, startedAt: number, now: () => number) {
-  const hasVideo = draft.creatives.some((c) => !!c.videoId)
+  const hasVideo = allCreatives(draft).some((c) => !!c.videoId)
   if (draft.kind !== 'messenger_conversation' && !hasVideo) return undefined
   return {
     stopWritingAt: startedAt + BUDGET.stopWritingMs,
@@ -345,6 +353,17 @@ function expectedFindings(
   )
 }
 
+/** 账本里记 Meta 对象编号的写法：多个广告组只记 adSetIds（不写 adSetId，见 `DraftRecord.adSetIds`）。 */
+function publishedIds(
+  draft: AdDraft,
+  published: PublishedDraft,
+): Pick<DraftRecord, 'campaignId' | 'adSetId' | 'adSetIds' | 'adIds'> {
+  if (Array.isArray(draft.adSets)) {
+    return { campaignId: published.campaignId, adSetIds: published.adSetIds, adIds: published.adIds }
+  }
+  return { campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds }
+}
+
 /** 回读不出来 ≠ 没问题。建都建出来了，但没人能保证它是干净的 —— 不进审批队列。 */
 async function blockedUnreadable(
   draft: AdDraft,
@@ -359,7 +378,7 @@ async function blockedUnreadable(
     redlinesChecked: base.redlinesChecked, redlinesSkipped: base.redlinesSkipped,
     minBudgetChecked: base.minBudgetChecked ?? null,
     audiencesChecked: base.audiencesChecked ?? null,
-    campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds,
+    ...publishedIds(draft, published),
   })
   return { actionId: id, status: 'blocked', summary: base.summary, findings: [], error }
 }
@@ -398,6 +417,7 @@ async function gateReadback(
   if (ctx.tooLateToRead) {
     return blockedUnreadable(draft, published, deps, ctx, '这次请求已经用掉太多时间，没来得及回读它的真实设置')
   }
+  if (Array.isArray(draft.adSets)) return gateReadbackMulti(draft, published, deps, ctx)
   const wantsExpected = draft.kind === 'messenger_conversation'
   const [rawAdSet, ads, campaignStatus] = await Promise.all([
     fetchAdSetReadback(published.adSetId, deps.accessToken),
@@ -424,6 +444,28 @@ async function gateReadback(
   return recordGate(draft, published, deps, ctx, merged, autoPause)
 }
 
+/** 多个广告组：逐组回读、逐组过已有的闸门，再加上「建出来的是不是我们要的」那一层，合成一份。 */
+async function gateReadbackMulti(
+  draft: AdDraft,
+  published: PublishedDraft,
+  deps: CreateDraftDeps,
+  ctx: GateContext,
+): Promise<CreateDraftOutcome> {
+  const rb = await fetchMultiReadback(draft, published, deps.accessToken)
+  if (!rb) return blockedUnreadable(draft, published, deps, ctx, '回读不到系列或某个广告组的真实设置')
+  const reports = rb.sets.map((s) => ({
+    setName: s.view.adSetName,
+    report: launchReportFor(s.view, deps, s.adSet, s.ads),
+  }))
+  const extra = checkMultiCreated(draft, rb, ctx.now())
+  const autoPause = extra.some((f) => f.code === 'not_paused')
+    ? await pausePublished(published, deps.accessToken, {
+        deadlineAt: ctx.startedAt + BUDGET.giveUpPauseMs, now: ctx.now,
+      })
+    : undefined
+  return recordGate(draft, published, deps, ctx, mergeMultiReports(reports, extra), autoPause)
+}
+
 async function recordGate(
   draft: AdDraft,
   published: PublishedDraft,
@@ -440,7 +482,7 @@ async function recordGate(
     (audienceSummary ? `\n\n${audienceSummary}` : '')
   const id = await record(deps.supabase, draft.clientId, {
     status, draft, summary: ctx.summary, readback,
-    campaignId: published.campaignId, adSetId: published.adSetId, adIds: published.adIds,
+    ...publishedIds(draft, published),
     findings: merged.findings,
     buyerWillSee: merged.buyerWillSee,
     redlinesChecked: ctx.redlinesChecked,
@@ -498,6 +540,12 @@ export async function approveDraft(
   }
   if (p.status !== 'awaiting_approval') {
     return { ok: false, error: `这条现在是「${p.status}」，只有等待批准的才能开` }
+  }
+  if (Array.isArray(p.adSetIds) && p.adSetIds.length > 0) {
+    return {
+      ok: false,
+      error: '这条草案有多个广告组，「开」按钮现在不能开它。多个广告组要由 PM 点名到层、逐层开，不走这个按钮。',
+    }
   }
   if (!p.campaignId || !p.adSetId || !p.adIds) {
     return { ok: false, error: '这条草案没记下 Meta 那边的 id，开不了' }

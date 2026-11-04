@@ -18,6 +18,7 @@ vi.mock('@/lib/meta/readback', () => ({
   fetchAdSetReadback: vi.fn(),
   fetchAdCreativesReadback: vi.fn(),
   fetchCampaignStatus: vi.fn(),
+  fetchCampaignReadback: vi.fn(),
   fetchAccountMinDailyBudget: vi.fn(),
 }))
 vi.mock('@/lib/meta/entity-settings', () => ({
@@ -29,7 +30,7 @@ vi.mock('@/lib/meta/asset-upload', () => ({
 }))
 
 import { publishDraftPaused, activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
-import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
+import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchCampaignReadback, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
 import { fetchCustomAudiences, fetchCustomAudienceById } from '@/lib/meta/entity-settings'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import {
@@ -48,6 +49,7 @@ const mActivate = vi.mocked(activatePublished)
 const mAdSet = vi.mocked(fetchAdSetReadback)
 const mCreatives = vi.mocked(fetchAdCreativesReadback)
 const mCampaignStatus = vi.mocked(fetchCampaignStatus)
+const mCampaignReadback = vi.mocked(fetchCampaignReadback)
 const mWait = vi.mocked(waitForVideoReady)
 const mMinBudget = vi.mocked(fetchAccountMinDailyBudget)
 const mAudiences = vi.mocked(fetchCustomAudiences)
@@ -126,7 +128,7 @@ const DRAFT: AdDraft = {
 }
 
 const OK_PUBLISH = {
-  ok: true as const, campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1'], orphans: [],
+  ok: true as const, campaignId: 'camp1', adSetId: 'as1', adSetIds: ['as1'], adIds: ['ad1'], orphans: [],
 }
 
 beforeEach(() => {
@@ -143,13 +145,14 @@ beforeEach(() => {
 })
 
 describe('createDraftForApproval — 扩展草稿先停下，不去建', () => {
-  it('多个广告组：不调用发布器，也不读受众、不读最低预算', async () => {
+  it('私信类型的多个广告组：发布器还不会建，不调用发布器，也不读受众、不读最低预算', async () => {
     const { sb } = fakeSupabase()
     mPublish.mockClear()
     mAudiences.mockClear()
     mMinBudget.mockClear()
     const r = await createDraftForApproval({
       ...DRAFT,
+      kind: 'messenger_conversation',
       adSetName: '',
       geoCountries: [],
       creatives: [],
@@ -520,7 +523,7 @@ const MSG: AdDraft = {
   ],
 }
 
-const MSG_PUBLISH = { ok: true as const, campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1', 'ad2'], orphans: [] }
+const MSG_PUBLISH = { ok: true as const, campaignId: 'camp1', adSetId: 'as1', adSetIds: ['as1'], adIds: ['ad1', 'ad2'], orphans: [] }
 const T0 = 1_000_000
 
 function messengerReadback(over: { adSet?: object; ads?: object[] } = {}) {
@@ -626,7 +629,7 @@ describe('createDraftForApproval — 私信类型', () => {
     expect(r.status).toBe('blocked')
     expect(r.findings.map((f) => f.code)).toContain('not_paused')
     expect(mPause).toHaveBeenCalledWith(
-      { campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1', 'ad2'], orphans: [], ok: true },
+      { campaignId: 'camp1', adSetId: 'as1', adSetIds: ['as1'], adIds: ['ad1', 'ad2'], orphans: [], ok: true },
       'tok',
       // 补暂停也有期限：从请求开始算 92 秒
       { deadlineAt: T0 + 92_000, now: expect.any(Function) },
@@ -1355,5 +1358,172 @@ describe('approveDraft — 开之前复核受众还在', () => {
     expect(r.ok).toBe(true)
     expect(mAdSet).not.toHaveBeenCalled()
     expect(mActivate).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 多个广告组（老曹拆组实验的臂 2：1 个系列 + 3 个组，日预算 9.5 / 10 / 10.5）
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DAY_MS = 86_400_000
+const MULTI_CREATIVE = { name: 'EN', primaryText: 'Shanghai & Beyond', headline: 'Sign up', imageHash: 'h1' }
+function multiSet(name: string, dailyBudget: number, over: Partial<AdDraft['adSets'] extends (infer T)[] | undefined ? T : never> = {}) {
+  return { name, dailyBudget, geoCountries: ['NZ'], ageMin: 35, ageMax: 65, creatives: [{ ...MULTI_CREATIVE, name: `${name} 广告` }], ...over }
+}
+const MULTI: AdDraft = {
+  kind: 'lead_form', clientId: 'c1', campaignName: '实验臂2', adSetName: '', dailyBudget: 30, durationDays: 14,
+  geoCountries: [], pageId: 'p1', leadFormId: 'f1', creatives: [], budgetMode: 'ad_set',
+  campaignSpendCapMinor: 42000,
+  adSets: [multiSet('组b', 9.5), multiSet('组c', 10), multiSet('组d', 10.5)],
+}
+const MULTI_PUBLISH = {
+  ok: true as const, campaignId: 'camp1', adSetId: 'as1', adSetIds: ['as1', 'as2', 'as3'],
+  adIds: ['ad1', 'ad2', 'ad3'], orphans: [],
+}
+const SET_BUDGET: Record<string, string> = { as1: '950', as2: '1000', as3: '1050' }
+
+/** 读回「全对」的样子；overrides 按组编号改坏。 */
+function multiReadbackGood(over: Record<string, Partial<{ status: string; daily_budget: string }>> = {}) {
+  mCampaignReadback.mockResolvedValue({ status: 'PAUSED', spendCap: '42000' })
+  mAdSet.mockImplementation(async (id: string) => ({
+    id, name: id, optimization_goal: 'LEAD_GENERATION', destination_type: 'ON_AD',
+    status: 'PAUSED', daily_budget: SET_BUDGET[id], end_time: new Date(T0 + 14 * DAY_MS).toISOString(),
+    targeting: { age_min: 35, age_max: 65, geo_locations: { countries: ['NZ'] } },
+    ...(over[id] ?? {}),
+  }))
+  mCreatives.mockImplementation(async (id: string) => [
+    { adId: `ad-${id}`, adName: `ad ${id}`, status: 'PAUSED', texts: ['Shanghai & Beyond'], leadFormId: 'f1' },
+  ])
+}
+
+describe('createDraftForApproval — 多个广告组', () => {
+  beforeEach(() => {
+    mPublish.mockResolvedValue(MULTI_PUBLISH)
+    mWait.mockResolvedValue({ ok: true })
+    mPause.mockResolvedValue({ ok: true, failed: [] })
+    multiReadbackGood()
+  })
+
+  it('全对 → 等批准；账本只记 adSetIds（不写 adSetId），每个组都读回过', async () => {
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MULTI, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPublish).toHaveBeenCalledTimes(1)
+    expect(mAdSet.mock.calls.map((c) => c[0]).sort()).toEqual(['as1', 'as2', 'as3'])
+    expect(inserted[0].adSetIds).toEqual(['as1', 'as2', 'as3'])
+    expect(inserted[0].adSetId).toBeUndefined()
+    expect(inserted[0].adIds).toEqual(['ad1', 'ad2', 'ad3'])
+  })
+
+  it('某个组的预算读回不对 → 拦下（blocked），不进审批队列', async () => {
+    multiReadbackGood({ as2: { daily_budget: '3000' } })
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MULTI, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('adset_budget_mismatch')
+    expect(inserted[0].status).toBe('blocked')
+  })
+
+  it('系列花费上限没落到 Meta → 拦下', async () => {
+    mCampaignReadback.mockResolvedValue({ status: 'PAUSED', spendCap: '0' })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(MULTI, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('spend_cap_mismatch')
+  })
+
+  it('某个组读回时不是暂停 → 拦下，并且补一刀暂停（全部组都在补暂停的名单里）', async () => {
+    multiReadbackGood({ as3: { status: 'ACTIVE' } })
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MULTI, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(mPause).toHaveBeenCalledTimes(1)
+    expect(mPause.mock.calls[0][0]).toMatchObject({ adSetIds: ['as1', 'as2', 'as3'] })
+    expect(inserted[0].autoPause).toEqual({ ok: true, failed: [] })
+  })
+
+  it('某个组读不到 → 拦下（读不到 ≠ 没问题），账本照样记下建出来的编号', async () => {
+    mAdSet.mockImplementation(async (id: string) => (id === 'as2' ? null : { id }))
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(MULTI, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(inserted[0].adSetIds).toEqual(['as1', 'as2', 'as3'])
+  })
+
+  it('最低日预算按「最低的那一个组」比：9.5 低于账户最低 → 不建', async () => {
+    mMinBudget.mockResolvedValue({ minDailyBudgetMinor: 1000, currency: 'NZD' })
+    const { sb } = fakeSupabase()
+    mPublish.mockClear()
+    const r = await createDraftForApproval(MULTI, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('9.5')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('受众写在第 2 个组上也要查（只看根会漏）：读不到受众列表 → 不建', async () => {
+    const withAudience: AdDraft = {
+      ...MULTI,
+      adSets: [
+        multiSet('组b', 9.5),
+        multiSet('组c', 10, {
+          audienceIds: ['2222222'],
+          expansion: { advantageAudience: false, customAudienceRelaxed: false, lookalikeRelaxed: false },
+        }),
+        multiSet('组d', 10.5),
+      ],
+    }
+    mAudiences.mockResolvedValue({ rows: [], complete: false, error: 'boom' } as unknown as Awaited<ReturnType<typeof fetchCustomAudiences>>)
+    const { sb } = fakeSupabase()
+    mPublish.mockClear()
+    const r = await createDraftForApproval(withAudience, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(mAudiences).toHaveBeenCalled()
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('客户禁用词出现在第 3 个组的文案里 → 不建（只看根的 creatives 会整个漏掉）', async () => {
+    const bad: AdDraft = {
+      ...MULTI,
+      adSets: [
+        multiSet('组b', 9.5),
+        multiSet('组c', 10),
+        multiSet('组d', 10.5, { creatives: [{ ...MULTI_CREATIVE, primaryText: 'We guarantee cheapest tours' }] }),
+      ],
+    }
+    const { sb } = fakeSupabase()
+    mPublish.mockClear()
+    const r = await createDraftForApproval(bad, deps(sb, { brandRedlines: ['cheapest'] }))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('cheapest')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('超过 5 个组 → 不建', async () => {
+    const six: AdDraft = {
+      ...MULTI, dailyBudget: 30,
+      adSets: ['a', 'b', 'c', 'd', 'e', 'f'].map((n) => multiSet(`组${n}`, 5)),
+    }
+    const { sb } = fakeSupabase()
+    mPublish.mockClear()
+    const r = await createDraftForApproval(six, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('5')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+})
+
+describe('approveDraft — 多个广告组的草案不能用「开」按钮', () => {
+  it('账本里记了 adSetIds 的草案：拒开，不调用任何 Meta 开启请求，也不改账本状态', async () => {
+    const rec: DraftRecord = {
+      status: 'awaiting_approval', draft: MULTI, summary: 's',
+      campaignId: 'camp1', adSetIds: ['as1', 'as2', 'as3'], adIds: ['ad1', 'ad2', 'ad3'],
+    }
+    const { sb, updated } = fakeSupabase(rec)
+    mActivate.mockClear()
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('多个广告组')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated).toHaveLength(0)
   })
 })

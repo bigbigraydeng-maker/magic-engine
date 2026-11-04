@@ -167,6 +167,8 @@ export interface AdDraft {
   budgetMode?: DraftBudgetMode
   /** 系列日预算（元）。`budgetMode === 'campaign'` 时必填，且要等于 `dailyBudget`。 */
   campaignDailyBudget?: number
+  /** 系列花费上限，账户币种最小单位（分）。不写 = 不设上限（和以前一样）。建系列时传给 Meta 的 spend_cap。 */
+  campaignSpendCapMinor?: number
   /** 多个广告组。不写 = 根上的字段就是那一个组。 */
   adSets?: AdDraftAdSet[]
   /** 单个广告组的扩量开关。多个广告组时写在每个组上。 */
@@ -491,6 +493,48 @@ export function describeDraft(d: AdDraft): string {
   // 这一步在 `validateDraft` 之前就会被调（账本的摘要），所以 kind 可能是请求体里的任何值。
   const what = isKnownDraftKind(d.kind) ? DRAFT_WHAT[d.kind] : '（不认识的广告类型）'
   const budget = d.budgetMode === 'campaign' ? '（系列预算）' : ''
-  const sets = Array.isArray(d.adSets) ? `，${d.adSets.length} 个广告组` : ''
+  const sets = Array.isArray(d.adSets)
+    ? `，${d.adSets.length} 个广告组（${d.adSets.map((s) => `${s.name} $${s.dailyBudget ?? '?'}`).join('、')}）`
+    : ''
   return `${what}，每天 $${d.dailyBudget}${budget}、跑 ${d.durationDays} 天，最多花 $${total}${sets}`
+}
+
+/**
+ * 一份草稿里每一个要建的广告组，压成「单组草稿」的样子 —— 建组、回读、受众检查都按这个形状走，
+ * 不需要各自再认一遍 `adSets`。没有 `adSets` 时就是它自己（一个元素）。
+ * 注意：多组时组预算缺失会变成 NaN，调用方必须先过 `validateDraft`，不要拿没验过的草稿来建。
+ */
+export function adSetViews(d: AdDraft): AdDraft[] {
+  if (!Array.isArray(d.adSets)) return [d]
+  return d.adSets.map((set) => ({
+    ...d,
+    adSets: undefined,
+    adSetName: set.name,
+    dailyBudget: set.dailyBudget ?? Number.NaN,
+    geoCountries: set.geoCountries,
+    geoCityKeys: set.geoCityKeys,
+    ageMin: set.ageMin,
+    ageMax: set.ageMax,
+    audienceIds: set.audienceIds,
+    excludedAudienceIds: set.excludedAudienceIds,
+    expansion: set.expansion,
+    creatives: set.creatives,
+    ctaType: set.ctaType,
+    urlTags: set.urlTags,
+    firstComment: set.firstComment,
+  }))
+}
+
+/** 所有广告组的所有创意（单组 = 根上的创意）。 */
+export function allCreatives(d: AdDraft): AdDraftCreative[] {
+  return adSetViews(d).flatMap((v) => v.creatives)
+}
+
+/** 所有广告组里出现过的包含 / 排除受众编号，各自去重。 */
+export function unionAudienceIds(d: AdDraft): { included: string[]; excluded: string[] } {
+  const views = adSetViews(d)
+  return {
+    included: [...new Set(views.flatMap((v) => v.audienceIds ?? []))],
+    excluded: [...new Set(views.flatMap((v) => v.excludedAudienceIds ?? []))],
+  }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { describeDraft, validateDraft, type AdDraft, type AdDraftAdSet } from '../ad-draft'
+import { adSetViews, allCreatives, describeDraft, unionAudienceIds, validateDraft, type AdDraft, type AdDraftAdSet } from '../ad-draft'
 import {
+  MAX_BUILDABLE_AD_SETS,
   draftNotYetBuildable,
   readPromoPhaseAdSets,
   reviewDraftAgainstCaps,
@@ -158,7 +159,7 @@ describe('扩展后的广告草稿', () => {
       dailyBudget: 15,
     })
     expect(validateDraft(sourced)).toEqual([])
-    expect(draftNotYetBuildable(sourced)).toContain('多个广告组')
+    expect(draftNotYetBuildable(sourced)).toContain('打开的受众扩量')
   })
 
   it('国家和城市同时填 → 拦', () => {
@@ -307,3 +308,86 @@ function promo(audienceRef: string) {
     }],
   }
 }
+
+describe('发布器现在能建的多广告组', () => {
+  it('留资类型、预算在组上、组数不超上限、扩量全关 → 能建', () => {
+    expect(draftNotYetBuildable(multi())).toBeNull()
+  })
+
+  it('看完视频类型也能建；私信类型的多个广告组仍不能建', () => {
+    expect(draftNotYetBuildable(multi({ kind: 'video_thruplay' }))).toBeNull()
+    expect(draftNotYetBuildable(multi({ kind: 'messenger_conversation' }))).toContain('多个广告组')
+  })
+
+  it(`超过 ${MAX_BUILDABLE_AD_SETS} 个组 → 不能建；刚好 ${MAX_BUILDABLE_AD_SETS} 个 → 能建`, () => {
+    const make = (n: number) => multi({
+      dailyBudget: n * 5,
+      adSets: Array.from({ length: n }, (_, i) => adSet({ name: `g${i}`, dailyBudget: 5 })),
+    })
+    expect(draftNotYetBuildable(make(MAX_BUILDABLE_AD_SETS))).toBeNull()
+    expect(draftNotYetBuildable(make(MAX_BUILDABLE_AD_SETS + 1))).toContain(`${MAX_BUILDABLE_AD_SETS}`)
+  })
+
+  it('系列预算（CBO）、打开的扩量、网址参数这些仍然不能建', () => {
+    expect(draftNotYetBuildable(multi({ budgetMode: 'campaign', campaignDailyBudget: 30 }))).toContain('系列预算')
+    expect(draftNotYetBuildable(multi({ adSets: [adSet({ expansion: { ...OFF, advantageAudience: true, source: 's' } })], dailyBudget: 15 }))).toContain('扩量')
+    expect(draftNotYetBuildable(multi({ adSets: [adSet({ urlTags: 'utm_medium=paid' })], dailyBudget: 15 }))).toContain('网址参数')
+  })
+
+  it('adSets 不是数组 → 不能建（不猜）', () => {
+    const bad = { ...multi(), adSets: 'oops' } as unknown as AdDraft
+    expect(draftNotYetBuildable(bad)).toContain('格式不对')
+  })
+})
+
+describe('系列花费上限 campaignSpendCapMinor', () => {
+  it('不写 → 不影响校验；写了正整数（分）→ 通过', () => {
+    expect(fields(multi())).not.toContain('campaignSpendCapMinor')
+    expect(fields(multi({ campaignSpendCapMinor: 42000 }))).not.toContain('campaignSpendCapMinor')
+  })
+
+  it('0、负数、小数、不是数字 → 拦', () => {
+    for (const bad of [0, -5, 420.5, Number.NaN]) {
+      expect(fields(multi({ campaignSpendCapMinor: bad }))).toContain('campaignSpendCapMinor')
+    }
+  })
+
+  it('比一天的预算还低（多半把元当成分）→ 拦', () => {
+    expect(fields(multi({ campaignSpendCapMinor: 420 }))).toContain('campaignSpendCapMinor')
+    expect(fields(multi({ campaignSpendCapMinor: 3000 }))).not.toContain('campaignSpendCapMinor')
+  })
+})
+
+describe('adSetViews / allCreatives / unionAudienceIds', () => {
+  it('单组草稿：视图就是它自己（同一个对象）', () => {
+    const single: AdDraft = { ...multi(), adSets: undefined, adSetName: 'a', geoCountries: ['NZ'], creatives: [creative()] }
+    expect(adSetViews(single)).toEqual([single])
+    expect(allCreatives(single)).toHaveLength(1)
+  })
+
+  it('多组草稿：每个组一份单组视图，带着自己的名字、预算、年龄、创意，且不再带 adSets', () => {
+    const d = multi({ adSets: [adSet({ name: 'g1', dailyBudget: 9.5, ageMin: 35 }), adSet({ name: 'g2', dailyBudget: 10.5 })], dailyBudget: 20 })
+    const views = adSetViews(d)
+    expect(views.map((v) => [v.adSetName, v.dailyBudget, v.ageMin])).toEqual([['g1', 9.5, 35], ['g2', 10.5, undefined]])
+    expect(views.every((v) => v.adSets === undefined)).toBe(true)
+    expect(views.every((v) => v.campaignName === 'lead campaign')).toBe(true)
+    expect(allCreatives(d)).toHaveLength(2)
+  })
+
+  it('受众编号取所有组的并集并去重', () => {
+    const d = multi({
+      adSets: [
+        adSet({ name: 'g1', audienceIds: ['1111111'], excludedAudienceIds: ['2222222'], expansion: OFF }),
+        adSet({ name: 'g2', audienceIds: ['1111111', '3333333'], expansion: OFF }),
+      ],
+    })
+    expect(unionAudienceIds(d)).toEqual({ included: ['1111111', '3333333'], excluded: ['2222222'] })
+  })
+
+  it('describeDraft 多组时列出每个组的名字和日预算', () => {
+    const text = describeDraft(multi({ adSets: [adSet({ name: 'g1', dailyBudget: 9.5 }), adSet({ name: 'g2', dailyBudget: 10.5 })], dailyBudget: 20 }))
+    expect(text).toContain('2 个广告组')
+    expect(text).toContain('g1 $9.5')
+    expect(text).toContain('g2 $10.5')
+  })
+})
