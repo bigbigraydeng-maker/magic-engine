@@ -241,7 +241,7 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
       )}
       {page.reel_scheduled ? (
         <div className="space-y-2">
-          <h3 className="text-sm font-bold text-me-charcoal">下周的视频（{weekReels?.items.length ?? 0} 条）</h3>
+          <h3 className="text-sm font-bold text-me-charcoal">下周的视频{weekReels ? `（${weekReels.items.length} 条）` : ''}</h3>
           {reelsError && <p className="text-sm font-medium text-[#8F2B22]">{reelsError}</p>}
           {weekReels === null && !reelsError && (
             <p className="text-sm text-me-charcoal/70">正在读下周的视频。</p>
