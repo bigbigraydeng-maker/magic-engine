@@ -123,7 +123,7 @@ export function createWeeklyLoopDbDeps(db: SupabaseClient): WeeklyLoopDeps {
     async loadClient(clientId: string): Promise<WeeklyLoopClient | null> {
       const { data, error } = await db
         .from('clients')
-        .select('id, name, industry, publishing_calendar_config')
+        .select('id, name, industry, plan_tier, publishing_calendar_config')
         .eq('id', clientId)
         .maybeSingle()
       if (error) throw new Error(`client_read_failed: ${error.message}`)
@@ -131,7 +131,7 @@ export function createWeeklyLoopDbDeps(db: SupabaseClient): WeeklyLoopDeps {
       const name = typeof data.name === 'string' ? data.name : ''
       const industry = typeof data.industry === 'string' ? data.industry : null
       const config = data.publishing_calendar_config ?? null
-      return { id: clientId, name, industry, config } satisfies WeeklyLoopClient
+      return { id: clientId, name, industry, config, planTier: data.plan_tier ?? null } satisfies WeeklyLoopClient
     },
 
     async loadOrders(
