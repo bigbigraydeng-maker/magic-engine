@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 
+import { kindCap, type PublishingQuota } from '@/lib/social/publishing-quota/parse'
 import type { OverviewReel, ReelVariety } from '@/lib/social/week-overview/build'
 import { REEL_QUERY_LIMIT, countReelWorks, describeVarietyAdvice, groupReelWorks, type ReelWork, type StatusKind } from '@/lib/social/week-overview/reel-works'
 import { buildReelTodoSummary } from '@/lib/social/week-overview/todo'
@@ -96,13 +97,14 @@ export function DailyPlanReelsPanel({ clientId }: { clientId: string }) {
           reels?: OverviewReel[]
           reels_error?: string | null
           reel_variety?: ReelVariety
-          quota?: { reel_per_week?: number | null } | null
+          quota?: Partial<PublishingQuota> | null
         }
         if (!res.ok || json.success !== true) return setLoad('error')
         setReels(Array.isArray(json.reels) ? json.reels : [])
         setReelsError(typeof json.reels_error === 'string' ? json.reels_error : null)
         setVariety(json.reel_variety ?? null)
-        setWeeklyQuota(typeof json.quota?.reel_per_week === 'number' ? json.quota.reel_per_week : null)
+        const reelCap = kindCap(json.quota, 'reel')
+        setWeeklyQuota(reelCap?.period === 'week' ? reelCap.count : null)
         setLoad('ready')
       } catch {
         if (!cancelled) setLoad('error')
