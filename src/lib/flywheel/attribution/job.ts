@@ -25,6 +25,7 @@ import {
   isSiteLevelUnattributable,
   resolveAttributionRouting,
 } from './outcome-identity'
+import { recordAdsFunnelCheck } from './ads-funnel-record'
 
 /**
  * Pass 1's default attribution window. Exported because the cron route must
@@ -374,21 +375,29 @@ async function upsertOutcome(row: Record<string, unknown>): Promise<void> {
 /**
  * Attribute one action at one window.
  *
- * Reconciliation runs ahead of both metric lookups on purpose: an action with
- * no baseline, or no measurement yet, returns early below, and reconciling only
- * on the success path would leave a deploy-window row unsigned for as long as
- * the action stays immature. (Codex P2, round 16 on PR #862.)
+ * Reconciliation runs first so an immature action is not left unsigned
+ * (Codex P2, round 16 on PR #862). The cost-per-lead funnel check may save a
+ * candidate lesson, but never replaces the temporal attribution outcome.
  */
 async function processAction(
   action: ActionRow,
   windowDays: number,
 ): Promise<ProcessActionResult> {
+  const reconcileErrors = await reconcileLegacyWindows(action.id, action.expected_metric)
+  const funnel = await recordAdsFunnelCheck(action, windowDays)
+  reconcileErrors.push(...funnel.errors)
+  return attributeExpectedMetric(action, windowDays, reconcileErrors)
+}
+
+async function attributeExpectedMetric(
+  action: ActionRow,
+  windowDays: number,
+  reconcileErrors: string[],
+): Promise<ProcessActionResult> {
   const { id, client_id, expected_metric, expected_delta, executed_at } = action
   const executedAt = new Date(executed_at)
   const windowEnd = new Date(executedAt)
   windowEnd.setDate(windowEnd.getDate() + windowDays)
-
-  const reconcileErrors = await reconcileLegacyWindows(id, expected_metric)
 
   const baseline = await latestMetricValue(
     client_id, expected_metric, { before: executedAt.toISOString() }, 'baseline',
