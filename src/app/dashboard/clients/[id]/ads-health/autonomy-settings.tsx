@@ -47,6 +47,22 @@ interface AdStrategyConfig {
   daily_budget_cap_cents: number | null
   autonomy_mode: AutonomyMode
   creative_pool: CreativePoolEntry[]
+  /** 自动止损开没开 / 是不是只演练；接口一直有返回，只用来如实写「现在实际做到哪步」 */
+  autopilot_enabled?: boolean
+  autopilot_dry_run?: boolean
+}
+
+/**
+ * 「自动调整」那一项实际做到哪一步。选项的字面意思比系统真做的多（PM 11-04 审计）：
+ * 止损只提交暂停申请、批了才停，演练时连申请都不交；加预算一律要 PM 本人批。
+ */
+export function autopilotTruth(c: Pick<AdStrategyConfig, 'autopilot_enabled' | 'autopilot_dry_run'>): string {
+  const stopLoss = c.autopilot_enabled !== true
+    ? '自动止损：没开'
+    : c.autopilot_dry_run !== false
+      ? '自动止损：演练中，只记下会停哪些组，不真停'
+      : '自动止损：发现白花钱的组会提交暂停申请，在「等你点头」里批了才停'
+  return `${stopLoss}；加预算：一律要 PM 本人批准，系统不会自己加`
 }
 
 interface CreativeLabel {
@@ -168,10 +184,12 @@ function CapField({
 function ModeField({
   draftMode,
   capUnset,
+  truth,
   onChange,
 }: {
   draftMode: AutonomyMode
   capUnset: boolean
+  truth: string
   onChange: (m: AutonomyMode) => void
 }) {
   return (
@@ -197,9 +215,10 @@ function ModeField({
             onChange={() => onChange('bounded_auto')}
             className="accent-me-ochre"
           />
-          在每天上限内自动调整预算 / 暂停广告（需要先设好上面的每天上限）
+          在每天上限内允许系统动钱（需要先设好上面的每天上限）
         </label>
       </div>
+      <p className="mt-1.5 text-xs text-gray-500">现在实际做到：{truth}</p>
     </div>
   )
 }
@@ -853,7 +872,7 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
           saving={saving}
         />
 
-        <ModeField draftMode={draftMode} capUnset={capUnset} onChange={setDraftMode} />
+        <ModeField draftMode={draftMode} capUnset={capUnset} truth={autopilotTruth(config)} onChange={setDraftMode} />
 
         <div>
           <span className="block text-sm font-medium text-gray-700">每个广告账户各自每天最多花多少</span>
