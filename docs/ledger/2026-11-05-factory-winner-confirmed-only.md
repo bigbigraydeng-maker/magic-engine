@@ -9,7 +9,7 @@ risk: B
 verify_by: 2026-11-12
 verify_how: "合并部署后打开 /dashboard/factory?client=c0000000-0000-0000-0000-000000000000#current-winner，看到当前赢家（上海团 18 秒价格开头那条）与状态「等你认」；今日待办出现一条「这条广告样板要不要认」；点「认」（勾看过截图）后状态变「已认」、今日待办那条消失、winner_structures.performance.pm_decision 有 by/role/event_id/at 回执"
 done_on: 2026-11-05
-done_ref: pr:pending
+done_ref: pr:3614
 ---
 
 第 1 刀：共享读取闸 `loadUsableWinners`（关闭即失败：没复核、没人认、回执对不上、缺单次成本都不用）；工厂挑赢家改按每个结果的成本；「认 / 不认」接口（PM 或该客户员工，回执记谁点的，PM 推翻一次的判定已备好）；工厂页「当前广告样板」一块；今日待办每客户最多一条、两周后不再提醒；Winner Intake 改为客户名精确唯一匹配。
