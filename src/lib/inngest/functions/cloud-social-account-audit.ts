@@ -37,6 +37,8 @@ export interface AuditTickReceipt {
   clients: ClientAuditReceipt[]
   failures: string[]
   no_publish: true
+  /** 'cron' = the weekly run for everyone; 'event' = a manual run for one client (the to-do must not mistake it for the weekly one). */
+  trigger: 'cron' | 'event'
 }
 
 type StepLike = GetStepTools<typeof inngest>
@@ -89,7 +91,7 @@ async function handleCron(deps: AccountAuditDeps, step: StepLike): Promise<Audit
       return { ids: [], error: message(e) }
     }
   })
-  const receipt: AuditTickReceipt = { kind: 'tick', status: listed.error ? 'list_failed' : 'done', as_of: asOf, clients: [], failures: listed.error ? [`list_failed: ${listed.error}`] : [], no_publish: true }
+  const receipt: AuditTickReceipt = { kind: 'tick', status: listed.error ? 'list_failed' : 'done', as_of: asOf, clients: [], failures: listed.error ? [`list_failed: ${listed.error}`] : [], no_publish: true, trigger: 'cron' }
   for (const id of listed.ids) receipt.clients.push(await auditOne(deps, step, id, asOf))
   receipt.failures.push(...failuresOf(receipt.clients))
   await finish(deps, step, started, receipt)
@@ -101,7 +103,7 @@ async function handleDue(deps: AccountAuditDeps, event: { data?: unknown }, step
   const data = isRecord(event.data) ? event.data : {}
   const clientId = typeof data.clientId === 'string' ? data.clientId : ''
   const asOf = typeof data.asOf === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data.asOf) ? data.asOf : NZ_DATE_FMT.format(deps.now())
-  const receipt: AuditTickReceipt = { kind: 'tick', status: 'done', as_of: asOf, clients: [], failures: [], no_publish: true }
+  const receipt: AuditTickReceipt = { kind: 'tick', status: 'done', as_of: asOf, clients: [], failures: [], no_publish: true, trigger: 'event' }
   if (!clientId) receipt.failures.push('invalid_event: clientId missing')
   else receipt.clients.push(await auditOne(deps, step, clientId, asOf))
   receipt.failures.push(...failuresOf(receipt.clients))

@@ -181,17 +181,20 @@ function d3(reels: readonly AuditReel[], t: AuditThresholds): MetricResult {
   return { key: 'D3', label, status: crowded > 0 ? 'over' : 'ok', value: `${crowded} 组改版在 ${t.maxVariantsPerGroupWithinDays} 天内成批出现`, threshold }
 }
 
-function d4(reels: readonly AuditReel[], now: string, t: AuditThresholds): { metric: MetricResult; missing: string[] } {
+function d4(reels: readonly AuditReel[], now: string, t: AuditThresholds): { metric: MetricResult; missing: string[]; unknown: number } {
   const label = '形式覆盖'
   const threshold = `${t.formatLookbackDays} 天内至少各有 1 条：${t.requiredFormats.join(' / ')}`
   const from = dayNumber(now) - t.formatLookbackDays
   const win = reels.filter((r) => dayNumber(r.createdOn) >= from)
   const present = new Set(win.map(inferFormat).filter((f): f is string => f !== null))
   if (win.length === 0 || win.every((r) => inferFormat(r) === null)) {
-    return { metric: notMeasured('D4', label, threshold, '看不出这些片是什么形式'), missing: [] }
+    return { metric: notMeasured('D4', label, threshold, '看不出这些片是什么形式'), missing: [], unknown: win.length }
   }
   const missing = t.requiredFormats.filter((f) => !present.has(f))
-  return { metric: { key: 'D4', label, status: missing.length > 0 ? 'over' : 'ok', value: missing.length > 0 ? `缺：${missing.join('、')}` : '都有', threshold }, missing }
+  // Untagged reels might be exactly the missing form: say so instead of declaring it absent.
+  const unknown = win.filter((r) => inferFormat(r) === null).length
+  const hedge = missing.length > 0 && unknown > 0 ? `（另有 ${unknown} 条没标形式，可能就是）` : ''
+  return { metric: { key: 'D4', label, status: missing.length > 0 ? 'over' : 'ok', value: missing.length > 0 ? `缺：${missing.join('、')}${hedge}` : '都有', threshold }, missing, unknown }
 }
 
 function d5(reels: readonly AuditReel[], now: string, t: AuditThresholds): MetricResult {
@@ -216,7 +219,7 @@ function d6(recent: readonly AuditReel[], t: AuditThresholds): MetricResult {
   return { key: 'D6', label, status: share > t.maxVisualSignatureShare ? 'over' : 'ok', value: `${sig} 占 ${pct(share)}`, threshold }
 }
 
-function findingsFor(metrics: readonly MetricResult[], missingForms: readonly string[]): Finding[] {
+function findingsFor(metrics: readonly MetricResult[], missingForms: readonly string[], unknownForms: number): Finding[] {
   const out: Finding[] = []
   for (const m of metrics) {
     if (m.status === 'over' && ['D1', 'D2', 'D3', 'D6'].includes(m.key)) {
@@ -227,10 +230,13 @@ function findingsFor(metrics: readonly MetricResult[], missingForms: readonly st
         const canMake = FORMS_FACTORY_CAN_MAKE.has(form)
         out.push({
           key: 'D4', tier: canMake ? 'B' : 'C',
-          what: `账号缺「${form}」这一类内容`,
+          what: `账号缺「${form}」这一类内容${unknownForms > 0 ? `（另有 ${unknownForms} 条没标形式，可能就是）` : ''}`,
           how: canMake ? '按工厂现有模板给这一类下一张单。' : '工厂还没有这一类的模板，或需要客户提供素材：开发卡 / 客户侧任务。',
         })
       }
+    }
+    if (m.key === 'D4' && m.status === 'over' && unknownForms > 0) {
+      out.push({ key: 'D4', tier: 'C', what: `有 ${unknownForms} 条片没标内容形式，「缺哪一类」量不准`, how: '给这几条片补上内容形式标签（风景 / 真人 / 干货），自检才能说准账号到底缺什么。' })
     }
     if (m.status === 'not_measured') {
       out.push({ key: m.key, tier: 'C', what: `${m.label}量不出来：${m.value}`, how: '补上工单里缺的字段（形式 / 内容柱 / 模板），否则这一项永远看不见。' })
@@ -251,5 +257,5 @@ export function auditAccount(reels: readonly AuditReel[], asOf: string, t: Audit
   const recent = sorted.slice(0, t.recentWindow)
   const four = d4(sorted, asOf, t)
   const metrics = [d1(recent, t), d2(sorted, asOf, t), d3(sorted, t), four.metric, d5(sorted, asOf, t), d6(recent, t)]
-  return { asOf, reelCount: sorted.length, metrics, findings: findingsFor(metrics, four.missing) }
+  return { asOf, reelCount: sorted.length, metrics, findings: findingsFor(metrics, four.missing, four.unknown) }
 }

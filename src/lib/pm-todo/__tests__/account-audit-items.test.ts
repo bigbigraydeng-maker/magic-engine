@@ -97,6 +97,16 @@ describe('pushAccountAuditItems', () => {
     expect(items[0].what).toContain('没拿到客户名单')
   })
 
+  it('the weekly run could not list clients, then someone ran one client by hand: the back-office item still shows', async () => {
+    const { db } = fakeDb([
+      run([receipt({ client_id: 'c9' })], { trigger: 'event', started_at: '2026-11-10T01:00:00Z' }),
+      run([], { status: 'list_failed', trigger: 'cron' }),
+    ])
+    const items: ManualItem[] = []
+    await pushAccountAuditItems(db, items, (id) => id, NOW)
+    expect(items.map((i) => i.client_id).sort()).toEqual(['c9', 'infra'])
+  })
+
   it('no receipt in the last 8 days → nothing; an unreadable log → one back-office item', async () => {
     const empty: ManualItem[] = []
     await pushAccountAuditItems(fakeDb([]).db, empty, (id) => id, NOW)

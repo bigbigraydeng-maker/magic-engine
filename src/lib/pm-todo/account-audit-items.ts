@@ -85,7 +85,8 @@ export async function pushAccountAuditItems(supabase: SupabaseClient, items: Man
       .limit(20)
     if (error) throw new Error(error.message)
     const rows = (Array.isArray(data) ? data : []).map((r) => (isRecord(r) ? r.summary : null)).filter(isRecord)
-    if (rows[0]?.status === 'list_failed') items.push(infraItem('社媒账号自检这周没拿到客户名单，所有客户都没量过，不要当成没问题。'))
+    // The weekly run decides this: a later manual run for one client must not hide that the weekly run never got its client list.
+    if (rows.find((r) => r.trigger !== 'event')?.status === 'list_failed') items.push(infraItem('社媒账号自检这周没拿到客户名单，所有客户都没量过，不要当成没问题。'))
     const seen = new Set<string>()
     for (const summary of rows) {
       for (const c of Array.isArray(summary.clients) ? summary.clients : []) {

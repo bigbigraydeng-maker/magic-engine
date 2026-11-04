@@ -45,7 +45,7 @@ describe('social account audit function', () => {
   it('cron audits every client in the loop, writes one receipt row, never publishes', async () => {
     const d = deps()
     const out = await handler(createAccountAuditFunction(d))({ event: { name: 'inngest/scheduled.timer', data: {} }, step: step() })
-    expect(out).toMatchObject({ status: 'done', as_of: '2026-11-09', no_publish: true, failures: [] })
+    expect(out).toMatchObject({ status: 'done', as_of: '2026-11-09', no_publish: true, failures: [], trigger: 'cron' })
     expect(out.clients.map((c) => c.client_id)).toEqual(['c1', 'c2'])
     expect(d.finishRun).toHaveBeenCalledTimes(1)
     const fin = vi.mocked(d.finishRun).mock.calls[0][0]
@@ -72,6 +72,7 @@ describe('social account audit function', () => {
   it('a manual event audits just that client, with an optional date', async () => {
     const d = deps()
     const out = await handler(createAccountAuditFunction(d))({ event: { name: ACCOUNT_AUDIT_EVENT, data: { clientId: 'c9', asOf: '2026-11-05' } }, step: step() })
+    expect(out).toMatchObject({ trigger: 'event' })
     expect(out.clients.map((c) => c.client_id)).toEqual(['c9'])
     expect(out.as_of).toBe('2026-11-05')
     expect(d.listClients).not.toHaveBeenCalled()

@@ -75,6 +75,16 @@ describe('auditAccount', () => {
     expect(d4[0].what).toContain('destination')
   })
 
+  it('untagged reels might be the missing form: say so, and ask for tags, instead of declaring it absent', () => {
+    const reels = [reel('a', '2026-10-20'), reel('up', '2026-10-21', { template: null, engine: 'external_upload', music: 'u.mp3' })]
+    const r = auditAccount(reels, '2026-10-30')
+    const d4 = r.metrics.find((m) => m.key === 'D4')
+    expect(d4?.status).toBe('over')
+    expect(d4?.value).toContain('另有 1 条没标形式，可能就是')
+    expect(r.findings.some((f) => f.key === 'D4' && f.tier === 'C' && f.what.includes('没标内容形式'))).toBe(true)
+    expect(r.findings.filter((f) => f.key === 'D4' && f.what.startsWith('账号缺')).every((f) => f.what.includes('可能就是'))).toBe(true)
+  })
+
   it('industry thresholds can be overridden per client', () => {
     const reels = ['a', 'a', 'b', 'b'].map((tpl, i) => reel(`r${i}`, `2026-10-${20 + i}`, { template: tpl }))
     const strict = auditAccount(reels, '2026-10-30', { ...TRAVEL_THRESHOLDS, maxTemplateShare: 0.4, maxSameTemplateRun: 5 })
