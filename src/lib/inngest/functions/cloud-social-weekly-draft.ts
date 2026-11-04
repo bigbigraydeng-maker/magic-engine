@@ -1,5 +1,5 @@
 /**
- * 社媒每周出稿编排。每天新西兰 08:30 醒一次：总开关 SOCIAL_WEEKLY_LOOP_ENABLED 不是 'true' 就只写一行 disabled 回执；
+ * 社媒每周出稿编排。每天新西兰 06:30 醒一次（早于 07:00 的今日待办，当天排进来的条目当天就能出现在待办里）：总开关 SOCIAL_WEEKLY_LOOP_ENABLED 不是 'true' 就只写一行 disabled 回执；
  * 开着就给「开了每周闭环、今天是出稿日」的客户各发一个 social/week_pack.draft_due 事件。
  * 事件处理按客户跑 runWeeklyLoop，写一行 cron_run_logs 回执。
  * 写库要三样同时成立：总开关 SOCIAL_WEEKLY_LOOP_ENABLED、写库开关 SOCIAL_WEEKLY_LOOP_WRITE 都是 'true'，且客户开了每周闭环；少一样一律演练（只算不写）。
@@ -23,7 +23,7 @@ import { readSocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
 import { MALIANG_BACKFILL_MAX_PER_RUN, maliangWeeklyCapUsd, overlayReviews, pickBackfillTargets, type BackfillPersisted, type BackfillTarget, type MaliangBackfillReceipt } from '@/lib/social/weekly-loop/maliang-backfill'
 
 export const SOCIAL_WEEKLY_DRAFT_FUNCTION_ID = `${CLOUD_FN_PREFIX}social-weekly-draft`
-export const SOCIAL_WEEKLY_DRAFT_CRON = 'TZ=Pacific/Auckland 30 8 * * *'
+export const SOCIAL_WEEKLY_DRAFT_CRON = 'TZ=Pacific/Auckland 30 6 * * *'
 export const SOCIAL_WEEKLY_DRAFT_DUE_EVENT = 'social/week_pack.draft_due'
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000

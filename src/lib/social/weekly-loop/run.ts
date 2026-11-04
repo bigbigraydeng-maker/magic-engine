@@ -13,7 +13,7 @@ import { APP_BASE } from '@/lib/pm-todo/binding-request-items'
 import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 import { checkReelFacts, factCheckToday, reelOverlayOf, type OkFactSource } from './reel-facts'
 import { dailyVersionDecisions, dailyWindows, type DatedRow } from './daily-schedule'
-import { dailyEntries, dailySettings, datedOutsideCandidates, outsideTourKey, scheduleDaily } from './daily-run'
+import { dailyEntries, dailySettings, datedOutsideCandidates, outsideTourKey, scheduleDaily, type ExpirePort } from './daily-run'
 
 /** cron_run_logs.job_name for every receipt of the weekly loop (daily fan-out and per-client runs). */
 export const WEEKLY_LOOP_JOB = 'social-weekly-draft'
@@ -56,6 +56,7 @@ export interface WeeklyLoopDeps {
   /** Writes only `output` (with fact_check merged in) and updated_at, guarded by the read updated_at. */
   writeFactCheck(input: { clientId: string; id: string; readUpdatedAt: string; output: Record<string, unknown> }): Promise<FactCheckWriteOutcome>
   writeSchedule(args: WriteReelScheduleArgs): Promise<WriteReelScheduleResult>
+  expireUnapproved?: ExpirePort // daily cadence: past-day reels never approved go back to the pool
 }
 
 export type WeeklyLoopTaskCode =
@@ -127,7 +128,7 @@ export interface WeeklyLoopReceipt {
   no_publish: true
   errors: string[]
   /** Daily cadence only (social agent on): slots filled, quota, and days the undated eligible pool lasts. */
-  cadence?: 'weekly' | 'daily'; reel_per_day?: number; slot_dates?: string[]; pool_depth_days?: number | null
+  cadence?: 'weekly' | 'daily'; reel_per_day?: number; slot_dates?: string[]; pool_depth_days?: number | null; expired_unapproved?: string[]
 }
 
 export interface RunWeeklyLoopInput {
@@ -324,10 +325,8 @@ function keepVersionsDaily(candidates: Candidate[], outside: readonly DatedRow[]
   const kept: Candidate[] = []
   for (const c of candidates) {
     const reason = excluded.get(c.row.id) ?? (keep.has(c.row.id) ? null : 'ambiguous_version')
-    if (reason === null) {
-      kept.push(c)
-      continue
-    }
+    if (reason === null) kept.push(c)
+    if (reason === null) continue
     pushExcluded(items, c.row, reason)
     bump(counts.skipped_by_reason, reason)
     if (reason === 'superseded') counts.superseded += 1
@@ -757,7 +756,7 @@ export async function runWeeklyLoop(
       persistedIds,
       (id) => outsideTourKey(rows, outside, id, source, today),
     )
-    const plan = await scheduleDaily(deps.writeSchedule, { clientId: input.clientId, slotDates: daily.slotDates, reelPerDay, entries, dryRun: input.mode !== 'write' })
+    const plan = await scheduleDaily(deps.writeSchedule, { clientId: input.clientId, slotDates: daily.slotDates, reelPerDay, entries, dryRun: input.mode !== 'write', today: daily.today }, deps.expireUnapproved)
     for (let i = 0; i < notPersisted; i += 1) bump(counts.skipped_by_reason, 'fact_check_not_persisted')
     for (const u of [...plan.unscheduled, ...plan.skipped]) bump(counts.skipped_by_reason, u.reason)
     errors.push(...plan.errors)
@@ -766,7 +765,7 @@ export async function runWeeklyLoop(
     return {
       ...baseReceipt(input, look, counts, items, errors), catalog_version: source.catalogVersion, truncated, recipe_stage: quota.stage,
       scheduled: plan.written, fact_check_writes: factCheckWrites, manual_tasks: finalTasks(input.clientId, counts, null, errors, factCheckWrites),
-      cadence: 'daily', reel_per_day: reelPerDay, slot_dates: daily.slotDates, pool_depth_days: plan.poolDepthDays,
+      cadence: 'daily', reel_per_day: reelPerDay, slot_dates: daily.slotDates, pool_depth_days: plan.poolDepthDays, expired_unapproved: plan.expired,
     }
   }
 

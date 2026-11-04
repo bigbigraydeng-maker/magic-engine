@@ -1077,3 +1077,154 @@ describe('按日公开:批卡授权 → 到日执行', async () => {
     expect(w.log.filter((l) => l === 'meta.promote').length).toBe(1)
   })
 })
+
+describe('每日清单:服务端重建清单 → 逐条绑指纹放行 / 剔除', async () => {
+  const { decideDailyList } = await import('@/lib/social/daily-list/decide')
+  const { buildDailyList } = await import('@/lib/social/daily-list/list')
+  const { excludedBrief } = await import('@/lib/social/daily-list/db')
+  const { authorizeFromList } = await import('./scheduled-authorize-list')
+  const { runScheduledPromote } = await import('./scheduled-action')
+  const { readGrant } = await import('./scheduled-grant')
+  const DAY = '2026-10-20' // T0 = 13:00 NZ that day
+  let brief: Record<string, unknown>
+  let receipts: unknown[]
+  let receiptFails: boolean
+
+  function wire(day: string | null): void {
+    brief = { copy: { caption: CAPTION, endcard: { cta: 'Book now', url: 'https://example.com/tour' } }, ...(day ? { weekly_pack: { publish_on: day } } : {}) }
+    receipts = []
+    receiptFails = false
+    const base = deps.store.loadOrder.bind(deps.store)
+    deps = { ...deps, store: { ...deps.store, async loadOrder(id: string) { const o = await base(id); return o ? { ...o, brief: structuredClone(brief) } : o } } }
+  }
+  const ports = () => ({
+    promote: deps,
+    async listDatedOrders(_c: string, from: string, to: string) {
+      const o = await deps.store.loadOrder(ORDER_ID)
+      const pack = brief.weekly_pack as { publish_on?: string } | undefined
+      const day = pack?.publish_on
+      return o && typeof day === 'string' && day >= from && day <= to ? [{ order: o, angle: 'Silk Road: gobi' }] : []
+    },
+    async excludeOrder(_c: string, _id: string, mark: { at: string; by: string; reason: string }) {
+      brief = excludedBrief(brief, mark)
+      return 'excluded' as const
+    },
+    async writeReceipt(r: unknown) { if (receiptFails) throw new Error('db down'); receipts.push(r) },
+  })
+  const grant = () => (w.row ? readGrant(w.row.payload) : null)
+  const decide = (over: Partial<{ approve: Array<{ work_order_id: string; fingerprint: string; publish_on: string }>; exclude: Array<{ work_order_id: string; reason: string }>; dryRun: boolean; switchOn: boolean }>) =>
+    decideDailyList(ports(), { clientId: CLIENT_ID, adminEmail: ADMIN, switchOn: over.switchOn ?? true, approve: over.approve ?? [], exclude: over.exclude ?? [], dryRun: over.dryRun ?? false, now: new Date(w.now), requestId: 'req-1' })
+  async function listed() {
+    const l = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true })
+    const it = l.items[0]
+    if (!it?.fingerprint) throw new Error('not listed')
+    return { work_order_id: it.work_order_id, fingerprint: it.fingerprint, publish_on: it.publish_on }
+  }
+
+  it('清单只列今天到后天、带指纹、默认勾上;开关没开就不能勾', async () => {
+    wire(DAY)
+    const on = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true })
+    expect(on.items).toHaveLength(1)
+    expect(on.items[0]).toMatchObject({ publish_on: DAY, selectable: true, default_checked: true, title: 'Silk Road' })
+    expect(on.items[0].fingerprint).toMatch(/.+/)
+    const off = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: false })
+    expect(off.items[0].selectable).toBe(false)
+    wire('2026-10-25')
+    expect((await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true })).items).toHaveLength(0)
+  })
+
+  it('放行 → 授权 armed、绑指纹、记清单号;到点执行器照常公开;回执落库', async () => {
+    wire(DAY)
+    const item = await listed()
+    const r = await decide({ approve: [item] })
+    expect(r.items[0]).toMatchObject({ outcome: 'armed' })
+    expect(r.receipt_saved).toBe(true)
+    expect(receipts).toHaveLength(1)
+    expect(grant()).toMatchObject({ status: 'armed', fingerprint: item.fingerprint, publish_on: DAY, authorized_by: ADMIN })
+    expect(grant()?.card_run_id).toMatch(/^daily-list:[0-9a-f]{16}$/)
+    expect(w.log).not.toContain('meta.promote')
+    const run = await runScheduledPromote(deps, { orderId: ORDER_ID, executedBy: 'system:t', isApprover: (e) => e === ADMIN, dryRun: false })
+    expect(run.outcome).toBe('published')
+  })
+
+  it('提交的指纹跟当前不符 / 清单之后内容变了 → 拒,不写授权', async () => {
+    wire(DAY)
+    const item = await listed()
+    expect((await decide({ approve: [{ ...item, fingerprint: 'forged' }] })).items[0]).toMatchObject({ outcome: 'refused', reason: 'content_changed' })
+    w.meta.description = 'Edited after the list'
+    brief = { ...brief, copy: { caption: 'Edited after the list', endcard: { cta: 'Book now', url: 'https://example.com/tour' } } }
+    expect((await decide({ approve: [item] })).items[0]).toMatchObject({ outcome: 'refused', reason: 'content_changed' })
+    expect(grant()).toBeNull()
+  })
+
+  it('不在清单上的条目(窗口外)提交过来 → not_on_list', async () => {
+    wire(DAY)
+    const item = await listed()
+    brief = { ...brief, weekly_pack: { publish_on: '2026-10-28' } }
+    expect((await decide({ approve: [{ ...item, publish_on: '2026-10-28' }] })).items[0]).toMatchObject({ outcome: 'refused', reason: 'not_on_list' })
+    expect(grant()).toBeNull()
+  })
+
+  it('发布前检查不过(红线)的条目:显示、不能勾、放行被拒、不会自动剔除', async () => {
+    wire(DAY)
+    w.meta.description = 'Great badword deal'
+    brief = { ...brief, copy: { caption: 'Great badword deal', endcard: { cta: 'Book now', url: 'https://example.com/tour' } } }
+    const l = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true })
+    expect(l.items[0]).toMatchObject({ selectable: false, fingerprint: null })
+    expect(l.items[0].blocked_reason).toMatch(/.+/)
+    expect((await decide({ approve: [{ work_order_id: ORDER_ID, fingerprint: 'x', publish_on: DAY }] })).items[0]).toMatchObject({ reason: 'not_selectable' })
+    expect((brief.weekly_pack as Record<string, unknown>).excluded_by_card).toBeUndefined()
+  })
+
+  it('剔除:必须写原因;剔除后删掉发布日、打标记、不再上清单;再放行被拒', async () => {
+    wire(DAY)
+    const item = await listed()
+    expect((await decide({ exclude: [{ work_order_id: ORDER_ID, reason: '  ' }] })).items[0]).toMatchObject({ outcome: 'refused', reason: 'reason_required' })
+    expect((await decide({ exclude: [{ work_order_id: ORDER_ID, reason: '画面太暗' }] })).items[0]).toMatchObject({ outcome: 'excluded' })
+    const pack = brief.weekly_pack as Record<string, unknown>
+    expect(pack.publish_on).toBeUndefined()
+    expect(pack.excluded_by_card).toMatchObject({ reason: '画面太暗', by: ADMIN, publish_on: DAY })
+    expect((await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true })).items).toHaveLength(0)
+    const direct = await authorizeFromList(deps, { orderId: ORDER_ID, adminEmail: ADMIN, fingerprint: item.fingerprint, publishOn: DAY, listId: 'x', dryRun: false })
+    expect(direct).toMatchObject({ ok: false, reason: 'excluded_by_card' })
+  })
+
+  it('同一请求里既剔除又放行同一条 → 只剔除', async () => {
+    wire(DAY)
+    const item = await listed()
+    const r = await decide({ approve: [item], exclude: [{ work_order_id: ORDER_ID, reason: '不发了' }] })
+    expect(r.items.map((i) => i.outcome)).toEqual(['excluded'])
+    expect(grant()).toBeNull()
+  })
+
+  it('已放行的再提交 → already_armed,不重写;正在发 / 已发 → 拒', async () => {
+    wire(DAY)
+    const item = await listed()
+    await decide({ approve: [item] })
+    const g = grant()
+    const again = await authorizeFromList(deps, { orderId: ORDER_ID, adminEmail: ADMIN, fingerprint: item.fingerprint, publishOn: DAY, listId: 'y', dryRun: false })
+    expect(again).toMatchObject({ ok: true, outcome: 'already_armed' })
+    expect(grant()?.card_run_id).toBe(g?.card_run_id)
+    if (!w.row || !g) throw new Error('no grant')
+    w.row.payload['scheduled_go_public'] = { ...g, status: 'claimed' }
+    expect(await authorizeFromList(deps, { orderId: ORDER_ID, adminEmail: ADMIN, fingerprint: item.fingerprint, publishOn: DAY, listId: 'y', dryRun: false })).toMatchObject({ ok: false, reason: 'in_flight' })
+  })
+
+  it('演练:逐条给判定,不写授权、不写回执', async () => {
+    wire(DAY)
+    const item = await listed()
+    const r = await decide({ approve: [item], dryRun: true })
+    expect(r.items[0].outcome).toBe('armed')
+    expect(grant()).toBeNull()
+    expect(receipts).toHaveLength(0)
+  })
+
+  it('回执写不进去 → 授权照样生效,并如实说「记录没存上」', async () => {
+    wire(DAY)
+    const item = await listed()
+    receiptFails = true
+    const r = await decide({ approve: [item] })
+    expect(r.receipt_saved).toBe(false)
+    expect(grant()?.status).toBe('armed')
+  })
+})

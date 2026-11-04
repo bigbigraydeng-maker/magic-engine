@@ -88,7 +88,7 @@ describe('runWeeklyLoop daily cadence', () => {
     expect(all[1].assignments).toEqual([{ id: 'w2', publishOn: '2026-11-07' }])
     expect(all[1].weekStart).toBe('2026-11-02')
     for (const a of all) {
-      expect(a.blockOnlyPending).toBe(false) // knife 1: an approved week is off limits too
+      expect(a.blockOnlyPending).toBe(true) // knife 2: an approved week is open, items are approved on the daily list
       expect(a.scheduledBy).toBe('social-daily-agent')
       expect(a.dryRun).toBe(false)
     }

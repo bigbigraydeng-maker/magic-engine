@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadSocialFactSource } from './fact-aliases'
 import { sumWeeklyMaliangSpend } from './maliang-backfill'
-import { writeReelSchedule } from './schedule-writer'
+import { expireUnapproved, writeReelSchedule } from './schedule-writer'
 import { WEEKLY_LOOP_JOB, type FactCheckWriteOutcome, type WeeklyLoopClient, type WeeklyLoopDeps, type WeeklyLoopOrderRow } from './run'
 
 export const WEEKLY_LOOP_ORDER_CAP = 50
@@ -181,6 +181,10 @@ export function createWeeklyLoopDbDeps(db: SupabaseClient): WeeklyLoopDeps {
 
     writeSchedule(args) {
       return writeReelSchedule(db, args)
+    },
+
+    expireUnapproved(args) {
+      return expireUnapproved(db, args)
     },
   }
 }

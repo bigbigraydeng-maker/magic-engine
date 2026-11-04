@@ -98,3 +98,28 @@ describe('poolDepthDays', () => {
     expect(poolDepthDays(5, 2)).toBe(2)
   })
 })
+
+describe('dailyVersionDecisions · exclusion', () => {
+  const ex = { weekly_pack: { excluded_by_card: { at: 'x', by: 'y', reason: 'z' } } }
+  it('the newest version was excluded → the whole reel stays off (no older version comes back)', () => {
+    vi.mocked(groupVersions).mockReturnValueOnce({ groups: [{ latestId: 'v3', memberIds: ['v2', 'v3'] }], ambiguous: [] })
+    const { keep, excluded } = dailyVersionDecisions([
+      { id: 'v2', created_at: '2026-11-01', brief: {}, overlay: null, scheduledOn: null },
+      { id: 'v3', created_at: '2026-11-02', brief: ex, overlay: null, scheduledOn: null },
+    ])
+    expect([...keep]).toEqual([])
+    expect(excluded.get('v3')).toBe('excluded_by_card')
+    expect(excluded.get('v2')).toBe('version_excluded')
+  })
+
+  it('a version made after the exclusion (now the newest) can be scheduled', () => {
+    vi.mocked(groupVersions).mockReturnValueOnce({ groups: [{ latestId: 'v4', memberIds: ['v3', 'v4'] }], ambiguous: [] })
+    const { keep, excluded } = dailyVersionDecisions([
+      { id: 'v3', created_at: '2026-11-02', brief: ex, overlay: null, scheduledOn: null },
+      { id: 'v4', created_at: '2026-11-03', brief: {}, overlay: null, scheduledOn: null },
+    ])
+    expect([...keep]).toEqual(['v4'])
+    expect(excluded.get('v3')).toBe('superseded')
+  })
+})
+

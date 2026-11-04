@@ -401,12 +401,12 @@ const CRON_REGISTRY_ENTRIES = [
   // 所以按「每周二」对账是对的：每周都有一行。周期与代码常量 LIBAI_PROMPT_AUDIT_CRON 一致。
   // 包拯 · 每周复核 AI 判客人阶段（修复方案第 1b 刀）：每周三新西兰 10:00；总开关关着也写一行 skipped 回执，
   // 所以每周都有一行。周期与代码常量 BAOZHENG_WEEKLY_CRON 一致。规则书 docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md。
-  // 社媒每周出稿编排：每天新西兰 08:30 醒一次，给今天是出稿日、开了每周闭环的客户各发一个 social/week_pack.draft_due 事件；
+  // 社媒每周出稿编排：每天新西兰 06:30 醒一次，给今天是出稿日、开了每周闭环的客户各发一个 social/week_pack.draft_due 事件；
   // 每个客户跑完也用同一个 job 名写一行回执。总开关 SOCIAL_WEEKLY_LOOP_ENABLED 关着也写一行 disabled 回执，所以每天都有一行。
   // 写库开关 SOCIAL_WEEKLY_LOOP_WRITE 关着一律演练。不发布、不扣费、不外发。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/cloud-social-weekly-draft.ts 的 SOCIAL_WEEKLY_DRAFT_CRON。
   // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
-  { service: 'inngest:cloud-social-weekly-draft', jobName: 'social-weekly-draft', schedule: '30 8 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-04' },
+  { service: 'inngest:cloud-social-weekly-draft', jobName: 'social-weekly-draft', schedule: '30 6 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-04' },
   // Reel 按日公开：每 30 分钟醒一次（新西兰时间），到了客户发布时点（默认 18:00）才把当天已在周卡上授权的 Reel 走转公开；
   // 总开关 WEEKLY_PACK_REEL_SCHEDULED_PUBLIC 关着也写一行 disabled 回执，所以每次醒来都有一行。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/cloud-reel-scheduled-go-public.ts 的 REEL_SCHEDULED_CRON。
