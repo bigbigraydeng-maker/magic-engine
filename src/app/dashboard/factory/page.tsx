@@ -7,6 +7,7 @@ import { factoryConfigHref } from '@/lib/factory/config-link'
 import { ReviewInbox } from './_components/ReviewInbox'
 import { RecoveryQueue } from './_components/RecoveryQueue'
 import { VariantOrderPanel } from './_components/VariantOrderPanel'
+import { CurrentWinnerPanel } from './_components/CurrentWinnerPanel'
 
 interface PendingOrder {
   id: string
@@ -166,6 +167,7 @@ export default function FactoryCockpitPage() {
           </>
         )}
       </section>
+      <CurrentWinnerPanel clientId={lockedClient ?? selectedClient} />
       <VariantOrderPanel clientId={lockedClient} />
       {!lockedClient && <RecoveryQueue />}
     </div>
