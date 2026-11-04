@@ -5,7 +5,7 @@ status: done
 owner: agent
 decided_on: 2026-11-05
 source: doc:docs/specs/2026-11-05-ads-winner-learning-loop-design-v0.md
-risk: B
+risk: A
 verify_by: 2026-11-12
 verify_how: "合并部署后打开 /dashboard/factory?client=c0000000-0000-0000-0000-000000000000#current-winner，看到当前赢家（上海团 18 秒价格开头那条）与状态「等你认」；今日待办出现一条「这条广告样板要不要认」；点「认」（勾看过截图）后状态变「已认」、今日待办那条消失、winner_structures.performance.pm_decision 有 by/role/event_id/at 回执"
 done_on: 2026-11-05
