@@ -4,6 +4,7 @@ import type { CardClicker } from './actor'
 import { listPendingCards, listShownCards, notesFor, type DecisionNote } from './records'
 import { settleExpired } from './settle'
 import { isExpired, presentCard, readStoredCard, type ConfirmationCardView } from './view'
+import { reconcilePlanCardViews } from '@/lib/marketing-plan/plan-card-progress'
 
 async function expirePending(deps: KernelDeps, clientId: string, now: Date): Promise<void> {
   const pending = await listPendingCards(deps.supabase, clientId)
@@ -48,5 +49,12 @@ export async function listConfirmationCards(
     const view = viewOf(run, notes, clicker, now)
     if (view) views.push(view)
   }
-  return views
+  return reconcilePlanCardViews(
+    deps.supabase,
+    clientId,
+    clicker,
+    views,
+    new Map(runs.map((run) => [run.id, run.input])),
+    new Map(runs.map((run) => [run.id, run.evidence])),
+  )
 }

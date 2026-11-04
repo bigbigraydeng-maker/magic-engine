@@ -4,6 +4,7 @@ import { approveRun, rejectRun } from '@/lib/kernel/human-approval'
 import type { CardClicker, ClickGrant } from './actor'
 import { assertMayClick } from './actor'
 import { confirmBlockReason } from './facts'
+import { planCardMayConfirmDespiteChecks } from '@/lib/marketing-plan/plan-card-subject'
 import { notesFor } from './records'
 import { ConfirmationCardError } from './errors'
 import { settleExpired } from './settle'
@@ -97,7 +98,7 @@ export async function decideConfirmationCard(
   if (run.status !== 'pending_approval') {
     throw new ConfirmationCardError('not_waiting', await closedMessage(deps, run.authorization_decision_id))
   }
-  if (args.resolution === 'confirm') {
+  if (args.resolution === 'confirm' && !planCardMayConfirmDespiteChecks(stored)) {
     const block = confirmBlockReason(stored.hardChecks)
     if (block) throw new ConfirmationCardError('hard_check', block)
   }
