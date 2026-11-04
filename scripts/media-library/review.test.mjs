@@ -610,6 +610,19 @@ test('batch-level review_status hold phrase forces needs_human', () => {
   }
 });
 
+test('batch-level no_publish forces needs_human', () => {
+  const root = makeStudio();
+  try {
+    const policy = loadPolicy();
+    addCollectionWithMeta(root, { no_publish: true }, [cleanCollectionAsset()]);
+    const { review } = reviewOne(root, policy);
+    expect(review.rights).toBe('needs_human');
+    expect(review.human_reasons).toContain('rights:intake_marked_pending');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('brand_or_alcohol_flags present is third_party_brand', () => {
   const root = makeStudio();
   try {
