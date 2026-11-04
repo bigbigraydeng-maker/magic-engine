@@ -184,5 +184,6 @@ description: 藏经阁——设计或改造 ME 任何 agent / agent loop 之前�
 - 专家资料转技能流程：`.claude/skills/me-expert-source-to-skill/`（新讲稿 / 新文章进藏经阁走这条）
 - 已经按这些讲稿写过的设计：`docs/specs/2026-11-03-me-agent-loop-upgrade-design-v0.md` §1、`docs/specs/2026-11-03-ads-agent-fix-plan-v0.md` §2、`docs/specs/2026-11-04-social-agent-start-plan-v0.1.md`
 - 事故清单：`docs/PITFALLS.md`
+- 外部打法（具体投放/运营技巧，不是 agent 设计原则）：[references/external-tactics-index.md](./references/external-tactics-index.md)
 
 **增补规则**：新讲稿或新文章要进藏经阁，按 `me-expert-source-to-skill` 出技能卡，再在这里加出处或新增一部经；只有在 ME 里真跑出证据的，才能在「ME 已踩过」里写上。
