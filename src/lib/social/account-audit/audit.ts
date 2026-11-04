@@ -92,10 +92,9 @@ export function normaliseMusic(raw: string | null): string | null {
   return stem || null
 }
 
-/** Remotion list / postcard templates are destination content; an external upload is a person-led video. */
+/** Remotion list / postcard templates are destination content. An external upload could be anything: without a tag it is unknown (never assumed to be people). */
 export function inferFormat(reel: Pick<AuditReel, 'format' | 'template' | 'engine'>): string | null {
   if (reel.format) return reel.format
-  if (reel.engine === 'external_upload') return 'people'
   if (reel.template === 'postcard' || reel.template === 'list') return 'destination'
   return null
 }

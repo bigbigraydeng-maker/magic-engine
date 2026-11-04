@@ -44,7 +44,7 @@ export async function loadAuditReels(db: SupabaseClient, clientId: string, since
     .from('content_work_orders')
     .select('id, created_at, brief')
     .eq('client_id', clientId)
-    .in('status', ['approved', 'published', 'in_review'])
+    .in('status', ['approved', 'published', 'in_review', 'measuring', 'closed'])
     .gte('created_at', sinceIso)
     .order('created_at', { ascending: false })
     .limit(300)

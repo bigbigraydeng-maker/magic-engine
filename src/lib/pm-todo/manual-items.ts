@@ -456,9 +456,11 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
       console.warn('[manual-items] 社媒每周出稿待办生成失败（不阻塞其他待办）:', e),
     ),
     // Reel 按日公开：周卡批过、到日没发出去的（读流量记录里的授权状态）
+    // 社媒账号自检：每周一自检的回执（每个客户最新一份；没跑成也出待办）
     (b) => pushAccountAuditItems(supabase, b, nameOf, now).catch((e) =>
       console.warn('[manual-items] 社媒账号自检待办生成失败（不阻塞其他待办）:', e),
     ),
+    // Reel 按日公开：周卡批过、到日没发出去的（读流量记录里的授权状态）
     (b) => pushReelScheduledItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] Reel 按日公开待办生成失败（不阻塞其他待办）:', e),
     ),

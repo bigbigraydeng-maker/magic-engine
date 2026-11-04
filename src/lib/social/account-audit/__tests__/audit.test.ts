@@ -16,9 +16,10 @@ describe('normaliseMusic', () => {
 })
 
 describe('inferFormat', () => {
-  it('factory templates are destination content; an external upload is people; unknown stays unknown', () => {
+  it('factory templates are destination content; an untagged external upload is unknown; unknown stays unknown', () => {
     expect(inferFormat({ format: null, template: 'list', engine: 'remotion' })).toBe('destination')
-    expect(inferFormat({ format: null, template: null, engine: 'external_upload' })).toBe('people')
+    expect(inferFormat({ format: null, template: null, engine: 'external_upload' })).toBeNull()
+    expect(inferFormat({ format: 'people', template: null, engine: 'external_upload' })).toBe('people')
     expect(inferFormat({ format: null, template: 'mystery', engine: 'remotion' })).toBeNull()
     expect(inferFormat({ format: 'explainer', template: 'list', engine: 'remotion' })).toBe('explainer')
   })
