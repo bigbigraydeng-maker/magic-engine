@@ -90,7 +90,7 @@ export default function AdsNextStepCard({
       <p className="mt-0.5 text-xs text-slate-400">体检红灯、等人批的动作、华佗处方 —— 只读汇总</p>
       <dl className="mt-3 space-y-3 text-sm">
         <div>
-          <dt className="text-xs font-medium text-slate-500">体检红灯</dt>
+          <dt className="text-xs font-medium text-slate-500">体检红灯 · 跟目标成本比</dt>
           <dd className="mt-0.5 text-slate-800">
             {healthRowText(loadStatus, view?.healthRedLights)}
           </dd>

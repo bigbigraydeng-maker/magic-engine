@@ -631,6 +631,9 @@ export default function AdsHealthPage() {
           )}
           {!loading && !error && latest && (
             <>
+              <p className="mb-1.5 text-xs font-medium text-gray-500">
+                跟自己以前比 · 每个系列和它自己最好的一周比，不看目标成本（跟上面「体检红灯」是两把尺子）
+              </p>
               <div className={`rounded-xl border p-4 mb-4 ${overallMeta.tint}`}>
                 <div className="flex items-center gap-2.5">
                   <span className={`inline-block w-3 h-3 rounded-full ${overallMeta.dot}`} />

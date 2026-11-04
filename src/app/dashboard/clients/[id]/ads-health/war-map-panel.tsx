@@ -135,7 +135,7 @@ function AccountSummaryList({ view }: { view: WarMapView }) {
           <span>
             {s.dataDay === null ? '没有数据' : `数据日 ${fmtDay(s.dataDay)}`}
             {s.dormant ? (
-              <span className="ml-1 text-gray-400">没在投，没有新数据是正常的</span>
+              <span className="ml-1 text-gray-400">这个账户没在投，没有新数据是正常的</span>
             ) : (
               s.staleDays !== null && s.staleDays > DATA_STALE_DAYS && (
                 <span className="ml-1 text-amber-700">已 {s.staleDays} 天没更新</span>

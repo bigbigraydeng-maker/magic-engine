@@ -2,7 +2,7 @@ import React from 'react'
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react'
 
-import AutonomySettings from '../autonomy-settings'
+import AutonomySettings, { autopilotTruth } from '../autonomy-settings'
 
 afterEach(() => {
   cleanup()
@@ -248,7 +248,7 @@ describe('AutonomySettings', () => {
     await waitFor(() => expect(screen.getByText('可用于广告的视频')).toBeTruthy())
     expect(screen.getByDisplayValue('150')).toBeTruthy()
     expect(screen.getByText(/\$150 \/ 天/)).toBeTruthy()
-    expect(screen.getByText('在每天上限内自动调整预算 / 暂停广告（需要先设好上面的每天上限）')).toBeTruthy()
+    expect(screen.getByText('在每天上限内允许系统动钱（需要先设好上面的每天上限）')).toBeTruthy()
     await waitFor(() => expect(screen.getByText('Best of China')).toBeTruthy())
     expect(screen.getByText('未能识别，请核对')).toBeTruthy()
     expect(document.body.textContent).not.toContain('素材池')
@@ -720,5 +720,22 @@ describe('AutonomySettings · 视频缩略图', () => {
     fireEvent.error(container.querySelector('img') as HTMLImageElement)
     await waitFor(() => expect(container.querySelector('img')).toBeNull())
     expect(screen.getAllByTestId('video-thumb-placeholder')).toHaveLength(2)
+  })
+})
+
+describe('autopilotTruth：如实写「现在实际做到哪步」（PM 11-04 审计）', () => {
+  it('演练中 → 说只记下、不真停；加预算要 PM 本人批', () => {
+    expect(autopilotTruth({ autopilot_enabled: true, autopilot_dry_run: true }))
+      .toBe('自动止损：演练中，只记下会停哪些组，不真停；加预算：一律要 PM 本人批准，系统不会自己加')
+  })
+  it('真跑 → 说提交暂停申请、批了才停', () => {
+    expect(autopilotTruth({ autopilot_enabled: true, autopilot_dry_run: false })).toContain('批了才停')
+  })
+  it('没开、或读不到开关 → 说没开（不往「已经在自动做」那边猜）', () => {
+    expect(autopilotTruth({ autopilot_enabled: false, autopilot_dry_run: false })).toContain('自动止损：没开')
+    expect(autopilotTruth({})).toContain('自动止损：没开')
+  })
+  it('开了但演练标记读不到 → 按演练写（不往真跑那边猜）', () => {
+    expect(autopilotTruth({ autopilot_enabled: true })).toContain('演练中')
   })
 })
