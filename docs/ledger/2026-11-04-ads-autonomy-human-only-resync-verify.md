@@ -9,7 +9,7 @@ verify_by: 2026-11-11
 verify_how: 部署后当场手动发一次同步事件（用新的事件编号，CTS、NAL 各一次），回读两家 ads.auto_pause_on_d3 生效规则为 require_approval，且 ads_autonomy_sync_receipts 各有一行对应 to_mode=require_approval 的回执；不等 11-12，不靠每日对账。这一步会写生产规则表，需 Ray 合并时一并授权，合并后由 74 号执行。任何一家仍是 auto_approve 或没有回执算不成
 done_on: 2026-11-04
 done_ref: pr:3596
-verified_ref: doc:docs/ledger/evidence/2026-11-04-ads-autonomy-human-only-resync-verify--2026-11-04.md
+verified_ref: pr:3603
 last_checked: 2026-11-04
 check_note: 生产库只读回读：CTS/NAL ads.auto_pause_on_d3 均为 require_approval，各一行回执；证据 docs/ledger/evidence/2026-11-04-ads-autonomy-human-only-resync-verify--2026-11-04.md
 ---
