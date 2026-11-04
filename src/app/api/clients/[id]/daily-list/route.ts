@@ -1,5 +1,7 @@
 /**
  * GET  /api/clients/[id]/daily-list — Reels dated today..day after tomorrow that still need a person's approval.
+ *      ?scope=week — next week's reels instead (read-only here: the week card approves them).
+ *      Both answer publish_hour (NZ hour the client's reels go public).
  * POST /api/clients/[id]/daily-list — { approve: [{ work_order_id, fingerprint, publish_on }], exclude: [{ work_order_id, reason }], dry_run? }
  * Global admins only. The list is rebuilt on the server for every POST; nothing here publishes (the reel's day does,
  * via cloud-reel-scheduled-go-public). Design: docs/specs/2026-11-05-daily-list-card-design-v0.1.md §9.
@@ -14,6 +16,8 @@ import { readWeekPackEnv, reelCardMode } from '@/lib/social/week-pack/switches'
 import { buildDailyList } from '@/lib/social/daily-list/list'
 import { decideDailyList, type ApproveRequest, type ExcludeRequest } from '@/lib/social/daily-list/decide'
 import { createDailyListPorts, socialAgentOn } from '@/lib/social/daily-list/db'
+import { targetWeek } from '@/lib/social/week-pack/cadence'
+import { publishHourOf } from '@/lib/factory/publish/promote/scheduled-grant'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,15 +53,24 @@ function readExclude(v: unknown): ExcludeRequest[] | null {
   return out
 }
 
-export async function GET(_req: Request, { params }: Ctx) {
+async function publishHour(clientId: string): Promise<number> {
+  const { data } = await supabaseAdmin.from('clients').select('publishing_calendar_config').eq('id', clientId).maybeSingle()
+  return publishHourOf(isRecord(data) ? data.publishing_calendar_config : null)
+}
+
+export async function GET(req: Request, { params }: Ctx) {
   if (!isUuid(params.id)) return refused(400, '这个地址不对。')
   const admin = await requireGlobalAdmin()
   if (!admin.ok) return refused(admin.status, admin.error)
   try {
     const ports = createDailyListPorts(supabaseAdmin, createProductionPromoteDeps())
-    const agentOn = await socialAgentOn(supabaseAdmin, params.id)
-    const list = await buildDailyList(ports, { clientId: params.id, now: new Date(), switchOn: switchOn(), agentOn })
-    return NextResponse.json({ success: true, switch_on: switchOn() && agentOn, ...list })
+    const now = new Date()
+    const week = new URL(req.url).searchParams.get('scope') === 'week'
+    // The week card is the approval path for next week, whatever the cadence; the daily list needs the social agent.
+    const agentOn = week ? true : await socialAgentOn(supabaseAdmin, params.id)
+    const window = week ? (({ weekStart, weekEnd }) => ({ from: weekStart, to: weekEnd }))(targetWeek(now)) : undefined
+    const list = await buildDailyList(ports, { clientId: params.id, now, switchOn: switchOn(), agentOn, window })
+    return NextResponse.json({ success: true, switch_on: switchOn() && agentOn, publish_hour: await publishHour(params.id), ...list })
   } catch {
     return refused(500, '清单没读出来，不要当成没有要批的。')
   }

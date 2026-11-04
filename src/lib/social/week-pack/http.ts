@@ -7,13 +7,17 @@ import type { CardClicker } from '@/lib/confirmation-card/actor'
 import { confirmWeekPack, declineWeekPack, openWeekPack, revokeWeekPack, type FlowResult, type WeekPackPorts } from './flow'
 import { toWeekPackPage, type WeekPackPage } from './view'
 
-const COMMAND_KEYS = new Set(['action', 'run_id', 'fingerprint', 'expected_decision_id', 'preview_tokens'])
+import type { ReelListApproval } from './types'
+
+const COMMAND_KEYS = new Set(['action', 'run_id', 'fingerprint', 'expected_decision_id', 'preview_tokens', 'reel_approvals'])
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 const TOKEN_KEYS = new Set(['work_order_id', 'preview_token'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export interface PageContext {
   enabled: boolean
   reelGoPublic: boolean
+  reelScheduled?: boolean
   configReadable: boolean
   clientId: string
   clicker: CardClicker
@@ -26,6 +30,7 @@ export interface WeekPackCommand {
   fingerprint: string
   expectedDecisionId: string
   tokens: Map<string, string>
+  reelApprovals: ReelListApproval[]
 }
 
 export async function handleWeekPackGet(ctx: PageContext): Promise<{ status: number; body: WeekPackPage | { success: false; error: string } }> {
@@ -65,7 +70,7 @@ async function runCommand(ctx: PageContext, command: WeekPackCommand): Promise<F
     ports: ctx.ports,
   }
   if (command.action === 'decline') return declineWeekPack(shared)
-  return confirmWeekPack({ ...shared, tokens: command.tokens })
+  return confirmWeekPack({ ...shared, tokens: command.tokens, reelApprovals: command.reelApprovals })
 }
 
 function asPage(ctx: PageContext, result: FlowResult): { status: number; body: WeekPackPage | { success: false; error: string } } {
@@ -77,6 +82,7 @@ function asPage(ctx: PageContext, result: FlowResult): { status: number; body: W
     body: toWeekPackPage({
       enabled: ctx.enabled,
       reelGoPublic: ctx.reelGoPublic,
+      reelScheduled: ctx.reelScheduled,
       configReadable: ctx.configReadable,
       cadence: ctx.ports.cadence(),
       manifest: result.manifest,
@@ -98,8 +104,10 @@ export function parseWeekPackCommand(raw: unknown): WeekPackCommand | { error: s
   }
   const tokens = readTokens(body.preview_tokens)
   if ('error' in tokens) return tokens
+  const reelApprovals = readApprovals(body.reel_approvals)
+  if ('error' in reelApprovals) return reelApprovals
   if (body.action === 'revoke') {
-    return { action: 'revoke', runId: '', fingerprint: '', expectedDecisionId: '', tokens: tokens.tokens }
+    return { action: 'revoke', runId: '', fingerprint: '', expectedDecisionId: '', tokens: tokens.tokens, reelApprovals: [] }
   }
   if (typeof body.run_id !== 'string' || typeof body.fingerprint !== 'string' || typeof body.expected_decision_id !== 'string') {
     return { error: '这张卡的编号不齐，没有点成。' }
@@ -110,7 +118,22 @@ export function parseWeekPackCommand(raw: unknown): WeekPackCommand | { error: s
     fingerprint: body.fingerprint,
     expectedDecisionId: body.expected_decision_id,
     tokens: tokens.tokens,
+    reelApprovals: reelApprovals.items,
   }
+}
+
+function readApprovals(raw: unknown): { items: ReelListApproval[] } | { error: string } {
+  if (raw == null) return { items: [] }
+  if (!Array.isArray(raw) || raw.length > 30) return { error: '勾选的视频读不懂，没有公开。' }
+  const items: ReelListApproval[] = []
+  for (const x of raw) {
+    if (!x || typeof x !== 'object' || Array.isArray(x)) return { error: '勾选的视频读不懂，没有公开。' }
+    const r = x as Record<string, unknown>
+    if (typeof r.work_order_id !== 'string' || !UUID_RE.test(r.work_order_id)) return { error: '勾选的视频读不懂，没有公开。' }
+    if (typeof r.fingerprint !== 'string' || typeof r.publish_on !== 'string' || !DATE_RE.test(r.publish_on)) return { error: '勾选的视频读不懂，没有公开。' }
+    items.push({ work_order_id: r.work_order_id, fingerprint: r.fingerprint, publish_on: r.publish_on })
+  }
+  return { items }
 }
 
 function readTokens(raw: unknown): { tokens: Map<string, string> } | { error: string } {

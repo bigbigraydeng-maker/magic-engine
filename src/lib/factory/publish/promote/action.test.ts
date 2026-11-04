@@ -1304,5 +1304,17 @@ describe('每日清单:服务端重建清单 → 逐条绑指纹放行 / 剔除'
     expect(r.items[0].outcome).toBe('would_arm')
     expect(grant()).toBeNull()
   })
+
+  it('周卡用的「下周」窗口:窗口外的条目照样被列出、能凭指纹批', async () => {
+    wire('2026-10-27')
+    const win = { from: '2026-10-26', to: '2026-11-01' }
+    const l = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true, window: win })
+    expect(l.items.map((i) => i.publish_on)).toEqual(['2026-10-27'])
+    const it0 = l.items[0]
+    if (!it0.fingerprint) throw new Error('no fp')
+    const r = await decideDailyList(ports(), { clientId: CLIENT_ID, adminEmail: ADMIN, switchOn: true, agentOn: true, approve: [{ work_order_id: ORDER_ID, fingerprint: it0.fingerprint, publish_on: '2026-10-27' }], exclude: [], dryRun: false, now: new Date(w.now), requestId: 'r', window: win })
+    expect(r.items[0].outcome).toBe('armed')
+    expect((await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true })).items).toHaveLength(0)
+  })
 })
 

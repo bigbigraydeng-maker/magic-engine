@@ -4,25 +4,12 @@
 // 设计稿 docs/specs/2026-11-05-daily-list-card-design-v0.1.md §9。
 
 import { useCallback, useEffect, useState } from 'react'
-
-interface Item {
-  work_order_id: string
-  title: string
-  publish_on: string
-  caption: string
-  first_comment: string
-  fact_summary: string | null
-  fingerprint: string | null
-  selectable: boolean
-  blocked_reason: string | null
-  default_checked: boolean
-  note: string | null
-}
+import { ReelListRows, defaultChecked, readReelList, type ReelListItem } from './ReelListRows'
 
 interface ResultLine {
   work_order_id: string
   action: 'approve' | 'exclude'
-  outcome: 'armed' | 'already_armed' | 'excluded' | 'refused'
+  outcome: 'armed' | 'already_armed' | 'excluded' | 'refused' | 'would_arm' | 'would_exclude'
   reason: string | null
 }
 
@@ -49,13 +36,8 @@ const OUTCOME_ZH: Record<ResultLine['outcome'], string> = {
   already_armed: '之前已放行',
   excluded: '已剔除，不会再自动排',
   refused: '没放行：',
-}
-
-function readItems(json: unknown): { switch_on: boolean; items: Item[] } | null {
-  if (!json || typeof json !== 'object') return null
-  const obj = json as { switch_on?: unknown; items?: unknown }
-  if (typeof obj.switch_on !== 'boolean' || !Array.isArray(obj.items)) return null
-  return { switch_on: obj.switch_on, items: obj.items as Item[] }
+  would_arm: '演练：会放行',
+  would_exclude: '演练：会剔除',
 }
 
 function readReceipt(json: unknown): Receipt | null {
@@ -79,8 +61,9 @@ function reasonText(reason: string | null): string {
 }
 
 export function DailyListPanel({ clientId }: { clientId: string }) {
-  const [items, setItems] = useState<Item[] | null>(null)
+  const [items, setItems] = useState<ReelListItem[] | null>(null)
   const [switchOn, setSwitchOn] = useState(false)
+  const [publishHour, setPublishHour] = useState(18)
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -93,12 +76,13 @@ export function DailyListPanel({ clientId }: { clientId: string }) {
     const res = await fetch(base).catch(() => null)
     if (res?.status === 403) { setError(null); setItems([]); return } // not an admin: nothing to manage here
     const json: unknown = res ? await res.json().catch(() => null) : null
-    const data = res?.ok ? readItems(json) : null
+    const data = res?.ok ? readReelList(json) : null
     if (data === null) { setError('清单没读出来，不要当成没有要批的。'); return }
     setError(null)
-    setSwitchOn(data.switch_on)
+    setSwitchOn(data.switchOn)
+    setPublishHour(data.publishHour)
     setItems(data.items)
-    setChecked(new Set(data.items.filter((it) => it.selectable && it.default_checked).map((it) => it.work_order_id)))
+    setChecked(defaultChecked(data.items))
   }, [base])
 
   useEffect(() => { void load() }, [load])
@@ -168,58 +152,42 @@ export function DailyListPanel({ clientId }: { clientId: string }) {
           ))}
         </ul>
       )}
-      <ul className="space-y-2">
-        {items.map((it) => (
-          <li key={it.work_order_id} className="text-xs text-slate-700 space-y-1">
-            <label className="flex items-start gap-2">
+      <ReelListRows
+        items={items}
+        publishHour={publishHour}
+        checked={checked}
+        onToggle={toggle}
+        disabled={busy}
+        renderExtra={(it) => (
+          excludeFor === it.work_order_id ? (
+            <div className="flex flex-wrap items-center gap-2">
               <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={checked.has(it.work_order_id)}
-                disabled={!it.selectable}
-                onChange={() => toggle(it.work_order_id)}
+                type="text"
+                className="rounded border border-slate-300 px-2 py-1 text-xs"
+                placeholder="为什么不发（必填）"
+                value={excludeReason}
+                onChange={(e) => setExcludeReason(e.target.value)}
               />
-              <span>{it.publish_on} · {it.title}</span>
-            </label>
-            {it.caption && (
-              <>
-                <p className="whitespace-pre-wrap text-xs text-slate-600">正文：{it.caption}</p>
-                <p className="whitespace-pre-wrap text-xs text-slate-600">首评：{it.first_comment}</p>
-              </>
-            )}
-            {it.fact_summary && <p className="text-xs text-amber-700">事实要你看一眼：{it.fact_summary}</p>}
-            {it.note && <p className="text-xs text-amber-700">{it.note}</p>}
-            {it.blocked_reason && <p className="text-xs text-red-700">不能放行：{it.blocked_reason}</p>}
-            {excludeFor === it.work_order_id ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="text"
-                  className="rounded border border-slate-300 px-2 py-1 text-xs"
-                  placeholder="为什么不发（必填）"
-                  value={excludeReason}
-                  onChange={(e) => setExcludeReason(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="underline disabled:opacity-50"
-                  disabled={excludeReason.trim() === '' || busy}
-                  onClick={() => confirmExclude(it.work_order_id)}
-                >
-                  确认剔除
-                </button>
-              </div>
-            ) : (
               <button
                 type="button"
-                className="underline"
-                onClick={() => { setExcludeFor(it.work_order_id); setExcludeReason('') }}
+                className="underline disabled:opacity-50"
+                disabled={excludeReason.trim() === '' || busy}
+                onClick={() => confirmExclude(it.work_order_id)}
               >
-                剔除
+                确认剔除
               </button>
-            )}
-          </li>
-        ))}
-      </ul>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="underline"
+              onClick={() => { setExcludeFor(it.work_order_id); setExcludeReason('') }}
+            >
+              剔除
+            </button>
+          )
+        )}
+      />
       <div className="space-y-1">
         <button
           type="button"
@@ -229,7 +197,7 @@ export function DailyListPanel({ clientId }: { clientId: string }) {
         >
           放行勾上的 {n} 条
         </button>
-        <p className="text-xs text-slate-500">没勾的不会发，也不算剔除；过了日子会自动退回内容池。</p>
+        <p className="text-xs text-slate-500">没勾的不会发，也不算剔除；勾上的在各自那天 {publishHour}:00 自动公开，过了日子没批的会自动退回内容池。</p>
       </div>
     </section>
   )

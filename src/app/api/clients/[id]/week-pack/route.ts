@@ -60,6 +60,7 @@ async function context(req: Request, clientId: string) {
     ctx: {
       enabled: weeklyPackApprovalEnabled(env),
       reelGoPublic: reelCardMode(env) !== 'off',
+      reelScheduled: reelCardMode(env) === 'scheduled',
       configReadable: settings.configReadable,
       clientId,
       clicker,
