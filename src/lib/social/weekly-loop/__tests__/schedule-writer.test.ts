@@ -391,5 +391,11 @@ describe('knife 2: exclusion, live grants, expiry', () => {
     expect(await expireUnapproved(makeDb(dry), { clientId: 'c1', ids: ['w1'], today: '2026-11-05', dryRun: true })).toEqual([{ id: 'w1', outcome: 'expired' }])
     expect(dry.updates).toHaveLength(0)
   })
+
+  it('expireUnapproved keeps a reel that is already public on Facebook', async () => {
+    const state = baseState({ orders: { w1: order({ brief: { weekly_pack: { publish_on: '2026-11-04' } }, published_ref: { video_state: 'PUBLISHED' } }) } })
+    expect(await expireUnapproved(makeDb(state), { clientId: 'c1', ids: ['w1'], today: '2026-11-05', dryRun: false })).toEqual([{ id: 'w1', outcome: 'kept_published' }])
+    expect(state.updates).toHaveLength(0)
+  })
 })
 

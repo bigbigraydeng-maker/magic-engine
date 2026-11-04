@@ -11,7 +11,7 @@ export const DAILY_LIST_DECISION_ACTION = 'social_daily_list_decision'
 export interface ApproveRequest { work_order_id: string; fingerprint: string; publish_on: string }
 export interface ExcludeRequest { work_order_id: string; reason: string }
 
-export type ItemOutcome = 'armed' | 'already_armed' | 'excluded' | 'refused'
+export type ItemOutcome = 'armed' | 'already_armed' | 'excluded' | 'refused' | 'would_arm' | 'would_exclude'
 
 export interface ItemResult {
   work_order_id: string
@@ -51,7 +51,8 @@ async function approveOne(ports: DecidePorts, onList: Map<string, DailyListItem>
     orderId: req.work_order_id, adminEmail: ctx.adminEmail, fingerprint: req.fingerprint, publishOn: req.publish_on, listId: ctx.listId, dryRun: ctx.dryRun,
   })
   if (!res.ok) return refused(req.work_order_id, 'approve', res.reason)
-  return { work_order_id: req.work_order_id, action: 'approve', outcome: res.outcome, reason: null, fingerprint: res.fingerprint, publish_on: res.publishOn }
+  const outcome: ItemOutcome = ctx.dryRun && res.outcome === 'armed' ? 'would_arm' : res.outcome
+  return { work_order_id: req.work_order_id, action: 'approve', outcome, reason: null, fingerprint: res.fingerprint, publish_on: res.publishOn }
 }
 
 async function excludeOne(ports: DecidePorts, clientId: string, onList: Map<string, DailyListItem>, req: ExcludeRequest, ctx: { adminEmail: string; dryRun: boolean; at: string }): Promise<ItemResult> {
@@ -60,19 +61,23 @@ async function excludeOne(ports: DecidePorts, clientId: string, onList: Map<stri
   const reason = req.reason.trim().slice(0, 200)
   if (!reason) return refused(req.work_order_id, 'exclude', 'reason_required')
   const base = { work_order_id: req.work_order_id, action: 'exclude' as const, fingerprint: item.fingerprint, publish_on: item.publish_on }
-  if (ctx.dryRun) return { ...base, outcome: 'excluded', reason }
+  if (ctx.dryRun) return { ...base, outcome: 'would_exclude', reason }
   const out = await ports.excludeOrder(clientId, req.work_order_id, { at: ctx.at, by: ctx.adminEmail, reason })
   return out === 'excluded' ? { ...base, outcome: 'excluded', reason } : { ...base, outcome: 'refused', reason: `exclude_${out}` }
 }
 
 export async function decideDailyList(
   ports: DecidePorts,
-  input: { clientId: string; adminEmail: string; switchOn: boolean; approve: ApproveRequest[]; exclude: ExcludeRequest[]; dryRun: boolean; now: Date; requestId: string },
+  input: { clientId: string; adminEmail: string; switchOn: boolean; agentOn: boolean; approve: ApproveRequest[]; exclude: ExcludeRequest[]; dryRun: boolean; now: Date; requestId: string },
 ): Promise<DecisionReceipt & { receipt_saved: boolean }> {
-  const list = await buildDailyList(ports, { clientId: input.clientId, now: input.now, switchOn: input.switchOn })
+  const list = await buildDailyList(ports, { clientId: input.clientId, now: input.now, switchOn: input.switchOn, agentOn: input.agentOn })
   const onList = new Map(list.items.map((i) => [i.work_order_id, i]))
   const excludeIds = new Set(input.exclude.map((e) => e.work_order_id))
-  const approvable = input.approve.filter((a) => !excludeIds.has(a.work_order_id))
+  // The list id covers only submitted items that match the rebuilt list (same content and day, tickable).
+  const approvable = input.approve.filter((a) => {
+    const it = onList.get(a.work_order_id)
+    return !excludeIds.has(a.work_order_id) && it !== undefined && it.selectable && it.fingerprint === a.fingerprint && it.publish_on === a.publish_on
+  })
   const listId = listIdOf(approvable)
   const at = input.now.toISOString()
   const items: ItemResult[] = []

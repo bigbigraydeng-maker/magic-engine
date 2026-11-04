@@ -1113,9 +1113,9 @@ describe('每日清单:服务端重建清单 → 逐条绑指纹放行 / 剔除'
   })
   const grant = () => (w.row ? readGrant(w.row.payload) : null)
   const decide = (over: Partial<{ approve: Array<{ work_order_id: string; fingerprint: string; publish_on: string }>; exclude: Array<{ work_order_id: string; reason: string }>; dryRun: boolean; switchOn: boolean }>) =>
-    decideDailyList(ports(), { clientId: CLIENT_ID, adminEmail: ADMIN, switchOn: over.switchOn ?? true, approve: over.approve ?? [], exclude: over.exclude ?? [], dryRun: over.dryRun ?? false, now: new Date(w.now), requestId: 'req-1' })
+    decideDailyList(ports(), { clientId: CLIENT_ID, adminEmail: ADMIN, switchOn: over.switchOn ?? true, agentOn: true, approve: over.approve ?? [], exclude: over.exclude ?? [], dryRun: over.dryRun ?? false, now: new Date(w.now), requestId: 'req-1' })
   async function listed() {
-    const l = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true })
+    const l = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true })
     const it = l.items[0]
     if (!it?.fingerprint) throw new Error('not listed')
     return { work_order_id: it.work_order_id, fingerprint: it.fingerprint, publish_on: it.publish_on }
@@ -1123,14 +1123,14 @@ describe('每日清单:服务端重建清单 → 逐条绑指纹放行 / 剔除'
 
   it('清单只列今天到后天、带指纹、默认勾上;开关没开就不能勾', async () => {
     wire(DAY)
-    const on = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true })
+    const on = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true })
     expect(on.items).toHaveLength(1)
     expect(on.items[0]).toMatchObject({ publish_on: DAY, selectable: true, default_checked: true, title: 'Silk Road' })
     expect(on.items[0].fingerprint).toMatch(/.+/)
-    const off = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: false })
+    const off = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: false, agentOn: true })
     expect(off.items[0].selectable).toBe(false)
     wire('2026-10-25')
-    expect((await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true })).items).toHaveLength(0)
+    expect((await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true })).items).toHaveLength(0)
   })
 
   it('放行 → 授权 armed、绑指纹、记清单号;到点执行器照常公开;回执落库', async () => {
@@ -1169,7 +1169,7 @@ describe('每日清单:服务端重建清单 → 逐条绑指纹放行 / 剔除'
     wire(DAY)
     w.meta.description = 'Great badword deal'
     brief = { ...brief, copy: { caption: 'Great badword deal', endcard: { cta: 'Book now', url: 'https://example.com/tour' } } }
-    const l = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true })
+    const l = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true })
     expect(l.items[0]).toMatchObject({ selectable: false, fingerprint: null })
     expect(l.items[0].blocked_reason).toMatch(/.+/)
     expect((await decide({ approve: [{ work_order_id: ORDER_ID, fingerprint: 'x', publish_on: DAY }] })).items[0]).toMatchObject({ reason: 'not_selectable' })
@@ -1184,7 +1184,7 @@ describe('每日清单:服务端重建清单 → 逐条绑指纹放行 / 剔除'
     const pack = brief.weekly_pack as Record<string, unknown>
     expect(pack.publish_on).toBeUndefined()
     expect(pack.excluded_by_card).toMatchObject({ reason: '画面太暗', by: ADMIN, publish_on: DAY })
-    expect((await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true })).items).toHaveLength(0)
+    expect((await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true })).items).toHaveLength(0)
     const direct = await authorizeFromList(deps, { orderId: ORDER_ID, adminEmail: ADMIN, fingerprint: item.fingerprint, publishOn: DAY, listId: 'x', dryRun: false })
     expect(direct).toMatchObject({ ok: false, reason: 'excluded_by_card' })
   })
@@ -1214,7 +1214,7 @@ describe('每日清单:服务端重建清单 → 逐条绑指纹放行 / 剔除'
     wire(DAY)
     const item = await listed()
     const r = await decide({ approve: [item], dryRun: true })
-    expect(r.items[0].outcome).toBe('armed')
+    expect(r.items[0].outcome).toBe('would_arm')
     expect(grant()).toBeNull()
     expect(receipts).toHaveLength(0)
   })
@@ -1226,5 +1226,60 @@ describe('每日清单:服务端重建清单 → 逐条绑指纹放行 / 剔除'
     const r = await decide({ approve: [item] })
     expect(r.receipt_saved).toBe(false)
     expect(grant()?.status).toBe('armed')
+  })
+
+  const tour = (durationText: string) => ({
+    id: 't1', slug: 'tour', name: 'Acme Signature — Grand Tour', destination: 'china', tier: 'signature', title: null,
+    durationText, displayPriceText: null, highlights: [], inclusions: [], exclusions: [], singleSupplement: null,
+    soldOut: false, managesDepartures: false, isActive: true, departures: [],
+  })
+  function blockedEverywhere(l: Awaited<ReturnType<typeof buildDailyList>>) {
+    expect(l.items).toHaveLength(1)
+    expect(l.items[0]).toMatchObject({ selectable: false })
+    expect(l.items[0].blocked_reason).toMatch(/.+/)
+  }
+
+  it('团目录对不上(片里 16 天、目录 19 天):列出、不能勾、放行被拒、不自动剔除', async () => {
+    wire(DAY)
+    const claim = '16 days in China with Acme'
+    w.meta.description = claim
+    brief = { ...brief, copy: { caption: claim, endcard: { cta: 'Book now', url: 'https://example.com/tour' } } }
+    deps = { ...deps, loadFactSource: async () => ({ ok: true as const, catalogVersion: 13, tours: [tour('19 Days')], aliasesByTourId: {} }) }
+    blockedEverywhere(await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true }))
+    expect((await decide({ approve: [{ work_order_id: ORDER_ID, fingerprint: 'x', publish_on: DAY }] })).items[0]).toMatchObject({ reason: 'not_selectable' })
+    expect((brief.weekly_pack as Record<string, unknown>).excluded_by_card).toBeUndefined()
+    expect(grant()).toBeNull()
+  })
+
+  it('外部成片没有出镜授权:列出、不能勾、放行被拒、不自动剔除', async () => {
+    wire(DAY)
+    brief = { ...brief, engine: 'external_upload' }
+    blockedEverywhere(await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true }))
+    expect((await decide({ approve: [{ work_order_id: ORDER_ID, fingerprint: 'x', publish_on: DAY }] })).items[0]).toMatchObject({ reason: 'not_selectable' })
+    expect((brief.weekly_pack as Record<string, unknown>).excluded_by_card).toBeUndefined()
+    expect(grant()).toBeNull()
+  })
+
+  it('撤回过的那一版:照列、不能勾、不能原样再放行;改片(内容变了)后可以', async () => {
+    wire(DAY)
+    const item = await listed()
+    await decide({ approve: [item] })
+    const g = grant()
+    if (!w.row || !g) throw new Error('no grant')
+    w.row.payload['scheduled_go_public'] = { ...g, status: 'revoked' }
+    const l = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true })
+    expect(l.items[0]).toMatchObject({ selectable: false, default_checked: false, blocked_reason: '你撤回过这一版，改片后才能再放行' })
+    expect((await decide({ approve: [item] })).items[0]).toMatchObject({ outcome: 'refused', reason: 'not_selectable' })
+    w.meta.description = 'Recut caption'
+    brief = { ...brief, copy: { caption: 'Recut caption', endcard: { cta: 'Book now', url: 'https://example.com/tour' } } }
+    const again = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true })
+    expect(again.items[0].selectable).toBe(true)
+  })
+
+  it('客户没开社媒 Agent:照列给人看,但不能勾', async () => {
+    wire(DAY)
+    const l = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: false })
+    expect(l.items[0]).toMatchObject({ selectable: false })
+    expect(l.items[0].blocked_reason).toContain('社媒 Agent')
   })
 })

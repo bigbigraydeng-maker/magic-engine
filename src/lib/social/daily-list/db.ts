@@ -2,6 +2,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { PromoteDeps, PromoteOrder } from '@/lib/factory/publish/promote/types'
 import { DAILY_LIST_DECISION_ACTION, type DecidePorts, type DecisionReceipt } from './decide'
+import { readSocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -24,6 +25,13 @@ export function excludedBrief(brief: unknown, mark: { at: string; by: string; re
   const removedDay = typeof pack.publish_on === 'string' ? pack.publish_on : null
   delete pack.publish_on
   return { ...base, weekly_pack: { ...pack, excluded_by_card: { ...mark, publish_on: removedDay } } }
+}
+
+/** Whether the social agent (daily cadence) is on for this client. Unreadable = off. */
+export async function socialAgentOn(db: SupabaseClient, clientId: string): Promise<boolean> {
+  const { data, error } = await db.from('clients').select('publishing_calendar_config').eq('id', clientId).maybeSingle()
+  if (error || !isRecord(data)) return false
+  return readSocialAgentSettings(data.publishing_calendar_config ?? null, null).enabled
 }
 
 export function createDailyListPorts(db: SupabaseClient, promote: PromoteDeps): DecidePorts {

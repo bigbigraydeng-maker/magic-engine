@@ -15,12 +15,13 @@ import { APP_BASE } from './binding-request-items'
 import { readGrant } from '@/lib/factory/publish/promote/scheduled-grant'
 import { isExcludedByCard } from '@/lib/factory/publish/promote/scheduled-authorize-list'
 import { readPublishOn } from '@/lib/social/week-pack/manifest'
-import { listWindow } from '@/lib/social/daily-list/list'
+import { HANDLED_GRANT, listWindow } from '@/lib/social/daily-list/list'
 
 export const DAILY_LIST_TODO_KIND = 'reel_daily_list_pending' as const
 
 /** 已经处理过的授权状态：这些不再算「等你放行」。 */
-const ACTIVE = new Set(['armed', 'claimed', 'consumed', 'consumed_manual', 'unknown'])
+// Same 'already decided' set as the list; a revoked version is not counted as waiting (the list blocks the same content).
+const ACTIVE = new Set([...HANDLED_GRANT, 'revoked'])
 
 const HOW =
   '打开客户社媒页的「今天到后天要发的 Reel」：看完正文和首评点「放行」；不想发的单条点「剔除」并写原因（剔除后不会再自动排）。'

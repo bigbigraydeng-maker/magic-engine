@@ -103,4 +103,17 @@ describe('buildDailyListItems', () => {
     expect(items[0].what).toContain('1 条')
     expect(items[0].what).toContain('另有 2 条')
   })
+
+  it('a revoked version is not counted as waiting (the list blocks that same content)', () => {
+    const items = buildDailyListItems({
+      orders: [{ id: 'o1', client_id: 'c1', brief: { weekly_pack: { publish_on: '2026-11-06' } } }],
+      grantStatus: new Map([['o1', 'revoked']]),
+      expiredYesterday: new Map(),
+      nameOf: () => 'CTS',
+      from: '2026-11-06',
+      to: '2026-11-08',
+    })
+    expect(items).toEqual([])
+  })
 })
+

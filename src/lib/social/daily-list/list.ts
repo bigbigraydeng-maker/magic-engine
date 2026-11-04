@@ -13,6 +13,9 @@ import { readPublishOn, reelTitle } from '@/lib/social/week-pack/manifest'
 
 export const DAILY_LIST_DAYS = 3 // today, tomorrow, the day after
 
+/** Grant states that mean a person already decided (or it may be public): not on the list, not counted as waiting. */
+export const HANDLED_GRANT = new Set(['armed', 'claimed', 'consumed', 'consumed_manual', 'unknown'])
+
 export interface DailyListItem {
   work_order_id: string
   title: string
@@ -53,15 +56,24 @@ export function listIdOf(items: ReadonlyArray<{ work_order_id: string; fingerpri
   return createHash('sha256').update(JSON.stringify(rows)).digest('hex').slice(0, 16)
 }
 
-async function needsApproval(ports: DailyListPorts, order: PromoteOrder): Promise<boolean> {
-  if (isExcludedByCard(order.brief)) return false
+/** Whether the order belongs on the list, and the fingerprint of a version a person revoked (that exact content stays blocked). */
+async function approvalState(ports: DailyListPorts, order: PromoteOrder): Promise<{ show: boolean; revokedFingerprint: string | null }> {
+  if (isExcludedByCard(order.brief)) return { show: false, revokedFingerprint: null }
   const rows = await ports.promote.store.loadTrafficRows(order.id, order.client_id)
-  if (rows.length !== 1) return true // shown, and buildContext will say why it cannot be ticked
+  if (rows.length !== 1) return { show: true, revokedFingerprint: null } // buildContext will say why it cannot be ticked
   const grant = readGrant(rows[0].payload)
-  return !(grant && (grant.status === 'armed' || grant.status === 'claimed' || grant.status === 'consumed'))
+  if (grant && HANDLED_GRANT.has(grant.status)) return { show: false, revokedFingerprint: null }
+  return { show: true, revokedFingerprint: grant?.status === 'revoked' ? grant.fingerprint : null }
 }
 
-async function toItem(ports: DailyListPorts, order: PromoteOrder, angle: unknown, switchOn: boolean): Promise<DailyListItem> {
+/** Why nothing on the list can be ticked right now; null = it can. */
+export function listBlock(input: { switchOn: boolean; agentOn: boolean }): string | null {
+  if (!input.agentOn) return '这位客户没开社媒 Agent：Reel 走周卡批'
+  if (!input.switchOn) return '按日公开没打开，现在批了到日也不会发'
+  return null
+}
+
+async function toItem(ports: DailyListPorts, order: PromoteOrder, angle: unknown, block: string | null, revokedFingerprint: string | null): Promise<DailyListItem> {
   const publishOn = String(readPublishOn(order.brief))
   const base = { work_order_id: order.id, title: reelTitle(angle), publish_on: publishOn }
   const ctx = await buildContext(ports.promote, order)
@@ -70,30 +82,33 @@ async function toItem(ports: DailyListPorts, order: PromoteOrder, angle: unknown
   }
   const fc = ctx.factCheck
   const summary = fc.verdict === 'pass' || fc.verdict === 'not_applicable' ? null : fc.problems.join('；') || '事实要人核对'
+  const fingerprint = grantFingerprint(ctx)
+  const reason = block ?? (revokedFingerprint === fingerprint ? '你撤回过这一版，改片后才能再放行' : null)
   return {
     ...base,
     caption: ctx.view.description,
     first_comment: ctx.firstComment,
     fact_summary: summary,
-    fingerprint: grantFingerprint(ctx),
-    selectable: switchOn,
-    blocked_reason: switchOn ? null : '按日公开没打开，现在批了到日也不会发',
-    default_checked: switchOn && summary === null,
+    fingerprint,
+    selectable: reason === null,
+    blocked_reason: reason,
+    default_checked: reason === null && summary === null,
   }
 }
 
 /** Builds the list. Items whose gates fail are shown, never ticked, never auto-excluded. */
 export async function buildDailyList(
   ports: DailyListPorts,
-  input: { clientId: string; now: Date; switchOn: boolean },
+  input: { clientId: string; now: Date; switchOn: boolean; agentOn: boolean },
 ): Promise<{ from: string; to: string; items: DailyListItem[] }> {
   const { from, to } = listWindow(input.now)
   const orders = await ports.listDatedOrders(input.clientId, from, to)
   const items: DailyListItem[] = []
   for (const { order, angle } of orders) {
     if (order.client_id !== input.clientId) continue
-    if (!(await needsApproval(ports, order))) continue
-    items.push(await toItem(ports, order, angle, input.switchOn))
+    const state = await approvalState(ports, order)
+    if (!state.show) continue
+    items.push(await toItem(ports, order, angle, listBlock(input), state.revokedFingerprint))
   }
   items.sort((a, b) => (a.publish_on + a.work_order_id).localeCompare(b.publish_on + b.work_order_id))
   return { from, to, items }

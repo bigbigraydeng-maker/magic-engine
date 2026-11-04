@@ -13,7 +13,7 @@ import { createProductionPromoteDeps } from '@/lib/factory/publish/promote/deps'
 import { readWeekPackEnv, reelCardMode } from '@/lib/social/week-pack/switches'
 import { buildDailyList } from '@/lib/social/daily-list/list'
 import { decideDailyList, type ApproveRequest, type ExcludeRequest } from '@/lib/social/daily-list/decide'
-import { createDailyListPorts } from '@/lib/social/daily-list/db'
+import { createDailyListPorts, socialAgentOn } from '@/lib/social/daily-list/db'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,8 +55,9 @@ export async function GET(_req: Request, { params }: Ctx) {
   if (!admin.ok) return refused(admin.status, admin.error)
   try {
     const ports = createDailyListPorts(supabaseAdmin, createProductionPromoteDeps())
-    const list = await buildDailyList(ports, { clientId: params.id, now: new Date(), switchOn: switchOn() })
-    return NextResponse.json({ success: true, switch_on: switchOn(), ...list })
+    const agentOn = await socialAgentOn(supabaseAdmin, params.id)
+    const list = await buildDailyList(ports, { clientId: params.id, now: new Date(), switchOn: switchOn(), agentOn })
+    return NextResponse.json({ success: true, switch_on: switchOn() && agentOn, ...list })
   } catch {
     return refused(500, '清单没读出来，不要当成没有要批的。')
   }
@@ -74,12 +75,15 @@ export async function POST(req: Request, { params }: Ctx) {
   const exclude = readExclude(body.exclude ?? [])
   if (!approve || !exclude) return refused(400, '请求格式不对。')
   if (approve.length + exclude.length === 0) return refused(400, '没有要放行或剔除的条目。')
-  if (approve.length > 0 && !switchOn()) return refused(409, '按日公开现在没打开，放行了到日也不会发。')
+  const dryRun = body.dry_run === true
+  if (approve.length > 0 && !switchOn() && !dryRun) return refused(409, '按日公开现在没打开，放行了到日也不会发。')
   try {
+    const agentOn = await socialAgentOn(supabaseAdmin, params.id)
+    if (approve.length > 0 && !agentOn && !dryRun) return refused(409, '这位客户没开社媒 Agent：Reel 走周卡批。')
     const ports = createDailyListPorts(supabaseAdmin, createProductionPromoteDeps())
     const receipt = await decideDailyList(ports, {
-      clientId: params.id, adminEmail: email, switchOn: switchOn(), approve, exclude,
-      dryRun: body.dry_run === true, now: new Date(), requestId: randomUUID(),
+      clientId: params.id, adminEmail: email, switchOn: switchOn(), agentOn, approve, exclude,
+      dryRun, now: new Date(), requestId: randomUUID(),
     })
     return NextResponse.json({ success: true, receipt })
   } catch {

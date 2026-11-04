@@ -210,7 +210,7 @@ export async function writeReelSchedule(
   return { ok: true, dryRun: args.dryRun, written, skipped }
 }
 
-export type ExpireOutcome = 'expired' | 'kept_has_grant' | 'kept_not_past' | 'not_found' | 'check_failed' | 'concurrent_update' | 'write_failed'
+export type ExpireOutcome = 'expired' | 'kept_has_grant' | 'kept_published' | 'kept_not_past' | 'not_found' | 'check_failed' | 'concurrent_update' | 'write_failed'
 
 /**
  * Daily cadence: a reel whose day has passed without any approval goes back to the pool (its day is removed and
@@ -226,6 +226,7 @@ export async function expireUnapproved(
     if (!row || row.client_id !== args.clientId) { out.push({ id, outcome: 'not_found' }); continue }
     const day = readPublishOn(row.brief)
     if (typeof day !== 'string' || day === 'invalid' || day >= args.today) { out.push({ id, outcome: 'kept_not_past' }); continue }
+    if (toPublishedView(row.published_ref)?.video_state === 'PUBLISHED') { out.push({ id, outcome: 'kept_published' }); continue }
     const promote = await checkPromoteRecord(db, args.clientId, id)
     if (promote === 'failed') { out.push({ id, outcome: 'check_failed' }); continue }
     if (promote === 'exists') { out.push({ id, outcome: 'kept_has_grant' }); continue }
