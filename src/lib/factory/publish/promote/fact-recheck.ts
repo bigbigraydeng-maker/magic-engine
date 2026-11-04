@@ -45,6 +45,14 @@ function emptySummary(
   }
 }
 
+const SOURCE_REASON_ZH: Record<string, string> = {
+  catalog_unreadable: '已发布的团目录读不出来',
+  catalog_empty: '团目录里没有团',
+  presence_read_failed: '查不到团目录是否发布过',
+  snapshot_read_failed: '读不到团目录的历史版本',
+  load_failed: '读取出错',
+}
+
 /** Loads the catalog; anything but a usable catalog (or "this client has none") blocks. */
 async function loadSource(
   load: FactSourceLoader,
@@ -62,7 +70,7 @@ async function loadSource(
   if (source.reason === 'catalog_not_published') {
     return { ok: true, summary: emptySummary('not_applicable', '这位客户没有已发布的团目录，不核对') }
   }
-  return blocked(503, `${prefix}读不到团目录，先不公开：${source.reason}`, emptySummary('needs_human', null))
+  return blocked(503, `${prefix}读不到团目录，先不公开：${SOURCE_REASON_ZH[source.reason] ?? '读取出错'}`, emptySummary('needs_human', null))
 }
 
 /** Re-checks one reel against the catalog published right now, at the moment it is about to become public. Fail-closed: only a pass (or a client with no published catalog) goes through. */

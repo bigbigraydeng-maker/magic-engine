@@ -148,7 +148,7 @@ async function firstCommentBlocked(deps: PromoteDeps, f: FinishInput): Promise<s
 }
 
 async function sendFirstComment(deps: PromoteDeps, f: FinishInput, blocked: string | null): Promise<string | null> {
-  if (blocked) { deps.alert(`${f.commentBlockedReason ? '首评与团目录对不上' : '首评命中红线'},未发送 order=${f.orderId}: ${blocked}`); return null }
+  if (blocked) { deps.alert(`${f.commentBlockedReason ? '首评没过团目录复核' : '首评命中红线'},未发送 order=${f.orderId}: ${blocked}`); return null }
   try {
     return await deps.meta.ensureFirstComment({ target: f.target, videoId: f.videoId, idempotencyTag: f.orderId, message: f.firstComment })
   } catch (e) {
