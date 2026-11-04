@@ -80,13 +80,13 @@ const dueEvent = (mode: string) => ({
 })
 
 describe('social-weekly-draft function', () => {
-  it('🔴 is scheduled daily at 08:30 NZ, also listens for the due event, never retries, serialises per client', () => {
+  it('🔴 is scheduled daily at 06:30 NZ, also listens for the due event, never retries, serialises per client', () => {
     const fn = createSocialWeeklyDraftFunction(makeDeps({}))
     const opts = optsOf(fn)
     expect(opts.id).toBe(`${CLOUD_FN_PREFIX}social-weekly-draft`)
     expect(opts.id).toBe(SOCIAL_WEEKLY_DRAFT_FUNCTION_ID)
     expect(opts.triggers?.[0]?.cron).toBe(SOCIAL_WEEKLY_DRAFT_CRON)
-    expect(SOCIAL_WEEKLY_DRAFT_CRON).toBe('TZ=Pacific/Auckland 30 8 * * *')
+    expect(SOCIAL_WEEKLY_DRAFT_CRON).toBe('TZ=Pacific/Auckland 30 6 * * *')
     expect(opts.triggers?.[1]?.event).toBe('social/week_pack.draft_due')
     expect(opts.retries).toBe(0)
     expect(opts.concurrency?.key).toBe('event.data.clientId')

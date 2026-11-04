@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { writeReelSchedule } from '../schedule-writer'
+import { expireUnapproved, writeReelSchedule } from '../schedule-writer'
 
 interface Card {
   id: string
@@ -351,3 +351,51 @@ describe('writeReelSchedule', () => {
     expect(result.skipped).toEqual([{ id: 'missing', reason: 'not_found' }])
   })
 })
+
+describe('knife 2: exclusion, live grants, expiry', () => {
+  it('refuses a reel taken off the daily list', async () => {
+    const state = baseState({ orders: { w1: order({ brief: { weekly_pack: { excluded_by_card: { at: 'x', by: 'y', reason: 'z' } } } }) } })
+    const r = await writeReelSchedule(makeDb(state), ARGS)
+    expect(r.ok && r.skipped).toEqual([{ id: 'w1', reason: 'excluded_by_card' }])
+    expect(state.updates).toHaveLength(0)
+  })
+
+  it('a live go-public grant blocks rescheduling; a missed one does not', async () => {
+    const armed = baseState({ traffic: [{ id: 't', payload: { scheduled_go_public: { status: 'armed' } } }] })
+    const a = await writeReelSchedule(makeDb(armed), ARGS)
+    expect(a.ok && a.skipped).toEqual([{ id: 'w1', reason: 'promote_record_exists' }])
+    const missed = baseState({ traffic: [{ id: 't', payload: { scheduled_go_public: { status: 'missed' } } }] })
+    const m = await writeReelSchedule(makeDb(missed), ARGS)
+    expect(m.ok && m.written).toEqual([{ id: 'w1', publishOn: '2026-11-09' }])
+  })
+
+  it('expireUnapproved: a past day without any grant goes back to the pool and records the old day', async () => {
+    const state = baseState({ orders: { w1: order({ brief: { weekly_pack: { publish_on: '2026-11-04', other: 'keep' } } }) } })
+    const r = await expireUnapproved(makeDb(state), { clientId: 'c1', ids: ['w1'], today: '2026-11-05', dryRun: false })
+    expect(r).toEqual([{ id: 'w1', outcome: 'expired' }])
+    const brief = state.updates[0].patch.brief as { weekly_pack: Record<string, unknown> }
+    expect(brief.weekly_pack.publish_on).toBeUndefined()
+    expect(brief.weekly_pack.other).toBe('keep')
+    expect(brief.weekly_pack.expired_unapproved).toMatchObject({ publish_on: '2026-11-04' })
+  })
+
+  it('expireUnapproved keeps a reel with a grant, a future day, and writes nothing in dry run', async () => {
+    const granted = baseState({
+      orders: { w1: order({ brief: { weekly_pack: { publish_on: '2026-11-04' } } }) },
+      traffic: [{ id: 't', payload: { scheduled_go_public: { status: 'consumed' } } }],
+    })
+    expect(await expireUnapproved(makeDb(granted), { clientId: 'c1', ids: ['w1'], today: '2026-11-05', dryRun: false })).toEqual([{ id: 'w1', outcome: 'kept_has_grant' }])
+    const future = baseState({ orders: { w1: order({ brief: { weekly_pack: { publish_on: '2026-11-05' } } }) } })
+    expect(await expireUnapproved(makeDb(future), { clientId: 'c1', ids: ['w1'], today: '2026-11-05', dryRun: false })).toEqual([{ id: 'w1', outcome: 'kept_not_past' }])
+    const dry = baseState({ orders: { w1: order({ brief: { weekly_pack: { publish_on: '2026-11-04' } } }) } })
+    expect(await expireUnapproved(makeDb(dry), { clientId: 'c1', ids: ['w1'], today: '2026-11-05', dryRun: true })).toEqual([{ id: 'w1', outcome: 'expired' }])
+    expect(dry.updates).toHaveLength(0)
+  })
+
+  it('expireUnapproved keeps a reel that is already public on Facebook', async () => {
+    const state = baseState({ orders: { w1: order({ brief: { weekly_pack: { publish_on: '2026-11-04' } }, published_ref: { video_state: 'PUBLISHED' } }) } })
+    expect(await expireUnapproved(makeDb(state), { clientId: 'c1', ids: ['w1'], today: '2026-11-05', dryRun: false })).toEqual([{ id: 'w1', outcome: 'kept_published' }])
+    expect(state.updates).toHaveLength(0)
+  })
+})
+

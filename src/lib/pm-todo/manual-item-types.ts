@@ -115,6 +115,8 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'social_weekly_loop_needs_human',
   // Reel 按日公开：链接是要登录的后台页。没人看见 = 批过的片到日没发，也没人知道。
   'reel_scheduled_needs_human',
+  // Reel 每日清单：链接是要登录的后台页。没人看见 = 排了日子的片没人批，到日不发。
+  'reel_daily_list_pending',
   // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
   // 这条里还有「检查自己没跑成」，绝不能因为链接问题静默消失。
   'ads_tracking_preflight_fix',
@@ -251,6 +253,8 @@ export type ManualItemKind =
   | 'social_weekly_loop_needs_human'
   /** Reel 按日公开：批后内容 / 日子变了、错过、发失败、结果不明（读流量记录里的授权状态） */
   | 'reel_scheduled_needs_human'
+  /** Reel 每日清单：今天到后天排了日子、还没放行的（开了社媒 Agent 的客户） */
+  | 'reel_daily_list_pending'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */

@@ -4,7 +4,7 @@
  * Never moves a date that is already set (it may already be approved). Writes nothing in dry_run.
  */
 import { fillSlots } from './schedule'
-import type { WriteReelScheduleArgs, WriteReelScheduleResult } from './schedule-writer'
+import type { ExpireOutcome, WriteReelScheduleArgs, WriteReelScheduleResult } from './schedule-writer'
 import { mondayOf, occupiedDays, poolDepthDays, type DatedRow } from './daily-schedule'
 import { checkReelFacts, reelOverlayOf, type OkFactSource } from './reel-facts'
 import { readPublishOn } from '@/lib/social/week-pack/manifest'
@@ -13,10 +13,10 @@ import { readSocialAgentSettings, type SocialAgentSettings } from '@/lib/social/
 export const DAILY_SCHEDULED_BY = 'social-daily-agent'
 
 /**
- * Knife 1: a week whose card was already approved is also off limits. Items put there now could not be
- * approved before knife 2 (per-day list card) and would silently expire. Knife 2 turns this on.
+ * Only a week card still under review blocks daily scheduling. Items put into an approved week are approved
+ * on the daily list (knife 2); unapproved ones past their day go back to the pool (expiry pass).
  */
-export const DAILY_BLOCK_ONLY_PENDING = false
+export const DAILY_BLOCK_ONLY_PENDING = true
 
 /**
  * Rows the candidate selection left out but that carry a date (today, past, beyond the look window, any status).
@@ -52,7 +52,11 @@ export interface DailyScheduleResult {
   errors: string[]
   poolDepthDays: number | null
   alreadyScheduled: number
+  /** Past-day reels that were never approved and went back to the pool this run. */
+  expired: string[]
 }
+
+export type ExpirePort = (args: { clientId: string; ids: string[]; today: string; dryRun: boolean }) => Promise<Array<{ id: string; outcome: ExpireOutcome }>>
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -99,6 +103,17 @@ export function outsideTourKey(
   return row ? checkReelFacts({ brief: row.brief, output: row.output, orderId: row.id, source, today }).result.targetTourId : null
 }
 
+async function expirePast(
+  args: { clientId: string; entries: readonly DailyEntry[]; dryRun: boolean; today: string },
+  expire: ExpirePort | undefined,
+): Promise<{ expired: string[]; errors: string[] }> {
+  const past = args.entries.filter((e) => e.scheduledOn !== null && e.scheduledOn < args.today).map((e) => e.id)
+  if (!expire || past.length === 0) return { expired: [], errors: [] }
+  const res = await expire({ clientId: args.clientId, ids: past, today: args.today, dryRun: args.dryRun })
+  const broken = res.filter((r) => r.outcome === 'check_failed' || r.outcome === 'write_failed').length
+  return { expired: res.filter((r) => r.outcome === 'expired').map((r) => r.id), errors: broken > 0 ? [`expire_failed:${broken}`] : [] }
+}
+
 export async function scheduleDaily(
   writeSchedule: (args: WriteReelScheduleArgs) => Promise<WriteReelScheduleResult>,
   args: {
@@ -107,16 +122,21 @@ export async function scheduleDaily(
     reelPerDay: number
     entries: readonly DailyEntry[]
     dryRun: boolean
+    today: string
   },
+  expire?: ExpirePort,
 ): Promise<DailyScheduleResult> {
   const keyOf = new Map(args.entries.map((e) => [e.id, e.productKey]))
-  const occupied = occupiedDays(args.entries, (id) => keyOf.get(id) ?? null)
-  const pool = args.entries.filter((e) => e.eligible && e.scheduledOn === null)
+  const { expired, errors } = await expirePast(args, expire)
+  const live = args.entries.filter((e) => !expired.includes(e.id))
+  const occupied = occupiedDays(live, (id) => keyOf.get(id) ?? null)
+  const pool = live.filter((e) => e.eligible && e.scheduledOn === null)
   const result: DailyScheduleResult = {
     written: [],
     skipped: [],
     unscheduled: [],
-    errors: [],
+    errors,
+    expired,
     poolDepthDays: poolDepthDays(pool.length, args.reelPerDay),
     alreadyScheduled: occupied.length,
   }

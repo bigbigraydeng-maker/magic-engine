@@ -9,6 +9,7 @@
  */
 import { groupVersions, type VersionRow } from './version-groups'
 import type { ScheduledItem } from './schedule'
+import { isExcludedByCard } from '@/lib/factory/publish/promote/scheduled-authorize-list'
 
 /** Reel publishing allows scheduling up to 29 days ahead; one day of margin. */
 export const DAILY_LOOK_DAYS = 28
@@ -52,7 +53,7 @@ export interface DatedRow extends VersionRow {
   scheduledOn: string | null
 }
 
-export type DailyVersionReason = 'ambiguous_version' | 'superseded' | 'version_already_scheduled'
+export type DailyVersionReason = 'ambiguous_version' | 'superseded' | 'version_already_scheduled' | 'excluded_by_card' | 'version_excluded'
 
 /** Which rows stay in the run, and why the others left. */
 export function dailyVersionDecisions(rows: readonly DatedRow[]): {
@@ -76,9 +77,12 @@ export function dailyVersionDecisions(rows: readonly DatedRow[]): {
       }
       continue
     }
+    // The newest version was taken off the list: the whole reel stays off; only a version made later can return.
+    const latestExcluded = isExcludedByCard(byId.get(group.latestId)?.brief)
     for (const id of group.memberIds) {
       if (excluded.has(id)) continue
-      if (id === group.latestId) keep.add(id)
+      if (latestExcluded) excluded.set(id, id === group.latestId ? 'excluded_by_card' : 'version_excluded')
+      else if (id === group.latestId) keep.add(id)
       else excluded.set(id, 'superseded')
     }
   }

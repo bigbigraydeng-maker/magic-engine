@@ -56,6 +56,7 @@ import { pushAdsAccountStatusItems } from './ads-account-status-items'
 import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
 import { pushWeeklyLoopItems } from './social-weekly-loop-items'
 import { pushReelScheduledItems } from './reel-scheduled-items'
+import { pushDailyListItems } from './daily-list-items'
 import { pushPlanDraftFailureItems } from './plan-draft-failure-items'
 import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
@@ -451,6 +452,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // Reel 按日公开：周卡批过、到日没发出去的（读流量记录里的授权状态）
     (b) => pushReelScheduledItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] Reel 按日公开待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // Reel 每日清单：开了社媒 Agent 的客户，今天到后天排了日子、还没放行的
+    (b) => pushDailyListItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] Reel 每日清单待办生成失败（不阻塞其他待办）:', e),
     ),
     (b) => pushPlanDraftFailureItems(supabase, b, ids, nameOf).catch((e) =>
       console.warn('[manual-items] 推广计划草稿失败待办生成失败（不阻塞其他待办）:', e),
