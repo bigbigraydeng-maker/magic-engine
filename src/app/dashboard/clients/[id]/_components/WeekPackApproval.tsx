@@ -4,7 +4,7 @@
  * 「批下一周」：给人看的句子。开关关闭时没有同意按钮，也不会去授权。
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { ReelGoPublicPreviewPanel, readFactCheck, type ReelGoPublicPreview } from '@/app/dashboard/factory/_components/PromoteReelButton'
 import { ReelListRows, defaultChecked, readReelList, type ReelListItem } from './ReelListRows'
@@ -74,27 +74,31 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
   const [weekReels, setWeekReels] = useState<{ publishHour: number; items: ReelListItem[] } | null>(null)
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [reelsError, setReelsError] = useState<string | null>(null)
+  // Only the latest list request may write state (a slow first read must not overwrite a newer one).
+  const reelsSeq = useRef(0)
 
   async function loadWeekReels() {
+    const seq = ++reelsSeq.current
+    setWeekReels(null)
     try {
       const res = await fetch(`/api/clients/${clientId}/daily-list?scope=week`)
+      if (seq !== reelsSeq.current) return
       if (res.status === 403) {
-        setWeekReels({ publishHour: 18, items: [] })
-        setChecked(new Set())
-        setReelsError(null)
+        setReelsError('批视频要全局管理员：你这次点同意只会批 Story，视频不会批。')
         return
       }
       const json: unknown = await res.json().catch(() => null)
+      if (seq !== reelsSeq.current) return
       const parsed = readReelList(json)
       if (!res.ok || parsed === null) {
-        setReelsError('下周的视频清单没读出来，不要当成没有视频。')
+        setReelsError('下周的视频清单没读出来，不要当成没有视频。现在点同意只会批 Story，视频不会批；刷新后再批视频。')
         return
       }
       setWeekReels({ publishHour: parsed.publishHour, items: parsed.items })
       setChecked(defaultChecked(parsed.items))
       setReelsError(null)
     } catch {
-      setReelsError('下周的视频清单没读出来，不要当成没有视频。')
+      if (seq === reelsSeq.current) setReelsError('下周的视频清单没读出来，不要当成没有视频。现在点同意只会批 Story，视频不会批；刷新后再批视频。')
     }
   }
 
@@ -209,6 +213,8 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
   if (load.kind === 'error') return <section id="approve-week" className="rounded-2xl border border-[#8F2B22]/30 bg-white p-4 text-sm font-medium text-[#8F2B22]">{load.text}</section>
 
   const page = load.page
+  // While the list is still loading the click would send no reels and read as "send none": wait for it.
+  const reelsLoading = page.reel_scheduled === true && weekReels === null && reelsError === null
   const checkedReelCount = weekReels
     ? weekReels.items.filter((item) => checked.has(item.work_order_id) && item.selectable && item.fingerprint).length
     : 0
@@ -296,8 +302,8 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
       {page.enabled && (
         <div className="flex flex-wrap gap-2">
           {page.card && (
-            <button type="button" disabled={busy || !page.card.confirm_enabled} onClick={() => void send('confirm', page.card)} className="rounded-lg bg-me-ochre px-3 py-1.5 text-sm font-bold text-me-charcoal disabled:opacity-40">
-              {page.reel_scheduled ? `同意这一周（视频 ${checkedReelCount} 条）` : '同意这一周'}
+            <button type="button" disabled={busy || !page.card.confirm_enabled || reelsLoading} onClick={() => void send('confirm', page.card)} className="rounded-lg bg-me-ochre px-3 py-1.5 text-sm font-bold text-me-charcoal disabled:opacity-40">
+              {!page.reel_scheduled ? '同意这一周' : reelsError ? '同意这一周（只批 Story，视频这次不批）' : `同意这一周（视频 ${checkedReelCount} 条）`}
             </button>
           )}
           {page.card && (

@@ -70,6 +70,17 @@ describe('week card · reel list (scheduled mode)', () => {
     expect(r.receipt?.lines.some((l) => l.text.includes('已批'))).toBe(true)
   })
 
+  it('the week rolled over (or anything changed) between opening and clicking → refused before any reel is approved', async () => {
+    const s = setup(true)
+    const next = { ...manifest(), week_start: '2026-11-16', week_end: '2026-11-22' }
+    const r = await confirmWeekPack({
+      enabled: true, clientId: CLIENT, clicker: OPC, runId: 'run-1', expectedDecisionId: 'dec-1',
+      fingerprint: s.fingerprint, tokens: new Map(), reelApprovals: [approval], ports: { ...s.ports, loadManifest: async () => next },
+    })
+    expect(r.httpStatus).toBe(409)
+    expect(s.approveReels).not.toHaveBeenCalled()
+  })
+
   it('not scheduled: the old per-reel preview path is unchanged', async () => {
     const s = setup(false)
     await confirmWeekPack({

@@ -87,7 +87,7 @@ export async function approveReelsFromWeekList(
   if (input.actor.allowedClientId !== null || !isGlobalAdminEmail(input.actor.email)) {
     return [{ kind: 'reel', stable_id: null, code: 'reel_forbidden', ok: false, text: '批视频仍要全局管理员。视频这一周没有授权，其他内容照常。' }]
   }
-  if (approvals.length === 0) return [{ kind: 'reel', stable_id: null, code: 'reel_none', ok: true, text: '没有勾选视频，这一周视频都不发。' }]
+  if (approvals.length === 0) return [{ kind: 'reel', stable_id: null, code: 'reel_none', ok: true, text: '这次没勾视频，没有新批视频；之前已经批过的照常按日公开。' }]
   const { decideDailyList } = await import('@/lib/social/daily-list/decide')
   const { createDailyListPorts } = await import('@/lib/social/daily-list/db')
   const { createProductionPromoteDeps } = await import('@/lib/factory/publish/promote/deps')

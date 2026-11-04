@@ -1,5 +1,6 @@
 'use client'
 
+// 「看片」放的是视频工厂的成片文件；批准绑定的是 Facebook 草稿的正文、首评和视频编号（两者默认同一份，重新出片会变成新工单）。
 // 一条 Reel 一行：哪天几点发、哪个团、能直接看片、要公开的正文和首评、核对结果。周卡和每日清单共用。只管显示和勾选，不发请求。
 
 import type { ReactNode } from 'react'
@@ -118,7 +119,7 @@ export function ReelListRows(props: {
           </label>
           {it.video_path && (
             <details>
-              <summary className="cursor-pointer underline">看片</summary>
+              <summary className="cursor-pointer underline">看片（视频工厂的成片）</summary>
               <video controls preload="none" className="mt-1 max-h-80 rounded" src={videoUrl(it.video_path)} />
             </details>
           )}
