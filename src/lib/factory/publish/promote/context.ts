@@ -7,6 +7,7 @@ import {
   asRecord, checkOrderPrechecks, computeFingerprint, normalizeForCompare, redlineSurface,
 } from './guards'
 import { portFor, type PromotePlatformPort } from './platform-port'
+import { recheckReelFacts, type FactRecheckSummary } from './fact-recheck'
 import {
   PromoteMetaError,
   type MetaReelView, type PromoteDeps, type PromoteOrder, type PromoteResult, type TrafficRow,
@@ -25,6 +26,7 @@ export interface PromoteContext {
   caption: string
   firstComment: string
   fingerprint: string
+  factCheck: FactRecheckSummary
 }
 
 type Fail = Extract<PromoteResult, { ok: false }>
@@ -54,6 +56,18 @@ async function checkDraftContent(deps: PromoteDeps, order: PromoteOrder, view: M
   return hit ? fail(422, hit) : null
 }
 
+/** Re-check the reel against the catalog published right now. A reel already public on Facebook is only synced,
+ *  so a mismatch is flagged (alert) rather than blocking the record of what already happened. */
+async function recheckFacts(deps: PromoteDeps, order: PromoteOrder, view: MetaReelView): Promise<FactRecheckSummary | Fail> {
+  const recheck = await recheckReelFacts({ loadFactSource: deps.loadFactSource, order, now: deps.now() })
+  if (!recheck.ok) {
+    // Already public on Facebook (sync only): do not block recording what happened; flag it instead.
+    if (!view.published) return fail(recheck.status, recheck.error)
+    deps.alert(`已公开的 Reel 与团目录对不上: ${order.id} ${recheck.error}`)
+  }
+  return recheck.summary
+}
+
 export async function buildContext(deps: PromoteDeps, order: PromoteOrder): Promise<PromoteContext | Fail> {
   const target = await deps.resolveTarget(order.client_id)
   const rows = await deps.store.loadTrafficRows(order.id, order.client_id)
@@ -72,8 +86,12 @@ export async function buildContext(deps: PromoteDeps, order: PromoteOrder): Prom
   const blocked = await checkDraftContent(deps, order, view, caption, first.text)
   if (blocked) return blocked
 
+  const factCheck = await recheckFacts(deps, order, view)
+  if ('ok' in factCheck) return factCheck
+
   const fingerprint = computeFingerprint({
     videoId: pre.videoId, description: view.description, firstComment: first.text, approvedAt: pre.approvedAt,
+    catalogVersion: factCheck.catalog_version,
   })
-  return { order, target, port, row: pre.row, videoId: pre.videoId, pageId: pre.pageId, approvedAt: pre.approvedAt, view, caption, firstComment: first.text, fingerprint }
+  return { order, target, port, row: pre.row, videoId: pre.videoId, pageId: pre.pageId, approvedAt: pre.approvedAt, view, caption, firstComment: first.text, fingerprint, factCheck }
 }

@@ -16,6 +16,8 @@ import { REEL_AUTO_CHECK_KEYS, checklistPasses, humanKeysForReviewRef, validateC
 import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
 import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from '../deliverable'
 import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
+import { recheckReelFacts } from './promote/fact-recheck'
+import { loadSocialFactSource } from '@/lib/social/weekly-loop/fact-aliases'
 
 const MAX_PUBLISH_ATTEMPTS = 3
 const RETRY_BACKOFF_MIN = 10 // 失败退避基数(分钟)· 指数
@@ -201,13 +203,23 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
     return { order_id: id, result: 'failed', detail: 'approval_checklist_incomplete' }
   }
 
-  // Only a live publish shows the reel to the public; drafts stay private. The consent gate is shared
-  // with the weekly loop and the go-public precheck (lib/factory/talent-consent.ts).
+  // Only a live publish shows the reel to the public; drafts stay private. Both the consent gate and the
+  // catalog fact re-check run only for a live publish. The consent gate is shared with the weekly loop and
+  // the go-public precheck (lib/factory/talent-consent.ts).
   if (!opts.draft) {
     const consent = consentVerdict({ brief, output, use: 'facebook_organic' })
     if (!consent.ok) {
       await markFailed(id, attempts, `出镜授权不满足:${CONSENT_REASON_ZH[consent.reason]}`, true)
       return { order_id: id, result: 'failed', detail: 'consent_blocked' }
+    }
+    const facts = await recheckReelFacts({
+      loadFactSource: (cid, today) => loadSocialFactSource(supabaseAdmin, cid, today),
+      order: { id, client_id: clientId, brief, output },
+      now: new Date(),
+    })
+    if (!facts.ok) {
+      await markFailed(id, attempts, facts.error, true)
+      return { order_id: id, result: 'failed', detail: 'fact_check_blocked' }
     }
   }
 

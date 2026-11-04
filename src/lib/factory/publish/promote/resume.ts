@@ -3,6 +3,7 @@
 
 import { buildReelFirstComment } from '@/lib/social/reel-publishing'
 import { asRecord, computeFingerprint, redlineSurface } from './guards'
+import { recheckReelFacts } from './fact-recheck'
 import { writeCompletionBooks } from './books'
 import { finishStage, type FinishInput } from './publish-steps'
 import { readAuth } from './payload-lock'
@@ -63,6 +64,8 @@ async function buildResume(deps: PromoteDeps, order: PromoteOrder, row: ResumeCo
   if (!videoId || !first || !order.master_brief_id || typeof approvedAt !== 'string') return fail(422, '补做收尾所需的配置缺失')
   const hit = await deps.scanRedline(order.client_id, order.master_brief_id, redlineSurface(first.text))
   if (hit) return fail(422, `首评命中红线,不能发送: ${hit}`)
+  const recheck = await recheckReelFacts({ loadFactSource: deps.loadFactSource, order, now: deps.now(), only: 'first_comment' })
+  if (!recheck.ok) return fail(recheck.status, recheck.error)
   const fingerprint = computeFingerprint({ videoId, description: '', firstComment: first.text, approvedAt })
   return {
     ok: true, order, claimTarget: { orderId: order.id, row, fingerprint, videoId, pageId }, approvedAt, requestId, commentRetry,

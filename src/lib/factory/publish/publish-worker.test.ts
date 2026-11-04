@@ -12,6 +12,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
+const factSource = vi.hoisted(() => ({ load: vi.fn() }))
+vi.mock('@/lib/social/weekly-loop/fact-aliases', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/social/weekly-loop/fact-aliases')>()),
+  loadSocialFactSource: (...args: unknown[]) => factSource.load(...args),
+}))
 vi.mock('./facebook-reel-adapter', () => ({
   facebookReelAdapter: {
     publish: vi.fn(),
@@ -213,6 +218,32 @@ describe('发布正文红线闸', () => {
     expect(mockPublish).not.toHaveBeenCalled()
     expect(r.detail).toBe('consent_blocked')
     expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('🔴 live publish is refused when the tour catalog cannot be read (fact re-check fails closed)', async () => {
+    factSource.load.mockResolvedValue({ ok: false, reason: 'load_failed' })
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('fact_check_blocked')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('live publish goes ahead for a client with no published tour catalog (not applicable)', async () => {
+    factSource.load.mockResolvedValue({ ok: false, reason: 'catalog_not_published' })
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
+    await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('a draft publish never reads the catalog', async () => {
+    factSource.load.mockClear()
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
+    await run()
+
+    expect(factSource.load).not.toHaveBeenCalled()
   })
 
   it('a draft publish of the same external upload is allowed (drafts are not public)', async () => {

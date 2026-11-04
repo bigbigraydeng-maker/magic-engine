@@ -1,6 +1,8 @@
 // 转公开动作的生产依赖装配(路由用)。测试与试跑用 action.ts 的 PromoteDeps 注入替身,不走这里。
 
 import { randomBytes, randomUUID } from 'node:crypto'
+import { loadSocialFactSource } from '@/lib/social/weekly-loop/fact-aliases'
+import { supabaseAdmin } from '@/lib/supabase'
 import { resolveTarget, scanPublishCaption } from '../publish-worker'
 import { createPromoteBooks } from './books-port'
 import { createPromoteMeta } from './meta-port'
@@ -14,6 +16,7 @@ export function createProductionPromoteDeps(): PromoteDeps {
     books: createPromoteBooks(),
     resolveTarget,
     scanRedline: (clientId, masterBriefId, text) => scanPublishCaption(clientId, masterBriefId, text),
+    loadFactSource: (clientId, today) => loadSocialFactSource(supabaseAdmin, clientId, today),
     now: () => new Date(),
     uuid: () => randomUUID(),
     randomToken: () => randomBytes(24).toString('base64url'),

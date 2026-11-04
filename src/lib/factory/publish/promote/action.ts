@@ -48,6 +48,7 @@ const claimTargetOf = (ctx: PromoteContext): ClaimTarget => ({
 const previewDataOf = (ctx: PromoteContext): Omit<PreviewData, 'preview_token' | 'expires_at'> => ({
   mode: ctx.view.published ? 'sync_only' : 'promote', page_id: ctx.pageId, video_id: ctx.videoId,
   caption: ctx.view.description, first_comment: ctx.firstComment, checklist_passed_at: ctx.approvedAt,
+  fact_check: ctx.factCheck,
 })
 
 function readSlots(payload: Record<string, unknown>): Record<string, PreviewSlot> {

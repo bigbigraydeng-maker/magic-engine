@@ -125,6 +125,7 @@ function makeDeps(w: World): PromoteDeps {
       },
     },
     resolveTarget: async () => (w.target ? { ...w.target } : null),
+    loadFactSource: async () => ({ ok: false as const, reason: 'catalog_not_published' }),
     scanRedline: async (_c, _m, text) => (text.toLowerCase().includes(w.redlineWord) ? `命中红线: ${w.redlineWord}` : null),
     now: () => new Date(w.now),
     uuid: () => `00000000-0000-4000-8000-${String(++w.seq).padStart(12, '0')}`,
@@ -654,5 +655,71 @@ describe('books_written_at 章', () => {
     expect(auth().books_written_at).toBeUndefined()
     expect(String(auth().books_error)).toContain('没有命中任何行')
     expect(auth().needs_attention).toBe(true)
+  })
+})
+
+describe('发前团目录复核', () => {
+  const okSource = (version: number) => async () => ({ ok: true as const, catalogVersion: version, tours: [], aliasesByTourId: {} })
+
+  it('目录读不到 → 预览就拦(503),不碰 Meta 转公开', async () => {
+    deps = { ...deps, loadFactSource: async () => ({ ok: false as const, reason: 'load_failed' }) }
+    const r = await preview()
+    expect(!r.ok && r.status).toBe(503)
+    expect(err(r)).toContain('读不到团目录')
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('目录读取本身抛错 → 一样拦,不当成没问题', async () => {
+    deps = { ...deps, loadFactSource: async () => { throw new Error('db down') } }
+    const r = await preview()
+    expect(!r.ok && r.status).toBe(503)
+  })
+
+  it('没有已发布团目录的客户 → 不适用,照常预览,预览里写明', async () => {
+    const r = await preview()
+    expect(r.ok && r.kind === 'preview' ? r.data.fact_check?.verdict : '').toBe('not_applicable')
+  })
+
+  it('核对通过 → 预览带出目录版本', async () => {
+    deps = { ...deps, loadFactSource: okSource(13) }
+    const r = await preview()
+    expect(r.ok && r.kind === 'preview' ? r.data.fact_check?.catalog_version : null).toBe(13)
+  })
+
+  it('预览之后目录发了新版 → 确认被拒,要求重新预览', async () => {
+    deps = { ...deps, loadFactSource: okSource(13) }
+    const token = await tokenOf()
+    deps = { ...deps, loadFactSource: okSource(14) }
+    const r = await confirm(token)
+    expect(r.ok).toBe(false)
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('确认时目录读不到 → 不转公开', async () => {
+    const token = await tokenOf()
+    deps = { ...deps, loadFactSource: async () => ({ ok: false as const, reason: 'snapshot_read_failed' }) }
+    const r = await confirm(token)
+    expect(!r.ok && r.status).toBe(503)
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('已被人在 Facebook 上手动公开(只同步记录)→ 读不到目录也不拦同步,但发告警', async () => {
+    w.meta.published = true
+    deps = { ...deps, loadFactSource: async () => ({ ok: false as const, reason: 'load_failed' }) }
+    const r = await preview()
+    expect(r.ok && r.kind === 'preview' ? r.data.mode : '').toBe('sync_only')
+    expect(w.alerts.join('|')).toContain('团目录')
+  })
+
+  it('补发首评前也复核首评:目录读不到 → 不发首评', async () => {
+    w.commentError = new Error('comment boom')
+    await confirm(await tokenOf())
+    w.commentError = null
+    w.log.length = 0
+    deps = { ...deps, loadFactSource: async () => ({ ok: false as const, reason: 'load_failed' }) }
+    const r = await preview()
+    expect(r.ok).toBe(false)
+    expect(err(r)).toContain('首评')
+    expect(w.log).not.toContain('comment')
   })
 })
