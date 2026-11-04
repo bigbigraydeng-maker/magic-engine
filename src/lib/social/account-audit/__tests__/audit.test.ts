@@ -16,9 +16,10 @@ describe('normaliseMusic', () => {
 })
 
 describe('inferFormat', () => {
-  it('factory templates are destination content; an external upload is people; unknown stays unknown', () => {
+  it('factory templates are destination content; an untagged external upload is unknown; unknown stays unknown', () => {
     expect(inferFormat({ format: null, template: 'list', engine: 'remotion' })).toBe('destination')
-    expect(inferFormat({ format: null, template: null, engine: 'external_upload' })).toBe('people')
+    expect(inferFormat({ format: null, template: null, engine: 'external_upload' })).toBeNull()
+    expect(inferFormat({ format: 'people', template: null, engine: 'external_upload' })).toBe('people')
     expect(inferFormat({ format: null, template: 'mystery', engine: 'remotion' })).toBeNull()
     expect(inferFormat({ format: 'explainer', template: 'list', engine: 'remotion' })).toBe('explainer')
   })
@@ -72,6 +73,16 @@ describe('auditAccount', () => {
     expect(d4).toHaveLength(1)
     expect(d4[0]).toMatchObject({ tier: 'B' })
     expect(d4[0].what).toContain('destination')
+  })
+
+  it('untagged reels might be the missing form: say so, and ask for tags, instead of declaring it absent', () => {
+    const reels = [reel('a', '2026-10-20'), reel('up', '2026-10-21', { template: null, engine: 'external_upload', music: 'u.mp3' })]
+    const r = auditAccount(reels, '2026-10-30')
+    const d4 = r.metrics.find((m) => m.key === 'D4')
+    expect(d4?.status).toBe('over')
+    expect(d4?.value).toContain('另有 1 条没标形式，可能就是')
+    expect(r.findings.some((f) => f.key === 'D4' && f.tier === 'C' && f.what.includes('没标内容形式'))).toBe(true)
+    expect(r.findings.filter((f) => f.key === 'D4' && f.what.startsWith('账号缺')).every((f) => f.what.includes('可能就是'))).toBe(true)
   })
 
   it('industry thresholds can be overridden per client', () => {
