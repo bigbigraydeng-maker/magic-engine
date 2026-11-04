@@ -560,7 +560,8 @@ export async function approveDraft(
   if (p.status !== 'awaiting_approval') {
     return { ok: false, error: `这条现在是「${p.status}」，只有等待批准的才能开` }
   }
-  if (Array.isArray(p.adSetIds) && p.adSetIds.length > 0) {
+  // 账本里的草稿内容也看（不只看 adSetIds）：草稿写了多个组、账本却只记了单个 adSetId 的形状，开一次只会开其中一个组。
+  if ((Array.isArray(p.adSetIds) && p.adSetIds.length > 0) || Array.isArray(p.draft?.adSets)) {
     return {
       ok: false,
       error: '这条草案有多个广告组，「开」按钮现在不能开它。多个广告组要由 PM 点名到层、逐层开，不走这个按钮。',

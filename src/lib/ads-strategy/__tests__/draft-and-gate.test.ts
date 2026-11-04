@@ -1543,6 +1543,20 @@ describe('approveDraft — 锁定：多组草案无论账本里有没有 adSetId
     expect(updated).toHaveLength(0)
   })
 
+  it('账本里草稿写了 3 个组、却只记了单个 adSetId、没记 adSetIds → 拒开，不发任何开启请求', async () => {
+    const rec: DraftRecord = {
+      status: 'awaiting_approval', draft: MULTI, summary: 's',
+      campaignId: 'camp1', adSetId: 'as1', adIds: ['ad1'],
+    }
+    const { sb, updated } = fakeSupabase(rec)
+    mActivate.mockClear()
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('多个广告组')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated).toHaveLength(0)
+  })
+
   it('旧记录 adSetIds 是空数组 → 按单组走，行为不变（会去开）', async () => {
     const rec: DraftRecord = {
       status: 'awaiting_approval', draft: DRAFT, summary: 's',
