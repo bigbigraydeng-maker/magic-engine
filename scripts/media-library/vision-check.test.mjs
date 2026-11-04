@@ -12,6 +12,7 @@ import {
   reserveUsd,
   checkAsset,
   runVision,
+  PROMPT_SHA,
 } from './vision-check.mjs';
 import { loadPolicy } from './review.mjs';
 
@@ -93,6 +94,23 @@ test('frameTimes samples short and long videos', () => {
   expect(long.length).toBe(12);
   expect(long[0]).toBe(2.5);
   expect(frameTimes(NaN, v)).toEqual([0]);
+  // 11.28s real asset failed at 11.25s: never sample within the last half second.
+  expect(Math.max(...frameTimes(11.28, v))).toBeLessThanOrEqual(11.28 - 0.5);
+});
+
+test.skipIf(!hasFfmpeg)('checkAsset marks a max_tokens stop as truncated', async () => {
+  const root = makeStudio();
+  try {
+    const record = addVideo(root, 't1', 8);
+    const recordSha = sha256File(join(root, '99_Catalog', 'asset-records', 't1.json'));
+    const response = { ...okResponse(), stop_reason: 'max_tokens' };
+    const client = fakeClient([response]);
+    const result = await checkAsset({ record, recordSha, studioRoot: root, client, model: 'claude-haiku-5-5', v, now: 'now' });
+    expect(result.status).toBe('vision_failed');
+    expect(result.error).toBe('truncated');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('parseResult validates shape strictly', () => {
@@ -219,10 +237,11 @@ test.skipIf(!hasFfmpeg)('runVision skips existing ok vision file', async () => {
     const recordSha = sha256File(join(root, '99_Catalog', 'asset-records', 'd1.json'));
     const checksDir = join(root, '99_Catalog', 'vision-checks');
     mkdirSync(checksDir, { recursive: true });
-    writeFileSync(
-      join(checksDir, 'd1.json'),
-      JSON.stringify({ status: 'ok', record_sha256: recordSha, asset_id: record.asset_id }),
-    );
+    const existing = {
+      status: 'ok', record_sha256: recordSha, asset_id: record.asset_id,
+      prompt_sha256: PROMPT_SHA, model: 'claude-haiku-5-5',
+    };
+    writeFileSync(join(checksDir, 'd1.json'), JSON.stringify(existing));
     const client = fakeClient([]);
     const code = await runVision(
       [root, '--budget-usd', '10'],
@@ -233,6 +252,32 @@ test.skipIf(!hasFfmpeg)('runVision skips existing ok vision file', async () => {
     const runs = readdirSync(join(root, '99_Catalog', 'vision-runs'));
     const summary = JSON.parse(readFileSync(join(root, '99_Catalog', 'vision-runs', runs[0]), 'utf8'));
     expect(summary.skipped_existing).toBe(1);
+    // An older prompt version must be re-checked, not reused.
+    writeFileSync(join(checksDir, 'd1.json'), JSON.stringify({ ...existing, prompt_sha256: 'old' }));
+    const client2 = fakeClient([okResponse()]);
+    await runVision([root, '--budget-usd', '10'], { clientFactory: () => client2 });
+    expect(client2.calls.length).toBe(1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.skipIf(!hasFfmpeg)('runVision --ids-file checks only listed assets', async () => {
+  const root = makeStudio();
+  try {
+    addVideo(root, 'i1', 8);
+    addVideo(root, 'i2', 8);
+    const idsFile = join(root, 'ids.txt');
+    writeFileSync(idsFile, 'i2\n');
+    const client = fakeClient([okResponse('claude-sonnet-5-5')]);
+    const code = await runVision(
+      [root, '--budget-usd', '10', '--model', 'claude-sonnet-5-5', '--ids-file', idsFile],
+      { clientFactory: () => client },
+    );
+    expect(code).toBe(0);
+    expect(client.calls.length).toBe(1);
+    expect(existsSync(join(root, '99_Catalog', 'vision-checks', 'i1.json'))).toBe(false);
+    expect(existsSync(join(root, '99_Catalog', 'vision-checks', 'i2.json'))).toBe(true);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

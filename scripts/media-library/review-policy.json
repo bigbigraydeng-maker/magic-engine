@@ -28,7 +28,7 @@
     "min_frames": 3,
     "max_frames": 12,
     "long_video_seconds": 30,
-    "max_output_tokens": 400,
+    "max_output_tokens": 1200,
     "reserve_tokens_per_frame": 3300,
     "reserve_prompt_tokens": 800
   }
