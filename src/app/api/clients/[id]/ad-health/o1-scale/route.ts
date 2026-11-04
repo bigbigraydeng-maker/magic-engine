@@ -84,9 +84,12 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     const { data: campaign, error: campaignError } = await supabaseAdmin.from('ad_entity_snapshots')
       .select('ad_account_id, daily_budget_minor, budget_level, effective_status, currency, captured_at')
       .eq('client_id', params.id).eq('platform', 'meta').eq('level', 'campaign').eq('entity_id', campaignId)
-      .eq('captured_at', snapshot.captured_at).order('id', { ascending: true }).limit(1).maybeSingle()
+      // 快照每轮只写变了的行：系列没变的那一轮没有系列行，不能要求跟广告组同一时刻，取系列自己最新一行再验新鲜度
+      .order('captured_at', { ascending: false }).order('id', { ascending: true }).limit(1).maybeSingle()
     if (campaignError) return NextResponse.json({ error: '暂时读不到广告系列预算' }, { status: 500 })
-    if (!campaign || campaign.ad_account_id !== adAccountId || campaign.budget_level !== 'cbo'
+    const campaignAge = campaign?.captured_at ? Date.now() - Date.parse(campaign.captured_at) : Number.NaN
+    if (!campaign || !Number.isFinite(campaignAge) || campaignAge < 0 || campaignAge > 24 * 60 * 60 * 1000
+      || campaign.ad_account_id !== adAccountId || campaign.budget_level !== 'cbo'
       || campaign.effective_status !== 'ACTIVE' || typeof campaign.currency !== 'string'
       || !campaign.currency.trim() || campaign.currency !== snapshot.currency) {
       return NextResponse.json({ error: '广告系列预算快照过期或归属不一致；没有创建审批请求' }, { status: 409 })
