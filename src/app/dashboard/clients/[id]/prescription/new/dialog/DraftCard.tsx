@@ -1,3 +1,4 @@
+import { effectJudgmentLines, type EffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 import type { KPITarget, PrescriptionAction, PrescriptionContent, PrescriptionIntake, PrescriptionPhase } from '@/types/diagnostic'
 import { DIMENSION_LABEL, weaknessSentences } from './copy'
 import type { SelfGrade } from '@/lib/huatuo/types'
@@ -12,17 +13,20 @@ export function DraftCard({
   selfGrade,
   problem,
   status,
+  effectCard = null,
 }: {
   content: PrescriptionContent | null
   intake: PrescriptionIntake | null
   selfGrade: SelfGrade | null
   problem: string | null
   status: string | null
+  effectCard?: EffectJudgmentCard | null
 }) {
   if (!content) return problem ? <p className="text-sm text-me-charcoal/80">{problem}</p> : null
   return (
     <div className="min-w-0 space-y-8">
       <SummaryCard content={content} intake={intake} status={status} />
+      <EffectJudgmentBlock card={effectCard} />
       <StageList phases={content.phases ?? []} />
       <OutcomeBlock content={content} weaknesses={weaknessSentences(selfGrade?.weaknesses)} />
       <FullText content={content} />
@@ -88,6 +92,20 @@ function KeyNumberList({ numbers }: { numbers: KeyNumber[] }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+function EffectJudgmentBlock({ card }: { card: EffectJudgmentCard | null }) {
+  const lines = effectJudgmentLines(card)
+  return (
+    <section className="min-w-0 rounded-xl border border-black/10 bg-white p-5 shadow-sm" aria-label="怎么判断有没有效果">
+      <h3 className="text-base font-semibold text-me-charcoal">怎么判断有没有效果</h3>
+      <div className="mt-3 space-y-2">
+        {lines.map((line) => (
+          <p key={line} className="break-words text-sm font-normal leading-6 tabular-nums text-me-charcoal">{line}</p>
+        ))}
+      </div>
+    </section>
   )
 }
 

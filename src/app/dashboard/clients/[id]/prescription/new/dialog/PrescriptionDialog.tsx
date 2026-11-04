@@ -93,6 +93,7 @@ function PlanBody({ clientId, model }: { clientId: string; model: DialogModel })
         selfGrade={prescription?.selfGrade ?? null}
         problem={model.problem}
         status={prescription?.status ?? null}
+        effectCard={prescription?.effectCard ?? null}
       />
     </div>
   )
@@ -375,6 +376,7 @@ function followedToDialog(result: Extract<FollowResult, { ok: true }>, previous:
     selfGrade: result.selfGrade,
     intake: previous?.intake ?? null,
     manual: false,
+    effectCard: result.effectCard,
   }
 }
 

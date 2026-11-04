@@ -1,3 +1,4 @@
+import { dailyCapGate, type EffectJudgmentCard } from '@/lib/ads-strategy/effect-judgment/card'
 import { classifyPlays } from './classify'
 import { captureBasis, candidateBasis, buildBudgetFields, budgetUsedLive, collectCurrencies, meHistoryBasis } from './budget-fields'
 import { loadAllAccounts, loadCandidates, loadForms, loadPageContext, loadScopes } from './context'
@@ -11,7 +12,7 @@ import {
   seedStepAudiences,
   type AudienceStatusRead,
 } from './audience-creative'
-import { errorReason, type Accumulator, type PassingStep, type PlanSeedDeps, type SharedContext } from './shared'
+import { errorReason, type AccountData, type Accumulator, type PassingStep, type PlanSeedDeps, type SharedContext } from './shared'
 import type { Basis, Field, PlanSeed, PlanSeedStep } from './types'
 
 export type { PlanSeedDeps } from './shared'
@@ -20,6 +21,8 @@ export interface BuildArgs {
   clientId: string
   plays: AdPlay[]
   period: { start_date: string; end_date: string } | null
+  /** Undefined on older prescriptions that have no effect-judgment card. */
+  effectCard?: EffectJudgmentCard | null
 }
 
 const DEFAULT_TIMEOUT_MS = 8000
@@ -154,6 +157,29 @@ function buildStep(
   }
 }
 
+/** Recorded daily cap is checked, not written back onto the suggestion. */
+function liveClientCapCents(accounts: AccountData[]): number | null {
+  for (const account of accounts) {
+    const headroom = account.facts?.headroom
+    if (headroom && headroom.ok === true) return headroom.cap_minor
+  }
+  return null
+}
+
+function blockBudgetsOverCard(
+  budgets: Map<string, Field<number>>,
+  card: EffectJudgmentCard | null | undefined,
+  liveCapCents: number | null,
+  acc: Accumulator,
+): void {
+  const gate = dailyCapGate(card, liveCapCents)
+  if (gate.action === 'keep') return
+  for (const [key, field] of budgets) {
+    budgets.set(key, { ok: false, why_empty: gate.reason, notes: field.notes })
+  }
+  if (!acc.notes.includes(gate.reason)) acc.notes.push(gate.reason)
+}
+
 /** 把通过步骤组装成 ad_steps；预算或主页读不到的步骤改记到 skipped。 */
 function collectSteps(
   passing: PassingStep[],
@@ -255,21 +281,9 @@ async function runWork(
     acc.currency = currencies.length === 1 ? currencies[0] : null
     if (multiCurrency) acc.notes.push('多币种')
 
-    const live = await readLiveForSelected(
-      args.clientId,
-      passing,
-      deps,
-      liveCapMs(limits.deadlineMs, limits.timeoutMs),
-    )
-
-    const budgets = await buildBudgetFields(args.clientId, passing, deps, {
-      nowMs,
-      multiCurrency,
-      allAccounts: accounts,
-      unknownDrops,
-      currency: acc.currency,
-      live,
-    })
+    const budgets = await budgetsFor(args, deps, passing, accounts, {
+      nowMs, multiCurrency, unknownDrops, currency: acc.currency, limits,
+    }, acc)
 
     const extras = await buildExtras(args, passing, deps, nowMs, limits)
     collectSteps(passing, pageId ?? '', budgets, extras, acc)
@@ -277,6 +291,38 @@ async function runWork(
   } catch (err) {
     skipRemaining(args, acc, err)
   }
+}
+
+async function budgetsFor(
+  args: BuildArgs,
+  deps: PlanSeedDeps,
+  passing: PassingStep[],
+  accounts: AccountData[],
+  input: {
+    nowMs: number
+    multiCurrency: boolean
+    unknownDrops: { step_key: string; reason: string }[]
+    currency: string | null
+    limits: { deadlineMs: number; timeoutMs: number }
+  },
+  acc: Accumulator,
+): Promise<Map<string, Field<number>>> {
+  const live = await readLiveForSelected(
+    args.clientId,
+    passing,
+    deps,
+    liveCapMs(input.limits.deadlineMs, input.limits.timeoutMs),
+  )
+  const budgets = await buildBudgetFields(args.clientId, passing, deps, {
+    nowMs: input.nowMs,
+    multiCurrency: input.multiCurrency,
+    allAccounts: accounts,
+    unknownDrops: input.unknownDrops,
+    currency: input.currency,
+    live,
+  })
+  blockBudgetsOverCard(budgets, args.effectCard, liveClientCapCents(accounts), acc)
+  return budgets
 }
 
 /** 超时后从累加器组装：未完成的打法标记为取数超时。 */

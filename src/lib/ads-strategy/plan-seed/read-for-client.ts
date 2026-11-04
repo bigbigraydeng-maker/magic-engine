@@ -4,6 +4,7 @@
  * Read-only: it does not insert or update.
  */
 
+import { storedEffectCard } from '@/lib/ads-strategy/effect-judgment/card'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { PrescriptionContent } from '@/types/diagnostic'
 import { collectAdPlays } from '@/lib/ads-strategy/plan-seed/attach'
@@ -32,26 +33,27 @@ interface PrescriptionRow {
   client_id: string
   goal_id: string | null
   content: PrescriptionContent | null
+  generation_meta: unknown
 }
 
 type Loaded =
   | { kind: 'error' }
   | { kind: 'missing' }
   | { kind: 'empty' }
-  | { kind: 'ready'; plays: AdPlay[]; goalId: string | null }
+  | { kind: 'ready'; plays: AdPlay[]; goalId: string | null; generationMeta: unknown }
 
 export async function readPlanSeedForClient(clientId: string, prescriptionId: string): Promise<PlanSeedRead> {
   const loaded = await loadPrescription(clientId, prescriptionId)
   if (loaded.kind === 'error') return { status: 500, body: { success: false, error: '读取处方失败' } }
   if (loaded.kind === 'missing') return { status: 404, body: { success: false, error: '处方不存在' } }
   if (loaded.kind === 'empty') return { status: 200, body: { success: true, seed: null, reason: NO_PLAYS } }
-  return computeSeed(clientId, loaded.plays, loaded.goalId)
+  return computeSeed(clientId, loaded.plays, loaded.goalId, loaded.generationMeta)
 }
 
 async function loadPrescription(clientId: string, prescriptionId: string): Promise<Loaded> {
   const { data, error } = await supabaseAdmin
     .from('prescriptions')
-    .select('id, client_id, goal_id, content')
+    .select('id, client_id, goal_id, content, generation_meta')
     .eq('id', prescriptionId)
     .eq('client_id', clientId)
     .maybeSingle<PrescriptionRow>()
@@ -60,13 +62,23 @@ async function loadPrescription(clientId: string, prescriptionId: string): Promi
   if (data.content === null) return { kind: 'empty' }
   const plays = collectAdPlays(data.content)
   if (plays.length === 0) return { kind: 'empty' }
-  return { kind: 'ready', plays, goalId: data.goal_id }
+  return { kind: 'ready', plays, goalId: data.goal_id, generationMeta: data.generation_meta }
 }
 
-async function computeSeed(clientId: string, plays: AdPlay[], goalId: string | null): Promise<PlanSeedRead> {
+async function computeSeed(
+  clientId: string,
+  plays: AdPlay[],
+  goalId: string | null,
+  generationMeta: unknown,
+): Promise<PlanSeedRead> {
   try {
     const period = await loadGoalPeriod(goalId)
-    const seed = await buildPlanSeed({ clientId, plays, period }, productionDeps())
+    const seed = await buildPlanSeed({
+      clientId,
+      plays,
+      period,
+      effectCard: storedEffectCard(generationMeta),
+    }, productionDeps())
     return { status: 200, body: { success: true, seed, computed_at: new Date().toISOString() } }
   } catch (err) {
     console.error('[plan-seed] compute failed', err instanceof Error ? err.message : '未知错误')
