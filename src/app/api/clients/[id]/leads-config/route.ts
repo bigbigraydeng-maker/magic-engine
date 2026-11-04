@@ -25,8 +25,16 @@ import { parseEmailList } from '@/lib/leads/parse-email-list'
 import { parsePhoneList, toPhoneCountry } from '@/lib/leads/parse-phone-list'
 import { readOwnPhoneNumbers } from '@/lib/leads/own-phone-numbers'
 import { readAudienceId, writeAudienceId } from '@/lib/mailchimp/audience-config'
+import {
+  applyCapiSettingsWrite,
+  capiSettingsView,
+  conversionLeadOptInError,
+  normalizeCapiSettingsWrite,
+  readyCapiSettingsWrite,
+  type CapiSettingsView,
+} from '@/lib/conversions/capi-client-config'
 
-export interface LeadsConfig {
+export interface LeadsConfig extends CapiSettingsView {
   /** 开了才会把邮件打开/点击同步进这个客户的 CRM。 */
   mailchimpEnabled: boolean
   /** 客户自己的邮件域名（可以有多个：主域名 + 关联公司）。 */
@@ -62,6 +70,7 @@ function readConfig(raw: unknown): LeadsConfig {
     tradeDomains: rules.trade,
     ownPhoneNumbers: readOwnPhoneNumbers(o),
     notifyEmails,
+    ...capiSettingsView(o),
   }
 }
 
@@ -104,6 +113,12 @@ interface PatchBody {
   tradeDomains?: unknown
   ownPhoneNumbers?: unknown
   notifyEmails?: unknown
+  capiAllowedEvents?: unknown
+  capiDealMilestone?: unknown
+  capiQualifiedLeadStageKey?: unknown
+  capiDealStageKey?: unknown
+  capiConversionLeads?: unknown
+  capiConversionDealStageKey?: unknown
 }
 
 export async function PATCH(
@@ -121,6 +136,12 @@ export async function PATCH(
     body = (await req.json()) as PatchBody
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
+
+  // 广告回传这几项先校验。填错就整次不写，避免名单存进去一半。
+  const capiWrite = normalizeCapiSettingsWrite(body)
+  if (capiWrite.touched && 'error' in capiWrite && typeof capiWrite.error === 'string') {
+    return NextResponse.json({ error: capiWrite.error }, { status: 400 })
   }
 
   // 每一项都可以单独改 —— 三个面板各自保存，互不覆盖。
@@ -239,7 +260,7 @@ export async function PATCH(
     audienceWritten = value
   }
 
-  if (Object.keys(patch).length === 0 && !hasOwnPatch) {
+  if (Object.keys(patch).length === 0 && !hasOwnPatch && !capiWrite.touched) {
     if (audienceWritten !== undefined) {
       // 只改了 audience —— 其余几项要**照实回读**再回给界面。
       // 拿 readConfig(null) 顶替会把「这次没读」变成「全都是关的」，界面照单
@@ -268,7 +289,7 @@ export async function PATCH(
     .maybeSingle()
 
   const curConfig = (cur?.leads_config as Record<string, unknown> | null) ?? {}
-  const next: Record<string, unknown> = { ...curConfig, ...patch }
+  const merged: Record<string, unknown> = { ...curConfig, ...patch }
   if (hasOwnPatch) {
     const curRules = readDomainRules(curConfig)
     const domains = ownDomainsPatch ?? curRules.own
@@ -277,7 +298,12 @@ export async function PATCH(
     const addresses = explicitAddresses
       ? (ownAddressesPatch ?? [])
       : Array.from(new Set([...curAddresses, ...(ownAddressesPatch ?? [])]))
-    next.own_email_domains = [...domains, ...addresses]
+    merged.own_email_domains = [...domains, ...addresses]
+  }
+  const next = readyCapiSettingsWrite(capiWrite) ? applyCapiSettingsWrite(merged, capiWrite) : merged
+  if (readyCapiSettingsWrite(capiWrite)) {
+    const problem = conversionLeadOptInError(next)
+    if (problem) return NextResponse.json({ error: problem }, { status: 400 })
   }
 
   const { error: updErr } = await supabaseAdmin
