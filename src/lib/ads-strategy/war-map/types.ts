@@ -65,6 +65,10 @@ export interface CampaignFrequencyInput {
   frequency7d: number | null
   /** 窗口内最近一个有花费的数据日；null = 窗口内没花过钱；不带 = 不判「已停」 */
   lastSpendDay?: string | null
+  /** 这个系列里「现在不在投」的广告组，在窗口内花的钱；系列频率混进了它们。不带 = 没查 / 不知道 */
+  stoppedAdsetSpend7d?: number
+  /** 这个系列里「现在在投」的广告组个数；不带 = 没查 / 不知道 */
+  liveAdsetCount?: number
 }
 
 /** 一个账户现在在不在投：最近有花费，或设置里有 ACTIVE 广告组 */
@@ -221,6 +225,8 @@ export interface FrequencyRow {
   spend7d: number
   light: Light
   note: string
+  /** true = 系列频率超红线，但数字混进了已暂停的广告组，在投的组单独的频率读不到，所以不亮红灯 */
+  mixedWithStopped?: boolean
 }
 
 export interface FollowupGroup {

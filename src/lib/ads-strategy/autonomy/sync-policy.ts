@@ -14,14 +14,18 @@
  *   · 只动 `mode` + `updated_by`，**不碰** `spend_cap_*` / `decision_ttl_seconds`。
  *   · `deny` **永不由同步写入**（它是为未来管理员 / 熔断预留的值）；worker 遇到
  *     策略表当前是 `deny` 时**跳过不覆盖**（防御性 SQL 守卫，见 spec §4.6）。
- *   · 幂等键 `(client_id, action_key, ad_strategy_configs.updated_at)`：同一个
- *     `updated_at` 已经同步过就跳过，不重复写策略表。
+ *   · 幂等键 `(client_id, action_key, ad_strategy_configs.updated_at, 目标模式)`：同一个
+ *     `updated_at` 已经同步到**同一个目标模式**才跳过，不重复写策略表。
+ *     目标模式进键（第 3 刀 3a）：同步规则本身改了（加钱类改成永远要审批）时，
+ *     部署后下一次对账就会把旧行改过来——只按时间去重的话，设置没人动就永远不会重写。
+ *   · **加钱类动作**（注册表 `spendIncrease: true`）不管自治程度是什么，一律写
+ *     `require_approval`：只有 PM 本人能批（第 3 刀 3a 第 1 道闸，内核另有四道）。
  *
  * 本文件是**纯模块**：不 import supabase、不 import `@/lib/kernel/**` 的运行时
- * 代码（只取注册表的 `ACTION_KEYS` 常量）、无副作用。所有 I/O 归 worker。
+ * 代码（只取注册表的 `ACTION_KEYS` 常量和动作定义里的 `spendIncrease` 声明）、无副作用。所有 I/O 归 worker。
  */
 
-import { ACTION_KEYS } from '@/lib/kernel/registry'
+import { ACTION_KEYS, ACTION_REGISTRY } from '@/lib/kernel/registry'
 
 /** 意向源的值域（`ad_strategy_configs.autonomy_mode` 的 CHECK 约束）。 */
 export type AutonomyMode = 'observe' | 'bounded_auto'
@@ -40,12 +44,24 @@ export function listAdsActionKeys(): readonly string[] {
   return ACTION_KEYS.filter((key) => key.startsWith('ads.'))
 }
 
+export interface LastSyncedReceipt {
+  readonly sourceUpdatedAt: string
+  /** 回执里的 `to_mode`。读不到（旧回执 / 脏数据）= null → 当没同步过。 */
+  readonly toMode: string | null
+}
+
+/** 这个广告动作在本轮该同步成什么模式。加钱类永远要审批（只有 PM 本人能批）。 */
+export function targetModeFor(key: string, autonomyMode: AutonomyMode): PolicyMode {
+  if (ACTION_REGISTRY.get(key)?.spendIncrease === true) return 'require_approval'
+  return AUTONOMY_TO_POLICY_MODE[autonomyMode]
+}
+
 export interface AutonomySyncPlanInput {
   readonly autonomyMode: AutonomyMode
   /** `ad_strategy_configs.updated_at`（ISO 字符串） */
   readonly sourceUpdatedAt: string
-  /** action_key → 该键最近一条回执的 source_updated_at（ISO 字符串） */
-  readonly lastSynced: ReadonlyMap<string, string>
+  /** action_key → 该键最近一条成功回执的 source_updated_at（ISO 字符串）与当时写的目标模式 */
+  readonly lastSynced: ReadonlyMap<string, LastSyncedReceipt>
 }
 
 export interface AutonomySyncPlanItem {
@@ -62,9 +78,15 @@ export interface AutonomySyncPlanItem {
  *    任一侧解析出 NaN（脏数据 / 空串）→ 一律当**没同步过**（skip = null），
  *    宁可多写一次幂等 UPDATE，也不要把「读不懂」当成「已经同步」。
  */
-function isAlreadySynced(lastSyncedAt: string | undefined, sourceUpdatedAt: string): boolean {
-  if (lastSyncedAt === undefined) return false
-  const last = Date.parse(lastSyncedAt)
+function isAlreadySynced(
+  last_: LastSyncedReceipt | undefined,
+  sourceUpdatedAt: string,
+  targetMode: PolicyMode,
+): boolean {
+  if (last_ === undefined) return false
+  // 上次写的不是这次要写的模式（同步规则改过）→ 必须重写，不看时间。
+  if (last_.toMode !== targetMode) return false
+  const last = Date.parse(last_.sourceUpdatedAt)
   const source = Date.parse(sourceUpdatedAt)
   if (Number.isNaN(last) || Number.isNaN(source)) return false
   return last >= source
@@ -77,14 +99,14 @@ function isAlreadySynced(lastSyncedAt: string | undefined, sourceUpdatedAt: stri
  * `skip = 'already_synced'` 的条目 worker 直接跳过，不写策略表、不写回执。
  */
 export function planAutonomySync(input: AutonomySyncPlanInput): AutonomySyncPlanItem[] {
-  const mode = AUTONOMY_TO_POLICY_MODE[input.autonomyMode]
-  return listAdsActionKeys().map((key) => ({
-    key,
-    mode,
-    skip: isAlreadySynced(input.lastSynced.get(key), input.sourceUpdatedAt)
-      ? 'already_synced'
-      : null,
-  }))
+  return listAdsActionKeys().map((key) => {
+    const mode = targetModeFor(key, input.autonomyMode)
+    return {
+      key,
+      mode,
+      skip: isAlreadySynced(input.lastSynced.get(key), input.sourceUpdatedAt, mode) ? 'already_synced' : null,
+    }
+  })
 }
 
 /** 写进 client_automation_policies.updated_by 的审计标签：autonomy-sync:<email|unknown>:<sourceUpdatedAt> */

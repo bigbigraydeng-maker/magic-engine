@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation'
 import { factoryConfigHref } from '@/lib/factory/config-link'
 import { ReviewInbox } from './_components/ReviewInbox'
 import { RecoveryQueue } from './_components/RecoveryQueue'
+import { VariantOrderPanel } from './_components/VariantOrderPanel'
 
 interface PendingOrder {
   id: string
@@ -165,6 +166,7 @@ export default function FactoryCockpitPage() {
           </>
         )}
       </section>
+      <VariantOrderPanel clientId={lockedClient} />
       {!lockedClient && <RecoveryQueue />}
     </div>
   )

@@ -92,6 +92,7 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
             eq(col: string, val: unknown) { f[col] = val; return chain },
             in(col: string, vals: unknown[]) { f[col] = vals; return chain },
             gte(col: string, val: unknown) { f[`gte:${col}`] = val; return chain },
+            lte(col: string, val: unknown) { f[`lte:${col}`] = val; return chain },
             like(col: string, pattern: string) { f[`like:${col}`] = pattern; return chain },
             not(col: string, op: string, val: unknown) { f[`not:${col}`] = op; f[`notval:${col}`] = val; return chain },
             or(expr: string) { f.__or = expr; return chain },
@@ -206,6 +207,9 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
             }
             if (typeof f.capture_reason === 'string') rows = rows.filter((r) => r.capture_reason === f.capture_reason)
             if (typeof f['gte:captured_at'] === 'string') rows = rows.filter(r => String(r.captured_at) >= String(f['gte:captured_at']))
+            if (typeof f['lte:captured_at'] === 'string') rows = rows.filter(r => String(r.captured_at) <= String(f['lte:captured_at']))
+            // 真按轮次筛：以前替身不认 eq(captured_at)，把「只读最新一轮写下的行」的缺陷藏住了（白天加预算被拒）
+            if (typeof f.captured_at === 'string') rows = rows.filter(r => r.captured_at === f.captured_at)
             if (typeof f.level === 'string') rows = rows.filter((r) => r.level === f.level)
             if (Array.isArray(f.level)) rows = rows.filter((r) => (f.level as unknown[]).includes(r.level))
             if (typeof f.entity_id === 'string') rows = rows.filter((r) => r.entity_id === f.entity_id)
@@ -393,6 +397,70 @@ describe('加预算客户级安全事实', () => {
       ad_snapshot_captures: completeCaptures(ACCOUNT),
     }, log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
     expect(r).toMatchObject({ facts: { clientDailyTotalBeforeCents: 500, clientDailyCapCents: 10_000 } })
+  })
+  describe('白天的快照轮只写有变化的行：按每个对象最新已知状态核算', () => {
+    // 生产 2026-11-04：新西兰 01:31 那轮写全，07:30 那轮回执完整但一行没写 → 以前一律「币种或客户归属无法确认」
+    const morning = new Date(NOW.getTime() - 6 * 3_600_000).toISOString()
+    const latestRound = new Date(NOW.getTime() - 60_000).toISOString()
+    const capturesAt = (id: string, at: string) => completeCaptures(id).map(row => ({ ...row, captured_at: at }))
+    const baseRows = () => [
+      account(ACCOUNT, 'account', ACCOUNT, null, { captured_at: morning }),
+      account(ACCOUNT, 'campaign', 'cmp-act_1', null, { budget_level: 'abo', captured_at: morning }),
+      account(ACCOUNT, 'adset', ADSET, 500, { captured_at: morning }),
+      account(ACCOUNT, 'adset', 'as-other', 300, { captured_at: morning }),
+    ]
+    const tables = (rows: Row[]) => ({
+      ad_entity_snapshots: rows,
+      client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 10_000 }],
+      ad_snapshot_captures: [...capturesAt(ACCOUNT, morning), ...capturesAt(ACCOUNT, latestRound)],
+    })
+
+    it('最新一轮一行没写 → 用早上那轮的行核算，放行（合计查询只读到最新一轮为止）', async () => {
+      const l = log()
+      const r = await resolve(tables(baseRows()), l, 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ facts: { beforeCents: 500, accountDailyTotalBeforeCents: 800, clientDailyTotalBeforeCents: 800, clientDailyCapCents: 10_000 } })
+      expect(l.snapQueries.some(q => q['lte:captured_at'] === latestRound)).toBe(true)
+    })
+
+    it('最新一轮只写了变了的组 → 那个组用新值，其余沿用早上的行', async () => {
+      const rows = [...baseRows(), account(ACCOUNT, 'adset', 'as-other', 900, { capture_reason: 'changed', captured_at: latestRound })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ facts: { accountDailyTotalBeforeCents: 1_400, clientDailyTotalBeforeCents: 1_400 } })
+    })
+
+    it('最新一轮记了某组消失 → 不再算进合计', async () => {
+      const rows = [...baseRows(), account(ACCOUNT, 'adset', 'as-other', null, { capture_reason: 'disappeared', effective_status: 'NOT_RETURNED', captured_at: latestRound })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ facts: { accountDailyTotalBeforeCents: 500 } })
+    })
+
+    it('🔴 某个没消失的组最新一行超过一天 → 拒（不能悄悄少算它的预算）', async () => {
+      const stale = new Date(NOW.getTime() - 30 * 3_600_000).toISOString()
+      const rows = [...baseRows().filter(r => r.entity_id !== 'as-other'), account(ACCOUNT, 'adset', 'as-other', 300, { captured_at: stale })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ unavailable: expect.stringContaining('超过一天没有快照') })
+    })
+
+    it('🔴 合计只读到最新一轮为止；目标组之后又变了 → 照旧按「预算已变化」拒', async () => {
+      const later = new Date(NOW.getTime() - 30_000).toISOString()
+      const rows = [...baseRows(), account(ACCOUNT, 'adset', ADSET, 700, { capture_reason: 'changed', captured_at: later })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ unavailable: expect.stringContaining('预算已变化') })
+    })
+
+    it('🔴 核算只读到最新一轮：之后才写的 700 不算，跟用户看到的 700 对不上 → 按「基线不一致」拒', async () => {
+      // 魏征 11-04：这条是唯一走到合计里目标基线检查的用例；删掉 lte 或删掉基线检查都会红
+      const later = new Date(NOW.getTime() - 30_000).toISOString()
+      const rows = [...baseRows(), account(ACCOUNT, 'adset', ADSET, 700, { capture_reason: 'changed', captured_at: later })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', { ...scaleInput, before_cents: 700, after_cents: 770 })
+      expect(r).toMatchObject({ unavailable: expect.stringContaining('目标预算与本次授权读取的基线不一致') })
+    })
+
+    it('目标组的基线跟沿用的行比：用户看到的是 500、快照沿用的是 500 → 放行；是 600 → 拒', async () => {
+      const rows = [...baseRows().filter(r => r.entity_id !== ADSET), account(ACCOUNT, 'adset', ADSET, 600, { captured_at: morning })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ unavailable: expect.stringContaining('预算已变化') })
+    })
   })
 })
 

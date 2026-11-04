@@ -17,6 +17,7 @@ interface StoredSettings {
   footer: string | null
   limits: { per_user_per_hour: number; per_user_per_day: number; per_mailbox_per_day: number }
   frequency_cap: { max: number; window_days: number } | null
+  cap_exempt_template_keys?: string[]
   recipient_allowlist: string[] | null
   same_template_cooldown_hours: number
   call_prompt_hours: number
@@ -60,6 +61,7 @@ interface FormState {
   frequencyOn: boolean
   frequencyMax: string
   frequencyWindowDays: string
+  capExemptText: string
   allowlistMode: 'list' | 'anyone'
   allowlistText: string
   sameTemplateCooldownHours: string
@@ -81,6 +83,7 @@ const DEFAULT_FORM: FormState = {
   frequencyOn: true,
   frequencyMax: '2',
   frequencyWindowDays: '7',
+  capExemptText: '',
   allowlistMode: 'list',
   allowlistText: '',
   sameTemplateCooldownHours: '24',
@@ -110,6 +113,7 @@ function formFromSettings(s: StoredSettings): FormState {
     frequencyOn: s.frequency_cap !== null,
     frequencyMax: s.frequency_cap ? String(s.frequency_cap.max) : '2',
     frequencyWindowDays: s.frequency_cap ? String(s.frequency_cap.window_days) : '7',
+    capExemptText: (s.cap_exempt_template_keys ?? []).join('\n'),
     allowlistMode: s.recipient_allowlist === null ? 'anyone' : 'list',
     allowlistText: s.recipient_allowlist ? s.recipient_allowlist.join('\n') : '',
     sameTemplateCooldownHours: String(s.same_template_cooldown_hours),
@@ -195,6 +199,7 @@ function buildSettings(form: FormState): BuildResult {
         per_mailbox_per_day: perMailboxPerDay,
       },
       frequency_cap: frequencyCap,
+      cap_exempt_template_keys: linesToList(form.capExemptText),
       recipient_allowlist: allowlist,
       same_template_cooldown_hours: sameTemplateCooldownHours,
       call_prompt_hours: callPromptHours,
@@ -480,6 +485,16 @@ export function EmailSettingsPanel(props: { clientId: string }): JSX.Element {
           </div>
         )}
         <Help>按这个客人名下所有邮箱地址、含群发邮件一起数。</Help>
+        <p className="mt-3 font-medium">不占名额的模板（回复客人自己来信的）</p>
+        <textarea
+          value={form.capExemptText}
+          onChange={(e) => update('capExemptText', e.target.value)}
+          rows={3}
+          aria-label="不占频次名额的模板代号"
+          placeholder="一行一个模板代号"
+          className="w-full rounded-lg border border-me-stone bg-white px-3 py-2 text-sm"
+        />
+        <Help>这些模板发出去：不受上面的次数限制，也不算进别的邮件的次数里。只填回复客人自己来信的模板。</Help>
       </Section>
 
       <Section title="试跑名单">

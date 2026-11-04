@@ -17,7 +17,7 @@ function stubGraph(data: unknown[]) {
 describe('getAdsetDailyInsights', () => {
   it('请求 level=adset 且带上视频完播字段', async () => {
     const fetchMock = stubGraph([])
-    await getAdsetDailyInsights('act_953025114498626', 't', '2026-09-11', '2026-09-13')
+    await getAdsetDailyInsights('act_955561215570466', 't', '2026-09-11', '2026-09-13')
     const url = new URL(String((fetchMock.mock.calls[0] as unknown[])[0]))
     expect(url.searchParams.get('level')).toBe('adset')
     const fields = url.searchParams.get('fields') ?? ''
@@ -28,13 +28,13 @@ describe('getAdsetDailyInsights', () => {
 
   it('NAL「Thruplay-物流-200/cbm」2026-09-13：ThruPlay 723、p25 725、p95 128、平均 34 秒、3 秒播放 745', async () => {
     stubGraph(nalAdsetDaily)
-    const { rows, complete } = await getAdsetDailyInsights('act_953025114498626', 't', '2026-08-17', '2026-09-13')
+    const { rows, complete } = await getAdsetDailyInsights('act_955561215570466', 't', '2026-08-17', '2026-09-13')
     expect(complete).toBe(true)
     expect(rows).toHaveLength(61)
-    const r = rows.find(x => x.adset_id === '52596939123725' && x.insight_date === '2026-09-13')
+    const r = rows.find(x => x.adset_id === '52104815523595' && x.insight_date === '2026-09-13')
     expect(r).toMatchObject({
-      campaign_id: '52596939123525',
-      spend: 13.85,
+      campaign_id: '52028365152823',
+      spend: 16.2,
       video_thruplays: 723,
       video_p25: 725,
       video_p95: 128,
@@ -48,7 +48,7 @@ describe('getAdsetDailyInsights', () => {
 
   it('非视频广告组（没有视频字段）→ 视频列是 null，不伪造 0', async () => {
     stubGraph(nalAdsetDaily)
-    const { rows } = await getAdsetDailyInsights('act_953025114498626', 't', '2026-08-17', '2026-09-13')
+    const { rows } = await getAdsetDailyInsights('act_955561215570466', 't', '2026-08-17', '2026-09-13')
     const noVideo = rows.find(x => x.video_thruplays === null)
     expect(noVideo).toBeDefined()
     expect(noVideo?.video_p95).toBeNull()
@@ -60,7 +60,7 @@ describe('getAdsetDailyInsights', () => {
     const real = (nalAdsetDaily as RawRow[]).find(x => (x.actions ?? []).some(a => a.action_type === 'video_view'))!
     const stripped = { ...real, actions: (real.actions ?? []).filter(a => a.action_type !== 'video_view') }
     stubGraph([real, stripped])
-    const { rows } = await getAdsetDailyInsights('act_953025114498626', 't', '2026-08-17', '2026-09-13')
+    const { rows } = await getAdsetDailyInsights('act_955561215570466', 't', '2026-08-17', '2026-09-13')
     expect(rows[0].video_3s_views).toBeGreaterThan(0)
     expect(rows[1].video_3s_views).toBeNull()
   })

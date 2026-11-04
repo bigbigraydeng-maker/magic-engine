@@ -1,5 +1,5 @@
 /**
- * Facebook 即时表单 → CRM 每小时自动同步。
+ * Facebook 即时表单 → CRM 自动同步（每 30 分钟一轮，调度在 cron catalog）。
  *
  * 这是「新人自动进 CRM」那条链的编排层：找表单 → 拉新 lead → 建人 / 合并 → 写触点。
  * 取数在 `meta/lead-forms.ts`，建人写触点在 `crm/meta-lead.ts`，这里只管调度和纪律。

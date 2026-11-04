@@ -7,10 +7,28 @@ import type { DigestGoalContext } from '../../portfolio/internal-digest'
 
 const NOW = new Date('2026-10-21T20:00:00Z') // NZ 2026-10-22 09:00
 const pace = { expectedToDate: 10, actualToDate: 12, gapPct: 20, projectedEnd: 40, verdict: 'on_track', reason: 'ok' } as const
-const live: DigestGoalContext = { title: '新目标', label: '留资', target: 50, dayIndex: 2, totalDays: 30, pace: { ...pace } }
+const live: DigestGoalContext = {
+  title: '新目标',
+  label: '留资',
+  target: 50,
+  dayIndex: 2,
+  totalDays: 30,
+  primaryMetricKey: 'leads_count',
+  pace: { ...pace },
+}
 const row = {
   date: '2026-10-21',
-  payload: { headline: 'h', goal: { title: '旧目标', label: '留资', target: 20, dayIndex: 9, totalDays: 14 } },
+  payload: {
+    headline: 'h',
+    goal: {
+      title: '旧目标',
+      label: '留资',
+      target: 20,
+      dayIndex: 9,
+      totalDays: 14,
+      primaryMetricKey: 'signups_count',
+    },
+  },
   goal_pace: { ...pace, verdict: 'behind' },
 }
 
@@ -27,7 +45,9 @@ describe('overlayLiveGoal', () => {
 
   it('keeps the cached values and marks not-live when the live read returns nothing', async () => {
     const out = await overlayLiveGoal('c1', row, NOW, vi.fn().mockResolvedValue(null))
-    expect(out.payload).toBe(row.payload)
+    expect(out.payload).toMatchObject({
+      goal: expect.objectContaining({ primaryMetricKey: 'signups_count' }),
+    })
     expect(out.goal_pace).toBe(row.goal_pace)
     expect(out.goal_live.live).toBe(false)
   })

@@ -13,6 +13,7 @@ function rx(over: Partial<PrescriptionFact> = {}): PrescriptionFact {
     approvedAt: null,
     errorMessage: null,
     intake: { businessGoal: '推北岛', monthlyBudget: 3700 },
+    manual: false,
     contentPresent: true,
     adPlayCount: 1,
     targetCosts: [11],
@@ -29,6 +30,7 @@ function facts(over: Partial<ChainFacts> = {}): ChainFacts {
     goal: {
       read: 'ok',
       value: {
+        title: '十一月线索',
         targetValue: 30,
         baselineValue: 0,
         currentValue: 10,
@@ -219,6 +221,117 @@ describe('deriveChainStatus', () => {
       workOrders: { read: 'ok', value: [{ status: 'in_review', updatedAt: '2026-10-25T11:00:00.000Z' }] },
     }))
     expect(step(status, 'creative').detail).toBe('有素材停在待审超过 24 小时。')
+  })
+
+  it('does not block an approved plan when only unrelated old reviews remain', () => {
+    const status = deriveChainStatus(facts({
+      plans: {
+        read: 'ok',
+        value: [{
+          id: 'plan-1',
+          status: 'approved',
+          createdAt: '2026-10-20T00:00:00.000Z',
+          goalId: 'goal-1',
+          adsStepCount: 1,
+          creativeRefs: ['video-1'],
+        }],
+      },
+      strategy: {
+        read: 'ok',
+        value: {
+          dailyCapCents: 10000,
+          pool: [{ ref: 'video-1', status: 'approved', aliasRefs: [], promoWindow: { kind: 'evergreen' } }],
+        },
+      },
+      workOrders: { read: 'ok', value: [{ status: 'in_review', updatedAt: '2026-10-25T11:00:00.000Z' }] },
+    }))
+    expect(step(status, 'creative')).toMatchObject({
+      state: 'done',
+      detail: '计划点名的素材都已批准，推广期也盖得住。另有 1 条素材待审超过 24 小时，不挡这份计划',
+    })
+  })
+
+  it('ignores pause-line KPI rows when judging target cost conflict', () => {
+    const status = deriveChainStatus(facts({
+      prescription: {
+        read: 'ok',
+        value: rx({
+          targetCosts: [11],
+        }),
+      },
+    }))
+    expect(step(status, 'measure').state).toBe('done')
+  })
+
+  it('still blocks measure when two genuine target costs disagree', () => {
+    const status = deriveChainStatus(facts({
+      prescription: { read: 'ok', value: rx({ targetCosts: [11, 12] }) },
+    }))
+    expect(step(status, 'measure').state).toBe('blocked')
+    expect(step(status, 'measure').detail).toContain('不只一个')
+  })
+
+  it('marks manual confirm done from goal and approved plan when intake is empty', () => {
+    const status = deriveChainStatus(facts({
+      prescription: {
+        read: 'ok',
+        value: rx({ status: 'approved', intake: null, manual: true }),
+      },
+      plans: {
+        read: 'ok',
+        value: [{
+          id: 'plan-1',
+          status: 'approved',
+          createdAt: '2026-10-20T00:00:00.000Z',
+          goalId: 'goal-1',
+          adsStepCount: 1,
+          creativeRefs: ['video-1'],
+        }],
+      },
+    }))
+    expect(step(status, 'confirm')).toMatchObject({
+      state: 'done',
+      detail: '需求按目标和已批准计划登记（人工处方）。',
+    })
+  })
+
+  it('marks prescribe done when ads live in an approved plan without prescription plays', () => {
+    const status = deriveChainStatus(facts({
+      prescription: { read: 'ok', value: rx({ status: 'approved', adPlayCount: 0 }) },
+      plans: {
+        read: 'ok',
+        value: [{
+          id: 'plan-1',
+          status: 'approved',
+          createdAt: '2026-10-20T00:00:00.000Z',
+          goalId: 'goal-1',
+          adsStepCount: 2,
+          creativeRefs: [],
+        }],
+      },
+    }))
+    expect(step(status, 'prescribe')).toMatchObject({
+      state: 'done',
+      detail: '广告打法写在已批准的推广计划里',
+    })
+  })
+
+  it('keeps prescribe blocked for draft prescriptions without ad plays', () => {
+    const status = deriveChainStatus(facts({
+      prescription: { read: 'ok', value: rx({ status: 'draft', adPlayCount: 0 }) },
+      plans: {
+        read: 'ok',
+        value: [{
+          id: 'plan-1',
+          status: 'approved',
+          createdAt: '2026-10-20T00:00:00.000Z',
+          goalId: 'goal-1',
+          adsStepCount: 2,
+          creativeRefs: [],
+        }],
+      },
+    }))
+    expect(step(status, 'prescribe').state).toBe('blocked')
   })
 
   it('does not invent a review age when the timestamp is missing', () => {

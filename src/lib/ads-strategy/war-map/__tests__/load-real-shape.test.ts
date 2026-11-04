@@ -234,6 +234,31 @@ describe('loadWarMapInput · 真实形状的行（CTS 2026-10-20 08:50Z）', () 
     expect(input.campaigns.every(c => c.adAccountId === OFFICIAL)).toBe(true)
   })
 
+  it('L. 系列里有已暂停的广告组花过钱、还有在投的组：系列行带出「已停组花费」和「在投组个数」；没有快照的组不算已停', async () => {
+    const CAMP = '120250459565520307'
+    db.tables.ad_daily_insights = [
+      ...(db.tables.ad_daily_insights ?? []),
+      { client_id: CLIENT, ad_account_id: OFFICIAL, level: 'campaign', entity_id: CAMP, entity_name: '组A系列', insight_date: '2026-09-22', spend: 929, frequency_7d: 3.15, fetched_at: '2026-10-07T17:01:33.503Z' },
+      { client_id: CLIENT, ad_account_id: OFFICIAL, level: 'adset', entity_id: 'live_a', parent_id: CAMP, entity_name: '组A', insight_date: '2026-09-22', spend: 595, frequency_7d: null, fetched_at: '2026-10-07T17:01:33.503Z' },
+      { client_id: CLIENT, ad_account_id: OFFICIAL, level: 'adset', entity_id: 'paused_b', parent_id: CAMP, entity_name: '组B', insight_date: '2026-09-21', spend: 161, frequency_7d: null, fetched_at: '2026-10-07T17:01:33.503Z' },
+      { client_id: CLIENT, ad_account_id: OFFICIAL, level: 'adset', entity_id: 'unknown_c', parent_id: CAMP, entity_name: '组C', insight_date: '2026-09-21', spend: 40, frequency_7d: null, fetched_at: '2026-10-07T17:01:33.503Z' },
+    ]
+    db.tables.ad_entity_snapshots = [
+      ...(db.tables.ad_entity_snapshots ?? []),
+      { client_id: CLIENT, level: 'adset', entity_id: 'live_a', campaign_id: CAMP, effective_status: 'ACTIVE', capture_reason: 'daily', captured_at: '2026-10-19T12:31:23.530Z', ad_account_id: OFFICIAL, entity_name: null },
+      { client_id: CLIENT, level: 'adset', entity_id: 'paused_b', campaign_id: CAMP, effective_status: 'PAUSED', capture_reason: 'daily', captured_at: '2026-10-19T12:31:23.530Z', ad_account_id: OFFICIAL, entity_name: null },
+    ]
+    const { input, view } = await run()
+    const c = input.campaigns.find(x => x.campaignId === CAMP)
+    expect(c).toMatchObject({ frequency7d: 3.15, stoppedAdsetSpend7d: 161, liveAdsetCount: 1 })
+    expect(view.frequency.rows.find(r => r.campaignId === CAMP)?.light).not.toBe('red')
+  })
+
+  it('M. 读广告组花费失败：loader 抛错，不把「读不到」吞成「没有已暂停的组」', async () => {
+    db.errors.ad_entity_snapshots = 'boom'
+    await expect(loadWarMapInput(CLIENT, NOW)).rejects.toThrow()
+  })
+
   it('K. 计划所挂目标的最新处方（含草稿）变成一行；别的目标和别的客户不算', async () => {
     db.tables.marketing_plans = [{
       client_id: CLIENT,

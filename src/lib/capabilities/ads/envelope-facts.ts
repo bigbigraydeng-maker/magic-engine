@@ -75,6 +75,17 @@ const SNAP_COLUMNS =
  */
 const DELIVERING = DELIVERING_STATUSES
 const CLIENT_BUDGET_FACT_FRESH_MS = 24 * 60 * 60 * 1000
+/**
+ * 快照写入程序每轮只写「新出现 / 变了 / 今天还没记 / 消失了」的行（`selectRowsToWrite`），
+ * 一天里第一轮之后的定时轮常常一行都不写。所以核算客户预算不能只读最新一轮写下的行，
+ * 要跟写入程序用同一个基线：每个对象在这一轮及以前最新的那一行，回看天数也跟写入程序一样。
+ */
+const CLIENT_BUDGET_CARRY_FORWARD_DAYS = 30
+/**
+ * 最新一轮回执完整时，每个还在的对象当天（账户时区）都已经有一行（「今天还没记」那条规则）。
+ * 某个没消失的对象最新一行比这一轮早超过这个时长 = 这个前提被打破，拒绝核算（留 2 小时给夏令时那一天）。
+ */
+const CLIENT_BUDGET_CARRY_FORWARD_MAX_AGE_MS = 26 * 60 * 60 * 1000
 const CLIENT_BUDGET_ROW_LIMIT = 20_000
 const POSTGREST_PAGE_SIZE = 1_000
 
@@ -188,7 +199,8 @@ async function loadClientBudgetRollup(
       .eq('client_id', clientId)
       .in('ad_account_id', accountIds)
       .in('level', ['account', 'campaign', 'adset'])
-      .eq('captured_at', roundAt)
+      .gte('captured_at', new Date(roundTime - CLIENT_BUDGET_CARRY_FORWARD_DAYS * 86_400_000).toISOString())
+      .lte('captured_at', roundAt)
       .order('captured_at', { ascending: false })
       .order('id', { ascending: true })
       .range(offset, offset + POSTGREST_PAGE_SIZE - 1)
@@ -204,6 +216,13 @@ async function loadClientBudgetRollup(
   for (const row of rows) {
     const key = `${row.ad_account_id}:${row.level}:${row.entity_id}`
     if (!latest.has(key)) latest.set(key, row)
+  }
+  for (const row of latest.values()) {
+    if (row.capture_reason === 'disappeared') continue
+    const at = Date.parse(row.captured_at)
+    if (!Number.isFinite(at) || at < roundTime - CLIENT_BUDGET_CARRY_FORWARD_MAX_AGE_MS) {
+      return unavailable(`广告账户 ${row.ad_account_id} 的${row.level} ${row.entity_id} 超过一天没有快照，不能证明总预算完整`)
+    }
   }
 
   const currencies = new Set<string>()

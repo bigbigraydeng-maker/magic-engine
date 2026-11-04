@@ -21,6 +21,8 @@ export interface DueItem {
   phone: string | null
   /** 验收：卡片当前状态 */
   status: string | null
+  /** 回电：这位客人的跟进人邮箱（没人跟进为 null）；验收：null。日历页「只看我的」按它过滤 */
+  assignee: string | null
 }
 
 const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/
@@ -66,6 +68,7 @@ export function ledgerDueItems(entries: readonly LedgerEntry[], month: string): 
       refId: e.id,
       phone: null,
       status: e.status,
+      assignee: null,
     }))
 }
 
@@ -80,6 +83,7 @@ export interface CallbackContactRow {
   display_name: string | null
   primary_phone: string | null
   do_not_contact: boolean
+  assigned_to?: string | null
 }
 
 /**
@@ -112,6 +116,7 @@ export function callbackItems(
       refId: contactId,
       phone: contact.primary_phone,
       status: null,
+      assignee: contact.assigned_to?.trim().toLowerCase() || null,
     })
   }
   return items

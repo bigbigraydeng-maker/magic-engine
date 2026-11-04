@@ -76,10 +76,7 @@ TOURS['silk-road'] = {
              {'a':6,'b':7,'mode':'coach','off':22}],
 }
 
-TOURS['grand-tour'] = {
- 'title':'CHINA PANORAMA','subtitle':'27 Days · Grand tour of China · Fully inclusive',
- 'origin':'Auckland','return_to':'Auckland','start_idx':0,'finish_idx':10,
- 'stops':[
+_gt_cards = [
    S('Beijing','3 nights',['Juyongguan Great Wall','Forbidden City']),
    S("Xi'an",'3 nights',['Terracotta Warriors']),
    S('Yangtze Cruise','4 nights',['Three Gorges 5-star cruise']),
@@ -88,15 +85,40 @@ TOURS['grand-tour'] = {
    S('Kunming','2 nights',['Stone Forest']),
    S('Guilin','2 nights',['Karst scenery']),
    S('Yangshuo','2 nights',['Li River cruise']),
-   S('Hangzhou','1 night',['West Lake & Longjing tea']),
-   S('Suzhou','2 nights',["Humble Administrator's Garden"]),
    S('Shanghai','2 nights',['Huangpu River cruise & Bund']),
+   S('Suzhou','1 night',["Humble Administrator's Garden"]),
+   S('Hangzhou','2 nights',['West Lake & Longjing tea']),
+]
+# Modes follow the published itinerary (catalog v13). Hangzhou -> Shanghai is the
+# airport transfer; the itinerary does not name the vehicle, drawn as coach.
+# Guilin/Yangshuo and Shanghai/Suzhou/Hangzhou are too close to read at national
+# scale, so the main map shows one hub each and a zoom inset shows the legs.
+TOURS['grand-tour'] = {
+ 'title':'CHINA PANORAMA','subtitle':'27 Days · Grand tour of China · Fully inclusive',
+ 'origin':'Auckland','return_to':'Auckland','start_idx':0,'finish_idx':7,
+ 'cards':_gt_cards,
+ 'stops':[
+   S('Beijing','3 nights',[]),
+   S("Xi'an",'3 nights',[]),
+   dict(S('Yangtze Cruise','4 nights',[]),lbl_off=(68,-14)),
+   S('Chengdu','1 night',[]),
+   S('Dali','2 nights',[]),
+   dict(S('Kunming','2 nights',[]),lbl_off=(-4,44)),
+   dict(S('Guilin','4 nights',[],name='Guilin & Yangshuo'),lbl_off=(30,48)),
+   S('Shanghai','5 nights',[],name='Shanghai area'),
  ],
- 'segments':[{'a':0,'b':1,'mode':'train','off':40},{'a':1,'b':2,'mode':'flight','off':-40},
+ 'segments':[{'a':0,'b':1,'mode':'train','off':40},{'a':1,'b':2,'mode':'train','off':-40},
              {'a':2,'b':3,'mode':'train','off':-30},{'a':3,'b':4,'mode':'flight','off':30},
-             {'a':4,'b':5,'mode':'coach','off':-20},{'a':5,'b':6,'mode':'flight','off':40},
-             {'a':6,'b':7,'mode':'cruise','off':18},{'a':7,'b':8,'mode':'flight','off':50},
-             {'a':8,'b':9,'mode':'train','off':-18},{'a':9,'b':10,'mode':'train','off':20}],
+             {'a':4,'b':5,'mode':'coach','off':-20},{'a':5,'b':6,'mode':'train','off':40},
+             {'a':6,'b':7,'mode':'flight','off':50}],
+ 'insets':[
+   {'dx':12,'dy':14,'w':155,'h':152,'title':'GUILIN & YANGSHUO',
+    'nodes':[('Guilin','2 nights',0.22,0.42),('Yangshuo','2 nights',0.78,0.42)],
+    'segs':[(0,1,'cruise',-24),(1,0,'coach',-24)]},
+   {'dx':179,'dy':14,'w':155,'h':152,'title':'SHANGHAI AREA',
+    'nodes':[('Shanghai','2 nights',0.2,0.68),('Suzhou','1 night',0.5,0.36),('Hangzhou','2 nights',0.8,0.68)],
+    'segs':[(0,1,'coach',-22),(1,2,'coach',-22),(2,0,'coach',-22)],'finish':0},
+ ],
 }
 
 _icons_stops = [

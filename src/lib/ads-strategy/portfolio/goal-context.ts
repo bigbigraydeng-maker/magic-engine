@@ -7,6 +7,7 @@ import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
 import { loadAdStrategyConfigWithSource } from '../config'
 import { getTrackingClientConfig } from '@/lib/ads-tracking-preflight/client-config'
 import { computeGoalPace, type GoalPace } from '../goal-pace'
+import { ADS_ATTRIBUTABLE_METRIC_KEYS } from './attributable-metric-keys'
 import type { DigestGoalContext } from './internal-digest'
 import type { GoalRow } from '@/types/strategy'
 
@@ -14,14 +15,7 @@ const DAY_MS = 86_400_000
 export const MEDIAN_WINDOW_DAYS = 7
 export const MIN_MEDIAN_DAYS = 3
 
-/**
- * Goal metrics that autoFetchMetricValue can fill from ad_daily_insights via the
- * outcome ladder (leads_count falls back to the ads 'lead' step; messaging_started
- * is the ads 'messaging_started' step). Keep in sync with the switch in
- * src/lib/strategy/auto-fetch.ts. signups_count is NOT here: it reads real
- * bookings from me_sale_outcomes, which ads cannot move day to day.
- */
-export const ADS_ATTRIBUTABLE_METRIC_KEYS: ReadonlySet<string> = new Set(['leads_count', 'messaging_started'])
+export { ADS_ATTRIBUTABLE_METRIC_KEYS }
 
 /**
  * With several active goals, prefer the newest one the ads can measure; if none
@@ -316,6 +310,7 @@ export async function buildDigestGoalContext(
       target: goal.target_value,
       dayIndex,
       totalDays,
+      primaryMetricKey: goal.primary_metric_key,
       pace,
       ...(source === 'fallback' ? { configReadError: configError ?? 'unknown error' } : {}),
     }

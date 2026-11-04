@@ -55,6 +55,7 @@ function settingsObj(over: Partial<EmailSettings> = {}): EmailSettings {
     footer: null,
     limits: { perUserPerHour: 30, perUserPerDay: 100, perMailboxPerDay: 200 },
     frequencyCap: { max: 2, windowDays: 7 },
+    capExemptTemplateKeys: [],
     recipientAllowlist: null,
     sameTemplateCooldownHours: 24,
     callPromptHours: 24,
@@ -133,13 +134,18 @@ function makeData(over: Partial<SendGateData> = {}): SendGateData {
     })),
     loadSenderName: vi.fn(async () => 'Lisa Zhang'),
     sentTemplateReceiptsSince: vi.fn(async () => [] as StoredReceipt[]),
+    exemptMessageIdsSince: vi.fn(async () => [] as string[]),
     frequencySources: emptySources(),
     ...over,
   }
 }
 
 // Render the template with the real provider so the final body matches what the staff would see.
-function renderedText(tpl: EmailTemplateVersion, tours: PublishedTourFact[] = [tour()]): { subject: string; body: string } {
+function renderedText(
+  tpl: EmailTemplateVersion,
+  tours: PublishedTourFact[] = [tour()],
+  inputs: Record<string, string> = {},
+): { subject: string; body: string } {
   const provider = getProvider('published_tours')
   if (provider === null) throw new Error('published_tours provider missing')
   const resolved = provider.resolvePicks(tours, [{ tourId: 't1', departOn: '2027-03-11' }], {}, 'one')
@@ -148,7 +154,7 @@ function renderedText(tpl: EmailTemplateVersion, tours: PublishedTourFact[] = [t
     contactName: 'Amy Lee',
     senderDisplayName: 'Lisa Zhang',
     callWhen: null,
-    inputs: {},
+    inputs,
     facts: {
       tours,
       picks: resolved.picks,
@@ -748,3 +754,273 @@ describe('GATE_MESSAGES', () => {
 // Keep the GateReason import used so the type stays referenced.
 const _reasons: readonly GateReason[] = Object.keys(GATE_MESSAGES) as GateReason[]
 void _reasons
+
+// ---- weekly cap and exempt templates --------------------------------------
+
+describe('inLock: weekly cap and exempt templates', () => {
+  it('an exempt template is not stopped by a full cap and reads nothing', async () => {
+    const sources = emptySources()
+    sources.sentItems = vi.fn(async () => ({
+      ok: true as const,
+      items: [
+        outboundItem({ id: 'a', at: '2026-10-27T00:00:00Z' }),
+        outboundItem({ id: 'b', at: '2026-10-26T00:00:00Z' }),
+      ],
+    }))
+    const data = makeData({ frequencySources: sources })
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const exemptConfig = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
+    expect(meta.editedAfterRender).toBe(false)
+    const result = await gates.inLock(inArgs(state, meta, { config: exemptConfig }))
+    expect(result.ok).toBe(true)
+    expect(sources.sentItems).not.toHaveBeenCalled()
+    expect(sources.audit).not.toHaveBeenCalled()
+    expect(sources.touchpoints).not.toHaveBeenCalled()
+    expect(sources.mailchimp).not.toHaveBeenCalled()
+    expect(data.exemptMessageIdsSince).not.toHaveBeenCalled()
+  })
+
+  it('the same two items still block a template that is not exempt', async () => {
+    const sources = emptySources()
+    sources.sentItems = vi.fn(async () => ({
+      ok: true as const,
+      items: [
+        outboundItem({ id: 'a', at: '2026-10-27T00:00:00Z' }),
+        outboundItem({ id: 'b', at: '2026-10-26T00:00:00Z' }),
+      ],
+    }))
+    const data = makeData({
+      frequencySources: sources,
+      exemptMessageIdsSince: vi.fn(async () => [] as string[]),
+    })
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const result = await gates.inLock(
+      inArgs(state, meta, { config: config({ capExemptTemplateKeys: ['some-other-template'] }) }),
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.reason).toBe('frequency_cap')
+    expect(data.exemptMessageIdsSince).toHaveBeenCalledTimes(1)
+    expect(data.exemptMessageIdsSince).toHaveBeenCalledWith(
+      'client-a',
+      'contact-1',
+      ['some-other-template'],
+      '2026-10-21T02:00:00.000Z',
+    )
+  })
+
+  it('an exempt mail of the guest does not use up the cap for another template', async () => {
+    const sources = emptySources()
+    sources.sentItems = vi.fn(async () => ({
+      ok: true as const,
+      items: [
+        outboundItem({ id: 'normal-1', at: '2026-10-27T00:00:00Z' }),
+        outboundItem({ id: 'exempt-1', at: '2026-10-26T00:00:00Z' }),
+      ],
+    }))
+    const data = makeData({
+      frequencySources: sources,
+      exemptMessageIdsSince: vi.fn(async () => ['exempt-1']),
+    })
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const result = await gates.inLock(
+      inArgs(state, meta, { config: config({ capExemptTemplateKeys: ['some-other-template'] }) }),
+    )
+    expect(result.ok).toBe(true)
+  })
+
+  it('two normal mails still block even when an exempt mail is also there', async () => {
+    const sources = emptySources()
+    sources.sentItems = vi.fn(async () => ({
+      ok: true as const,
+      items: [
+        outboundItem({ id: 'normal-1', at: '2026-10-27T00:00:00Z' }),
+        outboundItem({ id: 'normal-2', at: '2026-10-26T00:00:00Z' }),
+        outboundItem({ id: 'exempt-1', at: '2026-10-25T00:00:00Z' }),
+      ],
+    }))
+    const data = makeData({
+      frequencySources: sources,
+      exemptMessageIdsSince: vi.fn(async () => ['exempt-1']),
+    })
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const result = await gates.inLock(
+      inArgs(state, meta, { config: config({ capExemptTemplateKeys: ['some-other-template'] }) }),
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toBe('frequency_cap')
+    expect(result.meta.blockDetail?.startsWith('count=2;')).toBe(true)
+  })
+
+  it('a failing lookup of exempt mails stops the send as unverifiable', async () => {
+    const data = makeData({
+      exemptMessageIdsSince: vi.fn(async () => {
+        throw new Error('receipts down')
+      }),
+    })
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const result = await gates.inLock(
+      inArgs(state, meta, { config: config({ capExemptTemplateKeys: ['some-other-template'] }) }),
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(503)
+    expect(result.reason).toBe('frequency_unverifiable')
+    expect(result.meta.blockDetail).toContain('exempt ids')
+  })
+
+  it('with no exempt templates the lookup is never made', async () => {
+    const data = makeData()
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const result = await gates.inLock(inArgs(state, meta))
+    expect(result.ok).toBe(true)
+    expect(data.exemptMessageIdsSince).not.toHaveBeenCalled()
+  })
+
+  it('a mail without a template gets no exemption', async () => {
+    const sources = emptySources()
+    sources.sentItems = vi.fn(async () => ({
+      ok: true as const,
+      items: [
+        outboundItem({ id: 'a', at: '2026-10-27T00:00:00Z' }),
+        outboundItem({ id: 'b', at: '2026-10-26T00:00:00Z' }),
+      ],
+    }))
+    const data = makeData({ frequencySources: sources })
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const exemptConfig = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
+    const result = await gates.inLock(
+      inArgs({ ...state, templateKey: null }, meta, { config: exemptConfig }),
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.reason).toBe('frequency_cap')
+  })
+
+  it('no cap at all: nothing is read, not even the exempt lookup', async () => {
+    const sources = emptySources()
+    const data = makeData({ frequencySources: sources })
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const result = await gates.inLock(
+      inArgs(state, meta, {
+        config: config({ frequencyCap: null, capExemptTemplateKeys: ['some-other-template'] }),
+      }),
+    )
+    expect(result.ok).toBe(true)
+    expect(data.exemptMessageIdsSince).not.toHaveBeenCalled()
+    expect(sources.sentItems).not.toHaveBeenCalled()
+  })
+
+  it('an exempt template whose text was changed after rendering is an ordinary mail: the cap blocks it', async () => {
+    const sources = emptySources()
+    sources.sentItems = vi.fn(async () => ({
+      ok: true as const,
+      items: [
+        outboundItem({ id: 'a', at: '2026-10-27T00:00:00Z' }),
+        outboundItem({ id: 'b', at: '2026-10-26T00:00:00Z' }),
+      ],
+    }))
+    const data = makeData({ frequencySources: sources })
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const exemptConfig = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
+    const result = await gates.inLock(
+      inArgs(state, { ...meta, editedAfterRender: true }, { config: exemptConfig }),
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.reason).toBe('frequency_cap')
+  })
+
+  it('an exempt template whose text could not be compared (flag unknown) is an ordinary mail', async () => {
+    const sources = emptySources()
+    sources.sentItems = vi.fn(async () => ({
+      ok: true as const,
+      items: [
+        outboundItem({ id: 'a', at: '2026-10-27T00:00:00Z' }),
+        outboundItem({ id: 'b', at: '2026-10-26T00:00:00Z' }),
+      ],
+    }))
+    const data = makeData({ frequencySources: sources })
+    const { state, meta } = await successfulPreLock(data)
+    const gates = createSendGates(data)
+    const exemptConfig = config({ capExemptTemplateKeys: ['post-call-single-tour'] })
+    const result = await gates.inLock(
+      inArgs(state, { ...meta, editedAfterRender: null }, { config: exemptConfig }),
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.reason).toBe('frequency_cap')
+  })
+
+  it('a render that used staff-typed input boxes leaves the edit flag unknown, even when the text was not touched', async () => {
+    const tpl = template({ body: `${template().body}\n\nNote: {{input.note}}` })
+    const inputs = { note: 'Half price this week' }
+    const rendered = renderedText(tpl, [tour()], inputs)
+    const data = makeData({ loadTemplate: vi.fn(async () => tpl) })
+    const result = await createSendGates(data).preLock(
+      preArgs({ subject: rendered.subject, body: rendered.body, template: templateReq({ inputs }) }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.meta.editedAfterRender).toBeNull()
+    expect(result.meta.renderedSha256).not.toBeNull()
+  })
+
+  it('a changed text of a template that uses input boxes is still recorded as changed', async () => {
+    const tpl = template({ body: `${template().body}\n\nNote: {{input.note}}` })
+    const inputs = { note: 'Half price this week' }
+    const rendered = renderedText(tpl, [tour()], inputs)
+    const data = makeData({ loadTemplate: vi.fn(async () => tpl) })
+    const result = await createSendGates(data).preLock(
+      preArgs({
+        subject: rendered.subject,
+        body: `${rendered.body}\n\nP.S. see you soon.`,
+        template: templateReq({ inputs }),
+      }),
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.meta.editedAfterRender).toBe(true)
+  })
+
+  it('an exempt template that used input boxes is an ordinary mail: the cap blocks it', async () => {
+    const tpl = template({ body: `${template().body}\n\nNote: {{input.note}}` })
+    const inputs = { note: 'Half price this week' }
+    const rendered = renderedText(tpl, [tour()], inputs)
+    const sources = emptySources()
+    sources.sentItems = vi.fn(async () => ({
+      ok: true as const,
+      items: [
+        outboundItem({ id: 'a', at: '2026-10-27T00:00:00Z' }),
+        outboundItem({ id: 'b', at: '2026-10-26T00:00:00Z' }),
+      ],
+    }))
+    const data = makeData({ loadTemplate: vi.fn(async () => tpl), frequencySources: sources })
+    const { state, meta } = await successfulPreLock(data, {
+      subject: rendered.subject,
+      body: rendered.body,
+      template: templateReq({ inputs }),
+    })
+    const gates = createSendGates(data)
+    const result = await gates.inLock(
+      inArgs(state, meta, { config: config({ capExemptTemplateKeys: ['post-call-single-tour'] }) }),
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.status).toBe(409)
+    expect(result.reason).toBe('frequency_cap')
+  })
+})

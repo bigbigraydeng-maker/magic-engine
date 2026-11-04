@@ -14,15 +14,60 @@ import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
 import { buildSenderDeps } from '@/lib/social/story-lite/ports'
 import { runStorySweep, type SenderDeps, type SweepSummary } from '@/lib/social/story-lite/sender'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import {
+  STORY_PUBLISH_RECONCILE_EVENT,
+  storyPublishReconcileEnabled,
+  storyReconcileEventId,
+} from '@/lib/social/story-publish-action'
 
 export const STORY_LITE_PUBLISH_FUNCTION_ID = `${CLOUD_FN_PREFIX}story-lite-publish`
 export const STORY_LITE_PUBLISH_JOB = 'story-lite-publish'
 export const STORY_LITE_PUBLISH_CRON = 'TZ=Pacific/Auckland */10 * * * *'
 
+export interface StoryReconcileEmit {
+  ok: boolean
+  error?: string
+}
+
 export interface StoryLitePublishFnDeps {
   buildDeps: (now: Date) => SenderDeps
   startRun: () => Promise<string>
-  finishRun: (input: { runId: string; startedAt: number; summary?: SweepSummary; error?: string }) => Promise<void>
+  finishRun: (input: {
+    runId: string
+    startedAt: number
+    summary?: SweepSummary
+    error?: string
+    reconcileEmit?: StoryReconcileEmit | null
+  }) => Promise<void>
+  /** Omitted or false: the sweep does not emit a backfill event. */
+  reconcileEnabled?: () => boolean
+  sendReconcile?: (now: Date) => Promise<void>
+  now?: () => Date
+}
+
+/** One event, bucketed so two sweeps in the same 10 minutes share an id. */
+export async function emitStoryPublishReconcile(
+  now: Date,
+  send: typeof sendInngestEvent = sendInngestEvent,
+): Promise<void> {
+  await send({
+    id: storyReconcileEventId(now),
+    name: STORY_PUBLISH_RECONCILE_EVENT,
+    data: { triggered_at: now.toISOString() },
+  })
+}
+
+export function storySweepLogSummary(
+  summary: SweepSummary,
+  reconcileEmit?: StoryReconcileEmit | null,
+): Record<string, unknown> {
+  return {
+    ...summary.counts,
+    stale_expired: summary.staleExpired.length,
+    records: summary.records,
+    ...(reconcileEmit ? { reconcile_emit: reconcileEmit } : {}),
+  }
 }
 
 type SweepStepResult = { ok: true; summary: SweepSummary } | { ok: false; error: string }
@@ -47,10 +92,15 @@ export function createStoryLitePublishFunction(fnDeps: StoryLitePublishFnDeps) {
         }
       })
 
+      const reconcileEmit = result.ok && fnDeps.reconcileEnabled?.()
+        ? await step.run('emit-story-reconcile', () => sendReconcileNote(fnDeps))
+        : null
+
       await step.run('finish-run', () =>
         fnDeps.finishRun({
           runId: started.runId,
           startedAt: started.startedAt,
+          reconcileEmit,
           ...(result.ok ? { summary: result.summary } : { error: result.error }),
         }),
       )
@@ -66,7 +116,9 @@ export function createStoryLitePublishFunction(fnDeps: StoryLitePublishFnDeps) {
 export const storyLitePublish = createStoryLitePublishFunction({
   buildDeps: (now) => buildSenderDeps(now),
   startRun: () => startCronRunId(STORY_LITE_PUBLISH_JOB),
-  finishRun: async ({ runId, startedAt, summary, error }) => {
+  reconcileEnabled: () => storyPublishReconcileEnabled(),
+  sendReconcile: (now) => emitStoryPublishReconcile(now),
+  finishRun: async ({ runId, startedAt, summary, error, reconcileEmit }) => {
     const run = cronRunHandle(STORY_LITE_PUBLISH_JOB, runId, startedAt)
     if (error) {
       await run.finish({ failed: 1, error })
@@ -77,7 +129,17 @@ export const storyLitePublish = createStoryLitePublishFunction({
       processed: summary?.records.length ?? 0,
       completed: (counts.SENT ?? 0) + (counts.DRY_RUN ?? 0),
       failed: (counts.BLOCKED ?? 0) + (counts.FAILED ?? 0) + (counts.UNKNOWN_OUTCOME ?? 0) + (counts.MISSED ?? 0),
-      summary: { ...counts, stale_expired: summary?.staleExpired.length ?? 0, records: summary?.records ?? [] },
+      summary: summary ? storySweepLogSummary(summary, reconcileEmit) : {},
     })
   },
 })
+
+async function sendReconcileNote(fnDeps: StoryLitePublishFnDeps): Promise<StoryReconcileEmit> {
+  try {
+    await (fnDeps.sendReconcile ?? emitStoryPublishReconcile)(fnDeps.now?.() ?? new Date())
+    return { ok: true }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message.slice(0, 200) : 'emit_failed'
+    return { ok: false, error: message }
+  }
+}

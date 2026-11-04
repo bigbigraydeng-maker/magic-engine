@@ -10,6 +10,13 @@
 > - `src/lib/visual/` — 图片/视频生成 ✅ 已建  
 > 定位：视觉智能 Agent。管理素材库、采集平台爆款、为视觉资产打标签、监控生成质量、把学到的视觉模式写回记忆层。
 
+> **素材库归马良管（PM 2026-11-04 定，不另开仓库、不另造 agent）。** 下面「职责 1」写的 `client_assets` 打标签是旧设想；素材库的真实位置如下（2026-11-04 实查）：
+> - 原件和采集证据放 Dropbox `MagicLab_Studio`：新素材先进 `00_Inbox/<层级>`，审核后归入 `01_Platform` / `02_Industry` / `03_Enterprise`。规矩见 `99_Catalog/素材采集与入库规范.txt`。
+> - 入库、打标签和上传工具在 `scripts/media-library/`（说明见 `AUTOMATION.md`）。登记记录在 `99_Catalog/asset-records/`，制作副本放 Supabase 私有存储 `me-media-platform` / `me-media-industry` / `me-media-enterprise`。
+> - 出片机读的是本机镜像。补齐工具是 `scripts/factory-worker/tools/sync-studio-mirror.mjs`，PM 11-04 定为每天跑一次；2026-11-04 时定时任务还没装（安装说明在 `scripts/factory-worker/launchd/README.md`），装之前靠手动跑，不读上面那套登记记录。
+> - 自动入库现在没在跑：本机那个监听任务 10-22 起就没加载，停之前一直报「扫描失败」。现在只能有人手动运行 `manage.mjs import` 来登记素材。
+> - 还没接上的：审核放行（500 条全是待确认，没有一条能被自动选片）；出片机和 ME 后台从「已审核清单」选片；用完回写用在了哪里。这三项按顺序做，每项开工前先跟 PM 讲清楚。
+
 ---
 
 ## 一、身份定义

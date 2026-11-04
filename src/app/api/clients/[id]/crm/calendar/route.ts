@@ -58,7 +58,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       const ids = contactIds.slice(i, i + 100)
       const { data, error } = await supabaseAdmin
         .from('contacts')
-        .select('id, display_name, primary_phone, do_not_contact')
+        .select('id, display_name, primary_phone, do_not_contact, assigned_to')
         .eq('client_id', clientId)
         .in('id', ids)
       if (error) throw error
@@ -99,7 +99,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       }
     }
 
-    return NextResponse.json({ month, items: sortDueItems(items), includesLedger })
+    return NextResponse.json({
+      month,
+      items: sortDueItems(items),
+      includesLedger,
+      viewerEmail: access.user.email?.toLowerCase() ?? null,
+    })
   } catch (err) {
     console.error('[crm/calendar] failed', err)
     return NextResponse.json({ error: 'Failed to load calendar' }, { status: 500 })

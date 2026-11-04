@@ -13,7 +13,9 @@ const mockGenerate = vi.fn()
 const mockHuatuo = vi.fn()
 vi.mock('@/lib/diagnostic/prescription-landing', () => ({ landPrescription: (...a: unknown[]) => mockLand(...a) }))
 vi.mock('@/lib/diagnostic/prescription-generator', () => ({ generatePrescription: (...a: unknown[]) => mockGenerate(...a) }))
-vi.mock('@/lib/huatuo/agent', () => ({ runHuatuo: (...a: unknown[]) => mockHuatuo(...a) }))
+vi.mock('@/lib/huatuo/client-kind', () => ({
+  resolveIntakeClientKind: vi.fn(async (_db, _clientId, intake: unknown) => intake),
+}))
 
 import { POST } from '../route'
 import { supabaseAdmin } from '@/lib/supabase'
@@ -100,6 +102,28 @@ beforeEach(() => {
 })
 
 describe('POST /prescriptions/manual', () => {
+  it('stores optional intake when business goal and budget are present', async () => {
+    const { inserts } = mockDb()
+    const body = {
+      ...payload(),
+      intake: { business_goal: '推线索', monthly_budget_aud: 1200, budget_currency: 'NZD' },
+    }
+    const res = await POST(request(body), { params })
+    expect(res.status).toBe(200)
+    expect(inserts[0].intake).toMatchObject({
+      business_goal: '推线索',
+      monthly_budget_aud: 1200,
+      budget_currency: 'NZD',
+    })
+  })
+
+  it('rejects intake missing business_goal or budget', async () => {
+    const { inserts } = mockDb()
+    const res = await POST(request({ ...payload(), intake: { business_goal: '推线索' } }), { params })
+    expect(res.status).toBe(400)
+    expect(inserts).toHaveLength(0)
+  })
+
   it('inserts a draft with the latest run id and the next version', async () => {
     const { inserts, tables, queries } = mockDb()
     const res = await POST(request(payload()), { params })

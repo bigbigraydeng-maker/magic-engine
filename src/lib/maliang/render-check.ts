@@ -96,11 +96,11 @@ Output ONLY JSON — no markdown, no explanation:
 
 // ─── Response parser ──────────────────────────────────────────────────────────
 
-function asString(v: unknown): string {
+export function asString(v: unknown): string {
   return typeof v === 'string' ? v : ''
 }
 
-function parseFrame(raw: unknown, index: number): NineGridFrame {
+export function parseFrame(raw: unknown, index: number): NineGridFrame {
   if (!raw || typeof raw !== 'object') {
     throw new Error(`模型回答格式不对：第 ${index + 1} 镜不是对象`)
   }
@@ -126,7 +126,7 @@ function parseFrame(raw: unknown, index: number): NineGridFrame {
   }
 }
 
-export function parseNineGridResponse(raw: string): NineGridResult {
+export function parseJsonObject(raw: string): Record<string, unknown> {
   const stripped = raw
     .replace(/^```(?:json)?\s*/m, '')
     .replace(/\s*```\s*$/m, '')
@@ -141,7 +141,11 @@ export function parseNineGridResponse(raw: string): NineGridResult {
   if (!parsed || typeof parsed !== 'object') {
     throw new Error('模型回答格式不对：顶层不是对象')
   }
-  const obj = parsed as Record<string, unknown>
+  return parsed as Record<string, unknown>
+}
+
+export function parseNineGridResponse(raw: string): NineGridResult {
+  const obj = parseJsonObject(raw)
   if (!Array.isArray(obj.frames)) {
     throw new Error('模型回答格式不对：缺少 frames 数组')
   }
@@ -180,7 +184,7 @@ export function decideVerdict(
 
 // ─── Snapshot merge / read ────────────────────────────────────────────────────
 
-function isPlainObject(v: unknown): v is Record<string, unknown> {
+export function isPlainObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v)
 }
 
@@ -313,6 +317,38 @@ export async function analyzeVideoWithGemini(
 
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
 
+export async function downloadAndAnalyze(params: {
+  videoUrl: string
+  prompt: string
+  apiKey: string
+  analyze?: VideoAnalyzer
+  allowedHosts?: readonly string[]
+}): Promise<{ ok: true; raw: string } | { ok: false; reason: string }> {
+  const { videoUrl, prompt, apiKey, analyze, allowedHosts } = params
+  const hosts = allowedHosts ?? allowedVideoHosts()
+  const analyzer = analyze ?? analyzeVideoWithGemini
+
+  let tmpPath: string | null = null
+  try {
+    try {
+      tmpPath = await downloadVideoToTmp(videoUrl, hosts)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, reason: `视频下载失败：${msg}` }
+    }
+
+    try {
+      const raw = await analyzer(tmpPath, prompt, apiKey)
+      return { ok: true, raw }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, reason: `模型调用失败：${msg}` }
+    }
+  } finally {
+    if (tmpPath) unlink(tmpPath).catch(() => {})
+  }
+}
+
 export async function runNineGridCheck(params: {
   videoUrl: string
   input: NineGridInput
@@ -337,45 +373,28 @@ export async function runNineGridCheck(params: {
     return unverifiable('GEMINI_API_KEY 未配置，马良看不了片')
   }
 
-  const hosts = allowedHosts ?? allowedVideoHosts()
-  const analyzer = analyze ?? analyzeVideoWithGemini
   const prompt = buildNineGridPrompt(input)
 
-  let tmpPath: string | null = null
+  const analyzed = await downloadAndAnalyze({ videoUrl, prompt, apiKey, analyze, allowedHosts })
+  if (!analyzed.ok) {
+    return unverifiable(analyzed.reason)
+  }
+
+  let parsed: NineGridResult
   try {
-    try {
-      tmpPath = await downloadVideoToTmp(videoUrl, hosts)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return unverifiable(`视频下载失败：${msg}`)
-    }
+    parsed = parseNineGridResponse(analyzed.raw)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return unverifiable(`模型回答格式不对：${msg}`)
+  }
 
-    let raw: string
-    try {
-      raw = await analyzer(tmpPath, prompt, apiKey)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return unverifiable(`模型调用失败：${msg}`)
-    }
-
-    let parsed: NineGridResult
-    try {
-      parsed = parseNineGridResponse(raw)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      return unverifiable(`模型回答格式不对：${msg}`)
-    }
-
-    const verdict = decideVerdict(parsed, input.logoExpected)
-    return {
-      status: verdict.status,
-      checked_at: checkedAt,
-      video_url: videoUrl,
-      reasons: verdict.reasons,
-      frames: parsed.frames,
-      model: MALIANG_MODEL,
-    }
-  } finally {
-    if (tmpPath) unlink(tmpPath).catch(() => {})
+  const verdict = decideVerdict(parsed, input.logoExpected)
+  return {
+    status: verdict.status,
+    checked_at: checkedAt,
+    video_url: videoUrl,
+    reasons: verdict.reasons,
+    frames: parsed.frames,
+    model: MALIANG_MODEL,
   }
 }

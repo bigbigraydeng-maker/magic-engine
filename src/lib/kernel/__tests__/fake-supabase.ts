@@ -140,7 +140,7 @@ export interface FakeSupabaseOptions {
 }
 
 export interface Filter {
-  kind: 'eq' | 'in' | 'is' | 'gte' | 'lte' | 'not' | 'or'
+  kind: 'eq' | 'in' | 'is' | 'gte' | 'lte' | 'not' | 'or' | 'like'
   column: string
   value: unknown
 }
@@ -249,6 +249,14 @@ function matches(row: Row, filters: Filter[]): boolean {
         return String(v) <= String(f.value)
       case 'not':
         return v !== f.value
+      case 'like': {
+        if (typeof v !== 'string' || typeof f.value !== 'string') return false
+        const pattern = f.value
+        if (pattern.endsWith('%')) {
+          return v.startsWith(pattern.slice(0, -1))
+        }
+        return v === pattern
+      }
       case 'or':
         return orMatches(row, String(f.value))
       default:
@@ -403,6 +411,10 @@ export function createFakeSupabase(
     }
     builder.not = (column: string, _op: string, value: unknown) => {
       filters.push({ kind: 'not', column, value })
+      return chain()
+    }
+    builder.like = (column: string, pattern: string) => {
+      filters.push({ kind: 'like', column, value: pattern })
       return chain()
     }
     builder.order = (column: string, opts?: { ascending?: boolean }) => {

@@ -39,15 +39,21 @@ import { libaiCopyProvenance } from './libai-copy-provenance'
 import { libaiPromptLibraryMonthly } from './libai-prompt-library-monthly'
 import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
 import { gscPageDailyFanOut, gscPageDailyPull } from './gsc-page-daily'
+import { baozhengWeekly } from './baozheng-weekly'
 import { gscQueryPageDailyFanOut, gscQueryPageDailyPull } from './gsc-query-page-daily'
 import { toolsLabLeadFollowUp, toolsLabReportEmailReceipt } from './tools-lab-lead-followup'
 import { dailyPlanAutoPublish } from './daily-plan-auto-publish'
 import { youtubeStaging, youtubePublicStep } from './youtube-publish'
 import { storyLitePublish } from './story-lite-publish'
+import { storyPublishActionRecorder } from './story-publish-action-recorder'
+import { storyPublishActionReconcile } from './story-publish-action-reconcile'
 import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-voipline'
 import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
 import { planDraftFromPrescription } from './plan-draft-from-prescription'
 import { crmEmailSendReceipt } from './crm-email-send-receipt'
+import { zhangqianDiscovery } from './zhangqian-discovery'
+import { triggeredSendWelcomeDispatch, triggeredSendWelcomeSweep } from './triggered-send-welcome-sweep'
+import { socialWeeklyDraft } from './cloud-social-weekly-draft'
 
 export const cloudFunctions = [
   promoPlanDailyWatch,
@@ -98,6 +104,8 @@ export const cloudFunctions = [
   libaiCopyProvenance,
   libaiPromptLibraryMonthly,
   simaqianReputationWeekly,
+  // 包拯：每周复核 AI 判客人阶段准不准（只读；总开关 BAOZHENG_ENABLED 默认关）
+  baozhengWeekly,
   gscPageDailyFanOut,
   gscPageDailyPull,
   gscQueryPageDailyFanOut,
@@ -108,12 +116,19 @@ export const cloudFunctions = [
   youtubeStaging,
   youtubePublicStep,
   storyLitePublish,
+  storyPublishActionRecorder,
+  storyPublishActionReconcile,
   telephonyVoiplineProcess,
   telephonyVoiplineSweep,
   telephonyCallAnalysis,
   telephonyCallAnalysisSweep,
   planDraftFromPrescription,
   crmEmailSendReceipt,
+  zhangqianDiscovery,
+  triggeredSendWelcomeDispatch,
+  triggeredSendWelcomeSweep,
+  // 社媒每周出稿编排（两个开关默认关；关着也每天写一行 disabled 回执）
+  socialWeeklyDraft,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

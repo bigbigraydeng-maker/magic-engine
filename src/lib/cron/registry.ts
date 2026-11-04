@@ -1,4 +1,5 @@
 import { DISPATCH_OWNED_SERVICES } from './dispatch/catalog'
+import { META_LEADS_SYNC_SCHEDULE } from '@/lib/meta/leads-sync-schedule'
 
 /**
  * 全部定时任务清单（2026-08-03 自动从 render.yaml + 各接口代码生成）。
@@ -250,8 +251,10 @@ const CRON_REGISTRY_ENTRIES = [
       // 的 `run.finish({ processed: due.list.length })`），语义对得上，可以当判据。
       emptyRoundsAreLegitimate: true,
     }] },
-  // 服务名叫 hourly，但 2026-09-16（commit 2a17a85f2）起实际是每 2 小时一轮（偶数 UTC 小时的第 25 分）。
-  { service: 'meta-leads-hourly', jobName: 'meta-leads-sync', schedule: '25 */2 * * *', logsRuns: true },
+  // 服务名仍叫 hourly。2026-11-01 起每 30 分钟一轮（每小时第 25 分和第 55 分），
+  // 避开整点的评论读取和每小时第 10 分的私信同步。真正生效的是这条 schedule，
+  // 由 cron-dispatch-frequent 每 5 分钟来对，不在 render.yaml 里单列。
+  { service: 'meta-leads-hourly', jobName: 'meta-leads-sync', schedule: META_LEADS_SYNC_SCHEDULE, logsRuns: true },
   { service: 'pm-daily-todo', jobName: 'pm-daily-todo', schedule: '0 19 * * 0-4', logsRuns: true },
   { service: 'poll-visual-jobs', jobName: 'poll-visual-jobs', schedule: '15 * * * *', logsRuns: true },
   // ME2 Product Map 每日全量对账(webhook 的兜底)。表未 apply 前它会天天报 failed ——
@@ -396,6 +399,15 @@ const CRON_REGISTRY_ENTRIES = [
   // 李白 · 提示词库月检（agent 自治计划 B2）：cron 每周二 NZ 09:00 醒，函数里只在当月 1–7 号
   // 真跑（标准 cron 的日/周字段是「或」，写不出「第一个周二」），其余周二写一条 skipped 回执。
   // 所以按「每周二」对账是对的：每周都有一行。周期与代码常量 LIBAI_PROMPT_AUDIT_CRON 一致。
+  // 包拯 · 每周复核 AI 判客人阶段（修复方案第 1b 刀）：每周三新西兰 10:00；总开关关着也写一行 skipped 回执，
+  // 所以每周都有一行。周期与代码常量 BAOZHENG_WEEKLY_CRON 一致。规则书 docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md。
+  // 社媒每周出稿编排：每天新西兰 08:30 醒一次，给今天是出稿日、开了每周闭环的客户各发一个 social/week_pack.draft_due 事件；
+  // 每个客户跑完也用同一个 job 名写一行回执。总开关 SOCIAL_WEEKLY_LOOP_ENABLED 关着也写一行 disabled 回执，所以每天都有一行。
+  // 写库开关 SOCIAL_WEEKLY_LOOP_WRITE 关着一律演练。不发布、不扣费、不外发。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/cloud-social-weekly-draft.ts 的 SOCIAL_WEEKLY_DRAFT_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
+  { service: 'inngest:cloud-social-weekly-draft', jobName: 'social-weekly-draft', schedule: '30 8 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-04' },
+  { service: 'inngest:cloud-baozheng-weekly', jobName: 'baozheng-weekly', schedule: '0 10 * * 3', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-03' },
   { service: 'inngest:cloud-libai-prompt-library-monthly', jobName: 'libai-prompt-library-monthly', schedule: '0 9 * * 2', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-25' },
   // 司马迁 · 口碑周巡（agent 自治计划 B2）：每周四新西兰 09:00 读本周新 Google 评价、起草回复，
   // 一律不发，只写回执给今日待办拉。周期与 src/lib/inngest/functions/simaqian-reputation-weekly.ts
@@ -444,6 +456,17 @@ const CRON_REGISTRY_ENTRIES = [
   // 每一轮都写一行运行记录。设计稿 docs/specs/2026-10-12-story-lite-design.md。2026-10-21 补登记，理由同上一条。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/story-lite-publish.ts 的 STORY_LITE_PUBLISH_CRON（该函数的测试断言两边一致）。
   { service: 'inngest:cloud-story-lite-publish', jobName: 'story-lite-publish', schedule: '*/10 * * * *', logsRuns: true, scheduler: 'inngest' },
+
+  // Triggered-send (welcome e-mail) SHADOW run: records what ME WOULD send each morning; it never sends anything.
+  // Runs at 09:00 New Zealand time (the Inngest cron carries TZ=Pacific/Auckland; after the old 08:01 batch, so Mailchimp's
+  // report of it has settled); a second trigger at 11:00 retries what could not be read, and is not watched separately. Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §5.
+  // 🔴 schedule must not be hand-copied: the only definition is TRIGGERED_SEND_SWEEP_CRON in
+  //    src/lib/inngest/functions/triggered-send-welcome-sweep.ts (its test asserts the two are equal).
+  { service: 'inngest:cloud-triggered-send-welcome-dispatch', jobName: 'triggered-send-welcome-dispatch', schedule: '0 9 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-02' },
+  // The per-client sweeps ordered by the dispatch above (event-triggered, so they follow its schedule). A morning without
+  // new leads legitimately writes no ledger row, hence emptyRoundsAreLegitimate (processed = contacts to decide).
+  { service: 'inngest:cloud-triggered-send-welcome-sweep', jobName: 'triggered-send-welcome-sweep', schedule: '0 9 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-02',
+    outputTables: [{ table: 'triggered_sends', freshnessHours: 26, timestampColumn: 'created_at', emptyRoundsAreLegitimate: true }] },
 
   // Render 上只留这三条。它们自己很快返回，到点的旧接口在 web 进程里接着跑。
   { service: 'cron-dispatch-frequent', jobName: 'cron-dispatch-frequent', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-24' },
@@ -522,6 +545,11 @@ export const UNSCHEDULED_CRON_ROUTES: Readonly<Record<string, string>> = {
   // 2026-10-07 PM 拍板暂停：上游已停 6 周的空跑。render.yaml 那段已整块注释掉，
   // 登记行也同步注释掉 —— 留着会天天误报「没跑」。恢复三件套见 render.yaml 对应注释。
   'team-memory-sweeper': '2026-10-07 暂停（上游已停 6 周的空跑），render.yaml 与登记行已注释，恢复条件见 render.yaml 注释',
+
+  // 社媒读回链拒绝回执（src/lib/social/readback-outcome-record.ts）。
+  // 由接线函数在拒绝时写一行，没有排班。放进带 schedule 的登记表会让健康检查
+  // 天天报「从没跑过」。对账扫描只认 startCronRunId，所以同文件有一个只给扫描器看的声明。
+  'social-readback-outcome': '按需事件触发（读回链拒绝时写一行失败回执），非周期任务，不适用 CRON_REGISTRY 的排班对账',
 
   // Render 上这条从 2026-10-24 审计起已是暂停、30 天没有运行。不进 dispatcher。
   // 路由留着给人手补跑。恢复时要重新加登记、加进 DISPATCH_CATALOG，并在 Render 打开它。
