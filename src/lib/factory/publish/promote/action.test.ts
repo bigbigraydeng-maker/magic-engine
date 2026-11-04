@@ -1282,4 +1282,27 @@ describe('每日清单:服务端重建清单 → 逐条绑指纹放行 / 剔除'
     expect(l.items[0]).toMatchObject({ selectable: false })
     expect(l.items[0].blocked_reason).toContain('社媒 Agent')
   })
+
+  it('先因内容变了 stale、再撤回:清单上显示的新内容能勾,但绝不默认勾,并提示撤回过', async () => {
+    wire(DAY)
+    const item = await listed()
+    await decide({ approve: [item] })
+    const g = grant()
+    if (!w.row || !g) throw new Error('no grant')
+    w.meta.description = 'Changed copy B'
+    brief = { ...brief, copy: { caption: 'Changed copy B', endcard: { cta: 'Book now', url: 'https://example.com/tour' } } }
+    w.row.payload['scheduled_go_public'] = { ...g, status: 'revoked', updated_at: '2026-10-20T01:00:00.000Z' }
+    const l = await buildDailyList(ports(), { clientId: CLIENT_ID, now: new Date(w.now), switchOn: true, agentOn: true })
+    expect(l.items[0]).toMatchObject({ selectable: true, default_checked: false })
+    expect(l.items[0].note).toContain('撤回过这条')
+  })
+
+  it('演练在开关没开时也走全部发布前检查,但仍不写', async () => {
+    wire(DAY)
+    const item = await listed()
+    const r = await decideDailyList(ports(), { clientId: CLIENT_ID, adminEmail: ADMIN, switchOn: false, agentOn: false, approve: [item], exclude: [], dryRun: true, now: new Date(w.now), requestId: 'r' })
+    expect(r.items[0].outcome).toBe('would_arm')
+    expect(grant()).toBeNull()
+  })
 })
+

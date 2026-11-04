@@ -28,8 +28,10 @@ export interface DailyListItem {
   selectable: boolean
   /** Why it cannot be ticked (gate failed, switch off). */
   blocked_reason: string | null
-  /** Suggest leaving it unticked (fact check raised a question). */
+  /** Suggest leaving it unticked (fact check raised a question, or a person revoked this reel before). */
   default_checked: boolean
+  /** Shown next to a tickable item that needs a second look (e.g. revoked before). */
+  note: string | null
 }
 
 export interface DailyListPorts {
@@ -57,13 +59,16 @@ export function listIdOf(items: ReadonlyArray<{ work_order_id: string; fingerpri
 }
 
 /** Whether the order belongs on the list, and the fingerprint of a version a person revoked (that exact content stays blocked). */
-async function approvalState(ports: DailyListPorts, order: PromoteOrder): Promise<{ show: boolean; revokedFingerprint: string | null }> {
-  if (isExcludedByCard(order.brief)) return { show: false, revokedFingerprint: null }
+interface Revoked { fingerprint: string; at: string | null }
+
+async function approvalState(ports: DailyListPorts, order: PromoteOrder): Promise<{ show: boolean; revoked: Revoked | null }> {
+  if (isExcludedByCard(order.brief)) return { show: false, revoked: null }
   const rows = await ports.promote.store.loadTrafficRows(order.id, order.client_id)
-  if (rows.length !== 1) return { show: true, revokedFingerprint: null } // buildContext will say why it cannot be ticked
+  if (rows.length !== 1) return { show: true, revoked: null } // buildContext will say why it cannot be ticked
   const grant = readGrant(rows[0].payload)
-  if (grant && HANDLED_GRANT.has(grant.status)) return { show: false, revokedFingerprint: null }
-  return { show: true, revokedFingerprint: grant?.status === 'revoked' ? grant.fingerprint : null }
+  if (grant && HANDLED_GRANT.has(grant.status)) return { show: false, revoked: null }
+  // The grant keeps the fingerprint it was approved with, not what the person saw when revoking: never pre-tick.
+  return { show: true, revoked: grant?.status === 'revoked' ? { fingerprint: grant.fingerprint, at: grant.updated_at ?? null } : null }
 }
 
 /** Why nothing on the list can be ticked right now; null = it can. */
@@ -73,17 +78,18 @@ export function listBlock(input: { switchOn: boolean; agentOn: boolean }): strin
   return null
 }
 
-async function toItem(ports: DailyListPorts, order: PromoteOrder, angle: unknown, block: string | null, revokedFingerprint: string | null): Promise<DailyListItem> {
+async function toItem(ports: DailyListPorts, order: PromoteOrder, angle: unknown, block: string | null, revoked: Revoked | null): Promise<DailyListItem> {
   const publishOn = String(readPublishOn(order.brief))
   const base = { work_order_id: order.id, title: reelTitle(angle), publish_on: publishOn }
   const ctx = await buildContext(ports.promote, order)
   if ('ok' in ctx) {
-    return { ...base, caption: '', first_comment: '', fact_summary: null, fingerprint: null, selectable: false, blocked_reason: ctx.error, default_checked: false }
+    return { ...base, caption: '', first_comment: '', fact_summary: null, fingerprint: null, selectable: false, blocked_reason: ctx.error, default_checked: false, note: null }
   }
   const fc = ctx.factCheck
   const summary = fc.verdict === 'pass' || fc.verdict === 'not_applicable' ? null : fc.problems.join('；') || '事实要人核对'
   const fingerprint = grantFingerprint(ctx)
-  const reason = block ?? (revokedFingerprint === fingerprint ? '你撤回过这一版，改片后才能再放行' : null)
+  const reason = block ?? (revoked?.fingerprint === fingerprint ? '你撤回过这一版，改片后才能再放行' : null)
+  const note = revoked && reason === null ? `你${revoked.at ? `在 ${revoked.at.slice(0, 10)} ` : ''}撤回过这条，确认改好了再勾` : null
   return {
     ...base,
     caption: ctx.view.description,
@@ -92,7 +98,8 @@ async function toItem(ports: DailyListPorts, order: PromoteOrder, angle: unknown
     fingerprint,
     selectable: reason === null,
     blocked_reason: reason,
-    default_checked: reason === null && summary === null,
+    default_checked: reason === null && summary === null && revoked === null,
+    note,
   }
 }
 
@@ -108,7 +115,7 @@ export async function buildDailyList(
     if (order.client_id !== input.clientId) continue
     const state = await approvalState(ports, order)
     if (!state.show) continue
-    items.push(await toItem(ports, order, angle, listBlock(input), state.revokedFingerprint))
+    items.push(await toItem(ports, order, angle, listBlock(input), state.revoked))
   }
   items.sort((a, b) => (a.publish_on + a.work_order_id).localeCompare(b.publish_on + b.work_order_id))
   return { from, to, items }

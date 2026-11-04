@@ -16,6 +16,7 @@ interface Item {
   selectable: boolean
   blocked_reason: string | null
   default_checked: boolean
+  note: string | null
 }
 
 interface ResultLine {
@@ -187,6 +188,7 @@ export function DailyListPanel({ clientId }: { clientId: string }) {
               </>
             )}
             {it.fact_summary && <p className="text-xs text-amber-700">事实要你看一眼：{it.fact_summary}</p>}
+            {it.note && <p className="text-xs text-amber-700">{it.note}</p>}
             {it.blocked_reason && <p className="text-xs text-red-700">不能放行：{it.blocked_reason}</p>}
             {excludeFor === it.work_order_id ? (
               <div className="flex flex-wrap items-center gap-2">

@@ -79,7 +79,8 @@ export async function POST(req: Request, { params }: Ctx) {
   if (approve.length > 0 && !switchOn() && !dryRun) return refused(409, '按日公开现在没打开，放行了到日也不会发。')
   try {
     const agentOn = await socialAgentOn(supabaseAdmin, params.id)
-    if (approve.length > 0 && !agentOn && !dryRun) return refused(409, '这位客户没开社媒 Agent：Reel 走周卡批。')
+    // Not on the daily cadence: the week card owns these reels, so neither approve nor exclude here.
+    if (!agentOn && !dryRun) return refused(409, '这位客户没开社媒 Agent：Reel 走周卡批，这里不能放行或剔除。')
     const ports = createDailyListPorts(supabaseAdmin, createProductionPromoteDeps())
     const receipt = await decideDailyList(ports, {
       clientId: params.id, adminEmail: email, switchOn: switchOn(), agentOn, approve, exclude,

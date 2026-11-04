@@ -20,7 +20,8 @@ import { HANDLED_GRANT, listWindow } from '@/lib/social/daily-list/list'
 export const DAILY_LIST_TODO_KIND = 'reel_daily_list_pending' as const
 
 /** 已经处理过的授权状态：这些不再算「等你放行」。 */
-// Same 'already decided' set as the list; a revoked version is not counted as waiting (the list blocks the same content).
+// Same 'already decided' set as the list. A revoked reel is not counted as waiting even after a recut: it still shows on
+// the list (never pre-ticked), but does not raise a to-do.
 const ACTIVE = new Set([...HANDLED_GRANT, 'revoked'])
 
 const HOW =
