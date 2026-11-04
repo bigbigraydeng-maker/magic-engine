@@ -4,7 +4,8 @@
  * 守的几条：
  *   1. 一个系列下建多个组，每个组的预算设在组上，全程 PAUSED；
  *   2. 系列花费上限只在草稿给了才传，给了就原样传；
- *   3. 中途失败只回滚本次建出来的东西（逆序），不碰账户里已有的对象；
+ *   3. 中途失败只回滚本次建出来的系列 / 组 / 广告（逆序），不碰账户里已有的对象；
+ *      创意永远不删（Meta 会把内容相同的创意复用成同一个对象，可能正被在投的广告用着）；
  *   4. 单组草稿的请求次数和结果形状不变；
  *   5. 补暂停会把每一个组都停掉。
  */
@@ -42,15 +43,32 @@ interface Call { url: string; method: string; body: URLSearchParams }
 let calls: Call[] = []
 
 /** 每次建东西返回递增的 id（camp1 / as1.. / cr1.. / ad1..）；可以让第 n 次「建组」失败。 */
-function mockGraph(opts: { failAdSetNumber?: number } = {}) {
+function mockGraph(opts: {
+  failAdSetNumber?: number
+  /** 所有「建创意」都返回同一个编号（Meta 对内容相同的创意复用同一个对象），删它会被 Meta 拒。 */
+  reuseCreativeId?: string
+  /** 第 n 次「建创意」像断网一样抛错（不知道 Meta 建成没有）。 */
+  throwOnCreativeNumber?: number
+} = {}) {
   const counters = { campaigns: 0, adsets: 0, adcreatives: 0, ads: 0 }
   const prefix = { campaigns: 'camp', adsets: 'as', adcreatives: 'cr', ads: 'ad' } as const
   return vi.fn(async (url: string, init?: RequestInit) => {
     const body = new URLSearchParams(String(init?.body ?? ''))
     calls.push({ url, method: init?.method ?? 'GET', body })
-    if (init?.method === 'DELETE') return { ok: true, status: 200, text: async () => '{}' } as Response
+    if (init?.method === 'DELETE') {
+      if (opts.reuseCreativeId && url.includes(opts.reuseCreativeId)) {
+        return { ok: false, status: 400, text: async () => '{"error":{"code":1487235,"message":"in use"}}' } as Response
+      }
+      return { ok: true, status: 200, text: async () => '{}' } as Response
+    }
     const kind = (['campaigns', 'adsets', 'adcreatives', 'ads'] as const).find((k) => url.includes(`/${k}`))!
     counters[kind] += 1
+    if (kind === 'adcreatives' && opts.throwOnCreativeNumber === counters.adcreatives) {
+      throw new Error('The operation was aborted due to timeout')
+    }
+    if (kind === 'adcreatives' && opts.reuseCreativeId) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ id: opts.reuseCreativeId }) } as Response
+    }
     if (kind === 'adsets' && opts.failAdSetNumber === counters.adsets) {
       return { ok: false, status: 400, text: async () => '{"error":{"message":"nope"}}' } as Response
     }
@@ -119,17 +137,42 @@ describe('系列花费上限 spend_cap', () => {
 })
 
 describe('中途失败：只回滚本次建出来的，逆序', () => {
-  it('第 2 个组建失败 → 按逆序删本次建出的广告、创意、第 1 组、系列；不碰别的编号', async () => {
+  it('第 2 个组建失败 → 按逆序删本次建出的广告、第 1 组、系列（创意不删）；不碰别的编号', async () => {
     vi.stubGlobal('fetch', mockGraph({ failAdSetNumber: 2 }))
     const r = await publishDraftPaused(MULTI, 'act_1', 'tok')
     expect(r.ok).toBe(false)
     if (r.ok) return
     expect(r.step).toBe('adset')
     const deleted = calls.filter((c) => c.method === 'DELETE').map((c) => c.url.split('?')[0].split('/').pop())
-    expect(deleted).toEqual(['ad1', 'cr1', 'as1', 'camp1'])
+    expect(deleted).toEqual(['ad1', 'as1', 'camp1'])
     expect(r.orphans).toEqual([])
     expect(posts('/adsets')).toHaveLength(2)
     expect(posts('/adcreatives')).toHaveLength(1)
+  })
+
+  it('3 个组共用同一个创意编号、第 3 个组建失败 → 一次都不去删那个创意，孤儿名单里也没有它', async () => {
+    const SHARED = '2210869679828612'
+    vi.stubGlobal('fetch', mockGraph({ failAdSetNumber: 3, reuseCreativeId: SHARED }))
+    const r = await publishDraftPaused(MULTI, 'act_1', 'tok')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    const deleted = calls.filter((c) => c.method === 'DELETE').map((c) => c.url.split('?')[0].split('/').pop())
+    expect(deleted).toEqual(['ad2', 'as2', 'ad1', 'as1', 'camp1'])
+    expect(calls.some((c) => c.url.includes(SHARED) && c.method === 'DELETE')).toBe(false)
+    expect(r.orphans).toEqual([])
+    expect(r.orphans.join('')).not.toContain(SHARED)
+  })
+
+  it('建创意时断网（不知道建成没有）→ 回滚已建的；孤儿名单里不出现「创意」', async () => {
+    vi.stubGlobal('fetch', mockGraph({ throwOnCreativeNumber: 2 }))
+    const r = await publishDraftPaused(MULTI, 'act_1', 'tok')
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.step).toBe('creative')
+    expect(r.orphans.join('')).not.toContain('创意')
+    expect(r.orphans).toEqual([])
+    const deleted = calls.filter((c) => c.method === 'DELETE').map((c) => c.url.split('?')[0].split('/').pop())
+    expect(deleted).toEqual(['as2', 'ad1', 'as1', 'camp1'])
   })
 })
 

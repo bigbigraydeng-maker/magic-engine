@@ -12,9 +12,11 @@ import {
   MAX_AD_SETS,
   MAX_AUTO_DAILY_BUDGET,
   MESSENGER_CTA_TYPE,
+  ageProblems,
   audienceListProblems,
   creativeProblems,
   isKnownDraftKind,
+  isWholeCents,
   messengerCreativeProblems,
   registerExpandedDraftProblems,
   validateDraft,
@@ -210,16 +212,23 @@ function audienceFactProblems(d: AdDraft, facts: ReadonlyMap<string, AudienceFac
   return problems
 }
 
-/** 系列花费上限：给了就必须是正整数（分），且不能低于一天的预算（低于一天预算的上限没有意义，多半是填错了单位）。 */
+/** 系列花费上限：给了就必须是正整数（分），且不能低于整个投放期的预算合计（每天 × 天数）。 */
 function spendCapProblems(d: AdDraft): DraftProblem[] {
   const cap = d.campaignSpendCapMinor
   if (cap === undefined) return []
   if (typeof cap !== 'number' || !Number.isInteger(cap) || cap <= 0) {
     return [{ field: 'campaignSpendCapMinor', message: '系列花费上限必须是大于 0 的整数（账户币种的最小单位，例如 NZD 的分）' }]
   }
+  // 上限低于「每天预算 × 天数」= 还没跑完就会被 Meta 拦停；这里按整个投放期算，不是只比一天。
   const dayMinor = cents(d.dailyBudget)
-  if (dayMinor !== null && dayMinor > 0 && cap < dayMinor) {
-    return [{ field: 'campaignSpendCapMinor', message: '系列花费上限比一天的预算还低，多半是单位填错了（要写分，不是元）' }]
+  if (dayMinor !== null && dayMinor > 0 && Number.isInteger(d.durationDays) && d.durationDays > 0) {
+    const totalMinor = dayMinor * d.durationDays
+    if (cap < totalMinor) {
+      return [{
+        field: 'campaignSpendCapMinor',
+        message: `系列花费上限（${cap}）低于整个投放期的预算合计（每天 × ${d.durationDays} 天 = ${totalMinor}，单位是分）。上限太低会让广告没跑完就被拦停；也可能是单位填错了（要写分，不是元）`,
+      }]
+    }
   }
   return []
 }
@@ -276,6 +285,11 @@ function adSetBudgetProblems(d: AdDraft): DraftProblem[] {
     if (!isAdSet(set)) return
     if (!Number.isFinite(set.dailyBudget) || (set.dailyBudget ?? 0) <= 0) {
       p.push({ field: `adSets[${i}].dailyBudget`, message: '每个广告组的日预算必须是大于 0 的数' })
+      sumOk = false
+      return
+    }
+    if (!isWholeCents(set.dailyBudget as number)) {
+      p.push({ field: `adSets[${i}].dailyBudget`, message: '广告组日预算最多写到分（两位小数），多出来的位数会被 Meta 悄悄四舍五入' })
       sumOk = false
       return
     }
@@ -381,15 +395,6 @@ function placeProblems(set: AdDraftAdSet, prefix: string): DraftProblem[] {
     return [{ field: `${prefix}geoCityKeys`, message: '国家和城市不能同时填：一起写时城市范围会失效。要按城市投就只填城市' }]
   }
   return []
-}
-
-function ageProblems(ageMin: number | undefined, ageMax: number | undefined, prefix: string): DraftProblem[] {
-  const p: DraftProblem[] = []
-  if (ageMin !== undefined && ageMin < 18) p.push({ field: `${prefix}ageMin`, message: 'Meta 不允许投给 18 岁以下' })
-  if (ageMin !== undefined && ageMax !== undefined && ageMin > ageMax) {
-    p.push({ field: `${prefix}ageMax`, message: '年龄下限比上限还大' })
-  }
-  return p
 }
 
 function switchProblems(

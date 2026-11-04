@@ -8,6 +8,7 @@ import {
   reviewDraftForBuild,
 } from '../ad-draft-expansion'
 import type { AudienceFact } from '../draft-audiences'
+import { checkDraftRedlines } from '../draft-redlines'
 
 const OFF = {
   advantageAudience: false,
@@ -354,7 +355,15 @@ describe('系列花费上限 campaignSpendCapMinor', () => {
 
   it('比一天的预算还低（多半把元当成分）→ 拦', () => {
     expect(fields(multi({ campaignSpendCapMinor: 420 }))).toContain('campaignSpendCapMinor')
-    expect(fields(multi({ campaignSpendCapMinor: 3000 }))).not.toContain('campaignSpendCapMinor')
+  })
+
+  it('低于「每天预算合计 × 天数」→ 拦（会让广告没跑完就被拦停）；刚好等于或更高 → 放行', () => {
+    const base = multi()
+    const total = Math.round(base.dailyBudget * 100) * base.durationDays
+    expect(fields(multi({ campaignSpendCapMinor: total - 1 }))).toContain('campaignSpendCapMinor')
+    expect(fields(multi({ campaignSpendCapMinor: 3000 }))).toContain('campaignSpendCapMinor')
+    expect(fields(multi({ campaignSpendCapMinor: total }))).not.toContain('campaignSpendCapMinor')
+    expect(fields(multi({ campaignSpendCapMinor: total + 1 }))).not.toContain('campaignSpendCapMinor')
   })
 })
 
@@ -389,5 +398,67 @@ describe('adSetViews / allCreatives / unionAudienceIds', () => {
     expect(text).toContain('2 个广告组')
     expect(text).toContain('g1 $9.5')
     expect(text).toContain('g2 $10.5')
+  })
+})
+
+describe('年龄和预算的位数（多组与单组各走各的路，规则一样）', () => {
+  const setField = (over: Partial<AdDraftAdSet>) => multi({ adSets: [adSet({ name: 'g1', dailyBudget: 15, ...over }), adSet({ name: 'g2', dailyBudget: 15 })], dailyBudget: 30 })
+  const single = (over: Partial<AdDraft>): AdDraft => ({
+    kind: 'lead_form', clientId: 'c1', campaignName: 'c', adSetName: 'a', dailyBudget: 30, durationDays: 7,
+    geoCountries: ['NZ'], pageId: 'p1', leadFormId: 'f1', creatives: [creative()], ...over,
+  })
+
+  it('多组：年龄上限 > 65、下限 > 65、下限 > 上限、下限 < 18 → 各自拦；35–65 放行', () => {
+    expect(fields(setField({ ageMax: 66 }))).toContain('adSets[0].ageMax')
+    expect(fields(setField({ ageMin: 66 }))).toContain('adSets[0].ageMin')
+    expect(fields(setField({ ageMin: 50, ageMax: 40 }))).toContain('adSets[0].ageMax')
+    expect(fields(setField({ ageMin: 17 }))).toContain('adSets[0].ageMin')
+    const ok = fields(setField({ ageMin: 35, ageMax: 65 }))
+    expect(ok.filter((f) => f.includes('age'))).toEqual([])
+  })
+
+  it('单组：同样的年龄规则', () => {
+    expect(fields(single({ ageMax: 66 }))).toContain('ageMax')
+    expect(fields(single({ ageMin: 66 }))).toContain('ageMin')
+    expect(fields(single({ ageMin: 50, ageMax: 40 }))).toContain('ageMax')
+    expect(fields(single({ ageMin: 17 }))).toContain('ageMin')
+    expect(fields(single({ ageMin: 35, ageMax: 65 })).filter((f) => f.includes('age'))).toEqual([])
+  })
+
+  it('多组：组日预算写到分以后还有小数位（9.505）→ 拦；9.5 / 10.25 放行', () => {
+    expect(fields(setField({ dailyBudget: 9.505 }))).toContain('adSets[0].dailyBudget')
+    expect(fields(setField({ dailyBudget: 10.25 })).filter((f) => f === 'adSets[0].dailyBudget')).toEqual([])
+    expect(fields(setField({ dailyBudget: 9.5 })).filter((f) => f === 'adSets[0].dailyBudget')).toEqual([])
+  })
+
+  it('单组：每天预算 9.505 → 拦；9.5 放行', () => {
+    expect(fields(single({ dailyBudget: 9.505 }))).toContain('dailyBudget')
+    expect(fields(single({ dailyBudget: 9.5 }))).not.toContain('dailyBudget')
+  })
+})
+
+describe('adSets 里的元素形状不对：账本摘要和红线扫描不能抛错（在 validateDraft 之前就会走到）', () => {
+  const junkItems: unknown[] = [null, 7, 'x', { name: 'only-name' }, {}]
+  const junk = junkItems as AdDraftAdSet[]
+
+  it('describeDraft 不抛，缺的名字 / 预算显示成 ?', () => {
+    const text = describeDraft(multi({ adSets: junk }))
+    expect(text).toContain('5 个广告组')
+    expect(text).toContain('only-name $?')
+  })
+
+  it('adSetViews / allCreatives 不抛，读不懂的组按「没有创意」处理', () => {
+    const d = multi({ adSets: junk })
+    expect(adSetViews(d)).toHaveLength(5)
+    expect(allCreatives(d)).toEqual([])
+  })
+
+  it('validateDraft 对这种草稿给出错误而不是抛', () => {
+    expect(() => validateDraft(multi({ adSets: junk }))).not.toThrow()
+    expect(validateDraft(multi({ adSets: junk })).length).toBeGreaterThan(0)
+  })
+
+  it('checkDraftRedlines 不抛', () => {
+    expect(() => checkDraftRedlines(multi({ adSets: junk }), ['cheapest'])).not.toThrow()
   })
 })

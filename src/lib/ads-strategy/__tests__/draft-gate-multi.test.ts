@@ -140,6 +140,34 @@ describe('checkMultiCreated — 广告条数和表单', () => {
   })
 })
 
+describe('checkMultiCreated — 视频留资：表单编号读不到就拦', () => {
+  const VIDEO_DRAFT: AdDraft = {
+    ...DRAFT,
+    adSets: DRAFT.adSets!.map((s) => ({
+      ...s,
+      creatives: s.creatives.map((c) => ({ ...c, imageHash: undefined, videoId: 'v1', thumbnailUrl: 'https://img.example/t.jpg' })),
+    })),
+  }
+  const videoSet = (i: number, ads?: SetReadback['ads']): SetReadback => ({ ...goodSet(i, {}, ads), view: adSetViews(VIDEO_DRAFT)[i] })
+  const noForm = [{ adId: 'ad1', adName: '组b 广告', status: 'PAUSED', texts: ['Hello'] }]
+
+  it('视频留资 + 回读里看不到表单编号 → ad_form_unreadable 是 blocker', () => {
+    const f = checkMultiCreated(VIDEO_DRAFT, good({ sets: [videoSet(0, noForm), videoSet(1), videoSet(2)] }), NOW)
+    expect(f).toHaveLength(1)
+    expect(f[0]).toMatchObject({ code: 'ad_form_unreadable', severity: 'blocker' })
+  })
+
+  it('视频留资 + 表单编号读得到且一致 → 空', () => {
+    expect(checkMultiCreated(VIDEO_DRAFT, good({ sets: [videoSet(0), videoSet(1), videoSet(2)] }), NOW)).toEqual([])
+  })
+
+  it('表单编号对不上：不管图片还是视频一律 blocker', () => {
+    const wrong = [{ adId: 'ad1', adName: '组b 广告', status: 'PAUSED', texts: ['Hello'], leadFormId: 'other' }]
+    const f = checkMultiCreated(VIDEO_DRAFT, good({ sets: [videoSet(0, wrong), videoSet(1), videoSet(2)] }), NOW)
+    expect(f.map((x) => `${x.code}:${x.severity}`)).toEqual(['ad_form_mismatch:blocker'])
+  })
+})
+
 describe('checkMultiCreated — 系列花费上限', () => {
   it('回读到的上限和草稿不一样 → spend_cap_mismatch', () => {
     expect(codes(good({ campaign: { status: 'PAUSED', spendCap: '0' } }))).toEqual(['spend_cap_mismatch'])

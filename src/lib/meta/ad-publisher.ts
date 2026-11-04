@@ -12,6 +12,7 @@
  * 建广告是四次写操作（系列 / 组 / 创意 / 广告），任何一步都可能失败。半成品
  * 留在账户里比失败更糟：它会出现在后台、会被人误开、会进第二天的扫描。
  * 所以失败时按创建的**逆序**删回去，删不掉的如实报出来让人处理。
+ * 只删系列 / 广告组 / 广告；**创意永远不删**（见 `newRun`）。
  * 多个广告组时，是 1 次系列 + 每组各 1 次组 + 每条广告各 2 次（创意 / 广告）；
  * 失败时同样按逆序回滚，且只回滚本次建出来的。
  */
@@ -292,7 +293,11 @@ type MadeOrFailed = { id: string } | PublishFailure
  */
 function newRun(accessToken: string, opts: PublishOptions) {
   const now = opts.now ?? Date.now
-  const created: string[] = []
+  // 只记「回滚要删」的三类：系列 / 广告组 / 广告。创意**不进这张单子，回滚永远不删创意**：
+  // Meta 对内容相同的创意会复用同一个对象（2026-10-27 实测），它可能正被在投的广告用着，
+  // 删它会被 Meta 拒（1487235），还会把一个根本不用收拾的编号当成「要手动删」的孤儿报给人。
+  // 没挂任何广告的创意不花钱，留着无害。
+  const created = new Set<string>()
   const possible: string[] = []
 
   const rollback = async (): Promise<string[]> => {
@@ -323,10 +328,13 @@ function newRun(accessToken: string, opts: PublishOptions) {
     }
     const r = await graphPost(path, body, accessToken)
     if ('error' in r) {
-      if (r.ambiguous) possible.push(`未确认是否已建成：${label}「${name}」，请去 Meta 后台按名字核对`)
+      // 创意不进孤儿名单：不花钱，也不该让人去后台「核对」一个可能被在投广告共用的对象。
+      if (r.ambiguous && step !== 'creative') {
+        possible.push(`未确认是否已建成：${label}「${name}」，请去 Meta 后台按名字核对`)
+      }
       return fail(step, r.error)
     }
-    created.push(r.id)
+    if (step !== 'creative') created.add(r.id)
     return r
   }
 

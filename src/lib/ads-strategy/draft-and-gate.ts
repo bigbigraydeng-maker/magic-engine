@@ -23,13 +23,13 @@ import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableK
 import { draftNotYetBuildable } from './ad-draft-expansion'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
-import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
+import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
 import { checkAudiences, renderAudienceSummary, type AudienceFact, type AudiencesChecked } from './draft-audiences'
 import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
 import { checkCreatedAsExpected } from './created-as-expected'
-import { checkMultiCreated, fetchMultiReadback, mergeMultiReports } from './draft-gate-multi'
+import { checkMultiCreated, fetchMultiReadback, mergeMultiReports, spendCapFindings } from './draft-gate-multi'
 import {
   buildSpendActivationReceipt,
   type SpendActivationAuthority,
@@ -155,6 +155,21 @@ const BUDGET = {
   giveUpPauseMs: 92_000,
 } as const
 
+/**
+ * 多个广告组要写的次数多（1 个系列 + 每组 1 次组 + 每条广告 2 次），时间预算按组数放宽：
+ * 每多一组多 15 秒，最多多 25 秒。总有顶：补暂停的截止点最坏 117 秒，在路由 120 秒上限之内。
+ * 单组 = 原来的数，一点没变。
+ */
+function budgetFor(draft: AdDraft) {
+  const extra = Math.min((adSetViews(draft).length - 1) * 15_000, 25_000)
+  return {
+    stopWritingMs: BUDGET.stopWritingMs + extra,
+    skipReadbackAfterMs: BUDGET.skipReadbackAfterMs + extra,
+    giveUpRollbackMs: BUDGET.giveUpRollbackMs + extra,
+    giveUpPauseMs: BUDGET.giveUpPauseMs + extra,
+  }
+}
+
 async function record(
   supabase: SupabaseClient,
   clientId: string,
@@ -239,7 +254,7 @@ export async function createDraftForApproval(
 
   // ── 2+3. 回读 → 闸门 ────────────────────────────────────────────────
   return gateReadback(draft, published, deps, {
-    ...base, startedAt, now, tooLateToRead: now() > startedAt + BUDGET.skipReadbackAfterMs,
+    ...base, startedAt, now, tooLateToRead: now() > startedAt + budgetFor(draft).skipReadbackAfterMs,
   })
 }
 
@@ -304,13 +319,13 @@ async function waitForTranscode(
   return ready.ok ? null : ready.error
 }
 
-/** 私信类型和任一创意带视频的草案有整次请求的时间预算（与 waitForTranscode 同口径）；其它沿用旧行为（不限）。 */
+/** 私信类型、任一创意带视频、多个广告组的草案有整次请求的时间预算（多组写的次数多，不能不限时）；其它沿用旧行为（不限）。 */
 function publishBudgetFor(draft: AdDraft, startedAt: number, now: () => number) {
   const hasVideo = allCreatives(draft).some((c) => !!c.videoId)
-  if (draft.kind !== 'messenger_conversation' && !hasVideo) return undefined
+  if (draft.kind !== 'messenger_conversation' && !hasVideo && !Array.isArray(draft.adSets)) return undefined
   return {
-    stopWritingAt: startedAt + BUDGET.stopWritingMs,
-    giveUpRollbackAt: startedAt + BUDGET.giveUpRollbackMs,
+    stopWritingAt: startedAt + budgetFor(draft).stopWritingMs,
+    giveUpRollbackAt: startedAt + budgetFor(draft).giveUpRollbackMs,
     now,
   }
 }
@@ -419,20 +434,24 @@ async function gateReadback(
   }
   if (Array.isArray(draft.adSets)) return gateReadbackMulti(draft, published, deps, ctx)
   const wantsExpected = draft.kind === 'messenger_conversation'
-  const [rawAdSet, ads, campaignStatus] = await Promise.all([
+  const wantsCap = draft.campaignSpendCapMinor !== undefined
+  const [rawAdSet, ads, campaignStatus, campaignRb] = await Promise.all([
     fetchAdSetReadback(published.adSetId, deps.accessToken),
     fetchAdCreativesReadback(published.adSetId, deps.accessToken),
     wantsExpected ? fetchCampaignStatus(published.campaignId, deps.accessToken) : undefined,
+    wantsCap ? fetchCampaignReadback(published.campaignId, deps.accessToken) : undefined,
   ])
   if (!rawAdSet || !ads) {
     return blockedUnreadable(draft, published, deps, ctx, '回读不到它的真实设置')
   }
 
   const report = launchReportFor(draft, deps, rawAdSet, ads)
-  const extra = expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps)
+  // 单组草稿带了系列花费上限：和多组一样，必须读回到同一个数（读不到也算没落到）。
+  const capFindings = wantsCap ? spendCapFindings(draft, campaignRb?.spendCap ?? null) : []
+  const extra = [...expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps), ...capFindings]
   const autoPause = extra.some((f) => f.code === 'not_paused')
     ? await pausePublished(published, deps.accessToken, {
-        deadlineAt: ctx.startedAt + BUDGET.giveUpPauseMs, now: ctx.now,
+        deadlineAt: ctx.startedAt + budgetFor(draft).giveUpPauseMs, now: ctx.now,
       })
     : undefined
 
@@ -460,7 +479,7 @@ async function gateReadbackMulti(
   const extra = checkMultiCreated(draft, rb, ctx.now())
   const autoPause = extra.some((f) => f.code === 'not_paused')
     ? await pausePublished(published, deps.accessToken, {
-        deadlineAt: ctx.startedAt + BUDGET.giveUpPauseMs, now: ctx.now,
+        deadlineAt: ctx.startedAt + budgetFor(draft).giveUpPauseMs, now: ctx.now,
       })
     : undefined
   return recordGate(draft, published, deps, ctx, mergeMultiReports(reports, extra), autoPause)

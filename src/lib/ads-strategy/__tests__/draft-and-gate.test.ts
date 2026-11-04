@@ -1527,3 +1527,103 @@ describe('approveDraft — 多个广告组的草案不能用「开」按钮', ()
     expect(updated).toHaveLength(0)
   })
 })
+
+describe('approveDraft — 锁定：多组草案无论账本里有没有 adSetId 都不能开', () => {
+  it('账本同时有 adSetId 和多个 adSetIds（被人补过）→ 仍然拒开，不调用 Meta 开启', async () => {
+    const rec: DraftRecord = {
+      status: 'awaiting_approval', draft: MULTI, summary: 's',
+      campaignId: 'camp1', adSetId: 'as1', adSetIds: ['as1', 'as2', 'as3'], adIds: ['ad1', 'ad2', 'ad3'],
+    }
+    const { sb, updated } = fakeSupabase(rec)
+    mActivate.mockClear()
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('多个广告组')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated).toHaveLength(0)
+  })
+
+  it('旧记录 adSetIds 是空数组 → 按单组走，行为不变（会去开）', async () => {
+    const rec: DraftRecord = {
+      status: 'awaiting_approval', draft: DRAFT, summary: 's',
+      campaignId: 'camp1', adSetId: 'as1', adSetIds: [], adIds: ['ad1'],
+    }
+    const { sb } = fakeSupabase(rec)
+    mActivate.mockResolvedValue({ ok: true, failed: [] } as Awaited<ReturnType<typeof activatePublished>>)
+    await approveDraft('act1', sb, 'tok', PM)
+    expect(mActivate).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('createDraftForApproval — 单组草稿带系列花费上限：也要读回核对', () => {
+  const CAPPED: AdDraft = { ...DRAFT, campaignSpendCapMinor: 21000 } // 30 × 7 天 = 21000 分
+
+  it('读回等于草稿写的数 → 照常等批准；确实去读了系列', async () => {
+    mCampaignReadback.mockResolvedValue({ status: 'PAUSED', spendCap: '21000' })
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(CAPPED, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mCampaignReadback).toHaveBeenCalledWith('camp1', 'tok')
+  })
+
+  it('读回的上限没落到 Meta（0）→ 拦下，blocker 是 spend_cap_mismatch', async () => {
+    mCampaignReadback.mockResolvedValue({ status: 'PAUSED', spendCap: '0' })
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(CAPPED, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('spend_cap_mismatch')
+    expect(inserted[0].status).toBe('blocked')
+  })
+
+  it('读不到系列（读不到 ≠ 没问题）→ 拦下', async () => {
+    mCampaignReadback.mockResolvedValue(null)
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(CAPPED, deps(sb))
+    expect(r.status).toBe('blocked')
+    expect(r.findings.map((f) => f.code)).toContain('spend_cap_mismatch')
+  })
+
+  it('草稿没写上限 → 不去读系列，行为和以前一样', async () => {
+    const { sb } = fakeSupabase()
+    const r = await createDraftForApproval(DRAFT, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mCampaignReadback).not.toHaveBeenCalled()
+  })
+})
+
+describe('createDraftForApproval — 时间预算按广告组数放宽，且总有顶', () => {
+  function nSets(n: number): AdDraft {
+    return {
+      ...MULTI, dailyBudget: n * 5, campaignSpendCapMinor: undefined,
+      adSets: Array.from({ length: n }, (_, i) => multiSet(`组${i}`, 5)),
+    }
+  }
+  const budgets = async (draft: AdDraft) => {
+    mPublish.mockResolvedValue(MULTI_PUBLISH)
+    mPause.mockResolvedValue({ ok: true, failed: [] })
+    multiReadbackGood()
+    const { sb } = fakeSupabase()
+    await createDraftForApproval(draft, deps(sb))
+    return mPublish.mock.calls[mPublish.mock.calls.length - 1][3]
+  }
+
+  it('单组纯图片留资：和以前一样，不限时（不传时间预算）', async () => {
+    expect(await budgets(DRAFT)).toBeUndefined()
+  })
+
+  it('多个组即使全是图片也要限时：1 个组 = 原来的 45 / 80 秒；2 个组多 15 秒；3 个组起多 25 秒（封顶）；5 个组不再多', async () => {
+    expect(await budgets(nSets(1))).toMatchObject({ stopWritingAt: T0 + 45_000, giveUpRollbackAt: T0 + 80_000 })
+    expect(await budgets(nSets(2))).toMatchObject({ stopWritingAt: T0 + 60_000, giveUpRollbackAt: T0 + 95_000 })
+    expect(await budgets(nSets(3))).toMatchObject({ stopWritingAt: T0 + 70_000, giveUpRollbackAt: T0 + 105_000 })
+    expect(await budgets(nSets(5))).toMatchObject({ stopWritingAt: T0 + 70_000, giveUpRollbackAt: T0 + 105_000 })
+  })
+
+  it('补暂停的截止点最坏是 117 秒，低于路由的 120 秒上限', async () => {
+    mPublish.mockResolvedValue(MULTI_PUBLISH)
+    mPause.mockResolvedValue({ ok: true, failed: [] })
+    multiReadbackGood({ as3: { status: 'ACTIVE' } })
+    const { sb } = fakeSupabase()
+    await createDraftForApproval(nSets(3), deps(sb))
+    expect(mPause.mock.calls[0][2]).toMatchObject({ deadlineAt: T0 + 117_000 })
+  })
+})

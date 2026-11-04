@@ -72,18 +72,25 @@ const blocker = (code: string, message: string): LaunchFinding => ({
 const isPaused = (s: unknown): boolean => typeof s === 'string' && s.trim().toUpperCase() === 'PAUSED'
 const show = (s: unknown): string => (typeof s === 'string' && s.trim() ? s.trim() : '读不到')
 
+/**
+ * 系列花费上限落没落到 Meta：草稿写了就必须读回到一模一样的数；读不到也算没落到。
+ * 单组和多组草稿共用（单组草稿带上限时，单组回读也要核）。草稿没写上限 = 不核，返回空。
+ */
+export function spendCapFindings(draft: AdDraft, readSpendCap: string | null): LaunchFinding[] {
+  const want = draft.campaignSpendCapMinor
+  if (want === undefined || Number(readSpendCap) === want) return []
+  return [blocker(
+    'spend_cap_mismatch',
+    `系列花费上限应是 ${want}（最小货币单位），回读到「${show(readSpendCap)}」。上限没落到 Meta 上，就不算设上了。`,
+  )]
+}
+
 function campaignFindings(draft: AdDraft, rb: MultiReadback): LaunchFinding[] {
   const out: LaunchFinding[] = []
   if (!isPaused(rb.campaign.status)) {
     out.push(blocker('not_paused', `广告系列应该是暂停的，回读到「${show(rb.campaign.status)}」。读不到也算没确认。`))
   }
-  const want = draft.campaignSpendCapMinor
-  if (want !== undefined && Number(rb.campaign.spendCap) !== want) {
-    out.push(blocker(
-      'spend_cap_mismatch',
-      `系列花费上限应是 ${want}（最小货币单位），回读到「${show(rb.campaign.spendCap)}」。上限没落到 Meta 上，就不算设上了。`,
-    ))
-  }
+  out.push(...spendCapFindings(draft, rb.campaign.spendCap))
   return out
 }
 
@@ -152,10 +159,15 @@ function formFindings(sb: SetReadback): LaunchFinding[] {
     return [blocker('ad_form_mismatch', `广告组「${view.adSetName}」里有广告挂的表单和草稿不是同一个：${wrong.map((a) => show(a.adName)).join('、')}。`)]
   }
   if (ads.some((a) => a.leadFormId === undefined)) {
+    // 视频留资：Meta 会回显 lead_gen_form_id（2026-10-09 上海实测），读不到就是表单没挂上，拦。
+    // 图片留资：不确定一定回显，只提醒。
+    const hasVideo = view.creatives.some((c) => !!c.videoId)
     return [{
       code: 'ad_form_unreadable',
-      severity: 'warn',
-      message: `广告组「${view.adSetName}」的广告回读里没看到表单编号（Meta 不一定回显），表单对不对要开投前人工核一次。`,
+      severity: hasVideo ? 'blocker' : 'warn',
+      message: hasVideo
+        ? `广告组「${view.adSetName}」是视频留资，但广告回读里没看到表单编号 —— 视频留资 Meta 会回显，读不到就当表单没挂上，不能当没问题。`
+        : `广告组「${view.adSetName}」的广告回读里没看到表单编号（Meta 不一定回显），表单对不对要开投前人工核一次。`,
       learnedFrom: LEARNED,
     }]
   }
