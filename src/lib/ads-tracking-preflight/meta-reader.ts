@@ -441,6 +441,20 @@ async function enrichDataset(
   }
 }
 
+/** 只读一个广告账户的状态 / 付款 / 花费上限（不读数据集）。永不 reject。 */
+export async function readAdAccountFact(input: {
+  adAccountId: string
+  token: string
+  fetcher: typeof fetch
+  sleep?: Sleep
+}): Promise<{ account: MetaAccountFact | null; errors: string[] }> {
+  const errors: string[] = []
+  if (!ACCOUNT_ID_RE.test(input.adAccountId)) return { account: null, errors: ['投放广告账户编号格式不对'] }
+  const graphGet = makeGraphGet(input.fetcher, input.token, input.sleep)
+  const account = await readAccount(graphGet, input.adAccountId, errors)
+  return { account, errors }
+}
+
 /** 读取官方账户的数据集、事件统计、匹配质量和账户状态。永不 reject。 */
 export async function readMetaFacts(input: MetaReadInput): Promise<MetaReadResult> {
   const { adAccountId, focusPixelIds, token, fetcher, now } = input

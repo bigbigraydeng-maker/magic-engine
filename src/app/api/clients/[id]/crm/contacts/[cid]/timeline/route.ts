@@ -13,12 +13,15 @@
  * Responses: 200 { contact, timeline } / 401 / 403 / 404 / 500
  */
 
-import { formFactsLine } from '@/lib/crm/form-facts'
+import { formFactsLine, metaFormFactsLine } from '@/lib/crm/form-facts'
+import { fetchFullEmailBody, mayBeTruncatedPreview } from '@/lib/crm/email-full-body'
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
+import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
+import { asFacts } from '@/lib/crm/call-analysis-facts'
 import { normalisePhone } from '@/lib/crm/identity'
 import { dropEmailTouchesDuplicatedByMessage } from '@/lib/crm/timeline-dedupe'
 import { buildTouchpointLike } from '@/lib/crm/contact-model'
@@ -52,21 +55,11 @@ interface CallAnalysisView {
   id: string
   summary: string
   reviewStatus: 'pending_review' | 'confirmed' | 'rejected'
-  facts: { key: string; value: string; quote: string }[]
+  facts: { key: string; value: string; quote: string; speaker?: 'customer' | 'employee' }[]
 }
 
 function asReviewStatus(v: unknown): CallAnalysisView['reviewStatus'] {
   return v === 'confirmed' || v === 'rejected' ? v : 'pending_review'
-}
-
-function asFacts(v: unknown): CallAnalysisView['facts'] {
-  if (!Array.isArray(v)) return []
-  return v.flatMap((f) => {
-    const o = (f ?? {}) as Record<string, unknown>
-    return typeof o.key === 'string' && typeof o.value === 'string' && typeof o.quote === 'string'
-      ? [{ key: o.key, value: o.value, quote: o.quote }]
-      : []
-  })
 }
 
 type TimelineEntry =
@@ -76,6 +69,17 @@ type TimelineEntry =
       channel: string
       direction: 'inbound' | 'outbound'
       summary: string | null
+      /** 出站且是机器发的（Mailchimp 欢迎信 / 群发）。 */
+      automated?: boolean
+      /** 同事发的信（不是发给客人的，也不是系统群发）：显示成「同事内部邮件」。 */
+      staffInternal?: boolean
+      /**
+       * 表格「员工跟进记录」那列的原话（source = sheet_followup）。仅当这条记录没有自己的摘要时才带 ——
+       * 抽屉只认摘要，不带的话这类记录整条看不见。
+       */
+      sheetNote?: string
+      /** 表格不记具体时间：`at` 是客人填表的时间，不是通话 / 写记录的时间（同步时标了 time_is_approximate）。 */
+      timeApproximate?: boolean
       /**
        * 销售**真正敲进去的那句话**（客人的原文 / FDE 的手记）。
        *
@@ -112,6 +116,13 @@ type TimelineEntry =
        * 销售会据此决定要不要解除全渠道停联 —— 而他以为自己在看客人说的话。
        */
       rawKind: 'verbatim' | 'ai_summary'
+      /**
+       * 员工自己在 CRM 里手记的一笔（`source = me_manual`）。前端据此把 `raw`（员工原话）当主行、
+       * AI 整理当次要行 —— 员工写的字是最高置信度的证据，AI 改写不能替代它（PM 2026-10-30）。
+       */
+      staffNote?: boolean
+      /** 谁记的（登录邮箱，`metadata.logged_by`）；不知道就没有。 */
+      loggedBy?: string | null
 
       tour: string | null
       outcome: string | null
@@ -192,7 +203,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     // 免得「Messenger 私信（5 条往来）」和真实 5 条消息在时间线里重复。
     supabaseAdmin
       .from('contact_touchpoints')
-      .select('channel, direction, occurred_at, summary, raw, metadata')
+      .select('channel, direction, occurred_at, summary, raw, metadata, source')
       .eq('client_id', clientId)
       .eq('contact_id', contactId)
       .neq('channel', 'messenger')
@@ -248,15 +259,24 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     sender_name: string | null
     body: string | null
     sent_at: string
+    message_id?: string | null
   }[] = []
   if (convIds.length > 0) {
     const { data: msgs } = await supabaseAdmin
       .from('conversation_messages')
-      .select('conversation_id, direction, sender_name, body, sent_at')
+      .select('conversation_id, direction, sender_name, body, sent_at, message_id')
       .in('conversation_id', convIds)
       .order('sent_at', { ascending: false })
       .limit(3000)
     messages = (msgs ?? []) as typeof messages
+    // 邮件同步只存 255 字摘要；「上次说到这」读的是最新一封客人来信，只对这一封去邮箱拉全文。
+    const latestInbound = messages.find(
+      (m) => m.direction === 'inbound' && convChannel.get(m.conversation_id) === 'email',
+    )
+    if (latestInbound?.message_id && mayBeTruncatedPreview(latestInbound.body)) {
+      const full = await fetchFullEmailBody(clientId, latestInbound.message_id)
+      if (full && full.length > (latestInbound.body ?? '').trim().length) latestInbound.body = full
+    }
   }
 
   // AI 摘要（意向 / 下一步）不再从这里出：2026-10-10 起由列表接口统一算进「该做什么」
@@ -297,19 +317,30 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     /** 原话。存量结果值读的时候要靠它重判一次（见 reclassifyStoredOutcome）。 */
     raw: string | null
     metadata: Record<string, unknown> | null
+    source: string | null
   }[]) {
     if (hasWhatsAppConversation && t.channel === 'whatsapp') continue
     const m = t.metadata ?? {}
+    // 'sheet_followup' 跟 lib/crm/sheet-followup-sync 的 SHEET_FOLLOWUP_SOURCE 同值；这里不 import 它，
+    // 免得把读 Google 表格的依赖拖进抽屉接口。
+    const sheetNote = t.source === 'sheet_followup' && !cleanStr(t.summary) ? cleanStr(t.raw) : null
     entries.push({
       kind: 'touch',
       at: t.occurred_at,
       channel: t.channel,
       direction: t.direction,
       summary: t.summary,
+      // 机器发的出站（Mailchimp 欢迎信 / 群发）：抽屉里要说清「系统自动发出」，不能当成同事写的话，
+      // 也不能当「最后一句」盖掉客人真说的话。
+      automated: t.channel === 'email' && t.direction === 'outbound' && isAutomatedTouch(t.source, m),
+      ...(t.channel === 'email' && typeof m.staff_sender === 'string' ? { staffInternal: true } : {}),
       raw: cleanStr(t.raw),
+      ...(sheetNote ? { sheetNote } : {}),
+      ...(m.time_is_approximate === true ? { timeApproximate: true } : {}),
       dncFlag: m.do_not_contact === true,
       // 外呼那条路写的是模型摘要，不是逐字原话 —— 靠 voice_call_id 认出来。
       rawKind: m.voice_call_id ? 'ai_summary' : 'verbatim',
+      ...(t.source === 'me_manual' ? { staffNote: true, loggedBy: cleanStr(m.logged_by) } : {}),
       // 这一条触点自己带的团意向：FB 表单下拉优先，其次手工笔记解析值。
       tour: cleanStr(m.tour_interest_raw) ?? cleanStr(m.tour_interest),
       /**
@@ -432,16 +463,19 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     }
   }
 
-  // 官网表单里的「预计出发时间 / 每人预算」：取最新一条带这两项稳定代码的 web_form 触点，转成一行人话。
+  // 官网表单 / Facebook 客资表单里的「预计出发时间 / 每人预算」：取最新一条带这两项答案的表单触点，转成一行人话。
   // 缺失就是 null（抽屉不显示），不当 0；这两项只是事实，不参与冷热/阶段判断。
   let formFacts: string | null = null
   let formFactsAt = ''
   for (const t of (touches ?? []) as { channel: string; occurred_at: string; metadata: Record<string, unknown> | null }[]) {
-    if (t.channel !== 'web_form' || !t.metadata) continue
-    const line = formFactsLine({
-      travelWindow: typeof t.metadata.form_travel_window === 'string' ? t.metadata.form_travel_window : null,
-      budgetBand: typeof t.metadata.form_budget_band === 'string' ? t.metadata.form_budget_band : null,
-    })
+    if ((t.channel !== 'web_form' && t.channel !== 'meta_lead_form') || !t.metadata) continue
+    const line =
+      t.channel === 'meta_lead_form'
+        ? metaFormFactsLine(t.metadata.custom_answers)
+        : formFactsLine({
+            travelWindow: typeof t.metadata.form_travel_window === 'string' ? t.metadata.form_travel_window : null,
+            budgetBand: typeof t.metadata.form_budget_band === 'string' ? t.metadata.form_budget_band : null,
+          })
     if (line && t.occurred_at >= formFactsAt) {
       // 带上提交日期：客人后来再填一次没带这两项的表单时，抽屉不会把旧答案当成现在的说法。
       formFacts = `${line}（${nzMonthDay(t.occurred_at)}提交）`

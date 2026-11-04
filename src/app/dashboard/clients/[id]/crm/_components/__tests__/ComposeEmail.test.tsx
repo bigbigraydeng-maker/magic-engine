@@ -111,4 +111,41 @@ describe('ComposeEmail', () => {
     const second = JSON.parse((f.mock.calls[2][1] as { body: string }).body).requestId
     expect(second).toBe(first)
   })
+  it('AI draft fills the box, warns to review, never sends by itself', async () => {
+    const f = stub([
+      { ok: true, body: { conversationId: null, compose: can } },
+      { ok: true, body: { subject: 'Your tour', body: 'Hi Amy, thanks for asking.' } },
+    ])
+    draw()
+    fireEvent.click(await screen.findByTestId('compose-ai-draft'))
+    await waitFor(() => expect(screen.getByLabelText('邮件正文')).toHaveValue('Hi Amy, thanks for asking.'))
+    expect(screen.getByLabelText('邮件主题')).toHaveValue('Your tour')
+    expect(screen.getByTestId('compose-ai-notice')).toBeInTheDocument()
+    expect(f).toHaveBeenCalledTimes(2)
+    expect(String(f.mock.calls[1][0])).toContain('/email/compose/draft')
+    expect(String(f.mock.calls.map((c) => c[0]).join())).not.toMatch(/email\/compose$/)
+  })
+
+  it('AI draft failure shows the reason and keeps what was typed', async () => {
+    stub([
+      { ok: true, body: { conversationId: null, compose: can } },
+      { ok: false, status: 502, body: { error: 'AI 暂时起草不出来' } },
+    ])
+    draw()
+    fireEvent.change(await screen.findByLabelText('邮件正文'), { target: { value: 'mine' } })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(screen.getByTestId('compose-ai-draft'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('AI 暂时起草不出来')
+    expect(screen.getByLabelText('邮件正文')).toHaveValue('mine')
+  })
+  it('cancelling the overwrite confirm does not call the AI, and send is disabled while drafting', async () => {
+    const f = stub([{ ok: true, body: { conversationId: null, compose: can } }])
+    draw()
+    fireEvent.change(await screen.findByLabelText('邮件正文'), { target: { value: 'mine' } })
+    fireEvent.change(screen.getByLabelText('邮件主题'), { target: { value: 'S' } })
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    fireEvent.click(screen.getByTestId('compose-ai-draft'))
+    expect(f).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText('邮件正文')).toHaveValue('mine')
+  })
 })

@@ -44,6 +44,8 @@ export interface CronRunFinishOpts {
 }
 
 export interface CronRunHandle {
+  /** 开跑时生成的 cron_run_logs.id。重叠的后一轮用它认出「哪一行是自己」。 */
+  id: string
   finish(opts: CronRunFinishOpts): Promise<void>
 }
 
@@ -148,6 +150,7 @@ function finisher(jobName: string, runId: string, startedAt: number): CronRunHan
   const startedAtIso = new Date(startedAt).toISOString()
 
   return {
+    id: runId,
     async finish({ processed = 0, completed = 0, failed = 0, summary, error: jobError }) {
       const outcome = {
         id: runId,

@@ -14,7 +14,7 @@ function sortTours(tours: CatalogTour[]): CatalogTour[] {
 }
 
 /** Departures of a tour that are on/after `today`, visible, sorted ascending by departOn. */
-function visibleDepartures(
+export function visibleDepartures(
   tourId: string,
   departures: CatalogDeparture[],
   today: string,

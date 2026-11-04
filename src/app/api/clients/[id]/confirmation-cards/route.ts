@@ -10,6 +10,7 @@ import {
   listConfirmationCards,
 } from '@/lib/confirmation-card'
 import { parseIssueBody, publicError } from '@/lib/confirmation-card/http'
+import { pausedDraftResultLines } from '@/lib/ads-strategy/paused-draft-submit'
 
 function clickerOf(req: Request, email: string, role: 'admin' | 'client-viewer', allowedClientId: string | null, clientId: string) {
   return clickerFromSession({
@@ -33,8 +34,14 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
   const clicker = clickerOf(req, access.user.email ?? '', access.role, access.allowedClientId, params.id)
   try {
-    const cards = await listConfirmationCards(createKernel(supabaseAdmin), params.id, clicker)
-    return NextResponse.json({ cards })
+    const kernel = createKernel(supabaseAdmin)
+    const cards = await listConfirmationCards(kernel, params.id, clicker)
+    const lines = await pausedDraftResultLines(kernel.supabase, params.id)
+    const shown = cards.map((card) => {
+      const line = lines.get(card.runId)
+      return line ? { ...card, statusLine: line } : card
+    })
+    return NextResponse.json({ cards: shown })
   } catch (error) {
     const mapped = publicError(error)
     if (mapped.status === 500) console.error('[confirmation-card] list failed')

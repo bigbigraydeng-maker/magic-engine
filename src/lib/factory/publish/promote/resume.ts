@@ -3,6 +3,7 @@
 
 import { buildReelFirstComment } from '@/lib/social/reel-publishing'
 import { asRecord, computeFingerprint, redlineSurface } from './guards'
+import { recheckReelFacts } from './fact-recheck'
 import { writeCompletionBooks } from './books'
 import { finishStage, type FinishInput } from './publish-steps'
 import { readAuth } from './payload-lock'
@@ -63,10 +64,15 @@ async function buildResume(deps: PromoteDeps, order: PromoteOrder, row: ResumeCo
   if (!videoId || !first || !order.master_brief_id || typeof approvedAt !== 'string') return fail(422, '补做收尾所需的配置缺失')
   const hit = await deps.scanRedline(order.client_id, order.master_brief_id, redlineSurface(first.text))
   if (hit) return fail(422, `首评命中红线,不能发送: ${hit}`)
+  const recheck = await recheckReelFacts({ loadFactSource: deps.loadFactSource, order, now: deps.now(), only: 'first_comment' })
+  // Retrying only the comment: nothing else to do, so refuse. Finishing an already-public reel: still write the
+  // receipts, just do not send a comment that no longer matches the catalog.
+  if (!recheck.ok && commentRetry) return fail(recheck.status, recheck.error)
+  const commentBlockedReason = recheck.ok ? null : recheck.error
   const fingerprint = computeFingerprint({ videoId, description: '', firstComment: first.text, approvedAt })
   return {
     ok: true, order, claimTarget: { orderId: order.id, row, fingerprint, videoId, pageId }, approvedAt, requestId, commentRetry,
-    finish: { orderId: order.id, clientId: order.client_id, masterBriefId: order.master_brief_id, target, videoId, firstComment: first.text, rowId: row.id },
+    finish: { orderId: order.id, clientId: order.client_id, masterBriefId: order.master_brief_id, target, videoId, firstComment: first.text, rowId: row.id, commentBlockedReason },
     publishedAt: String(ref['published_at'] ?? ''), estimated: ref['published_at_estimated'] === true,
     permalink: typeof ref['permalink'] === 'string' ? ref['permalink'] : null,
   }

@@ -21,7 +21,6 @@ export const JOB_MAX_DURATION_SEC: Readonly<Record<string, number>> = {
   'cms-connection-retest': 300,
   'content-factory-intake': 300,
   'cron-run-logs-cleanup': 120,
-  'diagnostic-weekly': 800,
   'execution-auto-run': 900,
   'factory-dead-letter-rerun': 60,
   'factory-order-scheduler': 120,

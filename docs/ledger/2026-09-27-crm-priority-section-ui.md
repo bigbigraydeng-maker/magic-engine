@@ -9,8 +9,8 @@ done_on: 2026-09-27
 done_ref: pr:2089
 verify_by: 2026-10-01
 verify_how: 跑 `npx tsx --tsconfig scripts/tsconfig.probe-ui.json --env-file=<.env.local> scripts/probe-crm-priority-ui.ts`（换 clientId 再跑一次 NAL `4ae76381-cd45-43bd-85cd-98cfd7604007`）。判成：每一项都是 ✅，尤其「收起来的段也画出段头」和「人数 = 接口给的 total」。人数跟今天不一样是正常的（新私信天天进），但**四段人数之和必须等于该客户联系人总数**——对不上先跑 probe-crm-priority-view.ts 看是接口算错了还是页面画漏了
-last_checked: 2026-10-09
-check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
+last_checked: 2026-10-28
+check_note: 夜巡跑 probe-crm-priority-ui.ts 崩溃(退出码1)：NewMessagesBanner.tsx:39 formatParts 对 undefined 调 Object.entries，探针喂的数据与现页面不匹配，是探针过期还是页面真有缺陷未分清，判不了
 ---
 这一页原先只按「最近联系时间」平铺，**谁该先被联系看不出来**。现在多一个按钮切到 4 段：客人在等你 / 还没搭上话 / 先放着系统盯着 / 不在今天名单。口径跟「今天要联系」那一页共用同一套判据，不是这一页自己另算。默认仍是平铺，老用户打开看到的东西一个字没变。
 

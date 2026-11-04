@@ -4,35 +4,36 @@ import { requireOperatorAccess } from '@/lib/auth/client-access'
 import { getGoalById } from '@/lib/strategy/goals'
 import {
   MANUAL_PRESCRIPTION_AGENT,
-  NO_COMPLETED_RUN_MESSAGE,
   parseManualPrescriptionBody,
   type ManualParseSuccess,
 } from '@/lib/diagnostic/manual-prescription'
 import { attachPlanSeed } from '@/lib/ads-strategy/plan-seed/attach'
 import { afterPrescriptionDraftSaved } from '@/lib/marketing-plan/promo/plan-draft-hook'
+import { prepareBudgetIntake } from '@/lib/ads/budget-currency'
+import { resolveIntakeClientKind } from '@/lib/huatuo/client-kind'
+import type { PrescriptionIntake } from '@/types/diagnostic'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 type Fail = { ok: false; status: number; error: string }
-type Ready = { ok: true; runId: string; version: number }
+type Ready = { ok: true; runId: string | null; version: number }
 
 function jsonError(status: number, error: string): NextResponse {
   return NextResponse.json({ success: false, error }, { status })
 }
 
-async function latestCompletedRunId(clientId: string): Promise<{ runId: string } | Fail> {
+/** Latest run id only. Scores and issue lists stay unread. Missing id is stored as null. */
+async function latestRunId(clientId: string): Promise<{ runId: string | null } | Fail> {
   const { data, error } = await supabaseAdmin
     .from('diagnostic_runs')
     .select('id')
     .eq('client_id', clientId)
-    .eq('status', 'completed')
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle<{ id: string }>()
   if (error) return { ok: false, status: 500, error: '读取体检记录失败' }
-  if (!data?.id) return { ok: false, status: 422, error: NO_COMPLETED_RUN_MESSAGE }
-  return { runId: data.id }
+  return { runId: data?.id ?? null }
 }
 
 async function nextVersionForGoal(goalId: string): Promise<number | Fail> {
@@ -47,12 +48,30 @@ async function nextVersionForGoal(goalId: string): Promise<number | Fail> {
   return (data?.version ?? 0) + 1
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+async function resolveOptionalIntake(
+  body: unknown,
+  clientId: string,
+): Promise<{ ok: true; intake: PrescriptionIntake | null } | Fail> {
+  if (!isRecord(body) || body.intake == null) return { ok: true, intake: null }
+  const prepared = prepareBudgetIntake(body.intake)
+  if (!prepared.ok) return { ok: false, status: 400, error: prepared.error }
+  const intake = await resolveIntakeClientKind(supabaseAdmin, clientId, prepared.intake)
+  if (!intake.business_goal || typeof intake.monthly_budget_aud !== 'number') {
+    return { ok: false, status: 400, error: 'intake must include business_goal and monthly_budget_aud' }
+  }
+  return { ok: true, intake }
+}
+
 async function loadInsertContext(clientId: string, goalId: string): Promise<Ready | Fail> {
   const goal = await getGoalById(supabaseAdmin, goalId)
   if (!goal || goal.client_id !== clientId) {
     return { ok: false, status: 422, error: '目标不存在，或不属于这个客户' }
   }
-  const run = await latestCompletedRunId(clientId)
+  const run = await latestRunId(clientId)
   if (!('runId' in run)) return run
   const version = await nextVersionForGoal(goalId)
   if (typeof version !== 'number') return version
@@ -63,6 +82,7 @@ async function insertDraft(
   clientId: string,
   parsed: ManualParseSuccess,
   ready: Ready,
+  intake: PrescriptionIntake | null,
 ): Promise<NextResponse> {
   const row = {
     client_id: clientId,
@@ -73,7 +93,7 @@ async function insertDraft(
     version: ready.version,
     agent_name: MANUAL_PRESCRIPTION_AGENT,
     content: parsed.content,
-    intake: null,
+    intake,
     generation_meta: parsed.generationMeta,
     supersedes_id: null,
     supplements_id: null,
@@ -84,10 +104,6 @@ async function insertDraft(
     .select('id')
     .single<{ id: string }>()
   if (error || !data) {
-    const message = error?.message ?? ''
-    if (message.includes('run_id') || message.includes('discovery_id')) {
-      return jsonError(422, NO_COMPLETED_RUN_MESSAGE)
-    }
     console.error('[prescriptions/manual] insert failed', error)
     return jsonError(500, '保存处方草稿失败')
   }
@@ -122,9 +138,11 @@ export async function POST(
 
   const parsed = parseManualPrescriptionBody(body, clientId)
   if (!parsed.ok) return jsonError(parsed.status, parsed.error)
+  const intakeResult = await resolveOptionalIntake(body, clientId)
+  if (!intakeResult.ok) return jsonError(intakeResult.status, intakeResult.error)
   const ready = await loadInsertContext(clientId, parsed.goalId)
   if (!ready.ok) return jsonError(ready.status, ready.error)
   // 种子构建失败不能挡住保存草稿：attachPlanSeed 自己不抛错，这里再兜一层
   parsed.content = await attachPlanSeed(parsed.content, { clientId, goalId: parsed.goalId }).catch(() => parsed.content)
-  return insertDraft(clientId, parsed, ready)
+  return insertDraft(clientId, parsed, ready, intakeResult.intake)
 }

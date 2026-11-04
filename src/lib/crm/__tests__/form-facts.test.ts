@@ -102,3 +102,37 @@ describe('formFactsLine', () => {
     expect(formFactsLine({ travelWindow: null, budgetBand: null })).toBeNull()
   })
 })
+
+import { metaFormFactsLine } from '../form-facts'
+
+describe('metaFormFactsLine (Facebook lead form answers)', () => {
+  it('renders travel time and budget from the stored option slugs', () => {
+    expect(
+      metaFormFactsLine({
+        'when_are_you_hoping_to_travel?': 'first_half_next_year',
+        'whats_your_budget_per_person_nzd?': '3000_5000',
+        'which_tour_interests_you_most?': 'still_deciding_–_show_me_all',
+      }),
+    ).toBe('预计明年上半年出发 · 预算 NZD 3,000–5,000/人')
+  })
+
+  it('renders every option currently used in the live form', () => {
+    for (const v of ['next_1_2_months', 'around_christmas', 'first_half_next_year', 'not_sure_exploring']) {
+      expect(metaFormFactsLine({ 'when_are_you_hoping_to_travel?': v })).not.toContain('：')
+    }
+    for (const v of ['around_3000', '3000_5000', '5000_8000', 'budget_not_a_concern', 'not_sure_yet']) {
+      expect(metaFormFactsLine({ 'whats_your_budget_per_person_nzd?': v })).not.toContain('：')
+    }
+  })
+
+  it('keeps an unrecognised new option as readable text instead of dropping it', () => {
+    expect(metaFormFactsLine({ 'when_are_you_hoping_to_travel?': 'late_next_year' })).toBe('出发时间：late next year')
+  })
+
+  it('returns null when neither question was answered', () => {
+    expect(metaFormFactsLine({ 'which_tour_interests_you_most?': 'x' })).toBeNull()
+    expect(metaFormFactsLine({})).toBeNull()
+    expect(metaFormFactsLine(null)).toBeNull()
+    expect(metaFormFactsLine(['a'])).toBeNull()
+  })
+})

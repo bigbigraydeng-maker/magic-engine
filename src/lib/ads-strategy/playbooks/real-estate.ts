@@ -6,4 +6,6 @@ export const REAL_ESTATE_ADS_PLAYBOOK: AdsPlaybook = {
   resultNoun: '线索',
   costPerResultLabel: '每个线索',
   expectedGeoNoun: '房源',
+  creativeCompareMinLinkClicks: null,
+  creativeOfferNoun: null,
 }

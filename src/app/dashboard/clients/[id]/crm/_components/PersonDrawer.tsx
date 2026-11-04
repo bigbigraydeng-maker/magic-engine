@@ -7,6 +7,8 @@
  * 滑出，手机上铺满整屏。prospecting 的看板也是这个交互。
  */
 
+import { MarkTradeButton } from './MarkTradeButton'
+import { phoneRegionLabel } from '@/lib/crm/phone-region'
 import { ReturningRoute } from './ReturningRoute'
 import { AssigneeSelect } from './AssigneeSelect'
 import type { ContactRow } from '../all/_components/contact-table-types'
@@ -16,9 +18,11 @@ import { ComposeNote, type StageOption } from './ComposeNote'
 import { WhatsAppReply } from './WhatsAppReply'
 import { ContactTimeline, type TimelineSummary, type TimelineAiBrief, type StageSource } from './ContactTimeline'
 import { briefAge } from '@/lib/crm/brief-age'
+import { preserveOriginalName } from '@/lib/crm/brief-display-name'
 import { MessengerReply } from './MessengerReply'
 import { EmailReply } from './EmailReply'
 import { ComposeEmail } from './ComposeEmail'
+import { PostCallEmailBar } from './PostCallEmailBar'
 import { ProfileCard } from './ProfileCard'
 import { ReturnLeadPanel } from './ReturnLeadPanel'
 import { DncBanner } from './DncBanner'
@@ -148,6 +152,8 @@ export function PersonDrawer({
   const [markingWon, setMarkingWon] = useState(false)
   /** 阶段的「其他」展开没有 —— 默认只给下一步 + 一个出口。 */
   const [allStages, setAllStages] = useState(false)
+  /** 「上次说到这」默认只露四行，长的可展开看全。 */
+  const [lastTextOpen, setLastTextOpen] = useState(false)
   /** 「更多」折叠区 —— 次要控件都收在这里，屏幕上只留一个主按钮（PM：按钮太多）。 */
   const [moreOpen, setMoreOpen] = useState(false)
   /** 一键动作正在写 —— 防双击记成两笔。 */
@@ -181,6 +187,7 @@ export function PersonDrawer({
   useEffect(() => {
     let alive = true
     setAiBrief(null)
+    setLastTextOpen(false)
     const ctrl = new AbortController()
     void (async () => {
       try {
@@ -394,7 +401,7 @@ export function PersonDrawer({
                   ⚠️ 这张卡生成之后他又有新动作（见上面的往来一览），卡里「尚未回复」之类的说法可能已不对，以最新记录为准
                 </p>
               )}
-              <p className="text-[13px] leading-relaxed text-me-charcoal/90">{aiBrief.summary}</p>
+              <p className="text-[13px] leading-relaxed text-me-charcoal/90">{preserveOriginalName(aiBrief.summary, row.name)}</p>
               {aiBrief.customerNeeds.length > 0 && (
                 <div className="mt-2 flex gap-2">
                   <span className="min-w-[52px] text-[11px] font-bold text-me-charcoal/50">想要什么</span>
@@ -428,17 +435,28 @@ export function PersonDrawer({
                   <p className="text-[10px] font-black uppercase tracking-[0.12em] text-me-ochre">
                     上次说到这
                   </p>
-                  <p className="mt-1 line-clamp-3 text-[13px] leading-relaxed text-me-charcoal/85">
+                  <p
+                    className={`mt-1 whitespace-pre-line text-[13px] leading-relaxed text-me-charcoal/85 ${lastTextOpen ? '' : 'line-clamp-4'}`}
+                  >
                     <span className="font-bold">{summary.lastWho}：</span>
                     {summary.lastText}
                   </p>
+                  {summary.lastText.length > 160 && (
+                    <button
+                      type="button"
+                      onClick={() => setLastTextOpen((v) => !v)}
+                      className="mt-1 text-[12px] font-bold text-me-ochre"
+                    >
+                      {lastTextOpen ? '收起' : '展开看全文'}
+                    </button>
+                  )}
                 </>
               )}
               {(summary.tour || summary.travelWindow) && (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {summary.tour && (
                     <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-me-charcoal/75">
-                      想去：{summary.tour}
+                      广告表单里点过：{summary.tour}
                     </span>
                   )}
                   {summary.travelWindow && (
@@ -472,6 +490,11 @@ export function PersonDrawer({
                 className="rounded-lg border border-me-stone bg-white px-3 py-2 text-sm font-semibold text-me-charcoal"
               >
                 📞 {row.phone}
+                {phoneRegionLabel(row.phone) && (
+                  <span className="ml-1.5 text-[11px] font-bold text-me-charcoal/50">
+                    {phoneRegionLabel(row.phone)}号码
+                  </span>
+                )}
               </a>
             )}
             {row.phone && !row.phoneUnusable && !row.doNotContact && (
@@ -494,6 +517,7 @@ export function PersonDrawer({
                 </a>
                 {/* mailto 靠电脑里设好的邮件程序，没设就没反应——旁边永远有一个有反馈的「复制」。 */}
                 <CopyEmailButton email={row.email} />
+                <MarkTradeButton clientId={clientId} email={row.email} onDone={(msg) => onSaved(msg, true)} />
               </>
             )}
             {row.doNotContact && (
@@ -720,6 +744,17 @@ export function PersonDrawer({
           {/* 回复框放在往来记录之后（先读后回，跟聊天类产品一样）：原来它在上面，一个空的邮件回复框就有 320 像素高，
               把往来记录整个顶到屏幕下面（PM 2026-10-14 好用性调整）。 */}
           <div className="mt-5 space-y-3 empty:hidden" data-testid="drawer-replies">
+          {/* 通话后选模板发邮件：功能没开通 / 没有模板时什么都不渲染，容器照样是空的。 */}
+          <PostCallEmailBar
+            key={row.contactId}
+            clientId={clientId}
+            contactId={row.contactId}
+            dialedAt={dialedAt}
+            onSent={() => {
+              setTimelineKey((k) => k + 1)
+              onSaved('✓ 邮件已发出', false)
+            }}
+          />
           {/* 在这一页直接回私信 —— 没有私信线的人这里什么都不渲染。
               110 位 CTS 客人只有 Facebook 身份，卡上写着「只能在 Messenger
               回他」，之前却要跳去另一个页面才回得了。 */}

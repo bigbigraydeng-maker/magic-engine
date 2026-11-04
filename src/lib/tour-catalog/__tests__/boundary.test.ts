@@ -48,7 +48,18 @@ const DB_OBJECT_PREFIX = ['tour', 'catalog', ''].join('_')
 const OPEN_MODULES = new Set(['publish-contract', 'types', 'api-contract', 'catalog-contract', 'publish-request-feed', 'booking-facts', 'sales-facts'])
 /** store-publish is importable only for these names. */
 const PUBLISHED_READER_MODULE = 'store-publish'
-const PUBLISHED_READER_NAMES = new Set(['loadPublishedProducts', 'PublishedProductsRead'])
+const PUBLISHED_READER_NAMES = new Set([
+  'loadPublishedProducts',
+  'PublishedProductsRead',
+  'loadPublishedTourFacts',
+  'PublishedTourFactsRead',
+  // Social copy checker: id / name / title from published snapshots only (earlier tour names).
+  'loadPublishedNameHistory',
+  'PublishedNameHistoryRead',
+  // Social copy checker: tells "never published" apart from "published but unreadable".
+  'hasPublishedCatalog',
+  'PublishedCatalogPresence',
+])
 
 const SOURCE_FILE = /\.(tsx?|mjs|js)$/
 
@@ -263,6 +274,8 @@ describe('tour catalog draft boundary', () => {
       `import { loadPublishedProducts } from '@/lib/tour-catalog/store-publish'`,
       `import { loadPublishedProducts, type PublishedProductsRead } from '@/lib/tour-catalog/store-publish'`,
       `import type { PublishedProductsRead } from '@/lib/tour-catalog/store-publish'`,
+      `import { loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'`,
+      `import type { PublishedTourFact } from '@/lib/tour-catalog/publish-contract'`,
       `import type { PublishChange } from '@/lib/tour-catalog/publish-contract'`,
       `import type { CatalogTour } from '@/lib/tour-catalog/types'`,
       `import type { CatalogResponse } from '../tour-catalog/api-contract'`,

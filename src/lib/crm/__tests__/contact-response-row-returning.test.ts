@@ -47,3 +47,25 @@ describe('responseRowFor 透传 returning', () => {
     expect(row.nextAction.line.match(/——/g)?.length).toBe(1)
   })
 })
+
+describe('responseRowFor · 最近联系不算机器发的邮件', () => {
+  const t = (over: Record<string, unknown>) =>
+    ({ id: 't', contact_id: 'c1', channel: 'email', direction: 'inbound', summary: null, raw: null, metadata: null, source: 'microsoft_mail', occurred_at: '2026-10-27T01:00:00Z', ...over }) as never
+  const rowOf = (touches: never[]) =>
+    responseRowFor(contact, touches, new Map(), { doNotContact: false } as never, seg()).row as { lastTouchAt: string | null }
+
+  it('Mailchimp 欢迎信（出站 + 机器）不把「最近联系」顶到今天', () => {
+    const r = rowOf([
+      t({ occurred_at: '2026-10-27T01:00:00Z' }),
+      t({ direction: 'outbound', source: 'mailchimp', metadata: { automated: true, kind: 'sent' }, occurred_at: '2026-10-28T19:02:00Z' }),
+    ])
+    expect(r.lastTouchAt).toBe('2026-10-27T01:00:00.000Z')
+  })
+
+  it('同事真回的信、AI 外呼（也标了 automated 的电话）仍然算最近联系', () => {
+    expect(rowOf([t({ direction: 'outbound', occurred_at: '2026-10-28T02:00:00Z' })]).lastTouchAt).toBe('2026-10-28T02:00:00.000Z')
+    expect(
+      rowOf([t({ channel: 'phone', direction: 'outbound', source: 'voice', metadata: { automated: true }, occurred_at: '2026-10-28T03:00:00Z' })]).lastTouchAt,
+    ).toBe('2026-10-28T03:00:00.000Z')
+  })
+})

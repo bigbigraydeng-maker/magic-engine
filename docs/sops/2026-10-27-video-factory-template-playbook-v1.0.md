@@ -1,5 +1,7 @@
 # 视频模板优化手册 v1.0（生产车间模型）
 
+> 负责 agent：苏东坡（`sudongpo`，主）；出片检查一侧配合马良（`maliang`）｜ 档案：[`14-sudongpo`](../agents/14-sudongpo.md) · [`60-maliang`](../agents/60-maliang.md) ｜ 索引：[agents 索引](../agents/README.md)
+
 > 负责：ME Video（视频工厂） ｜ 范围：视频/图片模板的画面质量、入库闸、渠道分流、数据回流（不含素材本身质量，素材归素材库专项）
 > 状态：**已核实（对照代码，2026-10-27 一次，有 3 处核不了，见 §6）**；2026-10-26 起 §3 钩子 / 片尾 / 字卡与 §5 P0 第 3、4 条按模板默认更新 ｜ 日期：2026-10-27 ｜ 最后核实：2026-10-26 ｜ 风险：C（仅文档）
 > 依据：`scripts/factory-worker/remotion-branch.mjs` · `scripts/factory-worker/engines/remotion/render.mjs` · `scripts/factory-worker/engines/remotion/src/*Reel.tsx` · `src/lib/maliang/render-check.ts` · `src/lib/inngest/functions/{maliang-render-check,factory-creatomate-render,youtube-publish}.ts` · `src/lib/visual/openai-images.ts` · `src/lib/factory/worker-guard.ts`
@@ -145,6 +147,8 @@ flowchart LR
 
 postcard 的死信多是缺素材、配乐登记、文件太大，不是画面问题；素材问题归素材库专项。
 
+**明信片要自动进素材库的写法（2026-10-28）**：素材库入库闸要求片上每一句字都有官网出处，并且这句字的词按原顺序整段出现在出处原文里。明信片的开场钩子（`hook`）和结尾标题（`end`）现在可以和场景一样填 `sourceUrl` + `sourceQuote`（两个要么都填、要么都不填）。想自动入库就必须填，且字要直接取自官网原句的一段，不要自己改写成「Explore China」这类官网没有的口号；没填的字会被判「未核验」，成片只能走人工审片。
+
 ## 5. 改进清单
 
 ### P0 先做
@@ -189,5 +193,6 @@ postcard 的死信多是缺素材、配乐登记、文件太大，不是画面�
 
 - 「左上角一直挂 logo」：默认只在最后 60 帧出现，仅 `logoMode=always` 才从头挂；位置在左上区域（left 54 / top 292）。2026-10-26 起，钩子和落版播放时这段 logo 让开。
 - 2026-10-26：明信片开场和标题片尾已接共享组件；字卡改到安全区上沿或下沿。「没有钩子 / 没有落版 / 字卡钉在 800」不再是现状。主体检测和多比例成片仍没有。
+- 2026-10-28：明信片开场钩子和结尾标题可填官网出处（`hook.sourceUrl/sourceQuote`、`end.sourceUrl/sourceQuote`），写法见第 4 节末尾。
 - 「YouTube 发布模块是否接工厂未核实」：已接（私密暂存）。
 - 「价格、日期」那条：不是未核实，而是无通用词表、靠客户配置。

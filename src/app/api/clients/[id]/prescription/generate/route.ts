@@ -5,7 +5,6 @@
  *   - 普通生成    body.discovery_id      — 从张骞 discovery 全新开方
  *   - 补充处方    body.supplement_of     — 为已有处方生成增量动作（原处方不动）
  *   - 修订处方    body.revise            — 为方向需调整的处方生成 v2
- *   - legacy      body.run_id            — diagnostic run（同步小路径）
  *
  * 补充/修订模式：从原处方 derive discovery_id，加载原处方全文 + 执行进度，
  * 作为 priorContext 传给华佗。
@@ -18,7 +17,6 @@
 import { NextRequest } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireOperatorAccess } from '@/lib/auth/client-access'
-import { generatePrescription } from '@/lib/diagnostic/prescription-generator'
 import { schedulePrescriptionGeneration } from '@/lib/huatuo/prescription-job'
 import type {
   PrescriptionIntake, PrescriptionContent, PriorPrescriptionContext,
@@ -119,29 +117,11 @@ export async function POST(
     return startHuatuoJob(clientId, row.id, row.payload, intake, goal)
   }
 
-  // ── Path B: legacy diagnostic run（同步小路径）────────────────────────────
-  if (body.run_id) {
-    try {
-      const { data: run, error: runError } = await supabaseAdmin
-        .from('diagnostic_runs')
-        .select('id, status')
-        .eq('id', body.run_id)
-        .eq('client_id', clientId)
-        .single()
-      if (runError || !run) return errorResponse(404, 'Diagnostic run not found')
-      const { prescriptionId, content } = await generatePrescription(
-        supabaseAdmin, body.run_id, clientId, intake,
-      )
-      return new Response(JSON.stringify({ success: true, prescription_id: prescriptionId, content }), {
-        headers: { 'Content-Type': 'application/json' },
-      })
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err)
-      return errorResponse(500, message)
-    }
+  if (body.run_id && !body.discovery_id && !body.supplement_of && !body.revise) {
+    return errorResponse(410, '按体检编号开方已废弃，不再读取诊断分数和问题清单')
   }
 
-  return errorResponse(400, 'discovery_id / supplement_of / revise / run_id 至少要有一个')
+  return errorResponse(400, 'discovery_id / supplement_of / revise 至少要有一个')
 }
 
 // ─── DAPE Week 2 W4: Goal 解析 ───────────────────────────────────────────────

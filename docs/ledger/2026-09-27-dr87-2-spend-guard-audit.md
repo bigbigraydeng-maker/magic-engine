@@ -9,6 +9,8 @@ done_on: 2026-09-27
 done_ref: doc:docs/ledger/2026-09-27-dr87-2-spend-guard-audit.md
 verify_by: 2026-10-11
 verify_how: 这份回查本身是交付，不需要再验数字。到期只查两件后续有没有落地：①重做（WP3 收编）有没有把 execute 那三个动作走内核、boost-post 补审计写入、winner-reel-sync 改成另建独立组；②客户级日上限跨账户汇总这条有没有被单独立项（PM 2026-09-27 由小秘书升级中，当时未定）。两件都没动 → 把这张卡的结论重新交回 PM，不要默认它已解决
+last_checked: 2026-10-29
+check_note: 10-29 查主干代码：①execute 改预算已走内核(queueAdsCampaignBudgetDecrease+createKernel)；boost-post 已退役只返 410；winner-reel-sync 仍往配置的现有广告组放广告(加了账户归属校验)，没改成另建独立组；②跨账户日上限已单独开卡 2026-10-05-dr87-2-cross-account-cap-parked(PM 定暂不立项)。两件都动了但①第三项未落地，判不了全成
 ---
 PM 2026-09-27 定：三条等 WP3 重做一起收编，winner-reel-sync 功能保留不停，但要有人回查数据。本卡是那份回查（只读，未改任何代码、未停任何任务、未动任何广告）。
 

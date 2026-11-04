@@ -1,5 +1,7 @@
 # SOP：Meta 广告角度测试与预算分配 v1
 
+> 负责 agent：卫青（`weiqing`）｜ 档案：[`docs/agents/11-weiqing.md`](../agents/11-weiqing.md) ｜ 索引：[agents 索引](../agents/README.md)
+
 > 立项日期：2026-08-15 · 依据：[2026-08-14 Meta 广告方向审计](../audits/2026-08-14-meta-ads-direction-audit.md)（PR [#972](https://github.com/bigbigraydeng-maker/magic-engine/pull/972)）
 > 适用：FDE 月付轨的 Meta 广告投放。self-serve 轨暂不适用（预算量级不同，需另定）。
 > 引擎侧的建设顺序见：[ME2 · Meta 广告在七层里的位置与建设顺序 v1](../specs/2026-08-15-me2-ads-build-order-v1.md)

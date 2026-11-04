@@ -1,5 +1,7 @@
 # SEO Agent：工作流与目标导向工作方案 v1（CTS 先行）
 
+> 负责 agent：孔子（`kongzi`）｜ 档案：[`docs/agents/13-kongzi.md`](../agents/13-kongzi.md) ｜ 索引：[agents 索引](../agents/README.md) ｜ 含客户层（§6）
+
 > 状态：方案，C 级文档。作者：73 号窗口（规矩与方向）。排期与卡点由 98 号窗口（SEO 统筹）管，优先级按 `docs/ENGINEERING_QUALITY_GATES.md §11` 由 98 号打分；本文是它的输入。
 > 起因：PM 2026-10-14 ——「细节性问题不用问我，我要的是 SEO Agent 的工作流和目标为导向的工作方案。」
 > 平台—行业—客户三层：§1～§5 是**平台层**（任何客户都适用），§6 是 **CTS 客户层**数据。行业层（旅游）暂无第二个客户，不抽象。

@@ -53,6 +53,10 @@ export interface RankedContact {
   pinnedAt: string | null
   /** conversation_briefs.intent_level（最新一张）；null = 没有 AI 摘要。只能把人往上抬，见 next-action.ts。 */
   intent: IntentLevel | null
+  /** 今天我们已经动过他了 —— 卡片就地变灰打勾，位置不动（day-list 的承诺）。不传 = 没做当天冻结。 */
+  handled?: boolean
+  /** 已处理的话，一句人话说明做了什么。 */
+  handledWhy?: string | null
 }
 
 export interface SectionResult<T> {

@@ -224,7 +224,7 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
             <p className="text-xs text-me-charcoal/45 mt-0.5">
               {phase === 'loading' && (source === null
                 ? '读取上一次战略建议…'
-                : '正在分析张骞证据 + 华佗诊断，约 20–40 秒…')}
+                : '正在看品牌扫描和客户资料，约 20–40 秒…')}
               {phase === 'done' && output && (source === 'cached'
                 ? `上一次结果 · ${output.top_actions.length} 条建议 · 如需更新点「重新分析」`
                 : `已生成 ${output.top_actions.length} 条建议 · 点击「前往工作台」直接执行`)}
@@ -260,7 +260,7 @@ export function ZhugeDrawer({ clientId, isOpen, onClose, onComplete }: ZhugeDraw
               <div className="text-center">
                 <p className="text-sm font-semibold text-me-charcoal/75">诸葛亮运筹中…</p>
                 <p className="text-xs text-me-charcoal/45 mt-1">
-                  调用 Strategy Engine，分析张骞证据 + 华佗诊断
+                  调用 Strategy Engine，看品牌扫描和客户资料
                 </p>
               </div>
             </div>

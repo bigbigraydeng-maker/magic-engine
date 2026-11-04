@@ -157,3 +157,9 @@ Codex → 产出代码变更
 - 子牙手册（调用者）：`docs/agents/10-ziya.md`
 - 达芬奇手册（已撤 2026-09-24，历史参考；设计挑战并入子牙 `10-ziya.md` §四b）：`docs/agents/80-davinci.md`
 - 测试套件：`TESTING.md`
+
+---
+
+## 操作手册
+
+暂无。索引：[agents 索引](./README.md)（合并闸签字 role 写作 `weizheng`，与本档案代号 `weicheng` 的对应见索引）。

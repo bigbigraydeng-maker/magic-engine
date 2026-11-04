@@ -11,19 +11,9 @@ Codex 按任务说明承担规划、实现或审查；与 Claude Code、CMUX Dee
 
 ---
 
-## 9 个 Agent 速查表
+## Agent 名单
 
-| Agent | 代码位置 | 职责一句话 |
-|-------|---------|-----------|
-| 子牙 | `src/lib/ziya/` | 技术大脑：架构/安全/后台统筹（Claude Opus）|
-| 诸葛亮 | `src/lib/zhuge/` | 业务大脑：客户策略/FDE工作台（Claude Sonnet）|
-| 张骞 | `src/lib/zhangqian/` | 侦察：采集站点/关键词/AI可见度证据 |
-| 孙子 | `src/lib/seo-agent/` | SEO编排：把 Goal/Brief/关键词信号变成本周 SEO 优先级 |
-| 华佗 | `src/lib/huatuo/` | 诊断：6维度评分（0–100）|
-| 鲁班 | `src/lib/luban/` | 执行：flywheel adapter + 落数据 |
-| 马良 | `src/lib/visual/` | 视觉学习：图片/视频质量 + 平台研究 |
-| 李白 | `src/lib/blog/` + `src/lib/geo/` | 文案质量 + 全系统提示词管理 |
-| 魏征 | `src/lib/weicheng/` | 代码检查：CI关卡 + LLM审查 |
+旧的「9 个 Agent 速查表」已过时（缺五大支柱和审查团，且含名单外的孙子），已删除。Agent 名单以 [`docs/specs/2026-09-24-agent-autonomy-operating-plan-v1.md`](../specs/2026-09-24-agent-autonomy-operating-plan-v1.md) §4 为准；代号、档案、操作手册对照见 [agents 索引](./README.md)。
 
 > 达芬奇已撤（PM 2026-09-24 拍板）：其"方案挑战"审查清单并入子牙自审，见 [`10-ziya.md`](./10-ziya.md) §四b；不再作为独立 agent 调度，见 [`80-davinci.md`](./80-davinci.md)。
 

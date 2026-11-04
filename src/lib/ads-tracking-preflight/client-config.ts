@@ -20,6 +20,9 @@ const BY_CLIENT: Readonly<Record<string, TrackingClientConfig>> = {
   // CTS Tours（新西兰）· 中国团广告（2026-10-20 15:25 新西兰时间已发布并启用）
   [CTS_CLIENT_ID]: {
     ad_account_id: 'act_2202695063810470',
+    // 本期广告实际投在旧账户 7274（表单留资系列，见下面 objective_watch）。数据集 / 像素仍在上面的官方账户，
+    // 所以只把「广告账户与付款」和预算那道门指向这个账户；不然它读到的是一个没有任何在投广告的账户，永远只能给黄灯。
+    spend_ad_account_id: 'act_2775766642787274',
     site_url: 'https://www.ctstours.co.nz',
     landing_targets: [
       {
@@ -33,7 +36,11 @@ const BY_CLIENT: Readonly<Record<string, TrackingClientConfig>> = {
     ],
     // 官网的统一询盘事件叫 enquiry_thank_you（见 ga4/landing-class-config.ts），表单提交时另有 generate_lead
     ga4_lead_events: ['generate_lead', 'enquiry_thank_you'],
-    web_form_to_crm: true,
+    // 本期在投的广告都是 Meta 自带表单留资（表单系列 7274）：客人不去官网填表，线索走 Meta 表单同步进 CRM
+    // （channel = meta_lead_form，带广告编号），由下面 objective_watch 的 lead_form 盯盘核对「有没有进 CRM」。
+    // 「官网广告落地页表单进 CRM」这道门核的是另一条路，对本期广告永远没有证据，所以本期标「不适用」。
+    // 🔴 下一次要投「点进官网落地页」的广告前，把它改回 true（并换上新的落地页）。
+    web_form_to_crm: false,
     // 🔴 预算数字不再写死（2026-10-21）：这里曾写「计划日预算 NZ$101 / 官方日上限 NZ$110」（10-18 那版），
     // 而库里官方账户上限早已是 NZ$150、实际在投合计 NZ$134——预算门拿这两个旧常量互相比，
     // 「预算在上限内」成了假绿。写死的数字会天天过期（计划重排期间尤其），所以留 null：

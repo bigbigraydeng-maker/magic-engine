@@ -3,6 +3,7 @@
 // This file does not approve work orders and does not write the creative pool.
 
 import { FACTORY_ORDER_BUDGET_CAP_USD } from './constants'
+import { CURRENT_FACTORY_OUTPUT_PLATFORM } from './creative-tags'
 import { evaluateSignal } from './evaluate'
 import { supabaseAdmin } from '@/lib/supabase'
 
@@ -63,6 +64,7 @@ export function buildPromotionSignalRow(input: {
     request: {
       notes: campaignName,
       deliverable: 'asset_only',
+      platform: CURRENT_FACTORY_OUTPUT_PLATFORM,
     },
   }
 }

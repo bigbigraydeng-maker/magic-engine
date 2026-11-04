@@ -177,8 +177,9 @@ if [[ -n "${BASE_SHA:-}" && -n "${HEAD_SHA:-}" && -n "${PR_NUMBER:-}" ]]; then
         break
       fi
       dref="$(field "$f" done_ref)"
+      vref="$(field "$f" verified_ref)"
       src="$(field "$f" source)"
-      if [[ "$dref" == "pr:${PR_NUMBER}" || "$src" == "pr:${PR_NUMBER}" ]]; then
+      if [[ "$dref" == "pr:${PR_NUMBER}" || "$vref" == "pr:${PR_NUMBER}" || "$src" == "pr:${PR_NUMBER}" ]]; then
         bound=1
         break
       fi

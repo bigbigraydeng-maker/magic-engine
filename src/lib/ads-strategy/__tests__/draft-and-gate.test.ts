@@ -425,6 +425,27 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
     expect(mActivate).not.toHaveBeenCalled()
   })
 
+  it('确认卡开失败先占着，不退回等待批准', async () => {
+    mActivate.mockResolvedValue({ ok: false, error: '开 camp1 失败：HTTP 400' })
+    const { sb, updated } = fakeSupabase(READY)
+    const card = {
+      actorUserId: 'u-pm',
+      actorEmail: 'pm@magiclab.test',
+      basis: 'go_live_card' as const,
+      cardRunId: '11111111-1111-4111-8111-111111111111',
+    }
+    const r = await approveDraft('act1', sb, 'tok', card, 'go-live-card')
+    expect(r).toEqual({ ok: false, error: '开 camp1 失败：HTTP 400', holding: true })
+    expect(updated[0]?.status).toBe('activating')
+    expect(updated.at(-1)?.status).toBe('activating')
+    expect(updated.at(-1)?.activation).toMatchObject({
+      status: 'meta_failed',
+      error: '开 camp1 失败：HTTP 400',
+      card_run_id: card.cardRunId,
+    })
+    expect(updated.some((row) => row.status === 'awaiting_approval')).toBe(false)
+  })
+
   it('占位之后开失败 → 退回等待批准并带失败回执，可重试', async () => {
     mActivate.mockResolvedValue({ ok: false, error: 'HTTP 400' })
     const { sb, updated } = fakeSupabase(READY)

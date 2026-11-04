@@ -47,6 +47,8 @@ export function ComposeEmail({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
+  const [drafting, setDrafting] = useState(false)
+  const [drafted, setDrafted] = useState(false)
   const requestId = useRef(newRequestId())
 
   const load = useCallback(async () => {
@@ -75,6 +77,30 @@ export function ComposeEmail({
     )
   }
 
+  // AI 只起草、填进框里；发不发、改不改都是员工自己的事。已写了字就先问，别悄悄盖掉。
+  const draftWithAi = async (): Promise<void> => {
+    if (drafting) return
+    if ((subject.trim() !== '' || body.trim() !== '') && !window.confirm('框里已经有内容，让 AI 重写会盖掉它。继续吗？')) return
+    setDrafting(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/crm/contacts/${contactId}/email/compose/draft`, { method: 'POST' })
+      const json = (await res.json().catch(() => ({}))) as { subject?: string; body?: string; error?: string }
+      if (!res.ok || !json.subject || !json.body) {
+        setError(json.error ?? 'AI 起草失败，请自己写或稍后再试')
+        return
+      }
+      setSubject(json.subject)
+      setBody(json.body)
+      setDrafted(true)
+      setDone(false)
+    } catch {
+      setError('网络出错，AI 没能起草。请自己写或稍后再试。')
+    } finally {
+      setDrafting(false)
+    }
+  }
+
   const send = async (): Promise<void> => {
     if (sending) return
     setSending(true)
@@ -94,6 +120,7 @@ export function ComposeEmail({
       setSubject('')
       setBody('')
       setDone(true)
+      setDrafted(false)
       onSent()
       void load()
     } catch {
@@ -110,6 +137,20 @@ export function ComposeEmail({
         将用 {compose.mailbox} 发给 {compose.recipient}
         {compose.sentToContactLast7Days > 0 ? `（最近 7 天已发给他 ${compose.sentToContactLast7Days} 封）` : ''}
       </p>
+      <button
+        type="button"
+        onClick={() => void draftWithAi()}
+        disabled={drafting || sending}
+        className="mb-2 rounded-lg border border-me-charcoal/20 bg-white px-3 py-1.5 text-sm font-bold text-me-charcoal disabled:opacity-40"
+        data-testid="compose-ai-draft"
+      >
+        {drafting ? 'AI 正在写…' : drafted ? '✨ 重新让 AI 写' : '✨ 让 AI 帮我写'}
+      </button>
+      {drafted && (
+        <p className="mb-2 text-xs font-semibold text-amber-700" data-testid="compose-ai-notice">
+          这是 AI 起草的，请先看一遍、核对价格和日期再发送。
+        </p>
+      )}
       <input
         value={subject}
         onChange={(e) => setSubject(e.target.value)}
@@ -136,7 +177,7 @@ export function ComposeEmail({
       <button
         type="button"
         onClick={() => void send()}
-        disabled={sending || subject.trim() === '' || body.trim() === ''}
+        disabled={sending || drafting || subject.trim() === '' || body.trim() === ''}
         className="mt-2 rounded-lg bg-me-charcoal px-4 py-2 text-sm font-bold text-white disabled:opacity-40"
       >
         {sending ? '发送中…' : '发送'}

@@ -43,6 +43,8 @@ export interface MetaCycleRosterEntry {
   maxPagesPerRun: number
   cooldownDays: number
   brandVoice: string
+  /** See MetaCycleClientConfig.brandTerms. */
+  brandTerms: string[]
   /** See MetaCycleClientConfig.keywordFallbackLocations — validated here so a malformed config value can never reach the gate as garbage location_codes. */
   keywordFallbackLocations: number[]
   /** See MetaCycleClientConfig.protectedSlugs — validated here so a malformed config value can never silently become "protect nothing". */
@@ -116,6 +118,9 @@ function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown;
     cooldownDays: typeof cfg.meta_cycle_cooldown_days === 'number' && cfg.meta_cycle_cooldown_days > 0 ? cfg.meta_cycle_cooldown_days : DEFAULT_COOLDOWN_DAYS,
     brandVoice: typeof cfg.meta_cycle_brand_voice === 'string' && cfg.meta_cycle_brand_voice.trim().length > 0 ? cfg.meta_cycle_brand_voice : DEFAULT_BRAND_VOICE,
     keywordFallbackLocations: parseKeywordFallbackLocations(cfg.meta_cycle_keyword_fallback_locations),
+    brandTerms: Array.isArray(cfg.brand_terms)
+      ? cfg.brand_terms.filter((t: unknown): t is string => typeof t === 'string' && t.trim().length > 0).map((t: string) => t.trim())
+      : [],
     protectedSlugs: protectedResult.entries,
   }
 }
@@ -147,6 +152,7 @@ export function toClientConfig(entry: MetaCycleRosterEntry): MetaCycleClientConf
     cooldownDays: entry.cooldownDays,
     brandVoice: entry.brandVoice,
     keywordFallbackLocations: entry.keywordFallbackLocations,
+    brandTerms: entry.brandTerms,
     protectedSlugs: entry.protectedSlugs,
   }
 }

@@ -1,5 +1,6 @@
 # 鲁班 — Agent 手册
 
+> ⚠️ 与代码不符，见 [`agent-autonomy-operating-plan-v1` §4.4](../specs/2026-09-24-agent-autonomy-operating-plan-v1.md)：大模型可直接调 `publish_to_gbp` 发谷歌商家帖子，绕过内核（台账 `2026-10-18-luban-gbp-publish-bypasses-kernel`）。正文未改。
 > 模型：Claude Sonnet（复杂决策）/ gpt-4o-mini（批量执行）  
 > 代码入口：`src/lib/luban/agent.ts` · `src/lib/luban/tools.ts` · `src/lib/luban/prompts.ts`  
 > 定位：执行者。接收诸葛亮的 work order，调用 flywheel adapter 完成实际操作，落数据到飞轮表。
@@ -137,3 +138,9 @@ await flywheelAdapter.execute({
 - 词表：`src/lib/flywheel/vocabulary.ts`
 - 诸葛亮手册（上游）：`docs/agents/20-zhuge.md`
 - 马良手册（视觉执行协作）：`docs/agents/60-maliang.md`
+
+---
+
+## 操作手册
+
+暂无。索引：[agents 索引](./README.md)。

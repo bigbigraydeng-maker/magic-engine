@@ -47,6 +47,8 @@ export interface DomainRules {
   own: string[]
   /** 同行 / 分销商的域名。 */
   trade: string[]
+  /** 点名的员工地址（own_email_domains 里含 @ 的条目，只认这一个地址，不扩成整个域名）。 */
+  ownAddresses?: string[]
 }
 
 export const EMPTY_RULES: DomainRules = { own: [], trade: [] }
@@ -74,6 +76,37 @@ export function normaliseDomain(raw: string): string {
 export function isUsableDomain(domain: string): boolean {
   // 至少两段、只允许字母数字和连字符、末段是字母（排除 IP 和 `a.1`）
   return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(domain)
+}
+
+/**
+ * 私人邮箱服务商。用这些邮箱的人不能按域名标成同行 —— 一标就把所有用 Gmail 的客人都扔出名单。
+ * 不求全：漏一个的后果是按钮让人标了一个大众邮箱，所以下面 `tradeDomainFor` 只认这里没有的。
+ */
+export const PERSONAL_MAIL_DOMAINS: ReadonlySet<string> = new Set([
+  'gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.co.nz', 'hotmail.co.uk', 'outlook.com', 'outlook.co.nz',
+  'live.com', 'live.co.nz', 'live.com.au', 'msn.com', 'windowslive.com', 'yahoo.com', 'yahoo.co.nz', 'yahoo.com.au',
+  'ymail.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'protonmail.com', 'proton.me', 'mail.com', 'gmx.com',
+  'xtra.co.nz', 'slingshot.co.nz', 'orcon.net.nz', 'vodafone.co.nz', 'clear.net.nz', 'paradise.net.nz',
+  'actrix.co.nz', 'inspire.net.nz', 'kinect.co.nz', 'bigpond.com', 'bigpond.net.au', 'optusnet.com.au',
+  'qq.com', '163.com', '126.com', 'sina.com', 'foxmail.com',
+])
+
+/** 私人邮箱服务商的整域名（含 yahoo.* / hotmail.* 这类各国后缀）。整域名登记它们 = 所有用私人邮箱的客人都被误判。 */
+export function isPersonalMailDomain(domain: string): boolean {
+  const d = domain.trim().toLowerCase()
+  return PERSONAL_MAIL_DOMAINS.has(d) || /^(gmail|googlemail|hotmail|outlook|live|yahoo|icloud|msn|ymail|proton|protonmail)\./.test(d)
+}
+
+/**
+ * 「这是同行」按钮要标的域名：邮箱的域名，前提是它像个公司域名。
+ * 私人邮箱或认不出的返回 null —— 那种人只能单独处理，不能整域名拉黑。
+ */
+export function tradeDomainFor(email: string | null | undefined): string | null {
+  if (!email || !email.includes('@')) return null
+  const domain = normaliseDomain(email)
+  if (!isUsableDomain(domain)) return null
+  if (PERSONAL_MAIL_DOMAINS.has(domain)) return null
+  return domain
 }
 
 export interface ParsedDomainList {
@@ -105,7 +138,8 @@ export function parseDomainList(input: unknown): ParsedDomainList {
 
   const take = (t: string) => {
     const d = normaliseDomain(t)
-    if (d && isUsableDomain(d)) {
+    // 私人邮箱整域名（gmail.com 等）不能登记成「自家 / 同行域名」：登记了，所有用它的客人都会被误判。
+    if (d && isUsableDomain(d) && !isPersonalMailDomain(d)) {
       if (!domains.includes(d)) domains.push(d)
       return true
     }
@@ -166,6 +200,13 @@ export function contactKindOf(emails: readonly string[], rules: DomainRules): Co
   const trade = rules.trade.map(normaliseDomain).filter(Boolean)
   const domains = emails.map(domainOf).filter((d): d is string => !!d)
 
+  // 点名的员工地址：只认这一个地址，不扩成整个域名。
+  const ownAddresses = rules.ownAddresses ?? []
+  if (ownAddresses.length > 0) {
+    const addresses = emails.map((e) => e.trim().toLowerCase())
+    if (addresses.some((a) => ownAddresses.includes(a))) return 'staff'
+  }
+
   // 员工优先 —— 两边都命中时说「自己人」更准确，也更该被排除。
   if (domains.some((d) => own.some((o) => domainMatches(d, o)))) return 'staff'
   if (domains.some((d) => trade.some((t) => domainMatches(d, t)))) return 'trade'
@@ -195,7 +236,26 @@ export function readDomainRules(leadsConfig: unknown): DomainRules {
           ),
         )
       : []
-  return { own: list(cfg.own_email_domains), trade: list(cfg.trade_domains) }
+  // 含 @ 的条目是点名的员工地址，必须原样保留 —— 走 normaliseDomain 会被扩成
+  // 整个域名，把同域的其他真人（客人、同行）一起当成员工。
+  const rawOwn = Array.isArray(cfg.own_email_domains)
+    ? cfg.own_email_domains.filter((x): x is string => typeof x === 'string')
+    : []
+  // 已存的私人邮箱整域名（历史脏数据）也不认：否则所有 Gmail 客人都成了「自己人」。
+  const own = list(rawOwn.filter((x) => !x.includes('@'))).filter((d) => !isPersonalMailDomain(d))
+  const ownAddresses = Array.from(
+    new Set(
+      rawOwn
+        .filter((x) => x.includes('@'))
+        .map((x) => x.trim().toLowerCase())
+        .filter((x) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)),
+    ),
+  )
+  return {
+    own,
+    trade: list(cfg.trade_domains).filter((d) => !isPersonalMailDomain(d)),
+    ...(ownAddresses.length > 0 ? { ownAddresses } : {}),
+  }
 }
 
 /** 卡片上那个小标记。终端客户不标 —— 他们是默认，标了只是噪音。 */
@@ -223,4 +283,30 @@ export const SYSTEM_ACCOUNT_NAMES: ReadonlySet<string> = new Set([
 export function isSystemAccountName(name: string | null | undefined): boolean {
   if (!name) return false
   return SYSTEM_ACCOUNT_NAMES.has(name.trim().toLowerCase())
+}
+
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/**
+ * 把一坨文字拆成「点名的员工地址」清单：只校验邮箱格式，**保持精确地址**，绝不退化成域名。
+ * 认不出来的原样退回。
+ */
+export function parseAddressList(input: unknown): { addresses: string[]; rejected: string[] } {
+  const pieces = Array.isArray(input)
+    ? input.filter((x): x is string => typeof x === 'string')
+    : typeof input === 'string'
+      ? input.split(/[\s,;、，；]+/)
+      : []
+  const addresses: string[] = []
+  const rejected: string[] = []
+  for (const piece of pieces) {
+    const t = piece.trim().toLowerCase()
+    if (!t) continue
+    if (EMAIL_SHAPE.test(t)) {
+      if (!addresses.includes(t)) addresses.push(t)
+    } else if (!rejected.includes(piece.trim())) {
+      rejected.push(piece.trim())
+    }
+  }
+  return { addresses, rejected }
 }

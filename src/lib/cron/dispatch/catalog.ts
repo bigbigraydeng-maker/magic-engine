@@ -1,3 +1,4 @@
+import { META_LEADS_SYNC_SCHEDULE } from '@/lib/meta/leads-sync-schedule'
 import type { DispatchJob } from './types'
 
 /**
@@ -30,7 +31,7 @@ export const DISPATCH_CATALOG: readonly DispatchJob[] = [
   { service: 'viral-analyzer-worker', route: 'viral-analyzer-worker', method: 'POST', auth: 'bearer', schedule: '*/10 * * * *', healthcheckUrl: 'https://hc-ping.com/55891cbc-cfd5-4c58-b28b-f06206fade5a' },
   { service: 'viral-discovery-weekly', route: 'viral-discovery-weekly', method: 'POST', auth: 'bearer', schedule: '0 0 * * *', healthcheckUrl: 'https://hc-ping.com/e5c6cbe8-e6cc-457f-bb3f-538971dafd46', scheduleNote: 'Service name says weekly. Production schedule is daily at 00:00 UTC. Kept.' },
   { service: 'content-factory-intake', route: 'content-factory-intake', method: 'POST', auth: 'bearer', schedule: '0 22 * * *' },
-  { service: 'diagnostic-weekly', route: 'diagnostic-weekly', method: 'GET', auth: 'bearer', schedule: '0 8 * * 1' },
+  // diagnostic-weekly is retired (刀 20). Absent so cron-dispatch-weekly does not wake it.
   { service: 'kpi-backfill', route: 'kpi-backfill', method: 'GET', auth: 'bearer', schedule: '20 6 * * *' },
   { service: 'benchmark-accumulator', route: 'benchmark-accumulator', method: 'GET', auth: 'bearer', schedule: '40 7 * * 1' },
   { service: 'cms-connection-retest', route: 'cms-connection-retest', method: 'GET', auth: 'bearer', schedule: '10 6 * * *' },
@@ -54,7 +55,7 @@ export const DISPATCH_CATALOG: readonly DispatchJob[] = [
   { service: 'factory-publish-sweeper', route: 'factory-publish-sweeper', method: 'GET', auth: 'bearer', schedule: '25 * * * *' },
   { service: 'factory-worker-sweeper', route: 'factory-worker-sweeper', method: 'GET', auth: 'bearer', schedule: '*/5 * * * *' },
   { service: 'messenger-hourly', route: 'messenger-sync-hourly', method: 'GET', auth: 'bearer', schedule: '10 * * * *' },
-  { service: 'meta-leads-hourly', route: 'meta-leads-sync', method: 'GET', auth: 'bearer', schedule: '25 */2 * * *' },
+  { service: 'meta-leads-hourly', route: 'meta-leads-sync', method: 'GET', auth: 'bearer', schedule: META_LEADS_SYNC_SCHEDULE },
   { service: 'ad-readback-sweep-daily', route: 'ad-readback-sweep', method: 'GET', auth: 'bearer', schedule: '40 20 * * *' },
   { service: 'ad-entity-snapshot', route: 'ad-entity-snapshot', method: 'GET', auth: 'bearer', schedule: '30 */6 * * *' },
   { service: 'mailchimp-activity-daily', route: 'mailchimp-activity-sync', method: 'GET', auth: 'bearer', schedule: '40 4 * * *' },

@@ -28,8 +28,9 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
 import { projectFactoryConfig } from '@/lib/factory/client-config'
 import { runNineGridCheck, mergeMaliangIntoSnapshot, allowedVideoHosts, type MaliangCheck, type NineGridInput } from '@/lib/maliang/render-check'
+import { runReviewCheckV2 } from '@/lib/maliang/render-check-v2'
 import { dispositionOf, REMOTION_REVIEW_TIMEOUT_MS, runCheckWithTimeout } from '@/lib/maliang/review-disposition'
-import { readWorkOrderContext, writeWorkOrderVerdict, type WorkOrderReady } from '@/lib/maliang/work-order-review'
+import { readWorkOrderContext, writeWorkOrderVerdict, type WorkOrderReady, type WorkOrderReviewContext } from '@/lib/maliang/work-order-review'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { ASSET_DUAL_REVIEW_EVENT } from './asset-dual-review'
 
@@ -64,6 +65,8 @@ function isWorkOrderReady(data: MaliangRenderReadyData): data is WorkOrderReady 
 export interface MaliangDeps {
   supabase: SupabaseClient
   check: typeof runNineGridCheck
+  /** v2 review (shots, audio, identifiable faces) for externally uploaded finished videos. Absent: those videos get the v1 check, and the consent gate treats them as faces-unchecked (blocked). */
+  checkV2?: typeof runReviewCheckV2
   apiKey: () => string | undefined
   /** Template-render reviews only. A hung model must not leave the order unmarked. */
   reviewTimeoutMs?: number
@@ -316,12 +319,7 @@ async function runWorkOrderReview(
   const ctx = read.ctx
   const check = await step.run('run-check', () =>
     runCheckWithTimeout(
-      () => deps.check({
-        videoUrl: data.output_url,
-        input: ctx.input,
-        apiKey: deps.apiKey(),
-        allowedHosts: allowedVideoHosts(),
-      }),
+      () => workOrderCheck(deps, ctx, data.output_url),
       deps.reviewTimeoutMs ?? REMOTION_REVIEW_TIMEOUT_MS,
       data.output_url,
     ),
@@ -338,6 +336,16 @@ async function runWorkOrderReview(
     no_publish: true,
   })
   return verdictReceipt(requestId, data.client_id, data.work_order_id, check)
+}
+
+/** External uploads get the v2 check when available; everything else stays on v1. */
+function workOrderCheck(deps: MaliangDeps, ctx: WorkOrderReviewContext, videoUrl: string): Promise<MaliangCheck> {
+  const apiKey = deps.apiKey()
+  const allowedHosts = allowedVideoHosts()
+  if (ctx.external && deps.checkV2) {
+    return deps.checkV2({ videoUrl, input: ctx.input, apiKey }, { allowedHosts })
+  }
+  return deps.check({ videoUrl, input: ctx.input, apiKey, allowedHosts })
 }
 
 async function enqueueAssetDualReview(
@@ -393,6 +401,7 @@ export function createMaliangRenderCheckFunction(deps: MaliangDeps) {
 export const maliangRenderCheck = createMaliangRenderCheckFunction({
   supabase: supabaseAdmin,
   check: runNineGridCheck,
+  checkV2: runReviewCheckV2,
   apiKey: () => process.env.GEMINI_API_KEY,
   enqueueAssetReview: (data) => sendInngestEvent({
     id: `asset-dual-review:${data.work_order_id}`,

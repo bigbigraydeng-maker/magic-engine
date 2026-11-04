@@ -648,6 +648,95 @@ describe('timing with an end card', () => {
   })
 })
 
+describe('hook and end-card sources', () => {
+  const hookSource = {
+    sourceUrl: 'https://example.com/tour',
+    sourceQuote: 'quiet harbour mornings on the water',
+  }
+
+  test('a hook with a matching official-page source parses', () => {
+    const props = validProps()
+    props.hook = { ...props.hook, lines: ['QUIET', 'HARBOUR'], ...hookSource }
+    assert.equal(parsePostcardProps(props).hook.sourceUrl, hookSource.sourceUrl)
+  })
+
+  test('an end card with a matching source parses', () => {
+    const props = validProps()
+    props.price = null
+    props.end = {
+      backdropClip: 'clips/end.mp4',
+      title: 'QUIET HARBOUR',
+      ...hookSource,
+    }
+    assert.equal(parsePostcardProps(props).end.sourceQuote, hookSource.sourceQuote)
+  })
+
+  test('a source URL without a quote is rejected', () => {
+    rejects((props) => {
+      props.hook = { ...props.hook, sourceUrl: hookSource.sourceUrl }
+    }, '要么都填')
+  })
+
+  test('a quote that does not contain the hook words is rejected', () => {
+    rejects((props) => {
+      props.hook = { ...props.hook, sourceUrl: hookSource.sourceUrl, sourceQuote: 'something unrelated entirely' }
+    }, '出处片段里找不到')
+  })
+
+  test('a non-http source URL on the end card is rejected', () => {
+    rejects((props) => {
+      props.price = null
+      props.end = {
+        backdropClip: 'clips/end.mp4',
+        title: 'QUIET HARBOUR',
+        sourceUrl: 'file:///etc/passwd',
+        sourceQuote: hookSource.sourceQuote,
+      }
+    }, 'http')
+  })
+
+  test('a source quote with a banned promo word is rejected', () => {
+    rejects((props) => {
+      props.hook = { ...props.hook, sourceUrl: hookSource.sourceUrl, sourceQuote: 'quiet harbour mornings, book now' }
+    }, '促销词')
+  })
+
+  test('every hook line must be supported, not just the first', () => {
+    rejects((props) => {
+      props.hook = { ...props.hook, lines: ['QUIET', 'MOUNTAINS'], ...hookSource }
+    }, '第 2 行')
+  })
+
+  test('a quote without a URL is rejected', () => {
+    rejects((props) => {
+      props.hook = { ...props.hook, sourceQuote: hookSource.sourceQuote }
+    }, '要么都填')
+  })
+
+  test('an end title not found in its quote is rejected', () => {
+    rejects((props) => {
+      props.price = null
+      props.end = { backdropClip: 'clips/end.mp4', title: 'MOUNTAIN RETREAT', ...hookSource }
+    }, '出处片段里找不到')
+  })
+
+  test('a half-filled citation on a three-line hook is reported once', () => {
+    const props = validProps()
+    props.hook = { ...props.hook, lines: ['QUIET', 'HARBOUR', 'MORNINGS'], sourceUrl: hookSource.sourceUrl }
+    const result = PostcardPropsSchema.safeParse(props)
+    assert.equal(result.success, false)
+    const hits = result.error.issues.filter((i) => i.message.includes('要么都填'))
+    assert.equal(hits.length, 1)
+  })
+
+  test('hook and end without sources still parse (sources stay optional)', () => {
+    const props = validProps()
+    props.price = null
+    props.end = { backdropClip: 'clips/end.mp4', title: 'QUIET HARBOUR' }
+    assert.doesNotThrow(() => parsePostcardProps(props))
+  })
+})
+
 describe('error text', () => {
   test('formatZodIssues produces one line per issue', () => {
     const result = PostcardPropsSchema.safeParse({})

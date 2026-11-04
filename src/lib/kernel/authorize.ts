@@ -26,6 +26,7 @@ import type { KernelDeps } from './deps'
 import { validateAgainstSchema } from './registry'
 import { selectEnvelopeVerdict } from './autonomy-envelope'
 import { outwardBlockReason } from './outward-authorization'
+import { isSpendIncreaseAction, signedBySpendApprover, SPEND_APPROVER_ONLY_REASON } from './spend-approval'
 import {
   getActivePolicy,
   getDecision,
@@ -362,6 +363,20 @@ export async function preflight(deps: KernelDeps, run: ActionRun, now: Date): Pr
     return bad(
       'policy_deny',
       `这个客户明确关掉了「${definition.title}」的自动执行`,
+      definition,
+      policy,
+      costEstimate,
+    )
+  }
+
+  // ⑥a 🔴 加钱类动作（第 3 刀 3a 第 2 道）：自动策略一律拒，不进下面的 bounded 信封分支。
+  //     正常情况下策略同步已经把这类动作写成「要审批」；走到这里说明有人手改了策略表或同步失败。
+  //     复用可恢复拒绝码：规则改回「要审批」之后同一件事理应能做。
+  if (isSpendIncreaseAction(definition) && policy.mode === 'auto_approve') {
+    return bad(
+      'outward_requires_human_policy',
+      `「${definition.title}」会让客户多花钱，${SPEND_APPROVER_ONLY_REASON} —— ` +
+        '这个客户的规则却配成了「自动执行」。规则改成「要审批」之前一律不做',
       definition,
       policy,
       costEstimate,
@@ -705,6 +720,10 @@ export async function reuseLiveAuthorization(
       ? policy.mode === 'require_approval'
       : policy.mode === 'auto_approve'
   if (!modeStillMatches) return null
+
+  // 🔴 加钱类（第 3 刀 3a 第 4 道）：不是 PM 本人签的旧放行不复用——复用了只会一直撞 Gateway
+  //    的第 5 道闸直到过期；返回 null 让它重新授权（会重新挂起等 PM）。
+  if (isSpendIncreaseAction(deps.registry.get(run.action_key)) && !signedBySpendApprover(deps, decision)) return null
 
   return { verdict: 'allow', decision, run, ctx: mintContext(decision, decision.cost_cap_usd) }
 }

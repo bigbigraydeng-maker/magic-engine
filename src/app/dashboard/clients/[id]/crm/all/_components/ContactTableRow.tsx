@@ -1,8 +1,10 @@
 'use client'
 
 import { cleanDisplayName } from '@/lib/crm/clean-display-name'
+import { preserveOriginalName } from '@/lib/crm/brief-display-name'
 import {
   LIST_CLS,
+  arrivalLabel,
   fmtDate,
   relTime,
   type ContactRow,
@@ -73,7 +75,7 @@ function PinCell({ r, onTogglePin }: { r: ContactRow; onTogglePin: (row: Contact
   )
 }
 
-function NameCell({ r }: { r: ContactRow }) {
+function NameCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
   const { text, missing, sub } = nameForDisplay(r)
   return (
     <td className="px-4 py-2">
@@ -96,7 +98,18 @@ function NameCell({ r }: { r: ContactRow }) {
             🔥 回头
           </span>
         )}
-        {(r.sources ?? []).slice(0, 1).map((k) => (
+        {/* 刚打通聊上 —— 这个人正热着，跟「回头」一样摆在最前（PM 2026-10-29）。 */}
+        {r.afterCall && !r.returning && (
+          <span
+            data-testid="after-call-tag"
+            title={r.reason ?? '刚打通电话聊上了，还没记下一步'}
+            className="shrink-0 rounded bg-[#C2453A]/12 px-1.5 py-0.5 text-[10px] font-black text-[#C2453A]"
+          >
+            📞 刚聊过
+          </span>
+        )}
+        {/* 「今天先联系」不画来源小标签：一行只留名字和「回头」这类最该先看的东西。 */}
+        {!grouped && (r.sources ?? []).slice(0, 1).map((k) => (
           <span
             key={k}
             title="最早是从这个渠道进来的"
@@ -127,19 +140,54 @@ function NameCell({ r }: { r: ContactRow }) {
   )
 }
 
+/** 联系渠道：一个词 + 一个小图标，让销售一眼知道「用什么联系他」。号码 / 邮箱留在点开后的详情里。 */
+const CHANNEL_CHIP: Record<NonNullable<ContactRow['suggestedChannel']>, string> = {
+  phone: '📞 电话',
+  sms: '💬 短信',
+  email: '✉️ 邮件',
+  messenger: '💬 私信',
+  none: '暂无可用渠道',
+}
+
+function ChannelCell({ r }: { r: ContactRow }) {
+  const ch = r.suggestedChannel
+  return (
+    <td className="whitespace-nowrap px-4 py-2 text-xs text-me-charcoal/60" data-testid="channel-cell">
+      {ch ? CHANNEL_CHIP[ch] : <span className="text-me-charcoal/35">—</span>}
+    </td>
+  )
+}
+
 function StageCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
+  const aiSummary = r.aiSummary ? preserveOriginalName(r.aiSummary, r.name) : null
   return (
     <td className="whitespace-nowrap px-4 py-2">
       {grouped ? (
-        <div className="flex max-w-[380px] items-center gap-2">
+        <div className="flex max-w-[460px] items-center gap-2">
           <span
             className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-bold ${LIST_CLS[r.nextAction.list]}`}
           >
             {r.nextAction.verbLabel}
           </span>
-          <span className="truncate text-xs text-me-charcoal/60" title={r.nextAction.reason}>
-            {r.nextAction.reason}
-          </span>
+          {r.handled === true && (
+            <span
+              data-testid="handled-tick"
+              title={r.handledWhy ?? '今天已处理'}
+              className="shrink-0 text-xs font-bold text-emerald-700"
+            >
+              ✓ {r.handledWhy ?? '今天已处理'}
+            </span>
+          )}
+          {aiSummary ? (
+            <span className="truncate text-xs text-me-charcoal/70" title={aiSummary} data-testid="ai-summary">
+              <span className="mr-1 rounded bg-me-charcoal/10 px-1 text-[10px] font-bold text-me-charcoal/50">AI</span>
+              {aiSummary}
+            </span>
+          ) : (
+            <span className="truncate text-xs text-me-charcoal/60" title={r.nextAction.reason}>
+              {r.nextAction.reason}
+            </span>
+          )}
         </div>
       ) : r.stageLabel ? (
         <span className="text-me-charcoal/70">{r.stageLabel}</span>
@@ -148,6 +196,14 @@ function StageCell({ r, grouped }: { r: ContactRow; grouped: boolean }) {
       )}
     </td>
   )
+}
+
+function CurrentStageCell({ r }: { r: ContactRow }) {
+  return <td className="whitespace-nowrap px-4 py-2 text-xs" data-testid="current-stage-cell">
+    {r.stageLabel
+      ? <span className="rounded-full bg-me-charcoal/[0.07] px-2 py-1 font-semibold text-me-charcoal/75">{r.stageLabel}</span>
+      : <span className="text-me-charcoal/35">还没标</span>}
+  </td>
 }
 
 export function ContactTableRow(props: {
@@ -164,10 +220,25 @@ export function ContactTableRow(props: {
       // 直达链接靠它定位（?contact=<id> 打开对应抽屉）
       id={`contact-${r.contactId}`}
       onClick={() => onToggle(r.contactId)}
-      className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${active ? 'bg-me-ivory/50' : ''}`}
+      data-handled={r.handled === true ? 'true' : undefined}
+      className={`border-b border-me-charcoal/5 cursor-pointer hover:bg-me-ivory/40 ${active ? 'bg-me-ivory/50' : ''} ${r.handled === true ? 'opacity-60' : ''}`}
     >
       <PinCell r={r} onTogglePin={onTogglePin} />
-      <NameCell r={r} />
+      <NameCell r={r} grouped={grouped} />
+      {grouped ? (
+        <>
+          <td className="whitespace-nowrap px-4 py-2 text-xs text-me-charcoal/55" data-testid="arrival-cell">
+            {r.firstSeenAt ? arrivalLabel(r.firstSeenAt) : <span className="text-me-charcoal/35">—</span>}
+          </td>
+          <td className="whitespace-nowrap px-4 py-2 text-xs text-me-charcoal/55" data-testid="recent-cell">
+            {r.lastTouchAt ? relTime(r.lastTouchAt) : <span className="text-me-charcoal/35">—</span>}
+          </td>
+          <CurrentStageCell r={r} />
+          <StageCell r={r} grouped />
+          <ChannelCell r={r} />
+        </>
+      ) : (
+        <>
       <td className="whitespace-nowrap px-4 py-2 text-me-charcoal/60">{fmtDate(r.firstSeenAt)}</td>
       <td className="whitespace-nowrap px-4 py-2 text-me-charcoal/60">
         {r.lastTouchAt ? relTime(r.lastTouchAt) : <span className="text-me-charcoal/35">—</span>}
@@ -188,7 +259,9 @@ export function ContactTableRow(props: {
           </td>
         )
       })}
-      <StageCell r={r} grouped={grouped} />
+      <StageCell r={r} grouped={false} />
+        </>
+      )}
     </tr>
   )
 }

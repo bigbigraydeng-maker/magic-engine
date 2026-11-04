@@ -17,6 +17,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact } from '@/lib/crm/identity'
+import { markNewLeadStage } from './new-lead-stage'
 import { attributionColumns, attributionFromMetaLeadRow } from '@/lib/crm/attribution'
 import { lookupCreativeRefByAdId } from '@/lib/ads/creative-link'
 import { type SubscribeMemberResult } from '@/lib/mailchimp/client'
@@ -310,6 +311,7 @@ export async function ingestMetaLead(input: IngestMetaLeadInput): Promise<Ingest
       attribution,
       autoAssign: true,
     })
+    if (created) await markNewLeadStage(clientId, contactId)
 
     // ── 触点 Phase A：**在任何 Mailchimp 调用之前**先 create-if-not-exists 一条
     //    contact + source touchpoint。用 upsert(ignoreDuplicates=true) 保幂等：

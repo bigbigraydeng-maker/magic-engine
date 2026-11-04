@@ -51,6 +51,8 @@ export interface AdsetInput {
   /** Meta effective_status。注意：账户欠款时它仍可能是 ACTIVE，不等于真在投 */
   effectiveStatus: string | null
   includedAudienceIds: string[]
+  /** 所属广告账户；老调用方不带 = 不参与「账户在不在投」的判断 */
+  adAccountId?: string
 }
 
 export interface CampaignFrequencyInput {
@@ -61,6 +63,20 @@ export interface CampaignFrequencyInput {
   spend7d: number
   /** 窗口内最近一个非空的 7 天不重复频率；null = 没有 */
   frequency7d: number | null
+  /** 窗口内最近一个有花费的数据日；null = 窗口内没花过钱；不带 = 不判「已停」 */
+  lastSpendDay?: string | null
+  /** 这个系列里「现在不在投」的广告组，在窗口内花的钱；系列频率混进了它们。不带 = 没查 / 不知道 */
+  stoppedAdsetSpend7d?: number
+  /** 这个系列里「现在在投」的广告组个数；不带 = 没查 / 不知道 */
+  liveAdsetCount?: number
+}
+
+/** 一个账户现在在不在投：最近有花费，或设置里有 ACTIVE 广告组 */
+export interface AccountActivity {
+  /** 这个账户最近一个有花费的数据日；null = 从没花过 */
+  lastSpendDay: string | null
+  /** true = 看到 ACTIVE；false = 看到了广告组但没有 ACTIVE；null = 这两天没看到快照，不能当成没有 */
+  hasActiveAdset: boolean | null
 }
 
 export interface GrowthProblemInput {
@@ -118,8 +134,14 @@ export interface WarMapInput {
   runningSince: string | null
   /** 每个绑定账户自己的数据日（该账户 ad_daily_insights 里最新的 insight_date）。键是 adAccountId；没有数据 = null。 */
   accountDataDays: Record<string, string | null>
+  /** 每个绑定账户最近一次取数时间（ad_daily_insights.fetched_at 最大值）。不带 = 退回用数据日判断。 */
+  accountFetchedAt?: Record<string, string | null>
+  /** 每个绑定账户在不在投。不带 = 所有在用账户都算在投（老行为）。 */
+  accountActivity?: Record<string, AccountActivity>
   /** 素材池里「已批准」的条数；null = 读不到素材池 */
   creativePoolApproved: number | null
+  /** 广告线索跟进。不带 = 调用方还没接，清单里不加这张卡。 */
+  followup?: FollowupInput
 }
 
 // ── 输出（页面直接渲染）────────────────────────────────────────────────
@@ -189,6 +211,8 @@ export interface AccountPoolSummary {
   /** 这个账户里最大的池子（读得准的才算）；没有 = null */
   biggestPoolName: string | null
   biggestPoolSize: number | null
+  /** 这个账户现在没在投：有够新且完整的停投证据；没有新数据是正常的 */
+  dormant: boolean
   poolCount: number
   light: Light
 }
@@ -201,6 +225,22 @@ export interface FrequencyRow {
   spend7d: number
   light: Light
   note: string
+  /** true = 系列频率超红线，但数字混进了已暂停的广告组，在投的组单独的频率读不到，所以不亮红灯 */
+  mixedWithStopped?: boolean
+}
+
+export interface FollowupGroup {
+  label: string
+  count: number
+}
+
+export interface FollowupInput {
+  unreadable: boolean
+  groups: FollowupGroup[]
+  inWindow: number
+  outsideWindow: number
+  /** null = 还没有够老的线索，或这一段读不到。 */
+  rateWithin24h: number | null
 }
 
 export type ActionSeverity = 'red' | 'yellow' | 'info'
@@ -225,14 +265,17 @@ export interface GoalNote {
 export interface WarMapView {
   generatedAt: string
   countdown: CountdownView
-  clocks: { dataDay: string | null; fetchedAt: string | null; staleDays: number | null }
+  /** note：不算「取数挂了」但值得说一句的事（全停账户没新数据 / 取数正常只是没花钱）；没有就是 null */
+  clocks: { dataDay: string | null; fetchedAt: string | null; staleDays: number | null; note: string | null }
   accounts: AccountView[]
   accountSummaries: AccountPoolSummary[]
   pools: { headline: Headline; rows: PoolRow[]; hiddenCount: number; unusableRows: PoolRow[] }
-  /** windowLabel：花费和频率对应的真实日期区间（数据日往前 7 天），如「10/4–10/10」 */
-  frequency: { headline: Headline; rows: FrequencyRow[]; windowLabel: string | null }
+  /** windowLabel：花费和频率对应的真实日期区间（实际读取的窗口往前 7 天），如「10/4–10/10」 */
+  frequency: { headline: Headline; rows: FrequencyRow[]; stoppedRows: FrequencyRow[]; windowLabel: string | null }
   adjust: { headline: Headline; actions: ActionRow[] }
   goalNote: GoalNote | null
   /** 计划所挂目标的最新处方一行；没有就是 null */
   prescriptionLine: string | null
+  /** 近 7 天广告线索的 24 小时跟进率低于 80%。 */
+  budgetHold: boolean
 }

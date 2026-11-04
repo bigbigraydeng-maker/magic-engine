@@ -72,9 +72,18 @@ describe('dispatch catalog', () => {
     expect(counts.get('industry-ai-visibility-daily')).toBe(1)
     expect(counts.get('render-dashboard:baseline-domains-monthly')).toBe(7)
     expect(counts.get('pm-daily-todo')).toBe(5)
-    expect(counts.get('meta-leads-hourly')).toBe(7 * 12)
+    expect(counts.get('meta-leads-hourly')).toBe(7 * 48)
     expect(counts.get('attribution-cron')).toBe(7 * 4)
     expect(counts.get('factory-worker-sweeper')).toBe(7 * 24 * 12)
+  })
+
+  it('wakes meta lead sync twice an hour on the frequent tick', () => {
+    const job = DISPATCH_CATALOG.find((entry) => entry.service === 'meta-leads-hourly')
+    expect(job).toMatchObject({
+      route: 'meta-leads-sync',
+      schedule: '25,55 * * * *',
+    })
+    expect(bucketForSchedule(job?.schedule ?? '')).toBe('frequent')
   })
 
   it('reclaims stale factory workers on the frequent tick, not a GitHub schedule', () => {
@@ -89,6 +98,11 @@ describe('dispatch catalog', () => {
     const workflow = readFileSync(path.join(ROOT, '.github/workflows/factory-sweepers.yml'), 'utf8')
     expect(workflow).not.toMatch(/^\s*schedule:/m)
     expect(workflow).toContain('workflow_dispatch:')
+  })
+
+  it('does not schedule the retired six-dimension diagnostic', () => {
+    expect(DISPATCH_CATALOG.some((job) => job.service === 'diagnostic-weekly')).toBe(false)
+    expect(CRON_REGISTRY.some((entry) => entry.service === 'diagnostic-weekly')).toBe(false)
   })
 
   it('records the three name/schedule mismatches instead of "correcting" them', () => {

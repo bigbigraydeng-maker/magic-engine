@@ -1209,3 +1209,51 @@ describe('自定义 playbook 必须真的接进 dayRow，不能悄悄退回默�
     expect(rows[0].seg.segment).not.toBe('nurture_future')
   })
 })
+
+describe('接通后记了笔记，灰勾和卡片说的是同一件事', () => {
+  const spoke = (at: string): TouchpointLike =>
+    tp({
+      channel: 'phone',
+      direction: 'outbound',
+      occurredAt: at,
+      source: 'twilio',
+      outcome: 'spoke',
+    })
+  const note = (at: string): TouchpointLike =>
+    tp({
+      channel: 'phone',
+      direction: 'outbound',
+      occurredAt: at,
+      source: 'me_manual',
+      outcome: 'spoke',
+    })
+
+  it('刚通完电话并记下笔记 → handledWhy 与理由一致，不说他还没回', () => {
+    const r = row(
+      person([
+        ...YESTERDAY_LEAD,
+        spoke('2026-08-05T03:00:00.000Z'),
+        note('2026-08-05T03:20:00.000Z'),
+      ]),
+      true,
+    )
+    expect(r.handled).toBe(true)
+    expect(r.seg.afterCall).toBe(false)
+    expect(r.seg.reason).toBe('刚通完电话，今天已记录')
+    expect(r.handledWhy).toBe('刚通完电话，今天已记录')
+  })
+
+  it('几天前通的电话、今天才记 → 两边都说「通完电话，今天已记录」', () => {
+    const r = row(
+      person([
+        tp({ direction: 'inbound', occurredAt: '2026-08-01T02:00:00.000Z' }),
+        spoke('2026-08-03T02:00:00.000Z'),
+        note('2026-08-05T03:20:00.000Z'),
+      ]),
+      true,
+    )
+    expect(r.handled).toBe(true)
+    expect(r.seg.reason).toBe('通完电话，今天已记录')
+    expect(r.handledWhy).toBe('通完电话，今天已记录')
+  })
+})

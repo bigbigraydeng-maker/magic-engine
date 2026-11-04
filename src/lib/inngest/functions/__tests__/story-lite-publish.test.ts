@@ -3,8 +3,10 @@
  * `social/story-lite/__tests__/sender.test.ts`; here the sweep runs over an empty store so only scheduling,
  * retries and the run log are on trial.
  */
-import { describe, expect, it, vi } from 'vitest'
-import { createStoryLitePublishFunction, STORY_LITE_PUBLISH_CRON, STORY_LITE_PUBLISH_FUNCTION_ID, STORY_LITE_PUBLISH_JOB } from '../story-lite-publish'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createStoryLitePublishFunction, storySweepLogSummary, STORY_LITE_PUBLISH_CRON, STORY_LITE_PUBLISH_FUNCTION_ID, STORY_LITE_PUBLISH_JOB } from '../story-lite-publish'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import * as storyReconcile from '@/lib/social/story-publish-reconcile'
 import { CLOUD_FN_PREFIX } from '../../client'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
 import { InMemoryLiteStore } from '@/lib/social/story-lite/in-memory-store'
@@ -36,12 +38,81 @@ function depsWith(store: InMemoryLiteStore): SenderDeps {
   }
 }
 
-function build(store: InMemoryLiteStore) {
+function build(store: InMemoryLiteStore, extra: {
+  reconcileEnabled?: () => boolean
+  now?: () => Date
+} = {}) {
   const startRun = vi.fn(async () => 'run-1')
-  const finishRun = vi.fn(async (_input: { runId: string; startedAt: number; summary?: SweepSummary; error?: string }) => undefined)
-  const fn = createStoryLitePublishFunction({ buildDeps: () => depsWith(store), startRun, finishRun })
+  const finishRun = vi.fn(async (_input: {
+    runId: string
+    startedAt: number
+    summary?: SweepSummary
+    error?: string
+    reconcileEmit?: { ok: boolean; error?: string } | null
+  }) => undefined)
+  const fn = createStoryLitePublishFunction({ buildDeps: () => depsWith(store), startRun, finishRun, ...extra })
   return { fn, startRun, finishRun }
 }
+
+describe('story-lite-publish backfill emit', () => {
+  const listMissing = vi.spyOn(storyReconcile, 'listUnregisteredSentStories')
+
+  beforeEach(() => {
+    vi.mocked(sendInngestEvent).mockReset()
+    vi.mocked(sendInngestEvent).mockResolvedValue({ event_ids: ['evt-1'] })
+    listMissing.mockClear()
+  })
+
+  it('switch off: no reconcile event and the sweep steps stay the same', async () => {
+    const { fn } = build(new InMemoryLiteStore())
+    const step = fakeStep()
+    await handlerOf(fn)({ step })
+    expect(step.run.mock.calls.map((c) => c[0])).toEqual(['start-run', 'sweep', 'finish-run'])
+    expect(sendInngestEvent).not.toHaveBeenCalled()
+    expect(listMissing).not.toHaveBeenCalled()
+    const summary = storySweepLogSummary({ records: [], staleExpired: [], counts: { SENT: 1 } }, null)
+    expect(summary).not.toHaveProperty('reconcile_emit')
+    expect(storySweepLogSummary({ records: [], staleExpired: [], counts: {} }, { ok: false, error: 'network down' })).toMatchObject({
+      reconcile_emit: { ok: false, error: 'network down' },
+    })
+  })
+
+  it('T12 switch on: one event after the sweep, backfill itself is not called, a failed send leaves the sweep result', async () => {
+    const now = new Date('2026-11-02T07:33:00.000Z')
+    const { fn, finishRun } = build(new InMemoryLiteStore(), {
+      reconcileEnabled: () => true,
+      now: () => now,
+    })
+    const step = fakeStep()
+    await expect(handlerOf(fn)({ step })).resolves.toEqual({})
+    expect(step.run.mock.calls.map((c) => c[0])).toEqual(['start-run', 'sweep', 'emit-story-reconcile', 'finish-run'])
+    expect(sendInngestEvent).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(sendInngestEvent).mock.calls[0][0]).toMatchObject({
+      id: 'story-reconcile:202611020730',
+      name: 'social/story.publish_actions.reconcile_due',
+      data: { triggered_at: '2026-11-02T07:33:00.000Z' },
+    })
+    expect(listMissing).not.toHaveBeenCalled()
+    expect(finishRun.mock.calls[0][0].error).toBeUndefined()
+    expect(finishRun.mock.calls[0][0].summary).toMatchObject({ records: [], staleExpired: [] })
+
+    vi.mocked(sendInngestEvent).mockRejectedValueOnce(new Error('network down'))
+    const again = build(new InMemoryLiteStore(), { reconcileEnabled: () => true, now: () => now })
+    await expect(handlerOf(again.fn)({ step: fakeStep() })).resolves.toEqual({})
+    expect(again.finishRun.mock.calls[0][0].error).toBeUndefined()
+    expect(again.finishRun.mock.calls[0][0].summary).toMatchObject({ records: [] })
+    expect(again.finishRun.mock.calls[0][0].reconcileEmit).toEqual({ ok: false, error: 'network down' })
+  })
+
+  it('a failed sweep does not emit a backfill event', async () => {
+    const store = new InMemoryLiteStore()
+    store.listLivePacks = async () => { throw new Error('db down') }
+    const { fn, finishRun } = build(store, { reconcileEnabled: () => true })
+    await expect(handlerOf(fn)({ step: fakeStep() })).rejects.toThrow('db down')
+    expect(sendInngestEvent).not.toHaveBeenCalled()
+    expect(finishRun.mock.calls[0][0]).toMatchObject({ error: 'db down' })
+  })
+})
 
 describe('story-lite-publish function', () => {
   it('🔴 is scheduled every ten minutes in New Zealand time, never retries, never overlaps', () => {

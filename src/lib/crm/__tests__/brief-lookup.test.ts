@@ -27,32 +27,32 @@ describe('latestBriefPerContact', () => {
 
   it('同一个人多段对话 → 取 generated_at 最新的一张', () => {
     const out = latestBriefPerContact(convs, [
-      { conversation_id: 'c1', intent_level: 'low', next_action: '旧的', generated_at: '2026-09-01T00:00:00Z' },
-      { conversation_id: 'c2', intent_level: 'high', next_action: ' 新的 ', generated_at: '2026-10-01T00:00:00Z' },
+      { conversation_id: 'c1', intent_level: 'low', next_action: '旧的', summary: null, generated_at: '2026-09-01T00:00:00Z' },
+      { conversation_id: 'c2', intent_level: 'high', next_action: ' 新的 ', summary: '  客户想要 4 月上海团  ', generated_at: '2026-10-01T00:00:00Z' },
     ])
-    expect(out.get('p1')).toEqual({ intent: 'high', nextAction: '新的', generatedAt: '2026-10-01T00:00:00Z' })
+    expect(out.get('p1')).toEqual({ intent: 'high', nextAction: '新的', summary: '客户想要 4 月上海团', generatedAt: '2026-10-01T00:00:00Z' })
   })
 
   it('顺序反着给也一样 —— 比的是时间不是先后', () => {
     const out = latestBriefPerContact(convs, [
-      { conversation_id: 'c2', intent_level: 'high', next_action: null, generated_at: '2026-10-01T00:00:00Z' },
-      { conversation_id: 'c1', intent_level: 'low', next_action: null, generated_at: '2026-09-01T00:00:00Z' },
+      { conversation_id: 'c2', intent_level: 'high', next_action: null, summary: null, generated_at: '2026-10-01T00:00:00Z' },
+      { conversation_id: 'c1', intent_level: 'low', next_action: null, summary: null, generated_at: '2026-09-01T00:00:00Z' },
     ])
     expect(out.get('p1')?.intent).toBe('high')
   })
 
   it('会话没挂到人（contact_id null）→ 这张摘要丢掉，不进任何人', () => {
     const out = latestBriefPerContact(convs, [
-      { conversation_id: 'c9', intent_level: 'high', next_action: 'x', generated_at: '2026-10-01T00:00:00Z' },
+      { conversation_id: 'c9', intent_level: 'high', next_action: 'x', summary: null, generated_at: '2026-10-01T00:00:00Z' },
     ])
     expect(out.size).toBe(0)
   })
 
   it('generated_at 为空的当成最旧；next_action 空串 → null', () => {
     const out = latestBriefPerContact(convs, [
-      { conversation_id: 'c1', intent_level: 'high', next_action: '', generated_at: null },
-      { conversation_id: 'c2', intent_level: 'medium', next_action: '', generated_at: '2026-09-01T00:00:00Z' },
+      { conversation_id: 'c1', intent_level: 'high', next_action: '', summary: null, generated_at: null },
+      { conversation_id: 'c2', intent_level: 'medium', next_action: '', summary: null, generated_at: '2026-09-01T00:00:00Z' },
     ])
-    expect(out.get('p1')).toEqual({ intent: 'medium', nextAction: null, generatedAt: '2026-09-01T00:00:00Z' })
+    expect(out.get('p1')).toEqual({ intent: 'medium', nextAction: null, summary: null, generatedAt: '2026-09-01T00:00:00Z' })
   })
 })

@@ -6,20 +6,30 @@
  * the global admin (PM) may ACTIVATE. Every activation carries a machine-readable
  * receipt so it can be traced afterwards (who, which client, which campaign, basis, time).
  *
- * Fail-closed: no session, scoped admin, domain-only admin, empty ADMIN_EMAILS,
- * or any thrown error → deny. Pausing never goes through this module.
+ * Fail-closed: no session, scoped admin, not on the exact ADS_SPEND_APPROVER_EMAILS list
+ * (empty list = nobody), or any thrown error → deny. Pausing never goes through this module.
+ *
+ * 2026-11-03 (fix-plan knife 3a): the list used to be ADMIN_EMAILS, which holds six people;
+ * PM decided only PM personally may turn spend back on, so it now shares the spend-approver
+ * list with the kernel's spend-increase gate.
+ *
+ * Go-live uses a separate basis, `go_live_card`. This module does not grant it.
+ * The go-live decision mints that basis only after OPC or that client's FDE
+ * clicks the confirmation card. `requireSpendActivationAuthority` stays global-admin only.
  */
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
+import { isSpendApproverEmail } from '@/lib/auth/whitelist'
 
 export const SPEND_ACTIVATION_RECEIPT_SCHEMA = 'ads.spend_activation_receipt.v1' as const
 
-export type SpendActivationEntry = 'meta-ads/execute' | 'ad-approval'
+export type SpendActivationEntry = 'meta-ads/execute' | 'ad-approval' | 'go-live-card'
 
 export interface SpendActivationAuthority {
   readonly actorUserId: string
   readonly actorEmail: string
-  readonly basis: 'global_admin'
+  readonly basis: 'global_admin' | 'go_live_card'
+  /** Set only for `go_live_card`: the confirmation-card run that was clicked. */
+  readonly cardRunId?: string
 }
 
 export type SpendActivationAuthorityResult =
@@ -42,8 +52,8 @@ export async function requireSpendActivationAuthority(): Promise<SpendActivation
 
     const email = (admin.user.email ?? '').toLowerCase().trim()
 
-    // Rejects people who are admin only through ADMIN_EMAIL_DOMAIN; only the exact ADMIN_EMAILS list counts.
-    if (!isGlobalAdminEmail(email)) {
+    // Only the exact ADS_SPEND_APPROVER_EMAILS list counts (not ADMIN_EMAILS, not ADMIN_EMAIL_DOMAIN).
+    if (!isSpendApproverEmail(email)) {
       return {
         ok: false,
         status: 403,
@@ -72,7 +82,8 @@ export async function requireSpendActivationAuthority(): Promise<SpendActivation
 export interface SpendActivationReceipt {
   readonly schema: typeof SPEND_ACTIVATION_RECEIPT_SCHEMA
   readonly entry: SpendActivationEntry
-  readonly basis: 'global_admin'
+  readonly basis: 'global_admin' | 'go_live_card'
+  readonly card_run_id?: string
   readonly actor_user_id: string
   readonly actor_email: string
   readonly client_id: string
@@ -89,7 +100,7 @@ export function buildSpendActivationReceipt(input: {
   readonly draftActionId?: string | null
   readonly now?: Date
 }): SpendActivationReceipt {
-  return {
+  const receipt: SpendActivationReceipt = {
     schema: SPEND_ACTIVATION_RECEIPT_SCHEMA,
     entry: input.entry,
     basis: input.authority.basis,
@@ -100,4 +111,6 @@ export function buildSpendActivationReceipt(input: {
     draft_action_id: input.draftActionId ?? null,
     authorized_at: (input.now ?? new Date()).toISOString(),
   }
+  if (!input.authority.cardRunId) return receipt
+  return { ...receipt, card_run_id: input.authority.cardRunId }
 }

@@ -23,7 +23,7 @@ function baseView(): WarMapView {
       actualLaunchDay: null,
       planStale: false,
     },
-    clocks: { dataDay: '2026-10-20', fetchedAt: '2026-10-20T03:26:00.000Z', staleDays: 0 },
+    clocks: { dataDay: '2026-10-20', fetchedAt: '2026-10-20T03:26:00.000Z', staleDays: 0, note: null },
     accounts: [],
     accountSummaries: [],
     pools: {
@@ -35,11 +35,13 @@ function baseView(): WarMapView {
     frequency: {
       headline: { light: 'green', sentence: '频率正常' },
       rows: [],
+      stoppedRows: [],
       windowLabel: '10/14–10/20',
     },
     adjust: { headline: { light: 'green', sentence: '今天没有要调的' }, actions: [] },
     goalNote: null,
     prescriptionLine: null,
+    budgetHold: false,
   }
 }
 
@@ -48,6 +50,45 @@ function stubView(view: WarMapView) {
   vi.stubGlobal('fetch', fn)
   return fn
 }
+
+describe('WarMapPanel · 没人跟进', () => {
+  it('只显示条数和广告组，并链到现有客人名单', async () => {
+    const view = baseView()
+    view.adjust = {
+      headline: { light: 'yellow', sentence: '今天有 1 件要留意' },
+      actions: [{
+        key: 'ad-lead-followup',
+        severity: 'yellow',
+        what: '广告线索超过 24 小时没人跟进：3 条，另有更早的 1 条',
+        how: '春季组 3 条。打开客人名单逐条联系。',
+        owner: 'pm',
+      }],
+    }
+    stubView(view)
+    render(<WarMapPanel clientId="c1" />)
+    await waitFor(() => expect(screen.getByText(/超过 24 小时没人跟进：3 条/)).toBeTruthy())
+    expect(screen.getAllByText(/超过 24 小时没人跟进：3 条/)).toHaveLength(1)
+    expect(screen.getByRole('link', { name: '打开客人名单' }).getAttribute('href')).toBe('/dashboard/clients/c1/crm/all')
+    expect(screen.queryByText('王女士')).toBeNull()
+  })
+
+  it('没有积压时只显示一句中性说明，不画黄色警告', async () => {
+    const view = baseView()
+    view.adjust.actions = [{
+      key: 'ad-lead-followup',
+      severity: 'info',
+      what: '超过 24 小时的广告线索都有人跟进了',
+      how: '',
+      owner: 'pm',
+    }]
+    stubView(view)
+    render(<WarMapPanel clientId="c1" />)
+    const line = await screen.findByText('超过 24 小时的广告线索都有人跟进了')
+    expect(line.parentElement?.className ?? '').not.toContain('bg-amber-50')
+    expect(screen.queryByText(/没人跟进/)).toBeNull()
+    expect(screen.queryByText('先补跟进，暂不建议加预算')).toBeNull()
+  })
+})
 
 describe('WarMapPanel · 处方一行', () => {
   it('有处方摘要就显示那一行', async () => {
@@ -89,7 +130,7 @@ describe('WarMapPanel · 倒计时条', () => {
 describe('WarMapPanel · 数据停了', () => {
   it('数据停了 10 天：显示琥珀色标签', async () => {
     const view = baseView()
-    view.clocks = { dataDay: '2026-10-10', fetchedAt: '2026-10-17T17:00:00.000Z', staleDays: 10 }
+    view.clocks = { dataDay: '2026-10-10', fetchedAt: '2026-10-17T17:00:00.000Z', staleDays: 10, note: null }
     stubView(view)
     render(<WarMapPanel clientId="c1" />)
     await waitFor(() => expect(screen.getByText('数据已 10 天没更新')).toBeTruthy())
@@ -97,7 +138,7 @@ describe('WarMapPanel · 数据停了', () => {
 
   it('只停了 1 天：不显示这句', async () => {
     const view = baseView()
-    view.clocks = { dataDay: '2026-10-19', fetchedAt: '2026-10-20T03:26:00.000Z', staleDays: 1 }
+    view.clocks = { dataDay: '2026-10-19', fetchedAt: '2026-10-20T03:26:00.000Z', staleDays: 1, note: null }
     stubView(view)
     render(<WarMapPanel clientId="c1" />)
     await waitFor(() => expect(screen.getByText(/数据日/)).toBeTruthy())
@@ -119,6 +160,7 @@ describe('WarMapPanel · 按账户分开', () => {
         staleDays: 0,
         biggestPoolName: '某池',
         biggestPoolSize: 44500,
+        dormant: false,
         poolCount: 1,
         light: 'red',
       },
@@ -132,6 +174,7 @@ describe('WarMapPanel · 按账户分开', () => {
         staleDays: 0,
         biggestPoolName: '另一个池',
         biggestPoolSize: 9000,
+        dormant: false,
         poolCount: 1,
         light: 'green',
       },

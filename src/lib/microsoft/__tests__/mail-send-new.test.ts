@@ -292,6 +292,12 @@ describe('sendMailNew', () => {
     expect(f.store.claimConversation).not.toHaveBeenCalled()
   })
 
+  it('prior send: the lookup is scoped to the contact being written to', async () => {
+    const f = makeFakes({})
+    await sendMailNew(baseInput({ contactId: 'contact-77' }), f.deps)
+    expect(f.store.findPriorSend).toHaveBeenCalledWith('client-a', REQUEST_ID, 'contact-77')
+  })
+
   it('prior send: pending is duplicate_unfinished', async () => {
     const f = makeFakes({
       prior: { auditId: 'a9', status: 'pending', messageId: null, conversationId: 'conv-9' },

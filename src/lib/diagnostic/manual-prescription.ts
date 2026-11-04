@@ -5,8 +5,6 @@ import type {
 import { parseAdPlays } from '@/lib/ads-strategy/plan-seed/ad-plays'
 
 export const MANUAL_PRESCRIPTION_AGENT = '广告 Agent'
-export const NO_COMPLETED_RUN_MESSAGE =
-  '这个客户还没有已完成的体检，处方草稿存不进去。先完成一次体检再保存。'
 
 const DIMENSIONS: ReadonlySet<string> = new Set<DiagnosticDimension>([
   'seo', 'ai_visibility', 'ads', 'social', 'reputation', 'competitor',

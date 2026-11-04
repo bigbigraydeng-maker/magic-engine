@@ -26,7 +26,7 @@ export interface TrialOutcome {
   costUsd: number
 }
 
-type TrialLlm = Pick<DeepSeekClient, 'completeJson' | 'price'>
+export type TrialLlm = Pick<DeepSeekClient, 'completeJson' | 'price'>
 
 /** 经验文字来自库里的蒸馏结果，当作"待评估的参考规则"，不是指令 */
 export function buildTrialPrompt(sample: TrialSampleId, lesson: string | null): { system: string; user: string } {
@@ -63,7 +63,7 @@ export function parseSuggestions(text: string): Suggestion[] | null {
 }
 
 /** 一次外呼；失败返回 null（结果未知，调用方保留预留） */
-async function callOnce(llm: TrialLlm, prompt: { system: string; user: string }) {
+export async function callOnce(llm: TrialLlm, prompt: { system: string; user: string }) {
   const res = await llm.completeJson({
     ...prompt,
     maxOutputTokens: TRIAL_MAX_OUTPUT_TOKENS,

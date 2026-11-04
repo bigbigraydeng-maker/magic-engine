@@ -12,7 +12,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { callClaudeChat, parseJsonResponse } from '@/lib/anthropic/client'
 import type {
-  ExecutionItem, ExecutionLog, DiagnosticDimension,
+  ExecutionItem, ExecutionLog,
   PrescriptionContent, KPITarget,
 } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
@@ -93,27 +93,10 @@ async function loadReviewContext(
     }
   }
 
-  // 3. 最近一次诊断分数
-  let overallScore: number | null = null
-  let dimensionScores: Partial<Record<DiagnosticDimension, number | null>> | null = null
-  {
-    const { data: run } = await supabase
-      .from('diagnostic_runs')
-      .select('overall_score, dimension_scores')
-      .eq('client_id', clientId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle<{
-        overall_score: number | null
-        dimension_scores: Partial<Record<DiagnosticDimension, number | null>> | null
-      }>()
-    if (run) {
-      overallScore = run.overall_score
-      dimensionScores = run.dimension_scores
-    }
-  }
+  const overallScore = null
+  const dimensionScores = null
 
-  // 4. 全部执行项
+  // 全部执行项
   const { data: itemRows } = await supabase
     .from('execution_items')
     .select('*')

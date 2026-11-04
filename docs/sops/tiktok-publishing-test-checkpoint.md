@@ -1,5 +1,7 @@
 # TikTok integration test checkpoint
 
+> 负责 agent：苏东坡（`sudongpo`）｜ 档案：[`docs/agents/14-sudongpo.md`](../agents/14-sudongpo.md) ｜ 索引：[agents 索引](../agents/README.md)
+
 User authorized continuing Magic Engine TikTok development. L3 existing social connector. Single writer: this chat. Worktree /Users/raydeng/Projects/magic-engine-tiktok-review, branch codex/tiktok-publishing-review, base d79c03ed4. Remote not refreshed. Original repository's unrelated changes untouched. No commit, push, deployment, credential export or actual TikTok post.
 
 Implemented creator-info query with existing client access control; a post preview form with account nickname, caption editing, explicit privacy choice, disabled-account interaction handling, interactions off by default, commercial disclosure and music/final confirmation. Queue retains review choices; execution queries current creator settings and refuses invalid/unconfirmed jobs before fetching media or initializing upload. Existing Facebook path remains in place.

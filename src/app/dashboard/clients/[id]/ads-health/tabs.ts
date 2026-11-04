@@ -8,11 +8,12 @@
  *    所以清单放这里，页面和守卫各自 import。
  */
 
-export type PageTab = 'today' | 'ads' | 'approvals' | 'settings'
+export type PageTab = 'today' | 'ads' | 'breakdown' | 'approvals' | 'settings'
 
 export const PAGE_TABS: ReadonlyArray<{ key: PageTab; label: string; hint: string }> = [
   { key: 'today', label: '今天看这里', hint: '三句话：池子、频率、今天调什么' },
   { key: 'ads', label: '每条广告', hint: '逐条体检' },
+  { key: 'breakdown', label: '多维数据', hint: '时段、版位、人群、地区，对上真实进线' },
   { key: 'approvals', label: '等你点头', hint: '这个客户等人点头的广告动作' },
   { key: 'settings', label: '目标与设置', hint: '每天预算上限、自动化、可投视频' },
 ]

@@ -148,9 +148,26 @@ function safeNotify(
   }
 }
 
+/**
+ * Node 的 `AbortSignal.timeout` / 定时器只接受整数毫秒。
+ * 再大过有符号 32 位时，运行时不抛错，但会把延时静默改成 1 毫秒。
+ */
+const TIMEOUT_MAX_MS = 2 ** 31 - 1
+
+/**
+ * 把一段毫秒收成定时器肯收的整数。预算按剩余家数相除经常除不尽
+ * （三家平分 20 秒就是 20000/3），原样传进去会抛 RangeError，调用方一条都发不出去。
+ * 向下取整：分到的超时不会比份额更长。非有限数或 ≤0 收成 0（到点即止，不抛）。
+ */
+export function integerTimeoutMs(ms: number): number {
+  if (!Number.isFinite(ms) || ms <= 0) return 0
+  const whole = Math.floor(ms)
+  return whole > TIMEOUT_MAX_MS ? TIMEOUT_MAX_MS : whole
+}
+
 /** 为某个供应商构造信号：其预算切片 + 可选的调用方信号。 */
 function buildSignal(sliceMs: number, callerSignal: AbortSignal | undefined): AbortSignal {
-  const timeoutSignal = AbortSignal.timeout(sliceMs)
+  const timeoutSignal = AbortSignal.timeout(integerTimeoutMs(sliceMs))
   if (callerSignal === undefined) return timeoutSignal
   return AbortSignal.any([timeoutSignal, callerSignal])
 }
@@ -210,7 +227,7 @@ export async function runFailover<T>(args: RunFailoverArgs<T>): Promise<Failover
     const remaining = totalBudgetMs - (now() - start)
     if (remaining <= 0) break
 
-    const slice = remaining / (n - i)
+    const slice = integerTimeoutMs(remaining / (n - i))
     const providerSignal = buildSignal(slice, signal)
     const maxAttempts = i === 0 ? 2 : 1
 

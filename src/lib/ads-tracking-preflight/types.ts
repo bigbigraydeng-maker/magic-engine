@@ -220,8 +220,14 @@ export interface ObjectiveWatchConfig {
 }
 
 export interface TrackingClientConfig {
-  /** Meta 官方广告账户，带 act_ 前缀 */
+  /** Meta 官方广告账户（数据集 / 像素在它名下），带 act_ 前缀 */
   ad_account_id: string
+  /**
+   * 广告实际在哪个账户里投，带 act_ 前缀。不写 = 和 ad_account_id 是同一个账户。
+   * 数据集 / 像素那几道门继续读 ad_account_id；「广告账户与付款」和预算只读这个账户——
+   * 它们要核的是真正在花钱的账户，不是放像素的账户。
+   */
+  spend_ad_account_id?: string
   /** 官网首页（落地页探测只允许这个主机及其 www / 非 www 变体） */
   site_url: string
   landing_targets: LandingTarget[]

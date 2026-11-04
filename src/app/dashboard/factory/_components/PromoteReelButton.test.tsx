@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
-import { PromoteReelButton, promoteEntry } from './PromoteReelButton'
+import { PromoteReelButton, ReelGoPublicPreviewPanel, promoteEntry, readFactCheck } from './PromoteReelButton'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -142,4 +142,18 @@ it('promoteEntry returns null for a published reel without pending first comment
 
 it('promoteEntry returns null when status is not published', () => {
   expect(promoteEntry({ status: 'draft', published: { video_state: 'DRAFT' } })).toBeNull()
+})
+
+it('preview panel shows the catalog check result and the lines that did not match', async () => {
+  const div = document.body.appendChild(document.createElement('div'))
+  const preview = { ...PREVIEW, fact_check: readFactCheck({ verdict: 'pass', catalog_version: 13, problems: [], note: '画面字幕没有文本，未核' }) }
+  await act(async () => { createRoot(div).render(<ReelGoPublicPreviewPanel preview={preview} actions={null} />) })
+  expect(document.body.textContent).toContain('团目录核对:通过(目录第 13 版)')
+  expect(document.body.textContent).toContain('画面字幕没有文本，未核')
+})
+
+it('readFactCheck drops malformed values and non-string problem lines', () => {
+  expect(readFactCheck('x')).toBeNull()
+  expect(readFactCheck({ catalog_version: 1 })).toBeNull()
+  expect(readFactCheck({ verdict: 'fail', problems: ['天数：16 days', 3] })?.problems).toEqual(['天数：16 days'])
 })

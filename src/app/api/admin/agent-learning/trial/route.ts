@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
   if (!llm.ok) return NextResponse.json({ success: false, error: '模型未配置' }, { status: 503 })
 
   const store = createRpcTrialStore(
-    ((fn, args) => supabaseAdmin.rpc(fn, args)) as unknown as RpcFn,
+    ((fn: string, args: Record<string, unknown>) => supabaseAdmin.rpc(fn, args)) as unknown as RpcFn,
   )
   const result = await runTrial(
     { llm: llm.value, store, now: () => new Date() },

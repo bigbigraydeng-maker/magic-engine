@@ -14,13 +14,16 @@ import { fetchAll } from '@/lib/supabase-paginate'
 import { loadAdStrategyConfigWithSource } from '@/lib/ads-strategy/config'
 import { canonicalAccountDigits } from '@/lib/meta/ad-account-binding'
 import { loadAccountStatusRows, latestPerAccount } from '@/lib/ads-strategy/account-status'
+import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 import { loadLatestGoalPrescription } from '@/lib/marketing-plan/promo/goal-prescription'
 import { pickWarMapPlan } from '@/lib/marketing-plan/promo/plan-pick'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { loadAdFollowup } from './followup-load'
 import { unusableAccountNote } from './pools'
 import { nzDay } from './util'
 import { computeRunningSince, type SnapRowLite } from './running-since'
 import type {
+  AccountActivity,
   AccountInput,
   AdsetInput,
   AudienceHistoryPoint,
@@ -165,6 +168,7 @@ async function loadAudiences(
 // ── 广告组：谁在用哪个池子 ───────────────────────────────────────────────────
 interface AdsetRow {
   entity_id: string
+  ad_account_id: string | null
   effective_status: string | null
   included_audience_ids: string[] | null
   capture_reason: string | null
@@ -174,7 +178,7 @@ async function loadAdsets(clientId: string, now: Date): Promise<AdsetInput[]> {
   const rows = await fetchAll<AdsetRow>((from, to) =>
     supabaseAdmin
       .from('ad_entity_snapshots')
-      .select('entity_id, effective_status, included_audience_ids, capture_reason')
+      .select('entity_id, ad_account_id, effective_status, included_audience_ids, capture_reason')
       .eq('client_id', clientId)
       .eq('level', 'adset')
       .gte('captured_at', isoDaysAgo(now, 2))
@@ -185,12 +189,14 @@ async function loadAdsets(clientId: string, now: Date): Promise<AdsetInput[]> {
   const seen = new Map<string, AdsetInput>()
   for (const r of rows) {
     if (seen.has(r.entity_id)) continue
+    const acct = r.ad_account_id ? toActId(r.ad_account_id) : undefined
     if (r.capture_reason === DISAPPEARED) {
-      seen.set(r.entity_id, { id: r.entity_id, effectiveStatus: 'NOT_RETURNED', includedAudienceIds: [] })
+      seen.set(r.entity_id, { id: r.entity_id, effectiveStatus: 'NOT_RETURNED', includedAudienceIds: [], adAccountId: acct })
       continue
     }
     seen.set(r.entity_id, {
       id: r.entity_id,
+      adAccountId: acct,
       effectiveStatus: r.effective_status,
       includedAudienceIds: r.included_audience_ids ?? [],
     })
@@ -239,7 +245,94 @@ interface InsightRow {
   frequency_7d: number | string | null
 }
 
-async function loadCampaigns(clientId: string, dataDay: string | null): Promise<CampaignFrequencyInput[]> {
+interface AdsetSpendRow {
+  entity_id: string
+  parent_id: string | null
+  spend: number | string | null
+}
+
+interface AdsetStatusRow {
+  entity_id: string
+  campaign_id: string | null
+  effective_status: string | null
+  capture_reason: string | null
+}
+
+/**
+ * 每个系列里「现在不在投」的广告组在窗口内花了多少、「现在在投」的广告组有几个。
+ * 系列的 7 天频率是整个系列算的，没有广告组层级的 7 天频率（库里 adset 行的 frequency_7d 一直是空，同步时没取），
+ * 所以只能说出「这个系列的数混进了已暂停的组」，不能编出在投组单独的频率。
+ * 广告组当前状态读不到（没有快照）时不算已停：宁可保持原来的红灯，也不凭空放过。
+ */
+async function loadAdsetLiveness(
+  clientId: string,
+  dataDay: string,
+  now: Date,
+): Promise<Map<string, { stoppedSpend: number; live: number }>> {
+  const [spendRows, statusRows] = await Promise.all([
+    fetchAll<AdsetSpendRow>((from, to) =>
+      supabaseAdmin
+        .from('ad_daily_insights')
+        .select('entity_id, parent_id, spend')
+        .eq('client_id', clientId)
+        .eq('level', 'adset')
+        .gte('insight_date', shiftDay(dataDay, -6))
+        .lte('insight_date', dataDay)
+        .order('insight_date', { ascending: false })
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+    fetchAll<AdsetStatusRow>((from, to) =>
+      supabaseAdmin
+        .from('ad_entity_snapshots')
+        .select('entity_id, campaign_id, effective_status, capture_reason')
+        .eq('client_id', clientId)
+        .eq('level', 'adset')
+        .gte('captured_at', isoDaysAgo(now, 8))
+        .order('captured_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(from, to),
+    ),
+  ])
+  const status = new Map<string, { campaignId: string | null; delivering: boolean | null }>()
+  for (const r of statusRows) {
+    if (status.has(r.entity_id)) continue
+    if (r.capture_reason === DISAPPEARED) {
+      status.set(r.entity_id, { campaignId: r.campaign_id, delivering: false })
+      continue
+    }
+    status.set(r.entity_id, {
+      campaignId: r.campaign_id,
+      delivering: r.effective_status === null ? null : DELIVERING_STATUSES.has(r.effective_status),
+    })
+  }
+  const spendByAdset = new Map<string, { campaignId: string | null; spend: number }>()
+  for (const r of spendRows) {
+    const cur = spendByAdset.get(r.entity_id) ?? { campaignId: r.parent_id, spend: 0 }
+    cur.spend += num(r.spend) ?? 0
+    spendByAdset.set(r.entity_id, cur)
+  }
+  const out = new Map<string, { stoppedSpend: number; live: number }>()
+  const bump = (campaignId: string | null): { stoppedSpend: number; live: number } | null => {
+    if (!campaignId) return null
+    const cur = out.get(campaignId) ?? { stoppedSpend: 0, live: 0 }
+    out.set(campaignId, cur)
+    return cur
+  }
+  for (const [adsetId, st] of Array.from(status.entries())) {
+    const cur = bump(st.campaignId ?? spendByAdset.get(adsetId)?.campaignId ?? null)
+    if (cur && st.delivering === true) cur.live += 1
+  }
+  for (const [adsetId, sp] of Array.from(spendByAdset.entries())) {
+    const st = status.get(adsetId)
+    if (!st || st.delivering !== false || sp.spend <= 0) continue
+    const cur = bump(st.campaignId ?? sp.campaignId)
+    if (cur) cur.stoppedSpend += sp.spend
+  }
+  return out
+}
+
+async function loadCampaigns(clientId: string, dataDay: string | null, now: Date): Promise<CampaignFrequencyInput[]> {
   if (!dataDay) return []
   const rows = await fetchAll<InsightRow>((from, to) =>
     supabaseAdmin
@@ -261,13 +354,21 @@ async function loadCampaigns(clientId: string, dataDay: string | null): Promise<
       adAccountId: r.ad_account_id,
       spend7d: 0,
       frequency7d: null,
+      lastSpendDay: null as string | null,
     }
-    cur.spend7d += num(r.spend) ?? 0
+    const spend = num(r.spend) ?? 0
+    cur.spend7d += spend
+    // 已按日期倒序：第一个有花费的日子就是最近一次花钱
+    if (cur.lastSpendDay === null && spend > 0) cur.lastSpendDay = r.insight_date
     // 已按日期倒序：第一个非空的 7 天频率就是最近的
     if (cur.frequency7d === null) cur.frequency7d = num(r.frequency_7d)
     byCampaign.set(r.entity_id, cur)
   }
-  return Array.from(byCampaign.values())
+  const liveness = await loadAdsetLiveness(clientId, dataDay, now)
+  return Array.from(byCampaign.values()).map(c => {
+    const l = liveness.get(c.campaignId)
+    return l ? { ...c, stoppedAdsetSpend7d: l.stoppedSpend, liveAdsetCount: l.live } : c
+  })
 }
 
 // ── 经营视图（卫青每天写的那一行）────────────────────────────────────────────
@@ -392,6 +493,51 @@ async function loadAccountDataDays(clientId: string, accounts: AccountInput[]): 
   return Object.fromEntries(entries)
 }
 
+// ── 每个账户最近一次取数时间（判断「取数挂了」用，不看最近花费日）───────────────
+async function loadAccountFetchedAt(clientId: string, accounts: AccountInput[]): Promise<Record<string, string | null>> {
+  const entries = await Promise.all(accounts.map(async a => {
+    const { data, error } = await supabaseAdmin
+      .from('ad_daily_insights')
+      .select('fetched_at')
+      .eq('client_id', clientId)
+      .eq('ad_account_id', a.adAccountId)
+      .order('fetched_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (error) throw new Error(`读账户取数时间失败：${error.message}`)
+    return [a.adAccountId, str((data as { fetched_at?: unknown } | null)?.fetched_at)] as const
+  }))
+  return Object.fromEntries(entries)
+}
+
+/** 这两天没看到该账户的广告组快照时返回 null，不能把「窗口是空的」写成「没有 ACTIVE」。 */
+function observedActiveAdset(adsets: AdsetInput[], id: string): boolean | null {
+  const seen = adsets.filter(s => s.adAccountId === id)
+  if (seen.length === 0) return null
+  return seen.some(s => s.effectiveStatus === 'ACTIVE')
+}
+
+/** 账户在不在投：最近有花费的日子取自已读到的系列日报，ACTIVE 广告组只在看到快照时才下结论 */
+function buildAccountActivity(
+  accounts: AccountInput[],
+  campaigns: CampaignFrequencyInput[],
+  adsets: AdsetInput[],
+): Record<string, AccountActivity> {
+  const out: Record<string, AccountActivity> = {}
+  for (const a of accounts) {
+    const id = toActId(a.adAccountId)
+    const days = campaigns
+      .filter(c => toActId(c.adAccountId) === id)
+      .map(c => c.lastSpendDay ?? null)
+      .filter((d): d is string => d !== null)
+    out[a.adAccountId] = {
+      lastSpendDay: days.length > 0 ? days.reduce((x, y) => (y > x ? y : x)) : null,
+      hasActiveAdset: observedActiveAdset(adsets, id),
+    }
+  }
+  return out
+}
+
 // ── 实际已经在跑的最早日子（判断计划记录是不是过时了）────────────────────────
 interface SnapLiteRow {
   entity_id: string
@@ -436,7 +582,7 @@ async function loadRunningSince(clientId: string, now: Date, accounts: AccountIn
 export async function loadWarMapInput(clientId: string, now: Date = new Date()): Promise<WarMapInput> {
   const accounts = await loadAccounts(clientId, now)
   const usableIds = accounts.filter(a => unusableAccountNote(a.statusCode) === null).map(a => a.adAccountId)
-  const [aud, adsets, clocks, growth, plan, creativePoolApproved, accountDataDays, runningSince] = await Promise.all([
+  const [aud, adsets, clocks, growth, plan, creativePoolApproved, accountDataDays, runningSince, accountFetchedAt] = await Promise.all([
     loadAudiences(clientId, now),
     loadAdsets(clientId, now),
     loadClocks(clientId, accounts.length === 0 ? null : usableIds),
@@ -445,8 +591,16 @@ export async function loadWarMapInput(clientId: string, now: Date = new Date()):
     loadApprovedCreatives(clientId),
     loadAccountDataDays(clientId, accounts),
     loadRunningSince(clientId, now, accounts),
+    loadAccountFetchedAt(clientId, accounts),
   ])
-  const campaigns = await loadCampaigns(clientId, clocks.dataDay)
+  let followup
+  try {
+    followup = await loadAdFollowup(supabaseAdmin, clientId, now)
+  } catch (err) {
+    console.warn('[war-map] 广告线索跟进读不到', { error: err instanceof Error ? err.message : 'unknown' })
+    followup = { unreadable: true, groups: [], inWindow: 0, outsideWindow: 0, rateWithin24h: null }
+  }
+  const campaigns = await loadCampaigns(clientId, clocks.dataDay, now)
   // 账户清单是「哪些账户算数」的唯一来源：被隐藏的账户，它的池子/池子历史/系列频率也不能漏进来。
   // accounts 为空（没绑定）时不过滤，保持原行为。
   const visible = accounts.length > 0 ? new Set(accounts.map(a => toActId(a.adAccountId))) : null
@@ -466,6 +620,9 @@ export async function loadWarMapInput(clientId: string, now: Date = new Date()):
     plan,
     runningSince,
     accountDataDays,
+    accountFetchedAt,
+    accountActivity: buildAccountActivity(accounts, visibleCampaigns, adsets),
     creativePoolApproved,
+    followup,
   }
 }

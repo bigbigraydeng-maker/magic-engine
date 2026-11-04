@@ -75,6 +75,8 @@ function stubFetch(contacts: ReturnType<typeof contact>[]) {
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   mockClientId = NAL
+  // 这页默认进「今天先联系」；本文件测的是平铺名单里的阶段按钮。
+  window.history.replaceState({}, '', '/dashboard/clients/nal/crm/all?view=all')
 })
 afterEach(() => {
   vi.unstubAllGlobals()

@@ -33,4 +33,10 @@ describe('buildSystemPrompt —— 按渠道说话', () => {
       expect(p).not.toMatch(new RegExp(`\\b${name}\\b`))
     }
   })
+
+  it('摘要保留来源中的客户原名，不翻译或音译', () => {
+    const prompt = buildSystemPrompt(identity, [])
+    expect(prompt).toContain('Never translate or transliterate a name')
+    expect(prompt).toContain('copy their spelling exactly')
+  })
 })

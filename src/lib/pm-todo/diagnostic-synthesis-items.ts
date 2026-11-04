@@ -138,22 +138,9 @@ export function buildDiagnosticSynthesisItems(failures: SynthesisFailure[]): Man
  * 其他通道同一条纪律：一条通道读挂了不拖垮别的待办。
  */
 export async function pushDiagnosticSynthesisItems(
-  supabase: SupabaseClient,
-  items: ManualItem[],
-  now: Date,
+  _supabase: SupabaseClient,
+  _items: ManualItem[],
+  _now: Date,
 ): Promise<void> {
-  const since = new Date(now.getTime() - SYNTHESIS_ITEM_LOOKBACK_DAYS * 24 * 3_600_000).toISOString()
-
-  const { data, error } = await supabase
-    .from('cron_run_logs')
-    .select('summary')
-    .eq('job_name', 'diagnostic-weekly')
-    .gte('started_at', since)
-    .order('started_at', { ascending: false })
-    .limit(10)
-
-  if (error) throw new Error(`cron_run_logs query failed: ${error.message}`)
-
-  const rows = (data ?? []) as Array<{ summary: unknown }>
-  items.push(...buildDiagnosticSynthesisItems(extractSynthesisFailures(rows)))
+  return
 }

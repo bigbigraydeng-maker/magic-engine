@@ -16,13 +16,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { contactCardTitle } from '@/lib/crm/display-name'
-import { buildIdentities, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
+import { buildIdentities, normalisePhone, resolveContact, AmbiguousIdentityError } from '@/lib/crm/identity'
 import { contactKindOf, isSystemAccountName, normaliseDomain, readDomainRules, SYSTEM_ACCOUNT_NAMES } from '@/lib/crm/contact-kind'
 import { EMPTY_ATTRIBUTION } from '@/lib/crm/attribution'
 import { segmentContact } from '@/lib/crm/segments'
 import { buildContactModel } from '@/lib/crm/contact-model'
 import { enrichContacts, type SourceKey } from '@/lib/crm/contact-enrichment'
-import { loadEnrichmentInputs, type EnrichmentInputs } from '@/lib/crm/contact-enrichment-loader'
+import { loadAllEnrichmentConversations, loadEnrichmentInputs, type EnrichmentInputs } from '@/lib/crm/contact-enrichment-loader'
 import {
   responseRowFor,
   stageMetaOf,
@@ -31,9 +31,15 @@ import {
   type StageRow,
 } from '@/lib/crm/contact-response-row'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
+import { contactsTouchedToday, localDayStartMs } from '@/lib/crm/day-list'
+import { loadStageSuppressedTodayIds } from '@/lib/crm/day-stage-events'
+import { handledNextAction, type NextAction } from '@/lib/crm/next-action'
+import { recentStaffNotes } from '@/lib/crm/recent-staff-notes'
+import { isMarketingAction } from '@/lib/crm/pipeline'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
 import { loadLatestBriefByContact, loadLatestBriefByContactCached, type BriefByContact } from '@/lib/crm/brief-lookup'
 import { fetchAll } from '@/lib/supabase-paginate'
+import { loadPriorityTouchpoints } from '@/lib/crm/priority-touchpoints'
 import { createStepTimer, type StepTimer } from '@/lib/http/step-timing'
 import { orderContactIdsByLatestTouch, scanLatestTouchContactIds, type TouchRowLite } from '@/lib/crm/contact-touch-order'
 import {
@@ -130,7 +136,7 @@ function parseListQuery(url: URL): ListQuery | { error: string } {
 
   // PostgREST 的 `or(...)` 语法用逗号和括号分隔条件，q 里带这些字符会把
   // 语法拆坏（甚至注入别的条件）。不尝试转义 —— 直接拒绝，让调用方自己清。
-  if (q !== null && /[,()]/.test(q)) return { error: 'invalid characters in q' }
+  if (q !== null && /[,()]/.test(q) && !(/^[+\d\s().-]+$/.test(q) && /\d/.test(q))) return { error: 'invalid characters in q' }
 
   const rawView = sp.get('view')
   if (rawView !== null && rawView !== 'priority') return { error: 'invalid view' }
@@ -211,8 +217,34 @@ function contactFilterParams(query: ListQuery): {
     orExpr:
       query.q === null
         ? null
-        : `display_name.ilike.%${query.q}%,primary_phone.ilike.%${query.q}%,primary_email.ilike.%${query.q}%`,
+        : searchFilters(query.q, ['display_name', 'primary_phone', 'primary_email']),
   }
+}
+
+/** Build safe PostgREST search patterns for human-formatted NZ/AU phone numbers. */
+function searchFilters(q: string, fields: string[]): string {
+  const phoneLike = /^[+\d\s().-]+$/.test(q)
+  const safe = phoneLike ? q.replace(/[()]/g, '') : q
+  const patterns = new Set([safe])
+  if (phoneLike) {
+    const digits = q.replace(/\D/g, '')
+    if (digits) patterns.add(digits)
+    if (digits.startsWith('0') && digits.length >= 3) patterns.add(digits.slice(1))
+    for (const country of ['NZ', 'AU'] as const) {
+      const normalised = normalisePhone(q, country)
+      if (normalised) patterns.add(normalised)
+    }
+  }
+  return fields.flatMap((field) => [...patterns].map((pattern) => `${field}.ilike.%${pattern}%`)).join(',')
+}
+
+async function searchIdentityContactIds(clientId: string, q: string): Promise<string[]> {
+  const rows = await fetchAll<{ contact_id: string }>((from, to) =>
+    supabaseAdmin.from('contact_identities').select('contact_id').eq('client_id', clientId)
+      .in('kind', ['phone', 'email']).or(searchFilters(q, ['value']))
+      .order('id', { ascending: true }).range(from, to),
+  )
+  return [...new Set(rows.map((row) => row.contact_id).filter((id) => UUID_RE.test(id)))]
 }
 
 /**
@@ -513,6 +545,20 @@ async function getPaged(
       }
     }
 
+    // Search all stored phone/email identities as well as the primary fields.
+    // Pass the resulting IDs to the RPC rather than a long PostgREST URL.
+    if (query.q !== null && filters.orExpr !== null) {
+      const [primary, secondary] = await Promise.all([
+        fetchAll<{ id: string }>((from, to) => supabaseAdmin.from('contacts').select('id')
+          .eq('client_id', clientId).or(filters.orExpr!).order('id', { ascending: true }).range(from, to)),
+        searchIdentityContactIds(clientId, query.q),
+      ])
+      const ids = [...new Set([...primary.map((row) => row.id), ...secondary])]
+      const permitted = kindInIds === null ? ids : ids.filter((id) => kindInIds!.includes(id))
+      if (permitted.length === 0) return NextResponse.json({ total: 0, page: query.page, perPage: query.perPage, columns: [], items: [], viewerEmail })
+      kindInIds = permitted
+    }
+
     // 先取「符合筛选的全部人」的 id（几百到一两千行，只带 id 和首次进线时间），再按「最近有互动」排好序，
     // 最后只把当前这一页的人取全。排序不能放在 SQL 里：「最近联系」是逐人对触点取最大值，
     // 而 contacts.last_seen_at 不可信（生产里 721/1159 人比真实最新触点旧）。见 contact-touch-order.ts。
@@ -532,7 +578,7 @@ async function getPaged(
         supabaseAdmin.rpc('crm_contacts_page_by_latest_touch', {
           p_client_id: clientId,
           p_stages: filters.stages,
-          p_q: query.q,
+          p_q: null,
           p_in_ids: kindInIds,
           p_not_in_ids: kindNotInIds !== null && kindNotInIds.length > 0 ? kindNotInIds : null,
           p_limit: query.perPage,
@@ -559,7 +605,7 @@ async function getPaged(
           const first = await supabaseAdmin.rpc('crm_contacts_page_by_latest_touch', {
             p_client_id: clientId,
             p_stages: filters.stages,
-            p_q: query.q,
+            p_q: null,
             p_in_ids: kindInIds,
             p_not_in_ids: kindNotInIds !== null && kindNotInIds.length > 0 ? kindNotInIds : null,
             p_limit: 1,
@@ -622,12 +668,14 @@ async function getPaged(
     }
 
     if (!fastDone) {
-      const [idRows, stages] = await Promise.all([
-        fetchAll<{ id: string; first_seen_at: string | null }>((from, to) => {
+      const idChunks: Array<string[] | null> = kindInIds === null ? [null] : Array.from(
+        { length: Math.ceil(kindInIds.length / 100) }, (_, i) => kindInIds!.slice(i * 100, i * 100 + 100),
+      )
+      const [idParts, stages] = await Promise.all([
+        Promise.all(idChunks.map((chunk) => fetchAll<{ id: string; first_seen_at: string | null }>((from, to) => {
           let b = supabaseAdmin.from('contacts').select('id, first_seen_at').eq('client_id', clientId)
           if (filters.stages !== null) b = b.in('stage', filters.stages)
-          if (filters.orExpr !== null) b = b.or(filters.orExpr)
-          if (kindInIds !== null) b = b.in('id', kindInIds)
+          if (chunk !== null) b = b.in('id', chunk)
           if (kindNotInIds !== null && kindNotInIds.length > 0) {
             b = b.not('id', 'in', `(${kindNotInIds.join(',')})`)
           }
@@ -635,7 +683,7 @@ async function getPaged(
           if (assigneeFilter?.kind === 'null') b = b.is('assigned_to', null)
           else if (assigneeFilter?.kind === 'eq') b = b.eq('assigned_to', assigneeFilter.email)
           return b.order('id', { ascending: true }).range(from, to)
-        }),
+        }))),
         fetchAll<StageRow>((from, to) =>
           supabaseAdmin
             .from('client_pipeline_stages')
@@ -645,6 +693,7 @@ async function getPaged(
             .range(from, to),
         ),
       ])
+      const idRows = idParts.flat()
 
       const orderedIds = await orderContactIdsByLatestTouch({
         contacts: idRows.map((r) => ({ id: r.id, firstSeenAt: r.first_seen_at })),
@@ -723,33 +772,63 @@ async function getPaged(
  * CTS 量级约 5k 行 / 1.4MB，跟今天页每次打开读的量相同。真要收窄得按 100 个
  * contact_id 一批走 `.in()`（PostgREST URL 长度限制），留作后续一轮。
  */
-async function getPriority(clientId: string, query: ListQuery, viewerEmail: string | null): Promise<NextResponse> {
+async function getPriority(clientId: string, query: ListQuery, viewerEmail: string | null, timer: StepTimer): Promise<NextResponse> {
   let contacts: ContactRow[]
   let touches: TouchRow[]
   let stageRows: StageRow[]
   let briefs: BriefByContact
   let leadsConfig: unknown = null
-  try {
-    const filters = contactFilterParams(query)
-    ;[contacts, touches, stageRows, briefs, leadsConfig] = await Promise.all([
+  let clientCountry = ''
+  let allNoteContacts: Array<{ id: string; display_name: string | null; primary_email: string | null }> | null
+  // Enrichment reads the same tenant-wide inputs regardless of the filtered contact list.
+  // Start it with the other reads instead of waiting for all of them to finish.
+  // Request-local only: both consumers use this client's same conversation rows.
+  const sharedConversations = loadAllEnrichmentConversations(supabaseAdmin, clientId)
+  sharedConversations.catch(() => undefined)
+  const filters = contactFilterParams(query)
+  const contactsRead = fetchAll<ContactRow>((from, to) => {
+    let b = supabaseAdmin.from('contacts').select(PAGE_CONTACT_COLUMNS).eq('client_id', clientId)
+    if (filters.stages !== null) b = b.in('stage', filters.stages)
+    if (filters.orExpr !== null) b = b.or(filters.orExpr)
+    return b.order('id', { ascending: true }).range(from, to)
+  })
+  // The lookup panel stays useful while the main queue is filtered by stage.
+  // Fetch minimal tenant-scoped identity fields in parallel only for that case.
+  const noteContactsRead = query.stages.length > 0 && query.q === null
+    ? fetchAll<{ id: string; display_name: string | null; primary_email: string | null }>((from, to) =>
+        supabaseAdmin.from('contacts').select('id, display_name, primary_email')
+          .eq('client_id', clientId).order('id', { ascending: true }).range(from, to))
+    : Promise.resolve(null)
+  const selectedContacts = query.q === null ? contactsRead : (async () => {
+    const [primary, identities] = await Promise.all([
+      contactsRead,
+      searchIdentityContactIds(clientId, query.q!),
+    ])
+    const ids = identities
+    const parts = await Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) =>
       fetchAll<ContactRow>((from, to) => {
-        let b = supabaseAdmin
-          .from('contacts')
-          .select(PAGE_CONTACT_COLUMNS)
-          .eq('client_id', clientId)
+        let b = supabaseAdmin.from('contacts').select(PAGE_CONTACT_COLUMNS).eq('client_id', clientId).in('id', ids.slice(i * 100, i * 100 + 100))
         if (filters.stages !== null) b = b.in('stage', filters.stages)
-        if (filters.orExpr !== null) b = b.or(filters.orExpr)
         return b.order('id', { ascending: true }).range(from, to)
       }),
-      fetchAll<TouchRow>((from, to) =>
-        supabaseAdmin
-          .from('contact_touchpoints')
-          .select('id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source')
-          .eq('client_id', clientId)
-          .order('occurred_at', { ascending: false })
-          .order('id', { ascending: false })
-          .range(from, to),
-      ),
+    ))
+    return [...new Map([...primary, ...parts.flat()].map((row) => [row.id, row])).values()].sort((a, b) => a.id.localeCompare(b.id))
+  })()
+  selectedContacts.catch(() => undefined)
+  const enrichmentInputs = query.q === null
+    ? loadEnrichmentInputs(supabaseAdmin, clientId, undefined, sharedConversations)
+    : selectedContacts.then((rows) => loadEnrichmentInputs(supabaseAdmin, clientId, rows.map((row) => row.id)))
+  enrichmentInputs.catch(() => undefined)
+  try {
+    ;[contacts, touches, stageRows, briefs, { leadsConfig, country: clientCountry }, allNoteContacts] = await Promise.all([
+      selectedContacts,
+      // Summary is not consumed by the priority calculation or the list row.
+      // Keep raw and metadata: they affect follow-up and do-not-contact rules.
+      query.q !== null ? selectedContacts.then(async (rows) => {
+        const ids = rows.map((row) => row.id)
+        const parts = await Promise.all(Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) => fetchTouchesFor(clientId, ids.slice(i * 100, i * 100 + 100))))
+        return parts.flat().map((row) => ({ ...row, summary: null }))
+      }) : loadPriorityTouchpoints(supabaseAdmin, clientId),
       fetchAll<StageRow>((from, to) =>
         supabaseAdmin
           .from('client_pipeline_stages')
@@ -758,13 +837,17 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
           .order('sort_order', { ascending: true })
           .range(from, to),
       ),
-      loadLatestBriefByContact(clientId),
+      loadLatestBriefByContact(clientId, sharedConversations),
       supabaseAdmin
         .from('clients')
-        .select('leads_config')
+        .select('leads_config, country')
         .eq('id', clientId)
         .maybeSingle()
-        .then((r) => (r.data as { leads_config: unknown } | null)?.leads_config ?? null),
+        .then((r) => {
+          const d = r.data as { leads_config: unknown; country: string | null } | null
+          return { leadsConfig: d?.leads_config ?? null, country: d?.country ?? '' }
+        }),
+      noteContactsRead,
     ])
   } catch (err) {
     return NextResponse.json(
@@ -772,6 +855,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       { status: 500 },
     )
   }
+  timer.step('priority_reads')
 
   // 系统账号（WhatsApp Business 等）不是客人，不进「智能」视图的任何一栏。
   contacts = contacts.filter((c) => !isSystemAccountName(c.display_name))
@@ -779,8 +863,17 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   // 页一致，不进两张名单（2026-09 CTS 老板：「contact 里面怎么还有工作人员？」）。平铺名单不动（见 ListQuery.kind 的说明）。
   const ownRules = readDomainRules(leadsConfig)
   contacts = contacts.filter((c) => contactKindOf(c.primary_email ? [c.primary_email] : [], ownRules) !== 'staff')
+  const noteContacts = allNoteContacts
+    ? allNoteContacts.filter((c) => !isSystemAccountName(c.display_name) &&
+        contactKindOf(c.primary_email ? [c.primary_email] : [], ownRules) !== 'staff')
+    : contacts
+  // 同行（旅行社 / 分销）：不在「今天先联系」散客名单里——挪到先放着并写明原因，仍可在全部客人里点「同行」筛出。
+  const tradeIds = new Set(
+    contacts.filter((c) => contactKindOf(c.primary_email ? [c.primary_email] : [], ownRules) === 'trade').map((c) => c.id),
+  )
 
-  const enrichedPri = await enrichForDisplay(clientId, contacts, touches, false)
+  const enrichedPri = await enrichForDisplay(clientId, contacts, touches, false, enrichmentInputs)
+  timer.step('priority_enrich')
   contacts = enrichedPri.contacts
   touches = enrichedPri.touches
 
@@ -792,35 +885,88 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     byContact.set(t.contact_id, list)
   }
 
+  // 「今天」按客户所在地算（同 today 路由）：员工今天记的笔记 / 打的电话不许把人从
+  // 「今天要联系」挪走 —— 2026-10-30 CTS 员工记完笔记人掉进「先放着」，以为没存上。
+  // 读不到国家就按 NZ，猜错最多差两小时。
+  const timeZone = clientCountry.toUpperCase() === 'AU' ? 'Australia/Sydney' : 'Pacific/Auckland'
+  const nowPri = new Date()
+  // 今天被推到成交 / 停止营销的人也要就地变灰（和今天要联系页同一份读取）。
+  const stageSuppressedTodayIds = await loadStageSuppressedTodayIds(
+    clientId,
+    localDayStartMs(nowPri, timeZone),
+    (k) => stageMeta.get(k)?.suppressed ?? false,
+  )
+
   const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
   const { sections, focus } = buildPriorityView(
     {
       contacts,
       touchpoints: touches,
       stageMeta,
-      now: new Date(),
+      now: nowPri,
       perPage: query.perPage,
       open: query.open,
       page: query.sectionPage,
       focusContactId: query.focusContactId,
       briefs,
+      tradeIds,
+      dayStartMs: localDayStartMs(nowPri, timeZone),
+      touchedToday: contactsTouchedToday(touches, nowPri, timeZone),
+      stageSuppressedTodayIds,
     },
     (row, ranked) => {
       const tps = byContact.get(row.id) ?? []
       const built = responseRowFor(row as ContactRow, tps, stageMeta, buildContactModel(row, tps, stageMeta), ranked.seg, briefs.get(row.id) ?? null)
       customPerContact.push(built.custom)
       built.row.sources = enrichedPri.sources.get(row.id) ?? []
+      // 今天已处理：页面就地变灰打勾，位置不动。
+      built.row.handled = ranked.handled === true
+      built.row.handledWhy = ranked.handledWhy ?? null
+      if (ranked.handled === true) {
+        // 已处理的卡片不能同时又写着「记下一步」（魏征复审 P2-b）：灰色 + 打勾那句话说明今天做了什么。
+        // （afterCall 提醒本身由 dayRow 在员工记完笔记后撤掉；没记笔记时 dayRow 不会把卡片标成已处理。）
+        built.row.nextAction = handledNextAction(built.row.nextAction as NextAction, ranked.handledWhy ?? '今天已处理')
+      }
       return built.row
     },
   )
 
-  return NextResponse.json({
+  timer.step('priority_assemble')
+  const recentNotes = query.q === null ? recentStaffNotes(noteContacts, touches, new Date()) : []
+  if (recentNotes.length > 0) {
+    // The main priority scan intentionally omits summary for every touchpoint.
+    // Read only the selected, latest staff note IDs so the inline card shows
+    // that exact note's summary, even when no conversation brief exists.
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('contact_touchpoints')
+        .select('id, summary')
+        .eq('client_id', clientId)
+        .in('id', recentNotes.map((note) => note.touchpointId))
+      if (!error && data) {
+        const summaries = new Map(data.map((row) => [row.id, row.summary]))
+        for (const note of recentNotes) note.aiSummary = summaries.get(note.touchpointId) ?? null
+      }
+    } catch {
+      // A missing summary must not hide the staff note or the contact list.
+    }
+  }
+  timer.step('priority_note_summaries')
+  const res = NextResponse.json({
     view: 'priority',
     focus,
     columns: visibleCustomColumns(customPerContact),
+    stages: stageRows.map((stage) => ({
+      stageKey: stage.stage_key,
+      label: stage.label,
+      marketingAction: isMarketingAction(stage.marketing_action) ? stage.marketing_action : 'suppress',
+    })),
     sections,
+    recentNotes,
     viewerEmail,
   })
+  res.headers.set('Server-Timing', timer.header())
+  return res
 }
 
 /**
@@ -852,7 +998,7 @@ export async function GET(
   }
   if (parsed.ids !== undefined) return getByIds(clientId, parsed.ids, viewerEmail, timer)
   if (parsed.paged) return getPaged(clientId, parsed, viewerEmail, timer)
-  if (parsed.view === 'priority') return getPriority(clientId, parsed, viewerEmail)
+  if (parsed.view === 'priority') return getPriority(clientId, parsed, viewerEmail, timer)
 
   // 必须分页拉全 —— Supabase 单次查询硬顶 1000 行，`.limit(20000)` 会被静默
   // 砍掉且不报错。实测 CTS：库里 1271 条触点只回 1000 条；配合 order desc，

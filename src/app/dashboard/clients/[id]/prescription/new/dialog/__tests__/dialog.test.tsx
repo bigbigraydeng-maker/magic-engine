@@ -87,6 +87,36 @@ describe('处方对话框', () => {
     expect(screen.queryByText(/我刚才说/)).not.toBeInTheDocument()
   })
 
+  it('puts the plan result on the agree reply', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'PATCH') {
+        return json({
+          success: true,
+          plan_approval: { text: '计划草稿有 1 项必过检查没有全绿，所以没有自动批准，只批准了处方。已出确认卡，请负责人在卡上看过再决定。' },
+        })
+      }
+      if (url.includes('zhangqian/latest')) return json({ discovery: { id: 'd1', confirmed_at: '2026-01-01' } })
+      if (url.includes('active-list')) return json({ goals: [{ id: 'g1', title: '十一月线索' }] })
+      if (url.includes('latest-draft')) {
+        return json({
+          prescription: {
+            id: 'p1', status: 'draft', content: draftContent, agent_name: 'huatuo',
+            intake: { business_goal: '300 条线索', timeline_urgency: 'short_term', monthly_budget_aud: 3700, budget_currency: 'NZD', priority_dimensions: [], notes: null },
+          },
+        })
+      }
+      return json({ error: 'unexpected' }, 500)
+    }))
+
+    render(<PrescriptionDialog clientId="c1" prescriptionId={null} goalId={null} supplementOf={null} reviseOf={null} />)
+    fireEvent.click(await screen.findByRole('button', { name: '同意' }))
+    fireEvent.click(screen.getByRole('button', { name: '确定批准' }))
+    expect(await screen.findByText(/这一步不是开始花钱/)).toBeInTheDocument()
+    expect(screen.getByText(/没有自动批准/)).toBeInTheDocument()
+    expect(screen.getByText(/已出确认卡/)).toBeInTheDocument()
+  })
+
   it('shows a failure, not "writing", when a prescription that was still writing on open fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo) => {
       const url = String(input)

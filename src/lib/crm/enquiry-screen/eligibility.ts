@@ -10,7 +10,7 @@
  * 第一个不满足的条件就是 `why`，调用方拿它写干跑报告。
  */
 
-import { isAutomatedActor, ENQUIRY_SCREEN_ACTOR } from '@/lib/crm/actors'
+import { isAutomatedActor, ENQUIRY_SCREEN_ACTOR, ENQUIRY_SCREEN_ROLLBACK_ACTOR } from '@/lib/crm/actors'
 import {
   NOT_ENQUIRY_STAGE_KEY,
   SCREENABLE_INBOUND_SOURCES,
@@ -112,6 +112,10 @@ export function checkEligibility(input: EligibilityInput): Eligibility {
   if (touches.some((t) => t.direction === 'outbound')) return { eligible: false, why: 'has_outbound' }
   if (contact.hasPhone) return { eligible: false, why: 'has_phone' }
   if (!touches.every(isScreenableInbound)) return { eligible: false, why: 'non_screenable_touch' }
+  // 被回退过的人永久不再参加筛选：回退身份是机器（`ai:`），不挡的话下一轮会把他再判走一次。
+  if (events.some((e) => e.changedBy === ENQUIRY_SCREEN_ROLLBACK_ACTOR)) {
+    return { eligible: false, why: 'rolled_back' }
+  }
   if (events.some((e) => !isAutomatedActor(e.changedBy))) {
     return { eligible: false, why: 'human_stage_change' }
   }

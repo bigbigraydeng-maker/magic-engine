@@ -222,6 +222,7 @@ export async function applyQualityReject(
     reopened_from: id,
     review_checklist_failed_items: checkedHuman.items.filter(item => item.outcome === 'FAIL').map(item => item.key),
   }
+  delete newBrief.weekly_pack
   if (musicOverride) {
     newBrief.remotion = musicOverride.remotion
     newBrief.review_overrides = {

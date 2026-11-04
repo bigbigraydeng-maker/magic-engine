@@ -22,6 +22,8 @@ let searchParamsValue = new URLSearchParams()
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84' }),
   useSearchParams: () => searchParamsValue,
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => '/dashboard/clients/d5c98811-1c1d-4ded-bdf0-4cefec6afb84/ads-health',
 }))
 
 vi.mock('next/link', () => ({
@@ -483,6 +485,68 @@ describe('「等你点头」标签', () => {
     expect(body).toEqual({ resolution: 'reject', expectedDecisionId: 'dec-1', reason: '这个组我要留着' })
   })
 
+  it('批准暂停后顶部「广告下一步」待批行会重新拉取', async () => {
+    let nextStepLoads = 0
+    let autoPauseItems = 1
+    const fn = vi.fn((url: string, init?: RequestInit) => {
+      if (url.includes('/ad-health/next-step')) {
+        nextStepLoads += 1
+        const pending = nextStepLoads === 1
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            view: {
+              healthRedLights: { kind: 'empty' },
+              pendingActions: pending
+                ? {
+                  kind: 'ok',
+                  data: {
+                    count: 1,
+                    items: [{ summary: '待批暂停', href: '/dashboard/clients/x/ads-health?tab=approvals' }],
+                  },
+                }
+                : { kind: 'empty' },
+              prescription: { kind: 'empty' },
+            },
+          }),
+        })
+      }
+      if (url.includes('/ad-health/auto-pause/') && init?.method === 'POST') {
+        autoPauseItems = 0
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ok: true, kind: 'done' }) })
+      }
+      if (url.includes('/ad-health/auto-pause')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            items: autoPauseItems > 0
+              ? [{
+                runId: 'run-1',
+                expectedDecisionId: 'dec-1',
+                adsetId: '123',
+                adsetName: '物流组',
+                adAccountId: 'act_1',
+                diagnosisTitle: '花钱没结果',
+                insightDate: '2026-10-17',
+                createdAt: '2026-10-17T00:00:00Z',
+              }]
+              : [],
+            hasMore: false,
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(respond([])) })
+    })
+    vi.stubGlobal('fetch', fn)
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getByText('待批暂停')).toBeTruthy())
+    await userEvent.click(await screen.findByText('等你点头'))
+    await waitFor(() => expect(screen.getByText('物流组', { exact: false })).toBeTruthy())
+    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+    await waitFor(() => expect(nextStepLoads).toBeGreaterThanOrEqual(2))
+    await waitFor(() => expect(screen.getByText('目前没有等人批的广告动作')).toBeTruthy())
+  })
+
 
   it('网址带 ?tab=approvals 时直接落在这个标签上', async () => {
     searchParamsValue = new URLSearchParams('tab=approvals')
@@ -503,7 +567,16 @@ describe('「等你点头」标签', () => {
    */
   it('?tab= 给了认不出的值，落回「今天看这里」而不是空白', async () => {
     searchParamsValue = new URLSearchParams('tab=nonsense')
-    vi.stubGlobal('fetch', mockFetch({ '/ad-health': respond([]) }))
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': respond([]),
+      '/ad-health/next-step': {
+        view: {
+          healthRedLights: { kind: 'staff_only' },
+          pendingActions: { kind: 'empty' },
+          prescription: { kind: 'empty' },
+        },
+      },
+    }))
     render(<AdsHealthPage />)
 
     // 断言「哪个标签是选中态」，而不是断言某块面板的文字 ——
@@ -512,5 +585,65 @@ describe('「等你点头」标签', () => {
     expect(active.className).toContain('border-gray-800')
     expect(screen.getByTitle('这个客户等人点头的广告动作').className).toContain('border-transparent')
     expect(screen.queryByText(/系统发现这些广告组连续花钱没结果/)).toBeNull()
+  })
+
+  it('searchParams 的 ?tab= 变化后标签状态跟着更新（合并卡 deep link 回归）', async () => {
+    searchParamsValue = new URLSearchParams('tab=today')
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health': respond([]),
+      '/ad-health/next-step': {
+        view: {
+          healthRedLights: { kind: 'staff_only' },
+          pendingActions: { kind: 'empty' },
+          prescription: { kind: 'empty' },
+        },
+      },
+    }))
+    const { rerender } = render(<AdsHealthPage />)
+    await screen.findByTitle('三句话：池子、频率、今天调什么')
+
+    searchParamsValue = new URLSearchParams('tab=settings')
+    rerender(<AdsHealthPage />)
+
+    await waitFor(() => {
+      expect(screen.getByTitle('每天预算上限、自动化、可投视频').className).toContain('border-gray-800')
+    })
+  })
+})
+
+describe('每日广告成绩单（第 1 刀 ②）', () => {
+  const SCORECARD = {
+    window: { start: '2026-10-26', end: '2026-11-01' }, completeness: 'complete', accountsSkipped: [],
+    units: [{ adAccountId: 'act_7274', level: 'adset', id: 'A', name: '组A', role: 'acquisition', spend: 398.12, resultType: 'lead', results: 67, costPerResult: 5.94, targetCost: 11, vsTarget: 'at_or_below', sampleGap: 0, separate: null }],
+    budget: [{ adAccountId: 'act_7274', role: 'acquisition', state: 'not_comparable', reason: 'single_unit', threshold: 0.15, fdrQ: 0.1, maxGap: null, under: [], over: [], overHeld: [], thin: [], notLikeForLike: [] }],
+  }
+  const staffGrowth = { date: '2026-11-01', data_completeness: 'complete', goal_pace: null, payload: { headline: 'h', scorecard: SCORECARD } }
+
+  it('内部员工在「今天看这里」看到成绩单', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: staffGrowth } }))
+    render(<AdsHealthPage />)
+    expect(await screen.findByText('每个组这 7 天的成绩')).toBeTruthy()
+    expect(screen.getByText('获客：只有一个组在花钱，没得比')).toBeTruthy()
+  })
+
+  it('客户账号（客户版接口）看不到成绩单', async () => {
+    const clientGrowth = { viewer: 'client', date: '2026-11-01', goal: null, goal_pace: null, adCards: null, adNote: null }
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: clientGrowth } }))
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getByText(/过去 7 天花了/)).toBeTruthy())
+    expect(screen.queryByText('每个组这 7 天的成绩')).toBeNull()
+  })
+
+  it('成绩单带「合格客人」那一块时，员工在下面看到它', async () => {
+    const qualified = { window: { start: '2026-10-04', end: '2026-11-02' }, observeDays: 14, configured: false, staleStageKeys: [], rows: [], unattributedQualified: 0 }
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h', scorecard: { ...SCORECARD, qualified } } } } }))
+    render(<AdsHealthPage />)
+    expect(await screen.findByText('近 30 天带来的客人质量')).toBeTruthy()
+  })
+
+  it('老的巡察行没有成绩单 → 说还没有，不画空表', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h' } } } }))
+    render(<AdsHealthPage />)
+    expect(await screen.findByText('今天还没有成绩单：每天的广告巡察跑过一次才会出现。')).toBeTruthy()
   })
 })

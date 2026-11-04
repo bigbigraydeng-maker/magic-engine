@@ -23,6 +23,18 @@ import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-pa
 import { approveDraftContentGate } from './approve-gate'
 import { isStaleGenerating, STALE_GENERATING_MESSAGE } from '@/lib/huatuo/prescription-status'
 import { planDraftCardLine, planDraftCardView } from '@/lib/marketing-plan/promo/plan-draft-card'
+import {
+  approvePlanWithAgree,
+  draftPlanIdOf,
+  failedPlanAgree,
+  noPlanDraftOutcome,
+  planAgreeFromMeta,
+  storePlanAgreeOutcome,
+  type PlanAgreeOutcome,
+} from '@/lib/marketing-plan/promo/plan-draft-agree'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
+import { clickerFromSession } from '@/lib/confirmation-card'
+import { createKernel } from '@/lib/kernel'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
 // 关键：禁用 Next.js 路由缓存，否则华佗异步 polling 拿不到刚写入的 content。
@@ -66,6 +78,9 @@ export async function GET(
         (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
       ),
       plan_draft: planDraftCardView(
+        (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
+      ),
+      plan_approval: planAgreeFromMeta(
         (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
       ),
     }, {
@@ -118,6 +133,45 @@ async function promotionSignalAfterApproval(
     return await emitPromotionSignal({ clientId, prescriptionId, goalId, content })
   } catch (error) {
     return { ok: false, reason: readableError(error) }
+  }
+}
+
+/**
+ * The plan draft rides along with "agree" only when every hard check is green.
+ * Any failure stays in the returned outcome and never fails the prescription agree.
+ */
+async function planAgreeAfterApproval(
+  req: NextRequest,
+  clientId: string,
+  prescriptionId: string,
+  access: Extract<Awaited<ReturnType<typeof requirePlanApproverAccess>>, { ok: true }>,
+  landedRow: Prescription,
+): Promise<PlanAgreeOutcome> {
+  const meta = (landedRow as Prescription & { generation_meta?: unknown }).generation_meta
+  const planId = draftPlanIdOf(meta)
+  if (!planId) return noPlanDraftOutcome()
+  try {
+    // An agent bearer key or an agent-marked request is never the approver.
+    const agentDenied = await rejectAgentAdsBearer(req, { clientId, action: 'approve', resourceId: planId })
+    const clicker = clickerFromSession({
+      email: access.user.email ?? '',
+      role: access.role,
+      allowedClientId: access.allowedClientId,
+      clientId,
+      agentMarked: agentDenied !== null || req.headers.get('x-me-actor') === 'agent',
+    })
+    const outcome = await approvePlanWithAgree({
+      clientId,
+      generationMeta: meta,
+      approvedBy: access.user.email ?? '',
+      clicker,
+      deps: createKernel(supabaseAdmin),
+    })
+    await storePlanAgreeOutcome(supabaseAdmin, clientId, prescriptionId, outcome)
+    return outcome
+  } catch (err: unknown) {
+    console.warn('[prescription PATCH] plan approval step failed', err instanceof Error ? err.name : 'error')
+    return failedPlanAgree(planId)
   }
 }
 
@@ -225,7 +279,13 @@ export async function PATCH(
         return NextResponse.json({ success: false, error: 'Failed to update prescription' }, { status: 500 })
       }
       const promotionSignal = await promotionSignalAfterApproval(clientId, pId, current.goal_id, current.content)
-      return NextResponse.json({ success: true, prescription: landedRow, promotion_signal: promotionSignal })
+      const planApproval = await planAgreeAfterApproval(req, clientId, pId, access, landedRow)
+      return NextResponse.json({
+        success: true,
+        prescription: landedRow,
+        promotion_signal: promotionSignal,
+        plan_approval: planApproval,
+      })
     }
 
     // Build update payload（走到这儿只剩 rejected）

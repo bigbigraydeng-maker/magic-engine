@@ -22,11 +22,13 @@ import {
 import type { AttributionItemKind } from './attribution-items'
 import type { ClientRosterItemKind } from './client-roster'
 import type { DailyPlanMeasurementItemKind } from './daily-plan-measurement-items'
+import type { SocialReadbackItemKind } from './social-readback-items'
 import type { EmailReplyItemKind } from './email-reply-items'
 import type { BindingRequestItemKind } from './binding-request-items'
 import type { PageBindingItemKind } from './page-binding-items'
 import type { CommentScopeTodoKind } from './comment-scope-items'
 import type { CommentReplyScopeTodoKind } from './comment-reply-scope-items'
+import type { CommentHumanTodoKind } from './comment-human-items'
 import type { CommentAutoreplyRunFailingTodo } from './comment-autoreply-run-failing-items'
 import type { MetaTokenHealthKind } from './meta-token-health-items'
 import type { DeployHealthItemKind } from './deploy-health-items'
@@ -44,6 +46,7 @@ import type { AdsAccountStatusItemKind } from './ads-account-status-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
+import type { BaozhengItemKind } from './baozheng-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
 import type { ToolLeadItemKind } from './tool-lead-items'
 import type { PmKind } from './five-kinds'
@@ -63,6 +66,9 @@ import type { PmKind } from './five-kinds'
 //   我们的探活 fetch 很可能拿到 403 → 整条被当坏链接丢掉。而这两条恰恰是
 //   「全站 AI 在空跑」和「这套告警自己瞎了」—— 宁可让人自己找入口，也不能让它静默消失。
 export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
+  // 标题效果判定的两条欠账：链接是要登录的后台页，探活会判坏链接——不能因此静默消失（2026-10-29）。
+  'seo_rank_verdict_overdue',
+  'seo_rank_baseline_missing',
   // diagnostic_synthesis_failing：链接是需要登录的后台页，探活大概率判成坏链接 —— 这条正是要消灭「静默」的，不能被探活悄悄丢掉（魏征 2026-10-18）。
   'diagnostic_synthesis_failing',
   'cross_client_leak',
@@ -102,6 +108,11 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'promo_plan_watch',
   'promo_plan_watch_broken',
   'plan_draft_auto_failed',
+  // 整包批准：链接是要登录的后台页，探活多半判成坏链接。没人看见 = 这一周不会批。
+  'week_pack_needs_approval',
+  'week_pack_items_held',
+  // 社媒每周出稿：链接是要登录的后台页，探活多半判成坏链接。没人看见 = 下周的卡是空的。
+  'social_weekly_loop_needs_human',
   // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
   // 这条里还有「检查自己没跑成」，绝不能因为链接问题静默消失。
   'ads_tracking_preflight_fix',
@@ -114,6 +125,9 @@ export const META_PENDING_STALE_DAYS = 3
 export const CRAWL_STALE_DAYS = CRAWL_FRESH_DAYS
 
 export type ManualItemKind =
+  /** 已上线标题改动超期没有效果判定 / 上线时没记改前名次 —— 开发欠账（2026-10-29）。 */
+  | 'seo_rank_verdict_overdue'
+  | 'seo_rank_baseline_missing'
   /** 体检的 AI 文字叙事没写成（保存失败/模型失败）—— 开发欠账，不用 PM 动手（2026-10-18）。 */
   | 'diagnostic_synthesis_failing'
   | 'promo_plan_watch'
@@ -227,6 +241,12 @@ export type ManualItemKind =
   | 'story_unknown_outcome'
   /** Story 自动发布：已授权的周包到点了，却没有任何发布 / 演练记录 —— 发布器可能没在跑 */
   | 'story_unarmed'
+  /** 下一周的社媒整包该批了，或确认卡快过期 */
+  | 'week_pack_needs_approval'
+  /** 整包里有条目被单独拦住，没有整包撤回 */
+  | 'week_pack_items_held'
+  /** 社媒每周出稿：没东西可排 / 全被刷掉 / 读不到团目录 / 马良没审（读写库模式的回执） */
+  | 'social_weekly_loop_needs_human'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
@@ -257,6 +277,8 @@ export type ManualItemKind =
   | ToolLeadItemKind
   | CommentScopeTodoKind
   | CommentReplyScopeTodoKind
+  /** 主页评论分流后仍要 FDE 公开回复（不含评论原文） */
+  | CommentHumanTodoKind
   /** 评论自动回复连续多轮整轮没扫完 —— 以前被记成「完成」，约一个月没人发现 */
   | CommentAutoreplyRunFailingTodo['kind']
   /** 写在 Render 里的 Meta 钥匙被 Meta 作废（错误码 190）—— 只有人能重新授权 */
@@ -298,6 +320,8 @@ export type ManualItemKind =
   | 'conversion_capi_token_dead'
   /** D3 诊断建议暂停广告组，Kernel 待批准——PM 不点头不暂停 */
   | 'ads_auto_pause_pending'
+  /** D3 暂停建议被内核或安全闸拦下，没进「等你点头」，广告照常花钱（2026-11-04） */
+  | 'ads_auto_pause_blocked'
   /** AI 全自动审核发现异常，已经自动暂停发送（PM 拍板 2026-09-15："要有异常刹车"） */
   | 'ai_auto_review_circuit_breaker'
   /** AI 客服回复草稿写好了，等人批准发送（issue #1589） */
@@ -319,6 +343,8 @@ export type ManualItemKind =
   | PageBindingItemKind
   /** 排期发的 Facebook 帖子发出去了，但一直拿不到帖子编号 —— 成绩收不回来 */
   | DailyPlanMeasurementItemKind
+  /** 读回链拒绝开始记成绩（草稿 / 时间对不上 / 多条流量记录）。开关关掉时不会产出。 */
+  | SocialReadbackItemKind
   /** 私信客服健康心跳查出问题（issue #1587）：消息量骤降 / 验证器拦截率过高 / 退订登记写入失败 */
   | 'conversation_health_alert'
   /** 同一个心跳查出「AI 起草回复一直报错」—— 这条只有我们能修（开发的活） */
@@ -336,6 +362,7 @@ export type ManualItemKind =
   | MaliangItemKind
   /** 李白 · 文案溯源：「未证实」句待改 / 检不了 / 没检；提示词库月检疑似过期（只报告不改） */
   | LibaiItemKind
+  | BaozhengItemKind
   /** 司马迁 · 口碑周巡：每周四起草的 Google 评价回复草稿（一律没发）/ 本周没巡成 */
   | SimaqianItemKind
   /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */

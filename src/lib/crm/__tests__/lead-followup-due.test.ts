@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest'
 import {
   pickLeadFollowupDue,
   isHumanFollowup,
+  rateLeadFollowupWithinSla,
   findLeadFollowupDue,
   countLeadFollowupBacklog,
   loadLeadCandidates,
@@ -349,6 +350,27 @@ describe('取数层 · countLeadFollowupBacklog', () => {
       client_pipeline_stages: [],
     })
     expect((await countLeadFollowupBacklog(db, CLIENT, NOW)).backlog).toBe(0)
+  })
+})
+
+describe('rateLeadFollowupWithinSla', () => {
+  it('24 小时跟进率只认真人跟进，Messenger 不算', () => {
+    const human = candidate({ contactId: 'a', touches: [touch({ occurredAt: iso(2 * DAY - 2 * HOUR) })] })
+    const messenger = candidate({
+      contactId: 'b',
+      touches: [touch({ channel: 'messenger', source: 'messenger', occurredAt: iso(2 * DAY - 2 * HOUR) })],
+    })
+    expect(rateLeadFollowupWithinSla([human, messenger], NOW)).toEqual({
+      scored: 2,
+      followedWithinSla: 1,
+      rate: 0.5,
+    })
+  })
+
+  it('跟进率结果里没有客人姓名；挑出来的条目带广告组编号', () => {
+    const picked = pickLeadFollowupDue([candidate({ adsetId: 'set-1' })], NOW, { maxPerClient: 0 })
+    expect(picked.items[0]?.adsetId).toBe('set-1')
+    expect(JSON.stringify(rateLeadFollowupWithinSla([candidate({ adsetId: 'set-1' })], NOW))).not.toContain('王女士')
   })
 })
 
