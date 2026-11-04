@@ -31,17 +31,18 @@ const WHAT: Record<string, string> = {
 const HOW: Record<string, string> = {
   stale: '打开客户社媒页的周卡区，在「已授权、还没公开」里看原因：内容对的就重新预览再授权，不对就撤回并改片。',
   missed: '打开客户社媒页的周卡区把这条撤回；要再发，等下一张周卡排新日子后再批。',
-  overdue: '先到 Facebook 主页看这条有没有公开；没公开就在客户社媒页的周卡区把它撤回，等下一张周卡重排。',
-  comment: '到 Facebook 这条 Reel 下面手动贴订团链接（链接在视频工厂这条工单的首评文字里）。',
+  overdue: '先到 Facebook 主页看这条有没有公开；没公开就在客户社媒页的周卡区把它撤回（显示「正在发」的等 10 分钟后定时任务会自己接手），等下一张周卡重排。',
+  comment: '打开视频工厂找到这条 Reel，点「补发首评」（只补评论，不会再发一次）；补发成功后这条待办自己消失。',
   failed: '打开客户社媒页的周卡区看失败原因；改好后重新预览再授权。',
   unknown: '先到 Facebook 主页看这条有没有公开：公开了就在周卡区重新预览（会只同步记录）；没公开就撤回再授权。',
 }
 
 /** Which to-do (if any) a grant needs. Waiting past its day means no run reached it. */
-function needsPerson(grant: ScheduledGrant, today: string): string | null {
+function needsPerson(grant: ScheduledGrant, today: string, commentStillFailed: boolean): string | null {
   if (NEEDS_PERSON.includes(grant.status)) return grant.status
   if (WAITING.includes(grant.status) && grant.publish_on < today) return 'overdue'
-  if (grant.status === 'consumed' && grant.reason === FIRST_COMMENT_FAILED) return 'comment'
+  // Reads the live first-comment status, so a successful 补发首评 clears this to-do.
+  if (grant.status === 'consumed' && grant.reason === FIRST_COMMENT_FAILED && commentStillFailed) return 'comment'
   return null
 }
 
@@ -58,7 +59,8 @@ export function buildReelScheduledItems(
   const out: ManualItem[] = []
   for (const row of rows) {
     const grant = readGrant(asRecord(row.payload))
-    const which = grant ? needsPerson(grant, today) : null
+    const auth = asRecord(asRecord(row.payload).promote_authorization)
+    const which = grant ? needsPerson(grant, today, auth.first_comment_status === 'failed') : null
     if (!grant || !which) continue
     out.push({
       kind: REEL_SCHEDULED_TODO_KIND,
@@ -66,7 +68,7 @@ export function buildReelScheduledItems(
       client_name: nameOf(row.client_id),
       what: `${WHAT[which]}（原定 ${grant.publish_on}）`,
       how: HOW[which],
-      href: `${APP_BASE}/dashboard/clients/${encodeURIComponent(row.client_id)}`,
+      href: which === 'comment' ? `${APP_BASE}/dashboard/factory` : `${APP_BASE}/dashboard/clients/${encodeURIComponent(row.client_id)}`,
     })
   }
   return out
@@ -80,13 +82,17 @@ export async function pushReelScheduledItems(
   try {
     const today = nzToday(new Date())
     const base = () => supabase.from('flywheel_actions').select('client_id, payload').eq('action_type', 'factory_reel_publish')
-    const [open, commented] = await Promise.all([
-      base().in('payload->scheduled_go_public->>status', [...NEEDS_PERSON, ...WAITING]).limit(200),
-      base().eq('payload->scheduled_go_public->>status', 'consumed').eq('payload->scheduled_go_public->>reason', FIRST_COMMENT_FAILED).limit(50),
+    const [open, overdue, commented] = await Promise.all([
+      base().in('payload->scheduled_go_public->>status', [...NEEDS_PERSON]).limit(200),
+      // Waiting grants only matter once their day has passed; future ones must not crowd the limit.
+      base().in('payload->scheduled_go_public->>status', [...WAITING]).lt('payload->scheduled_go_public->>publish_on', today).limit(200),
+      base().eq('payload->scheduled_go_public->>status', 'consumed').eq('payload->scheduled_go_public->>reason', FIRST_COMMENT_FAILED)
+        .eq('payload->promote_authorization->>first_comment_status', 'failed').limit(50),
     ])
     if (open.error) throw new Error(open.error.message)
+    if (overdue.error) throw new Error(overdue.error.message)
     if (commented.error) throw new Error(commented.error.message)
-    const data = [...(open.data ?? []), ...(commented.data ?? [])]
+    const data = [...(open.data ?? []), ...(overdue.data ?? []), ...(commented.data ?? [])]
     const rows = data.filter(
       (r): r is { client_id: string; payload: unknown } => typeof asRecord(r).client_id === 'string',
     )

@@ -73,11 +73,24 @@ async function settleWithoutClaim(
     return result(order.id, 'consumed_manual', 'promoted_by_a_person', false)
   }
   if (isLeaseExpired(grant, deps.now()) && !input.dryRun) {
+    const finished = finishedBeforeInterrupt(order, row)
+    if (finished) {
+      // The earlier attempt got past going public and died before marking the grant: settle, never re-run.
+      await setGrant(deps, row, finished, `${finished}_before_interrupt`)
+      return result(order.id, finished === 'consumed' ? 'synced' : 'unknown', `${finished}_before_interrupt`, finished !== 'consumed')
+    }
     // An earlier attempt died part-way. Re-arm and carry on: the run reads Facebook first, so a reel that did go
     // public is only synced (never published twice), and one that did not is promoted now.
     await setGrant(deps, row, 'armed', 'rearmed_after_interrupt')
   }
   return null
+}
+
+/** consumed = the go-public fully finished; unknown = the reel is public but its bookkeeping did not finish. */
+function finishedBeforeInterrupt(order: PromoteOrder, row: TrafficRow): 'consumed' | 'unknown' | null {
+  if (readAuth(row.payload).status === 'consumed') return 'consumed'
+  const ref = order.published_ref
+  return typeof ref === 'object' && ref !== null && ref['video_state'] === 'PUBLISHED' ? 'unknown' : null
 }
 
 async function claimAndRun(deps: PromoteDeps, order: PromoteOrder, row: TrafficRow, input: ScheduledInput): Promise<ScheduledResult> {
@@ -102,7 +115,7 @@ async function claimAndRun(deps: PromoteDeps, order: PromoteOrder, row: TrafficR
   const done = await executeClaimed(deps, ctx, claimed.payload, requestId)
   if (!done.ok) {
     // Facebook already called = it may be public now: say "unknown", never "still a draft".
-    const called = await platformWasCalled(deps, row)
+    const called = ctx.view.published || (await platformWasCalled(deps, row))
     const status: ScheduledGrantStatus = called ? 'unknown' : 'failed'
     await setGrant(deps, row, status, done.error.slice(0, 200))
     return result(order.id, status, done.error.slice(0, 200), true)
@@ -119,7 +132,8 @@ async function platformWasCalled(deps: PromoteDeps, row: TrafficRow): Promise<bo
   // promote_called_at; a public video whose bookkeeping failed is left as meta_published_db_pending.
   if (fresh === null) return true
   const auth = readAuth(fresh.payload)
-  return typeof auth.promote_called_at === 'string' || auth.status === 'meta_published_db_pending'
+  return typeof auth.promote_called_at === 'string' || typeof auth.published_at === 'string'
+    || auth.status === 'meta_published_db_pending' || fresh.payload['video_state'] === 'PUBLISHED'
 }
 
 /** A gate failed before claiming. Unreadable catalog = try again at the next wake-up; anything else needs a person. */

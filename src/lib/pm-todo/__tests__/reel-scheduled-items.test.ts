@@ -35,11 +35,15 @@ describe('buildReelScheduledItems', () => {
   })
 
   it('published but first comment failed → to-do; published fine → none', () => {
+    const failedComment = { ...grant('consumed', { reason: 'first_comment_failed' }), promote_authorization: { first_comment_status: 'failed' } }
+    const retried = { ...grant('consumed', { reason: 'first_comment_failed' }), promote_authorization: { first_comment_status: 'ok' } }
     const items = buildReelScheduledItems([
-      { client_id: 'c1', payload: grant('consumed', { reason: 'first_comment_failed' }) },
+      { client_id: 'c1', payload: failedComment },
+      { client_id: 'c1', payload: retried },
       { client_id: 'c1', payload: grant('consumed', { reason: 'promoted' }) },
     ], () => 'CTS', '2026-11-12')
     expect(items).toHaveLength(1)
     expect(items[0].what).toContain('订团链接')
+    expect(items[0].href).toContain('/dashboard/factory')
   })
 })

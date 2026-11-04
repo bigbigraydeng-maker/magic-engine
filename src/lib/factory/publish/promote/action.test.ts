@@ -984,6 +984,40 @@ describe('按日公开:批卡授权 → 到日执行', async () => {
     expect(r.needs_person).toBe(true)
   })
 
+  it('中断前其实已全部完成(授权已用)→ 只把授权记成已完成,不重跑、不说「内容变了」', async () => {
+    withPublishOn(DAY)
+    await approve()
+    interrupted()
+    w.row!.payload['promote_authorization'] = { ...auth(), status: 'consumed' }
+    const r = await run()
+    expect(r.outcome).toBe('synced')
+    expect(r.needs_person).toBe(false)
+    expect(grant()?.status).toBe('consumed')
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('中断前工单已记成公开、但收尾没做完 → 结果不明要人核对,不说「内容变了」', async () => {
+    withPublishOn(DAY)
+    await approve()
+    interrupted()
+    const base = deps.store.loadOrder.bind(deps.store)
+    deps = { ...deps, store: { ...deps.store, async loadOrder(id: string) { const o = await base(id); return o ? { ...o, published_ref: { ...o.published_ref, video_state: 'PUBLISHED' } } : o } } }
+    const r = await run()
+    expect(r.outcome).toBe('unknown')
+    expect(grant()?.status).toBe('unknown')
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('Facebook 已公开、流量记录写不进(租约已释放)→ 结果不明,不说「仍是草稿」', async () => {
+    withPublishOn(DAY)
+    await approve()
+    w.failCas = 3
+    const r = await run()
+    expect(w.log).toContain('meta.promote')
+    expect(r.outcome).toBe('unknown')
+    expect(grant()?.status).toBe('unknown')
+  })
+
   it('Facebook 拒绝转公开 → 标失败要人处理', async () => {
     withPublishOn(DAY)
     await approve()
