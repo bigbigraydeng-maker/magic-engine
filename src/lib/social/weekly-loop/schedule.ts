@@ -140,14 +140,26 @@ export function planReelSchedule(
 ): PlanReelScheduleResult {
   const slotCount = Math.min(MAX_SLOTS, Math.max(0, Math.floor(input.reelPerWeek)));
   const cappedAt = input.reelPerWeek > MAX_SLOTS ? MAX_SLOTS : null;
-
   const slotDates = computeSlotDates(input.weekStart, slotCount);
-  const occupied = new Set(input.alreadyScheduled.map((item) => item.publishOn));
+  return { ...fillSlots(slotDates, input.candidates, input.alreadyScheduled), cappedAt };
+}
+
+/**
+ * Fills each free slot date with the oldest candidate whose product does not sit next to the same product.
+ * A date already taken by `alreadyScheduled` is never filled again; neighbours are looked up across every
+ * already-scheduled item, not only the ones on slot dates.
+ */
+export function fillSlots(
+  slotDates: readonly string[],
+  candidates: ScheduleCandidate[],
+  alreadyScheduled: readonly ScheduledItem[],
+): Omit<PlanReelScheduleResult, 'cappedAt'> {
+  const occupied = new Set(alreadyScheduled.map((item) => item.publishOn));
   const freeSlots = slotDates.filter((date) => !occupied.has(date));
 
-  const sorted = sortCandidates(input.candidates);
+  const sorted = sortCandidates(candidates);
   const used = new Set<number>();
-  const placed: PlacedEntry[] = input.alreadyScheduled.map((item) => ({
+  const placed: PlacedEntry[] = alreadyScheduled.map((item) => ({
     publishOn: item.publishOn,
     productKey: item.productKey,
   }));
@@ -190,5 +202,5 @@ export function planReelSchedule(
 
   assignments.sort((a, b) => (a.publishOn < b.publishOn ? -1 : a.publishOn > b.publishOn ? 1 : 0));
 
-  return { assignments, unscheduled, cappedAt };
+  return { assignments, unscheduled };
 }

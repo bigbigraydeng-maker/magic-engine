@@ -19,6 +19,7 @@ import type { MaliangCheck } from '@/lib/maliang/render-check'
 import { allowedVideoHosts } from '@/lib/maliang/render-check'
 import { REVIEW_V2_ESTIMATE_USD, runReviewCheckV2, withinWeeklyBudget } from '@/lib/maliang/render-check-v2'
 import { REMOTION_REVIEW_TIMEOUT_MS, runCheckWithTimeout, stampWorkOrderOutput } from '@/lib/maliang/review-disposition'
+import { readSocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
 import { MALIANG_BACKFILL_MAX_PER_RUN, maliangWeeklyCapUsd, overlayReviews, pickBackfillTargets, type BackfillPersisted, type BackfillTarget, type MaliangBackfillReceipt } from '@/lib/social/weekly-loop/maliang-backfill'
 
 export const SOCIAL_WEEKLY_DRAFT_FUNCTION_ID = `${CLOUD_FN_PREFIX}social-weekly-draft`
@@ -64,7 +65,9 @@ export function planFanOut(
   const due: string[] = []
   for (const client of clients) {
     if (!weeklyLoopEnabled(client.config)) continue
-    if (cadenceFromConfig(client.config).draftWeekday !== weekday) continue
+    // Social agent on = daily cadence: due every day. Otherwise only on the client's draft weekday.
+    const daily = readSocialAgentSettings(client.config, null).enabled
+    if (!daily && cadenceFromConfig(client.config).draftWeekday !== weekday) continue
     due.push(client.id)
   }
   return { due, mode: loopWriteAllowed(env) ? 'write' : 'dry_run' }
@@ -152,6 +155,8 @@ export interface DueContext {
   triggered_at: string
   /** Manual dry runs may opt in to real 马良 reviews with data.maliang_review === true. */
   maliangReview: boolean
+  /** Manual events may ask for the daily cadence (data.cadence === 'daily'); honoured only in dry_run. */
+  forceDaily: boolean
 }
 
 export function parseDueEvent(event: { id?: unknown; ts?: unknown; data?: unknown }, now: Date): DueContext {
@@ -168,6 +173,7 @@ export function parseDueEvent(event: { id?: unknown; ts?: unknown; data?: unknow
     event_id,
     triggered_at,
     maliangReview: record.maliang_review === true,
+    forceDaily: trigger === 'manual_event' && record.cadence === 'daily',
   }
 }
 
@@ -213,9 +219,10 @@ async function planBackfillSafe(
   clientId: string,
   mode: WeeklyLoopMode,
   optIn: boolean,
+  forceDaily = false,
 ): Promise<BackfillPlan> {
   try {
-    return await planBackfill(deps, clientId, mode, optIn)
+    return await planBackfill(deps, clientId, mode, optIn, forceDaily)
   } catch (e) {
     return emptyPlan(`plan_failed: ${errorMessage(e, 200)}`, 0, 0)
   }
@@ -226,6 +233,7 @@ async function planBackfill(
   clientId: string,
   mode: WeeklyLoopMode,
   optIn: boolean,
+  forceDaily: boolean,
 ): Promise<BackfillPlan> {
   const enabled = mode === 'write' || optIn
   const loopDeps = deps.loopDeps()
@@ -243,7 +251,7 @@ async function planBackfill(
   const { rows } = await loopDeps.loadOrders(clientId)
   const preview = await runWeeklyLoop(
     { ...loopDeps, loadOrders: async () => ({ rows, truncated: false }) },
-    { clientId, now: deps.now(), mode: 'dry_run' },
+    { clientId, now: deps.now(), mode: 'dry_run', forceDaily },
   )
   const picked = pickBackfillTargets({
     items: preview.items,
@@ -374,8 +382,9 @@ async function runMaliangBackfill(
   mode: WeeklyLoopMode,
   optIn: boolean,
   runId: string,
+  forceDaily = false,
 ): Promise<{ receipt: MaliangBackfillReceipt; overlay: Record<string, MaliangCheck> }> {
-  const plan = await step.run('maliang-plan', () => planBackfillSafe(deps, clientId, mode, optIn))
+  const plan = await step.run('maliang-plan', () => planBackfillSafe(deps, clientId, mode, optIn, forceDaily))
 
   const reviews: BackfillReview[] = []
   for (const target of plan.targets) {
@@ -488,6 +497,11 @@ function loopErrorReceipt(
     no_publish: true,
     maliang_backfill: backfill,
   }
+}
+
+/** A manual event may force the daily cadence only for a practice run; a write run follows the client switch. */
+export function forceDaily(ctx: Pick<DueContext, 'forceDaily'>, mode: WeeklyLoopMode): boolean {
+  return ctx.forceDaily && mode === 'dry_run'
 }
 
 async function handleCron(deps: SocialWeeklyDraftDeps, step: StepLike): Promise<FanOutReceipt> {
@@ -604,6 +618,7 @@ async function handleDue(
       resolved.mode,
       ctx.maliangReview,
       started.runId,
+      forceDaily(ctx, resolved.mode),
     )
 
     receipt = await step.run('run-loop', async (): Promise<ClientRunReceipt> => {
@@ -619,7 +634,7 @@ async function handleDue(
               },
             }
       try {
-        const loop = await runWeeklyLoop(loopDeps, { clientId: ctx.clientId, now: deps.now(), mode: resolved.mode })
+        const loop = await runWeeklyLoop(loopDeps, { clientId: ctx.clientId, now: deps.now(), mode: resolved.mode, forceDaily: forceDaily(ctx, resolved.mode) })
         return loopReceipt(ctx, resolved.mode, resolved.forced, loop, backfill.receipt)
       } catch (e) {
         const message = errorMessage(e, 300)

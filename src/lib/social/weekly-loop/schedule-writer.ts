@@ -21,6 +21,10 @@ export interface WriteReelScheduleArgs {
   weekStart: string
   assignments: Array<{ id: string; publishOn: string }>
   dryRun: boolean
+  /** Daily cadence: only a card still under review blocks; an approved card does not (new items need their own grant). */
+  blockOnlyPending?: boolean
+  /** Recorded on brief.weekly_pack.scheduled_by. */
+  scheduledBy?: string
 }
 
 export type WriteReelScheduleResult =
@@ -56,6 +60,7 @@ async function checkCardOpen(
   db: SupabaseClient,
   clientId: string,
   weekStart: string,
+  blockOnlyPending: boolean,
 ): Promise<'open' | 'closed' | 'failed'> {
   const subject = weekPackSubject(clientId, weekStart)
   const { data, error } = await db
@@ -63,7 +68,7 @@ async function checkCardOpen(
     .select('id, status')
     .eq('client_id', clientId)
     .eq('action_key', CONFIRMATION_ACTION_KEY)
-    .in('status', ['pending_approval', 'authorized'])
+    .in('status', blockOnlyPending ? ['pending_approval'] : ['pending_approval', 'authorized'])
     .eq('input->>subject_key', subject)
   if (error) return 'failed'
   if (Array.isArray(data) && data.length > 0) return 'open'
@@ -123,7 +128,7 @@ function refusalFor(
   return null
 }
 
-function buildNextBrief(brief: unknown, publishOn: string): Record<string, unknown> {
+function buildNextBrief(brief: unknown, publishOn: string, scheduledBy: string): Record<string, unknown> {
   const base = isPlainObject(brief) ? brief : {}
   const weekly = isPlainObject(base.weekly_pack) ? base.weekly_pack : {}
   return {
@@ -131,7 +136,7 @@ function buildNextBrief(brief: unknown, publishOn: string): Record<string, unkno
     weekly_pack: {
       ...weekly,
       publish_on: publishOn,
-      scheduled_by: 'social-weekly-loop',
+      scheduled_by: scheduledBy,
       scheduled_at: new Date().toISOString(),
     },
   }
@@ -142,8 +147,9 @@ async function applyWrite(
   clientId: string,
   row: OrderRow,
   publishOn: string,
+  scheduledBy: string,
 ): Promise<'written' | 'write_failed' | 'concurrent_update'> {
-  const next = buildNextBrief(row.brief, publishOn)
+  const next = buildNextBrief(row.brief, publishOn, scheduledBy)
   const { data: updated, error: uErr } = await db
     .from('content_work_orders')
     .update({ brief: next, updated_at: new Date().toISOString() })
@@ -160,7 +166,7 @@ export async function writeReelSchedule(
   db: SupabaseClient,
   args: WriteReelScheduleArgs,
 ): Promise<WriteReelScheduleResult> {
-  const card = await checkCardOpen(db, args.clientId, args.weekStart)
+  const card = await checkCardOpen(db, args.clientId, args.weekStart, args.blockOnlyPending === true)
   if (card === 'failed') return { ok: false, reason: 'card_check_failed' }
   if (card === 'open') return { ok: false, reason: 'card_open' }
 
@@ -183,7 +189,7 @@ export async function writeReelSchedule(
       written.push({ id: a.id, publishOn: a.publishOn })
       continue
     }
-    const outcome = await applyWrite(db, args.clientId, row, a.publishOn)
+    const outcome = await applyWrite(db, args.clientId, row, a.publishOn, args.scheduledBy ?? 'social-weekly-loop')
     if (outcome === 'written') {
       written.push({ id: a.id, publishOn: a.publishOn })
     } else {
