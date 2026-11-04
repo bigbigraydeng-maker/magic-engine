@@ -48,11 +48,14 @@ function listCheck(manifest: WeekPackManifest): HardCheck {
   return { label: '清单', state: 'green', reason: 'Story 和 Reel 都读到了' }
 }
 
-function reelCheck(manifest: WeekPackManifest, reelGoPublic: boolean): HardCheck {
+function reelCheck(manifest: WeekPackManifest, reelGoPublic: boolean, scheduled = false): HardCheck {
   if (manifest.reels.read_state === 'unread') {
     return { label: 'Reel', state: 'unread', reason: '读不到，没有转公开' }
   }
   if (!reelGoPublic) return { label: 'Reel', state: 'green', reason: '本版不在这里转公开' }
+  if (scheduled) {
+    return { label: 'Reel', state: 'green', reason: '批了之后按每条的日子在新西兰 18:00 公开；没预览或没排日子的不授权' }
+  }
   return { label: 'Reel', state: 'green', reason: '只会处理已经预览过的，没预览的单独拦住' }
 }
 
@@ -60,6 +63,7 @@ export function buildWeekPackFacts(input: {
   manifest: WeekPackManifest
   accountLabel: string
   reelGoPublic: boolean
+  reelScheduled?: boolean
 }): { facts: CardFacts; digest: string; fingerprint: string } {
   const digest = manifestDigest(input.manifest)
   const facts = normalizeFacts({
@@ -72,7 +76,7 @@ export function buildWeekPackFacts(input: {
     hardChecks: [
       listCheck(input.manifest),
       { label: '图文', state: 'green', reason: '尚未接入，本版不授权' },
-      reelCheck(input.manifest, input.reelGoPublic),
+      reelCheck(input.manifest, input.reelGoPublic, input.reelScheduled ?? false),
     ],
   })
   return { facts, digest, fingerprint: contentFingerprint(facts) }

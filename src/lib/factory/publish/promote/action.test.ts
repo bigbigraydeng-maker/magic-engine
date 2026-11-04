@@ -799,3 +799,170 @@ describe('发前团目录复核:真团对不上', () => {
     expect(auth().status).toBe('consumed')
   })
 })
+
+describe('按日公开:批卡授权 → 到日执行', async () => {
+  const { authorizeScheduledReel } = await import('./scheduled-authorize')
+  const { runScheduledPromote } = await import('./scheduled-action')
+  const { readGrant } = await import('./scheduled-grant')
+  const DAY = '2026-10-20' // T0 = 2026-10-20T00:00Z = 13:00 NZDT that day
+  const isApprover = (e: string) => e === ADMIN
+
+  function withPublishOn(day: string | null): void {
+    const base = deps.store.loadOrder.bind(deps.store)
+    deps = {
+      ...deps,
+      store: {
+        ...deps.store,
+        async loadOrder(id: string) {
+          const o = await base(id)
+          if (!o) return o
+          const brief = { ...(o.brief as Record<string, unknown>), ...(day ? { weekly_pack: { publish_on: day } } : {}) }
+          return { ...o, brief }
+        },
+      },
+    }
+  }
+  const grant = () => (w.row ? readGrant(w.row.payload) : null)
+  async function approve(): Promise<void> {
+    const token = await tokenOf()
+    const r = await authorizeScheduledReel(deps, { orderId: ORDER_ID, adminEmail: ADMIN, previewToken: token, source: 'week-card' })
+    if (!r.ok) throw new Error(`approve failed: ${r.error}`)
+  }
+  const run = (dryRun = false) => runScheduledPromote(deps, { orderId: ORDER_ID, executedBy: 'system:week-card:t', isApprover, dryRun })
+
+  it('批卡只记授权,不调 Meta;口令同时作废', async () => {
+    withPublishOn(DAY)
+    const token = await tokenOf()
+    const r = await authorizeScheduledReel(deps, { orderId: ORDER_ID, adminEmail: ADMIN, previewToken: token, source: 'week-card' })
+    expect(r.ok && r.publishOn).toBe(DAY)
+    expect(grant()?.status).toBe('armed')
+    expect(grant()?.authorized_by).toBe(ADMIN)
+    expect(w.log).not.toContain('meta.promote')
+    const reuse = await authorizeScheduledReel(deps, { orderId: ORDER_ID, adminEmail: ADMIN, previewToken: token, source: 'week-card' })
+    expect(reuse.ok).toBe(false)
+  })
+
+  it('没预览就批 → 拒;没排日子 → 拒', async () => {
+    withPublishOn(DAY)
+    const noToken = await authorizeScheduledReel(deps, { orderId: ORDER_ID, adminEmail: ADMIN, previewToken: 'nope', source: 'week-card' })
+    expect(noToken.ok).toBe(false)
+    w = makeWorld(); deps = makeDeps(w); withPublishOn(null)
+    const token = await tokenOf()
+    const noDay = await authorizeScheduledReel(deps, { orderId: ORDER_ID, adminEmail: ADMIN, previewToken: token, source: 'week-card' })
+    expect(!noDay.ok && noDay.status).toBe(422)
+  })
+
+  it('到日:全部闸重跑后公开,授权记为已用,回执记批准人不是程序', async () => {
+    withPublishOn(DAY)
+    await approve()
+    const r = await run()
+    expect(r.outcome).toBe('published')
+    expect(w.log).toContain('meta.promote')
+    expect(grant()?.status).toBe('consumed')
+    expect(auth().authorized_by).toBe(ADMIN)
+    expect(grant()?.executed_by).toBe('system:week-card:t')
+  })
+
+  it('还没到日 → 不发,不改授权', async () => {
+    withPublishOn('2026-10-21')
+    await approve()
+    const r = await run()
+    expect(r.outcome).toBe('not_due')
+    expect(w.log).not.toContain('meta.promote')
+    expect(grant()?.status).toBe('armed')
+  })
+
+  it('过了日子还没发 → 记错过并要人处理,不补发', async () => {
+    withPublishOn(DAY)
+    await approve()
+    w.now = Date.parse('2026-10-22T00:00:00.000Z')
+    const r = await run()
+    expect(r.outcome).toBe('missed')
+    expect(r.needs_person).toBe(true)
+    expect(w.log).not.toContain('meta.promote')
+    expect(grant()?.status).toBe('missed')
+  })
+
+  it('批了之后草稿文案变了 → 不发,授权作废,要人重批', async () => {
+    withPublishOn(DAY)
+    await approve()
+    w.meta.description = 'Edited copy after approval'
+    w.meta.description = w.meta.description // keep caption check equal below
+    const base = deps.store.loadOrder.bind(deps.store)
+    deps = { ...deps, store: { ...deps.store, async loadOrder(id: string) { const o = await base(id); return o ? { ...o, brief: { ...(o.brief as Record<string, unknown>), copy: { caption: 'Edited copy after approval', endcard: { cta: 'Book now', url: 'https://example.com/tour' } } } } : o } } }
+    const r = await run()
+    expect(r.outcome).toBe('stale')
+    expect(r.needs_person).toBe(true)
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('批了之后发布日被改 → 不发,授权作废', async () => {
+    withPublishOn(DAY)
+    await approve()
+    withPublishOn('2026-10-25')
+    w.now = Date.parse('2026-10-20T00:00:00.000Z')
+    const r = await run()
+    expect(['stale', 'not_due']).toContain(r.outcome)
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('批准人已不是管理员 → 不发', async () => {
+    withPublishOn(DAY)
+    await approve()
+    const r = await runScheduledPromote(deps, { orderId: ORDER_ID, executedBy: 'system:week-card:t', isApprover: () => false, dryRun: false })
+    expect(r.outcome).toBe('stale')
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('已撤回 → 不发', async () => {
+    withPublishOn(DAY)
+    await approve()
+    const g = grant()
+    if (!g || !w.row) throw new Error('no grant')
+    w.row.payload['scheduled_go_public'] = { ...g, status: 'revoked' }
+    const r = await run()
+    expect(r.outcome).toBe('not_due')
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('演练:只核不写', async () => {
+    withPublishOn(DAY)
+    await approve()
+    const before = JSON.stringify(w.row?.payload)
+    const r = await run(true)
+    expect(r.outcome).toBe('dry_run_ok')
+    expect(JSON.stringify(w.row?.payload)).toBe(before)
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('有人已在 ME 里手动转了公开 → 标手动,不再发', async () => {
+    withPublishOn(DAY)
+    await approve()
+    await confirm(await tokenOf())
+    w.log.length = 0
+    const r = await run()
+    expect(r.outcome).toBe('consumed_manual')
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('上一次执行抢到后中断(租约过期)→ 标结果不明,要人核对', async () => {
+    withPublishOn(DAY)
+    await approve()
+    const g = grant()
+    if (!g || !w.row) throw new Error('no grant')
+    w.row.payload['scheduled_go_public'] = { ...g, status: 'claimed', claimed_at: '2026-10-19T00:00:00.000Z' }
+    const r = await run()
+    expect(r.outcome).toBe('unknown')
+    expect(r.needs_person).toBe(true)
+    expect(w.log).not.toContain('meta.promote')
+  })
+
+  it('同一条执行两次只公开一次', async () => {
+    withPublishOn(DAY)
+    await approve()
+    const [a, b] = await Promise.all([run(), run()])
+    const published = [a, b].filter((x) => x.outcome === 'published').length
+    expect(published).toBe(1)
+    expect(w.log.filter((l) => l === 'meta.promote').length).toBe(1)
+  })
+})

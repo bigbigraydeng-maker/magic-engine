@@ -407,6 +407,11 @@ const CRON_REGISTRY_ENTRIES = [
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/cloud-social-weekly-draft.ts 的 SOCIAL_WEEKLY_DRAFT_CRON。
   // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
   { service: 'inngest:cloud-social-weekly-draft', jobName: 'social-weekly-draft', schedule: '30 8 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-04' },
+  // Reel 按日公开：每 30 分钟醒一次（新西兰时间），到了客户发布时点（默认 18:00）才把当天已在周卡上授权的 Reel 走转公开；
+  // 总开关 WEEKLY_PACK_REEL_SCHEDULED_PUBLIC 关着也写一行 disabled 回执，所以每次醒来都有一行。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/cloud-reel-scheduled-go-public.ts 的 REEL_SCHEDULED_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
+  { service: 'inngest:cloud-reel-scheduled-go-public', jobName: 'reel-scheduled-go-public', schedule: '*/30 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-04' },
   { service: 'inngest:cloud-baozheng-weekly', jobName: 'baozheng-weekly', schedule: '0 10 * * 3', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-03' },
   { service: 'inngest:cloud-libai-prompt-library-monthly', jobName: 'libai-prompt-library-monthly', schedule: '0 9 * * 2', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-25' },
   // 司马迁 · 口碑周巡（agent 自治计划 B2）：每周四新西兰 09:00 读本周新 Google 评价、起草回复，

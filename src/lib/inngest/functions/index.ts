@@ -54,6 +54,7 @@ import { crmEmailSendReceipt } from './crm-email-send-receipt'
 import { zhangqianDiscovery } from './zhangqian-discovery'
 import { triggeredSendWelcomeDispatch, triggeredSendWelcomeSweep } from './triggered-send-welcome-sweep'
 import { socialWeeklyDraft } from './cloud-social-weekly-draft'
+import { reelScheduledGoPublic } from './cloud-reel-scheduled-go-public'
 
 export const cloudFunctions = [
   promoPlanDailyWatch,
@@ -129,6 +130,7 @@ export const cloudFunctions = [
   triggeredSendWelcomeSweep,
   // 社媒每周出稿编排（两个开关默认关；关着也每天写一行 disabled 回执）
   socialWeeklyDraft,
+  reelScheduledGoPublic,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */

@@ -169,6 +169,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   week_pack_needs_approval: 'review', // 下一周整包还没批
   week_pack_items_held: 'review', // 有条目被单独拦住
   social_weekly_loop_needs_human: 'review', // 下周的社媒视频排不出来，要人补片或改片
+  reel_scheduled_needs_human: 'review', // 周卡批过的 Reel 到日没发出去，要人重批或撤回
   auto_publish_record_conflict: 'truth', // 记录说撤回了、回执说又发了：帖子到底在不在主页，只有看主页的人知道
 
   // ── 5 · 系统判不了真假的 ─────────────────────────────────────────────

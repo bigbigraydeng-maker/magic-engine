@@ -19,7 +19,7 @@ import { loadWeekPackManifest, readClientPackSettings, type ClientPackSettings }
 import { recordUnpublishedOnCard } from './persist-held'
 import { voidPendingWeekPackCards } from './void-pending'
 import { promoteReelGated } from './promote-guard'
-import { reelGoPublicOnApproveEnabled, type WeekPackEnv } from './switches'
+import { reelCardMode, type WeekPackEnv } from './switches'
 
 export interface WireInput {
   litePorts: LiteServicePorts
@@ -37,10 +37,12 @@ export function createWeekPackPorts(input: WireInput): WeekPackPorts & { setting
   const settings = input.settings
     ? Promise.resolve(input.settings)
     : readClientPackSettings(input.db, input.clientId)
-  const reelGoPublic = reelGoPublicOnApproveEnabled(input.env)
+  const reelMode = reelCardMode(input.env)
+  const reelGoPublic = reelMode !== 'off'
   return {
     settings,
     reelGoPublic,
+    reelScheduled: reelMode === 'scheduled',
     loadManifest: (clientId) => loadWeekPackManifest({
       ports: input.litePorts, db: input.db, clientId, now: input.now,
     }),
@@ -65,7 +67,9 @@ export function createWeekPackPorts(input: WireInput): WeekPackPorts & { setting
       enabled: reelGoPublic,
       allowedClientId: input.actor.allowedClientId,
       email: input.actor.email,
-      run: () => callRunPromote(workOrderId, previewToken, input.actor.email),
+      run: () => reelMode === 'scheduled'
+        ? callAuthorizeScheduled(workOrderId, previewToken, input.actor.email)
+        : callRunPromote(workOrderId, previewToken, input.actor.email),
     }),
   }
 }
@@ -121,6 +125,20 @@ async function callRunPromote(workOrderId: string, previewToken: string, adminEm
     return { ok: false, code: 'reel_failed', text: '这条视频没能转公开。' }
   }
   return promotedReelLine(result.data.first_comment_status)
+}
+
+async function callAuthorizeScheduled(workOrderId: string, previewToken: string, adminEmail: string): Promise<ReelPromoteResult> {
+  const { authorizeScheduledReel } = await import('@/lib/factory/publish/promote/scheduled-authorize')
+  const { createProductionPromoteDeps } = await import('@/lib/factory/publish/promote/deps')
+  const result = await authorizeScheduledReel(createProductionPromoteDeps(), {
+    orderId: workOrderId, adminEmail, previewToken, source: 'week-card',
+  })
+  if (!result.ok) return { ok: false, code: 'reel_failed', text: safePromoteText(result.error) }
+  return {
+    ok: true,
+    code: 'reel_scheduled',
+    text: `已授权：${result.publishOn} 新西兰时间 18:00 自动公开，当天公开前会再核一遍。`,
+  }
 }
 
 function safePromoteText(error: string): string {

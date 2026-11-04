@@ -1,0 +1,84 @@
+/**
+ * 今日待办里的「Reel 按日公开」栏：周卡批过、但到日没能公开的 Reel。
+ *
+ * 只读流量记录里的授权状态（scheduled_go_public），不读回执、不现算：状态改了（撤回 / 重批 / 已发）这条就自己消失。
+ * 只出要人动手的四种：批后内容或日子变了（stale）、错过了发布日（missed）、发失败（failed）、执行到一半结果不明（unknown）。
+ *
+ * 🔴 本文件一行写库都没有。
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import type { ManualItem } from './manual-item-types'
+import { APP_BASE } from './binding-request-items'
+import { readGrant, type ScheduledGrantStatus } from '@/lib/factory/publish/promote/scheduled-grant'
+
+export const REEL_SCHEDULED_TODO_KIND = 'reel_scheduled_needs_human' as const
+const NEEDS_PERSON: readonly ScheduledGrantStatus[] = ['stale', 'missed', 'failed', 'unknown']
+
+const WHAT: Record<string, string> = {
+  stale: '周卡上批过的这条 Reel，批完之后内容、发布日或团目录变了，按日公开没有发出去。',
+  missed: '周卡上批过的这条 Reel 错过了发布日，没有补发。',
+  failed: '这条 Reel 到日转公开失败了，仍是 Facebook 草稿。',
+  unknown: '这条 Reel 到日转公开时程序中断，不确定 Facebook 上是否已公开。',
+}
+
+const HOW: Record<string, string> = {
+  stale: '打开客户社媒页的周卡区，在「已授权、还没公开」里看原因：内容对的就重新预览再授权，不对就撤回并改片。',
+  missed: '打开客户社媒页的周卡区，把这条撤回或重新预览后授权一个新日子。',
+  failed: '打开客户社媒页的周卡区看失败原因；改好后重新预览再授权。',
+  unknown: '先到 Facebook 主页看这条有没有公开：公开了就在周卡区重新预览（会只同步记录）；没公开就撤回再授权。',
+}
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {}
+}
+
+/** Turns traffic-row payloads into to-do items (pure). */
+export function buildReelScheduledItems(
+  rows: ReadonlyArray<{ client_id: string; payload: unknown }>,
+  nameOf: (id: string) => string,
+): ManualItem[] {
+  const out: ManualItem[] = []
+  for (const row of rows) {
+    const grant = readGrant(asRecord(row.payload))
+    if (!grant || !NEEDS_PERSON.includes(grant.status)) continue
+    out.push({
+      kind: REEL_SCHEDULED_TODO_KIND,
+      client_id: row.client_id,
+      client_name: nameOf(row.client_id),
+      what: `${WHAT[grant.status]}（原定 ${grant.publish_on}）`,
+      how: HOW[grant.status],
+      href: `${APP_BASE}/dashboard/clients/${encodeURIComponent(row.client_id)}`,
+    })
+  }
+  return out
+}
+
+export async function pushReelScheduledItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  nameOf: (id: string) => string,
+): Promise<void> {
+  try {
+    const { data, error } = await supabase
+      .from('flywheel_actions')
+      .select('client_id, payload')
+      .eq('action_type', 'factory_reel_publish')
+      .in('payload->scheduled_go_public->>status', [...NEEDS_PERSON])
+      .limit(200)
+    if (error) throw new Error(error.message)
+    const rows = (Array.isArray(data) ? data : []).filter(
+      (r): r is { client_id: string; payload: unknown } => typeof asRecord(r).client_id === 'string',
+    )
+    items.push(...buildReelScheduledItems(rows, nameOf))
+  } catch {
+    items.push({
+      kind: REEL_SCHEDULED_TODO_KIND,
+      client_id: 'infra',
+      client_name: 'Magic Engine 后台',
+      what: 'Reel 按日公开的授权状态今天没读出来，这一栏可能不全。',
+      how: '这条不用你动手，是我们这边的欠账。',
+      href: 'https://app.inngest.com',
+    })
+  }
+}
