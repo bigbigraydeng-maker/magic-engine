@@ -1,6 +1,6 @@
 # CTS 月度旅行建议信 · 倒数版系列 v0 + 12 月初要发的两篇草稿
 
-> 状态：**草稿 v0，未经独立审查、未发送**｜作者：126 号窗口｜起草日：2026-11-04（新西兰时间）｜台账卡：2026-11-04-cts-monthly-predeparture-newsletter-first-draft-due-1119
+> 状态：**草稿 v0.2（PM 11-04 回「先不说」，已删去免签那一段），独立审查中，未发送**｜作者：126 号窗口｜起草日：2026-11-04（新西兰时间）｜台账卡：2026-11-04-cts-monthly-predeparture-newsletter-first-draft-due-1119
 > 本文件不是发送授权：每次发送都要 PM 本人在对话里点头（手册 NL-14）；只在本机，PM 回「行」之前不推送。
 > 缘起：PM 11-04 在 129 号窗口提出「给交了定金的客户持续发旅游建议 newsletter，按月，直到出发前」；回「插队」后补充「客户交定金的时间不一样，距离出发有 3、4、5 个月」，并回「对」确认**倒数版**（按每位客人离出发的月数发对应那一篇）。
 
@@ -19,7 +19,7 @@
 
 | 篇 | 离出发 | 主题 | 主要依据 | 状态 |
 |---|---|---|---|---|
-| 1 | 5 个月 | 第一张清单：护照、免签状态、保险、SafeTravel 登记、团含什么 | 官网签证页 / 团含什么页 / SafeTravel | **本稿已写（§2）** |
+| 1 | 5 个月 | 第一张清单：护照、保险、SafeTravel 登记、团含什么 | 官网签证指南页 / 团含什么页 / SafeTravel | **本稿已写（§2）** |
 | 2 | 4 个月 | 认识目的地：最佳季节与城市指南 | 官网 best-time 与城市指南页 | 待读官网后写 |
 | 3 | 3 个月 | 应用、支付与上网 | 官网应用与支付页 / 新手贴士页 | **本稿已写（§3）** |
 | 4 | 2 个月 | 装箱与体能 | 官网 packing 页 | 待读官网后写 |
@@ -49,7 +49,7 @@
 
 ## 2. 第 1 篇「离出发 5 个月」（12 月初发给 5 月团 6 位）
 
-主题：`Five things to do now for your China tour`
+主题：`Four things to do now for your China tour`
 预览文字：`A short checklist from Baker at CTS Tours.`
 
 ```
@@ -57,17 +57,15 @@ Kia ora {{first_name}},
 
 Thank you again for booking your China tour with CTS Tours. Between now and your departure I'll send you a short note each month with practical tips, so there are no surprises on the day.
 
-Here are five things worth doing now.
+Here are four things worth doing now.
 
 1. Check your passport. Make sure it is valid and has blank pages for entry stamps. We recommend at least six months of validity from the day you arrive in China.
 
-2. Visa-free entry. New Zealand passport holders can currently enter China visa-free for up to 30 days, and this is published until 31 December 2026. Your tour departs in 2027, so we are watching for China's announcement about the new year and will email you as soon as we have confirmed news. There is nothing you need to do right now. Our visa guide always shows the latest: https://www.ctstours.co.nz/china-visa-guide-for-new-zealanders?utm_source=mailchimp&utm_medium=email&utm_campaign=predeparture_m5_202612
+2. Travel insurance. New Zealand's SafeTravel service advises comprehensive cover that includes medical evacuation by air, and we strongly recommend it too.
 
-3. Travel insurance. New Zealand's SafeTravel service advises comprehensive cover that includes medical evacuation by air, and we strongly recommend it too.
+3. Register your trip on SafeTravel (safetravel.govt.nz). It lets the Ministry of Foreign Affairs and Trade send you updates about the places you are visiting.
 
-4. Register your trip on SafeTravel (safetravel.govt.nz). It lets the Ministry of Foreign Affairs and Trade send you updates about the places you are visiting.
-
-5. Know what is included. Your itinerary page lists what is and is not included in your tour, and our plain-language guide explains the details: https://www.ctstours.co.nz/blog/what-is-included-guided-china-tour-nz?utm_source=mailchimp&utm_medium=email&utm_campaign=predeparture_m5_202612
+4. Know what is included. Your itinerary page lists what is and is not included in your tour, and our plain-language guide explains the details: https://www.ctstours.co.nz/blog/what-is-included-guided-china-tour-nz?utm_source=mailchimp&utm_medium=email&utm_campaign=predeparture_m5_202612
 
 If you have any questions at all, just reply to this email or call us on 0800 287 888. We are always glad to help.
 
@@ -84,10 +82,6 @@ Founder, CTS Tours
 | Between now and your departure I'll send you a short note each month … | PM 11-04 决定：按月发到出发前（台账卡） | PM 决定 |
 | Check your passport. Make sure it is valid and has blank pages for entry stamps. | 签证指南页「Check Passport Validity: Ensure your NZ passport is valid and has blank pages for entry stamps」 | 官网可溯 |
 | We recommend at least six months of validity from the day you arrive in China. | 签证博客写「A passport with 6 or more months of validity remaining on the day you enter」（当作要求）；签证指南页写「no specific 6-month requirement for visa-free entry, but recommended」——**两页官网口径不一致**，本句取两页都成立的「建议」 | 官网可溯（口径不一，见 §4） |
-| New Zealand passport holders can currently enter China visa-free for up to 30 days, and this is published until 31 December 2026. | 签证指南页、签证博客、新手贴士页、全站横幅都写 30 天、到 2026-12-31；签证指南页注「Confirmed by China MFA, May 2026. Verify with the Chinese Embassy before travel」 | 官网可溯；**发送当天必须重核官方最新状态** |
-| Your tour departs in 2027, so we are watching … will email you as soon as we have confirmed news. | 出发年份来自 CRM；「关注并及时通知」是 CTS 的承诺 | PM 决定（见 §4 第 1 条） |
-| There is nothing you need to do right now. | 判断：免签期内无需办理；若延期未获确认，到时再通知 | 未证实（PM 过目） |
-| Our visa guide always shows the latest | 签证博客「I keep it updated whenever the policy moves」 | 官网可溯 |
 | Travel insurance … SafeTravel advises comprehensive cover that includes medical evacuation by air | SafeTravel 中国页「should have a comprehensive travel insurance policy in place that includes provision for medical evacuation by air」 | 官方可溯 |
 | … and we strongly recommend it too. | 签证指南页「comprehensive travel insurance is still strongly recommended」；团含什么页「Travel insurance — I insist on it」 | 官网可溯 |
 | Register your trip on SafeTravel … send you updates about the places you are visiting. | SafeTravel 页「Register your plans and contact details so we can send you travel updates about the places you're travelling to」；页脚署名 Ministry of Foreign Affairs and Trade | 官方可溯 |
@@ -117,8 +111,6 @@ Google, Facebook and Instagram are blocked in China, so if you rely on them, sor
 
 A quick reminder if you haven't done them yet: check your passport (we recommend at least six months of validity from the day you arrive in China), arrange comprehensive travel insurance, and register your trip on SafeTravel (safetravel.govt.nz).
 
-Visa-free entry. New Zealand passport holders can currently enter China visa-free for up to 30 days, and this is published until 31 December 2026. Your tour departs in 2027, so we are watching for China's announcement about the new year and will email you as soon as we have confirmed news. There is nothing you need to do right now. Our visa guide always shows the latest: https://www.ctstours.co.nz/china-visa-guide-for-new-zealanders?utm_source=mailchimp&utm_medium=email&utm_campaign=predeparture_m3_202612
-
 If you have any questions at all, just reply to this email or call us on 0800 287 888. We are always glad to help.
 
 Warm regards,
@@ -143,18 +135,18 @@ Founder, CTS Tours
 | Google, Facebook and Instagram are blocked in China … | 新手贴士页「Many Western apps (Google, Facebook, Instagram) are blocked」 | 官网可溯 |
 | Download and test everything at home first. | 应用与支付页「Install and test on your phone before leaving New Zealand」「Install and register before you fly」（原文针对 VPN 与 DiDi，本稿概括为全部应用） | 官网可溯（概括） |
 | A quick reminder … passport … insurance … SafeTravel | 同 §2.1 对应各行 | 同 §2.1 |
-| Visa-free entry … | 同 §2.1 对应各行 | 同 §2.1 |
 | If you have any questions … / Warm regards … | 同 §2.1 | 同 §2.1 |
 
-## 4. 待 PM 决定 / 待核（一次只问一个，按顺序）
+## 4. 待 PM 决定 / 待核
 
-1. **要不要在第一期如实写免签只公布到 2026-12-31**（两篇的「Visa-free entry」那段）。官网自己写免签到 2026-12-31，而现有 16 位客人都是 2027 年出发。建议写：信息本来就公开在官网上，客人迟早会看到，由 CTS 先平静地说清、并承诺有确认消息立刻通知，比沉默稳妥。不写的话删掉这一段并把序号顺延。**发送当天必须重核官方最新状态**（那时可能已官宣延期）：核对中国驻新西兰使馆签证页与外交部通告，写明核对日期。
+1. **免签那段：PM 11-04 回「先不说」→ 两篇都已删掉。** 官网自己写免签（NZ 护照 30 天）只公布到 2026-12-31，而现有 16 位客人都是 2027 年出发；12/14 复核官方是否官宣延期（台账卡 2026-11-04-cts-visa-free-2027-recheck-due-1214），再问 PM 要不要在 1 月那两篇里说。删掉后两篇不再提签证，客人按官网现状理解为免签。
 2. 官网两页对护照有效期说法不一（博客写「要求 6 个月以上」，签证指南页写「无硬性要求但建议」）。本稿写「建议」，两页都成立；官网要不要统一是另一件事，不归本任务。
 3. 署名用 Baker 第一人称，与欢迎信草稿一致。
 4. 「直接回这封信」：发送前把 Mailchimp 活动的回复地址设成 info@ 并真回一封验证。
 5. 这批收件人在 Mailchimp 里的订阅状态还没核（11/5 例行查漏登录时顺带查）。核完才能建活动。
-6. 链接：发送前逐个核（下架团页返回 200 但内容是通用页的坑），本稿用到的三条官网页 11-04 已取回、标题与内容对得上，SafeTravel 页 11-04 已取回。
+6. 链接：发送前逐个核（下架团页返回 200 但内容是通用页的坑），本稿用到的两条官网页 11-04 已取回、标题与内容对得上，SafeTravel 页 11-04 已取回。
 7. 第 2、4、5 篇尚未写；官网对应页（best-time / packing / safety / 城市指南）起草前逐页读。
+8. 独立审查员逐句核事实：11-04 已交出，结果回来后更新本文件。
 
 ## 5. Reuse Statement
 
