@@ -36,7 +36,8 @@ export interface DraftMatchInput {
  * the whole answer becomes unread. No match at all is unread too, because
  * "no draft" cannot be told apart from "drafts we cannot link".
  */
-export function matchDrafts(input: DraftMatchInput): Loaded<DraftFact[]> {
+/** Same match as `matchDrafts`, keeping the row id so a page can open the existing card. */
+export function matchDraftRows(input: DraftMatchInput): Loaded<DraftRow[]> {
   const exact = input.rows.filter((row) => row.executionItemId !== null && input.itemIds.has(row.executionItemId))
   const found = new Map<string, DraftRow>(exact.map((row) => [row.id, row]))
   if (input.goalId && input.plans.read === 'ok') {
@@ -56,5 +57,11 @@ export function matchDrafts(input: DraftMatchInput): Loaded<DraftFact[]> {
     }
   }
   if (found.size === 0) return { read: 'unread' }
-  return { read: 'ok', value: [...found.values()].map((row) => ({ status: row.status })) }
+  return { read: 'ok', value: [...found.values()] }
+}
+
+export function matchDrafts(input: DraftMatchInput): Loaded<DraftFact[]> {
+  const matched = matchDraftRows(input)
+  if (matched.read !== 'ok') return { read: 'unread' }
+  return { read: 'ok', value: matched.value.map((row) => ({ status: row.status })) }
 }

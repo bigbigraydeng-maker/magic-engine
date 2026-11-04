@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchDrafts } from './draft-match'
+import { matchDraftRows, matchDrafts } from './draft-match'
 import type { DraftRow, PlanFact, PoolFact } from './types'
 
 function plan(over: Partial<PlanFact>): PlanFact {
@@ -26,6 +26,11 @@ const pool: PoolFact[] = [
 const base = { itemIds: new Set<string>(), goalId: 'goal-1', pool }
 
 describe('matchDrafts', () => {
+  it('keeps the draft id when the same creative matches', () => {
+    const result = matchDraftRows({ ...base, rows: [row({})], plans: { read: 'ok', value: [plan({})] } })
+    expect(result).toEqual({ read: 'ok', value: [row({})] })
+  })
+
   it('finds a draft whose creative the prescription plan names, with no execution item', () => {
     const result = matchDrafts({ ...base, rows: [row({})], plans: { read: 'ok', value: [plan({})] } })
     expect(result).toEqual({ read: 'ok', value: [{ status: 'awaiting_approval' }] })
