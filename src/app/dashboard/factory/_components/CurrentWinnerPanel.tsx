@@ -51,7 +51,9 @@ interface WinnersResponse {
 const REASON_LABELS: Record<string, string> = {
   not_active: '已退役',
   performance_unreadable: '数据读不出',
-  program_check_failed: '复核没通过',
+  program_check_not_passed: '程序复核没通过，现在不能用',
+  confirmer_not_authorized: '点认的人已经没有这个权限，要重新认',
+  result_type_unknown: '不知道这条按什么结果算，没法比',
   pm_decision_rejected: '已被点了不认',
   receipt_invalid: '确认记录对不上，要重新认',
   cost_per_result_missing: '缺每个结果的成本，没法排序',
@@ -176,12 +178,12 @@ function formatPct(value: number | null): string {
 }
 
 const CHECK_REASON_LABELS: Record<string, string> = {
-  source_video_unavailable: '',
+  source_video_unavailable: '拿不到原视频',
 }
 
-/** 复核原因写成人话；已经在正文说过的（拿不到原视频）不再重复 */
+/** 复核原因写成人话；没登记的原样显示 */
 function checkReasonLabel(reason: string | null): string {
-  if (!reason) return ''
+  if (!reason) return '原因没记下'
   return CHECK_REASON_LABELS[reason] ?? reason
 }
 
@@ -247,22 +249,13 @@ function TextBlock({ label, text }: { label: string; text: string }) {
 
 interface DecisionButtonsProps {
   submitting: boolean
-  needsTick: boolean
-  ticked: boolean
-  onTick: (next: boolean) => void
   onDecide: (decision: Decision) => void
 }
 
-function DecisionButtons({ submitting, needsTick, ticked, onTick, onDecide }: DecisionButtonsProps) {
-  const approveDisabled = submitting || (needsTick && !ticked)
+function DecisionButtons({ submitting, onDecide }: DecisionButtonsProps) {
+  const approveDisabled = submitting
   return (
     <div className="space-y-2">
-      {needsTick && (
-        <label className="flex items-center gap-2 text-xs text-slate-700">
-          <input type="checkbox" checked={ticked} onChange={(e) => onTick(e.target.checked)} />
-          我看过上面的截图，骨架没拆错
-        </label>
-      )}
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => onDecide('approved')}
@@ -292,9 +285,6 @@ interface WinnerCardProps {
 function WinnerCard({ winner, onDecided }: WinnerCardProps) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [ticked, setTicked] = useState(false)
-
-  const needsTick = winner.program_check?.state === 'needs_human'
   const showButtons = winner.state === 'needs_confirm' || winner.state === 'confirmed'
 
   const decide = async (decision: Decision) => {
@@ -321,12 +311,9 @@ function WinnerCard({ winner, onDecided }: WinnerCardProps) {
     <article className="space-y-3 rounded-lg border border-slate-200 p-3">
       <StatusBadge winner={winner} />
 
-      {winner.program_check?.state === 'needs_human' && (
+      {winner.program_check && winner.program_check.state !== 'passed' && (
         <p className="text-xs text-amber-800">
-          复核没完成：拿不到原视频，只能请你看截图核对
-          {checkReasonLabel(winner.program_check.reason) && (
-            <span className="text-slate-500">（{checkReasonLabel(winner.program_check.reason)}）</span>
-          )}
+          复核没完成：{checkReasonLabel(winner.program_check.reason)}，这条现在不能用
         </p>
       )}
 
@@ -353,13 +340,7 @@ function WinnerCard({ winner, onDecided }: WinnerCardProps) {
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
 
       {showButtons && (
-        <DecisionButtons
-          submitting={submitting}
-          needsTick={needsTick}
-          ticked={ticked}
-          onTick={setTicked}
-          onDecide={(decision) => void decide(decision)}
-        />
+        <DecisionButtons submitting={submitting} onDecide={(decision) => void decide(decision)} />
       )}
     </article>
   )

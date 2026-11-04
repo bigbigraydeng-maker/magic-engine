@@ -9,12 +9,13 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { usableWinnerSlices, winnerDecisionEventId, type WinnerRow } from '../winner-gate'
+import { usableWinnerSlices, winnerDecisionEventId, type ConfirmerDirectory, type WinnerRow } from '../winner-gate'
 import { decideSignal, pickWinner } from '../strategist'
 import type { DemandSignal, GateContext, WinnerSlice } from '../types'
 
 const NOW = Date.parse('2026-11-05T09:00:00Z')
 const AT = '2026-11-05T08:00:00.000Z'
+const DIR: ConfirmerDirectory = { isGlobalAdmin: (e) => e === 'pm@example.com', staffEmails: new Set() }
 
 function signal(over: Partial<DemandSignal> = {}): DemandSignal {
   return {
@@ -33,7 +34,7 @@ function signal(over: Partial<DemandSignal> = {}): DemandSignal {
   }
 }
 
-function ctx(activeWinners: WinnerSlice[]): GateContext {
+function ctx(activeWinners: WinnerSlice[], winnerThemeGuards: GateContext['winnerThemeGuards'] = []): GateContext {
   return {
     now: new Date(NOW),
     signal: signal(),
@@ -50,6 +51,7 @@ function ctx(activeWinners: WinnerSlice[]): GateContext {
     recentAngles: [],
     blocklist: [],
     activeWinners,
+    winnerThemeGuards,
     balanceUsd: 20,
     dailyOrderCount: 0,
     dailyCostUsd: 0,
@@ -79,8 +81,8 @@ function confirmedRow(id: string, perf: Record<string, unknown>, extra: Partial<
         role: 'magic_lab',
         event_id: winnerDecisionEventId(id, 'approved', AT),
         at: AT,
-        acknowledged_check_state: 'passed',
       },
+      result_type: 'lead',
       ...perf,
     },
     ...extra,
@@ -95,7 +97,7 @@ describe('Q2 按错的尺子挑赢家（待 PM 确认）', () => {
       ...confirmedRow('intake', {}, { cost_per_thruplay: 0.0001 }),
       performance: { notes: 'from airtable', source: 'winner_intake_airtable' },
     }
-    const usable = usableWinnerSlices([a, intake, b], NOW)
+    const usable = usableWinnerSlices([a, intake, b], NOW, DIR)
     expect(usable.map((w) => w.id)).toEqual(['b', 'a'])
     expect(pickWinner(ctx(usable))?.id).toBe('b')
   })
@@ -107,7 +109,7 @@ describe('Q5 候选不出片（待 PM 确认）', () => {
 
   it('status=active 但没有 pm_decision → 共享读取函数返回空，工单不挂骨架', () => {
     const row = { ...base, performance: { program_check: { state: 'passed', at: AT }, cost_per_result: 4.57 } }
-    const usable = usableWinnerSlices([row], NOW)
+    const usable = usableWinnerSlices([row], NOW, DIR)
     expect(usable).toEqual([])
     const d = decideSignal(ctx(usable))
     expect(d.outcome).toBe('accepted')
@@ -115,7 +117,7 @@ describe('Q5 候选不出片（待 PM 确认）', () => {
   })
 
   it('确认过的同一条 → 工单挂上这条骨架（反例，证明上一题不是因为别的原因没挂）', () => {
-    const d = decideSignal(ctx(usableWinnerSlices([base], NOW)))
+    const d = decideSignal(ctx(usableWinnerSlices([base], NOW, DIR)))
     expect(d.outcome).toBe('accepted')
     if (d.outcome === 'accepted') expect(d.workOrder.winner_structure_id).toBe('w')
   })
@@ -129,17 +131,39 @@ describe('Q5 候选不出片（待 PM 确认）', () => {
       { program_check: { state: 'passed', at: 'yesterday' }, pm_decision: decisionOf, cost_per_result: 4.57 },
     ]
     for (const performance of variants) {
-      expect(usableWinnerSlices([{ ...base, performance }], NOW)).toEqual([])
+      expect(usableWinnerSlices([{ ...base, performance }], NOW, DIR)).toEqual([])
     }
   })
 
   it('Intake 刚录进来的新行（只有备注）→ 不可用', () => {
     const row = { ...base, performance: { notes: 'x', source: 'winner_intake_airtable' } }
-    expect(usableWinnerSlices([row], NOW)).toEqual([])
+    expect(usableWinnerSlices([row], NOW, DIR)).toEqual([])
   })
 
   it('刷新表现数据（只合并 cost_per_result 等字段）后确认状态还在 → 仍可用', () => {
     const refreshed = { ...base, performance: { ...(base.performance as Record<string, unknown>), cost_per_result: 5.1, leads: 130 } }
-    expect(usableWinnerSlices([refreshed], NOW).map((w) => w.id)).toEqual(['w'])
+    expect(usableWinnerSlices([refreshed], NOW, DIR).map((w) => w.id)).toEqual(['w'])
+  })
+})
+
+describe('Q5b 复核没通过的赢家不出片，但题材护栏照样避开（待 PM 确认）', () => {
+  it('needs_human 的赢家不可用；它的题材仍挡住同题材新角度', () => {
+    const nh = confirmedRow('n', { cost_per_result: 4.57, program_check: { state: 'needs_human', at: AT, reason: 'source_video_unavailable' } })
+    expect(usableWinnerSlices([nh], NOW, DIR)).toEqual([])
+    const theme = { hook_segment: { description: 'Best of China group tours' }, current_frequency: 1.2 }
+    const angleOf = (d: ReturnType<typeof decideSignal>) => (d.outcome === 'accepted' ? d.workOrder.angle : null)
+    expect(angleOf(decideSignal(ctx([])))).toBe('Best of China group tours')
+    expect(angleOf(decideSignal(ctx([], [theme])))).not.toBe('Best of China group tours')
+  })
+})
+
+describe('Q2b 不同结果种类不放在一起比（待 PM 确认）', () => {
+  it('一条留资、一条开聊、信号没点名种类 → 不挑；点名后只在那一种里挑', () => {
+    const lead = confirmedRow('lead', { cost_per_result: 9 })
+    const chat = confirmedRow('chat', { cost_per_result: 1, result_type: 'messaging_started' })
+    const usable = usableWinnerSlices([lead, chat], NOW, DIR)
+    expect(pickWinner(ctx(usable))).toBeNull()
+    const wantLead = { ...ctx(usable), signal: signal({ request: { result_type: 'lead' } }) }
+    expect(pickWinner(wantLead)?.id).toBe('lead')
   })
 })

@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { loadWinnerBoard } from '@/lib/factory/winner-decision'
-import { confirmIsPmOnly } from '@/lib/factory/winner-gate'
+import { confirmIsPmOnly, isGlobalAdminByEmail } from '@/lib/factory/winner-gate'
 
 export const dynamic = 'force-dynamic'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -26,7 +26,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       winners,
       pm_only: confirmIsPmOnly(cfg.data?.factory_config ?? null),
-      viewer_role: access.role === 'admin' ? 'magic_lab' : 'client_staff',
+      viewer_role: isGlobalAdminByEmail(access.user.email ?? '') ? 'magic_lab' : 'client_staff',
     })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })

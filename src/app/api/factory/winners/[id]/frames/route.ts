@@ -6,7 +6,7 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
-import { loadWinnerRow, mergePerformanceSegment } from '@/lib/factory/winner-decision'
+import { loadWinnerRow, mergePerformance } from '@/lib/factory/winner-decision'
 
 export const dynamic = 'force-dynamic'
 const BUCKET = 'content-factory'
@@ -69,7 +69,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (!(await allExist(params.id, paths))) {
       return NextResponse.json({ error: '有截图还没传上去，先传完再提交' }, { status: 409 })
     }
-    const merged = await mergePerformanceSegment(supabaseAdmin, row.data, 'frames', paths.map(publicUrl), new Date().toISOString())
+    const merged = await mergePerformance(supabaseAdmin, row.data, { frames: paths.map(publicUrl) }, new Date().toISOString())
     return merged.ok
       ? NextResponse.json({ frames: paths.map(publicUrl) })
       : NextResponse.json({ error: merged.error }, { status: merged.status })

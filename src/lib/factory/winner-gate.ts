@@ -1,16 +1,21 @@
 /**
- * 赢家闸：工厂只认「程序复核过 + 有权的人点过认」的赢家（设计稿 2026-11-05 §3.3，第 1 刀）。
+ * 赢家闸：工厂只认「程序复核通过 + 有权的人点过认」的赢家（设计稿 2026-11-05 §3.3，第 1 刀）。
  *
- * 所有读 winner_structures 去下单 / 出片的入口只许调 `loadUsableWinners`，不许各自查表。
- * 判定是关闭即失败：缺键、解析失败、取值不在固定集合 = 不可用。
+ * 照赢家出片（pickWinner）只许拿 `loadUsableWinners` 的结果，不许各自查表。
+ * 判定是关闭即失败：缺键、解析失败、取值不在固定集合、复核不是 passed、确认人对不上 = 不可用。
+ * （「别撞在跑赢家的题材」那道护栏不走这道闸，读全部 status=active 的行，见 evaluate.ts。）
  *
- * 状态存在 `performance` 的两段里，分开写互不覆盖：
- *   program_check = { state, at, reason?, frames_checked? }      程序复核结论
- *   pm_decision   = { decision, by, role, event_id, at, acknowledged_check_state }  人的决定（即确认回执）
- * 排序用 `performance.cost_per_result`（该广告组自己结果种类的单次成本）；缺这个数 = 不可用。
+ * 状态存在 `performance` 的几段里，分开写互不覆盖：
+ *   program_check        = { state, at, reason? }                    程序复核结论（只有 passed 算过）
+ *   pm_decision          = { decision, by, role, event_id, at }      最新一次人的决定（即确认回执）
+ *   pm_decision_history  = PmDecision[]                              之前的决定，只追加
+ *   cost_per_result + result_type                                    该广告组自己结果种类的单次成本
+ * 确认人在读取时再核一次：magic_lab 必须是全局管理员；client_staff 必须在该客户的员工名单里。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { getUserPermissions } from '@/lib/auth/whitelist'
+import { ACCESS_TYPES_CUSTOMER_ONLY } from '@/lib/auth/access-types'
 import type { WinnerSlice } from './types'
 
 export const PROGRAM_CHECK_STATES = ['passed', 'needs_human', 'failed'] as const
@@ -22,19 +27,24 @@ export type PmDecisionValue = (typeof PM_DECISIONS)[number]
 export const CONFIRMER_ROLES = ['magic_lab', 'client_staff'] as const
 export type ConfirmerRole = (typeof CONFIRMER_ROLES)[number]
 
+/** 与 ads-strategy/rules/core-metric.ts 的 CoreMetric 同一份取值（测试锁住两边一致，工厂不反向依赖广告策略目录） */
+export const WINNER_RESULT_TYPES = ['lead', 'messaging_started'] as const
+export type WinnerResultType = (typeof WINNER_RESULT_TYPES)[number]
+
 export type WinnerUnusableReason =
   | 'not_active'
   | 'performance_unreadable'
   | 'program_check_missing'
-  | 'program_check_failed'
+  | 'program_check_not_passed'
   | 'pm_decision_missing'
   | 'pm_decision_rejected'
   | 'receipt_invalid'
-  | 'human_check_not_acknowledged'
+  | 'confirmer_not_authorized'
+  | 'result_type_unknown'
   | 'cost_per_result_missing'
 
 export type WinnerVerdict =
-  | { usable: true; costPerResult: number }
+  | { usable: true; costPerResult: number; resultType: WinnerResultType }
   | { usable: false; reason: WinnerUnusableReason }
 
 export interface ProgramCheck {
@@ -49,8 +59,12 @@ export interface PmDecision {
   role: ConfirmerRole
   event_id: string
   at: string
-  /** 点「认」时看到的复核状态；复核没过（needs_human）时，人看过截图点认才算数 */
-  acknowledged_check_state: ProgramCheckState
+}
+
+/** 谁有权确认：magic_lab 查全局管理员名单；client_staff 查该客户员工邮箱（已小写） */
+export interface ConfirmerDirectory {
+  isGlobalAdmin: (email: string) => boolean
+  staffEmails: ReadonlySet<string>
 }
 
 export interface WinnerRow {
@@ -70,6 +84,12 @@ export interface WinnerRow {
 /** 回执里写的事件编号：同一次决定只有这一个编号，界面和 Inngest 用同一个。 */
 export function winnerDecisionEventId(winnerId: string, decision: PmDecisionValue, at: string): string {
   return `factory.winner.${decision}:${winnerId}:${at}`
+}
+
+/** requireGlobalAdmin 背后的同一判据：内部管理员且不限定客户（DEMO_ADMINS / 受限管理员不算）。 */
+export function isGlobalAdminByEmail(email: string): boolean {
+  const perms = getUserPermissions(email)
+  return perms !== null && perms.role === 'admin' && perms.allowedClientId === null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -94,17 +114,19 @@ export function readProgramCheck(performance: unknown): ProgramCheck | null {
   return { state, at, reason: typeof pc.reason === 'string' ? pc.reason : null }
 }
 
+export function parsePmDecision(value: unknown): PmDecision | null {
+  if (!isRecord(value)) return null
+  const decision = oneOf(value.decision, PM_DECISIONS)
+  const role = oneOf(value.role, CONFIRMER_ROLES)
+  const at = isoOrNull(value.at)
+  if (!decision || !role || !at) return null
+  if (typeof value.by !== 'string' || !value.by.includes('@')) return null
+  if (typeof value.event_id !== 'string') return null
+  return { decision, by: value.by, role, event_id: value.event_id, at }
+}
+
 export function readPmDecision(performance: unknown): PmDecision | null {
-  if (!isRecord(performance) || !isRecord(performance.pm_decision)) return null
-  const d = performance.pm_decision
-  const decision = oneOf(d.decision, PM_DECISIONS)
-  const role = oneOf(d.role, CONFIRMER_ROLES)
-  const ack = oneOf(d.acknowledged_check_state, PROGRAM_CHECK_STATES)
-  const at = isoOrNull(d.at)
-  if (!decision || !role || !ack || !at) return null
-  if (typeof d.by !== 'string' || !d.by.includes('@')) return null
-  if (typeof d.event_id !== 'string') return null
-  return { decision, by: d.by, role, event_id: d.event_id, at, acknowledged_check_state: ack }
+  return isRecord(performance) ? parsePmDecision(performance.pm_decision) : null
 }
 
 export function readCostPerResult(performance: unknown): number | null {
@@ -113,28 +135,43 @@ export function readCostPerResult(performance: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
 }
 
+export function readResultType(performance: unknown): WinnerResultType | null {
+  return isRecord(performance) ? oneOf(performance.result_type, WINNER_RESULT_TYPES) : null
+}
+
 /** 回执对得上：事件编号必须由这条赢家、这个决定、这个时间算出来；时间不能在未来。 */
 export function receiptMatches(winnerId: string, d: PmDecision, nowMs: number): boolean {
   if (d.event_id !== winnerDecisionEventId(winnerId, d.decision, d.at)) return false
   return Date.parse(d.at) <= nowMs + 5 * 60_000
 }
 
-export function judgeWinner(row: Pick<WinnerRow, 'id' | 'status' | 'performance'>, nowMs: number): WinnerVerdict {
+/** 点认的人现在还有没有这个资格（换了岗位 / 被移出名单的，之前认的也不算）。 */
+export function confirmerAuthorized(d: PmDecision, dir: ConfirmerDirectory): boolean {
+  const email = d.by.toLowerCase().trim()
+  if (d.role === 'magic_lab') return dir.isGlobalAdmin(email)
+  return !dir.isGlobalAdmin(email) && dir.staffEmails.has(email)
+}
+
+export function judgeWinner(
+  row: Pick<WinnerRow, 'id' | 'status' | 'performance'>,
+  nowMs: number,
+  dir: ConfirmerDirectory,
+): WinnerVerdict {
   if (row.status !== 'active') return { usable: false, reason: 'not_active' }
   if (!isRecord(row.performance)) return { usable: false, reason: 'performance_unreadable' }
   const check = readProgramCheck(row.performance)
   if (!check) return { usable: false, reason: 'program_check_missing' }
-  if (check.state === 'failed') return { usable: false, reason: 'program_check_failed' }
+  if (check.state !== 'passed') return { usable: false, reason: 'program_check_not_passed' }
   const decision = readPmDecision(row.performance)
   if (!decision) return { usable: false, reason: 'pm_decision_missing' }
   if (!receiptMatches(row.id, decision, nowMs)) return { usable: false, reason: 'receipt_invalid' }
+  if (!confirmerAuthorized(decision, dir)) return { usable: false, reason: 'confirmer_not_authorized' }
   if (decision.decision !== 'approved') return { usable: false, reason: 'pm_decision_rejected' }
-  if (check.state === 'needs_human' && decision.acknowledged_check_state !== 'needs_human') {
-    return { usable: false, reason: 'human_check_not_acknowledged' }
-  }
+  const resultType = readResultType(row.performance)
+  if (!resultType) return { usable: false, reason: 'result_type_unknown' }
   const cost = readCostPerResult(row.performance)
   if (cost === null) return { usable: false, reason: 'cost_per_result_missing' }
-  return { usable: true, costPerResult: cost }
+  return { usable: true, costPerResult: cost, resultType }
 }
 
 export const WINNER_COLUMNS =
@@ -146,16 +183,37 @@ export async function loadWinnerRows(sb: SupabaseClient, clientId: string): Prom
   return (data ?? []) as WinnerRow[]
 }
 
-/** 下单 / 出片唯一入口：只返回可用赢家，按单次成本从低到高。 */
-export async function loadUsableWinners(sb: SupabaseClient, clientId: string, now: Date = new Date()): Promise<WinnerSlice[]> {
-  const rows = await loadWinnerRows(sb, clientId)
-  return usableWinnerSlices(rows, now.getTime())
+/** 该客户的员工邮箱（只认客户自己的人：client / dashboard / both，排除受限管理员）。读不出就抛，调用方关闭即失败。 */
+export async function loadStaffEmails(sb: SupabaseClient, clientId: string): Promise<Set<string>> {
+  const { data, error } = await sb
+    .from('client_portal_users')
+    .select('email, access_type, scoped_admin')
+    .eq('client_id', clientId)
+    .in('access_type', ACCESS_TYPES_CUSTOMER_ONLY as readonly string[] as string[])
+  if (error) throw new Error(`client_portal_users query failed: ${error.message}`)
+  const out = new Set<string>()
+  for (const r of data ?? []) {
+    const row = r as { email?: unknown; scoped_admin?: unknown }
+    if (row.scoped_admin === true || typeof row.email !== 'string') continue
+    out.add(row.email.toLowerCase().trim())
+  }
+  return out
 }
 
-export function usableWinnerSlices(rows: readonly WinnerRow[], nowMs: number): WinnerSlice[] {
+export async function loadConfirmerDirectory(sb: SupabaseClient, clientId: string): Promise<ConfirmerDirectory> {
+  return { isGlobalAdmin: isGlobalAdminByEmail, staffEmails: await loadStaffEmails(sb, clientId) }
+}
+
+/** 照赢家出片的唯一入口：只返回可用赢家，按结果种类分组、组内按单次成本从低到高。 */
+export async function loadUsableWinners(sb: SupabaseClient, clientId: string, now: Date = new Date()): Promise<WinnerSlice[]> {
+  const [rows, dir] = await Promise.all([loadWinnerRows(sb, clientId), loadConfirmerDirectory(sb, clientId)])
+  return usableWinnerSlices(rows, now.getTime(), dir)
+}
+
+export function usableWinnerSlices(rows: readonly WinnerRow[], nowMs: number, dir: ConfirmerDirectory): WinnerSlice[] {
   const out: WinnerSlice[] = []
   for (const row of rows) {
-    const verdict = judgeWinner(row, nowMs)
+    const verdict = judgeWinner(row, nowMs, dir)
     if (!verdict.usable) continue
     out.push({
       id: row.id,
@@ -165,20 +223,26 @@ export function usableWinnerSlices(rows: readonly WinnerRow[], nowMs: number): W
       win_reason_tags: row.win_reason_tags ?? [],
       cost_per_thruplay: row.cost_per_thruplay,
       cost_per_result: verdict.costPerResult,
+      result_type: verdict.resultType,
       current_frequency: row.current_frequency,
       status: row.status,
     })
   }
-  return out.sort((a, b) => a.cost_per_result - b.cost_per_result)
+  return out.sort((a, b) => a.result_type.localeCompare(b.result_type) || a.cost_per_result - b.cost_per_result)
 }
 
-/** PM 推翻一次员工认过的赢家 → 该客户回到只认 PM（第 1 刀只给判定，不自动写配置）。 */
+/** PM 推翻一次员工认过的赢家 → 该客户回到只认 PM（设计稿 §4 降级规则）。 */
 export function shouldRevertToPmOnly(previous: PmDecision | null, next: Pick<PmDecision, 'decision' | 'role'>): boolean {
   return previous !== null
     && previous.decision === 'approved'
     && previous.role === 'client_staff'
     && next.role === 'magic_lab'
     && next.decision === 'rejected'
+}
+
+/** 员工不能改 Magic Lab 定下的决定。 */
+export function staffCannotOverride(previous: PmDecision | null, nextRole: ConfirmerRole): boolean {
+  return previous !== null && previous.role === 'magic_lab' && nextRole === 'client_staff'
 }
 
 /** factory_config.winner_confirm_pm_only：true = 只有 Magic Lab 内部账号能点认。 */

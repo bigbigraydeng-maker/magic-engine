@@ -62,27 +62,29 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('显示骨架、表现和「等你认」；复核没完成时不勾「看过截图」就点不了认', async () => {
-  await mount({ winners: [WINNER], pm_only: false, viewer_role: 'magic_lab' })
+it('复核通过、等你认：显示骨架和表现，点认发出请求并显示谁记下的', async () => {
+  await mount({ winners: [{ ...WINNER, program_check: { state: 'passed', at: '2026-11-04T12:46:39.651Z', reason: null } }], pm_only: false, viewer_role: 'magic_lab' })
   const text = document.body.textContent ?? ''
   expect(text).toContain('当前广告样板（赢家）')
   expect(text).toContain('等你认')
-  expect(text).toContain('复核没完成：拿不到原视频')
-  expect(text).not.toContain('source_video_unavailable')
   expect(text).toContain('每个 NZ$4.57')
   expect(text).toContain('截图还没传上来')
-  expect(btn('认')?.hasAttribute('disabled')).toBe(true)
-
-  const tick = document.querySelector('input[type="checkbox"]')
-  await click(tick ?? undefined)
-  expect(btn('认')?.hasAttribute('disabled')).toBe(false)
+  expect(document.querySelector('input[type="checkbox"]')).toBeNull()
   await click(btn('认'))
   await flush()
-
   const post = calls.find((c) => c.method === 'POST')
   expect(post?.url).toBe('/api/factory/winners/w1/decision')
   expect(post?.body).toEqual({ decision: 'approved' })
   expect(document.body.textContent).toContain('已记下：认，记录人 pm@magiclab.example')
+})
+
+it('复核没完成 → 如实写「拿不到原视频，这条现在不能用」，不给认按钮', async () => {
+  await mount({ winners: [{ ...WINNER, state: 'unusable', reason: 'program_check_not_passed' }], pm_only: false, viewer_role: 'magic_lab' })
+  const text = document.body.textContent ?? ''
+  expect(text).toContain('复核没完成：拿不到原视频，这条现在不能用')
+  expect(text).not.toContain('source_video_unavailable')
+  expect(btn('认')).toBeUndefined()
+  expect(btn('不认')).toBeUndefined()
 })
 
 it('只认 PM 的客户有提示；复核中 / 不可用的不给按钮', async () => {

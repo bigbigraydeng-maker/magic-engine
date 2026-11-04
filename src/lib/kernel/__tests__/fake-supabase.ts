@@ -140,7 +140,7 @@ export interface FakeSupabaseOptions {
 }
 
 export interface Filter {
-  kind: 'eq' | 'in' | 'is' | 'gte' | 'lte' | 'not' | 'or' | 'like'
+  kind: 'eq' | 'in' | 'is' | 'gte' | 'lte' | 'not' | 'or' | 'like' | 'json_eq'
   column: string
   value: unknown
 }
@@ -259,6 +259,9 @@ function matches(row: Row, filters: Filter[]): boolean {
       }
       case 'or':
         return orMatches(row, String(f.value))
+      case 'json_eq':
+        // `.filter(col, 'eq', JSON.stringify(old))`：整份 jsonb 原值比较（乐观锁写法）
+        return JSON.stringify(v ?? null) === f.value
       default:
         return true
     }
@@ -395,6 +398,14 @@ export function createFakeSupabase(
     }
     builder.is = (column: string, value: unknown) => {
       filters.push({ kind: 'is', column, value })
+      return chain()
+    }
+    builder.filter = (column: string, operator: string, value: unknown) => {
+      // 🔴 只认 jsonb 整值相等；别的算子直接炸，不能静默当「匹配」
+      if (operator !== 'eq' || typeof value !== 'string') {
+        throw new Error(`[fake-supabase] filter 只支持 (col, 'eq', JSON 字符串)，收到 ${operator}`)
+      }
+      filters.push({ kind: 'json_eq', column, value })
       return chain()
     }
     builder.gte = (column: string, value: unknown) => {

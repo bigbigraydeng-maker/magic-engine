@@ -80,8 +80,16 @@ export interface WinnerSlice {
   cost_per_thruplay: number | null
   /** 该赢家所在广告组自己结果种类的单次成本（winner-gate 只放有这个数的进来） */
   cost_per_result: number
+  /** 结果种类（lead / messaging_started）；只在同一种里比单次成本 */
+  result_type: 'lead' | 'messaging_started'
   current_frequency: number | null
   status: string
+}
+
+/** 「别撞在跑赢家的题材」护栏用：全部 status=active 的赢家，不经确认闸 */
+export interface WinnerThemeGuard {
+  hook_segment: Record<string, unknown>
+  current_frequency: number | null
 }
 
 export interface BlocklistEntry {
@@ -118,7 +126,10 @@ export interface GateContext {
   /** 近 14 天全部工单 angle(含打回/归档,魏征 F4) */
   recentAngles: string[]
   blocklist: BlocklistEntry[]
+  /** 照赢家出片只能用这些：程序复核通过 + 有权的人点过认（winner-gate） */
   activeWinners: WinnerSlice[]
+  /** 题材防撞护栏（护栏 7）：全部 status=active 的赢家，不管认没认 */
+  winnerThemeGuards: WinnerThemeGuard[]
   /** factory_balance_ledger 结余;null = 查询失败 */
   balanceUsd: number | null
   /** 该 client 当日已建工单数 / 当日生成成本 */

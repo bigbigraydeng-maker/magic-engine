@@ -174,8 +174,9 @@ function isBlocked(ctx: GateContext, angle: string): boolean {
     if (b.permanent) return true
     if (!b.expires_at || new Date(b.expires_at).getTime() > ctx.now.getTime()) return true
   }
-  // 防撞 active winner 题材(护栏 7):frequency ≤ 2.5 的在跑赢家题材不做,> 2.5 解锁续命
-  for (const w of ctx.activeWinners) {
+  // 防撞 active winner 题材(护栏 7):frequency ≤ 2.5 的在跑赢家题材不做,> 2.5 解锁续命。
+  // 读全部 status=active 的赢家（不经确认闸）：没认的赢家题材也照样避开。
+  for (const w of ctx.winnerThemeGuards) {
     const theme = asString((w.hook_segment ?? {})['description'])
     if (!theme || normalizeAngle(theme) !== n) continue
     const freq = w.current_frequency
@@ -258,11 +259,14 @@ export function pickWinner(ctx: GateContext): WinnerSlice | null {
   if (reuse === false) return null
   if (ctx.signal.signal_type === 'new_campaign' || ctx.signal.signal_type === 'asset_gap') return null
   // 按该赢家广告组自己结果种类的单次成本挑（留资广告 = 每个留资多少钱），不再按「看完视频成本」。
-  // 缺这个数的赢家在 winner-gate 已判不可用，进不到这里。
-  const active = ctx.activeWinners
-    .filter((w) => w.status === 'active' && Number.isFinite(w.cost_per_result) && w.cost_per_result > 0)
-    .sort((a, b) => a.cost_per_result - b.cost_per_result)
-  return active[0] ?? null
+  // 只在同一种结果里比：信号点名了种类就只看那一种；没点名又混着两种 = 比不了，不挑。
+  const active = ctx.activeWinners.filter(
+    (w) => w.status === 'active' && Number.isFinite(w.cost_per_result) && w.cost_per_result > 0,
+  )
+  const wanted = ctx.signal.request['result_type']
+  const pool = typeof wanted === 'string' ? active.filter((w) => w.result_type === wanted) : active
+  if (new Set(pool.map((w) => w.result_type)).size > 1) return null
+  return [...pool].sort((a, b) => a.cost_per_result - b.cost_per_result)[0] ?? null
 }
 
 // ── 素材选取 + A/B 轨分流(护栏 1/6,§5.1 步骤 5)──────────────────────────────
