@@ -79,6 +79,7 @@ function baseInput(): JudgeInput {
       capi_preflight: { ok: true, stage: null, token_valid: true, pixel_visible: true },
       capi_events_7d: { confirmed: 4, in_doubt: 0, failed: 0 },
       meta_token_resolved: true,
+      conversion_stage: 'dry_run',
       jobs: [
         { job: 'meta-leads-sync', max_age_hours: 3, last_finished_at: hoursAgo(1), last_status: 'completed' },
         { job: 'messenger-sync-hourly', max_age_hours: 3, last_finished_at: hoursAgo(0.5), last_status: 'completed' },
@@ -638,6 +639,31 @@ describe('tracking.capi_ready', () => {
     expect(g.hard).toBe(false)
   })
 
+  it('正式回传、近 7 天有线索、成功回传是 0 → 黄，注明管道通但没料', () => {
+    const g = gate(judge(i => {
+      i.env.conversion_stage = 'live'
+      i.env.capi_events_7d = { confirmed: 0, in_doubt: 0, failed: 0 }
+    }), KEY)
+    expect(g.status).toBe('yellow')
+    expect(g.reason).toBe('管道通但没料')
+  })
+
+  it('正式回传但近 7 天没有线索、成功回传是 0 → 仍绿', () => {
+    const g = gate(judge(i => {
+      i.env.conversion_stage = 'live'
+      i.env.capi_events_7d = { confirmed: 0, in_doubt: 0, failed: 0 }
+      i.crm.web_form_touchpoints_7d = 0
+      i.ga4.events_7d = {}
+      for (const dataset of i.meta.datasets) dataset.events_7d = { PageView: 1 }
+    }), KEY)
+    expect(g.status).toBe('green')
+  })
+
+  it('正式回传、有线索、近 7 天有成功回传 → 仍绿', () => {
+    const g = gate(judge(i => { i.env.conversion_stage = 'live' }), KEY)
+    expect(g.status).toBe('green')
+  })
+
   it('探活没通过 → 红（但只是软门）', () => {
     const g = gate(judge(i => { i.env.capi_preflight = { ok: false, stage: 'config', token_valid: null, pixel_visible: null } }), KEY)
     expect(g.status).toBe('red')
@@ -647,6 +673,15 @@ describe('tracking.capi_ready', () => {
   it('近 7 天有失败的回传 → 黄；有「不确定」的 → 黄', () => {
     expect(gate(judge(i => { i.env.capi_events_7d = { confirmed: 4, in_doubt: 0, failed: 1 } }), KEY).status).toBe('yellow')
     expect(gate(judge(i => { i.env.capi_events_7d = { confirmed: 4, in_doubt: 1, failed: 0 } }), KEY).status).toBe('yellow')
+  })
+
+  it('正式回传且成功回传是 0，但已有失败 → 仍按失败出黄，不改成没料', () => {
+    const g = gate(judge(i => {
+      i.env.conversion_stage = 'live'
+      i.env.capi_events_7d = { confirmed: 0, in_doubt: 0, failed: 2 }
+    }), KEY)
+    expect(g.status).toBe('yellow')
+    expect(g.reason).toContain('失败')
   })
 
   it('探活通过但没读到回传统计 → 黄', () => {

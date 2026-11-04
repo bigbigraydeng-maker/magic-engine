@@ -350,6 +350,11 @@ export interface EnvFacts {
   capi_events_7d: { confirmed: number; in_doubt: number; failed: number } | null
   /** 有没有解析出可用的 Meta 令牌（只记有没有，不记值） */
   meta_token_resolved: boolean
+  /**
+   * 客户转化回传阶段：live = 正式发送，dry_run = 试运行。
+   * null = 没读到，或库里的值不是这两档（不能当成正式发送）。
+   */
+  conversion_stage: 'live' | 'dry_run' | null
   jobs: CronJobFact[]
   as_of: string
 }
