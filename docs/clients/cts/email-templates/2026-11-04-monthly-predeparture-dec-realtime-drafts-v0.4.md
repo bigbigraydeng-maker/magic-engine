@@ -1,6 +1,7 @@
 # 12 月初两篇月信 v0.4（实时版·润色第二遍）——按 2026-11-04 当天真实核查重写
 
-> 状态：**草稿 v0.4（润色版），只在本机，未发送。** PM 11-04 看完第一遍后回「方向是对的，内容还需要润色」，本文件 §3 的信是润色后的第二遍；第一遍的文字留在 git 历史里（提交 5d8c4fdcc）。取代 v0.3 的两篇正文（v0.3 文件保留作历史，不删）。
+> 状态：**草稿 v0.4（润色版）；PM 2026-11-05 已对文字和署名点头（见下一行）；只在本机，未发送；发送仍须 PM 本人说「发」。** PM 11-04 看完第一遍后回「方向是对的，内容还需要润色」，本文件 §3 的信是润色后的第二遍；第一遍的文字留在 git 历史里（提交 5d8c4fdcc）。取代 v0.3 的两篇正文（v0.3 文件保留作历史，不删）。
+> **PM 点头记录**：2026-11-05（新西兰时间 0 点 46 分前后）PM 在 126 窗口回「可以，并且附带 Baker Gu 的名称」，回答的是我问的「信的文字和署名『China Travel Specialist』这样定，可以吗？」。署名因此定为：第一行 Baker Gu，第二行 China Travel Specialist, CTS Tours。这是对**文字**的点头，不是发送授权。
 > 日期：2026-11-04 ｜ 来源：126 号窗口；PM 2026-11-04 指令：「内容不够好，内容我需要结合实时 realtime 的撰写」「方向是对的，内容还需要润色」 ｜ 风险：C（仅文档）
 > 设计依据：[实时写信线设计稿 v0.1](../../../specs/2026-11-04-newsletter-realtime-context-line-design-v0.1.md)。本文件就是那份设计「手工跑一遍」的产物：§2 是情境包，§3 是据此写的信，§6 是被丢掉的热点。
 > **保鲜规定**：§2 里标「发前重核」的条目，发送日前 2 天（11/30 周一）必须重查一遍；变了就改信，信里每个「as at」的日期同步改。
@@ -168,7 +169,7 @@ So pack light layers for the cooler mornings, a packable waterproof jacket and c
 4. **（已解决）保险「we strongly recommend」**：Best of China 与 China Panorama 两页都有，不用再请 Baker 确认。
 5. **SafeTravel 级别是「Exercise increased caution」（黄区）**：官方原话，客人点进链接也看得到；信里按原话转述，并补上「四档里的第二档」「Among other things」「The full page is worth a read」，避免读起来像只有这两条。留不留由 PM 定；如果不想写，删 3.1 / 3.3 里带 "exercise increased caution" 的那一句即可，其余不受影响。
 6. **VPN**：官网应用指南自己写了「VPN legality and reliability change — verify current policies」，上一遍的信丢掉了这个提醒。本遍补回（「VPN rules and reliability change, so … check the current position」）。PM 觉得这个话题太敏感，可整句删。
-7. **（高）署名职位冲突——需要 PM 定**：官网**首页**「Meet your specialist」写 Baker Gu＝「Founder & Lead China Specialist」；官网**「关于我们」页**写 **Lisa Li, MNZM＝Managing Director、Founder of CTS Tours New Zealand**，而 Baker Gu＝「China Travel Specialist」，没有创始人头衔。上一遍的信和欢迎信 v1 都署「Baker Gu, Founder, CTS Tours」。本遍先把这四封信改署「**China Travel Specialist, CTS Tours**」（跟「关于我们」页一致，说少不说多）；如果 Baker 确实是创始人之一，回 `Founder` 我改回去。欢迎信 v1 草稿也有同一处，等欢迎信那件事一起定。**第二位审查员抽查了 9 个带头衔的官网页面（首页、关于我们、专家页 `/experts/baker-gu`、4 篇博客作者框等）：8 页写 China Travel Specialist，只有首页写 Founder & Lead China Specialist——首页是孤例。**
+7. **（已定：PM 11-05 回「可以」，署名＝Baker Gu / China Travel Specialist, CTS Tours）署名职位冲突**：官网**首页**「Meet your specialist」写 Baker Gu＝「Founder & Lead China Specialist」；官网**「关于我们」页**写 **Lisa Li, MNZM＝Managing Director、Founder of CTS Tours New Zealand**，而 Baker Gu＝「China Travel Specialist」，没有创始人头衔。上一遍的信和欢迎信 v1 都署「Baker Gu, Founder, CTS Tours」。本遍先把这四封信改署「**China Travel Specialist, CTS Tours**」（跟「关于我们」页一致，说少不说多）；如果 Baker 确实是创始人之一，回 `Founder` 我改回去。欢迎信 v1 草稿也有同一处，等欢迎信那件事一起定。**第二位审查员抽查了 9 个带头衔的官网页面（首页、关于我们、专家页 `/experts/baker-gu`、4 篇博客作者框等）：8 页写 China Travel Specialist，只有首页写 Founder & Lead China Specialist——首页是孤例。**
 8. **所有 ctstours.co.nz 链接页顶部都挂着免签横幅**（「visit China visa-free for 30 days (until 31 Dec 2026)」）：客人点信里的打包指南、应用指南、团页，会看到写着“到 2026 年底”的免签横幅，而他们都是 2027 年出发，可能来电话问。信里一个字没提免签（照 PM 的「先不说」），但链接页绕过了这个决定。这是 PM 的决定：①留着、告诉接电话的同事怎么答；②请官网把横幅改成中性说法。我可以写一段给同事用的统一回答。
 9. **护照六个月**：官网签证指南写「建议但非必须」，另一页（FAQ）写「minimum 6 months validity remaining」，两页对是否必须说法不一。信里只写 “We recommend”，并去掉了 “for entry stamps” 这半句（它描述的是入境条件，靠近 PM 关掉的话题）。
 10. **有别的窗口正在改 Signature 团的酒店和火车**（会话列表里的「Signature 4 tours: hotel and train updates」）：China Panorama 的行程可能变，F02 在 11/30 必须重核。

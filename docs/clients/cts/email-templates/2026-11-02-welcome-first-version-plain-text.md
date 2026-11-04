@@ -3,7 +3,7 @@
 > 状态：**草稿，等 PM 确认**（PM 确认后在这里写日期）｜ 作者：126 号窗口 ｜ 起草日：2026-11-02
 > 用途：ME 触发型发送闸里「CTS 新线索欢迎信」的第一版模板。依据：docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §6.2 和决定 D4（PM 11-02 回「可以」：第一版短纯文字、只带名字、不写团名价格日期）。
 > 本文件不是发送授权：授权只存在于授权表里，并且绑定模板指纹——改一个字授权就作废，要重新点。
-> **⚠️ 2026-11-04 新发现，PM 回「行」之前要先定：**正文里的「I'm Baker, the founder.」和署名「Founder, CTS Tours」与官网「关于我们」页冲突（该页写 Lisa Li, MNZM＝创始人，Baker Gu＝China Travel Specialist）。见 §5 第 4 条。
+> **2026-11-05 更新**：官网「关于我们」页写 Lisa Li, MNZM＝创始人、Baker Gu＝China Travel Specialist（独立复核抽查 9 个带头衔的官网页，8 页相同，只有首页写 Founder）；月信署名已由 PM 11-05 定为「Baker Gu / China Travel Specialist, CTS Tours」。本稿的自我介绍与署名已同步改成同样写法，**新正文等 PM 回「欢迎信行」确认**（见 §5 第 4 条）。
 
 ## 1. 主题与正文（英文、纯文字；`{{first_name}}` 是唯一的变量）
 
@@ -12,7 +12,7 @@
 ```
 Kia ora {{first_name}},
 
-Thank you for your interest in China with CTS Tours. I'm Baker, the founder. We're an Auckland-based team, backed by China Travel Service, and we offer small-group China tours from Auckland.
+Thank you for your interest in China with CTS Tours. I'm Baker Gu, a China Travel Specialist. We're an Auckland-based team, backed by China Travel Service, and we offer small-group China tours from Auckland.
 
 You're welcome to browse all our China tours here:
 https://www.ctstours.co.nz/china-tours?utm_source=me&utm_medium=email&utm_campaign=welcome_me_v1
@@ -21,7 +21,7 @@ If you have any questions at all, just reply to this email or call us on 0800 28
 
 Warm regards,
 Baker Gu
-Founder, CTS Tours
+China Travel Specialist, CTS Tours
 ```
 
 系统会在正文末尾自动加一行可见的退订说明，并带一键退订的信头（设计稿 §6.1）——正文里不自己写退订。
@@ -32,14 +32,14 @@ Founder, CTS Tours
 |---|---|---|
 | Kia ora {{first_name}}, | 问候语，没有事实可查 | 客套话 |
 | Thank you for your interest in China with CTS Tours. | 公司名 CTS Tours 见官网首页；「感谢关注」是客套 | 官网可溯（名称）+ 客套话 |
-| I'm Baker, the founder. | 官网首页：Baker Gu，头衔「Founder & Lead China Specialist」；**但官网「关于我们」页（2026-11-04 复核）写 Lisa Li, MNZM＝Managing Director、Founder of CTS Tours New Zealand，Baker Gu＝China Travel Specialist，没有创始人头衔** | **官网两页冲突 → 待 PM 定**（原标记「官网可溯」只核了首页，作废） |
+| I'm Baker Gu, a China Travel Specialist. | 官网「关于我们」页：Baker Gu＝「China Travel Specialist」；专家页 /experts/baker-gu 与 4 篇博客作者框相同（独立复核抽查 9 页，8 页相同；只有首页写「Founder & Lead China Specialist」）；名字加头衔的写法由 PM 11-05 定 | 官网可溯（多数页面）+ PM 定 |
 | We're an Auckland-based team, backed by China Travel Service, | 官网首页页面说明「Auckland-based and backed by China Travel Service」；简报 core_proposition「Backed by China Travel Service (CTS)」 | 官网可溯 + brief 可溯 |
 | and we offer small-group China tours from Auckland. | 官网首页「Expert-led small groups」；/china-tours「Signature … small groups up to 16」「Auckland departures」；简报「small-group China tours」 | 官网可溯 + brief 可溯 |
 | You're welcome to browse all our China tours here: [链接] | 链接返回 200，页面标题含「All China Tours」；统计参数沿用 v2 的写法（utm_source / utm_campaign），来源名改成 me | 官网可溯 |
 | If you have any questions at all, just reply to this email | 设计稿 §6.1 写 Reply-To 指向 CTS 现有邮箱，线上还没核 | **未证实**（上线前要核 Reply-To 真的配到 info@） |
 | or call us on 0800 287 888. | 官网首页电话链接（页面上显示成「0800 CTS 888」，同一个号码） | 官网可溯 |
 | We'd be glad to help. | 客套话 | 客套话 |
-| Warm regards, Baker Gu, Founder, CTS Tours | 同第 3 句 | **同上，待 PM 定** |
+| Warm regards, Baker Gu, China Travel Specialist, CTS Tours | 同上 | 官网可溯 + PM 定 |
 
 ## 3. 对照客户简报的红线
 
@@ -57,7 +57,7 @@ Founder, CTS Tours
 1. 谁把这段正文录进 ME 的模板管理（设计稿 §6.2 写「你们或我起草、你们确认」）。
 2. Reply-To 是否真指向 info@；不是的话，「just reply to this email」要改成写明邮箱地址（会让模板指纹变化，授权要重新点）。
 3. From 署名建议显示为「Baker from CTS Tours」（沿用 v2 主题行的写法），和正文署名一致。
-4. **（2026-11-04 新增，要 PM 定，且必须在授权之前定）自我介绍与署名里的 “Founder”**：月信 v0.4 的独立审查员发现、我随后重新打开官网首页和「关于我们」页核实属实——首页把 Baker 写成「Founder & Lead China Specialist」，「关于我们」页把 Lisa Li, MNZM 写成 Managing Director / Founder of CTS Tours New Zealand、把 Baker 写成「China Travel Specialist」。稳妥改法：把 “I'm Baker, the founder.” 改成 “I'm Baker.”，署名改成 “China Travel Specialist, CTS Tours”（月信 v0.4 四封信已先这样写）；如果 Baker 确实是创始人之一，就保留现状。**注意：改一个字，授权指纹就变，所以要在 PM 点头之前定。**
+4. **（2026-11-05 已按 PM 的决定同步）自我介绍与署名**：原稿「I'm Baker, the founder.」和署名「Founder, CTS Tours」与官网「关于我们」页冲突（该页：Lisa Li, MNZM＝Managing Director、Founder of CTS Tours New Zealand，Baker Gu＝China Travel Specialist）。PM 11-05 对月信回「可以」，署名定为 Baker Gu / China Travel Specialist, CTS Tours，本稿已同步成「I'm Baker Gu, a China Travel Specialist.」和同样的署名。**这是正文的改动，PM 还没对新正文说「行」；改一个字，授权指纹就变，所以以 PM 回「欢迎信行」的那一版为准。**
 
 ## 6. Reuse Statement
 
