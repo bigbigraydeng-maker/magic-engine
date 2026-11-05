@@ -10,6 +10,10 @@ vi.mock('@/lib/campaign/daily-plan-auto-publish-worker-store', async importOrigi
   claimManualAttempt: vi.fn(),
   finishAttempt: vi.fn(),
 }))
+vi.mock('@/lib/campaign/daily-plan-publish-runner', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/campaign/daily-plan-publish-runner')>()
+  return { ...actual, runDailyPlanPublish: vi.fn(actual.runDailyPlanPublish) }
+})
 vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: vi.fn() }))
 vi.mock('@/lib/meta/token-manager', () => ({
   getMetaTokenForClient: vi.fn(),
@@ -26,6 +30,7 @@ vi.mock('@/lib/meta/first-comment', async importOriginal => ({
 }))
 
 import { POST } from '../route'
+import { runDailyPlanPublish } from '@/lib/campaign/daily-plan-publish-runner'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
@@ -51,6 +56,7 @@ const mockSendInngestEvent = vi.mocked(sendInngestEvent)
 const mockFreshClaims = vi.mocked(listFreshClaims)
 const mockUnconfirmed = vi.mocked(listUnconfirmedAttempts)
 const mockClaim = vi.mocked(claimManualAttempt)
+const mockRunner = vi.mocked(runDailyPlanPublish)
 const mockFinish = vi.mocked(finishAttempt)
 const mockGetMetaToken = vi.mocked(getMetaTokenForClient)
 const mockGetStoredPageToken = vi.mocked(getStoredPageToken)
@@ -1370,7 +1376,7 @@ describe('publish bridge — never races the unattended publisher', () => {
     expect(mockClaim).toHaveBeenCalled()
     const closed = mockFinish.mock.calls.map(call => call[0].patch.status)
     expect(closed.length).toBeGreaterThan(0)
-    expect(closed.every(status => status === 'unknown_outcome' || status === 'failed_final')).toBe(true)
+    expect(closed.every(status => status === 'unknown_outcome')).toBe(true)
     expect(response.status).toBeGreaterThanOrEqual(200)
   })
 
@@ -1385,6 +1391,77 @@ describe('publish bridge — never races the unattended publisher', () => {
     expect(response.status).toBe(200)
     expect(log).toHaveBeenCalled()
     log.mockRestore()
+  })
+
+  it('🔴 a run that throws after claiming closes the claim as unknown_outcome and the request still fails', async () => {
+    stubTables()
+    armProvider()
+    mockRunner.mockImplementationOnce(async input => {
+      await input.beforeSend?.(DATES[0])
+      throw new Error('boom')
+    })
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+
+    expect(response.status).toBe(500)
+    expect(mockFinish).toHaveBeenCalledWith(
+      expect.objectContaining({ date: DATES[0], patch: expect.objectContaining({ status: 'unknown_outcome' }) }),
+    )
+  })
+
+  it('🔴 a claim whose call threw may still have been written, so that date is closed as unknown_outcome too', async () => {
+    stubTables()
+    armProvider()
+    mockClaim.mockRejectedValue(new Error('read-back failed'))
+
+    await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(mockFinish).toHaveBeenCalledWith(
+      expect.objectContaining({ date: DATES[0], patch: expect.objectContaining({ status: 'unknown_outcome' }) }),
+    )
+  })
+
+  it('closing the claim is retried once before giving up', async () => {
+    stubTables()
+    armProvider()
+    mockFinish.mockRejectedValueOnce(new Error('db blip')).mockResolvedValue(true)
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+
+    expect(response.status).toBe(200)
+    expect(mockFinish).toHaveBeenCalledTimes(2)
+    log.mockRestore()
+  })
+
+  it('🔴 a claim that nobody closed is turned into unknown_outcome (so a person can act) before the date is refused', async () => {
+    stubTables()
+    armProvider()
+    mockUnconfirmed.mockResolvedValue([{ date: DATES[0], status: 'claimed', request_id: 'req-old' } as never])
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+
+    expect(response.status).toBe(409)
+    expect(mockFinish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        date: DATES[0],
+        requestId: 'req-old',
+        patch: expect.objectContaining({ status: 'unknown_outcome', reason_code: 'STALE_CLAIM' }),
+      }),
+    )
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('an attempt that is already unknown_outcome is left alone when the date is refused', async () => {
+    stubTables()
+    armProvider()
+    mockUnconfirmed.mockResolvedValue([{ date: DATES[0], status: 'unknown_outcome', request_id: 'req-old' } as never])
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+
+    expect(response.status).toBe(409)
+    expect(mockFinish).not.toHaveBeenCalled()
   })
 
   it('a dry run never looks at claims', async () => {

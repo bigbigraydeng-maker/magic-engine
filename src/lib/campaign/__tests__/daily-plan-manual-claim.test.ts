@@ -51,4 +51,15 @@ describe('manualAttemptPatch', () => {
     expect(manualAttemptPatch(DATE, { published: [{ date: DATE }], failed: [] }, plain)).toEqual(unknown)
     expect(manualAttemptPatch(DATE, { published: [{ date: '2026-11-10', post_id: '9_9' }] }, plain)).toEqual(unknown)
   })
+
+  it('with several entries for the date, the newest published one is used', () => {
+    const patch = manualAttemptPatch(DATE, { published: [{ date: DATE, post_id: 'OLD_1' }, { date: DATE, post_id: 'NEW_2' }] }, plain)
+    expect(patch.post_id).toBe('NEW_2')
+  })
+
+  it('a date in both lists (an older run and this one) cannot be told apart, so it is unknown_outcome', () => {
+    expect(
+      manualAttemptPatch(DATE, { published: [{ date: DATE, post_id: 'OLD_1' }], failed: [{ date: DATE, certainty: 'rejected' }] }, plain).status,
+    ).toBe('unknown_outcome')
+  })
 })

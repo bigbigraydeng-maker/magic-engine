@@ -28,6 +28,7 @@ import { runDailyPlanPublish } from '@/lib/campaign/daily-plan-publish-runner'
 import { randomUUID } from 'crypto'
 import {
   claimManualAttempt,
+  type AttemptRecord,
   finishAttempt,
   isMissingTableError,
   listFreshClaims,
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       // If the auto-publish tables are not there at all, there is no unattended publisher to collide with; any
       // other read failure stops the publish (fail closed).
       const freshSince = new Date(Date.now() - AUTO_PUBLISH_CLAIM_FRESH_MS)
-      const readAttempts = (read: () => Promise<{ date: string }[]>) =>
+      const readAttempts = (read: () => Promise<AttemptRecord[]>): Promise<AttemptRecord[]> =>
         read().catch(error => {
           if (isMissingTableError(error)) return []
           throw error
@@ -79,14 +80,34 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       ])
       const wanted = (attempt: { date: string }) => !command.dates || command.dates.includes(attempt.date)
       // An unconfirmed date may already be on the Page: publishing it again by hand is how a Post goes out twice.
-      const unsure = unconfirmed.filter(wanted).map(attempt => attempt.date)
+      const unsureRows = unconfirmed.filter(wanted)
+      const unsure = unsureRows.map(attempt => attempt.date)
       if (unsure.length > 0) {
+        // A claim nobody closed (a dead process, a failed write) would otherwise block this date forever: nothing
+        // else turns it into something a person can act on while auto-publish is only practising. Mark it
+        // unknown_outcome (guarded by its own request id, so a live claim that finishes meanwhile is untouched).
+        await Promise.all(
+          unsureRows
+            .filter(row => row.status === 'claimed')
+            .map(row =>
+              finishAttempt({
+                planId: command.plan_id,
+                date: row.date,
+                requestId: row.request_id,
+                patch: { status: 'unknown_outcome', reason_code: 'STALE_CLAIM', next_retry_at: null },
+                now: new Date(),
+              }).catch(error => {
+                console.error('[daily-plan publish] could not mark a stale claim as unknown', { clientId, date: row.date, error: errorMessage(error) })
+                return false
+              })
+            )
+        )
         return NextResponse.json(
           {
             success: false,
             error: 'AUTO_PUBLISH_UNCONFIRMED',
             dates: unsure,
-            hint: '自动发布没确认这些日期有没有已经发出去。先去 Facebook 主页看一眼：已经发出的，在今日待办里确认；没发出的，也在待办里处理后再手动发，避免同一条发两次。',
+            hint: '自动发布没确认这些日期有没有已经发出去。先去 Facebook 主页看一眼，再到今日待办里点「确认」（已发出 / 没发出）；确认完再手动发，避免同一条发两次。',
           },
           { status: 409 }
         )
@@ -108,29 +129,43 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // send one date at the same moment. Dates are claimed one by one right before their Facebook call.
     const requestId = randomUUID()
     const claimed = new Map<string, ManualClaim>()
+    // Dates where the claim call threw: the write may still have landed, so they are closed as unknown too.
+    const maybeClaimed = new Set<string>()
     const claimDate = async (date: string): Promise<boolean> => {
-      const taken = await claimManualAttempt({ clientId, planId: command.plan_id, date, requestId, now: new Date() }).catch(error => {
+      let taken: Awaited<ReturnType<typeof claimManualAttempt>> | { claimed: true; restoreRecalled: false; untracked: true }
+      try {
+        taken = await claimManualAttempt({ clientId, planId: command.plan_id, date, requestId, now: new Date() })
+      } catch (error) {
         // No attempts table at all means there is no unattended publisher to share a date with.
-        if (isMissingTableError(error)) return { claimed: true as const, restoreRecalled: false, untracked: true }
+        if (isMissingTableError(error)) return true
+        maybeClaimed.add(date)
         throw error
-      })
+      }
       if (!taken.claimed) return false
-      if (!('untracked' in taken)) claimed.set(date, { restoreRecalled: taken.restoreRecalled })
+      claimed.set(date, { restoreRecalled: taken.restoreRecalled })
       return true
+    }
+    const closeOne = async (date: string, claim: ManualClaim, receipt: unknown): Promise<boolean> => {
+      const patch = manualAttemptPatch(date, receipt, claim)
+      // One retry: a claim left open blocks the date until a person resolves it.
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          return await finishAttempt({ planId: command.plan_id, date, requestId, patch, now: new Date() })
+        } catch (error) {
+          console.error('[daily-plan publish] could not close the manual claim', { clientId, planId: command.plan_id, date, attempt, error: errorMessage(error) })
+        }
+      }
+      return false
     }
     const closeClaims = async (receipt: unknown) => {
       for (const [date, claim] of claimed) {
-        const closed = await finishAttempt({
-          planId: command.plan_id,
-          date,
-          requestId,
-          patch: manualAttemptPatch(date, receipt, claim),
-          now: new Date(),
-        }).catch(error => {
-          console.error('[daily-plan publish] could not close the manual claim', { clientId, planId: command.plan_id, date, error: errorMessage(error) })
-          return false
-        })
-        if (!closed) console.error('[daily-plan publish] manual claim was changed by someone else before it could be closed', { clientId, planId: command.plan_id, date })
+        if (!(await closeOne(date, claim, receipt))) {
+          console.error('[daily-plan publish] manual claim was not closed', { clientId, planId: command.plan_id, date })
+        }
+      }
+      // A date whose claim call threw may or may not hold our row; closing it is a no-op when it does not.
+      for (const date of maybeClaimed) {
+        if (!claimed.has(date)) await closeOne(date, { restoreRecalled: false }, null)
       }
     }
 
