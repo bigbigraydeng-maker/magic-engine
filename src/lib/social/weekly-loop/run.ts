@@ -13,7 +13,7 @@ import { APP_BASE } from '@/lib/pm-todo/binding-request-items'
 import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 import { checkReelFacts, factCheckToday, reelOverlayOf, type OkFactSource } from './reel-facts'
 import { dailyVersionDecisions, dailyWindows, type DatedRow } from './daily-schedule'
-import { dailyEntries, dailySettings, datedOutsideCandidates, outsideTourKey, scheduleDaily, type ExpirePort } from './daily-run'
+import { dailyEntries, dailySettings, datedOutsideCandidates, outsideTourKey, rowStyler, scheduleDaily, type ExpirePort } from './daily-run'
 
 /** cron_run_logs.job_name for every receipt of the weekly loop (daily fan-out and per-client runs). */
 export const WEEKLY_LOOP_JOB = 'social-weekly-draft'
@@ -755,6 +755,7 @@ export async function runWeeklyLoop(
       reviewed.map((r) => ({ id: r.c.row.id, excluded: r.excluded, productKey: r.productKey })),
       persistedIds,
       (id) => outsideTourKey(rows, outside, id, source, today),
+      rowStyler(rows),
     )
     const plan = await scheduleDaily(deps.writeSchedule, { clientId: input.clientId, slotDates: daily.slotDates, reelPerDay, entries, dryRun: input.mode !== 'write', today: daily.today }, deps.expireUnapproved)
     for (let i = 0; i < notPersisted; i += 1) bump(counts.skipped_by_reason, 'fact_check_not_persisted')

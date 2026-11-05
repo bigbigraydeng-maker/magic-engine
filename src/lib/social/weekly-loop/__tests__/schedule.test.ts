@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planReelSchedule } from '../schedule';
+import { planReelSchedule, fillSlots } from '../schedule';
 
 const WEEK_START = '2026-11-09';
 const WEEK_END = '2026-11-15';
@@ -203,3 +203,43 @@ describe('planReelSchedule zero quota', () => {
     expect(result.cappedAt).toBeNull();
   });
 });
+
+describe('fillSlots · style rules (knife 2.5b)', () => {
+  const s = (template: string, music: string, group: string) => ({ template, music, variantGroup: group, signature: `${template}|#B|3` })
+  const cand = (id: string, rankAt: string, style?: ReturnType<typeof s>) => ({ id, productKey: null, rankAt, style })
+
+  it('picks the next reel that does not repeat the neighbour template, even when an older one is a repeat', () => {
+    const out = fillSlots(['2026-11-07'], [cand('old', '2026-11-01', s('postcard', 'm1', 'g1')), cand('new', '2026-11-02', s('list', 'm2', 'g2'))], [
+      { id: 'prev', publishOn: '2026-11-06', productKey: null, style: s('postcard', 'm9', 'g9') },
+    ])
+    expect(out.assignments).toEqual([{ id: 'new', publishOn: '2026-11-07' }])
+  })
+
+  it('falls back to the oldest when every option looks the same (a soft preference, not a stall)', () => {
+    const out = fillSlots(['2026-11-07'], [cand('a', '2026-11-01', s('postcard', 'm1', 'g1')), cand('b', '2026-11-02', s('postcard', 'm2', 'g2'))], [
+      { id: 'prev', publishOn: '2026-11-06', productKey: null, style: s('postcard', 'm9', 'g9') },
+    ])
+    expect(out.assignments).toEqual([{ id: 'a', publishOn: '2026-11-07' }])
+  })
+
+  it('a third same-template reel in a row is held back, and the reason is recorded', () => {
+    const out = fillSlots(['2026-11-08'], [cand('c', '2026-11-01', s('postcard', 'm1', 'g1'))], [
+      { id: 'p1', publishOn: '2026-11-06', productKey: null, style: s('postcard', 'm8', 'g8') },
+      { id: 'p2', publishOn: '2026-11-07', productKey: null, style: s('postcard', 'm9', 'g9') },
+    ])
+    expect(out.assignments).toEqual([])
+    expect(out.unscheduled).toEqual([{ id: 'c', reason: 'template_run' }])
+  })
+
+  it('the same track within a week and variants of one original in a week are held back with their own reasons', () => {
+    const placed = [{ id: 'p', publishOn: '2026-11-06', productKey: null, style: s('list', 'shared', 'orig') }]
+    const out = fillSlots(['2026-11-08'], [cand('m', '2026-11-01', s('postcard', 'shared', 'x')), cand('v', '2026-11-02', s('postcard', 'other', 'orig'))], placed)
+    expect(out.assignments).toEqual([])
+    expect(out.unscheduled.map((u) => `${u.id}:${u.reason}`).sort()).toEqual(['m:music_repeat', 'v:variant_crowd'])
+  })
+
+  it('reels without style data are scheduled exactly as before', () => {
+    const out = fillSlots(['2026-11-07', '2026-11-08'], [cand('a', '2026-11-01'), cand('b', '2026-11-02')], [])
+    expect(out.assignments).toEqual([{ id: 'a', publishOn: '2026-11-07' }, { id: 'b', publishOn: '2026-11-08' }])
+  })
+})

@@ -26,7 +26,8 @@ describe('buildAccountAuditItem', () => {
     expect(item?.what).toContain('1 项量不出来（内容柱配比）')
     expect(item?.what).toContain('账号缺「people」这一类内容')
     expect(item?.what).not.toContain('模板集中度超线') // tier A is not asked of a person
-    expect(item?.what).toContain('这一步还没上线') // the text does not claim a fix that does not exist yet
+    expect(item?.what).toContain('已自动避开连发同模板') // says what the schedule now does, and what it still cannot see
+    expect(item?.what).toContain('系统看不到的重复')
     expect(item?.what).not.toContain('已自己往后排')
     expect(item?.how).not.toContain('我会自己下单')
     expect(item?.how.length).toBeGreaterThan(20)

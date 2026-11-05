@@ -6,6 +6,8 @@
 import { fillSlots } from './schedule'
 import type { ExpireOutcome, WriteReelScheduleArgs, WriteReelScheduleResult } from './schedule-writer'
 import { mondayOf, occupiedDays, poolDepthDays, type DatedRow } from './daily-schedule'
+import { styleOf, type EntryStyle } from './style-rules'
+import { toAuditReel } from '@/lib/social/account-audit/load'
 import { checkReelFacts, reelOverlayOf, type OkFactSource } from './reel-facts'
 import { readPublishOn } from '@/lib/social/week-pack/manifest'
 import { readSocialAgentSettings, type SocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
@@ -43,6 +45,18 @@ export interface DailyEntry {
   rankAt: string
   /** eligible = passed facts, 马良 and consent; and (write mode) its fact check was stored. */
   eligible: boolean
+  /** Template / music / variant group of the reel; null = unreadable (never held back for style). */
+  style?: EntryStyle | null
+}
+
+/** Style of every order row the run loaded (candidates and dated rows outside them). Unreadable fields stay null. */
+export function rowStyler(rows: ReadonlyArray<{ id: string; created_at: string; brief: unknown }>): (id: string) => EntryStyle | null {
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  return (id) => {
+    const row = byId.get(id)
+    const reel = row ? toAuditReel(row) : null
+    return reel ? styleOf(reel) : null
+  }
 }
 
 export interface DailyScheduleResult {
@@ -77,6 +91,7 @@ export function dailyEntries(
   persistedIds: ReadonlySet<string> | null,
   /** Product key for rows that were not reviewed in this run (dated rows outside the candidates). */
   fallbackKey: (id: string) => string | null = () => null,
+  styleFor: (id: string) => EntryStyle | null = () => null,
 ): { entries: DailyEntry[]; notPersisted: number } {
   const byId = new Map(reviewed.map((r) => [r.id, r]))
   let notPersisted = 0
@@ -85,7 +100,7 @@ export function dailyEntries(
     const passed = r !== undefined && r.excluded === null
     const stored = persistedIds === null || persistedIds.has(c.id)
     if (passed && c.scheduledOn === null && !stored) notPersisted += 1
-    return { id: c.id, scheduledOn: c.scheduledOn, productKey: r ? r.productKey : fallbackKey(c.id), rankAt: c.createdAt, eligible: passed && stored }
+    return { id: c.id, scheduledOn: c.scheduledOn, productKey: r ? r.productKey : fallbackKey(c.id), rankAt: c.createdAt, eligible: passed && stored, style: styleFor(c.id) }
   })
   return { entries, notPersisted }
 }
@@ -127,9 +142,10 @@ export async function scheduleDaily(
   expire?: ExpirePort,
 ): Promise<DailyScheduleResult> {
   const keyOf = new Map(args.entries.map((e) => [e.id, e.productKey]))
+  const styleOfId = new Map(args.entries.map((e) => [e.id, e.style ?? null]))
   const { expired, errors } = await expirePast(args, expire)
   const live = args.entries.filter((e) => !expired.includes(e.id))
-  const occupied = occupiedDays(live, (id) => keyOf.get(id) ?? null)
+  const occupied = occupiedDays(live, (id) => keyOf.get(id) ?? null, (id) => styleOfId.get(id) ?? null)
   const pool = live.filter((e) => e.eligible && e.scheduledOn === null)
   const result: DailyScheduleResult = {
     written: [],
@@ -141,7 +157,7 @@ export async function scheduleDaily(
     alreadyScheduled: occupied.length,
   }
   const slots = args.reelPerDay > 0 ? args.slotDates : []
-  const plan = fillSlots(slots, pool.map((e) => ({ id: e.id, productKey: e.productKey, rankAt: e.rankAt })), occupied)
+  const plan = fillSlots(slots, pool.map((e) => ({ id: e.id, productKey: e.productKey, rankAt: e.rankAt, style: e.style })), occupied)
   result.unscheduled = plan.unscheduled
   for (const a of plan.assignments) {
     const res = await writeSchedule({

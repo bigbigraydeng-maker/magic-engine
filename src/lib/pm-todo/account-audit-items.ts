@@ -56,7 +56,7 @@ export function buildAccountAuditItem(receipt: unknown, nameOf: (id: string) => 
     kind: ACCOUNT_AUDIT_TODO_KIND,
     client_id: receipt.client_id,
     client_name: nameOf(receipt.client_id),
-    what: `账号自检（${s(receipt.as_of)}）：${parts.join('，')}。排期时自动避开重复（模板、音乐、改版）这一步还没上线，现在只是把问题报给你，批清单时请自己避开连发同模板、同一首曲子；${needs}`.trim(),
+    what: `账号自检（${s(receipt.as_of)}）：${parts.join('，')}。每天排期时已自动避开连发同模板、一周内同一首曲子、同一条片的改版；但视觉风格、素材类型这些系统看不到的重复，还是要你批清单时自己留意；${needs}`.trim(),
     how: '打开客户社媒页看哪几类内容缺：工厂有模板的那类，请下一张单；工厂没有模板的（真人、客人故事、干货、轻松类）或要客户提供素材的，请定先做哪一类，转给开发或客户。',
     href: `${APP_BASE}/dashboard/clients/${encodeURIComponent(receipt.client_id)}/daily-plan?tab=reels`,
   }
