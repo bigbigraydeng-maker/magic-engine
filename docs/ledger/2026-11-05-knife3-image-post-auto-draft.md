@@ -2,7 +2,7 @@
 id: 2026-11-05-knife3-image-post-auto-draft
 title: "第 3 刀：Facebook 图文帖自动草稿（CTS）"
 status: done
-done_ref: "pr:3636"
+done_ref: pr:3636
 owner: agent
 decided_on: 2026-11-05
 source: pr:3636
