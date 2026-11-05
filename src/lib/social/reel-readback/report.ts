@@ -18,6 +18,8 @@ export interface ReelMeta {
 export type ReadbackStatus = 'measured' | 'pending' | 'not_readable'
 
 export interface ReelReadbackItem {
+  /** The publish action (unique per published reel; one work order can be published more than once). */
+  action_id: string
   work_order_id: string
   title: string
   template: string | null
@@ -42,6 +44,18 @@ function str(v: unknown): string | null {
   return typeof v === 'string' && v ? v : null
 }
 
+/** Receipts land a little after the 72-hour mark; inside this grace the reel still counts as "not yet". */
+const RECEIPT_GRACE_HOURS = 6
+
+/** The reel publish action keeps its work order only inside idempotency_key = `factory-reel:<work order>:<video>`. */
+export function workOrderIdOf(payload: Record<string, unknown>): string | null {
+  const direct = str(payload.work_order_id)
+  if (direct) return direct
+  const key = str(payload.idempotency_key)
+  const m = key ? /^factory-reel:([^:]+):/.exec(key) : null
+  return m ? m[1] : null
+}
+
 const NOT_READ: Reading = { kind: 'not_readable', reason: 'no_72h_receipt' }
 
 function engagementOf(parts: Reading[]): Reading {
@@ -64,19 +78,19 @@ function itemOf(action: PublishActionRow, receipts: readonly ReceiptRow[], meta:
   const receipt = receiptAt72(receipts)
   const usable = receipt !== null && (receipt.status === 'ok' || receipt.status === 'partial')
   const age = publishedAt ? now.getTime() - new Date(publishedAt).getTime() : Number.NaN
-  const base = { work_order_id: meta.id, title: meta.title, template: meta.template, pillar: meta.pillar, permalink: str(payload.permalink), published_at: publishedAt }
+  const base = { action_id: action.id, work_order_id: meta.id, title: meta.title, template: meta.template, pillar: meta.pillar, permalink: str(payload.permalink), published_at: publishedAt }
   if (usable) {
     const likes = readingFromReceipt(receipt, 'likes')
     const comments = readingFromReceipt(receipt, 'comments')
     const shares = readingFromReceipt(receipt, 'shares')
     return { ...base, status: 'measured', note: null, likes, comments, shares, engagement: engagementOf([likes, comments, shares]) }
   }
-  const young = Number.isFinite(age) && age < READBACK_WINDOW_HOURS * HOUR_MS
+  const young = Number.isFinite(age) && age < (READBACK_WINDOW_HOURS + RECEIPT_GRACE_HOURS) * HOUR_MS
   const reason = receipt !== null ? (receipt.reason ?? receipt.status) : null
   return {
     ...base,
     status: young ? 'pending' : 'not_readable',
-    note: young ? '还没满 72 小时' : `满 72 小时但没读到数${reason ? `（${reason}）` : ''}`,
+    note: young ? '还没满 72 小时（或成绩还在路上）' : `满 72 小时但没读到数${reason ? `（${reason}）` : ''}`,
     likes: NOT_READ, comments: NOT_READ, shares: NOT_READ, engagement: NOT_READ,
   }
 }
@@ -94,7 +108,7 @@ export function buildReelReadback(input: {
   let unmatched = 0
   for (const action of input.actions) {
     const payload = isRecord(action.payload) ? action.payload : {}
-    const woId = str(payload.work_order_id)
+    const woId = workOrderIdOf(payload)
     const meta = woId ? input.metas.get(woId) : undefined
     if (!meta) { unmatched += 1; continue }
     items.push(itemOf(action, byAction.get(action.id) ?? [], meta, input.now))

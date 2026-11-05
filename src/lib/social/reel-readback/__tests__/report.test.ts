@@ -1,14 +1,34 @@
 import { describe, expect, it } from 'vitest'
-import { buildReelReadback, type ReelMeta } from '../report'
+import { buildReelReadback, workOrderIdOf, type ReelMeta } from '../report'
 import { buildSuggestion } from '../suggest'
 import type { PublishActionRow, ReceiptRow } from '@/lib/social/post-performance'
 
 const NOW = new Date('2026-11-20T00:00:00Z')
 const meta = (id: string, template: string | null = 'postcard', pillar: string | null = null): ReelMeta => ({ id, title: `t-${id}`, template, pillar })
-const action = (id: string, wo: string, publishedAt: string): PublishActionRow => ({ id, executed_at: publishedAt, payload: { work_order_id: wo, published_at: publishedAt, permalink: `https://fb/${wo}` } })
+// The real factory-reel action keeps its work order only inside idempotency_key (factory-reel-measurement-adapter.ts), never as work_order_id.
+const action = (id: string, wo: string, publishedAt: string): PublishActionRow => ({ id, executed_at: publishedAt, payload: { source: 'factory_reel', idempotency_key: `factory-reel:${wo}:vid-${id}`, published_at: publishedAt, permalink: `https://fb/${wo}` } })
 const receipt = (actionId: string, hours: number, values: Record<string, number>, status = 'ok', extra: Partial<ReceiptRow> = {}): ReceiptRow => ({ action_id: actionId, window_hours: hours, status, measured_at: null, values, missing: null, reason: null, ...extra })
 
+describe('workOrderIdOf', () => {
+  it('reads the id out of the real idempotency_key, prefers an explicit work_order_id, and refuses anything else', () => {
+    expect(workOrderIdOf({ idempotency_key: 'factory-reel:wo-1:vid-9' })).toBe('wo-1')
+    expect(workOrderIdOf({ work_order_id: 'wo-2', idempotency_key: 'factory-reel:wo-1:vid-9' })).toBe('wo-2')
+    expect(workOrderIdOf({ idempotency_key: 'daily-plan:abc' })).toBeNull()
+    expect(workOrderIdOf({})).toBeNull()
+  })
+})
+
 describe('buildReelReadback', () => {
+  it('two videos of one work order stay two rows with their own action ids', () => {
+    const { items } = buildReelReadback({ actions: [action('a1', 'w1', '2026-11-10T00:00:00Z'), action('a2', 'w1', '2026-11-11T00:00:00Z')], receipts: [], metas: new Map([['w1', meta('w1')]]), now: NOW })
+    expect(items.map((i) => i.action_id)).toEqual(['a2', 'a1'])
+  })
+
+  it('just past 72 hours with no receipt yet still counts as on its way, not unreadable', () => {
+    const { items } = buildReelReadback({ actions: [action('a1', 'w1', '2026-11-16T22:00:00Z')], receipts: [], metas: new Map([['w1', meta('w1')]]), now: new Date('2026-11-20T00:00:00Z') })
+    expect(items[0].status).toBe('pending')
+  })
+
   it('reads the 72h receipt, sums engagement, and keeps newest first', () => {
     const { items } = buildReelReadback({
       actions: [action('a1', 'w1', '2026-11-10T00:00:00Z'), action('a2', 'w2', '2026-11-12T00:00:00Z')],
@@ -70,6 +90,19 @@ describe('buildSuggestion', () => {
     expect(verdicts).toEqual({ hot: 'more', cold: 'less', mid: 'keep' })
     expect(s.groups.find((g) => g.key === 'single')).toBeUndefined()
     expect(s.lines.join('\n')).toContain('多做')
+  })
+
+  it('all-zero reels are flagged, one hit reel cannot lift a group (median), and one work order counts once', () => {
+    const zeros = buildSuggestion([1, 2, 3, 4, 5, 6].map((i) => measured(i, 'a', 0)))
+    expect(zeros).toMatchObject({ status: 'not_enough_data', all_zero: true })
+    const hit = buildSuggestion([...[1, 2, 3].map((i) => measured(i, 'x', i === 3 ? 100 : 1)), ...[4, 5, 6].map((i) => measured(i, 'y', 1))])
+    expect(hit.groups.find((g) => g.key === 'x')?.verdict).not.toBe('more')
+    const twice = buildReelReadback({
+      actions: [action('d1', 'dup', '2026-11-10T00:00:00Z'), action('d2', 'dup', '2026-11-11T00:00:00Z')],
+      receipts: [receipt('d1', 72, { likes: 9, comments: 0, shares: 0 }), receipt('d2', 72, { likes: 9, comments: 0, shares: 0 })],
+      metas: new Map([['dup', meta('dup')]]), now: NOW,
+    }).items
+    expect(buildSuggestion(twice).measured).toBe(1)
   })
 
   it('reels without a readable 72h number do not count as zero', () => {

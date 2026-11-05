@@ -14,7 +14,7 @@ const handler = (fn: Fn) => Reflect.get(fn, 'fn') as (a: { event: unknown; step:
 const step = () => ({ run: vi.fn(async (_id: string, fn: () => Promise<unknown> | unknown) => fn()) })
 
 const item = (i: number, value: number): ReelReadbackItem => ({
-  work_order_id: `w${i}`, title: `t${i}`, template: 'postcard', pillar: null, permalink: null, published_at: '2026-11-10T00:00:00Z', status: 'measured', note: null,
+  action_id: `a${i}`, work_order_id: `w${i}`, title: `t${i}`, template: 'postcard', pillar: null, permalink: null, published_at: '2026-11-10T00:00:00Z', status: 'measured', note: null,
   likes: { kind: 'value', value }, comments: { kind: 'value', value: 0 }, shares: { kind: 'value', value: 0 }, engagement: { kind: 'value', value },
 })
 

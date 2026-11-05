@@ -4,7 +4,7 @@ import { SOCIAL_PUBLISH_ACTION_TYPE } from '@/lib/social/post-measurement-store'
 import type { PublishActionRow, ReceiptRow } from '@/lib/social/post-performance'
 import { toAuditReel } from '@/lib/social/account-audit/load'
 import { reelTitle } from '@/lib/social/week-pack/manifest'
-import { buildReelReadback, type ReelMeta, type ReelReadbackItem } from './report'
+import { buildReelReadback, workOrderIdOf, type ReelMeta, type ReelReadbackItem } from './report'
 
 const MAX_ACTIONS = 200
 
@@ -39,7 +39,7 @@ export async function loadReelReadback(db: SupabaseClient, input: { clientId: st
   if (receiptsRes.error) throw new Error(`reel_readback_receipts_failed: ${receiptsRes.error.message}`)
   const receipts = rows(receiptsRes.data) as unknown as ReceiptRow[]
 
-  const woIds = [...new Set(actions.map((a) => (isRecord(a.payload) && typeof a.payload.work_order_id === 'string' ? a.payload.work_order_id : '')).filter(Boolean))]
+  const woIds = [...new Set(actions.map((a) => (isRecord(a.payload) ? workOrderIdOf(a.payload) : null)).filter((x): x is string => x !== null))]
   const ordersRes = woIds.length === 0 ? { data: [], error: null } : await db.from('content_work_orders').select('id, created_at, angle, brief').eq('client_id', input.clientId).in('id', woIds)
   if (ordersRes.error) throw new Error(`reel_readback_orders_failed: ${ordersRes.error.message}`)
   const metas = new Map<string, ReelMeta>()

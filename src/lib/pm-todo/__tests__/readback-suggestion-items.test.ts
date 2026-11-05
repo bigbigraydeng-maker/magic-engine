@@ -24,6 +24,18 @@ describe('buildReadbackItem', () => {
     expect(item?.what).toContain('2 条满 72 小时但没读到数')
     expect(item?.what).toContain('不是 0')
   })
+  it('reels that match no work order raise a to-do (never silent)', () => {
+    const item = buildReadbackItem(ok({ suggestion: { status: 'not_enough_data', lines: [] }, counts: { measured: 0, pending: 0, not_readable: 0, unmatched: 3 } }), () => 'CTS')
+    expect(item?.what).toContain('3 条发出去的 Reel 对不上工单')
+  })
+  it('every read reel at zero engagement is said out loud, not called "about the same"', () => {
+    const item = buildReadbackItem(ok({ suggestion: { status: 'not_enough_data', all_zero: true, lines: ['读到数的 6 条 Reel 互动全是 0，没法比较哪类好'] } }), () => 'CTS')
+    expect(item?.what).toContain('互动全是 0')
+  })
+  it('reels with one metric missing are counted, not silent', () => {
+    const item = buildReadbackItem(ok({ suggestion: { status: 'not_enough_data', lines: [] }, counts: { measured: 4, pending: 0, not_readable: 0, unmatched: 0, incomplete: 2 } }), () => 'CTS')
+    expect(item?.what).toContain('2 条读到了但点赞、评论、分享缺一项')
+  })
   it('a failed run is its own to-do, never silence', () => {
     const item = buildReadbackItem(ok({ error: 'db down' }), () => 'CTS')
     expect(item?.what).toContain('没跑成')

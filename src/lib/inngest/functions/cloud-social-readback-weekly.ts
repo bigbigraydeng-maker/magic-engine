@@ -25,7 +25,7 @@ export interface ClientReadbackReceipt {
   client_id: string
   as_of: string
   error: string | null
-  counts: { measured: number; pending: number; not_readable: number; unmatched: number }
+  counts: { measured: number; pending: number; not_readable: number; unmatched: number; incomplete: number }
   suggestion: Suggestion | null
 }
 
@@ -61,7 +61,7 @@ export function clientReceipt(clientId: string, asOf: string, loaded: { items: R
   const count = (s: ReelReadbackItem['status']) => loaded.items.filter((i) => i.status === s).length
   return {
     client_id: clientId, as_of: asOf, error: null,
-    counts: { measured: count('measured'), pending: count('pending'), not_readable: count('not_readable'), unmatched: loaded.unmatched },
+    counts: { measured: count('measured'), pending: count('pending'), not_readable: count('not_readable'), unmatched: loaded.unmatched, incomplete: loaded.items.filter((i) => i.status === 'measured' && i.engagement.kind !== 'value').length },
     suggestion: buildSuggestion(loaded.items),
   }
 }
@@ -72,7 +72,7 @@ async function readOne(deps: ReadbackWeeklyDeps, step: StepLike, clientId: strin
       const now = deps.now()
       return clientReceipt(clientId, asOf, await deps.load(clientId, new Date(now.getTime() - READBACK_LOOKBACK_DAYS * 86_400_000), now))
     } catch (e) {
-      return { client_id: clientId, as_of: asOf, error: message(e), counts: { measured: 0, pending: 0, not_readable: 0, unmatched: 0 }, suggestion: null }
+      return { client_id: clientId, as_of: asOf, error: message(e), counts: { measured: 0, pending: 0, not_readable: 0, unmatched: 0, incomplete: 0 }, suggestion: null }
     }
   })
 }

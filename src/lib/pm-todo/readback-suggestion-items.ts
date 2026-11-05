@@ -31,12 +31,17 @@ export function buildReadbackItem(receipt: unknown, nameOf: (id: string) => stri
   const suggestion = isRecord(receipt.suggestion) ? receipt.suggestion : null
   const lines = Array.isArray(suggestion?.lines) ? suggestion.lines.filter((l): l is string => typeof l === 'string') : []
   const advice = suggestion?.status === 'ok' && lines.length > 0 ? lines : []
-  if (advice.length === 0 && unread === 0) return null
+  const lost = n(counts.unmatched)
+  const partial = n(counts.incomplete)
+  const zeroNote = suggestion?.all_zero === true ? lines.join('') : ''
+  if (advice.length === 0 && unread === 0 && lost === 0 && partial === 0 && zeroNote === '') return null
+  const partialNote = partial > 0 ? `另有 ${partial} 条读到了但点赞、评论、分享缺一项，没算进建议。` : ''
+  const lostNote = lost > 0 ? `另有 ${lost} 条发出去的 Reel 对不上工单，没算进来（是我们这边的问题，不是数据为 0）。` : ''
   const unreadNote = unread > 0 ? `另有 ${unread} 条满 72 小时但没读到数（不是 0，要查读数权限）。` : ''
   return {
     ...base,
-    what: `Reel 回看（${s(receipt.as_of)}）：${advice.length > 0 ? advice.join('') : ''}${unreadNote}${NO_DM_NOTE}`,
-    how: advice.length > 0 ? '打开客户社媒页看每条片的 72 小时成绩，决定下周配比是否照建议调；系统不会自己改。' : '打开客户社媒页看哪几条没读到数，转给开发查读数权限。',
+    what: `Reel 回看（${s(receipt.as_of)}）：${advice.length > 0 ? advice.join('') : zeroNote}${unreadNote}${partialNote}${lostNote}${NO_DM_NOTE}`,
+    how: advice.length > 0 ? '打开客户社媒页看每条片的 72 小时成绩，决定下周配比是否照建议调；系统不会自己改。' : '打开客户社媒页看哪几条没读到数或对不上工单，转给开发查。',
   }
 }
 
