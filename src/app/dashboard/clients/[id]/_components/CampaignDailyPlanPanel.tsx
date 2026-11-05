@@ -651,6 +651,12 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
           )}
         </div>
 
+        <details data-publish-settings className="group rounded-xl border border-black/[.06] bg-white">
+          <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-me-charcoal [&::-webkit-details-marker]:hidden">
+            发布设置（不常用，点开看）
+            <span className="ml-2 text-xs font-normal text-me-charcoal/65">发布队列、试发布、自动发布、发布计划</span>
+          </summary>
+          <div className="space-y-4 border-t border-black/5 p-4">
         {/* Daily Plan publish queue — review handoff only; no legacy content board. */}
         <div className="border-t border-black/[.06] pt-3">
           <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
@@ -787,6 +793,8 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
               </span>
             </div>
           )}
+        </details>
+          </div>
         </details>
       </div>
     </div>
