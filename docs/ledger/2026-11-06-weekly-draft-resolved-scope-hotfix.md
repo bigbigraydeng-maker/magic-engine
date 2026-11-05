@@ -4,7 +4,7 @@ title: 修第 3 刀留下的两个运行时错误：每日社媒函数引用了�
 status: decided
 owner: agent
 decided_on: 2026-11-06
-source: pr:3649
+source: pr:3650
 verify_by: 2026-11-06
 verify_how: 合并部署后看 11-06 早上 6:30（新西兰）那次 social-weekly-draft 的运行记录：应有 finishRun 的记录、summary 里有 imagePost（drafted 大于等于 0 或写明跳过原因），不应是崩溃；CTS 的 social_plans 出现 source 为 auto_image_post 的新行（前提：CTS 客户配置里 imagePostPerDay 大于等于 1）
 ---
