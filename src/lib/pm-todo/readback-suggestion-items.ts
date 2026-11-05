@@ -9,7 +9,7 @@ import { APP_BASE } from './binding-request-items'
 export const READBACK_TODO_KIND = 'social_readback_suggestion' as const
 export const READBACK_JOB = 'social-readback-weekly'
 const FRESH_DAYS = 8
-const NO_DM_NOTE = '注意：这里比的是点赞、评论、分享，不是询价；自然内容带来的私信和表单暂时归不到某一条片，所以查不到，不是 0。'
+const NO_DM_NOTE = '注意：这里比的是点赞加评论（分享数 Facebook 常不返回，单独看），不是询价；自然内容带来的私信和表单暂时归不到某一条片，所以查不到，不是 0。'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -35,7 +35,7 @@ export function buildReadbackItem(receipt: unknown, nameOf: (id: string) => stri
   const partial = n(counts.incomplete)
   const zeroNote = suggestion?.all_zero === true ? lines.join('') : ''
   if (advice.length === 0 && unread === 0 && lost === 0 && partial === 0 && zeroNote === '') return null
-  const partialNote = partial > 0 ? `另有 ${partial} 条读到了但点赞、评论、分享缺一项，没算进建议。` : ''
+  const partialNote = partial > 0 ? `另有 ${partial} 条读到了但点赞或评论缺一项，没算进建议。` : ''
   const lostNote = lost > 0 ? `另有 ${lost} 条发出去的 Reel 对不上工单，没算进来（是我们这边的问题，不是数据为 0）。` : ''
   const unreadNote = unread > 0 ? `另有 ${unread} 条满 72 小时但没读到数（不是 0，要查读数权限）。` : ''
   return {

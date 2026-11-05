@@ -66,7 +66,7 @@ export function ReelReadbackPanel({ clientId }: { clientId: string }) {
           </li>
         ))}
       </ul>
-      <p className="text-xs text-slate-500">比的是互动，不是询价。自然内容带来的私信和表单暂时归不到某一条片，所以查不到，不是 0。</p>
+      <p className="text-xs text-slate-500">比的是点赞加评论，不是询价；分享数 Facebook 常常不返回，读不到就显示读不到。自然内容带来的私信和表单暂时归不到某一条片，所以查不到，不是 0。</p>
     </section>
   )
 }

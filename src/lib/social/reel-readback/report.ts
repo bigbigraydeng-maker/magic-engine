@@ -32,7 +32,7 @@ export interface ReelReadbackItem {
   likes: Reading
   comments: Reading
   shares: Reading
-  /** likes + comments + shares, only when all three were read; engagement is NOT inquiries. */
+  /** likes + comments, only when both were read. Shares are shown on their own: Facebook leaves the field out when nobody shared (omitted_unverified, seen on the real reel), so counting it would make almost every reel unmeasurable. Engagement is NOT inquiries. */
   engagement: Reading
 }
 
@@ -83,7 +83,7 @@ function itemOf(action: PublishActionRow, receipts: readonly ReceiptRow[], meta:
     const likes = readingFromReceipt(receipt, 'likes')
     const comments = readingFromReceipt(receipt, 'comments')
     const shares = readingFromReceipt(receipt, 'shares')
-    return { ...base, status: 'measured', note: null, likes, comments, shares, engagement: engagementOf([likes, comments, shares]) }
+    return { ...base, status: 'measured', note: null, likes, comments, shares, engagement: engagementOf([likes, comments]) }
   }
   const young = Number.isFinite(age) && age < (READBACK_WINDOW_HOURS + RECEIPT_GRACE_HOURS) * HOUR_MS
   const reason = receipt !== null ? (receipt.reason ?? receipt.status) : null

@@ -36,7 +36,7 @@ describe('buildReelReadback', () => {
       metas: new Map([['w1', meta('w1')], ['w2', meta('w2')]]), now: NOW,
     })
     expect(items.map((i) => i.work_order_id)).toEqual(['w2', 'w1'])
-    expect(items[1]).toMatchObject({ status: 'measured', engagement: { kind: 'value', value: 8 } })
+    expect(items[1]).toMatchObject({ status: 'measured', engagement: { kind: 'value', value: 7 } }) // likes + comments, shares shown apart
   })
 
   it('a reel younger than 72h is pending, not zero', () => {
@@ -51,10 +51,14 @@ describe('buildReelReadback', () => {
     expect(items[0].engagement.kind).toBe('not_readable')
   })
 
-  it('one unreadable metric makes engagement unreadable, the other numbers stay', () => {
-    const { items } = buildReelReadback({ actions: [action('a1', 'w1', '2026-11-10T00:00:00Z')], receipts: [receipt('a1', 72, { likes: 3, comments: 1 }, 'partial', { missing: { shares: 'no_permission' } })], metas: new Map([['w1', meta('w1')]]), now: NOW })
-    expect(items[0].likes).toEqual({ kind: 'value', value: 3 })
-    expect(items[0].shares).toEqual({ kind: 'not_readable', reason: 'no_permission' })
+  it('the real production shape: Facebook omitted shares (partial receipt). Engagement still counts likes + comments, shares show as unreadable', () => {
+    const { items } = buildReelReadback({ actions: [action('a1', 'w1', '2026-11-10T00:00:00Z')], receipts: [receipt('a1', 72, { likes: 2, comments: 0 }, 'partial', { missing: { shares: 'omitted_unverified' } })], metas: new Map([['w1', meta('w1')]]), now: NOW })
+    expect(items[0]).toMatchObject({ status: 'measured', likes: { kind: 'value', value: 2 }, shares: { kind: 'not_readable', reason: 'omitted_unverified' }, engagement: { kind: 'value', value: 2 } })
+  })
+
+  it('a missing likes or comments number makes engagement unreadable, never a smaller sum', () => {
+    const { items } = buildReelReadback({ actions: [action('a1', 'w1', '2026-11-10T00:00:00Z')], receipts: [receipt('a1', 72, { likes: 3, shares: 1 }, 'partial', { missing: { comments: 'no_permission' } })], metas: new Map([['w1', meta('w1')]]), now: NOW })
+    expect(items[0].comments).toEqual({ kind: 'not_readable', reason: 'no_permission' })
     expect(items[0].engagement).toEqual({ kind: 'not_readable', reason: 'incomplete' })
   })
 

@@ -1,6 +1,6 @@
 /**
  * Weekly "what to make more / less of" suggestion from measured 72-hour engagement. Pure, suggestion only: nothing here changes a setting.
- * Engagement (likes + comments + shares) is NOT inquiries; organic reel → DM / form cannot be attributed yet, and the text says so.
+ * Engagement (likes + comments) is NOT inquiries; organic reel → DM / form cannot be attributed yet, and the text says so.
  */
 import type { ReelReadbackItem } from './report'
 

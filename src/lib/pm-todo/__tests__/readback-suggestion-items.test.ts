@@ -34,7 +34,7 @@ describe('buildReadbackItem', () => {
   })
   it('reels with one metric missing are counted, not silent', () => {
     const item = buildReadbackItem(ok({ suggestion: { status: 'not_enough_data', lines: [] }, counts: { measured: 4, pending: 0, not_readable: 0, unmatched: 0, incomplete: 2 } }), () => 'CTS')
-    expect(item?.what).toContain('2 条读到了但点赞、评论、分享缺一项')
+    expect(item?.what).toContain('2 条读到了但点赞或评论缺一项')
   })
   it('a failed run is its own to-do, never silence', () => {
     const item = buildReadbackItem(ok({ error: 'db down' }), () => 'CTS')
