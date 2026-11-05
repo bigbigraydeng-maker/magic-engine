@@ -403,6 +403,29 @@ describe('pushAutoPublishItems —— 看门狗：授权了却什么都没发生
     expect(items[0].what).toContain('演练模式')
   })
 
+  it('按客户判断：全局开关开着但这个客户不在白名单 → 仍然说演练模式，不说「发布器没跑起来」', async () => {
+    const db = makeSupabase({
+      auth: [auth({ dates: [TODAY] })],
+      attempts: [],
+    })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, { live: (clientId: string) => clientId === 'someone-else' })
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('演练模式')
+    expect(items[0].what).not.toContain('根本没跑起来')
+  })
+
+  it('按客户判断：这个客户在真发名单里 → 说没有尝试记录', async () => {
+    const db = makeSupabase({
+      auth: [auth({ dates: [TODAY] })],
+      attempts: [],
+    })
+    const items: ManualItem[] = []
+    await pushAutoPublishItems(db, items, NOW, nameOf, { live: (clientId: string) => clientId === CLIENT })
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('根本没跑起来')
+  })
+
   it('正式模式（live=true）→ what 里说没有尝试记录', async () => {
     const db = makeSupabase({
       auth: [auth({ dates: [TODAY] })],
