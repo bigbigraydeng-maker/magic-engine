@@ -3,9 +3,11 @@ id: 2026-11-05-knife3-image-post-auto-draft
 title: "第 3 刀：Facebook 图文帖自动草稿（CTS）"
 status: done
 done_ref: "pr:3636"
-owner: "window:97"
+owner: agent
+decided_on: 2026-11-05
+source: pr:3636
 risk: A
-created: 2026-11-05
+done_on: 2026-11-05
 verify_by: 2026-11-06
 verify_how: "明早 06:30 NZST 社媒周报函数跑完后查 social_plans 有没有新增 source='auto_image_post' 的行（CTS 客户配置里 imagePostPerDay 需 ≥1 且 imagePostSource='client'）"
 ledger-id: 2026-11-05-knife3-image-post-auto-draft
