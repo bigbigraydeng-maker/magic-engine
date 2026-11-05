@@ -27,6 +27,7 @@ import type {
   BlogTopicPlan,
   EmailTopicPlan,
 } from '@/lib/marketing-plan/types'
+import { supersededReplacementText } from '@/lib/marketing-plan/promo/supersede-prior-approved'
 
 interface Props {
   clientId: string
@@ -70,6 +71,7 @@ export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
   }, [plan.id])
 
   const editable = plan.status === 'draft'
+  const replaced = plan.status === 'archived' ? supersededReplacementText(plan.generation_meta) : null
   const taskCount = (draft.tasks ?? []).length
 
   const setMessage = (text: string, ok: boolean) => {
@@ -211,7 +213,10 @@ export function PlanEditor({ clientId, plan, onUpdated, onArchived }: Props) {
               <span>📅 {plan.start_date} → {plan.end_date}</span>
             )}
             <span>📋 {taskCount} 个任务</span>
-            {plan.approved_at && (
+            {replaced && (
+              <span className="text-gray-700">{replaced}</span>
+            )}
+            {!replaced && plan.approved_at && (
               <span className="text-green-600">✓ 已于 {plan.approved_at.slice(0, 10)} 批准</span>
             )}
           </div>

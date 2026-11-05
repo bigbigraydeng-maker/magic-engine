@@ -15,6 +15,7 @@ import { approveButtonState, continueButtonVisible } from '@/lib/marketing-plan/
 import { buildPromoSample, describePromoSpec } from '@/lib/marketing-plan/promo/overview'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
 import { pickPlanForPrescription } from '@/lib/marketing-plan/promo/plan-pick'
+import { planStatusLabel, supersededReplacementText } from '@/lib/marketing-plan/promo/supersede-prior-approved'
 import { ApprovalRecord } from './_components/ApprovalRecord'
 import { PlanOverview } from './_components/PlanOverview'
 import { ScheduleTable } from './_components/ScheduleTable'
@@ -161,6 +162,7 @@ export function PromoPlanClient() {
   // 目前只有默认排期摆法（行业剧本还没有证据，见 playbooks.ts）
   const schedule = useMemo(() => (shownSpec ? expandPromoSchedule(shownSpec, DEFAULT_PROMO_PLAYBOOK) : null), [shownSpec])
   const approvedLike = selected?.status === 'approved' || selected?.status === 'completed'
+  const replacedText = selected?.status === 'archived' ? supersededReplacementText(selected.generation_meta) : null
   const viewPhases = useMemo(() => (shownSpec?.phases ?? []).map(p => ({ id: p.id, name: p.name, start_date: p.start_date })), [shownSpec])
   const scheduleMode = showSample ? 'sample' : approvedLike ? 'approved' : 'preview'
 
@@ -184,8 +186,8 @@ export function PromoPlanClient() {
             className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white w-full sm:w-auto"
             aria-label="选择计划"
           >
-            {plans.filter(p => p.status !== 'archived').map(p => (
-              <option key={p.id} value={p.id}>{p.title}（{p.status === 'draft' ? '草稿' : p.status === 'approved' ? '执行中' : '已完成'}）</option>
+            {plans.filter(p => p.status !== 'archived' || supersededReplacementText(p.generation_meta)).map(p => (
+              <option key={p.id} value={p.id}>{p.title}（{planStatusLabel(p.status, p.generation_meta)}）</option>
             ))}
           </select>
         )}
@@ -205,6 +207,11 @@ export function PromoPlanClient() {
 
         {board && selected && (
           <>
+            {replacedText && (
+              <p className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-800">
+                {replacedText}
+              </p>
+            )}
             <Headline board={board} plan={selected} liveAds={liveAdsVisible ? liveAds : null} liveAdsVisible={liveAdsVisible} clientId={clientId} />
             {board.approval?.deferred_blockers && board.approval.deferred_blockers.length > 0 && (
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">

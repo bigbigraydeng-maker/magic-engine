@@ -13,6 +13,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
+import { planStatusLabel } from '@/lib/marketing-plan/promo/supersede-prior-approved'
 import { PlanGenerator } from './_components/PlanGenerator'
 import { PlanEditor } from './_components/PlanEditor'
 import { BriefGateBanner } from '../_components/BriefGateBanner'
@@ -90,7 +91,7 @@ export function MarketingPlanClient() {
         <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 px-5 py-3.5 flex items-start gap-3">
           <span className="text-xl shrink-0">💡</span>
           <div className="text-xs text-indigo-900 leading-relaxed">
-            <strong>Marketing Plan</strong> 是 FDE 工作的策略起点。和"处方"（诊断驱动）不同，
+            <strong>Marketing Plan</strong> 是 FDE 工作的策略起点。和「处方」（诊断驱动）不同，
             Plan 是<strong>主动进攻</strong>：定义这段时间发多少社媒/写多少博客，覆盖哪些主题，
             目标是什么。批准后自动派发任务到执行看板（鲁班）。
           </div>
@@ -115,6 +116,7 @@ export function MarketingPlanClient() {
             ) : (
               plans.map(p => {
                 const meta = STATUS_META[p.status]
+                const statusLabel = planStatusLabel(p.status, p.generation_meta)
                 const isActive = selectedId === p.id
                 return (
                   <button
@@ -129,7 +131,7 @@ export function MarketingPlanClient() {
                     <div className="flex items-start gap-2 mb-1">
                       <p className="text-sm font-semibold text-gray-900 line-clamp-2 flex-1">{p.title}</p>
                       <span className={`shrink-0 text-[10px] font-medium border rounded-full px-1.5 py-0.5 ${meta.cls}`}>
-                        {meta.label}
+                        {statusLabel}
                       </span>
                     </div>
                     {p.start_date && p.end_date && (
