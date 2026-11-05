@@ -57,6 +57,7 @@ import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
 import { pushWeeklyLoopItems } from './social-weekly-loop-items'
 import { pushReelScheduledItems } from './reel-scheduled-items'
 import { pushAccountAuditItems } from './account-audit-items'
+import { pushReadbackItems } from './readback-suggestion-items'
 import { pushDailyListItems } from './daily-list-items'
 import { pushPlanDraftFailureItems } from './plan-draft-failure-items'
 import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
@@ -459,6 +460,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 社媒账号自检：每周一自检的回执（每个客户最新一份；没跑成也出待办）
     (b) => pushAccountAuditItems(supabase, b, nameOf, now).catch((e) =>
       console.warn('[manual-items] 社媒账号自检待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 社媒每周回看建议：公开满 72 小时的 Reel 成绩（只读；建议不会自己改设置）
+    (b) => pushReadbackItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 社媒回看建议待办生成失败（不阻塞其他待办）:', e),
     ),
     // Reel 按日公开：周卡批过、到日没发出去的（读流量记录里的授权状态）
     (b) => pushReelScheduledItems(supabase, b, nameOf).catch((e) =>

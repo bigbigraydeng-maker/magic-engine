@@ -25,6 +25,7 @@ import { ReelWorkGroups, StatusTag, TodoStrip } from './SocialDailyParts'
 import { WeekPackApproval } from './WeekPackApproval'
 import { ReelGrantsPanel } from './ReelGrantsPanel'
 import { DailyListPanel } from './DailyListPanel'
+import { ReelReadbackPanel } from './ReelReadbackPanel'
 
 const ROLE_LABEL: Record<string, string> = {
   inspiration: '灵感',
@@ -321,6 +322,7 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
       <SafetyBanner live={data.live} clientId={clientId} />
       <WeekPackApproval clientId={clientId} />
       <DailyListPanel clientId={clientId} />
+      <ReelReadbackPanel clientId={clientId} />
       <ReelGrantsPanel clientId={clientId} />
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <ReelTile data={data} works={works} />

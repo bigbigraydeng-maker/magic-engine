@@ -173,6 +173,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   social_weekly_loop_needs_human: 'review', // 下周的社媒视频排不出来，要人补片或改片
   reel_scheduled_needs_human: 'review', // 周卡批过的 Reel 到日没发出去，要人重批或撤回
   social_account_audit: 'review', // 账号自检：看哪类内容缺、定先做哪一类
+  social_readback_suggestion: 'review', // 回看建议：看哪类片效果好、定下周配比调不调
   reel_daily_list_pending: 'decide', // 放行之后到日对外公开，撤不回
   auto_publish_record_conflict: 'truth', // 记录说撤回了、回执说又发了：帖子到底在不在主页，只有看主页的人知道
 

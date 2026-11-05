@@ -411,6 +411,8 @@ const CRON_REGISTRY_ENTRIES = [
   // 只读工单、不写业务表、不外发、不花钱。🔴 schedule 唯一定义在 src/lib/inngest/functions/cloud-social-account-audit.ts 的 ACCOUNT_AUDIT_CRON。
   // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
   { service: 'inngest:cloud-social-account-audit', jobName: 'social-account-audit', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-05' },
+  // 社媒每周回看建议：公开满 72 小时的 Reel 成绩 → 多做/少做建议；只读、不改设置、不外发、不花钱。🔴 schedule 唯一定义在 src/lib/inngest/functions/cloud-social-readback-weekly.ts 的 READBACK_WEEKLY_CRON。
+  { service: 'inngest:cloud-social-readback-weekly', jobName: 'social-readback-weekly', schedule: '10 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-05' },
   // Reel 按日公开：每 30 分钟醒一次（新西兰时间），到了客户发布时点（默认 18:00）才把当天已在周卡上授权的 Reel 走转公开；
   // 总开关 WEEKLY_PACK_REEL_SCHEDULED_PUBLIC 关着也写一行 disabled 回执，所以每次醒来都有一行。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/cloud-reel-scheduled-go-public.ts 的 REEL_SCHEDULED_CRON。

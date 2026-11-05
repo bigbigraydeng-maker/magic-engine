@@ -56,6 +56,7 @@ import { triggeredSendWelcomeDispatch, triggeredSendWelcomeSweep } from './trigg
 import { socialWeeklyDraft } from './cloud-social-weekly-draft'
 import { reelScheduledGoPublic } from './cloud-reel-scheduled-go-public'
 import { socialAccountAudit } from './cloud-social-account-audit'
+import { socialReadbackWeekly } from './cloud-social-readback-weekly'
 
 export const cloudFunctions = [
   promoPlanDailyWatch,
@@ -133,6 +134,7 @@ export const cloudFunctions = [
   socialWeeklyDraft,
   reelScheduledGoPublic,
   socialAccountAudit,
+  socialReadbackWeekly,
 ]
 
 /** 命名空间自检：所有注册函数 id 必须以 cloud- 开头（契约测试 + 运行期双保险）。 */
