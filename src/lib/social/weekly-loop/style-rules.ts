@@ -22,7 +22,7 @@ export interface StyledPlacement {
   style?: EntryStyle | null
 }
 
-export const STYLE_LIMITS = { sameMusicDays: 7, variantDays: 7, maxTemplateRun: 2 } as const
+export const STYLE_LIMITS = { sameMusicDays: 7, variantDays: 7, maxTemplateRun: 2, maxRunGapDays: 2 } as const
 
 const DAY_MS = 86_400_000
 
@@ -44,19 +44,22 @@ function apart(a: string, b: string): number {
   return Math.abs(dayNumber(a) - dayNumber(b))
 }
 
-/** Placements with a known template, split around the slot day (nearest first on each side). */
-function sides(slotDate: string, placed: readonly StyledPlacement[]): { before: EntryStyle[]; after: EntryStyle[] } {
-  const known = placed.filter((p): p is StyledPlacement & { style: EntryStyle } => p.style != null && p.style.template !== null)
-  const before = known.filter((p) => p.publishOn < slotDate).sort((a, b) => b.publishOn.localeCompare(a.publishOn)).map((p) => p.style)
-  const after = known.filter((p) => p.publishOn > slotDate).sort((a, b) => a.publishOn.localeCompare(b.publishOn)).map((p) => p.style)
+/** Placements split around the slot day, nearest first on each side. A placement with an unknown template is kept (it breaks a run). */
+function sides(slotDate: string, placed: readonly StyledPlacement[]): { before: Array<{ publishOn: string; style: EntryStyle | null }>; after: Array<{ publishOn: string; style: EntryStyle | null }> } {
+  const all = placed.map((p) => ({ publishOn: p.publishOn, style: p.style ?? null }))
+  const before = all.filter((p) => p.publishOn < slotDate).sort((a, b) => b.publishOn.localeCompare(a.publishOn))
+  const after = all.filter((p) => p.publishOn > slotDate).sort((a, b) => a.publishOn.localeCompare(b.publishOn))
   return { before, after }
 }
 
-function runLength(template: string, side: readonly EntryStyle[]): number {
+/** How many consecutive same-template reels sit next to the slot on one side; a gap of more than 2 days ends the run. */
+function runLength(template: string, from: string, side: ReadonlyArray<{ publishOn: string; style: EntryStyle | null }>): number {
   let n = 0
+  let prev = from
   for (const s of side) {
-    if (s.template !== template) break
+    if (s.style?.template !== template || apart(prev, s.publishOn) > STYLE_LIMITS.maxRunGapDays) break
     n += 1
+    prev = s.publishOn
   }
   return n
 }
@@ -68,7 +71,7 @@ export function styleViolation(style: EntryStyle | null | undefined, slotDate: s
   if (style.variantGroup !== null && placed.some((p) => p.style?.variantGroup === style.variantGroup && apart(p.publishOn, slotDate) <= STYLE_LIMITS.variantDays)) return 'variant_crowd'
   if (style.template !== null) {
     const { before, after } = sides(slotDate, placed)
-    if (runLength(style.template, before) + runLength(style.template, after) + 1 > STYLE_LIMITS.maxTemplateRun) return 'template_run'
+    if (runLength(style.template, slotDate, before) + runLength(style.template, slotDate, after) + 1 > STYLE_LIMITS.maxTemplateRun) return 'template_run'
   }
   return null
 }
@@ -78,8 +81,8 @@ export function stylePenalty(style: EntryStyle | null | undefined, slotDate: str
   if (!style || style.template === null) return 0
   const { before, after } = sides(slotDate, placed)
   let penalty = 0
-  if (before[0]?.template === style.template) penalty += 2
-  if (after[0]?.template === style.template) penalty += 2
-  if (style.signature !== null && before[0]?.signature === style.signature) penalty += 1
+  if (before[0]?.style?.template === style.template && apart(before[0].publishOn, slotDate) <= STYLE_LIMITS.maxRunGapDays) penalty += 2
+  if (after[0]?.style?.template === style.template && apart(after[0].publishOn, slotDate) <= STYLE_LIMITS.maxRunGapDays) penalty += 2
+  if (style.signature !== null && before[0]?.style?.signature === style.signature) penalty += 1
   return penalty
 }

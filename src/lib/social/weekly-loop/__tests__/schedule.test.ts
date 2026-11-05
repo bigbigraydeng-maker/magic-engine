@@ -222,20 +222,26 @@ describe('fillSlots · style rules (knife 2.5b)', () => {
     expect(out.assignments).toEqual([{ id: 'a', publishOn: '2026-11-07' }])
   })
 
-  it('a third same-template reel in a row is held back, and the reason is recorded', () => {
-    const out = fillSlots(['2026-11-08'], [cand('c', '2026-11-01', s('postcard', 'm1', 'g1'))], [
+  it('a third same-template reel in a row loses to a different one, and is still placed (flagged) when nothing else fits', () => {
+    const placed = [
       { id: 'p1', publishOn: '2026-11-06', productKey: null, style: s('postcard', 'm8', 'g8') },
       { id: 'p2', publishOn: '2026-11-07', productKey: null, style: s('postcard', 'm9', 'g9') },
-    ])
-    expect(out.assignments).toEqual([])
-    expect(out.unscheduled).toEqual([{ id: 'c', reason: 'template_run' }])
+    ]
+    const both = fillSlots(['2026-11-08'], [cand('c', '2026-11-01', s('postcard', 'm1', 'g1')), cand('d', '2026-11-02', s('list', 'm2', 'g2'))], placed)
+    expect(both.assignments).toEqual([{ id: 'd', publishOn: '2026-11-08' }])
+    expect(both.relaxed).toEqual([])
+    const only = fillSlots(['2026-11-08'], [cand('c', '2026-11-01', s('postcard', 'm1', 'g1'))], placed)
+    expect(only.assignments).toEqual([{ id: 'c', publishOn: '2026-11-08' }])
+    expect(only.relaxed).toEqual([{ id: 'c', violation: 'template_run' }])
   })
 
-  it('the same track within a week and variants of one original in a week are held back with their own reasons', () => {
+  it('the same track within a week and variants of one original lose to a clean reel; if none is clean they are placed flagged', () => {
     const placed = [{ id: 'p', publishOn: '2026-11-06', productKey: null, style: s('list', 'shared', 'orig') }]
-    const out = fillSlots(['2026-11-08'], [cand('m', '2026-11-01', s('postcard', 'shared', 'x')), cand('v', '2026-11-02', s('postcard', 'other', 'orig'))], placed)
-    expect(out.assignments).toEqual([])
-    expect(out.unscheduled.map((u) => `${u.id}:${u.reason}`).sort()).toEqual(['m:music_repeat', 'v:variant_crowd'])
+    const clean = fillSlots(['2026-11-08'], [cand('m', '2026-11-01', s('postcard', 'shared', 'x')), cand('v', '2026-11-02', s('postcard', 'other', 'orig')), cand('ok', '2026-11-03', s('postcard', 'fresh', 'y'))], placed)
+    expect(clean.assignments).toEqual([{ id: 'ok', publishOn: '2026-11-08' }])
+    const none = fillSlots(['2026-11-08'], [cand('m', '2026-11-01', s('postcard', 'shared', 'x'))], placed)
+    expect(none.assignments).toEqual([{ id: 'm', publishOn: '2026-11-08' }])
+    expect(none.relaxed).toEqual([{ id: 'm', violation: 'music_repeat' }])
   })
 
   it('reels without style data are scheduled exactly as before', () => {

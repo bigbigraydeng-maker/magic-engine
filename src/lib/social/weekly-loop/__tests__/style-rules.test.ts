@@ -34,6 +34,17 @@ describe('styleViolation', () => {
     expect(styleViolation(st({ music: 'n', variantGroup: 'n', template: 'list' }), '2026-11-07', run)).toBeNull()
   })
 
+  it('a gap of more than 2 days ends a run; a placement with unknown template breaks it', () => {
+    const far = [at('2026-11-01'), at('2026-11-02')]
+    expect(styleViolation(st({ music: 'n', variantGroup: 'n' }), '2026-11-06', far)).toBeNull()
+    const unknownBetween = [at('2026-11-05'), { publishOn: '2026-11-06', style: st({ template: null, music: 'u', variantGroup: 'u' }) }]
+    expect(styleViolation(st({ music: 'n', variantGroup: 'n' }), '2026-11-07', unknownBetween)).toBeNull()
+  })
+
+  it('same track 6 days apart is refused', () => {
+    expect(styleViolation(st({ music: 'a' }), '2026-11-11', [at('2026-11-05', { music: 'a', template: 'x' })])).toBe('music_repeat')
+  })
+
   it('a reel with no style data is never held back', () => {
     expect(styleViolation(null, '2026-11-07', [at('2026-11-06')])).toBeNull()
     expect(styleViolation(st({ template: null, music: null, variantGroup: null }), '2026-11-07', [at('2026-11-06')])).toBeNull()

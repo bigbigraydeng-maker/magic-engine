@@ -6,7 +6,9 @@
 import { fillSlots } from './schedule'
 import type { ExpireOutcome, WriteReelScheduleArgs, WriteReelScheduleResult } from './schedule-writer'
 import { mondayOf, occupiedDays, poolDepthDays, type DatedRow } from './daily-schedule'
-import { styleOf, type EntryStyle } from './style-rules'
+import { STYLE_LIMITS, styleOf, type EntryStyle } from './style-rules'
+
+const STYLE_LOOKBACK_DAYS = Math.max(STYLE_LIMITS.sameMusicDays, STYLE_LIMITS.variantDays)
 import { toAuditReel } from '@/lib/social/account-audit/load'
 import { checkReelFacts, reelOverlayOf, type OkFactSource } from './reel-facts'
 import { readPublishOn } from '@/lib/social/week-pack/manifest'
@@ -68,7 +70,12 @@ export interface DailyScheduleResult {
   alreadyScheduled: number
   /** Past-day reels that were never approved and went back to the pool this run. */
   expired: string[]
+  /** Placed even though it repeats a recent track / variant / template, because nothing else fitted that day. */
+  relaxed: Array<{ id: string; violation: string }>
 }
+
+/** Reels already public in the last days: they are not schedulable, but the style rules must see them. */
+export type RecentPublishedPort = (args: { clientId: string; sinceDay: string }) => Promise<Array<{ id: string; created_at: string; brief: unknown; publishedOn: string }>>
 
 export type ExpirePort = (args: { clientId: string; ids: string[]; today: string; dryRun: boolean }) => Promise<Array<{ id: string; outcome: ExpireOutcome }>>
 
@@ -118,6 +125,26 @@ export function outsideTourKey(
   return row ? checkReelFacts({ brief: row.brief, output: row.output, orderId: row.id, source, today }).result.targetTourId : null
 }
 
+async function loadRecent(
+  args: { clientId: string; today: string },
+  port: RecentPublishedPort | undefined,
+): Promise<{ placed: Array<{ id: string; publishOn: string; productKey: null; style: EntryStyle | null }>; errors: string[] }> {
+  if (!port) return { placed: [], errors: [] }
+  try {
+    const rows = await port({ clientId: args.clientId, sinceDay: shiftDay(args.today, -STYLE_LOOKBACK_DAYS) })
+    const styleFor = rowStyler(rows)
+    return { placed: rows.map((r) => ({ id: r.id, publishOn: r.publishedOn, productKey: null, style: styleFor(r.id) })), errors: [] }
+  } catch {
+    // Not seeing the recent past only weakens the repeat check; it must not stop the schedule.
+    return { placed: [], errors: ['recent_published_unreadable'] }
+  }
+}
+
+function shiftDay(day: string, n: number): string {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
+}
+
 async function expirePast(
   args: { clientId: string; entries: readonly DailyEntry[]; dryRun: boolean; today: string },
   expire: ExpirePort | undefined,
@@ -140,6 +167,7 @@ export async function scheduleDaily(
     today: string
   },
   expire?: ExpirePort,
+  recentPublished?: RecentPublishedPort,
 ): Promise<DailyScheduleResult> {
   const keyOf = new Map(args.entries.map((e) => [e.id, e.productKey]))
   const styleOfId = new Map(args.entries.map((e) => [e.id, e.style ?? null]))
@@ -153,12 +181,16 @@ export async function scheduleDaily(
     unscheduled: [],
     errors,
     expired,
+    relaxed: [],
     poolDepthDays: poolDepthDays(pool.length, args.reelPerDay),
     alreadyScheduled: occupied.length,
   }
   const slots = args.reelPerDay > 0 ? args.slotDates : []
-  const plan = fillSlots(slots, pool.map((e) => ({ id: e.id, productKey: e.productKey, rankAt: e.rankAt, style: e.style })), occupied)
+  const recent = await loadRecent(args, recentPublished)
+  result.errors.push(...recent.errors)
+  const plan = fillSlots(slots, pool.map((e) => ({ id: e.id, productKey: e.productKey, rankAt: e.rankAt, style: e.style })), [...occupied, ...recent.placed])
   result.unscheduled = plan.unscheduled
+  result.relaxed = plan.relaxed ?? []
   for (const a of plan.assignments) {
     const res = await writeSchedule({
       clientId: args.clientId,

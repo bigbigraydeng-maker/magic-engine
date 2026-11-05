@@ -13,7 +13,7 @@ import { APP_BASE } from '@/lib/pm-todo/binding-request-items'
 import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 import { checkReelFacts, factCheckToday, reelOverlayOf, type OkFactSource } from './reel-facts'
 import { dailyVersionDecisions, dailyWindows, type DatedRow } from './daily-schedule'
-import { dailyEntries, dailySettings, datedOutsideCandidates, outsideTourKey, rowStyler, scheduleDaily, type ExpirePort } from './daily-run'
+import { dailyEntries, dailySettings, datedOutsideCandidates, outsideTourKey, rowStyler, scheduleDaily, type ExpirePort, type RecentPublishedPort } from './daily-run'
 
 /** cron_run_logs.job_name for every receipt of the weekly loop (daily fan-out and per-client runs). */
 export const WEEKLY_LOOP_JOB = 'social-weekly-draft'
@@ -57,6 +57,7 @@ export interface WeeklyLoopDeps {
   writeFactCheck(input: { clientId: string; id: string; readUpdatedAt: string; output: Record<string, unknown> }): Promise<FactCheckWriteOutcome>
   writeSchedule(args: WriteReelScheduleArgs): Promise<WriteReelScheduleResult>
   expireUnapproved?: ExpirePort // daily cadence: past-day reels never approved go back to the pool
+  recentPublished?: RecentPublishedPort // daily cadence: reels already public, so the repeat rules see the recent past
 }
 
 export type WeeklyLoopTaskCode =
@@ -757,7 +758,7 @@ export async function runWeeklyLoop(
       (id) => outsideTourKey(rows, outside, id, source, today),
       rowStyler(rows),
     )
-    const plan = await scheduleDaily(deps.writeSchedule, { clientId: input.clientId, slotDates: daily.slotDates, reelPerDay, entries, dryRun: input.mode !== 'write', today: daily.today }, deps.expireUnapproved)
+    const plan = await scheduleDaily(deps.writeSchedule, { clientId: input.clientId, slotDates: daily.slotDates, reelPerDay, entries, dryRun: input.mode !== 'write', today: daily.today }, deps.expireUnapproved, deps.recentPublished)
     for (let i = 0; i < notPersisted; i += 1) bump(counts.skipped_by_reason, 'fact_check_not_persisted')
     for (const u of [...plan.unscheduled, ...plan.skipped]) bump(counts.skipped_by_reason, u.reason)
     errors.push(...plan.errors)

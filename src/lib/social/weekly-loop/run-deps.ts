@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { loadSocialFactSource } from './fact-aliases'
 import { sumWeeklyMaliangSpend } from './maliang-backfill'
 import { expireUnapproved, writeReelSchedule } from './schedule-writer'
+import { readPublishOn } from '@/lib/social/week-pack/manifest'
 import { WEEKLY_LOOP_JOB, type FactCheckWriteOutcome, type WeeklyLoopClient, type WeeklyLoopDeps, type WeeklyLoopOrderRow } from './run'
 
 export const WEEKLY_LOOP_ORDER_CAP = 50

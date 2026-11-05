@@ -100,6 +100,13 @@ describe('runWeeklyLoop daily cadence', () => {
     expect(receipt.no_publish).toBe(true)
   })
 
+  it('the run hands the recent-published reader to the daily scheduler (the repeat rules see yesterday)', async () => {
+    const deps = makeDeps([row('w1'), row('w2'), row('w3')])
+    const recentPublished = vi.fn(async () => [])
+    await runWeeklyLoop({ ...deps, recentPublished }, { clientId: 'c1', now: NOW, mode: 'dry_run' })
+    expect(recentPublished).toHaveBeenCalledWith({ clientId: 'c1', sinceDay: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) })
+  })
+
   it('3. dry_run: writes nothing', async () => {
     const deps = makeDeps([row('w1'), row('w2'), row('w3')])
     await runWeeklyLoop(deps, { clientId: 'c1', now: NOW, mode: 'dry_run' })

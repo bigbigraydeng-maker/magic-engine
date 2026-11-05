@@ -10,6 +10,9 @@
 
 import { styleViolation, stylePenalty, type EntryStyle, type StyleViolation } from './style-rules';
 
+/** A style violation costs more than any combination of soft penalties, but never leaves a day empty. */
+const STYLE_VIOLATION_COST = 100;
+
 export interface ScheduleCandidate {
   id: string;
   productKey: string | null;
@@ -33,11 +36,13 @@ export interface PlanReelScheduleInput {
   alreadyScheduled: ScheduledItem[];
 }
 
-export type UnscheduledReason = 'over_quota' | 'product_adjacent' | StyleViolation;
+export type UnscheduledReason = 'over_quota' | 'product_adjacent';
 
 export interface PlanReelScheduleResult {
   assignments: Array<{ id: string; publishOn: string }>;
   unscheduled: Array<{ id: string; reason: UnscheduledReason }>;
+  /** Placed anyway because no candidate fitted the style rules for that day (a day left empty is worse than a repeat). */
+  relaxed?: Array<{ id: string; violation: StyleViolation }>;
   cappedAt: number | null;
 }
 
@@ -175,24 +180,26 @@ export function fillSlots(
   const assignments: Array<{ id: string; publishOn: string }> = [];
   let emptySlots = 0;
 
+  const relaxed: Array<{ id: string; violation: StyleViolation }> = [];
+
   for (const slotDate of freeSlots) {
     let chosen: RankedCandidate | null = null;
-    let chosenPenalty = Number.POSITIVE_INFINITY;
+    let chosenCost = Number.POSITIVE_INFINITY;
+    let chosenViolation: StyleViolation | null = null;
     for (const entry of sorted) {
       if (used.has(entry.index)) {
         continue;
       }
-      const reason: UnscheduledReason | null = conflictsAt(placed, slotDate, entry.candidate.productKey)
-        ? 'product_adjacent'
-        : styleViolation(entry.candidate.style, slotDate, placed);
-      if (reason !== null) {
-        rejected.set(entry.candidate.id, reason);
+      if (conflictsAt(placed, slotDate, entry.candidate.productKey)) {
+        rejected.set(entry.candidate.id, 'product_adjacent');
         continue;
       }
-      const penalty = stylePenalty(entry.candidate.style, slotDate, placed);
-      if (penalty < chosenPenalty) {
+      const violation = styleViolation(entry.candidate.style, slotDate, placed);
+      const cost = (violation === null ? 0 : STYLE_VIOLATION_COST) + stylePenalty(entry.candidate.style, slotDate, placed);
+      if (cost < chosenCost) {
         chosen = entry;
-        chosenPenalty = penalty;
+        chosenCost = cost;
+        chosenViolation = violation;
       }
     }
     if (chosen === null) {
@@ -200,6 +207,9 @@ export function fillSlots(
       continue;
     }
     used.add(chosen.index);
+    if (chosenViolation !== null) {
+      relaxed.push({ id: chosen.candidate.id, violation: chosenViolation });
+    }
     placed.push({
       publishOn: slotDate,
       productKey: chosen.candidate.productKey,
@@ -220,5 +230,5 @@ export function fillSlots(
 
   assignments.sort((a, b) => (a.publishOn < b.publishOn ? -1 : a.publishOn > b.publishOn ? 1 : 0));
 
-  return { assignments, unscheduled };
+  return { assignments, unscheduled, relaxed };
 }
