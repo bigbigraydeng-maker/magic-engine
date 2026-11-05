@@ -2,6 +2,8 @@
 # Limited git for the Claude workflow: fetch, checkout, switch, cherry-pick.
 # Installed root-owned outside the repo. The allowlist names that path.
 # Raw `git fetch` / `checkout` / `switch` / `cherry-pick` are not allowed.
+# A NEW branch (checkout -b / switch -c) must be named claude/<name>; see
+# is_new_branch_name. Existing branches can still be checked out by name.
 set -euo pipefail
 
 export PATH=/usr/bin:/bin
@@ -92,6 +94,19 @@ is_branch_name() {
   return 0
 }
 
+# New branches only in Claude's own lane. claude/* is the lane the review
+# loop and fix-scope already watch (tools/ops-review-loop/src/fix-scope.mjs).
+# claude/ledger-verify-* is refused: pr-light-checks.yml swaps the ledger
+# checks for a different check on that prefix, so Claude must not pick it.
+# One segment after claude/, lower case, so the name cannot look like
+# another lane or a config key.
+is_new_branch_name() {
+  is_branch_name "$1" || return 1
+  [[ "$1" =~ ^claude/[a-z0-9][a-z0-9._-]{0,99}$ ]] || return 1
+  [[ "$1" != claude/ledger-verify-* ]] || return 1
+  return 0
+}
+
 is_rev() {
   if is_branch_name "$1"; then
     return 0
@@ -173,24 +188,24 @@ run_fetch() {
 run_checkout() {
   if [[ $# -eq 1 ]] && is_branch_name "$1"; then
     git_exec checkout "$1"
-  elif [[ $# -eq 2 && "$1" == "-b" ]] && is_branch_name "$2"; then
+  elif [[ $# -eq 2 && "$1" == "-b" ]] && is_new_branch_name "$2"; then
     git_exec checkout -b "$2"
-  elif [[ $# -eq 3 && "$1" == "-b" ]] && is_branch_name "$2" && is_rev "$3"; then
+  elif [[ $# -eq 3 && "$1" == "-b" ]] && is_new_branch_name "$2" && is_rev "$3"; then
     git_exec checkout -b "$2" "$3"
   else
-    refuse "checkout allows a branch, or -b <new> [<start>]"
+    refuse "checkout allows a branch, or -b claude/<new> [<start>]"
   fi
 }
 
 run_switch() {
   if [[ $# -eq 1 ]] && is_branch_name "$1"; then
     git_exec switch "$1"
-  elif [[ ($# -eq 2) && ("$1" == "-c" || "$1" == "--create") ]] && is_branch_name "$2"; then
+  elif [[ ($# -eq 2) && ("$1" == "-c" || "$1" == "--create") ]] && is_new_branch_name "$2"; then
     git_exec switch -c "$2"
-  elif [[ ($# -eq 3) && ("$1" == "-c" || "$1" == "--create") ]] && is_branch_name "$2" && is_rev "$3"; then
+  elif [[ ($# -eq 3) && ("$1" == "-c" || "$1" == "--create") ]] && is_new_branch_name "$2" && is_rev "$3"; then
     git_exec switch -c "$2" "$3"
   else
-    refuse "switch allows a branch, or -c <new> [<start>]"
+    refuse "switch allows a branch, or -c claude/<new> [<start>]"
   fi
 }
 

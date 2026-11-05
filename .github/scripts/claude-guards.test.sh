@@ -1,7 +1,7 @@
 #!/bin/bash
 # Shows the draft wrapper cannot open a non-draft PR, and the git wrapper
-# cannot be pointed at a local command. Uses a fake gh/git where the real
-# command must not run. Branch creation uses real git.
+# cannot be pointed at a local command or make a branch outside claude/.
+# Uses a fake gh/git where the real command must not run. Branch creation uses real git.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -272,6 +272,14 @@ expect_reject "switch upload-pack" "$git_real" switch --upload-pack="touch $mark
 expect_reject "switch config-looking name" "$git_real" switch -c "core.sshCommand=evil"
 expect_reject "cherry-pick --exec" "$git_real" cherry-pick --exec="touch $marker"
 expect_reject "cherry-pick -c" "$git_real" cherry-pick -c HEAD
+expect_reject "new branch outside claude/" "$git_real" switch -c feature-x
+expect_reject "checkout -b outside claude/" "$git_real" checkout -b feature-x
+expect_reject "ledger-verify lane" "$git_real" switch -c claude/ledger-verify-x
+expect_reject "upper case" "$git_real" switch -c claude/Feature
+expect_reject "nested segment" "$git_real" checkout -b claude/a/b
+expect_reject "bare prefix" "$git_real" switch -c claude/
+expect_reject "lock suffix" "$git_real" switch -c claude/x.lock
+expect_reject "dotdot" "$git_real" switch -c claude/a..b
 
 hook_dir="$tmp/hooks"
 mkdir -p "$hook_dir"
@@ -282,25 +290,25 @@ git -C "$repo" config core.hooksPath "$hook_dir"
 rm -f "$marker"
 (
   cd "$repo"
-  "$git_real" switch -c feature-a
-  "$git_real" checkout -b feature-b
-  "$git_real" checkout feature-a
+  "$git_real" switch -c claude/feature-a
+  "$git_real" checkout -b claude/feature-b
+  "$git_real" checkout claude/feature-a
   "$git_real" cherry-pick "$side_sha"
 )
 if [[ -e "$marker" ]]; then
   echo "checkout or commit hook ran" >&2
   exit 1
 fi
-assert_eq "$(git -C "$repo" branch --show-current)" "feature-a" "cherry-pick stays on feature-a"
+assert_eq "$(git -C "$repo" branch --show-current)" "claude/feature-a" "cherry-pick stays on claude/feature-a"
 assert_eq "$(git -C "$repo" log -1 --format=%s)" "second" "cherry-pick kept the commit subject"
 grep -q '^b$' <(git -C "$repo" show HEAD:a.txt)
-( cd "$repo" && "$git_real" checkout -b feature-from feature-a )
-assert_eq "$(git -C "$repo" branch --show-current)" "feature-from" "checkout -b accepts a start point"
+( cd "$repo" && "$git_real" checkout -b claude/feature-from claude/feature-a )
+assert_eq "$(git -C "$repo" branch --show-current)" "claude/feature-from" "checkout -b accepts a start point"
 
 git -C "$repo" config core.fsmonitor "touch $marker"
 rm -f "$marker"
 set +e
-( cd "$repo" && "$git_real" switch feature-b ) >"$tmp/out" 2>"$tmp/err"
+( cd "$repo" && "$git_real" switch claude/feature-b ) >"$tmp/out" 2>"$tmp/err"
 status=$?
 set -e
 if [[ "$status" -eq 0 ]]; then
@@ -332,7 +340,7 @@ git -C "$repo" config --unset remote.origin.uploadpack
 git -C "$repo" config alias.checkout "!touch $marker; exit 9"
 rm -f "$marker"
 set +e
-( cd "$repo" && "$git_real" checkout -b feature-alias ) >"$tmp/out" 2>"$tmp/err"
+( cd "$repo" && "$git_real" checkout -b claude/feature-alias ) >"$tmp/out" 2>"$tmp/err"
 status=$?
 set -e
 if [[ "$status" -eq 0 ]]; then
@@ -348,7 +356,7 @@ git -C "$repo" config --remove-section alias
 git -C "$repo" config diff.evil.command "touch $marker"
 rm -f "$marker"
 set +e
-( cd "$repo" && "$git_real" switch feature-a ) >"$tmp/out" 2>"$tmp/err"
+( cd "$repo" && "$git_real" switch claude/feature-a ) >"$tmp/out" 2>"$tmp/err"
 status=$?
 set -e
 if [[ "$status" -eq 0 ]]; then
@@ -414,6 +422,19 @@ expected="$(printf '%s\n' \
   '      actions: read # Required for Claude to read CI results on PRs' \
   '    steps:')"
 assert_eq "$perm" "$expected" "job permissions changed"
+if [[ -e "$root/.github/scripts/gh-resolve-thread.sh" ]]; then
+  echo "resolve-thread wrapper must stay deleted" >&2
+  exit 1
+fi
+if grep -F 'gh-resolve-thread' "$root/.github/workflows/claude.yml"; then
+  echo "workflow still installs or allows resolving review threads" >&2
+  exit 1
+fi
+tools_line="$(grep -F -- '--allowedTools' "$root/.github/workflows/claude.yml")"
+if grep -E -q 'gh api|graphql|resolveReviewThread' <<<"$tools_line"; then
+  echo "allowed tools still include gh api or graphql" >&2
+  exit 1
+fi
 if grep -E -q 'Bash\(git (fetch|checkout|switch|cherry-pick):' "$root/.github/workflows/claude.yml"; then
   echo "raw git prefix is still allowed" >&2
   exit 1
@@ -509,22 +530,22 @@ cp "$config_backup" "$repo/.git/config"
 rm -f "$repo/.gitattributes" "$marker"
 
 printf '\n[diff "evil=x"]\n\ttextconv = touch %s\n' "$marker" >> "$repo/.git/config"
-expect_git_refused "diff textconv key with equals" "$git_real" switch feature-a
+expect_git_refused "diff textconv key with equals" "$git_real" switch claude/feature-a
 cp "$config_backup" "$repo/.git/config"
 git -C "$repo" config interactive.diffFilter "touch $marker"
-expect_git_refused "interactive diff filter" "$git_real" switch feature-a
+expect_git_refused "interactive diff filter" "$git_real" switch claude/feature-a
 git -C "$repo" config --unset interactive.diffFilter
 git -C "$repo" config pager.status "touch $marker"
-expect_git_refused "pager status command" "$git_real" switch feature-a
+expect_git_refused "pager status command" "$git_real" switch claude/feature-a
 git -C "$repo" config --unset pager.status
 git -C "$repo" config core.askPass "touch $marker"
-expect_git_refused "askpass command" "$git_real" switch feature-a
+expect_git_refused "askpass command" "$git_real" switch claude/feature-a
 git -C "$repo" config --unset core.askPass
 git -C "$repo" config imap.tunnel "touch $marker"
-expect_git_refused "imap tunnel" "$git_real" switch feature-a
+expect_git_refused "imap tunnel" "$git_real" switch claude/feature-a
 git -C "$repo" config --unset imap.tunnel
 printf '* diff=evil=x\n' > "$repo/.gitattributes"
-expect_git_refused "diff attribute value with equals" "$git_real" switch feature-a
+expect_git_refused "diff attribute value with equals" "$git_real" switch claude/feature-a
 rm -f "$repo/.gitattributes"
 git -C "$repo" config credential.helper "/tmp/not-a-helper"
 expect_git_refused "absolute credential helper" "$git_real" fetch
@@ -532,7 +553,7 @@ git -C "$repo" config --unset credential.helper
 inc="$tmp/included-filter"
 printf '[filter "hidden"]\n\tclean = touch %s\n' "$marker" > "$inc"
 git -C "$repo" config include.path "$inc"
-expect_git_refused "include path" "$git_real" switch feature-a
+expect_git_refused "include path" "$git_real" switch claude/feature-a
 if [[ -e "$marker" ]]; then
   echo "included filter ran" >&2
   exit 1
@@ -542,13 +563,13 @@ git -C "$repo" config --unset include.path
 # Strict attribute parse: a pattern is not an attribute, comments are not
 # applied, and this repo's timestamp-ours driver is not a program.
 printf 'filter=evil\n' > "$repo/.gitattributes"
-expect_git_ok "pattern only" "$git_real" switch feature-a
+expect_git_ok "pattern only" "$git_real" switch claude/feature-a
 printf '# filter=evil\n* merge=text\n* diff\n' > "$repo/.gitattributes"
-expect_git_ok "comment and builtin merge" "$git_real" switch feature-a
+expect_git_ok "comment and builtin merge" "$git_real" switch claude/feature-a
 cp "$root/.gitattributes" "$repo/.gitattributes"
-expect_git_ok "repo gitattributes" "$git_real" switch feature-a
+expect_git_ok "repo gitattributes" "$git_real" switch claude/feature-a
 printf '\n[merge "timestamp-ours"]\n\tdriver = touch %s\n' "$marker" >> "$repo/.git/config"
-expect_git_refused "timestamp driver command" "$git_real" switch feature-a
+expect_git_refused "timestamp driver command" "$git_real" switch claude/feature-a
 cp "$config_backup" "$repo/.git/config"
 rm -f "$repo/.gitattributes" "$marker"
 
@@ -557,13 +578,13 @@ printf '* filter=evil\n' > "$repo/.gitattributes"
 git -C "$repo" add .gitattributes
 git -C "$repo" commit -qm 'add attributes'
 rm -f "$repo/.gitattributes"
-expect_git_refused "index attributes" "$git_real" switch feature-a
+expect_git_refused "index attributes" "$git_real" switch claude/feature-a
 git -C "$repo" checkout -q -- .gitattributes
 rm -f "$repo/.gitattributes"
 git -C "$repo" reset -q HEAD -- .gitattributes >/dev/null 2>&1 || true
 
 printf '[merge "evil=x"]\n\tdriver = touch %s\n' "$marker" > "$repo/.git/config.worktree"
-expect_git_refused "worktree merge driver with equals" "$git_real" switch feature-a
+expect_git_refused "worktree merge driver with equals" "$git_real" switch claude/feature-a
 rm -f "$repo/.git/config.worktree" "$marker"
 
 echo "claude-guards tests passed"
