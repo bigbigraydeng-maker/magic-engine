@@ -13,7 +13,7 @@ import { APP_BASE } from '@/lib/pm-todo/binding-request-items'
 import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 import { checkReelFacts, factCheckToday, reelOverlayOf, type OkFactSource } from './reel-facts'
 import { dailyVersionDecisions, dailyWindows, type DatedRow } from './daily-schedule'
-import { dailyEntries, dailySettings, datedOutsideCandidates, outsideTourKey, scheduleDaily, type ExpirePort } from './daily-run'
+import { dailyEntries, dailySettings, datedOutsideCandidates, outsideTourKey, rowStyler, scheduleDaily, type ExpirePort, type RecentPublishedPort } from './daily-run'
 
 /** cron_run_logs.job_name for every receipt of the weekly loop (daily fan-out and per-client runs). */
 export const WEEKLY_LOOP_JOB = 'social-weekly-draft'
@@ -56,7 +56,7 @@ export interface WeeklyLoopDeps {
   /** Writes only `output` (with fact_check merged in) and updated_at, guarded by the read updated_at. */
   writeFactCheck(input: { clientId: string; id: string; readUpdatedAt: string; output: Record<string, unknown> }): Promise<FactCheckWriteOutcome>
   writeSchedule(args: WriteReelScheduleArgs): Promise<WriteReelScheduleResult>
-  expireUnapproved?: ExpirePort // daily cadence: past-day reels never approved go back to the pool
+  expireUnapproved?: ExpirePort; recentPublished?: RecentPublishedPort // daily cadence: unapproved past days go back to the pool; already-public reels feed the repeat rules
 }
 
 export type WeeklyLoopTaskCode =
@@ -755,10 +755,11 @@ export async function runWeeklyLoop(
       reviewed.map((r) => ({ id: r.c.row.id, excluded: r.excluded, productKey: r.productKey })),
       persistedIds,
       (id) => outsideTourKey(rows, outside, id, source, today),
+      rowStyler(rows),
     )
-    const plan = await scheduleDaily(deps.writeSchedule, { clientId: input.clientId, slotDates: daily.slotDates, reelPerDay, entries, dryRun: input.mode !== 'write', today: daily.today }, deps.expireUnapproved)
+    const plan = await scheduleDaily(deps.writeSchedule, { clientId: input.clientId, slotDates: daily.slotDates, reelPerDay, entries, dryRun: input.mode !== 'write', today: daily.today }, deps.expireUnapproved, deps.recentPublished)
     for (let i = 0; i < notPersisted; i += 1) bump(counts.skipped_by_reason, 'fact_check_not_persisted')
-    for (const u of [...plan.unscheduled, ...plan.skipped]) bump(counts.skipped_by_reason, u.reason)
+    for (const u of [...plan.unscheduled, ...plan.skipped, ...plan.relaxed.map((r) => ({ reason: `placed_despite_${r.violation}` }))]) bump(counts.skipped_by_reason, u.reason)
     errors.push(...plan.errors)
     counts.already_scheduled = plan.alreadyScheduled
     counts.scheduled = plan.written.length

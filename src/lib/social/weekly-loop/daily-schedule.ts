@@ -9,6 +9,7 @@
  */
 import { groupVersions, type VersionRow } from './version-groups'
 import type { ScheduledItem } from './schedule'
+import type { EntryStyle } from './style-rules'
 import { isExcludedByCard } from '@/lib/factory/publish/promote/scheduled-authorize-list'
 
 /** Reel publishing allows scheduling up to 29 days ahead; one day of margin. */
@@ -93,10 +94,11 @@ export function dailyVersionDecisions(rows: readonly DatedRow[]): {
 export function occupiedDays(
   rows: ReadonlyArray<{ id: string; scheduledOn: string | null }>,
   productKeyOf: (id: string) => string | null,
+  styleFor: (id: string) => EntryStyle | null = () => null,
 ): ScheduledItem[] {
   const out: ScheduledItem[] = []
   for (const r of rows) {
-    if (r.scheduledOn !== null) out.push({ id: r.id, publishOn: r.scheduledOn, productKey: productKeyOf(r.id) })
+    if (r.scheduledOn !== null) out.push({ id: r.id, publishOn: r.scheduledOn, productKey: productKeyOf(r.id), style: styleFor(r.id) })
   }
   return out
 }

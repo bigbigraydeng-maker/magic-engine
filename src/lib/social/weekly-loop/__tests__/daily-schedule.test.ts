@@ -81,7 +81,7 @@ describe('occupiedDays', () => {
       ],
       (id) => (id === 'a' ? 'tourA' : null),
     )
-    expect(out).toEqual([{ id: 'a', publishOn: '2026-11-06', productKey: 'tourA' }])
+    expect(out).toEqual([{ id: 'a', publishOn: '2026-11-06', productKey: 'tourA', style: null }])
   })
 })
 

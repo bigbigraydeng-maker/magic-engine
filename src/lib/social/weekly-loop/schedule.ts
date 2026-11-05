@@ -8,16 +8,24 @@
  * candidates that could not be scheduled along with the reason.
  */
 
+import { styleViolation, stylePenalty, type EntryStyle, type StyleViolation } from './style-rules';
+
+/** A style violation costs more than any combination of soft penalties, but never leaves a day empty. */
+const STYLE_VIOLATION_COST = 100;
+
 export interface ScheduleCandidate {
   id: string;
   productKey: string | null;
   rankAt: string;
+  /** Optional: when present the style rules (music, variants, template runs) apply. */
+  style?: EntryStyle | null;
 }
 
 export interface ScheduledItem {
   id: string;
   publishOn: string;
   productKey: string | null;
+  style?: EntryStyle | null;
 }
 
 export interface PlanReelScheduleInput {
@@ -33,12 +41,15 @@ export type UnscheduledReason = 'over_quota' | 'product_adjacent';
 export interface PlanReelScheduleResult {
   assignments: Array<{ id: string; publishOn: string }>;
   unscheduled: Array<{ id: string; reason: UnscheduledReason }>;
+  /** Placed anyway because no candidate fitted the style rules for that day (a day left empty is worse than a repeat). */
+  relaxed?: Array<{ id: string; violation: StyleViolation }>;
   cappedAt: number | null;
 }
 
 interface PlacedEntry {
   publishOn: string;
   productKey: string | null;
+  style?: EntryStyle | null;
 }
 
 interface RankedCandidate {
@@ -162,20 +173,33 @@ export function fillSlots(
   const placed: PlacedEntry[] = alreadyScheduled.map((item) => ({
     publishOn: item.publishOn,
     productKey: item.productKey,
+    style: item.style,
   }));
+  const rejected = new Map<string, UnscheduledReason>();
 
   const assignments: Array<{ id: string; publishOn: string }> = [];
   let emptySlots = 0;
 
+  const relaxed: Array<{ id: string; violation: StyleViolation }> = [];
+
   for (const slotDate of freeSlots) {
     let chosen: RankedCandidate | null = null;
+    let chosenCost = Number.POSITIVE_INFINITY;
+    let chosenViolation: StyleViolation | null = null;
     for (const entry of sorted) {
       if (used.has(entry.index)) {
         continue;
       }
-      if (!conflictsAt(placed, slotDate, entry.candidate.productKey)) {
+      if (conflictsAt(placed, slotDate, entry.candidate.productKey)) {
+        rejected.set(entry.candidate.id, 'product_adjacent');
+        continue;
+      }
+      const violation = styleViolation(entry.candidate.style, slotDate, placed);
+      const cost = (violation === null ? 0 : STYLE_VIOLATION_COST) + stylePenalty(entry.candidate.style, slotDate, placed);
+      if (cost < chosenCost) {
         chosen = entry;
-        break;
+        chosenCost = cost;
+        chosenViolation = violation;
       }
     }
     if (chosen === null) {
@@ -183,9 +207,13 @@ export function fillSlots(
       continue;
     }
     used.add(chosen.index);
+    if (chosenViolation !== null) {
+      relaxed.push({ id: chosen.candidate.id, violation: chosenViolation });
+    }
     placed.push({
       publishOn: slotDate,
       productKey: chosen.candidate.productKey,
+      style: chosen.candidate.style,
     });
     assignments.push({ id: chosen.candidate.id, publishOn: slotDate });
   }
@@ -196,11 +224,11 @@ export function fillSlots(
   const unscheduled: Array<{ id: string; reason: UnscheduledReason }> = [];
   for (const entry of sorted) {
     if (!used.has(entry.index)) {
-      unscheduled.push({ id: entry.candidate.id, reason });
+      unscheduled.push({ id: entry.candidate.id, reason: rejected.get(entry.candidate.id) ?? reason });
     }
   }
 
   assignments.sort((a, b) => (a.publishOn < b.publishOn ? -1 : a.publishOn > b.publishOn ? 1 : 0));
 
-  return { assignments, unscheduled };
+  return { assignments, unscheduled, relaxed };
 }

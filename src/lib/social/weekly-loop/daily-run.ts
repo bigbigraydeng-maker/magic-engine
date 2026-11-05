@@ -6,6 +6,10 @@
 import { fillSlots } from './schedule'
 import type { ExpireOutcome, WriteReelScheduleArgs, WriteReelScheduleResult } from './schedule-writer'
 import { mondayOf, occupiedDays, poolDepthDays, type DatedRow } from './daily-schedule'
+import { STYLE_LIMITS, styleOf, type EntryStyle } from './style-rules'
+
+const STYLE_LOOKBACK_DAYS = Math.max(STYLE_LIMITS.sameMusicDays, STYLE_LIMITS.variantDays)
+import { toAuditReel } from '@/lib/social/account-audit/load'
 import { checkReelFacts, reelOverlayOf, type OkFactSource } from './reel-facts'
 import { readPublishOn } from '@/lib/social/week-pack/manifest'
 import { readSocialAgentSettings, type SocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
@@ -43,6 +47,18 @@ export interface DailyEntry {
   rankAt: string
   /** eligible = passed facts, 马良 and consent; and (write mode) its fact check was stored. */
   eligible: boolean
+  /** Template / music / variant group of the reel; null = unreadable (never held back for style). */
+  style?: EntryStyle | null
+}
+
+/** Style of every order row the run loaded (candidates and dated rows outside them). Unreadable fields stay null. */
+export function rowStyler(rows: ReadonlyArray<{ id: string; created_at: string; brief: unknown }>): (id: string) => EntryStyle | null {
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  return (id) => {
+    const row = byId.get(id)
+    const reel = row ? toAuditReel(row) : null
+    return reel ? styleOf(reel) : null
+  }
 }
 
 export interface DailyScheduleResult {
@@ -54,7 +70,12 @@ export interface DailyScheduleResult {
   alreadyScheduled: number
   /** Past-day reels that were never approved and went back to the pool this run. */
   expired: string[]
+  /** Placed even though it repeats a recent track / variant / template, because nothing else fitted that day. */
+  relaxed: Array<{ id: string; violation: string }>
 }
+
+/** Reels already public in the last days: they are not schedulable, but the style rules must see them. */
+export type RecentPublishedPort = (args: { clientId: string; sinceDay: string }) => Promise<Array<{ id: string; created_at: string; brief: unknown; publishedOn: string }>>
 
 export type ExpirePort = (args: { clientId: string; ids: string[]; today: string; dryRun: boolean }) => Promise<Array<{ id: string; outcome: ExpireOutcome }>>
 
@@ -77,6 +98,7 @@ export function dailyEntries(
   persistedIds: ReadonlySet<string> | null,
   /** Product key for rows that were not reviewed in this run (dated rows outside the candidates). */
   fallbackKey: (id: string) => string | null = () => null,
+  styleFor: (id: string) => EntryStyle | null = () => null,
 ): { entries: DailyEntry[]; notPersisted: number } {
   const byId = new Map(reviewed.map((r) => [r.id, r]))
   let notPersisted = 0
@@ -85,7 +107,7 @@ export function dailyEntries(
     const passed = r !== undefined && r.excluded === null
     const stored = persistedIds === null || persistedIds.has(c.id)
     if (passed && c.scheduledOn === null && !stored) notPersisted += 1
-    return { id: c.id, scheduledOn: c.scheduledOn, productKey: r ? r.productKey : fallbackKey(c.id), rankAt: c.createdAt, eligible: passed && stored }
+    return { id: c.id, scheduledOn: c.scheduledOn, productKey: r ? r.productKey : fallbackKey(c.id), rankAt: c.createdAt, eligible: passed && stored, style: styleFor(c.id) }
   })
   return { entries, notPersisted }
 }
@@ -101,6 +123,26 @@ export function outsideTourKey(
   if (!outside.some((o) => o.id === id)) return null
   const row = rows.find((r) => r.id === id)
   return row ? checkReelFacts({ brief: row.brief, output: row.output, orderId: row.id, source, today }).result.targetTourId : null
+}
+
+async function loadRecent(
+  args: { clientId: string; today: string },
+  port: RecentPublishedPort | undefined,
+): Promise<{ placed: Array<{ id: string; publishOn: string; productKey: null; style: EntryStyle | null }>; errors: string[] }> {
+  if (!port) return { placed: [], errors: [] }
+  try {
+    const rows = await port({ clientId: args.clientId, sinceDay: shiftDay(args.today, -STYLE_LOOKBACK_DAYS) })
+    const styleFor = rowStyler(rows)
+    return { placed: rows.map((r) => ({ id: r.id, publishOn: r.publishedOn, productKey: null, style: styleFor(r.id) })), errors: [] }
+  } catch {
+    // Not seeing the recent past only weakens the repeat check; it must not stop the schedule.
+    return { placed: [], errors: ['recent_published_unreadable'] }
+  }
+}
+
+function shiftDay(day: string, n: number): string {
+  const [y, m, d] = day.split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
 }
 
 async function expirePast(
@@ -125,11 +167,13 @@ export async function scheduleDaily(
     today: string
   },
   expire?: ExpirePort,
+  recentPublished?: RecentPublishedPort,
 ): Promise<DailyScheduleResult> {
   const keyOf = new Map(args.entries.map((e) => [e.id, e.productKey]))
+  const styleOfId = new Map(args.entries.map((e) => [e.id, e.style ?? null]))
   const { expired, errors } = await expirePast(args, expire)
   const live = args.entries.filter((e) => !expired.includes(e.id))
-  const occupied = occupiedDays(live, (id) => keyOf.get(id) ?? null)
+  const occupied = occupiedDays(live, (id) => keyOf.get(id) ?? null, (id) => styleOfId.get(id) ?? null)
   const pool = live.filter((e) => e.eligible && e.scheduledOn === null)
   const result: DailyScheduleResult = {
     written: [],
@@ -137,12 +181,16 @@ export async function scheduleDaily(
     unscheduled: [],
     errors,
     expired,
+    relaxed: [],
     poolDepthDays: poolDepthDays(pool.length, args.reelPerDay),
     alreadyScheduled: occupied.length,
   }
   const slots = args.reelPerDay > 0 ? args.slotDates : []
-  const plan = fillSlots(slots, pool.map((e) => ({ id: e.id, productKey: e.productKey, rankAt: e.rankAt })), occupied)
+  const recent = await loadRecent(args, recentPublished)
+  result.errors.push(...recent.errors)
+  const plan = fillSlots(slots, pool.map((e) => ({ id: e.id, productKey: e.productKey, rankAt: e.rankAt, style: e.style })), [...occupied, ...recent.placed])
   result.unscheduled = plan.unscheduled
+  result.relaxed = plan.relaxed ?? []
   for (const a of plan.assignments) {
     const res = await writeSchedule({
       clientId: args.clientId,
