@@ -154,7 +154,7 @@ describe('GET /api/factory/work-orders', () => {
     expect(res.status).toBe(200)
     expect(json.orders).toHaveLength(2)
     expect(json.orders.map((o: { client_id: string }) => o.client_id)).toEqual([CLIENT_A, CLIENT_B])
-    expect(eqCalls).toEqual([['status', 'in_review']])
+    expect(eqCalls).toEqual([['status', 'in_review'], ['job_name', 'factory-worker-alive']])
     expect(json.worker.active_count).toBe(0)
   })
 
@@ -172,7 +172,7 @@ describe('GET /api/factory/work-orders', () => {
     const json = await res.json()
 
     expect(json.orders.map((order: { id: string }) => order.id)).toEqual(['wo-review'])
-    expect(json.worker).toEqual({ last_heartbeat_at: '2026-10-23T00:00:00Z', active_count: 1 })
+    expect(json.worker).toEqual({ last_heartbeat_at: '2026-10-23T00:00:00Z', active_count: 1, engine_notice: null })
   })
 
   it('client-scoped admin → only own client rows, filtered in the query', async () => {
@@ -189,7 +189,7 @@ describe('GET /api/factory/work-orders', () => {
     expect(json.orders).toHaveLength(1)
     expect(json.orders[0].client_id).toBe(CLIENT_A)
     expect(json.orders[0].client_name).toBe('Client A')
-    expect(eqCalls).toEqual([['status', 'in_review'], ['client_id', CLIENT_A], ['client_id', CLIENT_A]])
+    expect(eqCalls).toEqual([['status', 'in_review'], ['client_id', CLIENT_A], ['client_id', CLIENT_A], ['job_name', 'factory-worker-alive']])
 
     const serialized = JSON.stringify(json)
     expect(serialized).not.toContain(CLIENT_B)
@@ -223,7 +223,7 @@ describe('GET /api/factory/work-orders', () => {
     expect(res.status).toBe(200)
     expect(json.orders).toHaveLength(1)
     expect(json.orders[0].client_id).toBe(CLIENT_A)
-    expect(eqCalls).toEqual([['status', 'in_review'], ['client_id', CLIENT_A], ['client_id', CLIENT_A]])
+    expect(eqCalls).toEqual([['status', 'in_review'], ['client_id', CLIENT_A], ['client_id', CLIENT_A], ['job_name', 'factory-worker-alive']])
 
     const serialized = JSON.stringify(json)
     expect(serialized).not.toContain(CLIENT_B)
