@@ -173,6 +173,24 @@ describe('landPrescription —— 批准后挂到目标下，不再生成看板�
     expect(updates.some((u) => u.patch.status === 'approved')).toBe(true)
   })
 
+  it('批准新版本时按 supersedes_id 把上一版标成 superseded', async () => {
+    const { supabase, updates } = fakeSupabase()
+    await landPrescription(
+      supabase,
+      { ...PRES, id: 'rx-new', supersedes_id: 'rx-prior' },
+      'approver@example.com',
+      { requireStatus: 'draft' },
+    )
+    const archived = updates.find((row) => row.table === 'prescriptions' && row.patch.status === 'superseded')
+    expect(archived?.calls).toEqual(expect.arrayContaining([
+      ['eq', 'id', 'rx-prior'],
+      ['eq', 'client_id', 'c1'],
+    ]))
+    expect(updates.find((row) => row.patch.status === 'approved')?.calls).toEqual(
+      expect.arrayContaining([['eq', 'id', 'rx-new']]),
+    )
+  })
+
   it('修订版落地 → 把被它替代的上一版归档，但仍然不插入新的看板待办', async () => {
     const { supabase, updates, inserts } = fakeSupabase()
     const r = await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
