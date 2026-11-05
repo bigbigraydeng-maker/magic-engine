@@ -19,12 +19,15 @@ export const TIER_DEFAULTS: Readonly<Record<PlanTier, TierQuota>> = {
 
 /** Knife 1 publishes at one hour per client per day, so at most one reel per day is scheduled. */
 export const DAILY_REEL_HARD_CAP = 1
+export const DAILY_IMAGE_POST_HARD_CAP = 1
 
 export interface SocialAgentSettings {
   enabled: boolean
   reelPerDay: number
   /** where reelPerDay came from */
   reelSource: 'client' | 'tier' | 'off'
+  imagePostPerDay: number
+  imagePostSource: 'client' | 'tier' | 'off'
   tier: PlanTier | null
 }
 
@@ -49,7 +52,7 @@ export function readSocialAgentSettings(
   const enabled = isRecord(socialAgent) && socialAgent.enabled === true
 
   if (!enabled) {
-    return { enabled: false, reelPerDay: 0, reelSource: 'off', tier }
+    return { enabled: false, reelPerDay: 0, reelSource: 'off', imagePostPerDay: 0, imagePostSource: 'off', tier }
   }
 
   const rawReelPerDay = isRecord(socialAgent) ? socialAgent.reel_per_day : undefined
@@ -73,10 +76,34 @@ export function readSocialAgentSettings(
     reelSource = 'off'
   }
 
+  // Image post quota (same pattern as reel)
+  const rawImagePostPerDay = isRecord(socialAgent) ? socialAgent.image_post_per_day : undefined
+  const hasClientImagePost =
+    typeof rawImagePostPerDay === 'number' &&
+    Number.isFinite(rawImagePostPerDay) &&
+    Number.isInteger(rawImagePostPerDay) &&
+    rawImagePostPerDay >= 0
+
+  let imagePostValue: number
+  let imagePostSource: SocialAgentSettings['imagePostSource']
+
+  if (hasClientImagePost) {
+    imagePostValue = rawImagePostPerDay as number
+    imagePostSource = 'client'
+  } else if (tier !== null) {
+    imagePostValue = TIER_DEFAULTS[tier].postPerDay
+    imagePostSource = 'tier'
+  } else {
+    imagePostValue = 0
+    imagePostSource = 'off'
+  }
+
   return {
     enabled: true,
     reelPerDay: Math.min(value, DAILY_REEL_HARD_CAP),
     reelSource,
+    imagePostPerDay: Math.min(imagePostValue, DAILY_IMAGE_POST_HARD_CAP),
+    imagePostSource,
     tier,
   }
 }

@@ -80,7 +80,7 @@ export interface CampaignDailyPlanData {
    */
   bundles: CampaignDailyBundle[]
   command_meta: {
-    source: 'conversation_command'
+    source: 'conversation_command' | 'auto_image_post'
     received_at: string
     raw_summary: string | null
   }
