@@ -20,6 +20,10 @@ import { FPS } from './timing'
 import { fontFamily } from './theme'
 import { templateProps } from './aspect'
 import { useStage } from './stage'
+import { useStyleFamily } from './styles/fonts'
+import { peelStyle } from './styles/select'
+import { StyledPostcard } from './styles/StyledPostcard'
+import type { ResolvedLook } from './styles/types'
 
 const LegacyHookText: React.FC<{ lines: string[] }> = ({ lines }) => {
   const stage = useStage()
@@ -103,7 +107,7 @@ const BrandedEnd: React.FC<{ props: PostcardProps; backdropClip: string; title: 
   )
 }
 
-export const PostcardReel: React.FC<Record<string, unknown>> = (rawProps) => {
+const PostcardReelMain: React.FC<Record<string, unknown>> = (rawProps) => {
   const props = parsePostcardProps(templateProps(rawProps))
   const timing = computePostcardTiming(props)
   const plan = resolveFramePlan('postcard', props)
@@ -146,4 +150,27 @@ export const PostcardReel: React.FC<Record<string, unknown>> = (rawProps) => {
       {props.musicFile !== null ? <Audio src={staticFile(props.musicFile)} volume={vol * 0.9 * (props.musicGain ?? 1)} startFrom={Math.round((props.musicStartSec ?? 0) * FPS)} /> : null}
     </AbsoluteFill>
   )
+}
+
+function carriedLook(rawProps: Record<string, unknown>): ResolvedLook | null {
+  const look = peelStyle(rawProps).look
+  return look == null ? null : (look as ResolvedLook)
+}
+
+function plainProps(rawProps: Record<string, unknown>): Record<string, unknown> {
+  const body = peelStyle(rawProps).body
+  return body === rawProps ? rawProps : (body as Record<string, unknown>)
+}
+
+const PostcardStyled: React.FC<{ rawProps: Record<string, unknown>; look: ResolvedLook }> = ({ rawProps, look }) => {
+  const family = useStyleFamily(look)
+  const props = parsePostcardProps(templateProps(peelStyle(rawProps).body))
+  if (family === null) return null
+  return <StyledPostcard props={props} look={look} family={family} />
+}
+
+export const PostcardReel: React.FC<Record<string, unknown>> = (rawProps) => {
+  const look = carriedLook(rawProps)
+  if (look) return <PostcardStyled rawProps={rawProps} look={look} />
+  return <PostcardReelMain rawProps={plainProps(rawProps)} />
 }
