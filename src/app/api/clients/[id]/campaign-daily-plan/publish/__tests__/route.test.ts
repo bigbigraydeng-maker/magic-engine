@@ -1409,7 +1409,7 @@ describe('publish bridge — never races the unattended publisher', () => {
     )
   })
 
-  it('🔴 a claim whose call threw may still have been written, so that date is closed as unknown_outcome too', async () => {
+  it('🔴 a claim whose call threw may still have been written: the date is closed from the receipt (rejected, nothing sent), not left open', async () => {
     stubTables()
     armProvider()
     mockClaim.mockRejectedValue(new Error('read-back failed'))
@@ -1418,8 +1418,19 @@ describe('publish bridge — never races the unattended publisher', () => {
 
     expect(mockPublish).not.toHaveBeenCalled()
     expect(mockFinish).toHaveBeenCalledWith(
-      expect.objectContaining({ date: DATES[0], patch: expect.objectContaining({ status: 'unknown_outcome' }) }),
+      expect.objectContaining({ date: DATES[0], patch: expect.objectContaining({ status: 'failed_final', reason_code: 'MANUAL_REJECTED' }) }),
     )
+  })
+
+  it('each Facebook call of a live manual publish has a timeout shorter than the stale-claim limit', async () => {
+    stubTables()
+    armProvider()
+
+    await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+
+    const timeout = mockRunner.mock.calls.at(-1)?.[0].requestTimeoutMs
+    expect(timeout).toBeGreaterThan(0)
+    expect((timeout ?? 0) * 7).toBeLessThan(15 * 60 * 1000)
   })
 
   it('closing the claim is retried once before giving up', async () => {

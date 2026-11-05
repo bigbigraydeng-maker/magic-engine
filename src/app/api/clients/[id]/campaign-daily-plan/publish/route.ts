@@ -39,6 +39,13 @@ import { manualAttemptPatch, type ManualClaim } from '@/lib/campaign/daily-plan-
 /** A claim younger than this belongs to a sweep that may still be sending. */
 const AUTO_PUBLISH_CLAIM_FRESH_MS = 15 * 60 * 1000
 
+/**
+ * Per Facebook call on a live manual publish. A plan has at most 7 dates, so a request holds its claims for well under
+ * AUTO_PUBLISH_CLAIM_FRESH_MS and a still-running manual publish is never mistaken for a dead one. A timeout is an
+ * uncertain outcome (a person confirms it), never a silent retry.
+ */
+const MANUAL_PUBLISH_REQUEST_TIMEOUT_MS = 90 * 1000
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -132,7 +139,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // Dates where the claim call threw: the write may still have landed, so they are closed as unknown too.
     const maybeClaimed = new Set<string>()
     const claimDate = async (date: string): Promise<boolean> => {
-      let taken: Awaited<ReturnType<typeof claimManualAttempt>> | { claimed: true; restoreRecalled: false; untracked: true }
+      let taken: Awaited<ReturnType<typeof claimManualAttempt>>
       try {
         taken = await claimManualAttempt({ clientId, planId: command.plan_id, date, requestId, now: new Date() })
       } catch (error) {
@@ -165,13 +172,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }
       // A date whose claim call threw may or may not hold our row; closing it is a no-op when it does not.
       for (const date of maybeClaimed) {
-        if (!claimed.has(date)) await closeOne(date, { restoreRecalled: false }, null)
+        if (!claimed.has(date)) await closeOne(date, { restoreRecalled: false }, receipt)
       }
     }
 
     let result: Awaited<ReturnType<typeof runDailyPlanPublish>>
     try {
-      result = await runDailyPlanPublish({ clientId, command, approvedByUserId: access.user.id, beforeSend: claimDate })
+      result = await runDailyPlanPublish({
+        clientId,
+        command,
+        approvedByUserId: access.user.id,
+        beforeSend: claimDate,
+        requestTimeoutMs: MANUAL_PUBLISH_REQUEST_TIMEOUT_MS,
+      })
     } catch (error: unknown) {
       // The run died somewhere between claiming a date and recording the outcome: Facebook may hold the Post.
       await closeClaims(null)

@@ -31,13 +31,19 @@ function asReceipt(value: unknown): ReceiptLike | null {
  */
 export function manualAttemptPatch(date: string, receiptValue: unknown, claim: ManualClaim): AttemptPatch {
   const receipt = asReceipt(receiptValue)
-
-  // Older receipts can already hold an entry for this date; the entry written by this run is the last one.
+  // `failed[]` only holds this run's failures, `published[]` also holds earlier runs: where both name the date, this
+  // run's failure is the answer for this run, and the newest published entry is the answer when there is no failure.
+  const failed = receipt?.failed?.filter(item => item.date === date).pop()
   const published = receipt?.published?.filter(post => post.date === date).pop()
-  const failedEntry = receipt?.failed?.filter(item => item.date === date).pop()
-  // The receipt also carries entries from earlier runs. A date in both lists cannot be told apart from here, so a person looks.
-  if (published && failedEntry) return { status: 'unknown_outcome', reason_code: 'MANUAL_UNKNOWN', next_retry_at: null }
-  if (published && typeof published.post_id === 'string' && published.post_id.length > 0) {
+
+  if (failed && (failed.certainty === 'rejected' || failed.certainty === 'rate_limited')) {
+    // Nothing went out. A recalled date goes back to being recalled so the sweep never republishes it.
+    return claim.restoreRecalled
+      ? { status: 'blocked', reason_code: 'RECALLED', next_retry_at: null }
+      : { status: 'failed_final', reason_code: 'MANUAL_REJECTED', next_retry_at: null }
+  }
+
+  if (!failed && published && typeof published.post_id === 'string' && published.post_id.length > 0) {
     return {
       status: 'published',
       reason_code: 'MANUAL_PUBLISH',
@@ -46,14 +52,6 @@ export function manualAttemptPatch(date: string, receiptValue: unknown, claim: M
       provider_impact: 'FB_SCHEDULED',
       next_retry_at: null,
     }
-  }
-
-  const failed = failedEntry
-  if (failed && (failed.certainty === 'rejected' || failed.certainty === 'rate_limited')) {
-    // Nothing went out. A recalled date goes back to being recalled so the sweep never republishes it.
-    return claim.restoreRecalled
-      ? { status: 'blocked', reason_code: 'RECALLED', next_retry_at: null }
-      : { status: 'failed_final', reason_code: 'MANUAL_REJECTED', next_retry_at: null }
   }
 
   return { status: 'unknown_outcome', reason_code: 'MANUAL_UNKNOWN', next_retry_at: null }

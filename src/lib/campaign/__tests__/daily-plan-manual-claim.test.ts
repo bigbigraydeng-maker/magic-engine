@@ -57,9 +57,14 @@ describe('manualAttemptPatch', () => {
     expect(patch.post_id).toBe('NEW_2')
   })
 
-  it('a date in both lists (an older run and this one) cannot be told apart, so it is unknown_outcome', () => {
-    expect(
-      manualAttemptPatch(DATE, { published: [{ date: DATE, post_id: 'OLD_1' }], failed: [{ date: DATE, certainty: 'rejected' }] }, plain).status,
-    ).toBe('unknown_outcome')
+  it('an older published entry plus this run\'s certain failure: the failure is this run\'s answer', () => {
+    const receipt = { published: [{ date: DATE, post_id: 'OLD_1' }], failed: [{ date: DATE, certainty: 'rejected' }] }
+    expect(manualAttemptPatch(DATE, receipt, plain).status).toBe('failed_final')
+    expect(manualAttemptPatch(DATE, receipt, { restoreRecalled: true })).toEqual({ status: 'blocked', reason_code: 'RECALLED', next_retry_at: null })
+  })
+
+  it('an older published entry plus this run\'s uncertain failure stays unknown_outcome', () => {
+    const receipt = { published: [{ date: DATE, post_id: 'OLD_1' }], failed: [{ date: DATE, certainty: 'unknown' }] }
+    expect(manualAttemptPatch(DATE, receipt, plain).status).toBe('unknown_outcome')
   })
 })
