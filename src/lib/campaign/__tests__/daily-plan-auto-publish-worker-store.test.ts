@@ -14,6 +14,7 @@ import {
   clearNonStickyAttempts,
   isMissingTableError,
   listFreshClaims,
+  listUnconfirmedAttempts,
   claimAttempt,
   confirmUnknownOutcome,
   finishAttempt,
@@ -452,6 +453,27 @@ describe('listFreshClaims', () => {
     expect(chain.eq).toHaveBeenCalledWith('status', 'claimed')
     expect(chain.eq).toHaveBeenCalledWith('client_id', 'client-1')
     expect(chain.gte).toHaveBeenCalledWith('updated_at', '2026-10-12T00:00:00.000Z')
+  })
+})
+
+describe('listUnconfirmedAttempts', () => {
+  it('asks for unknown_outcome rows and claimed rows not touched since the cut-off, scoped to plan and client', async () => {
+    const chain = makeChain({ data: [{ date: '2026-10-13', status: 'unknown_outcome' }], error: null })
+    fromMock.mockReturnValue(chain)
+
+    const rows = await listUnconfirmedAttempts('plan-1', 'client-1', new Date('2026-10-12T00:00:00Z'))
+
+    expect(rows).toHaveLength(1)
+    expect(chain.eq).toHaveBeenCalledWith('plan_id', 'plan-1')
+    expect(chain.eq).toHaveBeenCalledWith('client_id', 'client-1')
+    expect(chain.or).toHaveBeenCalledWith(
+      'status.eq.unknown_outcome,and(status.eq.claimed,updated_at.lt.2026-10-12T00:00:00.000Z)',
+    )
+  })
+
+  it('throws database errors instead of reading them as "nothing unconfirmed"', async () => {
+    fromMock.mockReturnValue(makeChain({ data: null, error: { message: 'x' } }))
+    await expect(listUnconfirmedAttempts('plan-1', 'client-1', new Date())).rejects.toBeTruthy()
   })
 })
 

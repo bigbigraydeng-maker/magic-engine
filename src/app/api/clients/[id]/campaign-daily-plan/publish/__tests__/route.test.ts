@@ -6,6 +6,7 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/campaign/daily-plan-auto-publish-worker-store', async importOriginal => ({
   ...(await importOriginal<typeof import('@/lib/campaign/daily-plan-auto-publish-worker-store')>()),
   listFreshClaims: vi.fn(),
+  listUnconfirmedAttempts: vi.fn(),
 }))
 vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: vi.fn() }))
 vi.mock('@/lib/meta/token-manager', () => ({
@@ -26,7 +27,7 @@ import { POST } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
-import { listFreshClaims } from '@/lib/campaign/daily-plan-auto-publish-worker-store'
+import { listFreshClaims, listUnconfirmedAttempts } from '@/lib/campaign/daily-plan-auto-publish-worker-store'
 import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { getPageAccessToken, publishPagePhotoPost } from '@/lib/meta/page-posts'
 import { ensureFacebookFirstComment } from '@/lib/meta/first-comment'
@@ -41,6 +42,7 @@ const mockAccess = vi.mocked(requirePaidClientAccess)
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockSendInngestEvent = vi.mocked(sendInngestEvent)
 const mockFreshClaims = vi.mocked(listFreshClaims)
+const mockUnconfirmed = vi.mocked(listUnconfirmedAttempts)
 const mockGetMetaToken = vi.mocked(getMetaTokenForClient)
 const mockGetStoredPageToken = vi.mocked(getStoredPageToken)
 const mockGetPageToken = vi.mocked(getPageAccessToken)
@@ -267,6 +269,7 @@ beforeEach(() => {
   allow()
   mockFirstComment.mockResolvedValue('comment_1')
   mockFreshClaims.mockResolvedValue([])
+  mockUnconfirmed.mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -1242,10 +1245,57 @@ describe('publish bridge — never races the unattended publisher', () => {
     expect(response.status).not.toBe(409)
   })
 
+  it('🔴 a live publish is refused for a date whose auto-publish outcome nobody has confirmed', async () => {
+    stubTables()
+    armProvider()
+    mockUnconfirmed.mockResolvedValue([{ date: DATES[0] } as never])
+
+    const response = await POST(request({ no_publish: false }), params)
+    const json = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(json).toMatchObject({ error: 'AUTO_PUBLISH_UNCONFIRMED', dates: [DATES[0]] })
+    expect(json.hint).toContain('Facebook')
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('an unconfirmed date the caller did not ask for does not block the one asked for', async () => {
+    stubTables()
+    armProvider()
+    mockUnconfirmed.mockResolvedValue([{ date: '2099-01-01' } as never])
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[1]] }), params)
+
+    expect(response.status).not.toBe(409)
+  })
+
+  it('an unconfirmed date is reported before a fresh claim on the same date', async () => {
+    stubTables()
+    armProvider()
+    mockUnconfirmed.mockResolvedValue([{ date: DATES[0] } as never])
+    mockFreshClaims.mockResolvedValue([{ date: DATES[0] } as never])
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect((await response.json()).error).toBe('AUTO_PUBLISH_UNCONFIRMED')
+  })
+
+  it('🔴 if the unconfirmed attempts cannot be read the publish does not go ahead (fail closed)', async () => {
+    stubTables()
+    armProvider()
+    mockUnconfirmed.mockRejectedValue(new Error('db down'))
+
+    const response = await POST(request({ no_publish: false }), params)
+
+    expect(response.status).toBe(500)
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
   it('a dry run never looks at claims', async () => {
     stubTables()
     await POST(request({ no_publish: true }), params)
     expect(mockFreshClaims).not.toHaveBeenCalled()
+    expect(mockUnconfirmed).not.toHaveBeenCalled()
   })
 
   it('if the auto-publish tables do not exist at all, the manual publish is not blocked', async () => {

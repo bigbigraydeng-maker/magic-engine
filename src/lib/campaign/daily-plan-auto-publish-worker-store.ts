@@ -288,6 +288,23 @@ export async function listFreshClaims(planId: string, clientId: string, since: D
   return (data ?? []) as AttemptRecord[]
 }
 
+/**
+ * Attempts whose outcome nobody has confirmed: Facebook may already hold the Post. That is `unknown_outcome`, plus a
+ * `claimed` row that has not been touched since `staleBefore` (the sweep has not turned it into `unknown_outcome` yet).
+ */
+export async function listUnconfirmedAttempts(planId: string, clientId: string, staleBefore: Date): Promise<AttemptRecord[]> {
+  const { data, error } = await supabaseAdmin
+    .from(ATTEMPTS_TABLE)
+    .select('*')
+    .eq('plan_id', planId)
+    .eq('client_id', clientId)
+    .or(`status.eq.unknown_outcome,and(status.eq.claimed,updated_at.lt.${staleBefore.toISOString()})`)
+
+  if (error) throw error
+
+  return (data ?? []) as AttemptRecord[]
+}
+
 /** True when a database error means "this table does not exist (yet)" — Postgres 42P01 or PostgREST PGRST205. */
 export function isMissingTableError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false

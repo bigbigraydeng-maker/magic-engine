@@ -25,7 +25,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { CampaignDailyPublishCommandSchema } from '@/lib/campaign/daily-plan-publish'
 import { runDailyPlanPublish } from '@/lib/campaign/daily-plan-publish-runner'
-import { isMissingTableError, listFreshClaims } from '@/lib/campaign/daily-plan-auto-publish-worker-store'
+import { isMissingTableError, listFreshClaims, listUnconfirmedAttempts } from '@/lib/campaign/daily-plan-auto-publish-worker-store'
 
 /** A claim younger than this belongs to a sweep that may still be sending. */
 const AUTO_PUBLISH_CLAIM_FRESH_MS = 15 * 60 * 1000
@@ -59,11 +59,31 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!command.no_publish) {
       // If the auto-publish tables are not there at all, there is no unattended publisher to collide with; any
       // other read failure stops the publish (fail closed).
-      const claims = await listFreshClaims(command.plan_id, clientId, new Date(Date.now() - AUTO_PUBLISH_CLAIM_FRESH_MS)).catch(error => {
-        if (isMissingTableError(error)) return []
-        throw error
-      })
-      const busy = claims.filter(claim => !command.dates || command.dates.includes(claim.date)).map(claim => claim.date)
+      const freshSince = new Date(Date.now() - AUTO_PUBLISH_CLAIM_FRESH_MS)
+      const readAttempts = (read: () => Promise<{ date: string }[]>) =>
+        read().catch(error => {
+          if (isMissingTableError(error)) return []
+          throw error
+        })
+      const [claims, unconfirmed] = await Promise.all([
+        readAttempts(() => listFreshClaims(command.plan_id, clientId, freshSince)),
+        readAttempts(() => listUnconfirmedAttempts(command.plan_id, clientId, freshSince)),
+      ])
+      const wanted = (attempt: { date: string }) => !command.dates || command.dates.includes(attempt.date)
+      // An unconfirmed date may already be on the Page: publishing it again by hand is how a Post goes out twice.
+      const unsure = unconfirmed.filter(wanted).map(attempt => attempt.date)
+      if (unsure.length > 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'AUTO_PUBLISH_UNCONFIRMED',
+            dates: unsure,
+            hint: '自动发布没确认这些日期有没有已经发出去。先去 Facebook 主页看一眼：已经发出的，在今日待办里确认；没发出的，也在待办里处理后再手动发，避免同一条发两次。',
+          },
+          { status: 409 }
+        )
+      }
+      const busy = claims.filter(wanted).map(claim => claim.date)
       if (busy.length > 0) {
         return NextResponse.json(
           { success: false, error: 'AUTO_PUBLISH_IN_PROGRESS', dates: busy, hint: '自动发布正在处理这些日期，等几分钟后再试。' },
