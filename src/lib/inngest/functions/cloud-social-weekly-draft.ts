@@ -21,6 +21,7 @@ import { REVIEW_V2_ESTIMATE_USD, runReviewCheckV2, withinWeeklyBudget } from '@/
 import { REMOTION_REVIEW_TIMEOUT_MS, runCheckWithTimeout, stampWorkOrderOutput } from '@/lib/maliang/review-disposition'
 import { readSocialAgentSettings } from '@/lib/social/recipe/tier-defaults'
 import { MALIANG_BACKFILL_MAX_PER_RUN, maliangWeeklyCapUsd, overlayReviews, pickBackfillTargets, type BackfillPersisted, type BackfillTarget, type MaliangBackfillReceipt } from '@/lib/social/weekly-loop/maliang-backfill'
+import { runImagePostStep, type ImagePostStepReceipt } from '@/lib/social/image-post-step'
 
 export const SOCIAL_WEEKLY_DRAFT_FUNCTION_ID = `${CLOUD_FN_PREFIX}social-weekly-draft`
 export const SOCIAL_WEEKLY_DRAFT_CRON = 'TZ=Pacific/Auckland 30 6 * * *'
@@ -603,12 +604,14 @@ async function handleDue(
   } else {
     const resolved = await step.run('resolve-mode', async () => {
       let clientEnabled = false
+      let clientConfig: unknown = null
       try {
-        clientEnabled = weeklyLoopEnabled(await deps.loadClientConfig(ctx.clientId))
+        clientConfig = await deps.loadClientConfig(ctx.clientId)
+        clientEnabled = weeklyLoopEnabled(clientConfig)
       } catch {
         clientEnabled = false
       }
-      return resolveMode(ctx.requested, deps.env(), clientEnabled)
+      return { ...resolveMode(ctx.requested, deps.env(), clientEnabled), clientConfig }
     })
 
     const backfill = await runMaliangBackfill(
@@ -643,6 +646,31 @@ async function handleDue(
     })
   }
 
+  // --- Image post auto-draft (knife 3) ---
+  let imagePostReceipt: ImagePostStepReceipt | null = null
+  if (ctx.clientId && resolved.mode === 'write') {
+    imagePostReceipt = await step.run('draft-image-posts', async (): Promise<ImagePostStepReceipt> => {
+      if (!process.env.OPENAI_API_KEY) {
+        return { attempted: 0, drafted: 0, planIds: [], skipped: 'no_openai_key', error: null }
+      }
+      const { getOpenAIClient } = await import('@/lib/ai/openai-client')
+      const openai = getOpenAIClient()
+      const callLLM = async (prompt: string): Promise<string> => {
+        const resp = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.7,
+          max_tokens: 600,
+        })
+        return resp.choices[0]?.message?.content ?? ''
+      }
+      return runImagePostStep(ctx.clientId, isoDate(deps.now()), resolved.clientConfig, null, {
+        supabase: supabaseAdmin,
+        callLLM,
+      })
+    })
+  }
+
   await step.run('finish-run', async () => {
     const processed = receipt.counts?.candidates ?? 0
     const completed = receipt.counts?.scheduled ?? 0
@@ -653,7 +681,7 @@ async function handleDue(
       processed,
       completed,
       failed,
-      summary: { ...receipt },
+      summary: { ...receipt, imagePost: imagePostReceipt },
       error: failed > 0 ? receipt.failures.join('; ').slice(0, 500) : undefined,
     })
     return null
