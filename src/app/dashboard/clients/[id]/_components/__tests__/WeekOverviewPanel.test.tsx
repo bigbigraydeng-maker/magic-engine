@@ -320,7 +320,7 @@ describe('WeekOverviewPanel', () => {
     })
     const { container } = render(<WeekOverviewPanel clientId={CLIENT} />)
     await screen.findByText('Review One')
-    const groups = Array.from(container.querySelectorAll('details'))
+    const groups = Array.from(container.querySelectorAll<HTMLDetailsElement>('details:not([data-other-items])'))
       .filter((d) => d.querySelector('h3'))
       .map((d) => [d.querySelector('h3')?.textContent, d.open])
     expect(groups).toEqual([

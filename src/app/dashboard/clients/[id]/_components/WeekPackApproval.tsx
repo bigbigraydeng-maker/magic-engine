@@ -219,26 +219,36 @@ export function WeekPackApproval({ clientId }: { clientId: string }) {
     ? weekReels.items.filter((item) => checked.has(item.work_order_id) && item.selectable && item.fingerprint).length
     : 0
   return (
-    <section id="approve-week" className="space-y-3 rounded-2xl border border-black/10 bg-white p-4">
+    <section id="approve-week" className="space-y-3 rounded-2xl border-2 border-me-ochre bg-white p-5">
       <div>
-        <h2 className="text-lg font-bold text-me-charcoal">批下一周</h2>
+        <p className="text-xs font-bold text-me-ochre">这周你要做的一件事</p>
+        <h2 className="text-xl font-bold text-me-charcoal">批下一周</h2>
         <p className="text-sm font-semibold text-me-charcoal">{page.headline}</p>
       </div>
-      <ul className="space-y-1 text-sm text-me-charcoal/80">
-        {page.lines.map((line) => <li key={line}>{line}</li>)}
-      </ul>
-      <p className="text-sm text-me-charcoal/80">{page.posts_line}</p>
-      <p className="text-xs text-me-charcoal/70">{page.cadence_line}</p>
       {page.message && <p className="text-sm font-medium text-me-charcoal">{page.message}</p>}
       {page.card && (
         <div className="space-y-1 rounded-xl bg-[#f6f7f2] p-3 text-sm text-me-charcoal">
-          <p>{page.card.what}</p>
-          <p>{page.card.date}</p>
-          <p>{page.card.display_scope}</p>
           <p className="font-semibold">{page.card.status_line}</p>
           {page.card.blocked_reason && <p className="text-[#8F2B22]">{page.card.blocked_reason}</p>}
         </div>
       )}
+      <details className="text-sm text-me-charcoal/80">
+        <summary className="cursor-pointer text-xs font-semibold text-me-charcoal/70">这一批包含什么、怎么算的（点开看）</summary>
+        <div className="mt-2 space-y-1">
+          {page.card && (
+            <>
+              <p>{page.card.what}</p>
+              <p>{page.card.date}</p>
+              <p>{page.card.display_scope}</p>
+            </>
+          )}
+          <ul className="space-y-1">
+            {page.lines.map((line) => <li key={line}>{line}</li>)}
+          </ul>
+          <p>{page.posts_line}</p>
+          <p className="text-xs text-me-charcoal/70">{page.cadence_line}</p>
+        </div>
+      </details>
       {page.reel_scheduled ? (
         <div className="space-y-2">
           <h3 className="text-sm font-bold text-me-charcoal">下周的视频{weekReels ? `（${weekReels.items.length} 条）` : ''}</h3>
