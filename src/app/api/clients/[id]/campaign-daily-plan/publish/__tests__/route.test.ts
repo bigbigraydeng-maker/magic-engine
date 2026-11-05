@@ -7,6 +7,8 @@ vi.mock('@/lib/campaign/daily-plan-auto-publish-worker-store', async importOrigi
   ...(await importOriginal<typeof import('@/lib/campaign/daily-plan-auto-publish-worker-store')>()),
   listFreshClaims: vi.fn(),
   listUnconfirmedAttempts: vi.fn(),
+  claimManualAttempt: vi.fn(),
+  finishAttempt: vi.fn(),
 }))
 vi.mock('@/lib/workflows/inngest-event', () => ({ sendInngestEvent: vi.fn() }))
 vi.mock('@/lib/meta/token-manager', () => ({
@@ -27,7 +29,12 @@ import { POST } from '../route'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
-import { listFreshClaims, listUnconfirmedAttempts } from '@/lib/campaign/daily-plan-auto-publish-worker-store'
+import {
+  claimManualAttempt,
+  finishAttempt,
+  listFreshClaims,
+  listUnconfirmedAttempts,
+} from '@/lib/campaign/daily-plan-auto-publish-worker-store'
 import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { getPageAccessToken, publishPagePhotoPost } from '@/lib/meta/page-posts'
 import { ensureFacebookFirstComment } from '@/lib/meta/first-comment'
@@ -43,6 +50,8 @@ const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockSendInngestEvent = vi.mocked(sendInngestEvent)
 const mockFreshClaims = vi.mocked(listFreshClaims)
 const mockUnconfirmed = vi.mocked(listUnconfirmedAttempts)
+const mockClaim = vi.mocked(claimManualAttempt)
+const mockFinish = vi.mocked(finishAttempt)
 const mockGetMetaToken = vi.mocked(getMetaTokenForClient)
 const mockGetStoredPageToken = vi.mocked(getStoredPageToken)
 const mockGetPageToken = vi.mocked(getPageAccessToken)
@@ -270,6 +279,8 @@ beforeEach(() => {
   mockFirstComment.mockResolvedValue('comment_1')
   mockFreshClaims.mockResolvedValue([])
   mockUnconfirmed.mockResolvedValue([])
+  mockClaim.mockResolvedValue({ claimed: true, restoreRecalled: false })
+  mockFinish.mockResolvedValue(true)
 })
 
 afterEach(() => {
@@ -1291,11 +1302,97 @@ describe('publish bridge — never races the unattended publisher', () => {
     expect(mockPublish).not.toHaveBeenCalled()
   })
 
+  it('🔴 a live publish claims the date before the Facebook call, and closes the claim as published with the post id', async () => {
+    stubTables()
+    armProvider()
+    const order: string[] = []
+    mockClaim.mockImplementation(async () => {
+      order.push('claim')
+      return { claimed: true, restoreRecalled: false }
+    })
+    mockPublish.mockImplementationOnce(async () => {
+      order.push('facebook')
+      return { postId: 'PAGE_1', postIdSource: 'post_id' as const, permalink: 'https://www.facebook.com/PAGE_1', raw: { id: 'p', post_id: 'PAGE_1' } }
+    })
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+
+    expect(response.status).toBe(200)
+    expect(order.slice(0, 2)).toEqual(['claim', 'facebook'])
+    expect(mockClaim).toHaveBeenCalledWith(expect.objectContaining({ clientId: expect.any(String), date: DATES[0] }))
+    expect(mockFinish).toHaveBeenCalledWith(
+      expect.objectContaining({ date: DATES[0], patch: expect.objectContaining({ status: 'published', post_id: 'PAGE_1' }) }),
+    )
+  })
+
+  it('🔴 a date whose claim is refused is never sent to Facebook', async () => {
+    stubTables()
+    armProvider()
+    mockClaim.mockResolvedValue({ claimed: false })
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+    const json = await response.json()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(JSON.stringify(json)).toContain(DATES[0])
+    expect(mockFinish).not.toHaveBeenCalled()
+  })
+
+  it('🔴 if the claim cannot be taken (database error) the date is not sent either', async () => {
+    stubTables()
+    armProvider()
+    mockClaim.mockRejectedValue(new Error('db down'))
+
+    await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('without an attempts table there is no claim to take, and the publish goes ahead', async () => {
+    stubTables()
+    armProvider()
+    mockClaim.mockRejectedValue({ code: '42P01', message: 'relation "daily_plan_auto_publish_attempts" does not exist' })
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+
+    expect(response.status).toBe(200)
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+    expect(mockFinish).not.toHaveBeenCalled()
+  })
+
+  it('a run that dies after claiming closes the claim as unknown_outcome and still fails', async () => {
+    stubTables()
+    armProvider()
+    mockPublish.mockRejectedValueOnce(new Error('socket hang up'))
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+
+    expect(mockClaim).toHaveBeenCalled()
+    const closed = mockFinish.mock.calls.map(call => call[0].patch.status)
+    expect(closed.length).toBeGreaterThan(0)
+    expect(closed.every(status => status === 'unknown_outcome' || status === 'failed_final')).toBe(true)
+    expect(response.status).toBeGreaterThanOrEqual(200)
+  })
+
+  it('a failure to close the claim is logged and does not turn a successful publish into an error', async () => {
+    stubTables()
+    armProvider()
+    mockFinish.mockRejectedValue(new Error('db down'))
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+
+    const response = await POST(request({ no_publish: false, dates: [DATES[0]] }), params)
+
+    expect(response.status).toBe(200)
+    expect(log).toHaveBeenCalled()
+    log.mockRestore()
+  })
+
   it('a dry run never looks at claims', async () => {
     stubTables()
     await POST(request({ no_publish: true }), params)
     expect(mockFreshClaims).not.toHaveBeenCalled()
     expect(mockUnconfirmed).not.toHaveBeenCalled()
+    expect(mockClaim).not.toHaveBeenCalled()
   })
 
   it('if the auto-publish tables do not exist at all, the manual publish is not blocked', async () => {

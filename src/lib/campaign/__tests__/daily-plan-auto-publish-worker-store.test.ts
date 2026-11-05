@@ -16,6 +16,7 @@ import {
   listFreshClaims,
   listUnconfirmedAttempts,
   claimAttempt,
+  claimManualAttempt,
   confirmUnknownOutcome,
   finishAttempt,
   listAttempts,
@@ -474,6 +475,87 @@ describe('listUnconfirmedAttempts', () => {
   it('throws database errors instead of reading them as "nothing unconfirmed"', async () => {
     fromMock.mockReturnValue(makeChain({ data: null, error: { message: 'x' } }))
     await expect(listUnconfirmedAttempts('plan-1', 'client-1', new Date())).rejects.toBeTruthy()
+  })
+})
+
+describe('claimManualAttempt', () => {
+  const input = { clientId: 'client-1', planId: 'plan-1', date: '2026-11-09', requestId: 'req-1', now: new Date('2026-11-08T00:00:00Z') }
+  const unique = { code: '23505', message: 'duplicate' }
+
+  it('inserts a fresh claim with no authorization id', async () => {
+    const chain = makeChain({ data: null, error: null })
+    fromMock.mockReturnValueOnce(chain)
+
+    expect(await claimManualAttempt(input)).toEqual({ claimed: true, restoreRecalled: false })
+    expect(chain.insert).toHaveBeenCalledWith(expect.objectContaining({ auth_id: null, status: 'claimed', request_id: 'req-1', date: '2026-11-09' }))
+  })
+
+  it('throws any insert error that is not the unique violation', async () => {
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: { code: '42501', message: 'denied' } }))
+    await expect(claimManualAttempt(input)).rejects.toBeTruthy()
+  })
+
+  it.each(['claimed', 'published', 'unknown_outcome'])('refuses a date whose row is %s', async status => {
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: unique }))
+    fromMock.mockReturnValueOnce(makeChain({ data: { status, reason_code: null, attempt_no: 1 }, error: null }))
+
+    expect(await claimManualAttempt(input)).toEqual({ claimed: false })
+    expect(fromMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('refuses a block that is not a recall', async () => {
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: unique }))
+    fromMock.mockReturnValueOnce(makeChain({ data: { status: 'blocked', reason_code: 'NOT_APPROVED', attempt_no: 1 }, error: null }))
+
+    expect(await claimManualAttempt(input)).toEqual({ claimed: false })
+  })
+
+  it.each(['dry_run', 'missed_window', 'failed_final', 'failed_retryable'])('takes over a %s row, guarded by that status', async status => {
+    const update = makeChain({ data: { id: 'row-1' }, error: null })
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: unique }))
+    fromMock.mockReturnValueOnce(makeChain({ data: { status, reason_code: null, attempt_no: 2 }, error: null }))
+    fromMock.mockReturnValueOnce(update)
+
+    expect(await claimManualAttempt(input)).toEqual({ claimed: true, restoreRecalled: false })
+    expect(update.update).toHaveBeenCalledWith(expect.objectContaining({ status: 'claimed', auth_id: null, request_id: 'req-1', attempt_no: 3 }))
+    expect(update.eq).toHaveBeenCalledWith('status', status)
+  })
+
+  it('takes over a RECALLED tombstone and says so, guarded by the recall reason', async () => {
+    const update = makeChain({ data: { id: 'row-1' }, error: null })
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: unique }))
+    fromMock.mockReturnValueOnce(makeChain({ data: { status: 'blocked', reason_code: 'RECALLED', attempt_no: 1 }, error: null }))
+    fromMock.mockReturnValueOnce(update)
+
+    expect(await claimManualAttempt(input)).toEqual({ claimed: true, restoreRecalled: true })
+    expect(update.eq).toHaveBeenCalledWith('status', 'blocked')
+    expect(update.eq).toHaveBeenCalledWith('reason_code', 'RECALLED')
+  })
+
+  it('loses the race when the guarded update lands on nothing', async () => {
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: unique }))
+    fromMock.mockReturnValueOnce(makeChain({ data: { status: 'dry_run', reason_code: null, attempt_no: 1 }, error: null }))
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: null }))
+
+    expect(await claimManualAttempt(input)).toEqual({ claimed: false })
+  })
+
+  it('refuses when the row vanished between the insert and the read', async () => {
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: unique }))
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: null }))
+
+    expect(await claimManualAttempt(input)).toEqual({ claimed: false })
+  })
+
+  it('throws read and update errors instead of reading them as a lost race', async () => {
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: unique }))
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: { message: 'down' } }))
+    await expect(claimManualAttempt(input)).rejects.toBeTruthy()
+
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: unique }))
+    fromMock.mockReturnValueOnce(makeChain({ data: { status: 'dry_run', reason_code: null, attempt_no: 1 }, error: null }))
+    fromMock.mockReturnValueOnce(makeChain({ data: null, error: { message: 'down' } }))
+    await expect(claimManualAttempt(input)).rejects.toBeTruthy()
   })
 })
 

@@ -25,7 +25,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { CampaignDailyPublishCommandSchema } from '@/lib/campaign/daily-plan-publish'
 import { runDailyPlanPublish } from '@/lib/campaign/daily-plan-publish-runner'
-import { isMissingTableError, listFreshClaims, listUnconfirmedAttempts } from '@/lib/campaign/daily-plan-auto-publish-worker-store'
+import { randomUUID } from 'crypto'
+import {
+  claimManualAttempt,
+  finishAttempt,
+  isMissingTableError,
+  listFreshClaims,
+  listUnconfirmedAttempts,
+} from '@/lib/campaign/daily-plan-auto-publish-worker-store'
+import { manualAttemptPatch, type ManualClaim } from '@/lib/campaign/daily-plan-manual-claim'
 
 /** A claim younger than this belongs to a sweep that may still be sending. */
 const AUTO_PUBLISH_CLAIM_FRESH_MS = 15 * 60 * 1000
@@ -91,7 +99,50 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         )
       }
     }
-    const result = await runDailyPlanPublish({ clientId, command, approvedByUserId: access.user.id })
+    if (command.no_publish) {
+      const result = await runDailyPlanPublish({ clientId, command, approvedByUserId: access.user.id })
+      return NextResponse.json(result.body, { status: result.status })
+    }
+
+    // A live manual publish takes the same per-date claim the unattended publisher uses, so the two can never
+    // send one date at the same moment. Dates are claimed one by one right before their Facebook call.
+    const requestId = randomUUID()
+    const claimed = new Map<string, ManualClaim>()
+    const claimDate = async (date: string): Promise<boolean> => {
+      const taken = await claimManualAttempt({ clientId, planId: command.plan_id, date, requestId, now: new Date() }).catch(error => {
+        // No attempts table at all means there is no unattended publisher to share a date with.
+        if (isMissingTableError(error)) return { claimed: true as const, restoreRecalled: false, untracked: true }
+        throw error
+      })
+      if (!taken.claimed) return false
+      if (!('untracked' in taken)) claimed.set(date, { restoreRecalled: taken.restoreRecalled })
+      return true
+    }
+    const closeClaims = async (receipt: unknown) => {
+      for (const [date, claim] of claimed) {
+        const closed = await finishAttempt({
+          planId: command.plan_id,
+          date,
+          requestId,
+          patch: manualAttemptPatch(date, receipt, claim),
+          now: new Date(),
+        }).catch(error => {
+          console.error('[daily-plan publish] could not close the manual claim', { clientId, planId: command.plan_id, date, error: errorMessage(error) })
+          return false
+        })
+        if (!closed) console.error('[daily-plan publish] manual claim was changed by someone else before it could be closed', { clientId, planId: command.plan_id, date })
+      }
+    }
+
+    let result: Awaited<ReturnType<typeof runDailyPlanPublish>>
+    try {
+      result = await runDailyPlanPublish({ clientId, command, approvedByUserId: access.user.id, beforeSend: claimDate })
+    } catch (error: unknown) {
+      // The run died somewhere between claiming a date and recording the outcome: Facebook may hold the Post.
+      await closeClaims(null)
+      throw error
+    }
+    await closeClaims((result.body as { receipt?: unknown }).receipt)
     return NextResponse.json(result.body, { status: result.status })
   } catch (error: unknown) {
     return NextResponse.json({ success: false, error: errorMessage(error) }, { status: 500 })
