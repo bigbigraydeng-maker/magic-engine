@@ -118,6 +118,8 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'reel_scheduled_needs_human',
   // 社媒账号自检：链接是要登录的后台页。没人看见 = 账号越来越像，没人知道。
   'social_account_audit',
+  // 社媒每周回看建议：链接是要登录的后台页。没人看见 = 发出去的片效果好坏没人知道，配比不会调。
+  'social_readback_suggestion',
   // Reel 每日清单：链接是要登录的后台页。没人看见 = 排了日子的片没人批，到日不发。
   'reel_daily_list_pending',
   // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
@@ -258,6 +260,8 @@ export type ManualItemKind =
   | 'reel_scheduled_needs_human'
   /** 社媒账号自检：哪些项超线或量不出来（读每周自检的回执） */
   | 'social_account_audit'
+  /** 社媒每周回看建议：公开满 72 小时的 Reel 成绩，多做 / 少做建议（读每周回看的回执） */
+  | 'social_readback_suggestion'
   /** Reel 每日清单：今天到后天排了日子、还没放行的（开了社媒 Agent 的客户） */
   | 'reel_daily_list_pending'
   | 'auto_run_blocked'
