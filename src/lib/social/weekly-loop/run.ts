@@ -56,8 +56,7 @@ export interface WeeklyLoopDeps {
   /** Writes only `output` (with fact_check merged in) and updated_at, guarded by the read updated_at. */
   writeFactCheck(input: { clientId: string; id: string; readUpdatedAt: string; output: Record<string, unknown> }): Promise<FactCheckWriteOutcome>
   writeSchedule(args: WriteReelScheduleArgs): Promise<WriteReelScheduleResult>
-  expireUnapproved?: ExpirePort // daily cadence: past-day reels never approved go back to the pool
-  recentPublished?: RecentPublishedPort // daily cadence: reels already public, so the repeat rules see the recent past
+  expireUnapproved?: ExpirePort; recentPublished?: RecentPublishedPort // daily cadence: unapproved past days go back to the pool; already-public reels feed the repeat rules
 }
 
 export type WeeklyLoopTaskCode =
@@ -760,7 +759,7 @@ export async function runWeeklyLoop(
     )
     const plan = await scheduleDaily(deps.writeSchedule, { clientId: input.clientId, slotDates: daily.slotDates, reelPerDay, entries, dryRun: input.mode !== 'write', today: daily.today }, deps.expireUnapproved, deps.recentPublished)
     for (let i = 0; i < notPersisted; i += 1) bump(counts.skipped_by_reason, 'fact_check_not_persisted')
-    for (const u of [...plan.unscheduled, ...plan.skipped]) bump(counts.skipped_by_reason, u.reason)
+    for (const u of [...plan.unscheduled, ...plan.skipped, ...plan.relaxed.map((r) => ({ reason: `placed_despite_${r.violation}` }))]) bump(counts.skipped_by_reason, u.reason)
     errors.push(...plan.errors)
     counts.already_scheduled = plan.alreadyScheduled
     counts.scheduled = plan.written.length

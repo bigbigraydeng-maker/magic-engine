@@ -187,5 +187,26 @@ export function createWeeklyLoopDbDeps(db: SupabaseClient): WeeklyLoopDeps {
     expireUnapproved(args) {
       return expireUnapproved(db, args)
     },
+
+    async recentPublished({ clientId, sinceDay }) {
+      const { data, error } = await db
+        .from('content_work_orders')
+        .select('id, created_at, updated_at, brief')
+        .eq('client_id', clientId)
+        .in('status', ['approved', 'published', 'measuring', 'closed'])
+        .eq('published_ref->>video_state', 'PUBLISHED')
+        .gte('updated_at', sinceDay)
+        .order('updated_at', { ascending: false })
+        .limit(60)
+      if (error) throw new Error(`recent_published_read_failed: ${error.message}`)
+      const out: Array<{ id: string; created_at: string; brief: unknown; publishedOn: string }> = []
+      for (const row of Array.isArray(data) ? data : []) {
+        if (!isRecord(row) || typeof row.id !== 'string' || typeof row.created_at !== 'string' || typeof row.updated_at !== 'string') continue
+        const planned = readPublishOn(row.brief)
+        const publishedOn = typeof planned === 'string' && planned !== 'invalid' ? planned : row.updated_at.slice(0, 10)
+        if (publishedOn >= sinceDay) out.push({ id: row.id, created_at: row.created_at, brief: row.brief, publishedOn })
+      }
+      return out
+    },
   }
 }
