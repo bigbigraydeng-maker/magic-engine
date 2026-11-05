@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 
 import { CampaignDailyPublishPanel, type PublishReceipt } from './CampaignDailyPublishPanel'
 import { CampaignDailyAutoPublishPanel } from './CampaignDailyAutoPublishPanel'
+import { nzDateKey } from '@/lib/social/story-lite/page-text'
 import { POST_HUMAN_CHECK_KEYS, type CheckItemOutcome, type ContentCheckItemKey, type ContentCheckItemResult } from '@/lib/social/content-review'
 
 interface Props {
@@ -180,7 +181,9 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
       setData(json)
       // Default to the first selectable day so Ray always lands on real content when it exists.
       const bundleDates = new Set((json.bundles as DailyBundle[] | undefined)?.map(b => b.date) ?? [])
-      const firstSelectable = (json.days as DailyPlanResponse['days'])?.find(day => isDaySelectable(day, bundleDates))
+      const todayKey = nzDateKey(new Date().toISOString())
+      const selectableDays = ((json.days as DailyPlanResponse['days']) ?? []).filter(day => isDaySelectable(day, bundleDates))
+      const firstSelectable = selectableDays.find(day => day.date >= todayKey) ?? selectableDays[0]
       setSelectedDate(current => {
         const currentStillExists = current && (json.days as DailyPlanResponse['days'])?.some(day => day.date === current)
         return currentStillExists ? current : firstSelectable?.date ?? json.days?.[0]?.date ?? null
@@ -367,6 +370,43 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
       ]
     : []
 
+  const todayKey = nzDateKey(new Date().toISOString())
+  const currentDays = data.days.filter(day => day.date >= todayKey)
+  const expiredDays = data.days.filter(day => day.date < todayKey)
+
+  const renderDay = (day: DailyPlanResponse['days'][number]) => {
+    const selectable = isDaySelectable(day, bundleDates)
+    const isSelected = day.date === selectedDate
+    const postReview = data.bundles.find(bundle => bundle.date === day.date)?.post_review
+    return (
+      <button
+        key={day.date}
+        type="button"
+        disabled={!selectable}
+        onClick={() => { setSelectedDate(day.date); setPostExpanded(false) }}
+        className={`min-w-[68px] shrink-0 rounded-lg px-1.5 py-2 text-center transition-colors border sm:min-w-0 ${
+          isSelected
+            ? 'bg-me-ochre text-me-charcoal border-me-ochre shadow-[0_0_0_2px_rgba(198,139,31,0.18)]'
+            : selectable
+              ? postReview?.verdict === 'PASS' && postReview.is_current
+                ? 'bg-[#5C8A4A]/8 border-[#5C8A4A]/20 hover:bg-[#5C8A4A]/12 cursor-pointer'
+                : 'bg-me-ivory border-transparent hover:bg-me-ochre/15 cursor-pointer'
+              : 'bg-me-ivory/60 border-transparent cursor-not-allowed'
+        }`}
+      >
+        <p className={`text-[11px] mb-1 ${isSelected ? 'text-me-charcoal/85' : 'text-me-charcoal/65'}`}>{day.date.slice(5)}</p>
+        <div className="flex justify-center gap-0.5">
+          <SlotDot label="帖" planned={day.slots.post === 'PLANNED'} selected={isSelected} />
+          <SlotDot label="故" planned={day.slots.story === 'PLANNED'} selected={isSelected} />
+          <SlotDot label="片" planned={day.slots.reel === 'PLANNED'} selected={isSelected} />
+        </div>
+        <p className={`text-[11px] mt-1 ${isSelected ? 'text-me-charcoal/90' : postReview?.verdict === 'PASS' && postReview.is_current ? 'text-[#5C8A4A]' : postReview ? 'text-[#C2453A]' : 'text-me-charcoal/35'}`}>
+          {postReview?.verdict === 'PASS' && postReview.is_current ? '✓ Post' : postReview?.verdict === 'PASS' ? '! 重审' : postReview?.verdict === 'NEEDS_REVISION' ? '! 修改' : '· 待审'}
+        </p>
+      </button>
+    )
+  }
+
   return (
     <div className="border border-black/[.06] rounded-xl overflow-hidden">
       <div className="bg-me-ivory px-4 py-3 flex items-center justify-between flex-wrap gap-2">
@@ -388,39 +428,22 @@ export function CampaignDailyPlanPanel({ clientId, campaignId }: Props) {
         <div>
           <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-2">七日排期</p>
           <div className="flex gap-1.5 overflow-x-auto pb-1 sm:grid sm:grid-cols-7 sm:overflow-visible sm:pb-0">
-            {data.days.map(day => {
-              const selectable = isDaySelectable(day, bundleDates)
-              const isSelected = day.date === selectedDate
-              const postReview = data.bundles.find(bundle => bundle.date === day.date)?.post_review
-              return (
-                <button
-                  key={day.date}
-                  type="button"
-                  disabled={!selectable}
-                  onClick={() => { setSelectedDate(day.date); setPostExpanded(false) }}
-                  className={`min-w-[68px] shrink-0 rounded-lg px-1.5 py-2 text-center transition-colors border sm:min-w-0 ${
-                    isSelected
-                      ? 'bg-me-ochre text-me-charcoal border-me-ochre shadow-[0_0_0_2px_rgba(198,139,31,0.18)]'
-                      : selectable
-                        ? postReview?.verdict === 'PASS' && postReview.is_current
-                          ? 'bg-[#5C8A4A]/8 border-[#5C8A4A]/20 hover:bg-[#5C8A4A]/12 cursor-pointer'
-                          : 'bg-me-ivory border-transparent hover:bg-me-ochre/15 cursor-pointer'
-                        : 'bg-me-ivory/60 border-transparent cursor-not-allowed'
-                  }`}
-                >
-                  <p className={`text-[11px] mb-1 ${isSelected ? 'text-me-charcoal/85' : 'text-me-charcoal/65'}`}>{day.date.slice(5)}</p>
-                  <div className="flex justify-center gap-0.5">
-                    <SlotDot label="帖" planned={day.slots.post === 'PLANNED'} selected={isSelected} />
-                    <SlotDot label="故" planned={day.slots.story === 'PLANNED'} selected={isSelected} />
-                    <SlotDot label="片" planned={day.slots.reel === 'PLANNED'} selected={isSelected} />
-                  </div>
-                  <p className={`text-[11px] mt-1 ${isSelected ? 'text-me-charcoal/90' : postReview?.verdict === 'PASS' && postReview.is_current ? 'text-[#5C8A4A]' : postReview ? 'text-[#C2453A]' : 'text-me-charcoal/35'}`}>
-                    {postReview?.verdict === 'PASS' && postReview.is_current ? '✓ Post' : postReview?.verdict === 'PASS' ? '! 重审' : postReview?.verdict === 'NEEDS_REVISION' ? '! 修改' : '· 待审'}
-                  </p>
-                </button>
-              )
-            })}
+            {currentDays.map(renderDay)}
           </div>
+          {currentDays.length === 0 && (
+            <p className="text-xs text-me-charcoal/65">今天和之后没有排好的图文。</p>
+          )}
+          {expiredDays.length > 0 && (
+            <details data-expired-days className="mt-3 rounded-lg border border-black/[.06]">
+              <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold text-me-charcoal/70 [&::-webkit-details-marker]:hidden">
+                已过期的旧草稿（{expiredDays.length} 天）
+                <span className="ml-2 font-normal text-me-charcoal/60 underline">点开看</span>
+              </summary>
+              <div className="flex gap-1.5 overflow-x-auto p-3 pt-1 sm:grid sm:grid-cols-7 sm:overflow-visible">
+                {expiredDays.map(renderDay)}
+              </div>
+            </details>
+          )}
         </div>
 
         {/* Selected day's bundle */}
@@ -823,7 +846,7 @@ function EmptySlot() {
 
 function PostReviewBadge({ review }: { review: PostReview | null | undefined }) {
   if (review?.verdict === 'PASS' && review.is_current) {
-    return <span className="rounded-full bg-[#5C8A4A]/12 px-2 py-0.5 text-[11px] font-medium text-[#5C8A4A]">已通过</span>
+    return <span className="rounded-full bg-[#5C8A4A]/12 px-2 py-0.5 text-[11px] font-medium text-[#5C8A4A]">已批</span>
   }
   if (review?.verdict === 'PASS') {
     return <span className="rounded-full bg-[#C2453A]/10 px-2 py-0.5 text-[11px] font-medium text-[#C2453A]">已失效，需重审</span>
@@ -831,17 +854,17 @@ function PostReviewBadge({ review }: { review: PostReview | null | undefined }) 
   if (review?.verdict === 'NEEDS_REVISION') {
     return <span className="rounded-full bg-[#C2453A]/10 px-2 py-0.5 text-[11px] font-medium text-[#C2453A]">需修改</span>
   }
-  return <span className="rounded-full bg-me-charcoal/[.06] px-2 py-0.5 text-[11px] font-medium text-me-charcoal/50">待审核</span>
+  return <span className="rounded-full bg-me-charcoal/[.06] px-2 py-0.5 text-[11px] font-medium text-me-charcoal/50">还没批</span>
 }
 
 function PublishQueueBadge({ status }: { status: PublishQueueStatus }) {
   if (status === 'READY') {
-    return <span className="justify-self-start rounded-full bg-[#5C8A4A]/12 px-2 py-0.5 text-[11px] font-medium text-[#5C8A4A]">待排期</span>
+    return <span className="justify-self-start rounded-full bg-[#5C8A4A]/12 px-2 py-0.5 text-[11px] font-medium text-[#5C8A4A]">已批，等发</span>
   }
   if (status === 'NEEDS_REVISION') {
     return <span className="justify-self-start rounded-full bg-[#C2453A]/10 px-2 py-0.5 text-[11px] font-medium text-[#C2453A]">需修改</span>
   }
-  return <span className="justify-self-start rounded-full bg-me-charcoal/[.06] px-2 py-0.5 text-[11px] font-medium text-me-charcoal/50">待审核</span>
+  return <span className="justify-self-start rounded-full bg-me-charcoal/[.06] px-2 py-0.5 text-[11px] font-medium text-me-charcoal/50">还没批</span>
 }
 
 function ReadinessRow({ label, ok, forceLabel }: { label: string; ok: boolean; forceLabel?: string }) {
