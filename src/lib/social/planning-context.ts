@@ -17,6 +17,7 @@ import { SOCIAL_PUBLISH_ACTION_TYPE } from '@/lib/social/post-measurement-store'
 import {
   buildPageLevel,
   readingFromReceipt,
+  receiptAtWindow,
   type PageMetricRow,
   type PublishActionRow,
   type Reading,
@@ -135,13 +136,6 @@ function emptyTuneCounts(): TuneDecisionCounts {
   return { REPEAT: 0, ITERATE: 0, STOP: 0, INCONCLUSIVE: 0, pending_t72: 0 }
 }
 
-function receiptAtWindow(receipts: ReceiptRow[], windowHours: number): ReceiptRow | null {
-  for (const r of receipts) {
-    if (r.window_hours === windowHours) return r
-  }
-  return null
-}
-
 function payloadString(payload: unknown, key: string): string | null {
   const rec = asRecord(payload)
   if (rec === null) return null
@@ -158,7 +152,7 @@ export function buildT72PostSnapshots(
 
   for (const action of actions) {
     const source = payloadString(action.payload, 'source')
-    if (source === 'factory_reel') continue
+    if (source !== DAILY_PLAN_SOURCE && source !== 'factory_reel') continue
 
     const allReceipts = receiptsByAction.get(action.id) ?? []
     const t72 = receiptAtWindow(allReceipts, T72_WINDOW_HOURS)
