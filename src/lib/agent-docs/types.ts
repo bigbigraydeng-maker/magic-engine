@@ -4,7 +4,7 @@ export type AgentStatus = 'active' | 'retired' | 'outside'
 export interface DocRef { kind: DocKind; file: string }
 
 export interface AgentRow {
-  key: string; nameZh: string; code: string; group: string; status: AgentStatus
+  key: string; nameZh: string; code: string; group: string; status: AgentStatus; summary: string
   profile: DocRef | null; playbooks: DocRef[]; warnings: string[]
 }
 
