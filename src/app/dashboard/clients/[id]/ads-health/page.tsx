@@ -15,9 +15,12 @@ import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 // Pure data module (no server imports) — safe in a client component.
 import { resolveAdsPlaybook, type AdsPlaybook } from '@/lib/ads-strategy/playbooks'
+import type { AdsScorecard } from '@/lib/ads-strategy/portfolio/scorecard'
+import { summarizeResultsByType, type ResultSummary } from '@/lib/ads-strategy/portfolio/result-summary'
+import { CORE_METRIC_NOUN } from '@/lib/ads-strategy/rules/core-metric'
 import AutonomySettings from './autonomy-settings'
 import GrowthPanel, { type GrowthStateView, goalLiveNote } from './growth-panel'
-import ScorecardPanel from './scorecard-panel'
+import ScorecardSection from './scorecard-section'
 import QualifiedPanel from './qualified-panel'
 import { TodayGoalProgress } from './today-goal-progress'
 import WarMapPanel from './war-map-panel'
@@ -258,11 +261,20 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
  * week-over-week comparison, because the engine only computes that per campaign
  * and inventing an aggregate would be a fabricated number.
  */
-function MoneySummary({ campaigns, playbook }: { campaigns: CampaignNarrative[]; playbook: AdsPlaybook }) {
+function MoneySummary({ campaigns, playbook, scorecard }: {
+  campaigns: CampaignNarrative[]
+  playbook: AdsPlaybook
+  /** 内部员工才有；有了就按结果种类分开汇总（RL-12：开聊和留资不相加），没有就退回旧的整体相加 */
+  scorecard?: AdsScorecard | { error: string }
+}) {
   const spend = campaigns.reduce((s, c) => s + c.latest_spend_7d, 0)
-  const results = campaigns.reduce((s, c) => s + c.latest_results_7d, 0)
   if (spend <= 0) return null
 
+  if (scorecard && !('error' in scorecard)) {
+    return <TypedMoneySummary spend={spend} summary={summarizeResultsByType(scorecard.units)} />
+  }
+
+  const results = campaigns.reduce((s, c) => s + c.latest_results_7d, 0)
   const perResult = results > 0 ? spend / results : null
 
   // Name only the single worst payer, and only when it is meaningfully worse
@@ -290,6 +302,31 @@ function MoneySummary({ campaigns, playbook }: { campaigns: CampaignNarrative[];
         <p className="mt-1.5 text-xs text-gray-500">
           最贵的是「<span className="text-gray-700">{worst.c.campaign_name}</span>」——
           一个{playbook.resultNoun} <span className="tabular-nums text-gray-700">${worst.per.toFixed(1)}</span>。
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** 按结果种类分开写：留资一行、开聊一行，永远不加成一个数。 */
+function TypedMoneySummary({ spend, summary }: { spend: number; summary: ResultSummary }) {
+  const skipped = summary.noResultUnits + summary.unknownUnits
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 mb-4">
+      <p className="text-sm text-gray-700">
+        过去 7 天花了 <span className="font-semibold tabular-nums">${spend.toFixed(0)}</span>
+        {summary.rows.length === 0 && <>,按结果种类汇总的数今天读不到（见下面成绩单）。</>}
+        {summary.rows.length > 0 && <>,其中：</>}
+      </p>
+      {summary.rows.map(row => (
+        <p key={row.type} className="mt-1 text-sm text-gray-700">
+          <span className="font-semibold tabular-nums">{row.results}</span> 个{CORE_METRIC_NOUN[row.type]}
+          {row.costPerResult !== null && <>,实付平均 <span className="font-semibold tabular-nums">${row.costPerResult.toFixed(1)}</span> 一个</>}
+        </p>
+      ))}
+      {skipped > 0 && (
+        <p className="mt-1.5 text-xs text-gray-500">
+          另有 {skipped} 个组没算进上面的数（不出结果，比如视频播放，或判不出结果种类）。
         </p>
       )}
     </div>
@@ -614,7 +651,7 @@ export default function AdsHealthPage() {
           <WarMapPanel clientId={clientId} />
           {/* 每日广告成绩单：只给内部员工（客户版没有 payload，见 growth-client-view 白名单）；今天还没巡察就不显示 */}
           {!loading && !error && data?.growth && !('viewer' in data.growth) && (
-            <ScorecardPanel scorecard={data.growth.payload?.scorecard} clientId={clientId} />
+            <ScorecardSection scorecard={data.growth.payload?.scorecard} clientId={clientId} />
           )}
           {!loading && !error && data?.growth && !('viewer' in data.growth) && data.growth.payload?.scorecard && !('error' in data.growth.payload.scorecard) && (
             <QualifiedPanel block={data.growth.payload.scorecard.qualified} />
@@ -643,7 +680,11 @@ export default function AdsHealthPage() {
                   体检日期 {latest.insight_date} · 共 {latest.payload.evaluated} 条广告
                 </p>
               </div>
-              <MoneySummary campaigns={latest.payload.campaigns} playbook={playbook} />
+              <MoneySummary
+                campaigns={latest.payload.campaigns}
+                playbook={playbook}
+                scorecard={data?.growth && !('viewer' in data.growth) ? data.growth.payload?.scorecard : undefined}
+              />
               {live.length > 0 && (
                 <p className="text-xs text-gray-400">在投的 {live.length} 条广告要看明细，点上面「每条广告」。</p>
               )}

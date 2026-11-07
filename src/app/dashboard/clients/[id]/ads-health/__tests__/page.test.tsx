@@ -641,6 +641,82 @@ describe('每日广告成绩单（第 1 刀 ②）', () => {
     expect(await screen.findByText('近 30 天带来的客人质量')).toBeTruthy()
   })
 
+  it('7 天汇总按结果种类分开写：留资和开聊不相加（RL-12）', async () => {
+    const mixed = { ...SCORECARD, units: [
+      { ...SCORECARD.units[0], id: 'A', spend: 300, resultType: 'lead', results: 100 },
+      { ...SCORECARD.units[0], id: 'W', name: '组W', spend: 50, resultType: 'messaging_started', results: 7 },
+    ] }
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h', scorecard: mixed } } } }))
+    render(<AdsHealthPage />)
+    await screen.findByText('每个组这 7 天的成绩')
+    const box = screen.getByText(/过去 7 天花了/).closest('div')
+    const text = box?.textContent ?? ''
+    expect(text).toContain('100 个留资')
+    expect(text).toContain('7 个开聊')
+    expect(text).not.toContain('107')
+  })
+
+  const liveAdset = (id: string, dailyBudget: number) => ({
+    adsetId: id, name: id, status: 'ACTIVE', spendToday: 1, impressionsToday: 10, dailyBudget, budgetLevel: 'adset', createdToday: false, adCount: 1,
+  })
+  const liveView = (...active: ReturnType<typeof liveAdset>[]) => ({
+    view: { readAtIso: '2026-11-05T12:15:00Z', accounts: [{ adAccountId: 'act_1', readState: 'ok', reason: null, currency: 'NZD', accountDay: '2026-11-06', active, newToday: [] }] },
+  })
+  const snapshotWith = (...stopped: string[]) => ({ tree: { snapshotAt: '2026-11-05T06:31:00Z', campaigns: [
+    { id: 'c', name: 'c', state: 'running', dailyBudget: null, currency: 'NZD', adsets: [
+      { id: 'A', name: 'A', state: 'running', dailyBudget: 100, currency: 'NZD' },
+      { id: 'B', name: 'B', state: stopped.includes('B') ? 'stopped' : 'running', dailyBudget: 30, currency: 'NZD' },
+    ] },
+  ] } })
+  const twoUnits = { ...SCORECARD, units: [
+    { ...SCORECARD.units[0], id: 'A', name: '组A' },
+    { ...SCORECARD.units[0], id: 'B', name: '组B' },
+  ] }
+
+  it('快照说已停、实时也没在投的组：成绩单不再给「调预算」，在投的照旧有', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health/entities': snapshotWith('B'),
+      '/ad-health/live': liveView(liveAdset('A', 100)),
+      '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h', scorecard: twoUnits } } },
+    }))
+    render(<AdsHealthPage />)
+    await screen.findByText('已停，没得调')
+    expect(screen.getAllByRole('button', { name: '调预算' }).length).toBe(1)
+  })
+
+  it('快照说已停、但实时读数里它正在投（刚重新打开）：不藏「调预算」', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health/entities': snapshotWith('B'),
+      '/ad-health/live': liveView(liveAdset('A', 100), liveAdset('B', 30)),
+      '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h', scorecard: twoUnits } } },
+    }))
+    render(<AdsHealthPage />)
+    await screen.findByTestId('budget-headroom')
+    expect(screen.queryByText('已停，没得调')).toBeNull()
+    expect(screen.getAllByRole('button', { name: '调预算' }).length).toBe(2)
+  })
+
+  it('在投预算合计顶到客户总上限时，页面提前写「再加预算会被系统拦下」', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      '/ad-health/live': liveView(liveAdset('A', 100), liveAdset('E', 100)),
+      '/ad-accounts': { accounts: [], client_total_cap_cents: 20001 },
+      '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h', scorecard: SCORECARD } } },
+    }))
+    render(<AdsHealthPage />)
+    const box = await screen.findByTestId('budget-headroom')
+    expect(box.textContent).toContain('在投每天预算合计 NZD 200.00')
+    expect(box.textContent).toContain('还剩 NZD 0.01')
+    expect(box.textContent).toContain('再加预算会被系统拦下')
+  })
+
+  it('读不到快照 / 总上限时不画预算提示，也不藏「调预算」', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: staffGrowth } }))
+    render(<AdsHealthPage />)
+    await screen.findByText('每个组这 7 天的成绩')
+    expect(screen.queryByTestId('budget-headroom')).toBeNull()
+    expect(screen.getAllByRole('button', { name: '调预算' }).length).toBe(1)
+  })
+
   it('老的巡察行没有成绩单 → 说还没有，不画空表', async () => {
     vi.stubGlobal('fetch', mockFetch({ '/ad-health': { ...respond([HEALTHY]), growth: { ...staffGrowth, payload: { headline: 'h' } } } }))
     render(<AdsHealthPage />)
