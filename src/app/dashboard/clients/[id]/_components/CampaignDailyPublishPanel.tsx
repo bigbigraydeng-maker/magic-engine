@@ -132,8 +132,9 @@ export function CampaignDailyPublishPanel({
       }
 
       if (!res.ok || json.success === false) {
+        const hint = typeof json.hint === 'string' && json.hint.trim() ? `：${json.hint}` : ''
         const err = new Error(
-          `HTTP ${res.status} · ${typeof json.error === 'string' ? json.error : '请求失败'}`
+          `HTTP ${res.status} · ${typeof json.error === 'string' ? json.error : '请求失败'}${hint}`
         ) as Error & { receipt?: unknown }
         err.receipt = json.receipt
         throw err
