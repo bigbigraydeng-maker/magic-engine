@@ -27,9 +27,9 @@
 候选学习卡；无代码改动。
 
 ## 效果回写
-尚无。
+2026-10-19 首轮只读验证：判 cannot_check。已发 21 条工厂 Reel 的 angle/brief 里没有「栏目/系列」字段（含 series 字样 0/21），只能从自由文本猜；也没有单条回访/关注转化数据，页面级 7 天汇总无法归到某个栏目。
 
 ## 机器索引
 ```json
-{"pillar":"social","points":[{"key":"series_format","text":"可持续的栏目格式是内容测试候选；是否提升回访或关注待 ME 数据验证。","state":"learning","note":"不得将虚构角色设定写成真人经历。"}]}
+{"pillar":"social","points":[{"key":"series_format","text":"可持续的栏目格式是内容测试候选；是否提升回访或关注待 ME 数据验证。","state":"cannot_check","note":"栏目没有结构化标签，只能靠自由文本猜；且无单条表现数据。要先给工单加栏目字段并攒单条数据。"}]}
 ```

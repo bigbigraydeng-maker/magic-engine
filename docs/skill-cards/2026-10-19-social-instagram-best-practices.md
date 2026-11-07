@@ -27,9 +27,9 @@ ME 已有社媒设计 §6–§7 的指标/调整门槛及 SO-09/SO-10；个性�
 接入现有 Instagram 复盘候选；不改变生产规则。
 
 ## 效果回写
-尚无。
+2026-10-19 首轮只读验证：判 cannot_check。platform_oauth_connections 里没有 Instagram/Threads 条目，Meta 连接权限里也没有 instagram_basic / instagram_manage_insights；该面板是 Instagram 应用内页面，需要人工在已授权账号上查看，本轮无账号可查。
 
 ## 机器索引
 ```json
-{"pillar":"social","points":[{"key":"instagram_best_practices_panel","text":"Instagram 专业面板的个性化最佳实践可作复盘线索，应按账号和日期核对，不是固定生产规则。","state":"learning","note":"不得据通用提示自动改频率、资料或预算。"}]}
+{"pillar":"social","points":[{"key":"instagram_best_practices_panel","text":"Instagram 专业面板的个性化最佳实践可作复盘线索，应按账号和日期核对，不是固定生产规则。","state":"cannot_check","note":"没有 Instagram 账号连接，也没有任何 Instagram 面板/指标读取；要等原生接入（PR 2897）并拿到只读指标权限。"}]}
 ```

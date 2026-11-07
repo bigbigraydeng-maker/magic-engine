@@ -27,9 +27,9 @@ Trial Reels 先分发给非关注者，可用于尝试新类型、叙事形式�
 候选并入已有内容测试/审批链，不新增发布能力。
 
 ## 效果回写
-尚无。
+2026-10-19 首轮只读验证：判 not_applicable（当前）。content_work_orders 已发 21 条全是 Facebook，social_plans 95 条全是 Facebook；Instagram 跟发整套下线（PR 2756 待合）、原生接入只做身份（PR 2897）。Trial Reels 依赖发布能力，现阶段无从试。
 
 ## 机器索引
 ```json
-{"pillar":"social","points":[{"key":"instagram_trial_reels","text":"Trial Reels 可先向非关注者测试新主题；资格、指标与 ME 效果待核验，不默认自动分享。","state":"learning","note":"24h/72h 为功能时间点，不是成效门槛；仍走现有审查与去重链路。"}]}
+{"pillar":"social","points":[{"key":"instagram_trial_reels","text":"Trial Reels 可先向非关注者测试新主题；资格、指标与 ME 效果待核验，不默认自动分享。","state":"not_applicable","note":"ME 目前没有 Instagram 发布能力（已发全是 Facebook；跟发已下线、原生接入仅身份）。有发布能力后重评。"}]}
 ```
