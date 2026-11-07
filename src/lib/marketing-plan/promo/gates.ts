@@ -182,7 +182,7 @@ function configChecks(phase: PromoPhase, f: GateFacts): GateResult[] {
     const bad = refs.filter(r => cfg.creative_pool.find(p => p.ref === r)?.status !== 'approved')
     out.push(bad.length === 0
       ? make('ads.creative_approved', 'content', '投放素材已批准', true, 'green', `${refs.length} 个素材均已批准`, '')
-      : make('ads.creative_approved', 'content', '投放素材已批准', true, 'red', `${bad.length} 个素材不在素材池或还没批准：${bad.join('、')}`, '在广告审批页批准素材，或从步骤里去掉。'))
+      : make('ads.creative_approved', 'content', '投放素材已批准', true, 'red', `${bad.length} 个素材不在素材池或还没批准：${bad.join('、')}`, '在检查清单这一行下面直接选推广期、批准素材，或从步骤里去掉。'))
   }
   return out
 }
