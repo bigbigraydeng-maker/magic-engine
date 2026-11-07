@@ -53,7 +53,7 @@ describe('shared published Reel projection', () => {
   it('initial publish uses the same completed projection and links its returned id once', async () => {
     results.execution_items = [{ data: { id: 'item-shared' }, error: null }]
     await writeThreeBooks('order-1', {
-      platform: 'facebook', post_id: 'post-1', permalink: 'https://example.test/reel/1', published_at: '2026-10-19T00:00:00Z',
+      platform: 'facebook', post_id: 'post-1', permalink: 'https://example.test/reel/1', published_at: '2026-10-19T00:00:00Z', video_state: 'PUBLISHED',
     }, 'c1', 'angle')
     expect(callsOn('execution_items', 'insert')).toHaveLength(1)
     expect(callsOn('execution_items', 'insert')[0].args[0]).toMatchObject({
@@ -79,7 +79,7 @@ describe('shared published Reel projection', () => {
     results.execution_items = [{ data: null, error: { message: 'projection unavailable' } }]
     const logSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
-      await writeThreeBooks('order-1', { platform: 'facebook', post_id: 'post-1', published_at: '2026-10-19T00:00:00Z' }, 'c1', 'angle')
+      await writeThreeBooks('order-1', { platform: 'facebook', post_id: 'post-1', published_at: '2026-10-19T00:00:00Z', video_state: 'PUBLISHED' }, 'c1', 'angle')
       expect(callsOn('flywheel_actions', 'insert')[0].args[0]).toMatchObject({ execution_item_id: null })
       expect(callsOn('fde_work_logs', 'insert')).toHaveLength(1)
       expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('projection unavailable'))
