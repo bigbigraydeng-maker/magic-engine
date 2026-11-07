@@ -334,3 +334,7 @@
 
 - R1、R2、R4、R5、B1–B4、C1、C2、L2：2026-11-03 只读 SELECT（`contacts`、`contact_stage_events`、`contact_touchpoints`、`crm_bookings`、`client_pipeline_stages`、`client_automation_policies`、`ad_strategy_configs`、`ads_growth_states`、`ad_entity_snapshots`、`ad_daily_insights`）。R4 的写入者拆分、R5、B4 来自子牙和华佗复审时的核对。
 - 讲稿机制完整清单（23 条）由调研助手整理，§2 是摘取版。
+
+## 附：广告疲劳 → 对症优化（指针，2026-11-05）
+
+广告看腻（点击率降、CPM 升、单次成本升、触达池小）的触发、诊断、素材轨 + 受众轨处方、授权与验证，写在 [赢家经验闭环设计 §13](./2026-11-05-ads-winner-learning-loop-design-v0.md)。本方案不重复；其中对 D2 / 战情图 / 处方卡频次阈值（3 与 2.5）的统一提议见该文 §13.6。
