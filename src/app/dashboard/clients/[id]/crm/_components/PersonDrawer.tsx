@@ -233,8 +233,10 @@ export function PersonDrawer({
         return
       }
       if (!res.ok) throw new Error()
+      const json = (await res.json().catch(() => null)) as { qualifiedLead?: { message?: string } } | null
       setTimelineKey((k) => k + 1)
-      onSaved('✓ 改好了')
+      const note = json?.qualifiedLead?.message
+      onSaved(note ? `✓ 改好了。${note}` : '✓ 改好了')
     } catch {
       onSaved('没改上，再试一次')
     }

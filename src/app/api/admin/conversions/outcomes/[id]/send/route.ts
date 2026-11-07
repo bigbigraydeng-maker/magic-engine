@@ -15,7 +15,8 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
-import { guardConversionRoute } from '@/lib/conversions/route-guard'
+import { guardConversionRoute, type ConversionActor } from '@/lib/conversions/route-guard'
+import { singleEventSendScope } from '@/lib/conversions/conversion-lead'
 import { sendApprovedOutcome } from '@/lib/conversions/writeback-service'
 import { metaCapiWriter } from '@/lib/meta/capi/writer'
 
@@ -46,13 +47,18 @@ export async function POST(request: Request, { params }: { params: { id: string 
     )
   }
 
+  const named = singleEventSendScope(outcome.id, await postedEventId(request))
+  if (!named) {
+    return NextResponse.json({ error: '发送编号不属于这一笔' }, { status: 400 })
+  }
+
   let result
   try {
     result = await sendApprovedOutcome(outcome.id, {
       supabase: supabaseAdmin,
       writer: metaCapiWriter,
       fetcher: fetch,
-    })
+    }, named.scope)
   } catch (e) {
     return NextResponse.json(
       { error: `发送时出错：${e instanceof Error ? e.message : String(e)}` },
@@ -60,16 +66,37 @@ export async function POST(request: Request, { params }: { params: { id: string 
     )
   }
 
-  await supabaseAdmin.from('me_conversion_audit').insert({
-    outcome_id: outcome.id,
-    writeback_id: result.writebackId,
-    action: 'resent',
-    actor: g.ctx.actor,
-    ip: g.ctx.ip,
-    ua: g.ctx.ua,
-    request_id: g.ctx.requestId,
-    detail: { status: result.status },
-  })
-
+  await recordResent(outcome.id, result.writebackId, result.status, g.ctx)
   return NextResponse.json({ send_status: result.status, message: result.message })
+}
+
+async function recordResent(
+  outcomeId: string,
+  writebackId: string | null,
+  status: string,
+  ctx: ConversionActor,
+): Promise<void> {
+  await supabaseAdmin.from('me_conversion_audit').insert({
+    outcome_id: outcomeId,
+    writeback_id: writebackId,
+    action: 'resent',
+    actor: ctx.actor,
+    ip: ctx.ip,
+    ua: ctx.ua,
+    request_id: ctx.requestId,
+    detail: { status },
+  })
+}
+
+/** Absent body means the caller did not name one event. A named id is checked by the scope helper. */
+async function postedEventId(request: Request): Promise<unknown> {
+  const type = request.headers.get('content-type') ?? ''
+  if (!type.includes('application/json')) return undefined
+  try {
+    const body = await request.json()
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined
+    return 'event_id' in body ? (body as { event_id?: unknown }).event_id : undefined
+  } catch {
+    return undefined
+  }
 }

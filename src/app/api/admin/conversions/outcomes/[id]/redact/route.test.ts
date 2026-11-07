@@ -16,11 +16,16 @@ vi.mock('@/lib/conversions/route-guard', () => ({
 }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 
+import { redactQualifiedSourceRef } from '@/lib/conversions/conversion-lead'
 import { supabaseAdmin } from '@/lib/supabase'
 import { POST } from './route'
 
+const RAW_LEAD = '1687504185706630'
+const RAW_REF = `crm_qualified:${RAW_LEAD}:quoted`
+
 type Row = Record<string, unknown>
 let updates: Array<{ table: string; patch: Row }>
+let inserts: Array<{ table: string; row: Row }>
 
 function chain(table: string) {
   const q: Record<string, unknown> = {}
@@ -30,13 +35,16 @@ function chain(table: string) {
   q.in = self
   q.maybeSingle = async () =>
     table === 'me_sale_outcomes'
-      ? { data: { id: 'o-1', client_id: 'c-1', redacted_at: null }, error: null }
+      ? { data: { id: 'o-1', client_id: 'c-1', redacted_at: null, source_ref: RAW_REF }, error: null }
       : { data: null, error: null }
   q.update = (patch: Row) => {
     updates.push({ table, patch })
     return q
   }
-  q.insert = async () => ({ data: null, error: null })
+  q.insert = async (row: Row) => {
+    inserts.push({ table, row })
+    return { data: null, error: null }
+  }
   // `.select('id').eq(...).eq('status','sending')` 这类直接 await 的链
   q.then = (res: (v: { data: Row[]; error: null; patch?: Row }) => unknown) =>
     Promise.resolve(res({ data: [], error: null }))
@@ -45,6 +53,7 @@ function chain(table: string) {
 
 beforeEach(() => {
   updates = []
+  inserts = []
   vi.mocked(supabaseAdmin.from).mockImplementation(((table: string) => chain(table)) as never)
 })
 
@@ -68,5 +77,7 @@ describe('redact · 清空个人信息列', () => {
       expect(redact!.patch, col).toHaveProperty(col, null)
     }
     expect(typeof redact!.patch.redacted_at).toBe('string')
+    expect(redact!.patch.source_ref).toBe(redactQualifiedSourceRef(RAW_REF))
+    expect(JSON.stringify({ updates, inserts })).not.toContain(RAW_LEAD)
   })
 })

@@ -263,3 +263,118 @@ describe('own_email_domains 里的点名员工地址（WP-1a，魏征 P1）', ()
     expect(json.config.ownEmailDomains).toEqual(['ctstours.co.nz'])
   })
 })
+
+describe('PATCH 广告回传配置', () => {
+  it('GET 回显四项，不把没填的显示成已经限制', async () => {
+    mockClients({ mailchimp_enabled: true })
+    mocks.readAudienceId.mockResolvedValue({ ok: true, audienceId: '' })
+    const json = await (await GET(new NextRequest('http://localhost/x'), params)).json()
+    expect(json.config.capiAllowedEvents).toBeNull()
+    expect(json.config.capiDealMilestone).toBeNull()
+    expect(json.config.capiQualifiedLeadStageKey).toBeNull()
+    expect(json.config.capiDealStageKey).toBeNull()
+    expect(json.config.capiConversionLeads).toBe(false)
+    expect(json.config.capiConversionDealStageKey).toBeNull()
+  })
+
+  it('保存四项时留下原来的邮件配置', async () => {
+    const updates = mockClients({ trade_domains: ['hot.co.nz'], mailchimp_enabled: true })
+    const res = await PATCH(
+      patchReq({
+        capiAllowedEvents: ['Purchase', 'BalancePaid'],
+        capiDealMilestone: 'deposit',
+        capiQualifiedLeadStageKey: 'quoted',
+        capiDealStageKey: 'won',
+      }),
+      params,
+    )
+    expect(res.status).toBe(200)
+    expect(updates[0].leads_config).toMatchObject({
+      trade_domains: ['hot.co.nz'],
+      mailchimp_enabled: true,
+      capi_allowed_events: ['Purchase', 'BalancePaid'],
+      capi_deal_milestone: 'deposit',
+      capi_qualified_lead_stage_key: 'quoted',
+      capi_deal_stage_key: 'won',
+    })
+  })
+
+  it('留空会清掉键，而不是写成空名单', async () => {
+    const updates = mockClients({
+      capi_allowed_events: ['Purchase'],
+      capi_deal_milestone: 'deposit',
+      capi_deal_stage_key: 'won',
+      trade_domains: ['hot.co.nz'],
+    })
+    const res = await PATCH(
+      patchReq({
+        capiAllowedEvents: null,
+        capiDealMilestone: null,
+        capiQualifiedLeadStageKey: null,
+        capiDealStageKey: '',
+      }),
+      params,
+    )
+    expect(res.status).toBe(200)
+    const saved = updates[0].leads_config as Record<string, unknown>
+    expect(saved.trade_domains).toEqual(['hot.co.nz'])
+    expect(saved.capi_allowed_events).toBeUndefined()
+    expect(saved.capi_deal_milestone).toBeUndefined()
+    expect(saved.capi_deal_stage_key).toBeUndefined()
+    const json = await res.json()
+    expect(json.config.capiAllowedEvents).toBeNull()
+  })
+
+  it('空名单存成空清单，跟没填不是一回事', async () => {
+    const updates = mockClients({ trade_domains: ['hot.co.nz'] })
+    const res = await PATCH(patchReq({ capiAllowedEvents: [] }), params)
+    expect(res.status).toBe(200)
+    expect((updates[0].leads_config as Record<string, unknown>).capi_allowed_events).toEqual([])
+    expect((await res.json()).config.capiAllowedEvents).toEqual([])
+  })
+
+  it('只改邮件开关时不动已经保存的名单', async () => {
+    const updates = mockClients({ capi_allowed_events: ['Purchase'], trade_domains: ['hot.co.nz'] })
+    const res = await PATCH(patchReq({ mailchimpEnabled: true }), params)
+    expect(res.status).toBe(200)
+    expect(updates[0].leads_config).toMatchObject({
+      capi_allowed_events: ['Purchase'],
+      mailchimp_enabled: true,
+    })
+  })
+
+  it('认不出的事件名或阶段不保存', async () => {
+    const updates = mockClients({ trade_domains: ['hot.co.nz'] })
+    expect((await PATCH(patchReq({ capiAllowedEvents: ['ViewContent'] }), params)).status).toBe(400)
+    expect((await PATCH(patchReq({ capiDealMilestone: 'won' }), params)).status).toBe(400)
+    expect((await PATCH(patchReq({ capiDealStageKey: 'Won' }), params)).status).toBe(400)
+    expect(updates).toHaveLength(0)
+  })
+
+  it('打开线索阶段回传时，两步都没选就不保存', async () => {
+    const updates = mockClients({ trade_domains: ['hot.co.nz'] })
+    const res = await PATCH(patchReq({ capiConversionLeads: true }), params)
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toContain('合格咨询')
+    expect(updates).toHaveLength(0)
+  })
+
+  it('两步都选了才打开，并且不碰原来的邮件配置', async () => {
+    const updates = mockClients({ trade_domains: ['hot.co.nz'] })
+    const res = await PATCH(
+      patchReq({
+        capiConversionLeads: true,
+        capiQualifiedLeadStageKey: 'quoted',
+        capiConversionDealStageKey: 'balance_received',
+      }),
+      params,
+    )
+    expect(res.status).toBe(200)
+    expect(updates[0].leads_config).toMatchObject({
+      trade_domains: ['hot.co.nz'],
+      capi_conversion_leads: true,
+      capi_qualified_lead_stage_key: 'quoted',
+      capi_conversion_deal_stage_key: 'balance_received',
+    })
+  })
+})

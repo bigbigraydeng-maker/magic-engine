@@ -156,6 +156,8 @@ describe('build · Facebook 私信身份（PSID）匹配键', () => {
       CONFIG,
     )
     expect(messenger.data[0].action_source).toBe('business_messaging')
+    expect(messenger.data[0].messaging_channel).toBe('messenger')
+    expect(email.data[0].messaging_channel).toBeUndefined()
   })
 })
 
@@ -187,6 +189,44 @@ describe('build · Facebook 线索编号（lead_id）匹配键', () => {
     expect(withId.action_source).toBe(base.action_source)
     expect(withId.custom_data).toEqual(base.custom_data)
     expect(withId.event_id).toBe(base.event_id)
+  })
+})
+
+describe('build · 同一条 Meta 线索的阶段', () => {
+  const leadId = '1687504185706630'
+
+  it('阶段名用传入的值，action_source 与来源按线索阶段回传，成交带金额', () => {
+    const stageName = 'balance_received'
+    const p = writer.build(
+      outcome({
+        outcomeKind: 'purchase',
+        metaLeadId: leadId,
+        conversionLeadEventName: stageName,
+        platformEventId: '11111111-2222-3333-4444-555555555555:conversion-stage',
+        amountMinor: 388000,
+        currency: 'NZD',
+      }),
+      CONFIG,
+    ).data[0]
+    expect(p.event_name).toBe(stageName)
+    expect(p.event_id).toBe('11111111-2222-3333-4444-555555555555:conversion-stage')
+    expect(p.event_name).not.toBe('Purchase')
+    expect(p.action_source).toBe('system_generated')
+    expect(p.messaging_channel).toBeUndefined()
+    expect(p.user_data.lead_id).toBe(leadId)
+    expect(p.custom_data).toMatchObject({
+      event_source: 'crm',
+      lead_event_source: 'Magic Engine',
+      currency: 'NZD',
+      value: 3880,
+      order_id: '84191',
+    })
+  })
+
+  it('没有合法线索编号时直接拒绝，不会装成普通咨询', () => {
+    expect(() =>
+      writer.build(outcome({ outcomeKind: 'lead', conversionLeadEventName: 'quoted', metaLeadId: null, amountMinor: null, currency: null }), CONFIG),
+    ).toThrow('没有原始线索编号')
   })
 })
 
