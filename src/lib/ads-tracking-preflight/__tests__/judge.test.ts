@@ -216,6 +216,20 @@ describe('tracking.pixel_alive', () => {
     expect(g.status).toBe('gray')
   })
 
+  it('统计读成功但 7 天全空、而 Meta 说刚触发过（空响应）→ 灰，不是红', () => {
+    const g = gate(judge(i => { i.meta.datasets[0].events_24h = {}; i.meta.datasets[0].events_7d = {} }), KEY)
+    expect(g.status).toBe('gray')
+  })
+
+  it('统计 7 天全空且很久没触发 → 仍是红（真死了）', () => {
+    const g = gate(judge(i => {
+      i.meta.datasets[0].last_fired_at = hoursAgo(30)
+      i.meta.datasets[0].events_24h = {}
+      i.meta.datasets[0].events_7d = {}
+    }), KEY)
+    expect(g.status).toBe('red')
+  })
+
   it('官网同时发两个官方数据集，一个在线一个已死 → 黄', () => {
     const g = gate(judge(i => {
       i.landing.probes[0].pixel_ids = [OFFICIAL, OTHER_OFFICIAL]
@@ -247,6 +261,16 @@ describe('tracking.lead_event_seen', () => {
   it('事件统计没读到、也没有别处能证明 → 灰', () => {
     const g = gate(judge(i => { i.meta.datasets[0].events_7d = null }), KEY)
     expect(g.status).toBe('gray')
+  })
+
+  it('统计读成功但 7 天全空、而 Meta 说刚触发过（空响应）→ 灰，不是红', () => {
+    const g = gate(judge(i => { i.meta.datasets[0].events_7d = {} }), KEY)
+    expect(g.status).toBe('gray')
+  })
+
+  it('统计 7 天全空且很久没触发 → 仍是红', () => {
+    const g = gate(judge(i => { i.meta.datasets[0].last_fired_at = hoursAgo(30); i.meta.datasets[0].events_7d = {} }), KEY)
+    expect(g.status).toBe('red')
   })
 
   it('按客户配置的留资事件名数；默认的 Lead 不再算', () => {
