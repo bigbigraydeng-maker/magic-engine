@@ -69,7 +69,7 @@ export async function middleware(request: NextRequest) {
       const { data: portalRow } = await supabaseAdmin
         .from('client_portal_users')
         .select('access_type')
-        .eq('email', email)
+        .eq(email ? 'email' : 'auth_user_id', email || user.id)
         .eq('client_id', clientId)
         .maybeSingle()
       if ((portalRow as { access_type?: string } | null)?.access_type === 'portal') {
@@ -140,7 +140,7 @@ export async function middleware(request: NextRequest) {
   const { data: clientUsers } = await supabaseAdmin
     .from('client_portal_users')
     .select('client_id, access_type, scoped_admin')
-    .eq('email', email)
+    .eq(email ? 'email' : 'auth_user_id', email || user.id)
     .in('access_type', ACCESS_TYPES_DASHBOARD as readonly string[] as string[])
 
   // 受限管理员（DB 版）：client_portal_users.scoped_admin = true

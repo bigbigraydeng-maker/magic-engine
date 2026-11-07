@@ -1,9 +1,10 @@
 import Link from 'next/link'
 import { MeMark, MeMarkDefs } from '@/components/ui/me-mark'
 import PortalLoginForm from './portal-login-form'
+import { isChinaPhoneOtpEnabled } from '@/lib/auth/china-phone-otp'
 
 interface Props {
-  searchParams: { next?: string; error?: string }
+  searchParams: { next?: string; error?: string; emailCode?: string }
 }
 
 const portalLoops = [
@@ -30,6 +31,9 @@ export default function PortalLoginPage({ searchParams }: Props) {
     : '/portal'
   const hasError = searchParams.error === 'auth_failed'
   const fromProspect = next === '/prospect'
+  const firstPhoneBinding = next === '/account/phone'
+  const phoneEnabled = isChinaPhoneOtpEnabled()
+  const emailCodeFirst = firstPhoneBinding || searchParams.emailCode === '1' || !phoneEnabled
   const registerHref = `/portal/register?next=${encodeURIComponent(next)}`
 
   return (
@@ -98,23 +102,44 @@ export default function PortalLoginPage({ searchParams }: Props) {
         <div className="w-full max-w-[360px]">
           <div className="mb-7">
             <h2 className="font-display text-[2rem] font-bold leading-tight tracking-tight text-me-charcoal">
-              {fromProspect ? 'Open your Discovery Report.' : 'Enter your workspace.'}
+              {firstPhoneBinding ? '验证原账号并绑定手机号' : fromProspect ? 'Open your Discovery Report.' : '登录 Magic Engine 工作区'}
             </h2>
             <p className="mt-2 text-sm leading-6 text-me-charcoal/60">
-              {fromProspect
-                ? 'Sign in with Google or your email and password to return to your saved report.'
-                : 'Sign in with Google or your email and password to return to your workspace.'}
+              {firstPhoneBinding
+                ? '请用原账号邮箱收取一次性验证码。验证后会直接进入绑定页面，不会创建新账号。'
+                : !phoneEnabled
+                  ? '手机号验证码登录暂未开放。请先用原账号邮箱验证码或 Google 登录。'
+                  : fromProspect
+                    ? '使用手机验证码、Google 或邮箱登录继续查看报告。'
+                    : '使用中国大陆手机号接收验证码登录工作区。'}
             </p>
           </div>
 
-          <PortalLoginForm next={next} authFailed={hasError} />
+          <PortalLoginForm next={next} authFailed={hasError} phoneEnabled={phoneEnabled} emailCodeFirst={emailCodeFirst} />
 
-          <p className="mt-7 text-center text-xs text-me-charcoal/45">
-            New customer?{' '}
-            <Link href={registerHref} className="font-semibold text-me-ochre no-underline hover:underline">
-              Create a free account →
-            </Link>
-          </p>
+          {firstPhoneBinding ? (
+            <p className="mt-7 text-center text-xs text-me-charcoal/45">
+              员工请使用 <Link href="/login" className="font-semibold text-me-ochre no-underline hover:underline">员工登录</Link>。
+            </p>
+          ) : (
+            <>
+              <p className="mt-7 text-center text-xs text-me-charcoal/45">
+                New customer?{' '}
+                <Link href={registerHref} className="font-semibold text-me-ochre no-underline hover:underline">
+                  Create a free account →
+                </Link>
+              </p>
+              <p className="mt-3 text-center text-xs leading-5 text-me-charcoal/45">
+                已有账号首次绑定手机？
+                <Link
+                  href="/portal/login?next=%2Faccount%2Fphone&emailCode=1"
+                  className="ml-1 font-semibold text-me-ochre no-underline hover:underline"
+                >
+                  用原邮箱验证码进入并绑定
+                </Link>
+              </p>
+            </>
+          )}
         </div>
       </div>
     </main>

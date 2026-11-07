@@ -148,6 +148,17 @@
 | `UPLOAD_LINK_SECRET` | 客户免登录上传链接签名（未配时 fallback 到 `CRON_SECRET`） | Render-web | ❌ |
 | `ADMIN_KEY_KILL_SWITCH` | 紧急关停全部 admin API key（设 `true` 生效） | Render-web | ❌ |
 | `OPENAI_WEBHOOK_SECRET` | OpenAI Realtime webhook 校验 | Render-web | ✅ |
+| `CHINA_PHONE_OTP_ENABLED` | 中国手机号 OTP 总闸；默认 `false`，已有客户绑定号码登录需配置两项 Supabase Hook 与 PNVS 后才设 `true` | Render-web | ❌（默认关闭） |
+| `CHINA_PHONE_SIGNUP_ENABLED` | 开放中国大陆手机号新用户注册；默认 `false`，依赖 OTP 总闸及总日预算 | Render-web | ❌（默认关闭） |
+| `CHINA_PHONE_SMS_DAILY_MAX` | PNVS 总日发送上限；注册开关开启时必填正整数，所有手机号共享，配额服务异常时拒绝发送 | Render-web | ❌（需负责人定预算） |
+| `SUPABASE_AUTH_BEFORE_USER_CREATED_SECRET` | Supabase Auth「Before User Created」Hook 签名密钥；按手机号注册开关允许或拒绝 +86 phone-only Auth 用户 | Render-web + Supabase Auth Hook | ❌（本次登记，生产未配置） |
+| `SUPABASE_AUTH_SMS_HOOK_SECRET` | Supabase Auth「Send SMS Hook」签名密钥（保留完整 `v1,whsec_...` 格式） | Render-web + Supabase Auth Hook | ❌（本次登记，生产未配置） |
+| `ALICLOUD_ACCESS_KEY_ID` / `ALICLOUD_ACCESS_KEY_SECRET` | 服务端访问 PNVS 的 RAM 凭证；只授予验证码发送/核验权限 | Render-web | ❌（本次登记，生产未配置） |
+| `PNVS_SIGN_NAME` / `PNVS_TEMPLATE_CODE` | PNVS 控制台提供的系统签名与系统验证码模板 | Render-web | ❌（本次登记，生产未配置） |
+
+中国手机号验证码需要负责人开通并核实 PNVS 账号、系统签名/模板、费用与预算，再在 Supabase Auth 配置 Phone Provider、Before User Created Hook 和 Send SMS Hook；两项 Hook 都必须指向本应用并验收后，才设 `CHINA_PHONE_OTP_ENABLED=true`。只有同时确定 `CHINA_PHONE_SMS_DAILY_MAX`、大陆可用的反滥用方案及账号恢复政策，才可另设 `CHINA_PHONE_SIGNUP_ENABLED=true`。两项开关默认关闭；本仓库没有生产凭证，也不会自动启用线上设置。phone-only 注册用户当前不领取既有 500 MTC 邮箱欢迎奖励，待单独定义可验证的防重复规则。
+
+**当前手机号注册代码尚未接入 CAPTCHA 客户端挑战及 `captchaToken`，不能在生产开启注册 flag。** 选择并验证大陆可达的 CAPTCHA 方案后，先完成前端 token 接线，再配置 Supabase Auth 并实测；只在控制台启用 CAPTCHA 可能导致现有注册请求全部失败。Supabase Auth 公共 anon API 可绕过网页直接请求；Hook 与日预算可限制短信发送，但不能取代 Auth CAPTCHA/限额。总日预算由现有用户短信登录与新注册共用，耗尽时两者都会暂时收不到验证码。还需核实 Supabase 配置是否允许公开 phone+password 建号；当前 Before User Created Hook 不能证明用户只通过网页 OTP 注册。短信验证码无法区分原号码持有人和运营商回收后的新持有人，手机号-only 账号恢复政策须先确定，否则新持有人可能登录原账号。邮箱注册与 discovery onboarding 目前也未和手机号建档 RPC 共用工作区名称锁。
 
 ## 9. 邮件 / 通知
 

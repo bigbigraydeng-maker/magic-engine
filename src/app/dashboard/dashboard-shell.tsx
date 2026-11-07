@@ -358,6 +358,14 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
         {/* Footer */}
         <div className="border-t border-white/[.07] px-4 py-3.5">
           <p className="truncate text-[11px] text-white/30">{userEmail}</p>
+          {isClientViewer && (
+            <Link
+              href="/account/phone"
+              className="mt-2 block rounded-lg px-1 py-1 text-[12px] font-semibold text-white/45 transition hover:text-white/80"
+            >
+              账号设置 · 绑定手机号
+            </Link>
+          )}
           <form action="/auth/signout" method="POST" className="mt-2.5">
             <button
               type="submit"
@@ -375,11 +383,18 @@ export default function DashboardShell({ children, userEmail, userRole, userTier
           <MeMark className="h-6 w-7" />
           <span className="font-display text-sm font-bold">Magic Engine</span>
         </div>
-        <form action="/auth/signout" method="POST">
-          <button type="submit" className="rounded-lg border border-black/15 px-3 py-1.5 text-xs font-semibold text-black/60">
-            Sign out
-          </button>
-        </form>
+        <div className="flex items-center gap-2">
+          {isClientViewer && (
+            <Link href="/account/phone" className="text-xs font-semibold text-black/60">
+              账号设置
+            </Link>
+          )}
+          <form action="/auth/signout" method="POST">
+            <button type="submit" className="rounded-lg border border-black/15 px-3 py-1.5 text-xs font-semibold text-black/60">
+              Sign out
+            </button>
+          </form>
+        </div>
       </header>
 
       {/* Main content */}
