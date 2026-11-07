@@ -51,6 +51,7 @@ import { telephonyVoiplineProcess, telephonyVoiplineSweep } from './telephony-vo
 import { telephonyCallAnalysis, telephonyCallAnalysisSweep } from './telephony-analysis'
 import { planDraftFromPrescription } from './plan-draft-from-prescription'
 import { crmEmailSendReceipt } from './crm-email-send-receipt'
+import { clientWeeklyReportFanOut, clientWeeklyReportRunOne } from './client-weekly-report'
 import { zhangqianDiscovery } from './zhangqian-discovery'
 import { triggeredSendWelcomeDispatch, triggeredSendWelcomeSweep } from './triggered-send-welcome-sweep'
 import { socialWeeklyDraft } from './cloud-social-weekly-draft'
@@ -93,6 +94,8 @@ export const cloudFunctions = [
   competitorWatchRunOne,
   aiVisibilityWeeklyFanOut,
   aiVisibilityTrackerRunOne,
+  clientWeeklyReportFanOut,
+  clientWeeklyReportRunOne,
   reelBatchRender,
   adsD3AutoPause,
   leadSheetSyncFanOut,
