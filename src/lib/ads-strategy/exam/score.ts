@@ -33,6 +33,8 @@ export interface ExamScore {
   readonly missing: number
   /** 有 wrong 或 missing 时为 false（脚本据此退出码 1）。 */
   readonly ok: boolean
+  /** agent 离线回放：模拟答卷里出现过红线（整轮未通过标记，不改变 per-question 计数）。 */
+  readonly agentRoundRedlineVeto?: boolean
 }
 
 function normalise(file: string): string {
@@ -120,6 +122,9 @@ function summaryLines(score: ExamScore): string[] {
   const lines: string[] = [
     `广告考卷：答对 ${score.right} / 共 ${score.total} 题（已知待修 ${score.knownFail}，还没出题 ${score.todo}）`,
   ]
+  if (score.agentRoundRedlineVeto) {
+    lines.push('⛔ 本轮未通过：触广告 agent 红线（一票否决，不能靠别题补回）')
+  }
   if (score.wrong > 0) {
     lines.push(`❌ 答错 ${score.wrong} 题——原来对的题被改错了，先别合并`)
   }

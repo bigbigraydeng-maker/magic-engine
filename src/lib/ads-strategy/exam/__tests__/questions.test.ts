@@ -12,8 +12,8 @@ describe('广告考卷登记表', () => {
     expect(ids).toEqual(expected)
   })
 
-  it('至少 25 道题', () => {
-    expect(ADS_EXAM_QUESTIONS.length).toBeGreaterThanOrEqual(25)
+  it('至少 51 道题（Q01–Q25 规则回归 + Q26–Q51 agent 离线回放）', () => {
+    expect(ADS_EXAM_QUESTIONS.length).toBe(51)
   })
 
   it('每道题的测试文件存在，且 match 原文真的出现在文件里（防止测试改名后登记表悄悄失效）', () => {
