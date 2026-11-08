@@ -153,7 +153,7 @@ async function insertOutcome(row: {
     unit: row.unit,
     dimension: row.dimension,
   })
-  if (error) throw new Error('launch check outcome insert failed')
+  if (error) throw new Error(`launch check outcome insert failed: ${error.message}`)
 }
 
 async function updateOutcome(id: string, patch: { unit: string; dimension: string }): Promise<void> {
@@ -161,7 +161,7 @@ async function updateOutcome(id: string, patch: { unit: string; dimension: strin
     unit: patch.unit,
     dimension: patch.dimension,
   }).eq('id', id)
-  if (error) throw new Error('launch check outcome update failed')
+  if (error) throw new Error(`launch check outcome update failed: ${error.message}`)
 }
 
 async function pageActions(from: number, to: number): Promise<ActionRow[]> {
