@@ -1,12 +1,14 @@
 ---
 id: 2026-11-08-budget-raise-quota-before-write
 title: 上调卡写入前按同一份上限重算，过期快照不算数
-status: decided
+status: done
 owner: agent
 decided_on: 2026-11-08
 source: pr:3663
 verify_by: 2026-11-15
 verify_how: 相关测试里，两张上调卡的未写入增量会一起算进账户和客户上限；快照超过现有窗口、币种读不到、上限读不到时上调不写。下调仍放行。
+done_on: 2026-11-08
+done_ref: commit:297c42547c0bfabc221360206b1a8c3b2fcc954b
 ---
 
 上调在写入前用已有的跨账户快照重算账户和客户上限，并把还没写进快照的其它上调算进去。
