@@ -8,6 +8,32 @@
  */
 import type { MonthlyReportData } from '@/lib/reports/monthly-aggregator'
 
+function adsSectionHtml(report: MonthlyReportData): string {
+  const ads = report.ads
+  if (!ads) {
+    return `<div class="section"><div class="section-title"><span class="badge">A</span> 付费广告</div><p style="font-size:13px;color:rgba(26,26,26,0.55);">广告板块未加载。</p></div>`
+  }
+  const sym = ads.currency === 'NZD' ? 'NZ$' : ads.currency === 'AUD' ? 'A$' : ads.currency ?? ''
+  const noun = ads.primaryResultLabel ?? '主结果'
+  const gaps = ads.gaps.map(g => `<li>${escHtml(g)}</li>`).join('')
+  const ledger = ads.ledger
+    .map(
+      l => `<li style="margin-bottom:8px;font-size:12px;"><strong>${escHtml(l.actionLabel)}</strong> · ${escHtml(l.entityName ?? '')}<br/>${escHtml([l.beforeText, l.afterText].filter(Boolean).join(' → '))}<br/><em>${escHtml(l.observedResult ?? '')}</em></li>`,
+    )
+    .join('')
+  return `<div class="section">
+    <div class="section-title"><span class="badge">A</span> 付费广告（${escHtml(noun)}）</div>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">本月花费</div><div class="kpi-value">${ads.spend != null ? escHtml(`${sym}${ads.spend.toFixed(2)}`) : '—'}</div></div>
+      <div class="kpi"><div class="kpi-label">本月${escHtml(noun)}</div><div class="kpi-value">${ads.results ?? '—'}</div></div>
+      <div class="kpi"><div class="kpi-label">单次成本</div><div class="kpi-value">${ads.costPerResult != null ? escHtml(`${sym}${ads.costPerResult.toFixed(2)}`) : '—'}</div></div>
+      <div class="kpi"><div class="kpi-label">合格询盘</div><div class="kpi-value">${ads.qualifiedLeads ?? '—'}</div><div class="kpi-sub">${escHtml(ads.qualifiedStagesLabel ?? '')}</div></div>
+    </div>
+    ${gaps ? `<ul style="font-size:12px;color:#8a5a00;margin-top:12px;">${gaps}</ul>` : ''}
+  <ul style="margin-top:12px;padding-left:18px;">${ledger || '<li>本月无操作记录</li>'}</ul>
+  </div>`
+}
+
 export function buildExportHtml(report: MonthlyReportData, recommendations: string): string {
   const { overview, geo, competitive } = report
 
@@ -139,6 +165,8 @@ export function buildExportHtml(report: MonthlyReportData, recommendations: stri
       <tbody>${competitiveRows}</tbody>
     </table>
   </div>
+
+  ${adsSectionHtml(report)}
 
   <div class="section">
     <div class="section-title"><span class="badge">4</span> Next Month Recommendations</div>

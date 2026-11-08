@@ -10,6 +10,7 @@
 import { supabaseAdmin } from '../supabase'
 import { isRunConclusive } from '../ai-tracker/run-conclusive'
 import type { BrandMention } from '@/types/magic-engine'
+import { collectMonthlyAdsSection, type MonthlyAdsSection } from './monthly-ads-section'
 
 // ── Output types ──────────────────────────────────────────────────────────────
 
@@ -128,6 +129,8 @@ export interface MonthlyReportData {
   local: LocalVisibilityData | null
   market: MarketBenchmarkData | null
   usage: DataSourceUsageData | null
+  /** Paid social ads — null only when the collector itself failed (rare). */
+  ads: MonthlyAdsSection | null
   generated_at: string
 }
 
@@ -341,16 +344,18 @@ export async function buildMonthlyReport(clientId: string): Promise<MonthlyRepor
     local: null,
     market: null,
     usage: null,
+    ads: null,
   }
 
   // ── Phase 8 parallel collectors (gracefully degrade if table absent) ─────────
-  const [linksResult, searchResult, localResult, marketResult, usageResult] =
+  const [linksResult, searchResult, localResult, marketResult, usageResult, adsResult] =
     await Promise.allSettled([
       collectLinkIntelligence(clientId, periodFrom, periodTo, lastFrom, lastTo),
       collectSearchVisibility(clientId),
       collectLocalVisibility(clientId),
       collectMarketBenchmark(clientId),
       collectDataSourceUsage(clientId, now),
+      collectMonthlyAdsSection(clientId, periodFrom, periodTo),
     ])
 
   if (linksResult.status  === 'fulfilled') base.links  = linksResult.value
@@ -358,6 +363,7 @@ export async function buildMonthlyReport(clientId: string): Promise<MonthlyRepor
   if (localResult.status  === 'fulfilled') base.local  = localResult.value
   if (marketResult.status === 'fulfilled') base.market = marketResult.value
   if (usageResult.status  === 'fulfilled') base.usage  = usageResult.value
+  if (adsResult.status    === 'fulfilled') base.ads    = adsResult.value
 
   return base
 }
