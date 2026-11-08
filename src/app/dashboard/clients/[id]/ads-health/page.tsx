@@ -25,6 +25,7 @@ import QualifiedPanel from './qualified-panel'
 import { TodayGoalProgress } from './today-goal-progress'
 import WarMapPanel from './war-map-panel'
 import LiveTodayPanel from './live-today-panel'
+import LivePacingPanel from './live-pacing-panel'
 import HourlyLeadsPanel from './hourly-leads-panel'
 import BreakdownPanel from './breakdown-panel'
 import EntityTreePanel from './entity-tree-panel'
@@ -651,6 +652,7 @@ export default function AdsHealthPage() {
           <HourlyLeadsPanel clientId={clientId} />
           {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
           <LiveTodayPanel clientId={clientId} part="today" />
+          <LivePacingPanel clientId={clientId} />
           <WarMapPanel clientId={clientId} />
           {/* 每日广告成绩单：只给内部员工（客户版没有 payload，见 growth-client-view 白名单）；今天还没巡察就不显示 */}
           {!loading && !error && data?.growth && !('viewer' in data.growth) && (
