@@ -261,5 +261,6 @@ describe('budget step card', () => {
     const kernel = readFileSync('src/lib/ads-budget-card/kernel-path.ts', 'utf8')
     const flow = readFileSync('src/lib/ads-budget-card/flow.ts', 'utf8')
     expect(meta + kernel + flow).not.toMatch(/setAdSetDailyBudget|setCampaignDailyBudget/)
+    expect(kernel).not.toMatch(/triggeredBy:\s*'human'/)
   })
 })

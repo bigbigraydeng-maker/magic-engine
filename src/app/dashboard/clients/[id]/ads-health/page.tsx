@@ -211,7 +211,7 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
         text: n > 0
           // No invented third party: ME did it, or it needs your click. Nothing
           // is ever "已通知团队" (板桥) — the PM knows there is no such team.
-          ? `已补 ${n} 条新素材,全部暂停、一分钱不花。要开投的时候你点一下就行。`
+          ? `已出 ${n} 张确认卡。点确认之后才会建成暂停广告，不会直接开投。`
           : '现成的老素材里没有能用的,所以这次没补上 —— 新片要现做。\n钱这边你现在就能按住:上面的「预算降 20%」或「先全停」。做片的事我去接,接通了告诉你。',
       })
     } catch (err) {

@@ -1,0 +1,101 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { EnvelopeFacts, EnvelopeRequest } from '@/lib/kernel/autonomy-envelope'
+import type { EnvelopeFactsResolver } from '@/lib/kernel/deps'
+import { ACTION_REGISTRY } from '@/lib/kernel/registry'
+import { runAction } from '@/lib/kernel/runner'
+import { CLIENT_A, GOAL_A, makeFixture, makeRegistry } from '@/lib/kernel/__tests__/fixtures'
+import { getAdSetStatus, setAdSetDailyBudget } from '@/lib/meta/adsets'
+import { planHashOf, type PrescriptionLock } from '@/lib/ads-budget-card/prescription-lock'
+import { cardFields } from '@/lib/ads-budget-card/write-gate'
+import { createCutUnitBudgetCapability } from '../cut-unit-budget'
+
+vi.mock('@/lib/meta/adsets', () => ({ getAdSetStatus: vi.fn(), setAdSetDailyBudget: vi.fn() }))
+vi.mock('../common', async () => {
+  const actual = await vi.importActual<typeof import('../common')>('../common')
+  return {
+    ...actual,
+    requireMetaToken: vi.fn(async () => 'test-token'),
+    makeSnapshotPreStep: () => async () => ({ output: {} }),
+  }
+})
+
+const SEED = { schema_version: 1 }
+const lock: PrescriptionLock = {
+  prescriptionId: 'p1110000-0000-4000-8000-000000000001',
+  version: 2,
+  goalId: GOAL_A,
+  planId: 'plan-1',
+  planHash: planHashOf('plan-1', SEED),
+  approvedOn: '2026-11-02',
+}
+const facts: EnvelopeFacts = {
+  beforeCents: 1000, accountDailyTotalBeforeCents: null, clientDailyTotalBeforeCents: null,
+  dailyCapCents: null, clientDailyCapCents: null, learningPhaseApplicable: true, learningStage: null,
+  hoursSinceLastChange: null, adStudyCount: 0, hasRollbackHandler: true,
+}
+const request: EnvelopeRequest = { kind: 'budget_change', afterCents: 800 }
+
+function harness() {
+  const definition = ACTION_REGISTRY.get('ads.cut_unit_budget')
+  if (!definition) throw new Error('missing cut definition')
+  const resolver: EnvelopeFactsResolver = async () => ({ request, facts })
+  return makeFixture({
+    registry: makeRegistry([definition]),
+    capabilities: (sb) => ({ 'ads.cut_unit_budget': createCutUnitBudgetCapability(sb) }),
+    options: {
+      policy: { action_key: 'ads.cut_unit_budget', mode: 'auto_approve' },
+      resolveEnvelopeFacts: resolver,
+      extraTables: {
+        prescriptions: [{
+          id: lock.prescriptionId, client_id: CLIENT_A, status: 'approved', version: 2, goal_id: GOAL_A,
+          approved_at: '2026-11-02T00:00:00.000Z', content: { plan_seed: SEED },
+          generation_meta: { plan_draft: { status: 'created', plan_id: 'plan-1' } },
+        }],
+      },
+    },
+  })
+}
+
+describe('budget card read-back uses the real cut rollback path', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(setAdSetDailyBudget).mockResolvedValue(true)
+    vi.mocked(getAdSetStatus).mockResolvedValueOnce({
+      id: 'adset-a', name: 'test', status: 'ACTIVE', daily_budget: '1000',
+    }).mockResolvedValue({
+      id: 'adset-a', name: 'test', status: 'ACTIVE', daily_budget: '900',
+    })
+  })
+
+  it('does not write the old budget back when the card read-back mismatches', async () => {
+    const f = harness()
+    const outcome = await runAction(f.kernel, {
+      clientId: CLIENT_A, goalId: GOAL_A, purpose: 'growth', actionKey: 'ads.cut_unit_budget',
+      triggeredBy: 'human', triggeredByRef: 'user-from-session',
+      evidence: { source: 'budget_step_card' },
+      input: {
+        cycle_date: '2026-11-02', ad_account_id: '123', adset_id: 'adset-a',
+        before_cents: 1000, after_cents: 800, ...cardFields(lock),
+      },
+    })
+    expect(outcome.kind, outcome.run.last_error ?? '').toBe('dead_letter')
+    expect(outcome.run.needs_human).toBe(true)
+    expect(outcome.run.last_error).toMatch(/没有把旧预算写回去/)
+    expect(outcome.run.last_error).not.toMatch(/已按 provider-native rollback 撤回/)
+    expect(setAdSetDailyBudget).toHaveBeenCalledTimes(1)
+    expect(setAdSetDailyBudget).toHaveBeenCalledWith('adset-a', 'test-token', 800)
+  })
+
+  it('still rolls a non-card cut back through the provider handler', async () => {
+    const f = harness()
+    const outcome = await runAction(f.kernel, {
+      clientId: CLIENT_A, goalId: GOAL_A, purpose: 'growth', actionKey: 'ads.cut_unit_budget',
+      triggeredBy: 'human', triggeredByRef: 'user-from-session',
+      input: { cycle_date: '2026-11-02', ad_account_id: '123', adset_id: 'adset-a', after_cents: 800 },
+    })
+    expect(outcome.kind, outcome.run.last_error ?? '').toBe('dead_letter')
+    expect(setAdSetDailyBudget).toHaveBeenNthCalledWith(1, 'adset-a', 'test-token', 800)
+    expect(setAdSetDailyBudget).toHaveBeenNthCalledWith(2, 'adset-a', 'test-token', 1000)
+    expect(outcome.run.last_error).toMatch(/撤回/)
+  })
+})
