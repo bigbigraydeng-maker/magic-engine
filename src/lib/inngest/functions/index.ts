@@ -53,6 +53,7 @@ import { planDraftFromPrescription } from './plan-draft-from-prescription'
 import { crmEmailSendReceipt } from './crm-email-send-receipt'
 import { zhangqianDiscovery } from './zhangqian-discovery'
 import { triggeredSendWelcomeDispatch, triggeredSendWelcomeSweep } from './triggered-send-welcome-sweep'
+import { crmDncReengageSweep } from './crm-dnc-reengage-sweep'
 import { socialWeeklyDraft } from './cloud-social-weekly-draft'
 import { reelScheduledGoPublic } from './cloud-reel-scheduled-go-public'
 import { socialAccountAudit } from './cloud-social-account-audit'
@@ -130,6 +131,8 @@ export const cloudFunctions = [
   zhangqianDiscovery,
   triggeredSendWelcomeDispatch,
   triggeredSendWelcomeSweep,
+  // 客人自己回来找我们 → 自动解除「别再联系」（每 15 分钟；默认只演练，名单里的客户才真写）
+  crmDncReengageSweep,
   // 社媒每周出稿编排（两个开关默认关；关着也每天写一行 disabled 回执）
   socialWeeklyDraft,
   reelScheduledGoPublic,
