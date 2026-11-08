@@ -24,6 +24,15 @@ import { parseExecutedLaunches } from '@/lib/ads/prescription-launch-check'
 import { executeConfirmedGoLive } from '../execute'
 
 const IDS = { campaignId: 'camp', adSetId: 'set', adIds: ['ad'] }
+const STORED = { dailyBudget: 15, durationDays: null, endTime: null }
+
+function reusedRow(status: string): Record<string, unknown> {
+  return owned(status, { draft: { existingAdSetId: 'set', inheritedSpend: STORED } })
+}
+
+function sameSpend() {
+  return async () => ({ ok: true as const, campaignId: 'camp', spend: { ...STORED } })
+}
 const CARD = '11111111-1111-4111-8111-111111111111'
 
 function authority(basis: 'go_live_card' | 'global_admin' = 'go_live_card') {
@@ -499,13 +508,14 @@ describe('executeConfirmedGoLive', () => {
     const ids = { ...IDS, reusedCampaign: true as const, reusedAdSet: true as const }
     m.fetchCampaignStatus.mockImplementation(async (id: string) => (id === 'camp' ? 'ACTIVE' : 'PAUSED'))
     m.fetchEffectiveStatus.mockResolvedValue('ACTIVE')
-    const { sb } = fakeDb(owned('active'))
+    const { sb } = fakeDb(reusedRow('active'))
     const held = await executeConfirmedGoLive({
       supabase: sb as never,
       clientId: 'client-1',
       draftId: 'draft-1',
       authority: authority(),
       ids,
+      readSpend: sameSpend(),
     })
     expect(held.settle.outcome).toBe('held')
     expect(m.fetchCampaignStatus.mock.calls.map((call) => call[0])).toEqual(['camp', 'ad', 'ad'])
@@ -531,6 +541,7 @@ describe('executeConfirmedGoLive', () => {
       draftId: 'draft-1',
       authority: authority(),
       ids,
+      readSpend: sameSpend(),
     })
     expect(live.settle).toMatchObject({ outcome: 'live', attempts: 1 })
     expect(m.fetchCampaignStatus.mock.calls.map((call) => call[0])).toEqual(['camp', 'ad'])
@@ -549,13 +560,14 @@ describe('executeConfirmedGoLive', () => {
       m.pausePublished.mockResolvedValue({ ok: true, failed: [] })
       m.fetchCampaignStatus.mockResolvedValue('ACTIVE')
       m.fetchEffectiveStatus.mockResolvedValue(status)
-      const { sb, store } = fakeDb(owned('active'))
+      const { sb, store } = fakeDb(reusedRow('active'))
       const result = await executeConfirmedGoLive({
         supabase: sb as never,
         clientId: 'client-1',
         draftId: 'draft-1',
         authority: authority(),
         ids,
+        readSpend: sameSpend(),
       })
       expect(result.settle.outcome).toBe('held')
       expect(store.payload.goLiveStartedAt).toBeUndefined()
@@ -567,6 +579,39 @@ describe('executeConfirmedGoLive', () => {
       const pausedIds = m.pausePublished.mock.calls.flat().map((value) => JSON.stringify(value))
       expect(pausedIds.some((value) => value.includes('"reusedAdSet":true'))).toBe(true)
     }
+  })
+
+  it('stops when the existing ad set budget or end time no longer matches', async () => {
+    const ids = { ...IDS, reusedCampaign: true as const, reusedAdSet: true as const }
+    m.fetchCampaignStatus.mockResolvedValue('ACTIVE')
+    const { sb } = fakeDb(reusedRow('activating'))
+    const raised = await executeConfirmedGoLive({
+      supabase: sb as never,
+      clientId: 'client-1',
+      draftId: 'draft-1',
+      authority: authority(),
+      ids,
+      readSpend: async () => ({ ok: true, campaignId: 'camp', spend: { dailyBudget: 100, durationDays: null, endTime: null } }),
+    })
+    expect(raised.settle.outcome).toBe('held')
+    expect(raised.settle.reason).toContain('已经变了')
+    expect(m.approveDraft).not.toHaveBeenCalled()
+    expect(m.activatePublished).not.toHaveBeenCalled()
+
+    const openEnded = await executeConfirmedGoLive({
+      supabase: sb as never,
+      clientId: 'client-1',
+      draftId: 'draft-1',
+      authority: authority(),
+      ids,
+      readSpend: async () => ({
+        ok: true,
+        campaignId: 'camp',
+        spend: { dailyBudget: 15, durationDays: null, endTime: '2026-12-01T00:00:00+0000' },
+      }),
+    })
+    expect(openEnded.settle.outcome).toBe('held')
+    expect(m.activatePublished).not.toHaveBeenCalled()
   })
 
   it('does not overwrite another run that already recorded the open', async () => {

@@ -4,11 +4,13 @@
  * 规则（设计稿 §5.2-7 + Codex 对币种的意见）：
  *  - 按「账户」汇总本计划所有广告步骤的日预算，不是逐个步骤比；
  *  - 账户币种必须能确定（来自账户快照），缺失 → unknown，不猜；
- *  - 客户总上限（ad_strategy_configs.daily_budget_cap_cents）没有币种，只有当全部涉及账户
+ *  - 客户总上限（ad_strategy_configs.daily_budget_cap_cents）没有币种，只有当全部计入的账户
  *    币种一致时才与之比较，币种不一致或缺失 → unknown（不做换算）；
- *  - 账户级上限（client_meta_ad_accounts.daily_budget_cap_cents）按账户比，没设就不比这一层；
- *  - 传入 liveByAccount 时，比较的是「已在投日预算 + 本计划」。不传则仍只比本计划，并在 notes 里说明。
- *    传 null、或某个账户没有数 = 没读到，结论是 unknown，不能当成没有在花钱。
+ *  - 账户级上限（client_meta_ad_accounts.daily_budget_cap_cents）只比这次有新草稿的账户，没设就不比这一层；
+ *  - 传入 liveByAccount 时，客户总上限比的是「每个账户的已在投 + 本计划」。
+ *    这次没有新草稿的账户，只要出现在账户名单或已在投地图里，它的已在投也算进客户总上限。
+ *    不传则仍只比本计划，并在 notes 里说明。
+ *    传 null、名单里有但地图里没有、或某个数不合法 = 没读到，结论是 unknown，不能当成没有在花钱。
  *
  * 结论只有三种：ok / over / unknown。unknown 在检查清单里是灰色，花钱相关的硬门不能批准。
  */
@@ -68,14 +70,15 @@ export function checkAdsBudget(
     return { verdict: 'ok', reasons: [], per_account_cents: {}, notes: [] }
   }
 
-  const compared = totalsWithLive(perAccount, liveByAccount)
+  const compared = totalsWithLive(perAccount, liveByAccount, accounts.map(account => account.ad_account_id))
   if (!compared.ok) {
     reasons.push(LIVE_UNREAD)
     unknown = true
   }
   const totals = compared.ok ? compared.per : perAccount
   const byId = new Map(accounts.map(a => [a.ad_account_id, a]))
-  for (const [accountId, total] of Object.entries(totals)) {
+  for (const accountId of Object.keys(perAccount)) {
+    const total = totals[accountId] ?? perAccount[accountId]
     const flags = accountOver(accountId, total, byId.get(accountId), compared.ok)
     reasons.push(...flags.reasons)
     if (flags.over) over = true
@@ -97,14 +100,16 @@ export function checkAdsBudget(
 function totalsWithLive(
   perAccount: Record<string, number>,
   liveByAccount: LiveSpendByAccount | undefined,
+  knownAccountIds: readonly string[],
 ): { ok: true; per: Record<string, number> } | { ok: false } {
   if (liveByAccount === undefined) return { ok: true, per: perAccount }
   if (liveByAccount === null) return { ok: false }
+  const ids = new Set([...Object.keys(perAccount), ...Object.keys(liveByAccount), ...knownAccountIds])
   const per: Record<string, number> = {}
-  for (const [accountId, draft] of Object.entries(perAccount)) {
+  for (const accountId of ids) {
     const live = liveByAccount[accountId]
     if (live === undefined || !Number.isSafeInteger(live) || live < 0) return { ok: false }
-    const sum = draft + live
+    const sum = (perAccount[accountId] ?? 0) + live
     if (!Number.isSafeInteger(sum)) return { ok: false }
     per[accountId] = sum
   }
@@ -143,8 +148,15 @@ function clientOver(
   if (clientCapCents === null) {
     return { reasons: ['客户的广告日预算总上限还没设置'], over: false, unknown: true }
   }
-  const involved = Object.keys(totals).map(id => byId.get(id)).filter((a): a is AccountCapFacts => !!a)
-  const currencies = new Set(involved.map(a => a.currency))
+  const involved = Object.keys(totals).map(id => byId.get(id))
+  if (involved.some(account => !account?.owned_by_client)) {
+    return {
+      reasons: ['涉及的广告账户币种缺失或不一致，客户总上限无法比较（不做币种换算）'],
+      over: false,
+      unknown: true,
+    }
+  }
+  const currencies = new Set(involved.map(account => account?.currency ?? null))
   if (currencies.has(null) || currencies.size !== 1) {
     return {
       reasons: ['涉及的广告账户币种缺失或不一致，客户总上限无法比较（不做币种换算）'],

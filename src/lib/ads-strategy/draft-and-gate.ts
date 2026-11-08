@@ -41,6 +41,7 @@ import { checkAudiences, renderAudienceSummary, type AudienceFact, type Audience
 import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
 import { expectedPlacement } from './placement-lock'
+import { plannedPlacements } from './readback-sweep'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
 import { checkCreatedAsExpected } from './created-as-expected'
 import {
@@ -409,12 +410,15 @@ async function blockedUnreadable(
 }
 
 /** 已有的闸门（多语言混放、重定向被放宽……）。 */
-function launchReportFor(
+async function launchReportFor(
   draft: AdDraft,
   deps: CreateDraftDeps,
   rawAdSet: NonNullable<Awaited<ReturnType<typeof fetchAdSetReadback>>>,
   ads: NonNullable<Awaited<ReturnType<typeof fetchAdCreativesReadback>>>,
-): LaunchReadbackReport {
+): Promise<LaunchReadbackReport> {
+  const planned = draft.existingAdSetId
+    ? await plannedPlacements(deps.supabase, draft.clientId, [rawAdSet.id])
+    : null
   return checkLaunch({
     ...adaptMetaAdSet(rawAdSet, ads, {
       expectedGeo: deps.expectedGeo ?? null,
@@ -427,7 +431,8 @@ function launchReportFor(
     }),
     industry: deps.industry ?? null,
     expectedOptimizationGoal: metaTripletFor(draft.kind).optimizationGoal,
-    ...expectedPlacement(draft.placements),
+    ...expectedPlacement(planned ? planned.get(rawAdSet.id) : draft.placements),
+    ...(draft.existingAdSetId ? { reuseExistingAdSet: true } : {}),
     ...(draft.audienceIds && draft.audienceIds.length > 0 ? { expectedAudienceIds: draft.audienceIds } : {}),
     ...(draft.excludedAudienceIds && draft.excludedAudienceIds.length > 0 ? { expectedExcludedAudienceIds: draft.excludedAudienceIds } : {}),
   })
@@ -453,7 +458,7 @@ async function gateReadback(
     return blockedUnreadable(draft, published, deps, ctx, '回读不到它的真实设置')
   }
 
-  const report = launchReportFor(draft, deps, rawAdSet, ads)
+  const report = await launchReportFor(draft, deps, rawAdSet, ads)
   const extra = [
     ...expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps),
     ...attachReadbackFindings(draft, published, rawAdSet, ads),

@@ -6,6 +6,7 @@ import { createKernel } from '@/lib/kernel'
 import { supabaseAdmin } from '@/lib/supabase'
 import { openReader } from '../../access'
 import { executeConfirmedGoLive } from '../../execute'
+import { blockStaleReusedSpend } from '../../recheck-existing-spend'
 
 function emailOf(clicker: CardClicker): string {
   if (clicker.kind === 'opc' || clicker.kind === 'fde') return clicker.email
@@ -25,6 +26,10 @@ export async function POST(req: Request, { params }: { params: { id: string; dra
     const parsed = parseGoLiveDecision(raw)
     const loaded = await loadGoLive(supabaseAdmin, params.id, params.draftId, new Date())
     if (!loaded.ok) return NextResponse.json({ error: loaded.error }, { status: loaded.status })
+    if (loaded.reusedSpend) {
+      const stale = await blockStaleReusedSpend(supabaseAdmin, params.id, loaded.reusedSpend)
+      if (stale) return NextResponse.json({ error: stale }, { status: 409 })
+    }
     const body = await decideGoLive({
       kernel: createKernel(supabaseAdmin),
       clientId: params.id,

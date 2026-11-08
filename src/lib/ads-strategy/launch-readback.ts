@@ -106,6 +106,11 @@ export interface LaunchReadbackInput {
   expectedFacebookPositions?: string[]
   /** 计划要求的 Instagram 具体位置。不给就不查。 */
   expectedInstagramPositions?: string[]
+  /**
+   * 加到已有广告组。没有记下的计划版位时，不用「必须同时投 Facebook 和 Instagram」那条。
+   * 不改这个广告组自己的版位。
+   */
+  reuseExistingAdSet?: boolean
 }
 
 export interface LaunchReadbackReport {
@@ -139,6 +144,7 @@ export function isPlaybackGoal(goal: string): boolean {
 function placementFindings(input: LaunchReadbackInput): LaunchFinding[] {
   const expected = input.expectedPublisherPlatforms ?? []
   if (expected.length > 0) return plannedPlacementFindings(input, expected)
+  if (input.reuseExistingAdSet) return []
   return playbackPlacementFindings(input)
 }
 

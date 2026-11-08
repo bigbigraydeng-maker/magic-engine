@@ -4,7 +4,7 @@
  * No network, no database.
  */
 
-import { sumDeliveringDailyMinor, type HeadroomRow } from './launch-budget-headroom'
+import { deliveringAdSetMinor, sumDeliveringDailyMinor, type HeadroomRow } from './launch-budget-headroom'
 import type { CampaignShape } from './paused-draft-facts'
 
 const CAPTURE = new Set(['first_seen', 'changed', 'daily', 'disappeared', 'kernel_pre', 'kernel_post'])
@@ -36,6 +36,8 @@ export interface SnapshotCaptureRow {
 
 export interface SpendRead {
   readonly liveDeliveringCents: number | null
+  /** null when the delivering total was not read. Empty when nothing delivering is an ad set. */
+  readonly deliveringAdSetCents: Readonly<Record<string, number>> | null
   readonly campaignShapes: readonly CampaignShape[] | null
 }
 
@@ -53,18 +55,25 @@ export function spendFromSnapshots(
   captures: readonly SnapshotCaptureRow[] | null,
   nowMs = Date.now(),
 ): SpendRead {
-  if (!rows) return { liveDeliveringCents: null, campaignShapes: null }
+  if (!rows) return unread(null)
   const shapes = campaignShapes(rows)
-  if (rows.length === 0 || !capturesCover(captures, nowMs)) {
-    return { liveDeliveringCents: null, campaignShapes: shapes }
-  }
+  if (rows.length === 0 || !capturesCover(captures, nowMs)) return unread(shapes)
   const parsed: HeadroomRow[] = []
   for (const row of rows) {
     const one = toHeadroom(row)
-    if (one === 'bad') return { liveDeliveringCents: null, campaignShapes: null }
+    if (one === 'bad') return unread(null)
     if (one) parsed.push(one)
   }
-  return { liveDeliveringCents: sumDeliveringDailyMinor(parsed), campaignShapes: shapes }
+  const liveDeliveringCents = sumDeliveringDailyMinor(parsed)
+  return {
+    liveDeliveringCents,
+    deliveringAdSetCents: liveDeliveringCents === null ? null : deliveringAdSetMinor(parsed),
+    campaignShapes: shapes,
+  }
+}
+
+function unread(shapes: readonly CampaignShape[] | null): SpendRead {
+  return { liveDeliveringCents: null, deliveringAdSetCents: null, campaignShapes: shapes }
 }
 
 /** Newest entity row must be inside the fresh window. No rows is not fresh. */

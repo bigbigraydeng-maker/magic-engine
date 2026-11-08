@@ -68,6 +68,32 @@ describe('已有广告组编号', () => {
     expect(under.date).toBe('跟这个广告组一起跑 7 天')
   })
 
+  it('已经在投的广告组不再把同一份日预算加第二遍', () => {
+    const live = {
+      ...REVIEW,
+      accounts: [{ ad_account_id: 'act_1', currency: 'NZD', daily_cap_cents: 5000, owned_by_client: true }],
+      clientCapCents: 5000,
+      liveDeliveringCents: 4000,
+      deliveringAdSetCents: { '800001': 4000 },
+    }
+    const adding = draft({
+      existingAdSetId: '800001',
+      inheritedSpend: { dailyBudget: 40, durationDays: null, endTime: null },
+    })
+    expect(pausedDraftFacts(adding, '账户', live).hardChecks.find((row) => row.label === '日预算上限')?.state).toBe('green')
+
+    const paused = {
+      ...live,
+      liveDeliveringCents: 0,
+      deliveringAdSetCents: {},
+    }
+    const notLive = draft({
+      existingAdSetId: '800001',
+      inheritedSpend: { dailyBudget: 60, durationDays: null, endTime: null },
+    })
+    expect(pausedDraftFacts(notLive, '账户', paused).hardChecks.find((row) => row.label === '日预算上限')?.state).toBe('red')
+  })
+
   it('确认卡保留广告组的绝对结束日，不把整段跨度当成还要跑的天数', () => {
     const end = '2026-11-01T00:00:00+0000'
     const facts = pausedDraftFacts(

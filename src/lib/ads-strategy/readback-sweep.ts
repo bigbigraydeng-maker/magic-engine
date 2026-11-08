@@ -237,7 +237,7 @@ interface PlanRow {
  * 广告组对应草稿上的投放位置。同一组有多条记录时用最新一条写了位置的。
  * 没写、不是一列文字、或这次没读到账，都当没写 —— 调用方保持原来的检查。
  */
-async function plannedPlacements(
+export async function plannedPlacements(
   supabase: SupabaseClient | undefined,
   clientId: string,
   adSetIds: readonly string[],

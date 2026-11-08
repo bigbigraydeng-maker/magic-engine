@@ -145,19 +145,23 @@ export function reviewDraftForBuild(d: AdDraft, ctx?: DraftBuildReviewContext): 
 
 /**
  * 用现成的预算上限检查。不读账户、不写账户。
- * 不传 liveDeliveringCents = 只比这份草稿。传数字 = 已在投 + 这份草稿。传 null = 已在投没读到。
+ * 不传 = 只比这份草稿。传数字 = 这个账户的已在投 + 这份草稿。
+ * 传各地图 = 每个账户的已在投都算进客户总上限，包括这次没有新草稿的账户。
+ * 传 null = 已在投没读到。
+ * allowZeroBudget 只给「已在投的广告组不再重复加一份预算」用。
  */
 export function reviewDraftAgainstCaps(
   d: AdDraft,
   adAccountId: string,
   accounts: readonly AccountCapFacts[],
   clientCapCents: number | null,
-  liveDeliveringCents?: number | null,
+  liveDeliveringCents?: number | null | LiveSpendByAccount,
+  allowZeroBudget = false,
 ): BudgetCheck {
   if (adAccountId.trim() === '') {
     return { verdict: 'unknown', reasons: ['没给出广告账户，预算上限核不成'], per_account_cents: {}, notes: [] }
   }
-  const steps = budgetSteps(d, adAccountId)
+  const steps = budgetSteps(d, adAccountId, allowZeroBudget)
   if (!steps) {
     return { verdict: 'unknown', reasons: ['日预算不是能核对的正数'], per_account_cents: {}, notes: [] }
   }
@@ -165,9 +169,12 @@ export function reviewDraftAgainstCaps(
   return checkAdsBudget(steps, accounts, clientCapCents, live)
 }
 
-function liveSpend(adAccountId: string, liveDeliveringCents: number | null | undefined): LiveSpendByAccount | undefined {
-  if (liveDeliveringCents === undefined) return undefined
-  if (liveDeliveringCents === null) return null
+function liveSpend(
+  adAccountId: string,
+  liveDeliveringCents: number | null | LiveSpendByAccount | undefined,
+): LiveSpendByAccount | undefined {
+  if (typeof liveDeliveringCents !== 'number') return liveDeliveringCents
+  if (!Number.isSafeInteger(liveDeliveringCents) || liveDeliveringCents < 0) return null
   return { [adAccountId]: liveDeliveringCents }
 }
 
@@ -481,9 +488,10 @@ function ctaBlocksBuild(d: AdDraft): boolean {
   return d.adSets.some((set) => isAdSet(set) && set.ctaType !== undefined && set.ctaType !== CTA_FOR_KIND[d.kind])
 }
 
-function budgetSteps(d: AdDraft, adAccountId: string): AdsStep[] | null {
+function budgetSteps(d: AdDraft, adAccountId: string, allowZero = false): AdsStep[] | null {
   const rows = budgetRows(d)
-  if (rows.length === 0 || rows.some((row) => row.cents === null || row.cents <= 0)) return null
+  if (rows.length === 0 || rows.some((row) => row.cents === null || row.cents < 0)) return null
+  if (!allowZero && rows.some((row) => row.cents === 0)) return null
   return rows.map((row, i) => ({
     id: `budget-${i}`,
     kind: 'ads_campaign' as const,

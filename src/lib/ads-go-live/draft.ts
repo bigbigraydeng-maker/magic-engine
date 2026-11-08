@@ -4,6 +4,8 @@
  * Optional `accountLabel` on the payload is the seam for that draft's account name.
  */
 
+import { inheritedSpendOf, type AdDraft, type InheritedAdSetSpend } from '@/lib/ads-strategy/ad-draft'
+
 const DRAFT_ID_RE = /^[a-z0-9][a-z0-9_-]{0,64}$/
 
 export interface GoLiveIds {
@@ -85,6 +87,22 @@ export function parsePausedDraft(payload: unknown): PausedDraftView | null {
         }
       : null,
   }
+}
+
+/** Reused ad sets must be checked again before go-live. New drafts return null. */
+export function reusedSpendGate(payload: unknown): { adSetId: string; spend: InheritedAdSetSpend | null } | null {
+  const draft = draftOf(payload)
+  const existing = draft?.existingAdSetId
+  if (!existing) return null
+  const published = parsePausedDraft(payload)?.ids?.adSetId
+  return { adSetId: published || existing, spend: inheritedSpendOf(draft) }
+}
+
+function draftOf(payload: unknown): AdDraft | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const draft = (payload as { draft?: unknown }).draft
+  if (!draft || typeof draft !== 'object' || Array.isArray(draft)) return null
+  return draft as AdDraft
 }
 
 function storedSpend(

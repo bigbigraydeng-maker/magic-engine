@@ -66,6 +66,7 @@ function fakeSupabase(
     updateError?: { message: string } | null
     failAfterFirstUpdate?: boolean
     claimMatches?: boolean
+    planRows?: { created_at?: string; payload?: unknown }[]
   } = {},
 ) {
   const inserted: DraftRecord[] = []
@@ -85,6 +86,9 @@ function fakeSupabase(
             maybeSingle: async () => ({
               data: existing ? { id: 'act1', client_id: 'c1', payload: existing } : null,
               error: null,
+            }),
+            in: () => ({
+              order: async () => ({ data: opts.planRows ?? [], error: null }),
             }),
           }),
           maybeSingle: async () => ({
@@ -1478,6 +1482,61 @@ describe('createDraftForApproval — 已有系列', () => {
       inheritedSpend: { dailyBudget: 100, durationDays: null },
       existingAdSetId: '800001',
     }))
+  })
+
+  it('复用只投 Instagram 的看完视频广告组时，按原计划版位检查，不要求两个平台', async () => {
+    mWait.mockResolvedValue({ ok: true } as Awaited<ReturnType<typeof waitForVideoReady>>)
+    mPublish.mockResolvedValue({
+      ok: true, campaignId: '900001', adSetId: '800001', adIds: ['ad9'], orphans: [],
+      reusedCampaign: true, reusedAdSet: true,
+    })
+    mAdSet.mockResolvedValue({
+      id: '800001', name: 'North Shore', optimization_goal: 'THRUPLAY', destination_type: 'ON_AD',
+      status: 'ACTIVE', campaign_id: '900001',
+      targeting: { geo_locations: { countries: ['NZ'] }, publisher_platforms: ['instagram'] },
+    })
+    mCreatives.mockResolvedValue([
+      { adId: 'ad9', adName: 'new', status: 'PAUSED', texts: ['Watch the route'] },
+    ])
+    const video = {
+      kind: 'video_thruplay' as const,
+      clientId: 'c1',
+      campaignName: 'Kiteroa 留资',
+      adSetName: 'North Shore',
+      dailyBudget: 30,
+      durationDays: 7,
+      geoCountries: ['NZ'],
+      pageId: 'p1',
+      linkUrl: 'https://example.co.nz',
+      existingAdSetId: '800001',
+      creatives: [{
+        name: 'V', primaryText: 'Watch the route', headline: 'Play', videoId: 'v1', thumbnailImageHash: 'th1',
+      }],
+    }
+    const instagramPlan = {
+      created_at: '2026-11-01T00:00:00.000Z',
+      payload: { adSetId: '800001', draft: { placements: ['instagram'] } },
+    }
+    const planned = fakeSupabase(undefined, { planRows: [instagramPlan] })
+    const ok = await createDraftForApproval(video, deps(planned.sb))
+    expect(ok.status).toBe('awaiting_approval')
+    expect(ok.findings.map((f) => f.code)).not.toContain('playback_placement_not_locked')
+    expect(mPublish.mock.calls.at(-1)?.[0].placements).toBeUndefined()
+
+    const bare = fakeSupabase()
+    const noPlan = await createDraftForApproval(video, deps(bare.sb))
+    expect(noPlan.findings.map((f) => f.code)).not.toContain('playback_placement_not_locked')
+
+    const drifted = fakeSupabase(undefined, {
+      planRows: [{
+        created_at: '2026-11-01T00:00:00.000Z',
+        payload: { adSetId: '800001', draft: { placements: ['facebook', 'instagram'] } },
+      }],
+    })
+    const blocked = await createDraftForApproval(video, deps(drifted.sb))
+    expect(blocked.status).toBe('blocked')
+    expect(blocked.findings.map((f) => f.code)).toContain('placement_not_as_planned')
+    expect(blocked.findings.map((f) => f.code)).not.toContain('playback_placement_not_locked')
   })
 })
 

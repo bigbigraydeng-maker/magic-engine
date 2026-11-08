@@ -154,6 +154,20 @@ export function sumDeliveringDailyMinor(rows: readonly HeadroomRow[]): number | 
   return Number.isSafeInteger(minor) ? minor : null
 }
 
+/** Ad-set budgets already inside the delivering total. Campaign budgets are not listed. */
+export function deliveringAdSetMinor(rows: readonly HeadroomRow[]): Record<string, number> | null {
+  const latest = latestPerEntity(rows)
+  if (latest.length === 0) return null
+  const split = splitSpend(latest)
+  if (!split.ok) return null
+  const out: Record<string, number> = {}
+  for (const unit of split.delivering) {
+    if (unit.level !== 'adset') continue
+    out[unit.entityId] = unit.dailyMinor
+  }
+  return out
+}
+
 function splitSpend(rows: readonly HeadroomRow[]): SpendSplit {
   const currencies = new Set(rows.map((r) => (r.currency ?? '').trim().toUpperCase()))
   if (currencies.size !== 1 || currencies.has('')) {

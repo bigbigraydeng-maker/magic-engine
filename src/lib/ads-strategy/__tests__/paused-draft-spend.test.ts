@@ -36,7 +36,11 @@ const covered = [capture('campaign'), capture('adset')]
 describe('spendFromSnapshots', () => {
   it('returns null when there are no rows, even if the capture receipt is complete', () => {
     expect(spendFromSnapshots([], covered, NOW).liveDeliveringCents).toBeNull()
-    expect(spendFromSnapshots(null, covered, NOW)).toEqual({ liveDeliveringCents: null, campaignShapes: null })
+    expect(spendFromSnapshots(null, covered, NOW)).toEqual({
+      liveDeliveringCents: null,
+      deliveringAdSetCents: null,
+      campaignShapes: null,
+    })
   })
 
   it('does not treat a missing ad set capture as zero delivering', () => {
