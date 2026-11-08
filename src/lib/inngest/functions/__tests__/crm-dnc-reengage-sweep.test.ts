@@ -12,6 +12,7 @@ const CLIENT = 'C0000000-0000-0000-0000-000000000000'
 const comesBack: ReengageCandidate = {
   contactId: 'contact-1',
   input: {
+    asOf: '2026-11-08T00:00:00.000Z',
     contactFlag: true,
     reason: null,
     touches: [

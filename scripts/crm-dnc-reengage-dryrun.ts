@@ -95,7 +95,8 @@ function main(): void {
   const whyCounts: Record<string, number> = {}
 
   for (const row of rows) {
-    const decision = decideReengageClear(row.input)
+    // Exported rows may predate the `asOf` field; judge them as of now.
+    const decision = decideReengageClear({ ...row.input, asOf: row.input.asOf ?? new Date().toISOString() })
     if (decision.clear) {
       wouldClear++
       table.push([

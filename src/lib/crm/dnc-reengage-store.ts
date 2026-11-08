@@ -255,6 +255,7 @@ async function loadCandidatesFor(clientId: string, ids: string[]): Promise<Reeng
   return contacts.map((c) => ({
     contactId: c.id,
     input: {
+      asOf: new Date().toISOString(),
       contactFlag: c.do_not_contact === true,
       reason: c.do_not_contact_reason,
       touches: touchesByContact.get(c.id) ?? [],
@@ -307,7 +308,8 @@ async function insertClearTouch(
         direction: 'outbound',
         // The trigger's own time, not "now": any do-not-contact recorded later than the customer's action —
         // even one that syncs in late with an earlier timestamp than now — must still be the latest verdict.
-        occurred_at: t.at,
+        // Never later than now: a future time would outrank every do-not-contact recorded afterwards.
+        occurred_at: new Date(Math.min(Date.parse(t.at), Date.now())).toISOString(),
         summary,
         raw: `${summary}（触发：${t.kind} @ ${t.at}；拒联判决时间：${decision.dncAt}）`,
         metadata: {

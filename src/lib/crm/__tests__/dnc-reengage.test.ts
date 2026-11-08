@@ -42,6 +42,7 @@ function msg(
 
 function input(over: Partial<ReengageInput>): ReengageInput {
   return {
+    asOf: '2027-01-01T00:00:00.000Z',
     contactFlag: true,
     reason: null,
     touches: [],
@@ -220,7 +221,7 @@ describe('decideReengageClear', () => {
     })
   })
 
-  it('12. web form identified by channel only clears', () => {
+  it('12. website form is review-only (public endpoint, anyone can post a phone/email)', () => {
     const decision = decideReengageClear(
       input({
         touches: [
@@ -230,10 +231,10 @@ describe('decideReengageClear', () => {
       }),
     )
     expect(decision).toEqual({
-      clear: true,
+      clear: false,
+      why: 'needs_review',
       dncAt: T0,
-      dncAtSource: 'touch',
-      trigger: { kind: 'form', ref: 'w1', at: at(DAY), channel: 'web_form' },
+      trigger: { kind: 'web_form', ref: 'w1', at: at(DAY), channel: 'web_form' },
     })
   })
 
@@ -540,5 +541,25 @@ describe('decideReengageClear', () => {
       input({ touches: [verdict()], inboundMessages: [msg('m1', at(DAY), 'Why are you still messaging me')] }),
     )
     expect(decision.clear).toBe(false)
+  })
+
+  it('34. a form dated in the future (client-controlled time) is ignored', () => {
+    const decision = decideReengageClear(
+      input({
+        asOf: at(DAY),
+        touches: [verdict(), touch({ id: 'f1', channel: 'meta_lead_form', source: 'meta_lead_form', occurredAt: at(DAY + HOUR) })],
+      }),
+    )
+    expect(decision).toEqual({ clear: false, why: 'no_reengage' })
+  })
+
+  it('35. a form a few minutes "ahead" (clock skew within tolerance) still counts', () => {
+    const decision = decideReengageClear(
+      input({
+        asOf: at(DAY),
+        touches: [verdict(), touch({ id: 'f1', channel: 'meta_lead_form', source: 'meta_lead_form', occurredAt: at(DAY + 2 * MIN) })],
+      }),
+    )
+    expect(decision.clear).toBe(true)
   })
 })

@@ -6,7 +6,10 @@
  *
  * 但「自动放出来」是这条闸上最贵的错，所以第一版分两档（2026-11-08 子牙 / 魏征复审后）：
  *
- *   · **自动解除**：只认**表单**和**接通的来电**（`AUTO_KINDS`）—— 明确的动作，不用读字面意思
+ *   · **自动解除**：只认 **Facebook 表单**和**接通的来电**（`AUTO_KINDS`）—— 明确的动作，不用读字面意思。
+ *     官网表单**不算**自动（2026-11-08 安全复审）：`POST /api/clients/[id]/leads` 不要登录，
+ *     任何人填上一位拒联客人的电话/邮箱就能造一条「他回来了」。它只进 `needs_review`。
+ *     Facebook 表单是客人用自己的账号在 Meta 那边提交、由 Meta 推过来的，冒充成本高得多。
  *   · **交给人看一眼**（`needs_review`）：私信、真人回信。它们字面上可能是回头，也可能是
  *     「Why are you still messaging me」这种词表认不出的骂人话；邮件同步进来的还只是正文前一段。
  *     判错的代价是把一个明确拒绝的人放出来，所以只列出来，不写。
@@ -50,7 +53,10 @@ export const NOT_A_CUSTOMER = /钓鱼|假冒|不是真实客户|非真实客户|
 export const REENGAGE_EXTRA_STOP =
   /\b(stop|unsubscribe|opt[- ]?out|remove me|take me off|leave me alone|not interested|no thanks?)\b|(do not|don'?t|never) (contact|email|e-mail|call|message|text|ring) (me|us)|stop (contacting|emailing|calling|messaging|texting)|退订|不要再|别再|不需要|不感兴趣/i
 
-export type ReengageKind = 'form' | 'inbound_call' | 'email' | 'message'
+export type ReengageKind = 'form' | 'web_form' | 'inbound_call' | 'email' | 'message'
+
+/** 时间在「现在」之后超过这么多的记录不信（客户端可填的时间会被填成未来，好永远压过后来的拒联）。 */
+export const FUTURE_TOLERANCE_MS = 5 * 60_000
 
 /** 这两种才自动解除；其余只列出来请人看。 */
 export const AUTO_KINDS: ReadonlySet<ReengageKind> = new Set(['form', 'inbound_call'])
@@ -79,6 +85,8 @@ export interface ReengageMessage {
 }
 
 export interface ReengageInput {
+  /** 判定时刻（ISO）。比它晚 `FUTURE_TOLERANCE_MS` 以上的记录一律不算。 */
+  asOf: string
   contactFlag: boolean
   reason: string | null
   touches: ReengageTouch[]
@@ -95,6 +103,7 @@ export type ReengageDecision =
   | { clear: true; dncAt: string; dncAtSource: 'touch' | 'stop_message'; trigger: ReengageTrigger }
 
 const FORM_KINDS = new Set(['meta_lead_form', 'web_form'])
+const META_FORM = 'meta_lead_form'
 
 function ts(v: string): number {
   const t = new Date(v).getTime()
@@ -155,7 +164,8 @@ function touchKind(t: ReengageTouch): ReengageKind | null {
   if (t.direction !== 'inbound') return null
   if (t.channel === 'messenger' || t.channel === 'whatsapp') return null
   const src = t.source ?? ''
-  if (FORM_KINDS.has(t.channel) || FORM_KINDS.has(src)) return 'form'
+  if (t.channel === META_FORM || src === META_FORM) return 'form'
+  if (FORM_KINDS.has(t.channel) || FORM_KINDS.has(src)) return 'web_form'
   if (t.channel === 'phone' && src === 'twilio') return isAnsweredCall(t) ? 'inbound_call' : null
   const realEmail =
     t.channel === 'email' && src !== 'mailchimp' && t.automated !== true && !isAutoReply(t.subject ?? '')
@@ -167,13 +177,15 @@ function messageCounts(m: ReengageMessage): boolean {
 }
 
 function collectCandidates(input: ReengageInput, cutoffMs: number): ReengageTrigger[] {
+  const latestOk = ts(input.asOf) + FUTURE_TOLERANCE_MS
+  const inWindow = (at: string): boolean => ts(at) > cutoffMs && ts(at) <= latestOk
   const out: ReengageTrigger[] = []
   for (const t of input.touches) {
     const kind = touchKind(t)
-    if (kind !== null && ts(t.occurredAt) > cutoffMs) out.push({ kind, ref: t.id, at: t.occurredAt, channel: t.channel })
+    if (kind !== null && inWindow(t.occurredAt)) out.push({ kind, ref: t.id, at: t.occurredAt, channel: t.channel })
   }
   for (const m of input.inboundMessages) {
-    if (messageCounts(m) && ts(m.sentAt) > cutoffMs) out.push({ kind: 'message', ref: m.id, at: m.sentAt, channel: m.channel })
+    if (messageCounts(m) && inWindow(m.sentAt)) out.push({ kind: 'message', ref: m.id, at: m.sentAt, channel: m.channel })
   }
   return out
 }
