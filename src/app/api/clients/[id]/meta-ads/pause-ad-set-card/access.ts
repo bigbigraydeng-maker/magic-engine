@@ -1,12 +1,10 @@
 /**
- * Session gate for pause cards. Agents cannot ask for or press one.
+ * Who may open or press the pause card. Agents cannot.
  */
 
 import { NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
 import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
-import { createKernel } from '@/lib/kernel'
 import { isUuid } from '@/lib/validation-utils'
 import { assertMayClick, clickerFromSession, type CardClicker } from '@/lib/confirmation-card'
 import { publicError } from '@/lib/confirmation-card/http'
@@ -22,7 +20,7 @@ export async function pauseCardGate(
   }
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) {
-    const message = access.status === 401 ? '请先登录。' : '你不能替这位客户暂停广告。'
+    const message = access.status === 401 ? '请先登录。' : '你不能替这位客户暂停广告组。'
     return { ok: false, response: NextResponse.json({ error: message }, { status: access.status }) }
   }
   const clicker = clickerFromSession({
@@ -39,8 +37,4 @@ export async function pauseCardGate(
     return { ok: false, response: NextResponse.json({ error: mapped.message }, { status: mapped.status }) }
   }
   return { ok: true, clicker }
-}
-
-export function pauseKernel() {
-  return createKernel(supabaseAdmin)
 }

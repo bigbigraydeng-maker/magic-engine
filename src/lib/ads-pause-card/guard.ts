@@ -1,162 +1,89 @@
 /**
- * Checks for a pause card. Confirm stays closed unless every check is green.
- * This card can only pause. It never treats a missing metric as a default.
+ * Confirm stays closed unless every check is green.
+ * Pausing the last active ad set in the campaign is a refusal, not a second card.
  */
 
 import type { HardCheck } from '@/lib/confirmation-card/facts'
 import { confirmBlockReason } from '@/lib/confirmation-card/facts'
-import type { LiveAd, PauseOrder } from './order'
+import type { PauseAdSetOrder } from './order'
 
-export interface LiveObject {
-  readonly campaignId: string
-  readonly accountId: string
-  readonly adsetId: string | null
-}
-
-export interface SuccessorLive {
-  readonly readable: boolean
+export interface LiveAdSet {
+  readonly id: string
+  readonly status: string | null
   readonly accountId: string | null
-  readonly campaignId: string | null
-  readonly adsetId: string | null
-  readonly effectiveStatus: string | null
 }
 
 export interface LiveFacts {
   readonly registeredAccountIds: readonly string[] | null
-  readonly object: LiveObject | null
-  readonly campaignAds: readonly LiveAd[] | null
-  readonly successor: SuccessorLive
+  readonly target: LiveAdSet | null
+  readonly campaignAdSets: readonly LiveAdSet[] | null
 }
-
-const SUCCESSOR_LABEL = '新广告在投'
 
 export interface GuardResult {
   readonly checks: readonly HardCheck[]
   readonly block: string | null
-  readonly needsEmptyAck: boolean
 }
 
-export function guardPause(order: PauseOrder, live: LiveFacts, emptyAckConfirmed: boolean): GuardResult {
+export function guardPause(order: PauseAdSetOrder, live: LiveFacts, sourceReason: string | null): GuardResult {
   const checks = [
-    pauseOnlyCheck(),
+    { label: '只暂停', state: 'green' as const, reason: '不会开启，也不会改预算' },
+    sourceCheck(sourceReason),
     ownershipCheck(order, live),
-    emptyCheck(order, live, emptyAckConfirmed),
-    basisCheck(order),
-    metricCheck(order),
-    ...successorChecks(order, live),
+    activeCheck(live),
+    emptyCheck(order, live),
   ]
-  const empty = checks.find((check) => check.label === '系列会空')
-  const needsEmptyAck = empty?.state === 'red'
-  return { checks, block: confirmBlockReason(checks), needsEmptyAck }
+  return { checks, block: confirmBlockReason(checks) }
 }
 
-function pauseOnlyCheck(): HardCheck {
-  return { label: '只暂停', state: 'green', reason: '不会开启，也不会改预算' }
+function sourceCheck(reason: string | null): HardCheck {
+  if (reason) return { label: '来源仍批准', state: 'red', reason }
+  return { label: '来源仍批准', state: 'green', reason: '处方、目标和计划都还是当时那一版' }
 }
 
-function ownershipCheck(order: PauseOrder, live: LiveFacts): HardCheck {
-  if (!live.registeredAccountIds || !live.object) {
-    return { label: '归属', state: 'unread', reason: '账户或这条广告读不到' }
+function ownershipCheck(order: PauseAdSetOrder, live: LiveFacts): HardCheck {
+  if (!live.registeredAccountIds || !live.target) {
+    return { label: '仍属于这个客户', state: 'unread', reason: '账户或广告组读不到' }
   }
-  const knownOrder = listed(live.registeredAccountIds, order.adAccountId)
-  const knownObject = listed(live.registeredAccountIds, live.object.accountId)
-  const sameAccount = sameAcct(live.object.accountId, order.adAccountId)
-  const sameCampaign = live.object.campaignId === order.campaignId
-  const sameSet = !order.adsetId || live.object.adsetId === order.adsetId
-  if (!knownOrder || !knownObject || !sameAccount || !sameCampaign || !sameSet) {
-    return { label: '归属', state: 'red', reason: '不属于这个客户的已知账户和系列' }
+  const known = listed(live.registeredAccountIds, order.adAccountId)
+    && listed(live.registeredAccountIds, live.target.accountId ?? '')
+    && sameAcct(live.target.accountId ?? '', order.adAccountId)
+  if (!known) return { label: '仍属于这个客户', state: 'red', reason: '广告组不在这个客户的账户里' }
+  return { label: '仍属于这个客户', state: 'green', reason: '' }
+}
+
+function activeCheck(live: LiveFacts): HardCheck {
+  if (!live.target) return { label: '广告组仍在投', state: 'unread', reason: '广告组状态读不到' }
+  if (live.target.status !== 'ACTIVE') {
+    return { label: '广告组仍在投', state: 'red', reason: '广告组已经不是在投，没有去暂停' }
   }
-  return { label: '归属', state: 'green', reason: '' }
+  return { label: '广告组仍在投', state: 'green', reason: '' }
 }
 
-function emptyCheck(order: PauseOrder, live: LiveFacts, acked: boolean): HardCheck {
-  const remaining = remainingActive(order, live.campaignAds)
-  if (remaining === null) return { label: '系列会空', state: 'unread', reason: '系列里还有哪些在投广告，现在读不到' }
-  if (remaining > 0) return { label: '系列会空', state: 'green', reason: '暂停后系列里还有在投广告' }
-  if (acked) return { label: '系列会空', state: 'green', reason: '已单独确认：暂停后这个系列没有在投广告' }
-  return { label: '系列会空', state: 'red', reason: '暂停后这个系列没有在投广告，要单独确认' }
+function emptyCheck(order: PauseAdSetOrder, live: LiveFacts): HardCheck {
+  const remaining = remainingActive(order.adsetId, live.campaignAdSets)
+  if (remaining === null) return { label: '系列不会空', state: 'unread', reason: '系列里还有哪些在投广告组，现在读不到' }
+  if (remaining === 'missing') return { label: '系列不会空', state: 'red', reason: '这个广告组不在该系列里' }
+  if (remaining < 1) return { label: '系列不会空', state: 'red', reason: '暂停后这个系列就没有在投广告组了' }
+  return { label: '系列不会空', state: 'green', reason: '暂停后系列里还有在投广告组' }
 }
 
-function basisCheck(order: PauseOrder): HardCheck {
-  return { label: '改动依据', state: 'green', reason: clip(order.basis) }
-}
-
-function metricCheck(order: PauseOrder): HardCheck {
-  return { label: '预期指标', state: 'green', reason: order.expectedMetric }
-}
-
-function successorChecks(order: PauseOrder, live: LiveFacts): HardCheck[] {
-  if (!order.successorAdId) return []
-  if (pauseAlsoStopsSuccessor(order, live)) return [successorStopped()]
-  if (!live.successor.readable) return [successorUnread()]
-  const gap = successorGap(order, live)
-  if (gap) return [gap]
-  if (live.successor.effectiveStatus !== 'ACTIVE') {
-    return [{ label: SUCCESSOR_LABEL, state: 'red', reason: '新广告还没回读到在投，先不能停旧的' }]
-  }
-  return [{ label: SUCCESSOR_LABEL, state: 'green', reason: '新广告已回读为在投' }]
-}
-
-function successorUnread(): HardCheck {
-  return { label: SUCCESSOR_LABEL, state: 'unread', reason: '新广告的状态读不到，先不能停旧的' }
-}
-
-function successorGap(order: PauseOrder, live: LiveFacts): HardCheck | null {
-  const next = live.successor
-  if (!next.accountId || !next.campaignId || !next.adsetId || !next.effectiveStatus) {
-    return { label: SUCCESSOR_LABEL, state: 'red', reason: '新广告的账户、系列、广告组或状态不全，先不能停旧的' }
-  }
-  if (successorPlaced(order, live)) return null
-  return { label: SUCCESSOR_LABEL, state: 'red', reason: '新广告不在同一个已登记账户和系列里，先不能停旧的' }
-}
-
-function successorStopped(): HardCheck {
-  return { label: SUCCESSOR_LABEL, state: 'red', reason: '新广告会被这次暂停一起停掉，先不能停旧的' }
-}
-
-/** The successor is the ad being paused, or it sits in the ad set being paused. */
-function pauseAlsoStopsSuccessor(order: PauseOrder, live: LiveFacts): boolean {
-  if (order.level === 'ad' && order.successorAdId === order.adId) return true
-  return order.level === 'ad_set' && live.successor.adsetId === order.adsetId
-}
-
-/** Same registered account and campaign, and not covered by this pause. */
-function successorPlaced(order: PauseOrder, live: LiveFacts): boolean {
-  const next = live.successor
-  if (!live.registeredAccountIds || !next.accountId || !next.campaignId) return false
-  if (pauseAlsoStopsSuccessor(order, live)) return false
-  const known = listed(live.registeredAccountIds, next.accountId)
-    && listed(live.registeredAccountIds, order.adAccountId)
-    && sameAcct(next.accountId, order.adAccountId)
-  return known && next.campaignId === order.campaignId
-}
-
-/** Active ads that would still be running. null = could not tell. */
-export function remainingActive(order: PauseOrder, ads: readonly LiveAd[] | null): number | null {
-  if (!ads) return null
-  let stay = 0
-  for (const ad of ads) {
-    if (!ad.effectiveStatus) return null
-    if (ad.effectiveStatus !== 'ACTIVE') continue
-    if (order.level === 'ad' && ad.id === order.adId) continue
-    if (order.level === 'ad_set' && ad.adsetId === order.adsetId) continue
-    stay += 1
-  }
-  return stay
+function remainingActive(adsetId: string, rows: readonly LiveAdSet[] | null): number | 'missing' | null {
+  if (!rows) return null
+  if (!rows.some((row) => row.id === adsetId)) return 'missing'
+  if (rows.some((row) => !row.status)) return null
+  const active = rows.filter((row) => row.status === 'ACTIVE')
+  const includesTarget = active.some((row) => row.id === adsetId)
+  return includesTarget ? active.length - 1 : active.length
 }
 
 function listed(ids: readonly string[], accountId: string): boolean {
-  return ids.some((id) => sameAcct(id, accountId))
+  return accountId.length > 0 && ids.some((id) => sameAcct(id, accountId))
 }
 
 function sameAcct(left: string, right: string): boolean {
-  return strip(left) === strip(right)
+  return strip(left) === strip(right) && strip(left).length > 0
 }
 
 function strip(id: string): string {
   return id.startsWith('act_') ? id.slice(4) : id
-}
-
-function clip(value: string): string {
-  return value.trim().slice(0, 80)
 }
