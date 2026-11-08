@@ -13,6 +13,7 @@ import {
   loadInsightSlices,
   loadLatestSnapshotsForDelivery,
   matchEntities,
+  MATCH_ENTITIES_LIMIT,
   type InvestigationDataContext,
 } from './load'
 import { opaqueEntityRef, type EntityLevel } from './refs'
@@ -106,12 +107,23 @@ async function getCtx(supabase: SupabaseClient, clientId: string): Promise<Inves
   return buildInvestigationContext(supabase, clientId)
 }
 
-function baseEvidence(ctx: InvestigationDataContext, dateRange: Record<string, string>, metrics: string[]) {
+function baseEvidence(
+  ctx: InvestigationDataContext,
+  dateRange: Record<string, string>,
+  metrics: string[],
+  extraCouldNotRead: string[] = [],
+) {
   return {
     metrics_included: metrics,
     date_range: dateRange,
     data_freshness: ctx.freshness,
-    could_not_read: [...ctx.couldNotRead],
+    could_not_read: [...ctx.couldNotRead, ...extraCouldNotRead],
+  }
+}
+
+function appendTruncationNote(extra: string[], total: number, limit: number, label: string) {
+  if (total > limit) {
+    extra.push(`${label}：共 ${total} 条，仅返回前 ${limit} 条（其余未展示）`)
   }
 }
 
@@ -163,34 +175,36 @@ export function buildAdsInvestigationTools(ctx: AdsInvestigationToolContext): {
 
       const inv = await getCtx(ctx.supabase, ctx.clientId)
       const level = parseLevel(o.level)
-      const entities = matchEntities(inv, {
+      const matched = matchEntities(inv, {
         level,
         name_contains: typeof o.name_contains === 'string' ? o.name_contains : undefined,
         entity_ref: typeof o.entity_ref === 'string' ? o.entity_ref : undefined,
       })
+      const extraCould: string[] = []
+      appendTruncationNote(extraCould, matched.totalMatched, MATCH_ENTITIES_LIMIT, '指标查询对象')
 
-      if (entities.length === 0) {
+      if (matched.entities.length === 0) {
+        extraCould.push('没有匹配的广告对象（不是「没有问题」）')
         return jsonResult({
           entities: [],
-          evidence: baseEvidence(inv, { start, end }, METRIC_LIST),
-          could_not_read: [...inv.couldNotRead, '没有匹配的广告对象（不是「没有问题」）'],
+          evidence: baseEvidence(inv, { start, end }, METRIC_LIST, extraCould),
         })
       }
 
       const results = []
-      const extraCould: string[] = []
-      for (const ent of entities) {
-        results.push(await metricsForEntity(ctx.supabase, ctx.clientId, inv, ent, start, end))
-        const last = results[results.length - 1] as { could_not_read?: string[] }
-        if (last.could_not_read?.length) extraCould.push(...last.could_not_read)
+      for (const ent of matched.entities) {
+        const row = await metricsForEntity(ctx.supabase, ctx.clientId, inv, ent, start, end)
+        results.push(row)
+        if ('error' in row) {
+          extraCould.push(`对象 ${ent.ref}：${row.error}`)
+        } else if (row.could_not_read?.length) {
+          extraCould.push(...row.could_not_read)
+        }
       }
 
       return jsonResult({
         entities: results,
-        evidence: {
-          ...baseEvidence(inv, { start, end }, METRIC_LIST),
-          could_not_read: [...inv.couldNotRead, ...extraCould],
-        },
+        evidence: baseEvidence(inv, { start, end }, METRIC_LIST, extraCould),
       })
     },
 
@@ -220,13 +234,16 @@ export function buildAdsInvestigationTools(ctx: AdsInvestigationToolContext): {
 
       const inv = await getCtx(ctx.supabase, ctx.clientId)
       const level = parseLevel(o.level)
-      const entities = matchEntities(inv, {
+      const matched = matchEntities(inv, {
         level,
         name_contains: typeof o.name_contains === 'string' ? o.name_contains : undefined,
         entity_ref: typeof o.entity_ref === 'string' ? o.entity_ref : undefined,
       })
+      const extraCould: string[] = []
+      appendTruncationNote(extraCould, matched.totalMatched, MATCH_ENTITIES_LIMIT, '区间对比对象')
 
-      if (entities.length === 0) {
+      if (matched.entities.length === 0) {
+        extraCould.push('没有匹配的广告对象（不是「没有问题」）')
         return jsonResult({
           comparisons: [],
           evidence: baseEvidence(inv, {
@@ -234,14 +251,12 @@ export function buildAdsInvestigationTools(ctx: AdsInvestigationToolContext): {
             period_a_end: aEnd,
             period_b_start: bStart,
             period_b_end: bEnd,
-          }, METRIC_LIST),
-          could_not_read: [...inv.couldNotRead, '没有匹配的广告对象（不是「没有问题」）'],
+          }, METRIC_LIST, extraCould),
         })
       }
 
       const comparisons = []
-      const extraCould: string[] = []
-      for (const ent of entities) {
+      for (const ent of matched.entities) {
         const [ra, rb] = await Promise.all([
           metricsForEntity(ctx.supabase, ctx.clientId, inv, ent, aStart, aEnd),
           metricsForEntity(ctx.supabase, ctx.clientId, inv, ent, bStart, bEnd),
@@ -256,23 +271,21 @@ export function buildAdsInvestigationTools(ctx: AdsInvestigationToolContext): {
             deltas: deltaMetrics(ra.metrics, rb.metrics),
           })
         }
+        if ('error' in ra) extraCould.push(`对象 ${ent.ref}（区间 A）：${ra.error}`)
+        if ('error' in rb) extraCould.push(`对象 ${ent.ref}（区间 B）：${rb.error}`)
         for (const r of [ra, rb]) {
-          const c = (r as { could_not_read?: string[] }).could_not_read
-          if (c?.length) extraCould.push(...c)
+          if ('could_not_read' in r && r.could_not_read?.length) extraCould.push(...r.could_not_read)
         }
       }
 
       return jsonResult({
         comparisons,
-        evidence: {
-          ...baseEvidence(inv, {
-            period_a_start: aStart,
-            period_a_end: aEnd,
-            period_b_start: bStart,
-            period_b_end: bEnd,
-          }, METRIC_LIST),
-          could_not_read: [...inv.couldNotRead, ...extraCould],
-        },
+        evidence: baseEvidence(inv, {
+          period_a_start: aStart,
+          period_a_end: aEnd,
+          period_b_start: bStart,
+          period_b_end: bEnd,
+        }, METRIC_LIST, extraCould),
       })
     },
 
@@ -312,14 +325,15 @@ export function buildAdsInvestigationTools(ctx: AdsInvestigationToolContext): {
         }
       }
 
+      const deliveryLimit = 40
+      appendTruncationNote(extraCould, allIssues.length, deliveryLimit, '投放问题列表')
       if (extraCould.length && allIssues.length === 0) {
         extraCould.push('未能完整读取快照时，不能当作「没有投放问题」')
       }
 
       return jsonResult({
-        issues: allIssues.slice(0, 40),
-        evidence: baseEvidence(inv, { as_of: 'latest_snapshot' }, ['delivery_status']),
-        could_not_read: [...inv.couldNotRead, ...extraCould],
+        issues: allIssues.slice(0, deliveryLimit),
+        evidence: baseEvidence(inv, { as_of: 'latest_snapshot' }, ['delivery_status'], extraCould),
       })
     },
 
@@ -331,15 +345,22 @@ export function buildAdsInvestigationTools(ctx: AdsInvestigationToolContext): {
       if (typeof end === 'object') return jsonResult({ error: end.error })
 
       const inv = await getCtx(ctx.supabase, ctx.clientId)
-      const entities = matchEntities(inv, {
+      const matched = matchEntities(inv, {
         level: 'ad',
         name_contains: typeof o.name_contains === 'string' ? o.name_contains : undefined,
         entity_ref: typeof o.entity_ref === 'string' ? o.entity_ref : undefined,
       })
+      const funnelLimit = 10
+      const extraCould: string[] = []
+      appendTruncationNote(extraCould, matched.totalMatched, MATCH_ENTITIES_LIMIT, '漏斗查询匹配')
+      appendTruncationNote(extraCould, matched.entities.length, funnelLimit, '漏斗结果')
+
+      if (matched.entities.length === 0) {
+        extraCould.push('没有匹配的广告对象（不是「没有问题」）')
+      }
 
       const funnels = []
-      const extraCould: string[] = []
-      for (const ent of entities.slice(0, 10)) {
+      for (const ent of matched.entities.slice(0, funnelLimit)) {
         const block = await metricsForEntity(ctx.supabase, ctx.clientId, inv, ent, start, end)
         if ('metrics' in block) {
           funnels.push({
@@ -357,16 +378,13 @@ export function buildAdsInvestigationTools(ctx: AdsInvestigationToolContext): {
             },
           })
         }
-        const c = (block as { could_not_read?: string[] }).could_not_read
-        if (c?.length) extraCould.push(...c)
+        if ('error' in block) extraCould.push(`对象 ${ent.ref}：${block.error}`)
+        else if (block.could_not_read?.length) extraCould.push(...block.could_not_read)
       }
 
       return jsonResult({
         ads: funnels,
-        evidence: {
-          ...baseEvidence(inv, { start, end }, FUNNEL_METRICS),
-          could_not_read: [...inv.couldNotRead, ...extraCould],
-        },
+        evidence: baseEvidence(inv, { start, end }, FUNNEL_METRICS, extraCould),
       })
     },
   }

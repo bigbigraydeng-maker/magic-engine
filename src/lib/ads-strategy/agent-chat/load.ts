@@ -3,8 +3,12 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { getClientAdAccounts } from '@/lib/meta/client-ad-accounts'
+import {
+  findSharedAdAccounts,
+  type ClientAdAccount,
+} from '@/lib/meta/client-ad-accounts'
 import { loadOutcomeConfig } from '@/lib/ads-strategy/portfolio/outcome-config'
+import { supabaseAdmin } from '@/lib/supabase'
 import { mergeFreshness, emptyFreshness, type DataFreshness } from './evidence'
 import { opaqueAccountRef, opaqueEntityRef, type EntityLevel } from './refs'
 import type { InsightSlice } from './aggregate'
@@ -66,16 +70,107 @@ function parseActions(v: unknown): InsightSlice['actions'] {
   return out.length > 0 ? out : null
 }
 
+async function loadClientAdAccounts(
+  clientId: string,
+): Promise<{ accounts: ClientAdAccount[]; errors: string[] }> {
+  const errors: string[] = []
+  const { data, error } = await supabaseAdmin
+    .from('client_meta_ad_accounts')
+    .select('ad_account_id, label, is_primary')
+    .eq('client_id', clientId)
+    .order('is_primary', { ascending: false })
+
+  if (error) {
+    errors.push(`客户广告账户列表读失败（${error.message}）`)
+    return { accounts: [], errors }
+  }
+  if (data && data.length > 0) {
+    return {
+      accounts: (data as Array<{ ad_account_id: string; label: string | null; is_primary: boolean }>).map(row => ({
+        adAccountId: row.ad_account_id,
+        label: row.label,
+        isPrimary: row.is_primary,
+      })),
+      errors,
+    }
+  }
+
+  const { data: client, error: clientError } = await supabaseAdmin
+    .from('clients')
+    .select('meta_ad_account_id')
+    .eq('id', clientId)
+    .maybeSingle()
+
+  if (clientError) {
+    errors.push(`客户主广告账户读失败（${clientError.message}）`)
+    return { accounts: [], errors }
+  }
+  const primary = (client as { meta_ad_account_id?: string | null } | null)?.meta_ad_account_id
+  return {
+    accounts: primary ? [{ adAccountId: primary, label: '主账户', isPrimary: true }] : [],
+    errors,
+  }
+}
+
+async function loadHiddenAdAccounts(clientId: string): Promise<Set<string>> {
+  const { data, error } = await supabaseAdmin.from('client_meta_ad_accounts')
+    .select('ad_account_id, hidden_from_ad_health')
+    .eq('client_id', clientId)
+  if (error) {
+    console.warn(`[ads-agent-chat] hidden account read failed, treating none as hidden: ${error.message}`)
+    return new Set()
+  }
+  const hidden = new Set<string>()
+  for (const row of (data ?? []) as Array<{ ad_account_id: string | null; hidden_from_ad_health: boolean | null }>) {
+    if (!row.hidden_from_ad_health || !row.ad_account_id) continue
+    hidden.add(row.ad_account_id.replace(/^act_/, ''))
+  }
+  return hidden
+}
+
+function normalizeAccountId(id: string): string {
+  return id.replace(/^act_/, '')
+}
+
 export async function buildInvestigationContext(
   supabase: SupabaseClient,
   clientId: string,
 ): Promise<InvestigationDataContext> {
   const couldNotRead: string[] = []
-  const accountsRaw = await getClientAdAccounts(clientId)
-  const accounts: AccountCatalogEntry[] = accountsRaw.map((a, i) => ({
-    ref: opaqueAccountRef(a.adAccountId, i + 1),
-    label: a.label ?? (a.isPrimary ? 'primary' : null),
-  }))
+  const { accounts: accountsRegistered, errors: accountLoadErrors } = await loadClientAdAccounts(clientId)
+  couldNotRead.push(...accountLoadErrors)
+
+  const { shared, error: sharedLookupError } = await findSharedAdAccounts(
+    clientId,
+    accountsRegistered.map(a => a.adAccountId),
+  )
+  if (sharedLookupError) {
+    couldNotRead.push(`共用账户查询失败（${sharedLookupError}），已按 fail-closed 跳过全部账户`)
+  }
+  const hidden = await loadHiddenAdAccounts(clientId)
+
+  const accountsRaw: ClientAdAccount[] = []
+  const accounts: AccountCatalogEntry[] = []
+  for (let i = 0; i < accountsRegistered.length; i++) {
+    const a = accountsRegistered[i]
+    const key = normalizeAccountId(a.adAccountId)
+    const sourceIndex = i + 1
+    if (sharedLookupError || shared.has(key)) {
+      if (!sharedLookupError) {
+        couldNotRead.push(`账户索引 ${sourceIndex} 与其他客户共用，已跳过`)
+      }
+      continue
+    }
+    if (hidden.has(key)) {
+      couldNotRead.push(`账户索引 ${sourceIndex} 已在广告健康页隐藏，已跳过`)
+      continue
+    }
+    accountsRaw.push(a)
+    accounts.push({
+      ref: opaqueAccountRef(a.adAccountId, accountsRaw.length),
+      label: a.label ?? (a.isPrimary ? 'primary' : null),
+    })
+  }
   const accountIdByRef = new Map(accounts.map((a, i) => [a.ref, accountsRaw[i].adAccountId]))
 
   let freshness = emptyFreshness()
@@ -174,19 +269,29 @@ export async function buildInvestigationContext(
   }
 }
 
+export const MATCH_ENTITIES_LIMIT = 25
+
+export interface MatchEntitiesResult {
+  entities: EntityCatalogEntry[]
+  totalMatched: number
+}
+
 export function matchEntities(
   ctx: InvestigationDataContext,
   opts: { level?: EntityLevel; name_contains?: string; entity_ref?: string },
-): EntityCatalogEntry[] {
+): MatchEntitiesResult {
   if (opts.entity_ref) {
     const hit = ctx.entityByRef.get(opts.entity_ref)
-    if (!hit) return []
-    return [{
-      ref: opts.entity_ref,
-      level: hit.level,
-      name: hit.name,
-      account_ref: hit.accountRef,
-    }]
+    if (!hit) return { entities: [], totalMatched: 0 }
+    return {
+      entities: [{
+        ref: opts.entity_ref,
+        level: hit.level,
+        name: hit.name,
+        account_ref: hit.accountRef,
+      }],
+      totalMatched: 1,
+    }
   }
 
   const needle = opts.name_contains?.trim().toLowerCase()
@@ -198,7 +303,8 @@ export function matchEntities(
     out.push({ ref, level: e.level, name: e.name, account_ref: e.accountRef })
   }
   out.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
-  return out.slice(0, 25)
+  const totalMatched = out.length
+  return { entities: out.slice(0, MATCH_ENTITIES_LIMIT), totalMatched }
 }
 
 export async function loadInsightSlices(

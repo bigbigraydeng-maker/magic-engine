@@ -34,3 +34,8 @@ risk: B
 
 - `src/lib/ads-strategy/agent-chat/*`
 - 接线：`src/lib/luban/project-tools.ts`（`buildProjectLubanToolsFull`）、`project-agent.ts`、`project-prompts.ts`
+
+## 复审修补（PR #3657，B1/B2）
+
+- **B1**：`buildInvestigationContext` 经 `findSharedAdAccounts` 跳过共用账户；查询失败 fail-closed；与诊断一致跳过 `hidden_from_ad_health`；账户列表读失败写入 `could_not_read`。
+- **B2**：工具输出里 `could_not_read` 统一进 `evidence`；匹配/截断/指标读失败不再静默；漏斗零匹配有提示。
