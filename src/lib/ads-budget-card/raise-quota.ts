@@ -53,10 +53,13 @@ export async function cardRaiseCapBlock(
   before: number,
   after: number,
   ctx: RaiseWriteContext,
+  clientCapCents: number,
 ): Promise<string | null> {
   if (after <= before) return null
   if (!ctx.snapshottedAt) return '执行前的预算快照读不到，没有改。'
-  const loaded = await readKernelPreBudget(sb, clientId, ctx.accountId, ctx.level, ctx.entityId, before, ctx.now ?? new Date())
+  const loaded = await readKernelPreBudget(
+    sb, clientId, ctx.accountId, ctx.level, ctx.entityId, before, ctx.now ?? new Date(), clientCapCents,
+  )
   if (!loaded.ok) return loaded.reason
   const sibling = await unreflectedRaises(sb, clientId, ctx, loaded.budget)
   if (!sibling.ok) return sibling.reason

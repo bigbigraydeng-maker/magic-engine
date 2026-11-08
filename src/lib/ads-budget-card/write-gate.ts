@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { readPlanDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { stepProblem } from './guard'
 import { loadApprovedLock, sameLock, type PrescriptionLock } from './prescription-lock'
 import { cardRaiseCapBlock, type RaiseWriteContext } from './raise-quota'
@@ -46,7 +47,10 @@ export async function budgetCardWriteBlock(
   if (step) return step
   if (afterCents <= currentCents) return null
   if (!raise) return '执行前的预算快照读不到，没有改。'
-  return cardRaiseCapBlock(sb, clientId, currentCents, afterCents, raise)
+  if (!saved.planId) return '已批准的计划里还没有每天广告总上限，没有改。'
+  const cap = await readPlanDailyTotalCap(sb, clientId, saved.planId)
+  if (!cap.ok) return cap.reason
+  return cardRaiseCapBlock(sb, clientId, currentCents, afterCents, raise, cap.cents)
 }
 
 function savedLock(input: Readonly<Record<string, unknown>>): PrescriptionLock | 'absent' | 'invalid' {
@@ -59,7 +63,7 @@ function savedLock(input: Readonly<Record<string, unknown>>): PrescriptionLock |
   const planId = input.card_plan_id === undefined || input.card_plan_id === null ? null : text(input.card_plan_id)
   if (!prescriptionId || !goalId || !planHash || !approvedOn || planId === '') return 'invalid'
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 1) return 'invalid'
-  return { prescriptionId, version, goalId, planId, planHash, approvedOn }
+  return { prescriptionId, version, goalId, planId: planId ?? '', planHash, approvedOn }
 }
 
 function text(value: unknown): string | null {

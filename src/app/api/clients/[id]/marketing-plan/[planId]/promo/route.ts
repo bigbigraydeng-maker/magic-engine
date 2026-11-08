@@ -17,6 +17,7 @@ import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-presc
 import { planLinkedGoalId } from '@/lib/marketing-plan/promo/plan-pick'
 import { loadLiveAds } from '@/lib/marketing-plan/promo/live-ads'
 import { loadPromoOptions } from '@/lib/marketing-plan/promo/options'
+import { dailyTotalCapCents } from '@/lib/marketing-plan/promo/daily-total-cap'
 import { allAdsSteps, type PromoSpec, type PromoValidationIssue } from '@/lib/marketing-plan/promo/spec'
 import { validatePlanDraft } from '@/lib/marketing-plan/promo/plan-draft-validate'
 import { isPlanContentLocked, PLAN_CONTENT_LOCKED_MESSAGE } from '@/lib/marketing-plan/plan-guard'
@@ -121,12 +122,14 @@ export async function PUT(req: NextRequest, ctx: Ctx) {
       return NextResponse.json({ success: false, error: '目标不存在或不属于这个客户' }, { status: 400 })
     }
 
-    // 广告账户归属 + 确定的超限（读不到只是未核实，不在这里拒绝）
+    // 广告账户归属 + 确定的超限。客户每天总上限只认计划上填写的数。
+    // 草稿可以先不填；没填时批准会被挡住，这里不拿旧客户总闸或各步骤预算来顶上。
     if (allAdsSteps(spec).length > 0) {
+      const planCap = dailyTotalCapCents({ promo: spec })
       const facts = await loadPromoFacts(ctx.params.id, spec, plan.generation_meta?.promo_checks ?? [])
       const verdict = validatePlanDraft(body?.promo, {
         accounts: facts.gate.accounts,
-        clientCapCents: facts.gate.config?.daily_budget_cap_cents ?? null,
+        clientCapCents: planCap,
       })
       if (!verdict.ok && verdict.code === 'invalid_spec') return shapeError(verdict.issues)
       if (!verdict.ok) return budgetError(verdict.problems)

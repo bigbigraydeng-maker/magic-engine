@@ -201,6 +201,12 @@ export const PromoSpecSchema = z.object({
   schema: z.literal('promo_v1'),
   /** 目标真相源：goals.id，必须属于同一个客户（保存时服务端校验）。 */
   goal_id: z.string().min(1),
+  /**
+   * 这位客户一天的广告总上限，账户币种的「分」。
+   * 没有默认值。旧计划没写这个键时，解析结果里也不留下这个键，
+   * 否则已批准计划的内容指纹会变。各广告步骤的日预算加总不是这个数。
+   */
+  daily_total_cap_cents: z.number().int().positive().optional(),
   phases: z.array(phase).min(1),
   /** 销售承接就绪，计划级。 */
   sales_handover: salesHandover.optional(),
@@ -242,8 +248,17 @@ export function parsePromoSpec(raw: unknown): ParsePromoResult {
       issues: parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })),
     }
   }
-  const issues = crossFieldIssues(parsed.data)
-  return issues.length > 0 ? { ok: false, issues } : { ok: true, spec: parsed.data }
+  const spec = withoutUnsetCap(parsed.data)
+  const issues = crossFieldIssues(spec)
+  return issues.length > 0 ? { ok: false, issues } : { ok: true, spec }
+}
+
+/** A missing cap must stay absent. An undefined key becomes null in the content hash. */
+function withoutUnsetCap(spec: PromoSpec): PromoSpec {
+  if (spec.daily_total_cap_cents !== undefined) return spec
+  const next: Record<string, unknown> = { ...spec }
+  delete next.daily_total_cap_cents
+  return next as PromoSpec
 }
 
 function crossFieldIssues(spec: PromoSpec): PromoValidationIssue[] {
