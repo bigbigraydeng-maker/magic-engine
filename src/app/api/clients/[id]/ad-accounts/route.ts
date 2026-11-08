@@ -1,8 +1,9 @@
 /**
  * 账户级日上限清单 —— 只读（v2.1 §3.9 / §11.11）。
  *
- * 这里只负责"把每个账户现在填了多少、客户总闸是多少、要不要出现在广告健康页"
- * 读出来给面板显示。日上限的写入仍然只走 `[accountId]/daily-cap`；
+ * 这里只负责"把每个账户现在填了多少、已批准计划上的每天总上限是多少、要不要出现在广告健康页"
+ * 读出来给面板显示。旧的客户总闸只作为 legacy_client_total_cap_cents 提示，不参与判断。
+ * 日上限的写入仍然只走 `[accountId]/daily-cap`；
  * 「在广告健康页显示」走 `[accountId]/visibility`。
  *
  * ── 界面不许自己算校验 ────────────────────────────────────────────────
@@ -18,6 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 
 interface AccountCapRow {
   ad_account_id: string
@@ -36,12 +38,13 @@ export async function GET(
     return NextResponse.json({ error: admin.error }, { status: admin.status })
   }
 
-  const [{ data: accountRows, error: accountErr }, { data: cfg, error: cfgErr }] = await Promise.all([
+  const [{ data: accountRows, error: accountErr }, planCap, legacy] = await Promise.all([
     supabaseAdmin
       .from('client_meta_ad_accounts')
       .select('ad_account_id, daily_budget_cap_cents, hidden_from_ad_health')
       .eq('client_id', clientId)
       .order('ad_account_id', { ascending: true }),
+    readClientDailyTotalCap(supabaseAdmin, clientId),
     supabaseAdmin
       .from('ad_strategy_configs')
       .select('daily_budget_cap_cents')
@@ -51,8 +54,8 @@ export async function GET(
   if (accountErr) {
     return NextResponse.json({ error: `查账户上限失败：${accountErr.message}` }, { status: 500 })
   }
-  if (cfgErr) {
-    return NextResponse.json({ error: `查客户总闸失败：${cfgErr.message}` }, { status: 500 })
+  if (planCap.state === 'unreadable') {
+    return NextResponse.json({ error: planCap.reason }, { status: 500 })
   }
 
   const accounts: AccountCapRow[] = ((accountRows ?? []) as AccountCapRow[]).map((r) => ({
@@ -60,7 +63,13 @@ export async function GET(
     daily_budget_cap_cents: typeof r.daily_budget_cap_cents === 'number' ? r.daily_budget_cap_cents : null,
     hidden_from_ad_health: r.hidden_from_ad_health === true,
   }))
-  const clientTotalCapCents = typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null
+  const legacyCents = legacy.error ? null : legacy.data?.daily_budget_cap_cents
+  const legacyClientTotalCapCents = typeof legacyCents === 'number' && legacyCents > 0 ? legacyCents : null
 
-  return NextResponse.json({ accounts, client_total_cap_cents: clientTotalCapCents })
+  return NextResponse.json({
+    accounts,
+    client_total_cap_cents: planCap.state === 'set' ? planCap.cents : null,
+    client_total_cap_reason: planCap.state === 'missing' ? planCap.reason : null,
+    legacy_client_total_cap_cents: legacyClientTotalCapCents,
+  })
 }

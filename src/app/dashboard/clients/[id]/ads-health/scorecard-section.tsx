@@ -33,7 +33,7 @@ export function headroomText(h: BudgetHeadroom, readAtIso: string | null): Headr
   const lines: string[] = []
   let tone: HeadroomText['tone'] = 'neutral'
   if (h.cap === null || h.headroom === null) {
-    lines.push(`在投每天预算合计 ${total}（这个客户还没设总上限）`)
+    lines.push(`在投每天预算合计 ${total}（在广告计划里填上每天的广告总上限。）`)
   } else if (h.level === 'over') {
     tone = 'red'
     lines.push(`在投每天预算合计 ${total}，已经超过客户总上限 ${money(h.currency, h.cap)}`)

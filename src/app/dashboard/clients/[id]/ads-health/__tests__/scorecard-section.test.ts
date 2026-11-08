@@ -26,7 +26,7 @@ describe('headroomText', () => {
 
   it('没设总上限：不编上限，直说没设', () => {
     const t = headroomText(h({ cap: null, headroom: null, level: 'no_cap' }), null)
-    expect(t.lines[0]).toContain('还没设总上限')
+    expect(t.lines[0]).toContain('在广告计划里填上每天的广告总上限')
   })
 
   it('有读不到预算的在投组：写出个数，说明没算进合计', () => {

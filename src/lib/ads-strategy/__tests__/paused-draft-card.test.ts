@@ -687,7 +687,8 @@ describe('paused draft helpers', () => {
         label: '主账户',
         daily_budget_cap_cents: 10000,
       }],
-      ad_strategy_configs: [{ client_id: CLIENT_A, daily_budget_cap_cents: 20000 }],
+      ad_strategy_configs: [{ client_id: CLIENT_A, daily_budget_cap_cents: 1 }],
+      marketing_plans: [{ client_id: CLIENT_A, status: 'approved', plan_data: { promo: { daily_total_cap_cents: 20000 } } }],
       ad_entity_snapshots: [{
         client_id: CLIENT_A,
         ad_account_id: 'act_test',
