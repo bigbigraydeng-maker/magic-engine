@@ -10,10 +10,14 @@ import type { BudgetFacts, OtherAccountFact } from '@/lib/ads-tracking-preflight
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 
 const order: BudgetOrder = {
+  prescriptionId: '11111111-1111-4111-8111-111111111111',
   adsetId: '111',
   adAccountId: 'act_111111',
   newDailyBudgetCents: 120,
   name: '春季组',
+  expectedMetric: 'ads.account.cpa',
+  direction: 'down',
+  observationWindowDays: 7,
 }
 
 function live(over: Partial<BudgetSnapshot> = {}): BudgetSnapshot {
@@ -94,8 +98,17 @@ describe('ad set budget step', () => {
     expect(guardBudget(order, live({
       status: 'PAUSED', countedInLive: false, accountCapCents: 900,
     }), null).block).toBeNull()
+    expect(guardBudget(order, live({
+      status: 'PAUSED', countedInLive: false, accountLiveCents: 400, accountCapCents: 500,
+    }), null).block).toMatch(/这个广告账户的每日上限/)
     expect(guardBudget(order, live({ status: 'DELETED' }), null).block).toMatch(/不是在投或暂停/)
     expect(guardBudget(order, live({ accountId: '999999' }), null).block).toMatch(/不在这位客户/)
+  })
+
+  it('allows a reduction that stays over the cap when the total does not rise', () => {
+    const down = { ...order, newDailyBudgetCents: 80 }
+    const over = live({ accountLiveCents: 600, accountCapCents: 500, clientCapCents: 600, otherAccountsLiveCents: 0 })
+    expect(guardBudget(down, over, null).block).toBeNull()
   })
 
   it('says the change in plain language and keeps one ad set per card', () => {
@@ -103,10 +116,16 @@ describe('ad set budget step', () => {
     expect(pausedDraftClickUrl('client', 'run', budgetWhat('春季组', 100, 120))).toContain('/budget-cards/run')
     expect(() => parseBudgetRequest({ adsetIds: ['111', '222'] })).toThrow(ConfirmationCardError)
     expect(parseBudgetRequest({
+      prescriptionId: order.prescriptionId,
       adsetId: '111',
       adAccountId: 'act_111111',
       newDailyBudgetCents: 120,
+      expectedMetric: 'ads.account.cpa',
+      direction: 'down',
+      observationWindowDays: 7,
     }).adsetId).toBe('111')
+    expect(() => parseBudgetRequest({ ...order, observationWindowDays: 29 })).toThrow(ConfirmationCardError)
+    expect(() => parseBudgetRequest({ ...order, expectedMetric: 'not.a.metric' })).toThrow(ConfirmationCardError)
   })
 
   it('adds other-account live budgets from the existing budget facts', () => {

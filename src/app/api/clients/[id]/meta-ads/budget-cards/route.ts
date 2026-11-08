@@ -1,5 +1,6 @@
 /**
- * Ask for one ad set daily budget card. Does not change the budget by itself.
+ * Ask for one budget-step card from an approved prescription.
+ * Issuing the card does not change the budget.
  */
 
 import { NextResponse } from 'next/server'
@@ -7,11 +8,12 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { publicError } from '@/lib/confirmation-card/http'
 import { issueBudgetCard } from '@/lib/ads-budget-card/flow'
 import { metaBudgetRuntime } from '@/lib/ads-budget-card/meta'
+import { prescriptionLockSource } from '@/lib/ads-budget-card/prescription-lock'
 import { parseBudgetRequest } from '@/lib/ads-budget-card/request'
 import { budgetCardGate, budgetKernel } from './access'
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params
+export async function POST(req: Request, { params }: { params: { id: string } }) {
+  const { id } = params
   const gate = await budgetCardGate(req, id)
   if (!gate.ok) return gate.response
   let raw: unknown
@@ -30,6 +32,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       clicker: gate.clicker,
       order,
       runtime,
+      locks: prescriptionLockSource(supabaseAdmin),
     })
     if (!issued.card) return NextResponse.json({ error: issued.reason }, { status: 409 })
     return NextResponse.json({ ...issued.card, blockedReason: issued.reason ?? issued.card.blockedReason })

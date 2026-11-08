@@ -1,13 +1,13 @@
 /**
- * Meta read, one budget write, and the existing cap reader.
- * This file never chooses a budget. The card flow does.
+ * Read one ad set and the existing cap numbers.
+ * The budget write stays in the kernel budget action. This file does not write.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { readBudgetFacts } from '@/lib/ads-tracking-preflight/budget-reader'
 import type { BudgetFacts } from '@/lib/ads-tracking-preflight/types'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
-import { getAdSetStatus, setAdSetDailyBudget, type AdSetSummary } from '@/lib/meta/adsets'
+import { getAdSetStatus, type AdSetSummary } from '@/lib/meta/adsets'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { capNumbers } from './caps'
 import { readStepRatio } from './ratio'
@@ -18,7 +18,6 @@ export async function metaBudgetRuntime(clientId: string, sb: SupabaseClient): P
   if (!token) return null
   return createBudgetRuntime({
     readSet: (adsetId) => getAdSetStatus(adsetId, token),
-    writeSet: (adsetId, cents) => setAdSetDailyBudget(adsetId, token, cents),
     accounts: () => getRegisteredAccountIds(clientId),
     caps: (accountId) => loadCaps(sb, clientId, accountId, token),
     ratio: (now) => readStepRatio(sb, clientId, now),
@@ -28,17 +27,12 @@ export async function metaBudgetRuntime(clientId: string, sb: SupabaseClient): P
 
 export function createBudgetRuntime(deps: {
   readSet: (adsetId: string) => Promise<AdSetSummary | null>
-  writeSet: (adsetId: string, cents: number) => Promise<boolean>
   accounts: () => Promise<{ ids: string[]; error?: string }>
   caps: (accountId: string) => Promise<BudgetFacts>
   ratio: (now: Date) => Promise<StepRatio>
   now: () => Date
 }): BudgetRuntime {
-  return {
-    read: (order) => readSnapshot(deps, order),
-    write: (order) => writeOnce(deps, order),
-    readback: (order) => readCents(deps, order.adsetId),
-  }
+  return { read: (order) => readSnapshot(deps, order) }
 }
 
 async function readSnapshot(
@@ -52,22 +46,6 @@ async function readSnapshot(
     deps.accounts().catch(() => ({ ids: [] as string[], error: 'unread' })),
   ])
   return assembleSnapshot(order, row, facts, ratio, accounts)
-}
-
-async function writeOnce(
-  deps: Parameters<typeof createBudgetRuntime>[0],
-  order: BudgetOrder,
-): Promise<boolean> {
-  if (!/^\d{1,32}$/.test(order.adsetId)) return false
-  return deps.writeSet(order.adsetId, order.newDailyBudgetCents)
-}
-
-async function readCents(
-  deps: Parameters<typeof createBudgetRuntime>[0],
-  adsetId: string,
-): Promise<number | null> {
-  const row = await deps.readSet(adsetId).catch(() => null)
-  return centsFromMeta(row?.daily_budget)
 }
 
 export function centsFromMeta(value: unknown): number | null {
