@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { confirmWinnerCard, type ConfirmWinnerInput, type WinnerPorts } from '../winner-reel-execute'
+import { confirmWinnerCard, refuseSingleAdPause, type ConfirmWinnerInput, type WinnerPorts } from '../winner-reel-execute'
 import type { ProposalHold } from '@/lib/winner-reel-sync/intents'
 import { pausedDraftClickUrl } from '@/lib/ads-strategy/paused-draft-copy'
 import { WINNER_ADD_WHAT, WINNER_PAUSE_WHAT, WINNER_ACTIVATE_WHAT } from '@/lib/winner-reel-sync/copy'
@@ -180,6 +180,18 @@ describe('winner card confirm', () => {
     expect(store.rows[0]?.payload.confirmedBy).toBe('session-user')
   })
 
+  it('refuses a single-ad pause because the live pause card only pauses an ad set', async () => {
+    const store = db({ id: 'row-1', payload: hold({ kind: 'pause_ad', postId: null, adId: '101', score: null, ctr: 0.1, before: 0.1 }) })
+    const used = ports({ issuePause: vi.fn(async () => refuseSingleAdPause()) })
+    const result = await confirmWinnerCard(store.client, input(), used)
+    expect(used.submitPause).not.toHaveBeenCalled()
+    expect(used.createPaused).not.toHaveBeenCalled()
+    expect(used.activate).not.toHaveBeenCalled()
+    expect(result.wroteMeta).toBe(false)
+    expect(result.resultLine).toContain('没有暂停')
+    expect(store.rows[0]?.payload.status).toBe('failed')
+  })
+
   it('does not pause when the pause card is off or still needs an empty-campaign confirmation', async () => {
     const pause = vi.fn()
     const off = db({ id: 'row-1', payload: hold({ kind: 'pause_ad', postId: null, adId: '101', score: null, ctr: 0.1 }) })
@@ -230,5 +242,8 @@ describe('winner card click target', () => {
     expect(confirm).toContain("triggeredBy: 'human'")
     expect(confirm).toContain('requirePaidClientAccess(')
     expect(execute).not.toContain("triggeredBy: 'human'")
+    expect(execute).not.toContain('ads-pause-card/flow')
+    expect(execute).not.toContain('ads-pause-card/meta')
+    expect(execute).not.toContain('pauseAd')
   })
 })

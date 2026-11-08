@@ -1,7 +1,8 @@
 /**
  * A confirmed winner-sync card writes once.
  * New ads are created paused. Opening them is a second card.
- * A pause goes through the existing pause card, never a direct pause.
+ * A single-ad pause is refused. The live pause card only pauses one ad set named in a prescription.
+ * This file does not write that pause itself.
  * A row left in `writing` is not retried. A mismatched read-back is not written again.
  */
 
@@ -14,9 +15,6 @@ import type { ConfirmationCardView } from '@/lib/confirmation-card/view'
 import { createAdFromPost, readAdPlacement, activateAd, type AdPlacement } from '@/lib/meta/ads-manager'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { linkAdToCreative, type LinkAdToCreativeArgs } from '@/lib/ads/creative-link'
-import { issuePauseOrder, submitPauseCard, type PauseIssueResult, type PauseRuntime } from '@/lib/ads-pause-card/flow'
-import { metaPauseRuntime } from '@/lib/ads-pause-card/meta'
-import type { PauseOrder } from '@/lib/ads-pause-card/order'
 import { collectWinnerSuggestions, type WinnerSuggestions } from '@/lib/winner-reel-sync/engine'
 import { proposeActivateCard } from '@/lib/winner-reel-sync/propose'
 import { claimHold, holdForCard, saveHold, type HoldRow } from '@/lib/winner-reel-sync/ledger'
@@ -43,6 +41,50 @@ export interface WinnerResult {
   wroteMeta: boolean
 }
 
+/** Shape the deleted ad-level pause card used. The live card does not accept it. */
+export interface PauseOrder {
+  readonly sourceKind: 'prescription'
+  readonly sourceId: string
+  readonly stepId: string
+  readonly level: 'ad'
+  readonly adAccountId: string
+  readonly campaignId: string
+  readonly adsetId: string
+  readonly adId: string
+  readonly basis: string
+  readonly expectedMetric: string
+  readonly successorAdId: null
+}
+
+export interface PauseRuntime {
+  live(): Promise<unknown>
+  pause(): Promise<boolean>
+  readback(): Promise<string | null>
+}
+
+export interface PauseIssueResult {
+  readonly status: 'issued' | 'blocked' | 'off'
+  readonly reason?: string
+  readonly runId?: string
+  readonly emptyAckRunId?: string
+  readonly confirmEnabled?: boolean
+  readonly fingerprint?: string
+  readonly expectedDecisionId?: string
+}
+
+export interface PauseSubmitResult {
+  readonly status: string
+  readonly reason: string
+  readonly wroteMeta: boolean
+  readonly readback: string | null
+}
+
+const SINGLE_AD_PAUSE_REFUSAL = '现有暂停卡只暂停处方里的一个广告组，这条单条广告没有暂停。'
+
+export function refuseSingleAdPause(): PauseIssueResult {
+  return { status: 'blocked', confirmEnabled: false, reason: SINGLE_AD_PAUSE_REFUSAL }
+}
+
 export interface WinnerPorts {
   decide(input: ConfirmWinnerInput): Promise<ConfirmationCardView>
   recheck(clientId: string, skipFatiguePause: boolean): Promise<WinnerSuggestions>
@@ -52,10 +94,29 @@ export interface WinnerPorts {
   activate(adId: string, token: string): Promise<boolean>
   link(args: LinkAdToCreativeArgs): Promise<{ creativeRef: string | null }>
   kernel(): KernelDeps
-  issuePause(args: Parameters<typeof issuePauseOrder>[0]): Promise<PauseIssueResult>
-  submitPause(args: Parameters<typeof submitPauseCard>[0]): Promise<{ status: string; reason: string; wroteMeta: boolean; readback: string | null }>
+  issuePause(args: PauseIssueArgs): Promise<PauseIssueResult>
+  submitPause(args: PauseSubmitArgs): Promise<PauseSubmitResult>
   pauseRuntime(clientId: string): Promise<PauseRuntime | null>
   proposeLive(args: Parameters<typeof proposeActivateCard>[0]): Promise<string | null>
+}
+
+interface PauseIssueArgs {
+  kernel: KernelDeps
+  clientId: string
+  clicker: CardClicker
+  order: PauseOrder
+  runtime: PauseRuntime
+}
+
+interface PauseSubmitArgs {
+  kernel: KernelDeps
+  clientId: string
+  runId: string
+  clicker: CardClicker
+  resolution: 'confirm' | 'decline'
+  expectedDecisionId: string
+  fingerprint: string
+  runtime: PauseRuntime
 }
 
 interface PausedCreate {
@@ -108,10 +169,18 @@ function defaultPorts(sb: SupabaseClient): WinnerPorts {
     activate: activateAd,
     link: linkAdToCreative,
     kernel: () => createKernel(sb),
-    issuePause: issuePauseOrder,
-    submitPause: submitPauseCard,
-    pauseRuntime: metaPauseRuntime,
+    issuePause: async () => refuseSingleAdPause(),
+    submitPause: async () => ({ status: 'blocked', reason: SINGLE_AD_PAUSE_REFUSAL, wroteMeta: false, readback: null }),
+    pauseRuntime: async () => unusedPauseRuntime(),
     proposeLive: proposeActivateCard,
+  }
+}
+
+function unusedPauseRuntime(): PauseRuntime {
+  return {
+    live: async () => null,
+    pause: async () => false,
+    readback: async () => null,
   }
 }
 
