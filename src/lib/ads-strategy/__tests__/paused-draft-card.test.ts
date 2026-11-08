@@ -715,3 +715,58 @@ describe('paused draft helpers', () => {
     expect(submit).not.toContain("'ACTIVE'")
   })
 })
+
+function reviewClient(on: boolean) {
+  return fixture({
+    extraTables: {
+      clients: [{ id: CLIENT_A, leads_config: { ads_independent_review: on } }],
+    },
+  })
+}
+
+function storedReview(f: ReturnType<typeof fixture>) {
+  const run = f.tables.action_runs.find((row) => row.action_key === CONFIRMATION_ACTION_KEY)
+  const input = run?.input as { hard_checks?: string } | undefined
+  const checks = JSON.parse(input?.hard_checks ?? '[]') as Array<{ label: string; state: string }>
+  return { run, mark: checks.find((item) => item.label === '独立复核') }
+}
+
+describe('paused draft review before pending', () => {
+  it('marks a clean draft and still waits for a person', async () => {
+    const f = reviewClient(true)
+    const { card } = await issued(f)
+    expect(card.status).toBe('waiting')
+    expect(card.confirmEnabled).toBe(true)
+    const stored = storedReview(f)
+    expect(stored.run?.status).toBe('pending_approval')
+    expect(stored.mark).toMatchObject({ state: 'green' })
+  })
+
+  it('does not open a pending card when the draft text hits a shared red line', async () => {
+    const f = reviewClient(true)
+    const bad = draft({
+      creatives: [{ name: 'A', primaryText: '已帮你暂停这条广告', headline: 'Read more', imageHash: 'hash-1' }],
+    })
+    await expect(issuePausedDraftCard({
+      kernel: f.kernel,
+      clientId: CLIENT_A,
+      clicker: OPC,
+      draft: bad,
+      accountLabel: '这位客户的广告账户',
+      review: REVIEW,
+    })).rejects.toBeInstanceOf(ConfirmationCardError)
+    expect(f.tables.action_runs).toEqual([])
+    expect(f.tables.flywheel_actions).toEqual([])
+  })
+
+  it('still issues the card when the switch is off', async () => {
+    const f = reviewClient(false)
+    const bad = draft({
+      creatives: [{ name: 'A', primaryText: '已帮你暂停这条广告', headline: 'Read more', imageHash: 'hash-1' }],
+    })
+    const { card } = await issued(f, bad)
+    expect(card.confirmEnabled).toBe(true)
+    expect(card.status).toBe('waiting')
+    expect(storedReview(f).mark).toBeUndefined()
+  })
+})

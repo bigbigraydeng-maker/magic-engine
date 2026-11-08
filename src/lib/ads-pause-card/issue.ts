@@ -13,6 +13,7 @@ import { orderKey, readPauseOrder, type PauseAdSetOrder } from './order'
 import { pauseFacts } from './facts'
 import { readApprovalSource } from '@/lib/approval-source/read'
 import { readPauseCardSwitch } from './switch'
+import { markOrHold } from '@/lib/ads-strategy/independent-review-gate'
 
 export interface PauseIssueItem {
   readonly prescriptionId: string
@@ -63,10 +64,14 @@ async function issueOrder(
   const goalId = chain.ok ? chain.source.goalId : (bundle.goalId ?? '')
   const sourceReason = chain.ok ? null : chain.reason
   const guard = guardPause(order, await args.live(order), sourceReason)
+  const marked = await markOrHold(args.kernel.supabase, args.clientId, guard.checks, guard.block !== null, order.basis)
+  if (marked.kind === 'return') {
+    return { prescriptionId: order.prescriptionId, status: 'blocked', reason: `独立复核退回：${marked.reason}`, confirmEnabled: false }
+  }
   const card = await issueConfirmationCard(args.kernel, {
     clientId: args.clientId,
     clicker: args.clicker,
-    facts: pauseFacts(order, guard.checks),
+    facts: pauseFacts(order, marked.checks),
     now: args.now,
   })
   const key = orderKey(order)
