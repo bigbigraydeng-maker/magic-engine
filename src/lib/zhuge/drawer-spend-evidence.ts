@@ -11,6 +11,7 @@ import {
   TRACKING_RECEIPT_STALE_HOURS,
 } from '@/lib/ads-tracking-preflight/receipt'
 import type { Light } from '@/lib/marketing-plan/promo/gates'
+import { agreedPlanDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import type { CapFact, SpendEvidence } from './drawer-spend-checks'
 
 interface QueryResult<T> {
@@ -26,8 +27,8 @@ export interface SpendEvidenceDb {
   }
 }
 
-interface CapChain {
-  maybeSingle(): Promise<QueryResult<{ daily_budget_cap_cents?: unknown } | null>>
+interface CapChain extends PromiseLike<QueryResult<unknown>> {
+  eq(column: string, value: string): CapChain
 }
 
 interface LogChain {
@@ -57,12 +58,16 @@ function crmFromLight(status: Light, reason: string): { state: HardCheckState; r
 }
 
 async function readCap(db: SpendEvidenceDb, clientId: string): Promise<CapFact> {
-  const result = await db.from('ad_strategy_configs').select('daily_budget_cap_cents').eq('client_id', clientId).maybeSingle()
-  if (result.error) return 'unread'
-  const cents = result.data?.daily_budget_cap_cents
-  if (typeof cents === 'number' && Number.isFinite(cents)) return { cents }
-  if (!result.data) return 'missing'
-  return 'missing'
+  const result = await db
+    .from('marketing_plans')
+    .select('status, plan_data')
+    .eq('client_id', clientId)
+    .eq('status', 'approved')
+  if (result.error || !Array.isArray(result.data)) return 'unread'
+  const agreed = agreedPlanDailyTotalCap(result.data as { status?: unknown; plan_data?: unknown }[])
+  if (agreed.state === 'unreadable') return 'unread'
+  if (agreed.state !== 'set') return 'missing'
+  return { cents: agreed.cents }
 }
 
 async function readCrm(db: SpendEvidenceDb, clientId: string, now: Date): Promise<{ state: HardCheckState; reason: string }> {

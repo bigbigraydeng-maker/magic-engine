@@ -8,12 +8,9 @@
  *
  * Older columns stay in the database. They are not a second runtime total:
  * - `ad_strategy_configs.daily_budget_cap_cents` is the old client total.
- *   Autonomy settings still edit it. PATCH `.../ad-accounts/[accountId]/daily-cap`
- *   still compares the sum of per-account caps against it, and does not write
- *   this plan field. The account list route stays read-only.
- * - `client_meta_ad_accounts.daily_budget_cap_cents` is the per-account ceiling,
- *   still written only by that daily-cap route. Adding those ceilings up is
- *   not the client total.
+ *   Readers use the approved plan. The column may still be shown as a legacy hint.
+ * - `client_meta_ad_accounts.daily_budget_cap_cents` is the per-account ceiling.
+ *   Adding those ceilings up is not the client total.
  */
 
 export function dailyTotalCapCents(planData: unknown): number | null {

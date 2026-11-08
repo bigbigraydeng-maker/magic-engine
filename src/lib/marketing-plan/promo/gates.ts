@@ -85,7 +85,7 @@ export interface GateFacts {
   playbook: PromoPlaybook
   accounts: AccountCapFacts[]
   snapshots: Record<string, AccountSnapshotFact>
-  /** ad_strategy_configs 读出的三项；整个读失败 = null */
+  /** 素材池和结果口径来自广告设置；每天总上限来自已批准计划。整个读失败 = null */
   config: {
     daily_budget_cap_cents: number | null
     primary_result: string | null

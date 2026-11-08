@@ -860,11 +860,12 @@ describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
     expect(r.facts.dailyCapCents).toBe(5_000)
   })
 
-  it('客户只绑了这一个账户、这个账户没配自己的上限 → 回落客户总闸', async () => {
+  it('客户只绑了这一个账户、这个账户没配自己的上限 → 回落已批准计划，不认旧客户总闸', async () => {
     const r = await resolve(
       {
         ad_entity_snapshots: [snap()],
-        ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        ad_strategy_configs: { daily_budget_cap_cents: 999_999 },
+        marketing_plans: [approvedPlan(8_000)],
         client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null }],
       },
       log(),
@@ -874,11 +875,27 @@ describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
     expect(r.facts.dailyCapCents).toBe(8_000)
   })
 
-  it('客户在 client_meta_ad_accounts 里压根没有行（老单账户客户）→ 回落客户总闸', async () => {
+  it('计划没填每天总上限 → 单账户回落也是缺失，不用旧客户总闸', async () => {
     const r = await resolve(
       {
         ad_entity_snapshots: [snap()],
         ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        marketing_plans: [approvedPlan(null)],
+        client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null }],
+      },
+      log(),
+    )
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.dailyCapCents).toBeNull()
+  })
+
+  it('客户在 client_meta_ad_accounts 里压根没有行（老单账户客户）→ 回落已批准计划', async () => {
+    const r = await resolve(
+      {
+        ad_entity_snapshots: [snap()],
+        ad_strategy_configs: { daily_budget_cap_cents: 1 },
+        marketing_plans: [approvedPlan(8_000)],
         client_meta_ad_accounts: [],
       },
       log(),
@@ -926,7 +943,8 @@ describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
     const r = await resolve(
       {
         ad_entity_snapshots: [snap()],
-        ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        ad_strategy_configs: { daily_budget_cap_cents: 1 },
+        marketing_plans: [approvedPlan(8_000)],
         client_meta_ad_accounts: [
           { client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null },
           { client_id: 'other-client', ad_account_id: 'act_9', daily_budget_cap_cents: 1_000 },
