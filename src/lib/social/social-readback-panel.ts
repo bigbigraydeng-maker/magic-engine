@@ -130,17 +130,57 @@ export function readingToCell(label: string, reading: Reading, windowStatus: Rea
   return { label, display: '读不到', detail: reasonToZh(reading.reason) }
 }
 
+/** Visible time: scheduled public time, then submit time, then the action row. */
+export function publicTimeOfPublish(payload: unknown, executedAt: string | null): string | null {
+  return (
+    payloadString(payload, 'scheduled_publish_time')
+    ?? payloadString(payload, 'published_at')
+    ?? executedAt
+  )
+}
+
+function measureDueIso(payload: unknown, windowHours: number): string | null {
+  const rec = asRecord(payload)
+  const raw = rec?.measure_at
+  if (!Array.isArray(raw)) return null
+  for (const entry of raw) {
+    const row = asRecord(entry)
+    if (row === null) continue
+    if (row.hours !== windowHours) continue
+    if (typeof row.at === 'string' && parseTime(row.at) !== null) return row.at
+  }
+  return null
+}
+
+/**
+ * When the measurement row is due. `measure_at[].at` is authoritative
+ * (scheduled posts); otherwise public time plus the window.
+ */
+export function dueAtForReadbackWindow(
+  payload: unknown,
+  windowHours: number,
+  publicTime: string | null,
+): string | null {
+  const fromSchedule = measureDueIso(payload, windowHours)
+  if (fromSchedule !== null) return fromSchedule
+  const anchorMs = parseTime(publicTime)
+  if (anchorMs === null) return null
+  return new Date(anchorMs + windowHours * 60 * 60 * 1000).toISOString()
+}
+
 export function resolveWindowStatus(
   publishedAt: string | null,
   windowHours: number,
   receipt: ReceiptRow | null,
   now: Date,
+  dueAt?: string | null,
 ): ReadbackWindowStatus {
+  const explicitDue = dueAt !== undefined ? parseTime(dueAt) : null
   const anchorMs = parseTime(publishedAt)
-  if (anchorMs === null) {
+  const dueMs = explicitDue ?? (anchorMs === null ? null : anchorMs + windowHours * 60 * 60 * 1000)
+  if (dueMs === null) {
     return receipt === null ? 'missing' : 'read'
   }
-  const dueMs = anchorMs + windowHours * 60 * 60 * 1000
   if (now.getTime() < dueMs) return 'pending'
   if (receipt === null) return 'missing'
   return 'read'
@@ -173,13 +213,15 @@ function kindLabel(kind: ReadbackItemKind): string {
 }
 
 function buildEngagementWindows(
+  payload: unknown,
   publishedAt: string | null,
   receipts: ReceiptRow[],
   now: Date,
 ): ReadbackWindowBlock[] {
   return READBACK_MEASUREMENT_WINDOWS.map((hours) => {
     const receipt = receiptAtWindow(receipts, hours)
-    const status = resolveWindowStatus(publishedAt, hours, receipt, now)
+    const dueAt = dueAtForReadbackWindow(payload, hours, publishedAt)
+    const status = resolveWindowStatus(publishedAt, hours, receipt, now, dueAt)
     const metrics: ReadbackMetricCell[] = (['likes', 'comments', 'shares'] as const).map((metric) =>
       readingToCell(METRIC_LABELS[metric], readingFromReceipt(receipt, metric), status),
     )
@@ -202,8 +244,7 @@ function buildEngagementItem(
   const kind = kindFromSource(source)
   if (kind === null) return null
 
-  const publishedAt =
-    payloadString(action.payload, 'published_at') ?? action.executed_at
+  const publishedAt = publicTimeOfPublish(action.payload, action.executed_at)
   const platform = platformOfPublishPayload(action.payload)
 
   return {
@@ -215,7 +256,7 @@ function buildEngagementItem(
     published_at_display: formatReadbackTimeNz(publishedAt),
     story_sent: null,
     story_registered: null,
-    windows: buildEngagementWindows(publishedAt, receipts, now),
+    windows: buildEngagementWindows(action.payload, publishedAt, receipts, now),
     summary: null,
   }
 }

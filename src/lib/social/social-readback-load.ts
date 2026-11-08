@@ -21,6 +21,11 @@ import {
 export const DEFAULT_SOCIAL_READBACK_LIMIT = 20
 const MAX_ROWS = 200
 
+/** Idempotency keys for the Story rows actually shown, so registration lookup cannot drift. */
+export function storyRegistrationKeys(stories: readonly { item_id: string }[]): string[] {
+  return stories.map((story) => `story-lite:${story.item_id}`)
+}
+
 interface QueryResult {
   data: unknown
   error: { message: string } | null
@@ -78,28 +83,30 @@ export async function loadSocialReadbackPanel(
     .order('sent_at', { ascending: false })
     .limit(MAX_ROWS)
 
-  const storyRegPromise = supabase
-    .from('flywheel_actions')
-    .select('payload')
-    .eq('client_id', input.clientId)
-    .eq('action_type', SOCIAL_PUBLISH_STORY_ACTION_TYPE)
-    .gte('executed_at', sinceIso)
-    .lte('executed_at', untilIso)
-    .limit(MAX_ROWS)
-
-  const [actionsResult, storiesResult, storyRegResult] = await Promise.all([
+  const [actionsResult, storiesResult] = await Promise.all([
     actionsPromise,
     storiesPromise,
-    storyRegPromise,
   ])
 
   assertNoError('flywheel_actions', actionsResult)
   assertNoError('story_items', storiesResult)
-  assertNoError('flywheel_actions (story register)', storyRegResult)
 
   const actions = toRows<PublishActionRow>(actionsResult.data)
   const stories = toRows<StoryRow>(storiesResult.data)
-  const storyRegistrationRows = toRows<{ payload: unknown }>(storyRegResult.data)
+
+  const registrationKeys = storyRegistrationKeys(stories)
+  let storyRegistrationRows: Array<{ payload: unknown }> = []
+  if (registrationKeys.length > 0) {
+    const storyRegResult = await supabase
+      .from('flywheel_actions')
+      .select('payload')
+      .eq('client_id', input.clientId)
+      .eq('action_type', SOCIAL_PUBLISH_STORY_ACTION_TYPE)
+      .in('payload->>idempotency_key', registrationKeys)
+
+    assertNoError('flywheel_actions (story register)', storyRegResult)
+    storyRegistrationRows = toRows<{ payload: unknown }>(storyRegResult.data)
+  }
 
   let receipts: ReceiptRow[] = []
   if (actions.length > 0) {

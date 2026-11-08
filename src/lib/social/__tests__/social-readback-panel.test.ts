@@ -107,6 +107,44 @@ describe('parseStoryRegistrationItemIds', () => {
   })
 })
 
+describe('scheduled image posts', () => {
+  it('uses scheduled public time and measure_at, not the early Facebook submit time', () => {
+    const now = new Date('2026-11-03T12:00:00.000Z')
+    const panel = buildSocialReadbackPanel({
+      clientId: CLIENT,
+      since: '2026-10-01T00:00:00.000Z',
+      until: '2026-11-04T00:00:00.000Z',
+      limit: 5,
+      now,
+      actions: [
+        {
+          id: 'scheduled-1',
+          executed_at: '2026-11-03T10:00:00.000Z',
+          payload: {
+            source: 'daily_plan',
+            platform: 'facebook',
+            published_at: '2026-11-01T10:00:00.000Z',
+            scheduled_publish_time: '2026-11-03T10:00:00.000Z',
+            measure_at: [
+              { hours: 4, at: '2026-11-03T14:00:00.000Z' },
+              { hours: 72, at: '2026-11-06T10:00:00.000Z' },
+            ],
+          },
+        },
+      ],
+      receipts: [],
+      stories: [],
+      storyRegistrationRows: [],
+    })
+
+    const item = panel.items[0]
+    expect(item.published_at).toBe('2026-11-03T10:00:00.000Z')
+    expect(item.windows?.[0].status).toBe('pending')
+    expect(item.windows?.[0].status_label).toBe('还没到点')
+    expect(item.windows?.[1].status).toBe('pending')
+  })
+})
+
 describe('resolveWindowStatus', () => {
   it('maps reason codes to Chinese labels', () => {
     expect(reasonToZh('no_receipt')).toContain('读数')

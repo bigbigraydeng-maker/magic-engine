@@ -11,3 +11,4 @@ done_on: 2026-11-09
 done_ref: pr:3548
 ---
 调研报告 R-1：接 loadPostPerformance，纳入 factory_reel；只读 API + 面板。不碰周包批准、cron 登记、Meta 权限、迁移。R-2/R-3 另开 PR，不与此合并。
+审查两条 P2：排期图文按 scheduled_publish_time 与 measure_at 判断公开时间和 4h/72h，不按提前提交的 published_at；Story 登记按已展示条目的 idempotency_key 查询，避免无序截断 200 把已登记显示成未登记。
