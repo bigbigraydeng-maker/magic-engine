@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   load: vi.fn(),
   submitScale: vi.fn(),
   submitStop: vi.fn(),
+  issue: vi.fn(),
   scaleAccess: vi.fn(),
   stopAccess: vi.fn(),
   owned: vi.fn(),
@@ -24,6 +25,10 @@ vi.mock('@/lib/action-submission/stop-loss', () => ({
   requireStopLossAccess: h.stopAccess, submitStopLossThroughKernel: h.submitStop,
 }))
 vi.mock('@/lib/kernel', () => ({ createKernel: () => ({}) }))
+vi.mock('@/lib/action-submission/money-card', () => ({
+  issueMoneyBudget: h.issue,
+  clickerFromAccess: () => ({ kind: 'opc', email: 'staff@magiclab.test' }),
+}))
 vi.mock('@/lib/meta/token-manager', () => ({ getMetaTokenForClient: async () => 'tok' }))
 vi.mock('@/lib/meta/campaign-ownership', () => ({ assertCampaignOwnedByClient: h.owned }))
 vi.mock('@/lib/ads-strategy/account-timezone', () => ({
@@ -68,6 +73,7 @@ beforeEach(() => {
   h.goal = { data: { id: 'goal-1' }, error: null }
   h.submitScale.mockResolvedValue({ kind: 'pending_approval', run: { id: 'run-1' }, humanReason: null })
   h.submitStop.mockResolvedValue({ action: 'cut_unit', runs: [{ entityId: '456', name: '456', runId: 'run-2', kind: 'succeeded', humanReason: null, warnings: [] }] })
+  h.issue.mockResolvedValue({ card: { runId: 'card-1' }, reason: null, wroteMeta: false })
 })
 afterEach(() => { vi.clearAllMocks(); delete process.env.ADS_SPEND_APPROVER_EMAILS })
 
@@ -91,16 +97,17 @@ describe('POST 加预算', () => {
     const res = await post({ ...unitBody, kind: 'up10' })
     expect(res.status).toBe(503)
     expect(h.submitScale).not.toHaveBeenCalled()
+    expect(h.issue).not.toHaveBeenCalled()
   })
 
-  it('🔴 金额由服务端算：请求体里塞的金额不起作用，提交 before 10000 → after 11000，来源是成绩单', async () => {
+  it('🔴 金额由服务端算：请求体里塞的金额不起作用，出卡 before 10000 → after 11000，不写 Meta', async () => {
     const res = await post({ ...unitBody, kind: 'up10', after_cents: 999999 })
     expect(res.status).toBe(202)
-    expect(h.submitScale).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      beforeCents: 10000, afterCents: 11000, source: 'ads_health_scorecard', adsetId: '456', goalId: 'goal-1',
+    expect(await res.json()).toMatchObject({ status: 'awaiting_confirmation', wroteMeta: false })
+    expect(h.submitScale).not.toHaveBeenCalled()
+    expect(h.issue).toHaveBeenCalledWith(expect.objectContaining({
+      beforeCents: 10000, afterCents: 11000, source: 'scorecard_up', entityId: '456', goalId: 'goal-1', campaignId: null,
     }))
-    // ABO 广告组不带 campaign_id（内核信封见到 campaign_id 会按 CBO 判）
-    expect(h.submitScale.mock.calls[0][1]).not.toHaveProperty('campaignId')
   })
 
   it('72 小时内改过 → 409 带原因，不提交', async () => {
@@ -109,6 +116,7 @@ describe('POST 加预算', () => {
     expect(res.status).toBe(409)
     expect((await res.json()).error).toContain('小时前刚改过')
     expect(h.submitScale).not.toHaveBeenCalled()
+    expect(h.issue).not.toHaveBeenCalled()
   })
 
   it('不是内部负责人 → 403', async () => {
@@ -124,14 +132,16 @@ describe('POST 减预算', () => {
     const res = await post({ ...unitBody, kind: 'down_to', target_cents: 7999, request_id: rid })
     expect(res.status).toBe(409)
     expect(h.submitStop).not.toHaveBeenCalled()
+    expect(h.issue).not.toHaveBeenCalled()
   })
 
-  it('8000 → 按人工止损执行广告组降预算', async () => {
+  it('8000 → 出降预算确认卡，不写 Meta', async () => {
     const res = await post({ ...unitBody, kind: 'down_to', target_cents: 8000, request_id: rid })
-    expect(res.status).toBe(200)
-    expect(h.submitStop).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      action: 'cut_unit', adAccountId: 'act_123', campaignId: '789', requestId: rid,
-      targets: [expect.objectContaining({ id: '456', currentCents: 10000, afterCents: 8000 })],
+    expect(res.status).toBe(202)
+    expect(await res.json()).toMatchObject({ status: 'awaiting_confirmation', wroteMeta: false })
+    expect(h.submitStop).not.toHaveBeenCalled()
+    expect(h.issue).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'scorecard_down', beforeCents: 10000, afterCents: 8000, requestId: rid, campaignId: '789',
     }))
   })
 
@@ -144,20 +154,22 @@ describe('POST 减预算', () => {
     const res = await post({ ...unitBody, kind: 'down_to', target_cents: 8000, request_id: rid })
     expect(res.status).toBe(403)
     expect(h.submitStop).not.toHaveBeenCalled()
+    expect(h.issue).not.toHaveBeenCalled()
   })
 
-  it('减系列预算 → 走系列降预算，不要求增长目标', async () => {
+  it('减系列预算 → 出系列降预算卡，不要求增长目标，不写 Meta', async () => {
     h.goal = { data: null, error: null }
     h.load.mockResolvedValue({ ...loaded(), target: { level: 'campaign', id: '789', adAccountId: 'act_123', scaleAdsetId: null, campaignId: '789', cycleDate: '2026-11-03' } })
     const res = await post({ level: 'campaign', unit_id: '789', ad_account_id: 'act_123', kind: 'down_to', target_cents: 8000, request_id: rid })
-    expect(res.status).toBe(200)
-    expect(h.submitStop).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ action: 'cut_campaign', goalId: undefined }))
+    expect(res.status).toBe(202)
+    expect(h.submitStop).not.toHaveBeenCalled()
+    expect(h.issue).toHaveBeenCalledWith(expect.objectContaining({ source: 'scorecard_down', level: 'campaign', goalId: null }))
   })
 
-  it('内核要人批（规则不是自动）→ 202 等批，不当失败', async () => {
-    h.submitStop.mockResolvedValue({ action: 'cut_unit', runs: [{ entityId: '456', name: '456', runId: 'run-3', kind: 'pending_approval', humanReason: null, warnings: [] }] })
+  it('没有出卡 → 409，不写 Meta', async () => {
+    h.issue.mockResolvedValue({ card: null, reason: '没有出卡。', wroteMeta: false })
     const res = await post({ ...unitBody, kind: 'down_to', target_cents: 8000, request_id: rid })
-    expect(res.status).toBe(202)
-    expect((await res.json()).status).toBe('awaiting_approval')
+    expect(res.status).toBe(409)
+    expect(h.submitStop).not.toHaveBeenCalled()
   })
 })

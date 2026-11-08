@@ -20,6 +20,7 @@ const m = vi.hoisted(() => ({
   setAdSetDailyBudget: vi.fn(),
   setAdSetStatus: vi.fn(),
   submitStopLoss: vi.fn(),
+  askPause: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
@@ -30,6 +31,9 @@ vi.mock('@/lib/action-submission/stop-loss', () => ({
   submitStopLossThroughKernel: m.submitStopLoss,
 }))
 vi.mock('@/lib/kernel', () => ({ createKernel: vi.fn(() => ({ kernel: true })) }))
+vi.mock('@/lib/action-submission/campaign-status-card', () => ({
+  requestCampaignStatusCard: m.askPause,
+}))
 vi.mock('@/lib/meta/token-manager', () => ({
   getMetaTokenForClient: vi.fn().mockResolvedValue('SHARED_FALLBACK_TOKEN'),
 }))
@@ -101,22 +105,20 @@ function post(body: unknown) {
 beforeEach(() => {
   vi.clearAllMocks()
   m.registeredAccounts.mockResolvedValue({ data: [{ ad_account_id: 'act_1111111111' }], error: null })
-  m.submitStopLoss.mockResolvedValue({
-    action: 'pause_campaign',
-    runs: [{ entityId: '120220000000000002', name: 'A campaign', runId: 'run-1', kind: 'succeeded', humanReason: null, warnings: [] }],
-  })
+  m.askPause.mockResolvedValue({ status: 202, body: { status: 'awaiting_confirmation', wroteMeta: false } })
 })
 
 describe('stop-loss POST — 账户号形状', () => {
-  it('Meta 返回纯数字账户号 → 真的取到时区 → 200，且交给内核的 adAccountId 是 act_ 形式', async () => {
+  it('Meta 返回纯数字账户号 → 真的取到时区 → 出暂停卡，账户号是 act_ 形式，不写 Meta', async () => {
     m.getCampaignDetails.mockResolvedValue({
       id: '120220000000000002', name: 'A campaign', status: 'PAUSED', daily_budget: '1000', account_id: '1111111111',
     })
 
     const res = await post({ campaign_id: '120220000000000002', action: 'pause' })
 
-    expect(res.status).toBe(200)
-    expect(m.submitStopLoss).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    expect(res.status).toBe(202)
+    expect(m.submitStopLoss).not.toHaveBeenCalled()
+    expect(m.askPause).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       adAccountId: 'act_1111111111',
     }))
   })
@@ -128,8 +130,9 @@ describe('stop-loss POST — 账户号形状', () => {
 
     const res = await post({ campaign_id: '120220000000000002', action: 'pause' })
 
-    expect(res.status).toBe(200)
-    expect(m.submitStopLoss).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    expect(res.status).toBe(202)
+    expect(m.submitStopLoss).not.toHaveBeenCalled()
+    expect(m.askPause).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       adAccountId: 'act_1111111111',
     }))
   })

@@ -11,6 +11,9 @@ import { submitBudgetCard } from '@/lib/ads-budget-card/flow'
 import { kernelBudgetPath } from '@/lib/ads-budget-card/kernel-path'
 import { metaBudgetRuntime } from '@/lib/ads-budget-card/meta'
 import { prescriptionLockSource } from '@/lib/ads-budget-card/prescription-lock'
+import { confirmMoneyBudget } from '@/lib/action-submission/money-card'
+import { loadMoneyBudgetLive } from '@/lib/action-submission/money-card-live'
+import { writeHeldBudget } from '@/lib/action-submission/money-card-write'
 import { budgetCardGate, budgetKernel } from '../access'
 
 export async function POST(
@@ -28,10 +31,26 @@ export async function POST(
     const mapped = publicError(error)
     return NextResponse.json({ error: mapped.message }, { status: mapped.status })
   }
-  const runtime = await metaBudgetRuntime(id, supabaseAdmin)
-  if (!runtime) return NextResponse.json({ error: '拿不到广告授权，没有改日预算。' }, { status: 424 })
   const kernel = budgetKernel()
   try {
+    const money = await confirmMoneyBudget({
+      kernel,
+      sb: supabaseAdmin,
+      clientId: id,
+      runId,
+      clicker: gate.clicker,
+      resolution: decision.resolution,
+      expectedDecisionId: decision.expectedDecisionId,
+      fingerprint: decision.fingerprint,
+      readLive: (hold) => loadMoneyBudgetLive(supabaseAdmin, id, hold),
+      write: (hold) => writeHeldBudget(id, hold),
+    })
+    if (money.handled) {
+      if (!money.card) return NextResponse.json({ error: money.reason, wroteMeta: false }, { status: 409 })
+      return NextResponse.json({ ...money.card, statusLine: money.reason, wroteMeta: money.wroteMeta })
+    }
+    const runtime = await metaBudgetRuntime(id, supabaseAdmin)
+    if (!runtime) return NextResponse.json({ error: '拿不到广告授权，没有改日预算。' }, { status: 424 })
     const result = await submitBudgetCard({
       kernel,
       clientId: id,

@@ -422,6 +422,10 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
         setResult({ kind: 'err', text: '这条广告的每天预算改不了。能立刻做的是先全停。' })
         return
       }
+      if (json.status === 'awaiting_confirmation') {
+        setResult({ kind: 'err', text: '确认卡已出，预算和投放都还没改。请到确认卡上点确认。' })
+        return
+      }
       if (json.status === 'awaiting_approval') {
         setResult({ kind: 'err', text: '止损请求已登记，正在等待授权；广告目前还没有确认变更。' })
         return
