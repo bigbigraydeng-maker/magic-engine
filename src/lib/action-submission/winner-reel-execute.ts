@@ -1,7 +1,7 @@
 /**
  * A confirmed winner-sync card writes once.
  * New ads are created paused. Opening them is a second card.
- * A pause goes through the existing pause card, never a direct pause.
+ * The retired ad-level pause path stays closed; it must not become an ad-set pause.
  * A row left in `writing` is not retried. A mismatched read-back is not written again.
  */
 
@@ -13,9 +13,6 @@ import type { ConfirmationCardView } from '@/lib/confirmation-card/view'
 import { createAdFromPost, readAdPlacement, activateAd, type AdPlacement } from '@/lib/meta/ads-manager'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { linkAdToCreative, type LinkAdToCreativeArgs } from '@/lib/ads/creative-link'
-import { issuePauseOrder, submitPauseCard, type PauseIssueResult, type PauseRuntime } from '@/lib/ads-pause-card/flow'
-import { metaPauseRuntime } from '@/lib/ads-pause-card/meta'
-import type { PauseOrder } from '@/lib/ads-pause-card/order'
 import { collectWinnerSuggestions, type WinnerSuggestions } from '@/lib/winner-reel-sync/engine'
 import { proposeActivateCard } from '@/lib/winner-reel-sync/propose'
 import { claimHold, holdForCard, saveHold, type HoldRow } from '@/lib/winner-reel-sync/ledger'
@@ -51,9 +48,6 @@ export interface WinnerPorts {
   activate(adId: string, token: string): Promise<boolean>
   link(args: LinkAdToCreativeArgs): Promise<{ creativeRef: string | null }>
   kernel(): KernelDeps
-  issuePause(args: Parameters<typeof issuePauseOrder>[0]): Promise<PauseIssueResult>
-  submitPause(args: Parameters<typeof submitPauseCard>[0]): Promise<{ status: string; reason: string; wroteMeta: boolean; readback: string | null }>
-  pauseRuntime(clientId: string): Promise<PauseRuntime | null>
   proposeLive(args: Parameters<typeof proposeActivateCard>[0]): Promise<string | null>
 }
 
@@ -79,10 +73,14 @@ export async function confirmWinnerCard(
   }
   if (row.payload.status !== 'holding') return quiet(row.payload)
   if (input.choice === 'decline') return decline(sb, input, row, ports)
+  if (row.payload.kind === 'pause_ad') {
+    throw new ConfirmationCardError('hard_check', '这条单独暂停广告的旧入口已停用，没有改广告。不能用它暂停整个广告组。')
+  }
   if (!(await stillValid(input, row.payload, ports))) {
     throw new ConfirmationCardError('stale', '这条建议已经对不上现在的广告了，没有改。')
   }
   const card = await ports.decide(input)
+  if (card.status !== 'confirmed') return { card, resultLine: card.statusLine, wroteMeta: false }
   const claimed = await claimHold(sb, input.clientId, row, who(input.actor))
   if (!claimed) return { card, resultLine: '没有改广告。', wroteMeta: false }
   const next = await writeOnce(input, claimedPayload(row, input.actor), ports)
@@ -107,9 +105,6 @@ function defaultPorts(sb: KernelDeps['supabase']): WinnerPorts {
     activate: activateAd,
     link: linkAdToCreative,
     kernel: () => createKernel(sb),
-    issuePause: issuePauseOrder,
-    submitPause: submitPauseCard,
-    pauseRuntime: metaPauseRuntime,
     proposeLive: proposeActivateCard,
   }
 }
@@ -156,7 +151,7 @@ function claimedPayload(row: HoldRow, actor: WinnerActor): ProposalHold {
 
 async function writeOnce(input: ConfirmWinnerInput, hold: ProposalHold, ports: WinnerPorts): Promise<ProposalHold> {
   if (hold.kind === 'add_paused') return writeAdd(input, hold, ports)
-  if (hold.kind === 'pause_ad') return writePause(input, hold, ports)
+  if (hold.kind === 'pause_ad') return failed(hold, '单独暂停广告的旧入口已停用，没有改广告。', false, null)
   return writeActivate(input.clientId, hold, ports)
 }
 
@@ -215,62 +210,6 @@ async function offerLive(input: ConfirmWinnerInput, hold: ProposalHold, adId: st
   } catch {
     // 开投卡没出也不再去改刚建成的暂停广告。
   }
-}
-
-async function writePause(input: ConfirmWinnerInput, hold: ProposalHold, ports: WinnerPorts): Promise<ProposalHold> {
-  const ready = await pauseOrder(input.clientId, hold, ports)
-  if (!ready) return failed(hold, '这条广告现在读不到，没有暂停。', false, null)
-  const runtime = await ports.pauseRuntime(input.clientId)
-  if (!runtime) return failed(hold, '读不到广告账户的钥匙，没有暂停。', false, null)
-  const issued = await ports.issuePause({
-    kernel: ports.kernel(), clientId: input.clientId, clicker: input.clicker, order: ready, runtime,
-  })
-  if (!canSubmit(issued)) return pauseStopped(hold, issued)
-  const submitted = await ports.submitPause({
-    kernel: ports.kernel(),
-    clientId: input.clientId,
-    runId: issued.runId ?? '',
-    clicker: input.clicker,
-    resolution: 'confirm',
-    expectedDecisionId: issued.expectedDecisionId ?? '',
-    fingerprint: issued.fingerprint ?? '',
-    runtime,
-  })
-  const ok = submitted.status === 'executed'
-  return { ...hold, status: ok ? 'executed' : 'failed', wroteMeta: submitted.wroteMeta, readback: submitted.readback, resultLine: submitted.reason }
-}
-
-async function pauseOrder(clientId: string, hold: ProposalHold, ports: WinnerPorts): Promise<PauseOrder | null> {
-  if (!hold.adId) return null
-  const token = await ports.token(clientId)
-  if (!token) return null
-  const placement = await ports.readPlacement(hold.adId, token)
-  if (!placement?.campaignId || placement.adsetId !== hold.adsetId) return null
-  if (!sameAccount(placement.accountId, hold.adAccountId)) return null
-  return {
-    sourceKind: 'prescription',
-    sourceId: hold.cardRunId,
-    stepId: 'fatigue',
-    level: 'ad',
-    adAccountId: hold.adAccountId,
-    campaignId: placement.campaignId,
-    adsetId: placement.adsetId,
-    adId: hold.adId,
-    basis: '这条广告的点击率低于同组中位数的一半',
-    expectedMetric: hold.metric,
-    successorAdId: null,
-  }
-}
-
-function canSubmit(issued: PauseIssueResult): boolean {
-  return issued.status === 'issued' && issued.confirmEnabled === true && !issued.emptyAckRunId && Boolean(issued.runId && issued.fingerprint && issued.expectedDecisionId)
-}
-
-function pauseStopped(hold: ProposalHold, issued: PauseIssueResult): ProposalHold {
-  if (issued.emptyAckRunId) {
-    return { ...hold, status: 'executed', wroteMeta: false, resultLine: '暂停后这个系列里就没有在投的广告了，要单独再确认一次。这一步没有暂停。' }
-  }
-  return failed(hold, issued.reason ?? '这次没有暂停。', false, null)
 }
 
 async function writeActivate(clientId: string, hold: ProposalHold, ports: WinnerPorts): Promise<ProposalHold> {
