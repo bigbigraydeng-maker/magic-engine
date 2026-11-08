@@ -10,6 +10,8 @@ import {
   listConfirmationCards,
 } from '@/lib/confirmation-card'
 import { parseIssueBody, publicError } from '@/lib/confirmation-card/http'
+import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
+import { isPlanApprovalCard } from '@/lib/marketing-plan/plan-card-subject'
 import { pausedDraftResultLines } from '@/lib/ads-strategy/paused-draft-submit'
 
 function clickerOf(req: Request, email: string, role: 'admin' | 'client-viewer', allowedClientId: string | null, clientId: string) {
@@ -65,6 +67,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       return refused(400, '请求内容读不懂，没有收下。')
     }
     const facts = parseIssueBody(raw)
+    if (isPlanApprovalCard(facts.subjectKey)) {
+      throw new ConfirmationCardError('invalid', '计划批准卡不能从这里开。请从处方的同意里出。')
+    }
     const card = await issueConfirmationCard(createKernel(supabaseAdmin), {
       clientId: params.id,
       clicker,

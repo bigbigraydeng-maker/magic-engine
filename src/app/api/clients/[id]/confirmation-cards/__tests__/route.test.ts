@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   issueConfirmationCard: vi.fn(),
   decideConfirmationCard: vi.fn(),
   listConfirmationCards: vi.fn(),
+  applyConfirmationDecision: vi.fn(),
 }))
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
@@ -13,6 +14,9 @@ vi.mock('@/lib/auth/client-access', () => ({
   requirePaidClientAccess: mocks.requirePaidClientAccess,
 }))
 vi.mock('@/lib/kernel', () => ({ createKernel: mocks.createKernel }))
+vi.mock('@/lib/marketing-plan/plan-card-decision', () => ({
+  applyConfirmationDecision: mocks.applyConfirmationDecision,
+}))
 vi.mock('@/lib/confirmation-card', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/confirmation-card')>()
   return {
@@ -65,7 +69,7 @@ describe('confirmation card routes', () => {
       { params: { id: CLIENT, runId: RUN } },
     )
     expect(staff.status).toBe(403)
-    expect(mocks.decideConfirmationCard).not.toHaveBeenCalled()
+    expect(mocks.applyConfirmationDecision).not.toHaveBeenCalled()
 
     mocks.requirePaidClientAccess.mockResolvedValue(access('admin', null))
     const agent = await decidePOST(
@@ -77,7 +81,7 @@ describe('confirmation card routes', () => {
       { params: { id: CLIENT, runId: RUN } },
     )
     expect(agent.status).toBe(403)
-    expect(mocks.decideConfirmationCard).not.toHaveBeenCalled()
+    expect(mocks.applyConfirmationDecision).not.toHaveBeenCalled()
   })
 
   it('lets this client\'s FDE confirm, and not as an agent', async () => {
@@ -88,7 +92,7 @@ describe('confirmation card routes', () => {
       tier: 'admin' as const,
       allowedClientId: CLIENT,
     })
-    mocks.decideConfirmationCard.mockResolvedValue({ status: 'confirmed' })
+    mocks.applyConfirmationDecision.mockResolvedValue({ status: 'declined' })
     const res = await decidePOST(
       post(`http://localhost/api/clients/${CLIENT}/confirmation-cards/${RUN}/decision`, {
         resolution: 'decline',
@@ -98,17 +102,18 @@ describe('confirmation card routes', () => {
       { params: { id: CLIENT, runId: RUN } },
     )
     expect(res.status).toBe(200)
-    expect(mocks.decideConfirmationCard).toHaveBeenCalledWith(
+    expect(mocks.applyConfirmationDecision).toHaveBeenCalledWith(
       { name: 'kernel' },
       expect.objectContaining({
+        resolution: 'decline',
         clicker: { kind: 'fde', email: 'fde@example.com', clientId: CLIENT },
       }),
     )
   })
 
-  it('lets OPC confirm through the decision record only', async () => {
+  it('lets OPC post a confirm, including who approved', async () => {
     mocks.requirePaidClientAccess.mockResolvedValue(access('admin', null))
-    mocks.decideConfirmationCard.mockResolvedValue({ status: 'confirmed', what: '记下' })
+    mocks.applyConfirmationDecision.mockResolvedValue({ status: 'confirmed', what: '记下' })
     const res = await decidePOST(
       post(`http://localhost/api/clients/${CLIENT}/confirmation-cards/${RUN}/decision`, {
         resolution: 'confirm',
@@ -118,10 +123,11 @@ describe('confirmation card routes', () => {
       { params: { id: CLIENT, runId: RUN } },
     )
     expect(res.status).toBe(200)
-    expect(mocks.decideConfirmationCard).toHaveBeenCalledWith(
+    expect(mocks.applyConfirmationDecision).toHaveBeenCalledWith(
       { name: 'kernel' },
       expect.objectContaining({
         resolution: 'confirm',
+        approvedBy: 'opc@example.com',
         clicker: { kind: 'opc', email: 'opc@example.com' },
       }),
     )
@@ -144,7 +150,25 @@ describe('confirmation card routes', () => {
       { params: { id: CLIENT } },
     )
     expect(chat.status).toBe(400)
-    expect(mocks.decideConfirmationCard).not.toHaveBeenCalled()
+    expect(mocks.applyConfirmationDecision).not.toHaveBeenCalled()
+    expect(mocks.issueConfirmationCard).not.toHaveBeenCalled()
+  })
+
+  it('does not open a plan approval card from this address', async () => {
+    mocks.requirePaidClientAccess.mockResolvedValue(access('admin', null))
+    const res = await POST(
+      post(`http://localhost/api/clients/${CLIENT}/confirmation-cards`, {
+        subjectKey: 'plan-approve:11111111-1111-4111-8111-111111111111:0123456789abcdef',
+        what: '批准推广计划草稿（只改计划状态，不开投）',
+        account: '不操作任何广告账户',
+        amount: '批准计划本身不花钱，不改预算',
+        date: '下周一',
+        scope: '只改这份计划的状态，不建广告草稿，不写 Meta',
+        hardChecks: [{ label: '预算', state: 'red', reason: '还差一点' }],
+      }),
+      { params: { id: CLIENT } },
+    )
+    expect(res.status).toBe(400)
     expect(mocks.issueConfirmationCard).not.toHaveBeenCalled()
   })
 
