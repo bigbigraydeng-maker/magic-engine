@@ -61,6 +61,7 @@ import { pushReadbackItems } from './readback-suggestion-items'
 import { pushDailyListItems } from './daily-list-items'
 import { pushPlanDraftFailureItems } from './plan-draft-failure-items'
 import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
+import { pushAdsAgentMonitorItems } from './ads-agent-stale-items'
 import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushRankVerdictGapItems } from './seo-rank-verdict-overdue-items'
@@ -447,6 +448,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // Meta 广告账户状态不是正常（欠款 / 被限制）超过 24 小时 —— 账户停摆时不会花钱也不会有新线索，系统里没有别处会说
     (b) => pushAdsAccountStatusItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 广告账户状态待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 广告 Agent 定时同步太久没成功 / 花费超日上限只读提醒（不自动改广告）
+    (b) => pushAdsAgentMonitorItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告 Agent 同步监控待办生成失败（不阻塞其他待办）:', e),
     ),
     // 推广计划每日检查：草稿等批准 / 批准后被改 / 到期阶段没过 / 对账偏差 / 检查自己没跑成
     (b) => pushPromoPlanWatchItems(supabase, b, nameOf).catch((e) =>
