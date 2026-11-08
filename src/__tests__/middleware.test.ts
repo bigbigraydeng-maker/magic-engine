@@ -78,7 +78,7 @@ function buildRequest(pathname: string): NextRequest {
   return new NextRequestCtor(new URL(`http://localhost:3001${pathname}`))
 }
 
-const KEYS = ['ADMIN_EMAILS', 'ADMIN_EMAIL_DOMAIN', 'CLIENT_VIEWERS'] as const
+const KEYS = ['ADMIN_EMAILS', 'ADMIN_EMAIL_DOMAIN', 'CLIENT_VIEWERS', 'DEMO_ADMINS'] as const
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
@@ -336,6 +336,48 @@ describe('dashboard auth middleware', () => {
     // Forwarded header lives on the request, exposed via x-middleware-request-*
     // headers on the response. Assert via the documented mechanism:
     expect(res.headers.get('x-middleware-request-x-user-role')).toBe('admin')
+  })
+
+  it('lets an env scoped admin open the project desk only for their client', async () => {
+    process.env.DEMO_ADMINS = 'staff@x.com:client-a'
+    getUserMock.mockResolvedValue({ data: { user: { email: 'staff@x.com' } } })
+
+    for (const path of ['/dashboard/impact', '/dashboard/impact/new', '/dashboard/impact/client-a']) {
+      const res = await middleware(buildRequest(path))
+      expect(res.status).toBe(200)
+      expect(res.headers.get('x-middleware-request-x-user-role')).toBe('admin')
+    }
+    const denied = await middleware(buildRequest('/dashboard/impact/client-b'))
+    expect(new URL(denied.headers.get('location')!).pathname).toBe('/dashboard/clients/client-a')
+  })
+
+  it('lets a DB scoped admin open assigned projects but never another client', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { email: 'staff@x.com' } } })
+    mockSupabaseIn.mockResolvedValue({
+      data: [
+        { client_id: 'client-a', access_type: 'fde', scoped_admin: true },
+        { client_id: 'client-b', access_type: 'fde', scoped_admin: true },
+        { client_id: 'client-c', access_type: 'client', scoped_admin: false },
+      ],
+      error: null,
+    })
+    for (const path of ['/dashboard/impact', '/dashboard/impact/new', '/dashboard/impact/client-b']) {
+      const res = await middleware(buildRequest(path))
+      expect(res.status).toBe(200)
+      expect(res.headers.get('x-middleware-request-x-user-role')).toBe('admin')
+    }
+    const denied = await middleware(buildRequest('/dashboard/impact/client-c'))
+    expect(new URL(denied.headers.get('location')!).pathname).toBe('/dashboard/clients/client-a')
+  })
+
+  it('keeps a customer account out of the project desk', async () => {
+    getUserMock.mockResolvedValue({ data: { user: { email: 'customer@x.com' } } })
+    mockSupabaseIn.mockResolvedValue({
+      data: [{ client_id: 'client-a', access_type: 'client', scoped_admin: false }],
+      error: null,
+    })
+    const res = await middleware(buildRequest('/dashboard/impact'))
+    expect(new URL(res.headers.get('location')!).pathname).toBe('/dashboard/clients/client-a')
   })
 
   it('lets a client-viewer through when accessing their scope', async () => {

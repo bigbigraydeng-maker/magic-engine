@@ -47,6 +47,7 @@ export const ADMIN_SECTIONS: NavSection[] = [
       { key: 'kernel-approvals', label: '等你点头的动作',   mark: 'KA', href: '/dashboard/kernel-approvals' },
       { key: 'launch-signoff',  label: '上线签字',         mark: 'SG', href: '/dashboard/launch-signoff' },
       { key: 'clients',   label: 'Clients',  mark: 'CL', href: '/dashboard/clients' },
+      { key: 'impact',    label: '项目',     mark: 'IM', href: '/dashboard/impact' },
     ],
   },
   {
@@ -216,6 +217,7 @@ function buildScopedAdminSections(clientId: string, industry: string | null): Na
     {
       items: [
         { key: 'client-home', label: '客户工作台', mark: 'CL', href: at('') },
+        { key: 'impact', label: '项目', mark: 'IM', href: '/dashboard/impact' },
         // 演示账号可能有多个客户（不同行业长出不同的工具）。列表页对受限
         // 管理员只返回他有权的客户，所以它天然就是切换器。
         { key: 'clients', label: '切换客户', mark: 'SW', href: '/dashboard/clients' },
