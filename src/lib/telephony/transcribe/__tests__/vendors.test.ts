@@ -106,4 +106,9 @@ describe('vendors (Twilio transcribe + DeepSeek analyse)', () => {
     expect(raw.facts).toEqual([good])
     expect(() => parseAnalysisJson('not json')).toThrow(SyntaxError)
   })
+  it('keeps the model customerSpoke verdict; a missing or invalid value falls back to unclear instead of voiding the analysis', () => {
+    expect(parseAnalysisJson(JSON.stringify({ summary: 's', customerSpoke: 'yes', customerSpokeQuote: 'hello this is Kam' }))).toMatchObject({ customerSpoke: 'yes', customerSpokeQuote: 'hello this is Kam' })
+    expect(parseAnalysisJson(JSON.stringify({ summary: 's' }))).toMatchObject({ customerSpoke: 'unclear', customerSpokeQuote: null })
+    expect(parseAnalysisJson(JSON.stringify({ summary: 's', customerSpoke: 'definitely', customerSpokeQuote: 42 }))).toMatchObject({ customerSpoke: 'unclear', customerSpokeQuote: null })
+  })
 })

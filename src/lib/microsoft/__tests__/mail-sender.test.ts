@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { classifySender } from '../mail-sender'
+import { classifySender, isOwnAddress } from '../mail-sender'
 
 const OWN = ['ctstours.co.nz']
 
@@ -141,5 +141,34 @@ describe('脏地址', () => {
   it.each(['', '   ', 'not-an-email', '@nolocal.com', 'nodomain@'])('%s → 不建人', (address) => {
     const v = classifySender({ address })
     expect(v).toMatchObject({ kind: 'skip', why: '地址不成形' })
+  })
+})
+
+describe('isOwnAddress：自家域名 + 点名的员工地址（WP-1a）', () => {
+  it('自家域名命中；子域名和别的域名不命中（保持原样）', () => {
+    expect(isOwnAddress('amy@ctstours.co.nz', ['ctstours.co.nz'])).toBe(true)
+    expect(isOwnAddress('AMY@CTSTOURS.co.nz', [' ctstours.co.nz '])).toBe(true)
+    expect(isOwnAddress('amy@mail.ctstours.co.nz', ['ctstours.co.nz'])).toBe(false)
+    expect(isOwnAddress('amy@gmail.com', ['ctstours.co.nz'])).toBe(false)
+  })
+
+  it('点名的员工地址只认这一个地址，不扩成整个域名', () => {
+    const own = ['op3@asiascapeholidays.com']
+    expect(isOwnAddress('Op3@AsiaScapeHolidays.com', own)).toBe(true)
+    expect(isOwnAddress('someone.else@asiascapeholidays.com', own)).toBe(false)
+    // 点名的是个人 Gmail：只认他，其他 Gmail 客人不受影响
+    expect(isOwnAddress('staff.person@gmail.com', ['staff.person@gmail.com'])).toBe(true)
+    expect(isOwnAddress('real.customer@gmail.com', ['staff.person@gmail.com'])).toBe(false)
+  })
+
+  it('没名单 / 脏地址 → 不判（不猜）', () => {
+    expect(isOwnAddress('amy@ctstours.co.nz', undefined)).toBe(false)
+    expect(isOwnAddress('amy@ctstours.co.nz', [])).toBe(false)
+    expect(isOwnAddress('not-an-email', ['ctstours.co.nz'])).toBe(false)
+  })
+
+  it('classifySender 也认点名的员工地址', () => {
+    expect(classifySender({ address: 'staff.person@gmail.com', ownDomains: ['staff.person@gmail.com'] })).toMatchObject({ kind: 'skip', why: '公司内部邮箱' })
+    expect(classifySender({ address: 'real.customer@gmail.com', ownDomains: ['staff.person@gmail.com'] }).kind).toBe('customer')
   })
 })

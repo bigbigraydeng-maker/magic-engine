@@ -108,6 +108,8 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   comment_token_invalid: 'one_click',
   comment_autoreply_run_failing: 'dev', // 评论 cron 连续多轮没扫完：授权 / Meta 接口问题，开发看日志
   comment_reply_scope_missing: 'one_click', // 主页管理员重新「连接 Meta」并勾上管理评论权限
+  comment_needs_human_reply: 'client_side', // 主页评论要人公开回，不含自动回复范围改动
+  comment_human_check_failed: 'dev', // 「要人回」清单读不出来
   conversion_capi_token_dead: 'one_click',
   daily_plan_post_unmeasured: 'one_click', // 重新连接 Meta / 确认帖子公开
   daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
@@ -286,6 +288,7 @@ export const BLIND_SPOT_NOTE: Partial<Record<ManualItemKind, string>> = {
   promo_plan_watch_broken: '推广计划每日检查今天没跑成，计划有没有问题看不出来',
   ads_tracking_preflight_broken: '开投前追踪检查今天没跑成，像素 / 落地页 / 留资有没有问题看不出来',
   libai_check_missing: '有文案生成后没做溯源检查，「未证实的句子」可能没列全',
+  comment_human_check_failed: '主页评论「要人回」清单今天没读成，可能漏报',
 }
 
 export function blindSpotNotes(items: readonly ManualItem[]): string[] {

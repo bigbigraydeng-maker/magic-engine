@@ -19,11 +19,12 @@ import { useCallback, useEffect, useState } from 'react'
 
 interface Config {
   ownEmailDomains: string[]
+  ownAddresses: string[]
   tradeDomains: string[]
   ownPhoneNumbers: string[]
 }
 
-type Field = 'ownEmailDomains' | 'tradeDomains' | 'ownPhoneNumbers'
+type Field = 'ownEmailDomains' | 'ownAddresses' | 'tradeDomains' | 'ownPhoneNumbers'
 
 const COPY: Record<Field, { icon: string; title: string; hint: string; placeholder: string; format: string; unit: string }> = {
   ownEmailDomains: {
@@ -33,6 +34,14 @@ const COPY: Record<Field, { icon: string; title: string; hint: string; placehold
     placeholder: 'ctstours.co.nz\nchinatravel.co.nz',
     format: '一行一个，也可以用逗号隔开。只要写域名，不要写 @ 前面那半截',
     unit: '个域名。已经在系统里的人会立刻重新归类',
+  },
+  ownAddresses: {
+    icon: '🧑‍💼',
+    title: '点名的员工邮箱（个人邮箱的同事）',
+    hint: '同事用的是 Gmail 这类私人邮箱、或所在公司不能整个算自己人时，在这里一个个点名。只认这一个地址，不会连累同域名的其他人。他发到公司邮箱的信不会被记成客人来信。',
+    placeholder: 'colleague@asiascapeholidays.com',
+    format: '一行一个，也可以用逗号隔开。要写完整邮箱地址',
+    unit: '个员工邮箱',
   },
   tradeDomains: {
     icon: '🤝',
@@ -69,6 +78,7 @@ export function DomainRulesPanel({ clientId }: { clientId: string }) {
       if (!res.ok) throw new Error(json.error ?? '加载失败')
       setConfig({
         ownEmailDomains: json.config?.ownEmailDomains ?? [],
+        ownAddresses: json.config?.ownAddresses ?? [],
         tradeDomains: json.config?.tradeDomains ?? [],
         ownPhoneNumbers: json.config?.ownPhoneNumbers ?? [],
       })
@@ -121,7 +131,7 @@ export function DomainRulesPanel({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
-      {(['ownEmailDomains', 'tradeDomains', 'ownPhoneNumbers'] as const).map((field) => {
+      {(['ownEmailDomains', 'ownAddresses', 'tradeDomains', 'ownPhoneNumbers'] as const).map((field) => {
         const copy = COPY[field]
         const stored = config?.[field] ?? []
         const value = draft[field] ?? stored.join('\n')
@@ -170,9 +180,9 @@ export function DomainRulesPanel({ clientId }: { clientId: string }) {
 
       {rejected.length > 0 && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">
-          ⚠ 这几条看不出是域名，<strong>没有存进去</strong>：{rejected.join('、')}
+          ⚠ 这几条没有存进去：{rejected.join('、')}
           <br />
-          要填的是邮箱 @ 后面那一截（像 <code>hot.co.nz</code>），不是公司名字。
+          域名框要填邮箱 @ 后面那一截（像 <code>hot.co.nz</code>），不能是公司名字，也不能是 Gmail / Outlook / Hotmail 这类私人邮箱的整个域名；员工邮箱框要填完整邮箱地址。
         </p>
       )}
 

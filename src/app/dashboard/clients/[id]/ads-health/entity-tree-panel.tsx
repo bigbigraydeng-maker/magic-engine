@@ -14,6 +14,7 @@
 
 import React, { useEffect, useState } from 'react'
 import type { AdNode, AdsetNode, CampaignNode, DeliveryState, EntityMetrics } from '@/lib/ads-strategy/entity-tree/build'
+import { ratesFromMetrics, type FunnelRates } from '@/lib/ads-strategy/entity-tree/funnel-baseline'
 import type { EntityTreeResult } from '@/lib/ads-strategy/entity-tree/load'
 
 const STATE_META: Record<DeliveryState, { label: string; dot: string; text: string }> = {
@@ -36,7 +37,7 @@ function Numbers({ m }: { m: EntityMetrics }) {
       <span>花费 <span className="text-gray-700">{usd(m.spend)}</span></span>
       <span>留资 <span className="text-gray-700">{m.leads}</span></span>
       <span>每条 <span className="text-gray-700">{m.costPerLead === null ? '—' : `$${m.costPerLead.toFixed(1)}`}</span></span>
-      <span>点击率 <span className="text-gray-700">{m.ctr === null ? '—' : `${(m.ctr * 100).toFixed(1)}%`}</span></span>
+      <span>链接点击率 <span className="text-gray-700">{m.ctr === null ? '—' : `${(m.ctr * 100).toFixed(1)}%`}</span></span>
     </div>
   )
 }
@@ -51,7 +52,37 @@ function StateBadge({ state, status }: { state: DeliveryState; status: string | 
   )
 }
 
-function AdRow({ ad }: { ad: AdNode }) {
+function pct(n: number | null): string {
+  return n === null ? '—' : `${(n * 100).toFixed(1)}%`
+}
+
+function money1(n: number | null): string {
+  return n === null ? '—' : `$${n.toFixed(1)}`
+}
+
+function versus(own: string, winner: FunnelRates | null, base: number | null, fmt: (n: number) => string): string {
+  if (winner === null) return `${own}（样本不足）`
+  return `${own}（赢家 ${base === null ? '—' : fmt(base)}）`
+}
+
+function linkCtrText(ctr: number | null, winner: FunnelRates | null): string {
+  if (ctr === null) return '暂无数据'
+  return versus(pct(ctr), winner, winner?.linkCtr ?? null, pct)
+}
+
+function AdFunnel({ ad, winner }: { ad: AdNode; winner: FunnelRates | null }) {
+  const rates = ratesFromMetrics(ad.metrics)
+  return (
+    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
+      <span>千次展示费用 {versus(money1(rates.cpm), winner, winner?.cpm ?? null, money1)}</span>
+      <span>链接点击率 {linkCtrText(ad.metrics.ctr, winner)}</span>
+      <span>表单完成率 {versus(pct(rates.completion), winner, winner?.completion ?? null, pct)}</span>
+      <span>3 秒播放率 {versus(pct(rates.hook), winner, winner?.hook ?? null, pct)}</span>
+    </div>
+  )
+}
+
+function AdRow({ ad, winner }: { ad: AdNode; winner: FunnelRates | null }) {
   return (
     <div className="ml-5 mt-1.5 border-l border-gray-100 pl-3">
       <div className="flex items-center justify-between gap-2">
@@ -59,11 +90,12 @@ function AdRow({ ad }: { ad: AdNode }) {
         <StateBadge state={ad.state} status={ad.effectiveStatus} />
       </div>
       <Numbers m={ad.metrics} />
+      <AdFunnel ad={ad} winner={winner} />
     </div>
   )
 }
 
-function AdsetRow({ s }: { s: AdsetNode }) {
+function AdsetRow({ s, winner }: { s: AdsetNode; winner: FunnelRates | null }) {
   return (
     <div className="mt-2.5 ml-2 border-l-2 border-gray-100 pl-3">
       <div className="flex items-center justify-between gap-2">
@@ -74,12 +106,12 @@ function AdsetRow({ s }: { s: AdsetNode }) {
         {s.dailyBudget === null ? '每天预算：设在系列上，或读不到' : `每天预算 ${s.currency ?? ''} ${s.dailyBudget.toFixed(0)}`}
       </div>
       <Numbers m={s.metrics} />
-      {s.ads.map(ad => <AdRow key={ad.id} ad={ad} />)}
+      {s.ads.map(ad => <AdRow key={ad.id} ad={ad} winner={winner} />)}
     </div>
   )
 }
 
-function CampaignBlock({ c }: { c: CampaignNode }) {
+function CampaignBlock({ c, winner }: { c: CampaignNode; winner: FunnelRates | null }) {
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="flex items-center justify-between gap-2">
@@ -95,7 +127,7 @@ function CampaignBlock({ c }: { c: CampaignNode }) {
           另有 {c.unplacedAds.count} 条广告（多半已删除）花了 {usd(c.unplacedAds.spend)}、留资 {c.unplacedAds.leads}，归不到具体广告组，已含在上面广告组的数字里。
         </p>
       )}
-      {c.adsets.map(s => <AdsetRow key={s.id} s={s} />)}
+      {c.adsets.map(s => <AdsetRow key={s.id} s={s} winner={winner} />)}
     </div>
   )
 }
@@ -123,6 +155,7 @@ export default function EntityTreePanel({ clientId }: { clientId: string }) {
   if (error) return <p className="mb-4 text-sm text-gray-500">{error}</p>
   if (!result) return <p className="mb-4 text-sm text-gray-400">广告组和广告加载中…</p>
   const { tree, hiddenAdsets, noPageRegistered } = result
+  const winner = tree.winnerBaseline
 
   const running = tree.campaigns.filter(c => c.state === 'running' || c.runningAdsets > 0)
   const unclear = tree.campaigns.filter(c => !running.includes(c) && c.state === 'unknown')
@@ -139,13 +172,13 @@ export default function EntityTreePanel({ clientId }: { clientId: string }) {
       {hiddenAdsets > 0 && <p className="mb-3 text-xs text-gray-400">另有 {hiddenAdsets} 个广告组没有列出（属于别的主页，或确认不了归属），不代表它们没在投。</p>}
       {running.length === 0 && !noPageRegistered && <p className="text-sm text-gray-500">能确认是这个客户的广告组里，快照显示现在没有在投的。</p>}
       <div className="grid gap-3">
-        {running.map(c => <CampaignBlock key={c.id} c={c} />)}
+        {running.map(c => <CampaignBlock key={c.id} c={c} winner={winner} />)}
       </div>
       {unclear.length > 0 && (
         <div className="mt-3">
           <p className="mb-2 text-sm text-amber-700">状态还没确认的系列 {unclear.length} 个（审核中、有问题或还没有快照，不能说它们停了）</p>
           <div className="grid gap-3">
-            {unclear.map(c => <CampaignBlock key={c.id} c={c} />)}
+            {unclear.map(c => <CampaignBlock key={c.id} c={c} winner={winner} />)}
           </div>
         </div>
       )}
@@ -153,7 +186,7 @@ export default function EntityTreePanel({ clientId }: { clientId: string }) {
         <details className="mt-3">
           <summary className="cursor-pointer text-sm text-gray-500">已停的系列 {stopped.length} 个（点开看）</summary>
           <div className="mt-3 grid gap-3">
-            {stopped.map(c => <CampaignBlock key={c.id} c={c} />)}
+            {stopped.map(c => <CampaignBlock key={c.id} c={c} winner={winner} />)}
           </div>
         </details>
       )}

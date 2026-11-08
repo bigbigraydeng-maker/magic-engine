@@ -151,6 +151,22 @@ export function nextActionFor(input: {
   }
 }
 
+/**
+ * 今天已经动过他了 —— 「该做什么」那一格改成「先别打 —— 今天做了什么」。
+ *
+ * 否则同一张卡一边灰着打勾写「今天联系过了」，一边还写「记下一步 / 打给他」，
+ * 自相矛盾（魏征复审 PR #3417 P2-b）。只换动词和理由，名单（hot / cold）不动 —— 位置不变是 day-list 的承诺。
+ */
+export function handledNextAction(na: NextAction, why: string): NextAction {
+  return {
+    ...na,
+    verb: 'hold',
+    verbLabel: VERB_LABEL.hold,
+    reason: why,
+    line: `${VERB_LABEL.hold} —— ${why}`,
+  }
+}
+
 /** 排序用的时间戳。没有触点（null / 空 / 解析不出）当成「刚刚」—— 新人排最前。 */
 function recency(iso: string | null): number {
   if (!iso) return Number.POSITIVE_INFINITY

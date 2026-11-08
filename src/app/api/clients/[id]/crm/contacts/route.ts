@@ -31,6 +31,9 @@ import {
   type StageRow,
 } from '@/lib/crm/contact-response-row'
 import { buildPriorityView } from '@/lib/crm/contact-list-view'
+import { contactsTouchedToday, localDayStartMs } from '@/lib/crm/day-list'
+import { loadStageSuppressedTodayIds } from '@/lib/crm/day-stage-events'
+import { handledNextAction, type NextAction } from '@/lib/crm/next-action'
 import { recentStaffNotes } from '@/lib/crm/recent-staff-notes'
 import { isMarketingAction } from '@/lib/crm/pipeline'
 import { SECTION_KEYS, type SectionKey } from '@/lib/crm/list-sections'
@@ -775,6 +778,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
   let stageRows: StageRow[]
   let briefs: BriefByContact
   let leadsConfig: unknown = null
+  let clientCountry = ''
   let allNoteContacts: Array<{ id: string; display_name: string | null; primary_email: string | null }> | null
   // Enrichment reads the same tenant-wide inputs regardless of the filtered contact list.
   // Start it with the other reads instead of waiting for all of them to finish.
@@ -816,7 +820,7 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     : selectedContacts.then((rows) => loadEnrichmentInputs(supabaseAdmin, clientId, rows.map((row) => row.id)))
   enrichmentInputs.catch(() => undefined)
   try {
-    ;[contacts, touches, stageRows, briefs, leadsConfig, allNoteContacts] = await Promise.all([
+    ;[contacts, touches, stageRows, briefs, { leadsConfig, country: clientCountry }, allNoteContacts] = await Promise.all([
       selectedContacts,
       // Summary is not consumed by the priority calculation or the list row.
       // Keep raw and metadata: they affect follow-up and do-not-contact rules.
@@ -836,10 +840,13 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
       loadLatestBriefByContact(clientId, sharedConversations),
       supabaseAdmin
         .from('clients')
-        .select('leads_config')
+        .select('leads_config, country')
         .eq('id', clientId)
         .maybeSingle()
-        .then((r) => (r.data as { leads_config: unknown } | null)?.leads_config ?? null),
+        .then((r) => {
+          const d = r.data as { leads_config: unknown; country: string | null } | null
+          return { leadsConfig: d?.leads_config ?? null, country: d?.country ?? '' }
+        }),
       noteContactsRead,
     ])
   } catch (err) {
@@ -878,25 +885,48 @@ async function getPriority(clientId: string, query: ListQuery, viewerEmail: stri
     byContact.set(t.contact_id, list)
   }
 
+  // 「今天」按客户所在地算（同 today 路由）：员工今天记的笔记 / 打的电话不许把人从
+  // 「今天要联系」挪走 —— 2026-10-30 CTS 员工记完笔记人掉进「先放着」，以为没存上。
+  // 读不到国家就按 NZ，猜错最多差两小时。
+  const timeZone = clientCountry.toUpperCase() === 'AU' ? 'Australia/Sydney' : 'Pacific/Auckland'
+  const nowPri = new Date()
+  // 今天被推到成交 / 停止营销的人也要就地变灰（和今天要联系页同一份读取）。
+  const stageSuppressedTodayIds = await loadStageSuppressedTodayIds(
+    clientId,
+    localDayStartMs(nowPri, timeZone),
+    (k) => stageMeta.get(k)?.suppressed ?? false,
+  )
+
   const customPerContact: Array<Record<CustomColumnKey, string | null>> = []
   const { sections, focus } = buildPriorityView(
     {
       contacts,
       touchpoints: touches,
       stageMeta,
-      now: new Date(),
+      now: nowPri,
       perPage: query.perPage,
       open: query.open,
       page: query.sectionPage,
       focusContactId: query.focusContactId,
       briefs,
       tradeIds,
+      dayStartMs: localDayStartMs(nowPri, timeZone),
+      touchedToday: contactsTouchedToday(touches, nowPri, timeZone),
+      stageSuppressedTodayIds,
     },
     (row, ranked) => {
       const tps = byContact.get(row.id) ?? []
       const built = responseRowFor(row as ContactRow, tps, stageMeta, buildContactModel(row, tps, stageMeta), ranked.seg, briefs.get(row.id) ?? null)
       customPerContact.push(built.custom)
       built.row.sources = enrichedPri.sources.get(row.id) ?? []
+      // 今天已处理：页面就地变灰打勾，位置不动。
+      built.row.handled = ranked.handled === true
+      built.row.handledWhy = ranked.handledWhy ?? null
+      if (ranked.handled === true) {
+        // 已处理的卡片不能同时又写着「记下一步」（魏征复审 P2-b）：灰色 + 打勾那句话说明今天做了什么。
+        // （afterCall 提醒本身由 dayRow 在员工记完笔记后撤掉；没记笔记时 dayRow 不会把卡片标成已处理。）
+        built.row.nextAction = handledNextAction(built.row.nextAction as NextAction, ranked.handledWhy ?? '今天已处理')
+      }
       return built.row
     },
   )

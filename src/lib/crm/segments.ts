@@ -33,6 +33,7 @@ import { resolveTravelDate, isDueToWake } from './travel-date'
 import { detectReturningLead, returningReason, type ReturningLead } from './returning-lead'
 // 「别再联系」的判据全仓只有一份 —— 这里要的是「什么时候被人推翻过」。
 import { withoutClearedDnc } from './dnc'
+import { isVoicemailOrSilentCall } from './customer-spoke'
 
 export type Temperature = 'hot' | 'warm' | 'cold' | 'off'
 
@@ -502,7 +503,10 @@ const PHONE_VERDICTS: ReadonlySet<string> = new Set(['bad_number', 'spoke'])
  * `no_answer` 是一次正常尝试。
  */
 export function isUnansweredCall(metadata: Record<string, unknown> | null | undefined): boolean {
-  return metadata?.answered === false
+  // 通话分析确认客人没出声（语音信箱 / 对方全程没说话）：线路虽然「接通」了，客人并没有联系上，
+  // 跟没人接一样处理 —— 不算我们最后一次出站、不算今天已出手、不算聊过。
+  // 分析还没出结果（null）不在这里：未知时不下结论，也不藏人（见 lib/crm/customer-spoke）。
+  return metadata?.answered === false || isVoicemailOrSilentCall(metadata)
 }
 
 export function isFailedReach(outcome: string | null | undefined): boolean {
@@ -925,8 +929,19 @@ export function segmentContact(
   //      掉进先放着 —— 恰恰是最不该丢的人。只认**人打的**（`automated` 的 AI 外呼不算）、
   //      **通话是最后一次人出手**（之后有邮件 / 备注 / 再次拨出就算有人跟了）、没有未到期的回电约定。
   //      客人之后又来消息，规则 2 会接手；这里不重复。
+  //  🔴 员工手打的笔记（source = me_manual）不是「打通的电话」（PM 2026-10-30，CTS 员工 info@ 实测）：
+  //  `recordManualTouchpoint` 把每条笔记都写成 phone / outbound，分类兜底值又是 spoke，
+  //  所以员工刚记完一笔，这里仍把那条笔记当成「刚通完电话」→ 「还没记下一步」提醒永远不消，
+  //  员工以为没存上。只认真正的通话记录；笔记晚于通话时，下面 `lastSpoke >= lastOutbound`
+  //  自然为假 —— 这就是「有人跟了」。
   const spokeCalls = tps.filter(
-    (t) => t.channel === 'phone' && t.direction === 'outbound' && !t.automated && t.outcome === 'spoke',
+    (t) =>
+      t.channel === 'phone' &&
+      t.direction === 'outbound' &&
+      !t.automated &&
+      !t.unansweredCall &&
+      t.source !== 'me_manual' &&
+      t.outcome === 'spoke',
   )
   const lastSpoke = Math.max(0, ...spokeCalls.map((t) => ts(t.occurredAt)))
   const hasFutureCallback = tps.some((t) => t.callbackAt && ts(t.callbackAt) > nowMs)

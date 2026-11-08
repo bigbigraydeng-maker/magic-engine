@@ -20,6 +20,7 @@ import { prescribe, Prescription } from './prescription'
 import { loadOutcomeConfig } from './portfolio/outcome-config'
 import { countOutcome, type OutcomeStep } from './portfolio/outcome-ladder'
 import { D3_COST_MULTIPLE } from './portfolio/diagnostics/thresholds'
+import { linkClickRate } from './link-clicks'
 
 /** How many days of history to load for the baseline (needs ≥ 2 windows). */
 const HISTORY_DAYS = 30
@@ -36,6 +37,12 @@ interface InsightRow {
   frequency_7d: number | null
   /** 客户主结果口径的当天计数（countOutcome）；null / 缺省 = 归不上，冷启动不判。 */
   primary_results?: number | null
+  /**
+   * Link clicks ÷ impressions for the strip. Undefined = caller did not supply it
+   * (tests keep the stored ctr). Null = actions were missing, so the strip shows unknown.
+   * Fatigue still uses `ctr` (all clicks). The 0.5% floor assumes that caliber.
+   */
+  link_ctr?: number | null
 }
 
 /** Raw columns needed to count the client's primary outcome (same shape countOutcome reads). */
@@ -255,7 +262,7 @@ function buildCampaignNarrative(
     verdict:       judged.verdict,
     headline:      judged.headline,
     metrics:       judged.metrics,
-    ctr_series:    last7.map(r => ({ date: r.insight_date, ctr: r.ctr })),
+    ctr_series:    last7.map(r => ({ date: r.insight_date, ctr: r.link_ctr !== undefined ? r.link_ctr : r.ctr })),
     latest_spend_7d:   Math.round(latestSpend7d * 100) / 100,
     latest_results_7d: latestResults7d,
     frequency_7d:      freq7d,
@@ -358,6 +365,7 @@ export async function evaluateClientAdHealth(
     const campaignGoals = config.primary === null ? new Map<string, Set<string | null>>() : await loadCampaignGoals(clientId)
     const rows = rawRows.map(r => ({
       ...r,
+      link_ctr: linkClickRate(r.actions, r.impressions),
       primary_results: primaryCountOf(config.primary, r, campaignGoalFor(campaignGoals.get(r.entity_id))),
     }))
     const payload = buildNarrativePayload(groupByCampaign(rows), insightDate, cfg, industry, targetCost)

@@ -88,6 +88,7 @@ import { fetchAutoRunTodos } from '@/lib/pm-todo/auto-run-items'
 import { fetchCommentScopeTodos } from '@/lib/pm-todo/comment-scope-items'
 import { fetchCommentReplyScopeTodos } from '@/lib/pm-todo/comment-reply-scope-items'
 import { fetchCommentAutoreplyRunFailingTodos } from '@/lib/pm-todo/comment-autoreply-run-failing-items'
+import { pushCommentHumanItems } from '@/lib/pm-todo/comment-human-items'
 import { fetchKernelHandoffTodos } from '@/lib/kernel/handoff'
 import { auditCrossClientLeaks } from '@/lib/clients/cross-client-audit'
 import {
@@ -370,6 +371,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 评论读不到（缺权限 / 令牌被拒）—— 只有人能补，日志里那行 console.error 没人会看
     (b) => pushCommentScopeItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 评论权限待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 主页评论 needs_human 读时分流 → 今日待办（独立通道，评论权限待办失败也不挡）
+    (b) => pushCommentHumanItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] 评论要人回待办生成失败（不阻塞其他待办）:', e),
     ),
     // 马良：Creatomate 成片的 9 宫格自检结果——过关等审片（署名）、不过关问返工还是放弃、
     // 检不了 / 出片 2 小时后没检进系统欠账栏。拉模式读工单 + 快照，事件丢了也照样出得来

@@ -20,6 +20,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { parseNote, type NoteParse } from '@/lib/crm/note-parser'
+import { withStructuredCallback } from '@/lib/crm/callback-pick'
 
 export interface RecordTouchpointInput {
   clientId: string
@@ -81,6 +82,13 @@ export interface RecordTouchpointInput {
    * 只标**按钮动作**，不标聊天内容 —— 手打的笔记不带这个字段。
    */
   action?: 'snooze' | 'unsnooze' | null
+  /**
+   * 销售在「约回电」快捷项里选定的回电时间（ISO，调用方已按客户时区换算并校验过：
+   * 不是过去、不超过 60 天，见 lib/crm/callback-pick）。
+   * 传了就写成 `metadata.callback_at` + outcome=`callback_set`，并**覆盖** AI 从原话
+   * 里读出的时间；「别再联系」/ 坏号码仍然优先。不传 = 照旧只看解析结果。
+   */
+  callbackAt?: string | null
 }
 
 export interface RecordTouchpointResult {
@@ -121,13 +129,15 @@ export async function recordManualTouchpoint(
    * 去推日期（那会让整条 callback 变成 null，静悄悄少排一次跟进）。
    */
   const noteBasis = new Date(occurredAt)
-  const parsed =
+  const parsedFromNote =
     input.parsed ??
     (await parseNote(note, {
       brandTerms: input.brandTerms,
       timeZone: input.timeZone,
       now: Number.isNaN(noteBasis.getTime()) ? new Date() : noteBasis,
     }))
+  // 销售点按钮选的回电时间是确定的，赢过 AI 从原话里读出来的（原话 raw 仍原样保存）。
+  const parsed = withStructuredCallback(parsedFromNote, input.callbackAt)
 
   // 1) 幂等写触点。ignoreDuplicates → ON CONFLICT DO NOTHING:
   //    命中冲突时 select 返回空,maybeSingle() 得到 null,created=false。

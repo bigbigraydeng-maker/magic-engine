@@ -6,13 +6,14 @@ import type { EntityMetrics, EntityTree } from '@/lib/ads-strategy/entity-tree/b
 import type { EntityTreeResult } from '@/lib/ads-strategy/entity-tree/load'
 
 const metrics = (spend: number, leads: number): EntityMetrics => ({
-  spend, impressions: 1000, clicks: 30, leads, messagingConversations: 0,
+  spend, impressions: 1000, clicks: 80, linkClicks: 30, video3sViews: 200, leads, messagingConversations: 0,
   costPerLead: leads > 0 ? spend / leads : null, ctr: 0.03, activeDays: 7,
 })
 
 const tree: EntityTree = {
   window: { since: '2026-10-22', until: '2026-10-28', days: 7 },
   snapshotAt: '2026-10-28T12:30:00Z',
+  winnerBaseline: null,
   campaigns: [
     {
       id: 'c1', name: '运行中系列', state: 'running', effectiveStatus: 'ACTIVE', metrics: metrics(167, 11), runningAdsets: 2, runningAds: 2, metricsShared: false, unplacedAds: { count: 0, spend: 0, leads: 0 },
@@ -43,6 +44,42 @@ describe('EntityTreePanel', () => {
     expect(screen.getByText(/在投 2 个广告组、2 条广告/)).toBeTruthy()
     expect(screen.getByText('状态不明')).toBeTruthy()
     expect(screen.getByText(/每天预算：设在系列上，或读不到/)).toBeTruthy()
+    expect(screen.getAllByText(/链接点击率/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/样本不足/).length).toBeGreaterThan(0)
+  })
+
+  it('有赢家基线时，漏斗对照赢家而不是写样本不足', async () => {
+    const withWinner: EntityTree = {
+      ...tree,
+      winnerBaseline: { cpm: 12, linkCtr: 0.02, completion: 0.25, hook: 0.3 },
+    }
+    mockFetch(200, { success: true, tree: withWinner, hiddenAdsets: 0, noPageRegistered: false })
+    render(<EntityTreePanel clientId="c" />)
+    expect((await screen.findAllByText(/赢家 \$12.0/)).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/样本不足/)).toBeNull()
+  })
+
+  it('链接点击没存过时写暂无数据，不跟赢家比成 0%', async () => {
+    const unknown = metrics(40, 5)
+    unknown.ctr = null
+    unknown.linkClicks = 0
+    const withUnknown: EntityTree = {
+      ...tree,
+      winnerBaseline: { cpm: 12, linkCtr: 0.02, completion: 0.25, hook: 0.3 },
+      campaigns: [{
+        ...tree.campaigns[0],
+        adsets: [{
+          ...tree.campaigns[0].adsets[0],
+          ads: [{ ...tree.campaigns[0].adsets[0].ads[0], metrics: unknown }],
+        }],
+      }],
+    }
+    mockFetch(200, { success: true, tree: withUnknown, hiddenAdsets: 0, noPageRegistered: false })
+    render(<EntityTreePanel clientId="c" />)
+    const line = await screen.findByText(/链接点击率 暂无数据/)
+    expect(line.textContent).not.toContain('赢家')
+    expect(line.textContent).not.toContain('0.0%')
+    expect(line.textContent).not.toContain('样本不足')
   })
 
   it('puts stopped campaigns behind a collapsed section', async () => {

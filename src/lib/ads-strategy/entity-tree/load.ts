@@ -3,6 +3,7 @@
  * Read-only: database only, never calls Meta.
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { countAction } from '@/lib/ads-strategy/link-clicks'
 import { buildEntityTree } from './build'
 import type { EntityTree, InsightRow, SnapshotRow } from './build'
 import { scopeToClientPage } from './scope'
@@ -33,6 +34,8 @@ interface RawInsight {
   clicks: number | string | null
   leads: number | string | null
   messaging_conversations: number | string | null
+  actions?: unknown
+  video_3s_views?: number | string | null
 }
 
 interface RawSnapshot {
@@ -69,6 +72,8 @@ export function toInsightRow(r: RawInsight): InsightRow | null {
     clicks: num(r.clicks),
     leads: num(r.leads),
     messagingConversations: num(r.messaging_conversations),
+    linkClicks: countAction(r.actions, 'link_click'),
+    video3sViews: num(r.video_3s_views),
   }
 }
 
@@ -142,7 +147,7 @@ export async function loadEntityTree(clientId: string, days: number, supabase: S
   const rawInsights = await pageAll<RawInsight>((from, to) =>
     supabase
       .from('ad_daily_insights')
-      .select('level, entity_id, entity_name, parent_id, insight_date, spend, impressions, clicks, leads, messaging_conversations')
+      .select('level, entity_id, entity_name, parent_id, insight_date, spend, impressions, clicks, leads, messaging_conversations, actions, video_3s_views')
       .eq('client_id', clientId)
       .gte('insight_date', since)
       .lte('insight_date', endDate)

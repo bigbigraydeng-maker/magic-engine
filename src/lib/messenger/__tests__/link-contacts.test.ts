@@ -441,6 +441,36 @@ describe('linkMessengerConversation → segments（真人回复 vs AI 自动回�
     // lastHumanOut = 09:00，客户最后一条 10:00 更晚 → 客户在等我们（真人）回。
     expect(segment).toBe('replied')
   })
+
+  // WP-1a：Meta AI 客服接管期间的追问（间隔 > 30 秒）和系统通知，以前被当成真人回复。
+  it('AI 客服接管期间，间隔很久的追问也是机器 → 仍是 new_untouched（没有真人看过他）', async () => {
+    const { segment, directions } = await segmentAfterLink([
+      { direction: 'inbound', body: 'hi, I want the China tour', sentAt: AT(8) },
+      { direction: 'outbound', body: '你的 AI 客服将会回复这个聊天。', sentAt: '2026-07-24T08:00:01+0000', tags: ['inbox'] },
+      { direction: 'outbound', body: 'Still interested in the China tour?', sentAt: AT(10), tags: ['inbox'] },
+    ])
+    expect(directions).toEqual(['inbound'])
+    expect(segment).toBe('new_untouched')
+  })
+
+  it('系统通知（广告回复 / 分配对话）本身不算真人回复 → 仍是 new_untouched', async () => {
+    const { segment, directions } = await segmentAfterLink([
+      { direction: 'inbound', body: 'hi', sentAt: AT(8) },
+      { direction: 'outbound', body: 'Ann 回复了一条广告。', sentAt: AT(9), tags: ['inbox'] },
+    ])
+    expect(directions).toEqual(['inbound'])
+    expect(segment).toBe('new_untouched')
+  })
+
+  it('转给真人（「你已接管」）之后的回复才算真人回复', async () => {
+    const { directions } = await segmentAfterLink([
+      { direction: 'inbound', body: 'hi', sentAt: AT(8) },
+      { direction: 'outbound', body: '你的 AI 客服将会回复这个聊天。', sentAt: '2026-07-24T08:00:01+0000', tags: ['inbox'] },
+      { direction: 'outbound', body: '你已接管这个聊天。', sentAt: AT(10), tags: ['inbox'] },
+      { direction: 'outbound', body: 'Hi, which dates suit you?', sentAt: AT(11), tags: ['inbox', 'source:chat'] },
+    ])
+    expect(directions).toEqual(['inbound', 'outbound'])
+  })
 })
 
 // ── 唯一全名认亲（2026-07-31 PM 反馈「有大量重名的」后加的第 2 级）─────────────

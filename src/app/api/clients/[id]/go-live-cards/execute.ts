@@ -8,9 +8,10 @@ import type { SpendActivationAuthority } from '@/lib/ads/spend-activation'
 import type { ExecutionOutcome, SettleResult } from '@/lib/ads-go-live'
 import { settleGoLive, type ActivateAttempt, type LayerRead } from '@/lib/ads-go-live'
 import type { GoLiveIds } from '@/lib/ads-go-live/draft'
+import { existingAdSetCountsAsLive } from '@/lib/ads-go-live/existing-ad-set-live'
 import { approveDraft } from '@/lib/ads-strategy/draft-and-gate'
 import { activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
-import { fetchCampaignStatus } from '@/lib/meta/readback'
+import { fetchCampaignStatus, fetchEffectiveStatus } from '@/lib/meta/readback'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 
 function held(reason: string): ExecutionOutcome {
@@ -43,13 +44,20 @@ async function ownsGoLive(
   return activationRunId(current) === cardRunId
 }
 
-function targets(ids: GoLiveIds): { name: string; id: string }[] {
+type LiveTarget = { name: string; id: string; existingAdSet?: boolean }
+
+function targets(ids: GoLiveIds): LiveTarget[] {
   const ads = ids.adIds.map((id, index) => ({
     name: ids.adIds.length === 1 ? '广告' : `第${index + 1}条广告`,
     id,
   }))
-  // A reused campaign or ad set stays as it was. It is not part of the "is this live" read.
-  const adSet = ids.reusedAdSet ? [] : [{ name: '广告组', id: ids.adSetId }]
+  // A reused campaign stays out of this read. A reused ad set stays switched as it was,
+  // but its effective status still decides whether the new ad is actually live.
+  const adSet: LiveTarget[] = [{
+    name: '广告组',
+    id: ids.adSetId,
+    ...(ids.reusedAdSet ? { existingAdSet: true } : {}),
+  }]
   const campaign = ids.reusedCampaign || ids.reusedAdSet ? [] : [{ name: '广告系列', id: ids.campaignId }]
   return [...ads, ...adSet, ...campaign]
 }
@@ -61,11 +69,17 @@ function skipIds(ids: GoLiveIds): string[] {
   return skip
 }
 
+async function layerStatus(target: LiveTarget, token: string): Promise<string | null> {
+  if (!target.existingAdSet) return fetchCampaignStatus(target.id, token)
+  const actual = await fetchEffectiveStatus(target.id, token)
+  return existingAdSetCountsAsLive(actual) ? 'ACTIVE' : actual
+}
+
 async function readLayers(ids: GoLiveIds, token: string): Promise<LayerRead[] | null> {
   try {
     return await Promise.all(targets(ids).map(async (target) => ({
       name: target.name,
-      status: await fetchCampaignStatus(target.id, token),
+      status: await layerStatus(target, token),
     })))
   } catch {
     return null
@@ -195,6 +209,30 @@ async function runSettle(
   }
 }
 
+/** A reused campaign is left as it is. If it is paused, nothing spends, so this is not a launch. */
+async function reusedCampaignPaused(ids: GoLiveIds, token: string): Promise<ExecutionOutcome | null> {
+  if (!ids.reusedCampaign) return null
+  let status: string | null = null
+  try {
+    status = await fetchCampaignStatus(ids.campaignId, token)
+  } catch {
+    status = null
+  }
+  if (status === 'ACTIVE') return null
+  if (status === 'PAUSED') {
+    return {
+      settle: {
+        outcome: 'held',
+        readback: '系列暂停，不会花钱',
+        reason: '系列暂停，不会花钱。',
+        paused: false,
+      },
+      note: null,
+    }
+  }
+  return held('读不到原系列是不是开着，没有开。')
+}
+
 function allowed(authority: SpendActivationAuthority): boolean {
   return authority.basis === 'go_live_card' && authority.actorEmail.trim().length > 0 && !!authority.cardRunId
 }
@@ -212,6 +250,18 @@ export async function executeConfirmedGoLive(args: {
   if (!allowed(args.authority)) return held('这次确认对不上，没有开，系列保持暂停。')
   const token = await getMetaTokenForClient(args.clientId)
   if (!token) return held('拿不到这个客户的广告授权，没有开，系列保持暂停。')
+  const blocked = await reusedCampaignPaused(ids, token)
+  if (blocked) {
+    const note = await writeMark(
+      args.supabase,
+      args.clientId,
+      args.draftId,
+      blocked.settle,
+      (args.now ?? new Date()).toISOString(),
+      args.authority.cardRunId ?? '',
+    )
+    return { settle: blocked.settle, note }
+  }
   const settled = await runSettle({ ...args, ids }, token)
   const note = await writeMark(
     args.supabase,

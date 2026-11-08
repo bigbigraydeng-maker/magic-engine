@@ -3,7 +3,7 @@
  * Numbers that were not read stay unreadable. Nothing here is filled in.
  */
 
-import { isApprovableKind } from '@/lib/ads-strategy/ad-draft'
+import { inheritedScheduleText, isApprovableKind } from '@/lib/ads-strategy/ad-draft'
 import {
   ConfirmationCardError,
   contentFingerprint,
@@ -28,11 +28,21 @@ function moneyLine(view: PausedDraftView): { text: string; problem: HardCheck | 
 }
 
 function dateLine(view: PausedDraftView): { text: string; problem: HardCheck | null } {
-  if (view.inheritedSchedule && view.durationDays === null) {
-    return { text: '这个广告组没有结束日', problem: null }
-  }
-  if (view.inheritedSchedule && Number.isInteger(view.durationDays) && (view.durationDays ?? 0) >= 1) {
-    return { text: `跟这个广告组一起跑 ${view.durationDays} 天`, problem: null }
+  if (view.inheritedSchedule) {
+    const daysUnread = view.endTime === undefined
+      && view.durationDays !== null
+      && (!Number.isInteger(view.durationDays) || view.durationDays < 1)
+    if (daysUnread) {
+      return { text: '开始日读不到', problem: { label: '开始日', state: 'unread', reason: '还没读到这个广告组的结束日' } }
+    }
+    return {
+      text: inheritedScheduleText({
+        dailyBudget: 1,
+        durationDays: view.durationDays,
+        ...(view.endTime !== undefined ? { endTime: view.endTime } : {}),
+      }),
+      problem: null,
+    }
   }
   const days = view.durationDays
   if (days === null || !Number.isInteger(days) || days < 1 || days > 30) {

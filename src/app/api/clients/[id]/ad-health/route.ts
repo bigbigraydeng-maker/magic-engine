@@ -33,8 +33,62 @@ import {
   type NarrativeRowForClient,
 } from '@/lib/ads-strategy/narrative-client-view'
 import { overlayLiveGoal } from '@/lib/ads-strategy/agents/growth-live-goal'
+import { overlayLinkCtrSeries, type LinkCtrCampaign, type LinkCtrInsight } from '@/lib/ads-strategy/link-clicks'
 
 export const dynamic = 'force-dynamic'
+
+function seriesDates(payload: Record<string, unknown> | null): string[] {
+  if (!payload || !Array.isArray(payload.campaigns)) return []
+  const dates: string[] = []
+  for (const item of payload.campaigns) {
+    if (!item || typeof item !== 'object') continue
+    const series = (item as { ctr_series?: unknown }).ctr_series
+    if (!Array.isArray(series)) continue
+    for (const point of series) {
+      if (point && typeof point === 'object' && typeof (point as { date?: unknown }).date === 'string') {
+        dates.push((point as { date: string }).date)
+      }
+    }
+  }
+  return dates
+}
+
+function asCampaigns(payload: Record<string, unknown>): LinkCtrCampaign[] {
+  if (!Array.isArray(payload.campaigns)) return []
+  return payload.campaigns.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const row = item as { campaign_id?: unknown; ctr_series?: unknown }
+    if (typeof row.campaign_id !== 'string' || !Array.isArray(row.ctr_series)) return []
+    const series = row.ctr_series.flatMap((point) => {
+      if (!point || typeof point !== 'object') return []
+      const p = point as { date?: unknown; ctr?: unknown }
+      if (typeof p.date !== 'string') return []
+      return [{ ...p, date: p.date, ctr: typeof p.ctr === 'number' ? p.ctr : null }]
+    })
+    return [{ ...(item as object), campaign_id: row.campaign_id, ctr_series: series }]
+  })
+}
+
+async function withLinkCtr<T extends NarrativeRowForClient>(clientId: string, latest: T | null): Promise<T | null> {
+  if (!latest?.payload) return latest
+  const dates = seriesDates(latest.payload)
+  if (dates.length === 0) return latest
+  const since = dates.reduce((a, b) => (a < b ? a : b))
+  const until = dates.reduce((a, b) => (a > b ? a : b))
+  const { data, error } = await supabaseAdmin
+    .from('ad_daily_insights')
+    .select('entity_id, insight_date, impressions, actions')
+    .eq('client_id', clientId)
+    .eq('level', 'campaign')
+    .gte('insight_date', since)
+    .lte('insight_date', until)
+  if (error) {
+    console.warn('[api/ad-health] 链接点击读不到，卡片仍显示已存数字', { error: error.message })
+    return latest
+  }
+  const campaigns = overlayLinkCtrSeries(asCampaigns(latest.payload), (data ?? []) as LinkCtrInsight[])
+  return { ...latest, payload: { ...latest.payload, campaigns } }
+}
 
 export async function GET(
   req: NextRequest,
@@ -104,12 +158,15 @@ export async function GET(
       ? (growthRows[0] ? await overlayLiveGoal(clientId, growthRows[0]) : null)
       : toClientGrowthView(growthRows, new Date())
 
+  const latestRaw = (latestRes.data ?? null) as NarrativeRowForClient | null
+  const latestOverlaid = await withLinkCtr(clientId, latestRaw)
+
   return NextResponse.json({
     success: true,
     // Non-staff get a whitelisted payload: portfolio_diagnoses (D11 etc.) stays internal.
     latest: fullView
-      ? (latestRes.data ?? null)
-      : toClientNarrativeView((latestRes.data ?? null) as NarrativeRowForClient | null),
+      ? latestOverlaid
+      : toClientNarrativeView(latestOverlaid),
     // Oldest → newest for the trend strip.
     history: (historyRes.data ?? []).slice().reverse(),
     industry: (clientRes.data as { industry?: string | null } | null)?.industry ?? null,

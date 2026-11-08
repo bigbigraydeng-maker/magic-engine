@@ -26,6 +26,8 @@ import { INDUSTRY_OPTIONS } from '@/lib/clients/industries'
 import LessonToggle from './_components/LessonToggle'
 import LessonVerify, { type SiteOption } from './_components/LessonVerify'
 import LessonTrial from './_components/LessonTrial'
+import AutoJudgeAll from './_components/AutoJudgeAll'
+import AiVerdictBanner from './_components/AiVerdictBanner'
 import { trialSampleFor } from '@/lib/agent-learning/lesson-trial/eligibility'
 
 export const dynamic = 'force-dynamic'
@@ -216,8 +218,9 @@ export default async function AdEnginePage() {
               待试的专家经验（{trialable.length} 条）
             </summary>
             <p className="mt-2 text-sm text-slate-600">
-              点“试一下”对比有/没有这条经验的效果，只是测试，不会正式启用。
+              AI 会自己对比有/没有这条经验的效果并给结论，只是测试，不会正式启用。
             </p>
+            <AutoJudgeAll pending={trialable.filter(l => !l.evidence?.ai_verdict).length} />
             <div className="mt-3 space-y-3">
               {trialable.map(l => <LessonCard key={l.lesson_key} lesson={l} sites={sites} clients={allClients} />)}
             </div>
@@ -407,7 +410,13 @@ function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: S
         <LessonToggle lessonKey={l.lesson_key} isActive={l.is_active} />
       </div>
       <LessonVerify lessonKey={l.lesson_key} lesson={l.lesson} rationale={l.rationale} sites={sites} clients={clients} />
-      {!l.is_active && trialSampleFor(l.lesson_key, l.evidence?.kind) && <LessonTrial lessonKey={l.lesson_key} />}
+      {!l.is_active && <AiVerdictBanner verdict={l.evidence?.ai_verdict} />}
+      {!l.is_active && trialSampleFor(l.lesson_key, l.evidence?.kind) && (
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer text-slate-500">手动再试一次 / 自己决定</summary>
+          <LessonTrial lessonKey={l.lesson_key} />
+        </details>
+      )}
     </div>
   )
 }
