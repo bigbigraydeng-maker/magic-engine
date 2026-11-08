@@ -1,7 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { ManualItem } from '../manual-item-types'
 import {
   pushAdsAgentStaleItems,
+  pushAdsDailyPullbackGapItems,
   pushAdsDailySpendOverCapNoticeItems,
+  pushAdsHeartbeatStallItems,
 } from '../ads-agent-stale-items'
 
 vi.mock('@/lib/meta/client-ad-accounts', () => ({
@@ -29,6 +32,7 @@ function chain(table: string, rows: unknown[]) {
   const q: Record<string, unknown> = {
     eq: () => q,
     not: () => q,
+    in: () => q,
     gte: () => q,
     order: () => q,
     limit: () => q,
@@ -63,5 +67,57 @@ describe('pushAdsDailySpendOverCapNoticeItems', () => {
     const items: Parameters<typeof pushAdsDailySpendOverCapNoticeItems>[1] = []
     await pushAdsDailySpendOverCapNoticeItems({} as never, items, () => 'n')
     expect(items).toHaveLength(0)
+  })
+})
+
+describe('pushAdsHeartbeatStallItems', () => {
+  const env = process.env
+
+  afterEach(() => {
+    process.env = { ...env }
+  })
+
+  it('does not alert when dry and no clients', async () => {
+    process.env.AD_HEARTBEAT_MODE = 'dry'
+    process.env.AD_HEARTBEAT_CLIENT_IDS = ''
+    const items: ManualItem[] = []
+    const supabase = { from: () => chain('cron_run_logs', []) }
+    await pushAdsHeartbeatStallItems(supabase as never, items, NOW)
+    expect(items).toHaveLength(0)
+  })
+
+  it('alerts when configured client never succeeds', async () => {
+    process.env.AD_HEARTBEAT_MODE = 'dry'
+    process.env.AD_HEARTBEAT_CLIENT_IDS = 'c1'
+    const items: ManualItem[] = []
+    const supabase = { from: () => chain('cron_run_logs', []) }
+    await pushAdsHeartbeatStallItems(supabase as never, items, NOW)
+    expect(items).toHaveLength(1)
+    expect(items[0]?.kind).toBe('ads_heartbeat_stall')
+  })
+})
+
+describe('pushAdsDailyPullbackGapItems', () => {
+  it('emits per-client gap and skips when stale already on client', async () => {
+    const finished = '2026-11-08T09:00:00.000Z'
+    const supabase = {
+      from: (table: string) => {
+        if (table === 'cron_run_logs') {
+          return chain(table, [{
+            finished_at: finished,
+            summary: {
+              errors: [
+                { client_id: 'c1', source: 'ad_daily', error: 'timeout' },
+                { client_id: 'c2', source: 'ad_health', error: 'x' },
+              ],
+            },
+          }])
+        }
+        return chain(table, [])
+      },
+    }
+    const items: ManualItem[] = [{ kind: 'ads_agent_sync_stale', client_id: 'c1', client_name: 'A', what: 'w', how: 'h', href: 'u' }]
+    await pushAdsDailyPullbackGapItems(supabase as never, items, NOW, (id) => `名-${id}`)
+    expect(items.filter((i) => i.kind === 'ads_agent_daily_pull_gap').map((i) => i.client_id)).toEqual(['c2'])
   })
 })
