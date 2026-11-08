@@ -319,8 +319,27 @@ export function isWithinHumanStopEnvelope(
   return { within: reasons.length === 0, reasons }
 }
 
-/** 这一次该用哪套信封判。`'human_stop'` = 人按的收类动作。 */
-export type EnvelopeChoice = 'human_stop' | 'ads_autonomy'
+/**
+ * PM 本人批的加钱类动作用的信封（第 3 刀 3a §2.3）。纯函数。
+ *
+ * 跟 AI 自治信封**只差一条**：学习期「读不到」不再当作在学习期（PM 知情批准；CTS/NAL
+ * 广告组的学习期状态 09-27 实测全是空，照 AI 信封判，PM 批的加预算会全部死在执行前）。
+ * 读到了、明确还在学习期 → 照样拒；±20%、日上限、72 小时、实验、撤回处理一条不放。
+ *
+ * 🔴 选不选这套信封不看可自报的 `triggered_by`，看放行是不是 PM 名单里的人签的
+ *    （`spend-approval.ts` 的 `signedBySpendApprover`，由调用方从决策表读出来传进来）。
+ */
+export function isWithinPmScaleEnvelope(
+  request: EnvelopeRequest,
+  facts: EnvelopeFacts,
+  envelope: AutonomyEnvelope,
+): EnvelopeVerdict {
+  const relaxed: EnvelopeFacts = facts.learningStage === null ? { ...facts, learningPhaseApplicable: false } : facts
+  return isWithinEnvelope(request, relaxed, envelope)
+}
+
+/** 这一次该用哪套信封判。`'human_stop'` = 人按的收类动作；`'pm_scale'` = PM 本人批的加钱类。 */
+export type EnvelopeChoice = 'human_stop' | 'ads_autonomy' | 'pm_scale'
 
 /**
  * 分派：人按的收类动作走人工信封，其余一律走 AI 自治信封。
@@ -350,6 +369,11 @@ export function selectEnvelopeVerdict(args: {
   readonly request: EnvelopeRequest
   readonly facts: EnvelopeFacts
   readonly envelope: AutonomyEnvelope
+  /**
+   * 放行是不是 PM 本人签的加钱类动作（调用方从决策表读出、经 `signedBySpendApprover` 判定）。
+   * 缺省 = 否 = 原行为。
+   */
+  readonly pmApprovedSpendIncrease?: boolean
 }): EnvelopeVerdict & { readonly envelopeUsed: EnvelopeChoice } {
   const human =
     args.triggeredBy === 'human' &&
@@ -359,6 +383,9 @@ export function selectEnvelopeVerdict(args: {
 
   if (human) {
     return { ...isWithinHumanStopEnvelope(args.actionKey, args.request, args.facts), envelopeUsed: 'human_stop' }
+  }
+  if (args.pmApprovedSpendIncrease === true) {
+    return { ...isWithinPmScaleEnvelope(args.request, args.facts, args.envelope), envelopeUsed: 'pm_scale' }
   }
   return {
     ...isWithinEnvelope(args.request, args.facts, args.envelope),

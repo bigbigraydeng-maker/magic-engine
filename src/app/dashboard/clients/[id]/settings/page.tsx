@@ -40,6 +40,7 @@ import { CmsPanel } from '../_components/CmsPanel'
 import { MailboxPanel } from './_components/MailboxPanel'
 import { AdStrategyPanel } from './_components/AdStrategyPanel'
 import { AdOutcomePanel } from './_components/AdOutcomePanel'
+import { QualifiedStagesPanel } from './_components/QualifiedStagesPanel'
 import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
 import { ReputationIdentityPanel } from './_components/ReputationIdentityPanel'
 import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
@@ -146,6 +147,7 @@ function TabBody({
           <SettingsSection icon="🩺" title="广告健康监测">
             <AdStrategyPanel clientId={clientId} />
             <div className="mt-3"><AdOutcomePanel clientId={clientId} /></div>
+            <div className="mt-3"><QualifiedStagesPanel clientId={clientId} /></div>
           </SettingsSection>
           <SettingsSection icon="🌐" title="网站连接（GitHub / WordPress / Shopify）">
             <CmsPanel clientId={clientId} />

@@ -390,7 +390,7 @@ describe('publishDraftPaused — 私信类型失败要收拾干净', () => {
     expect(deletes).toEqual(['as1', 'camp1']) // 逆序
   })
 
-  it('第二条创意失败 → 第一条已建的创意 / 广告也要一起删', async () => {
+  it('第二条创意失败 → 第一条已建的广告 / 组 / 系列一起删；创意不删（可能被别的广告共用）', async () => {
     let n = 0
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, method: init?.method ?? 'GET', body: new URLSearchParams(String(init?.body ?? '')) })
@@ -407,7 +407,7 @@ describe('publishDraftPaused — 私信类型失败要收拾干净', () => {
     )
     expect(r.ok).toBe(false)
     const deleted = calls.filter((c) => c.method === 'DELETE').map((c) => c.url.split('/').pop()!.split('?')[0])
-    expect(deleted).toEqual(['ad1', 'cr1', 'as1', 'camp1'])
+    expect(deleted).toEqual(['ad1', 'as1', 'camp1'])
   })
 
   it('请求超时 / 断网（不知道 Meta 建成没有）→ 回滚已建的，并把名字记进 orphans', async () => {

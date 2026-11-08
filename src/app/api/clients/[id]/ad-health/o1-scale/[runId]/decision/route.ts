@@ -50,7 +50,11 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
         return NextResponse.json({ error: '批准前请先核对更长周期表现和 Meta 变更记录' }, { status: 400 })
       }
       assertActorMayApproveAction(run, access.tier)
-      await approveRun(kernel, run.id, access.user.email, { expectedDecisionId })
+      const approval = await approveRun(kernel, run.id, access.user.email, { expectedDecisionId })
+      // 批准时预跑信封判不过（例如 72 小时内改过）：把具体原因告诉批的人，不吞成一句「不能执行」。
+      if (approval.verdict !== 'allow') {
+        return NextResponse.json({ error: approval.decision.reason, code: 'approval_denied' }, { status: 409 })
+      }
       run = await kernel.requireRun(run.id)
     }
     if (run.status !== 'authorized' || !run.authorization_decision_id) {
@@ -66,6 +70,10 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     })
     return NextResponse.json({ ok: true, kind: 'queued', runId: run.id }, { status: 202 })
   } catch (error) {
+    // 加钱类只有 PM 本人能批（第 3 刀 3a）：别人点批准是权限问题，答 403 而不是「状态冲突」。
+    if (error instanceof KernelError && error.code === 'NOT_AUTHORIZED' && error.detail?.reason === 'spend_approver_only') {
+      return NextResponse.json({ error: error.humanReason, code: error.code }, { status: 403 })
+    }
     if (error instanceof KernelError) return NextResponse.json({ error: error.humanReason, code: error.code }, { status: 409 })
     console.error('[ad-health/o1-scale/decision] failed:', error)
     return NextResponse.json({ error: '批准已记录，但暂时无法排入执行队列；可以刷新后重试' }, { status: 503 })

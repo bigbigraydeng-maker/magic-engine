@@ -71,6 +71,8 @@ const ADS_PAUSE_UNIT: ActionDefinition<'ads.pause_unit'> = {
   risk: 'high',
   sideEffect: 'outward',
   reversible: true,
+  // 不加钱（刹车 / 换素材）：不进 PM 本人闸
+  spendIncrease: false,
   outwardAuthorization: {
     declaredIn: DECLARED_IN,
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
@@ -102,6 +104,8 @@ const ADS_PAUSE_CAMPAIGN: ActionDefinition<'ads.pause_campaign'> = {
   },
   outputSchema: { type: 'object', required: ['applied'], properties: { applied: { type: 'boolean' } }, additionalProperties: true },
   capability: 'ads.pause_campaign', risk: 'high', sideEffect: 'outward', reversible: true,
+  // 不加钱（刹车 / 换素材）：不进 PM 本人闸
+  spendIncrease: false,
   outwardAuthorization: { declaredIn: 'docs/roadmap/2026-09-27-ads-wp3-1b-v2-redo-plan.md §零', approval: { mode: 'bounded', envelope: ADS_ENVELOPE }, rollback: 'provider_native' },
   idempotency: { keyFields: ['cycle_date', 'campaign_id'], scope: 'client' },
   costModel: { kind: 'fixed', estimate: () => 0, stepCeilingUsd: zeroCeilings(['snapshot_pre', 'apply', 'readback']) },
@@ -141,6 +145,8 @@ const ADS_CUT_UNIT_BUDGET: ActionDefinition<'ads.cut_unit_budget'> = {
   risk: 'high',
   sideEffect: 'outward',
   reversible: true,
+  // 不加钱（刹车 / 换素材）：不进 PM 本人闸
+  spendIncrease: false,
   outwardAuthorization: {
     declaredIn: DECLARED_IN,
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
@@ -186,6 +192,8 @@ const ADS_CUT_CAMPAIGN_BUDGET: ActionDefinition<'ads.cut_campaign_budget'> = {
   risk: 'high',
   sideEffect: 'outward',
   reversible: true,
+  // 不加钱（刹车 / 换素材）：不进 PM 本人闸
+  spendIncrease: false,
   outwardAuthorization: {
     declaredIn: 'docs/roadmap/2026-09-27-ads-wp3-1b-v2-redo-plan.md §四半 PR B',
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
@@ -239,12 +247,17 @@ const ADS_SCALE_UNIT_BUDGET: ActionDefinition<'ads.scale_unit_budget'> = {
   risk: 'high',
   sideEffect: 'outward',
   reversible: true,
+  // 加钱类：只有 PM 本人签的放行才能执行（第 3 刀 3a）
+  spendIncrease: true,
   outwardAuthorization: {
     declaredIn: DECLARED_IN,
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
     rollback: 'provider_native',
   },
-  idempotency: { keyFields: ['cycle_date', 'adset_id', 'campaign_id', 'before_cents', 'after_cents'], scope: 'client' },
+  // 🔴 不含 campaign_id（第 3 刀 3b，2026-11-04）：ABO 广告组加预算时 input 不能带 campaign_id
+  //    （envelope-facts 见到 campaign_id 就按 CBO 系列判），而幂等键缺字段直接抛错 —— 原来 ABO 加预算
+  //    根本提交不了。adset_id 已唯一确定所属系列，去掉不丢区分度。改前生产库这个动作 0 条记录（已查）。
+  idempotency: { keyFields: ['cycle_date', 'adset_id', 'before_cents', 'after_cents'], scope: 'client' },
   costModel: {
     kind: 'fixed',
     estimate: () => 0,
@@ -288,6 +301,8 @@ const ADS_BUDGET_MOVE_PLAN: ActionDefinition<'ads.budget_move_plan'> = {
   risk: 'high',
   sideEffect: 'outward',
   reversible: true,
+  // 加钱类：只有 PM 本人签的放行才能执行（第 3 刀 3a）
+  spendIncrease: true,
   outwardAuthorization: {
     declaredIn: DECLARED_IN,
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
@@ -338,6 +353,8 @@ const ADS_ADD_RETARGETING_ADSET: ActionDefinition<'ads.add_retargeting_adset'> =
   risk: 'high',
   sideEffect: 'outward',
   reversible: true,
+  // 加钱类：只有 PM 本人签的放行才能执行（第 3 刀 3a）
+  spendIncrease: true,
   outwardAuthorization: {
     declaredIn: DECLARED_IN,
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },
@@ -388,6 +405,8 @@ const ADS_SWAP_CREATIVE: ActionDefinition<'ads.swap_creative'> = {
   risk: 'high',
   sideEffect: 'outward',
   reversible: true,
+  // 不加钱（刹车 / 换素材）：不进 PM 本人闸
+  spendIncrease: false,
   outwardAuthorization: {
     declaredIn: DECLARED_IN,
     approval: { mode: 'bounded', envelope: ADS_ENVELOPE },

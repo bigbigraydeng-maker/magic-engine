@@ -66,6 +66,13 @@ export interface KernelDeps {
    *    所以它是可选字段，但 authorize / gateway 在 bounded 路径上缺它就 deny。
    */
   readonly resolveEnvelopeFacts?: EnvelopeFactsResolver
+  /**
+   * 加钱类动作（`ActionDefinition.spendIncrease === true`）的批准人判定（第 3 刀 3a）。
+   *
+   * 🔴 Kernel 刻意不认识鉴权模块：名单住在 `auth/whitelist.ts`（`ADS_SPEND_APPROVER_EMAILS`），
+   *    由 `createKernel` 注入。**缺这个判定 = 加钱类一律批不了、执行不了**，不是「跳过检查」。
+   */
+  readonly isSpendApprover?: (email: string) => boolean
   now(): Date
   /** 重试之间的等待。测试里换成不等，生产里就是真等。 */
   sleep(ms: number): Promise<void>
@@ -84,6 +91,8 @@ export interface KernelDepsInit {
   sleep?: (ms: number) => Promise<void>
   /** 见 `KernelDeps.resolveEnvelopeFacts`。不给 = bounded 动作一律拒。 */
   resolveEnvelopeFacts?: EnvelopeFactsResolver
+  /** 见 `KernelDeps.isSpendApprover`。不给 = 加钱类动作一律批不了。 */
+  isSpendApprover?: (email: string) => boolean
 }
 
 /**
@@ -137,6 +146,8 @@ export function createKernelDeps(init: KernelDepsInit): KernelDeps {
      *    架构测试现在盯着「生产 Kernel 工厂产出的 `deps.resolveEnvelopeFacts` 非空」。
      */
     resolveEnvelopeFacts: init.resolveEnvelopeFacts,
+    // 🔴 同上一行那类 bug：类型收了它、工厂不转发 = 加钱类全拒。架构测试盯着生产工厂产出非空。
+    isSpendApprover: init.isSpendApprover,
     async requireRun(runId: string) {
       const run = await getRun(init.supabase, runId)
       if (!run) throw new Error(`[kernel] 找不到执行实例 ${runId}`)

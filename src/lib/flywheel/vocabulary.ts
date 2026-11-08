@@ -228,6 +228,9 @@ export const ADS_ACTION_TYPE = {
   /** Adjust bid for an ad set (third_party, meta) */
   ADJUST_BID: 'ads.adjust_bid',
 
+  /** Change one ad set daily budget after a person confirms the card. */
+  ADJUST_ADSET_DAILY_BUDGET: 'ads.adjust_adset_daily_budget',
+
   /** Add a negative keyword to stop wasted spend (third_party, meta) */
   ADD_NEGATIVE_KEYWORD: 'ads.add_negative_keyword',
 
@@ -315,6 +318,9 @@ export const SOCIAL_ACTION_TYPE = {
 
   /** Publish a post immediately (third_party, historical vendor tag) */
   PUBLISH_POST: 'social.publish_post',
+
+  /** A Story was sent. Registration only — no measurement windows on the row. */
+  PUBLISH_STORY: 'social.publish_story',
 } as const
 
 export type SocialActionType = (typeof SOCIAL_ACTION_TYPE)[keyof typeof SOCIAL_ACTION_TYPE]

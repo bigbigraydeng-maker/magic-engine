@@ -7,6 +7,7 @@
 **碰 6 大支柱任一件活先读对应手册**：广告 / SEO / GEO（AI 可见度）/ 社媒 / 口碑，各有一份跨客户经验手册存在 Claude 持久记忆里（不在这个代码仓库中），路径 `~/.claude/projects/-Users-raydeng-Projects-magic-engine/memory/playbook-<支柱>-*.md`。开工前必读对应那份，并在回复里明确说出"读了哪份"——说不出来 = 没读。行业层手册（文件名带 `-industry-`）目前多数只有单客户证据，当"候选参考"用，不当"已验证定论"套用；竞品支柱目前没有可用手册，不用去找。
 **平台化必读**：[ME2 Reuse & Platformization Principle](./docs/roadmap/2026-08-19-me2-platformization-principle.md) —— **所有开发窗口、Work Package、Claude Code/Codex 会话都受它约束。**
 **平台层级门必挂 skill**：[`.claude/skills/me-platform-tier-gate/`](./.claude/skills/me-platform-tier-gate/SKILL.md) —— **Claude Code 会话每次开工前必先调用 `Skill me-platform-tier-gate` 加载**（`Skill` 调用接口仅 Claude Code 提供）；**Codex 会话没有 `Skill` 调用接口，改为直接阅读 `SKILL.md` 全文并遵循其判据 / 红线 / 输出格式**。两种入口下，任何提议新增能力线 / 支柱 / capability / 智能层 / 分析层 / Build vs Connect vs Buy 决策 / 客户新需求判断"ME 要不要自己做"，都必须先输出 Tier Classification Report 再继续。跳过 = 治理失职。
+**设计 agent 先进藏经阁**：[`.claude/skills/cangjingge/`](./.claude/skills/cangjingge/SKILL.md) —— 新建或改造任何 agent / agent loop 前必读（75 份 QCon 2026 讲稿归成 16 部经）。Claude Code 调 `Skill cangjingge`；Codex 没有 `Skill` 接口，直接读 `SKILL.md` 全文。设计稿里逐条回答其中的「开工十问」，回复里写明读了第几部经——说不出来 = 没读。
 **必读规则**：[`~/.claude/rules/coding-style.md`](~/.claude/rules/coding-style.md) · [`~/.claude/rules/development-workflow.md`](~/.claude/rules/development-workflow.md)
 
 ---
@@ -209,6 +210,21 @@ Claude Code、Codex、CMUX DeepSeek 都可承担规划或审查；用户可直�
 - 两类例外可由 Claude Code 自己写：①要同时看懂多个文件才能写对的核心改动（Kernel、接线进上千行的大文件等）；②A 级安全核心（权限/RLS/鉴权/合并闸/资金/不可逆副作用）。走例外须在 PR 写一句原因。
 - PR 写明 DeepSeek 跑了几轮、合计花费；只有例外部分由 Claude Code 自写。
 
+**派活按等级选模型（PM 2026-11-01，参照 Grok 云端开发模型分配办法 v1；Claude Code / Codex 窗口通用）**：
+
+| 等级 | 什么活 | 用谁 |
+|---|---|---|
+| L0 | 查库、读代码答问题、读 PR 状态、发评论、小改动 | 自己做，不派助手 |
+| L1 杂活 | 文档/台账/文案/格式/解冲突/照清楚审查意见小修 | DeepSeek 写，Haiku 做汇总整理 |
+| L2 普通 | 普通 bug、B 级功能、补测试、只读调研 | DeepSeek 写，Sonnet 审 diff |
+| L3 A 级修复 | 审查意见明确、范围清楚、不改设计 | DeepSeek 写，Opus 审 |
+| L4 A 级新做/设计 | 碰权限、发布、花钱、数据库表、密钥、客人档案规则 | Opus 做或指挥 |
+
+- 审查：A 级必审（子牙+魏征，Opus）；B 级抽查（Sonnet 一位）。A 级合并闸只认 Claude Code 签字，不请 Codex 审（PM 2026-10-15）。
+- 能自己做的不派；能续用已有助手就续用；同一任务低一级失败两次才升一级，并写明原因；一律不开最贵档位，除非 Ray 点名。
+- **A 级 PR 正文必须有一行「派活等级：L? / 写代码模型：xxx」**；偏离默认（例如 Claude 助手写代码）要写原因。每次派活在台账记一句任务/等级/模型。
+- 产品线上 AI（逐客人判断等）：Haiku 5.5；客人对话类判断不用 DeepSeek。
+
 - 写入者负责范围内实现、验证与交付；其它工具只读规划/审查，给出建议，由写入者统一落地，不自动代修。
 - 可并行处理独立且文件不重叠的工作，但各自必须有明确写入者和文件边界；同一工作区同一文件（含公共文档、锁文件、生成物）禁止多代理同时修改。测试也不得互相覆盖 `.next` 等共享产物；不能证明不冲突就串行。
 - CMUX 中的 DeepSeek 会话须先读取本文件和权威任务说明，并声明实际可用的读文件/执行命令工具；不假定终端容器或模型会自动加载规则。不能直接读仓库时交由有权限的参与者完成读取，只传必要证据与路径，不让用户反复贴源码。
@@ -248,6 +264,7 @@ Claude Code、Codex、CMUX DeepSeek 都可承担规划或审查；用户可直�
 - **绝不凭空注入客户业务数据**：写任何 Goal / Initiative / 关键词前，先查 `master_briefs` + `clients.primary_keywords`。搜索量 / KD / 点击数**必须来自 DataForSEO 或 GSC**，不能估不能编
 - **对外内容必先 grounding 官网**：写 reel / post / 广告 / 邮件前先 WebFetch 客户官网真实产品页。`master_briefs` 只给方向，不含运营细节。发布前逐句标「官网可溯 / brief 可溯 / 未证实」
 - **我们管理的 FB / IG 等社媒账户，所有要发布的视频一律只能走视频工厂流程（`src/lib/factory/`），禁止任何窗口另写脚本直接调生成 API（Muapi / WaveSpeed / Seedance 等）+ 平台发布 API 绕过工厂**：工厂流程自带查配方、出对账表、分镜自检这几道闸，绕开工厂等于把这几道闸一起绕开，而且绕过之后不会报错、不留痕迹，跟真正走过闸的产出长得一模一样。**窗口自己写「已完成、没问题」不算审查**——生产方和质检方必须是两个不同的角色（工厂产出 → 苏东坡 / 马良审 → PM 授权发布）。PM 2026-09-28 拍板；2026-09-28 East Inter 事故：另开脚本直接生产+发布，两条视频没有声音、文案数字编造，客户 Facebook 主页上已经真实发出去，见 [PITFALLS D14](./docs/PITFALLS.md)
+- **AI 窗口禁止直接用 Meta 广告工具改预算、开关广告（PM 2026-11-04 拍板）**：改预算、暂停、开投一律走 ME（成绩单「调预算」、止损、O1、发布器），这样单次 ≤20%、72 小时只改一次、加钱只认 PM 本人这几道闸才管得住。Claude Code 已在用户设置里禁用 Meta 工具的 `ads_update_entity` / `ads_activate_entity`；Codex 等没有这道机器闸的窗口同样遵守，被拦了不许换别的写入接口绕过。PM 本人在手机或 Ads Manager 里改不受限，ME 照常从快照记下、事后回看。起因：10-30~11-01 CTS 组 A 被 AI 窗口经 Meta 工具 2.5 天里加了三次预算（最后一次 +39%），ME 的闸全没碰到
 - **对外画面必先跑配方对账**：只要要**写视频模板 / 调生图·生视频 API / 拼片出成片**，先查 `viral_reference_library` 拿该行业配方，**并输出一张对账表**（配方每一列 → 这次做了什么 → 满足 / 未满足 / 不适用），再动手。**只满足镜长、切点这类「改个数字就行」的列，跳过真人出镜 / 航拍 / 真实感这类「要换素材才行」的列 = 没照配方做**，成品会是「卡得很准的幻灯片」。2026-07-20、2026-09-03 两次同样事故，见 [PITFALLS D5](./docs/PITFALLS.md)
 - **对外成片交付前必先出「分镜自检表」**：把成片截成逐镜缩略图（9 宫格），**自己逐镜过一遍再发 PM**——每镜检查①图对不对（是不是这个城市/地标，AI 生成的有没有糊脸/糊字）②文字对不对（错别字/张冠李戴）③logo 完不完整清不清晰。**禁止用「渲一版给 PM 看 → PM 挑错 → 重渲」的循环替代自检**：那样每轮五六分钟，本该一次抓全的问题拖成四五轮。图库图 / i2v 输出必逐帧核对来源与内容（见 [PITFALLS D6](./docs/PITFALLS.md)）
 - **客户营销落地页必须建在客户自己的域名**，绝对禁止 `magicengine.com.au/<客户>/...`

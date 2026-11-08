@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   parsePromoWindow,
   nzToday,
+  nzDayMinus,
   promoVerdict,
   matchPoolEntry,
   videoVerdicts,
@@ -53,6 +54,17 @@ describe('parsePromoWindow', () => {
 
   it('字符串 → null', () => {
     expect(parsePromoWindow('evergreen')).toBeNull()
+  })
+})
+
+describe('nzDayMinus', () => {
+  it('减 1 天用日历位，不用 UTC 正午（Jan16 NZ 的昨天是 Jan15）', () => {
+    expect(nzDayMinus('2026-01-16', 1)).toBe('2026-01-15')
+    expect(nzDayMinus('2026-01-16', 7)).toBe('2026-01-09')
+  })
+
+  it('0 天返回原日', () => {
+    expect(nzDayMinus('2026-03-01', 0)).toBe('2026-03-01')
   })
 })
 

@@ -3,7 +3,7 @@ import { canEditSettings, parseSettingsWrite, unrestrictedNeedsConfirmation } fr
 import { serialiseEmailSettings } from '@/lib/crm/email-templates/settings'
 import { settingsObj } from './fixtures'
 
-const stored = serialiseEmailSettings(settingsObj({ recipientAllowlist: ['hello@magicengine.cloud'] }))
+const stored = { cap_exempt_template_keys: [], ...serialiseEmailSettings(settingsObj({ recipientAllowlist: ['hello@magicengine.cloud'] })) }
 
 afterEach(() => vi.unstubAllEnvs())
 
@@ -58,6 +58,24 @@ describe('parseSettingsWrite', () => {
     const res = parseSettingsWrite(input)
     expect(res.ok).toBe(false)
     expect(!res.ok && res.error.length).toBeGreaterThan(0)
+  })
+
+  it('refuses settings without the exemption list key (a page opened before the list existed)', () => {
+    const { cap_exempt_template_keys: omitted, ...withoutList } = stored
+    void omitted
+    const res = parseSettingsWrite({ settings: withoutList, baseVersion: 1 })
+    expect(res.ok).toBe(false)
+    expect(!res.ok && res.error).toContain('cap_exempt_template_keys')
+  })
+
+  it('accepts an empty exemption list', () => {
+    const res = parseSettingsWrite({ settings: { ...stored, cap_exempt_template_keys: [] }, baseVersion: 1 })
+    expect(res.ok && res.settings.capExemptTemplateKeys).toEqual([])
+  })
+
+  it('parses a list of template keys', () => {
+    const res = parseSettingsWrite({ settings: { ...stored, cap_exempt_template_keys: ['tour-enquiry-reply'] }, baseVersion: 1 })
+    expect(res.ok && res.settings.capExemptTemplateKeys).toEqual(['tour-enquiry-reply'])
   })
 
   it('lists what is wrong with the settings, not just that something is', () => {

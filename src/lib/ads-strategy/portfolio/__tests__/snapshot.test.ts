@@ -34,8 +34,8 @@ describe('normalizeCampaign — 预算层级读系列自己的预算字段', () 
   it('NAL 五个系列都把日预算挂在系列上 → 全部判 CBO（2026-09-14 实拉）', () => {
     const rows = nalCampaigns.map(c => normalizeCampaign(NAL_CTX, c))
     expect(rows.map(r => r.budget_level)).toEqual(['cbo', 'cbo', 'cbo', 'cbo', 'cbo'])
-    const logistics = rows.find(r => r.entity_id === '52589907084125')
-    expect(logistics?.daily_budget_minor).toBe(6200)
+    const logistics = rows.find(r => r.entity_id === '52902974440554')
+    expect(logistics?.daily_budget_minor).toBe(7254)
     expect(logistics?.objective).toBe('OUTCOME_LEADS')
     expect(logistics?.special_ad_categories).toEqual([])
   })
@@ -48,8 +48,8 @@ describe('normalizeCampaign — 预算层级读系列自己的预算字段', () 
 
 describe('normalizeAdset — 受众包含/排除、Advantage+、名单外扩展', () => {
   it('NAL 再营销组：包含视频观众名单，advantage_audience=0，custom_audience 扩展=0', () => {
-    const row = normalizeAdset(NAL_CTX, byId(nalAdsets, '52597304727125'))
-    expect(row.included_audience_ids).toEqual(['52597304640525'])
+    const row = normalizeAdset(NAL_CTX, byId(nalAdsets, '52567871115731'))
+    expect(row.included_audience_ids).toEqual(['52438409830467'])
     expect(row.excluded_audience_ids).toEqual([])
     expect(row.advantage_audience).toBe(0)
     expect(row.targeting_relaxation).toEqual({ lookalike: 0, custom_audience: 0 })
@@ -59,24 +59,24 @@ describe('normalizeAdset — 受众包含/排除、Advantage+、名单外扩展'
   })
 
   it('CTS 顶层 ThruPlay 组：只有排除名单、没有包含名单（冷流量），预算在组上', () => {
-    const row = normalizeAdset(CTS_CTX, byId(ctsAdsets, '52549857906273'))
+    const row = normalizeAdset(CTS_CTX, byId(ctsAdsets, '52510454332891'))
     expect(row.included_audience_ids).toEqual([])
-    expect(row.excluded_audience_ids).toEqual(['52549822861673'])
+    expect(row.excluded_audience_ids).toEqual(['52482924144212'])
     expect(row.advantage_audience).toBe(1)
     expect(row.budget_level).toBe('abo')
-    expect(row.daily_budget_minor).toBe(1000)
+    expect(row.daily_budget_minor).toBe(1170)
   })
 
-  it('CTS A/B 实验两组带上 ad_studies（实验 1489853439620194，SPLIT_TEST）', () => {
+  it('CTS A/B 实验两组带上 ad_studies（实验 1400527488568234，SPLIT_TEST）', () => {
     const studiesById = new Map((ctsStudies.data as Array<{ id: string; ad_studies?: { data?: [] } }>).map(s => [s.id, s.ad_studies]))
-    for (const id of ['52551117304473', '52551118124873']) {
+    for (const id of ['52149073923601', '52151282553412']) {
       const withStudies = { ...byId(ctsAdsets, id), ad_studies: studiesById.get(id) } as GraphAdsetSettings
       const row = normalizeAdset(CTS_CTX, withStudies)
       expect(row.ad_studies).toEqual([
-        { id: '1489853439620194', type: 'SPLIT_TEST', start_time: '2026-09-13T12:31:23+0000', end_time: '2026-09-23T12:31:23+0000' },
+        { id: '1400527488568234', type: 'SPLIT_TEST', start_time: '2026-09-13T12:31:23+0000', end_time: '2026-09-23T12:31:23+0000' },
       ])
     }
-    const control = normalizeAdset(CTS_CTX, { ...byId(ctsAdsets, '52549857906273'), ad_studies: studiesById.get('52549857906273') } as GraphAdsetSettings)
+    const control = normalizeAdset(CTS_CTX, { ...byId(ctsAdsets, '52510454332891'), ad_studies: studiesById.get('52510454332891') } as GraphAdsetSettings)
     expect(control.ad_studies).toEqual([])
   })
 })
@@ -84,9 +84,9 @@ describe('normalizeAdset — 受众包含/排除、Advantage+、名单外扩展'
 describe('normalizeAd — 创意视频 id（D4 用）', () => {
   it('NAL ThruPlay 广告的 creative.video_id 正是视频观众池规则里的 object_id（不是上传稿 video_data.video_id）', () => {
     const ads = nal.ads as GraphAdSettings[]
-    const thruplay = normalizeAd(NAL_CTX, ads.find(a => a.adset_id === '52596939123725')!)
-    expect(thruplay.creative_video_ids).toEqual(['961317390332083'])
-    expect(thruplay.creative_page_id).toBe('1177479655430100')
+    const thruplay = normalizeAd(NAL_CTX, ads.find(a => a.adset_id === '52104815523595')!)
+    expect(thruplay.creative_video_ids).toEqual(['963431201022889'])
+    expect(thruplay.creative_page_id).toBe('1126806032150993')
     const pool = parseAudienceRule((nal.audiences as GraphCustomAudience[])[0].rule)
     expect(pool.objectIds).toContain(thruplay.creative_video_ids[0])
   })
@@ -102,7 +102,7 @@ describe('parseAudienceRule — 按 object_id 判，不按名字', () => {
   it('视频受众（NAL 25% 观众池）：两个视频 object_id + 事件名', () => {
     const aud = (nal.audiences as GraphCustomAudience[])[0]
     expect(parseAudienceRule(aud.rule)).toEqual({
-      objectIds: ['1117182540888214', '961317390332083'],
+      objectIds: ['1140238568218872', '963431201022889'],
       events: ['video_view_25_percent'],
     })
     const row = normalizeAudience(NAL_CTX, aud)
@@ -112,13 +112,13 @@ describe('parseAudienceRule — 按 object_id 判，不按名字', () => {
   })
 
   it('CTS 看完 95% 名单：Meta 事件名是 video_completed（不是 video_view_95_percent）', () => {
-    const aud = byId(cts.audiences as GraphCustomAudience[], '52551117275273')
+    const aud = byId(cts.audiences as GraphCustomAudience[], '52170070344921')
     expect(parseAudienceRule(aud.rule).events).toEqual(['video_completed'])
   })
 
   it('主页互动受众（inclusions 形状）：取 event_sources 的主页 id', () => {
-    const aud = byId(cts.audiences as GraphCustomAudience[], '6971567517469')
-    expect(parseAudienceRule(aud.rule).objectIds).toEqual(['1146745731851959'])
+    const aud = byId(cts.audiences as GraphCustomAudience[], '6939377845445')
+    expect(parseAudienceRule(aud.rule).objectIds).toEqual(['1108546381046118'])
   })
 
   it('规则缺失或读不懂 → 空（D4 据此判「无法按 object_id 匹配」，不按名字猜）', () => {
@@ -156,7 +156,7 @@ describe('selectRowsToWrite — 只在设置变化时记一行，另每天一次
   })
 
   it('受众 id 排序后再存（Meta 返回顺序不同不算变化）', () => {
-    const s = byId(ctsAdsets, '52551118124873')
+    const s = byId(ctsAdsets, '52151282553412')
     const t = s.targeting as { custom_audiences: Array<{ id: string }> }
     const twoAud = { ...s, targeting: { ...t, custom_audiences: [{ id: '9' }, { id: '1' }] } } as GraphAdsetSettings
     expect(normalizeAdset(CTS_CTX, twoAud).included_audience_ids).toEqual(['1', '9'])
@@ -175,12 +175,12 @@ describe('selectRowsToWrite — 只在设置变化时记一行，另每天一次
     expect(new Set(nextDay.map(r => r.capture_reason))).toEqual(new Set(['daily']))
   })
 
-  it('改预算（CTS 2026-09-13 12:11 UTC 顶层 ThruPlay 组 6000→1000，Meta activities 实查）→ 只记这一行 changed', () => {
+  it('改预算（CTS 2026-09-13 12:11 UTC 顶层 ThruPlay 组 7020→1170，Meta activities 实查）→ 只记这一行 changed', () => {
     const ctsDrafts = ctsAdsets.map(s => normalizeAdset(CTS_CTX, s))
-    const before = ctsDrafts.map(d => (d.entity_id === '52549857906273' ? { ...d, daily_budget_minor: 6000 } : d))
+    const before = ctsDrafts.map(d => (d.entity_id === '52510454332891' ? { ...d, daily_budget_minor: 7020 } : d))
     const earlier = selectRowsToWrite(before, [], { capturedAt: '2026-09-13T09:30:00Z', dayKey })
     const after = selectRowsToWrite(ctsDrafts, earlier, { capturedAt: '2026-09-13T12:30:00Z', dayKey })
-    expect(after.map(r => [r.entity_id, r.capture_reason, r.daily_budget_minor])).toEqual([['52549857906273', 'changed', 1000]])
+    expect(after.map(r => [r.entity_id, r.capture_reason, r.daily_budget_minor])).toEqual([['52510454332891', 'changed', 1170]])
   })
 
   it('改名不是设置变化（名字不进哈希）', () => {

@@ -15,6 +15,9 @@ import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import { REEL_AUTO_CHECK_KEYS, checklistPasses, humanKeysForReviewRef, validateContentChecklist } from '@/lib/social/content-review'
 import { buildReelFirstComment, buildReelPostCaption } from '@/lib/social/reel-publishing'
 import { ASSET_ONLY_NOT_PUBLISHABLE, isAssetOnly } from '../deliverable'
+import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
+import { recheckReelFacts } from './promote/fact-recheck'
+import { loadSocialFactSource } from '@/lib/social/weekly-loop/fact-aliases'
 
 const MAX_PUBLISH_ATTEMPTS = 3
 const RETRY_BACKOFF_MIN = 10 // 失败退避基数(分钟)· 指数
@@ -177,6 +180,25 @@ async function markFailed(
 }
 
 // ── 处理一条 ──────────────────────────────────────────────────────────────────
+type FactOrder = { id: string; client_id: string; brief: unknown; output: unknown }
+
+/** Catalog fact re-check for a live publish (same rules as the weekly loop and go-public). */
+function liveFactRecheck(order: FactOrder, only?: 'first_comment') {
+  return recheckReelFacts({
+    loadFactSource: (cid, today) => loadSocialFactSource(supabaseAdmin, cid, today),
+    order,
+    now: new Date(),
+    only,
+  })
+}
+
+/** The reel is already public (recovery): record it either way, but only send a first comment that still matches the catalog. */
+async function firstCommentStillTrue(id: string, order: FactOrder): Promise<boolean> {
+  const facts = await liveFactRecheck(order, 'first_comment')
+  if (!facts.ok) console.error(`[publish-worker] ${id} 已公开,首评与团目录对不上或读不到目录,首评未发: ${facts.error}`)
+  return facts.ok
+}
+
 async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Promise<PublishOutcome> {
   const id = String(wo['id'])
   const clientId = String(wo['client_id'])
@@ -199,6 +221,18 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
     await markFailed(id, attempts, 'approval checklist missing, incomplete, failed, or not measured', true)
     return { order_id: id, result: 'failed', detail: 'approval_checklist_incomplete' }
   }
+
+  // Only a live publish shows the reel to the public; drafts stay private. The consent gate is shared with
+  // the weekly loop and the go-public precheck (lib/factory/talent-consent.ts). The catalog fact re-check
+  // runs later, after the idempotency recovery (a reel that is already public must still be recorded).
+  if (!opts.draft) {
+    const consent = consentVerdict({ brief, output, use: 'facebook_organic' })
+    if (!consent.ok) {
+      await markFailed(id, attempts, `出镜授权不满足:${CONSENT_REASON_ZH[consent.reason]}`, true)
+      return { order_id: id, result: 'failed', detail: 'consent_blocked' }
+    }
+  }
+  const factOrder = { id, client_id: clientId, brief, output }
 
   const target = await resolveTarget(clientId)
   if (!target) {
@@ -235,7 +269,7 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   if (priorRef && priorRef['provisional'] === true && priorRef['video_id']) {
     const recovered = await adapter.findExisting({ target, idempotencyTag: id }).catch(() => null)
     if (recovered) {
-      if (!opts.draft && adapter.ensureFirstComment && !recovered.first_comment_id) {
+      if (!opts.draft && adapter.ensureFirstComment && !recovered.first_comment_id && await firstCommentStillTrue(id, factOrder)) {
         recovered.first_comment_id = await adapter.ensureFirstComment({
           target, videoId: String(recovered.video_id ?? priorRef['video_id']), idempotencyTag: id, message: firstComment.text,
         })
@@ -255,7 +289,7 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   try {
     const existing = await adapter.findExisting({ target, idempotencyTag: id })
     if (existing) {
-      if (!opts.draft && adapter.ensureFirstComment && !existing.first_comment_id) {
+      if (!opts.draft && adapter.ensureFirstComment && !existing.first_comment_id && await firstCommentStillTrue(id, factOrder)) {
         existing.first_comment_id = await adapter.ensureFirstComment({
           target, videoId: String(existing.video_id ?? existing.post_id), idempotencyTag: id, message: firstComment.text,
         })
@@ -280,6 +314,15 @@ async function processOne(wo: Record<string, unknown>, opts: PublishOptions): Pr
   if (urlErr) {
     await markFailed(id, attempts, urlErr)
     return { order_id: id, result: 'failed', detail: 'bad_video_url' }
+  }
+
+  if (!opts.draft) {
+    const facts = await liveFactRecheck(factOrder)
+    if (!facts.ok) {
+      // Unreadable catalog = try again later; a real mismatch or a "needs a person" stays failed until the copy or catalog changes.
+      await markFailed(id, attempts, facts.error, facts.status !== 503)
+      return { order_id: id, result: 'failed', detail: 'fact_check_blocked' }
+    }
   }
 
   // 发布(draft 由 opts 控制:首测=草稿不公开)

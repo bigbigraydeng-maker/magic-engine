@@ -122,6 +122,7 @@ describe('the first settings', () => {
       footer: null,
       limits: { per_user_per_hour: 30, per_user_per_day: 100, per_mailbox_per_day: 200 },
       frequency_cap: { max: 2, window_days: 7 },
+      cap_exempt_template_keys: [],
       recipient_allowlist: [],
       same_template_cooldown_hours: 24,
       call_prompt_hours: 24,
@@ -331,5 +332,65 @@ describe('when the save does not go through', () => {
     await ready()
     fireEvent.click(saveButton())
     expect(await screen.findByText('网络出错，保存状态不明。请重新载入后再确认。')).toBeInTheDocument()
+  })
+})
+
+describe('templates that do not use up a place in the weekly cap', () => {
+  const exemptBox = () => screen.getByLabelText('不占频次名额的模板代号') as HTMLTextAreaElement
+
+  it('shows the stored template keys, one per line', async () => {
+    routes([{ body: okPayload({ settings: stored({ cap_exempt_template_keys: ['tour-enquiry-reply', 'catalogue-request-reply'] }) }) }])
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    expect(exemptBox().value).toBe('tour-enquiry-reply\ncatalogue-request-reply')
+  })
+
+  it('saving without touching it sends the same list', async () => {
+    const { sent } = routes(
+      [{ body: okPayload({ settings: stored({ cap_exempt_template_keys: ['tour-enquiry-reply', 'catalogue-request-reply'] }) }) }, { body: okPayload({ version: 5 }) }],
+      [{ body: { ok: true, version: 5 } }],
+    )
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent).cap_exempt_template_keys).toEqual(['tour-enquiry-reply', 'catalogue-request-reply'])
+  })
+
+  it('lines are trimmed and empty lines are dropped', async () => {
+    const { sent } = routes(
+      [{ body: okPayload({ settings: stored({ cap_exempt_template_keys: ['tour-enquiry-reply'] }) }) }, { body: okPayload({ version: 5 }) }],
+      [{ body: { ok: true, version: 5 } }],
+    )
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    fireEvent.change(exemptBox(), { target: { value: ' a-one \n\n b-two\n' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent).cap_exempt_template_keys).toEqual(['a-one', 'b-two'])
+  })
+
+  it('an older payload without the key shows an empty box and saves an empty list', async () => {
+    const { sent } = routes([{ body: okPayload() }, { body: okPayload({ version: 5 }) }], [{ body: { ok: true, version: 5 } }])
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    expect(exemptBox().value).toBe('')
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent)).toHaveProperty('cap_exempt_template_keys')
+    expect(settingsOf(sent).cap_exempt_template_keys).toEqual([])
+  })
+
+  it('clearing the box saves an empty list', async () => {
+    const { sent } = routes(
+      [{ body: okPayload({ settings: stored({ cap_exempt_template_keys: ['tour-enquiry-reply'] }) }) }, { body: okPayload({ version: 5 }) }],
+      [{ body: { ok: true, version: 5 } }],
+    )
+    render(<EmailSettingsPanel clientId="c1" />)
+    await ready()
+    fireEvent.change(exemptBox(), { target: { value: '' } })
+    fireEvent.click(saveButton())
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(settingsOf(sent).cap_exempt_template_keys).toEqual([])
   })
 })

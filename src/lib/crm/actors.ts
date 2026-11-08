@@ -41,6 +41,9 @@ export const NEW_LEAD_ACTOR = 'system:new-lead'
 /** 我们已跟进（接通电话或同事回了邮件）、把「新线索」推进到「已联系」时写下的机器身份。 */
 export const CALL_REACHED_ACTOR = 'system:call-reached'
 
+/** 同事一对一发出了点名具体团 / 出发日的推荐邮件、把「已联系」推进到「已报价」时写下的机器身份。 */
+export const QUOTE_EMAIL_ACTOR = 'system:quote-email-sent'
+
 /** 「邮件 / WhatsApp 来客是不是有效咨询」筛选写阶段时用的机器身份（设计稿 2026-10-21-crm-valid-leads-only-design）。 */
 export const ENQUIRY_SCREEN_ACTOR = 'ai:enquiry-screen'
 /** 回退脚本补的反向事件用的身份。 */
@@ -70,6 +73,28 @@ export function isAutomatedActor(actor: string | null | undefined): boolean {
   return a.startsWith('ai:') || a.startsWith('system:') || a === 'system'
 }
 
+/** 阶段记录的写入者归哪一类（广告成绩单「合格客人」用）。 */
+export type StageWriterKind = 'human' | 'system' | 'ai' | 'unknown'
+
+/**
+ * 给「谁把客人推进了这个阶段」分类。以 `isAutomatedActor` 为底，补上它不认的机器写法；
+ * 那个函数本身不改（有效咨询筛选、WhatsApp 跟进记录、时间线显示都在用它）。
+ *
+ * 🔴 认不出的一律 `unknown`，不兜底算人：「人确认」是最被信任的数，宁可少算。
+ *    例如 agent 代写的 `PM-2026-10-12 via claude (…)` 归 unknown。
+ * 设计：docs/specs/2026-11-03-ads-scorecard-qualified-column-v0.md §3。
+ */
+export function classifyStageWriter(actor: string | null | undefined): StageWriterKind {
+  if (!actor) return 'unknown'
+  const a = actor.trim().toLowerCase()
+  if (a === '') return 'unknown'
+  if (a.startsWith('ai:')) return 'ai'
+  if (isAutomatedActor(a) || a.startsWith('auto:') || a.endsWith('@system')) return 'system'
+  if (a.startsWith('human:')) return 'human'
+  if (a.includes('@')) return 'human'
+  return 'unknown'
+}
+
 /**
  * 把「谁改的阶段」翻成员工看得懂的一句话。
  *
@@ -91,6 +116,7 @@ export function describeStageActor(actor: string | null | undefined): string {
   if (a === STAGE_INFER_ACTOR) return '系统读往来记录判的'
   if (a === NEW_LEAD_ACTOR) return '系统建档时标的'
   if (a === CALL_REACHED_ACTOR) return '系统按已跟进判的'
+  if (a === QUOTE_EMAIL_ACTOR) return '系统按已发推荐邮件判的'
   if (a === AUTO_TAG_ACTOR) return '系统自动标的'
   if (a === ENQUIRY_SCREEN_ACTOR) return '系统判成不是咨询'
   if (a === ENQUIRY_SCREEN_ROLLBACK_ACTOR) return '系统撤回了不是咨询的判定'

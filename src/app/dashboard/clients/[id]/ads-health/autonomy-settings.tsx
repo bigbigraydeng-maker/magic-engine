@@ -47,6 +47,22 @@ interface AdStrategyConfig {
   daily_budget_cap_cents: number | null
   autonomy_mode: AutonomyMode
   creative_pool: CreativePoolEntry[]
+  /** 自动止损开没开 / 是不是只演练；接口一直有返回，只用来如实写「现在实际做到哪步」 */
+  autopilot_enabled?: boolean
+  autopilot_dry_run?: boolean
+}
+
+/**
+ * 「自动调整」那一项实际做到哪一步。选项的字面意思比系统真做的多（PM 11-04 审计）：
+ * 止损只提交暂停申请、批了才停，演练时连申请都不交；加预算一律要 PM 本人批。
+ */
+export function autopilotTruth(c: Pick<AdStrategyConfig, 'autopilot_enabled' | 'autopilot_dry_run'>): string {
+  const stopLoss = c.autopilot_enabled !== true
+    ? '自动止损：没开'
+    : c.autopilot_dry_run !== false
+      ? '自动止损：演练中，只记下会停哪些组，不真停'
+      : '自动止损：发现白花钱的组会提交暂停申请，在「等你点头」里批了才停'
+  return `${stopLoss}；加预算：一律要 PM 本人批准，系统不会自己加`
 }
 
 interface CreativeLabel {
@@ -58,6 +74,17 @@ interface CreativeLabel {
 
 interface LabelsResponse {
   labels?: Record<string, CreativeLabel>
+}
+
+/** Live from Meta on every page load (the URLs expire, so the server never stores them). */
+interface CreativeThumbnail {
+  thumbnailUrl: string | null
+  title: string | null
+  durationSeconds: number | null
+}
+
+interface ThumbnailsResponse {
+  thumbnails?: Record<string, CreativeThumbnail>
 }
 
 /** Stored in cents; shown to people in whole currency units. */
@@ -157,10 +184,12 @@ function CapField({
 function ModeField({
   draftMode,
   capUnset,
+  truth,
   onChange,
 }: {
   draftMode: AutonomyMode
   capUnset: boolean
+  truth: string
   onChange: (m: AutonomyMode) => void
 }) {
   return (
@@ -186,33 +215,78 @@ function ModeField({
             onChange={() => onChange('bounded_auto')}
             className="accent-me-ochre"
           />
-          在每天上限内自动调整预算 / 暂停广告（需要先设好上面的每天上限）
+          在每天上限内允许系统动钱（需要先设好上面的每天上限）
         </label>
       </div>
+      <p className="mt-1.5 text-xs text-gray-500">现在实际做到：{truth}</p>
     </div>
   )
 }
 
-function VideoRow({ entry, label }: { entry: CreativePoolEntry; label: CreativeLabel | undefined }) {
+function VideoThumb({ url }: { url: string | null | undefined }) {
+  const [failed, setFailed] = useState(false)
+  if (url && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- signed Meta URL, not optimisable
+      <img
+        src={url}
+        alt="视频缩略图"
+        width={64}
+        height={114}
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="h-[114px] w-16 shrink-0 rounded-md bg-gray-100 object-cover"
+      />
+    )
+  }
+  return (
+    <div
+      data-testid="video-thumb-placeholder"
+      className="flex h-[114px] w-16 shrink-0 items-center justify-center rounded-md bg-gray-100 text-center text-[10px] leading-tight text-gray-400"
+    >
+      暂无缩略图
+    </div>
+  )
+}
+
+function VideoRow({
+  entry,
+  label,
+  media,
+}: {
+  entry: CreativePoolEntry
+  label: CreativeLabel | undefined
+  media?: CreativeThumbnail
+}) {
   const number = videoNumber(entry)
   const fbUrl = label?.url ?? (/^\d+$/.test(number) ? `https://www.facebook.com/reel/${number}` : null)
   return (
-    <div className="min-w-0">
-      <p className="truncate text-gray-800">
-        {label ? label.title : <span className="text-amber-700">未能识别，请核对</span>}
-        {label?.subtitle && <span className="text-gray-500"> · {label.subtitle}</span>}
-      </p>
-      <p className="text-xs text-gray-400">
-        发布日期 {formatDate(label?.publishedAt ?? null)} · 编号 <span className="tabular-nums">{number}</span>
-        {fbUrl && (
-          <>
-            {' '}·{' '}
-            <a href={fbUrl} target="_blank" rel="noreferrer" className="text-gray-500 underline hover:text-gray-700">
-              在 Facebook 打开
-            </a>
-          </>
+    <div className="flex min-w-0 items-center gap-3">
+      <VideoThumb url={media?.thumbnailUrl} />
+      <div className="min-w-0">
+        <p className="truncate text-gray-800">
+          {label ? label.title : <span className="text-amber-700">未能识别，请核对</span>}
+          {label?.subtitle && <span className="text-gray-500"> · {label.subtitle}</span>}
+        </p>
+        {(media?.title || media?.durationSeconds) && (
+          <p className="truncate text-xs text-gray-500">
+            {media.title && <>Meta 上的标题：{media.title}</>}
+            {media.title && media.durationSeconds ? ' · ' : ''}
+            {media.durationSeconds ? `时长 ${media.durationSeconds} 秒` : ''}
+          </p>
         )}
-      </p>
+        <p className="text-xs text-gray-400">
+          发布日期 {formatDate(label?.publishedAt ?? null)} · 编号 <span className="tabular-nums">{number}</span>
+          {fbUrl && (
+            <>
+              {' '}·{' '}
+              <a href={fbUrl} target="_blank" rel="noreferrer" className="text-gray-500 underline hover:text-gray-700">
+                在 Facebook 打开
+              </a>
+            </>
+          )}
+        </p>
+      </div>
     </div>
   )
 }
@@ -231,6 +305,7 @@ function CreativePoolList({
   const [busyRef, setBusyRef] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [labels, setLabels] = useState<Record<string, CreativeLabel>>({})
+  const [thumbs, setThumbs] = useState<Record<string, CreativeThumbnail>>({})
   const refKey = entries.map(e => e.ref).join(',')
 
   useEffect(() => {
@@ -240,6 +315,16 @@ function CreativePoolList({
       .then(r => (r.ok ? (r.json() as Promise<LabelsResponse>) : { labels: {} }))
       .then(j => { if (alive) setLabels(j.labels ?? {}) })
       .catch(() => { /* names stay "unrecognised"; never block approval UI */ })
+    return () => { alive = false }
+  }, [clientId, refKey])
+
+  useEffect(() => {
+    if (refKey === '') return
+    let alive = true
+    fetch(`/api/clients/${clientId}/ad-strategy-config/creative-pool/thumbnails`)
+      .then(r => (r.ok ? (r.json() as Promise<ThumbnailsResponse>) : { thumbnails: {} }))
+      .then(j => { if (alive) setThumbs(j.thumbnails ?? {}) })
+      .catch(() => { /* grey placeholder stays; never block approval UI */ })
     return () => { alive = false }
   }, [clientId, refKey])
 
@@ -277,7 +362,7 @@ function CreativePoolList({
     <div className="space-y-2.5">
       {entries.map(e => (
         <div key={`${e.kind}:${e.ref}`} className="flex items-center justify-between gap-3 text-sm">
-          <VideoRow entry={e} label={labels[e.ref]} />
+          <VideoRow entry={e} label={labels[e.ref]} media={thumbs[e.ref]} />
           <div className="flex shrink-0 items-center gap-2">
             <span className={`text-xs ${e.status === 'approved' ? 'text-emerald-600' : 'text-gray-400'}`}>
               {e.status === 'approved'
@@ -787,7 +872,7 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
           saving={saving}
         />
 
-        <ModeField draftMode={draftMode} capUnset={capUnset} onChange={setDraftMode} />
+        <ModeField draftMode={draftMode} capUnset={capUnset} truth={autopilotTruth(config)} onChange={setDraftMode} />
 
         <div>
           <span className="block text-sm font-medium text-gray-700">每个广告账户各自每天最多花多少</span>

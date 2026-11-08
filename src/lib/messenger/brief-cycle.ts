@@ -35,6 +35,7 @@ import { autoTagQualifiedBuyers, type AutoTagResult } from '@/lib/crm/qualified-
 import { inferStagesFromConversations, type StageInferResult } from '@/lib/crm/stage-infer'
 import { reviveScreenedOnNewInbound, type ReviveResult } from '@/lib/crm/enquiry-screen/revive'
 import { advanceNewLeadsAfterFollowUp, type CallAdvanceResult } from '@/lib/crm/advance-after-call'
+import { advanceContactedAfterQuoteEmail, type QuoteAdvanceResult } from '@/lib/crm/advance-after-quote'
 import { inferConversationFacts, type FactsRunResult } from '@/lib/crm/facts/infer'
 import { supabaseFactsIo } from '@/lib/crm/facts/io'
 import type { BriefChannel } from './brief-schema'
@@ -208,6 +209,7 @@ export interface PostBriefSweepResult {
   stageInfer: StageInferResult | { error: string }
   /** 我们拨出并接通了电话、客人还停在「新线索」的，推进到「已联系」。 */
   callAdvance: CallAdvanceResult | { error: string }
+  quoteAdvance: QuoteAdvanceResult | { error: string }
   enquiryRevive: ReviveResult | { error: string }
   /** AI 读对话存事实（默认关，`CRM_FACTS_CLIENT_IDS` 列了客户才跑）。只写自己的表，不影响名单。 */
   conversationFacts: FactsRunResult | { error: string }
@@ -646,6 +648,15 @@ export async function runPostBriefSweeps(now: Date): Promise<PostBriefSweepResul
     console.error('[crm/advance-after-call] 通话接通推进阶段整轮失败:', err)
   }
 
+  // 同事已一对一发出点名出发日的推荐邮件、却还停在「已联系」的人 → 推进到「已报价」。放在上一步之后：刚被推进到已联系的人这一轮就能接着往前走。
+  let quoteAdvance: QuoteAdvanceResult | { error: string }
+  try {
+    quoteAdvance = await advanceContactedAfterQuoteEmail(now)
+  } catch (err) {
+    quoteAdvance = { error: err instanceof Error ? err.message : String(err) }
+    console.error('[crm/advance-after-quote] 推荐邮件推进已报价整轮失败:', err)
+  }
+
   // 被机器判成「非咨询」的人又来了真消息 → 放回「新线索」。没有任何人被机器判过时什么都不做。
   let enquiryRevive: ReviveResult | { error: string }
   try {
@@ -665,7 +676,7 @@ export async function runPostBriefSweeps(now: Date): Promise<PostBriefSweepResul
     console.error('[crm/facts] 存对话事实整轮失败:', err)
   }
 
-  return { qualifiedBuyers, stageInfer, callAdvance, enquiryRevive, conversationFacts }
+  return { qualifiedBuyers, stageInfer, callAdvance, quoteAdvance, enquiryRevive, conversationFacts }
 }
 
 /** 把 due 列表切成每段 `BRIEFS_PER_CHUNK` 条。抽出来是为了能直测切法。 */

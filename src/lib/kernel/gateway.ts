@@ -33,6 +33,7 @@ import type { KernelDeps } from './deps'
 import { KernelError, humanReasonOf, isRetryable, reportedCostOf } from './errors'
 import { validateAgainstSchema } from './registry'
 import { outwardBlockReason, preProviderEnvelopeBlockReason } from './outward-authorization'
+import { assertSpendApproverSigned, isSpendIncreaseAction, signedBySpendApprover } from './spend-approval'
 import {
   beginAuthorizedRun,
   ensureSteps,
@@ -77,6 +78,8 @@ function assertDecisionMatches(args: {
   definition: ActionDefinition
   currentPolicy: ClientAutomationPolicy | null
   now: Date
+  /** 放行是不是 PM 本人签的（`signedBySpendApprover`）。 */
+  spendApproverSigned: boolean
 }): void {
   const { ctx, run, decision, definition, currentPolicy, now } = args
 
@@ -191,6 +194,8 @@ function assertDecisionMatches(args: {
       { detail: { decidedBy: decision.decided_by, actionKey: decision.action_key } },
     )
   }
+  // 🔴 加钱类（第 3 刀 3a 第 5 道）：放行必须是 PM 本人签的。位置在领取执行权之前：拒了不消耗授权。
+  assertSpendApproverSigned(definition, decision, args.spendApproverSigned)
 }
 
 /**
@@ -306,6 +311,7 @@ export async function executeAuthorizedRun(
     )
   }
   const policy = await getActivePolicy(deps.supabase, run.client_id, run.action_key, now)
+  const spendApproverSigned = signedBySpendApprover(deps, decision)
   assertDecisionMatches({
     ctx,
     run,
@@ -313,6 +319,7 @@ export async function executeAuthorizedRun(
     definition,
     currentPolicy: policy,
     now,
+    spendApproverSigned,
   })
 
   // ④b 🔴 A · Authorized Input Pinning execution-time check（Hardening v1）：
@@ -428,6 +435,7 @@ export async function executeAuthorizedRun(
     steps,
     fence,
     verifiedRunInput,
+    pmApprovedSpendIncrease: isSpendIncreaseAction(definition) && spendApproverSigned,
   })
 }
 
@@ -775,6 +783,8 @@ async function runSteps(
     fence: ExecutionFence
     /** 🔴 A · Hardening：深冻结的 verified snapshot；capability handler 从这里读，不回库。 */
     verifiedRunInput: Readonly<Record<string, unknown>>
+    /** PM 本人签的加钱类 → 碰 Meta 前用 PM 放量信封判（第 3 刀 3a §2.3）。 */
+    pmApprovedSpendIncrease: boolean
   },
 ): Promise<ExecutionResult> {
   const { ctx, definition, capability, fence, verifiedRunInput } = args
@@ -899,6 +909,7 @@ async function runSteps(
         run: args.run,
         stepKey,
         resolveFacts: deps.resolveEnvelopeFacts,
+        pmApprovedSpendIncrease: args.pmApprovedSpendIncrease,
       })
       if (envelopeBlock) {
         const blocked = new KernelError('INVALID_STATE', envelopeBlock, {

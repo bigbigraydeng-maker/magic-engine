@@ -6,4 +6,6 @@ export const ECOMMERCE_ADS_PLAYBOOK: AdsPlaybook = {
   resultNoun: '订单',
   costPerResultLabel: '每个订单',
   expectedGeoNoun: '配送市场',
+  creativeCompareMinLinkClicks: null,
+  creativeOfferNoun: null,
 }

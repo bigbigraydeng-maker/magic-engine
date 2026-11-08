@@ -12,10 +12,13 @@
  * 建广告是四次写操作（系列 / 组 / 创意 / 广告），任何一步都可能失败。半成品
  * 留在账户里比失败更糟：它会出现在后台、会被人误开、会进第二天的扫描。
  * 所以失败时按创建的**逆序**删回去，删不掉的如实报出来让人处理。
+ * 只删系列 / 广告组 / 广告；**创意永远不删**（见 `newRun`）。
+ * 多个广告组时，是 1 次系列 + 每组各 1 次组 + 每条广告各 2 次（创意 / 广告）；
+ * 失败时同样按逆序回滚，且只回滚本次建出来的。
  */
 
 import type { AdDraft, AdDraftCreative } from '@/lib/ads-strategy/ad-draft'
-import { metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
+import { adSetViews, metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
 import { isPlaybackGoal, PLAYBACK_REQUIRED_PLATFORMS } from '@/lib/ads-strategy/launch-readback'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
@@ -36,7 +39,10 @@ export interface PublishOptions {
 
 export interface PublishedDraft {
   campaignId: string
+  /** 第一个广告组的编号（单组草稿就是它唯一的那个）。 */
   adSetId: string
+  /** 这次建出来的全部广告组编号，按草稿里的顺序。单组 = 只有一个，等于 adSetId。 */
+  adSetIds: string[]
   adIds: string[]
   /** 建到一半失败、又没删干净的东西 —— 必须有人去 Meta 后台手动删。 */
   orphans: string[]
@@ -249,6 +255,7 @@ function campaignBody(d: AdDraft): Record<string, string> {
     // （否则报 100/4834011）。false = 各组预算互不共享，与我们每组独立日预算的做法一致。
     // 2026-10-26 $1 试跑第一次真跑 ads.create_ad 时撞上。
     is_adset_budget_sharing_enabled: 'false',
+    ...(d.campaignSpendCapMinor !== undefined ? { spend_cap: String(d.campaignSpendCapMinor) } : {}),
   }
 }
 
@@ -286,7 +293,11 @@ type MadeOrFailed = { id: string } | PublishFailure
  */
 function newRun(accessToken: string, opts: PublishOptions) {
   const now = opts.now ?? Date.now
-  const created: string[] = []
+  // 只记「回滚要删」的三类：系列 / 广告组 / 广告。创意**不进这张单子，回滚永远不删创意**：
+  // Meta 对内容相同的创意会复用同一个对象（2026-10-27 实测），它可能正被在投的广告用着，
+  // 删它会被 Meta 拒（1487235），还会把一个根本不用收拾的编号当成「要手动删」的孤儿报给人。
+  // 没挂任何广告的创意不花钱，留着无害。
+  const created = new Set<string>()
   const possible: string[] = []
 
   const rollback = async (): Promise<string[]> => {
@@ -317,10 +328,13 @@ function newRun(accessToken: string, opts: PublishOptions) {
     }
     const r = await graphPost(path, body, accessToken)
     if ('error' in r) {
-      if (r.ambiguous) possible.push(`未确认是否已建成：${label}「${name}」，请去 Meta 后台按名字核对`)
+      // 创意不进孤儿名单：不花钱，也不该让人去后台「核对」一个可能被在投广告共用的对象。
+      if (r.ambiguous && step !== 'creative') {
+        possible.push(`未确认是否已建成：${label}「${name}」，请去 Meta 后台按名字核对`)
+      }
       return fail(step, r.error)
     }
-    created.push(r.id)
+    if (step !== 'creative') created.add(r.id)
     return r
   }
 
@@ -467,15 +481,21 @@ export async function publishDraftPaused(
   const campaign = await run.make('campaign', '广告系列', d.campaignName, `${adAccountId}/campaigns`, campaignBody(d))
   if ('ok' in campaign) return campaign
 
-  // ── 2. 广告组 ────────────────────────────────────────────────────────
-  const adSet = await run.make('adset', '广告组', d.adSetName, `${adAccountId}/adsets`, adSetBodyFor(d, campaign.id, run.now()))
-  if ('ok' in adSet) return adSet
+  // ── 2+3+4. 逐个广告组：先建组，再建它的创意和广告 ──────────────────────
+  // 多组草稿的每个组都是「单组草稿」的样子（adSetViews），所以建组、建创意的函数不用改。
+  const startMs = run.now()
+  const adSetIds: string[] = []
+  const adIds: string[] = []
+  for (const view of adSetViews(d)) {
+    const adSet = await run.make('adset', '广告组', view.adSetName, `${adAccountId}/adsets`, adSetBodyFor(view, campaign.id, startMs))
+    if ('ok' in adSet) return adSet
+    adSetIds.push(adSet.id)
+    const made = await publishCreatives(view, adAccountId, adSet.id, run)
+    if (!Array.isArray(made)) return made
+    adIds.push(...made)
+  }
 
-  // ── 3+4. 每条创意 → 每条广告 ─────────────────────────────────────────
-  const adIds = await publishCreatives(d, adAccountId, adSet.id, run)
-  if (!Array.isArray(adIds)) return adIds
-
-  return { ok: true, campaignId: campaign.id, adSetId: adSet.id, adIds, orphans: [] }
+  return { ok: true, campaignId: campaign.id, adSetId: adSetIds[0], adSetIds, adIds, orphans: [] }
 }
 
 /**
@@ -503,14 +523,15 @@ export async function activatePublished(
  * 失败的 id 如实返回，由调用方记账让人看见。
  */
 export async function pausePublished(
-  p: Pick<PublishedDraft, 'campaignId' | 'adSetId' | 'adIds'>,
+  p: Pick<PublishedDraft, 'campaignId' | 'adSetId' | 'adIds'> & { adSetIds?: readonly string[] },
   accessToken: string,
   opts: { deadlineAt?: number; now?: () => number } = {},
 ): Promise<{ ok: boolean; failed: string[] }> {
   const now = opts.now ?? Date.now
   // 同时发：此刻的目标是尽快让钱停下来，不是保持顺序；串行最坏 (N+2)×15 秒。
+  const ids = [...new Set([...p.adIds, ...(p.adSetIds ?? []), p.adSetId, p.campaignId])]
   const results = await Promise.all(
-    [...p.adIds, p.adSetId, p.campaignId].map(async (id): Promise<string | null> => {
+    ids.map(async (id): Promise<string | null> => {
       // 有顶：整次请求不能因为补暂停拖过平台的超时线。没来得及的如实报出来。
       if (opts.deadlineAt !== undefined && now() > opts.deadlineAt) {
         return `${id}：整次请求的时间用完了，没来得及`

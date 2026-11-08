@@ -2,7 +2,7 @@
  * 账户状态快速探测：只读 Meta 的账户级信息，状态变了才写一行账户级快照。
  *
  * 为什么存在：完整设置快照每 6 小时一次，欠款（状态 3）最坏要 6 小时才被读到。
- * 这里挂在每 2 小时一次的线索同步 cron 上，把读状态的最坏延迟缩到约 2 小时。
+ * 这里挂在每 30 分钟一次的线索同步 cron 上，把读状态的最坏延迟缩到约 30 分钟。
  *
  * 🔴 对 Meta 只读（只调 `fetchAccountSettings`，一次 GET）。
  * 🔴 对库只 insert，且只写 `ad_entity_snapshots` 的 level='account'、状态相对上一行变了（changed / first_seen）的行；

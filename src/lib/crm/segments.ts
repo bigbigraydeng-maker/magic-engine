@@ -33,6 +33,7 @@ import { resolveTravelDate, isDueToWake } from './travel-date'
 import { detectReturningLead, returningReason, type ReturningLead } from './returning-lead'
 // 「别再联系」的判据全仓只有一份 —— 这里要的是「什么时候被人推翻过」。
 import { withoutClearedDnc } from './dnc'
+import { isVoicemailOrSilentCall } from './customer-spoke'
 
 export type Temperature = 'hot' | 'warm' | 'cold' | 'off'
 
@@ -502,7 +503,10 @@ const PHONE_VERDICTS: ReadonlySet<string> = new Set(['bad_number', 'spoke'])
  * `no_answer` 是一次正常尝试。
  */
 export function isUnansweredCall(metadata: Record<string, unknown> | null | undefined): boolean {
-  return metadata?.answered === false
+  // 通话分析确认客人没出声（语音信箱 / 对方全程没说话）：线路虽然「接通」了，客人并没有联系上，
+  // 跟没人接一样处理 —— 不算我们最后一次出站、不算今天已出手、不算聊过。
+  // 分析还没出结果（null）不在这里：未知时不下结论，也不藏人（见 lib/crm/customer-spoke）。
+  return metadata?.answered === false || isVoicemailOrSilentCall(metadata)
 }
 
 export function isFailedReach(outcome: string | null | undefined): boolean {
@@ -935,6 +939,7 @@ export function segmentContact(
       t.channel === 'phone' &&
       t.direction === 'outbound' &&
       !t.automated &&
+      !t.unansweredCall &&
       t.source !== 'me_manual' &&
       t.outcome === 'spoke',
   )

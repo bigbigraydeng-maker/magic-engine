@@ -179,6 +179,8 @@ export interface AdDraft {
   budgetMode?: DraftBudgetMode
   /** 系列日预算（元）。`budgetMode === 'campaign'` 时必填，且要等于 `dailyBudget`。 */
   campaignDailyBudget?: number
+  /** 系列花费上限，账户币种最小单位（分）。不写 = 不设上限（和以前一样）。建系列时传给 Meta 的 spend_cap。 */
+  campaignSpendCapMinor?: number
   /** 多个广告组。不写 = 根上的字段就是那一个组。 */
   adSets?: AdDraftAdSet[]
   /** 单个广告组的扩量开关。多个广告组时写在每个组上。 */
@@ -274,10 +276,29 @@ function isCreativeShape(c: unknown): boolean {
   return OPTIONAL_TEXT_FIELDS.every((k) => o[k] === undefined || typeof o[k] === 'string')
 }
 
+/** 金额恰好能换算成整数分（Meta 按分收预算；9.505 这种会被悄悄四舍五入，建出来和草稿不是一个数）。 */
+export function isWholeCents(n: number): boolean {
+  return Math.abs(n * 100 - Math.round(n * 100)) < 1e-6
+}
+
+/** 年龄：下限不低于 18、上限不高于 65（Meta 的 65 岁以上是 65+，这里只允许写 65）、下限不超过上限。 */
+export function ageProblems(ageMin: number | undefined, ageMax: number | undefined, prefix: string): DraftProblem[] {
+  const p: DraftProblem[] = []
+  if (ageMin !== undefined && ageMin < 18) p.push({ field: `${prefix}ageMin`, message: 'Meta 不允许投给 18 岁以下' })
+  if (ageMin !== undefined && ageMin > 65) p.push({ field: `${prefix}ageMin`, message: '年龄下限不能超过 65' })
+  if (ageMax !== undefined && ageMax > 65) p.push({ field: `${prefix}ageMax`, message: '年龄上限不能超过 65（Meta 的 65 就是 65 岁以上）' })
+  if (ageMin !== undefined && ageMax !== undefined && ageMin > ageMax) {
+    p.push({ field: `${prefix}ageMax`, message: '年龄下限比上限还大' })
+  }
+  return p
+}
+
 function moneyAndSpanProblems(d: AdDraft): DraftProblem[] {
   const p: DraftProblem[] = []
   if (!Number.isFinite(d.dailyBudget) || d.dailyBudget <= 0) {
     p.push({ field: 'dailyBudget', message: '每天预算必须是大于 0 的数' })
+  } else if (!isWholeCents(d.dailyBudget)) {
+    p.push({ field: 'dailyBudget', message: '每天预算最多写到分（两位小数），多出来的位数会被 Meta 悄悄四舍五入' })
   } else if (d.dailyBudget > MAX_AUTO_DAILY_BUDGET) {
     p.push({
       field: 'dailyBudget',
@@ -345,12 +366,7 @@ function validateCommon(d: AdDraft): DraftProblem[] {
     }
     p.push(...creativeProblems(d.kind, d.creatives, ''))
 
-    if (d.ageMin !== undefined && d.ageMin < 18) {
-      p.push({ field: 'ageMin', message: 'Meta 不允许投给 18 岁以下' })
-    }
-    if (d.ageMin !== undefined && d.ageMax !== undefined && d.ageMin > d.ageMax) {
-      p.push({ field: 'ageMax', message: '年龄下限比上限还大' })
-    }
+    p.push(...ageProblems(d.ageMin, d.ageMax, ''))
 
     p.push(...audienceListProblems(d.audienceIds, d.excludedAudienceIds, ''))
   }
@@ -538,6 +554,61 @@ export function describeDraft(d: AdDraft): string {
   // 这一步在 `validateDraft` 之前就会被调（账本的摘要），所以 kind 可能是请求体里的任何值。
   const what = isKnownDraftKind(d.kind) ? DRAFT_WHAT[d.kind] : '（不认识的广告类型）'
   const budget = d.budgetMode === 'campaign' ? '（系列预算）' : ''
-  const sets = Array.isArray(d.adSets) ? `，${d.adSets.length} 个广告组` : ''
+  const sets = Array.isArray(d.adSets)
+    ? `，${d.adSets.length} 个广告组（${d.adSets.map((s) => { const v = asSet(s); return `${v.name ?? '?'} $${v.dailyBudget ?? '?'}` }).join('、')}）`
+    : ''
   return `${what}，每天 $${d.dailyBudget}${budget}、跑 ${d.durationDays} 天，最多花 $${total}${sets}`
+}
+
+/**
+ * 一份草稿里每一个要建的广告组，压成「单组草稿」的样子 —— 建组、回读、受众检查都按这个形状走，
+ * 不需要各自再认一遍 `adSets`。没有 `adSets` 时就是它自己（一个元素）。
+ * 注意：多组时组预算缺失会变成 NaN，调用方必须先过 `validateDraft`，不要拿没验过的草稿来建。
+ */
+export function adSetViews(d: AdDraft): AdDraft[] {
+  if (!Array.isArray(d.adSets)) return [d]
+  return d.adSets.map((raw) => {
+    const set = asSet(raw)
+    return {
+      ...d,
+      adSets: undefined,
+      adSetName: set.name ?? '',
+      dailyBudget: set.dailyBudget ?? Number.NaN,
+      geoCountries: set.geoCountries ?? [],
+      geoCityKeys: set.geoCityKeys,
+      ageMin: set.ageMin,
+      ageMax: set.ageMax,
+      audienceIds: set.audienceIds,
+      excludedAudienceIds: set.excludedAudienceIds,
+      expansion: set.expansion,
+      creatives: set.creatives ?? [],
+      ctaType: set.ctaType,
+      urlTags: set.urlTags,
+      firstComment: set.firstComment,
+    }
+  })
+}
+
+/**
+ * 请求体里 `adSets` 的元素没人保证过形状（null、数字、缺字段都可能）；账本摘要和红线扫描在 `validateDraft` 之前就会走到这里，
+ * 所以读不懂的元素按「空组」处理（创意为空数组），绝不抛错 —— 抛错会变成 500 且不留账。
+ */
+function asSet(raw: unknown): Partial<AdDraftAdSet> {
+  if (typeof raw !== 'object' || raw === null) return { creatives: [] }
+  const o = raw as Partial<AdDraftAdSet>
+  return { ...o, creatives: Array.isArray(o.creatives) ? o.creatives : [] }
+}
+
+/** 所有广告组的所有创意（单组 = 根上的创意）。 */
+export function allCreatives(d: AdDraft): AdDraftCreative[] {
+  return adSetViews(d).flatMap((v) => v.creatives)
+}
+
+/** 所有广告组里出现过的包含 / 排除受众编号，各自去重。 */
+export function unionAudienceIds(d: AdDraft): { included: string[]; excluded: string[] } {
+  const views = adSetViews(d)
+  return {
+    included: [...new Set(views.flatMap((v) => v.audienceIds ?? []))],
+    excluded: [...new Set(views.flatMap((v) => v.excludedAudienceIds ?? []))],
+  }
 }

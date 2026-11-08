@@ -57,6 +57,13 @@ interface ClaimRule {
   inNote: RegExp
 }
 
+/**
+ * 「next March / this June」这种「下一个 / 本个 + 月份」的英文说法（may 只认后面收束的写法，避免情态动词）。
+ * 模型把英文笔记翻成中文时会写成「明年三月 / 今年六月」，不能因此判成没依据。
+ */
+const EN_MONTH_ALT =
+  'jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|may(?=\\s*(?:$|[\\d,.;:，。]))'
+
 const CLAIM_RULES: ClaimRule[] = [
   { inSummary: /报价|报个价/, inNote: /报价|quote|quotation|price|pricing|多少钱|价格|费用|cost/i },
   { inSummary: /要求|请求|索要/, inNote: /要求|想要|需要|(?<![不没别无未])要|请|求|问|request|ask|(?<!(?:do not |don'?t |not ))need|(?<!(?:do not |don'?t |not ))want|require/i },
@@ -86,7 +93,8 @@ const CLAIM_RULES: ClaimRule[] = [
   { inSummary: /后天/, inNote: /后天|day after tomorrow/i },
   { inSummary: /今天|今晚/, inNote: /今天|今晚|today|tonight/i },
   { inSummary: /下个月|下月/, inNote: /下个月|下月|next\s*month/i },
-  { inSummary: /明年/, inNote: /明年|next\s*year/i },
+  { inSummary: /明年/, inNote: new RegExp(`明年|next\\s*year|\\bnext\\s+(?:${EN_MONTH_ALT})\\b`, 'i') },
+  { inSummary: /今年/, inNote: new RegExp(`今年|this\\s*year|\\bthis\\s+(?:${EN_MONTH_ALT})\\b`, 'i') },
   { inSummary: /月底/, inNote: /月底|end of (the )?month/i },
   { inSummary: /年底/, inNote: /年底|end of (the |next )?year/i },
   { inSummary: /上午|早上/, inNote: /上午|早上|morning|\bam\b/i },
@@ -261,11 +269,39 @@ function cnNumeralValue(t: string): number | null {
 }
 
 /**
+ * 「三千 / 五千五 / 两万 / 一万二千 / 3千 / 3万」→ 阿拉伯数字（3000 / 5500 / 20000 / 12000）。
+ * 只处理带 千 / 百 / 万 的整串；「三千五」末尾单独一位按「千」的下一位（五百）算。
+ * 两边（笔记原话、摘要）都过这一道，所以「预算三千」对「预算五千」会被拦下，对「budget 3000」放行。
+ */
+function magnitudeToArabic(s: string): string {
+  return s.replace(/[零〇一二两三四五六七八九十\d]+[千百万][零〇一二两三四五六七八九十千百万\d]*/g, (run) => {
+    let total = 0
+    let section = 0
+    let pending: number | null = null
+    let lastUnit = 0
+    for (const m of run.matchAll(/\d+|./g)) {
+      const t = m[0]
+      if (/^\d+$/.test(t)) { pending = Number(t); continue }
+      const digit = CN_DIGIT[t]
+      if (digit !== undefined) { if (t !== '零' && t !== '〇') pending = digit; continue }
+      if (t === '十') { section += (pending ?? 1) * 10; pending = null; lastUnit = 10; continue }
+      if (t === '百') { section += (pending ?? 1) * 100; pending = null; lastUnit = 100; continue }
+      if (t === '千') { section += (pending ?? 1) * 1000; pending = null; lastUnit = 1000; continue }
+      if (t === '万') { total += (section + (pending ?? 0) || 1) * 10000; section = 0; pending = null; lastUnit = 0; continue }
+      return run
+    }
+    // 末尾孤零零的一位：三千五 = 3500，三百五 = 350。
+    const tail = pending === null ? 0 : lastUnit >= 100 ? pending * (lastUnit / 10) : pending
+    return String(total + section + tail)
+  })
+}
+
+/**
  * 把「两个人 / 三月 / 十二天」里的中文数字换成阿拉伯数字，后面再比数字。
  * 只换「数字 + （个）+ 量词」这种明确的数量 / 日期（避免「一直」「一下」被当成数字 1）。
  */
 export function cnNumeralsToArabic(s: string): string {
-  return s.replace(/([零〇一二两三四五六七八九十]{1,3})个?(?=[人位天晚岁月号日周年万元块间])/g, (m, num: string) => {
+  return magnitudeToArabic(s).replace(/([零〇一二两三四五六七八九十]{1,3})个?(?=[人位天晚岁月号日周年万元块间])/g, (m, num: string) => {
     const v = cnNumeralValue(num)
     return v === null ? m : String(v)
   })
@@ -366,21 +402,32 @@ function digitRuns(s: string): string[] {
   return s.match(/\d+/g) ?? []
 }
 
-/** 地名 / 目的地：摘要里写了哪个，原话里就必须有（中文或对应英文）。 */
-const PLACES: Array<[string, RegExp]> = [
-  ['北京', /beijing/i], ['上海', /shanghai/i], ['西安', /xi'?an/i], ['成都', /chengdu/i], ['桂林', /guilin/i],
+/**
+ * 地名 / 目的地：摘要里写了哪个，原话里就必须有（中文、别名或对应英文）。
+ * 别名（魔都→上海、帝都→北京）算同一个地方：原话写别名、摘要写正名没问题；
+ * 但原话没有任何一种说法时，摘要里冒出来的地名一律没依据。
+ * 英文只认整词（dalian 不是 Dali）。
+ */
+const PLACES: Array<[string, RegExp, string[]?]> = [
+  ['北京', /beijing/i, ['帝都', '京城']], ['上海', /shanghai/i, ['魔都', '申城']], ['西安', /xi'?an/i], ['成都', /chengdu/i], ['桂林', /guilin/i],
   ['杭州', /hangzhou/i], ['苏州', /suzhou/i], ['广州', /guangzhou/i], ['深圳', /shenzhen/i], ['香港', /hong\s*kong/i],
-  ['澳门', /macau|macao/i], ['重庆', /chongqing/i], ['昆明', /kunming/i], ['丽江', /lijiang/i], ['大理', /dali/i],
-  ['拉萨', /lhasa/i], ['西藏', /tibet/i], ['新疆', /xinjiang/i], ['云南', /yunnan/i], ['张家界', /zhangjiajie/i],
+  ['澳门', /macau|macao/i], ['重庆', /chongqing/i], ['昆明', /kunming/i], ['丽江', /lijiang/i], ['大理', /\bdali\b/i],
+  ['大连', /dalian/i], ['拉萨', /lhasa/i], ['西藏', /tibet/i], ['新疆', /xinjiang/i], ['云南', /yunnan/i], ['张家界', /zhangjiajie/i],
   ['黄山', /huangshan|yellow mountain/i], ['哈尔滨', /harbin/i], ['青岛', /qingdao/i], ['厦门', /xiamen/i],
   ['南京', /nanjing/i], ['洛阳', /luoyang/i], ['敦煌', /dunhuang/i], ['兰州', /lanzhou/i], ['三亚', /sanya/i],
+  ['武汉', /wuhan/i], ['天津', /tianjin/i], ['沈阳', /shenyang/i], ['长沙', /changsha/i], ['乌鲁木齐', /urumqi/i],
+  ['九寨沟', /jiuzhai/i], ['长城', /great\s*wall/i], ['故宫', /forbidden\s*city|palace\s*museum/i], ['兵马俑', /terracotta/i],
+  ['外滩', /\bthe\s*bund\b/i], ['漓江', /li\s*river/i], ['三峡', /three\s*gorges/i], ['峨眉山', /emei/i], ['稻城', /daocheng/i],
   ['台湾', /taiwan/i], ['日本', /japan/i], ['韩国', /korea/i], ['越南', /vietnam/i], ['泰国', /thailand/i],
-  ['澳洲', /australia|aussie/i], ['新西兰', /new zealand|\bnz\b/i], ['中国', /china|chinese/i],
+  ['东京', /tokyo/i], ['大阪', /osaka/i], ['京都', /kyoto/i], ['首尔', /seoul/i], ['新加坡', /singapore/i],
+  ['澳洲', /australia|aussie/i, ['澳大利亚']], ['新西兰', /new zealand|\bnz\b/i], ['中国', /china|chinese/i],
 ]
 
 function firstUngroundedPlace(summary: string, raw: string): string | null {
-  for (const [cn, en] of PLACES) {
-    if (summary.includes(cn) && !raw.includes(cn) && !en.test(raw)) return cn
+  for (const [cn, en, aliases = []] of PLACES) {
+    const names = [cn, ...aliases]
+    const hit = names.find((n) => summary.includes(n))
+    if (hit && !names.some((n) => raw.includes(n)) && !en.test(raw)) return hit
   }
   return null
 }

@@ -20,7 +20,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
-import { parseDomainList, readDomainRules } from '@/lib/crm/contact-kind'
+import { parseAddressList, parseDomainList, readDomainRules } from '@/lib/crm/contact-kind'
 import { parseEmailList } from '@/lib/leads/parse-email-list'
 import { parsePhoneList, toPhoneCountry } from '@/lib/leads/parse-phone-list'
 import { readOwnPhoneNumbers } from '@/lib/leads/own-phone-numbers'
@@ -31,6 +31,8 @@ export interface LeadsConfig {
   mailchimpEnabled: boolean
   /** 客户自己的邮件域名（可以有多个：主域名 + 关联公司）。 */
   ownEmailDomains: string[]
+  /** 点名的员工地址（own_email_domains 里含 @ 的条目，只认这一个地址）。 */
+  ownAddresses: string[]
   /** 同行 / 分销商的域名。 */
   tradeDomains: string[]
   /** 客户自己人（销售、老板）的手机号，E.164。用来在 WhatsApp 群里认出谁是自己人。 */
@@ -56,6 +58,7 @@ function readConfig(raw: unknown): LeadsConfig {
   return {
     mailchimpEnabled: o.mailchimp_enabled === true,
     ownEmailDomains: rules.own,
+    ownAddresses: rules.ownAddresses ?? [],
     tradeDomains: rules.trade,
     ownPhoneNumbers: readOwnPhoneNumbers(o),
     notifyEmails,
@@ -97,6 +100,7 @@ interface PatchBody {
   mailchimpEnabled?: unknown
   mailchimpAudienceId?: unknown
   ownEmailDomains?: unknown
+  ownAddresses?: unknown
   tradeDomains?: unknown
   ownPhoneNumbers?: unknown
   notifyEmails?: unknown
@@ -131,8 +135,38 @@ export async function PATCH(
     patch.mailchimp_enabled = body.mailchimpEnabled
   }
 
+  // own_email_domains 一个 jsonb 数组里住着两种条目：域名 和 点名的员工地址（含 @）。
+  // 两个输入框各改各的，存的时候在下面合起来 —— 改域名绝不能把已存的员工地址丢掉。
+  let ownDomainsPatch: string[] | undefined
+  let ownAddressesPatch: string[] | undefined
+  if (body.ownEmailDomains !== undefined) {
+    const v = body.ownEmailDomains
+    if (typeof v !== 'string' && !Array.isArray(v)) {
+      return NextResponse.json({ error: 'ownEmailDomains 要么是一段文字，要么是一个清单' }, { status: 400 })
+    }
+    // 含 @ 的条目是精确地址，不许走 normaliseDomain 退化成整个域名。
+    const pieces = (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : v.split(/[\n\r,;、，；]+/))
+      .map((x) => x.trim())
+      .filter(Boolean)
+    const parsed = parseDomainList(pieces.filter((x) => !x.includes('@')))
+    ownDomainsPatch = parsed.domains
+    rejected.push(...parsed.rejected)
+    const typedAddresses = parseAddressList(pieces.filter((x) => x.includes('@')))
+    if (typedAddresses.addresses.length > 0) ownAddressesPatch = typedAddresses.addresses
+    rejected.push(...typedAddresses.rejected)
+  }
+  if (body.ownAddresses !== undefined) {
+    if (typeof body.ownAddresses !== 'string' && !Array.isArray(body.ownAddresses)) {
+      return NextResponse.json({ error: 'ownAddresses 要么是一段文字，要么是一个清单' }, { status: 400 })
+    }
+    const parsed = parseAddressList(body.ownAddresses)
+    ownAddressesPatch = parsed.addresses
+    rejected.push(...parsed.rejected)
+  }
+  const hasOwnPatch = ownDomainsPatch !== undefined || ownAddressesPatch !== undefined
+  const explicitAddresses = body.ownAddresses !== undefined
+
   for (const [field, column] of [
-    ['ownEmailDomains', 'own_email_domains'],
     ['tradeDomains', 'trade_domains'],
   ] as const) {
     const value = body[field]
@@ -205,7 +239,7 @@ export async function PATCH(
     audienceWritten = value
   }
 
-  if (Object.keys(patch).length === 0) {
+  if (Object.keys(patch).length === 0 && !hasOwnPatch) {
     if (audienceWritten !== undefined) {
       // 只改了 audience —— 其余几项要**照实回读**再回给界面。
       // 拿 readConfig(null) 顶替会把「这次没读」变成「全都是关的」，界面照单
@@ -233,9 +267,17 @@ export async function PATCH(
     .eq('id', clientId)
     .maybeSingle()
 
-  const next = {
-    ...((cur?.leads_config as Record<string, unknown> | null) ?? {}),
-    ...patch,
+  const curConfig = (cur?.leads_config as Record<string, unknown> | null) ?? {}
+  const next: Record<string, unknown> = { ...curConfig, ...patch }
+  if (hasOwnPatch) {
+    const curRules = readDomainRules(curConfig)
+    const domains = ownDomainsPatch ?? curRules.own
+    const curAddresses = curRules.ownAddresses ?? []
+    // 明确改地址框 → 以提交的为准；只改域名框 → 已存地址原样保留，域名框里顺手打的地址并进去。
+    const addresses = explicitAddresses
+      ? (ownAddressesPatch ?? [])
+      : Array.from(new Set([...curAddresses, ...(ownAddressesPatch ?? [])]))
+    next.own_email_domains = [...domains, ...addresses]
   }
 
   const { error: updErr } = await supabaseAdmin
