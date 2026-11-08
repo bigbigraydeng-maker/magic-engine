@@ -479,6 +479,11 @@ const CRON_REGISTRY_ENTRIES = [
   { service: 'inngest:cloud-triggered-send-welcome-sweep', jobName: 'triggered-send-welcome-sweep', schedule: '0 9 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-02',
     outputTables: [{ table: 'triggered_sends', freshnessHours: 26, timestampColumn: 'created_at', emptyRoundsAreLegitimate: true }] },
 
+  // 「别再联系」的客人自己回来：填表 / 接通的来电 → 自动解除；私信 / 回信只列进运行记录请人看。每 15 分钟（Inngest cron 带 TZ=Pacific/Auckland），
+  // 每一轮都写一行运行记录。默认只演练：CRM_DNC_REENGAGE_WRITE_CLIENTS 名单里的客户才真写。设计稿 docs/specs/2026-11-08-crm-ai-takeover-and-dnc-reengage-design-v0.md §3。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/crm-dnc-reengage-sweep.ts 的 CRM_DNC_REENGAGE_CRON（去掉 TZ 前缀）。
+  { service: 'inngest:cloud-crm-dnc-reengage-sweep', jobName: 'crm-dnc-reengage-sweep', schedule: '*/15 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-08' },
+
   // Render 上只留这三条。它们自己很快返回，到点的旧接口在 web 进程里接着跑。
   { service: 'cron-dispatch-frequent', jobName: 'cron-dispatch-frequent', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-24' },
   { service: 'cron-dispatch-daily', jobName: 'cron-dispatch-daily', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-24' },
