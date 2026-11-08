@@ -14,10 +14,17 @@ export interface OtherLive {
 export function sumOtherLive(
   accounts: readonly OtherAccountFact[] | null,
   error: string | null,
+  targetCurrency: string | null,
 ): OtherLive {
   if (error || accounts === null) return { cents: null, lifetime: false }
+  if (accounts.length === 0) return { cents: 0, lifetime: false }
+  // No conversion source exists for ad-account currencies. A mismatch or a
+  // missing code is "can't read", never a sum of unlike minor units.
+  const target = currencyCode(targetCurrency)
+  if (!target) return { cents: null, lifetime: false }
   let sum = 0
   for (const row of accounts) {
+    if (currencyCode(row.currency) !== target) return { cents: null, lifetime: false }
     if (row.live_lifetime_budget_count > 0) return { cents: null, lifetime: true }
     if (!Number.isSafeInteger(row.live_daily_budget_cents) || row.live_daily_budget_cents < 0) {
       return { cents: null, lifetime: false }
@@ -28,12 +35,18 @@ export function sumOtherLive(
   return { cents: sum, lifetime: false }
 }
 
+function currencyCode(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const code = value.trim().toUpperCase()
+  return /^[A-Z]{3}$/.test(code) ? code : null
+}
+
 export function countedInLive(effectiveStatus: string | null | undefined): boolean | null {
   if (!effectiveStatus) return null
   return DELIVERING_STATUSES.has(effectiveStatus)
 }
 
-export function capNumbers(facts: BudgetFacts, effectiveStatus: string | null | undefined): {
+export function capNumbers(facts: BudgetFacts & { account_currency?: string | null }, effectiveStatus: string | null | undefined): {
   accountCapCents: number | null
   accountLiveCents: number | null
   otherAccountsLiveCents: number | null
@@ -41,7 +54,7 @@ export function capNumbers(facts: BudgetFacts, effectiveStatus: string | null | 
   countedInLive: boolean | null
   lifetimeBlocks: boolean
 } {
-  const other = sumOtherLive(facts.other_accounts, facts.other_accounts_error)
+  const other = sumOtherLive(facts.other_accounts, facts.other_accounts_error, facts.account_currency ?? null)
   const lifetimeBlocks = facts.live_lifetime_budget_count > 0 || other.lifetime
   if (!facts.read) {
     return {

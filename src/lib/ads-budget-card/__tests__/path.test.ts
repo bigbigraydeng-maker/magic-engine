@@ -47,16 +47,17 @@ describe('budget path result', () => {
     }])).toEqual({ cents: 90, passed: false })
   })
 
-  it('sends a raise through the scale action and a cut through the cut action', () => {
+  it('sends the confirmed baseline and prescription lock with both directions', () => {
     const raise = kernelInput({
-      cycleDate: '2026-11-02', adAccountId: 'act_1', adsetId: '1', beforeCents: 100, afterCents: 120, raising: true,
+      cycleDate: '2026-11-02', adAccountId: 'act_1', adsetId: '1', beforeCents: 100, afterCents: 120, raising: true, lock,
     })
-    expect(raise).toMatchObject({ before_cents: 100, after_cents: 120 })
+    expect(raise).toMatchObject({ before_cents: 100, after_cents: 120, card_prescription_id: lock.prescriptionId, card_version: 2 })
     const cut = kernelInput({
-      cycleDate: '2026-11-02', adAccountId: 'act_1', adsetId: '1', beforeCents: 100, afterCents: 80, raising: false,
+      cycleDate: '2026-11-02', adAccountId: 'act_1', adsetId: '1', beforeCents: 100, afterCents: 80, raising: false, lock,
     })
-    expect(cut).not.toHaveProperty('before_cents')
+    expect(cut.before_cents).toBe(100)
     expect(cut.after_cents).toBe(80)
+    expect(cut.card_goal_id).toBe(lock.goalId)
   })
 })
 

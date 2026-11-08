@@ -23,6 +23,7 @@ import { canonicalAccountDigits, findOtherClientRegistrations } from '@/lib/meta
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
 import { getCampaignDetails } from '@/lib/meta/campaign-management'
 import { setCampaignDailyBudget } from '@/lib/meta/campaign-writes'
+import { budgetCardWriteBlock } from '@/lib/ads-budget-card/write-gate'
 import { makeReadbackVerification, makeSnapshotPreStep, requireMetaToken } from './common'
 
 function adsetId(step: CapabilityStepContext): string {
@@ -182,6 +183,8 @@ export function createScaleUnitBudgetCapability(sb: SupabaseClient): CapabilityI
           const current = await readCampaignBudget(campaign, accountId, token)
           if (current !== expected) throw new RetryableCapabilityError('Meta 当前系列预算与审批时的金额不同；已停止修改，请重新提交并审批')
           assertScaleLimit(current, target)
+          const cardBlock = await budgetCardWriteBlock(sb, step.ctx.clientId, step.runInput, current, target)
+          if (cardBlock) throw new KernelError('INVALID_INPUT', cardBlock)
           const ok = await setCampaignDailyBudget(campaign, token, target)
           if (!ok) throw new RetryableCapabilityError(`提高广告系列 ${campaign} 预算失败：Meta 未确认写入`)
           return { output: { campaign_id: campaign, applied: true, prior_daily_budget_cents: current, new_daily_budget_cents: target } }
@@ -213,6 +216,8 @@ export function createScaleUnitBudgetCapability(sb: SupabaseClient): CapabilityI
         if (!Number.isSafeInteger(beforeCents) || beforeCents !== expectedBeforeCents) {
           throw new RetryableCapabilityError('Meta 当前预算与审批时看到的金额不同；已停止修改，请重新检查并提交')
         }
+        const cardBlock = await budgetCardWriteBlock(sb, step.ctx.clientId, step.runInput, beforeCents, newCents)
+        if (cardBlock) throw new KernelError('INVALID_INPUT', cardBlock)
 
         const ok = await setAdSetDailyBudget(id, token, newCents)
         if (!ok) {

@@ -7,6 +7,7 @@ import { ACTION_REGISTRY } from '@/lib/kernel/registry'
 import { computeIdempotencyKey } from '@/lib/kernel/idempotency'
 import type { BudgetOrder } from './types'
 import type { PrescriptionLock } from './prescription-lock'
+import { cardFields } from './write-gate'
 
 export interface BudgetExecuteCall {
   readonly clientId: string
@@ -19,6 +20,7 @@ export interface BudgetExecuteCall {
   readonly nonce: string
   readonly raising: boolean
   readonly idempotencyKey: string
+  readonly lock: PrescriptionLock
 }
 
 export interface BudgetExecuteResult {
@@ -68,6 +70,7 @@ export function budgetStepIdempotencyKey(
         beforeCents,
         afterCents: order.newDailyBudgetCents,
         raising,
+        lock,
       }),
       budgetNonce(lock),
     )
@@ -94,6 +97,7 @@ export function executeCall(
     nonce: budgetNonce(lock),
     raising: order.newDailyBudgetCents > beforeCents,
     idempotencyKey,
+    lock,
   }
 }
 
@@ -104,14 +108,16 @@ export function kernelInput(call: {
   beforeCents: number
   afterCents: number
   raising: boolean
+  lock: PrescriptionLock
 }): Record<string, unknown> {
-  const shared = {
+  return {
     cycle_date: call.cycleDate,
     ad_account_id: call.adAccountId,
     adset_id: call.adsetId,
+    before_cents: call.beforeCents,
     after_cents: call.afterCents,
+    ...cardFields(call.lock),
   }
-  return call.raising ? { ...shared, before_cents: call.beforeCents } : shared
 }
 
 export function readbackFromSteps(

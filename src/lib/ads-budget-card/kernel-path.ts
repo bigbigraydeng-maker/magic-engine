@@ -5,12 +5,11 @@
  */
 
 import type { KernelDeps } from '@/lib/kernel/deps'
-import { runAction } from '@/lib/kernel/runner'
 import { listSteps } from '@/lib/kernel/store'
 import type { ActionRunStep } from '@/lib/kernel/types'
+import { submitBudgetCardAction } from '@/lib/action-submission/ads-budget-card'
 import {
   interpretBudgetOutcome,
-  kernelInput,
   readbackFromSteps,
   type BudgetExecuteCall,
   type BudgetExecuteResult,
@@ -18,37 +17,16 @@ import {
   type BudgetPath,
 } from './path'
 
-const SCALE_KEY = 'ads.scale_unit_budget'
-const CUT_KEY = 'ads.cut_unit_budget'
-
 export function kernelBudgetPath(kernel: KernelDeps): BudgetPath {
   return { execute: (call) => executeOnKernel(kernel, call) }
 }
 
 export async function executeOnKernel(kernel: KernelDeps, call: BudgetExecuteCall): Promise<BudgetExecuteResult> {
-  const outcome = await runAction(kernel, submitFrom(call), call.raising ? { requireHumanApproval: true } : {})
+  const submitted = await submitBudgetCardAction(kernel, call)
+  if (!submitted.ok) return refused(submitted.reason)
+  const outcome = submitted.outcome
   const steps = await stepsOf(kernel, outcome.kind, outcome.run.id, outcome.execution?.steps ?? null)
   return interpretBudgetOutcome(viewFrom(outcome.kind, outcome.run.id, outcome.humanReason, steps), call.afterCents)
-}
-
-function submitFrom(call: BudgetExecuteCall) {
-  return {
-    clientId: call.clientId,
-    actionKey: call.raising ? SCALE_KEY : CUT_KEY,
-    purpose: 'growth' as const,
-    goalId: call.goalId,
-    triggeredBy: 'human' as const,
-    triggeredByRef: null,
-    rationale: '已批准的处方出了一张预算步骤卡，执行走已有的预算路径',
-    idempotencyNonce: call.nonce,
-    evidence: {
-      source: 'budget_step_card',
-      idempotency_key: call.idempotencyKey,
-      before_cents: call.beforeCents,
-      after_cents: call.afterCents,
-    },
-    input: kernelInput(call),
-  }
 }
 
 async function stepsOf(
@@ -70,4 +48,8 @@ function viewFrom(
 ): BudgetOutcomeView {
   const readback = readbackFromSteps(steps)
   return { kind, runId, humanReason, readbackCents: readback.cents, verificationPassed: readback.passed }
+}
+
+function refused(reason: string): BudgetExecuteResult {
+  return { kind: 'refused', wrote: false, readbackCents: null, actionRunId: null, reason }
 }
