@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { KernelDeps } from '@/lib/kernel/deps'
 import { ADS_ACTION_TYPE, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
+import { approvalPlanHash, type ApprovalSource } from '@/lib/approval-source/read'
 import { confirmPauseCard } from '../confirm'
 import { issuePauseCards } from '../issue'
 import type { PauseHold } from '../ledger'
@@ -25,6 +26,7 @@ const payload: PauseHold = {
   },
   goalId: 'goal-1',
   planId: 'plan-1',
+  source: null,
   before: null,
   after: null,
   wrote: false,
@@ -91,14 +93,18 @@ describe('writing ledger', () => {
     const execute = vi.fn()
     const result = await confirmPauseCard({
       kernel: kernelFor([
-        holdRow({ ...payload, status: 'holding', orderKey: orderKey(order) }),
+        holdRow({ ...payload, status: 'holding', orderKey: orderKey(order), source: pauseSource() }),
         prescriptionRow(order),
         { id: 'goal-1', client_id: 'client-1', status: 'active' },
         {
           id: 'plan-1',
           client_id: 'client-1',
           status: 'approved',
-          generation_meta: { from_prescription: { prescription_id: 'rx-1', version: 2 } },
+          plan_data: {},
+          generation_meta: {
+            from_prescription: { prescription_id: 'rx-1', version: 2 },
+            blank_draft: { goal_id: 'goal-1' },
+          },
         },
       ]),
       clientId: 'client-1',
@@ -145,6 +151,7 @@ function prescriptionRow(order: PauseAdSetOrder): Record<string, unknown> {
     status: 'approved',
     version: 2,
     goal_id: 'goal-1',
+    approved_at: '2026-11-08T00:00:00.000Z',
     content: {
       pause_ad_set: {
         ad_account_id: order.adAccountId,
@@ -157,6 +164,17 @@ function prescriptionRow(order: PauseAdSetOrder): Record<string, unknown> {
       },
     },
     generation_meta: { plan_draft: { plan_id: 'plan-1' } },
+  }
+}
+
+function pauseSource(): ApprovalSource {
+  return {
+    prescriptionId: 'rx-1',
+    version: 2,
+    goalId: 'goal-1',
+    planId: 'plan-1',
+    planHash: approvalPlanHash('plan-1', null),
+    approvedOn: '2026-11-08',
   }
 }
 
