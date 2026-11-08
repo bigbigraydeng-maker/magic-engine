@@ -6,6 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { stepProblem } from './guard'
 import { loadApprovedLock, sameLock, type PrescriptionLock } from './prescription-lock'
+import { cardRaiseCapBlock, type RaiseWriteContext } from './raise-quota'
 import { readStepRatio } from './ratio'
 import type { StepRatio } from './types'
 
@@ -26,6 +27,7 @@ export async function budgetCardWriteBlock(
   input: Readonly<Record<string, unknown>>,
   currentCents: number,
   afterCents: number,
+  raise?: RaiseWriteContext,
 ): Promise<string | null> {
   const saved = savedLock(input)
   if (saved === 'absent') return null
@@ -38,9 +40,13 @@ export async function budgetCardWriteBlock(
   const locked = await loadApprovedLock(sb, clientId, saved.prescriptionId)
   if (!locked.ok) return locked.reason
   if (!sameLock(saved, locked.lock)) return '处方的版本、目标或计划变了，没有改。'
-  const ratio = await readStepRatio(sb, clientId, new Date())
+  const ratio = await readStepRatio(sb, clientId, raise?.now ?? new Date())
   if (typeof ratio !== 'number') return ratioClosed(ratio)
-  return stepProblem(currentCents, afterCents, ratio)
+  const step = stepProblem(currentCents, afterCents, ratio)
+  if (step) return step
+  if (afterCents <= currentCents) return null
+  if (!raise) return '执行前的预算快照读不到，没有改。'
+  return cardRaiseCapBlock(sb, clientId, currentCents, afterCents, raise)
 }
 
 function savedLock(input: Readonly<Record<string, unknown>>): PrescriptionLock | 'absent' | 'invalid' {

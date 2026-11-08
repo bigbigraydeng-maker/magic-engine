@@ -139,9 +139,25 @@ describe('budget card recheck at the provider write', () => {
     expect(blocked).toMatch(/关掉了/)
     const chain = {
       select: () => chain, eq: () => chain, in: () => chain, order: () => chain, limit: () => chain,
-      then: (resolve: (value: unknown) => void) => resolve({ data: [{ currency: 'nzd' }], error: null }),
+      then: (resolve: (value: unknown) => void) => resolve({
+        data: [{ currency: 'nzd', captured_at: new Date().toISOString() }],
+        error: null,
+      }),
     }
     const sb = { from: () => chain } as unknown as SupabaseClient
     expect(await readAccountCurrency(sb, CLIENT, 'act_1234567890')).toBe('NZD')
+    const stale = {
+      select: () => stale, eq: () => stale, in: () => stale, order: () => stale, limit: () => stale,
+      then: (resolve: (value: unknown) => void) => resolve({
+        data: [{ currency: 'NZD', captured_at: '2020-01-01T00:00:00.000Z' }],
+        error: null,
+      }),
+    }
+    expect(await readAccountCurrency({ from: () => stale } as unknown as SupabaseClient, CLIENT, 'act_1')).toBeNull()
+    const missing = {
+      select: () => missing, eq: () => missing, in: () => missing, order: () => missing, limit: () => missing,
+      then: (resolve: (value: unknown) => void) => resolve({ data: [{ currency: 'NZD' }], error: null }),
+    }
+    expect(await readAccountCurrency({ from: () => missing } as unknown as SupabaseClient, CLIENT, 'act_1')).toBeNull()
   })
 })
