@@ -22,6 +22,7 @@
  */
 
 import { resolveAdsPlaybook } from './playbooks'
+import { placementDrift, positionDrift } from './placement-lock'
 
 export type Severity =
   /** 🔴 会伤到真买家或烧错钱 —— 不修不许开 */
@@ -77,6 +78,10 @@ export interface AdSetReadback {
     geoNames?: string[]
     /** 回读到的版位。缺失/空 = 自动版位（Meta 想投哪投哪）。 */
     publisherPlatforms?: string[]
+    /** 回读到的 Facebook 具体位置。缺失 = 没读到。 */
+    facebookPositions?: string[]
+    /** 回读到的 Instagram 具体位置。缺失 = 没读到。 */
+    instagramPositions?: string[]
   }
   creatives: CreativeReadback[]
 }
@@ -95,6 +100,12 @@ export interface LaunchReadbackInput {
   expectedAudienceIds?: string[]
   /** 草案想挂的排除受众。给了就要求回读里必须看见它们。 */
   expectedExcludedAudienceIds?: string[]
+  /** 计划要求的投放平台。给了就按这份对，不再用看完类视频那条「必须正好两个平台」的检查。 */
+  expectedPublisherPlatforms?: string[]
+  /** 计划要求的 Facebook 具体位置。不给就不查。 */
+  expectedFacebookPositions?: string[]
+  /** 计划要求的 Instagram 具体位置。不给就不查。 */
+  expectedInstagramPositions?: string[]
 }
 
 export interface LaunchReadbackReport {
@@ -122,6 +133,55 @@ export const PLAYBACK_OPTIMIZATION_GOALS: ReadonlySet<string> = new Set(['THRUPL
 export const PLAYBACK_REQUIRED_PLATFORMS: readonly string[] = ['facebook', 'instagram']
 export function isPlaybackGoal(goal: string): boolean {
   return PLAYBACK_OPTIMIZATION_GOALS.has(goal.toUpperCase())
+}
+
+/** 计划写了版位就按计划对；没写才用看完类视频那条固定锁。 */
+function placementFindings(input: LaunchReadbackInput): LaunchFinding[] {
+  const expected = input.expectedPublisherPlatforms ?? []
+  if (expected.length > 0) return plannedPlacementFindings(input, expected)
+  return playbackPlacementFindings(input)
+}
+
+function plannedPlacementFindings(input: LaunchReadbackInput, expected: string[]): LaunchFinding[] {
+  const t = input.adSet.targeting
+  const drifts = [
+    placementDrift(t.publisherPlatforms, expected),
+    positionDrift(t.facebookPositions, input.expectedFacebookPositions),
+    positionDrift(t.instagramPositions, input.expectedInstagramPositions),
+  ].filter((line): line is string => line !== null)
+  if (drifts.length === 0) return []
+  return [{
+    code: 'placement_not_as_planned',
+    severity: 'blocker',
+    message: `计划要求的投放位置没有按原样落上。${drifts.join('。')}。`,
+    learnedFrom: '计划步骤写了版位，建组时必须带上，回读必须对得上',
+  }]
+}
+
+function playbackPlacementFindings(input: LaunchReadbackInput): LaunchFinding[] {
+  const adSet = input.adSet
+  if (!isPlaybackGoal(adSet.optimizationGoal) && !isPlaybackGoal(input.expectedOptimizationGoal ?? '')) return []
+  const got = new Set((adSet.targeting.publisherPlatforms ?? []).map((p) => p.toLowerCase()))
+  const locked =
+    got.size === PLAYBACK_REQUIRED_PLATFORMS.length &&
+    PLAYBACK_REQUIRED_PLATFORMS.every((p) => got.has(p))
+  if (locked) return []
+  const state =
+    got.size === 0
+      ? '现在是自动版位'
+      : got.has('audience_network')
+        ? `现在含 Audience Network（${[...got].join('、')}）`
+        : `现在是 ${[...got].join('、')}`
+  return [{
+    code: 'playback_placement_not_locked',
+    severity: 'blocker',
+    message:
+      `这是「看完视频」类广告组，投放位置必须手动锁成只投 Facebook 和 Instagram。${state}。` +
+      '自动版位会让 Meta 把大部分钱花在手机游戏奖励视频上，完播率虚高、还会把假观众沉淀进再营销名单。' +
+      '读不到版位也按没锁处理。' +
+      '去广告组设置把投放位置改成手动，只勾 Facebook 和 Instagram。',
+    learnedFrom: '看完类视频广告留自动版位，95% 花费落在 Audience Network 手游奖励视频，完播率虚高（PITFALLS D9）',
+  }]
 }
 
 /**
@@ -381,31 +441,7 @@ export function checkLaunch(input: LaunchReadbackInput): LaunchReadbackReport {
     })
   }
 
-  // ── 坑 6：看完类视频广告没锁版位 ──────────────────────────────────
-  if (isPlaybackGoal(adSet.optimizationGoal) || isPlaybackGoal(input.expectedOptimizationGoal ?? '')) {
-    const got = new Set((t.publisherPlatforms ?? []).map((p) => p.toLowerCase()))
-    const locked =
-      got.size === PLAYBACK_REQUIRED_PLATFORMS.length &&
-      PLAYBACK_REQUIRED_PLATFORMS.every((p) => got.has(p))
-    if (!locked) {
-      const state =
-        got.size === 0
-          ? '现在是自动版位'
-          : got.has('audience_network')
-            ? `现在含 Audience Network（${[...got].join('、')}）`
-            : `现在是 ${[...got].join('、')}`
-      findings.push({
-        code: 'playback_placement_not_locked',
-        severity: 'blocker',
-        message:
-          `这是「看完视频」类广告组，投放位置必须手动锁成只投 Facebook 和 Instagram。${state}。` +
-          '自动版位会让 Meta 把大部分钱花在手机游戏奖励视频上，完播率虚高、还会把假观众沉淀进再营销名单。' +
-          '读不到版位也按没锁处理。' +
-          '去广告组设置把投放位置改成手动，只勾 Facebook 和 Instagram。',
-        learnedFrom: '看完类视频广告留自动版位，95% 花费落在 Audience Network 手游奖励视频，完播率虚高（PITFALLS D9）',
-      })
-    }
-  }
+  findings.push(...placementFindings(input))
 
   return {
     findings,
