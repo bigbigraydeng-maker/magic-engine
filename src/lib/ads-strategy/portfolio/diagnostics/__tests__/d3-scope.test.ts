@@ -145,7 +145,7 @@ describe('D3 候选范围', () => {
   })
 })
 
-describe('D3 不再误报：已不在投放的组 / 样本太小', () => {
+describe('【考卷9】D3 不再误报：已不在投放的组 / 样本太小', () => {
   function runWith(status: string, rows: DailyRow[], target = 11) {
     const g: GraphAdsetSettings = { ...adset('as_1', 'LEAD_GENERATION'), status: status === 'ACTIVE' ? 'ACTIVE' : 'PAUSED', effective_status: status }
     const account: AccountInput = {
@@ -221,7 +221,7 @@ describe('【考卷3】止损提议不被最近的设置改动压住', () => {
  * 10-25 → 10-30 连着 6 天被判「花钱没结果」）。这种组按客户主结果数永远是 0，只能出「判不了」，不能出命中。
  * 结果种类跟广告组目的地走，复用 rules/core-metric.ts（D2 / D10 已经这么判）。
  */
-describe('结果种类对不上：不出命中，只出判不了', () => {
+describe('【考卷7】结果种类对不上：不出命中，只出判不了', () => {
   function runUnit(opts: { goal: string; destination?: string; primary: 'lead' | 'messaging_started' | 'qualified_enquiry'; spend: number; messages?: number; nullActions?: boolean }) {
     const g: GraphAdsetSettings = { ...adset('as_1', opts.goal), ...(opts.destination ? { destination_type: opts.destination } : {}) }
     const row: DailyRow = {
