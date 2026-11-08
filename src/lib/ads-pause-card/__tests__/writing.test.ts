@@ -5,7 +5,7 @@ import { ADS_ACTION_TYPE, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import { approvalPlanHash, type ApprovalSource } from '@/lib/approval-source/read'
 import { confirmPauseCard } from '../confirm'
 import { issuePauseCards } from '../issue'
-import type { PauseHold } from '../ledger'
+import { saveHold, type PauseHold } from '../ledger'
 import { orderKey, type PauseAdSetOrder } from '../order'
 
 const payload: PauseHold = {
@@ -123,6 +123,42 @@ describe('writing ledger', () => {
     expect(result.wrote).toBe(false)
     expect(result.reason).toContain('没有在投广告组')
     expect(execute).not.toHaveBeenCalled()
+  })
+})
+
+describe('executed pause review', () => {
+  it('records metric, direction and window in one shape only after a real pause', async () => {
+    const saved: Record<string, unknown>[] = []
+    const sb = {
+      from() {
+        return {
+          update(patch: Record<string, unknown>) {
+            saved.push(patch)
+            const chain = {
+              eq() { return chain },
+              then(resolve: (value: { error: null }) => unknown) {
+                return Promise.resolve({ error: null }).then(resolve)
+              },
+            }
+            return chain
+          },
+        }
+      },
+    } as unknown as SupabaseClient
+    const row = { id: 'hold-1', payload }
+    await saveHold(sb, 'client-1', row, { ...payload, status: 'failed', wrote: false }, null)
+    await saveHold(sb, 'client-1', row, { ...payload, status: 'executed', wrote: true, source: pauseSource() }, payload.order.metric)
+    expect(saved[0]?.executed_at).toBeUndefined()
+    expect((saved[0]?.payload as PauseHold).review).toBeUndefined()
+    expect(saved[1]?.expected_metric).toBe(payload.order.metric)
+    expect(saved[1]?.executed_at).toEqual(expect.any(String))
+    expect((saved[1]?.payload as PauseHold).review).toMatchObject({
+      metric: payload.order.metric,
+      direction: 'pause',
+      observationWindowDays: 7,
+      objectId: 'set-a',
+      source: pauseSource(),
+    })
   })
 })
 

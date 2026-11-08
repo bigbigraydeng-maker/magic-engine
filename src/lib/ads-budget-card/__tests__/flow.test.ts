@@ -153,7 +153,14 @@ describe('budget step card', () => {
       readbackMatched: true,
       status: 'executed',
       lock: { version: 2, goalId: GOAL_A, planId: 'plan-1' },
+      review: {
+        metric: 'ads.account.cpa',
+        direction: 'down',
+        observationWindowDays: 7,
+        objectId: '111',
+      },
     })
+    expect(row?.executed_at).toEqual(expect.any(String))
     expect(payload.idempotencyKey.length).toBeGreaterThan(10)
   })
 
