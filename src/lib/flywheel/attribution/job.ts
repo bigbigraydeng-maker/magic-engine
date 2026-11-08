@@ -19,6 +19,16 @@ import { dualWindowEnabled } from './dual-window-gate'
 import { isNotEvaluable } from './execution-evidence'
 import { getMetricPolarity } from '../polarity'
 import {
+  observationDue,
+  pairSpans,
+  readExecutedReview,
+  reviewVerdict,
+  windowSpanOf,
+  type ExecutedReview,
+  type PairMark,
+  type ReviewAction,
+} from './executed-review'
+import {
   OUTCOME_CONFLICT_TARGET,
   OUTCOME_EVALUATOR,
   foreignMetricPrefixes,
@@ -40,6 +50,8 @@ export interface AttributionJobOptions {
   windowDays?: number
   /** Restrict to a single client (e.g. for manual reruns). */
   clientId?: string
+  /** Clock for "is this card's own window due". Defaults to the current time. */
+  now?: Date
 }
 
 export interface AttributionJobResult {
@@ -154,6 +166,55 @@ async function loadAttributableActions(
   })
 }
 
+function asReviewAction(action: ActionRow): ReviewAction {
+  return {
+    id: action.id,
+    client_id: action.client_id,
+    action_type: action.action_type,
+    payload: action.payload,
+    expected_metric: action.expected_metric,
+    executed_at: action.executed_at,
+  }
+}
+
+/**
+ * A budget or pause card keeps its own window. The job default is not used.
+ * The row is written only after that window has ended, and the verdict stays
+ * inconclusive until a real comparable sample exists.
+ */
+async function saveDueReview(
+  action: ActionRow,
+  review: ExecutedReview,
+  pair: PairMark,
+  now: Date,
+): Promise<ActionOutcome> {
+  const judged = reviewVerdict(pair)
+  const reconcileErrors = await reconcileLegacyWindows(action.id, review.metric)
+  if (!observationDue(review.executedAt, review.observationWindowDays, now)) {
+    return { kind: 'skipped', reconcileErrors }
+  }
+  try {
+    await upsertOutcome({
+      action_id: action.id,
+      client_id: action.client_id,
+      metric_key: review.metric,
+      baseline: null,
+      after_value: null,
+      delta: null,
+      delta_pct: null,
+      confidence: judged.confidence,
+      verdict: judged.verdict,
+      window_days: review.observationWindowDays,
+      evaluator_key: OUTCOME_EVALUATOR.FLYWHEEL_METRICS,
+      computed_at: now.toISOString(),
+    })
+  } catch (err) {
+    return { kind: 'failed', message: err instanceof Error ? err.message : String(err) }
+  }
+  reconcileErrors.push(...await retireExtraWindows(action.id, review.metric, review.observationWindowDays))
+  return { kind: 'written', reconcileErrors }
+}
+
 function emptyResult(): AttributionJobResult {
   return {
     processed: 0,
@@ -214,7 +275,14 @@ function evaluabilityOf(action: ActionRow) {
 async function attributeOne(
   action: ActionRow,
   windowDays: number,
+  pairs: ReadonlyMap<string, PairMark>,
+  now: Date,
 ): Promise<ActionOutcome> {
+  const review = readExecutedReview(asReviewAction(action))
+  if (review.kind === 'not_executed') return { kind: 'not_evaluable', reconcileErrors: [] }
+  if (review.kind === 'incomplete') return { kind: 'failed', message: review.reason }
+  if (review.kind === 'ready') return saveDueReview(action, review.review, pairs.get(action.id) ?? 'clear', now)
+
   // Not evaluable actions return before any reconcile call, so no stored
   // outcome row is deleted and no to-do is raised for work that never happened.
   if (isNotEvaluable(evaluabilityOf(action))) return { kind: 'not_evaluable', reconcileErrors: [] }
@@ -252,15 +320,20 @@ export async function runAttributionJob(
   options: AttributionJobOptions = {}
 ): Promise<AttributionJobResult> {
   const windowDays = options.windowDays ?? DEFAULT_WINDOW_DAYS
+  const now = options.now ?? new Date()
   const actions = await loadAttributableActions(options)
   if (!actions.length) return emptyResult()
 
   const r = emptyResult()
   const pass2Clients = new Set<string>()
   let notEvaluable = 0
+  const pairs = pairSpans(actions.flatMap((action) => {
+    const span = windowSpanOf(asReviewAction(action))
+    return span ? [span] : []
+  }))
 
   for (const action of actions) {
-    const outcome = await attributeOne(action, windowDays)
+    const outcome = await attributeOne(action, windowDays, pairs, now)
 
     if (outcome.kind === 'failed') {
       console.error(`Attribution job: action ${action.id} — ${outcome.message}`)
