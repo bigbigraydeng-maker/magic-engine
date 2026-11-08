@@ -14,8 +14,9 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { createKernel } from '@/lib/kernel'
 import { requireAdsO1BudgetScaleAccess } from '@/lib/action-submission/ads-o1-budget-scale'
 import { requireStopLossAccess } from '@/lib/action-submission/stop-loss'
+import { CLIENT_BUDGET_FACT_FRESH_MS } from '@/lib/capabilities/ads/envelope-facts'
 import { clickerFromAccess, issueMoneyBudget } from '@/lib/action-submission/money-card'
-import { loadMoneyBudgetLive } from '@/lib/action-submission/money-card-live'
+import { loadMoneyBudgetLive } from '@/lib/ads-budget-card/money-live'
 import { resolveAccountTimezone, accountDayKey } from '@/lib/ads-strategy/account-timezone'
 import { loadBudgetChange, type BudgetChangeUnit } from '@/lib/ads-strategy/budget-change/load'
 import { validateReduceTarget } from '@/lib/ads-strategy/budget-change/plan'
@@ -185,6 +186,7 @@ async function issueScorecardCard(
     goalId: spec.goalId,
     cycleDate: spec.cycleDate,
     requestId: spec.requestId,
+    freshMs: CLIENT_BUDGET_FACT_FRESH_MS,
     readLive: () => loadMoneyBudgetLive(supabaseAdmin, clientId, {
       level: unit.level,
       entityId: spec.entityId,

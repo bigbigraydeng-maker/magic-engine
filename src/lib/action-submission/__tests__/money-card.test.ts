@@ -4,6 +4,7 @@ import { ACTION_REGISTRY } from '@/lib/kernel/registry'
 import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
 import { CLIENT_A, makeFixture, type Fixture } from '@/lib/kernel/__tests__/fixtures'
 import type { BudgetSnapshot } from '@/lib/ads-budget-card/types'
+import { CLIENT_BUDGET_FACT_FRESH_MS } from '@/lib/capabilities/ads/envelope-facts'
 import type { CardClicker } from '@/lib/confirmation-card'
 import {
   confirmMoneyBudget,
@@ -75,6 +76,7 @@ function issue(f: Fixture, after = 800, over: Partial<BudgetSnapshot> = {}, snap
       goalId: null,
       cycleDate: '2026-11-09',
       requestId: '11111111-2222-4333-8444-555555555555',
+      freshMs: CLIENT_BUDGET_FACT_FRESH_MS,
       readLive: async () => seen,
       now: f.clock.now,
     }),
@@ -92,6 +94,7 @@ function confirm(f: Fixture, runId: string, fingerprint: string, write: (hold: M
     expectedDecisionId: 'unused-until-loaded',
     fingerprint,
     now: f.clock.now,
+    freshMs: CLIENT_BUDGET_FACT_FRESH_MS,
     readLive: async () => seen,
     write,
   })
@@ -130,7 +133,7 @@ describe('money card does not write before a confirmed, unexpired card', () => {
     const result = await confirmMoneyBudget({
       kernel: f.kernel, sb: f.supabase, clientId: CLIENT_A, runId: card.card!.runId,
       clicker: OPC, resolution: 'confirm', expectedDecisionId: card.card!.expectedDecisionId,
-      fingerprint: card.card!.fingerprint, now: f.clock.now, readLive: async () => live(), write: opened.write,
+      fingerprint: card.card!.fingerprint, now: f.clock.now, freshMs: CLIENT_BUDGET_FACT_FRESH_MS, readLive: async () => live(), write: opened.write,
     })
     expect(result.wroteMeta).toBe(false)
     expect(opened.writes).toHaveLength(0)
@@ -163,7 +166,7 @@ describe('money card does not write before a confirmed, unexpired card', () => {
     const result = await confirmMoneyBudget({
       kernel: f.kernel, sb: f.supabase, clientId: CLIENT_A, runId: card.card!.runId,
       clicker: OPC, resolution: 'confirm', expectedDecisionId: card.card!.expectedDecisionId,
-      fingerprint: card.card!.fingerprint, now: f.clock.now,
+      fingerprint: card.card!.fingerprint, now: f.clock.now, freshMs: CLIENT_BUDGET_FACT_FRESH_MS,
       readLive: async () => live({ adsetId: 'set-up' }), write: opened.write,
     })
     expect(result.wroteMeta).toBe(false)
@@ -178,13 +181,13 @@ describe('money card does not write before a confirmed, unexpired card', () => {
     await expect(confirmMoneyBudget({
       kernel: f.kernel, sb: f.supabase, clientId: CLIENT_A, runId: card.card!.runId,
       clicker: AGENT, resolution: 'confirm', expectedDecisionId: card.card!.expectedDecisionId,
-      fingerprint: card.card!.fingerprint, now: f.clock.now, readLive: async () => live(), write: opened.write,
+      fingerprint: card.card!.fingerprint, now: f.clock.now, freshMs: CLIENT_BUDGET_FACT_FRESH_MS, readLive: async () => live(), write: opened.write,
     })).rejects.toThrow(/不能点/)
     expect(opened.writes).toHaveLength(0)
     const done = await confirmMoneyBudget({
       kernel: f.kernel, sb: f.supabase, clientId: CLIENT_A, runId: card.card!.runId,
       clicker: OPC, resolution: 'confirm', expectedDecisionId: card.card!.expectedDecisionId,
-      fingerprint: card.card!.fingerprint, now: f.clock.now, readLive: async () => live(), write: opened.write,
+      fingerprint: card.card!.fingerprint, now: f.clock.now, freshMs: CLIENT_BUDGET_FACT_FRESH_MS, readLive: async () => live(), write: opened.write,
     })
     expect(done.wroteMeta).toBe(true)
     expect(opened.writes).toHaveLength(1)

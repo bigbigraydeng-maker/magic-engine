@@ -4,7 +4,6 @@
  * `confirmMoneyBudget` / `confirmMoneyPause` sees a confirmed, unexpired card.
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js'
 import type { KernelDeps } from '@/lib/kernel/deps'
 import { canonicalHashOfInput } from '@/lib/kernel/canonical-hash'
 import {
@@ -20,7 +19,6 @@ import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import { confirmBlockReason, type HardCheck } from '@/lib/confirmation-card/facts'
 import type { ConfirmationCardView } from '@/lib/confirmation-card/view'
 import { isExpired, presentCard, readStoredCard } from '@/lib/confirmation-card/view'
-import { CLIENT_BUDGET_FACT_FRESH_MS } from '@/lib/capabilities/ads/envelope-facts'
 import { budgetFacts, budgetSubject } from '@/lib/ads-budget-card/facts'
 import { guardBudget } from '@/lib/ads-budget-card/guard'
 import { raiseQuotaBlock } from '@/lib/ads-budget-card/raise-quota'
@@ -34,6 +32,7 @@ import type { ClientAccessResult } from '@/lib/auth/client-access'
 export const MONEY_ACTION = 'ads.money_card'
 
 type Access = Extract<ClientAccessResult, { ok: true }>
+type Db = KernelDeps['supabase']
 type Lane = 'budget' | 'pause_adset'
 type HoldStatus = 'holding' | 'writing' | 'executed' | 'failed' | 'declined'
 
@@ -100,7 +99,7 @@ export interface MoneyConfirmResult {
 
 interface BudgetIssue {
   kernel: KernelDeps
-  sb: SupabaseClient
+  sb: Db
   clientId: string
   clicker: CardClicker
   source: MoneyHold['source']
@@ -116,13 +115,14 @@ interface BudgetIssue {
   goalId: string | null
   cycleDate: string | null
   requestId: string | null
+  freshMs: number
   readLive: () => Promise<BudgetSnapshot>
   now?: Date
 }
 
 interface PauseIssue {
   kernel: KernelDeps
-  sb: SupabaseClient
+  sb: Db
   clientId: string
   clicker: CardClicker
   entityId: string
@@ -137,7 +137,7 @@ interface PauseIssue {
 
 interface ConfirmArgs {
   kernel: KernelDeps
-  sb: SupabaseClient
+  sb: Db
   clientId: string
   runId: string
   clicker: CardClicker
@@ -168,7 +168,7 @@ export async function issueMoneyBudget(args: BudgetIssue): Promise<MoneyIssueRes
   const order = budgetOrder(args)
   const open = await openHold(args.sb, args.clientId, budgetSubject(order))
   if (open) return { card: refFrom(open.payload), reason: null, wroteMeta: false }
-  const checks = await budgetChecks(args.sb, args.clientId, order, live, null, args.snapshotAt, now, null)
+  const checks = await budgetChecks(args.sb, args.clientId, order, live, null, args.snapshotAt, now, null, args.freshMs)
   const card = await issueConfirmationCard(args.kernel, {
     clientId: args.clientId,
     clicker: args.clicker,
@@ -202,7 +202,7 @@ export async function issueMoneyPause(args: PauseIssue): Promise<MoneyIssueResul
 }
 
 export async function confirmMoneyBudget(
-  args: ConfirmArgs & { readLive: (hold: MoneyHold) => Promise<BudgetSnapshot> },
+  args: ConfirmArgs & { readLive: (hold: MoneyHold) => Promise<BudgetSnapshot>; freshMs: number },
 ): Promise<MoneyConfirmResult> {
   const row = await loadMoneyHold(args.sb, args.clientId, args.runId)
   if (!row || row.payload.lane !== 'budget') return { handled: false, wroteMeta: false, reason: '', card: null, readbackCents: null }
@@ -211,7 +211,7 @@ export async function confirmMoneyBudget(
     if (!live) return '预算事实读不到，没有改。'
     const now = args.now ?? args.kernel.now()
     return (await budgetChecks(
-      args.sb, args.clientId, budgetOrder(hold), live, hold.beforeCents, hold.snapshotAt, now, hold.cardRunId,
+      args.sb, args.clientId, budgetOrder(hold), live, hold.beforeCents, hold.snapshotAt, now, hold.cardRunId, args.freshMs,
     ).then(confirmBlockReason))
   })
 }
@@ -321,7 +321,7 @@ function decisionArgs(args: ConfirmArgs) {
 }
 
 async function budgetChecks(
-  sb: SupabaseClient,
+  sb: Db,
   clientId: string,
   order: BudgetOrder,
   live: BudgetSnapshot,
@@ -329,13 +329,14 @@ async function budgetChecks(
   snapshotAt: string | null,
   now: Date,
   exceptCard: string | null,
+  freshMs: number,
 ): Promise<HardCheck[]> {
   const guard = guardBudget(order, live, shownCents)
   const pending = await pendingRaiseCents(sb, clientId, exceptCard, order.adAccountId)
   const raise = order.newDailyBudgetCents > (live.currentCents ?? order.newDailyBudgetCents)
     ? raiseCheck(order, live, pending)
     : null
-  return [...guard.checks, ageCheck(snapshotAt, now), ...(raise ? [raise] : [])]
+  return [...guard.checks, ageCheck(snapshotAt, now, freshMs), ...(raise ? [raise] : [])]
 }
 
 function raiseCheck(order: BudgetOrder, live: BudgetSnapshot, pending: { account: number; client: number } | null): HardCheck {
@@ -367,11 +368,13 @@ function quota(
   })
 }
 
-function ageCheck(snapshotAt: string | null, now: Date): HardCheck {
+function ageCheck(snapshotAt: string | null, now: Date, freshMs: number): HardCheck {
   const at = snapshotAt ? Date.parse(snapshotAt) : Number.NaN
   if (!Number.isFinite(at)) return { label: '快照还新', state: 'unread', reason: '预算快照时间读不到' }
   const age = now.getTime() - at
-  if (age < 0 || age > CLIENT_BUDGET_FACT_FRESH_MS) return { label: '快照还新', state: 'red', reason: '预算快照过期，没有改。' }
+  if (!Number.isSafeInteger(freshMs) || freshMs <= 0 || age < 0 || age > freshMs) {
+    return { label: '快照还新', state: 'red', reason: '预算快照过期，没有改。' }
+  }
   return { label: '快照还新', state: 'green', reason: '快照还在一天以内' }
 }
 
@@ -558,7 +561,7 @@ function emailOf(clicker: CardClicker): string {
   return ''
 }
 
-export async function loadMoneyHold(sb: SupabaseClient, clientId: string, runId: string): Promise<MoneyRow | null> {
+export async function loadMoneyHold(sb: Db, clientId: string, runId: string): Promise<MoneyRow | null> {
   const { data, error } = await sb.from('flywheel_actions').select('id, payload')
     .eq('client_id', clientId).eq('action_type', MONEY_ACTION).eq('payload->>cardRunId', runId)
   if (error) throw new ConfirmationCardError('invalid', '确认卡的台账读不出来，没有改。')
@@ -566,7 +569,7 @@ export async function loadMoneyHold(sb: SupabaseClient, clientId: string, runId:
   return rows.length === 1 ? rows[0] ?? null : null
 }
 
-async function openHold(sb: SupabaseClient, clientId: string, subject: string): Promise<MoneyRow | null> {
+async function openHold(sb: Db, clientId: string, subject: string): Promise<MoneyRow | null> {
   const { data, error } = await sb.from('flywheel_actions').select('id, payload')
     .eq('client_id', clientId).eq('action_type', MONEY_ACTION)
     .eq('payload->>subjectKey', subject).eq('payload->>status', 'holding')
@@ -576,7 +579,7 @@ async function openHold(sb: SupabaseClient, clientId: string, subject: string): 
 }
 
 async function pendingRaiseCents(
-  sb: SupabaseClient,
+  sb: Db,
   clientId: string,
   exceptCard: string | null,
   accountId: string,
@@ -598,7 +601,7 @@ async function pendingRaiseCents(
   return { account, client }
 }
 
-async function insertHold(sb: SupabaseClient, clientId: string, payload: MoneyHold): Promise<void> {
+async function insertHold(sb: Db, clientId: string, payload: MoneyHold): Promise<void> {
   const { error } = await sb.from('flywheel_actions').insert({
     client_id: clientId,
     flywheel: 'ads',
@@ -611,14 +614,14 @@ async function insertHold(sb: SupabaseClient, clientId: string, payload: MoneyHo
   if (error) throw new ConfirmationCardError('invalid', '确认卡记下了，但台账没存住，没有改。')
 }
 
-async function claimHold(sb: SupabaseClient, clientId: string, row: MoneyRow): Promise<boolean> {
+async function claimHold(sb: Db, clientId: string, row: MoneyRow): Promise<boolean> {
   const next: MoneyHold = { ...row.payload, status: 'writing', wroteMeta: false }
   const { data, error } = await sb.from('flywheel_actions').update({ payload: next })
     .eq('id', row.id).eq('client_id', clientId).eq('payload->>status', 'holding').select('id').maybeSingle()
   return !error && Boolean((data as { id?: string } | null)?.id)
 }
 
-async function saveHold(sb: SupabaseClient, clientId: string, row: MoneyRow, payload: MoneyHold): Promise<void> {
+async function saveHold(sb: Db, clientId: string, row: MoneyRow, payload: MoneyHold): Promise<void> {
   const patch: Record<string, unknown> = { payload }
   if (payload.status === 'executed') patch.executed_at = new Date().toISOString()
   const { error } = await sb.from('flywheel_actions').update(patch).eq('id', row.id).eq('client_id', clientId)

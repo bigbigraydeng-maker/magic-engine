@@ -1,22 +1,24 @@
 /**
  * Re-read the budget facts the existing budget card already checks.
- * This file does not write.
+ * This file does not write. The confirmation gate calls it; it does not live
+ * in the submission boundary.
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js'
+import type { KernelDeps } from '@/lib/kernel/deps'
 import { readBudgetFacts } from '@/lib/ads-tracking-preflight/budget-reader'
-import { assembleSnapshot } from '@/lib/ads-budget-card/meta'
+import { assembleSnapshot, metaBudgetRuntime } from '@/lib/ads-budget-card/meta'
 import { readStepRatio } from '@/lib/ads-budget-card/ratio'
 import type { BudgetOrder, BudgetSnapshot } from '@/lib/ads-budget-card/types'
-import { metaBudgetRuntime } from '@/lib/ads-budget-card/meta'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
 import { getCampaignDetails } from '@/lib/meta/client'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import type { AdSetSummary } from '@/lib/meta/adsets'
-import type { MoneyHold } from './money-card'
+import type { MoneyHold } from '@/lib/action-submission/money-card'
+
+type Db = KernelDeps['supabase']
 
 export async function loadMoneyBudgetLive(
-  sb: SupabaseClient,
+  sb: Db,
   clientId: string,
   hold: Pick<MoneyHold, 'level' | 'entityId' | 'adAccountId' | 'name' | 'beforeCents' | 'afterCents'>,
 ): Promise<BudgetSnapshot> {
@@ -30,7 +32,7 @@ export async function loadMoneyBudgetLive(
 }
 
 async function readCampaign(
-  sb: SupabaseClient,
+  sb: Db,
   clientId: string,
   hold: Pick<MoneyHold, 'entityId' | 'adAccountId' | 'name'>,
   order: BudgetOrder,

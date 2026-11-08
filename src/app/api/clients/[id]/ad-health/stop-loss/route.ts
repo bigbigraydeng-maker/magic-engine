@@ -34,8 +34,9 @@ import {
 import { createKernel } from '@/lib/kernel'
 import { requireStopLossAccess } from '@/lib/action-submission/stop-loss'
 import { requestCampaignStatusCard } from '@/lib/action-submission/campaign-status-card'
+import { CLIENT_BUDGET_FACT_FRESH_MS } from '@/lib/capabilities/ads/envelope-facts'
 import { clickerFromAccess, issueMoneyBudget } from '@/lib/action-submission/money-card'
-import { loadMoneyBudgetLive } from '@/lib/action-submission/money-card-live'
+import { loadMoneyBudgetLive } from '@/lib/ads-budget-card/money-live'
 import { resolveAccountTimezone, accountDayKey } from '@/lib/ads-strategy/account-timezone'
 import { toActAccountId } from '@/lib/meta/ad-account-binding'
 
@@ -196,6 +197,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
       goalId: goalId ?? null,
       cycleDate,
       requestId,
+      freshMs: CLIENT_BUDGET_FACT_FRESH_MS,
       readLive: () => loadMoneyBudgetLive(supabaseAdmin, clientId, {
         level: kernelAction === 'cut_campaign' ? 'campaign' : 'adset',
         entityId: target.id,

@@ -3,8 +3,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { createKernel } from '@/lib/kernel'
 import { ADS_O1_BUDGET_SCALE_ACTION_KEY, requireAdsO1BudgetScaleAccess } from '@/lib/action-submission/ads-o1-budget-scale'
+import { CLIENT_BUDGET_FACT_FRESH_MS } from '@/lib/capabilities/ads/envelope-facts'
 import { clickerFromAccess, issueMoneyBudget } from '@/lib/action-submission/money-card'
-import { loadMoneyBudgetLive } from '@/lib/action-submission/money-card-live'
+import { loadMoneyBudgetLive } from '@/lib/ads-budget-card/money-live'
 import { findSingleDeliveringChild } from '@/lib/ads-strategy/budget-change/cbo-single-child'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 
@@ -155,6 +156,7 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
     goalId: goal.id,
     cycleDate: state.date,
     requestId: null,
+    freshMs: CLIENT_BUDGET_FACT_FRESH_MS,
     readLive: () => loadMoneyBudgetLive(supabaseAdmin, params.id, {
       level, entityId, adAccountId, name: entityId, beforeCents: before, afterCents: after,
     }),

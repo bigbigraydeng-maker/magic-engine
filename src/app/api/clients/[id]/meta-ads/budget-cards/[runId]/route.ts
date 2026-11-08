@@ -11,8 +11,9 @@ import { submitBudgetCard } from '@/lib/ads-budget-card/flow'
 import { kernelBudgetPath } from '@/lib/ads-budget-card/kernel-path'
 import { metaBudgetRuntime } from '@/lib/ads-budget-card/meta'
 import { prescriptionLockSource } from '@/lib/ads-budget-card/prescription-lock'
+import { CLIENT_BUDGET_FACT_FRESH_MS } from '@/lib/capabilities/ads/envelope-facts'
 import { confirmMoneyBudget } from '@/lib/action-submission/money-card'
-import { loadMoneyBudgetLive } from '@/lib/action-submission/money-card-live'
+import { loadMoneyBudgetLive } from '@/lib/ads-budget-card/money-live'
 import { writeHeldBudget } from '@/lib/action-submission/money-card-write'
 import { budgetCardGate, budgetKernel } from '../access'
 
@@ -42,8 +43,9 @@ export async function POST(
       resolution: decision.resolution,
       expectedDecisionId: decision.expectedDecisionId,
       fingerprint: decision.fingerprint,
+      freshMs: CLIENT_BUDGET_FACT_FRESH_MS,
       readLive: (hold) => loadMoneyBudgetLive(supabaseAdmin, id, hold),
-      write: (hold) => writeHeldBudget(id, hold),
+      write: (hold) => writeHeldBudget(kernel, id, hold),
     })
     if (money.handled) {
       if (!money.card) return NextResponse.json({ error: money.reason, wroteMeta: false }, { status: 409 })
