@@ -98,9 +98,7 @@ function ports(over: Partial<WinnerPorts> = {}): WinnerPorts {
     activate: vi.fn(async () => true),
     link: vi.fn(async () => ({ creativeRef: 'piece-1' })),
     kernel: vi.fn(),
-    issuePause: vi.fn(),
-    submitPause: vi.fn(),
-    pauseRuntime: vi.fn(async () => ({ live: vi.fn(), pause: vi.fn(), readback: vi.fn() })),
+    runPause: vi.fn(async () => ({ ok: false, wroteMeta: false, readback: null, reason: '没有暂停。' })),
     proposeLive: vi.fn(async () => 'live-1'),
     ...over,
   }
@@ -160,46 +158,48 @@ describe('winner card confirm', () => {
     expect(saved?.status).toBe('executed')
   })
 
-  it('a pause suggestion goes through the pause card and does not pause by itself', async () => {
-    const pause = vi.fn()
+  it('a pause suggestion uses the confirmed pause once and does not open another card', async () => {
     const store = db({ id: 'row-1', payload: hold({ kind: 'pause_ad', postId: null, adId: '101', score: null, ctr: 0.1, before: 0.1 }) })
     const used = ports({
-      pauseRuntime: vi.fn(async () => ({ live: vi.fn(), pause, readback: vi.fn() })),
-      issuePause: vi.fn(async () => ({
-        status: 'issued' as const, confirmEnabled: true, runId: 'pause-run', fingerprint: FP,
-        expectedDecisionId: view.expectedDecisionId,
-      })),
-      submitPause: vi.fn(async () => ({ status: 'executed', reason: '已暂停。', wroteMeta: true, readback: 'PAUSED' })),
+      runPause: vi.fn(async () => ({ ok: true, wroteMeta: true, readback: 'PAUSED', reason: '已暂停，回读是暂停。' })),
     })
     const result = await confirmWinnerCard(store.client, input(), used)
-    expect(used.issuePause).toHaveBeenCalledTimes(1)
-    expect(used.submitPause).toHaveBeenCalledTimes(1)
-    expect(pause).not.toHaveBeenCalled()
+    expect(used.decide).toHaveBeenCalledTimes(1)
+    expect(used.runPause).toHaveBeenCalledTimes(1)
+    expect(used.runPause).toHaveBeenCalledWith({ clientId: CLIENT, adId: '101', adAccountId: 'act_11', adsetId: '301' })
     expect(used.createPaused).not.toHaveBeenCalled()
     expect(result.wroteMeta).toBe(true)
     expect(store.rows[0]?.payload.confirmedBy).toBe('session-user')
   })
 
-  it('does not pause when the pause card is off or still needs an empty-campaign confirmation', async () => {
-    const pause = vi.fn()
-    const off = db({ id: 'row-1', payload: hold({ kind: 'pause_ad', postId: null, adId: '101', score: null, ctr: 0.1 }) })
-    const offPorts = ports({
-      pauseRuntime: vi.fn(async () => ({ live: vi.fn(), pause, readback: vi.fn() })),
-      issuePause: vi.fn(async () => ({ status: 'off' as const, reason: '这个客户没开暂停广告的确认卡。' })),
+  it('records a refused pause and does not create an ad', async () => {
+    const store = db({ id: 'row-1', payload: hold({ kind: 'pause_ad', postId: null, adId: '101', score: null, ctr: 0.1 }) })
+    const used = ports({
+      runPause: vi.fn(async () => ({ ok: false, wroteMeta: false, readback: null, reason: '这条广告已经不是在投，没有暂停。' })),
     })
-    const offResult = await confirmWinnerCard(off.client, input(), offPorts)
-    expect(offPorts.submitPause).not.toHaveBeenCalled()
-    expect(pause).not.toHaveBeenCalled()
-    expect(offResult.wroteMeta).toBe(false)
+    const result = await confirmWinnerCard(store.client, input(), used)
+    expect(used.runPause).toHaveBeenCalledTimes(1)
+    expect(used.createPaused).not.toHaveBeenCalled()
+    expect(result.wroteMeta).toBe(false)
+    expect(result.resultLine).toContain('没有暂停')
+    expect(store.rows[0]?.payload.status).toBe('failed')
+  })
 
-    const empty = db({ id: 'row-2', payload: hold({ kind: 'pause_ad', postId: null, adId: '101', score: null, ctr: 0.1 }) })
-    const emptyPorts = ports({
-      issuePause: vi.fn(async () => ({ status: 'blocked' as const, confirmEnabled: false, emptyAckRunId: 'ack-1', reason: '要单独确认' })),
-    })
-    const emptyResult = await confirmWinnerCard(empty.client, input(), emptyPorts)
-    expect(emptyPorts.submitPause).not.toHaveBeenCalled()
-    expect(emptyResult.wroteMeta).toBe(false)
-    expect(emptyResult.resultLine).toContain('没有暂停')
+  it('an expired or void card is recorded and does not write', async () => {
+    for (const status of ['expired', 'voided'] as const) {
+      const store = db({ id: 'row-1', payload: hold({ kind: 'pause_ad', postId: null, adId: '101', score: null, ctr: 0.1 }) })
+      const used = ports({
+        decide: vi.fn(async () => ({ ...view, status, statusLine: status === 'expired' ? '过了 30 分钟没人点，这张卡作废了。' : '要做的事变了，这张旧卡作废了。' })),
+      })
+      const result = await confirmWinnerCard(store.client, input(), used)
+      expect(used.runPause).not.toHaveBeenCalled()
+      expect(used.createPaused).not.toHaveBeenCalled()
+      expect(used.activate).not.toHaveBeenCalled()
+      expect(result.wroteMeta).toBe(false)
+      expect(result.resultLine).toContain('作废')
+      expect(store.rows[0]?.payload.status).toBe('failed')
+      expect(store.rows[0]?.payload.writeAttempted).toBe(false)
+    }
   })
 
   it('turns one paused ad on once, and does not try again when the read-back is still paused', async () => {
@@ -230,5 +230,10 @@ describe('winner card click target', () => {
     expect(confirm).toContain("triggeredBy: 'human'")
     expect(confirm).toContain('requirePaidClientAccess(')
     expect(execute).not.toContain("triggeredBy: 'human'")
+    expect(execute).not.toContain('ads-pause-card/flow')
+    expect(execute).not.toContain('ads-pause-card/meta')
+    expect(execute).not.toContain('issuePause')
+    expect(execute).not.toContain('submitPause')
+    expect(execute).toContain('pauseConfirmedWinnerAd')
   })
 })
