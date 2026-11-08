@@ -7,7 +7,8 @@ import { setCampaignDailyBudget } from '@/lib/meta/campaign-writes'
 import { createCutUnitBudgetCapability } from '@/lib/capabilities/ads/cut-unit-budget'
 import { createScaleUnitBudgetCapability } from '@/lib/capabilities/ads/scale-unit-budget'
 import type { CapabilityStepContext } from '@/lib/kernel/types'
-import { planHashOf, type PrescriptionLock } from '../prescription-lock'
+import { approvalPlanHash } from '@/lib/approval-source/read'
+import { type PrescriptionLock } from '../prescription-lock'
 import { readAccountCurrency } from '../meta'
 import { budgetCardWriteBlock, cardFields } from '../write-gate'
 
@@ -29,13 +30,13 @@ vi.mock('@/lib/capabilities/ads/common', () => ({
 
 const CLIENT = 'c11e0000-0000-4000-8000-00000000000a'
 const GOAL = '90a10000-0000-4000-8000-00000000000a'
-const SEED = { schema_version: 1 }
+const PLAN_HASH = 'hash-plan'
 const lock: PrescriptionLock = {
   prescriptionId: 'p1110000-0000-4000-8000-000000000001',
   version: 2,
   goalId: GOAL,
   planId: 'plan-1',
-  planHash: planHashOf('plan-1', SEED),
+  planHash: approvalPlanHash('plan-1', PLAN_HASH),
   approvedOn: '2026-11-02',
 }
 
@@ -47,8 +48,22 @@ function prescription(version = 2) {
     version,
     goal_id: GOAL,
     approved_at: '2026-11-02T00:00:00.000Z',
-    content: { plan_seed: SEED },
+    content: { plan_seed: { schema_version: 1 } },
     generation_meta: { plan_draft: { status: 'created', plan_id: 'plan-1' } },
+  }
+}
+
+function planRow(version: number) {
+  return {
+    id: 'plan-1',
+    client_id: CLIENT,
+    status: 'approved',
+    plan_data: {},
+    generation_meta: {
+      from_prescription: { prescription_id: lock.prescriptionId, version },
+      blank_draft: { goal_id: GOAL },
+      approval_receipt: { content_hash: PLAN_HASH },
+    },
   }
 }
 
@@ -67,6 +82,8 @@ function policy(mode: string, ratio: number | null) {
 function db(version = 2, mode = 'auto_approve', ratio: number | null = 0.2) {
   return createFakeSupabase({
     prescriptions: [prescription(version)],
+    goals: [{ id: GOAL, client_id: CLIENT, status: 'active' }],
+    marketing_plans: [planRow(version)],
     client_automation_policies: [policy(mode, ratio)],
   })
 }

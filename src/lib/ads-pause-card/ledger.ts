@@ -6,6 +6,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
+import type { ApprovalSource } from '@/lib/approval-source/read'
 import type { PauseAdSetOrder } from './order'
 
 export type HoldStatus = 'holding' | 'writing' | 'executed' | 'failed' | 'declined' | 'refused'
@@ -18,6 +19,7 @@ export interface PauseHold {
   order: PauseAdSetOrder
   goalId: string
   planId: string
+  source: ApprovalSource | null
   before: string | null
   after: string | null
   wrote: boolean

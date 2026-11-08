@@ -15,7 +15,7 @@ import { guardPause, type LiveFacts } from './guard'
 import { claimWriting, holdForCard, saveHold, type HoldRow, type PauseHold } from './ledger'
 import { loadPrescriptionBundle } from './load'
 import { orderKey, readPauseOrder } from './order'
-import { sourceBlock } from './source'
+import { readApprovalSource, sameApprovalSource } from '@/lib/approval-source/read'
 
 export interface PauseCardReply {
   readonly runId: string
@@ -74,17 +74,21 @@ async function confirmHolding(args: Parameters<typeof confirmPauseCard>[0], row:
 }
 
 async function recheck(args: Parameters<typeof confirmPauseCard>[0], row: HoldRow): Promise<string | null> {
+  const chainReason = await chainBlock(args, row)
+  if (chainReason) return chainReason
   const bundle = await loadPrescriptionBundle(args.kernel.supabase, args.clientId, row.payload.order.prescriptionId)
   if (bundle === 'unreadable' || !bundle || bundle.version === null) return '处方读不到，没有去暂停。'
   const parsed = readPauseOrder(bundle.prescriptionId, bundle.version, bundle.content)
   if (!parsed.ok || orderKey(parsed.order) !== row.payload.orderKey) return '处方里的暂停内容变了，没有去暂停。'
-  const sourceReason = sourceBlock(bundle, {
-    prescriptionId: row.payload.order.prescriptionId,
-    version: row.payload.order.version,
-    goalId: row.payload.goalId,
-    planId: row.payload.planId,
-  })
-  return guardPause(row.payload.order, await args.live(row.payload.order), sourceReason).block
+  return guardPause(row.payload.order, await args.live(row.payload.order), null).block
+}
+
+async function chainBlock(args: Parameters<typeof confirmPauseCard>[0], row: HoldRow): Promise<string | null> {
+  if (!row.payload.source) return '这张卡没有记下批准源，没有去暂停。'
+  const live = await readApprovalSource(args.kernel.supabase, args.clientId, row.payload.source.prescriptionId)
+  if (!live.ok) return live.reason
+  if (!sameApprovalSource(row.payload.source, live.source)) return '处方的版本、目标或计划变了，没有去暂停。'
+  return null
 }
 
 async function cardConfirmed(args: Parameters<typeof confirmPauseCard>[0]): Promise<ConfirmationCardView | 'again' | null> {
@@ -136,6 +140,7 @@ function executeArgs(args: Parameters<typeof confirmPauseCard>[0], row: HoldRow)
     cycleDate: now.toISOString().slice(0, 10),
     nonce: row.id,
     basis: row.payload.order.basis,
+    source: row.payload.source,
   }
 }
 

@@ -11,7 +11,7 @@ import { insertHold, retireStale, type PauseHold } from './ledger'
 import { loadPrescriptionBundle, listApprovedIds } from './load'
 import { orderKey, readPauseOrder, type PauseAdSetOrder } from './order'
 import { pauseFacts } from './facts'
-import { sourceBlock } from './source'
+import { readApprovalSource } from '@/lib/approval-source/read'
 import { readPauseCardSwitch } from './switch'
 
 export interface PauseIssueItem {
@@ -58,7 +58,10 @@ async function issueOrder(
   order: PauseAdSetOrder,
   bundle: Exclude<Awaited<ReturnType<typeof loadPrescriptionBundle>>, 'unreadable' | null>,
 ): Promise<PauseIssueItem> {
-  const sourceReason = sourceBlock(bundle, { prescriptionId: order.prescriptionId, version: order.version, goalId: bundle.goalId ?? '', planId: bundle.planId ?? '' })
+  const chain = await readApprovalSource(args.kernel.supabase, args.clientId, order.prescriptionId)
+  const planId = chain.ok ? chain.source.planId : (bundle.planId ?? '')
+  const goalId = chain.ok ? chain.source.goalId : (bundle.goalId ?? '')
+  const sourceReason = chain.ok ? null : chain.reason
   const guard = guardPause(order, await args.live(order), sourceReason)
   const card = await issueConfirmationCard(args.kernel, {
     clientId: args.clientId,
@@ -68,7 +71,9 @@ async function issueOrder(
   })
   const key = orderKey(order)
   await retireStale(args.kernel.supabase, args.clientId, key, card.fingerprint)
-  await insertHold(args.kernel.supabase, args.clientId, holdOf(order, key, card.runId, card.fingerprint, bundle.goalId ?? '', bundle.planId ?? ''))
+  await insertHold(args.kernel.supabase, args.clientId, holdOf(
+    order, key, card.runId, card.fingerprint, goalId, planId, chain.ok ? chain.source : null,
+  ))
   return {
     prescriptionId: order.prescriptionId,
     status: guard.block ? 'blocked' : 'issued',
@@ -80,9 +85,17 @@ async function issueOrder(
   }
 }
 
-function holdOf(order: PauseAdSetOrder, key: string, cardRunId: string, fingerprint: string, goalId: string, planId: string): PauseHold {
+function holdOf(
+  order: PauseAdSetOrder,
+  key: string,
+  cardRunId: string,
+  fingerprint: string,
+  goalId: string,
+  planId: string,
+  source: PauseHold['source'],
+): PauseHold {
   return {
-    status: 'holding', cardRunId, fingerprint, orderKey: key, order, goalId, planId,
+    status: 'holding', cardRunId, fingerprint, orderKey: key, order, goalId, planId, source,
     before: null, after: null, wrote: false,
   }
 }

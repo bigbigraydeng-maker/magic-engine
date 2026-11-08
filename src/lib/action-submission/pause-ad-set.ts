@@ -4,6 +4,7 @@
  * This file does not write a resume, and it does not call the pause a second time.
  */
 
+import { approvalCardFields, type ApprovalSource } from '@/lib/approval-source/read'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { approveAndRun, runAction, type ActionRunOutcome } from '@/lib/kernel/runner'
 import type { KernelDeps } from '@/lib/kernel/deps'
@@ -19,6 +20,7 @@ export interface PauseExecuteArgs {
   readonly cycleDate: string
   readonly nonce: string
   readonly basis: string
+  readonly source?: ApprovalSource | null
 }
 
 export interface PauseExecuteResult {
@@ -63,7 +65,7 @@ function submitInput(args: PauseExecuteArgs, session: { triggeredBy: TriggeredBy
     triggeredByRef: session.triggeredByRef,
     rationale: args.basis.slice(0, 180),
     idempotencyNonce: args.nonce,
-    input: pauseUnitInput(args),
+    input: args.source ? { ...pauseUnitInput(args), ...approvalCardFields(args.source) } : pauseUnitInput(args),
   }
 }
 
