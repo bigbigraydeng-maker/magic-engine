@@ -21,7 +21,9 @@ export {
 export {
   CORRECTION_CANDIDATE_TEST_FILE,
   buildExamCandidatesFromCorrections,
+  correctionIsPromoted,
   correctionToExamCandidate,
+  listCorrectionsPendingCandidates,
 } from './to-candidate'
 import { loadAdsAgentCorrections } from './load'
 import { buildExamCandidatesFromCorrections } from './to-candidate'

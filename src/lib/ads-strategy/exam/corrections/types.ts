@@ -21,8 +21,8 @@ export interface AdsAgentCorrection {
   readonly correctSummary: string
   /** 出处：台账指针 / 文档指针，如 ledger:2026-11-03-… */
   readonly source: string
-  /** 已并入正式考卷题号时填写；候选阶段通常为空。 */
-  readonly promotedQuestionId?: string
+  /** 已升入正式考卷题号（如 Q23）后填写；有此字段则不再出现在候选输出。 */
+  readonly promoted_to?: string
 }
 
 /** 考卷候选题：结构同正式题，但未并入 ADS_EXAM_QUESTIONS。 */

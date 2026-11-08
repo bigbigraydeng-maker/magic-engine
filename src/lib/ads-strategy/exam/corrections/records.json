@@ -9,7 +9,7 @@
       "wrongSummary": "按客户主结果（留资）去数 WhatsApp 开聊组，连续多天报「花钱没结果」",
       "correctSummary": "止损 D3 跟广告组自己的结果种类走；开聊组按开聊数判，跟主结果留资对不上则「判不了」",
       "source": "ledger:2026-11-03-ads-d3-judges-whatsapp-adsets-by-leads",
-      "promotedQuestionId": "Q23"
+      "promoted_to": "Q23"
     },
     {
       "id": "CR-2026-11-03-stoploss-by-leads",
@@ -19,7 +19,7 @@
       "wrongSummary": "回放显示多条止损建议仍用留资当「没结果」，视频组与开聊组被误伤",
       "correctSummary": "视频组、开聊组的结果种类跟着广告组目的地走，不按留资条数当零结果",
       "source": "ledger:2026-11-09-ads-exam-scoreboard-part1",
-      "promotedQuestionId": "Q24"
+      "promoted_to": "Q24"
     },
     {
       "id": "CR-2026-11-04-stale-red-lights",
@@ -29,7 +29,7 @@
       "wrongSummary": "已暂停或样本太小的广告组在健康看板仍亮「花钱没结果」红灯",
       "correctSummary": "已暂停组与样本量不够的组不亮 D3 红灯，避免误导",
       "source": "ledger:2026-11-04-fix-ads-health-stale-red-lights",
-      "promotedQuestionId": "Q25"
+      "promoted_to": "Q25"
     },
     {
       "id": "CR-2026-11-03-agent-cpl-misread",

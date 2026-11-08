@@ -6,6 +6,6 @@ owner: agent
 decided_on: 2026-11-08
 source: doc:docs/ROADMAP.md
 verify_by: 2026-11-18
-verify_how: 合并后 npx vitest run src/lib/ads-strategy/exam/corrections 全绿；npx tsx scripts/ads-exam.ts 末行显示候选题数量与 records.json 条数一致
+verify_how: 合并后 npx vitest run src/lib/ads-strategy/exam 全绿；npx tsx scripts/ads-exam.ts 末行候选数为 1（三条已 promoted_to Q23–Q25 不计入）
 ---
-路线图「三个缺口」第 2 项首刀：records.json + 校验 + 候选题转换，不并 questions.ts。Ray 定：新纠正只 accrue 到 JSON 还是还要 UI/API；agent 口述「判错了」谁落库。
+路线图「三个缺口」第 2 项首刀。v1：人手改 records.json，不接对话/API；升入 formal 后填 promoted_to 即出候选池。

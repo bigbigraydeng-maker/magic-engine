@@ -20,6 +20,19 @@ function candidateMatch(correctionId: string): string {
   return `【考卷候选 ${correctionId}】`
 }
 
+/** 已升入正式考卷 → 不再参与候选输出。 */
+export function correctionIsPromoted(correction: AdsAgentCorrection): boolean {
+  const id = correction.promoted_to?.trim()
+  return id !== undefined && id !== '' && /^Q\d{2}$/.test(id)
+}
+
+/** 未晋升的纠正记录（供候选题与统计）。 */
+export function listCorrectionsPendingCandidates(
+  corrections: readonly AdsAgentCorrection[],
+): readonly AdsAgentCorrection[] {
+  return corrections.filter((c) => !correctionIsPromoted(c))
+}
+
 /** 把一条纠正记录转成考卷候选题（不写入正式题库）。 */
 export function correctionToExamCandidate(
   correction: AdsAgentCorrection,
@@ -37,10 +50,12 @@ export function correctionToExamCandidate(
   }
 }
 
-/** 全部纠正记录 → 候选题列表（顺序与 records.json 一致）。 */
+/** 未晋升纠正 → 候选题列表（顺序与 records.json 一致，跳过 promoted_to）。 */
 export function buildExamCandidatesFromCorrections(
   corrections: readonly AdsAgentCorrection[],
 ): readonly ExamCandidateQuestion[] {
-  return corrections.map((c, i) => correctionToExamCandidate(c, i + 1))
+  return listCorrectionsPendingCandidates(corrections).map((c, i) =>
+    correctionToExamCandidate(c, i + 1),
+  )
 }
 

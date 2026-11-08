@@ -73,11 +73,11 @@ function validateOne(raw: unknown, index: number): CorrectionValidationError[] {
     else scanSensitive(value, `${base}.${key}`, errors)
   }
 
-  const promoted = o.promotedQuestionId
+  const promoted = o.promoted_to
   if (promoted !== undefined && promoted !== null) {
     const pq = str(promoted)
     if (pq === null || !/^Q\d{2}$/.test(pq)) {
-      errors.push(err(`${base}.promotedQuestionId`, '须为 Q01 样式或省略'))
+      errors.push(err(`${base}.promoted_to`, '须为 Q01 样式或省略'))
     }
   }
 
