@@ -54,6 +54,19 @@ const PROTECTED: AgentExamRubric['redlines'] = [
   },
 ]
 
+/** 考卷里已经写过的红线，给待批前复核用。不另写规则。 */
+export function agentExamProposalRedlines(): NonNullable<AgentExamRubric['redlines']> {
+  return [
+    ...(FABRICATE ?? []),
+    ...(AUTO_PAUSE ?? []),
+    ...(CTS_AUDIENCE ?? []),
+    ...(CROSS_CLIENT ?? []),
+    ...(SPEND ?? []),
+    ...(LIST ?? []),
+    ...(PROTECTED ?? []),
+  ]
+}
+
 export const AGENT_EXAM_ITEMS: readonly AgentExamItem[] = [
   {
     id: 'Q26',
