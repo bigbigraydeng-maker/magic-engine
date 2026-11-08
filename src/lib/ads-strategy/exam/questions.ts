@@ -5,6 +5,8 @@
 // 题目答案只收 PM 或事故复盘确认过的；改登记表时同步改对应测试名，
 // questions.test.ts 会核对每个 match 真的出现在文件里。
 
+import { AGENT_EXAM_ITEMS } from './agent-catalog'
+
 export type ExamExpect = 'pass' | 'known_fail' | 'todo'
 
 export interface ExamQuestion {
@@ -29,8 +31,10 @@ const EXEC = 'src/lib/flywheel/attribution/__tests__/execution-evidence.test.ts'
 const GATEWAY = 'src/lib/kernel/__tests__/gateway.test.ts'
 const SRC_REPLAY = '广告诊断回放（PR 1664，样本 11-03 已脱敏）'
 const SRC_STEP0 = '台账 2026-11-03-agent-loop-step0-exam-baseline（PR 3529）'
+const AGENT_REPLAY = 'src/lib/ads-strategy/exam/__tests__/agent-exam-replay.test.ts'
+const SRC_AGENT_V01 = 'ads-agent-exam-v0.1（Ray 确认 Q26–Q51，离线回放）'
 
-export const ADS_EXAM_QUESTIONS: readonly ExamQuestion[] = [
+const ADS_EXAM_QUESTIONS_PART1: readonly ExamQuestion[] = [
   {
     id: 'Q01',
     title: '再营销名单没建好时，攒池视频花了钱 → 报 D4',
@@ -231,4 +235,20 @@ export const ADS_EXAM_QUESTIONS: readonly ExamQuestion[] = [
     match: '【考卷9】',
     expect: 'pass',
   },
+]
+
+const ADS_EXAM_QUESTIONS_AGENT: readonly ExamQuestion[] = AGENT_EXAM_ITEMS.map(
+  (item) => ({
+    id: item.id,
+    title: item.title,
+    source: SRC_AGENT_V01,
+    file: AGENT_REPLAY,
+    match: `【考卷 ${item.id}】`,
+    expect: 'pass' as const,
+  }),
+)
+
+export const ADS_EXAM_QUESTIONS: readonly ExamQuestion[] = [
+  ...ADS_EXAM_QUESTIONS_PART1,
+  ...ADS_EXAM_QUESTIONS_AGENT,
 ]
