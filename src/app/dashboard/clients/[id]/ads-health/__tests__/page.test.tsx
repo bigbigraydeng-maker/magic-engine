@@ -31,6 +31,7 @@ vi.mock('next/link', () => ({
 }))
 
 import AdsHealthPage from '../page'
+import { PAGE_TABS } from '../tabs'
 
 /** Oztop's real 2026-07-23 alert, the one card that mattered. */
 const OZTOP_ALERT = {
@@ -547,6 +548,23 @@ describe('「等你点头」标签', () => {
     await waitFor(() => expect(screen.getByText('目前没有等人批的广告动作')).toBeTruthy())
   })
 
+
+  it('标签栏里「广告样板」排在「每条广告」之后，点进去才出现样板面板', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/api/factory/winners': { success: true, winners: [] }, '/ad-health': respond([]) }))
+    render(<AdsHealthPage />)
+    const labels = PAGE_TABS.map(t => t.label)
+    expect(labels.indexOf('广告样板')).toBe(labels.indexOf('每条广告') + 1)
+    expect(screen.queryByText('当前广告样板（赢家）')).toBeNull()
+    await userEvent.click(screen.getByText('广告样板'))
+    await waitFor(() => expect(screen.getByText('当前广告样板（赢家）')).toBeTruthy())
+  })
+
+  it('网址带 ?tab=winners（待办链接的落点）时直接落在样板面板上', async () => {
+    searchParamsValue = new URLSearchParams('tab=winners')
+    vi.stubGlobal('fetch', mockFetch({ '/api/factory/winners': { success: true, winners: [] }, '/ad-health': respond([]) }))
+    render(<AdsHealthPage />)
+    await waitFor(() => expect(screen.getByText('当前广告样板（赢家）')).toBeTruthy())
+  })
 
   it('网址带 ?tab=approvals 时直接落在这个标签上', async () => {
     searchParamsValue = new URLSearchParams('tab=approvals')

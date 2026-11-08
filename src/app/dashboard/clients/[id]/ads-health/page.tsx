@@ -30,6 +30,7 @@ import EntityTreePanel from './entity-tree-panel'
 import AutoPausePanel from './auto-pause-panel'
 import AdsNextStepCard from './ads-next-step-card'
 import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
+import { CurrentWinnerPanel } from './current-winner-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
@@ -727,6 +728,8 @@ export default function AdsHealthPage() {
           )}
         </>
       )}
+
+      {tab === 'winners' && <CurrentWinnerPanel clientId={clientId} />}
 
       {tab === 'breakdown' && <BreakdownPanel clientId={clientId} />}
 

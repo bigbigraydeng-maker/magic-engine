@@ -391,7 +391,7 @@ export function CurrentWinnerPanel({ clientId }: { clientId: string | null }) {
   const showUnsynced = pmOnlyFailed || data?.pm_only_unsynced === true
 
   return (
-    <section id="current-winner" className="mt-8">
+    <section id="current-winner">
       <h2 className="text-base font-semibold text-slate-800">当前广告样板（赢家）</h2>
       <p className="mt-1 text-xs text-slate-500">
         认了以后，视频工厂给这个客户做新广告片时会照它的样子做。没人认之前，工厂一律不用它。
