@@ -15,6 +15,13 @@ export interface AdsNextStepPendingItem {
   readonly href: string
 }
 
+export interface ImpactGapNextStepSlice {
+  readonly code: 'M-2' | 'I-1' | 'C-3' | 'C-i'
+  readonly title: string
+  readonly summary: string
+  readonly href: string
+}
+
 export interface AdsNextStepView {
   readonly healthRedLights: HealthRedLightsView
   readonly pendingActions: AdsNextStepRow<{
@@ -26,4 +33,8 @@ export interface AdsNextStepView {
     readonly statusLabel: string
     readonly approvedAt: string | null
   }>
+  /** IMPACT 批次 B：只读事实与缺口（内部员工可见）。 */
+  readonly impactGaps:
+    | AdsNextStepRow<{ readonly items: readonly ImpactGapNextStepSlice[] }>
+    | { readonly kind: 'staff_only' }
 }
