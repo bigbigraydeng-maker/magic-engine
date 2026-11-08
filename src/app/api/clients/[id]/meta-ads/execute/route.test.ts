@@ -27,6 +27,7 @@ const m = vi.hoisted(() => ({
   authority: vi.fn(),
   fwUpdate: vi.fn(),
   callOrder: [] as string[],
+  requestCard: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
@@ -112,6 +113,9 @@ vi.mock('@/lib/supabase', () => ({
     },
   },
 }))
+vi.mock('@/lib/action-submission/campaign-status-card', () => ({
+  requestCampaignStatusCard: m.requestCard,
+}))
 vi.mock('@/lib/meta/client', () => ({
   getCampaignDetails: m.getCampaignDetails,
   setCampaignStatus: (...args: unknown[]) => {
@@ -151,6 +155,10 @@ beforeEach(() => {
   m.draftLookupError = null
   m.callOrder = []
   m.authority.mockResolvedValue({ ok: true, actorUserId: 'u-pm', actorEmail: 'pm@magiclab.test', basis: 'global_admin' })
+  m.requestCard.mockResolvedValue({
+    status: 202,
+    body: { success: false, status: 'awaiting_confirmation', wroteMeta: false },
+  })
   m.registeredAccounts.mockResolvedValue({ data: [{ ad_account_id: 'act_1111111111' }], error: null })
   m.getCampaignDetails.mockResolvedValue({
     id: '120220000000000002', name: 'B campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '2222222222',
@@ -181,8 +189,13 @@ describe('meta-ads/execute POST — campaign belonging to another client', () =>
 
     const res = await post({ action_type: 'ads.pause_campaign', campaign_id: '120210000000000001' })
 
-    expect(res.status).not.toBe(403)
-    expect(m.setCampaignStatus).toHaveBeenCalledWith('120210000000000001', 'SHARED_FALLBACK_TOKEN', 'PAUSED')
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      kind: 'pause',
+      campaignId: '120210000000000001',
+      clientId: CLIENT_A,
+    }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 
   it('queues the Kernel action in Inngest and does not call a Meta writer from the route', async () => {
@@ -266,8 +279,9 @@ describe('meta-ads/execute POST — reactivating ME Messenger draft campaigns', 
   it('reactivates when no Messenger draft exists', async () => {
     const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
 
-    expect(res.status).toBe(200)
-    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'ACTIVE')
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'resume', campaignId: CAMP }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 
   it('fails closed when the draft lookup errors', async () => {
@@ -297,8 +311,9 @@ describe('meta-ads/execute POST — reactivating ME Messenger draft campaigns', 
 
     const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
 
-    expect(res.status).toBe(200)
-    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'ACTIVE')
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'resume' }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 
   it('does not block pausing a campaign that has a Messenger draft', async () => {
@@ -306,8 +321,9 @@ describe('meta-ads/execute POST — reactivating ME Messenger draft campaigns', 
 
     const res = await post({ action_type: 'ads.pause_campaign', campaign_id: CAMP })
 
-    expect(res.status).toBe(200)
-    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'PAUSED')
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'pause' }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 
   it('refuses a malformed campaign id spelling (leading zero) without writing', async () => {
@@ -350,86 +366,26 @@ describe('meta-ads/execute POST — reactivation needs PM authority and a receip
     })
   })
 
-  it('paid client account (not PM) cannot reactivate → 403, no Meta call, no receipt', async () => {
+  it('a paid client can ask to resume, and this route does not write Meta', async () => {
     m.authority.mockResolvedValue({ ok: false, status: 403, error: 'x', code: 'activation_requires_pm' })
 
     const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
 
-    expect(res.status).toBe(403)
-    const body = await res.json()
-    expect(body.code).toBe('activation_requires_pm')
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'resume' }))
     expect(m.setCampaignStatus).not.toHaveBeenCalled()
+    expect(m.authority).not.toHaveBeenCalled()
     expect(m.otherTableInsert).not.toHaveBeenCalled()
-    expect(m.getCampaignDetails).not.toHaveBeenCalled()
   })
 
-  it('authority check failure → denied (fail-closed)', async () => {
-    m.authority.mockResolvedValue({ ok: false, status: 500, error: 'x', code: 'activation_auth_failed' })
-
-    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
-
-    expect(res.status).toBe(500)
-    expect(m.setCampaignStatus).not.toHaveBeenCalled()
-  })
-
-  it('PM reactivation writes the receipt BEFORE calling Meta', async () => {
-    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
-
-    expect(res.status).toBe(200)
-    expect(m.callOrder).toEqual(['receipt_insert', 'meta_set_status', 'receipt_update'])
-    expect(m.otherTableInsert).toHaveBeenCalledWith(expect.objectContaining({
-      client_id: CLIENT_A,
-      action_type: 'ads.reactivate_campaign',
-      payload: expect.objectContaining({
-        status: 'authorized_pending',
-        campaign_id: CAMP,
-        authorization: expect.objectContaining({
-          schema: 'ads.spend_activation_receipt.v1',
-          entry: 'meta-ads/execute',
-          basis: 'global_admin',
-          actor_user_id: 'u-pm',
-          actor_email: 'pm@magiclab.test',
-          client_id: CLIENT_A,
-          campaign_id: CAMP,
-        }),
-      }),
-    }))
-    expect(m.fwUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      payload: expect.objectContaining({ status: 'executed' }),
-    }))
-  })
-
-  it('receipt insert fails → 503, Meta never called', async () => {
-    m.otherTableInsert.mockReturnValue({
-      select: () => ({ single: vi.fn().mockResolvedValue({ data: null, error: { message: 'db down' } }) }),
-    })
-
-    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
-
-    expect(res.status).toBe(503)
-    const body = await res.json()
-    expect(body.code).toBe('activation_receipt_failed')
-    expect(m.setCampaignStatus).not.toHaveBeenCalled()
-  })
-
-  it('Meta failure is recorded on the receipt as meta_failed', async () => {
-    m.setCampaignStatus.mockResolvedValue(false)
-
-    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
-
-    expect(res.status).toBe(502)
-    expect(m.fwUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      payload: expect.objectContaining({ status: 'meta_failed' }),
-    }))
-  })
-
-  it('pausing still works for a paid client account without PM authority', async () => {
+  it('pausing still asks for a card without PM authority and does not write Meta', async () => {
     m.authority.mockResolvedValue({ ok: false, status: 403, error: 'x', code: 'activation_requires_pm' })
 
     const res = await post({ action_type: 'ads.pause_campaign', campaign_id: CAMP })
 
-    expect(res.status).toBe(200)
-    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'PAUSED')
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'pause' }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
     expect(m.authority).not.toHaveBeenCalled()
   })
 
@@ -460,7 +416,8 @@ describe('meta-ads/execute POST — hostile request bodies', () => {
   it('params: null does not crash (no 500)', async () => {
     const res = await post({ action_type: 'ads.pause_campaign', campaign_id: CAMP, params: null })
 
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(202)
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 
   it('execution_item_id that is not a UUID → 400, nothing written', async () => {
@@ -482,9 +439,11 @@ describe('meta-ads/execute POST — hostile request bodies', () => {
       params: { execution_item_id: '11111111-2222-4333-8444-555555555555' },
     })
 
-    expect(res.status).toBe(200)
-    expect(m.otherTableInsert).toHaveBeenCalledWith(expect.objectContaining({
-      execution_item_id: '11111111-2222-4333-8444-555555555555',
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      executionItemId: '11111111-2222-4333-8444-555555555555',
+      kind: 'resume',
     }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 })

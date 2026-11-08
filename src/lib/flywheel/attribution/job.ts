@@ -22,12 +22,12 @@ import {
   observationDue,
   pairSpans,
   readExecutedReview,
-  reviewVerdict,
   windowSpanOf,
   type ExecutedReview,
   type PairMark,
   type ReviewAction,
 } from './executed-review'
+import { asObjectDay, judgeObjectWindow, objectWindowDates, type ObjectDay } from './object-window'
 import {
   OUTCOME_CONFLICT_TARGET,
   OUTCOME_EVALUATOR,
@@ -179,8 +179,9 @@ function asReviewAction(action: ActionRow): ReviewAction {
 
 /**
  * A budget or pause card keeps its own window. The job default is not used.
- * The row is written only after that window has ended, and the verdict stays
- * inconclusive until a real comparable sample exists.
+ * After that window ends, the same ad set's own daily numbers are compared.
+ * A failed save is returned as failed so the next run retries it and the
+ * cron's failure count reaches the existing to-do. It is not logged and dropped.
  */
 async function saveDueReview(
   action: ActionRow,
@@ -188,31 +189,100 @@ async function saveDueReview(
   pair: PairMark,
   now: Date,
 ): Promise<ActionOutcome> {
-  const judged = reviewVerdict(pair)
   const reconcileErrors = await reconcileLegacyWindows(action.id, review.metric)
   if (!observationDue(review.executedAt, review.observationWindowDays, now)) {
     return { kind: 'skipped', reconcileErrors }
   }
+  const rows = await loadObjectDays(action.client_id, review.objectId, review.executedAt, review.observationWindowDays)
+  if (rows === 'error') return { kind: 'failed', message: 'object window read failed' }
+  const judged = judgeObjectWindow({
+    metric: review.metric,
+    direction: review.direction,
+    expectedDelta: action.expected_delta,
+    pair,
+    rows,
+    executedAt: review.executedAt,
+    windowDays: review.observationWindowDays,
+    ...caseFacts(action.payload),
+    verdictOf: computeOutcomeVerdict,
+  })
   try {
     await upsertOutcome({
       action_id: action.id,
       client_id: action.client_id,
       metric_key: review.metric,
-      baseline: null,
-      after_value: null,
-      delta: null,
-      delta_pct: null,
+      baseline: judged.baseline,
+      after_value: judged.after,
+      delta: judged.delta,
+      delta_pct: judged.deltaPct,
       confidence: judged.confidence,
-      verdict: judged.verdict,
+      verdict: judged.storedVerdict,
       window_days: review.observationWindowDays,
       evaluator_key: OUTCOME_EVALUATOR.FLYWHEEL_METRICS,
       computed_at: now.toISOString(),
     })
+    await saveCase(action, judged.case)
   } catch (err) {
     return { kind: 'failed', message: err instanceof Error ? err.message : String(err) }
   }
   reconcileErrors.push(...await retireExtraWindows(action.id, review.metric, review.observationWindowDays))
   return { kind: 'written', reconcileErrors }
+}
+
+async function loadObjectDays(
+  clientId: string,
+  objectId: string,
+  executedAt: string,
+  windowDays: number,
+): Promise<ObjectDay[] | 'error'> {
+  const span = objectWindowDates(executedAt, windowDays)
+  if (!span) return 'error'
+  const { data, error } = await supabaseAdmin
+    .from('ad_daily_insights')
+    .select('insight_date, spend, impressions, clicks, leads, messaging_conversations, results')
+    .eq('client_id', clientId)
+    .eq('platform', 'meta')
+    .eq('level', 'adset')
+    .eq('entity_id', objectId)
+    .gte('insight_date', span.from)
+    .lt('insight_date', span.to)
+  if (error) return 'error'
+  return Array.isArray(data) ? data.flatMap((row) => asDay(row)) : []
+}
+
+function asDay(row: unknown): ObjectDay[] {
+  const day = asObjectDay(row)
+  return day ? [day] : []
+}
+
+function caseFacts(payload: Record<string, unknown> | null): {
+  beforeCents: unknown
+  afterCents: unknown
+  beforeStatus: unknown
+  afterStatus: unknown
+  basis: unknown
+} {
+  const order = payload?.order
+  const basis = order && typeof order === 'object' && !Array.isArray(order)
+    ? (order as Record<string, unknown>).basis
+    : null
+  return {
+    beforeCents: payload?.beforeCents,
+    afterCents: payload?.afterCents,
+    beforeStatus: payload?.before,
+    afterStatus: payload?.after,
+    basis,
+  }
+}
+
+async function saveCase(action: ActionRow, reviewCase: { verdict: string; reason: string | null; text: string }): Promise<void> {
+  const payload = { ...(action.payload ?? {}), reviewCase }
+  const { error } = await supabaseAdmin
+    .from('flywheel_actions')
+    .update({ payload })
+    .eq('id', action.id)
+    .eq('client_id', action.client_id)
+  if (error) throw new Error(`case save: ${error.message}`)
 }
 
 function emptyResult(): AttributionJobResult {

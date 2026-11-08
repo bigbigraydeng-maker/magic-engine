@@ -17,10 +17,11 @@ interface AdsAction {
   id:                 string
   action_type:        string
   vendor:             string | null
-  executed_at:        string
+  executed_at:        string | null
   execution_item_id:  string | null
-  payload: {
+    payload: {
     campaign_id?: string
+    status?: string
     before?: { status: string; name?: string; daily_budget?: string | null }
     after?:  { status: string; name?: string; daily_budget?: string | null }
   } | null
@@ -79,7 +80,11 @@ export function AdsAuditSection({ clientId }: Props) {
           campaign_id: campaignId,
         }),
       })
-      const data = await res.json() as { success?: boolean; error?: string }
+      const data = await res.json() as { success?: boolean; error?: string; status?: string }
+      if (data.status === 'awaiting_confirmation') {
+        setUndoMsg({ id: action.id, ok: true, msg: '已出恢复确认卡，还没有重新打开。' })
+        return
+      }
       if (!res.ok || !data.success) throw new Error(data.error ?? `HTTP ${res.status}`)
       setUndoMsg({ id: action.id, ok: true, msg: '已恢复为 ACTIVE' })
       void fetchActions()
@@ -150,7 +155,12 @@ export function AdsAuditSection({ clientId }: Props) {
                 const afterStatus  = action.payload?.after?.status
                 const afterBudget  = budgetFromCents(action.payload?.after?.daily_budget)
                 const beforeBudget = budgetFromCents(action.payload?.before?.daily_budget)
-                const canUndo      = action.action_type === 'ads.pause_campaign'
+                const recorded = action.payload?.status
+                const canUndo = action.action_type === 'ads.pause_campaign'
+                  && recorded !== 'holding'
+                  && recorded !== 'writing'
+                  && recorded !== 'failed'
+                  && recorded !== 'declined'
                 const thisUndoMsg  = undoMsg?.id === action.id ? undoMsg : null
 
                 return (
@@ -162,7 +172,9 @@ export function AdsAuditSection({ clientId }: Props) {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-xs font-black text-slate-900">{label}</span>
-                          <span className="text-[10px] text-slate-400">{fmtTime(action.executed_at)}</span>
+                          <span className="text-[10px] text-slate-400">
+                            {action.executed_at ? fmtTime(action.executed_at) : '还没改广告'}
+                          </span>
                         </div>
                         <p className="text-xs text-slate-600 mt-0.5 truncate">{campaignName}</p>
 
