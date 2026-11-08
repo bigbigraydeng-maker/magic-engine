@@ -4,6 +4,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { listActiveGoals } from '@/lib/strategy/goals'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { loadAdStrategyConfigWithSource } from '../config'
 import { getTrackingClientConfig } from '@/lib/ads-tracking-preflight/client-config'
 import { computeGoalPace, type GoalPace } from '../goal-pace'
@@ -264,7 +265,10 @@ export async function buildDigestGoalContext(
     const goal = pickDigestGoal(await listActiveGoals(supabaseAdmin, clientId))
     if (!goal) return null
 
-    const { config, source, error: configError } = await loadAdStrategyConfigWithSource(clientId)
+    const [{ source, error: configError }, planCap] = await Promise.all([
+      loadAdStrategyConfigWithSource(clientId),
+      readClientDailyTotalCap(supabaseAdmin, clientId),
+    ])
     const metric = costMetricForGoal(goal.primary_metric_key)
     const campaignIds = goalCampaignIds(clientId, metric)
     const cost = await readRecentCost(clientId, insightDate, { metric, campaignIds })
@@ -291,12 +295,12 @@ export async function buildDigestGoalContext(
       periodEnd: goal.period_end,
       today: insightDate,
       actualToDate,
-      dailyCapCents: config.daily_budget_cap_cents,
+      dailyCapCents: planCap.state === 'set' ? planCap.cents : null,
       medianCostPerResultCents7d,
       dataThrough,
       actualDailySpendCents: cost.avgDailySpendCents,
     })
-    const capped = source === 'fallback' ? withoutCapLens(computed) : computed
+    const capped = source === 'fallback' || planCap.state === 'unreadable' ? withoutCapLens(computed) : computed
     const pace = withThinSampleGuard(capped, medianCostPerResultCents7d, dataDays)
     if (source === 'fallback') {
       console.error(`[ads-strategy] goal context: ad_strategy_configs read failed for ${clientId}: ${configError ?? 'unknown error'}`)

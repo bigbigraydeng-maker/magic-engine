@@ -204,6 +204,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   ads_config_unreadable: 'dev', // 广告回拉读不出广告设置，字段没对齐或临时故障，都是我们的活
   ads_agent_sync_stale: 'dev', // 广告 Agent 后台同步太久没成功：开发排查，不占客户操作
   ads_daily_spend_over_cap_notice: 'decide', // 花费超日上限只读提醒，不自动暂停
+  ads_plan_daily_cap_missing: 'decide', // 已批准计划还没填每天总上限，加预算会被拦住
   cron_not_running: 'dev',
   cron_silent_success: 'dev',
   ai_alerting_broken: 'dev',
