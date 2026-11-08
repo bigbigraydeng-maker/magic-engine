@@ -39,13 +39,13 @@ function live(over: Partial<BudgetSnapshot> = {}): BudgetSnapshot {
   }
 }
 
-function other(cents: number, lifetime = 0): OtherAccountFact {
+function other(cents: number, lifetime = 0, currency: string | null = null): OtherAccountFact {
   return {
     tail: '2222',
     label: null,
     hidden: false,
     account_status: 1,
-    currency: null,
+    currency,
     open_campaign_count: 1,
     live_daily_budget_cents: cents,
     live_lifetime_budget_count: lifetime,
@@ -83,8 +83,11 @@ describe('ad set budget step', () => {
   it('does not treat an unread other-account total as zero', () => {
     const unread = guardBudget(order, live({ otherAccountsLiveCents: null }), null)
     expect(unread.block).toMatch(/其它广告账户/)
-    expect(sumOtherLive(null, '读不到')).toEqual({ cents: null, lifetime: false })
-    expect(sumOtherLive([other(200), other(50)], null).cents).toBe(250)
+    expect(sumOtherLive(null, '读不到', 'NZD')).toEqual({ cents: null, lifetime: false })
+    expect(sumOtherLive([other(200, 0, 'NZD'), other(50, 0, 'NZD')], null, 'NZD').cents).toBe(250)
+    expect(sumOtherLive([other(200, 0, 'AUD')], null, 'NZD').cents).toBeNull()
+    expect(sumOtherLive([other(200, 0, 'NZD')], null, null).cents).toBeNull()
+    expect(sumOtherLive([other(200)], null, 'NZD').cents).toBeNull()
   })
 
   it('fails closed when the live budget is no longer the one on the card', () => {
@@ -129,7 +132,7 @@ describe('ad set budget step', () => {
   })
 
   it('adds other-account live budgets from the existing budget facts', () => {
-    const facts: BudgetFacts = {
+    const facts: BudgetFacts & { account_currency?: string | null } = {
       read: true,
       error: null,
       as_of: '2026-11-02T00:00:00.000Z',
@@ -139,10 +142,13 @@ describe('ad set budget step', () => {
       live_daily_budget_cents: 400,
       live_lifetime_budget_count: 0,
       live_entity_count: 1,
-      other_accounts: [other(200)],
+      other_accounts: [other(200, 0, 'NZD')],
       other_accounts_error: null,
+      account_currency: 'NZD',
     }
     expect(capNumbers(facts, 'ACTIVE').otherAccountsLiveCents).toBe(200)
+    expect(capNumbers({ ...facts, account_currency: 'AUD' }, 'ACTIVE').otherAccountsLiveCents).toBeNull()
+    expect(capNumbers({ ...facts, account_currency: null }, 'ACTIVE').otherAccountsLiveCents).toBeNull()
     expect(capNumbers({ ...facts, other_accounts: null, other_accounts_error: '读不到' }, 'ACTIVE').otherAccountsLiveCents).toBeNull()
   })
 })

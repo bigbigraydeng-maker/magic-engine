@@ -97,7 +97,7 @@ async function loadCaps(
   clientId: string,
   accountId: string,
   token: string,
-): Promise<BudgetFacts> {
+): Promise<BudgetFacts & { account_currency?: string | null }> {
   const result = await readBudgetFacts({
     supabase: sb,
     clientId,
@@ -106,5 +106,27 @@ async function loadCaps(
     fetcher: fetch,
     now: new Date(),
   })
-  return result.facts
+  const others = result.facts.other_accounts
+  if (!others || others.length === 0) return result.facts
+  return { ...result.facts, account_currency: await readAccountCurrency(sb, clientId, accountId) }
+}
+
+export async function readAccountCurrency(
+  sb: SupabaseClient,
+  clientId: string,
+  accountId: string,
+): Promise<string | null> {
+  const digits = accountId.replace(/^act_/i, '')
+  const ids = Array.from(new Set([accountId, digits, `act_${digits}`]))
+  const { data, error } = await sb.from('ad_entity_snapshots')
+    .select('currency')
+    .eq('client_id', clientId)
+    .eq('level', 'account')
+    .in('ad_account_id', ids)
+    .order('captured_at', { ascending: false })
+    .limit(1)
+  if (error || !Array.isArray(data) || data.length === 0) return null
+  const currency = (data[0] as { currency?: unknown }).currency
+  if (typeof currency !== 'string' || !/^[A-Za-z]{3}$/.test(currency.trim())) return null
+  return currency.trim().toUpperCase()
 }

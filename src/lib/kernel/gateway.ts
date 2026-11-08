@@ -1280,6 +1280,7 @@ interface RollbackContext {
  *    rollback handler —— 在落 dead_letter **之前**调 rollback、落一行 lineage。
  *    rollback 结果**不改** run 的最终状态（永远还是 dead_letter），只把「撤没撤」
  *    和后果如实记进 `last_error` 追加行 + `action_run_steps(step_key='rollback')`。
+ *    预算步骤卡的回读对不上或读不到时例外：只标失败交给人，不把旧预算再写回去。
  */
 async function failRun(
   deps: KernelDeps,
@@ -1292,31 +1293,8 @@ async function failRun(
 ): Promise<ExecutionResult> {
   const code = err instanceof KernelError ? err.code : 'EXECUTION_FAILED'
   const humanReason = humanReasonOf(err)
-
-  // 🔴 B · Rollback trigger（在落 dead_letter 之前）：
-  //    判据 = execution 已经**实际进入过任一 capability handler**（steps.some(s.attempt > 0)）。
-  //    不用「至少一个 succeeded」—— 那会漏掉「provider 已经写出、handler 在
-  //    返回 succeeded 之前网络断了」这种，`step.status=running/failed` 时不算 succeeded。
-  //
-  //    只在 rollbackContext 存在（definition + capability + verifiedInput + priorOutputs
-  //    都齐）且声明了 provider_native rollback + capability 提供了 handler 时才触发 ——
-  //    assembly gate 已经确保这两者齐全或提前 fail；这里只是 defensive 再验一次。
-  let rollbackNote: string | null = null
-  let rollbackStep: ActionRunStep | null = null
-  if (
-    rollbackContext &&
-    rollbackContext.definition.sideEffect === 'outward' &&
-    rollbackContext.definition.outwardAuthorization?.rollback === 'provider_native' &&
-    typeof rollbackContext.capability.rollback === 'function' &&
-    anyHandlerInvocationAttempted(steps)
-  ) {
-    const rollbackOutcome = await invokeRollbackHandler(deps, run, steps, fence, rollbackContext)
-    rollbackStep = rollbackOutcome.step
-    rollbackNote = rollbackOutcome.note
-  }
-
-  const composedError =
-    rollbackNote === null ? humanReason : `${humanReason}\n\n${rollbackNote}`
+  const rolled = await rollbackForFailure(deps, run, steps, fence, err, rollbackContext)
+  const composedError = rolled.note === null ? humanReason : `${humanReason}\n\n${rolled.note}`
 
   // 🔴 F1：落死信也是一次推进性写入。过期的执行者不许把接管者正在跑的 run
   //    写成 dead_letter —— 那会直接毁掉一次正在进行的执行。
@@ -1333,7 +1311,7 @@ async function failRun(
       { detail: { runId: run.id, generation: fence.generation, originalError: humanReason } },
     )
   }
-  const finalSteps = rollbackStep ? [...steps, rollbackStep] : steps
+  const finalSteps = rolled.step ? [...steps, rolled.step] : steps
   return {
     status: 'dead_letter',
     run: failed,
@@ -1343,6 +1321,55 @@ async function failRun(
     verification: verificationOf(steps),
     failure: { code, humanReason },
   }
+}
+
+/**
+ * 失败后要不要调 provider 撤回。
+ * 预算步骤卡回读失败时不调：撤回会把旧预算再写一次，可能盖住别人刚改的数。
+ */
+async function rollbackForFailure(
+  deps: KernelDeps,
+  run: ActionRun,
+  steps: ActionRunStep[],
+  fence: ExecutionFence,
+  err: unknown,
+  rollbackContext?: RollbackContext,
+): Promise<{ note: string | null; step: ActionRunStep | null }> {
+  if (!providerRollbackApplies(rollbackContext, steps) || !rollbackContext) {
+    return { note: null, step: null }
+  }
+  if (budgetCardReadbackStop(run, err, steps)) {
+    return {
+      note: '回读对不上或读不到。没有把旧预算写回去，已标失败，要人处理。',
+      step: null,
+    }
+  }
+  const outcome = await invokeRollbackHandler(deps, run, steps, fence, rollbackContext)
+  return { note: outcome.note, step: outcome.step }
+}
+
+function providerRollbackApplies(
+  rollbackContext: RollbackContext | undefined,
+  steps: readonly ActionRunStep[],
+): boolean {
+  return Boolean(
+    rollbackContext &&
+    rollbackContext.definition.sideEffect === 'outward' &&
+    rollbackContext.definition.outwardAuthorization?.rollback === 'provider_native' &&
+    typeof rollbackContext.capability.rollback === 'function' &&
+    anyHandlerInvocationAttempted(steps),
+  )
+}
+
+function budgetCardReadbackStop(run: ActionRun, err: unknown, steps: readonly ActionRunStep[]): boolean {
+  const marked = run.evidence?.source === 'budget_step_card'
+  const carried = typeof run.input?.card_prescription_id === 'string' && run.input.card_prescription_id.length > 0
+  if (!marked && !carried) return false
+  const step = steps.find((item) => item.step_key === 'readback')
+  if (!step || step.attempt <= 0) return false
+  if (err instanceof KernelError && err.code === 'VERIFICATION_FAILED') return true
+  if (step.verification?.passed === false) return true
+  return step.status !== 'succeeded'
 }
 
 /**
@@ -1471,7 +1498,7 @@ function composeRollbackNote(result: OutwardRollbackResult): string {
 }
 
 /** 本次 execution 里有没有实际调用过任何 capability handler（判据来自 spec §4.3）。 */
-function anyHandlerInvocationAttempted(steps: ActionRunStep[]): boolean {
+function anyHandlerInvocationAttempted(steps: readonly ActionRunStep[]): boolean {
   return steps.some((s) => s.step_key !== 'rollback' && s.attempt > 0)
 }
 
