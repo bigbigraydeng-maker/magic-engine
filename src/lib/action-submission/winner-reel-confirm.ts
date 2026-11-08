@@ -1,13 +1,13 @@
 /** The confirming session is the only place a winner card may say a person pressed it. */
 
-import type { SupabaseClient } from '@supabase/supabase-js'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import type { KernelDeps } from '@/lib/kernel/deps'
 import type { CardClicker } from '@/lib/confirmation-card'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import { confirmWinnerCard, type WinnerPorts, type WinnerResult } from './winner-reel-execute'
 
 export async function confirmWinnerFromSession(
-  sb: SupabaseClient,
+  sb: KernelDeps['supabase'],
   input: {
     clientId: string
     runId: string

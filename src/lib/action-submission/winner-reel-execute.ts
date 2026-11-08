@@ -5,7 +5,6 @@
  * A row left in `writing` is not retried. A mismatched read-back is not written again.
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js'
 import type { KernelDeps } from '@/lib/kernel/deps'
 import { createKernel } from '@/lib/kernel'
 import { decideConfirmationCard, type CardClicker } from '@/lib/confirmation-card'
@@ -69,7 +68,7 @@ interface PausedCreate {
 }
 
 export async function confirmWinnerCard(
-  sb: SupabaseClient,
+  sb: KernelDeps['supabase'],
   input: ConfirmWinnerInput,
   ports: WinnerPorts = defaultPorts(sb),
 ): Promise<WinnerResult> {
@@ -91,7 +90,7 @@ export async function confirmWinnerCard(
   return { card, resultLine: next.resultLine ?? '做完了。', wroteMeta: next.wroteMeta }
 }
 
-function defaultPorts(sb: SupabaseClient): WinnerPorts {
+function defaultPorts(sb: KernelDeps['supabase']): WinnerPorts {
   return {
     decide: (input) => decideConfirmationCard(createKernel(sb), {
       clientId: input.clientId,
@@ -129,7 +128,7 @@ function quiet(hold: ProposalHold): WinnerResult {
   return { card: null, resultLine: hold.resultLine ?? '这张卡已经做完了。', wroteMeta: false }
 }
 
-async function decline(sb: SupabaseClient, input: ConfirmWinnerInput, row: HoldRow, ports: WinnerPorts): Promise<WinnerResult> {
+async function decline(sb: KernelDeps['supabase'], input: ConfirmWinnerInput, row: HoldRow, ports: WinnerPorts): Promise<WinnerResult> {
   const card = await ports.decide(input)
   const next: ProposalHold = { ...row.payload, status: 'declined', confirmedBy: who(input.actor), resultLine: '不做了。' }
   await saveHold(sb, input.clientId, row, next)
