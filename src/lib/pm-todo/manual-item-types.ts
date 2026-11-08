@@ -47,10 +47,6 @@ import type {
   AdsAgentSyncStaleItemKind,
   AdsDailySpendOverCapNoticeItemKind,
 } from './ads-agent-stale-items'
-import type {
-  AdsAgentSyncStaleItemKind,
-  AdsDailySpendOverCapNoticeItemKind,
-} from './ads-agent-stale-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'

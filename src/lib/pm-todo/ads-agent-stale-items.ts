@@ -123,7 +123,7 @@ function parsePrescriptionLastOk(
     if (!Array.isArray(summary.outcomes)) continue
     for (const raw of summary.outcomes) {
       if (!isRecord(raw) || raw.clientId !== clientId) continue
-      if (raw.result === 'checked' || raw.result === 'unreadable') return log.started_at
+      if (raw.result === 'checked') return log.started_at
     }
   }
   return null
