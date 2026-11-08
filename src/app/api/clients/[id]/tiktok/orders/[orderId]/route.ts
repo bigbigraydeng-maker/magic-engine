@@ -5,12 +5,13 @@ import { factoryVideoUrl } from '@/lib/factory/outlets'
 import { inspectTikTokVideo } from '@/lib/tiktok/video-proof'
 import { validateReview } from '@/lib/tiktok/post-review'
 import { getTikTokCreatorInfo, publishToTikTok, checkTikTokStatus, humanTikTokError } from '@/lib/factory/publish/tiktok-adapter'
+import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 interface Submission { status: string; privacy?: string; publishId?: string; accountId?: string; error?: string }
-interface Order { id: string; client_id: string; status: string; angle: string; updated_at: string; output: Record<string, unknown> | null }
+interface Order { id: string; client_id: string; status: string; angle: string; updated_at: string; brief: unknown; output: Record<string, unknown> | null }
 async function load(clientId: string, orderId: string): Promise<Order | null> {
-  const { data, error } = await supabaseAdmin.from('content_work_orders').select('id,client_id,status,angle,updated_at,output').eq('id',orderId).eq('client_id',clientId).single()
+  const { data, error } = await supabaseAdmin.from('content_work_orders').select('id,client_id,status,angle,updated_at,brief,output').eq('id',orderId).eq('client_id',clientId).single()
   if (error || !data) return null
   return data as Order
 }
@@ -56,6 +57,9 @@ export async function POST(req: Request, {params}: Context) {
   if (!order || !video(order)) return NextResponse.json({error:'未找到此客户的成片'},{status:404})
   if (!['approved','published','measuring','closed'].includes(order.status)) return NextResponse.json({error:'请先完成成片审核，再发布到 TikTok'},{status:409})
   if (order.output?.tiktok_publish) return NextResponse.json({error:'已有 TikTok 发布记录，请查询原任务，不能重复上传'},{status:409})
+  // Same on-camera consent gate as the Facebook paths (lib/factory/talent-consent.ts); TikTok is its own use.
+  const consent = consentVerdict({brief:order.brief,output:order.output,use:'tiktok_organic'})
+  if (!consent.ok) return NextResponse.json({error:`出镜授权不满足，不能发布到 TikTok：${CONSENT_REASON_ZH[consent.reason]}`},{status:409})
   let state: Submission | undefined
   try {
     const body = await req.json()

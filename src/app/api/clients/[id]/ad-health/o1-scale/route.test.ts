@@ -50,6 +50,7 @@ function post() {
 
 function setup(
   siblings: Array<{ entity_id: string; effective_status: string | null }> = [{ entity_id: ADSET_ID, effective_status: 'ACTIVE' }],
+  opts: { campaignAgeMs?: number } = {},
 ) {
   const now = new Date()
   const today = now.toISOString().slice(0, 10)
@@ -65,7 +66,8 @@ function setup(
   }
   const campaign = {
     ad_account_id: ACCOUNT_ID, daily_budget_minor: 5000, budget_level: 'cbo',
-    effective_status: 'ACTIVE', currency: 'USD', captured_at: adset.captured_at,
+    effective_status: 'ACTIVE', currency: 'USD',
+    captured_at: new Date(now.getTime() - (opts.campaignAgeMs ?? 0)).toISOString(),
   }
   const rows = new Map<string, unknown[]>([
     ['ads_growth_states', [state]],
@@ -105,6 +107,24 @@ describe('O1 campaign-budget proposal', () => {
       campaignId: CAMPAIGN_ID, beforeCents: 5000, afterCents: 6000,
       evidence: expect.objectContaining({ currency: 'USD', target_level: 'campaign' }),
     }))
+  })
+
+  it('系列行是 6 小时前那一轮写的（之后几轮系列没变、没写行）→ 照常建审批', async () => {
+    setup(undefined, { campaignAgeMs: 6 * 60 * 60 * 1000 })
+
+    const response = await post()
+
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(202)
+    expect(await response.json()).toMatchObject({ ok: true, beforeCents: 5000, afterCents: 6000 })
+  })
+
+  it('🔴 系列最新一行超过 24 小时 → 拒，不拿旧预算建审批', async () => {
+    setup(undefined, { campaignAgeMs: 30 * 60 * 60 * 1000 })
+
+    const response = await post()
+
+    expect(response.status).toBe(409)
+    expect(m.submit).not.toHaveBeenCalled()
   })
 
   it('refuses to raise the whole campaign budget when another child ad set is delivering', async () => {

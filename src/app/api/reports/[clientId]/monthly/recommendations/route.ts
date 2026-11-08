@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getOpenAIClient } from '@/lib/ai/openai-client'
 import { buildMonthlyReport } from '@/lib/reports/monthly-aggregator'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
 
 /**
  * POST /api/reports/[clientId]/monthly/recommendations
@@ -16,8 +17,16 @@ export const maxDuration = 60
 
 export async function POST(
   _req: NextRequest,
-  { params }: { params: { clientId: string } }
+  { params }: { params: { clientId: string } },
 ) {
+  const access = await requirePaidClientAccess(params.clientId)
+  if (!access.ok) {
+    return NextResponse.json(
+      { success: false, error: access.error, reason: access.reason },
+      { status: access.status },
+    )
+  }
+
   try {
     const { clientId } = params
 

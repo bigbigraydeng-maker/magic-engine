@@ -146,6 +146,13 @@ export default function DailyPlanPage() {
 
           {selectedCampaign && (
             <>
+              <section className="rounded-2xl border-2 border-me-ochre bg-white p-5">
+                <p className="text-xs font-bold text-me-ochre">图文帖子现在的情况</p>
+                <h2 className="text-lg font-bold text-me-charcoal">图文在这一页单独批</h2>
+                <p className="mt-1 text-sm text-me-charcoal/80">
+                  图文还没接进每周的「批下一周」卡，所以下周的图文不会出现在本周总览里。每条图文先在下面的七日排期里审核。
+                </p>
+              </section>
               <div>
                 <h2 className="text-base font-semibold text-me-charcoal/90">{selectedCampaign.title}</h2>
                 {selectedCampaign.description && (

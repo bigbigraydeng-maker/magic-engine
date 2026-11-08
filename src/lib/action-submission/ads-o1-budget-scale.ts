@@ -22,6 +22,13 @@ export interface SubmitAdsO1BudgetScaleInput {
   readonly beforeCents: number
   readonly afterCents: number
   readonly evidence: Record<string, unknown>
+  /** 谁发起的：O1 机会卡（默认）或成绩单「调预算」按钮（第 3 刀 3b）。只影响理由文案和证据里的来源。 */
+  readonly source?: 'ads_health_o1' | 'ads_health_scorecard'
+}
+
+const RATIONALE: Record<NonNullable<SubmitAdsO1BudgetScaleInput['source']>, string> = {
+  ads_health_o1: 'O1 连续三天出现积极信号；先由负责人核对预算调整，再决定是否执行',
+  ads_health_scorecard: '负责人在成绩单上点了加预算；只有 PM 本人批了才执行',
 }
 
 export function submitAdsO1BudgetScale(deps: KernelDeps, input: SubmitAdsO1BudgetScaleInput): Promise<ActionRunOutcome> {
@@ -32,9 +39,9 @@ export function submitAdsO1BudgetScale(deps: KernelDeps, input: SubmitAdsO1Budge
     goalId: input.goalId,
     triggeredBy: 'human',
     triggeredByRef: input.access.user.id,
-    rationale: 'O1 连续三天出现积极信号；先由负责人核对预算调整，再决定是否执行',
+    rationale: RATIONALE[input.source ?? 'ads_health_o1'],
     evidence: {
-      source: 'ads_health_o1',
+      source: input.source ?? 'ads_health_o1',
       current_daily_budget_cents: input.beforeCents,
       proposed_daily_budget_cents: input.afterCents,
       ...input.evidence,

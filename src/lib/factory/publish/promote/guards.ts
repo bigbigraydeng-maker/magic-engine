@@ -10,6 +10,7 @@ import {
   humanKeysForReviewRef,
   validateContentChecklist,
 } from '@/lib/social/content-review'
+import { CONSENT_REASON_ZH, consentVerdict } from '@/lib/factory/talent-consent'
 import type { PublishTarget } from '../../types'
 import { portFor } from './platform-port'
 import { asRecord, nonEmptyString } from './record'
@@ -62,13 +63,15 @@ export function computeFingerprint(input: {
   description: string
   firstComment: string
   approvedAt: string
+  catalogVersion?: number | null
 }): string {
-  const payload = [
+  const payload: (string | number)[] = [
     input.videoId,
     normalizeForCompare(input.description),
     normalizeForCompare(input.firstComment),
     input.approvedAt,
   ]
+  if (typeof input.catalogVersion === 'number') payload.push(input.catalogVersion)
   return createHash('sha256').update(JSON.stringify(payload)).digest('hex')
 }
 
@@ -147,6 +150,13 @@ function checkChecklists(order: PromoteOrder): PrecheckResult | null {
   return null
 }
 
+/** On-camera consent (shared gate). Fail-closed: anything not clearly allowed is refused. */
+function checkConsent(order: PromoteOrder): PrecheckResult | null {
+  const verdict = consentVerdict({ brief: order.brief, output: order.output, use: 'facebook_organic' })
+  if (verdict.ok) return null
+  return { ok: false, status: 409, error: `出镜授权不满足,不能转公开:${CONSENT_REASON_ZH[verdict.reason]}` }
+}
+
 /** 流量记录:必须恰好一条,否则无法确定转哪一条。 */
 function checkRows(rows: TrafficRow[]): PrecheckResult | null {
   if (rows.length === 0) {
@@ -200,6 +210,9 @@ export function checkOrderPrechecks(input: {
 
   const checklistFailure = checkChecklists(order)
   if (checklistFailure) return checklistFailure
+
+  const consentFailure = checkConsent(order)
+  if (consentFailure) return consentFailure
 
   const rowsFailure = checkRows(rows)
   if (rowsFailure) return rowsFailure

@@ -60,7 +60,13 @@ beforeEach(() => {
   m.recentRows = []
   m.logError = false
   m.logFilters.length = 0
-  m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { id: 'u1' } })
+  m.access.mockResolvedValue({
+    ok: true,
+    tier: 'admin',
+    role: 'admin',
+    allowedClientId: null,
+    user: { id: 'u1', email: 'ray@example.com' },
+  })
   m.sync.mockResolvedValue({ status: 'ok', postsScanned: 4, adsAdded: [{ name: 'Reel A', score: 9 }], guardsHit: [] })
 })
 
@@ -78,6 +84,11 @@ describe('execute-prescription — 10 minute de-dup', () => {
     const res = await post()
     expect(res.status).toBe(200)
     expect(m.sync).toHaveBeenCalledTimes(1)
+    expect(m.sync.mock.calls[0]?.[1]).toMatchObject({
+      skipFatiguePause: true,
+      newAdStatusOverride: 'PAUSED',
+      clicker: { kind: 'opc', email: 'ray@example.com' },
+    })
     const filters = Object.fromEntries(m.logFilters)
     expect(filters['eq:client_id']).toBe(CLIENT)
     expect(filters['eq:status']).toBe('ok')

@@ -15,6 +15,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { BUDGET_HOLD_NOTE } from '@/lib/ads-strategy/war-map/followup'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
+import type { AdsScorecard } from '@/lib/ads-strategy/portfolio/scorecard'
 import { ApprovalContextNotes } from './approval-context-notes'
 
 export type GrowthVerdict = 'on_track' | 'behind' | 'unreachable_within_caps' | 'unknown'
@@ -55,6 +56,8 @@ export interface GrowthStateView {
     opportunitiesSkippedReason?: string | null
     problemsSupersededByOpportunities?: number
     goal?: { title: string; label: string; target: number; dayIndex: number; totalDays: number; primaryMetricKey?: string } | null
+    /** 每日广告成绩单（2026-11-03 起写入；老行没有） */
+    scorecard?: AdsScorecard | { error: string }
   } | null
 }
 

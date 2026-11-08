@@ -126,6 +126,62 @@ export async function loadPublished(db: SupabaseClient, clientId: string): Promi
   return mapPublishedRow(asRecord(res.data), clientId)
 }
 
+export interface PublishedNameVersion {
+  version: number
+  tours: Array<{ id: string; name: string; title: string | null }>
+}
+
+export type PublishedNameHistoryRead = { ok: true; versions: PublishedNameVersion[] } | { ok: false }
+
+/**
+ * Social copy checker reader: the id / name / title of every tour in the latest published versions,
+ * newest first, so a renamed tour's earlier names can be recognised. Published snapshots only —
+ * never the draft. Fails closed: a read error is `ok: false`, never an empty history.
+ */
+export async function loadPublishedNameHistory(
+  db: SupabaseClient,
+  clientId: string,
+  limit: number,
+): Promise<PublishedNameHistoryRead> {
+  const res = await db
+    .from('tour_catalog_published')
+    .select('version, snapshot')
+    .eq('client_id', clientId)
+    .order('version', { ascending: false })
+    .limit(limit)
+  if (res.error) return { ok: false }
+  const versions: PublishedNameVersion[] = []
+  for (const raw of rowsOf(res.data)) {
+    const row = asRecord(raw)
+    const version = numOrNull(row.version)
+    const tours = asRecord(row.snapshot).tours
+    if (version === null || !Array.isArray(tours)) continue
+    versions.push({ version, tours: tours.flatMap(namedTourOf) })
+  }
+  return { ok: true, versions }
+}
+
+export type PublishedCatalogPresence = { ok: true; present: boolean } | { ok: false }
+
+/**
+ * Whether this client has ever published a catalog (any row in the published table). Lets a caller tell
+ * "never published" apart from "published but the latest version cannot be read" — the second must never
+ * be treated as the first. Fails closed: a read error is `ok: false`.
+ */
+export async function hasPublishedCatalog(db: SupabaseClient, clientId: string): Promise<PublishedCatalogPresence> {
+  const res = await db.from('tour_catalog_published').select('version').eq('client_id', clientId).limit(1)
+  if (res.error) return { ok: false }
+  return { ok: true, present: rowsOf(res.data).length > 0 }
+}
+
+function namedTourOf(raw: unknown): Array<{ id: string; name: string; title: string | null }> {
+  const tour = asRecord(raw)
+  const id = asString(tour.id)
+  const name = asString(tour.name)
+  if (!id || !name) return []
+  return [{ id, name, title: asString(tour.title) || null }]
+}
+
 /** Read one specific published version and its content. */
 export async function loadPublishedVersion(
   db: SupabaseClient,

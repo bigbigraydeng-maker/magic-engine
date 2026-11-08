@@ -29,6 +29,7 @@ import {
   syncActorLabel,
   type AutonomyMode,
   type AutonomySyncPlanItem,
+  type LastSyncedReceipt,
 } from '@/lib/ads-strategy/autonomy/sync-policy'
 
 export const ADS_AUTONOMY_SYNC_FN_ID = `${CLOUD_FN_PREFIX}ads-autonomy-sync`
@@ -94,21 +95,24 @@ async function readConfig(sb: SupabaseClient, clientId: string): Promise<ConfigS
  * 返回**普通对象**（不是 Map）—— step 返回值必须可 JSON 序列化。
  * `sync_failed:` 前缀的行不算「已同步」，否则一次失败会把该键永久锁死。
  */
-async function readLastSynced(sb: SupabaseClient, clientId: string): Promise<Record<string, string>> {
+async function readLastSynced(sb: SupabaseClient, clientId: string): Promise<Record<string, LastSyncedReceipt>> {
   const { data, error } = await sb
     .from('ads_autonomy_sync_receipts')
-    .select('action_key, source_updated_at, skipped_reason')
+    .select('action_key, source_updated_at, skipped_reason, to_mode')
     .eq('client_id', clientId)
     .order('synced_at', { ascending: false })
     .limit(200)
   if (error) throw new Error(`read-receipts failed: ${error.message}`)
-  const record: Record<string, string> = {}
+  const record: Record<string, LastSyncedReceipt> = {}
   for (const row of data ?? []) {
     const key = typeof row.action_key === 'string' ? row.action_key : null
     if (key === null || key in record) continue
     const skipped = typeof row.skipped_reason === 'string' ? row.skipped_reason : null
     if (skipped !== null && skipped.startsWith('sync_failed:')) continue
-    record[key] = String(row.source_updated_at)
+    record[key] = {
+      sourceUpdatedAt: String(row.source_updated_at),
+      toMode: typeof row.to_mode === 'string' ? row.to_mode : null,
+    }
   }
   return record
 }

@@ -74,7 +74,18 @@ const SNAP_COLUMNS =
  *    统一到诊断层的一份，改只改一处，两边不会分家。
  */
 const DELIVERING = DELIVERING_STATUSES
-const CLIENT_BUDGET_FACT_FRESH_MS = 24 * 60 * 60 * 1000
+export const CLIENT_BUDGET_FACT_FRESH_MS = 24 * 60 * 60 * 1000
+/**
+ * 快照写入程序每轮只写「新出现 / 变了 / 今天还没记 / 消失了」的行（`selectRowsToWrite`），
+ * 一天里第一轮之后的定时轮常常一行都不写。所以核算客户预算不能只读最新一轮写下的行，
+ * 要跟写入程序用同一个基线：每个对象在这一轮及以前最新的那一行，回看天数也跟写入程序一样。
+ */
+const CLIENT_BUDGET_CARRY_FORWARD_DAYS = 30
+/**
+ * 最新一轮回执完整时，每个还在的对象当天（账户时区）都已经有一行（「今天还没记」那条规则）。
+ * 某个没消失的对象最新一行比这一轮早超过这个时长 = 这个前提被打破，拒绝核算（留 2 小时给夏令时那一天）。
+ */
+const CLIENT_BUDGET_CARRY_FORWARD_MAX_AGE_MS = 26 * 60 * 60 * 1000
 const CLIENT_BUDGET_ROW_LIMIT = 20_000
 const POSTGREST_PAGE_SIZE = 1_000
 
@@ -82,6 +93,14 @@ interface ClientBudgetRollup {
   totalCents: number
   accountTotals: Map<string, number>
   capCents: number
+  accountCapCents: number
+  roundAt: string
+  entityMinor: Map<string, number | null>
+  countedLive: Set<string>
+}
+
+export function budgetEntityKey(accountId: string, level: string, entityId: string): string {
+  return `${accountId}|${level}|${entityId}`
 }
 
 /**
@@ -188,7 +207,8 @@ async function loadClientBudgetRollup(
       .eq('client_id', clientId)
       .in('ad_account_id', accountIds)
       .in('level', ['account', 'campaign', 'adset'])
-      .eq('captured_at', roundAt)
+      .gte('captured_at', new Date(roundTime - CLIENT_BUDGET_CARRY_FORWARD_DAYS * 86_400_000).toISOString())
+      .lte('captured_at', roundAt)
       .order('captured_at', { ascending: false })
       .order('id', { ascending: true })
       .range(offset, offset + POSTGREST_PAGE_SIZE - 1)
@@ -205,9 +225,17 @@ async function loadClientBudgetRollup(
     const key = `${row.ad_account_id}:${row.level}:${row.entity_id}`
     if (!latest.has(key)) latest.set(key, row)
   }
+  for (const row of latest.values()) {
+    if (row.capture_reason === 'disappeared') continue
+    const at = Date.parse(row.captured_at)
+    if (!Number.isFinite(at) || at < roundTime - CLIENT_BUDGET_CARRY_FORWARD_MAX_AGE_MS) {
+      return unavailable(`广告账户 ${row.ad_account_id} 的${row.level} ${row.entity_id} 超过一天没有快照，不能证明总预算完整`)
+    }
+  }
 
   const currencies = new Set<string>()
   const accountTotals = new Map<string, number>()
+  const countedLive = new Set<string>()
   for (const accountId of accountIds) {
     const accountRows = [...latest.values()].filter(r => r.ad_account_id === accountId)
     const accountSnap = accountRows.find(r => r.level === 'account')
@@ -233,6 +261,7 @@ async function loadClientBudgetRollup(
           return unavailable(`投放中的广告系列 ${campaign.entity_id} 预算或币种无法确认`)
         }
         total += amount
+        countedLive.add(budgetEntityKey(accountId, 'campaign', campaign.entity_id))
       } else if (campaign.budget_level !== 'abo') {
         return unavailable(`投放中的广告系列 ${campaign.entity_id} 预算层级无法确认`)
       }
@@ -245,6 +274,7 @@ async function loadClientBudgetRollup(
         return unavailable(`投放中的广告组 ${adset.entity_id} 预算或币种无法确认`)
       }
       total += amount
+      countedLive.add(budgetEntityKey(accountId, 'adset', adset.entity_id))
     }
     if (!Number.isSafeInteger(total)) return unavailable(`广告账户 ${accountId} 预算合计溢出`)
     const cap = perAccountCaps[accountIds.indexOf(accountId)] as number
@@ -265,7 +295,83 @@ async function loadClientBudgetRollup(
     return unavailable('目标预算与本次授权读取的基线不一致')
   }
 
-  return { totalCents, accountTotals, capCents: clientCapCents }
+  const accountCapCents = perAccountCaps[accountIds.indexOf(targetAccountId)] as number
+  const entityMinor = new Map<string, number | null>()
+  for (const row of latest.values()) {
+    if (row.capture_reason === 'disappeared') continue
+    const amount = row.daily_budget_minor
+    const minor = typeof amount === 'number' && Number.isSafeInteger(amount) && amount >= 0 ? amount : null
+    entityMinor.set(budgetEntityKey(row.ad_account_id, row.level, row.entity_id), minor)
+  }
+  return {
+    totalCents, accountTotals, capCents: clientCapCents, accountCapCents, roundAt,
+    entityMinor, countedLive,
+  }
+}
+
+export interface KernelPreBudget {
+  readonly accountLiveCents: number
+  readonly accountCapCents: number
+  readonly clientLiveCents: number
+  readonly clientCapCents: number
+  readonly roundAt: string
+  readonly entityMinor: ReadonlyMap<string, number | null>
+  readonly countedLive: ReadonlySet<string>
+}
+
+/** Same cross-account snapshot the pre-provider envelope already requires. */
+export async function readKernelPreBudget(
+  sb: SupabaseClient,
+  clientId: string,
+  accountId: string,
+  level: 'adset' | 'campaign',
+  entityId: string,
+  beforeCents: number,
+  now: Date,
+): Promise<{ ok: true; budget: KernelPreBudget } | { ok: false; reason: string }> {
+  const { data, error } = await sb.from('ad_strategy_configs')
+    .select('daily_budget_cap_cents')
+    .eq('client_id', clientId)
+    .maybeSingle<{ daily_budget_cap_cents: number | null }>()
+  if (error) return { ok: false, reason: '现在的每日预算合计读不到，没有改。' }
+  const clientCap = (data as { daily_budget_cap_cents?: unknown } | null)?.daily_budget_cap_cents
+  if (typeof clientCap !== 'number' || !Number.isSafeInteger(clientCap) || clientCap <= 0) {
+    return { ok: false, reason: '每日上限读不到，没有改。' }
+  }
+  const rollup = await loadClientBudgetRollup(
+    sb, clientId, accountId, level, entityId, beforeCents, clientCap, now, 'pre_provider',
+  )
+  if ('unavailable' in rollup) return { ok: false, reason: quotaReason(rollup.unavailable) }
+  const accountLive = liveTotal(rollup.accountTotals, accountId)
+  if (accountLive === undefined) return { ok: false, reason: '现在的每日预算合计读不到，没有改。' }
+  return {
+    ok: true,
+    budget: {
+      accountLiveCents: accountLive,
+      accountCapCents: rollup.accountCapCents,
+      clientLiveCents: rollup.totalCents,
+      clientCapCents: rollup.capCents,
+      roundAt: rollup.roundAt,
+      entityMinor: rollup.entityMinor,
+      countedLive: rollup.countedLive,
+    },
+  }
+}
+
+function liveTotal(totals: ReadonlyMap<string, number>, accountId: string): number | undefined {
+  const digits = accountId.replace(/^act_/i, '')
+  for (const id of [accountId, digits, `act_${digits}`]) {
+    if (totals.has(id)) return totals.get(id)
+  }
+  return undefined
+}
+
+export function quotaReason(raw: string): string {
+  if (/过期|时间无效|超过一天/.test(raw)) return '跨账户预算快照已经过期，先刷新再改。'
+  if (/币种/.test(raw)) return '广告账户的币种读不到或对不上，没有改。'
+  if (/未配置|无效|没有有效|不在客户|读不到目标/.test(raw)) return '每日上限读不到，没有改。'
+  if (/已超过/.test(raw)) return '现在的每日预算合计已经超过上限，没有改。'
+  return '现在的每日预算合计读不到，没有改。'
 }
 
 function studyCount(raw: unknown): number {

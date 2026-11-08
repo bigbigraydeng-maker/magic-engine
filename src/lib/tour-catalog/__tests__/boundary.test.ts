@@ -53,6 +53,12 @@ const PUBLISHED_READER_NAMES = new Set([
   'PublishedProductsRead',
   'loadPublishedTourFacts',
   'PublishedTourFactsRead',
+  // Social copy checker: id / name / title from published snapshots only (earlier tour names).
+  'loadPublishedNameHistory',
+  'PublishedNameHistoryRead',
+  // Social copy checker: tells "never published" apart from "published but unreadable".
+  'hasPublishedCatalog',
+  'PublishedCatalogPresence',
 ])
 
 const SOURCE_FILE = /\.(tsx?|mjs|js)$/

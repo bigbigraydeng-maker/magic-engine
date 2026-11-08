@@ -26,14 +26,14 @@ const wordsOf = (p: AdsPlaybook): string[] => WORD_FIELDS.map(f => p[f])
 
 describe('resolveAdsPlaybook — picks words by industry', () => {
   it.each([
-    ['logistics',   '真实询价', '每个询价', '服务地区'],
-    ['travel',      '咨询',     '每个咨询', '客户服务市场'],
-    ['real_estate', '线索',     '每个线索', '房源'],
-    ['retail',      '订单',     '每个订单', '配送市场'],
-  ])('%s', (industry, resultNoun, costPerResultLabel, expectedGeoNoun) => {
+    ['logistics',   '真实询价', '每个询价', '服务地区',     null, null],
+    ['travel',      '咨询',     '每个咨询', '客户服务市场', 150,  '团和出发档期'],
+    ['real_estate', '线索',     '每个线索', '房源',         null, null],
+    ['retail',      '订单',     '每个订单', '配送市场',     null, null],
+  ])('%s', (industry, resultNoun, costPerResultLabel, expectedGeoNoun, creativeCompareMinLinkClicks, creativeOfferNoun) => {
     const p = resolveAdsPlaybook(industry)
     expect(p.key).toBe(industry)
-    expect(p).toEqual({ key: industry, resultNoun, costPerResultLabel, expectedGeoNoun })
+    expect(p).toEqual({ key: industry, resultNoun, costPerResultLabel, expectedGeoNoun, creativeCompareMinLinkClicks, creativeOfferNoun })
   })
 
   it('real_estate words are industry-generic, not one client\'s play (valuation / listing mandate)', () => {

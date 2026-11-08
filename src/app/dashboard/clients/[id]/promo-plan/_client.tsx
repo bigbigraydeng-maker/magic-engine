@@ -14,6 +14,7 @@ import type { PromoBoard } from '@/lib/marketing-plan/promo/board'
 import { approveButtonState, continueButtonVisible } from '@/lib/marketing-plan/promo/labels'
 import { buildPromoSample, describePromoSpec } from '@/lib/marketing-plan/promo/overview'
 import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { creativeRefsOfPhase } from '@/lib/marketing-plan/promo/phase-creatives'
 import { pickPlanForPrescription } from '@/lib/marketing-plan/promo/plan-pick'
 import { ApprovalRecord } from './_components/ApprovalRecord'
 import { PlanOverview } from './_components/PlanOverview'
@@ -226,7 +227,19 @@ export function PromoPlanClient() {
             {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} phases={viewPhases} adsRunning={adsRunningFrom(liveAdsVisible ? liveAds : null)} />}
             <ApprovalRecord plan={selected} />
             {board.reconcile && selected.status === 'approved' && <ReconcileTable rec={board.reconcile} />}
-            {board.next_phase && <GateList view={board.next_phase} onVerify={onVerify} busyKey={busy} />}
+            {board.next_phase && (
+              <GateList
+                view={board.next_phase}
+                onVerify={onVerify}
+                busyKey={busy}
+                creatives={{
+                  clientId,
+                  refs: creativeRefsOfPhase(selected ? readPromoSpec(selected.plan_data) : null, board.next_phase.phase.id),
+                  canAct: !approverOnly,
+                  onChanged: () => { void refresh(selectedId) },
+                }}
+              />
+            )}
             {board.has_promo && !board.spec_valid && <SpecProblems board={board} />}
 
             {approverOnly && (

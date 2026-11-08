@@ -13,7 +13,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { callClaudeWithTools } from '@/lib/anthropic/client'
-import { buildProjectLubanTools } from './project-tools'
+import { buildProjectLubanToolsFull } from './project-tools'
+import { loadAdsAgentInvestigationEnabled } from '@/lib/ads-strategy/agent-chat/config'
 import type {
   ExecutionItem, ExecutionLog,
 } from '@/types/diagnostic'
@@ -184,8 +185,9 @@ export async function chatWithProjectLuban(
 
   const history = (historyRows ?? []) as Array<{ role: 'user' | 'assistant'; content: string }>
 
-  const systemPrompt = buildProjectLubanSystemPrompt(ctx)
-  const { tools, handlers } = buildProjectLubanTools({ supabase, clientId })
+  const adsInvestigation = await loadAdsAgentInvestigationEnabled(supabase, clientId)
+  const systemPrompt = buildProjectLubanSystemPrompt(ctx, { adsInvestigationTools: adsInvestigation })
+  const { tools, handlers } = await buildProjectLubanToolsFull({ supabase, clientId })
   const result = await callClaudeWithTools({
     systemPrompt,
     messages: [...history, { role: 'user', content: trimmed }],

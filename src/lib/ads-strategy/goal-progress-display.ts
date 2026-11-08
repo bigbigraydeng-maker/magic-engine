@@ -2,7 +2,7 @@
  * 广告健康页「今天看这里」目标进度条 —— 纯展示逻辑（复用 ads_growth_states.goal_pace，不重算）。
  */
 
-import { ADS_ATTRIBUTABLE_METRIC_KEYS } from '@/lib/ads-strategy/portfolio/goal-context'
+import { ADS_ATTRIBUTABLE_METRIC_KEYS } from '@/lib/ads-strategy/portfolio/attributable-metric-keys'
 
 /** 进度条尚未接入的指标（已报价 / 定金 / 成交等），只显示「还没设目标」。 */
 export const GOAL_PROGRESS_PENDING_METRIC_KEYS: ReadonlySet<string> = new Set([
@@ -17,6 +17,11 @@ export function isGoalProgressPending(metricKey: string | null | undefined): boo
   if (GOAL_PROGRESS_PENDING_METRIC_KEYS.has(metricKey)) return true
   // 非广告可量指标、又不在 pending 表里的，也不在「今天看这里」画进度条（避免误读 SEO 等目标）。
   return !ADS_ATTRIBUTABLE_METRIC_KEYS.has(metricKey)
+}
+
+/** 目标进度里的件数一律显示整数（「到今天应完成」是按天比例算出来的小数）。 */
+export function roundGoalCount(n: number): number {
+  return Math.round(n)
 }
 
 export function remainingGoalDays(dayIndex: number, totalDays: number): number {

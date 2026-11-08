@@ -43,9 +43,15 @@ import type { AdsRuleFindingItemKind } from './ads-rule-finding-items'
 import type { AdsCircuitItemKind } from './ads-circuit-items'
 import type { AdsServicePauseItemKind } from './ads-service-pause-items'
 import type { AdsAccountStatusItemKind } from './ads-account-status-items'
+import type {
+  AdsAgentSyncStaleItemKind,
+  AdsDailySpendOverCapNoticeItemKind,
+} from './ads-agent-stale-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
+import type { BaozhengItemKind } from './baozheng-items'
+import type { FactoryWinnerItemKind } from './factory-winner-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
 import type { ToolLeadItemKind } from './tool-lead-items'
 import type { PmKind } from './five-kinds'
@@ -110,6 +116,16 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 整包批准：链接是要登录的后台页，探活多半判成坏链接。没人看见 = 这一周不会批。
   'week_pack_needs_approval',
   'week_pack_items_held',
+  // 社媒每周出稿：链接是要登录的后台页，探活多半判成坏链接。没人看见 = 下周的卡是空的。
+  'social_weekly_loop_needs_human',
+  // Reel 按日公开：链接是要登录的后台页。没人看见 = 批过的片到日没发，也没人知道。
+  'reel_scheduled_needs_human',
+  // 社媒账号自检：链接是要登录的后台页。没人看见 = 账号越来越像，没人知道。
+  'social_account_audit',
+  // 社媒每周回看建议：链接是要登录的后台页。没人看见 = 发出去的片效果好坏没人知道，配比不会调。
+  'social_readback_suggestion',
+  // Reel 每日清单：链接是要登录的后台页。没人看见 = 排了日子的片没人批，到日不发。
+  'reel_daily_list_pending',
   // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
   // 这条里还有「检查自己没跑成」，绝不能因为链接问题静默消失。
   'ads_tracking_preflight_fix',
@@ -242,6 +258,16 @@ export type ManualItemKind =
   | 'week_pack_needs_approval'
   /** 整包里有条目被单独拦住，没有整包撤回 */
   | 'week_pack_items_held'
+  /** 社媒每周出稿：没东西可排 / 全被刷掉 / 读不到团目录 / 马良没审（读写库模式的回执） */
+  | 'social_weekly_loop_needs_human'
+  /** Reel 按日公开：批后内容 / 日子变了、错过、发失败、结果不明（读流量记录里的授权状态） */
+  | 'reel_scheduled_needs_human'
+  /** 社媒账号自检：哪些项超线或量不出来（读每周自检的回执） */
+  | 'social_account_audit'
+  /** 社媒每周回看建议：公开满 72 小时的 Reel 成绩，多做 / 少做建议（读每周回看的回执） */
+  | 'social_readback_suggestion'
+  /** Reel 每日清单：今天到后天排了日子、还没放行的（开了社媒 Agent 的客户） */
+  | 'reel_daily_list_pending'
   | 'auto_run_blocked'
   | 'auto_run_stuck'
   /** 被一句「不打算去」误判成永久拒联 —— 只有人能看一眼原话再决定 */
@@ -301,6 +327,8 @@ export type ManualItemKind =
   | AdsServicePauseItemKind
   /** Meta 广告账户状态不是正常超过 24 小时 / 状态读不到 / 账户已关闭（每周提醒一次） */
   | AdsAccountStatusItemKind
+  | AdsAgentSyncStaleItemKind
+  | AdsDailySpendOverCapNoticeItemKind
   /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */
   | GoalRolloverItemKind
   /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */
@@ -315,6 +343,8 @@ export type ManualItemKind =
   | 'conversion_capi_token_dead'
   /** D3 诊断建议暂停广告组，Kernel 待批准——PM 不点头不暂停 */
   | 'ads_auto_pause_pending'
+  /** D3 暂停建议被内核或安全闸拦下，没进「等你点头」，广告照常花钱（2026-11-04） */
+  | 'ads_auto_pause_blocked'
   /** AI 全自动审核发现异常，已经自动暂停发送（PM 拍板 2026-09-15："要有异常刹车"） */
   | 'ai_auto_review_circuit_breaker'
   /** AI 客服回复草稿写好了，等人批准发送（issue #1589） */
@@ -355,6 +385,9 @@ export type ManualItemKind =
   | MaliangItemKind
   /** 李白 · 文案溯源：「未证实」句待改 / 检不了 / 没检；提示词库月检疑似过期（只报告不改） */
   | LibaiItemKind
+  | BaozhengItemKind
+  /** 视频工厂 · 广告赢家（工厂照着学的样板片）复核过、等人点「认 / 不认」 */
+  | FactoryWinnerItemKind
   /** 司马迁 · 口碑周巡：每周四起草的 Google 评价回复草稿（一律没发）/ 本周没巡成 */
   | SimaqianItemKind
   /** Facebook 私信 / 表单留资同步连续失败（授权失效时要有主页管理员重新「连接 Meta」） */

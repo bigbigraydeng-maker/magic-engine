@@ -6,6 +6,7 @@
 export interface WeekPackEnv {
   WEEKLY_PACK_APPROVAL_ENABLED?: string
   WEEKLY_PACK_REEL_GO_PUBLIC?: string
+  WEEKLY_PACK_REEL_SCHEDULED_PUBLIC?: string
 }
 
 export function weeklyPackApprovalEnabled(env: WeekPackEnv): boolean {
@@ -17,9 +18,19 @@ export function reelGoPublicOnApproveEnabled(env: WeekPackEnv): boolean {
   return env.WEEKLY_PACK_REEL_GO_PUBLIC === 'true'
 }
 
+export type ReelCardMode = 'off' | 'now' | 'scheduled'
+
+/** How the card treats reels on confirm. Scheduled wins when both switches are on (never publish a whole week at once). */
+export function reelCardMode(env: WeekPackEnv): ReelCardMode {
+  if (env.WEEKLY_PACK_REEL_SCHEDULED_PUBLIC === 'true') return 'scheduled'
+  if (reelGoPublicOnApproveEnabled(env)) return 'now'
+  return 'off'
+}
+
 export function readWeekPackEnv(env: NodeJS.ProcessEnv = process.env): WeekPackEnv {
   return {
     WEEKLY_PACK_APPROVAL_ENABLED: env.WEEKLY_PACK_APPROVAL_ENABLED,
     WEEKLY_PACK_REEL_GO_PUBLIC: env.WEEKLY_PACK_REEL_GO_PUBLIC,
+    WEEKLY_PACK_REEL_SCHEDULED_PUBLIC: env.WEEKLY_PACK_REEL_SCHEDULED_PUBLIC,
   }
 }

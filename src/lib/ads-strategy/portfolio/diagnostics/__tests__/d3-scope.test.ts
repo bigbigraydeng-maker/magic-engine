@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import type { GraphAdsetSettings } from '@/lib/meta/entity-settings'
 import { normalizeAdset, normalizeCampaign, settingsHash, type EntitySnapshotRow } from '../../snapshot'
 import type { RoleVerdict } from '../../roles'
-import { buildAccountContext } from '../context'
+import { buildAccountContext, shiftDate } from '../context'
 import { diagnoseSpendNoResult } from '../d3-spend-no-result'
 import type { AccountInput, DailyRow, DiagnosisInput, SettingChange } from '../types'
 
@@ -25,9 +25,9 @@ function adset(id: string, goal: string): GraphAdsetSettings {
   }
 }
 
-function dayRow(adsetId: string, spend: number, leads = 0): DailyRow {
+function dayRow(adsetId: string, spend: number, leads = 0, date = DATE): DailyRow {
   return {
-    level: 'adset', entity_id: adsetId, parent_id: 'camp_1', insight_date: DATE,
+    level: 'adset', entity_id: adsetId, parent_id: 'camp_1', insight_date: date,
     spend, impressions: 1000, reach: 800, clicks: 40, leads, messaging_conversations: 0,
     video_thruplays: null,
     actions: leads > 0 ? [{ action_type: 'lead', value: String(leads) }] : [],
@@ -109,7 +109,10 @@ describe('D3 候选范围', () => {
     const account: AccountInput = {
       adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
       snapshots: [campaign, snap(named('as_a', '组A')), snap(named('as_b', '组B'))],
-      daily: [dayRow('as_a', 48.55, 2), dayRow('as_b', 16.37, 0)],
+      daily: [
+        dayRow('as_a', 16.18, 1, shiftDate(DATE, -2)), dayRow('as_a', 16.18, 1, shiftDate(DATE, -1)), dayRow('as_a', 16.19, 0),
+        dayRow('as_b', 16.37, 0),
+      ],
       hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
     }
     const ctx = buildAccountContext(account, DATE)
@@ -129,10 +132,72 @@ describe('D3 候选范围', () => {
     expect(hits[0]?.evidence).toMatchObject({ spend: 48.55, results: 2, cost_per_result: 24.28 })
   })
 
+  it('标题写实际有花费的天数，不写死「近 7 天」', () => {
+    const [d] = run('LEAD_GENERATION', 100)
+    expect(d.title).toContain('投放 1 天花了')
+    expect(d.title).not.toContain('近 7 天')
+  })
+
   it('系列里只有一个有花费的广告组：标题写明组名，不另写合计', () => {
     const [d] = run('LEAD_GENERATION', 100)
     expect(d.title).toContain('广告组「as_1」')
     expect(d.title).not.toContain('系列合计')
+  })
+})
+
+describe('【考卷9】D3 不再误报：已不在投放的组 / 样本太小', () => {
+  function runWith(status: string, rows: DailyRow[], target = 11) {
+    const g: GraphAdsetSettings = { ...adset('as_1', 'LEAD_GENERATION'), status: status === 'ACTIVE' ? 'ACTIVE' : 'PAUSED', effective_status: status }
+    const account: AccountInput = {
+      adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
+      snapshots: [snap(g)], daily: rows,
+      hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
+    }
+    const ctx = buildAccountContext(account, DATE)
+    const prev = ctx.roles.get('as_1')
+    ctx.roles.set('as_1', { ...prev, role: 'acquisition', confidence: 'high', reasons: [], retargetingAudienceIds: [] } as RoleVerdict)
+    const input: DiagnosisInput = {
+      clientId: 'c', date: DATE, evaluatedAt: `${DATE}T20:00:00Z`,
+      outcome: { leading: null, primary: 'lead', targetCostPerPrimary: target, minPrimaryPerUnit: 5 },
+      outcomeConfigured: true, messagingReferralAvailable: false, digestRecipients: [], accounts: [account],
+    }
+    return diagnoseSpendNoResult(ctx, input)
+  }
+  const oneLeadTwoDays = [dayRow('as_1', 12, 1, shiftDate(DATE, -1)), dayRow('as_1', 11.98, 0)]
+
+  it('已暂停的广告组：花得再多也不报（钱已经不在流了）', () => {
+    expect(runWith('PAUSED', [dayRow('as_1', 152, 0)])).toEqual([])
+  })
+
+  it('系列被暂停（CAMPAIGN_PAUSED）的广告组同样不报', () => {
+    expect(runWith('CAMPAIGN_PAUSED', [dayRow('as_1', 152, 0)])).toEqual([])
+  })
+
+  it('同样的数据，在投（ACTIVE）就报——证明上面两条是靠「不在投」才不报的', () => {
+    expect(runWith('ACTIVE', [dayRow('as_1', 152, 0)])[0]).toMatchObject({ status: 'hit' })
+  })
+
+  it('真实案例：花 23.98、1 个留资、只投了 2 天（目标 11）→ 样本太小，不报', () => {
+    expect(runWith('ACTIVE', oneLeadTwoDays)).toEqual([])
+  })
+
+  it('同样 23.98 / 1 个留资，但已经投了 3 天以上 → 不再算样本小，照报，标题写 3 天', () => {
+    const rows = [dayRow('as_1', 8, 1, shiftDate(DATE, -2)), dayRow('as_1', 8, 0, shiftDate(DATE, -1)), dayRow('as_1', 7.98, 0)]
+    const [d] = runWith('ACTIVE', rows)
+    expect(d).toMatchObject({ status: 'hit' })
+    expect(d.title).toContain('投放 3 天花了 NZD 23.98')
+  })
+
+  it('零结果的白花钱不受样本太小限制：只投 1 天、花 $30、0 个留资 → 照报', () => {
+    const [d] = runWith('ACTIVE', [dayRow('as_1', 30, 0)])
+    expect(d).toMatchObject({ status: 'hit' })
+    expect(d.title).toContain('花钱没结果')
+    expect(d.title).toContain('投放 1 天')
+  })
+
+  it('结果够 3 个、成本仍超 2× 目标 → 照报（样本不算小）', () => {
+    const [d] = runWith('ACTIVE', [dayRow('as_1', 90, 3)])
+    expect(d).toMatchObject({ status: 'hit' })
   })
 })
 
@@ -156,7 +221,7 @@ describe('【考卷3】止损提议不被最近的设置改动压住', () => {
  * 10-25 → 10-30 连着 6 天被判「花钱没结果」）。这种组按客户主结果数永远是 0，只能出「判不了」，不能出命中。
  * 结果种类跟广告组目的地走，复用 rules/core-metric.ts（D2 / D10 已经这么判）。
  */
-describe('结果种类对不上：不出命中，只出判不了', () => {
+describe('【考卷7】结果种类对不上：不出命中，只出判不了', () => {
   function runUnit(opts: { goal: string; destination?: string; primary: 'lead' | 'messaging_started' | 'qualified_enquiry'; spend: number; messages?: number; nullActions?: boolean }) {
     const g: GraphAdsetSettings = { ...adset('as_1', opts.goal), ...(opts.destination ? { destination_type: opts.destination } : {}) }
     const row: DailyRow = {

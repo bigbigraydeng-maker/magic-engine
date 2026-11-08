@@ -14,7 +14,7 @@
  *   200 { success, actionId, campaignId, before, after }
  *   400 missing required fields
  *   403 campaign_id does not belong to this client's registered ad account (AD-SEC-1)
- *   403 ads.reactivate_campaign by anyone other than the global admin (PM) — code activation_requires_pm
+ *   403 ads.reactivate_campaign by anyone not on ADS_SPEND_APPROVER_EMAILS (PM only) — code activation_requires_pm
  *   422 action not supported, campaign has no daily_budget (for adjust_bid), or reactivate of an ME Messenger draft campaign
  *   424 META_SYSTEM_USER_TOKEN not configured
  *   502 Meta Graph API call failed
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     return NextResponse.json({ error: 'params.execution_item_id must be a UUID string' }, { status: 400 })
   }
 
-  // ── 重开 = 重新花钱：只有 PM（全局管理员，ADMIN_EMAILS 精确名单）能做 ─────────
+  // ── 重开 = 重新花钱：只有 PM 本人（ADS_SPEND_APPROVER_EMAILS 精确名单；没配 = 谁都不能）能做 ─────────
   // 付费客户账号照样能暂停；重开必须是 PM。任何校验失败都拒绝（fail-closed）。
   let activationAuthority: SpendActivationAuthority | null = null
   if (action_type === 'ads.reactivate_campaign') {
