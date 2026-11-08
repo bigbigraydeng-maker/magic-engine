@@ -31,6 +31,7 @@ import { adsRunningFrom, describeLiveAds } from '@/lib/marketing-plan/promo/live
 import type { LiveAdsFact, LiveAdsMessage } from '@/lib/marketing-plan/promo/live-ads-message'
 import { BlankDraftPlanButton } from './_components/BlankDraftPlanButton'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
+import { dailyTotalCapSentence } from '@/lib/marketing-plan/promo/daily-total-cap'
 import { PromoSpecForm } from './_components/PromoSpecForm'
 
 /** 计划内容变了（含从「高级」保存）就换 key，让表格和文本编辑器都重新读最新内容。 */
@@ -308,6 +309,7 @@ function Headline({ board, plan, liveAds, liveAdsVisible, clientId }: { board: P
     <div className={`rounded-xl border px-5 py-4 ${blind ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200'}`}>
       <p className="text-xs text-gray-500 mb-1">{plan.title}</p>
       <p className="text-lg font-bold text-gray-900">{text}</p>
+      <p className="text-sm text-gray-800 mt-2">{dailyTotalCapSentence(plan.plan_data)}</p>
       {draft && liveAdsVisible && <LiveAdsNotice fact={liveAds} message={live} clientId={clientId} />}
       {blind && <p className="text-xs text-gray-600 mt-1">“看不清”不是“正常”：先把上面写的缺项补上，再看对账。</p>}
       {board.today && !board.timezone_known && (

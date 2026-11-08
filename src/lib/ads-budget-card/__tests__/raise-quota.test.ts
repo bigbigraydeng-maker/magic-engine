@@ -3,7 +3,8 @@ import { createFakeSupabase, type Row } from '@/lib/kernel/__tests__/fake-supaba
 import { createScaleUnitBudgetCapability } from '@/lib/capabilities/ads/scale-unit-budget'
 import type { CapabilityStepContext } from '@/lib/kernel/types'
 import { getAdSetStatus, setAdSetDailyBudget } from '@/lib/meta/adsets'
-import { planHashOf, type PrescriptionLock } from '../prescription-lock'
+import { approvalPlanHash } from '@/lib/approval-source/read'
+import { type PrescriptionLock } from '../prescription-lock'
 import { raiseQuotaBlock, type RaiseQuotaFacts } from '../raise-quota'
 import { cardFields } from '../write-gate'
 
@@ -29,13 +30,13 @@ const ACCOUNT = 'act_1'
 const NOW = new Date()
 const FRESH = new Date(NOW.getTime() - 60_000).toISOString()
 const STALE = new Date(NOW.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString()
-const SEED = { schema_version: 1 }
+const PLAN_HASH = 'hash-plan'
 const lock: PrescriptionLock = {
   prescriptionId: 'p1110000-0000-4000-8000-000000000001',
   version: 2,
   goalId: GOAL,
   planId: 'plan-1',
-  planHash: planHashOf('plan-1', SEED),
+  planHash: approvalPlanHash('plan-1', PLAN_HASH),
   approvedOn: '2026-11-02',
 }
 
@@ -92,13 +93,45 @@ function baseRows(): Row[] {
   ]
 }
 
+function planRow(cents: number | null): Row {
+  const promo: Row = {
+    schema: 'promo_v1',
+    goal_id: GOAL,
+    phases: [{
+      id: 'p1', name: '阶段', start_date: '2026-11-01', end_date: '2026-11-30',
+      steps: [{
+        id: 's', kind: 'ads_campaign',
+        settings: {
+          ad_account_id: ACCOUNT, daily_budget_cents: 9_999_999, audience_ref: 'aud',
+          creative_refs: [], placements: [], paused_ranges: [],
+        },
+      }],
+    }],
+    checks: [],
+  }
+  if (cents !== null) promo.daily_total_cap_cents = cents
+  return {
+    id: 'plan-1',
+    client_id: CLIENT,
+    status: 'approved',
+    plan_data: { promo },
+    generation_meta: {
+      from_prescription: { prescription_id: lock.prescriptionId, version: 2 },
+      blank_draft: { goal_id: GOAL },
+      approval_receipt: { content_hash: PLAN_HASH },
+    },
+  }
+}
+
 function db(over: {
   snaps?: Row[]
   captures?: Row[]
   accounts?: Row[]
   runs?: Row[]
   clientCap?: number | null
+  planCap?: number | null
 } = {}) {
+  const planCap = over.planCap === undefined ? (over.clientCap === undefined ? 1400 : over.clientCap) : over.planCap
   return createFakeSupabase({
     prescriptions: [{
       id: lock.prescriptionId,
@@ -107,9 +140,10 @@ function db(over: {
       version: 2,
       goal_id: GOAL,
       approved_at: '2026-11-02T00:00:00.000Z',
-      content: { plan_seed: SEED },
-      generation_meta: { plan_draft: { status: 'created', plan_id: 'plan-1' } },
+      generation_meta: {},
     }],
+    goals: [{ id: GOAL, client_id: CLIENT, status: 'active' }],
+    marketing_plans: [planRow(planCap)],
     client_automation_policies: [{
       id: 'policy-card',
       client_id: CLIENT,
@@ -119,7 +153,7 @@ function db(over: {
       effective_from: '2020-01-01T00:00:00.000Z',
       effective_to: null,
     }],
-    ad_strategy_configs: [{ client_id: CLIENT, daily_budget_cap_cents: over.clientCap === undefined ? 1400 : over.clientCap }],
+    ad_strategy_configs: [{ client_id: CLIENT, daily_budget_cap_cents: 1 }],
     client_meta_ad_accounts: over.accounts ?? [
       { client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 1400 },
     ],
@@ -227,6 +261,12 @@ describe('raise quota before the provider write', () => {
       ],
     }))
     await expect(mixed.steps.apply(raiseStep())).rejects.toThrow(/币种/)
+    expect(setAdSetDailyBudget).not.toHaveBeenCalled()
+  })
+
+  it('stops a raise when the approved plan has no daily total, even if the old client column is set', async () => {
+    const capability = createScaleUnitBudgetCapability(db({ planCap: null }))
+    await expect(capability.steps.apply(raiseStep())).rejects.toThrow(/每天广告总上限/)
     expect(setAdSetDailyBudget).not.toHaveBeenCalled()
   })
 
