@@ -1,12 +1,14 @@
 ---
 id: 2026-11-09-ads-execution-review-case
 title: 预算卡和暂停卡真正改完后，按同一个广告组、同一段观察期写下变好、变差或判不了
-status: decided
+status: done
 owner: agent
 decided_on: 2026-11-09
 source: doc:docs/ledger/2026-11-08-ads-executed-window-review.md
 verify_by: 2026-11-18
 verify_how: 等一张已执行的预算卡或暂停卡过了自己的观察天数，打开那条执行记录，能看到做了什么、为什么、前后结果、以及变好了、变差了或判不了和原因。保存失败的那一轮会在自动任务的报错里出现，下一轮会再试，不能只留在日志里。
+done_on: 2026-11-09
+done_ref: commit:b09e891376a500d0c9e7df4c935573d753042b99
 ---
 
 只比较这一个广告组自己的日数据，不用整个账户的数代替。
