@@ -3,25 +3,21 @@
  * which fatigued Ads to pause in a target Pool Builder Ad Set.
  *
  * Level-1 (pilot) design principles:
- *   - New Ads default to PAUSED (Slack notifies FDE for approval)
- *   - Guards prevent runaway auto-changes: min active Ads, min Ad age, max new per run
+ *   - Does not write Meta. One run asks for one paused-draft confirmation card.
+ *   - After a person confirms, the existing card path creates paused ads only.
+ *   - Guards prevent runaway asks: max new posts per run. Fatigue is not auto-paused.
  *   - Blacklist keyword filter for content the client doesn't want promoted
  *   - Every decision is written to winner_reel_sync_log for audit + rollback
  */
 
 import { createClient } from '@supabase/supabase-js'
 
-import {
-  createAdFromPost,
-  fetchCTRForAds,
-  listAdsInAdSet,
-  pauseAd,
-} from '../meta/ads-manager'
-import { getAdSetStatus } from '../meta/adsets'
+import { listAdsInAdSet } from '../meta/ads-manager'
+import { getAdSetStatus, type AdSetSummary } from '../meta/adsets'
 import { getRegisteredAccountIds } from '../meta/campaign-ownership'
 import { fetchPagePosts, getPageAccessToken, rankVideoWinners } from '../meta/page-posts'
 import { getMetaTokenForClient } from '../meta/token-manager'
-import { linkAdToCreative } from '../ads/creative-link'
+import { buildWinnerPausedDraft, majorBudget, requestWinnerPausedCard } from './paused-card'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -59,6 +55,8 @@ export interface SyncResult {
     creativeRef: string | null
   }>
   adsPaused: Array<{ adId: string; name: string; reason: string; ctr: number | null }>
+  /** Set when this run asked for a paused-draft card. No ad exists until a person confirms. */
+  cardRunId: string | null
   guardsHit: string[]
   status: 'ok' | 'skipped' | 'error'
   errorMessage?: string
@@ -119,7 +117,7 @@ async function assertConfigOwnedByClient(
   cfg: SyncConfig,
   clientId: string,
   accessToken: string,
-): Promise<{ ok: true } | { ok: false; reason: string }> {
+): Promise<{ ok: true; adSet: AdSetSummary; adAccountId: string } | { ok: false; reason: string }> {
   // 账户按多账户登记表核对（2026-09-14 ADS-IMPACT-P0-1）：CTS 有个人号 + 官方账户两个，
   // 只认 clients.meta_ad_account_id 会把官方账户上的配置误拦。查询出错 fail closed。
   const { ids: registeredAccountIds, error: registryError } = await getRegisteredAccountIds(clientId)
@@ -152,7 +150,8 @@ async function assertConfigOwnedByClient(
   if (!adSet.account_id || normalizeAccountId(adSet.account_id) !== configAccount) {
     return { ok: false, reason: 'winner_reel_sync_config 里的 target_adset_id 不在配置的广告账户里，已拒绝执行（防止配错/串到别家客户的广告组）' }
   }
-  return { ok: true }
+  const matched = registeredAccountIds.find((id) => normalizeAccountId(id) === configAccount)
+  return { ok: true, adSet, adAccountId: matched ?? cfg.adAccountId }
 }
 
 async function writeLog(result: SyncResult): Promise<void> {
@@ -187,18 +186,15 @@ async function notifySlack(webhook: string | null, text: string): Promise<void> 
 
 export interface SyncOptions {
   /**
-   * Skip Step 4 (fatigue-pause pass). Used by the ads-health "补新素材" button
-   * (P21.K.6): a button labelled "add creatives" must never also pause ads —
-   * that would be an action beyond what the user consented to. The daily cron
-   * omits this and keeps the full pipeline.
+   * The "补新素材" button must not pause other ads. The daily job also does
+   * not pause: pausing is a Meta write, and this engine no longer writes Meta.
+   * The flag is kept so the button's promise stays visible in the log.
    */
   skipFatiguePause?: boolean
   /**
-   * Force the status new ads are created with, overriding the client config.
-   * The prescription button PROMISES "暂停、不花钱" in its confirm dialog, so it
-   * must hold even after a client's config flips new_ad_default_status to
-   * ACTIVE (Level-2 rollout) — a button may never spend money it said it
-   * wouldn't (魏征 P1-2). The cron keeps following config.
+   * Kept so callers can still say "paused only". Ignored as a Meta status:
+   * this engine never creates an ad, and the card's publisher always uses PAUSED.
+   * A config value of ACTIVE cannot turn that into a live ad.
    */
   newAdStatusOverride?: 'PAUSED'
 }
@@ -210,6 +206,7 @@ export async function syncWinnerReels(clientId: string, opts: SyncOptions = {}):
     winnersFound: 0,
     adsAdded: [],
     adsPaused: [],
+    cardRunId: null,
     guardsHit: [],
     status: 'ok',
   }
@@ -266,100 +263,54 @@ export async function syncWinnerReels(clientId: string, opts: SyncOptions = {}):
     )
     const missingWinners = winners.filter((w) => !currentPostIds.has(w.postId))
 
-    // ── Step 3 · Add missing winners (capped)
+    // ── Step 3 · One paused-draft card. No Meta write, whatever the config says.
     const toAdd = missingWinners.slice(0, cfg.maxNewAdsPerRun)
     if (missingWinners.length > cfg.maxNewAdsPerRun) result.guardsHit.push('max_new_ads_per_run')
-
-    for (const w of toAdd) {
-      try {
-        const preview = w.message.slice(0, 30).replace(/\s+/g, ' ')
-        const name = `Auto: ${preview} [${w.postId.slice(-6)}]`.slice(0, 90)
-        const { adId } = await createAdFromPost({
-          adAccountId: cfg.adAccountId,
-          adsetId: cfg.targetAdsetId,
-          pageId: cfg.fbPageId,
-          postId: w.postId,
-          name,
-          status: opts.newAdStatusOverride ?? cfg.newAdDefaultStatus,
-          accessToken: userToken,
-        })
-        // 记「这条广告投的是哪条片」。必须紧跟建广告 —— 这是唯一知道对应关系的时刻。
-        // 永不抛异常,所以放在同一个 try 里也不会把已建出的广告算成失败。
-        const link = await linkAdToCreative({
-          clientId: cfg.clientId,
-          adId,
-          postId: w.postId,
-          pageId: cfg.fbPageId,
-          createdBy: 'winner_reel_sync',
-        })
-        result.adsAdded.push({ adId, name, postId: w.postId, score: w.score, creativeRef: link.creativeRef })
-      } catch (e) {
-        // one failure should not block the rest
-        result.guardsHit.push(`create_failed:${w.postId}`)
-      }
-    }
-
-    // ── Step 4 · Fatigue pause pass (with guards)
-    const active = currentAds.filter((a) => a.status === 'ACTIVE')
-    if (opts.skipFatiguePause) {
-      result.guardsHit.push('fatigue_pause_skipped')
-    } else if (active.length < cfg.minActiveAds) {
-      result.guardsHit.push('min_active_ads')
-    } else {
-      const cutoff = Date.now() - cfg.adMinAgeDays * 86_400_000
-      const eligibleForPause = active.filter(
-        (a) => new Date(a.createdTime).getTime() < cutoff,
-      )
-
-      if (eligibleForPause.length === 0) {
-        result.guardsHit.push('ad_min_age_days')
+    const configuredStatus = opts.newAdStatusOverride ?? cfg.newAdDefaultStatus
+    result.guardsHit.push(`new_ad_status_ignored:${configuredStatus}`)
+    if (toAdd.length > 0) {
+      const built = buildWinnerPausedDraft({
+        clientId: cfg.clientId,
+        pageId: cfg.fbPageId,
+        adSetId: cfg.targetAdsetId,
+        adSetName: ownership.adSet.name,
+        dailyBudgetMajor: majorBudget(ownership.adSet.daily_budget),
+        winners: toAdd,
+      })
+      if (!built.draft) {
+        result.guardsHit.push(built.blocked ?? 'winner_skipped_no_caption')
       } else {
-        // Pull recent CTR to spot fatigue; median-based comparison
-        const ctrMap = await fetchCTRForAds(eligibleForPause.map((a) => a.adId), userToken, 7)
-        const validCTRs = Object.values(ctrMap).filter((v): v is number => v !== null)
-
-        if (validCTRs.length >= 3) {
-          const median = medianOf(validCTRs)
-          const threshold = median * 0.5
-
-          for (const ad of eligibleForPause) {
-            const ctr = ctrMap[ad.adId]
-            // Guard: never pause below min_active_ads
-            const wouldRemain = active.length - result.adsPaused.length - 1
-            if (wouldRemain < cfg.minActiveAds) {
-              result.guardsHit.push('min_active_ads_pause_stop')
-              break
-            }
-            if (ctr !== null && ctr < threshold) {
-              try {
-                await pauseAd(ad.adId, userToken)
-                result.adsPaused.push({
-                  adId: ad.adId,
-                  name: ad.name,
-                  reason: `CTR ${ctr.toFixed(2)} < median ${median.toFixed(2)} × 0.5`,
-                  ctr,
-                })
-              } catch {
-                result.guardsHit.push(`pause_failed:${ad.adId}`)
-              }
-            }
-          }
-        } else {
-          result.guardsHit.push('insufficient_ctr_signal')
+        if (built.skipped > 0) result.guardsHit.push('winner_skipped_no_caption')
+        try {
+          const card = await requestWinnerPausedCard({
+            supabase: supabaseAdmin,
+            clientId: cfg.clientId,
+            adAccountId: ownership.adAccountId,
+            draft: built.draft,
+          })
+          result.cardRunId = card.runId
+          result.guardsHit.push('paused_draft_card')
+        } catch {
+          console.error('[winner-reel-sync] paused draft card was not issued')
+          result.status = 'error'
+          result.errorMessage = '确认卡没有出成，没有去建广告'
+          result.guardsHit.push('card_failed')
+          await writeLog(result)
+          return result
         }
       }
     }
 
+    // Fatigue pause is a Meta write. It stays off until it has its own card.
+    result.guardsHit.push(opts.skipFatiguePause ? 'fatigue_pause_skipped' : 'fatigue_pause_not_written')
+
     await writeLog(result)
 
-    if (result.adsAdded.length > 0 || result.adsPaused.length > 0) {
-      const summary = [
-        `🎯 Winner Reel Sync · client ${clientId}`,
-        result.adsAdded.length  > 0 ? `  ✅ Added ${result.adsAdded.length} Ad(s)`  : null,
-        result.adsPaused.length > 0 ? `  ⏸️ Paused ${result.adsPaused.length} Ad(s)` : null,
-        result.guardsHit.length > 0 ? `  🛡️ Guards hit: ${result.guardsHit.join(', ')}` : null,
-      ].filter(Boolean).join('\n')
-      await notifySlack(cfg.slackWebhookUrl, summary)
+    if (result.cardRunId) {
+      await notifySlack(
+        cfg.slackWebhookUrl,
+        '赢家素材同步出了一张暂停草稿确认卡。还没有建广告，也没有改预算。',
+      )
     }
 
     return result
@@ -369,12 +320,4 @@ export async function syncWinnerReels(clientId: string, opts: SyncOptions = {}):
     await writeLog(result)
     return result
   }
-}
-
-function medianOf(nums: number[]): number {
-  const sorted = [...nums].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1] + sorted[mid]) / 2
-    : sorted[mid]
 }
