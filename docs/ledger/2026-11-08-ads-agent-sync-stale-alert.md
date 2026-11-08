@@ -4,9 +4,11 @@ title: 广告 Agent 定时同步太久没成功 + 花费超日上限只读提醒
 status: done
 owner: agent
 decided_on: 2026-11-08
-source: pr:claude/ads-heartbeat-stale-alert
+source: pr:3661
+done_on: 2026-11-08
+done_ref: pr:3661
 risk: B
-verify_by: 首次 pm-daily-todo 自动运行当天（7 天内）
+verify_by: 2026-11-15
 verify_how: 合并后等次日今日待办邮件：有 Meta 广告的客户若某路同步超过容错仍无成功，应出现中文说明（无表名/无 JSON）；花费严格高于日上限时出现只读提醒且不写熔断。
 ---
 
