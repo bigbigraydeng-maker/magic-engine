@@ -89,6 +89,16 @@ export function setGoal(spec: PromoSpec, goalId: string): PromoSpec {
   return { ...spec, goal_id: goalId }
 }
 
+/** Empty input removes the key. A leftover undefined key changes the approval fingerprint. */
+export function setDailyTotalCap(spec: PromoSpec, cents: number | undefined): PromoSpec {
+  if (cents === undefined) {
+    const next: Record<string, unknown> = { ...spec }
+    delete next.daily_total_cap_cents
+    return next as PromoSpec
+  }
+  return { ...spec, daily_total_cap_cents: cents }
+}
+
 /** 逗号 / 换行分隔的文本拆成列表，去空去重。 */
 export function splitList(text: string): string[] {
   return Array.from(new Set(text.split(/[,\n，]/).map(s => s.trim()).filter(Boolean)))

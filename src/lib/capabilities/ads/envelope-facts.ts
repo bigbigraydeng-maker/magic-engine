@@ -9,6 +9,8 @@
  *    距上次变动几小时、在不在学习期、在不在实验里 —— 全部从
  *    `ad_entity_snapshots` / `ad_strategy_configs` 读。让被约束者自报约束
  *    等于没有约束。
+ *    加预算时的客户每天总上限例外：不读 `ad_strategy_configs`，也不把各系列日预算
+ *    加总当成上限。`card_prescription_id` 只指认已批准的那条链，金额从那份计划读。
  *
  * 🔴 **读不到一律返回 null / unavailable，交给判据拒绝。**
  *    这里不做「读不到就当没有」的兜底：那会让一次读失败等于一次静默放行。
@@ -28,6 +30,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { EnvelopeFactsResolver } from '@/lib/kernel/deps'
 import type { EnvelopeChangeKind, EnvelopeFacts, EnvelopeRequest } from '@/lib/kernel/autonomy-envelope'
 import type { CapabilityImplementation } from '@/lib/kernel/types'
+import { readApprovedDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { readCircuitState } from '@/lib/ads-strategy/circuit-state'
 import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 
@@ -107,6 +110,7 @@ export function budgetEntityKey(accountId: string, level: string, entityId: stri
  * 上调预算前，按客户全部已登记账户重新核算预算配置。
  * 所有账户都必须有近 24 小时内完整的账户/系列/广告组抓取回执；快照只用于读
  * 当前设置，任一账户、币种、预算或分页无法证明完整时都拒绝上调。
+ * `clientCapCents` 必须是已批准计划上的每天总上限，不是各系列日预算的合计。
  */
 async function loadClientBudgetRollup(
   sb: SupabaseClient,
@@ -328,18 +332,10 @@ export async function readKernelPreBudget(
   entityId: string,
   beforeCents: number,
   now: Date,
+  clientCapCents: number,
 ): Promise<{ ok: true; budget: KernelPreBudget } | { ok: false; reason: string }> {
-  const { data, error } = await sb.from('ad_strategy_configs')
-    .select('daily_budget_cap_cents')
-    .eq('client_id', clientId)
-    .maybeSingle<{ daily_budget_cap_cents: number | null }>()
-  if (error) return { ok: false, reason: '现在的每日预算合计读不到，没有改。' }
-  const clientCap = (data as { daily_budget_cap_cents?: unknown } | null)?.daily_budget_cap_cents
-  if (typeof clientCap !== 'number' || !Number.isSafeInteger(clientCap) || clientCap <= 0) {
-    return { ok: false, reason: '每日上限读不到，没有改。' }
-  }
   const rollup = await loadClientBudgetRollup(
-    sb, clientId, accountId, level, entityId, beforeCents, clientCap, now, 'pre_provider',
+    sb, clientId, accountId, level, entityId, beforeCents, clientCapCents, now, 'pre_provider',
   )
   if ('unavailable' in rollup) return { ok: false, reason: quotaReason(rollup.unavailable) }
   const accountLive = liveTotal(rollup.accountTotals, accountId)
@@ -802,6 +798,7 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     } else if (registeredAccounts.length >= 2) {
       return unavailable('facts:账户级日上限未配置')
     } else {
+      // 暂停等非上调动作仍回落旧的客户总闸。上调不走这里，只读已批准计划上的每天总上限。
       dailyCapCents = typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null
     }
 
@@ -882,6 +879,8 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     let clientDailyTotalBeforeCents: number | null = null
     let clientDailyCapCents: number | null = null
     if (actionKey === 'ads.scale_unit_budget' && afterRawIsIncrease(afterCents, beforeCents)) {
+      const planCap = await readApprovedDailyTotalCap(deps.sb, clientId, str('card_prescription_id') ?? '')
+      if (!planCap.ok) return unavailable(`facts:${planCap.reason}`)
       const rollup = await loadClientBudgetRollup(
         deps.sb,
         clientId,
@@ -889,7 +888,7 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
         str('campaign_id') ? 'campaign' : 'adset',
         subject.entityId,
         beforeCents ?? Number.NaN,
-        typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null,
+        planCap.cents,
         now(),
         at,
       )
