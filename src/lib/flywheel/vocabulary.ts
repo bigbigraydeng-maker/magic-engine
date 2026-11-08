@@ -239,6 +239,9 @@ export const ADS_ACTION_TYPE = {
 
   /** Re-enable a paused Google Ads / TikTok campaign (undo of PAUSE_CAMPAIGN) */
   REACTIVATE_CAMPAIGN: 'ads.reactivate_campaign',
+
+  /** Winner-sync suggestion. The row is a card, not a Meta write. */
+  WINNER_REEL_PROPOSAL: 'ads.winner_reel_proposal',
 } as const
 
 export type AdsActionType = (typeof ADS_ACTION_TYPE)[keyof typeof ADS_ACTION_TYPE]

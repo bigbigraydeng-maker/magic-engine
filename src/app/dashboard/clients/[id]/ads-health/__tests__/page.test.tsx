@@ -349,9 +349,9 @@ describe('no reply may end without a next step, and there is no "团队"', () =>
     await waitFor(() => expect(screen.getByText('执行')).toBeTruthy())
 
     await userEvent.click(screen.getByText('执行'))
-    await waitFor(() => expect(screen.getByText(/已补 2 条新素材/)).toBeTruthy())
-    const msg = screen.getByText(/已补 2 条新素材/).textContent ?? ''
-    expect(msg).toContain('一分钱不花')
+    await waitFor(() => expect(screen.getByText(/已出 2 张确认卡/)).toBeTruthy())
+    const msg = screen.getByText(/已出 2 张确认卡/).textContent ?? ''
+    expect(msg).toContain('不会直接开投')
     expect(msg).not.toContain('团队')
   })
 })
