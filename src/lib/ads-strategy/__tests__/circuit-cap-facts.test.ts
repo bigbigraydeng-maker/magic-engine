@@ -23,6 +23,7 @@ type TableName =
   | 'ad_entity_snapshots'
   | 'ad_strategy_configs'
   | 'ad_daily_insights'
+  | 'marketing_plans'
 
 const db: Record<TableName, Row[]> = {
   client_meta_ad_accounts: [],
@@ -30,6 +31,7 @@ const db: Record<TableName, Row[]> = {
   ad_entity_snapshots: [],
   ad_strategy_configs: [],
   ad_daily_insights: [],
+  marketing_plans: [],
 }
 
 /** 表名 → 该表这一次查询是否要报错（模拟查询失败）。测试间会被 reset。 */
@@ -172,6 +174,14 @@ function entitySnapshotRow(
   }
 }
 
+function planCap(cents: number): Row {
+  return {
+    client_id: CLIENT,
+    status: 'approved',
+    plan_data: { promo: { daily_total_cap_cents: cents } },
+  }
+}
+
 function configRow(over: Partial<Row> = {}): Row {
   return {
     client_id: CLIENT,
@@ -195,6 +205,7 @@ describe('账户列表 + 参考日', () => {
     db.client_meta_ad_accounts = [accountRow('act_1'), accountRow('act_2')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1'), accountSnapshotRow('act_2')]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -205,6 +216,7 @@ describe('账户列表 + 参考日', () => {
     db.clients = [{ id: CLIENT, meta_ad_account_id: 'act_fallback' }]
     db.ad_entity_snapshots = [accountSnapshotRow('act_fallback')]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -213,16 +225,18 @@ describe('账户列表 + 参考日', () => {
 
   it('零个账户 → accounts 为空数组，不报错', async () => {
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
     const facts = await loadClientCapFacts(CLIENT)
     expect(facts.accounts).toEqual([])
   })
 })
 
 describe('配置来源与上限', () => {
-  it('有配置行 → configSource=row，capCents 是配置的值', async () => {
+  it('已批准计划上的数才算，旧客户总闸不算', async () => {
     db.client_meta_ad_accounts = [accountRow('act_1')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1')]
-    db.ad_strategy_configs = [configRow({ daily_budget_cap_cents: 250000 })]
+    db.ad_strategy_configs = [configRow({ daily_budget_cap_cents: 1 })]
+    db.marketing_plans = [planCap(250000)]
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -230,20 +244,21 @@ describe('配置来源与上限', () => {
     expect(facts.capCents).toBe(250000)
   })
 
-  it('没有配置行 → configSource=default，capCents 为 null', async () => {
+  it('没有已批准计划 → 读成功但上限缺失，不当成 0', async () => {
     db.client_meta_ad_accounts = [accountRow('act_1')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1')]
+    db.ad_strategy_configs = [configRow({ daily_budget_cap_cents: 250000 })]
 
     const facts = await loadClientCapFacts(CLIENT)
 
-    expect(facts.configSource).toBe('default')
+    expect(facts.configSource).toBe('row')
     expect(facts.capCents).toBeNull()
   })
 
-  it('配置读取失败 → configSource=fallback', async () => {
+  it('计划读取失败 → configSource=fallback', async () => {
     db.client_meta_ad_accounts = [accountRow('act_1')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1')]
-    failTables.add('ad_strategy_configs')
+    failTables.add('marketing_plans')
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -256,6 +271,7 @@ describe('每账户花费事实', () => {
     db.client_meta_ad_accounts = [accountRow('act_1')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1')] // 时区 Pacific/Auckland（见 accountSnapshotRow 默认值）
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
     // 用跟生产同一个函数算「Auckland 时区下的昨天」，不用 UTC 减一天——
     // 两者在 UTC+12/13 的午夜前后会差一天，写死 UTC 会让这条测试脆弱地
     // 依赖跑测试时的挂钟时刻。
@@ -274,6 +290,7 @@ describe('每账户花费事实', () => {
     db.client_meta_ad_accounts = [accountRow('act_1')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1')]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
     const day = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
     db.ad_daily_insights = [
       insightRow('act_1', day, 100, { entity_id: 'camp_1' }),
@@ -291,6 +308,7 @@ describe('每账户花费事实', () => {
     db.client_meta_ad_accounts = [accountRow('act_1')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1')]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
     const day = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
     db.ad_daily_insights = [
       insightRow('act_1', day, 100, { level: 'campaign', entity_id: 'camp_1' }),
@@ -307,6 +325,7 @@ describe('每账户花费事实', () => {
     db.client_meta_ad_accounts = [accountRow('act_1'), accountRow('act_2')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1'), accountSnapshotRow('act_2')]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
     const day = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
     db.ad_daily_insights = [insightRow('act_1', day, 100), insightRow('act_2', day, 999)]
 
@@ -320,6 +339,7 @@ describe('每账户花费事实', () => {
     db.client_meta_ad_accounts = [accountRow('act_1')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1')]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
     const day = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
     db.ad_daily_insights = [
       insightRow('act_1', day, 100),
@@ -335,6 +355,7 @@ describe('每账户花费事实', () => {
     db.client_meta_ad_accounts = [accountRow('act_1')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1')]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -347,6 +368,7 @@ describe('每账户花费事实', () => {
     db.client_meta_ad_accounts = [accountRow('act_1')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1')]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
     const staleDay = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10)
     db.ad_daily_insights = [insightRow('act_1', staleDay, 42)]
 
@@ -361,6 +383,7 @@ describe('每账户花费事实', () => {
     db.client_meta_ad_accounts = [accountRow('act_1')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1')]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
     const day = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
     db.ad_daily_insights = [
       insightRow('act_1', day, null, { entity_id: 'camp_1' }),
@@ -379,6 +402,7 @@ describe('花费事实：第一步「找哪一天」必须跟第二步同一套�
       db.client_meta_ad_accounts = [accountRow('act_1')]
       db.ad_entity_snapshots = [accountSnapshotRow('act_1')]
       db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
       const referenceDay = accountYesterday('Pacific/Auckland', new Date())
       const staleCampaignDay = new Date(
@@ -415,6 +439,7 @@ describe('花费事实：第一步「找哪一天」必须跟第二步同一套�
       db.client_meta_ad_accounts = [accountRow('act_1'), accountRow('act_2')]
       db.ad_entity_snapshots = [accountSnapshotRow('act_1'), accountSnapshotRow('act_2')]
       db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
       const referenceDay = accountYesterday('Pacific/Auckland', new Date())
       const act1Day = new Date(new Date(`${referenceDay}T00:00:00Z`).getTime() - 3 * 86_400_000)
@@ -449,6 +474,7 @@ describe('在不在投 + 币种', () => {
       entitySnapshotRow('act_1', 'camp_2', 'ACTIVE'),
     ]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -465,6 +491,7 @@ describe('在不在投 + 币种', () => {
       entitySnapshotRow('act_1', 'camp_2', 'ARCHIVED'),
     ]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -476,6 +503,7 @@ describe('在不在投 + 币种', () => {
     // 只给账户级那一行（用来解析时区/币种），不给任何 campaign/adset 快照
     db.ad_entity_snapshots = [accountSnapshotRow('act_1')]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -495,6 +523,7 @@ describe('在不在投 + 币种', () => {
       }),
     ]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -510,6 +539,7 @@ describe('在不在投 + 币种', () => {
       entitySnapshotRow('act_2', 'camp_2', 'ACTIVE'),
     ]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -525,6 +555,7 @@ describe('在不在投 + 币种', () => {
       entitySnapshotRow('act_1', 'camp_1', 'ACTIVE', { captured_at: staleCapturedAt }),
     ]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -541,6 +572,7 @@ describe('在不在投 + 币种', () => {
     }
     db.ad_entity_snapshots = rows
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
 
     const facts = await loadClientCapFacts(CLIENT)
 
@@ -551,6 +583,7 @@ describe('在不在投 + 币种', () => {
     db.client_meta_ad_accounts = [accountRow('act_1')]
     db.ad_entity_snapshots = [accountSnapshotRow('act_1', { currency: 'NZD' })]
     db.ad_strategy_configs = [configRow()]
+    db.marketing_plans = [planCap(100000)]
     failTables.add('ad_entity_snapshots')
 
     const facts = await loadClientCapFacts(CLIENT)

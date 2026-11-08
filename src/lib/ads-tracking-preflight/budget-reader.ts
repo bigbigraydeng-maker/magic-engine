@@ -8,10 +8,10 @@
  * 口径跟信封 / 诊断保持一致（capabilities/ads/envelope-facts.ts、ads-strategy 诊断，两处各写一份必然分家）：
  *   · 「在投」的状态集合复用 DELIVERING_STATUSES；
  *   · 系列级预算（成组预算）：在投系列有日预算就算系列的，它下面的广告组不再单独计入——钱在系列那一层，重复加就翻倍；
- *   · 上限：账户级读 client_meta_ad_accounts（按这个账户自己那一行，账户编号带不带 act_ 都认），客户级读 ad_strategy_configs；
+ *   · 上限：账户级读 client_meta_ad_accounts（按这个账户自己那一行，账户编号带不带 act_ 都认），客户每天总上限读已批准计划；
  *     多个登记账户时账户级没设就是没设，客户总上限顶替不了（带回登记账户数，由判灯去判）；
  *     老客户没有登记行时回落 clients.meta_ad_account_id + 客户级上限（跟信封一样）；
- *   · 上限不是正整数（0 / 负数 / 乱码）= 配置无效，读不到——不当作「没设」，更不当作 0（信封里这种配置会被拒）。
+ *   · 账户级上限不是正整数 = 配置无效，整份读不到。计划上没有正整数的每天总上限 = 没设（null），不当成 0，也不拿旧客户总闸顶上。
  *   · 多个登记账户时，其它账户（含被隐藏的）的在投预算读库里的快照（other-accounts.ts），读不成功就是 null，由判灯回到「只核对这一个账户」。
  *
  * 🔴 只读：库只 select；Meta 只发 GET（makeGraphGet：路径白名单、令牌只进 Authorization 头）。
@@ -20,6 +20,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 import { ACCOUNT_ID_RE, makeGraphGet, type GraphGet } from './meta-reader'
 import { hasDataArray, hasNextPage } from './post-launch'
@@ -140,16 +141,13 @@ async function readClientCap(
   supabase: SupabaseClient,
   clientId: string,
 ): Promise<{ ok: true; cap: number | null } | { ok: false; error: string }> {
-  const table = 'ad_strategy_configs'
   try {
-    const res = await supabase.from(table).select('daily_budget_cap_cents').eq('client_id', clientId).maybeSingle()
-    if (res.error) return { ok: false, error: `读 ${table} 失败：${sanitizeError(res.error.message)}` }
-    // 没有这一行 = 客户级上限没设（不是读失败）；有这一行但值不是正整数 = 配置无效
-    const cap = parseCap(asRecord(res.data)?.daily_budget_cap_cents)
-    if (cap.kind === 'invalid') return { ok: false, error: `库里该客户的日预算总上限配置无效（不是正整数，${table}），上限没法读` }
-    return { ok: true, cap: cap.kind === 'value' ? cap.cents : null }
+    const cap = await readClientDailyTotalCap(supabase, clientId)
+    if (cap.state === 'unreadable') return { ok: false, error: cap.reason }
+    if (cap.state === 'missing') return { ok: true, cap: null }
+    return { ok: true, cap: cap.cents }
   } catch (err) {
-    return { ok: false, error: `读 ${table} 失败：${sanitizeError(err)}` }
+    return { ok: false, error: `读已批准的计划失败：${sanitizeError(err)}` }
   }
 }
 

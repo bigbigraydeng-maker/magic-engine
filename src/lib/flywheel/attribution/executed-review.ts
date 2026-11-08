@@ -5,8 +5,9 @@
  * This module only reads that stored shape. It does not invent a window,
  * a direction, or an approval source, and it does not judge success.
  *
- * #3590 / #3647 still have no comparable control sample, so a due window is
- * inconclusive. A pause, or a spend change, is not a success.
+ * The attribution job compares this object's own daily numbers after the
+ * window. Overlap stays inconclusive. A neutral metric, including spend,
+ * is not a success by itself.
  */
 
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
@@ -134,9 +135,8 @@ export function pairSpans(spans: readonly WindowSpan[]): ReadonlyMap<string, Pai
 }
 
 /**
- * A due card is saved, but not scored.
- * There is still no untouched ad set to compare against, so overlap and a
- * single change are both inconclusive. Direction is an input, not a verdict.
+ * Overlap stays inconclusive. Direction is an input, not a verdict.
+ * The job scores a clear pair from the object's own window instead of calling this.
  */
 export function reviewVerdict(pair: PairMark): { verdict: 'inconclusive'; confidence: 0; pair: PairMark } {
   return { verdict: 'inconclusive', confidence: 0, pair }

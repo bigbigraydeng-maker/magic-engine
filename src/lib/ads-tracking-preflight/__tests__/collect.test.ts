@@ -97,9 +97,13 @@ function makeDb(opts: DbOpts = {}) {
       const finish = () => {
         if (table === 'clients') return { data: { domain: 'shop.example.test' }, error: null }
         if (table === 'me_conversion_writebacks') return { data: [], error: null }
-        if (table === 'client_meta_ad_accounts' || table === 'ad_strategy_configs') {
+        if (table === 'client_meta_ad_accounts' || table === 'marketing_plans') {
           if (opts.capsError) return { data: null, error: { message: opts.capsError } }
-          if (table === 'ad_strategy_configs') return { data: { daily_budget_cap_cents: opts.clientCap === undefined ? 15000 : opts.clientCap }, error: null }
+          if (table === 'marketing_plans') {
+            const cents = opts.clientCap === undefined ? 15000 : opts.clientCap
+            if (typeof cents !== 'number' || !Number.isInteger(cents) || cents <= 0) return { data: [], error: null }
+            return { data: [{ status: 'approved', plan_data: { promo: { daily_total_cap_cents: cents } } }], error: null }
+          }
           return { data: [{ ad_account_id: 'act_1111111111', daily_budget_cap_cents: opts.accountCap === undefined ? 15000 : opts.accountCap }], error: null }
         }
         if (table === 'cron_run_logs') return { data: [{ status: 'completed', finished_at: '2026-10-19T09:30:00Z', started_at: '2026-10-19T09:25:00Z' }], error: null }
@@ -436,7 +440,6 @@ describe('预算门 · 判灯一路到批准拦截（端到端）', () => {
       ['没有令牌', { token: null }],
       ['账户级和客户级上限都没设', { accountCap: null, clientCap: null }],
       ['账户级上限是 0（配置无效）', { accountCap: 0 }],
-      ['客户级上限是 0（配置无效）', { clientCap: 0 }],
       ['有终身预算折不出日预算', { adsets: [{ id: '6001', campaign_id: '5001', effective_status: 'ACTIVE', daily_budget: '0', lifetime_budget: '90000' }] }],
       ['广告组预算乱码', { adsets: [{ id: '6001', campaign_id: '5001', effective_status: 'ACTIVE', daily_budget: 'abc' }] }],
     ]
@@ -444,6 +447,7 @@ describe('预算门 · 判灯一路到批准拦截（端到端）', () => {
       const r = await budgetBlocks(opts)
       expect(r, name).toMatchObject({ status: 'gray', blocked: true })
     }
+    expect(await budgetBlocks({ clientCap: 0 })).toMatchObject({ status: 'green', blocked: false })
   })
 
   it('🔴 账户里一个在投的都没有（空返回）→ 黄，不出绿；黄不拦，但会列在「未核实」里提醒', async () => {

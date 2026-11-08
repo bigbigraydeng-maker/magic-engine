@@ -10,24 +10,20 @@
  * 这一列直接决定广告自治的"能不能动、动多少"，判据同 `facebook-page` PATCH
  * （AD-SEC-4）：客户成员自己填会让"被约束者自报约束"，那就没有约束。
  *
- * ── 为什么要校验 sum(账户上限) ≤ 客户总闸 ────────────────────────────
- * 客户级总闸（`ad_strategy_configs.daily_budget_cap_cents`）的意义是
- * "这个客户所有账户加起来一天最多花这么多"。账户级上限如果加起来能超过
- * 总闸，总闸就只是纸面数字——账户级各自守着自己的额度，合计却能冲破总闸。
- *
- * 这份旧总闸不是上调时用的每天总上限。上调读的是已批准计划里填写的数。
- * 本路由仍只写账户自己的上限，不写计划；账户清单接口保持只读。
- * 各账户上限加总不能拿来充当客户每天总上限。
+ * ── 为什么要校验 sum(账户上限) ≤ 已批准计划上的每天总上限 ────────────
+ * 每天总上限的意义是"这个客户所有账户加起来一天最多花这么多"。
+ * 账户级上限如果加起来能超过它，它就只是纸面数字。
+ * 计划没填这个数时，不能写入一个新的正数上限（那是放宽花钱），清空仍可以。
+ * 本路由仍只写账户自己的上限，不写计划。各账户上限加总不能拿来充当每天总上限。
  *
  * 🔴 **这道校验只在配置时把关，不是运行时强制**（欠账，见 ROADMAP 那条
  *    "运行时跨账户日上限强制"）：`envelope-facts.ts` 单账户动作只比对该账户
  *    自己的上限，不会去查"其它账户今天已经花了多少"。这里挡的是"一开始就配
  *    超了"，挡不住"账户各自守规矩、但赶在同一天各花到了各自上限"的情形。
  *
- * ── 客户总闸还没配的情况 ──────────────────────────────────────────────
- * 没有总闸可比时不拒——没有基准就没法说"超没超"。但这不等于没有保护：
- * `envelope-facts.ts` 的规则是"客户绑了 ≥2 个账户、这个账户没配自己的上限
- * → 拒"，账户上限本身仍然必填才能让该账户的自治动起来。
+ * ── 计划上的每天总上限还没填 ──────────────────────────────────────────
+ * 没有这个数时，写入正数上限会被拒绝，并请到广告计划里补上。
+ * 不能把"没填"当成不设上限。
  *
  * ── 币种闸（子牙+魏征审出的 BLOCKER，2026-09-28 补）─────────────────────
  * `client_meta_ad_accounts` 本身没有 `currency` 列——migration
@@ -46,6 +42,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireGlobalAdmin } from '@/lib/auth/require-admin'
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 
 interface PatchBody {
   readonly daily_budget_cap_cents?: unknown
@@ -110,25 +107,24 @@ export async function PATCH(
 
   // 校验 sum(账户上限) ≤ 客户总闸：查这个客户名下**其它**账户的上限，
   // 加上即将写入的这个账户的新值，跟客户总闸比。
-  const [{ data: siblingRows, error: siblingErr }, { data: cfg, error: cfgErr }] = await Promise.all([
+  const [{ data: siblingRows, error: siblingErr }, planCap] = await Promise.all([
     supabaseAdmin
       .from('client_meta_ad_accounts')
       .select('ad_account_id, daily_budget_cap_cents')
       .eq('client_id', clientId),
-    supabaseAdmin
-      .from('ad_strategy_configs')
-      .select('daily_budget_cap_cents')
-      .eq('client_id', clientId)
-      .maybeSingle<{ daily_budget_cap_cents: number | null }>(),
+    readClientDailyTotalCap(supabaseAdmin, clientId),
   ])
   if (siblingErr) {
     return NextResponse.json({ error: `查账户上限失败：${siblingErr.message}` }, { status: 500 })
   }
-  if (cfgErr) {
-    return NextResponse.json({ error: `查客户总闸失败：${cfgErr.message}` }, { status: 500 })
+  if (planCap.state === 'unreadable') {
+    return NextResponse.json({ error: planCap.reason }, { status: 500 })
+  }
+  if (planCap.state === 'missing' && nextCents !== null) {
+    return NextResponse.json({ error: planCap.reason }, { status: 409 })
   }
 
-  const totalCapCents = typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null
+  const totalCapCents = planCap.state === 'set' ? planCap.cents : null
 
   if (totalCapCents !== null) {
     const rows = (siblingRows ?? []) as Array<{
@@ -194,8 +190,8 @@ export async function PATCH(
         {
           error:
             `这个客户所有账户的日上限加起来会变成 ${sumWithThis} 分，` +
-            `超过客户总闸 ${totalCapCents} 分（其它账户合计 ${sumOthers} 分）。` +
-            '先降低这个账户或其它账户的上限，或者先把客户总闸调大。',
+            `超过已批准计划上的每天总上限 ${totalCapCents} 分（其它账户合计 ${sumOthers} 分）。` +
+            '先降低账户上限，或在广告计划里把每天总上限改大后再批准。',
         },
         { status: 400 },
       )
