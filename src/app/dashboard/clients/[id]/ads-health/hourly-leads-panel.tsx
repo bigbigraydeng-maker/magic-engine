@@ -19,12 +19,14 @@ import {
 } from 'recharts'
 import type { HourlyLeadChart } from '@/lib/ads-strategy/hourly-meta-leads'
 import type { LeadForecast } from '@/lib/ads-strategy/hourly-leads-forecast'
+import type { WeeklyLeadForecast } from '@/lib/ads-strategy/weekly-leads-forecast'
 
 type StaffPayload = {
   unreadable: boolean
   message?: string
   chart?: HourlyLeadChart
   forecast?: LeadForecast | null
+  weekForecast?: WeeklyLeadForecast | null
   lastSyncAt?: string | null
   jobName?: string
 }
@@ -35,6 +37,7 @@ type ClientPayload = {
   message?: string
   chart?: HourlyLeadChart
   forecast?: LeadForecast | null
+  weekForecast?: WeeklyLeadForecast | null
   lastSyncLabel?: string | null
 }
 
@@ -166,26 +169,52 @@ export default function HourlyLeadsPanel({ clientId }: { clientId: string }) {
         <p className="mt-1 text-xs text-gray-500">表单最后一次同步：{syncLabel}（新西兰时间）</p>
       )}
 
-      <ForecastBlock forecast={data.forecast ?? null} />
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:gap-4">
+        <ForecastBlock
+          label="全天"
+          forecast={data.forecast ?? null}
+          insufficientFallback="全天估算：数据不足，不预测"
+        />
+        <ForecastBlock
+          label="当周"
+          forecast={data.weekForecast ?? null}
+          insufficientFallback="当周估算：数据不足"
+        />
+      </div>
     </div>
   )
 }
 
-function ForecastBlock({ forecast }: { forecast: LeadForecast | null }) {
+type ForecastLike =
+  | LeadForecast
+  | WeeklyLeadForecast
+  | null
+
+function ForecastBlock({
+  label,
+  forecast,
+  insufficientFallback,
+}: {
+  label: string
+  forecast: ForecastLike
+  insufficientFallback: string
+}) {
   if (!forecast) {
     return (
-      <p className="mt-4 text-sm text-gray-500">全天估算：数据不足，不预测</p>
+      <p className="flex-1 text-sm text-gray-500">{insufficientFallback}</p>
     )
   }
   if (forecast.status === 'insufficient') {
     return (
-      <p className="mt-4 text-sm text-gray-600">{forecast.message}</p>
+      <p className="flex-1 text-sm text-gray-600">
+        {label}估算：{forecast.message}
+      </p>
     )
   }
   return (
-    <div className="mt-4 rounded-lg border border-gray-100 bg-gray-50 px-3 py-3 text-sm text-gray-700">
+    <div className="flex-1 rounded-lg border border-gray-100 bg-gray-50 px-3 py-3 text-sm text-gray-700">
       <p>
-        预计全天 <b>{forecast.rangeMin}–{forecast.rangeMax}</b> 条（估算）
+        预计{label} <b>{forecast.rangeMin}–{forecast.rangeMax}</b> 条（估算）
       </p>
       <p className="mt-1 text-xs text-gray-500">{forecast.disclaimer}</p>
     </div>
