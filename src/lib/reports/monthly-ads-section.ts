@@ -50,12 +50,19 @@ export interface MonthlyAdsSection {
 }
 
 interface InsightRow {
+  ad_account_id: string
   entity_id: string
   entity_name: string | null
   spend: number | null
   leads: number | null
   messaging_conversations: number | null
   insight_date: string
+}
+
+export interface MonthlyAdsPeriodOptions {
+  ledgerViewer?: BoardViewer
+  periodStartIso: string
+  periodEndIso: string
 }
 
 interface LedgerRow {
@@ -194,7 +201,7 @@ async function readInsights(
     const rows = await fetchAll<InsightRow>((from, to) =>
       supabaseAdmin
         .from('ad_daily_insights')
-        .select('entity_id, entity_name, spend, leads, messaging_conversations, insight_date')
+        .select('ad_account_id, entity_id, entity_name, spend, leads, messaging_conversations, insight_date')
         .eq('client_id', clientId)
         .eq('level', level)
         .gte('insight_date', periodFrom)
@@ -235,17 +242,40 @@ async function loadNameFallback(
   return map
 }
 
-async function loadCurrency(clientId: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin
-    .from('ad_entity_snapshots')
-    .select('currency, captured_at')
-    .eq('client_id', clientId)
-    .eq('level', 'account')
-    .order('captured_at', { ascending: false })
-    .limit(1)
-  if (error || !data?.length) return null
-  const c = (data[0] as { currency: string | null }).currency
-  return typeof c === 'string' && c.trim() ? c.trim() : null
+async function loadAccountCurrencies(clientId: string): Promise<Map<string, string>> {
+  const rows = await fetchAll<{ ad_account_id: string; currency: string | null }>((from, to) =>
+    supabaseAdmin
+      .from('ad_entity_snapshots')
+      .select('ad_account_id, currency, captured_at')
+      .eq('client_id', clientId)
+      .eq('level', 'account')
+      .order('captured_at', { ascending: false })
+      .order('ad_account_id', { ascending: true })
+      .range(from, to),
+  )
+  const map = new Map<string, string>()
+  for (const row of rows) {
+    if (map.has(row.ad_account_id)) continue
+    const c = row.currency?.trim()
+    if (c) map.set(row.ad_account_id, c)
+  }
+  return map
+}
+
+function spendCurrencies(
+  campaignRows: readonly InsightRow[],
+  byAccount: ReadonlyMap<string, string>,
+): { currency: string | null; mixed: boolean } {
+  const used = new Set<string>()
+  for (const row of campaignRows) {
+    if (num(row.spend) <= 0) continue
+    const c = byAccount.get(row.ad_account_id)
+    if (c) used.add(c)
+  }
+  if (used.size > 1) return { currency: null, mixed: true }
+  if (used.size === 1) return { currency: [...used][0], mixed: false }
+  const fallback = byAccount.size === 1 ? [...byAccount.values()][0] : null
+  return { currency: fallback, mixed: false }
 }
 
 async function loadPrimaryAndTarget(clientId: string): Promise<{
@@ -310,8 +340,8 @@ async function loadQualifiedStagesLabel(clientId: string): Promise<{
 async function countQualifiedLeads(
   clientId: string,
   keys: string[],
-  periodFrom: string,
-  periodTo: string,
+  periodStartIso: string,
+  periodEndIso: string,
 ): Promise<number | { error: string }> {
   if (keys.length === 0) return 0
   try {
@@ -321,8 +351,8 @@ async function countQualifiedLeads(
         .select('contact_id')
         .eq('client_id', clientId)
         .in('to_stage', keys)
-        .gte('created_at', `${periodFrom}T00:00:00.000Z`)
-        .lte('created_at', `${periodTo}T23:59:59.999Z`)
+        .gte('created_at', periodStartIso)
+        .lte('created_at', periodEndIso)
         .order('created_at', { ascending: true })
         .order('id', { ascending: true })
         .range(from, to),
@@ -333,8 +363,8 @@ async function countQualifiedLeads(
         .select('id')
         .eq('client_id', clientId)
         .in('stage', keys)
-        .gte('created_at', `${periodFrom}T00:00:00.000Z`)
-        .lte('created_at', `${periodTo}T23:59:59.999Z`)
+        .gte('created_at', periodStartIso)
+        .lte('created_at', periodEndIso)
         .order('created_at', { ascending: true })
         .order('id', { ascending: true })
         .range(from, to),
@@ -350,8 +380,8 @@ async function countQualifiedLeads(
 
 async function loadLedger(
   clientId: string,
-  periodFrom: string,
-  periodTo: string,
+  periodStartIso: string,
+  periodEndIso: string,
   viewer: BoardViewer,
 ): Promise<{ lines: MonthlyAdsLedgerLine[]; gap: string | null }> {
   try {
@@ -362,8 +392,8 @@ async function loadLedger(
         .eq('client_id', clientId)
         .eq('flywheel', 'ads')
         .neq('action_type', 'ads.meta_snapshot')
-        .gte('executed_at', `${periodFrom}T00:00:00.000Z`)
-        .lte('executed_at', `${periodTo}T23:59:59.999Z`)
+        .gte('executed_at', periodStartIso)
+        .lte('executed_at', periodEndIso)
         .order('executed_at', { ascending: false })
         .order('id', { ascending: false })
         .range(from, to),
@@ -410,14 +440,15 @@ export async function collectMonthlyAdsSection(
   clientId: string,
   periodFrom: string,
   periodTo: string,
-  options?: { ledgerViewer?: BoardViewer },
+  options: MonthlyAdsPeriodOptions,
 ): Promise<MonthlyAdsSection> {
   const gaps: string[] = []
-  const viewer: BoardViewer = options?.ledgerViewer ?? 'client'
+  const viewer: BoardViewer = options.ledgerViewer ?? 'client'
+  const { periodStartIso, periodEndIso } = options
 
-  const [{ primary, target, gaps: cfgGaps }, currency] = await Promise.all([
+  const [{ primary, target, gaps: cfgGaps }, accountCurrencies] = await Promise.all([
     loadPrimaryAndTarget(clientId),
-    loadCurrency(clientId),
+    loadAccountCurrencies(clientId),
   ])
   gaps.push(...cfgGaps)
 
@@ -426,6 +457,10 @@ export async function collectMonthlyAdsSection(
   const campaignRead = await readInsights(clientId, 'campaign', periodFrom, periodTo)
   if (campaignRead.error) gaps.push('本月广告花费与进线数据读失败')
   const campaignRows = campaignRead.rows
+
+  const currencyProbe = campaignRows.length
+    ? spendCurrencies(campaignRows, accountCurrencies)
+    : { currency: spendCurrencies([], accountCurrencies).currency, mixed: accountCurrencies.size > 1 }
 
   let spend: number | null = null
   let results: number | null = null
@@ -437,6 +472,11 @@ export async function collectMonthlyAdsSection(
     gaps.push('本月没有读到广告投放日数据')
     spend = null
     results = null
+  } else if (currencyProbe.mixed) {
+    gaps.push('多个广告账户币种不一致，未做跨币种合计')
+    spend = null
+    costPerResult = null
+    if (primary) results = campaignRows.reduce((s, r) => s + primaryCount(r, primary), 0)
   } else if (!primary) {
     spend = round2(campaignRows.reduce((s, r) => s + num(r.spend), 0))
     results = null
@@ -444,8 +484,10 @@ export async function collectMonthlyAdsSection(
   } else {
     spend = round2(campaignRows.reduce((s, r) => s + num(r.spend), 0))
     results = campaignRows.reduce((s, r) => s + primaryCount(r, primary), 0)
-    costPerResult = results > 0 && spend != null ? round2(spend / results) : null
+    costPerResult = results > 0 ? round2(spend / results) : null
   }
+
+  const currency = currencyProbe.mixed ? null : currencyProbe.currency
 
   let vsTarget: MonthlyAdsSection['vsTarget'] = null
   if (target == null) vsTarget = 'no_target'
@@ -457,7 +499,7 @@ export async function collectMonthlyAdsSection(
 
   let qualifiedLeads: number | null = null
   if (qualifiedMeta.keys.length > 0) {
-    const counted = await countQualifiedLeads(clientId, qualifiedMeta.keys, periodFrom, periodTo)
+    const counted = await countQualifiedLeads(clientId, qualifiedMeta.keys, periodStartIso, periodEndIso)
     if (typeof counted === 'number') qualifiedLeads = counted
     else gaps.push('合格询盘人数读失败')
   }
@@ -475,7 +517,7 @@ export async function collectMonthlyAdsSection(
   const adsetMap = aggregateByEntity(adsetRead.rows, primary, nameFallback)
   const adMap = aggregateByEntity(adRead.rows, primary, nameFallback)
 
-  const ledgerLoad = await loadLedger(clientId, periodFrom, periodTo, viewer)
+  const ledgerLoad = await loadLedger(clientId, periodStartIso, periodEndIso, viewer)
   if (ledgerLoad.gap) gaps.push('本月广告操作记录读失败')
 
   return {

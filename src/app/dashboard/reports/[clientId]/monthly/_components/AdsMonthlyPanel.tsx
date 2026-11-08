@@ -2,21 +2,8 @@
 
 import type { ReactNode } from 'react'
 import type { MonthlyAdsSection } from '@/lib/reports/monthly-ads-section'
+import { formatAdsMoney, vsTargetText } from '@/lib/reports/ads-monthly-present'
 import { ReportSectionHeader } from './Shared'
-
-function money(amount: number | null, currency: string | null): string {
-  if (amount == null) return '—'
-  const sym = currency === 'NZD' ? 'NZ$' : currency === 'AUD' ? 'A$' : currency ? `${currency} ` : ''
-  return `${sym}${amount.toFixed(2)}`
-}
-
-function vsTargetText(vs: MonthlyAdsSection['vsTarget'], target: number | null): string {
-  if (vs === 'no_target' || target == null) return '未设置目标成本'
-  if (vs === 'not_comparable') return '进线成本算不出，无法对比目标'
-  if (vs === 'at_or_below') return `达目标（≤ ${target.toFixed(2)}）`
-  if (vs === 'above') return `高于目标（> ${target.toFixed(2)}）`
-  return '—'
-}
 
 function fmtDate(iso: string): string {
   if (!iso) return '—'
@@ -81,7 +68,13 @@ function EntityTable({
   )
 }
 
-export function AdsMonthlyPanel({ ads }: { ads: MonthlyAdsSection | null }) {
+export function AdsMonthlyPanel({
+  ads,
+  periodScopeNote,
+}: {
+  ads: MonthlyAdsSection | null
+  periodScopeNote?: string
+}) {
   if (!ads) {
     return (
       <section className="rounded-xl border border-me-border bg-white p-5 shadow-sm">
@@ -96,18 +89,20 @@ export function AdsMonthlyPanel({ ads }: { ads: MonthlyAdsSection | null }) {
   return (
     <section className="rounded-xl border border-me-border bg-white p-5 shadow-sm space-y-4">
       <ReportSectionHeader title="付费广告" />
-      <p className="text-xs text-me-charcoal/50">口径：按客户设置的主结果（{noun}）汇总；金额单位 {ads.currency ?? '未读到'}。</p>
+      <p className="text-xs text-me-charcoal/50">
+        {periodScopeNote ?? '口径：本月至今'}；主结果（{noun}）；金额单位 {ads.currency ?? '未读到'}。
+      </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="本月花费" value={money(ads.spend, ads.currency)} />
+        <Kpi label="本月花费" value={formatAdsMoney(ads.spend, ads.currency)} />
         <Kpi
           label={`本月${noun}数`}
           value={ads.results != null ? String(ads.results) : '—'}
         />
         <Kpi
           label={`单次${noun}成本`}
-          value={money(ads.costPerResult, ads.currency)}
-          sub={vsTargetText(ads.vsTarget, ads.targetCostPerResult)}
+          value={formatAdsMoney(ads.costPerResult, ads.currency)}
+          sub={vsTargetText(ads.vsTarget, ads.targetCostPerResult, ads.currency)}
         />
         <Kpi
           label="合格询盘（CRM）"

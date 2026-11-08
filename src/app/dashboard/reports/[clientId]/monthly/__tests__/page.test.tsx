@@ -28,6 +28,7 @@ function makeReport(overrides: Partial<MonthlyReportData> = {}): MonthlyReportDa
     period_label: 'May 2026',
     period_from: '2026-05-01',
     period_to: '2026-05-31',
+    period_scope_note: '统计范围：2026-05-01 至 2026-05-31（Pacific/Auckland，本月至今）',
     overview: {
       this_month_avg_rank: 4,
       last_month_avg_rank: 6,

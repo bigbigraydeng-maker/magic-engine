@@ -7,13 +7,17 @@
  * and the page bundle stays focused on the live UI.
  */
 import type { MonthlyReportData } from '@/lib/reports/monthly-aggregator'
+import {
+  entityRowsHtml,
+  formatAdsMoney,
+  vsTargetText,
+} from '@/lib/reports/ads-monthly-present'
 
 function adsSectionHtml(report: MonthlyReportData): string {
   const ads = report.ads
   if (!ads) {
     return `<div class="section"><div class="section-title"><span class="badge">A</span> 付费广告</div><p style="font-size:13px;color:rgba(26,26,26,0.55);">广告板块未加载。</p></div>`
   }
-  const sym = ads.currency === 'NZD' ? 'NZ$' : ads.currency === 'AUD' ? 'A$' : ads.currency ?? ''
   const noun = ads.primaryResultLabel ?? '主结果'
   const gaps = ads.gaps.map(g => `<li>${escHtml(g)}</li>`).join('')
   const ledger = ads.ledger
@@ -23,14 +27,24 @@ function adsSectionHtml(report: MonthlyReportData): string {
     .join('')
   return `<div class="section">
     <div class="section-title"><span class="badge">A</span> 付费广告（${escHtml(noun)}）</div>
+    <p style="font-size:11px;color:rgba(26,26,26,0.55);">${escHtml(report.period_scope_note)}</p>
     <div class="kpi-grid">
-      <div class="kpi"><div class="kpi-label">本月花费</div><div class="kpi-value">${ads.spend != null ? escHtml(`${sym}${ads.spend.toFixed(2)}`) : '—'}</div></div>
+      <div class="kpi"><div class="kpi-label">本月花费</div><div class="kpi-value">${escHtml(formatAdsMoney(ads.spend, ads.currency))}</div></div>
       <div class="kpi"><div class="kpi-label">本月${escHtml(noun)}</div><div class="kpi-value">${ads.results ?? '—'}</div></div>
-      <div class="kpi"><div class="kpi-label">单次成本</div><div class="kpi-value">${ads.costPerResult != null ? escHtml(`${sym}${ads.costPerResult.toFixed(2)}`) : '—'}</div></div>
+      <div class="kpi"><div class="kpi-label">单次成本</div><div class="kpi-value">${escHtml(formatAdsMoney(ads.costPerResult, ads.currency))}</div><div class="kpi-sub">${escHtml(vsTargetText(ads.vsTarget, ads.targetCostPerResult, ads.currency))}</div></div>
       <div class="kpi"><div class="kpi-label">合格询盘</div><div class="kpi-value">${ads.qualifiedLeads ?? '—'}</div><div class="kpi-sub">${escHtml(ads.qualifiedStagesLabel ?? '')}</div></div>
     </div>
+    <div style="margin-top:16px;font-size:13px;font-weight:600;">表现最好的广告组</div>
+    ${entityRowsHtml(ads.topAdSets, '无数据')}
+    <div style="margin-top:12px;font-size:13px;font-weight:600;">表现偏弱的广告组</div>
+    ${entityRowsHtml(ads.bottomAdSets, '无数据')}
+    <div style="margin-top:12px;font-size:13px;font-weight:600;">表现最好的素材</div>
+    ${entityRowsHtml(ads.topCreatives, '无数据')}
+    <div style="margin-top:12px;font-size:13px;font-weight:600;">表现偏弱的素材</div>
+    ${entityRowsHtml(ads.bottomCreatives, '无数据')}
+    <div style="margin-top:12px;font-size:13px;font-weight:600;">本月广告调整</div>
+    <ul style="margin-top:8px;padding-left:18px;">${ledger || '<li>本月无操作记录</li>'}</ul>
     ${gaps ? `<ul style="font-size:12px;color:#8a5a00;margin-top:12px;">${gaps}</ul>` : ''}
-  <ul style="margin-top:12px;padding-left:18px;">${ledger || '<li>本月无操作记录</li>'}</ul>
   </div>`
 }
 

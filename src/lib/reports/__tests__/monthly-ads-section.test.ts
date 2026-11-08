@@ -9,6 +9,10 @@ const mockFrom = vi.mocked(supabaseAdmin.from)
 const CLIENT = '00000000-0000-0000-0000-000000000001'
 const FROM = '2026-10-01'
 const TO = '2026-10-31'
+const PERIOD_OPTS = {
+  periodStartIso: '2026-09-30T11:00:00.000Z',
+  periodEndIso: '2026-10-31T10:59:59.000Z',
+}
 
 type Tables = {
   ad_strategy_configs: Record<string, unknown> | null
@@ -99,11 +103,11 @@ describe('collectMonthlyAdsSection', () => {
     installTables({
       ad_strategy_configs: baseConfig,
       ad_daily_insights: [
-        { entity_id: '111', entity_name: '系列 A', level: 'campaign', spend: 100, leads: 4, messaging_conversations: 0, insight_date: '2026-10-05' },
-        { entity_id: '222', entity_name: '组优', level: 'adset', spend: 60, leads: 3, messaging_conversations: 0, insight_date: '2026-10-06' },
-        { entity_id: '333', entity_name: '组弱', level: 'adset', spend: 40, leads: 1, messaging_conversations: 0, insight_date: '2026-10-06' },
+        { ad_account_id: 'act_1', entity_id: '111', entity_name: '系列 A', level: 'campaign', spend: 100, leads: 4, messaging_conversations: 0, insight_date: '2026-10-05' },
+        { ad_account_id: 'act_1', entity_id: '222', entity_name: '组优', level: 'adset', spend: 60, leads: 3, messaging_conversations: 0, insight_date: '2026-10-06' },
+        { ad_account_id: 'act_1', entity_id: '333', entity_name: '组弱', level: 'adset', spend: 40, leads: 1, messaging_conversations: 0, insight_date: '2026-10-06' },
       ],
-      ad_entity_snapshots: [{ currency: 'NZD', level: 'account', captured_at: '2026-10-10T00:00:00Z' }],
+      ad_entity_snapshots: [{ ad_account_id: 'act_1', currency: 'NZD', level: 'account', captured_at: '2026-10-10T00:00:00Z' }],
       client_pipeline_stages: [{ stage_key: 'quoted', label: '已报价' }],
       contact_stage_events: [{ contact_id: 'c1', to_stage: 'quoted', created_at: '2026-10-08T00:00:00Z', id: 'e1' }],
       contacts: [],
@@ -111,7 +115,7 @@ describe('collectMonthlyAdsSection', () => {
       flywheel_outcomes: [],
     })
 
-    const section = await collectMonthlyAdsSection(CLIENT, FROM, TO)
+    const section = await collectMonthlyAdsSection(CLIENT, FROM, TO, PERIOD_OPTS)
 
     expect(section.spend).toBe(100)
     expect(section.results).toBe(4)
@@ -135,7 +139,7 @@ describe('collectMonthlyAdsSection', () => {
       flywheel_outcomes: [],
     })
 
-    const section = await collectMonthlyAdsSection(CLIENT, FROM, TO)
+    const section = await collectMonthlyAdsSection(CLIENT, FROM, TO, PERIOD_OPTS)
     expect(section.spend).toBeNull()
     expect(section.gaps).toContain('本月没有读到广告投放日数据')
   })

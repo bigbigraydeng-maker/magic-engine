@@ -363,7 +363,7 @@ export default function MonthlyReportPage() {
       </section>
 
       {/* ── Paid ads (read-only monthly block) ───────────────────────── */}
-      <AdsMonthlyPanel ads={report.ads} />
+      <AdsMonthlyPanel ads={report.ads} periodScopeNote={report.period_scope_note} />
 
       {/* ── §5 Link Intelligence ─────────────────────────────────────── */}
       <section>
