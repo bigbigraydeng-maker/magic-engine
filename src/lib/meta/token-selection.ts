@@ -35,8 +35,11 @@ export type ScopedTokenSource = 'client_domain' | 'client_page'
  * Which lookup step produced the token. `shared_fallback` can see several
  * clients' ad accounts and Pages, so "this token can read X" proves nothing about
  * X belonging to the client — callers that audit or gate on ownership check this.
+ *
+ * `client_db`: the token was stored in platform_oauth_connections with
+ * purpose='meta_client_token' — the preferred path after the env-var migration.
  */
-export type MetaTokenSource = ScopedTokenSource | 'shared_fallback'
+export type MetaTokenSource = 'client_db' | ScopedTokenSource | 'shared_fallback'
 
 export interface TokenOwnerRow {
   id: string
@@ -223,6 +226,15 @@ export async function resolveMetaTokenDetailed(
   if (error) return 'ownership_unknown'
   if (!data) return fallback
 
+  // ── Step 0 (preferred): DB-stored per-client token ──────────────────────
+  // After the env-var migration, per-client tokens live in
+  // platform_oauth_connections with purpose='meta_client_token'. This is
+  // checked FIRST so migrated clients use the DB path immediately; env vars
+  // become a legacy fallback that disappears once Render vars are cleaned up.
+  const dbToken = await loadStoredClientMetaToken(supabase, clientId)
+  if (dbToken) return { token: dbToken, source: 'client_db' }
+
+  // ── Steps 1–2 (legacy): scoped env vars ─────────────────────────────────
   // The ownership read is skipped when no scoped env var exists for this client's keys anyway.
   const row = data as TokenOwnerRow
   if (hasScopedEnvToken(row, env)) {
@@ -234,6 +246,41 @@ export async function resolveMetaTokenDetailed(
     if (scoped) return scoped
   }
   return fallback
+}
+
+/**
+ * Per-client Meta token stored in platform_oauth_connections
+ * (purpose='meta_client_token'). This is the preferred lookup path after the
+ * env-var migration — it replaces META_SYSTEM_USER_TOKEN_<DOMAIN> and
+ * META_SYSTEM_USER_TOKEN_PAGE_<id> env vars.
+ *
+ * Returns the decrypted access token or null.
+ */
+export async function loadStoredClientMetaToken(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from('platform_oauth_connections')
+    .select('access_token_enc, token_expiry')
+    .eq('client_id', clientId)
+    .eq('provider', 'meta')
+    .eq('purpose', 'meta_client_token')
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (error || !data) return null
+
+  const enc = (data as { access_token_enc?: unknown }).access_token_enc
+  if (typeof enc !== 'string' || enc.length === 0) return null
+
+  try {
+    return decryptToken(enc)
+  } catch {
+    return null
+  }
 }
 
 /**

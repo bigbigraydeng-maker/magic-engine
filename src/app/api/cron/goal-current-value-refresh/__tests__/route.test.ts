@@ -240,4 +240,45 @@ describe('GET /api/cron/goal-current-value-refresh', () => {
     expect(res.status).toBe(500)
     expect(finishMock).toHaveBeenCalledWith({ failed: 1, error: 'Failed to load active goals: db down' })
   })
+
+  it('signups goal with a departure list asks for deposited seats', async () => {
+    const goals = [{
+      id: 'g-signups',
+      client_id: 'c1',
+      primary_metric_key: 'signups_count',
+      period_start: '2026-10-21',
+      period_end: '2027-02-28',
+      created_at: '2026-10-16T01:00:00.000Z',
+      baseline_value: 0,
+      supporting_metrics: [{
+        key: 'deposited_seat_scope',
+        label: '已收定金座位',
+        departures: [{ depart_on: '2027-03-18', tour_id: 'tour-b' }],
+      }],
+    }]
+    ;(supabaseAdmin.from as any).mockImplementation((table: string) => {
+      if (table === 'clients') {
+        return {
+          select: () => ({ in: () => ({ eq: () => Promise.resolve({ data: [{ id: 'c1' }], error: null }) }) }),
+        }
+      }
+      return {
+        select: () => ({ eq: () => Promise.resolve({ data: goals, error: null }) }),
+        update: () => ({ eq: () => Promise.resolve({ error: null }) }),
+      }
+    })
+    ;(autoFetchMetricValue as any).mockResolvedValue({
+      ok: true, value: 2, source: 'auto.crm_deposited_seats', snapshot_date: '2027-02-28', label: '1 笔定金，2 个座位',
+    })
+
+    const res = await GET(makeReq('Bearer test-secret-123'))
+
+    expect(res.status).toBe(200)
+    expect(autoFetchMetricValue).toHaveBeenCalledWith(expect.anything(), 'c1', 'signups_count', {
+      goalPeriod: { period_start: '2026-10-21', period_end: '2027-02-28' },
+      depositedSeatScope: [{ departOn: '2027-03-18', tourId: 'tour-b' }],
+      goalCreatedAt: '2026-10-16T01:00:00.000Z',
+      baselineValue: 0,
+    })
+  })
 })

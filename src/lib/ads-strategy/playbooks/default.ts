@@ -9,4 +9,6 @@ export const DEFAULT_ADS_PLAYBOOK: AdsPlaybook = {
   resultNoun: '结果',
   costPerResultLabel: '每个结果',
   expectedGeoNoun: '客户业务',
+  creativeCompareMinLinkClicks: null,
+  creativeOfferNoun: null,
 }

@@ -49,7 +49,7 @@ import {
   humanWait,
   scrubContactDetails,
   sendDigestMail,
-  stripAddress,
+  digestName,
   type DigestMailer,
   type DigestSendResult,
 } from '@/lib/crm/digest-shared'
@@ -102,7 +102,7 @@ function byWaitDesc(a: number, b: number): number {
 }
 
 function renderRow(item: LeadDueItem, index: number, ms: number): string {
-  const name = stripAddress(contactCardTitle(item.displayName))
+  const name = digestName(item.displayName)
   const interest = item.interest ? scrubContactDetails(item.interest) : ''
   return `
       <div style="margin:12px 0;padding:12px 14px;background:#f8fafc;border-radius:8px">

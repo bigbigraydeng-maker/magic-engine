@@ -10,6 +10,7 @@
 import { ctrBenchmarkForPosition } from '@/lib/seo-patrol/rules'
 import { isBrandedKeywordWithAliases } from '@/lib/seo-intelligence/intent-strategy'
 import { canonicalUrl } from '@/lib/url/canonical-url'
+import { identityFromUrl, matchProtected } from '@/lib/seo/protected-pages'
 import type { SeoLoopConfig } from './config'
 
 export interface SnapshotKeywordRow {
@@ -242,25 +243,18 @@ export function buildCtrGapCandidates(pages: PageAggRow[], config: SeoLoopConfig
   return out
 }
 
-/** Last path segment of a URL, lowercased ('' for the homepage). */
-export function slugOf(url: string): string {
-  const canon = canonicalUrl(url)
-  if (!canon) return ''
-  const path = canon.slice(canon.indexOf('/'))
-  const segs = path.split('/').filter(Boolean)
-  return (segs[segs.length - 1] ?? '').toLowerCase()
-}
-
-/** URL excluded from the list: on the meta-cycle protected list, or changed by it recently. */
+/** URL excluded from the list: on the protected-page list, or changed by the meta-cycle recently. */
 export function isExcludedUrl(
   url: string,
-  protectedSlugs: string[],
+  protectedEntries: readonly string[],
   recentMetaUrls: ReadonlySet<string>,
 ): boolean {
   const canon = canonicalUrl(url)
   if (canon && recentMetaUrls.has(canon)) return true
-  const slug = slugOf(url)
-  return slug !== '' && protectedSlugs.map(s => s.toLowerCase()).includes(slug)
+  const identity = identityFromUrl(url)
+  // Fail-closed: a URL we cannot normalise is never offered as an opportunity.
+  if (identity.unresolved !== null) return true
+  return matchProtected(protectedEntries, identity)
 }
 
 export interface SitePageRow {

@@ -4,6 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
 import { meMailFrom, ME_MAIL_TO_ADDRESS } from '@/lib/email/sender'
 import { loadTodoCounts, buildTodoEmail, nzWeekday } from '@/lib/pm-todo/daily-todo'
+import { openFactoryWinnerRounds } from '@/lib/pm-todo/factory-winner-items'
 
 /**
  * GET /api/cron/pm-daily-todo (22.E.S18 前置)
@@ -52,6 +53,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Email not configured' }, { status: 503 })
     }
 
+    // 广告赢家待办：先把今天该开的新一轮写进推送记录，再读待办（读路径只读不写）。
+    // 写失败的那条今天不出现；整步挂了也不挡邮件，只在运行记录里留一笔。
+    const winnerRounds = await openFactoryWinnerRounds(supabaseAdmin, now).catch((e: unknown) => ({
+      opened: [] as string[],
+      failed: [{ winner_id: '*', error: e instanceof Error ? e.message : String(e) }],
+    }))
+    if (winnerRounds.failed.length > 0) console.error('[pm-daily-todo] 赢家待办开轮失败:', winnerRounds.failed)
+
     const counts = await loadTodoCounts(supabaseAdmin)
     const nzDateLabel = now.toLocaleDateString('en-NZ', {
       timeZone: 'Pacific/Auckland',
@@ -75,7 +84,13 @@ export async function GET(req: NextRequest) {
     await cronRun.finish({
       processed: 1,
       completed: 1,
-      summary: { sent: true, total_items: email.totalItems, weekday },
+      summary: {
+        sent: true,
+        total_items: email.totalItems,
+        weekday,
+        winner_rounds_opened: winnerRounds.opened.length,
+        winner_rounds_failed: winnerRounds.failed.length,
+      },
     })
 
     return NextResponse.json({ sent: true, total_items: email.totalItems })

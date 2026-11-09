@@ -65,7 +65,7 @@ export function generateAdminApiKey(): GeneratedKey {
 export type KeyKind = 'client' | 'admin'
 
 export type ApiKeyAuth =
-  | { kind: 'client'; keyId: string; clientId: string; scopes: string[] }
+  | { kind: 'client'; keyId: string; clientId: string; scopes: string[]; expiresAt?: string | null }
   | { kind: 'admin'; keyId: string; ownerEmail: string; scopes: string[]; ipAllowlist: string[] }
 
 export type ApiKeyAuthFailure =
@@ -133,6 +133,12 @@ interface LookupRow {
   ownerEmail: string | null
   scopes: string[]
   ipAllowlist: string[]
+  /** Client keys only. Null means the row has no expiry. Admin lookups leave this null. */
+  expiresAt: string | null
+}
+
+function clientExpiresAt(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
 }
 
 /**
@@ -160,6 +166,7 @@ async function lookupByKind(kind: KeyKind, hash: string): Promise<LookupRow | nu
       ownerEmail: null,
       scopes: (data.scopes as string[]) ?? ['read:all'],
       ipAllowlist: [],
+      expiresAt: clientExpiresAt(data.expires_at),
     }
   }
 
@@ -197,6 +204,7 @@ async function lookupByKind(kind: KeyKind, hash: string): Promise<LookupRow | nu
     ownerEmail: data.owner_email as string,
     scopes: (data.scopes as string[]) ?? ['admin:read:all'],
     ipAllowlist: (data.ip_allowlist as string[]) ?? [],
+    expiresAt: null,
   }
 }
 
@@ -246,7 +254,13 @@ export async function verifyApiKey(
   if (kind === 'client') {
     return {
       ok: true,
-      auth: { kind: 'client', keyId: found.keyId, clientId: found.clientId as string, scopes: found.scopes },
+      auth: {
+        kind: 'client',
+        keyId: found.keyId,
+        clientId: found.clientId as string,
+        scopes: found.scopes,
+        expiresAt: found.expiresAt,
+      },
     }
   }
   return {

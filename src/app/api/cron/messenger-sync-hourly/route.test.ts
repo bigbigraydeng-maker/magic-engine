@@ -138,6 +138,15 @@ describe('🔴 跑完必须发「同步跑完了」那张条子（整条新链�
     expect(sendInngestEvent).toHaveBeenCalledTimes(1)
   })
 
+  it('已知坏令牌不算进 failed，真错误照算', async () => {
+    syncClientMessenger.mockResolvedValue(
+      syncResult({ error: 'page_not_verified: unverified_shared_token', skipped: 'page_not_verified' }),
+    )
+    await callRoute()
+    expect(sendInngestEvent.mock.calls[0][0].data).toMatchObject({ failed: 0 })
+    expect(finish).toHaveBeenCalledWith(expect.objectContaining({ failed: 0 }))
+  })
+
   it('🔴 部分客户同步失败也照样发 —— 跟改造之前 `&&` 那套的行为一致', async () => {
     // 改造前：单个客户失败只记一笔、路由仍返 200，`&&` 后面那条 curl 照跑。
     // 这里若收紧成「有失败就不写卡」，就是借这次修复偷偷改了业务行为。

@@ -7,7 +7,13 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { failureCell, isDigestFailure, summaryFailureDetail, type DigestRunRow } from '../digest-cells'
+import {
+  failureCell,
+  isAbandonedDigestRow,
+  isDigestFailure,
+  summaryFailureDetail,
+  type DigestRunRow,
+} from '../digest-cells'
 import { failureSignature } from '../failure-signature'
 import { reconcile } from '@/lib/todo-reconciliation/reconcile'
 import type { RawWorkItem } from '@/lib/todo-reconciliation/types'
@@ -55,6 +61,27 @@ describe('验收 2：卡在 running 的任务进得了失败邮件', () => {
   it('卡死那一格不能再显示成红色的「0 failed」', () => {
     const stuck: DigestRunRow = { status: 'running', failed_count: 0, started_at: hoursAgo(5), finished_at: null }
     expect(failureCell(stuck, NOW)).toMatch(/卡住了/)
+  })
+
+  it('孤儿行（abandoned，或迁移未应用时 failed + abandoned:）进邮件，格子不写 0 failed', () => {
+    const abandoned: DigestRunRow = { status: 'abandoned', failed_count: 0, error_message: 'still running' }
+    expect(isDigestFailure(abandoned, NOW)).toBe(true)
+    expect(failureCell(abandoned, NOW)).toBe('abandoned')
+
+    const fallback: DigestRunRow = {
+      status: 'failed',
+      failed_count: 0,
+      error_message: 'abandoned: still running past twice the expected duration',
+    }
+    expect(isAbandonedDigestRow(fallback)).toBe(true)
+    expect(isDigestFailure(fallback, NOW)).toBe(true)
+    expect(failureCell(fallback, NOW)).toBe('abandoned')
+  })
+
+  it('有的条目成了、有的没成（partial）也进邮件', () => {
+    expect(isDigestFailure({ status: 'partial', failed_count: 0 }, NOW)).toBe(true)
+    expect(failureCell({ status: 'partial', failed_count: 0 }, NOW)).toBe('partial')
+    expect(failureCell({ status: 'partial', failed_count: 2 }, NOW)).toBe('2 failed')
   })
 })
 

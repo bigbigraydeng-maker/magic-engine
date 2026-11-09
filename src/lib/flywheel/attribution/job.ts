@@ -16,6 +16,18 @@ import { supabaseAdmin } from '../../supabase'
 import { fetchAll } from '@/lib/supabase-paginate'
 import type { OutcomeVerdict } from '../adapters/types'
 import { dualWindowEnabled } from './dual-window-gate'
+import { isNotEvaluable } from './execution-evidence'
+import { getMetricPolarity } from '../polarity'
+import {
+  observationDue,
+  pairSpans,
+  readExecutedReview,
+  windowSpanOf,
+  type ExecutedReview,
+  type PairMark,
+  type ReviewAction,
+} from './executed-review'
+import { asObjectDay, judgeObjectWindow, objectWindowDates, type ObjectDay } from './object-window'
 import {
   OUTCOME_CONFLICT_TARGET,
   OUTCOME_EVALUATOR,
@@ -38,6 +50,8 @@ export interface AttributionJobOptions {
   windowDays?: number
   /** Restrict to a single client (e.g. for manual reruns). */
   clientId?: string
+  /** Clock for "is this card's own window due". Defaults to the current time. */
+  now?: Date
 }
 
 export interface AttributionJobResult {
@@ -88,6 +102,12 @@ export interface AttributionJobResult {
   /** First few unattributable action ids, for diagnosis. Bounded on purpose. */
   unattributableSamples: string[]
   /**
+   * Actions that were never executed (AI suggestions, discovery recommendations), so a before/after
+   * comparison would measure nothing. Counted only: no outcome row is written, no existing row is
+   * touched and no to-do is raised. Deliberately NOT part of `unattributable`, whose path deletes rows.
+   */
+  not_evaluable?: number
+  /**
    * Reconciliation failures — claiming a row an older deployment left unsigned,
    * or retiring a non-authoritative window.
    *
@@ -131,7 +151,7 @@ async function loadAttributableActions(
   return fetchAll<ActionRow>((from, to) => {
     let query = supabaseAdmin
       .from('flywheel_actions')
-      .select('id, client_id, flywheel, action_type, payload, expected_metric, expected_delta, executed_at')
+      .select('id, client_id, flywheel, action_type, payload, expected_metric, expected_delta, executed_at, execution_item_id, action_run_id, vendor')
       .not('expected_metric', 'is', null)
       // A stable, unique sort — `range` without one repeats or drops rows at
       // page boundaries.
@@ -144,6 +164,125 @@ async function loadAttributableActions(
     const message = err instanceof Error ? err.message : String(err)
     throw new Error(`runAttributionJob: failed to fetch actions — ${message}`)
   })
+}
+
+function asReviewAction(action: ActionRow): ReviewAction {
+  return {
+    id: action.id,
+    client_id: action.client_id,
+    action_type: action.action_type,
+    payload: action.payload,
+    expected_metric: action.expected_metric,
+    executed_at: action.executed_at,
+  }
+}
+
+/**
+ * A budget or pause card keeps its own window. The job default is not used.
+ * After that window ends, the same ad set's own daily numbers are compared.
+ * A failed save is returned as failed so the next run retries it and the
+ * cron's failure count reaches the existing to-do. It is not logged and dropped.
+ */
+async function saveDueReview(
+  action: ActionRow,
+  review: ExecutedReview,
+  pair: PairMark,
+  now: Date,
+): Promise<ActionOutcome> {
+  const reconcileErrors = await reconcileLegacyWindows(action.id, review.metric)
+  if (!observationDue(review.executedAt, review.observationWindowDays, now)) {
+    return { kind: 'skipped', reconcileErrors }
+  }
+  const rows = await loadObjectDays(action.client_id, review.objectId, review.executedAt, review.observationWindowDays)
+  if (rows === 'error') return { kind: 'failed', message: 'object window read failed' }
+  const judged = judgeObjectWindow({
+    metric: review.metric,
+    direction: review.direction,
+    expectedDelta: action.expected_delta,
+    pair,
+    rows,
+    executedAt: review.executedAt,
+    windowDays: review.observationWindowDays,
+    ...caseFacts(action.payload),
+    verdictOf: computeOutcomeVerdict,
+  })
+  try {
+    await upsertOutcome({
+      action_id: action.id,
+      client_id: action.client_id,
+      metric_key: review.metric,
+      baseline: judged.baseline,
+      after_value: judged.after,
+      delta: judged.delta,
+      delta_pct: judged.deltaPct,
+      confidence: judged.confidence,
+      verdict: judged.storedVerdict,
+      window_days: review.observationWindowDays,
+      evaluator_key: OUTCOME_EVALUATOR.FLYWHEEL_METRICS,
+      computed_at: now.toISOString(),
+    })
+    await saveCase(action, judged.case)
+  } catch (err) {
+    return { kind: 'failed', message: err instanceof Error ? err.message : String(err) }
+  }
+  reconcileErrors.push(...await retireExtraWindows(action.id, review.metric, review.observationWindowDays))
+  return { kind: 'written', reconcileErrors }
+}
+
+async function loadObjectDays(
+  clientId: string,
+  objectId: string,
+  executedAt: string,
+  windowDays: number,
+): Promise<ObjectDay[] | 'error'> {
+  const span = objectWindowDates(executedAt, windowDays)
+  if (!span) return 'error'
+  const { data, error } = await supabaseAdmin
+    .from('ad_daily_insights')
+    .select('insight_date, spend, impressions, clicks, leads, messaging_conversations, results')
+    .eq('client_id', clientId)
+    .eq('platform', 'meta')
+    .eq('level', 'adset')
+    .eq('entity_id', objectId)
+    .gte('insight_date', span.from)
+    .lt('insight_date', span.to)
+  if (error) return 'error'
+  return Array.isArray(data) ? data.flatMap((row) => asDay(row)) : []
+}
+
+function asDay(row: unknown): ObjectDay[] {
+  const day = asObjectDay(row)
+  return day ? [day] : []
+}
+
+function caseFacts(payload: Record<string, unknown> | null): {
+  beforeCents: unknown
+  afterCents: unknown
+  beforeStatus: unknown
+  afterStatus: unknown
+  basis: unknown
+} {
+  const order = payload?.order
+  const basis = order && typeof order === 'object' && !Array.isArray(order)
+    ? (order as Record<string, unknown>).basis
+    : null
+  return {
+    beforeCents: payload?.beforeCents,
+    afterCents: payload?.afterCents,
+    beforeStatus: payload?.before,
+    afterStatus: payload?.after,
+    basis,
+  }
+}
+
+async function saveCase(action: ActionRow, reviewCase: { verdict: string; reason: string | null; text: string }): Promise<void> {
+  const payload = { ...(action.payload ?? {}), reviewCase }
+  const { error } = await supabaseAdmin
+    .from('flywheel_actions')
+    .update({ payload })
+    .eq('id', action.id)
+    .eq('client_id', action.client_id)
+  if (error) throw new Error(`case save: ${error.message}`)
 }
 
 function emptyResult(): AttributionJobResult {
@@ -167,8 +306,26 @@ function emptyResult(): AttributionJobResult {
  * report — which is how the deferral path went quiet until round 20.
  */
 type ActionOutcome =
-  | { kind: 'deferred' | 'unattributable' | 'written' | 'skipped'; reconcileErrors: string[] }
+  | { kind: 'deferred' | 'unattributable' | 'written' | 'skipped' | 'not_evaluable'; reconcileErrors: string[] }
   | { kind: 'failed'; message: string }
+
+/** A non-empty string from an untyped payload value, else null. */
+function payloadText(payload: Record<string, unknown> | null, key: string): string | null {
+  const v = payload?.[key]
+  return typeof v === 'string' && v !== '' ? v : null
+}
+
+/** The execution evidence of one loaded action. Missing columns read as null. */
+function evaluabilityOf(action: ActionRow) {
+  return {
+    zhuge_session_key: payloadText(action.payload, 'zhuge_session_key'),
+    payload_source: payloadText(action.payload, 'source'),
+    discovery_id: payloadText(action.payload, 'discovery_id'),
+    execution_item_id: action.execution_item_id ?? null,
+    action_run_id: action.action_run_id ?? null,
+    vendor: action.vendor ?? null,
+  }
+}
 
 /**
  * Arbitration plus attribution for a single action.
@@ -188,7 +345,18 @@ type ActionOutcome =
 async function attributeOne(
   action: ActionRow,
   windowDays: number,
+  pairs: ReadonlyMap<string, PairMark>,
+  now: Date,
 ): Promise<ActionOutcome> {
+  const review = readExecutedReview(asReviewAction(action))
+  if (review.kind === 'not_executed') return { kind: 'not_evaluable', reconcileErrors: [] }
+  if (review.kind === 'incomplete') return { kind: 'failed', message: review.reason }
+  if (review.kind === 'ready') return saveDueReview(action, review.review, pairs.get(action.id) ?? 'clear', now)
+
+  // Not evaluable actions return before any reconcile call, so no stored
+  // outcome row is deleted and no to-do is raised for work that never happened.
+  if (isNotEvaluable(evaluabilityOf(action))) return { kind: 'not_evaluable', reconcileErrors: [] }
+
   const routing = resolveAttributionRouting(action)
 
   if (routing === 'defer') {
@@ -222,14 +390,20 @@ export async function runAttributionJob(
   options: AttributionJobOptions = {}
 ): Promise<AttributionJobResult> {
   const windowDays = options.windowDays ?? DEFAULT_WINDOW_DAYS
+  const now = options.now ?? new Date()
   const actions = await loadAttributableActions(options)
   if (!actions.length) return emptyResult()
 
   const r = emptyResult()
   const pass2Clients = new Set<string>()
+  let notEvaluable = 0
+  const pairs = pairSpans(actions.flatMap((action) => {
+    const span = windowSpanOf(asReviewAction(action))
+    return span ? [span] : []
+  }))
 
   for (const action of actions) {
-    const outcome = await attributeOne(action, windowDays)
+    const outcome = await attributeOne(action, windowDays, pairs, now)
 
     if (outcome.kind === 'failed') {
       console.error(`Attribution job: action ${action.id} — ${outcome.message}`)
@@ -243,6 +417,11 @@ export async function runAttributionJob(
         r.reconcileErrorSamples.push(`action ${action.id}: ${msg}`)
       }
       console.error(`Attribution job: action ${action.id} — ${msg}`)
+    }
+
+    if (outcome.kind === 'not_evaluable') {
+      notEvaluable++
+      continue
     }
 
     if (outcome.kind === 'written') r.written++
@@ -263,6 +442,7 @@ export async function runAttributionJob(
   }
 
   r.processed = actions.length
+  r.not_evaluable = notEvaluable
   r.pass2ClientIds = Array.from(pass2Clients)
   return r
 }
@@ -278,6 +458,9 @@ interface ActionRow {
   expected_metric: string
   expected_delta: number | null
   executed_at: string
+  execution_item_id: string | null
+  action_run_id: string | null
+  vendor: string | null
 }
 
 /** What one action's attribution produced, and what reconciliation could not do. */
@@ -543,6 +726,10 @@ async function retireExtraWindows(
  * every other action in the window, so it cannot say whether THIS action worked.
  * The caller still stores baseline / after / delta. Everything else goes through
  * `computeVerdict`. Both evaluators (this file and gsc-bridge.ts) call this.
+ *
+ * With no expected_delta, direction comes from the polarity table: lower-is-better
+ * metrics are flipped, and neutral metrics (e.g. spend) are always inconclusive.
+ * An explicit expected_delta is never touched.
  */
 export function computeOutcomeVerdict(
   metricKey: string,
@@ -551,7 +738,12 @@ export function computeOutcomeVerdict(
   expectedDelta: number | null,
 ): { verdict: OutcomeVerdict; confidence: number } {
   if (isSiteLevelUnattributable(metricKey)) return { verdict: 'inconclusive', confidence: 0 }
-  return computeVerdict(delta, deltaPct, expectedDelta)
+
+  const polarity = expectedDelta === null ? getMetricPolarity(metricKey) : 'higher_is_better'
+  if (polarity === 'neutral') return { verdict: 'inconclusive', confidence: 0 }
+
+  const flip = polarity === 'lower_is_better'
+  return computeVerdict(flip ? -delta : delta, flip && deltaPct !== null ? -deltaPct : deltaPct, expectedDelta)
 }
 
 /**

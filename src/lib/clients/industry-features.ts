@@ -18,7 +18,7 @@
  */
 
 /** 行业专属功能。加新功能前先问：这东西对别的行业有意义吗？有就别加进来。 */
-export type IndustryFeature = 'listings' | 'projects' | 'tailor_made' | 'agents'
+export type IndustryFeature = 'listings' | 'projects' | 'tailor_made' | 'agents' | 'tour_catalog' | 'business_calculator'
 
 /**
  * 归一化：下划线/连字符/多余空格统一，大小写拉平。
@@ -53,6 +53,12 @@ const FEATURE_KEYWORDS: Record<IndustryFeature, string[]> = {
   // (2026-09-28 查证：这张卡片此前没有任何行业过滤，NAL 也能看到，见台账
   // client-custom-features-leak-to-other-clients)。
   agents: TRAVEL_KEYWORDS,
+  // 「团目录」= 旅行社的团名、行程、展示价、出发班期的统一档案。只对旅游客户有意义,
+  // 同样共用旅游关键词,不另起一套。
+  tour_catalog: TRAVEL_KEYWORDS,
+  // 「经营测算」= 旅游业务的年度利润模拟器（Tour / Tailor-made 产品结构），内部财务假设，
+  // 同样共用旅游关键词。
+  business_calculator: TRAVEL_KEYWORDS,
 }
 
 /**
@@ -76,5 +82,7 @@ export function industryFeatureFlags(industry: string | null | undefined): Recor
     projects: hasIndustryFeature(industry, 'projects'),
     tailor_made: hasIndustryFeature(industry, 'tailor_made'),
     agents: hasIndustryFeature(industry, 'agents'),
+    tour_catalog: hasIndustryFeature(industry, 'tour_catalog'),
+    business_calculator: hasIndustryFeature(industry, 'business_calculator'),
   }
 }

@@ -19,6 +19,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { createDiagnosticRun, executeDiagnosticRun } from './runner'
+import type { SynthesisReceipt } from './synthesis-orchestrator'
 
 /** 同一个客户多久内跑过就跳过 —— 防手工刚跑完 cron 又跑一遍白花钱。 */
 export const RERUN_COOLDOWN_DAYS = 5
@@ -29,6 +30,8 @@ export interface ScheduledDiagnosticOutcome {
   result: 'ran' | 'skipped_recent' | 'skipped_no_industry' | 'error'
   runId?: string
   detail?: string
+  /** 叙事（大模型写的体检解读）这一步的回执 —— 失败也要留痕，否则又是静默（2026-10-18）。 */
+  synthesis?: SynthesisReceipt
 }
 
 export interface ScheduledDiagnosticSummary {
@@ -127,8 +130,14 @@ export async function runScheduledDiagnostics(
   for (const c of run) {
     try {
       const runId = await createDiagnosticRun(supabase, c.id, 'full')
-      await executeDiagnosticRun(supabase, runId, c.id, 'full')
-      outcomes.push({ clientId: c.id, clientName: c.name, result: 'ran', runId })
+      const synthesis = await executeDiagnosticRun(supabase, runId, c.id, 'full')
+      outcomes.push({
+        clientId: c.id,
+        clientName: c.name,
+        result: 'ran',
+        runId,
+        ...(synthesis ? { synthesis } : {}),
+      })
     } catch (e) {
       // 一个客户失败不拖累其他客户 —— 但要留下原因，否则又变成「没结果也不知道为什么」
       outcomes.push({

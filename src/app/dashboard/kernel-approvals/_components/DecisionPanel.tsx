@@ -58,6 +58,7 @@ const BLOCKED_REASON_LABEL: Record<string, string> = {
   unknown_action: '系统认不出这个动作，不给批（可以点「先不做」）',
   unknown_action_version: '这条是旧版本的请求，不能用新规则批（可以点「先不做」）',
   dedicated_entry: '这条要去它自己的批准页批——那里批完会立刻执行，这里只签不执行（可以点「先不做」）',
+  spend_increase: '这条会让客户多花钱，只有 PM 本人能批，这里不给批（可以点「先不做」）',
 }
 
 export default function DecisionPanel({

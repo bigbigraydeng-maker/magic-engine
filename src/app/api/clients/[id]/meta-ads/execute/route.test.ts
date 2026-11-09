@@ -24,6 +24,10 @@ const m = vi.hoisted(() => ({
   statusReceipt: null as null | Record<string, unknown>,
   draftRows: [] as Array<{ client_id: string; action_type: string; payload: { draft: { kind: string }; campaignId: string } }>,
   draftLookupError: null as null | { message: string },
+  authority: vi.fn(),
+  fwUpdate: vi.fn(),
+  callOrder: [] as string[],
+  requestCard: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
@@ -37,6 +41,10 @@ vi.mock('@/lib/inngest/client', () => ({ CLOUD_FN_PREFIX: 'cloud-', inngest: { s
 vi.mock('@/lib/meta/token-manager', () => ({
   getMetaTokenForClient: vi.fn().mockResolvedValue('SHARED_FALLBACK_TOKEN'),
 }))
+vi.mock('@/lib/ads/spend-activation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ads/spend-activation')>()
+  return { ...actual, requireSpendActivationAuthority: m.authority }
+})
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: (table: string) => {
@@ -52,7 +60,15 @@ vi.mock('@/lib/supabase', () => ({
           return builder
         }
         builder.maybeSingle = vi.fn().mockResolvedValue({ data: m.statusReceipt, error: null })
-        builder.insert = m.otherTableInsert
+        builder.insert = (row: unknown) => {
+          m.callOrder.push('receipt_insert')
+          return m.otherTableInsert(row)
+        }
+        builder.update = (row: unknown) => {
+          m.callOrder.push('receipt_update')
+          m.fwUpdate(row)
+          return { eq: async () => ({ data: null, error: null }) }
+        }
         builder.limit = () => {
           const rows = m.draftRows.filter((row) =>
             filters.every(([col, val]) => {
@@ -83,17 +99,29 @@ vi.mock('@/lib/supabase', () => ({
         data: table === 'action_runs' ? m.statusRun : m.statusReceipt,
         error: null,
       })
-      builder.insert = m.otherTableInsert
+      builder.insert = (row: unknown) => {
+        m.callOrder.push('receipt_insert')
+        return m.otherTableInsert(row)
+      }
       return {
         ...builder,
-        insert: m.otherTableInsert,
+        insert: (row: unknown) => {
+          m.callOrder.push('receipt_insert')
+          return m.otherTableInsert(row)
+        },
       }
     },
   },
 }))
+vi.mock('@/lib/action-submission/campaign-status-card', () => ({
+  requestCampaignStatusCard: m.requestCard,
+}))
 vi.mock('@/lib/meta/client', () => ({
   getCampaignDetails: m.getCampaignDetails,
-  setCampaignStatus: m.setCampaignStatus,
+  setCampaignStatus: (...args: unknown[]) => {
+    m.callOrder.push('meta_set_status')
+    return m.setCampaignStatus(...args)
+  },
 }))
 
 import { GET, POST } from './route'
@@ -125,6 +153,12 @@ beforeEach(() => {
   m.statusReceipt = null
   m.draftRows = []
   m.draftLookupError = null
+  m.callOrder = []
+  m.authority.mockResolvedValue({ ok: true, actorUserId: 'u-pm', actorEmail: 'pm@magiclab.test', basis: 'global_admin' })
+  m.requestCard.mockResolvedValue({
+    status: 202,
+    body: { success: false, status: 'awaiting_confirmation', wroteMeta: false },
+  })
   m.registeredAccounts.mockResolvedValue({ data: [{ ad_account_id: 'act_1111111111' }], error: null })
   m.getCampaignDetails.mockResolvedValue({
     id: '120220000000000002', name: 'B campaign', status: 'ACTIVE', daily_budget: '5000', account_id: '2222222222',
@@ -155,8 +189,13 @@ describe('meta-ads/execute POST — campaign belonging to another client', () =>
 
     const res = await post({ action_type: 'ads.pause_campaign', campaign_id: '120210000000000001' })
 
-    expect(res.status).not.toBe(403)
-    expect(m.setCampaignStatus).toHaveBeenCalledWith('120210000000000001', 'SHARED_FALLBACK_TOKEN', 'PAUSED')
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      kind: 'pause',
+      campaignId: '120210000000000001',
+      clientId: CLIENT_A,
+    }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 
   it('queues the Kernel action in Inngest and does not call a Meta writer from the route', async () => {
@@ -173,7 +212,7 @@ describe('meta-ads/execute POST — campaign belonging to another client', () =>
     expect(m.queueBudget).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       clientId: CLIENT_A,
       campaignId: '120210000000000001',
-      adAccountId: '1111111111',
+      adAccountId: 'act_1111111111',
       afterCents: 4_000,
       access: expect.objectContaining({ ok: true }),
     }))
@@ -240,8 +279,9 @@ describe('meta-ads/execute POST — reactivating ME Messenger draft campaigns', 
   it('reactivates when no Messenger draft exists', async () => {
     const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
 
-    expect(res.status).toBe(200)
-    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'ACTIVE')
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'resume', campaignId: CAMP }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 
   it('fails closed when the draft lookup errors', async () => {
@@ -271,8 +311,9 @@ describe('meta-ads/execute POST — reactivating ME Messenger draft campaigns', 
 
     const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
 
-    expect(res.status).toBe(200)
-    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'ACTIVE')
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'resume' }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 
   it('does not block pausing a campaign that has a Messenger draft', async () => {
@@ -280,8 +321,9 @@ describe('meta-ads/execute POST — reactivating ME Messenger draft campaigns', 
 
     const res = await post({ action_type: 'ads.pause_campaign', campaign_id: CAMP })
 
-    expect(res.status).toBe(200)
-    expect(m.setCampaignStatus).toHaveBeenCalledWith(CAMP, 'SHARED_FALLBACK_TOKEN', 'PAUSED')
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'pause' }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 
   it('refuses a malformed campaign id spelling (leading zero) without writing', async () => {
@@ -307,6 +349,101 @@ describe('meta-ads/execute POST — reactivating ME Messenger draft campaigns', 
     const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: '120220000000000002' })
 
     expect(res.status).toBe(403)
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
+  })
+})
+
+describe('meta-ads/execute POST — reactivation needs PM authority and a receipt first', () => {
+  const CAMP = '120210000000000001'
+
+  beforeEach(() => {
+    m.getCampaignDetails.mockResolvedValue({
+      id: CAMP, name: 'A campaign', status: 'PAUSED', daily_budget: '5000', account_id: '1111111111',
+    })
+    m.setCampaignStatus.mockResolvedValue(true)
+    m.otherTableInsert.mockReturnValue({
+      select: () => ({ single: vi.fn().mockResolvedValue({ data: { id: 'act1' }, error: null }) }),
+    })
+  })
+
+  it('a paid client can ask to resume, and this route does not write Meta', async () => {
+    m.authority.mockResolvedValue({ ok: false, status: 403, error: 'x', code: 'activation_requires_pm' })
+
+    const res = await post({ action_type: 'ads.reactivate_campaign', campaign_id: CAMP })
+
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'resume' }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
+    expect(m.authority).not.toHaveBeenCalled()
+    expect(m.otherTableInsert).not.toHaveBeenCalled()
+  })
+
+  it('pausing still asks for a card without PM authority and does not write Meta', async () => {
+    m.authority.mockResolvedValue({ ok: false, status: 403, error: 'x', code: 'activation_requires_pm' })
+
+    const res = await post({ action_type: 'ads.pause_campaign', campaign_id: CAMP })
+
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'pause' }))
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
+    expect(m.authority).not.toHaveBeenCalled()
+  })
+
+  it('lowering a budget still works for a paid client account without PM authority', async () => {
+    m.authority.mockResolvedValue({ ok: false, status: 403, error: 'x', code: 'activation_requires_pm' })
+
+    const res = await post({ action_type: 'ads.adjust_bid', campaign_id: CAMP, params: { new_daily_budget: 40 } })
+
+    expect(res.status).toBe(202)
+    expect(m.queueBudget).toHaveBeenCalled()
+    expect(m.authority).not.toHaveBeenCalled()
+  })
+})
+
+describe('meta-ads/execute POST — hostile request bodies', () => {
+  const CAMP = '120210000000000001'
+
+  beforeEach(() => {
+    m.getCampaignDetails.mockResolvedValue({
+      id: CAMP, name: 'A campaign', status: 'PAUSED', daily_budget: '5000', account_id: '1111111111',
+    })
+    m.setCampaignStatus.mockResolvedValue(true)
+    m.otherTableInsert.mockReturnValue({
+      select: () => ({ single: vi.fn().mockResolvedValue({ data: { id: 'act1' }, error: null }) }),
+    })
+  })
+
+  it('params: null does not crash (no 500)', async () => {
+    const res = await post({ action_type: 'ads.pause_campaign', campaign_id: CAMP, params: null })
+
+    expect(res.status).toBe(202)
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
+  })
+
+  it('execution_item_id that is not a UUID → 400, nothing written', async () => {
+    const res = await post({
+      action_type: 'ads.reactivate_campaign',
+      campaign_id: CAMP,
+      params: { execution_item_id: 'not-a-uuid' },
+    })
+
+    expect(res.status).toBe(400)
+    expect(m.setCampaignStatus).not.toHaveBeenCalled()
+    expect(m.otherTableInsert).not.toHaveBeenCalled()
+  })
+
+  it('a valid UUID execution_item_id is accepted on reactivate', async () => {
+    const res = await post({
+      action_type: 'ads.reactivate_campaign',
+      campaign_id: CAMP,
+      params: { execution_item_id: '11111111-2222-4333-8444-555555555555' },
+    })
+
+    expect(res.status).toBe(202)
+    expect(m.requestCard).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      executionItemId: '11111111-2222-4333-8444-555555555555',
+      kind: 'resume',
+    }))
     expect(m.setCampaignStatus).not.toHaveBeenCalled()
   })
 })

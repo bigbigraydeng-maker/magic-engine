@@ -22,6 +22,12 @@ import { getDecision, resolvePendingApproval } from './store'
 import { KernelError } from './errors'
 import { canonicalHashOfInput } from './canonical-hash'
 import {
+  isSpendApproverUser,
+  isSpendIncreaseAction,
+  pmSpendEnvelopeBlockReason,
+  SPEND_APPROVER_ONLY_REASON,
+} from './spend-approval'
+import {
   mintContext,
   preflight,
   recordDeny,
@@ -337,7 +343,38 @@ async function checkApprovalPreconditions(
     )
   }
 
+  const spendBlock = await checkPmSpendEnvelope(deps, run, approvedByUser, pf, expectedDecisionId)
+  if (spendBlock) return spendBlock
+
   return { ok: true, pending, definition: pf.definition, policy: pf.policy, costEstimate: pf.costEstimate }
+}
+
+/**
+ * ④ 加钱类（第 3 刀 3a §2.2-3）：执行前 Gateway 一定会按 PM 放量信封再判一次。这里先判，
+ *    判不过就当场落一条可恢复 deny 说清哪一条没过——不然 PM 批完，run 死在碰 Meta 之前，
+ *    PM 以为改了、实际没改。不是加钱类 → null（不判）。
+ */
+async function checkPmSpendEnvelope(
+  deps: KernelDeps,
+  run: ActionRun,
+  approvedByUser: string,
+  pf: { definition: ActionDefinition; policy: ClientAutomationPolicy; costEstimate: number },
+  expectedDecisionId: string,
+): Promise<ApprovalPreconditions | null> {
+  if (!isSpendIncreaseAction(pf.definition)) return null
+  const blocked = await pmSpendEnvelopeBlockReason(deps, pf.definition, run)
+  if (!blocked) return null
+  return approvalDeny(
+    run,
+    {
+      definition: pf.definition,
+      policy: pf.policy,
+      code: 'outside_autonomy_envelope',
+      reason: `${approvedByUser} 点了同意，但这次改动现在做不了：${blocked}`,
+      costEstimate: pf.costEstimate,
+    },
+    expectedDecisionId,
+  )
 }
 
 /**
@@ -432,6 +469,17 @@ export async function approveRun(
 
   // 🔴 在任何写入之前 —— 批的必须是他看见的那一份（见 HumanDecisionOptions）
   assertDecisionStillCurrent(run, options.expectedDecisionId, approvedByUser)
+
+  // 🔴 加钱类（第 3 刀 3a 第 3 道）：批准人必须是 PM 本人。不是 → 抛错，**不签、不改 run**：
+  //    run 仍挂着等 PM，一次误点不能把它变成「已拒绝」。所有人工批准都汇到这里
+  //    （O1 专属页、runner；通用审批页对加钱类另有专属入口登记先挡）。
+  if (isSpendIncreaseAction(deps.registry.get(run.action_key)) && !isSpendApproverUser(deps, approvedByUser)) {
+    throw new KernelError(
+      'NOT_AUTHORIZED',
+      `${approvedByUser || '这个账号'} 点了同意，但${SPEND_APPROVER_ONLY_REASON} —— 没有签任何决策，这条仍在等 PM 批`,
+      { detail: { runId: run.id, actionKey: run.action_key, reason: 'spend_approver_only' } },
+    )
+  }
 
   const checked = await checkApprovalPreconditions(deps, run, approvedByUser, options, now)
   if (!checked.ok) return recordDeny(deps, checked.deny)

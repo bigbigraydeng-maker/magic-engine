@@ -14,9 +14,10 @@
  *                          Conversions = key events. Requires client to mark
  *                          form_submit or generate_lead as key event in GA4.
  *                          See docs/sops/ga4-lead-gen-key-event-setup.md
- *   - leads_count        → same source as form_submissions (hybrid metric — auto
- *                          half from GA4 conversions, FDE tops up phone/wechat
- *                          leads manually via Submit Verdict)
+ *   - leads_count        → dated goal: Meta lead actions inside the goal
+ *                          window, end clamped to today (auto.meta_leads).
+ *                          Undated: GA4 conversions, then the ads ladder only
+ *                          when that read fails. FDE still tops up phone/wechat.
  *   - ai_visibility_score→ industry_ai_visibility_snapshots: client's top-3 AI
  *                          mention share × 100 (A2.1-γ). Has a same-day freshness
  *                          gate — returns ok:false if the snapshot isn't today's.
@@ -44,6 +45,8 @@ import {
 } from '@/lib/industry-ai-visibility/snapshot-conclusive'
 import { resolveIndustryCode, matchAliases } from './industry-mapping'
 import { countOutcome, type OutcomeStep } from '@/lib/ads-strategy/portfolio/outcome-ladder'
+import type { SeatDeparture } from '@/lib/crm/sales-progress/deposited-seats'
+import { fetchDepositedSeatProgress } from '@/lib/strategy/deposited-seat-fetch'
 
 export type AutoFetchResult =
   | { ok: true;  value: number; source: string; snapshot_date: string; label: string }
@@ -67,6 +70,20 @@ export interface AutoFetchOptions {
    *    fails for every goal of that client.
    */
   goalPeriod?: GoalPeriod
+  /**
+   * When set on a signups_count goal, count deposited seats on these
+   * departures instead of purchase rows. Absent = the original deal count.
+   */
+  depositedSeatScope?: readonly SeatDeparture[]
+  /** goals.created_at. The later of its NZ day and period_start is the cutoff. */
+  goalCreatedAt?: string | null
+  /** goals.baseline_value. New seats are published only when this is 0. */
+  baselineValue?: unknown
+  /**
+   * Clock for clamping a dated leads_count window to today.
+   * Defaults to the current time. Tests pass a fixed instant.
+   */
+  now?: Date
 }
 
 /**
@@ -83,7 +100,7 @@ export async function autoFetchMetricValue(
   metricKey: string,
   options: AutoFetchOptions = {},
 ): Promise<AutoFetchResult> {
-  const { goalPeriod } = options
+  const { goalPeriod, now } = options
   switch (metricKey) {
     case 'organic_traffic':
       return fetchOrganicTraffic(supabase, clientId)
@@ -92,17 +109,28 @@ export async function autoFetchMetricValue(
     case 'form_submissions':
       return fetchFormSubmissions(supabase, clientId)
     case 'leads_count': {
-      // leads_count is hybrid (catalog.measurement='hybrid'): GA4 conversions
-      // are the auto half; FDE adds phone/wechat counts via Submit Verdict.
-      // We surface only the auto half here — the hybrid hint in CurrentValueCell
-      // tells FDE to top up the rest. When GA4 has nothing, fall back to the
-      // ads outcome ladder (spec 2026-09-24 ads IMPACT §3 G1).
+      // Hybrid: this returns only the auto half. CurrentValueCell tells FDE
+      // to top up phone/wechat. A dated goal must not use the latest GA4
+      // snapshot — that sum ignores the start date. Count Meta leads in the
+      // window first (fetchAdsOutcome). No dates → old order, unchanged.
+      const dated = explicitGoalPeriod(goalPeriod)
+      if (dated) return fetchDatedLeadCount(supabase, clientId, dated, now ?? new Date())
       const ga = await fetchFormSubmissions(supabase, clientId)
       return ga.ok ? ga : fetchAdsOutcome(supabase, clientId, 'lead', goalPeriod)
     }
     // 🔴 「报名/预订数」是真成交，不是广告留资。WP0 一度把它接到 fetchAdsOutcome('lead')
     //    上——那会让「33 个报名」的目标拿留资数去填，数字看着漂亮但名不符实。
     case 'signups_count':
+      // A goal that lists departures wants seats, not deal rows.
+      // Goals without that list keep the purchase-row count.
+      if (options.depositedSeatScope) {
+        return fetchDepositedSeatProgress(supabase, clientId, {
+          depositedSeatScope: options.depositedSeatScope,
+          goalPeriod,
+          goalCreatedAt: options.goalCreatedAt,
+          baselineValue: options.baselineValue,
+        })
+      }
       return fetchBookings(supabase, clientId, goalPeriod)
     case 'messaging_started':
       return fetchAdsOutcome(supabase, clientId, 'messaging_started', goalPeriod)
@@ -772,6 +800,20 @@ export interface GoalPeriod {
   period_end: string
 }
 
+/** Both dates present → the caller named a window. Blank dates stay undated. */
+function explicitGoalPeriod(period: GoalPeriod | undefined): GoalPeriod | null {
+  if (!period) return null
+  const start = typeof period.period_start === 'string' ? period.period_start.trim() : ''
+  const end = typeof period.period_end === 'string' ? period.period_end.trim() : ''
+  if (start.length === 0 || end.length === 0) return null
+  return { period_start: start, period_end: end }
+}
+
+function clampPeriodEndToToday(period: GoalPeriod, today: string): GoalPeriod {
+  if (period.period_end <= today) return period
+  return { period_start: period.period_start, period_end: today }
+}
+
 /** The exact columns InsightForOutcome needs — never select '*'. */
 interface AdsetInsightRow {
   reach: number | null
@@ -923,5 +965,36 @@ async function fetchAdsOutcome(
     source: 'ad_daily_insights',
     snapshot_date: goal.period.period_end,
     label: step,
+  }
+}
+
+/**
+ * Dated leads_count. Reuses fetchAdsOutcome on the goal window with the end
+ * clamped to today, so days before the start (and days that have not happened)
+ * are not part of the sum.
+ */
+async function fetchDatedLeadCount(
+  supabase: SupabaseClient,
+  clientId: string,
+  period: GoalPeriod,
+  now: Date,
+): Promise<AutoFetchResult> {
+  const today = now.toISOString().slice(0, 10)
+  if (period.period_start > today) {
+    return {
+      ok: true,
+      value: 0,
+      source: 'auto.meta_leads',
+      snapshot_date: today,
+      label: `0 Meta leads (starts ${formatDate(period.period_start)}; nothing before the start date counts)`,
+    }
+  }
+  const window = clampPeriodEndToToday(period, today)
+  const ads = await fetchAdsOutcome(supabase, clientId, 'lead', window)
+  if (!ads.ok) return ads
+  return {
+    ...ads,
+    source: 'auto.meta_leads',
+    label: `${ads.value.toLocaleString()} Meta leads (${formatDate(window.period_start)} → ${formatDate(window.period_end)})`,
   }
 }

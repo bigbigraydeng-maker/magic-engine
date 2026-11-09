@@ -56,6 +56,7 @@ function installWorkerMocks() {
                   quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
                 },
                 review_ref: {
+                  approved_at: '2026-10-20T00:00:00.000Z', // 切换日(2026-10-23)之前批准的旧版清单
                   checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
                     key, judge: 'HUMAN', outcome: 'PASS', detail: null,
                     source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,

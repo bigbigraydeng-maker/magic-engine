@@ -558,7 +558,9 @@ describe('三个同步入口都把账户时区算进请求窗口', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(INCIDENT)
-    historyProbe.mockResolvedValue(DEEP_HISTORY)
+    // 历史深度要在假时钟设好之后再算：模块顶部的 DEEP_HISTORY 是按真实今天算的，
+    // 假时钟回到 9 月后它就「比回填窗口浅」，会误走回填路径，窗口起点变成 30 天前
+    historyProbe.mockResolvedValue(historyReachingBack(BACKFILL_LOOKBACK_DAYS + 10))
     timezoneProbe.mockResolvedValue(AUCKLAND)
     fetchDaily.mockResolvedValue([])
     fetchAds.mockResolvedValue([])

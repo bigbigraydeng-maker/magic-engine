@@ -57,7 +57,7 @@ beforeAll(async () => {
   const NAL = settingsFixture(nalSettings)
   ctsRun = runDiagnostics({
     clientId: 'cts', date: '2026-09-13', evaluatedAt: '2026-09-14T03:00:00Z',
-    outcome: { leading: 'lead', primary: 'lead', targetCostPerPrimary: 40, minPrimaryPerUnit: 5 }, outcomeConfigured: true,
+    outcome: { leading: 'lead', primary: 'lead', targetCostPerPrimary: 46.8, minPrimaryPerUnit: 5 }, outcomeConfigured: true,
     messagingReferralAvailable: false, digestRecipients: [],
     accounts: [accountInput({ fixture: CTS, snapshots: replaySnapshots({ fixture: CTS, clientId: 'cts', asOfIso: '2026-09-13T11:59:59Z', date: '2026-09-13', daily: ctsDaily, activities: ctsActivities as ActivityRow[] }), daily: ctsDaily, hourly: hourlyFromGraph((ctsHourlyRaw as { days: Record<string, GraphHourlySpendRow[]> }).days), lastInsightDate: '2026-09-13' })],
   })
@@ -126,7 +126,7 @@ describe('日报内容（真实回放诊断）', () => {
     expect(html).toContain('投放卡住')
     expect(html).toContain('样本：')
     expect(html).toContain('只读诊断，没有改任何广告和预算')
-    expect(html).toContain('NZD 23.22')
+    expect(html).toContain('NZD 27.17')
     expect(html).toContain('<a href="https://adsmanager.facebook.com/')
   })
 
@@ -159,6 +159,17 @@ describe('日报内容（真实回放诊断）', () => {
     expect(awarenessAt).toBeGreaterThan(-1)
     expect(html.indexOf('攒了人没收割')).toBeGreaterThan(awarenessAt)
     expect(html).toContain('结果真相断层')
+  })
+
+  it('目标进度未判：归属不足照旧写「归属数据不足」；广告设置读失败不冒充成归属不足', () => {
+    const pace = { expectedToDate: 35, actualToDate: null, gapPct: null, projectedEnd: null, verdict: 'unknown' as const, reason: 'r' }
+    const goal = { title: 'G', label: '留资', target: 50, dayIndex: 15, totalDays: 30, pace }
+    const build = (g: typeof goal & { configReadError?: string }) =>
+      buildInternalDigest({ clientName: 'C', date: '2026-09-13', run: ctsRun, decision: 'alert', legacyNeedsAction: [], droppedRecipients: 0, goal: g }).html
+    expect(build(goal)).toContain('归属数据不足，未判（r）')
+    const failed = build({ ...goal, pace: { ...pace, reason: '读不出广告设置' }, configReadError: 'boom' })
+    expect(failed).toContain('— 未判（读不出广告设置）')
+    expect(failed).not.toContain('归属数据不足')
   })
 
   it('不出现任何挪预算 / 改广告的操作指令', () => {

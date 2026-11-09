@@ -26,19 +26,25 @@ import {
   type ContactLike,
   type Segment,
   engagementFromMetadata,
+  callStanceFromMetadata,
   isPhoneVerdict,
-  isFailedReach,
   latestIntentVerdict,
 } from '@/lib/crm/segments'
 import { reclassifyStoredOutcome } from '@/lib/crm/note-parser'
 import { isDoNotContact, withoutClearedDnc } from '@/lib/crm/dnc'
 import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { contactCardTitle } from '@/lib/crm/display-name'
-import { followUpMarks, localDay } from '@/lib/crm/follow-up-marks'
-import { dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
+import { followUpMarks } from '@/lib/crm/follow-up-marks'
+import { contactsTouchedToday, dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
+import { loadStageSuppressedTodayIds } from '@/lib/crm/day-stage-events'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
-import { contactKindOf, readDomainRules, type ContactKind } from '@/lib/crm/contact-kind'
+import {
+  contactKindOf,
+  isSystemAccountName,
+  readDomainRules,
+  type ContactKind,
+} from '@/lib/crm/contact-kind'
 import { fetchAll } from '@/lib/supabase-paginate'
 
 interface RouteParams {
@@ -258,7 +264,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   const kindOf = (id: string): ContactKind =>
     contactKindOf(emailsByContact.get(id) ?? [], rules)
 
-  const rows = contacts.filter((c) => kindOf(c.id) !== 'staff')
+  // 系统账号（如 WhatsApp Business）跟自己人一样整个丢掉，不进任何一栏。
+  const rows = contacts.filter((c) => kindOf(c.id) !== 'staff' && !isSystemAccountName(c.display_name))
   const models: ContactLike[] = rows.map((c) => {
     const tps = byContact.get(c.id) ?? []
     const stage = c.stage ? stageMeta.get(c.stage) : undefined
@@ -309,6 +316,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
             : t.metadata?.action === 'unsnooze'
               ? ('unsnooze' as const)
               : null,
+        // 通话分析读出的客人表态（改天再说 / 不感兴趣）—— 跟 contact-model 同一份判据（驳回的不算）。
+        callStance: callStanceFromMetadata(t.metadata),
       })),
       // 这个人实际能怎么被联系到 —— 决定「建议用哪个渠道」落在哪。
       // 私信能力看他有没有 messenger 触点（有触点就说明那条线是通的）。
@@ -361,23 +370,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
    *    真推迟的那一头不受影响：live 版看得见 `snooze_until`，
    *    `dayRow` 靠 `droppedOff` 照样把他标成已处理（理由写「标了：先放着…」）。
    */
-  const todayLocal = localDay(now.toISOString(), timeZone)
-  const touchedTodayIds = new Set(
-    touches
-      .filter(
-        (t) =>
-          t.direction === 'outbound' &&
-          !isAutomatedTouch(t.source, t.metadata) &&
-          !engagementFromMetadata(t.metadata) &&
-          t.metadata?.action !== 'snooze' &&
-          t.metadata?.action !== 'unsnooze' &&
-          // 拨到一个空号不算「我们出手了」—— 客人什么都没收到，
-          // 该走的备用渠道一次都还没走。判据跟 day-list 共用同一个函数。
-          !isFailedReach(t.metadata?.outcome as string | undefined) &&
-          localDay(t.occurred_at, timeZone) === todayLocal,
-      )
-      .map((t) => t.contact_id),
-  )
+  const touchedTodayIds = contactsTouchedToday(touches, now, timeZone)
 
   /**
    * 今天**从「还在名单上」被推进到「不再联系」**的那些人。
@@ -394,29 +387,12 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
    * 一天内改了多次就看**最早那一条**的 from_stage，那才是今天早上的状态。
    * 读不到就当没有：最坏结果是人照旧当天消失（改动前的行为），不会多打电话。
    */
-  const stageSuppressedTodayIds = new Set<string>()
-  /** 已经看过今天第一条变更的人 —— 后面的都不看了。 */
-  const seenStageEvent = new Set<string>()
-  try {
-    const { data: events } = await supabaseAdmin
-      .from('contact_stage_events')
-      .select('contact_id, from_stage, created_at')
-      .eq('client_id', clientId)
-      .gte('created_at', new Date(localDayStartMs(now, timeZone)).toISOString())
-      .order('created_at', { ascending: true })
-
-    for (const e of events ?? []) {
-      const cid = e.contact_id as string
-      // 只认今天最早那一条 —— 后面的 from_stage 已经是今天改过之后的状态了。
-      if (seenStageEvent.has(cid)) continue
-      seenStageEvent.add(cid)
-      const from = e.from_stage as string | null
-      const wasOnList = !from || !(stageMeta.get(from)?.suppressed ?? false)
-      if (wasOnList) stageSuppressedTodayIds.add(cid)
-    }
-  } catch (err) {
-    console.error('[crm/today] 读今天的阶段变更失败，按「没改过」算:', err)
-  }
+  // 读取逻辑抽成共用函数，「全部客人」页同用一份（魏征复审 PR #3417 P2-c）。
+  const stageSuppressedTodayIds = await loadStageSuppressedTodayIds(
+    clientId,
+    localDayStartMs(now, timeZone),
+    (k) => stageMeta.get(k)?.suppressed ?? false,
+  )
 
   /**
    * 今天这份名单**一天之内不变**（判据见 lib/crm/day-list）。
@@ -690,6 +666,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       suggestedChannel: c.seg.suggestedChannel,
       /** 号码在库里但打不通 —— 卡片靠它把「没留电话」和「号是坏的」分开说。 */
       phoneUnusable: c.seg.phoneUnusable ?? false,
+      /** 客人说过不要电话（只关电话，邮件照常）—— 抽屉据此藏拨号、显示撤销条。 */
+      doNotCall: c.seg.doNotCall === true,
       /** 被标成「别再联系」—— 抽屉靠它给出取消入口（早前判词误判过一批人）。 */
       doNotContact: c.doNotContact === true,
       dueAt: c.seg.dueAt,
@@ -804,6 +782,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
          * 点开它就能拨那个已知打不通的号，是这一组里最不该出现的事。
          */
         phoneUnusable: seg.phoneUnusable ?? false,
+        doNotCall: seg.doNotCall === true,
         /** 「要记住的事」—— 见上面那一处同名字段的注释，两处必须一致。 */
         important: { note: row?.important_note ?? null, dueAt: row?.important_due_at ?? null },
         /** 被标成「别再联系」—— 抽屉靠它给出取消入口。 */

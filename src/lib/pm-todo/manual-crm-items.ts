@@ -8,6 +8,8 @@ import { daysAgo, type ManualItem } from './manual-item-types'
 import { findMessengerStopSignals } from '@/lib/crm/messenger-stop-signal'
 import { dropAlreadyPaidTagged } from '@/lib/mailchimp/paid-review-filter'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
+import { countReviewCallsByClient } from '@/lib/telephony/review-calls'
+import { contactCardTitle } from '@/lib/crm/display-name'
 
 /** Mailchimp 后台的联系人页 —— 登录后一定打得开的稳定入口。 */
 const MAILCHIMP_AUDIENCE_URL = 'https://admin.mailchimp.com/audience/contacts/'
@@ -263,7 +265,7 @@ export async function pushDncReviewItems(
     if (raws.some((r) => BOUNDARY.test(r))) continue
     if (!raws.some((r) => SOFT.test(r))) continue
 
-    const name = (c.display_name as string) || '未留姓名'
+    const name = contactCardTitle(c.display_name as string | null)
     items.push({
       kind: 'dnc_maybe_wrong',
       client_id: c.client_id as string,
@@ -323,12 +325,15 @@ export async function pushMessengerStopItems(
   )
 
   for (const s of signals) {
-    const who = nameById.get(s.contactId) || '未留姓名'
+    const who = contactCardTitle(nameById.get(s.contactId))
     items.push({
       kind: 'dm_maybe_stop',
       client_id: s.clientId,
       client_name: nameOf(s.clientId),
-      what: `${who} 在 Facebook 私信里说了「${s.quote}」—— 听着像是不想再被联系，但系统读不懂私信，他现在**照常留在名单里**，明天还会被打扰`,
+      what:
+        s.scope === 'phone_only'
+          ? `客人在私信里说不要打电话，要不要标记「只别打电话」？${who} 的原话：「${s.quote}」—— 系统没有自动标，他现在**照常会被打电话**`
+          : `${who} 在 Facebook 私信里说了「${s.quote}」—— 听着像是不想再被联系，但系统读不懂私信，他现在**照常留在名单里**，明天还会被打扰`,
       /**
        * 🔴 **两条路都必须让人留一笔**（Codex 复审 PR #1037，2026-08-17）。
        *
@@ -340,7 +345,10 @@ export async function pushMessengerStopItems(
        * 所以两条路都收在「写一句」上 —— 顺带这一笔也成了留痕，
        * 下一个人能看见当初是谁、按什么理由判的。
        */
-      how: '点链接直接打开他的抽屉，先把私信原话看完整（同一段对话里可能后面又改口了）。真要停 → 在他的记录里写一句「客户说别再联系」，系统会停掉所有渠道；只是这次不想去 → 写一句「只是这次不去，可以继续联系」。**两种都得写一句**，写完这条才不会再冒出来（没写就等于没人看过，明天还来）',
+      how:
+        s.scope === 'phone_only'
+          ? '点链接直接打开他的抽屉，先把私信原话看完整。确实只是不要电话 → 在他的记录里写一句「客户说不要打电话」，系统只停电话、邮件和私信照常；其实是什么都别联系 → 写一句「客户说别再联系」，停掉所有渠道；看完觉得没事 → 写一句「可以继续打电话」。**哪种都得写一句**，写完这条才不会再冒出来'
+          : '点链接直接打开他的抽屉，先把私信原话看完整（同一段对话里可能后面又改口了）。真要停 → 在他的记录里写一句「客户说别再联系」，系统会停掉所有渠道；只是这次不想去 → 写一句「只是这次不去，可以继续联系」。**两种都得写一句**，写完这条才不会再冒出来（没写就等于没人看过，明天还来）',
       /**
        * 🔴 绝对网址 —— 相对路径会被链接闸判成 broken，整条待办被丢掉
        *    （狄仁杰 2026-08-05 实测 kept=0，理由见 pushCrossClientItems）。
@@ -396,3 +404,30 @@ export async function pushImportantDueItems(
     })
   }
 }
+
+/**
+ * 电话系统收了通话、但没能自动记进客人档案（待确认 / 没记成）—— 每个客户一条汇总。
+ *
+ * 三件套：what（几通、后果）、how（怎么处理，具体到点哪里）、href（绝对网址，直达待确认页）。
+ * 只读：读失败抛出去，由调用方记警告；不许把「读不到」当成「没有」。
+ */
+export async function pushPhoneReviewItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  ids: string[],
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const counts = await countReviewCallsByClient(supabase, ids)
+  for (const [clientId, n] of counts) {
+    if (n <= 0) continue
+    items.push({
+      kind: 'phone_call_needs_review',
+      client_id: clientId,
+      client_name: nameOf(clientId),
+      what: `有 ${n} 通电话没能自动记进客人档案 —— 客人打来或我们打出去的这几通，销售在客人页上看不到`,
+      how: '点链接看是哪几通（时间、方向、号码尾号、为什么待确认）。在「全部客人」里按尾号搜到是谁，就在他档案里记一笔；找不到就新建一位客人再记',
+      href: `https://app.magicengine.com.au/dashboard/clients/${clientId}/crm/phone-review`,
+    })
+  }
+}
+

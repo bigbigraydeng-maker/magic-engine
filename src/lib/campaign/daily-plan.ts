@@ -80,7 +80,7 @@ export interface CampaignDailyPlanData {
    */
   bundles: CampaignDailyBundle[]
   command_meta: {
-    source: 'conversation_command'
+    source: 'conversation_command' | 'auto_image_post'
     received_at: string
     raw_summary: string | null
   }
@@ -560,7 +560,7 @@ export interface CampaignDailyPublishingPlan {
   conversion_goal: string | null
   /**
    * Publishing destination — always `'UNKNOWN'` in WP1. This slice does not
-   * bind any Facebook Page/Instagram account/Publer channel; showing a
+   * bind any Facebook Page/Instagram account/publishing channel; showing a
    * primary CTA (`lead_form_submit`) here would misread as "this is where
    * it will publish". A future WP that reads a proven connected account
    * can flip this to that account's identifier — never a CTA/URL/goal.

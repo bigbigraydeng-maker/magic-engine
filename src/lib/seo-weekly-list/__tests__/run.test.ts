@@ -68,6 +68,16 @@ describe('runSeoWeeklyList', () => {
     expect(r.results[0].skipped_keywords).toBeGreaterThan(0)
   })
 
+  it('🔴 fail-closed: a malformed protected-page list withholds the whole client (it used to degrade to "protect nothing")', async () => {
+    for (const bad of ['protected-page', [{ slug: 'protected-page' }], ['protected-page', 42]]) {
+      const db = baseDb()
+      db.rows('clients')[0].seo_config = { meta_cycle_protected_slugs: bad }
+      const r = await runSeoWeeklyList(db.client(), { now: NOW })
+      expect(r.results[0].withheld, JSON.stringify(bad)).toBe('protected_list_malformed')
+      expect(db.rows('execution_items')).toHaveLength(0)
+    }
+  })
+
   it('one page gets at most one item per week (keyword item and low-CTR item on the same page collapse)', async () => {
     const db = baseDb()
     db.rows('client_site_pages').push({ client_id: CID, url: 'https://x.com/low-ctr', path: '/low-ctr', title: 'visa to china low ctr', h1: null, word_count: 700, status_code: 200, crawl_status: 'crawled', crawled_at: '2026-10-01T00:00:00Z', markdown_content: '' })

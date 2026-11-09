@@ -25,6 +25,7 @@ export interface ListReelTiming {
   itemFrom: number[];
   itemDur: number[];
   revealFrom: number;
+  /** First frame the logo is shown on: 0 when logoMode is 'always', otherwise the last LOGO_BEATS beats. */
   logoFrom: number;
   totalFrames: number;
 }
@@ -43,6 +44,7 @@ function fb(beats: readonly number[], i: number): number {
 export function computeTiming(
   beats: readonly number[],
   itemCount: number,
+  logoMode?: 'last_beats' | 'always',
 ): ListReelTiming {
   const needed = requiredBeatCount(itemCount);
   if (beats.length < needed) {
@@ -84,17 +86,20 @@ export function computeTiming(
     throw new Error(`成片太短：只有 ${totalFrames} 帧，至少需要 ${MIN_TOTAL_FRAMES} 帧（节拍间隔太近）`);
   }
 
-  const logoFrom = fb(
-    beats,
-    HOOK_BEATS + ITEM_BEATS * itemCount + REVEAL_BEATS - LOGO_BEATS,
-  );
+  const logoFrom =
+    logoMode === 'always'
+      ? 0
+      : fb(
+          beats,
+          HOOK_BEATS + ITEM_BEATS * itemCount + REVEAL_BEATS - LOGO_BEATS,
+        );
 
   return { hookFrames, itemFrom, itemDur, revealFrom, logoFrom, totalFrames };
 }
 
 /** Compute the frame timing layout directly from validated props. */
 export function computeTimingFromProps(
-  props: Pick<ListReelProps, 'beats' | 'items'>,
+  props: Pick<ListReelProps, 'beats' | 'items' | 'logoMode'>,
 ): ListReelTiming {
-  return computeTiming(props.beats, props.items.length);
+  return computeTiming(props.beats, props.items.length, props.logoMode);
 }

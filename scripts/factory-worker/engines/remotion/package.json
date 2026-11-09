@@ -8,7 +8,7 @@
   },
   "scripts": {
     "render": "node render.mjs",
-    "test": "node --test test/schema.test.mjs test/no-client-facts.test.mjs test/render-smoke.test.mjs",
+    "test": "node --test test/schema.test.mjs test/no-client-facts.test.mjs test/encode-cap.test.mjs test/render-smoke.test.mjs",
     "test:render": "RUN_REMOTION_RENDER=1 node --test test/render-smoke.test.mjs",
     "type-check": "tsc --noEmit -p tsconfig.json"
   },

@@ -4,6 +4,7 @@
  * 只读：只读 `ads_growth_states`、生成待办；系统不会自动改广告。
  * 同一条广告同一个问题按 remind-cadence 节奏提醒（前 3 天每天、之后只周日），不天天刷屏。
  * 数据没拉全（partial）的那天不出 —— 趋势判断在缺数据日最容易假报。
+ * 例外是 D7（授权 / 数据 / 配置体检）：它报的就是数据和配置坏了，不看 partial，见 d7Item。
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -12,10 +13,12 @@ import { APP_BASE } from './binding-request-items'
 import { shouldRemindToday } from './remind-cadence'
 import {
   ADS_RULE_STALE_DAYS,
+  ADS_RULE_STREAK_GAP_DAYS,
   ADS_RULE_MIN_STREAK,
   ADS_RULE_CODES,
+  dayGap,
   findingKey,
-  ruleHits,
+  pmRuleHits,
   streakFor,
   streakForReason,
   isUsableNewest,
@@ -41,6 +44,8 @@ export type AdsRuleFindingItemKind = 'ads_rule_finding'
 export const ADS_RULE_LOOKBACK_DAYS = 14
 /** 一条待办的 how 里最多列几条 */
 export const ADS_RULE_MAX_LISTED = 3
+/** 「广告结果怎么算没设置」只对这么多天内真花过钱的客户提醒 */
+export const ADS_OUTCOME_SPEND_LOOKBACK_DAYS = 14
 
 export function adsHealthHref(clientId: string): string {
   return `${APP_BASE}/dashboard/clients/${encodeURIComponent(clientId)}/ads-health`
@@ -70,13 +75,14 @@ function groupByClient(rows: readonly GrowthStateRow[]): Map<string, GrowthState
   return byClient
 }
 
-/** D10 在前、D2 次之、D11 再次，其余最后；同 rank 内保持原顺序（sort 稳定）。 */
+/** D3（花钱没结果）在前、D10 次之、D2、D11，其余最后；同 rank 内保持原顺序（sort 稳定）。 */
 function orderCandidates(findings: readonly RuleFinding[]): RuleFinding[] {
   const rank = (f: RuleFinding): number => {
-    if (f.code === 'D10') return 0
-    if (f.code === 'D2') return 1
-    if (f.code === 'D11') return 2
-    return 3
+    if (f.code === 'D3') return 0
+    if (f.code === 'D10') return 1
+    if (f.code === 'D2') return 2
+    if (f.code === 'D11') return 3
+    return 4
   }
   return [...findings].sort((a, b) => rank(a) - rank(b))
 }
@@ -104,6 +110,91 @@ function configGapItem(
   }
 }
 
+type D7Task = RuleFinding & { manualTask: NonNullable<RuleFinding['manualTask']> }
+
+/** D7 里的「广告结果怎么算没设置」（诊断只在这一条的 evidence 里放 outcome_configured）。 */
+function isOutcomeUnsetTask(p: RuleFinding): boolean {
+  return p.code === 'D7' && p.evidence !== undefined && 'outcome_configured' in p.evidence
+}
+
+/**
+ * D7（授权 / 数据 / 配置体检）里带人工任务的命中。永不进客户版。
+ * 没在投广告的客户不提醒「结果怎么算没设置」：不花钱就没有判不了的结果，提醒只是噪音
+ * （2026-11-03 生产库：4 个挂着这条的客户里 3 个近 14 天零花费）。
+ */
+function d7TasksOf(row: GrowthStateRow, notSpending: ReadonlySet<string>): D7Task[] {
+  return (row.payload?.problems ?? []).filter(
+    (p): p is D7Task =>
+      p.code === 'D7' && p.status === 'hit' && !!p.manualTask &&
+      !(isOutcomeUnsetTask(p) && notSpending.has(row.client_id)),
+  )
+}
+
+/** 从最新一行往回数，连着几天有 D7 人工任务（断连规则同 streakForReason）。 */
+function d7Streak(rowsNewestFirst: readonly GrowthStateRow[], notSpending: ReadonlySet<string>): number {
+  let streak = 0
+  let lastHitDate: string | null = null
+  for (const row of rowsNewestFirst) {
+    if (d7TasksOf(row, notSpending).length === 0) break
+    if (lastHitDate !== null && dayGap(row.date, lastHitDate) > ADS_RULE_STREAK_GAP_DAYS) break
+    streak += 1
+    lastHitDate = row.date
+  }
+  return streak
+}
+
+function absoluteHref(href: string | null, fallback: string): string {
+  if (!href) return fallback
+  return href.startsWith('/') ? `${APP_BASE}${href}` : href
+}
+
+/**
+ * D7 → 每个客户最多一条待办（里面列出这个客户所有 D7 任务）。
+ *
+ * D7 只发现、不自动改授权和设置，所以必须下发给人（CLAUDE.md §3「管道不许断头」）。
+ * 跟 D2/D3/D10/D11 的区别：**不看 partial**——数据没拉全、读不到账户，正是 D7 要报的事；
+ * 只卡「巡察自己停了」（最新一行太旧）。同样要连着 ADS_RULE_MIN_STREAK 天，提醒节奏同其它规则。
+ */
+function d7Item(
+  clientId: string,
+  clientRows: readonly GrowthStateRow[],
+  now: Date,
+  nameOf: (id: string) => string,
+  notSpending: ReadonlySet<string>,
+): ManualItem | null {
+  const newest = clientRows[0]
+  if (!newest || dayGap(newest.date, now.toISOString().slice(0, 10)) > ADS_RULE_STALE_DAYS) return null
+  const tasks = d7TasksOf(newest, notSpending)
+  if (tasks.length === 0) return null
+  const streak = d7Streak(clientRows, notSpending)
+  if (streak < ADS_RULE_MIN_STREAK || !shouldRemindToday(streak - ADS_RULE_MIN_STREAK + 1, 0, now)) return null
+
+  const fallback = adsHealthHref(clientId)
+  const listed = tasks.slice(0, ADS_RULE_MAX_LISTED)
+  const first = listed[0].manualTask
+  const rest = tasks.length - listed.length
+  const how =
+    tasks.length === 1
+      ? `${first.how}\n这件事已经连着 ${streak} 天没处理。`
+      : [
+          ...listed.flatMap((t) => [
+            `• ${t.manualTask.what}`,
+            `  怎么办：${t.manualTask.how}`,
+            `  链接：${absoluteHref(t.manualTask.href, fallback)}`,
+          ]),
+          ...(rest > 0 ? [`…另有 ${rest} 条，进广告健康页「要看的事」里看`] : []),
+          `这些问题已经连着 ${streak} 天没处理。`,
+        ].join('\n')
+  return {
+    kind: 'ads_rule_finding',
+    client_id: clientId,
+    client_name: nameOf(clientId),
+    what: tasks.length === 1 ? first.what : `${tasks.length} 件广告体检的配置 / 数据问题要你处理：${first.what}`,
+    how,
+    href: absoluteHref(first.href, fallback),
+  }
+}
+
 function findingLines(f: RuleFinding, prevFirst?: string): string[] {
   const lines = [`• ${f.title}`]
   const first = f.reasons?.[0]
@@ -125,23 +216,32 @@ function buildHow(kept: readonly RuleFinding[]): string {
 }
 
 /**
- * 纯函数：把**所有**行（任意客户、任意顺序）变成每个客户最多一条待办。
+ * 纯函数：把**所有**行（任意客户、任意顺序）变成待办：每个客户最多 3 条——
+ * D2/D3/D10/D11 合成 1 条、客户级配置缺口（没登记主页）1 条、D7 体检任务 1 条。
  * 每个客户：按日期倒序；最新一行必须在 ADS_RULE_STALE_DAYS 天内（拿 YYYY-MM-DD 跟 now 的 UTC 日期比）
  * 且 payload.dataCompleteness 不是 'partial'，否则跳过。
  * 候选 = 最新一行里 ruleHits 且有 findingKey 的，保留 shouldRemindToday(streakFor(key, rows), 0, now) 为真的。
  * 顺序：D10 → D2 → D11，组内保持原顺序。
+ * notSpending：近 ADS_OUTCOME_SPEND_LOOKBACK_DAYS 天零花费的客户，不出「结果怎么算没设置」。
  */
 export function buildAdsRuleFindingItems(
   rows: readonly GrowthStateRow[],
   now: Date,
   nameOf: (id: string) => string,
+  notSpending: ReadonlySet<string> = new Set(),
 ): ManualItem[] {
   const items: ManualItem[] = []
   for (const [clientId, clientRows] of groupByClient(rows)) {
     const newest = clientRows[0]
-    if (!newest || !isUsableNewest(newest, now)) continue
+    if (!newest) continue
 
-    const candidates = orderCandidates(ruleHits(newest).filter((f) => findingKey(f) !== null))
+    // D7 不看 partial（见 d7Item），所以排在「最新一行可用」检查之前
+    const d7 = d7Item(clientId, clientRows, now, nameOf, notSpending)
+    if (d7) items.push(d7)
+
+    if (!isUsableNewest(newest, now)) continue
+
+    const candidates = orderCandidates(pmRuleHits(newest).filter((f) => findingKey(f) !== null))
     // daysSinceLatest 恒传 0：候选只取最新一行，新鲜度由 ADS_RULE_STALE_DAYS 单独卡（巡察记录的日期本来就比今天晚一天）。
     const kept = candidates.filter((f) => {
       const key = findingKey(f)
@@ -185,5 +285,37 @@ export async function pushAdsRuleFindingItems(
   if (error) throw new Error(`ads_growth_states 读取失败：${error.message}`)
 
   const rows = (data ?? []) as GrowthStateRow[]
-  items.push(...buildAdsRuleFindingItems(rows, now, nameOf))
+  const notSpending = await clientsWithoutRecentSpend(supabase, rows, now)
+  items.push(...buildAdsRuleFindingItems(rows, now, nameOf, notSpending))
+}
+
+/**
+ * IO：挂着「结果怎么算没设置」的客户里，近 ADS_OUTCOME_SPEND_LOOKBACK_DAYS 天一分钱没花的。
+ * 读失败就当它在花钱（照常提醒）——宁可多提醒一条，也不能把真问题吞掉。
+ */
+async function clientsWithoutRecentSpend(
+  supabase: SupabaseClient,
+  rows: readonly GrowthStateRow[],
+  now: Date,
+): Promise<Set<string>> {
+  const candidates = new Set(
+    rows.filter((r) => (r.payload?.problems ?? []).some(isOutcomeUnsetTask)).map((r) => r.client_id),
+  )
+  const since = new Date(now.getTime() - ADS_OUTCOME_SPEND_LOOKBACK_DAYS * 86_400_000)
+    .toISOString()
+    .slice(0, 10)
+  const out = new Set<string>()
+  await Promise.all(
+    Array.from(candidates).map(async (clientId) => {
+      const { data, error } = await supabase
+        .from('ad_daily_insights')
+        .select('client_id')
+        .eq('client_id', clientId)
+        .gte('insight_date', since)
+        .gt('spend', 0)
+        .limit(1)
+      if (!error && (data ?? []).length === 0) out.add(clientId)
+    }),
+  )
+  return out
 }

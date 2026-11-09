@@ -66,18 +66,19 @@ export const projects = [
         heading: 'Riverside in context.',
         copy: 'Explore the development from above, with views of its homes, surrounding streets and wider Rosehill setting.',
         img: {
-          src: '/img/riverside/v2/08-riverside-site-and-surroundings.webp', width: 2560, height: 1440,
-          alt: 'Aerial view of Riverside housing, construction areas and surrounding roads and neighbourhood',
-          caption: 'Site photography — including surrounding properties and areas under construction.',
+          src: '/img/riverside/v2/10-riverside-community-oct-2026.webp', width: 2560, height: 1440,
+          alt: 'Riverside community overview with housing, internal roads and construction areas',
+          caption: 'Site photography — October 2026. Includes surrounding properties where visible.',
         },
       },
       progress: {
-        heading: 'A community taking shape.',
-        copy: 'Site photography records the development as it progresses, showing homes alongside areas still under construction. This section will be updated as work moves forward across the project.',
+        heading: 'Development update — October 2026',
+        copy: 'New aerial photography offers a closer look at Riverside as the community develops. The views show housing, internal roads and ongoing construction, including roof framing and scaffolding on homes beside the watercourse. Current listings remain part of the wider 104-home development.',
+        // 09-riverside-development-progress.webp = earlier progress photo, archived (no longer referenced).
         img: {
-          src: '/img/riverside/v2/09-riverside-development-progress.webp', width: 2560, height: 1440,
-          alt: 'Aerial view of homes, framing and earthworks beside the watercourse',
-          caption: 'Site photography — homes and construction activity within the developing community.',
+          src: '/img/riverside/v2/11-riverside-construction-oct-2026.webp', width: 2560, height: 1440,
+          alt: 'Roof framing and scaffolding beside the watercourse at Riverside',
+          caption: 'Site photography — October 2026. Includes surrounding properties where visible.',
         },
         // Supplied by the client (Jason, 2026-10-04) via email — Riverside progress update video.
         // The caption date is when the video was received, not an inferred capture or stage date.
@@ -322,6 +323,15 @@ export const projects = [
     // client sends; `date` is when the photos were received (never a guessed
     // capture or stage date). Adding an update = adding an entry here.
     progress: [
+      {
+        date: 'October 2026',
+        title: 'Site progress — October 2026',
+        body: 'New aerial views show site preparation at Greenview on Reynolds Road, with excavation, timber retaining structures and machinery visible across the site. Further photography will be added as the development progresses.',
+        images: [
+          { src: '/img/greenview/progress/gv-oct-2026-site.webp', width: 2560, height: 1440, alt: 'Greenview site on Reynolds Road with earthworks and neighbouring properties', caption: 'Site photography — October 2026. Includes surrounding properties where visible.' },
+          { src: '/img/greenview/progress/gv-oct-2026-retaining.webp', width: 2560, height: 1440, alt: 'Timber retaining structures, excavation and machinery at Greenview', caption: 'Site photography — October 2026. Includes surrounding properties where visible.' },
+        ],
+      },
       {
         date: 'September 2026',
         title: 'Earthworks under way',

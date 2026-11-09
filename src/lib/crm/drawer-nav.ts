@@ -8,7 +8,7 @@
  *
  * ## 两种模式，判据完全不同（spec §3.3）
  *
- * **分段模式**（跟进优先级那四段）：位置是全局的——「第 12 位 / 共 217 位」，
+ * **分段模式**（跟进优先级那两张名单）：位置是全局的——「第 12 位 / 共 217 位」，
  * 跨页也算得出来，因为每段有权威 `total`。走到段尾**停住**，不自动跳下一段
  * （`open` 是完整声明，偷偷展开等于偷偷改用户的展开状态——见 segments 相关代码）。
  *
@@ -20,7 +20,10 @@
  * 肉眼看不出为什么是下一个的人。
  */
 
-export type SectionKey = 'waiting' | 'acted' | 'queued' | 'off_list'
+import type { NextActionList } from './next-action'
+
+/** 跟 list-sections.ts 同一份两张名单的 key；原四段合成 hot / cold。 */
+export type SectionKey = NextActionList
 
 export type NavDirection = 'prev' | 'next'
 

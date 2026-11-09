@@ -74,10 +74,43 @@ import {
   type StoppedMonth,
 } from '@/lib/gsc/page-daily-plan'
 import { buildPageDailyPlan, type PlanResult } from '@/lib/gsc/page-daily-store'
-import { handlePullFailure, runPageDailyPull, type PullDeps, type PullStep } from '@/lib/gsc/page-daily-pull'
+import { handlePullFailure, PAGE_DATASET, runPageDailyPull, type PullDataset, type PullDeps, type PullStep } from '@/lib/gsc/page-daily-pull'
 
 export const GSC_PAGE_DAILY_FANOUT_ID = `${CLOUD_FN_PREFIX}gsc-page-daily-fanout`
 export const GSC_PAGE_DAILY_PULL_ID = `${CLOUD_FN_PREFIX}gsc-page-daily-pull`
+
+/**
+ * Everything that tells one dispatch/pull chain apart from another: job name, event name, event-id prefix,
+ * Inngest function ids and display names, schedule, and the data set it feeds. The per-page chain is the default;
+ * the per-(query, page) chain (gsc-query-page-daily.ts) passes its own, so the two never share an event name,
+ * an event id, a job name or a receipts table.
+ */
+export interface GscChainVariant {
+  readonly job: string
+  /** Opens the dispatch's run-log row (see PullDataset.startRun for why this is a function). */
+  startRun(runLogId: string): Promise<void>
+  readonly eventName: string
+  readonly eventIdPrefix: string
+  readonly fanoutId: string
+  readonly fanoutName: string
+  readonly pullId: string
+  readonly pullName: string
+  readonly cron: string
+  readonly dataset: PullDataset
+}
+
+export const PAGE_CHAIN: GscChainVariant = {
+  job: GSC_PAGE_DAILY_JOB,
+  startRun: (runLogId) => startCronRunWithId(GSC_PAGE_DAILY_JOB, runLogId),
+  eventName: GSC_PAGE_DAILY_PULL_EVENT,
+  eventIdPrefix: 'gsc-page-daily',
+  fanoutId: GSC_PAGE_DAILY_FANOUT_ID,
+  fanoutName: 'GSC per-page daily: dispatch pull orders',
+  pullId: GSC_PAGE_DAILY_PULL_ID,
+  pullName: 'GSC per-page daily: pull one order',
+  cron: GSC_PAGE_DAILY_CRON,
+  dataset: PAGE_DATASET,
+}
 
 /** The dispatch receipt — also what the Inngest dashboard shows for a fan-out run. */
 export interface FanOutReceipt {
@@ -112,10 +145,10 @@ export interface FanOutDeps {
 }
 
 /** Turn planned orders into the events to send; extracted so tests can assert what was sent. */
-export function buildPullEvents(orders: readonly PullOrder[]): PullEvent[] {
+export function buildPullEvents(orders: readonly PullOrder[], chain: GscChainVariant = PAGE_CHAIN): PullEvent[] {
   return orders.map((o) => ({
-    id: pullEventId(o),
-    name: GSC_PAGE_DAILY_PULL_EVENT,
+    id: pullEventId(o, chain.eventIdPrefix),
+    name: chain.eventName,
     data: { client_id: o.client_id, kind: o.kind, start_day: o.start_day, end_day: o.end_day },
   }))
 }
@@ -135,10 +168,11 @@ function finishFanOutLog(
 
 /** One FanOutReceipt from the shared fields plus this run's outcome. */
 function fanOutReceipt(
+  chain: GscChainVariant,
   started: { today: string; createdAt: string },
   outcome: Omit<FanOutReceipt, 'job' | 'today' | 'no_publish' | 'created_at'>,
 ): FanOutReceipt {
-  return { job: GSC_PAGE_DAILY_JOB, today: started.today, no_publish: true, created_at: started.createdAt, ...outcome }
+  return { job: chain.job, today: started.today, no_publish: true, created_at: started.createdAt, ...outcome }
 }
 
 /** The error text for months this dispatch is the first to see stopped; undefined when there are none. */
@@ -176,32 +210,37 @@ export function fanOutFinishOpts(
 }
 
 /** Run one dispatch: plan, send one event per order, write one run log (its id derived from the Inngest run id). */
-export async function runGscPageDailyFanOut(step: FanOutStep, deps: FanOutDeps, runId: string): Promise<FanOutReceipt> {
+export async function runGscPageDailyFanOut(
+  step: FanOutStep,
+  deps: FanOutDeps,
+  runId: string,
+  chain: GscChainVariant = PAGE_CHAIN,
+): Promise<FanOutReceipt> {
   // "today" must be computed inside a step: a replay after midnight Pacific
   // would otherwise plan a different day than the one the run log records.
   const started = await step.run('log-start', async () => {
     const runLogId = cronRunIdFromInngestRun(runId)
-    await startCronRunWithId(GSC_PAGE_DAILY_JOB, runLogId)
+    await chain.startRun(runLogId)
     return { runLogId, startedAt: Date.now(), today: pacificDay(new Date()), createdAt: new Date().toISOString() }
   })
-  const run = cronRunHandle(GSC_PAGE_DAILY_JOB, started.runLogId, started.startedAt)
+  const run = cronRunHandle(chain.job, started.runLogId, started.startedAt)
 
   const plan = await step.run('plan', async () => deps.buildPlan(started.today))
   if (!plan.ok) {
     const error = `plan failed: ${plan.reason}`
     await finishFanOutLog(step, 'log-finish-plan-failed', run, { processed: 0, completed: 0, failed: 1, error })
-    return fanOutReceipt(started, {
+    return fanOutReceipt(chain, started, {
       status: 'plan_failed', clients: 0, orders_dispatched: 0, daily_orders: 0, backfill_orders: 0,
       stopped_backfill_months: 0, newly_stopped_backfill_months: 0, error: plan.reason,
     })
   }
 
-  const events = buildPullEvents(plan.orders)
+  const events = buildPullEvents(plan.orders, chain)
   if (events.length > 0) await step.sendEvent('dispatch-pulls', events)
   const opts = fanOutFinishOpts(started.today, plan, events.length)
   await finishFanOutLog(step, events.length > 0 ? 'log-finish-dispatched' : 'log-finish-empty', run, opts)
   const dailyOrders = plan.orders.filter((o) => o.kind === 'daily').length
-  return fanOutReceipt(started, {
+  return fanOutReceipt(chain, started, {
     status: events.length > 0 ? 'dispatched' : 'nothing_to_do',
     clients: plan.clients,
     orders_dispatched: events.length,
@@ -218,13 +257,13 @@ export async function handleFanOutFailure(input: {
   runId: string | null
   message: string
   failedAt: Date
-}): Promise<'closed' | 'already_terminal' | 'no_run_id'> {
+}, chain: GscChainVariant = PAGE_CHAIN): Promise<'closed' | 'already_terminal' | 'no_run_id'> {
   if (!input.runId) {
     console.error('[gsc-page-daily] fan-out onFailure without a run id — nothing closed:', input.message)
     return 'no_run_id'
   }
   return finishCronRunIfOpen(
-    GSC_PAGE_DAILY_JOB,
+    chain.job,
     cronRunIdFromInngestRun(input.runId),
     { processed: 0, completed: 0, failed: 1, error: `retries exhausted: ${input.message}` },
     input.failedAt,
@@ -232,11 +271,11 @@ export async function handleFanOutFailure(input: {
 }
 
 /** Dependency-injected fan-out, so tests can inject a fake plan and a fake step. */
-export function createGscPageDailyFanOutFunction(deps: FanOutDeps) {
+export function createGscPageDailyFanOutFunction(deps: FanOutDeps, chain: GscChainVariant = PAGE_CHAIN) {
   return inngest.createFunction(
     {
-      id: GSC_PAGE_DAILY_FANOUT_ID,
-      name: 'GSC per-page daily: dispatch pull orders',
+      id: chain.fanoutId,
+      name: chain.fanoutName,
       // Two dispatches at once would plan and send the same orders twice; the
       // deterministic event ids absorb that within 24 h, but the run log would
       // then show dispatch counts that are not real.
@@ -248,10 +287,10 @@ export function createGscPageDailyFanOutFunction(deps: FanOutDeps) {
           runId: typeof event.data.run_id === 'string' ? event.data.run_id : null,
           message: error?.message || 'unknown error',
           failedAt,
-        })
+        }, chain)
       },
     },
-    { cron: `TZ=${GSC_PAGE_DAILY_TZ} ${GSC_PAGE_DAILY_CRON}` },
+    { cron: `TZ=${GSC_PAGE_DAILY_TZ} ${chain.cron}` },
     async ({ step, runId }): Promise<FanOutReceipt> =>
       runGscPageDailyFanOut(
         {
@@ -261,6 +300,7 @@ export function createGscPageDailyFanOutFunction(deps: FanOutDeps) {
         },
         deps,
         runId,
+        chain,
       ),
   )
 }
@@ -282,11 +322,11 @@ export function defaultPullDeps(): PullDeps {
 }
 
 /** Dependency-injected pull worker, so tests can inject fake rows and a fake DB. */
-export function createGscPageDailyPullFunction(deps: PullDeps) {
+export function createGscPageDailyPullFunction(deps: PullDeps, chain: GscChainVariant = PAGE_CHAIN) {
   return inngest.createFunction(
     {
-      id: GSC_PAGE_DAILY_PULL_ID,
-      name: 'GSC per-page daily: pull one order',
+      id: chain.pullId,
+      name: chain.pullName,
       // One order per client at a time (daily and backfill share this lock),
       // and at most 3 orders in flight overall.
       concurrency: [
@@ -302,10 +342,10 @@ export function createGscPageDailyPullFunction(deps: PullDeps) {
           runId: typeof event.data.run_id === 'string' ? event.data.run_id : null,
           message: error?.message || 'unknown error',
           failedAt,
-        })
+        }, deps.dataset ?? PAGE_DATASET)
       },
     },
-    { event: GSC_PAGE_DAILY_PULL_EVENT },
+    { event: chain.eventName },
     async ({ event, step, runId }) => {
       const parsed = parsePullDue(event.data)
       if (!parsed.ok) return { status: 'invalid_payload' as const, reason: parsed.reason }

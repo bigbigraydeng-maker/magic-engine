@@ -249,27 +249,24 @@ export async function generateAdCopy(params: {
           .map(([k, v]) => `${k}=${v}`)
           .join('、')
       : ''
-    // 叙事人格:PM 2026-07-25 定 CTS 用「Baker Gu · China Travel Specialist」第一人称。
-    // 依据是真实爆款对照(FB reel「I Took My Parents to Zhangjiajie」,28s,原声,105 赞):
-    // 打动人的是「一个具体的人带着情感讲经历」,不是品牌播报卖点。
-    // 🔴 但第一人称有编造身份的风险:必须是客户真实存在的人(PM 提供),且只用 name+role,
-    // 绝不替这个人编经历/编行程 —— 具体地点行程仍只能来自 brief 的可溯源条目。
-    const persona = (brief.brand_voice as { persona?: { name?: string; role?: string } } | null)?.persona
-    const personaName = typeof persona?.name === 'string' ? persona.name.trim() : ''
-    const narrativeBlock = personaName
-      ? `\n\n**用第一人称叙事,不要写成广告**:你就是「${personaName}」${persona?.role ? `(${persona.role})` : ''}。` +
-        `按这个结构写:①hook=「我/我们做了什么」的具体行动(不是口号);②中段=经历里的具体细节,一句一个,` +
-        `每句 ≤6 词;③临近结尾要有一句**情感回扣**(写人的反应/感受,不是产品卖点);④cta=把话转向观众` +
-        `(「你也可以…」),用邀请口吻不用命令口吻。全程「我/我们」,禁止第三人称自称品牌名。` +
-        `\n\n🔴 **编造红线(实测 AI 会犯,逐条禁止)**:` +
-        `①**禁止编造任何具体客户/人名/引语/对话**(如「Margaret called me last week」「'I never thought we'd go'」)——` +
-        `真实客户案例只能由人工提供,AI 一律不许虚构;情感回扣改用不指名的普遍感受。` +
-        `②**禁止编造行程细节**:景点、时段、玩法、节奏(如「Great Wall sunrise」——真实行程是慕田峪全天、` +
-        `缆车上滑道下、并无日出)。只能用品牌资料里明确写到的内容。` +
-        `③**禁止编造政策/数字**:签证天数、价格、时长、人数一律不写,除非上方资料明确给出。` +
-        `④拿不准就写得虚一点(「planning made simple」),**宁可平淡也不许编**——编造会让客户到店体验落差,是事故。`
-      : ''
-    const briefText = formatBriefForPrompt(brief)
+    // 2026-10-16 PM 取消「必须用 Baker Gu 第一人称/人物口吻」的要求(原 2026-07-25 决定):
+    // 不再强制第一人称叙事、不再扮演 persona。保留的只有防编造红线 ——
+    // 这些是真实事故换来的(AI 会编客户引语/行程细节/政策数字),与口吻、与有没有 persona 都无关,
+    // 所以对所有客户无条件注入(此前只在配了 persona 时出现;CTS 的 persona 在数据源头移除后会连红线一起丢)。
+    const narrativeBlock =
+      `\n\n🔴 **编造红线(实测 AI 会犯,逐条禁止;括号里的例子只示意类型,与行业无关)**:` +
+      `①**禁止编造任何具体客户/人名/引语/对话**(如「某某上周还跟我说……」「'I never thought I'd buy one'」)——` +
+      `真实客户案例只能由人工提供,AI 一律不许虚构;情感回扣改用不指名的普遍感受。` +
+      `②**禁止编造品牌资料里没有的具体事实**:地点、行程/流程、时段、规格、保修、认证、库存、服务内容` +
+      `(如把产品说成有某功能、把活动说成含某环节)。只能用品牌资料里明确写到的内容。` +
+      `③**禁止编造政策/数字**:价格、折扣、时长、人数、政策天数一律不写,除非下方「客户已确认真实促销事实」或品牌资料里明确给出。` +
+      `④拿不准就写得虚一点(「planning made simple」),**宁可平淡也不许编**——编造会让客户到店体验落差,是事故。\n\n`
+    // formatBriefForPrompt 会把 persona 注入成「用第一人称讲」(全站共用,其它内容线不动);
+    // 工厂文案这条线口吻要求已取消,所以只在这里把 persona 摘掉再格式化。
+    const bv = (brief.brand_voice ?? null) as Record<string, unknown> | null
+    const { persona: _persona, ...voiceWithoutPersona } = bv ?? {}
+    const briefForPrompt = bv && 'persona' in bv ? { ...brief, brand_voice: voiceWithoutPersona } : brief
+    const briefText = formatBriefForPrompt(briefForPrompt as typeof brief)
     const systemPrompt =
       `你为「${brand}」写 9:16 竖屏**信息流短视频广告**(Facebook/Instagram Reels)文案。` +
       `这是刷到就要在前 3 秒留住观众的广告,不是品牌宣传片——第一段(hook)是全片生死线。` +

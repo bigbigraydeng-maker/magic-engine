@@ -36,6 +36,10 @@ export interface GoalPaceInput {
   actualToDate: number | null    // null = 归属数据不足（M2），不是 0
   dailyCapCents: number | null   // ad_strategy_configs.daily_budget_cap_cents
   medianCostPerResultCents7d: number | null   // 近 7 天每结果成本中位数（分）
+  /** 日报最新有数据的一天（'YYYY-MM-DD'）。给了就按「有数据的天数」算速度，不按日历天数；不给 = 按 today。 */
+  dataThrough?: string | null
+  /** 近几天实际日花费（分），给「按实际在投花费」那个上限数；不给 = 不算这一条 */
+  actualDailySpendCents?: number | null
 }
 
 export interface GoalPace {
@@ -45,6 +49,12 @@ export interface GoalPace {
   projectedEnd: number | null     // baseline + (actual-baseline)/elapsedDays * totalDays；elapsedDays=0 时 null；取整
   verdict: GoalPaceVerdict
   reason: string                  // 中文一句话，给日报直接用
+  /** 按日预算上限算的到期最多结果数；算不出就没有这个字段 */
+  reachableAtCap?: number
+  /** 按近几天实际日花费算的到期最多结果数；算不出就没有这个字段 */
+  reachableAtActualSpend?: number
+  /** 速度所用的数据截止日（日报口径，通常是昨天）；没给 dataThrough 就没有这个字段 */
+  dataThrough?: string
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -98,11 +108,11 @@ function gapPercent(actual: number, expected: number): number | null {
 /** Max results the remaining days can buy under the cap, or null if not computable. */
 function reachableUnderCap(
   actualToDate: number,
-  dailyCapCents: number | null,
+  dailyCapCents: number | null | undefined,
   medianCostPerResultCents7d: number | null,
   remainingDays: number,
 ): number | null {
-  if (dailyCapCents === null || medianCostPerResultCents7d === null) return null
+  if (dailyCapCents == null || medianCostPerResultCents7d === null) return null
   if (medianCostPerResultCents7d <= 0) return null
   const perDay = Math.floor(dailyCapCents / medianCostPerResultCents7d)
   return actualToDate + perDay * remainingDays
@@ -119,13 +129,15 @@ function decideVerdict(args: {
   targetValue: number
   gapPct: number | null
   reachable: number | null
+  reachableAtSpend: number | null
 }): VerdictResult {
-  const { actualToDate, targetValue, gapPct, reachable } = args
+  const { targetValue, gapPct, reachable, reachableAtSpend } = args
 
   if (reachable !== null && reachable < 0.8 * targetValue) {
+    const spendPart = reachableAtSpend === null ? '' : `；按近几天实际花费约 ${reachableAtSpend}`
     return {
       verdict: 'unreachable_within_caps',
-      reason: `按当前日预算上限和近 7 天每结果成本，到期最多约 ${reachable}，不到目标的 80%`,
+      reason: `按日预算上限和近 7 天同类结果成本，到期最多约 ${reachable}${spendPart}，不到目标的 80%`,
     }
   }
   if (gapPct !== null && gapPct < -15) {
@@ -149,6 +161,7 @@ export function computeGoalPace(input: GoalPaceInput): GoalPace {
   const {
     targetValue, baselineValue, periodStart, periodEnd, today,
     actualToDate, dailyCapCents, medianCostPerResultCents7d,
+    dataThrough, actualDailySpendCents,
   } = input
 
   const start = parseUtcDay(periodStart)
@@ -172,7 +185,10 @@ export function computeGoalPace(input: GoalPaceInput): GoalPace {
   if (now < start) return unknown('目标期未开始')
 
   // Rule 3: first day — too little signal to project.
-  const clampedNow = Math.min(now, end)
+  // 速度只算有日报数据的天：dataThrough 比今天早（通常是昨天）就以它为准。
+  const through = dataThrough ? parseUtcDay(dataThrough) : null
+  if (through !== null && through < start) return unknown('日报还没有这个目标期的数据，未判')
+  const clampedNow = Math.min(now, end, through ?? now)
   const elapsedDays = daysBetween(start, clampedNow) + 1
   const expectedToDate = linearExpected(targetValue, baselineValue, elapsedDays, totalDays)
 
@@ -190,9 +206,18 @@ export function computeGoalPace(input: GoalPaceInput): GoalPace {
     actualToDate, dailyCapCents, medianCostPerResultCents7d, remainingDays,
   )
 
+  const reachableAtSpend = reachableUnderCap(
+    actualToDate, actualDailySpendCents, medianCostPerResultCents7d, remainingDays,
+  )
+
   const { verdict, reason } = decideVerdict({
-    actualToDate, targetValue, gapPct, reachable,
+    actualToDate, targetValue, gapPct, reachable, reachableAtSpend,
   })
 
-  return { expectedToDate, actualToDate, gapPct, projectedEnd, verdict, reason }
+  return {
+    expectedToDate, actualToDate, gapPct, projectedEnd, verdict, reason,
+    ...(reachable !== null ? { reachableAtCap: reachable } : {}),
+    ...(reachableAtSpend !== null ? { reachableAtActualSpend: reachableAtSpend } : {}),
+    ...(dataThrough ? { dataThrough } : {}),
+  }
 }

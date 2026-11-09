@@ -9,6 +9,8 @@
  *    距上次变动几小时、在不在学习期、在不在实验里 —— 全部从
  *    `ad_entity_snapshots` / `ad_strategy_configs` 读。让被约束者自报约束
  *    等于没有约束。
+ *    加预算时的客户每天总上限例外：不读 `ad_strategy_configs`，也不把各系列日预算
+ *    加总当成上限。`card_prescription_id` 只指认已批准的那条链，金额从那份计划读。
  *
  * 🔴 **读不到一律返回 null / unavailable，交给判据拒绝。**
  *    这里不做「读不到就当没有」的兜底：那会让一次读失败等于一次静默放行。
@@ -28,6 +30,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { EnvelopeFactsResolver } from '@/lib/kernel/deps'
 import type { EnvelopeChangeKind, EnvelopeFacts, EnvelopeRequest } from '@/lib/kernel/autonomy-envelope'
 import type { CapabilityImplementation } from '@/lib/kernel/types'
+import { readApprovedDailyTotalCap, readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { readCircuitState } from '@/lib/ads-strategy/circuit-state'
 import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 
@@ -74,7 +77,18 @@ const SNAP_COLUMNS =
  *    统一到诊断层的一份，改只改一处，两边不会分家。
  */
 const DELIVERING = DELIVERING_STATUSES
-const CLIENT_BUDGET_FACT_FRESH_MS = 24 * 60 * 60 * 1000
+export const CLIENT_BUDGET_FACT_FRESH_MS = 24 * 60 * 60 * 1000
+/**
+ * 快照写入程序每轮只写「新出现 / 变了 / 今天还没记 / 消失了」的行（`selectRowsToWrite`），
+ * 一天里第一轮之后的定时轮常常一行都不写。所以核算客户预算不能只读最新一轮写下的行，
+ * 要跟写入程序用同一个基线：每个对象在这一轮及以前最新的那一行，回看天数也跟写入程序一样。
+ */
+const CLIENT_BUDGET_CARRY_FORWARD_DAYS = 30
+/**
+ * 最新一轮回执完整时，每个还在的对象当天（账户时区）都已经有一行（「今天还没记」那条规则）。
+ * 某个没消失的对象最新一行比这一轮早超过这个时长 = 这个前提被打破，拒绝核算（留 2 小时给夏令时那一天）。
+ */
+const CLIENT_BUDGET_CARRY_FORWARD_MAX_AGE_MS = 26 * 60 * 60 * 1000
 const CLIENT_BUDGET_ROW_LIMIT = 20_000
 const POSTGREST_PAGE_SIZE = 1_000
 
@@ -82,12 +96,21 @@ interface ClientBudgetRollup {
   totalCents: number
   accountTotals: Map<string, number>
   capCents: number
+  accountCapCents: number
+  roundAt: string
+  entityMinor: Map<string, number | null>
+  countedLive: Set<string>
+}
+
+export function budgetEntityKey(accountId: string, level: string, entityId: string): string {
+  return `${accountId}|${level}|${entityId}`
 }
 
 /**
  * 上调预算前，按客户全部已登记账户重新核算预算配置。
  * 所有账户都必须有近 24 小时内完整的账户/系列/广告组抓取回执；快照只用于读
  * 当前设置，任一账户、币种、预算或分页无法证明完整时都拒绝上调。
+ * `clientCapCents` 必须是已批准计划上的每天总上限，不是各系列日预算的合计。
  */
 async function loadClientBudgetRollup(
   sb: SupabaseClient,
@@ -188,7 +211,8 @@ async function loadClientBudgetRollup(
       .eq('client_id', clientId)
       .in('ad_account_id', accountIds)
       .in('level', ['account', 'campaign', 'adset'])
-      .eq('captured_at', roundAt)
+      .gte('captured_at', new Date(roundTime - CLIENT_BUDGET_CARRY_FORWARD_DAYS * 86_400_000).toISOString())
+      .lte('captured_at', roundAt)
       .order('captured_at', { ascending: false })
       .order('id', { ascending: true })
       .range(offset, offset + POSTGREST_PAGE_SIZE - 1)
@@ -205,9 +229,17 @@ async function loadClientBudgetRollup(
     const key = `${row.ad_account_id}:${row.level}:${row.entity_id}`
     if (!latest.has(key)) latest.set(key, row)
   }
+  for (const row of latest.values()) {
+    if (row.capture_reason === 'disappeared') continue
+    const at = Date.parse(row.captured_at)
+    if (!Number.isFinite(at) || at < roundTime - CLIENT_BUDGET_CARRY_FORWARD_MAX_AGE_MS) {
+      return unavailable(`广告账户 ${row.ad_account_id} 的${row.level} ${row.entity_id} 超过一天没有快照，不能证明总预算完整`)
+    }
+  }
 
   const currencies = new Set<string>()
   const accountTotals = new Map<string, number>()
+  const countedLive = new Set<string>()
   for (const accountId of accountIds) {
     const accountRows = [...latest.values()].filter(r => r.ad_account_id === accountId)
     const accountSnap = accountRows.find(r => r.level === 'account')
@@ -233,6 +265,7 @@ async function loadClientBudgetRollup(
           return unavailable(`投放中的广告系列 ${campaign.entity_id} 预算或币种无法确认`)
         }
         total += amount
+        countedLive.add(budgetEntityKey(accountId, 'campaign', campaign.entity_id))
       } else if (campaign.budget_level !== 'abo') {
         return unavailable(`投放中的广告系列 ${campaign.entity_id} 预算层级无法确认`)
       }
@@ -245,6 +278,7 @@ async function loadClientBudgetRollup(
         return unavailable(`投放中的广告组 ${adset.entity_id} 预算或币种无法确认`)
       }
       total += amount
+      countedLive.add(budgetEntityKey(accountId, 'adset', adset.entity_id))
     }
     if (!Number.isSafeInteger(total)) return unavailable(`广告账户 ${accountId} 预算合计溢出`)
     const cap = perAccountCaps[accountIds.indexOf(accountId)] as number
@@ -265,7 +299,75 @@ async function loadClientBudgetRollup(
     return unavailable('目标预算与本次授权读取的基线不一致')
   }
 
-  return { totalCents, accountTotals, capCents: clientCapCents }
+  const accountCapCents = perAccountCaps[accountIds.indexOf(targetAccountId)] as number
+  const entityMinor = new Map<string, number | null>()
+  for (const row of latest.values()) {
+    if (row.capture_reason === 'disappeared') continue
+    const amount = row.daily_budget_minor
+    const minor = typeof amount === 'number' && Number.isSafeInteger(amount) && amount >= 0 ? amount : null
+    entityMinor.set(budgetEntityKey(row.ad_account_id, row.level, row.entity_id), minor)
+  }
+  return {
+    totalCents, accountTotals, capCents: clientCapCents, accountCapCents, roundAt,
+    entityMinor, countedLive,
+  }
+}
+
+export interface KernelPreBudget {
+  readonly accountLiveCents: number
+  readonly accountCapCents: number
+  readonly clientLiveCents: number
+  readonly clientCapCents: number
+  readonly roundAt: string
+  readonly entityMinor: ReadonlyMap<string, number | null>
+  readonly countedLive: ReadonlySet<string>
+}
+
+/** Same cross-account snapshot the pre-provider envelope already requires. */
+export async function readKernelPreBudget(
+  sb: SupabaseClient,
+  clientId: string,
+  accountId: string,
+  level: 'adset' | 'campaign',
+  entityId: string,
+  beforeCents: number,
+  now: Date,
+  clientCapCents: number,
+): Promise<{ ok: true; budget: KernelPreBudget } | { ok: false; reason: string }> {
+  const rollup = await loadClientBudgetRollup(
+    sb, clientId, accountId, level, entityId, beforeCents, clientCapCents, now, 'pre_provider',
+  )
+  if ('unavailable' in rollup) return { ok: false, reason: quotaReason(rollup.unavailable) }
+  const accountLive = liveTotal(rollup.accountTotals, accountId)
+  if (accountLive === undefined) return { ok: false, reason: '现在的每日预算合计读不到，没有改。' }
+  return {
+    ok: true,
+    budget: {
+      accountLiveCents: accountLive,
+      accountCapCents: rollup.accountCapCents,
+      clientLiveCents: rollup.totalCents,
+      clientCapCents: rollup.capCents,
+      roundAt: rollup.roundAt,
+      entityMinor: rollup.entityMinor,
+      countedLive: rollup.countedLive,
+    },
+  }
+}
+
+function liveTotal(totals: ReadonlyMap<string, number>, accountId: string): number | undefined {
+  const digits = accountId.replace(/^act_/i, '')
+  for (const id of [accountId, digits, `act_${digits}`]) {
+    if (totals.has(id)) return totals.get(id)
+  }
+  return undefined
+}
+
+export function quotaReason(raw: string): string {
+  if (/过期|时间无效|超过一天/.test(raw)) return '跨账户预算快照已经过期，先刷新再改。'
+  if (/币种/.test(raw)) return '广告账户的币种读不到或对不上，没有改。'
+  if (/未配置|无效|没有有效|不在客户|读不到目标/.test(raw)) return '每日上限读不到，没有改。'
+  if (/已超过/.test(raw)) return '现在的每日预算合计已经超过上限，没有改。'
+  return '现在的每日预算合计读不到，没有改。'
 }
 
 function studyCount(raw: unknown): number {
@@ -291,6 +393,13 @@ function latestOf(rows: readonly SnapRow[]): SnapRow | null {
  *    才写的一行，所以**人工在 Ads Manager 里改的也算**（§14 K12：72 小时按真实
  *    变化算，不是只算 ME 自己的动作）。`daily` 那种例行抓取不算变化。
  *    完全没有快照 = 读不到（null）；有快照但没有一条 changed = 确实从没变过。
+ *
+ * 🔴 **故意不认 `kernel_post`**（魏征复审查实，本窗口核过 `snapshot.ts:363-365`）：
+ *    那个原因码写的时候是「该客户**所有**实体一律写一行」，不管这个实体的设置有没有变。
+ *    所以它代表不了「这个实体变了」；一旦有人接上它，任何一次动作之后整个客户
+ *    每个实体都会显示「刚改过」→ 自治被整体冻死 72 小时。
+ *    「我们自己刚改过」改由 `hoursSinceOwnLastAction` 查内核执行记录来回答，那是按实体精确的。
+ *    （`diagnostics/loader.ts:89` 认它，是同一颗地雷，已另开卡，本轮不动那边。）
  */
 function hoursSinceLastRealChange(rows: readonly SnapRow[], now: Date): number | null {
   if (rows.length === 0) return null
@@ -298,6 +407,100 @@ function hoursSinceLastRealChange(rows: readonly SnapRow[], now: Date): number |
   if (changed.length === 0) return Number.MAX_SAFE_INTEGER
   const ms = now.getTime() - Date.parse(latestOf(changed)!.captured_at)
   return Number.isFinite(ms) ? ms / 3_600_000 : null
+}
+
+/**
+ * 内核自己上次成功改过这个实体是多久以前（小时）。读不到任何记录返回 null。
+ *
+ * 🔴 **为什么不靠快照**：内核执行完一个动作后，没有任何地方会立刻补写一条
+ *    `changed` 快照 —— 那要等下一次定期对账。所以同一个实体连续两次自治动作
+ *    之间，快照里可能一条「刚改过」的痕迹都没有，冷却期闸读到的还是旧数字。
+ *    内核自己的执行记录（`action_runs`）是唯一当场就知道「我们刚动过它」的来源。
+ *
+ * 🔴 **为什么撤回也算**：`rolled_back` 意味着我们确实改过设置、又改回去了 ——
+ *    设置被碰过就是被碰过，学习期照样重置，不能因为最后撤回了就当没发生。
+ *
+ * 🔴 **为什么读失败必须报错而不是当成没动过**：把查询失败当成「从没动过」，
+ *    等于一次数据库抖动就静默放行一次本该被冷却期挡下的动作 —— fail-open。
+ *    调用方拿到 `ok: false` 必须拒绝，不能拿 `hours: null` 凑合。
+ */
+/**
+ * 哪些最终状态代表「这次动作可能已经碰过 Meta 的设置」。
+ *
+ * 🔴 **故意宁多勿少（fail-closed）**：
+ *   · `succeeded` —— 显然碰过
+ *   · `dead_letter` —— 撤回之后的终态就是这个（`gateway.ts` failRun 的注释：
+ *     「rollback 结果不改 run 的最终状态，永远还是 dead_letter」）。撤回意味着
+ *     设置被改过又改回去，学习期照样被重置，不能当没发生
+ *   · `failed` —— provider 写成功、但验证或后续步骤失败的 run 落在这里，设置已经被改过
+ * 不含 `denied` / `superseded` / `queued` / `authorizing` / `authorized` /
+ * `pending_approval` / `running`：这些都还没走到 apply 那一步。
+ *
+ * ⚠️ 代价：在 apply 之前就失败的 run 也会被算成「动过」，于是冷却期偏严、
+ *    可能多拦 72 小时。偏严比偏松安全，所以先这样；要精确就得逐个查
+ *    `action_run_steps` 里有没有 provider 写入回执，另开卡做。
+ *
+ * ❌ 不要写 `rolled_back`：`action_runs.status` 没有这个取值（见 `kernel/types.ts`
+ *    的 `RunStatus` 与建表 CHECK），写了等于筛零行 —— 第一版就踩了这个坑。
+ */
+const TOUCHED_PROVIDER_STATUSES = ['succeeded', 'failed', 'dead_letter'] as const
+
+/**
+ * `action_runs.input` 里可能装广告实体编号的字段。八个 `ads.*` 动作的全集。
+ *
+ * 🔴 少一个就等于那类动作的冷却期失效：`ads.swap_creative` 的 input 只有 `ad_id`
+ *    （`registry-ads.ts` 的 inputSchema），第一版只筛 adset/campaign，它永远不命中。
+ */
+const ENTITY_INPUT_FIELDS = ['adset_id', 'campaign_id', 'ad_id', 'audience_id'] as const
+
+export async function hoursSinceOwnLastAction(
+  sb: SupabaseClient,
+  args: {
+    readonly clientId: string
+    /** 要查的实体编号：判据实体 + 这次 input 里原始的那些（换素材要靠原始 ad_id 才命中）。 */
+    readonly entityIds: readonly string[]
+    readonly now: Date
+  },
+): Promise<{ ok: true; hours: number | null } | { ok: false; error: string }> {
+  // 🔴 **按实体在服务端精确筛，不许「拉最近 N 条再在内存里找」**：那样一旦这个客户
+  //    的动作条数超过 N，目标实体最后一次动作就掉出窗口 → 返回 null（= 从没动过）
+  //    → 冷却期闸静默失效。这正是同文件上面那段注释记下的 4000 行截断事故
+  //    （#1994 缺陷 2）的同一种坑，不能再踩一遍。
+  const ids = [...new Set(args.entityIds)].filter((id) => id.length > 0)
+  if (ids.length === 0) return { ok: false, error: '没有可查的实体编号，判不了我们自己上次动它是什么时候' }
+  // 形状不认识就拒，不拼进查询：这些 id 会被拼进 PostgREST 的 or 表达式。
+  // 白名单里没有逗号、点、括号、引号，所以拼不出第二个 or 子句或别的运算符（子牙复审核过）。
+  // 这里**故意不用**本文件别处那个更严的纯数字判据：实体编号不全来自 input
+  // （换素材那条是从快照里反查出来的所属广告组），收太严会变成误拒。
+  const bad = ids.find((id) => !/^[A-Za-z0-9_-]{1,64}$/.test(id))
+  if (bad !== undefined) {
+    return { ok: false, error: `实体编号形状不认识，不敢拿去查内核执行记录：${bad}` }
+  }
+  const orExpr = ids
+    .flatMap((id) => ENTITY_INPUT_FIELDS.map((field) => `input->>${field}.eq.${id}`))
+    .join(',')
+  const { data, error } = await sb
+    .from('action_runs')
+    .select('finished_at')
+    .eq('client_id', args.clientId)
+    .like('action_key', 'ads.%')
+    .in('status', [...TOUCHED_PROVIDER_STATUSES])
+    .not('finished_at', 'is', null)
+    .or(orExpr)
+    .order('finished_at', { ascending: false })
+    .limit(1)
+  if (error) return { ok: false, error: '读内核执行记录失败：' + error.message }
+
+  const rows = (data ?? []) as Array<{ finished_at: string | null }>
+  const finishedAt = rows[0]?.finished_at ?? null
+  if (!finishedAt) return { ok: true, hours: null }
+  const ms = args.now.getTime() - Date.parse(finishedAt)
+  // 🔴 有这一行、但时间读不懂 → 拒，不许跟「没有行」走同一个出口（魏征复审）：
+  //    返回 hours: null 会被调用方当成「我们没动过」→ 放行，那是 fail-open。
+  if (!Number.isFinite(ms)) {
+    return { ok: false, error: `内核执行记录里的完成时间读不懂：${finishedAt}` }
+  }
+  return { ok: true, hours: ms / 3_600_000 }
 }
 
 /** 这次动作的「跟钱和学习期相关的那个实体」解析结果。 */
@@ -342,6 +545,15 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
 
     /**
      * 🔴 **熔断检查 —— 这是熔断真正生效的那一刀**（v2.2 §6.1）。
+     *
+     * ⚠️ **但今天这一刀永远放行，因为没有人写 trip 行**（2026-10-18 查实，别误以为这道防线在工作）：
+     *    写 trip 的是韩信 step 1（设计稿 `2026-09-25-ads-impact-wp3-design-v1.md` §2.2 第 1 行
+     *    「#1/#2/#4 的 trip 在这里写」），韩信属 **WP3.2，尚未开工**（ROADMAP「WP3.2 链条」那条）。
+     *    现状：`circuit-detectors.ts` 五条判据零调用方、生产库 `ads_circuit_events` **0 行**、
+     *    因此下面的 `readCircuitState` 恒返回 `tripped: false`，`pm-todo/ads-circuit-items.ts` 恒为空。
+     *    **这不是这段代码的 bug**（读侧按 WP3.1b 的范围已交付且正确），是写侧还在 WP3.2。
+     *    WP3.2 落地后这段不需要改，自然开始真拦。工作量估算见
+     *    `docs/specs/2026-10-18-ads-agent-whole-design-and-code-gaps-v0.1.md` §6.5。
      *
      *    熔断不写 `ad_strategy_configs`、不改任何状态列；它就是在这里让信封事实
      *    「读不到」，于是 Kernel 两层各拒一次：
@@ -545,28 +757,11 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
       }
     }
 
-    const { data: cfg, error: cfgErr } = await deps.sb
-      .from('ad_strategy_configs')
-      .select('daily_budget_cap_cents')
-      .eq('client_id', clientId)
-      .maybeSingle<{ daily_budget_cap_cents: number | null }>()
-    if (cfgErr) return cantRead(`读客户广告配置失败：${cfgErr.message}`)
+    const planTotal = await readClientDailyTotalCap(deps.sb, clientId)
 
     /**
-     * 🔴 **日上限改成按账户取**（v2.1 §3.9 / §11.11，本轮交付）。
-     *
-     * 上面 `cfg.daily_budget_cap_cents` 是**客户级**的总闸（配置时校验
-     * `sum(账户上限) ≤ 客户总闸`，见 PATCH 路由）；单账户动作要比的是
-     * **这个账户自己**的日上限，不是客户总闸——CTS 两个账户各花各的，
-     * 拿总闸去比单账户等于把另一账户的额度也算给了它，会晚很久才拦下超支。
-     *
-     * 判据（migration `20260927000003` 的表注释原文）：
-     *   · 这个账户有自己的上限 → 用它
-     *   · 没有，但客户绑了 **≥2 个**账户 → `unavailable('facts:账户级日上限未配置')`——
-     *     多账户下不配就动，等于没有账户级保护，必须拒
-     *   · 没有，且客户就这一个账户（或用老的 `clients.meta_ad_account_id` 单账户
-     *     字段，压根没在 `client_meta_ad_accounts` 建过行）→ 回落客户级总闸——
-     *     单账户时总闸跟账户上限本来就是同一个数，不强制每个老客户都去面板重填一遍
+     * 日上限按账户取。单账户没填自己的上限时，回落已批准计划上的每天总上限。
+     * 计划没填就是缺失，不回落旧的客户总闸。多账户缺账户上限则拒绝。
      */
     const { data: accountRows, error: accountRowsErr } = await deps.sb
       .from('client_meta_ad_accounts')
@@ -586,7 +781,7 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     } else if (registeredAccounts.length >= 2) {
       return unavailable('facts:账户级日上限未配置')
     } else {
-      dailyCapCents = typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null
+      dailyCapCents = planTotal.state === 'set' ? planTotal.cents : null
     }
 
     // 🔴 **冷却期单独查，不受上面那个 4000 行账户窗口限制**（#1994 缺陷 2，本轮修）。
@@ -609,7 +804,35 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
       .order('captured_at', { ascending: false })
       .limit(200)
     if (cooldownErr) return cantRead(`读这个单位的变动历史失败：${cooldownErr.message}`)
-    const cooldownHours = hoursSinceLastRealChange((cooldownRows ?? []) as SnapRow[], now())
+    const snapshotCooldownHours = hoursSinceLastRealChange((cooldownRows ?? []) as SnapRow[], now())
+
+    // 🔴 **两个来源各看见一半，取更近的那个**：
+    //    · 快照（`changed` / `kernel_post`）看见「设置真的变了」，包括人在 Ads Manager 里改的
+    //    · 内核执行记录（`action_runs`）看见「我们自己刚动过」，哪怕还没轮到下一次对账
+    //    只用一个都会漏：只靠快照会漏掉内核刚改完、还没对账的那一段；只靠执行记录
+    //    会漏掉人工在 Ads Manager 里改的。取小时数更小的那个（= 更近）才不会漏。
+    //    两个都是 null 时保持 null（下游语义不变）；只有一个有数就用那个。
+    // 要查的实体编号：判据实体 + 这次 input 里原始的那几个。换素材的 input 只有
+    // `ad_id`，而判据实体是它所属的广告组 —— 只拿判据实体去查，那类动作永远不命中。
+    const ownEntityIds = [
+      subject.entityId,
+      ...ENTITY_INPUT_FIELDS.map((field) => str(field)).filter((v): v is string => typeof v === 'string' && v.length > 0),
+    ]
+    const ownAction = await hoursSinceOwnLastAction(deps.sb, {
+      clientId,
+      entityIds: ownEntityIds,
+      now: now(),
+    })
+    if (!ownAction.ok) return cantRead(ownAction.error)
+    // 🔴 **快照是 null 时保持 null**（子牙复审）：null 的意思是「这个实体一条快照都没有」，
+    //    下游（`autonomy-envelope.ts`）据此直接拒。让一条很旧的执行记录把 null 变成数字
+    //    等于把「读不到」改写成「很久没动过」——方向是从偏严变偏松，不许。
+    //    执行记录只用来覆盖 `MAX_SAFE_INTEGER`（= 有快照但没有一条真改动）这一种。
+    const cooldownHours = snapshotCooldownHours === null
+      ? null
+      : ownAction.hours === null
+        ? snapshotCooldownHours
+        : Math.min(snapshotCooldownHours, ownAction.hours)
 
     // 新建的单位改动前没有预算（0）；其余类型必须真读到，读不到就是 null → 拒绝。
     const beforeCents = kind === 'new_spend'
@@ -638,6 +861,8 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     let clientDailyTotalBeforeCents: number | null = null
     let clientDailyCapCents: number | null = null
     if (actionKey === 'ads.scale_unit_budget' && afterRawIsIncrease(afterCents, beforeCents)) {
+      const planCap = await readApprovedDailyTotalCap(deps.sb, clientId, str('card_prescription_id') ?? '')
+      if (!planCap.ok) return unavailable(`facts:${planCap.reason}`)
       const rollup = await loadClientBudgetRollup(
         deps.sb,
         clientId,
@@ -645,7 +870,7 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
         str('campaign_id') ? 'campaign' : 'adset',
         subject.entityId,
         beforeCents ?? Number.NaN,
-        typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null,
+        planCap.cents,
         now(),
         at,
       )

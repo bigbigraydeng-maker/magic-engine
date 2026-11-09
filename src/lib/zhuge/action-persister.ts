@@ -31,6 +31,7 @@ import { saveDecisionHistory } from '@/lib/memory/service'
 import { assertAdsExpectedMetric } from '@/lib/flywheel/metric-registry'
 import { resolveClientAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 import { canonicalUrl } from '@/lib/url/canonical-url'
+import { isKnownActionType } from './action-vocabulary'
 
 // ── Dimension mappings ────────────────────────────────────────────────────────
 
@@ -83,6 +84,8 @@ export interface WriteExecutionItemsResult {
   inserted: number
   /** Number of old zhuge items marked superseded. */
   superseded: number
+  /** Number of actions dropped because action_type is not in the registered vocabulary. */
+  rejected_unknown_action_type: number
 }
 
 // ── Session key ───────────────────────────────────────────────────────────────
@@ -373,9 +376,36 @@ export async function writeExecutionItems(
   actions: PriorityAction[],
   prescriptionId: string | null = null,
 ): Promise<WriteExecutionItemsResult> {
-  if (actions.length === 0) return { inserted: 0, superseded: 0 }
+  if (actions.length === 0) {
+    return { inserted: 0, superseded: 0, rejected_unknown_action_type: 0 }
+  }
 
-  const actionTypes = actions.map((a) => a.action_type)
+  // 不认识的 action_type 不进待办：LLM 临场编的 slug（例如
+  // `launch_google_search_ads_3pl`）没有执行器，写进 execution_items 只会
+  // 卡在 pending 空转。词汇表的权威来源在 action-vocabulary.ts。
+  const knownActions: PriorityAction[] = []
+  const unknownActionTypes: string[] = []
+  for (const action of actions) {
+    if (isKnownActionType(action.action_type)) {
+      knownActions.push(action)
+    } else {
+      unknownActionTypes.push(action.action_type)
+    }
+  }
+  if (unknownActionTypes.length > 0) {
+    console.warn(
+      `[action-persister] 丢弃 ${unknownActionTypes.length} 个未登记的 action_type（client=${clientId}, session=${zhugeSessionId ?? 'none'}）: ${unknownActionTypes.join(', ')}`,
+    )
+  }
+  if (knownActions.length === 0) {
+    return {
+      inserted: 0,
+      superseded: 0,
+      rejected_unknown_action_type: unknownActionTypes.length,
+    }
+  }
+
+  const actionTypes = knownActions.map((a) => a.action_type)
 
   // Fetch any existing pending rows for these action types for this client.
   // steps_json is needed to rebuild each row's dedup key (keyword lives there).
@@ -412,7 +442,7 @@ export async function writeExecutionItems(
   const toInsert: PriorityAction[] = []
   const batchKeys = new Set<string>()
 
-  for (const action of actions) {
+  for (const action of knownActions) {
     const key = executionItemDedupKey(action.action_type, action.metadata?.keyword, action.metadata?.url ?? action.metadata?.page_url)
     // Same finding appearing twice in one batch: insert only the first
     if (batchKeys.has(key)) continue
@@ -471,7 +501,11 @@ export async function writeExecutionItems(
     }
   }
 
-  return { inserted: toInsert.length, superseded: toSupersede.length }
+  return {
+    inserted: toInsert.length,
+    superseded: toSupersede.length,
+    rejected_unknown_action_type: unknownActionTypes.length,
+  }
 }
 
 // ── SEO weekly list items (docs/specs/2026-10-04-seo-weekly-list-v0.2.md) ───────

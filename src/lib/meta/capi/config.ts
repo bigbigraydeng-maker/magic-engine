@@ -12,7 +12,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
-import { domainToEnvKey } from '@/lib/meta/token-manager'
+import { domainToEnvKey, loadStoredClientMetaToken } from '@/lib/meta/token-manager'
 
 export type CapiCredentials = {
   clientId: string
@@ -82,7 +82,9 @@ export async function resolveCapiConfig(clientId: string): Promise<CapiCredentia
   const tokenEnv = tokenEnvVar(domain)
   const pixelEnv = pixelEnvVar(domain)
 
-  const accessToken = process.env[tokenEnv]
+  // Preferred: DB-stored per-client token (post-migration path).
+  const dbToken = await loadStoredClientMetaToken(supabase(), clientId)
+  const accessToken = dbToken ?? process.env[tokenEnv]
   if (!accessToken) {
     throw new CapiConfigError(
       `缺少该客户的 Meta 令牌（${tokenEnv}）。刻意不回落到共享令牌 —— 拿别人的令牌写成交撤不回。`,
@@ -96,5 +98,8 @@ export async function resolveCapiConfig(clientId: string): Promise<CapiCredentia
     throw new CapiConfigError(`缺少该客户的 Meta pixel（${pixelEnv}）`, 'pixel', pixelEnv)
   }
 
-  return { clientId, pixelId, accessToken, source: { tokenEnv, pixelEnv } }
+  return {
+    clientId, pixelId, accessToken,
+    source: { tokenEnv: dbToken ? 'platform_oauth_connections' : tokenEnv, pixelEnv },
+  }
 }

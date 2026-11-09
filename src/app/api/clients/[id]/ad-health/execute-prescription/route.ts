@@ -4,9 +4,9 @@
  * DAPE E for the ads-health dashboard: execute the one-click prescription on a
  * campaign card. Currently one executable kind:
  *
- *   refresh_creatives — trigger the winner-reel-sync engine for this client.
- *     It scans the client's organic winners and adds the best into the paid
- *     pool as NEW ads, DEFAULT PAUSED (no spend until a human activates them).
+ *   refresh_creatives — ask the winner-reel scan to raise confirmation cards.
+ *     It does not create ads. A person confirms a card before a paused ad
+ *     is created. Opening that ad is a second card.
  *     Called as a direct library import — never an internal HTTP self-call
  *     (zhangqian lesson, PR #297).
  *
@@ -15,17 +15,22 @@
  *
  * Body: { kind: 'refresh_creatives' }
  * 200 → { success, adsAdded: [{name, score}], guardsHit, status }
+ * 403 → not an internal (Magic Lab) account
  * 409 → winner-sync not configured/enabled for this client
+ * 429 → a successful run was logged for this client in the last 10 minutes
  * 422 → kind not executable
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePlanApproverAccess } from '@/lib/auth/client-access'
+import { clickerFromSession } from '@/lib/confirmation-card'
 import { syncWinnerReels } from '@/lib/winner-reel-sync/engine'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
+
+const DEDUPE_WINDOW_MS = 10 * 60 * 1000
 
 interface RouteParams {
   params: { id: string }
@@ -34,7 +39,8 @@ interface RouteParams {
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
   const clientId = params.id
 
-  const access = await requirePaidClientAccess(clientId)
+  // Adds ads to the paid pool: internal accounts only.
+  const access = await requirePlanApproverAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -73,13 +79,43 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     )
   }
 
-  // skipFatiguePause: a button labelled "补新素材" must ONLY add — pausing other
-  // ads here would be an action beyond what the user consented to.
-  // newAdStatusOverride: the confirm dialog promises "暂停、不花钱" — hold that
-  // promise even if the client's winner-sync config defaults new ads to ACTIVE.
+  // Approximate de-dup (not atomic): a successful run in the last 10 minutes already added
+  // ads, so a second click/tab/retry must not add another batch.
+  const since = new Date(Date.now() - DEDUPE_WINDOW_MS).toISOString()
+  const { data: recent, error: recentError } = await supabaseAdmin
+    .from('winner_reel_sync_log')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('status', 'ok')
+    .gte('run_at', since)
+    .limit(1)
+  if (recentError) {
+    // Fail closed: if we cannot tell whether a batch was just added, do not add another.
+    return NextResponse.json(
+      { error: '读不到最近的补素材记录,为避免重复添加,这次没有执行,请稍后重试' },
+      { status: 503 },
+    )
+  }
+  if (recent && recent.length > 0) {
+    return NextResponse.json(
+      { error: '10 分钟内刚补过一批素材,请先刷新看看,不要重复提交', recently_run: true },
+      { status: 429 },
+    )
+  }
+
+  // skipFatiguePause: a button labelled "补新素材" must ONLY suggest adds.
+  // The scan no longer writes. Cards are issued in this person's name.
+  const clicker = clickerFromSession({
+    email: access.user.email ?? '',
+    role: access.role,
+    allowedClientId: access.allowedClientId,
+    clientId,
+    agentMarked: req.headers.get('x-me-actor') === 'agent',
+  })
   const result = await syncWinnerReels(clientId, {
     skipFatiguePause: true,
     newAdStatusOverride: 'PAUSED',
+    clicker,
   })
 
   if (result.status === 'error') {
@@ -91,6 +127,7 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
 
   return NextResponse.json({
     success: true,
+    proposed: true,
     status: result.status,
     postsScanned: result.postsScanned,
     adsAdded: result.adsAdded.map(a => ({ name: a.name, score: a.score })),

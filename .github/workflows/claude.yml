@@ -30,6 +30,43 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Install guards from the default branch, not the working tree.
+      # Claude can edit the checkout after this step. The copies it is allowed
+      # to run are root-owned and outside the repo, so those edits do not change
+      # them. Tradeoff: the merged default-branch files are trusted. This job
+      # does not verify a signature, and it does not add a separate sandbox.
+      - name: Install Claude command guards
+        run: |
+          set -euo pipefail
+          default_branch="${{ github.event.repository.default_branch }}"
+          git fetch --depth=1 origin "$default_branch"
+          tmp="$(mktemp -d)"
+          git show "FETCH_HEAD:.github/scripts/gh-pr-create-draft.sh" > "$tmp/gh-pr-create-draft.sh"
+          git show "FETCH_HEAD:.github/scripts/git-limited.sh" > "$tmp/git-limited.sh"
+          git show "FETCH_HEAD:.github/scripts/git-command-config.sh" > "$tmp/git-command-config.sh"
+          printf '%s\n' "https://github.com/${{ github.repository }}.git" > "$tmp/origin-url"
+          : > "$tmp/empty-gitconfig"
+          sudo install -d -o root -g root -m 0755 /opt/claude-guards /opt/claude-guards/empty-gh
+          sudo install -o root -g root -m 0755 "$tmp/gh-pr-create-draft.sh" /opt/claude-guards/gh-pr-create-draft
+          sudo install -o root -g root -m 0755 "$tmp/git-limited.sh" /opt/claude-guards/git-limited
+          sudo install -o root -g root -m 0644 "$tmp/git-command-config.sh" /opt/claude-guards/git-command-config.sh
+          sudo install -o root -g root -m 0644 "$tmp/origin-url" /opt/claude-guards/origin-url
+          sudo install -o root -g root -m 0644 "$tmp/empty-gitconfig" /opt/claude-guards/empty-gitconfig
+          rm -rf "$tmp"
+          test "$(stat -c '%U:%a' /opt/claude-guards/gh-pr-create-draft)" = "root:755"
+          test "$(stat -c '%U:%a' /opt/claude-guards/git-limited)" = "root:755"
+          test "$(stat -c '%U:%a' /opt/claude-guards/git-command-config.sh)" = "root:644"
+          test "$(stat -c '%U:%a' /opt/claude-guards/origin-url)" = "root:644"
+          test "$(stat -c '%U:%a' /opt/claude-guards/empty-gitconfig)" = "root:644"
+          test "$(stat -c '%U:%a' /opt/claude-guards/empty-gh)" = "root:755"
+          test "$(stat -c '%U:%a' /opt/claude-guards)" = "root:755"
+          test -x /usr/bin/gh
+          test -x /usr/bin/git
+          if [[ -w /opt/claude-guards || -w /opt/claude-guards/gh-pr-create-draft || -w /opt/claude-guards/git-limited || -w /opt/claude-guards/git-command-config.sh || -w /opt/claude-guards/empty-gh || -w /opt/claude-guards/origin-url || -w /opt/claude-guards/empty-gitconfig ]]; then
+            echo "guard path is writable by the job user" >&2
+            exit 1
+          fi
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
@@ -43,8 +80,33 @@ jobs:
           # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
           # prompt: 'Update the pull request description to include a summary of changes.'
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr *)'
+          # v1 passes claude_args to the CLI. The documented flag is --allowedTools
+          # (camelCase). The action merges this list with its built-in tools
+          # (read, search, in-repo edits, git add/commit, and the no-flag push
+          # wrapper). It does not replace them.
+          # Pull requests are created only via the root-owned wrapper installed
+          # above. It checks that value flags have values, puts --draft before
+          # caller args, and rejects flags that can turn draft off. Raw
+          # `gh pr create` is not allowed. No merge, no force-push, no gh api,
+          # no resolve-review-thread.
+          # fetch / checkout / switch / cherry-pick go through git-limited.
+          # Raw git prefixes are not allowed: flags such as --upload-pack run
+          # a local command. The wrapper allows only those four subcommands,
+          # a fixed https origin, and a short flag list. Before it runs git,
+          # it parses config with NUL records and refuses keys that name a
+          # program, including a subsection that contains "=". It also refuses
+          # attribute values such as filter=<name> and merge=<custom driver>.
+          # gh pr create is refused the same way: its git status runs clean
+          # filters from the work tree, including when the command is started
+          # from a subdirectory.
+          # npm ci, npm test, and npm run type-check are exact commands.
+          # Wildcards are omitted because npm accepts --script-shell and vitest
+          # accepts --config, both of which run arbitrary code.
+          # Job permissions stay as declared above. gh uses the Claude app token
+          # minted in the action (it already requests pull request write), not
+          # the read-only GITHUB_TOKEN from this job.
+          # See https://github.com/anthropics/claude-code-action/blob/v1/docs/usage.md
+          # and https://github.com/anthropics/claude-code-action/blob/v1/docs/configuration.md
+          claude_args: |
+            --allowedTools "Bash(/opt/claude-guards/git-limited:*),Bash(/opt/claude-guards/gh-pr-create-draft:*),Bash(gh pr view:*),Bash(npm ci),Bash(npm test),Bash(npm run type-check)"
 

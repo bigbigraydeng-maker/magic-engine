@@ -51,6 +51,7 @@ describe('PLATFORM_PROVIDERS', () => {
     expect(PLATFORM_PROVIDERS.MICROSOFT_MAIL).toBe('microsoft_mail')
     expect(PLATFORM_PROVIDERS.GOOGLE_GA4).toBe('google_ga4')
     expect(PLATFORM_PROVIDERS.GOOGLE_GTM).toBe('google_gtm')
+    expect(PLATFORM_PROVIDERS.GOOGLE_YOUTUBE).toBe('google_youtube')
   })
 })
 

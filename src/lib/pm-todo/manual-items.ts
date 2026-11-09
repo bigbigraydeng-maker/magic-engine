@@ -30,17 +30,41 @@ import { deployCheckFailedItem, pushDeployHealthItems } from './deploy-health-it
 import { pushMessengerDraftItems } from './messenger-draft-items'
 import { pushKnowledgeFactExpiringItems } from './knowledge-fact-expiring-items'
 import { pushDailyPlanMeasurementItems } from './daily-plan-measurement-items'
+import { pushSocialReadbackItems } from './social-readback-items'
+import { socialReadbackOutcomeEnabled } from '@/lib/social/readback-outcome-record'
+import { pushPriceFactItems } from './price-fact-items'
+import { pushTourCatalogPublishRequestItems } from './tour-catalog-publish-request-items'
+import { pushAutoPublishItems } from './auto-publish-items'
+import { pushStoryLiteItems } from './story-lite-items'
+import { pushWeekPackItems } from './week-pack-items'
 import { pushEmailReplyItems } from './email-reply-items'
+import { pushLeadFollowupItems } from './lead-followup-items'
 import { pushBindingRequestItems } from './binding-request-items'
 import { pushPageBindingItems } from './page-binding-items'
 import { pushFacebookSyncFailingItems } from './facebook-sync-items'
+import { pushBrokenPageHoldItems } from './broken-page-hold-items'
 import { pushLeadSheetItems } from './lead-sheet-items'
+import { foldRootCauseDuplicates } from './dedupe-root-cause'
+import { pushCalendarClosureItems } from './calendar-closure-items'
 import { pushToolLeadItems } from './tool-lead-items'
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
 import { pushAdsCircuitItems } from './ads-circuit-items'
+import { pushAdsServicePauseItems } from './ads-service-pause-items'
+import { pushAdsAccountStatusItems } from './ads-account-status-items'
+import { pushPromoPlanWatchItems } from './promo-plan-watch-items'
+import { pushWeeklyLoopItems } from './social-weekly-loop-items'
+import { pushReelScheduledItems } from './reel-scheduled-items'
+import { pushAccountAuditItems } from './account-audit-items'
+import { pushReadbackItems } from './readback-suggestion-items'
+import { pushDailyListItems } from './daily-list-items'
+import { pushPlanDraftFailureItems } from './plan-draft-failure-items'
+import { pushAdsTrackingPreflightItems } from './ads-tracking-preflight-items'
+import { pushAdsAgentMonitorItems } from './ads-agent-stale-items'
+import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
+import { pushRankVerdictGapItems } from './seo-rank-verdict-overdue-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
 import {
   buildCrawlHealthItems,
@@ -53,16 +77,15 @@ import {
   type ManualItemPusher,
   type NotIndexedRow,
 } from './manual-item-types'
-import { pushLinkedinProgressItems } from './manual-linkedin-items'
-import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
+import { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
 import { pushAdsAutoPauseItems } from './ads-auto-pause-items'
 
 export * from './manual-item-types'
-export { pushLinkedinProgressItems } from './manual-linkedin-items'
-export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems } from './manual-crm-items'
+export { pushPaidSignalReviewItems, pushDncReviewItems, pushMessengerStopItems, pushImportantDueItems, pushPhoneReviewItems } from './manual-crm-items'
+import { pushFactoryMaterialItems } from './factory-material-items'
 import { pushVideoCreditsItem, pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
-import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems } from './manual-monitoring-items'
-import { pushLeadsSanityItems, pushDiagnosticItems, pushPrescriptionItems } from './manual-strategy-items'
+import { pushDataForSeoCreditsItem, pushProviderOutageItems, pushCronHealthItems, pushAdReadbackItems, pushMailchimpExportItems, pushAdsConfigReadItems, pushAdsAutoPauseConfigReadItems } from './manual-monitoring-items'
+import { pushLeadsSanityItems, pushPrescriptionItems } from './manual-strategy-items'
 
 export { pushCreatomateRenderItems, pushPriceGateItems, pushFactoryWorkerItems } from './manual-content-items'
 export { pushDataForSeoCreditsItem, buildProviderOutageItems, pushMailchimpExportItems } from './manual-monitoring-items'
@@ -72,6 +95,9 @@ import { auditGoalBaselines } from '@/lib/strategy/baseline-audit'
 import { fetchBlogDraftTodos } from '@/lib/pm-todo/blog-drafts'
 import { fetchAutoRunTodos } from '@/lib/pm-todo/auto-run-items'
 import { fetchCommentScopeTodos } from '@/lib/pm-todo/comment-scope-items'
+import { fetchCommentReplyScopeTodos } from '@/lib/pm-todo/comment-reply-scope-items'
+import { fetchCommentAutoreplyRunFailingTodos } from '@/lib/pm-todo/comment-autoreply-run-failing-items'
+import { pushCommentHumanItems } from '@/lib/pm-todo/comment-human-items'
 import { fetchKernelHandoffTodos } from '@/lib/kernel/handoff'
 import { auditCrossClientLeaks } from '@/lib/clients/cross-client-audit'
 import {
@@ -82,9 +108,12 @@ import {
 import { CLIENT_DOC_MANUAL_TASKS, type ClientDocManualTask } from './client-doc-manual-tasks'
 import { pushPlaybookStalenessItems } from './playbook-staleness-items'
 import { pushPlatformConnectionItems } from './platform-connection-items'
+import { pushWhatsappUnclaimedItems } from './whatsapp-unclaimed-items'
 import { pushLedgerItems } from './ledger-items'
 import { pushMaliangRenderItems } from './maliang-render-items'
 import { pushLibaiItems } from './libai-items'
+import { pushBaozhengItems } from './baozheng-items'
+import { pushFactoryWinnerItems } from './factory-winner-items'
 import { pushSimaqianReviewItems } from './simaqian-review-items'
 
 /**
@@ -130,7 +159,8 @@ export async function loadManualItems(
   }
   // 两组同时跑，拼回时仍是「基础设施在前、客户通道在后」的原顺序（见 runPushers 头注）
   await runPushers(items, [...infra, ...clientPushers(supabase, clients, now)])
-  return items
+  // 同一个根因报了很多次的折成一次（AI 余额用完 → 各客户体检全挂只是症状；授权断了 + 同步失败 = 同一修法）
+  return foldRootCauseDuplicates(items).items
 }
 
 /** 跟客户名单无关的检查（余额、断电、定时任务、授权、钥匙……），客户表读挂了也照跑。 */
@@ -170,6 +200,11 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     // 不拦的话会掀掉整个 loadManualItems，当天整份待办邮件变空（比漏一条严重得多）。
     (b) => pushPlatformConnectionItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 平台授权体检失败（不阻塞其他待办）:', e),
+    ),
+    // WhatsApp 收到了消息但没客户绑定这个号码 —— 消息没存下来，只有人能去设置页绑一次。
+    // 表还没上线时模块自己静默返回，不抛给这里。
+    (b) => pushWhatsappUnclaimedItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] WhatsApp 无人认领号码检查失败（不阻塞其他待办）:', e),
     ),
     // 写在 Render 里的 Meta 钥匙被 Meta 作废 —— 上面那条只查「连接 Meta」按钮存下的授权，
     // 这条补的是环境变量里的钥匙（CTS 9/21·9/23·9/25 三次都是 PM 自己问才发现）
@@ -219,6 +254,17 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushFactoryWorkerItems(supabase, b, now, clients).catch((e) =>
       console.warn('[manual-items] 出片工人在岗检查失败（不阻塞其他待办）:', e),
     ),
+    (b) => pushFactoryMaterialItems(supabase, b, now, clients).catch((e: unknown) => {
+      const message = e instanceof Error && e.message.trim() ? e.message.trim().slice(0, 160) : '读不到'
+      b.push({
+        kind: 'factory_material_check_failed',
+        client_id: 'infra',
+        client_name: 'Magic Engine 后台',
+        what: `素材待审和死信检查没跑成（${message}）。没列出来不等于没有。`,
+        how: '这条不用你动手。回我一句「素材催办检查没跑成」，我去查。',
+        href: 'https://app.magicengine.com.au/dashboard/factory',
+      })
+    }),
     // Creatomate 渲染失败/超时 —— 旧路径的卡死回收已死透，这是它的替代（spec §4.4 B4）
     (b) => pushCreatomateRenderItems(supabase, b, now, clients).catch((e) =>
       console.warn('[manual-items] Creatomate 渲染检查失败（不阻塞其他待办）:', e),
@@ -227,6 +273,14 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushDailyPlanMeasurementItems(supabase, b, now, clients).catch((e) =>
       console.warn('[manual-items] 帖子成绩回收失败检查读取失败（不阻塞其他待办）:', e),
     ),
+    // 读回链拒绝（草稿 / 时间对不上）以前直接 return，今日待办看不见。
+    // 开关默认关：没打开就不查这张表。
+    (b) => {
+      if (!socialReadbackOutcomeEnabled()) return Promise.resolve()
+      return pushSocialReadbackItems(supabase, b, now, clients).catch((e) =>
+        console.warn('[manual-items] 读回链拒绝记录读取失败（不阻塞其他待办）:', e),
+      )
+    },
     // 正在花钱的广告撞上了已知的坑 —— 每天扫一遍的结果，不下发就等于没扫
     (b) => pushAdReadbackItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 广告闸门结果读取失败（不阻塞其他待办）:', e),
@@ -241,19 +295,27 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushAdsConfigReadItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 广告配置读取检查失败（不阻塞其他待办）:', e),
     ),
+    // 同一类：回拉读成功、自动暂停自己再读失败的窄窗口，痕迹只在它的回执里。
+    (b) => pushAdsAutoPauseConfigReadItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 自动暂停读配置检查失败（不阻塞其他待办）:', e),
+    ),
     // Facebook 私信 / 表单留资同步连续失败 —— 报错原来只进运行记录，NAL 的主页授权
     // 2026-09-16 失效后 9 天没人知道，新私信新留资全没进 CRM。授权失效只有主页管理员能修，必须下发。
     (b) => pushFacebookSyncFailingItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] Facebook 同步失败检查读取失败（不阻塞其他待办）:', e),
+    ),
+    // 没有连接行可标的坏主页令牌（Graph 190 / 缺角色）。未核实公用令牌仍走主页绑定待办。
+    (b) => pushBrokenPageHoldItems(supabase, b).catch((e) =>
+      console.warn('[manual-items] Facebook 主页暂停名单读取失败（不阻塞其他待办）:', e),
     ),
     // 线索没写进客户自己的 Google 表格 —— 销售看的就是那张表，缺一条就是少跟一个人，
     // 而 Facebook 的留资只保留 90 天，超期永久取不回
     (b) => pushLeadSheetItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 线索表格同步待办检查失败（不阻塞其他待办）:', e),
     ),
-    // ME 产品动态自动发 LinkedIn —— 敏感内容待审 / 账号未连 / 发布失败三种卡点
-    (b) => pushLinkedinProgressItems(supabase, b, now).catch((e) =>
-      console.warn('[manual-items] LinkedIn 进度贴待办检查失败（不阻塞其他待办）:', e),
+    // 日历上带日期的验证事项每天核对一遍 —— 读不到日历 / 巡检没跑成 / 没法自动核对都要摆到人眼前
+    (b) => pushCalendarClosureItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 日历到期事项巡检待办检查失败（不阻塞其他待办）:', e),
     ),
     // 客人说他付款了但没法自动确认 —— 只有人能对银行流水，不许机器自己打 paid 标签
     (b) => pushPaidSignalReviewItems(supabase, b, now).catch((e) =>
@@ -280,18 +342,43 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
   const nameOf = (id: string) => clients.get(id)?.name ?? '未知客户'
   return [
     // 广告 D3（花钱没结果）自动暂停建议等人批准——点一下就执行，不用去 Meta 后台
-    (b) => pushAdsAutoPauseItems(supabase, b, nameOf).catch((e) =>
+    (b) => pushAdsAutoPauseItems(supabase, b, nameOf, now).catch((e) =>
       console.warn('[manual-items] Ads D3 自动暂停待批准读取失败（不阻塞其他待办）:', e),
     ),
-    // 新诊断结果 —— PM 2026-08-03 拍板要逐条看；没有消费方的自动化 = 再造一个没人看的数据源。
-    // 必须放在 nameOf 定义之后：待办上显示 uuid 等于没显示。
-    (b) => pushDiagnosticItems(supabase, b, now, nameOf),
+    // 已上线的标题改动一直没有效果判定 —— 9-28 起「改了有没有用」整条静默，没人知道（2026-10-29）。
+    (b) => pushRankVerdictGapItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 标题效果判定检查失败（不阻塞其他待办）:', e),
+    ),
     // 审批过但被价格闸拦住的帖子 —— 自动发布那条路人不在场,不捞出来就没人知道
     (b) => pushPriceGateItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 价格闸待办检查失败（不阻塞其他待办）:', e),
     ),
-    // 本周方案已自动落地 —— 只通知，不要求 PM 操作（PM 2026-08-04 拍板）
-    (b) => pushPrescriptionItems(supabase, b, now, nameOf),
+    // 每日计划里写了价格但跟客户资料对不上的帖子 —— 发布出口会整批拦下，不捞出来没人知道
+    (b) => pushPriceFactItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 价格数字核对待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // 客户员工改了团目录、点了「请 Magic Engine 上架」—— 不摆出来就没人去上架
+    (b) => pushTourCatalogPublishRequestItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 团目录上架请求待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 自动发布没发出去 / 不确定发没发出去 / 已授权却没动静 —— 人不在场，不捞出来没人知道
+    (b) => pushAutoPublishItems(supabase, b, now, nameOf, { live: process.env.DAILY_PLAN_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
+      console.warn('[manual-items] 自动发布待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // Story 自动发布没发出去 / 不知道发没发出去 / 已授权却没动静
+    (b) => pushStoryLiteItems(supabase, b, now, nameOf, { live: process.env.STORY_AUTO_PUBLISH_LIVE === 'true' }).catch((e) =>
+      console.warn('[manual-items] Story 自动发布待办检查失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushWeekPackItems(supabase, b, now, nameOf, {
+      WEEKLY_PACK_APPROVAL_ENABLED: process.env.WEEKLY_PACK_APPROVAL_ENABLED,
+      WEEKLY_PACK_REEL_GO_PUBLIC: process.env.WEEKLY_PACK_REEL_GO_PUBLIC,
+    }, ids).catch((e) =>
+      console.warn('[manual-items] 每周整包待办检查失败（不阻塞其他待办）:', e),
+    ),
+    // 本周已批准方案的进度复查 —— 只通知建议，不要求按这条去改方案
+    (b) => pushPrescriptionItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 方案复查通知读取失败（不阻塞其他待办）:', e),
+    ),
     // 客资数值不值得信 —— 值不值得信只有查了统计后台才知道，别让人自己去翻
     (b) => pushLeadsSanityItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 客资口径检查失败（不阻塞其他待办）:', e),
@@ -310,6 +397,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushCommentScopeItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 评论权限待办生成失败（不阻塞其他待办）:', e),
     ),
+    // 主页评论 needs_human 读时分流 → 今日待办（独立通道，评论权限待办失败也不挡）
+    (b) => pushCommentHumanItems(supabase, b, clients, now).catch((e) =>
+      console.warn('[manual-items] 评论要人回待办生成失败（不阻塞其他待办）:', e),
+    ),
     // 马良：Creatomate 成片的 9 宫格自检结果——过关等审片（署名）、不过关问返工还是放弃、
     // 检不了 / 出片 2 小时后没检进系统欠账栏。拉模式读工单 + 快照，事件丢了也照样出得来
     (b) => pushMaliangRenderItems(supabase, b, now, nameOf).catch((e) =>
@@ -319,6 +410,15 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 另有提示词库月检结果（只报告不改）。拉模式读库和回执，事件丢了也照样出得来
     (b) => pushLibaiItems(supabase, b, now, nameOf).catch((e) =>
       console.warn('[manual-items] 李白待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 包拯：每周复核 AI 判客人阶段，两个 AI 判得不一样的进「认一下」栏；周检没跑成进系统欠账。
+    // 拉模式读它的回执（规则书 docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md BZ-18）
+    (b) => pushBaozhengItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 包拯待办读取失败（不阻塞其他待办）:', e),
+    ),
+    // 视频工厂赢家：复核过、等人点「认 / 不认」的样板片；每客户最多一条，两周后不再提醒（只留工厂页）
+    (b) => pushFactoryWinnerItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 工厂赢家待办读取失败（不阻塞其他待办）:', e),
     ),
     // 司马迁每周四起草的 Google 评价回复草稿（一律没发）—— 拉模式读它的回执，
     // 事件送达失败也照样出得来；巡不成的那条进系统欠账栏，不静默
@@ -341,6 +441,54 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushAdsCircuitItems(supabase, b, nameOf).catch((e) =>
       console.warn('[manual-items] 广告熔断待办生成失败（不阻塞其他待办）:', e),
     ),
+    // 服务刚暂停的广告系列 —— 拉模式读操作记录，通知事件丢了也照样出现在今日待办
+    (b) => pushAdsServicePauseItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 广告暂停待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // Meta 广告账户状态不是正常（欠款 / 被限制）超过 24 小时 —— 账户停摆时不会花钱也不会有新线索，系统里没有别处会说
+    (b) => pushAdsAccountStatusItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告账户状态待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 广告 Agent 定时同步太久没成功 / 花费超日上限只读提醒（不自动改广告）
+    (b) => pushAdsAgentMonitorItems(supabase, b, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 广告 Agent 同步监控待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 推广计划每日检查：草稿等批准 / 批准后被改 / 到期阶段没过 / 对账偏差 / 检查自己没跑成
+    (b) => pushPromoPlanWatchItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 推广计划每日检查待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 社媒每周出稿：只读写库模式回执里的待办（没东西可排 / 全被刷掉 / 读不到团目录 / 马良没审）
+    (b) => pushWeeklyLoopItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 社媒每周出稿待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // Reel 按日公开：周卡批过、到日没发出去的（读流量记录里的授权状态）
+    // 社媒账号自检：每周一自检的回执（每个客户最新一份；没跑成也出待办）
+    (b) => pushAccountAuditItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 社媒账号自检待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 社媒每周回看建议：公开满 72 小时的 Reel 成绩（只读；建议不会自己改设置）
+    (b) => pushReadbackItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 社媒回看建议待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // Reel 按日公开：周卡批过、到日没发出去的（读流量记录里的授权状态）
+    (b) => pushReelScheduledItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] Reel 按日公开待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // Reel 每日清单：开了社媒 Agent 的客户，今天到后天排了日子、还没放行的
+    (b) => pushDailyListItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] Reel 每日清单待办生成失败（不阻塞其他待办）:', e),
+    ),
+    (b) => pushPlanDraftFailureItems(supabase, b, ids, nameOf).catch((e) =>
+      console.warn('[manual-items] 推广计划草稿失败待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 广告开投前「追踪与环境就绪」检查：红灯怎么修（开发欠账）+ 检查自己没跑成。读每日函数的回执，不自己现算
+    (b) => pushAdsTrackingPreflightItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 开投前追踪检查待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 月循环目标没自动续上 —— 自动续建失败不许只写日志（铁律 3）
+    (b) => pushGoalRolloverItems(supabase, b, nameOf).catch((e) =>
+      console.warn('[manual-items] 月目标续建缺口待办生成失败（不阻塞其他待办）:', e),
+    ),
     // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
     (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 删除数据请求失败待办生成失败（不阻塞其他待办）:', e),
@@ -354,6 +502,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     (b) => pushDncReviewItems(supabase, b, ids, nameOf).catch((e) =>
       console.warn('[manual-items] 拒联复核待办生成失败（不阻塞其他待办）:', e),
     ),
+    // 电话系统收了通话、但没能自动记进客人档案 —— 接真实客人线路前必须有人看得见（PM 2026-10-12）
+    (b) => pushPhoneReviewItems(supabase, b, ids, nameOf).catch((e) =>
+      console.warn('[manual-items] 待确认电话待办生成失败（不阻塞其他待办）:', e),
+    ),
     // 反向的那一半：客人在私信里像是说了「别再联系」，而判据从来读不到私信（#1025）。
     // 刻意**不自动封渠道**，只提示 —— 理由见 lib/crm/messenger-stop-signal.ts 文件头。
     (b) => pushMessengerStopItems(supabase, b, ids, now, nameOf).catch((e) =>
@@ -366,6 +518,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // 客人来信超过一天没人回 + 公司邮箱同步哑了（后者会让前者假装成零条），见 email-reply-items.ts
     (b) => pushEmailReplyItems(supabase, b, ids, now, nameOf).catch((e) =>
       console.warn('[manual-items] 客人来信没回待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // 客人填了表超过 24 小时没人回 —— 汇总信的开关一直关着，没有任何人被指派（CTS 积压 170 条）。
+    (b) => pushLeadFollowupItems(supabase, b, ids, now, nameOf).catch((e) =>
+      console.warn('[manual-items] 线索没人回待办生成失败（不阻塞其他待办）:', e),
     ),
     // 客户交了广告账户号等核实 —— 客户以为交上去了，不下发就没人知道（AD-SEC-3）
     (b) => pushBindingRequestItems(supabase, b, ids, now, nameOf).catch((e) =>
@@ -806,6 +962,9 @@ async function pushAutoRunItems(
  *
  * 判定与文案都在 `comment-scope-items.ts`：那边直接读 cron 自己写的运行记录，
  * 所以这里说的话跟机器真遇到的失败永远一致。
+ *
+ * 也覆盖「读得到评论、但回复被 Meta 拒掉」的那种（缺 pages_manage_engagement）——
+ * 判定与文案在 `comment-reply-scope-items.ts`。
  */
 async function pushCommentScopeItems(
   supabase: SupabaseClient,
@@ -815,6 +974,28 @@ async function pushCommentScopeItems(
 ): Promise<void> {
   const todos = await fetchCommentScopeTodos(supabase, now)
   for (const t of todos) {
+    items.push({
+      kind: t.kind,
+      client_id: t.client_id,
+      client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+  const failingTodos = await fetchCommentAutoreplyRunFailingTodos(supabase, now)
+  for (const t of failingTodos) {
+    items.push({
+      kind: t.kind,
+      client_id: t.client_id,
+      client_name: nameOf(t.client_id),
+      what: t.what,
+      how: t.how,
+      href: t.href,
+    })
+  }
+  const replyTodos = await fetchCommentReplyScopeTodos(supabase, now)
+  for (const t of replyTodos) {
     items.push({
       kind: t.kind,
       client_id: t.client_id,

@@ -600,8 +600,243 @@ describe('timing', () => {
   })
 })
 
+describe('logoMode', () => {
+  test('props without logoMode still parse and stay undefined', () => {
+    const parsed = parseListReelProps(valid())
+    assert.equal(parsed.logoMode, undefined)
+  })
+
+  test("logoMode 'last_beats' is accepted", () => {
+    const props = valid()
+    props.logoMode = 'last_beats'
+    assert.doesNotThrow(() => parseListReelProps(props))
+  })
+
+  test("logoMode 'always' is accepted", () => {
+    const props = valid()
+    props.logoMode = 'always'
+    assert.doesNotThrow(() => parseListReelProps(props))
+  })
+
+  test("logoMode 'forever' is rejected", () => {
+    rejects((props) => {
+      props.logoMode = 'forever'
+    })
+  })
+
+  test('logoMode null is rejected', () => {
+    rejects((props) => {
+      props.logoMode = null
+    })
+  })
+
+  test('the default timing is unchanged (regression)', () => {
+    const props = valid()
+    const fromProps = computeTimingFromProps(props)
+    const fromBeats = computeTiming(props.beats, props.items.length)
+    const explicit = computeTiming(props.beats, props.items.length, 'last_beats')
+    assert.deepEqual(fromProps, fromBeats)
+    assert.deepEqual(fromProps, explicit)
+  })
+
+  test("logoMode 'always' starts the logo at frame 0 and changes nothing else", () => {
+    const props = valid()
+    const base = computeTimingFromProps(props)
+    const always = computeTimingFromProps({ ...props, logoMode: 'always' })
+    assert.equal(always.logoFrom, 0)
+    assert.equal(always.hookFrames, base.hookFrames)
+    assert.deepEqual(always.itemFrom, base.itemFrom)
+    assert.deepEqual(always.itemDur, base.itemDur)
+    assert.equal(always.revealFrom, base.revealFrom)
+    assert.equal(always.totalFrames, base.totalFrames)
+  })
+})
+
+describe('readability options', () => {
+  test('props without the new fields still parse and stay undefined', () => {
+    const parsed = parseListReelProps(valid())
+    assert.equal(parsed.cutFlash, undefined)
+    assert.equal(parsed.price.footnoteSize, undefined)
+  })
+
+  test('deleting price.dateLine now parses OK and stays undefined', () => {
+    const props = valid()
+    delete props.price.dateLine
+    const parsed = parseListReelProps(props)
+    assert.equal(parsed.price.dateLine, undefined)
+  })
+
+  test('price.dateLine of an empty string is still rejected', () => {
+    rejects((props) => {
+      props.price.dateLine = ''
+    })
+  })
+
+  test('footnoteSize 38 is accepted', () => {
+    const props = valid()
+    props.price.footnoteSize = 38
+    assert.doesNotThrow(() => parseListReelProps(props))
+  })
+
+  for (const bad of [29, 61, 38.5, '38']) {
+    test(`footnoteSize ${JSON.stringify(bad)} is rejected`, () => {
+      rejects((props) => {
+        props.price.footnoteSize = bad
+      })
+    })
+  }
+
+  for (const good of [true, false]) {
+    test(`cutFlash ${good} is accepted`, () => {
+      const props = valid()
+      props.cutFlash = good
+      assert.doesNotThrow(() => parseListReelProps(props))
+    })
+  }
+
+  for (const bad of ['no', null]) {
+    test(`cutFlash ${JSON.stringify(bad)} is rejected`, () => {
+      rejects((props) => {
+        props.cutFlash = bad
+      })
+    })
+  }
+})
+
 // Music, montage and template tests ride along with this file because package.json (an A-level path) lists test files explicitly.
 import './music.test.mjs'
 import './music-excerpt.test.mjs'
 import './montage.test.mjs'
 import './templates.test.mjs'
+
+describe('footageScrim', () => {
+  test('props without footageScrim still parse and stay undefined', () => {
+    const parsed = parseListReelProps(valid())
+    assert.equal(parsed.footageScrim, undefined)
+  })
+
+  test('footageScrim between 0 and 1 is accepted', () => {
+    for (const good of [0, 0.35, 1]) {
+      const props = valid()
+      props.footageScrim = good
+      assert.equal(parseListReelProps(props).footageScrim, good)
+    }
+  })
+
+  test('footageScrim out of range or non-number is rejected', () => {
+    for (const bad of [-0.1, 1.01, '0.4', null]) {
+      rejects((props) => {
+        props.footageScrim = bad
+      })
+    }
+  })
+})
+import './datacard.test.mjs'
+
+describe('price/label layout options', () => {
+  test('corner layout, qualifierSize, footnoteBackdrop and itemLabelSize are accepted', () => {
+    const props = valid()
+    props.price.layout = 'corner'
+    props.price.qualifier = 'FLIGHTS INCLUDED'
+    props.price.footnote = 'PER PERSON'
+    delete props.price.dateLine
+    props.price.qualifierSize = 48
+    props.price.footnoteBackdrop = true
+    props.itemLabelSize = 52
+    const parsed = parseListReelProps(props)
+    assert.equal(parsed.price.layout, 'corner')
+    assert.equal(parsed.price.qualifierSize, 48)
+    assert.equal(parsed.price.footnoteBackdrop, true)
+    assert.equal(parsed.itemLabelSize, 52)
+  })
+
+  test("price.layout 'left' is rejected", () => {
+    rejects((props) => {
+      props.price.layout = 'left'
+    })
+  })
+
+  for (const bad of [29, 61]) {
+    test(`qualifierSize ${bad} is rejected`, () => {
+      rejects((props) => {
+        props.price.qualifierSize = bad
+      })
+    })
+  }
+
+  for (const bad of [29, 65]) {
+    test(`itemLabelSize ${bad} is rejected`, () => {
+      rejects((props) => {
+        props.itemLabelSize = bad
+      })
+    })
+  }
+
+  test('the unmodified fixture still parses (defaults)', () => {
+    const parsed = parseListReelProps(valid())
+    assert.equal(parsed.price.layout, undefined)
+    assert.equal(parsed.price.qualifierSize, undefined)
+    assert.equal(parsed.price.footnoteBackdrop, undefined)
+    assert.equal(parsed.itemLabelSize, undefined)
+  })
+})
+
+describe('corner layout safe-zone guard', () => {
+  test('corner layout rejects oversized qualifier/footnote text', () => {
+    const a = valid()
+    a.price.layout = 'corner'
+    a.price.qualifierSize = 49
+    assert.throws(() => parseListReelProps(a), /右下小卡/)
+    const b = valid()
+    b.price.layout = 'corner'
+    b.price.footnoteSize = 41
+    assert.throws(() => parseListReelProps(b), /右下小卡/)
+    const c = valid()
+    c.price.layout = 'corner'
+    c.price.footnote = 'X'.repeat(27)
+    assert.throws(() => parseListReelProps(c), /右下小卡/)
+    const d = valid()
+    d.price.layout = 'corner'
+    d.price.dateLine = 'Y'.repeat(25)
+    assert.throws(() => parseListReelProps(d), /右下小卡/)
+  })
+  test('corner layout accepts the boundary sizes; centre layout keeps the full range', () => {
+    const a = valid()
+    a.price.layout = 'corner'
+    a.price.qualifierSize = 48
+    a.price.footnoteSize = 40
+    a.price.footnote = 'F'.repeat(26)
+    a.price.qualifier = 'Q'.repeat(26)
+    a.price.dateLine = 'D'.repeat(24)
+    assert.doesNotThrow(() => parseListReelProps(a))
+    const b = valid()
+    b.price.layout = 'center'
+    b.price.qualifierSize = 60
+    b.price.footnoteSize = 60
+    assert.doesNotThrow(() => parseListReelProps(b))
+  })
+  test('footnoteBackdrop must be a boolean; size boundaries 30/60/64 are accepted', () => {
+    const a = valid()
+    a.price.footnoteBackdrop = 'yes'
+    assert.throws(() => parseListReelProps(a))
+    const b = valid()
+    b.price.qualifierSize = 30
+    b.itemLabelSize = 64
+    assert.doesNotThrow(() => parseListReelProps(b))
+  })
+})
+
+describe('revealTitleSize', () => {
+  test('accepts 36..60 and rejects outside', () => {
+    for (const ok of [36, 48, 60]) {
+      const p = valid()
+      p.revealTitleSize = ok
+      assert.equal(parseListReelProps(p).revealTitleSize, ok)
+    }
+    for (const bad of [35, 61, 47.5]) {
+      const p = valid()
+      p.revealTitleSize = bad
+      assert.throws(() => parseListReelProps(p))
+    }
+  })
+})

@@ -1,0 +1,108 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Shanghai & Surroundings #2: 'what's in the price' 15-second reel (departs 25 March 2027; v3 (music swapped to jade_river_journey.mp3 per 74 window; picture unchanged), 3 slower items ~2.8s each (reviewer asked >=2.8s), flights+7 nights merged; no guests)",
+ "angle_source": {
+  "source": "manual_remotion_cts_spring2027",
+  "authorized_by": "74 号 CTS 广告总控补充需求单（2026-10-12，PM 要求补充更多素材）；只出片到 in_review，不发布、不起广告",
+  "facts_checked": "ctstours.co.nz/tours/china/discovery/shanghai-surroundings, 2026-10-12：NZD 2,699 pp twin share；单人房差 NZD 400；10 days；25 March 2027；7 nights / 5 hotels；English-speaking guide；meals 7 breakfasts + 5 lunches + 1 dinner = 13；International and domestic airfares（片内只写 FLIGHTS）。"
+ },
+ "rationale_one_liner": "上海第二条：「含什么」逐项叠出（机票/7 晚 5 家酒店/英语导游/13 餐），钩子 WHAT'S IN THE PRICE?；只存草稿。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "list",
+   "props": {
+    "brandColor": "#B61E2E",
+    "itemOverlayOpacity": 0.08,
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "cutFlash": false,
+    "footageScrim": 0.35,
+    "musicFile": "music/jade_river_journey.mp3",
+    "musicStartSec": 0,
+    "beats": [
+     0,
+     0.75,
+     1.5,
+     2.25,
+     3.0,
+     4.4,
+     5.8,
+     7.2,
+     8.6,
+     10.0,
+     11.4,
+     11.8,
+     12.2,
+     12.6,
+     13.0,
+     13.4,
+     14.0,
+     14.5,
+     14.9
+    ],
+    "hook": {
+     "clip": "clips/c4_westlake_boats.mp4",
+     "lines": [
+      {
+       "badge": null,
+       "text": "WHAT'S"
+      },
+      {
+       "badge": null,
+       "text": "IN THE"
+      },
+      {
+       "badge": null,
+       "text": "PRICE?"
+      }
+     ]
+    },
+    "items": [
+     {
+      "text": "FLIGHTS & 7 NIGHTS' HOTELS",
+      "clip": "clips/item2_aerialnight.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "ENGLISH-SPEAKING GUIDE",
+      "clip": "clips/v3_bund_night_zoom.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "13 MEALS INCLUDED",
+      "clip": "clips/price_shanghaiday.mp4",
+      "blurBackdrop": false
+     }
+    ],
+    "itemLabel": "IN THE PRICE",
+    "revealTitle": "ONE PRICE.",
+    "price": {
+     "backdropClip": "clips/c4_westlake_pavilion.mp4",
+     "fromLabel": "FROM",
+     "currencyPrefix": "NZ$",
+     "amount": 2699,
+     "qualifier": "PER PERSON · TWIN SHARE",
+     "footnote": "SINGLE SUPPLEMENT NZ$400",
+     "footnoteSize": 50
+    }
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Ten days from Auckland. In the price: flights, seven nights of hotel accommodation, an English-speaking tour guide and 13 meals (7 breakfasts, 5 lunches and 1 dinner). NZD $2,699 per person, twin share; single supplement NZD $400. Travel insurance and tips are not included. Next departure 25 March 2027.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings",
+    "offer": [
+     "10 days from Auckland",
+     "NZD $2,699 per person, twin share",
+     "Next departure 25 March 2027"
+    ]
+   }
+  }
+ }
+}

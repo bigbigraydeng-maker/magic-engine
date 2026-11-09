@@ -18,7 +18,7 @@ vi.mock('@/lib/platform-oauth/token-manager', () => ({
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
-import { sendMailReply, mailReplyWindow } from '../mail-send'
+import { callWithRetry, sendMailReply, mailReplyWindow } from '../mail-send'
 
 const INPUT = {
   clientId: 'c1',
@@ -377,5 +377,37 @@ describe('mailReplyWindow（跟 channel-dispatch 的 CHANNEL_WINDOW 查表形状
   it('客人来过信，不管多久之前 → open，msRemaining 是 Infinity（邮件不存在"窗口快关了"）', () => {
     expect(mailReplyWindow('2020-01-01T00:00:00Z')).toEqual({ kind: 'open', msRemaining: Number.POSITIVE_INFINITY })
     expect(mailReplyWindow(new Date().toISOString())).toEqual({ kind: 'open', msRemaining: Number.POSITIVE_INFINITY })
+  })
+})
+
+describe('callWithRetry: the optional "do not mark the connection as failed" switch', () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('without the switch the token is asked for exactly as before (no extra argument)', async () => {
+    ;(getValidTokenForConnection as ReturnType<typeof vi.fn>).mockResolvedValue('tok-1')
+    await callWithRetry('conn-1', async () => ({ ok: true as const, value: 1 }))
+    expect(getValidTokenForConnection).toHaveBeenCalledTimes(1)
+    expect(getValidTokenForConnection).toHaveBeenCalledWith('conn-1')
+  })
+
+  it('with markErrorOnFailure:false both token requests (also the forced refresh after a 401) carry the switch', async () => {
+    ;(getValidTokenForConnection as ReturnType<typeof vi.fn>).mockResolvedValue('tok-1')
+    let calls = 0
+    const result = await callWithRetry(
+      'conn-1',
+      async () => (++calls === 1 ? { ok: false as const, status: 401, error: 'expired' } : { ok: true as const, value: 2 }),
+      { markErrorOnFailure: false },
+    )
+    expect(result).toEqual({ ok: true, value: 2 })
+    expect(getValidTokenForConnection).toHaveBeenNthCalledWith(1, 'conn-1', { markErrorOnFailure: false })
+    expect(getValidTokenForConnection).toHaveBeenNthCalledWith(2, 'conn-1', { forceRefresh: true, markErrorOnFailure: false })
+  })
+
+  it('a token that cannot be had still gives the usual 424 answer', async () => {
+    ;(getValidTokenForConnection as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('refresh failed'))
+    const result = await callWithRetry('conn-1', async () => ({ ok: true as const, value: 3 }), { markErrorOnFailure: false })
+    expect(result).toMatchObject({ ok: false, status: 424 })
   })
 })

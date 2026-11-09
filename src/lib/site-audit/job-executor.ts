@@ -12,6 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { JobRunner } from './job-runner'
 import { discoverSitemapUrls as crawlerDiscoverUrls, crawlPages } from './crawler'
 import { enrichCrawledPage } from './page-enrichment'
+import { orderStalestFirst, summarizeCapSkips } from './crawl-order'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -151,6 +152,47 @@ export async function crawlAndClassifyPages(
     if (crawl.error) {
       failed.push({ url: crawl.url, error: crawl.error })
       crawledCount++
+      // Record a first-time failure so the URL has a row. ignoreDuplicates keeps any
+      // existing row untouched: a transient error must not overwrite the last
+      // successful snapshot (status, crawled_at) that SEO signals and dedup read.
+      try {
+        let failPath = '/'
+        try { failPath = new URL(crawl.url).pathname } catch { /* keep default */ }
+        const { error: failMarkError } = await supabase.from('client_site_pages').upsert(
+          {
+            client_id:    clientId,
+            url:          crawl.url,
+            path:         failPath,
+            crawled_at:   crawl.crawledAt.toISOString(),
+            crawl_status: 'failed',
+            crawl_error:  crawl.error,
+          },
+          { onConflict: 'client_id,url', ignoreDuplicates: true },
+        )
+        if (failMarkError) {
+          console.warn('[site-audit] could not record failed attempt', crawl.url, failMarkError.message)
+          failed[failed.length - 1].error = `${crawl.error}${RECORD_FAILED_MARKER}${failMarkError.message}`
+        }
+
+        // Refresh the attempt time for rows that never had a good crawl, so a
+        // persistently-failing URL does not keep its first-failure timestamp and
+        // hog the front of the staleness queue. Rows with crawl_status 'crawled'
+        // (last good snapshot) or 'antibot_challenged' are left untouched.
+        const { error: failRefreshError } = await supabase
+          .from('client_site_pages')
+          .update({ crawled_at: crawl.crawledAt.toISOString(), crawl_error: crawl.error })
+          .eq('client_id', clientId)
+          .eq('url', crawl.url)
+          .eq('crawl_status', 'failed')
+        if (failRefreshError) {
+          console.warn('[site-audit] could not refresh failed attempt', crawl.url, failRefreshError.message)
+          failed[failed.length - 1].error = `${crawl.error}${RECORD_FAILED_MARKER}${failRefreshError.message}`
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        console.warn('[site-audit] could not record failed attempt', crawl.url, message)
+        failed[failed.length - 1].error = `${crawl.error}${RECORD_FAILED_MARKER}${message}`
+      }
 
       // Periodic progress update
       if ((i + 1) % PROGRESS_UPDATE_INTERVAL === 0) {
@@ -194,6 +236,8 @@ export async function crawlAndClassifyPages(
             url: crawl.url,
             path: pagePath,
             title: crawl.title,
+            // undefined = not captured (keep old value); null = confirmed absent (clear it).
+            ...(crawl.metaDescription !== undefined ? { meta_description: crawl.metaDescription } : {}),
             markdown_content: crawl.markdown,
             word_count: wordCount,
             page_type: pageType,
@@ -247,6 +291,9 @@ export async function crawlAndClassifyPages(
 /** Marker `crawlAndClassifyPages` appends to a blocked page's failure when its DB mark failed. */
 const MARK_FAILED_MARKER = '; mark failed: '
 
+/** Marker `crawlAndClassifyPages` appends to a failed crawl when recording the attempt failed. */
+const RECORD_FAILED_MARKER = '; record failed: '
+
 /**
  * One-line summary of blocked pages whose database mark failed, or null when none did.
  * Saved on the completed job so the reason is not left only in server logs.
@@ -256,6 +303,79 @@ export function summarizeMarkFailures(failed: Array<{ url: string; error: string
   if (marks.length === 0) return null
   const reason = marks[0].error.split(MARK_FAILED_MARKER)[1] ?? ''
   return `${marks.length} 个被防火墙挡住的页面没能标记上（第一个原因：${reason.slice(0, 200)}）`
+}
+
+/**
+ * One-line summary of failed crawls whose attempt record could not be written, or null when none did.
+ * Saved on the completed job so the reason is not left only in server logs.
+ */
+export function summarizeRecordFailures(failed: Array<{ url: string; error: string }>): string | null {
+  const records = failed.filter((f) => f.error.includes(RECORD_FAILED_MARKER))
+  if (records.length === 0) return null
+  const reason = records[0].error.split(RECORD_FAILED_MARKER)[1] ?? ''
+  return `${records.length} 个抓取失败的页面没能记录失败时间（第一个原因：${reason.slice(0, 200)}）`
+}
+
+const HISTORY_PAGE_SIZE = 1000
+const HISTORY_MAX_PAGES = 50
+
+interface CrawlHistoryRow {
+  url: string
+  crawled_at: string | null
+  crawl_status: string | null
+}
+
+/**
+ * Read every crawl-history row for a client, paging past the default row cap.
+ * Returns null on any page error so the caller can fall back to sitemap order.
+ */
+async function readCrawlHistory(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<CrawlHistoryRow[] | null> {
+  const rows: CrawlHistoryRow[] = []
+  for (let page = 0; page < HISTORY_MAX_PAGES; page++) {
+    const from = page * HISTORY_PAGE_SIZE
+    const { data, error } = await supabase
+      .from('client_site_pages')
+      .select('url, crawled_at, crawl_status')
+      .eq('client_id', clientId)
+      .order('url', { ascending: true })
+      .range(from, from + HISTORY_PAGE_SIZE - 1)
+    if (error || !data) {
+      console.warn('[site-audit] could not read crawl history, keeping sitemap order:', error?.message)
+      return null
+    }
+    rows.push(...(data as CrawlHistoryRow[]))
+    if (data.length < HISTORY_PAGE_SIZE) break
+  }
+  return rows
+}
+
+/**
+ * Reorder discovered URLs so the longest-unrefreshed pages come first. Only matters
+ * when the cap will cut something; a read failure keeps sitemap order (the old behaviour).
+ */
+async function orderByStaleness(
+  supabase: SupabaseClient,
+  clientId: string,
+  urls: string[],
+): Promise<string[]> {
+  try {
+    const data = await readCrawlHistory(supabase, clientId)
+    if (!data) return urls
+    const crawledAt = new Map<string, string>()
+    for (const row of data) {
+      // 'crawled' = real refresh; 'failed' = attempt time (back off repeat failures).
+      // Anti-bot challenged / pending pages were never refreshed, so they stay first in line.
+      const attempted = row.crawl_status === 'crawled' || row.crawl_status === 'failed'
+      if (row.crawled_at && attempted) crawledAt.set(row.url, row.crawled_at)
+    }
+    return orderStalestFirst(urls, crawledAt)
+  } catch (err) {
+    console.warn('[site-audit] could not read crawl history, keeping sitemap order:', err instanceof Error ? err.message : String(err))
+    return urls
+  }
 }
 
 /**
@@ -311,11 +431,15 @@ export async function executeJob(
       return
     }
 
+    // 3b. If the site has more pages than the cap, crawl the stalest first so
+    //     the same tail is not skipped every run (2026-10-05 CTS: 179 pages, cap 150).
+    const orderedUrls = await orderByStaleness(supabase, job.client_id, urls)
+
     // 4. Crawl, classify, GEO-detect, upsert
     const { successful, failed } = await crawlAndClassifyPages(
       supabase,
       job.client_id,
-      urls,
+      orderedUrls,
       jobId,
       resolvedOptions
     )
@@ -326,9 +450,13 @@ export async function executeJob(
       totalPagesClassified: successful.length,
     })
     const failedUrls = failed.map((f) => f.url)
-    const markSummary = summarizeMarkFailures(failed)
-    if (markSummary) {
-      await runner.completeJob(jobId, failedUrls, markSummary)
+    const note = [
+      summarizeMarkFailures(failed),
+      summarizeRecordFailures(failed),
+      summarizeCapSkips(urls.length, resolvedOptions.maxPages ?? DEFAULT_MAX_PAGES),
+    ].filter((n): n is string => n !== null).join('；')
+    if (note) {
+      await runner.completeJob(jobId, failedUrls, note)
     } else {
       await runner.completeJob(jobId, failedUrls)
     }

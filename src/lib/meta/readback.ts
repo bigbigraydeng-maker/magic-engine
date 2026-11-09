@@ -26,7 +26,7 @@ const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 
 /** 广告组回读要的字段。targeting 必须整个拿回来 —— 我们要看的正是 Meta 补的那些。 */
 const ADSET_FIELDS =
-  'id,name,optimization_goal,destination_type,status,effective_status,campaign_id,targeting'
+  'id,name,optimization_goal,destination_type,status,effective_status,campaign_id,daily_budget,end_time,targeting'
 
 /**
  * 创意里所有**买家会看到**的文字。
@@ -84,6 +84,33 @@ export async function fetchCampaignStatus(
   const json = await graphGet(`${GRAPH_BASE}/${campaignId}?${params}`, `campaign ${campaignId}`)
   const status = (json as { status?: unknown } | null)?.status
   return typeof status === 'string' ? status : null
+}
+
+/** 一个广告系列的状态和花费上限（账户币种最小单位，Meta 返回字符串；没设上限时是 "0" 或缺失）。读不到返回 null。 */
+export async function fetchCampaignReadback(
+  campaignId: string,
+  accessToken: string,
+): Promise<{ status: string | null; spendCap: string | null } | null> {
+  const params = new URLSearchParams({ fields: 'status,spend_cap', access_token: accessToken })
+  const json = await graphGet(`${GRAPH_BASE}/${campaignId}?${params}`, `campaign ${campaignId}`)
+  if (!json || typeof json !== 'object') return null
+  const o = json as { status?: unknown; spend_cap?: unknown }
+  return {
+    status: typeof o.status === 'string' ? o.status : null,
+    spendCap: typeof o.spend_cap === 'string' || typeof o.spend_cap === 'number' ? String(o.spend_cap) : null,
+  }
+}
+
+/** 创意里挂的即时表单编号。video_data / link_data 两种结构都看；摘不到返回 undefined（不是「没挂」）。 */
+export function extractLeadFormId(creative: unknown): string | undefined {
+  if (!creative || typeof creative !== 'object') return undefined
+  const spec = (creative as Record<string, unknown>).object_story_spec as Record<string, unknown> | undefined
+  for (const key of ['video_data', 'link_data'] as const) {
+    const cta = (spec?.[key] as Record<string, unknown> | undefined)?.call_to_action as Record<string, unknown> | undefined
+    const id = (cta?.value as Record<string, unknown> | undefined)?.lead_gen_form_id
+    if (typeof id === 'string' && id.trim()) return id.trim()
+  }
+  return undefined
 }
 
 /**
@@ -240,7 +267,11 @@ export async function fetchAdCreativesReadback(
       }
     }
 
-    out.push({ adId: String(ad.id ?? ''), adName: ad.name, status: ad.status, texts })
+    const leadFormId = extractLeadFormId(ad.creative)
+    out.push({
+      adId: String(ad.id ?? ''), adName: ad.name, status: ad.status, texts,
+      ...(leadFormId ? { leadFormId } : {}),
+    })
   }
   return out
 }
@@ -266,4 +297,22 @@ async function fetchPostText(
     .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
     .map((v) => v.trim())
   return texts.length > 0 ? texts : null
+}
+
+/**
+ * 广告账户的最低日预算（账户币种的最小单位，如 NZD 178 = $1.78）和币种。
+ * 低于它 Meta 一定拒绝按天预算的广告组。读不到返回 null（= 查不出来，调用方放行、由 Meta 兜底，
+ * 不是「预算够」）。
+ */
+export async function fetchAccountMinDailyBudget(
+  adAccountId: string,
+  accessToken: string,
+): Promise<{ minDailyBudgetMinor: number; currency: string } | null> {
+  const params = new URLSearchParams({ fields: 'currency,min_daily_budget', access_token: accessToken })
+  const json = await graphGet(`${GRAPH_BASE}/${adAccountId}?${params}`, `min budget ${adAccountId}`)
+  if (!json || typeof json !== 'object') return null
+  const o = json as { currency?: unknown; min_daily_budget?: unknown }
+  const min = typeof o.min_daily_budget === 'string' ? Number(o.min_daily_budget) : o.min_daily_budget
+  if (typeof o.currency !== 'string' || typeof min !== 'number' || !Number.isFinite(min) || min <= 0) return null
+  return { minDailyBudgetMinor: min, currency: o.currency }
 }

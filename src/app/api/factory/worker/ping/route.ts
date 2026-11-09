@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { parseRenderWorkerField } from '@/lib/factory/render-worker-report'
 import {
   isWorkerAuthorized,
   workerClaimClientIds,
@@ -38,12 +39,17 @@ export async function POST(req: NextRequest) {
   if (!clientIds) return NextResponse.json({ error: 'client_id must be allowlisted when provided' }, { status: 403 })
 
   const at = new Date().toISOString()
+  const renderWorker = parseRenderWorkerField(body)
   const row = {
     status: 'completed',
     started_at: at,
     finished_at: at,
     duration_ms: 0,
-    summary: { worker_id: workerId, client_ids: clientIds },
+    summary: {
+      worker_id: workerId,
+      client_ids: clientIds,
+      ...(renderWorker ? { render_worker: renderWorker } : {}),
+    },
   }
   const { data: existing, error: findErr } = await supabaseAdmin
     .from('cron_run_logs')

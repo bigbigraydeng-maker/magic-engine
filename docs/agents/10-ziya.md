@@ -69,7 +69,7 @@ Step 2 — LLM 兜底（Opus，规则未匹配时）
      → 子牙读魏征报告 → 决定 merge 或打回
 ```
 
-**Codex 产出的代码必须经过魏征两层才能 merge。子牙不亲自审 Codex 代码。**
+**2026-10-25 起，合并闸不再要求魏征或子牙签字。** A 级由 Codex Astra 审查、Claude Code 独立复核。子牙 / 魏征 / 狄仁杰 只参与 B 级可选抽查，缺席不挡合并。上面的流程图是旧协作方式，不再当作合并条件。
 
 ### 给 Codex 派活的标准格式
 
@@ -187,3 +187,15 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 - 达芬奇手册（已撤，历史参考；审查清单已并入本文件 §四b）：`docs/agents/80-davinci.md`
 - 魏征手册（代码验收）：`docs/agents/90-weicheng.md`
 - Codex 入口：`docs/agents/CODEX.md`
+
+---
+
+## 操作手册
+
+暂无。索引：[agents 索引](./README.md)。
+
+---
+
+## 十一、当审查员时的省钱约定（2026-11-05）
+
+子牙做 B/C 级抽查审查时，同样适用 [魏征手册 §九](./90-weicheng.md)：Sonnet 档、只读 diff 和点名文件、约 15 轮封顶、一个 PR 一次审查。A 级复核不降级。

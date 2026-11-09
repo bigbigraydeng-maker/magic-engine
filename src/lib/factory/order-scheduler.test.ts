@@ -125,6 +125,8 @@ describe('自动排产 — 一天一单', () => {
     // 调度器塞角度 = 绕过护栏 2 的溯源要求
     expect(inserted[0].evidence).toEqual({})
     expect(JSON.stringify(inserted[0].request)).not.toMatch(/angle/i)
+    // Name the platform explicitly (evaluate would otherwise default it with a warning).
+    expect(inserted[0].request).toMatchObject({ platform: 'facebook' })
   })
 })
 

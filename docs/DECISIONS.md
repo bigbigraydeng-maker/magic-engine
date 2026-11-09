@@ -41,7 +41,7 @@
 - 现有无 Campaign 归属的 `content_posts` 记录（历史散单内容），在 UI 上标"散单 / 待归入"，不迁移但也不继续新增。
 - Campaign 创建界面：v1 实现多轮对话补全（`campaign_id`、时间窗、目标受众、核心诉求、关联 Master Brief），表单填写降为备用。
 - Newsletter 纳入 Campaign 作为一路输出，与社媒内容共享 Campaign 目的和受众定义，单独管理发送时间和内容格式。
-- 发布管道：Campaign Bundle 批准 → 写 `content_posts`（`status=approved`）→ 发布 → 回写 `content_posts.publer_post_id` / `published_at`。
+- 发布管道：Campaign Bundle 批准 → 写 `content_posts`（`status=approved`）→ 发布 → 回写 `content_posts.publer_post_id` / `published_at`。（Publer 已于 2026-10 删除）
 
 ---
 
@@ -356,7 +356,7 @@ function buildEntityMatcher(aliases: readonly string[]): RegExp { /* 精确别�
 - 建 `flywheel_actions` / `flywheel_metrics` / `flywheel_outcomes` 三层数据骨架 + adapter 抽象
 - **第 4 飞轮命名定为 `geo`**（替代历史命名 `insight_reports`）—— GEO 才是真正动手干活的引擎，月报独立为非飞轮的 `reports`
 - 广告 vendor 策略：先用 Meta MCP 自建 adapter，markisfact 当「未来可插拔」备选。**硬约束 = 数据必须留在 ME 自己的表里，不管 vendor 是谁**
-- 社媒飞轮形态 = 混合：自研内容制作（Atlas + OpenAI/Claude）+ 第三方发布（Publer）
+- 社媒飞轮形态 = 混合：自研内容制作（Atlas + OpenAI/Claude）+ 第三方发布（Publer）（Publer 已于 2026-10 删除）
 - **AI Tracker 保留自建，不切 Apify `amernas/ai-brand-monitor`** —— 该 actor 不支持 AU/NZ 地域定位（默认美国视角，对全部客户失真），且状态 "Under maintenance" 不能做核心数据源
 - **TikTok 广告库抓取未来用 Apify，不自建** —— 商品化数据采集，TikTok 反爬激进
 

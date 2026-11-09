@@ -9,10 +9,13 @@
  * 桌面：右侧 520px 抽屉；移动：全屏。
  */
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { PrescriptionContent, PrescriptionIntake, PrescriptionAction } from '@/types/diagnostic'
 import type { SelfGrade, HuatuoGenerationMeta } from '@/lib/huatuo/types'
-import { readHuatuoStream } from '@/lib/huatuo/stream-client'
+import { pollHuatuoPrescription } from '@/lib/huatuo/poll-prescription'
+import { useClientAdCurrency } from '@/lib/ads/use-client-ad-currency'
+import { adCurrencyLabel, adCurrencyPrefix, formatAdMoney } from '@/lib/ads/spend-figures'
+import { prescriptionBudgetFields } from '@/lib/ads/budget-currency'
 
 type Mode = 'supplement' | 'revision'
 type Step = 'form' | 'generating' | 'review'
@@ -61,11 +64,16 @@ export function InlinePrescriptionDrawer({
   // 批准状态
   const [approving, setApproving] = useState(false)
 
-  // body 滚动锁
+  const alive = useRef(true)
+
+  // body 滚动锁；关掉抽屉就不再改界面，后台开方继续写
   useEffect(() => {
     const orig = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = orig }
+    return () => {
+      alive.current = false
+      document.body.style.overflow = orig
+    }
   }, [])
 
   const modeTitle  = mode === 'supplement' ? '补充处方' : '修订处方'
@@ -76,11 +84,21 @@ export function InlinePrescriptionDrawer({
   const goalPlaceholder = mode === 'supplement'
     ? '例：客户决定也要做 LinkedIn B2B 内容，需要补充对应动作'
     : '例：客户预算砍半，需要聚焦最高 ROI 的动作，砍掉视频拍摄类'
+  const budgetCurrency = useClientAdCurrency(clientId)
+  const budgetCode = adCurrencyLabel(budgetCurrency)
+  const budgetPrefix = adCurrencyPrefix(budgetCurrency)
   const budgetLabel = mode === 'supplement' ? '本次补充的月度增量预算' : '修订后月度预算'
 
   // ── 生成 ────────────────────────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
     if (!goal.trim()) return
+    const amount = budget.trim() ? Math.max(0, Number(budget)) : 0
+    const budgetFields = prescriptionBudgetFields(amount, budgetCurrency)
+    if (!budgetFields.ok) {
+      setError(budgetFields.error)
+      return
+    }
+
     setStep('generating')
     setError(null)
     setProgress('连接诸葛亮…')
@@ -93,7 +111,8 @@ export function InlinePrescriptionDrawer({
         business_goal:       goal.trim(),
         timeline_urgency:    urgency,
         // 预算可选：空 → 0（华佗理解为"不涉及额外预算，在现有资源内完成"）
-        monthly_budget_aud:  budget.trim() ? Math.max(0, Number(budget)) : 0,
+        monthly_budget_aud:  budgetFields.monthly_budget_aud,
+        budget_currency:     budgetFields.budget_currency,
         priority_dimensions: [],
         notes:               notes.trim() || null,
       }
@@ -116,36 +135,35 @@ export function InlinePrescriptionDrawer({
         throw new Error(msg)
       }
 
-      let streamErr: string | null = null
-      const ok = await readHuatuoStream(res, {
-        onStarted:  (id) => setPrescriptionId(id),
-        onProgress: (note) => setProgress(note),
-        onDone: (payload) => {
-          setPrescriptionId(payload.prescription_id)
-          setContent(payload.content)
-          setSelfGrade(payload.self_grade ?? null)
-          if (payload.meta) setGenMeta(payload.meta)
-        },
-        onError: (err) => { streamErr = err },
-      })
+      const accepted = await res.json() as { prescription_id?: string }
+      if (!accepted.prescription_id) throw new Error('没有拿到处方编号')
+      if (!alive.current) return
+      setPrescriptionId(accepted.prescription_id)
 
-      if (streamErr) {
-        setError(streamErr)
+      const outcome = await pollHuatuoPrescription(clientId, accepted.prescription_id, {
+        mode: 'generate',
+        onProgress: (note) => { if (alive.current && note) setProgress(note) },
+        isCancelled: () => !alive.current,
+      })
+      if (!alive.current) return
+      if (!outcome.ok || !outcome.snapshot.content) {
+        setError(outcome.ok ? '处方写好了但内容是空的，请刷新再看' : (outcome.error || '生成失败'))
         setStep('form')
-      } else if (!ok) {
-        setError('诸葛亮流意外关闭，请重试')
-        setStep('form')
-      } else {
-        setStep('review')
+        return
       }
+      setContent(outcome.snapshot.content)
+      setSelfGrade(outcome.snapshot.self_grade)
+      if (outcome.snapshot.generation_meta) setGenMeta(outcome.snapshot.generation_meta)
+      setStep('review')
     } catch (e) {
+      if (!alive.current) return
       setError(e instanceof Error ? e.message : '生成失败')
       setStep('form')
     } finally {
       clearInterval(timer)
-      setProgress(null)
+      if (alive.current) setProgress(null)
     }
-  }, [goal, urgency, budget, notes, mode, priorPrescriptionId, clientId])
+  }, [goal, urgency, budget, budgetCurrency, notes, mode, priorPrescriptionId, clientId])
 
   // ── 批准 ────────────────────────────────────────────────────────────────
   const handleApprove = useCallback(async () => {
@@ -217,10 +235,10 @@ export function InlinePrescriptionDrawer({
 
               <div>
                 <label className="mb-1 block text-sm font-black text-slate-700">
-                  {budgetLabel} <span className="text-xs font-semibold text-slate-400">（可选）</span>
+                  {budgetLabel}（{budgetCode}） <span className="text-xs font-semibold text-slate-400">（可选）</span>
                 </label>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-bold text-slate-500">AUD $</span>
+                  <span className="text-sm font-bold text-slate-500">{budgetPrefix || budgetCode}</span>
                   <input
                     type="number" min={0} max={50000} step={100}
                     value={budget}
@@ -277,7 +295,7 @@ export function InlinePrescriptionDrawer({
               <p className="text-sm font-black text-slate-950">诸葛亮正在{modeTitle}…</p>
               <p className="min-h-[1.5em] text-sm font-semibold text-slate-500">{progress ?? ''}</p>
               <p className="text-xs tabular-nums text-slate-400">
-                已用时 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')} · 通常 60–150 秒
+                已用时 {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')} · 通常 60–150 秒。关掉窗口也不会把已经开始的开方掐掉。
               </p>
             </div>
           )}
@@ -339,7 +357,7 @@ export function InlinePrescriptionDrawer({
                     {content.budget_allocation.map(b => (
                       <div key={b.dimension} className="flex justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs">
                         <span className="font-semibold text-slate-600">{b.dimension}</span>
-                        <span className="font-black text-slate-800">AUD ${b.amount_aud}（{b.percentage}%）</span>
+                        <span className="font-black text-slate-800">{formatAdMoney(b.amount_aud, budgetCurrency)}（{b.percentage}%）</span>
                       </div>
                     ))}
                   </div>

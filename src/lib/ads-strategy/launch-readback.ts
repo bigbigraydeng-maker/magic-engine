@@ -69,6 +69,8 @@ export interface AdSetReadback {
     advantageAudience?: boolean
     /** 显式挂上的受众名单。 */
     customAudienceIds?: string[]
+    /** 回读到的排除受众编号（targeting.excluded_custom_audiences）。缺失 = 没读到。 */
+    excludedAudienceIds?: string[]
     /** Meta 自动补挂的隐式相似人群 —— 创建时传参里没有。 */
     implicitLookalikeIds?: string[]
     /** 投放地区名，用于跟房源所在地对照。 */
@@ -89,6 +91,10 @@ export interface LaunchReadbackInput {
   industry?: string | null
   /** 建广告那条路已知草案该是什么优化目标；回读目标读不到（空串）时靠它仍能做版位检查。 */
   expectedOptimizationGoal?: string
+  /** 草案想挂的包含受众。给了就要求回读里必须看见它们。 */
+  expectedAudienceIds?: string[]
+  /** 草案想挂的排除受众。给了就要求回读里必须看见它们。 */
+  expectedExcludedAudienceIds?: string[]
 }
 
 export interface LaunchReadbackReport {
@@ -195,6 +201,55 @@ function scriptsInAdSet(creatives: CreativeReadback[]): Map<Script, string[]> {
   return out
 }
 
+/** 草案声明的受众 vs 回读到的受众：读不到 / 缺了哪些，各出一条 blocker。 */
+function missingAudienceFindings(args: {
+  code: 'audience_not_attached' | 'excluded_audience_not_attached'
+  expected: readonly string[] | undefined
+  got: readonly string[] | undefined
+  unreadableMessage: (expected: readonly string[]) => string
+  missingMessage: (missing: string[]) => string
+}): LaunchFinding[] {
+  const { code, expected, got, unreadableMessage, missingMessage } = args
+  if (!expected || expected.length === 0) return []
+  const learnedFrom = '2026-10-26 刀②：草案声明了受众，回读必须看见它'
+  if (got === undefined) {
+    return [{ code, severity: 'blocker', message: unreadableMessage(expected), learnedFrom }]
+  }
+  const missing = expected.filter((id) => !got.includes(id))
+  if (missing.length === 0) return []
+  return [{ code, severity: 'blocker', message: missingMessage(missing), learnedFrom }]
+}
+
+/**
+ * 草案声明了受众，回读就必须看见它。
+ *
+ * 创建接口的回显里「挂了哪些受众」跟实际落地是两回事（放宽、隐式相似人群都是
+ * 回读才现形），所以不能拿草案当事实 —— 草案说挂了，回读没看见，就是没挂上。
+ */
+function audienceFindings(input: LaunchReadbackInput): LaunchFinding[] {
+  const t = input.adSet.targeting
+  return [
+    ...missingAudienceFindings({
+      code: 'audience_not_attached',
+      expected: input.expectedAudienceIds,
+      got: t.customAudienceIds,
+      unreadableMessage: (expected) =>
+        `回读没读到这个广告组挂了哪些受众，核实不了草案声明的受众（${expected.join('、')}）有没有挂上。`,
+      missingMessage: (missing) =>
+        `草案声明了受众 ${missing.join('、')}，但回读发现广告组上没有挂上 —— 这条广告会投给不该投的人。`,
+    }),
+    ...missingAudienceFindings({
+      code: 'excluded_audience_not_attached',
+      expected: input.expectedExcludedAudienceIds,
+      got: t.excludedAudienceIds,
+      unreadableMessage: (expected) =>
+        `回读没读到这个广告组排除了哪些受众，核实不了草案要排除的受众（${expected.join('、')}）有没有排除上。`,
+      missingMessage: (missing) =>
+        `草案要排除受众 ${missing.join('、')}，但回读发现没排除上 —— 已经买过 / 不该看到的人还会被投到。`,
+    }),
+  ]
+}
+
 /**
  * 撞一遍已知的坑。纯函数 —— 传什么进来判什么，不猜、不查库。
  */
@@ -284,6 +339,9 @@ export function checkLaunch(input: LaunchReadbackInput): LaunchReadbackReport {
       })
     }
   }
+
+  // ── 坑 2b：草案声明了受众，回读必须看见它 ────────────────────────
+  findings.push(...audienceFindings(input))
 
   // ── 坑 3：Meta 自动补挂了相似人群 ────────────────────────────────
   if (t.implicitLookalikeIds && t.implicitLookalikeIds.length > 0) {

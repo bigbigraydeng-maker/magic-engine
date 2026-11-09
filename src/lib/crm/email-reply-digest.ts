@@ -33,7 +33,7 @@ import {
   esc,
   humanWait,
   sendDigestMail,
-  stripAddress,
+  digestName,
   type DigestMailer,
   type DigestSendResult,
 } from '@/lib/crm/digest-shared'
@@ -95,7 +95,7 @@ function byWaitDesc(a: number, b: number): number {
 }
 
 function renderRow(item: DigestItem, index: number, ms: number): string {
-  const name = stripAddress(contactCardTitle(item.displayName))
+  const name = digestName(item.displayName)
   const subject = item.subject?.trim() ? item.subject : '（这封信没有主题）'
   return `
       <div style="margin:12px 0;padding:12px 14px;background:#f8fafc;border-radius:8px">

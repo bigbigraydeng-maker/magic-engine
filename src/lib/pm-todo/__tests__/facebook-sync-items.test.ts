@@ -24,6 +24,8 @@ function run(hoursAgo: number, results: Array<Record<string, unknown>>): SyncRun
   }
 }
 
+const statusFilters: unknown[] = []
+
 function fakeRuns(byJob: Record<string, SyncRunRow[]>, queryError?: string): SupabaseClient {
   function chain() {
     let job = ''
@@ -34,7 +36,10 @@ function fakeRuns(byJob: Record<string, SyncRunRow[]>, queryError?: string): Sup
         return c
       },
       not: () => c,
-      in: () => c,
+      in: (_column: string, values: unknown) => {
+        statusFilters.push(values)
+        return c
+      },
       order: () => c,
       limit: async (n: number) =>
         queryError
@@ -162,6 +167,7 @@ describe('pushFacebookSyncFailingItems', () => {
     expect(items[0].what).toContain('主页授权失效了')
     expect(items[0].how).toContain('连接 Meta')
     expect(items[0].href).toBe(`https://app.magicengine.com.au/dashboard/clients/${NAL}?settings=platform`)
+    expect(statusFilters.some((values) => Array.isArray(values) && values.includes('partial'))).toBe(true)
   })
 
   it('只有表单留资同步连续失败 → 只提这个任务', async () => {
@@ -221,6 +227,32 @@ describe('pushFacebookSyncFailingItems', () => {
     await pushFacebookSyncFailingItems(supabase, items, NOW)
 
     expect(items).toEqual([])
+  })
+
+  it('让路那一轮不算进连续失败', async () => {
+    const items: ManualItem[] = []
+    const overlap: SyncRunRow = {
+      finished_at: new Date(NOW.getTime() - 0.5 * 3_600_000).toISOString(),
+      summary: { skipped: 'overlap' } as unknown as SyncRunRow['summary'],
+    }
+    const supabase = fakeRuns({
+      'messenger-sync-hourly': [
+        run(1, [{ clientId: NAL, clientName: 'New Asian Logistics' }]),
+        run(2, [{ clientId: NAL, clientName: 'New Asian Logistics' }]),
+        run(3, [{ clientId: NAL, clientName: 'New Asian Logistics' }]),
+      ],
+      'meta-leads-sync': [
+        overlap,
+        run(1, [{ clientId: NAL, clientName: 'New Asian Logistics', error: LEADS_190 }]),
+        run(2, [{ clientId: NAL, clientName: 'New Asian Logistics', error: LEADS_190 }]),
+        run(3, [{ clientId: NAL, clientName: 'New Asian Logistics', error: LEADS_190 }]),
+      ],
+    })
+
+    await pushFacebookSyncFailingItems(supabase, items, NOW)
+
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('表单留资同步')
   })
 
   it('取数失败直接抛，由调用方 catch', async () => {

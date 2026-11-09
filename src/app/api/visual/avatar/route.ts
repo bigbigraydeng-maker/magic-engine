@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { submitAvatarVideo } from '@/lib/visual/heygen'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,11 +14,21 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const access = await requireDashboardClientAccess(client_id)
+    if (!access.ok) {
+      return NextResponse.json({ success: false, error: access.error }, { status: access.status })
+    }
+
     const { data: post } = await supabaseAdmin
       .from('content_posts')
-      .select('script')
+      .select('script, client_id')
       .eq('id', post_id)
       .single()
+
+    // Post must belong to the authorised client (blocks cross-client post_id use)
+    if (post && post.client_id !== client_id) {
+      return NextResponse.json({ success: false, error: 'Post not found' }, { status: 404 })
+    }
 
     if (!post?.script) {
       return NextResponse.json(

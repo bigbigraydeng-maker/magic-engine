@@ -5,8 +5,8 @@
  * call, bypassing the draft -> paused -> approval flow. It now returns 410
  * after auth and does nothing else.
  *
- * The one-call boost helper in the Meta library is kept but must not be
- * imported by any route; an architecture test enforces this.
+ * The one-call boost helper in the Meta library was removed on 2026-10-06;
+ * an architecture test keeps it from coming back.
  */
 
 import { type NextRequest, NextResponse } from 'next/server'

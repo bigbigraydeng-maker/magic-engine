@@ -314,3 +314,67 @@ describe('auditCrossClientLeaks —— 代码仓通道', () => {
     expect(findings.filter((f) => f.source.includes('代码仓'))).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// 平台授权(platform_oauth_connections):已撤销的连接不能再算「挂在客户名下」。
+// 起因(2026-10-20):同一个 TikTok 账号被误授权到 CTS 与 Celine 两个客户下,
+// PM 授权把 CTS 那条标为 revoked(行保留备查),审计却不看状态,会一直报串台。
+// ---------------------------------------------------------------------------
+
+describe('auditCrossClientLeaks —— 平台授权按状态过滤', () => {
+  const sameAccount = (statusA: string | undefined, statusB: string | undefined) =>
+    fakeSupabase({
+      clients: { data: CLIENTS },
+      cms_connections: { data: [] },
+      platform_oauth_connections: {
+        data: [
+          { client_id: 'cts', provider: 'tiktok', account_id: 'open-id-1', ...(statusA ? { status: statusA } : {}) },
+          { client_id: 'oz', provider: 'tiktok', account_id: 'open-id-1', ...(statusB ? { status: statusB } : {}) },
+        ],
+      },
+      meta_ads_snapshots: { data: [] },
+    })
+  const oauthFindings = async (db: never) =>
+    (await auditCrossClientLeaks(db)).filter((f) => f.source.includes('平台授权'))
+
+  it('🔴 两个客户都有效 → 仍然报串台(原有行为不变)', async () => {
+    const f = await oauthFindings(sameAccount('active', 'active'))
+    expect(f).toHaveLength(1)
+    expect(f[0].severity).toBe('critical')
+    expect(f[0].clients.sort()).toEqual(['CTS Tours NZ', 'oztop'])
+  })
+
+  it('🔴 其中一条已撤销 → 不再报(撤销要能让告警消失)', async () => {
+    expect(await oauthFindings(sameAccount('revoked', 'active'))).toEqual([])
+    expect(await oauthFindings(sameAccount('active', 'revoked'))).toEqual([])
+  })
+
+  it('两条都已撤销 → 不报', async () => {
+    expect(await oauthFindings(sameAccount('revoked', 'revoked'))).toEqual([])
+  })
+
+  it('🔴 过期/出错但没撤销的连接仍算挂在客户名下 → 照报(只有撤销才算释放)', async () => {
+    expect(await oauthFindings(sameAccount('expired', 'active'))).toHaveLength(1)
+    expect(await oauthFindings(sameAccount('error', 'active'))).toHaveLength(1)
+  })
+
+  it('🔴 读不到状态的行保守地照常参与比对(不能因为缺字段就放过)', async () => {
+    expect(await oauthFindings(sameAccount(undefined, undefined))).toHaveLength(1)
+  })
+
+  it('我们自己的登录账号仍然排除', async () => {
+    const db = fakeSupabase({
+      clients: { data: CLIENTS },
+      cms_connections: { data: [] },
+      platform_oauth_connections: {
+        data: [
+          { client_id: 'cts', provider: 'google_gsc', account_id: 'bigbigraydeng@gmail.com', status: 'active' },
+          { client_id: 'oz', provider: 'google_gsc', account_id: 'bigbigraydeng@gmail.com', status: 'active' },
+        ],
+      },
+      meta_ads_snapshots: { data: [] },
+    })
+    expect(await oauthFindings(db)).toEqual([])
+  })
+})
+

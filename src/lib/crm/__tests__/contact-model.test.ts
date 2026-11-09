@@ -99,6 +99,14 @@ describe('buildContactModel', () => {
     expect(m.doNotContact).toBe(false)
   })
 
+  it('通话分析的客人表态 call_stance 透传；分析被驳回 / 值不认识 → null（PM 2026-10-29 Gavin Hall）', () => {
+    expect(buildTouchpointLike(tp({ metadata: { call_stance: 'not_now', call_analysis_review: 'pending_review' } })).callStance).toBe('not_now')
+    expect(buildTouchpointLike(tp({ metadata: { call_stance: 'not_interested' } })).callStance).toBe('not_interested')
+    expect(buildTouchpointLike(tp({ metadata: { call_stance: 'not_now', call_analysis_review: 'rejected' } })).callStance).toBeNull()
+    expect(buildTouchpointLike(tp({ metadata: { call_stance: 'maybe' } })).callStance).toBeNull()
+    expect(buildTouchpointLike(tp({ metadata: null })).callStance).toBeNull()
+  })
+
   it('metadata.action=snooze / unsnooze 原样透传，别的值一律 null（避免新按钮偷偷影响判断）', () => {
     expect(buildTouchpointLike(tp({ metadata: { action: 'snooze' } })).action).toBe('snooze')
     expect(buildTouchpointLike(tp({ metadata: { action: 'unsnooze' } })).action).toBe('unsnooze')
@@ -108,6 +116,15 @@ describe('buildContactModel', () => {
   it('群发邮件（source=mailchimp）→ automated=true；员工手打（me_manual）→ false', () => {
     expect(buildTouchpointLike(tp({ channel: 'email', direction: 'outbound', source: 'mailchimp' })).automated).toBe(true)
     expect(buildTouchpointLike(tp({ source: 'me_manual' })).automated).toBe(false)
+  })
+
+  it('电话系统记录的外呼没人接 → unansweredCall=true；接通 / 入站 / 手打笔记 / 别的渠道都不是', () => {
+    const unanswered = { metadata: { answered: false } }
+    expect(buildTouchpointLike(tp(unanswered)).unansweredCall).toBe(true)
+    expect(buildTouchpointLike(tp({ metadata: { answered: true } })).unansweredCall).toBe(false)
+    expect(buildTouchpointLike(tp({ ...unanswered, direction: 'inbound' })).unansweredCall).toBe(false)
+    expect(buildTouchpointLike(tp({ metadata: null })).unansweredCall).toBe(false)
+    expect(buildTouchpointLike(tp({ ...unanswered, channel: 'email' })).unansweredCall).toBe(false)
   })
 
   it('邮件打开 / 链接点开变成 engagement，不当作出站消息', () => {

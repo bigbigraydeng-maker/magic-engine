@@ -36,6 +36,11 @@ interface Props {
   goal: GoalRow
 }
 
+function currentValueSourceLabel(source: string): string {
+  if (source === 'auto.meta_leads') return 'Meta 线索'
+  return source
+}
+
 export function CurrentValueCell({ goal }: Props) {
   const metricDef = PRIMARY_METRIC_CATALOG.find(m => m.key === goal.primary_metric_key)
   // Includes 'hybrid' — these have a partially-auto data source (e.g. leads_count
@@ -130,7 +135,7 @@ export function CurrentValueCell({ goal }: Props) {
             {result.value.toLocaleString()}
           </div>
           <div className="text-[10px] font-semibold text-me-ochre" title={result.label}>
-            ⚡ {result.source}
+            ⚡ {currentValueSourceLabel(result.source)}
             {metricDef?.measurement === 'hybrid' && (
               <span className="ml-1 text-me-charcoal/55">· FDE 补录其他渠道</span>
             )}

@@ -17,8 +17,9 @@
 
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { createAdsEnvelopeFactsResolver } from '../envelope-facts'
+import { createAdsEnvelopeFactsResolver, hoursSinceOwnLastAction } from '../envelope-facts'
 import type { CapabilityImplementation } from '@/lib/kernel/types'
+import type { EnvelopeFactsResolver } from '@/lib/kernel/deps'
 
 const CLIENT = 'c-1'
 const ACCOUNT = 'act_1'
@@ -57,6 +58,11 @@ interface Tables {
   client_meta_ad_accounts: Row[]
   ad_snapshot_captures: Row[]
   clients: Row | null
+  /** 内核自己的执行记录（`hoursSinceOwnLastAction` 读这张表）。默认空数组 = 从没动过。 */
+  action_runs: Row[]
+  prescriptions: Row[]
+  goals: Row[]
+  marketing_plans: Row[]
 }
 
 interface Log {
@@ -85,10 +91,14 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
       return {
         select() {
           const f: Record<string, unknown> = {}
+          let one = false
           const chain = {
             eq(col: string, val: unknown) { f[col] = val; return chain },
             in(col: string, vals: unknown[]) { f[col] = vals; return chain },
             gte(col: string, val: unknown) { f[`gte:${col}`] = val; return chain },
+            lte(col: string, val: unknown) { f[`lte:${col}`] = val; return chain },
+            like(col: string, pattern: string) { f[`like:${col}`] = pattern; return chain },
+            not(col: string, op: string, val: unknown) { f[`not:${col}`] = op; f[`notval:${col}`] = val; return chain },
             or(expr: string) { f.__or = expr; return chain },
             order(col: string, opts?: { ascending?: boolean }) {
               const orders = (f.__orders as Array<{ col: string; ascending?: boolean }> | undefined) ?? []
@@ -97,7 +107,7 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
             },
             range(start: number, end: number) { f.__range = { start, end }; return settle() },
             limit(count: number) { f.__limit = count; return settle() },
-            maybeSingle() { return settle() },
+            maybeSingle() { one = true; return settle() },
             then<T>(r: (v: ReturnType<typeof settle>) => T) { return Promise.resolve(settle()).then(r) },
           }
           const settle = () => {
@@ -106,6 +116,40 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
             if (err) return { data: null, error: { message: err } }
             if (key === 'ad_strategy_configs') return { data: t.ad_strategy_configs, error: null }
             if (key === 'clients') return { data: t.clients, error: null }
+            if (key === 'action_runs') {
+              let rows = t.action_runs
+              if (typeof f.client_id === 'string') rows = rows.filter((r) => r.client_id === f.client_id)
+              if (Array.isArray(f.status)) rows = rows.filter((r) => (f.status as unknown[]).includes(r.status))
+              if (typeof f['like:action_key'] === 'string') {
+                const prefix = (f['like:action_key'] as string).replace(/%$/, '')
+                rows = rows.filter((r) => String(r.action_key).startsWith(prefix))
+              }
+              if (f['not:finished_at'] === 'is') rows = rows.filter((r) => r.finished_at !== null && r.finished_at !== undefined)
+              // 真实查询按实体在服务端筛（`input->>adset_id.eq.X,input->>campaign_id.eq.X`），
+              // 替身必须照着筛 —— 不筛的话「没有记录命中」这类用例会永远绿（假测试）。
+              if (typeof f.__or === 'string') {
+                const wanted = (f.__or as string).split(',').map((clause) => {
+                  const m = /^input->>([a-z_]+)\.eq\.(.+)$/.exec(clause)
+                  return m ? { key: m[1], value: m[2] } : null
+                }).filter((x): x is { key: string; value: string } => x !== null)
+                if (wanted.length > 0) {
+                  rows = rows.filter((r) => {
+                    const input = (r.input ?? {}) as Record<string, unknown>
+                    return wanted.some((w) => input[w.key] === w.value)
+                  })
+                }
+              }
+              const orders = (f.__orders as Array<{ col: string; ascending?: boolean }> | undefined) ?? []
+              if (orders.length) rows = [...rows].sort((a, b) => {
+                for (const order of orders) {
+                  const compared = String(a[order.col]).localeCompare(String(b[order.col])) * (order.ascending === false ? -1 : 1)
+                  if (compared) return compared
+                }
+                return 0
+              })
+              if (typeof f.__limit === 'number') rows = rows.slice(0, f.__limit)
+              return { data: rows, error: null }
+            }
             if (key === 'ad_snapshot_captures') {
               let rows = t.ad_snapshot_captures
               for (const [col, val] of Object.entries(f)) {
@@ -127,6 +171,13 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
               if (range) rows = rows.slice(range.start, range.end + 1)
               if (typeof f.__limit === 'number') rows = rows.slice(0, f.__limit)
               return { data: rows, error: null }
+            }
+            if (key === 'prescriptions' || key === 'goals' || key === 'marketing_plans') {
+              let rows = t[key]
+              if (typeof f.id === 'string') rows = rows.filter(r => r.id === f.id)
+              if (typeof f.client_id === 'string') rows = rows.filter(r => r.client_id === f.client_id)
+              if (typeof f.status === 'string') rows = rows.filter(r => r.status === f.status)
+              return { data: one ? (rows[0] ?? null) : rows, error: null }
             }
             if (key === 'client_meta_ad_accounts') {
               // 真过滤 client_id —— 判据要在「这个账户有没有自己的行」和
@@ -167,6 +218,9 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
             }
             if (typeof f.capture_reason === 'string') rows = rows.filter((r) => r.capture_reason === f.capture_reason)
             if (typeof f['gte:captured_at'] === 'string') rows = rows.filter(r => String(r.captured_at) >= String(f['gte:captured_at']))
+            if (typeof f['lte:captured_at'] === 'string') rows = rows.filter(r => String(r.captured_at) <= String(f['lte:captured_at']))
+            // 真按轮次筛：以前替身不认 eq(captured_at)，把「只读最新一轮写下的行」的缺陷藏住了（白天加预算被拒）
+            if (typeof f.captured_at === 'string') rows = rows.filter(r => r.captured_at === f.captured_at)
             if (typeof f.level === 'string') rows = rows.filter((r) => r.level === f.level)
             if (Array.isArray(f.level)) rows = rows.filter((r) => (f.level as unknown[]).includes(r.level))
             if (typeof f.entity_id === 'string') rows = rows.filter((r) => r.entity_id === f.entity_id)
@@ -197,11 +251,30 @@ const withRollback: Readonly<Record<string, CapabilityImplementation>> = {
   'ads.scale_unit_budget': { actionKey: 'ads.scale_unit_budget', version: 1, steps: {}, rollback: async () => ({ ok: true, rollbackKind: 'noop', detail: {} }) } as unknown as CapabilityImplementation,
 }
 
+function approvedPlan(cents: number | null): Row {
+  const promo: Row = {
+    phases: [{
+      steps: [{ kind: 'ads_campaign', settings: { daily_budget_cents: 9_999_999 } }],
+    }],
+  }
+  if (cents !== null) promo.daily_total_cap_cents = cents
+  return {
+    id: 'plan-cap',
+    client_id: CLIENT,
+    status: 'approved',
+    plan_data: { promo },
+    generation_meta: {
+      from_prescription: { prescription_id: 'rx-cap', version: 1 },
+      blank_draft: { goal_id: 'goal-cap' },
+    },
+  }
+}
+
 function resolve(
   t: Partial<Tables>,
   log: Log,
   at: 'authorize' | 'pre_provider' = 'authorize',
-  actionKey: 'ads.pause_unit' | 'ads.cut_campaign_budget' | 'ads.scale_unit_budget' = 'ads.pause_unit',
+  actionKey: Parameters<EnvelopeFactsResolver>[0]['actionKey'] = 'ads.pause_unit',
   input: Record<string, unknown> = { ad_account_id: ACCOUNT, adset_id: ADSET, cycle_date: '2026-09-27' },
 ) {
   const tables: Tables = {
@@ -213,6 +286,13 @@ function resolve(
     client_meta_ad_accounts: [],
     ad_snapshot_captures: [],
     clients: null,
+    action_runs: [],
+    prescriptions: [{
+      id: 'rx-cap', client_id: CLIENT, status: 'approved', version: 1,
+      goal_id: 'goal-cap', approved_at: '2026-11-02T00:00:00.000Z',
+    }],
+    goals: [{ id: 'goal-cap', client_id: CLIENT, status: 'active' }],
+    marketing_plans: [approvedPlan(10_000)],
     ...t,
   }
   const resolver = createAdsEnvelopeFactsResolver({
@@ -242,7 +322,10 @@ describe('加预算客户级安全事实', () => {
     client_id: CLIENT, ad_account_id: id, level, captured_at: new Date(NOW.getTime() - 60_000).toISOString(), capture_reason: 'scheduled',
     complete: true, skipped_shared: false,
   }))
-  const scaleInput = { ad_account_id: ACCOUNT, adset_id: ADSET, before_cents: 500, after_cents: 550, cycle_date: '2026-09-27' }
+  const scaleInput = {
+    ad_account_id: ACCOUNT, adset_id: ADSET, before_cents: 500, after_cents: 550,
+    cycle_date: '2026-09-27', card_prescription_id: 'rx-cap',
+  }
 
   it('读取客户所有账户并在同币种完整证据下返回总预算与客户上限', async () => {
     const rows = [
@@ -353,6 +436,100 @@ describe('加预算客户级安全事实', () => {
       ad_snapshot_captures: completeCaptures(ACCOUNT),
     }, log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
     expect(r).toMatchObject({ facts: { clientDailyTotalBeforeCents: 500, clientDailyCapCents: 10_000 } })
+  })
+  describe('白天的快照轮只写有变化的行：按每个对象最新已知状态核算', () => {
+    // 生产 2026-11-04：新西兰 01:31 那轮写全，07:30 那轮回执完整但一行没写 → 以前一律「币种或客户归属无法确认」
+    const morning = new Date(NOW.getTime() - 6 * 3_600_000).toISOString()
+    const latestRound = new Date(NOW.getTime() - 60_000).toISOString()
+    const capturesAt = (id: string, at: string) => completeCaptures(id).map(row => ({ ...row, captured_at: at }))
+    const baseRows = () => [
+      account(ACCOUNT, 'account', ACCOUNT, null, { captured_at: morning }),
+      account(ACCOUNT, 'campaign', 'cmp-act_1', null, { budget_level: 'abo', captured_at: morning }),
+      account(ACCOUNT, 'adset', ADSET, 500, { captured_at: morning }),
+      account(ACCOUNT, 'adset', 'as-other', 300, { captured_at: morning }),
+    ]
+    const tables = (rows: Row[]) => ({
+      ad_entity_snapshots: rows,
+      client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 10_000 }],
+      ad_snapshot_captures: [...capturesAt(ACCOUNT, morning), ...capturesAt(ACCOUNT, latestRound)],
+    })
+
+    it('最新一轮一行没写 → 用早上那轮的行核算，放行（合计查询只读到最新一轮为止）', async () => {
+      const l = log()
+      const r = await resolve(tables(baseRows()), l, 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ facts: { beforeCents: 500, accountDailyTotalBeforeCents: 800, clientDailyTotalBeforeCents: 800, clientDailyCapCents: 10_000 } })
+      expect(l.snapQueries.some(q => q['lte:captured_at'] === latestRound)).toBe(true)
+    })
+
+    it('最新一轮只写了变了的组 → 那个组用新值，其余沿用早上的行', async () => {
+      const rows = [...baseRows(), account(ACCOUNT, 'adset', 'as-other', 900, { capture_reason: 'changed', captured_at: latestRound })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ facts: { accountDailyTotalBeforeCents: 1_400, clientDailyTotalBeforeCents: 1_400 } })
+    })
+
+    it('最新一轮记了某组消失 → 不再算进合计', async () => {
+      const rows = [...baseRows(), account(ACCOUNT, 'adset', 'as-other', null, { capture_reason: 'disappeared', effective_status: 'NOT_RETURNED', captured_at: latestRound })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ facts: { accountDailyTotalBeforeCents: 500 } })
+    })
+
+    it('🔴 某个没消失的组最新一行超过一天 → 拒（不能悄悄少算它的预算）', async () => {
+      const stale = new Date(NOW.getTime() - 30 * 3_600_000).toISOString()
+      const rows = [...baseRows().filter(r => r.entity_id !== 'as-other'), account(ACCOUNT, 'adset', 'as-other', 300, { captured_at: stale })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ unavailable: expect.stringContaining('超过一天没有快照') })
+    })
+
+    it('🔴 合计只读到最新一轮为止；目标组之后又变了 → 照旧按「预算已变化」拒', async () => {
+      const later = new Date(NOW.getTime() - 30_000).toISOString()
+      const rows = [...baseRows(), account(ACCOUNT, 'adset', ADSET, 700, { capture_reason: 'changed', captured_at: later })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ unavailable: expect.stringContaining('预算已变化') })
+    })
+
+    it('🔴 核算只读到最新一轮：之后才写的 700 不算，跟用户看到的 700 对不上 → 按「基线不一致」拒', async () => {
+      // 魏征 11-04：这条是唯一走到合计里目标基线检查的用例；删掉 lte 或删掉基线检查都会红
+      const later = new Date(NOW.getTime() - 30_000).toISOString()
+      const rows = [...baseRows(), account(ACCOUNT, 'adset', ADSET, 700, { capture_reason: 'changed', captured_at: later })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', { ...scaleInput, before_cents: 700, after_cents: 770 })
+      expect(r).toMatchObject({ unavailable: expect.stringContaining('目标预算与本次授权读取的基线不一致') })
+    })
+
+    it('每天总上限认已批准计划，不认旧客户总闸，也不把计划里的系列预算加总', async () => {
+      const r = await resolve({
+        ad_entity_snapshots: [
+          account(ACCOUNT, 'account', ACCOUNT, null),
+          account(ACCOUNT, 'campaign', 'cmp-act_1', null, { budget_level: 'abo' }),
+          account(ACCOUNT, 'adset', ADSET, 500),
+        ],
+        ad_strategy_configs: { daily_budget_cap_cents: 1 },
+        client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 10_000 }],
+        ad_snapshot_captures: completeCaptures(ACCOUNT),
+        marketing_plans: [approvedPlan(10_000)],
+      }, log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ facts: { clientDailyCapCents: 10_000 } })
+    })
+
+    it('计划上没有每天总上限就拒绝上调', async () => {
+      const r = await resolve({
+        ad_entity_snapshots: [
+          account(ACCOUNT, 'account', ACCOUNT, null),
+          account(ACCOUNT, 'campaign', 'cmp-act_1', null, { budget_level: 'abo' }),
+          account(ACCOUNT, 'adset', ADSET, 500),
+        ],
+        ad_strategy_configs: { daily_budget_cap_cents: 10_000 },
+        client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 10_000 }],
+        ad_snapshot_captures: completeCaptures(ACCOUNT),
+        marketing_plans: [approvedPlan(null)],
+      }, log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ unavailable: expect.stringContaining('每天广告总上限') })
+    })
+
+    it('目标组的基线跟沿用的行比：用户看到的是 500、快照沿用的是 500 → 放行；是 600 → 拒', async () => {
+      const rows = [...baseRows().filter(r => r.entity_id !== ADSET), account(ACCOUNT, 'adset', ADSET, 600, { captured_at: morning })]
+      const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ unavailable: expect.stringContaining('预算已变化') })
+    })
   })
 })
 
@@ -481,6 +658,128 @@ describe('🔴 #1994 缺陷 2 · 冷却期判据不受账户窗口影响', () =>
   })
 })
 
+describe('🔴 冷却期 · 故意不认 kernel_post（它是按客户全量写的，代表不了这个实体变了）', () => {
+  it('只有 kernel_post 快照、没有 changed → 仍然算「从没变过」，不许当成刚改过', async () => {
+    // snapshot.ts:363-365：reason=kernel_post 时该客户所有实体一律写一行，不看设置有没有变。
+    // 认它就会让任何一次动作冻死整个客户 72 小时（魏征复审查实）。
+    const post = snap({ capture_reason: 'kernel_post', captured_at: new Date(NOW.getTime() - 2 * 3_600_000).toISOString() })
+    const r = await resolve({ ad_entity_snapshots: [snap(), post] }, log())
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.hoursSinceLastChange).toBe(Number.MAX_SAFE_INTEGER)
+  })
+})
+
+describe('🔴 冷却期 · 内核自己的执行记录（hoursSinceOwnLastAction）', () => {
+  const run = (over: Row = {}): Row => ({
+    client_id: CLIENT,
+    action_key: 'ads.cut_unit_budget',
+    status: 'succeeded',
+    finished_at: new Date(NOW.getTime() - 3_600_000).toISOString(),
+    input: { ad_account_id: ACCOUNT, adset_id: ADSET },
+    ...over,
+  })
+
+  it('input.adset_id 命中 → 算出小时数', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({ action_runs: [run()] } as unknown as Tables, log()), {
+      clientId: CLIENT, entityIds: [ADSET], now: NOW,
+    })
+    expect(r).toEqual({ ok: true, hours: 1 })
+  })
+
+  it('input.campaign_id 命中 → 算出小时数', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ action_key: 'ads.cut_campaign_budget', input: { ad_account_id: ACCOUNT, campaign_id: '456' } })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: ['456'], now: NOW })
+    expect(r).toEqual({ ok: true, hours: 1 })
+  })
+
+  it('没有任何记录命中 → { ok: true, hours: null }', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ input: { ad_account_id: ACCOUNT, adset_id: 'other' } })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: [ADSET], now: NOW })
+    expect(r).toEqual({ ok: true, hours: null })
+  })
+
+  it('🔴 查询报错 → { ok: false }，绝不能塌成 { ok: true, hours: null }（fail-open）', async () => {
+    const l = log()
+    l.errors.action_runs = 'boom'
+    const r = await hoursSinceOwnLastAction(makeSb({ action_runs: [] } as unknown as Tables, l), {
+      clientId: CLIENT, entityIds: [ADSET], now: NOW,
+    })
+    expect(r.ok).toBe(false)
+    expect(r).not.toEqual({ ok: true, hours: null })
+    if (r.ok) return
+    expect(r.error).toContain('boom')
+  })
+
+  it.each(['dead_letter', 'failed'])('状态是 %s 的记录也算（撤回的终态是 dead_letter；写进 Meta 后失败落 failed）', async (status) => {
+    // 🔴 不要写 rolled_back：action_runs.status 没有这个取值（kernel/types.ts 的 RunStatus
+    //    与建表 CHECK），第一版写了它等于筛零行，两位复审都抓到了。
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ status, finished_at: new Date(NOW.getTime() - 5 * 3_600_000).toISOString() })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: [ADSET], now: NOW })
+    expect(r).toEqual({ ok: true, hours: 5 })
+  })
+
+  it('🔴 状态是 denied / queued 的记录不算（还没走到动手那一步）', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ status: 'denied' }), run({ status: 'queued' })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: [ADSET], now: NOW })
+    expect(r).toEqual({ ok: true, hours: null })
+  })
+
+  it('🔴 有记录但完成时间读不懂 → ok:false，不许跟「没有记录」同一个出口', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ finished_at: '不是时间' })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: [ADSET], now: NOW })
+    expect(r.ok).toBe(false)
+    expect(r).not.toEqual({ ok: true, hours: null })
+  })
+
+  it('🔴 换素材那类动作：input 里只有 ad_id，也要能命中', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({
+      action_runs: [run({ action_key: 'ads.swap_creative', input: { ad_account_id: ACCOUNT, ad_id: '789' } })],
+    } as unknown as Tables, log()), { clientId: CLIENT, entityIds: [ADSET, '789'], now: NOW })
+    expect(r).toEqual({ ok: true, hours: 1 })
+  })
+
+  it('🔴 实体编号形状不认识 → 拒，不拼进查询', async () => {
+    const r = await hoursSinceOwnLastAction(makeSb({ action_runs: [run()] } as unknown as Tables, log()), {
+      clientId: CLIENT, entityIds: ['1,2)or(true'], now: NOW,
+    })
+    expect(r.ok).toBe(false)
+  })
+
+  it('🔴 快照一条都没有时保持 null（读不到就拒），不许被一条很旧的执行记录改写成数字', async () => {
+    const r = await resolve({
+      ad_entity_snapshots: [],
+      action_runs: [run({ finished_at: new Date(NOW.getTime() - 500 * 3_600_000).toISOString() })],
+    }, log())
+    expect('unavailable' in r).toBe(true)
+  })
+
+  it('🔴 执行记录比快照更近时，最终冷却小时数取更近的那个', async () => {
+    const changed = snap({ capture_reason: 'changed', captured_at: new Date(NOW.getTime() - 10 * 3_600_000).toISOString() })
+    const r = await resolve({
+      ad_entity_snapshots: [snap(), changed],
+      action_runs: [run({ finished_at: new Date(NOW.getTime() - 3_600_000).toISOString() })],
+    }, log())
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.hoursSinceLastChange).toBeCloseTo(1, 1)
+  })
+
+  it('🔴 读执行记录失败 → 拒，前缀是 facts:', async () => {
+    const l = log()
+    l.errors.action_runs = 'boom'
+    const r = await resolve({ ad_entity_snapshots: [snap()] }, l)
+    expect('unavailable' in r).toBe(true)
+    if (!('unavailable' in r)) return
+    expect(r.unavailable.startsWith('facts:')).toBe(true)
+  })
+})
+
 describe('🔴 熔断中必须拒，且两种原因前缀分得开', () => {
   const trip = {
     id: 't1', client_id: CLIENT, ad_account_id: ACCOUNT, kind: 'trip',
@@ -561,11 +860,12 @@ describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
     expect(r.facts.dailyCapCents).toBe(5_000)
   })
 
-  it('客户只绑了这一个账户、这个账户没配自己的上限 → 回落客户总闸', async () => {
+  it('客户只绑了这一个账户、这个账户没配自己的上限 → 回落已批准计划，不认旧客户总闸', async () => {
     const r = await resolve(
       {
         ad_entity_snapshots: [snap()],
-        ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        ad_strategy_configs: { daily_budget_cap_cents: 999_999 },
+        marketing_plans: [approvedPlan(8_000)],
         client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null }],
       },
       log(),
@@ -575,11 +875,27 @@ describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
     expect(r.facts.dailyCapCents).toBe(8_000)
   })
 
-  it('客户在 client_meta_ad_accounts 里压根没有行（老单账户客户）→ 回落客户总闸', async () => {
+  it('计划没填每天总上限 → 单账户回落也是缺失，不用旧客户总闸', async () => {
     const r = await resolve(
       {
         ad_entity_snapshots: [snap()],
         ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        marketing_plans: [approvedPlan(null)],
+        client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null }],
+      },
+      log(),
+    )
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.dailyCapCents).toBeNull()
+  })
+
+  it('客户在 client_meta_ad_accounts 里压根没有行（老单账户客户）→ 回落已批准计划', async () => {
+    const r = await resolve(
+      {
+        ad_entity_snapshots: [snap()],
+        ad_strategy_configs: { daily_budget_cap_cents: 1 },
+        marketing_plans: [approvedPlan(8_000)],
         client_meta_ad_accounts: [],
       },
       log(),
@@ -627,7 +943,8 @@ describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
     const r = await resolve(
       {
         ad_entity_snapshots: [snap()],
-        ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        ad_strategy_configs: { daily_budget_cap_cents: 1 },
+        marketing_plans: [approvedPlan(8_000)],
         client_meta_ad_accounts: [
           { client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null },
           { client_id: 'other-client', ad_account_id: 'act_9', daily_budget_cap_cents: 1_000 },
@@ -648,5 +965,79 @@ describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
     expect('unavailable' in r).toBe(true)
     if (!('unavailable' in r)) return
     expect(r.unavailable.startsWith('facts:')).toBe(true)
+  })
+})
+
+describe('🔴 ads.pause_campaign · 账户号必须是 act_ 形式（stop-loss 路由 503 缺陷的下一步）', () => {
+  const account = (id: string, level: string, entity: string, budget: number | null, over: Row = {}) => snap({
+    id: `snapshot:${id}:${level}:${entity}`,
+    ad_account_id: id, level, entity_id: entity, adset_id: level === 'adset' ? entity : null,
+    campaign_id: level === 'adset' ? `cmp-${id}` : null,
+    budget_level: level === 'adset' ? 'abo' : null,
+    daily_budget_minor: budget, currency: 'NZD', effective_status: 'ACTIVE',
+    capture_reason: 'daily', captured_at: new Date(NOW.getTime() - 60_000).toISOString(), ...over,
+  })
+  const completeCaptures = (id: string) => ['account', 'campaign', 'adset'].map(level => ({
+    client_id: CLIENT, ad_account_id: id, level, captured_at: new Date(NOW.getTime() - 60_000).toISOString(), capture_reason: 'scheduled',
+    complete: true, skipped_shared: false,
+  }))
+  const tables = () => ({
+    ad_entity_snapshots: [
+      account(ACCOUNT, 'account', ACCOUNT, null),
+      account(ACCOUNT, 'campaign', '456', 5_000, { budget_level: 'cbo' }),
+      account(ACCOUNT, 'adset', ADSET, null, { campaign_id: '456', budget_level: 'cbo' }),
+    ],
+    ad_strategy_configs: { daily_budget_cap_cents: 10_000 },
+    client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 10_000 }],
+    ad_snapshot_captures: completeCaptures(ACCOUNT),
+  })
+
+  it('ad_account_id 用 act_ 形式 → 能读出事实', async () => {
+    const r = await resolve(tables(), log(), 'authorize', 'ads.pause_campaign', {
+      cycle_date: '2026-09-27', ad_account_id: ACCOUNT, campaign_id: '456',
+    })
+    expect('facts' in r).toBe(true)
+  })
+
+  it('ad_account_id 用纯数字 → 读不出事实（fail-closed）', async () => {
+    // 这条证明为什么路由入口必须规范化——内核不会替它补 act_ 前缀。
+    const r = await resolve(tables(), log(), 'authorize', 'ads.pause_campaign', {
+      cycle_date: '2026-09-27', ad_account_id: ACCOUNT.replace(/^act_/, ''), campaign_id: '456',
+    })
+    expect('unavailable' in r).toBe(true)
+    // 实测原因：按纯数字账户号去库里找，快照（存的是 act_ 形式）一行都对不上。
+    if ('unavailable' in r) expect(r.unavailable).toContain('快照里查不到')
+  })
+
+  // 子牙复审：止损路由还有「降预算」两条路（系列级 / 广告组级），只证明了暂停的事实链能读通不够。
+  it('ads.cut_campaign_budget · act_ 形式 → 能读出事实，减预算的目标金额带进去', async () => {
+    const r = await resolve(tables(), log(), 'authorize', 'ads.cut_campaign_budget', {
+      cycle_date: '2026-09-27', ad_account_id: ACCOUNT, campaign_id: '456', after_cents: 4_000,
+    })
+    expect('facts' in r).toBe(true)
+    if ('facts' in r) expect(r.request).toMatchObject({ kind: 'budget_change', afterCents: 4_000 })
+  })
+
+  it('ads.cut_unit_budget · act_ 形式 → 能读出事实', async () => {
+    const r = await resolve({
+      ...tables(),
+      ad_entity_snapshots: [
+        account(ACCOUNT, 'account', ACCOUNT, null),
+        account(ACCOUNT, 'campaign', 'cmp-abo', null, { budget_level: 'abo' }),
+        account(ACCOUNT, 'adset', ADSET, 500),
+      ],
+    }, log(), 'authorize', 'ads.cut_unit_budget', {
+      cycle_date: '2026-09-27', ad_account_id: ACCOUNT, adset_id: ADSET, after_cents: 400,
+    })
+    expect('facts' in r).toBe(true)
+  })
+
+  it.each(['ads.cut_campaign_budget', 'ads.cut_unit_budget'])('%s · 纯数字账户号 → 读不出事实（fail-closed）', async (actionKey) => {
+    const digits = ACCOUNT.replace(/^act_/, '')
+    const input = actionKey === 'ads.cut_campaign_budget'
+      ? { cycle_date: '2026-09-27', ad_account_id: digits, campaign_id: '456', after_cents: 4_000 }
+      : { cycle_date: '2026-09-27', ad_account_id: digits, adset_id: ADSET, after_cents: 400 }
+    const r = await resolve(tables(), log(), 'authorize', actionKey, input)
+    expect('unavailable' in r).toBe(true)
   })
 })

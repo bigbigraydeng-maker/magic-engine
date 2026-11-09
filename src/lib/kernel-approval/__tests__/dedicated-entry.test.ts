@@ -72,7 +72,7 @@ describe('通用面：有专属入口的动作不给批、给链接', () => {
       canApprove: false,
       canReject: true,
       approveBlockedReason: 'dedicated_entry',
-      dedicatedEntry: { label: '广告自动暂停待批准页', path: `/dashboard/clients/${CLIENT}/ad-health/auto-pause` },
+      dedicatedEntry: { label: '广告门 ·「等你点头」', path: `/dashboard/clients/${CLIENT}/ads-health?tab=approvals` },
     })
   })
 
@@ -81,7 +81,7 @@ describe('通用面：有专属入口的动作不给批、给链接', () => {
     expect(err).toBeInstanceOf(ApprovalError)
     expect(err.code).toBe('forbidden_tier')
     expect(err.detail?.reason).toBe('dedicated_entry')
-    expect(err.humanReason).toContain('广告自动暂停待批准页')
+    expect(err.humanReason).toContain('广告门 ·「等你点头」')
   })
 
   it('没登记的动作 → 通用面照常能批，dedicatedEntry 为 null', () => {
@@ -141,5 +141,35 @@ describe('专属入口的批准闸：版本 + 档次，读注册表', () => {
     )
     expect(caught(() => assertActorMayApproveAction(runOf(D3), 'paid_client')).detail?.reason).toBe('insufficient_tier')
     expect(() => assertActorMayApproveAction(runOf(D3), 'admin')).not.toThrow()
+  })
+})
+
+describe('🔴 加钱类动作（第 3 刀 3a）：通用面一律不给批，拒绝照旧', () => {
+  const SCALE = 'ads.scale_unit_budget'
+  const deps = {} as KernelDeps
+
+  beforeEach(() => {
+    approveRun.mockReset()
+    rejectRun.mockReset()
+  })
+
+  it('满权限账号看加预算 → 不能批、原因是 spend_increase、能拒', () => {
+    const p = approvalPermissionsFor(runOf(SCALE, { purpose: 'growth' }), 'admin')
+    expect(p).toMatchObject({ canApprove: false, canReject: true, approveBlockedReason: 'spend_increase' })
+  })
+
+  it('直接调 decideApproval 批加预算 → forbidden，不碰 Kernel', async () => {
+    await expect(
+      decideApproval(deps, { run: runOf(SCALE, { purpose: 'growth' }), actorEmail: 'ray@magiclab', input: { resolution: 'approve', expectedDecisionId: SEEN } }),
+    ).rejects.toMatchObject({ code: 'forbidden_tier' })
+    expect(approveRun).not.toHaveBeenCalled()
+  })
+
+  it('拒加预算 → 照常交给 Kernel', async () => {
+    rejectRun.mockResolvedValueOnce({ verdict: 'deny', decision: { id: 'd2', reason: '不做' } })
+    await decideApproval(deps, {
+      run: runOf(SCALE, { purpose: 'growth' }), actorEmail: 'ray@magiclab', input: { resolution: 'reject', expectedDecisionId: SEEN, reason: '不做' },
+    })
+    expect(rejectRun).toHaveBeenCalled()
   })
 })

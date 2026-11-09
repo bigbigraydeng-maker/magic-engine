@@ -235,7 +235,8 @@ describe('派生态 · 时间以传入的 now 为准，不看真实挂钟', () =
 })
 
 describe('listActiveCircuitTrips · 全表列出现在熔断中的 (客户, 账户)', () => {
-  async function list(s: FakeState, now?: Date) {
+  // now 默认用本文件的 NOW（trip 的 created_at 都是相对 NOW 造的）；不传的话会用真实时钟，过了 TTL 后「未解的 trip」会被当成已过期而全红
+  async function list(s: FakeState, now: Date = NOW) {
     return listActiveCircuitTrips(makeFake(s), now)
   }
 

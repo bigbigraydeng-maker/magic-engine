@@ -51,6 +51,11 @@ const OBJECTIVE_ALLOWS: Readonly<Record<string, ReadonlyArray<'awareness' | 'acq
 const RETARGETING_SUBTYPES = new Set(['ENGAGEMENT', 'WEBSITE', 'CUSTOM', 'OFFLINE_CONVERSION', 'APP', 'VIDEO'])
 const LOOKALIKE_SUBTYPES = new Set(['LOOKALIKE'])
 
+/** 暖池重定向只能用这些子类型。相似受众和读不到子类型的不算。 */
+export function isRemarketingSubtype(subtype: string | null | undefined): boolean {
+  return typeof subtype === 'string' && RETARGETING_SUBTYPES.has(subtype)
+}
+
 /** 名字里带「再营销」一类通用词但设置判成冷流量 → 名字与设置矛盾，可信度下调。 */
 const RETARGETING_NAME_HINT = /retarget|remarket|再营销|收割|warm/i
 

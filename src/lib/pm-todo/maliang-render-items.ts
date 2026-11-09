@@ -16,6 +16,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-item-types'
 import { readMaliangFromSnapshot } from '@/lib/maliang/render-check'
+import { MACHINE_REVIEWED_KEY } from '@/lib/maliang/review-disposition'
+import { isRemotionBrief } from '@/lib/factory/render-mode'
 import { NEEDS_REWORK_STATUS } from '@/lib/inngest/functions/maliang-render-check'
 
 export type MaliangItemKind =
@@ -51,6 +53,10 @@ export interface PostRow {
 
 export function boardUrl(clientId: string): string {
   return `https://app.magicengine.com.au/dashboard/clients/${clientId}/content-factory`
+}
+
+export function factoryReviewUrl(): string {
+  return 'https://app.magicengine.com.au/dashboard/factory'
 }
 
 function hoursSince(iso: string, now: Date): number {
@@ -134,21 +140,118 @@ export async function fetchMaliangTodos(
   if (jobError) throw new Error(`maliang render jobs query failed: ${jobError.message}`)
 
   const jobs = (jobData ?? []) as RenderJobRow[]
-  if (jobs.length === 0) return []
-
-  const postIds = Array.from(new Set(jobs.map((j) => j.content_post_id).filter(Boolean)))
-  const { data: postData, error: postError } = await supabase
-    .from('content_posts')
-    .select('id, title, generation_context_snapshot')
-    .in('id', postIds)
-  if (postError) throw new Error(`maliang posts query failed: ${postError.message}`)
-
-  const postsById = new Map<string, PostRow>()
-  for (const p of (postData ?? []) as PostRow[]) postsById.set(p.id, p)
-
   const todos: MaliangTodo[] = []
-  for (const job of jobs) {
-    const todo = buildMaliangTodo(job, postsById.get(job.content_post_id), now)
+  if (jobs.length > 0) {
+    const postIds = Array.from(new Set(jobs.map((j) => j.content_post_id).filter(Boolean)))
+    const { data: postData, error: postError } = await supabase
+      .from('content_posts')
+      .select('id, title, generation_context_snapshot')
+      .in('id', postIds)
+    if (postError) throw new Error(`maliang posts query failed: ${postError.message}`)
+
+    const postsById = new Map<string, PostRow>()
+    for (const p of (postData ?? []) as PostRow[]) postsById.set(p.id, p)
+    for (const job of jobs) {
+      const todo = buildMaliangTodo(job, postsById.get(job.content_post_id), now)
+      if (todo) todos.push(todo)
+    }
+  }
+  todos.push(...await safeRemotionTodos(supabase, now))
+  return todos
+}
+
+async function safeRemotionTodos(supabase: SupabaseClient, now: Date): Promise<MaliangTodo[]> {
+  try {
+    return await fetchRemotionMaliangTodos(supabase, now)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn('[maliang-todos] template-render todo query failed; the other route is kept:', message)
+    return []
+  }
+}
+
+export interface RemotionOrderRow {
+  id: string
+  client_id: string
+  status: string
+  angle: string | null
+  output: unknown
+  updated_at: string
+  brief: unknown
+}
+
+function machineReviewedFlag(output: unknown): boolean | null {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return null
+  const flag = (output as Record<string, unknown>)[MACHINE_REVIEWED_KEY]
+  return typeof flag === 'boolean' ? flag : null
+}
+
+/** Template-render orders use the same todo kinds. The video link is the factory review screen. */
+export function buildRemotionMaliangTodo(row: RemotionOrderRow, now: Date): MaliangTodo | null {
+  if (!isRemotionBrief(row.brief)) return null
+  const title = row.angle?.trim() || '(未命名)'
+  const href = factoryReviewUrl()
+  const check = readMaliangFromSnapshot(row.output)
+  if (!check) {
+    if (row.status !== 'in_review' || machineReviewedFlag(row.output) !== false) return null
+    const hours = hoursSince(row.updated_at, now)
+    if (hours < CHECK_GRACE_HOURS) return null
+    return {
+      kind: 'maliang_check_missing',
+      client_id: row.client_id,
+      what: `马良还没检《${title}》这条成片（出片 ${hours} 小时了）—— 没检 ≠ 没问题，别直接发`,
+      how: '这条不用你动手 —— 是自检事件没发出去或没跑。回我一句「马良重查」我去补',
+      href,
+    }
+  }
+  if (check.status === 'unverifiable' && row.status === 'in_review') {
+    return {
+      kind: 'maliang_check_unverifiable',
+      client_id: row.client_id,
+      what: `马良看不了《${title}》：${check.reasons.join('；')}`,
+      how: '这条片已在审片队列里，标成还没经过机器审。你审的时候请自己逐镜看',
+      href,
+    }
+  }
+  if (check.status === 'fail' && row.status === 'in_review') {
+    const head = check.reasons.slice(0, 4).join('；')
+    const tail = check.reasons.length > 4 ? `；另有 ${check.reasons.length - 4} 处` : ''
+    return {
+      kind: 'maliang_render_failed',
+      client_id: row.client_id,
+      what: `马良没过：《${title}》仍在审片收件箱，请你看完再决定 —— ${head}${tail}`,
+      how: '打开审片台播放这条。卡片上有「马良没过」和原因。看完由你点通过或打回',
+      href,
+    }
+  }
+  if (check.status === 'pass' && row.status === 'in_review') {
+    return {
+      kind: 'maliang_render_passed',
+      client_id: row.client_id,
+      what: `马良：《${title}》9 宫格自检过关（图 / 字 / logo 都对），等你审片`,
+      how: '打开审片台看完这条，再点通过或打回',
+      href,
+    }
+  }
+  return null
+}
+
+export async function fetchRemotionMaliangTodos(
+  supabase: SupabaseClient,
+  now: Date,
+): Promise<MaliangTodo[]> {
+  const sinceIso = new Date(now.getTime() - RENDER_LOOKBACK_DAYS * 86_400_000).toISOString()
+  const { data, error } = await supabase
+    .from('content_work_orders')
+    .select('id, client_id, status, angle, output, updated_at, brief')
+    .in('status', ['in_review'])
+    .gte('updated_at', sinceIso)
+    .order('updated_at', { ascending: false })
+    .limit(50)
+  if (error) throw new Error(`maliang work orders query failed: ${error.message}`)
+  const todos: MaliangTodo[] = []
+  for (const row of (data ?? []) as RemotionOrderRow[]) {
+    const todo = buildRemotionMaliangTodo(row, now)
     if (todo) todos.push(todo)
   }
   return todos

@@ -18,7 +18,8 @@ import type {
   CapabilityStepResult,
   OutwardRollbackResult,
 } from '@/lib/kernel/types'
-import { RetryableCapabilityError } from '@/lib/kernel/errors'
+import { pauseCardWriteBlock } from '@/lib/approval-source/read'
+import { KernelError, RetryableCapabilityError } from '@/lib/kernel/errors'
 import { getAdSetStatus, setAdSetStatus } from '@/lib/meta/adsets'
 import { makeReadbackVerification, makeSnapshotPreStep, requireMetaToken } from './common'
 
@@ -80,6 +81,8 @@ export function createPauseUnitCapability(sb: SupabaseClient): CapabilityImpleme
 
       /** 读改前状态，写 PAUSED。改前状态**必须留在 output 里**——撤回要用。 */
       async apply(step: CapabilityStepContext): Promise<CapabilityStepResult> {
+        const cardBlock = await pauseCardWriteBlock(sb, step.ctx.clientId, step.runInput)
+        if (cardBlock) throw new KernelError('INVALID_INPUT', cardBlock)
         const id = adsetId(step)
         const token = await requireMetaToken(step.ctx.clientId)
 
@@ -112,7 +115,7 @@ export function createPauseUnitCapability(sb: SupabaseClient): CapabilityImpleme
 
         const verification = makeReadbackVerification({ status: 'PAUSED' }, { status: current.status })
         return {
-          output: { adset_id: id, status_now: current.status },
+          output: { applied: true, adset_id: id, status_now: current.status },
           verification,
         }
       },

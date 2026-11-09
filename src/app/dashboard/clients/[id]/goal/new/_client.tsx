@@ -20,6 +20,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
+import { isGoalReason } from '@/lib/strategy/goals'
 import {
   GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY,
   GOAL_SUBTYPES_BY_INTENT,
@@ -174,17 +175,9 @@ export function NewGoalClient() {
   function handleSubTypeChange(newSubType: GoalSubType) {
     setSubType(newSubType)
     const def = availableSubTypes.find(s => s.value === newSubType)
-    if (def) {
-      setTargetDirection(def.default_direction)
-      // B13 fix: pre-fill title with sub-type example, FDE can edit or accept as-is
-      // Only pre-fill if title is empty or matches a previous sub-type example
-      // (so FDE's manual edits aren't overwritten)
-      const previousExamples = availableSubTypes.map(s => s.example)
-      if (!title.trim() || previousExamples.includes(title.trim())) {
-        setTitle(def.example)
-      }
-    }
-    // Clear metric — will be re-chosen from filtered list
+    if (def) setTargetDirection(def.default_direction)
+    // Clear metric — will be re-chosen from filtered list.
+    // Title stays empty until typed. The card example is only the placeholder.
     setSelectedMetric(null)
     setBaselineValue('')
     setTargetValue('')
@@ -195,23 +188,22 @@ export function NewGoalClient() {
     setSubType(null)
     setTargetDirection('increase')
     setSelectedMetric(null)
-    // B13: also clear title if it's a previous sub-type example
-    if (intent) {
-      const previousExamples = GOAL_SUBTYPES_BY_INTENT[intent].map(s => s.example)
-      if (previousExamples.includes(title.trim())) {
-        setTitle('')
-      }
-    }
   }
 
   // ── Validation per step ────────────────────────────────────────────────────
   const canProceed1 = !!intent && !!subType && !!title.trim()
   const canProceed2 = !!selectedMetric && baselineValue !== '' && targetValue !== '' && baselineValue !== targetValue
-  const canProceed3 = !!periodStart && !!periodEnd && new Date(periodEnd) > new Date(periodStart)
+  const periodOk = !!periodStart && !!periodEnd && new Date(periodEnd) > new Date(periodStart)
+  const reasonOk = isGoalReason(fdeReasoning)
+  const canProceed3 = periodOk && reasonOk
 
   // ── Submit handler ─────────────────────────────────────────────────────────
   async function handleSubmit() {
-    if (!intent || !subType || !selectedMetric) return
+    if (!intent || !subType || !selectedMetric || !title.trim()) return
+    if (!isGoalReason(fdeReasoning)) {
+      setError('不能保存草稿，缺：理由')
+      return
+    }
     setSaving(true)
     setError('')
 
@@ -229,7 +221,7 @@ export function NewGoalClient() {
       period_end: periodEnd,
       budget_amount: budgetAmount ? parseFloat(budgetAmount) : undefined,
       budget_currency: budgetCurrency,
-      fde_reasoning: fdeReasoning.trim() || undefined,
+      fde_reasoning: fdeReasoning.trim(),
     }
 
     try {
@@ -378,8 +370,10 @@ export function NewGoalClient() {
             {/* Title (only after sub_type chosen) */}
             {subType && (
               <div className="space-y-2 border-t border-black/10 pt-4">
-                <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">1.3 Goal 标题（FDE 起名）</label>
+                <label htmlFor="goal-title" className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">1.3 Goal 标题（FDE 起名）</label>
                 <input
+                  id="goal-title"
+                  required
                   value={title}
                   onChange={e => setTitle(e.target.value)}
                   placeholder={selectedSubTypeDef?.example ?? 'e.g. CTS 2026 春节中国团'}
@@ -601,10 +595,11 @@ export function NewGoalClient() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
-                FDE Reasoning (强烈建议填) — 客户为什么要做这个 Goal？我们 90 天后看回这段话
+              <label htmlFor="goal-draft-reason" className="text-xs font-black uppercase tracking-wide text-me-charcoal/55">
+                理由（必填）— 客户为什么要做这个 Goal？我们 90 天后看回这段话
               </label>
               <textarea
+                id="goal-draft-reason"
                 value={fdeReasoning}
                 onChange={e => setFdeReasoning(e.target.value)}
                 rows={4}
@@ -631,7 +626,7 @@ export function NewGoalClient() {
               <Row label="Baseline → Target" value={`${baselineValue} → ${targetValue}`} highlight />
               <Row label="Period" value={`${periodStart} → ${periodEnd}`} />
               {budgetAmount && <Row label="Budget" value={`${budgetCurrency} ${parseFloat(budgetAmount).toLocaleString()}`} />}
-              {fdeReasoning && <Row label="FDE Reasoning" value={fdeReasoning} multiline />}
+              <Row label="理由" value={fdeReasoning} multiline />
             </dl>
 
             <p className="border-t border-black/10 pt-4 text-xs font-semibold text-me-charcoal/55">
@@ -663,6 +658,12 @@ export function NewGoalClient() {
                   {intent && subType && !title.trim() && '请填 Goal 标题'}
                 </p>
               )}
+              {step === 3 && !canProceed3 && (
+                <p className="text-[11px] font-semibold text-me-charcoal/55">
+                  {!periodOk && '请填有效的起止日期 · '}
+                  {!reasonOk && '请写一句理由（至少 8 个字，不能是待定这类占位词）'}
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -685,7 +686,7 @@ export function NewGoalClient() {
             <button
               type="button"
               onClick={handleSubmit}
-              disabled={saving}
+              disabled={saving || !title.trim()}
               className="rounded-lg bg-status-track px-6 py-2 text-sm font-black text-white transition-colors hover:bg-status-track/90 disabled:opacity-50"
             >
               {saving ? 'Saving…' : 'Save Draft'}

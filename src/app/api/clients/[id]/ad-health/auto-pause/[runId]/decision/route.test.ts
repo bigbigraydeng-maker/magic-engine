@@ -25,29 +25,33 @@ const m = vi.hoisted(() => ({
   requireRun: vi.fn(),
   approve: vi.fn(),
   reject: vi.fn(),
+  issue: vi.fn(),
 }))
 
-vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: m.access }))
+vi.mock('@/lib/auth/client-access', () => ({ requirePlanApproverAccess: m.access }))
 vi.mock('@/lib/kernel', () => ({ createKernel: m.createKernel }))
 vi.mock('@/lib/action-submission/ads-auto-pause', () => ({
   ADS_AUTO_PAUSE_ACTION_KEY: 'ads.auto_pause_on_d3',
   approveAndExecuteAdsAutoPause: m.approve,
   rejectAdsAutoPause: m.reject,
 }))
+vi.mock('@/lib/action-submission/money-card', () => ({
+  issueMoneyPause: m.issue,
+  clickerFromAccess: () => ({ kind: 'opc', email: 'fde@magicengine.cloud' }),
+}))
 vi.mock('@/lib/supabase', () => {
-  // 账表回写：有一行账；update 收到的 payload 记进 ledgerWrites，好断言记了什么
   const chain: Record<string, unknown> = {}
-  for (const k of ['select', 'eq']) chain[k] = () => chain
+  for (const k of ['select', 'eq', 'order', 'limit']) chain[k] = () => chain
   chain.update = (patch: { payload: { status: string } }) => {
     ledgerWrites.push(patch.payload.status)
     return chain
   }
-  chain.maybeSingle = async () => ({ data: { id: 'fa-1', payload: {} }, error: null })
+  chain.maybeSingle = async () => ({ data: { id: 'fa-1', payload: {}, campaign_id: 'cmp-1' }, error: null })
   return { supabaseAdmin: { from: () => chain } }
 })
 
 import { ACTION_REGISTRY } from '@/lib/kernel/registry'
-import { POST } from './route'
+import { executeAutoPauseHold, POST } from './route'
 
 const kernel = { requireRun: m.requireRun }
 
@@ -69,7 +73,9 @@ beforeEach(() => {
   m.requireRun.mockResolvedValue({
     id: RUN_ID, client_id: CLIENT, action_key: 'ads.auto_pause_on_d3',
     action_version: ACTION_REGISTRY.get('ads.auto_pause_on_d3')!.version,
+    input: { ad_account_id: 'act_1', adset_id: 'set-1' },
   })
+  m.issue.mockResolvedValue({ card: { runId: 'card-1' }, reason: null, wroteMeta: false })
   m.approve.mockResolvedValue({ runId: RUN_ID, kind: 'succeeded', humanReason: null })
   m.reject.mockResolvedValue({ runId: RUN_ID, kind: 'denied', humanReason: '不批准' })
   ledgerWrites.length = 0
@@ -91,10 +97,13 @@ describe('① 没带看到的那份 → 400，连 Kernel 都不建', () => {
 })
 
 describe('② 带上了 → 原样交下去', () => {
-  it('批准：带着看到的那份（归一小写）', async () => {
+  it('批准：先出确认卡，不暂停', async () => {
     const res = await post({ resolution: 'approve', expectedDecisionId: SEEN.toUpperCase() })
-    expect(res.status).toBe(200)
-    expect(m.approve).toHaveBeenCalledWith(kernel, RUN_ID, 'fde@magicengine.cloud', SEEN)
+    expect(res.status).toBe(202)
+    expect(await res.json()).toMatchObject({ status: 'awaiting_confirmation', wroteMeta: false })
+    expect(m.approve).not.toHaveBeenCalled()
+    expect(m.issue).toHaveBeenCalledWith(expect.objectContaining({ kernelDecisionId: SEEN, kernelRunId: RUN_ID }))
+    expect(ledgerWrites).toEqual([])
   })
 
   it('驳回：带着看到的那份', async () => {
@@ -103,11 +112,22 @@ describe('② 带上了 → 原样交下去', () => {
     expect(m.reject).toHaveBeenCalledWith(kernel, RUN_ID, 'fde@magicengine.cloud', '数据是暂时的', SEEN)
   })
 
-  it('Kernel 说「你看的不是最新的」→ 409 + code，页面据此重拉', async () => {
+  it('批准这一下不调用执行，所以过期审批也还没写', async () => {
     m.approve.mockRejectedValueOnce(new KernelError('STALE_DECISION', '看到的那份已经不是最新的了'))
     const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
-    expect(res.status).toBe(409)
-    expect((await res.json()).code).toBe('STALE_DECISION')
+    expect(res.status).toBe(202)
+    expect(m.approve).not.toHaveBeenCalled()
+  })
+})
+
+describe('S2 非内部账号：批准和驳回都挡', () => {
+  it.each(['approve', 'reject'] as const)('🔴 %s → 403，连 Kernel 都不建', async (resolution) => {
+    m.access.mockResolvedValue({ ok: false, status: 403, error: '批准和修改推广计划需要 Magic Lab 内部账号', reason: 'approver_only' })
+    const res = await post({ resolution, expectedDecisionId: SEEN, reason: '不要' })
+    expect(res.status).toBe(403)
+    expect(m.createKernel).not.toHaveBeenCalled()
+    expect(m.approve).not.toHaveBeenCalled()
+    expect(m.reject).not.toHaveBeenCalled()
   })
 })
 
@@ -124,6 +144,7 @@ describe('③ 批准过注册表定的档次闸', () => {
     const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
     expect(res.status).toBe(403)
     expect(m.approve).not.toHaveBeenCalled()
+    expect(m.issue).not.toHaveBeenCalled()
   })
 
   it('同样门槛下驳回照常（不授权任何执行）', async () => {
@@ -133,31 +154,35 @@ describe('③ 批准过注册表定的档次闸', () => {
     expect(m.reject).toHaveBeenCalled()
   })
 
-  it('admin 账号在 admin 门槛下能批', async () => {
+  it('admin 账号在 admin 门槛下能出卡，仍然不暂停', async () => {
     requireAdmin()
-    m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { email: 'ray@magiclab' } })
+    m.access.mockResolvedValue({ ok: true, tier: 'admin', role: 'admin', allowedClientId: null, user: { email: 'ray@magiclab' } })
     const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
-    expect(res.status).toBe(200)
-    expect(m.approve).toHaveBeenCalled()
+    expect(res.status).toBe(202)
+    expect(m.approve).not.toHaveBeenCalled()
+    expect(m.issue).toHaveBeenCalled()
   })
 })
 
-describe('账表只记确定的结果', () => {
+describe('确认之后才记确定的结果', () => {
+  const hold = { kernelRunId: RUN_ID, kernelDecisionId: SEEN } as Parameters<typeof executeAutoPauseHold>[2]
+
   it.each([
     ['succeeded', 'paused', true],
     ['idempotent_hit', 'paused', true],
     ['dead_letter', 'failed', false],
-  ])('%s → 记 %s', async (kind, status, ok) => {
+  ])('%s → 记 %s', async (kind, status, wrote) => {
     m.approve.mockResolvedValueOnce({ runId: RUN_ID, kind, humanReason: null })
-    const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
+    const result = await executeAutoPauseHold(CLIENT, 'fde@magicengine.cloud', hold)
     expect(ledgerWrites).toEqual([status])
-    expect((await res.json()).ok).toBe(ok)
+    expect(result.wroteMeta).toBe(wrote)
+    expect(m.approve).toHaveBeenCalledWith(expect.anything(), RUN_ID, 'fde@magicengine.cloud', SEEN)
   })
 
   it('🔴 in_progress（别人刚批了、正在执行）→ 不记「失败」，账一个字不动', async () => {
     m.approve.mockResolvedValueOnce({ runId: RUN_ID, kind: 'in_progress', humanReason: null })
-    const res = await post({ resolution: 'approve', expectedDecisionId: SEEN })
-    expect((await res.json()).kind).toBe('in_progress')
+    const result = await executeAutoPauseHold(CLIENT, 'fde@magicengine.cloud', hold)
+    expect(result.wroteMeta).toBe(false)
     expect(ledgerWrites).toEqual([])
   })
 })

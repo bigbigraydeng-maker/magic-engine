@@ -50,7 +50,7 @@ check_note: 一句话         # 夜巡结论或"为什么判不了"
 - `verified`/`failed` 必填 `verified_ref`（≠ `done_ref`）和 `last_checked`（≥ `done_on`）
 - 不合规的卡不会静默消失，会以"台账读不出来"出现在待办邮件里
 
-**门卫（`.github/workflows/ledger-check.yml`）**
+**门卫（`.github/workflows/pr-light-checks.yml` 里的台账三步）**
 - 改了 `src/`、`supabase/migrations/`、`scripts/`、`.github/workflows/`、`render.yaml` 的 PR，改动里必须有一张**新建的卡**，或一张写着 `pr:<本 PR 号>` 的卡——改一个字不算
 - 新建的卡只能是 `decided` 或 `done`，不能一出生就 `verified`
 - 每个指向都要真实存在：`pr:`/`issue:` 查 GitHub，`commit:` 查 git，`doc:` 查文件；`done_ref` 指向别的 PR 时那个 PR 必须已合并

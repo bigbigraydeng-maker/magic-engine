@@ -62,7 +62,7 @@ function montageProps() {
 }
 
 test('TEMPLATE_IDS lists the supported templates', () => {
-  assert.deepEqual([...TEMPLATE_IDS], ['list', 'montage'])
+  assert.deepEqual([...TEMPLATE_IDS], ['list', 'montage', 'datacard', 'postcard', 'atmosphere'])
 })
 
 test('isTemplateId accepts known ids and rejects others', () => {
@@ -105,6 +105,30 @@ test('render.mjs rejects an unknown --template with exit code 2', () => {
   )
   assert.equal(result.status, 2)
   assert.ok(result.stderr.includes('--template'))
+})
+
+test('render.mjs applies the same bitrate cap for every aspect', () => {
+  const render = fs.readFileSync(new URL('../render.mjs', import.meta.url), 'utf8')
+  const runRender = render.slice(render.indexOf('async function runRender'))
+  const beforeMedia = runRender.slice(0, runRender.indexOf('await renderMedia('))
+  assert.match(beforeMedia, /const cap = encodingCapFor\(/)
+  assert.equal(/if\s*\([\s\S]*aspect[\s\S]*encodingCapFor/.test(beforeMedia), false)
+  const mediaCall = runRender.slice(runRender.indexOf('await renderMedia('), runRender.indexOf('onProgress:'))
+  assert.match(mediaCall, /crf: 18/)
+  assert.match(mediaCall, /encodingMaxRate: cap\.encodingMaxRate/)
+  assert.match(mediaCall, /encodingBufferSize: cap\.encodingBufferSize/)
+})
+
+test('render.mjs rejects an unknown --aspect with exit code 2 and accepts 9:16 as the default flag', () => {
+  const renderPath = fileURLToPath(new URL('../render.mjs', import.meta.url))
+  const propsPath = path.join(here, '..', 'examples', 'sydney-apartment.props.json')
+  const bad = spawnSync(
+    process.execPath,
+    [renderPath, '--props', propsPath, '--out', '/tmp/x.mp4', '--aspect', '21:9'],
+    { encoding: 'utf8' },
+  )
+  assert.equal(bad.status, 2)
+  assert.ok(bad.stderr.includes('--aspect'))
 })
 
 test('the sydney montage example loads and uses 3 or more clip kinds', () => {
@@ -177,4 +201,34 @@ test('musicSourceOf skips a corrupt catalog entry without throwing', () => {
   assert.ok(src)
   assert.equal(src.id, 'pipa-trap')
   assert.equal(musicSourceOf(catalog, 'unknown.mp3'), null)
+})
+
+test('loadTemplate postcard returns PostcardReel metadata', () => {
+  const input = JSON.parse(fs.readFileSync(new URL('../examples/fictional-postcard.props.json', import.meta.url), 'utf8'))
+  const loaded = loadTemplate('postcard', input)
+  assert.equal(loaded.compositionId, 'PostcardReel')
+  assert.equal(loaded.totalFrames, 492)
+  assert.ok(loaded.assetFiles.includes('clips/hook.mp4'))
+})
+
+test('isTemplateId accepts postcard', () => {
+  assert.equal(isTemplateId('postcard'), true)
+})
+
+test('loadTemplate atmosphere returns AtmosphereReel metadata and reports the missing person column', () => {
+  const loaded = loadTemplate('atmosphere', {
+    logoFile: 'logo.png',
+    musicFile: null,
+    clip: 'clips/main.mp4',
+    durationSec: 15,
+    line: null,
+  })
+  assert.equal(loaded.compositionId, 'AtmosphereReel')
+  assert.equal(loaded.totalFrames, 450)
+  assert.deepEqual(loaded.assetFiles, ['clips/main.mp4', 'logo.png'])
+  assert.deepEqual(loaded.recipeGaps.map((g) => g.column), ['真人背影/真人出镜'])
+})
+
+test('loadTemplate refuses an unknown template id instead of falling back to montage', () => {
+  assert.throws(() => loadTemplate('nope', {}), /未知模板/)
 })

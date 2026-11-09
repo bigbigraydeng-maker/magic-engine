@@ -1,0 +1,182 @@
+name: PR risk gate refresh
+
+# Re-evaluates the merge gate when Codex reviews or Claude Code signs off.
+# A clean Codex review is an issue comment (`codex-review-state:v1`, full
+# commit sha), not a review object (#3086, #3091). Codex updates that comment
+# in place, so `edited` counts too. A Claude sign-off is the same kind of
+# comment (`me-review-signoff`, or a comment from the trusted login). When
+# the light checks finish, this runs again so an A-level PR can arm
+# auto-merge once they are green. Every required check other than Risk gate
+# is published by that workflow, so its completion is the retrigger. It does
+# not listen to this workflow or to the risk-gate workflow: that would loop.
+#
+# This file is separate from `pr-risk-gate.yml` on purpose. An `issue_comment`
+# run is attached to the default-branch SHA. A job here named "Risk gate"
+# would put that required check on main — green after a clean review, red
+# when the head is still unreviewed. The job below has a different name. The
+# script writes a check run named "Risk gate" onto the PR head, then exits 0
+# so this job does not paint main red. Failing to write that check still
+# fails the job.
+#
+# The script and this workflow both come from `main`. Comment text never
+# enters a `run:` block. A review-submitted event would use the PR merge ref,
+# so this file does not listen for it.
+#
+# Irrelevant comments must not cancel an in-flight gate. Concurrency is on
+# the job, and the group includes the event. A comment that does not
+# re-evaluate gets its own group (`idle` + this run id), so it cannot cancel
+# a real gate run or a review that is still being recorded. A later review
+# of the same PR still cancels the previous re-check.
+
+on:
+  issue_comment:
+    types: [created, edited]
+  workflow_run:
+    workflows: ['PR light checks']
+    types: [completed]
+
+permissions:
+  contents: write        # enable / disable auto-merge
+  pull-requests: write   # post the rating comment; enable / disable auto-merge
+  checks: write          # publish "Risk gate" on the PR head, not on main
+  issues: write          # create and apply the needs-ray-merge label
+
+jobs:
+  refresh:
+    name: Record risk gate on head
+    # Same predicate as the concurrency group. A Codex comment on a draft
+    # still runs: decideMerge keeps drafts closed. Anything else skips, and
+    # the idle group means the skip cannot cancel another run.
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0].number > 0)
+      || (github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(vars.ME_SIGNOFF_TRUSTED_LOGINS, github.event.comment.user.login) || contains(github.event.comment.body, 'codex-review-state:v1') || contains(github.event.comment.body, 'codex-review-receipt:v1') || contains(github.event.comment.body, 'me-review-signoff')))
+    concurrency:
+      group: ${{ case(github.event_name == 'workflow_run', format('pr-risk-gate-workflow_run-{0}', github.event.workflow_run.pull_requests[0].number), github.event_name == 'issue_comment' && github.event.issue.pull_request && (contains(vars.ME_SIGNOFF_TRUSTED_LOGINS, github.event.comment.user.login) || contains(github.event.comment.body, 'codex-review-state:v1') || contains(github.event.comment.body, 'codex-review-receipt:v1') || contains(github.event.comment.body, 'me-review-signoff')), format('pr-risk-gate-issue_comment-{0}', github.event.issue.number), format('pr-risk-gate-issue_comment-idle-{0}', github.run_id)) }}
+      cancel-in-progress: true
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    steps:
+      # Checked out from `main`, never the PR head. Credentials are not
+      # persisted because nothing here pushes.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.3.0
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      # Comment events have no pull_request payload. Read the live PR as data.
+      # The comment body is not passed in.
+      - name: Bind this run to the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+          EVENT_BASE: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD: ${{ github.event.pull_request.head.sha }}
+          EVENT_AUTHOR: ${{ github.event.pull_request.user.login }}
+          EVENT_DRAFT: ${{ github.event.pull_request.draft }}
+          EVENT_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          # 带 p0 标签的 PR 要人签字才自动合（Ray 2026-10-26「只有 P0 审」）。
+          # 🔴 这个入口 2026-10-26 漏过一次：#3155 只给 pr-risk-gate.yml 传了 PR_IS_P0，
+          #    闸门脚本却把它列为必需变量 —— 于是每次「检查跑完后的重判」都报
+          #    「缺少必需的环境变量 PR_IS_P0」判红，仓库里每条 PR 都会被这条红挡住。
+          EVENT_P0: ${{ contains(github.event.pull_request.labels.*.name, 'p0') }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request_target" ]; then
+            {
+              echo "base=$EVENT_BASE"
+              echo "head=$EVENT_HEAD"
+              echo "author=$EVENT_AUTHOR"
+              echo "draft=$EVENT_DRAFT"
+              echo "fork=$EVENT_FORK"
+              echo "p0=$EVENT_P0"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json baseRefOid,headRefOid,isDraft,isCrossRepository,author,labels \
+            --jq '"base=\(.baseRefOid)\nhead=\(.headRefOid)\ndraft=\(.isDraft)\nfork=\(.isCrossRepository)\nauthor=\(.author.login)\np0=\([.labels[].name | ascii_downcase] | index("p0") != null)"' \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Rate this PR and decide the merge tier
+        id: gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+          BASE_SHA: ${{ steps.pr.outputs.base }}
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
+          PR_AUTHOR: ${{ steps.pr.outputs.author }}
+          PR_DRAFT: ${{ steps.pr.outputs.draft }}
+          PR_IS_FORK: ${{ steps.pr.outputs.fork }}
+          PR_IS_P0: ${{ steps.pr.outputs.p0 }}
+          SIGNOFF_TRUSTED_LOGINS: ${{ vars.ME_SIGNOFF_TRUSTED_LOGINS }}
+          GATE_EVENT_NAME: ${{ github.event_name }}
+        run: node tools/ops-review-loop/src/check-risk-gate.mjs
+
+      - name: Enable auto-merge when the gate says the current head is clear
+        if: steps.gate.outputs.decision == 'enable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
+        run: |
+          set -euo pipefail
+          live=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)
+          decision=$(LIVE_HEAD="$live" node tools/ops-review-loop/src/head-check.mjs --plan-auto-merge)
+          if [ "$decision" = "skip" ]; then
+            echo '- 自动合并：未开启（这次审的提交已经不是 PR 当前提交）' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$decision" != "enable" ]; then
+            echo '- 自动合并：未开启（无法确认当前提交）' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          gh pr merge --auto --merge --match-head-commit "$HEAD_SHA" "$PR_NUMBER"
+          echo '- 自动合并：已开启（必过检查全绿后由 GitHub 合并）' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Disable auto-merge when the gate does not enable it
+        if: always() && steps.gate.outputs.decision != 'enable'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          # Distinguish "already off" from a real API failure (CONCERN-2 from
+          # the 2026-09-25 three-way review). The old form `|| echo …` swallowed
+          # both, so an API outage that left a stale enable in place would look
+          # identical to the idempotent no-op.
+          state=$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest')
+          if [ "$state" = "null" ] || [ -z "$state" ]; then
+            echo '- 自动合并：本来就未开启（无需操作）' >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh pr merge --disable-auto "$PR_NUMBER"
+            echo '- 自动合并：已关闭' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Label pulls Ray merges by hand
+        if: always() && steps.gate.outputs.ray_hold == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          gh label create needs-ray-merge --repo "$GITHUB_REPOSITORY" --color B60205 --description "Ray merges this pull request by hand" --force
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label needs-ray-merge
+          echo '- 留给 Ray 亲手合：已标 needs-ray-merge' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the Ray-merge label when this diff is not held
+        if: always() && steps.gate.outputs.ray_hold == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}
+        run: |
+          set -euo pipefail
+          names=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")')
+          case ",$names," in
+            *,needs-ray-merge,*)
+              gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label needs-ray-merge
+              echo '- 留给 Ray 亲手合：标签已去掉' >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac

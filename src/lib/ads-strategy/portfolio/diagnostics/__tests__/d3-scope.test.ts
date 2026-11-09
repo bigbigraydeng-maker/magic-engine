@@ -1,0 +1,321 @@
+/**
+ * D3 候选范围：获客 / 再营销照旧（可进自动暂停建议）；类似人群与流量组纳入但只提醒（autoPauseEligible=false）。
+ * 广告组设置用真实 `GraphAdsetSettings` 经 `normalizeAdset` + `buildAccountContext` 构造。
+ */
+import { describe, expect, it } from 'vitest'
+import type { GraphAdsetSettings } from '@/lib/meta/entity-settings'
+import { normalizeAdset, normalizeCampaign, settingsHash, type EntitySnapshotRow } from '../../snapshot'
+import type { RoleVerdict } from '../../roles'
+import { buildAccountContext, shiftDate } from '../context'
+import { diagnoseSpendNoResult } from '../d3-spend-no-result'
+import type { AccountInput, DailyRow, DiagnosisInput, SettingChange } from '../types'
+
+const CTX = { clientId: 'c', adAccountId: 'act_1', currency: 'NZD', sharedAccount: false }
+const DATE = '2026-10-24'
+
+function snap(g: GraphAdsetSettings): EntitySnapshotRow {
+  const draft = normalizeAdset(CTX, g)
+  return { ...draft, settings_hash: settingsHash(draft), capture_reason: 'daily', captured_at: `${DATE}T10:00:00Z` }
+}
+
+function adset(id: string, goal: string): GraphAdsetSettings {
+  return {
+    id, name: id, campaign_id: 'camp_1', optimization_goal: goal,
+    status: 'ACTIVE', effective_status: 'ACTIVE', targeting: {},
+  }
+}
+
+function dayRow(adsetId: string, spend: number, leads = 0, date = DATE): DailyRow {
+  return {
+    level: 'adset', entity_id: adsetId, parent_id: 'camp_1', insight_date: date,
+    spend, impressions: 1000, reach: 800, clicks: 40, leads, messaging_conversations: 0,
+    video_thruplays: null,
+    actions: leads > 0 ? [{ action_type: 'lead', value: String(leads) }] : [],
+  }
+}
+
+function run(
+  goal: string,
+  spend: number,
+  target: number | null = 11,
+  role?: RoleVerdict['role'],
+  settingChanges?: SettingChange[],
+) {
+  const account: AccountInput = {
+    adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
+    snapshots: [snap(adset('as_1', goal))], daily: [dayRow('as_1', spend)],
+    hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
+    ...(settingChanges ? { settingChanges } : {}),
+  }
+  const ctx = buildAccountContext(account, DATE)
+  if (role) {
+    const prev = ctx.roles.get('as_1')
+    ctx.roles.set('as_1', { ...prev, role, confidence: 'high', reasons: [], retargetingAudienceIds: [] } as RoleVerdict)
+  }
+  const input: DiagnosisInput = {
+    clientId: 'c', date: DATE, evaluatedAt: `${DATE}T20:00:00Z`,
+    outcome: { leading: null, primary: 'lead', targetCostPerPrimary: target, minPrimaryPerUnit: 5 },
+    outcomeConfigured: true, messagingReferralAvailable: false, digestRecipients: [], accounts: [account],
+  }
+  return diagnoseSpendNoResult(ctx, input)
+}
+
+describe('D3 候选范围', () => {
+  it('流量组（LINK_CLICKS）花 $152、0 线索、目标 $11 → 命中，只提醒', () => {
+    const [d] = run('LINK_CLICKS', 152)
+    expect(d).toMatchObject({ code: 'D3', status: 'hit', autoPauseEligible: false })
+    expect(d.title).toContain('只提醒')
+    expect(d.units[0].id).toBe('as_1')
+  })
+
+  it('落地页浏览目标的流量组同样命中且只提醒', () => {
+    expect(run('LANDING_PAGE_VIEWS', 30)[0]).toMatchObject({ status: 'hit', autoPauseEligible: false })
+  })
+
+  it('类似人群（expansion）花 $194、0 线索 → 命中，只提醒', () => {
+    expect(run('LEAD_GENERATION', 194, 11, 'expansion')[0]).toMatchObject({ status: 'hit', autoPauseEligible: false })
+  })
+
+  it('流量组被判成再营销（retargeting）→ 仍只提醒，不进自动暂停', () => {
+    expect(run('LINK_CLICKS', 152, 11, 'retargeting')[0]).toMatchObject({ status: 'hit', autoPauseEligible: false })
+  })
+
+  it('获客组行为不变：命中且不带 autoPauseEligible=false', () => {
+    const [d] = run('LEAD_GENERATION', 100)
+    expect(d.status).toBe('hit')
+    expect(d.autoPauseEligible).toBeUndefined()
+    expect(d.title).not.toContain('只提醒')
+  })
+
+  it('花费没到 2× 目标（$22）→ 不报', () => {
+    expect(run('LINK_CLICKS', 21)).toEqual([])
+  })
+
+  it('没配目标 → 判不了（不回落默认），且不会是命中', () => {
+    const out = run('LINK_CLICKS', 152, null)
+    expect(out.every(d => d.status === 'not_comparable')).toBe(true)
+  })
+
+  it('破冰类（THRUPLAY）不纳入', () => {
+    expect(run('THRUPLAY', 500)).toEqual([])
+  })
+
+  it('花钱结果太少：标题写明广告组，同系列还有别的花费时补系列合计，判定仍只看这个组', () => {
+    const campaign = {
+      ...normalizeCampaign(CTX, { id: 'camp_1', name: '系列甲', status: 'ACTIVE', effective_status: 'ACTIVE' }),
+      settings_hash: 'h', capture_reason: 'daily' as const, captured_at: `${DATE}T10:00:00Z`,
+    }
+    const named = (id: string, name: string): GraphAdsetSettings => ({ ...adset(id, 'LEAD_GENERATION'), name })
+    const account: AccountInput = {
+      adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
+      snapshots: [campaign, snap(named('as_a', '组A')), snap(named('as_b', '组B'))],
+      daily: [
+        dayRow('as_a', 16.18, 1, shiftDate(DATE, -2)), dayRow('as_a', 16.18, 1, shiftDate(DATE, -1)), dayRow('as_a', 16.19, 0),
+        dayRow('as_b', 16.37, 0),
+      ],
+      hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
+    }
+    const ctx = buildAccountContext(account, DATE)
+    for (const id of ['as_a', 'as_b']) {
+      const prev = ctx.roles.get(id)
+      ctx.roles.set(id, { ...prev, role: 'acquisition', confidence: 'high', reasons: [], retargetingAudienceIds: [] } as RoleVerdict)
+    }
+    const input: DiagnosisInput = {
+      clientId: 'c', date: DATE, evaluatedAt: `${DATE}T20:00:00Z`,
+      outcome: { leading: null, primary: 'lead', targetCostPerPrimary: 11, minPrimaryPerUnit: 5 },
+      outcomeConfigured: true, messagingReferralAvailable: false, digestRecipients: [], accounts: [account],
+    }
+    const hits = diagnoseSpendNoResult(ctx, input).filter(d => d.status === 'hit')
+    expect(hits.map(d => d.units[0]?.id)).toEqual(['as_a'])
+    expect(hits[0]?.title).toContain('广告组「组A」')
+    expect(hits[0]?.title).toContain('系列合计 NZD 64.92 / 2 = NZD 32.46')
+    expect(hits[0]?.evidence).toMatchObject({ spend: 48.55, results: 2, cost_per_result: 24.28 })
+  })
+
+  it('标题写实际有花费的天数，不写死「近 7 天」', () => {
+    const [d] = run('LEAD_GENERATION', 100)
+    expect(d.title).toContain('投放 1 天花了')
+    expect(d.title).not.toContain('近 7 天')
+  })
+
+  it('系列里只有一个有花费的广告组：标题写明组名，不另写合计', () => {
+    const [d] = run('LEAD_GENERATION', 100)
+    expect(d.title).toContain('广告组「as_1」')
+    expect(d.title).not.toContain('系列合计')
+  })
+})
+
+describe('【考卷9】D3 不再误报：已不在投放的组 / 样本太小', () => {
+  function runWith(status: string, rows: DailyRow[], target = 11) {
+    const g: GraphAdsetSettings = { ...adset('as_1', 'LEAD_GENERATION'), status: status === 'ACTIVE' ? 'ACTIVE' : 'PAUSED', effective_status: status }
+    const account: AccountInput = {
+      adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
+      snapshots: [snap(g)], daily: rows,
+      hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
+    }
+    const ctx = buildAccountContext(account, DATE)
+    const prev = ctx.roles.get('as_1')
+    ctx.roles.set('as_1', { ...prev, role: 'acquisition', confidence: 'high', reasons: [], retargetingAudienceIds: [] } as RoleVerdict)
+    const input: DiagnosisInput = {
+      clientId: 'c', date: DATE, evaluatedAt: `${DATE}T20:00:00Z`,
+      outcome: { leading: null, primary: 'lead', targetCostPerPrimary: target, minPrimaryPerUnit: 5 },
+      outcomeConfigured: true, messagingReferralAvailable: false, digestRecipients: [], accounts: [account],
+    }
+    return diagnoseSpendNoResult(ctx, input)
+  }
+  const oneLeadTwoDays = [dayRow('as_1', 12, 1, shiftDate(DATE, -1)), dayRow('as_1', 11.98, 0)]
+
+  it('已暂停的广告组：花得再多也不报（钱已经不在流了）', () => {
+    expect(runWith('PAUSED', [dayRow('as_1', 152, 0)])).toEqual([])
+  })
+
+  it('系列被暂停（CAMPAIGN_PAUSED）的广告组同样不报', () => {
+    expect(runWith('CAMPAIGN_PAUSED', [dayRow('as_1', 152, 0)])).toEqual([])
+  })
+
+  it('同样的数据，在投（ACTIVE）就报——证明上面两条是靠「不在投」才不报的', () => {
+    expect(runWith('ACTIVE', [dayRow('as_1', 152, 0)])[0]).toMatchObject({ status: 'hit' })
+  })
+
+  it('真实案例：花 23.98、1 个留资、只投了 2 天（目标 11）→ 样本太小，不报', () => {
+    expect(runWith('ACTIVE', oneLeadTwoDays)).toEqual([])
+  })
+
+  it('同样 23.98 / 1 个留资，但已经投了 3 天以上 → 不再算样本小，照报，标题写 3 天', () => {
+    const rows = [dayRow('as_1', 8, 1, shiftDate(DATE, -2)), dayRow('as_1', 8, 0, shiftDate(DATE, -1)), dayRow('as_1', 7.98, 0)]
+    const [d] = runWith('ACTIVE', rows)
+    expect(d).toMatchObject({ status: 'hit' })
+    expect(d.title).toContain('投放 3 天花了 NZD 23.98')
+  })
+
+  it('零结果的白花钱不受样本太小限制：只投 1 天、花 $30、0 个留资 → 照报', () => {
+    const [d] = runWith('ACTIVE', [dayRow('as_1', 30, 0)])
+    expect(d).toMatchObject({ status: 'hit' })
+    expect(d.title).toContain('花钱没结果')
+    expect(d.title).toContain('投放 1 天')
+  })
+
+  it('结果够 3 个、成本仍超 2× 目标 → 照报（样本不算小）', () => {
+    const [d] = runWith('ACTIVE', [dayRow('as_1', 90, 3)])
+    expect(d).toMatchObject({ status: 'hit' })
+  })
+})
+
+// 【考卷3】Agent 闭环升级第 0 步（设计稿 §3.1 / §4「收放分开」）。
+// 「收」类提议（止损、暂停）永远不被「刚动过设置」压住：钱在流失时，冷却期只能多加一行标注，
+// 不能把止损信号藏起来。现在 D3 不看 settingChanges，这道题是护栏——
+// 第 1 步加「冷却 / 上次结果」后处理后，这道必须仍然通过。
+describe('【考卷3】止损提议不被最近的设置改动压住', () => {
+  it('6 小时前刚改过这个广告组，花 $100、0 线索、目标 $11 → D3 照样命中，仍可进自动暂停建议', () => {
+    const [d] = run('LEAD_GENERATION', 100, 11, undefined, [
+      { level: 'adset', entity_id: 'as_1', captured_at: `${DATE}T04:00:00Z` },
+    ])
+    expect(d).toMatchObject({ code: 'D3', status: 'hit' })
+    expect(d.autoPauseEligible).toBeUndefined()
+    expect(d.units[0].id).toBe('as_1')
+  })
+})
+
+/**
+ * 广告组自己出的结果跟客户主结果不是一种（2026-11-03 生产库：CTS 主结果是留资，WhatsApp 开聊组 …493473
+ * 10-25 → 10-30 连着 6 天被判「花钱没结果」）。这种组按客户主结果数永远是 0，只能出「判不了」，不能出命中。
+ * 结果种类跟广告组目的地走，复用 rules/core-metric.ts（D2 / D10 已经这么判）。
+ */
+describe('【考卷7】结果种类对不上：不出命中，只出判不了', () => {
+  function runUnit(opts: { goal: string; destination?: string; primary: 'lead' | 'messaging_started' | 'qualified_enquiry'; spend: number; messages?: number; nullActions?: boolean }) {
+    const g: GraphAdsetSettings = { ...adset('as_1', opts.goal), ...(opts.destination ? { destination_type: opts.destination } : {}) }
+    const row: DailyRow = {
+      ...dayRow('as_1', opts.spend),
+      actions: opts.nullActions ? null : opts.messages ? [{ action_type: 'onsite_conversion.messaging_conversation_started_7d', value: String(opts.messages) }] : [],
+    }
+    const account: AccountInput = {
+      adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
+      snapshots: [snap(g)], daily: [row], hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
+    }
+    const ctx = buildAccountContext(account, DATE)
+    const input: DiagnosisInput = {
+      clientId: 'c', date: DATE, evaluatedAt: `${DATE}T20:00:00Z`,
+      outcome: { leading: null, primary: opts.primary, targetCostPerPrimary: 11, minPrimaryPerUnit: 5 },
+      outcomeConfigured: true, messagingReferralAvailable: false, digestRecipients: [], accounts: [account],
+    }
+    return diagnoseSpendNoResult(ctx, input)
+  }
+
+  it('客户主结果是留资、WhatsApp 开聊组花 $100 聊了 30 个 → 不是命中，是判不了（结果种类对不上）', () => {
+    const out = runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'lead', spend: 100, messages: 30 })
+    expect(out.filter(d => d.status === 'hit')).toEqual([])
+    expect(out).toEqual([expect.objectContaining({ code: 'D3', status: 'not_comparable', notComparableReason: 'result_type_mismatch' })])
+    expect(out[0].title).toContain('开聊')
+    expect(out[0].title).toContain('留资')
+  })
+
+  it('🔴 结果种类对不上、但这个组自己的结果也是 0：WhatsApp 组花 $500 零开聊 → 照样命中，照样可进自动暂停（魏征）', () => {
+    const [d] = runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'lead', spend: 500 })
+    expect(d).toMatchObject({ code: 'D3', status: 'hit', evidence: { results: 0 } })
+    expect(d.autoPauseEligible).toBeUndefined()
+    expect(d.title).toContain('私信开聊 0 个')
+  })
+
+  it('客户主结果是开聊、表单留资组（ON_AD）零留资 → 照样命中（NAL 那种）', () => {
+    const out = runUnit({ goal: 'LEAD_GENERATION', destination: 'ON_AD', primary: 'messaging_started', spend: 500 })
+    expect(out).toEqual([expect.objectContaining({ status: 'hit' })])
+  })
+
+  it('这个组自己的结果数不出来（数据没拉到）→ 判不了，理由是归不上，不是结果种类不对', () => {
+    const out = runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'lead', spend: 100, nullActions: true })
+    expect(out).toEqual([expect.objectContaining({ status: 'not_comparable', notComparableReason: 'primary_result_unknown' })])
+  })
+
+  it('主结果是合格询盘（不是留资 / 开聊）+ WhatsApp 组 → 照旧走归不上，不按结果种类拦', () => {
+    const out = runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'qualified_enquiry', spend: 100, messages: 30 })
+    expect(out).toEqual([expect.objectContaining({ status: 'not_comparable', notComparableReason: 'primary_result_unknown' })])
+  })
+
+  it('WhatsApp 目的地的点击组（LINK_CLICKS）零开聊 → 照旧命中、只提醒', () => {
+    expect(runUnit({ goal: 'LINK_CLICKS', destination: 'WHATSAPP', primary: 'lead', spend: 152 })[0])
+      .toMatchObject({ status: 'hit', autoPauseEligible: false })
+  })
+
+  it('花费没到 2× 目标 → 健康日不出（跟其它判不了一样）', () => {
+    expect(runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'lead', spend: 21 })).toEqual([])
+  })
+
+  it('结果种类对得上的照旧：主结果开聊、WhatsApp 组花 $100 零开聊 → 命中', () => {
+    const [d] = runUnit({ goal: 'CONVERSATIONS', destination: 'WHATSAPP', primary: 'messaging_started', spend: 100 })
+    expect(d).toMatchObject({ code: 'D3', status: 'hit' })
+  })
+
+  it('Messenger 里的表单（目的地私信 + 目标留资）跟着客户配置走：主结果留资 → 照常按留资判，命中', () => {
+    const [d] = runUnit({ goal: 'LEAD_GENERATION', destination: 'MESSENGER', primary: 'lead', spend: 100 })
+    expect(d).toMatchObject({ status: 'hit' })
+  })
+
+  it('流量组（点击类，自己不出留资也不出开聊）行为不变：照旧命中、只提醒', () => {
+    expect(runUnit({ goal: 'LINK_CLICKS', destination: 'WEBSITE', primary: 'lead', spend: 152 })[0])
+      .toMatchObject({ status: 'hit', autoPauseEligible: false })
+  })
+})
+
+describe('系列合计不把两种结果混着加', () => {
+  it('同系列一个表单组命中、一个 WhatsApp 组在聊：标题不写系列合计', () => {
+    const form = snap({ ...adset('as_form', 'LEAD_GENERATION'), destination_type: 'ON_AD' })
+    const wa = snap({ ...adset('as_wa', 'CONVERSATIONS'), destination_type: 'WHATSAPP' })
+    const account: AccountInput = {
+      adAccountId: 'act_1', shared: false, timezone: 'Pacific/Auckland', currency: 'NZD',
+      snapshots: [form, wa],
+      daily: [dayRow('as_form', 100), { ...dayRow('as_wa', 80), actions: [{ action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '20' }] }],
+      hourly: {}, hourlyError: null, latestCaptures: [], lastInsightDate: DATE,
+    }
+    const ctx = buildAccountContext(account, DATE)
+    const input: DiagnosisInput = {
+      clientId: 'c', date: DATE, evaluatedAt: `${DATE}T20:00:00Z`,
+      outcome: { leading: null, primary: 'lead', targetCostPerPrimary: 11, minPrimaryPerUnit: 5 },
+      outcomeConfigured: true, messagingReferralAvailable: false, digestRecipients: [], accounts: [account],
+    }
+    const out = diagnoseSpendNoResult(ctx, input)
+    const hit = out.find(d => d.status === 'hit')
+    expect(hit?.units[0].id).toBe('as_form')
+    expect(hit?.title).not.toContain('系列合计')
+    expect(out.find(d => d.units[0].id === 'as_wa')).toMatchObject({ status: 'not_comparable', notComparableReason: 'result_type_mismatch' })
+  })
+})

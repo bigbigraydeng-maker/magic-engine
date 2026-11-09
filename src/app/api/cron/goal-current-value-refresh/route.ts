@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
+import { readSeatFetchExtras } from '@/lib/strategy/seat-scope'
 import { startCronRun } from '@/lib/cron/run-logger'
 
 export const maxDuration = 300 // 5 min — generous; cron typically completes <60s
@@ -28,6 +29,9 @@ interface GoalRow {
   primary_metric_key: string
   period_start: string
   period_end: string
+  supporting_metrics?: unknown
+  created_at?: string | null
+  baseline_value?: unknown
 }
 
 interface CronResult {
@@ -63,7 +67,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // ── Load active goals ───────────────────────────────────────────────────
   const goalsRes = await supabaseAdmin
     .from('goals')
-    .select('id, client_id, primary_metric_key, period_start, period_end')
+    .select('id, client_id, primary_metric_key, period_start, period_end, supporting_metrics, created_at, baseline_value')
     .eq('status', 'active')
 
   const goalsErr = (goalsRes as { error: { message: string } | null }).error
@@ -119,11 +123,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   for (const goal of goals) {
     try {
       // 传这个目标自己的时间段：一个客户可以同时有多个 active 目标（2026-09-24 起已出现）。
+      const extras = readSeatFetchExtras(goal)
+      if (!extras.ok) {
+        failed++
+        errors.push({ goal_id: goal.id, reason: extras.reason })
+        continue
+      }
       const result = await autoFetchMetricValue(
         supabaseAdmin as any,
         goal.client_id,
         goal.primary_metric_key,
-        { goalPeriod: { period_start: goal.period_start, period_end: goal.period_end } },
+        {
+          goalPeriod: { period_start: goal.period_start, period_end: goal.period_end },
+          ...(extras.extras ?? {}),
+        },
       )
 
       if (!result.ok) {

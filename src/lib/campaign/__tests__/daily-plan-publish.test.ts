@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   CampaignDailyPublishCommandSchema,
+  CampaignDailyPublishMetaSchema,
   DAILY_PLAN_POST_PUBLISHED_EVENT,
   measurementSchedule,
   partitionByIdempotency,
@@ -8,6 +9,7 @@ import {
   resolvePublishSchedule,
   resolvePublishStatus,
   shiftDateString,
+  StoryResolveDueSchema,
 } from '../daily-plan-publish'
 
 const CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
@@ -274,6 +276,86 @@ describe('resolvePublishSchedule — the 2026-09-03 regression', () => {
     // legitimate long-lead schedule. Publishing now surfaces the mistake.
     const r = resolvePublishSchedule('2027-06-01', new Date('2026-09-03T04:00:00Z'))
     expect(r.publishNow).toBe(true)
+  })
+})
+
+describe('first comment fields', () => {
+  function receipt(publishedOverrides: Record<string, unknown> = {}) {
+    return {
+      schema_version: 1,
+      event_name: DAILY_PLAN_POST_PUBLISHED_EVENT,
+      status: 'PUBLISHED',
+      request_id: '20000000-0000-0000-0000-000000000001',
+      client_id: CLIENT_ID,
+      campaign_id: CAMPAIGN_ID,
+      plan_id: PLAN_ID,
+      plan_revision: PLAN_REVISION,
+      review_revision: REVIEW_REVISION,
+      page_id: PAGE_ID,
+      publishing_authorization: 'AUTHORIZED',
+      approved_by_user_id: '30000000-0000-0000-0000-000000000001',
+      created_at: '2026-09-03T00:00:00.000Z',
+      published: [
+        {
+          date: '2026-09-03',
+          idempotency_key: 'fbpost_a',
+          post_id: `${PAGE_ID}_123`,
+          post_id_source: 'post_id',
+          page_id: PAGE_ID,
+          published_at: '2026-09-03T00:00:00.000Z',
+          permalink: 'https://www.facebook.com/123',
+          provider_response: {},
+          ...publishedOverrides,
+        },
+      ],
+      failed: [],
+      event_ids: [],
+    }
+  }
+
+  it('parses a published item without first_comment_status / first_comment_id (old receipts)', () => {
+    const parsed = CampaignDailyPublishMetaSchema.parse(receipt())
+    expect(parsed.published[0].first_comment_status).toBeUndefined()
+    expect(parsed.published[0].first_comment_id).toBeUndefined()
+  })
+
+  it('accepts POSTED with an id, and rejects an unknown status', () => {
+    const parsed = CampaignDailyPublishMetaSchema.parse(
+      receipt({ first_comment_status: 'POSTED', first_comment_id: 'comment-1' }),
+    )
+    expect(parsed.published[0].first_comment_status).toBe('POSTED')
+    expect(parsed.published[0].first_comment_id).toBe('comment-1')
+
+    expect(
+      CampaignDailyPublishMetaSchema.safeParse(receipt({ first_comment_status: 'WHATEVER' })).success,
+    ).toBe(false)
+  })
+
+  function storyResolveDue(overrides: Record<string, unknown> = {}) {
+    return {
+      client_id: CLIENT_ID,
+      campaign_id: CAMPAIGN_ID,
+      plan_id: PLAN_ID,
+      plan_revision: PLAN_REVISION,
+      review_revision: REVIEW_REVISION,
+      date: '2026-09-03',
+      idempotency_key: 'fbpost_a',
+      photo_id: '123456789',
+      page_id: PAGE_ID,
+      published_at: '2026-09-03T00:00:00.000Z',
+      measure_at: [{ hours: 4, at: '2026-09-03T04:00:00.000Z' }],
+      ...overrides,
+    }
+  }
+
+  it('accepts a normal first_comment_text and rejects empty / over-long text', () => {
+    expect(
+      StoryResolveDueSchema.safeParse(storyResolveDue({ first_comment_text: 'Book now' })).success,
+    ).toBe(true)
+    expect(StoryResolveDueSchema.safeParse(storyResolveDue({ first_comment_text: '' })).success).toBe(false)
+    expect(
+      StoryResolveDueSchema.safeParse(storyResolveDue({ first_comment_text: 'x'.repeat(2001) })).success,
+    ).toBe(false)
   })
 })
 

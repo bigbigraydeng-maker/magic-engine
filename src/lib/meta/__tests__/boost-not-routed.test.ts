@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { describe, it, expect } from 'vitest';
 
@@ -37,67 +37,42 @@ function toRel(absPath: string): string {
   return relative(SRC_ROOT, absPath).split(sep).join('/');
 }
 
-const ALLOWED_DEFINERS = new Set(['lib/meta/boost.ts', 'lib/meta/client.ts']);
+// boostPagePost created Meta campaigns/ad sets/ads directly as ACTIVE with no
+// approval, receipt or budget check. It had no callers and was removed on
+// 2026-10-06; these guards keep it from coming back under the same name/module.
+describe('boostPagePost stays retired', () => {
+  it('the boost module no longer exists', () => {
+    expect(existsSync(join(SRC_ROOT, 'lib', 'meta', 'boost.ts'))).toBe(false);
+  });
 
-describe('boostPagePost architecture guard', () => {
-  it('no production file other than the definer and the re-export mentions boostPagePost', () => {
+  it('no production file mentions boostPagePost', () => {
     const offenders: string[] = [];
     for (const file of listSourceFiles(SRC_ROOT)) {
-      const rel = toRel(file);
-      if (ALLOWED_DEFINERS.has(rel)) {
-        continue;
-      }
       const text = readFileSync(file, 'utf8');
       if (/\bboostPagePost\b/.test(text)) {
-        offenders.push(rel);
+        offenders.push(toRel(file));
       }
     }
     expect(offenders).toEqual([]);
   });
 
-  it('nothing imports the boost module directly', () => {
+  it('nothing imports a meta boost module', () => {
     const offenders: string[] = [];
     for (const file of listSourceFiles(SRC_ROOT)) {
-      const rel = toRel(file);
-      if (rel === 'lib/meta/client.ts') {
-        continue;
-      }
-      if (rel === 'lib/meta/boost.ts') {
-        continue;
-      }
       const text = readFileSync(file, 'utf8');
-      const staticImport = /from\s+['"][^'"]*\/boost['"]/.test(text);
+      const staticImport = /from\s+['"][^'"]*meta\/boost['"]|from\s+['"]\.\/boost['"]/.test(text);
       const dynamicImport = /import\(\s*['"][^'"]*\/boost['"]\s*\)/.test(text);
       const requireCall = /require\(\s*['"][^'"]*\/boost['"]\s*\)/.test(text);
       if (staticImport || dynamicImport || requireCall) {
-        offenders.push(rel);
+        offenders.push(toRel(file));
       }
     }
     expect(offenders).toEqual([]);
   });
 
-  it('the route files under src/app/api never reference the boost module or the re-export', () => {
-    const offenders: string[] = [];
-    for (const file of listSourceFiles(SRC_ROOT)) {
-      const rel = toRel(file);
-      if (!rel.startsWith('app/api/')) {
-        continue;
-      }
-      const text = readFileSync(file, 'utf8');
-      if (/\bboostPagePost\b|lib\/meta\/boost/.test(text)) {
-        offenders.push(rel);
-      }
-    }
-    expect(offenders).toEqual([]);
-  });
-
-  it('the scan actually sees the definer and the re-export', () => {
+  it('the scan actually sees the meta client and the wider source tree', () => {
     const files = listSourceFiles(SRC_ROOT).map(toRel);
-    expect(files).toContain('lib/meta/boost.ts');
     expect(files).toContain('lib/meta/client.ts');
     expect(files.length).toBeGreaterThan(200);
-
-    const clientText = readFileSync(join(SRC_ROOT, 'lib', 'meta', 'client.ts'), 'utf8');
-    expect(clientText).toContain('boostPagePost');
   });
 });

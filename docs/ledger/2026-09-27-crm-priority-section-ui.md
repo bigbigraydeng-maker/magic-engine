@@ -2,13 +2,15 @@
 id: 2026-09-27-crm-priority-section-ui
 title: 「全部客人」页能按「先联系谁」分 4 段显示了；拿 CTS 1010 人 / NAL 197 人真数据渲染过真页面
 status: done
-owner: agent
+owner: pm
 decided_on: 2026-09-27
 source: session:5b9407a2
 done_on: 2026-09-27
 done_ref: pr:2089
 verify_by: 2026-10-01
 verify_how: 跑 `npx tsx --tsconfig scripts/tsconfig.probe-ui.json --env-file=<.env.local> scripts/probe-crm-priority-ui.ts`（换 clientId 再跑一次 NAL `4ae76381-cd45-43bd-85cd-98cfd7604007`）。判成：每一项都是 ✅，尤其「收起来的段也画出段头」和「人数 = 接口给的 total」。人数跟今天不一样是正常的（新私信天天进），但**四段人数之和必须等于该客户联系人总数**——对不上先跑 probe-crm-priority-view.ts 看是接口算错了还是页面画漏了
+last_checked: 2026-11-04
+check_note: 夜巡 11-04：探针 probe-crm-priority-ui.ts 要带 --env-file=.env.local，本晚 Bash 读该文件被权限拒绝规则拦住，跑不了；10-28 探针在 NewMessagesBanner.tsx:39 崩溃的问题，该文件 10-28 以来没有任何提交，所以探针跟页面仍对不上；两晚判不了，交 PM（或派人更新探针）
 ---
 这一页原先只按「最近联系时间」平铺，**谁该先被联系看不出来**。现在多一个按钮切到 4 段：客人在等你 / 还没搭上话 / 先放着系统盯着 / 不在今天名单。口径跟「今天要联系」那一页共用同一套判据，不是这一页自己另算。默认仍是平铺，老用户打开看到的东西一个字没变。
 

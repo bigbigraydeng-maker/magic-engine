@@ -8,6 +8,8 @@ import {
   relFile,
   text,
   formatZodIssues,
+  musicGainSchema,
+  frameSchema,
 } from './schema.ts';
 
 /** Allowed clip kinds for the montage pool. */
@@ -83,7 +85,9 @@ const MontageBaseSchema = z
       message: '颜色必须是 #RRGGBB 十六进制',
     }),
     logoFile: relFile('logo 文件', LOGO_EXTS),
+    frame: frameSchema.optional(),
     musicFile: relFile('音乐文件', MUSIC_EXTS),
+    musicGain: musicGainSchema,
     beats: z.array(z.number().finite().min(0).max(120)).max(120),
     totalBeats: z
       .number()

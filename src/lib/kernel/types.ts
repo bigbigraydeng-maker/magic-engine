@@ -44,6 +44,11 @@ export type ActionKey =
   | 'ads.budget_move_plan'
   | 'ads.add_retargeting_adset'
   | 'ads.swap_creative'
+  /**
+   * P0 confirmation card. Approval is recorded here.
+   * The capability refuses to run, so a click never spends or publishes.
+   */
+  | 'governance.p0_confirmation'
 
 /** 一个 run 为了什么而跑。决定它需不需要挂 Goal。 */
 export type ActionPurpose =
@@ -234,6 +239,15 @@ export interface ActionDefinition<K extends ActionKey = ActionKey> {
    * outward 的动作没有它就一定被拒 —— 授权层和 Gateway 各拒一次。
    */
   readonly outwardAuthorization: OutwardAuthorization | null
+  /**
+   * 这个动作会不会让客户**多花钱**（加预算、挪预算的加的一侧、新建会花钱的东西）。
+   *
+   * `true` = 加钱类：不管客户策略表写的是不是自动，只有 PM 本人（`KernelDeps.isSpendApprover`）
+   * 签的放行才能执行（第 3 刀 3a，`docs/specs/2026-11-03-ads-knife3-spend-gate-and-budget-buttons-design.md` §2）。
+   * 🔴 广告动作必须**明写** true / false（守卫测试盯着）——不按信封事实类型推断：
+   *    减预算的事实类型也是「改预算」，推断会把刹车误收进这道闸。
+   */
+  readonly spendIncrease?: boolean
   readonly idempotency: IdempotencyRule
   readonly costModel: CostModel
   /**

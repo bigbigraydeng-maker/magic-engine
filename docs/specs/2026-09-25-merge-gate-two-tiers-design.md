@@ -1,5 +1,7 @@
 # 合并闸两档化设计稿（机器定级 · B/C 自动合 · A 级签字闸）
 
+> **2026-10-25 起，A 级签字人已改。** 现行规则在 `.github/merge-authorization.md`：A 级要 Codex Astra 与 Claude Code 两方签字；子牙 / 魏征 / 狄仁杰 只做 B 级可选抽查，不挡 B/C 合并。下面第 0 节是 2026-09-25 的原文，保留不改。
+
 - 日期：2026-09-25 · 风险级 **A**（改 `.github/workflows/`、`tools/ops-review-loop/`，即 `risk.mjs` 自己判的 control-plane）
 - 台账卡：`docs/ledger/2026-09-25-merge-gate-machine-not-human.md` · `docs/ledger/2026-09-25-merge-two-tiers-auto-vs-signed.md`
 - 审核：子牙（架构）+ 魏征（挑刺）+ 狄仁杰（攻击验证）设计前一次、实施后一次

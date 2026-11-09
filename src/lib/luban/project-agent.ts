@@ -13,9 +13,10 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { callClaudeWithTools } from '@/lib/anthropic/client'
-import { buildProjectLubanTools } from './project-tools'
+import { buildProjectLubanToolsFull } from './project-tools'
+import { loadAdsAgentInvestigationEnabled } from '@/lib/ads-strategy/agent-chat/config'
 import type {
-  ExecutionItem, ExecutionLog, DiagnosticDimension,
+  ExecutionItem, ExecutionLog,
 } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import {
@@ -88,27 +89,10 @@ async function loadProjectContext(
     }
   }
 
-  // 3. 最近一次诊断分数
-  let overallScore: number | null = null
-  let dimensionScores: Partial<Record<DiagnosticDimension, number | null>> | null = null
-  {
-    const { data: run } = await supabase
-      .from('diagnostic_runs')
-      .select('overall_score, dimension_scores')
-      .eq('client_id', clientId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle<{
-        overall_score: number | null
-        dimension_scores: Partial<Record<DiagnosticDimension, number | null>> | null
-      }>()
-    if (run) {
-      overallScore = run.overall_score
-      dimensionScores = run.dimension_scores
-    }
-  }
+  const overallScore = null
+  const dimensionScores = null
 
-  // 4. 全部执行项
+  // 全部执行项
   const { data: itemRows } = await supabase
     .from('execution_items')
     .select('*')
@@ -201,8 +185,9 @@ export async function chatWithProjectLuban(
 
   const history = (historyRows ?? []) as Array<{ role: 'user' | 'assistant'; content: string }>
 
-  const systemPrompt = buildProjectLubanSystemPrompt(ctx)
-  const { tools, handlers } = buildProjectLubanTools({ supabase, clientId })
+  const adsInvestigation = await loadAdsAgentInvestigationEnabled(supabase, clientId)
+  const systemPrompt = buildProjectLubanSystemPrompt(ctx, { adsInvestigationTools: adsInvestigation })
+  const { tools, handlers } = await buildProjectLubanToolsFull({ supabase, clientId })
   const result = await callClaudeWithTools({
     systemPrompt,
     messages: [...history, { role: 'user', content: trimmed }],

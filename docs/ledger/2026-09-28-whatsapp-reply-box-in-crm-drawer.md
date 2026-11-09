@@ -9,6 +9,8 @@ done_ref: commit:840f74cd
 source: session:5b9407a2
 verify_by: 2026-10-05
 verify_how: 号码接上当天按板桥定的演示流程当着顾问跑一遍——① 用一部私人手机给 CTS 那个号发一条消息；② 在 ME「今天该联系谁」里点开这个人，抽屉里应出现「📱 在这里直接回他的 WhatsApp」和倒计时；③ 在框里回一句、点发送、确认那部手机真收到；④ 回库核对 `select direction, sent_by_email from conversation_messages where conversation_id=<那条> order by sent_at` 能看到 outbound 一行且署名是操作人。任一步不成立 = 这张卡回退成 failed
+last_checked: 2026-10-09
+check_note: 夜巡盖章：done_ref 指向的 PR 已合并（或为文档/提交型指向），但 verify_how 要求的实证本晚未取到，不翻状态
 ---
 
 ## 一句话

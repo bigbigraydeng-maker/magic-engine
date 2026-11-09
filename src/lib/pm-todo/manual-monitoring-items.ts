@@ -8,6 +8,8 @@ import { daysSinceLatest, makeSupabaseOutageReader, readRecentOutages, streakDay
 import { shouldRemindToday, streakPhrase } from './remind-cadence'
 import { checkCronHealth } from '@/lib/cron/health'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
+import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
+import { isOverlapSkipSummary } from '@/lib/meta/leads-sync-lock'
 
 /**
  * `ad-readback-sweep` 写进运行记录的那份 summary 的形状。
@@ -98,19 +100,81 @@ const AI_ACCOUNT_GUIDE: Record<
   },
 }
 
+/**
+ * 备用 AI（Claude / DeepSeek）自己断电时的指引。
+ *
+ * 🔴 为什么必须单独写：上面那份 `AI_ACCOUNT_GUIDE` 的文案和链接全是 OpenAI 的
+ * （「打开 OpenAI 充值页」「把 OPENAI_API_KEY 换成新的」）。切换层现在会把 Claude / DeepSeek 的
+ * 账户级失败也写进台账；不单独写的话，Claude 没钱时你会收到一条「去 OpenAI 充值」的待办 ——
+ * 下发了但没法照做（CLAUDE.md 铁律 3）。
+ */
+const BACKUP_PROVIDER_GUIDE: Record<string, { name: string; billing: string; keys: string; envVar: string }> = {
+  anthropic: {
+    name: 'Claude（备用 AI）',
+    billing: 'https://console.anthropic.com/settings/billing',
+    keys: 'https://console.anthropic.com/settings/keys',
+    envVar: 'ANTHROPIC_API_KEY',
+  },
+  deepseek: {
+    name: 'DeepSeek（备用 AI）',
+    billing: 'https://platform.deepseek.com/top_up',
+    keys: 'https://platform.deepseek.com/api_keys',
+    envVar: 'DEEPSEEK_API_KEY',
+  },
+}
+
+function backupProviderGuide(provider: string, reason: string) {
+  const g = BACKUP_PROVIDER_GUIDE[provider]
+  if (!g) return null
+  const noMoney = reason === 'account_exhausted'
+  return {
+    kind: 'ai_provider_exhausted' as const,
+    what: `${g.name}的${noMoney ? '钱用完了' : '钥匙不认了'} —— 它平时不被用到，所以现在没有症状；但主力 OpenAI 一旦也断，简报就没有备用可换，会跟以前一样整片停摆`,
+    how: noMoney
+      ? `打开链接 → 充值。充完回我一句即可（这条不紧急，但别拖到 OpenAI 也断的那天）`
+      : `打开链接 → 新建一把钥匙 → **别贴在聊天里**，直接去 Render 后台把 ${g.envVar} 换成新的 → Save。换完回我一句`,
+    href: noMoney ? g.billing : g.keys,
+  }
+}
+
+/**
+ * 今天（UTC）有多少张简报卡是备用模型答的。查不出来就当 0 —— 这只是并进文案的一句补充，
+ * 绝不能因为它挂了而丢掉「该充值了」那条本身。
+ *
+ * 判据是 `model` 列以 claude / deepseek 开头。这一列刀 2 起才记真实答题的模型，
+ * 此前是凭环境变量猜的，所以只有刀 2 上线之后的卡才数得准。
+ */
+async function countDegradedCardsToday(supabase: SupabaseClient, now: Date): Promise<number> {
+  try {
+    const { count, error } = await supabase
+      .from('conversation_briefs')
+      .select('*', { count: 'exact', head: true })
+      .gte('generated_at', `${utcDate(now)}T00:00:00.000Z`)
+      .or('model.like.claude%,model.like.deepseek%')
+    return error ? 0 : (count ?? 0)
+  } catch {
+    return 0
+  }
+}
+
 export async function pushProviderOutageItems(
   supabase: SupabaseClient,
   items: ManualItem[],
   now: Date,
 ): Promise<void> {
   const query = await readRecentOutages(makeSupabaseOutageReader(supabase), now)
-  items.push(...buildProviderOutageItems(query, now))
+  items.push(...buildProviderOutageItems(query, now, await countDegradedCardsToday(supabase, now)))
 }
 
 /**
  * 从断电记录造待办 —— 纯函数，可完全单测（这是验收条件 1 的落点）。
  */
-export function buildProviderOutageItems(query: OutageQuery, now: Date): ManualItem[] {
+export function buildProviderOutageItems(
+  query: OutageQuery,
+  now: Date,
+  /** 今天由备用模型答的简报卡张数。有的话并进 OpenAI 那条「该充值了」，不另起一条（告知不是待办）。 */
+  degradedCardsToday = 0,
+): ManualItem[] {
   const items: ManualItem[] = []
   const { rows, error } = query
 
@@ -143,8 +207,10 @@ export function buildProviderOutageItems(query: OutageQuery, now: Date): ManualI
     const streak = streakDays(g.dates, today)
     const sinceLatest = daysSinceLatest(g.dates, today)
     if (!shouldRemindToday(streak, sinceLatest, now)) continue
-    const reason = key.split('::')[1] ?? ''
-    const guide = AI_ACCOUNT_GUIDE[reason]
+    const [provider = '', reason = ''] = key.split('::')
+    const guide = provider === 'openai' || !BACKUP_PROVIDER_GUIDE[provider]
+      ? AI_ACCOUNT_GUIDE[reason]
+      : backupProviderGuide(provider, reason) ?? undefined
     // 认不出来的新失败形态照样下发 —— 说不清楚也好过不说。
     // 供应商原话一起带上（截断），否则 PM 只看到一个代号，连问我第二遍都没法问。
     const raw = (g.detail ?? '').trim()
@@ -156,11 +222,16 @@ export function buildProviderOutageItems(query: OutageQuery, now: Date): ManualI
       sinceLatest !== null && sinceLatest > 0
         ? `${sinceLatest} 天前断过一次（现在看起来已经恢复）`
         : streakPhrase(streak)
+    // 只并进 OpenAI 这一条：备用模型自己的断电提示不该再说「有卡是备用答的」。
+    const degraded =
+      provider === 'openai' && degradedCardsToday > 0
+        ? `。**简报已自动改用备用 AI**：今天有 ${degradedCardsToday} 张客人卡是 Claude/DeepSeek 答的，语言和细节可能比平时粗，有报价、付款、投诉的客人请多看一眼原始对话`
+        : ''
     items.push({
       kind: guide?.kind ?? 'ai_provider_exhausted',
       client_id: 'infra',
       client_name: 'Magic Engine 后台',
-      what: `${when}：${what}`,
+      what: `${when}：${what}${degraded}`,
       how: guide?.how ?? '回我一句「查一下 AI 账户」，我去看供应商后台具体报的是什么',
       href: guide?.href ?? '',
     })
@@ -447,18 +518,18 @@ export async function pushMailchimpExportItems(
     .not('finished_at', 'is', null)
     .in('status', ['completed', 'failed'])
     .order('finished_at', { ascending: false })
-    .limit(1)
+    .limit(5)
 
   if (error) throw new Error(`cron_run_logs query failed: ${error.message}`)
 
-  const run = (data ?? [])[0] as
-    | {
-        finished_at: string | null
-        summary: {
-          results?: Array<{ clientId: string; clientName: string | null; mailchimp?: Record<string, number> }>
-        } | null
-      }
-    | undefined
+  const rows = (data ?? []) as Array<{
+    finished_at: string | null
+    summary: {
+      results?: Array<{ clientId: string; clientName: string | null; mailchimp?: Record<string, number> }>
+      skipped?: unknown
+    } | null
+  }>
+  const run = rows.find((row) => !isOverlapSkipSummary(row.summary))
   if (!run?.summary) return
 
   const hoursOld = run.finished_at ? (now.getTime() - Date.parse(run.finished_at)) / 3_600_000 : null
@@ -480,6 +551,14 @@ export async function pushMailchimpExportItems(
       href: `https://app.magicengine.com.au/dashboard/clients/${r.clientId}/settings`,
     })
   }
+}
+
+/** 报错原话摘一段进 PM 邮件：去掉路由拼的前缀和任何 uuid，不把客户 id 带进去。 */
+function redactConfigReadError(raw: string): string {
+  return raw
+    .replace(/^.*?for this client:\s*/, '')
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<id>')
+    .slice(0, 120)
 }
 
 /** google-data-pullback-daily 每天一轮；超过这个窗口的记录算旧账，不再报。 */
@@ -525,10 +604,7 @@ export async function pushAdsConfigReadItems(
 
   // 原始报错摘一段：「字段没加上」不会自己好，「一次超时」明天自己消失 —— 只有看报错才分得清
   //（子牙 / 魏征复审）。去掉路由拼的前缀和任何 uuid，不把客户 id 带进 PM 邮件。
-  const detail = (configErrors[0]?.error ?? '')
-    .replace(/^.*?for this client:\s*/, '')
-    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<id>')
-    .slice(0, 120)
+  const detail = redactConfigReadError(configErrors[0]?.error ?? '')
 
   items.push({
     kind: 'ads_config_unreadable',
@@ -537,5 +613,46 @@ export async function pushAdsConfigReadItems(
     what: `广告每日回拉读不出 ${affected.size} 个客户的广告设置 —— 这些客户今天的广告诊断、经营状态、内部日报**和坏广告自动暂停**全部跳过了（广告数据本身照常在拉，钱照常在花）${detail ? `。报错原话：${detail}` : ''}。如果是数据库字段没加上，不会自己好；如果只是一次临时读取失败，明天这条会自己消失`,
     how: '这条不用你动手 —— 是我们这边的欠账。回我一句「查一下广告配置」我就去看是字段没对齐还是临时故障，并把漏掉的诊断补跑',
     href:'https://app.magicengine.com.au/dashboard/admin/cron-health',
+  })
+}
+
+/**
+ * 坏广告自动暂停那一步自己读不出广告设置 → 同一类系统欠账。
+ *
+ * 上面那条只看每日回拉的读取；回拉读成功、几分钟后自动暂停再读却失败时，唯一的痕迹是
+ * `ads-d3-auto-pause` 写进 flywheel_actions 的 failed 回执（带 config_read_error）。
+ * 两条不会同时出现：回拉读失败时诊断整段跳过，自动暂停根本不会被触发。
+ */
+export async function pushAdsAutoPauseConfigReadItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const since = new Date(now.getTime() - ADS_CONFIG_READ_STALE_HOURS * 3_600_000).toISOString()
+  const { data, error } = await supabase
+    .from('flywheel_actions')
+    .select('client_id, payload')
+    .eq('action_type', ADS_AUTO_PAUSE_ACTION_KEY)
+    .gte('created_at', since)
+    .not('payload->>config_read_error', 'is', null)
+    .limit(200)
+
+  if (error) throw new Error(`flywheel_actions query failed: ${error.message}`)
+
+  type Row = { client_id: string; payload: { config_read_error?: unknown } | null }
+  const rows = (data ?? []) as Row[]
+  if (rows.length === 0) return
+
+  const affected = new Set(rows.map((r) => r.client_id))
+  const first = rows[0].payload?.config_read_error
+  const detail = redactConfigReadError(typeof first === 'string' ? first : '')
+
+  items.push({
+    kind: 'ads_config_unreadable',
+    client_id: 'infra',
+    client_name: 'Magic Engine 后台',
+    what: `过去 30 小时里，坏广告自动暂停有 ${affected.size} 个客户读不出广告设置 —— 这些客户那一轮「花钱没结果」的广告组没判要不要停（没停、也没提交审批，钱照常在花；其中可能有本来就没开自动暂停的客户）${detail ? `。报错原话：${detail}` : ''}。只是一次临时读取失败的话，过一天这条会自己消失`,
+    how: '这条不用你动手 —— 是我们这边的欠账。回我一句「查一下广告配置」我就去看是字段没对齐还是临时故障',
+    href: 'https://app.magicengine.com.au/dashboard/admin/cron-health',
   })
 }

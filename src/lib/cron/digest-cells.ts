@@ -19,9 +19,16 @@ import { isStuck } from './health'
 export interface DigestRunRow {
   status?: string | null
   failed_count?: number | null
+  error_message?: string | null
   /** 卡死判据要用（status='running' + 没有结束时间 + 开跑很久）。 */
   started_at?: string | null
   finished_at?: string | null
+}
+
+/** 清理任务收口的孤儿行：新状态 `abandoned`，或迁移未应用时写成 failed 且错误以 abandoned: 开头。 */
+export function isAbandonedDigestRow(run: DigestRunRow): boolean {
+  if (run.status === 'abandoned') return true
+  return (run.error_message ?? '').startsWith('abandoned:')
 }
 
 /**
@@ -34,9 +41,11 @@ export interface DigestRunRow {
  *    看的人只会当成显示 bug 划过去。
  */
 export function failureCell(run: DigestRunRow, now: Date = new Date()): string {
+  if (isAbandonedDigestRow(run)) return 'abandoned'
   const n = run.failed_count ?? 0
   if (n > 0) return `${n} failed`
   if (run.status === 'failed') return 'needs attention'
+  if (run.status === 'partial') return 'partial'
   // 刚开跑几分钟的 running 行不许标成卡死 —— 日报常常就在某个任务的执行窗口里跑
   if (isStuckRow(run, now)) return '卡住了（开跑后从没结束）'
   return '0 failed'
@@ -70,8 +79,9 @@ export function isStuckRow(run: DigestRunRow, now: Date): boolean {
  * 而这次整件事修的就是「没真跑过不算数」。
  */
 export function isDigestFailure(run: DigestRunRow, now: Date): boolean {
+  if (isAbandonedDigestRow(run)) return true
   if ((run.failed_count ?? 0) > 0) return true
-  if (run.status === 'failed') return true
+  if (run.status === 'failed' || run.status === 'partial') return true
   return isStuckRow(run, now)
 }
 

@@ -4,8 +4,10 @@
  *
  * PATCH /api/clients/[id]/prescription/[pId]
  *   Body: { status: 'approved'|'rejected', rejection_note?: string }
- *   - 'approved' → save approval (含批准人，取自会话) + synchronously generate execution_items
- *   - 'rejected'  → record rejection note
+ *   - 'approved' → only a draft with non-empty content. Anything else is 4xx
+ *     and does not write. Then save approval (含批准人，取自会话) + 把阶段挂到目标下。
+ *     不再生成看板上的待办。
+ *   - 'rejected'  → record rejection note（不走上面的草稿校验）
  *   - Already-approved prescription → 409 Conflict
  *
  * Security: Bearer token (INTERNAL_API_KEY)
@@ -14,9 +16,25 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePaidClientAccess, requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { landPrescription } from '@/lib/diagnostic/prescription-landing'
+import { emitPromotionSignal, readableError } from '@/lib/factory/promotion-signal'
 import { buildPrescriptionDecisionPatch } from '@/lib/diagnostic/prescription-patch'
+import { approveDraftContentGate } from './approve-gate'
+import { isStaleGenerating, STALE_GENERATING_MESSAGE } from '@/lib/huatuo/prescription-status'
+import { planDraftCardLine, planDraftCardView } from '@/lib/marketing-plan/promo/plan-draft-card'
+import {
+  approvePlanWithAgree,
+  draftPlanIdOf,
+  failedPlanAgree,
+  noPlanDraftOutcome,
+  planAgreeFromMeta,
+  storePlanAgreeOutcome,
+  type PlanAgreeOutcome,
+} from '@/lib/marketing-plan/promo/plan-draft-agree'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
+import { clickerFromSession } from '@/lib/confirmation-card'
+import { createKernel } from '@/lib/kernel'
 import type { Prescription, PrescriptionStatus } from '@/types/diagnostic'
 
 // 关键：禁用 Next.js 路由缓存，否则华佗异步 polling 拿不到刚写入的 content。
@@ -51,7 +69,21 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Prescription not found' }, { status: 404 })
     }
 
-    return NextResponse.json({ success: true, prescription: data }, {
+    const prescription = await failIfStaleGenerating(clientId, pId, data)
+
+    return NextResponse.json({
+      success: true,
+      prescription,
+      plan_draft_line: planDraftCardLine(
+        (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
+      ),
+      plan_draft: planDraftCardView(
+        (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
+      ),
+      plan_approval: planAgreeFromMeta(
+        (prescription as Prescription & { generation_meta?: unknown }).generation_meta,
+      ),
+    }, {
       headers: {
         // 双重保险：浏览器也不要缓存
         'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -60,6 +92,86 @@ export async function GET(
   } catch (err: unknown) {
     console.error('[prescription GET] Error:', err)
     return NextResponse.json({ success: false, error: 'An unexpected error occurred' }, { status: 500 })
+  }
+}
+
+async function failIfStaleGenerating(
+  clientId: string,
+  prescriptionId: string,
+  row: Prescription,
+): Promise<Prescription> {
+  if (!isStaleGenerating(row.status, row.generated_at, Date.now())) return row
+  const { error } = await supabaseAdmin
+    .from('prescriptions')
+    .update({
+      status: 'failed',
+      error_message: STALE_GENERATING_MESSAGE,
+      progress_note: null,
+    })
+    .eq('id', prescriptionId)
+    .eq('client_id', clientId)
+    .eq('status', 'generating')
+  if (error) {
+    console.error('[prescription GET] stale heal failed', error)
+    return row
+  }
+  return {
+    ...row,
+    status: 'failed',
+    error_message: STALE_GENERATING_MESSAGE,
+    progress_note: null,
+  }
+}
+
+async function promotionSignalAfterApproval(
+  clientId: string,
+  prescriptionId: string,
+  goalId: string | null,
+  content: unknown,
+) {
+  try {
+    return await emitPromotionSignal({ clientId, prescriptionId, goalId, content })
+  } catch (error) {
+    return { ok: false, reason: readableError(error) }
+  }
+}
+
+/**
+ * The plan draft rides along with "agree" only when every hard check is green.
+ * Any failure stays in the returned outcome and never fails the prescription agree.
+ */
+async function planAgreeAfterApproval(
+  req: NextRequest,
+  clientId: string,
+  prescriptionId: string,
+  access: Extract<Awaited<ReturnType<typeof requirePlanApproverAccess>>, { ok: true }>,
+  landedRow: Prescription,
+): Promise<PlanAgreeOutcome> {
+  const meta = (landedRow as Prescription & { generation_meta?: unknown }).generation_meta
+  const planId = draftPlanIdOf(meta)
+  if (!planId) return noPlanDraftOutcome()
+  try {
+    // An agent bearer key or an agent-marked request is never the approver.
+    const agentDenied = await rejectAgentAdsBearer(req, { clientId, action: 'approve', resourceId: planId })
+    const clicker = clickerFromSession({
+      email: access.user.email ?? '',
+      role: access.role,
+      allowedClientId: access.allowedClientId,
+      clientId,
+      agentMarked: agentDenied !== null || req.headers.get('x-me-actor') === 'agent',
+    })
+    const outcome = await approvePlanWithAgree({
+      clientId,
+      generationMeta: meta,
+      approvedBy: access.user.email ?? '',
+      clicker,
+      deps: createKernel(supabaseAdmin),
+    })
+    await storePlanAgreeOutcome(supabaseAdmin, clientId, prescriptionId, outcome)
+    return outcome
+  } catch (err: unknown) {
+    console.warn('[prescription PATCH] plan approval step failed', err instanceof Error ? err.name : 'error')
+    return failedPlanAgree(planId)
   }
 }
 
@@ -77,7 +189,8 @@ export async function PATCH(
   { params }: { params: { id: string; pId: string } },
 ): Promise<NextResponse> {
   const { id: clientId } = params
-  const access = await requirePaidClientAccess(clientId)
+  // Agree is OPC only. This check rejects a single-client FDE; drafting uses requireOperatorAccess.
+  const access = await requirePlanApproverAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
@@ -114,14 +227,23 @@ export async function PATCH(
     }
 
     // ── 批准 = 落地 ──
-    // 派生 Initiative → 生成执行项 → 归档旧版 → 标 approved，整套在
-    // lib/diagnostic/prescription-landing.ts 里，跟处方周更共用同一段代码。
-    // （顺序很重要：若执行项生成失败，status 保持 draft，
-    //   不会卡在"已批准但看板上没动作"这种从界面完全看不出来的状态。）
+    // 派生 Initiative（目标下的阶段）→ 归档旧版 → 标 approved。
+    // 不再生成看板上的待办；看板生成失败也不会让这次批准失败。
+    // 整套在 lib/diagnostic/prescription-landing.ts，处方周更共用同一段代码。
     if (body.status === 'approved') {
+      // 退回、失败、空内容、以及其他非草稿：拒绝且不落地、不写库。
+      const gate = approveDraftContentGate(current.status, current.content)
+      if (!gate.ok) {
+        return NextResponse.json(
+          { success: false, error: gate.error },
+          { status: gate.httpStatus },
+        )
+      }
       try {
         // 批准人取自登录会话，不认前端传的值（前端说自己是谁不算数）
-        const landed = await landPrescription(supabaseAdmin, current, access.user.email)
+        const landed = await landPrescription(supabaseAdmin, current, access.user.email, {
+          requireStatus: 'draft',
+        })
         console.info('[prescription PATCH] landed:', {
           prescriptionId: pId,
           goalId: current.goal_id,
@@ -130,6 +252,13 @@ export async function PATCH(
         })
         for (const note of landed.notes) console.info('  ', note)
       } catch (landErr: unknown) {
+        // 闸门之后、标已批准之前，处方被别人改了状态（如刚被退回）：不同意，409
+        if ((landErr as { code?: string } | null)?.code === 'prescription_status_changed') {
+          return NextResponse.json(
+            { success: false, error: (landErr as Error).message },
+            { status: 409 },
+          )
+        }
         const msg = landErr instanceof Error ? landErr.message : String(landErr)
         console.error('[prescription PATCH] landPrescription failed:', msg, landErr)
         return NextResponse.json(
@@ -149,7 +278,14 @@ export async function PATCH(
         console.error('[prescription PATCH] read-back after landing failed:', readErr)
         return NextResponse.json({ success: false, error: 'Failed to update prescription' }, { status: 500 })
       }
-      return NextResponse.json({ success: true, prescription: landedRow })
+      const promotionSignal = await promotionSignalAfterApproval(clientId, pId, current.goal_id, current.content)
+      const planApproval = await planAgreeAfterApproval(req, clientId, pId, access, landedRow)
+      return NextResponse.json({
+        success: true,
+        prescription: landedRow,
+        promotion_signal: promotionSignal,
+        plan_approval: planApproval,
+      })
     }
 
     // Build update payload（走到这儿只剩 rejected）

@@ -20,6 +20,7 @@ import type {
 } from '@/lib/kernel/types'
 import { KernelError, RetryableCapabilityError } from '@/lib/kernel/errors'
 import { getAdSetStatus, setAdSetDailyBudget } from '@/lib/meta/adsets'
+import { budgetCardWriteBlock } from '@/lib/ads-budget-card/write-gate'
 import { makeReadbackVerification, makeSnapshotPreStep, requireMetaToken } from './common'
 
 function adsetId(step: CapabilityStepContext): string {
@@ -96,6 +97,8 @@ export function createCutUnitBudgetCapability(sb: SupabaseClient): CapabilityImp
         if (newCents > beforeCents) {
           throw new KernelError('INVALID_INPUT', '当前预算已低于计划金额，这次减预算会反向加钱，已停止执行')
         }
+        const cardBlock = await budgetCardWriteBlock(sb, step.ctx.clientId, step.runInput, beforeCents, newCents)
+        if (cardBlock) throw new KernelError('INVALID_INPUT', cardBlock)
 
         const ok = await setAdSetDailyBudget(id, token, newCents)
         if (!ok) {
@@ -123,7 +126,7 @@ export function createCutUnitBudgetCapability(sb: SupabaseClient): CapabilityImp
         const currentCents = current.daily_budget ? parseInt(current.daily_budget, 10) : null
         const verification = makeReadbackVerification({ daily_budget: newCents }, { daily_budget: currentCents })
         return {
-          output: { adset_id: id, daily_budget_now: currentCents },
+          output: { applied: true, adset_id: id, daily_budget_now: currentCents },
           verification,
         }
       },

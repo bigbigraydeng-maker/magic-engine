@@ -7,11 +7,8 @@
  *    批准和驳回都必填：对不上 = 人看的是旧的一版，Kernel 在**任何写入之前**拒掉
  *    （409 STALE_DECISION），页面重拉列表让人重看。不传就不往 Kernel 走。
  *
- * 🔴 批准 = 签批准 + 立刻执行（一次调用），不是「先签、再另外去点执行」——
- *    PM 2026-09-22 明确要的是这个。走
- *    `src/lib/action-submission/ads-auto-pause.ts` 的
- *    `approveAndExecuteAdsAutoPause`，那个模块是这一个动作专属的一键批准
- *    入口，不是通用审批面（`kernel-approval/` 那条路只签批准、不执行）。
+ * 🔴 批准先出一张暂停确认卡。确认卡没过期、被人点了确认之后，才走
+ *    `approveAndExecuteAdsAutoPause`。这一步之前不暂停。
  *
  * 🔴 操作者身份**只来自服务端认证会话**（`access.user.email`），
  *    请求体不接受、也不信任何身份字段。
@@ -19,10 +16,13 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requirePlanApproverAccess } from '@/lib/auth/client-access'
 import { createKernel } from '@/lib/kernel'
 import { KernelError } from '@/lib/kernel/errors'
 import { approveAndExecuteAdsAutoPause, rejectAdsAutoPause, ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause'
+import { clickerFromAccess, issueMoneyPause, type MoneyHold, type MoneyWriteResult } from '@/lib/action-submission/money-card'
+import { readPauseLive } from '@/lib/ads-pause-card/live'
+import type { PauseAdSetOrder } from '@/lib/ads-pause-card/order'
 import { assertActorMayApproveAction, parseExpectedDecisionId } from '@/lib/kernel-approval/service'
 import { ApprovalError } from '@/lib/kernel-approval/errors'
 import type { AccessTier } from '@/lib/auth/access-types'
@@ -117,16 +117,20 @@ async function decide(kernel: Kernel, params: RouteParams['params'], body: Decis
       await updateLedgerStatus(params.id, params.runId, 'rejected', { reason: outcome.humanReason })
       return NextResponse.json({ ok: true, kind: outcome.kind })
     }
-    const outcome = await approveAndExecuteAdsAutoPause(kernel, params.runId, actorEmail, body.expectedDecisionId)
-    // 🔴 只有确定的结果才记账：idempotent_hit 跟 succeeded 一样是**已经做完**
-    //    （outcomeForSettledRun 只在 run.status === 'succeeded' 时才答 idempotent_hit，
-    //    见 src/lib/kernel/runner.ts），必须同样记 paused、同样报成功，
-    //    否则账表会永远停在 awaiting_approval、页面一直说「正在暂停」。
-    //    真正未定的只有 in_progress（另一个执行者还没跑完）——结果未定就不动账，
-    //    由真正执行的那一方记，这里记「失败」会是假账（广告马上就会停）。
-    const status = outcome.kind === 'succeeded' || outcome.kind === 'idempotent_hit' ? 'paused' : outcome.kind === 'dead_letter' || outcome.kind === 'denied' ? 'failed' : null
-    if (status) await updateLedgerStatus(params.id, params.runId, status, { reason: outcome.humanReason })
-    return NextResponse.json({ ok: outcome.kind === 'succeeded' || outcome.kind === 'idempotent_hit', kind: outcome.kind, humanReason: outcome.humanReason })
+    const owned = await loadOwnedRun(kernel, params)
+    if (owned instanceof NextResponse) return owned
+    const issued = await issueAutoPauseCard(kernel, params, owned, body.expectedDecisionId)
+    if (!issued.card) {
+      return NextResponse.json({ error: issued.reason ?? '没有出暂停卡，没有暂停。', wroteMeta: false }, { status: 409 })
+    }
+    return NextResponse.json({
+      ok: false,
+      status: 'awaiting_confirmation',
+      wroteMeta: false,
+      kind: 'awaiting_confirmation',
+      card: issued.card,
+      humanReason: '确认卡已出，还没暂停。',
+    }, { status: 202 })
   } catch (e) {
     if (e instanceof KernelError) {
       return NextResponse.json({ error: e.humanReason, code: e.code }, { status: 409 })
@@ -138,7 +142,8 @@ async function decide(kernel: Kernel, params: RouteParams['params'], body: Decis
 }
 
 export async function POST(req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
-  const access = await requirePaidClientAccess(params.id)
+  // 批准和驳回都只给内部账号：客户自己的员工不该替自己的预算做决定。
+  const access = await requirePlanApproverAccess(params.id)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
   const body = parseBody(await req.json().catch(() => null))
@@ -158,4 +163,78 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
     if (denied) return denied
   }
   return decide(kernel, params, body, actorEmail)
+}
+
+async function issueAutoPauseCard(
+  kernel: Kernel,
+  params: RouteParams['params'],
+  run: OwnedRun,
+  expectedDecisionId: string,
+) {
+  const adsetId = text(run.input.adset_id)
+  const adAccountId = text(run.input.ad_account_id)
+  const campaignId = adsetId && adAccountId ? await campaignOf(params.id, adsetId, adAccountId) : null
+  if (!adsetId || !adAccountId || !campaignId) {
+    return { card: null, reason: '读不到这个组所属的系列，没有出卡，也没有暂停。' }
+  }
+  const access = await requirePlanApproverAccess(params.id)
+  if (!access.ok) return { card: null, reason: access.error }
+  return issueMoneyPause({
+    kernel,
+    sb: supabaseAdmin,
+    clientId: params.id,
+    clicker: clickerFromAccess(access, params.id),
+    entityId: adsetId,
+    adAccountId,
+    campaignId,
+    name: null,
+    kernelRunId: run.id,
+    kernelDecisionId: expectedDecisionId,
+    readLive: () => readPauseLive(params.id, pauseOrder(adsetId, adAccountId, campaignId)),
+  })
+}
+
+function pauseOrder(adsetId: string, adAccountId: string, campaignId: string): PauseAdSetOrder {
+  return {
+    prescriptionId: adsetId,
+    version: 1,
+    adAccountId,
+    campaignId,
+    adsetId,
+    metric: 'ads.account.spend',
+    direction: 'pause',
+    observationDays: 7,
+    basis: '确认之后才暂停',
+  }
+}
+
+async function campaignOf(clientId: string, adsetId: string, adAccountId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin.from('ad_entity_snapshots')
+    .select('campaign_id')
+    .eq('client_id', clientId)
+    .eq('level', 'adset')
+    .eq('entity_id', adsetId)
+    .eq('ad_account_id', adAccountId)
+    .order('captured_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (error) return null
+  const id = (data as { campaign_id?: unknown } | null)?.campaign_id
+  return typeof id === 'string' && id.length > 0 ? id : null
+}
+
+function text(value: unknown): string {
+  return typeof value === 'string' ? value : ''
+}
+
+/** Called only after the pause confirmation card is already confirmed. */
+export async function executeAutoPauseHold(clientId: string, email: string, hold: MoneyHold): Promise<MoneyWriteResult> {
+  if (!email || !hold.kernelRunId || !hold.kernelDecisionId) {
+    return { wroteMeta: false, readbackCents: null, reason: '暂停建议对不上，没有暂停。' }
+  }
+  const outcome = await approveAndExecuteAdsAutoPause(createKernel(supabaseAdmin), hold.kernelRunId, email, hold.kernelDecisionId)
+  const wrote = outcome.kind === 'succeeded' || outcome.kind === 'idempotent_hit'
+  const status = wrote ? 'paused' : outcome.kind === 'dead_letter' || outcome.kind === 'denied' ? 'failed' : null
+  if (status) await updateLedgerStatus(clientId, hold.kernelRunId, status, { reason: outcome.humanReason })
+  return { wroteMeta: wrote, readbackCents: null, reason: outcome.humanReason ?? (wrote ? '已暂停。' : '没有暂停。') }
 }

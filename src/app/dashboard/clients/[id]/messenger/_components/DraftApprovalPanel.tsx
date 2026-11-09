@@ -19,7 +19,7 @@ import React, { useState } from 'react'
 import type { PendingDraft, ThreadMessage } from '../types'
 import { formatMoment } from './bits'
 
-const GATE_LABELS: Record<string, string> = {
+export const GATE_LABELS: Record<string, string> = {
   brand_redline: '品牌红线用词',
   retired_tour_mention: '下架团提及',
   number_claim: '价格/日期核实',
@@ -27,10 +27,17 @@ const GATE_LABELS: Record<string, string> = {
   provenance: '产品名称对编码',
   length: '长度限制',
   url_allowlist: '链接白名单',
+  content_claims: '承诺/未核实说法',
   // 2026-09-20 新增：Jev 语义补充判断，评上了才会出现在 passedGateIds 里
   // （见 cts.ts `checked_gate_ids`），不是「过了」而是「AI 真的核对过这一项」。
   brand_redline_semantic: 'AI 语义核对·品牌红线换措辞',
   number_claim_semantic: 'AI 语义核对·数字文字拼写',
+}
+
+/** 被拦原因（库里是 `gate_id: English detail`）→ 中文闸门名；认不出的统一说"安全检查未通过"，不露英文。 */
+export function blockedReasonLabel(reason: string): string {
+  const id = reason.split(':')[0]?.trim() ?? ''
+  return GATE_LABELS[id] ?? '安全检查未通过'
 }
 
 /**
