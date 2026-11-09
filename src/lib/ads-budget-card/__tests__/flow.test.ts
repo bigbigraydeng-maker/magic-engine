@@ -128,6 +128,20 @@ function submitArgs(
 }
 
 describe('budget step card', () => {
+  it('does not write Meta when an intraday card is no longer fresh or over cap', async () => {
+    const h = harness(live())
+    const f = fixture()
+    const issued = await issueBudgetCard({
+      kernel: f.kernel, clientId: CLIENT_A, clicker: OPC, order, runtime: h.runtime, locks: locks(),
+    })
+    const payload = f.tables.flywheel_actions[0]?.payload as { subjectKey?: string } | undefined
+    if (payload) payload.subjectKey = 'intraday-cap:2026-11-09'
+    const done = await submitBudgetCard(submitArgs(f, h, issued))
+    expect(done.wroteMeta).toBe(false)
+    expect(done.status).toBe('blocked')
+    expect(h.calls).toEqual([])
+  })
+
   it('does not change the budget until a person confirms, then records the readback', async () => {
     const h = harness(live())
     const f = fixture()
