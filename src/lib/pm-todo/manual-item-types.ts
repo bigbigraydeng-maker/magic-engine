@@ -44,8 +44,10 @@ import type { AdsCircuitItemKind } from './ads-circuit-items'
 import type { AdsServicePauseItemKind } from './ads-service-pause-items'
 import type { AdsAccountStatusItemKind } from './ads-account-status-items'
 import type {
+  AdsAgentDailyPullGapItemKind,
   AdsAgentSyncStaleItemKind,
   AdsDailySpendOverCapNoticeItemKind,
+  AdsHeartbeatStallItemKind,
   AdsPlanDailyCapMissingItemKind,
 } from './ads-agent-stale-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
@@ -329,7 +331,9 @@ export type ManualItemKind =
   /** Meta 广告账户状态不是正常超过 24 小时 / 状态读不到 / 账户已关闭（每周提醒一次） */
   | AdsAccountStatusItemKind
   | AdsAgentSyncStaleItemKind
+  | AdsAgentDailyPullGapItemKind
   | AdsDailySpendOverCapNoticeItemKind
+  | AdsHeartbeatStallItemKind
   | AdsPlanDailyCapMissingItemKind
   /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */
   | GoalRolloverItemKind

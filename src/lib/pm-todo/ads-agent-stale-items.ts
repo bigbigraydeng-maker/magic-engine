@@ -25,10 +25,29 @@ import {
   spendCapNoticeWhat,
 } from '@/lib/ads-strategy/monitoring/spend-cap-notice'
 import { listActiveCircuitTrips } from '@/lib/ads-strategy/circuit-state'
+import {
+  AD_HEARTBEAT_JOB_NAME,
+  evaluateHeartbeatStall,
+  heartbeatStallShouldAlert,
+  heartbeatStallSummary,
+  readHeartbeatEnvConfig,
+  type HeartbeatCronRun,
+} from '@/lib/ads-strategy/monitoring/heartbeat-stall'
+import {
+  collectDailyPullbackGaps,
+  formatDailyPullbackGapWhat,
+  type PullbackErrorRow,
+} from '@/lib/ads-strategy/monitoring/daily-pullback-gaps'
 
 export type AdsAgentSyncStaleItemKind = 'ads_agent_sync_stale'
 export type AdsDailySpendOverCapNoticeItemKind = 'ads_daily_spend_over_cap_notice'
+export type AdsHeartbeatStallItemKind = 'ads_heartbeat_stall'
+export type AdsAgentDailyPullGapItemKind = 'ads_agent_daily_pull_gap'
 export type AdsPlanDailyCapMissingItemKind = 'ads_plan_daily_cap_missing'
+
+const DAILY_PULLBACK_JOB = 'google-data-pullback-daily'
+const DAILY_PULLBACK_STALE_HOURS = 30
+const HEARTBEAT_LOOKBACK_HOURS = 72
 
 const META_LEADS_LOOKBACK_MS = 48 * 3_600_000
 const PRESCRIPTION_LOOKBACK_DAYS = 10
@@ -266,6 +285,99 @@ export async function pushAdsDailySpendOverCapNoticeItems(
   }
 }
 
+async function loadHeartbeatRuns(
+  supabase: SupabaseClient,
+  since: string,
+): Promise<HeartbeatCronRun[]> {
+  const { data, error } = await supabase
+    .from('cron_run_logs')
+    .select('status, finished_at, started_at')
+    .eq('job_name', AD_HEARTBEAT_JOB_NAME)
+    .gte('started_at', since)
+    .not('finished_at', 'is', null)
+    .order('started_at', { ascending: false })
+    .limit(80)
+  if (error) throw new Error(`ad-heartbeat 运行记录读取失败：${error.message}`)
+  return (data ?? []) as HeartbeatCronRun[]
+}
+
+export async function pushAdsHeartbeatStallItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+): Promise<void> {
+  const cfg = readHeartbeatEnvConfig(process.env.AD_HEARTBEAT_MODE, process.env.AD_HEARTBEAT_CLIENT_IDS)
+  const since = new Date(now.getTime() - HEARTBEAT_LOOKBACK_HOURS * 3_600_000).toISOString()
+  const runs = await loadHeartbeatRuns(supabase, since)
+  const verdict = evaluateHeartbeatStall(cfg, runs, now)
+  if (!verdict || !heartbeatStallShouldAlert(verdict)) return
+  if (items.some((i) => i.kind === 'ads_heartbeat_stall')) return
+  items.push({
+    kind: 'ads_heartbeat_stall',
+    client_id: 'infra',
+    client_name: 'Magic Engine 后台',
+    what: heartbeatStallSummary(verdict),
+    how: '这条不用你动手 —— 是开发排查广告小时心跳（Inngest）。回我一句「查一下广告心跳」我就看 Inngest / 运行记录和 env 开关（AD_HEARTBEAT_*）',
+    href: `${APP_BASE}/dashboard/admin/cron-health`,
+  })
+}
+
+async function loadRecentDailyPullbackRuns(
+  supabase: SupabaseClient,
+  limit: number,
+): Promise<Array<{ finished_at: string | null; summary: { errors?: PullbackErrorRow[] } | null }>> {
+  const { data, error } = await supabase
+    .from('cron_run_logs')
+    .select('finished_at, summary')
+    .eq('job_name', DAILY_PULLBACK_JOB)
+    .not('finished_at', 'is', null)
+    .in('status', ['completed', 'failed'])
+    .order('finished_at', { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(`google-data-pullback-daily 运行记录读取失败：${error.message}`)
+  return (data ?? []) as Array<{ finished_at: string | null; summary: { errors?: PullbackErrorRow[] } | null }>
+}
+
+export async function pushAdsDailyPullbackGapItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  now: Date,
+  nameOf: (id: string) => string,
+): Promise<void> {
+  const runs = await loadRecentDailyPullbackRuns(supabase, 3)
+  const run = runs.find((r) => Array.isArray(r.summary?.errors) && r.summary!.errors!.length > 0)
+  if (!run?.summary?.errors || !run.finished_at) return
+
+  const hoursOld = (now.getTime() - Date.parse(run.finished_at)) / 3_600_000
+  if (hoursOld > DAILY_PULLBACK_STALE_HOURS) return
+
+  const gaps = collectDailyPullbackGaps(run.summary.errors)
+  if (gaps.length === 0) return
+
+  const existingGapClients = new Set(
+    items.filter((i) => i.kind === 'ads_agent_daily_pull_gap').map((i) => i.client_id),
+  )
+  const existingStaleClients = new Set(
+    items.filter((i) => i.kind === 'ads_agent_sync_stale').map((i) => i.client_id),
+  )
+
+  for (const gap of gaps) {
+    if (gap.clientId === '?') continue
+    if (existingGapClients.has(gap.clientId)) continue
+    if (existingStaleClients.has(gap.clientId)) continue
+    const name = nameOf(gap.clientId)
+    items.push({
+      kind: 'ads_agent_daily_pull_gap',
+      client_id: gap.clientId,
+      client_name: name,
+      what: formatDailyPullbackGapWhat(name, gap),
+      how: '这条不用客户操作。打开广告健康页看最近数据日期；若是临时故障，明天这条会自己消失。',
+      href: adsHealthHref(gap.clientId),
+    })
+    existingGapClients.add(gap.clientId)
+  }
+}
+
 export async function pushAdsAgentMonitorItems(
   supabase: SupabaseClient,
   items: ManualItem[],
@@ -273,5 +385,7 @@ export async function pushAdsAgentMonitorItems(
   nameOf: (id: string) => string,
 ): Promise<void> {
   await pushAdsAgentStaleItems(supabase, items, now, nameOf)
+  await pushAdsDailyPullbackGapItems(supabase, items, now, nameOf)
+  await pushAdsHeartbeatStallItems(supabase, items, now)
   await pushAdsDailySpendOverCapNoticeItems(supabase, items, nameOf)
 }
