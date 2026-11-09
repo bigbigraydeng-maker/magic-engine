@@ -31,6 +31,7 @@ describe('GET ad-intraday-spend-sample', () => {
     expect(body.rows).toBe(2)
     expect(body.purged).toBe(1)
     expect(body.failed).toBe(0)
+    expect(body.overCapClients).toHaveLength(1)
     expect(fetchSpy.mock.calls.length).toBe(before)
   })
 })

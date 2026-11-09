@@ -16,6 +16,7 @@ import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { readHeartbeatAccount } from '@/lib/ads-strategy/heartbeat/read'
 import { createSupabaseStore } from '@/lib/ads-strategy/heartbeat/store'
 import { getLiveToday, type LiveDeps } from '@/lib/ads-strategy/heartbeat/live-view'
+import { readClientPacing } from '@/lib/ads-strategy/intraday-spend/db'
 
 export const dynamic = 'force-dynamic'
 
@@ -70,7 +71,13 @@ export async function GET(
 
   try {
     const view = await getLiveToday(clientId, productionDeps())
-    return NextResponse.json({ success: true, view })
+    let pacing = null
+    try {
+      pacing = await readClientPacing(supabaseAdmin, clientId, new Date())
+    } catch {
+      pacing = null
+    }
+    return NextResponse.json({ success: true, view, pacing })
   } catch (e) {
     console.warn('[api/ad-health/live] 读取失败', { clientId, error: e instanceof Error ? e.message : String(e) })
     return NextResponse.json({ error: '读不到今日实时数据，稍后再试；持续读不出来找开发' }, { status: 500 })

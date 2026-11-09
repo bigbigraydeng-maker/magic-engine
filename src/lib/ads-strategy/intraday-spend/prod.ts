@@ -2,7 +2,8 @@ import { findSharedAdAccounts, getActiveClientsWithMetaAccounts } from '@/lib/me
 import { fetchHeartbeatAdsets, fetchHeartbeatTodayInsights, type GraphReadError } from '@/lib/meta/entity-settings'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { supabaseAdmin } from '@/lib/supabase'
-import { purgeSamplesBefore, upsertSamples } from './db'
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
+import { loadRecentSamples, purgeSamplesBefore, upsertSamples } from './db'
 import type { SampleDeps } from './run'
 import { isGraphRateLimited } from './sample'
 
@@ -17,6 +18,11 @@ export function productionDeps(): SampleDeps {
     readAccount,
     upsert: (rows) => upsertSamples(supabaseAdmin, rows),
     purge: (before) => purgeSamplesBefore(supabaseAdmin, before),
+    loadSamples: async (clientId, since) => (await loadRecentSamples(supabaseAdmin, clientId, since)) ?? [],
+    capMinor: async (clientId) => {
+      const cap = await readClientDailyTotalCap(supabaseAdmin, clientId)
+      return cap.state === 'set' ? cap.cents : null
+    },
   }
 }
 async function listAccounts(clientId: string): Promise<{ adAccountId: string; hidden: boolean }[]> {

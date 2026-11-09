@@ -14,7 +14,7 @@ interface Payload {
   receipts: ReceiptRow[]
 }
 
-const REASON_LABELS: Record<string, string> = {
+export const REASON_LABELS: Record<string, string> = {
   frequency_cap: '最近收到的邮件已达上限',
   frequency_unverifiable: '数不清他收了几封',
   content_blocked: '文字踩了红线',
