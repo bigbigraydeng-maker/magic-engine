@@ -1,14 +1,14 @@
 /**
  * 仅素材工单三关通过后的上传口。
- * 这里没有确认卡，所以不把成片传到广告账户。
+ * 没有确认卡时这里不上传。上传只发生在视频上传确认卡点过之后。
  * 工单上已经记下的同账户回执可以复用，那一次不再上传。
  * 不写素材池。关掉上传的开关仍然直接跳过。
  */
 
+import { canonicalAccountDigits, toActAccountId } from '@/lib/meta/ad-account-binding'
+
 export const ASSET_UPLOAD_REFUSED =
   '成片验收不能直接传到广告账户。这里没有确认卡，没有上传。'
-
-import { canonicalAccountDigits, toActAccountId } from '@/lib/meta/ad-account-binding'
 
 export const CREATIVE_POOL_UPLOAD_ENV = 'ME_CREATIVE_POOL_META_UPLOAD'
 export const ACCOUNT_UPLOAD_SOURCE = 'account_upload'
@@ -49,6 +49,12 @@ export type AdmitOutcome =
   | { ok: true; action: 'not_material' }
   | { ok: true; action: 'upload_disabled' }
   | { ok: true; action: 'uploaded'; videoId: string; accountId: string }
+  | { ok: false; status: number; error: string }
+
+export type UploadPlan =
+  | { ok: true; kind: 'skip'; action: 'not_material' | 'upload_disabled' }
+  | { ok: true; kind: 'reuse'; videoId: string; accountId: string }
+  | { ok: true; kind: 'needs_card'; accountId: string; fileUrl: string }
   | { ok: false; status: number; error: string }
 
 export function pickPrimaryAdAccount(
@@ -122,21 +128,24 @@ async function resolveTarget(deps: AdmitDeps): Promise<
   return { ok: true, accountId: picked.adAccountId, registeredIds: loaded.registeredIds }
 }
 
-function obtainVideoId(
-  order: AdmitWorkOrder,
-  accountId: string,
-): { ok: true; videoId: string } | (AdmitOutcome & { ok: false }) {
-  const reused = reusableVideoId(order.reviewRef, accountId)
-  if (reused) return { ok: true, videoId: reused }
-  return { ok: false, status: 409, error: ASSET_UPLOAD_REFUSED }
+const BAD_FILE = '成片地址不对，没有出上传确认卡，也没有上传。'
+
+export async function readyToUpload(order: AdmitWorkOrder, deps: AdmitDeps): Promise<UploadPlan> {
+  if (!order.assetOnly || order.status !== 'in_review') return { ok: true, kind: 'skip', action: 'not_material' }
+  if (!deps.uploadEnabled) return { ok: true, kind: 'skip', action: 'upload_disabled' }
+  const target = await resolveTarget(deps)
+  if (!target.ok) return target
+  const reused = reusableVideoId(order.reviewRef, target.accountId)
+  if (reused) return { ok: true, kind: 'reuse', videoId: reused, accountId: target.accountId }
+  const fileUrl = factoryPublicVideoUrl(order.videoPath, deps.publicBase)
+  if (!fileUrl) return { ok: false, status: 422, error: BAD_FILE }
+  return { ok: true, kind: 'needs_card', accountId: target.accountId, fileUrl }
 }
 
 export async function admitFinishedAsset(order: AdmitWorkOrder, deps: AdmitDeps): Promise<AdmitOutcome> {
-  if (!order.assetOnly || order.status !== 'in_review') return { ok: true, action: 'not_material' }
-  if (!deps.uploadEnabled) return { ok: true, action: 'upload_disabled' }
-  const target = await resolveTarget(deps)
-  if (!target.ok) return target
-  const video = obtainVideoId(order, target.accountId)
-  if (!video.ok) return video
-  return { ok: true, action: 'uploaded', videoId: video.videoId, accountId: target.accountId }
+  const plan = await readyToUpload(order, deps)
+  if (!plan.ok) return plan
+  if (plan.kind === 'skip') return { ok: true, action: plan.action }
+  if (plan.kind === 'reuse') return { ok: true, action: 'uploaded', videoId: plan.videoId, accountId: plan.accountId }
+  return { ok: false, status: 409, error: ASSET_UPLOAD_REFUSED }
 }

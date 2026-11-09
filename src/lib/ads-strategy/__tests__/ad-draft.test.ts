@@ -337,8 +337,8 @@ describe('isApprovableKind — ME 的「开」按钮只认白名单', () => {
     }
   })
 
-  it('isKnownDraftKind 认三种、不认原型链上的名字', () => {
-    expect(['lead_form', 'video_thruplay', 'messenger_conversation'].every(isKnownDraftKind)).toBe(true)
+  it('isKnownDraftKind 认四种、不认原型链上的名字', () => {
+    expect(['lead_form', 'video_thruplay', 'messenger_conversation', 'reels_lead'].every(isKnownDraftKind)).toBe(true)
     expect(isKnownDraftKind('hasOwnProperty')).toBe(false)
   })
 })
