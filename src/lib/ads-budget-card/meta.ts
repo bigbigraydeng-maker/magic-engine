@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { CLIENT_BUDGET_FACT_FRESH_MS } from '@/lib/capabilities/ads/envelope-facts'
 import { readBudgetFacts } from '@/lib/ads-tracking-preflight/budget-reader'
 import type { BudgetFacts } from '@/lib/ads-tracking-preflight/types'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
@@ -97,7 +98,7 @@ async function loadCaps(
   clientId: string,
   accountId: string,
   token: string,
-): Promise<BudgetFacts> {
+): Promise<BudgetFacts & { account_currency?: string | null }> {
   const result = await readBudgetFacts({
     supabase: sb,
     clientId,
@@ -106,5 +107,37 @@ async function loadCaps(
     fetcher: fetch,
     now: new Date(),
   })
-  return result.facts
+  const others = result.facts.other_accounts
+  if (!others || others.length === 0) return result.facts
+  return { ...result.facts, account_currency: await readAccountCurrency(sb, clientId, accountId) }
+}
+
+export async function readAccountCurrency(
+  sb: SupabaseClient,
+  clientId: string,
+  accountId: string,
+): Promise<string | null> {
+  const digits = accountId.replace(/^act_/i, '')
+  const ids = Array.from(new Set([accountId, digits, `act_${digits}`]))
+  const { data, error } = await sb.from('ad_entity_snapshots')
+    .select('currency, captured_at')
+    .eq('client_id', clientId)
+    .eq('level', 'account')
+    .in('ad_account_id', ids)
+    .order('captured_at', { ascending: false })
+    .limit(1)
+  if (error || !Array.isArray(data) || data.length === 0) return null
+  const row = data[0] as { currency?: unknown; captured_at?: unknown }
+  if (!freshCapture(row.captured_at)) return null
+  const currency = row.currency
+  if (typeof currency !== 'string' || !/^[A-Za-z]{3}$/.test(currency.trim())) return null
+  return currency.trim().toUpperCase()
+}
+
+function freshCapture(value: unknown): boolean {
+  if (typeof value !== 'string') return false
+  const at = Date.parse(value)
+  if (!Number.isFinite(at)) return false
+  const age = Date.now() - at
+  return age >= 0 && age <= CLIENT_BUDGET_FACT_FRESH_MS
 }

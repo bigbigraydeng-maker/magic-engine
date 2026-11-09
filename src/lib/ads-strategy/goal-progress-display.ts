@@ -19,6 +19,11 @@ export function isGoalProgressPending(metricKey: string | null | undefined): boo
   return !ADS_ATTRIBUTABLE_METRIC_KEYS.has(metricKey)
 }
 
+/** 目标进度里的件数一律显示整数（「到今天应完成」是按天比例算出来的小数）。 */
+export function roundGoalCount(n: number): number {
+  return Math.round(n)
+}
+
 export function remainingGoalDays(dayIndex: number, totalDays: number): number {
   if (!Number.isFinite(dayIndex) || !Number.isFinite(totalDays) || totalDays < 1) return 0
   return Math.max(0, totalDays - dayIndex)

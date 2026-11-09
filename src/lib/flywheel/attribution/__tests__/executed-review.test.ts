@@ -1,0 +1,90 @@
+import { describe, expect, it } from 'vitest'
+import {
+  BUDGET_CARD_ACTION, PAUSE_CARD_ACTION, observationDue, pairSpans, readExecutedReview, reviewVerdict,
+  type ReviewAction, type ReviewSource, type WindowSpan,
+} from '../executed-review'
+
+const SOURCE: ReviewSource = {
+  prescriptionId: 'rx-1', version: 2, goalId: 'goal-1', planId: 'plan-1', planHash: 'hash-1', approvedOn: '2026-11-01',
+}
+
+function action(kind: 'budget' | 'pause', payload: Record<string, unknown>): ReviewAction {
+  const pauseCard = kind === 'pause'
+  return {
+    id: pauseCard ? 'pause-1' : 'budget-1',
+    client_id: 'client-1',
+    action_type: pauseCard ? PAUSE_CARD_ACTION : BUDGET_CARD_ACTION,
+    expected_metric: pauseCard ? 'ads.account.spend' : 'ads.account.cpa',
+    executed_at: '2026-01-01T00:00:00.000Z',
+    payload,
+  }
+}
+
+function budget(extra: Record<string, unknown> = {}): ReviewAction {
+  return action('budget', {
+    status: 'executed', direction: 'down', observationWindowDays: 7,
+    order: { expectedMetric: 'ads.account.cpa', direction: 'down', observationWindowDays: 7, adsetId: 'set-a' },
+    lock: SOURCE, ...extra,
+  })
+}
+
+function pause(extra: Record<string, unknown> = {}): ReviewAction {
+  return action('pause', {
+    status: 'executed',
+    order: { metric: 'ads.account.spend', direction: 'pause', observationDays: 7, adsetId: 'set-a' },
+    source: SOURCE, ...extra,
+  })
+}
+
+describe('executed card review', () => {
+  it('reads budget and pause into one shape', () => {
+    const down = readExecutedReview(budget())
+    const stopped = readExecutedReview(pause())
+    expect(down).toMatchObject({ kind: 'ready', review: { direction: 'down', observationWindowDays: 7, objectId: 'set-a', source: SOURCE } })
+    expect(stopped).toMatchObject({ kind: 'ready', review: { direction: 'pause', observationWindowDays: 7, metric: 'ads.account.spend' } })
+  })
+
+  it('ignores cards that did not really execute', () => {
+    for (const status of ['holding', 'awaiting', 'writing', 'failed', 'declined']) {
+      expect(readExecutedReview(budget({ status })).kind).toBe('not_executed')
+      expect(readExecutedReview(pause({ status })).kind).toBe('not_executed')
+    }
+  })
+
+  it('does not invent a window, clamp one, or fill a missing source', () => {
+    const missingWindow = budget()
+    const payload = missingWindow.payload as Record<string, unknown>
+    delete payload.observationWindowDays
+    delete (payload.order as Record<string, unknown>).observationWindowDays
+    expect(readExecutedReview(missingWindow).kind).toBe('incomplete')
+    expect(readExecutedReview(pause({ source: null })).kind).toBe('incomplete')
+    expect(readExecutedReview(budget({
+      observationWindowDays: 29,
+      order: { expectedMetric: 'ads.account.cpa', direction: 'down', observationWindowDays: 29, adsetId: 'set-a' },
+    })).kind).toBe('incomplete')
+    expect(readExecutedReview(budget({
+      review: { metric: 'ads.account.cpa', direction: 'up', observationWindowDays: 7, objectId: 'set-a', source: SOURCE },
+    })).kind).toBe('incomplete')
+  })
+
+  it('pairs only the same object inside an overlapping window', () => {
+    const first: WindowSpan = {
+      actionId: 'a', clientId: 'client-1', objectId: 'set-a',
+      executedAt: '2026-01-01T00:00:00.000Z', observationWindowDays: 7,
+    }
+    const marks = pairSpans([
+      first,
+      { ...first, actionId: 'b', executedAt: '2026-01-04T00:00:00.000Z' },
+      { ...first, actionId: 'c', executedAt: '2026-02-01T00:00:00.000Z' },
+      { ...first, actionId: 'd', objectId: 'set-b' },
+      { ...first, actionId: 'e', clientId: 'client-2', executedAt: '2026-01-04T00:00:00.000Z' },
+    ])
+    expect([marks.get('a'), marks.get('b'), marks.get('c'), marks.get('d'), marks.get('e')]).toEqual([
+      'overlap', 'overlap', 'clear', 'clear', 'clear',
+    ])
+    expect(observationDue('2026-01-01T00:00:00.000Z', 7, new Date('2026-01-02T00:00:00.000Z'))).toBe(false)
+    expect(observationDue('2026-01-01T00:00:00.000Z', 7, new Date('2026-02-01T00:00:00.000Z'))).toBe(true)
+    expect(reviewVerdict('clear').verdict).toBe('inconclusive')
+    expect(reviewVerdict('overlap').verdict).toBe('inconclusive')
+  })
+})

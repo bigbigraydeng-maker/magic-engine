@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import type { AccountCapFacts } from '@/lib/marketing-plan/promo/budget-caps'
 import type { PausedDraftReview } from './paused-draft-facts'
 
@@ -53,15 +54,8 @@ async function readAccounts(
 }
 
 async function readClientCap(sb: SupabaseClient, clientId: string): Promise<number | null> {
-  const { data, error } = await sb
-    .from('ad_strategy_configs')
-    .select('daily_budget_cap_cents')
-    .eq('client_id', clientId)
-    .limit(1)
-    .maybeSingle()
-  if (error || !data) return null
-  const cap = (data as { daily_budget_cap_cents?: unknown }).daily_budget_cap_cents
-  return typeof cap === 'number' ? cap : null
+  const cap = await readClientDailyTotalCap(sb, clientId)
+  return cap.state === 'set' ? cap.cents : null
 }
 
 async function readCurrency(sb: SupabaseClient, clientId: string, adAccountId: string): Promise<string | null> {

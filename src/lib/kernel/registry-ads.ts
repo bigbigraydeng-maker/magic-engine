@@ -37,6 +37,16 @@ const ADS_ENVELOPE: AutonomyEnvelope = {
  */
 const DECLARED_IN = 'docs/specs/2026-09-24-ads-goal-driven-autonomous-impact-loop-v1.md §3 G5'
 
+/** Optional budget-card lock. Absent on every other caller. */
+const CARD_LOCK_FIELDS = {
+  card_prescription_id: { type: 'string' },
+  card_version: { type: 'number' },
+  card_goal_id: { type: 'string' },
+  card_plan_id: { type: 'string' },
+  card_plan_hash: { type: 'string' },
+  card_approved_on: { type: 'string' },
+} as const
+
 function zeroCeilings(steps: readonly string[]): Record<string, number> {
   return Object.fromEntries(steps.map(s => [s, 0]))
 }
@@ -56,6 +66,7 @@ const ADS_PAUSE_UNIT: ActionDefinition<'ads.pause_unit'> = {
       cycle_date: { type: 'string' },
       ad_account_id: { type: 'string' },
       adset_id: { type: 'string' },
+      ...CARD_LOCK_FIELDS,
     },
     additionalProperties: false,
   },
@@ -130,6 +141,8 @@ const ADS_CUT_UNIT_BUDGET: ActionDefinition<'ads.cut_unit_budget'> = {
       ad_account_id: { type: 'string' },
       adset_id: { type: 'string' },
       after_cents: { type: 'number' },
+      before_cents: { type: 'number' },
+      ...CARD_LOCK_FIELDS,
     },
     additionalProperties: false,
   },
@@ -232,6 +245,7 @@ const ADS_SCALE_UNIT_BUDGET: ActionDefinition<'ads.scale_unit_budget'> = {
       campaign_id: { type: 'string' },
       before_cents: { type: 'number' },
       after_cents: { type: 'number' },
+      ...CARD_LOCK_FIELDS,
     },
     additionalProperties: false,
   },

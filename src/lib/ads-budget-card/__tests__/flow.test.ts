@@ -82,11 +82,28 @@ function harness(start: BudgetSnapshot, result?: BudgetExecuteResult | Error) {
   }
 }
 
-function fixture() {
+function planRow(cents: number | null) {
+  const promo: Record<string, unknown> = {
+    schema: 'promo_v1',
+    goal_id: GOAL_A,
+    phases: [{ id: 'p1', name: '阶段', start_date: '2026-11-01', end_date: '2026-11-30', steps: [] }],
+    checks: [],
+  }
+  if (cents !== null) promo.daily_total_cap_cents = cents
+  return {
+    id: 'plan-1',
+    client_id: CLIENT_A,
+    status: 'approved',
+    plan_data: { promo },
+  }
+}
+
+function fixture(planCap: number | null = 900) {
   return makeFixture({
     registry: ACTION_REGISTRY,
     capabilities: (sb) => createCapabilities(sb),
     startAt: '2026-11-02T00:00:00.000Z',
+    options: { extraTables: { marketing_plans: [planRow(planCap)] } },
   })
 }
 
@@ -136,7 +153,14 @@ describe('budget step card', () => {
       readbackMatched: true,
       status: 'executed',
       lock: { version: 2, goalId: GOAL_A, planId: 'plan-1' },
+      review: {
+        metric: 'ads.account.cpa',
+        direction: 'down',
+        observationWindowDays: 7,
+        objectId: '111',
+      },
     })
+    expect(row?.executed_at).toEqual(expect.any(String))
     expect(payload.idempotencyKey.length).toBeGreaterThan(10)
   })
 
@@ -246,7 +270,7 @@ describe('budget step card', () => {
 
   it('counts another account live budget before it will write', async () => {
     const h = harness(live({ otherAccountsLiveCents: 200, clientCapCents: 600 }))
-    const f = fixture()
+    const f = fixture(600)
     const issued = await issueBudgetCard({
       kernel: f.kernel, clientId: CLIENT_A, clicker: OPC, order, runtime: h.runtime, locks: locks(),
     })
@@ -256,10 +280,23 @@ describe('budget step card', () => {
     expect(h.calls).toEqual([])
   })
 
+  it('stops a raise when the approved plan has no daily total', async () => {
+    const h = harness(live({ clientCapCents: 900 }))
+    const f = fixture(null)
+    const issued = await issueBudgetCard({
+      kernel: f.kernel, clientId: CLIENT_A, clicker: OPC, order, runtime: h.runtime, locks: locks(),
+    })
+    expect(issued.card?.confirmEnabled).toBe(false)
+    const done = await submitBudgetCard(submitArgs(f, h, issued))
+    expect(done.reason).toMatch(/每天广告总上限/)
+    expect(h.calls).toEqual([])
+  })
+
   it('does not keep a second budget writer', () => {
     const meta = readFileSync('src/lib/ads-budget-card/meta.ts', 'utf8')
     const kernel = readFileSync('src/lib/ads-budget-card/kernel-path.ts', 'utf8')
     const flow = readFileSync('src/lib/ads-budget-card/flow.ts', 'utf8')
     expect(meta + kernel + flow).not.toMatch(/setAdSetDailyBudget|setCampaignDailyBudget/)
+    expect(kernel).not.toMatch(/triggeredBy:\s*'human'/)
   })
 })
