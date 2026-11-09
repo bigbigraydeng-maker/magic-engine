@@ -296,7 +296,7 @@ async function confirmedView(
   const stored = readStoredCard(run.input)
   if (!stored || !run.authorization_decision_id) return null
   if (run.status !== 'succeeded' && run.status !== 'authorized') return null
-  if (isExpired(stored.issuedAt, now)) return null
+  if (isExpired(stored.issuedAt, now, stored.lifetime)) return null
   const view = presentCard({
     run,
     decisionId: run.authorization_decision_id,

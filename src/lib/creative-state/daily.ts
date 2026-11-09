@@ -36,6 +36,7 @@ async function issueDaily(sb: SupabaseClient, clientId: string, now: Date): Prom
     clicker: CLICKER,
     decision,
     now,
+    lifetime: 'nz_day',
   })
   return { cards: issued.issued.length, skipped: issued.skipped, wroteMeta: false }
 }

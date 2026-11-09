@@ -14,7 +14,7 @@ function row(over: Partial<SpendRow> = {}): SpendRow {
     campaignName: '春季系列',
     day: '2026-11-09',
     spendCents: 100,
-    leads: 1,
+    primaryCount: 1,
     currency: 'NZD',
     campaignLive: true,
     ...over,
@@ -38,6 +38,7 @@ function facts(over: Partial<BreakerFacts> = {}): BreakerFacts {
     insights: [{ accountId: 'act-demo', updatedAt: NOW.toISOString() }],
     accounts: ['act-demo'],
     freshReadable: true,
+    primaryResult: 'lead',
     ...over,
   }
 }
@@ -77,19 +78,53 @@ describe('judgeBreaker', () => {
   it('花费超过目标线索成本的两倍且没有线索时，提议暂停', () => {
     const judged = judgeBreaker(facts({
       settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
-      spend: [row({ spendCents: 250, leads: 0 })],
+      spend: [row({ spendCents: 250, primaryCount: 0 })],
     }))
     expect(judged.pauses[0]?.rules).toEqual(['cpl_zero_leads'])
+    expect(judged.pauses[0]?.summary).toBe('最近这一天有花费，但没有线索，花费已经高于约定的目标线索成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停。')
+    expect(judged.alerts).toEqual([])
   })
 
   it('有线索，或没配目标成本时，不按这条提议', () => {
     const withLead = judgeBreaker(facts({
       settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
-      spend: [row({ spendCents: 250, leads: 1 })],
+      spend: [row({ spendCents: 250, primaryCount: 1 })],
     }))
-    const noTarget = judgeBreaker(facts({ spend: [row({ spendCents: 250, leads: 0 })] }))
+    const noTarget = judgeBreaker(facts({ spend: [row({ spendCents: 250, primaryCount: 0 })] }))
     expect(withLead.pauses).toEqual([])
     expect(noTarget.pauses).toEqual([])
+    expect(noTarget.alerts).toEqual([])
+  })
+
+  it('主结果是开聊且开聊大于 0 时，不因留资为 0 出卡', () => {
+    const judged = judgeBreaker(facts({
+      primaryResult: 'messaging_started',
+      settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
+      spend: [row({ spendCents: 250, primaryCount: 4 })],
+    }))
+    expect(judged.pauses).toEqual([])
+    expect(judged.alerts).toEqual([])
+  })
+
+  it('主结果是开聊、开聊为 0 且花费超过目标倍数时出卡', () => {
+    const judged = judgeBreaker(facts({
+      primaryResult: 'messaging_started',
+      settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
+      spend: [row({ spendCents: 250, primaryCount: 0 })],
+    }))
+    expect(judged.pauses[0]?.rules).toEqual(['cpl_zero_leads'])
+    expect(judged.pauses[0]?.summary).toContain('没有开聊')
+  })
+
+  it('主结果数读不出来时不出暂停卡，只记提醒', () => {
+    const judged = judgeBreaker(facts({
+      primaryResult: null,
+      settings: { ...defaultBreakerSettings(), targetCplCents: 100 },
+      spend: [row({ spendCents: 250, primaryCount: null })],
+    }))
+    expect(judged.pauses).toEqual([])
+    expect(judged.alerts.map((item) => item.code)).toEqual(['primary_unreadable'])
+    expect(judged.alerts[0]?.kind).toBe('alert')
   })
 
   it('在投广告被判政策问题时，提议暂停它的系列', () => {
@@ -130,7 +165,7 @@ describe('judgeBreaker', () => {
   it('开关关掉时，什么都不出', () => {
     const judged = judgeBreaker(facts({
       settings: { ...defaultBreakerSettings(), enabled: false },
-      spend: [row({ spendCents: 9000, leads: 0 })],
+      spend: [row({ spendCents: 9000, primaryCount: 0 })],
     }))
     expect(judged).toEqual({ pauses: [], alerts: [] })
   })
