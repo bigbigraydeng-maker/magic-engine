@@ -7,11 +7,21 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { nzTodayIso } from '@/lib/crm/booking-view'
 import { SCHEDULED_BATCHES_SHOWN, buildDetail, buildList, type LetterFacts } from './aggregate'
+import { COUNTDOWN_CADENCE, type CountdownCadence } from './cadence'
 import { buildTemplateKey, buildTriggerKey, parseLetterKey, type LetterIdentity } from './keys'
 import { loadBookingFacts } from './load-bookings'
 import { loadMeSends, loadRegistry } from './load-facts'
 import { planCountdownCalendar, planCountdownIssue } from './plan'
 import type { AutoLetterDetail, AutoLettersList, PlannedLetter } from './types'
+
+export type CadenceResolver = (clientId: string) => CountdownCadence | null
+
+/**
+ * 这个客户用哪套倒计时节奏——全仓库只在这一处决定。
+ * 现在所有客户暂用同一套（现有旅游客户的规矩：周三发、6 到 1 个月、最后一封提前 3 天停），这是进客户配置之前的过渡。
+ * 发信引擎用计划函数之前，这里必须改成从客户配置读；没配节奏的客户返回 null，就不排信（列表为空、详情找不到）。
+ */
+export const cadenceFor: CadenceResolver = () => COUNTDOWN_CADENCE
 
 function identityOf(letter: PlannedLetter): LetterIdentity {
   return { sendDate: letter.sendDate, tourId: letter.tourId, departOn: letter.departOn, monthsLeft: letter.monthsLeft }
@@ -55,10 +65,13 @@ export async function loadAutoLettersList(
   db: SupabaseClient,
   clientId: string,
   now: Date = new Date(),
+  resolveCadence: CadenceResolver = cadenceFor,
 ): Promise<AutoLettersList> {
   const today = nzTodayIso(now)
+  const cadence = resolveCadence(clientId)
+  if (cadence === null) return { ...buildList([], new Map(), today, now.toISOString()), notices: [] }
   const { facts, notices } = await loadBookingFacts(db, clientId)
-  const planned = planCountdownCalendar(facts, today)
+  const planned = planCountdownCalendar(facts, today, cadence)
   const letterFacts = await loadLetterFacts(db, clientId, lettersShownOnList(planned, today))
   return { ...buildList(planned, letterFacts, today, now.toISOString()), notices }
 }
@@ -68,12 +81,16 @@ export async function loadAutoLetterDetail(
   db: SupabaseClient,
   clientId: string,
   letterKey: string,
+  now: Date = new Date(),
+  resolveCadence: CadenceResolver = cadenceFor,
 ): Promise<AutoLetterDetail | null> {
   const identity = parseLetterKey(letterKey)
   if (identity === null) return null
+  const cadence = resolveCadence(clientId)
+  if (cadence === null) return null
   const { facts } = await loadBookingFacts(db, clientId)
-  const letter = planCountdownIssue(facts, identity.sendDate).find((candidate) => candidate.letterKey === letterKey)
+  const letter = planCountdownIssue(facts, identity.sendDate, cadence).find((candidate) => candidate.letterKey === letterKey)
   if (letter === undefined) return null
   const letterFacts = await loadLetterFacts(db, clientId, [letter])
-  return buildDetail(letter, letterFacts.get(letterKey) ?? null)
+  return buildDetail(letter, letterFacts.get(letterKey) ?? null, nzTodayIso(now))
 }

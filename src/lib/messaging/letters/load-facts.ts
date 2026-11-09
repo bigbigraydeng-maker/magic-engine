@@ -112,12 +112,18 @@ function toSendRow(raw: Record<string, unknown>): SendRow | null {
   return { triggerKey, contactId, rehearsal: scope === 'shadow', status, reasonCode: str(raw.reason_code) }
 }
 
+const STATUS_REASON: Readonly<Record<string, string>> = {
+  bounced: 'bounced',
+  unknown_outcome: 'unknown_outcome',
+  complained: 'complained',
+}
+
 function outcomeOf(row: SendRow): RecipientOutcome {
   if (row.rehearsal) {
     return { contactId: row.contactId, outcome: 'rehearsal', reasonCode: row.reasonCode, opened: null, clicked: null }
   }
-  // 退信没写原因码时，补上「bounced」让页面说「邮箱退回」。
-  const reasonCode = row.reasonCode ?? (row.status === 'bounced' ? 'bounced' : null)
+  // 这几种状态账本常常不写原因码：照状态补一个，让页面说清楚（退信 → 邮箱退回；结果不明 → 等人核对；投诉 → 他投诉过）。
+  const reasonCode = row.reasonCode ?? STATUS_REASON[row.status] ?? null
   return { contactId: row.contactId, outcome: recipientStatusOf(row.status), reasonCode, opened: null, clicked: null }
 }
 

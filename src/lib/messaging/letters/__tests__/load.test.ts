@@ -9,6 +9,7 @@ import {
   milestoneRow,
   tourRow,
 } from '@/lib/crm/__tests__/booking-fixtures'
+import { COUNTDOWN_CADENCE } from '../cadence'
 import { buildLetterKey, buildTemplateKey, buildTriggerKey } from '../keys'
 import { UNKNOWN_TOUR_NAME, loadBookingFacts } from '../load-bookings'
 import { loadMeSends, loadRegistry, recipientStatusOf } from '../load-facts'
@@ -369,5 +370,69 @@ describe('loadAutoLettersList / loadAutoLetterDetail (end to end on a fake datab
     await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
     expect(state.queries.length).toBeGreaterThan(0)
     for (const q of state.queries) expect(q.eqs).toContainEqual(['client_id', CLIENT_A])
+  })
+})
+
+describe('rhythm, past batches and empty reasons', () => {
+  const T1_DEC = { sendDate: '2026-12-02', tourId: T1, departOn: '2027-03-11', monthsLeft: 3 as const }
+  const KEY = buildLetterKey(T1_DEC) as string
+
+  function seedTwoGuests(): void {
+    seedCatalog()
+    seedBooking({ n: 1, name: 'Bea Test', party: 2 })
+    seedBooking({ n: 2, name: 'Al Test' })
+  }
+
+  it('a client with no rhythm gets an empty page / no such letter, and nothing is read', async () => {
+    seedTwoGuests()
+    state.queries.length = 0
+    expect(await loadAutoLettersList(ctx.db, CLIENT_A, NOW, () => null)).toEqual({
+      generatedAt: NOW.toISOString(),
+      nextBatch: null,
+      depositLetters: [],
+      scheduledLetters: [],
+      totalDistinctLetters: 0,
+      notices: [],
+    })
+    expect(await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW, () => null)).toBeNull()
+    expect(state.queries).toHaveLength(0)
+  })
+
+  it('the rhythm comes only from the resolver (asked per client): a different one gives different batch days', async () => {
+    seedTwoGuests()
+    const asked: string[] = []
+    const friday = (clientId: string) => {
+      asked.push(clientId)
+      return { ...COUNTDOWN_CADENCE, batchWeekday: 5 }
+    }
+    const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW, friday)
+    expect(list.nextBatch).toMatchObject({ sendDate: '2026-12-04', weekdayLabel: '周五' })
+    expect(asked).toEqual([CLIENT_A])
+    // the default resolver gives the Wednesday rhythm
+    expect((await loadAutoLettersList(ctx.db, CLIENT_A, NOW)).nextBatch?.sendDate).toBe('2026-12-02')
+  })
+
+  it('a batch that already went out: a person who is planned but has no record is not shown as 待发', async () => {
+    seedTwoGuests()
+    seed('triggered_sends', [
+      { id: 'a', client_id: CLIENT_A, trigger_key: buildTriggerKey(T1_DEC), contact_id: cid(1), dedupe_scope: 'lifetime', status: 'delivered', reason_code: null },
+    ])
+    const after = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, new Date('2026-12-09T20:00:00Z')) // NZ 2026-12-10
+    const byName = Object.fromEntries((after?.recipients ?? []).map((r) => [r.displayName, [r.status, r.reasonText]]))
+    expect(byName).toEqual({ 'Bea Test': ['sent', null], 'Al Test': ['pending', '这一批发出时他还没交定金'] })
+    const before = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW) // before the send day
+    expect((before?.recipients ?? []).every((r) => r.reasonText === null)).toBe(true)
+  })
+
+  it('statuses the ledger leaves without a reason still get a plain one', async () => {
+    seedTwoGuests()
+    const trigger = buildTriggerKey(T1_DEC)
+    seed('triggered_sends', [
+      { id: 'a', client_id: CLIENT_A, trigger_key: trigger, contact_id: cid(1), dedupe_scope: 'lifetime', status: 'unknown_outcome', reason_code: null },
+      { id: 'b', client_id: CLIENT_A, trigger_key: trigger, contact_id: cid(2), dedupe_scope: 'lifetime', status: 'complained', reason_code: null },
+    ])
+    const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW)
+    const byName = Object.fromEntries((detail?.recipients ?? []).map((r) => [r.displayName, [r.status, r.reasonText]]))
+    expect(byName).toEqual({ 'Bea Test': ['failed', '发送结果不明，等人核对'], 'Al Test': ['failed', '他投诉过'] })
   })
 })

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  NOT_IN_BATCH_TEXT,
   SAMPLE_FIRST_NAME,
   buildDetail,
   buildLetterRow,
@@ -236,5 +237,35 @@ describe('buildDetail', () => {
     const json = JSON.stringify(buildDetail(letter, null))
     expect(json).not.toMatch(/@/)
     expect(json).not.toMatch(/email/i)
+  })
+})
+
+describe('buildDetail · a batch that has already gone out', () => {
+  const letter = planned({
+    sendDate: '2026-12-02',
+    recipients: [
+      { contactId: 'c1', displayName: 'Bea', seats: 2 },
+      { contactId: 'c2', displayName: 'Al', seats: null },
+      { contactId: 'c3', displayName: 'Cy', seats: 1 },
+    ],
+  })
+  const wentOut: LetterFacts = { registry: null, sends: sends({ started: true, recipients: [outcome({ contactId: 'c1' }), outcome({ contactId: 'c3', outcome: 'pending' })] }) }
+  const note = (detail: ReturnType<typeof buildDetail>, id: string) => detail.recipients.find((r) => r.contactId === id)?.reasonText
+
+  it('people planned but absent from the send record say they were not yet depositors, not 待发', () => {
+    const detail = buildDetail(letter, wentOut, '2026-12-10')
+    expect(NOT_IN_BATCH_TEXT).toBe('这一批发出时他还没交定金')
+    expect(detail.recipients.find((r) => r.contactId === 'c2')).toMatchObject({ status: 'pending', reasonText: NOT_IN_BATCH_TEXT })
+    expect(note(detail, 'c1')).toBeNull() // has a record: sent
+    expect(note(detail, 'c3')).toBeNull() // has a record (claimed, still pending): not "not in batch"
+  })
+
+  it('only after the send day, only when the batch really went out', () => {
+    expect(note(buildDetail(letter, wentOut, '2026-12-02'), 'c2')).toBeNull() // the send day itself
+    expect(note(buildDetail(letter, wentOut, '2026-12-01'), 'c2')).toBeNull() // before it
+    expect(note(buildDetail(letter, wentOut), 'c2')).toBeNull() // no "today" given
+    expect(note(buildDetail(letter, null, '2026-12-10'), 'c2')).toBeNull() // nothing sent at all
+    const awaiting: LetterFacts = { registry: null, sends: sends({ proposalPending: true }) }
+    expect(note(buildDetail(letter, awaiting, '2026-12-10'), 'c2')).toBeNull() // still waiting for release
   })
 })

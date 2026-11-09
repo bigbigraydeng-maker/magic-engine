@@ -9,19 +9,19 @@
  *  - 批次日：每月第一个周三；最后一个月（离出发 ≤ 30 天）改成每周三。
  *  - 最后一封至少提前 3 天发（更近的由运营直接联系）。
  *  - 月数 = round(离出发天数 / 30.4)，只发 6、5、4、3、2、1 个月的信。
+ *    注意：每月第一个周三之间隔 28 或 35 天，所以同一个团的月数偶尔会跳号（例如 4 → 2）或重号（例如 3、3）。
+ *    这是规则本身的结果，不是算错；发信日和编号里带着发信日，所以重号的两封信不会混。
  *  - 不管哪天订，都进「离你最近」那一组；前面错过的不补（本函数只算指定那天往后，天然如此）。
  *  - 同一个团同一天只有一封信，同团的人收同一封。
  *
- * 层级：旅游版（按出发日倒计时）的行业层默认值。节奏参数集中在 cadence.ts 的 COUNTDOWN_CADENCE，
+ * 层级：旅游版（按出发日倒计时）的行业层规则。节奏（周几发、几个月起、提前几天停）不在这里写死：调用方必须显式传入，
  * 将来某个客户节奏不同，走客户配置传进来，不改这里；这里没有任何客户名、客户 ID、团名。
  */
 
 import { dayOfMonth, daysBetween, fromDayNumber, toDayNumber, weekdayOf } from './dates'
-import { COUNTDOWN_CADENCE, type CountdownCadence } from './cadence'
+import type { CountdownCadence } from './cadence'
 import { buildLetterKey } from './keys'
 import type { BookingFact, MonthsLeft, NzDate, PlannedLetter, PlannedRecipient } from './types'
-
-export { COUNTDOWN_CADENCE, type CountdownCadence }
 
 interface TourGroup {
   tourId: string
@@ -131,7 +131,7 @@ function planDay(groups: readonly TourGroup[], day: NzDate, cadence: CountdownCa
 export function planCountdownIssue(
   facts: readonly BookingFact[],
   day: NzDate,
-  cadence: CountdownCadence = COUNTDOWN_CADENCE,
+  cadence: CountdownCadence,
 ): PlannedLetter[] {
   if (toDayNumber(day) === null) return []
   return planDay(buildGroups(facts), day, cadence)
@@ -141,7 +141,7 @@ export function planCountdownIssue(
 export function planCountdownCalendar(
   facts: readonly BookingFact[],
   fromDay: NzDate,
-  cadence: CountdownCadence = COUNTDOWN_CADENCE,
+  cadence: CountdownCadence,
 ): PlannedLetter[] {
   const start = toDayNumber(fromDay)
   if (start === null) return []

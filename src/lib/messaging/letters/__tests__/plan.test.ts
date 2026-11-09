@@ -6,8 +6,15 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { COUNTDOWN_CADENCE, planCountdownCalendar, planCountdownIssue } from '../plan'
+import { COUNTDOWN_CADENCE, type CountdownCadence } from '../cadence'
+import { planCountdownCalendar as calendarWith, planCountdownIssue as issueWith } from '../plan'
 import type { BookingFact, MonthsLeft, NzDate, PlannedLetter } from '../types'
+
+/** 约定里的测试向量是按这套节奏写的，所以测试显式传它；计划函数自己没有默认节奏。 */
+const planCountdownIssue = (facts: readonly BookingFact[], day: NzDate, cadence: CountdownCadence = COUNTDOWN_CADENCE): PlannedLetter[] =>
+  issueWith(facts, day, cadence)
+const planCountdownCalendar = (facts: readonly BookingFact[], fromDay: NzDate, cadence: CountdownCadence = COUNTDOWN_CADENCE): PlannedLetter[] =>
+  calendarWith(facts, fromDay, cadence)
 
 interface GroupSpec {
   code: 'A' | 'B' | 'C' | 'D'

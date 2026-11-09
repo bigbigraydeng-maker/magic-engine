@@ -29,6 +29,9 @@ import type {
 /** 页面代入 `{{first_name}}` 用的示例名字（服务器给，页面不要自己编）。 */
 export const SAMPLE_FIRST_NAME = 'Alex'
 
+/** 这一批已经发出去，但这个人当时不在名单里（订单后来才交定金）：不显示成「待发」。 */
+export const NOT_IN_BATCH_TEXT = '这一批发出时他还没交定金'
+
 /** 列表里「按期发送的信」只列最近几批。 */
 export const SCHEDULED_BATCHES_SHOWN = 2
 
@@ -166,28 +169,32 @@ function compareNames(a: string | null, b: string | null): number {
 function recipientRowFor(
   outcome: RecipientOutcome | undefined,
   person: { contactId: string; displayName: string | null; seats: number | null },
+  notInBatch: boolean,
 ): RecipientRow {
   const status = outcome?.outcome ?? 'pending'
   const failed = status === 'blocked' || status === 'failed'
+  let reasonText: string | null = null
+  if (failed) reasonText = reasonTextFor(outcome?.reasonCode)
+  else if (outcome === undefined && notInBatch) reasonText = NOT_IN_BATCH_TEXT
   return {
     contactId: person.contactId,
     displayName: person.displayName,
     seats: person.seats,
     status,
-    reasonText: failed ? reasonTextFor(outcome?.reasonCode) : null,
+    reasonText,
     opened: outcome?.opened ?? null,
     clicked: outcome?.clicked ?? null,
   }
 }
 
 /** 收件人：计划里的每一位 + 发送记录里有、计划里已经没有的人（订单后来变了）。 */
-function recipientRows(planned: PlannedLetter, sends: SendFacts | null): RecipientRow[] {
+function recipientRows(planned: PlannedLetter, sends: SendFacts | null, notInBatch: boolean): RecipientRow[] {
   const outcomes = new Map((sends?.recipients ?? []).map((r) => [r.contactId, r] as const))
-  const rows = planned.recipients.map((p) => recipientRowFor(outcomes.get(p.contactId), p))
+  const rows = planned.recipients.map((p) => recipientRowFor(outcomes.get(p.contactId), p, notInBatch))
   const known = new Set(planned.recipients.map((p) => p.contactId))
   for (const outcome of outcomes.values()) {
     if (!known.has(outcome.contactId)) {
-      rows.push(recipientRowFor(outcome, { contactId: outcome.contactId, displayName: null, seats: null }))
+      rows.push(recipientRowFor(outcome, { contactId: outcome.contactId, displayName: null, seats: null }, false))
     }
   }
   return rows.sort((a, b) => compareNames(a.displayName, b.displayName) || a.contactId.localeCompare(b.contactId))
@@ -199,8 +206,13 @@ function mailchimpSummaryOf(sends: SendFacts | null): AutoLetterDetail['mailchim
   return { opened: real.filter((r) => r.opened === true).length, clicked: real.filter((r) => r.clicked === true).length }
 }
 
-export function buildDetail(planned: PlannedLetter, facts: LetterFacts | null): AutoLetterDetail {
+/**
+ * 详情。`today` 给了，并且这封信的发信日早于今天、整批已经发出去，那么计划里有、发送记录里没有的人，
+ * 说明他们是这一批发出之后才交的定金——显示「这一批发出时他还没交定金」，不显示「待发」（引擎不会补发）。
+ */
+export function buildDetail(planned: PlannedLetter, facts: LetterFacts | null, today?: NzDate): AutoLetterDetail {
   const row = buildLetterRow(planned, facts)
+  const batchWentOut = today !== undefined && planned.sendDate < today && row.status === 'sent'
   const letter: LetterDetailRow = {
     ...row,
     previewText: facts?.registry?.previewText ?? null,
@@ -211,6 +223,6 @@ export function buildDetail(planned: PlannedLetter, facts: LetterFacts | null): 
     letter,
     tiles: tilesOf(row.counts),
     mailchimpSummary: mailchimpSummaryOf(facts?.sends ?? null),
-    recipients: recipientRows(planned, facts?.sends ?? null),
+    recipients: recipientRows(planned, facts?.sends ?? null, batchWentOut),
   }
 }

@@ -60,11 +60,19 @@ describe('resolveReasonText · text already translated by the read interface', (
     expect(out.main).toBe('没有同意依据')
   })
 
-  it('does not touch sent, pending or rehearsal rows', () => {
-    for (const status of ['sent', 'pending', 'rehearsal'] as const) {
+  it('does not touch sent or rehearsal rows', () => {
+    for (const status of ['sent', 'rehearsal'] as const) {
       const out = resolveReasonText({ status, reasonCode: null, reasonDetail: null, reasonText: '不该出现' }, {})
       expect(out.main).not.toBe('不该出现')
     }
+  })
+
+  it('a pending row shows the plain note the read interface attached, otherwise a dash', () => {
+    expect(
+      resolveReasonText({ status: 'pending', reasonCode: null, reasonDetail: null, reasonText: '这一批发出时他还没交定金' }, {}),
+    ).toEqual({ main: '这一批发出时他还没交定金', detail: null })
+    expect(resolveReasonText({ status: 'pending', reasonCode: null, reasonDetail: null, reasonText: null }, {})).toEqual({ main: '—', detail: null })
+    expect(resolveReasonText({ status: 'pending', reasonCode: 'dnc', reasonDetail: '地址无效', reasonText: '   ' }, {})).toEqual({ main: '—', detail: null })
   })
 })
 

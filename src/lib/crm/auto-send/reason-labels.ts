@@ -50,8 +50,14 @@ export function resolveReasonText(
   row: { status: RecipientStatus; reasonCode: string | null; reasonDetail: string | null; reasonText?: string | null },
   base: Readonly<Record<string, string>>,
 ): { main: string; detail: string | null } {
-  if (row.status === 'sent' || row.status === 'pending') {
+  if (row.status === 'sent') {
     return { main: '—', detail: null }
+  }
+
+  // A pending row normally has nothing to explain; the read interface may still attach a plain note
+  // (for example 「这一批发出时他还没交定金」 on an already-sent batch).
+  if (row.status === 'pending') {
+    return { main: normaliseDetail(row.reasonText ?? null) ?? '—', detail: null }
   }
 
   if (row.status === 'rehearsal') {

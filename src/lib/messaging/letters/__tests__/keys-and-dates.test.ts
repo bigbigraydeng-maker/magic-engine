@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { TEMPLATE_KEY_RE } from '@/lib/crm/email-templates/template-store'
 import { compactDate, dayOfMonth, daysBetween, fromDayNumber, toDayNumber, weekdayLabelZh, weekdayOf } from '../dates'
 import { buildLetterKey, buildTemplateKey, buildTriggerKey, parseLetterKey, tourCodeOf } from '../keys'
 
@@ -58,7 +59,7 @@ describe('letter / template / trigger keys', () => {
   })
 
   it('the template and trigger keys fit the database rules for any tour id (uuid, odd characters)', () => {
-    const TEMPLATE_KEY_RE = /^[a-z0-9][a-z0-9-]{1,62}$/
+    // TEMPLATE_KEY_RE is the real rule from the template store; the trigger-key rule is a copy of the send engine's (its constant is not exported).
     const TRIGGER_KEY_RE = /^[a-z][a-z0-9_]{0,39}$/
     for (const tourId of ['7a5c1e2f-0000-4000-8000-000000000001', 'a:b c/d', 'é-é', 'T-1']) {
       for (const monthsLeft of [1, 2, 3, 4, 5, 6, 'weekly'] as const) {
@@ -107,5 +108,35 @@ describe('letter / template / trigger keys', () => {
     ]) {
       expect(parseLetterKey(bad)).toBeNull()
     }
+  })
+})
+
+describe('key algorithm is frozen to fixed values', () => {
+  // If the hash or the spelling ever changes, every registered letter and every send record would stop matching its letter.
+  // So these exact strings must never change without a deliberate migration.
+  const UUID = 'b6a1f3c2-4d5e-4f60-8a71-92b3c4d5e6f7'
+  const monthly = { sendDate: '2026-12-02', tourId: UUID, departOn: '2027-03-11', monthsLeft: 3 as const }
+  const weekly = { sendDate: '2027-03-03', tourId: UUID, departOn: '2027-03-11', monthsLeft: 'weekly' as const }
+
+  it('the short tour code', () => {
+    expect(tourCodeOf('tour-1')).toBe('0kvm3a9')
+    expect(tourCodeOf(UUID)).toBe('15me0um')
+  })
+
+  it('the template key and the trigger key, monthly and weekly', () => {
+    expect(buildTemplateKey(monthly)).toBe('auto-countdown-20261202-15me0um-20270311-m3')
+    expect(buildTriggerKey(monthly)).toBe('countdown_20261202_15me0um_20270311_3')
+    expect(buildTemplateKey(weekly)).toBe('auto-countdown-20270303-15me0um-20270311-w')
+    expect(buildTriggerKey(weekly)).toBe('countdown_20270303_15me0um_20270311_w')
+  })
+
+  it('and the frozen keys obey the database rules', () => {
+    const templates = [buildTemplateKey(monthly), buildTemplateKey(weekly)] as string[]
+    const triggers = [buildTriggerKey(monthly), buildTriggerKey(weekly)] as string[]
+    for (const key of templates) {
+      expect(key).toMatch(TEMPLATE_KEY_RE)
+      expect(key.startsWith('auto-')).toBe(true)
+    }
+    for (const key of triggers) expect(key).toMatch(/^[a-z][a-z0-9_]{0,39}$/)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LETTER_REASON_TEXT, UNKNOWN_REASON_TEXT, reasonTextFor } from '../reasons'
+import { LETTER_REASON_TEXT, UNKNOWN_REASON_TEXT, UNVERIFIABLE_REASON_TEXT, reasonTextFor } from '../reasons'
 
 describe('reasonTextFor', () => {
   it('translates every code in the contract table', () => {
@@ -30,6 +30,41 @@ describe('reasonTextFor', () => {
     for (const text of Object.values(LETTER_REASON_TEXT)) {
       expect(text).toMatch(/[一-鿿]/)
       expect(text).not.toMatch(/_/)
+    }
+  })
+})
+
+describe('reasonTextFor · codes the send engine writes beyond the first table', () => {
+  it.each([
+    ['quiet_hours', '稍后自动再试'],
+    ['lock_busy', '稍后自动再试'],
+    ['cap_reached', '今天的发信上限到了，明天继续'],
+    ['hard_bounced_address', '这个邮箱以前退过信'],
+    ['legacy_welcomed', '旧的欢迎信批次已经发过'],
+    ['address_duplicate', '同一个邮箱已经收过这封'],
+    ['provider_rejected', '发信服务拒收了'],
+    ['unknown_outcome', '发送结果不明，等人核对'],
+    ['expired_unknown', '发送结果不明，等人核对'],
+    ['expired_20h', '发送结果不明，等人核对'],
+    ['not_sent_confirmed', '已确认没发出'],
+    ['complained', '他投诉过'],
+    ['auth_inactive', '授权失效，已停发'],
+    ['not_armed', '授权失效，已停发'],
+    ['template_changed', '授权失效，已停发'],
+    ['gate_changed', '授权失效，已停发'],
+  ])('%s → %s', (code, text) => {
+    expect(reasonTextFor(code)).toBe(text)
+  })
+
+  it('every code ending in _unverifiable or _unreadable says 暂时查不清, without listing them one by one', () => {
+    for (const code of ['frequency_unverifiable', 'consent_unverifiable', 'template_unreadable', 'mailbox_unreadable', 'x_unreadable']) {
+      expect(reasonTextFor(code)).toBe(UNVERIFIABLE_REASON_TEXT)
+    }
+  })
+
+  it('a code that only looks similar is still 系统出错 (the suffix must be exact, at the end)', () => {
+    for (const code of ['unverifiable', 'unreadable', 'a_unreadable_b', 'x_unverifiables', '_unreadable ', 'Unreadable', '']) {
+      expect(reasonTextFor(code)).toBe(UNKNOWN_REASON_TEXT)
     }
   })
 })
