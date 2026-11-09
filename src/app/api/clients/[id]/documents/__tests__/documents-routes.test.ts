@@ -555,7 +555,7 @@ describe('the upload body as real browsers send it', () => {
   it('accepts a body whose Content-Length is present and within the limit', async () => {
     const { body, type } = multipart(pdf('browser upload'))
     const req = new NextRequest(`http://localhost/api/clients/${CLIENT_A}/documents`, {
-      method: 'POST', body, headers: { 'content-type': type, 'content-length': String(body.length) },
+      method: 'POST', body: new Uint8Array(body), headers: { 'content-type': type, 'content-length': String(body.length) },
     })
     const res = await uploadDocument(req, ctx(CLIENT_A))
     expect(res.status).toBe(201)
@@ -565,7 +565,7 @@ describe('the upload body as real browsers send it', () => {
   it('answers 400 for a body that is not a valid form', async () => {
     const garbage = Buffer.from('this is not multipart')
     const req = new NextRequest(`http://localhost/api/clients/${CLIENT_A}/documents`, {
-      method: 'POST', body: garbage, headers: { 'content-type': 'multipart/form-data; boundary=xx', 'content-length': String(garbage.length) },
+      method: 'POST', body: new Uint8Array(garbage), headers: { 'content-type': 'multipart/form-data; boundary=xx', 'content-length': String(garbage.length) },
     })
     const res = await uploadDocument(req, ctx(CLIENT_A))
     expect(res.status).toBe(400)
