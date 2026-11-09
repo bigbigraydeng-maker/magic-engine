@@ -171,3 +171,12 @@ interface RecipientRow {
 1. **批次计划（哪天、哪些信、哪些人）由谁算**：你写 `planCountdownIssue`（§8），我审。
 2. **信的登记（标题／预览行／正文）存哪**：`crm_email_templates`（`template_key` 约定 `auto-countdown-<yyyymmdd>-<团码小写>-<月数>`，状态「停用」＝草稿；标题＝`subject`，正文＝`body`）。**11-10 改：一律 `auto-` 开头**——发信底座第 1 单起，`auto-` 开头的模板销售在「通话后发邮件」里选不到、手发也会被拒（`src/lib/crm/email-templates/automated-template-key.ts`）；模板键只许小写字母、数字、连字符、最长 63 位，团码要转小写。**预览行**表里目前没有列，我在库结构放宽那一单里加 `preview_text`；在那之前接口把 `previewText` 返回 `null`，页面按「没有预览行」显示。126 的定稿文字怎么录进去：我做登记工具，v0 是手工录入（像 `auto-welcome` 那样）。
 3. **走 Mailchimp 的 12/2 批次发送情况从哪读**：`contact_touchpoints`（`source='mailchimp'`、`direction='outbound'`；`metadata.email_campaign_title／email_campaign_subject／email_send_status`，打开点击见 `kind`），**但只记标题前缀 `auto_e1_` 的信**。12/2 那批要被记录，需要 PM 点头改 `clients.leads_config.mailchimp_sent_record.title_prefixes`（126 在 11/30 问他）。在那之前页面把 12/2 批显示成「草稿」、发送情况「—」。
+
+## 10. 138 v0.2 的 6 问（11-10 下午答；全文在 126 共享笔记夹 `138-autosend-page-read-contract-answers-from-33ebcd0b.md`）
+
+- **页面形状以 138 的 `src/lib/crm/auto-send/types.ts` 为准**（取代 §0 里「共同类型文件放 `src/lib/messaging/letters/types.ts`」）；读接口直接返回那个形状。批次计划函数仍放 `src/lib/messaging/letters/plan.ts`（以后引擎也调它，改它按 A 级审），和页面拆成两单。
+- 计划函数的节奏（6→1 个月、最后一个月每周三、出发前几天停）写成参数，CTS 的值放客户配置，函数里不写死任何客户的事。
+- 信的状态：`planned`（该有、模板表里还没这个键）／`draft`（模板 `disabled`，或 `active` 但没有可批的提案）／`awaiting_release`（提案 `authorized_at is null and revoked_at is null and template_sha256 is not null`；彩排用的欢迎信提案模板列为空，不算）／`sent`（`triggered_sends` 里 `dedupe_scope='lifetime'`、`template_key` 相同、有任一行不是 `blocked`/`skipped`）／`not_enabled`（触发类的信没有生效授权）。
+- 正文切块：空行分段→paragraph；行首「- 」「• 」→bullet；纯文字信第一版不用 heading。预览行先返回 `null`。
+- Mailchimp：「发出」＝`contact_touchpoints` `source='mailchimp'`、`direction='outbound'`、`metadata->>kind='sent'`（`email_send_status` 等，`source_ref`＝`<campaignId>:<contactId>:sent`）；「打开／点击」＝同表 `direction='inbound'`、`metadata.email_opened`／`email_clicked`（`source_ref`＝`<campaignId>:<contactId>`），按 `email_campaign_id` 对信。第一版就接上读取，有记录才显示。
+- 演练＝`triggered_sends.dedupe_scope='shadow'`（`provider_impact='NONE'`），真发＝`'lifetime'`。
