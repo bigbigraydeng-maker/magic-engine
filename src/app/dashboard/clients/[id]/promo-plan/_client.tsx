@@ -27,7 +27,7 @@ import { GateList } from './_components/GateList'
 import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
 import { PrescriptionCard } from './_components/PrescriptionCard'
-import { adsRunningFrom, describeLiveAds } from '@/lib/marketing-plan/promo/live-ads-message'
+import { adsRunningFrom, describeLiveAds, describeUnrecordedAdsets } from '@/lib/marketing-plan/promo/live-ads-message'
 import type { LiveAdsFact, LiveAdsMessage } from '@/lib/marketing-plan/promo/live-ads-message'
 import { BlankDraftPlanButton } from './_components/BlankDraftPlanButton'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
@@ -296,11 +296,14 @@ export function PromoPlanClient() {
   )
 }
 
-function Headline({ board, plan, liveAds, liveAdsVisible, clientId }: { board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; liveAdsVisible: boolean; clientId: string }) {
+function Headline({ board, plan, liveAds, liveAdsVisible, clientId }: {
+  board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; liveAdsVisible: boolean; clientId: string
+}) {
   const draft = plan.status === 'draft'
-  const live = draft ? describeLiveAds(liveAds) : null
+  const missing = describeUnrecordedAdsets(liveAds)
+  const live = describeLiveAds(liveAds)
   const text = draft
-    ? live?.level === 'red' ? '还没批准——但系统里显示广告已经在花钱'
+    ? missing?.level === 'red' ? '还没批准——有开着的广告组没有批准记录'
       : live?.level === 'amber' ? '还没批准——Meta 里的广告可能已经在花钱'
       : '还没批准——批准之前，ME 的自动动作都不会发生'
     : board.reconcile?.headline ?? (board.has_promo ? '推广计划的内容有问题，先改好' : '这份计划还没有推广计划的阶段')
@@ -310,7 +313,7 @@ function Headline({ board, plan, liveAds, liveAdsVisible, clientId }: { board: P
       <p className="text-xs text-gray-500 mb-1">{plan.title}</p>
       <p className="text-lg font-bold text-gray-900">{text}</p>
       <p className="text-sm text-gray-800 mt-2">{dailyTotalCapSentence(plan.plan_data)}</p>
-      {draft && liveAdsVisible && <LiveAdsNotice fact={liveAds} message={live} clientId={clientId} />}
+      {liveAdsVisible && <LiveAdsNotice fact={liveAds} missing={missing} message={live} clientId={clientId} />}
       {blind && <p className="text-xs text-gray-600 mt-1">“看不清”不是“正常”：先把上面写的缺项补上，再看对账。</p>}
       {board.today && !board.timezone_known && (
         <p className="text-xs text-yellow-800 mt-1">广告账户的时区还没确定，日期暂按世界标准时间算，花费对账会显示“看不清”。</p>
@@ -330,17 +333,23 @@ function SpecProblems({ board }: { board: PromoBoard }) {
   )
 }
 
-function LiveAdsNotice({ fact, message, clientId }: { fact: LiveAdsFact | null; message: LiveAdsMessage | null; clientId: string }) {
-  if (message) {
-    const tone = message.level === 'red' ? 'border-red-300 bg-red-50 text-red-800'
-      : message.level === 'amber' ? 'border-yellow-300 bg-yellow-50 text-yellow-900' : 'border-gray-200 bg-gray-50 text-gray-700'
-    return (
-      <p className={`mt-2 rounded-lg border px-3 py-2 text-sm ${tone}`}>
-        {message.text}{' '}
-        <a className="underline font-medium" href={`/dashboard/clients/${clientId}/ads-health`}>去作战地图看「已开投」</a>
-      </p>
-    )
-  }
-  if (!fact || !fact.ok) return <p className="text-xs text-gray-600 mt-1">读不到广告花费，没法确认 Meta 里有没有在跑的广告。</p>
-  return null
+function LiveAdsNotice({ fact, missing, message, clientId }: {
+  fact: LiveAdsFact | null; missing: LiveAdsMessage | null; message: LiveAdsMessage | null; clientId: string
+}) {
+  const tone = (level: LiveAdsMessage['level']) => level === 'red' ? 'border-red-300 bg-red-50 text-red-800'
+    : level === 'amber' ? 'border-yellow-300 bg-yellow-50 text-yellow-900' : 'border-gray-200 bg-gray-50 text-gray-700'
+  return (
+    <>
+      {missing && (
+        <p className={`mt-2 rounded-lg border px-3 py-2 text-sm ${tone(missing.level)}`}>
+          {missing.text}{' '}
+          <a className="underline font-medium" href={`/dashboard/clients/${clientId}/ads-health`}>去作战地图看「已开投」</a>
+        </p>
+      )}
+      {message && <p className={`mt-2 rounded-lg border px-3 py-2 text-sm ${tone(message.level)}`}>{message.text}</p>}
+      {!missing && !message && (!fact || !fact.ok) && (
+        <p className="text-xs text-gray-600 mt-1">读不到广告花费，没法确认 Meta 里有没有在跑的广告。</p>
+      )}
+    </>
+  )
 }
