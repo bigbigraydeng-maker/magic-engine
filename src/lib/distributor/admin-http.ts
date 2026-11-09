@@ -8,9 +8,10 @@ import { DistributorStoreError } from './store'
 
 export type AdminGate = { ok: true; email: string } | { ok: false; response: NextResponse }
 
+/** Writes must carry an Origin header equal to this host; browsers always send one on fetch POST. */
 export function isCrossOrigin(req: Request): boolean {
   const origin = req.headers.get('origin')
-  if (!origin) return false
+  if (!origin) return true
   try {
     const selfHost = req.headers.get('x-forwarded-host') ?? new URL(req.url).host
     return new URL(origin).host !== selfHost

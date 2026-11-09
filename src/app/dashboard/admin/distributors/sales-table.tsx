@@ -74,7 +74,7 @@ function RefundForm({ sale, onDone, onCancel }: RefundFormProps) {
       <ErrorBox message={err} />
       <div className="flex flex-wrap items-end gap-2">
         <label className="block">
-          <span className="text-xs text-me-charcoal/55">金额（元）</span>
+          <span className="text-xs text-me-charcoal/55">金额（新西兰元）</span>
           <input
             type="number"
             step="0.01"

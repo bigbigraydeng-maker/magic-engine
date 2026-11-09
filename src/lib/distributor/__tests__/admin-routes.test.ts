@@ -32,14 +32,14 @@ vi.mock('@/lib/distributor/store', async () => {
 import * as store from '@/lib/distributor/store'
 import { GET as listGet, POST as createPost } from '@/app/api/admin/distributors/route'
 import { POST as decisionPost } from '@/app/api/admin/distributors/[id]/decision/route'
-import { POST as salesPost } from '@/app/api/admin/distributors/sales/route'
+import { GET as salesGet, POST as salesPost } from '@/app/api/admin/distributors/sales/route'
 
 const ID = '3f2b8c1e-6a4d-4e2f-9b1a-0c5d7e8f9a0b'
 
 function req(body: unknown, headers: Record<string, string> = {}): Request {
   return new Request('http://me.test/api/admin/distributors', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...headers },
+    headers: { 'content-type': 'application/json', origin: 'http://me.test', ...headers },
     body: JSON.stringify(body),
   })
 }
@@ -55,8 +55,12 @@ describe('access', () => {
     expect((await listGet(new Request('http://me.test/x'))).status).toBe(403)
     expect((await createPost(req({ display_name: 'A' }))).status).toBe(403)
     expect((await salesPost(req({ type: 'sale' }))).status).toBe(403)
+    expect((await salesGet(new Request('http://me.test/x'))).status).toBe(403)
+    expect((await decisionPost(req({ decision: 'approve' }), { params: Promise.resolve({ id: ID }) })).status).toBe(403)
     expect(store.listDistributors).not.toHaveBeenCalled()
     expect(store.createDistributor).not.toHaveBeenCalled()
+    expect(store.listSales).not.toHaveBeenCalled()
+    expect(store.decideDistributor).not.toHaveBeenCalled()
   })
 
   it('refuses signed-out users with 401', async () => {
@@ -64,10 +68,14 @@ describe('access', () => {
     expect((await listGet(new Request('http://me.test/x'))).status).toBe(401)
   })
 
-  it('refuses cross-origin writes', async () => {
-    const res = await createPost(req({ display_name: 'A' }, { origin: 'https://evil.example' }))
-    expect(res.status).toBe(403)
+  it('refuses cross-origin writes and writes without an Origin header, on every write route', async () => {
+    const noOrigin = new Request('http://me.test/x', { method: 'POST', body: JSON.stringify({ display_name: 'A' }) })
+    expect((await createPost(noOrigin)).status).toBe(403)
+    expect((await createPost(req({ display_name: 'A' }, { origin: 'https://evil.example' }))).status).toBe(403)
+    expect((await decisionPost(req({ decision: 'approve' }, { origin: 'https://evil.example' }), { params: Promise.resolve({ id: ID }) })).status).toBe(403)
+    expect((await salesPost(req({ type: 'sale' }, { origin: 'https://evil.example' }))).status).toBe(403)
     expect(store.createDistributor).not.toHaveBeenCalled()
+    expect(store.decideDistributor).not.toHaveBeenCalled()
   })
 
   it('refuses an admin session with an empty email', async () => {

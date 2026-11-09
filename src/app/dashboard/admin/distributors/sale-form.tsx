@@ -116,7 +116,7 @@ function CommonFields({
       </label>
       <label className="block">
         <span className="text-xs font-bold uppercase tracking-wide text-me-charcoal/55">
-          实收金额（元，留空 = 按价目表）
+          实收金额（新西兰元，留空 = 按价目表）
         </span>
         <input
           type="number"
@@ -165,16 +165,20 @@ export function SaleForm({ approved, catalog, onCreated }: SaleFormProps) {
 
   const extraCents = catalog ? catalog.extraAvatarOneTimeCents : 0
   const selectedPlan = catalog?.plans.find((p) => p.code === planCode) ?? null
-  const monthsNum = Math.max(1, Math.min(60, Number(months) || 1))
-  const extraNum = Math.max(kind === 'addon' ? 1 : 0, Number(extraAvatars) || 0)
+  // No silent clamping: what the admin typed is what gets checked and sent.
+  const monthsNum = Number(months)
+  const extraNum = Number(extraAvatars)
+  const monthsOk = Number.isInteger(monthsNum) && monthsNum >= 1 && monthsNum <= 60
+  const extraOk = Number.isInteger(extraNum) && extraNum >= (kind === 'addon' ? 1 : 0) && extraNum <= 50
 
   const listCents = useMemo(() => {
+    if (!monthsOk || !extraOk) return 0
     if (kind === 'plan') {
       const base = selectedPlan ? selectedPlan.monthlyCents * monthsNum : 0
       return base + extraNum * extraCents
     }
     return extraNum * extraCents
-  }, [kind, selectedPlan, monthsNum, extraNum, extraCents])
+  }, [kind, selectedPlan, monthsNum, extraNum, extraCents, monthsOk, extraOk])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -185,6 +189,14 @@ export function SaleForm({ approved, catalog, onCreated }: SaleFormProps) {
     }
     if (!orderRef.trim()) {
       setErr('请填写订单号')
+      return
+    }
+    if (kind === 'plan' && !monthsOk) {
+      setErr('月数必须是 1 到 60 的整数')
+      return
+    }
+    if (!extraOk) {
+      setErr(kind === 'addon' ? '只加数字人时，数量必须是 1 到 50 的整数' : '多加数字人必须是 0 到 50 的整数')
       return
     }
     let amountCents: number | undefined

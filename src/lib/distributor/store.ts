@@ -35,29 +35,44 @@ export interface DistributorSummary extends DistributorRow {
 const DISTRIBUTOR_COLUMNS = 'id, parent_id, display_name, contact_email, contact_phone, status, approved_by, approved_at, created_at'
 const SALE_COLUMNS = 'id, distributor_id, kind, order_ref, plan_code, months, extra_avatars, amount_cents, currency, paid_at, is_self_purchase, refund_of_sale_id, recorded_by, created_at'
 
-function fail(context: string, error: { message: string } | null): never {
+type DbError = { message: string; code?: string } | null
+
+function fail(context: string, error: DbError): never {
+  // Errors raised by our own guard triggers (refund over-limit, settled-sale edits) are conflicts, not outages.
+  if (error?.code === 'P0001') throw new DistributorStoreError(error.message, 409)
   console.error(`[distributor-store] ${context}:`, error?.message)
   throw new DistributorStoreError(`${context} failed`, 500)
 }
 
+const PAGE = 1000
+
+/** Reads every row of a table page by page (PostgREST caps a single response). */
+async function selectAll<T>(table: string, columns: string): Promise<T[]> {
+  const rows: T[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabaseAdmin.from(table).select(columns).order('id').range(from, from + PAGE - 1)
+    if (error) fail(`list ${table}`, error)
+    const page = (data ?? []) as T[]
+    rows.push(...page)
+    if (page.length < PAGE) return rows
+  }
+}
+
 export async function listDistributors(): Promise<DistributorSummary[]> {
-  const [d, l, s] = await Promise.all([
-    supabaseAdmin.from('distributors').select(DISTRIBUTOR_COLUMNS).order('created_at', { ascending: false }),
-    supabaseAdmin.from('distributor_level_history').select('distributor_id, level, effective_from'),
-    supabaseAdmin.from('distributor_sales').select('distributor_id, amount_cents'),
+  const [rows, levels, saleRows] = await Promise.all([
+    selectAll<DistributorRow>('distributors', DISTRIBUTOR_COLUMNS),
+    selectAll<{ distributor_id: string; level: DistributorLevel; effective_from: string }>('distributor_level_history', 'id, distributor_id, level, effective_from'),
+    selectAll<{ distributor_id: string; amount_cents: number }>('distributor_sales', 'id, distributor_id, amount_cents'),
   ])
-  if (d.error) fail('list distributors', d.error)
-  if (l.error) fail('list levels', l.error)
-  if (s.error) fail('list sales', s.error)
-  const rows = (d.data ?? []) as DistributorRow[]
+  rows.sort((a, b) => b.created_at.localeCompare(a.created_at))
   const latest = new Map<string, { level: DistributorLevel; at: number }>()
-  for (const h of (l.data ?? []) as Array<{ distributor_id: string; level: DistributorLevel; effective_from: string }>) {
+  for (const h of levels) {
     const at = Date.parse(h.effective_from)
     const prev = latest.get(h.distributor_id)
     if (!prev || at >= prev.at) latest.set(h.distributor_id, { level: h.level, at })
   }
   const sales = new Map<string, number>()
-  for (const r of (s.data ?? []) as Array<{ distributor_id: string; amount_cents: number }>) {
+  for (const r of saleRows) {
     sales.set(r.distributor_id, (sales.get(r.distributor_id) ?? 0) + r.amount_cents)
   }
   const names = new Map(rows.map((r) => [r.id, r.display_name]))
@@ -95,8 +110,18 @@ export async function createDistributor(input: CreateDistributorInput): Promise<
   return data as DistributorRow
 }
 
-/** Makes sure the active rule version exists and the distributor has a starting level. Idempotent. */
-async function ensureStartingLevel(distributorId: string, at: string): Promise<void> {
+/** JSON with object keys sorted, so a jsonb round-trip compares equal to the source object. */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+/** Registers the active rule version; refuses if the stored config differs (rules changed without a new version). */
+async function ensureRuleVersion(): Promise<void> {
   const rules = AI_STEWARD_RULES_V1
   const version = await supabaseAdmin
     .from('distributor_rule_versions')
@@ -105,14 +130,31 @@ async function ensureStartingLevel(distributorId: string, at: string): Promise<v
       { onConflict: 'version', ignoreDuplicates: true },
     )
   if (version.error) fail('register rule version', version.error)
+  const stored = await supabaseAdmin.from('distributor_rule_versions').select('config').eq('version', rules.version).maybeSingle()
+  if (stored.error) fail('load rule version', stored.error)
+  if (!stored.data || canonicalJson((stored.data as { config: unknown }).config) !== canonicalJson(rules)) {
+    console.error(`[distributor-store] rule version ${rules.version} in the database differs from the code`)
+    throw new DistributorStoreError('rule version mismatch: the rules changed without a new version number', 500)
+  }
+}
+
+/**
+ * Makes sure the distributor has a starting level and returns the earliest level start (ISO).
+ * Idempotent; a concurrent duplicate insert is treated as success.
+ */
+async function ensureStartingLevel(distributorId: string, at: string): Promise<string> {
+  await ensureRuleVersion()
   const existing = await supabaseAdmin
-    .from('distributor_level_history').select('id').eq('distributor_id', distributorId).limit(1)
+    .from('distributor_level_history').select('effective_from').eq('distributor_id', distributorId)
+    .order('effective_from', { ascending: true }).limit(1)
   if (existing.error) fail('load level history', existing.error)
-  if ((existing.data ?? []).length > 0) return
+  const first = (existing.data ?? []) as Array<{ effective_from: string }>
+  if (first.length > 0) return first[0].effective_from
   const inserted = await supabaseAdmin.from('distributor_level_history').insert({
-    distributor_id: distributorId, level: 'standard', effective_from: at, reason: 'approved', rule_version: rules.version,
+    distributor_id: distributorId, level: 'standard', effective_from: at, reason: 'approved', rule_version: AI_STEWARD_RULES_V1.version,
   })
-  if (inserted.error) fail('insert starting level', inserted.error)
+  if (inserted.error && inserted.error.code !== '23505') fail('insert starting level', inserted.error)
+  return at
 }
 
 /**
@@ -145,7 +187,11 @@ export async function recordSale(input: SaleInput, actorEmail: string): Promise<
   const seller = await getDistributor(input.distributorId)
   if (seller.status !== 'approved') throw new DistributorStoreError('sales can only be recorded for approved distributors', 409)
   // Self-heal an approval whose level insert failed half-way; the engine refuses distributors without a level.
-  await ensureStartingLevel(seller.id, seller.approved_at ?? new Date().toISOString())
+  const levelStart = await ensureStartingLevel(seller.id, seller.approved_at ?? new Date().toISOString())
+  // A sale paid before the distributor had a level would make every later statement fail to compute.
+  if (Date.parse(input.paidAt) < Date.parse(levelStart)) {
+    throw new DistributorStoreError('the payment date is before this distributor was approved', 409)
+  }
   const { data, error } = await supabaseAdmin
     .from('distributor_sales')
     .insert({
@@ -171,9 +217,12 @@ export async function recordSale(input: SaleInput, actorEmail: string): Promise<
 export async function recordRefund(input: RefundInput, actorEmail: string): Promise<Record<string, unknown>> {
   const original = await supabaseAdmin.from('distributor_sales').select(SALE_COLUMNS).eq('id', input.refundOfSaleId).maybeSingle()
   if (original.error) fail('load original sale', original.error)
-  const o = original.data as { id: string; kind: string; distributor_id: string; amount_cents: number; currency: string } | null
+  const o = original.data as { id: string; kind: string; distributor_id: string; amount_cents: number; currency: string; paid_at: string } | null
   if (!o) throw new DistributorStoreError('original sale not found', 404)
   if (o.kind === 'refund') throw new DistributorStoreError('a refund cannot be refunded', 409)
+  if (Date.parse(input.paidAt) < Date.parse(o.paid_at)) {
+    throw new DistributorStoreError('the refund date is before the original payment date', 409)
+  }
   const prior = await supabaseAdmin.from('distributor_sales').select('amount_cents').eq('refund_of_sale_id', o.id)
   if (prior.error) fail('load earlier refunds', prior.error)
   const remaining = ((prior.data ?? []) as Array<{ amount_cents: number }>).reduce((sum, r) => sum + r.amount_cents, o.amount_cents)

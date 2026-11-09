@@ -79,8 +79,18 @@ export function todayString(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland' }).format(new Date())
 }
 
+/** New Zealand UTC offset (e.g. "+13:00" in summer, "+12:00" in winter) at noon of the given date. */
+export function nzOffset(date: string): string {
+  const name = new Intl.DateTimeFormat('en-US', { timeZone: 'Pacific/Auckland', timeZoneName: 'longOffset' })
+    .formatToParts(new Date(`${date}T00:00:00Z`))
+    .find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+12:00'
+  return name.replace('GMT', '') || '+00:00'
+}
+
+/** Today → the current moment (never "in the future"); a past date → noon New Zealand time that day. */
 export function toPaidAt(date: string): string {
-  return `${date}T12:00:00+13:00`
+  if (date === todayString()) return new Date().toISOString()
+  return `${date}T12:00:00${nzOffset(date)}`
 }
 
 export function parseDollarsToCents(value: string): number | null {
