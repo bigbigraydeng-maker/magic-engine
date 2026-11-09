@@ -31,6 +31,7 @@ import {
 } from '@/lib/ads-strategy/ad-draft'
 import { isPlaybackGoal, PLAYBACK_REQUIRED_PLATFORMS } from '@/lib/ads-strategy/launch-readback'
 import { lockPlacements, targetingPlacement } from '@/lib/ads-strategy/placement-lock'
+import { partnerPagePublishRefusal } from '@/lib/ads-strategy/partner-page'
 import { reelsLeadPublishRefusal } from '@/lib/ads-strategy/reels-lead'
 import { assertOwnedByAccount } from './owned-ad-object'
 import { readExistingAdSetSpend } from './existing-adset-spend'
@@ -262,6 +263,7 @@ function creativeSpec(d: AdDraft, c: AdDraftCreative): Record<string, string> {
     case 'reels_lead':
       storySpec.video_data = leadFormVideoData(d, c)
       break
+    case 'partner_page':
     case 'lead_form': {
       if (c.videoId) {
         // 视频留资：实测过审的写法是 video_data（读回来是 object_type VIDEO），不是把 video_id 塞进 link_data
@@ -540,6 +542,8 @@ export async function publishDraftPaused(
   accessToken: string,
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
+  const partnerRefusal = await partnerPagePublishRefusal(d, adAccountId, accessToken)
+  if (partnerRefusal) return { ok: false, step: 'creative', error: partnerRefusal, orphans: [] }
   const reelsRefusal = reelsLeadPublishRefusal(d)
   if (reelsRefusal) return { ok: false, step: reelsRefusal.step, error: reelsRefusal.error, orphans: [] }
   const refused = refuseBadPlacements(d)

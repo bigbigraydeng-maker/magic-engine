@@ -26,6 +26,7 @@ import {
   emptyMeta,
   type GateFailure,
   type GateReason,
+  type GateState,
   type MailNewGates,
   type PreLockResult,
   type SendMeta,
@@ -152,6 +153,16 @@ export interface MailNewDeps {
    * The caller still records every outcome afterwards; the receipt table drops the repeat (same request, same outcome).
    */
   recordUnderLock?(input: SendMailNewInput, result: SendMailNewResult): Promise<void>
+  /**
+   * Gives the tracked links of the body a click token (design 2026-11-10 B2 §4.2), after every gate and inside the
+   * guest's lock. Never throws: tracking is not a safety gate, so a failure returns the body untouched with a warning.
+   * Only the body is passed: links in the footer (an unsubscribe link, say) are never tokened.
+   */
+  tagLinks?(args: { input: SendMailNewInput; requestId: string; body: string; config: EffectiveEmailConfig; state: GateState }): Promise<{
+    body: string
+    tagged: number
+    warning: string | null
+  }>
 }
 
 const fail = (
@@ -486,13 +497,20 @@ async function sendUnderLock(args: LockedSend, deps: MailNewDeps): Promise<SendM
     if (!step.ok) return gateFailure(step)
     meta = step.meta
   }
+  let body = args.body
+  if (pre !== null && meta !== undefined && deps.tagLinks !== undefined) {
+    const tagged = await tagLinksSafely(deps.tagLinks, { input, requestId: args.requestId, body, config, state: pre.state })
+    body = tagged.body
+    const notes = [...(tagged.warning === null ? [] : [tagged.warning]), ...(tagged.tagged > 0 ? [`link_tracked:${tagged.tagged}`] : [])]
+    if (notes.length > 0) meta = { ...meta, warnings: [...meta.warnings, ...notes] }
+  }
   let sent: SendMailNewResult
   try {
     sent = await claimAndSend(
       {
         input,
         subject: args.subject,
-        body: appendFooter(args.body, config.footer),
+        body: appendFooter(body, config.footer),
         requestId: args.requestId,
         to: args.to,
         mailbox: args.mailbox,
@@ -510,6 +528,19 @@ async function sendUnderLock(args: LockedSend, deps: MailNewDeps): Promise<SendM
   const result = meta === undefined ? sent : { ...sent, meta }
   await recordLocked(args, deps, result)
   return result
+}
+
+/** A tagLinks that throws anyway must not turn into a refusal (this is still before the send starts). */
+async function tagLinksSafely(
+  tag: NonNullable<MailNewDeps['tagLinks']>,
+  args: Parameters<NonNullable<MailNewDeps['tagLinks']>>[0],
+): Promise<{ body: string; tagged: number; warning: string | null }> {
+  try {
+    return await tag(args)
+  } catch (err) {
+    console.error('[mail-send-new] 打编号出错，这封按原文发出:', err instanceof Error ? err.message : err)
+    return { body: args.body, tagged: 0, warning: 'link_tracking_failed' }
+  }
 }
 
 const SEND_UNKNOWN_MESSAGE = '系统出错了，这封邮件有没有发出去还不确定。请先到时间线确认，别重复发送。'

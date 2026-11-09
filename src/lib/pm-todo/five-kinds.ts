@@ -79,6 +79,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   // 依法要求删数据我们答应了却没做到 —— 对外 / 合规义务。how 虽是「让开发查」，但主干明确
   // 要它留在 PM 可见栏（不许只写日志、进了 NEVER_DROP_KINDS），风险归 PM 拍板一栏。
   meta_data_deletion_failure: 'decide',
+  crm_link_tracking_silent: 'dev', // 邮件点击追踪疑似坏了：开发去修，信照常发
   // Magic Bridge 免费名额快满：加不加额度、加到多少美元由 PM 定（花钱）；不加则新客户到月底出不了报告
   magic_bridge_quota: 'decide',
   tools_wide_budget_warning: 'decide',
