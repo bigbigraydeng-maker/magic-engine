@@ -206,6 +206,8 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   ads_agent_daily_pull_gap: 'dev', // 每日回拉里日结果/体检局部失败：开发排查
   ads_heartbeat_stall: 'dev', // 广告小时心跳停摆或配置错误：开发排查
   ads_daily_spend_over_cap_notice: 'decide', // 花费超日上限只读提醒，不自动暂停
+  ads_circuit_breaker_pause: 'decide', // 异常只出暂停确认卡，等人点了才停
+  ads_circuit_breaker_alert: 'decide', // 快照或花费太旧，只提醒，不出卡
   ads_plan_daily_cap_missing: 'decide', // 已批准计划还没填每天总上限，加预算会被拦住
   cron_not_running: 'dev',
   cron_silent_success: 'dev',
