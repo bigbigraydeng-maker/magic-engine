@@ -40,6 +40,7 @@ import { libaiPromptLibraryMonthly } from './libai-prompt-library-monthly'
 import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
 import { gscPageDailyFanOut, gscPageDailyPull } from './gsc-page-daily'
 import { baozhengWeekly } from './baozheng-weekly'
+import { distributorMonthlyStatement } from './distributor-monthly-statement'
 import { gscQueryPageDailyFanOut, gscQueryPageDailyPull } from './gsc-query-page-daily'
 import { toolsLabLeadFollowUp, toolsLabReportEmailReceipt } from './tools-lab-lead-followup'
 import { dailyPlanAutoPublish } from './daily-plan-auto-publish'
@@ -110,6 +111,7 @@ export const cloudFunctions = [
   simaqianReputationWeekly,
   // 包拯：每周复核 AI 判客人阶段准不准（只读；总开关 BAOZHENG_ENABLED 默认关）
   baozhengWeekly,
+  distributorMonthlyStatement,
   gscPageDailyFanOut,
   gscPageDailyPull,
   gscQueryPageDailyFanOut,
