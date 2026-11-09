@@ -18,6 +18,9 @@ import { CRON_REGISTRY } from '@/lib/cron/registry'
 import { WEEKLY_LOOP_JOB, type WeeklyLoopDeps } from '@/lib/social/weekly-loop/run'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
+const imageStep = vi.hoisted(() => ({ run: vi.fn() }))
+vi.mock('@/lib/social/image-post-step', () => ({ runImagePostStep: imageStep.run }))
+vi.mock('@/lib/ai/openai-client', () => ({ getOpenAIClient: () => ({ chat: { completions: { create: vi.fn() } } }) }))
 
 type Fn = ReturnType<typeof createSocialWeeklyDraftFunction>
 const optsOf = (fn: Fn) =>
@@ -205,5 +208,50 @@ describe('social-weekly-draft function', () => {
     expect(resolveMode('write', { SOCIAL_WEEKLY_LOOP_WRITE: 'TRUE' }, true)).toEqual({ mode: 'dry_run', forced: true })
     expect(resolveMode('dry_run', { SOCIAL_WEEKLY_LOOP_WRITE: 'true' }, true)).toEqual({ mode: 'dry_run', forced: false })
     expect(resolveMode(undefined, {}, true)).toEqual({ mode: 'dry_run', forced: false })
+  })
+})
+
+describe('social-weekly-draft: the image-post draft step is isolated from the reel run', () => {
+  const env = { SOCIAL_WEEKLY_LOOP_ENABLED: 'true', SOCIAL_WEEKLY_LOOP_WRITE: 'true' }
+
+  it('🔴 an image-post step that throws becomes an error receipt: the run log is still finished and the reel receipt is returned', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key')
+    imageStep.run.mockRejectedValueOnce(new Error('boom'))
+    const deps = makeDeps(env)
+    const fn = createSocialWeeklyDraftFunction(deps)
+
+    const out = (await handlerOf(fn)({ event: dueEvent('write'), step: fakeStep() })) as { mode: string }
+
+    expect(out.mode).toBe('write')
+    expect(deps.finishRun).toHaveBeenCalledTimes(1)
+    const call = (deps.finishRun as unknown as { mock: { calls: [{ summary: { imagePost: { error: string | null } } }][] } }).mock.calls[0][0]
+    expect(call.summary.imagePost.error).toContain('image_step_failed: boom')
+    vi.unstubAllEnvs()
+  })
+
+  it('a successful image-post step is recorded in the run log as before', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key')
+    imageStep.run.mockResolvedValueOnce({ attempted: 1, drafted: 1, planIds: ['p1'], skipped: null, error: null })
+    const deps = makeDeps(env)
+    const fn = createSocialWeeklyDraftFunction(deps)
+
+    await handlerOf(fn)({ event: dueEvent('write'), step: fakeStep() })
+
+    expect(imageStep.run).toHaveBeenCalledWith('c1', '2026-11-05', expect.anything(), null, expect.anything())
+    const call = (deps.finishRun as unknown as { mock: { calls: [{ summary: { imagePost: { drafted: number } } }][] } }).mock.calls[0][0]
+    expect(call.summary.imagePost.drafted).toBe(1)
+    vi.unstubAllEnvs()
+  })
+
+  it('🔴 a dry run never drafts image posts', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'test-key')
+    imageStep.run.mockClear()
+    const deps = makeDeps({})
+    const fn = createSocialWeeklyDraftFunction(deps)
+
+    await handlerOf(fn)({ event: dueEvent('dry_run'), step: fakeStep() })
+
+    expect(imageStep.run).not.toHaveBeenCalled()
+    vi.unstubAllEnvs()
   })
 })
