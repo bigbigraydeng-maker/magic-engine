@@ -31,22 +31,30 @@ export function dryDeps(): SampleDeps {
       rows.splice(0, rows.length, ...kept)
       return removed
     },
+    loadSamples: async () => rows.filter((row) => row.clientId === DRY_CLIENT),
+    capMinor: async () => 1000,
   }
 }
 
 function seed(): SpendDraft[] {
   const today = accountDayKey(TZ, DRY_NOW) ?? '2026-11-09'
-  return [{
-    clientId: DRY_CLIENT,
-    adAccountId: ACCOUNT,
-    accountDay: shiftDay(today, -30),
-    sampledAt: new Date(DRY_NOW.getTime() - 30 * 86_400_000).toISOString(),
-    localMinute: 0,
-    entityLevel: 'campaign',
-    entityId: 'cmp_synth',
-    spendMinor: 1,
-    impressions: 1,
-    currency: 'NZD',
-    timezone: TZ,
-  }]
+  const rows: SpendDraft[] = []
+  for (let ago = 1; ago <= 4; ago += 1) {
+    const day = shiftDay(today, -ago)
+    for (let hour = 0; hour <= 24; hour += 1) {
+      const localMinute = hour === 24 ? 1430 : hour * 60
+      const spendMinor = hour === 24 ? 1000 : Math.round((1000 * localMinute) / 1440)
+      rows.push(draft(day, localMinute, spendMinor, new Date(DRY_NOW.getTime() - ago * 86_400_000).toISOString()))
+    }
+  }
+  rows.push(draft(shiftDay(today, -30), 0, 1, new Date(DRY_NOW.getTime() - 30 * 86_400_000).toISOString()))
+  return rows
+}
+
+function draft(day: string, localMinute: number, spendMinor: number, sampledAt: string): SpendDraft {
+  return {
+    clientId: DRY_CLIENT, adAccountId: ACCOUNT, accountDay: day, sampledAt,
+    localMinute, entityLevel: 'campaign', entityId: 'cmp_synth', spendMinor,
+    impressions: 10, currency: 'NZD', timezone: TZ,
+  }
 }
