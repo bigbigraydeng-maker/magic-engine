@@ -75,8 +75,22 @@ describe('runWithStore', () => {
     const { db, insertOutcome } = store({ findCaseId: async () => null })
     const receipt = await runWithStore(db, NOW)
     expect(receipt.unsaved).toBe(1)
+    expect(receipt.missing_case).toBe(1)
+    expect(receipt.held.some(line => line.startsWith('rx-1:'))).toBe(true)
     expect(receipt.outcomes_written).toBe(0)
+    expect(receipt.save_errors).toEqual([])
     expect(insertOutcome).not.toHaveBeenCalled()
+  })
+
+  it('keeps a save failure visible and does not count it as written', async () => {
+    const { db } = store({
+      insertOutcome: async () => { throw new Error('outcome row rejected') },
+    })
+    const receipt = await runWithStore(db, NOW)
+    expect(receipt.outcomes_written).toBe(0)
+    expect(receipt.failed).toBeGreaterThan(0)
+    expect(receipt.save_errors).toContain('outcome row rejected')
+    expect(receipt.missing_case).toBe(0)
   })
 
   it('does not overwrite a row already marked met', async () => {

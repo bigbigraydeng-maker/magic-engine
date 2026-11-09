@@ -43,6 +43,7 @@ export type AdsAgentSyncStaleItemKind = 'ads_agent_sync_stale'
 export type AdsDailySpendOverCapNoticeItemKind = 'ads_daily_spend_over_cap_notice'
 export type AdsHeartbeatStallItemKind = 'ads_heartbeat_stall'
 export type AdsAgentDailyPullGapItemKind = 'ads_agent_daily_pull_gap'
+export type AdsPlanDailyCapMissingItemKind = 'ads_plan_daily_cap_missing'
 
 const DAILY_PULLBACK_JOB = 'google-data-pullback-daily'
 const DAILY_PULLBACK_STALE_HOURS = 30
@@ -259,8 +260,20 @@ export async function pushAdsDailySpendOverCapNoticeItems(
     if (trippedCaps.has(client.id)) continue
     const facts = await loadClientCapFacts(client.id)
     const verdict = evaluateDailySpendOverCapNotice(facts)
-    if (!verdict.alert) continue
     const name = client.name || nameOf(client.id)
+    if (!verdict.alert) {
+      if ('skipReason' in verdict && verdict.skipReason === 'no_cap') {
+        items.push({
+          kind: 'ads_plan_daily_cap_missing',
+          client_id: client.id,
+          client_name: name,
+          what: `${name} 的已批准广告计划里还没有每天广告总上限。没有这个数，加预算会被拦住。`,
+          how: '打开广告计划，填上每天的广告总上限，保存后再批准。不要用以前的客户总闸，也不要填 0。',
+          href: `${APP_BASE}/dashboard/clients/${encodeURIComponent(client.id)}/promo-plan`,
+        })
+      }
+      continue
+    }
     items.push({
       kind: 'ads_daily_spend_over_cap_notice',
       client_id: client.id,

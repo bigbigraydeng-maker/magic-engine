@@ -48,6 +48,7 @@ import type {
   AdsAgentSyncStaleItemKind,
   AdsDailySpendOverCapNoticeItemKind,
   AdsHeartbeatStallItemKind,
+  AdsPlanDailyCapMissingItemKind,
 } from './ads-agent-stale-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
@@ -333,6 +334,7 @@ export type ManualItemKind =
   | AdsAgentDailyPullGapItemKind
   | AdsDailySpendOverCapNoticeItemKind
   | AdsHeartbeatStallItemKind
+  | AdsPlanDailyCapMissingItemKind
   /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */
   | GoalRolloverItemKind
   /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */

@@ -8,6 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
+import { executedReviewStamp, type ReviewStamp } from '@/lib/flywheel/attribution/executed-review'
 import type { BudgetOrder, MetricDirection } from './types'
 import type { PrescriptionLock } from './prescription-lock'
 
@@ -36,6 +37,7 @@ export interface BudgetHold {
   writeAttempted: boolean
   wroteMeta: boolean
   resultLine?: string
+  review?: ReviewStamp
 }
 
 export interface HoldRow {
@@ -105,15 +107,30 @@ export async function saveHold(
   row: HoldRow,
   payload: BudgetHold,
 ): Promise<void> {
+  const stamped = withReview(payload)
+  const patch: Record<string, unknown> = {
+    payload: stamped,
+    expected_metric: stamped.order.expectedMetric,
+    expected_delta: directionDelta(stamped.direction),
+  }
+  if (stamped.status === 'executed') patch.executed_at = new Date().toISOString()
   const { error } = await sb.from('flywheel_actions')
-    .update({
-      payload,
-      expected_metric: payload.order.expectedMetric,
-      expected_delta: directionDelta(payload.direction),
-    })
+    .update(patch)
     .eq('id', row.id)
     .eq('client_id', clientId)
   if (error) throw new ConfirmationCardError('invalid', '结果没能记下。没有再改一次日预算。')
+}
+
+function withReview(payload: BudgetHold): BudgetHold {
+  if (payload.status !== 'executed') return payload
+  const review = executedReviewStamp({
+    metric: payload.order.expectedMetric,
+    direction: payload.direction,
+    observationWindowDays: payload.observationWindowDays,
+    objectId: payload.order.adsetId,
+    source: payload.lock,
+  })
+  return review ? { ...payload, review } : payload
 }
 
 function actionRow(clientId: string, payload: BudgetHold) {

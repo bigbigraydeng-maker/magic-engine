@@ -25,6 +25,7 @@ import QualifiedPanel from './qualified-panel'
 import { TodayGoalProgress } from './today-goal-progress'
 import WarMapPanel from './war-map-panel'
 import LiveTodayPanel from './live-today-panel'
+import LivePacingPanel from './live-pacing-panel'
 import HourlyLeadsPanel from './hourly-leads-panel'
 import BreakdownPanel from './breakdown-panel'
 import EntityTreePanel from './entity-tree-panel'
@@ -421,6 +422,10 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
         setResult({ kind: 'err', text: '这条广告的每天预算改不了。能立刻做的是先全停。' })
         return
       }
+      if (json.status === 'awaiting_confirmation') {
+        setResult({ kind: 'err', text: '确认卡已出，预算和投放都还没改。请到确认卡上点确认。' })
+        return
+      }
       if (json.status === 'awaiting_approval') {
         setResult({ kind: 'err', text: '止损请求已登记，正在等待授权；广告目前还没有确认变更。' })
         return
@@ -651,6 +656,7 @@ export default function AdsHealthPage() {
           <HourlyLeadsPanel clientId={clientId} />
           {/* 作战地图（只给内部员工；非内部人员接口回 403，面板自己不渲染）。三句话先看。 */}
           <LiveTodayPanel clientId={clientId} part="today" />
+          <LivePacingPanel clientId={clientId} />
           <WarMapPanel clientId={clientId} />
           {/* 每日广告成绩单：只给内部员工（客户版没有 payload，见 growth-client-view 白名单）；今天还没巡察就不显示 */}
           {!loading && !error && data?.growth && !('viewer' in data.growth) && (

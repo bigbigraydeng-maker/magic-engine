@@ -7,6 +7,7 @@
  * 所有读取都带 client_id（目标 / 广告账户额外校验归属同一客户）。
  */
 
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { supabaseAdmin } from '@/lib/supabase'
 import { accountDayKey } from '@/lib/ads-strategy/account-timezone'
 import { parseCreativePool } from '@/lib/ads-strategy/config'
@@ -100,16 +101,18 @@ async function loadAccountTotal(clientId: string, currency: string | null): Prom
 }
 
 async function loadStrategyConfig(clientId: string): Promise<GateFacts['config']> {
-  const { data, error } = await supabaseAdmin
-    .from('ad_strategy_configs')
-    .select('daily_budget_cap_cents, primary_result, creative_pool')
-    .eq('client_id', clientId)
-    .maybeSingle()
+  const [{ data, error }, planCap] = await Promise.all([
+    supabaseAdmin
+      .from('ad_strategy_configs')
+      .select('primary_result, creative_pool')
+      .eq('client_id', clientId)
+      .maybeSingle(),
+    readClientDailyTotalCap(supabaseAdmin, clientId),
+  ])
   if (error) return null
-  const row = data as { daily_budget_cap_cents?: number | null; primary_result?: string | null; creative_pool?: unknown } | null
-  const cap = row?.daily_budget_cap_cents
+  const row = data as { primary_result?: string | null; creative_pool?: unknown } | null
   return {
-    daily_budget_cap_cents: typeof cap === 'number' && cap > 0 ? cap : null,
+    daily_budget_cap_cents: planCap.state === 'set' ? planCap.cents : null,
     primary_result: row?.primary_result ?? null,
     creative_pool: parseCreativePool(row?.creative_pool).map(p => ({ ref: p.ref, status: p.status })),
   }

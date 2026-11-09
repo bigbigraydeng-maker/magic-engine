@@ -172,7 +172,7 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
               {item.title}
             </h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">
-              选择广告系列并执行修复动作 — 操作将实时写入 Meta Ads
+              暂停会先出确认卡，点确认之后才改广告。下调预算仍按原来的队列走。
             </p>
           </div>
           <button
@@ -188,7 +188,28 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
         <div className="flex-1 overflow-y-auto px-5 py-5">
 
           {/* Done state */}
-          {phase === 'done' && result && (
+          {phase === 'done' && result && result.status === 'awaiting_confirmation' && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+                <p className="text-sm font-black text-amber-800">已提交确认卡，广告还没改</p>
+                <p className="mt-1 text-sm text-amber-900">负责人在确认卡里点确认之后，才会暂停这个系列。</p>
+                <a
+                  href={`/dashboard/clients/${clientId}/confirmation-cards`}
+                  className="mt-3 inline-flex text-sm font-black text-amber-800 underline"
+                >
+                  去确认卡
+                </a>
+              </div>
+              <button
+                onClick={onClose}
+                className="w-full rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition-colors hover:bg-slate-800"
+              >
+                关闭
+              </button>
+            </div>
+          )}
+
+          {phase === 'done' && result && result.status !== 'awaiting_confirmation' && (
             <div className="space-y-4">
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
                 <p className="text-sm font-black text-emerald-700">执行成功</p>
@@ -375,7 +396,11 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                           {actionType === 'ads.pause_campaign' ? '暂停' : `调整日预算至 $${newDailyBudget}`}
                         </strong>
                       </p>
-                      <p className="mt-1 text-xs text-orange-600">此操作将实时写入 Meta Ads，花费立即停止或变化。</p>
+                      <p className="mt-1 text-xs text-orange-600">
+                        {actionType === 'ads.pause_campaign'
+                          ? '这一步只提交确认卡。点确认之后才会暂停，现在不会改广告。'
+                          : '下调预算会进入原来的队列，不会在这一步直接改 Meta。'}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -408,7 +433,7 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                     </svg>
                     执行中…
                   </>
-                ) : '确认执行 →'}
+                ) : actionType === 'ads.pause_campaign' ? '提交确认卡' : '确认执行 →'}
               </button>
             )}
           </footer>

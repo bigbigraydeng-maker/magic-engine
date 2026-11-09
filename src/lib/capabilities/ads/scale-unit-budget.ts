@@ -74,6 +74,25 @@ async function assertExclusiveRegisteredAccount(clientId: string, accountId: str
   if (others.length) throw new KernelError('INVALID_INPUT', '该 Meta 广告账户登记给多个客户，暂不允许自动调整预算')
 }
 
+function cardWriteBlock(
+  sb: SupabaseClient,
+  step: CapabilityStepContext,
+  accountId: string,
+  level: 'adset' | 'campaign',
+  entityId: string,
+  current: number,
+  target: number,
+): Promise<string | null> {
+  const stamped = step.priorOutputs.snapshot_pre?.snapshotted_at
+  return budgetCardWriteBlock(sb, step.ctx.clientId, step.runInput, current, target, {
+    runId: step.ctx.runId,
+    accountId,
+    level,
+    entityId,
+    snapshottedAt: typeof stamped === 'string' ? stamped : null,
+  })
+}
+
 function rollbackBudgets(step: CapabilityStepContext, priorOutputs: Readonly<Record<string, Record<string, unknown>>>) {
   const output = priorOutputs.apply ?? {}
   // Input values authorize the intended change; they do not prove that this
@@ -183,7 +202,7 @@ export function createScaleUnitBudgetCapability(sb: SupabaseClient): CapabilityI
           const current = await readCampaignBudget(campaign, accountId, token)
           if (current !== expected) throw new RetryableCapabilityError('Meta 当前系列预算与审批时的金额不同；已停止修改，请重新提交并审批')
           assertScaleLimit(current, target)
-          const cardBlock = await budgetCardWriteBlock(sb, step.ctx.clientId, step.runInput, current, target)
+          const cardBlock = await cardWriteBlock(sb, step, accountId, 'campaign', campaign, current, target)
           if (cardBlock) throw new KernelError('INVALID_INPUT', cardBlock)
           const ok = await setCampaignDailyBudget(campaign, token, target)
           if (!ok) throw new RetryableCapabilityError(`提高广告系列 ${campaign} 预算失败：Meta 未确认写入`)
@@ -216,7 +235,7 @@ export function createScaleUnitBudgetCapability(sb: SupabaseClient): CapabilityI
         if (!Number.isSafeInteger(beforeCents) || beforeCents !== expectedBeforeCents) {
           throw new RetryableCapabilityError('Meta 当前预算与审批时看到的金额不同；已停止修改，请重新检查并提交')
         }
-        const cardBlock = await budgetCardWriteBlock(sb, step.ctx.clientId, step.runInput, beforeCents, newCents)
+        const cardBlock = await cardWriteBlock(sb, step, accountId, 'adset', id, beforeCents, newCents)
         if (cardBlock) throw new KernelError('INVALID_INPUT', cardBlock)
 
         const ok = await setAdSetDailyBudget(id, token, newCents)
