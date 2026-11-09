@@ -88,6 +88,21 @@ export interface PublishedToursProviderSettings {
   allToursUrl: string // https URL
 }
 
+/**
+ * The client's current brochure / catalogue, sent by the one-click catalogue line. Client configuration only: what the
+ * document is (a tour brochure, a property booklet) lives in the template text, never in shared code.
+ */
+export interface CatalogueProviderSettings {
+  /** The template the catalogue line sends. Never cap-exempt (the parser refuses it). */
+  templateKey: string
+  /** Shown to people and kept on the line's records, e.g. "v9". */
+  versionLabel: string
+  /** https, its host in guardrails.allowedLinkHosts. */
+  url: string
+  /** YYYY-MM-DD, inclusive, in the client's time zone. After it no mail may carry `url`. */
+  validUntil: string
+}
+
 export interface EmailSettings {
   enabled: boolean
   sendMailbox: string | null
@@ -101,5 +116,5 @@ export interface EmailSettings {
   sameTemplateCooldownHours: number
   callPromptHours: number
   guardrails: { allowedLinkHosts: string[]; rules: GuardrailRule[] }
-  providers: { publishedTours?: PublishedToursProviderSettings }
+  providers: { publishedTours?: PublishedToursProviderSettings; catalogue?: CatalogueProviderSettings }
 }

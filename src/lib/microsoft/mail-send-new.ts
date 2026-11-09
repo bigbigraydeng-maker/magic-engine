@@ -145,6 +145,13 @@ export interface MailNewDeps {
   now?: () => Date
   /** The template-era gates. Only clients with a settings row run them; legacy configs behave exactly as before. */
   gates?: MailNewGates
+  /**
+   * Writes the receipt of an attempt that got as far as the send, while this guest's locks are still held. Never throws.
+   * The follow-up gate (same-template cooldown, one follow-up per call) reads receipts: written only after the locks were
+   * released, a second send started a moment later with another request id would not see the first one and go out too.
+   * The caller still records every outcome afterwards; the receipt table drops the repeat (same request, same outcome).
+   */
+  recordUnderLock?(input: SendMailNewInput, result: SendMailNewResult): Promise<void>
 }
 
 const fail = (
@@ -479,19 +486,41 @@ async function sendUnderLock(args: LockedSend, deps: MailNewDeps): Promise<SendM
     if (!step.ok) return gateFailure(step)
     meta = step.meta
   }
-  const sent = await claimAndSend(
-    {
-      input,
-      subject: args.subject,
-      body: appendFooter(args.body, config.footer),
-      requestId: args.requestId,
-      to: args.to,
-      mailbox: args.mailbox,
-      track: args.track,
-    },
-    deps,
-  )
-  return meta === undefined ? sent : { ...sent, meta }
+  let sent: SendMailNewResult
+  try {
+    sent = await claimAndSend(
+      {
+        input,
+        subject: args.subject,
+        body: appendFooter(args.body, config.footer),
+        requestId: args.requestId,
+        to: args.to,
+        mailbox: args.mailbox,
+        track: args.track,
+      },
+      deps,
+    )
+  } catch (err) {
+    // A message may have left: hold the guest until the "unknown" receipt is down, then let the caller see the exception.
+    if (args.track.sendStarted && meta !== undefined) {
+      await recordLocked(args, deps, { ...fail(503, 'send_unknown', SEND_UNKNOWN_MESSAGE), meta: { ...meta, blockDetail: 'send_exception' } })
+    }
+    throw err
+  }
+  const result = meta === undefined ? sent : { ...sent, meta }
+  await recordLocked(args, deps, result)
+  return result
+}
+
+const SEND_UNKNOWN_MESSAGE = '系统出错了，这封邮件有没有发出去还不确定。请先到时间线确认，别重复发送。'
+
+/** The receipt as sendMailNew will finally return it (with the mailbox), written before the locks are let go. */
+async function recordLocked(args: LockedSend, deps: MailNewDeps, result: SendMailNewResult): Promise<void> {
+  if (deps.recordUnderLock === undefined || result.meta === undefined) return
+  const withMailbox: SendMailNewResult = { ...result, meta: { ...result.meta, mailbox: args.track.mailbox } }
+  await deps.recordUnderLock(args.input, withMailbox).catch((err: unknown) => {
+    console.error('[mail-send-new] 锁内记回执出错（发信结果不受影响）:', err instanceof Error ? err.message : err)
+  })
 }
 
 async function checkDnc(input: SendMailNewInput, deps: MailNewDeps): Promise<SendMailNewResult | null> {

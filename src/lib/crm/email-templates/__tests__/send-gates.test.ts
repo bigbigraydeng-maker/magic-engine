@@ -161,6 +161,8 @@ function renderedText(
       settings: settingsObj().providers.publishedTours ?? null,
     },
     provider,
+    catalogue: null,
+    today: '2026-10-28',
   })
   return { subject: out.subject, body: out.body }
 }
@@ -1022,5 +1024,47 @@ describe('inLock: weekly cap and exempt templates', () => {
     if (result.ok) return
     expect(result.status).toBe(409)
     expect(result.reason).toBe('frequency_cap')
+  })
+})
+
+// ---- catalogue (design 2026-11-09 §3.3) -------------------------------------
+
+describe('preLock: the catalogue gate is wired into the real send path', () => {
+  const URL = 'https://www.example.com/brochures/Brochure-2027.pdf'
+  const withCatalogue = (validUntil: string) =>
+    config({ providers: { catalogue: { templateKey: 'catalogue-send', versionLabel: 'v9', url: URL, validUntil } } })
+  const freeMail = (over: Partial<PreLockArgs> = {}) =>
+    preArgs({ template: null, subject: 'Brochure', body: `Here it is: ${URL}`, ...over })
+
+  it('a free-written mail carrying an expired catalogue link is refused, with the date in the message', async () => {
+    const result = await createSendGates(makeData()).preLock(freeMail({ config: withCatalogue('2026-10-27') }))
+    expect(result).toMatchObject({ ok: false, status: 409, reason: 'catalogue_expired' })
+    if (result.ok) return
+    expect(result.error).toContain('2026-10-27')
+    expect(result.meta.blockDetail).toBe('catalogue_expired') // the code, never the link
+  })
+
+  it('the last valid day still sends', async () => {
+    const result = await createSendGates(makeData()).preLock(freeMail({ config: withCatalogue('2026-10-28') }))
+    expect(result.ok).toBe(true)
+  })
+
+  it('"today" is the client\'s day: 12:00 UTC on 27 Oct is already the 28th in Auckland, still the 27th in Sydney', async () => {
+    const now = new Date('2026-10-27T12:00:00Z')
+    const auckland = await createSendGates(makeData()).preLock(freeMail({ config: withCatalogue('2026-10-27'), now }))
+    expect(auckland).toMatchObject({ ok: false, reason: 'catalogue_expired' })
+    const sydney = await createSendGates(makeData({ loadTimeZone: vi.fn(async () => 'Australia/Sydney') })).preLock(
+      freeMail({ config: withCatalogue('2026-10-27'), now }),
+    )
+    expect(sydney.ok).toBe(true)
+  })
+
+  it('a template that uses {{catalogue_url}} is refused when the client has no catalogue', async () => {
+    const tpl = template({ templateKey: 'catalogue-send', factSource: 'none', pickMode: 'none', subject: 'Brochure', body: 'Hi {{first_name}}, {{catalogue_url}}' })
+    const data = makeData({ loadTemplate: vi.fn(async () => tpl) })
+    const result = await createSendGates(data).preLock(
+      preArgs({ template: templateReq({ key: 'catalogue-send', catalogVersion: null, picks: [] }), subject: 'Brochure', body: 'Hi Amy, see the brochure' }),
+    )
+    expect(result).toMatchObject({ ok: false, reason: 'catalogue_unavailable' })
   })
 })

@@ -14,7 +14,9 @@ import { evaluateContentGates } from './gates/content-gates'
 import { evaluateFollowUp } from './gates/follow-up'
 import { evaluateFrequency } from './gates/frequency'
 import type { ExemptIdLoader, FrequencySources, GateViolation } from './gates/types'
-import { renderTemplate } from './render'
+import { evaluateCatalogue } from './gates/catalogue'
+import { scanPlaceholders } from './placeholders'
+import { catalogueRenderFields, renderTemplate } from './render'
 import { checkTemplateSendable } from './template-store'
 import { DEFAULT_TIME_ZONE, isValidTimeZone } from './time-zone'
 import type { CallBasis, EmailTemplateVersion, StoredReceipt } from './types'
@@ -35,6 +37,8 @@ export type GateReason =
   | 'tour_page_not_on_sale'
   | 'departure_not_on_sale'
   | 'content_blocked'
+  | 'catalogue_expired'
+  | 'catalogue_unavailable'
   | 'already_followed_up'
   | 'duplicate_template'
   | 'frequency_cap'
@@ -57,6 +61,8 @@ export const GATE_MESSAGES: Record<GateReason, string> = {
   tour_page_not_on_sale: '正文里有指向已下架团页的链接，请改掉。',
   departure_not_on_sale: '正文里的链接指向一个已不在售的班期，请改掉。',
   content_blocked: '正文里有不允许写的内容，请按提示改掉。',
+  catalogue_expired: '手册已过期，这封没有发出。请等新版手册换上后再发。',
+  catalogue_unavailable: '这个客户还没配目录，或目录已过期，这封没有发出。',
   already_followed_up: '这次通话后已经发过跟进邮件了。',
   duplicate_template: '同一个模板刚给他发过，请稍后再发。',
   frequency_cap: '他最近收到的邮件已达上限。',
@@ -328,6 +334,7 @@ async function attachRenderHash(
     inputs: template.inputs,
     facts: stage.facts,
     provider: stage.provider,
+    ...catalogueRenderFields(args.config.providers.catalogue, todayInZone(args.now, tz)),
   })
   // A render with gaps cannot be compared with what was sent: leave the edit flag unknown.
   if (rendered.missing.length > 0 || rendered.problems.length > 0) return
@@ -344,6 +351,24 @@ function contentFailure(blocks: readonly GateViolation[], meta: SendMeta): GateF
   return fail(409, reasonOf(blocks[0]), meta, blocks[0].detail)
 }
 
+function usesCatalogue(tpl: Pick<EmailTemplateVersion, 'subject' | 'body'>): boolean {
+  return [...scanPlaceholders(tpl.subject), ...scanPlaceholders(tpl.body)].some((ref) => ref.name === 'catalogue_url')
+}
+
+/** §3.3: no mail carries the link of an expired catalogue; a catalogue template is refused when there is none to send. */
+function catalogueStage(args: PreLockArgs, templateUsesCatalogue: boolean, tz: string, meta: SendMeta): GateFailure | null {
+  const verdict = evaluateCatalogue({
+    texts: args.footer ? [args.subject, args.body, args.footer] : [args.subject, args.body],
+    catalogue: args.config.providers.catalogue,
+    today: todayInZone(args.now, tz),
+    templateUsesCatalogue,
+  })
+  if (verdict.ok) return null
+  meta.blockDetail = verdict.reason
+  if (verdict.reason === 'catalogue_expired') return fail(409, 'catalogue_expired', meta, `有效期到 ${verdict.validUntil}`)
+  return fail(409, 'catalogue_unavailable', meta)
+}
+
 async function runPreLock(args: PreLockArgs, data: SendGateData, tz: string): Promise<PreLockResult> {
   const meta = emptyMeta()
   meta.finalSha256 = sha256(`${args.subject}\n${args.body}`)
@@ -358,9 +383,11 @@ async function runPreLock(args: PreLockArgs, data: SendGateData, tz: string): Pr
 
   let provider: FactProvider | null = null
   let facts: RenderFacts | null = null
+  let templateUsesCatalogue = false
   if (args.template !== null) {
     const stage = await templateStage(args, args.template, data, tz, meta)
     if (!('tpl' in stage)) return stage
+    templateUsesCatalogue = usesCatalogue(stage.tpl)
     provider = stage.provider
     facts = stage.facts
     if (provider === null) {
@@ -377,6 +404,10 @@ async function runPreLock(args: PreLockArgs, data: SendGateData, tz: string): Pr
     provider = stage.provider
     facts = stage.facts
   }
+
+  // Before the other content checks, so an expired catalogue is named as such rather than as a leftover placeholder.
+  const catalogue = catalogueStage(args, templateUsesCatalogue, tz, meta)
+  if (catalogue !== null) return catalogue
 
   const result = evaluateContentGates({
     subject: args.subject,
