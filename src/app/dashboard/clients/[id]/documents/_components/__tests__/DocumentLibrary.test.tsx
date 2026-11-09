@@ -200,11 +200,28 @@ describe('client member', () => {
     expect(screen.queryByText('客户员工也能下载')).toBeNull()
   })
 
-  it('does not even draw the upload form if it had been opened before the list said "cannot manage"', async () => {
+  it('shows an empty library as such, without an upload form', async () => {
     serve({ documents: [], canManage: false })
     render(<DocumentLibrary clientId={CLIENT} />)
     expect(await screen.findByText(/还没有可下载的资料/)).toBeTruthy()
     expect(screen.queryByRole('form', { name: '上传文件' })).toBeNull()
+  })
+
+  it('closes an open upload form when a refresh says the account can no longer manage the library', async () => {
+    let loads = 0
+    responses = [call => {
+      if (call.method !== 'GET') return undefined
+      loads += 1
+      return json({ documents: [BROCHURE], canManage: loads === 1 })
+    }]
+    render(<DocumentLibrary clientId={CLIENT} />)
+    await userEvent.click(await screen.findByRole('button', { name: '上传文件' }))
+    expect(screen.getByRole('form', { name: '上传文件' })).toBeTruthy()
+
+    await userEvent.click(screen.getByLabelText('显示旧版'))
+    await waitFor(() => expect(screen.queryByRole('form', { name: '上传文件' })).toBeNull())
+    expect(screen.queryByRole('button', { name: '上传文件' })).toBeNull()
+    expect(screen.getByRole('link', { name: '下载' })).toBeTruthy()
   })
 })
 

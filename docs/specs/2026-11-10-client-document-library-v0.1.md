@@ -85,7 +85,7 @@
 
 1. PM 本人回「合」合并这条 PR（A 级，碰数据库）。
 2. PM 同意后，在线上数据库执行迁移（建表 + 建私有桶）。
-3. PM 同意后，上传 CTS 的 9 个文件（Dropbox 里的 v11 手册 + 8 个单团 PDF），并由 PM 定这 9 个是否设为「客户员工可见」。
+3. PM 同意后，上传 CTS 的 9 个文件（Dropbox 里的 v11 手册 + 8 个单团 PDF），并由 PM 定这 9 个是否设为「客户员工可见」。用 `scripts/client-documents/import-files.ts`：先演练（只读本地文件，不联网、不用钥匙），再加 `--apply --project-ref <项目号>` 真写；写之前它会核对钥匙文件指向的项目和你给的项目号一致，不一致就拒绝。清单文件（谁能下载逐个写明，没有默认值）放在 Dropbox 的 `Tours/brochure-source-v11/资料库首批文件-manifest.json`，现在 9 个都写的是「仅内部」。
 4. 用内部账号和客户员工账号各点一次下载，核对。
 
 **回滚**：删表 `client_documents`、删桶 `me-client-documents`（先清空），再去掉客户页那张卡片；没有别的功能依赖它。
