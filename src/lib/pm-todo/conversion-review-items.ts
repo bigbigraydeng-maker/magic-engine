@@ -12,8 +12,9 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ManualItem } from './manual-items'
-import { formatMoney } from '@/lib/conversions/money'
 import { isPastEventWindow } from '@/lib/conversions/event-window'
+import { sweepPastWindowAll } from '@/lib/conversions/expire-pending'
+import { conversionReviewWhat, pastEventWindowCutoffIso } from '@/lib/conversions/review-copy'
 
 /** 一次最多列这么多，免得某天灌进来几百条把今日待办淹掉。 */
 const MAX_ITEMS = 20
@@ -36,14 +37,6 @@ type DoubtRow = {
   me_sale_outcomes: { client_id: string; customer_first: string | null; order_ref: string | null } | null
 }
 
-/** 只露首字母 —— 待办会被截图、会进日志。 */
-function shortName(first: string | null, last: string | null): string {
-  const f = first?.trim()
-  const l = last?.trim()
-  if (f) return `${f[0].toUpperCase()}${l ? ` ${l[0].toUpperCase()}.` : ''} 这位客人`
-  return '这位客人'
-}
-
 function daysAgo(iso: string, now: Date): number {
   return Math.floor((now.getTime() - new Date(iso).getTime()) / 86_400_000)
 }
@@ -54,6 +47,16 @@ export async function pushConversionReviewItems(
   clientNames: Map<string, { name: string }>,
   now: Date,
 ): Promise<void> {
+  // 过了 7 天的先标成不发送，再列还发得出去的。不标的话，取整后的「7 天前」
+  // 会继续出现在邮件里，页面上发送按钮却已经灰了。
+  // 原因约束还没更新时，标不发送会失败。失败只记一笔，仍然列出还在窗口内的，
+  // 不让整段成交待办从邮件里消失。过期的靠下面的时间条件排除。
+  try {
+    await sweepPastWindowAll(supabase, now)
+  } catch (e) {
+    console.warn('[conversion-review] 过期自动标不发送没做成，今天先不把过期的列进待办:', e)
+  }
+
   // ── 待核对的成交/咨询 ────────────────────────────────────────────────
   const { data, error } = await supabase
     .from('me_sale_outcomes')
@@ -63,6 +66,7 @@ export async function pushConversionReviewItems(
     )
     .eq('review_status', 'pending_review')
     .is('redacted_at', null)
+    .gte('occurred_at', pastEventWindowCutoffIso(now))
     .order('occurred_at', { ascending: true })
     .limit(MAX_ITEMS)
 
@@ -70,39 +74,16 @@ export async function pushConversionReviewItems(
 
   for (const row of (data ?? []) as unknown as PendingRow[]) {
     const clientName = clientNames.get(row.client_id)?.name ?? '客户'
-    const who = shortName(row.customer_first, row.customer_last)
-    const age = daysAgo(row.occurred_at, now)
-    // 广告平台只收 7 天内的 —— 快到期的要显眼，过期的别再催人做无用功。
-    // 按精确时间判（不按取整后的天数）：距今 7.3 天也已经发不出去了。
-    const expired = isPastEventWindow(row.occurred_at, now)
-
-    let what: string
-    if (row.outcome_kind === 'lead') {
-      what =
-        `${who}${age === 0 ? '今天' : `${age} 天前`}来问过一次。要把「这是个真实咨询」告诉广告平台吗？` +
-        '告诉后，平台会去找更多像他这样会主动来问的人；不告诉，平台只知道谁点了广告，不知道谁真的开口。'
-    } else {
-      const money = formatMoney(row.amount_minor, row.currency) ?? '一笔款'
-      const kindWord = row.outcome_kind === 'balance' ? '付了尾款' : '付了定金'
-      what =
-        `${who}${kindWord} ${money}${row.order_ref ? `（单号 ${row.order_ref}）` : ''}。` +
-        '要把这笔成交告诉广告平台吗？' +
-        '告诉后，平台会去找更多像他这样真会掏钱的人，同样的预算能带回更多真客户；' +
-        '不告诉，平台会继续找那些爱填表但不付钱的人。'
-    }
-
-    if (expired) {
-      what += ` ⚠️ 这条已经过去 ${age} 天，广告平台只收 7 天内的 —— 现在告诉它也收不进去了，可以直接选「不发送」。`
-    }
+    // 查询已经去掉过期行。这里再挡一次，避免分界线两侧口径漂开。
+    if (isPastEventWindow(row.occurred_at, now)) continue
+    const copy = conversionReviewWhat(row, now)
 
     items.push({
       kind: 'conversion_needs_review',
       client_name: clientName,
       client_id: row.client_id,
-      what,
-      how: expired
-        ? '打开页面，在这条上点「不发送」并选原因「超过时限」即可。'
-        : '打开页面，看一眼客人和金额对不对，对就点「告诉广告平台」（会再确认一次），不对就点「不发送」并选个原因。',
+      what: copy.what,
+      how: copy.how,
       // 🔴 必须是绝对网址。相对路径会被 dropBrokenLinks 静默丢掉
       //    （同 `cross_client_leak` 那次事故，见 manual-items.ts:1540）。
       href: `https://app.magicengine.com.au/dashboard/conversions?client=${row.client_id}&focus=${row.id}`,

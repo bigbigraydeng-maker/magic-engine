@@ -12,6 +12,7 @@
  */
 
 import { NextResponse } from 'next/server'
+import { extractUuid } from '@/lib/conversions/client-id'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin, requireAdmin } from '@/lib/auth/require-admin'
 import { assertClientScope } from '@/lib/conversions/route-guard'
@@ -142,12 +143,14 @@ export async function GET(request: Request) {
   if (!admin.ok) return NextResponse.json({ error: admin.error }, { status: admin.status })
 
   const { searchParams } = new URL(request.url)
-  const clientId = searchParams.get('client_id')
+  // 邮件里的长链接常被折行或塞进不可见字符。能认出里面的客户 ID 就用它，
+  // 不要整段对不上就报「必须是 uuid」。
+  const clientId = extractUuid(searchParams.get('client_id'))
   const status = searchParams.get('review_status')
   const focusId = searchParams.get('id')
   const limit = Math.min(Math.max(parseInt(searchParams.get('limit') ?? '50', 10) || 50, 1), 200)
 
-  if (!clientId || !UUID_RE.test(clientId)) {
+  if (!clientId) {
     return NextResponse.json({ error: 'client_id 必填且必须是 uuid' }, { status: 400 })
   }
 

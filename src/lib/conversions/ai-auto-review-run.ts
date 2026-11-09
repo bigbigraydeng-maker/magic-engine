@@ -37,6 +37,7 @@ import {
 import { sendApprovedOutcome, type SendDeps } from './writeback-service'
 import type { SourceKind } from './intake'
 import { approvalCutoffIso, eventAgeMs, isTooLateToApprove, DAY_MS, META_EVENT_WINDOW_DAYS } from './event-window'
+import { markNotSentPastWindow, sweepPastWindowAll } from './expire-pending'
 
 /**
  * AI 自动批准**只认白名单来源**——新来源默认不可，必须在这里显式加上才会被自动批准。
@@ -166,6 +167,8 @@ export async function runAiAutoReviewForClient(
   if (!clientRow) throw new Error('客户不存在')
   const clientEnabled = clientRow as { ai_auto_review_enabled: boolean }
   if (!clientEnabled.ai_auto_review_enabled) {
+    // 开关关着也不许把过了 7 天的行留在待办里（2026-09-26）。这一步不发送。
+    await sweepPastWindowAll(supabase, now)
     return { ran: false, reason: 'disabled' }
   }
 
@@ -174,6 +177,7 @@ export async function runAiAutoReviewForClient(
   if (!opts.carried) {
     const breaker = await checkCircuitBreaker(supabase, clientId, now)
     if (breaker.tripped) {
+      await sweepPastWindowAll(supabase, now)
       await tripCircuitBreaker(supabase, clientId, breaker.rule, breaker.detail)
       if (deps.onCircuitBreakerTripped) {
         await deps.onCircuitBreakerTripped({ clientId, rule: breaker.rule, detail: breaker.detail })
@@ -375,7 +379,8 @@ export async function runAiAutoReviewForClient(
 /**
  * 把「已过期或离过期不到余量」的待审核行直接判不发送，不调 AI。
  * 只挑这一个客户、未脱敏、仍在待审核的行；最多 `limit` 条，跟单轮上限共用一个额度。
- * 不查客户开关——调用方负责（本文件只在开关打开时调用）。
+ * 只在开关开着时调用，用的是「提前 1 小时」的分界。
+ * 开关关着的客户不走这里，改由 sweepPastWindowAll 清，而且只清精确超过 7 天的。
  */
 export async function sweepExpiredPending(
   supabase: SupabaseClient,
@@ -410,23 +415,13 @@ async function expireOutcome(
   now: Date,
 ): Promise<RunItemResult> {
   const ageDays = eventAgeMs(row.occurred_at, now) / DAY_MS
-  const didReject = await rejectOutcome(
-    supabase,
-    row.id,
-    'other',
-    `已过去 ${ageDays.toFixed(1)} 天，超过或即将超过广告平台 ${META_EVENT_WINDOW_DAYS} 天时间窗口，系统自动标记不发送`,
-    now,
-  )
+  const note =
+    `已过去 ${ageDays.toFixed(1)} 天，超过或即将超过广告平台 ${META_EVENT_WINDOW_DAYS} 天时间窗口，系统自动标记不发送`
+  const didReject = await markNotSentPastWindow(supabase, row.id, note, now, ageDays)
   if (!didReject) {
     // 已经被人工页面抢先处理过了，不写一条跟事实不符的"AI 已拒绝"审计。
     return { outcomeId: row.id, verdict: 'uncertain', message: '已被抢先处理，本轮跳过' }
   }
-  await writeAudit(supabase, row.id, 'ai_auto_rejected', {
-    reason: 'expired',
-    ageDays: Math.round(ageDays * 100) / 100,
-    model: null,
-    promptVersion: null,
-  })
   return { outcomeId: row.id, verdict: 'expired', message: '已过期，自动标记不发送' }
 }
 

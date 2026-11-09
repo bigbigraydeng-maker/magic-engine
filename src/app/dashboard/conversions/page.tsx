@@ -16,8 +16,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { clientIdFromSearch, extractUuid } from '@/lib/conversions/client-id'
 import { formatMoney } from '@/lib/conversions/money'
 import { isPastEventWindow, META_EVENT_WINDOW_DAYS } from '@/lib/conversions/event-window'
+import { CONVERSION_REJECT_REASONS } from '@/lib/conversions/reject-reasons'
+import {
+  conversionAgeLabel,
+  conversionPastWindowNotice,
+  displayCustomerFirst,
+} from '@/lib/conversions/review-copy'
 
 /**
  * Meta 只收 7 天内的事件（官方硬限制）。
@@ -55,23 +62,12 @@ type Outcome = {
   me_conversion_writebacks?: Writeback[]
 }
 
-/** customer_first 存库时全小写（给 Meta 哈希用），这里只管显示好看，不改数据。 */
-function displayName(name: string | null): string | null {
-  if (!name) return null
-  return name.replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
 /** 这条记录当前的发送状态（一个事实目前只发一个平台，取第一条即可）。 */
 function sendState(o: Outcome): Writeback | null {
   return o.me_conversion_writebacks?.[0] ?? null
 }
 
-const REJECT_REASONS: Array<{ value: string; label: string }> = [
-  { value: 'customer_opted_out', label: '客人明确说过别用他的信息' },
-  { value: 'not_real_sale', label: '不是真成交（补开发票之类）' },
-  { value: 'duplicate', label: '重复了，同一笔已经有一条' },
-  { value: 'other', label: '其它（下面写一句）' },
-]
+const REJECT_REASONS = CONVERSION_REJECT_REASONS
 
 /**
  * 金额一律走 `money.ts` 那一份。
@@ -87,10 +83,6 @@ function kindLabel(k: Outcome['outcome_kind']): string {
   return k === 'purchase' ? '收到定金' : k === 'balance' ? '收到尾款' : '有效咨询'
 }
 
-/** 精确天数。判"过没过期"用它，跟服务端同一口径；显示时才取整。 */
-function daysAgo(iso: string): number {
-  return (Date.now() - new Date(iso).getTime()) / 86_400_000
-}
 
 export default function ConversionsPage() {
   const [clientId, setClientId] = useState<string>('')
@@ -121,18 +113,21 @@ export default function ConversionsPage() {
 
   useEffect(() => {
     const p = new URLSearchParams(window.location.search)
-    setClientId(p.get('client') ?? '')
+    const { id, raw } = clientIdFromSearch(window.location.search)
+    if (id) setClientId(id)
+    else if (raw.trim()) setError('链接里的客户编号不是有效的客户 ID')
     setFocusOutcomeId(p.get('focus'))
     setAutoScrollStatus(p.get('status'))
   }, [])
 
   const load = useCallback(async () => {
-    if (!clientId) return
+    const id = extractUuid(clientId)
+    if (!id) return
     setLoading(true)
     setError(null)
     setWritebackDisabled(false)
     try {
-      const base = `/api/admin/conversions/outcomes?client_id=${encodeURIComponent(clientId)}&limit=200`
+      const base = `/api/admin/conversions/outcomes?client_id=${encodeURIComponent(id)}&limit=200`
       // 已批准但没走完的：发出去没下文的、失败可重试的。send_status 交给接口在 SQL
       // 层筛（不是先按最新 200 条截断再筛）—— 否则堆积超过 200 条时，卡住的老记录
       // 会先被"最新 N 条"的窗口挤掉，压根轮不到这一步筛选。
@@ -208,12 +203,13 @@ export default function ConversionsPage() {
 
     // 两边都没有 —— 按 id 直查一次（可能被 200 条窗口挤掉），拿回来后按
     // review_status 决定塞 rows 还是 stuck。
-    if (!clientId) return
+    const idForApi = extractUuid(clientId)
+    if (!idForApi) return
     let cancelled = false
     void (async () => {
       try {
         const res = await fetch(
-          `/api/admin/conversions/outcomes?client_id=${encodeURIComponent(clientId)}&id=${encodeURIComponent(id)}`,
+          `/api/admin/conversions/outcomes?client_id=${encodeURIComponent(idForApi)}&id=${encodeURIComponent(id)}`,
         )
         const body = await res.json()
         if (cancelled || !res.ok) return
@@ -398,7 +394,10 @@ export default function ConversionsPage() {
         setKeyLock(true)
         void approve(current).finally(() => setKeyLock(false))
       }
-      if (e.key === 'n' || e.key === 'N') setRejecting(current.id)
+      if (e.key === 'n' || e.key === 'N') {
+        setRejecting(current.id)
+        setRejectReason(isPastEventWindow(current.occurred_at, Date.now()) ? 'past_window' : '')
+      }
       if (e.key === 'ArrowDown') setCursor((c) => Math.min(c + 1, rows.length - 1))
       if (e.key === 'ArrowUp') setCursor((c) => Math.max(c - 1, 0))
     }
@@ -407,9 +406,10 @@ export default function ConversionsPage() {
   }, [current, rejecting, busy, keyLock, rows.length, approve])
 
   const checkAudience = useCallback(async () => {
-    if (!clientId) return
+    const id = extractUuid(clientId)
+    if (!id) return
     setAudienceLoading(true)
-    const base = `/api/admin/conversions/audience-export?client_id=${encodeURIComponent(clientId)}&format=stats`
+    const base = `/api/admin/conversions/audience-export?client_id=${encodeURIComponent(id)}&format=stats`
     const next: Record<string, Record<string, number | string>> = {}
     for (const source of ['fbleads']) {
       try {
@@ -523,7 +523,11 @@ export default function ConversionsPage() {
           成交回写功能尚未启用（需先建数据表并重新连接 Meta）。上面的「客户名单下载」不受影响，可以正常使用。
         </div>
       )}
-      {error && <div className={box('error')}>读取出错：{error}</div>}
+      {error && (
+        <div className={box('error')}>
+          {error.startsWith('链接里的') ? error : `读取出错：${error}`}
+        </div>
+      )}
       {loading && <div className="text-sm text-me-charcoal/50">读取中…</div>}
 
       {!loading && !error && !writebackDisabled && rows.length === 0 && stuck.length === 0 && clientId && (
@@ -595,8 +599,8 @@ export default function ConversionsPage() {
 
       <div className="space-y-2.5">
         {rows.map((o, i) => {
-          const age = daysAgo(o.occurred_at)
           const expired = isPastEventWindow(o.occurred_at, Date.now())
+          const who = displayCustomerFirst(o.customer_first)
           const focused = i === cursor
           return (
             <div
@@ -611,16 +615,16 @@ export default function ConversionsPage() {
             >
               <div className="flex justify-between gap-3">
                 <div>
-                  {displayName(o.customer_first) && (
-                    <div className="text-base font-bold text-me-charcoal">{displayName(o.customer_first)}</div>
+                  {who && (
+                    <div className="text-base font-bold text-me-charcoal">{who}</div>
                   )}
-                  <div className={`text-[15px] font-semibold ${displayName(o.customer_first) ? 'mt-0.5 text-me-charcoal/70' : 'text-me-charcoal'}`}>
+                  <div className={`text-[15px] font-semibold ${who ? 'mt-0.5 text-me-charcoal/70' : 'text-me-charcoal'}`}>
                     {kindLabel(o.outcome_kind)}
                     {o.outcome_kind !== 'lead' && <span className="tabular-nums"> · {money(o)}</span>}
                     {o.order_ref && <span className="font-normal text-me-charcoal/50"> · 单号 {o.order_ref}</span>}
                   </div>
                   <div className="mt-1 text-xs text-me-charcoal/50">
-                    {age < 1 ? '今天' : `${Math.floor(age)} 天前`}
+                    {conversionAgeLabel(o.occurred_at, Date.now())}
                     {' · 来源：'}
                     {{
                       manual_seed: '人工录入',
@@ -646,7 +650,10 @@ export default function ConversionsPage() {
                   )}
                   {expired && (
                     <div className="mt-1.5 text-xs leading-relaxed text-me-ochre">
-                      ⚠️ 已过去 {Math.floor(age)} 天，广告平台只收 {MAX_AGE_DAYS} 天内的 —— 现在发也收不进去，选「不发送」即可。
+                      ⚠️ {conversionPastWindowNotice(
+                        Math.floor((Date.now() - new Date(o.occurred_at).getTime()) / 86_400_000),
+                        MAX_AGE_DAYS,
+                      )}
                     </div>
                   )}
                 </div>
@@ -668,6 +675,8 @@ export default function ConversionsPage() {
                     onClick={(e) => {
                       e.stopPropagation()
                       setRejecting(o.id)
+                      setRejectReason(expired ? 'past_window' : '')
+                      setRejectNote('')
                     }}
                     className={btnNeutral()}
                   >

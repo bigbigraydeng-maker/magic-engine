@@ -31,8 +31,9 @@ describe('成交页是纯客户端，不拖服务端模块进浏览器', () => {
     expect(SRC.includes(needle), `页面里出现了 ${needle} —— 会把服务端代码拖进浏览器 bundle，运行时崩`).toBe(false)
   })
 
-  it('时间窗口是写死的常数，不从 writer 取', () => {
-    // 取一个常数 7 不值得 import 整个引擎。
-    expect(/MAX_AGE_DAYS\s*=\s*7\b/.test(SRC)).toBe(true)
+  it('时间窗口不从 writer 取，用核对页也能引的那份常数', () => {
+    // 取一个常数不值得 import 整个引擎。event-window 本身不引服务端模块。
+    expect(/MAX_AGE_DAYS\s*=\s*META_EVENT_WINDOW_DAYS\b/.test(SRC)).toBe(true)
+    expect(SRC.includes("from '@/lib/conversions/event-window'")).toBe(true)
   })
 })
