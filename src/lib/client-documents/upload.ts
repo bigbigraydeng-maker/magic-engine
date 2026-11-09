@@ -8,15 +8,20 @@ import {
   clientExists,
   findCurrentByHash,
   getCurrentDocument,
+  getDocumentById,
   insertDocument,
+  type StoreFailure,
 } from './store'
 
 /**
  * One upload, start to finish: check the file and the fields, refuse duplicates, store the file,
  * write the row, and (for "replace with a new version") archive the old row.
  *
- * Order matters: the file goes up first and is removed again if the row cannot be written, so a
- * row never points at a missing file. A leftover file with no row cannot be downloaded.
+ * Order matters: the file goes up first and is removed again if the row definitely was not written,
+ * so a row never points at a missing file. A leftover file with no row cannot be downloaded.
+ * When the database answers with an error that carries no SQLSTATE (timeout, dropped connection),
+ * the row may have been written anyway: the row is looked up first, and the file is only removed
+ * when the row is confirmed absent. If even that lookup fails, the file is kept and its path logged.
  */
 
 export interface UploadOutcome {
@@ -34,7 +39,7 @@ function refuse(status: UploadOutcome['status'], error: string, code?: string): 
   return { status, body: code ? { error, code } : { error } }
 }
 
-const UNAVAILABLE = refuse(500, '资料库暂不可用，请确认数据库迁移已安装', 'client_documents_unavailable')
+const UNAVAILABLE = refuse(500, '资料库暂时不可用，请稍后再试', 'client_documents_unavailable')
 
 async function prepareUpload(form: FormData): Promise<Prepared | UploadOutcome> {
   const entry = form.get('file')
@@ -99,13 +104,28 @@ async function storeFileAndRow(clientId: string, prepared: Prepared, actor: stri
     uploaded_by: actor,
     replaces_id: fields.replaceId,
   })
-  if (!inserted.ok) {
-    await removeDocumentFile(path)
-    return inserted.duplicate
-      ? refuse(409, '资料库里已经有内容完全相同的现行文件', 'duplicate_content')
-      : UNAVAILABLE
-  }
+  if (!inserted.ok) return recoverFromInsertFailure(clientId, docId, path, inserted)
   return { status: 201, body: { document: inserted.data } }
+}
+
+async function recoverFromInsertFailure(
+  clientId: string,
+  docId: string,
+  path: string,
+  failure: StoreFailure,
+): Promise<UploadOutcome> {
+  if (failure.ambiguous) {
+    const found = await getDocumentById(clientId, docId)
+    if (found.ok && found.data) return { status: 201, body: { document: found.data } }
+    if (!found.ok) {
+      console.error('[client-documents/upload] could not confirm whether the row was saved; file kept at', path)
+      return UNAVAILABLE
+    }
+  }
+  await removeDocumentFile(path)
+  return failure.duplicate
+    ? refuse(409, '资料库里已经有内容完全相同的现行文件', 'duplicate_content')
+    : UNAVAILABLE
 }
 
 export async function saveUploadedDocument(params: {

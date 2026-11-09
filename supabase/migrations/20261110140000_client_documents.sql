@@ -11,8 +11,10 @@
 --   · storage_path 必须是「<client_id>/<本行 id>/<安全文件名>」，数据库层再拦一道串客户
 --   · 同一客户同一内容（SHA-256）只能有一份现行文件
 --
--- 回滚：先清空并删除桶 me-client-documents，再 drop table public.client_documents。
---       没有别的表、函数或视图依赖它。
+-- 回滚：先通过存储接口（不是 SQL）清空并删除桶 me-client-documents——托管版 Supabase 不允许用 SQL
+--       直接删 storage 里的行——再 drop table public.client_documents。没有别的表、函数或视图依赖它。
+-- 注意：client_id 外键没有写 on delete，所以删除一个资料库里还有文件的客户会被拦住；
+--       客户下线时要先清空那个客户的资料库（目前没有自动清理）。
 -- ════════════════════════════════════════════════════════════════════════════
 
 create table public.client_documents (

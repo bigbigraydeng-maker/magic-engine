@@ -162,10 +162,41 @@ describe('GET /documents/[docId]/download', () => {
     const res = await downloadDocument(get('/x'), docCtx(CLIENT_A, id(2)))
     expect(res.status).toBe(302)
     expect(res.headers.get('location')).toContain(`/sign/${DOCUMENTS_BUCKET}/${CLIENT_A}/${id(2)}/file.pdf`)
+    expect(new URL(res.headers.get('location') ?? '').searchParams.get('download')).toBe('file.pdf')
     expect(res.headers.get('cache-control')).toBe('no-store')
-    expect(fakeDb.storage.signed).toEqual([
-      { path: `${CLIENT_A}/${id(2)}/file.pdf`, ttl: 60, download: 'file.pdf', bucket: DOCUMENTS_BUCKET },
-    ])
+    // the SDK is asked for a plain 60-second link; the file name is added by us, encoded properly
+    expect(fakeDb.storage.signed).toEqual([{ path: `${CLIENT_A}/${id(2)}/file.pdf`, ttl: 60, bucket: DOCUMENTS_BUCKET }])
+    expect(fakeDb.storage.signed[0].download).toBeUndefined()
+  })
+
+  it('carries a file name with & # + % intact in the link', async () => {
+    const name = 'Hiking & Walking #5 C++ 100% 中国.pdf'
+    rows().push(docRow(30, { visibility: 'client', original_filename: name }))
+    mocks.paid.mockResolvedValue(MEMBER)
+    const res = await downloadDocument(get('/x'), docCtx(CLIENT_A, id(30)))
+    const link = new URL(res.headers.get('location') ?? '')
+    expect(link.searchParams.get('download')).toBe(name)
+    expect(link.searchParams.getAll('download')).toHaveLength(1)
+    expect(link.searchParams.get('token')).toBe('t')
+  })
+
+  it('finds a file by an upper-case document id, and the path it signs comes from the row, not from the URL', async () => {
+    mocks.paid.mockResolvedValue(MEMBER)
+    const res = await downloadDocument(get('/x'), docCtx(CLIENT_A, id(2).toUpperCase()))
+    expect(res.status).toBe(302)
+    expect(fakeDb.storage.signed[0].path).toBe(`${CLIENT_A}/${id(2)}/file.pdf`)
+    expect((await downloadDocument(get('/x'), docCtx(CLIENT_A, id(1).toUpperCase()))).status).toBe(404)
+  })
+
+  it('never writes the signed link or its token to the log', async () => {
+    mocks.paid.mockResolvedValue(MEMBER)
+    await downloadDocument(get('/x'), docCtx(CLIENT_A, id(2)))
+    fakeDb.storageFailures.sign = 'Object not found'
+    await downloadDocument(get('/x'), docCtx(CLIENT_A, id(2)))
+    const logged = JSON.stringify([...vi.mocked(console.info).mock.calls, ...vi.mocked(console.error).mock.calls])
+    expect(logged).not.toContain('token=')
+    expect(logged).not.toContain('storage.example.test')
+    expect(vi.mocked(console.info).mock.calls[0]).toEqual(['[client-documents/download]', { clientId: CLIENT_A, docId: id(2), tier: 'paid_client', userId: 'u-member' }])
   })
 
   it('answers 404, not 403, when a client member asks for an internal or archived file', async () => {
@@ -244,6 +275,7 @@ describe('POST /documents (upload)', () => {
     expect(stored.bucket).toBe(DOCUMENTS_BUCKET)
     expect(stored.contentType).toBe('application/pdf')
     expect(stored.upsert).toBe(false)
+    expect(stored.cacheControl).toBe('0')
     expect(stored.path).toBe(`${CLIENT_A}/${body.document.id}/CTS_Brochure_v11.pdf`)
     const saved = rows().find(row => row.id === body.document.id)
     expect(saved).toMatchObject({ client_id: CLIENT_A, uploaded_by: 'ray@magiclab.test', size_bytes: pdf('one').length })
@@ -419,5 +451,124 @@ describe('PATCH /documents/[docId] (edit, archive, restore)', () => {
     expect((await patchDocument(patchRequest({ title: 'x' }), docCtx(CLIENT_A, 'nope'))).status).toBe(404)
     fakeDb.failNext('client_documents', 'update', { message: 'relation does not exist', code: '42P01' })
     expect((await patchDocument(patchRequest({ title: 'x' }), docCtx(CLIENT_A, id(2)))).status).toBe(500)
+  })
+})
+
+describe('sessions without an e-mail address', () => {
+  const noEmail = { ...INTERNAL, user: { id: 'u-anon', email: '' } }
+
+  it('are refused by every handler, before any database read or write', async () => {
+    mocks.paid.mockResolvedValue(noEmail)
+    mocks.operator.mockResolvedValue(noEmail)
+    const results = [
+      await listDocuments(get('/x'), ctx(CLIENT_A)),
+      await downloadDocument(get('/x'), docCtx(CLIENT_A, id(1))),
+      await uploadDocument(uploadRequest({}, { name: 'a.pdf', bytes: pdf('anon') }), ctx(CLIENT_A)),
+      await patchDocument(patchRequest({ title: 'x' }), docCtx(CLIENT_A, id(1))),
+    ]
+    expect(results.map(r => r.status)).toEqual([403, 403, 403, 403])
+    expect(fakeDb.queries).toEqual([])
+    expect(fakeDb.storage.uploads).toEqual([])
+    expect(fakeDb.storage.signed).toEqual([])
+  })
+
+  it('are refused when the e-mail is missing altogether', async () => {
+    mocks.paid.mockResolvedValue({ ...INTERNAL, user: { id: 'u-anon' } })
+    expect((await listDocuments(get('/x'), ctx(CLIENT_A))).status).toBe(403)
+  })
+})
+
+describe('upload when the database answer is unclear', () => {
+  const upload = (text: string) => uploadDocument(uploadRequest({}, { name: 'a.pdf', bytes: pdf(text) }), ctx(CLIENT_A))
+
+  it('removes the file when an error without a database code left no row behind', async () => {
+    fakeDb.failNext('client_documents', 'insert', { message: 'timeout', code: '' })
+    const res = await upload('lost-before-commit')
+    expect(res.status).toBe(500)
+    expect(fakeDb.storage.removed).toEqual([fakeDb.storage.uploads[0].path])
+    expect(rows()).toHaveLength(SEED.length)
+  })
+
+  it('keeps the file, and reports success, when the row was saved but the answer was lost', async () => {
+    fakeDb.failNext('client_documents', 'insert', { message: 'connection reset' }, { afterCommit: true })
+    const res = await upload('lost-after-commit')
+    const body = await res.json()
+    expect(res.status).toBe(201)
+    expect(rows().some(row => row.id === body.document.id)).toBe(true)
+    expect(fakeDb.storage.removed).toEqual([])
+    expect(fakeDb.objects.has(fakeDb.storage.uploads[0].path)).toBe(true)
+  })
+
+  it('keeps the file, and says the library is unavailable, when it cannot tell whether the row exists', async () => {
+    fakeDb.failNext('client_documents', 'insert', { message: 'connection reset' }, { afterCommit: true })
+    fakeDb.failNext('client_documents', 'select', { message: 'still down' }, { skip: 1 })
+    const res = await upload('cannot-tell')
+    expect(res.status).toBe(500)
+    expect(fakeDb.storage.removed).toEqual([])
+    expect(vi.mocked(console.error).mock.calls.some(call => String(call[0]).includes('file kept at'))).toBe(true)
+  })
+
+  it('removes the file for any definite database error, such as a failed check', async () => {
+    fakeDb.failNext('client_documents', 'insert', { message: 'check violation', code: '23514' })
+    const res = await upload('definite-error')
+    expect(res.status).toBe(500)
+    expect(fakeDb.storage.removed).toEqual([fakeDb.storage.uploads[0].path])
+  })
+
+  it('logs the path of an object it could not remove, so it can be removed by hand', async () => {
+    fakeDb.storageFailures.remove = 'storage 503'
+    fakeDb.failNext('client_documents', 'insert', { message: 'duplicate key', code: '23505' })
+    const res = await upload('cleanup-fails')
+    expect(res.status).toBe(409)
+    expect(vi.mocked(console.error)).toHaveBeenCalledWith('[client-documents] cleanup failed for', fakeDb.storage.uploads[0].path, 'storage 503')
+  })
+})
+
+describe('archiving a file that is already archived', () => {
+  it('keeps the first stamp and still applies the other edited fields', async () => {
+    const res = await patchDocument(patchRequest({ status: 'archived', title: 'New name' }), docCtx(CLIENT_A, id(3)))
+    expect(res.status).toBe(200)
+    expect((await res.json()).document).toMatchObject({ title: 'New name', status: 'archived', archived_by: 'ray@magiclab.test', archived_at: '2026-11-05T00:00:00Z' })
+  })
+
+  it('returns it unchanged when nothing else was asked for', async () => {
+    const res = await patchDocument(patchRequest({ status: 'archived' }), docCtx(CLIENT_A, id(3)))
+    expect(res.status).toBe(200)
+    expect(rowById(3)).toMatchObject({ archived_by: 'ray@magiclab.test', archived_at: '2026-11-05T00:00:00Z' })
+  })
+
+  it('answers 404 for a file that does not exist, or belongs to another client', async () => {
+    expect((await patchDocument(patchRequest({ status: 'archived' }), docCtx(CLIENT_A, id(99)))).status).toBe(404)
+    expect((await patchDocument(patchRequest({ status: 'archived' }), docCtx(CLIENT_A, id(5)))).status).toBe(404)
+    expect(rowById(5)).toMatchObject({ status: 'current' })
+  })
+})
+
+describe('the upload body as real browsers send it', () => {
+  function multipart(fileBytes: Buffer): { body: Buffer; type: string } {
+    const boundary = '----testboundary7MA4YWxk'
+    const head = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="From Browser.pdf"\r\nContent-Type: application/pdf\r\n\r\n`
+    const tail = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="category"\r\n\r\nsheet\r\n--${boundary}--\r\n`
+    return { body: Buffer.concat([Buffer.from(head), fileBytes, Buffer.from(tail)]), type: `multipart/form-data; boundary=${boundary}` }
+  }
+
+  it('accepts a body whose Content-Length is present and within the limit', async () => {
+    const { body, type } = multipart(pdf('browser upload'))
+    const req = new NextRequest(`http://localhost/api/clients/${CLIENT_A}/documents`, {
+      method: 'POST', body, headers: { 'content-type': type, 'content-length': String(body.length) },
+    })
+    const res = await uploadDocument(req, ctx(CLIENT_A))
+    expect(res.status).toBe(201)
+    expect((await res.json()).document).toMatchObject({ title: 'From Browser', category: 'sheet', original_filename: 'From Browser.pdf' })
+  })
+
+  it('answers 400 for a body that is not a valid form', async () => {
+    const garbage = Buffer.from('this is not multipart')
+    const req = new NextRequest(`http://localhost/api/clients/${CLIENT_A}/documents`, {
+      method: 'POST', body: garbage, headers: { 'content-type': 'multipart/form-data; boundary=xx', 'content-length': String(garbage.length) },
+    })
+    const res = await uploadDocument(req, ctx(CLIENT_A))
+    expect(res.status).toBe(400)
+    expect(fakeDb.storage.uploads).toEqual([])
   })
 })

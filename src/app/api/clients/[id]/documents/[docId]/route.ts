@@ -7,7 +7,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { requireOperatorAccess } from '@/lib/auth/client-access'
-import { actorOf } from '@/lib/client-documents/access'
+import { actorOf, hasEmail } from '@/lib/client-documents/access'
 import { jsonError, notFound, unavailable } from '@/lib/client-documents/http'
 import { isUuid, parsePatch } from '@/lib/client-documents/input'
 import { patchDocument } from '@/lib/client-documents/store'
@@ -20,6 +20,7 @@ export async function PATCH(req: NextRequest, { params }: Context) {
   const { id: clientId, docId } = await params
   const access = await requireOperatorAccess(clientId)
   if (!access.ok) return jsonError(access.status, access.error)
+  if (!hasEmail(access.user)) return jsonError(403, 'Forbidden')
   if (!isUuid(clientId) || !isUuid(docId)) return notFound()
 
   let body: unknown

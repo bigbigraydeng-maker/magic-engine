@@ -118,6 +118,33 @@ describe('internal account', () => {
     })
   })
 
+  it('opens a download in a new tab, so a refusal never replaces the library page', async () => {
+    serve({ documents: [BROCHURE], canManage: true })
+    render(<DocumentLibrary clientId={CLIENT} />)
+    await screen.findByText('CTS Tours 2027 Brochure')
+    const link = screen.getByRole('link', { name: '下载' })
+    expect(link.getAttribute('target')).toBe('_blank')
+    expect(link.getAttribute('rel')).toContain('noopener')
+  })
+
+  it('warns, in both forms, that title, description and version are visible to client staff once the file is', async () => {
+    serve({ documents: [SHEET], canManage: true })
+    render(<DocumentLibrary clientId={CLIENT} />)
+    await screen.findByText('Best of China')
+
+    await userEvent.click(screen.getByRole('button', { name: '改信息' }))
+    expect(screen.queryByRole('note')).toBeNull()
+    await userEvent.selectOptions(screen.getByLabelText('谁能下载'), 'client')
+    expect(screen.getByRole('note').textContent).toContain('也会被客户员工看到')
+    await userEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    await userEvent.click(screen.getByRole('button', { name: '上传文件' }))
+    const form = screen.getByRole('form', { name: '上传文件' })
+    expect(within(form).queryByRole('note')).toBeNull()
+    await userEvent.selectOptions(within(form).getByLabelText('谁能下载'), 'client')
+    expect(within(form).getByRole('note').textContent).toContain('也会被客户员工看到')
+  })
+
   it('shows the server\'s sentence when an edit is refused', async () => {
     serve({ documents: [BROCHURE], canManage: true })
     responses.unshift(call => (call.method === 'PATCH' ? json({ error: '资料库里已经有内容完全相同的现行文件，不能再恢复这个旧版' }, 409) : undefined))

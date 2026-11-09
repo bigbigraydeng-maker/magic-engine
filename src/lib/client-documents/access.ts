@@ -23,3 +23,13 @@ export function actorOf(user: { id: string; email?: string | null }): string {
   const email = (user.email ?? '').trim().toLowerCase()
   return email || user.id
 }
+
+/**
+ * The library only serves sessions that carry an e-mail address. The shared access guard compares
+ * the e-mail against the admin lists, and an empty address can match an empty entry in a
+ * comma-separated list (for example a trailing comma in ADMIN_EMAILS), which would make an
+ * e-mail-less session an administrator. Real customers and staff always sign in with an e-mail.
+ */
+export function hasEmail(user: { email?: string | null }): boolean {
+  return (user.email ?? '').trim() !== ''
+}

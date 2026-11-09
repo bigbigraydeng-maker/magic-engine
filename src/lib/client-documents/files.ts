@@ -55,9 +55,10 @@ export function hasValidSignature(extension: FileExtension, head: Buffer): boole
 }
 
 function stemOf(original: string, extension: string): string {
-  const base = (original.replace(/\\/g, '/').split('/').pop() ?? '')
-    .normalize('NFKC')
-    .replace(/\p{Cc}/gu, '')
+  // Normalise BEFORE splitting on slashes: NFKC turns a full-width slash into a real one, and
+  // \p{Cf} (format characters, including the bidi overrides) must not survive into a display name.
+  const normalised = original.normalize('NFKC').replace(/[\p{Cc}\p{Cf}]/gu, '')
+  const base = (normalised.replace(/\\/g, '/').split('/').pop() ?? '')
     .replace(/["<>|?*:]/g, '')
     .replace(/\s+/g, ' ')
     .trim()

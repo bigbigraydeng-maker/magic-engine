@@ -73,6 +73,15 @@ describe('names', () => {
     expect(cleanDisplayName('.pdf', 'pdf')).toBe('file.pdf')
   })
 
+  it('treats a full-width slash or backslash like a real one, and drops direction-control characters', () => {
+    expect(cleanDisplayName('..／..／evil.pdf', 'pdf')).toBe('evil.pdf')
+    expect(cleanDisplayName('C:＼Users＼x＼report.pdf', 'pdf')).toBe('report.pdf')
+    expect(cleanDisplayName('gnp\u202E.pdf', 'pdf')).toBe('gnp.pdf')
+    expect(cleanDisplayName('a\u200Bb\u2066c.pdf', 'pdf')).toBe('abc.pdf')
+    expect(safeStorageName('..／..／evil.pdf', 'pdf')).toBe('evil.pdf')
+    expect(cleanDisplayName('..／..／evil.pdf', 'pdf')).not.toContain('/')
+  })
+
   it('caps the display name length', () => {
     expect(cleanDisplayName(`${'x'.repeat(400)}.pdf`, 'pdf').length).toBeLessThanOrEqual(194)
   })

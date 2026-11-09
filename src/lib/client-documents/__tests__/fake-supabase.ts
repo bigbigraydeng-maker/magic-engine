@@ -8,6 +8,7 @@
 
 export type Row = Record<string, unknown>
 interface DbError { message: string; code?: string }
+interface Failure { table: string; op: string; error: DbError; afterCommit: boolean; skip: number }
 interface Outcome { data: Row[] | null; error: DbError | null }
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
@@ -15,23 +16,24 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 export const PATH_SHAPE = new RegExp(`^${UUID}/${UUID}/[A-Za-z0-9_-][A-Za-z0-9._-]{0,119}$`)
 
 export interface StorageCalls {
-  uploads: Array<{ path: string; contentType?: string; upsert?: boolean; bucket: string }>
+  uploads: Array<{ path: string; contentType?: string; upsert?: boolean; cacheControl?: string; bucket: string }>
   removed: string[]
   signed: Array<{ path: string; ttl: number; download?: unknown; bucket: string }>
 }
 
 class FakeDb {
-  tables: Record<string, Row[]> = { clients: [], client_documents: [] }
+  tables: Record<string, Row[]> = { clients: [], client_documents: [], client_portal_users: [] }
   objects = new Set<string>()
   storage: StorageCalls = { uploads: [], removed: [], signed: [] }
   queries: string[] = []
-  failures: Array<{ table: string; op: string; error: DbError }> = []
-  storageFailures: { upload?: string; sign?: string } = {}
+  failures: Failure[] = []
+  storageFailures: { upload?: string; sign?: string; remove?: string } = {}
 
-  reset(seed: { clients?: Row[]; client_documents?: Row[] } = {}): void {
+  reset(seed: { clients?: Row[]; client_documents?: Row[]; client_portal_users?: Row[] } = {}): void {
     this.tables = {
       clients: [...(seed.clients ?? [])],
       client_documents: (seed.client_documents ?? []).map(row => ({ ...row })),
+      client_portal_users: [...(seed.client_portal_users ?? [])],
     }
     this.objects = new Set()
     this.storage = { uploads: [], removed: [], signed: [] }
@@ -40,18 +42,35 @@ class FakeDb {
     this.storageFailures = {}
   }
 
-  failNext(table: string, op: string, error: DbError): void {
-    this.failures.push({ table, op, error })
+  /** One-shot failure. `afterCommit` = the statement is applied and THEN reports an error (a lost answer). */
+  failNext(table: string, op: string, error: DbError, opts: { afterCommit?: boolean; skip?: number } = {}): void {
+    this.failures.push({ table, op, error, afterCommit: opts.afterCommit === true, skip: opts.skip ?? 0 })
   }
 
-  takeFailure(table: string, op: string): DbError | null {
+  /** `skip` = how many matching operations succeed first (to aim a failure at a later call). */
+  takeFailure(table: string, op: string): Failure | null {
     const index = this.failures.findIndex(f => f.table === table && f.op === op)
     if (index < 0) return null
-    return this.failures.splice(index, 1)[0].error
+    const failure = this.failures[index]
+    if (failure.skip > 0) {
+      failure.skip -= 1
+      return null
+    }
+    return this.failures.splice(index, 1)[0]
   }
 }
 
 export const fakeDb = new FakeDb()
+
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** Postgres compares uuid columns by value, so upper- and lower-case spellings are equal. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (typeof a === 'string' && typeof b === 'string' && UUID_TEXT.test(a) && UUID_TEXT.test(b)) {
+    return a.toLowerCase() === b.toLowerCase()
+  }
+  return a === b
+}
 
 function project(row: Row, cols: string): Row {
   if (cols.trim() === '*') return { ...row }
@@ -88,7 +107,8 @@ class Query implements PromiseLike<Outcome> {
   select(cols = '*'): this { this.cols = cols; return this }
   insert(row: Row): this { this.op = 'insert'; this.payload = row; return this }
   update(patch: Row): this { this.op = 'update'; this.payload = patch; return this }
-  eq(col: string, value: unknown): this { this.filters.push(row => row[col] === value); return this }
+  eq(col: string, value: unknown): this { this.filters.push(row => sameValue(row[col], value)); return this }
+  in(col: string, values: unknown[]): this { this.filters.push(row => values.some(value => sameValue(row[col], value))); return this }
   order(col: string, opts?: { ascending?: boolean }): this { this.sort = { col, asc: opts?.ascending !== false }; return this }
   limit(n: number): this { this.max = n; return this }
 
@@ -112,8 +132,12 @@ class Query implements PromiseLike<Outcome> {
   private async run(): Promise<Outcome> {
     fakeDb.queries.push(`${this.op} ${this.table}`)
     const injected = fakeDb.takeFailure(this.table, this.op)
-    if (injected) return { data: null, error: injected }
-    const rows = fakeDb.tables[this.table]
+    if (injected && !injected.afterCommit) return { data: null, error: injected.error }
+    const rows = fakeDb.tables[this.table] ?? []
+    if (injected && this.op === 'insert') {
+      this.runInsert(rows)
+      return { data: null, error: injected.error }
+    }
     if (this.op === 'insert') return this.runInsert(rows)
     const matched = rows.filter(row => this.filters.every(f => f(row)))
     if (this.op === 'update') return this.runUpdate(rows, matched)
@@ -157,14 +181,15 @@ class Query implements PromiseLike<Outcome> {
 
 function bucketApi(bucket: string) {
   return {
-    async upload(path: string, _bytes: unknown, opts?: { contentType?: string; upsert?: boolean }) {
-      fakeDb.storage.uploads.push({ path, contentType: opts?.contentType, upsert: opts?.upsert, bucket })
+    async upload(path: string, _bytes: unknown, opts?: { contentType?: string; upsert?: boolean; cacheControl?: string }) {
+      fakeDb.storage.uploads.push({ path, contentType: opts?.contentType, upsert: opts?.upsert, cacheControl: opts?.cacheControl, bucket })
       if (fakeDb.storageFailures.upload) return { data: null, error: { message: fakeDb.storageFailures.upload } }
       fakeDb.objects.add(path)
       return { data: { path }, error: null }
     },
     async remove(paths: string[]) {
       fakeDb.storage.removed.push(...paths)
+      if (fakeDb.storageFailures.remove) return { data: null, error: { message: fakeDb.storageFailures.remove } }
       for (const path of paths) fakeDb.objects.delete(path)
       return { data: [], error: null }
     },

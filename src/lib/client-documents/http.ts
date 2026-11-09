@@ -10,7 +10,7 @@ export function jsonError(status: number, error: string, code?: string): NextRes
 }
 
 export function unavailable(): NextResponse {
-  return jsonError(500, '资料库暂不可用，请确认数据库迁移已安装', 'client_documents_unavailable')
+  return jsonError(500, '资料库暂时不可用，请稍后再试', 'client_documents_unavailable')
 }
 
 export function notFound(what = '文件'): NextResponse {

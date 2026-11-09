@@ -2,6 +2,9 @@
 
 export const GENERIC_ACTION_ERROR = '操作没成功，请稍后再试'
 
+/** Shown under the visibility choice: everything typed about a file is visible with it. */
+export const CLIENT_VISIBLE_NOTE = '选「客户员工也能下载」后，名称、说明、版本号也会被客户员工看到，请别写内部信息。'
+
 export interface ApiFailure {
   status: number
   error: string | null

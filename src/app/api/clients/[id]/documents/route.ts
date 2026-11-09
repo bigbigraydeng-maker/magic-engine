@@ -9,7 +9,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { requireOperatorAccess, requirePaidClientAccess } from '@/lib/auth/client-access'
-import { actorOf, scopeForTier } from '@/lib/client-documents/access'
+import { actorOf, hasEmail, scopeForTier } from '@/lib/client-documents/access'
 import { MAX_DOCUMENT_BYTES } from '@/lib/client-documents/constants'
 import { jsonError, notFound, unavailable } from '@/lib/client-documents/http'
 import { isUuid } from '@/lib/client-documents/input'
@@ -30,6 +30,7 @@ export async function GET(req: NextRequest, { params }: Context) {
   const { id: clientId } = await params
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return jsonError(access.status, access.error)
+  if (!hasEmail(access.user)) return jsonError(403, 'Forbidden')
   const scope = scopeForTier(access.tier)
   if (!scope) return jsonError(403, 'Forbidden')
   if (!isUuid(clientId)) return notFound('客户')
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest, { params }: Context) {
   const { id: clientId } = await params
   const access = await requireOperatorAccess(clientId)
   if (!access.ok) return jsonError(access.status, access.error)
+  if (!hasEmail(access.user)) return jsonError(403, 'Forbidden')
   if (!isUuid(clientId)) return notFound('客户')
 
   const parsed = await boundedFormData(req, MAX_DOCUMENT_BYTES + FORM_OVERHEAD_BYTES)

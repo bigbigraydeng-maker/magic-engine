@@ -12,7 +12,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
-import { scopeForTier } from '@/lib/client-documents/access'
+import { hasEmail, scopeForTier } from '@/lib/client-documents/access'
 import { jsonError, notFound, unavailable } from '@/lib/client-documents/http'
 import { isUuid } from '@/lib/client-documents/input'
 import { createDownloadUrl, pathBelongsTo } from '@/lib/client-documents/storage'
@@ -26,6 +26,7 @@ export async function GET(_req: NextRequest, { params }: Context) {
   const { id: clientId, docId } = await params
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return jsonError(access.status, access.error)
+  if (!hasEmail(access.user)) return jsonError(403, 'Forbidden')
   const scope = scopeForTier(access.tier)
   if (!scope) return jsonError(403, 'Forbidden')
   if (!isUuid(clientId) || !isUuid(docId)) return notFound()
@@ -46,6 +47,6 @@ export async function GET(_req: NextRequest, { params }: Context) {
     return jsonError(500, '文件暂不可用，请稍后再试')
   }
 
-  console.info('[client-documents/download]', { clientId, docId: id, tier: access.tier })
+  console.info('[client-documents/download]', { clientId, docId: id, tier: access.tier, userId: access.user.id })
   return NextResponse.redirect(link.url, { status: 302, headers: { 'Cache-Control': 'no-store' } })
 }

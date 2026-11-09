@@ -18,12 +18,14 @@ import {
   pathBelongsTo,
   removeDocumentFile,
   uploadDocumentFile,
+  withDownloadName,
 } from '../storage'
 import { fakeDb } from './fake-supabase'
 
 const CLIENT_A = '11111111-1111-4111-8111-111111111111'
 const CLIENT_B = '22222222-2222-4222-8222-222222222222'
 const DOC = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+const INVARIANTS = readFileSync(path.resolve(__dirname, '../../../../scripts/db-invariants.sql'), 'utf8')
 const MIGRATION = readFileSync(
   path.resolve(__dirname, '../../../../supabase/migrations/20261110140000_client_documents.sql'),
   'utf8',
@@ -61,11 +63,11 @@ describe('storage paths', () => {
 })
 
 describe('storage calls', () => {
-  it('uploads into the private documents bucket without overwriting', async () => {
+  it('uploads into the private documents bucket, without overwriting and without CDN caching', async () => {
     const error = await uploadDocumentFile(`${CLIENT_A}/${DOC}/a.pdf`, Buffer.from('x'), 'application/pdf')
     expect(error).toBeNull()
     expect(fakeDb.storage.uploads).toEqual([
-      { path: `${CLIENT_A}/${DOC}/a.pdf`, contentType: 'application/pdf', upsert: false, bucket: DOCUMENTS_BUCKET },
+      { path: `${CLIENT_A}/${DOC}/a.pdf`, contentType: 'application/pdf', upsert: false, cacheControl: '0', bucket: DOCUMENTS_BUCKET },
     ])
   })
 
@@ -74,13 +76,29 @@ describe('storage calls', () => {
     expect(await uploadDocumentFile('p', Buffer.from('x'), 'application/pdf')).toBe('bucket not found')
   })
 
-  it('signs a 60-second link that forces a download under the original name', async () => {
+  it('signs a plain 60-second link and puts the original file name on it', async () => {
     const result = await createDownloadUrl(`${CLIENT_A}/${DOC}/a.pdf`, 'Brochure v11.pdf')
     expect(result.ok).toBe(true)
     expect(fakeDb.storage.signed).toEqual([
-      { path: `${CLIENT_A}/${DOC}/a.pdf`, ttl: SIGNED_URL_TTL_SECONDS, download: 'Brochure v11.pdf', bucket: DOCUMENTS_BUCKET },
+      { path: `${CLIENT_A}/${DOC}/a.pdf`, ttl: SIGNED_URL_TTL_SECONDS, bucket: DOCUMENTS_BUCKET },
     ])
+    // the SDK's own download option is not used (it does not escape & # +); the name is added here
+    expect(fakeDb.storage.signed[0].download).toBeUndefined()
+    if (result.ok) expect(new URL(result.url).searchParams.get('download')).toBe('Brochure v11.pdf')
     expect(SIGNED_URL_TTL_SECONDS).toBe(60)
+  })
+
+  it('adds the file name with proper encoding, once, and keeps the token', () => {
+    for (const name of ['A & B.pdf', 'Tour #5.pdf', 'C++.pdf', '100%.pdf', 'q=1&download=evil.pdf', '中国手册 v11.pdf']) {
+      const url = new URL(withDownloadName('https://x.example/object/sign/b/p.pdf?token=tok', name))
+      expect(url.searchParams.get('download')).toBe(name)
+      expect(url.searchParams.getAll('download')).toHaveLength(1)
+      expect(url.searchParams.get('token')).toBe('tok')
+      expect([...url.searchParams.keys()].sort()).toEqual(['download', 'token'])
+    }
+    // a name never leaves a loose # (which would cut the URL) or & (which would start a new parameter)
+    expect(withDownloadName('https://x.example/o?token=tok', 'a#b&c').includes('#')).toBe(false)
+    expect(withDownloadName('https://x.example/o?token=tok', 'a#b&c').split('&').length).toBe(2)
   })
 
   it('returns an error instead of a link when signing fails', async () => {
@@ -116,6 +134,14 @@ describe('code and migration agree', () => {
     }
     expect(`${CLIENT_A}/${DOC}/../x.pdf`).not.toMatch(shape)
     expect(`${CLIENT_A}/${DOC}/.hidden`).not.toMatch(shape)
+  })
+
+  it('has the CI safety file read the bucket back after the replay: it must exist and be private', () => {
+    const block = /不变量 5[\s\S]*?END \$\$;/.exec(INVARIANTS)?.[0] ?? ''
+    expect(block).toContain(`'${DOCUMENTS_BUCKET}'`)
+    expect(block).toContain('public IS FALSE')
+    expect(block).toContain('NOT EXISTS')
+    expect(block).toContain('RAISE EXCEPTION')
   })
 
   it('keeps the bucket private and the table locked to the server', () => {

@@ -21,29 +21,49 @@ export function pathBelongsTo(path: string, clientId: string, docId: string): bo
   return match !== null && match[1] === clientId.toLowerCase() && match[2] === docId.toLowerCase()
 }
 
-/** Returns an error message, or null on success. */
+/**
+ * Returns an error message, or null on success.
+ * cacheControl '0': a private file must not be kept by a CDN for the SDK's default hour, because
+ * a cached copy would outlive the 60-second signed link.
+ */
 export async function uploadDocumentFile(path: string, bytes: Buffer, mimeType: string): Promise<string | null> {
   const { error } = await supabaseAdmin.storage
     .from(DOCUMENTS_BUCKET)
-    .upload(path, bytes, { contentType: mimeType, upsert: false })
+    .upload(path, bytes, { contentType: mimeType, upsert: false, cacheControl: '0' })
   return error ? error.message : null
 }
 
+/**
+ * Best-effort clean-up. The storage client reports failure in its result instead of throwing,
+ * so the result is checked: a leftover object has no row pointing at it (it cannot be
+ * downloaded), and its path is logged so it can be removed by hand.
+ */
 export async function removeDocumentFile(path: string): Promise<void> {
   try {
-    await supabaseAdmin.storage.from(DOCUMENTS_BUCKET).remove([path])
+    const { error } = await supabaseAdmin.storage.from(DOCUMENTS_BUCKET).remove([path])
+    if (error) console.error('[client-documents] cleanup failed for', path, error.message)
   } catch (error) {
-    // A leftover object has no row pointing at it, so it cannot be downloaded; log the path for cleanup.
     console.error('[client-documents] cleanup failed for', path, error instanceof Error ? error.message : error)
   }
 }
 
 export type DownloadUrlResult = { ok: true; url: string } | { ok: false; error: string }
 
+/**
+ * Put the download file name on a signed URL. The SDK's own `download` option pastes the name
+ * into the query string without escaping `&`, `#` or `+`, which cuts the name short, so the
+ * name is added here with proper query-string encoding instead.
+ */
+export function withDownloadName(signedUrl: string, downloadName: string): string {
+  const url = new URL(signedUrl)
+  url.searchParams.set('download', downloadName)
+  return url.toString()
+}
+
 export async function createDownloadUrl(path: string, downloadName: string): Promise<DownloadUrlResult> {
   const { data, error } = await supabaseAdmin.storage
     .from(DOCUMENTS_BUCKET)
-    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS, { download: downloadName })
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS)
   if (error || !data?.signedUrl) return { ok: false, error: error?.message ?? 'no signed url' }
-  return { ok: true, url: data.signedUrl }
+  return { ok: true, url: withDownloadName(data.signedUrl, downloadName) }
 }
