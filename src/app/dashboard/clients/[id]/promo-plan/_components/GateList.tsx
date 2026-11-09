@@ -3,15 +3,27 @@
 import type { PhaseGateView } from '@/lib/marketing-plan/promo/board'
 import { MANUAL_GATE_KEYS } from '@/lib/marketing-plan/promo/gates'
 import { LIGHT_META } from '@/lib/marketing-plan/promo/labels'
+import { CreativeApprovalList } from './CreativeApprovalList'
+
+/** 「投放素材已批准」那一行下面直接批准素材所需的东西 */
+export interface CreativeApprovalProps {
+  clientId: string
+  /** 本计划这个阶段用到的素材编号；null = 读不到 */
+  refs: string[] | null
+  canAct: boolean
+  onChanged: () => void
+}
 
 interface Props {
   view: PhaseGateView
   /** 点「我已核实」：只有人工项会出现这个按钮 */
   onVerify: (phaseId: string, checkKey: string) => void
   busyKey: string | null
+  /** 不传 = 素材这一行只读（旧行为）；传了 = 红灯时在这一行下面直接批准素材 */
+  creatives?: CreativeApprovalProps
 }
 
-export function GateList({ view, onVerify, busyKey }: Props) {
+export function GateList({ view, onVerify, busyKey, creatives }: Props) {
   return (
     <section className="rounded-xl border border-gray-200 bg-white">
       <div className="px-4 py-3 border-b border-gray-100">
@@ -40,6 +52,9 @@ export function GateList({ view, onVerify, busyKey }: Props) {
                   </p>
                   <p className="text-xs text-gray-600 mt-0.5">{r.reason}</p>
                   {r.light !== 'green' && r.how && <p className="text-xs text-gray-500 mt-0.5">怎么办：{r.how}</p>}
+                  {r.key === 'ads.creative_approved' && r.light !== 'green' && creatives && (
+                    <CreativeApprovalList {...creatives} />
+                  )}
                 </div>
                 {manual && r.light !== 'green' && (
                   <button

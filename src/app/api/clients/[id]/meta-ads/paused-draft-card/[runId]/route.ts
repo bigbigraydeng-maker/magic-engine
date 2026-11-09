@@ -1,6 +1,7 @@
 /**
  * Confirm or decline one paused-draft card.
  * Meta is written only after confirm, and the campaign stays paused.
+ * A listing card uses this same address: upload and build happen here, after confirm.
  */
 
 import { NextResponse } from 'next/server'
@@ -10,7 +11,11 @@ import { loadDraftRedlines } from '@/lib/ads-strategy/draft-redlines'
 import { isUuid } from '@/lib/validation-utils'
 import { parseDecisionBody, publicError } from '@/lib/confirmation-card/http'
 import { submitPausedDraftCard } from '@/lib/ads-strategy/paused-draft-submit'
+import { confirmListingDraftCard, listingCardDeps } from '@/lib/ads-strategy/listing-draft-card'
+import { publishListingDraft } from '@/lib/ads-strategy/listing-draft-publish'
 import { cardContext, clientAds, kernel, pausedDraftGate } from '../access'
+
+export const maxDuration = 120
 
 export async function POST(
   req: Request,
@@ -32,6 +37,23 @@ export async function POST(
   } catch (error) {
     const mapped = publicError(error)
     return NextResponse.json({ error: mapped.message }, { status: mapped.status })
+  }
+  try {
+    const listing = await confirmListingDraftCard({
+      sb: supabaseAdmin,
+      clientId: id,
+      runId,
+      clicker: gate.clicker,
+      resolution: body.resolution,
+      expectedDecisionId: body.expectedDecisionId,
+      fingerprint: body.fingerprint,
+      deps: listingCardDeps(kernel()),
+      perform: (intent) => publishListingDraft(id, intent),
+    })
+    if (listing.handled) return NextResponse.json(listing.body, { status: listing.status })
+  } catch (error) {
+    const mapped = publicError(error)
+    return NextResponse.json({ error: mapped.message, wroteMeta: false }, { status: mapped.status })
   }
   const ads = await clientAds(id)
   if (!ads.ok) return ads.response

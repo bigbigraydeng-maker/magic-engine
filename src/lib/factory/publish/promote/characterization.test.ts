@@ -105,6 +105,7 @@ function makeDeps(w: World): PromoteDeps {
       },
     },
     resolveTarget: async () => (w.target ? { ...w.target } : null),
+    loadFactSource: async () => ({ ok: false as const, reason: 'catalog_not_published' }),
     scanRedline: async (_c, _m, text) => { w.log.push('redline'); return text.toLowerCase().includes('badword') ? '命中红线: badword' : null },
     now: () => new Date(w.now),
     uuid: () => `00000000-0000-4000-8000-${String(++w.seq).padStart(12, '0')}`,
@@ -142,6 +143,13 @@ describe('特征化:预览', () => {
           "caption": "Great Acme tour deal⁣​‌",
           "checklist_passed_at": "2026-10-19T01:00:00.000Z",
           "expires_at": "2026-10-20T00:05:00.000Z",
+          "fact_check": {
+            "catalog_version": null,
+            "note": "这位客户没有已发布的团目录，不核对",
+            "overlay_checked": false,
+            "problems": [],
+            "verdict": "not_applicable",
+          },
           "first_comment": "Book now
       https://example.com/tour?utm_source=facebook&utm_medium=organic_social&utm_campaign=me_factory_reel&utm_content=c0000000-0000-4000-8000-0000000000a1",
           "mode": "promote",
@@ -612,6 +620,13 @@ describe('特征化:视频已被人手公开(sync_only)', () => {
           "caption": "Great Acme tour deal⁣​‌",
           "checklist_passed_at": "2026-10-19T01:00:00.000Z",
           "expires_at": "2026-10-20T00:05:00.000Z",
+          "fact_check": {
+            "catalog_version": null,
+            "note": "这位客户没有已发布的团目录，不核对",
+            "overlay_checked": false,
+            "problems": [],
+            "verdict": "not_applicable",
+          },
           "first_comment": "Book now
       https://example.com/tour?utm_source=facebook&utm_medium=organic_social&utm_campaign=me_factory_reel&utm_content=c0000000-0000-4000-8000-0000000000a1",
           "mode": "sync_only",

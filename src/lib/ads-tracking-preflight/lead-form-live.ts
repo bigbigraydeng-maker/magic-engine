@@ -4,7 +4,7 @@
  * 不点名任何客户。令牌只进 Graph 的 Authorization 头。
  */
 
-import { loadAdStrategyConfigWithSource } from '@/lib/ads-strategy/config'
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { classifyLeadsSyncOutcome } from '@/lib/meta/leads-sync-alert'
 import { isOverlapSkipSummary } from '@/lib/meta/leads-sync-lock'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
@@ -183,13 +183,17 @@ export async function loadPreviousSurplusLive(clientId: string, campaignId: stri
 }
 
 async function applyCaps(extra: LeadFormExtra, clientId: string, accountId: string): Promise<string[]> {
-  const [rows, registered, strategy] = await Promise.all([
+  const [rows, registered, planCap] = await Promise.all([
     loadAccountRows(clientId),
     loadRegisteredIds(clientId),
-    loadAdStrategyConfigWithSource(clientId),
+    readClientDailyTotalCap(supabaseAdmin, clientId),
   ])
   const accountCap = accountCapFromRows(rows, accountId)
-  const totalCap = totalCapFromSource(strategy.source, strategy.config.daily_budget_cap_cents)
+  const totalCap: CapRead = planCap.state === 'set'
+    ? { known: true, cents: planCap.cents }
+    : planCap.state === 'missing'
+      ? { known: true, cents: null }
+      : { known: false, cents: null }
   extra.accountCapKnown = accountCap.known
   extra.accountCapCents = accountCap.cents
   extra.totalCapKnown = totalCap.known

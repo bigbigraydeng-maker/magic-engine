@@ -4,9 +4,11 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { listActiveGoals } from '@/lib/strategy/goals'
 import { autoFetchMetricValue } from '@/lib/strategy/auto-fetch'
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { loadAdStrategyConfigWithSource } from '../config'
 import { getTrackingClientConfig } from '@/lib/ads-tracking-preflight/client-config'
 import { computeGoalPace, type GoalPace } from '../goal-pace'
+import { ADS_ATTRIBUTABLE_METRIC_KEYS } from './attributable-metric-keys'
 import type { DigestGoalContext } from './internal-digest'
 import type { GoalRow } from '@/types/strategy'
 
@@ -14,14 +16,7 @@ const DAY_MS = 86_400_000
 export const MEDIAN_WINDOW_DAYS = 7
 export const MIN_MEDIAN_DAYS = 3
 
-/**
- * Goal metrics that autoFetchMetricValue can fill from ad_daily_insights via the
- * outcome ladder (leads_count falls back to the ads 'lead' step; messaging_started
- * is the ads 'messaging_started' step). Keep in sync with the switch in
- * src/lib/strategy/auto-fetch.ts. signups_count is NOT here: it reads real
- * bookings from me_sale_outcomes, which ads cannot move day to day.
- */
-export const ADS_ATTRIBUTABLE_METRIC_KEYS: ReadonlySet<string> = new Set(['leads_count', 'messaging_started'])
+export { ADS_ATTRIBUTABLE_METRIC_KEYS }
 
 /**
  * With several active goals, prefer the newest one the ads can measure; if none
@@ -270,7 +265,10 @@ export async function buildDigestGoalContext(
     const goal = pickDigestGoal(await listActiveGoals(supabaseAdmin, clientId))
     if (!goal) return null
 
-    const { config, source, error: configError } = await loadAdStrategyConfigWithSource(clientId)
+    const [{ source, error: configError }, planCap] = await Promise.all([
+      loadAdStrategyConfigWithSource(clientId),
+      readClientDailyTotalCap(supabaseAdmin, clientId),
+    ])
     const metric = costMetricForGoal(goal.primary_metric_key)
     const campaignIds = goalCampaignIds(clientId, metric)
     const cost = await readRecentCost(clientId, insightDate, { metric, campaignIds })
@@ -297,12 +295,12 @@ export async function buildDigestGoalContext(
       periodEnd: goal.period_end,
       today: insightDate,
       actualToDate,
-      dailyCapCents: config.daily_budget_cap_cents,
+      dailyCapCents: planCap.state === 'set' ? planCap.cents : null,
       medianCostPerResultCents7d,
       dataThrough,
       actualDailySpendCents: cost.avgDailySpendCents,
     })
-    const capped = source === 'fallback' ? withoutCapLens(computed) : computed
+    const capped = source === 'fallback' || planCap.state === 'unreadable' ? withoutCapLens(computed) : computed
     const pace = withThinSampleGuard(capped, medianCostPerResultCents7d, dataDays)
     if (source === 'fallback') {
       console.error(`[ads-strategy] goal context: ad_strategy_configs read failed for ${clientId}: ${configError ?? 'unknown error'}`)

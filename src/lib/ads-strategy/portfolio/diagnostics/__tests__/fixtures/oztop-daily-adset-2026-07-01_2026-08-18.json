@@ -1,15 +1,15 @@
 [
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "1.41",
+  "spend": "1.65",
   "impressions": "141",
   "reach": "81",
   "clicks": "0",
   "frequency": "1.740741",
-  "cpm": "10",
+  "cpm": "11.700000",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -76,16 +76,16 @@
   "date_stop": "2026-07-02"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "19.68",
+  "spend": "23.03",
   "impressions": "1380",
   "reach": "512",
   "clicks": "2",
   "frequency": "2.695313",
-  "cpm": "14.26087",
+  "cpm": "16.685218",
   "actions": [
    {
     "action_type": "link_click",
@@ -164,16 +164,16 @@
   "date_stop": "2026-07-03"
  },
  {
-  "campaign_id": "120252422464760790",
-  "adset_id": "120252422464770790",
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
   "campaign_name": "New Leads campaign Jul 26",
   "adset_name": "New Leads ad set",
-  "spend": "28.37",
+  "spend": "33.19",
   "impressions": "384",
   "reach": "328",
   "clicks": "7",
   "frequency": "1.170732",
-  "cpm": "73.880208",
+  "cpm": "86.439843",
   "actions": [
    {
     "action_type": "link_click",
@@ -260,16 +260,16 @@
   "date_stop": "2026-07-03"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "10.47",
+  "spend": "12.25",
   "impressions": "786",
   "reach": "328",
   "clicks": "0",
   "frequency": "2.396341",
-  "cpm": "13.320611",
+  "cpm": "15.585115",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -336,16 +336,16 @@
   "date_stop": "2026-07-04"
  },
  {
-  "campaign_id": "120252422464760790",
-  "adset_id": "120252422464770790",
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
   "campaign_name": "New Leads campaign Jul 26",
   "adset_name": "New Leads ad set",
-  "spend": "20.4",
+  "spend": "23.87",
   "impressions": "226",
   "reach": "198",
   "clicks": "3",
   "frequency": "1.141414",
-  "cpm": "90.265487",
+  "cpm": "105.610620",
   "actions": [
    {
     "action_type": "link_click",
@@ -432,16 +432,16 @@
   "date_stop": "2026-07-04"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "18.22",
+  "spend": "21.32",
   "impressions": "1313",
   "reach": "451",
   "clicks": "0",
   "frequency": "2.911308",
-  "cpm": "13.876618",
+  "cpm": "16.235643",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -508,16 +508,16 @@
   "date_stop": "2026-07-05"
  },
  {
-  "campaign_id": "120252422464760790",
-  "adset_id": "120252422464770790",
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
   "campaign_name": "New Leads campaign Jul 26",
   "adset_name": "New Leads ad set",
-  "spend": "41.03",
+  "spend": "48.01",
   "impressions": "781",
   "reach": "656",
   "clicks": "19",
   "frequency": "1.190549",
-  "cpm": "52.535211",
+  "cpm": "61.466197",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -628,16 +628,16 @@
   "date_stop": "2026-07-05"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "14.79",
+  "spend": "17.30",
   "impressions": "1105",
   "reach": "302",
   "clicks": "3",
   "frequency": "3.65894",
-  "cpm": "13.384615",
+  "cpm": "15.660000",
   "actions": [
    {
     "action_type": "link_click",
@@ -708,16 +708,16 @@
   "date_stop": "2026-07-06"
  },
  {
-  "campaign_id": "120252422464760790",
-  "adset_id": "120252422464770790",
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
   "campaign_name": "New Leads campaign Jul 26",
   "adset_name": "New Leads ad set",
-  "spend": "37.82",
+  "spend": "44.25",
   "impressions": "552",
   "reach": "494",
   "clicks": "14",
   "frequency": "1.117409",
-  "cpm": "68.514493",
+  "cpm": "80.161957",
   "actions": [
    {
     "action_type": "link_click",
@@ -804,16 +804,16 @@
   "date_stop": "2026-07-06"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "11.68",
+  "spend": "13.67",
   "impressions": "870",
   "reach": "356",
   "clicks": "1",
   "frequency": "2.44382",
-  "cpm": "13.425287",
+  "cpm": "15.707586",
   "actions": [
    {
     "action_type": "link_click",
@@ -892,16 +892,16 @@
   "date_stop": "2026-07-07"
  },
  {
-  "campaign_id": "120252422464760790",
-  "adset_id": "120252422464770790",
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
   "campaign_name": "New Leads campaign Jul 26",
   "adset_name": "New Leads ad set",
-  "spend": "28.47",
+  "spend": "33.31",
   "impressions": "464",
   "reach": "412",
   "clicks": "13",
   "frequency": "1.126214",
-  "cpm": "61.357759",
+  "cpm": "71.788578",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -1052,16 +1052,16 @@
   "date_stop": "2026-07-07"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252526551730790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "122992771939214112",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S2-LeadReels-BNE-GC",
-  "spend": "15.75",
+  "spend": "18.43",
   "impressions": "1153",
   "reach": "455",
   "clicks": "1",
   "frequency": "2.534066",
-  "cpm": "13.660017",
+  "cpm": "15.982220",
   "actions": [
    {
     "action_type": "link_click",
@@ -1132,16 +1132,16 @@
   "date_stop": "2026-07-07"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252557279220790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "121627794319130403",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S3-Promo-BNE-GC",
-  "spend": "14.88",
+  "spend": "17.41",
   "impressions": "1177",
   "reach": "478",
   "clicks": "4",
   "frequency": "2.462343",
-  "cpm": "12.642311",
+  "cpm": "14.791504",
   "actions": [
    {
     "action_type": "link_click",
@@ -1220,16 +1220,16 @@
   "date_stop": "2026-07-07"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "18.75",
+  "spend": "21.94",
   "impressions": "1385",
   "reach": "453",
   "clicks": "2",
   "frequency": "3.057395",
-  "cpm": "13.537906",
+  "cpm": "15.839350",
   "actions": [
    {
     "action_type": "link_click",
@@ -1300,16 +1300,16 @@
   "date_stop": "2026-07-08"
  },
  {
-  "campaign_id": "120252422464760790",
-  "adset_id": "120252422464770790",
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
   "campaign_name": "New Leads campaign Jul 26",
   "adset_name": "New Leads ad set",
-  "spend": "11.8",
+  "spend": "13.81",
   "impressions": "165",
   "reach": "159",
   "clicks": "1",
   "frequency": "1.037736",
-  "cpm": "71.515152",
+  "cpm": "83.672728",
   "actions": [
    {
     "action_type": "post_reaction",
@@ -1396,16 +1396,16 @@
   "date_stop": "2026-07-08"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252526551730790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "122992771939214112",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S2-LeadReels-BNE-GC",
-  "spend": "30.29",
+  "spend": "35.44",
   "impressions": "2276",
   "reach": "620",
   "clicks": "0",
   "frequency": "3.670968",
-  "cpm": "13.308436",
+  "cpm": "15.570870",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -1472,16 +1472,16 @@
   "date_stop": "2026-07-08"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252557279220790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "121627794319130403",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S3-Promo-BNE-GC",
-  "spend": "27.61",
+  "spend": "32.30",
   "impressions": "2141",
   "reach": "615",
   "clicks": "1",
   "frequency": "3.481301",
-  "cpm": "12.895843",
+  "cpm": "15.088136",
   "actions": [
    {
     "action_type": "link_click",
@@ -1552,16 +1552,16 @@
   "date_stop": "2026-07-08"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "14.85",
+  "spend": "17.37",
   "impressions": "1149",
   "reach": "379",
   "clicks": "2",
   "frequency": "3.031662",
-  "cpm": "12.924282",
+  "cpm": "15.121410",
   "actions": [
    {
     "action_type": "link_click",
@@ -1632,16 +1632,16 @@
   "date_stop": "2026-07-09"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252526551730790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "122992771939214112",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S2-LeadReels-BNE-GC",
-  "spend": "22.01",
+  "spend": "25.75",
   "impressions": "1698",
   "reach": "453",
   "clicks": "0",
   "frequency": "3.748344",
-  "cpm": "12.962309",
+  "cpm": "15.165902",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -1708,16 +1708,16 @@
   "date_stop": "2026-07-09"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252557279220790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "121627794319130403",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S3-Promo-BNE-GC",
-  "spend": "22.79",
+  "spend": "26.66",
   "impressions": "1766",
   "reach": "488",
   "clicks": "1",
   "frequency": "3.618852",
-  "cpm": "12.90487",
+  "cpm": "15.098698",
   "actions": [
    {
     "action_type": "link_click",
@@ -1788,16 +1788,16 @@
   "date_stop": "2026-07-09"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "51.34",
+  "spend": "60.07",
   "impressions": "1176",
   "reach": "863",
   "clicks": "41",
   "frequency": "1.362688",
-  "cpm": "43.656463",
+  "cpm": "51.078062",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -1916,16 +1916,16 @@
   "date_stop": "2026-07-09"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "10.36",
+  "spend": "12.12",
   "impressions": "786",
   "reach": "319",
   "clicks": "2",
   "frequency": "2.46395",
-  "cpm": "13.180662",
+  "cpm": "15.421375",
   "actions": [
    {
     "action_type": "link_click",
@@ -1996,16 +1996,16 @@
   "date_stop": "2026-07-10"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "46.21",
+  "spend": "54.07",
   "impressions": "1049",
   "reach": "763",
   "clicks": "27",
   "frequency": "1.374836",
-  "cpm": "44.051478",
+  "cpm": "51.540229",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -2124,16 +2124,16 @@
   "date_stop": "2026-07-10"
  },
  {
-  "campaign_id": "120252620658990790",
-  "adset_id": "120252620658980790",
+  "campaign_id": "128935235445693327",
+  "adset_id": "122484593700717559",
   "campaign_name": "Oztop — WhatsApp — Cold Broad — 20260709",
   "adset_name": "新互动广告组",
-  "spend": "40.47",
+  "spend": "47.35",
   "impressions": "977",
   "reach": "672",
   "clicks": "24",
   "frequency": "1.453869",
-  "cpm": "41.422723",
+  "cpm": "48.464586",
   "actions": [
    {
     "action_type": "link_click",
@@ -2232,16 +2232,16 @@
   "date_stop": "2026-07-10"
  },
  {
-  "campaign_id": "120252643974900790",
-  "adset_id": "120252643974920790",
+  "campaign_id": "122395194351255552",
+  "adset_id": "121668273531412522",
   "campaign_name": "Oztop — WhatsApp — RETARGET Warm Pool — 20260710",
   "adset_name": "新互动广告组",
-  "spend": "19.01",
+  "spend": "22.24",
   "impressions": "477",
   "reach": "413",
   "clicks": "3",
   "frequency": "1.154964",
-  "cpm": "39.853249",
+  "cpm": "46.628301",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -2308,16 +2308,16 @@
   "date_stop": "2026-07-10"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "24.84",
+  "spend": "29.06",
   "impressions": "1752",
   "reach": "522",
   "clicks": "1",
   "frequency": "3.356322",
-  "cpm": "14.178082",
+  "cpm": "16.588356",
   "actions": [
    {
     "action_type": "link_click",
@@ -2396,16 +2396,16 @@
   "date_stop": "2026-07-11"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "37.01",
+  "spend": "43.30",
   "impressions": "1145",
   "reach": "887",
   "clicks": "25",
   "frequency": "1.290868",
-  "cpm": "32.323144",
+  "cpm": "37.818078",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -2524,16 +2524,16 @@
   "date_stop": "2026-07-11"
  },
  {
-  "campaign_id": "120252620658990790",
-  "adset_id": "120252620658980790",
+  "campaign_id": "128935235445693327",
+  "adset_id": "122484593700717559",
   "campaign_name": "Oztop — WhatsApp — Cold Broad — 20260709",
   "adset_name": "新互动广告组",
-  "spend": "25.51",
+  "spend": "29.85",
   "impressions": "514",
   "reach": "356",
   "clicks": "13",
   "frequency": "1.44382",
-  "cpm": "49.63035",
+  "cpm": "58.067509",
   "actions": [
    {
     "action_type": "link_click",
@@ -2628,16 +2628,16 @@
   "date_stop": "2026-07-11"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "29.31",
+  "spend": "34.29",
   "impressions": "2233",
   "reach": "551",
   "clicks": "4",
   "frequency": "4.052632",
-  "cpm": "13.12584",
+  "cpm": "15.357233",
   "actions": [
    {
     "action_type": "link_click",
@@ -2716,16 +2716,16 @@
   "date_stop": "2026-07-12"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "61.52",
+  "spend": "71.98",
   "impressions": "1997",
   "reach": "1512",
   "clicks": "36",
   "frequency": "1.320767",
-  "cpm": "30.806209",
+  "cpm": "36.043265",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -2852,16 +2852,16 @@
   "date_stop": "2026-07-12"
  },
  {
-  "campaign_id": "120252620658990790",
-  "adset_id": "120252620658980790",
+  "campaign_id": "128935235445693327",
+  "adset_id": "122484593700717559",
   "campaign_name": "Oztop — WhatsApp — Cold Broad — 20260709",
   "adset_name": "新互动广告组",
-  "spend": "25.08",
+  "spend": "29.34",
   "impressions": "586",
   "reach": "403",
   "clicks": "6",
   "frequency": "1.454094",
-  "cpm": "42.798635",
+  "cpm": "50.074403",
   "actions": [
    {
     "action_type": "link_click",
@@ -2932,16 +2932,16 @@
   "date_stop": "2026-07-12"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "19.79",
+  "spend": "23.15",
   "impressions": "1608",
   "reach": "526",
   "clicks": "2",
   "frequency": "3.057034",
-  "cpm": "12.307214",
+  "cpm": "14.399440",
   "actions": [
    {
     "action_type": "link_click",
@@ -3012,16 +3012,16 @@
   "date_stop": "2026-07-13"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "65.55",
+  "spend": "76.69",
   "impressions": "1811",
   "reach": "1390",
   "clicks": "27",
   "frequency": "1.302878",
-  "cpm": "36.195472",
+  "cpm": "42.348702",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -3148,16 +3148,16 @@
   "date_stop": "2026-07-13"
  },
  {
-  "campaign_id": "120252620658990790",
-  "adset_id": "120252620658980790",
+  "campaign_id": "128935235445693327",
+  "adset_id": "122484593700717559",
   "campaign_name": "Oztop — WhatsApp — Cold Broad — 20260709",
   "adset_name": "新互动广告组",
-  "spend": "20.61",
+  "spend": "24.11",
   "impressions": "273",
   "reach": "198",
   "clicks": "1",
   "frequency": "1.378788",
-  "cpm": "75.494505",
+  "cpm": "88.328571",
   "actions": [
    {
     "action_type": "onsite_conversion.total_messaging_connection",
@@ -3236,16 +3236,16 @@
   "date_stop": "2026-07-13"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "8.56",
+  "spend": "10.02",
   "impressions": "4949",
   "reach": "4632",
   "clicks": "1",
   "frequency": "1.068437",
-  "cpm": "1.729642",
+  "cpm": "2.023681",
   "actions": [
    {
     "action_type": "link_click",
@@ -3316,16 +3316,16 @@
   "date_stop": "2026-07-13"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "20.97",
+  "spend": "24.53",
   "impressions": "1600",
   "reach": "543",
   "clicks": "3",
   "frequency": "2.946593",
-  "cpm": "13.10625",
+  "cpm": "15.334312",
   "actions": [
    {
     "action_type": "link_click",
@@ -3396,16 +3396,16 @@
   "date_stop": "2026-07-14"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "69.43",
+  "spend": "81.23",
   "impressions": "1830",
   "reach": "1353",
   "clicks": "28",
   "frequency": "1.35255",
-  "cpm": "37.939891",
+  "cpm": "44.389672",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -3520,16 +3520,16 @@
   "date_stop": "2026-07-14"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "13.58",
+  "spend": "15.89",
   "impressions": "7989",
   "reach": "7384",
   "clicks": "3",
   "frequency": "1.081934",
-  "cpm": "1.699837",
+  "cpm": "1.988809",
   "actions": [
    {
     "action_type": "link_click",
@@ -3608,16 +3608,16 @@
   "date_stop": "2026-07-14"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "31.19",
+  "spend": "36.49",
   "impressions": "2413",
   "reach": "625",
   "clicks": "3",
   "frequency": "3.8608",
-  "cpm": "12.925818",
+  "cpm": "15.123207",
   "actions": [
    {
     "action_type": "link_click",
@@ -3696,16 +3696,16 @@
   "date_stop": "2026-07-15"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "79.01",
+  "spend": "92.44",
   "impressions": "1911",
   "reach": "1418",
   "clicks": "28",
   "frequency": "1.347673",
-  "cpm": "41.344846",
+  "cpm": "48.373470",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -3816,16 +3816,16 @@
   "date_stop": "2026-07-15"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "14.09",
+  "spend": "16.49",
   "impressions": "8083",
   "reach": "7127",
   "clicks": "4",
   "frequency": "1.134138",
-  "cpm": "1.743165",
+  "cpm": "2.039503",
   "actions": [
    {
     "action_type": "link_click",
@@ -3904,16 +3904,16 @@
   "date_stop": "2026-07-15"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "25.44",
+  "spend": "29.76",
   "impressions": "2018",
   "reach": "534",
   "clicks": "0",
   "frequency": "3.779026",
-  "cpm": "12.606541",
+  "cpm": "14.749653",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -3980,16 +3980,16 @@
   "date_stop": "2026-07-16"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "74.25",
+  "spend": "86.87",
   "impressions": "1790",
   "reach": "1294",
   "clicks": "33",
   "frequency": "1.383308",
-  "cpm": "41.480447",
+  "cpm": "48.532123",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -4104,16 +4104,16 @@
   "date_stop": "2026-07-16"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "14.31",
+  "spend": "16.74",
   "impressions": "8074",
   "reach": "7374",
   "clicks": "5",
   "frequency": "1.094928",
-  "cpm": "1.772356",
+  "cpm": "2.073657",
   "actions": [
    {
     "action_type": "link_click",
@@ -4184,16 +4184,16 @@
   "date_stop": "2026-07-16"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "24.69",
+  "spend": "28.89",
   "impressions": "1923",
   "reach": "493",
   "clicks": "0",
   "frequency": "3.900609",
-  "cpm": "12.839314",
+  "cpm": "15.021997",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -4260,16 +4260,16 @@
   "date_stop": "2026-07-17"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "71.16",
+  "spend": "83.26",
   "impressions": "1613",
   "reach": "1267",
   "clicks": "28",
   "frequency": "1.273086",
-  "cpm": "44.116553",
+  "cpm": "51.616367",
   "actions": [
    {
     "action_type": "link_click",
@@ -4356,16 +4356,16 @@
   "date_stop": "2026-07-17"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "14.51",
+  "spend": "16.98",
   "impressions": "7804",
   "reach": "7068",
   "clicks": "2",
   "frequency": "1.104131",
-  "cpm": "1.859303",
+  "cpm": "2.175385",
   "actions": [
    {
     "action_type": "link_click",
@@ -4444,16 +4444,16 @@
   "date_stop": "2026-07-17"
  },
  {
-  "campaign_id": "120252412058510790",
-  "adset_id": "120252412058520790",
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
   "campaign_name": "OZ-THRU-S1-hooktest-202607",
   "adset_name": "OZ-THRU-S1-BNE-GC",
-  "spend": "2.73",
+  "spend": "3.19",
   "impressions": "190",
   "reach": "76",
   "clicks": "0",
   "frequency": "2.5",
-  "cpm": "14.368421",
+  "cpm": "16.811053",
   "actions": [
    {
     "action_type": "post_engagement",
@@ -4520,16 +4520,16 @@
   "date_stop": "2026-07-18"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "65.7",
+  "spend": "76.87",
   "impressions": "1237",
   "reach": "1005",
   "clicks": "28",
   "frequency": "1.230846",
-  "cpm": "53.112369",
+  "cpm": "62.141472",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -4660,16 +4660,16 @@
   "date_stop": "2026-07-18"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "15.24",
+  "spend": "17.83",
   "impressions": "8240",
   "reach": "7363",
   "clicks": "7",
   "frequency": "1.119109",
-  "cpm": "1.849515",
+  "cpm": "2.163933",
   "actions": [
    {
     "action_type": "link_click",
@@ -4748,16 +4748,16 @@
   "date_stop": "2026-07-18"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "94.55",
+  "spend": "110.62",
   "impressions": "1807",
   "reach": "1301",
   "clicks": "35",
   "frequency": "1.388932",
-  "cpm": "52.324294",
+  "cpm": "61.219424",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -4872,16 +4872,16 @@
   "date_stop": "2026-07-19"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "15.09",
+  "spend": "17.66",
   "impressions": "8378",
   "reach": "7695",
   "clicks": "5",
   "frequency": "1.088759",
-  "cpm": "1.801146",
+  "cpm": "2.107341",
   "actions": [
    {
     "action_type": "link_click",
@@ -4960,16 +4960,16 @@
   "date_stop": "2026-07-19"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "67.18",
+  "spend": "78.60",
   "impressions": "1706",
   "reach": "1292",
   "clicks": "25",
   "frequency": "1.320433",
-  "cpm": "39.378664",
+  "cpm": "46.073037",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -5120,16 +5120,16 @@
   "date_stop": "2026-07-20"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "15.13",
+  "spend": "17.70",
   "impressions": "8694",
   "reach": "8133",
   "clicks": "8",
   "frequency": "1.068978",
-  "cpm": "1.740281",
+  "cpm": "2.036129",
   "actions": [
    {
     "action_type": "link_click",
@@ -5208,16 +5208,16 @@
   "date_stop": "2026-07-20"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "72.92",
+  "spend": "85.32",
   "impressions": "1669",
   "reach": "1205",
   "clicks": "31",
   "frequency": "1.385062",
-  "cpm": "43.690833",
+  "cpm": "51.118275",
   "actions": [
    {
     "action_type": "link_click",
@@ -5340,16 +5340,16 @@
   "date_stop": "2026-07-21"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "14.84",
+  "spend": "17.36",
   "impressions": "8460",
   "reach": "7732",
   "clicks": "3",
   "frequency": "1.094154",
-  "cpm": "1.754137",
+  "cpm": "2.052340",
   "actions": [
    {
     "action_type": "link_click",
@@ -5420,16 +5420,16 @@
   "date_stop": "2026-07-21"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "80",
+  "spend": "93.60",
   "impressions": "1465",
   "reach": "1102",
   "clicks": "26",
   "frequency": "1.329401",
-  "cpm": "54.607509",
+  "cpm": "63.890786",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -5568,16 +5568,16 @@
   "date_stop": "2026-07-22"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "14.49",
+  "spend": "16.95",
   "impressions": "8216",
   "reach": "7412",
   "clicks": "6",
   "frequency": "1.108473",
-  "cpm": "1.763632",
+  "cpm": "2.063449",
   "actions": [
    {
     "action_type": "link_click",
@@ -5656,16 +5656,16 @@
   "date_stop": "2026-07-22"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "76.72",
+  "spend": "89.76",
   "impressions": "1361",
   "reach": "1053",
   "clicks": "36",
   "frequency": "1.292498",
-  "cpm": "56.370316",
+  "cpm": "65.953270",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -5780,16 +5780,16 @@
   "date_stop": "2026-07-23"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "14.7",
+  "spend": "17.20",
   "impressions": "8160",
   "reach": "7465",
   "clicks": "5",
   "frequency": "1.093101",
-  "cpm": "1.801471",
+  "cpm": "2.107721",
   "actions": [
    {
     "action_type": "link_click",
@@ -5868,16 +5868,16 @@
   "date_stop": "2026-07-23"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "64.02",
+  "spend": "74.90",
   "impressions": "1335",
   "reach": "1044",
   "clicks": "14",
   "frequency": "1.278736",
-  "cpm": "47.955056",
+  "cpm": "56.107416",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -5992,16 +5992,16 @@
   "date_stop": "2026-07-24"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
-  "spend": "14.92",
+  "spend": "17.46",
   "impressions": "7789",
   "reach": "6824",
   "clicks": "9",
   "frequency": "1.141413",
-  "cpm": "1.915522",
+  "cpm": "2.241161",
   "actions": [
    {
     "action_type": "link_click",
@@ -6080,16 +6080,16 @@
   "date_stop": "2026-07-24"
  },
  {
-  "campaign_id": "120250860014220790",
-  "adset_id": "120250860014210790",
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
   "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
   "adset_name": "Raptor-01 · Home Reno · Brisbane",
-  "spend": "34.25",
+  "spend": "40.07",
   "impressions": "595",
   "reach": "461",
   "clicks": "7",
   "frequency": "1.290672",
-  "cpm": "57.563025",
+  "cpm": "67.348739",
   "actions": [
    {
     "action_type": "link_click",
@@ -6176,16 +6176,16 @@
   "date_stop": "2026-07-25"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "60.44",
+  "spend": "70.71",
   "impressions": "1052",
   "reach": "864",
   "clicks": "26",
   "frequency": "1.217593",
-  "cpm": "57.452471",
+  "cpm": "67.219391",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -6300,8 +6300,8 @@
   "date_stop": "2026-07-25"
  },
  {
-  "campaign_id": "120252742855760790",
-  "adset_id": "120252742860150790",
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
   "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
   "adset_name": "OZ-REACH-S4-BNE-GC-home",
   "spend": "0",
@@ -6326,16 +6326,16 @@
   "date_stop": "2026-07-25"
  },
  {
-  "campaign_id": "120250860014220790",
-  "adset_id": "120250860014210790",
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
   "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
   "adset_name": "Raptor-01 · Home Reno · Brisbane",
-  "spend": "21.58",
+  "spend": "25.25",
   "impressions": "405",
   "reach": "352",
   "clicks": "6",
   "frequency": "1.150568",
-  "cpm": "53.283951",
+  "cpm": "62.342223",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -6474,16 +6474,16 @@
   "date_stop": "2026-07-26"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "78.64",
+  "spend": "92.01",
   "impressions": "1693",
   "reach": "1394",
   "clicks": "32",
   "frequency": "1.214491",
-  "cpm": "46.450089",
+  "cpm": "54.346604",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -6594,16 +6594,16 @@
   "date_stop": "2026-07-26"
  },
  {
-  "campaign_id": "120250860014220790",
-  "adset_id": "120250860014210790",
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
   "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
   "adset_name": "Raptor-01 · Home Reno · Brisbane",
-  "spend": "22.67",
+  "spend": "26.52",
   "impressions": "390",
   "reach": "323",
   "clicks": "3",
   "frequency": "1.20743",
-  "cpm": "58.128205",
+  "cpm": "68.010000",
   "actions": [
    {
     "action_type": "link_click",
@@ -6674,16 +6674,16 @@
   "date_stop": "2026-07-27"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "68.77",
+  "spend": "80.46",
   "impressions": "1472",
   "reach": "1173",
   "clicks": "31",
   "frequency": "1.254902",
-  "cpm": "46.71875",
+  "cpm": "54.660937",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -6810,16 +6810,16 @@
   "date_stop": "2026-07-27"
  },
  {
-  "campaign_id": "120250860014220790",
-  "adset_id": "120250860014210790",
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
   "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
   "adset_name": "Raptor-01 · Home Reno · Brisbane",
-  "spend": "19.15",
+  "spend": "22.41",
   "impressions": "389",
   "reach": "299",
   "clicks": "8",
   "frequency": "1.301003",
-  "cpm": "49.228792",
+  "cpm": "57.597687",
   "actions": [
    {
     "action_type": "link_click",
@@ -6906,16 +6906,16 @@
   "date_stop": "2026-07-28"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "56.45",
+  "spend": "66.05",
   "impressions": "1288",
   "reach": "1036",
   "clicks": "29",
   "frequency": "1.243243",
-  "cpm": "43.82764",
+  "cpm": "51.278339",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -7030,16 +7030,16 @@
   "date_stop": "2026-07-28"
  },
  {
-  "campaign_id": "120250860014220790",
-  "adset_id": "120250860014210790",
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
   "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
   "adset_name": "Raptor-01 · Home Reno · Brisbane",
-  "spend": "24.01",
+  "spend": "28.09",
   "impressions": "478",
   "reach": "355",
   "clicks": "4",
   "frequency": "1.346479",
-  "cpm": "50.230126",
+  "cpm": "58.769247",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -7166,16 +7166,16 @@
   "date_stop": "2026-07-29"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "59.93",
+  "spend": "70.12",
   "impressions": "1208",
   "reach": "926",
   "clicks": "21",
   "frequency": "1.304536",
-  "cpm": "49.610927",
+  "cpm": "58.044785",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -7290,16 +7290,16 @@
   "date_stop": "2026-07-29"
  },
  {
-  "campaign_id": "120250860014220790",
-  "adset_id": "120250860014210790",
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
   "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
   "adset_name": "Raptor-01 · Home Reno · Brisbane",
-  "spend": "20.41",
+  "spend": "23.88",
   "impressions": "336",
   "reach": "273",
   "clicks": "6",
   "frequency": "1.230769",
-  "cpm": "60.744048",
+  "cpm": "71.070536",
   "actions": [
    {
     "action_type": "link_click",
@@ -7390,16 +7390,16 @@
   "date_stop": "2026-07-30"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "58.27",
+  "spend": "68.18",
   "impressions": "1144",
   "reach": "909",
   "clicks": "21",
   "frequency": "1.258526",
-  "cpm": "50.935315",
+  "cpm": "59.594319",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -7506,16 +7506,16 @@
   "date_stop": "2026-07-30"
  },
  {
-  "campaign_id": "120250860014220790",
-  "adset_id": "120250860014210790",
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
   "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
   "adset_name": "Raptor-01 · Home Reno · Brisbane",
-  "spend": "20.47",
+  "spend": "23.95",
   "impressions": "331",
   "reach": "295",
   "clicks": "6",
   "frequency": "1.122034",
-  "cpm": "61.8429",
+  "cpm": "72.356193",
   "actions": [
    {
     "action_type": "link_click",
@@ -7586,16 +7586,16 @@
   "date_stop": "2026-07-31"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "53.82",
+  "spend": "62.97",
   "impressions": "1172",
   "reach": "980",
   "clicks": "16",
   "frequency": "1.195918",
-  "cpm": "45.921502",
+  "cpm": "53.728157",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -7702,16 +7702,16 @@
   "date_stop": "2026-07-31"
  },
  {
-  "campaign_id": "120250860014220790",
-  "adset_id": "120250860014210790",
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
   "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
   "adset_name": "Raptor-01 · Home Reno · Brisbane",
-  "spend": "3.96",
+  "spend": "4.63",
   "impressions": "83",
   "reach": "73",
   "clicks": "2",
   "frequency": "1.136986",
-  "cpm": "47.710843",
+  "cpm": "55.821686",
   "actions": [
    {
     "action_type": "link_click",
@@ -7810,16 +7810,16 @@
   "date_stop": "2026-08-01"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "43.86",
+  "spend": "51.32",
   "impressions": "976",
   "reach": "778",
   "clicks": "17",
   "frequency": "1.254499",
-  "cpm": "44.938525",
+  "cpm": "52.578074",
   "actions": [
    {
     "action_type": "link_click",
@@ -7906,16 +7906,16 @@
   "date_stop": "2026-08-01"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "75.97",
+  "spend": "88.88",
   "impressions": "1822",
   "reach": "1358",
   "clicks": "36",
   "frequency": "1.341679",
-  "cpm": "41.695939",
+  "cpm": "48.784249",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -8046,16 +8046,16 @@
   "date_stop": "2026-08-02"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "75",
+  "spend": "87.75",
   "impressions": "1770",
   "reach": "1362",
   "clicks": "32",
   "frequency": "1.299559",
-  "cpm": "42.372881",
+  "cpm": "49.576271",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -8146,16 +8146,16 @@
   "date_stop": "2026-08-03"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "42.45",
+  "spend": "49.67",
   "impressions": "891",
   "reach": "676",
   "clicks": "24",
   "frequency": "1.318047",
-  "cpm": "47.643098",
+  "cpm": "55.742425",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -8262,16 +8262,16 @@
   "date_stop": "2026-08-04"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "56.41",
+  "spend": "66.00",
   "impressions": "1210",
   "reach": "932",
   "clicks": "21",
   "frequency": "1.298283",
-  "cpm": "46.619835",
+  "cpm": "54.545207",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -8402,16 +8402,16 @@
   "date_stop": "2026-08-05"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "60.38",
+  "spend": "70.64",
   "impressions": "1278",
   "reach": "985",
   "clicks": "20",
   "frequency": "1.297462",
-  "cpm": "47.245696",
+  "cpm": "55.277464",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -8518,16 +8518,16 @@
   "date_stop": "2026-08-06"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "62.46",
+  "spend": "73.08",
   "impressions": "1271",
   "reach": "1019",
   "clicks": "16",
   "frequency": "1.247301",
-  "cpm": "49.142408",
+  "cpm": "57.496617",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -8650,16 +8650,16 @@
   "date_stop": "2026-08-07"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "47.12",
+  "spend": "55.13",
   "impressions": "1022",
   "reach": "850",
   "clicks": "21",
   "frequency": "1.202353",
-  "cpm": "46.105675",
+  "cpm": "53.943640",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -8774,16 +8774,16 @@
   "date_stop": "2026-08-08"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "76.27",
+  "spend": "89.24",
   "impressions": "1512",
   "reach": "1184",
   "clicks": "21",
   "frequency": "1.277027",
-  "cpm": "50.443122",
+  "cpm": "59.018453",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -8898,16 +8898,16 @@
   "date_stop": "2026-08-09"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "53.67",
+  "spend": "62.79",
   "impressions": "1364",
   "reach": "1096",
   "clicks": "19",
   "frequency": "1.244526",
-  "cpm": "39.347507",
+  "cpm": "46.036583",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -9026,16 +9026,16 @@
   "date_stop": "2026-08-10"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "58.01",
+  "spend": "67.87",
   "impressions": "1142",
   "reach": "901",
   "clicks": "28",
   "frequency": "1.267481",
-  "cpm": "50.796848",
+  "cpm": "59.432312",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -9158,16 +9158,16 @@
   "date_stop": "2026-08-11"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "65.15",
+  "spend": "76.23",
   "impressions": "1457",
   "reach": "1157",
   "clicks": "26",
   "frequency": "1.259291",
-  "cpm": "44.715168",
+  "cpm": "52.316747",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -9302,16 +9302,16 @@
   "date_stop": "2026-08-12"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "58.89",
+  "spend": "68.90",
   "impressions": "1071",
   "reach": "791",
   "clicks": "16",
   "frequency": "1.353982",
-  "cpm": "54.985994",
+  "cpm": "64.333613",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -9434,16 +9434,16 @@
   "date_stop": "2026-08-13"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "59.64",
+  "spend": "69.78",
   "impressions": "1200",
   "reach": "998",
   "clicks": "25",
   "frequency": "1.202405",
-  "cpm": "49.7",
+  "cpm": "58.149000",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -9562,16 +9562,16 @@
   "date_stop": "2026-08-14"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "48.14",
+  "spend": "56.32",
   "impressions": "974",
   "reach": "764",
   "clicks": "17",
   "frequency": "1.274869",
-  "cpm": "49.425051",
+  "cpm": "57.827310",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -9682,16 +9682,16 @@
   "date_stop": "2026-08-15"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "70.34",
+  "spend": "82.30",
   "impressions": "1684",
   "reach": "1260",
   "clicks": "25",
   "frequency": "1.336508",
-  "cpm": "41.769596",
+  "cpm": "48.870427",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -9818,16 +9818,16 @@
   "date_stop": "2026-08-16"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "48.89",
+  "spend": "57.20",
   "impressions": "1010",
   "reach": "794",
   "clicks": "20",
   "frequency": "1.27204",
-  "cpm": "48.405941",
+  "cpm": "56.634951",
   "actions": [
    {
     "action_type": "offsite_complete_registration_add_meta_leads",
@@ -9942,16 +9942,16 @@
   "date_stop": "2026-08-17"
  },
  {
-  "campaign_id": "120252612541630790",
-  "adset_id": "120252612541620790",
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
   "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
   "adset_name": "新潜在客户广告组",
-  "spend": "4.44",
+  "spend": "5.19",
   "impressions": "91",
   "reach": "75",
   "clicks": "1",
   "frequency": "1.213333",
-  "cpm": "48.791209",
+  "cpm": "57.085715",
   "actions": [
    {
     "action_type": "link_click",

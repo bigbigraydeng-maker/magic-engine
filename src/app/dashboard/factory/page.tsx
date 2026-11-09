@@ -6,6 +6,8 @@ import { useSearchParams } from 'next/navigation'
 import { factoryConfigHref } from '@/lib/factory/config-link'
 import { ReviewInbox } from './_components/ReviewInbox'
 import { RecoveryQueue } from './_components/RecoveryQueue'
+import { VariantOrderPanel } from './_components/VariantOrderPanel'
+import { winnerBoardPath } from '@/lib/factory/winner-links'
 
 interface PendingOrder {
   id: string
@@ -165,6 +167,14 @@ export default function FactoryCockpitPage() {
           </>
         )}
       </section>
+      {(lockedClient ?? selectedClient) && (
+        <p className="mt-8 text-sm text-slate-500">
+          <Link href={winnerBoardPath((lockedClient ?? selectedClient) as string)} className="text-slate-700 underline">
+            当前广告样板在广告页 →
+          </Link>
+        </p>
+      )}
+      <VariantOrderPanel clientId={lockedClient} />
       {!lockedClient && <RecoveryQueue />}
     </div>
   )

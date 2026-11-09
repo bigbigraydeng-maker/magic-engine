@@ -125,7 +125,7 @@ describe('loadChainFacts', () => {
       prescriptions: { data: prescription, error: null },
       goals: { data: null, error: null },
       ad_strategy_configs: { data: { daily_budget_cap_cents: 5000, creative_pool: { bad: true }, target_cost_per_primary: 11 }, error: null },
-      marketing_plans: { data: [], error: null },
+      marketing_plans: { data: [{ id: 'plan-1', status: 'approved', created_at: '2026-10-01T00:00:00.000Z', plan_data: { promo: { daily_total_cap_cents: 8000 } }, generation_meta: null }], error: null },
       content_work_orders: { data: [], error: null },
       execution_items: { data: [], error: null },
       ad_entity_snapshots: { data: { captured_at: '2026-10-26T11:00:00.000Z' }, error: null },
@@ -133,7 +133,7 @@ describe('loadChainFacts', () => {
 
     expect(facts.strategy.read).toBe('ok')
     if (facts.strategy.read !== 'ok' || facts.strategy.value === null) throw new Error('strategy missing')
-    expect(facts.strategy.value.dailyCapCents).toBe(5000)
+    expect(facts.strategy.value.dailyCapCents).toBe(8000)
     expect(facts.strategy.value.pool).toBeNull()
     expect(facts.snapshot).toEqual({ read: 'ok', value: { capturedAt: '2026-10-26T11:00:00.000Z' } })
   })

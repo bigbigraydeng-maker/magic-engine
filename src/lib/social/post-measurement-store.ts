@@ -29,6 +29,8 @@ const UNIQUE_VIOLATION = '23505'
 const SNAPSHOT_HASH_MISMATCH_HINT = 'snapshot_hash_mismatch'
 
 export const SOCIAL_PUBLISH_ACTION_TYPE = 'social.publish_post'
+/** Story registration only. Rows omit measure_at so they cannot enter the T+N read chain. */
+export const SOCIAL_PUBLISH_STORY_ACTION_TYPE = 'social.publish_story'
 
 export const POST_METRIC_KEYS = {
   likes: 'social.post.likes',

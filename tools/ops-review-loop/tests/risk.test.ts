@@ -84,6 +84,7 @@ const A_PATHS: Array<[string, string]> = [
   // Planned for P2-1b (does not exist yet): the rule must already rate it A when it lands.
   ['src/lib/inngest/functions/triggered-send-welcome-sweep.ts', 'triggered-send inngest functions'],
   ['src/lib/inngest/functions/triggered-send/welcome-sweep.ts', 'triggered-send inngest functions (subdirectory)'],
+  ['src/lib/inngest/triggered-send-events.ts', 'triggered-send inngest events'],
   ['src/lib/meta/guardrails.ts', 'spend guardrail'],
   ['scripts/factory-worker/engines/remotion/catalog/music-vocals.json', 'music vocal registry'],
   ['scripts/factory-worker/music-vocal-gate.mjs', 'music vocal gate'],

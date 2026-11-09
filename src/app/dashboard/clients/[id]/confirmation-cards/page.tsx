@@ -23,7 +23,7 @@ export default async function ConfirmationCardsPage({
     <main className="mx-auto max-w-xl px-4 py-10">
       <h1 className="text-2xl font-semibold text-neutral-900">请确认</h1>
       <p className="mt-2 text-base text-neutral-700">
-        点「确认」或「不做」才算数。标题是「批准建 Meta 暂停草稿并送审」的那张，点了确认才会去建暂停草稿。建成后仍是暂停，不会开启，也不会花钱。其他卡点了只是记下。
+        点「确认」或「不做」才算数。标题是「批准建 Meta 暂停草稿并送审」的那张，点了确认才会去建暂停草稿。建成后仍是暂停，不会开启，也不会花钱。「建议把跑赢的自然帖建成暂停广告」点了才建成暂停广告；「建议暂停一条点击率过低的广告」点了才走暂停；「把这条已暂停的新广告打开」点了才打开这一条。其他卡点了只是记下。
       </p>
       <CardList clientId={params.id} />
     </main>

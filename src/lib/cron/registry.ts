@@ -399,6 +399,26 @@ const CRON_REGISTRY_ENTRIES = [
   // 李白 · 提示词库月检（agent 自治计划 B2）：cron 每周二 NZ 09:00 醒，函数里只在当月 1–7 号
   // 真跑（标准 cron 的日/周字段是「或」，写不出「第一个周二」），其余周二写一条 skipped 回执。
   // 所以按「每周二」对账是对的：每周都有一行。周期与代码常量 LIBAI_PROMPT_AUDIT_CRON 一致。
+  // 包拯 · 每周复核 AI 判客人阶段（修复方案第 1b 刀）：每周三新西兰 10:00；总开关关着也写一行 skipped 回执，
+  // 所以每周都有一行。周期与代码常量 BAOZHENG_WEEKLY_CRON 一致。规则书 docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md。
+  // 社媒每周出稿编排：每天新西兰 06:30 醒一次，给今天是出稿日、开了每周闭环的客户各发一个 social/week_pack.draft_due 事件；
+  // 每个客户跑完也用同一个 job 名写一行回执。总开关 SOCIAL_WEEKLY_LOOP_ENABLED 关着也写一行 disabled 回执，所以每天都有一行。
+  // 写库开关 SOCIAL_WEEKLY_LOOP_WRITE 关着一律演练。不发布、不扣费、不外发。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/cloud-social-weekly-draft.ts 的 SOCIAL_WEEKLY_DRAFT_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
+  { service: 'inngest:cloud-social-weekly-draft', jobName: 'social-weekly-draft', schedule: '30 6 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-04' },
+  // 社媒账号自检：每周一新西兰 06:00 醒一次，给开了每周闭环的客户各量一遍账号最近 Reel 的同质化，结果写一行回执，今日待办读它。
+  // 只读工单、不写业务表、不外发、不花钱。🔴 schedule 唯一定义在 src/lib/inngest/functions/cloud-social-account-audit.ts 的 ACCOUNT_AUDIT_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
+  { service: 'inngest:cloud-social-account-audit', jobName: 'social-account-audit', schedule: '0 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-05' },
+  // 社媒每周回看建议：公开满 72 小时的 Reel 成绩 → 多做/少做建议；只读、不改设置、不外发、不花钱。🔴 schedule 唯一定义在 src/lib/inngest/functions/cloud-social-readback-weekly.ts 的 READBACK_WEEKLY_CRON。
+  { service: 'inngest:cloud-social-readback-weekly', jobName: 'social-readback-weekly', schedule: '10 6 * * 1', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-05' },
+  // Reel 按日公开：每 30 分钟醒一次（新西兰时间），到了客户发布时点（默认 18:00）才把当天已在周卡上授权的 Reel 走转公开；
+  // 总开关 WEEKLY_PACK_REEL_SCHEDULED_PUBLIC 关着也写一行 disabled 回执，所以每次醒来都有一行。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/cloud-reel-scheduled-go-public.ts 的 REEL_SCHEDULED_CRON。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
+  { service: 'inngest:cloud-reel-scheduled-go-public', jobName: 'reel-scheduled-go-public', schedule: '*/30 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-04' },
+  { service: 'inngest:cloud-baozheng-weekly', jobName: 'baozheng-weekly', schedule: '0 10 * * 3', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-03' },
   { service: 'inngest:cloud-libai-prompt-library-monthly', jobName: 'libai-prompt-library-monthly', schedule: '0 9 * * 2', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-25' },
   // 司马迁 · 口碑周巡（agent 自治计划 B2）：每周四新西兰 09:00 读本周新 Google 评价、起草回复，
   // 一律不发，只写回执给今日待办拉。周期与 src/lib/inngest/functions/simaqian-reputation-weekly.ts
@@ -447,6 +467,22 @@ const CRON_REGISTRY_ENTRIES = [
   // 每一轮都写一行运行记录。设计稿 docs/specs/2026-10-12-story-lite-design.md。2026-10-21 补登记，理由同上一条。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/story-lite-publish.ts 的 STORY_LITE_PUBLISH_CRON（该函数的测试断言两边一致）。
   { service: 'inngest:cloud-story-lite-publish', jobName: 'story-lite-publish', schedule: '*/10 * * * *', logsRuns: true, scheduler: 'inngest' },
+
+  // Triggered-send (welcome e-mail) SHADOW run: records what ME WOULD send each morning; it never sends anything.
+  // Runs at 09:00 New Zealand time (the Inngest cron carries TZ=Pacific/Auckland; after the old 08:01 batch, so Mailchimp's
+  // report of it has settled); a second trigger at 11:00 retries what could not be read, and is not watched separately. Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §5.
+  // 🔴 schedule must not be hand-copied: the only definition is TRIGGERED_SEND_SWEEP_CRON in
+  //    src/lib/inngest/functions/triggered-send-welcome-sweep.ts (its test asserts the two are equal).
+  { service: 'inngest:cloud-triggered-send-welcome-dispatch', jobName: 'triggered-send-welcome-dispatch', schedule: '0 9 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-02' },
+  // The per-client sweeps ordered by the dispatch above (event-triggered, so they follow its schedule). A morning without
+  // new leads legitimately writes no ledger row, hence emptyRoundsAreLegitimate (processed = contacts to decide).
+  { service: 'inngest:cloud-triggered-send-welcome-sweep', jobName: 'triggered-send-welcome-sweep', schedule: '0 9 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-02',
+    outputTables: [{ table: 'triggered_sends', freshnessHours: 26, timestampColumn: 'created_at', emptyRoundsAreLegitimate: true }] },
+
+  // 「别再联系」的客人自己回来：填表 / 接通的来电 → 自动解除；私信 / 回信只列进运行记录请人看。每 15 分钟（Inngest cron 带 TZ=Pacific/Auckland），
+  // 每一轮都写一行运行记录。默认只演练：CRM_DNC_REENGAGE_WRITE_CLIENTS 名单里的客户才真写。设计稿 docs/specs/2026-11-08-crm-ai-takeover-and-dnc-reengage-design-v0.md §3。
+  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/crm-dnc-reengage-sweep.ts 的 CRM_DNC_REENGAGE_CRON（去掉 TZ 前缀）。
+  { service: 'inngest:cloud-crm-dnc-reengage-sweep', jobName: 'crm-dnc-reengage-sweep', schedule: '*/15 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-08' },
 
   // Render 上只留这三条。它们自己很快返回，到点的旧接口在 web 进程里接着跑。
   { service: 'cron-dispatch-frequent', jobName: 'cron-dispatch-frequent', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-24' },

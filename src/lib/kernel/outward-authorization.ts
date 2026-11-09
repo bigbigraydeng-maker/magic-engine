@@ -165,6 +165,8 @@ export async function preProviderEnvelopeBlockReason(args: {
   run: Pick<ActionRun, 'id' | 'client_id' | 'action_key' | 'input' | 'triggered_by'>
   stepKey: string
   resolveFacts: EnvelopeFactsResolver | undefined
+  /** 放行是 PM 本人签的加钱类动作（Gateway 从决策表读出、经注入判定算好）。缺省 = 否。 */
+  pmApprovedSpendIncrease?: boolean
 }): Promise<string | null> {
   const approval = args.definition.outwardAuthorization?.approval
   if (args.definition.sideEffect !== 'outward') return null
@@ -191,6 +193,7 @@ export async function preProviderEnvelopeBlockReason(args: {
     request: resolved.request,
     facts: resolved.facts,
     envelope: approval.envelope,
+    pmApprovedSpendIncrease: args.pmApprovedSpendIncrease === true,
   })
   if (verdict.within) return null
   return `碰 Meta 之前重算信封已越界：${verdict.reasons.join('；')}`

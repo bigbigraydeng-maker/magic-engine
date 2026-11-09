@@ -300,12 +300,13 @@ export function createMailNewGraph(opts: { timeoutMs?: number } = {}): MailNewGr
 export async function graphGetPage(
   connectionId: string,
   pathOrUrl: string,
+  opts?: { markErrorOnFailure?: boolean },
 ): Promise<{ ok: true; json: unknown } | { ok: false; error: string }> {
   let path: string
   if (pathOrUrl.startsWith(`${GRAPH}/`)) path = pathOrUrl.slice(GRAPH.length)
   else if (pathOrUrl.startsWith('/') && !pathOrUrl.startsWith('//')) path = pathOrUrl
   else return { ok: false, error: 'refusing to follow a link outside Microsoft Graph' }
-  const result = await callWithRetry(connectionId, (token) => graphJson<unknown>(token, path, { method: 'GET' }))
+  const result = await callWithRetry(connectionId, (token) => graphJson<unknown>(token, path, { method: 'GET' }), opts)
   return result.ok ? { ok: true, json: result.value } : { ok: false, error: result.error }
 }
 

@@ -1,19 +1,19 @@
 /**
- * 服务级「只暂停」：用服务密钥暂停一条广告系列。
+ * 服务级「只暂停」：服务密钥只能申请暂停确认卡，不能自己暂停。
+ * 人点未过期的卡之后，才由既有的暂停卡去改系列。
  * 不能恢复、不能改预算、不能删除或新建。总开关默认关。
- * 先写操作记录，记录写不进去就不去改广告。
  * 不点名任何客户。
  */
 
+import { requestCampaignStatusCard, type CampaignRequest } from '@/lib/action-submission/campaign-status-card'
 import { getTrackingClientConfig } from '@/lib/ads-tracking-preflight/client-config'
-import { inngest } from '@/lib/inngest/client'
+import { askerFromAccess } from '@/lib/ads-strategy/card-asker'
+import type { CardClicker } from '@/lib/confirmation-card'
 import { assertCampaignOwnedByClient } from '@/lib/meta/campaign-ownership'
-import { setCampaignStatus } from '@/lib/meta/client'
 import { resolveMetaToken } from '@/lib/meta/token-selection'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export const SERVICE_PAUSE_ACTION = 'ads.service_pause_only'
-export const SERVICE_PAUSE_EVENT = 'ads.service_pause.completed'
 
 const BODY_KEYS = [
   'client_id', 'campaign_id', 'campaign_name', 'ad_account_id', 'fault_code', 'fault_what',
@@ -61,8 +61,7 @@ export interface PauseOnlyDeps {
   update: (id: string, payload: Record<string, unknown>) => Promise<boolean>
   resolveToken: (clientId: string) => Promise<string | null>
   assertOwned: (campaignId: string, clientId: string, token: string) => Promise<OwnedCampaign | { ok: false }>
-  pauseOnly: (campaignId: string, token: string) => Promise<boolean>
-  sendEvent: (event: { id: string; data: { client_id: string; action_id: string } }) => Promise<void>
+  issuePauseCard: (body: PauseBody) => Promise<{ ok: true; runId: string } | { ok: false; reason: string }>
 }
 
 export interface PauseOnlyResult {
@@ -73,6 +72,7 @@ export interface PauseOnlyResult {
     idempotent?: boolean
     warning?: string
     action_id?: string
+    card_run_id?: string
   }
 }
 
@@ -157,15 +157,6 @@ export function pausePayload(body: PauseBody, status: string): Record<string, un
   }
 }
 
-/** 只允许暂停。类型上就没有恢复这个选项。 */
-export async function pauseCampaignOnly(
-  campaignId: string,
-  token: string,
-  setStatus: (id: string, accessToken: string, status: 'PAUSED') => Promise<boolean>,
-): Promise<boolean> {
-  return setStatus(campaignId, token, 'PAUSED')
-}
-
 function result(http: number, reason: string, extra: Partial<PauseOnlyResult['body']> = {}): PauseOnlyResult {
   return { http, body: { paused: false, reason, ...extra } }
 }
@@ -173,17 +164,14 @@ function result(http: number, reason: string, extra: Partial<PauseOnlyResult['bo
 function replay(row: PauseRow): PauseOnlyResult {
   const status = typeof row.payload.status === 'string' ? row.payload.status : 'pending'
   if (status === 'paused') return result(200, 'paused', { paused: true, idempotent: true, action_id: row.id })
-  const reason = status === 'already_paused' || status === 'meta_failed' ? status : 'pending'
-  return result(200, reason, { idempotent: true, action_id: row.id })
-}
-
-async function notify(deps: PauseOnlyDeps, body: PauseBody, actionId: string): Promise<string | null> {
-  try {
-    await deps.sendEvent({ id: body.idempotency_key, data: { client_id: body.client_id, action_id: actionId } })
-    return null
-  } catch {
-    return 'notify_failed'
+  if (status === 'card_issued') {
+    const runId = typeof row.payload.card_run_id === 'string' ? row.payload.card_run_id : undefined
+    return result(202, 'card_issued', { idempotent: true, action_id: row.id, ...(runId ? { card_run_id: runId } : {}) })
   }
+  const reason = status === 'already_paused' || status === 'meta_failed' || status === 'card_failed' || status === 'not_active'
+    ? status
+    : 'pending'
+  return result(200, reason, { idempotent: true, action_id: row.id })
 }
 
 async function recordWithoutMeta(deps: PauseOnlyDeps, body: PauseBody, status: string, reason: string): Promise<PauseOnlyResult> {
@@ -192,19 +180,53 @@ async function recordWithoutMeta(deps: PauseOnlyDeps, body: PauseBody, status: s
   return result(200, reason, { action_id: row.id })
 }
 
-async function pauseNew(deps: PauseOnlyDeps, body: PauseBody, token: string): Promise<PauseOnlyResult> {
-  const pending = pausePayload(body, 'pending')
-  const row = await deps.insert(body.client_id, pending)
+async function askCard(deps: PauseOnlyDeps, body: PauseBody): Promise<PauseOnlyResult> {
+  const row = await deps.insert(body.client_id, pausePayload(body, 'asking'))
   if (row === null) return result(200, 'log_failed')
-  const paused = await deps.pauseOnly(body.campaign_id, token)
-  if (!paused) {
-    await deps.update(row.id, pausePayload(body, 'meta_failed'))
-    return result(200, 'meta_failed', { action_id: row.id })
+  const asked = await deps.issuePauseCard(body)
+  if (!asked.ok) {
+    await deps.update(row.id, pausePayload(body, 'card_failed'))
+    return result(200, asked.reason, { action_id: row.id })
   }
-  const wrote = await deps.update(row.id, pausePayload(body, 'paused'))
-  const warning = await notify(deps, body, row.id)
-  const note = !wrote ? 'log_update_failed' : warning
-  return result(200, 'paused', { paused: true, action_id: row.id, ...(note !== null ? { warning: note } : {}) })
+  await deps.update(row.id, { ...pausePayload(body, 'card_issued'), card_run_id: asked.runId })
+  return result(202, 'card_issued', { action_id: row.id, card_run_id: asked.runId })
+}
+
+export function servicePauseAccess(clientId: string): CampaignRequest['access'] {
+  return {
+    ok: true,
+    user: { id: 'service-pause', email: 'service-pause@internal' } as CampaignRequest['access']['user'],
+    role: 'client-viewer',
+    tier: 'paid_client',
+    allowedClientId: clientId,
+  }
+}
+
+/** The service identity can ask. It cannot press the card. */
+export function servicePauseClicker(clientId: string): CardClicker {
+  return askerFromAccess(servicePauseAccess(clientId), clientId, false)
+}
+
+async function issueServicePauseCard(body: PauseBody): Promise<{ ok: true; runId: string } | { ok: false; reason: string }> {
+  try {
+    const out = await requestCampaignStatusCard(supabaseAdmin, {
+      clientId: body.client_id,
+      access: servicePauseAccess(body.client_id),
+      kind: 'pause',
+      campaignId: body.campaign_id,
+      adAccountId: body.ad_account_id,
+      name: body.campaign_name,
+      liveStatus: 'ACTIVE',
+      dailyBudget: null,
+      objective: null,
+      executionItemId: null,
+    })
+    const runId = typeof out.body.runId === 'string' ? out.body.runId : ''
+    if (out.status !== 202 || runId.length === 0 || out.body.wroteMeta !== false) return { ok: false, reason: 'card_failed' }
+    return { ok: true, runId }
+  } catch {
+    return { ok: false, reason: 'card_failed' }
+  }
 }
 
 /** fail-closed：名单读不到、系列不在名单、请求体账户与名单不符，一律不通过。 */
@@ -247,7 +269,8 @@ export async function pauseCampaignServiceOnly(raw: unknown, deps: PauseOnlyDeps
   const owned = await deps.assertOwned(parsed.body.campaign_id, parsed.body.client_id, token)
   if (!owned.ok) return result(403, 'not_owned')
   if (owned.status === 'PAUSED') return recordWithoutMeta(deps, parsed.body, 'already_paused', 'already_paused')
-  return pauseNew(deps, parsed.body, token)
+  if (owned.status !== 'ACTIVE') return recordWithoutMeta(deps, parsed.body, 'not_active', 'not_active')
+  return askCard(deps, parsed.body)
 }
 
 function rowFrom(data: unknown): PauseRow | null {
@@ -268,10 +291,7 @@ export function realPauseDeps(): PauseOnlyDeps {
       if (!owned.ok) return { ok: false }
       return { ok: true, status: owned.campaign.status }
     },
-    pauseOnly: (campaignId, token) => pauseCampaignOnly(campaignId, token, setCampaignStatus),
-    sendEvent: async event => {
-      await inngest.send({ id: event.id, name: SERVICE_PAUSE_EVENT, data: event.data })
-    },
+    issuePauseCard: issueServicePauseCard,
   }
 }
 

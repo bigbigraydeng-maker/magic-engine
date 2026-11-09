@@ -261,6 +261,32 @@ async function persistRefreshedToken(
   }
 }
 
+/**
+ * 刷新失败是不是**临时的**：对方服务器出错（HTTP 5xx）、限流（429）、网络断一下（fetch failed / 连接被重置 / 超时）。
+ *
+ * 🔴 临时失败绝不能把连接标成 error（2026-11-03 实查）：CTS 的 GA4 在 10-31 刷新时谷歌回了一次 500 internal_failure，
+ *    NAL 的 GA4 在 11-02 碰上一次 fetch failed，两条连接都被永久标成 error，之后每天的谷歌数据回拉都直接跳过它们
+ *    （GA4 一连几天没数）。同一刷新令牌事后实测换得到访问令牌——令牌是好的，坏的只是那一次请求。
+ *    只有对方明确拒绝（invalid_grant 之类的 4xx、缺配置）才是「这条连接真的断了」，那时才标 error。
+ */
+export function isTransientRefreshFailure(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err)
+  if (err instanceof PlatformTokenRefreshError) {
+    // 对方回了话：只认我们自己拼的开头「Token refresh failed for <平台>: HTTP <状态码>」里的状态码。
+    // 🔴 不许在整段错误原文里找字样——对方 400 拒绝的说明里碰巧带 "network" / "HTTP 500"，会把被拒绝的授权误当临时故障，
+    //    连接就永远不进 error（魏征补审 P2-1，2026-11-03）。
+    const m = /^Token refresh failed for [^:]+: HTTP (\d{3})\b/.exec(message)
+    if (m === null) return false
+    const status = Number(m[1])
+    return status >= 500 || status === 429
+  }
+  // 请求根本没拿到完整回应（fetch 自己抛的错、回应读到一半断了 / 内容不是 JSON）：只在这种「没拿到回应」的错误上认网络字样
+  return (
+    err instanceof SyntaxError ||
+    /fetch failed|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|terminated|network/i.test(message)
+  )
+}
+
 async function markConnectionError(connectionId: string, message: string): Promise<void> {
   try {
     await supabaseAdmin
@@ -283,7 +309,7 @@ async function markConnectionError(connectionId: string, message: string): Promi
  * Transparently refreshes the token if expired.
  *
  * @throws {PlatformConnectionNotFoundError}  No active connection exists.
- * @throws {PlatformTokenRefreshError}         Refresh call failed (connection marked error).
+ * @throws {PlatformTokenRefreshError}         Refresh call failed (connection marked error unless the failure was transient).
  */
 export async function getValidToken(
   clientId: string,
@@ -309,7 +335,8 @@ export async function getValidToken(
     refreshed = await callProviderRefresh(provider, refreshTokenPlain)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    await markConnectionError(row.id, msg)
+    // 临时失败只抛给调用方（这一轮读不到），不把连接标坏；下一轮会再试
+    if (!isTransientRefreshFailure(err)) await markConnectionError(row.id, msg)
     throw err
   }
 
@@ -327,7 +354,7 @@ export async function getValidToken(
  */
 export async function getValidTokenForConnection(
   connectionId: string,
-  opts?: { forceRefresh?: boolean },
+  opts?: { forceRefresh?: boolean; markErrorOnFailure?: boolean },
 ): Promise<string> {
   const { data, error } = await supabaseAdmin
     .from('platform_oauth_connections')
@@ -350,7 +377,11 @@ export async function getValidTokenForConnection(
   try {
     refreshed = await callProviderRefresh(row.provider, decryptToken(row.refresh_token_enc))
   } catch (err) {
-    await markConnectionError(row.id, err instanceof Error ? err.message : String(err))
+    // A read-only background reader (the triggered-send shadow run) passes `markErrorOnFailure: false`: a refresh that
+    // fails once must not take the mailbox offline for the people who send from it. Every other caller keeps the default.
+    if (opts?.markErrorOnFailure !== false && !isTransientRefreshFailure(err)) {
+      await markConnectionError(row.id, err instanceof Error ? err.message : String(err))
+    }
     throw err
   }
 

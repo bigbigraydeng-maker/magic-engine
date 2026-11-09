@@ -53,12 +53,15 @@ export function parsePausedDraft(payload: unknown): PausedDraftView | null {
   const campaignId = text(row.campaignId)
   const adSetId = text(row.adSetId)
   const adIds = idList(row.adIds)
+  // 多个广告组的草稿：账本里只有 adSetIds（没有单个 adSetId），上线卡和「开」按钮都只会开一个组，
+  // 开了一个就等于另外几组被静默落下 —— 一律当作「编号不全」，让上线卡走不通、交回人处理（失败关闭）。
+  const multiSet = (Array.isArray(row.adSetIds) && row.adSetIds.length > 0) || (body !== null && Array.isArray(body.adSets))
   return {
     status,
     kind: body ? text(body.kind) : null,
     dailyBudget: body ? finite(body.dailyBudget) : null,
     durationDays: body ? finite(body.durationDays) : null,
     accountLabel: text(row.accountLabel),
-    ids: campaignId && adSetId && adIds ? { campaignId, adSetId, adIds } : null,
+    ids: !multiSet && campaignId && adSetId && adIds ? { campaignId, adSetId, adIds } : null,
   }
 }

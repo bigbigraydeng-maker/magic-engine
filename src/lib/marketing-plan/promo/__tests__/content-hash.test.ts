@@ -25,10 +25,24 @@ describe('promoContentHash', () => {
     const reordered = {
       checks: parsed.checks,
       phases: parsed.phases,
+      daily_total_cap_cents: parsed.daily_total_cap_cents,
       goal_id: parsed.goal_id,
       schema: parsed.schema,
     } as unknown as PromoSpec
     expect(promoContentHash(reordered)).toBe(promoContentHash(spec))
+  })
+
+  it('改每天总上限会换指纹；没填这个键则不进指纹', () => {
+    const spec = baseSpec()
+    const changed = clone(spec)
+    changed.daily_total_cap_cents = (spec.daily_total_cap_cents ?? 0) + 100
+    expect(promoContentHash(changed)).not.toBe(promoContentHash(spec))
+    const dropped = clone(spec)
+    delete dropped.daily_total_cap_cents
+    const never = clone(spec)
+    delete never.daily_total_cap_cents
+    expect(promoContentHash(dropped)).toBe(promoContentHash(never))
+    expect(JSON.stringify(dropped)).not.toContain('daily_total_cap_cents')
   })
 
   it('checks 内容不同 → 同一指纹', () => {

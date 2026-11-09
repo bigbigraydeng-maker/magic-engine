@@ -69,6 +69,7 @@ const NOT_COMPARABLE_LABEL: Record<string, string> = {
   target_cost_not_configured: '没设置目标单次成本',
   outcome_not_configured: '没设置结果怎么算',
   primary_result_unknown: '真实生意归不到广告',
+  result_type_mismatch: '这个组出的结果跟主结果不是一种',
   primary_not_attributable: '真实生意归不到广告',
   audience_below_floor: '受众人数太少看不准',
   audience_too_new: '受众刚建',

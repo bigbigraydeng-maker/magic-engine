@@ -62,3 +62,10 @@ export interface WeekPackReceipt {
   rolled_back: false
   lines: WeekPackLine[]
 }
+
+/** One reel the person ticked on the week card (scheduled mode): what they saw and the day it was listed for. */
+export interface ReelListApproval {
+  work_order_id: string
+  fingerprint: string
+  publish_on: string
+}

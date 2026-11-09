@@ -277,7 +277,7 @@ function buildOverallHeadline(verdict: Verdict, campaigns: CampaignNarrative[]):
   if (campaigns.length > 0 && campaigns.every(c => c.verdict === 'paused')) {
     return `所有 ${campaigns.length} 条广告都已停投,无在投广告可体检`
   }
-  if (verdict === 'insufficient_history') return '广告数据仍在积累,暂无健康判定'
+  if (verdict === 'insufficient_history') return '在投系列的历史还不够长,先不跟它自己以前比'
   const alerts  = campaigns.filter(c => c.verdict === 'alert')
   const watches = campaigns.filter(c => c.verdict === 'watch')
   const paused  = campaigns.filter(c => c.verdict === 'paused')

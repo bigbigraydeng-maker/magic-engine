@@ -193,3 +193,9 @@ const memory = await loadMemoryForClient(supabase, clientId, {
 ## 操作手册
 
 暂无。索引：[agents 索引](./README.md)。
+
+---
+
+## 十一、当审查员时的省钱约定（2026-11-05）
+
+子牙做 B/C 级抽查审查时，同样适用 [魏征手册 §九](./90-weicheng.md)：Sonnet 档、只读 diff 和点名文件、约 15 轮封顶、一个 PR 一次审查。A 级复核不降级。

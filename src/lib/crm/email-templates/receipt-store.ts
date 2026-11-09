@@ -311,6 +311,44 @@ export async function findSentTemplateReceiptsSince(
   })
 }
 
+const SENT_IDS_LIMIT = 200
+
+/**
+ * The provider message ids of the mails these templates sent to one guest since `sinceIso` (outcome `sent` only, and only mails sent exactly as the template wrote them: `edited_after_render` is false).
+ * The weekly cap leaves these mails out of its count. It throws when the list cannot be vouched for (query error,
+ * unreadable row, or more rows than the limit): the cap then fails closed instead of reading a failure as "none".
+ */
+export async function findSentMessageIdsOfTemplates(
+  db: SupabaseClient,
+  clientId: string,
+  contactId: string,
+  templateKeys: readonly string[],
+  sinceIso: string,
+): Promise<string[]> {
+  if (templateKeys.length === 0) return []
+  const { data, error } = await db
+    .from(TABLE)
+    .select('provider_message_id')
+    .eq('client_id', clientId)
+    .eq('contact_id', contactId)
+    .in('template_key', [...templateKeys])
+    .eq('outcome', 'sent')
+    .eq('edited_after_render', false)
+    .not('provider_message_id', 'is', null)
+    .gte('created_at', sinceIso)
+    .limit(SENT_IDS_LIMIT + 1)
+  if (error !== null) throw new Error(`${TABLE}: sent ids of templates: ${error.message}`)
+  const rows = Array.isArray(data) ? data : []
+  if (rows.length > SENT_IDS_LIMIT) throw new Error(`${TABLE}: too many mails of the exempt templates to list`)
+  const ids: string[] = []
+  for (const row of rows) {
+    const id = row !== null && typeof row === 'object' ? (row as Record<string, unknown>).provider_message_id : undefined
+    if (typeof id !== 'string' || id === '') throw new Error(`${TABLE}: unreadable row`)
+    ids.push(id)
+  }
+  return ids
+}
+
 interface SummaryAccumulator {
   templateKey: string | null
   sent: number

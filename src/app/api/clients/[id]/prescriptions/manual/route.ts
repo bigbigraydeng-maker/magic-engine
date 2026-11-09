@@ -48,23 +48,6 @@ async function nextVersionForGoal(goalId: string): Promise<number | Fail> {
   return (data?.version ?? 0) + 1
 }
 
-/** Latest approved row for this client and goal. Drafts do not count. Blank goal → null. */
-async function latestApprovedId(clientId: string, goalId: string): Promise<string | null | Fail> {
-  if (goalId.trim() === '') return null
-  const { data, error } = await supabaseAdmin
-    .from('prescriptions')
-    .select('id')
-    .eq('client_id', clientId)
-    .eq('goal_id', goalId)
-    .eq('status', 'approved')
-    .order('approved_at', { ascending: false, nullsFirst: false })
-    .order('version', { ascending: false })
-    .limit(1)
-    .maybeSingle<{ id: string }>()
-  if (error) return { ok: false, status: 500, error: '读取已批准处方失败' }
-  return typeof data?.id === 'string' && data.id.length > 0 ? data.id : null
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
@@ -92,9 +75,27 @@ async function loadInsertContext(clientId: string, goalId: string): Promise<Read
   if (!('runId' in run)) return run
   const version = await nextVersionForGoal(goalId)
   if (typeof version !== 'number') return version
-  const supersedesId = await latestApprovedId(clientId, goalId)
-  if (typeof supersedesId !== 'string' && supersedesId !== null) return supersedesId
-  return { ok: true, runId: run.runId, version, supersedesId }
+  const predecessor = await approvedPredecessor(clientId, goalId)
+  if (!predecessor.ok) return predecessor
+  return { ok: true, runId: run.runId, version, supersedesId: predecessor.id }
+}
+
+/** Pointer only. Does not update the approved row. A read failure does not insert. */
+async function approvedPredecessor(
+  clientId: string,
+  goalId: string,
+): Promise<{ ok: true; id: string | null } | Fail> {
+  const { data, error } = await supabaseAdmin
+    .from('prescriptions')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('goal_id', goalId)
+    .eq('status', 'approved')
+    .order('approved_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ id: string }>()
+  if (error) return { ok: false, status: 500, error: '读取已批准处方失败' }
+  return { ok: true, id: data?.id ?? null }
 }
 
 async function insertDraft(

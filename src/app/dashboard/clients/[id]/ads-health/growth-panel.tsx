@@ -15,6 +15,8 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { BUDGET_HOLD_NOTE } from '@/lib/ads-strategy/war-map/followup'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
+import type { AdsScorecard } from '@/lib/ads-strategy/portfolio/scorecard'
+import { ApprovalContextNotes } from './approval-context-notes'
 
 export type GrowthVerdict = 'on_track' | 'behind' | 'unreachable_within_caps' | 'unknown'
 
@@ -54,6 +56,8 @@ export interface GrowthStateView {
     opportunitiesSkippedReason?: string | null
     problemsSupersededByOpportunities?: number
     goal?: { title: string; label: string; target: number; dayIndex: number; totalDays: number; primaryMetricKey?: string } | null
+    /** 每日广告成绩单（2026-11-03 起写入；老行没有） */
+    scorecard?: AdsScorecard | { error: string }
   } | null
 }
 
@@ -88,7 +92,7 @@ function useBudgetHold(clientId: string | undefined, enabled: boolean): boolean 
   return hold
 }
 
-function FindingCard({ f, kind, clientId, cycleDate, budgetHold }: { f: GrowthFinding; kind: 'problem' | 'opportunity'; clientId?: string; cycleDate?: string; budgetHold?: boolean }) {
+function FindingCard({ f, kind, clientId, cycleDate, budgetHold, onPendingAdsChanged }: { f: GrowthFinding; kind: 'problem' | 'opportunity'; clientId?: string; cycleDate?: string; budgetHold?: boolean; onPendingAdsChanged?: () => void }) {
   const isHit = f.status === 'hit'
   const tint = !isHit ? 'border-gray-200 bg-gray-50'
     : kind === 'problem' ? 'border-amber-200 bg-amber-50' : 'border-sky-200 bg-sky-50'
@@ -111,14 +115,33 @@ function FindingCard({ f, kind, clientId, cycleDate, budgetHold }: { f: GrowthFi
         <p className="mt-1 text-xs text-amber-800">{BUDGET_HOLD_NOTE}</p>
       )}
       {kind === 'opportunity' && f.code === 'O1' && clientId && f.units?.map(unit => (
-        <O1Approval key={unit.id} clientId={clientId} adsetId={unit.id} cycleDate={cycleDate} o1Evidence={f.evidence ?? {}} />
+        <O1Approval
+          key={unit.id}
+          clientId={clientId}
+          adsetId={unit.id}
+          cycleDate={cycleDate}
+          o1Evidence={f.evidence ?? {}}
+          onPendingAdsChanged={onPendingAdsChanged}
+        />
       ))}
     </div>
   )
 }
 
 interface O1Run { id: string; status: string; input: Record<string, unknown>; evidence: Record<string, unknown>; authorization_decision_id: string | null }
-function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: string; adsetId: string; cycleDate?: string; o1Evidence: Record<string, unknown> }) {
+function O1Approval({
+  clientId,
+  adsetId,
+  cycleDate,
+  o1Evidence,
+  onPendingAdsChanged,
+}: {
+  clientId: string
+  adsetId: string
+  cycleDate?: string
+  o1Evidence: Record<string, unknown>
+  onPendingAdsChanged?: () => void
+}) {
   const [runs, setRuns] = useState<O1Run[]>([])
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -136,8 +159,9 @@ function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: st
     try {
       const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ adset_id: adsetId }) })
       const json = await response.json() as { error?: string }
-      setMessage(response.ok ? '已提交，等待负责人核对并批准。' : json.error ?? '暂时无法提交。')
+      setMessage(response.ok ? '确认卡已出，预算还没改。请到确认卡上点确认。' : json.error ?? '暂时无法提交。')
       await refresh()
+      if (response.ok) onPendingAdsChanged?.()
     } catch { setMessage('网络暂时不可用，请稍后重试。') }
     finally { setBusy(false) }
   }
@@ -147,8 +171,9 @@ function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: st
     try {
       const response = await fetch(`${endpoint}/${run.id}/decision`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ resolution, expectedDecisionId: run.authorization_decision_id, historyReviewed }) })
       const json = await response.json() as { error?: string }
-      setMessage(response.ok ? (resolution === 'approve' ? '已批准，正在排队执行；完成后会记录 Meta 回读结果。' : '已驳回。') : json.error ?? '处理失败。')
+      setMessage(response.ok ? (resolution === 'approve' ? '已记下。预算要等确认卡点了确认才改。' : '已驳回。') : json.error ?? '处理失败。')
       await refresh()
+      if (response.ok) onPendingAdsChanged?.()
     } catch { setMessage('网络暂时不可用，请稍后重试。') }
     finally { setBusy(false) }
   }
@@ -167,6 +192,14 @@ function O1Approval({ clientId, adsetId, cycleDate, o1Evidence }: { clientId: st
     <div className="mt-3 rounded-lg border border-sky-200 bg-white p-3 text-xs text-gray-700">
       <p>这是系统建议，不会自动加预算。批准后最多上调 20%，并受客户预算上限约束。</p>
       {typeof before === 'number' && typeof after === 'number' && <p className="mt-1">当前{budgetTarget}日预算 {money(before)} → 建议 {money(after)}</p>}
+      {(pending ?? active ?? terminal) && (
+        <ApprovalContextNotes
+          clientId={clientId}
+          adsetId={adsetId}
+          runId={(pending ?? active ?? terminal)!.id}
+          runStatus={(pending ?? active ?? terminal)!.status}
+        />
+      )}
       {typeof o1Evidence.ctr_by_day === 'string' && <p className="mt-1 text-gray-500">最近三天 CTR：{o1Evidence.ctr_by_day.split('|').join(' / ')}；账户中位数：{String(o1Evidence.median_by_day ?? '—').split('|').join(' / ')}</p>}
       {pending ? (
         <>
@@ -227,7 +260,15 @@ function ClientGrowthPanel({ view }: { view: ClientGrowthView }) {
 /**
  * @param state  null = 今天还没巡察过；undefined = 这一段读不到（接口出错）
  */
-export default function GrowthPanel({ state, clientId }: { state: GrowthStateView | ClientGrowthView | null | undefined; clientId?: string }) {
+export default function GrowthPanel({
+  state,
+  clientId,
+  onPendingAdsChanged,
+}: {
+  state: GrowthStateView | ClientGrowthView | null | undefined
+  clientId?: string
+  onPendingAdsChanged?: () => void
+}) {
   const clientView = state != null && isClientView(state)
   const budgetHold = useBudgetHold(clientId, state != null && !clientView)
   if (state === undefined) {
@@ -283,7 +324,17 @@ export default function GrowthPanel({ state, clientId }: { state: GrowthStateVie
             ? <p className="text-xs text-gray-400">数据不全，这天没判。</p>
             : opportunities.length === 0
               ? <p className="text-xs text-gray-400">今天没发现明显还有空间的地方。</p>
-            : <div className="space-y-2">{opportunities.map((f, i) => <FindingCard key={`${f.code}-${i}`} f={f} kind="opportunity" clientId={clientId} cycleDate={state.date} budgetHold={budgetHold} />)}</div>}
+            : <div className="space-y-2">{opportunities.map((f, i) => (
+              <FindingCard
+                key={`${f.code}-${i}`}
+                f={f}
+                kind="opportunity"
+                clientId={clientId}
+                cycleDate={state.date}
+                budgetHold={budgetHold}
+                onPendingAdsChanged={onPendingAdsChanged}
+              />
+            ))}</div>}
         </section>
       </div>
 

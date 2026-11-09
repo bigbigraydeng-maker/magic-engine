@@ -520,6 +520,13 @@ describe('🔴 Kernel 依赖工厂：声明了的字段必须真的转发（防�
     ).toBe('function')
   })
 
+  it('🔴 加钱批准人判定：createKernelDeps 转发、createKernel 默认装（第 3 刀 3a；不转发 = 加预算谁都批不了）', () => {
+    const marker = (email: string) => email === 'pm@probe'
+    expect(createKernelDeps({ supabase: probeClient(), registry: ACTION_REGISTRY, capabilities: {}, isSpendApprover: marker }).isSpendApprover).toBe(marker)
+    expect(typeof createKernel(probeClient()).isSpendApprover).toBe('function')
+    expect(createKernel(probeClient(), { isSpendApprover: marker }).isSpendApprover).toBe(marker)
+  })
+
   it('createKernel 的 overrides 能换掉默认解析器（测试要用这条路）', () => {
     const marker: NonNullable<KernelDeps['resolveEnvelopeFacts']> = async () => ({ unavailable: '合成解析器' })
     const deps = createKernel(probeClient(), { resolveEnvelopeFacts: marker })

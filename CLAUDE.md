@@ -7,6 +7,7 @@
 **碰 6 大支柱任一件活先读对应手册**：广告 / SEO / GEO（AI 可见度）/ 社媒 / 口碑，各有一份跨客户经验手册存在 Claude 持久记忆里（不在这个代码仓库中），路径 `~/.claude/projects/-Users-raydeng-Projects-magic-engine/memory/playbook-<支柱>-*.md`。开工前必读对应那份，并在回复里明确说出"读了哪份"——说不出来 = 没读。行业层手册（文件名带 `-industry-`）目前多数只有单客户证据，当"候选参考"用，不当"已验证定论"套用；竞品支柱目前没有可用手册，不用去找。
 **平台化必读**：[ME2 Reuse & Platformization Principle](./docs/roadmap/2026-08-19-me2-platformization-principle.md) —— **所有开发窗口、Work Package、Claude Code/Codex 会话都受它约束。**
 **平台层级门必挂 skill**：[`.claude/skills/me-platform-tier-gate/`](./.claude/skills/me-platform-tier-gate/SKILL.md) —— **Claude Code 会话每次开工前必先调用 `Skill me-platform-tier-gate` 加载**（`Skill` 调用接口仅 Claude Code 提供）；**Codex 会话没有 `Skill` 调用接口，改为直接阅读 `SKILL.md` 全文并遵循其判据 / 红线 / 输出格式**。两种入口下，任何提议新增能力线 / 支柱 / capability / 智能层 / 分析层 / Build vs Connect vs Buy 决策 / 客户新需求判断"ME 要不要自己做"，都必须先输出 Tier Classification Report 再继续。跳过 = 治理失职。
+**设计 agent 先进藏经阁**：[`.claude/skills/cangjingge/`](./.claude/skills/cangjingge/SKILL.md) —— 新建或改造任何 agent / agent loop 前必读（75 份 QCon 2026 讲稿归成 16 部经）。Claude Code 调 `Skill cangjingge`；Codex 没有 `Skill` 接口，直接读 `SKILL.md` 全文。设计稿里逐条回答其中的「开工十问」，回复里写明读了第几部经——说不出来 = 没读。
 **必读规则**：[`~/.claude/rules/coding-style.md`](~/.claude/rules/coding-style.md) · [`~/.claude/rules/development-workflow.md`](~/.claude/rules/development-workflow.md)
 
 ---
@@ -263,6 +264,7 @@ Claude Code、Codex、CMUX DeepSeek 都可承担规划或审查；用户可直�
 - **绝不凭空注入客户业务数据**：写任何 Goal / Initiative / 关键词前，先查 `master_briefs` + `clients.primary_keywords`。搜索量 / KD / 点击数**必须来自 DataForSEO 或 GSC**，不能估不能编
 - **对外内容必先 grounding 官网**：写 reel / post / 广告 / 邮件前先 WebFetch 客户官网真实产品页。`master_briefs` 只给方向，不含运营细节。发布前逐句标「官网可溯 / brief 可溯 / 未证实」
 - **我们管理的 FB / IG 等社媒账户，所有要发布的视频一律只能走视频工厂流程（`src/lib/factory/`），禁止任何窗口另写脚本直接调生成 API（Muapi / WaveSpeed / Seedance 等）+ 平台发布 API 绕过工厂**：工厂流程自带查配方、出对账表、分镜自检这几道闸，绕开工厂等于把这几道闸一起绕开，而且绕过之后不会报错、不留痕迹，跟真正走过闸的产出长得一模一样。**窗口自己写「已完成、没问题」不算审查**——生产方和质检方必须是两个不同的角色（工厂产出 → 苏东坡 / 马良审 → PM 授权发布）。PM 2026-09-28 拍板；2026-09-28 East Inter 事故：另开脚本直接生产+发布，两条视频没有声音、文案数字编造，客户 Facebook 主页上已经真实发出去，见 [PITFALLS D14](./docs/PITFALLS.md)
+- **AI 窗口禁止直接用 Meta 广告工具改预算、开关广告（PM 2026-11-04 拍板）**：改预算、暂停、开投一律走 ME（成绩单「调预算」、止损、O1、发布器），这样单次 ≤20%、72 小时只改一次、加钱只认 PM 本人这几道闸才管得住。Claude Code 已在用户设置里禁用 Meta 工具的 `ads_update_entity` / `ads_activate_entity`；Codex 等没有这道机器闸的窗口同样遵守，被拦了不许换别的写入接口绕过。PM 本人在手机或 Ads Manager 里改不受限，ME 照常从快照记下、事后回看。起因：10-30~11-01 CTS 组 A 被 AI 窗口经 Meta 工具 2.5 天里加了三次预算（最后一次 +39%），ME 的闸全没碰到
 - **对外画面必先跑配方对账**：只要要**写视频模板 / 调生图·生视频 API / 拼片出成片**，先查 `viral_reference_library` 拿该行业配方，**并输出一张对账表**（配方每一列 → 这次做了什么 → 满足 / 未满足 / 不适用），再动手。**只满足镜长、切点这类「改个数字就行」的列，跳过真人出镜 / 航拍 / 真实感这类「要换素材才行」的列 = 没照配方做**，成品会是「卡得很准的幻灯片」。2026-07-20、2026-09-03 两次同样事故，见 [PITFALLS D5](./docs/PITFALLS.md)
 - **对外成片交付前必先出「分镜自检表」**：把成片截成逐镜缩略图（9 宫格），**自己逐镜过一遍再发 PM**——每镜检查①图对不对（是不是这个城市/地标，AI 生成的有没有糊脸/糊字）②文字对不对（错别字/张冠李戴）③logo 完不完整清不清晰。**禁止用「渲一版给 PM 看 → PM 挑错 → 重渲」的循环替代自检**：那样每轮五六分钟，本该一次抓全的问题拖成四五轮。图库图 / i2v 输出必逐帧核对来源与内容（见 [PITFALLS D6](./docs/PITFALLS.md)）
 - **客户营销落地页必须建在客户自己的域名**，绝对禁止 `magicengine.com.au/<客户>/...`

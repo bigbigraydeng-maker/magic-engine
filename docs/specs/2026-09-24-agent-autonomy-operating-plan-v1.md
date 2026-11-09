@@ -61,6 +61,7 @@ Tier Classification：把广告支柱已落地的「信封内自治 + PM 日检�
 | 鲁班 | 批准的动作真做出去、留回执 | 无闹钟，有授权 run 即干 | 只做已授权的 | 执行失败、回读对不上 |
 | 马良 | 出片不出丑 | 每出一条片/一批图 | 逐镜 9 宫格自检，不过关不给 PM 看 | 不过关的片返工还是放弃 |
 | 李白 | 客户文案句句可溯源、提示词库不烂 | 每出一篇文案 + 每月提示词体检 | 逐句标「官网可溯 / brief 可溯 / 未证实」 | 「未证实」句留不留 |
+| 包拯（2026-11-03 加，修复方案第 1b 刀） | ME 里 AI 做的判断越来越准（先接 CRM「AI 判客人阶段」） | 每周一次（避开周五、周六；排期第 3 关定） | 复核上周 AI 判断、算准确率、攒错题、提改法并先考试（调模型花费 PM 11-03 回「自动跑」） | 有分歧的判断谁对（进「审核」车道）；新判法上线走改动单 |
 
 闹钟一律避开周五、周六（今日待办那两天不跑）；不用 7 的倍数天做提醒周期。
 
@@ -93,6 +94,7 @@ Tier Classification：把广告支柱已落地的「信封内自治 + PM 日检�
 | 鲁班 | `src/lib/luban/`（入口 `execution/[itemId]/luban`、`clients/[id]/luban`） | **无闹钟**：人在执行项页面对话触发 | 是 | 否 | 名单写「只做已授权的」不准确：大模型可直接调 `publish_to_gbp` 发谷歌商家帖子，绕过内核（台账 `2026-10-18-luban-gbp-publish-bypasses-kernel`；目前无授权、零调用） |
 | 马良 | `src/lib/maliang/render-check.ts`、`src/lib/assets/vision-analyzer.ts`、`storyboard-generator.ts`、`case-library/` | `maliang-render-check`（Inngest，`:436-438`） | 是（出片检查 Gemini，视觉分析 GPT-4o-mini） | **是** | 名单一致 |
 | 李白 | `src/lib/blog/`、`src/lib/geo/`、`content/prompt-library-audit.ts` | `libai-prompt-library-monthly`（Inngest 定时，每月，`registry.ts:362`） | 是 | 否 | 待扩展 |
+| 包拯 | `src/lib/baozheng/`（第 3 关建） | `cloud-baozheng-weekly`（Inngest 定时，第 3 关登记进 `registry.ts`） | 是（复核、提改法各一次，Claude Sonnet） | 否 | 规则书 `docs/sops/2026-11-03-crm-ai-judgement-review-rules-v1.0.md`；身份 `docs/agents/93-baozheng.md` |
 | 诸葛亮（常驻） | `src/lib/zhuge/` | `zhuge-weekly-recalculate`（`:271`）；另有 conduct 接口 | 是 | 否 | 两条路径：conduct 带记忆与工具，每周重算两样都不带 |
 
 **名单上没有、代码里有**：孙子（`src/lib/seo-agent/`，只被 `seo-agent/plan` 接口调）——收不收由 PM 定。**CLAUDE.md 里有、名单和代码都没有**：司马徽（DAPE「发现」段）——留不留由 PM 定。

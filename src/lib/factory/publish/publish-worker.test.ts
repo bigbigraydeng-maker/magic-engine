@@ -12,10 +12,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
+const factSource = vi.hoisted(() => ({ load: vi.fn() }))
+vi.mock('@/lib/social/weekly-loop/fact-aliases', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/social/weekly-loop/fact-aliases')>()),
+  loadSocialFactSource: (...args: unknown[]) => factSource.load(...args),
+}))
 vi.mock('./facebook-reel-adapter', () => ({
   facebookReelAdapter: {
     publish: vi.fn(),
     findExisting: vi.fn(async () => null),
+    ensureFirstComment: vi.fn(async () => 'comment-1'),
   },
 }))
 
@@ -52,6 +58,10 @@ interface Scenario {
   checklistVersion?: string
   /** review_ref.approved_at(切换日用例) */
   approvedAt?: string
+  /** brief.engine = external_upload with no talent_consent (consent gate cases) */
+  externalNoConsent?: boolean
+  /** Post copy (the only segment caption) for catalog fact re-check cases */
+  segmentCaption?: string
 }
 
 /** 记录所有对 content_work_orders 的 update payload,用来断言最终状态 */
@@ -95,7 +105,7 @@ function installMocks(s: Scenario) {
                     quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
                   }),
                 },
-                brief: { ...(s.noAngle ? {} : { angle: 'X' }), ...(s.deliverable === undefined ? {} : { remotion: { deliverable: s.deliverable } }), copy: { segments: [{ caption: 'Explore with us' }], endcard: s.endcard } },
+                brief: { ...(s.externalNoConsent ? { engine: 'external_upload' } : {}), ...(s.noAngle ? {} : { angle: 'X' }), ...(s.deliverable === undefined ? {} : { remotion: { deliverable: s.deliverable } }), copy: { segments: [{ caption: s.segmentCaption ?? 'Explore with us' }], endcard: s.endcard } },
               },
               error: null,
             }
@@ -202,6 +212,73 @@ describe('发布正文红线闸', () => {
     expect(mockPublish).toHaveBeenCalledTimes(1)
     expect(r.result).toBe('published')
     expect(finalStatus()!.status).toBe('published')
+  })
+
+  it('🔴 live publish of an external upload without on-camera consent is refused before any provider call', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, externalNoConsent: true })
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('consent_blocked')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('🔴 live publish waits (retry later) when the tour catalog cannot be read — never publishes unchecked', async () => {
+    factSource.load.mockResolvedValue({ ok: false, reason: 'load_failed' })
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('fact_check_blocked')
+    expect(finalStatus()?.next_retry_at).not.toBeNull()
+  })
+
+  it('🔴 live publish of a reel that no longer matches the catalog is refused for good (16 days vs 19)', async () => {
+    factSource.load.mockResolvedValue({ ok: true, catalogVersion: 13, aliasesByTourId: {}, tours: [{
+      id: 't1', slug: 'x', name: 'Acme — X', destination: 'china', tier: 'signature', title: null, durationText: '19 Days',
+      displayPriceText: null, highlights: [], inclusions: [], exclusions: [], singleSupplement: null, soldOut: false,
+      managesDepartures: false, isActive: true, departures: [],
+    }] })
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, segmentCaption: '16 days across China' })
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('fact_check_blocked')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('🔴 already public on the platform (recovery): recorded even when the catalog is unreadable, but no first comment', async () => {
+    factSource.load.mockResolvedValue({ ok: false, reason: 'load_failed' })
+    mockFindExisting.mockResolvedValue({ platform: 'facebook', post_id: 'p1', video_id: 'v1', permalink: 'https://fb/p1' } as never)
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(r.result).toBe('skipped_existing')
+    expect(vi.mocked(facebookReelAdapter.ensureFirstComment)).not.toHaveBeenCalled()
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('live publish goes ahead for a client with no published tour catalog (not applicable)', async () => {
+    factSource.load.mockResolvedValue({ ok: false, reason: 'catalog_not_published' })
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
+    await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('a draft publish never reads the catalog', async () => {
+    factSource.load.mockClear()
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
+    await run()
+
+    expect(factSource.load).not.toHaveBeenCalled()
+  })
+
+  it('a draft publish of the same external upload is allowed (drafts are not public)', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, externalNoConsent: true })
+    await run()
+
+    expect(mockPublish).toHaveBeenCalledTimes(1)
   })
 
   it('legacy approved row without checklist is quarantined before provider access', async () => {
