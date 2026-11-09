@@ -146,6 +146,11 @@ export async function confirmCampaignStatusCard(
   if (args.resolution === 'decline') return decline(sb, args, row, deps)
   const fresh = await automaticPauseBlock(sb, args.clientId, row.payload, deps, deps.now?.() ?? new Date())
   if (fresh) return stopped(409, fresh)
+  if (row.payload.requestedBy === 'intraday-cap@internal') {
+    const { intradayConfirmRefusal } = await import('@/lib/ads-strategy/intraday-spend/cap-proposal-run')
+    const block = await intradayConfirmRefusal(sb, args.clientId, deps.now?.() ?? new Date())
+    if (block) return stopped(409, block)
+  }
   const bound = await resumePlan(sb, args.clientId, row.payload)
   if (!bound.ok) return stopped(409, bound.reason)
   const block = await guard(args.clientId, row.payload, deps)
