@@ -22,6 +22,8 @@ export interface Distributor {
   parentId: string | null
   /** Must contain at least one entry; sorted or unsorted is fine. */
   levelHistory: readonly LevelChange[]
+  /** Suspended distributors earn nothing payable; clawbacks still apply. */
+  suspended?: boolean
 }
 
 export type SaleKind = 'plan' | 'addon' | 'refund'
@@ -32,6 +34,8 @@ export interface Sale {
   kind: SaleKind
   /** Amount actually paid, excluding tax. Refunds are negative. */
   amountCents: number
+  /** ISO 4217; must equal CommissionRules.currency. */
+  currency: string
   /** ISO timestamp of payment (or of the refund). */
   paidAt: string
   /** The distributor bought for their own use. */
@@ -55,6 +59,8 @@ export interface PlanPrice {
 export interface CommissionRules {
   version: string
   currency: string
+  /** IANA timezone that defines settlement months. */
+  timeZone: string
   retailRateBp: Readonly<Record<DistributorLevel, number>>
   peerRateBp: number
   /** Ascending by minTeamSalesCents. Below the first step the rate is 0. */
@@ -82,10 +88,20 @@ export type CommissionKind = 'retail' | 'peer' | 'team'
 export interface CommissionLine {
   distributorId: string
   kind: CommissionKind
-  /** Source sale for retail / peer lines; null for team lines. */
+  /** Source sale for retail / peer lines and team clawbacks; null for monthly team lines. */
   saleId: string | null
   amountCents: number
   /** False when earned but withheld (e.g. team commission while inactive). */
   payable: boolean
   note: string
+}
+
+/** Per-distributor money for one statement. opening/closing are carried debts (≤ 0). */
+export interface DistributorBalance {
+  openingCents: number
+  periodCents: number
+  /** Amount to pay out this period (≥ 0). */
+  payoutCents: number
+  /** Debt carried into the next period (≤ 0). */
+  closingCents: number
 }

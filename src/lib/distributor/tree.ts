@@ -1,13 +1,14 @@
+import { toMs } from './time'
 import { LEVEL_ORDER, type Distributor, type DistributorLevel } from './types'
 
 export class DistributorTreeError extends Error {}
 
 /** Level in force at `at` (ISO). Throws if the distributor had no level yet. */
 export function levelAt(distributor: Distributor, at: string): DistributorLevel {
-  const atMs = Date.parse(at)
+  const atMs = toMs(at)
   let best: { level: DistributorLevel; ms: number } | null = null
   for (const change of distributor.levelHistory) {
-    const ms = Date.parse(change.effectiveFrom)
+    const ms = toMs(change.effectiveFrom)
     if (ms <= atMs && (best === null || ms >= best.ms)) best = { level: change.level, ms }
   }
   if (best === null) {

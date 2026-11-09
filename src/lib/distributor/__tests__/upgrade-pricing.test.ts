@@ -12,6 +12,7 @@ import {
 
 const T0 = '2026-01-01T00:00:00.000Z'
 const AS_OF = '2026-06-01T00:00:00.000Z'
+// Note: '…Z' timestamps are accepted; strings without an offset are rejected (see time.test.ts).
 
 function dist(id: string, parentId: string | null, level: DistributorLevel): Distributor {
   return { id, parentId, levelHistory: [{ level, effectiveFrom: T0 }] }
@@ -20,7 +21,7 @@ function dist(id: string, parentId: string | null, level: DistributorLevel): Dis
 let seq = 0
 function sale(sellerId: string, amountCents: number, extra: Partial<Sale> = {}): Sale {
   seq += 1
-  return { id: `u${seq}`, sellerId, kind: 'plan', amountCents, paidAt: '2026-05-01T00:00:00.000Z', isSelfPurchase: false, ...extra }
+  return { id: `u${seq}`, sellerId, kind: 'plan', amountCents, currency: 'NZD', paidAt: '2026-05-01T00:00:00.000Z', isSelfPurchase: false, ...extra }
 }
 
 function decide(distributors: Distributor[], id: string, allSales: Sale[], months: number[] = []) {
@@ -79,6 +80,13 @@ describe('tier1 → premier', () => {
   it('fails with only one direct tier1', () => {
     const thin = [dist('p', null, 'tier1'), dist('k1', 'p', 'tier1'), dist('k3', 'p', 'standard')]
     expect(decide(thin, 'p', [], [20_000_000, 20_000_000, 20_000_000]).next).toBeNull()
+  })
+
+  it('does not upgrade a suspended distributor or count suspended children', () => {
+    expect(decide([dist('m', null, 'standard')].map((d) => ({ ...d, suspended: true })), 'm',
+      [sale('m', 1_598_000, { isSelfPurchase: true })]).next).toBeNull()
+    const withSuspended = [dist('p', null, 'tier1'), dist('k1', 'p', 'tier1'), { ...dist('k2', 'p', 'tier1'), suspended: true }]
+    expect(decide(withSuspended, 'p', [], [20_000_000, 20_000_000, 20_000_000]).next).toBeNull()
   })
 
   it('never moves a premier', () => {

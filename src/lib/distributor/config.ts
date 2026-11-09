@@ -10,6 +10,7 @@ import type { CommissionRules } from './types'
 export const AI_STEWARD_RULES_V1: CommissionRules = {
   version: 'ai-steward-2026-11-10',
   currency: 'NZD',
+  timeZone: 'Pacific/Auckland',
   retailRateBp: { standard: 2000, tier1: 3000, premier: 3500 },
   peerRateBp: 500,
   teamRateSteps: [

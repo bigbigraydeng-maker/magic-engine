@@ -1,23 +1,23 @@
+import { buildSaleBook, netOfRefunds } from './refund'
+import { toMs } from './time'
 import { levelAt, levelRank, type DistributorIndex } from './tree'
 import type { CommissionRules, DistributorLevel, Sale } from './types'
 
-/** Net amount per original sale (sale + its refunds), keeping only sales past the refund window. */
+/**
+ * Net amount per original sale (sale + every known refund), keeping only sales past the refund window.
+ * Known limitation: an upgrade already granted is not reversed by a refund after the window.
+ */
 export function maturedNetSales(
   sellerId: string,
   allSales: readonly Sale[],
   asOf: string,
   rules: CommissionRules,
 ): Array<{ sale: Sale; netCents: number }> {
-  const cutoff = Date.parse(asOf) - rules.refundWindowDays * 86_400_000
-  const refunds = new Map<string, number>()
-  for (const s of allSales) {
-    if (s.kind === 'refund' && s.refundOfSaleId) {
-      refunds.set(s.refundOfSaleId, (refunds.get(s.refundOfSaleId) ?? 0) + s.amountCents)
-    }
-  }
+  const cutoff = toMs(asOf) - rules.refundWindowDays * 86_400_000
+  const book = buildSaleBook(allSales)
   return allSales
-    .filter((s) => s.sellerId === sellerId && s.kind !== 'refund' && Date.parse(s.paidAt) <= cutoff)
-    .map((sale) => ({ sale, netCents: sale.amountCents + (refunds.get(sale.id) ?? 0) }))
+    .filter((s) => s.sellerId === sellerId && s.kind !== 'refund' && toMs(s.paidAt) <= cutoff)
+    .map((sale) => ({ sale, netCents: netOfRefunds(sale, book) }))
     .filter((row) => row.netCents > 0)
 }
 
@@ -25,7 +25,7 @@ export interface UpgradeInput {
   distributorId: string
   index: DistributorIndex
   allSales: readonly Sale[]
-  /** Team sales of the distributor for the most recent completed months, oldest first. */
+  /** Team sales of the distributor for consecutive completed months, oldest first, no gaps. */
   recentMonthlyTeamSalesCents: readonly number[]
   asOf: string
   rules: CommissionRules
@@ -37,12 +37,13 @@ export interface UpgradeDecision {
   reason: string
 }
 
-/** One step at a time: standard → tier1 → premier. Never downgrades. */
+/** One step at a time: standard → tier1 → premier. Never downgrades. Suspended never upgrade. */
 export function evaluateUpgrade(input: UpgradeInput): UpgradeDecision {
   const { index, rules, asOf } = input
   const me = index.byId.get(input.distributorId)
   if (!me) throw new Error(`unknown distributor ${input.distributorId}`)
   const current = levelAt(me, asOf)
+  if (me.suspended) return { current, next: null, reason: 'suspended' }
   if (current === 'standard') return evaluateTier1(input, current)
   if (current === 'tier1') {
     const months = input.recentMonthlyTeamSalesCents.slice(-rules.upgrade.premierConsecutiveMonths)
@@ -50,7 +51,7 @@ export function evaluateUpgrade(input: UpgradeInput): UpgradeDecision {
       && months.every((m) => m >= rules.upgrade.premierMonthlyTeamSalesCents)
     const directTier1 = (index.children.get(me.id) ?? []).filter((kid) => {
       const child = index.byId.get(kid)
-      return child !== undefined && levelRank(levelAt(child, asOf)) >= levelRank('tier1')
+      return child !== undefined && !child.suspended && levelRank(levelAt(child, asOf)) >= levelRank('tier1')
     }).length
     const teamOk = directTier1 >= rules.upgrade.premierMinDirectTier1
     if (salesOk && teamOk) return { current, next: 'premier', reason: `team sales ${months.length} months ≥ threshold; ${directTier1} direct tier1+` }
