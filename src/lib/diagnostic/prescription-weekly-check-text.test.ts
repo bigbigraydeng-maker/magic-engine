@@ -41,6 +41,7 @@ describe('pickInActPrescriptions', () => {
       { id: 'b', client_id: 'c1', goal_id: 'g1', status: 'approved', approved_at: '2026-10-01T00:00:00Z' },
       { id: 'a', client_id: 'c1', goal_id: 'g1', status: 'approved', approved_at: '2026-10-20T00:00:00Z' },
       { id: 'd', client_id: 'c1', goal_id: 'g1', status: 'draft', approved_at: null },
+      { id: 's', client_id: 'c1', goal_id: 'g1', status: 'superseded', approved_at: '2026-10-22T00:00:00Z' },
       { id: 'r', client_id: 'c1', goal_id: 'g1', status: 'rejected', approved_at: '2026-10-21T00:00:00Z' },
       { id: 'o', client_id: 'c1', goal_id: 'g2', status: 'approved', approved_at: '2026-10-18T00:00:00Z' },
     ])
