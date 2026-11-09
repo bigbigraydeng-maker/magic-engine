@@ -7,7 +7,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { agreedPlanDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { accountDayKey } from '@/lib/ads-strategy/account-timezone'
 import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
-import { hoursIntoLocalDay, previousDay, type BreakerFacts, type CaptureStamp, type InsightStamp, type PolicyAd, type SpendRow } from './rules'
+import { hoursIntoLocalDay, previousDay, type BreakerFacts, type CaptureStamp, type InsightStamp, type PolicyAd, type PrimaryResultKind, type SpendRow } from './rules'
 import { readBreakerSettings } from './settings'
 
 const SNAP_LIMIT = 500
@@ -34,6 +34,7 @@ interface SpendRaw {
   insight_date: string
   spend: number | string | null
   leads: number | null
+  messaging_conversations: number | null
   updated_at: string | null
 }
 
@@ -68,12 +69,13 @@ function assemble(
   spend: { rows: SpendRaw[]; truncated: boolean },
   captures: { rows: CaptureStamp[]; error: boolean },
   accounts: string[],
-  strategy: { target_cost_per_primary?: unknown } | null,
+  strategy: { target_cost_per_primary?: unknown; primary_result?: unknown } | null,
 ): BreakerFacts {
   const cap = plans.error ? null : agreedPlanDailyTotalCap(plans.rows)
   const latest = latestSnaps(snaps.rows)
   const live = liveCampaigns(latest)
   const currency = currencyOf(latest)
+  const primaryResult = primaryResultOf(strategy?.primary_result)
   return {
     now,
     localDate,
@@ -82,7 +84,7 @@ function assemble(
     capCents: cap?.state === 'set' ? cap.cents : null,
     capReadable: !plans.error && cap?.state !== 'unreadable',
     settings: readBreakerSettings(leads, plans.rows, strategy),
-    spend: spend.rows.flatMap((row) => mapSpend(row, live, currency)),
+    spend: spend.rows.flatMap((row) => mapSpend(row, live, currency, primaryResult)),
     spendReadable: !spend.truncated,
     policyAds: policyAds(latest, live),
     policyReadable: !snaps.truncated,
@@ -90,7 +92,20 @@ function assemble(
     insights: insightStamps(spend.rows),
     accounts,
     freshReadable: !captures.error && !spend.truncated,
+    primaryResult,
   }
+}
+
+/** Same column mapping as ads health / ads strategy: lead → leads, messaging_started → messaging_conversations. */
+function primaryResultOf(value: unknown): PrimaryResultKind | null {
+  if (value === 'lead' || value === 'messaging_started') return value
+  return null
+}
+
+function countedPrimary(primary: PrimaryResultKind | null, row: SpendRaw): number | null {
+  if (primary === null) return null
+  const raw = primary === 'messaging_started' ? row.messaging_conversations : row.leads
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : null
 }
 
 async function readClient(sb: SupabaseClient, clientId: string): Promise<{ leads: unknown; primary: string | null } | null> {
@@ -103,10 +118,10 @@ async function readClient(sb: SupabaseClient, clientId: string): Promise<{ leads
 async function readStrategy(
   sb: SupabaseClient,
   clientId: string,
-): Promise<{ row: { target_cost_per_primary?: unknown } | null } | null> {
-  const { data, error } = await sb.from('ad_strategy_configs').select('target_cost_per_primary').eq('client_id', clientId).maybeSingle()
+): Promise<{ row: { target_cost_per_primary?: unknown; primary_result?: unknown } | null } | null> {
+  const { data, error } = await sb.from('ad_strategy_configs').select('target_cost_per_primary, primary_result').eq('client_id', clientId).maybeSingle()
   if (error) return null
-  return { row: (data as { target_cost_per_primary?: unknown } | null) ?? null }
+  return { row: (data as { target_cost_per_primary?: unknown; primary_result?: unknown } | null) ?? null }
 }
 
 async function readPlans(sb: SupabaseClient, clientId: string): Promise<{ rows: { plan_data?: unknown }[]; error: boolean } | null> {
@@ -134,7 +149,7 @@ async function readSpend(
 ): Promise<{ rows: SpendRaw[]; truncated: boolean } | null> {
   if (!localDate) return { rows: [], truncated: false }
   const { data, error } = await sb.from('ad_daily_insights')
-    .select('ad_account_id, entity_id, entity_name, insight_date, spend, leads, updated_at')
+    .select('ad_account_id, entity_id, entity_name, insight_date, spend, leads, messaging_conversations, updated_at')
     .eq('client_id', clientId)
     .eq('level', 'campaign')
     .gte('insight_date', previousDay(localDate))
@@ -206,7 +221,12 @@ function policyAds(rows: readonly Snap[], live: Set<string>): PolicyAd[] {
   }))
 }
 
-function mapSpend(row: SpendRaw, live: Set<string>, currency: string | null): SpendRow[] {
+function mapSpend(
+  row: SpendRaw,
+  live: Set<string>,
+  currency: string | null,
+  primary: PrimaryResultKind | null,
+): SpendRow[] {
   const spend = typeof row.spend === 'number' ? row.spend : Number(row.spend)
   if (!row.entity_id || !Number.isFinite(spend)) return []
   return [{
@@ -215,7 +235,7 @@ function mapSpend(row: SpendRaw, live: Set<string>, currency: string | null): Sp
     campaignName: row.entity_name?.trim() || '在投的广告系列',
     day: String(row.insight_date).slice(0, 10),
     spendCents: Math.round(spend * 100),
-    leads: typeof row.leads === 'number' ? row.leads : null,
+    primaryCount: countedPrimary(primary, row),
     currency,
     campaignLive: live.has(row.entity_id),
   }]
