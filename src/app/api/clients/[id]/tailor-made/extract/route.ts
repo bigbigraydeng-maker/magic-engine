@@ -85,18 +85,20 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
  * 生成结束后顺手把结果存回行程草稿本身，跟 import/route.ts 的 persistIfUnchanged
  * 是同一套道理：顾问在等待期间关掉标签页，任务表里有结果但草稿页上看不到，
  * 只能重新点一次、重新花一次钱。乐观锁同款：updated_at 变过就不覆盖。
+ *
+ * 条件写在 saveItinerary() 里用一条 `.eq('updated_at', ...)` 的 UPDATE 完成，
+ * 不是先读一次判断再写一次——见 import/route.ts 同名函数的注释（#1234）。
  */
 async function persistIfUnchanged(
   clientId: string, itineraryId: string, baselineUpdatedAt: string, payload: TailorMadeItinerary
 ): Promise<void> {
   try {
-    const latest = await getItinerary(clientId, itineraryId)
-    if (!latest) return
-    if (latest.updated_at !== baselineUpdatedAt) {
+    const applied = await saveItinerary(clientId, itineraryId, payload, undefined, {
+      expectedUpdatedAt: baselineUpdatedAt,
+    })
+    if (!applied) {
       console.warn('[tailor-made/extract] 草稿在生成期间被改过，跳过自动回存，避免覆盖更新的内容', { itineraryId })
-      return
     }
-    await saveItinerary(clientId, itineraryId, payload)
   } catch (err) {
     console.error('[tailor-made/extract] 自动回存草稿失败（任务表里的结果还在，不算彻底丢失）', err)
   }

@@ -91,18 +91,22 @@ function looksLikeTicket(text: string): boolean {
  * 乐观锁：只有草稿的 updated_at 跟建任务时读到的一致，才落这次结果——如果
  * 顾问在等待期间自己手动改过草稿（正常的自动保存已经落库），updated_at 会
  * 变，这时候宁可不存，也不能拿一份基于旧草稿算出来的结果覆盖用户更新的内容。
+ *
+ * 条件写在 saveItinerary() 里用一条 `.eq('updated_at', ...)` 的 UPDATE 完成，
+ * 不是这里「先读一次判断、再写一次」——那样两次查询之间还是有空隙能被插进来
+ * 一次别的保存，版本检查保护不到它自己守着的这次写入（Codex round-2 复审点
+ * 出来的问题，见 #1234）。
  */
 async function persistIfUnchanged(
   clientId: string, itineraryId: string, baselineUpdatedAt: string, payload: TailorMadeItinerary
 ): Promise<void> {
   try {
-    const latest = await getItinerary(clientId, itineraryId)
-    if (!latest) return // 草稿被删了，没什么好存的
-    if (latest.updated_at !== baselineUpdatedAt) {
+    const applied = await saveItinerary(clientId, itineraryId, payload, undefined, {
+      expectedUpdatedAt: baselineUpdatedAt,
+    })
+    if (!applied) {
       console.warn('[tailor-made/import] 草稿在生成期间被改过，跳过自动回存，避免覆盖更新的内容', { itineraryId })
-      return
     }
-    await saveItinerary(clientId, itineraryId, payload)
   } catch (err) {
     console.error('[tailor-made/import] 自动回存草稿失败（任务表里的结果还在，不算彻底丢失）', err)
   }
