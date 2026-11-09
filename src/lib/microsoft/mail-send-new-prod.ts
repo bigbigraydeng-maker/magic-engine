@@ -9,6 +9,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
 import { createSendGatesProd } from '@/lib/crm/email-templates/send-gates-prod'
 import { recordSendAttemptProd } from '@/lib/crm/email-templates/send-record-prod'
+import { saveTokensTo, tagLinks } from '@/lib/crm/email-templates/link-tracking/tag-links-prod'
 import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
 import { MICROSOFT_MAIL_PROVIDER } from '@/lib/microsoft/mail-oauth'
 import { checkManualSendDncForContact } from '@/lib/crm/manual-send-dnc-gate'
@@ -324,6 +325,15 @@ export function createMailNewDeps(clientId?: string): MailNewDeps {
         requestId: input.requestId,
         actorEmail: input.sentByEmail,
         result,
+      })
+    deps.tagLinks = ({ input, requestId, body, config, state }) =>
+      tagLinks(saveTokensTo(supabaseAdmin), {
+        clientId: input.clientId,
+        contactId: input.contactId,
+        requestId,
+        body,
+        config,
+        facts: state.linkFacts ?? null,
       })
   }
   return deps

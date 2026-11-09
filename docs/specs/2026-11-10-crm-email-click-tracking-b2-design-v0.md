@@ -171,7 +171,7 @@ ME 公开接口 /api/public/crm/email-link-click
 
 ### 6.1 追踪坏了要有人知道（魏征 P1-5）
 
-每天核对一次：开了追踪的客户，近 7 天发出过带编号的信 ≥5 封、但收到 0 次点击，或回执里 `link_tracking_failed / mismatch` 超过 3 次 → 下发到今日待办「🙋 需要你动手」：what（追踪可能坏了，影响：第 2 天提醒全停）、how（先看官网是否在回传、再看 ME 接口日志）、href（最近发送表直达链接）。走 `src/lib/pm-todo/manual-items.ts` 现有做法，不另建。
+每天核对一次：开了追踪的客户，近 7 天发出过带编号的信 ≥5 封、但收到 0 次点击，或回执里 `link_tracking_failed / mismatch` 超过 3 次 → 下发到今日待办的「开发欠账」栏（实现时定：这是开发去修的事，PM 邮件里照样有一行计数和链接）：what（追踪可能坏了，影响：第 2 天提醒全停）、how（先看官网是否在回传、再看 ME 接口日志）、href（最近发送表直达链接）。走 `src/lib/pm-todo/manual-items.ts` 现有做法，不另建。
 
 ## 7. 加的两张表（Ray 亲手合）
 
@@ -197,7 +197,8 @@ create table public.crm_email_link_clicks (
   path text check (char_length(path) <= 300),
   method text not null check (method in ('GET','HEAD')),
   ua_class text not null check (ua_class in ('browser','scanner','unknown')),
-  suspected_scan boolean not null
+  suspected_scan boolean not null,
+  counts_as_human boolean not null      -- 实现时加：「真人点击」在记录那一刻判好，读的地方不再各自猜
 );
 create index on public.crm_email_link_clicks (client_id, contact_id, occurred_at desc);
 alter table public.crm_email_link_tokens enable row level security;
