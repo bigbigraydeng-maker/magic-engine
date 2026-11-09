@@ -1,5 +1,5 @@
 ---
-id: 2026-11-10-crm-link-tracking-todo-first-run
+id: 2026-11-10-crm-link-tracking-daily-check-first-run
 title: 「邮件点击追踪坏了」这条开发欠账检查，第一次每天自动跑完要核一次：没报错、没误报
 status: decided
 owner: agent
