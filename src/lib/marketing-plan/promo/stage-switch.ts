@@ -2,7 +2,6 @@ import { STAGE_GOAL, STAGE_LABEL, STAGE_SWITCH_MIN_DAYS, STAGE_SWITCH_MIN_LEADS,
 import type { PromoSpec } from './spec'
 
 export type CaptureState = 'fresh' | 'stale' | 'incomplete' | 'missing' | 'unreadable'
-
 export interface SwitchEvidence {
   capture: CaptureState
   asOf: string | null
@@ -13,7 +12,6 @@ export interface SwitchEvidence {
   targetMajor: number | null
   currency: string | null
 }
-
 export type SwitchVerdict =
   | { kind: 'propose'; text: string }
   | { kind: 'hold'; text: string }
@@ -21,27 +19,21 @@ export type SwitchVerdict =
   | { kind: 'unreadable'; text: string }
   | { kind: 'not_marked'; text: string }
   | { kind: 'scale_hold'; text: string }
-
 const DAY = 86_400_000
-
 export function dayNumber(date: string): number {
   const [y, m, d] = date.split('-').map(Number)
   return Math.round(Date.UTC(y, m - 1, d) / DAY)
 }
-
 export function shiftDate(date: string, days: number): string {
   return new Date((dayNumber(date) + days) * DAY).toISOString().slice(0, 10)
 }
-
 function money(amount: number, currency: string | null): string {
   const code = currency && /^[A-Z]{3}$/.test(currency) ? `${currency} ` : ''
   return `${code}${amount.toFixed(2)}`
 }
-
 function windowDays(startedOn: string, stableEnd: string): number {
   return dayNumber(stableEnd) - dayNumber(startedOn) + 1
 }
-
 function evidenceBlock(evidence: SwitchEvidence, startedOn: string): SwitchVerdict | null {
   if (evidence.capture !== 'fresh') {
     const why = evidence.capture === 'stale' ? '广告快照抓取太旧' : evidence.capture === 'incomplete' ? '广告快照没抓全' : evidence.capture === 'missing' ? '找不到广告快照抓取记录' : '广告快照抓取记录读不出来'
@@ -66,7 +58,6 @@ function evidenceBlock(evidence: SwitchEvidence, startedOn: string): SwitchVerdi
   }
   return null
 }
-
 function costVerdict(evidence: SwitchEvidence): SwitchVerdict {
   const leads = evidence.leads ?? 0
   const spend = evidence.spendMajor ?? 0
@@ -84,7 +75,6 @@ function costVerdict(evidence: SwitchEvidence): SwitchVerdict {
     text: `试投已满 ${STAGE_SWITCH_MIN_DAYS} 天，留资 ${leads} 条，单次成本 ${shown}，不高于目标 ${goal}。可以另起一份放量草稿。正在跑的计划不会被改，也不会自动重新批准。`,
   }
 }
-
 export function judgeSwitch(spec: PromoSpec, evidence: SwitchEvidence): SwitchVerdict {
   const row = spec.delivery
   if (!row) return { kind: 'not_marked', text: '这份计划还没写入试投、放量或稳住。下面按试投来提醒。已批准的计划不会因此被重新批准。' }
@@ -93,9 +83,7 @@ export function judgeSwitch(spec: PromoSpec, evidence: SwitchEvidence): SwitchVe
   const blocked = evidenceBlock(evidence, row.started_on)
   return blocked ?? costVerdict(evidence)
 }
-
 export interface ScaleDraft { spec: PromoSpec; note: string }
-
 export function buildScaleDraft(spec: PromoSpec, asOf: string): ScaleDraft {
   const next = structuredClone(spec)
   delete next.gate_snapshot

@@ -19,7 +19,6 @@ export interface StageProposalRow {
   }
   approved_at: null
 }
-
 export function stageProposalRow(source: MarketingPlan, draft: PromoSpec, at: string): StageProposalRow {
   const base = source.plan_data
   return {
@@ -38,15 +37,12 @@ export function stageProposalRow(source: MarketingPlan, draft: PromoSpec, at: st
     approved_at: null,
   }
 }
-
 interface Existing { id?: unknown; generation_meta?: unknown }
-
 function sourceIdOf(meta: unknown): string {
   if (!meta || typeof meta !== 'object') return ''
   const row = (meta as { stage_proposal?: { source_plan_id?: unknown } }).stage_proposal
   return typeof row?.source_plan_id === 'string' ? row.source_plan_id : ''
 }
-
 async function existingDraft(supabase: SupabaseClient, clientId: string, sourceId: string): Promise<string | null | undefined> {
   const { data, error } = await supabase.from('marketing_plans')
     .select('id, generation_meta')
@@ -61,11 +57,9 @@ async function existingDraft(supabase: SupabaseClient, clientId: string, sourceI
   if (!hit) return null
   return typeof hit.id === 'string' ? hit.id : undefined
 }
-
 export type ProposalResult =
   | { ok: true; planId: string; already: boolean }
   | { ok: false; status: number; error: string }
-
 export async function createStageProposal(
   supabase: SupabaseClient, clientId: string, source: MarketingPlan, today: string, now: Date = new Date(),
 ): Promise<ProposalResult> {
