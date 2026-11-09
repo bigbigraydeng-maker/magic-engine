@@ -87,6 +87,10 @@ function isFailed<T extends { ok: boolean }>(value: Safe<T>): value is { ok: fal
 
 function isSalesEmailItem(item: OutboundItem, createdAtMs: number): boolean {
   if (item.source === 'mailchimp') return false
+  // ME's own automated letters count toward the cap but are not a person's email (design P2 §5.2 step J: "排除 me_send").
+  // No shadow decision changes because of this line: until ME's first real send there is no such item, so the gate
+  // contract version stays as it is.
+  if (item.automated === true) return false
   const atMs = Date.parse(item.at)
   if (Number.isNaN(atMs)) return true
   return atMs >= createdAtMs

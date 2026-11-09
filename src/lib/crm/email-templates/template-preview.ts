@@ -13,8 +13,10 @@ import { evaluateContentGates } from './gates/content-gates'
 import { evaluateFrequency } from './gates/frequency'
 import type { GateViolation } from './gates/types'
 import { catalogueRenderFields, renderTemplate } from './render'
+import { isAutomatedTemplateKey } from './automated-template-key'
 import {
   DEFAULT_TIME_ZONE,
+  GATE_MESSAGES,
   computeCallWhen,
   decideCallBasis,
   exemptIdLoaderFor,
@@ -179,6 +181,8 @@ export async function previewTemplate(
   data: SendGateData,
   opts: { timeZone?: string } = {},
 ): Promise<PreviewResult> {
+  // Same rule as the send path: the template of an automated letter (auto-…) is not for staff, not even to preview.
+  if (isAutomatedTemplateKey(args.request.key)) return refuse(409, 'template_automated', GATE_MESSAGES.template_automated)
   const tz = await resolveTimeZone(data, args.clientId, opts.timeZone ?? DEFAULT_TIME_ZONE)
   const tpl = await data.loadTemplate(args.clientId, args.request.key)
   const sendable = checkTemplateSendable(tpl, tpl === null ? 0 : tpl.version)

@@ -80,6 +80,12 @@ const A_PATHS: Array<[string, string]> = [
   ['src/lib/crm/email-templates/send-gates.ts', 'staff-send gate assembly (send-gates alternative)'],
   ['src/lib/crm/dnc.ts', 'do-not-contact verdict source (dnc alternative)'],
   ['src/lib/crm/automated-touch.ts', 'machine-touch marker (automated-touch alternative)'],
+  ['src/lib/crm/email-unsubscribe.ts', 'unsubscribe verdict source'],
+  ['src/lib/crm/touchpoint-sources.ts', 'ME-written touchpoint sources (email-unsubscribe alternative)'],
+  ['src/lib/crm/address-sha256.ts', 'address fingerprint (email-unsubscribe alternative)'],
+  ['src/lib/crm/email-templates/automated-template-key.ts', 'automated-letter template rule'],
+  ['src/lib/microsoft/mail-send-new.ts', 'staff-send pipeline'],
+  ['src/lib/microsoft/mail-send-new-prod.ts', 'staff-send pipeline wiring (mail-send-new alternative)'],
   ['src/lib/platform/live-switch.ts', 'live-send arming switch'],
   // Planned for P2-1b (does not exist yet): the rule must already rate it A when it lands.
   ['src/lib/inngest/functions/triggered-send-welcome-sweep.ts', 'triggered-send inngest functions'],
