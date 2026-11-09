@@ -25,6 +25,7 @@ import {
   checkMessengerDraftCampaign,
 } from '@/lib/ads-strategy/messenger-draft-campaign-guard'
 import { buildSpendActivationReceipt, requireSpendActivationAuthority, type SpendActivationReceipt } from '@/lib/ads/spend-activation'
+import { bindLaunchToApprovedPlan } from '@/lib/ads-launch/plan-gate'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import { resolveAndLogAdsExpectedMetric } from '@/lib/flywheel/ads-expected-metric'
 import { assertCampaignOwnedByClient } from '@/lib/meta/campaign-ownership'
@@ -132,9 +133,11 @@ export async function confirmCampaignStatusCard(
   if (row.payload.status === 'writing') return stopped(409, '上次写到一半，没有再自动写一次。')
   if (row.payload.status !== 'holding') return stopped(409, row.payload.resultLine ?? '这张卡已经有结果了，没有再改。')
   if (args.resolution === 'decline') return decline(sb, args, row, deps)
+  const bound = await resumePlan(sb, args.clientId, row.payload)
+  if (!bound.ok) return stopped(409, bound.reason)
   const block = await guard(args.clientId, row.payload, deps)
   if (block) return stopped(409, block)
-  const receipt = await resumeReceipt(args.clientId, row.payload, deps)
+  const receipt = await resumeReceipt(args.clientId, row.payload, deps, bound.planId)
   if (receipt === 'denied') return stopped(403, '重新开启广告只有 PM 能确认，这次没有改。')
   const card = await deps.decide(args)
   if (card.status === 'expired' || card.status === 'voided' || card.status !== 'confirmed') {
@@ -170,10 +173,22 @@ function facts(args: CampaignRequest): CardFacts {
   }
 }
 
+async function resumePlan(
+  sb: Sb,
+  clientId: string,
+  hold: CampaignHold,
+): Promise<{ ok: true; planId: string | null } | { ok: false; reason: string }> {
+  if (hold.kind !== 'resume') return { ok: true, planId: null }
+  const bound = await bindLaunchToApprovedPlan(sb, clientId, { mode: 'resume', campaignId: hold.campaign_id })
+  if (!bound.ok) return bound
+  return { ok: true, planId: bound.planId }
+}
+
 async function resumeReceipt(
   clientId: string,
   hold: CampaignHold,
   deps: CampaignDeps,
+  planId: string | null,
 ): Promise<SpendActivationReceipt | null | 'denied'> {
   if (hold.kind !== 'resume') return null
   const authority = await deps.resumeAuthority()
@@ -183,6 +198,7 @@ async function resumeReceipt(
     entry: 'meta-ads/execute',
     clientId,
     campaignId: hold.campaign_id,
+    ...(planId ? { planId } : {}),
   })
 }
 

@@ -19,15 +19,17 @@
 
 import type { PlayKey } from './play-vocabulary'
 import { dominantScript } from './launch-readback'
+import { reelsLeadCreativeProblems, reelsLeadDraftProblems } from './reels-lead'
 
-/** 目前 ME 会发的三种广告。要加第四种，先在 PLAY_CATALOG 里有对应打法。 */
-export type DraftKind = 'lead_form' | 'video_thruplay' | 'messenger_conversation'
+/** 目前 ME 会发的四种广告。短视频留资复用留资打法，不另开一套打法。 */
+export type DraftKind = 'lead_form' | 'video_thruplay' | 'messenger_conversation' | 'reels_lead'
 
 /** 打法 → 这个草案要走哪套 Meta 参数。两边必须对得上，别各自加。 */
 export const DRAFT_PLAY: Readonly<Record<DraftKind, PlayKey>> = {
   lead_form: 'lead_form_harvest',
   video_thruplay: 'thruplay_pool_build',
   messenger_conversation: 'messenger_direct',
+  reels_lead: 'lead_form_harvest',
 }
 
 export function isKnownDraftKind(k: unknown): k is DraftKind {
@@ -45,6 +47,8 @@ export function isKnownDraftKind(k: unknown): k is DraftKind {
 export const APPROVABLE_KINDS: ReadonlySet<DraftKind> = new Set<DraftKind>([
   'lead_form',
   'video_thruplay',
+  // 短视频留资可以进开投卡。旧的开按钮在 approveDraft 里按入口拒绝，不在这里放行。
+  'reels_lead',
 ])
 
 export function isApprovableKind(k: unknown): boolean {
@@ -364,6 +368,7 @@ function validateCommon(d: AdDraft): DraftProblem[] {
   if (d.kind === 'lead_form' && !d.leadFormId) {
     p.push({ field: 'leadFormId', message: '留资广告没挂表单 —— 那它收不到任何联系方式' })
   }
+  p.push(...reelsLeadDraftProblems(d))
 
   p.push(...expandedDraftProblems(d))
 
@@ -385,6 +390,7 @@ export function creativeProblems(kind: DraftKind, creatives: AdDraftCreative[], 
     if (kind === 'lead_form' && c.videoId && !hasThumbnail(c)) {
       p.push({ field: `${prefix}creatives[${i}].thumbnail`, message: THUMBNAIL_MISSING })
     }
+    if (kind === 'reels_lead') p.push(...reelsLeadCreativeProblems(c, prefix, i))
   })
   return p
 }
@@ -516,6 +522,12 @@ const META_TRIPLET: Readonly<Record<DraftKind, MetaObjectiveTriplet>> = {
     billingEvent: 'IMPRESSIONS',
     destinationType: 'MESSENGER',
   },
+  reels_lead: {
+    objective: 'OUTCOME_LEADS',
+    optimizationGoal: 'LEAD_GENERATION',
+    billingEvent: 'IMPRESSIONS',
+    destinationType: 'ON_AD',
+  },
 }
 
 /**
@@ -607,6 +619,7 @@ const DRAFT_WHAT: Readonly<Record<DraftKind, string>> = {
   lead_form: '收联系方式（填表单）',
   video_thruplay: '养受众（让人看完视频，之后可以再投给他们）',
   messenger_conversation: '私信开聊（让人点广告直接进 Messenger 和我们对话）',
+  reels_lead: '短视频留资（用已上传的视频在 Reels 上收表单）',
 }
 
 export function describeDraft(d: AdDraft): string {
