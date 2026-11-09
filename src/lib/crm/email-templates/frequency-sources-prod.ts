@@ -5,6 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { emailAddressSha256s } from '@/lib/crm/address-sha256'
 import { readAudienceId, type AudienceIdRead } from '@/lib/mailchimp/audience-config'
 import { getCampaignRecipientStatus, listSentCampaigns, type MailchimpCampaign } from '@/lib/mailchimp/client'
 import { collectSentItems, toOutboundItems, type PageFetcher } from './gates/sent-items'
@@ -88,32 +89,6 @@ async function auditSource(deps: FrequencySourceDeps, contactId: string, sinceIs
   }
 }
 
-type TouchpointRow = { source_ref: string | null; occurred_at: string; metadata: Record<string, unknown> | null }
-
-/**
- * Out-of-office replies and other machine mail are left out: they are not "emails we sent". The exception is mail a
- * machine sent on our behalf whose writer flags it `counts_toward_frequency: true` (ME's own automated letters,
- * docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §6.4): the guest really receives it, so the cap counts it. It stays
- * marked `automated` (never read as a person's email) and keeps a non-empty subject label, so the de-duplication can
- * never fold it into a sales email sent the same minute.
- */
-export function touchpointItem(row: TouchpointRow): OutboundItem | null {
-  const metadata = row.metadata
-  if (metadata?.counts_toward_frequency === true) {
-    const label = typeof metadata.subject_label === 'string' ? metadata.subject_label.trim() : ''
-    return {
-      source: 'touchpoint',
-      id: row.source_ref,
-      at: row.occurred_at,
-      subject: label === '' ? 'automated' : label,
-      address: '',
-      automated: true,
-    }
-  }
-  if (metadata?.automated === true) return null
-  return { source: 'touchpoint', id: row.source_ref, at: row.occurred_at, subject: null, address: '' }
-}
-
 async function touchpointSource(deps: FrequencySourceDeps, contactId: string, sinceIso: string): Promise<SourceResult> {
   const rows = await deps.db
     .from('contact_touchpoints')
@@ -125,13 +100,72 @@ async function touchpointSource(deps: FrequencySourceDeps, contactId: string, si
     .gte('occurred_at', sinceIso)
     .limit(500)
   if (rows.error) return { ok: false, error: `touchpoints: ${rows.error.message}` }
-  const list = (rows.data as TouchpointRow[] | null) ?? []
-  const items: OutboundItem[] = []
-  for (const row of list) {
-    const item = touchpointItem(row)
-    if (item !== null) items.push(item)
+  const list =
+    (rows.data as Array<{ source_ref: string | null; occurred_at: string; metadata: Record<string, unknown> | null }> | null) ?? []
+  return {
+    ok: true,
+    items: list
+      // out-of-office / auto-replies are not "emails we sent"; ME's own automated mails are counted by meSends instead
+      .filter((r) => r.metadata?.automated !== true)
+      .map((r) => ({ source: 'touchpoint', id: r.source_ref, at: r.occurred_at, subject: null, address: '' })),
   }
-  return { ok: true, items }
+}
+
+// Send-ledger statuses of a mail that went out or may have gone out (the same set as the ledger's "one address, one
+// welcome" index). failed (definitely not sent), blocked, skipped and shadow rows are not mail and are not counted.
+export const ME_SEND_COUNTED_STATUSES = [
+  'pending',
+  'unknown_outcome',
+  'sent',
+  'delivery_delayed',
+  'delivered',
+  'suppressed',
+  'bounced',
+  'complained',
+] as const
+// A mail counts from when it went out (sent_at), or from its first attempt while that is not known. The first attempt
+// is at most 20 hours before the send (the ledger's own rule), so rows are read from a day before the window.
+const ME_SEND_LOOKBACK_MS = 24 * 3_600_000
+const ME_SEND_PAGE = 500
+const ME_SEND_SUBJECT = 'ME 自动发的信'
+
+/**
+ * ME's own automated mails to these addresses, read from the send ledger by address fingerprint: one item per mail,
+ * `automated: true`, never folded into another record (gates/frequency.ts). Reading by address, not by contact, is the
+ * point: the same address on two contact records must not let a second mail through.
+ * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §16.8.
+ */
+async function meSendSource(deps: FrequencySourceDeps, addresses: readonly string[], sinceIso: string): Promise<SourceResult> {
+  const fingerprints = emailAddressSha256s(addresses)
+  if (fingerprints.length === 0) return { ok: true, items: [] }
+  const sinceMs = Date.parse(sinceIso)
+  if (Number.isNaN(sinceMs)) return { ok: false, error: 'me sends: the window start is not a time' }
+  const rows = await deps.db
+    .from('triggered_sends')
+    .select('id, first_attempt_at, sent_at')
+    .eq('client_id', deps.clientId)
+    .eq('channel', 'email')
+    .eq('dedupe_scope', 'lifetime')
+    .in('status', [...ME_SEND_COUNTED_STATUSES])
+    .in('to_address_sha256', fingerprints)
+    .gte('first_attempt_at', new Date(sinceMs - ME_SEND_LOOKBACK_MS).toISOString())
+    .limit(ME_SEND_PAGE)
+  if (rows.error) return { ok: false, error: `me sends: ${rows.error.message}` }
+  const list = (rows.data as Array<{ id: string; first_attempt_at: string | null; sent_at: string | null }> | null) ?? []
+  // A full page means there may be more than we saw: then we cannot vouch for the count.
+  if (list.length >= ME_SEND_PAGE) return { ok: false, error: 'me sends: too many rows to check them all' }
+  return {
+    ok: true,
+    items: list.map((r) => ({
+      source: 'me_send',
+      id: r.id,
+      // No time at all cannot happen for a claimed row (the ledger requires it); an unreadable time is counted anyway.
+      at: r.sent_at ?? r.first_attempt_at ?? '',
+      subject: ME_SEND_SUBJECT,
+      address: '',
+      automated: true,
+    })),
+  }
 }
 
 async function recipientItems(
@@ -178,5 +212,6 @@ export function createFrequencySources(deps: FrequencySourceDeps): FrequencySour
     audit: (contactId, sinceIso) => auditSource(deps, contactId, sinceIso).catch(failure),
     touchpoints: (contactId, sinceIso) => touchpointSource(deps, contactId, sinceIso).catch(failure),
     mailchimp: (addresses, sinceIso) => mailchimpSource(deps, addresses, sinceIso).catch(failure),
+    meSends: (addresses, sinceIso) => meSendSource(deps, addresses, sinceIso).catch(failure),
   }
 }

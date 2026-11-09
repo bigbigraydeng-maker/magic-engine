@@ -585,3 +585,21 @@ PM 回「缩小」后又回「开始」。本批只做「彩排」：每天早�
 - 她另外验证了：不传开关的调用方一个字节不变（另跑了 30 个调用方的测试文件，623 条通过）；严格读取与原判据读同样的三张表同样的列（2000 组随机数据对比 0 差异）；回执计数恒等式（3000 组随机块）0 违例；53 处变异全部被测试抓住。
 
 **给 P2-2 的合同（补充）**：④对照与批次对账必须按 `authorization_id` 和 `annotations.gate_contract_version` 过滤，批次对账还要先滤掉提案时刻之前的活动，否则改了关口之后，5 天证据里会混进旧规则的行；⑤`excluded_tag` 与 `needsSuppression` 是真发的前提：真发路径复用同一个 `decideShadow`，不得另写一份。
+
+### 16.8 P2-2a（第 1 单「能发出去」）实现与第一轮审查的处理（2026-11-10）
+
+**开工依据**：PM 11-10 原话「你把功能做上线，我去 ME 后台仔细检查后操作发送」（126、127 窗口）；窗口由 126 替 PM 切到 Opus，PM 随后在本窗口 `/model` 确认。PM 11-10 在 129 窗口回「共用」：CTS 客人的自动信沿用 ME 现有的 Resend 账号（CTS 主域名早已挂在它下面，官网询价通知在用），发件 info@ctstours.co.nz，`RESEND_API_KEY_CTS` 填与系统钥匙同值（台账卡 `2026-11-10-me-send-gate-cts-shares-me-resend-account`）。派活：L4，Claude Opus 5.5 自写（A 级不可逆副作用核心）。
+
+**第一轮审查**：子牙「需改后再审」（0 P0 / 3 P1 / 7 P2），魏征「需改后再审」（2 P0 / 3 P1 / 5 P2），两位的 P0/P1 有一半重合。处理后与原设计的差别：
+
+1. **ME 的信怎么计入「7 天 2 封」（取代 §6.4 的触点计数）**：不再靠联系记录上的 `counts_toward_frequency`，改为频次关口的第五个来源 `meSends`：直接读发送账本 `triggered_sends`，**按收件地址指纹**（`to_address_sha256`）匹配客人的全部地址，`dedupe_scope='lifetime'`，状态取「发出或可能发出」那一组（pending / unknown_outcome / sent / delivery_delayed / delivered / suppressed / bounced / complained），时间取 `sent_at`，没有就取 `first_attempt_at`（往前多读 24 小时）。理由（魏征 P0-1、子牙 P1-1）：同一个邮箱挂在两条联系人上时，按联系人数会少数一封。联系记录 `me_send` 只用于时间线，联系记录来源（S3）回到「机器信一律不算」，所以「通话后发跟进邮件？」提示不受影响（子牙 P1-2）。
+2. **去重**（魏征 P0-2，实测）：`sameMessage` 里两条中任一条是 `automated` 时，只认「编号相同」才算同一封。原来「120 秒内、任一主题为空就算一封」会把 ME 的信并进没有主题的审计记录或人工联系记录。
+3. **退订按联系人或地址查**（两位都提）：读取挪到 `src/lib/crm/email-unsubscribe.ts`（退订和「别再联系」一样是联系人身上的事实，依赖只剩 messaging → crm 一个方向），`readEmailUnsubscribed(db, clientId, { contactId, addresses })`：本联系人的退订记录，或任何联系人上 `metadata.address_sha256` 属于这些地址的记录。**第 2 单写入的形状照此约定**：`source='me_unsubscribe'`、`channel='email'`、`direction='inbound'`、`contact_id`＝链接对应的联系人、`metadata={ automated: true, kind: 'email_unsubscribed', address_sha256 }`。`me_unsubscribe` 已进机器来源名单（否则会被当成「客人来信」，子牙 P2 / 魏征 P2-8）。地址指纹与账本的 `addressSha256` 用测试钉死逐字节相同。
+4. **发信接口的结果分类收严**（魏征 P1-3）：请求带 `attempt: 'first' | 'replay'`；只有**首次**请求被 400 / 422 拒才算「被拒」（可释放地址）；重发的任何拒绝、以及 401 / 403 / 404（我们自己的钥匙或账号问题）一律「结果不明」，状态码照传，由第 3 单出待办。服务器地址写死 `https://api.resend.com`（SDK 会读 `RESEND_BASE_URL`，子牙 P2-6 / 魏征 P2-9 实测）。新增一条不注入依赖的测试：真 SDK + 假网络 + 两把不同的假钥匙，断言请求头里是账号钥匙、地址是写死的那个；账号钥匙为空时一次请求都不发（魏征 P1-5，原测试对默认接线的两个变异全绿）。
+5. **auto- 模板**：预览入口和目录设置也拒收（魏征 P2-10）；生产只读核过，`auto-` 开头的模板只有 CTS `auto-welcome` v1（停用），没有员工模板受影响。
+6. **合并闸**：`automated-template-key.ts`、`mail-send-new(-prod).ts`、`crm/email-unsubscribe.ts`、`crm/touchpoint-sources.ts`、`crm/address-sha256.ts` 加进高风险名单（`classifyFile` 实测原来都判 B）。
+7. **关口版本号不升**：生产只读（2026-11-10）——联系记录带 `counts_toward_frequency` 的 0 条、来源 `me_send`/`me_unsubscribe` 的 0 条、账本真发行 0 条；新来源在彩排里读不到任何行，没有一个彩排判断会变。第 3 单首次授权前重新判一次。
+
+**留给后两单、必须做到的（写入方契约，补 §13）**
+- 第 2 单（退订入口上线之前）：所有手发入口都查退订——`resolveSend`（所有客户都跑，与「别再联系」并列）和 `sendMailReply`（回复客人来信）；客人退订之后又主动来信的回复怎么放行，先出规则再做（魏征 P1-4）。回执从**系统账号**进来（PM「共用」），消费函数按 `provider_message_id` 从系统账号回执里认出 ME 自动信，对不上的是 ME 自己的系统邮件，不报警、不重试（子牙 P2-5 的白名单问题因此推后到有客户单开账号时：账号名单从配置读，不写进代码）。
+- 第 3 单：①认领**之前**用 `readResendAccountKey` + `resendRequestProblem` 查定稿后的完整请求，不通过就不占名额；②认领后仍拿到 `not_attempted` → 同一条更新写 `failed`＋原因，并作废时间线记录；③时间线记录写失败就不发，保持 pending 等下一轮；④接管时重查频次要用 `loadExemptIds` 传 `[triggered_send_id]`，把**这封自己的账本行**排除（否则 `meSends` 会把在途的自己数进去）；⑤重发一律 `attempt: 'replay'`；401 / 403 出「钥匙出错」待办；⑥PM 标「没发出」时同时作废时间线记录；⑦提案只接受 `auto-` 模板，且只接受「新版发信设置」的客户（旧版设置的客户不跑销售关口，退订检查在那里不生效）。

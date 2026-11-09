@@ -19,7 +19,7 @@
  * 机器发的那一笔**仍然留在时间线上**（客人确实收到了），只是不算「有人跟过他」。
  */
 
-import { ME_SEND_SOURCE } from '@/lib/messaging/triggered-send/send-touchpoint'
+import { EMAIL_UNSUBSCRIBE_SOURCE, ME_SEND_SOURCE } from './touchpoint-sources'
 
 /**
  * 这些来源写出来的出站整类都是机器发的。
@@ -30,8 +30,10 @@ import { ME_SEND_SOURCE } from '@/lib/messaging/triggered-send/send-touchpoint'
  *
  * `me_send` = ME 自己通过 Resend 自动发的信（欢迎信等）。写入方也会标 `automated: true`，
  * 这里按来源再认一次，两条判据任一条都够（设计稿 2026-11-02-me-send-gate-p2 §6.4）。
+ * `me_unsubscribe` = 客人点了 ME 信里的一键退订。它是进站记录，但不是「客人来信了」——
+ * 不认它的话，一个被判成「非咨询」的人点一下退订，会被当成又来消息、重新放回新线索。
  */
-const AUTOMATED_SOURCES = new Set(['mailchimp', ME_SEND_SOURCE])
+const AUTOMATED_SOURCES = new Set(['mailchimp', ME_SEND_SOURCE, EMAIL_UNSUBSCRIBE_SOURCE])
 
 /**
  * 这一笔是机器发的吗。

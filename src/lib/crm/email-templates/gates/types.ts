@@ -19,7 +19,7 @@ export interface ContentGateResult {
 
 // ---- frequency gate -------------------------------------------------------
 
-export type OutboundSource = 'sent_items' | 'audit' | 'touchpoint' | 'mailchimp'
+export type OutboundSource = 'sent_items' | 'audit' | 'touchpoint' | 'mailchimp' | 'me_send'
 
 /** One email we sent to one of the guest's addresses. */
 export interface OutboundItem {
@@ -32,8 +32,10 @@ export interface OutboundItem {
   /** Lower-case recipient address this item counts for. '' = contact-scoped (audit rows, touchpoints): counted for the primary address. */
   address: string
   /**
-   * true = a mail a machine sent that still counts toward the cap (ME's own automated letters). It is never a person's
-   * email: anything asking "did a person write to this guest" must leave it out. Absent = an ordinary item.
+   * true = a mail a machine sent that still counts toward the cap (ME's own automated letters, source `me_send`). It is
+   * never a person's email: anything asking "did a person write to this guest" must leave it out. It is also never
+   * folded into another record as "the same mail" unless the two carry the same id (gates/frequency.ts). Absent = an
+   * ordinary item.
    */
   automated?: true
 }
@@ -55,6 +57,11 @@ export interface FrequencySources {
     addresses: readonly string[],
     sinceIso: string,
   ): Promise<SourceResult | { ok: true; items: []; applicable: false }>
+  /**
+   * ME's own automated mails to these addresses (the send ledger, matched by address fingerprint, so a guest whose address
+   * sits on two contact records is still counted). Every item is `automated: true`, source `me_send`.
+   */
+  meSends(addresses: readonly string[], sinceIso: string): Promise<SourceResult>
 }
 
 /**

@@ -2,15 +2,19 @@
  * The one place where ME sends an automated e-mail through Resend (a connector: provider details stay in this file).
  *
  * What it guarantees:
- *  - Every sending account has its own key, `RESEND_API_KEY_<ACCOUNT>`. A missing, empty or malformed key means NO send.
- *    resend@6 quietly falls back to ME's own system key (`RESEND_API_KEY`) when it is handed an empty key, which would
- *    send a client's mail from ME's account, so an empty value never reaches `new Resend(...)`, and the label 'system'
- *    is refused outright. The SDK client is created inside each call.
+ *  - Every sending account label has its own variable, `RESEND_API_KEY_<ACCOUNT>`. A missing, empty or malformed key
+ *    means NO send. resend@6 quietly falls back to `RESEND_API_KEY` (ME's system key) when it is handed an empty key, so
+ *    an empty value never reaches `new Resend(...)`, and the label 'system' is refused outright: a client's mail never
+ *    uses the system key by accident. (Using the same Resend account on purpose is allowed: the PM may put the same key
+ *    into the client's own variable, as for CTS on 2026-11-10.) The SDK client is created inside each call, with the
+ *    provider address pinned, so the SDK's own `RESEND_BASE_URL` variable cannot send the key somewhere else.
  *  - The SDK sets no request timeout. The call gets 15 seconds; after that the outcome is UNKNOWN (the request may have
  *    reached Resend). Unknown is never "failed": the caller keeps the send pending and may replay it only with the SAME
  *    idempotency key and the SAME frozen content, and never sends a second, different mail.
- *  - Only a definite 4xx refusal (not 409, not 429) is "rejected". 409 (idempotency conflicts), 429, 5xx, network errors
- *    and anything that cannot be classified are "unknown".
+ *  - "rejected" (definitely not sent, the guest's address may be released) only for a FIRST attempt refused as a bad
+ *    request (400 / 422). A replay's refusal cannot prove the first attempt did not go out, and 401 / 403 / 404 are our
+ *    own key or account problem, not the guest's: all of those, 409, 429, 5xx, network errors and anything that cannot
+ *    be classified are "unknown" (the provider status is passed on so the caller can raise a to-do for a key problem).
  *  - Everything is checked before the provider is called; a request that fails a check is "not_attempted".
  *  - Nothing here logs or returns an address, a subject, a body or a provider error message (those can echo addresses).
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §6.1.
@@ -19,6 +23,10 @@
 import { Resend, type CreateEmailOptions, type CreateEmailRequestOptions } from 'resend'
 
 export const RESEND_SEND_TIMEOUT_MS = 15_000
+/** The provider address, pinned (the SDK would otherwise read it from RESEND_BASE_URL). */
+export const RESEND_API_BASE_URL = 'https://api.resend.com'
+/** First-attempt refusals that mean "this request was bad", so nothing was sent. */
+const DEFINITE_REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 422])
 
 /** The label of ME's own account (login links, notifications). Automated client mail must never use it. */
 const SYSTEM_ACCOUNT = 'system'
@@ -71,6 +79,8 @@ export interface ResendEmailRequest {
   /** Sent as the Idempotency-Key header. One key must always carry one and the same payload. */
   idempotencyKey: string
   tags: ReadonlyArray<{ name: string; value: string }>
+  /** 'replay' = this send was attempted before (same key, same frozen content): then no refusal counts as "not sent". */
+  attempt: 'first' | 'replay'
 }
 
 export type ResendSendOutcome =
@@ -170,16 +180,23 @@ export function resendRequestProblem(request: ResendEmailRequest): string | null
   if (request.text.trim() === '' || request.text.length > MAX_TEXT) return 'text is empty or too long'
   if (request.html !== undefined && (request.html.trim() === '' || request.html.length > MAX_HTML)) return 'html is empty or too long'
   if (!IDEMPOTENCY_KEY_RE.test(request.idempotencyKey)) return 'idempotency key is malformed'
+  if (request.attempt !== 'first' && request.attempt !== 'replay') return 'attempt must be first or replay'
   return headersProblem(request.headers) ?? tagsProblem(request.tags)
 }
 
-/** A provider error: a definite 4xx (except 409 and 429) is a refusal; everything else is an unknown outcome. */
-export function classifyResendError(error: unknown): Extract<ResendSendOutcome, { kind: 'rejected' | 'unknown' }> {
+/**
+ * A provider error: on a first attempt, a bad-request refusal (400 / 422) is "rejected"; everything else, and every
+ * refusal of a replay, is an unknown outcome.
+ */
+export function classifyResendError(
+  error: unknown,
+  attempt: ResendEmailRequest['attempt'],
+): Extract<ResendSendOutcome, { kind: 'rejected' | 'unknown' }> {
   const fields: { statusCode?: unknown; name?: unknown } =
     typeof error === 'object' && error !== null ? (error as { statusCode?: unknown; name?: unknown }) : {}
   const status = typeof fields.statusCode === 'number' && Number.isInteger(fields.statusCode) ? fields.statusCode : null
   const code = typeof fields.name === 'string' && ERROR_NAME_RE.test(fields.name) ? fields.name : 'unknown_error'
-  if (status !== null && status >= 400 && status < 500 && status !== 409 && status !== 429) {
+  if (attempt === 'first' && status !== null && DEFINITE_REFUSAL_STATUSES.has(status)) {
     return { kind: 'rejected', code, status }
   }
   return { kind: 'unknown', code, status }
@@ -223,10 +240,10 @@ async function callWithTimeout(
   }
 }
 
-function outcomeOfResponse(response: unknown): ResendSendOutcome {
+function outcomeOfResponse(response: unknown, attempt: ResendEmailRequest['attempt']): ResendSendOutcome {
   if (typeof response !== 'object' || response === null) return { kind: 'unknown', code: 'malformed_response', status: null }
   const { data, error } = response as { data?: unknown; error?: unknown }
-  if (error !== null && error !== undefined) return classifyResendError(error)
+  if (error !== null && error !== undefined) return classifyResendError(error, attempt)
   const id = typeof data === 'object' && data !== null ? (data as { id?: unknown }).id : undefined
   if (typeof id === 'string' && id.trim() !== '') return { kind: 'sent', messageId: id.trim() }
   return { kind: 'unknown', code: 'no_message_id', status: null }
@@ -234,7 +251,7 @@ function outcomeOfResponse(response: unknown): ResendSendOutcome {
 
 const DEFAULT_DEPS: ResendEmailPortDeps = {
   env: (name) => process.env[name],
-  createClient: (key) => new Resend(key),
+  createClient: (key) => new Resend(key, { baseUrl: RESEND_API_BASE_URL }),
   timeoutMs: RESEND_SEND_TIMEOUT_MS,
 }
 
@@ -256,7 +273,7 @@ export function createResendEmailPort(overrides: Partial<ResendEmailPortDeps> = 
       const result = await callWithTimeout(client, payloadOf(request), request.idempotencyKey, timeoutMs)
       if (result.type === 'timeout') return { kind: 'unknown', code: 'timeout', status: null }
       if (result.type === 'thrown') return { kind: 'unknown', code: 'exception', status: null }
-      return outcomeOfResponse(result.response)
+      return outcomeOfResponse(result.response, request.attempt)
     },
   }
 }

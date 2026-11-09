@@ -70,6 +70,7 @@ function dataReturning(receipts: StoredReceipt[], seenSince: string[]): SendGate
       audit: async () => ({ ok: true, items: [] }),
       touchpoints: async () => ({ ok: true, items: [] }),
       mailchimp: async () => ({ ok: true, items: [] }),
+      meSends: async () => ({ ok: true, items: [] }),
     },
   }
 }

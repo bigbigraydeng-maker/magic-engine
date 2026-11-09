@@ -7,8 +7,9 @@
  * Timeouts are tested with real timers and a short budget, not a fake clock.
  */
 
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  RESEND_API_BASE_URL,
   RESEND_SEND_TIMEOUT_MS,
   classifyResendError,
   createResendEmailPort,
@@ -36,6 +37,7 @@ function request(over: Partial<ResendEmailRequest> = {}): ResendEmailRequest {
     },
     idempotencyKey: `ts:${SEND_ID}`,
     tags: [{ name: 'triggered_send_id', value: SEND_ID }],
+    attempt: 'first',
     ...over,
   }
 }
@@ -150,6 +152,9 @@ describe('sending', () => {
   })
 
   it.each([
+    ['401 our key is wrong', { statusCode: 401, name: 'missing_api_key' }],
+    ['403 our key or sending domain is not allowed', { statusCode: 403, name: 'invalid_from_address' }],
+    ['404', { statusCode: 404, name: 'not_found' }],
     ['409 concurrent request with the same key', { statusCode: 409, name: 'concurrent_idempotent_requests' }],
     ['409 same key, different payload', { statusCode: 409, name: 'invalid_idempotent_request' }],
     ['429 rate limit', { statusCode: 429, name: 'rate_limit_exceeded' }],
@@ -159,6 +164,14 @@ describe('sending', () => {
     const { createClient } = clientReturning(() => Promise.resolve({ data: null, error, headers: null }))
     const port = createResendEmailPort({ env: envWith({ RESEND_API_KEY_CTS: KEY }), createClient })
     expect((await port.send(request())).kind).toBe('unknown')
+  })
+
+  it('a replay refused as a bad request is unknown, not rejected', async () => {
+    const { createClient } = clientReturning(() =>
+      Promise.resolve({ data: null, error: { statusCode: 422, name: 'validation_error', message: 'x' }, headers: null }),
+    )
+    const port = createResendEmailPort({ env: envWith({ RESEND_API_KEY_CTS: KEY }), createClient })
+    expect(await port.send(request({ attempt: 'replay' }))).toEqual({ kind: 'unknown', code: 'validation_error', status: 422 })
   })
 
   it('reads a 2xx without a message id as unknown', async () => {
@@ -231,8 +244,16 @@ describe('sending', () => {
 })
 
 describe('classifyResendError', () => {
-  it.each([400, 401, 403, 404, 422])('%i is a refusal', (statusCode) => {
-    expect(classifyResendError({ statusCode, name: 'validation_error' }).kind).toBe('rejected')
+  it.each([400, 422])('%i on a first attempt is a refusal (the request was bad, nothing was sent)', (statusCode) => {
+    expect(classifyResendError({ statusCode, name: 'validation_error' }, 'first').kind).toBe('rejected')
+  })
+
+  it.each([400, 422, 401, 403])('%i on a replay is unknown: it cannot prove the first attempt did not go out', (statusCode) => {
+    expect(classifyResendError({ statusCode, name: 'validation_error' }, 'replay').kind).toBe('unknown')
+  })
+
+  it.each([401, 403, 404])('%i is our own key or account problem, never the guest refusing: unknown, status passed on', (statusCode) => {
+    expect(classifyResendError({ statusCode, name: 'invalid_api_key' }, 'first')).toEqual({ kind: 'unknown', code: 'invalid_api_key', status: statusCode })
   })
 
   it.each([
@@ -244,11 +265,11 @@ describe('classifyResendError', () => {
     ['not an object', 'boom'],
     ['null', null],
   ])('%s is unknown', (_label, error) => {
-    expect(classifyResendError(error).kind).toBe('unknown')
+    expect(classifyResendError(error, 'first').kind).toBe('unknown')
   })
 
   it('keeps only a well-formed provider code', () => {
-    expect(classifyResendError({ statusCode: 400, name: 'Bad <name>' })).toEqual({ kind: 'rejected', code: 'unknown_error', status: 400 })
+    expect(classifyResendError({ statusCode: 400, name: 'Bad <name>' }, 'first')).toEqual({ kind: 'rejected', code: 'unknown_error', status: 400 })
   })
 })
 
@@ -287,5 +308,41 @@ describe('checks before anything is sent', () => {
   it('accepts a bare sender address and the normal request', () => {
     expect(resendRequestProblem(request())).toBeNull()
     expect(resendRequestProblem(request({ from: 'baker@news.example.co.nz' }))).toBeNull()
+  })
+})
+
+describe('the real default wiring (real SDK, fake network)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  function captureFetch() {
+    const calls: Array<{ url: string; authorization: string | null }> = []
+    const fetchFake = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), authorization: new Headers(init?.headers).get('Authorization') })
+      return new Response(JSON.stringify({ id: 'msg_real_wiring' }), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchFake)
+    return { calls, fetchFake }
+  }
+
+  it('sends with the account key to the pinned provider address, whatever RESEND_BASE_URL says', async () => {
+    vi.stubEnv('RESEND_API_KEY', 're_system_key_aaaaaaaa')
+    vi.stubEnv('RESEND_API_KEY_CTS', 're_cts_key_bbbbbbbbbb')
+    vi.stubEnv('RESEND_BASE_URL', 'https://elsewhere.example')
+    const { calls } = captureFetch()
+    expect(await createResendEmailPort().send(request())).toEqual({ kind: 'sent', messageId: 'msg_real_wiring' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe(`${RESEND_API_BASE_URL}/emails`)
+    expect(calls[0].authorization).toBe('Bearer re_cts_key_bbbbbbbbbb')
+  })
+
+  it('with the account key missing, nothing at all is sent (the SDK would have used the system key)', async () => {
+    vi.stubEnv('RESEND_API_KEY', 're_system_key_aaaaaaaa')
+    vi.stubEnv('RESEND_API_KEY_CTS', '')
+    const { fetchFake } = captureFetch()
+    expect(await createResendEmailPort().send(request())).toMatchObject({ kind: 'not_attempted', code: 'no_account_key' })
+    expect(fetchFake).not.toHaveBeenCalled()
   })
 })

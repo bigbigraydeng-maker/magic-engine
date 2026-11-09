@@ -1,21 +1,21 @@
 /**
  * The CRM timeline row of one automated e-mail that ME sends.
  *
- * Written when the send is CLAIMED, before the provider is called: the sales path's rolling per-guest cap then already
- * counts a mail whose outcome is still unknown (written after sending, a timeout would leave it uncounted). Turned into
- * "cancelled" (no longer counted) only when the provider definitely refused the mail. One row per send, keyed by the
- * ledger row id (source_ref), so a replay of the same send never writes a second row. Deliveries, bounces and complaints
- * update the ledger (triggered_sends), never this row: one mail is one touchpoint.
+ * Timeline only. The weekly per-guest cap does NOT count this row: it counts ME's mails from the send ledger
+ * (triggered_sends) by address fingerprint (frequency source `meSends`), so a guest whose address sits on two contact
+ * records is still counted, and a pending or unknown mail is counted from the moment it is claimed.
  *
- * The row is `automated: true` (nothing reads it as a person's follow-up) and `counts_toward_frequency: true` (the weekly
- * cap counts it), with a non-empty subject label (the cap's de-duplication folds two mails sent close together when one
- * of them has no subject). It holds no address, no subject line and no body.
- * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §6.4.
+ * Written when the send is claimed; marked "cancelled" (with its timeline line rewritten) when the provider definitely
+ * refused the mail. One row per send, keyed by the ledger row id (source_ref), so a replay never writes a second one.
+ * Deliveries, bounces and complaints update the ledger, never this row. The row is `automated: true` (source `me_send`),
+ * so nothing reads it as a person following the guest up. It holds no address, no subject line and no body.
+ * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §6.4 (counting moved to the ledger: §16.8).
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { ME_SEND_SOURCE } from '@/lib/crm/touchpoint-sources'
 
-export const ME_SEND_SOURCE = 'me_send'
+export { ME_SEND_SOURCE }
 
 const TABLE = 'contact_touchpoints'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -41,8 +41,6 @@ export type SendState = 'claimed' | 'cancelled'
 export type SendTouchpointMetadata = {
   automated: true
   transport: 'resend'
-  counts_toward_frequency: boolean
-  subject_label: string
   triggered_send_id: string
   trigger_key: string
   send_state: SendState
@@ -55,12 +53,15 @@ export function sendTouchpointMetadata(triggeredSendId: string, triggerKey: stri
   return {
     automated: true,
     transport: 'resend',
-    counts_toward_frequency: state === 'claimed',
-    subject_label: `${ME_SEND_SOURCE}:${triggerKey}`,
     triggered_send_id: triggeredSendId,
     trigger_key: triggerKey,
     send_state: state,
   }
+}
+
+function summaryProblem(summary: string): string | null {
+  const trimmed = summary.trim()
+  return trimmed === '' || trimmed.length > SUMMARY_MAX ? 'summary is empty or too long' : null
 }
 
 function inputProblem(input: SendTouchpointInput): string | null {
@@ -69,9 +70,7 @@ function inputProblem(input: SendTouchpointInput): string | null {
   if (!UUID_RE.test(input.triggeredSendId)) return 'triggeredSendId is not a uuid'
   if (!TRIGGER_KEY_RE.test(input.triggerKey)) return 'triggerKey is malformed'
   if (Number.isNaN(Date.parse(input.occurredAt))) return 'occurredAt is not a time'
-  const summary = input.summary.trim()
-  if (summary === '' || summary.length > SUMMARY_MAX) return 'summary is empty or too long'
-  return null
+  return summaryProblem(input.summary)
 }
 
 export function buildSendTouchpointRow(input: SendTouchpointInput): Record<string, unknown> {
@@ -109,20 +108,29 @@ export async function writeSendTouchpoint(db: SupabaseClient, input: SendTouchpo
 }
 
 /**
- * The provider definitely refused the mail: the row stays on the timeline but stops counting toward the cap.
- * `updated: 0` means there was no row (the claim crashed before writing it): nothing was counted, nothing to undo.
+ * The provider definitely refused the mail (or a person confirmed it was not sent): the row stays on the timeline,
+ * marked cancelled, and its line says so (`summary`, e.g. 「ME 自动发信被拒收，没有发出：欢迎信」).
+ * `updated: 0` means there was no row (the claim crashed before writing it): nothing to rewrite.
  */
 export async function cancelSendTouchpoint(
   db: SupabaseClient,
-  args: { clientId: string; triggeredSendId: string; triggerKey: string },
+  args: { clientId: string; triggeredSendId: string; triggerKey: string; summary: string },
 ): Promise<TouchpointCancel> {
-  if (!UUID_RE.test(args.clientId) || !UUID_RE.test(args.triggeredSendId) || !TRIGGER_KEY_RE.test(args.triggerKey)) {
+  if (
+    !UUID_RE.test(args.clientId) ||
+    !UUID_RE.test(args.triggeredSendId) ||
+    !TRIGGER_KEY_RE.test(args.triggerKey) ||
+    summaryProblem(args.summary) !== null
+  ) {
     return { ok: false, error: 'invalid touchpoint input' }
   }
   try {
     const { data, error } = await db
       .from(TABLE)
-      .update({ metadata: sendTouchpointMetadata(args.triggeredSendId, args.triggerKey, 'cancelled') })
+      .update({
+        metadata: sendTouchpointMetadata(args.triggeredSendId, args.triggerKey, 'cancelled'),
+        summary: args.summary.trim(),
+      })
       .eq('client_id', args.clientId)
       .eq('source', ME_SEND_SOURCE)
       .eq('source_ref', args.triggeredSendId)

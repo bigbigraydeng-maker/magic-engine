@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
@@ -5,7 +6,7 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 import {
   createFrequencySources,
   messageIdOfAudit,
-  touchpointItem,
+  ME_SEND_COUNTED_STATUSES,
   type FrequencySourceDeps,
   type MailchimpPort,
 } from '@/lib/crm/email-templates/frequency-sources-prod'
@@ -178,34 +179,75 @@ describe('touchpoint source', () => {
     expect(calls).toContainEqual({ table: 'contact_touchpoints', method: 'eq', args: ['client_id', CLIENT] })
   })
 
-  it("counts ME's own automated letters, marked as machine mail with their subject label, but not a cancelled one", async () => {
+  it("leaves out ME's own automated mails: they are counted from the send ledger by address (meSends)", async () => {
     const { value } = deps({
       tables: {
         contact_touchpoints: ok([
-          { source_ref: 'S1', occurred_at: '2026-10-25T03:00:00Z', metadata: { automated: true, counts_toward_frequency: true, subject_label: 'me_send:welcome' } },
-          { source_ref: 'S2', occurred_at: '2026-10-25T04:00:00Z', metadata: { automated: true, counts_toward_frequency: false, subject_label: 'me_send:welcome' } },
+          { source_ref: 'S1', occurred_at: '2026-10-25T03:00:00Z', metadata: { automated: true, transport: 'resend' } },
           { source_ref: 'M1', occurred_at: '2026-10-25T05:00:00Z', metadata: {} },
         ]),
       },
     })
     const res = await createFrequencySources(value).touchpoints('contact-1', SINCE)
-    expect(res.ok && res.items).toEqual([
-      { source: 'touchpoint', id: 'S1', at: '2026-10-25T03:00:00Z', subject: 'me_send:welcome', address: '', automated: true },
-      { source: 'touchpoint', id: 'M1', at: '2026-10-25T05:00:00Z', subject: null, address: '' },
-    ])
+    expect(res.ok && res.items.map((i) => i.id)).toEqual(['M1'])
   })
 })
 
-describe('touchpointItem', () => {
-  it('a counted machine mail without a label still gets a non-empty subject (so it is never folded into a sales email)', () => {
-    expect(touchpointItem({ source_ref: 'S1', occurred_at: '2026-10-25T03:00:00Z', metadata: { counts_toward_frequency: true } })).toMatchObject({
-      subject: 'automated',
-      automated: true,
+describe('ME-mail source (the send ledger, by address fingerprint)', () => {
+  const sha = (a: string) => createHash('sha256').update(a.trim().toLowerCase()).digest('hex')
+
+  it('reads only real sends that went out or may have, to these addresses, from a day before the window', async () => {
+    const { stub, value } = deps({
+      tables: {
+        triggered_sends: ok([
+          { id: 'ts-1', first_attempt_at: '2026-10-24T20:00:00Z', sent_at: '2026-10-24T20:00:05Z' },
+          { id: 'ts-2', first_attempt_at: '2026-10-25T20:00:00Z', sent_at: null },
+        ]),
+      },
     })
+    const res = await createFrequencySources(value).meSends([' Amy@Example.com ', 'amy@example.com', 'amy.lee@work.com'], SINCE)
+    expect(res).toEqual({
+      ok: true,
+      items: [
+        { source: 'me_send', id: 'ts-1', at: '2026-10-24T20:00:05Z', subject: 'ME 自动发的信', address: '', automated: true },
+        { source: 'me_send', id: 'ts-2', at: '2026-10-25T20:00:00Z', subject: 'ME 自动发的信', address: '', automated: true },
+      ],
+    })
+    const calls = stub.of('triggered_sends')
+    expect(calls).toContainEqual({ table: 'triggered_sends', method: 'eq', args: ['client_id', CLIENT] })
+    expect(calls).toContainEqual({ table: 'triggered_sends', method: 'eq', args: ['channel', 'email'] })
+    expect(calls).toContainEqual({ table: 'triggered_sends', method: 'eq', args: ['dedupe_scope', 'lifetime'] })
+    expect(calls).toContainEqual({ table: 'triggered_sends', method: 'in', args: ['status', [...ME_SEND_COUNTED_STATUSES]] })
+    expect(calls).toContainEqual({
+      table: 'triggered_sends',
+      method: 'in',
+      args: ['to_address_sha256', [sha('amy@example.com'), sha('amy.lee@work.com')]],
+    })
+    expect(calls).toContainEqual({ table: 'triggered_sends', method: 'gte', args: ['first_attempt_at', '2026-10-20T00:00:00.000Z'] })
   })
 
-  it('only a real true counts: a string "true" is not the flag', () => {
-    expect(touchpointItem({ source_ref: 'S1', occurred_at: '2026-10-25T03:00:00Z', metadata: { automated: true, counts_toward_frequency: 'true' } })).toBeNull()
+  it('counts every status that went out or may have, and none that did not', () => {
+    expect([...ME_SEND_COUNTED_STATUSES].sort()).toEqual(
+      ['bounced', 'complained', 'delivered', 'delivery_delayed', 'pending', 'sent', 'suppressed', 'unknown_outcome'],
+    )
+    for (const notMail of ['failed', 'blocked', 'skipped', 'shadow']) expect(ME_SEND_COUNTED_STATUSES).not.toContain(notMail)
+  })
+
+  it('no address: nothing to count and nothing read', async () => {
+    const { stub, value } = deps({ tables: { triggered_sends: ok([]) } })
+    expect(await createFrequencySources(value).meSends(['  '], SINCE)).toEqual({ ok: true, items: [] })
+    expect(stub.touched('triggered_sends')).toBe(false)
+  })
+
+  it('fails closed on a read error, a full page, or a window start that is not a time', async () => {
+    const failing = deps({ tables: { triggered_sends: fail('boom') } })
+    expect((await createFrequencySources(failing.value).meSends(['amy@example.com'], SINCE)).ok).toBe(false)
+    const full = deps({
+      tables: { triggered_sends: ok(Array.from({ length: 500 }, (_, i) => ({ id: `ts-${i}`, first_attempt_at: SINCE, sent_at: null }))) },
+    })
+    expect((await createFrequencySources(full.value).meSends(['amy@example.com'], SINCE)).ok).toBe(false)
+    const badSince = deps({ tables: { triggered_sends: ok([]) } })
+    expect((await createFrequencySources(badSince.value).meSends(['amy@example.com'], 'not a time')).ok).toBe(false)
   })
 })
 

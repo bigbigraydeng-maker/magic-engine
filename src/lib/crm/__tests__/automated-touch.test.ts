@@ -20,6 +20,11 @@ describe('按来源', () => {
     expect(isAutomatedTouch('me_send', { automated: false })).toBe(true)
   })
 
+  /** 客人点 ME 信里的一键退订 —— 进站记录，但不是「客人来信了」，不能把人重新放回新线索。 */
+  it('一键退订的记录整类算机器写的', () => {
+    expect(isAutomatedTouch('me_unsubscribe', null)).toBe(true)
+  })
+
   /** 销售手打的电话记录 —— 这就是「人跟过」本身，认错它整套分级都塌了。 */
   it('人手记的电话不是机器发的', () => {
     expect(isAutomatedTouch('me_manual', null)).toBe(false)

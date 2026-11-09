@@ -1,14 +1,14 @@
 /**
- * The timeline row of one automated send. It is the bridge to the sales path's weekly cap: written at claim time it
- * makes the cap count the mail; cancelled, it stops counting. The last block pins that contract end to end through
- * the real frequency source and the real "machine or person" check.
+ * The timeline row of one automated send. Timeline only: the weekly cap counts ME's mails from the send ledger by
+ * address, so this row must never be counted by the touchpoint source, and must always read as machine mail.
+ * The last block pins that contract through the real frequency source and the real "machine or person" check.
  */
 
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
-import { touchpointItem } from '@/lib/crm/email-templates/frequency-sources-prod'
+import { createFrequencySources } from '@/lib/crm/email-templates/frequency-sources-prod'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import { createQueryStub, fail, ok } from '@/lib/crm/email-templates/__tests__/query-stub'
 import {
@@ -37,7 +37,7 @@ function input(over: Partial<SendTouchpointInput> = {}): SendTouchpointInput {
 }
 
 describe('the row', () => {
-  it('is one outbound e-mail touchpoint of source me_send, keyed by the send, counted, machine-marked', () => {
+  it('is one outbound e-mail touchpoint of source me_send, keyed by the send, machine-marked', () => {
     expect(buildSendTouchpointRow(input())).toEqual({
       client_id: CLIENT,
       contact_id: CONTACT,
@@ -46,15 +46,7 @@ describe('the row', () => {
       occurred_at: '2026-11-11T20:01:00.000Z',
       summary: 'ME 自动发出：欢迎信',
       raw: null,
-      metadata: {
-        automated: true,
-        transport: 'resend',
-        counts_toward_frequency: true,
-        subject_label: 'me_send:welcome',
-        triggered_send_id: SEND,
-        trigger_key: 'welcome',
-        send_state: 'claimed',
-      },
+      metadata: { automated: true, transport: 'resend', triggered_send_id: SEND, trigger_key: 'welcome', send_state: 'claimed' },
       source: ME_SEND_SOURCE,
       source_ref: SEND,
     })
@@ -64,12 +56,8 @@ describe('the row', () => {
     expect(JSON.stringify(buildSendTouchpointRow(input()))).not.toContain('@')
   })
 
-  it('a cancelled row no longer counts', () => {
-    expect(sendTouchpointMetadata(SEND, 'welcome', 'cancelled')).toMatchObject({
-      automated: true,
-      counts_toward_frequency: false,
-      send_state: 'cancelled',
-    })
+  it('the source is the one the CRM module owns', () => {
+    expect(ME_SEND_SOURCE).toBe('me_send')
   })
 })
 
@@ -104,50 +92,53 @@ describe('writeSendTouchpoint', () => {
 })
 
 describe('cancelSendTouchpoint', () => {
-  const args = { clientId: CLIENT, triggeredSendId: SEND, triggerKey: 'welcome' }
+  const args = { clientId: CLIENT, triggeredSendId: SEND, triggerKey: 'welcome', summary: 'ME 自动发信被拒收，没有发出：欢迎信' }
 
-  it('turns exactly this send row into a no-longer-counted one', async () => {
+  it('marks exactly this send row cancelled and rewrites its timeline line', async () => {
     const stub = createQueryStub({ contact_touchpoints: ok([{ id: 't1' }]) })
     expect(await cancelSendTouchpoint(stub.db, args)).toEqual({ ok: true, updated: 1 })
     const calls = stub.of('contact_touchpoints')
     expect(calls.find((c) => c.method === 'update')?.args[0]).toEqual({
       metadata: sendTouchpointMetadata(SEND, 'welcome', 'cancelled'),
+      summary: 'ME 自动发信被拒收，没有发出：欢迎信',
     })
     expect(calls).toContainEqual({ table: 'contact_touchpoints', method: 'eq', args: ['client_id', CLIENT] })
     expect(calls).toContainEqual({ table: 'contact_touchpoints', method: 'eq', args: ['source', ME_SEND_SOURCE] })
     expect(calls).toContainEqual({ table: 'contact_touchpoints', method: 'eq', args: ['source_ref', SEND] })
   })
 
-  it('no row to cancel is not an error (nothing was counted)', async () => {
+  it('no row to cancel is not an error', async () => {
     const stub = createQueryStub({ contact_touchpoints: ok([]) })
     expect(await cancelSendTouchpoint(stub.db, args)).toEqual({ ok: true, updated: 0 })
   })
 
-  it('reports a failed update and refuses malformed ids', async () => {
+  it('reports a failed update and refuses malformed input without touching the database', async () => {
     const failing = createQueryStub({ contact_touchpoints: fail('boom') })
     expect((await cancelSendTouchpoint(failing.db, args)).ok).toBe(false)
-    const untouched = createQueryStub({ contact_touchpoints: ok([]) })
-    expect((await cancelSendTouchpoint(untouched.db, { ...args, clientId: 'x' })).ok).toBe(false)
-    expect(untouched.touched('contact_touchpoints')).toBe(false)
+    for (const bad of [{ ...args, clientId: 'x' }, { ...args, summary: ' ' }]) {
+      const untouched = createQueryStub({ contact_touchpoints: ok([]) })
+      expect((await cancelSendTouchpoint(untouched.db, bad)).ok).toBe(false)
+      expect(untouched.touched('contact_touchpoints')).toBe(false)
+    }
   })
 })
 
 describe('the contract with the sales cap and the "person or machine" check', () => {
-  const asRead = (metadata: Record<string, unknown>) => ({ source_ref: SEND, occurred_at: '2026-11-11T20:01:00Z', metadata })
-
-  it('a claimed send counts toward the cap, marked as machine mail with a non-empty subject', () => {
-    expect(touchpointItem(asRead(sendTouchpointMetadata(SEND, 'welcome', 'claimed')))).toEqual({
-      source: 'touchpoint',
-      id: SEND,
-      at: '2026-11-11T20:01:00Z',
-      subject: 'me_send:welcome',
-      address: '',
-      automated: true,
-    })
-  })
-
-  it('a cancelled send does not count', () => {
-    expect(touchpointItem(asRead(sendTouchpointMetadata(SEND, 'welcome', 'cancelled')))).toBeNull()
+  it('the touchpoint source never counts this row (the ledger source does), claimed or cancelled', async () => {
+    for (const state of ['claimed', 'cancelled'] as const) {
+      const stub = createQueryStub({
+        contact_touchpoints: ok([
+          { source_ref: SEND, occurred_at: '2026-11-11T20:01:00Z', metadata: sendTouchpointMetadata(SEND, 'welcome', state) },
+        ]),
+      })
+      const sources = createFrequencySources({
+        db: stub.db,
+        clientId: CLIENT,
+        listActiveMailboxes: async () => [],
+        graphGetPage: async () => ({ ok: true, json: {} }),
+      })
+      expect(await sources.touchpoints(CONTACT, '2026-11-05T00:00:00.000Z')).toEqual({ ok: true, items: [] })
+    }
   })
 
   it('is never read as a person following the guest up, by source or by its own mark', () => {

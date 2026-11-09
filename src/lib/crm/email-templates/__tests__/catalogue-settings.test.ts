@@ -111,6 +111,10 @@ describe('providers.catalogue', () => {
     )
   })
 
+  it('refuses the template of an automated letter (auto-…) as the catalogue template', () => {
+    expect(errorsOf(raw(catalogue({ template_key: 'auto-welcome' })))[0]).toMatch(/^providers\.catalogue\.template_key:.*auto-/)
+  })
+
   it('refuses a template key that is not a template key', () => {
     expect(errorsOf(raw(catalogue({ template_key: 'Catalogue Send' })))[0]).toMatch(/^providers\.catalogue\.template_key:/)
   })

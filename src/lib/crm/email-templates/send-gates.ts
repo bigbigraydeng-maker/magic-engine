@@ -7,7 +7,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import type { EmailUnsubscribeRead } from '@/lib/messaging/email-unsubscribe'
+import type { EmailUnsubscribeRead } from '@/lib/crm/email-unsubscribe'
 import { isAutomatedTemplateKey } from './automated-template-key'
 import type { EffectiveEmailConfig } from './effective-config'
 import { getProvider } from './facts/registry'
@@ -184,8 +184,11 @@ export interface SendGateData {
   /** Provider message ids of the mails these templates sent to this guest since `sinceIso`; throws when it cannot list them all. */
   exemptMessageIdsSince(clientId: string, contactId: string, templateKeys: readonly string[], sinceIso: string): Promise<string[]>
   frequencySources: FrequencySources
-  /** Did the guest unsubscribe from e-mail (ME's one-click link)? A failed read must come back as `ok:false`. */
-  loadEmailUnsubscribed(clientId: string, contactId: string): Promise<EmailUnsubscribeRead>
+  /**
+   * Did the guest unsubscribe from e-mail (ME's one-click link), on this contact or on any of these addresses?
+   * A failed read must come back as `ok:false`.
+   */
+  loadEmailUnsubscribed(clientId: string, contactId: string, addresses: readonly string[]): Promise<EmailUnsubscribeRead>
   /** The client's own time zone ("today" differs between Sydney and Auckland). Absent = the default zone. */
   loadTimeZone?(clientId: string): Promise<string>
 }
@@ -500,8 +503,9 @@ async function frequencyStage(args: InLockArgs, data: SendGateData, tz: string):
 
 // Checked inside the lock, first: an unsubscribe that arrived while the earlier checks ran still stops this mail.
 // Its own check, deliberately not part of the do-not-contact check: unsubscribing stops e-mail only, not calls.
+// Asked by address too: the same address can sit on another contact record, where the guest may have unsubscribed.
 async function unsubscribedStage(args: InLockArgs, data: SendGateData): Promise<GateFailure | null> {
-  const read = await data.loadEmailUnsubscribed(args.clientId, args.contactId)
+  const read = await data.loadEmailUnsubscribed(args.clientId, args.contactId, args.state.addresses)
   if (!read.ok) {
     return fail(503, 'unsubscribe_unverifiable', { ...args.meta, blockDetail: `unverifiable:${read.error}`.slice(0, 300) })
   }

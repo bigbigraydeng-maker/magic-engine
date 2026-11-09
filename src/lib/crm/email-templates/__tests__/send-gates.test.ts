@@ -120,6 +120,7 @@ function emptySources(): FrequencySources {
     audit: vi.fn(empty),
     touchpoints: vi.fn(empty),
     mailchimp: vi.fn(empty),
+    meSends: vi.fn(empty),
   }
 }
 
@@ -1079,7 +1080,9 @@ describe('inLock: a guest who unsubscribed from e-mail', () => {
     vi.mocked(data.sentTemplateReceiptsSince).mockClear()
     const result = await createSendGates(data).inLock(inArgs(state, meta))
     expect(result).toMatchObject({ ok: false, status: 409, reason: 'email_unsubscribed', error: GATE_MESSAGES.email_unsubscribed })
-    expect(data.loadEmailUnsubscribed).toHaveBeenCalledWith('client-a', 'contact-1')
+    // asked by contact AND by every address of the guest (the same address can sit on another contact record)
+    expect(data.loadEmailUnsubscribed).toHaveBeenCalledWith('client-a', 'contact-1', state.addresses)
+    expect(state.addresses).toEqual(['amy@gmail.com', 'amy.lee@work.com'])
     expect(data.sentTemplateReceiptsSince).not.toHaveBeenCalled()
     expect(data.frequencySources.sentItems).not.toHaveBeenCalled()
     expect(data.frequencySources.touchpoints).not.toHaveBeenCalled()
