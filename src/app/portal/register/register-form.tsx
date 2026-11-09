@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { GoogleSelfServeButton } from '@/components/auth/GoogleSelfServeButton'
+import { safeInternalPath } from '@/lib/auth/safe-internal-path'
 
 const INPUT_CLS = 'mt-1.5 h-12 w-full rounded-xl border-[1.5px] border-me-charcoal/14 bg-white px-3 text-sm text-me-charcoal outline-none transition focus:border-me-ochre focus:shadow-[0_0_0_3px_rgba(196,145,46,.12)]'
 const LABEL_CLS = 'text-xs font-bold uppercase tracking-[0.12em] text-me-charcoal/55'
@@ -153,7 +154,7 @@ export default function RegisterForm({ next, fromProspect, zh = false, authFaile
         return
       }
       // Session cookie is set server-side; go straight to the resolved landing.
-      window.location.href = data.redirect ?? '/dashboard'
+      window.location.href = safeInternalPath(data.redirect, '/dashboard')
     } catch {
       setVerifyError(zh
         ? '网络不稳定，请再试一次。'

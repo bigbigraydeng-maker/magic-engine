@@ -16,6 +16,7 @@ import { cookies } from 'next/headers'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getUserPermissions } from '@/lib/auth/whitelist'
 import { getPublicOrigin } from '@/lib/auth/public-origin'
+import { safeInternalPath } from '@/lib/auth/safe-internal-path'
 import { grantSignupBonus } from '@/lib/mtc/grant-signup-bonus'
 import { resolveSelfServeLanding } from '@/lib/auth/self-serve-routing'
 import { ensureSelfServeClientForEmail } from '@/lib/auth/self-serve-client'
@@ -28,8 +29,7 @@ export async function GET(request: NextRequest) {
   const origin = getPublicOrigin(request)
   const { searchParams } = new URL(request.url)
   const code = searchParams.get('code')
-  const next = searchParams.get('next') ?? '/dashboard'
-  const safePath = next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard'
+  const safePath = safeInternalPath(searchParams.get('next'), '/dashboard')
   const selfServeIntent = searchParams.get('intent') === 'self_serve'
   const loginPath = selfServeIntent
     ? '/portal/register'

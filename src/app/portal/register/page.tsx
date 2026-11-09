@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { MeMark, MeMarkDefs } from '@/components/ui/me-mark'
 import RegisterForm from './register-form'
+import { safeInternalPath } from '@/lib/auth/safe-internal-path'
 
 const benefits = [
   {
@@ -45,10 +46,7 @@ interface Props {
 
 export default function RegisterPage({ searchParams }: Props) {
   const isAdsCheck = searchParams.tool === 'ads-check'
-  const validNext = searchParams.next?.startsWith('/') && !searchParams.next.startsWith('//')
-    ? searchParams.next
-    : undefined
-  const next = validNext ?? (isAdsCheck ? '/meta-ads-ai/mine' : '/dashboard')
+  const next = safeInternalPath(searchParams.next, isAdsCheck ? '/meta-ads-ai/mine' : '/dashboard')
   const fromProspect = next === '/prospect'
   const zh = next === '/meta-ads-ai/mine' || isAdsCheck
   const authFailed = searchParams.error === 'auth_failed'

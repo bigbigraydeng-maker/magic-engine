@@ -3,15 +3,10 @@ import { createClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { getUserPermissions } from '@/lib/auth/whitelist'
 import { ADS_CHECK_ENTRY } from '@/lib/auth/self-serve-routing'
+import { safeInternalPath } from '@/lib/auth/safe-internal-path'
 
 function sanitizeNext(next: unknown): string {
-  if (typeof next !== 'string') {
-    return '/dashboard'
-  }
-
-  return next.startsWith('/') && !next.startsWith('//')
-    ? next
-    : '/dashboard'
+  return safeInternalPath(next, '/dashboard')
 }
 
 // Best-effort per-IP throttle on the resend branch. The old code returned 409
