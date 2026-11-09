@@ -484,6 +484,11 @@ const CRON_REGISTRY_ENTRIES = [
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/crm-dnc-reengage-sweep.ts 的 CRM_DNC_REENGAGE_CRON（去掉 TZ 前缀）。
   { service: 'inngest:cloud-crm-dnc-reengage-sweep', jobName: 'crm-dnc-reengage-sweep', schedule: '*/15 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-08' },
 
+  // Intraday spend samples for the close-of-day forecast. Every 10 minutes on the
+  // existing frequent dispatcher. Read-only Meta insights. Does not change other schedules.
+  { service: 'ad-intraday-spend-sample', jobName: 'ad-intraday-spend-sample', schedule: '*/10 * * * *', logsRuns: true, addedAt: '2026-11-09',
+    outputTables: [{ table: 'ad_intraday_spend_samples', freshnessHours: 6, timestampColumn: 'sampled_at', emptyRoundsAreLegitimate: true }] },
+
   // Render 上只留这三条。它们自己很快返回，到点的旧接口在 web 进程里接着跑。
   { service: 'cron-dispatch-frequent', jobName: 'cron-dispatch-frequent', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-24' },
   { service: 'cron-dispatch-daily', jobName: 'cron-dispatch-daily', schedule: '*/5 * * * *', logsRuns: true, addedAt: '2026-10-24' },

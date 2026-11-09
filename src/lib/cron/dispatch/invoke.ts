@@ -55,6 +55,7 @@ const LOADERS: Record<string, () => Promise<RouteModule>> = {
   'meta-leads-sync': () => import('@/app/api/cron/meta-leads-sync/route'),
   'ad-readback-sweep': () => import('@/app/api/cron/ad-readback-sweep/route'),
   'ad-entity-snapshot': () => import('@/app/api/cron/ad-entity-snapshot/route'),
+  'ad-intraday-spend-sample': () => import('@/app/api/cron/ad-intraday-spend-sample/route'),
   'mailchimp-activity-sync': () => import('@/app/api/cron/mailchimp-activity-sync/route'),
   'mailchimp-paid-tagging': () => import('@/app/api/cron/mailchimp-paid-tagging/route'),
   'mailchimp-suppression-sync': () => import('@/app/api/cron/mailchimp-suppression-sync/route'),
