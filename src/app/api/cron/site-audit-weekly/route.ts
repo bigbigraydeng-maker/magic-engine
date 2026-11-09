@@ -30,8 +30,10 @@ import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 
-/** Oztop has 131 discoverable pages; the default cap of 100 dropped the tail. */
-const MAX_PAGES = 150
+/** CTS lists 179 pages (Oztop 131); 150 dropped CTS's tail every week. Executor also crawls stalest-first. */
+const MAX_PAGES = 200
+/** A crawled page older than this at run start counts as "not refreshed" in the receipt. */
+const STALE_AFTER_DAYS = 10
 /** ~20 RPM keeps the anonymous Jina tier under its 429 threshold. */
 const RATE_LIMIT_MS = 3500
 
@@ -69,7 +71,14 @@ export async function GET(req: NextRequest) {
     if (error) throw new Error(`Failed to load clients: ${error.message}`)
 
     const runner = new JobRunner(supabaseAdmin)
-    const results: Array<{ name: string; outcome: string; job_id?: string; error?: string }> = []
+    const results: Array<{
+      name: string
+      outcome: string
+      job_id?: string
+      error?: string
+      /** Pages whose last crawl is older than STALE_AFTER_DAYS when this run started. */
+      pages_stale_before_run?: number
+    }> = []
 
     for (const client of (clients ?? []) as ClientRow[]) {
       if (!client.domain) continue
@@ -84,6 +93,8 @@ export async function GET(req: NextRequest) {
           results.push({ name: client.name, outcome: 'skipped_job_in_progress' })
           continue
         }
+
+        const staleBefore = await countStalePages(client.id)
 
         const job = await runner.createJob(client.id, {
           domain: client.domain,
@@ -102,7 +113,12 @@ export async function GET(req: NextRequest) {
           )
         })
 
-        results.push({ name: client.name, outcome: 'crawl_started', job_id: job.id })
+        results.push({
+          name: client.name,
+          outcome: 'crawl_started',
+          job_id: job.id,
+          ...(staleBefore !== null ? { pages_stale_before_run: staleBefore } : {}),
+        })
       } catch (err) {
         results.push({
           name: client.name,
@@ -126,4 +142,16 @@ export async function GET(req: NextRequest) {
     await cronRun.finish({ failed: 1, error: message })
     return NextResponse.json({ success: false, error: message }, { status: 500 })
   }
+}
+
+/** Null when the count could not be read — a receipt field must never block the crawl. */
+async function countStalePages(clientId: string): Promise<number | null> {
+  const cutoff = new Date(Date.now() - STALE_AFTER_DAYS * 24 * 60 * 60 * 1000).toISOString()
+  const { count, error } = await supabaseAdmin
+    .from('client_site_pages')
+    .select('id', { count: 'exact', head: true })
+    .eq('client_id', clientId)
+    .eq('crawl_status', 'crawled')
+    .lt('crawled_at', cutoff)
+  return error ? null : count ?? 0
 }

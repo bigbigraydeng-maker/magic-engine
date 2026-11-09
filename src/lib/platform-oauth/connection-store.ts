@@ -12,7 +12,9 @@
  *   await revokeConnection(id)
  */
 
+import { clearMetaPageSyncHold } from '../meta/broken-page-token'
 import { supabaseAdmin } from '../supabase'
+import type { SocialConnectionFact } from './social-onboarding'
 import {
   encryptToken,
   toConnectionSummary,
@@ -49,6 +51,11 @@ export async function upsertConnection(input: UpsertConnectionInput): Promise<vo
         display_name:      input.displayName,
         scopes:            input.scopes,
         status:            CONNECTION_STATUS.ACTIVE,
+        // 🔴 状态改回 active 就必须把旧报错擦掉，否则一条健康的连接会永远
+        //    挂着上次断线的原文。2026-09-24 实测：CTS 的 info@ 重连之后
+        //    status=active、error_message 还是 9 天前那条 AADSTS65001 ——
+        //    任何"按报错找坏连接"的排查都会被它骗一次。
+        error_message:     null,
         // Only touch last_synced_at when the caller just re-verified the grant.
         // Omitting the key entirely (rather than writing null) keeps an
         // existing value intact on an upsert that is not a fresh sync.
@@ -59,7 +66,12 @@ export async function upsertConnection(input: UpsertConnectionInput): Promise<vo
     )
 
   if (error) {
-    throw new Error(`Failed to upsert connection: ${error.message}`)
+    throw Object.assign(new Error(`Failed to upsert connection: ${error.message}`), { code: error.code })
+  }
+
+  // 重新连上 Meta 主页之后，每小时同步才准再打 Graph。清不掉暂停不能让重连本身失败。
+  if (input.provider === 'meta') {
+    await clearMetaPageSyncHold(supabaseAdmin, input.clientId, input.accountId)
   }
 }
 
@@ -84,11 +96,49 @@ export async function revokeConnection(id: string): Promise<void> {
 
 // ─── Read operations ─────────────────────────────────────────────────────────
 
-/**
- * List all connections for a client — safe for frontend consumption.
- * Returns PlatformConnectionSummary[] (no encrypted token fields).
- * Non-throwing: returns [] on DB error.
+/** Narrow, fail-closed read for social onboarding; never selects credentials or provider errors. */
+export async function listSocialConnectionFacts(clientId: string): Promise<SocialConnectionFact[]> {
+  const { data, error } = await supabaseAdmin
+    .from('platform_oauth_connections')
+    .select('id,provider,purpose,account_id,location_name,display_name,status,scopes,token_expiry,last_synced_at')
+    .eq('client_id', clientId)
+    .eq('purpose', 'legacy')
+    .in('provider', ['meta', 'instagram', 'tiktok', 'google_youtube'])
+  if (error || !data) throw new Error('Social connection facts unavailable')
+  return data as SocialConnectionFact[]
+}
+
+/** Confirm that the grant just written is the one this client can actually use.
+ * The timestamp checks prevent an older grant for the same account from passing a new callback.
+ * Reads only the credential-free onboarding projection.
  */
+export async function confirmSocialConnectionWrite(input: {
+  clientId: string
+  provider: 'google_youtube' | 'instagram'
+  accountId: string
+  requiredScopes: readonly string[]
+  tokenExpiry: Date
+  verifiedAt: Date
+  locationName?: string
+}): Promise<boolean> {
+  const rows = (await listSocialConnectionFacts(input.clientId))
+    .filter(row => row.provider === input.provider && row.purpose === 'legacy' && row.status !== 'revoked')
+  if (rows.length !== 1) return false
+  const row = rows[0]
+  const scopes = row.scopes
+  return row.account_id === input.accountId && row.status === 'active'
+    && (input.locationName === undefined || row.location_name === input.locationName)
+    && Array.isArray(scopes)
+    && scopes.every(scope => typeof scope === 'string')
+    && input.requiredScopes.every(scope => scopes.includes(scope))
+    && typeof row.token_expiry === 'string'
+    && Date.parse(row.token_expiry) === input.tokenExpiry.getTime()
+    && input.tokenExpiry.getTime() > Date.now()
+    && typeof row.last_synced_at === 'string'
+    && Date.parse(row.last_synced_at) === input.verifiedAt.getTime()
+}
+
+/** Legacy summary contract: returns [] on DB error. New onboarding uses the strict narrow read above. */
 export async function listConnections(clientId: string): Promise<PlatformConnectionSummary[]> {
   const { data, error } = await supabaseAdmin
     .from('platform_oauth_connections')

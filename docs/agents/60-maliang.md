@@ -1,5 +1,6 @@
 # 马良 — Agent 手册
 
+> ⚠️ 与代码不符，见 [`agent-autonomy-operating-plan-v1` §4.4](../specs/2026-09-24-agent-autonomy-operating-plan-v1.md)：马良代码在 `src/lib/maliang/`（`render-check.ts`），不是旧写法 `src/lib/visual/`。正文未改。
 > 模型：GPT-4o-mini vision（视觉分析）/ Claude Sonnet（学习与策略）  
 > 代码入口：  
 > - `src/lib/assets/vision-analyzer.ts` — 视觉分析引擎 ✅ 已建  
@@ -8,6 +9,14 @@
 > - `src/lib/assets/storyboard-generator.ts` — 故事板生成 ✅ 已建  
 > - `src/lib/visual/` — 图片/视频生成 ✅ 已建  
 > 定位：视觉智能 Agent。管理素材库、采集平台爆款、为视觉资产打标签、监控生成质量、把学到的视觉模式写回记忆层。
+
+> **素材库归马良管（PM 2026-11-04 定，不另开仓库、不另造 agent）。** 下面「职责 1」写的 `client_assets` 打标签是旧设想；素材库的真实位置如下（2026-11-04 实查）：
+> - 原件和采集证据放 Dropbox `MagicLab_Studio`：新素材先进 `00_Inbox/<层级>`，审核后归入 `01_Platform` / `02_Industry` / `03_Enterprise`。规矩见 `99_Catalog/素材采集与入库规范.txt`。
+> - 入库、打标签和上传工具在 `scripts/media-library/`（说明见 `AUTOMATION.md`）。登记记录在 `99_Catalog/asset-records/`，制作副本放 Supabase 私有存储 `me-media-platform` / `me-media-industry` / `me-media-enterprise`。
+> - 出片机读的是本机镜像。补齐工具是 `scripts/factory-worker/tools/sync-studio-mirror.mjs`，每天早上 8 点自动跑（11-04 已装好，安装说明在 `scripts/factory-worker/launchd/README.md`），不读上面那套登记记录。
+> - 自动入库现在没在跑：本机那个监听任务 10-22 起就没加载，停之前一直报「扫描失败」。现在只能有人手动运行 `manage.mjs import` 来登记素材。
+> - 审核放行 11-04 已上线：500 条里放行 40 条、待人工 460 条。还没接上的：出片机和 ME 后台从「已审核清单」选片；用完回写用在了哪里。每项开工前先跟 PM 讲清楚。
+> - **完整说明（入口、PM 日常怎么管、agent 怎么调用、三个「素材库」的区别）见 [素材库功能介绍](../sops/2026-11-05-media-library-guide-v1.0.md)。**
 
 ---
 
@@ -193,3 +202,11 @@ await saveProvenPattern(supabase, {
 - 李白手册：`docs/agents/70-libai.md`
 - 鲁班手册：`docs/agents/50-luban.md`
 - 提示词库：`docs/agents/prompt-library/`
+
+---
+
+## 操作手册
+
+- 配合：[视频模板优化手册 v1.0](../sops/2026-10-27-video-factory-template-playbook-v1.0.md)（主负责是苏东坡，出片检查一侧归马良）
+
+索引：[agents 索引](./README.md)。

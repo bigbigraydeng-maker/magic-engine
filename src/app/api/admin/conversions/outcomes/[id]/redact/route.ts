@@ -79,6 +79,8 @@ export async function POST(request: Request, { params }: { params: { id: string 
       customer_first: null,
       customer_last: null,
       page_scoped_user_id: null,
+      // Facebook 线索编号能反查到具体那条表单提交（含姓名电话），同样必须清空。
+      meta_lead_id: null,
       redacted_at: now,
       redaction_reason: reason || '客人要求删除',
       updated_at: now,

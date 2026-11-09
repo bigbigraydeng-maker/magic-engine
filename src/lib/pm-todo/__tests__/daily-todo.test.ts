@@ -50,11 +50,12 @@ describe('buildTodoEmail · setup tasks', () => {
     }, '1 Aug')
 
     const setupAt = email.html.indexOf('去连接')
-    const draftsAt = email.html.indexOf('Blog 草稿待审')
+    const draftsAt = email.html.indexOf('Blog 草稿写好了')
     expect(setupAt).toBeGreaterThan(-1)
     expect(draftsAt).toBeGreaterThan(-1)
     expect(setupAt).toBeLessThan(draftsAt)
-    expect(email.totalItems).toBe(4)
+    // 一行 = 一件事：连接 1 件 + oztop 的 3 篇草稿 1 件
+    expect(email.totalItems).toBe(2)
   })
 
   it('no setup card once every client is authorised', () => {
@@ -136,7 +137,7 @@ describe('buildTodoEmail', () => {
     expect(email.html).not.toContain('去处理')
   })
 
-  it('drafts + findings show per-client rows with deep links and sum into the subject', () => {
+  it('drafts show one row per client with a deep link; SEO patrol findings are not in the daily list at all', () => {
     const email = buildTodoEmail(1, {
       ...EMPTY,
       draftsByClient: [
@@ -146,17 +147,15 @@ describe('buildTodoEmail', () => {
       findingsByClient: [{ name: 'oztop', id: 'cid-2', findings: 3 }],
     }, '31 Jul')
 
-    // 🔴 14 = 7 + 7 草稿。**巡逻发现那 3 条不进总数** ——
-    //    它们当天就被自动排成了建议卡，跟建议卡是同一批活儿，
-    //    两边各数一遍就是虚高。PM 2026-08-04 收到「91 件」正是这么堆出来的。
-    expect(email.totalItems).toBe(14)
-    expect(email.subject).toContain('14 件')
+    // 🔴 一行一件事：两个客户各一行草稿 = 2 件（以前按篇数算成 14 件）。
+    //    巡逻发现 2026-09-26 起整栏拿出每日待办 —— 周报里有「巡逻员本周抓到 N 个新发现」。
+    expect(email.totalItems).toBe(2)
+    expect(email.subject).toContain('2 件')
     expect(email.html).toContain('/clients/cid-1/blog')
-    expect(email.html).toContain('/clients/cid-2/execution')
-    expect(email.html).toContain('Blog 草稿待审')
-    // 发现仍然显示（要看得见系统查到了什么），只是措辞说清它不用单独处理
-    expect(email.html).toContain('SEO 巡逻查到的')
-    expect(email.html).toContain('不用单独处理')
+    expect(email.html).toContain('7 篇 Blog 草稿写好了')
+    expect(email.html).toContain('发出去前要你看一眼的')
+    expect(email.html).not.toContain('SEO 巡逻')
+    expect(email.html).not.toContain('/clients/cid-2/execution')
   })
 
   it('🔴 巡逻发现再多也不抬高「今天有几件」—— 那是建议卡的原料，不是另一批活', () => {
@@ -170,9 +169,8 @@ describe('buildTodoEmail', () => {
 
   /**
    * 2026-09-07 铁律 3：以下 kind 是**我们代码 / infra 欠账**——每条的 how
-   * 都是「回我一句我去改」，PM 没法真的动手，塞进「🙋 需要你动手」栏是把
-   * dev 的活假装成 PM 的活。这条测试锁死：它们进单独一栏「🛠 系统欠账」，
-   * 不进「🙋 需要你动手」，不进「📣 系统替你做了什么」，不抬高总数。
+   * 都是「回我一句我去改」，PM 没法真的动手。2026-09-26 起（PM：今日待办只留五类）
+   * 它们连一栏都不占了：PM 邮件里只剩一行「N 件开发欠账」+ 后台清单链接，不抬高总数。
    */
   it.each([
     'auto_run_stuck',
@@ -180,7 +178,8 @@ describe('buildTodoEmail', () => {
     'attribution_audit_failed',
     'client_list_unreadable',
     'cron_blind',
-  ] as const)('🛠 %s 走「系统欠账」栏，不进「需要你动手」，不抬高总数', (kind) => {
+    'ads_config_unreadable',
+  ] as const)('🛠 %s 只在「开发欠账」那一行小字里出现，不抬高总数', (kind) => {
     const email = buildTodoEmail(3, {
       ...EMPTY,
       manualItems: [
@@ -194,16 +193,15 @@ describe('buildTodoEmail', () => {
         },
       ],
     }, '31 Jul')
-    expect(email.html).toContain('系统欠账')
-    expect(email.html).not.toContain('需要你动手')
-    // 这些不是"系统替你做了什么"（那是给成功事件用的），也不属于那栏
-    const infoAt = email.html.indexOf('这周系统替你做了什么')
-    expect(infoAt).toBe(-1)
+    expect(email.html).toContain('1 件开发欠账')
+    expect(email.html).toContain('/dashboard/admin/cron-health#dev-debt')
+    expect(email.html).not.toContain('（dev 该看的）')
     expect(email.totalItems).toBe(0)
-    expect(email.subject).toContain('无事')
+    // 客户名单读不出来 = 大部分检查没跑，不许说「无事」
+    expect(email.subject).toContain(kind === 'client_list_unreadable' ? '有检查没跑成' : '无事')
   })
 
-  it('🛠 系统欠账栏与「需要你动手」栏共存时，只有 action 类算进总数', () => {
+  it('🛠 开发欠账与 PM 的事共存时，只有 PM 的事算进总数', () => {
     const email = buildTodoEmail(3, {
       ...EMPTY,
       manualItems: [
@@ -225,19 +223,18 @@ describe('buildTodoEmail', () => {
         },
       ],
     }, '31 Jul')
-    expect(email.html).toContain('需要你动手')
-    expect(email.html).toContain('系统欠账')
+    expect(email.html).toContain('系统进不去、要你点一次的')
+    expect(email.html).toContain('1 件开发欠账')
     // 只有 video_credits_out 算一件
     expect(email.totalItems).toBe(1)
     expect(email.subject).toContain('1 件')
   })
 
   /**
-   * 2026-09-07 铁律 3 下半（PR #1442）：`diagnostic_findings` 走「系统替你
-   * 做了什么」栏，见 daily-todo.ts:29 INFORMATIONAL_KINDS 头注。此条测试
-   * 保护那份契约，跟上面 dev-owned 契约互不重叠。
+   * 2026-09-26 PM：「这周系统替你做了什么」是知会，挪到周一周报（weekly-report/build.ts）。
+   * 每日待办里只剩一行「N 件系统知会挪到周一周报」，不抬高总数。
    */
-  it('🔴 本周体检查到的严重问题走「系统替你做了什么」栏，不进「需要你动手」，不抬高总数', () => {
+  it('🔴 本周体检结果挪去周报，每日待办只说一句挪走了，不抬高总数', () => {
     const email = buildTodoEmail(3, {
       ...EMPTY,
       manualItems: [
@@ -251,32 +248,31 @@ describe('buildTodoEmail', () => {
         },
       ],
     }, '31 Jul')
-    // 不进「需要你动手」，走「系统替你做了什么」
-    expect(email.html).not.toContain('需要你动手')
-    expect(email.html).toContain('系统替你做了什么')
-    expect(email.html).toContain('CTS Tours NZ')
+    expect(email.html).not.toContain('首页 H1 缺失')
+    expect(email.html).toContain('1 件系统知会挪到周一周报')
     // 不抬高总数
     expect(email.totalItems).toBe(0)
     expect(email.subject).toContain('无事')
   })
 
-  it('zero-count sections are omitted entirely', () => {
+  it('cron failures are developer work: one small line with the list link, never counted', () => {
     const email = buildTodoEmail(3, {
       ...EMPTY,
       cronFailures24h: 2,
     }, '31 Jul')
-    expect(email.html).not.toContain('Blog 草稿待审')
-    expect(email.html).toContain('系统有活儿没跑成')
-    expect(email.totalItems).toBe(2)
+    expect(email.html).not.toContain('Blog 草稿写好了')
+    expect(email.html).toContain('过去 24 小时 2 次自动任务失败')
+    expect(email.html).toContain('/dashboard/admin/cron-health#dev-debt')
+    expect(email.totalItems).toBe(0)
   })
 
-  it('reels awaiting review show as 社媒成片待审 with factory link', () => {
+  it('reels awaiting review are one review row per client with the factory link', () => {
     const email = buildTodoEmail(4, {
       ...EMPTY,
       reelsByClient: [{ name: 'CTS Tours NZ', id: 'cid-1', reels: 11 }],
     }, '1 Aug')
-    expect(email.totalItems).toBe(11)
-    expect(email.html).toContain('社媒成片待审')
+    expect(email.totalItems).toBe(1)
+    expect(email.html).toContain('11 条社媒成片等你审')
     expect(email.html).toContain('/dashboard/factory')
   })
 

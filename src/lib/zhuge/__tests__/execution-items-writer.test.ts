@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { writeExecutionItems, executionModeToFixType, actionTypeToTitle } from '../action-persister'
+import { writeExecutionItems, executionModeToFixType, actionTypeToTitle, executionItemDedupKey } from '../action-persister'
 import type { PriorityAction, DiagnosticDimension } from '../types'
 import type { ExecutionMode } from '@/lib/flywheel/adapters/types'
 
@@ -118,6 +118,32 @@ describe('executionModeToFixType()', () => {
 
   it('maps external_manual → fde_manual', () => {
     expect(executionModeToFixType('external_manual')).toBe('fde_manual')
+  })
+})
+
+// ── executionItemDedupKey ──────────────────────────────────────────────────────
+
+describe('executionItemDedupKey()', () => {
+  it('treats two spellings of the same page as one key', () => {
+    expect(
+      executionItemDedupKey('seo.fix_internal_link', null, 'https://www.example.com/a/'),
+    ).toBe(executionItemDedupKey('seo.fix_internal_link', null, 'http://example.com/a'))
+  })
+
+  it('gives different pages different keys', () => {
+    expect(
+      executionItemDedupKey('seo.fix_internal_link', null, 'https://example.com/a'),
+    ).not.toBe(executionItemDedupKey('seo.fix_internal_link', null, 'https://example.com/b'))
+  })
+
+  it('falls back to the old key format when no URL is present', () => {
+    expect(executionItemDedupKey('seo.refresh_blog', 'Keyword')).toBe('seo.refresh_blog::keyword')
+  })
+
+  it('falls back to the old key format when the URL is unparseable', () => {
+    expect(executionItemDedupKey('seo.refresh_blog', 'Keyword', 'not a url')).toBe(
+      'seo.refresh_blog::keyword',
+    )
   })
 })
 
@@ -352,5 +378,69 @@ describe('writeExecutionItems()', () => {
 
     expect(result.inserted).toBe(0)
     expect(result.superseded).toBe(0)
+  })
+
+  // ── URL-keyed dedup (not-indexed / missing-internal-link cards) ─────────────
+
+  it('inserts both cards when two same-type actions carry different page URLs', async () => {
+    const supabase = makeSupabase([])
+    const actions = [
+      makeAction('seo', 'seo.fix_internal_link', 1, 'in_house', { keyword: null, url: 'https://example.com/a' }),
+      makeAction('seo', 'seo.fix_internal_link', 2, 'in_house', { keyword: null, url: 'https://example.com/b' }),
+    ]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 's1', actions)
+
+    expect(result.inserted).toBe(2)
+    expect(result.superseded).toBe(0)
+    expect(supabase._updateFn).not.toHaveBeenCalled()
+  })
+
+  it('does not supersede a pending card for a different page', async () => {
+    const existing: ExistingRow[] = [
+      { id: 'page-a-card', action_type: 'seo.fix_internal_link', source: 'zhuge', zhuge_session_id: 's1', steps_json: { keyword: null, url: 'https://example.com/a' } },
+    ]
+    const supabase = makeSupabase(existing)
+    const actions  = [
+      makeAction('seo', 'seo.fix_internal_link', 1, 'in_house', { keyword: null, url: 'https://example.com/b' }),
+    ]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 's2', actions)
+
+    expect(result.superseded).toBe(0)
+    expect(result.inserted).toBe(1)
+    expect(supabase._updateFn).not.toHaveBeenCalled()
+  })
+
+  it('supersedes a pending card for the same page written with a different URL spelling', async () => {
+    const existing: ExistingRow[] = [
+      { id: 'page-a-card', action_type: 'seo.fix_internal_link', source: 'zhuge', zhuge_session_id: 's1', steps_json: { keyword: null, url: 'https://www.example.com/a/' } },
+    ]
+    const supabase = makeSupabase(existing)
+    const actions  = [
+      makeAction('seo', 'seo.fix_internal_link', 1, 'in_house', { keyword: null, url: 'http://example.com/a' }),
+    ]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 's2', actions)
+
+    expect(result.superseded).toBe(1)
+    expect(result.inserted).toBe(1)
+    expect(supabase._updateInFn).toHaveBeenCalledWith('id', ['page-a-card'])
+  })
+
+  it('matches a row carrying page_url against an action carrying url', async () => {
+    const existing: ExistingRow[] = [
+      { id: 'page-a-card', action_type: 'seo.fix_internal_link', source: 'zhuge', zhuge_session_id: 's1', steps_json: { page_url: 'https://example.com/a' } },
+    ]
+    const supabase = makeSupabase(existing)
+    const actions  = [
+      makeAction('seo', 'seo.fix_internal_link', 1, 'in_house', { url: 'https://example.com/a' }),
+    ]
+
+    const result = await writeExecutionItems(supabase as never, 'client-1', 's2', actions)
+
+    expect(result.superseded).toBe(1)
+    expect(result.inserted).toBe(1)
+    expect(supabase._updateInFn).toHaveBeenCalledWith('id', ['page-a-card'])
   })
 })

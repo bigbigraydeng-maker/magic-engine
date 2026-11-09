@@ -240,7 +240,6 @@ export interface ContentPost {
   status: ContentStatus
   scheduled_at?: string
   published_at?: string
-  publer_post_id?: string
   generation_context_snapshot?: Record<string, unknown> | null
   quality_score?: number | null      // 0–10, written after quality rubric check
 }
@@ -324,6 +323,7 @@ export interface AiVisibilityRun {
   cost_usd: number | null
   latency_ms: number | null
   error_message: string | null
+  parse_error_message: string | null
   ran_at: string
 }
 

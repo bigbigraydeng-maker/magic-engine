@@ -10,7 +10,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll } from '@/lib/supabase-paginate'
-import { keepOneCasePerAction } from '@/lib/flywheel/attribution/outcome-identity'
+import { MIN_DECIDED_FOR_RATE, effectiveVerdict, isDecidedVerdict, keepOneCasePerAction } from '@/lib/flywheel/attribution/outcome-identity'
 
 /**
  * An outcome row as these queries fetch it. The identity columns are selected
@@ -45,29 +45,39 @@ export interface RawOutcomeConfidenceRow {
 }
 
 export interface ConfidenceEntry {
+  /** confirmed ÷ decided. 0 when nothing was decided — always check `sampleSize` first. */
   successRate: number
+  /** Decided cases only (confirmed + reversed). `inconclusive` is not a case either way. */
   sampleSize: number
+  /** All cases including the undecided ones — only used to state "decided X of Y". */
+  totalCases: number
 }
 
 /** keyed by action_type (e.g. "geo.deploy_directive") */
 export type OutcomeConfidenceMap = Record<string, ConfidenceEntry>
 
+function entryFrom(b: { confirmed: number; decided: number; total: number }): ConfidenceEntry {
+  return {
+    successRate: b.decided === 0 ? 0 : b.confirmed / b.decided,
+    sampleSize: b.decided,
+    totalCases: b.total,
+  }
+}
+
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
 export function computeConfidenceMap(rows: RawOutcomeConfidenceRow[]): OutcomeConfidenceMap {
-  const buckets = new Map<string, { confirmed: number; total: number }>()
+  const buckets = new Map<string, { confirmed: number; decided: number; total: number }>()
   for (const r of rows) {
-    const b = buckets.get(r.action_type) ?? { confirmed: 0, total: 0 }
+    const b = buckets.get(r.action_type) ?? { confirmed: 0, decided: 0, total: 0 }
     b.total++
+    if (isDecidedVerdict(r.verdict)) b.decided++
     if (r.verdict === 'confirmed') b.confirmed++
     buckets.set(r.action_type, b)
   }
   const result: OutcomeConfidenceMap = {}
   buckets.forEach((b, actionType) => {
-    result[actionType] = {
-      successRate: b.total === 0 ? 0 : b.confirmed / b.total,
-      sampleSize: b.total,
-    }
+    result[actionType] = entryFrom(b)
   })
   return result
 }
@@ -75,8 +85,12 @@ export function computeConfidenceMap(rows: RawOutcomeConfidenceRow[]): OutcomeCo
 export function getConfidenceLabel(map: OutcomeConfidenceMap, actionType: string): string {
   const entry = map[actionType]
   if (!entry) return '新策略，尚无验证数据'
+  if (entry.sampleSize === 0) return `尚无可判定案例（共 ${entry.totalCases} 个，结果都判不了）`
+  if (entry.sampleSize < MIN_DECIDED_FOR_RATE) {
+    return `可判定案例太少（可判定 ${entry.sampleSize} / 共 ${entry.totalCases}），先不给成功率`
+  }
   const pct = Math.round(entry.successRate * 100)
-  return `历史成功率 ${pct}%，基于 ${entry.sampleSize} 个客户案例`
+  return `历史成功率 ${pct}%（可判定 ${entry.sampleSize} / 共 ${entry.totalCases} 个客户案例）`
 }
 
 export function formatConfidenceForPrompt(map: OutcomeConfidenceMap): string {
@@ -87,24 +101,33 @@ export function formatConfidenceForPrompt(map: OutcomeConfidenceMap): string {
     '## 历史成效数据（飞轮归因库）',
     '',
     '以下是 Magic Engine 历史上各行动类型的实测成功率。',
+    `成功率只在能判定的案例里算（整站流量涨跌、变化太小的都算判不了）；可判定少于 ${MIN_DECIDED_FOR_RATE} 个的不给成功率。`,
     '**使用方式**：为每个推荐行动附上置信度标签，帮助 FDE 优先执行高效行动。',
     '**不要跳过低成功率行动**：它们可能对特定客户仍有价值，只需透明标注。',
     '',
-    '| action_type | 历史成功率 | 案例数 |',
-    '|-------------|-----------|--------|',
+    '| action_type | 历史成功率 | 可判定 / 共 | 置信度标签（照抄） |',
+    '|-------------|-----------|-----------|------------------|',
   ]
 
-  const sorted = entries.sort((a, b) => b[1].successRate - a[1].successRate)
+  const sorted = entries.sort((a, b) => {
+    const aRated = a[1].sampleSize >= MIN_DECIDED_FOR_RATE
+    const bRated = b[1].sampleSize >= MIN_DECIDED_FOR_RATE
+    if (aRated !== bRated) return aRated ? -1 : 1
+    if (aRated) return b[1].successRate - a[1].successRate
+    return b[1].sampleSize - a[1].sampleSize
+  })
   for (const [actionType, entry] of sorted) {
-    const pct = Math.round(entry.successRate * 100)
-    lines.push(`| \`${actionType}\` | ${pct}% | ${entry.sampleSize} |`)
+    const rate = entry.sampleSize >= MIN_DECIDED_FOR_RATE
+      ? `${Math.round(entry.successRate * 100)}%`
+      : '—'
+    lines.push(`| \`${actionType}\` | ${rate} | ${entry.sampleSize} / ${entry.totalCases} | ${getConfidenceLabel(map, actionType)} |`)
   }
 
   lines.push(
     '',
-    '**输出约束**：每个 action 的 `description` 末尾必须附上对应 action_type 的置信度标签，',
-    '格式：`（${getConfidenceLabel(map, actionType)}）`。',
-    '若该 action 无历史数据，附：`（新策略，尚无验证数据）`。',
+    '**输出约束**：每个 action 的 `description` 末尾必须附上对应 action_type 的置信度标签：',
+    '照抄上表「置信度标签」一列的文字，用全角括号括起来；不要改数字，也不要自己算百分比。',
+    '若该 action_type 不在表中，附：`（新策略，尚无验证数据）`。',
   )
 
   return lines.join('\n')
@@ -140,7 +163,7 @@ export async function fetchOutcomeConfidenceMap(
       withPromise(data),
     ).map(r => {
       const actions = Array.isArray(r.flywheel_actions) ? r.flywheel_actions[0] : r.flywheel_actions
-      return { action_type: actions?.action_type ?? 'unknown', verdict: r.verdict }
+      return { action_type: actions?.action_type ?? 'unknown', verdict: effectiveVerdict(r) }
     })
 
     return computeConfidenceMap(rows)
@@ -195,7 +218,7 @@ export async function fetchClientOutcomeHistory(
       withPromise(data),
     ).map(r => {
       const actions = Array.isArray(r.flywheel_actions) ? r.flywheel_actions[0] : r.flywheel_actions
-      return { action_type: actions?.action_type ?? 'unknown', verdict: r.verdict }
+      return { action_type: actions?.action_type ?? 'unknown', verdict: effectiveVerdict(r) }
     })
 
     return computeConfidenceMap(rows)
@@ -231,9 +254,9 @@ export async function fetchSeoBlogConfidenceByMode(
   clientId: string,
 ): Promise<SeoBlogConfidenceByMode> {
   const empty: SeoBlogConfidenceByMode = {
-    unified:  { successRate: 0, sampleSize: 0 },
-    geo_only: { successRate: 0, sampleSize: 0 },
-    seo_only: { successRate: 0, sampleSize: 0 },
+    unified:  { successRate: 0, sampleSize: 0, totalCases: 0 },
+    geo_only: { successRate: 0, sampleSize: 0, totalCases: 0 },
+    seo_only: { successRate: 0, sampleSize: 0, totalCases: 0 },
   }
 
   try {
@@ -250,10 +273,10 @@ export async function fetchSeoBlogConfidenceByMode(
           .range(from, to),
     )
 
-    const buckets: Record<string, { confirmed: number; total: number }> = {
-      unified:  { confirmed: 0, total: 0 },
-      geo_only: { confirmed: 0, total: 0 },
-      seo_only: { confirmed: 0, total: 0 },
+    const buckets: Record<string, { confirmed: number; decided: number; total: number }> = {
+      unified:  { confirmed: 0, decided: 0, total: 0 },
+      geo_only: { confirmed: 0, decided: 0, total: 0 },
+      seo_only: { confirmed: 0, decided: 0, total: 0 },
     }
 
     for (const row of keepOneCasePerAction(
@@ -262,36 +285,31 @@ export async function fetchSeoBlogConfidenceByMode(
       const action = Array.isArray(row.flywheel_actions) ? row.flywheel_actions[0] : row.flywheel_actions
       const mode = action?.payload?.mode
       if (!mode || !(mode in buckets)) continue
+      const verdict = effectiveVerdict(row)
       buckets[mode].total++
-      if (row.verdict === 'confirmed') buckets[mode].confirmed++
+      if (isDecidedVerdict(verdict)) buckets[mode].decided++
+      if (verdict === 'confirmed') buckets[mode].confirmed++
     }
 
     return {
-      unified:  toEntry(buckets.unified),
-      geo_only: toEntry(buckets.geo_only),
-      seo_only: toEntry(buckets.seo_only),
+      unified:  entryFrom(buckets.unified),
+      geo_only: entryFrom(buckets.geo_only),
+      seo_only: entryFrom(buckets.seo_only),
     }
   } catch {
     return empty
   }
 }
 
-function toEntry(b: { confirmed: number; total: number }): ConfidenceEntry {
-  return {
-    successRate: b.total === 0 ? 0 : b.confirmed / b.total,
-    sampleSize:  b.total,
-  }
-}
-
 /**
  * Compute a 0–10 priority boost for one content_mode based on its historical
- * success rate. Requires at least 2 samples to avoid noise; caps at +10 to
- * preserve the scorer's existing ceiling.
+ * success rate. Requires at least MIN_DECIDED_FOR_RATE decided cases (inconclusive
+ * ones do not count); caps at +10 to preserve the scorer's existing ceiling.
  *
  * Pure function — exported for unit testing.
  */
 export function getModeBoost(stats: ConfidenceEntry): number {
-  if (stats.sampleSize < 2) return 0
+  if (stats.sampleSize < MIN_DECIDED_FOR_RATE) return 0
   if (stats.successRate >= 0.7) return 10
   if (stats.successRate >= 0.5) return 6
   if (stats.successRate >= 0.3) return 2
@@ -302,13 +320,16 @@ export function getModeBoost(stats: ConfidenceEntry): number {
 export function formatSeoModeConfidenceForPrompt(
   stats: SeoBlogConfidenceByMode,
 ): string {
-  const anyData = Object.values(stats).some(s => s.sampleSize > 0)
+  const anyData = Object.values(stats).some(s => s.totalCases > 0)
   if (!anyData) return ''
 
   const fmt = (mode: keyof SeoBlogConfidenceByMode): string => {
     const s = stats[mode]
-    if (s.sampleSize === 0) return `| \`${mode}\` | — | 0 |`
-    return `| \`${mode}\` | ${Math.round(s.successRate * 100)}% | ${s.sampleSize} |`
+    if (s.totalCases === 0) return `| \`${mode}\` | — | 0 / 0 |`
+    if (s.sampleSize < MIN_DECIDED_FOR_RATE) {
+      return `| \`${mode}\` | — | ${s.sampleSize} / ${s.totalCases} |`
+    }
+    return `| \`${mode}\` | ${Math.round(s.successRate * 100)}% | ${s.sampleSize} / ${s.totalCases} |`
   }
 
   return [
@@ -316,8 +337,8 @@ export function formatSeoModeConfidenceForPrompt(
     '',
     '当推荐 `seo.publish_blog` 类行动时，请优先选择历史成功率最高的 mode。',
     '',
-    '| mode | 成功率 | 案例数 |',
-    '|------|--------|--------|',
+    '| mode | 成功率 | 可判定 / 共 |',
+    '|------|--------|-----------|',
     fmt('unified'),
     fmt('geo_only'),
     fmt('seo_only'),

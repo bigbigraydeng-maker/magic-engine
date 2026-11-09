@@ -102,7 +102,10 @@ async function loadLatest(clientId: string, adAccountId: string): Promise<{ rows
       .eq('client_id', clientId)
       .eq('ad_account_id', adAccountId)
       .gte('captured_at', since)
+      // 同一轮写下的几百行 captured_at 完全相同：不加 id 兜底，翻页边界可能漏一行，
+      // 漏掉的若正好是某对象最新那行，「变没变」就会对着更旧的行判（内核核算客户预算靠这个基线，魏征 11-04）
       .order('captured_at', { ascending: false })
+      .order('id', { ascending: true })
       .range(from, from + PAGE - 1)
     if (error) return { rows: [], error: error.message }
     const page = (data ?? []) as LatestSnapshotRef[]
@@ -236,6 +239,9 @@ export async function captureClientSnapshots(
   accountIds: string[],
   opts: { reason?: CaptureRunReason; now?: Date } = {},
 ): Promise<ClientSnapshotResult> {
+  // A multi-account capture is one evidence round. Share one timestamp so a
+  // caller can prove that all account and entity levels came from that round.
+  const capturedAt = opts.now ?? new Date()
   const token = await getMetaTokenForClient(clientId)
   if (!token) return { client_id: clientId, success: false, accounts: [], error: 'no Meta token configured for client' }
 
@@ -245,7 +251,7 @@ export async function captureClientSnapshots(
     accounts.push(await captureAccountSnapshots(clientId, id, token, {
       shared: shared.has(normalizeAccountId(id)),
       reason: opts.reason,
-      now: opts.now,
+      now: capturedAt,
     }))
   }
   const success = !sharedError && accounts.every(a => !a.error && a.levels.every(l => l.complete || l.skipped_shared))

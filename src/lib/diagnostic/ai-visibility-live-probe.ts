@@ -28,22 +28,75 @@ export interface LiveProbeInput {
 export interface LiveProbeQuestionResult {
   question: string
   client_brand_rank: number | null
+  /**
+   * Set when this question could NOT be measured at all (engine error, empty
+   * response, exception). `client_brand_rank: null` alongside a non-null
+   * `error` means "we do not know", NOT "the brand was absent" — the two are
+   * indistinguishable without this field, and conflating them fabricates a
+   * client-facing measurement result. See CLAUDE.md 铁律 8.
+   */
+  error: string | null
 }
 
 export interface LiveProbeResult {
+  /** Questions attempted. */
   runs: number
+  /**
+   * Questions that actually produced a usable engine answer. Only these can
+   * carry evidence about the brand. `runs - failed_runs`.
+   */
+  measured_runs: number
+  /**
+   * Questions whose engine call failed (429 / timeout / model error). A brand
+   * missing from a failed run is NOT evidence of absence.
+   */
+  failed_runs: number
   mentions: number
   avg_rank: number | null
   questions: LiveProbeQuestionResult[]
   /** Total latency for the probe call, in milliseconds. */
   latency_ms: number
-  /** `true` when the probe could not run (missing API key, no queries, etc.). */
+  /** `true` when the probe did not produce a conclusive measurement. */
   skipped: boolean
   skip_reason?: string
+  /**
+   * Distinguishes WHY `skipped` is true. `'not_configured'` means the probe
+   * never attempted a call (missing API key, no priority questions set up) —
+   * a genuine "tracking was never enabled" state. `'attempt_failed'` means
+   * the probe DID try and the attempt itself broke (the outer timeout fired,
+   * or `probe.run()` rejected) — a transient failure, not evidence that
+   * tracking is unconfigured. Callers must not collapse the two: reporting
+   * an `attempt_failed` skip as "not tracked" tells the client to go
+   * configure something that is already configured and simply timed out.
+   */
+  skip_kind?: 'not_configured' | 'attempt_failed'
 }
 
 export interface LiveProbe {
   run(input: LiveProbeInput): Promise<LiveProbeResult>
+}
+
+/**
+ * Whether a probe result may back a client-facing conclusion.
+ *
+ * Fail-closed on purpose: the probe samples only
+ * {@link LIVE_PROBE_QUESTION_LIMIT} questions, so losing even one of them
+ * leaves too little to assert either presence or absence — and the lost one
+ * may well have been the hit. A probe is therefore conclusive only when every
+ * attempted question was actually measured.
+ *
+ * Callers must treat a non-conclusive probe as "not measured" (score `null`,
+ * no findings, no evidence), never as "measured zero". See
+ * docs/PITFALLS.md and CLAUDE.md 铁律 8 —— a measurement we failed to take is
+ * not a measurement of zero.
+ */
+export function isProbeConclusive(probe: LiveProbeResult | null): probe is LiveProbeResult {
+  return (
+    probe !== null &&
+    !probe.skipped &&
+    probe.failed_runs === 0 &&
+    probe.measured_runs > 0
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +119,7 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
       const identity = await loadClientIdentity(supabase, clientId)
       const questions: LiveProbeQuestionResult[] = []
       let mentions = 0
+      let failedRuns = 0
       const ranks: number[] = []
 
       for (const q of queries) {
@@ -73,7 +127,21 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
         try {
           const out = await runOpenAI({ question: q.question, market })
           if (out.error_message || !out.raw_response) {
-            questions.push({ question: q.question, client_brand_rank: null })
+            failedRuns++
+            questions.push({
+              question: q.question,
+              client_brand_rank: null,
+              error: out.error_message || 'engine returned an empty response',
+            })
+            continue
+          }
+          if (out.raw_response.trim().length < 30) {
+            failedRuns++
+            questions.push({
+              question: q.question,
+              client_brand_rank: null,
+              error: `engine response too short to parse (${out.raw_response.trim().length} chars)`,
+            })
             continue
           }
           const parsed = await parseRanking({
@@ -83,13 +151,22 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
             clientAliases: identity.brand_aliases,
             clientGeoAnchors: identity.brand_geo_anchors,
           })
-          questions.push({ question: q.question, client_brand_rank: parsed.client_brand_rank })
+          questions.push({
+            question: q.question,
+            client_brand_rank: parsed.client_brand_rank,
+            error: null,
+          })
           if (parsed.client_brand_rank !== null) {
             mentions++
             ranks.push(parsed.client_brand_rank)
           }
-        } catch {
-          questions.push({ question: q.question, client_brand_rank: null })
+        } catch (err) {
+          failedRuns++
+          questions.push({
+            question: q.question,
+            client_brand_rank: null,
+            error: err instanceof Error ? err.message : 'probe threw',
+          })
         }
       }
 
@@ -98,6 +175,8 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
 
       return {
         runs,
+        measured_runs: runs - failedRuns,
+        failed_runs: failedRuns,
         mentions,
         avg_rank: avgRank,
         questions,
@@ -115,12 +194,15 @@ export function createDefaultLiveProbe(supabase: SupabaseClient): LiveProbe {
 function emptyResult(start: number, reason: string): LiveProbeResult {
   return {
     runs: 0,
+    measured_runs: 0,
+    failed_runs: 0,
     mentions: 0,
     avg_rank: null,
     questions: [],
     latency_ms: Date.now() - start,
     skipped: true,
     skip_reason: reason,
+    skip_kind: 'not_configured',
   }
 }
 
@@ -167,7 +249,12 @@ async function loadPriorityQueries(
     .order('created_at', { ascending: true })
     .limit(LIVE_PROBE_QUESTION_LIMIT)
 
-  if (error || !data) return []
+  if (error) {
+    throw new Error(
+      `[ai-visibility-live-probe] ai_visibility_queries load failed: ${error.message}`,
+    )
+  }
+  if (!data) return []
   return data as AiVisibilityQuery[]
 }
 
@@ -182,12 +269,15 @@ export async function runProbeWithTimeout(
     const timer = setTimeout(() => {
       resolve({
         runs: 0,
+        measured_runs: 0,
+        failed_runs: 0,
         mentions: 0,
         avg_rank: null,
         questions: [],
         latency_ms: Date.now() - start,
         skipped: true,
         skip_reason: `live probe exceeded ${timeoutMs}ms`,
+        skip_kind: 'attempt_failed',
       })
     }, timeoutMs)
 
@@ -200,12 +290,15 @@ export async function runProbeWithTimeout(
         clearTimeout(timer)
         resolve({
           runs: 0,
+          measured_runs: 0,
+          failed_runs: 0,
           mentions: 0,
           avg_rank: null,
           questions: [],
           latency_ms: Date.now() - start,
           skipped: true,
           skip_reason: 'live probe threw',
+          skip_kind: 'attempt_failed',
         })
       },
     )

@@ -24,7 +24,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { extractMarkdownLinks } from '@/lib/site-audit/crawler'
+import { canonicalUrl } from '@/lib/url/canonical-url'
 import type { PageSignal } from './types'
+
+// Re-exported so existing importers of `seo-patrol/page-signals` keep working.
+export { canonicalUrl }
 
 interface CrawledPage {
   url: string
@@ -47,24 +51,6 @@ interface GscPageRow {
   position?: number
 }
 
-/**
- * Canonical form for cross-source URL comparison:
- * protocol dropped, leading www. dropped, host lowercased, trailing slash,
- * query and fragment dropped.
- */
-export function canonicalUrl(raw: string): string | null {
-  try {
-    const u = new URL(raw)
-    const host = u.hostname.toLowerCase().replace(/^www\./, '')
-    // Strip trailing slashes AND markdown residue the bare-URL regex drags
-    // along (**, ., , etc.) — un-stripped residue makes cross-source URL
-    // matching silently fail.
-    const path = u.pathname.replace(/[*.,'")]+$/, '').replace(/\/+$/, '') || '/'
-    return `${host}${path}`
-  } catch {
-    return null
-  }
-}
 
 /**
  * Inbound-link map from crawled pages: canonical target URL → count of

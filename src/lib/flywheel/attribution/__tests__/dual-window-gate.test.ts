@@ -66,14 +66,16 @@ describe('where the flag is documented', () => {
     expect(row).toContain('Render-web')
   })
 
-  it('the cron service really is curl-only, which is why web is the right place', () => {
+  it('no Render cron process runs attribution itself, so the flag stays on the web', () => {
     const render = readFileSync(path.join(process.cwd(), 'render.yaml'), 'utf8')
-    const block = render.slice(render.indexOf('name: attribution-cron'))
-    const startCommand = block.slice(0, block.indexOf('envVars'))
-
-    // If this ever becomes a node process running the job in-process, the flag
-    // would need to move — and this assertion is what says so.
-    expect(startCommand).toContain('curl')
-    expect(startCommand).toContain('/api/cron/attribution')
+    expect(render).not.toContain('name: attribution-cron')
+    const route = readFileSync(
+      path.join(process.cwd(), 'src/app/api/cron/attribution/route.ts'),
+      'utf8',
+    )
+    expect(route).toContain(DUAL_WINDOW_FLAG)
+    // The dispatcher cron only curls. The handler runs in the web process.
+    expect(render).toContain('curl')
+    expect(render).toContain('/api/cron/dispatch-frequent')
   })
 })

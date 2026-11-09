@@ -4,7 +4,8 @@ import { activeConnectionForPrincipal,requireDiscoveryAuthorization,requireRelea
 import { MetaReadError,metaGraphGet,graphRows,graphAfter } from '../graph-read'
 import { AI_ENTITY_FIELDS } from '../entity-settings'
 import { META_ADS_SCOPE,toolNames } from './contract'
-import { pilotState,requirePilotActive } from './entitlement'
+import { isSelfServeClient,pilotState,publicConnectOpen,requirePilotActive } from './entitlement'
+import { requireNotBlocked } from './blocklist'
 import { listAnalyses } from './analysis'
 
 type LastRead={ tool:string;account_id:string|null;at:string }
@@ -26,6 +27,7 @@ export async function status(clientId: string, principalId: string) {
     pilotState(clientId),
     listAnalyses(clientId,principalId),
   ])
+  const selfServe=await isSelfServeClient(clientId)
   if (connections.error || grants.error || keys.error) throw new MetaReadError('authorization_unavailable',503)
   const ownedConnections=connections.data.filter(connection=>connection.authorizing_principal_id===principalId)
   const ownedGrants=grants.data.filter(grant=>grant.principal_id===principalId)
@@ -47,7 +49,7 @@ export async function status(clientId: string, principalId: string) {
         && connection?.status==='active' && Date.parse(connection.token_expiry)>Date.now()) }]
   })
   const safeKeys=await Promise.all(visibleKeys.map(async key=>({ ...key,last_successful_read:await lastSuccessfulRead(clientId,key.id) })))
-  return { pilot,connections:safeConnections,grants:safeGrants,keys:safeKeys,analyses }
+  return { pilot,self_serve:selfServe,public_connect:publicConnectOpen(),connections:safeConnections,grants:safeGrants,keys:safeKeys,analyses }
 }
 export async function discover(clientId: string,principalId: string,connectionId: string) {
   await reserveRead(clientId)
@@ -68,15 +70,32 @@ export async function discover(clientId: string,principalId: string,connectionId
 }
 export async function bind(clientId: string,principalId: string,connectionId: string,accountId: string) {
   await reserveRead(clientId)
+  await requireNotBlocked('ad_account',accountId)
   const connection = await activeConnectionForPrincipal(clientId,connectionId,principalId)
   const account = await metaGraphGet(accountId,connection.token,{ fields:AI_ENTITY_FIELDS.account })
   if (account.id !== accountId) throw new MetaReadError('account_not_accessible',403)
   const pilot=await requirePilotActive(clientId)
   const finalConnection=await activeConnectionForPrincipal(clientId,connectionId,principalId)
   if(finalConnection.version!==connection.version || pilot.revision!==connection.entitlementRevision) throw new MetaReadError('authorization_changed',403)
-  const { data,error } = await supabaseAdmin.from('meta_ads_read_grants').upsert({ client_id:clientId,connection_id:connectionId,
-    ad_account_id:accountId,principal_id:principalId,entitlement_revision:pilot.revision,revoked_at:null },{ onConflict:'client_id,ad_account_id' }).select('id,ad_account_id').single()
-  if (error || !data) throw new MetaReadError('account_unavailable',409)
+  const { data,error } = await supabaseAdmin.from('meta_ads_read_grants').insert({ client_id:clientId,connection_id:connectionId,
+    ad_account_id:accountId,principal_id:principalId,entitlement_revision:pilot.revision,revoked_at:null }).select('id,ad_account_id').single()
+  if (error || !data) {
+    // A unique violation here is either a repeat bind by the same owner or a
+    // cross-client active conflict. Never trust the error text for ownership:
+    // re-read and only treat it as an idempotent repeat when every identity
+    // field matches an existing active grant.
+    if (error?.code === '23505') {
+      const { data:existing,error:readError } = await supabaseAdmin.from('meta_ads_read_grants')
+        .select('id,ad_account_id').eq('client_id',clientId).eq('ad_account_id',accountId)
+        .eq('principal_id',principalId).eq('connection_id',connectionId)
+        .eq('entitlement_revision',pilot.revision).is('revoked_at',null).maybeSingle()
+      if (!readError && existing) return existing
+    }
+    // No client/token data here — client_id and the write outcome only — so this is safe to log
+    // while a real account_unavailable cause (2026-09-22, CTS/act_953025114498626) is unconfirmed.
+    console.warn('[meta-ads-ai] grant insert failed',{ clientId,code:error?.code,message:error?.message,details:error?.details,hint:error?.hint })
+    throw new MetaReadError('account_unavailable',409)
+  }
   return data
 }
 export async function issueKey(clientId: string,principalId: string,grantId: string,email: string) {
@@ -87,6 +106,8 @@ export async function issueKey(clientId: string,principalId: string,grantId: str
   await activeConnectionForPrincipal(clientId,grant.connection_id,principalId)
   await reserveRead(clientId)
   const pilot=await requirePilotActive(clientId)
+  // Self-serve customers get the report only; external API keys stay an ops-opened capability.
+  if(pilot.source==='self_serve') throw new MetaReadError('not_available',403)
   const finalConnection=await activeConnectionForPrincipal(clientId,grant.connection_id,principalId)
   if(grant.entitlement_revision!==pilot.revision || finalConnection.entitlementRevision!==pilot.revision) throw new MetaReadError('invitation_changed',403)
   const key = generateApiKey()
@@ -104,7 +125,11 @@ export async function issueKey(clientId: string,principalId: string,grantId: str
 export async function revoke(clientId: string,principalId:string,type:'key'|'grant'|'connection',id: string) {
   let result: { data: Array<{ id:string }> | null; error: { message:string } | null }
   if (type === 'connection') {
-    result=await supabaseAdmin.from('platform_oauth_connections').update({ status:'revoked',updated_at:new Date().toISOString() })
+    // Clearing the owner in the same UPDATE is what lets a different ME member
+    // later complete their own Meta OAuth: the existing guard only permits
+    // NULL -> new owner on an active row with a fresh token. The AFTER UPDATE
+    // trigger revokes this connection's grants in the same transaction.
+    result=await supabaseAdmin.from('platform_oauth_connections').update({ status:'revoked',authorizing_principal_id:null,updated_at:new Date().toISOString() })
       .eq('client_id',clientId).eq('id',id).eq('purpose','meta_ads_read').eq('authorizing_principal_id',principalId).select('id')
   } else if(type === 'grant') {
     result=await supabaseAdmin.from('meta_ads_read_grants').update({ revoked_at:new Date().toISOString() })

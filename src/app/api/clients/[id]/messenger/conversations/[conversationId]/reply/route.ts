@@ -65,6 +65,7 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { sendReply } from '@/lib/messenger/send'
 import { supabaseAdmin } from '@/lib/supabase'
 import { emitConversationApprovalEvent } from '@/lib/messenger-agent/conversation-approval-emit'
+import { checkManualSendDnc } from '@/lib/crm/manual-send-dnc-gate'
 
 interface RouteParams {
   params: { id: string; conversationId: string }
@@ -117,6 +118,13 @@ export async function POST(req: NextRequest, { params }: RouteParams): Promise<N
 
   if (typeof payload.body !== 'string') {
     return NextResponse.json({ error: '回复内容不能为空' }, { status: 400 })
+  }
+
+  // Free-text send only: an approved AI draft is sent by F2, which already runs
+  // `isConversationOptedOut` right before sending.
+  const dnc = await checkManualSendDnc(params.id, params.conversationId)
+  if (dnc.blocked) {
+    return NextResponse.json({ error: dnc.error, reason: dnc.reason }, { status: dnc.status })
   }
 
   const result = await sendReply({

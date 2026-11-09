@@ -28,6 +28,7 @@ function makeReport(overrides: Partial<MonthlyReportData> = {}): MonthlyReportDa
     period_label: 'May 2026',
     period_from: '2026-05-01',
     period_to: '2026-05-31',
+    period_scope_note: '统计范围：2026-05-01 至 2026-05-31（Pacific/Auckland，本月至今）',
     overview: {
       this_month_avg_rank: 4,
       last_month_avg_rank: 6,
@@ -52,6 +53,23 @@ function makeReport(overrides: Partial<MonthlyReportData> = {}): MonthlyReportDa
     local: null,
     market: null,
     usage: null,
+    ads: {
+      currency: 'NZD',
+      primaryResultLabel: '留资',
+      spend: 1200.5,
+      results: 40,
+      costPerResult: 30.01,
+      targetCostPerResult: 35,
+      vsTarget: 'at_or_below',
+      qualifiedLeads: 8,
+      qualifiedStagesLabel: '已报价（quoted）',
+      topAdSets: [{ name: '组 A', spend: 500, results: 20, costPerResult: 25 }],
+      bottomAdSets: [],
+      topCreatives: [],
+      bottomCreatives: [],
+      ledger: [],
+      gaps: [],
+    },
     generated_at: '2026-06-01T00:00:00Z',
     ...overrides,
   }
@@ -368,6 +386,7 @@ describe('Monthly Report Page Components', () => {
             competitors: [{ brand: 'Rival Co', rank: 1 }, { brand: 'Other Ltd', rank: 3 }],
             engine: 'openai',
             run_at: '2026-05-30T00:00:00Z',
+            measured: true,
           },
           {
             question: 'cheap Auckland day trips',
@@ -376,6 +395,7 @@ describe('Monthly Report Page Components', () => {
             competitors: [],
             engine: 'perplexity',
             run_at: '2026-05-30T00:00:00Z',
+            measured: true,
           },
         ],
       }))
@@ -389,9 +409,9 @@ describe('Monthly Report Page Components', () => {
       expect(screen.getByText('#3 Other Ltd')).toBeInTheDocument()
       expect(screen.getByText('openai')).toBeInTheDocument()
 
-      // Not mentioned → N/M badge + "No run data" when no competitors were captured
+      // Measured but not mentioned → N/M badge + "No competitors found"
       expect(screen.getByText('N/M')).toBeInTheDocument()
-      expect(screen.getByText('No run data')).toBeInTheDocument()
+      expect(screen.getByText('No competitors found')).toBeInTheDocument()
       expect(screen.getByText('perplexity')).toBeInTheDocument()
     })
   })

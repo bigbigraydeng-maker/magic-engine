@@ -92,6 +92,7 @@ describe('回归：真实广告组回读', () => {
     targeting: {
       geo_locations: { regions: [{ name: 'Auckland Region' }] },
       targeting_automation: { advantage_audience: 0 },
+      publisher_platforms: ['facebook', 'instagram'], // 看完类视频必须锁版位（PITFALLS D9）
       // 真实返回里 custom_audiences / targeting_relaxation_types 都不存在
     },
   }
@@ -128,5 +129,32 @@ describe('回归：真实广告组回读', () => {
     const noRelax: RawMetaAdSet = { ...FORM, targeting: { ...FORM.targeting, targeting_relaxation_types: undefined } }
     const r = checkLaunch(adaptMetaAdSet(noRelax, [{ adId: 'a', texts: ['x'] }]))
     expect(r.findings.map(f => f.code)).toContain('retargeting_relaxation_unknown')
+  })
+})
+
+describe('adaptMetaAdSet — 排除受众（刀②）', () => {
+  it('excluded_custom_audiences 取 id', () => {
+    const r = adaptMetaAdSet(
+      { id: 'A', targeting: { excluded_custom_audiences: [{ id: '3333333' }, { id: '4444444' }] } }, [])
+    expect(r.adSet.targeting.excludedAudienceIds).toEqual(['3333333', '4444444'])
+  })
+
+  it('🔴 字段缺失 → undefined，不是空数组', () => {
+    const r = adaptMetaAdSet({ id: 'A', targeting: {} }, [])
+    expect(r.adSet.targeting.excludedAudienceIds).toBeUndefined()
+  })
+
+  it('显式空数组 → 空数组', () => {
+    const r = adaptMetaAdSet({ id: 'A', targeting: { excluded_custom_audiences: [] } }, [])
+    expect(r.adSet.targeting.excludedAudienceIds).toEqual([])
+  })
+
+  it('端到端：挂上了不报，没挂上就报', () => {
+    const adapted = adaptMetaAdSet(
+      { id: 'A', targeting: { excluded_custom_audiences: [{ id: '3333333' }] } }, [])
+    expect(checkLaunch({ ...adapted, expectedExcludedAudienceIds: ['3333333'] }).findings.map(f => f.code))
+      .not.toContain('excluded_audience_not_attached')
+    expect(checkLaunch({ ...adapted, expectedExcludedAudienceIds: ['9999999'] }).findings.map(f => f.code))
+      .toContain('excluded_audience_not_attached')
   })
 })

@@ -32,6 +32,8 @@ type Phase = 'select' | 'confirm' | 'submitting' | 'done' | 'error'
 interface ExecuteResult {
   success:    boolean
   actionId?:  string
+  actionRunId?: string
+  status?: string
   campaignId: string
   before:     { status: string; name: string; daily_budget: string | null }
   after:      { status: string; name: string; daily_budget: string | null }
@@ -101,6 +103,41 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
       const data = await res.json() as ExecuteResult & { error?: string }
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`)
 
+      if (res.status === 202 && data.actionRunId) {
+        // The external budget write runs in Inngest. Poll its Kernel receipt so
+        // the drawer never reports success merely because queue dispatch worked.
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+          const statusRes = await fetch(
+            `/api/clients/${clientId}/meta-ads/execute?runId=${encodeURIComponent(data.actionRunId)}`,
+          )
+          const statusData = await statusRes.json() as {
+            status?: string
+            humanReason?: string | null
+            receipt?: { id?: string; payload?: Partial<ExecuteResult> & { warning?: string; status?: string; reason?: string } } | null
+            error?: string
+          }
+          if (!statusRes.ok) throw new Error(statusData.error ?? `HTTP ${statusRes.status}`)
+          if (statusData.status === 'denied' || statusData.status === 'dead_letter' || statusData.status === 'failed' || statusData.status === 'workflow_failed') {
+            throw new Error(statusData.humanReason ?? statusData.receipt?.payload?.reason ?? `预算任务未执行（${statusData.status}）`)
+          }
+          if (statusData.status === 'succeeded' && statusData.receipt?.payload?.before && statusData.receipt.payload.after) {
+            setResult({
+              success: true,
+              actionId: statusData.receipt.id,
+              actionRunId: data.actionRunId,
+              campaignId: data.campaignId,
+              before: statusData.receipt.payload.before,
+              after: statusData.receipt.payload.after,
+              warning: statusData.receipt.payload.warning,
+            })
+            setPhase('done')
+            return
+          }
+        }
+        throw new Error(`预算任务仍在处理中。任务编号：${data.actionRunId}。请稍后重新打开看板查看。`)
+      }
+
       setResult(data)
       setPhase('done')
     } catch (err) {
@@ -135,7 +172,7 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
               {item.title}
             </h2>
             <p className="mt-1 text-sm font-semibold text-slate-500">
-              选择广告系列并执行修复动作 — 操作将实时写入 Meta Ads
+              暂停会先出确认卡，点确认之后才改广告。下调预算仍按原来的队列走。
             </p>
           </div>
           <button
@@ -151,7 +188,28 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
         <div className="flex-1 overflow-y-auto px-5 py-5">
 
           {/* Done state */}
-          {phase === 'done' && result && (
+          {phase === 'done' && result && result.status === 'awaiting_confirmation' && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+                <p className="text-sm font-black text-amber-800">已提交确认卡，广告还没改</p>
+                <p className="mt-1 text-sm text-amber-900">负责人在确认卡里点确认之后，才会暂停这个系列。</p>
+                <a
+                  href={`/dashboard/clients/${clientId}/confirmation-cards`}
+                  className="mt-3 inline-flex text-sm font-black text-amber-800 underline"
+                >
+                  去确认卡
+                </a>
+              </div>
+              <button
+                onClick={onClose}
+                className="w-full rounded-lg bg-slate-950 px-4 py-3 text-sm font-black text-white transition-colors hover:bg-slate-800"
+              >
+                关闭
+              </button>
+            </div>
+          )}
+
+          {phase === 'done' && result && result.status !== 'awaiting_confirmation' && (
             <div className="space-y-4">
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
                 <p className="text-sm font-black text-emerald-700">执行成功</p>
@@ -298,7 +356,7 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                       }`}
                     >
                       <p className="text-sm font-black text-slate-900">调整日预算</p>
-                      <p className="mt-0.5 text-[11px] text-slate-500">降低花费，保留投放（需 CBO）</p>
+                      <p className="mt-0.5 text-[11px] text-slate-500">降低花费，保留投放（仅支持 CBO）</p>
                     </button>
                   </div>
 
@@ -323,7 +381,7 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                         如需调整广告组预算，请前往 Meta Ads Manager 操作。
                       </p>
                       <p className="text-xs font-semibold text-amber-600">
-                        ⚠ 单次调整幅度限当前日预算的 ±20%；超出需走 Talk to Us 人工审核。
+                        ⚠ 目前只支持下调，单次最多降低当前日预算的 20%。
                       </p>
                     </div>
                   )}
@@ -338,7 +396,11 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                           {actionType === 'ads.pause_campaign' ? '暂停' : `调整日预算至 $${newDailyBudget}`}
                         </strong>
                       </p>
-                      <p className="mt-1 text-xs text-orange-600">此操作将实时写入 Meta Ads，花费立即停止或变化。</p>
+                      <p className="mt-1 text-xs text-orange-600">
+                        {actionType === 'ads.pause_campaign'
+                          ? '这一步只提交确认卡。点确认之后才会暂停，现在不会改广告。'
+                          : '下调预算会进入原来的队列，不会在这一步直接改 Meta。'}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -371,7 +433,7 @@ export function AdsFixDrawer({ clientId, item, onClose }: Props) {
                     </svg>
                     执行中…
                   </>
-                ) : '确认执行 →'}
+                ) : actionType === 'ads.pause_campaign' ? '提交确认卡' : '确认执行 →'}
               </button>
             )}
           </footer>

@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
+import { abandonStaleRunningRuns } from '@/lib/cron/abandon-stale-runs'
 
 export const maxDuration = 120
 
@@ -52,14 +53,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const result = data as PurgeResult
   const purged = result.purged_noise + result.purged_expired
+  const abandoned = await abandonStaleRunningRuns(supabaseAdmin)
 
-  console.log('[cron-run-logs-cleanup]', result)
+  console.log('[cron-run-logs-cleanup]', result, abandoned)
+  if (abandoned.error) {
+    await cronRun.finish({
+      processed: purged,
+      completed: purged,
+      failed: 1,
+      error: abandoned.error,
+      summary: { ...result, abandoned: abandoned.abandoned },
+    })
+    return NextResponse.json({ ...result, abandoned: abandoned.abandoned, error: abandoned.error }, { status: 500 })
+  }
+
   await cronRun.finish({
-    processed: purged,
-    completed: purged,
+    processed: purged + abandoned.abandoned,
+    completed: purged + abandoned.abandoned,
     failed: 0,
-    summary: { ...result },
+    summary: { ...result, abandoned: abandoned.abandoned },
   })
 
-  return NextResponse.json(result)
+  return NextResponse.json({ ...result, abandoned: abandoned.abandoned })
 }

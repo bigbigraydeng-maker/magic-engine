@@ -26,8 +26,15 @@ vi.mock('@/lib/ga4/client', () => ({
   fetchGa4PaidSearchMetrics: vi.fn().mockResolvedValue(null),
 }))
 
+const mockGetAdAccountInsights = vi.hoisted(() => vi.fn().mockResolvedValue(null))
 vi.mock('@/lib/meta/client', () => ({
-  getAdAccountInsights:  vi.fn().mockResolvedValue(null),
+  getAdAccountInsights: mockGetAdAccountInsights,
+  getAdAccountInsightsResult: async (...args: unknown[]) => {
+    const insights = await mockGetAdAccountInsights(...args)
+    return insights
+      ? { ok: true, insights }
+      : { ok: false, failure: { kind: 'empty_data' } }
+  },
   getAdCampaignInsights: vi.fn().mockResolvedValue([]),
 }))
 

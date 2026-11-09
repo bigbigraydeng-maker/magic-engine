@@ -24,6 +24,13 @@ export interface MetaCycleClientConfig {
   cooldownDays: number
   brandVoice: string
   /**
+   * The client's own brand words (clients.seo_config.brand_terms). Never a page fact:
+   * the hard fact check must not demand they survive a rewrite — 2026-10-28 every CTS
+   * proposal was blocked for "dropping CTS" while the brand voice forbids adding the
+   * brand suffix. Optional so existing configs/fixtures stay valid (missing = []).
+   */
+  brandTerms?: string[]
+  /**
    * PM 2026-09-20 (fourth pass): DataForSEO location_codes to try (in order)
    * when the client's own primary market has no data — e.g. CTS configures
    * [2036] (AU) because DataForSEO doesn't index many NZ long-tail queries.
@@ -34,6 +41,20 @@ export interface MetaCycleClientConfig {
    * integers only, max 2).
    */
   keywordFallbackLocations: number[]
+  /**
+   * Slugs this client has flagged as high-stakes conversion pages (quote/
+   * lead-gen pages, the homepage) — the meta-cycle skips these entirely, no
+   * matter what the gate or fact-check would otherwise allow. PM 2026-09-23
+   * incident follow-up: /china-tours (CTS's highest-converting page) almost
+   * had its departure-city coverage silently narrowed by an auto-merged
+   * change that both the gate and the AI fact-judge let through. Automated
+   * small-copy edits are an acceptable risk on content pages; never on a
+   * page that's a customer's primary enquiry entry point. Read from
+   * clients.seo_config.meta_cycle_protected_slugs (roster.ts) — client-level
+   * config (L4), same pattern as keywordFallbackLocations. Defaults to []
+   * (no client is protected by default; each client opts specific slugs in).
+   */
+  protectedSlugs: string[]
 }
 
 /** GSC only — patrol was dropped (复审 2026-09-20: unit mismatch + wrong-page risk, see candidates.ts). */
@@ -185,6 +206,12 @@ export interface ApplyAdapter {
    * description, etc.) — PM 2026-09-20 incident follow-up: a human must be
    * able to check the search volume/difficulty/competitor titles/CTS's own
    * ranking URL without leaving the PR.
+   */
+  /**
+   * dryRun: true MUST be read-only and MUST accept empty newTitle/newDesc — the
+   * runner calls it that way first to read the page's current title/description
+   * (oldTitle/oldDesc) before generating (2026-10-28). Any new implementation
+   * (e.g. wp_plugin) has to honour this.
    */
   apply(input: {
     candidate: MetaCycleCandidate

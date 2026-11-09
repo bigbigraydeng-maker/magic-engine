@@ -16,6 +16,10 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   pickReplyDue,
   findEmailRepliesDue,
+  isFormEnquirySubject,
+  isEnquiryTouch,
+  platformOwnDomains,
+  ENQUIRY_IDENTITY_SOURCES,
   REPLY_SLA_HOURS,
   MAX_PER_CLIENT,
   type EmailThread,
@@ -497,5 +501,71 @@ describe('findEmailRepliesDue', () => {
     expect(Math.max(...inSizes)).toBeLessThanOrEqual(100)
     // 真的分批了（658 个人 → 至少 7 批），不是因为压根没查
     expect(inSizes.filter((n) => n === 100).length).toBeGreaterThanOrEqual(7)
+  })
+})
+
+/**
+ * 陌生地址第一次来信 + ME 自己的信箱（2026-09-26，今日待办只留五类）。
+ * 判据全是库里的事实，见 email-reply-due.ts 文件头「陌生地址第一次来信」。
+ */
+describe('pickReplyDue —— 陌生来信与 ME 自己的信箱', () => {
+  it('不传 enquiryOrigin = 旧行为，全进 items，没有 firstContacts', () => {
+    const res = pickReplyDue(input())
+    expect(res.items).toHaveLength(1)
+    expect(res.firstContacts).toBeUndefined()
+  })
+
+  it('传了 enquiryOrigin：不在里面的人挪进 firstContacts，不丢', () => {
+    const res = pickReplyDue(input({ enquiryOrigin: new Set<string>() }))
+    expect(res.items).toEqual([])
+    expect(res.firstContacts).toHaveLength(1)
+  })
+
+  it('在 enquiryOrigin 里的人照常进 items', () => {
+    const t = thread()
+    const res = pickReplyDue(input({ threads: [t], enquiryOrigin: new Set([t.contactId]) }))
+    expect(res.items).toHaveLength(1)
+    expect(res.firstContacts).toEqual([])
+  })
+
+  it('主题带网站表单字样（Contact form）的陌生人算真询价', () => {
+    expect(isFormEnquirySubject('Re: Contact form: General Inquiry — L')).toBe(true)
+    expect(isFormEnquirySubject('AI intake for tailor-made travel enquiries')).toBe(false)
+    const t = thread({ subject: 'Contact form: Quote' })
+    const res = pickReplyDue(input({ threads: [t], enquiryOrigin: new Set<string>() }))
+    expect(res.items).toHaveLength(1)
+  })
+
+  it('ME 自己的信箱域名对每个客户都算自己人（[PREVIEW] 自测不是客人）', () => {
+    const t = thread()
+    const res = pickReplyDue(
+      input({
+        threads: [t],
+        emails: new Map([[t.contactId, ['hello@magicengine.cloud']]]),
+        platformOwnDomains: ['magicengine.cloud'],
+      }),
+    )
+    expect(res.items).toEqual([])
+    expect(platformOwnDomains()).toContain('magicengine.cloud')
+  })
+
+  it('🔴 发信地址被配成公共邮箱时不算自己人 —— 否则全世界的 gmail 客人都会静默消失', () => {
+    expect(platformOwnDomains('someone@gmail.com')).toEqual([])
+    expect(platformOwnDomains('ops@outlook.com')).toEqual([])
+    expect(platformOwnDomains('hello@magicengine.cloud')).toEqual(['magicengine.cloud'])
+  })
+
+  it('isEnquiryTouch：手记和机器回执不算，写过信 / 邮件名单 / 别的渠道算', () => {
+    const t = (over: Record<string, unknown>) => ({ channel: 'email', direction: 'inbound', source: 'microsoft_mail', metadata: {}, ...over })
+    expect(isEnquiryTouch(t({}))).toBe(false)
+    expect(isEnquiryTouch(t({ channel: 'phone', direction: 'outbound', source: 'me_manual' }))).toBe(false)
+    expect(isEnquiryTouch(t({ direction: 'outbound', metadata: { automated: true } }))).toBe(false)
+    expect(isEnquiryTouch(t({ direction: 'outbound' }))).toBe(true)
+    expect(isEnquiryTouch(t({ source: 'mailchimp' }))).toBe(true)
+    expect(isEnquiryTouch(t({ channel: 'messenger', source: 'messenger' }))).toBe(true)
+    // 身份来源：列算数的，'outlook'（邮箱批量导入）不算
+    expect(ENQUIRY_IDENTITY_SOURCES.has('meta_lead_form')).toBe(true)
+    expect(ENQUIRY_IDENTITY_SOURCES.has('outlook')).toBe(false)
+    expect(ENQUIRY_IDENTITY_SOURCES.has('email')).toBe(false)
   })
 })

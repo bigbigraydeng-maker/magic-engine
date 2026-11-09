@@ -32,15 +32,22 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   findEmailRepliesDue,
-  MAX_PER_CLIENT,
   REPLY_DUE_WINDOW_DAYS,
   REPLY_SLA_HOURS,
+  type ReplyDueItem,
 } from '@/lib/crm/email-reply-due'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { loadMailboxRun, type MailboxSummary } from '@/lib/crm/mailbox-run'
 import type { ManualItem } from './manual-items'
 
-export type EmailReplyItemKind = 'email_reply_due' | 'email_sync_stale'
+export type EmailReplyItemKind =
+  | 'email_reply_due'
+  /** 陌生地址第一次来信没回（多半是推销，但也可能是真客人的第一封询价）—— 一个客户合成一条 */
+  | 'email_first_contact'
+  /** 邮箱授权掉了 / 一个都没连上 —— 要人点一次重新授权 */
+  | 'email_sync_stale'
+  /** 同步那趟卡住 / 整趟失败 / 读到一半停 —— 我们这边要查（开发的活） */
+  | 'email_sync_broken'
 
 /** 后台入口（登录后可见）。所有 href 都从这里拼绝对网址，见下面的 🔴。 */
 const APP_BASE = 'https://app.magicengine.com.au'
@@ -76,9 +83,10 @@ async function pushDueItems(
   now: Date,
   nameOf: (id: string) => string,
 ): Promise<void> {
-  // 上限在这里传，不在判据里 —— 那是**这一页**的密度预算，别的消费方不该被它压。
-  const { items: due, droppedByClient } = await findEmailRepliesDue(supabase, ids, now, {
-    maxPerClient: MAX_PER_CLIENT,
+  // 不再传每客户上限：今日待办会把同一个客户的这些条合成一行、带着人数
+  // （daily-todo.ts `buildTodoView`），不存在「一页放不下只好说还有 N 条没列」。
+  const { items: due, firstContacts } = await findEmailRepliesDue(supabase, ids, now, {
+    separateFirstContacts: true,
   })
 
   for (const d of due) {
@@ -101,33 +109,48 @@ async function pushDueItems(
     })
   }
 
-  pushCappedItems(items, droppedByClient, nameOf)
+  pushFirstContactItems(items, firstContacts ?? [], nameOf)
 }
 
+/** 陌生来信那一行最多点几个主题 —— 够 PM 扫一眼认出真询价，又不把一行撑成一屏。 */
+const FIRST_CONTACT_SAMPLE = 5
+
 /**
- * 🔴 被这一页的上限压掉了几条，必须自己成为一条待办。
+ * 陌生地址第一次来信 —— 一个客户合成**一条**，不是一人一条。
  *
- * 只 `console.warn` 等于没说 —— 看这一页的人不会去翻 Render 日志，他数完
- * 10 条会以为清空了（铁律 3 下半：发现不许死在日志里）。
+ * 🔴 **不丢。** 这些人跟客户之间除了这封信什么记录都没有，十有八九是推销；但真客人的
+ *    第一封询价也长这样，而且那是最值钱的一封信。所以列主题让人扫一眼，不替人判。
+ *    （2026-09-26 子牙 / 魏征设计复审：「挪去销售汇总信」那条路是停着的，丢了就没人看见。）
  */
-function pushCappedItems(
+function pushFirstContactItems(
   items: ManualItem[],
-  droppedByClient: Record<string, number>,
+  firstContacts: ReplyDueItem[],
   nameOf: (id: string) => string,
 ): void {
-  for (const [clientId, n] of Object.entries(droppedByClient)) {
-    if (n <= 0) continue
+  const byClient = new Map<string, ReplyDueItem[]>()
+  for (const d of firstContacts) {
+    const list = byClient.get(d.clientId) ?? []
+    list.push(d)
+    byClient.set(d.clientId, list)
+  }
+  for (const [clientId, list] of Array.from(byClient.entries())) {
+    // 新来的排前面：真询价多半是最近才来的，推销往往一连发好几周
+    const newest = [...list].sort((a, b) => a.waitingHours - b.waitingHours)
+    const samples = newest
+      .slice(0, FIRST_CONTACT_SAMPLE)
+      .map((d) => `${contactCardTitle(d.displayName)}《${d.subject?.trim() || '没有主题'}》`)
+      .join('、')
+    const more = list.length > FIRST_CONTACT_SAMPLE ? ` 等 ${list.length} 封` : ''
     items.push({
-      kind: 'email_reply_due',
+      kind: 'email_first_contact',
       client_id: clientId,
       client_name: nameOf(clientId),
       what:
-        `这个客户还有 ${n} 封客人来信同样超过 ${REPLY_SLA_HOURS} 小时没回，但这一页没有列出来` +
-        `（一个客户一次最多列 ${MAX_PER_CLIENT} 条）—— 它们不是不存在，是没地方放`,
+        `${list.length} 封陌生地址的来信超过 ${REPLY_SLA_HOURS} 小时没回：${samples}${more}。` +
+        '这些人以前跟这个客户没有任何往来（没通过信、没从广告表单或私信来过、不在邮件名单上），多半是推销',
       how:
-        '点链接进「全部客人」，按最近来信从新到旧过一遍，把上面没列到的挨个看完。' +
-        '每处理一个就在他的记录里写一句话（回了 / 不用回都要写），' +
-        '否则明天这条数字一点都不会变小',
+        '扫一眼主题：像真客人来问的，点进去当普通来信回；是推销的，在他的记录里写一句「不是客人」，' +
+        `这条就不会再冒出来（不写的话会一直冒到 ${REPLY_DUE_WINDOW_DAYS} 天）`,
       href: allContactsHref(clientId),
     })
   }
@@ -141,7 +164,7 @@ function pushCappedItems(
  */
 function pushStuckItem(items: ManualItem[], hours: number): void {
   items.push({
-    kind: 'email_sync_stale',
+    kind: 'email_sync_broken',
     client_id: 'infra',
     client_name: 'Magic Engine 后台',
     what:
@@ -166,7 +189,7 @@ function pushMailboxWideItem(items: ManualItem[], mailbox: MailboxSummary): bool
   if (mailbox.error) {
     items.push({
       ...common,
-      kind: 'email_sync_stale',
+      kind: 'email_sync_broken',
       what:
         `公司邮箱同步整趟失败了：${mailbox.error} —— 客人发到公司邮箱的信今天一封都没进系统。` +
         '上面那条「客人来信没人回」今天查的是一份没更新的数据，别把它当成「没人在等」',
@@ -209,7 +232,8 @@ function pushMailboxResultItems(
     const stoppedOnly = !r.error
     const where = `邮箱 ${r.mailbox ?? '（地址不详）'}`
     items.push({
-      kind: 'email_sync_stale',
+      // 读到一半停了：先观察，连着几天停在同一处才是我们要查的；读不进来多半是授权掉了
+      kind: stoppedOnly ? 'email_sync_broken' : 'email_sync_stale',
       client_id: r.clientId,
       client_name: nameOf(r.clientId),
       what: stoppedOnly

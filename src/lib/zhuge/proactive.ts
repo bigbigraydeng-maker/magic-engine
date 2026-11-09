@@ -334,7 +334,8 @@ async function processClient(
           status: 'pending' as const,
           source: 'proactive_signal' as const,
           sort_order: sig.severity === 'high' ? 1 : 2,
-          payload: {
+          // execution_items 没有 payload 列。关联 id 放进已有的 steps_json。
+          steps_json: {
             flywheel_action_id: actionIds[i]?.id ?? null,
             anomaly_signal_id: sig.id,
           },

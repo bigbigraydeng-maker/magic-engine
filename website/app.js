@@ -2,11 +2,13 @@
    Responsibilities:
    1. English / Chinese page routing
    2. Discover state machine (form → progress → result)
-   3. API calls to /api/scout and /api/report
+   3. API calls to the app's public website-check endpoints (SITE_CHECK_API)
    4. Hero URL form redirect
 */
 
 const CN_PREFIX = '/cn';
+// The website check runs in the app (it holds the database and AI keys); this site calls it cross-origin.
+const SITE_CHECK_API = 'https://app.magicengine.com.au/api/public/site-check';
 
 /* ── Language routing ── */
 function isChinesePath(pathname = window.location.pathname) {
@@ -421,7 +423,8 @@ function applyLanguage(lang) {
   document.querySelectorAll('[data-en]').forEach(el => {
     const val = el.getAttribute(`data-${currentLang}`) || el.getAttribute('data-en');
     if (!val) return;
-    if (el.tagName === 'INPUT' && el.getAttribute('placeholder')) {
+    // Inputs and text areas only get a placeholder — never a value that would be submitted as the visitor's answer.
+    if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.hasAttribute('placeholder')) {
       el.placeholder = val;
     } else {
       el.textContent = val;
@@ -441,60 +444,6 @@ function toggleLang() {
   window.location.href = target.toString();
 }
 
-/* ── Demo data (shown when API fails or times out) ── */
-const DEMO = {
-  AU: {
-    summary: 'Your business has several common visibility gaps. Enter your URL above for a personalised report.',
-    findings: [
-      {
-        severity: 'NOW',
-        title: 'Missing from AI assistants',
-        desc: 'When customers ask ChatGPT or Google AI Overview for services like yours, businesses with the right content appear — others don\'t. This channel now drives 35%+ of new business discovery.',
-        fix: 'Create authoritative content that AI assistants cite when answering questions in your category.',
-      },
-      {
-        severity: 'GAP',
-        title: 'EOFY opportunity window is open',
-        desc: 'Australia\'s end-of-financial-year (30 June) triggers a surge in business purchases. Competitors investing in visibility now will capture intent that peaks in May–June.',
-        fix: 'Launch EOFY-targeted content and ads before the window closes.',
-      },
-      {
-        severity: 'GAP',
-        title: 'Google Business Profile needs attention',
-        desc: 'Local "near me" searches are the highest-converting search type. An incomplete Google Business Profile suppresses your local ranking significantly.',
-        fix: 'Optimise with photos, services, hours, and recent review responses.',
-      },
-    ],
-    totalCount: 6,
-    topOpportunity: { title: 'EOFY visibility campaign', draft_cta: 'Draft my EOFY campaign →' },
-  },
-  NZ: {
-    summary: 'Your business has several common visibility gaps. Enter your URL above for a personalised report.',
-    findings: [
-      {
-        severity: 'NOW',
-        title: 'Missing from AI assistants',
-        desc: 'When customers ask ChatGPT or Google AI Overview for services like yours, businesses with the right content appear — others don\'t. This channel now drives 35%+ of new business discovery.',
-        fix: 'Create authoritative content that AI assistants cite when answering questions in your category.',
-      },
-      {
-        severity: 'GAP',
-        title: 'EOFY opportunity window is open',
-        desc: 'New Zealand\'s end-of-financial-year (31 March) triggers a surge in business purchases. Competitors investing in visibility now will capture intent that peaks in February–March.',
-        fix: 'Launch EOFY-targeted content and ads before the March window closes.',
-      },
-      {
-        severity: 'GAP',
-        title: 'TradeMe and local platforms untapped',
-        desc: 'NZ customers use TradeMe Services and local directories heavily. Your presence on these platforms significantly affects local trust and discoverability.',
-        fix: 'Build and optimise your TradeMe Services profile and local NZ directory listings.',
-      },
-    ],
-    totalCount: 6,
-    topOpportunity: { title: 'EOFY visibility campaign', draft_cta: 'Draft my EOFY campaign →' },
-  },
-};
-
 /* ── Market detection ── */
 function detectMarket(url) {
   try {
@@ -511,11 +460,9 @@ let progressTimer = null;
 let stepIdx = 0;
 
 const STEPS = [
-  'Scanning your online footprint…',
-  'Checking Google search visibility…',
-  'Analysing AI assistant mentions…',
-  'Reviewing social & ad signals…',
-  'Writing your discovery report…',
+  'Reading your homepage…',
+  'Checking what visitors can understand, trust and act on…',
+  'Writing your findings…',
 ];
 
 function showState(name) {
@@ -541,7 +488,7 @@ function startProgress() {
   advanceStep(0);
   progressTimer = setInterval(() => {
     if (stepIdx < STEPS.length - 1) advanceStep(++stepIdx);
-  }, 20000);
+  }, 12000);
 }
 
 function stopProgress() {
@@ -550,71 +497,81 @@ function stopProgress() {
   advanceStep(STEPS.length); // mark all done
 }
 
-/* ── Visibility score (computed client-side from severity mix) ── */
-function computeScore(teaser, totalCount) {
-  let score = 100;
-  (teaser || []).forEach(f => {
-    if (f.severity === 'NOW') score -= 22;
-    else if (f.severity === 'GAP') score -= 11;
-    else if (f.severity === 'GOOD') score += 3;
-  });
-  const hidden = Math.max(0, (totalCount || 0) - (teaser?.length || 0));
-  score -= hidden * 4; // unseen findings drag the score down too
-  return Math.max(12, Math.min(92, Math.round(score)));
+/* ── Copy for the free website check (Chinese page gets Chinese; design 2026-09-27 step 2 §6) ── */
+function t(en, zh) { return currentLang === 'zh' ? zh : en; }
+
+const SCOUT_ERRORS = {
+  invalid_url: ['That web address does not look right. Please check it and try again.', '这个网址看起来不对，请检查一下再试。'],
+  unreachable: ['We could not open this website (it may block visitors from overseas or be down). Try another address, or tell us about your business instead.', '我们打不开这个网站，可能被防火墙挡住了，或者只有国内能打开。请换一个海外能打开的网址，或者点「我没有网站」填三句话。'],
+  not_html: ['That address is not a web page. Please enter your homepage address.', '这个地址不是网页，请填你网站首页的网址。'],
+  encoding: ['Your homepage uses an older text encoding we cannot read reliably, so we did not guess. Tell us about your business instead.', '你的网站首页用的是旧的中文编码（比如 GBK），我们读不准，所以不硬猜。请点「我没有网站」填三句话，或写信给我们。'],
+  challenge: ['Your website showed us a security check instead of the page, so we could not read it. Try another address, or tell us about your business instead.', '你的网站给我们看的是安全验证页，不是网页内容，所以没法诊断。请换一个网址，或者点「我没有网站」填三句话。'],
+  too_little_text: ['We could read almost no text on that page, so we cannot give an honest check. Try another page of your site.', '这个页面上几乎没有能读到的文字，没法给出靠谱的诊断。请换一个网址试试。'],
+  redirected_away: ['That address sends visitors to a different website, so we stopped. Please enter your own site\'s address.', '这个网址会跳到别的网站，我们就停下了。请填你自己网站的网址。'],
+  daily_limit: ['You have used today\'s 3 free checks. Please come back tomorrow.', '今天的 3 次免费诊断已经用完了，明天再来。着急的话写信到 hello@magicengine.cloud。'],
+  monthly_limit: ['This month\'s free checks have all been used. They reset on the 1st.', '本月的免费名额已经送完，下个月 1 号恢复。'],
+  answers_too_short: ['Please write a little more in each of the three boxes so we have something real to go on.', '三个框每个多写几个字，我们才有真实信息可以分析。'],
+  too_many_requests: ['Too many attempts from your network today. Please come back tomorrow.', '你这边今天提交次数太多了，明天再来。着急的话写信到 hello@magicengine.cloud。'],
+  site_busy: ['Today\'s free checks have all been used. Please come back tomorrow.', '今天的免费名额已经送完了，明天再来。'],
+  no_visitor: ['We could not verify this request. Please refresh the page and try again.', '这次请求没法确认来源，请刷新页面再试。'],
+  analysis_failed: ['This check did not complete — not your fault. Please try again in a few minutes.', '这次没诊断成功，不是你的问题。请过几分钟再点一次；还不行，写信到 hello@magicengine.cloud，我们人工帮你看。'],
+  unavailable: ['The free check is temporarily unavailable. Please try again later.', '免费诊断暂时用不了，请稍后再试。'],
+};
+
+const REPORT_ERRORS = {
+  already_sent: ['Already sent', 'The report for this check has already been emailed. Please check your inbox (and spam).', '已经发过了', '这次诊断的报告已经发过了，请查收邮箱（也看看垃圾邮件箱）。'],
+  recipient_limit: ['Already requested today', 'This email address has already requested a report today. Please try again tomorrow; if nothing arrived, email hello@magicengine.cloud.', '今天已经申请过', '这个邮箱今天已经申请过一次报告，明天再试；如果没收到，写信到 hello@magicengine.cloud。'],
+  daily_limit: ['Limit reached', 'You have reached today\'s email limit. Please try again tomorrow.', '今天发不了了', '你今天发报告的次数已经用完，明天再试。'],
+  site_busy: ['Limit reached', 'Today\'s report emails have all been sent. Please try again tomorrow.', '今天发不了了', '今天的报告邮件名额已经用完，明天再试。'],
+  invalid_email: ['Check your email', 'That email address does not look right. Please check it.', '邮箱不对', '这个邮箱地址看起来不对，请检查一下。'],
+  report_not_ready: ['Not available', 'The full report for this check is not available. Please run the check again.', '报告不可用', '这次诊断的完整报告拿不到了，请重新诊断一次。'],
+  not_saved: ['Email not available', 'We could not save the full report this time, so it cannot be emailed. The findings above are real.', '暂时发不了邮件', '完整报告这次没保存下来，所以发不了邮件；上面这几条结果是真实的。'],
+  send_failed: ['Not sent yet', 'We could not send the report this time. Please use another email address, try again tomorrow, or email hello@magicengine.cloud.', '还没发出去', '这次没能发出报告。请换一个邮箱，或明天再试，或写信到 hello@magicengine.cloud。'],
+};
+
+function showReportState(delivered, code) {
+  const sentEl = document.querySelector('.email-sent');
+  if (!sentEl) return;
+  sentEl.setAttribute('data-state', delivered ? 'delivered' : 'pending');
+  if (!delivered) {
+    const row = REPORT_ERRORS[code] || REPORT_ERRORS.send_failed;
+    const strong = sentEl.querySelector('.es-pending strong');
+    const p = sentEl.querySelector('.es-pending p');
+    if (strong) strong.textContent = t(row[0], row[2]);
+    if (p) p.textContent = t(row[1], row[3]);
+  }
+  sentEl.classList.add('show');
 }
 
-function scoreVerdict(score) {
-  if (score < 35) return 'Nearly invisible where it counts';
-  if (score < 55) return 'Losing ground to your competitors';
-  if (score < 75) return 'Visible — but leaking opportunities';
-  return 'Strong — with room to dominate';
-}
-
-function animateScore(el, target) {
-  let cur = 0;
-  const step = Math.max(1, Math.round(target / 26));
-  const tick = () => {
-    cur = Math.min(target, cur + step);
-    el.textContent = cur;
-    if (cur < target) requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
-  setTimeout(() => { el.textContent = target; }, 1600); // guarantee final value even if rAF is throttled (background tab)
+function scoutErrorText(code) {
+  const pair = SCOUT_ERRORS[code] || SCOUT_ERRORS.analysis_failed;
+  return t(pair[0], pair[1]);
 }
 
 /* ── Render result ── */
 function renderResult(data) {
-  const { teaser, totalCount, topOpportunity, isDemo } = data;
+  const { teaser, totalCount, source, reused } = data;
   const container = document.getElementById('teaser-container');
   if (!container) return;
 
-  const list = teaser || data.findings || []; // tolerate DEMO fallback (carries 'findings', not 'teaser')
-  const score = computeScore(list, totalCount);
+  const list = teaser || [];
 
   let html = '';
 
-  if (isDemo) {
-    html += `<div class="demo-badge">Preview mode — enter your URL for a personalised report</div>`;
+  if (source === 'answers') {
+    html += `<div class="demo-badge">${escHtml(t('You did not enter a website, so the advice below is based on what you told us — we have not looked at a site.', '⚠️ 你没有填网址，下面的建议是根据你填的业务介绍写的，我们没有看过网站。'))}</div>`;
   }
-
-  // Visibility score hero — the emotional hook
-  html += `
-    <div class="score-hero">
-      <div class="score-cap">AI-era visibility score</div>
-      <div class="score-num"><span id="score-val">0</span><span>/100</span></div>
-      <div class="score-bar"><div class="score-fill" id="score-fill"></div></div>
-      <div class="score-verdict">${escHtml(scoreVerdict(score))}</div>
-    </div>`;
+  if (reused) {
+    html += `<div class="demo-badge">${escHtml(t('This website was checked in the last 24 hours — here is that result. You can check again tomorrow after making changes.', '这个网站 24 小时内已经诊断过，下面是上次的结果。改完网站后，明天可以再诊断一次。'))}</div>`;
+  }
 
   // Findings — first one enlarged as "most urgent" with a loss-aversion line
   list.forEach((f, i) => {
-    const sevLabel = f.severity === 'NOW' ? '⚡ Most urgent'
-                   : f.severity === 'GAP' ? '⚠ Gap found'
-                   : '✓ Strength';
+    const sevLabel = f.severity === 'NOW' ? t('⚡ Fix this first', '⚡ 先改这条')
+                   : f.severity === 'GAP' ? t('⚠ Gap found', '⚠ 可以补上')
+                   : t('✓ Strength', '✓ 做得好');
     const hero = i === 0 ? ' hero-finding' : '';
-    const loss = (i === 0 && f.severity === 'NOW')
-      ? `<div class="finding-loss">Every week, customers ask AI assistants for businesses like yours — right now it isn't naming you.</div>`
-      : '';
+    const loss = f.where ? `<div class="finding-loss">${escHtml(t('Seen on: ', '在哪里看到：'))}${escHtml(f.where)}</div>` : '';
     html += `
       <div class="finding ${escHtml(f.severity)}${hero}">
         <div class="finding-sev">${sevLabel}</div>
@@ -625,37 +582,28 @@ function renderResult(data) {
       </div>`;
   });
 
-  // Locked findings — blurred and gated behind sign-up
+  // The remaining findings are in the full report, which is emailed (there is no account view of it).
   const hidden = Math.max(0, (totalCount || 0) - list.length);
-  if (hidden > 0) {
-    let locked = '';
-    for (let i = 0; i < Math.min(hidden, 3); i++) {
-      locked += `
-        <div class="finding GAP locked" aria-hidden="true">
-          <div class="finding-sev">⚠ Gap found</div>
-          <h3>████████ ███████████</h3>
-          <p>███████████████ ████████ ██████████ █████ ███████████████ ████████.</p>
-        </div>`;
-    }
+  if (hidden > 0 && data.leadId) {
     html += `
-      <div class="locked-stack">
-        ${locked}
-        <div class="unlock-overlay">
-          <div class="lock-icon">🔒</div>
-          <strong>+ ${hidden} more findings in your full report</strong>
-          <p>Create your free account to unlock every finding, prioritised fixes, and your local opportunity window.</p>
-          <a href="https://app.magicengine.com.au/portal/register" class="btn-primary">Unlock full report →</a>
-        </div>
+      <div class="unlock-overlay" style="position:static">
+        <strong>${escHtml(t(`+ ${hidden} more findings in your full report`, `还有 ${hidden} 条建议在完整报告里`))}</strong>
+        <p>${escHtml(t('Leave your email below and we will send the full report in a few minutes.', '在下面留个邮箱，完整报告几分钟内发到你邮箱。'))}</p>
       </div>`;
   }
 
   container.innerHTML = html;
 
-  // Animate the score number + progress bar
-  const valEl = document.getElementById('score-val');
-  const fillEl = document.getElementById('score-fill');
-  if (valEl) animateScore(valEl, score);
-  if (fillEl) setTimeout(() => { fillEl.style.width = score + '%'; }, 80);
+  // Each result starts with a fresh email area (a previous check's "sent" state must not linger).
+  document.querySelector('.email-form-wrap')?.classList.remove('hidden');
+  const sentEl = document.querySelector('.email-sent');
+  if (sentEl) { sentEl.classList.remove('show'); sentEl.setAttribute('data-state', 'pending'); }
+
+  // No saved lead → no report can be sent: say so instead of offering an email form that can never work.
+  if (!data.leadId) {
+    document.querySelector('.email-form-wrap')?.classList.add('hidden');
+    showReportState(false, 'not_saved');
+  }
 
   // Portal bridge CTA
   const base = 'https://app.magicengine.com.au/portal/login?next=/prospect';
@@ -667,11 +615,6 @@ function renderResult(data) {
     a.href = registerBase;
   });
 
-  // Show top opportunity in portal bridge if present
-  if (topOpportunity) {
-    const opp = document.getElementById('opportunity-title');
-    if (opp) opp.textContent = topOpportunity.title;
-  }
 
   showState('result');
 }
@@ -712,19 +655,20 @@ async function handleDiscoverSubmit(e) {
   );
 
   market = detectMarket(url);
-  if (btn) { btn.textContent = 'Starting…'; btn.disabled = true; }
+  if (btn) { btn.textContent = t('Checking…', '正在诊断…'); btn.disabled = true; }
   startProgress();
 
   try {
-    const res = await fetch('/api/scout', {
+    const res = await fetch(SITE_CHECK_API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, noWebsite, attribution }),
+      // Exactly one of the two: an open "no website" panel wins over a leftover address.
+      body: JSON.stringify(noWebsite ? { noWebsite, attribution, lang: currentLang } : { url, attribution, lang: currentLang }),
       signal: AbortSignal.timeout(90000),
     });
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { code: data.code });
 
     stopProgress();
     leadId = data.leadId;
@@ -738,7 +682,7 @@ async function handleDiscoverSubmit(e) {
     });
     logMarketingLeadEvent(MARKETING_EVENT.DISCOVER_SUBMIT, {
       destination: 'discover',
-      href: '/api/scout',
+      href: SITE_CHECK_API,
       attribution,
       metadata: {
         lead_id: data.leadId || null,
@@ -750,12 +694,15 @@ async function handleDiscoverSubmit(e) {
     setTimeout(() => renderResult(data), 500);
 
   } catch (err) {
-    console.warn('Scout API failed, falling back to demo:', err.message);
+    // Never show made-up findings: explain what happened and let the visitor try again.
+    console.warn('Website check failed:', err.message);
     stopProgress();
-    renderResult({ ...DEMO[market], isDemo: true, leadId: null });
+    showState('form');
+    const msg = document.getElementById('discover-error');
+    if (msg) { msg.textContent = scoutErrorText(err.code); msg.hidden = false; }
   }
 
-  if (btn) { btn.textContent = 'Run discovery →'; btn.disabled = false; }
+  if (btn) { btn.textContent = t('Check my website →', '开始诊断 →'); btn.disabled = false; }
 }
 
 /* ── Email submit ── */
@@ -776,36 +723,35 @@ async function handleEmailSubmit(e) {
     return;
   }
 
-  if (btn) { btn.textContent = 'Sending…'; btn.disabled = true; }
+  if (btn) { btn.textContent = t('Sending…', '正在发送…'); btn.disabled = true; }
 
   // delivered = the report email was actually sent (real lead behind it).
   // pending   = scan hasn't persisted a lead yet (demo/fallback/unknown id or
   //             /api/report returned report_not_ready). We must NOT claim the
   //             report is on its way in that case. P0-A fix.
   let delivered = false;
+  let code = leadId ? 'send_failed' : 'report_not_ready';
   try {
     if (leadId) {
-      const res = await fetch('/api/report', {
+      const res = await fetch(`${SITE_CHECK_API}/report`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ leadId, email, consent }),
       });
       delivered = res.ok;
+      if (!res.ok) code = (await res.json().catch(() => ({}))).code || 'send_failed';
     }
   } catch (err) {
     console.warn('Report API error (non-fatal):', err.message);
   }
 
-  document.querySelector('.email-form-wrap')?.classList.add('hidden');
+  // Hide the form once the report went out, or when retrying cannot help; otherwise let the visitor try again.
+  if (delivered || code === 'already_sent') document.querySelector('.email-form-wrap')?.classList.add('hidden');
 
-  // Toggle the success copy honestly: only show "on its way" when delivered.
-  const sentEl = document.querySelector('.email-sent');
-  if (sentEl) {
-    sentEl.setAttribute('data-state', delivered ? 'delivered' : 'pending');
-    sentEl.classList.add('show');
-  }
+  // Honest status: "on its way" only when delivered; otherwise say exactly why.
+  showReportState(delivered, code);
 
-  if (btn) { btn.textContent = 'Send my full report →'; btn.disabled = false; }
+  if (btn) { btn.textContent = t('Send my full report →', '把完整报告发给我 →'); btn.disabled = false; }
 }
 
 /* ── No-website toggle ── */
@@ -817,7 +763,7 @@ function toggleNoWebsite() {
   const isOpen = panel.classList.contains('open');
   if (urlBar) urlBar.style.display = isOpen ? 'none' : '';
   const toggle = document.querySelector('.nw-toggle');
-  if (toggle) toggle.textContent = isOpen ? '↑ I have a website' : '↓ I don\'t have a website';
+  if (toggle) toggle.textContent = isOpen ? t('↑ I have a website', '↑ 我有网站') : t('↓ I don\'t have a website', '↓ 我没有网站');
 }
 
 /* ── Hero URL form ── */

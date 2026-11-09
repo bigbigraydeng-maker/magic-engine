@@ -20,6 +20,7 @@ import type { GetStepTools } from 'inngest'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRunId, cronRunHandle } from '@/lib/cron/run-logger'
+import { MALIANG_RENDER_READY_EVENT } from './maliang-render-check'
 import {
   CREATOMATE_RENDER_REQUESTED_EVENT,
   CREATOMATE_RENDER_WEBHOOK_RECEIVED_EVENT,
@@ -227,7 +228,7 @@ async function finalizeSuccess(
   job: JobRow,
   render: CreatomateRender,
   totalCostUsd: number,
-): Promise<void> {
+): Promise<{ storageUrl: string }> {
   if (!render.url) throw new Error(`Creatomate 状态 succeeded 但没有 url（render_id=${render.id}）`)
   const { storageUrl } = await storeCreatomateResult({
     resultUrl: render.url,
@@ -236,6 +237,8 @@ async function finalizeSuccess(
   })
   await patchJob(supabase, job.id, { status: 'ready_for_review', output_url: storageUrl, cost_usd: totalCostUsd })
   await supabase.from('content_posts').update({ source_video_url: storageUrl }).eq('id', job.content_post_id)
+  // 返回落库后的地址，给马良自检事件用（step 结果会被 Inngest 记忆化，重放不重传）。
+  return { storageUrl }
 }
 
 async function finalizeFailure(supabase: SupabaseClient, job: JobRow, reason: string, costUsd: number): Promise<void> {
@@ -346,7 +349,14 @@ async function runWorkflow(
       extractTemplateContract(await readFactoryConfig(supabase, job.client_id), job.client_id),
     )
     const totalCostUsd = costUsd + estimateCreatomateCostUsd(contract, scenes.length)
-    await step.run('finalize-success', () => finalizeSuccess(supabase, job, render, totalCostUsd))
+    const { storageUrl } = await step.run('finalize-success', () => finalizeSuccess(supabase, job, render, totalCostUsd))
+    // 马良 · 出片自检（agent 自治计划 B2）：成片落库就叫马良逐镜看图 / 字 / logo。
+    // `step.sendEvent` 顶层调用、不裹进 step.run（conversation-inbound-autoack.ts 那次复审的教训）。
+    // 消费方 maliang-render-check.ts 只出裁决，不发布；发不出去时待办有「出片 2 小时后仍没自检」兜底。
+    await step.sendEvent('notify-maliang', {
+      name: MALIANG_RENDER_READY_EVENT,
+      data: { client_id: job.client_id, job_id: job.id, post_id: job.content_post_id, output_url: storageUrl },
+    })
     return { ok: true, clientId: job.client_id, costUsd: totalCostUsd }
   }
 

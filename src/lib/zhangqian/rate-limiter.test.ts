@@ -165,6 +165,20 @@ describe('consumeScanRateLimits (Phase X.S6 M-4)', () => {
     expect(r.limits.ip.count).toBe(1)
     spy.mockRestore()
   })
+
+  it('the RPC succeeding but returning no usable decision blocks that dimension outright — it does NOT take the fail-open legacy-upsert path (魏征 review, PR #2163: this must match the pre-centralisation behavior exactly)', async () => {
+    // Deliberately the wrong shape. 已跑：对照生产侧 consumeQuotaBucket 的判断 `typeof row.allowed !== 'boolean'`——
+    // 任何缺 allowed 字段的行，不管有没有别的字段，都会走进同一条 'malformed_response' 分支，跟这条测试模拟的一致。
+    rpcMock.mockImplementationOnce(async () => ({ data: [{ not_allowed: 'wrong shape' }] as unknown as RpcResult['data'], error: null }))
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const r = await consumeScanRateLimits({ ip: '1.1.1.1', domain: 'x.com' })
+    expect(r.allowed).toBe(false)
+    expect(r.blockedBy).toBe('ip')
+    // No legacy upsert should have happened for this dimension — the store was never written to via the
+    // fallback path (only the atomic RPC's own row, if any, could exist).
+    expect(store['zhangqian_scan_rate_limits']?.some((row) => row.bucket_type === 'ip')).toBeFalsy()
+    spy.mockRestore()
+  })
 })
 
 describe('recordScanAttempt — Phase X.S6 delegates to consume', () => {

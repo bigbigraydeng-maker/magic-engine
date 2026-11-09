@@ -42,7 +42,7 @@ function outwardTestAction(): ActionDefinition {
     providerIdempotency: 'supported',
     outwardAuthorization: {
       declaredIn: 'action-submission caller v1 kernel-progression test only',
-      requiresHumanApproval: true,
+      approval: { mode: 'human_only' },
       rollback: 'snapshot_restore',
     },
     inputSchema: {

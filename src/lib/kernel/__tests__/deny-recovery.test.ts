@@ -238,9 +238,12 @@ describe('C3 · 不可恢复的拒绝不许翻案', () => {
     ).rejects.toThrow(/不替人改主意/)
   })
 
+  // `outside_autonomy_envelope` 属于环境类 —— 改上限 / 等冷却 / 退出学习期之后
+  // 同一件事就能做。
   it('白名单是显式的：只有环境类拒绝码在里面', () => {
     expect(Array.from(RECOVERABLE_DENY_CODES).sort()).toEqual([
       'no_policy',
+      'outside_autonomy_envelope',
       'outward_requires_human_policy',
       'over_cost_cap',
       'policy_changed_since_request',
@@ -265,7 +268,7 @@ describe('K-WP02 · outward + auto_approve → 改成要审批 → 显式恢复'
     providerIdempotency: 'supported',
     outwardAuthorization: {
       declaredIn: 'K-WP02 #882 (test-only definition)',
-      requiresHumanApproval: true,
+      approval: { mode: 'human_only' },
       rollback: 'snapshot_restore',
     },
     costModel: { kind: 'fixed', estimate: () => 0, stepCeilingUsd: { build: 0, persist: 0, verify: 0 } },

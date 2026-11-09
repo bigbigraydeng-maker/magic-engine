@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ─── Hoisted mocks ────────────────────────────────────────────────────────────
 
@@ -27,9 +27,12 @@ vi.mock('../vocabulary', async (importOriginal) => {
 
 import {
   getValidToken,
+  getValidTokenForConnection,
+  isTransientRefreshFailure,
   PlatformConnectionNotFoundError,
   PlatformTokenRefreshError,
 } from '../token-manager'
+import { MICROSOFT_MAIL_SCOPES } from '@/lib/microsoft/mail-oauth'
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -248,5 +251,191 @@ describe('getValidToken — error cases', () => {
     // Should resolve, not reject
     const token = await getValidToken('client-1', 'google_gbp')
     expect(token).toBe('new-tok')
+  })
+})
+
+// ─── 刷新请求里带不带 scope：这是 2026-09-24 那次 9 天事故的真正根因 ──────────
+
+/**
+ * 🔴 **改这两条断言之前，先读 `docs/PITFALLS.md` F11。**
+ *
+ * 微软刷新时**必须重放**整份 scope 清单（漏掉会悄悄降权，读信时才 403）；
+ * 谷歌刷新时**必须不带** scope（带上客户没同意过的新权限会直接被拒，
+ * 已有连接当场死 —— 这正是 `MICROSOFT_MAIL_SCOPES` 那次改动弄死 CTS 两个邮箱的
+ * 机制）。谁哪天觉得「两边写法统一一下更规范」，就会原样复制一次那场事故。
+ *
+ * 钉住 `*_SCOPES` 清单的那道闸（`scope-change-gate.test.ts`）挡的是「改清单」，
+ * 这两条挡的是「改行为」—— 后者更接近根因。
+ */
+describe('刷新请求的形状（根因闸门，改之前先读 PITFALLS F11）', () => {
+  beforeEach(() => {
+    process.env.MICROSOFT_CLIENT_ID = 'ms-client'
+    process.env.MICROSOFT_CLIENT_SECRET = 'ms-secret'
+  })
+
+  async function refreshBodyFor(provider: string): Promise<URLSearchParams> {
+    // 上一个 describe 里留下的 mockReturnValueOnce 队列不会被 clearAllMocks 清掉，
+    // 不 reset 的话第一次调用会拿到别人排好的那个返回值。
+    mocks.from.mockReset()
+    mocks.isTokenExpired.mockReturnValue(true)
+    mocks.from.mockReturnValue(chainResolving({ data: { ...VALID_ROW, provider }, error: null }))
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ access_token: 'new-token', expires_in: 3600 }),
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    await getValidToken('client-1', provider as never)
+    vi.unstubAllGlobals()
+    return new URLSearchParams(fetchSpy.mock.calls[0][1].body as string)
+  }
+
+  it('谷歌：刷新请求里绝不能带 scope（带了 = 加新权限会弄死已有连接）', async () => {
+    const body = await refreshBodyFor('google_gsc')
+    expect(body.get('scope')).toBeNull()
+    expect(body.get('grant_type')).toBe('refresh_token')
+  })
+
+  it('微软：刷新请求里必须带完整 scope（漏了 = 悄悄降权，读信时才 403）', async () => {
+    const body = await refreshBodyFor('microsoft_mail')
+    expect(body.get('scope')).toBe(MICROSOFT_MAIL_SCOPES.join(' '))
+    // offline_access 少了就换不回刷新能力，下一小时安静地断
+    expect(body.get('scope')).toContain('offline_access')
+  })
+})
+
+/**
+ * A read-only background reader (the triggered-send shadow run) must be able to read a mailbox WITHOUT ever taking it
+ * offline: when its token refresh fails once, the connection must stay `active` for the people who send from it.
+ * Every other caller keeps the old behaviour (a failed refresh marks the connection as error).
+ */
+describe('getValidTokenForConnection — markErrorOnFailure', () => {
+  const MS_ROW = { ...VALID_ROW, provider: 'microsoft_mail', purpose: 'legacy' }
+
+  function setup() {
+    const eqAfterUpdate = vi.fn().mockResolvedValue({ error: null })
+    const update = vi.fn().mockReturnValue({ eq: eqAfterUpdate })
+    const chain: Record<string, unknown> = {}
+    for (const m of ['select', 'eq']) chain[m] = vi.fn().mockReturnValue(chain)
+    chain['maybeSingle'] = vi.fn().mockResolvedValue({ data: MS_ROW, error: null })
+    chain['update'] = update
+    mocks.from.mockReset()
+    mocks.from.mockReturnValue(chain)
+    return { update }
+  }
+
+  beforeEach(() => {
+    process.env.MICROSOFT_CLIENT_ID = 'ms-client'
+    process.env.MICROSOFT_CLIENT_SECRET = 'ms-secret'
+    mocks.isTokenExpired.mockReturnValue(true)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // 永久失败（对方明确拒绝）才标 error；临时失败（5xx / 网络）见下面的 isTransientRefreshFailure 用例
+  const failRefresh = () =>
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })))
+
+  it('by default a failed refresh marks the connection as error (behaviour unchanged for every other caller)', async () => {
+    const { update } = setup()
+    failRefresh()
+    await expect(getValidTokenForConnection('conn-1')).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+  })
+
+  it('with markErrorOnFailure:false a failed refresh still throws but leaves the connection alone', async () => {
+    const { update } = setup()
+    failRefresh()
+    await expect(getValidTokenForConnection('conn-1', { markErrorOnFailure: false })).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('with markErrorOnFailure:false a successful refresh is still saved (the token has to be kept fresh)', async () => {
+    const { update } = setup()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ access_token: 'new-token', expires_in: 3600 }) }),
+    )
+    await expect(getValidTokenForConnection('conn-1', { markErrorOnFailure: false })).resolves.toBe('new-token')
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ access_token_enc: 'enc:new-token' }))
+    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+  })
+})
+
+describe('临时刷新失败不把连接标坏（2026-11-03 CTS / NAL 的 GA4 被一次 500 / fetch failed 永久停掉）', () => {
+  const MS_ROW = { ...VALID_ROW, provider: 'microsoft_mail', purpose: 'legacy' }
+
+  function setup() {
+    const eqAfterUpdate = vi.fn().mockResolvedValue({ error: null })
+    const update = vi.fn().mockReturnValue({ eq: eqAfterUpdate })
+    const chain: Record<string, unknown> = {}
+    for (const m of ['select', 'eq']) chain[m] = vi.fn().mockReturnValue(chain)
+    chain['maybeSingle'] = vi.fn().mockResolvedValue({ data: MS_ROW, error: null })
+    chain['update'] = update
+    mocks.from.mockReset()
+    mocks.from.mockReturnValue(chain)
+    return { update }
+  }
+
+  beforeEach(() => {
+    process.env.MICROSOFT_CLIENT_ID = 'ms-client'
+    process.env.MICROSOFT_CLIENT_SECRET = 'ms-secret'
+    mocks.isTokenExpired.mockReturnValue(true)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('classifies 5xx / 429 / network failures as transient, 4xx and missing config as permanent', () => {
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 500: {"error":"internal_failure"}'))).toBe(true)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 503: x'))).toBe(true)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 429: x'))).toBe(true)
+    expect(isTransientRefreshFailure(new TypeError('fetch failed'))).toBe(true)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 400: {"error":"invalid_grant"}'))).toBe(false)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 401: x'))).toBe(false)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured'))).toBe(false)
+  })
+
+  it('a 400 rejection whose body merely mentions network / HTTP 500 stays permanent (魏征补审 P2-1)', () => {
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('microsoft_mail', 'HTTP 400: {"error_description":"AADSTS70000: network policy blocked this grant"}'))).toBe(false)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 400: {"error":"invalid_grant","error_description":"see HTTP 500 docs"}'))).toBe(false)
+  })
+
+  it('a response cut off halfway (JSON parse error / terminated) is transient, not a dead connection', () => {
+    expect(isTransientRefreshFailure(new SyntaxError('Unexpected end of JSON input'))).toBe(true)
+    expect(isTransientRefreshFailure(new TypeError('terminated'))).toBe(true)
+  })
+
+  it('a 500 from the provider throws but leaves the connection active', async () => {
+    const { update } = setup()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'internal_failure' }), { status: 500 })))
+    await expect(getValidTokenForConnection('conn-1')).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+  })
+
+  it('a network failure (fetch failed) throws but leaves the connection active', async () => {
+    const { update } = setup()
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')))
+    await expect(getValidTokenForConnection('conn-1')).rejects.toThrow('fetch failed')
+    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+  })
+
+  it('getValidToken: a 503 does not mark error, an invalid_grant does', async () => {
+    const { update } = setup()
+    const row = { ...VALID_ROW }
+    const chain: Record<string, unknown> = {}
+    for (const m of ['select', 'eq', 'order', 'limit']) chain[m] = vi.fn().mockReturnValue(chain)
+    chain['maybeSingle'] = vi.fn().mockResolvedValue({ data: row, error: null })
+    chain['single'] = vi.fn().mockResolvedValue({ data: row, error: null })
+    chain['update'] = update
+    mocks.from.mockReturnValue(chain)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 503 })))
+    await expect(getValidToken('client-1', 'google_gbp')).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })))
+    await expect(getValidToken('client-1', 'google_gbp')).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
   })
 })

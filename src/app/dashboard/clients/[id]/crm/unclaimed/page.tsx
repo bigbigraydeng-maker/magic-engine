@@ -93,8 +93,9 @@ export default function UnclaimedPage({ params }: { params: { id: string } }) {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-6">
-      <Link href={`/dashboard/clients/${clientId}/crm`} className="text-sm text-me-charcoal/50 hover:text-me-ochre">
-        ← 回到「今天该联系谁」
+      {/* 2026-09-28 WP-B6：「今天要联系」页已删除，功能全部并进「全部客人」。 */}
+      <Link href={`/dashboard/clients/${clientId}/crm/all`} className="text-sm text-me-charcoal/50 hover:text-me-ochre">
+        ← 回到「全部客人」
       </Link>
 
       <h1 className="mt-3 font-display text-2xl font-black text-me-charcoal">

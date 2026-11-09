@@ -37,7 +37,6 @@ import {
 } from '@/lib/inngest/functions/conversation-inbound-draft-store'
 import { isConversationOptedOut } from '@/lib/messenger-agent/optout'
 import { isChannelEnabled } from '@/lib/messenger-agent/channel-dispatch'
-import { classifyConversation, resolvePostSaleClassificationPolicy } from '@/lib/messenger-agent/classify'
 import { buildMessengerAgentSystemPrompt } from '@/lib/messenger-agent/prompt'
 import { buildMessengerAgentTools, CUSTOMER_FACING_SENSITIVITIES } from '@/lib/messenger-agent/tools'
 import { callClaudeWithTools } from '@/lib/anthropic/client'
@@ -178,12 +177,6 @@ async function verifyDraft(
   return verify({ clientId, agentOutput, brandRedlinePhrases, knowledge })
 }
 
-async function loadIndustry(clientId: string): Promise<string | null> {
-  const { data, error } = await supabaseAdmin.from('clients').select('industry').eq('id', clientId).maybeSingle()
-  if (error) throw new Error(`查客户行业失败: ${error.message}`)
-  return (data as { industry: string | null } | null)?.industry ?? null
-}
-
 // ---------------------------------------------------------------------------
 // fakeStep —— 跟 __tests__/conversation-inbound-draft.test.ts 里的同名手法
 // (`handlerOf`/`fakeStep`) 完全一致：直接拿 Inngest 包装前的原始 handler
@@ -295,8 +288,8 @@ async function loadTriggerMessage(conversationId: string): Promise<{ message_id:
 const deps: ConversationInboundDraftDeps = {
   isOptedOut: isConversationOptedOut,
   isEnabled: isChannelEnabled,
-  classify: classifyConversation,
-  loadIndustry,
+  // Dry run: pretend F1 will send the acknowledgement, so the drafting step waits as before.
+  hasRecentOutbound: async () => false,
   loadContext: loadDraftContext,
   runAgent: runDraftAgent,
   verify: verifyDraft,

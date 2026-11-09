@@ -10,7 +10,14 @@ vi.mock('openai', () => ({
   default: vi.fn().mockImplementation(() => ({})),
 }))
 
+// Jev judgement (cliché check) — never hit the network in tests
+vi.mock('@/lib/jev/client', () => ({
+  callJev: vi.fn(),
+}))
+
 import { evaluate } from '@/lib/content/quality-rubric'
+import { callJev } from '@/lib/jev/client'
+const mockJudge = vi.mocked(callJev)
 const mockEvaluate = vi.mocked(evaluate)
 
 const PASSING_RESULT = {
@@ -59,16 +66,18 @@ describe('auditReelsDraft', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     process.env.OPENAI_API_KEY = 'test-key'
+    mockJudge.mockResolvedValue({ answers: { cliche: { noul: 0.1 } } })
   })
 
   afterEach(() => {
     process.env.OPENAI_API_KEY = originalEnv
   })
 
-  it('returns null when OPENAI_API_KEY is not set', async () => {
+  it('still runs the content guard when OPENAI_API_KEY is not set (fail-closed)', async () => {
     delete process.env.OPENAI_API_KEY
     const result = await auditReelsDraft(SAMPLE_CAPTION, SAMPLE_METADATA)
-    expect(result).toBeNull()
+    expect(result.contextSnapshot.rubric_skipped).toBe(true)
+    expect(result.contentGuard.status).toBe('pass')
     expect(mockEvaluate).not.toHaveBeenCalled()
   })
 
@@ -211,5 +220,29 @@ describe('auditReelsDraft', () => {
 
     const [, , options] = mockEvaluate.mock.calls[0]
     expect(options.routeDimensions ?? []).toHaveLength(0)
+  })
+
+  describe('content guard (mixed language / cliché)', () => {
+    const NAL_TITLE = 'Unlock the Power of 一件代发物流支持 with NAL Express!'
+
+    it('fails and flags human review for mixed-language copy even when the rubric passes', async () => {
+      mockEvaluate.mockResolvedValueOnce(PASSING_RESULT)
+      const result = await auditReelsDraft(NAL_TITLE, SAMPLE_METADATA)
+      expect(result.rubricResult.pass).toBe(false)
+      expect(result.contentGuard.needsHumanReview).toBe(true)
+      expect(result.retryable).toBe(true)
+      const guard = result.contextSnapshot.content_guard as Record<string, unknown>
+      expect(guard.needs_human_review).toBe(true)
+      expect(guard.status).toBe('fail')
+    })
+
+    it('treats a judgement error as needs-review, not pass, and not retryable', async () => {
+      mockEvaluate.mockResolvedValueOnce(PASSING_RESULT)
+      mockJudge.mockRejectedValueOnce(new Error('HTTP 503'))
+      const result = await auditReelsDraft('Book the 12-day Golden China tour from Auckland today.', SAMPLE_METADATA)
+      expect(result.rubricResult.pass).toBe(false)
+      expect(result.contentGuard.status).toBe('unavailable')
+      expect(result.retryable).toBe(false)
+    })
   })
 })

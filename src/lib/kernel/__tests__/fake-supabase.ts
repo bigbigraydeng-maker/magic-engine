@@ -140,7 +140,7 @@ export interface FakeSupabaseOptions {
 }
 
 export interface Filter {
-  kind: 'eq' | 'in' | 'is' | 'gte' | 'lte' | 'not' | 'or'
+  kind: 'eq' | 'in' | 'is' | 'gte' | 'lte' | 'not' | 'or' | 'like' | 'json_eq'
   column: string
   value: unknown
 }
@@ -205,6 +205,17 @@ function orMatches(row: Row, expr: string): boolean {
         return v !== null && v !== undefined && String(v) <= value
       case 'eq':
         return String(v) === value
+      case 'neq':
+        // PostgREST 的 neq 是 SQL `<>`：NULL 不匹配
+        return v !== null && v !== undefined && String(v) !== value
+      case 'not': {
+        // 只实现 `col.not.in.("a","b")` —— 内核排除专属审批动作用到的那一种
+        if (!value.startsWith('in.(') || !value.endsWith(')')) {
+          throw new Error(`[fake-supabase] .or 只实现了 not.in：${cond}`)
+        }
+        const list = splitTopLevel(value.slice('in.('.length, -1)).map((x) => x.replace(/^"(.*)"$/, '$1'))
+        return v !== null && v !== undefined && !list.includes(String(v))
+      }
       default:
         throw new Error(`[fake-supabase] .or 没实现算子「${op}」：${cond}`)
     }
@@ -238,8 +249,19 @@ function matches(row: Row, filters: Filter[]): boolean {
         return String(v) <= String(f.value)
       case 'not':
         return v !== f.value
+      case 'like': {
+        if (typeof v !== 'string' || typeof f.value !== 'string') return false
+        const pattern = f.value
+        if (pattern.endsWith('%')) {
+          return v.startsWith(pattern.slice(0, -1))
+        }
+        return v === pattern
+      }
       case 'or':
         return orMatches(row, String(f.value))
+      case 'json_eq':
+        // `.filter(col, 'eq', JSON.stringify(old))`：整份 jsonb 原值比较（乐观锁写法）
+        return JSON.stringify(v ?? null) === f.value
       default:
         return true
     }
@@ -378,6 +400,14 @@ export function createFakeSupabase(
       filters.push({ kind: 'is', column, value })
       return chain()
     }
+    builder.filter = (column: string, operator: string, value: unknown) => {
+      // 🔴 只认 jsonb 整值相等；别的算子直接炸，不能静默当「匹配」
+      if (operator !== 'eq' || typeof value !== 'string') {
+        throw new Error(`[fake-supabase] filter 只支持 (col, 'eq', JSON 字符串)，收到 ${operator}`)
+      }
+      filters.push({ kind: 'json_eq', column, value })
+      return chain()
+    }
     builder.gte = (column: string, value: unknown) => {
       filters.push({ kind: 'gte', column, value })
       return chain()
@@ -392,6 +422,10 @@ export function createFakeSupabase(
     }
     builder.not = (column: string, _op: string, value: unknown) => {
       filters.push({ kind: 'not', column, value })
+      return chain()
+    }
+    builder.like = (column: string, pattern: string) => {
+      filters.push({ kind: 'like', column, value: pattern })
       return chain()
     }
     builder.order = (column: string, opts?: { ascending?: boolean }) => {

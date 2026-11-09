@@ -191,6 +191,27 @@ describe('pickGoalForPrescription —— 一个客户好几个目标时挂哪个
     const picked = pickGoalForPrescription([goal({ id: 'a', period_end: null as never })], NOW)
     expect(picked!.id).toBe('a')
   })
+
+  it('skips a goal that already has a manual draft and picks the next live one', () => {
+    const picked = pickGoalForPrescription(
+      [
+        goal({ id: 'manual', title: '人工草稿那个', period_end: '2026-08-20' }),
+        goal({ id: 'open', title: '还能自动开方的', period_end: '2026-10-01' }),
+      ],
+      NOW,
+      new Set(['manual']),
+    )
+    expect(picked!.id).toBe('open')
+  })
+
+  it('returns null when every live goal is held by a manual draft', () => {
+    const picked = pickGoalForPrescription(
+      [goal({ id: 'manual', period_end: '2026-09-02' })],
+      NOW,
+      new Set(['manual']),
+    )
+    expect(picked).toBeNull()
+  })
 })
 
 describe('buildIntake —— 一项都不许编，跟目标走的每次重算', () => {
@@ -228,6 +249,13 @@ describe('buildIntake —— 一项都不许编，跟目标走的每次重算', 
     const intake = buildIntake(goal({ budget_amount: 1500 }), { seo: 1 }, prior, NOW)
     expect(intake.monthly_budget_aud).toBe(1500)
     expect(intake.notes).toContain('目标自带预算')
+  })
+
+  it('目标币种是 NZD 时，备注和字段都写 NZD，不写成 AUD', () => {
+    const intake = buildIntake(goal({ budget_amount: 3000, budget_currency: 'NZD' }), { seo: 1 }, prior, NOW)
+    expect(intake.budget_currency).toBe('NZD')
+    expect(intake.notes).toContain('NZD')
+    expect(intake.notes).not.toContain('AUD')
   })
 
   it('🔴 目标没填预算 → 记 0，哪怕上一份口径里写着 3000 也不许拿来用', () => {

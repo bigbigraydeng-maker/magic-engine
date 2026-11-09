@@ -17,7 +17,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { verifyState, exchangeCode, exchangeForLongLivedToken, listPagesWithTokens, listGrantedScopes, META_PUBLISH_SCOPE } from '@/lib/meta-oauth/client'
+import { verifyState, exchangeCode, exchangeForLongLivedToken, listPagesWithTokens, listGrantedScopes, META_PUBLISH_SCOPE, META_STATE_COOKIE, META_STATE_PATH } from '@/lib/meta-oauth/client'
+import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { upsertConnection } from '@/lib/platform-oauth/connection-store'
 import { PLATFORM_PROVIDERS } from '@/lib/platform-oauth/vocabulary'
 import { projectFactoryConfig } from '@/lib/factory/client-config'
@@ -40,7 +41,7 @@ type Outcome =
   | 'bad_state'
   | 'exchange_failed'
 
-function back(clientId: string | null, outcome: Outcome): NextResponse {
+function back(clientId: string | null, outcome: Outcome, clearState = true): NextResponse {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'
   // The outcome message and the Reauthorize action live in FacebookPagePanel,
   // which only renders inside the client-page settings drawer's "platform" tab
@@ -52,33 +53,32 @@ function back(clientId: string | null, outcome: Outcome): NextResponse {
   const path = clientId
     ? `/dashboard/clients/${clientId}?${query.toString()}`
     : `/dashboard?meta=${outcome}`
-  return NextResponse.redirect(`${appUrl}${path}`)
+  const response = NextResponse.redirect(`${appUrl}${path}`)
+  if (clearState) {
+    response.cookies.set(META_STATE_COOKIE, '', {
+      httpOnly: true, secure: new URL(appUrl).protocol === 'https:',
+      sameSite: 'lax', path: META_STATE_PATH, maxAge: 0,
+    })
+  }
+  return response
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const params = req.nextUrl.searchParams
 
-  // User pressed Cancel on Meta's consent screen.
-  if (params.get('error')) return back(null, 'denied')
-
   const code = params.get('code')
   const state = params.get('state')
-  if (!code || !state) return back(null, 'bad_state')
+  // An old tab must not erase a newer attempt's browser binding.
+  if (!state || req.cookies.get(META_STATE_COOKIE)?.value !== state) return back(null, 'bad_state', false)
 
   const verified = verifyState(state)
   if (!verified) return back(null, 'bad_state')
   const { clientId, intent } = verified
-
-  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'}/api/auth/facebook/callback`
-
-  const shortToken = await exchangeCode(code, redirectUri)
-  if (!shortToken) return back(clientId, 'exchange_failed')
-
-  const longToken = await exchangeForLongLivedToken(shortToken)
-  if (!longToken) return back(clientId, 'exchange_failed')
-
-  const pages = await listPagesWithTokens(longToken)
-  if (pages.length === 0) return back(clientId, 'no_pages')
+  const access = await requireDashboardClientAccess(clientId)
+  if (!access.ok || access.user.id !== verified.userId) return back(null, 'bad_state')
+  // A cancellation belongs to this client only after browser and actor checks.
+  if (params.get('error')) return back(clientId, 'denied')
+  if (!code) return back(clientId, 'bad_state')
 
   // Which Page do we need a token for? These are two independent fields:
   //   • inbox connect  → clients.facebook_page_id (the Messenger sync target)
@@ -86,13 +86,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   //                        Facebook Reel adapter actually posts to)
   // Storing the inbox Page's token while claiming the publishing Page is ready
   // is exactly the failure this reauth exists to end, so publishing resolves its
-  // own target — re-read here server-side (never from a client-supplied id or
-  // the signed state) so a config change mid-flow fails closed below.
-  const { data } = await supabaseAdmin
+  // own target. Compare the current server config with the server target signed
+  // at initiation; changing A to B must never silently authorize B.
+  const { data, error } = await supabaseAdmin
     .from('clients')
     .select('facebook_page_id, factory_config')
     .eq('id', clientId)
     .maybeSingle()
+  if (error || !data) return back(clientId, 'verify_failed')
 
   let targetPageId: string | null
   if (intent === 'publishing') {
@@ -107,6 +108,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     targetPageId = (data as { facebook_page_id?: string | null } | null)?.facebook_page_id ?? null
     if (!targetPageId) return back(clientId, 'no_page_bound')
   }
+  if (targetPageId !== verified.targetPageId) return back(clientId, 'verify_failed')
+
+  const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3001'}/api/auth/facebook/callback`
+  const shortToken = await exchangeCode(code, redirectUri)
+  if (!shortToken) return back(clientId, 'exchange_failed')
+  const longToken = await exchangeForLongLivedToken(shortToken)
+  if (!longToken) return back(clientId, 'exchange_failed')
+  const pages = await listPagesWithTokens(longToken)
+  if (pages.length === 0) return back(clientId, 'no_pages')
 
   // The consent may be genuine yet not cover the Page we need — the account
   // that authorised holds no role on it. Saying so beats storing a token that
@@ -129,17 +139,36 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const granted = await listGrantedScopes(longToken)
   if (granted === null) return back(clientId, 'verify_failed')
 
-  await upsertConnection({
-    clientId,
-    provider: PLATFORM_PROVIDERS.META,
-    accessToken: match.pageToken,
-    refreshToken: '', // Meta issues no refresh token; re-consent is the renewal path.
-    tokenExpiry: expiry,
-    accountId: match.pageId,
-    displayName: match.pageName,
-    scopes: granted,
-    lastSyncedAt: new Date(),
-  })
+  // Provider calls yield control. Recheck immediately before persistence so
+  // changes made while the consent is completing cannot silently retarget it.
+  const finalAccess = await requireDashboardClientAccess(clientId)
+  if (!finalAccess.ok || finalAccess.user.id !== verified.userId) return back(null, 'bad_state')
+  const finalConfig = await supabaseAdmin.from('clients')
+    .select('facebook_page_id, factory_config').eq('id', clientId).maybeSingle()
+  if (finalConfig.error || !finalConfig.data) return back(clientId, 'verify_failed')
+  const finalTarget = intent === 'publishing'
+    ? projectFactoryConfig(finalConfig.data.factory_config).publish_target
+    : null
+  const finalPageId = intent === 'publishing'
+    ? (finalTarget?.platform === 'facebook' ? finalTarget.page_id : null)
+    : finalConfig.data.facebook_page_id
+  if (finalPageId !== verified.targetPageId) return back(clientId, 'verify_failed')
+
+  try {
+    await upsertConnection({
+      clientId,
+      provider: PLATFORM_PROVIDERS.META,
+      accessToken: match.pageToken,
+      refreshToken: '', // Meta issues no refresh token; re-consent is the renewal path.
+      tokenExpiry: expiry,
+      accountId: match.pageId,
+      displayName: match.pageName,
+      scopes: granted,
+      lastSyncedAt: new Date(),
+    })
+  } catch {
+    return back(clientId, 'verify_failed')
+  }
 
   // The publishing reauthorisation fails closed: only report ready when the
   // provider authoritatively confirmed pages_manage_posts. A declined grant

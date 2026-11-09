@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardContentGeneration } from '@/lib/content/guard-content-generation'
 import { getVideoTranscript } from '@/lib/supadata/client'
 import { analyzeViralVideo } from '@/lib/content/video-analyzer'
 import { getActiveBrief } from '@/lib/content/brief-injector'
@@ -18,6 +19,9 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
+
+    const denied = await guardContentGeneration({ client_id, execution_item_id })
+    if (denied) return denied
 
     const targetPlatforms: string[] = platforms || ['facebook', 'tiktok']
 

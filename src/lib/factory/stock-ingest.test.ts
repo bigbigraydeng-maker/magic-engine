@@ -212,4 +212,18 @@ describe('🔴 库存配额 —— 让抓来改好的图真能进成片', () => 
     const { generationPlan } = selectClips(ctxRichStock, 'x', false, recipe, pool)
     expect(generationPlan.every((p) => pool.includes(p.source_image_url!))).toBe(true)
   })
+
+  it('人工检索标签参与角度匹配排序，不要求替换原场景标签', () => {
+    const tagged = {
+      blocklist: [], recentAngles: [], activeWinners: [],
+      allowBTrackLandmarkAds: true,
+      now: new Date('2026-07-26T00:00:00Z'),
+      clipStock: [
+        { ...vid('generic', 'city_view') },
+        { ...vid('chongqing', 'river_view'), tags: ['chongqing', 'night_market'] },
+      ],
+    } as never
+    const { segments } = selectClips(tagged, 'Chongqing night market', false, recipe, [])
+    expect(segments[0].clip_ids).toEqual(['chongqing'])
+  })
 })

@@ -1,4 +1,5 @@
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { campaignPatchForViewer, campaignViewer, presentCampaign, presentCampaigns } from '@/lib/campaign/client-view'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 
@@ -31,7 +32,12 @@ export async function GET(
   const { data, error } = await query
   if (error) return NextResponse.json({ success: false, error: error.message }, { status: 500 })
 
-  return NextResponse.json({ success: true, campaigns: data ?? [] })
+  const viewer = campaignViewer(__access.role)
+  return NextResponse.json({
+    success: true,
+    viewer,
+    campaigns: presentCampaigns(data ?? [], viewer),
+  })
 }
 
 // POST /api/clients/[id]/campaign — create new campaign
@@ -51,9 +57,11 @@ export async function POST(
 
   try {
     const body = await req.json()
-    const { title, description, source_urls, source_file_urls, valid_from, valid_until } = body
+    const viewer = campaignViewer(__access.role)
+    const fields = campaignPatchForViewer(body as Record<string, unknown>, viewer)
+    const title = typeof fields.title === 'string' ? fields.title : ''
 
-    if (!title?.trim()) {
+    if (!title.trim()) {
       return NextResponse.json({ success: false, error: 'title is required' }, { status: 400 })
     }
 
@@ -62,11 +70,11 @@ export async function POST(
       .insert({
         client_id:        clientId,
         title:            title.trim(),
-        description:      description ?? null,
-        source_urls:      source_urls ?? [],
-        source_file_urls: source_file_urls ?? [],
-        valid_from:       valid_from ?? null,
-        valid_until:      valid_until ?? null,
+        description:      viewer === 'internal' ? (fields.description ?? null) : null,
+        source_urls:      fields.source_urls ?? [],
+        source_file_urls: fields.source_file_urls ?? [],
+        valid_from:       fields.valid_from ?? null,
+        valid_until:      fields.valid_until ?? null,
         status:           'active',
       })
       .select()
@@ -74,7 +82,7 @@ export async function POST(
 
     if (error) throw error
 
-    return NextResponse.json({ success: true, campaign: data })
+    return NextResponse.json({ success: true, viewer, campaign: presentCampaign(data, viewer) })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return NextResponse.json({ success: false, error: message }, { status: 500 })

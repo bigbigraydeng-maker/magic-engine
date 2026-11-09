@@ -425,10 +425,9 @@ export async function setDerivedMemoryActive(
     .neq('is_active', isActive)
     .select('id')
 
-  if (error) {
-    console.error(`[memory] setDerivedMemoryActive ${table} error:`, error.message)
-    return 0
-  }
+  // Thrown, not swallowed: the extractor records it per action. Returning 0 made a failed
+  // switch-off look like "nothing to switch off" and left both sides of a verdict active.
+  if (error) throw new Error(`setDerivedMemoryActive ${table}: ${error.message}`)
   return (data ?? []).length
 }
 

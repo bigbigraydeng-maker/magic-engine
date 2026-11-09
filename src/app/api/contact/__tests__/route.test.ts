@@ -50,15 +50,14 @@ describe('POST /api/contact — Meta Ads AI pilot application', () => {
     const internal = mocks.send.mock.calls[0][0]
     const confirmation = mocks.send.mock.calls[1][0]
     expect(internal.to).toEqual(['hello@magicengine.cloud'])
-    expect(internal.subject).toContain('Meta Ads AI 内测申请')
+    expect(internal.subject).toContain('工具实验室留言')
     expect(confirmation.to).toEqual(['applicant@example.com'])
     expect(confirmation.replyTo).toBe('hello@magicengine.cloud')
-    expect(confirmation.subject).toBe('我们已收到你的 Meta Ads AI 内测申请')
-    expect(confirmation.html).toContain('本轮采用邀请制')
-    expect(confirmation.html).toContain('正在审核申请')
-    expect(confirmation.html).toContain('无需向我们发送 Facebook 密码、广告报表或任何连接凭据')
-    expect(confirmation.html).toContain('发送专属连接方式')
-    expect(confirmation.html).toContain('申请已收到不代表已经批准或开通')
+    expect(confirmation.subject).toBe('我们收到你的留言了 · Magic Engine')
+    expect(confirmation.html).toContain('/meta-ads-ai/mine')
+    expect(confirmation.html).not.toMatch(/内测|邀请制|候补|招募|Magic Bridge/)
+    expect(confirmation.subject).not.toMatch(/内测|Meta Ads AI/)
+    expect(confirmation.html).toContain('我们不会向你要 Facebook 密码')
     expect(mocks.send.mock.invocationCallOrder[0]).toBeLessThan(mocks.send.mock.invocationCallOrder[1])
   })
 
@@ -91,7 +90,7 @@ describe('POST /api/contact — Meta Ads AI pilot application', () => {
       code: 'APPLICANT_CONFIRMATION_FAILED',
       received: true,
     })
-    expect(body.error).toContain('申请已收到，但确认邮件发送失败')
+    expect(body.error).toContain('留言已收到，但确认邮件发送失败')
     expect(log).toHaveBeenCalledWith(
       '[contact] Applicant confirmation delivery failed after internal notification succeeded:',
       expect.objectContaining({ message: 'confirmation rejected' }),

@@ -72,6 +72,7 @@ describe('POST /api/ai-tracker/run-dashboard', () => {
       runs_attempted: 2,
       runs_succeeded: 2,
       runs_failed: 0,
+      runs_conclusive: 2,
       client_brand_mentions: 1,
       total_cost_usd: 0.02,
       total_latency_ms: 1200,

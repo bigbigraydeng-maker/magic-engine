@@ -3,8 +3,7 @@
 // 用例取自真实生产工单原文(内部广告文案,非客户 PII,按 CLAUDE.md 指引不做脱敏):
 //   A. Oztop(client d5c98811)工单 4fb005b9/e70d0e80:角度写成 "mapei brisbane"/"karndean brisbane"
 //   B. Oztop 6f97a4c5/6fa3938f/af6e4e99 + CTS 7c2809e1:字幕逐段写成内部内容分类标签
-//   C. CTS 4812f7dc/9ba53cb0:brief 要求 Baker Gu 第一人称,AI 写成 "Our own offices. Our own guides."
-//      对照组 CTS 402c98b9:同一叙事人格意图,AI 正确写成第一人称 "I've watched it happen..."
+//   (原 C 类人称口吻检测已于 2026-10-16 取消,对应用例已删)
 
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
@@ -14,10 +13,6 @@ vi.mock('@/lib/jev/client', () => ({
 }))
 
 import { findRepeatedCaption, scanContentQualityFlags } from './content-quality-guard'
-
-const BAKER_GU_NARRATOR =
-  'a single first-person narrator (a real CTS Tours representative named Baker Gu, ' +
-  'tour guide, speaking about their own experience)'
 
 beforeEach(() => {
   callJev.mockReset()
@@ -61,7 +56,6 @@ describe('scanContentQualityFlags — A 竞品品牌当角度', () => {
       angleLabel: 'mapei brisbane',
       onScreenHook: '$35.50/m²',
       captions: ['$35.50/m²', 'mapei brisbane'],
-      intendedNarrator: null,
     })
     expect(flags.some((f) => f.category === 'competitor_brand')).toBe(true)
   })
@@ -73,7 +67,6 @@ describe('scanContentQualityFlags — A 竞品品牌当角度', () => {
       angleLabel: 'SPC hybrid flooring clearance',
       onScreenHook: '$29.90/m²',
       captions: ['$29.90/m²'],
-      intendedNarrator: null,
     })
     expect(flags.some((f) => f.category === 'competitor_brand')).toBe(false)
   })
@@ -87,7 +80,6 @@ describe('scanContentQualityFlags — B 内部标签冒充字幕', () => {
       angleLabel: null,
       onScreenHook: null,
       captions: Array(7).fill('Expertise & Heritage Stories'),
-      intendedNarrator: null,
     })
     expect(flags.some((f) => f.category === 'placeholder_caption')).toBe(true)
   })
@@ -99,7 +91,6 @@ describe('scanContentQualityFlags — B 内部标签冒充字幕', () => {
       angleLabel: null,
       onScreenHook: null,
       captions: ['Customer Stories & Community', 'Offers & Product Highlights'], // 两段不同标签,不精确重复
-      intendedNarrator: null,
     })
     expect(flags.some((f) => f.category === 'placeholder_caption')).toBe(true)
   })
@@ -111,58 +102,24 @@ describe('scanContentQualityFlags — B 内部标签冒充字幕', () => {
       angleLabel: null,
       onScreenHook: null,
       captions: ['This waterproof floor took 3 years to perfect.', 'Installed by our Brisbane team in one day.', 'Get a free sample before you buy.'],
-      intendedNarrator: null,
     })
     expect(flags.some((f) => f.category === 'placeholder_caption')).toBe(false)
   })
 })
 
-describe('scanContentQualityFlags — C 人称口吻不符简报', () => {
-  it('🔴 真实 CTS 案例:brief 要求 Baker Gu 第一人称,文案却是 "Our own offices..." → 命中', async () => {
-    callJev.mockResolvedValue({
-      answers: { placeholder_leak: { noul: 0.05 }, wrong_voice: { noul: 0.88 } },
-    })
+describe('scanContentQualityFlags — 人称口吻检测已取消', () => {
+  it('公司口吻文案不再被标记,也不再向 Jev 提人称问题', async () => {
+    callJev.mockResolvedValue({ answers: { placeholder_leak: { noul: 0.05 }, wrong_voice: { noul: 0.95 } } }) // 即使模型返回了高分也不应产生标记
     const flags = await scanContentQualityFlags({
       brandName: 'CTS Tours',
       angleLabel: null,
       onScreenHook: null,
-      captions: [
-        'Our own offices. Our own guides.',
-        'No middlemen. No markups.',
-        'The China locals know — not guidebook China.',
-      ],
-      intendedNarrator: BAKER_GU_NARRATOR,
+      captions: ['Our own offices. Our own guides.', 'No middlemen. No markups.'],
     })
-    expect(flags.some((f) => f.category === 'narrator_voice_mismatch')).toBe(true)
-  })
-
-  it('对照组(真实 CTS 402c98b9):同一叙事意图,AI 正确写成第一人称 → 不命中', async () => {
-    callJev.mockResolvedValue({
-      answers: { placeholder_leak: { noul: 0.05 }, wrong_voice: { noul: 0.1 } },
-    })
-    const flags = await scanContentQualityFlags({
-      brandName: 'CTS Tours',
-      angleLabel: null,
-      onScreenHook: null,
-      captions: ["I've watched it happen again and again — people leave for China nervous, and come back quietly changed."],
-      intendedNarrator: BAKER_GU_NARRATOR,
-    })
-    expect(flags.some((f) => f.category === 'narrator_voice_mismatch')).toBe(false)
-  })
-
-  it('反向用例:brief 没声明具体叙述者 → 根本不该发起人称检测(不能对品牌口吻文案误报)', async () => {
-    callJev.mockResolvedValue({ answers: { placeholder_leak: { noul: 0.05 } } })
-    const flags = await scanContentQualityFlags({
-      brandName: 'Oztop Building Supplies',
-      angleLabel: null,
-      onScreenHook: null,
-      captions: ['We deliver excellence in every trip.', 'Our team handles logistics for you.'],
-      intendedNarrator: null,
-    })
-    expect(flags.some((f) => f.category === 'narrator_voice_mismatch')).toBe(false)
-    // 没配叙述人格就不该问 Jev 人称问题 —— 断言实际发出的 questions 里没有 wrong_voice
-    const [, questions] = callJev.mock.calls[0]
+    expect(flags.map((f) => f.category as string)).not.toContain('narrator_voice_mismatch')
+    const [state, questions] = callJev.mock.calls[0]
     expect(questions.wrong_voice).toBeUndefined()
+    expect(state.intended_voice).toBeUndefined()
   })
 })
 
@@ -174,7 +131,6 @@ describe('scanContentQualityFlags — fail-closed(Jev 不可用)', () => {
       angleLabel: 'mapei brisbane',
       onScreenHook: '$35.50/m²',
       captions: ['$35.50/m²'],
-      intendedNarrator: null,
     })
     expect(flags.some((f) => f.category === 'quality_check_unavailable')).toBe(true)
   })
@@ -186,7 +142,6 @@ describe('scanContentQualityFlags — fail-closed(Jev 不可用)', () => {
       angleLabel: null,
       onScreenHook: null,
       captions: Array(7).fill('Expertise & Heritage Stories'),
-      intendedNarrator: null,
     })
     expect(flags.some((f) => f.category === 'placeholder_caption')).toBe(true)
     expect(flags.some((f) => f.category === 'quality_check_unavailable')).toBe(true)
@@ -201,7 +156,6 @@ describe('scanContentQualityFlags — 总开关', () => {
       angleLabel: 'mapei brisbane',
       onScreenHook: '$35.50/m²',
       captions: Array(3).fill('Customer Stories & Community'),
-      intendedNarrator: null,
     })
     expect(callJev).not.toHaveBeenCalled()
     expect(flags.some((f) => f.category === 'placeholder_caption')).toBe(true)
@@ -214,7 +168,6 @@ describe('scanContentQualityFlags — 总开关', () => {
       angleLabel: null,
       onScreenHook: null,
       captions: [],
-      intendedNarrator: null,
     })
     expect(callJev).not.toHaveBeenCalled()
     expect(flags).toEqual([])

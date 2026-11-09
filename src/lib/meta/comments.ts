@@ -11,7 +11,7 @@
  * 7 days of the comment, once per comment.
  */
 
-const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
+import { GRAPH_BASE } from './graph-base'
 
 export interface PageComment {
   commentId: string

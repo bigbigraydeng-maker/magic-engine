@@ -1,0 +1,464 @@
+import { describe, expect, it } from 'vitest'
+import { adSetViews, allCreatives, describeDraft, unionAudienceIds, validateDraft, type AdDraft, type AdDraftAdSet } from '../ad-draft'
+import {
+  MAX_BUILDABLE_AD_SETS,
+  draftNotYetBuildable,
+  readPromoPhaseAdSets,
+  reviewDraftAgainstCaps,
+  reviewDraftForBuild,
+} from '../ad-draft-expansion'
+import type { AudienceFact } from '../draft-audiences'
+import { checkDraftRedlines } from '../draft-redlines'
+
+const OFF = {
+  advantageAudience: false,
+  customAudienceRelaxed: false,
+  lookalikeRelaxed: false,
+}
+
+function creative() {
+  return { name: 'A', primaryText: 'Hello there', headline: 'Read more', imageHash: 'h1' }
+}
+
+function adSet(over: Partial<AdDraftAdSet> = {}): AdDraftAdSet {
+  return {
+    name: 'group-a',
+    dailyBudget: 15,
+    geoCountries: ['NZ'],
+    creatives: [creative()],
+    ...over,
+  }
+}
+
+function multi(over: Partial<AdDraft> = {}): AdDraft {
+  return {
+    kind: 'lead_form',
+    clientId: 'c1',
+    campaignName: 'lead campaign',
+    adSetName: '',
+    dailyBudget: 30,
+    durationDays: 7,
+    geoCountries: [],
+    pageId: 'p1',
+    leadFormId: 'f1',
+    creatives: [],
+    budgetMode: 'ad_set',
+    adSets: [
+      adSet({ audienceIds: ['1111111'], excludedAudienceIds: ['2222222'], expansion: OFF }),
+      adSet({ name: 'group-b' }),
+    ],
+    ...over,
+  }
+}
+
+const fields = (d: AdDraft) => validateDraft(d).map((x) => x.field)
+
+describe('扩展后的广告草稿', () => {
+  it('两个广告组、组预算、受众和排除都写了、扩量全关 → 校验通过', () => {
+    expect(validateDraft(multi())).toEqual([])
+    expect(describeDraft(multi())).toContain('2 个广告组')
+  })
+
+  it('旧的单组草稿一个新字段都没有 → 还是通过，摘要不提广告组个数', () => {
+    const legacy: AdDraft = {
+      kind: 'lead_form', clientId: 'c1', campaignName: 'n', adSetName: 'a',
+      dailyBudget: 30, durationDays: 7, geoCountries: ['NZ'], pageId: 'p1', leadFormId: 'f1',
+      creatives: [creative()],
+    }
+    expect(validateDraft(legacy)).toEqual([])
+    expect(describeDraft(legacy)).not.toContain('广告组')
+    expect(draftNotYetBuildable(legacy)).toBeNull()
+  })
+
+  it('各组日预算加起来和每天预算对不上 → 拦', () => {
+    expect(fields(multi({ dailyBudget: 20 }))).toContain('dailyBudget')
+  })
+
+  it('没写预算放在哪 → 拦，不猜成系列预算或组预算', () => {
+    const d = multi()
+    delete d.budgetMode
+    expect(fields(d)).toContain('budgetMode')
+  })
+
+  it('系列预算：各组不写日预算，合计写在系列上 → 通过', () => {
+    const d = multi({
+      budgetMode: 'campaign',
+      campaignDailyBudget: 30,
+      adSets: [
+        adSet({ dailyBudget: undefined, minDailyBudget: 5, maxDailyBudget: 20, audienceIds: ['1111111'], expansion: OFF }),
+        adSet({ name: 'group-b', dailyBudget: undefined }),
+      ],
+    })
+    expect(validateDraft(d)).toEqual([])
+    expect(describeDraft(d)).toContain('系列预算')
+    expect(draftNotYetBuildable(d)).toContain('系列预算')
+  })
+
+  it('系列预算时又给组写日预算 → 拦', () => {
+    const d = multi({
+      budgetMode: 'campaign',
+      campaignDailyBudget: 30,
+      adSets: [adSet({ minDailyBudget: 40 })],
+    })
+    expect(fields(d)).toContain('adSets[0].dailyBudget')
+  })
+
+  it('各组下限加起来超过系列预算 → 拦', () => {
+    const d = multi({
+      budgetMode: 'campaign',
+      campaignDailyBudget: 30,
+      adSets: [
+        adSet({ dailyBudget: undefined, minDailyBudget: 20, audienceIds: ['1111111'], expansion: OFF }),
+        adSet({ name: 'group-b', dailyBudget: undefined, minDailyBudget: 20 }),
+      ],
+    })
+    expect(fields(d).filter((f) => f === 'campaignDailyBudget').length).toBeGreaterThan(0)
+  })
+
+  it('挂了受众却没写扩量开关 → 建前复核过不了', () => {
+    const d = multi({
+      adSets: [adSet({ audienceIds: ['1111111'] }), adSet({ name: 'group-b' })],
+    })
+    expect(fields(d)).toContain('adSets[0].expansion')
+  })
+
+  it('挂了受众但优势受众开着 → 拦', () => {
+    const d = multi({
+      adSets: [
+        adSet({
+          audienceIds: ['1111111'],
+          expansion: { ...OFF, advantageAudience: true, source: 'step-1' },
+        }),
+        adSet({ name: 'group-b' }),
+      ],
+    })
+    expect(fields(d)).toContain('adSets[0].expansion')
+  })
+
+  it('只排除、不包含，相似人群开着 → 拦', () => {
+    const d = multi({
+      adSets: [
+        adSet({
+          excludedAudienceIds: ['2222222'],
+          expansion: { ...OFF, lookalikeRelaxed: true, source: 'step-1' },
+        }),
+      ],
+      dailyBudget: 15,
+    })
+    expect(fields(d)).toContain('adSets[0].expansion')
+  })
+
+  it('没有受众时打开扩量，必须写出处；写了出处校验通过，但现在还不能拿去建', () => {
+    const opened = { advantageAudience: true, customAudienceRelaxed: false, lookalikeRelaxed: false }
+    const missing = multi({
+      adSets: [adSet({ expansion: opened })],
+      dailyBudget: 15,
+    })
+    expect(fields(missing)).toContain('adSets[0].expansion.source')
+    const sourced = multi({
+      adSets: [adSet({ expansion: { ...opened, source: 'step-1' } })],
+      dailyBudget: 15,
+    })
+    expect(validateDraft(sourced)).toEqual([])
+    expect(draftNotYetBuildable(sourced)).toContain('打开的受众扩量')
+  })
+
+  it('国家和城市同时填 → 拦', () => {
+    const d = multi({
+      adSets: [adSet({ geoCityKeys: ['city-1'] })],
+      dailyBudget: 15,
+    })
+    expect(fields(d)).toContain('adSets[0].geoCityKeys')
+  })
+
+  it('按钮写错 → 拦；网址参数带问号 → 拦；空首评 → 拦', () => {
+    expect(fields(multi({ adSets: [adSet({ ctaType: 'BUY_NOW' })], dailyBudget: 15 }))).toContain('adSets[0].ctaType')
+    expect(fields(multi({ adSets: [adSet({ urlTags: '?utm_medium=paid' })], dailyBudget: 15 }))).toContain('adSets[0].urlTags')
+    expect(fields(multi({ adSets: [adSet({ firstComment: '   ' })], dailyBudget: 15 }))).toContain('adSets[0].firstComment')
+  })
+
+  it('单个旧草稿挂了受众但没写开关：validateDraft 仍通过，建前复核拦住', () => {
+    const d: AdDraft = {
+      kind: 'lead_form', clientId: 'c1', campaignName: 'n', adSetName: 'a',
+      dailyBudget: 30, durationDays: 7, geoCountries: ['NZ'], pageId: 'p1', leadFormId: 'f1',
+      creatives: [creative()],
+      audienceIds: ['1111111'],
+    }
+    expect(validateDraft(d)).toEqual([])
+    expect(reviewDraftForBuild(d).map((x) => x.field)).toContain('expansion')
+    const reviewed = reviewDraftForBuild({ ...d, expansion: OFF })
+    expect(reviewed).toEqual([])
+    expect(draftNotYetBuildable({ ...d, expansion: OFF })).toBeNull()
+  })
+})
+
+describe('建前复核用已经读到的数，自己不读 Meta', () => {
+  it('最低日预算没读到 → 不能当成通过；读到了而且组预算更低 → 拦', () => {
+    const unread = reviewDraftForBuild(multi(), { minDailyBudget: null })
+    expect(unread.map((x) => x.field)).toContain('minDailyBudget')
+    const low = reviewDraftForBuild(multi(), { minDailyBudget: { minor: 2000, currency: 'NZD' } })
+    expect(low.some((x) => x.field.startsWith('adSets['))).toBe(true)
+  })
+
+  it('受众事实没给 → 不能当成通过；编号不在账户里 → 拦', () => {
+    const unread = reviewDraftForBuild(multi(), { audienceFacts: null })
+    expect(unread.map((x) => x.message).join('')).toContain('没读到')
+    const facts = new Map<string, AudienceFact>([
+      ['2222222', fact('2222222', 1000)],
+    ])
+    const missing = reviewDraftForBuild(multi(), { audienceFacts: facts })
+    expect(missing.map((x) => x.message).join('')).toContain('不属于这个广告账户')
+  })
+
+  it('包含受众太小 → 拦；都够大 → 这一项通过', () => {
+    const small = new Map<string, AudienceFact>([
+      ['1111111', fact('1111111', 10)],
+      ['2222222', fact('2222222', 1000)],
+    ])
+    expect(reviewDraftForBuild(multi(), { audienceFacts: small }).map((x) => x.message).join('')).toContain('太小')
+    const ready = new Map<string, AudienceFact>([
+      ['1111111', fact('1111111', 1000)],
+      ['2222222', fact('2222222', 1000)],
+    ])
+    expect(reviewDraftForBuild(multi(), { audienceFacts: ready })).toEqual([])
+  })
+
+  it('预算上限沿用计划那道检查：两组加起来超了账户上限 → 超', () => {
+    const r = reviewDraftAgainstCaps(
+      multi(),
+      'act_1',
+      [{ ad_account_id: 'act_1', currency: 'AUD', daily_cap_cents: 1000, owned_by_client: true }],
+      5000,
+    )
+    expect(r.verdict).toBe('over')
+    expect(r.per_account_cents.act_1).toBe(3000)
+  })
+
+  it('没给广告账户 → 核不成，不编一个账户', () => {
+    expect(reviewDraftAgainstCaps(multi(), '  ', [], null).verdict).toBe('unknown')
+  })
+})
+
+describe('从计划步骤投影广告组', () => {
+  it('一个阶段两个步骤、受众是编号 → 两个组、组预算，文案留空', () => {
+    const r = readPromoPhaseAdSets(promo('1111111'), 'p1')
+    expect(r.problems).toEqual([])
+    expect(r.budgetMode).toBe('ad_set')
+    expect(r.dailyBudget).toBe(30)
+    expect(r.adSets).toHaveLength(2)
+    expect(r.adSets?.[0].audienceIds).toEqual(['1111111'])
+    expect(r.adSets?.[0].excludedAudienceIds).toEqual(['3333333'])
+    expect(r.adSets?.[0].creatives).toEqual([])
+  })
+
+  it('受众引用不是编号 → 不返回广告组，也不猜', () => {
+    const r = readPromoPhaseAdSets(promo('pool-a'), 'p1')
+    expect(r.adSets).toBeUndefined()
+    expect(r.problems.map((x) => x.message).join('')).toContain('不是受众编号')
+  })
+
+  it('没有投放地区 → 不猜国家', () => {
+    const raw = promo('1111111')
+    const step = (raw as { phases: { steps: { settings: { targeting?: unknown } }[] }[] }).phases[0].steps[0]
+    delete step.settings.targeting
+    const r = readPromoPhaseAdSets(raw, 'p1')
+    expect(r.adSets).toBeUndefined()
+    expect(r.problems.map((x) => x.message).join('')).toContain('不猜国家')
+  })
+
+  it('计划本身读不懂 → 用同一套解析的报错', () => {
+    const r = readPromoPhaseAdSets({ schema: 'nope' }, 'p1')
+    expect(r.problems.length).toBeGreaterThan(0)
+    expect(r.adSets).toBeUndefined()
+  })
+})
+
+function fact(id: string, count: number): AudienceFact {
+  return {
+    id,
+    name: null,
+    operationStatusCode: 200,
+    deliveryStatusCode: 200,
+    countLowerBound: count,
+  }
+}
+
+function promo(audienceRef: string) {
+  const step = (id: string, ref: string, country: string, excluded: string[]) => ({
+    id,
+    kind: 'ads_campaign' as const,
+    settings: {
+      ad_account_id: 'act_1',
+      daily_budget_cents: 1500,
+      audience_ref: ref,
+      creative_refs: [],
+      placements: [],
+      paused_ranges: [],
+      targeting: { countries: [country], city_keys: [], excluded_audience_refs: excluded },
+    },
+  })
+  return {
+    schema: 'promo_v1',
+    goal_id: 'g1',
+    phases: [{
+      id: 'p1',
+      name: 'phase',
+      start_date: '2026-11-01',
+      end_date: '2026-11-14',
+      steps: [step('step-a', audienceRef, 'NZ', ['3333333']), step('step-b', '4444444', 'AU', [])],
+    }],
+  }
+}
+
+describe('发布器现在能建的多广告组', () => {
+  it('留资类型、预算在组上、组数不超上限、扩量全关 → 能建', () => {
+    expect(draftNotYetBuildable(multi())).toBeNull()
+  })
+
+  it('看完视频类型也能建；私信类型的多个广告组仍不能建', () => {
+    expect(draftNotYetBuildable(multi({ kind: 'video_thruplay' }))).toBeNull()
+    expect(draftNotYetBuildable(multi({ kind: 'messenger_conversation' }))).toContain('多个广告组')
+  })
+
+  it(`超过 ${MAX_BUILDABLE_AD_SETS} 个组 → 不能建；刚好 ${MAX_BUILDABLE_AD_SETS} 个 → 能建`, () => {
+    const make = (n: number) => multi({
+      dailyBudget: n * 5,
+      adSets: Array.from({ length: n }, (_, i) => adSet({ name: `g${i}`, dailyBudget: 5 })),
+    })
+    expect(draftNotYetBuildable(make(MAX_BUILDABLE_AD_SETS))).toBeNull()
+    expect(draftNotYetBuildable(make(MAX_BUILDABLE_AD_SETS + 1))).toContain(`${MAX_BUILDABLE_AD_SETS}`)
+  })
+
+  it('系列预算（CBO）、打开的扩量、网址参数这些仍然不能建', () => {
+    expect(draftNotYetBuildable(multi({ budgetMode: 'campaign', campaignDailyBudget: 30 }))).toContain('系列预算')
+    expect(draftNotYetBuildable(multi({ adSets: [adSet({ expansion: { ...OFF, advantageAudience: true, source: 's' } })], dailyBudget: 15 }))).toContain('扩量')
+    expect(draftNotYetBuildable(multi({ adSets: [adSet({ urlTags: 'utm_medium=paid' })], dailyBudget: 15 }))).toContain('网址参数')
+  })
+
+  it('adSets 不是数组 → 不能建（不猜）', () => {
+    const bad = { ...multi(), adSets: 'oops' } as unknown as AdDraft
+    expect(draftNotYetBuildable(bad)).toContain('格式不对')
+  })
+})
+
+describe('系列花费上限 campaignSpendCapMinor', () => {
+  it('不写 → 不影响校验；写了正整数（分）→ 通过', () => {
+    expect(fields(multi())).not.toContain('campaignSpendCapMinor')
+    expect(fields(multi({ campaignSpendCapMinor: 42000 }))).not.toContain('campaignSpendCapMinor')
+  })
+
+  it('0、负数、小数、不是数字 → 拦', () => {
+    for (const bad of [0, -5, 420.5, Number.NaN]) {
+      expect(fields(multi({ campaignSpendCapMinor: bad }))).toContain('campaignSpendCapMinor')
+    }
+  })
+
+  it('比一天的预算还低（多半把元当成分）→ 拦', () => {
+    expect(fields(multi({ campaignSpendCapMinor: 420 }))).toContain('campaignSpendCapMinor')
+  })
+
+  it('低于「每天预算合计 × 天数」→ 拦（会让广告没跑完就被拦停）；刚好等于或更高 → 放行', () => {
+    const base = multi()
+    const total = Math.round(base.dailyBudget * 100) * base.durationDays
+    expect(fields(multi({ campaignSpendCapMinor: total - 1 }))).toContain('campaignSpendCapMinor')
+    expect(fields(multi({ campaignSpendCapMinor: 3000 }))).toContain('campaignSpendCapMinor')
+    expect(fields(multi({ campaignSpendCapMinor: total }))).not.toContain('campaignSpendCapMinor')
+    expect(fields(multi({ campaignSpendCapMinor: total + 1 }))).not.toContain('campaignSpendCapMinor')
+  })
+})
+
+describe('adSetViews / allCreatives / unionAudienceIds', () => {
+  it('单组草稿：视图就是它自己（同一个对象）', () => {
+    const single: AdDraft = { ...multi(), adSets: undefined, adSetName: 'a', geoCountries: ['NZ'], creatives: [creative()] }
+    expect(adSetViews(single)).toEqual([single])
+    expect(allCreatives(single)).toHaveLength(1)
+  })
+
+  it('多组草稿：每个组一份单组视图，带着自己的名字、预算、年龄、创意，且不再带 adSets', () => {
+    const d = multi({ adSets: [adSet({ name: 'g1', dailyBudget: 9.5, ageMin: 35 }), adSet({ name: 'g2', dailyBudget: 10.5 })], dailyBudget: 20 })
+    const views = adSetViews(d)
+    expect(views.map((v) => [v.adSetName, v.dailyBudget, v.ageMin])).toEqual([['g1', 9.5, 35], ['g2', 10.5, undefined]])
+    expect(views.every((v) => v.adSets === undefined)).toBe(true)
+    expect(views.every((v) => v.campaignName === 'lead campaign')).toBe(true)
+    expect(allCreatives(d)).toHaveLength(2)
+  })
+
+  it('受众编号取所有组的并集并去重', () => {
+    const d = multi({
+      adSets: [
+        adSet({ name: 'g1', audienceIds: ['1111111'], excludedAudienceIds: ['2222222'], expansion: OFF }),
+        adSet({ name: 'g2', audienceIds: ['1111111', '3333333'], expansion: OFF }),
+      ],
+    })
+    expect(unionAudienceIds(d)).toEqual({ included: ['1111111', '3333333'], excluded: ['2222222'] })
+  })
+
+  it('describeDraft 多组时列出每个组的名字和日预算', () => {
+    const text = describeDraft(multi({ adSets: [adSet({ name: 'g1', dailyBudget: 9.5 }), adSet({ name: 'g2', dailyBudget: 10.5 })], dailyBudget: 20 }))
+    expect(text).toContain('2 个广告组')
+    expect(text).toContain('g1 $9.5')
+    expect(text).toContain('g2 $10.5')
+  })
+})
+
+describe('年龄和预算的位数（多组与单组各走各的路，规则一样）', () => {
+  const setField = (over: Partial<AdDraftAdSet>) => multi({ adSets: [adSet({ name: 'g1', dailyBudget: 15, ...over }), adSet({ name: 'g2', dailyBudget: 15 })], dailyBudget: 30 })
+  const single = (over: Partial<AdDraft>): AdDraft => ({
+    kind: 'lead_form', clientId: 'c1', campaignName: 'c', adSetName: 'a', dailyBudget: 30, durationDays: 7,
+    geoCountries: ['NZ'], pageId: 'p1', leadFormId: 'f1', creatives: [creative()], ...over,
+  })
+
+  it('多组：年龄上限 > 65、下限 > 65、下限 > 上限、下限 < 18 → 各自拦；35–65 放行', () => {
+    expect(fields(setField({ ageMax: 66 }))).toContain('adSets[0].ageMax')
+    expect(fields(setField({ ageMin: 66 }))).toContain('adSets[0].ageMin')
+    expect(fields(setField({ ageMin: 50, ageMax: 40 }))).toContain('adSets[0].ageMax')
+    expect(fields(setField({ ageMin: 17 }))).toContain('adSets[0].ageMin')
+    const ok = fields(setField({ ageMin: 35, ageMax: 65 }))
+    expect(ok.filter((f) => f.includes('age'))).toEqual([])
+  })
+
+  it('单组：同样的年龄规则', () => {
+    expect(fields(single({ ageMax: 66 }))).toContain('ageMax')
+    expect(fields(single({ ageMin: 66 }))).toContain('ageMin')
+    expect(fields(single({ ageMin: 50, ageMax: 40 }))).toContain('ageMax')
+    expect(fields(single({ ageMin: 17 }))).toContain('ageMin')
+    expect(fields(single({ ageMin: 35, ageMax: 65 })).filter((f) => f.includes('age'))).toEqual([])
+  })
+
+  it('多组：组日预算写到分以后还有小数位（9.505）→ 拦；9.5 / 10.25 放行', () => {
+    expect(fields(setField({ dailyBudget: 9.505 }))).toContain('adSets[0].dailyBudget')
+    expect(fields(setField({ dailyBudget: 10.25 })).filter((f) => f === 'adSets[0].dailyBudget')).toEqual([])
+    expect(fields(setField({ dailyBudget: 9.5 })).filter((f) => f === 'adSets[0].dailyBudget')).toEqual([])
+  })
+
+  it('单组：每天预算 9.505 → 拦；9.5 放行', () => {
+    expect(fields(single({ dailyBudget: 9.505 }))).toContain('dailyBudget')
+    expect(fields(single({ dailyBudget: 9.5 }))).not.toContain('dailyBudget')
+  })
+})
+
+describe('adSets 里的元素形状不对：账本摘要和红线扫描不能抛错（在 validateDraft 之前就会走到）', () => {
+  const junkItems: unknown[] = [null, 7, 'x', { name: 'only-name' }, {}]
+  const junk = junkItems as AdDraftAdSet[]
+
+  it('describeDraft 不抛，缺的名字 / 预算显示成 ?', () => {
+    const text = describeDraft(multi({ adSets: junk }))
+    expect(text).toContain('5 个广告组')
+    expect(text).toContain('only-name $?')
+  })
+
+  it('adSetViews / allCreatives 不抛，读不懂的组按「没有创意」处理', () => {
+    const d = multi({ adSets: junk })
+    expect(adSetViews(d)).toHaveLength(5)
+    expect(allCreatives(d)).toEqual([])
+  })
+
+  it('validateDraft 对这种草稿给出错误而不是抛', () => {
+    expect(() => validateDraft(multi({ adSets: junk }))).not.toThrow()
+    expect(validateDraft(multi({ adSets: junk })).length).toBeGreaterThan(0)
+  })
+
+  it('checkDraftRedlines 不抛', () => {
+    expect(() => checkDraftRedlines(multi({ adSets: junk }), ['cheapest'])).not.toThrow()
+  })
+})

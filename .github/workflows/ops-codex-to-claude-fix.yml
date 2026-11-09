@@ -165,7 +165,7 @@ jobs:
           # makes the obvious abuses harder, but this leg genuinely needs a
           # shell to run tests and to commit + push, and any shell is enough
           # to do damage if the model is talked into it. What actually bounds
-          # the blast radius is ops-fix-scope-guard.yml, which judges the
+          # the blast radius is the fix-scope step in pr-light-checks.yml, which judges the
           # resulting diff and does not care what the prompt said.
           claude_args: '--allowed-tools Read,Edit,Write,Glob,Grep,Bash'
           additional_permissions: |

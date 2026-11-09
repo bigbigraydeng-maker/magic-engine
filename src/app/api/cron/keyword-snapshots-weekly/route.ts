@@ -9,6 +9,11 @@ import {
   type SerpCaptureClient,
   type SerpCaptureResult,
 } from '@/lib/seo-intelligence/serp-capture'
+import {
+  parseWatchKeywords,
+  snapshotWatchedKeywordsForClient,
+  type WatchSnapshotResult,
+} from '@/lib/seo-intelligence/watch-keywords'
 import { startCronRun } from '@/lib/cron/run-logger'
 
 /**
@@ -33,6 +38,7 @@ interface ClientRow {
   semrush_db: string | null
   name: string | null
   brand_aliases: string[] | null
+  seo_config: unknown
 }
 
 export async function GET(req: NextRequest) {
@@ -54,7 +60,7 @@ export async function GET(req: NextRequest) {
   // 真客户闸门：周期性监测只对 active 客户跑（DataForSEO 计划 阶段 0）
   const { data: clients, error: clientErr } = await supabaseAdmin
     .from('clients')
-    .select('id, domain, semrush_db, name, brand_aliases')
+    .select('id, domain, semrush_db, name, brand_aliases, seo_config')
     .eq('client_status', 'active')
     .not('domain', 'is', null)
 
@@ -80,6 +86,10 @@ export async function GET(req: NextRequest) {
       brand_aliases: c.brand_aliases ?? null,
     }))
 
+  const watchKeywordsByClient = new Map<string, string[]>(
+    ((clients ?? []) as ClientRow[]).map(c => [c.id, parseWatchKeywords(c.seo_config)]),
+  )
+
   if (eligibleClients.length === 0) {
     await cronRun.finish({ processed: 0, completed: 0, failed: 0 })
     return NextResponse.json({
@@ -100,6 +110,8 @@ export async function GET(req: NextRequest) {
     snapshots_written: number
     serp?: SerpCaptureResult
     serp_error?: string
+    watch?: WatchSnapshotResult
+    watch_error?: string
     error?: string
   }> = []
 
@@ -109,15 +121,25 @@ export async function GET(req: NextRequest) {
 
       // Step 2 — SERP capture rides on the fresh snapshot. Its failure must
       // not undo step 1 (snapshots already written), so it's caught separately.
+      const entry: (typeof results)[number] = { ...result }
       try {
-        const serp = await captureSerpForClient(client)
-        results.push({ ...result, serp })
+        entry.serp = await captureSerpForClient(client)
       } catch (serpErr) {
-        results.push({
-          ...result,
-          serp_error: serpErr instanceof Error ? serpErr.message : 'Unknown error',
-        })
+        entry.serp_error = serpErr instanceof Error ? serpErr.message : 'Unknown error'
       }
+
+      // Step 3 — per-client watch keywords (seo_config.rank_watch_keywords). Runs after
+      // SERP capture so the extra rows never trigger a second SERP per word; its failure
+      // must not undo steps 1-2.
+      try {
+        const watchKeywords = watchKeywordsByClient.get(client.id) ?? []
+        if (watchKeywords.length > 0) {
+          entry.watch = await snapshotWatchedKeywordsForClient(client, watchKeywords)
+        }
+      } catch (watchErr) {
+        entry.watch_error = watchErr instanceof Error ? watchErr.message : 'Unknown error'
+      }
+      results.push(entry)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       results.push({
@@ -135,6 +157,8 @@ export async function GET(req: NextRequest) {
   const localPackHits = results.reduce((sum, r) => sum + (r.serp?.local_pack_hits ?? 0), 0)
   const failedCount = results.filter(r => r.error !== undefined).length
   const serpFailedCount = results.filter(r => r.serp_error !== undefined).length
+  const watchRowsWritten = results.reduce((sum, r) => sum + (r.watch?.rows_written ?? 0), 0)
+  const watchFailedCount = results.filter(r => r.watch_error !== undefined).length
 
   await cronRun.finish({
     processed: results.length,
@@ -145,6 +169,8 @@ export async function GET(req: NextRequest) {
       serp_rows_written: serpRowsWritten,
       local_pack_hits: localPackHits,
       serp_failed_clients: serpFailedCount,
+      watch_rows_written: watchRowsWritten,
+      watch_failed_clients: watchFailedCount,
     },
   })
   return NextResponse.json({

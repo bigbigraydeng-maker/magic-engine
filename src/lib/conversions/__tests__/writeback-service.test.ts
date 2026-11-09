@@ -23,12 +23,16 @@ class FakeDb {
     contact_touchpoints: [],
   }
 
+  /** 记录每次 select 点名了哪些列，测「某列被悄悄从查询里删掉」这类静默回归。 */
+  selectLog: Array<{ table: string; columns: string }> = []
+
   /** 按表名注入一次性查询失败，测「查不到就当放行」这类假开的坑。 */
   errorOn: Partial<Record<string, { message: string }>> = {}
 
   from(table: string) {
     const failure = this.errorOn[table]
     const rows = this.tables[table] ?? []
+    const selectLog = this.selectLog
     const q: {
       _filters: Array<(r: Row) => boolean>
       _op: 'select' | 'update' | 'insert'
@@ -47,7 +51,8 @@ class FakeDb {
       _filters: [],
       _op: 'select',
       _patch: {},
-      select() {
+      select(...a: unknown[]) {
+        selectLog.push({ table, columns: typeof a[0] === 'string' ? a[0] : '' })
         return q
       },
       eq(col: string, val: unknown) {
@@ -157,6 +162,7 @@ function seed(
     review_status: 'approved',
     redacted_at: null,
     page_scoped_user_id: null,
+    meta_lead_id: null,
     source_kind: 'manual_seed',
     ...over.outcome,
   })
@@ -409,6 +415,20 @@ describe('不该发的都不发', () => {
     expect(r.message).toContain('35 天')
   })
 
+  it('窗口天数跟着目标平台走，不写死 7 天：窗口 3 天的平台，4 天前的不发、2 天前的照发', async () => {
+    seed(db, { outcome: { occurred_at: new Date(Date.now() - 4 * 86_400_000).toISOString() } })
+    const w3 = makeWriter({ maxEventAgeDays: 3 })
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w3))
+    expect(r.status).toBe('expired_no_send')
+    expect(w3.sendSpy).not.toHaveBeenCalled()
+
+    const db2 = new FakeDb()
+    seed(db2, { outcome: { occurred_at: new Date(Date.now() - 2 * 86_400_000).toISOString() } })
+    const w3b = makeWriter({ maxEventAgeDays: 3 })
+    const r2 = await sendApprovedOutcome(OUTCOME, deps(db2, w3b))
+    expect(r2.status).toBe('confirmed')
+  })
+
   it('组装不出来的不发（例如不认识的币种）', async () => {
     seed(db)
     const w = makeWriter({
@@ -461,6 +481,36 @@ describe('Facebook 私信身份（PSID）匹配键 —— NAL 数据源', () => 
 })
 
 // ─────────────────────────────────────────────────────────────────────────
+describe('Facebook 线索编号 —— 从库到 writer.build()', () => {
+  it('DB 里的 meta_lead_id 原样递给 writer.build()', async () => {
+    seed(db, { outcome: { meta_lead_id: '1687504185706630' } })
+    const buildSpy = vi.fn().mockReturnValue({ data: [] })
+    const w = makeWriter({ build: buildSpy })
+    await sendApprovedOutcome(OUTCOME, deps(db, w))
+
+    expect(buildSpy).toHaveBeenCalledTimes(1)
+    expect(buildSpy.mock.calls[0][0].metaLeadId).toBe('1687504185706630')
+  })
+
+  it('🔴 读 me_sale_outcomes 的 select 列表点名了 meta_lead_id —— 以后被人悄悄删掉，这里先红', async () => {
+    seed(db)
+    await sendApprovedOutcome(OUTCOME, deps(db, makeWriter({ build: vi.fn().mockReturnValue({ data: [] }) })))
+
+    const reads = db.selectLog.filter((s) => s.table === 'me_sale_outcomes')
+    expect(reads.length).toBeGreaterThan(0)
+    expect(reads.some((s) => s.columns.includes('meta_lead_id'))).toBe(true)
+  })
+
+  it('没有线索编号的旧记录：metaLeadId 恒为 null', async () => {
+    seed(db)
+    const buildSpy = vi.fn().mockReturnValue({ data: [] })
+    const w = makeWriter({ build: buildSpy })
+    await sendApprovedOutcome(OUTCOME, deps(db, w))
+
+    expect(buildSpy.mock.calls[0][0].metaLeadId).toBeNull()
+  })
+})
+
 describe('试运行模式', () => {
   it('不真发，只存打码预览', async () => {
     seed(db, { client: { conversion_stage: 'dry_run' } })
@@ -492,7 +542,7 @@ describe('各种失败分档落到正确状态', () => {
   const cases: Array<[string, SendVerdict, string, boolean]> = [
     ['平台确认收到', { kind: 'accepted', receipt: {} }, 'confirmed', false],
     ['太旧', { kind: 'expired', detail: 'too old' }, 'expired_no_send', false],
-    ['授权失效', { kind: 'auth', detail: '令牌失效' }, 'failed_permanent', false],
+    ['授权失效（2026-09-22 起可重发，不再永久作废）', { kind: 'auth', detail: '令牌失效' }, 'failed', false],
     ['限流可重试', { kind: 'retry', detail: '忙', retryAfterMs: 300_000 }, 'failed', false],
     ['结果不确定', { kind: 'in_doubt', detail: '超时' }, 'in_doubt', true],
     ['请求本身错', { kind: 'permanent', detail: '字段缺失' }, 'failed_permanent', false],
@@ -532,8 +582,59 @@ describe('各种失败分档落到正确状态', () => {
     seed(db)
     const w = makeWriter({ accept: () => ({ kind: 'auth', detail: 'OAuthException code 190' }) })
     const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
-    expect(r.message).toContain('重新连接')
+    expect(r.message).toContain('自动补发')
     expect(r.message).not.toContain('190')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+describe('授权失效 → 令牌修好后可以再发（2026-09-22，CTS 19 条永久丢失的教训）', () => {
+  const NOW = new Date('2026-09-22T18:00:00.000Z')
+
+  it('落 failed + last_error_code=auth + next_attempt_at=一小时后（精确到值，不是 toBeTruthy）', async () => {
+    seed(db)
+    const w = makeWriter({ accept: () => ({ kind: 'auth', detail: '令牌失效' }) })
+    const r = await sendApprovedOutcome(OUTCOME, { ...deps(db, w), now: NOW })
+    expect(r.status).toBe('failed')
+    const wb = db.tables.me_conversion_writebacks[0]
+    expect(wb.status).toBe('failed')
+    expect(wb.last_error_code).toBe('auth')
+    expect(wb.next_attempt_at).toBe('2026-09-22T19:00:00.000Z')
+  })
+
+  it('第一次授权失败、第二次令牌好了 → 真的再发一次并记为已确认（证明接上了 CAS 那条可重发路径）', async () => {
+    seed(db)
+    let call = 0
+    const w = makeWriter({
+      accept: () => (++call === 1 ? { kind: 'auth', detail: '令牌失效' } : { kind: 'accepted', receipt: {} }),
+    })
+    const first = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(first.status).toBe('failed')
+    const second = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(second.status).toBe('confirmed')
+    expect(w.sendSpy).toHaveBeenCalledTimes(2)
+    expect(db.tables.me_conversion_writebacks[0].last_error).toBeNull()
+  })
+
+  it('授权失败的行超过 7 天窗口后再来 → 判过期不发，不会永远重试', async () => {
+    // 事件时间要跟 NOW 同一个时钟：默认 seed 用真实时钟的「两天前」，真实日期走过 9-23 后
+    // 「NOW + 8 天」离事件就不到 7 天了，这条测试从那天起一直是红的（2026-09-26 发现）。
+    seed(db, { outcome: { occurred_at: new Date(NOW.getTime() - 2 * 86_400_000).toISOString() } })
+    const w = makeWriter({ accept: () => ({ kind: 'auth', detail: '令牌失效' }) })
+    await sendApprovedOutcome(OUTCOME, { ...deps(db, w), now: NOW })
+    const later = new Date(NOW.getTime() + 8 * 86_400_000)
+    const r = await sendApprovedOutcome(OUTCOME, { ...deps(db, w), now: later })
+    expect(r.status).toBe('expired_no_send')
+    expect(w.sendSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('🔴 in_doubt 不受影响：仍然是终态，再调也不发', async () => {
+    seed(db)
+    const w = makeWriter({ accept: () => ({ kind: 'in_doubt', detail: '超时' }) })
+    await sendApprovedOutcome(OUTCOME, deps(db, w))
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.status).toBe('in_doubt')
+    expect(w.sendSpy).toHaveBeenCalledTimes(1)
   })
 })
 

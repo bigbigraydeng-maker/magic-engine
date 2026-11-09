@@ -1,7 +1,15 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin } from '@/lib/auth/require-admin'
-import { loadTodoCounts, nzWeekday, DAY_THEMES, ZH_DAYS } from '@/lib/pm-todo/daily-todo'
+import {
+  loadTodoCounts,
+  buildTodoView,
+  routedElsewhereNote,
+  DEV_DEBT_URL,
+  nzWeekday,
+  DAY_THEMES,
+  ZH_DAYS,
+} from '@/lib/pm-todo/daily-todo'
 
 /**
  * GET /api/workbench/today (22.E.S18 前置)
@@ -14,6 +22,8 @@ import { loadTodoCounts, nzWeekday, DAY_THEMES, ZH_DAYS } from '@/lib/pm-todo/da
 
 export const dynamic = 'force-dynamic'
 
+const LINK_CHECK_BUDGET_MS = 2_500
+
 export async function GET() {
   const guard = await guardAdmin()
   if (guard) return guard
@@ -21,7 +31,9 @@ export async function GET() {
   const now = new Date()
   const weekday = nzWeekday(now)
 
-  const counts = await loadTodoCounts(supabaseAdmin)
+  // 有人在盯着转圈：外网链接检查最多等这么久，没验完的先放行（见 dropBrokenLinks）
+  const counts = await loadTodoCounts(supabaseAdmin, { linkCheckBudgetMs: LINK_CHECK_BUDGET_MS })
+  const view = buildTodoView(counts)
 
   return NextResponse.json({
     weekday,
@@ -34,5 +46,9 @@ export async function GET() {
       year: 'numeric',
     }),
     counts,
+    // 页面只渲染这个 —— 跟 pm-daily-todo 邮件是同一个函数算出来的，两边不会对不上
+    view,
+    routed_note: routedElsewhereNote(view),
+    dev_debt_url: view.routedToDev > 0 || view.cronFailures24h > 0 ? DEV_DEBT_URL : null,
   })
 }

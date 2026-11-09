@@ -153,5 +153,45 @@ describe('runTracker — parse-failure update path', () => {
     expect(result.runs_succeeded).toBe(1)
     expect(result.runs_failed).toBe(0)
     expect(result.errors).toHaveLength(0)
+    // Parse succeeded too, so this run is conclusive — real data, not just a clean write.
+    expect(result.runs_conclusive).toBe(1)
+  })
+
+  it('runs_conclusive stays 0 when the provider answers but parsing fails, even though runs_succeeded still counts it (Codex review 2026-09-28)', async () => {
+    // Same shape as the test above — DB insert and update both succeed —
+    // but parseRanking throws. runs_succeeded still increments (that's the
+    // existing, tested quirk: a clean DB write counts as "succeeded" even
+    // when we couldn't extract a ranking from the response). runs_conclusive
+    // is the field callers should read instead when they actually need
+    // "did we get real data" — the old ai-tracker-weekly cron's all-failed
+    // detection was trusting runs_succeeded and missing exactly this case.
+    mocks.parseRanking.mockRejectedValue(new Error('Could not extract ranking from response'))
+
+    const runsStub = tableStub({ data: null, error: null })
+    runsStub.insert = vi.fn(() => runsStub)
+    runsStub.select = vi.fn(() => runsStub)
+    runsStub.single = vi.fn(() => Promise.resolve({ data: { id: RUN_ID }, error: null }))
+    runsStub.update = vi.fn(() =>
+      Object.assign(runsStub, {
+        then: (onF: (v: TableResult) => unknown) => Promise.resolve({ data: null, error: null }).then(onF),
+      })
+    )
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'ai_visibility_runs') return runsStub as never
+      if (table === 'clients') return tableStub({ data: { id: CLIENT_ID, name: 'CTS Tours', domain: 'ctstours.co.nz', brand_aliases: [] }, error: null }) as never
+      if (table === 'master_briefs') return tableStub({ data: null, error: null }) as never
+      if (table === 'ai_visibility_queries') {
+        return tableStub({
+          data: [{ id: QUERY_ID, client_id: CLIENT_ID, question: 'Who runs NZ tours?', source: 'manual', enabled: true, market_tag: 'nz', notes: null, created_at: '', updated_at: '' }],
+          error: null,
+        }) as never
+      }
+      return tableStub({ data: [], error: null }) as never
+    })
+
+    const result = await runTracker({ client_id: CLIENT_ID, engines: ['openai'] })
+
+    expect(result.runs_succeeded).toBe(1)
+    expect(result.runs_conclusive).toBe(0)
   })
 })

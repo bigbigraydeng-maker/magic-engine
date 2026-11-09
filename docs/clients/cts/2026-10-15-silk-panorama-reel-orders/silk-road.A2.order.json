@@ -1,0 +1,108 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Silk Road A2: cover-friendly hook, items held >=3s, darker price page, Jiayuguan Fortress sharper crop, 'From' price, no 'from Auckland'; same old list template",
+ "angle_source": {
+  "source": "manual_remotion_cts_may2027",
+  "authorized_by": "18 号统筹 2026-10-15 转述苏东坡/马良复审意见要求 A2 版；只出片到 in_review，不发布",
+  "facts_checked": "ctstours.co.nz/tours/china/signature/silk-road, 2026-10-15：18 天/15 晚；NZD 7,999 pp twin share；单人房差 NZD 1,488；国际+国内机票、4–5 星酒店、英语导游；38 餐；行程含 Zhangye、Jiayuguan、Dunhuang、Turpan、Urumqi。班期页写 13–30 May 与出发表 5/29 差一天，故片内与文案都不写日期。",
+  "note": "简报要求的第一人称 Baker Gu 叙述：做不到，不替真人编亲身经历（客户红线）；本片无旁白，质检的口吻标记按误报处理；PM 若给 Baker 认可的稿再做。"
+ },
+ "rationale_one_liner": "丝路 A2：按苏东坡/马良复审意见改（价格加 From、去 from Auckland、官网原词 Jiayuguan Fortress、条目停留 ≥3 秒、价格页压暗、换更清晰的图、去掉重复的丹霞裁切）；只存草稿。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "list",
+   "props": {
+    "brandColor": "#B61E2E",
+    "itemOverlayOpacity": 0.22,
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "cutFlash": false,
+    "footageScrim": 0.8,
+    "beats": [
+     0,
+     0.9,
+     1.8,
+     2.7,
+     3.6,
+     5.2,
+     6.8,
+     8.4,
+     10.0,
+     11.6,
+     13.2,
+     14.01,
+     14.83,
+     15.64,
+     16.45,
+     17.27,
+     18.08,
+     18.89,
+     19.7
+    ],
+    "musicFile": "music/road-afar.m4a",
+    "musicStartSec": 0,
+    "hook": {
+     "clip": "clips/s3_terracotta_pit.mp4",
+     "lines": [
+      {
+       "text": "STEP ONTO",
+       "badge": null
+      },
+      {
+       "text": "THE SILK",
+       "badge": null
+      },
+      {
+       "text": "ROAD",
+       "badge": null
+      }
+     ]
+    },
+    "items": [
+     {
+      "clip": "clips/s1_zhangye_danxia.mp4",
+      "text": "ZHANGYE DANXIA",
+      "blurBackdrop": false
+     },
+     {
+      "clip": "clips/s2b_jiayuguan_fortress.mp4",
+      "text": "JIAYUGUAN FORTRESS",
+      "blurBackdrop": false
+     },
+     {
+      "clip": "clips/c1b_terracotta.mp4",
+      "text": "TERRACOTTA WARRIORS, XI'AN",
+      "blurBackdrop": false
+     }
+    ],
+    "itemLabel": "ON THE ROUTE",
+    "revealTitle": "18 DAYS. ONE ROAD.",
+    "price": {
+     "amount": 7999,
+     "footnote": "SINGLE SUPPLEMENT NZ$1,488",
+     "fromLabel": "FROM",
+     "qualifier": "PER PERSON · TWIN SHARE",
+     "backdropClip": "clips/s1b_zhangye_ridges.mp4",
+     "footnoteSize": 50,
+     "currencyPrefix": "NZ$"
+    }
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Eighteen days along the Silk Road, from Xi'an through Jiayuguan, Dunhuang and Turpan to Urumqi. International and domestic flights, 4-5 star hotels, an English-speaking tour guide and the 38 meals listed in the itinerary are in the price. From NZD $7,999 per person, twin share; single supplement NZD $1,488. Travel insurance, visa fee if required, and tips are not included.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/signature/silk-road",
+    "offer": [
+     "18 days along the Silk Road",
+     "From NZD $7,999 per person, twin share"
+    ]
+   }
+  }
+ }
+}

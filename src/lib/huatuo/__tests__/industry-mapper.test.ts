@@ -57,6 +57,10 @@ describe('mapIndustryToCategory — logistics_3pl', () => {
     expect(mapIndustryToCategory(['房地产', '中介'])).toBe('real_estate_agency')
   })
 
+  it("maps ['travel'] → tourism_operator", () => {
+    expect(mapIndustryToCategory(['travel'])).toBe('tourism_operator')
+  })
+
   /**
    * Known limitation, documented rather than hidden: mapIndustryToCategory
    * picks the highest keyword-hit count and breaks ties by dictionary order.

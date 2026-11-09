@@ -14,18 +14,15 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { callClaudeWithTools, type ClaudeToolCall } from '@/lib/anthropic/client'
-import type { ExecutionItem, ExecutionLog, PrescriptionContent, DiagnosticDimension } from '@/types/diagnostic'
+import type { ExecutionItem, ExecutionLog, PrescriptionContent } from '@/types/diagnostic'
 import type { DiscoveryReport } from '@/lib/zhangqian/types'
 import type { MasterBrief, CampaignBrief } from '@/types/magic-engine'
 import { getActiveBrief } from '@/lib/content/brief-injector'
 import { getActiveCampaigns } from '@/lib/content/campaign-injector'
-import { buildLubanSystemPrompt, type LubanContext, type DiagnosticFindingLite } from './prompts'
+import { buildLubanSystemPrompt, type LubanContext } from './prompts'
 import { buildLubanTools } from './tools'
 import { loadMemoryForClient } from '@/lib/memory'
 import type { MemoryContext } from '@/lib/memory/types'
-
-// Max findings to load per dimension — matches MAX_FINDINGS in prompts.ts
-const FINDINGS_PER_DIMENSION = 6
 
 export interface LubanChatResult {
   reply: string
@@ -60,17 +57,15 @@ async function loadLubanContext(
   // 2. 父处方（content.summary + discovery_id + run_id）
   let prescriptionSummary: string | null = null
   let discoveryId: string | null = null
-  let runId: string | null = null
   {
     const { data: presc } = await supabase
       .from('prescriptions')
-      .select('content, discovery_id, run_id')
+      .select('content, discovery_id')
       .eq('id', item.prescription_id)
-      .single<{ content: PrescriptionContent | null; discovery_id: string | null; run_id: string | null }>()
+      .single<{ content: PrescriptionContent | null; discovery_id: string | null }>()
     if (presc) {
       prescriptionSummary = presc.content?.summary ?? null
       discoveryId = presc.discovery_id
-      runId = presc.run_id
     }
   }
 
@@ -100,28 +95,10 @@ async function loadLubanContext(
     loadMemoryForClient(supabase, clientId, { maxRecentDecisions: 3 }),
   ]) as [MasterBrief | null, CampaignBrief[], MemoryContext]
 
-  // 5. 华佗诊断分数 + 同维度 top findings
-  let dimensionScores: Partial<Record<DiagnosticDimension, number | null>> | null = null
-  let topFindings: DiagnosticFindingLite[] = []
-  if (runId) {
-    const { data: runRow } = await supabase
-      .from('diagnostic_runs')
-      .select('dimension_scores')
-      .eq('id', runId)
-      .maybeSingle<{ dimension_scores: Partial<Record<DiagnosticDimension, number | null>> | null }>()
-    if (runRow?.dimension_scores) dimensionScores = runRow.dimension_scores
+  const dimensionScores = null
+  const topFindings: LubanContext['topFindings'] = []
 
-    const { data: findingRows } = await supabase
-      .from('diagnostic_findings')
-      .select('dimension, severity, title, description, recommendation')
-      .eq('run_id', runId)
-      .eq('dimension', item.dimension)
-      .order('priority_score', { ascending: false })
-      .limit(FINDINGS_PER_DIMENSION)
-    topFindings = (findingRows ?? []) as DiagnosticFindingLite[]
-  }
-
-  // 6. 该执行项最近的工作日志
+  // 该执行项最近的工作日志
   const { data: logRows } = await supabase
     .from('execution_logs')
     .select('*')

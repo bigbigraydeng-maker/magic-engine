@@ -18,6 +18,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { STAGE_REASON_PREFIX } from './actors'
 import {
   decideAutoTags,
   AUTO_TAG_ACTOR,
@@ -214,7 +215,7 @@ async function applyDecision(decision: AutoTagDecision, now: Date): Promise<bool
     from_stage: decision.fromStage,
     to_stage: decision.toStage,
     changed_by: AUTO_TAG_ACTOR,
-    note: `系统自动标为真买家：${decision.verdict.evidence ?? '—'}`,
+    note: `${STAGE_REASON_PREFIX.qualifiedBuyer}${decision.verdict.evidence ?? '—'}`,
   })
 
   return true

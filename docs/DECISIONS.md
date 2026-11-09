@@ -7,6 +7,14 @@
 
 ---
 
+## 2026-09-25 · 写代码默认交给 DeepSeek，Claude Code 出指令和审
+
+**决策**（PM 2026-09-25）：所有开发窗口写代码默认由 DeepSeek 执行（Claude Code 用 aider 直接驱动），Claude Code 负责出指令、审 diff、验证、提 PR、查库。例外两类：要同时看懂多个文件的核心改动、A 级安全核心。替代 2026-09-23「只管新窗口的试行」。
+
+**为什么**：试行两批实测都一次写对且便宜——广告 WP0 8 轮 $0.037、B2 三只闹钟 11 轮 $0.11；贵的模型只花在判断和审查上。
+
+**影响什么**：`CLAUDE.md` §5 改写；每个 PR 写明 DeepSeek 轮数与花费，例外部分写原因。
+
 ## 2026-09-21 · Campaign 作为所有增长类营销活动的唯一组织单元
 
 **决策**：ME 所有面向增长的营销执行，统一以 **Campaign** 为组织单元，不再允许"散单内容"并行运转。原 `content_posts` 直写路线、`social_plans` 独立写入路线，全部归并到 Campaign 之下。
@@ -33,7 +41,7 @@
 - 现有无 Campaign 归属的 `content_posts` 记录（历史散单内容），在 UI 上标"散单 / 待归入"，不迁移但也不继续新增。
 - Campaign 创建界面：v1 实现多轮对话补全（`campaign_id`、时间窗、目标受众、核心诉求、关联 Master Brief），表单填写降为备用。
 - Newsletter 纳入 Campaign 作为一路输出，与社媒内容共享 Campaign 目的和受众定义，单独管理发送时间和内容格式。
-- 发布管道：Campaign Bundle 批准 → 写 `content_posts`（`status=approved`）→ 发布 → 回写 `content_posts.publer_post_id` / `published_at`。
+- 发布管道：Campaign Bundle 批准 → 写 `content_posts`（`status=approved`）→ 发布 → 回写 `content_posts.publer_post_id` / `published_at`。（Publer 已于 2026-10 删除）
 
 ---
 
@@ -88,6 +96,24 @@
 - 回复草稿在显示和发送前各做一次输出检查，草稿里的数字对不上生效条目即撤回转人工。
 - 上线发送走 Governed Reply 的"草稿 → 人工点发"链路，不经执行内核（内核 v1 拒绝撤不回的对外动作）。
 - 设计与两轮复审记录：本机 plan `client-knowledge-base-capability.md` §9–§9.14。实施按 A 级分 6 个 PR，每个实施后复审。
+
+## 2026-09-09 · ME ↔ Creatomate 视频生产职责边界冻结
+
+**决策**：PM 拍板，Magic Engine 视频生产系统里 ME 与 Creatomate 的分工边界正式冻结为后续架构依据（PM 原话，逐字保留）：
+
+1. Magic Engine 负责导演和决策，包括目标理解、叙事结构、脚本、镜头表、素材选择、节奏、字幕、音乐情绪、CTA 和审片。
+2. Creatomate 负责执行已经制作好的模板，只能填充模板中已声明的槽位，不能动态创建新的镜头结构、页面或时间线。
+3. 每一种新的视频形态，都必须先在 Creatomate 可视化工具中制作新模板。
+4. ME 需要维护模板注册表，记录模板版本、可用槽位、字段类型、约束、画幅、时长和预览信息。
+5. Creatomate 不提供低成本分镜预览，也不支持局部重渲染；修改一个镜头通常需要重新渲染整片。
+6. 模板槽位映射是持续维护的隐性工作，模板变化时必须同步更新。
+7. 外部通知不能作为唯一状态依据，ME 必须通过任务状态查询、轮询和补偿机制确认渲染结果。
+
+**为什么**：第 2/3 条纠正了一个容易高估系统灵活性的误区——结构化数据只能"填槽"，不能"造槽"；新增镜头数量/顺序/风格仍然需要人在 Creatomate 编辑器里画新模板，这条边界呼应了更早「旅游 vlog 剪辑买不做」的拍板，没有因为接了 Creatomate 就等于 ME 有了任意编排视频的自由度。第 5/6/7 条是本次接入 Creatomate（PR #1513）过程中两轮复审揪出的真实运维约束（付费步骤不可重放、webhook 无签名机制不可信、模板槽位表需要人工维护且没有自动同步手段），不是设计偏好，是 Creatomate 官方 API 的真实能力边界。
+
+**来源**：[PR #1520](https://github.com/bigbigraydeng-maker/magic-engine/pull/1520)（[`docs/specs/2026-09-09-me-creatomate-responsibility-boundary.md`](./specs/2026-09-09-me-creatomate-responsibility-boundary.md) 完整分析，含每条结论的验证依据标注）。
+
+**影响**：后续任何"能不能让 Creatomate 做 X"的讨论，先查这条决策和源文档的验证依据，不用重新论证一遍；新增视频形态（新镜头数/新结构）默认走"先人工画模板"路径，不应假设可以纯代码实现。`src/lib/creatomate/` 的模板契约（`factory_config.render.creatomate`）是第 4 条"模板注册表"的雏形，尚未做到版本化/约束校验/预览，后续加强时对齐这条决策的字段清单。
 
 ## 2026-08-22 · 产品定位与 IMPACT v1.0 冻结：Digital Marketing Growth Intelligence System
 
@@ -330,7 +356,7 @@ function buildEntityMatcher(aliases: readonly string[]): RegExp { /* 精确别�
 - 建 `flywheel_actions` / `flywheel_metrics` / `flywheel_outcomes` 三层数据骨架 + adapter 抽象
 - **第 4 飞轮命名定为 `geo`**（替代历史命名 `insight_reports`）—— GEO 才是真正动手干活的引擎，月报独立为非飞轮的 `reports`
 - 广告 vendor 策略：先用 Meta MCP 自建 adapter，markisfact 当「未来可插拔」备选。**硬约束 = 数据必须留在 ME 自己的表里，不管 vendor 是谁**
-- 社媒飞轮形态 = 混合：自研内容制作（Atlas + OpenAI/Claude）+ 第三方发布（Publer）
+- 社媒飞轮形态 = 混合：自研内容制作（Atlas + OpenAI/Claude）+ 第三方发布（Publer）（Publer 已于 2026-10 删除）
 - **AI Tracker 保留自建，不切 Apify `amernas/ai-brand-monitor`** —— 该 actor 不支持 AU/NZ 地域定位（默认美国视角，对全部客户失真），且状态 "Under maintenance" 不能做核心数据源
 - **TikTok 广告库抓取未来用 Apify，不自建** —— 商品化数据采集，TikTok 反爬激进
 

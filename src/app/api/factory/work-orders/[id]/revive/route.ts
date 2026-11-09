@@ -1,24 +1,28 @@
 // P21.J M2 — POST /api/factory/work-orders/[id]/revive(spec §6.1 dead_letter 复活)
 // dead_letter 工单一键复活回 queued:清 claim 痕迹 + attempt_count 归零(人工判断值得重试),
-// 记 reclaim_count+1 + revived_by 留痕。仅 admin(guardAdmin)。非 dead_letter 状态拒。
+// 记 reclaim_count+1 + revived_by 留痕。仅内部员工(requireAdminScope 且范围为 global，邮箱为空一律拒)：唯一入口是跨客户总览 /dashboard/factory；限定客户的管理员一律 403。非 dead_letter 状态拒。
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { guardAdmin, requireAdmin } from '@/lib/auth/require-admin'
+import { requireAdminScope } from '@/lib/auth/require-admin'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const guard = await guardAdmin()
-  if (guard) return guard
-  const admin = await requireAdmin()
-  const reviver = admin.ok ? (admin.user.email ?? 'admin') : 'admin'
+  const admin = await requireAdminScope()
+  if (!admin.ok) return NextResponse.json({ error: admin.error }, { status: admin.status })
+  const reviver = admin.user.email ?? 'admin'
 
   const { id } = await params
 
+  if (admin.scope.kind !== 'global') {
+    console.warn(`[factory scope] revive denied: ${reviver} is limited to client ${admin.scope.clientId}, work order ${id}`)
+    return NextResponse.json({ error: 'Forbidden — only internal staff can revive a work order' }, { status: 403 })
+  }
+
   const { data: wo, error: loadErr } = await supabaseAdmin
     .from('content_work_orders')
-    .select('id, status, reclaim_count, reject_reason')
+    .select('id, status, reclaim_count, reject_reason, brief')
     .eq('id', id)
     .maybeSingle()
   if (loadErr) return NextResponse.json({ error: loadErr.message }, { status: 500 })
@@ -26,6 +30,12 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (wo.status !== 'dead_letter') {
     return NextResponse.json(
       { error: `only dead_letter orders can be revived (status=${wo.status})` },
+      { status: 409 },
+    )
+  }
+  if ((wo.brief as Record<string, unknown> | null)?.recipe_replan_required === true) {
+    return NextResponse.json(
+      { error: 'this order needs a new production plan; ordinary retry is blocked' },
       { status: 409 },
     )
   }

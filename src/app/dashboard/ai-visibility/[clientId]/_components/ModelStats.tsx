@@ -2,6 +2,7 @@
 
 import type { AiVisibilityRun } from '@/types/magic-engine';
 import { getEngineDisplayName } from '@/lib/ai-tracker/engine-display-names';
+import { isRunConclusive } from '@/lib/ai-tracker/run-conclusive';
 
 interface Props {
   runs: AiVisibilityRun[];
@@ -28,18 +29,22 @@ export function ModelStats({ runs, brandName }: Props) {
 
   const stats = models.map(model => {
     const modelRuns = runs.filter(r => r.ai_model === model);
-    const successful = modelRuns.filter(r => !r.error_message);
+    const successful = modelRuns.filter(isRunConclusive);
     const withMention = successful.filter(r => r.client_brand_rank != null);
     const ranks = withMention.map(r => r.client_brand_rank as number);
     const avgRank = ranks.length > 0
       ? ranks.reduce((a, b) => a + b, 0) / ranks.length
       : null;
-    const avgLatency = successful.length > 0
-      ? successful.reduce((a, r) => a + (r.latency_ms ?? 0), 0) / successful.length
+    // Cost/token/latency were incurred whenever the provider call itself succeeded,
+    // even if the downstream parser later failed — parse failures must not make
+    // real spend disappear from the totals. Ignore parse_error_message here.
+    const costed = modelRuns.filter(r => isRunConclusive({ error_message: r.error_message, parse_error_message: null }));
+    const avgLatency = costed.length > 0
+      ? costed.reduce((a, r) => a + (r.latency_ms ?? 0), 0) / costed.length
       : null;
-    const totalCost = successful.reduce((a, r) => a + (r.cost_usd ?? 0), 0);
-    const totalTokens = successful.reduce((a, r) => a + (r.tokens_used ?? 0), 0);
-    const avgTokens = successful.length > 0 ? totalTokens / successful.length : null;
+    const totalCost = costed.reduce((a, r) => a + (r.cost_usd ?? 0), 0);
+    const totalTokens = costed.reduce((a, r) => a + (r.tokens_used ?? 0), 0);
+    const avgTokens = costed.length > 0 ? totalTokens / costed.length : null;
     const engine = modelRuns[0]?.ai_engine ?? 'unknown';
     return {
       model,

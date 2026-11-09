@@ -13,7 +13,15 @@ const run=(name,args)=>execFileSync(join(bin,name),args,{ stdio:'pipe' })
 const clients=[]
 let started=false,checks=0
 async function connect(){ const c=new pg.Client({ host:root,port:5432,user:process.env.USER,database:'postgres' });await c.connect();clients.push(c);return c }
-async function denied(c,sql,params=[]){ await assert.rejects(()=>c.query(sql,params));checks++ }
+async function denied(c,sql,params=[],expected=null){
+  await assert.rejects(()=>c.query(sql,params),error=>{
+    if(expected){
+      assert.equal(error.code,expected.code,`expected SQLSTATE ${expected.code}, got ${error.code}: ${error.message}`)
+      if(expected.message) assert.ok(error.message.includes(expected.message),`expected message to include "${expected.message}", got "${error.message}"`)
+    }
+    return true
+  });checks++
+}
 const a='10000000-0000-0000-0000-000000000001',b='10000000-0000-0000-0000-000000000002'
 const ca='20000000-0000-0000-0000-000000000001',cb='20000000-0000-0000-0000-000000000002',ca2='20000000-0000-0000-0000-000000000003'
 const grantSql=`INSERT INTO meta_ads_read_grants(client_id,connection_id,ad_account_id,principal_id,entitlement_revision)
@@ -205,7 +213,100 @@ try {
  // that cardinality as failure instead of accepting error=null as a completed audit.
  assert.equal((await db.query("UPDATE client_binding_audit SET outcome='applied' WHERE id=gen_random_uuid() RETURNING id")).rowCount,0);checks++
  assert.equal((await db.query("UPDATE mcp_access_log SET ok=true,error_code=NULL WHERE id=gen_random_uuid() RETURNING id")).rowCount,0);checks++
- console.log(`PASS ${checks} isolated PostgreSQL boundary checks (grant/legacy races, RLS, RPC ACL, revoke, nonce, rate limit).`)
+ // ── Handover: owner clear, grant revoke, history retention, old-key death, new OAuth ──
+ const handoverClient='10000000-0000-0000-0000-000000000003'
+ const handoverPrincipal='20000000-0000-0000-0000-000000000005'
+ const handoverNewPrincipal='20000000-0000-0000-0000-000000000006'
+ const handoverConnection='30000000-0000-0000-0000-000000000001'
+ const backfillRevoked='30000000-0000-0000-0000-000000000002'
+ const backfillActive='30000000-0000-0000-0000-000000000003'
+ await db.query('INSERT INTO clients(id) VALUES($1)',[handoverClient])
+ await db.query(`INSERT INTO meta_ads_ai_pilot_entitlements(client_id,status,approved_by_email)
+   VALUES($1,'active','approver@example.test')`,[handoverClient])
+ await db.query(`INSERT INTO platform_oauth_connections(id,client_id,provider,access_token_enc,refresh_token_enc,token_expiry,account_id,display_name,scopes,purpose,authorizing_principal_id,entitlement_revision)
+   VALUES($1,$2,'meta','cipher-old','',now()+interval '1 day','ads_user:9','test',ARRAY['ads_read'],'meta_ads_read',$3,
+   (SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$2))`,[handoverConnection,handoverClient,handoverPrincipal])
+ // Seed the two rows the migration's backfill must distinguish, BEFORE it is loaded:
+ // one already-revoked row that still carries an owner, and one active row.
+ await db.query(`INSERT INTO platform_oauth_connections(id,client_id,provider,access_token_enc,refresh_token_enc,token_expiry,account_id,display_name,scopes,status,purpose,authorizing_principal_id,entitlement_revision)
+   VALUES($1,$2,'meta','cipher-backfill','',now()+interval '1 day','ads_user:10','test',ARRAY['ads_read'],'revoked','meta_ads_read',$3,
+   (SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$2))`,[backfillRevoked,handoverClient,handoverPrincipal])
+ await db.query(`INSERT INTO platform_oauth_connections(id,client_id,provider,access_token_enc,refresh_token_enc,token_expiry,account_id,display_name,scopes,status,purpose,authorizing_principal_id,entitlement_revision)
+   VALUES($1,$2,'meta','cipher-active','',now()+interval '1 day','ads_user:11','test',ARRAY['ads_read'],'active','meta_ads_read',$3,
+   (SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$2))`,[backfillActive,handoverClient,handoverPrincipal])
+ // Loaded only now, after every legacy boundary check above has run against the
+ // pre-handover schema. Loading it earlier would drop the (client_id, ad_account_id)
+ // unique that the old ON CONFLICT / grant-resurrection checks depend on.
+ await db.query(await readFile('supabase/migrations/20260923093000_meta_ads_ai_handover.sql','utf8'))
+ // Backfill cleared the revoked row's owner and left the active row untouched.
+ assert.equal((await db.query('SELECT authorizing_principal_id FROM platform_oauth_connections WHERE id=$1',[backfillRevoked])).rows[0].authorizing_principal_id,null);checks++
+ assert.equal((await db.query('SELECT authorizing_principal_id FROM platform_oauth_connections WHERE id=$1',[backfillActive])).rows[0].authorizing_principal_id,handoverPrincipal);checks++
+ assert.equal((await db.query(`SELECT count(*)::int AS n FROM client_binding_audit
+   WHERE binding_kind='meta_ads_read' AND actor_email='migration:20260923093000' AND previous_value=$1`,[backfillRevoked])).rows[0].n,1);checks++
+ assert.equal((await db.query(`SELECT count(*)::int AS n FROM client_binding_audit
+   WHERE binding_kind='meta_ads_read' AND actor_email='migration:20260923093000' AND previous_value=$1`,[backfillActive])).rows[0].n,0);checks++
+ // The handover connection's owner is handoverPrincipal, not handoverClient, so the
+ // shared grantSql (which pins principal_id to $1=client_id) would trip the
+ // 'invalid read connection' guard. Use a principal-aware insert for this case only.
+ const handoverGrantSql=`INSERT INTO meta_ads_read_grants(client_id,connection_id,ad_account_id,principal_id,entitlement_revision)
+  VALUES($1,$2,$3,$4,(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1)) RETURNING *`
+ const handoverGrant=(await db.query(handoverGrantSql,[handoverClient,handoverConnection,'act_9234567890',handoverPrincipal])).rows[0]
+ const handoverKey=(await db.query(`INSERT INTO client_api_keys(client_id,key_hash,key_prefix,name,scopes,expires_at,metadata)
+   VALUES($1::uuid,'handover-hash','me_live_handover','Meta Ads read-only',ARRAY['meta:ads:read'],now()+interval '1 day',
+   jsonb_build_object('meta_ads_grant_id',$2::text,'meta_ads_grant_revision',$3::text,'meta_ads_principal_id',$4::uuid::text,'meta_ads_entitlement_revision',$5::text)) RETURNING id`,
+   [handoverClient,handoverGrant.id,handoverGrant.revision,handoverPrincipal,handoverGrant.entitlement_revision])).rows[0].id
+ assert.equal((await db.query('SELECT meta_ads_authorization_current($1,$2,$3) AS allowed',[handoverClient,handoverKey,'act_9234567890'])).rows[0].allowed,true);checks++
+ // A historical analysis job must survive the handover untouched.
+ const handoverJob=(await db.query(`INSERT INTO meta_ads_ai_analysis_jobs(client_id,principal_id,grant_id,grant_revision,connection_version,entitlement_revision,ad_account_id,idempotency_key,period_key,window_since,window_until,status,reserved_usd)
+   VALUES($1,$2,$3,$4,now(),$5,'act_9234567890',$6,'2026-09','2026-09-01','2026-09-07','completed',0.12) RETURNING id`,
+   [handoverClient,handoverPrincipal,handoverGrant.id,handoverGrant.revision,handoverGrant.entitlement_revision,'h'.repeat(64)])).rows[0].id
+ // Disconnect: owner -> NULL on a revoked row is the one new allowed transition.
+ await db.query(`UPDATE platform_oauth_connections SET status='revoked',authorizing_principal_id=NULL,updated_at=now() WHERE id=$1`,[handoverConnection]);checks++
+ const cleared=(await db.query('SELECT status,authorizing_principal_id FROM platform_oauth_connections WHERE id=$1',[handoverConnection])).rows[0]
+ assert.deepEqual(cleared,{ status:'revoked',authorizing_principal_id:null });checks++
+ assert.ok((await db.query('SELECT revoked_at FROM meta_ads_read_grants WHERE id=$1',[handoverGrant.id])).rows[0].revoked_at);checks++
+ assert.equal((await db.query('SELECT meta_ads_authorization_current($1,$2,$3) AS allowed',[handoverClient,handoverKey,'act_9234567890'])).rows[0].allowed,false);checks++
+ assert.equal((await db.query('SELECT count(*)::int AS n FROM meta_ads_ai_analysis_jobs WHERE id=$1',[handoverJob])).rows[0].n,1);checks++
+ // Direct owner swap on an active row is still refused. backfillActive is still
+ // active with a non-null owner, so this is the real "no direct transfer" case.
+ await denied(db,`UPDATE platform_oauth_connections SET authorizing_principal_id=$1 WHERE id=$2`,[handoverNewPrincipal,backfillActive],
+   { code:'23514',message:'connection owner is immutable' })
+ const untouched=(await db.query('SELECT status,authorizing_principal_id FROM platform_oauth_connections WHERE id=$1',[backfillActive])).rows[0]
+ assert.deepEqual(untouched,{ status:'active',authorizing_principal_id:handoverPrincipal });checks++
+ // Taking over without a fresh token is refused.
+ await denied(db,`UPDATE platform_oauth_connections SET status='active',authorizing_principal_id=$1,
+   entitlement_revision=(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$2) WHERE id=$3`,
+   [handoverNewPrincipal,handoverClient,handoverConnection],
+   { code:'23514',message:'connection owner is immutable' })
+ // A fresh OAuth (new ciphertext) may take over the same row.
+ const takeover=(await db.query(`UPDATE platform_oauth_connections SET status='active',access_token_enc='cipher-new',authorizing_principal_id=$1,
+   entitlement_revision=(SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$2) WHERE id=$3 RETURNING status,authorizing_principal_id`,
+   [handoverNewPrincipal,handoverClient,handoverConnection]))
+ assert.equal(takeover.rowCount,1);checks++
+ assert.deepEqual(takeover.rows[0],{ status:'active',authorizing_principal_id:handoverNewPrincipal });checks++
+ const newGrant=(await db.query(handoverGrantSql,[handoverClient,handoverConnection,'act_9234567890',handoverNewPrincipal])).rows[0]
+ assert.notEqual(newGrant.id,handoverGrant.id);checks++
+ assert.equal((await db.query('SELECT meta_ads_authorization_current($1,$2,$3) AS allowed',[handoverClient,handoverKey,'act_9234567890'])).rows[0].allowed,false);checks++
+ // The new owner's own key is readable against the new grant.
+ const newOwnerKey=(await db.query(`INSERT INTO client_api_keys(client_id,key_hash,key_prefix,name,scopes,expires_at,metadata)
+   VALUES($1::uuid,'handover-new-hash','me_live_handover_new','Meta Ads read-only',ARRAY['meta:ads:read'],now()+interval '1 day',
+   jsonb_build_object('meta_ads_grant_id',$2::text,'meta_ads_grant_revision',$3::text,'meta_ads_principal_id',$4::uuid::text,'meta_ads_entitlement_revision',$5::text)) RETURNING id`,
+   [handoverClient,newGrant.id,newGrant.revision,handoverNewPrincipal,newGrant.entitlement_revision])).rows[0].id
+ assert.equal((await db.query('SELECT meta_ads_authorization_current($1,$2,$3) AS allowed',[handoverClient,newOwnerKey,'act_9234567890'])).rows[0].allowed,true);checks++
+ // The historical job keeps its original identity and is never rewritten by the handover.
+ const keptJob=(await db.query('SELECT principal_id,grant_id,grant_revision,ad_account_id,status FROM meta_ads_ai_analysis_jobs WHERE id=$1',[handoverJob])).rows[0]
+ assert.deepEqual(keptJob,{ principal_id:handoverPrincipal,grant_id:handoverGrant.id,grant_revision:handoverGrant.revision,
+   ad_account_id:'act_9234567890',status:'completed' });checks++
+ // Same-client and cross-client active conflicts still hold. The earlier legacy
+ // checks rotated b's entitlement revision, so cb still carries the old one and
+ // would fail with 'invalid read connection' before the conflict is even reached.
+ // Realign cb to b's current revision first, then assert the real conflict reason.
+ const realigned=(await db.query(`UPDATE platform_oauth_connections SET entitlement_revision=$2,access_token_enc='cipher-realign'
+   WHERE id=$1 AND client_id=$3`,[cb,(await db.query('SELECT revision FROM meta_ads_ai_pilot_entitlements WHERE client_id=$1',[b])).rows[0].revision,b]))
+ assert.equal(realigned.rowCount,1);checks++
+ await denied(db,handoverGrantSql,[handoverClient,handoverConnection,'act_9234567890',handoverNewPrincipal],{ code:'23505' })
+ await denied(db,grantSql,[b,cb,'act_9234567890'],{ code:'23514',message:'account unavailable' })
+ console.log(`PASS ${checks} isolated PostgreSQL boundary checks (grant/legacy races, RLS, RPC ACL, revoke, nonce, rate limit, handover).`)
 } finally {
  for(const c of clients) await c.end().catch(()=>{})
  if(started) run('pg_ctl',['-D',data,'-m','immediate','-w','stop'])

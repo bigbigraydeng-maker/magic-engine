@@ -1,0 +1,7 @@
+{
+  "web": [
+    { "event_name": "Subscribe", "event_match_quality": { "composite_score": 7.7 } },
+    { "event_name": "PageView", "event_match_quality": { "composite_score": 6.1 } },
+    { "event_name": "Lead", "event_match_quality": { "composite_score": 9.3 } }
+  ]
+}

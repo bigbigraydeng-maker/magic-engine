@@ -96,10 +96,16 @@ function fakeSupabase(opts: {
 
 /** run 直接跑传入的函数（不做真实 Inngest 记忆化，单测不需要）。 */
 function fakeStep(waitForEventResult: unknown = null) {
+  const sent: Array<{ name: string; data: Record<string, unknown> }> = []
   return {
+    sent,
     run: async (_id: string, fn: () => unknown) => fn(),
     waitForEvent: async () => waitForEventResult,
     sleep: async () => {},
+    // 成功路径末尾会 sendEvent 叫马良自检——记下发了什么，供断言
+    sendEvent: async (_id: string, ev: { name: string; data: Record<string, unknown> }) => {
+      sent.push(ev)
+    },
   }
 }
 

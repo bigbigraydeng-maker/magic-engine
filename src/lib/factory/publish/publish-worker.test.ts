@@ -6,23 +6,32 @@
  * 而「有实现、没接上」正是这个 bug 本身的形态(红线扫描一直存在于交付环节,却从未
  * 覆盖真正发出去的那串文案)。
  *
- * 关键事实:交付时扫的是 output.caption + 分镜文字;发布时发的是 buildCaption() 从
- * brief.copy.endcard 另拼的字。两串不是同一个东西。
+ * 发布正文取分镜文案;CTA 与带追踪参数的落地页链接必须放在首评。
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
+const factSource = vi.hoisted(() => ({ load: vi.fn() }))
+vi.mock('@/lib/social/weekly-loop/fact-aliases', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/social/weekly-loop/fact-aliases')>()),
+  loadSocialFactSource: (...args: unknown[]) => factSource.load(...args),
+}))
 vi.mock('./facebook-reel-adapter', () => ({
   facebookReelAdapter: {
     publish: vi.fn(),
     findExisting: vi.fn(async () => null),
+    ensureFirstComment: vi.fn(async () => 'comment-1'),
   },
 }))
 
 import { runPublishWorker } from './publish-worker'
 import { supabaseAdmin } from '@/lib/supabase'
 import { facebookReelAdapter } from './facebook-reel-adapter'
+import { REEL_AUTO_CHECK_KEYS, REEL_HUMAN_CHECK_KEYS } from '@/lib/social/content-review'
+
+// 默认夹具 = 切换日(2026-10-23)之前批准的旧版清单；不写死时间的话，过了切换日这些用例会被当成「必须第三版」而失败
+const LEGACY_APPROVED_AT = '2026-10-20T00:00:00.000Z'
 
 const mockFrom = vi.mocked(supabaseAdmin.from)
 const mockPublish = vi.mocked(facebookReelAdapter.publish)
@@ -37,13 +46,32 @@ interface Scenario {
   endcard: Record<string, unknown>
   /** 模拟红线查询失败(fail-closed 用例) */
   redlineQueryError?: boolean
+  checklistReady?: boolean
+  noAngle?: boolean
+  /** 上次上传到一半崩了:留着 provisional 回执 */
+  interrupted?: boolean
+  /** 模拟「幂等锚(provisional 回执)」写库失败 */
+  anchorWriteError?: boolean
+  /** brief.remotion.deliverable 取值;'asset_only' = 素材,绝不可发布 */
+  deliverable?: string
+  /** review_ref.checklist_version(防降级用例:带 v3 版本号但清单是旧的) */
+  checklistVersion?: string
+  /** review_ref.approved_at(切换日用例) */
+  approvedAt?: string
+  /** brief.engine = external_upload with no talent_consent (consent gate cases) */
+  externalNoConsent?: boolean
+  /** Post copy (the only segment caption) for catalog fact re-check cases */
+  segmentCaption?: string
 }
 
 /** 记录所有对 content_work_orders 的 update payload,用来断言最终状态 */
 let woUpdates: Record<string, unknown>[]
+/** 记录所有 insert payload,用来断言三落库内容 */
+let inserts: { table: string; payload: Record<string, unknown> }[]
 
 function installMocks(s: Scenario) {
   woUpdates = []
+  inserts = []
   let claimed = false
 
   mockFrom.mockImplementation((table: string) => {
@@ -55,6 +83,9 @@ function installMocks(s: Scenario) {
       if (table === 'content_work_orders') {
         if (ctx.isUpdate) {
           woUpdates.push(ctx.payload ?? {})
+          if (s.anchorWriteError && (ctx.payload?.published_ref as { provisional?: boolean } | undefined)?.provisional) {
+            return { data: null, error: { message: 'db down' } }
+          }
           // claimOne 的条件 UPDATE:返回领到的工单整行
           if (ctx.payload?.status === 'publishing') {
             return {
@@ -63,9 +94,18 @@ function installMocks(s: Scenario) {
                 client_id: CLIENT_ID,
                 master_brief_id: 'mb-1',
                 publish_attempts: 0,
-                published_ref: null,
-                output: { video_path: 'renders/c/wo/final.mp4' },
-                brief: { angle: 'X', copy: { endcard: s.endcard } },
+              published_ref: s.interrupted ? { provisional: true, video_id: 'v1' } : null,
+                review_ref: s.checklistReady === false ? {} : { ...(s.checklistVersion === undefined ? {} : { checklist_version: s.checklistVersion }), approved_at: s.approvedAt ?? LEGACY_APPROVED_AT, checklist_human: REEL_HUMAN_CHECK_KEYS.map(key => ({
+                  key, judge: 'HUMAN', outcome: 'PASS', detail: null,
+                  source_ref: key.startsWith('factual_') ? 'https://example.test/source' : null,
+                })) },
+                output: {
+                  video_path: 'renders/c/wo/final.mp4',
+                  ...(s.checklistReady === false ? {} : {
+                    quality_checklist_auto: REEL_AUTO_CHECK_KEYS.map(key => ({ key, judge: 'AUTO', outcome: 'PASS', detail: 'measured', source_ref: null })),
+                  }),
+                },
+                brief: { ...(s.externalNoConsent ? { engine: 'external_upload' } : {}), ...(s.noAngle ? {} : { angle: 'X' }), ...(s.deliverable === undefined ? {} : { remotion: { deliverable: s.deliverable } }), copy: { segments: [{ caption: s.segmentCaption ?? 'Explore with us' }], endcard: s.endcard } },
               },
               error: null,
             }
@@ -103,7 +143,7 @@ function installMocks(s: Scenario) {
     for (const m of ['eq', 'or', 'order', 'limit', 'maybeSingle', 'single']) builder[m] = () => builder
     builder.select = (cols?: string) => { ctx.select = cols ?? ''; return builder }
     builder.update = (p: Record<string, unknown>) => { ctx.isUpdate = true; ctx.payload = p; return builder }
-    builder.insert = () => builder
+    builder.insert = (p: Record<string, unknown>) => { inserts.push({ table, payload: p }); return builder }
     ;(builder as { then: unknown }).then = (r: (v: { data: unknown; error: unknown }) => unknown) => r(resolve())
     return builder as never
   })
@@ -174,12 +214,196 @@ describe('发布正文红线闸', () => {
     expect(finalStatus()!.status).toBe('published')
   })
 
-  it('发布正文由 cta + offer + url 拼成(确认扫的就是真发出去的那串)', async () => {
+  it('🔴 live publish of an external upload without on-camera consent is refused before any provider call', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, externalNoConsent: true })
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('consent_blocked')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('🔴 live publish waits (retry later) when the tour catalog cannot be read — never publishes unchecked', async () => {
+    factSource.load.mockResolvedValue({ ok: false, reason: 'load_failed' })
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('fact_check_blocked')
+    expect(finalStatus()?.next_retry_at).not.toBeNull()
+  })
+
+  it('🔴 live publish of a reel that no longer matches the catalog is refused for good (16 days vs 19)', async () => {
+    factSource.load.mockResolvedValue({ ok: true, catalogVersion: 13, aliasesByTourId: {}, tours: [{
+      id: 't1', slug: 'x', name: 'Acme — X', destination: 'china', tier: 'signature', title: null, durationText: '19 Days',
+      displayPriceText: null, highlights: [], inclusions: [], exclusions: [], singleSupplement: null, soldOut: false,
+      managesDepartures: false, isActive: true, departures: [],
+    }] })
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, segmentCaption: '16 days across China' })
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('fact_check_blocked')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('🔴 already public on the platform (recovery): recorded even when the catalog is unreadable, but no first comment', async () => {
+    factSource.load.mockResolvedValue({ ok: false, reason: 'load_failed' })
+    mockFindExisting.mockResolvedValue({ platform: 'facebook', post_id: 'p1', video_id: 'v1', permalink: 'https://fb/p1' } as never)
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
+    const r = await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(r.result).toBe('skipped_existing')
+    expect(vi.mocked(facebookReelAdapter.ensureFirstComment)).not.toHaveBeenCalled()
+    expect(mockPublish).not.toHaveBeenCalled()
+  })
+
+  it('live publish goes ahead for a client with no published tour catalog (not applicable)', async () => {
+    factSource.load.mockResolvedValue({ ok: false, reason: 'catalog_not_published' })
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
+    await runPublishWorker({ draft: false, workerId: 'test' })
+
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('a draft publish never reads the catalog', async () => {
+    factSource.load.mockClear()
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' } })
+    await run()
+
+    expect(factSource.load).not.toHaveBeenCalled()
+  })
+
+  it('a draft publish of the same external upload is allowed (drafts are not public)', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, externalNoConsent: true })
+    await run()
+
+    expect(mockPublish).toHaveBeenCalledTimes(1)
+  })
+
+  it('legacy approved row without checklist is quarantined before provider access', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, checklistReady: false })
+    const r = await run()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('approval_checklist_incomplete')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('🔴 asset_only 素材即使被置成 approved 也不发布,且置终态不排重试', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, deliverable: 'asset_only' })
+    const r = await run()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('asset_only_not_publishable')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('deliverable 拼错不当素材放行,也不当素材拦截(按成片正常发布)', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, deliverable: 'asset-only' })
+    await run()
+
+    expect(mockPublish).toHaveBeenCalled()
+  })
+
+  it('🔴 防降级:带 v3 版本号的批准回执缺「单独看得懂」一项 → 不发布，置终态', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, checklistVersion: 'v3' })
+    const r = await run()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('approval_checklist_incomplete')
+    expect(finalStatus()).toMatchObject({ status: 'publish_failed', next_retry_at: null })
+  })
+
+  it('🔴 切换日之后批准但没有版本号的（旧形状）回执 → 不发布；切换日之前批准的旧回执照常发布', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, approvedAt: '2026-10-23T00:00:01.000Z' })
+    const late = await run()
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(late.detail).toBe('approval_checklist_incomplete')
+
+    vi.clearAllMocks()
+    mockFindExisting.mockResolvedValue(null)
+    mockPublish.mockResolvedValue({ platform: 'facebook', post_id: 'p1', permalink: 'https://fb/p1' } as never)
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz/x?utm_source=a' }, approvedAt: '2026-10-22T23:59:59.000Z' })
+    await run()
+    expect(mockPublish).toHaveBeenCalled()
+  })
+
+  it('正文使用分镜文案,CTA 与追踪链接放首评', async () => {
     installMocks({ redlines: [], endcard: { cta: 'Book now', offer: ['Save 20%', 'Ends Friday'], url: 'https://ctstours.co.nz' } })
     await run()
 
     expect(mockPublish).toHaveBeenCalledWith(
-      expect.objectContaining({ caption: 'Book now\nSave 20% · Ends Friday\nhttps://ctstours.co.nz' }),
+      expect.objectContaining({
+        caption: 'Explore with us',
+        firstComment: expect.stringContaining('Book now\nSave 20% · Ends Friday\nhttps://ctstours.co.nz/?utm_source=facebook&utm_medium=organic_social'),
+      }),
     )
+  })
+})
+
+describe('幂等锚写库', () => {
+  const startThenPublish = () => mockPublish.mockImplementation(async args => {
+    await args.onStarted?.('vid-1')
+    return { platform: 'facebook', post_id: 'p1' } as never
+  })
+
+  it('🔴 锚点(provisional 回执)写库失败 → 中止发布并置失败,不能当没事继续上传', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, anchorWriteError: true })
+    startThenPublish()
+    const r = await run()
+    expect(r.result).toBe('failed')
+    expect(r.detail).toBe('publish_error')
+    expect(finalStatus()!.status).toBe('publish_failed')
+  })
+
+  it('锚点写库成功 → 照常发布', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    startThenPublish()
+    expect((await run()).result).toBe('published')
+    expect(woUpdates.some(u => (u.published_ref as { video_id?: string } | undefined)?.video_id === 'vid-1')).toBe(true)
+  })
+})
+
+describe('发布记录与失败原因', () => {
+  it('publish failure writes a token-free reject_reason', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    mockPublish.mockRejectedValueOnce(new Error('FB upload 失败 400: access_token=EAAfaketokenfaketokenfaketoken1234 https://graph.facebook.com/x'))
+    await run()
+
+    const last = finalStatus()!
+    expect(last.status).toBe('publish_failed')
+    expect(typeof last.reject_reason).toBe('string')
+    expect(String(last.reject_reason)).toContain('FB upload 失败 400')
+    expect(String(last.reject_reason)).not.toContain('EAAfake')
+    expect(String(last.reject_reason)).not.toContain('graph.facebook.com')
+  })
+
+  it('a successful publish clears the old reason and labels the vendor by channel, not customer', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' } })
+    await run()
+
+    expect(finalStatus()).toMatchObject({ status: 'published', reject_reason: null })
+    const fw = inserts.find((i) => i.table === 'flywheel_actions')
+    expect(fw?.payload.vendor).toBe('meta_graph')
+    expect(JSON.stringify(inserts)).not.toContain('oztop')
+  })
+
+  it('title falls back to the brand name, never the placeholder "factory reel"', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, noAngle: true })
+    await run()
+
+    const ex = inserts.find((i) => i.table === 'execution_items')
+    expect(String(ex?.payload.title)).toContain('CTS Tours')
+    expect(String(ex?.payload.title)).not.toContain('factory reel')
+  })
+
+  it('interrupted upload is not re-sent and tells the PM to check manually', async () => {
+    installMocks({ redlines: [], endcard: { cta: 'Book now', url: 'https://ctstours.co.nz' }, interrupted: true })
+    const r = await run()
+
+    expect(mockPublish).not.toHaveBeenCalled()
+    expect(r.detail).toBe('interrupted_verify_manual')
+    expect(String(finalStatus()!.reject_reason)).toContain('中断')
   })
 })

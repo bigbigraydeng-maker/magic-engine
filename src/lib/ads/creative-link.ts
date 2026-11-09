@@ -50,7 +50,7 @@ export type AdCreationPath = 'boost_post_api' | 'winner_reel_sync'
 /** 每条路径的出处。穷举 by construction —— 少一个 key 就编译不过。 */
 export const AD_CREATION_PATHS: Readonly<Record<AdCreationPath, string>> = {
   boost_post_api: 'src/app/api/clients/[id]/meta-ads/boost-post — 手动/脚本给某个帖子投流',
-  winner_reel_sync: 'src/lib/winner-reel-sync/engine.ts — 把跑赢的自然帖子自动加进广告组',
+  winner_reel_sync: 'src/lib/action-submission/winner-reel-execute.ts — 确认卡点头后才把跑赢的帖子建成暂停广告',
   // 待加:'me_ad_launch' —— 广告引擎的建广告入口（PM 2026-08-04「go 收口」）。
   // **等那个路由真的存在了再加这一项**。本文件开头就写着「提前声明一个没人产出
   // 的值正是 enum 漂移」,我 2026-08-04 差点犯这个错,被本模块自己的测试拦下。
@@ -59,9 +59,8 @@ export const AD_CREATION_PATHS: Readonly<Record<AdCreationPath, string>> = {
 /**
  * creative_ref 指向哪张表。
  *
- * 只有一个值不是写漏了:reels_drafts 那条线走 Publer 发布,Publer 只回 job_id、
- * 不回平台帖子 id(见 src/app/api/clients/[id]/reels/[draftId]/publish/route.ts),
- * 所以那条线上的片子**现在接不上**。等 Publer 回执里能拿到 post_id 再加
+ * 只有一个值不是写漏了:reels_drafts 那条线的第三方发布通道已退役(没有平台帖子 id 回执),
+ * 所以那条线上的片子**现在接不上**。等有新的发布通道能拿到 post_id 再加
  * 'reels_draft' —— 提前声明一个没人产出的值,正是 CLAUDE.md 说的 enum 漂移。
  */
 export type CreativeSource = 'content_work_order'

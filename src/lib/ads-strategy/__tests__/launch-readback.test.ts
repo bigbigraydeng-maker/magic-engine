@@ -336,3 +336,83 @@ describe('dominantScript', () => {
     expect(dominantScript(['Rangitoto College 学区 · Rothesay Bay 全新四房独立屋，产权已下发'])).toBe('han')
   })
 })
+
+describe('checkLaunch — 草案声明的受众必须回读看见（刀②）', () => {
+  const plain = (targeting: LaunchReadbackInput['adSet']['targeting']): LaunchReadbackInput => ({
+    adSet: {
+      adSetId: 'AS1',
+      adSetName: '普通组',
+      optimizationGoal: 'LEAD_GENERATION',
+      targeting,
+      creatives: [{ adId: 'A1', adName: 'a', buyerFacingText: ['Hello'] }],
+    },
+  })
+
+  it('声明的受众确实挂上了 → 不报', () => {
+    const r = checkLaunch({
+      ...plain({ customAudienceIds: ['1111111'] }),
+      expectedAudienceIds: ['1111111'],
+    })
+    expect(r.findings.map(f => f.code)).not.toContain('audience_not_attached')
+  })
+
+  it('🔴 声明两个只挂上一个 → blocker，点名缺的那个', () => {
+    const r = checkLaunch({
+      ...plain({ customAudienceIds: ['1111111'] }),
+      expectedAudienceIds: ['1111111', '2222222'],
+    })
+    const f = r.findings.find(x => x.code === 'audience_not_attached')
+    expect(f).toBeDefined()
+    expect(f!.severity).toBe('blocker')
+    expect(f!.message).toContain('2222222')
+    expect(r.safeToActivate).toBe(false)
+  })
+
+  it('🔴 回读里根本没有 customAudienceIds → 报「没读到」', () => {
+    const r = checkLaunch({
+      ...plain({}),
+      expectedAudienceIds: ['1111111'],
+    })
+    const f = r.findings.find(x => x.code === 'audience_not_attached')
+    expect(f).toBeDefined()
+    expect(f!.message).toContain('没读到')
+  })
+
+  it('没声明受众 → 不拿这条去要求它', () => {
+    expect(checkLaunch(plain({ customAudienceIds: [] })).findings.map(f => f.code))
+      .not.toContain('audience_not_attached')
+    expect(checkLaunch({ ...plain({ customAudienceIds: [] }), expectedAudienceIds: [] }).findings.map(f => f.code))
+      .not.toContain('audience_not_attached')
+  })
+
+  it('声明的排除受众确实挂上了 → 不报', () => {
+    const r = checkLaunch({
+      ...plain({ excludedAudienceIds: ['3333333'] }),
+      expectedExcludedAudienceIds: ['3333333'],
+    })
+    expect(r.findings.map(f => f.code)).not.toContain('excluded_audience_not_attached')
+  })
+
+  it('🔴 声明排除却没挂上 → blocker；读不到 → 报「没读到」', () => {
+    const missing = checkLaunch({
+      ...plain({ excludedAudienceIds: [] }),
+      expectedExcludedAudienceIds: ['3333333'],
+    })
+    const f = missing.findings.find(x => x.code === 'excluded_audience_not_attached')
+    expect(f).toBeDefined()
+    expect(f!.severity).toBe('blocker')
+
+    const unknown = checkLaunch({
+      ...plain({}),
+      expectedExcludedAudienceIds: ['3333333'],
+    })
+    const g = unknown.findings.find(x => x.code === 'excluded_audience_not_attached')
+    expect(g).toBeDefined()
+    expect(g!.message).toContain('没读到')
+  })
+
+  it('没声明排除受众 → 不报', () => {
+    expect(checkLaunch(plain({ excludedAudienceIds: [] })).findings.map(f => f.code))
+      .not.toContain('excluded_audience_not_attached')
+  })
+})

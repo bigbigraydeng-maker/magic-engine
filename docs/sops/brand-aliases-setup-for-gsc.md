@@ -1,5 +1,7 @@
 # Brand Aliases 配置 SOP — Goal brand_search_volume 主指标
 
+> 负责 agent：孔子（`kongzi`）｜ 档案：[`docs/agents/13-kongzi.md`](../agents/13-kongzi.md) ｜ 索引：[agents 索引](../agents/README.md)
+
 > **适用范围**：客户的 Goal 选了 `brand_search_volume` 作为主指标，要让 ME 从 GSC 自动算出"真实品牌词点击数"。
 > **目标**：让 Goal 详情页主指标卡显示真实数字，而不是 0 或 fallback 到 DataForSEO 估算。
 > **耗时**：每个客户 5-10 分钟（一次性配置）。

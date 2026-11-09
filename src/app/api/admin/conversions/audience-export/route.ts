@@ -16,6 +16,7 @@
 
 import { NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { guardAdmin } from '@/lib/auth/require-admin'
 import { assertClientScope } from '@/lib/conversions/route-guard'
 import { requireAdmin } from '@/lib/auth/require-admin'
@@ -63,14 +64,17 @@ export async function GET(request: Request) {
 }
 
 async function handleGet(request: Request) {
+  const { searchParams } = new URL(request.url)
+  const clientId = searchParams.get('client_id') ?? ''
+  const agentDenied = await rejectAgentAdsBearer(request, { clientId, action: 'upload_audience' })
+  if (agentDenied) return agentDenied
+
   const guard = await guardAdmin()
   if (guard) return guard
 
   const admin = await requireAdmin()
   if (!admin.ok) return NextResponse.json({ error: admin.error }, { status: admin.status })
 
-  const { searchParams } = new URL(request.url)
-  const clientId = searchParams.get('client_id')
   const format = searchParams.get('format') ?? 'stats'
 
   if (!clientId || !UUID_RE.test(clientId)) {

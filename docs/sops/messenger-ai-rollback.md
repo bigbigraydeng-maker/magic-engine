@@ -1,5 +1,7 @@
 # 私信 AI 客服 —— 紧急回滚 SOP
 
+> 负责 agent：苏东坡（`sudongpo`）｜ 档案：[`docs/agents/14-sudongpo.md`](../agents/14-sudongpo.md) ｜ 索引：[agents 索引](../agents/README.md)
+
 跟踪 issue [#1590](https://github.com/bigbigraydeng-maker/magic-engine/issues/1590) · 依赖 #1574/#1578/#1584/#1585/#1586/#1587（均已合并）
 
 **这份文档给谁看**：PM / FDE。目标客户出问题（说错价格、语气失控、客户投诉）时，照着这份文档就能自己关掉 AI，不需要等开发。

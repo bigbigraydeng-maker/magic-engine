@@ -8,7 +8,7 @@
  * v3 方案（`~/.claude/plans/cts-tours-messenger-dynamic-pearl.md` §Layer4 F2）
  * 的九步骨架，逐步对应本文件的 step id：
  *
- *   check-opt-out / check-channel-enabled / classify-conversation
+ *   check-opt-out / check-channel-enabled
  *     —— 三项独立判断，互不依赖，任一命中直接 return（不靠"等 F1 事件"来判断
  *        "要不要继续"，这正是 3 审第 1 轮子牙 B1 blocker 修好的地方）
  *   wait-autoack —— 等 `conversation/autoack.sent`，纯 UX 排序（超时也继续，
@@ -93,7 +93,6 @@
  */
 
 import { inngest, CLOUD_FN_PREFIX } from '../client'
-import { supabaseAdmin } from '@/lib/supabase'
 import {
   CONVERSATION_MESSAGE_RECEIVED_EVENT,
   CONVERSATION_AUTOACK_SENT_EVENT,
@@ -110,13 +109,8 @@ import {
   type MessengerAgentChannel,
   type ChannelSendResult,
 } from '@/lib/messenger-agent/channel-dispatch'
-import { isKnownAutoAckChannel } from './conversation-inbound-autoack'
-import {
-  classifyConversation,
-  resolvePostSaleClassificationPolicy,
-  type ConversationClass,
-  type PostSaleClassificationPolicy,
-} from '@/lib/messenger-agent/classify'
+import { isKnownAutoAckChannel, AUTOACK_COOLDOWN_HOURS } from './conversation-inbound-autoack'
+import { hasRecentOutbound } from '@/lib/messenger/recent-outbound'
 import { buildMessengerAgentSystemPrompt } from '@/lib/messenger-agent/prompt'
 import { buildMessengerAgentTools, CUSTOMER_FACING_SENSITIVITIES } from '@/lib/messenger-agent/tools'
 import { callClaudeWithTools } from '@/lib/anthropic/client'
@@ -144,8 +138,7 @@ export const CONVERSATION_REPLY_TIMEOUT_EVENT = 'conversation/reply.timeout'
  * F1（issue #1584，`conversation-inbound-autoack.ts`，PR #1739）在本文件动笔时
  * 是未合并的开着的 PR，跟这里共用的系统身份常量还没有一个已合并的家可以 import——
  * 这个值本身已跟 F1 逐字核对一致（子牙复审）。可对照的两个事件名常量和
- * `resolvePostSaleClassificationPolicy` 已经改成从已合并的 `conversations/events.ts`
- * / `messenger-agent/classify.ts` import（见上方 import 段），不再本地重复声明。
+ * （2026-10-22 PM：售前/售后分类闸已拿掉，所有进线都起草，见 `messenger-agent/classify.ts` 文件头。）
  */
 export const DRAFT_SENT_BY_EMAIL = 'governed-reply-agent@magicengine.cloud'
 
@@ -161,7 +154,6 @@ export type DraftOutcome =
   | 'skipped_invalid_payload'
   | 'skipped_opted_out'
   | 'skipped_channel_disabled'
-  | 'skipped_post_sale'
   | 'draft_error'
   | 'blocked'
   | 'timed_out'
@@ -353,8 +345,8 @@ type ChannelSendFn = (input: {
 export interface ConversationInboundDraftDeps {
   isOptedOut: (conversationId: string) => Promise<boolean>
   isEnabled: (clientId: string, channel: string) => Promise<boolean>
-  classify: (conversationId: string, policy: PostSaleClassificationPolicy) => Promise<ConversationClass>
-  loadIndustry: (clientId: string) => Promise<string | null>
+  /** F1 的 6 小时限频用同一个判断：命中就说明 F1 不会再发安抚、也不会 emit autoack.sent。 */
+  hasRecentOutbound: (conversationId: string, sinceIso: string) => Promise<boolean>
   loadContext: (clientId: string, conversationId: string) => Promise<LoadedDraftContext>
   runAgent: (clientId: string, conversationId: string, context: LoadedDraftContext) => Promise<MessengerAgentOutput>
   verify: (
@@ -423,15 +415,6 @@ export function createConversationInboundDraftFunction(deps: ConversationInbound
         return { ...base, outcome: 'skipped_channel_disabled', detail: null }
       }
 
-      const conversationClass = await step.run('classify-conversation', async () => {
-        const industry = await deps.loadIndustry(client_id)
-        const policy = resolvePostSaleClassificationPolicy(industry)
-        return policy ? deps.classify(conversation_id, policy) : ('lead_intake' as ConversationClass)
-      })
-      if (conversationClass === 'post_sale') {
-        return { ...base, outcome: 'skipped_post_sale', detail: null }
-      }
-
       // Step "wait-autoack" —— 纯 UX 排序（确保安抚话术先送达），不是 gate：
       // 超时（F1 因为瞬时故障没能按时 emit）也继续往下走起草，不因为排序没保证
       // 就放弃这整段本该继续的自动回复流程。
@@ -441,12 +424,30 @@ export function createConversationInboundDraftFunction(deps: ConversationInbound
       // 它。如果照样等，每一封邮件的起草都会被这个已知永远不会来的事件白白
       // 拖慢 5 分钟。直接跳过这一步，不是"缩短超时"，是这个 wait 对这个渠道
       // 根本不该存在。
+      //
+      // F1 有 6 小时限频（`AUTOACK_COOLDOWN_HOURS`）：窗口内已有成功出站时 F1 直接
+      // 跳过、不发安抚也不 emit `autoack.sent`——照样等就是白等 5 分钟。所以等之前用
+      // 同一个判断（同一个常量）先问一句：F1 会跳过就不等。读失败不拦起草，退回原来的
+      // 「照常等」（这一步只是排序，不是闸）。
       if (isKnownAutoAckChannel(channel)) {
-        await step.waitForEvent('wait-autoack', {
-          event: CONVERSATION_AUTOACK_SENT_EVENT,
-          timeout: '5m',
-          if: `async.data.conversation_id == "${conversation_id}"`,
+        const f1WillSkip = await step.run('check-autoack-cooldown', async () => {
+          try {
+            const sinceIso = new Date(Date.now() - AUTOACK_COOLDOWN_HOURS * 3_600_000).toISOString()
+            return await deps.hasRecentOutbound(conversation_id, sinceIso)
+          } catch (err) {
+            console.warn(
+              `[conversation-inbound-draft] 读最近出站失败，按「F1 会发」照常等：${err instanceof Error ? err.message : String(err)}`,
+            )
+            return false
+          }
         })
+        if (!f1WillSkip) {
+          await step.waitForEvent('wait-autoack', {
+            event: CONVERSATION_AUTOACK_SENT_EVENT,
+            timeout: '5m',
+            if: `async.data.conversation_id == "${conversation_id}"`,
+          })
+        }
       }
 
       const context = await step.run('load-context', () => deps.loadContext(client_id, conversation_id))
@@ -707,14 +708,7 @@ export function createConversationInboundDraftFunction(deps: ConversationInbound
 export const conversationInboundDraft = createConversationInboundDraftFunction({
   isOptedOut: isConversationOptedOut,
   isEnabled: isChannelEnabled,
-  classify: classifyConversation,
-  loadIndustry: async (clientId: string) => {
-    const { data, error } = await supabaseAdmin.from('clients').select('industry').eq('id', clientId).maybeSingle()
-    if (error) {
-      throw new Error(`[conversation-inbound-draft] 查客户行业失败 clientId=${clientId}: ${error.message}`)
-    }
-    return (data as { industry: string | null } | null)?.industry ?? null
-  },
+  hasRecentOutbound,
   loadContext: loadDraftContext,
   runAgent: runDraftAgent,
   verify: verifyDraft,

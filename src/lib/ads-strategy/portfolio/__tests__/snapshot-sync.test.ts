@@ -55,7 +55,7 @@ import { captureClientSnapshots, dayKeyIn, listSnapshotClients } from '../snapsh
 const ok = <T>(rows: T[]) => ({ rows, complete: true, error: null })
 const snapshots = () => tables.ad_entity_snapshots ?? []
 const captures = () => tables.ad_snapshot_captures ?? []
-const NAL_ACT = 'act_953025114498626'
+const NAL_ACT = 'act_955561215570466'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -86,10 +86,10 @@ describe('captureClientSnapshots', () => {
 
   it('🔴 M9 共用账户（同账户登记给两个客户）：只写账户级并标 shared_account，不读实体；实体层记 skipped_shared', async () => {
     tables.client_meta_ad_accounts = [
-      { client_id: 'client-roman', ad_account_id: 'act_1260456876069575' },
-      { client_id: 'client-kiteroa', ad_account_id: '1260456876069575' },
+      { client_id: 'client-roman', ad_account_id: 'act_1267447196150550' },
+      { client_id: 'client-kiteroa', ad_account_id: '1267447196150550' },
     ]
-    const res = await captureClientSnapshots('client-roman', ['act_1260456876069575'])
+    const res = await captureClientSnapshots('client-roman', ['act_1267447196150550'])
     expect(res.accounts[0].shared_account).toBe(true)
     expect(res.success).toBe(true)
     expect(snapshots().map(r => r.level)).toEqual(['account'])
@@ -169,7 +169,7 @@ describe('listSnapshotClients — 客户口径（魏征 B1）', () => {
   it('prospect 状态但登记了广告账户的客户（生产 NAL）要抓；archived 不抓', async () => {
     tables.clients = [
       { id: 'nal', name: 'New Asian Logistics', client_status: 'prospect', meta_ad_account_id: NAL_ACT },
-      { id: 'kiteroa', name: '30 Kiteroa', client_status: 'archived', meta_ad_account_id: 'act_1260456876069575' },
+      { id: 'kiteroa', name: '30 Kiteroa', client_status: 'archived', meta_ad_account_id: 'act_1267447196150550' },
     ]
     tables.client_meta_ad_accounts = [{ client_id: 'nal', ad_account_id: NAL_ACT }]
     const clients = await listSnapshotClients()

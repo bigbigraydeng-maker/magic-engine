@@ -64,6 +64,109 @@ const AUTOMATED_MESSAGE_SOURCES = new Set<string>([
  */
 const INSTANT_REPLY_MS = 30_000
 
+/**
+ * 「转移给你」这条通知之后多久内的出站消息仍算 AI 的收尾话。
+ *
+ * 依据（CTS 生产 60 天，2026-09-26 只读实测）：73 次「转移给你」里 28 次在 5 秒内
+ * 紧跟一条 AI 收尾话；5–15 秒这一段**0 条**；真人接手后最快也在 10 秒以上。
+ * 5 秒落在那段空白里，两边都不擦边。
+ */
+const AI_TAKEOVER_CLOSING_WINDOW_MS = 5_000
+
+/**
+ * Meta 在会话里留下的系统通知 —— 这是**唯一**可靠的「AI 现在接不接管」信号。
+ *
+ * 每条都标了发现日期和 CTS 60 天样本量（2026-09-26 只读实测）。加新文案时照这个
+ * 格式补一行，并在 `__tests__/automation.test.ts` 里补一条断言。
+ *
+ * `mode` 的意思：
+ *   · `ai_on`    —— 之后的出站消息都是 AI 发的，直到下一条 `human_on`
+ *   · `human_on` —— 真人接手 / Meta 把会话转给真人，之后的出站算真人
+ *                   （但紧跟其后 AI_TAKEOVER_CLOSING_WINDOW_MS 内那条仍算 AI 收尾）
+ *   · `neutral`  —— 只是告知，不改变谁在回话
+ *
+ * 通知本身永远不算真人回复 —— 它不是客服说的话。
+ *
+ * ⚠️ **认不出来的通知文案，方向是危险的那一边，不是安全的那一边。**
+ * （魏征复审 2026-09-26 纠正；原注释写反了，说成「最多名单上多留一个人」。）
+ *
+ * 认不出「AI 将会回复」那条 → `aiHasTheThread` 永远不会被打开 → 紧跟其后的
+ * AI 回复落到旧判据，间隔超过 30 秒就被判成**真人回复** → 那个客人显示成
+ * 「我们联系过了」→ 掉出「今天该联系谁」。这正是本模块要消灭的那个错本身。
+ *
+ * 全库目前没见过英文版通知（所有客户都没有），但 Meta 随时可能改文案或换语言。
+ * 所以「每天扫一遍近 7 天含 AI / 客服字样的系统通知、跟这张表比对、对不上的进
+ * 待办」（M3）**不是锦上添花，是这道判据的安全网**，必须跟接线同一轮或更早上线。
+ */
+type AiNoticeMode = 'ai_on' | 'human_on' | 'neutral'
+
+interface AiNoticePattern {
+  /** 出站消息正文的开头。比对前会 trim + 去零宽字符。 */
+  prefix: string
+  mode: AiNoticeMode
+  /**
+   * 这条 `human_on` 通知之后极短窗口内那条出站，是不是仍算 AI 的收尾话。
+   *
+   * **只有「转移给你」有证据支持**（CTS 60 天：73 次里 28 次在 5 秒内紧跟一条
+   * AI 收尾话，5–15 秒区间 0 条，真人最快 >10 秒）。
+   *
+   * 「你已接管」**没有**同类证据 —— 那是真人主动点了接管，5 秒内出现的话很可能是
+   * 他早就打好按下发送的。对它也套这个窗口会吞掉真人回复：2026-09-26 拿 CTS 真实
+   * 数据实测，套了之后「整条会话没有真人回复」从 377 变成 379，多算的那 2 条正是
+   * 接管后 5 秒内的真人回复。所以这个窗口按通知逐条声明，不按 mode 一刀切。
+   */
+  closingWindow?: boolean
+  /** 发现日期 + CTS 60 天样本量，供后来人判断这条还成不成立。 */
+  seen: string
+}
+
+const AI_NOTICE_PATTERNS: readonly AiNoticePattern[] = [
+  { prefix: '你的 AI 客服将会回复', mode: 'ai_on', seen: '2026-09-26 · 239 条' },
+  { prefix: '你的 AI 客服已将这个聊天转移给你', mode: 'human_on', closingWindow: true, seen: '2026-09-26 · 53 条（另有带「请训练你的 AI…」后缀 7 条、「…因为客户已准备购买。」1 条）' },
+  { prefix: '你已接管', mode: 'human_on', seen: '2026-09-26 · 46 条' },
+  // 下面两条只是告知，不改变谁在回话。漏掉它们会把一条通知误当成真人回复。
+  { prefix: '你的 AI 客服', mode: 'neutral', seen: '2026-09-26 · 兜底：上面两条更具体的先匹配，其余「你的 AI 客服…」一律中性' },
+]
+
+/**
+ * 「XX 回复了一条广告。」「A 把这个对话分配给了 B。」这类 —— 中性通知，
+ * 不改变谁在回话，本身也不算真人回复。
+ * 样本（2026-09-26）：广告回复通知 CTS 52 / NAL 114；分配对话通知 NAL 23。
+ */
+const NEUTRAL_NOTICE_SUFFIXES: readonly string[] = ['回复了一条广告。', '把这个对话分配给了']
+
+/** 零宽字符会让前缀比对落空（编码、复制粘贴都可能带进来）。比对前一律去掉。 */
+const ZERO_WIDTH_RE = /[\u200b\u200c\u200d\ufeff]/g
+
+/** 比对前的规范化：去零宽 + trim。 */
+export function normaliseNoticeText(body: string): string {
+  return body.replace(ZERO_WIDTH_RE, '').trim()
+}
+
+/**
+ * 这条出站消息是不是 Meta 的系统通知？是的话它把「谁在回话」切到哪一档？
+ * 返回 null = 不是已知通知（可能是真人的话，也可能是 AI 说的内容）。
+ */
+export function classifyAiNotice(body: string): AiNoticeMode | null {
+  return matchAiNotice(body)?.mode ?? null
+}
+
+/**
+ * 同 `classifyAiNotice`，但把命中的那条 pattern 整个给出来 —— walker 需要知道
+ * 这条 `human_on` 要不要套「5 秒收尾话」窗口（只有「转移给你」要，见 closingWindow）。
+ */
+function matchAiNotice(body: string): AiNoticePattern | null {
+  const text = normaliseNoticeText(body)
+  if (text.length === 0) return null
+  for (const suffix of NEUTRAL_NOTICE_SUFFIXES) {
+    if (text.includes(suffix)) return { prefix: suffix, mode: 'neutral', seen: 'NEUTRAL_NOTICE_SUFFIXES' }
+  }
+  for (const p of AI_NOTICE_PATTERNS) {
+    if (text.startsWith(p.prefix)) return p
+  }
+  return null
+}
+
 export interface PageMessageSignal {
   /** 这条消息的 `tags.data[].name` 列表(原样,可能含 `source:chat` 等)。 */
   tags: string[]
@@ -111,4 +214,139 @@ export function isAutomatedPageMessage(signal: PageMessageSignal): boolean {
 
   // 其余一律当真人:真人 composer(source:chat)、未知来源、无 tag、FDE 经 ME 的回复。
   return false
+}
+
+/** `lastHumanPageReplyAt` 的入参：一条消息在会话里的样子。 */
+export interface ThreadMessage {
+  direction: 'inbound' | 'outbound'
+  body: string
+  /** ISO 时间。 */
+  sentAt: string
+  tags: string[]
+  /**
+   * 这条出站消息在 `conversation_outbound_log` 里对得上、**而且是真人经 ME 发的**。
+   *
+   * 优先级最高：这是最硬的证据（我们自己的发送记录里写着谁发的）。它同时修掉
+   * link-contacts 记着的那个根因 —— 销售在 ME 里秒回被速度判据当成机器。
+   * 机器身份（自动安抚）经 ME 发出的要传 false。
+   */
+  sentByHumanViaMe?: boolean
+  /**
+   * ME's own F1 auto-acknowledgement. Never a human reply, and it does not change
+   * who has the thread.
+   */
+  viaMeAutoAck?: boolean
+}
+
+/** What kind of reply a single outbound message is. */
+export type PageReplyKind = 'human' | 'automated' | 'notice' | 'me_autoack'
+
+/** One outbound message's classification, keyed by its `sentAt`. */
+export interface PageReplyVerdict {
+  sentAt: string
+  kind: PageReplyKind
+}
+
+/**
+ * 整条会话走一遍，给**每条出站消息**定档（inbound 不产出 verdict）。
+ *
+ * 判定顺序（对每条出站消息）：
+ *   0. `viaMeAutoAck === true` → ME 自己的 F1 自动安抚。不算真人，也不改变谁在回话。
+ *   1. `sentByHumanViaMe === true` → 真人。不管 AI 是否在接管、也不管是不是秒回。
+ *   2. 是已知系统通知 → **不算真人**，但按 mode 切换「谁在回话」。
+ *   3. AI 接管期间 → 机器。包括第 60 / 120 分钟那种「还感兴趣吗」追问 ——
+ *      所以「回得慢就是真人」这条路走不通，必须靠通知定档。
+ *   4. 其余 → 交给既有的 `isAutomatedPageMessage`（先开口 / 来源 tag / 秒回）。
+ *
+ * 不认识的通知文案落到第 4 步，也就是默认真人 —— 跟本文件既有的 deny-list 原则一致：
+ * 错杀真人（线索多露一次面）远比错信机器是真人（热线索被埋）轻。
+ */
+export function classifyPageReplies(messages: readonly ThreadMessage[]): PageReplyVerdict[] {
+  // 🔴 按**时刻**排，不能按字符串排（魏征复审 2026-09-26 抓到，已复现）。
+  // ISO 时间的写法不止一种：`…T10:00:00Z` 和 `…T22:00:00+12:00` 是同一时刻，
+  // 但字符串比较会把后者排到前者后面很远。实测一条：客人 09:59Z 来信 →
+  // AI 接管通知写成 22:00+12:00 → AI 回复写成 10:01Z，字符串排序得到
+  // 「来信 → AI 回复 → 通知」，于是那条 AI 回复在「还没接管」的状态下被判成
+  // **真人回复** —— 正好是这个模块要消灭的那个错。
+  // 解析不出来的时间排到最后：不知道它在哪，就别让它去改变前面那些的判定。
+  const at = (v: string): number => {
+    const t = Date.parse(v)
+    return Number.isNaN(t) ? Number.POSITIVE_INFINITY : t
+  }
+  const ordered = [...messages].sort((a, b) => at(a.sentAt) - at(b.sentAt))
+
+  let aiHasTheThread = false
+  /** 最近一条 `human_on` 通知的时间 —— 用来判「转移给你」后 5 秒内的收尾话。 */
+  let humanOnAt: number | null = null
+  let lastInboundAt: number | null = null
+  const verdicts: PageReplyVerdict[] = []
+
+  for (const m of ordered) {
+    const at = Date.parse(m.sentAt)
+    const atMs = Number.isNaN(at) ? null : at
+
+    if (m.direction === 'inbound') {
+      lastInboundAt = atMs
+      continue
+    }
+
+    // 0) ME 自己的 F1 自动安抚 —— 不算真人，也不改变谁在回话。
+    if (m.viaMeAutoAck === true) {
+      verdicts.push({ sentAt: m.sentAt, kind: 'me_autoack' })
+      continue
+    }
+
+    // 1) 我们自己的发送记录说这是真人发的 —— 最硬的证据，先判。
+    if (m.sentByHumanViaMe === true) {
+      verdicts.push({ sentAt: m.sentAt, kind: 'human' })
+      continue
+    }
+
+    // 2) 系统通知：本身不算真人，但会切换「谁在回话」。
+    const notice = matchAiNotice(m.body)
+    if (notice !== null) {
+      if (notice.mode === 'ai_on') {
+        aiHasTheThread = true
+        humanOnAt = null
+      } else if (notice.mode === 'human_on') {
+        aiHasTheThread = false
+        // 只有「转移给你」才武装收尾话窗口；「你已接管」是真人主动点的，
+        // 他 5 秒内发出的话算他自己的（见 closingWindow 注释里的实测）。
+        humanOnAt = notice.closingWindow === true ? atMs : null
+      }
+      verdicts.push({ sentAt: m.sentAt, kind: 'notice' })
+      continue
+    }
+
+    // 3) 「转移给你」之后极短窗口内那条，仍是 AI 的收尾话。
+    if (humanOnAt !== null && atMs !== null && atMs - humanOnAt <= AI_TAKEOVER_CLOSING_WINDOW_MS) {
+      verdicts.push({ sentAt: m.sentAt, kind: 'automated' })
+      continue
+    }
+
+    // 4) AI 接管期间的出站一律算机器（含长间隔的追问）。
+    if (aiHasTheThread) {
+      verdicts.push({ sentAt: m.sentAt, kind: 'automated' })
+      continue
+    }
+
+    // 5) 其余交给既有判据。
+    const automated = isAutomatedPageMessage({
+      tags: m.tags,
+      hasPriorInbound: lastInboundAt !== null,
+      msSincePriorInbound: lastInboundAt !== null && atMs !== null ? atMs - lastInboundAt : null,
+    })
+    verdicts.push({ sentAt: m.sentAt, kind: automated ? 'automated' : 'human' })
+  }
+
+  return verdicts
+}
+
+/** Returns the time of the last human reply in the thread, or null if there is none. */
+export function lastHumanPageReplyAt(messages: readonly ThreadMessage[]): string | null {
+  let lastHuman: string | null = null
+  for (const v of classifyPageReplies(messages)) {
+    if (v.kind === 'human') lastHuman = v.sentAt
+  }
+  return lastHuman
 }

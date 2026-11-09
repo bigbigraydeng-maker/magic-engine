@@ -21,6 +21,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { Resend } from 'resend'
 import { startCronRun } from '@/lib/cron/run-logger'
+import { meMailFrom } from '@/lib/email/sender'
 
 const TO_EMAIL = 'hello@magicengine.cloud'
 const LOOKBACK_HOURS = 24
@@ -211,7 +212,7 @@ export async function GET(req: NextRequest) {
 
   const resend = new Resend(apiKey)
   const { error: sendError } = await resend.emails.send({
-    from: 'Magic Engine Monitor <onboarding@resend.dev>',
+    from: meMailFrom('Magic Engine Monitor'),
     to: [TO_EMAIL],
     subject: `${hot.length > 0 ? '🔥 ' : ''}${headline} — ${new Date().toLocaleDateString('en-NZ', { timeZone: 'Pacific/Auckland' })}`,
     html,

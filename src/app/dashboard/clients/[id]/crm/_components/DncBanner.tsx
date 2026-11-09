@@ -29,18 +29,43 @@
 
 import { useRef, useState } from 'react'
 
+/**
+ * 两种说法，同一个撤销动作（`/dnc` 写一条 `dnc_cleared`，它同时作废更早的
+ * 「别再联系」和「只别打电话」—— lib/crm/dnc `saidDoNotCall`）。
+ * `doNotCall` = 客人只说过不要电话（PM 2026-11-09），邮件照常，只关拨号。
+ */
+const COPY = {
+  doNotContact: {
+    banner: '🚫 他被标成「别再联系」—— 我们任何渠道都不会再联系他',
+    open: '判错了？点这里放回名单',
+    confirmHint: '先看一眼下面的往来记录：他原话真的说过「别再联系 / 不要打电话」吗？ 只是「不打算去」的话，放回来是对的。',
+    confirm: '确认放回名单',
+    done: (name: string) => `✓ ${name} 放回名单了 —— 明天起会正常出现`,
+  },
+  doNotCall: {
+    banner: '📵 这位客人说过不要电话，可以用邮件或短信联系他。',
+    open: '其实可以打电话？放回电话名单',
+    confirmHint: '先看一眼下面的往来记录：他原话是不是真的只说过「不要打电话」？确认他其实愿意接电话再放回。',
+    confirm: '确认放回电话名单',
+    done: (name: string) => `✓ ${name} 放回电话名单了`,
+  },
+} as const
+
 export function DncBanner({
   clientId,
   contactId,
   name,
   onSaved,
+  variant = 'doNotContact',
 }: {
   clientId: string
   contactId: string
   name: string
   /** 第二个参数 = 要不要顺手重拉列表；失败时传 false，别让人以为改上了。 */
   onSaved: (msg: string, reload?: boolean) => void
+  variant?: keyof typeof COPY
 }) {
+  const copy = COPY[variant]
   const [asking, setAsking] = useState(false)
   const [saving, setSaving] = useState(false)
   // 幂等键：双击 / 重试不该记成两笔纠正。整个组件生命周期内固定一个。
@@ -66,8 +91,8 @@ export function DncBanner({
       const json = (await res.json()) as { blockingStageLabel?: string | null }
       onSaved(
         json.blockingStageLabel
-          ? `✓ 放回来了，但他还停在「${json.blockingStageLabel}」这一档 —— 用下面的「跟进到哪步」改掉才会出现在名单上`
-          : `✓ ${name} 放回名单了 —— 明天起会正常出现`,
+          ? `✓ 放回来了，但他还停在「${json.blockingStageLabel}」这一档 —— 用下面的「到哪一步了」改掉才会出现在名单上`
+          : copy.done(name),
       )
     } catch {
       onSaved('没改上，再点一下试试', false)
@@ -80,7 +105,7 @@ export function DncBanner({
   return (
     <div className="w-full rounded-lg border border-me-ochre/40 bg-me-ochre/10 px-3 py-2">
       <p className="text-[13px] font-bold text-me-charcoal">
-        🚫 他被标成「别再联系」—— 我们任何渠道都不会再联系他
+        {copy.banner}
       </p>
       {!asking ? (
         <button
@@ -88,13 +113,12 @@ export function DncBanner({
           onClick={() => setAsking(true)}
           className="mt-1.5 text-[13px] font-bold text-me-ochre underline"
         >
-          判错了？点这里放回名单
+          {copy.open}
         </button>
       ) : (
         <div className="mt-1.5">
           <p className="text-[12.5px] text-me-charcoal/70">
-            先看一眼下面的往来记录：他原话真的说过「别再联系 / 不要打电话」吗？
-            只是「不打算去」的话，放回来是对的。
+            {copy.confirmHint}
           </p>
           <div className="mt-1.5 flex gap-2">
             <button
@@ -103,7 +127,7 @@ export function DncBanner({
               disabled={saving}
               className="rounded-lg bg-me-charcoal px-3 py-1.5 text-[13px] font-bold text-white disabled:opacity-50"
             >
-              {saving ? '改着…' : '确认放回名单'}
+              {saving ? '改着…' : copy.confirm}
             </button>
             <button
               type="button"

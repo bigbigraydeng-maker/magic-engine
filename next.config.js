@@ -12,6 +12,9 @@ const nextConfig = {
     ignoreDuringBuilds: true,
   },
   experimental: {
+    // Next 14 does not load src/instrumentation.ts unless this is on.
+    // That hook reuses PUT /api/inngest after a Render boot. No new secret.
+    instrumentationHook: true,
     serverActions: {
       allowedOrigins: ['localhost:3000', 'localhost:3001'],
     },

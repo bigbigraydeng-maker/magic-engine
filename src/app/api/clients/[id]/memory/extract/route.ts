@@ -17,7 +17,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { requireOperatorAccess } from '@/lib/auth/client-access'
 import { runExtractorForClient } from '@/lib/memory'
 
 export const dynamic = 'force-dynamic'
@@ -29,13 +29,15 @@ export async function POST(
 ): Promise<NextResponse> {
   const { id: clientId } = params
 
-  const access = await requirePaidClientAccess(clientId)
+  const access = await requireOperatorAccess(clientId)
   if (!access.ok) {
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
   try {
-    const result = await runExtractorForClient(supabaseAdmin, clientId)
+    // Manual runs never switch memories off: every switch-off must land in the daily cron's
+    // run log, which is the rollback list. Switching on still follows the same validity rule.
+    const result = await runExtractorForClient(supabaseAdmin, clientId, new Date(), { reconcile: false })
     return NextResponse.json({ success: true, result })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)

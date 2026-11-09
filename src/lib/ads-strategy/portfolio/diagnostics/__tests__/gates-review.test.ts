@@ -10,7 +10,7 @@ import nalActivities from './fixtures/nal-activities-budget-create.json'
 import ctsDailyRaw from './fixtures/cts-official-daily-adset-2026-09-07_2026-09-14.json'
 import ctsHourlyRaw from './fixtures/cts-official-hourly-adset.json'
 import ctsActivities from './fixtures/cts-official-activities-budget-create.json'
-import ctsStudy from './fixtures/cts-study-1489853439620194.json'
+import ctsStudy from './fixtures/cts-study.json'
 import { accountInput, dailyRowsFromGraph, hourlyFromGraph, replaySnapshots, settingsFixture, type ActivityRow } from './replay'
 import { runDiagnostics } from '../run'
 import { benjaminiHochberg, binomialTwoSidedP } from '../d5-budget-result-mismatch'
@@ -24,7 +24,7 @@ import type { GraphHourlySpendRow } from '@/lib/meta/entity-settings'
 
 const CTS = settingsFixture(ctsSettings)
 const NAL = settingsFixture(nalSettings)
-const LEAD: OutcomeConfig = { leading: 'lead', primary: 'lead', targetCostPerPrimary: 25, minPrimaryPerUnit: 5 }
+const LEAD: OutcomeConfig = { leading: 'lead', primary: 'lead', targetCostPerPrimary: 29.25, minPrimaryPerUnit: 5 }
 const MSG: OutcomeConfig = { leading: 'messaging_started', primary: 'messaging_started', targetCostPerPrimary: null, minPrimaryPerUnit: 5 }
 
 let nalDaily: DailyRow[] = []
@@ -42,34 +42,34 @@ function run(account: AccountInput, date: string, evaluatedAt: string, outcome: 
 const nalSnaps = (date: string, asOf: string) => replaySnapshots({ fixture: NAL, clientId: 'c', asOfIso: asOf, date, daily: nalDaily, activities: nalActivities as ActivityRow[] })
 const nalAcc = (snaps: EntitySnapshotRow[], date: string, daily = nalDaily) => accountInput({ fixture: NAL, snapshots: snaps, daily, lastInsightDate: date })
 
-// 真实实验对象的形状（CTS 1489853439620194），时间窗平移到被测窗口——派生，只为验证「实验排除」这道闸
+// 真实实验对象的形状（CTS 1400527488568234），时间窗平移到被测窗口——派生，只为验证「实验排除」这道闸
 const study = (start: string, end: string) => [{ id: (ctsStudy as { id: string }).id, type: 'SPLIT_TEST', start_time: start, end_time: end }]
 
 describe('M7 实验排除：闸真的在起作用（不只是断言空转）', () => {
   it('NAL 3PL 组 8/27 本来 D3 命中；给它挂上窗口内的实验 → 不再命中，并进 excluded', () => {
     const base = run(nalAcc(nalSnaps('2026-08-27', '2026-08-27T11:59:00Z'), '2026-08-27'), '2026-08-27', '2026-08-27T11:59:00Z', LEAD)
-    expect(base.diagnoses.some(d => d.code === 'D3' && d.status === 'hit' && d.units[0].id === '52589907084325')).toBe(true)
-    const snaps = nalSnaps('2026-08-27', '2026-08-27T11:59:00Z').map(s => (s.entity_id === '52589907084325' ? { ...s, ad_studies: study('2026-08-20T00:00:00+0000', '2026-08-30T00:00:00+0000') } : s))
+    expect(base.diagnoses.some(d => d.code === 'D3' && d.status === 'hit' && d.units[0].id === '52143863593432')).toBe(true)
+    const snaps = nalSnaps('2026-08-27', '2026-08-27T11:59:00Z').map(s => (s.entity_id === '52143863593432' ? { ...s, ad_studies: study('2026-08-20T00:00:00+0000', '2026-08-30T00:00:00+0000') } : s))
     const r = run(nalAcc(snaps, '2026-08-27'), '2026-08-27', '2026-08-27T11:59:00Z', LEAD)
-    expect(r.diagnoses.some(d => d.units.some(u => u.id === '52589907084325'))).toBe(false)
-    expect(r.excluded.find(e => e.id === '52589907084325')?.reason).toBe('meta_experiment')
+    expect(r.diagnoses.some(d => d.units.some(u => u.id === '52143863593432'))).toBe(false)
+    expect(r.excluded.find(e => e.id === '52143863593432')?.reason).toBe('meta_experiment')
   })
 
   it('实验只挂在系列上 → 系列下的广告组一并排除', () => {
-    const snaps = nalSnaps('2026-08-27', '2026-08-27T11:59:00Z').map(s => (s.level === 'campaign' && s.entity_id === '52589907084125' ? { ...s, ad_studies: study('2026-08-20T00:00:00+0000', '2026-08-30T00:00:00+0000') } : s))
+    const snaps = nalSnaps('2026-08-27', '2026-08-27T11:59:00Z').map(s => (s.level === 'campaign' && s.entity_id === '52902974440554' ? { ...s, ad_studies: study('2026-08-20T00:00:00+0000', '2026-08-30T00:00:00+0000') } : s))
     const r = run(nalAcc(snaps, '2026-08-27'), '2026-08-27', '2026-08-27T11:59:00Z', LEAD)
-    expect(r.excluded.map(e => e.id)).toEqual(expect.arrayContaining(['52589907084125', '52589907084325']))
+    expect(r.excluded.map(e => e.id)).toEqual(expect.arrayContaining(['52902974440554', '52143863593432']))
     expect(r.diagnoses.some(d => d.code === 'D3' && d.status === 'hit')).toBe(false)
   })
 
   it('实验时间窗不和评估窗口重叠 → 不排除（D3 照常命中）', () => {
-    const snaps = nalSnaps('2026-08-27', '2026-08-27T11:59:00Z').map(s => (s.entity_id === '52589907084325' ? { ...s, ad_studies: study('2026-09-13T12:31:23+0000', '2026-09-23T12:31:23+0000') } : s))
+    const snaps = nalSnaps('2026-08-27', '2026-08-27T11:59:00Z').map(s => (s.entity_id === '52143863593432' ? { ...s, ad_studies: study('2026-09-13T12:31:23+0000', '2026-09-23T12:31:23+0000') } : s))
     const r = run(nalAcc(snaps, '2026-08-27'), '2026-08-27', '2026-08-27T11:59:00Z', LEAD)
     expect(r.diagnoses.some(d => d.code === 'D3' && d.status === 'hit')).toBe(true)
   })
 
   it('D4：两个 ThruPlay 组都在实验中 → 破冰花费不计，D4 不报', () => {
-    const snaps = nalSnaps('2026-09-13', '2026-09-13T09:00:00Z').map(s => (['52596939123725', '52596931528525'].includes(s.entity_id) ? { ...s, ad_studies: study('2026-09-10T00:00:00+0000', '2026-09-20T00:00:00+0000') } : s))
+    const snaps = nalSnaps('2026-09-13', '2026-09-13T09:00:00Z').map(s => (['52104815523595', '52426144644352'].includes(s.entity_id) ? { ...s, ad_studies: study('2026-09-10T00:00:00+0000', '2026-09-20T00:00:00+0000') } : s))
     const r = run(nalAcc(snaps, '2026-09-13'), '2026-09-13', '2026-09-13T09:00:00Z', MSG)
     expect(r.diagnoses.find(d => d.code === 'D4')).toBeUndefined()
   })
@@ -79,8 +79,8 @@ describe('D5 比较本身（真实命中 + 统计函数）', () => {
   it('NAL 9/07–9/13 私信开聊：WhatsApp 系列花 31.9% 的钱拿到 47.9% 的开聊，物流系列 68.1% → 52.1%；二项检验 p=0.02，BH 后 0.02', () => {
     const r = run(nalAcc(nalSnaps('2026-09-13', '2026-09-13T09:00:00Z'), '2026-09-13'), '2026-09-13', '2026-09-13T09:00:00Z', MSG)
     const hits = r.diagnoses.filter(d => d.code === 'D5' && d.status === 'hit')
-    expect(hits.map(h => h.units[0].id).sort()).toEqual(['52589907084125', '52594661605725'])
-    expect(hits.find(h => h.units[0].id === '52594661605725')?.evidence).toMatchObject({ spend: 66.34, results: 23, spend_share: 0.319, result_share: 0.479, group_results: 48 })
+    expect(hits.map(h => h.units[0].id).sort()).toEqual(['52025872830354', '52902974440554'])
+    expect(hits.find(h => h.units[0].id === '52025872830354')?.evidence).toMatchObject({ spend: 77.61, results: 23, spend_share: 0.319, result_share: 0.479, group_results: 48 })
   })
 
   it('每个 D5 命中都必须过显著性（BH 后 p ≤ 0.1）和占比差（≥0.15）两道闸——NAL 8/24–9/13 每天逐日核', () => {
@@ -134,13 +134,13 @@ describe('第二轮核验补测', () => {
 
   it('🔴 N1：账户里有 Meta 实验在跑时，投放卡住不能漏报（花费和预算都要算上实验单位）', () => {
     // 派生：复制 CTS 顶层 ThruPlay 组（同预算、同日花费、同小时花费）为第二个组，并挂上真实实验形状
-    const src = ctsSnaps().find(s => s.entity_id === '52549857906273')!
+    const src = ctsSnaps().find(s => s.entity_id === '52510454332891')!
     const twin = { ...src, entity_id: 'derived-twin', ad_studies: study('2026-09-10T00:00:00+0000', '2026-09-20T00:00:00+0000') }
-    const daily = [...ctsDaily, ...ctsDaily.filter(r => r.entity_id === '52549857906273').map(r => ({ ...r, entity_id: 'derived-twin' }))]
+    const daily = [...ctsDaily, ...ctsDaily.filter(r => r.entity_id === '52510454332891').map(r => ({ ...r, entity_id: 'derived-twin' }))]
     const hourly = Object.fromEntries(Object.entries(ctsHourly).map(([d, rows]) => [d, [...rows, ...rows.map(h => ({ ...h, adset_id: 'derived-twin' }))]]))
     const acc = accountInput({ fixture: CTS, snapshots: [...ctsSnaps(), twin], daily, hourly, lastInsightDate: '2026-09-13' })
     const d1 = run(acc, '2026-09-13', '2026-09-14T03:00:00Z', LEAD).diagnoses.find(d => d.code === 'D1')
-    expect(d1).toMatchObject({ status: 'hit', evidence: expect.objectContaining({ daily_budget: 120, budget_remaining: 46.44 }) })
+    expect(d1).toMatchObject({ status: 'hit', evidence: expect.objectContaining({ daily_budget: 140.4, budget_remaining: 54.34 }) })
   })
 
   it('夜里停得比下午长（0–6 点 6 小时 vs 14–17 点 3 小时）→ 仍报下午那段', () => {
@@ -180,14 +180,14 @@ describe('D4 复审补测', () => {
   })
 
   it('破冰花费刚好 30（两个组各 3 天 × 5）→ 不判（下限是「大于」）', () => {
-    const daily = nalDaily.map(r => (['52596939123725', '52596931528525'].includes(r.entity_id) ? { ...r, spend: 5 } : r))
+    const daily = nalDaily.map(r => (['52104815523595', '52426144644352'].includes(r.entity_id) ? { ...r, spend: 5 } : r))
     const snaps = nalSnaps('2026-09-13', '2026-09-13T09:00:00Z')
     expect(run(nalAcc(snaps, '2026-09-13', daily), '2026-09-13', '2026-09-13T09:00:00Z', MSG).diagnoses.find(d => d.code === 'D4')).toBeUndefined()
   })
 
   it('受众建成时间晚于评估日结束 → 不算覆盖（D4 命中，covering_audiences=0）', () => {
     const snaps = nalSnaps('2026-09-13', '2026-09-13T12:30:00Z').map(s => (s.level === 'audience' ? { ...s, audience_created_at: '2026-09-20T00:00:00.000Z' } : s))
-      .filter(s => s.entity_id !== '52597304727125')
+      .filter(s => s.entity_id !== '52567871115731')
     const d4 = run(nalAcc(snaps, '2026-09-13'), '2026-09-13', '2026-09-13T12:30:00Z', MSG).diagnoses.find(d => d.code === 'D4')
     expect(d4).toMatchObject({ status: 'hit', evidence: expect.objectContaining({ covering_audiences: 0 }) })
   })
@@ -235,15 +235,15 @@ describe('加载器 / 时区 / 内部邮箱', () => {
 
   it('latestSnapshotsAsOf：只取评估时刻之前的最新一行；最新一行是 disappeared 的实体不出现', () => {
     const snaps = replaySnapshots({ fixture: NAL, clientId: 'c', asOfIso: '2026-09-13T09:00:00Z', date: '2026-09-13', daily: nalDaily, activities: nalActivities as ActivityRow[] })
-    const a = snaps.find(s => s.entity_id === '52596939123725')!
+    const a = snaps.find(s => s.entity_id === '52104815523595')!
     const rows: EntitySnapshotRow[] = [
       { ...a, captured_at: '2026-09-10T00:00:00Z', daily_budget_minor: 111 },
       { ...a, captured_at: '2026-09-12T00:00:00Z', daily_budget_minor: 222 },
       { ...a, captured_at: '2026-09-20T00:00:00Z', daily_budget_minor: 333 },
-      { ...snaps.find(s => s.entity_id === '52596931528525')!, captured_at: '2026-09-11T00:00:00Z', capture_reason: 'disappeared' },
+      { ...snaps.find(s => s.entity_id === '52426144644352')!, captured_at: '2026-09-11T00:00:00Z', capture_reason: 'disappeared' },
     ]
     const out = latestSnapshotsAsOf(rows, Date.parse('2026-09-13T12:00:00Z'))
-    expect(out.map(r => [r.entity_id, r.daily_budget_minor])).toEqual([['52596939123725', 222]])
+    expect(out.map(r => [r.entity_id, r.daily_budget_minor])).toEqual([['52104815523595', 222]])
     void row
   })
 
@@ -251,7 +251,7 @@ describe('加载器 / 时区 / 内部邮箱', () => {
     const raw = (ctsHourlyRaw as { days: Record<string, GraphHourlySpendRow[]> }).days['2026-09-12']
     const parsed = hourlyRowsFromGraph(raw)
     expect(parsed).toHaveLength(raw.length)
-    expect(parsed.find(h => h.hour === 14)?.spend).toBe(1.15)
+    expect(parsed.find(h => h.hour === 14)?.spend).toBe(1.35)
   })
 
   it('半小时时区（Adelaide +9:30）日终切准；Auckland 夏令时切换日也准', () => {
@@ -264,5 +264,32 @@ describe('加载器 / 时区 / 内部邮箱', () => {
     expect(isInternalEmail('boss@ctstours.co.nz')).toBe(false)
     expect(isInternalEmail('someone@gmail.com')).toBe(false)
     expect(splitAddresses(['a@magicengine.cloud, boss@ctstours.co.nz'])).toEqual(['a@magicengine.cloud', 'boss@ctstours.co.nz'])
+  })
+})
+
+describe('hidden_from_ad_health：只压数据新鲜度噪音，钱相关诊断照跑', () => {
+  const hasTitle = (r: ReturnType<typeof run>, code: string, needle: string) =>
+    r.diagnoses.some(d => d.code === code && d.title.includes(needle))
+
+  it('快照为空：隐藏账户不报「诊断缺数据」，未隐藏的对照照报', () => {
+    const hidden = run({ ...nalAcc([], '2026-09-13'), hiddenFromAdHealth: true }, '2026-09-13', '2026-09-13T09:00:00Z', MSG)
+    expect(hasTitle(hidden, 'D7', '缺数据')).toBe(false)
+    const control = run(nalAcc([], '2026-09-13'), '2026-09-13', '2026-09-13T09:00:00Z', MSG)
+    expect(hasTitle(control, 'D7', '缺数据')).toBe(true)
+  })
+
+  it('日数据停更：隐藏账户不报「停更」，未隐藏的对照照报', () => {
+    const snaps = nalSnaps('2026-09-13', '2026-09-13T09:00:00Z')
+    const stale = { ...nalAcc(snaps, '2026-09-13'), lastInsightDate: '2026-09-01' }
+    const control = run(stale, '2026-09-13', '2026-09-13T09:00:00Z', MSG)
+    expect(hasTitle(control, 'D7', '停更')).toBe(true)
+    const hidden = run({ ...stale, hiddenFromAdHealth: true }, '2026-09-13', '2026-09-13T09:00:00Z', MSG)
+    expect(hasTitle(hidden, 'D7', '停更')).toBe(false)
+  })
+
+  it('钱相关诊断不受影响：NAL 3PL 组 8/27 的 D3 在隐藏账户上照常命中', () => {
+    const acc = { ...nalAcc(nalSnaps('2026-08-27', '2026-08-27T11:59:00Z'), '2026-08-27'), hiddenFromAdHealth: true }
+    const r = run(acc, '2026-08-27', '2026-08-27T11:59:00Z', LEAD)
+    expect(r.diagnoses.some(d => d.code === 'D3' && d.status === 'hit' && d.units[0].id === '52143863593432')).toBe(true)
   })
 })

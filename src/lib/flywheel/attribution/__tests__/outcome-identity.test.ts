@@ -1,9 +1,14 @@
 import { describe, it, expect } from 'vitest'
+import { SEO_METRIC_KEY } from '@/lib/flywheel/vocabulary'
 import {
   GSC_EVALUATOR_METRIC_KEYS,
+  MIN_DECIDED_FOR_RATE,
   OUTCOME_CONFLICT_TARGET,
   OUTCOME_EVALUATOR,
   buildOutcomeKey,
+  effectiveVerdict,
+  isDecidedVerdict,
+  isSiteLevelUnattributable,
   keepOneCasePerAction,
   keepOneMeasurementPerAction,
   resolveStaleEvaluatorKeys,
@@ -257,5 +262,70 @@ describe('keepOneCasePerAction', () => {
     expect(kept).toHaveLength(1)
     expect(kept[0].metric_key).toBe('seo.gsc.clicks')
     expect(kept[0].window_days).toBe(28)
+  })
+})
+
+describe('isSiteLevelUnattributable — whole-site metrics cannot judge one action', () => {
+  it.each([
+    'seo.gsc.clicks',
+    'seo.gsc.impressions',
+    'seo.gsc.avg_position',
+    'seo.domain.organic_traffic',
+    'seo.domain.organic_keywords',
+    'seo.domain.authority_score',
+    'seo.ga4.sessions',
+    'seo.ga4.conversions',
+  ])('%s is site-level', (key) => {
+    expect(isSiteLevelUnattributable(key)).toBe(true)
+  })
+
+  it.each([
+    'seo.gsc.page_clicks',
+    'seo.gsc.page_impressions',
+    'seo.gsc.page_avg_position',
+    'seo.content.published_posts',
+    'geo.query.mention_rate',
+    'ads.spend',
+    '',
+  ])('%s is not site-level', (key) => {
+    expect(isSiteLevelUnattributable(key)).toBe(false)
+  })
+
+  it('classifies every SEO metric key on purpose', () => {
+    const siteLevel = Object.values(SEO_METRIC_KEY).filter(isSiteLevelUnattributable).sort()
+    const attributable = Object.values(SEO_METRIC_KEY).filter((k) => !isSiteLevelUnattributable(k)).sort()
+    // Only the page-scope Search Console keys and the published-post count stay attributable.
+    expect(attributable).toEqual([
+      'seo.content.published_posts',
+      'seo.gsc.page_avg_position',
+      'seo.gsc.page_clicks',
+      'seo.gsc.page_impressions',
+    ])
+    expect(siteLevel.length).toBe(Object.values(SEO_METRIC_KEY).length - 4)
+  })
+})
+
+describe('effectiveVerdict — readers count site-level rows as inconclusive', () => {
+  it('turns an old site-level confirmed or reversed into inconclusive', () => {
+    expect(effectiveVerdict({ metric_key: 'seo.gsc.clicks', verdict: 'confirmed' })).toBe('inconclusive')
+    expect(effectiveVerdict({ metric_key: 'seo.domain.organic_traffic', verdict: 'reversed' })).toBe('inconclusive')
+  })
+
+  it('leaves page-level and other pillars untouched', () => {
+    expect(effectiveVerdict({ metric_key: 'seo.gsc.page_clicks', verdict: 'confirmed' })).toBe('confirmed')
+    expect(effectiveVerdict({ metric_key: 'ads.spend', verdict: 'reversed' })).toBe('reversed')
+  })
+})
+
+describe('isDecidedVerdict / MIN_DECIDED_FOR_RATE', () => {
+  it('only confirmed and reversed are decided', () => {
+    expect(isDecidedVerdict('confirmed')).toBe(true)
+    expect(isDecidedVerdict('reversed')).toBe(true)
+    expect(isDecidedVerdict('inconclusive')).toBe(false)
+    expect(isDecidedVerdict('refuted')).toBe(false)
+  })
+
+  it('needs at least three decided cases before a rate is shown', () => {
+    expect(MIN_DECIDED_FOR_RATE).toBe(3)
   })
 })

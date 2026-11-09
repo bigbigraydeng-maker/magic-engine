@@ -27,6 +27,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { parseJsonResponse } from '@/lib/anthropic/client'
 import { getConnection } from '@/lib/cms/connection-store'
 import { GithubClient } from '@/lib/cms/github-client'
+import { identityFromSlug, type PageWriteGuard } from '@/lib/seo/protected-pages'
 
 export const CTS_CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 const DATA_DIR = 'src/lib/data'
@@ -38,11 +39,26 @@ const MIN_IMPRESSIONS = 10
 
 // ── Pure: narrow-lane source editing ────────────────────────────────────────────
 
+function oneLine(s: string): string {
+  return s.replace(/[\r\n]+/g, ' ').trim()
+}
+
 function escapeSingle(s: string): string {
   return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 }
 
 const STRING_LITERAL = /'(?:[^'\\]|\\.)*'/
+
+/**
+ * Which field style an entry uses.
+ *
+ * - 'default': hub/blog entries with `title:` + `description:`/`excerpt:`.
+ * - 'guide': destination-guide entries (guides.ts) with `metaTitle:` +
+ *   `metaDescription:`. Guides ALSO contain section objects whose `title:`
+ *   is a section heading, so the default style would silently overwrite a
+ *   section heading — guides must never be edited with the default style.
+ */
+export type MetaFieldStyle = 'default' | 'guide'
 
 export interface MetaReplacement {
   updated: string
@@ -60,6 +76,11 @@ export interface MetaReplacement {
  * or the next `export const`. Batch files hold many posts inside ONE export,
  * so an export-only boundary would let an entry missing its own excerpt
  * silently overwrite the next post's (魏征-style neighbour corruption).
+ *
+ * `style` selects the field names: 'default' uses `title:` +
+ * `description:`/`excerpt:`; 'guide' uses `metaTitle:` + `metaDescription:`
+ * and anchors on the top-level `\n  slug:` key so nested section `title:`
+ * fields are never touched.
  */
 interface MetaWindow {
   slugIdx: number
@@ -71,7 +92,11 @@ interface MetaWindow {
   desc: string
 }
 
-function findMetaWindow(source: string, slug: string): MetaWindow | null {
+function unquote(m: string): string {
+  return m.replace(/^[^']*'/, '').replace(/'$/, '').replace(/\\'/g, "'").replace(/\\\\/g, '\\')
+}
+
+function findDefaultWindow(source: string, slug: string): MetaWindow | null {
   const slugIdx = source.indexOf(`slug: '${slug}'`)
   if (slugIdx === -1) return null
 
@@ -92,8 +117,38 @@ function findMetaWindow(source: string, slug: string): MetaWindow | null {
   const descMatch = window.match(descRe)
   if (!titleMatch || !descMatch) return null
 
-  const unquote = (m: string): string =>
-    m.replace(/^[^']*'/, '').replace(/'$/, '').replace(/\\'/g, "'").replace(/\\\\/g, '\\')
+  return {
+    slugIdx,
+    windowEnd,
+    window,
+    titleRe,
+    descRe,
+    title: unquote(titleMatch[0].slice(titleMatch[1].length)),
+    desc: unquote(descMatch[0].slice(descMatch[1].length)),
+  }
+}
+
+function findGuideWindow(source: string, slug: string): MetaWindow | null {
+  // Anchor on the top-level key only: newline + exactly two spaces + slug.
+  // This avoids matching a nested mention (e.g. relatedSlugs entries).
+  const anchor = `\n  slug: '${slug}'`
+  const anchorIdx = source.indexOf(anchor)
+  if (anchorIdx === -1) return null
+  const slugIdx = anchorIdx + 1
+
+  const bounds = [
+    source.indexOf("\n  slug: '", slugIdx + 1),
+    source.indexOf('\nexport const', slugIdx),
+  ].filter((i) => i !== -1)
+  const windowEnd = bounds.length > 0 ? Math.min(...bounds) : source.length
+  const window = source.slice(slugIdx, windowEnd)
+
+  const titleRe = new RegExp(`(\\bmetaTitle:\\s*)${STRING_LITERAL.source}`)
+  const descRe = new RegExp(`(\\bmetaDescription:\\s*)${STRING_LITERAL.source}`)
+
+  const titleMatch = window.match(titleRe)
+  const descMatch = window.match(descRe)
+  if (!titleMatch || !descMatch) return null
 
   return {
     slugIdx,
@@ -106,15 +161,30 @@ function findMetaWindow(source: string, slug: string): MetaWindow | null {
   }
 }
 
+function findMetaWindow(
+  source: string,
+  slug: string,
+  style: MetaFieldStyle = 'default',
+): MetaWindow | null {
+  return style === 'guide' ? findGuideWindow(source, slug) : findDefaultWindow(source, slug)
+}
+
 /**
  * Read-only lookup of the title/description currently in the source for
  * `slug`, without writing anything. Used by the meta-cycle's true-revert
  * step (魏征 finding #7) to detect whether a human has hand-edited the slug
  * in GitHub since Magic Engine's last write, before deciding it's safe to
  * revert.
+ *
+ * `style` selects the field names (see MetaFieldStyle): 'default' for
+ * hub/blog entries, 'guide' for destination guides.
  */
-export function readMetaForSlug(source: string, slug: string): { title: string; desc: string } | null {
-  const found = findMetaWindow(source, slug)
+export function readMetaForSlug(
+  source: string,
+  slug: string,
+  style: MetaFieldStyle = 'default',
+): { title: string; desc: string } | null {
+  const found = findMetaWindow(source, slug, style)
   return found ? { title: found.title, desc: found.desc } : null
 }
 
@@ -123,13 +193,17 @@ export function replaceMetaForSlug(
   slug: string,
   newTitle: string,
   newDesc: string,
+  style: MetaFieldStyle = 'default',
 ): MetaReplacement | null {
-  const found = findMetaWindow(source, slug)
+  const found = findMetaWindow(source, slug, style)
   if (!found) return null
   const { slugIdx, windowEnd, window, titleRe, descRe, title: oldTitle, desc: oldDesc } = found
 
-  let newWindow = window.replace(titleRe, `$1'${escapeSingle(newTitle)}'`)
-  newWindow = newWindow.replace(descRe, `$1'${escapeSingle(newDesc)}'`)
+  // Function replacers on purpose: a string replacement would treat `$&`, `$'`, `$$` ... in the
+  // NEW text as special patterns and splice source code into the literal (review of #2284).
+  // Newlines are collapsed first: a raw newline inside a single-quoted literal is not valid TypeScript.
+  let newWindow = window.replace(titleRe, (_m: string, lead: string) => `${lead}'${escapeSingle(oneLine(newTitle))}'`)
+  newWindow = newWindow.replace(descRe, (_m: string, lead: string) => `${lead}'${escapeSingle(oneLine(newDesc))}'`)
 
   return {
     updated: source.slice(0, slugIdx) + newWindow + source.slice(windowEnd),
@@ -294,6 +368,7 @@ export interface CtsMetaPrResult {
 }
 
 export async function runCtsMetaPr(
+  guard: PageWriteGuard,
   supabase: SupabaseClient = supabaseAdmin,
 ): Promise<CtsMetaPrResult> {
   try {
@@ -397,6 +472,8 @@ export async function runCtsMetaPr(
         attempts.push({ slug: candidate.slug, step: 'slug_not_in_file' })
         continue
       }
+      // Legacy executor: still must pass the protected-page gate before any edit is staged.
+      await guard.assert(identityFromSlug(candidate.slug), { targetType: 'data_file_entry' })
       entry.source = replaced.updated
       entry.dirty = true
       attempts.push({ slug: candidate.slug, step: 'applied' })

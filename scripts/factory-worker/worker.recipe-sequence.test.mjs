@@ -108,7 +108,19 @@ function makeDeps(overrides = {}) {
       tmpJoin: (a, b) => `${a}/${b}`,
       probeDurationFn: (p) => (p.includes('final') ? 12.0 : 5.0),
       probeLoudnessFn: () => -18,
+      probeMediaEvidenceFn: () => ({
+        audio_stream_present: true,
+        audio_loudness_lufs: -18,
+        width: 1080,
+        height: 1920,
+        duration_seconds: 12,
+        subtitle_cues: [{ start_seconds: 0, end_seconds: 1, text: 'Discover China' }],
+        cover_mean_luma: 100,
+        cover_luma_range: 180,
+        cover_placeholder_detected: false,
+      }),
       hashFileFn: () => SHA,
+      musicVocalGateFn: () => ({ verdict: 'none' }),
       execAssembleFn: async () => {},
       completeFn: async (payload) => {
         completeCalls.push(payload)
@@ -146,6 +158,7 @@ describe('runRecipeSequence — provider payload contract', () => {
     expect(providerCalls[1].durationSeconds).toBe(5)
     expect(completeCalls).toHaveLength(1)
     expect(completeCalls[0].actual_cost_usd).toBeCloseTo(0.45, 3)
+    expect(completeCalls[0].media_evidence.width).toBe(1080)
   })
 
   it('每段无 inventory clip_ids(合同 §1)', async () => {
@@ -482,3 +495,21 @@ describe('runRecipeSequence — brief completeness pre-provider(R5 defense-in-de
 
 // 让 vitest 承认 vi 使用(实际这里未 spy;保留 API 以便未来加断言)
 void vi
+
+describe('runRecipeSequence — music vocal gate', () => {
+  it('an async gate function is refused (its rejection would be ignored)', async () => {
+    const { deps, providerCalls } = makeDeps({ musicVocalGateFn: async () => { throw new Error('MUSIC_VOCAL_PRESENT') } })
+    await expect(runRecipeSequence({ wo: makeWo(), recipe: RECIPE, tmp: '/tmp/x', deps })).rejects.toThrow(/同步函数/)
+    expect(providerCalls?.length ?? 0).toBe(0)
+  })
+  it('no gate function injected → refuses before any provider call', async () => {
+    const { deps, providerCalls } = makeDeps({ musicVocalGateFn: undefined })
+    await expect(runRecipeSequence({ wo: makeWo(), recipe: RECIPE, tmp: '/tmp/x', deps })).rejects.toThrow(/人声检查/)
+    expect(providerCalls?.length ?? 0).toBe(0)
+  })
+  it('gate says vocals present → refuses before any provider call', async () => {
+    const { deps, providerCalls } = makeDeps({ musicVocalGateFn: () => { throw new Error('MUSIC_VOCAL_PRESENT') } })
+    await expect(runRecipeSequence({ wo: makeWo(), recipe: RECIPE, tmp: '/tmp/x', deps })).rejects.toThrow(/MUSIC_VOCAL_PRESENT/)
+    expect(providerCalls?.length ?? 0).toBe(0)
+  })
+})

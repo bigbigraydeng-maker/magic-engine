@@ -23,6 +23,8 @@ import {
   requireApprovalActor,
   requireUuid,
 } from '@/lib/kernel-approval/http'
+import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
+import { assertMayClick, clickerFromSession, ConfirmationCardError } from '@/lib/confirmation-card'
 import {
   assertActorMayApprove,
   createApprovalKernelDeps,
@@ -55,6 +57,29 @@ export async function POST(
 
     // ③ 拿它的 client_id 做真实鉴权，操作者身份来自会话
     const actor = await requireApprovalActor(run.client_id)
+
+    // ③' 🔴 确认卡：批准和拒绝都按专属接口同一套规则核角色
+    //    （只有负责人和本客户的执行同事；代理人、客户员工不行）。
+    //    不核的话，客户员工能从这里把卡记成「不做」。其它动作不受影响。
+    if (run.action_key === CONFIRMATION_ACTION_KEY) {
+      try {
+        assertMayClick(
+          clickerFromSession({
+            email: actor.email,
+            role: actor.role,
+            allowedClientId: actor.allowedClientId,
+            clientId: run.client_id,
+            agentMarked: req.headers.get('x-me-actor') === 'agent',
+          }),
+          run.client_id,
+        )
+      } catch (err) {
+        if (err instanceof ConfirmationCardError) {
+          throw new ApprovalError('forbidden_client', err.humanReason, { actionKey: run.action_key })
+        }
+        throw err
+      }
+    }
 
     // ④ 🔴 **门槛只管「批准」。**（Codex P2）
     //    拒绝不授权任何执行，而契约升版 / 动作下架之后，这些旧请求

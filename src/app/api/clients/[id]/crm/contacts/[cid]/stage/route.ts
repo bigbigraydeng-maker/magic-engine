@@ -19,6 +19,8 @@ import { advanceContactStage } from '@/lib/crm/advance-contact-stage'
 interface Body {
   toStage?: unknown
   note?: unknown
+  /** 调用方看到的「改之前是哪一档」——不传 = 老行为，逐字不变。 */
+  expectedFromStage?: unknown
 }
 
 export async function PATCH(
@@ -45,6 +47,18 @@ export async function PATCH(
     return NextResponse.json({ error: '缺少目标阶段' }, { status: 400 })
   }
   const note = typeof body.note === 'string' ? body.note.trim() || null : null
+  /**
+   * 🔴 字段没传（key 不存在）和「明确传了 null」是两件不同的事，不能都塌成
+   * undefined——`null` 是「这个人还没标过任何阶段」的合法值，也正是并发保护
+   * 最该管的那个起点（魏征 2026-09-28 复审 B2 查出：塌成 undefined 会让并发闸
+   * 对这批人形同虚设）。只有 key 真的不在 body 里，才当「没传」处理。
+   */
+  const expectedFromStage: string | null | undefined =
+    'expectedFromStage' in body
+      ? typeof body.expectedFromStage === 'string'
+        ? body.expectedFromStage
+        : null
+      : undefined
 
   const result = await advanceContactStage(
     supabaseAdmin,
@@ -53,9 +67,13 @@ export async function PATCH(
     toStage,
     note,
     access.user.email ?? null,
+    expectedFromStage,
   )
 
   if (!result.ok) {
+    if (result.status === 409) {
+      return NextResponse.json({ error: result.error, actualStage: result.actualStage }, { status: 409 })
+    }
     return NextResponse.json({ error: result.error }, { status: result.status })
   }
   return NextResponse.json({ stage: result.stage, changed: result.changed })

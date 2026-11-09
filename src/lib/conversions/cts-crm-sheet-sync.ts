@@ -30,6 +30,8 @@ import { normalisePhone, normaliseEmail } from '@/lib/crm/identity'
 // ── 原始行 ──────────────────────────────────────────────────────────────────
 
 export interface Sheet1LeadRow {
+  /** Facebook 线索编号（Meta lead id，15–17 位纯数字）。A 列 `l:<数字>`；格式不对一律 null。 */
+  metaLeadId: string | null
   createdTime: string | null
   email: string | null
   fullName: string | null
@@ -48,16 +50,55 @@ export interface CrmManagementRow {
   stageUpdatedDate: string | null
 }
 
-/** Sheet1 实测列下标（0-based）：B=1, N=13, O=14, P=15, R=17。 */
-export function parseSheet1Row(cells: string[]): Sheet1LeadRow {
+/**
+ * 🔴 **员工跟进记录换过列**（PM 2026-09-24 当面确认，已对生产表逐行核实）。
+ *
+ * 表格第 505 行（含）以前写在 **R 列**；第 506 行起 R 列被拿去放 Facebook 后台
+ * 链接了，跟进记录改写在 **S 列**。实测切换点干净：505 行是 R 的最后一条内容，
+ * 506 行起 R 全是 `https://business.facebook.com/...`，S 开始有内容；
+ * 按这条规则取，**没有任何一行的记录落在「另一列」里**（707 行全量核过）。
+ *
+ * 写死一个行号不好看，但它是这张表的真实历史，没有任何一列能推导出来。
+ * 以后再换列，改这一个常量。
+ */
+export const CTS_NOTE_COLUMN_SWITCH_ROW = 506
+/** 505 行及以前：R 列（0-based 17）。 */
+const NOTE_COL_LEGACY = 17
+/** 506 行及以后：S 列（0-based 18）。 */
+const NOTE_COL_CURRENT = 18
+
+/** 这一行的员工跟进记录在哪一列 —— 唯一判据，两个消费方都走它。 */
+export function ctsNoteColumnIndex(sheetRow: number): number {
+  return sheetRow >= CTS_NOTE_COLUMN_SWITCH_ROW ? NOTE_COL_CURRENT : NOTE_COL_LEGACY
+}
+
+/**
+ * Sheet1 实测列下标（0-based）：B=1, N=13, O=14, P=15，跟进记录见上面 R/S 那段。
+ *
+ * @param sheetRow 这一行在表格里的**真实行号**（表头是第 1 行，数据从第 2 行起）。
+ *                 必填、没有默认值 —— 给个默认值等于让调用方忘了 R/S 这回事。
+ */
+export function parseSheet1Row(cells: string[], sheetRow: number): Sheet1LeadRow {
   const at = (i: number) => (cells[i]?.trim() ? cells[i].trim() : null)
   return {
+    metaLeadId: parseMetaLeadId(at(0)),
     createdTime: at(1),
     email: at(13),
     fullName: at(14),
     phoneRaw: at(15),
-    followUpNotes: at(17),
+    followUpNotes: at(ctsNoteColumnIndex(sheetRow)),
   }
+}
+
+/**
+ * Sheet1 A 列的 Facebook 线索编号：`l:1687504185706630` → `'1687504185706630'`。
+ * 只认 15–17 位纯数字（Meta 官方说明的 lead id 长度）；其它写法一律 null，
+ * 宁可不带这把匹配键，也不把一个猜出来的编号发给 Meta（发出去撤不回）。
+ */
+export function parseMetaLeadId(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const m = /^l:(\d{15,17})$/i.exec(raw.trim())
+  return m ? m[1] : null
 }
 
 /** CRM管理 实测列下标（0-based）：A=0, B=1, C=2, D=3, E=4, G=6, H=7。 */
@@ -95,12 +136,151 @@ export function isRealTourName(tourInterest: string | null): tourInterest is str
   return !!tourInterest && !TOUR_PLACEHOLDER_VALUES.has(tourInterest.trim())
 }
 
-/** PM 拍板的两条排除词，大小写不敏感子串匹配。 */
-const EXCLUDE_NOTE_PATTERNS = [/wrong number/i, /not interested/i]
+/**
+ * 排除词（压倒一切）：PM 拍板的 wrong number / not interested / already booked，加上同义的明显否定。
+ * 大小写不敏感。命中任一条就**不是**合格线索，哪怕同一条记录里还有兴趣词（"not interested in 2026 but
+ * keen 2027" 这种含糊的宁可不发——发给 Meta 撤不回）。
+ */
+const EXCLUDE_NOTE_PATTERNS: readonly RegExp[] = [
+  /wrong\s+number/i,
+  /not\s+interested/i,
+  /no\s+longer\s+interested/i,
+  /\b(?:isn'?t|aren'?t|not|never|no)\s+(?:\w+\s+){0,2}(?:keen|interested|going|travell?ing)\b/i,
+  /\bdon'?t\s+(?:want|call|contact)\b/i,
+  /\bdo\s+not\s+(?:call|contact)\b/i,
+  /already\s+booked/i,
+  /booked\s+(?:with|through|another|elsewhere)/i,
+  /\bunsubscribe/i,
+  /不感兴趣/,
+  /打错/,
+  /已订/,
+  /没兴趣/,
+  /没有兴趣/,
+  /暂时不去/,
+  /暂不/,
+  /不考虑/,
+  /不打算/,
+  /^\s*(?:stop|unsubscribe)\s*[.!]*\s*$/im,
+]
+
+const MONTHS_NO_MAY =
+  'january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec'
+const MONTHS_ALL = `${MONTHS_NO_MAY}|may`
+/** 旅行语境词：月份紧挨着它们才算「想在那个月去」（员工记录里月份更常是打电话的日期，如 "voice mail 3 Oct"）。 */
+const TRAVEL_WORDS =
+  'best of china|tale of two cities|golden china|china panorama|panorama|legacy|tour|departure|depart|itinerary|trip|travel|go'
+
+/**
+ * 记录里有没有「想在某个月去」：
+ *   A. 带介词/时间词：in / for / around / early / late / mid / by / during / next / until + 月份（含 may）；
+ *   B. 月份紧挨旅行语境词（团名 / tour / departure / itinerary / trip，前后 30 字内）——不含 may
+ *      （"she may travel" 里的 may 是助动词）；may 只认 A，或 "13 May" 这种日期写法。
+ * 单独出现的月份（"voice mail 3 Oct"）不算——那是打电话的日期。
+ */
+function hasTravelMonth(notes: string): boolean {
+  const A = new RegExp(`\\b(?:in|for|around|early|late|mid|by|during|next|until)\\s+(?:${MONTHS_ALL})\\b`, 'i')
+  const B1 = new RegExp(`\\b(?:${TRAVEL_WORDS})\\b[^.;/\\n]{0,30}?\\b(?:${MONTHS_NO_MAY})\\b`, 'i')
+  const B2 = new RegExp(`\\b(?:${MONTHS_NO_MAY})\\b[^.;/\\n]{0,30}?\\b(?:${TRAVEL_WORDS})\\b`, 'i')
+  const MAY_DATE = /\b\d{1,2}(?:st|nd|rd|th)?\s+may\b/i
+  return A.test(notes) || B1.test(notes) || B2.test(notes) || MAY_DATE.test(notes)
+}
+
+/**
+ * 兴趣证据（PM 2026-10-04 拍板的口径，松）：员工跟进记录里明确说了 2027 / 明年 / 具体月份想去，
+ * 或很感兴趣（very keen / interested / great talk 等），或开了定金发票。
+ */
+const INTEREST_NOTE_PATTERNS: readonly RegExp[] = [
+  /\b202[7-9]\b/,
+  /\bnext\s+year\b/i,
+  /明年/,
+  /\bnext\s+(?:spring|summer|autumn|fall|winter)\b/i,
+  /\b(?:keen|interested|excited|enthusiastic)\b/i,
+  /\b(?:great|good|lovely|nice|positive)\s+(?:talk|chat|call|conversation)\b/i,
+  /\b(?:wants?|wanted|would\s+like|plans?|planning|hop(?:es|ing)|looking)\s+to\s+(?:book|go|travel|visit|join|take|do)\b/i,
+  /\bwill\s+(?:book|pay|send|confirm)\b/i,
+  /\b(?:deposit\s+(?:invoice|sent|paid|requested)|invoice\s+(?:sent|issued|emailed))\b/i,
+  /感兴趣/,
+  /有意向/,
+  /想去/,
+]
 
 export function notesExcludeLead(notes: string | null): boolean {
   if (!notes) return false
   return EXCLUDE_NOTE_PATTERNS.some((re) => re.test(notes))
+}
+
+/**
+ * Facebook 即时表单提交后，Messenger 会自动生成一条首条入站消息，形如
+ * "Hello! I filled out your form and would like to know more about …"。
+ * 这条模板消息**不算**客户真的跟我们聊过（PM 2026-10-05：124 条近期线索里
+ * 107 条只有这一条）。空/纯空白同样不算。
+ *
+ * 实测里前缀花样很多（emoji、"Hi,"、"Hello!!"、引用标记 `>`/`&gt;`、全角标点），
+ * 所以先归一化再匹配。模板句后面必须**没有**实质内容——"…form yesterday but
+ * nobody called" 这种是真人写的，不能算模板。
+ */
+const FORM_TEMPLATE_PATTERN =
+  /^[\s\W_]*(?:hello|hi|hey)\b[\s\W]*i\s+(?:have\s+)?(?:filled|completed|submitted)\s+(?:out\s+|in\s+)?(?:your|the)\s+form(?=\s*(?:$|[.!,;:]|and\b|would\b|i'?d\b|i\s+would\b|to\s+know\b))/i
+
+/** 自动回复 / 休假自动应答——同样不是客户真的跟我们聊过。 */
+const AUTO_REPLY_PATTERN =
+  /\b(?:out\s+of\s+(?:the\s+)?office|auto[-\s]?reply|automatic\s+reply|automatically\s+generated|do\s+not\s+reply)\b/i
+const AUTO_REPLY_PATTERN_CJK = /自动回复|休假中|外出办公/
+
+export function isFormTemplateMessage(body: string | null | undefined): boolean {
+  if (!body || !body.trim()) return true
+  const normalised = body
+    .normalize('NFKC')
+    .replace(/^\s*(?:&gt;|>)+/, '')
+    .trim()
+  if (!normalised) return true
+  return (
+    FORM_TEMPLATE_PATTERN.test(normalised) ||
+    AUTO_REPLY_PATTERN.test(normalised) ||
+    AUTO_REPLY_PATTERN_CJK.test(normalised)
+  )
+}
+
+export type NoteQualification = 'qualified' | 'excluded' | 'no_evidence'
+
+/**
+ * 合格线索的判定（只看员工跟进记录，纯函数）：
+ *   排除词命中 → excluded（压倒兴趣词）；没有排除词且有兴趣证据 → qualified；
+ *   其余（没写记录 / 只写「已联系」「没接」之类）→ no_evidence，**不发**——
+ *   填了表单不等于合格，没有证据就不告诉 Meta 这是好线索。
+ */
+export function qualifyByNotes(notes: string | null): NoteQualification {
+  if (!notes || !notes.trim()) return 'no_evidence'
+  if (notesExcludeLead(notes)) return 'excluded'
+  return INTEREST_NOTE_PATTERNS.some((re) => re.test(notes)) || hasTravelMonth(notes) ? 'qualified' : 'no_evidence'
+}
+
+/**
+ * 客户自己消息里的兴趣证据——比员工记录严：只有**具体**证据才算 qualified。
+ * 光说 "interested" / "keen"（没有下文）不算，含糊的 "not now" / "maybe later"
+ * 归 no_evidence（延后，不是合格），排除词与员工记录共用一套。
+ */
+const CONVERSATION_INTEREST_PATTERNS: readonly RegExp[] = [
+  /\b202[7-9]\b/,
+  /\bnext\s+year\b/i,
+  /明年/,
+  /\b(?:very|really|extremely|so)\s+(?:keen|interested|excited)\b/i,
+  /\b(?:keen|interested)\s+(?:to\s+\w+|in\s+(?:going|booking|travell?ing|joining|taking|doing|the\s+(?:tour|trip)))\b/i,
+  /\b(?:wants?|wanted|would\s+like|hop(?:es|ing)|planning|looking)\s+to\s+(?:book|go|travel|visit|join|take)\b/i,
+  /\bwill\s+(?:book|pay|send\s+(?:the\s+)?deposit)\b/i,
+  /\b(?:deposit\s+(?:invoice|sent|paid|requested)|invoice\s+(?:sent|issued))\b/i,
+  /感兴趣|有意向|想去|想订/,
+]
+
+const CONVERSATION_DEFERRED_PATTERN = /\bnot\s+now\b|\bmaybe\s+later\b|\bnot\s+(?:right\s+)?now\b|\bnext\s+time\b/i
+
+export function qualifyByConversation(text: string | null): NoteQualification {
+  if (!text || !text.trim()) return 'no_evidence'
+  if (notesExcludeLead(text)) return 'excluded'
+  if (CONVERSATION_DEFERRED_PATTERN.test(text)) return 'no_evidence'
+  return CONVERSATION_INTEREST_PATTERNS.some((re) => re.test(text)) || hasTravelMonth(text)
+    ? 'qualified'
+    : 'no_evidence'
 }
 
 /**
@@ -160,6 +340,8 @@ export function stageIsPurchase(stage: string | null): boolean {
 
 export interface QualifiedLead {
   kind: 'qualified_lead'
+  /** 匹配到的 Sheet1 行的 Facebook 线索编号；没匹配到 Sheet1 行就是 null。 */
+  metaLeadId: string | null
   phoneE164: string
   email: string | null
   fullName: string | null
@@ -167,6 +349,8 @@ export interface QualifiedLead {
   occurredAt: string
   /** true = 用的是"进线日期"顶的（只有日期没有时间），不是 FB 的精确提交时间。 */
   occurredAtIsDateOnly: boolean
+  /** 'notes' = 员工跟进记录本身就显示了兴趣；'conversation' = 客户自己的消息显示了兴趣。 */
+  interestFrom: 'notes' | 'conversation'
 }
 
 export interface PurchaseMissingDate {
@@ -179,6 +363,7 @@ export interface PurchaseMissingDate {
 
 export interface PurchaseCandidate {
   kind: 'purchase_candidate'
+  metaLeadId: string | null
   phoneE164: string
   email: string | null
   fullName: string | null
@@ -188,7 +373,12 @@ export interface PurchaseCandidate {
 
 export interface ExcludedRow {
   kind: 'excluded'
-  reason: 'no_qualifying_phone' | 'excluded_by_notes' | 'no_usable_date'
+  reason:
+    | 'no_qualifying_phone'
+    | 'excluded_by_notes'
+    | 'no_usable_date'
+    | 'no_interest_evidence'
+    | 'no_customer_conversation'
 }
 
 export type ClassifiedRow = QualifiedLead | PurchaseMissingDate | PurchaseCandidate | ExcludedRow
@@ -200,6 +390,7 @@ export type ClassifiedRow = QualifiedLead | PurchaseMissingDate | PurchaseCandid
 export function classifyCtsCrmPerson(
   crmRow: CrmManagementRow,
   matchedSheet1Row: Sheet1LeadRow | null,
+  conversationText?: string | null,
 ): ClassifiedRow {
   const phoneE164 = ctsPhoneE164(crmRow.phoneRaw) ?? ctsPhoneE164(matchedSheet1Row?.phoneRaw ?? null)
 
@@ -241,6 +432,7 @@ export function classifyCtsCrmPerson(
     }
     return {
       kind: 'purchase_candidate',
+      metaLeadId: matchedSheet1Row?.metaLeadId ?? null,
       phoneE164,
       email: normaliseEmail(matchedSheet1Row?.email ?? crmRow.email),
       fullName: matchedSheet1Row?.fullName ?? crmRow.name,
@@ -252,8 +444,18 @@ export function classifyCtsCrmPerson(
   if (!phoneE164) {
     return { kind: 'excluded', reason: 'no_qualifying_phone' }
   }
-  if (notesExcludeLead(notes)) {
+  const n = qualifyByNotes(notes)
+  const c = conversationText ? qualifyByConversation(conversationText) : 'no_evidence'
+  if (n === 'excluded' || c === 'excluded') {
     return { kind: 'excluded', reason: 'excluded_by_notes' }
+  }
+  let interestFrom: 'notes' | 'conversation'
+  if (n === 'qualified') {
+    interestFrom = 'notes'
+  } else if (c === 'qualified') {
+    interestFrom = 'conversation'
+  } else {
+    return { kind: 'excluded', reason: 'no_interest_evidence' }
   }
 
   const email = normaliseEmail(matchedSheet1Row?.email ?? crmRow.email)
@@ -262,11 +464,13 @@ export function classifyCtsCrmPerson(
   if (matchedSheet1Row?.createdTime) {
     return {
       kind: 'qualified_lead',
+      metaLeadId: matchedSheet1Row.metaLeadId,
       phoneE164,
       email,
       fullName,
       occurredAt: new Date(matchedSheet1Row.createdTime).toISOString(),
       occurredAtIsDateOnly: false,
+      interestFrom,
     }
   }
   if (crmRow.entryDate) {
@@ -274,11 +478,13 @@ export function classifyCtsCrmPerson(
     if (parsed) {
       return {
         kind: 'qualified_lead',
+        metaLeadId: matchedSheet1Row?.metaLeadId ?? null,
         phoneE164,
         email,
         fullName,
         occurredAt: parsed.toISOString(),
         occurredAtIsDateOnly: true,
+        interestFrom,
       }
     }
   }

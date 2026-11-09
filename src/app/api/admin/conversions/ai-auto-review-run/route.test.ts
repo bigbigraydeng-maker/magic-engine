@@ -21,7 +21,7 @@ vi.mock('@/lib/conversions/route-guard', () => ({
 }))
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/conversions/ai-auto-review-run', () => ({
-  runAiAutoReviewForClient: vi.fn(async () => ({ ran: true, processed: 0, approved: 0, rejected: 0, uncertain: 0, expired: 0, items: [] })),
+  runAiAutoReviewForClient: vi.fn(async () => ({ ran: true, processed: 0, approved: 0, approvedAmountMinor: 0, rejected: 0, uncertain: 0, expired: 0, items: [] })),
 }))
 
 import { supabaseAdmin } from '@/lib/supabase'
@@ -102,7 +102,7 @@ describe('POST ai-auto-review-run', () => {
     }))
     vi.mocked(runAiAutoReviewForClient).mockImplementation(async (id: string) => {
       if (id === 'c1') throw new Error('模拟故障')
-      return { ran: true, processed: 0, approved: 0, rejected: 0, uncertain: 0, expired: 0, items: [] }
+      return { ran: true, processed: 0, approved: 0, approvedAmountMinor: 0, rejected: 0, uncertain: 0, expired: 0, items: [] }
     })
     const res = await POST(req({}))
     const body = await res.json()

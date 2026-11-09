@@ -1,7 +1,7 @@
 # Magic Engine — Agent 总架构
 
-> 最后更新：2026-06-03  
-> 权威来源：`src/lib/{ziya,zhangqian,huatuo,zhuge,luban,visual,blog,geo,davinci,weicheng,memory}/`  
+> 最后更新：2026-06-03（正文为 6 月版；2026-10-27 仅改文件头与 §十，其余未重核）  
+> Agent 名单与代号：见 [agents 索引](./README.md)（以 `docs/specs/2026-09-24-agent-autonomy-operating-plan-v1.md` §4 为准）；代码位置以 §4.4 为准。下文 §二 名单已过时。  
 > 本文件管**规则**；各 agent 的行为细节见同目录的单独文件。
 
 ---
@@ -23,14 +23,18 @@ cron / 批量 / 基础设施                 随时被 FDE / 客户调用
                        ↓ 按任务路由
           ┌────────────┼──────────────────────────┐
        执行类         质量类                   工具类
-  张骞/华佗/鲁班    马良/李白                达芬奇/魏征
+  张骞/华佗/鲁班    马良/李白                魏征
 ```
+
+> 达芬奇已撤（PM 2026-09-24 拍板）：其审查清单并入子牙自审，见 [`10-ziya.md`](./10-ziya.md) §四b；不再作为独立 agent 存在，见 [`80-davinci.md`](./80-davinci.md)。
 
 **并联，不串联**：子牙和诸葛亮是两个独立入口，各自可调度下方 7 个工作 agent。
 
 ---
 
 ## 二、9 Agent 职责表
+
+> ⚠️ **本表已过时（6 月版），不再维护。** Agent 名单以 `docs/specs/2026-09-24-agent-autonomy-operating-plan-v1.md` §4（PM 已认）为准，代码对照见同文件 §4.4；新 Agent 怎么立项、上线、体检见 `docs/specs/2026-10-18-me-agent-standard-process-v1.0.md`。（2026-10-18）
 
 | Agent | 模型 | 职责 | 代码 | 状态 |
 |-------|------|------|------|------|
@@ -41,8 +45,9 @@ cron / 批量 / 基础设施                 随时被 FDE / 客户调用
 | **鲁班** | Sonnet/4o-mini | 执行：flywheel adapter + 落数据 | `src/lib/luban/` | ✅ |
 | **马良** | GPT-4o vision | 视觉学习：图片/视频质量 + 平台研究 | `src/lib/visual/` | 待扩展 |
 | **李白** | Claude Sonnet | 文案质量 + 全系统提示词管理 | `src/lib/blog/` + `src/lib/geo/` | 待扩展 |
-| **达芬奇** | Claude Opus | PM：挑战设计方案（只读，无执行权）| `src/lib/davinci/` | 待建 |
 | **魏征** | Sonnet + CI | 代码检查：关卡 + LLM审查 | `src/lib/weicheng/` | 待建 |
+
+> 达芬奇（原 PM：挑战设计方案，只读无执行权）已撤，见上方提示；`src/lib/davinci/` 不建。
 
 ### 垂直专项子模块（非独立 agent）
 
@@ -132,6 +137,15 @@ saveProvenPattern / savePreference / saveFailedExperiment / saveDecisionHistory
 禁止写：                       子牙、张骞、华佗、鲁班（只读）
 马良可写：                     client_proven_patterns（flywheel=social）
 李白可写：                     client_learned_preferences + client_proven_patterns（flywheel=seo/geo）
+孔子 / 孟子 / 苏东坡 / 卫青：  不直写 Memory 表，也不自己写 Check 行。
+                               Check 只归现有归因任务 src/lib/flywheel/attribution/job.ts：
+                               它把结论写进 flywheel_outcomes。广告漏斗体检也只挂在这个任务上，
+                               不归卫青，不归诸葛亮，不新建 Check agent。没有对应模板就没有行（现状多数未接）。
+                               Tune 只归 src/lib/memory/write-lesson.ts：必须 isActive:false，写成候选；
+                               采纳人是 OPC，开关在 /dashboard/ad-engine。不归孔明落地，不归卫青改正文。
+                               23.C 抽取器仍可把已经写出的 outcome 滤进客户记忆，那不是另一套 Check。
+                               经验手册只写候选区 docs/playbooks/<pillar>/inbox.md，升正文须子牙签字 + PM 合。
+                               （2026-10-28 与代码和 #3125 v0.2 对齐；旧写法把 Check 记在孔子 / 孟子 / 苏东坡名下，作废）
 ```
 
 ---
@@ -161,7 +175,7 @@ Step 1 — 规则匹配（0 LLM 成本）
   "数据采集"     → Data Engine adapter
   "Fix 执行"     → 诸葛亮 confirm → 鲁班 execute
   "代码审查"     → 魏征
-  "方案挑战"     → 达芬奇
+  "方案挑战"     → 子牙自审（`10-ziya.md` §四b，达芬奇已撤）
 
 Step 2 — LLM 兜底（Opus，仅规则未匹配时）
   推理意图 → 选最近规则分支 → 记录日志（供归纳新规则）
@@ -174,13 +188,12 @@ Step 2 — LLM 兜底（Opus，仅规则未匹配时）
 | Agent | 可用 Plugin | 权限 |
 |-------|------------|------|
 | 子牙 | Supabase / Cloudflare / GitHub | 读写 |
-| 诸葛亮 | Meta Ads / SEMrush / GA4 / Airtable / Publer / 所有 ME API | 读写 |
+| 诸葛亮 | Meta Ads / SEMrush / GA4 / Airtable / Publer / 所有 ME API | 读写（Publer 已于 2026-10 删除） |
 | 张骞 | Jina.ai / SEMrush / DataForSEO / AI Tracker | 只读 |
 | 华佗 | Supabase（内部数据）| 只读 |
-| 鲁班 | Publer / Meta Ads / Google Ads / Airtable / Atlas / Seedance | 读写 |
+| 鲁班 | Publer / Meta Ads / Google Ads / Airtable / Atlas / Seedance | 读写（Publer 已于 2026-10 删除） |
 | 马良 | Higgsfield AI / Seedance / WaveSpeed / Meta Insights / TikTok Insights | 只读+写 Memory |
 | 李白 | SEMrush / DataForSEO / Jina.ai | 只读+写 Memory |
-| 达芬奇 | 所有文档（只读）| **无写权限** |
 | 魏征 | Bash/shell / 代码仓库 | 读写（仅代码层）|
 
 ---
@@ -189,7 +202,7 @@ Step 2 — LLM 兜底（Opus，仅规则未匹配时）
 
 - **SDK 初始化**：Anthropic/OpenAI client 必须在 handler 内部初始化，不允许模块级
 - **封装名**：UI 层禁止出现真实供应商名（见 CLAUDE.md）
-- **达芬奇触发场景**（强制）：新 Phase 规格完成 / 新 agent 手册完成 / schema 变更前 / 重大重构前
+- **子牙自审场景**（强制，`10-ziya.md` §四b，达芬奇已撤）：新 Phase 规格完成 / 新 agent 手册完成 / schema 变更前 / 重大重构前
 - **魏征通过**（强制）：每次 PR merge 前，Codex 产出代码必须经过两层
 
 ### 通用停手条件
@@ -204,21 +217,7 @@ Step 2 — LLM 兜底（Opus，仅规则未匹配时）
 
 ## 十、目录
 
-```
-docs/agents/
-├── 00-architecture.md   ← 本文件
-├── 10-ziya.md           ← 子牙手册
-├── 20-zhuge.md          ← 诸葛亮
-├── 30-zhangqian.md      ← 张骞
-├── 40-huatuo.md         ← 华佗
-├── 50-luban.md          ← 鲁班
-├── 60-maliang.md        ← 马良
-├── 70-libai.md          ← 李白
-├── 80-davinci.md        ← 达芬奇
-├── 90-weicheng.md       ← 魏征
-├── CODEX.md             ← Codex 专用入口
-└── prompt-library/      ← 李白管理的提示词库
-```
+完整文件清单、代号与手册对应见 [agents 索引](./README.md)，此处不再另列目录树（避免两份名单不一致）。
 
 ---
 
@@ -226,7 +225,7 @@ docs/agents/
 
 加新 agent 或扩展功能时必须确认：
 
-- [ ] 达芬奇已审查（有 BLOCKER 禁止继续）
+- [ ] 子牙已按 `10-ziya.md` §四b 自审（有 BLOCKER 禁止继续）
 - [ ] 子牙路由表已更新（新任务类型加入规则路由）
 - [ ] Handoff schema 使用现有 types，不重复定义
 - [ ] Memory 注入规则遵守权限矩阵

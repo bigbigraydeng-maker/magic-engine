@@ -66,8 +66,12 @@ async function mockSearch(ctx: ToolExecutionContext, query: string): Promise<Kno
 /** Real path: OpenAI Responses API File Search over the tenant's vector store. */
 async function openaiSearch(ctx: ToolExecutionContext, query: string, vectorStoreId: string): Promise<KnowledgeResult> {
   const cfg = getVoiceConfig()
-  const { default: OpenAI } = await import('openai')
-  const client = new OpenAI({ apiKey: cfg.env.OPENAI_API_KEY })
+  // 走统一封装（而不是自己 new）—— 账户级失效（余额耗尽 / 钥匙失效）
+  // 的识别与落库都装在那一层，是全站唯一能一次盖住所有调用点的位置。
+  // bypassGateway：这条链路用的是 responses API，从没经过 CF 网关验证过，
+  // 只拿拦截、不换路由（见 openai-client.ts 的 OpenAIClientOptions）。
+  const { getOpenAIClient } = await import('@/lib/ai/openai-client')
+  const client = getOpenAIClient({ apiKey: cfg.env.OPENAI_API_KEY, bypassGateway: true })
   const response = await client.responses.create({
     model: cfg.env.OPENAI_KB_MODEL,
     input: [

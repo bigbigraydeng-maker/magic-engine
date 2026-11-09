@@ -75,11 +75,13 @@ vi.mock('@/lib/meta/token-selection', async (importOriginal) => {
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { fetchGa4Snapshot } from '@/lib/ga4/client'
+import { fetchGscSnapshot } from '@/lib/gsc/client'
 import { fetchAccountInsights, loadGoogleAdsCreds } from '@/lib/google-ads/client'
 import { GET } from '../route'
 
 const mockFrom              = vi.mocked(supabaseAdmin.from)
 const mockFetchGa4          = vi.mocked(fetchGa4Snapshot)
+const mockFetchGsc          = vi.mocked(fetchGscSnapshot)
 const mockFetchGoogleAds    = vi.mocked(fetchAccountInsights)
 const mockLoadGoogleAdsCreds = vi.mocked(loadGoogleAdsCreds)
 
@@ -392,6 +394,29 @@ describe('GET /api/cron/google-data-pullback-daily', () => {
     expect(body.clients_processed).toBe(0)
     expect(body.ga4_synced).toBe(0)
     expect(mockFetchGa4).not.toHaveBeenCalled()
+  })
+
+  // ── GSC connector rule (shared with the per-page daily fan-out) ─────────────
+
+  it('GSC connector: the trimmed site_url reaches fetchGscSnapshot and a blank one is skipped', async () => {
+    const { clientConnectorsChain, clientsChain, platformOauthChain } = setupConnectorLoader({
+      connectors: [
+        { client_id: CLIENT_ID, anchor: 'gsc', config: { site_url: ' https://example.com.au/ ' } },
+        { client_id: 'client-uuid-blank-gsc', anchor: 'gsc', config: { site_url: '   ' } },
+      ],
+      meta: [],
+    })
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'client_connectors')          return clientConnectorsChain as never
+      if (table === 'clients')                    return clientsChain           as never
+      if (table === 'platform_oauth_connections') return platformOauthChain     as never
+      return {} as never
+    })
+
+    const res = await GET(makeRequest({ authorization: 'Bearer test-secret' }))
+    expect(res.status).toBe(200)
+    expect(mockFetchGsc).toHaveBeenCalledTimes(1)
+    expect(mockFetchGsc).toHaveBeenCalledWith('https://example.com.au/', CLIENT_ID)
   })
 
   // ── Google Ads sync arm ───────────────────────────────────────────────────

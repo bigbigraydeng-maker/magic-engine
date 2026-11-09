@@ -19,10 +19,18 @@ const APIFY_FETCH_TIMEOUT_MS = 30_000
  *                Pass the brand's home market (e.g. 'SG', 'GB', 'US') for
  *                multi-market brands whose AU activity is sparse.
  */
+// Kill-switch (PM 2026-10-27): the three callers that drove ~$100/mo of Apify
+// spend (competitor-collector, ads-collector, zhangqian/advanced-agent) feed a
+// dashboard card nobody reads. All callers already treat null / throw as a
+// soft-fail, so short-circuiting here is enough — no caller changes needed.
+// Set APIFY_META_ADS_ENABLED=1 to re-enable.
 export async function scrapeCompetitorMetaAds(
   domain: string,
   country: string = 'AU',
 ): Promise<MetaAdData> {
+  if (process.env.APIFY_META_ADS_ENABLED !== '1') {
+    throw new Error('scrapeCompetitorMetaAds disabled (set APIFY_META_ADS_ENABLED=1 to re-enable)')
+  }
   const apiToken = process.env.APIFY_API_KEY
   if (!apiToken) throw new Error('APIFY_API_KEY is not set')
 

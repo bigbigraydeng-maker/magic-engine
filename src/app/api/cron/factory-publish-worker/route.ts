@@ -1,4 +1,4 @@
-// P0.1 factory-publish-worker cron — approved 成片 → 发到客户平台(FB Reel / Publer)+ 三落库。
+// P0.1 factory-publish-worker cron — approved 成片 → 发到客户平台(FB Reel)+ 三落库。
 // 一次领 1 条发(FB 上传慢,防 300s 超时)。Auth: CRON_SECRET bearer(同全部 ME crons)。
 //
 // 🔴 首发安全阀:默认**草稿模式**(video_state=DRAFT,不公开)。PM 验完草稿格式、显式 go 后,
