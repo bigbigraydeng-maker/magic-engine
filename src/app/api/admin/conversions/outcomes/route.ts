@@ -16,10 +16,25 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { guardAdmin, requireAdmin } from '@/lib/auth/require-admin'
 import { assertClientScope } from '@/lib/conversions/route-guard'
 import { buildIntakeRow, type IntakeInput } from '@/lib/conversions/intake'
+import { dealStageEventId, dealStageEventName, legalMetaLeadId } from '@/lib/conversions/conversion-lead'
+import { META_EVENT_WINDOW_DAYS } from '@/lib/conversions/event-window'
 
 export const dynamic = 'force-dynamic'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const OUTCOME_KINDS = ['purchase', 'balance', 'lead'] as const
+/** Read a page, drop rows that need no action, then continue until the list is full. */
+const RECOVERY_PAGE = 200
+const RECOVERY_PAGES = 25
+
+/** 列表在截断之前按类型筛。逗号分隔，空着表示不限类型。 */
+function parseOutcomeKinds(raw: string | null): { ok: true; kinds: string[] } | { ok: false } {
+  if (!raw) return { ok: true, kinds: [] }
+  const kinds = raw.split(',').map((s) => s.trim()).filter(Boolean)
+  const allowed = new Set<string>(OUTCOME_KINDS)
+  if (kinds.some((k) => !allowed.has(k))) return { ok: false }
+  return { ok: true, kinds }
+}
 
 /** 审计里记请求来源。只有 reviewed_by 邮箱不够 —— 会话被劫也是同一个邮箱。 */
 function requestMeta(request: Request) {
@@ -146,6 +161,10 @@ export async function GET(request: Request) {
   const status = searchParams.get('review_status')
   const focusId = searchParams.get('id')
   const limit = Math.min(Math.max(parseInt(searchParams.get('limit') ?? '50', 10) || 50, 1), 200)
+  const parsedKinds = parseOutcomeKinds(searchParams.get('outcome_kind'))
+  if (!parsedKinds.ok) {
+    return NextResponse.json({ error: 'outcome_kind 只能是 purchase、balance、lead' }, { status: 400 })
+  }
 
   if (!clientId || !UUID_RE.test(clientId)) {
     return NextResponse.json({ error: 'client_id 必填且必须是 uuid' }, { status: 400 })
@@ -166,8 +185,8 @@ export async function GET(request: Request) {
     // 就已经在联系人管理页上明摆着（上面那条链接点进去就是），这里显示不构成
     // 新增泄露面，只是省一次跳转。
     'id, outcome_kind, order_ref, amount_minor, currency, occurred_at, ' +
-    'review_status, reject_reason, redacted_at, source_kind, created_at, contact_id, customer_first, ' +
-    'me_conversion_writebacks(id, status, last_error, last_error_code, next_attempt_at)'
+    'review_status, reject_reason, redacted_at, source_kind, source_ref, meta_lead_id, created_at, contact_id, customer_first, ' +
+    'me_conversion_writebacks(id, event_id, status, last_error, last_error_code, next_attempt_at, payload_preview)'
 
   // 深链目标查询：今日待办邮件里的 ?focus=<id> 指向的记录可能比列表的
   // limit/排序窗口更老（积压超过 limit 条时会被挤出默认列表）。
@@ -186,12 +205,20 @@ export async function GET(request: Request) {
     if (error) {
       return NextResponse.json({ error: `查询失败: ${error.message}` }, { status: 500 })
     }
-    const outcomes = data ? [data] : []
+    const outcomes = data ? await markOpenCompanions(clientId, [data as ListedOutcome]) : []
     return NextResponse.json({ outcomes, count: outcomes.length })
+  }
+
+  if (searchParams.get('qualified_open') === '1') {
+    return listQualifiedOpen(clientId, limit, SELECT_COLUMNS)
+  }
+  if (searchParams.get('companion_open') === '1') {
+    return listCompanionOpen(clientId, limit, SELECT_COLUMNS)
   }
 
   const sendStatus = searchParams.get('send_status')
   const sendStatuses = sendStatus ? sendStatus.split(',').map((s) => s.trim()).filter(Boolean) : []
+  const heldOnly = searchParams.get('held') === '1'
 
   let query = supabaseAdmin
     .from('me_sale_outcomes')
@@ -205,6 +232,10 @@ export async function GET(request: Request) {
 
   if (status) query = query.eq('review_status', status)
   if (sendStatuses.length > 0) query = query.in('me_conversion_writebacks.status', sendStatuses)
+  if (heldOnly) query = query.contains('me_conversion_writebacks.payload_preview', { held: true })
+  // 类型必须进 SQL，不能等取回 limit 条再在页面上丢掉。否则更新的咨询会占满
+  // 窗口，还在补发期内的成交根本到不了「需要你动手」。
+  if (parsedKinds.kinds.length > 0) query = query.in('outcome_kind', parsedKinds.kinds)
 
   const { data, error } = await query
   if (error) {
@@ -213,4 +244,136 @@ export async function GET(request: Request) {
 
   const outcomes = data ?? []
   return NextResponse.json({ outcomes, count: outcomes.length })
+}
+
+type ListedWriteback = {
+  event_id?: string | null
+  status?: string
+  last_error_code?: string | null
+  payload_preview?: { held?: boolean } | null
+}
+
+type ListedOutcome = {
+  id: string
+  outcome_kind?: string
+  review_status?: string
+  redacted_at?: string | null
+  meta_lead_id?: string | null
+  me_conversion_writebacks?: ListedWriteback[]
+  companion_expected?: boolean
+}
+
+function windowStart(): string {
+  return new Date(Date.now() - META_EVENT_WINDOW_DAYS * 86_400_000).toISOString()
+}
+
+async function listQualifiedOpen(clientId: string, limit: number, columns: string) {
+  const found = await collectOpenRows(
+    limit,
+    (offset) => loadQualifiedPage(clientId, columns, offset),
+    qualifiedStillOpen,
+  )
+  if (found.error) return NextResponse.json({ error: found.error }, { status: 500 })
+  return NextResponse.json({ outcomes: found.rows, count: found.rows.length })
+}
+
+async function loadQualifiedPage(clientId: string, columns: string, offset: number): Promise<PageResult> {
+  const { data, error } = await supabaseAdmin
+    .from('me_sale_outcomes')
+    .select(columns)
+    .eq('client_id', clientId)
+    .eq('review_status', 'approved')
+    .eq('outcome_kind', 'lead')
+    .like('source_ref', 'crm_qualified:%')
+    .is('redacted_at', null)
+    .gte('occurred_at', windowStart())
+    .order('occurred_at', { ascending: false })
+    .range(offset, offset + RECOVERY_PAGE - 1)
+  if (error) return { rows: [], error: `查询失败: ${error.message}` }
+  return { rows: (data ?? []) as ListedOutcome[], error: null }
+}
+
+function qualifiedStillOpen(row: ListedOutcome): boolean {
+  const writes = row.me_conversion_writebacks ?? []
+  if (writes.length === 0) return true
+  return writes.some((wb) => {
+    if (wb.payload_preview?.held === true || wb.last_error_code === 'auth') return false
+    return wb.status === 'queued' || wb.status === 'failed'
+  })
+}
+
+async function listCompanionOpen(clientId: string, limit: number, columns: string) {
+  const config = await readLeadConfig(clientId)
+  if (!config.ok) return NextResponse.json({ error: config.error }, { status: 500 })
+  const found = await collectOpenRows(
+    limit,
+    (offset) => loadCompanionPage(clientId, columns, offset),
+    (row) => companionStillOpen(row, config.leadsConfig),
+  )
+  if (found.error) return NextResponse.json({ error: found.error }, { status: 500 })
+  const outcomes = found.rows.map((row) => ({ ...row, companion_expected: true }))
+  return NextResponse.json({ outcomes, count: outcomes.length })
+}
+
+async function loadCompanionPage(clientId: string, columns: string, offset: number): Promise<PageResult> {
+  const { data, error } = await supabaseAdmin
+    .from('me_sale_outcomes')
+    .select(columns)
+    .eq('client_id', clientId)
+    .eq('review_status', 'approved')
+    .in('outcome_kind', ['purchase', 'balance'])
+    .is('redacted_at', null)
+    .not('meta_lead_id', 'is', null)
+    .gte('occurred_at', windowStart())
+    .order('occurred_at', { ascending: false })
+    .range(offset, offset + RECOVERY_PAGE - 1)
+  if (error) return { rows: [], error: `查询失败: ${error.message}` }
+  return { rows: (data ?? []) as ListedOutcome[], error: null }
+}
+
+type PageResult = { rows: ListedOutcome[]; error: string | null }
+
+async function collectOpenRows(
+  limit: number,
+  loadPage: (offset: number) => Promise<PageResult>,
+  stillOpen: (row: ListedOutcome) => boolean,
+): Promise<PageResult> {
+  const kept: ListedOutcome[] = []
+  for (let page = 0; kept.length < limit && page < RECOVERY_PAGES; page += 1) {
+    const batch = await loadPage(page * RECOVERY_PAGE)
+    if (batch.error) return { rows: [], error: batch.error }
+    for (const row of batch.rows) {
+      if (!stillOpen(row)) continue
+      kept.push(row)
+      if (kept.length >= limit) break
+    }
+    if (batch.rows.length < RECOVERY_PAGE) break
+  }
+  return { rows: kept, error: null }
+}
+
+async function markOpenCompanions(clientId: string, rows: ListedOutcome[]): Promise<ListedOutcome[]> {
+  const config = await readLeadConfig(clientId)
+  if (!config.ok) return rows
+  return rows.map((row) => (companionStillOpen(row, config.leadsConfig) ? { ...row, companion_expected: true } : row))
+}
+
+async function readLeadConfig(
+  clientId: string,
+): Promise<{ ok: true; leadsConfig: unknown } | { ok: false; error: string }> {
+  const { data, error } = await supabaseAdmin.from('clients').select('leads_config').eq('id', clientId).maybeSingle()
+  if (error) return { ok: false, error: `查询失败: ${error.message}` }
+  const row = data as { leads_config?: unknown } | null
+  return { ok: true, leadsConfig: row?.leads_config }
+}
+
+function companionStillOpen(row: ListedOutcome, leadsConfig: unknown): boolean {
+  if (row.outcome_kind !== 'purchase' && row.outcome_kind !== 'balance') return false
+  if (row.review_status && row.review_status !== 'approved') return false
+  if (row.redacted_at) return false
+  if (!dealStageEventName(leadsConfig, legalMetaLeadId(row.meta_lead_id))) return false
+  const companion = (row.me_conversion_writebacks ?? []).find((wb) => wb.event_id === dealStageEventId(row.id))
+  if (!companion) return true
+  if (companion.payload_preview?.held === true || companion.last_error_code === 'auth') return false
+  return companion.status === 'queued' || companion.status === 'failed' || companion.status === 'in_doubt'
 }

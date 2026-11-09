@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildIntakeRow, toMinorUnits, minorUnitsFor, type IntakeInput } from '../intake'
+import { actionSourceForSourceKind, buildIntakeRow, toMinorUnits, minorUnitsFor, type IntakeInput } from '../intake'
 import { normalizeEmail, normalizePhone } from '@/lib/pii/normalize'
 
 const CTS = 'c0000000-0000-0000-0000-000000000000'
@@ -300,6 +300,23 @@ describe('录入校验 · 匹配键', () => {
     expect(r.errors.join()).toContain('contactId 必须提供')
   })
 
+  it('只有合法的 Meta 线索编号和 contactId 记不下：库只认邮箱、电话或私信身份', () => {
+    const r = buildIntakeRow(
+      {
+        clientId: CTS,
+        contactId: '11111111-2222-3333-4444-555555555555',
+        outcomeKind: 'lead',
+        occurredAt: '2026-09-04T00:00:00Z',
+        sourceKind: 'crm_stage_manual',
+        metaLeadId: '1687504185706630',
+      },
+      CTX,
+    )
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.errors.join()).toContain('邮箱')
+  })
+
   it('邮箱/电话/PSID 一个都没有 → 拒，错误信息带上三个选项', () => {
     const r = buildIntakeRow(
       {
@@ -388,5 +405,13 @@ describe('录入 · Facebook 线索编号（meta_lead_id）', () => {
       CTX,
     )
     expect(r.ok).toBe(false)
+  })
+})
+
+describe('action source follows where the sale actually happened', () => {
+  it('付款和手改阶段按邮件，只有私信对话才按私信', () => {
+    expect(actionSourceForSourceKind('crm_stage_manual')).toBe('email')
+    expect(actionSourceForSourceKind('manual_seed')).toBe('email')
+    expect(actionSourceForSourceKind('messenger_conversation')).toBe('business_messaging')
   })
 })
