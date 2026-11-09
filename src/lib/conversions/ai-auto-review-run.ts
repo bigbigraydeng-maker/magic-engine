@@ -38,6 +38,7 @@ import { sendApprovedOutcome, type SendDeps } from './writeback-service'
 import type { SourceKind } from './intake'
 import { approvalCutoffIso, eventAgeMs, isTooLateToApprove, DAY_MS, META_EVENT_WINDOW_DAYS } from './event-window'
 import { markNotSentPastWindow, sweepPastWindowAll } from './expire-pending'
+import { runQuotedLeadAutoSendForClient } from './quoted-lead-auto-send'
 
 /**
  * AI 自动批准**只认白名单来源**——新来源默认不可，必须在这里显式加上才会被自动批准。
@@ -167,8 +168,10 @@ export async function runAiAutoReviewForClient(
   if (!clientRow) throw new Error('客户不存在')
   const clientEnabled = clientRow as { ai_auto_review_enabled: boolean }
   if (!clientEnabled.ai_auto_review_enabled) {
-    // 开关关着也不许把过了 7 天的行留在待办里（2026-09-26）。这一步不发送。
+    // 开关关着也不许把过了 7 天的行留在待办里（2026-09-26）。过期这一步不发送。
+    // 「已报价」自动回传是另一只开关，关着自动审核也可以发。
     await sweepPastWindowAll(supabase, now)
+    await runQuotedLeadAutoSendForClient(clientId, { supabase, sendDeps: deps.sendDeps, now })
     return { ran: false, reason: 'disabled' }
   }
 
@@ -178,6 +181,7 @@ export async function runAiAutoReviewForClient(
     const breaker = await checkCircuitBreaker(supabase, clientId, now)
     if (breaker.tripped) {
       await sweepPastWindowAll(supabase, now)
+      await runQuotedLeadAutoSendForClient(clientId, { supabase, sendDeps: deps.sendDeps, now })
       await tripCircuitBreaker(supabase, clientId, breaker.rule, breaker.detail)
       if (deps.onCircuitBreakerTripped) {
         await deps.onCircuitBreakerTripped({ clientId, rule: breaker.rule, detail: breaker.detail })
@@ -187,6 +191,10 @@ export async function runAiAutoReviewForClient(
   }
 
   const baseline = await fetchBaselineDailyAverage(supabase, clientId, now)
+
+  // 先发还在精确 7 天内、当前阶段是已报价的咨询。放在「提前 1 小时」的清理前面，
+  // 否则最后这一小时里人还能发的，会被自动审核的余量提前标成不发送。
+  await runQuotedLeadAutoSendForClient(clientId, { supabase, sendDeps: deps.sendDeps, now })
 
   // ── 先清掉已经来不及发的：不看判过几次、不看冷却，一律直接判过期 ────────────
   // 原来只有「判过不到 3 次、且过了冷却」的行才会被捞出来判过期；判满 3 次 uncertain

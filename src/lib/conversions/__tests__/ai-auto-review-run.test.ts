@@ -41,6 +41,7 @@ type Row = Record<string, unknown>
 
 let clients: Row[]
 let outcomes: Row[]
+let contacts: Row[]
 let audits: Row[]
 
 function fakeDb(table: string) {
@@ -49,7 +50,8 @@ function fakeDb(table: string) {
   let wantsAffectedSelect = false
   let limitN: number | null = null
 
-  const src = (): Row[] => (table === 'clients' ? clients : table === 'me_sale_outcomes' ? outcomes : [])
+  const src = (): Row[] =>
+    table === 'clients' ? clients : table === 'me_sale_outcomes' ? outcomes : table === 'contacts' ? contacts : []
 
   const rowsOf = (): Row[] =>
     src().filter((r) =>
@@ -61,6 +63,10 @@ function fakeDb(table: string) {
           if (typeof r[col] === 'number') return (r[col] as number) < (val as number)
           // 时间列按真实时刻比，不按字符串比（'…00Z' 和 '…00.000Z' 是同一刻）。
           if (typeof r[col] === 'string' && typeof val === 'string') return Date.parse(r[col] as string) < Date.parse(val)
+          return false
+        }
+        if (op === 'gte') {
+          if (typeof r[col] === 'string' && typeof val === 'string') return Date.parse(r[col] as string) >= Date.parse(val)
           return false
         }
         return true
@@ -79,6 +85,10 @@ function fakeDb(table: string) {
     },
     lt: (col: string, val: unknown) => {
       filters.push(['lt', col, val])
+      return builder
+    },
+    gte: (col: string, val: unknown) => {
+      filters.push(['gte', col, val])
       return builder
     },
     in: (col: string, vals: unknown[]) => {
@@ -152,6 +162,7 @@ const NOW = new Date('2026-09-15T00:00:00Z')
 beforeEach(() => {
   clients = [{ id: 'c1', ai_auto_review_enabled: true }]
   outcomes = []
+  contacts = []
   audits = []
   fromFn.mockImplementation(fakeDb)
   vi.mocked(checkCircuitBreaker).mockResolvedValue({ tripped: false })
@@ -172,6 +183,42 @@ describe('runAiAutoReviewForClient', () => {
     expect(summary).toMatchObject({ ran: false, reason: 'disabled' })
     expect(judgeOutcome).not.toHaveBeenCalled()
     expect((outcomes[0] as { review_status: string }).review_status).toBe('pending_review')
+  })
+
+  it('自动审核关着、已报价开关开着：窗口内的已报价咨询走发送，不交给模型', async () => {
+    clients = [{ id: 'c1', ai_auto_review_enabled: false, quoted_lead_auto_send_enabled: true }]
+    outcomes.push(
+      pendingRow({
+        id: 'quoted-lead',
+        outcome_kind: 'lead',
+        contact_id: 'person-1',
+        occurred_at: new Date(NOW.getTime() - 2 * DAY_MS).toISOString(),
+      }),
+      pendingRow({ id: 'not-quoted', outcome_kind: 'lead', contact_id: 'person-2' }),
+      pendingRow({ id: 'deal', outcome_kind: 'purchase', contact_id: 'person-1' }),
+    )
+    contacts.push(
+      { id: 'person-1', client_id: 'c1', stage: 'quoted' },
+      { id: 'person-2', client_id: 'c1', stage: 'contacted' },
+    )
+    const summary = await run()
+    expect(summary).toMatchObject({ ran: false, reason: 'disabled' })
+    expect(judgeOutcome).not.toHaveBeenCalled()
+    expect(sendApprovedOutcome).toHaveBeenCalledTimes(1)
+    expect(sendApprovedOutcome).toHaveBeenCalledWith('quoted-lead', expect.anything())
+    expect(outcomes.find((r) => r.id === 'quoted-lead')).toMatchObject({
+      review_status: 'approved',
+      reviewed_by: 'quoted-lead-auto-send@system',
+    })
+    expect(outcomes.find((r) => r.id === 'not-quoted')).toMatchObject({ review_status: 'pending_review' })
+    expect(outcomes.find((r) => r.id === 'deal')).toMatchObject({ review_status: 'pending_review' })
+    expect(audits).toContainEqual(
+      expect.objectContaining({
+        outcome_id: 'quoted-lead',
+        action: 'quoted_lead_auto_approved',
+        detail: expect.objectContaining({ rule: 'quoted_stage_within_window', stage: 'quoted' }),
+      }),
+    )
   })
 
   it('开关关着也清掉精确超过 7 天的，还在窗口里的不动、不问模型', async () => {
