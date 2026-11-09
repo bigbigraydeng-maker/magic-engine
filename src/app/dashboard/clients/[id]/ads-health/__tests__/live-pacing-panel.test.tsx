@@ -43,4 +43,57 @@ describe('LivePacingPanel', () => {
     })
     expect(screen.getAllByText(/数据不足/).length).toBeGreaterThan(0)
   })
+
+  it('shows a spend forecast when samples exist, and not a results forecast', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          view: {
+            readAtIso: '2026-11-09T08:00:00.000Z',
+            accounts: [
+              {
+                adAccountId: 'act_synth',
+                readState: 'ok',
+                reason: null,
+                currency: 'NZD',
+                accountDay: '2026-11-09',
+                active: [{ adsetId: '1', spendToday: 8, impressionsToday: 100, name: 'A', status: 'ACTIVE', dailyBudget: null, budgetLevel: 'campaign' as const, createdToday: false, adCount: 1 }],
+                newToday: [],
+              },
+            ],
+          },
+          pacing: {
+            clientOverCap: true,
+            capMajor: 10,
+            forecastMajor: 14.22,
+            currency: 'NZD',
+            accounts: [{
+              adAccountId: 'act_synth',
+              accountDay: '2026-11-09',
+              timezone: 'Pacific/Auckland',
+              currency: 'NZD',
+              sampledAt: '2026-11-09T01:00:00.000Z',
+              spendMajor: 8,
+              forecastStatus: 'ok',
+              forecastReason: null,
+              pointMinor: 1422,
+              pointMajor: 14.22,
+              lowMajor: 12,
+              highMajor: 16,
+              priorMedianMajor: 5.8,
+              segmentMajor: null,
+              cpm: 80,
+            }],
+          },
+        }),
+      })),
+    )
+    render(<LivePacingPanel clientId="client-synth" />)
+    expect(await screen.findByText(/14\.22 NZD/)).toBeTruthy()
+    expect(screen.getByText(/高于已批准计划的每天上限/)).toBeTruthy()
+    expect(screen.getAllByText(/没有结果或链接点击/).length).toBeGreaterThan(0)
+  })
 })

@@ -79,6 +79,17 @@ export function evaluateDailySpendOverCapNotice(facts: ClientCapFacts): SpendCap
   }
 }
 
+export function forecastOverCapWhat(
+  clientName: string,
+  v: { accountDay: string; forecastMajor: number; capMajor: number; currency: string },
+): string {
+  return (
+    `${clientName} 在 ${v.accountDay} 的收盘花费预测是 ${v.forecastMajor.toFixed(2)} ${v.currency}，` +
+    `高于已批准计划的每天上限 ${v.capMajor.toFixed(2)} ${v.currency}。` +
+    '这条只是提醒，系统没有自动暂停或改预算。'
+  )
+}
+
 export function spendCapNoticeWhat(
   clientName: string,
   v: Extract<SpendCapNoticeVerdict, { alert: true }>,

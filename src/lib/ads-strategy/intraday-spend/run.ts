@@ -12,6 +12,7 @@ import {
   retentionCutoff,
   type SpendDraft,
 } from './sample'
+import { pacingFromSamples, sinceDay, type PacingPayload } from './view'
 export interface AccountRead {
   complete: boolean
   rateLimited: boolean
@@ -27,6 +28,8 @@ export interface SampleDeps {
   readAccount(adAccountId: string, token: string, day: string): Promise<AccountRead>
   upsert(rows: SpendDraft[]): Promise<void>
   purge(beforeIso: string): Promise<number>
+  loadSamples(clientId: string, since: string): Promise<SpendDraft[]>
+  capMinor(clientId: string): Promise<number | null>
 }
 export interface SampleReceipt {
   dryRun: boolean
@@ -41,6 +44,7 @@ export interface SampleReceipt {
   noLive: number
   failed: number
   rateLimited: boolean
+  overCapClients: string[]
 }
 export async function runIntradaySample(
   deps: SampleDeps,
@@ -75,6 +79,7 @@ export async function runIntradaySample(
   if (drafts.length > 0) await deps.upsert(drafts)
   receipt.rows = drafts.length
   receipt.purged = await deps.purge(retentionCutoff(opts.now))
+  receipt.overCapClients = await overCapClients(deps, clients.map((c) => c.id), opts.now)
   return receipt
 }
 type SkipKey = 'skippedTimezone' | 'skippedHidden' | 'skippedShared' | 'skippedNoToken'
@@ -152,5 +157,25 @@ function emptyReceipt(dryRun: boolean): SampleReceipt {
     noLive: 0,
     failed: 0,
     rateLimited: false,
+    overCapClients: [],
   }
+}
+
+async function overCapClients(deps: SampleDeps, clientIds: string[], now: Date): Promise<string[]> {
+  const hits: string[] = []
+  for (const clientId of clientIds) {
+    const pacing = await pacingFor(deps, clientId, now)
+    if (pacing?.clientOverCap) hits.push(clientId)
+  }
+  return hits
+}
+
+export async function pacingFor(
+  deps: Pick<SampleDeps, 'loadSamples' | 'capMinor'>,
+  clientId: string,
+  now: Date,
+): Promise<PacingPayload | null> {
+  const rows = await deps.loadSamples(clientId, sinceDay(now))
+  const cap = await deps.capMinor(clientId)
+  return pacingFromSamples(rows, cap, now)
 }

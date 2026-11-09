@@ -1,5 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import type { SpendDraft } from './sample'
+import { pacingFromSamples, sinceDay, type PacingPayload } from './view'
 
 const COLUMNS = 'client_id, ad_account_id, account_day, local_minute, entity_level, entity_id, spend_minor, impressions, currency, timezone, sampled_at'
 const ROW_CAP = 20000
@@ -10,6 +12,17 @@ export async function samplesTableReady(sb: SupabaseClient): Promise<boolean> {
   if (/does not exist|schema cache|Could not find/i.test(error.message)) return false
   throw new Error(error.message)
 }
+export async function readClientPacing(
+  sb: SupabaseClient,
+  clientId: string,
+  now: Date,
+): Promise<PacingPayload | null> {
+  const rows = await loadRecentSamples(sb, clientId, sinceDay(now))
+  if (rows === null) return null
+  const cap = await readClientDailyTotalCap(sb, clientId)
+  return pacingFromSamples(rows, cap.state === 'set' ? cap.cents : null, now)
+}
+
 export async function loadRecentSamples(
   sb: SupabaseClient,
   clientId: string,

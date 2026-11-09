@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'fs'
 import path from 'path'
-import { DRY_NOW, dryDeps } from '../dry'
+import { DRY_CLIENT, DRY_NOW, dryDeps } from '../dry'
 import { runIntradaySample, type SampleDeps } from '../run'
 import { accountDayKey, bucketMinute, draftsForAccount, localMinuteOfDay, spendToMinor } from '../sample'
 
@@ -21,6 +21,8 @@ function deps(over: Partial<SampleDeps>): SampleDeps {
     readAccount: async () => ({ complete: true, rateLimited: false, adsets: [], insights: [] }),
     upsert: async () => {},
     purge: async () => 0,
+    loadSamples: async () => [],
+    capMinor: async () => null,
     ...over,
   }
 }
@@ -101,6 +103,7 @@ describe('intraday spend sample', () => {
     expect(receipt.rows).toBe(2)
     expect(receipt.purged).toBe(1)
     expect(receipt.accountsSampled).toBe(1)
+    expect(receipt.overCapClients).toEqual([DRY_CLIENT])
     expect(receipt.rateLimited).toBe(false)
   })
 
