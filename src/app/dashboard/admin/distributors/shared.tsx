@@ -13,6 +13,10 @@ export interface Distributor {
   status: DistributorStatus
   approved_by: string | null
   approved_at: string | null
+  referral_code: string | null
+  source: 'admin' | 'application'
+  region: string | null
+  application_note: string | null
   created_at: string
   level: DistributorLevel
   parent_name: string | null

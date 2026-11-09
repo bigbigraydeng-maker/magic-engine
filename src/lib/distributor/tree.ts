@@ -17,6 +17,12 @@ export function levelAt(distributor: Distributor, at: string): DistributorLevel 
   return best.level
 }
 
+/** Like levelAt, but null for someone with no level yet (a pending or rejected applicant). */
+export function levelAtOrNull(distributor: Distributor, at: string): DistributorLevel | null {
+  const atMs = toMs(at)
+  return distributor.levelHistory.some((c) => toMs(c.effectiveFrom) <= atMs) ? levelAt(distributor, at) : null
+}
+
 export function levelRank(level: DistributorLevel): number {
   return LEVEL_ORDER.indexOf(level)
 }

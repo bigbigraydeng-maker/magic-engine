@@ -6,10 +6,11 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { AI_STEWARD_RULES_V1 } from './config'
 import type { CreateDistributorInput, Decision, DistributorStatus, RefundInput, SaleInput } from './admin-input'
 import { nextStatus } from './admin-input'
+import { newReferralCode } from './referral-code'
 import type { DistributorLevel } from './types'
 
 export class DistributorStoreError extends Error {
-  constructor(message: string, readonly status: 400 | 403 | 404 | 409 | 500) {
+  constructor(message: string, readonly status: 400 | 403 | 404 | 409 | 429 | 500 | 503) {
     super(message)
   }
 }
@@ -23,6 +24,10 @@ export interface DistributorRow {
   status: DistributorStatus
   approved_by: string | null
   approved_at: string | null
+  referral_code: string | null
+  source: 'admin' | 'application'
+  region: string | null
+  application_note: string | null
   created_at: string
 }
 
@@ -32,7 +37,7 @@ export interface DistributorSummary extends DistributorRow {
   net_sales_cents: number
 }
 
-const DISTRIBUTOR_COLUMNS = 'id, parent_id, display_name, contact_email, contact_phone, status, approved_by, approved_at, created_at'
+const DISTRIBUTOR_COLUMNS = 'id, parent_id, display_name, contact_email, contact_phone, status, approved_by, approved_at, referral_code, source, region, application_note, created_at'
 const SALE_COLUMNS = 'id, distributor_id, kind, order_ref, plan_code, months, extra_avatars, amount_cents, currency, paid_at, is_self_purchase, refund_of_sale_id, recorded_by, created_at'
 
 type DbError = { message: string; code?: string } | null
@@ -108,6 +113,7 @@ export async function createDistributor(input: CreateDistributorInput): Promise<
     })
     .select(DISTRIBUTOR_COLUMNS)
     .single()
+  if (error?.code === '23505') throw new DistributorStoreError('this email already belongs to an active distributor', 409)
   if (error || !data) fail('create distributor', error)
   return data as DistributorRow
 }
@@ -168,14 +174,28 @@ export async function decideDistributor(id: string, decision: Decision, actorEma
   const to = nextStatus(current.status, decision)
   if (!to) throw new DistributorStoreError(`cannot ${decision} a distributor that is ${current.status}`, 409)
   const now = new Date().toISOString()
-  const patch: Record<string, unknown> = { status: to }
-  if (decision === 'approve') Object.assign(patch, { approved_by: actorEmail, approved_at: now })
-  const { data, error } = await supabaseAdmin
-    .from('distributors').update(patch).eq('id', id).eq('status', current.status).select(DISTRIBUTOR_COLUMNS).maybeSingle()
-  if (error) fail('update distributor status', error)
-  if (!data) throw new DistributorStoreError('the distributor changed meanwhile; reload and try again', 409)
+  const data = await updateStatus(current, to, decision === 'approve' ? { approved_by: actorEmail, approved_at: now } : {})
   if (to === 'approved') await ensureStartingLevel(id, current.approved_at ?? now)
   return data as DistributorRow
+}
+
+/**
+ * Conditional status update. Approval also hands out a referral code (once); a rare code collision
+ * (unique index) is retried with a fresh code.
+ */
+async function updateStatus(current: DistributorRow, to: DistributorStatus, extra: Record<string, unknown>): Promise<DistributorRow> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const patch: Record<string, unknown> = { status: to, ...extra }
+    if (to === 'approved' && !current.referral_code) patch.referral_code = newReferralCode()
+    const { data, error } = await supabaseAdmin
+      .from('distributors').update(patch).eq('id', current.id).eq('status', current.status).select(DISTRIBUTOR_COLUMNS).maybeSingle()
+    if (error?.code === '23505' && /referral_code/.test(error.message) && patch.referral_code) continue
+    if (error?.code === '23505') throw new DistributorStoreError('another active distributor already uses this email; reject this one or suspend that one first', 409)
+    if (error) fail('update distributor status', error)
+    if (!data) throw new DistributorStoreError('the distributor changed meanwhile; reload and try again', 409)
+    return data as DistributorRow
+  }
+  throw new DistributorStoreError('could not assign a referral code; try again', 500)
 }
 
 export async function listSales(limit = 200): Promise<Array<Record<string, unknown>>> {

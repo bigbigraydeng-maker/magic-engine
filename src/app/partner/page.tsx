@@ -5,7 +5,7 @@ import { formatMoney, formatDate } from '../dashboard/admin/distributors/shared'
 type Level = 'standard' | 'tier1' | 'premier' | null
 
 type PortalView = {
-  profile: { display_name: string; status: string; level: Level; approved_at: string | null }
+  profile: { display_name: string; status: string; level: Level; approved_at: string | null; referral_code: string | null }
   upgrade: {
     next: Level
     selfPurchaseBestCents: number
@@ -97,9 +97,45 @@ function Header({ profile, onLogout }: { profile: PortalView['profile']; onLogou
       </div>
       {profile.status === 'suspended' && (
         <div className="mt-4">
-          <Notice>你的账号已暂停：收益照算，暂不发放。</Notice>
+          <Notice>你的账号已停用：停用期间的收益只记账、不发放，恢复后也不补发。</Notice>
         </div>
       )}
+    </div>
+  )
+}
+
+function ReferralCard({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+  const link = `${window.location.origin}/partner/apply?ref=${code}`
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+  return (
+    <div className="mb-8 overflow-hidden rounded-2xl bg-white shadow-sm">
+      <div className="border-b border-black/[0.06] px-6 py-4">
+        <h2 className="text-base font-bold text-me-charcoal/90">我的推荐链接</h2>
+      </div>
+      <div className="px-6 py-5">
+        <p className="mb-3 text-sm text-me-charcoal/75">
+          别人用这个链接申请、审核通过后，就挂在你下面。你的推荐码是 <span className="font-bold tabular-nums">{code}</span>。
+        </p>
+        <div className="flex gap-2">
+          <input
+            readOnly
+            value={link}
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-full rounded-lg border border-black/[0.1] bg-me-ivory px-2 py-1 text-xs text-me-charcoal/80"
+          />
+          <button type="button" onClick={copy} className="shrink-0 rounded-lg bg-me-ochre px-3 py-1 text-xs font-bold text-white">
+            {copied ? '已复制' : '复制'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -369,6 +405,7 @@ export default function PartnerPage() {
         {state === 'ok' && view && (
           <>
             <Header profile={view.profile} onLogout={logout} />
+            {view.profile.referral_code && <ReferralCard code={view.profile.referral_code} />}
             <UpgradeCard upgrade={view.upgrade} level={view.profile.level} />
             <TeamCard team={view.team} />
             <SalesCard sales={view.sales} />

@@ -1,6 +1,6 @@
 import { buildSaleBook, netOfRefunds } from './refund'
 import { toMs } from './time'
-import { levelAt, levelRank, type DistributorIndex } from './tree'
+import { levelAt, levelAtOrNull, levelRank, type DistributorIndex } from './tree'
 import type { CommissionRules, DistributorLevel, Sale } from './types'
 
 /**
@@ -51,7 +51,9 @@ export function evaluateUpgrade(input: UpgradeInput): UpgradeDecision {
       && months.every((m) => m >= rules.upgrade.premierMonthlyTeamSalesCents)
     const directTier1 = (index.children.get(me.id) ?? []).filter((kid) => {
       const child = index.byId.get(kid)
-      return child !== undefined && !child.suspended && levelRank(levelAt(child, asOf)) >= levelRank('tier1')
+      // A pending applicant under me has no level yet and simply does not count.
+      const level = child && !child.suspended ? levelAtOrNull(child, asOf) : null
+      return level !== null && levelRank(level) >= levelRank('tier1')
     }).length
     const teamOk = directTier1 >= rules.upgrade.premierMinDirectTier1
     if (salesOk && teamOk) return { current, next: 'premier', reason: `team sales ${months.length} months ≥ threshold; ${directTier1} direct tier1+` }

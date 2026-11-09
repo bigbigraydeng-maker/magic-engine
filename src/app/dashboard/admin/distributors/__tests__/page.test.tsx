@@ -6,7 +6,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import DistributorsPage from '../page'
 
-const PENDING = { id: 'd-1', parent_id: null, display_name: '王小明', contact_email: null, contact_phone: null, status: 'pending', approved_by: null, approved_at: null, created_at: '2026-11-10T00:00:00Z', level: null, parent_name: null, net_sales_cents: 0 }
+const PENDING = { id: 'd-1', parent_id: null, display_name: '王小明', contact_email: null, contact_phone: null, status: 'pending', approved_by: null, approved_at: null, referral_code: null, source: 'application', region: 'Auckland', application_note: '我做美容店', created_at: '2026-11-10T00:00:00Z', level: null, parent_name: null, net_sales_cents: 0 }
 const APPROVED = { ...PENDING, id: 'd-2', display_name: '李经理', status: 'approved', approved_by: 'pm@x', approved_at: '2026-11-01T00:00:00Z', level: 'tier1', net_sales_cents: 159_800 }
 const SALE = { id: 's-1', distributor_id: 'd-2', kind: 'plan', order_ref: 'INV-9', plan_code: 'videos-16', months: 2, extra_avatars: 0, amount_cents: 159_800, currency: 'NZD', paid_at: '2026-11-05T00:00:00Z', is_self_purchase: false, refund_of_sale_id: null, recorded_by: 'pm@x', created_at: '2026-11-05T00:00:00Z' }
 const REFUND = { ...SALE, id: 's-2', kind: 'refund', order_ref: 'INV-9-退款', amount_cents: -79_900, refund_of_sale_id: 's-1' }
@@ -37,6 +37,8 @@ describe('distributors admin page', () => {
     render(<DistributorsPage />)
     expect(await screen.findByText('王小明')).toBeTruthy()
     expect(screen.getByText('待审批')).toBeTruthy()
+    expect(screen.getAllByText('自己申请').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('我做美容店').length).toBeGreaterThan(0)
     expect(screen.getByText('一级')).toBeTruthy()
     expect(screen.getAllByText('$1598.00').length).toBeGreaterThan(0)
   })
@@ -47,7 +49,8 @@ describe('distributors admin page', () => {
     vi.stubGlobal('confirm', confirm)
     render(<DistributorsPage />)
     await userEvent.click(await screen.findByRole('button', { name: '批准' }))
-    expect(confirm).toHaveBeenCalledWith('确定批准「王小明」成为经销商？')
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('确定批准「王小明」成为经销商？\n上线：没有（直属 Magic Engine）'))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('先打电话或发邮件和本人核实'))
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')
     expect(post?.[0]).toBe('/api/admin/distributors/d-1/decision')
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ decision: 'approve' })

@@ -26,11 +26,27 @@ CREATE TABLE public.distributors (
                    CHECK (status IN ('pending','approved','rejected','suspended')),
   approved_by     TEXT,
   approved_at     TIMESTAMPTZ,
+  -- 推荐码：批准时才发，别人用它申请就挂在这位经销商下面。
+  referral_code   TEXT UNIQUE CHECK (referral_code IS NULL OR referral_code ~ '^[A-HJ-NP-Z2-9]{8}$'),
+  -- 后台手工添加（admin）还是对外申请页自己填的（application）。
+  source          TEXT NOT NULL DEFAULT 'admin' CHECK (source IN ('admin','application')),
+  region          TEXT CHECK (region IS NULL OR length(region) <= 100),
+  application_note TEXT CHECK (application_note IS NULL OR length(application_note) <= 1000),
+  terms_version   TEXT CHECK (terms_version IS NULL OR length(terms_version) <= 64),
+  terms_accepted_at TIMESTAMPTZ,
+  -- 申请人 IP 的带密钥哈希，只用来限制同一来源反复提交，存不了原 IP。
+  applicant_ip_hash TEXT CHECK (applicant_ip_hash IS NULL OR applicant_ip_hash ~ '^[0-9a-f]{64}$'),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   CHECK (parent_id IS NULL OR parent_id <> id),
-  CHECK (status <> 'approved' OR (approved_by IS NOT NULL AND approved_at IS NOT NULL))
+  CHECK (status <> 'approved' OR (approved_by IS NOT NULL AND approved_at IS NOT NULL)),
+  CHECK (source <> 'application' OR (terms_version IS NOT NULL AND terms_accepted_at IS NOT NULL AND contact_email IS NOT NULL))
 );
 CREATE INDEX distributors_parent_idx ON public.distributors(parent_id);
+CREATE INDEX distributors_application_recent_idx ON public.distributors(created_at) WHERE source = 'application';
+-- 同一个邮箱同时只能有一位在用（已批准 / 已停用）的经销商。待审的申请故意不限：
+-- 否则别人先用你的邮箱填一份挂到他名下，你自己的申请就进不来了；同邮箱的多份申请在后台并排标出来，由人判断。
+CREATE UNIQUE INDEX distributors_live_email_uniq ON public.distributors (lower(contact_email))
+  WHERE contact_email IS NOT NULL AND status IN ('approved','suspended');
 
 CREATE TABLE public.distributor_level_history (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),

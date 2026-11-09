@@ -36,7 +36,7 @@ function builder(table: string) {
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: (t: string) => builder(t) } }))
 
 import { AI_STEWARD_RULES_V1 } from '../config'
-import { canonicalJson, DistributorStoreError, listDistributors, recordRefund, recordSale } from '../store'
+import { canonicalJson, createDistributor, decideDistributor, DistributorStoreError, listDistributors, recordRefund, recordSale } from '../store'
 
 const APPROVED = { id: 'd1', parent_id: null, display_name: 'A', contact_email: null, contact_phone: null, status: 'approved', approved_by: 'pm', approved_at: '2026-11-05T00:00:00Z', created_at: '2026-11-01T00:00:00Z' }
 const SALE_INPUT = { distributorId: 'd1', kind: 'plan' as const, planCode: 'videos-16', months: 1, extraAvatars: 0, isSelfPurchase: false, orderRef: 'INV-1', paidAt: '2026-11-06T00:00:00.000Z', listPriceCents: 79_900, amountCents: 79_900 }
@@ -121,5 +121,52 @@ describe('listing and helpers', () => {
   it('compares configs regardless of key order', () => {
     expect(canonicalJson({ b: 1, a: [{ y: 2, x: 1 }] })).toBe(canonicalJson({ a: [{ x: 1, y: 2 }], b: 1 }))
     expect(canonicalJson({ a: 1 })).not.toBe(canonicalJson({ a: 2 }))
+  })
+})
+
+describe('approval and referral codes', () => {
+  const PENDING = { ...APPROVED, status: 'pending', approved_by: null, approved_at: null, referral_code: null }
+
+  it('hands out one referral code on approval and retries a code collision', async () => {
+    let updates = 0
+    h.respond = (op) => {
+      if (op.table === 'distributors' && op.op === 'update') {
+        updates += 1
+        return updates === 1 ? { data: null, error: { message: 'duplicate key value violates unique constraint "distributors_referral_code_key"', code: '23505' } } : { data: { ...APPROVED, referral_code: 'X' }, error: null }
+      }
+      if (op.table === 'distributors') return { data: PENDING, error: null }
+      return happy(op)
+    }
+    await decideDistributor('d1', 'approve', 'pm@x')
+    const patches = h.calls.filter((c) => c.table === 'distributors' && c.op === 'update').map((c) => c.payload as Record<string, unknown>)
+    expect(patches).toHaveLength(2)
+    expect(patches[0].referral_code).toMatch(/^[A-HJ-NP-Z2-9]{8}$/)
+    expect(patches[1].referral_code).not.toBe(patches[0].referral_code)
+    expect(h.calls.find((c) => c.op === 'update')?.filters).toMatchObject({ id: 'd1', status: 'pending' })
+  })
+
+  it('refuses to approve a second active distributor with the same email, without retrying', async () => {
+    h.respond = (op) => {
+      if (op.table === 'distributors' && op.op === 'update') return { data: null, error: { message: 'duplicate key value violates unique constraint "distributors_live_email_uniq"', code: '23505' } }
+      if (op.table === 'distributors') return { data: PENDING, error: null }
+      return happy(op)
+    }
+    await expect(decideDistributor('d1', 'approve', 'pm@x')).rejects.toMatchObject({ status: 409 })
+    expect(h.calls.filter((c) => c.op === 'update')).toHaveLength(1)
+  })
+
+  it('keeps an existing code when a suspended distributor is reinstated', async () => {
+    h.respond = (op) => {
+      if (op.table === 'distributors' && op.op === 'update') return { data: APPROVED, error: null }
+      if (op.table === 'distributors') return { data: { ...APPROVED, status: 'suspended', referral_code: 'ABCD2345' }, error: null }
+      return happy(op)
+    }
+    await decideDistributor('d1', 'reinstate', 'pm@x')
+    expect(h.calls.find((c) => c.op === 'update')?.payload).not.toHaveProperty('referral_code')
+  })
+
+  it('reports a second live distributor with the same email as a conflict', async () => {
+    h.respond = (op) => (op.op === 'insert' ? { data: null, error: { message: 'dup', code: '23505' } } : happy(op))
+    await expect(createDistributor({ displayName: 'B', contactEmail: 'b@x.co', contactPhone: null, parentId: null })).rejects.toMatchObject({ status: 409 })
   })
 })

@@ -10,10 +10,10 @@ import { indexDistributors, levelAt } from './tree'
 import { evaluateUpgrade, maturedNetSales } from './upgrade'
 import type { DistributorLevel } from './types'
 
-interface Row extends DistributorDbRow { display_name: string; approved_at: string | null }
+interface Row extends DistributorDbRow { display_name: string; approved_at: string | null; referral_code: string | null }
 
 export interface PortalView {
-  profile: { display_name: string; status: string; level: DistributorLevel | null; approved_at: string | null }
+  profile: { display_name: string; status: string; level: DistributorLevel | null; approved_at: string | null; referral_code: string | null }
   upgrade: {
     next: DistributorLevel | null
     selfPurchaseBestCents: number
@@ -41,13 +41,16 @@ async function own<T>(table: string, columns: string, distributorId: string, ord
   }
 }
 
-function countDescendants(children: ReadonlyMap<string, readonly string[]>, id: string): number {
-  return (children.get(id) ?? []).reduce((sum, kid) => sum + 1 + countDescendants(children, kid), 0)
+/** Pending and rejected applicants are not team members yet: never shown to the upline, never counted. */
+const TEAM_STATUSES = new Set(['approved', 'suspended'])
+
+function countDescendants(children: ReadonlyMap<string, readonly string[]>, id: string, isMember: (id: string) => boolean): number {
+  return (children.get(id) ?? []).filter(isMember).reduce((sum, kid) => sum + 1 + countDescendants(children, kid, isMember), 0)
 }
 
 export async function buildPortalView(distributorId: string, now = new Date()): Promise<PortalView> {
   const [rows, levels, sales, statements, balances, lines] = await Promise.all([
-    selectAll<Row>('distributors', 'id, parent_id, status, display_name, approved_at'),
+    selectAll<Row>('distributors', 'id, parent_id, status, display_name, approved_at, referral_code'),
     selectAll<LevelDbRow>('distributor_level_history', 'id, distributor_id, level, effective_from'),
     own<SaleDbRow & { plan_code: string | null; months: number | null; extra_avatars: number }>('distributor_sales', 'id, distributor_id, kind, amount_cents, currency, paid_at, is_self_purchase, refund_of_sale_id, settled_statement_id, plan_code, months, extra_avatars', distributorId),
     selectAll<{ id: string; period_month: string; status: string }>('distributor_statements', 'id, period_month, status'),
@@ -65,16 +68,18 @@ export async function buildPortalView(distributorId: string, now = new Date()): 
   const live = statements.filter((s) => s.status !== 'voided').sort((a, b) => a.period_month.localeCompare(b.period_month))
   const balanceByStatement = new Map(balances.map((b) => [b.statement_id, b]))
   const upgrade = upgradeView({ distributorId, index, rows, sales: toSales(sales), live, balanceByStatement, asOf, levelOf })
-  const directKids = index.children.get(distributorId) ?? []
+  const statusById = new Map(rows.map((r) => [r.id, r.status]))
+  const isMember = (id: string) => TEAM_STATUSES.has(statusById.get(id) ?? '')
+  const directKids = (index.children.get(distributorId) ?? []).filter(isMember)
   return {
-    profile: { display_name: me.display_name, status: me.status, level: levelOf(distributorId), approved_at: me.approved_at },
+    profile: { display_name: me.display_name, status: me.status, level: levelOf(distributorId), approved_at: me.approved_at, referral_code: me.status === 'approved' ? me.referral_code : null },
     upgrade,
     team: {
       direct: directKids.map((k) => {
         const r = rows.find((x) => x.id === k)
         return { display_name: r?.display_name ?? '', level: levelOf(k), status: r?.status ?? '' }
       }),
-      total: countDescendants(index.children, distributorId),
+      total: countDescendants(index.children, distributorId, isMember),
     },
     sales: [...sales]
       .sort((a, b) => b.paid_at.localeCompare(a.paid_at))

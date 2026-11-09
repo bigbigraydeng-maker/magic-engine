@@ -18,8 +18,36 @@ interface DistributorTableProps {
   busyId: string | null
 }
 
+/** Contact details, city and the applicant's own words, so a decision does not need another lookup. */
+function ApplicantDetails({ d, sameEmail }: { d: Distributor; sameEmail: number }) {
+  const contact = [d.contact_email, d.contact_phone, d.region].filter((v): v is string => Boolean(v))
+  return (
+    <>
+      {contact.length > 0 && <div className="mt-1 text-xs text-me-charcoal/55">{contact.join(' · ')}</div>}
+      {sameEmail > 0 && (
+        <div className="mt-1 text-xs font-bold text-[#C2453A]">
+          这个邮箱还有 {sameEmail} 份别的记录：可能有人冒用邮箱，批准前先联系本人确认上线是谁
+        </div>
+      )}
+      {d.referral_code && <div className="mt-1 text-xs text-me-charcoal/55">推荐码 {d.referral_code}</div>}
+      {d.application_note && (
+        <p className="mt-1 max-w-xs whitespace-pre-line text-xs text-me-charcoal/70">{d.application_note}</p>
+      )}
+    </>
+  )
+}
+
 export function DistributorTable({ distributors, loading, onDecision, busyId }: DistributorTableProps) {
   const [linkBusyId, setLinkBusyId] = useState<string | null>(null)
+  const emailCounts = new Map<string, number>()
+  for (const x of distributors) {
+    const key = x.contact_email?.toLowerCase()
+    if (key && x.status !== 'rejected') emailCounts.set(key, (emailCounts.get(key) ?? 0) + 1)
+  }
+  const othersWithEmail = (d: Distributor) => {
+    const key = d.contact_email?.toLowerCase()
+    return key && d.status !== 'rejected' ? (emailCounts.get(key) ?? 1) - 1 : 0
+  }
   const [linkUrlById, setLinkUrlById] = useState<Record<string, string>>({})
   const [linkErrById, setLinkErrById] = useState<Record<string, string>>({})
 
@@ -188,7 +216,15 @@ export function DistributorTable({ distributors, loading, onDecision, busyId }: 
           ) : (
             distributors.map((d) => (
               <tr key={d.id} className="hover:bg-me-ivory/60 transition-colors">
-                <td className="px-6 py-4 text-sm font-medium text-me-charcoal/90">{d.display_name}</td>
+                <td className="px-6 py-4 text-sm text-me-charcoal/90">
+                  <div className="font-medium">
+                    {d.display_name}
+                    {d.source === 'application' && (
+                      <span className="ml-2 rounded-full bg-me-ochre/15 px-2 py-0.5 text-xs font-bold text-me-charcoal/75">自己申请</span>
+                    )}
+                  </div>
+                  <ApplicantDetails d={d} sameEmail={othersWithEmail(d)} />
+                </td>
                 <td className="px-6 py-4 text-sm text-me-charcoal/75">{d.parent_name ?? '—'}</td>
                 <td className="px-6 py-4 text-sm text-me-charcoal/75">
                   {d.level ? LEVEL_LABELS[d.level] : '—'}

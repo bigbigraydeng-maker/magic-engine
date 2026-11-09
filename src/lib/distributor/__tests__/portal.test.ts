@@ -127,6 +127,8 @@ describe('portal view', () => {
       if (op.table === 'distributors') return { data: [
         { id: 'me', parent_id: null, status: 'approved', display_name: '我', approved_at: '2026-01-01T00:00:00Z' },
         { id: 'kid', parent_id: 'me', status: 'approved', display_name: '下级', approved_at: '2026-01-01T00:00:00Z' },
+        { id: 'applicant', parent_id: 'me', status: 'pending', display_name: 'http://phish.example 点这里', approved_at: null },
+        { id: 'refused', parent_id: 'me', status: 'rejected', display_name: '被拒', approved_at: null },
       ], error: null }
       if (op.table === 'distributor_level_history') return { data: [
         { id: 'l1', distributor_id: 'me', level: 'tier1', effective_from: '2026-01-01T00:00:00Z' },

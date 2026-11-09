@@ -72,6 +72,11 @@ describe('tier1 → premier', () => {
     expect(decide(team, 'p', [], [15_000_000, 15_000_000, 20_000_000]).next).toBe('premier')
   })
 
+  it('ignores a pending applicant under them (no level yet) instead of failing', () => {
+    const applicant: Distributor = { id: 'new', parentId: 'p', levelHistory: [] }
+    expect(decide([...team, applicant], 'p', [], [15_000_000, 15_000_000, 20_000_000]).next).toBe('premier')
+  })
+
   it('fails when one recent month is short or history is too short', () => {
     expect(decide(team, 'p', [], [15_000_000, 14_999_999, 20_000_000]).next).toBeNull()
     expect(decide(team, 'p', [], [20_000_000, 20_000_000]).next).toBeNull()

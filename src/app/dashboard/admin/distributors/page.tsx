@@ -79,7 +79,7 @@ export default function DistributorsPage() {
     const name = d.display_name
     const message =
       decision === 'approve'
-        ? `确定批准「${name}」成为经销商？`
+        ? `确定批准「${name}」成为经销商？\n上线：${d.parent_name ?? '没有（直属 Magic Engine）'}。邮箱 ${d.contact_email ?? '—'}——批准前请先打电话或发邮件和本人核实，申请页不验证邮箱。`
         : decision === 'reject'
         ? `确定拒绝「${name}」的申请？`
         : decision === 'suspend'
