@@ -28,9 +28,9 @@ interface Props {
 
 function Badge({ children, tone }: { children: string; tone: 'quiet' | 'warm' }): JSX.Element {
   const cls = tone === 'warm'
-    ? 'border-me-ochre/30 bg-me-ochre/10 text-me-ochre'
-    : 'border-black/10 bg-me-ivory text-me-charcoal/60'
-  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold leading-none ${cls}`}>{children}</span>
+    ? 'border-me-ochre/30 bg-me-ochre/10 text-[#7A5410]'
+    : 'border-black/10 bg-me-ivory text-me-charcoal/70'
+  return <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold leading-none ${cls}`}>{children}</span>
 }
 
 export function DocumentRowItem({ clientId, doc, canManage, onChanged, onReplace, onError }: Props): JSX.Element {
@@ -73,14 +73,14 @@ export function DocumentRowItem({ clientId, doc, canManage, onChanged, onReplace
   return (
     <li className={`rounded-xl border border-black/10 bg-white p-4 ${archived ? 'opacity-70' : ''}`}>
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 basis-56">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-black text-me-charcoal">{doc.title}</p>
             {doc.version_label && <Badge tone="quiet">{doc.version_label}</Badge>}
             {archived && <Badge tone="quiet">旧版</Badge>}
             {canManage && <Badge tone={doc.visibility === 'client' ? 'warm' : 'quiet'}>{VISIBILITY_LABELS[doc.visibility]}</Badge>}
           </div>
-          <p className="mt-0.5 text-xs font-semibold text-me-charcoal/55">
+          <p className="mt-0.5 text-xs font-semibold text-me-charcoal/70">
             {fileKindLabel(doc.mime_type)} · {formatBytes(doc.size_bytes)} · {formatDate(doc.created_at)} 放入
           </p>
           {doc.description && <p className="mt-1 whitespace-pre-line text-xs font-semibold text-me-charcoal/70">{doc.description}</p>}
@@ -105,7 +105,7 @@ export function DocumentRowItem({ clientId, doc, canManage, onChanged, onReplace
       {canManage && editing && (
         <div className="mt-3 grid gap-2 border-t border-black/10 pt-3 sm:grid-cols-2">
           <input aria-label="名称" className={FIELD} value={title} maxLength={200} onChange={e => setTitle(e.target.value)} />
-          <input aria-label="版本号" className={FIELD} value={versionLabel} maxLength={40} placeholder="版本号" onChange={e => setVersionLabel(e.target.value)} />
+          <input aria-label="版本号" className={FIELD} value={versionLabel} maxLength={40} onChange={e => setVersionLabel(e.target.value)} />
           <select aria-label="类别" className={FIELD} value={category} onChange={e => isDocumentCategory(e.target.value) && setCategory(e.target.value)}>
             {DOCUMENT_CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
           </select>

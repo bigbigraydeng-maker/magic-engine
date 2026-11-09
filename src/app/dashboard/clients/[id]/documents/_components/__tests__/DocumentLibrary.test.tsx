@@ -97,6 +97,27 @@ describe('internal account', () => {
     expect(JSON.parse(String(patch?.body))).toEqual({ status: 'archived' })
   })
 
+  it('opens the edit form with the file\'s current values and sends every field on save', async () => {
+    serve({ documents: [SHEET], canManage: true })
+    render(<DocumentLibrary clientId={CLIENT} />)
+    await screen.findByText('Best of China')
+
+    await userEvent.click(screen.getByRole('button', { name: '改信息' }))
+    expect((screen.getByLabelText('类别') as HTMLSelectElement).value).toBe('sheet')
+    expect((screen.getByLabelText('谁能下载') as HTMLSelectElement).value).toBe('internal')
+    expect((screen.getByLabelText('名称') as HTMLInputElement).value).toBe('Best of China')
+    expect((screen.getByLabelText('说明') as HTMLTextAreaElement).value).toBe('一页介绍')
+
+    await userEvent.selectOptions(screen.getByLabelText('谁能下载'), 'client')
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.some(c => c.method === 'PATCH')).toBe(true))
+    const patch = calls.find(c => c.method === 'PATCH')
+    expect(patch?.url).toBe(`/api/clients/${CLIENT}/documents/d2`)
+    expect(JSON.parse(String(patch?.body))).toEqual({
+      title: 'Best of China', category: 'sheet', visibility: 'client', versionLabel: '', description: '一页介绍',
+    })
+  })
+
   it('shows the server\'s sentence when an edit is refused', async () => {
     serve({ documents: [BROCHURE], canManage: true })
     responses.unshift(call => (call.method === 'PATCH' ? json({ error: '资料库里已经有内容完全相同的现行文件，不能再恢复这个旧版' }, 409) : undefined))

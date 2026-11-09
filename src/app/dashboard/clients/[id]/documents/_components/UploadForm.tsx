@@ -95,8 +95,8 @@ export function UploadForm({ clientId, replacing, onDone, onCancel }: Props): JS
           <input id="doc-title" className={FIELD} value={title} maxLength={200} onChange={e => setTitle(e.target.value)} />
         </div>
         <div>
-          <label className={LABEL} htmlFor="doc-version">版本号（可不填）</label>
-          <input id="doc-version" className={FIELD} value={versionLabel} maxLength={40} placeholder="例如 v11" onChange={e => setVersionLabel(e.target.value)} />
+          <label className={LABEL} htmlFor="doc-version">版本号（可不填，例如 v11）</label>
+          <input id="doc-version" className={FIELD} value={versionLabel} maxLength={40} onChange={e => setVersionLabel(e.target.value)} />
         </div>
         <div>
           <label className={LABEL} htmlFor="doc-category">类别</label>
