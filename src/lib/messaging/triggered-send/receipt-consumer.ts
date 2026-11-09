@@ -7,8 +7,10 @@
  *     in its List-Unsubscribe header (the signature is checked; the token never leaves the load step).
  * Nothing is ever matched by address: the same Resend account also sends ME's system mail, and anyone can make it mail
  * any address (a contact form), so "same address, close in time" is not proof (review 2026-11-10, both reviewers).
- * The address is used for one thing only: when a row of that address is still `pending` without a message id, its
- * sender is probably about to record the id, so the receipt is retried a few times before it is given up ("unmatched").
+ * The address is used to wait and to report, never to bind: when a row of that address was claimed in the last 30
+ * minutes and is still `pending` without a message id, its sender is probably about to record the id, so the receipt
+ * is retried a few times; when any live row of that address has no message id (an unknown outcome, a person's "not
+ * sent", a stuck pending row), the receipt is reported as "unmatched" (ids only) for a person to look at.
  * Everything else is ME's own system mail ("not ours"): nothing happens, nothing is retried, nothing is reported.
  *
  * The update is compare-and-set on the row's `updated_at`, so two receipts of one letter never overwrite each other.
@@ -19,13 +21,15 @@
  */
 
 import type { EmailUnsubscribeRecord, EmailUnsubscribeWrite } from '@/lib/crm/email-unsubscribe'
-import type { ProviderReceipt } from '@/lib/messaging/provider-events/resend-receipt'
+import type { ProviderReceipt } from '@/lib/messaging/provider-events/receipt-types'
 import { decideReceipt, type ReceiptFacts, type ReceiptKind, type ReceiptPatch, type ReceiptRow } from './receipt'
 import { verifyUnsubscribeToken, type EnvReader } from './unsubscribe-token'
 
 export const SEND_ID_TAG = 'triggered_send_id'
 /** A `pending` row this recent may still be recording its message id: a receipt to its address is retried. */
 export const IN_FLIGHT_WINDOW_MS = 30 * 60 * 1000
+/** How far back a live row without a message id makes a receipt to its address worth reporting as "unmatched". */
+export const UNBOUND_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000
 const CAS_TRIES = 3
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const UNSUBSCRIBE_PATH_RE = /\/api\/u\/([A-Za-z0-9_-]{16,300}\.[A-Za-z0-9_-]{43})(?![A-Za-z0-9_-])/g
@@ -48,8 +52,11 @@ export type UpdateResult = 'updated' | 'changed' | 'stale' | 'conflict'
 export interface ReceiptStore {
   findByMessageId(messageId: string): Promise<ReceiptRow[]>
   findById(id: string): Promise<ReceiptRow | null>
-  /** Live rows still `pending` without a message id, of these addresses, attempted since `sinceIso`. */
-  findPendingByAddress(fingerprints: readonly string[], sinceIso: string): Promise<ReceiptRow[]>
+  /**
+   * Live rows of these addresses that have no message id yet (pending, unknown outcome, or a person's "not sent"),
+   * attempted since `sinceIso`. Used only to wait for or report a receipt — never to bind one.
+   */
+  findUnboundByAddress(fingerprints: readonly string[], sinceIso: string): Promise<ReceiptRow[]>
   /** Writes the patch only if the row still has the `updatedAt` it was read with. Throws on a database error. */
   updateIfUnchanged(row: ReceiptRow, patch: ReceiptPatch): Promise<UpdateResult>
   recordUnsubscribe(input: EmailUnsubscribeRecord): Promise<EmailUnsubscribeWrite>
@@ -133,10 +140,14 @@ async function matchRow(loaded: LoadedReceipt, store: ReceiptStore, lastTry: boo
     return row.providerMessageId === messageId ? { kind: 'row', row, bind: false } : { kind: 'conflict', row }
   }
   if (messageId === null || loaded.toFingerprints.length === 0) return { kind: 'not_ours' }
-  const since = new Date(now.getTime() - IN_FLIGHT_WINDOW_MS).toISOString()
-  const pending = await store.findPendingByAddress(loaded.toFingerprints, since)
-  if (pending.length === 0) return { kind: 'not_ours' }
-  return { kind: lastTry ? 'unmatched' : 'in_flight', sendId: pending[0].id }
+  const unbound = await store.findUnboundByAddress(loaded.toFingerprints, new Date(now.getTime() - UNBOUND_LOOKBACK_MS).toISOString())
+  if (unbound.length === 0) return { kind: 'not_ours' }
+  const freshSince = now.getTime() - IN_FLIGHT_WINDOW_MS
+  const inFlight = unbound.find((r) => r.status === 'pending' && Date.parse(r.firstAttemptAt ?? '') >= freshSince)
+  // A fresh pending row: its sender is probably about to record the id. Anything else cannot be told apart from
+  // another mail to the same address, so it is reported (ids only) for a person, never bound.
+  if (inFlight !== undefined && !lastTry) return { kind: 'in_flight', sendId: inFlight.id }
+  return { kind: 'unmatched', sendId: (inFlight ?? unbound[0]).id }
 }
 
 /** A complaint stops e-mail to the contact and address of the named letter. Repeats are harmless; a failed write throws. */

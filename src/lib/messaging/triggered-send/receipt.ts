@@ -14,7 +14,7 @@
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §4.2, §6.5 (implementation: §16.10).
  */
 
-import type { ReceiptKind } from '@/lib/messaging/provider-events/resend-receipt'
+import type { ReceiptKind } from '@/lib/messaging/provider-events/receipt-types'
 
 export type { ReceiptKind }
 

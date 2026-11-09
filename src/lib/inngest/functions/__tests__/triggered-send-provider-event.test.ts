@@ -45,7 +45,7 @@ const untouched = async (): Promise<never> => {
 const NO_STORE: ReceiptStore = {
   findByMessageId: untouched,
   findById: untouched,
-  findPendingByAddress: untouched,
+  findUnboundByAddress: untouched,
   updateIfUnchanged: untouched,
   recordUnsubscribe: untouched,
 }

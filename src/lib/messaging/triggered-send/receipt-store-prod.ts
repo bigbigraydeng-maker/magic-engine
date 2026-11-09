@@ -7,7 +7,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { recordEmailUnsubscribe } from '@/lib/crm/email-unsubscribe'
-import type { ReceiptPatch, ReceiptRow } from './receipt'
+import { NOT_SENT_CONFIRMED, type ReceiptPatch, type ReceiptRow } from './receipt'
 import type { ReceiptStore, UpdateResult } from './receipt-consumer'
 
 const LEDGER = 'triggered_sends'
@@ -72,7 +72,7 @@ export function createReceiptStore(db: SupabaseClient): ReceiptStore {
       if (error) throw new Error(`ledger read: ${codeOf(error)}`)
       return data === null ? null : toRow(data as LedgerDbRow)
     },
-    async findPendingByAddress(fingerprints, sinceIso) {
+    async findUnboundByAddress(fingerprints, sinceIso) {
       const hashes = fingerprints.filter((f) => SHA256_RE.test(f))
       if (hashes.length === 0) return []
       const { data, error } = await db
@@ -80,10 +80,11 @@ export function createReceiptStore(db: SupabaseClient): ReceiptStore {
         .select(COLUMNS)
         .in('to_address_sha256', hashes)
         .eq('dedupe_scope', 'lifetime')
-        .eq('status', 'pending')
         .is('provider_message_id', null)
         .gte('first_attempt_at', sinceIso)
-        .limit(2)
+        .or(`status.in.(pending,unknown_outcome),and(status.eq.failed,reason_code.eq.${NOT_SENT_CONFIRMED})`)
+        .order('first_attempt_at', { ascending: false })
+        .limit(5)
       if (error) throw new Error(`ledger read: ${codeOf(error)}`)
       return rowsOf(data)
     },

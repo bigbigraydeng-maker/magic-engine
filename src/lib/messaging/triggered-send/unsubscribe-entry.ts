@@ -12,6 +12,7 @@
  */
 
 import type { EmailUnsubscribeRecord, EmailUnsubscribeWrite } from '@/lib/crm/email-unsubscribe'
+import { visitorAddress } from '@/lib/tools-lab/visitor'
 import { verifyUnsubscribeToken, type EnvReader } from './unsubscribe-token'
 
 /** The columns of the send ledger row that an unsubscribe needs. */
@@ -178,8 +179,7 @@ export async function handleUnsubscribePost(token: string, deps: UnsubscribeEntr
 /**
  * A small per-address limiter for this public entry (per server process). A valid link costs one ledger read and one
  * idempotent write; a forged one costs one HMAC. The limit is generous because mail providers send their one-click
- * POSTs from shared addresses. When it holds `maxKeys` addresses it forgets the oldest ones, never all of them at once
- * (clearing everything would let a flood of made-up addresses reset the limit of a real one).
+ * POSTs from shared addresses. When it holds `maxKeys` addresses it forgets the oldest ones, never all of them at once.
  */
 export function createRateLimiter(opts: { limit: number; windowMs: number; maxKeys: number; now?: () => number }) {
   const hits = new Map<string, { windowStart: number; count: number }>()
@@ -205,13 +205,10 @@ export function createRateLimiter(opts: { limit: number; windowMs: number; maxKe
 }
 
 /**
- * The caller's address as our edge reports it, used only as the limiter's key. The first X-Forwarded-For entry is
- * whatever the caller sent, so it is never used: the edge's own header first, then the LAST forwarded entry (the one
- * the nearest proxy appended).
+ * The caller's address, used only as the limiter's key. The same rule as the Tools Lab (`visitorAddress`): the address
+ * is believed only when the request provably came through our Cloudflare edge, because anyone can reach the Render
+ * origin directly and set `cf-connecting-ip` / `x-forwarded-for` themselves. Every other request shares one bucket.
  */
-export function clientKeyOf(headers: { get(name: string): string | null }): string {
-  const edge = headers.get('cf-connecting-ip') ?? headers.get('true-client-ip')
-  const forwarded = (headers.get('x-forwarded-for') ?? '').split(',').map((part) => part.trim()).filter((part) => part !== '')
-  const key = edge?.trim() || forwarded.at(-1) || headers.get('x-real-ip')?.trim() || ''
-  return key === '' ? 'unknown' : key.slice(0, 64)
+export function clientKeyOf(headers: Headers): string {
+  return visitorAddress(headers)?.ip ?? 'unverified'
 }

@@ -178,11 +178,12 @@ describe('createRateLimiter / clientKeyOf', () => {
     expect(limiter.allow('fake-3')).toBe(false)
   })
 
-  it('keys by the edge\'s own header, else the LAST forwarded entry (the first one is whatever the caller sent)', () => {
-    const h = (values: Record<string, string>) => ({ get: (name: string) => values[name.toLowerCase()] ?? null })
-    expect(clientKeyOf(h({ 'cf-connecting-ip': '198.51.100.9', 'x-forwarded-for': '203.0.113.7, 10.0.0.1' }))).toBe('198.51.100.9')
-    expect(clientKeyOf(h({ 'x-forwarded-for': 'spoofed-by-caller, 203.0.113.7' }))).toBe('203.0.113.7')
-    expect(clientKeyOf(h({ 'x-real-ip': '203.0.113.8' }))).toBe('203.0.113.8')
-    expect(clientKeyOf(h({}))).toBe('unknown')
+  it('keys by the client address only when the request provably came through Cloudflare; everything else shares one bucket', () => {
+    // Nearest public hop is a Cloudflare edge (162.158.0.0/15): its cf-connecting-ip is believed.
+    expect(clientKeyOf(new Headers({ 'x-forwarded-for': '203.0.113.7, 162.158.1.1', 'cf-connecting-ip': '203.0.113.7' }))).toBe('203.0.113.7')
+    // Straight to the origin with made-up headers: not believed, whatever they say.
+    expect(clientKeyOf(new Headers({ 'x-forwarded-for': '198.51.100.20', 'cf-connecting-ip': '203.0.113.99' }))).toBe('unverified')
+    expect(clientKeyOf(new Headers({ 'true-client-ip': '203.0.113.99' }))).toBe('unverified')
+    expect(clientKeyOf(new Headers())).toBe('unverified')
   })
 })

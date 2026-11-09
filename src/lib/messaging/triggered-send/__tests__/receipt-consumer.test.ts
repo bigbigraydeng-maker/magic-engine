@@ -6,6 +6,7 @@ import { readResendReceipt } from '@/lib/messaging/provider-events/resend-receip
 import type { ReceiptPatch, ReceiptRow } from '../receipt'
 import {
   IN_FLIGHT_WINDOW_MS,
+  UNBOUND_LOOKBACK_MS,
   applyReceipt,
   identifyLetter,
   unsubscribeTokensIn,
@@ -56,16 +57,16 @@ function fakeStore(rows: ReceiptRow[], opts: { updateResults?: UpdateResult[]; u
       const r = ledger.get(id)
       return r === undefined ? null : { ...r }
     },
-    async findPendingByAddress(fingerprints, sinceIso) {
+    async findUnboundByAddress(fingerprints, sinceIso) {
       return [...ledger.values()]
         .filter(
           (r) =>
             r.dedupeScope === 'lifetime' &&
-            r.status === 'pending' &&
             r.providerMessageId === null &&
             r.toAddressSha256 !== null &&
             fingerprints.includes(r.toAddressSha256) &&
-            (r.firstAttemptAt ?? '') >= sinceIso,
+            (r.firstAttemptAt ?? '') >= sinceIso &&
+            (r.status === 'pending' || r.status === 'unknown_outcome' || (r.status === 'failed' && r.reasonCode === 'not_sent_confirmed')),
         )
         .map((r) => ({ ...r }))
     },
@@ -161,11 +162,12 @@ describe('applyReceipt: only an exactly named letter is ever touched', () => {
     expect(f.updates[0].patch).toMatchObject({ provider_message_id: 'em_1', sent_at: '2026-11-10T01:00:00.000Z' })
   })
 
-  it('2. a signed link of ANOTHER client names nothing (the row is not matched)', async () => {
+  it('2. a signed link of ANOTHER client names nothing: the row is not written (only reported, as for any same-address mail)', async () => {
     const f = fakeStore([row({ status: 'unknown_outcome', providerMessageId: null })])
     const r = receipt('email.delivered', { headers: [{ name: 'List-Unsubscribe', value: `<https://me.test/api/u/${token(SEND, OTHER_CLIENT)}>` }] })
-    expect(await applyReceipt(r, f.store, opts())).toEqual({ outcome: 'not_ours' })
+    expect(await applyReceipt(r, f.store, opts())).toEqual({ outcome: 'unmatched', sendId: SEND })
     expect(f.updates).toEqual([])
+    expect(f.ledger.get(SEND)?.providerMessageId).toBeNull()
   })
 
   it('2. a letter that names a row holding a DIFFERENT message id is a conflict: the row is not written', async () => {
@@ -189,14 +191,14 @@ describe('applyReceipt: only an exactly named letter is ever touched', () => {
 })
 
 describe('applyReceipt: never by address (review 2026-11-10)', () => {
-  it('another mail to the same address never binds an unknown-outcome row (regression: misbind probe)', async () => {
+  it('another mail to the same address never binds an unknown-outcome row; it is reported as unmatched (regression: misbind probe)', async () => {
     const f = fakeStore([row({ status: 'unknown_outcome', providerMessageId: null, sentAt: null })])
-    expect(await applyReceipt(receipt('email.delivered', {}, 'em_system_mail'), f.store, opts(true))).toEqual({ outcome: 'not_ours' })
+    expect(await applyReceipt(receipt('email.delivered', {}, 'em_system_mail'), f.store, opts(false))).toEqual({ outcome: 'unmatched', sendId: SEND })
     expect(f.updates).toEqual([])
     expect(f.ledger.get(SEND)?.providerMessageId).toBeNull()
   })
 
-  it('a pending row of that address is waited for, then reported as unmatched — never bound', async () => {
+  it('a fresh pending row of that address is waited for, then reported as unmatched — never bound', async () => {
     const f = fakeStore([row({ status: 'pending', providerMessageId: null, sentAt: null })])
     expect(await applyReceipt(receipt('email.sent', {}, 'em_other'), f.store, opts(false))).toEqual({ outcome: 'in_flight', sendId: SEND })
     expect(await applyReceipt(receipt('email.sent', {}, 'em_other'), f.store, opts(true))).toEqual({ outcome: 'unmatched', sendId: SEND })
@@ -204,10 +206,24 @@ describe('applyReceipt: never by address (review 2026-11-10)', () => {
     expect(f.ledger.get(SEND)?.providerMessageId).toBeNull()
   })
 
-  it('a pending row older than the in-flight window is not waited for', async () => {
+  it('a pending row older than the in-flight window is not waited for: unmatched at once', async () => {
     const stale = new Date(NOW.getTime() - IN_FLIGHT_WINDOW_MS - 1000).toISOString()
     const f = fakeStore([row({ status: 'pending', providerMessageId: null, firstAttemptAt: stale })])
-    expect(await applyReceipt(receipt('email.sent', {}, 'em_other'), f.store, opts())).toEqual({ outcome: 'not_ours' })
+    expect(await applyReceipt(receipt('email.sent', {}, 'em_other'), f.store, opts(false))).toEqual({ outcome: 'unmatched', sendId: SEND })
+  })
+
+  it('a complaint to the address of an unknown-outcome row is reported (unmatched), and writes nothing it cannot prove', async () => {
+    const f = fakeStore([row({ status: 'unknown_outcome', providerMessageId: null })])
+    expect(await applyReceipt(receipt('email.complained', {}, 'em_untagged'), f.store, opts(true))).toEqual({ outcome: 'unmatched', sendId: SEND })
+    expect(f.unsubscribes).toEqual([])
+  })
+
+  it('rows older than the look-back, or that already have an id, make it "not ours"', async () => {
+    const old = new Date(NOW.getTime() - UNBOUND_LOOKBACK_MS - 1000).toISOString()
+    const f = fakeStore([row({ status: 'unknown_outcome', providerMessageId: null, firstAttemptAt: old })])
+    expect(await applyReceipt(receipt('email.delivered', {}, 'em_other'), f.store, opts(true))).toEqual({ outcome: 'not_ours' })
+    const bound = fakeStore([row({ providerMessageId: 'em_mine' })])
+    expect(await applyReceipt(receipt('email.delivered', {}, 'em_other'), bound.store, opts(true))).toEqual({ outcome: 'not_ours' })
   })
 
   it('once the sender recorded its id, the waited-for receipt applies by message id', async () => {

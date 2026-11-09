@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { InsertOutcome, ProviderEventInput, ProviderEventStore } from './types'
-import type { StoredProviderEvent } from './resend-receipt'
+import type { StoredProviderEvent } from './receipt-types'
 
 // 基于 Supabase 的 ProviderEventStore 实现：把 provider webhook 事件写入 provider_webhook_events 表。
 export const supabaseProviderEventStore: ProviderEventStore = {
