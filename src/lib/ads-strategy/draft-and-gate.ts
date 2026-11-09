@@ -34,6 +34,7 @@ import {
   withoutInheritedSpend,
 } from './ad-draft'
 import { draftNotYetBuildable } from './ad-draft-expansion'
+import { alignPartnerDraft, isCleanPartnerRefusal, partnerPageOpenBlocked, PARTNER_PAGE_OPEN_REFUSAL } from './partner-page'
 import { reelsLeadOpenBlocked } from './reels-lead'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
@@ -248,11 +249,37 @@ export async function createDraftForApproval(
     return failedOutcome(deps, clean, { ...base, error })
   }
 
-  const prepared = await draftForBuild(input, deps)
+  const aligned = await alignPartnerDraft(input, (clientId) => readPartnerClient(deps.supabase, clientId))
+  if (!aligned.ok) return failedOutcome(deps, clean, { ...base, error: aligned.reason })
+
+  const prepared = await draftForBuild(aligned.draft, deps)
   if (!prepared.ok) return failedOutcome(deps, clean, { ...base, error: prepared.error })
   const draft = prepared.draft
   base.summary = describeDraft(draft)
   return publishPrepared(draft, deps, base, startedAt, now)
+}
+
+async function readPartnerClient(
+  sb: SupabaseClient,
+  clientId: string,
+): Promise<{ ok: true; ownPageId: string; leadsConfig: unknown } | { ok: false }> {
+  try {
+    const { data, error } = await sb
+      .from('clients')
+      .select('facebook_page_id, leads_config')
+      .eq('id', clientId)
+      .maybeSingle()
+    if (error || !data) return { ok: false }
+    const own = (data as { facebook_page_id?: unknown }).facebook_page_id
+    if (typeof own !== 'string' || own.trim() === '') return { ok: false }
+    return {
+      ok: true,
+      ownPageId: own.trim(),
+      leadsConfig: (data as { leads_config?: unknown }).leads_config,
+    }
+  } catch {
+    return { ok: false }
+  }
 }
 
 async function publishPrepared(
@@ -277,7 +304,9 @@ async function publishPrepared(
     draft, deps.adAccountId, deps.accessToken, publishBudgetFor(draft, startedAt, now),
   )
   if (!published.ok) {
-    const error = `建到「${published.step}」这步失败：${published.error}`
+    const error = isCleanPartnerRefusal(published.error)
+      ? published.error
+      : `建到「${published.step}」这步失败：${published.error}`
     const orphans = published.orphans.length > 0 ? published.orphans : undefined
     return failedOutcome(deps, draft, { ...base, error, orphans })
   }
@@ -624,6 +653,9 @@ export async function approveDraft(
   }
   if (reelsLeadOpenBlocked(p.draft.kind, entry)) {
     return { ok: false, error: '短视频留资只能从开投确认卡打开。这里没有开。' }
+  }
+  if (partnerPageOpenBlocked(p.draft.kind, entry)) {
+    return { ok: false, error: PARTNER_PAGE_OPEN_REFUSAL }
   }
   if (p.status !== 'awaiting_approval') {
     return { ok: false, error: `这条现在是「${p.status}」，只有等待批准的才能开` }

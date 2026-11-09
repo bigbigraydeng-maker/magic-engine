@@ -17,6 +17,7 @@ import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { createKernel } from '@/lib/kernel'
 import { publicError } from '@/lib/confirmation-card/http'
 import type { AdDraft } from '@/lib/ads-strategy/ad-draft'
+import { draftStampedWithIdentity } from '@/lib/ads-strategy/partner-page'
 import { askerFromAccess } from '@/lib/ads-strategy/card-asker'
 import { askDirectPausedDraft } from '@/lib/ads-strategy/direct-draft-card'
 import { loadPausedDraftContext } from '@/lib/ads-strategy/paused-draft-context'
@@ -44,7 +45,7 @@ export async function POST(
 
   const { data: client } = await supabaseAdmin
     .from('clients')
-    .select('meta_ad_account_id, facebook_page_id, country, industry')
+    .select('meta_ad_account_id, facebook_page_id, country, industry, leads_config')
     .eq('id', clientId)
     .maybeSingle()
 
@@ -73,11 +74,15 @@ export async function POST(
       { status: 424 },
     )
   }
-  const draft: AdDraft = {
-    ...(body as AdDraft),
-    clientId,
-    pageId: registeredPageId,
+  const stamped = draftStampedWithIdentity(
+    { ...(body as AdDraft), clientId },
+    registeredPageId,
+    (client as { leads_config?: unknown }).leads_config,
+  )
+  if (!stamped.ok) {
+    return NextResponse.json({ error: stamped.reason, wroteMeta: false }, { status: 409 })
   }
+  const draft = stamped.draft
 
   try {
     const asked = await askDirectPausedDraft({

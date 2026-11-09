@@ -59,6 +59,16 @@ describe('go-live facts', () => {
     ])
   })
 
+  it('lets a paused partnership draft through the same go-live card', () => {
+    const facts = buildGoLiveFacts({
+      draftId: 'draft-partner',
+      view: view({ kind: 'partner_page' }),
+      gates: greenGates(),
+      boundLabels: [],
+    })
+    expect(facts.hardChecks.some((check) => check.label === '广告类型')).toBe(false)
+  })
+
   it('lets a paused reels lead draft through the same go-live card', () => {
     const facts = buildGoLiveFacts({
       draftId: 'draft-reels',
