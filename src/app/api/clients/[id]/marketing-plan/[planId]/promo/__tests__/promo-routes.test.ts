@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   loadClientPrescription: vi.fn(),
   loadOptions: vi.fn(),
   liveAds: vi.fn(),
+  liveLink: vi.fn(),
   dispatch: vi.fn(),
   plan: null as Record<string, unknown> | null,
   updates: [] as Record<string, unknown>[],
@@ -37,6 +38,7 @@ vi.mock('@/lib/marketing-plan/promo/facts', async () => {
 })
 vi.mock('@/lib/marketing-plan/promo/options', () => ({ loadPromoOptions: m.loadOptions }))
 vi.mock('@/lib/marketing-plan/promo/live-ads', () => ({ loadLiveAds: m.liveAds }))
+vi.mock('@/lib/marketing-plan/promo/live-ad-link-load', () => ({ loadLiveAdLink: m.liveLink }))
 vi.mock('@/lib/supabase', () => {
   const chain = (): Record<string, unknown> => {
     const c: Record<string, unknown> = {}
@@ -209,28 +211,35 @@ describe('PUT promo — 保存时服务端校验', () => {
 
 describe('GET promo — 在跑广告提示只给内部账号', () => {
   beforeEach(() => {
+    m.liveAds.mockClear()
+    m.liveLink.mockClear()
     m.liveAds.mockResolvedValue({ ok: true, live_adsets: 1, spending_adsets: 1, by_account: [], currency: 'NZD', as_of: null, snapshot_age_hours: 0 })
+    m.liveLink.mockResolvedValue({ lines: ['对上关系'] })
   })
-  it('内部账号（admin）：草稿计划返回 live_ads', async () => {
+  it('内部账号（admin）：草稿计划返回 live_ads 和对上关系', async () => {
     m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { email: 'fde@example.com' } })
     const json = await (await GET(req(null, 'GET'), { params: P })).json()
     expect(json.live_ads_visible).toBe(true)
     expect(json.live_ads.ok).toBe(true)
     expect(m.liveAds).toHaveBeenCalledWith('client-1')
+    expect(json.live_link.lines).toEqual(['对上关系'])
   })
   it('付费客户账号：不读也不返回 live_ads', async () => {
     m.access.mockResolvedValue({ ok: true, tier: 'paid_client', user: { email: 'boss@client.example' } })
     const json = await (await GET(req(null, 'GET'), { params: P })).json()
     expect(json.live_ads_visible).toBe(false)
     expect(json.live_ads).toBeNull()
+    expect(json.live_link).toBeNull()
     expect(m.liveAds).not.toHaveBeenCalled()
+    expect(m.liveLink).not.toHaveBeenCalled()
   })
-  it('已批准的计划：内部账号也读开投回执', async () => {
+  it('已批准的计划：内部账号也读开投回执和对上关系', async () => {
     m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { email: 'fde@example.com' } })
     m.plan = planWith(undefined, { status: 'approved' })
     const json = await (await GET(req(null, 'GET'), { params: P })).json()
     expect(json.live_ads.ok).toBe(true)
     expect(m.liveAds).toHaveBeenCalledWith('client-1')
+    expect(m.liveLink).toHaveBeenCalledWith('client-1')
   })
 })
 

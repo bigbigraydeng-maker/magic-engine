@@ -44,6 +44,7 @@ export function PromoPlanClient() {
   const [board, setBoard] = useState<PromoBoard | null>(null)
   const [options, setOptions] = useState<PromoOptions | null>(null)
   const [liveAds, setLiveAds] = useState<LiveAdsFact | null>(null)
+  const [liveLink, setLiveLink] = useState<string[] | null>(null)
   const [liveAdsVisible, setLiveAdsVisible] = useState(false)
   const [prescription, setPrescription] = useState<GoalPrescriptionView | null>(null)
   const [loading, setLoading] = useState(true)
@@ -76,6 +77,7 @@ export function PromoPlanClient() {
       board?: PromoBoard
       options?: PromoOptions
       live_ads?: LiveAdsFact | null
+      live_link?: { lines: string[] } | null
       live_ads_visible?: boolean
       prescription?: GoalPrescriptionView | null
       error?: string
@@ -84,6 +86,7 @@ export function PromoPlanClient() {
     setBoard(json.board)
     setOptions(json.options ?? null)
     setLiveAds(json.live_ads ?? null)
+    setLiveLink(json.live_link?.lines ?? null)
     setLiveAdsVisible(json.live_ads_visible === true)
     setPrescription(json.prescription ?? null)
   }, [base])
@@ -207,7 +210,7 @@ export function PromoPlanClient() {
 
         {board && selected && (
           <>
-            <Headline board={board} plan={selected} liveAds={liveAdsVisible ? liveAds : null} liveAdsVisible={liveAdsVisible} clientId={clientId} />
+            <Headline board={board} plan={selected} liveAds={liveAdsVisible ? liveAds : null} liveLink={liveAdsVisible ? liveLink : null} liveAdsVisible={liveAdsVisible} clientId={clientId} />
             {board.approval?.deferred_blockers && board.approval.deferred_blockers.length > 0 && (
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
                 <p className="text-sm font-semibold text-yellow-800">这些阶段还没过关，开始前必须补齐</p>
@@ -296,8 +299,8 @@ export function PromoPlanClient() {
   )
 }
 
-function Headline({ board, plan, liveAds, liveAdsVisible, clientId }: {
-  board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; liveAdsVisible: boolean; clientId: string
+function Headline({ board, plan, liveAds, liveLink, liveAdsVisible, clientId }: {
+  board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; liveLink: string[] | null; liveAdsVisible: boolean; clientId: string
 }) {
   const draft = plan.status === 'draft'
   const missing = describeUnrecordedAdsets(liveAds)
@@ -314,6 +317,11 @@ function Headline({ board, plan, liveAds, liveAdsVisible, clientId }: {
       <p className="text-lg font-bold text-gray-900">{text}</p>
       <p className="text-sm text-gray-800 mt-2">{dailyTotalCapSentence(plan.plan_data)}</p>
       {liveAdsVisible && <LiveAdsNotice fact={liveAds} missing={missing} message={live} clientId={clientId} />}
+      {liveAdsVisible && liveLink && liveLink.length > 0 && (
+        <ul className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 space-y-1">
+          {liveLink.map((line, index) => <li key={`${index}-${line}`}>{line}</li>)}
+        </ul>
+      )}
       {blind && <p className="text-xs text-gray-600 mt-1">“看不清”不是“正常”：先把上面写的缺项补上，再看对账。</p>}
       {board.today && !board.timezone_known && (
         <p className="text-xs text-yellow-800 mt-1">广告账户的时区还没确定，日期暂按世界标准时间算，花费对账会显示“看不清”。</p>

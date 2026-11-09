@@ -16,6 +16,7 @@ import { loadGoal, loadLatestClientPrescription, loadLatestGoalPrescription, loa
 import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
 import { planLinkedGoalId } from '@/lib/marketing-plan/promo/plan-pick'
 import { loadLiveAds } from '@/lib/marketing-plan/promo/live-ads'
+import { loadLiveAdLink } from '@/lib/marketing-plan/promo/live-ad-link-load'
 import { loadPromoOptions } from '@/lib/marketing-plan/promo/options'
 import { dailyTotalCapCents } from '@/lib/marketing-plan/promo/daily-total-cap'
 import { allAdsSteps, type PromoSpec, type PromoValidationIssue } from '@/lib/marketing-plan/promo/spec'
@@ -56,18 +57,20 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     const goalId = planLinkedGoalId(plan)
     // 下拉选项只有草稿填表才用；读不到时页面照常显示（选项为空，表格里会提示）
     const internal = access.tier === 'admin'
-    const [board, options, liveAds, prescription] = await Promise.all([
+    const [board, options, liveAds, liveLink, prescription] = await Promise.all([
       // 页面上的「批准」按钮是否可点由这份清单决定，所以预算门存档过期 / 没过时要现读（不然晚上永远灰、点不了）
       buildPromoBoard(plan, new Date(), { liveBudget: 'if_needed' }),
       plan.status === 'draft' ? loadPromoOptions(ctx.params.id).catch(() => null) : Promise.resolve(null),
       // 管理员才读（付费客户账号不给）：草稿和已批准都读，用来点名没有开投回执的广告组。
       // 数据来自快照表和日花费表，不调用 Meta。读不到时回 ok:false。
       internal ? loadLiveAds(ctx.params.id) : Promise.resolve(null),
+      // 管理员在草稿和已批准计划上都读对上关系。只读本库回执，不调用 Meta，不改广告和预算。
+      internal ? loadLiveAdLink(ctx.params.id) : Promise.resolve(null),
       // 推广表单或空白草稿上的目标 → 该目标最新一版。都没有 → 客户最近一份还在用的处方。
       loadPlanPrescription(ctx.params.id, goalId),
     ])
     return NextResponse.json({
-      success: true, board, options, live_ads: liveAds, live_ads_visible: internal, prescription,
+      success: true, board, options, live_ads: liveAds, live_link: liveLink, live_ads_visible: internal, prescription,
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
