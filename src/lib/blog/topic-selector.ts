@@ -16,6 +16,7 @@
 import { supabaseAdmin } from '../supabase'
 import { bulkKeywordVolume } from '../dataforseo/labs'
 import { extractKeywordCandidates } from './keyword-candidates'
+import { isRunConclusive } from '../ai-tracker/run-conclusive'
 import type { BlogOpportunity, BlogMode } from '@/types/magic-engine'
 
 // ─── Internal interfaces ──────────────────────────────────────────────────────
@@ -82,15 +83,18 @@ export async function getWeakSpotOpportunities(
 
   // ── Step 2: Load recent runs for all queries ──────────────────────────────
 
-  const { data: runs, error: rErr } = await supabaseAdmin
+  const { data: rawRuns, error: rErr } = await supabaseAdmin
     .from('ai_visibility_runs')
-    .select('query_id, ai_engine, client_brand_rank, ran_at')
+    .select('query_id, ai_engine, client_brand_rank, ran_at, error_message, parse_error_message')
     .eq('client_id', clientId)
     .in('query_id', queryIds)
     .order('ran_at', { ascending: false })
     .limit(queryIds.length * lookback)
 
-  if (rErr || !runs) return []
+  if (rErr || !rawRuns) return []
+
+  // Exclude failed probes — a failed run with null rank is not evidence of weakness
+  const runs = rawRuns.filter(r => isRunConclusive(r))
 
   // ── Step 3: Aggregate per-query run summaries ─────────────────────────────
 
