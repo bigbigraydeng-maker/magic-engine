@@ -9,6 +9,8 @@
  *    距上次变动几小时、在不在学习期、在不在实验里 —— 全部从
  *    `ad_entity_snapshots` / `ad_strategy_configs` 读。让被约束者自报约束
  *    等于没有约束。
+ *    加预算时的客户每天总上限例外：不读 `ad_strategy_configs`，也不把各系列日预算
+ *    加总当成上限。`card_prescription_id` 只指认已批准的那条链，金额从那份计划读。
  *
  * 🔴 **读不到一律返回 null / unavailable，交给判据拒绝。**
  *    这里不做「读不到就当没有」的兜底：那会让一次读失败等于一次静默放行。
@@ -28,6 +30,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { EnvelopeFactsResolver } from '@/lib/kernel/deps'
 import type { EnvelopeChangeKind, EnvelopeFacts, EnvelopeRequest } from '@/lib/kernel/autonomy-envelope'
 import type { CapabilityImplementation } from '@/lib/kernel/types'
+import { readApprovedDailyTotalCap, readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { readCircuitState } from '@/lib/ads-strategy/circuit-state'
 import { DELIVERING_STATUSES } from '@/lib/ads-strategy/portfolio/diagnostics/context'
 
@@ -74,7 +77,7 @@ const SNAP_COLUMNS =
  *    统一到诊断层的一份，改只改一处，两边不会分家。
  */
 const DELIVERING = DELIVERING_STATUSES
-const CLIENT_BUDGET_FACT_FRESH_MS = 24 * 60 * 60 * 1000
+export const CLIENT_BUDGET_FACT_FRESH_MS = 24 * 60 * 60 * 1000
 /**
  * 快照写入程序每轮只写「新出现 / 变了 / 今天还没记 / 消失了」的行（`selectRowsToWrite`），
  * 一天里第一轮之后的定时轮常常一行都不写。所以核算客户预算不能只读最新一轮写下的行，
@@ -93,12 +96,21 @@ interface ClientBudgetRollup {
   totalCents: number
   accountTotals: Map<string, number>
   capCents: number
+  accountCapCents: number
+  roundAt: string
+  entityMinor: Map<string, number | null>
+  countedLive: Set<string>
+}
+
+export function budgetEntityKey(accountId: string, level: string, entityId: string): string {
+  return `${accountId}|${level}|${entityId}`
 }
 
 /**
  * 上调预算前，按客户全部已登记账户重新核算预算配置。
  * 所有账户都必须有近 24 小时内完整的账户/系列/广告组抓取回执；快照只用于读
  * 当前设置，任一账户、币种、预算或分页无法证明完整时都拒绝上调。
+ * `clientCapCents` 必须是已批准计划上的每天总上限，不是各系列日预算的合计。
  */
 async function loadClientBudgetRollup(
   sb: SupabaseClient,
@@ -227,6 +239,7 @@ async function loadClientBudgetRollup(
 
   const currencies = new Set<string>()
   const accountTotals = new Map<string, number>()
+  const countedLive = new Set<string>()
   for (const accountId of accountIds) {
     const accountRows = [...latest.values()].filter(r => r.ad_account_id === accountId)
     const accountSnap = accountRows.find(r => r.level === 'account')
@@ -252,6 +265,7 @@ async function loadClientBudgetRollup(
           return unavailable(`投放中的广告系列 ${campaign.entity_id} 预算或币种无法确认`)
         }
         total += amount
+        countedLive.add(budgetEntityKey(accountId, 'campaign', campaign.entity_id))
       } else if (campaign.budget_level !== 'abo') {
         return unavailable(`投放中的广告系列 ${campaign.entity_id} 预算层级无法确认`)
       }
@@ -264,6 +278,7 @@ async function loadClientBudgetRollup(
         return unavailable(`投放中的广告组 ${adset.entity_id} 预算或币种无法确认`)
       }
       total += amount
+      countedLive.add(budgetEntityKey(accountId, 'adset', adset.entity_id))
     }
     if (!Number.isSafeInteger(total)) return unavailable(`广告账户 ${accountId} 预算合计溢出`)
     const cap = perAccountCaps[accountIds.indexOf(accountId)] as number
@@ -284,7 +299,75 @@ async function loadClientBudgetRollup(
     return unavailable('目标预算与本次授权读取的基线不一致')
   }
 
-  return { totalCents, accountTotals, capCents: clientCapCents }
+  const accountCapCents = perAccountCaps[accountIds.indexOf(targetAccountId)] as number
+  const entityMinor = new Map<string, number | null>()
+  for (const row of latest.values()) {
+    if (row.capture_reason === 'disappeared') continue
+    const amount = row.daily_budget_minor
+    const minor = typeof amount === 'number' && Number.isSafeInteger(amount) && amount >= 0 ? amount : null
+    entityMinor.set(budgetEntityKey(row.ad_account_id, row.level, row.entity_id), minor)
+  }
+  return {
+    totalCents, accountTotals, capCents: clientCapCents, accountCapCents, roundAt,
+    entityMinor, countedLive,
+  }
+}
+
+export interface KernelPreBudget {
+  readonly accountLiveCents: number
+  readonly accountCapCents: number
+  readonly clientLiveCents: number
+  readonly clientCapCents: number
+  readonly roundAt: string
+  readonly entityMinor: ReadonlyMap<string, number | null>
+  readonly countedLive: ReadonlySet<string>
+}
+
+/** Same cross-account snapshot the pre-provider envelope already requires. */
+export async function readKernelPreBudget(
+  sb: SupabaseClient,
+  clientId: string,
+  accountId: string,
+  level: 'adset' | 'campaign',
+  entityId: string,
+  beforeCents: number,
+  now: Date,
+  clientCapCents: number,
+): Promise<{ ok: true; budget: KernelPreBudget } | { ok: false; reason: string }> {
+  const rollup = await loadClientBudgetRollup(
+    sb, clientId, accountId, level, entityId, beforeCents, clientCapCents, now, 'pre_provider',
+  )
+  if ('unavailable' in rollup) return { ok: false, reason: quotaReason(rollup.unavailable) }
+  const accountLive = liveTotal(rollup.accountTotals, accountId)
+  if (accountLive === undefined) return { ok: false, reason: '现在的每日预算合计读不到，没有改。' }
+  return {
+    ok: true,
+    budget: {
+      accountLiveCents: accountLive,
+      accountCapCents: rollup.accountCapCents,
+      clientLiveCents: rollup.totalCents,
+      clientCapCents: rollup.capCents,
+      roundAt: rollup.roundAt,
+      entityMinor: rollup.entityMinor,
+      countedLive: rollup.countedLive,
+    },
+  }
+}
+
+function liveTotal(totals: ReadonlyMap<string, number>, accountId: string): number | undefined {
+  const digits = accountId.replace(/^act_/i, '')
+  for (const id of [accountId, digits, `act_${digits}`]) {
+    if (totals.has(id)) return totals.get(id)
+  }
+  return undefined
+}
+
+export function quotaReason(raw: string): string {
+  if (/过期|时间无效|超过一天/.test(raw)) return '跨账户预算快照已经过期，先刷新再改。'
+  if (/币种/.test(raw)) return '广告账户的币种读不到或对不上，没有改。'
+  if (/未配置|无效|没有有效|不在客户|读不到目标/.test(raw)) return '每日上限读不到，没有改。'
+  if (/已超过/.test(raw)) return '现在的每日预算合计已经超过上限，没有改。'
+  return '现在的每日预算合计读不到，没有改。'
 }
 
 function studyCount(raw: unknown): number {
@@ -674,28 +757,11 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
       }
     }
 
-    const { data: cfg, error: cfgErr } = await deps.sb
-      .from('ad_strategy_configs')
-      .select('daily_budget_cap_cents')
-      .eq('client_id', clientId)
-      .maybeSingle<{ daily_budget_cap_cents: number | null }>()
-    if (cfgErr) return cantRead(`读客户广告配置失败：${cfgErr.message}`)
+    const planTotal = await readClientDailyTotalCap(deps.sb, clientId)
 
     /**
-     * 🔴 **日上限改成按账户取**（v2.1 §3.9 / §11.11，本轮交付）。
-     *
-     * 上面 `cfg.daily_budget_cap_cents` 是**客户级**的总闸（配置时校验
-     * `sum(账户上限) ≤ 客户总闸`，见 PATCH 路由）；单账户动作要比的是
-     * **这个账户自己**的日上限，不是客户总闸——CTS 两个账户各花各的，
-     * 拿总闸去比单账户等于把另一账户的额度也算给了它，会晚很久才拦下超支。
-     *
-     * 判据（migration `20260927000003` 的表注释原文）：
-     *   · 这个账户有自己的上限 → 用它
-     *   · 没有，但客户绑了 **≥2 个**账户 → `unavailable('facts:账户级日上限未配置')`——
-     *     多账户下不配就动，等于没有账户级保护，必须拒
-     *   · 没有，且客户就这一个账户（或用老的 `clients.meta_ad_account_id` 单账户
-     *     字段，压根没在 `client_meta_ad_accounts` 建过行）→ 回落客户级总闸——
-     *     单账户时总闸跟账户上限本来就是同一个数，不强制每个老客户都去面板重填一遍
+     * 日上限按账户取。单账户没填自己的上限时，回落已批准计划上的每天总上限。
+     * 计划没填就是缺失，不回落旧的客户总闸。多账户缺账户上限则拒绝。
      */
     const { data: accountRows, error: accountRowsErr } = await deps.sb
       .from('client_meta_ad_accounts')
@@ -715,7 +781,7 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     } else if (registeredAccounts.length >= 2) {
       return unavailable('facts:账户级日上限未配置')
     } else {
-      dailyCapCents = typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null
+      dailyCapCents = planTotal.state === 'set' ? planTotal.cents : null
     }
 
     // 🔴 **冷却期单独查，不受上面那个 4000 行账户窗口限制**（#1994 缺陷 2，本轮修）。
@@ -795,6 +861,8 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
     let clientDailyTotalBeforeCents: number | null = null
     let clientDailyCapCents: number | null = null
     if (actionKey === 'ads.scale_unit_budget' && afterRawIsIncrease(afterCents, beforeCents)) {
+      const planCap = await readApprovedDailyTotalCap(deps.sb, clientId, str('card_prescription_id') ?? '')
+      if (!planCap.ok) return unavailable(`facts:${planCap.reason}`)
       const rollup = await loadClientBudgetRollup(
         deps.sb,
         clientId,
@@ -802,7 +870,7 @@ export function createAdsEnvelopeFactsResolver(deps: AdsEnvelopeFactsDeps): Enve
         str('campaign_id') ? 'campaign' : 'adset',
         subject.entityId,
         beforeCents ?? Number.NaN,
-        typeof cfg?.daily_budget_cap_cents === 'number' ? cfg.daily_budget_cap_cents : null,
+        planCap.cents,
         now(),
         at,
       )

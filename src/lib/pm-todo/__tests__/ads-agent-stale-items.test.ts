@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { loadClientCapFacts } from '@/lib/ads-strategy/circuit-cap-facts'
 import {
   pushAdsAgentStaleItems,
   pushAdsDailySpendOverCapNoticeItems,
@@ -59,7 +60,28 @@ describe('pushAdsAgentStaleItems', () => {
 })
 
 describe('pushAdsDailySpendOverCapNoticeItems', () => {
-  it('skips when no cap', async () => {
+  it('计划没填每天总上限时，写成一条去广告计划补上的待办', async () => {
+    vi.mocked(loadClientCapFacts).mockResolvedValue({
+      clientReferenceDate: '2026-11-07',
+      accounts: [],
+      capCents: null,
+      configSource: 'row',
+    })
+    const items: Parameters<typeof pushAdsDailySpendOverCapNoticeItems>[1] = []
+    await pushAdsDailySpendOverCapNoticeItems({} as never, items, () => 'n')
+    expect(items).toHaveLength(1)
+    expect(items[0]?.kind).toBe('ads_plan_daily_cap_missing')
+    expect(items[0]?.what).toContain('广告计划')
+    expect(items[0]?.href).toContain('/promo-plan')
+  })
+
+  it('计划读不出来时不发这条待办', async () => {
+    vi.mocked(loadClientCapFacts).mockResolvedValue({
+      clientReferenceDate: '2026-11-07',
+      accounts: [],
+      capCents: null,
+      configSource: 'fallback',
+    })
     const items: Parameters<typeof pushAdsDailySpendOverCapNoticeItems>[1] = []
     await pushAdsDailySpendOverCapNoticeItems({} as never, items, () => 'n')
     expect(items).toHaveLength(0)

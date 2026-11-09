@@ -66,6 +66,7 @@ const ADS_PAUSE_UNIT: ActionDefinition<'ads.pause_unit'> = {
       cycle_date: { type: 'string' },
       ad_account_id: { type: 'string' },
       adset_id: { type: 'string' },
+      ...CARD_LOCK_FIELDS,
     },
     additionalProperties: false,
   },

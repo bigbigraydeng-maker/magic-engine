@@ -19,6 +19,16 @@ import { dualWindowEnabled } from './dual-window-gate'
 import { isNotEvaluable } from './execution-evidence'
 import { getMetricPolarity } from '../polarity'
 import {
+  observationDue,
+  pairSpans,
+  readExecutedReview,
+  windowSpanOf,
+  type ExecutedReview,
+  type PairMark,
+  type ReviewAction,
+} from './executed-review'
+import { asObjectDay, judgeObjectWindow, objectWindowDates, type ObjectDay } from './object-window'
+import {
   OUTCOME_CONFLICT_TARGET,
   OUTCOME_EVALUATOR,
   foreignMetricPrefixes,
@@ -40,6 +50,8 @@ export interface AttributionJobOptions {
   windowDays?: number
   /** Restrict to a single client (e.g. for manual reruns). */
   clientId?: string
+  /** Clock for "is this card's own window due". Defaults to the current time. */
+  now?: Date
 }
 
 export interface AttributionJobResult {
@@ -154,6 +166,125 @@ async function loadAttributableActions(
   })
 }
 
+function asReviewAction(action: ActionRow): ReviewAction {
+  return {
+    id: action.id,
+    client_id: action.client_id,
+    action_type: action.action_type,
+    payload: action.payload,
+    expected_metric: action.expected_metric,
+    executed_at: action.executed_at,
+  }
+}
+
+/**
+ * A budget or pause card keeps its own window. The job default is not used.
+ * After that window ends, the same ad set's own daily numbers are compared.
+ * A failed save is returned as failed so the next run retries it and the
+ * cron's failure count reaches the existing to-do. It is not logged and dropped.
+ */
+async function saveDueReview(
+  action: ActionRow,
+  review: ExecutedReview,
+  pair: PairMark,
+  now: Date,
+): Promise<ActionOutcome> {
+  const reconcileErrors = await reconcileLegacyWindows(action.id, review.metric)
+  if (!observationDue(review.executedAt, review.observationWindowDays, now)) {
+    return { kind: 'skipped', reconcileErrors }
+  }
+  const rows = await loadObjectDays(action.client_id, review.objectId, review.executedAt, review.observationWindowDays)
+  if (rows === 'error') return { kind: 'failed', message: 'object window read failed' }
+  const judged = judgeObjectWindow({
+    metric: review.metric,
+    direction: review.direction,
+    expectedDelta: action.expected_delta,
+    pair,
+    rows,
+    executedAt: review.executedAt,
+    windowDays: review.observationWindowDays,
+    ...caseFacts(action.payload),
+    verdictOf: computeOutcomeVerdict,
+  })
+  try {
+    await upsertOutcome({
+      action_id: action.id,
+      client_id: action.client_id,
+      metric_key: review.metric,
+      baseline: judged.baseline,
+      after_value: judged.after,
+      delta: judged.delta,
+      delta_pct: judged.deltaPct,
+      confidence: judged.confidence,
+      verdict: judged.storedVerdict,
+      window_days: review.observationWindowDays,
+      evaluator_key: OUTCOME_EVALUATOR.FLYWHEEL_METRICS,
+      computed_at: now.toISOString(),
+    })
+    await saveCase(action, judged.case)
+  } catch (err) {
+    return { kind: 'failed', message: err instanceof Error ? err.message : String(err) }
+  }
+  reconcileErrors.push(...await retireExtraWindows(action.id, review.metric, review.observationWindowDays))
+  return { kind: 'written', reconcileErrors }
+}
+
+async function loadObjectDays(
+  clientId: string,
+  objectId: string,
+  executedAt: string,
+  windowDays: number,
+): Promise<ObjectDay[] | 'error'> {
+  const span = objectWindowDates(executedAt, windowDays)
+  if (!span) return 'error'
+  const { data, error } = await supabaseAdmin
+    .from('ad_daily_insights')
+    .select('insight_date, spend, impressions, clicks, leads, messaging_conversations, results')
+    .eq('client_id', clientId)
+    .eq('platform', 'meta')
+    .eq('level', 'adset')
+    .eq('entity_id', objectId)
+    .gte('insight_date', span.from)
+    .lt('insight_date', span.to)
+  if (error) return 'error'
+  return Array.isArray(data) ? data.flatMap((row) => asDay(row)) : []
+}
+
+function asDay(row: unknown): ObjectDay[] {
+  const day = asObjectDay(row)
+  return day ? [day] : []
+}
+
+function caseFacts(payload: Record<string, unknown> | null): {
+  beforeCents: unknown
+  afterCents: unknown
+  beforeStatus: unknown
+  afterStatus: unknown
+  basis: unknown
+} {
+  const order = payload?.order
+  const basis = order && typeof order === 'object' && !Array.isArray(order)
+    ? (order as Record<string, unknown>).basis
+    : null
+  return {
+    beforeCents: payload?.beforeCents,
+    afterCents: payload?.afterCents,
+    beforeStatus: payload?.before,
+    afterStatus: payload?.after,
+    basis,
+  }
+}
+
+async function saveCase(action: ActionRow, reviewCase: { verdict: string; reason: string | null; text: string }): Promise<void> {
+  const payload = { ...(action.payload ?? {}), reviewCase }
+  const { error } = await supabaseAdmin
+    .from('flywheel_actions')
+    .update({ payload })
+    .eq('id', action.id)
+    .eq('client_id', action.client_id)
+  if (error) throw new Error(`case save: ${error.message}`)
+}
+
 function emptyResult(): AttributionJobResult {
   return {
     processed: 0,
@@ -214,7 +345,14 @@ function evaluabilityOf(action: ActionRow) {
 async function attributeOne(
   action: ActionRow,
   windowDays: number,
+  pairs: ReadonlyMap<string, PairMark>,
+  now: Date,
 ): Promise<ActionOutcome> {
+  const review = readExecutedReview(asReviewAction(action))
+  if (review.kind === 'not_executed') return { kind: 'not_evaluable', reconcileErrors: [] }
+  if (review.kind === 'incomplete') return { kind: 'failed', message: review.reason }
+  if (review.kind === 'ready') return saveDueReview(action, review.review, pairs.get(action.id) ?? 'clear', now)
+
   // Not evaluable actions return before any reconcile call, so no stored
   // outcome row is deleted and no to-do is raised for work that never happened.
   if (isNotEvaluable(evaluabilityOf(action))) return { kind: 'not_evaluable', reconcileErrors: [] }
@@ -252,15 +390,20 @@ export async function runAttributionJob(
   options: AttributionJobOptions = {}
 ): Promise<AttributionJobResult> {
   const windowDays = options.windowDays ?? DEFAULT_WINDOW_DAYS
+  const now = options.now ?? new Date()
   const actions = await loadAttributableActions(options)
   if (!actions.length) return emptyResult()
 
   const r = emptyResult()
   const pass2Clients = new Set<string>()
   let notEvaluable = 0
+  const pairs = pairSpans(actions.flatMap((action) => {
+    const span = windowSpanOf(asReviewAction(action))
+    return span ? [span] : []
+  }))
 
   for (const action of actions) {
-    const outcome = await attributeOne(action, windowDays)
+    const outcome = await attributeOne(action, windowDays, pairs, now)
 
     if (outcome.kind === 'failed') {
       console.error(`Attribution job: action ${action.id} — ${outcome.message}`)

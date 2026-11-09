@@ -60,6 +60,9 @@ interface Tables {
   clients: Row | null
   /** 内核自己的执行记录（`hoursSinceOwnLastAction` 读这张表）。默认空数组 = 从没动过。 */
   action_runs: Row[]
+  prescriptions: Row[]
+  goals: Row[]
+  marketing_plans: Row[]
 }
 
 interface Log {
@@ -88,6 +91,7 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
       return {
         select() {
           const f: Record<string, unknown> = {}
+          let one = false
           const chain = {
             eq(col: string, val: unknown) { f[col] = val; return chain },
             in(col: string, vals: unknown[]) { f[col] = vals; return chain },
@@ -103,7 +107,7 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
             },
             range(start: number, end: number) { f.__range = { start, end }; return settle() },
             limit(count: number) { f.__limit = count; return settle() },
-            maybeSingle() { return settle() },
+            maybeSingle() { one = true; return settle() },
             then<T>(r: (v: ReturnType<typeof settle>) => T) { return Promise.resolve(settle()).then(r) },
           }
           const settle = () => {
@@ -167,6 +171,13 @@ function makeSb(t: Tables, log: Log): SupabaseClient {
               if (range) rows = rows.slice(range.start, range.end + 1)
               if (typeof f.__limit === 'number') rows = rows.slice(0, f.__limit)
               return { data: rows, error: null }
+            }
+            if (key === 'prescriptions' || key === 'goals' || key === 'marketing_plans') {
+              let rows = t[key]
+              if (typeof f.id === 'string') rows = rows.filter(r => r.id === f.id)
+              if (typeof f.client_id === 'string') rows = rows.filter(r => r.client_id === f.client_id)
+              if (typeof f.status === 'string') rows = rows.filter(r => r.status === f.status)
+              return { data: one ? (rows[0] ?? null) : rows, error: null }
             }
             if (key === 'client_meta_ad_accounts') {
               // 真过滤 client_id —— 判据要在「这个账户有没有自己的行」和
@@ -240,6 +251,25 @@ const withRollback: Readonly<Record<string, CapabilityImplementation>> = {
   'ads.scale_unit_budget': { actionKey: 'ads.scale_unit_budget', version: 1, steps: {}, rollback: async () => ({ ok: true, rollbackKind: 'noop', detail: {} }) } as unknown as CapabilityImplementation,
 }
 
+function approvedPlan(cents: number | null): Row {
+  const promo: Row = {
+    phases: [{
+      steps: [{ kind: 'ads_campaign', settings: { daily_budget_cents: 9_999_999 } }],
+    }],
+  }
+  if (cents !== null) promo.daily_total_cap_cents = cents
+  return {
+    id: 'plan-cap',
+    client_id: CLIENT,
+    status: 'approved',
+    plan_data: { promo },
+    generation_meta: {
+      from_prescription: { prescription_id: 'rx-cap', version: 1 },
+      blank_draft: { goal_id: 'goal-cap' },
+    },
+  }
+}
+
 function resolve(
   t: Partial<Tables>,
   log: Log,
@@ -257,6 +287,12 @@ function resolve(
     ad_snapshot_captures: [],
     clients: null,
     action_runs: [],
+    prescriptions: [{
+      id: 'rx-cap', client_id: CLIENT, status: 'approved', version: 1,
+      goal_id: 'goal-cap', approved_at: '2026-11-02T00:00:00.000Z',
+    }],
+    goals: [{ id: 'goal-cap', client_id: CLIENT, status: 'active' }],
+    marketing_plans: [approvedPlan(10_000)],
     ...t,
   }
   const resolver = createAdsEnvelopeFactsResolver({
@@ -286,7 +322,10 @@ describe('加预算客户级安全事实', () => {
     client_id: CLIENT, ad_account_id: id, level, captured_at: new Date(NOW.getTime() - 60_000).toISOString(), capture_reason: 'scheduled',
     complete: true, skipped_shared: false,
   }))
-  const scaleInput = { ad_account_id: ACCOUNT, adset_id: ADSET, before_cents: 500, after_cents: 550, cycle_date: '2026-09-27' }
+  const scaleInput = {
+    ad_account_id: ACCOUNT, adset_id: ADSET, before_cents: 500, after_cents: 550,
+    cycle_date: '2026-09-27', card_prescription_id: 'rx-cap',
+  }
 
   it('读取客户所有账户并在同币种完整证据下返回总预算与客户上限', async () => {
     const rows = [
@@ -454,6 +493,36 @@ describe('加预算客户级安全事实', () => {
       const rows = [...baseRows(), account(ACCOUNT, 'adset', ADSET, 700, { capture_reason: 'changed', captured_at: later })]
       const r = await resolve(tables(rows), log(), 'authorize', 'ads.scale_unit_budget', { ...scaleInput, before_cents: 700, after_cents: 770 })
       expect(r).toMatchObject({ unavailable: expect.stringContaining('目标预算与本次授权读取的基线不一致') })
+    })
+
+    it('每天总上限认已批准计划，不认旧客户总闸，也不把计划里的系列预算加总', async () => {
+      const r = await resolve({
+        ad_entity_snapshots: [
+          account(ACCOUNT, 'account', ACCOUNT, null),
+          account(ACCOUNT, 'campaign', 'cmp-act_1', null, { budget_level: 'abo' }),
+          account(ACCOUNT, 'adset', ADSET, 500),
+        ],
+        ad_strategy_configs: { daily_budget_cap_cents: 1 },
+        client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 10_000 }],
+        ad_snapshot_captures: completeCaptures(ACCOUNT),
+        marketing_plans: [approvedPlan(10_000)],
+      }, log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ facts: { clientDailyCapCents: 10_000 } })
+    })
+
+    it('计划上没有每天总上限就拒绝上调', async () => {
+      const r = await resolve({
+        ad_entity_snapshots: [
+          account(ACCOUNT, 'account', ACCOUNT, null),
+          account(ACCOUNT, 'campaign', 'cmp-act_1', null, { budget_level: 'abo' }),
+          account(ACCOUNT, 'adset', ADSET, 500),
+        ],
+        ad_strategy_configs: { daily_budget_cap_cents: 10_000 },
+        client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: 10_000 }],
+        ad_snapshot_captures: completeCaptures(ACCOUNT),
+        marketing_plans: [approvedPlan(null)],
+      }, log(), 'authorize', 'ads.scale_unit_budget', scaleInput)
+      expect(r).toMatchObject({ unavailable: expect.stringContaining('每天广告总上限') })
     })
 
     it('目标组的基线跟沿用的行比：用户看到的是 500、快照沿用的是 500 → 放行；是 600 → 拒', async () => {
@@ -791,11 +860,12 @@ describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
     expect(r.facts.dailyCapCents).toBe(5_000)
   })
 
-  it('客户只绑了这一个账户、这个账户没配自己的上限 → 回落客户总闸', async () => {
+  it('客户只绑了这一个账户、这个账户没配自己的上限 → 回落已批准计划，不认旧客户总闸', async () => {
     const r = await resolve(
       {
         ad_entity_snapshots: [snap()],
-        ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        ad_strategy_configs: { daily_budget_cap_cents: 999_999 },
+        marketing_plans: [approvedPlan(8_000)],
         client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null }],
       },
       log(),
@@ -805,11 +875,27 @@ describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
     expect(r.facts.dailyCapCents).toBe(8_000)
   })
 
-  it('客户在 client_meta_ad_accounts 里压根没有行（老单账户客户）→ 回落客户总闸', async () => {
+  it('计划没填每天总上限 → 单账户回落也是缺失，不用旧客户总闸', async () => {
     const r = await resolve(
       {
         ad_entity_snapshots: [snap()],
         ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        marketing_plans: [approvedPlan(null)],
+        client_meta_ad_accounts: [{ client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null }],
+      },
+      log(),
+    )
+    expect('facts' in r).toBe(true)
+    if (!('facts' in r)) return
+    expect(r.facts.dailyCapCents).toBeNull()
+  })
+
+  it('客户在 client_meta_ad_accounts 里压根没有行（老单账户客户）→ 回落已批准计划', async () => {
+    const r = await resolve(
+      {
+        ad_entity_snapshots: [snap()],
+        ad_strategy_configs: { daily_budget_cap_cents: 1 },
+        marketing_plans: [approvedPlan(8_000)],
         client_meta_ad_accounts: [],
       },
       log(),
@@ -857,7 +943,8 @@ describe('日上限改按账户取（v2.1 §3.9，本轮交付）', () => {
     const r = await resolve(
       {
         ad_entity_snapshots: [snap()],
-        ad_strategy_configs: { daily_budget_cap_cents: 8_000 },
+        ad_strategy_configs: { daily_budget_cap_cents: 1 },
+        marketing_plans: [approvedPlan(8_000)],
         client_meta_ad_accounts: [
           { client_id: CLIENT, ad_account_id: ACCOUNT, daily_budget_cap_cents: null },
           { client_id: 'other-client', ad_account_id: 'act_9', daily_budget_cap_cents: 1_000 },

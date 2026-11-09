@@ -108,6 +108,13 @@ describe('ad set budget step', () => {
     expect(guardBudget(order, live({ accountId: '999999' }), null).block).toMatch(/不在这位客户/)
   })
 
+  it('stops a raise when the approved plan has no daily total and still allows a cut', () => {
+    const raised = guardBudget(order, live({ clientCapCents: null }), null)
+    expect(raised.block).toMatch(/每天广告总上限/)
+    const cut = guardBudget({ ...order, newDailyBudgetCents: 80 }, live({ clientCapCents: null }), null)
+    expect(cut.block).toBeNull()
+  })
+
   it('allows a reduction that stays over the cap when the total does not rise', () => {
     const down = { ...order, newDailyBudgetCents: 80 }
     const over = live({ accountLiveCents: 600, accountCapCents: 500, clientCapCents: 600, otherAccountsLiveCents: 0 })

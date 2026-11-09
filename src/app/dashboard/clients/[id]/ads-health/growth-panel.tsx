@@ -159,7 +159,7 @@ function O1Approval({
     try {
       const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ adset_id: adsetId }) })
       const json = await response.json() as { error?: string }
-      setMessage(response.ok ? '已提交，等待负责人核对并批准。' : json.error ?? '暂时无法提交。')
+      setMessage(response.ok ? '确认卡已出，预算还没改。请到确认卡上点确认。' : json.error ?? '暂时无法提交。')
       await refresh()
       if (response.ok) onPendingAdsChanged?.()
     } catch { setMessage('网络暂时不可用，请稍后重试。') }
@@ -171,7 +171,7 @@ function O1Approval({
     try {
       const response = await fetch(`${endpoint}/${run.id}/decision`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ resolution, expectedDecisionId: run.authorization_decision_id, historyReviewed }) })
       const json = await response.json() as { error?: string }
-      setMessage(response.ok ? (resolution === 'approve' ? '已批准，正在排队执行；完成后会记录 Meta 回读结果。' : '已驳回。') : json.error ?? '处理失败。')
+      setMessage(response.ok ? (resolution === 'approve' ? '已记下。预算要等确认卡点了确认才改。' : '已驳回。') : json.error ?? '处理失败。')
       await refresh()
       if (response.ok) onPendingAdsChanged?.()
     } catch { setMessage('网络暂时不可用，请稍后重试。') }

@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 type Fail = { ok: false; status: number; error: string }
-type Ready = { ok: true; runId: string | null; version: number }
+type Ready = { ok: true; runId: string | null; version: number; supersedesId: string | null }
 
 function jsonError(status: number, error: string): NextResponse {
   return NextResponse.json({ success: false, error }, { status })
@@ -75,7 +75,27 @@ async function loadInsertContext(clientId: string, goalId: string): Promise<Read
   if (!('runId' in run)) return run
   const version = await nextVersionForGoal(goalId)
   if (typeof version !== 'number') return version
-  return { ok: true, runId: run.runId, version }
+  const predecessor = await approvedPredecessor(clientId, goalId)
+  if (!predecessor.ok) return predecessor
+  return { ok: true, runId: run.runId, version, supersedesId: predecessor.id }
+}
+
+/** Pointer only. Does not update the approved row. A read failure does not insert. */
+async function approvedPredecessor(
+  clientId: string,
+  goalId: string,
+): Promise<{ ok: true; id: string | null } | Fail> {
+  const { data, error } = await supabaseAdmin
+    .from('prescriptions')
+    .select('id')
+    .eq('client_id', clientId)
+    .eq('goal_id', goalId)
+    .eq('status', 'approved')
+    .order('approved_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<{ id: string }>()
+  if (error) return { ok: false, status: 500, error: '读取已批准处方失败' }
+  return { ok: true, id: data?.id ?? null }
 }
 
 async function insertDraft(
@@ -95,7 +115,7 @@ async function insertDraft(
     content: parsed.content,
     intake,
     generation_meta: parsed.generationMeta,
-    supersedes_id: null,
+    supersedes_id: ready.supersedesId,
     supplements_id: null,
   }
   const { data, error } = await supabaseAdmin

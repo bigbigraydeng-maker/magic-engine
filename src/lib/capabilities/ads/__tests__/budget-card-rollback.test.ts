@@ -5,7 +5,8 @@ import { ACTION_REGISTRY } from '@/lib/kernel/registry'
 import { runAction } from '@/lib/kernel/runner'
 import { CLIENT_A, GOAL_A, makeFixture, makeRegistry } from '@/lib/kernel/__tests__/fixtures'
 import { getAdSetStatus, setAdSetDailyBudget } from '@/lib/meta/adsets'
-import { planHashOf, type PrescriptionLock } from '@/lib/ads-budget-card/prescription-lock'
+import { approvalPlanHash } from '@/lib/approval-source/read'
+import { type PrescriptionLock } from '@/lib/ads-budget-card/prescription-lock'
 import { cardFields } from '@/lib/ads-budget-card/write-gate'
 import { createCutUnitBudgetCapability } from '../cut-unit-budget'
 
@@ -19,13 +20,13 @@ vi.mock('../common', async () => {
   }
 })
 
-const SEED = { schema_version: 1 }
+const PLAN_HASH = 'hash-plan'
 const lock: PrescriptionLock = {
   prescriptionId: 'p1110000-0000-4000-8000-000000000001',
   version: 2,
   goalId: GOAL_A,
   planId: 'plan-1',
-  planHash: planHashOf('plan-1', SEED),
+  planHash: approvalPlanHash('plan-1', PLAN_HASH),
   approvedOn: '2026-11-02',
 }
 const facts: EnvelopeFacts = {
@@ -48,8 +49,17 @@ function harness() {
       extraTables: {
         prescriptions: [{
           id: lock.prescriptionId, client_id: CLIENT_A, status: 'approved', version: 2, goal_id: GOAL_A,
-          approved_at: '2026-11-02T00:00:00.000Z', content: { plan_seed: SEED },
-          generation_meta: { plan_draft: { status: 'created', plan_id: 'plan-1' } },
+          approved_at: '2026-11-02T00:00:00.000Z', content: {},
+          generation_meta: {},
+        }],
+        goals: [{ id: GOAL_A, client_id: CLIENT_A, title: '三个月内自然流量翻倍', status: 'active' }],
+        marketing_plans: [{
+          id: 'plan-1', client_id: CLIENT_A, status: 'approved', plan_data: {},
+          generation_meta: {
+            from_prescription: { prescription_id: lock.prescriptionId, version: 2 },
+            blank_draft: { goal_id: GOAL_A },
+            approval_receipt: { content_hash: PLAN_HASH },
+          },
         }],
       },
     },

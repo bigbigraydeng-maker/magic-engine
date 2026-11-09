@@ -23,6 +23,7 @@ import {
   type HoldRow,
 } from './ledger'
 import { budgetStepIdempotencyKey, executeCall, type BudgetExecuteResult, type BudgetPath } from './path'
+import { readPlanDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { sameLock, type PrescriptionLock, type VersionLockSource } from './prescription-lock'
 import type { BudgetOrder, BudgetRuntime, BudgetSnapshot } from './types'
 
@@ -52,7 +53,7 @@ export async function issueBudgetCard(args: {
   assertMayClick(args.clicker, args.clientId)
   const locked = await args.locks.read(args.clientId, args.order.prescriptionId)
   if (!locked.ok) return { status: 'blocked', reason: locked.reason, card: null }
-  const live = await args.runtime.read(args.order)
+  const live = await withPlanCap(args.kernel.supabase, args.clientId, locked.lock.planId, await args.runtime.read(args.order))
   const early = earlyBlock(live)
   if (early) return { status: 'blocked', reason: early, card: null }
   const guard = guardBudget(args.order, live, null)
@@ -121,8 +122,20 @@ async function recheck(args: Parameters<typeof submitBudgetCard>[0], row: HoldRo
   if (!sameLock(row.payload.lock, locked.lock)) {
     return '处方的版本、目标或计划变了，这张卡作废，没有改。'
   }
-  const live = await args.runtime.read(row.payload.order)
+  const live = await withPlanCap(
+    args.kernel.supabase, args.clientId, locked.lock.planId, await args.runtime.read(row.payload.order),
+  )
   return guardBudget(row.payload.order, live, row.payload.beforeCents).block
+}
+
+async function withPlanCap(
+  sb: Parameters<typeof readPlanDailyTotalCap>[0],
+  clientId: string,
+  planId: string,
+  live: BudgetSnapshot,
+): Promise<BudgetSnapshot> {
+  const cap = await readPlanDailyTotalCap(sb, clientId, planId)
+  return { ...live, clientCapCents: cap.ok ? cap.cents : null }
 }
 
 async function runPath(

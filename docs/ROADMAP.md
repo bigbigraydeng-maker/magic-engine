@@ -21,6 +21,18 @@
 
 ---
 
+## 广告 agent 三个没排的缺口：统一考卷 → 纠正记录 → 独立复核（2026-11-09 PM 回「现在就排」，三项均 P2）
+
+来源：对照 [藏经阁十问差距基线](./specs/2026-11-06-ads-loop-cangjingge-gap-baseline.md) 第 5、7、8 问；台账 `2026-11-09-ads-three-gaps-queued-exam-corrections-review`。**每一项开工前仍要先跟 PM 讲清并回「做」**。
+
+| 顺序 | 项 | 做完是什么样 | §11 | 状态 |
+|---|---|---|---|---|
+| 1 | **统一考卷** | 诊断回放 + 草稿/建议题 + agent 回放合成一套离线打分 | 中中中 → P2 | 进行中（Q01–Q51） |
+| 2 | **纠正记录** | PM「判错了」→ 人改 `src/lib/ads-strategy/exam/corrections/records.json`（**v1 不接对话/API 落库**）→ 未晋升时自动转考卷候选；升入正式题后填 `promoted_to` 即从候选去掉 | 中中低 → P2 | PR #3667 首刀 |
+| 3 | **独立复核** | 草稿/暂停建议待批前另一角色复核 | 中中中 → P2 | 未开工 |
+
+---
+
 ## Agent 自治运行计划 v1 —— 14 个 agent 从「等派活」改成「目标 + 闹钟 + 待办署名」（PM 2026-09-24 拍板，文档 PR #1985 已合并）
 
 计划全文：[`docs/specs/2026-09-24-agent-autonomy-operating-plan-v1.md`](./specs/2026-09-24-agent-autonomy-operating-plan-v1.md)。达芬奇已撤（7 问并入 `docs/agents/10-ziya.md` §四b）。**仅 B1 / B2 这两批**由 DeepSeek 执行、Claude Code 统筹复审（PM 2026-09-24 指定）；其他任务的写入者仍按 CLAUDE.md §5 协作规则按任务能力分配。

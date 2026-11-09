@@ -54,7 +54,9 @@ interface World { adsetDaily?: string }
 function fakeDb(): SupabaseClient {
   const finish = (table: string) => {
     if (table === 'client_meta_ad_accounts') return { data: [{ ad_account_id: 'act_1111111111', daily_budget_cap_cents: 15000 }], error: null }
-    if (table === 'ad_strategy_configs') return { data: { daily_budget_cap_cents: 15000 }, error: null }
+    if (table === 'marketing_plans') {
+      return { data: [{ status: 'approved', plan_data: { promo: { daily_total_cap_cents: 15000 } } }], error: null }
+    }
     return { data: null, error: { message: `unexpected table ${table}` } }
   }
   const db = {
