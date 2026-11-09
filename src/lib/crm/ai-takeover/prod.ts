@@ -33,16 +33,16 @@ export function createTakeoverStore(db: SupabaseClient = supabaseAdmin): Takeove
     async loadEvents(clientId, contactId): Promise<TakeoverEvent[]> {
       const { data, error } = await db
         .from('contact_automation_events')
-        .select('kind, created_at, actor')
+        .select('kind, created_at, actor, source_ref')
         .eq('client_id', clientId)
         .eq('contact_id', contactId)
         .order('created_at', { ascending: false })
         .limit(MAX_EVENTS)
       if (error) throw new Error(`contact_automation_events: ${error.message}`)
-      const rows = (data as Array<{ kind: unknown; created_at: unknown; actor: unknown }> | null) ?? []
+      const rows = (data as Array<{ kind: unknown; created_at: unknown; actor: unknown; source_ref: unknown }> | null) ?? []
       return rows
         .filter((r) => isTakeoverKind(r.kind))
-        .map((r) => ({ kind: r.kind as TakeoverEvent['kind'], createdAt: String(r.created_at), actor: String(r.actor) }))
+        .map((r) => ({ kind: r.kind as TakeoverEvent['kind'], createdAt: String(r.created_at), actor: String(r.actor), sourceRef: typeof r.source_ref === 'string' ? r.source_ref : null }))
     },
     async setMirror(clientId, contactId, since) {
       const { error } = await db

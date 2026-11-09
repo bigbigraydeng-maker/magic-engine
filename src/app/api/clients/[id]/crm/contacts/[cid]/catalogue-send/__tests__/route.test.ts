@@ -25,6 +25,8 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.requirePaidClientAccess.mockResolvedValue({ ok: true, user: { email: 'Lisa@Client.co.nz' } })
   mocks.store.insertEvent.mockResolvedValue({ inserted: true })
+  // first read = the not-yet-in-takeover pre-check; later reads = the log after the write
+  mocks.store.loadEvents.mockResolvedValueOnce([])
   mocks.store.loadEvents.mockResolvedValue([{ kind: 'ai_takeover_on', createdAt: '2026-11-10T01:00:00Z', actor: 'lisa@client.co.nz' }])
   mocks.store.setMirror.mockResolvedValue(undefined)
 })

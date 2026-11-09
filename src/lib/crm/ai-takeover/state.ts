@@ -15,6 +15,8 @@ export interface TakeoverEvent {
   kind: TakeoverKind
   createdAt: string
   actor: string
+  /** Idempotency key of the click that wrote it (null when unknown). */
+  sourceRef?: string | null
 }
 
 export type TakeoverState =

@@ -75,6 +75,34 @@ describe('CatalogueTakeoverPanel', () => {
     await screen.findByText('他这周已经收了 2 封邮件。')
   })
 
+  it('letter sent but mark not saved: a clickable retry re-posts the SAME request id', async () => {
+    let sends = 0
+    route({
+      '/ai-takeover': () => reply(200, offView),
+      '/email/template-preview': () => reply(200, { rendered: { subject: 'S', body: 'B' } }),
+      '/catalogue-send': () => {
+        sends += 1
+        return sends === 1
+          ? reply(500, { ok: false, sent: true, reason: 'half_written', message: '目录已发出，但「AI 跟进中」没挂上。请再点一下（不会重发目录）。' })
+          : reply(200, { ok: true, sent: true, duplicate: true, versionLabel: 'v9', since: 'x' })
+      },
+    })
+    const onSaved = vi.fn()
+    render(<CatalogueTakeoverPanel clientId="cts" contactId="c1" name="Amy" onSaved={onSaved} />)
+    await screen.findByText('amy@example.com')
+    fireEvent.click(btn('先看一眼信')!)
+    await screen.findByText('S')
+    fireEvent.click(btn('确认发送')!)
+    await screen.findByText(/没挂上/)
+    fireEvent.click(btn('再点一下')!)
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(expect.stringContaining('目录已发出'), true))
+    const ids = fetchMock.mock.calls
+      .filter(([u]) => String(u).endsWith('/catalogue-send'))
+      .map(([, init]) => (JSON.parse(String((init as RequestInit).body)) as { requestId: string }).requestId)
+    expect(ids).toHaveLength(2)
+    expect(ids[0]).toBe(ids[1])
+  })
+
   it('no usable address: the button is grey with the reason', async () => {
     route({ '/ai-takeover': () => reply(200, { ...offView, compose: { canCompose: false, message: '这个客人没有可用的邮箱。' } }) })
     render(<CatalogueTakeoverPanel clientId="cts" contactId="c1" name="Amy" onSaved={vi.fn()} />)

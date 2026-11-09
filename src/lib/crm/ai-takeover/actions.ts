@@ -23,6 +23,18 @@ export async function sendCatalogueAndTakeOver(
   args: SendCatalogueArgs,
   deps: { sendCatalogue(a: SendCatalogueArgs): Promise<SendCatalogueResult>; store: TakeoverStoreDeps },
 ): Promise<CatalogueActionResult> {
+  // A stale page must not send again (or restart the clock) for a guest already in takeover. A same-request retry
+  // after "half written" is allowed through: it is a replay, and the send layer recognises it as a duplicate.
+  try {
+    const events = await deps.store.loadEvents(args.clientId, args.contactId)
+    const already = takeoverState(events).on
+    const isReplay = events.some((e) => e.sourceRef === `catalogue:${args.requestId}`)
+    if (already && !isReplay) {
+      return { status: 409, body: { ok: false, sent: false, reason: 'already_in_takeover', message: '这位客人已经在「AI 跟进中」了，请刷新页面看最新状态。' } }
+    }
+  } catch {
+    return { status: 503, body: { ok: false, sent: false, reason: 'unreadable', message: '暂时读不到这位客人的跟进状态，信没发，请稍后再试。' } }
+  }
   const sent = await deps.sendCatalogue(args)
   if (!sent.ok) {
     if (sent.mayHaveSent) {
@@ -95,5 +107,9 @@ export async function takeOverManually(args: TakeoverOffArgs, store: TakeoverSto
     store,
   )
   if (!written.ok) return { status: 500, body: { ok: false, reason: written.reason, message: written.message } }
+  if (written.since !== null) {
+    // A replayed idempotency key inserted nothing and the log still says "on": do not report success.
+    return { status: 409, body: { ok: false, reason: 'not_taken_back', message: '没收回上，请刷新页面再点一下。' } }
+  }
   return { status: 200, body: { ok: true, alreadyOff: false } }
 }

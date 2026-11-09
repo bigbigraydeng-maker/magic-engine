@@ -38,7 +38,7 @@ describe('sendCatalogueAndTakeOver', () => {
     expect(s.events).toEqual([expect.objectContaining({
       kind: 'ai_takeover_on', actor: 'lisa@client.co.nz', catalogVersion: 'v9', sourceRef: `catalogue:${ARGS.requestId}`,
     })])
-    expect(s.calls).toEqual(['insert', 'load', 'mirror'])
+    expect(s.calls).toEqual(['load', 'insert', 'load', 'mirror'])
     expect(s.mirror.get(`${ARGS.clientId}/${ARGS.contactId}`)).toBe(s.events[0].createdAt)
   })
 
@@ -46,7 +46,7 @@ describe('sendCatalogueAndTakeOver', () => {
     const s = fakeStore()
     const r = await sendCatalogueAndTakeOver(ARGS, { sendCatalogue: async () => refused(), store: s.deps })
     expect(r).toEqual({ status: 409, body: { ok: false, sent: false, reason: 'frequency_cap', message: '他这周已经收了 2 封邮件。' } })
-    expect(s.calls).toEqual([])
+    expect(s.calls).toEqual(['load'])
   })
 
   it('outcome unknown (mayHaveSent) → nothing written, "先别重发"', async () => {
@@ -56,7 +56,26 @@ describe('sendCatalogueAndTakeOver', () => {
       store: s.deps,
     })
     expect(r.body).toEqual({ ok: false, sent: 'unknown', reason: 'send_unknown', message: CATALOGUE_UNKNOWN_MESSAGE })
-    expect(s.calls).toEqual([])
+    expect(s.calls).toEqual(['load'])
+  })
+
+  it('a stale page cannot send again for a guest already in takeover (no mail, no new event)', async () => {
+    const s = fakeStore()
+    await sendCatalogueAndTakeOver(ARGS, { sendCatalogue: async () => OK, store: s.deps })
+    const send = vi.fn(async () => OK)
+    const r = await sendCatalogueAndTakeOver({ ...ARGS, requestId: '33333333-3333-4333-8333-333333333333' }, { sendCatalogue: send, store: s.deps })
+    expect(r).toMatchObject({ status: 409, body: { ok: false, sent: false, reason: 'already_in_takeover' } })
+    expect(send).not.toHaveBeenCalled()
+    expect(s.events).toHaveLength(1)
+  })
+
+  it('an unreadable takeover log means no send at all', async () => {
+    const s = fakeStore()
+    s.deps.loadEvents = async () => { throw new Error('db down') }
+    const send = vi.fn(async () => OK)
+    const r = await sendCatalogueAndTakeOver(ARGS, { sendCatalogue: send, store: s.deps })
+    expect(r.status).toBe(503)
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('double click with the same requestId → one event (the replay comes back duplicate: true)', async () => {
@@ -154,6 +173,16 @@ describe('takeOverManually (收回人工)', () => {
     const r = await takeOverManually({ ...OFF, actorEmail: 'system:customer-came-back' }, s.deps)
     expect(r).toMatchObject({ status: 403, body: { reason: 'staff_only' } })
     expect(s.events).toHaveLength(1)
+  })
+
+  it('a replayed off key that inserts nothing while the log still says on is not reported as success', async () => {
+    const s = fakeStore()
+    await sendCatalogueAndTakeOver(ARGS, { sendCatalogue: async () => OK, store: s.deps })
+    const off = { clientId: ARGS.clientId, contactId: ARGS.contactId, actorEmail: 'lisa@client.co.nz', clientRef: 'r1' }
+    expect((await takeOverManually(off, s.deps)).status).toBe(200)
+    s.events.push({ ...s.events[0], kind: 'ai_takeover_on', sourceRef: 'catalogue:later', createdAt: '2026-11-10T05:00:00.000Z' })
+    const r = await takeOverManually(off, s.deps)
+    expect(r).toMatchObject({ status: 409, body: { ok: false, reason: 'not_taken_back' } })
   })
 
   it('double click → one off event', async () => {

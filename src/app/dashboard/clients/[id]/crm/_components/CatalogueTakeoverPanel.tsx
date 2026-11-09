@@ -29,6 +29,7 @@ type Phase =
   | { kind: 'sending' }
   | { kind: 'refused'; message: string }
   | { kind: 'unknown'; message: string }
+  | { kind: 'half'; message: string }
 
 const UNKNOWN = '这封有没有发出去还不确定。请一分钟后看下面的往来记录，先别重发。'
 
@@ -168,7 +169,9 @@ function CatalogueCard({ base, view, name, onSaved, reload }: {
         return void reload()
       }
       if (json.sent === false) requestRef.current = globalThis.crypto.randomUUID()
-      setPhase({ kind: json.sent === false ? 'refused' : 'unknown', message: str(json.message, UNKNOWN) })
+      // sent === true: the letter went out but the mark did not stick. Same requestId, so a retry never re-sends.
+      const kind = json.sent === false ? 'refused' : json.sent === true ? 'half' : 'unknown'
+      setPhase({ kind, message: str(json.message, UNKNOWN) })
     } catch {
       setPhase({ kind: 'unknown', message: UNKNOWN })
     }
@@ -188,6 +191,7 @@ function CardHead({ phase, blocked }: { phase: Phase; blocked: boolean }) {
   const chip =
     phase.kind === 'sending' ? '发送中'
       : phase.kind === 'unknown' ? '确认中'
+        : phase.kind === 'half' ? '只差一步'
         : phase.kind === 'refused' || blocked ? '现在不能发'
           : '可以发'
   return (
@@ -228,10 +232,21 @@ function CardBody({ phase, blocked, recipient, mailbox, onPreview, onSend, onCan
   if (phase.kind === 'sending') {
     return <p className="mt-2 text-[12.5px] text-me-charcoal/60">正在发送… 按钮在这几秒里点不动，避免点两次。就算关了窗口，也不会重复发。</p>
   }
+  if (phase.kind === 'half') {
+    return (
+      <>
+        <p className="mt-2 rounded-md bg-me-ochre/10 px-2.5 py-2 text-[12.5px] text-me-charcoal">{phase.message}</p>
+        <button type="button" onClick={onSend} data-testid="catalogue-retry-mark"
+          className="mt-2 w-full rounded-lg bg-me-charcoal px-3 py-2 text-[13px] font-bold text-white">
+          再点一下（不会重发目录）
+        </button>
+      </>
+    )
+  }
   const note = phase.kind === 'refused' || phase.kind === 'unknown' ? phase.message : blocked
   return (
     <>
-      {note && <p className="mt-2 rounded-md bg-me-ochre/10 px-2.5 py-2 text-[12.5px] text-me-charcoal">{note}</p>}
+      {note &&<p className="mt-2 rounded-md bg-me-ochre/10 px-2.5 py-2 text-[12.5px] text-me-charcoal">{note}</p>}
       <button
         type="button"
         onClick={onPreview}
