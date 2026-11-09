@@ -732,6 +732,13 @@ export default function ClientDetailPage() {
                   badge="in_house"
                 />
               )}
+              {/* 资料库不分行业：每个客户都有。谁能看哪个文件由接口判断，入口卡片不做权限。 */}
+              <ToolCard
+                href={`/dashboard/clients/${clientId}/documents`}
+                title="资料库"
+                desc="手册、单页资料、价格表等文件，点一下就能下载。文件不公开，每次下载都会先核对账号。"
+                badge="in_house"
+              />
             </div>
           </section>
 
