@@ -155,6 +155,13 @@ describe('sending', () => {
     ['401 our key is wrong', { statusCode: 401, name: 'missing_api_key' }],
     ['403 our key or sending domain is not allowed', { statusCode: 403, name: 'invalid_from_address' }],
     ['404', { statusCode: 404, name: 'not_found' }],
+  ])('reads %s on a first attempt as our own account problem: definitely not sent, never the guest refusing', async (_label, error) => {
+    const { createClient } = clientReturning(() => Promise.resolve({ data: null, error, headers: null }))
+    const port = createResendEmailPort({ env: envWith({ RESEND_API_KEY_CTS: KEY }), createClient })
+    expect(await port.send(request())).toEqual({ kind: 'account_error', code: error.name, status: error.statusCode })
+  })
+
+  it.each([
     ['409 concurrent request with the same key', { statusCode: 409, name: 'concurrent_idempotent_requests' }],
     ['409 same key, different payload', { statusCode: 409, name: 'invalid_idempotent_request' }],
     ['429 rate limit', { statusCode: 429, name: 'rate_limit_exceeded' }],
@@ -244,16 +251,16 @@ describe('sending', () => {
 })
 
 describe('classifyResendError', () => {
-  it.each([400, 422])('%i on a first attempt is a refusal (the request was bad, nothing was sent)', (statusCode) => {
+  it.each([400, 413, 422])('%i on a first attempt is a refusal (the request was bad, nothing was sent)', (statusCode) => {
     expect(classifyResendError({ statusCode, name: 'validation_error' }, 'first').kind).toBe('rejected')
   })
 
-  it.each([400, 422, 401, 403])('%i on a replay is unknown: it cannot prove the first attempt did not go out', (statusCode) => {
-    expect(classifyResendError({ statusCode, name: 'validation_error' }, 'replay').kind).toBe('unknown')
+  it.each([401, 403, 404, 451])('%i on a first attempt is our own account problem (nothing was sent), status passed on', (statusCode) => {
+    expect(classifyResendError({ statusCode, name: 'invalid_api_key' }, 'first')).toEqual({ kind: 'account_error', code: 'invalid_api_key', status: statusCode })
   })
 
-  it.each([401, 403, 404])('%i is our own key or account problem, never the guest refusing: unknown, status passed on', (statusCode) => {
-    expect(classifyResendError({ statusCode, name: 'invalid_api_key' }, 'first')).toEqual({ kind: 'unknown', code: 'invalid_api_key', status: statusCode })
+  it.each([400, 413, 422, 401, 403, 404, 451])('%i on a replay is unknown: it cannot prove the first attempt did not go out', (statusCode) => {
+    expect(classifyResendError({ statusCode, name: 'validation_error' }, 'replay').kind).toBe('unknown')
   })
 
   it.each([
@@ -334,8 +341,18 @@ describe('the real default wiring (real SDK, fake network)', () => {
     const { calls } = captureFetch()
     expect(await createResendEmailPort().send(request())).toEqual({ kind: 'sent', messageId: 'msg_real_wiring' })
     expect(calls).toHaveLength(1)
-    expect(calls[0].url).toBe(`${RESEND_API_BASE_URL}/emails`)
+    // the literal address, not the constant: a changed constant must fail this test
+    expect(calls[0].url).toBe('https://api.resend.com/emails')
+    expect(RESEND_API_BASE_URL).toBe('https://api.resend.com')
     expect(calls[0].authorization).toBe('Bearer re_cts_key_bbbbbbbbbb')
+  })
+
+  it('with the account variable not set at all, nothing is sent either', async () => {
+    vi.stubEnv('RESEND_API_KEY', 're_system_key_aaaaaaaa')
+    vi.stubEnv('RESEND_API_KEY_CTS', undefined)
+    const { fetchFake } = captureFetch()
+    expect(await createResendEmailPort().send(request())).toMatchObject({ kind: 'not_attempted', code: 'no_account_key' })
+    expect(fetchFake).not.toHaveBeenCalled()
   })
 
   it('with the account key missing, nothing at all is sent (the SDK would have used the system key)', async () => {

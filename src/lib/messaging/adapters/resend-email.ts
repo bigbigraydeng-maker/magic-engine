@@ -11,10 +11,13 @@
  *  - The SDK sets no request timeout. The call gets 15 seconds; after that the outcome is UNKNOWN (the request may have
  *    reached Resend). Unknown is never "failed": the caller keeps the send pending and may replay it only with the SAME
  *    idempotency key and the SAME frozen content, and never sends a second, different mail.
- *  - "rejected" (definitely not sent, the guest's address may be released) only for a FIRST attempt refused as a bad
- *    request (400 / 422). A replay's refusal cannot prove the first attempt did not go out, and 401 / 403 / 404 are our
- *    own key or account problem, not the guest's: all of those, 409, 429, 5xx, network errors and anything that cannot
- *    be classified are "unknown" (the provider status is passed on so the caller can raise a to-do for a key problem).
+ *  - Only a FIRST attempt can prove "not sent"; a replay's refusal cannot prove the first attempt did not go out, so every
+ *    refusal of a replay is "unknown". On a first attempt:
+ *      400 / 413 / 422 → "rejected": the request itself was bad; nothing was sent (the caller marks it failed).
+ *      401 / 403 / 404 / 451 → "account_error": OUR key, sending domain or account is wrong; nothing was sent. The
+ *        caller must stop claiming further guests until it is fixed and raise a to-do — every guest would fail the same
+ *        way — and must not count it as the guest refusing.
+ *    409, 429, 5xx, network errors, timeouts and anything that cannot be classified are "unknown".
  *  - Everything is checked before the provider is called; a request that fails a check is "not_attempted".
  *  - Nothing here logs or returns an address, a subject, a body or a provider error message (those can echo addresses).
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §6.1.
@@ -26,7 +29,9 @@ export const RESEND_SEND_TIMEOUT_MS = 15_000
 /** The provider address, pinned (the SDK would otherwise read it from RESEND_BASE_URL). */
 export const RESEND_API_BASE_URL = 'https://api.resend.com'
 /** First-attempt refusals that mean "this request was bad", so nothing was sent. */
-const DEFINITE_REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 422])
+const DEFINITE_REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 413, 422])
+/** First-attempt refusals that mean "our key / domain / account is wrong", so nothing was sent and nothing else will be. */
+const ACCOUNT_ERROR_STATUSES: ReadonlySet<number> = new Set([401, 403, 404, 451])
 
 /** The label of ME's own account (login links, notifications). Automated client mail must never use it. */
 const SYSTEM_ACCOUNT = 'system'
@@ -86,6 +91,7 @@ export interface ResendEmailRequest {
 export type ResendSendOutcome =
   | { kind: 'sent'; messageId: string }
   | { kind: 'rejected'; code: string; status: number }
+  | { kind: 'account_error'; code: string; status: number }
   | { kind: 'unknown'; code: string; status: number | null }
   | {
       kind: 'not_attempted'
@@ -185,19 +191,20 @@ export function resendRequestProblem(request: ResendEmailRequest): string | null
 }
 
 /**
- * A provider error: on a first attempt, a bad-request refusal (400 / 422) is "rejected"; everything else, and every
- * refusal of a replay, is an unknown outcome.
+ * A provider error. On a first attempt: a bad request (400 / 413 / 422) is "rejected", a key / domain / account problem
+ * (401 / 403 / 404 / 451) is "account_error"; everything else, and every refusal of a replay, is an unknown outcome.
  */
 export function classifyResendError(
   error: unknown,
   attempt: ResendEmailRequest['attempt'],
-): Extract<ResendSendOutcome, { kind: 'rejected' | 'unknown' }> {
+): Extract<ResendSendOutcome, { kind: 'rejected' | 'account_error' | 'unknown' }> {
   const fields: { statusCode?: unknown; name?: unknown } =
     typeof error === 'object' && error !== null ? (error as { statusCode?: unknown; name?: unknown }) : {}
   const status = typeof fields.statusCode === 'number' && Number.isInteger(fields.statusCode) ? fields.statusCode : null
   const code = typeof fields.name === 'string' && ERROR_NAME_RE.test(fields.name) ? fields.name : 'unknown_error'
-  if (attempt === 'first' && status !== null && DEFINITE_REFUSAL_STATUSES.has(status)) {
-    return { kind: 'rejected', code, status }
+  if (attempt === 'first' && status !== null) {
+    if (DEFINITE_REFUSAL_STATUSES.has(status)) return { kind: 'rejected', code, status }
+    if (ACCOUNT_ERROR_STATUSES.has(status)) return { kind: 'account_error', code, status }
   }
   return { kind: 'unknown', code, status }
 }

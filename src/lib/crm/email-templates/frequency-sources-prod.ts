@@ -111,8 +111,11 @@ async function touchpointSource(deps: FrequencySourceDeps, contactId: string, si
   }
 }
 
-// Send-ledger statuses of a mail that went out or may have gone out (the same set as the ledger's "one address, one
-// welcome" index). failed (definitely not sent), blocked, skipped and shadow rows are not mail and are not counted.
+// Send-ledger rows of a mail that went out or may have gone out: exactly the ledger's own "one address, one welcome"
+// index (supabase/migrations/20261102130000_triggered_send_ledger.sql, triggered_sends_lifetime_address_idx; a test pins
+// the two together): these statuses, plus `failed` with reason `not_sent_confirmed` (a person marked it "not sent";
+// a late receipt can still prove otherwise, so it is counted — counting too many can only block a send). Any other
+// `failed` (the provider refused it), blocked, skipped and rehearsal rows are not mail.
 export const ME_SEND_COUNTED_STATUSES = [
   'pending',
   'unknown_outcome',
@@ -123,8 +126,11 @@ export const ME_SEND_COUNTED_STATUSES = [
   'bounced',
   'complained',
 ] as const
-// A mail counts from when it went out (sent_at), or from its first attempt while that is not known. The first attempt
-// is at most 20 hours before the send (the ledger's own rule), so rows are read from a day before the window.
+export const ME_SEND_NOT_SENT_CONFIRMED = 'not_sent_confirmed'
+// The ledger never (re)sends a mail more than 20 hours after its first attempt. A mail counts from when it went out
+// (sent_at); while that is not known, from the LATEST moment it could have gone out (first attempt + 20 hours, or now
+// if that is still ahead), so it never leaves the window early. Rows are read from a day before the window.
+const ME_SEND_LATEST_SEND_MS = 20 * 3_600_000
 const ME_SEND_LOOKBACK_MS = 24 * 3_600_000
 const ME_SEND_PAGE = 500
 const ME_SEND_SUBJECT = 'ME 自动发的信'
@@ -142,30 +148,48 @@ async function meSendSource(deps: FrequencySourceDeps, addresses: readonly strin
   if (Number.isNaN(sinceMs)) return { ok: false, error: 'me sends: the window start is not a time' }
   const rows = await deps.db
     .from('triggered_sends')
-    .select('id, first_attempt_at, sent_at')
+    .select('id, status, reason_code, first_attempt_at, sent_at')
     .eq('client_id', deps.clientId)
     .eq('channel', 'email')
-    .eq('dedupe_scope', 'lifetime')
-    .in('status', [...ME_SEND_COUNTED_STATUSES])
+    // every scope but the rehearsal: a later kind of letter with its own scope is still real mail
+    .neq('dedupe_scope', 'shadow')
+    .in('status', [...ME_SEND_COUNTED_STATUSES, 'failed'])
     .in('to_address_sha256', fingerprints)
     .gte('first_attempt_at', new Date(sinceMs - ME_SEND_LOOKBACK_MS).toISOString())
     .limit(ME_SEND_PAGE)
   if (rows.error) return { ok: false, error: `me sends: ${rows.error.message}` }
-  const list = (rows.data as Array<{ id: string; first_attempt_at: string | null; sent_at: string | null }> | null) ?? []
+  const list =
+    (rows.data as Array<{
+      id: string
+      status: string
+      reason_code: string | null
+      first_attempt_at: string | null
+      sent_at: string | null
+    }> | null) ?? []
   // A full page means there may be more than we saw: then we cannot vouch for the count.
   if (list.length >= ME_SEND_PAGE) return { ok: false, error: 'me sends: too many rows to check them all' }
+  const nowMs = Date.now()
   return {
     ok: true,
-    items: list.map((r) => ({
-      source: 'me_send',
-      id: r.id,
-      // No time at all cannot happen for a claimed row (the ledger requires it); an unreadable time is counted anyway.
-      at: r.sent_at ?? r.first_attempt_at ?? '',
-      subject: ME_SEND_SUBJECT,
-      address: '',
-      automated: true,
-    })),
+    items: list
+      .filter((r) => r.status !== 'failed' || r.reason_code === ME_SEND_NOT_SENT_CONFIRMED)
+      .map((r) => ({
+        source: 'me_send',
+        id: r.id,
+        at: countedAt(r.sent_at, r.first_attempt_at, nowMs),
+        subject: ME_SEND_SUBJECT,
+        address: '',
+        automated: true,
+      })),
   }
+}
+
+/** When a ledger row counts from. An unreadable time stays unreadable, and the cap counts unreadable times anyway. */
+function countedAt(sentAt: string | null, firstAttemptAt: string | null, nowMs: number): string {
+  if (sentAt !== null) return sentAt
+  const firstMs = firstAttemptAt === null ? NaN : Date.parse(firstAttemptAt)
+  if (Number.isNaN(firstMs)) return firstAttemptAt ?? ''
+  return new Date(Math.min(firstMs + ME_SEND_LATEST_SEND_MS, nowMs)).toISOString()
 }
 
 async function recipientItems(

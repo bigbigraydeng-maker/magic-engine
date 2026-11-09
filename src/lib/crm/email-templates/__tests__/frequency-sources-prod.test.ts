@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import path from 'node:path'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
@@ -195,29 +197,22 @@ describe('touchpoint source', () => {
 
 describe('ME-mail source (the send ledger, by address fingerprint)', () => {
   const sha = (a: string) => createHash('sha256').update(a.trim().toLowerCase()).digest('hex')
+  const row = (over: Record<string, unknown>) => ({ id: 'ts', status: 'sent', reason_code: null, first_attempt_at: '2026-10-24T20:00:00Z', sent_at: null, ...over })
 
-  it('reads only real sends that went out or may have, to these addresses, from a day before the window', async () => {
+  it('reads every non-rehearsal row of these addresses that went out or may have, from a day before the window', async () => {
     const { stub, value } = deps({
-      tables: {
-        triggered_sends: ok([
-          { id: 'ts-1', first_attempt_at: '2026-10-24T20:00:00Z', sent_at: '2026-10-24T20:00:05Z' },
-          { id: 'ts-2', first_attempt_at: '2026-10-25T20:00:00Z', sent_at: null },
-        ]),
-      },
+      tables: { triggered_sends: ok([row({ id: 'ts-1', sent_at: '2026-10-24T20:00:05Z' })]) },
     })
     const res = await createFrequencySources(value).meSends([' Amy@Example.com ', 'amy@example.com', 'amy.lee@work.com'], SINCE)
     expect(res).toEqual({
       ok: true,
-      items: [
-        { source: 'me_send', id: 'ts-1', at: '2026-10-24T20:00:05Z', subject: 'ME 自动发的信', address: '', automated: true },
-        { source: 'me_send', id: 'ts-2', at: '2026-10-25T20:00:00Z', subject: 'ME 自动发的信', address: '', automated: true },
-      ],
+      items: [{ source: 'me_send', id: 'ts-1', at: '2026-10-24T20:00:05Z', subject: 'ME 自动发的信', address: '', automated: true }],
     })
     const calls = stub.of('triggered_sends')
     expect(calls).toContainEqual({ table: 'triggered_sends', method: 'eq', args: ['client_id', CLIENT] })
     expect(calls).toContainEqual({ table: 'triggered_sends', method: 'eq', args: ['channel', 'email'] })
-    expect(calls).toContainEqual({ table: 'triggered_sends', method: 'eq', args: ['dedupe_scope', 'lifetime'] })
-    expect(calls).toContainEqual({ table: 'triggered_sends', method: 'in', args: ['status', [...ME_SEND_COUNTED_STATUSES]] })
+    expect(calls).toContainEqual({ table: 'triggered_sends', method: 'neq', args: ['dedupe_scope', 'shadow'] })
+    expect(calls).toContainEqual({ table: 'triggered_sends', method: 'in', args: ['status', [...ME_SEND_COUNTED_STATUSES, 'failed']] })
     expect(calls).toContainEqual({
       table: 'triggered_sends',
       method: 'in',
@@ -226,11 +221,45 @@ describe('ME-mail source (the send ledger, by address fingerprint)', () => {
     expect(calls).toContainEqual({ table: 'triggered_sends', method: 'gte', args: ['first_attempt_at', '2026-10-20T00:00:00.000Z'] })
   })
 
-  it('counts every status that went out or may have, and none that did not', () => {
-    expect([...ME_SEND_COUNTED_STATUSES].sort()).toEqual(
-      ['bounced', 'complained', 'delivered', 'delivery_delayed', 'pending', 'sent', 'suppressed', 'unknown_outcome'],
-    )
-    for (const notMail of ['failed', 'blocked', 'skipped', 'shadow']) expect(ME_SEND_COUNTED_STATUSES).not.toContain(notMail)
+  it('a failed row counts only when a person marked it "not sent" (a late receipt can still prove otherwise)', async () => {
+    const { value } = deps({
+      tables: {
+        triggered_sends: ok([
+          row({ id: 'confirmed', status: 'failed', reason_code: 'not_sent_confirmed', sent_at: '2026-10-25T00:00:00Z' }),
+          row({ id: 'refused', status: 'failed', reason_code: 'provider_rejected', sent_at: null }),
+        ]),
+      },
+    })
+    const res = await createFrequencySources(value).meSends(['amy@example.com'], SINCE)
+    expect(res.ok && res.items.map((i) => i.id)).toEqual(['confirmed'])
+  })
+
+  it('a mail with no send time counts from the latest moment it could have gone out (first attempt + 20 h, or now)', async () => {
+    const recent = new Date(Date.now() - 60_000).toISOString()
+    const { value } = deps({
+      tables: {
+        triggered_sends: ok([
+          row({ id: 'old-unknown', status: 'unknown_outcome', first_attempt_at: '2026-10-24T20:00:00Z' }),
+          row({ id: 'in-flight', status: 'pending', first_attempt_at: recent }),
+        ]),
+      },
+    })
+    const before = Date.now()
+    const res = await createFrequencySources(value).meSends(['amy@example.com'], SINCE)
+    const after = Date.now()
+    if (!res.ok) throw new Error('expected an answer')
+    expect(res.items[0].at).toBe('2026-10-25T16:00:00.000Z')
+    const inFlightAt = Date.parse(res.items[1].at)
+    expect(inFlightAt).toBeGreaterThanOrEqual(before)
+    expect(inFlightAt).toBeLessThanOrEqual(after)
+  })
+
+  it('counts exactly what the ledger itself treats as "went out or may have" (its lifetime address index)', () => {
+    const sql = readFileSync(path.join(process.cwd(), 'supabase/migrations/20261102130000_triggered_send_ledger.sql'), 'utf8')
+    const index = /create unique index triggered_sends_lifetime_address_idx[\s\S]*?;/.exec(sql)?.[0] ?? ''
+    const listed = /status in \(([^)]*)\)/.exec(index)?.[1] ?? ''
+    expect(listed.split(',').map((s) => s.trim().replace(/'/g, '')).sort()).toEqual([...ME_SEND_COUNTED_STATUSES].sort())
+    expect(index).toMatch(/status = 'failed' and reason_code = 'not_sent_confirmed'/)
   })
 
   it('no address: nothing to count and nothing read', async () => {
@@ -242,9 +271,7 @@ describe('ME-mail source (the send ledger, by address fingerprint)', () => {
   it('fails closed on a read error, a full page, or a window start that is not a time', async () => {
     const failing = deps({ tables: { triggered_sends: fail('boom') } })
     expect((await createFrequencySources(failing.value).meSends(['amy@example.com'], SINCE)).ok).toBe(false)
-    const full = deps({
-      tables: { triggered_sends: ok(Array.from({ length: 500 }, (_, i) => ({ id: `ts-${i}`, first_attempt_at: SINCE, sent_at: null }))) },
-    })
+    const full = deps({ tables: { triggered_sends: ok(Array.from({ length: 500 }, (_, i) => row({ id: `ts-${i}` }))) } })
     expect((await createFrequencySources(full.value).meSends(['amy@example.com'], SINCE)).ok).toBe(false)
     const badSince = deps({ tables: { triggered_sends: ok([]) } })
     expect((await createFrequencySources(badSince.value).meSends(['amy@example.com'], 'not a time')).ok).toBe(false)
