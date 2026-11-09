@@ -77,3 +77,5 @@ __pycache__/
 # Impeccable skill machine-local config (hooks / consent)
 /.claude/settings.local.json
 /.impeccable/config.local.json
+# 本机钥匙同步/链接脚本产生的备份与临时文件（含明文令牌）
+.env.local.*
