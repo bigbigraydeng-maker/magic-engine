@@ -32,7 +32,7 @@ export type Segment =
 import { resolveTravelDate, isDueToWake } from './travel-date'
 import { detectReturningLead, returningReason, type ReturningLead } from './returning-lead'
 // 「别再联系」的判据全仓只有一份 —— 这里要的是「什么时候被人推翻过」。
-import { withoutClearedDnc } from './dnc'
+import { withoutClearedDnc, saidDoNotCall } from './dnc'
 import { isVoicemailOrSilentCall } from './customer-spoke'
 
 export type Temperature = 'hot' | 'warm' | 'cold' | 'off'
@@ -304,6 +304,14 @@ export interface SegmentResult {
    * 而这一页最贵的资产就是「它说的话可信」。
    */
   phoneUnusable?: boolean
+  /**
+   * 客人说过「不要电话」（触点 `outcome='do_not_call'`，没被 `dnc_cleared` 推翻）。
+   *
+   * **跟 `phoneUnusable` 是两件事**：那个的下游按「号码是坏的」解读（号码划线、
+   * 「问他要新号」、「（打不通）」）。这里号码是好的，只是客人不让打 —— 只关电话，
+   * 邮件 / Messenger / WhatsApp 照常。全面拒绝（别再联系）不靠这个字段，那种人直接 excluded。
+   */
+  doNotCall: boolean
   /**
    * 这一段**本来**想用哪个渠道 —— 还没按「他能不能被联系到」降级之前的那个。
    *
@@ -735,7 +743,10 @@ export function segmentContact(
     contact.hasEmail !== undefined ||
     contact.hasMessenger !== undefined
   const phoneIsDead = phoneLineIsDead(tps)
-  const reach = phoneIsDead && reachKnown ? { ...contact, hasPhone: false } : contact
+  // 「只别打电话」：号码是好的，但客人不让打 —— 跟坏号一样只关掉电话这一路。
+  // 从触点自己算（同 `phoneLineIsDead`），不靠调用方传进来。
+  const doNotCall = saidDoNotCall(tps)
+  const reach = (phoneIsDead || doNotCall) && reachKnown ? { ...contact, hasPhone: false } : contact
 
   const make = (segment: Segment, reason: string, ch: SegmentResult['suggestedChannel'], dueAt: string | null = null) => ({
     segment,
@@ -745,6 +756,7 @@ export function segmentContact(
     wantedChannel: ch,
     // 只有「库里有号码但打不通」才算 —— 压根没号码的人不该说成「号打不通」。
     phoneUnusable: phoneIsDead && contact.hasPhone === true,
+    doNotCall,
     dueAt,
     lastTouchAt,
   })
@@ -796,6 +808,9 @@ export function segmentContact(
    */
   if (phoneIsDead && reachKnown && contact.hasEmail !== true && contact.hasMessenger !== true) {
     return make('excluded', '号码不通，又没有邮箱和 Messenger —— 补个联系方式才能继续跟', 'none')
+  }
+  if (doNotCall && reachKnown && contact.hasEmail !== true && contact.hasMessenger !== true) {
+    return make('excluded', '只别打电话，又没有邮箱和 Messenger —— 补个联系方式才能继续跟', 'none')
   }
 
   // 2) 客户回了话，还没人接。三个条件缺一不可：

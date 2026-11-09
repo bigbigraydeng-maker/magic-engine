@@ -20,6 +20,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { parseNote, type NoteParse } from '@/lib/crm/note-parser'
+import { refusalMetadata, withRefusalInvariant } from '@/lib/crm/touchpoint-refusal'
 import { withStructuredCallback } from '@/lib/crm/callback-pick'
 
 export interface RecordTouchpointInput {
@@ -137,7 +138,8 @@ export async function recordManualTouchpoint(
       now: Number.isNaN(noteBasis.getTime()) ? new Date() : noteBasis,
     }))
   // 销售点按钮选的回电时间是确定的，赢过 AI 从原话里读出来的（原话 raw 仍原样保存）。
-  const parsed = withStructuredCallback(parsedFromNote, input.callbackAt)
+  // 拒绝字段不许是矛盾状态（只别打电话 + 全拦标记），见 touchpoint-refusal。
+  const parsed = withRefusalInvariant(withStructuredCallback(parsedFromNote, input.callbackAt))
 
   // 1) 幂等写触点。ignoreDuplicates → ON CONFLICT DO NOTHING:
   //    命中冲突时 select 返回空,maybeSingle() 得到 null,created=false。
@@ -153,8 +155,7 @@ export async function recordManualTouchpoint(
         summary: parsed.summary,
         raw: note,
         metadata: {
-          outcome: parsed.outcome,
-          do_not_contact: parsed.do_not_contact,
+          ...refusalMetadata(parsed),
           travel_window: parsed.travel_window,
           tour_interest: parsed.tour_interest,
           competitor: parsed.competitor,
@@ -188,7 +189,8 @@ export async function recordManualTouchpoint(
     last_seen_at: laterIso(input.currentLastSeenAt, occurredAt),
     updated_at: new Date().toISOString(),
   }
-  if (parsed.do_not_contact) {
+  // 「只别打电话」绝不碰镜像列：全仓约 30 处把它当「全渠道拒联」（设计稿 §2）。
+  if (parsed.do_not_contact && parsed.outcome !== 'do_not_call') {
     patch.do_not_contact = true
     patch.do_not_contact_reason = parsed.summary
   }

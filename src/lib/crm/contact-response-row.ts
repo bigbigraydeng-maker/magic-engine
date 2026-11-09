@@ -142,6 +142,8 @@ export function responseRowFor(
        * 展开却照旧能一点就拨。销售会以为其中一边是过时的，而两边他都不再信。
        */
       phoneUnusable: seg.phoneUnusable ?? false,
+      /** 客人说过不要电话（只关电话，邮件照常）—— 抽屉据此藏拨号、显示撤销条。 */
+      doNotCall: seg.doNotCall === true,
       /**
        * 被标成「别再联系」—— 页面据此给出**取消**那条路。
        *

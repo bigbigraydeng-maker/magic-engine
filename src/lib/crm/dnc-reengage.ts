@@ -34,6 +34,7 @@
 
 import { isDoNotContact, type DncTouch } from './dnc'
 import { classifyNote } from './note-parser'
+import { classifyRefusalScope } from './refusal-scope'
 import { isAutoReply } from '@/lib/microsoft/auto-reply'
 
 /** 判决前后 30 分钟内的消息算同一段对话。 */
@@ -116,7 +117,8 @@ function toDncTouch(t: ReengageTouch): DncTouch {
 
 function isStop(body: string | null | undefined): boolean {
   if (!body) return false
-  return REENGAGE_EXTRA_STOP.test(body) || classifyNote(body).do_not_contact
+  // 「只别打电话」和「说不清」的话也不算回头（2026-11-09）：说「别给我打电话」的人不是在回来找我们。
+  return REENGAGE_EXTRA_STOP.test(body) || classifyNote(body).do_not_contact || classifyRefusalScope(body) !== 'none'
 }
 
 function isVerdictTouch(t: ReengageTouch): boolean {

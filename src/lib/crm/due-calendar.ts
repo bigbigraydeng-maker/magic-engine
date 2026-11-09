@@ -23,6 +23,11 @@ export interface DueItem {
   status: string | null
   /** 回电：这位客人的跟进人邮箱（没人跟进为 null）；验收：null。日历页「只看我的」按它过滤 */
   assignee: string | null
+  /**
+   * 回电：客人说过不要电话（只关电话，邮件照常）—— 这一条显示成「邮件跟进」，不给号码。
+   * 验收与普通回电：不带（undefined）。
+   */
+  emailOnly?: boolean
 }
 
 const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/
@@ -83,12 +88,14 @@ export interface CallbackContactRow {
   display_name: string | null
   primary_phone: string | null
   do_not_contact: boolean
+  /** 客人说过不要电话（判据见 lib/crm/dnc `isDoNotCall`）；路由算好传进来。 */
+  do_not_call?: boolean
   assigned_to?: string | null
 }
 
 /**
  * 每个客人只取「最近一次」约的回电（后约的盖掉先约的），落在本月才显示；
- * 标了不要再联系的客人不排。
+ * 标了不要再联系的客人不排；只说过不要电话的客人照排，但改成「邮件跟进」、不带号码。
  */
 export function callbackItems(
   touches: readonly CallbackTouchRow[],
@@ -108,15 +115,17 @@ export function callbackItems(
     const iso = t.metadata?.callback_at as string
     const date = nzDateOf(iso)
     if (!contact || contact.do_not_contact || !date.startsWith(month)) continue
+    const emailOnly = contact.do_not_call === true
     items.push({
       date,
       kind: 'callback',
       title: contact.display_name?.trim() || contact.primary_phone || '未命名客人',
       time: nzTimeOf(iso),
       refId: contactId,
-      phone: contact.primary_phone,
+      phone: emailOnly ? null : contact.primary_phone,
       status: null,
       assignee: contact.assigned_to?.trim().toLowerCase() || null,
+      ...(emailOnly ? { emailOnly: true } : {}),
     })
   }
   return items

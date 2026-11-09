@@ -182,6 +182,12 @@ const VERDICT_ROW: Record<string, { icon: string; text: string; tone: 'stop' | '
     text: '有人判断上面那次是误判，把他放回了名单 —— 现在可以正常联系',
     tone: 'clear',
   },
+  // 只别打电话（PM 2026-11-09）：只关电话，所以不用「停了他」的红色那一档。
+  do_not_call: {
+    icon: '📵',
+    text: '就是这一句让系统关了电话 —— 从这天起不再给他打电话，邮件 / 私信照常',
+    tone: 'clear',
+  },
 }
 
 /**
@@ -301,6 +307,7 @@ function summarise(
 function verdictOf(e: TimelineEntry): (typeof VERDICT_ROW)[string] | undefined {
   if (e.outcome === 'dnc_cleared') return VERDICT_ROW.dnc_cleared
   if (e.outcome === 'do_not_contact' || e.dncFlag) return VERDICT_ROW.do_not_contact
+  if (e.outcome === 'do_not_call') return VERDICT_ROW.do_not_call
   return undefined
 }
 

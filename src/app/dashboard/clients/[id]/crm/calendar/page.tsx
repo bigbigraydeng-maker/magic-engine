@@ -116,8 +116,9 @@ export default function CrmCalendarPage({ params }: { params: { id: string } }) 
         ))}
         {monthCells(month).map((date, i) => {
           const list = date ? byDate.get(date) ?? [] : []
-          const calls = list.filter((x) => x.kind === 'callback').length
-          const checks = list.length - calls
+          const calls = list.filter((x) => x.kind === 'callback' && !x.emailOnly).length
+          const mails = list.filter((x) => x.kind === 'callback' && x.emailOnly).length
+          const checks = list.length - calls - mails
           return (
             <button
               key={date ?? `pad-${i}`}
@@ -130,6 +131,7 @@ export default function CrmCalendarPage({ params }: { params: { id: string } }) 
                 <>
                   <span className={date === today ? 'rounded bg-me-charcoal px-1 text-white' : ''}>{Number(date.slice(8))}</span>
                   {calls > 0 && <span className="mt-1 block">● {calls} 个回电</span>}
+                  {mails > 0 && <span className="block">● {mails} 个邮件跟进</span>}
                   {checks > 0 && <span className="block">◆ {checks} 项核对</span>}
                 </>
               )}
@@ -153,7 +155,7 @@ export default function CrmCalendarPage({ params }: { params: { id: string } }) 
             <span className="tabular-nums text-me-charcoal/60">{it.date.slice(5)}{it.time ? ` ${it.time}` : ''}</span>
             {it.kind === 'callback' ? (
               <>
-                <span>● 回电：</span>
+                <span>{it.emailOnly ? '● 邮件跟进：' : '● 回电：'}</span>
                 <Link className="underline" href={`/dashboard/clients/${clientId}/crm/all?contact=${it.refId}`}>{it.title}</Link>
                 {it.phone && <span className="text-me-charcoal/60">{it.phone}</span>}
               </>
