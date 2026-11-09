@@ -4,7 +4,7 @@ title: 同一目标的新手动处方草稿记下要替换的已批准版本
 status: done
 owner: agent
 decided_on: 2026-11-02
-source: session:5ad9manual
+source: pr:3515
 verify_by: 2026-11-09
 verify_how: 同一目标再存一版手动草稿，supersedes_id 指向该目标最新已批准处方；批准新版后旧版变为已替换，未批准的草稿不改旧版状态。
 done_on: 2026-11-02
