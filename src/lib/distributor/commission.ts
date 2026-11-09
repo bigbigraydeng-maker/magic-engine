@@ -156,7 +156,10 @@ export function teamLines(
   return { teamSalesCents, teamRateBp, grossCents, lines }
 }
 
-/** Distributors with no not-fully-refunded personal sale in [asOf − window, asOf). */
+/**
+ * Distributors with no not-fully-refunded personal sale in [asOf − window, asOf).
+ * Only refunds paid before asOf count, so recomputing a past month later gives the same answer.
+ */
 export function inactiveDistributors(
   distributors: readonly Distributor[],
   book: SaleBook,
@@ -168,7 +171,7 @@ export function inactiveDistributors(
   const active = new Set<string>()
   for (const s of book.saleById.values()) {
     const ms = toMs(s.paidAt)
-    if (s.kind !== 'refund' && ms >= start && ms < end && netOfRefunds(s, book) > 0) active.add(s.sellerId)
+    if (s.kind !== 'refund' && ms >= start && ms < end && netOfRefunds(s, book, end) > 0) active.add(s.sellerId)
   }
   return new Set(distributors.map((d) => d.id).filter((id) => !active.has(id)))
 }

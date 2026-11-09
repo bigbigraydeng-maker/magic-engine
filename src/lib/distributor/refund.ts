@@ -54,7 +54,9 @@ export function resolveRefund(refund: Sale, book: SaleBook): ResolvedRefund {
   return { original, beforeCents, afterCents }
 }
 
-/** Net amount of a non-refund sale after every known refund. */
-export function netOfRefunds(sale: Sale, book: SaleBook): number {
-  return (book.refundsByOriginal.get(sale.id) ?? []).reduce((sum, r) => sum + r.amountCents, sale.amountCents)
+/** Net amount of a non-refund sale after every known refund (or only refunds paid before `beforeMs`). */
+export function netOfRefunds(sale: Sale, book: SaleBook, beforeMs = Number.POSITIVE_INFINITY): number {
+  return (book.refundsByOriginal.get(sale.id) ?? [])
+    .filter((r) => toMs(r.paidAt) < beforeMs)
+    .reduce((sum, r) => sum + r.amountCents, sale.amountCents)
 }

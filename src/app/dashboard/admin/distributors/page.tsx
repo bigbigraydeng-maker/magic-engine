@@ -5,6 +5,7 @@ import { DistributorTable } from './distributor-table'
 import { NewDistributorForm } from './new-distributor-form'
 import { SaleForm } from './sale-form'
 import { SalesTable } from './sales-table'
+import { StatementsCard } from './statements-card'
 
 export default function DistributorsPage() {
   const [distributors, setDistributors] = useState<Distributor[]>([])
@@ -143,6 +144,10 @@ export default function DistributorsPage() {
             loading={salesLoading}
             onRefunded={reloadAll}
           />
+        </Card>
+
+        <Card title="月结与付款">
+          <StatementsCard distributors={distributors} />
         </Card>
       </div>
     </div>

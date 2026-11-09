@@ -14,11 +14,13 @@ const CATALOG = { plans: [{ code: 'videos-6', videosPerMonth: 6, monthlyCents: 3
 
 function mockApi() {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-    const json = url.endsWith('/sales') && !init
-      ? { sales: [SALE, REFUND], catalog: CATALOG }
-      : init?.method === 'POST'
-        ? { distributor: { ...PENDING, status: 'approved' } }
-        : { distributors: [PENDING, APPROVED] }
+    const json = url.endsWith('/statements') && !init
+      ? { statements: [] }
+      : url.endsWith('/sales') && !init
+        ? { sales: [SALE, REFUND], catalog: CATALOG }
+        : init?.method === 'POST'
+          ? { distributor: { ...PENDING, status: 'approved' } }
+          : { distributors: [PENDING, APPROVED] }
     return { ok: true, json: async () => json }
   })
   vi.stubGlobal('fetch', fetchMock)

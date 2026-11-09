@@ -250,6 +250,57 @@ END $$;
 CREATE TRIGGER distributor_statements_transition BEFORE INSERT OR UPDATE OR DELETE ON public.distributor_statements
   FOR EACH ROW EXECUTE FUNCTION public.distributor_statements_transition();
 
+-- 每笔销售 / 退款进了哪份月结。指向作废月结的视为没结算过，重算时会被覆盖。
+ALTER TABLE public.distributor_sales
+  ADD COLUMN settled_statement_id UUID REFERENCES public.distributor_statements(id) ON DELETE RESTRICT;
+CREATE INDEX distributor_sales_settled_idx ON public.distributor_sales(settled_statement_id);
+
+-- 一次事务保存整份月结：月结行、每人余额、分润明细、把这些销售标成已结算。任何一步失败整份回滚。
+-- 只给 service_role 用（SECURITY INVOKER，不提权）。
+CREATE FUNCTION public.distributor_save_statement(p JSONB) RETURNS UUID
+LANGUAGE plpgsql SECURITY INVOKER SET search_path = public AS $$
+DECLARE
+  sid UUID;
+  wanted INTEGER;
+  already INTEGER;
+  marked INTEGER;
+BEGIN
+  INSERT INTO public.distributor_statements(period_month, rule_version, total_payable_cents)
+  VALUES ((p->>'period_month')::date, p->>'rule_version', (p->>'total_payable_cents')::bigint)
+  RETURNING id INTO sid;
+
+  INSERT INTO public.distributor_statement_balances
+    (statement_id, distributor_id, opening_cents, period_cents, payout_cents, closing_cents, team_sales_cents, team_rate_bp, team_paid)
+  SELECT sid, (b->>'distributor_id')::uuid, (b->>'opening_cents')::bigint, (b->>'period_cents')::bigint,
+         (b->>'payout_cents')::bigint, (b->>'closing_cents')::bigint, (b->>'team_sales_cents')::bigint,
+         (b->>'team_rate_bp')::integer, (b->>'team_paid')::boolean
+    FROM jsonb_array_elements(p->'balances') b;
+
+  INSERT INTO public.distributor_commission_lines (statement_id, distributor_id, kind, sale_id, amount_cents, payable, note)
+  SELECT sid, (l->>'distributor_id')::uuid, l->>'kind', NULLIF(l->>'sale_id', '')::uuid,
+         (l->>'amount_cents')::bigint, (l->>'payable')::boolean, l->>'note'
+    FROM jsonb_array_elements(p->'lines') l;
+
+  SELECT count(*) INTO wanted FROM jsonb_array_elements_text(p->'sale_ids');
+  SELECT count(*) INTO already
+    FROM public.distributor_sales s JOIN public.distributor_statements st ON st.id = s.settled_statement_id
+   WHERE s.id IN (SELECT x::uuid FROM jsonb_array_elements_text(p->'sale_ids') x) AND st.status <> 'voided';
+  IF already > 0 THEN
+    RAISE EXCEPTION '% sale(s) are already settled in a live statement', already;
+  END IF;
+  UPDATE public.distributor_sales SET settled_statement_id = sid
+   WHERE id IN (SELECT x::uuid FROM jsonb_array_elements_text(p->'sale_ids') x);
+  GET DIAGNOSTICS marked = ROW_COUNT;
+  IF marked <> wanted THEN
+    RAISE EXCEPTION 'statement lists % sale(s) but % exist', wanted, marked;
+  END IF;
+  RETURN sid;
+END $$;
+
+REVOKE ALL ON FUNCTION public.distributor_save_statement(JSONB) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.distributor_save_statement(JSONB) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.distributor_save_statement(JSONB) TO service_role;
+
 REVOKE ALL ON FUNCTION public.distributor_sales_refund_guard() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.distributor_statement_children_lock() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.distributor_commission_lines_no_double() FROM PUBLIC;

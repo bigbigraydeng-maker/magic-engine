@@ -19,3 +19,15 @@ export function monthKey(iso: string, timeZone: string): string {
   if (!year || !month) throw new DistributorTimeError(`cannot derive month for ${iso}`)
   return `${year}-${month}`
 }
+
+/**
+ * New Zealand UTC offset ("+13:00" / "+12:00") at the start of the given NZ date (YYYY-MM-DD).
+ * Sampled at 12:00 UTC the day before = 00:00/01:00 NZ on that date, before any 2–3am DST switch.
+ */
+export function nzOffset(date: string): string {
+  const name = new Intl.DateTimeFormat('en-US', { timeZone: 'Pacific/Auckland', timeZoneName: 'longOffset' })
+    .formatToParts(new Date(Date.parse(`${date}T00:00:00Z`) - 12 * 3_600_000))
+    .find((p) => p.type === 'timeZoneName')?.value
+  if (!name || !/^GMT[+-]\d{2}:\d{2}$/.test(name)) throw new DistributorTimeError(`cannot derive NZ offset for ${date}`)
+  return name.slice(3)
+}

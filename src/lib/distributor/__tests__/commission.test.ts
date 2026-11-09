@@ -285,6 +285,16 @@ describe('team differential commission', () => {
   })
 })
 
+describe('inactivity is judged as of the period end', () => {
+  it('a refund recorded after the month ended does not make that month inactive', () => {
+    const sold = sale('B', 10_000_000)
+    const laterRefund = refundOf(sold, -10_000_000, APR)
+    const stmt = run({ distributors: [dist('B', null, 'standard')], periodSales: [sold], allSales: [sold, laterRefund] })
+    expect(stmt.lines.find((l) => l.kind === 'team')?.payable).toBe(true)
+    expect(stmt.teamMonth.get('B')).toEqual({ rateBp: 600, paid: true })
+  })
+})
+
 describe('balances and validation', () => {
   it('carries an opening debt forward and rejects a positive opening balance', () => {
     const stmt = run({ distributors: [dist('x', null, 'standard')], periodSales: [sale('x', 15_000)], openingBalances: new Map([['x', -5_000]]) })

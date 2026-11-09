@@ -37,7 +37,7 @@ const SALE_COLUMNS = 'id, distributor_id, kind, order_ref, plan_code, months, ex
 
 type DbError = { message: string; code?: string } | null
 
-function fail(context: string, error: DbError): never {
+export function fail(context: string, error: DbError): never {
   // Errors raised by our own guard triggers (refund over-limit, settled-sale edits) are conflicts, not outages.
   if (error?.code === 'P0001') throw new DistributorStoreError(error.message, 409)
   console.error(`[distributor-store] ${context}:`, error?.message)
@@ -46,11 +46,13 @@ function fail(context: string, error: DbError): never {
 
 const PAGE = 1000
 
-/** Reads every row of a table page by page (PostgREST caps a single response). */
-async function selectAll<T>(table: string, columns: string): Promise<T[]> {
+/** Reads every row of a table page by page (PostgREST caps a single response). `orderBy` must be unique. */
+export async function selectAll<T>(table: string, columns: string, orderBy: readonly string[] = ['id']): Promise<T[]> {
   const rows: T[] = []
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabaseAdmin.from(table).select(columns).order('id').range(from, from + PAGE - 1)
+    let query = supabaseAdmin.from(table).select(columns)
+    for (const column of orderBy) query = query.order(column)
+    const { data, error } = await query.range(from, from + PAGE - 1)
     if (error) fail(`list ${table}`, error)
     const page = (data ?? []) as T[]
     rows.push(...page)
