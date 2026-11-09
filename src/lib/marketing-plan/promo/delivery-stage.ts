@@ -10,13 +10,11 @@ export const STAGE_LABEL: Record<DeliveryStage, string> = {
   scale: '放量',
   steady: '稳住',
 }
-
 export const STAGE_GOAL: Record<DeliveryStage, string> = {
   test: '用每天上限里的一小部分，试出单次留资成本能不能压到客户设置的目标以内。',
   scale: '把已经达标的做法放到一份新计划里加大比重。正在跑的计划不改预算。',
   steady: '按已经证明的比例稳住。这次不提案加预算。',
 }
-
 export function defaultTestDelivery(startedOn: string): NonNullable<PromoSpec['delivery']> {
   return {
     stage: 'test',
@@ -26,7 +24,6 @@ export function defaultTestDelivery(startedOn: string): NonNullable<PromoSpec['d
     proven_share: DEFAULT_PROVEN_SHARE,
   }
 }
-
 export function sharesOf(spec: PromoSpec): { test: number; proven: number } {
   const row = spec.delivery
   if (row?.test_share !== undefined && row.proven_share !== undefined) {
@@ -34,28 +31,21 @@ export function sharesOf(spec: PromoSpec): { test: number; proven: number } {
   }
   return { test: DEFAULT_TEST_SHARE, proven: DEFAULT_PROVEN_SHARE }
 }
-
 export interface RatioWarning { level: 'ok' | 'warn' | 'unknown'; text: string }
-
 const SOFT = '这只是提醒，不拦住批准，也不改正在跑的计划。'
-
 function pct(share: number): string {
   return `${Math.round(share * 100)}%`
 }
-
 function yuan(cents: number): string {
   return (cents / 100).toFixed(2)
 }
-
 function ruleLine(spec: PromoSpec): string {
   const shares = sharesOf(spec)
   return `默认把每天总上限分成试投 ${pct(shares.test)}、已证明 ${pct(shares.proven)}。${SOFT}`
 }
-
 function sumRole(steps: AdsStep[], role: BudgetRole): number {
   return steps.filter(s => s.settings.budget_role === role).reduce((n, s) => n + s.settings.daily_budget_cents, 0)
 }
-
 function taggedWarning(spec: PromoSpec, steps: AdsStep[], cap: number): RatioWarning {
   const shares = sharesOf(spec)
   const rule = ruleLine(spec)
@@ -74,7 +64,6 @@ function taggedWarning(spec: PromoSpec, steps: AdsStep[], cap: number): RatioWar
   }
   return { level: 'ok', text: `试投和已证明的每日金额与 ${pct(shares.test)} / ${pct(shares.proven)} 一致。${rule}` }
 }
-
 function untaggedWarning(spec: PromoSpec, steps: AdsStep[], cap: number): RatioWarning {
   const rule = ruleLine(spec)
   const stage = spec.delivery?.stage
@@ -88,7 +77,6 @@ function untaggedWarning(spec: PromoSpec, steps: AdsStep[], cap: number): RatioW
   }
   return { level: 'ok', text: `试投阶段，这份计划的广告每天合计没有超过建议的试投部分。${rule}` }
 }
-
 export function ratioWarning(spec: PromoSpec): RatioWarning {
   const rule = ruleLine(spec)
   const cap = spec.daily_total_cap_cents

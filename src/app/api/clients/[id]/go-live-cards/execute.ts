@@ -12,6 +12,7 @@ import { existingAdSetCountsAsLive } from '@/lib/ads-go-live/existing-ad-set-liv
 import { goLiveSpendReason } from '@/lib/ads-go-live/spend-recheck'
 import { readReusedAdSetSpend } from './recheck-existing-spend'
 import type { SpendRead } from '@/lib/meta/existing-adset-spend'
+import { assertLaunchAllowed } from '@/lib/ads-launch/plan-gate'
 import { approveDraft } from '@/lib/ads-strategy/draft-and-gate'
 import { activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
 import { fetchCampaignStatus, fetchEffectiveStatus } from '@/lib/meta/readback'
@@ -267,6 +268,13 @@ export async function executeConfirmedGoLive(args: {
   const ids = args.ids
   if (!ids) return held('没记下广告编号，没有开，系列保持暂停。')
   if (!allowed(args.authority)) return held('这次确认对不上，没有开，系列保持暂停。')
+  const bound = await assertLaunchAllowed(
+    args.supabase,
+    args.clientId,
+    await readPayload(args.supabase, args.clientId, args.draftId),
+    args.now ?? new Date(),
+  )
+  if (!bound.ok) return held(bound.reason)
   const token = await getMetaTokenForClient(args.clientId)
   if (!token) return held('拿不到这个客户的广告授权，没有开，系列保持暂停。')
   const blocked = await reusedCampaignPaused(ids, token)
