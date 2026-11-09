@@ -1,16 +1,14 @@
 'use client'
 import { useState, type FormEvent } from 'react'
-import type { TermsSection } from '@/lib/distributor/terms'
 
 interface ApplyFormProps {
-  terms: TermsSection[]
   termsVersion: string
   initialReferralCode: string | null
 }
 
 const inputClass = 'block w-full rounded-lg border border-black/[0.1] bg-white px-3 py-2 text-sm'
 
-export function ApplyForm({ terms, termsVersion, initialReferralCode }: ApplyFormProps) {
+export function ApplyForm({ termsVersion, initialReferralCode }: ApplyFormProps) {
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
@@ -25,7 +23,7 @@ export function ApplyForm({ terms, termsVersion, initialReferralCode }: ApplyFor
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!accepted) {
-      setError('请先阅读并勾选同意经销商条款')
+      setError('请先阅读并勾选同意上面的经销商规则')
       return
     }
     setError(null)
@@ -78,25 +76,7 @@ export function ApplyForm({ terms, termsVersion, initialReferralCode }: ApplyFor
 
   return (
     <>
-      <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
-        <div className="border-b border-black/[0.06] px-6 py-4">
-          <h2 className="text-base font-bold text-me-charcoal/90">经销商条款</h2>
-        </div>
-        <div className="space-y-5 px-6 py-5">
-          {terms.map((section) => (
-            <div key={section.title}>
-              <h3 className="mb-2 text-sm font-bold text-me-charcoal/90">{section.title}</h3>
-              <ul className="list-disc pl-5 space-y-1 text-sm text-me-charcoal/75">
-                {section.points.map((point, i) => (
-                  <li key={i}>{point}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-8 overflow-hidden rounded-2xl bg-white shadow-sm">
+      <div className="overflow-hidden rounded-2xl bg-white shadow-card">
         <div className="border-b border-black/[0.06] px-6 py-4">
           <h2 className="text-base font-bold text-me-charcoal/90">填写申请</h2>
         </div>
@@ -206,7 +186,7 @@ export function ApplyForm({ terms, termsVersion, initialReferralCode }: ApplyFor
                 checked={accepted}
                 onChange={(e) => setAccepted(e.target.checked)}
               />
-              <span>我已阅读并同意上面的经销商条款</span>
+              <span>我已阅读并同意上面的经销商规则</span>
             </label>
 
             <button

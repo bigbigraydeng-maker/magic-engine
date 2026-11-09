@@ -53,7 +53,7 @@ export function parseApplication(body: unknown): Parsed<ApplicationInput> {
   const rawRef = typeof b.referral_code === 'string' ? b.referral_code.trim() : ''
   const referralCode = rawRef ? normaliseReferralCode(rawRef) : null
   if (rawRef && !referralCode) errors.push('推荐码格式不对（8 位字母和数字）')
-  if (b.accept_terms !== true) errors.push('请先阅读并勾选同意经销商条款')
+  if (b.accept_terms !== true) errors.push('请先阅读并勾选同意上面的经销商规则')
   if (b.terms_version !== DISTRIBUTOR_TERMS_VERSION) errors.push('条款已经更新，请刷新页面重新阅读后再提交')
   const isBot = typeof b.website === 'string' && b.website.trim() !== ''
   if (errors.length) return { ok: false, errors }
