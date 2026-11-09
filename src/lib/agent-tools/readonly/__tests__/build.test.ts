@@ -8,6 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 vi.mock('@/lib/dataforseo/labs', () => ({ getKeywordsForSite: vi.fn(async () => []) }))
 vi.mock('@/lib/gsc/client', () => ({ fetchGscSnapshot: vi.fn(async () => null) }))
 vi.mock('@/lib/ga4/client', () => ({ fetchGa4Snapshot: vi.fn(async () => null) }))
+vi.mock('@/lib/auth/client-access', () => ({ requirePaidClientAccess: vi.fn(), requirePlanApproverAccess: vi.fn() }))
 vi.mock('@/lib/case-library/outcome-confidence', () => ({ fetchClientOutcomeHistory: vi.fn(async () => ({})) }))
 
 import { fetchGscSnapshot } from '@/lib/gsc/client'
@@ -45,7 +46,10 @@ describe('buildReadonlyTools 资源身份解析', () => {
     })
 
     expect(tools.map(t => t.name).sort()).toEqual(
-      ['query_analytics', 'query_flywheel_history', 'query_keyword_detail', 'query_search_console'],
+      [
+        'query_analytics', 'query_flywheel_history', 'query_keyword_detail', 'query_search_console',
+        'read_plan_seed', 'read_prescription_progress', 'read_spend_and_leads',
+      ],
     )
 
     // handler 用的是**解析出来的** siteUrl/propertyId，Claude 无从指定

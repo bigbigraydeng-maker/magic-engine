@@ -79,6 +79,9 @@ describe('opt-in 工具路径', () => {
     expect(out.tool_trace).toEqual([
       { name: 'query_keyword_detail', input: {}, summary: 'ok', is_error: false },
     ])
+    expect(mockTools.mock.calls[0][0].systemPrompt).toContain(
+      '不传 prescription_id 时，服务端用这个客户最新一份已批准或草稿处方',
+    )
   })
 
   it('long 模式 maxToolRounds=4', async () => {
