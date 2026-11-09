@@ -90,6 +90,18 @@ describe('approval source', () => {
     expect(otherGoal.reason).toContain('已批准计划')
   })
 
+  it('ignores an archived plan for the same goal and keeps the approved one', async () => {
+    const read = await readApprovalSource(db({
+      marketing_plans: [
+        plan(),
+        plan({ id: 'plan-old', status: 'archived' }),
+      ],
+    }), CLIENT, RX)
+    expect(read.ok).toBe(true)
+    if (!read.ok) return
+    expect(read.source.planId).toBe('plan-1')
+  })
+
   it('refuses two approved plans instead of picking one, and does not write', async () => {
     const log: Array<{ table: string; op: string; filters: unknown[] }> = []
     const sb = createFakeSupabase({

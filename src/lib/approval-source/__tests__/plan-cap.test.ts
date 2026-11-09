@@ -43,6 +43,14 @@ describe('agreedPlanDailyTotalCap', () => {
   it('uses the number when every approved promo plan says the same', () => {
     expect(agreedPlanDailyTotalCap([plan(4_000), plan(4_000)])).toEqual({ state: 'set', cents: 4_000 })
   })
+
+  it('ignores an archived plan, even when that plan has no cap', () => {
+    expect(agreedPlanDailyTotalCap([
+      plan(4_000),
+      plan(null, 'archived'),
+      plan(9_000, 'archived'),
+    ])).toEqual({ state: 'set', cents: 4_000 })
+  })
 })
 
 describe('readClientDailyTotalCap', () => {
@@ -60,5 +68,25 @@ describe('readClientDailyTotalCap', () => {
     }
     const result = await readClientDailyTotalCap(sb as unknown as SupabaseClient, 'client-1')
     expect(result.state).toBe('unreadable')
+  })
+
+  it('asks only for approved plans, so an archived row is not part of the read', async () => {
+    const eqs: Array<[string, unknown]> = []
+    const sb = {
+      from() {
+        const api = {
+          select() { return api },
+          eq(col: string, val: unknown) { eqs.push([col, val]); return api },
+          then(resolve: (value: { data: unknown; error: null }) => unknown) {
+            return Promise.resolve({ data: [plan(4_000)], error: null }).then(resolve)
+          },
+        }
+        return api
+      },
+    }
+    const result = await readClientDailyTotalCap(sb as unknown as SupabaseClient, 'client-1')
+    expect(eqs).toContainEqual(['status', 'approved'])
+    expect(eqs).toContainEqual(['client_id', 'client-1'])
+    expect(result).toEqual({ state: 'set', cents: 4_000 })
   })
 })
