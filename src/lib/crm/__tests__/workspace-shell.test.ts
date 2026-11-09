@@ -121,12 +121,22 @@ describe('buildCrmNavItems', () => {
     expect(items.filter((i) => i.align === 'left')).toHaveLength(5)
   })
 
-  it('autosend sits between templates and settings and points at the auto-send page', () => {
+  it('adding autosend leaves the sales item untouched (bookings gate, left group, own href)', () => {
+    const sales = buildCrmNavItems(CLIENT).find((i) => i.key === 'sales')
+    expect(sales).toMatchObject({
+      label: '销售进度',
+      href: `${BASE}/sales-progress`,
+      gate: 'bookings',
+      align: 'left',
+    })
+  })
+
+  it('autosend sits between templates and settings and points at the auto-letters page', () => {
     const items = buildCrmNavItems(CLIENT)
     const keys = items.map((i) => i.key)
     expect(keys.indexOf('autosend')).toBe(keys.indexOf('templates') + 1)
     expect(keys.indexOf('settings')).toBe(keys.indexOf('autosend') + 1)
-    expect(items.find((i) => i.key === 'autosend')?.href).toBe(`${BASE}/crm/auto-send`)
+    expect(items.find((i) => i.key === 'autosend')?.href).toBe(`${BASE}/crm/auto-letters`)
   })
 
   it('embeds the clientId in every href', () => {
@@ -188,11 +198,11 @@ describe('activeCrmNavKey', () => {
   })
 
   it('auto-send page => autosend', () => {
-    expect(activeCrmNavKey(`${BASE}/crm/auto-send`, '', CLIENT)).toBe('autosend')
+    expect(activeCrmNavKey(`${BASE}/crm/auto-letters`, '', CLIENT)).toBe('autosend')
   })
 
   it('auto-send of a different client => null', () => {
-    expect(activeCrmNavKey('/dashboard/clients/other/crm/auto-send', '', CLIENT)).toBeNull()
+    expect(activeCrmNavKey('/dashboard/clients/other/crm/auto-letters', '', CLIENT)).toBeNull()
   })
 
   it('a CRM page with no nav item (decisions) => null', () => {
