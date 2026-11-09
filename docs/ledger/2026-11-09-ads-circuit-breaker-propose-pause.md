@@ -1,9 +1,11 @@
 ---
 id: 2026-11-09-ads-circuit-breaker-propose-pause
 title: 广告异常只出暂停确认卡，系统自己不暂停
-status: decided
+status: done
 owner: agent
 decided_on: 2026-11-09
+done_on: 2026-11-09
+done_ref: pr:3702
 source: doc:docs/ledger/evidence/2026-11-03-ads-impact-25-packages-audit.md
 verify_by: 2026-11-12
 verify_how: 用一份假数据跑判定，花费超每天上限时应出暂停卡且没有改广告；快照超过 12 小时只出提醒。
