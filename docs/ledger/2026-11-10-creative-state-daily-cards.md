@@ -1,9 +1,11 @@
 ---
 id: 2026-11-10-creative-state-daily-cards
 title: 每天拉完数出一次素材建议卡，自己不改预算
-status: decided
+status: done
 owner: agent
 decided_on: 2026-11-10
+done_on: 2026-11-10
+done_ref: pr:3714
 source: doc:docs/ledger/2026-11-10-ads-target-cpl-shared.md
 verify_by: 2026-11-12
 verify_how: 每日拉数任务跑完后，运行记录里能看到素材建议卡的张数。没点确认卡之前，广告和预算都不变。
