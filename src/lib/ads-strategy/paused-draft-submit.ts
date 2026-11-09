@@ -365,7 +365,7 @@ function holdFate(
   if (run.status !== 'pending_approval') return 'settled'
   if (!incoming) return 'live'
   const stored = readStoredCard(run.input)
-  if (stored && isExpired(stored.issuedAt, now)) return 'expired'
+  if (stored && isExpired(stored.issuedAt, now, stored.lifetime)) return 'expired'
   const replaced = payload.subjectKey === incoming.subjectKey && payload.fingerprint !== incoming.fingerprint
   return stored && replaced ? 'replaced' : 'live'
 }

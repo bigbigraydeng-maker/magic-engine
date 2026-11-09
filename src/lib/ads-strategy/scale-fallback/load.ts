@@ -155,15 +155,15 @@ function currencyOf(rows: readonly Snap[]): string | null {
 
 async function freshCapture(sb: SupabaseClient, clientId: string, accountId: string, now: Date): Promise<boolean | 'unreadable'> {
   const { data, error } = await sb.from('ad_snapshot_captures')
-    .select('complete, captured_at, skipped_shared')
+    .select('complete, captured_at, skipped_shared, error')
     .eq('client_id', clientId)
     .eq('ad_account_id', accountId)
     .eq('level', 'ad')
     .order('captured_at', { ascending: false })
     .limit(ROW_LIMIT)
   if (error) return 'unreadable'
-  const row = (data as Array<{ complete?: boolean; captured_at?: string; skipped_shared?: boolean }> | null)?.find((item) => (
-    item.complete === true && item.skipped_shared !== true && typeof item.captured_at === 'string'
+  const row = (data as Array<{ complete?: boolean; captured_at?: string; skipped_shared?: boolean; error?: string | null }> | null)?.find((item) => (
+    item.complete === true && item.skipped_shared !== true && (item.error == null || item.error === '') && typeof item.captured_at === 'string'
   ))
   if (!row?.captured_at) return false
   const age = now.getTime() - Date.parse(row.captured_at)
