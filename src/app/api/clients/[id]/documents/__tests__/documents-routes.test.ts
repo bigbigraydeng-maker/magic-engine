@@ -4,6 +4,7 @@
  * Runs the real routes, store and storage code against an in-memory stand-in for the database
  * and the private bucket, so the answers below come from what a request can actually reach.
  */
+import { createHash } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
 
@@ -148,6 +149,14 @@ describe('GET /documents/[docId]/download', () => {
     expect(fakeDb.storage.signed).toEqual([])
   })
 
+  it('fails closed if the paid guard ever lets a non-paid tier through', async () => {
+    mocks.paid.mockResolvedValue(SELF_SERVE_PASSED)
+    const res = await downloadDocument(get('/x'), docCtx(CLIENT_A, id(2)))
+    expect(res.status).toBe(403)
+    expect(fakeDb.queries).toEqual([])
+    expect(fakeDb.storage.signed).toEqual([])
+  })
+
   it('sends a client member to a 60-second signed link for a file marked visible to the client', async () => {
     mocks.paid.mockResolvedValue(MEMBER)
     const res = await downloadDocument(get('/x'), docCtx(CLIENT_A, id(2)))
@@ -284,6 +293,13 @@ describe('POST /documents (upload)', () => {
     expect((await uploadDocument(uploadRequest({}, { name: 'c.pdf', bytes: same }), ctx(CLIENT_A))).status).toBe(201)
   })
 
+  it('allows the same content for a different client: duplicates are only refused inside one client', async () => {
+    const same = pdf('shared content')
+    rows().push(docRow(9, { client_id: CLIENT_B, sha256: createHash('sha256').update(same).digest('hex') }))
+    const res = await uploadDocument(uploadRequest({}, { name: 'a.pdf', bytes: same }), ctx(CLIENT_A))
+    expect(res.status).toBe(201)
+  })
+
   it('answers 404 for an unknown client or a malformed client id, and 500 when the lookup fails', async () => {
     fakeDb.tables.clients = []
     expect((await uploadDocument(uploadRequest({}, { name: 'a.pdf', bytes: pdf('q') }), ctx(CLIENT_A))).status).toBe(404)
@@ -360,6 +376,11 @@ describe('PATCH /documents/[docId] (edit, archive, restore)', () => {
     const res = await patchDocument(patchRequest({ title: ' Renamed ', visibility: 'internal', versionLabel: 'v12' }), docCtx(CLIENT_A, id(2)))
     expect(res.status).toBe(200)
     expect((await res.json()).document).toMatchObject({ id: id(2), title: 'Renamed', visibility: 'internal', version_label: 'v12', category: 'brochure' })
+  })
+
+  it('changes the category and the description when asked', async () => {
+    const res = await patchDocument(patchRequest({ category: 'price', description: 'new text' }), docCtx(CLIENT_A, id(2)))
+    expect((await res.json()).document).toMatchObject({ id: id(2), category: 'price', description: 'new text', title: 'Doc 2', visibility: 'client' })
   })
 
   it('cannot change ownership or storage through extra fields', async () => {
