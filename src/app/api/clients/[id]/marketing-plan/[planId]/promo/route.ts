@@ -19,7 +19,8 @@ import { loadLiveAds } from '@/lib/marketing-plan/promo/live-ads'
 import { loadLiveAdLink } from '@/lib/marketing-plan/promo/live-ad-link-load'
 import { loadPromoOptions } from '@/lib/marketing-plan/promo/options'
 import { dailyTotalCapCents } from '@/lib/marketing-plan/promo/daily-total-cap'
-import { allAdsSteps, type PromoSpec, type PromoValidationIssue } from '@/lib/marketing-plan/promo/spec'
+import { loadDeliveryView } from '@/lib/marketing-plan/promo/stage-evidence'
+import { allAdsSteps, readPromoSpec, type PromoSpec, type PromoValidationIssue } from '@/lib/marketing-plan/promo/spec'
 import { validatePlanDraft } from '@/lib/marketing-plan/promo/plan-draft-validate'
 import { isPlanContentLocked, PLAN_CONTENT_LOCKED_MESSAGE } from '@/lib/marketing-plan/plan-guard'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
@@ -69,8 +70,10 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
       // 推广表单或空白草稿上的目标 → 该目标最新一版。都没有 → 客户最近一份还在用的处方。
       loadPlanPrescription(ctx.params.id, goalId),
     ])
+    const spec = board.spec_valid ? readPromoSpec(plan.plan_data) : null
+    const delivery = spec ? await loadDeliveryView(supabaseAdmin, ctx.params.id, spec, board.today) : null
     return NextResponse.json({
-      success: true, board, options, live_ads: liveAds, live_link: liveLink, live_ads_visible: internal, prescription,
+      success: true, board, options, live_ads: liveAds, live_link: liveLink, live_ads_visible: internal, prescription, delivery,
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error'
