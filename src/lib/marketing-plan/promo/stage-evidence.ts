@@ -1,11 +1,13 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { MarketingPlan } from '../types'
 import type { WatchFinding } from './daily-watch'
+import { audienceLadder, type LadderView, type QualifiedSeed, type QuotedSeed } from './audience-ladder'
 import { ratioWarning, STAGE_GOAL, STAGE_LABEL } from './delivery-stage'
 import { DEFAULT_PROMO_PLAYBOOK } from './playbooks'
 import { buildScaleDraft, judgeSwitch, shiftDate, type CaptureState, type SwitchEvidence, type SwitchVerdict } from './stage-switch'
 import { allAdsSteps, readPromoSpec, type PromoSpec } from './spec'
 
+const QUOTED = '已报价'
 const LEVELS = ['campaign', 'adset'] as const
 
 export interface DeliveryView {
@@ -15,6 +17,8 @@ export interface DeliveryView {
   switch_text: string
   can_propose: boolean
   draft_note: string | null
+  ladder_note: string
+  rungs: LadderView['rungs']
 }
 
 interface CaptureRow { complete?: unknown; captured_at?: unknown }
@@ -125,6 +129,32 @@ async function readCurrency(supabase: SupabaseClient, accountIds: string[]): Pro
   return [...codes][0] ?? null
 }
 
+function countriesOf(spec: PromoSpec): string[] {
+  const set = new Set<string>()
+  for (const row of allAdsSteps(spec)) {
+    for (const code of row.step.settings.targeting?.countries ?? []) set.add(code)
+  }
+  return [...set]
+}
+
+async function readLadderFacts(
+  supabase: SupabaseClient, clientId: string,
+): Promise<{ qualified: QualifiedSeed; quoted: QuotedSeed }> {
+  const stages = await supabase.from('client_pipeline_stages').select('stage_key, label').eq('client_id', clientId).limit(100)
+  const config = await supabase.from('ad_strategy_configs').select('qualified_stage_keys').eq('client_id', clientId).maybeSingle()
+  if (stages.error || config.error) return { qualified: 'unreadable', quoted: 'unreadable' }
+  const stageRows = (stages.data ?? []) as { stage_key?: unknown; label?: unknown }[]
+  if (stageRows.length >= 100) return { qualified: 'unreadable', quoted: 'unreadable' }
+  const keysRaw = (config.data as { qualified_stage_keys?: unknown } | null)?.qualified_stage_keys
+  const keys = Array.isArray(keysRaw) ? keysRaw.filter((key): key is string => typeof key === 'string' && key !== '') : []
+  const quotedRows = stageRows.filter(row => row.label === QUOTED && typeof row.stage_key === 'string')
+  const quoted: QuotedSeed = quotedRows.length === 0 ? 'absent' : quotedRows.some(row => keys.includes(String(row.stage_key))) ? 'included' : 'excluded'
+  if (keys.length === 0) return { qualified: 'unset', quoted }
+  const count = await supabase.from('contacts').select('id', { count: 'exact', head: true }).eq('client_id', clientId).in('stage', keys)
+  if (count.error || typeof count.count !== 'number') return { qualified: 'unreadable', quoted }
+  return { qualified: count.count > 0 ? 'ready' : 'empty', quoted }
+}
+
 function blankEvidence(capture: CaptureState): SwitchEvidence {
   return { capture, asOf: null, stableEnd: null, datesSeen: null, leads: null, spendMajor: null, targetMajor: null, currency: null }
 }
@@ -144,7 +174,7 @@ async function loadEvidence(supabase: SupabaseClient, clientId: string, spec: Pr
   return { capture, asOf: today, stableEnd, datesSeen: totals.dates, leads: totals.leads, spendMajor: totals.spend, targetMajor: target, currency }
 }
 
-export function describeDelivery(spec: PromoSpec, verdict: SwitchVerdict, draftNote: string | null): DeliveryView {
+export function describeDelivery(spec: PromoSpec, verdict: SwitchVerdict, ladder: LadderView, draftNote: string | null): DeliveryView {
   const marked = spec.delivery !== undefined
   return {
     stage_label: marked && spec.delivery ? STAGE_LABEL[spec.delivery.stage] : '还没标',
@@ -153,6 +183,8 @@ export function describeDelivery(spec: PromoSpec, verdict: SwitchVerdict, draftN
     switch_text: verdict.text,
     can_propose: verdict.kind === 'propose',
     draft_note: draftNote,
+    ladder_note: ladder.note,
+    rungs: ladder.rungs,
   }
 }
 
@@ -160,15 +192,18 @@ export async function loadDeliveryView(
   supabase: SupabaseClient, clientId: string, spec: PromoSpec, today: string | null, now: Date = new Date(),
 ): Promise<DeliveryView> {
   try {
+    const ladderFacts = await readLadderFacts(supabase, clientId)
+    const ladder = audienceLadder({ stage: spec.delivery?.stage ?? null, countries: countriesOf(spec), ...ladderFacts })
     if (!today) {
-      return describeDelivery(spec, { kind: 'unreadable', text: '不知道今天是客户的哪一天，不能判断能不能换阶段。' }, null)
+      return describeDelivery(spec, { kind: 'unreadable', text: '不知道今天是客户的哪一天，不能判断能不能换阶段。' }, ladder, null)
     }
     const evidence = await loadEvidence(supabase, clientId, spec, today, now)
     const verdict = judgeSwitch(spec, evidence)
     const draftNote = verdict.kind === 'propose' ? buildScaleDraft(spec, today).note : null
-    return describeDelivery(spec, verdict, draftNote)
+    return describeDelivery(spec, verdict, ladder, draftNote)
   } catch {
-    return describeDelivery(spec, { kind: 'unreadable', text: '阶段证据没读成，这次不提案。' }, null)
+    const ladder = audienceLadder({ stage: spec.delivery?.stage ?? null, countries: [], qualified: 'unreadable', quoted: 'unreadable' })
+    return describeDelivery(spec, { kind: 'unreadable', text: '阶段证据没读成，这次不提案。' }, ladder, null)
   }
 }
 
