@@ -4,9 +4,8 @@
  *   GET  ?level=adset|campaign&unit_id=&ad_account_id=  → 预览（只读）
  *   POST { level, unit_id, ad_account_id, kind: 'up10'|'up20'|'down_to', target_cents?, request_id }
  *
- * 🔴 加：只提交、不执行。复用 O1 人批链路（强制要人批），批准只有 PM 本人（内核第 3 刀 3a 的闸）。
- *    加钱批准人名单没配 → 503，不提交（闸不在位不开按钮）。
- * 🔴 减：复用人工止损提交（刹车，管理员点了就执行），一次最多减 20%，服务端重算、不信前端数字。
+ * 加：在投计划的预算不在这里改。要加预算，请新开一份计划。这一步不写。
+ * 减：只出降预算确认卡。点了没过期的卡之后才改。一次最多减 20%，服务端重算、不信前端数字。
  * 🔴 预览和提交都在服务端重读事实（最新成绩单、当场读 Meta、内核信封），不信请求体里的金额。
  */
 import { NextRequest, NextResponse } from 'next/server'
@@ -16,6 +15,7 @@ import { requireAdsO1BudgetScaleAccess } from '@/lib/action-submission/ads-o1-bu
 import { requireStopLossAccess } from '@/lib/action-submission/stop-loss'
 import { CLIENT_BUDGET_FACT_FRESH_MS } from '@/lib/capabilities/ads/envelope-facts'
 import { clickerFromAccess, issueMoneyBudget } from '@/lib/action-submission/money-card'
+import { LIVE_PLAN_INCREASE_REFUSED } from '@/lib/ads-strategy/live-plan-budget'
 import { loadMoneyBudgetLive } from '@/lib/ads-budget-card/money-live'
 import { resolveAccountTimezone, accountDayKey } from '@/lib/ads-strategy/account-timezone'
 import { loadBudgetChange, type BudgetChangeUnit } from '@/lib/ads-strategy/budget-change/load'
@@ -91,23 +91,7 @@ async function submitScale(clientId: string, unit: BudgetChangeUnit, kind: Exclu
   }
   const goal = await activeGoalId(clientId)
   if ('error' in goal) return goal.error
-  const issued = await issueScorecardCard(clientId, access, unit, {
-    source: 'scorecard_up',
-    entityId: unit.level === 'campaign' ? (loaded.target.campaignId ?? unit.id) : unit.id,
-    campaignId: unit.level === 'campaign' ? loaded.target.campaignId : null,
-    scaleAdsetId: loaded.target.scaleAdsetId,
-    beforeCents: before,
-    afterCents: option.afterCents,
-    goalId: goal.id,
-    cycleDate: loaded.target.cycleDate,
-    requestId: null,
-    snapshotAt: new Date().toISOString(),
-  })
-  if (!issued.card) return NextResponse.json({ error: issued.reason ?? '没有出确认卡，没有改预算。', wroteMeta: false }, { status: 409 })
-  return NextResponse.json({
-    ok: true, status: 'awaiting_confirmation', wroteMeta: false,
-    runId: issued.card.runId, beforeCents: before, afterCents: option.afterCents, card: issued.card,
-  }, { status: 202 })
+  return NextResponse.json({ error: LIVE_PLAN_INCREASE_REFUSED, wroteMeta: false }, { status: 409 })
 }
 
 async function submitReduce(clientId: string, unit: BudgetChangeUnit, targetCents: unknown, requestId: unknown): Promise<NextResponse> {

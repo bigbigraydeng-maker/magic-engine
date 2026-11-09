@@ -1,12 +1,9 @@
 /** Staff-only O1 scale-up proposal: use the persisted finding, never request-supplied evidence. */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { createKernel } from '@/lib/kernel'
 import { ADS_O1_BUDGET_SCALE_ACTION_KEY, requireAdsO1BudgetScaleAccess } from '@/lib/action-submission/ads-o1-budget-scale'
-import { CLIENT_BUDGET_FACT_FRESH_MS } from '@/lib/capabilities/ads/envelope-facts'
-import { clickerFromAccess, issueMoneyBudget } from '@/lib/action-submission/money-card'
-import { loadMoneyBudgetLive } from '@/lib/ads-budget-card/money-live'
 import { findSingleDeliveringChild } from '@/lib/ads-strategy/budget-change/cbo-single-child'
+import { LIVE_PLAN_INCREASE_REFUSED } from '@/lib/ads-strategy/live-plan-budget'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 
 export const dynamic = 'force-dynamic'
@@ -76,8 +73,6 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
 
   let campaignId: string | undefined
   let budgetMinor: number | null = snapshot.daily_budget_minor
-  let budgetCurrency: string | null = snapshot.currency
-  let snapshotAt: string | null = typeof snapshot.captured_at === 'string' ? snapshot.captured_at : null
   // Adset snapshots never carry `cbo`: normalizeAdset stores null when the
   // budget belongs to its parent campaign. Confirm CBO on that campaign row.
   if (snapshot.budget_level === null && snapshot.campaign_id) {
@@ -110,8 +105,6 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
       return NextResponse.json({ error: '该系列还有其他在投广告组，不能仅凭这一组的表现提高整个系列预算' }, { status: 409 })
     }
     budgetMinor = campaign.daily_budget_minor
-    budgetCurrency = campaign.currency
-    snapshotAt = typeof campaign.captured_at === 'string' ? campaign.captured_at : snapshotAt
   } else if (snapshot.budget_level !== 'abo') {
     return NextResponse.json({ error: '广告组预算层级无法确认；没有创建审批请求' }, { status: 409 })
   }
@@ -136,36 +129,5 @@ export async function POST(req: NextRequest, { params }: Params): Promise<NextRe
   if (policyError) return NextResponse.json({ error: '暂时无法核对预算审批规则' }, { status: 500 })
   if (!policy) return NextResponse.json({ error: '该客户还没有为这项预算调整设置“必须人工批准”的规则，未创建请求' }, { status: 409 })
 
-  const level = campaignId ? 'campaign' as const : 'adset' as const
-  const entityId = campaignId ?? adsetId
-  const issued = await issueMoneyBudget({
-    kernel: createKernel(supabaseAdmin),
-    sb: supabaseAdmin,
-    clientId: params.id,
-    clicker: clickerFromAccess(auth.access, params.id),
-    source: 'opportunity',
-    level,
-    entityId,
-    adAccountId,
-    campaignId: campaignId ?? null,
-    scaleAdsetId: adsetId,
-    name: entityId,
-    beforeCents: before,
-    afterCents: after,
-    snapshotAt,
-    goalId: goal.id,
-    cycleDate: state.date,
-    requestId: null,
-    freshMs: CLIENT_BUDGET_FACT_FRESH_MS,
-    readLive: () => loadMoneyBudgetLive(supabaseAdmin, params.id, {
-      level, entityId, adAccountId, name: entityId, beforeCents: before, afterCents: after,
-    }),
-  })
-  if (!issued.card) {
-    return NextResponse.json({ error: issued.reason ?? '没有出确认卡，没有改预算。', wroteMeta: false }, { status: 409 })
-  }
-  return NextResponse.json({
-    ok: true, status: 'awaiting_confirmation', wroteMeta: false,
-    runId: issued.card.runId, beforeCents: before, afterCents: after, card: issued.card,
-  }, { status: 202 })
+  return NextResponse.json({ error: LIVE_PLAN_INCREASE_REFUSED, wroteMeta: false }, { status: 409 })
 }

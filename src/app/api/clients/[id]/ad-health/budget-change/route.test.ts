@@ -1,6 +1,6 @@
 /**
- * 成绩单调预算路由（第 3 刀 3b）：服务端重算、不信请求体金额；加只提交不执行、闸不在位就不开；
- * 减按止损执行、超过 20% 拒。取数（loadBudgetChange）与内核提交用替身，这里只测路由自己的判断。
+ * 成绩单调预算路由：加预算直接拒绝，不改在投计划；减只出确认卡。
+ * 取数与内核提交用替身，这里只测路由自己的判断。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
@@ -100,14 +100,14 @@ describe('POST 加预算', () => {
     expect(h.issue).not.toHaveBeenCalled()
   })
 
-  it('🔴 金额由服务端算：请求体里塞的金额不起作用，出卡 before 10000 → after 11000，不写 Meta', async () => {
+  it('在投计划不能在这里加预算：请求体里的金额不起作用，不出卡，不写', async () => {
     const res = await post({ ...unitBody, kind: 'up10', after_cents: 999999 })
-    expect(res.status).toBe(202)
-    expect(await res.json()).toMatchObject({ status: 'awaiting_confirmation', wroteMeta: false })
+    const body = await res.json()
+    expect(res.status).toBe(409)
+    expect(body).toMatchObject({ wroteMeta: false })
+    expect(body.error).toContain('新开一份计划')
     expect(h.submitScale).not.toHaveBeenCalled()
-    expect(h.issue).toHaveBeenCalledWith(expect.objectContaining({
-      beforeCents: 10000, afterCents: 11000, source: 'scorecard_up', entityId: '456', goalId: 'goal-1', campaignId: null,
-    }))
+    expect(h.issue).not.toHaveBeenCalled()
   })
 
   it('72 小时内改过 → 409 带原因，不提交', async () => {
