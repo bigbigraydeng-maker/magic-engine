@@ -14,7 +14,7 @@ export {
   computeStatement,
   settleBalances,
 } from './commission'
-export type { StatementInput, Statement, TeamResult } from './commission'
+export type { StatementInput, Statement, TeamResult, TeamByMonth } from './commission'
 export { evaluateUpgrade, maturedNetSales } from './upgrade'
 export type { UpgradeInput, UpgradeDecision } from './upgrade'
 export { priceOrder, PricingError } from './pricing'

@@ -96,6 +96,21 @@ export interface CommissionLine {
   note: string
 }
 
+/** A distributor's team result for one settled month, kept so later refunds claw back correctly. */
+export interface TeamMonthEntry {
+  rateBp: number
+  /** False when that month's team commission was withheld or suspended (so it is never clawed back). */
+  paid: boolean
+}
+
+/** Where a non-refund sale was settled, and which of its lines were not paid out. */
+export interface SettledSaleInfo {
+  /** Settlement month (YYYY-MM) of the statement that included the sale. */
+  month: string
+  /** Keys `${kind}:${distributorId}` of lines for this sale that were recorded but not payable. */
+  unpaid: ReadonlySet<string>
+}
+
 /** Per-distributor money for one statement. opening/closing are carried debts (≤ 0). */
 export interface DistributorBalance {
   openingCents: number

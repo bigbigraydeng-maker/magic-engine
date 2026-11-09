@@ -66,14 +66,30 @@ CREATE INDEX distributor_sales_seller_paid_idx ON public.distributor_sales(distr
 CREATE INDEX distributor_sales_refund_of_idx ON public.distributor_sales(refund_of_sale_id);
 
 -- 退款兜底：只能退原单（不能退退款），卖家与币种必须和原单一致，累计退款不能超过原单金额。
--- 原单加行锁，避免两笔退款同时写入一起超额。
+-- 原单加行锁，避免两笔退款同时写入一起超额。已结算的销售不许再改关键字段。
 CREATE FUNCTION public.distributor_sales_refund_guard() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public AS $$
 DECLARE
   original public.distributor_sales%ROWTYPE;
   refunded BIGINT;
 BEGIN
+  IF TG_OP = 'UPDATE' AND (NEW.amount_cents, NEW.distributor_id, NEW.paid_at, NEW.currency, NEW.kind, NEW.refund_of_sale_id)
+       IS DISTINCT FROM (OLD.amount_cents, OLD.distributor_id, OLD.paid_at, OLD.currency, OLD.kind, OLD.refund_of_sale_id) THEN
+    -- 已进过任何一份未作废月结的销售或退款，金额、卖家、时间、币种、类型都不许再改。
+    IF EXISTS (
+      SELECT 1 FROM public.distributor_commission_lines l
+        JOIN public.distributor_statements s ON s.id = l.statement_id
+       WHERE l.sale_id = OLD.id AND s.status <> 'voided'
+    ) THEN
+      RAISE EXCEPTION 'sale % is already settled; record a refund instead of editing it', OLD.id;
+    END IF;
+  END IF;
   IF NEW.kind <> 'refund' THEN
+    -- 原单金额不能改到比已退款合计还小。
+    IF TG_OP = 'UPDATE' AND NEW.amount_cents + (
+         SELECT COALESCE(sum(amount_cents), 0) FROM public.distributor_sales WHERE refund_of_sale_id = NEW.id) < 0 THEN
+      RAISE EXCEPTION 'sale % would be below its refunds', NEW.id;
+    END IF;
     RETURN NEW;
   END IF;
   SELECT * INTO original FROM public.distributor_sales WHERE id = NEW.refund_of_sale_id FOR UPDATE;
@@ -142,6 +158,8 @@ CREATE TABLE public.distributor_statement_balances (
   closing_cents    BIGINT NOT NULL CHECK (closing_cents <= 0),
   team_sales_cents BIGINT NOT NULL CHECK (team_sales_cents >= 0),
   team_rate_bp     INTEGER NOT NULL CHECK (team_rate_bp BETWEEN 0 AND 10000),
+  -- 本月团队收益是否真的发了（被扣住 / 账号停用 = false）；以后退款只倒扣发过的。
+  team_paid        BOOLEAN NOT NULL,
   PRIMARY KEY (statement_id, distributor_id),
   CHECK (opening_cents + period_cents = payout_cents + closing_cents),
   CHECK (payout_cents = 0 OR closing_cents = 0)
