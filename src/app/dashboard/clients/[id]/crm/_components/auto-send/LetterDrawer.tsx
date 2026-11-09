@@ -93,11 +93,14 @@ function useLetterDetail(
 function DrawerHeader({
   titleId,
   summary,
+  pendingTitle,
   demo,
   onClose,
 }: {
   titleId: string
   summary: LetterSummary | null
+  /** 信还没取到时标题位置显示的话（加载中 / 读不到）。 */
+  pendingTitle: string
   demo: boolean
   onClose: () => void
 }): JSX.Element {
@@ -105,7 +108,7 @@ function DrawerHeader({
     <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-black/10 bg-white px-6 py-4">
       <div className="min-w-0 flex-1 space-y-1.5">
         <h2 id={titleId} className="font-display text-lg font-bold leading-6 text-me-charcoal">
-          {summary === null ? '加载中…' : summary.title ?? '（这封信还没写）'}
+          {summary === null ? pendingTitle : summary.title ?? '（这封信还没写）'}
         </h2>
         {summary !== null && (
           <div className="flex flex-wrap items-center gap-2">
@@ -253,6 +256,7 @@ export function LetterDrawer({
         <DrawerHeader
           titleId={titleId}
           summary={state.kind === 'ready' ? state.detail.summary : null}
+          pendingTitle={state.kind === 'error' ? '读不到这封信' : '加载中…'}
           demo={demo}
           onClose={onClose}
         />

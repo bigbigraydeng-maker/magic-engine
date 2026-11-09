@@ -301,5 +301,6 @@ describe('AutoSendBoard · 抽屉', () => {
     const dialog = await openLetter('demo-l1')
     expect((await within(dialog).findByRole('alert')).textContent).toContain('暂时读不到这封信：网络出错')
     expect(within(dialog).getByRole('button', { name: '重试' })).toBeTruthy()
+    expect(within(dialog).getByRole('heading', { name: '读不到这封信' })).toBeTruthy()
   })
 })
