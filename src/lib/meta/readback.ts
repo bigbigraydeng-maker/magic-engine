@@ -86,6 +86,17 @@ export async function fetchCampaignStatus(
   return typeof status === 'string' ? status : null
 }
 
+/** 对象的实际投放状态。配置开关 `status` 不能代替它。读不到返回 null。 */
+export async function fetchEffectiveStatus(
+  objectId: string,
+  accessToken: string,
+): Promise<string | null> {
+  const params = new URLSearchParams({ fields: 'effective_status', access_token: accessToken })
+  const json = await graphGet(`${GRAPH_BASE}/${objectId}?${params}`, `status ${objectId}`)
+  const status = (json as { effective_status?: unknown } | null)?.effective_status
+  return typeof status === 'string' ? status : null
+}
+
 /** 一个广告系列的状态和花费上限（账户币种最小单位，Meta 返回字符串；没设上限时是 "0" 或缺失）。读不到返回 null。 */
 export async function fetchCampaignReadback(
   campaignId: string,

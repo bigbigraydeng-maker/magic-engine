@@ -19,14 +19,31 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AdDraft } from './ad-draft'
-import { validateDraft, describeDraft, DRAFT_PLAY, metaTripletFor, isApprovableKind, adSetViews, allCreatives } from './ad-draft'
+import {
+  validateDraft,
+  describeDraft,
+  DRAFT_PLAY,
+  metaTripletFor,
+  isApprovableKind,
+  adSetViews,
+  allCreatives,
+  draftUsingInheritedBudget,
+  inheritedSpendOf,
+  sameInheritedSpend,
+  withInheritedSpend,
+  withoutInheritedSpend,
+} from './ad-draft'
 import { draftNotYetBuildable } from './ad-draft-expansion'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
+import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
+import { attachReadbackFindings } from './attach-readback'
 import { waitForVideoReady } from '@/lib/meta/asset-upload'
 import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignReadback, fetchCampaignStatus, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
 import { checkAudiences, renderAudienceSummary, type AudienceFact, type AudiencesChecked } from './draft-audiences'
 import { adaptMetaAdSet } from './meta-readback-adapter'
 import { checkLaunch, renderReadback, type LaunchFinding, type LaunchReadbackReport } from './launch-readback'
+import { expectedPlacement } from './placement-lock'
+import { plannedPlacements } from './readback-sweep'
 import { checkDraftRedlines, unusableRedlinePhrases } from './draft-redlines'
 import { checkCreatedAsExpected } from './created-as-expected'
 import { checkMultiCreated, fetchMultiReadback, mergeMultiReports, spendCapFindings } from './draft-gate-multi'
@@ -205,44 +222,55 @@ export interface CreateDraftOutcome {
  * 返回的 `status` 就是它现在的处境：`awaiting_approval` 才轮到人看。
  */
 export async function createDraftForApproval(
-  draft: AdDraft,
+  input: AdDraft,
   deps: CreateDraftDeps,
 ): Promise<CreateDraftOutcome> {
   const now = deps.now ?? Date.now
   const startedAt = now()
+  const clean = withoutInheritedSpend(input)
   const base: RecordBase = {
-    summary: describeDraft(draft),
+    summary: describeDraft(clean),
     redlinesChecked: deps.brandRedlines === undefined ? null : deps.brandRedlines.length,
     redlinesSkipped: skippedRedlines(deps.brandRedlines),
   }
 
   // 发布器今天只会建单个广告组、预算在组上。新字段对不上时，在任何 Meta 读取或写入之前停下。
   // 不删除、不修改已经存在的广告对象。
-  const held = draftNotYetBuildable(draft)
-  if (held) return failedOutcome(deps, draft, { ...base, error: held })
+  const held = draftNotYetBuildable(clean)
+  if (held) return failedOutcome(deps, clean, { ...base, error: held })
 
   // ── 0. ME 自己就能判的错，不要浪费一次真实创建 ────────────────────────
-  const problems = [...validateDraft(draft), ...checkDraftRedlines(draft, deps.brandRedlines)]
+  const problems = [...validateDraft(clean), ...checkDraftRedlines(clean, deps.brandRedlines)]
   if (problems.length > 0) {
     const error = problems.map((p) => `${p.field}：${p.message}`).join('；')
-    return failedOutcome(deps, draft, { ...base, error })
+    return failedOutcome(deps, clean, { ...base, error })
   }
 
-  // ── 0.3 受众：属不属于这个账户、准备好没有（失败关闭）─────────────
+  const prepared = await draftForBuild(input, deps)
+  if (!prepared.ok) return failedOutcome(deps, clean, { ...base, error: prepared.error })
+  const draft = prepared.draft
+  base.summary = describeDraft(draft)
+  return publishPrepared(draft, deps, base, startedAt, now)
+}
+
+async function publishPrepared(
+  draft: AdDraft,
+  deps: CreateDraftDeps,
+  base: RecordBase,
+  startedAt: number,
+  now: () => number,
+): Promise<CreateDraftOutcome> {
   const audiences = await checkAudiences(draft, deps)
   base.audiencesChecked = audiences.checked
   if (audiences.error) return failedOutcome(deps, draft, { ...base, error: audiences.error })
 
-  // ── 0.4 日预算低于账户最低日预算 → Meta 一定拒，别浪费一次真实创建 ──────
-  const budget = await checkMinDailyBudget(draft, deps)
+  const budget = await checkMinDailyBudget(draftUsingInheritedBudget(draft), deps)
   base.minBudgetChecked = budget.checked
   if (budget.error) return failedOutcome(deps, draft, { ...base, error: budget.error })
 
-  // ── 0.5 私信类型：视频上传完还要转码，转码没完就建会失败 ───────────────
   const waitError = await waitForTranscode(draft, deps, now)
   if (waitError) return failedOutcome(deps, draft, { ...base, error: waitError })
 
-  // ── 1. 建（全程暂停）────────────────────────────────────────────────
   const published = await publishDraftPaused(
     draft, deps.adAccountId, deps.accessToken, publishBudgetFor(draft, startedAt, now),
   )
@@ -252,10 +280,25 @@ export async function createDraftForApproval(
     return failedOutcome(deps, draft, { ...base, error, orphans })
   }
 
-  // ── 2+3. 回读 → 闸门 ────────────────────────────────────────────────
   return gateReadback(draft, published, deps, {
     ...base, startedAt, now, tooLateToRead: now() > startedAt + budgetFor(draft).skipReadbackAfterMs,
   })
+}
+
+/** 已有广告组先读真实预算。对不上确认卡上已经读过的数，就不建。 */
+async function draftForBuild(
+  input: AdDraft,
+  deps: CreateDraftDeps,
+): Promise<{ ok: true; draft: AdDraft } | { ok: false; error: string }> {
+  const clean = withoutInheritedSpend(input)
+  if (!clean.existingAdSetId) return { ok: true, draft: clean }
+  const read = await readExistingAdSetSpend(clean.existingAdSetId, deps.adAccountId, deps.accessToken)
+  if (!read.ok) return read
+  const confirmed = inheritedSpendOf(input)
+  if (confirmed && !sameInheritedSpend(confirmed, read.spend)) {
+    return { ok: false, error: '这个广告组的每天预算或结束日已经变了，和确认卡上的不一样，没有去建。' }
+  }
+  return { ok: true, draft: withInheritedSpend(clean, read.spend) }
 }
 
 interface RecordBase {
@@ -357,6 +400,9 @@ function expectedFindings(
 ): LaunchFinding[] {
   if (draft.kind !== 'messenger_conversation' || readback.campaignStatus === undefined) return []
   const t = metaTripletFor(draft.kind)
+  const ads = published.reusedAdSet
+    ? readback.ads.filter((ad) => published.adIds.includes(ad.adId))
+    : readback.ads
   return checkCreatedAsExpected(
     {
       optimizationGoal: t.optimizationGoal,
@@ -364,7 +410,8 @@ function expectedFindings(
       adCount: published.adIds.length,
       brandRedlines: deps.brandRedlines ?? [],
     },
-    { campaignStatus: readback.campaignStatus, adSet: readback.adSet, ads: readback.ads },
+    { campaignStatus: readback.campaignStatus, adSet: readback.adSet, ads },
+    { campaign: !(published.reusedCampaign || published.reusedAdSet), adSet: !published.reusedAdSet },
   )
 }
 
@@ -399,12 +446,15 @@ async function blockedUnreadable(
 }
 
 /** 已有的闸门（多语言混放、重定向被放宽……）。 */
-function launchReportFor(
+async function launchReportFor(
   draft: AdDraft,
   deps: CreateDraftDeps,
   rawAdSet: NonNullable<Awaited<ReturnType<typeof fetchAdSetReadback>>>,
   ads: NonNullable<Awaited<ReturnType<typeof fetchAdCreativesReadback>>>,
-): LaunchReadbackReport {
+): Promise<LaunchReadbackReport> {
+  const planned = draft.existingAdSetId
+    ? await plannedPlacements(deps.supabase, draft.clientId, [rawAdSet.id])
+    : null
   return checkLaunch({
     ...adaptMetaAdSet(rawAdSet, ads, {
       expectedGeo: deps.expectedGeo ?? null,
@@ -417,6 +467,8 @@ function launchReportFor(
     }),
     industry: deps.industry ?? null,
     expectedOptimizationGoal: metaTripletFor(draft.kind).optimizationGoal,
+    ...expectedPlacement(planned ? planned.get(rawAdSet.id) : draft.placements),
+    ...(draft.existingAdSetId ? { reuseExistingAdSet: true } : {}),
     ...(draft.audienceIds && draft.audienceIds.length > 0 ? { expectedAudienceIds: draft.audienceIds } : {}),
     ...(draft.excludedAudienceIds && draft.excludedAudienceIds.length > 0 ? { expectedExcludedAudienceIds: draft.excludedAudienceIds } : {}),
   })
@@ -445,10 +497,14 @@ async function gateReadback(
     return blockedUnreadable(draft, published, deps, ctx, '回读不到它的真实设置')
   }
 
-  const report = launchReportFor(draft, deps, rawAdSet, ads)
+  const report = await launchReportFor(draft, deps, rawAdSet, ads)
   // 单组草稿带了系列花费上限：和多组一样，必须读回到同一个数（读不到也算没落到）。
   const capFindings = wantsCap ? spendCapFindings(draft, campaignRb?.spendCap ?? null) : []
-  const extra = [...expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps), ...capFindings]
+  const extra = [
+    ...expectedFindings(draft, published, { campaignStatus, adSet: rawAdSet, ads }, deps),
+    ...attachReadbackFindings(draft, published, rawAdSet, ads),
+    ...capFindings,
+  ]
   const autoPause = extra.some((f) => f.code === 'not_paused')
     ? await pausePublished(published, deps.accessToken, {
         deadlineAt: ctx.startedAt + budgetFor(draft).giveUpPauseMs, now: ctx.now,
@@ -472,10 +528,10 @@ async function gateReadbackMulti(
 ): Promise<CreateDraftOutcome> {
   const rb = await fetchMultiReadback(draft, published, deps.accessToken)
   if (!rb) return blockedUnreadable(draft, published, deps, ctx, '回读不到系列或某个广告组的真实设置')
-  const reports = rb.sets.map((s) => ({
+  const reports = await Promise.all(rb.sets.map(async (s) => ({
     setName: s.view.adSetName,
-    report: launchReportFor(s.view, deps, s.adSet, s.ads),
-  }))
+    report: await launchReportFor(s.view, deps, s.adSet, s.ads),
+  })))
   const extra = checkMultiCreated(draft, rb, ctx.now())
   const autoPause = extra.some((f) => f.code === 'not_paused')
     ? await pausePublished(published, deps.accessToken, {
@@ -529,6 +585,13 @@ function renderAutoPause(r: { ok: boolean; failed: string[] } | undefined): stri
  * 审批页开失败会马上退回 awaiting_approval。确认卡不能这么做：回读和补暂停还没完，
  * 退回之后另一次确认会占走，这次再去暂停就会把对方正在开的广告关掉。确认卡占到失败结束。
  */
+function activationSkipIds(draft: AdDraft, campaignId: string, adSetId: string): string[] {
+  const skip: string[] = []
+  if (draft.existingCampaignId || draft.existingAdSetId) skip.push(campaignId)
+  if (draft.existingAdSetId) skip.push(adSetId)
+  return skip
+}
+
 export async function approveDraft(
   actionId: string,
   supabase: SupabaseClient,
@@ -606,9 +669,11 @@ export async function approveDraft(
     return { ok: false, error: '这条刚被别处处理过（可能已经被开启或否决），这次没有再开。' }
   }
 
+  const skipIds = activationSkipIds(p.draft, p.campaignId, p.adSetId)
   const r = await activatePublished(
     { campaignId: p.campaignId, adSetId: p.adSetId, adIds: p.adIds },
     accessToken,
+    skipIds.length > 0 ? { skipIds } : undefined,
   )
   if (!r.ok && entry === 'go-live-card') return noteHeldActivation(actionId, supabase, p, receipt, r.error)
   if (!r.ok) {

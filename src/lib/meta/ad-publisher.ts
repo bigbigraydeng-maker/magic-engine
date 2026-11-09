@@ -9,17 +9,30 @@
  * 这个模块**不判对错**，只负责建。判在 `ads-strategy/launch-readback.ts`。
  *
  * ── 建到一半失败要能收拾 ────────────────────────────────────────────────
- * 建广告是四次写操作（系列 / 组 / 创意 / 广告），任何一步都可能失败。半成品
- * 留在账户里比失败更糟：它会出现在后台、会被人误开、会进第二天的扫描。
- * 所以失败时按创建的**逆序**删回去，删不掉的如实报出来让人处理。
+ * 新建整棵树是四次写操作（系列 / 组 / 创意 / 广告）。带了已有系列编号就跳过系列，
+ * 带了已有广告组编号就只加新广告。任何一步都可能失败。半成品留在账户里比失败更糟：
+ * 它会出现在后台、会被人误开、会进第二天的扫描。
+ * 所以失败时按这次新建的**逆序**删回去，不删原来就有的系列和广告组。删不掉的如实报出来。
  * 只删系列 / 广告组 / 广告；**创意永远不删**（见 `newRun`）。
  * 多个广告组时，是 1 次系列 + 每组各 1 次组 + 每条广告各 2 次（创意 / 广告）；
  * 失败时同样按逆序回滚，且只回滚本次建出来的。
  */
 
-import type { AdDraft, AdDraftCreative } from '@/lib/ads-strategy/ad-draft'
-import { adSetViews, metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
+import {
+  adSetViews,
+  inheritedSpendOf,
+  isKnownDraftKind,
+  metaTripletFor,
+  MESSENGER_CTA_TYPE,
+  sameInheritedSpend,
+  type AdDraft,
+  type AdDraftCreative,
+  type InheritedAdSetSpend,
+} from '@/lib/ads-strategy/ad-draft'
 import { isPlaybackGoal, PLAYBACK_REQUIRED_PLATFORMS } from '@/lib/ads-strategy/launch-readback'
+import { lockPlacements, targetingPlacement } from '@/lib/ads-strategy/placement-lock'
+import { assertOwnedByAccount } from './owned-ad-object'
+import { readExistingAdSetSpend } from './existing-adset-spend'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 
@@ -46,6 +59,12 @@ export interface PublishedDraft {
   adIds: string[]
   /** 建到一半失败、又没删干净的东西 —— 必须有人去 Meta 后台手动删。 */
   orphans: string[]
+  /** 这次没有新建系列。补暂停和以后开投都不能去改它的开关。 */
+  reusedCampaign?: boolean
+  /** 这次没有新建广告组。补暂停和以后开投都不能去改它的开关。 */
+  reusedAdSet?: boolean
+  /** 加进已有广告组时读到的真实预算和排期。没有把它写回 Meta。 */
+  inheritedSpend?: InheritedAdSetSpend
 }
 
 export interface PublishFailure {
@@ -146,10 +165,7 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
     geo_locations: geo,
     age_min: d.ageMin ?? 25,
     age_max: d.ageMax ?? 65,
-    // 看完类视频必须手动锁版位，否则 Meta 把钱导向 Audience Network 奖励视频（PITFALLS D9）。
-    ...(isPlaybackGoal(metaTripletFor(d.kind).optimizationGoal)
-      ? { publisher_platforms: [...PLAYBACK_REQUIRED_PLATFORMS] }
-      : {}),
+    ...placementOverlay(d),
     // 明确关掉 Meta 的自动放宽。**这不代表它一定关着** —— Meta 可能照样开，
     // 所以建完还要回读一遍（这正是闸门存在的理由）。
     targeting_automation: { advantage_audience: 0 },
@@ -165,6 +181,28 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
   }
 
   return targeting
+}
+
+/** 计划写了版位就用计划的。没写时，看完类视频仍锁 Facebook + Instagram。 */
+function placementOverlay(d: AdDraft): Record<string, unknown> {
+  const locked = lockPlacements(d.placements ?? [])
+  if (locked.ok && locked.lock) return targetingPlacement(locked.lock)
+  if (isPlaybackGoal(metaTripletFor(d.kind).optimizationGoal)) {
+    return { publisher_platforms: [...PLAYBACK_REQUIRED_PLATFORMS] }
+  }
+  return {}
+}
+
+/** 版位认不出，或想在已有广告组上改版位：一次都不写。 */
+function refuseBadPlacements(d: AdDraft): PublishFailure | null {
+  const named = (d.placements?.length ?? 0) > 0
+  if (d.existingAdSetId && named) {
+    return { ok: false, step: 'adset', error: '往已有广告组加广告不会改它的版位。版位要在新建广告组时锁。', orphans: [] }
+  }
+  if (d.existingAdSetId) return null
+  const locked = lockPlacements(d.placements ?? [])
+  if (!locked.ok) return { ok: false, step: 'adset', error: locked.message, orphans: [] }
+  return null
 }
 
 function assertNever(x: never): never {
@@ -368,8 +406,123 @@ async function publishCreatives(
   return adIds
 }
 
+async function resolveCampaignId(
+  d: AdDraft,
+  adAccountId: string,
+  accessToken: string,
+  run: Run,
+): Promise<string | PublishFailure> {
+  if (!d.existingCampaignId) {
+    const campaign = await run.make('campaign', '广告系列', d.campaignName, `${adAccountId}/campaigns`, campaignBody(d))
+    if ('ok' in campaign) return campaign
+    return campaign.id
+  }
+  const owned = await assertOwnedByAccount(
+    d.existingCampaignId,
+    adAccountId,
+    accessToken,
+    'id,account_id,objective,daily_budget,lifetime_budget',
+  )
+  if (!owned.ok) return { ok: false, step: 'campaign', error: owned.error, orphans: [] }
+  const unfit = campaignUnfit(d, owned.body)
+  if (unfit) return { ok: false, step: 'campaign', error: unfit, orphans: [] }
+  return d.existingCampaignId
+}
+
+/** 读到系列目标和预算方式之后才挂新组。读不到、对不上，就不写。 */
+function campaignUnfit(d: AdDraft, body: Record<string, unknown>): string | null {
+  const objective = typeof body.objective === 'string' ? body.objective.trim() : ''
+  if (!objective) return '读不到这个系列的目标，没有去建。'
+  const daily = budgetMinor(body, 'daily_budget')
+  const lifetime = budgetMinor(body, 'lifetime_budget')
+  if (daily === 'missing' || lifetime === 'missing') return '读不到这个系列的预算方式，没有去建。'
+  if (daily === 'bad' || lifetime === 'bad') return '读不懂这个系列的预算，没有去建。'
+  if (daily > 0 || lifetime > 0) return '这个系列用的是系列预算，这次不能加一个自己带日预算的广告组，没有去建。'
+  if (!isKnownDraftKind(d.kind) || objective !== metaTripletFor(d.kind).objective) {
+    return '系列目标和这份草稿不一致，没有去建。'
+  }
+  return null
+}
+
+function budgetMinor(body: Record<string, unknown>, key: string): number | 'missing' | 'bad' {
+  if (!Object.prototype.hasOwnProperty.call(body, key)) return 'missing'
+  const value = body[key]
+  if (value === null || value === '') return 0
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN
+  if (!Number.isFinite(n) || n < 0) return 'bad'
+  return n
+}
+
+async function publishAdSetAndAds(
+  d: AdDraft,
+  adAccountId: string,
+  campaignId: string,
+  run: Run,
+): Promise<PublishResult> {
+  // 多组草稿的每个组都是「单组草稿」的样子（adSetViews），所以建组、建创意的函数不用改。
+  const startMs = run.now()
+  const adSetIds: string[] = []
+  const adIds: string[] = []
+  for (const view of adSetViews(d)) {
+    const adSet = await run.make(
+      'adset', '广告组', view.adSetName, `${adAccountId}/adsets`, adSetBodyFor(view, campaignId, startMs),
+    )
+    if ('ok' in adSet) return adSet
+    adSetIds.push(adSet.id)
+    const made = await publishCreatives(view, adAccountId, adSet.id, run)
+    if (!Array.isArray(made)) return made
+    adIds.push(...made)
+  }
+  return {
+    ok: true,
+    campaignId,
+    adSetId: adSetIds[0],
+    adSetIds,
+    adIds,
+    orphans: [],
+    ...(d.existingCampaignId ? { reusedCampaign: true } : {}),
+  }
+}
+
+async function publishOnExistingAdSet(
+  d: AdDraft,
+  adAccountId: string,
+  accessToken: string,
+  run: Run,
+): Promise<PublishResult> {
+  if (d.existingCampaignId) {
+    return { ok: false, step: 'adset', error: '加组和加广告要分成两张卡，没有去建。', orphans: [] }
+  }
+  const adSetId = d.existingAdSetId ?? ''
+  const read = await readExistingAdSetSpend(adSetId, adAccountId, accessToken)
+  if (!read.ok) return { ok: false, step: 'adset', error: read.error, orphans: [] }
+  const confirmed = inheritedSpendOf(d)
+  if (confirmed && !sameInheritedSpend(confirmed, read.spend)) {
+    return {
+      ok: false,
+      step: 'adset',
+      error: '这个广告组的每天预算或结束日已经变了，和确认卡上的不一样，没有去建。',
+      orphans: [],
+    }
+  }
+  const adIds = await publishCreatives(d, adAccountId, adSetId, run)
+  if (!Array.isArray(adIds)) return adIds
+  return {
+    ok: true,
+    campaignId: read.campaignId,
+    adSetId,
+    adIds,
+    orphans: [],
+    reusedCampaign: true,
+    reusedAdSet: true,
+    adSetIds: [adSetId],
+    inheritedSpend: read.spend,
+  }
+}
+
 /**
- * 建。全程 `status: PAUSED`。
+ * 建。这次新建的对象都是 `status: PAUSED`。
+ * 已有系列只挂新组；已有广告组只加新广告。原来的对象不新建，也不改开关。
  *
  * @param adAccountId `act_<digits>`
  */
@@ -379,27 +532,13 @@ export async function publishDraftPaused(
   accessToken: string,
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
+  const refused = refuseBadPlacements(d)
+  if (refused) return refused
   const run = newRun(accessToken, opts)
-
-  // ── 1. 广告系列 ──────────────────────────────────────────────────────
-  const campaign = await run.make('campaign', '广告系列', d.campaignName, `${adAccountId}/campaigns`, campaignBody(d))
-  if ('ok' in campaign) return campaign
-
-  // ── 2+3+4. 逐个广告组：先建组，再建它的创意和广告 ──────────────────────
-  // 多组草稿的每个组都是「单组草稿」的样子（adSetViews），所以建组、建创意的函数不用改。
-  const startMs = run.now()
-  const adSetIds: string[] = []
-  const adIds: string[] = []
-  for (const view of adSetViews(d)) {
-    const adSet = await run.make('adset', '广告组', view.adSetName, `${adAccountId}/adsets`, adSetBodyFor(view, campaign.id, startMs))
-    if ('ok' in adSet) return adSet
-    adSetIds.push(adSet.id)
-    const made = await publishCreatives(view, adAccountId, adSet.id, run)
-    if (!Array.isArray(made)) return made
-    adIds.push(...made)
-  }
-
-  return { ok: true, campaignId: campaign.id, adSetId: adSetIds[0], adSetIds, adIds, orphans: [] }
+  if (d.existingAdSetId) return publishOnExistingAdSet(d, adAccountId, accessToken, run)
+  const campaignId = await resolveCampaignId(d, adAccountId, accessToken, run)
+  if (typeof campaignId !== 'string') return campaignId
+  return publishAdSetAndAds(d, adAccountId, campaignId, run)
 }
 
 /**
@@ -411,8 +550,11 @@ export async function publishDraftPaused(
 export async function activatePublished(
   p: Pick<PublishedDraft, 'campaignId' | 'adSetId' | 'adIds'>,
   accessToken: string,
+  opts: { skipIds?: readonly string[] } = {},
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const skip = new Set(opts.skipIds ?? [])
   for (const id of [...p.adIds, p.adSetId, p.campaignId]) {
+    if (skip.has(id)) continue
     // 改状态走的是另一种返回（`{"success":true}`，没有 id），不能复用 graphPost。
     const r = await graphUpdate(id, { status: 'ACTIVE' }, accessToken)
     if (!r.ok) return { ok: false, error: `开 ${id} 失败：${r.error}` }
@@ -427,13 +569,19 @@ export async function activatePublished(
  * 失败的 id 如实返回，由调用方记账让人看见。
  */
 export async function pausePublished(
-  p: Pick<PublishedDraft, 'campaignId' | 'adSetId' | 'adIds'> & { adSetIds?: readonly string[] },
+  p: Pick<PublishedDraft, 'campaignId' | 'adSetId' | 'adIds' | 'reusedCampaign' | 'reusedAdSet'> & {
+    adSetIds?: readonly string[]
+  },
   accessToken: string,
   opts: { deadlineAt?: number; now?: () => number } = {},
 ): Promise<{ ok: boolean; failed: string[] }> {
   const now = opts.now ?? Date.now
+  const skip = new Set<string>()
+  if (p.reusedCampaign || p.reusedAdSet) skip.add(p.campaignId)
+  if (p.reusedAdSet) skip.add(p.adSetId)
   // 同时发：此刻的目标是尽快让钱停下来，不是保持顺序；串行最坏 (N+2)×15 秒。
-  const ids = [...new Set([...p.adIds, ...(p.adSetIds ?? []), p.adSetId, p.campaignId])]
+  // 原来就有的系列和广告组不在这张单子里，补暂停不能把它们关掉。
+  const ids = [...new Set([...p.adIds, ...(p.adSetIds ?? []), p.adSetId, p.campaignId])].filter((id) => !skip.has(id))
   const results = await Promise.all(
     ids.map(async (id): Promise<string | null> => {
       // 有顶：整次请求不能因为补暂停拖过平台的超时线。没来得及的如实报出来。

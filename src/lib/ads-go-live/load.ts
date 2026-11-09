@@ -9,12 +9,14 @@ import { ADS_CREATE_ACTION } from '@/lib/ads-strategy/draft-and-gate'
 import { loadTrackingGateFacts } from '@/lib/ads-tracking-preflight/load-receipt'
 import type { CardFacts } from '@/lib/confirmation-card'
 import { gatesFromReceipt, type StoredGate } from './checks'
-import { goLiveSubjectKey, parsePausedDraft, type GoLiveIds } from './draft'
+import { goLiveSubjectKey, parsePausedDraft, reusedSpendGate, type GoLiveIds } from './draft'
+import type { InheritedAdSetSpend } from '@/lib/ads-strategy/ad-draft'
 import { buildGoLiveFacts } from './facts'
 
 export interface GoLiveLoaded {
   readonly facts: CardFacts
   readonly ids: GoLiveIds | null
+  readonly reusedSpend: { adSetId: string; spend: InheritedAdSetSpend | null } | null
 }
 
 export type LoadResult = { ok: true } & GoLiveLoaded | { ok: false; status: number; error: string }
@@ -86,6 +88,7 @@ export async function loadGoLive(
   return {
     ok: true,
     ids: view.ids,
+    reusedSpend: reusedSpendGate(row.payload),
     facts: buildGoLiveFacts({
       draftId,
       view,
