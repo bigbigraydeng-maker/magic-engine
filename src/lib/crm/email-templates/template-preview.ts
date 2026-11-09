@@ -12,7 +12,7 @@ import type { EffectiveEmailConfig } from './effective-config'
 import { evaluateContentGates } from './gates/content-gates'
 import { evaluateFrequency } from './gates/frequency'
 import type { GateViolation } from './gates/types'
-import { renderTemplate } from './render'
+import { catalogueRenderFields, renderTemplate } from './render'
 import {
   DEFAULT_TIME_ZONE,
   computeCallWhen,
@@ -199,6 +199,7 @@ export async function previewTemplate(
     inputs: args.request.inputs,
     facts: state.facts,
     provider: state.provider,
+    ...catalogueRenderFields(args.config.providers.catalogue, todayInZone(args.now, tz)),
   })
   const checked = evaluateContentGates({
     subject: args.request.subject ?? rendered.subject,

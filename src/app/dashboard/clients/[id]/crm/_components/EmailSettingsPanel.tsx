@@ -9,6 +9,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { EMAIL_SETTINGS_SAVED_EVENT } from '@/lib/crm/email-templates/settings-events'
 import type { SettingsHistoryEntry } from '@/lib/crm/email-templates/settings-store'
+import {
+  CatalogueFields,
+  EMPTY_CATALOGUE_FORM,
+  catalogueFormFrom,
+  catalogueFromForm,
+  otherProviders,
+  type CatalogueForm,
+  type StoredCatalogue,
+} from './email-settings-catalogue'
 
 interface StoredSettings {
   enabled: boolean
@@ -25,7 +34,8 @@ interface StoredSettings {
     allowed_link_hosts: string[]
     rules: Array<{ id: string; phrases: string[]; message: string; severity: 'block' | 'warn' }>
   }
-  providers: { published_tours?: { url_pattern: string; all_tours_url: string } }
+  // Keys this panel has no fields for are carried back unchanged (see email-settings-catalogue.tsx).
+  providers: { published_tours?: { url_pattern: string; all_tours_url: string }; catalogue?: StoredCatalogue; [key: string]: unknown }
 }
 
 interface LoadPayload {
@@ -50,7 +60,7 @@ interface RuleDraft {
   phrasesText: string
 }
 
-interface FormState {
+interface FormState extends CatalogueForm {
   enabled: boolean
   sendMailbox: string
   allowUnsolicited: boolean
@@ -70,6 +80,7 @@ interface FormState {
   rules: RuleDraft[]
   urlPattern: string
   allToursUrl: string
+  otherProviders: Record<string, unknown>
 }
 
 const DEFAULT_FORM: FormState = {
@@ -92,6 +103,8 @@ const DEFAULT_FORM: FormState = {
   rules: [],
   urlPattern: '',
   allToursUrl: '',
+  ...EMPTY_CATALOGUE_FORM,
+  otherProviders: {},
 }
 
 function linesToList(text: string): string[] {
@@ -127,6 +140,8 @@ function formFromSettings(s: StoredSettings): FormState {
     })),
     urlPattern: s.providers.published_tours?.url_pattern ?? '',
     allToursUrl: s.providers.published_tours?.all_tours_url ?? '',
+    ...catalogueFormFrom(s.providers),
+    otherProviders: otherProviders(s.providers),
   }
 }
 
@@ -181,7 +196,9 @@ function buildSettings(form: FormState): BuildResult {
 
   const urlPattern = form.urlPattern.trim()
   const allToursUrl = form.allToursUrl.trim()
-  const providers: StoredSettings['providers'] = {}
+  const providers: StoredSettings['providers'] = { ...form.otherProviders }
+  const catalogue = catalogueFromForm(form)
+  if (catalogue !== null) providers.catalogue = catalogue
   if (urlPattern !== '' || allToursUrl !== '') {
     providers.published_tours = { url_pattern: urlPattern, all_tours_url: allToursUrl }
   }
@@ -651,6 +668,10 @@ export function EmailSettingsPanel(props: { clientId: string }): JSX.Element {
             className="w-full rounded-lg border border-me-stone bg-white px-2 py-1.5 text-sm"
           />
         </label>
+      </Section>
+
+      <Section title="一键发目录">
+        <CatalogueFields form={form} onChange={(key, value) => update(key, value)} />
       </Section>
 
       <Section title="变更说明">

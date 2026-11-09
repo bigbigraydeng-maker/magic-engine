@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { supabaseAdmin } from '@/lib/supabase'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
 import { createSendGatesProd } from '@/lib/crm/email-templates/send-gates-prod'
+import { recordSendAttemptProd } from '@/lib/crm/email-templates/send-record-prod'
 import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
 import { MICROSOFT_MAIL_PROVIDER } from '@/lib/microsoft/mail-oauth'
 import { checkManualSendDncForContact } from '@/lib/crm/manual-send-dnc-gate'
@@ -316,6 +317,14 @@ export function createMailNewDeps(clientId?: string): MailNewDeps {
   const deps: MailNewDeps = { store, graph: createMailNewGraph() }
   if (clientId !== undefined) {
     deps.gates = createSendGatesProd({ clientId, listActiveMailboxes: store.listActiveMailboxes, graphGetPage })
+    deps.recordUnderLock = (input, result) =>
+      recordSendAttemptProd({
+        clientId: input.clientId,
+        contactId: input.contactId,
+        requestId: input.requestId,
+        actorEmail: input.sentByEmail,
+        result,
+      })
   }
   return deps
 }

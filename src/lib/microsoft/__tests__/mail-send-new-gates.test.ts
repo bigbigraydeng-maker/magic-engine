@@ -786,3 +786,75 @@ describe('reconcileSendRequest', () => {
     expect(bad.graph.isStillDraft).not.toHaveBeenCalled()
   })
 })
+
+describe('the receipt of an attempt that reached the send is written while the guest is still locked', () => {
+  function recording(f: Fakes) {
+    const recordUnderLock = vi.fn(async () => {
+      f.calls.push('recordUnderLock')
+    })
+    f.deps.recordUnderLock = recordUnderLock
+    f.store.releaseContactLock = vi.fn(async () => {
+      f.calls.push('releaseContactLock')
+    })
+    return recordUnderLock
+  }
+
+  it('a sent mail: recorded (with the mailbox) before the contact lock is released', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    const record = recording(f)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result.ok).toBe(true)
+    expect(record).toHaveBeenCalledTimes(1)
+    const [, recorded] = record.mock.calls[0] as unknown as [unknown, { ok: boolean; meta: SendMeta }]
+    expect(recorded.ok).toBe(true)
+    expect(recorded.meta.mailbox).toBe(MAILBOX)
+    expect(indexOf(f, 'recordUnderLock')).toBeLessThan(indexOf(f, 'releaseContactLock'))
+  })
+
+  it('a crash after the send started: an "unknown" receipt goes down before the lock is let go, and the exception still reaches the caller', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    const record = recording(f)
+    f.graph.sendDraft = vi.fn(async () => {
+      throw new Error('graph exploded')
+    })
+    await expect(sendMailNew(baseInput(), f.deps)).rejects.toBeInstanceOf(SendStartedError)
+    const [, recorded] = record.mock.calls[0] as unknown as [unknown, { ok: boolean; reason: string; meta: SendMeta }]
+    expect(recorded).toMatchObject({ ok: false, reason: 'send_unknown' })
+    expect(recorded.meta.blockDetail).toBe('send_exception')
+    expect(indexOf(f, 'recordUnderLock')).toBeLessThan(indexOf(f, 'releaseContactLock'))
+  })
+
+  it('a refusal by an in-lock gate is not recorded here (the caller records it; nothing left)', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    const refusal: GateFailure = { ok: false, status: 409, reason: 'frequency_cap', error: 'cap', meta: baseMeta() }
+    f.deps.gates = stubGates(f, { inLock: refusal })
+    const record = recording(f)
+    await sendMailNew(baseInput(), f.deps)
+    expect(record).not.toHaveBeenCalled()
+  })
+
+  it('a legacy-config client gets no receipt here either', async () => {
+    const f = makeFakes({ leadsConfig: ENABLED })
+    const record = recording(f)
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result.ok).toBe(true)
+    expect(record).not.toHaveBeenCalled()
+  })
+
+  it('a receipt writer that throws does not turn a sent mail into a failure', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    f.deps.recordUnderLock = vi.fn(async () => {
+      throw new Error('receipts down')
+    })
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result.ok).toBe(true)
+  })
+})

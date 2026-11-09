@@ -5,6 +5,7 @@ import type {
   PublishedToursProviderSettings,
 } from './types'
 import { TEMPLATE_KEY_RE } from './template-store'
+import { checkCatalogueAgainst, parseCatalogueSettings, serialiseCatalogue } from './catalogue-settings'
 
 export type ParseSettingsResult =
   | { ok: true; settings: EmailSettings }
@@ -533,19 +534,22 @@ function parseProviders(
     sink.add(path, 'must be an object')
     return null
   }
-  for (const key of unknownKeys(value, ['published_tours'])) {
+  for (const key of unknownKeys(value, ['published_tours', 'catalogue'])) {
     sink.add(`${path}.${key}`, 'unknown key')
   }
-  if (!('published_tours' in value)) {
-    return {}
+  const out: EmailSettings['providers'] = {}
+  let ok = true
+  if ('published_tours' in value) {
+    const publishedTours = parsePublishedTours(value.published_tours, `${path}.published_tours`, sink)
+    if (publishedTours === null) ok = false
+    else out.publishedTours = publishedTours
   }
-  const publishedTours = parsePublishedTours(
-    value.published_tours,
-    `${path}.published_tours`,
-    sink,
-  )
-  if (publishedTours === null) return null
-  return { publishedTours }
+  if ('catalogue' in value) {
+    const catalogue = parseCatalogueSettings(value.catalogue, `${path}.catalogue`, (p, m) => sink.add(p, m))
+    if (catalogue === null) ok = false
+    else out.catalogue = catalogue
+  }
+  return ok ? out : null
 }
 
 const REQUIRED_TOP_LEVEL_KEYS = [
@@ -657,6 +661,7 @@ export function parseEmailSettingsStrict(raw: unknown): ParseSettingsResult {
   const sink = new ErrorSink()
   readTopLevelKeys(raw, sink)
   const settings = assemble(readParts(raw, sink))
+  if (settings !== null) checkCatalogueAgainst(settings, (p, m) => sink.add(p, m))
   if (sink.errors.length > 0 || settings === null) {
     return { ok: false, errors: sink.errors }
   }
@@ -673,6 +678,8 @@ export function serialiseEmailSettings(
       all_tours_url: settings.providers.publishedTours.allToursUrl,
     }
   }
+  // Only written when set: a version without it stays readable by code that predates the catalogue line.
+  if (settings.providers.catalogue) providers.catalogue = serialiseCatalogue(settings.providers.catalogue)
   return {
     enabled: settings.enabled,
     send_mailbox: settings.sendMailbox,
