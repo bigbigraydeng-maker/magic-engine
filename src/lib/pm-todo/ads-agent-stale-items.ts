@@ -40,6 +40,7 @@ import {
   formatDailyPullbackGapWhat,
   type PullbackErrorRow,
 } from '@/lib/ads-strategy/monitoring/daily-pullback-gaps'
+import { pushAdsPlanDeliveryStageMissingItems } from './ads-plan-delivery-stage-items'
 
 export type AdsAgentSyncStaleItemKind = 'ads_agent_sync_stale'
 export type AdsDailySpendOverCapNoticeItemKind = 'ads_daily_spend_over_cap_notice'
@@ -410,4 +411,5 @@ export async function pushAdsAgentMonitorItems(
   await pushAdsDailyPullbackGapItems(supabase, items, now, nameOf)
   await pushAdsHeartbeatStallItems(supabase, items, now)
   await pushAdsDailySpendOverCapNoticeItems(supabase, items, nameOf)
+  await pushAdsPlanDeliveryStageMissingItems(supabase, items, nameOf)
 }

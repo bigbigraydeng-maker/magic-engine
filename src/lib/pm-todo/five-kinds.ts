@@ -210,6 +210,7 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   ads_circuit_breaker_pause: 'decide', // 异常只出暂停确认卡，等人点了才停
   ads_circuit_breaker_alert: 'decide', // 快照或花费太旧，只提醒，不出卡
   ads_plan_daily_cap_missing: 'decide', // 已批准计划还没填每天总上限，加预算会被拦住
+  ads_plan_delivery_stage_missing: 'decide', // 已批准计划还没标试投/放量/稳住，放量与收回卡不会出
   cron_not_running: 'dev',
   cron_silent_success: 'dev',
   ai_alerting_broken: 'dev',

@@ -50,6 +50,7 @@ import type {
   AdsHeartbeatStallItemKind,
   AdsPlanDailyCapMissingItemKind,
 } from './ads-agent-stale-items'
+import type { AdsPlanDeliveryStageMissingItemKind } from './ads-plan-delivery-stage-items'
 import type { AdsCircuitBreakerAlertKind, AdsCircuitBreakerPauseKind } from './ads-circuit-breaker-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
@@ -339,6 +340,7 @@ export type ManualItemKind =
   | AdsDailySpendOverCapNoticeItemKind
   | AdsHeartbeatStallItemKind
   | AdsPlanDailyCapMissingItemKind
+  | AdsPlanDeliveryStageMissingItemKind
   | AdsCircuitBreakerPauseKind
   | AdsCircuitBreakerAlertKind
   /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */

@@ -3,6 +3,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { loadApprovedPromoDeliveryStage } from '@/lib/marketing-plan/promo/approved-delivery-stage'
 
 export interface CreativeDailyResult {
   readonly cards: number
@@ -26,6 +27,13 @@ export async function runCreativeStateDaily(
 }
 
 async function issueDaily(sb: SupabaseClient, clientId: string, now: Date): Promise<CreativeDailyResult> {
+  const stageRead = await loadApprovedPromoDeliveryStage(sb, clientId)
+  if (stageRead === 'query_failed') {
+    return { cards: 0, skipped: ['ledger_unread'], wroteMeta: false }
+  }
+  if (stageRead.kind === 'missing') {
+    return { cards: 0, skipped: ['no_delivery_stage'], wroteMeta: false }
+  }
   const { loadCreativeDecision } = await import('@/lib/action-submission/creative-state-live')
   const decision = await loadCreativeDecision(sb, clientId, now)
   if (decision.proposals.length === 0) return { cards: 0, skipped: decision.skipped, wroteMeta: false }
