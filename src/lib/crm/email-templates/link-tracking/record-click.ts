@@ -13,7 +13,10 @@ import type { TourLinkRef } from '../facts/published-tours'
 export const MAX_CLICKS_PER_TOKEN = 50
 export const DEDUPE_MS = 5 * 60_000
 export const SCAN_WINDOW_MS = 60_000
-export const HUMAN_AFTER_MS = 10 * 60_000
+// PM 11-10「你定」→ 1 minute (was 10). These mails go only to guests who enquired, so a mis-read checker costs one
+// extra follow-up call; a guest who opens the brochure straight away is the most interested one and must not be lost.
+// The browser and user-navigation checks still apply.
+export const HUMAN_AFTER_MS = 60_000
 
 // Mail-security link checkers and preview fetchers seen in the wild. Matched case-insensitively against the user agent.
 const SCANNER_MARKS = [
@@ -84,7 +87,7 @@ export interface ClickVerdict {
   countsAsHuman: boolean
 }
 
-/** §4.5: flag anything that does not look like a person opening the link, and only count a person after 10 minutes. */
+/** §4.5: flag anything that does not look like a person opening the link; a person counts from 1 minute after sending. */
 export function judgeClick(report: ClickReport, ageMs: number): ClickVerdict {
   const cls = uaClass(report.ua)
   const navigation = report.fetchMode === 'navigate' && report.fetchDest === 'document'

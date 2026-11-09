@@ -62,8 +62,8 @@ describe('parseClickReport', () => {
 })
 
 describe('judgeClick (§4.5)', () => {
-  it('a person opening the link after 10 minutes counts', () => {
-    expect(judgeClick(report(), 11 * MIN)).toEqual({ uaClass: 'browser', suspectedScan: false, countsAsHuman: true })
+  it('a person opening the link after the first minute counts', () => {
+    expect(judgeClick(report(), 2 * MIN)).toEqual({ uaClass: 'browser', suspectedScan: false, countsAsHuman: true })
   })
 
   it.each([
@@ -75,9 +75,10 @@ describe('judgeClick (§4.5)', () => {
     expect(judgeClick(r, 11 * MIN)).toMatchObject({ suspectedScan: true, countsAsHuman: false })
   })
 
-  it('within 60 seconds of sending is a suspected scan; between 1 and 10 minutes is recorded but does not count', () => {
+  it('within 60 seconds of sending is a suspected scan; from 1 minute a person opening it counts', () => {
     expect(judgeClick(report(), 30_000)).toMatchObject({ suspectedScan: true, countsAsHuman: false })
-    expect(judgeClick(report(), 5 * MIN)).toMatchObject({ suspectedScan: false, countsAsHuman: false })
+    expect(judgeClick(report(), 59_999)).toMatchObject({ suspectedScan: true, countsAsHuman: false })
+    expect(judgeClick(report(), 60_000)).toMatchObject({ suspectedScan: false, countsAsHuman: true })
   })
 
   it('a browser without fetch headers is recorded but does not count (better to under-count than to send staff to call)', () => {
