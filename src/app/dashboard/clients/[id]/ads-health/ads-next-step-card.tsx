@@ -30,6 +30,28 @@ function healthRowText(
   ), '今天没有需要优先处理的体检红灯')
 }
 
+function impactGapsRow(
+  status: LoadStatus,
+  row: AdsNextStepView['impactGaps'] | undefined,
+): React.ReactNode {
+  if (status === 'loading') return <span className="text-gray-500">读取中…</span>
+  if (status === 'failed' || row === undefined) return <span className="text-gray-500">没读到</span>
+  if (row.kind === 'staff_only') {
+    return <span className="text-gray-500">内部员工可见</span>
+  }
+  return rowText(status, row, (data) => (
+    <ul className="space-y-2">
+      {data.items.map((item) => (
+        <li key={item.code}>
+          <p className="text-xs font-medium text-slate-600">{item.code} · {item.title}</p>
+          <pre className="mt-0.5 whitespace-pre-wrap font-sans text-xs text-slate-700">{item.summary}</pre>
+          <Link href={item.href} className="text-sky-700 hover:underline text-xs">去补 / 去看</Link>
+        </li>
+      ))}
+    </ul>
+  ), '暂无 IMPACT 缺口摘要')
+}
+
 function rowText<T>(
   status: LoadStatus,
   row: AdsNextStepRow<T> | undefined,
@@ -87,7 +109,7 @@ export default function AdsNextStepCard({
       aria-label="广告下一步"
     >
       <h2 className="text-sm font-semibold text-slate-800">广告下一步</h2>
-      <p className="mt-0.5 text-xs text-slate-400">体检红灯、等人批的动作、华佗处方 —— 只读汇总</p>
+      <p className="mt-0.5 text-xs text-slate-400">体检红灯、等人批的动作、华佗处方、IMPACT 事实缺口 —— 只读汇总</p>
       <dl className="mt-3 space-y-3 text-sm">
         <div>
           <dt className="text-xs font-medium text-slate-500">体检红灯 · 跟目标成本比</dt>
@@ -125,6 +147,12 @@ export default function AdsNextStepCard({
                 </span>
               )
             }, '还没有华佗处方')}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium text-slate-500">IMPACT 事实 / 缺口</dt>
+          <dd className="mt-0.5 text-slate-800">
+            {impactGapsRow(loadStatus, view?.impactGaps)}
           </dd>
         </div>
       </dl>
