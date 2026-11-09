@@ -3,6 +3,50 @@
 > 来源：PM 2026-11-09 在 76 号窗口定——客人说「不要打电话」≠「不要联系我」，短信/邮件/WhatsApp 照样可以联系。第 1 刀（PR 3692）只加了纯函数 `refusal-scope.ts`，不接线上。本稿是第 2 刀：把新规则接进线上，**解析器切换和电话那一侧的拦截必须一起上线**。
 > 风险级别 A（控制外发的核心规则）。派活等级 L4：Claude Code 自写（CLAUDE.md §5 A 级安全核心例外）。
 
+## v1 修订（2026-11-09 子牙/魏征两位审查后；与下文冲突时以本节为准）
+
+子牙：APPROVE WITH CHANGES（1 个 P0 + 7 个 P1）。魏征：BLOCK（词表太窄，会把「拒绝所有联系」的人判成只别打电话）。处理如下。
+
+### A. 拆成两次上线（子牙 P1-7）
+- **2A「读的一侧」**：`isDoNotCall`、所有电话拦截、`doNotCall` 字段、页面小标和撤销条。此时没有任何程序写 `do_not_call`，上线零风险，可先验证拦截接对了。
+- **2B「写的一侧」**：解析器切换、AI 合并修正、词表、Messenger 提示。回滚 2B 时拦截还在，不会出现「回滚后全部放行」。
+- 回滚预案查询：`metadata->>'outcome'='do_not_call'` 列出所有人给 PM，PM 决定是否临时把镜像列置 true（宁可多拦）。旧代码遇到不认识的 `do_not_call` 等于**放行**（§8 原来写的「不拦也不放」不准确，已作废）。
+
+### B. 词表改成「白名单 + 风险词转人工」（魏征 P0）
+- `phone_only` 只在两种情况成立：①只有电话说法、没有任何别的字；②电话说法 + 明确同意别的渠道（`only email`、`email ok`、`只邮件联系`、`please send…`、`请发…`）。
+- 句子里只要出现风险词，一律 `needs_review`（暂按全面拒绝处理）：邮件/短信/信息/微信/消息/联系/打扰/发/退订/删除/拉黑/投诉/以后/永远/都别/去世，email/mail/text/sms/message/whatsapp/contact/write/send/unsubscribe/remove/list/delete/block/spam/report/never/again/ever/leave me alone/harass/complain/deceased/passed away/died。
+- 补进全面拒绝（现有词表本来就漏的）：不要(再)?联系、别联系、不需要再联系、unsubscribe、(do not|don't) contact、remove me、take me off、not to be contacted、DNC。
+- 补进电话说法：不要再打电话、别打了、少打电话、stop calling、no calls、don't ring。
+- 带时间限定或回电约定的（`call back Friday`、`do not call until March`）：**回电约定优先**，不判只别打电话。
+- 魏征列的全部 P0 原话写进测试，断言「不是 phone_only」。
+- 两份词表放进新文件 `refusal-patterns.ts`，`note-parser.ts` 和 `refusal-scope.ts` 都从它引用，去掉按正则原文匹配的 `PHONE_SOURCES`（子牙 P1-6，避免循环引用）。
+
+### C. AI 合并（子牙 P0-1 / 魏征 P1-3）
+- 现状是规则和 AI 的 `do_not_contact` 取并集（`note-parser.ts:584-591`）。规则判 `do_not_call` 时**忽略 AI 的 `do_not_contact`**；只有规则自己命中全面拒绝才升级。
+- 万一并集为 true 而结果值是 `do_not_call`，结果值改写成 `do_not_contact`（不留「结果是只别打电话、标记却是全拦」的矛盾状态）。
+- 提示词写明 `do_not_contact` 只表示全渠道拒绝，并告诉 AI 有 `do_not_call` 这个值。
+- 测试：mock AI 返回 `do_not_contact:true`，断言触点和镜像列都不是 true（规则判 do_not_call 时）。
+
+### D. 分段与页面（子牙 P1-1/2/3/4）
+- `SegmentResult` 新增独立字段 `doNotCall`，**不复用 `phoneUnusable`**（它的下游按「坏号码」解读：号码划线、「问他要新号」、「（打不通）」、冻结版重算）。`withLiveReach` 在 `phoneUnusable` 或 `doNotCall` 任一变化时重算。
+- `doNotCall` 在 `segmentContact` 里从触点自己算（只认 `{do_not_call, dnc_cleared}` 的最后一次判决，写法同 `phoneLineIsDead`），不由 5 个调用方传入（`day-list.ts`、`contact-list-view.ts`、`contacts/route.ts`、`today/route.ts`、`segments.ts:1000`）。
+- 补上漏的拨号入口：`MessengerReply.tsx:81`、`WhatsAppReply.tsx:112`、`ConversationCard.tsx:62`、`PersonDrawer.tsx:488` 的拨号链接、`contact-response-row.ts:144`。
+- **撤销入口**：`doNotCall` 时也显示撤销条「客人其实可以打电话」，调用现有 `/dnc` 写 `dnc_cleared`。否则误判的人永远回不来（8-16 事故重演）。
+- 页面改动很小（一个「只别打电话」小标 + 撤销条变体），先出一张 Figma 小图给 PM。
+
+### E. 其它（审查员 P2，本刀一并处理或记台账）
+- `outbound.ts:74` 手上没有联系人，不做「防守性检查」（设计里那句删掉）；拦截放在调用方。
+- `reach.hasPhone=false` 会让建议渠道连短信也不建议；CRM 目前没有短信入口，只在设计里记一句。
+- `messenger-stop-signal.ts:141`：客人在 Messenger 说「不要打电话」，改成发一条「客人说过不要电话，要不要标记」的提示，不丢。
+- `dnc-reengage.ts`：客人重填表单**不**自动清除 `do_not_call`（重填≠同意接电话），清除只靠员工。
+- 日历里「回电」事项对 `doNotCall` 的人改显示「邮件跟进」，不直接丢。
+- AI 下一步建议（`aiNextAction`）里写「打电话」的，对 `doNotCall` 的人过滤或改写。
+- `voice/crm-bridge.ts:188` 把 AI 电话里「不感兴趣」写成全渠道拒绝：记台账，接 AI 电话前改成「不感兴趣 + 只别打电话」，`voice/outbound-gate.ts:58` 接上 `isDoNotCall`。
+- `lead-followup-due.ts:188` 不分渠道，不用改（§10 第 1 问）。`TouchpointLike` 不用加字段（§10 第 3 问）。
+
+### F. 第 1 刀（PR 3692）
+词表是弱版，**不能按现状合并**；2B 把词表换成上面的白名单版后再合。
+
 ## §0 给 PM 的一页
 
 做完后你会看到：
