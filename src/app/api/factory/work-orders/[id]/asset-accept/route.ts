@@ -34,6 +34,13 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   }
   const { id } = await params
   const receipt = await runAssetDualReviewById(supabaseDualReviewIo(supabaseAdmin), id)
+  if (receipt.status === 'awaiting_card') {
+    return NextResponse.json({
+      ok: true,
+      status: 'awaiting_confirmation',
+      error: receipt.reason ?? '已出上传确认卡。点确认之后才会把成片传到广告账户。',
+    }, { status: 202 })
+  }
   if (receipt.status !== 'pooled') {
     return NextResponse.json({ error: errorText(receipt) }, { status: errorStatus(receipt) })
   }
