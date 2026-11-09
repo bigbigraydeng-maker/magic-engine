@@ -158,4 +158,9 @@ export const PLATFORM_CANDIDATE_REVIEWS: PlatformCandidateReview[] = [
     name: '从客户历史对话（Messenger/WhatsApp）批量提炼接待风格/标准应对+还没入库的事实，喂给客户知识库',
     reviewDate: '2026-10-15',
   },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '智能视频剪辑系统全链路（Whisper 转写 → Strategy Engine 术语纠错/语义分段/金句提取 → B-roll 语义匹配+跨视频复用限制 → 画面敏感信息 OCR+Strategy Engine vision 识别打码 → FFmpeg/Video Studio 双后端渲染 → 13 项自动 QA → 交付打包）拟作为 ME 视频工厂的全面升级/替代',
+    reviewDate: '2026-10-22',
+  },
 ]
