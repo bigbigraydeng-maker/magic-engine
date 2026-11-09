@@ -796,6 +796,28 @@ describe('approveDraft — 私信广告现在不能用「开」按钮打开', ()
       expect((await approveDraft('act1', sb, 'tok', PM)).ok, kind).toBe(true)
     }
   })
+
+  it('短视频留资不从旧开按钮开，零 Meta 调用', async () => {
+    const { sb, updated } = fakeSupabase({ ...base, draft: { ...DRAFT, kind: 'reels_lead' } })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('开投确认卡')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated).toHaveLength(0)
+  })
+
+  it('短视频留资从开投确认卡可以走到打开', async () => {
+    mActivate.mockResolvedValue({ ok: true })
+    const { sb } = fakeSupabase({ ...base, draft: { ...DRAFT, kind: 'reels_lead' } })
+    const card = {
+      actorUserId: 'u-pm',
+      actorEmail: 'pm@magiclab.test',
+      basis: 'go_live_card' as const,
+      cardRunId: '11111111-1111-4111-8111-111111111111',
+    }
+    expect((await approveDraft('act1', sb, 'tok', card, 'go-live-card')).ok).toBe(true)
+    expect(mActivate).toHaveBeenCalledTimes(1)
+  })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
