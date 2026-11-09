@@ -20,8 +20,10 @@ import {
   formatStaleJobsSummary,
 } from '@/lib/ads-strategy/monitoring/staleness'
 import { loadClientCapFacts } from '@/lib/ads-strategy/circuit-cap-facts'
+import { readClientPacing } from '@/lib/ads-strategy/intraday-spend/db'
 import {
   evaluateDailySpendOverCapNotice,
+  forecastOverCapWhat,
   spendCapNoticeWhat,
 } from '@/lib/ads-strategy/monitoring/spend-cap-notice'
 import { listActiveCircuitTrips } from '@/lib/ads-strategy/circuit-state'
@@ -270,6 +272,26 @@ export async function pushAdsDailySpendOverCapNoticeItems(
           what: `${name} 的已批准广告计划里还没有每天广告总上限。没有这个数，加预算会被拦住。`,
           how: '打开广告计划，填上每天的广告总上限，保存后再批准。不要用以前的客户总闸，也不要填 0。',
           href: `${APP_BASE}/dashboard/clients/${encodeURIComponent(client.id)}/promo-plan`,
+        })
+      }
+      if ('skipReason' in verdict && (verdict.skipReason === 'no_cap' || verdict.skipReason === 'unreadable')) {
+        continue
+      }
+      const pacing = await readClientPacing(supabase, client.id, new Date()).catch(() => null)
+      const day = pacing?.accounts[0]?.accountDay
+      if (pacing?.clientOverCap && pacing.forecastMajor !== null && pacing.capMajor !== null && pacing.currency && day) {
+        items.push({
+          kind: 'ads_daily_spend_over_cap_notice',
+          client_id: client.id,
+          client_name: name,
+          what: forecastOverCapWhat(name, {
+            accountDay: day,
+            forecastMajor: pacing.forecastMajor,
+            capMajor: pacing.capMajor,
+            currency: pacing.currency,
+          }),
+          how: '先看广告健康页上的收盘预测和每天上限是不是符合你的预期；要不要改预算或暂停由你决定，系统不会自动动广告。',
+          href: adsHealthHref(client.id),
         })
       }
       continue

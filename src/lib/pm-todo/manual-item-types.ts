@@ -50,6 +50,7 @@ import type {
   AdsHeartbeatStallItemKind,
   AdsPlanDailyCapMissingItemKind,
 } from './ads-agent-stale-items'
+import type { AdsCircuitBreakerAlertKind, AdsCircuitBreakerPauseKind } from './ads-circuit-breaker-items'
 import type { GoalRolloverItemKind } from './goal-rollover-items'
 import type { MaliangItemKind } from './maliang-render-items'
 import type { LibaiItemKind } from './libai-items'
@@ -133,6 +134,9 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   // 这条里还有「检查自己没跑成」，绝不能因为链接问题静默消失。
   'ads_tracking_preflight_fix',
   'ads_tracking_preflight_broken',
+  // 熔断只出暂停卡：链接是登录后的广告页，探活容易判坏。没人看见 = 异常花钱没人点确认。
+  'ads_circuit_breaker_pause',
+  'ads_circuit_breaker_alert',
 ])
 
 /** Meta queued this long without being applied = the applier is stuck. */
@@ -335,6 +339,8 @@ export type ManualItemKind =
   | AdsDailySpendOverCapNoticeItemKind
   | AdsHeartbeatStallItemKind
   | AdsPlanDailyCapMissingItemKind
+  | AdsCircuitBreakerPauseKind
+  | AdsCircuitBreakerAlertKind
   /** 月循环目标过了月底没自动续上 —— 广告自治 / 日报会失去目标口径 */
   | GoalRolloverItemKind
   /** Facebook 删除数据请求处理失败 —— 用户在 Facebook 里要求删数据，我们答应了却没做到，不许只写日志 */

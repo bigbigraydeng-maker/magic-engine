@@ -1,13 +1,14 @@
 'use client'
 
 /**
- * 节奏 / 收盘预测（只读）。仅用既有 `/ad-health/live`；缺日内 10 分钟历史时不假造预测。
+ * 节奏 / 收盘预测（只读）。花费样本来自 `/ad-health/live` 附带的 pacing；没有样本时不假造预测。
  * 刷新间隔最多 120 秒。
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import type { LiveAccountView, LiveTodayView } from '@/lib/ads-strategy/heartbeat/live-view'
+import type { AccountPace, PacingPayload } from '@/lib/ads-strategy/intraday-spend/view'
 import {
   LIVE_PACING_ALGO_VERSION,
   REPORT_LAG_MINUTES,
@@ -15,8 +16,8 @@ import {
 
 const REFRESH_MS = 120_000
 
-const INSUFFICIENT_INTRADAY =
-  '数据不足：老 ME 尚未有 campaign 级日内 10 分钟累计样本，无法做节奏外推。'
+const NO_SPEND = '数据不足：还没有够用的日内花费样本。'
+const NO_RESULTS = '数据不足：只读花费接口没有结果或链接点击的日内样本。'
 
 function fmtNzdt(iso: string | null): string {
   if (!iso) return '读不到'
@@ -47,27 +48,33 @@ function money(n: number | null, cur: string | null): string {
   return `${n.toFixed(2)} ${cur ?? ''}`.trim()
 }
 
-type MetricRowProps = {
-  label: string
-  available: boolean
-  children: React.ReactNode
-}
-
-function MetricRow({ label, available, children }: MetricRowProps) {
+function MetricRow({ label, text, empty }: { label: string; text: string | null; empty: string }) {
   return (
     <tr className="border-t border-gray-100 align-top">
       <td className="py-2 pr-3 text-xs text-gray-500">{label}</td>
       <td className="py-2 text-sm text-gray-800">
-        {available ? children : <span className="text-amber-700">{INSUFFICIENT_INTRADAY}</span>}
+        {text ?? <span className="text-amber-700">{empty}</span>}
       </td>
     </tr>
   )
 }
 
-function AccountPacingBlock({ acc }: { acc: LiveAccountView }) {
-  const spend = sumSpendToday(acc)
-  const hasIntradayHistory = false
+function forecastText(pace: AccountPace | undefined): string | null {
+  if (!pace) return null
+  if (pace.forecastStatus === 'ok' && pace.pointMajor != null && pace.lowMajor != null && pace.highMajor != null) {
+    return `${money(pace.pointMajor, pace.currency)}（${money(pace.lowMajor, pace.currency)} – ${money(pace.highMajor, pace.currency)}）`
+  }
+  return pace.forecastReason
+}
 
+function segmentText(pace: AccountPace | undefined): string | null {
+  if (!pace || pace.segmentMajor === null) return null
+  const cpm = pace.cpm === null ? 'CPM 读不到' : `CPM ${pace.cpm.toFixed(2)}`
+  return `近 60 分钟 ${money(pace.segmentMajor, pace.currency)} · ${cpm}。点击率还没有日内样本。`
+}
+
+function AccountPacingBlock({ acc, pace }: { acc: LiveAccountView; pace?: AccountPace }) {
+  const spend = sumSpendToday(acc)
   return (
     <div className="mt-3 rounded-lg border border-gray-100 bg-gray-50/80 p-3">
       <p className="text-xs text-gray-400">
@@ -86,21 +93,15 @@ function AccountPacingBlock({ acc }: { acc: LiveAccountView }) {
             <td className="py-2 pr-3 text-xs text-gray-500">今日累计花费</td>
             <td className="py-2 text-sm text-gray-800">{money(spend, acc.currency)}</td>
           </tr>
-          <MetricRow label="收盘预测 · 花费" available={hasIntradayHistory}>
-            —
-          </MetricRow>
-          <MetricRow label="收盘预测 · 结果" available={hasIntradayHistory}>
-            —
-          </MetricRow>
-          <MetricRow label="收盘预测 · 链接点击" available={hasIntradayHistory}>
-            —
-          </MetricRow>
-          <MetricRow label="近 7 天同刻对比" available={hasIntradayHistory}>
-            —
-          </MetricRow>
-          <MetricRow label="分段花费 / 效率 (CTR·CPC·CPM)" available={hasIntradayHistory}>
-            —
-          </MetricRow>
+          <MetricRow label="收盘预测 · 花费" text={forecastText(pace)} empty={NO_SPEND} />
+          <MetricRow label="收盘预测 · 结果" text={null} empty={NO_RESULTS} />
+          <MetricRow label="收盘预测 · 链接点击" text={null} empty={NO_RESULTS} />
+          <MetricRow
+            label="近 7 天同刻对比"
+            text={pace?.priorMedianMajor == null ? null : money(pace.priorMedianMajor, pace.currency)}
+            empty={NO_SPEND}
+          />
+          <MetricRow label="分段花费 / 效率 (CTR·CPC·CPM)" text={segmentText(pace)} empty={NO_SPEND} />
         </tbody>
       </table>
     </div>
@@ -109,6 +110,7 @@ function AccountPacingBlock({ acc }: { acc: LiveAccountView }) {
 
 export default function LivePacingPanel({ clientId }: { clientId: string }) {
   const [view, setView] = useState<LiveTodayView | null>(null)
+  const [pacing, setPacing] = useState<PacingPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [hidden, setHidden] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -125,13 +127,16 @@ export default function LivePacingPanel({ clientId }: { clientId: string }) {
       if (!res.ok || !body.view) {
         setError(body.error ?? '读不到今日实时数据')
         setView(null)
+        setPacing(null)
         return
       }
       setError(null)
       setView(body.view as LiveTodayView)
+      setPacing((body.pacing ?? null) as PacingPayload | null)
     } catch {
       setError('读不到今日实时数据（网络出错）')
       setView(null)
+      setPacing(null)
     } finally {
       setBusy(false)
     }
@@ -163,13 +168,22 @@ export default function LivePacingPanel({ clientId }: { clientId: string }) {
       </p>
       {busy && !view && <p className="mt-2 text-sm text-gray-500">读取中…</p>}
       {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+      {pacing?.clientOverCap && (
+        <p className="mt-2 text-sm text-amber-800">
+          收盘花费预测高于已批准计划的每天上限。这是提醒，系统不会改预算或暂停广告。
+        </p>
+      )}
       {view && (
         <>
           {view.accounts.length === 0 && (
             <p className="mt-2 text-sm text-gray-500">没有可读取的正式广告账户。</p>
           )}
           {view.accounts.map((acc) => (
-            <AccountPacingBlock key={acc.adAccountId} acc={acc} />
+            <AccountPacingBlock
+              key={acc.adAccountId}
+              acc={acc}
+              pace={pacing?.accounts.find((row) => row.adAccountId === acc.adAccountId)}
+            />
           ))}
         </>
       )}

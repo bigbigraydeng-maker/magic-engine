@@ -1,6 +1,7 @@
 /** Words shared by the confirmation card and the page that shows it. No server imports. */
 
 import { BUDGET_CARD_WHAT_PREFIX } from '@/lib/ads-budget-card/copy'
+import { isCreativeStateCard } from '@/lib/creative-state/copy'
 import { isWinnerReelCard } from '@/lib/winner-reel-sync/copy'
 
 export const PAUSED_DRAFT_WHAT = '批准建 Meta 暂停草稿并送审'
@@ -29,6 +30,9 @@ export function pausedDraftClickUrl(clientId: string, runId: string, what: strin
   }
   if (isWinnerReelCard(what)) {
     return `/api/clients/${client}/meta-ads/winner-reel-cards/${run}`
+  }
+  if (isCreativeStateCard(what)) {
+    return `/api/clients/${client}/meta-ads/creative-state-cards/${run}`
   }
   return `/api/clients/${client}/confirmation-cards/${run}/decision`
 }
