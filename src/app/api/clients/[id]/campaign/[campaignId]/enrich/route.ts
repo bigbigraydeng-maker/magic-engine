@@ -1,4 +1,5 @@
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { campaignViewer, presentCampaign } from '@/lib/campaign/client-view'
 // Enrich Campaign Brief with DataForSEO keyword data + URL parsing
 // Pulls question keywords + related keywords for the campaign topic
 // Parses source URLs via Jina Reader
@@ -133,10 +134,12 @@ export async function POST(req: NextRequest, { params }: RouteContext) {
 
     if (saveErr) throw saveErr
 
+    const viewer = campaignViewer(__access.role)
     return NextResponse.json({
       success: true,
-      campaign: updated,
-      keywords_found: semrush_keywords.length,
+      viewer,
+      campaign: presentCampaign(updated, viewer),
+      keywords_found: viewer === 'internal' ? semrush_keywords.length : 0,
       seeds_used: seeds,
       urls_parsed: urlsToParse.length,
       warnings,

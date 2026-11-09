@@ -36,7 +36,9 @@ function node(id) {
   });
   return nodes.get(id);
 }
-const context = vm.createContext({ document: {
+const context = vm.createContext({
+  matchMedia: () => ({ matches: false, addEventListener() {} }),
+  document: {
   querySelectorAll: () => [], querySelector: node, getElementById: node,
 } });
 vm.runInContext(script, context);
@@ -44,13 +46,18 @@ const evaluate = code => vm.runInContext(code, context);
 assert(evaluate('website()').includes('PROPOSED DESIGN'));
 evaluate('websiteAfter = false');
 assert(evaluate('website()').includes('BEFORE'));
-for (let i = 0; i < 3; i++) {
-  evaluate('slide = ' + i);
-  assert(evaluate('social()').includes('0' + (i + 1) + ' / 03'));
+const connected = evaluate('social()');
+for (const channel of ['Instagram', 'Google Search', 'Website']) {
+  assert(connected.includes(channel));
 }
+assert.equal((connected.match(/class="channel-work"/g) || []).length, 3);
+assert(connected.includes('Assumed inputs for fictional business'));
+assert(connected.includes('Budget not set · Approval required'));
+assert(connected.includes('You approve before anything is published or spent.'));
+assert(existsSync(resolve(root, 'assets/harbour-daylight-concept.jpg')));
 evaluate('ad = 0');
 assert(evaluate('advertising()').includes('China Small-Group Tours'));
 evaluate('ad = 1');
 assert(evaluate('advertising()').includes('Your First Trip to China'));
 assert(evaluate('advertising()').includes('Serving <b>Off</b>'));
-console.log('PASS: release metadata, assets, waitlist route, login, XML and 7 visual states');
+console.log('PASS: release metadata, assets, waitlist route, login, XML and 2 page states, 3 connected drafts and 2 ad states');

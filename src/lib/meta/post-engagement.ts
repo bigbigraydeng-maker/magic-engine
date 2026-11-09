@@ -13,7 +13,7 @@
  *     判据对齐 `comments.ts:reasonFor`。
  */
 
-const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
+import { GRAPH_BASE } from './graph-base'
 
 export type FieldRead =
   | { kind: 'value'; value: number }

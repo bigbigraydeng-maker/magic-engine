@@ -1,22 +1,15 @@
 /**
  * POST /api/ad-approval/[actionId]   { decision: 'approve' | 'reject', reason? }
  *
- * 人点头 → 广告真的开始花钱。这是整条链路上**唯一**会让钱动起来的接口。
- *
- * 为什么要单独一个接口、而不是让起草那步自己开（PM 2026-07-28 拍板的产品形态）：
- *   花钱 / 对外可见 / 难撤回 —— 三条全占，所以必须落成一个人点的动作。
- *   ME 把活干到「只剩点头」，但那一下必须是人点的。
+ * 「开」不再走这里。开投只认确认卡（/api/clients/[id]/go-live-cards）。
+ * 这个入口若收到 approve，直接拒绝，不读令牌，不写广告。
+ * 「先不投」仍只改账本，广告保持暂停。
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
-import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import {
-  approveDraft,
-  rejectDraft,
-  ADS_CREATE_ACTION,
-} from '@/lib/ads-strategy/draft-and-gate'
+import { rejectDraft, ADS_CREATE_ACTION } from '@/lib/ads-strategy/draft-and-gate'
 
 export async function POST(
   req: NextRequest,
@@ -37,12 +30,14 @@ export async function POST(
   }
 
   // 先查这条属于哪个客户，再按那个客户鉴权 —— 不能让 A 客户的人开 B 客户的广告。
-  const { data } = await supabaseAdmin
+  const { data, error: lookupError } = await supabaseAdmin
     .from('flywheel_actions')
     .select('client_id')
     .eq('id', actionId)
     .eq('action_type', ADS_CREATE_ACTION)
     .maybeSingle()
+
+  if (lookupError) return NextResponse.json({ error: '暂时查不到这条草案，已拒绝。' }, { status: 503 })
 
   const clientId = (data as { client_id?: string } | null)?.client_id
   if (!clientId) return NextResponse.json({ error: '找不到这条草案' }, { status: 404 })
@@ -50,24 +45,19 @@ export async function POST(
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
 
-  if (decision === 'reject') {
-    const r = await rejectDraft(
-      actionId,
-      supabaseAdmin,
-      typeof body.reason === 'string' ? body.reason : undefined,
+  if (decision === 'approve') {
+    return NextResponse.json(
+      { error: '开投要在确认卡上点。这个入口不再直接开启广告。' },
+      { status: 409 },
     )
-    return r.ok
-      ? NextResponse.json({ ok: true, status: 'rejected' })
-      : NextResponse.json({ error: r.error }, { status: 400 })
   }
 
-  const accessToken = await getMetaTokenForClient(clientId)
-  if (!accessToken) {
-    return NextResponse.json({ error: '拿不到这个客户的 Meta 授权' }, { status: 424 })
-  }
-
-  const r = await approveDraft(actionId, supabaseAdmin, accessToken)
+  const r = await rejectDraft(
+    actionId,
+    supabaseAdmin,
+    typeof body.reason === 'string' ? body.reason : undefined,
+  )
   return r.ok
-    ? NextResponse.json({ ok: true, status: 'active' })
+    ? NextResponse.json({ ok: true, status: 'rejected' })
     : NextResponse.json({ error: r.error }, { status: 400 })
 }

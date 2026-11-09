@@ -57,7 +57,7 @@ beforeAll(async () => {
   const NAL = settingsFixture(nalSettings)
   ctsRun = runDiagnostics({
     clientId: 'cts', date: '2026-09-13', evaluatedAt: '2026-09-14T03:00:00Z',
-    outcome: { leading: 'lead', primary: 'lead', targetCostPerPrimary: 40, minPrimaryPerUnit: 5 }, outcomeConfigured: true,
+    outcome: { leading: 'lead', primary: 'lead', targetCostPerPrimary: 46.8, minPrimaryPerUnit: 5 }, outcomeConfigured: true,
     messagingReferralAvailable: false, digestRecipients: [],
     accounts: [accountInput({ fixture: CTS, snapshots: replaySnapshots({ fixture: CTS, clientId: 'cts', asOfIso: '2026-09-13T11:59:59Z', date: '2026-09-13', daily: ctsDaily, activities: ctsActivities as ActivityRow[] }), daily: ctsDaily, hourly: hourlyFromGraph((ctsHourlyRaw as { days: Record<string, GraphHourlySpendRow[]> }).days), lastInsightDate: '2026-09-13' })],
   })
@@ -120,12 +120,13 @@ describe('日报内容（真实回放诊断）', () => {
   it('CTS 9/13：一句结论 + 账户层面「投放卡住」+ 样本量；明说只读、仅限内部', () => {
     const { subject, html } = buildInternalDigest({ clientName: 'CTS Tours NZ', date: '2026-09-13', run: ctsRun, decision: 'alert', legacyNeedsAction: [], droppedRecipients: 0 })
     expect(subject).toContain('内部')
-    expect(html).toContain('发现 1 件要看的事')
+    // 「投放卡住」(D1) + 「没排除 Audience Network」(D9，2026-09-22 补的规则，抓的是真实存在的配置问题）。
+    expect(html).toContain('发现 2 件要看的事')
     expect(html).toContain('账户层面')
     expect(html).toContain('投放卡住')
     expect(html).toContain('样本：')
     expect(html).toContain('只读诊断，没有改任何广告和预算')
-    expect(html).toContain('NZD 23.22')
+    expect(html).toContain('NZD 27.17')
     expect(html).toContain('<a href="https://adsmanager.facebook.com/')
   })
 
@@ -160,6 +161,17 @@ describe('日报内容（真实回放诊断）', () => {
     expect(html).toContain('结果真相断层')
   })
 
+  it('目标进度未判：归属不足照旧写「归属数据不足」；广告设置读失败不冒充成归属不足', () => {
+    const pace = { expectedToDate: 35, actualToDate: null, gapPct: null, projectedEnd: null, verdict: 'unknown' as const, reason: 'r' }
+    const goal = { title: 'G', label: '留资', target: 50, dayIndex: 15, totalDays: 30, pace }
+    const build = (g: typeof goal & { configReadError?: string }) =>
+      buildInternalDigest({ clientName: 'C', date: '2026-09-13', run: ctsRun, decision: 'alert', legacyNeedsAction: [], droppedRecipients: 0, goal: g }).html
+    expect(build(goal)).toContain('归属数据不足，未判（r）')
+    const failed = build({ ...goal, pace: { ...pace, reason: '读不出广告设置' }, configReadError: 'boom' })
+    expect(failed).toContain('— 未判（读不出广告设置）')
+    expect(failed).not.toContain('归属数据不足')
+  })
+
   it('不出现任何挪预算 / 改广告的操作指令', () => {
     const { html } = buildInternalDigest({ clientName: 'New Asian Logistics', date: '2026-09-13', run: nalRun, decision: 'alert', legacyNeedsAction: [], droppedRecipients: 0 })
     expect(html).not.toMatch(/挪预算|加预算|减预算|暂停这/)
@@ -175,7 +187,9 @@ describe('发送与回执', () => {
     expect(sent[0].to.every(isInternalRecipient)).toBe(true)
     expect(sent[0].to).not.toContain('boss@ctstours.co.nz')
     const stored = narratives[0].payload as { portfolio_diagnoses: { hit_count: number } }
-    expect(stored.portfolio_diagnoses.hit_count).toBe(1)
+    // D1（投放卡住）+ D9（GC 顶层 ThruPlay 广告组没排除 Audience Network，PITFALLS D9 那个真实的坑，
+    // 2026-09-08 就已经存在，加了 D9 规则后这条真实回放数据正确地多命中一条，不是回归）。
+    expect(stored.portfolio_diagnoses.hit_count).toBe(2)
     expect(narratives[0].email_status).toBe('sent')
   })
 

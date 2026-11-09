@@ -142,7 +142,10 @@ export async function checkContentDuplicate(
       .from('client_site_pages')
       .select('url, title, primary_keyword')
       .eq('client_id', clientId)
-      .eq('crawl_status', 'crawled'),
+      // Firewall-blocked pages ('antibot_challenged') are real pages whose body we
+      // could not read. This gate only uses url / title / keyword, so they must still
+      // count as existing content — otherwise the weekly blog can clash with them.
+      .in('crawl_status', ['crawled', 'antibot_challenged']),
   ])
 
   const existing: ExistingContent[] = [

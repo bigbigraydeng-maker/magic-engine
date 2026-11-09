@@ -1,0 +1,458 @@
+/**
+ * 编排：把一个客户的线索按路线分流、判重、追加进各自的 Google 表格。
+ *
+ * 纪律（跟 `meta/leads-sync.ts` 同一套，不另立规矩）：
+ *   · **先读后写** —— 先把目标表现有的行读回来算判重键，再决定写什么。
+ *     重跑不会写出第二行；跟别的管道（客户自己的 Zapier/Make、人手粘贴）
+ *     往同一张表里写也不会互相写重。
+ *   · **同一张表只读一次** —— 几条路线写同一张表是常态（所有表单汇总进一张，
+ *     用「来源表单」那一列区分），它们共用一份判重键集合，见 `DestinationSnapshot`。
+ *   · **只追加** —— 一个已有单元格都不碰（见 `google-sheets/client.ts`）。
+ *   · **一条路线炸了不牵连另一条** —— 错误记进那条路线的回执，继续跑下一条。
+ *   · **失败要说人话** —— 原话带进回执，调用方据此下发人工待办。
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { appendSheetValues, readSheetValues } from '@/lib/google-sheets/client'
+import { loadClientRoutes } from './config'
+import { countLeadsBefore, loadLeadsSince } from './leads'
+import { buildRow, dedupKeys, emptyNotes } from './row'
+import { isWithinBackfillWindow, pickRoute } from './route-match'
+import { destinationKey } from './types'
+import type { LeadRecord, LeadSheetClientReceipt, LeadSheetRoute, LeadSheetRouteReceipt } from './types'
+
+// 脚本和线上走同一个口径，从这里再导一次，省得调用方去记它住在哪。
+export { destinationKey }
+
+/**
+ * tab 名按 A1 记法转义。
+ *
+ * 🔴 名字里有空格（`FB 表单 2026`）或单引号时必须加引号，否则 Sheets 回 400，
+ *    这条路线**永远**失败 —— 而待办里给出的说法会是「表是不是被改名了」，
+ *    方向完全错。现在两个 tab 叫 Untitled / Sheet1 碰巧没事，配第三个就撞上。
+ */
+function quoteTab(tabName: string): string {
+  return `'${tabName.replace(/'/g, "''")}'`
+}
+
+/** 读整张表用的范围。列到 ZZ 够宽，行不设上限。 */
+function fullRange(tabName: string): string {
+  return `${quoteTab(tabName)}!A:ZZ`
+}
+
+/** 追加用的范围。同上 —— Sheets 会自己找到最后一行。 */
+function appendRange(tabName: string): string {
+  return `${quoteTab(tabName)}!A:ZZ`
+}
+
+export interface SyncDeps {
+  readSheet?: typeof readSheetValues
+  appendSheet?: typeof appendSheetValues
+  /** true = 只算不写。用来在真开闸之前把「会写什么」摆给人看。 */
+  dryRun?: boolean
+}
+
+/**
+ * 同一张表（同一个 tab）在这一轮里的共享状态。
+ *
+ * 🔴 **为什么要共享**：PM 2026-09-24 拍板「所有表单汇总进一张表」之后，几条路线
+ *    写同一张表成了常态。各读各的会出两个毛病：
+ *      1. 同一张表读两遍，纯浪费（而且第二遍读到的内容取决于第一条路线写没写完，
+ *         等于让判重结果跟路线顺序挂钩）。
+ *      2. **试算模式下会多报**：第一条路线只算不写，第二条再读回来的还是老内容，
+ *         两条路线上身份键相同的两个人会双双显示「会写」。真跑时不会重复（第二遍
+ *         读得到第一条写进去的行），于是试算跟真跑对不上 —— 而试算存在的全部意义
+ *         就是「先看清楚会写什么」。
+ *
+ *    共享一份键集合两个毛病一起没了：读一次，谁排进队列谁就把键加进去。
+ *
+ * 🔴 拿**第一条**路线的 dedup 配置去算已有行的键。这一点成立的前提是
+ *    `config.ts::describeLayoutMismatch` 已经保证同一张表上的路线判重配置一致 ——
+ *    两处是绑定的，改一边要看另一边。
+ */
+export interface DestinationSnapshot {
+  /** 表里已有的 + 本轮已排进队列的判重键。 */
+  keys: Set<string>
+  /** 读过了没。第一条用到这张表的路线负责读。 */
+  loaded: boolean
+  /** 读表失败时的原话。非 null = 这张表上的路线这一轮全部停手。 */
+  readError: string | null
+}
+
+export function newDestinationSnapshot(): DestinationSnapshot {
+  return { keys: new Set(), loaded: false, readError: null }
+}
+
+/**
+ * 开工前对一次表头。对得上返回 null，对不上返回一句人话（直接进人工待办）。
+ *
+ * 🔴 **为什么值得专门做这道闸**：改成「所有表单汇总进一张表」之后，上线多了一步
+ *    人工动作 —— 有人要照着约定把目标表格的表头排一遍。排错一列、或者以后有人在
+ *    表中间插一列，ME 照样按配置写满每一格：电话写进邮箱列、员工手打的跟进记录
+ *    被推到别的列，而 `appended` 正常、回执全绿、日报绿、一条待办都不出。
+ *    这张表是销售直接看的 —— **错位比不写更糟，而且追加不可逆**。
+ *    整张表本来就读回来了，第一行是白拿的。
+ *
+ * 🔴 配了表头签名、表却整个空着时**同样 fail-closed**，不是放行：空表照写第一条
+ *    线索，那一行会被当成第 1 行写进去；下一轮再读表，这行数据就会被当成表头去
+ *    跟配置比对，报「对不上」然后整轮停手——表头始终没人建，只是从「一开始就拦住」
+ *    变成「写脏一行之后才拦住」。没配 `header_row` 则完全不检查 —— 行为跟以前一样。
+ *
+ * 比对忽略首尾空白；表头右边多出来的空格子不算数（Sheets 会把尾部空单元格截掉，
+ * 人也常在右边留几列自己用的草稿，那不影响我们前 N 列的位置）。
+ */
+export function describeHeaderProblem(
+  route: LeadSheetRoute,
+  existing: readonly (readonly string[])[],
+): string | null {
+  const expected = route.headerRow
+  if (!expected || expected.length === 0) return null
+  if (existing.length === 0) {
+    return (
+      '目标表格要求按固定表头写入，但整张表还是空的（连表头都没有）：本轮一行都没写 —— ' +
+      `先照配置把表头这一行建好（应为「${expected.join('、')}」），下一轮会自动接着写。`
+    )
+  }
+
+  const actual = existing[0] ?? []
+  for (let i = 0; i < expected.length; i++) {
+    const want = expected[i].trim()
+    const got = (actual[i] ?? '').trim()
+    if (want !== got) {
+      return (
+        `目标表格的表头跟配置对不上，本轮一行都没写：第 ${i + 1} 列应该是「${want}」，` +
+        `实际是「${got || '（空）'}」。多半是有人在表里插了一列或改了表头 —— ` +
+        `照配置硬写会让之后每一行都错位（电话写进别的列、把员工写的跟进记录挤走），` +
+        `而错位是追加不回来的，所以这轮停手。`
+      )
+    }
+  }
+  return null
+}
+
+function emptyRouteReceipt(route: LeadSheetRoute): LeadSheetRouteReceipt {
+  return {
+    routeKey: route.routeKey,
+    label: route.label,
+    spreadsheetId: route.spreadsheetId,
+    tabName: route.tabName,
+    matched: 0,
+    alreadyPresent: 0,
+    skippedNoIdentity: 0,
+    skippedLeadIds: [],
+    appended: 0,
+    appendedLeadIds: [],
+    outsideWindow: 0,
+    unmappedValues: [],
+    blankedFields: [],
+    error: null,
+  }
+}
+
+/** 一条路线：读表 → 判重 → 追加。永不抛异常，错误进回执。 */
+export async function syncOneRoute(
+  clientId: string,
+  route: LeadSheetRoute,
+  leads: readonly LeadRecord[],
+  deps: SyncDeps = {},
+  /**
+   * 同一张表上几条路线共用的键集合。不传就自己建一个（单条路线跑、脚本试算
+   * 都是这个用法），行为跟以前完全一样。
+   */
+  snapshot: DestinationSnapshot = newDestinationSnapshot(),
+  /**
+   * 🔴 取数查询本身已经按「所有路线里最早的 backfillSince」截断过——比这更早的
+   *    线索根本没进 `leads`，下面这个逐条比对永远看不见它们。几条路线共用同一个
+   *    `backfillSince`（当下常态）时，这意味着窗口外永远算成 0。调用方
+   *    （`syncClientLeadSheets`）用 `countLeadsBefore` 把「查询截断掉多少条」
+   *    数出来传进来，这里当成起点，不是从 0 开始数。单独跑（脚本试算传的是
+   *    `since = null`，取的是全量）不传就是 0，行为跟以前一样。
+   */
+  outsideWindowBaseline = 0,
+): Promise<LeadSheetRouteReceipt> {
+  const read = deps.readSheet ?? readSheetValues
+  const append = deps.appendSheet ?? appendSheetValues
+  const receipt = emptyRouteReceipt(route)
+  receipt.outsideWindow = outsideWindowBaseline
+
+  const inWindow: LeadRecord[] = []
+  for (const lead of leads) {
+    if (isWithinBackfillWindow(lead, route)) inWindow.push(lead)
+    else receipt.outsideWindow++
+  }
+  receipt.matched = inWindow.length
+  // 一条线索都没有就别读表 —— 同一张表上后面还有别的路线，谁先有活谁去读。
+  if (inWindow.length === 0) return receipt
+
+  const idCol = route.dedupIdColumn ?? undefined
+
+  if (!snapshot.loaded) {
+    snapshot.loaded = true
+    try {
+      // 🔴 必须按「人看到的文本」读，不能按原始值读 —— 判重要跟人手填的行对上。
+      //    用 unformatted 的话日期列回来是 46289.411… 这种序列号，永远对不上（实测）。
+      const existing = await read(clientId, route.spreadsheetId, fullRange(route.tabName), {
+        render: 'formatted',
+      })
+      const headerProblem = describeHeaderProblem(route, existing)
+      if (headerProblem) {
+        snapshot.readError = headerProblem
+      } else {
+        // 表里每一行贡献它**全部**能算出来的键：老行只有身份键，我们以前写的行两把都有。
+        for (const row of existing) {
+          for (const key of dedupKeys(row, route.dedupColumns, idCol)) snapshot.keys.add(key)
+        }
+      }
+    } catch (err) {
+      // 🔴 读不到已有行就**什么都不写**。看不见表里有什么却照写不误 = 写一堆重复行，
+      //    而重复行在这种表上是不可逆的（人会在上面手工标注跟进）。
+      snapshot.readError = `读目标表格失败，本轮一行都没写：${err instanceof Error ? err.message : String(err)}`
+    }
+  }
+
+  if (snapshot.readError) {
+    // 同一张表上的每条路线都要在**自己的**回执里说这件事 —— 待办按路线下发，
+    // 只记在第一条上的话，后面那几条看起来像「这轮 0 条、一切正常」。
+    receipt.error = snapshot.readError
+    return receipt
+  }
+
+  const present = snapshot.keys
+
+  const notes = emptyNotes()
+  const toAppend: string[][] = []
+  const toAppendLeadIds: string[] = []
+
+  for (const lead of inWindow) {
+    const cells = buildRow(lead, route, notes)
+    const keys = dedupKeys(cells, route.dedupColumns, idCol)
+    if (keys.length === 0) {
+      /**
+       * 判重键拼不出来 = 这条线索在这张表里没有可比的身份。写进去就再也认不出
+       * 是谁、也去不掉，所以跳过。
+       *
+       * 🔴 但**必须按条计数 + 记下 lead id**：这些是真的没进销售手里的线索。
+       *    早先只往 `blankedFields` 里塞一个词，会被去重成一个元素 —— 条数和
+       *    是哪几条全丢了，人工待办那边也读不到，等于又一次「死在日志里」。
+       */
+      receipt.skippedNoIdentity++
+      receipt.skippedLeadIds.push(lead.leadId)
+      continue
+    }
+    /**
+     * 🔴 **任一把键撞上就算已经有了**：机器键认我们自己写过的行，
+     *    身份键认人手填的 / 外部管道写的老行。少一边就会写重复。
+     *
+     *    `present` 里除了表里已有的行，还有这一轮已经排进队列的行 —— 同一个人
+     *    同一分钟填了两次、或者同一张表上另一条路线已经收了他，都只写一条。
+     *
+     *    排进队列就先占键（不等写成功）。代价是：万一前一条路线的追加失败了，
+     *    同一张表上后一条路线里跟它撞键的那条会被当成「已有」跳过一轮。
+     *    下一轮两边都会重新算，自己会追上 —— 反过来「等写成功再占键」会在
+     *    追加成功但回执丢了的时候写出重复行，那个是不可逆的。
+     */
+    if (keys.some((k) => present.has(k))) {
+      receipt.alreadyPresent++
+      continue
+    }
+    for (const k of keys) present.add(k)
+    toAppend.push(cells)
+    toAppendLeadIds.push(lead.leadId)
+  }
+
+  receipt.unmappedValues = [...new Set(notes.unmappedValues)].sort()
+  receipt.blankedFields = [...new Set([...receipt.blankedFields, ...notes.blankedFields])].sort()
+
+  if (toAppend.length === 0) return receipt
+
+  if (deps.dryRun) {
+    // 只算不写：回执如实说「本来要写这几条」，但 appended 保持 0 —— 不能让
+    // 试算看起来像写成功了。
+    receipt.appendedLeadIds = toAppendLeadIds
+    return receipt
+  }
+
+  try {
+    const written = await append(clientId, route.spreadsheetId, appendRange(route.tabName), toAppend)
+    receipt.appended = written
+    if (written === toAppend.length) {
+      receipt.appendedLeadIds = toAppendLeadIds
+    } else {
+      /**
+       * 🔴 只写进去一部分时**不能**把全部 lead id 都说成写了。
+       *    这个列表存在的理由就是「出事时能直接回查是哪几条」——
+       *    在最需要它的那一刻撒谎，比没有这个字段还糟。
+       *    Sheets 不告诉我们是哪几行成了，所以这里如实留空。
+       */
+      receipt.appendedLeadIds = []
+      receipt.error =
+        `打算写 ${toAppend.length} 行，Sheets 只认了 ${written} 行 —— 有一部分没写进去；` +
+        `Sheets 没说是哪几行成了，所以这次不报 lead id（下一轮判重会把漏的补上）`
+    }
+  } catch (err) {
+    receipt.error = `写目标表格失败：${err instanceof Error ? err.message : String(err)}`
+  }
+
+  return receipt
+}
+
+/** 一个客户：读配置 → 取线索 → 逐条路线跑。永不抛异常。 */
+export async function syncClientLeadSheets(
+  supabase: SupabaseClient,
+  client: { id: string; name: string | null },
+  deps: SyncDeps = {},
+): Promise<LeadSheetClientReceipt> {
+  const receipt: LeadSheetClientReceipt = {
+    clientId: client.id,
+    clientName: client.name,
+    routes: [],
+    unrouted: 0,
+    error: null,
+    warning: null,
+  }
+
+  let routes: LeadSheetRoute[]
+  try {
+    const loaded = await loadClientRoutes(supabase, client.id)
+    routes = loaded.routes
+    if (loaded.invalid.length > 0) {
+      /**
+       * 🔴 **一条路线坏了，整个客户这轮停手，一行都不写。**
+       *
+       * 不能只跳过坏掉的那条继续跑 —— `pickRoute` 看不见被跳过的路线，
+       * 本该走它的线索会**掉进兜底路线**，被追加进错的那张表。追加不可逆；
+       * 等配置修好，这些线索又会被写进正确的表一遍 —— 同一个人两张表都有，
+       * 而两轮的回执都显示"成功"。
+       *
+       * 配置手误的正确代价是"今天没同步 + 待办里喊一声"，不是"写进错的表"。
+       */
+      receipt.error =
+        `路线配置有 ${loaded.invalid.length} 条读不出来，本轮整个客户停手、一行都没写（` +
+        `怕命中坏掉那条路线的线索掉进兜底表）：` +
+        loaded.invalid.map((i) => i.reason).join(' | ')
+      return receipt
+    }
+  } catch (err) {
+    receipt.error = err instanceof Error ? err.message : String(err)
+    return receipt
+  }
+  if (routes.length === 0) return receipt
+
+  /**
+   * 取数窗口 = 所有路线里最早的那个。某条路线没设窗口就等于要全部。
+   *
+   * 🔴 **按时间比，不按字符串比**。`'2026-09-24T00:00:00+12:00'` 字典序排在
+   *    `'2026-09-20T12:00:00+00:00'` 后面，可偏移量不同的两个串比字典序会得出
+   *    跟真实先后相反的结论 —— 窗口算晚了就是静默漏线索。
+   */
+  const since = routes.some((r) => !r.backfillSince)
+    ? null
+    : new Date(
+        Math.min(...routes.map((r) => Date.parse(r.backfillSince as string))),
+      ).toISOString()
+
+  let leads: LeadRecord[]
+  try {
+    leads = await loadLeadsSince(supabase, client.id, since)
+  } catch (err) {
+    receipt.error = [receipt.error, `取线索失败：${err instanceof Error ? err.message : String(err)}`]
+      .filter(Boolean)
+      .join(' | ')
+    return receipt
+  }
+
+  /**
+   * 🔴 `loadLeadsSince` 已经按 `since` 把更早的线索挡在查询之外，`leads` 里
+   *    压根不会出现它们——下面按路线分组、`syncRoutes` 里逐条线索去比
+   *    `backfillSince` 的算法看不到「查询范围之外」还有多少条。这里单独数一次，
+   *    数字统一交给每条路线的 `outsideWindow` 当起点（本节所有路线的 `backfillSince`
+   *    都 >= `since`，所以 `since` 之前的线索对每条路线都算「窗口外」）。
+   *    数不出来不阻断同步本身——这只是一个报数字段，宁可这一轮暂时偏小，
+   *    也不能因为数不出「还剩多少」就不写线索了。
+   */
+  let outsideWindowBaseline = 0
+  if (since) {
+    try {
+      outsideWindowBaseline = await countLeadsBefore(supabase, client.id, since)
+    } catch (err) {
+      /**
+       * 🔴 **这是 warning，不是 error。** 分流和写表在这个 catch 之后照常跑、照常
+       *    成功 —— 塞进 `receipt.error` 的话，`pushLeadSheetItems` 会把它念成
+       *    「这轮没能写进 Google 表格」，而新线索其实已经写进去了。这条诊断失败
+       *    只影响「窗口外还剩多少条没补」这一个数字这轮不准，不该让人以为同步炸了。
+       */
+      receipt.warning = `数窗口外线索失败（不影响本轮写入，只是「还有多少条没补」这个数字这轮不准）：${err instanceof Error ? err.message : String(err)}`
+    }
+  }
+
+  const byRoute = new Map<string, LeadRecord[]>()
+  for (const lead of leads) {
+    const route = pickRoute(lead, routes)
+    if (!route) {
+      receipt.unrouted++
+      continue
+    }
+    const bucket = byRoute.get(route.routeKey)
+    if (bucket) bucket.push(lead)
+    else byRoute.set(route.routeKey, [lead])
+  }
+
+  receipt.routes = await syncRoutes(client.id, routes, byRoute, deps, outsideWindowBaseline)
+  return receipt
+}
+
+/**
+ * 逐条路线跑，同一张表（同一个 tab）上的几条共用一份快照：读一次、判重键互通。
+ *
+ * 🔴 **单独导出是为了让试算脚本调同一份**（`scripts/lead-sheet-sync-dryrun.ts`）。
+ *    脚本头注声称「跑的是线上同一套代码，不是另写一份仿真」—— 手抄一份循环过去，
+ *    那句话就只在抄完那一刻成立。而试算正是 PM 决定要不要开闸时看的那张报告。
+ *
+ * `config.ts::describeLayoutMismatch` 已经保证同一张表上的路线判重配置一致，
+ * 所以那份共享的键集合对它们是同一把尺子。
+ */
+export async function syncRoutes(
+  clientId: string,
+  routes: readonly LeadSheetRoute[],
+  byRoute: ReadonlyMap<string, LeadRecord[]>,
+  deps: SyncDeps = {},
+  /** 见 `syncOneRoute` 同名参数。脚本试算传的是全量线索，不传就是 0，行为不变。 */
+  outsideWindowBaseline = 0,
+): Promise<LeadSheetRouteReceipt[]> {
+  const snapshots = new Map<string, DestinationSnapshot>()
+  const receipts: LeadSheetRouteReceipt[] = []
+
+  /**
+   * 🔴 **这个基数只归第一条路线，不逐条路线都塞一遍。**
+   *
+   * `countLeadsBefore` 数的是**客户级**总数，不是按路线拆出来的——分流本身要
+   * 先把线索取回内存才能跑（见 `leads.ts::countLeadsBefore` 的注释），窗口外的
+   * 那些线索根本没取回来，没法知道它们各自会走哪条路线。如果照 `outsideWindowBaseline`
+   * 原样传给每一条路线，`pushLeadSheetItems` 按目标表汇总时会出两个事故：
+   *   · 同一张表配了两条路线 → 同一个数字被加两遍，报出来的缺口翻倍；
+   *   · 几条路线各写各的表 → 每张表都显示「缺客户的全部历史」，其实历史只有一份。
+   * 只让全部路线里的第一条背这个数字，保证客户级基数在下游汇总里只出现一次。
+   */
+  for (const [index, route] of routes.entries()) {
+    const dest = destinationKey(route)
+    let snapshot = snapshots.get(dest)
+    if (!snapshot) {
+      snapshot = newDestinationSnapshot()
+      snapshots.set(dest, snapshot)
+    }
+    // 没分到线索的路线也出一条回执 —— 「这条路线今天 0 条」和「这条路线没跑」
+    // 必须分得开。
+    receipts.push(
+      await syncOneRoute(
+        clientId,
+        route,
+        byRoute.get(route.routeKey) ?? [],
+        deps,
+        snapshot,
+        index === 0 ? outsideWindowBaseline : 0,
+      ),
+    )
+  }
+
+  return receipts
+}

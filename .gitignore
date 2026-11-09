@@ -37,6 +37,9 @@ yarn-error.log*
 *.swo
 *~
 
+# aider (per-user tool cache/history — never committed)
+.aider*
+
 # Microsoft Office lock files
 ~$*
 
@@ -70,3 +73,7 @@ scripts/factory-worker/node_modules/
 # Python 编译产物（scripts/video-pipeline）
 __pycache__/
 *.py[cod]
+
+# Impeccable skill machine-local config (hooks / consent)
+/.claude/settings.local.json
+/.impeccable/config.local.json

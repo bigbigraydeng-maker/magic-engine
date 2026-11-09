@@ -44,7 +44,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { classifyNote } from '@/lib/crm/note-parser'
-import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
+import { isDoNotCall, isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { fetchAll } from '@/lib/supabase-paginate'
 
 /** 只看最近这些天的私信。见文件头「什么时候不再提醒」。 */
@@ -93,7 +93,14 @@ export interface MessengerStopSignal {
   /** 客人那句原话（截断过）—— 销售一眼就知道为什么被挑出来。 */
   quote: string
   sentAt: string
+  /**
+   * `all` = 听着像不想再被联系；`phone_only` = 只说了不要打电话（2026-11-09）。
+   * 后者只提示「要不要标记只别打电话」，这里照样**一行写操作都没有**。
+   */
+  scope: StopSignalScope
 }
+
+export type StopSignalScope = 'all' | 'phone_only'
 
 export interface StopSignalInput {
   messages: InboundDm[]
@@ -122,7 +129,25 @@ function quoteOf(body: string): string {
 }
 
 /**
- * 纯判据：哪些私信像是「别再联系」，且这个人还值得提醒一次。
+ * 这条私信该不该提醒、按哪一种提醒。已经被标过的人不再提（全面拒绝的人什么都不提；
+ * 已经是「只别打电话」的人不再提「只别打电话」）。
+ */
+function signalScope(
+  body: string,
+  d: { flag: boolean; touches: DncTouch[] } | undefined,
+): StopSignalScope | null {
+  // 判据只有一份 —— 跟销售手打备注走的是同一个 `classifyNote`。
+  const v = classifyNote(body)
+  const scope: StopSignalScope | null = v.do_not_contact ? 'all' : v.outcome === 'do_not_call' ? 'phone_only' : null
+  if (!scope) return null
+  // 查不到这个人的材料就按「没被标过」办。
+  if (d && isDoNotContact(d.flag, d.touches)) return null
+  if (scope === 'phone_only' && d && isDoNotCall(d.flag, d.touches)) return null
+  return scope
+}
+
+/**
+ * 纯判据：哪些私信像是「别再联系」（或「只别打电话」），且这个人还值得提醒一次。
  *
  * 拆成纯函数是为了能把每一条规矩单独钉住 —— IO 那半边（`findMessengerStopSignals`）
  * 只负责把行取出来喂进来。
@@ -137,23 +162,22 @@ export function pickStopSignals(input: StopSignalInput): StopSignalResult {
   for (const m of messages) {
     if (!m.body || !m.body.trim()) continue
 
-    // 判据只有一份 —— 跟销售手打备注走的是同一个 `classifyNote`。
-    if (!classifyNote(m.body).do_not_contact) continue
-
-    // 已经算拒联了 → 没什么可提示的。查不到这个人的材料就按「没被标过」办。
-    const d = dnc.get(m.contactId)
-    if (d && isDoNotContact(d.flag, d.touches)) continue
+    const scope = signalScope(m.body, dnc.get(m.contactId))
+    if (!scope) continue
 
     // 这条私信之后有人手工记过一笔 = 有人看过了，别再天天提。
     if (ts(lastHumanTouchAt.get(m.contactId)) >= ts(m.sentAt)) continue
 
     const prev = latest.get(m.contactId)
-    if (prev && ts(prev.sentAt) >= ts(m.sentAt)) continue
+    // 同一个人有「别再联系」就不降级成「只别打电话」的提醒。
+    if (prev && (prev.scope === 'all' && scope === 'phone_only')) continue
+    if (prev && prev.scope === scope && ts(prev.sentAt) >= ts(m.sentAt)) continue
     latest.set(m.contactId, {
       clientId: m.clientId,
       contactId: m.contactId,
       quote: quoteOf(m.body),
       sentAt: m.sentAt,
+      scope,
     })
   }
 

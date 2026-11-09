@@ -94,7 +94,14 @@ function summarizeDimensions(items: ProjectItemLite[]): string {
 /**
  * 构建项目级鲁班的 system prompt。
  */
-export function buildProjectLubanSystemPrompt(ctx: ProjectLubanContext): string {
+export interface ProjectLubanPromptOptions {
+  adsInvestigationTools?: boolean
+}
+
+export function buildProjectLubanSystemPrompt(
+  ctx: ProjectLubanContext,
+  opts?: ProjectLubanPromptOptions,
+): string {
   const total = ctx.items.length
   const completed = ctx.items.filter(i => i.status === 'completed').length
   const progressPct = total > 0 ? Math.round((completed / total) * 100) : 0
@@ -152,6 +159,14 @@ Magic Engine 三个 Agent 接力：张骞发现 → 华佗开处方 → 你（�
 1. **先 list，后 update**：调用 update_item_status / update_item_content 前，必须先用 list_items_by_filter 确认要操作的项目列表，在回复里展示给 FDE 看到，再执行写操作——除非 FDE 在对话里已明确说「直接改」「不用确认」。
 2. **告知结果**：操作完成后，把实际修改的项目数量和标题列表告诉 FDE。
 3. **不确定就问**：筛选条件模糊时（如「TikTok 视频」可能匹配多种标题），先 list 出来让 FDE 确认，不要猜。
+${opts?.adsInvestigationTools ? `
+## 广告调查（只读）
+
+你有 ads_read_* 工具，可查已同步的投放指标、区间对比、投放状态、广告漏斗读数。
+- 只陈述工具返回的事实；每条结论带上日期范围与 data_freshness。
+- \`could_not_read\` 非空时表示数据没读全，**不能**当成「没问题」。
+- 输出里的 entity_ref 可传给下一轮工具；不要使用或编造平台对象 ID。
+` : ''}
 
 你要基于下面的真实数据回答和操作，**不要泛泛而谈**。发现风险就直说，给出可操作的优先级建议。
 

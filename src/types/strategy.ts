@@ -35,11 +35,20 @@ export type AwarenessSubtype =
   | 'event_campaign'
   | 'geographic_expansion'
   | 'reputation_recovery'
+  | 'personal_influence'   // 个人影响力（个人 IP：人就是品牌）
 
 /** Union of all sub-types — used as `goals.sub_type` text column. */
 export type GoalSubType = SalesSubType | AcquisitionSubType | AwarenessSubtype
 
 export type TargetDirection = 'increase' | 'decrease'
+
+/**
+ * Goal auto-rollover cadence.
+ *   - null: one-shot goal (default) — expires and stays expired
+ *   - 'monthly': cron creates next natural month goal after period_end
+ * Values are extensible (weekly / quarterly) but only 'monthly' is wired today.
+ */
+export type GoalRecurrence = 'monthly' | null
 
 export type GoalStatus = 'draft' | 'active' | 'expired' | 'archived'
 
@@ -114,6 +123,10 @@ export const GOAL_SUBTYPES_BY_INTENT: Record<GoalIntent, Array<{
       description: '负面事件 / 危机后口碑修复',
       default_direction: 'increase',
       example: '差评涌入后形象修复' },
+    { value: 'personal_influence', label_zh: '个人影响力', label_en: 'Personal Influence', emoji: '🎙',
+      description: '个人 IP — 让人记住这个人：粉丝增量、私信对话数、品牌名搜索量；达标线跟开方时的起点比',
+      default_direction: 'increase',
+      example: '个人账号粉丝月净增为正、互动率不低于起点' },
   ],
 }
 
@@ -210,6 +223,9 @@ export interface GoalRow {
   verdict_at: string | null
   verdict_summary: string | null
 
+  /** Auto-rollover cadence; null = one-shot. See GoalRecurrence. */
+  recurrence: GoalRecurrence
+
   fde_reasoning: string | null
   is_beta: boolean
 
@@ -240,6 +256,12 @@ export interface SupportingMetric {
   unit?: string
   baseline?: number
   target?: number
+  /**
+   * Only read when key is `deposited_seat_scope`.
+   * Lists the departures whose deposited seats fill this goal.
+   * Verdict does not use supporting metrics.
+   */
+  departures?: Array<{ depart_on: string; tour_id?: string }>
 }
 
 export interface InitiativeRow {
@@ -298,6 +320,12 @@ export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
     recommended_for_sub_types: ['ongoing', 'event_driven'],
     default_direction: 'increase',
     note: 'GA4 form + 客户自报电话/微信咨询' },
+  { key: 'messaging_started', label_en: 'Messaging conversations started', label_zh: '私信/WhatsApp 对话开启数',
+    unit: 'count/mo', measurement: 'auto',
+    recommended_for: ['acquisition'],
+    recommended_for_sub_types: ['ongoing', 'event_driven'],
+    default_direction: 'increase',
+    note: 'Meta 广告 messaging_conversation_started 动作，按 outcome-ladder messaging_started 口径自动取数' },
   { key: 'form_submissions', label_en: 'GA4 form submissions', label_zh: 'GA4 表单提交',
     unit: 'count/mo', measurement: 'auto',
     recommended_for: ['acquisition'],
@@ -347,8 +375,10 @@ export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
     default_direction: 'decrease' },
 
   // ── Sales: product_launch (P32 NEW) ──────────────────────────────────────
+  // 2026-09-24：改成 hybrid —— 人在客户 CRM 表填「阶段=已订金」，系统读 me_sale_outcomes
+  // 的 purchase 行自动计数。人工那一半去不掉（订金到账只有客户知道），机器那一半已经自动。
   { key: 'signups_count', label_en: 'Sign-ups / bookings', label_zh: '报名/预订数',
-    unit: 'count', measurement: 'self_report',
+    unit: 'count', measurement: 'hybrid',
     recommended_for: ['sales'],
     recommended_for_sub_types: ['product_launch'],
     default_direction: 'increase',
@@ -377,6 +407,7 @@ export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
   { key: 'brand_search_volume', label_en: 'Brand keyword search volume', label_zh: '品牌词搜索量',
     unit: 'searches/mo', measurement: 'auto',
     recommended_for: ['awareness'],
+    recommended_for_sub_types: ['personal_influence'],
     default_direction: 'increase' },
   { key: 'media_mentions', label_en: 'Media mentions', label_zh: '媒体提及次数',
     unit: 'count/mo', measurement: 'hybrid',
@@ -398,11 +429,23 @@ export const PRIMARY_METRIC_CATALOG: MetricCandidate[] = [
   { key: 'social_followers_growth', label_en: 'Social followers growth', label_zh: '社媒粉丝增量',
     unit: 'count/mo', measurement: 'auto',
     recommended_for: ['awareness'],
+    recommended_for_sub_types: ['personal_influence'],
     default_direction: 'increase' },
+  { key: 'dm_conversations', label_en: 'Direct message conversations', label_zh: '私信对话数',
+    unit: 'count/mo', measurement: 'self_report',
+    recommended_for: ['awareness'],
+    recommended_for_sub_types: ['personal_influence'],
+    default_direction: 'increase',
+    note: '个人 IP 主指标；达标线跟开方时的起点比，不写具体数字' },
   { key: 'organic_traffic', label_en: 'Organic traffic', label_zh: '自然流量',
     unit: 'sessions/mo', measurement: 'auto',
     recommended_for: ['awareness', 'acquisition'],
     default_direction: 'increase' },
+  { key: 'seo_gsc_clicks_28d', label_en: 'Google search clicks (28 days)', label_zh: '谷歌搜索点击（近 28 天）',
+    unit: 'clicks/28d', measurement: 'auto',
+    recommended_for: ['awareness', 'acquisition'],
+    default_direction: 'increase',
+    note: '取 gsc_page_daily 全部页点击；窗口止于最近一个已入库日，数据过期或不全时不出数' },
 ]
 
 /**

@@ -16,6 +16,7 @@ import {
   publishIdentityMismatch,
   PublishActionIdentityMismatchError,
   SOCIAL_PUBLISH_ACTION_TYPE,
+  SOCIAL_PUBLISH_STORY_ACTION_TYPE,
 } from '../post-measurement-store'
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
@@ -284,6 +285,16 @@ describe('P4: verifyActionIdentity —— 消费测量事件前必须核对', ()
     })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toBe('action_not_found')
+  })
+
+  it('T9 social.publish_story → invalid_publish_action', async () => {
+    const r = await verifyActionIdentity(fakeDb({
+      actionRow: { ...baseAction, action_type: SOCIAL_PUBLISH_STORY_ACTION_TYPE },
+    }), ACTION, {
+      ...windowClaim,
+      clientId: CLIENT, idempotencyKey: KEY, postId: POST, pageId: PAGE,
+    })
+    expect(r).toEqual({ ok: false, reason: 'invalid_publish_action' })
   })
 
   it('🔴 DB 错误必须抛出，不能塌成 action_not_found（P1 同类原理）', async () => {

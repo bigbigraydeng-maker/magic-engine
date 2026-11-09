@@ -1,0 +1,11 @@
+{
+  "data": [
+    { "start_time": "2026-10-12T23:00:00+1300", "aggregation": "event", "data": [{ "value": "PageView", "count": 7 }] },
+    { "start_time": "2026-10-13T00:00:00+1300", "aggregation": "event", "data": [{ "value": "PageView", "count": 20 }, { "value": "Lead", "count": 4 }] },
+    { "start_time": "2026-10-18T10:00:00+1300", "aggregation": "event", "data": [{ "value": "PageView", "count": 5 }, { "value": "__missing_event", "count": 1 }] }
+  ],
+  "paging": {
+    "cursors": { "before": "BEFORE1", "after": "AFTER1" },
+    "next": "https://graph.facebook.com/v21.0/2000000000000001/stats?aggregation=event&access_token=LEAKY_TOKEN_IN_NEXT_URL&after=AFTER1"
+  }
+}

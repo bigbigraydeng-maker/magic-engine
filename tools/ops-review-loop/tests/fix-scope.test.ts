@@ -14,9 +14,12 @@ import {
   GUARDED_BRANCH_PREFIXES,
   MAX_CHANGED_FILES,
   MAX_CHANGED_LINES,
+  PROTECTED_PATHS,
   checkFixScope,
   isGuardedBranch,
+  protectionFor,
 } from '../src/fix-scope.mjs'
+import { classifyFile } from '../src/risk.mjs'
 
 const LANE = `${GUARDED_BRANCH_PREFIXES[0]}whatever`
 const file = (filename: string, additions = 1, deletions = 0) => ({ filename, additions, deletions })
@@ -51,6 +54,8 @@ describe('🔴 a successfully-injected fix round is stopped by what it changed',
     ['改对外动作授权', 'src/lib/kernel/outward-authorization.ts'],
     ['碰凭证文件', '.env'],
     ['碰嵌套凭证文件', 'apps/web/.env.production'],
+    ['碰根目录凭证变体', '.env.production'],
+    ['改忽略清单放密钥进仓库', '.gitignore'],
   ]
 
   for (const [label, path] of attacks) {
@@ -110,5 +115,41 @@ describe('✅ 正常的修复不会被误杀', () => {
       files: [file('docs/github/workflows.md'), file('src/lib/environment.ts'), file('src/env-helpers.ts')],
     })
     expect(r.ok).toBe(true)
+  })
+})
+
+// 魏征 W71-1 (#2071): this list still had the old `includes: '/.env.'` rule
+// after risk.mjs was fixed, so root `.env.production` was blocked by one guard
+// and not the other. One sample path per rule; every sample must be caught
+// here AND rate A in risk.mjs, and every rule must be hit by some sample.
+describe('the auto-fix denylist never falls out of step with the A rating', () => {
+  const SAMPLES = [
+    '.github/workflows/anything.yml',
+    'tools/ops-review-loop/src/plan.mjs',
+    'tools/ai-orchestrator/src/index.ts',
+    'supabase/migrations/20260101000000_x.sql',
+    'render.yaml',
+    'src/lib/kernel/boundaries.ts',
+    'src/lib/kernel/outward-authorization.ts',
+    '.env',
+    '.env.production',
+    '.gitignore',
+  ]
+
+  it.each(SAMPLES)('%s is protected here and rated A there', (path) => {
+    expect(protectionFor(path), path).toBeDefined()
+    expect(classifyFile(path).risk, path).toBe('A')
+  })
+
+  it('every protected-path rule is exercised by a sample above', () => {
+    const hit = new Set(SAMPLES.map((path) => protectionFor(path)))
+    const unhit = PROTECTED_PATHS.filter((rule) => !hit.has(rule))
+    expect(unhit.map((rule) => rule.why)).toEqual([])
+  })
+
+  it('keeps the root .env.example template and env-looking source files out', () => {
+    for (const path of ['.env.example', 'src/lib/environment.ts', 'src/env-helpers.ts']) {
+      expect(protectionFor(path), path).toBeUndefined()
+    }
   })
 })

@@ -35,7 +35,7 @@ interface ViralReference {
   is_our_video: boolean
   is_learnable: boolean
   view_threshold_min: number
-  analysis_status: 'pending' | 'analyzing' | 'done' | 'error'
+  analysis_status: 'pending' | 'analyzing' | 'done' | 'error' | 'terminal'
   analysis_error: string | null
   style_scores: StyleScores | null
   style_tags: string[] | null
@@ -106,13 +106,14 @@ function ScoreBar({ dimension, value }: { dimension: keyof StyleScores; value: n
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: ViralReference['analysis_status'] }) {
-  const config = {
+  const config: Record<string, { label: string; cls: string }> = {
     pending:   { label: 'Pending',   cls: 'bg-me-charcoal/60 text-me-ivory/40' },
     analyzing: { label: 'Analyzing…', cls: 'bg-me-ochre/70 text-me-gold animate-pulse' },
     done:      { label: 'Done',      cls: 'bg-status-track/30 text-status-track' },
     error:     { label: 'Error',     cls: 'bg-status-rej/30 text-status-rej' },
+    terminal:  { label: '不再重试', cls: 'bg-me-charcoal/80 text-me-ivory/50' },
   }
-  const { label, cls } = config[status]
+  const { label, cls } = config[status] ?? { label: status, cls: 'bg-me-charcoal/60 text-me-ivory/40' }
   return (
     <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{label}</span>
   )
@@ -254,12 +255,12 @@ function ReferenceCard({ item: r, onRetry, onUpdateIndustry, learnableAvgScores 
       </a>
 
       {/* Error — compact one-liner */}
-      {r.analysis_status === 'error' && (
+      {(r.analysis_status === 'error' || r.analysis_status === 'terminal') && (
         <div className="flex items-center justify-between gap-2 bg-status-rej/15 rounded px-2 py-1.5">
           <p className="text-xs text-status-rej truncate flex-1" title={r.analysis_error ?? ''}>
             {errSummary}
           </p>
-          {(r.platform === 'youtube' || r.platform === 'upload') && (
+          {r.analysis_status === 'error' && (r.platform === 'youtube' || r.platform === 'upload') && (
             <button
               onClick={() => onRetry(r.id)}
               className="shrink-0 px-2 py-0.5 bg-me-charcoal/60 hover:bg-me-charcoal/50 text-xs text-white rounded transition-colors"

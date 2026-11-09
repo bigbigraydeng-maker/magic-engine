@@ -207,6 +207,21 @@ describe('stuck audit and unknown ownership (魏征 / 狄仁杰 implementation r
     expect(res).toMatchObject({ ok: false, skipped: 'page_not_verified', reason: 'check_failed' })
     expect(mockPageToken).not.toHaveBeenCalled()
   })
+
+  it('the client\'s own row (not the peer scan) fails to read → check_failed, never the shared fallback (Codex review, 2026-09-21)', async () => {
+    const fake = makeBindingFakeDb(db, failures)
+    let clientReads = 0
+    const flaky = {
+      from: (t: string) => {
+        // 1st clients read = duplicate scan, 2nd = the client row inside resolveMetaTokenDetailed → fail it
+        if (t === 'clients' && ++clientReads === 2) return makeBindingFakeDb(db, { select: new Set(['clients']) }).from(t)
+        return fake.from(t)
+      },
+    } as unknown as SupabaseClient
+    const res = await authorizePageSync(flaky, A, PAGE, A_DOMAIN_ENV)
+    expect(res).toMatchObject({ ok: false, skipped: 'page_not_verified', reason: 'check_failed' })
+    expect(mockPageToken).not.toHaveBeenCalled()
+  })
 })
 
 describe('authorizeConfiguredPage — client-editable Page ids (comment auto-reply, page metrics)', () => {

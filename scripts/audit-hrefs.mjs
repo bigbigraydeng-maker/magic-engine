@@ -16,7 +16,6 @@ const OUT_DIR = path.join(REPO, 'docs/audits/screenshots')
 const META_FILE = path.join(REPO, 'docs/audits/2026-09-07-href-page-metadata.json')
 
 const CTS = 'c0000000-0000-0000-0000-000000000000'
-const LINKEDIN = '377468af-b103-45f0-984a-b353febb56a1'
 const GOAL_ID = '7e6d6ff0-f8c0-4e61-843a-ba5aa81843f5'
 const CONTACT_ID = '0120f341-a530-4d02-accb-53a58ae653ec'
 const PR_URL = 'https://github.com/bigbigraydeng-maker/chinatravel/pull/121'
@@ -32,8 +31,6 @@ const TARGETS = [
   { key: 'site_audit',                   kinds: ['crawl_stale'], url: `${APP}/dashboard/clients/${CTS}/site-audit` },
   { key: 'assets',                       kinds: ['price_claim_unbacked'], url: `${APP}/dashboard/clients/${CTS}/assets` },
   { key: 'goal_page',                    kinds: ['goal_baseline_mismatch', 'leads_metric_untrusted'], url: `${APP}/dashboard/clients/${CTS}/goal/${GOAL_ID}` },
-  { key: 'linkedin_content_factory',     kinds: ['linkedin_progress_needs_review'], url: `${APP}/dashboard/clients/${LINKEDIN}/content-factory` },
-  { key: 'linkedin_connectors_publer',   kinds: ['linkedin_progress_needs_setup', 'linkedin_progress_failed'], url: `${APP}/dashboard/clients/${LINKEDIN}/connectors/publer` },
   { key: 'crm_contact_focused',          kinds: ['dnc_maybe_wrong', 'dm_maybe_stop', 'email_reply_due_focused'], url: `${APP}/dashboard/clients/${CTS}/crm/all?contact=${CONTACT_ID}` },
   { key: 'crm_all',                      kinds: ['email_reply_due_client'], url: `${APP}/dashboard/clients/${CTS}/crm/all` },
   { key: 'client_list',                  kinds: ['cross_client_leak', 'email_sync_stale_all'], url: `${APP}/dashboard/clients` },

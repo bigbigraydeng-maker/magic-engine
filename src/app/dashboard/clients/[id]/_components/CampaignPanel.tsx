@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import Link from 'next/link'
 import type { CampaignBrief, CampaignKeywordSnapshot } from '@/types/magic-engine'
-import { CampaignDailyPlanPanel } from './CampaignDailyPlanPanel'
+import { VisualDirectionSection } from './VisualDirectionSection'
 
 interface Props {
   clientId: string
@@ -12,14 +13,16 @@ export function CampaignPanel({ clientId }: Props) {
   const [campaigns, setCampaigns] = useState<CampaignBrief[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [internal, setInternal] = useState(false)
 
   const fetchCampaigns = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch(`/api/clients/${clientId}/campaign?status=active`)
       if (res.ok) {
-        const { campaigns: list } = await res.json()
-        setCampaigns(list ?? [])
+        const body = await res.json()
+        setInternal(body.viewer === 'internal')
+        setCampaigns(body.campaigns ?? [])
       }
     } finally {
       setLoading(false)
@@ -40,6 +43,12 @@ export function CampaignPanel({ clientId }: Props) {
   const handleUpdated = (updated: CampaignBrief) => {
     setCampaigns(prev => prev.map(c => c.id === updated.id ? updated : c))
   }
+
+  // 已过期（有效期早于今天）的推广活动不删数据，折叠进「已结束」。
+  const today = new Date().toISOString().slice(0, 10)
+  const isExpired = (c: CampaignBrief) => !!c.valid_until && c.valid_until < today
+  const liveCampaigns = campaigns.filter(c => !isExpired(c))
+  const expiredCampaigns = campaigns.filter(isExpired)
 
   if (loading) {
     return (
@@ -71,13 +80,14 @@ export function CampaignPanel({ clientId }: Props) {
       {showForm && (
         <CreateCampaignForm
           clientId={clientId}
+          internal={internal}
           onCreated={handleCreated}
           onCancel={() => setShowForm(false)}
         />
       )}
 
       {/* Campaign list */}
-      {campaigns.length === 0 && !showForm ? (
+      {liveCampaigns.length === 0 && !showForm ? (
         <div className="bg-white rounded-xl border border-dashed border-black/10 py-14 text-center">
           <p className="text-2xl mb-2">🎯</p>
           <p className="text-sm font-medium text-me-charcoal/60">暂无进行中的推广活动</p>
@@ -85,11 +95,12 @@ export function CampaignPanel({ clientId }: Props) {
         </div>
       ) : (
         <div className="space-y-4">
-          {campaigns.map(c => (
+          {liveCampaigns.map(c => (
             <CampaignCard
               key={c.id}
               campaign={c}
               clientId={clientId}
+              internal={internal}
               onArchived={handleArchived}
               onUpdated={handleUpdated}
             />
@@ -97,8 +108,8 @@ export function CampaignPanel({ clientId }: Props) {
         </div>
       )}
 
-      {/* Archived toggle */}
-      <ArchivedCampaigns clientId={clientId} />
+      {/* 已结束（已过期 + 已归档），默认折叠 */}
+      <ArchivedCampaigns clientId={clientId} expired={expiredCampaigns} />
     </div>
   )
 }
@@ -107,10 +118,12 @@ export function CampaignPanel({ clientId }: Props) {
 
 function CreateCampaignForm({
   clientId,
+  internal,
   onCreated,
   onCancel,
 }: {
   clientId: string
+  internal: boolean
   onCreated: (c: CampaignBrief) => void
   onCancel: () => void
 }) {
@@ -131,7 +144,7 @@ function CreateCampaignForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: title.trim(),
-          description: description.trim() || null,
+          ...(internal ? { description: description.trim() || null } : {}),
           valid_from: validFrom || null,
           valid_until: validUntil || null,
         }),
@@ -160,15 +173,17 @@ function CreateCampaignForm({
           />
         </Field>
 
-        <Field label="推广描述">
-          <textarea
-            value={description}
-            onChange={e => setDescription(e.target.value)}
-            placeholder="简述推广目的、核心卖点、目标客群…"
-            rows={3}
-            className={`${INPUT_CLASS} resize-none`}
-          />
-        </Field>
+        {internal && (
+          <Field label="内部备注">
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="只给内部看：PM 指令、停放原因、竞品调研…"
+              rows={3}
+              className={`${INPUT_CLASS} resize-none`}
+            />
+          </Field>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="开始日期">
@@ -209,11 +224,13 @@ const CAMPAIGN_COLORS = [
 function CampaignCard({
   campaign,
   clientId,
+  internal,
   onArchived,
   onUpdated,
 }: {
   campaign: CampaignBrief
   clientId: string
+  internal: boolean
   onArchived: (id: string) => void
   onUpdated: (c: CampaignBrief) => void
 }) {
@@ -246,7 +263,7 @@ function CampaignCard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: editTitle.trim(),
-          description: editDescription.trim() || null,
+          ...(internal ? { description: editDescription.trim() || null } : {}),
           valid_from: editFrom || null,
           valid_until: editUntil || null,
         }),
@@ -382,13 +399,15 @@ function CampaignCard({
                 placeholder="活动名称"
                 className={`${INPUT_CLASS} text-sm font-semibold`}
               />
-              <textarea
-                value={editDescription}
-                onChange={e => setEditDescription(e.target.value)}
-                placeholder="推广描述（可选）"
-                rows={2}
-                className={`${INPUT_CLASS} text-xs resize-none`}
-              />
+              {internal && (
+                <textarea
+                  value={editDescription}
+                  onChange={e => setEditDescription(e.target.value)}
+                  placeholder="内部备注（可选）"
+                  rows={2}
+                  className={`${INPUT_CLASS} text-xs resize-none`}
+                />
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <input type="date" value={editFrom} onChange={e => setEditFrom(e.target.value)}
                   className={`${INPUT_CLASS} text-xs`} />
@@ -421,7 +440,7 @@ function CampaignCard({
                   ✏️ 编辑
                 </button>
               </div>
-              {campaign.description && (
+              {internal && campaign.description && (
                 <p className="text-xs text-me-charcoal/55 mt-1 line-clamp-2">{campaign.description}</p>
               )}
               <div className="flex items-center gap-3 mt-2 text-xs text-me-charcoal/45">
@@ -501,8 +520,8 @@ function CampaignCard({
             </button>
           </div>
 
-          {/* Keyword Enrichment */}
-          <div>
+          {/* Keyword Enrichment — 搜索量和竞品向的词只给内部看 */}
+          {internal && <div>
             <p className="text-xs font-semibold text-me-charcoal/55 uppercase tracking-wide mb-1">
               推广关键词
             </p>
@@ -550,17 +569,25 @@ function CampaignCard({
                 点击「拉取」从 Keyword Intelligence 获取推广相关词
               </p>
             )}
-          </div>
+          </div>}
 
           {/* ── Visual Direction ─────────────────────────────── */}
           <VisualDirectionSection
             campaign={campaign}
             clientId={clientId}
+            internal={internal}
             onUpdated={onUpdated}
           />
 
-          {/* ── Daily Plan (#1159 WP1) ───────────────────────── */}
-          <CampaignDailyPlanPanel clientId={clientId} campaignId={campaign.id} />
+          {/* ── Daily Plan — standalone entry, kept alongside Campaign for
+              discoverability (#1159 WP1 → split out per PM 2026-09-29) ── */}
+          <Link
+            href={`/dashboard/clients/${clientId}/daily-plan?campaign=${campaign.id}`}
+            className="flex items-center justify-between rounded-xl border border-black/[.06] bg-me-ivory px-4 py-3 text-sm font-medium text-me-charcoal/75 transition-colors hover:bg-me-ochre/10 hover:text-me-ochre"
+          >
+            <span>📅 社媒日常 · 图文帖子</span>
+            <span className="text-me-charcoal/35">→</span>
+          </Link>
 
           {msg && (
             <p className={`text-xs ${msg.startsWith('✓') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>
@@ -594,7 +621,7 @@ function CampaignCard({
 
 // ─── Archived campaigns (collapsed by default) ────────────────────────────────
 
-function ArchivedCampaigns({ clientId }: { clientId: string }) {
+function ArchivedCampaigns({ clientId, expired }: { clientId: string; expired: CampaignBrief[] }) {
   const [open, setOpen] = useState(false)
   const [archived, setArchived] = useState<CampaignBrief[]>([])
   const [loading, setLoading] = useState(false)
@@ -623,15 +650,26 @@ function ArchivedCampaigns({ clientId }: { clientId: string }) {
         onClick={toggle}
         className="text-xs text-me-charcoal/45 hover:text-me-charcoal/60 transition-colors"
       >
-        {open ? '▲ 隐藏已归档活动' : '▼ 查看已归档活动'}
+        {open ? '▲ 隐藏已结束活动' : `▼ 已结束的活动（${expired.length + archived.length}）`}
       </button>
 
       {open && (
         <div className="mt-3 space-y-2">
           {loading && <p className="text-xs text-me-charcoal/45 animate-pulse">加载中…</p>}
-          {!loading && archived.length === 0 && (
-            <p className="text-xs text-me-charcoal/45">暂无归档活动</p>
+          {!loading && archived.length === 0 && expired.length === 0 && (
+            <p className="text-xs text-me-charcoal/45">暂无已结束活动</p>
           )}
+          {expired.map(c => (
+            <div key={c.id} className="bg-me-ivory rounded-lg border border-black/[.06] px-4 py-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-me-charcoal/55">{c.title}</p>
+                {c.valid_from && (
+                  <p className="text-xs text-me-charcoal/45">{c.valid_from} → {c.valid_until ?? '—'}</p>
+                )}
+              </div>
+              <span className="text-xs bg-me-ivory text-me-charcoal/55 px-2 py-0.5 rounded-full">已过期</span>
+            </div>
+          ))}
           {archived.map(c => (
             <div key={c.id} className="bg-me-ivory rounded-lg border border-black/[.06] px-4 py-3 flex items-center justify-between">
               <div>
@@ -645,284 +683,6 @@ function ArchivedCampaigns({ clientId }: { clientId: string }) {
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-// ─── Visual Direction Section ─────────────────────────────────────────────────
-
-function VisualDirectionSection({
-  campaign,
-  clientId,
-  onUpdated,
-}: {
-  campaign: CampaignBrief
-  clientId: string
-  onUpdated: (c: CampaignBrief) => void
-}) {
-  const hasExisting = !!(campaign.vi_mood || campaign.vi_color_accent || campaign.vi_specific_dos?.length)
-
-  // Campaign visual inputs — drive AI generation
-  const [inputNotes, setInputNotes] = useState(campaign.vi_input_notes ?? '')
-  const [inputFiles, setInputFiles] = useState<{ storagePath: string; filename: string }[]>(
-    (campaign.vi_input_file_urls ?? []).map(p => ({ storagePath: p, filename: p.split('/').pop() ?? p }))
-  )
-  const [uploadingInput, setUploadingInput] = useState(false)
-  const inputFileRef = useRef<HTMLInputElement>(null)
-
-  // Draft state populated by AI or manual edit
-  const [draft, setDraft] = useState({
-    vi_mood:           campaign.vi_mood           ?? '',
-    vi_color_accent:   campaign.vi_color_accent   ?? '',
-    vi_specific_dos:   (campaign.vi_specific_dos  ?? []).join('\n'),
-    vi_specific_donts: (campaign.vi_specific_donts ?? []).join('\n'),
-    vi_reference_note: campaign.vi_reference_note ?? '',
-  })
-
-  const [generating, setGenerating] = useState(false)
-  const [saving,     setSaving]     = useState(false)
-  const [msg,        setMsg]        = useState('')
-  const [dirty,      setDirty]      = useState(false)
-
-  const update = (key: string, value: string) => {
-    setDraft(d => ({ ...d, [key]: value }))
-    setDirty(true)
-  }
-
-  const handleInputFileUpload = async (file: File) => {
-    setUploadingInput(true)
-    try {
-      const fd = new FormData()
-      fd.append('file', file)
-      const res = await fetch(`/api/clients/${clientId}/campaign/upload`, { method: 'POST', body: fd })
-      const json = await res.json()
-      if (!json.success) throw new Error(json.error)
-      setInputFiles(prev => [...prev, { storagePath: json.storage_path, filename: file.name }])
-      setDirty(true)
-    } catch (err) {
-      setMsg(`✗ 上传失败: ${(err as Error).message}`)
-    } finally {
-      setUploadingInput(false)
-    }
-  }
-
-  const removeInputFile = (i: number) => {
-    setInputFiles(prev => prev.filter((_, idx) => idx !== i))
-    setDirty(true)
-  }
-
-  const handleGenerate = async () => {
-    setGenerating(true)
-    setMsg('')
-    try {
-      const res = await fetch(
-        `/api/clients/${clientId}/campaign/${campaign.id}/generate-visual`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            vi_input_notes: inputNotes.trim() || null,
-            vi_input_file_urls: inputFiles.map(f => f.storagePath),
-          }),
-        }
-      )
-      const json = await res.json()
-      if (!json.success) throw new Error(json.error)
-      const g = json.generated
-      setDraft({
-        vi_mood:           g.vi_mood           ?? '',
-        vi_color_accent:   g.vi_color_accent   ?? '',
-        vi_specific_dos:   (g.vi_specific_dos  ?? []).join('\n'),
-        vi_specific_donts: (g.vi_specific_donts ?? []).join('\n'),
-        vi_reference_note: g.vi_reference_note ?? '',
-      })
-      setDirty(true)
-      setMsg('AI generated visual direction -- please review before saving')
-    } catch (err) {
-      setMsg(`Error: ${(err as Error).message}`)
-    } finally {
-      setGenerating(false)
-    }
-  }
-
-  const handleSave = async () => {
-    setSaving(true)
-    setMsg('')
-    try {
-      const res = await fetch(`/api/clients/${clientId}/campaign/${campaign.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          vi_input_notes:     inputNotes.trim() || null,
-          vi_input_file_urls: inputFiles.map(f => f.storagePath),
-          vi_mood:           draft.vi_mood.trim()           || null,
-          vi_color_accent:   draft.vi_color_accent.trim()   || null,
-          vi_specific_dos:   draft.vi_specific_dos.trim()
-            ? draft.vi_specific_dos.split('\n').map((s: string) => s.trim()).filter(Boolean)
-            : null,
-          vi_specific_donts: draft.vi_specific_donts.trim()
-            ? draft.vi_specific_donts.split('\n').map((s: string) => s.trim()).filter(Boolean)
-            : null,
-          vi_reference_note: draft.vi_reference_note.trim() || null,
-        }),
-      })
-      const json = await res.json()
-      if (!json.success) throw new Error(json.error)
-      onUpdated(json.campaign)
-      setDirty(false)
-      setMsg('Saved')
-    } catch (err) {
-      setMsg(`Error: ${(err as Error).message}`)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="border border-black/[.06] rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between bg-me-ivory px-4 py-3">
-        <div>
-          <p className="text-xs font-semibold text-me-charcoal/75 uppercase tracking-wide">
-            Visual Direction
-          </p>
-          <p className="text-xs text-me-charcoal/45 mt-0.5">
-            Inherits brand visual DNA and specialises for this campaign. AI-generated, manually adjustable.
-          </p>
-        </div>
-        <button
-          onClick={handleGenerate}
-          disabled={generating}
-          className="flex items-center gap-1.5 text-xs bg-me-ochre hover:bg-me-ochre/90 text-white px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors whitespace-nowrap"
-        >
-          {generating ? (
-            <>
-              <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-              Generating...
-            </>
-          ) : (
-            <>{hasExisting ? 'AI Regenerate' : 'AI Generate'}</>
-          )}
-        </button>
-      </div>
-
-      {/* ── Campaign Visual Inputs ── */}
-      <div className="px-4 pt-4 pb-3 space-y-2 border-b border-black/[.06] bg-me-ochre/10/40">
-        <p className="text-xs font-semibold text-me-charcoal/60 uppercase tracking-wide">
-          活动视觉要点 <span className="font-normal normal-case text-me-charcoal/45">— 填写后点 AI Generate，系统将结合品牌 DNA 生成方向</span>
-        </p>
-        <textarea
-          value={inputNotes}
-          onChange={e => { setInputNotes(e.target.value); setDirty(true) }}
-          placeholder="描述本次活动的视觉元素：主色调、主题风格、特定场景、情绪基调…例：节日红金配色，温馨家庭聚餐场景，年味十足"
-          rows={3}
-          className={`${INPUT_CLASS} text-xs resize-none`}
-        />
-        <div className="flex items-center gap-2 flex-wrap">
-          <input
-            ref={inputFileRef}
-            type="file"
-            accept=".pdf,.doc,.docx,.txt"
-            className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; if (f) handleInputFileUpload(f) }}
-          />
-          <button
-            onClick={() => inputFileRef.current?.click()}
-            disabled={uploadingInput}
-            className="text-xs border border-black/10 bg-white text-me-charcoal/60 hover:bg-me-ivory px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors whitespace-nowrap"
-          >
-            {uploadingInput ? '上传中…' : '+ 上传参考文件'}
-          </button>
-          <span className="text-xs text-me-charcoal/45">PDF / DOCX / TXT（活动创意简报、视觉参考等）</span>
-        </div>
-        {inputFiles.length > 0 && (
-          <ul className="space-y-1">
-            {inputFiles.map((f, i) => (
-              <li key={i} className="flex items-center gap-2 text-xs text-me-charcoal/60 bg-white rounded px-2 py-1 border border-black/[.06]">
-                <span className="truncate flex-1">{f.filename}</span>
-                <button onClick={() => removeInputFile(i)} className="text-me-charcoal/45 hover:text-[#C2453A]">×</button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      {/* ── AI-generated / manually editable fields ── */}
-      <div className="px-4 py-4 space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-me-charcoal/55 mb-1">Visual Mood</label>
-            <input
-              value={draft.vi_mood}
-              onChange={e => update('vi_mood', e.target.value)}
-              placeholder="e.g. Autumn imperial Beijing, misty morning, sense of history"
-              className={`${INPUT_CLASS} text-xs`}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-me-charcoal/55 mb-1">Campaign Accent Colour</label>
-            <input
-              value={draft.vi_color_accent}
-              onChange={e => update('vi_color_accent', e.target.value)}
-              placeholder="e.g. Harvest gold #C9A84C"
-              className={`${INPUT_CLASS} text-xs`}
-            />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-me-charcoal/55 mb-1">
-              Visual Dos <span className="text-me-charcoal/45 font-normal">(one per line)</span>
-            </label>
-            <textarea
-              value={draft.vi_specific_dos}
-              onChange={e => update('vi_specific_dos', e.target.value)}
-              placeholder={"Autumn foliage\nMorning mist atmosphere\nAncient architecture close-ups"}
-              rows={3}
-              className={`${INPUT_CLASS} text-xs resize-none`}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-me-charcoal/55 mb-1">
-              Visual Don'ts <span className="text-me-charcoal/45 font-normal">(one per line)</span>
-            </label>
-            <textarea
-              value={draft.vi_specific_donts}
-              onChange={e => update('vi_specific_donts', e.target.value)}
-              placeholder={"Summer green foliage\nModern city backgrounds"}
-              rows={3}
-              className={`${INPUT_CLASS} text-xs resize-none`}
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-me-charcoal/55 mb-1">
-            Image Generation Reference <span className="text-me-charcoal/45 font-normal">(English, for ChatGPT / Midjourney)</span>
-          </label>
-          <input
-            value={draft.vi_reference_note}
-            onChange={e => update('vi_reference_note', e.target.value)}
-            placeholder="e.g. Warm cinematic autumn travel photography, Palace Museum editorial style, harvest gold tones"
-            className={`${INPUT_CLASS} text-xs`}
-          />
-        </div>
-
-        <div className="flex items-center justify-between pt-1">
-          {msg ? (
-            <p className={`text-xs ${msg === 'Saved' || msg.startsWith('AI') ? 'text-[#5C8A4A]' : 'text-[#C2453A]'}`}>{msg}</p>
-          ) : <span />}
-          {dirty && (
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="text-xs bg-me-charcoal/90 hover:bg-me-charcoal/85 text-white px-4 py-1.5 rounded-lg disabled:opacity-50 transition-colors"
-            >
-              {saving ? 'Saving...' : 'Save Visual Direction'}
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   )
 }

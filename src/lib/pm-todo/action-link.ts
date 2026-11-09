@@ -43,7 +43,27 @@ const LOGIN_REQUIRED_HOSTS = [
   'mailchimp.com',
 ]
 
+// 本仓库是私有仓库（2026-09-21 实测 `gh repo view --json visibility`）——未登录
+// 直接 curl 任意 blob 深链一律 404（跟登录墙同一个信号，不是链接本身有问题）。
+// 不加这条，`client-doc-manual-tasks.ts` 里指向本仓库文件的 GitHub 深链会被
+// `dropBrokenLinks` 当成「打不开」静默丢掉——待办本身消失，人根本看不到。
+// 只挡这一个私有仓库的路径，不把整个 github.com 当登录墙——公开仓库/PR 链接
+// （比如 client-doc-manual-tasks.ts 之外别处用到的公开 issue/PR 深链）应该照常
+// 能被 verifyActionLink 实测，一刀切封掉整个域名会让那些链接也变成「验不了」。
+const PRIVATE_REPO_PATH_PREFIX = '/bigbigraydeng-maker/magic-engine'
+
+function isPrivateRepoPath(href: string): boolean {
+  try {
+    const url = new URL(href)
+    const host = url.hostname.replace(/^www\./, '')
+    return host === 'github.com' && url.pathname.startsWith(PRIVATE_REPO_PATH_PREFIX)
+  } catch {
+    return false
+  }
+}
+
 export function isLoginRequiredHost(href: string): boolean {
+  if (isPrivateRepoPath(href)) return true
   try {
     const host = new URL(href).hostname.replace(/^www\./, '')
     return LOGIN_REQUIRED_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))
@@ -101,6 +121,42 @@ export async function verifyActionLink(
     // 判 broken，不下发，不让调用方无限期等下去。
     return { kind: 'broken', status: null }
   }
+}
+
+/**
+ * 链接实测结论的进程内缓存（2026-09-26，PM 报 /dashboard/today「loading 非常慢」）。
+ *
+ * 之前每打开一次今日待办页，每条公开链接都现场 HEAD（不通再 GET）一遍，
+ * 各 8 秒超时 —— 一个慢站就能让整页多等十几秒。同一条链接十分钟内的结论
+ * 不会变，所以只存实测过的 ok / broken（含超时），unverifiable 本来就不发请求。
+ * 页面和每日邮件共用这一份，同一条链接两边结论一致。
+ */
+export type LinkVerdictCache = Map<string, { at: number; verdict: LinkVerdict }>
+
+export const LINK_VERDICT_TTL_MS = 10 * 60 * 1000
+
+export const sharedLinkVerdictCache: LinkVerdictCache = new Map()
+
+/** refresh=true：不读缓存、每条现场实测，结果照样写回（每日邮件用，保持它原来的判断方式）。 */
+export function verifyActionLinkCached(
+  href: string,
+  fetchImpl: typeof fetch,
+  cache: LinkVerdictCache,
+  now: () => number = Date.now,
+  refresh = false,
+): Promise<LinkVerdict> {
+  const hit = refresh ? undefined : cache.get(href)
+  if (hit && now() - hit.at < LINK_VERDICT_TTL_MS) return Promise.resolve(hit.verdict)
+  return verifyActionLink(href, fetchImpl).then((verdict) => {
+    if (verdict.kind !== 'unverifiable') {
+      const t = now()
+      for (const [k, v] of Array.from(cache.entries())) {
+        if (t - v.at >= LINK_VERDICT_TTL_MS) cache.delete(k)
+      }
+      cache.set(href, { at: t, verdict })
+    }
+    return verdict
+  })
 }
 
 /**

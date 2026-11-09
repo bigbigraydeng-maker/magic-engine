@@ -20,6 +20,7 @@ import {
   type CampaignDailyPlanData,
   type CampaignDailyPublishQueueMeta,
 } from '@/lib/campaign/daily-plan'
+import { postChecklistPasses } from '@/lib/social/content-review'
 
 const DAILY_PLAN_PUBLISH_QUEUE_READY_EVENT = 'daily_plan.publish_queue.ready' as const
 
@@ -105,6 +106,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
     const reviewMeta = reviewParsed.data
     if (reviewMeta.revision !== command.expected_review_revision) return conflict('REVIEW_REVISION_MISMATCH')
+
+    const uncheckedPosts = planData.bundles
+      .filter(bundle => !!bundle.post)
+      .filter(bundle => {
+        const review = reviewMeta.posts[bundle.date]
+        return !review || review.verdict !== 'PASS' || review.reviewer_role !== 'admin' || !postChecklistPasses(review.checklist)
+      })
+      .map(bundle => bundle.date)
+    if (uncheckedPosts.length > 0) {
+      return NextResponse.json({
+        success: false,
+        error: 'POSTS_NOT_READY_FOR_PUBLISH_QUEUE',
+        not_ready: uncheckedPosts.map(date => ({ date, reason: 'REVIEW_CHECKLIST_INCOMPLETE' })),
+      }, { status: 422 })
+    }
 
     if (planData.publish_queue_meta !== undefined) {
       const existing = CampaignDailyPublishQueueMetaSchema.safeParse(planData.publish_queue_meta)

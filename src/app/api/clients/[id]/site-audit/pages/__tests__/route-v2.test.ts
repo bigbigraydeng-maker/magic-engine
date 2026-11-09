@@ -488,6 +488,8 @@ describe('GET /api/clients/[id]/site-audit/pages (v2 — corrected implementatio
         word_count: 120,
         index_verdict: 'Crawled - currently not indexed',
         first_not_indexed_at: '2026-08-01T00:00:00Z',
+        crawl_status: 'crawled',
+        crawled_at: new Date().toISOString(),
       })
       setupFullFlow(mockClient, [thin], 1)
 
@@ -566,6 +568,66 @@ describe('GET /api/clients/[id]/site-audit/pages (v2 — corrected implementatio
       expect(res.status).toBe(200)
       const body = await res.json()
       expect(body.sort).toBe('first_not_indexed_at')
+    })
+
+    it('🔴 被防火墙挡住的行不判 thin → index_class=crawled', async () => {
+      const blocked = makeFullPage({
+        word_count: 59,
+        index_verdict: 'Crawled - currently not indexed',
+        first_not_indexed_at: '2026-08-01T00:00:00Z',
+        crawl_status: 'antibot_challenged',
+        crawled_at: new Date().toISOString(),
+      })
+      setupFullFlow(mockClient, [blocked], 1)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      const res = await GET(req, { params: { id: 'client-1' } })
+      const body = await res.json()
+      expect(body.pages[0].index_class).toBe('crawled')
+    })
+
+    it('谷歌还没爬（Discovered）→ index_class=discovered，不是 thin', async () => {
+      const discovered = makeFullPage({
+        word_count: 59,
+        index_verdict: 'Discovered - currently not indexed',
+        first_not_indexed_at: '2026-08-01T00:00:00Z',
+        crawl_status: 'crawled',
+        crawled_at: new Date().toISOString(),
+      })
+      setupFullFlow(mockClient, [discovered], 1)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      const res = await GET(req, { params: { id: 'client-1' } })
+      const body = await res.json()
+      expect(body.pages[0].index_class).toBe('discovered')
+    })
+
+    it('跳转页 → index_class=not_a_problem', async () => {
+      const redirect = makeFullPage({
+        index_verdict: 'Page with redirect',
+        first_not_indexed_at: '2026-08-01T00:00:00Z',
+        crawl_status: 'crawled',
+        crawled_at: new Date().toISOString(),
+      })
+      setupFullFlow(mockClient, [redirect], 1)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      const res = await GET(req, { params: { id: 'client-1' } })
+      const body = await res.json()
+      expect(body.pages[0].index_class).toBe('not_a_problem')
+    })
+
+    it('🔴 取数必须带上 crawl_status（漏列时 thin 会悄悄消失）', async () => {
+      const mockFrom = vi.fn()
+      vi.mocked(supabaseAdmin).from = mockFrom
+      mockFrom.mockReturnValueOnce(buildQueryChain({ data: mockClient, error: null }))
+      const pagesChain = buildQueryChain({ data: [], count: 0, error: null }) as Record<string, ReturnType<typeof vi.fn>>
+      mockFrom.mockReturnValueOnce(pagesChain)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      await GET(req, { params: { id: 'client-1' } })
+      expect(String(pagesChain.select.mock.calls[0][0])).toContain('crawl_status')
+      expect(String(pagesChain.select.mock.calls[0][0])).toContain('crawled_at')
     })
   })
 

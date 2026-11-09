@@ -22,7 +22,7 @@ import type { GraphHourlySpendRow } from '@/lib/meta/entity-settings'
 const CTS = settingsFixture(ctsSettings)
 const NAL = settingsFixture(nalSettings)
 const OZ = settingsFixture(oztopSettings)
-const CONFIGURED: OutcomeConfig = { leading: 'lead', primary: 'lead', targetCostPerPrimary: 40, minPrimaryPerUnit: 5 }
+const CONFIGURED: OutcomeConfig = { leading: 'lead', primary: 'lead', targetCostPerPrimary: 46.8, minPrimaryPerUnit: 5 }
 
 let ctsDaily: DailyRow[] = []
 let nalDaily: DailyRow[] = []
@@ -72,7 +72,7 @@ describe('D1 各道闸', () => {
   })
 
   it('有用总预算（排期）的在投单位 → not_comparable(scheduled_delivery)', () => {
-    const acc = cts913(ctsHourly, snaps => snaps.map(s => (s.entity_id === '52549857906273' ? { ...s, lifetime_budget_minor: 50000 } : s)))
+    const acc = cts913(ctsHourly, snaps => snaps.map(s => (s.entity_id === '52510454332891' ? { ...s, lifetime_budget_minor: 50000 } : s)))
     const r = run(acc, '2026-09-13', '2026-09-14T03:00:00Z')
     expect(r.diagnoses.find(d => d.code === 'D1')).toMatchObject({ status: 'not_comparable', notComparableReason: 'scheduled_delivery' })
   })
@@ -132,7 +132,9 @@ describe('D7 授权/数据体检（只读，只下发人工任务）', () => {
     const acc = accountInput({ fixture: CTS, snapshots: snaps, daily: ctsDaily, hourly: ctsHourly, lastInsightDate: '2026-09-08' })
     const ext = run(acc, '2026-09-08', '2026-09-08T23:00:00Z', { digestRecipients: ['team@magicengine.com.au', 'boss@client-example.co.nz'] })
     expect(ext.diagnoses.find(d => d.code === 'D7')?.evidence.external_recipients).toBe(1)
-    expect(run(acc, '2026-09-08', '2026-09-08T23:00:00Z').diagnoses).toEqual([])
+    // 全内部收件人时没有 D7 命中——但 GC 顶层 ThruPlay 广告组本身就没排除 Audience Network（真实存在，
+    // D9 2026-09-22 补规则后才抓出来），跟收件人这条测的事无关，不能再断言零诊断。
+    expect(run(acc, '2026-09-08', '2026-09-08T23:00:00Z').diagnoses.filter(d => d.code === 'D7')).toEqual([])
   })
 
   it('结果阶梯没配 → 命中（D3/D5 会一直判不了）', () => {
@@ -147,10 +149,10 @@ describe('D3 / D5 结果闸', () => {
   it('M8：D3 主结果是合格询盘（归不到广告）、配了目标 → 3PL 组花费够线也只能 not_comparable(primary_result_unknown)，绝不报命中', () => {
     const snaps = replaySnapshots({ fixture: NAL, clientId: 'c', asOfIso: '2026-08-27T11:59:00Z', date: '2026-08-27', daily: nalDaily, activities: nalActivities as ActivityRow[] })
     const r = run(accountInput({ fixture: NAL, snapshots: snaps, daily: nalDaily, lastInsightDate: '2026-08-27' }), '2026-08-27', '2026-08-27T11:59:00Z',
-      { outcome: { leading: 'messaging_started', primary: 'qualified_enquiry', targetCostPerPrimary: 25, minPrimaryPerUnit: 5 } })
+      { outcome: { leading: 'messaging_started', primary: 'qualified_enquiry', targetCostPerPrimary: 29.25, minPrimaryPerUnit: 5 } })
     const d3 = r.diagnoses.filter(d => d.code === 'D3')
     expect(d3.some(d => d.status === 'hit')).toBe(false)
-    expect(d3.find(d => d.units[0].id === '52589907084325')).toMatchObject({ status: 'not_comparable', notComparableReason: 'primary_result_unknown' })
+    expect(d3.find(d => d.units[0].id === '52143863593432')).toMatchObject({ status: 'not_comparable', notComparableReason: 'primary_result_unknown' })
   })
 
   it('M6：D5 只比同角色——NAL 9/13 两个 ThruPlay 破冰系列绝不进入主结果占比比较', () => {
@@ -158,7 +160,7 @@ describe('D3 / D5 结果闸', () => {
     const r = run(accountInput({ fixture: NAL, snapshots: snaps, daily: nalDaily, lastInsightDate: '2026-09-13' }), '2026-09-13', '2026-09-13T09:00:00Z',
       { outcome: { leading: 'messaging_started', primary: 'messaging_started', targetCostPerPrimary: null, minPrimaryPerUnit: 5 } })
     const d5Units = r.diagnoses.filter(d => d.code === 'D5').flatMap(d => d.units)
-    expect(d5Units.some(u => u.id === '52596939123525' || u.id === '52596931528325')).toBe(false)
+    expect(d5Units.some(u => u.id === '52028365152823' || u.id === '52119647569063')).toBe(false)
     expect(d5Units.some(u => u.role === 'awareness')).toBe(false)
   })
 })
@@ -172,17 +174,17 @@ describe('D4 各道闸', () => {
 
   it('再营销组包含覆盖视频的受众、组在投 → 算已收割，不报', () => {
     const snaps = replaySnapshots({ fixture: NAL, clientId: 'c', asOfIso: '2026-09-13T12:30:00Z', date: '2026-09-13', daily: nalDaily, activities: nalActivities as ActivityRow[] })
-      .map(s => (s.entity_id === '52597304727125' ? { ...s, effective_status: 'ACTIVE' } : s))
+      .map(s => (s.entity_id === '52567871115731' ? { ...s, effective_status: 'ACTIVE' } : s))
     const r = run(accountInput({ fixture: NAL, snapshots: snaps, daily: nalDaily, lastInsightDate: '2026-09-13' }), '2026-09-13', '2026-09-13T12:30:00Z')
     expect(r.diagnoses.find(d => d.code === 'D4')).toBeUndefined()
   })
 
   it('M8：包含受众的组 Advantage+ 开着（mixed，不是再营销）→ 不算已收割 → 仍报（受众太新则 not_comparable）', () => {
     const snaps = replaySnapshots({ fixture: NAL, clientId: 'c', asOfIso: '2026-09-13T12:30:00Z', date: '2026-09-13', daily: nalDaily, activities: nalActivities as ActivityRow[] })
-      .map(s => (s.entity_id === '52597304727125' ? { ...s, effective_status: 'ACTIVE', advantage_audience: 1 } : s))
+      .map(s => (s.entity_id === '52567871115731' ? { ...s, effective_status: 'ACTIVE', advantage_audience: 1 } : s))
       .map(s => (s.level === 'audience' ? { ...s, audience_created_at: '2026-09-01T00:00:00.000Z', audience_count_lower: 5000 } : s))
     const r = run(accountInput({ fixture: NAL, snapshots: snaps, daily: nalDaily, lastInsightDate: '2026-09-13' }), '2026-09-13', '2026-09-13T12:30:00Z')
-    expect(r.diagnoses.find(d => d.code === 'D4')).toMatchObject({ status: 'hit', evidence: expect.objectContaining({ unharvested_audiences: '52597304640525' }) })
+    expect(r.diagnoses.find(d => d.code === 'D4')).toMatchObject({ status: 'hit', evidence: expect.objectContaining({ unharvested_audiences: '52438409830467' }) })
   })
 
   it('覆盖受众人数在 Meta 显示下限（≤1000）且建成已超 72 小时 → not_comparable(audience_below_floor)', () => {

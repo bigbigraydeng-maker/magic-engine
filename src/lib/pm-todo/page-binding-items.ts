@@ -41,6 +41,33 @@ const HOW_RESAVE =
   '点链接打开这个客户的设置抽屉，在「Facebook 主页」卡片里点「重新核实」（系统会让 Meta 核实、查重复并留记录），' +
   '核实后看卡片上显示的主页名是不是这个客户自己的，不是就清空；或者让客户在同一张卡片里点「连接 Meta」授权。'
 
+/**
+ * 🔴 `unverified_shared_token` 这一档**必须先说「连接 Meta」，不能先说「重新核实」**
+ * （2026-09-27 拿生产数据实测出来的）。
+ *
+ * 两个按钮解开的是不同的东西：
+ *   · **重新核实** 走 `staff_verified` —— 只是补一条核实记录，让同步**改用公用令牌**去读。
+ *   · **连接 Meta** 走 `client_oauth` —— 存下一把**授权人自己的**主页令牌。
+ *
+ * 而公用令牌那个账号在客户主页上拿到的角色是「看数据 / 投广告 / 发内容」，
+ * **没有「消息」**。实测（2026-09-27 06:10 那次同步的运行记录）：
+ *   · Roman HU、East International 已经过了这道闸，私信照样被 Facebook 挡
+ *     （`HTTP 403 code=200 Requires permission: pages_messaging or User associated
+ *     with the Page access token does not have an appropriate role on the Page`）；
+ *   · 表单线索同一把令牌**读得动**（Roman 那次列出了 4 张表单）。
+ *
+ * 所以点「重新核实」的结果是：卡片变绿、表单线索恢复、**私信依旧一条不进**——
+ * 一半修好一半没修，比两半都没修更危险，因为卡片看着已经好了。
+ * 只有主页上有「消息」权限的人点「连接 Meta」才能把私信接回来（CTS 就是这条路，
+ * 同一次同步里它 8 段对话 / 4 条消息正常进）。
+ */
+// 注意不要用 `**粗体**`：`daily-todo.ts` 把 how 走 `esc()` 直接塞进 HTML，星号会原样显示出来。
+const HOW_RECONNECT =
+  '点链接打开这个客户的设置抽屉，在「Facebook 主页」卡片里点「连接 Meta」，' +
+  '而且必须用「在这个主页上有『消息』权限的那个 Facebook 账号」完成授权 —— 私信要靠这一步才能回来。' +
+  '授权完卡片上显示的主页名要是这个客户自己的，不是就说明授权用错账号了，换账号再点一次。' +
+  '（旁边那个「重新核实」只补一条核实记录、改用公用令牌读：表单线索会恢复，但公用令牌那个账号在主页上没有「消息」权限，私信仍然一条都进不来。）'
+
 export async function pushPageBindingItems(
   supabase: SupabaseClient,
   items: ManualItem[],
@@ -99,7 +126,10 @@ export async function pushPageBindingItems(
       what: `私信、表单线索、评论自动回复已暂停：Facebook 主页 ${pageId} 的绑定没通过核实（${REASON_TEXT[reason]}）—— 这期间客人的私信和留资不会进 CRM`,
       how: reason === 'bound_to_other_client'
         ? '先弄清这个主页到底是哪个客户的：点链接看设置抽屉里的「Facebook 主页」卡片，把不是它的那个客户的主页清空，再在对的客户那边点「重新核实」。'
-        : HOW_RESAVE,
+        // 理由见 HOW_RECONNECT 的头注：这一档点「重新核实」会让卡片变绿而私信依旧不进。
+        : reason === 'unverified_shared_token'
+          ? HOW_RECONNECT
+          : HOW_RESAVE,
       href: panelHref(row.id),
     })
   }

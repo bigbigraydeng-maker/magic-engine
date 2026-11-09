@@ -203,6 +203,8 @@ export function normalizeAdset(ctx: Ctx, s: GraphAdsetSettings): RowWithoutHash 
       geo_locations: t.geo_locations ?? null,
       age_min: t.age_min ?? null,
       age_max: t.age_max ?? null,
+      // 未设置(null) = 留给 Meta"自动版位"；D9 用这个字段判纯播放广告有没有排除 Audience Network。
+      publisher_platforms: t.publisher_platforms ?? null,
     },
     learning_stage: s.learning_stage_info?.status ?? null,
     ad_studies: studies(s.ad_studies),
@@ -229,7 +231,7 @@ export function normalizeAd(ctx: Ctx, a: GraphAdSettings): RowWithoutHash {
 
 /**
  * 受众规则里的 object_id / 事件名。两种真实形状（2026-09-14 实拉）：
- *   - 视频受众：`[{"event_name":"video_completed","object_id":2354728365274921}, ...]`
+ *   - 视频受众：`[{"event_name":"video_completed","object_id":2312024039213026}, ...]`
  *   - 主页/表单/像素受众：`{"inclusions":{"rules":[{"event_sources":[{"id":...,"type":"page"}], "filter":...}]}}`
  * 解析不了就返回空数组——D4 会把「规则读不懂」当成「无法按 object_id 匹配」，不会按名字猜。
  */

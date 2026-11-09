@@ -20,11 +20,24 @@
  */
 
 import { z } from 'zod'
+import { groundNoteParse, noteIsContentFree } from './note-grounding'
+import {
+  BOOKED_ELSEWHERE_PATTERNS,
+  CALLBACK_PATTERNS,
+  FULL_REFUSAL_PATTERNS,
+  NO_INTEREST_PATTERNS,
+} from './refusal-patterns'
+import { classifyRefusalScope } from './refusal-scope'
 
 export const CONTACT_OUTCOMES = [
   'no_answer',      // 打了没人接 / 语音信箱 / 打不通
   'bad_number',     // 号码本身是错的
-  'do_not_contact', // 客户明确说别再联系
+  'do_not_contact', // 客户明确说别再联系（所有渠道）
+  /**
+   * 客户只说了别打电话（PM 2026-11-09）—— 邮件、短信、WhatsApp 照样可以联系。
+   * 只由规则判（见 refusal-scope.ts 的白名单），AI 改不了它；`do_not_contact` 恒为 false。
+   */
+  'do_not_call',
   'not_interested', // 聊过了，明确不要了
   /**
    * **暂时**不考虑 —— 「现在不打算」「明年再说」「过段时间再看」。
@@ -65,6 +78,11 @@ export const NoteParseSchema = z.object({
    * 见 lib/crm/next-step。
    */
   mentioned_next_step: z.boolean().optional(),
+  /**
+   * 规则读到一句「说不清是只拒电话还是拒所有联系」的话时为 `needs_review`：
+   * 已按全面拒绝处理（`do_not_contact: true`），同时提示人看一眼。只由规则写，AI 不输出它。
+   */
+  refusal_scope: z.literal('needs_review').optional(),
   /** 一句中文人话，给销售看。 */
   summary: z.string(),
 })
@@ -73,27 +91,15 @@ export type NoteParse = z.infer<typeof NoteParseSchema>
 
 // ── 规则层：三件不能交给 AI 的事 ──────────────────────────────────────────
 
-/** 客户明确划清界限的说法。宁可多报 —— 漏判是骚扰，误判只是少打一通。 */
-const DNC_PATTERNS: RegExp[] = [
-  /do\s*not\s*follow\s*up/i,
-  /no\s*need\s*(to\s*)?follow\s*up/i,
-  /do\s*not\s*want\s*to\s*talk/i,
-  /does\s*not\s*want\s*to\s*talk/i,
-  /do\s*not\s*(like|want)\s*(phone|call)/i,
-  // 🔴 `not intending to go` **从这一组移走了**（Codex 复审 2026-08-16）。
-  //
-  // 它说的是「我不打算去」，不是「别再联系我」。而这一组会把
-  // `do_not_contact` **永久写进联系人**（任何渠道都不许再发），是全系统最重的
-  // 一个标记。「not intending to go **right now**」这种带时间限定的说法落在
-  // 这里，等于一句「今年先不去了」把人永久封死 —— 而它本该是「暂时不考虑」。
-  //
-  // 现在它落到 NO_INTEREST_PATTERNS（停止营销，可逆），带时间限定时更会
-  // 先被 SOFT_NO_PATTERNS 接住。这一组只留**客户真的在划界限**的说法。
-  /不要(打)?电话/,
-  /不需要联系/,
-  /别再(联系|打)/,
-  /只邮件联系/,
-]
+/**
+ * 客户明确划清界限、拒绝**所有**联系的说法。宁可多报 —— 漏判是骚扰，误判只是少打一通。
+ *
+ * 词表本身在 `refusal-patterns.ts`（单一来源）。保留这个导出名给别的调用方。
+ * 「不要电话」「do not like phone call」「只邮件联系」2026-11-09 起**不在这里**了：
+ * 它们只拦电话，见 `do_not_call` 与 `refusal-scope.ts`。
+ * `not intending to go` 2026-08-16 起也不在这里（那是没兴趣，见 NO_INTEREST_PATTERNS）。
+ */
+export const DNC_PATTERNS: RegExp[] = FULL_REFUSAL_PATTERNS
 
 const NO_ANSWER_PATTERNS: RegExp[] = [
   // 真实数据里主流写法是 "voice message"(82 次) 而不是 "voice mail"(16 次)，
@@ -111,48 +117,6 @@ const NO_ANSWER_PATTERNS: RegExp[] = [
 const BAD_NUMBER_PATTERNS: RegExp[] = [
   /invalid\s*(mumber|number)/i,   // "mumber" 是原始数据里的真实拼写
   /wrong\s*number/i,
-]
-
-/**
- * **已经在别家订了** —— 这是一件**已经发生的事实**，不是一种心情。
- *
- * 🔴 单独成组，而且**压过软拒绝**（Codex 复审 2026-08-16）：
- * 「I was thinking about it but already booked with another company」
- * 两边都命中，但前半句是犹豫、后半句是**这单已经没了**。软的赢会让一个
- * 已经在别家下单的人继续收我们的跟进邮件。
- *
- * 事实压过心情 —— 反过来不成立。
- */
-const BOOKED_ELSEWHERE_PATTERNS: RegExp[] = [
-  // ⚠️ **不能是跟我们订的**（Codex 复审 2026-08-16）：「already booked Best of
-  // China **with us**」是一单成交，判成「明确不要了」会把刚成交的客人踢出名单。
-  /already\s*(booked|sorted)\b(?!.{0,30}\bwith\s+(us|you|cts)\b)/i,
-  /\bbooked\s+(with|through)\s+(another|someone|somebody)/i,
-  /all\s*sorted/i,
-  // 「已经在别家订了」「找了另一家」——「已经…订」中间常隔着地点词，
-  // 「另一家」也和「别家」一样常见，所以这里放宽而不是逐字枚举。
-  // ⚠️ 中文这几条同样**不能命中跟我们订的**（Codex 复审 2026-08-16）——
-  // 「客户已经跟我们订了 Best of China」「已经订了我们的团」是成交，
-  // 判成「明确不要了」会把刚下单的客人踢出跟进名单。CTS 的备注绝大多数是中文，
-  // 只给英文加例外等于这个保护对真实数据不生效。
-  /已经?(?!.{0,10}(跟|和|在)?我们)(?!.{0,10}我们的).{0,6}(订|预订|报名|买)了/,
-  /(找|换)了(别|另|其他).{0,3}家/,
-  /(别|另|其他).{0,3}家(订|预订|报名)了/,
-]
-
-/** 明确说了没兴趣 —— 一种态度，可以被「暂时」这类时间限定词修饰。 */
-const NO_INTEREST_PATTERNS: RegExp[] = [
-  /not\s*interested/i,
-  /no\s*interest/i,
-  // 「我不打算去」不是「别再联系我」—— 原先它在 DNC 组里，一句带时间限定的
-  // 「not intending to go right now」会把人**永久封死**。挪到这里（可逆）。
-  /not\s*intending\s*to\s*go/i,
-  // 中文。原先整组只有英文，而 CTS 员工的通话备注绝大多数是中文写的 ——
-  //「客户对旅游不感兴趣」一条都匹配不上，人照旧留在今天的名单里被反复打。
-  /不感兴趣/,
-  /没有?兴趣/,
-  /不想去/,
-  /不打算去/,
 ]
 
 /**
@@ -246,15 +210,6 @@ const SOFT_NO_PATTERNS: RegExp[] = [
   /\btoo\s+early\s+(to\s+(book|decide|plan)|for\s+(a\s+)?(trip|tour|booking))/i,
 ]
 
-const CALLBACK_PATTERNS: RegExp[] = [
-  /call\s*(back|me|tomorrow|after|at|next)/i,
-  /ring\s*me/i,
-  // "call in two weeks after back to NZ" —— 真实数据里写的是英文单词不是数字
-  /call\s+in\s+\S+\s*(week|day|month|hour)/i,
-  /call\s+after\s+\d+\s*hours?/i,
-  /\bcallback\b/i,
-]
-
 /**
  * **他现在就想买** —— 出现这类说法时，前面那半句犹豫一概不算数。
  *
@@ -281,24 +236,44 @@ function anyMatch(text: string, patterns: RegExp[]): boolean {
   return patterns.some((p) => p.test(text))
 }
 
+export interface NoteVerdict {
+  outcome: ContactOutcome
+  do_not_contact: boolean
+  /** 说不清拒的是电话还是所有联系 —— 已按全面拒绝处理，并提示人看一眼。 */
+  refusal_scope?: 'needs_review'
+}
+
+/**
+ * 拒绝那一段（2026-11-09）：全面拒绝 > 说不清（按全面拒绝 + 请人看）> 只别打电话。
+ * 「只别打电话」排在「没接通」之前：那是客人明确说的。
+ */
+function refusalVerdict(t: string): NoteVerdict | null {
+  const scope = classifyRefusalScope(t)
+  if (scope === 'all') return { outcome: 'do_not_contact', do_not_contact: true }
+  if (scope === 'needs_review') {
+    return { outcome: 'do_not_contact', do_not_contact: true, refusal_scope: 'needs_review' }
+  }
+  if (scope === 'phone_only') return { outcome: 'do_not_call', do_not_contact: false }
+  return null
+}
+
 /**
  * 只靠规则能确定的部分。AI 不可用时这就是全部结果，
  * AI 可用时这几项仍然覆盖 AI —— 它们比 AI 更该被信任。
  */
-export function classifyNote(raw: string): {
-  outcome: ContactOutcome
-  do_not_contact: boolean
-} {
+export function classifyNote(raw: string): NoteVerdict {
   const t = (raw ?? '').trim()
   if (!t) return { outcome: 'unknown', do_not_contact: false }
 
-  const dnc = anyMatch(t, DNC_PATTERNS)
+  const refusal = refusalVerdict(t)
 
   // 顺序即优先级：
-  //   号码是坏的 > 明确拒绝 > 没接通 > **已经在别家订了** > **暂时**不考虑
+  //   号码是坏的 > 明确拒绝 > 只别打电话 > 没接通 > **已经在别家订了** > **暂时**不考虑
   //   > 明确没兴趣 > 约了回电 > 聊过了
-  if (anyMatch(t, BAD_NUMBER_PATTERNS)) return { outcome: 'bad_number', do_not_contact: dnc }
-  if (dnc) return { outcome: 'do_not_contact', do_not_contact: true }
+  if (anyMatch(t, BAD_NUMBER_PATTERNS)) {
+    return { outcome: 'bad_number', do_not_contact: refusal?.do_not_contact === true }
+  }
+  if (refusal) return refusal
   if (anyMatch(t, NO_ANSWER_PATTERNS)) return { outcome: 'no_answer', do_not_contact: false }
   // 🔴 **事实压过心情**（Codex 复审 2026-08-16）：「想了想，但已经在别家订了」
   //    两边都命中，前半句是犹豫、后半句是这单已经没了。软的赢会让一个已经
@@ -358,6 +333,7 @@ These notes are terse shorthand typed by a salesperson right after a phone call 
 
 Rules:
 - summary: ONE short sentence in SIMPLIFIED CHINESE, plain language, for another salesperson to read.
+  Keep every customer's name exactly as written in the note. Never translate or transliterate a name.
 - travel_window: what the CUSTOMER said about when they travel, in their own terms ("明年三月" / "2027 年底"). Null if they never said.
 - tour_interest: tour name in ENGLISH exactly as written ("Best of China", "Tale of Two Cities", "Silk Road"). Null if none named.
 - competitor: another travel company the customer mentioned using or quoting. Null if none.
@@ -375,6 +351,9 @@ Rules:
   This is independent of callback_at: a vague "下周再联系" is true here but null there.
 - Never invent. If the note does not say it, the field is null.
 - outcome / do_not_contact are decided by rules elsewhere; fill your best guess, it will be overridden.
+  do_not_contact means the customer refused ALL contact on EVERY channel (email, text, messages too).
+  A customer who only said not to PHONE them ("不要打电话", "do not like phone calls", "email only")
+  is NOT do_not_contact: that is the outcome "do_not_call", which the rules decide; set do_not_contact false.
 
 TWO MISTAKES THAT KEEP HAPPENING — read these twice:
 
@@ -529,6 +508,23 @@ export function todayContext(now: Date, timeZone: string): string {
   return `TODAY is ${fmt.format(now)} in ${timeZone}. Resolve any relative day against it.`
 }
 
+/**
+ * 规则和 AI 的拒绝判断怎么合（子牙 P0-1 / 魏征 P1-3，2026-11-09）。
+ *
+ *   · 规则判「只别打电话」→ **AI 的 do_not_contact 一律不算**。否则 AI 一句「拒联」就把
+ *     只拒电话的人扩成全渠道拦截（全仓约 30 处把这个标记当全渠道拒联）。
+ *   · 其余情况照旧：结果值规则赢，do_not_contact 两边取并集（宁可多拦）。
+ *   · 合完绝不留「结果是只别打电话、标记却是全拦」的矛盾状态：真出现就按全拦记。
+ */
+export function mergeRefusal(
+  rules: NoteVerdict,
+  aiDoNotContact: boolean,
+): Pick<NoteParse, 'outcome' | 'do_not_contact' | 'refusal_scope'> {
+  const doNotContact = rules.outcome === 'do_not_call' ? rules.do_not_contact : rules.do_not_contact || aiDoNotContact
+  const outcome = doNotContact && rules.outcome === 'do_not_call' ? 'do_not_contact' : rules.outcome
+  return { outcome, do_not_contact: doNotContact, refusal_scope: rules.refusal_scope }
+}
+
 export async function parseNote(
   raw: string,
   opts: { brandTerms?: string[]; now?: Date; timeZone?: string } = {},
@@ -539,6 +535,7 @@ export async function parseNote(
   const base: NoteParse = {
     outcome: rules.outcome,
     do_not_contact: rules.do_not_contact,
+    refusal_scope: rules.refusal_scope,
     travel_window: null,
     tour_interest: null,
     competitor: null,
@@ -546,12 +543,24 @@ export async function parseNote(
     summary: raw.trim().slice(0, 120),
   }
 
+  // 没内容可整理（「测试数据」「ok」「.」）：不送 AI，摘要就是原话本身 ——
+  // 2026-10-30 事故：「测试数据」被 AI 整理成「客户下周一要求报价」存进了客人档案。
+  // 规则层只剩兜底值 `spoke`（没命中任何规则）时，一句没有内容的话不能算「真的聊上了」，
+  // 记成 `unknown`；规则明确命中的（没接 / 坏号 / 别再联系…）照旧。
+  if (noteIsContentFree(raw)) {
+    return { ...base, outcome: rules.outcome === 'spoke' ? 'unknown' : rules.outcome }
+  }
+
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey || !raw.trim()) return base
 
   try {
-    const { default: OpenAI } = await import('openai')
-    const client = new OpenAI({ apiKey })
+    // 走统一封装（而不是自己 new）—— 账户级失效（余额耗尽 / 钥匙失效）
+    // 的识别与落库都装在那一层，是全站唯一能一次盖住所有调用点的位置。
+    // bypassGateway：这条链路用的是 responses API，从没经过 CF 网关验证过，
+    // 只拿拦截、不换路由（见 openai-client.ts 的 OpenAIClientOptions）。
+    const { getOpenAIClient } = await import('@/lib/ai/openai-client')
+    const client = getOpenAIClient({ apiKey, bypassGateway: true })
     const res = await client.responses.create({
       model: process.env.CRM_NOTE_MODEL ?? 'gpt-4o-mini',
       input: [
@@ -568,17 +577,17 @@ export async function parseNote(
       JSON.parse((res as { output_text?: string }).output_text ?? '{}'),
     )
 
+    // 模型说的每个事实都要能在员工原话里找到依据，否则拿掉 / 退回原话（见 note-grounding）。
+    const grounded = groundNoteParse(raw, parsed)
     return {
-      ...parsed,
-      // 规则赢。「别再联系」不交给 AI 判断，而且两边取并集。
-      outcome: rules.outcome,
-      do_not_contact: rules.do_not_contact || parsed.do_not_contact,
+      ...grounded,
+      ...mergeRefusal(rules, parsed.do_not_contact),
       // 模型的自由文本字段全部过一遍清洗 —— 实测它会返回字符串 "null"、
       // 把客户自己的团名当竞品、把销售的通话日期当出行时间。
-      travel_window: cleanTravelWindow(parsed.travel_window, now),
-      tour_interest: cleanNullish(parsed.tour_interest),
-      competitor: cleanCompetitor(parsed.competitor, brandTerms),
-      callback_at: saneCallbackInstant(cleanNullish(parsed.callback_at)),
+      travel_window: cleanTravelWindow(grounded.travel_window, now),
+      tour_interest: cleanNullish(grounded.tour_interest),
+      competitor: cleanCompetitor(grounded.competitor, brandTerms),
+      callback_at: saneCallbackInstant(cleanNullish(grounded.callback_at)),
     }
   } catch {
     // AI 挂了不能让整批导入失败 —— 规则版本已经覆盖了最要紧的三件事。

@@ -123,6 +123,14 @@ export async function resolveRedirectForSession(
     return '/prospect'
   }
 
+  // Meta Ads AI is an authenticated deep link. A user may also have an old
+  // public scan, but that historical record must not override the page they
+  // explicitly asked to return to after login. Portal/dashboard membership
+  // routing above keeps its existing priority.
+  if (safePath.startsWith('/meta-ads-ai/')) {
+    return safePath
+  }
+
   // Prospects: have a public_scan_jobs record but no portal/dashboard access
   const { data: scanJob } = await supabaseAdmin
     .from('public_scan_jobs')

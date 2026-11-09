@@ -858,15 +858,14 @@ export async function claimNextStep(
 export async function listDeadLetterRuns(
   sb: SupabaseClient,
   sinceIso: string,
+  excludePendingActionKeys: readonly string[] = [], // 🔴 这些动作的等批准有专属入口：在查询里排除，免得占掉下面 50 条的名额
 ): Promise<ActionRun[]> {
-  const { data, error } = await sb
-    .from(TABLE_RUNS)
-    .select(RUN_COLUMNS)
-    .in('status', ['dead_letter', 'pending_approval', 'denied'])
-    .eq('needs_human', true)
-    .gte('updated_at', sinceIso)
-    .order('updated_at', { ascending: false })
-    .limit(50)
+  let query = sb.from(TABLE_RUNS).select(RUN_COLUMNS)
+    .in('status', ['dead_letter', 'pending_approval', 'denied']).eq('needs_human', true).gte('updated_at', sinceIso)
+  if (excludePendingActionKeys.length > 0) {
+    query = query.or(`status.neq.pending_approval,action_key.not.in.(${excludePendingActionKeys.map((k) => `"${k}"`).join(',')})`)
+  }
+  const { data, error } = await query.order('updated_at', { ascending: false }).limit(50)
   if (error) fail('读取需要人处理的执行', error)
   return (data ?? []) as unknown as ActionRun[]
 }

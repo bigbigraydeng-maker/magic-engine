@@ -1,8 +1,11 @@
 import React from 'react'
+import Link from 'next/link'
+import { pilotEntryVisible, isSelfServeClient } from '@/lib/meta/ai/entitlement'
 import { ZhugeGlobalFab } from './_components/ZhugeGlobalFab'
+import AdsCheckCard from './_components/AdsCheckCard'
 import { readUserTier } from '@/components/auth/ServerFeatureLock'
 
-export default function ClientLayout({
+export default async function ClientLayout({
   children,
   params,
 }: {
@@ -15,9 +18,15 @@ export default function ClientLayout({
   // 悬浮球，容易怀疑自己上错网站。self_serve 访客不该看到它。
   const tier = readUserTier()
   const showFab = tier !== 'self_serve'
+  const showMetaAdsAi = await pilotEntryVisible(params.id)
+  const selfServe = showMetaAdsAi ? await isSelfServeClient(params.id) : false
+  // The customer card is for the customer; staff looking at a self-serve workspace keep the plain link.
+  const showCard = showMetaAdsAi && selfServe && tier === 'self_serve'
 
   return (
     <>
+      {showMetaAdsAi && !showCard && <div className="border-b px-6 py-2 text-sm"><Link href={`/meta-ads-ai/${params.id}`} className="underline">Facebook 广告体检</Link></div>}
+      {showCard && <AdsCheckCard clientId={params.id} />}
       {children}
       {showFab && <ZhugeGlobalFab clientId={params.id} />}
     </>

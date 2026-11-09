@@ -1,4 +1,13 @@
+/**
+ * GET/POST /api/public-scan/keyword-gap — internal DataForSEO keyword-gap research.
+ *
+ * Despite the `public-scan` path this is NOT a public endpoint: every call spends
+ * DataForSEO Labs credits on an arbitrary domain, and nothing in the product calls it
+ * (2026-09-27 audit: no UI, no cron, no sibling site). Global admins only; scoped
+ * demo admins are rejected because the spend is platform-level, not per-client.
+ */
 import { NextRequest, NextResponse } from 'next/server'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 import { getPublicKeywordGapReport, type PublicGapMarket } from '@/lib/seo-gap/public-gap'
 
 const DEFAULT_DOMAIN = 'magicengine.com.au'
@@ -18,12 +27,16 @@ function parseMarkets(raw: string | null): PublicGapMarket[] {
 function jsonReport(body: unknown) {
   return NextResponse.json(body, {
     headers: {
-      'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=3600',
+      // Auth-gated response: a shared cache must never replay it to anonymous callers.
+      'Cache-Control': 'private, no-store',
     },
   })
 }
 
 export async function GET(req: NextRequest) {
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   const url = new URL(req.url)
   const domain = url.searchParams.get('domain')?.trim() || DEFAULT_DOMAIN
   const markets = parseMarkets(url.searchParams.get('markets'))
@@ -42,6 +55,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   try {
     const body = await req.json().catch(() => ({})) as {
       domain?: string

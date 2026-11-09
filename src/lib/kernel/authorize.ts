@@ -24,7 +24,9 @@ import type {
 } from './types'
 import type { KernelDeps } from './deps'
 import { validateAgainstSchema } from './registry'
+import { selectEnvelopeVerdict } from './autonomy-envelope'
 import { outwardBlockReason } from './outward-authorization'
+import { isSpendIncreaseAction, signedBySpendApprover, SPEND_APPROVER_ONLY_REASON } from './spend-approval'
 import {
   getActivePolicy,
   getDecision,
@@ -108,7 +110,14 @@ export function snapshotOf(
           outward_authorization: definition.outwardAuthorization
             ? {
                 declared_in: definition.outwardAuthorization.declaredIn,
-                requires_human_approval: definition.outwardAuthorization.requiresHumanApproval,
+                // 语义不变：human_only ↔ 原来的 requiresHumanApproval: true。
+                // bounded 时这一项是 false，同时把信封原样存下来 —— 否则复盘时
+                // 只看到「没要人点头」，说不清当时是在什么范围内放行的。
+                requires_human_approval: definition.outwardAuthorization.approval.mode === 'human_only',
+                approval_mode: definition.outwardAuthorization.approval.mode,
+                autonomy_envelope: definition.outwardAuthorization.approval.mode === 'bounded'
+                  ? { ...definition.outwardAuthorization.approval.envelope }
+                  : null,
                 rollback: definition.outwardAuthorization.rollback,
               }
             : null,
@@ -360,6 +369,20 @@ export async function preflight(deps: KernelDeps, run: ActionRun, now: Date): Pr
     )
   }
 
+  // ⑥a 🔴 加钱类动作（第 3 刀 3a 第 2 道）：自动策略一律拒，不进下面的 bounded 信封分支。
+  //     正常情况下策略同步已经把这类动作写成「要审批」；走到这里说明有人手改了策略表或同步失败。
+  //     复用可恢复拒绝码：规则改回「要审批」之后同一件事理应能做。
+  if (isSpendIncreaseAction(definition) && policy.mode === 'auto_approve') {
+    return bad(
+      'outward_requires_human_policy',
+      `「${definition.title}」会让客户多花钱，${SPEND_APPROVER_ONLY_REASON} —— ` +
+        '这个客户的规则却配成了「自动执行」。规则改成「要审批」之前一律不做',
+      definition,
+      policy,
+      costEstimate,
+    )
+  }
+
   // ⑥b 🔴 对外动作**永远**要人点头 —— `auto_approve` 不足以放行。
   //     这里拒绝而不是"悄悄升级成要审批"：把客户明确配成自动的规则
   //     在背后改判成人工，会让设置页显示的和实际发生的两回事。
@@ -371,14 +394,90 @@ export async function preflight(deps: KernelDeps, run: ActionRun, now: Date): Pr
   //     幂等键会让同一件事命中旧的 denied run，而不可恢复的码连
   //     recoverDeniedRun 都救不回来，等于把这个动作**永久**锁死。
   if (definition.sideEffect === 'outward' && policy.mode === 'auto_approve') {
-    return bad(
-      'outward_requires_human_policy',
-      `「${definition.title}」会作用到客户自己的资产之外，这类动作一律要人点头 —— ` +
-        '这个客户的规则却配成了「自动执行」。先把规则改成「要审批」，在那之前一律不做',
-      definition,
-      policy,
-      costEstimate,
-    )
+    const approval = definition.outwardAuthorization?.approval
+
+    // 没声明、或声明成「只能人点头」→ 行为跟以前**完全一样**。
+    if (!approval || approval.mode === 'human_only') {
+      return bad(
+        'outward_requires_human_policy',
+        `「${definition.title}」会作用到客户自己的资产之外，这类动作一律要人点头 —— ` +
+          '这个客户的规则却配成了「自动执行」。先把规则改成「要审批」，在那之前一律不做',
+        definition,
+        policy,
+        costEstimate,
+      )
+    }
+
+    // ⑥c 🔴 声明成 bounded 的动作：查**这一次**的具体改动在不在信封内。
+    //     事实一律由域层解析器服务端读取（`deps.resolveEnvelopeFacts`），
+    //     绝不采信提交方在 input 里报的预算数字——让被约束者自报约束等于没有约束。
+    //     读不到解析器、读不到事实、越出信封，三种情况都 deny，且用可恢复码：
+    //     PM 调高上限 / 过了冷却 / 退出学习期之后同一件事理应能做。
+    if (!deps.resolveEnvelopeFacts) {
+      return bad(
+        'outside_autonomy_envelope',
+        `「${definition.title}」声明了信封内可自治，但这个 Kernel 实例没装信封事实解析器 —— ` +
+          '读不到真实预算就不自动动钱（缺解析器按拒绝处理，不是按跳过检查处理）',
+        definition,
+        policy,
+        costEstimate,
+      )
+    }
+
+    const resolved = await deps.resolveEnvelopeFacts({
+      clientId: run.client_id,
+      actionKey: run.action_key,
+      input: (run.input ?? {}) as Record<string, unknown>,
+      at: 'authorize',
+      runId: run.id,
+    })
+
+    if ('unavailable' in resolved) {
+      return bad(
+        'outside_autonomy_envelope',
+        `读不到信封要的事实，不自动动钱：${resolved.unavailable}`,
+        definition,
+        policy,
+        costEstimate,
+      )
+    }
+
+    // 🔴 人按的「收」类动作走另一套信封（`HUMAN_STOP_ENVELOPE`），不走 AI 自治信封。
+    //    `triggered_by` 取的是 `action_runs` 那一列。
+    //
+    // 🔴 **这里原来写着「提交时由 Kernel 自己写、不经请求体，所以不是调用方自报的」——
+    //    那句话是误导性的，我自己写的，2026-09-27 改掉。**
+    //    Kernel 确实是写那一列的人，但值来自 `SubmitActionInput.triggeredBy`
+    //    （`runner.ts:47` 必填 → `runner.ts:194` 原样写入），**没有任何校验**。
+    //    也就是说「人按的」这个身份**就是调用方自报的** —— 原注释让读代码的人
+    //    以为这里有一道不存在的保证，而这条判据正是人工信封绕过 AI 五条闸的唯一凭据。
+    //
+    //    真正的约束在 `boundaries.ts` 的 `HUMAN_TRIGGER_ALLOWED_DIRS`（哪个目录能传）
+    //    + `HUMAN_TRIGGER_REQUIRED_AUTH_CALLS`（传它的文件必须过鉴权），两条都由
+    //    架构测试强制。彻底的修法（让 `'human'` 不可自报）是欠账，见那两条的注释。
+    //    为什么必须分家：AI 信封里「学习期未知就不动」「72h 冷却」「在 A/B 测试里不动」
+    //    这几条防的是 AI 反复折腾学习期，而人按紧急停车是为了**少花钱** ——
+    //    2026-09-27 实测拿 AI 信封拦人按的刹车，CTS + NAL 46 个广告组因 `learning_stage`
+    //    全是 NULL 被 100% 拒掉（详见 autonomy-envelope.ts 里 HUMAN_STOP_ENVELOPE 的注释）。
+    const verdict = selectEnvelopeVerdict({
+      triggeredBy: run.triggered_by,
+      actionKey: run.action_key,
+      request: resolved.request,
+      facts: resolved.facts,
+      envelope: approval.envelope,
+    })
+    if (!verdict.within) {
+      // 🔴 理由里带上走的是哪套信封 —— 否则排查时分不清「人工信封拒了」还是
+      //    「AI 信封拒了」，而这两种该做的处置完全不同。
+      const which = verdict.envelopeUsed === 'human_stop' ? '人工止损信封' : '自治信封'
+      return bad(
+        'outside_autonomy_envelope',
+        `这一次的改动不在${which}内：${verdict.reasons.join('；')}`,
+        definition,
+        policy,
+        costEstimate,
+      )
+    }
   }
 
   // ⑦ 钱。上限没写 = 0，不是「不限」。
@@ -430,6 +529,7 @@ export async function authorizeRun(
    *    只有直接调 authorizeRun 的测试才会不传（那时没有第二个执行者）。
    */
   fence?: { generation: number },
+  options: { readonly requireHumanApproval?: boolean } = {},
 ): Promise<AuthorizationOutcome> {
   const now = deps.now()
 
@@ -464,8 +564,23 @@ export async function authorizeRun(
   const { definition, policy, costEstimate, costCap } = pf
   const expiresAt = new Date(now.getTime() + policy.decision_ttl_seconds * 1000).toISOString()
 
+  // A caller that promises an approval screen must never race a policy change
+  // into an automatic provider write. Re-read policy in preflight, then deny if
+  // it no longer requires approval; do not silently downgrade this request.
+  if (options.requireHumanApproval && policy.mode !== 'require_approval') {
+    return recordDeny(deps, {
+      run,
+      definition,
+      policy,
+      code: 'outward_requires_human_policy',
+      reason: `「${definition.title}」的当前规则不是“必须人工批准”——本次请求已停止，没有执行预算变更`,
+      costEstimate,
+      fence,
+    })
+  }
+
   // 要人点头。
-  if (policy.mode === 'require_approval') {
+  if (policy.mode === 'require_approval' || options.requireHumanApproval) {
     const decision = await insertDecision(deps.supabase, {
       action_run_id: run.id,
       client_id: run.client_id,
@@ -509,7 +624,9 @@ export async function authorizeRun(
     action_version: run.action_version,
     verdict: 'allow',
     deny_code: null,
-    reason: `这个客户已经允许系统自己做「${definition.title}」，且这次不花钱、不对外`,
+    reason: definition.sideEffect === 'outward'
+      ? `这个客户已允许有限自动执行「${definition.title}」，本次通过信封检查；执行前仍须重读事实`
+      : `这个客户已经允许系统自己做「${definition.title}」，且这次不花钱、不对外`,
     policy_snapshot: snapshotOf(policy, definition, run.input),
     policy_id: policy.id,
     policy_version: policy.policy_version,
@@ -603,6 +720,10 @@ export async function reuseLiveAuthorization(
       ? policy.mode === 'require_approval'
       : policy.mode === 'auto_approve'
   if (!modeStillMatches) return null
+
+  // 🔴 加钱类（第 3 刀 3a 第 4 道）：不是 PM 本人签的旧放行不复用——复用了只会一直撞 Gateway
+  //    的第 5 道闸直到过期；返回 null 让它重新授权（会重新挂起等 PM）。
+  if (isSpendIncreaseAction(deps.registry.get(run.action_key)) && !signedBySpendApprover(deps, decision)) return null
 
   return { verdict: 'allow', decision, run, ctx: mintContext(decision, decision.cost_cap_usd) }
 }

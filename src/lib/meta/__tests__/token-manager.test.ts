@@ -164,12 +164,18 @@ describe('never throws', () => {
     expect(await getMetaTokenForClient('ghost')).toBe('shared')
   })
 
-  it('returns the shared token on a DB error', async () => {
+  // 2026-09-21 (chatgpt-codex-connector review): a read ERROR on this client's
+  // OWN row is not the same as "this client doesn't exist" — the row might
+  // carry a domain/Page key this client owns, we just couldn't check. Falling
+  // back to the shared token here would silently swap the client onto a token
+  // that sees MORE clients than intended, exactly the CTS 2026-07-24 failure
+  // mode this whole lookup exists to avoid.
+  it('returns no token (not the shared fallback) on a DB error reading this client\'s own row', async () => {
     client({ domain: 'ctstours.co.nz' })
     state.failures = { select: new Set(['clients']) }
     process.env.META_SYSTEM_USER_TOKEN = 'shared'
 
-    expect(await getMetaTokenForClient('any')).toBe('shared')
+    expect(await getMetaTokenForClient('any')).toBeNull()
   })
 
   it('returns null when nothing at all is configured', async () => {

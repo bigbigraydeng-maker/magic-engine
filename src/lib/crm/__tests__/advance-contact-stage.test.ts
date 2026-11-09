@@ -13,6 +13,8 @@ const CONTACTS: Row[] = [
   { id: 'a1', client_id: 'client-a', stage: 'new' },
   { id: 'a2', client_id: 'client-a', stage: 'won' },
   { id: 'b1', client_id: 'client-b', stage: 'new' },
+  // 刚导入、还没人标过阶段——「大家的跟进到哪步都还空着」是常态，不是异常。
+  { id: 'a3', client_id: 'client-a', stage: null },
 ]
 
 const STAGES: Row[] = [
@@ -96,5 +98,49 @@ describe('advanceContactStage', () => {
   it('目标阶段不存在于该客户 → 400', async () => {
     const r = await advanceContactStage(supabase, 'client-a', 'a1', 'no-such-stage', null, 'fde@example.com')
     expect(r).toMatchObject({ ok: false, status: 400 })
+  })
+
+  describe('expectedFromStage（2026-09-28 并发保护）', () => {
+    it('不传这个参数 → 老行为逐字不变，正常写库', async () => {
+      const r = await advanceContactStage(supabase, 'client-a', 'a1', 'won', 'note', 'fde@example.com')
+      expect(r).toMatchObject({ ok: true, changed: true })
+      expect(inserts).toHaveLength(1)
+    })
+
+    it('传了、跟库里现在的阶段一致 → 照常写库', async () => {
+      const r = await advanceContactStage(supabase, 'client-a', 'a1', 'won', 'note', 'fde@example.com', 'new')
+      expect(r).toMatchObject({ ok: true, changed: true })
+      expect(inserts).toHaveLength(1)
+    })
+
+    it('🔴 传了、跟库里现在的阶段不一致（别人已经先改过）→ 409，不写事件、不改库', async () => {
+      // a1 库里实际是 'new'，调用方却以为是 'contacted'——说明中间被别人动过了。
+      const r = await advanceContactStage(supabase, 'client-a', 'a1', 'won', 'note', 'fde@example.com', 'contacted')
+      expect(r).toMatchObject({ ok: false, status: 409, actualStage: 'new' })
+      expect(inserts).toHaveLength(0)
+      expect(updates).toHaveLength(0)
+    })
+
+    it('并发闸排在合法值闸前面：目标阶段不存在 + 并发不一致，报的是 409 不是 400', async () => {
+      const r = await advanceContactStage(supabase, 'client-a', 'a1', 'no-such-stage', null, 'fde@example.com', 'contacted')
+      expect(r).toMatchObject({ ok: false, status: 409 })
+    })
+
+    /**
+     * 🔴 魏征 2026-09-28 复审 B2 实现时查出：`null` 不是"等价于不传"——它是
+     * 「我看到这个人还没标过任何阶段」这句真话，路由层曾经把它跟"整个字段没传"
+     * 都塌成 undefined，于是对这批人并发闸形同虚设。这里锁住正确行为。
+     */
+    it('expectedFromStage: null，且库里这个人确实还没标过 → 照常写库（两边都是"还没标"，没有冲突）', async () => {
+      const r = await advanceContactStage(supabase, 'client-a', 'a3', 'won', null, 'fde@example.com', null)
+      expect(r).toMatchObject({ ok: true, changed: true })
+    })
+
+    it('🔴 expectedFromStage: null，但库里这个人其实已经被标过阶段了 → 409，null 照样要触发检查', async () => {
+      // a1 库里实际是 'new'，调用方却传 null（以为还没人标过）——同一种"两人抢第一下"的场景。
+      const r = await advanceContactStage(supabase, 'client-a', 'a1', 'won', null, 'fde@example.com', null)
+      expect(r).toMatchObject({ ok: false, status: 409, actualStage: 'new' })
+      expect(inserts).toHaveLength(0)
+    })
   })
 })

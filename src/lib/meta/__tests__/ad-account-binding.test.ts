@@ -3,7 +3,7 @@
  * 路由级的端到端行为见 app/api/clients/[id]/meta-ad-account/route.test.ts。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { parseAdAccountInput, canonicalAccountDigits, registeredValueMatches, verifyAdAccountAccessible } from '../ad-account-binding'
+import { parseAdAccountInput, canonicalAccountDigits, registeredValueMatches, verifyAdAccountAccessible, toActAccountId } from '../ad-account-binding'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -103,3 +103,20 @@ describe('verifyAdAccountAccessible', () => {
     expect(await verifyAdAccountAccessible('act_2222222222', 'tok')).toMatchObject({ ok: false, kind: 'id_mismatch' })
   })
 })
+
+describe('toActAccountId — Meta 纯数字账户号 → 库和内核用的 act_ 形式', () => {
+  it('纯数字 → 补 act_（生产 503 的根因就是这一步没做）', () => {
+    expect(toActAccountId('953025114498626')).toBe('act_953025114498626')
+  })
+  it('已经是 act_ → 原样', () => {
+    expect(toActAccountId('act_953025114498626')).toBe('act_953025114498626')
+  })
+  it('夹空白 → 去掉再判', () => {
+    expect(toActAccountId(' 953025114498626 ')).toBe('act_953025114498626')
+  })
+  it.each([null, undefined, '', 'abc', 'act_', 'act_abc', '0123456789', '123', 'act-953025114498626'])(
+    '%s → null（调用方必须 fail-closed，不许回落成空串）',
+    (bad) => { expect(toActAccountId(bad)).toBeNull() },
+  )
+})
+

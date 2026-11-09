@@ -2,6 +2,7 @@ import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { SocialPlanOutput } from '@/lib/social/social-plan-templates'
+import { hasPromoField } from '@/lib/marketing-plan/promo/spec'
 
 function postRoute(contentType: string): string {
   if (contentType === 'promotional') return 'route_a'
@@ -49,13 +50,15 @@ export async function POST(
     // are created without it (to avoid violating the source_consistency CHECK constraint).
     const { data: mpRow } = await supabaseAdmin
       .from('marketing_plans')
-      .select('id')
+      .select('id, plan_data')
       .eq('client_id', clientId)
       .eq('status', 'approved')
       .order('created_at', { ascending: false })
       .limit(1)
-      .maybeSingle<{ id: string }>()
-    const marketingPlanId = mpRow?.id ?? null
+      .maybeSingle<{ id: string; plan_data: unknown }>()
+    // 推广计划（有 promo 字段）的任务必须各自带步骤引用，这里不能自动挂上去；
+    // 旧版计划保持原行为。
+    const marketingPlanId = mpRow && !hasPromoField(mpRow.plan_data) ? mpRow.id : null
 
     // Compute next sort_order to append new items after existing ones
     let nextSortOrder = 200

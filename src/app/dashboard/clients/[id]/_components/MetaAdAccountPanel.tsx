@@ -209,9 +209,8 @@ export function MetaAdAccountPanel({ clientId }: Props) {
         </div>
       )}
 
-      <p className="mb-3 text-sm text-slate-600">
-        填入 Meta 广告账户 ID，格式 <code className="rounded bg-slate-100 px-1 text-xs">act_数字</code>。
-        只填数字也行。保存前先点「核实」，确认 Meta 返回的账户名是这个客户的。
+      <p className="mb-3 text-sm text-slate-500">
+        格式 <code className="rounded bg-slate-100 px-1 text-xs">act_数字</code>，只填数字也行。保存前先点「核实」确认账户名。
       </p>
 
       <input
@@ -219,7 +218,7 @@ export function MetaAdAccountPanel({ clientId }: Props) {
         value={draft}
         onChange={e => { setDraft(e.target.value); resetPreview() }}
         placeholder="act_2775766642787274"
-        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100"
+        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-200"
       />
 
       {preview && (
@@ -249,7 +248,7 @@ export function MetaAdAccountPanel({ clientId }: Props) {
           <button
             onClick={handleVerify}
             disabled={busy}
-            className="rounded-lg border border-cyan-600 px-4 py-1.5 text-sm font-bold text-cyan-700 hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg border border-slate-600 px-4 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? '核实中…' : '核实'}
           </button>
@@ -258,7 +257,7 @@ export function MetaAdAccountPanel({ clientId }: Props) {
           <button
             onClick={handleSave}
             disabled={busy || !canSave}
-            className="rounded-lg bg-cyan-600 px-4 py-1.5 text-sm font-bold text-white hover:bg-cyan-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="rounded-lg bg-slate-900 px-4 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
           >
             {busy ? '保存中…' : clearing ? (keepPrevious ? '确认清空主账户' : '确认清空并移除') : '确认保存'}
           </button>
@@ -275,10 +274,15 @@ export function MetaAdAccountPanel({ clientId }: Props) {
         {!dirty && !savedAt && state.adAccountId === null && <span className="text-xs text-slate-400">未绑定</span>}
       </div>
 
-      <p className="mt-4 border-t border-slate-100 pt-3 text-xs text-slate-400">
-        在 Meta Ads Manager 左上账户切换器找到，复制完整 ID（含 <code className="rounded bg-slate-100 px-1">act_</code> 前缀）。
-        绑定后下一次 cron（每日 03:00 UTC）会自动同步广告花费 / CTR / ROAS 到 ME 飞轮。每次修改都会记下是谁改的。
-      </p>
+      <details className="mt-4 border-t border-slate-100 pt-3">
+        <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-600">
+          怎么找账户 ID？
+        </summary>
+        <p className="mt-1.5 text-xs text-slate-400">
+          在 Meta Ads Manager 左上账户切换器找到，复制完整 ID（含 <code className="rounded bg-slate-100 px-1">act_</code> 前缀）。
+          绑定后每日 03:00 UTC 自动同步广告数据。每次修改都会记下操作人。
+        </p>
+      </details>
     </div>
   )
 }

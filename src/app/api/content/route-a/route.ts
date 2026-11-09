@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardContentGeneration } from '@/lib/content/guard-content-generation'
 import { getActiveBrief, formatBriefForPrompt } from '@/lib/content/brief-injector'
 import { getCampaignById, formatCampaignForPrompt } from '@/lib/content/campaign-injector'
 import { generateVisualBrief } from '@/lib/content/visual-brief-generator'
@@ -17,6 +18,9 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       )
     }
+
+    const denied = await guardContentGeneration({ client_id, execution_item_id, production_package_id })
+    if (denied) return denied
 
     // Normalize platforms: accept string or string[]
     const targetPlatforms: string[] = Array.isArray(platforms)

@@ -7,24 +7,79 @@
  * and the page bundle stays focused on the live UI.
  */
 import type { MonthlyReportData } from '@/lib/reports/monthly-aggregator'
+import {
+  entityRowsHtml,
+  formatAdsMoney,
+  vsTargetText,
+} from '@/lib/reports/ads-monthly-present'
+
+function adsSectionHtml(report: MonthlyReportData): string {
+  const ads = report.ads
+  if (!ads) {
+    return `<div class="section"><div class="section-title"><span class="badge">A</span> 付费广告</div><p style="font-size:13px;color:rgba(26,26,26,0.55);">广告板块未加载。</p></div>`
+  }
+  const noun = ads.primaryResultLabel ?? '主结果'
+  const gaps = ads.gaps.map(g => `<li>${escHtml(g)}</li>`).join('')
+  const ledger = ads.ledger
+    .map(
+      l => `<li style="margin-bottom:8px;font-size:12px;"><strong>${escHtml(l.actionLabel)}</strong> · ${escHtml(l.entityName ?? '')}<br/>${escHtml([l.beforeText, l.afterText].filter(Boolean).join(' → '))}<br/><em>${escHtml(l.observedResult ?? '')}</em></li>`,
+    )
+    .join('')
+  return `<div class="section">
+    <div class="section-title"><span class="badge">A</span> 付费广告（${escHtml(noun)}）</div>
+    <p style="font-size:11px;color:rgba(26,26,26,0.55);">${escHtml(report.period_scope_note)}</p>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">本月花费</div><div class="kpi-value">${escHtml(formatAdsMoney(ads.spend, ads.currency))}</div></div>
+      <div class="kpi"><div class="kpi-label">本月${escHtml(noun)}</div><div class="kpi-value">${ads.results ?? '—'}</div></div>
+      <div class="kpi"><div class="kpi-label">单次成本</div><div class="kpi-value">${escHtml(formatAdsMoney(ads.costPerResult, ads.currency))}</div><div class="kpi-sub">${escHtml(vsTargetText(ads.vsTarget, ads.targetCostPerResult, ads.currency))}</div></div>
+      <div class="kpi"><div class="kpi-label">合格询盘</div><div class="kpi-value">${ads.qualifiedLeads ?? '—'}</div><div class="kpi-sub">${escHtml(ads.qualifiedStagesLabel ?? '')}</div></div>
+    </div>
+    <div style="margin-top:16px;font-size:13px;font-weight:600;">表现最好的广告组</div>
+    ${entityRowsHtml(ads.topAdSets, '无数据')}
+    <div style="margin-top:12px;font-size:13px;font-weight:600;">表现偏弱的广告组</div>
+    ${entityRowsHtml(ads.bottomAdSets, '无数据')}
+    <div style="margin-top:12px;font-size:13px;font-weight:600;">表现最好的素材</div>
+    ${entityRowsHtml(ads.topCreatives, '无数据')}
+    <div style="margin-top:12px;font-size:13px;font-weight:600;">表现偏弱的素材</div>
+    ${entityRowsHtml(ads.bottomCreatives, '无数据')}
+    <div style="margin-top:12px;font-size:13px;font-weight:600;">本月广告调整</div>
+    <ul style="margin-top:8px;padding-left:18px;">${ledger || '<li>本月无操作记录</li>'}</ul>
+    ${gaps ? `<ul style="font-size:12px;color:#8a5a00;margin-top:12px;">${gaps}</ul>` : ''}
+  </div>`
+}
 
 export function buildExportHtml(report: MonthlyReportData, recommendations: string): string {
   const { overview, geo, competitive } = report
 
   const competitiveRows = competitive
     .map(
-      row => `
+      row => {
+        // Not measured → neutral grey; Measured but absent → red; Ranked ≤3 → green; else ochre
+        const bg = !row.measured
+          ? 'rgba(0,0,0,0.06)'
+          : row.client_rank == null ? 'rgba(194,69,58,0.10)' : row.client_rank <= 3 ? 'rgba(92,138,74,0.12)' : 'rgba(196,145,46,0.10)'
+        const fg = !row.measured
+          ? 'rgba(26,26,26,0.40)'
+          : row.client_rank == null ? '#C2453A' : row.client_rank <= 3 ? '#5C8A4A' : '#C4912E'
+        const label = !row.measured
+          ? '—'
+          : row.client_rank != null ? `#${row.client_rank}` : 'N/M'
+        const competitorsCell = !row.measured
+          ? '<em style="color:rgba(26,26,26,0.35);">Not measured</em>'
+          : (row.competitors.map(c => `#${c.rank} ${escHtml(c.brand)}`).join(' · ') || '—')
+        return `
     <tr>
       <td style="padding:8px 12px; font-size:12px; color:#1A1A1A;">"${escHtml(row.question)}"</td>
       <td style="padding:8px 12px; text-align:center;">
-        <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:12px; background:${row.client_rank == null ? 'rgba(194,69,58,0.10)' : row.client_rank <= 3 ? 'rgba(92,138,74,0.12)' : 'rgba(196,145,46,0.10)'}; color:${row.client_rank == null ? '#C2453A' : row.client_rank <= 3 ? '#5C8A4A' : '#C4912E'};">
-          ${row.client_rank != null ? `#${row.client_rank}` : 'N/M'}
+        <span style="font-size:11px; font-weight:700; padding:2px 8px; border-radius:12px; background:${bg}; color:${fg};">
+          ${label}
         </span>
       </td>
       <td style="padding:8px 12px; font-size:11px; color:rgba(26,26,26,0.60);">
-        ${row.competitors.map(c => `#${c.rank} ${escHtml(c.brand)}`).join(' · ') || '—'}
+        ${competitorsCell}
       </td>
-    </tr>`,
+    </tr>`
+      },
     )
     .join('')
 
@@ -124,6 +179,8 @@ export function buildExportHtml(report: MonthlyReportData, recommendations: stri
       <tbody>${competitiveRows}</tbody>
     </table>
   </div>
+
+  ${adsSectionHtml(report)}
 
   <div class="section">
     <div class="section-title"><span class="badge">4</span> Next Month Recommendations</div>

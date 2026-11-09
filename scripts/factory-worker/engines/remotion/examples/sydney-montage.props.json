@@ -1,0 +1,245 @@
+{
+ "brandColor": "#0B6E99",
+ "logoFile": "logo.png",
+ "musicFile": "track.m4a",
+ "beats": [
+  0.2,
+  0.7,
+  1.2,
+  1.7,
+  2.2,
+  2.7,
+  3.2,
+  3.7,
+  4.2,
+  4.7,
+  5.2,
+  5.7,
+  6.2,
+  6.7,
+  7.2,
+  7.7,
+  8.2,
+  8.7,
+  9.2,
+  9.7,
+  10.2,
+  10.7,
+  11.2,
+  11.7,
+  12.2,
+  12.7,
+  13.2,
+  13.7,
+  14.2,
+  14.7,
+  15.2,
+  15.7,
+  16.2,
+  16.7,
+  17.2,
+  17.7,
+  18.2,
+  18.7,
+  19.2,
+  19.7
+ ],
+ "totalBeats": 32,
+ "fastBars": [
+  3,
+  6
+ ],
+ "placeTerms": [
+  "BEACH",
+  "SYDNEY",
+  "MANLY"
+ ],
+ "words": [
+  {
+   "at": 0,
+   "beats": 1,
+   "text": "3 BED",
+   "bg": "brand",
+   "rot": -3
+  },
+  {
+   "at": 1,
+   "beats": 1,
+   "text": "2 BATH",
+   "bg": "white",
+   "rot": 3
+  },
+  {
+   "at": 2,
+   "beats": 1,
+   "text": "SEA",
+   "bg": "black",
+   "rot": -2,
+   "clipTag": "beach"
+  },
+  {
+   "at": 3,
+   "beats": 1,
+   "text": "VIEWS",
+   "bg": "brand",
+   "rot": 4
+  },
+  {
+   "at": 6,
+   "beats": 2,
+   "text": "OPEN KITCHEN",
+   "bg": "white",
+   "rot": -3,
+   "clipTag": "kitchen"
+  },
+  {
+   "at": 8,
+   "beats": 1,
+   "text": "RESORT",
+   "bg": "black",
+   "rot": 2
+  },
+  {
+   "at": 9,
+   "beats": 1,
+   "text": "POOL",
+   "bg": "brand",
+   "rot": -4
+  },
+  {
+   "at": 10,
+   "beats": 2,
+   "text": "& GYM",
+   "bg": "white",
+   "rot": 3
+  },
+  {
+   "at": 14,
+   "beats": 1,
+   "text": "5 MIN",
+   "bg": "brand",
+   "rot": -2
+  },
+  {
+   "at": 15,
+   "beats": 1,
+   "text": "TO TRAIN",
+   "bg": "black",
+   "rot": 2
+  },
+  {
+   "at": 18,
+   "beats": 2,
+   "text": "A$1.25M",
+   "bg": "brand",
+   "rot": -2
+  },
+  {
+   "at": 20,
+   "beats": 1,
+   "text": "GUIDE",
+   "bg": "white",
+   "rot": 2
+  },
+  {
+   "at": 22,
+   "beats": 2,
+   "text": "OPEN SAT",
+   "bg": "black",
+   "rot": -3
+  },
+  {
+   "at": 24,
+   "beats": 2,
+   "text": "12 OCT",
+   "bg": "brand",
+   "rot": 3
+  },
+  {
+   "at": 26,
+   "beats": 2,
+   "text": "11AM",
+   "bg": "white",
+   "rot": -2
+  },
+  {
+   "at": 28,
+   "beats": 2,
+   "text": "VIEW NOW",
+   "bg": "black",
+   "rot": 2
+  },
+  {
+   "at": 30,
+   "beats": 2,
+   "text": "FICTIONAL",
+   "bg": "white",
+   "rot": -2
+  }
+ ],
+ "clips": [
+  {
+   "file": "clips/hook.mp4",
+   "tag": "beach",
+   "kind": "aerial",
+   "source": "ai",
+   "lenFrames": 300
+  },
+  {
+   "file": "clips/item1.mp4",
+   "tag": "beach",
+   "kind": "aerial",
+   "source": "ai",
+   "lenFrames": 300
+  },
+  {
+   "file": "clips/item2.mp4",
+   "tag": "street-a",
+   "kind": "street",
+   "source": "ai",
+   "lenFrames": 300
+  },
+  {
+   "file": "clips/item3.mp4",
+   "tag": "street-b",
+   "kind": "street",
+   "source": "ai",
+   "lenFrames": 300
+  },
+  {
+   "file": "clips/item4.mp4",
+   "tag": "person-a",
+   "kind": "person",
+   "source": "ai",
+   "lenFrames": 300
+  },
+  {
+   "file": "clips/item5.mp4",
+   "tag": "person-b",
+   "kind": "person",
+   "source": "ai",
+   "lenFrames": 300
+  },
+  {
+   "file": "clips/item6.mp4",
+   "tag": "kitchen",
+   "kind": "detail",
+   "source": "ai",
+   "lenFrames": 300
+  },
+  {
+   "file": "clips/item7.mp4",
+   "tag": "kitchen",
+   "kind": "detail",
+   "source": "ai",
+   "lenFrames": 300
+  },
+  {
+   "file": "clips/price.mp4",
+   "tag": "detail-c",
+   "kind": "detail",
+   "source": "ai",
+   "lenFrames": 300
+  }
+ ]
+}

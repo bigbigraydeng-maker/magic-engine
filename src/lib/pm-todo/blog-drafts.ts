@@ -36,6 +36,8 @@ export interface CmsConnectionRow {
 
 export interface DraftTodo {
   client_id: string
+  /** 这个客户没有能用的网站发布通道 —— 人要做的是去接通，不是审稿。 */
+  channelBroken: boolean
   /** 说人话的一句：写好了、多久没人看、能不能发 */
   what: string
   how: string
@@ -87,6 +89,7 @@ export function buildDraftTodos(
 
     out.push({
       client_id: clientId,
+      channelBroken: !connected,
       what: connected
         ? `有 ${n} 篇写好的文章还没人看过${ageText}：${titles}`
         : `有 ${n} 篇写好的文章没地方发${ageText}：${titles} —— 这个客户的网站发布通道是断的，文章写再多也上不了线`,

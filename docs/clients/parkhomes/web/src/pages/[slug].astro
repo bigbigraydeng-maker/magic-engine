@@ -65,6 +65,34 @@ const serviceSchema = {
         </div>
       </section>
 
+      {p.progress && p.progress.length > 0 && (
+        <section>
+          <div class="wrap">
+            <p class="eyebrow sec-eyebrow">Progress log</p>
+            <h2 class="sec-h">Watching {p.name} take shape</h2>
+            <p class="lead" style="margin-top:12px">A running record of the build, updated as new site photography comes in. Newest first.</p>
+            <ul class="milestones plog">
+              {p.progress.map((u) => (
+                <li>
+                  <p class="yr">{u.date}</p>
+                  <h4>{u.title}</h4>
+                  <p>{u.body}</p>
+                  <div class="plog-grid">
+                    {u.images.map((im) => (
+                      <figure>
+                        <img src={im.src} alt={im.alt} width={im.width} height={im.height} loading="lazy" data-cap={im.caption} />
+                        <figcaption>{im.caption}</figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                </li>
+              ))}
+              <li class="plog-next"><p class="yr">Next</p><h4>More to come</h4><p>This log grows with the build. <a href="#register" class="link-p" style="margin-top:6px">Register to hear about the next update →</a></p></li>
+            </ul>
+          </div>
+        </section>
+      )}
+
       {p.video && (
         <section>
           <div class="wrap">

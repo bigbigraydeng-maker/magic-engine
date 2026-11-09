@@ -7,12 +7,15 @@ import {
   classifyCtsCrmPerson,
   ctsSourceRef,
   parseSheet1Row,
+  CTS_NOTE_COLUMN_SWITCH_ROW,
+  ctsNoteColumnIndex,
   parseCrmManagementRow,
   parseNzDdMmYyyy,
   parseSheetsSerialDate,
   parseSheetDateCell,
   type CrmManagementRow,
   type Sheet1LeadRow,
+  parseMetaLeadId,
 } from '../cts-crm-sheet-sync'
 
 function crmRow(overrides: Partial<CrmManagementRow> = {}): CrmManagementRow {
@@ -30,11 +33,13 @@ function crmRow(overrides: Partial<CrmManagementRow> = {}): CrmManagementRow {
 
 function sheet1Row(overrides: Partial<Sheet1LeadRow> = {}): Sheet1LeadRow {
   return {
+    metaLeadId: null,
     createdTime: '2026-06-14T02:39:49-05:00',
     email: 'jane@example.com',
     fullName: 'Jane Doe',
     phoneRaw: 'p:+6421363598',
-    followUpNotes: null,
+    // 默认带兴趣证据（2026-10-04 起合格线索必须有）；要测「没记录」就显式传 null。
+    followUpNotes: 'very keen, wants to go in March 2027',
     ...overrides,
   }
 }
@@ -98,8 +103,12 @@ describe('classifyCtsCrmPerson — lead path', () => {
     }
   })
 
-  it('falls back to CRM管理 entryDate when there is no Sheet1 match', () => {
-    const result = classifyCtsCrmPerson(crmRow(), null)
+  it('没有 Sheet1 行（读不到员工记录）→ 没有兴趣证据，不当合格线索', () => {
+    expect(classifyCtsCrmPerson(crmRow(), null)).toEqual({ kind: 'excluded', reason: 'no_interest_evidence' })
+  })
+
+  it('falls back to CRM管理 entryDate when the Sheet1 row has no created_time', () => {
+    const result = classifyCtsCrmPerson(crmRow(), sheet1Row({ createdTime: null }))
     expect(result.kind).toBe('qualified_lead')
     if (result.kind === 'qualified_lead') {
       expect(result.occurredAtIsDateOnly).toBe(true)
@@ -111,7 +120,7 @@ describe('classifyCtsCrmPerson — lead path', () => {
   it('still classifies as a qualified lead when entryDate is a Sheets native-date serial number (2026-09 regression)', () => {
     // 实测：2026-09-12 起新增的行，entryDate 读出来是 '46277' 而不是 'DD/MM/YYYY' 文本。
     // 这条曾经会落进下面的"两边都没有可用日期"分支，把当天最新的咨询错判成 excluded。
-    const result = classifyCtsCrmPerson(crmRow({ entryDate: '46277' }), null)
+    const result = classifyCtsCrmPerson(crmRow({ entryDate: '46277' }), sheet1Row({ createdTime: null }))
     expect(result.kind).toBe('qualified_lead')
     if (result.kind === 'qualified_lead') {
       expect(result.occurredAt.startsWith('2026-09-12')).toBe(true)
@@ -255,20 +264,50 @@ describe('ctsSourceRef — idempotency key', () => {
 })
 
 describe('parseSheet1Row / parseCrmManagementRow — real column layout', () => {
-  it('reads Sheet1 columns B/N/O/P/R by index', () => {
+  function sheet1Cells(): string[] {
     const cells = new Array(20).fill('')
     cells[1] = '2026-06-14T02:39:49-05:00' // B created_time
     cells[13] = 'jane@example.com' // N email
     cells[14] = 'Jane Doe' // O full_name
     cells[15] = 'p:+6421363598' // P phone_number
-    cells[17] = 'voice mail' // R 员工跟进记录
-    expect(parseSheet1Row(cells)).toEqual({
+    return cells
+  }
+
+  it('reads Sheet1 columns B/N/O/P by index', () => {
+    const cells = sheet1Cells()
+    cells[17] = 'voice mail' // R 员工跟进记录（505 行及以前）
+    expect(parseSheet1Row(cells, 100)).toEqual({
+      metaLeadId: null,
       createdTime: '2026-06-14T02:39:49-05:00',
       email: 'jane@example.com',
       fullName: 'Jane Doe',
       phoneRaw: 'p:+6421363598',
       followUpNotes: 'voice mail',
     })
+  })
+
+  it('🔴 505 行及以前的跟进记录读 R 列', () => {
+    const cells = sheet1Cells()
+    cells[17] = 'voice mail'
+    cells[18] = '不该读到这个'
+    expect(parseSheet1Row(cells, CTS_NOTE_COLUMN_SWITCH_ROW - 1).followUpNotes).toBe('voice mail')
+  })
+
+  it('🔴 506 行起改读 S 列 —— R 列那时候已经被拿去放 Facebook 链接了', () => {
+    const cells = sheet1Cells()
+    cells[17] = 'https://business.facebook.com/latest/28201068'
+    cells[18] = 'wrong number'
+    expect(parseSheet1Row(cells, CTS_NOTE_COLUMN_SWITCH_ROW).followUpNotes).toBe('wrong number')
+  })
+
+  it('🔴 读错列的后果：506 行之后的「wrong number」会漏判成「没写排除词」', () => {
+    const cells = sheet1Cells()
+    cells[17] = 'https://business.facebook.com/latest/28201068'
+    cells[18] = 'wrong number'
+    // 按旧写法（恒读 R）拿到的是链接 → notesExcludeLead 返回 false，这条脏线索
+    // 会被当成合格线索传给 Meta。按行号取才判得对。
+    expect(notesExcludeLead(cells[17])).toBe(false)
+    expect(notesExcludeLead(parseSheet1Row(cells, 600).followUpNotes)).toBe(true)
   })
 
   it('reads CRM管理 columns A/B/C/D/E/G/H by index', () => {
@@ -289,5 +328,116 @@ describe('parseSheet1Row / parseCrmManagementRow — real column layout', () => 
       stage: '4-已订金',
       stageUpdatedDate: '15/07/2026',
     })
+  })
+})
+
+describe('parseMetaLeadId — Facebook 线索编号（Sheet1 A 列）', () => {
+  it('认 `l:` 开头加 15–17 位纯数字', () => {
+    expect(parseMetaLeadId('l:1687504185706630')).toBe('1687504185706630')
+    expect(parseMetaLeadId(' l:123456789012345 ')).toBe('123456789012345')
+    expect(parseMetaLeadId('l:12345678901234567')).toBe('12345678901234567')
+  })
+
+  it('🔴 格式不对一律 null —— 宁可不带这把匹配键，也不把猜出来的编号发给 Meta', () => {
+    expect(parseMetaLeadId(null)).toBeNull()
+    expect(parseMetaLeadId('')).toBeNull()
+    expect(parseMetaLeadId('f')).toBeNull() // 表头
+    expect(parseMetaLeadId('1687504185706630')).toBeNull() // 缺 `l:` 前缀
+    expect(parseMetaLeadId('l:12345678901234')).toBeNull() // 14 位，太短
+    expect(parseMetaLeadId('l:123456789012345678')).toBeNull() // 18 位，太长
+    expect(parseMetaLeadId('l:16875041857066x0')).toBeNull() // 夹杂字母
+    expect(parseMetaLeadId('ag:120246715959600307')).toBeNull() // 广告编号不是线索编号
+  })
+
+  it('parseSheet1Row 从 A 列读', () => {
+    const cells = new Array(20).fill('')
+    cells[0] = 'l:1687504185706630'
+    cells[1] = '2026-06-14T02:39:49-05:00'
+    cells[13] = 'jane@example.com'
+    expect(parseSheet1Row(cells, 100).metaLeadId).toBe('1687504185706630')
+  })
+})
+
+describe('classifyCtsCrmPerson — 线索编号随分类结果带出去', () => {
+  it('合格线索：带上匹配到的 Sheet1 行的线索编号', () => {
+    const r = classifyCtsCrmPerson(crmRow(), sheet1Row({ metaLeadId: '1687504185706630' }))
+    expect(r.kind).toBe('qualified_lead')
+    if (r.kind === 'qualified_lead') expect(r.metaLeadId).toBe('1687504185706630')
+  })
+
+  it('合格线索：没匹配到 Sheet1 行（只靠 CRM管理 日期兜底）时为 null', () => {
+    const r = classifyCtsCrmPerson(crmRow(), sheet1Row({ createdTime: null, metaLeadId: null }))
+    expect(r.kind).toBe('qualified_lead')
+    if (r.kind === 'qualified_lead') expect(r.metaLeadId).toBeNull()
+  })
+
+  it('成交候选：同样带出线索编号', () => {
+    const r = classifyCtsCrmPerson(
+      crmRow({ stage: '4-已订金', stageUpdatedDate: '01/07/2026' }),
+      sheet1Row({ metaLeadId: '1687504185706630' }),
+    )
+    expect(r.kind).toBe('purchase_candidate')
+    if (r.kind === 'purchase_candidate') expect(r.metaLeadId).toBe('1687504185706630')
+  })
+})
+
+import { qualifyByNotes } from '../cts-crm-sheet-sync'
+
+describe('qualifyByNotes · PM 2026-10-04 口径（松）', () => {
+  it.each([
+    'Spoke to her, very keen, wants deposit invoice',
+    'Great talk. Would like to go in October',
+    'interested in the Best of China tour',
+    'Wants to travel next year',
+    'planning for 2027',
+    '客人很感兴趣，明年想去',
+    'invoice sent, waiting for payment',
+    'looking to book for March',
+    'Tale of Two cities 18 March wife 50th birthday',
+    'best of china 11 march',
+    'follow up best of china in May',
+    'march departure first time traveller',
+    'maybe travel in 2028/2029',
+    'airnz staff will look at 13 May Best of China',
+  ])('合格：%s', (n) => expect(qualifyByNotes(n)).toBe('qualified'))
+
+  it.each([
+    'wrong number',
+    'Not interested, thanks',
+    'already booked with another company',
+    'he is no longer interested',
+    'not very keen, too expensive',
+    "isn't interested in going this year",
+    'please do not contact again',
+  ])('🔴 排除（压倒兴趣词）：%s', (n) => expect(qualifyByNotes(n)).toBe('excluded'))
+
+  it('含糊：既说不感兴趣 2026 又说 2027 想去 → 排除（宁可不发）', () => {
+    expect(qualifyByNotes('not interested in 2026 but keen for 2027')).toBe('excluded')
+  })
+
+  it.each([
+    null,
+    '',
+    '   ',
+    'called, no answer',
+    'voice mail left, will retry tomorrow',
+    'sent brochure',
+    'voice mail 3 Oct',
+    'left text message 12 September',
+    'she may call back',
+    'follow up Best of China itinerary',
+  ])(
+    '没有兴趣证据（%s）→ 不当合格线索发',
+    (n) => expect(qualifyByNotes(n as string | null)).toBe('no_evidence'),
+  )
+
+  it('"may" 只在 "in may" 时当月份，助动词不算', () => {
+    expect(qualifyByNotes('she may call back')).toBe('no_evidence')
+    expect(qualifyByNotes('wants to go in May')).toBe('qualified')
+  })
+
+  it('classify：填了表单但记录里没有兴趣证据 → excluded/no_interest_evidence', () => {
+    const r = classifyCtsCrmPerson(crmRow({}), sheet1Row({ followUpNotes: 'called, no answer' }))
+    expect(r).toEqual({ kind: 'excluded', reason: 'no_interest_evidence' })
   })
 })

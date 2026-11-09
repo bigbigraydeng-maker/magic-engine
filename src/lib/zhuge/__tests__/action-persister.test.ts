@@ -471,7 +471,7 @@ describe('persistZhugeActions()', () => {
       discoveryId: 'discovery-1',
       diagnosticRunId: 'run-1',
       prescriptionId: 'prescription-uuid-7',
-      output: makeZhugeOutput([makeAction('seo', 'seo.fix_titles')]),
+      output: makeZhugeOutput([makeAction('seo', 'seo.publish_blog')]),
     })
 
     const rows = supabase._executionChain.insert.mock.calls[0][0] as Array<{ prescription_id: string | null; source: string }>
@@ -492,7 +492,7 @@ describe('persistZhugeActions()', () => {
       discoveryId: 'discovery-1',
       diagnosticRunId: 'run-1',
       // prescriptionId not provided — backwards-compatible default = null
-      output: makeZhugeOutput([makeAction('seo', 'seo.fix_titles')]),
+      output: makeZhugeOutput([makeAction('seo', 'seo.publish_blog')]),
     })
 
     const rows = supabase._executionChain.insert.mock.calls[0][0] as Array<{ prescription_id: string | null }>
@@ -512,7 +512,7 @@ describe('persistZhugeActions()', () => {
       discoveryId: 'discovery-1',
       diagnosticRunId: 'run-1',
       prescriptionId: null,
-      output: makeZhugeOutput([makeAction('ai_visibility', 'geo.deploy')]),
+      output: makeZhugeOutput([makeAction('ai_visibility', 'geo.deploy_directive')]),
     })
 
     const rows = supabase._executionChain.insert.mock.calls[0][0] as Array<{ prescription_id: string | null }>

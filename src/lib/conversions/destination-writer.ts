@@ -58,6 +58,11 @@ export type OutcomeForSend = {
    */
   pageScopedUserId: string | null
   /**
+   * Facebook 即时表单线索编号（15–17 位纯数字），Meta 官方 `user_data.lead_id`，
+   * 文档标注「不哈希」。有它 Meta 能把这笔成交直接对回那条广告线索；没有就只靠邮箱/电话。
+   */
+  metaLeadId: string | null
+  /**
    * 这笔事实来自哪个渠道，由调用方（intake 层）按 `sourceKind` 决定，
    * `writer.ts` 只做字段拼装，不从 `pageScopedUserId` 是否存在反推——
    * 见 `src/lib/conversions/intake.ts::actionSourceForSourceKind` 的注释。

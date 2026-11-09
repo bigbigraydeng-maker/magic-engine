@@ -14,6 +14,8 @@
 
 import { GithubClient } from '@/lib/cms/github-client'
 import { getConnection } from '@/lib/cms/connection-store'
+import type { PageWriteGuard } from '@/lib/seo/protected-pages'
+import { systemPageGuard } from '@/lib/seo/system-page-guard'
 
 export interface GithubConnectionResolution {
   readonly repoOwner: string
@@ -28,6 +30,11 @@ export interface PageApplyOptimizationDeps {
   readonly resolveGithubConnection: (clientId: string) => Promise<GithubConnectionResolution | null>
   /** 用 PAT 造一个 GitHub 客户端。测试注入假的。 */
   readonly createGithubClient: (token: string) => GithubClient
+  /**
+   * Protected-page gate for this client. The capability runs inside the Kernel with no logged-in human, so the
+   * implementation must use the SYSTEM actor: a protected page is refused here, with no override.
+   */
+  readonly createPageGuard: (clientId: string) => PageWriteGuard
 }
 
 export function defaultDeps(): PageApplyOptimizationDeps {
@@ -44,5 +51,6 @@ export function defaultDeps(): PageApplyOptimizationDeps {
       }
     },
     createGithubClient: (token) => new GithubClient(token),
+    createPageGuard: (clientId) => systemPageGuard(clientId, 'page-apply-optimization'),
   }
 }

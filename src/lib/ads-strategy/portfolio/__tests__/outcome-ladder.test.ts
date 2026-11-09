@@ -20,9 +20,9 @@ function row(adsetId: string, date: string): InsightForOutcome {
 
 describe('countOutcome', () => {
   it('NAL 物流私信留资组某天：留资、私信开聊都是平台直报', () => {
-    const day = (nalAdsetDaily as Raw[]).find(x => x.adset_id === '52589967398925' && (x.actions ?? []).some(a => a.action_type === 'lead'))
+    const day = (nalAdsetDaily as Raw[]).find(x => x.adset_id === '52886694875449' && (x.actions ?? []).some(a => a.action_type === 'lead'))
     expect(day).toBeDefined()
-    const r = row('52589967398925', day!.date_start)
+    const r = row('52886694875449', day!.date_start)
     const lead = countOutcome('lead', r)
     expect(lead.attribution).toBe('platform_reported')
     expect(lead.value).toBeGreaterThan(0)
@@ -30,13 +30,13 @@ describe('countOutcome', () => {
   })
 
   it('ThruPlay 组：完播取视频字段；没有留资动作 → 0（平台直报的 0，不是 UNKNOWN）', () => {
-    const r = row('52596939123725', '2026-09-13')
+    const r = row('52104815523595', '2026-09-13')
     expect(countOutcome('video_complete', r)).toEqual({ step: 'video_complete', value: 723, attribution: 'platform_reported' })
     expect(countOutcome('lead', r)).toEqual({ step: 'lead', value: 0, attribution: 'platform_reported' })
   })
 
   it('🔴 M2 合格询盘 / 成交：归不到广告单位 → UNKNOWN（null），不算 0、不算自然流量', () => {
-    const r = row('52589967398925', '2026-09-13')
+    const r = row('52886694875449', '2026-09-13')
     for (const step of ['qualified_enquiry', 'deal'] as const) {
       const c = countOutcome(step, r)
       expect(c.value).toBeNull()

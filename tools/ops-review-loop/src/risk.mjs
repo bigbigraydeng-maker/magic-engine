@@ -34,6 +34,8 @@
  * exercises it offline.
  */
 
+import { isFileReadFailure } from './ray-file-read.mjs'
+
 /** Severity order, lowest first. Index position is the comparison key. */
 export const RISK_ORDER = ['C', 'B', 'A']
 
@@ -76,6 +78,10 @@ export const RISK_CATEGORY = {
   NETWORK_BOUNDARY: 'network-boundary',
   CREDENTIALS: 'credentials',
   SUPPLY_CHAIN: 'supply-chain',
+  /** Rules for how people and agents use the machine — not code, but the machine's rulebook. */
+  GOVERNANCE: 'governance',
+  /** How the app is built and what the production runtime actually runs. */
+  BUILD_RUNTIME: 'build-runtime',
   /** Not a kind of change — a kind of ignorance. The diff could not be read. */
   UNREADABLE: 'unreadable',
 }
@@ -95,6 +101,10 @@ export const RISK_CATEGORY = {
  *   `basenameIncludes` — substring of the final path segment
  *   `basenameWord`     — the final segment contains this as a whole word
  *                        (so `rls` matches `rls-policy.ts` but not `urls.ts`)
+ *   `basename`         — the final segment equals (any directory)
+ *   `pattern`          — RegExp tested against the whole path; used only where
+ *                        a family of names (`tsconfig*.json`, `.env*`) cannot
+ *                        be written as one of the plain kinds above
  */
 export const A_RISK_RULES = [
   // --- Database structure and production data shape -----------------------
@@ -107,8 +117,62 @@ export const A_RISK_RULES = [
   { prefix: 'tools/ai-orchestrator/', why: '编排控制面', category: RISK_CATEGORY.CONTROL_PLANE },
   { exact: 'render.yaml', why: '生产服务与 cron 调度', category: RISK_CATEGORY.PRODUCTION_SCHEDULE },
 
+  // --- Config that changes what the checks themselves do ------------------
+  // 🔴 Verified 2026-09-27 on main 33672dbe: every one of these rated B, and B
+  // auto-merges with no human since 2026-09-25. One line in any of them turns
+  // a check off (strict mode, a lint rule, which tests run, the pre-commit
+  // hook) while every check still reports green.
+  { pattern: /(^|\/)tsconfig[^/]*\.json$/, why: 'TypeScript 检查配置 —— 一行就能关掉严格检查', category: RISK_CATEGORY.CONTROL_PLANE },
+  // `workspace` / `projects`: vitest 3 reads both from the root on its own and
+  // they can swap which tests run and what runs first (狄仁杰 DR71-1, #2071).
+  { pattern: /(^|\/)vitest\.(config|setup|workspace|projects)\.[^/]+$/, why: '测试运行配置 —— 决定哪些测试跑、怎么跑', category: RISK_CATEGORY.CONTROL_PLANE },
+  { pattern: /(^|\/)playwright\.config\.[^/]+$/, why: '端到端测试配置 —— 决定哪些页面测试跑', category: RISK_CATEGORY.CONTROL_PLANE },
+  // Not in the repo today; adding one would hand a second runner the tests.
+  { pattern: /(^|\/)jest\.config\.[^/]+$/, why: 'jest 测试配置 —— 新加一个就换了跑测试的方式', category: RISK_CATEGORY.CONTROL_PLANE },
+  { pattern: /(^|\/)(eslint\.config\.[^/]+|\.eslintrc[^/]*)$/, why: 'lint 规则配置 —— 一行就能关掉规则', category: RISK_CATEGORY.CONTROL_PLANE },
+  { prefix: '.husky/', why: '提交前自动检查钩子', category: RISK_CATEGORY.CONTROL_PLANE },
+  // The db-security-invariants red-line scripts: a B PR turning either into
+  // `exit 0` would switch off "RLS must say TO service_role" unattended
+  // (DR71-4, #2071). `scripts/db-invariants.sql` is already A via `.sql`.
+  { exact: 'scripts/check-policy-to-clause.mjs', why: 'RLS 红线检查脚本 —— 改成直接放行就关掉「策略必须写 TO service_role」', category: RISK_CATEGORY.CONTROL_PLANE },
+  { exact: 'scripts/db-replay-and-verify.sh', why: '数据库红线回放检查脚本 —— 改成直接放行就关掉整套数据库安全检查', category: RISK_CATEGORY.CONTROL_PLANE },
+
+  // --- Build and production runtime --------------------------------------
+  // Same finding: these decide what production builds and runs, and rated B.
+  { pattern: /(^|\/)next\.config\.[^/]+$/, why: 'Next.js 构建与运行配置 —— 响应头、重定向、构建时跳过哪些检查', category: RISK_CATEGORY.BUILD_RUNTIME },
+  { pattern: /^(src\/)?instrumentation[^/]*\.[cm]?[jt]s$/, why: 'Next.js 启动钩子 —— 服务一启动就执行的代码', category: RISK_CATEGORY.BUILD_RUNTIME },
+  { pattern: /(^|\/)Dockerfile[^/]*$/, why: '容器镜像定义 —— 生产 worker 实际跑什么', category: RISK_CATEGORY.BUILD_RUNTIME },
+  { exact: 'supabase/config.toml', why: 'Supabase 项目配置 —— 鉴权与函数设置', category: RISK_CATEGORY.BUILD_RUNTIME },
+  { basename: '.nvmrc', why: 'Node 版本锁定 —— 构建与运行用哪个 Node', category: RISK_CATEGORY.BUILD_RUNTIME },
+  // Render reads `.node-version` ahead of `.nvmrc`; asdf/mise read `.tool-versions`.
+  { basename: '.node-version', why: 'Node 版本锁定（Render 优先读这个）', category: RISK_CATEGORY.BUILD_RUNTIME },
+  { basename: '.tool-versions', why: '运行时版本锁定（asdf / mise）', category: RISK_CATEGORY.BUILD_RUNTIME },
+  // Executed as code during `next build`, where production env vars are
+  // present (构建控制 2026-09-27). Babel / SWC config do not exist here; adding
+  // one silently swaps the compiler for every file.
+  { pattern: /(^|\/)((postcss|tailwind)\.config\.[^/]+|\.postcssrc[^/]*)$/, why: '构建时执行的样式配置 —— 生产构建里跑的代码', category: RISK_CATEGORY.BUILD_RUNTIME },
+  { pattern: /(^|\/)(\.babelrc[^/]*|babel\.config\.[^/]+|\.swcrc)$/, why: '编译器配置 —— 新加一个就换了整站的编译方式', category: RISK_CATEGORY.BUILD_RUNTIME },
+
+  // --- Governance: the rulebook the machine and its operators follow ------
+  // 🔴 子牙 design review 2026-09-25: `C_SAFE_RULES` rates every `.md` as C, so
+  // once B/C PRs auto-merge, a PR that only rewrites CLAUDE.md (merge rules,
+  // client-data red lines) or the merge-authorization doc would land with zero
+  // human eyes on it. The machine's behaviour is set by code; these files set
+  // how people and agents are allowed to use the machine. Editing the rulebook
+  // unreviewed is the same hole as editing the gate unreviewed.
+  { exact: 'CLAUDE.md', why: '仓库总规则 —— 合并规则、客户数据红线', category: RISK_CATEGORY.GOVERNANCE },
+  { exact: 'AGENTS.md', why: 'agent 入口规则', category: RISK_CATEGORY.GOVERNANCE },
+  { prefix: '.github/', why: 'GitHub 配置与合并规则文档（workflows 之外的部分）', category: RISK_CATEGORY.GOVERNANCE },
+  { prefix: '.claude/', why: 'agent 规则、skill 与层级门定义', category: RISK_CATEGORY.GOVERNANCE },
+  { exact: 'docs/ENGINEERING_QUALITY_GATES.md', why: '风险定级与质量闸的规则书', category: RISK_CATEGORY.GOVERNANCE },
+  { exact: 'docs/ledger/README.md', why: '台账规则 —— 门卫怎么拦、夜巡怎么翻', category: RISK_CATEGORY.GOVERNANCE },
+  { prefix: 'scripts/ledger-', why: '台账检查与更新脚本', category: RISK_CATEGORY.GOVERNANCE },
+  { prefix: 'src/lib/ledger/', why: '台账解析与校验逻辑 —— 改了等于改门卫的判断标准', category: RISK_CATEGORY.GOVERNANCE },
+  { pattern: /^docs\/playbooks(?:$|\/(?![^/]+\/inbox\.md$))/i, why: '经验手册正文 —— 所有窗口的必读规则书（inbox.md 除外，判 B/C）', category: RISK_CATEGORY.GOVERNANCE },
+
   // --- Auth, permissions, tenant isolation --------------------------------
   { exact: 'src/middleware.ts', why: '请求级鉴权与路由边界', category: RISK_CATEGORY.AUTH_ISOLATION },
+  { pattern: /^(src\/)?middleware\.[cm]?[jt]sx?$/, why: 'middleware 其他写法（根目录 / .js 等）—— 请求级鉴权与路由边界', category: RISK_CATEGORY.AUTH_ISOLATION },
   { prefix: 'src/lib/auth/', why: '鉴权与客户访问边界', category: RISK_CATEGORY.AUTH_ISOLATION },
   { prefix: 'src/app/api/auth/', why: '鉴权端点', category: RISK_CATEGORY.AUTH_ISOLATION },
   { prefix: 'src/app/api/webhooks/', why: '外部入站 webhook —— 签名校验即安全边界', category: RISK_CATEGORY.AUTH_ISOLATION },
@@ -119,6 +183,7 @@ export const A_RISK_RULES = [
   { prefix: 'src/lib/kernel/', why: 'Kernel —— 执行授权、审批、幂等、状态机', category: RISK_CATEGORY.KERNEL_EXECUTION },
   { prefix: 'src/app/api/kernel/', why: 'Kernel 端点', category: RISK_CATEGORY.KERNEL_EXECUTION },
   { prefix: 'src/lib/execution/', why: '自动执行策略与背书 —— 决定系统自己会做什么', category: RISK_CATEGORY.KERNEL_EXECUTION },
+  { prefix: 'tools/local-executor-bridge/', why: '签名本地执行器 —— 决定本机能被远程叫去执行什么', category: RISK_CATEGORY.KERNEL_EXECUTION },
 
   // --- Money -------------------------------------------------------------
   { prefix: 'src/lib/billing/', why: '计费与用量', category: RISK_CATEGORY.MONEY },
@@ -132,19 +197,49 @@ export const A_RISK_RULES = [
   // --- Outward, hard-to-retract side effects ------------------------------
   { basenameIncludes: 'publisher', why: '对外发布 —— 发出去就撤不回来', category: RISK_CATEGORY.OUTWARD_WRITE },
   { prefix: 'src/lib/email/', why: '对外发信', category: RISK_CATEGORY.OUTWARD_WRITE },
+  // --- Triggered sends (P2): the gate, the authorization and the provider callbacks. Without these four rules the
+  // whole directory rated B and would auto-merge, even a change that turns signature checking into a pass-through.
+  { prefix: 'src/lib/messaging/', why: '触发型发送与供应商回执 —— 授权、发送关口、验签与入库，松了就会多发或漏拦', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { prefix: 'src/app/api/u/', why: '联系人级一键退订入口（公共入口）—— 令牌校验即安全边界', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { pattern: /^src\/app\/api\/clients\/[^/]+\/triggered-send\//, why: '触发型发送的授权 / 撤销入口 —— 只能 PM 本人写，权限判断即安全边界', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'src/lib/platform/live-switch.ts', why: '真发武装开关 —— 严格等于 true 的判断，松了就会误武装', category: RISK_CATEGORY.OUTWARD_WRITE },
+  // Prefix, not a file-name pattern: a function file renamed or moved into a triggered-send/ subdirectory must stay A.
+  { prefix: 'src/lib/inngest/functions/triggered-send', why: '触发型发送的扫描与回执函数 —— 决定谁收到信、状态怎么走', category: RISK_CATEGORY.OUTWARD_WRITE },
+  // The events that wake those functions: `dry_run` defaulting to true for a hand-sent event is a safety rule, so the file must not rate B.
+  { prefix: 'src/lib/inngest/triggered-send', why: '触发型发送的事件定义与解析 —— 手动事件缺省只演练，这条判断松了手动事件就可能真跑', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { prefix: 'src/lib/crm/email-templates/gates/', why: '销售手发邮件的频次 / 内容关口 —— 关口松了会多发', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { pattern: /^src\/lib\/crm\/email-templates\/(frequency-sources-prod|send-gates|send-gates-prod)\.ts$/, why: '销售手发邮件的频次来源与关口装配 —— 来源读不到按 0 就等于关掉频次闸', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { pattern: /^src\/lib\/crm\/(dnc|manual-send-dnc-gate|automated-touch)\.ts$/, why: '别再联系判据与机器信标记 —— 决定谁会被发信、什么算人工联系', category: RISK_CATEGORY.OUTWARD_WRITE },
   { basenameIncludes: 'guardrail', why: '花费 / 发布安全闸 —— 它松了别的全松', category: RISK_CATEGORY.OUTWARD_WRITE },
+  // --- Music vocal gate: the registry IS the gate; a hand-written signature would otherwise pass as B ---
+  { pattern: /^scripts\/factory-worker\/.*music[-_]?vocal[^/]*$/i, why: '音乐人声闸：登记表 music-vocals.json、闸模块、回填工具及其测试 —— 登记表就是闸本身，签字格式可被手写伪造，只能靠人审', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'scripts/factory-worker/remotion-branch.mjs', why: '出片机 Remotion 分支：人声闸接线点，删掉接线 = 含人声音乐直接出片', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'scripts/factory-worker/worker.mjs', why: '出片机主程序：旧版/recipe 路径的人声闸接线点', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'scripts/factory-worker/creative-recipe.mjs', why: '出片机 recipe 路径：BGM 解析，人声闸依赖它选出的文件', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'scripts/factory-worker/remotion-branch.test.mjs', why: '出片机 Remotion 分支测试：删掉「没有人声闸就拒绝出片」的断言 = 闸静默失效', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'scripts/factory-worker/worker.recipe-sequence.test.mjs', why: '出片机 recipe 分支测试：含「未注入人声闸就拒绝出片」的断言', category: RISK_CATEGORY.OUTWARD_WRITE },
   { basenameIncludes: 'ssrf', why: 'SSRF 出网边界', category: RISK_CATEGORY.NETWORK_BOUNDARY },
 
   // --- Credentials --------------------------------------------------------
   { suffix: '.env', why: '凭证文件', category: RISK_CATEGORY.CREDENTIALS },
-  { includes: '/.env.', why: '凭证文件（带后缀变体）', category: RISK_CATEGORY.CREDENTIALS },
+  // 🔴 Replaces `includes: '/.env.'`, which needed a leading slash and so let
+  // root `.env.production` / `.env.local` rate B. Any path segment starting
+  // with `.env`, at any depth. The single exemption is the committed root
+  // template `.env.example`, which rated B before this rule and still does;
+  // nested `*/.env.example` stays A exactly as it was — nothing drops a level.
+  { pattern: /^(?!\.env\.example$)(.*\/)?\.env/i, why: '凭证文件（.env 及各种后缀变体；只放过根目录模板 .env.example）', category: RISK_CATEGORY.CREDENTIALS },
+  { basename: '.gitignore', why: '忽略清单 —— 删一行就能把 .env.local 这类密钥文件放进仓库', category: RISK_CATEGORY.CREDENTIALS },
+  { basename: '.dockerignore', why: '镜像忽略清单 —— 删一行就能把 .env 打进容器镜像', category: RISK_CATEGORY.CREDENTIALS },
   // `cred` rather than `credential`: this repo names them `creds-loader.ts`.
   // It also catches `credit-*`, which is money and belongs at A anyway.
   { basenameIncludes: 'cred', why: '凭证装载 / 额度', category: RISK_CATEGORY.CREDENTIALS },
 
   // --- Supply chain (CLAUDE.md §4 counts a new dependency as a big task) ---
-  { exact: 'package.json', why: '依赖清单 —— 引入新依赖即供应链面', category: RISK_CATEGORY.SUPPLY_CHAIN },
-  { exact: 'package-lock.json', why: '依赖锁 —— 引入新依赖即供应链面', category: RISK_CATEGORY.SUPPLY_CHAIN },
+  // Any directory: `scripts/factory-worker/` installs its own dependencies too.
+  { basename: 'package.json', why: '依赖清单 —— 引入新依赖即供应链面', category: RISK_CATEGORY.SUPPLY_CHAIN },
+  { basename: 'package-lock.json', why: '依赖锁 —— 引入新依赖即供应链面', category: RISK_CATEGORY.SUPPLY_CHAIN },
+  { pattern: /(^|\/)(npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml)$/, why: '其他依赖锁 —— 引入新依赖即供应链面', category: RISK_CATEGORY.SUPPLY_CHAIN },
+  { basename: '.npmrc', why: 'npm 安装配置 —— 能换依赖下载源、能放凭证', category: RISK_CATEGORY.SUPPLY_CHAIN },
 ]
 
 /**
@@ -174,16 +269,38 @@ export const C_SAFE_RULES = [
 ]
 
 /**
- * @param {{exact?: string, prefix?: string, suffix?: string, includes?: string, basenameIncludes?: string, basenameWord?: string}} rule
+ * @param {{exact?: string, prefix?: string, suffix?: string, includes?: string, basenameIncludes?: string, basenameWord?: string, basename?: string, pattern?: RegExp}} rule
  * @param {string} path
+ * @param {boolean} [caseInsensitive] — when true, string comparisons use
+ *   lowercased values and pattern rules gain the `i` flag. Used for A rules
+ *   only, so a case-variant path like `claude.md` cannot evade `CLAUDE.md` on
+ *   a macOS checkout where `core.ignorecase=true`.
  */
-function ruleMatches(rule, path) {
-  const basename = path.slice(path.lastIndexOf('/') + 1)
-  if (rule.exact !== undefined) return path === rule.exact
-  if (rule.prefix !== undefined) return path.startsWith(rule.prefix)
-  if (rule.suffix !== undefined) return path.endsWith(rule.suffix)
-  if (rule.includes !== undefined) return path.includes(rule.includes)
+function ruleMatches(rule, path, caseInsensitive = false) {
+  const p = caseInsensitive ? path.toLowerCase() : path
+  const basename = p.slice(p.lastIndexOf('/') + 1)
+  if (rule.exact !== undefined) {
+    return caseInsensitive ? p === rule.exact.toLowerCase() : p === rule.exact
+  }
+  if (rule.prefix !== undefined) {
+    return caseInsensitive ? p.startsWith(rule.prefix.toLowerCase()) : p.startsWith(rule.prefix)
+  }
+  if (rule.suffix !== undefined) {
+    return caseInsensitive ? p.endsWith(rule.suffix.toLowerCase()) : p.endsWith(rule.suffix)
+  }
+  if (rule.includes !== undefined) {
+    return caseInsensitive ? p.includes(rule.includes.toLowerCase()) : p.includes(rule.includes)
+  }
   if (rule.basenameIncludes !== undefined) return basename.toLowerCase().includes(rule.basenameIncludes)
+  if (rule.basename !== undefined) {
+    return caseInsensitive ? basename === rule.basename.toLowerCase() : basename === rule.basename
+  }
+  if (rule.pattern !== undefined) {
+    if (caseInsensitive && !rule.pattern.flags.includes('i')) {
+      return new RegExp(rule.pattern.source, rule.pattern.flags + 'i').test(path)
+    }
+    return rule.pattern.test(path)
+  }
   if (rule.basenameWord !== undefined) {
     return new RegExp(`(^|[^a-z0-9])${rule.basenameWord}([^a-z0-9]|$)`, 'i').test(basename)
   }
@@ -197,7 +314,7 @@ function ruleMatches(rule, path) {
  * @returns {{risk: 'A'|'B'|'C', why: string, category: string|null}}
  */
 export function classifyFile(path) {
-  const aRule = A_RISK_RULES.find((rule) => ruleMatches(rule, path))
+  const aRule = A_RISK_RULES.find((rule) => ruleMatches(rule, path, true))
   if (aRule) return { risk: 'A', why: aRule.why, category: aRule.category }
 
   const cRule = C_SAFE_RULES.find((rule) => ruleMatches(rule, path))
@@ -252,26 +369,331 @@ function pathsForEntry(entry) {
 }
 
 /**
- * Read the level the PR author declared, if any. Accepted only as a floor —
- * see `classifyRisk`. Matches the shape the quality-gate template asks for
- * ("风险级别：A"), plus the plain English equivalent.
+ * Paths that must never arm auto-merge, whatever the risk rating.
  *
- * A body declaring more than one distinct level is ambiguous, and ambiguity in
- * this direction is a way to smuggle a downgrade past a reader, so it resolves
- * to A rather than to whichever appeared first.
+ * Ray merges these by hand: database schema / migrations, Meta tokens or
+ * credentials, and code that creates or changes a Meta campaign, budget, or
+ * bid. A path that only mentions a budget in a read-only or non-Meta file is
+ * not on this list. Unreadable input fails closed.
+ */
+export const RAY_MERGE_HOLD_RULES = [
+  { prefix: 'supabase/migrations/', why: '数据库 migration' },
+  { suffix: '.sql', why: 'SQL，路径分不清是不是库表语句' },
+  { includes: '/migrations/', why: 'migration 目录' },
+  { basenameIncludes: 'migration', why: '文件名像 migration' },
+  { pattern: /(^|\/)meta\/.*token/i, why: 'Meta token' },
+  { pattern: /(^|\/)meta\/.*cred/i, why: 'Meta 凭证' },
+  { pattern: /(^|\/)meta\/.*secret/i, why: 'Meta 密钥' },
+  { includes: 'system-user', why: 'system user token' },
+  { includes: 'system_user', why: 'system user token' },
+  { pattern: /(^|\/)\.env/i, why: '密钥文件' },
+  { includes: 'src/lib/meta/campaign-writes', why: '改 Meta 广告系列预算或状态' },
+  { includes: 'src/lib/meta/campaign-management', why: '改 Meta 广告系列预算或状态' },
+  { includes: 'src/lib/meta/ad-publisher', why: '创建或改 Meta 广告' },
+  { includes: 'src/lib/meta/ads-manager', why: '创建或暂停 Meta 广告' },
+  { includes: 'src/lib/meta/adsets', why: '改 Meta 广告组预算' },
+  { includes: '/meta-ads/', why: 'Meta 广告写入入口' },
+  { includes: '/capabilities/ads/', why: '改广告系列或预算' },
+  { includes: 'ads-campaign-budget', why: '改广告系列预算' },
+  { includes: 'budget-scale', why: '加减广告预算' },
+  { pattern: /(^|\/)meta\/.*bid/i, why: '改 Meta 出价' },
+  { includes: 'ad-health/', why: '广告健康度里的预算或止损入口' },
+  { includes: 'action-submission/', why: '把广告动作交给执行' },
+  { includes: 'ads-strategy/', why: '广告策略草稿或止损' },
+  { includes: 'marketing-plan/promo/', why: '推广方案里的广告草稿' },
+  { includes: 'meta-oauth/', why: 'Meta 登录和凭证' },
+  { includes: 'meta/entity-settings', why: 'Meta 广告实体设置' },
+]
+
+/** Import specifiers that write a Meta campaign, budget, or bid. */
+const SPEND_IMPORT = /(?:^|\/)(?:campaign-writes|campaign-management|ad-publisher|adsets)(?:\.js)?$/
+
+/**
+ * True when the file imports a module that creates or changes Meta spend.
+ *
+ * @param {unknown} source
+ * @returns {boolean}
+ */
+export function importsMetaSpendWriter(source) {
+  if (typeof source !== 'string' || source === '') return false
+  for (const match of source.matchAll(/(?:from|import|require)\s*\(?\s*['"]([^'"]+)['"]/g)) {
+    if (SPEND_IMPORT.test(match[1])) return true
+  }
+  return false
+}
+
+/**
+ * Added and removed lines of a unified diff, without the leading `+` or `-`.
+ * `null` means there is no diff to read. Context lines are not changes.
+ * GitHub's files API usually sends hunks only; `--- a/` / `+++ b/` headers
+ * are skipped when a full diff is passed in.
+ *
+ * @param {unknown} patch
+ * @returns {string|null}
+ */
+function patchChangedText(patch) {
+  if (typeof patch !== 'string' || patch === '') return null
+  const lines = []
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('+++ ') || line.startsWith('--- ')) continue
+    if (line.startsWith('+') || line.startsWith('-')) lines.push(line.slice(1))
+  }
+  return lines.join('\n')
+}
+
+/** Access-check modules. A quoted path must sit under an `auth/` segment. */
+const AUTH_BOUNDARY_MODULE =
+  /(?:^|\/)auth\/(?:require-session|client-access|require-admin|api-key-access|whitelist|paid-only-handler)(?:\.js)?$/
+
+/** Calls that decide who is logged in, who may act, or which client's data is visible. */
+const AUTH_BOUNDARY_CALL =
+  /\b(?:requireSession|requireDashboardClientAccess|requireOnboardingClientAccess|requirePaidClientAccess|requireOperatorAccess|requirePlanApproverAccess|requireAdmin|guardAdmin|guardGlobalAdmin|requireGlobalAdmin|requireAdminScope|scopeAllowsClient|verifyApiKey|requireMeClientId|requireAdminContext|getUserPermissions|isAllowedEmail|isGlobalAdminEmail|withPaidOnlyTrap|isPaidOnly)\s*\(/
+
+/**
+ * True when added or removed lines touch a login, permission, or client-access check.
+ * The whole file is not scanned: a route that already had a check stays at its
+ * path rating when this diff does not change that check.
+ *
+ * @param {unknown} patch
+ * @returns {boolean}
+ */
+export function diffTouchesAuthBoundary(patch) {
+  const changed = patchChangedText(patch)
+  if (!changed) return false
+  if (AUTH_BOUNDARY_CALL.test(changed)) return true
+  for (const match of changed.matchAll(/['"]([^'"]+)['"]/g)) {
+    if (AUTH_BOUNDARY_MODULE.test(match[1])) return true
+  }
+  return false
+}
+
+/**
+ * @param {string} path
+ * @returns {boolean}
+ */
+function isSourcePath(path) {
+  return /\.(?:ts|tsx|js|mjs|cjs)$/i.test(path)
+}
+
+/**
+ * Spend-import hold for one source path. A string is the whole file. A read
+ * failure stays for Ray. `null` is too big or a confirmed deletion, so the diff is used.
+ *
+ * @param {string} path
+ * @param {Record<string, unknown>} entry
+ * @param {Record<string, string|null|object>} knownContents
+ * @returns {string|null}
+ */
+function spendHoldForSource(path, entry, knownContents) {
+  if (!isSourcePath(path)) return null
+  const text = knownContents[path]
+  if (typeof text === 'string') {
+    return importsMetaSpendWriter(text) ? `${path}（导入了 Meta 广告写入模块）` : null
+  }
+  if (isFileReadFailure(text)) return `${path}（文件读取失败，分不清是否导入了 Meta 广告写入模块）`
+  const changed = patchChangedText(entry.patch)
+  if (changed === null) {
+    return `${path}（读不到文件，diff 也没有，分不清是否碰到库表、Meta 凭证或广告花费）`
+  }
+  if (importsMetaSpendWriter(changed)) return `${path}（diff 导入了 Meta 广告写入模块）`
+  return null
+}
+
+/**
+ * Whether this diff must stay for Ray to merge by hand.
+ *
+ * @param {unknown} files changed-file entries, the same shape `classifyRisk` reads
+ * @param {Record<string, string|null|object>|null} [contents] whole-file text, `null` when only the diff can be judged, or a read-failure marker that still holds.
+ * @returns {{hold: boolean, reason: string}}
+ */
+export function assessRayMergeHold(files, contents) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return { hold: true, reason: '改动清单读不到，库表、凭证和广告花费分不清，留给 Ray 亲手合' }
+  }
+  const knownContents = contents && typeof contents === 'object' ? contents : null
+  /** @type {string[]} */
+  const hits = []
+  for (const entry of files) {
+    if (!entry || typeof entry !== 'object') {
+      return { hold: true, reason: '改动清单读不全，留给 Ray 亲手合' }
+    }
+    const record = /** @type {Record<string, unknown>} */ (entry)
+    const { paths, unreadable } = pathsForEntry(record)
+    if (unreadable) return { hold: true, reason: '改动清单读不全，留给 Ray 亲手合' }
+    for (const path of paths) {
+      const rule = RAY_MERGE_HOLD_RULES.find((candidate) => ruleMatches(candidate, path, true))
+      if (rule) {
+        hits.push(`${path}（${rule.why}）`)
+        continue
+      }
+      if (!knownContents) continue
+      const spend = spendHoldForSource(path, record, knownContents)
+      if (spend) hits.push(spend)
+    }
+  }
+  if (hits.length === 0) return { hold: false, reason: '' }
+  return { hold: true, reason: hits.slice(0, 8).join('；') }
+}
+
+function entryName(entry) {
+  const filename = entry && typeof entry === 'object' ? /** @type {{filename?: unknown}} */ (entry).filename : ''
+  return typeof filename === 'string' && filename !== '' ? filename : '未命名文件'
+}
+
+/** True when GitHub reported real edits but did not include the patch. A pure rename has no line count. */
+function sourceDiffUnreadable(entry) {
+  if (!entry || typeof entry !== 'object') return false
+  const row = /** @type {{patch?: unknown, changes?: unknown, additions?: unknown, deletions?: unknown}} */ (entry)
+  if (typeof row.patch === 'string' && row.patch !== '') return false
+  return [row.changes, row.additions, row.deletions].some((value) => Number.isFinite(Number(value)) && Number(value) > 0)
+}
+
+/** Auth-edit reason. A path that is already A is unchanged. An omitted source patch is A too. */
+function authDiffReason(entry, pathRatings) {
+  if (pathRatings.some((rated) => rated.risk === 'A')) return null
+  if (!pathRatings.some((rated) => isSourcePath(rated.path))) return null
+  const patch = entry && typeof entry === 'object' ? /** @type {{patch?: unknown}} */ (entry).patch : undefined
+  if (diffTouchesAuthBoundary(patch)) return `${entryName(entry)} —— A 级（改动行碰到鉴权或客户访问校验）`
+  if (sourceDiffUnreadable(entry)) return `${entryName(entry)} —— A 级（diff 读不到，没法判断是否改了鉴权）`
+  return null
+}
+
+/**
+ * Labels that introduce a declared level.
+ *
+ * `STRONG` is this repo's own convention: a line that opens with one of them
+ * is a declaration, so a value that cannot be read means "declared,
+ * unreadable" → A, not silence. `WEAK` labels (风险分级, 风险, risk) are
+ * common in prose, so they count only when an upper-case A/B/C standing on
+ * its own follows them — otherwise they are ignored (子牙 #2121 round 1).
+ */
+const STRONG_LABEL = '风险级别|风险等级|风险级|[Rr][Ii][Ss][Kk]\\s*[Ll][Ee][Vv][Ee][Ll]'
+const WEAK_LABEL = '风险分级|风险|[Rr][Ii][Ss][Kk]'
+
+/**
+ * Anything an author puts between label and level: 为 / 是 / is / = / - / → /
+ * brackets / colons / pipes / spaces, in any combination (W121-1). A single
+ * starred group whose branches cannot overlap — never `\s*…?\s*`, which
+ * backtracks quadratically on long runs of blanks (DR121-3).
+ */
+const JOIN = '(?:[\\s:：|=为是\\-→（(]|is(?=\\s))*'
+
+/**
+ * An upper-case level letter, optional 级, then anything but a letter, digit
+ * or `/` (DR121-2: "A/B/C" is a list; `A、` and `A）` are levels). Upper case
+ * only (DR121-5): "Risk: a stale cache" is prose. A strong label followed by a
+ * lower-case letter is still caught — as unreadable, which also rates A.
+ */
+const LEVEL = '([ABC])(?:\\s?级)?(?![A-Za-z0-9/])'
+
+/** Label → join → level anywhere in a line; `[^A-Za-z]` keeps `asterisk` from reading as `risk`. */
+const STRONG_INLINE_RE = new RegExp(`(?:^|[^A-Za-z])(?:${STRONG_LABEL})${JOIN}${LEVEL}`, 'g')
+const WEAK_INLINE_RE = new RegExp(`(?:^|[^A-Za-z])(?:${WEAK_LABEL})${JOIN}${LEVEL}`, 'g')
+
+/** Non-global twins for `.test()` — a `g` regex remembers `lastIndex` between calls. */
+const LABELLED_LEVEL_RES = [new RegExp(STRONG_INLINE_RE.source), new RegExp(WEAK_INLINE_RE.source)]
+
+/** A line that opens with a strong label: what joins it to the rest, and the rest. */
+const STRONG_LINE_RE = new RegExp(`^(?:${STRONG_LABEL})(${JOIN})(.*)$`)
+
+/** A line that opens with a level — the line under a `## 风险级` heading. */
+const LEVEL_LINE_RE = new RegExp(`^${JOIN}${LEVEL}`)
+
+/**
+ * Strip the markdown that authors wrap declarations in: bold, code, heading
+ * marks, list bullets, quote marks and table pipes. `**风险级：A**`,
+ * `风险级：**A**` and `## 风险级别：A` all reduce to `风险级…：A`. The tail is
+ * trimmed by hand: `/[\s|]+$/` rescans every run of blanks (DR121-3).
+ *
+ * @param {string} line
+ */
+function plainLine(line) {
+  const text = line.replace(/\*\*|__|`/g, '').replace(/^[\s>#*+|-]+/, '')
+  let end = text.length
+  while (end > 0 && /[\s|]/.test(text[end - 1])) end--
+  return text.slice(0, end)
+}
+
+/**
+ * Read the level the PR author declared. Accepted only as a floor — see
+ * `classifyRisk`.
+ *
+ * 🔴 Incident 2026-09-26 (#2061, #2075): the old parser read only
+ * `风险级别|风险等级|risk level` + colon + letter. #2075 wrote `## 风险级` with
+ * `**A 级**` on the next line, #2061 wrote `风险级：A`; both declared A, neither
+ * was read, both rated B from their files and auto-merged with no review.
+ * Round 1 of review found more (`风险级别为 A`, `风险分级：A 级`, `风险 **A 级**`,
+ * `## 风险级别（自报）` then A). So the rule is general rather than a list of
+ * spellings: a label, any joining characters, a level. A strong-label line
+ * that joins to something unreadable — or a strong-label heading whose next
+ * line is not a level — is "declared, unreadable" → A, so the next
+ * unforeseen spelling fails closed instead of repeating the incident.
+ *
+ * Several distinct levels still resolve to A. "非 A 级", "不是 A 级",
+ * "A/B/C 分级说明", "风险分级：见下表" and "Risk: a stale cache" are not
+ * declarations.
+ *
+ * @param {string|null|undefined} body
+ * @returns {{risk: 'A'|'B'|'C'|null, unreadable: string|null}} `unreadable` quotes the line that could not be read
+ */
+export function readDeclaredRisk(body) {
+  if (typeof body !== 'string') return { risk: null, unreadable: null }
+  const raw = body.replace(/<!--[\s\S]*?(-->|$)/g, '').replace(/\r\n/g, '\n').split('\n')
+  const lines = raw.map(plainLine)
+  const found = new Set()
+  let unreadable = null
+  lines.forEach((line, i) => {
+    for (const m of line.matchAll(STRONG_INLINE_RE)) found.add(m[1])
+    for (const m of line.matchAll(WEAK_INLINE_RE)) found.add(m[1])
+    const next = () => lines.slice(i + 1).find((l) => l.trim() !== '')
+    const level = strongLineLevel(line, /^\s*#/.test(raw[i]), next)
+    if (level === 'unreadable') unreadable ??= line.slice(0, 60)
+    else if (level) found.add(level)
+  })
+  if (unreadable !== null) return { risk: 'A', unreadable }
+  if (found.size === 0) return { risk: null, unreadable: null }
+  if (found.size > 1) return { risk: 'A', unreadable: null }
+  return { risk: /** @type {'A'|'B'|'C'} */ ([...found][0]), unreadable: null }
+}
+
+/**
+ * What a line that opens with a strong label declares: a level, `'unreadable'`,
+ * or `null` when it is prose that merely mentions the label.
+ *
+ * @param {string} line markdown already stripped
+ * @param {boolean} heading the raw line was a `#` heading
+ * @param {() => string|undefined} next the next non-empty line (only looked up when needed)
+ * @returns {'A'|'B'|'C'|'unreadable'|null}
+ */
+function strongLineLevel(line, heading, next) {
+  const strong = line.match(STRONG_LINE_RE)
+  if (!strong) return null
+  const [, join, rest] = strong
+  if (LEVEL_LINE_RE.test(`${join}${rest}`)) return null // already read inline
+  // A heading with any tail ("## 风险级别（自报）", "## 风险级说明") or a bare
+  // label: the level is on the next non-empty line.
+  if (heading || rest.trim() === '') {
+    const following = next()
+    const level = following?.match(LEVEL_LINE_RE)
+    if (level) return /** @type {'A'|'B'|'C'} */ (level[1])
+    // "## 风险级别 / 优先级" then "- 风险：**B**（…）" (#2032 / #2033 / #2043): the
+    // next line declares with its own label, and is read as its own line.
+    if (following !== undefined && LABELLED_LEVEL_RES.some((re) => re.test(following))) return null
+    return 'unreadable'
+  }
+  // "风险级别：见下表" joins the label to something that is not a level;
+  // "风险级别只作下限" does not join at all — that is prose.
+  return join.trim() === '' ? null : 'unreadable'
+}
+
+/**
+ * The declared level only. Kept for callers that do not report *why*.
  *
  * @param {string|null|undefined} body
  * @returns {'A'|'B'|'C'|null}
  */
 export function parseDeclaredRisk(body) {
-  if (typeof body !== 'string') return null
-  const found = new Set()
-  for (const match of body.matchAll(/(?:风险级别|风险等级|risk\s*level)\s*[:：]\s*([ABC])\b/gi)) {
-    found.add(match[1].toUpperCase())
-  }
-  if (found.size === 0) return null
-  if (found.size > 1) return 'A'
-  return /** @type {'A'|'B'|'C'} */ ([...found][0])
+  return readDeclaredRisk(body).risk
 }
 
 /** Cap on how many reasons are carried into the marker, so it stays readable. */
@@ -280,10 +702,10 @@ export const MAX_REASONS = 12
 /**
  * Rate a whole PR.
  *
- * @param {{files?: unknown, declaredRisk?: string|null}} input
+ * @param {{files?: unknown, declaredRisk?: string|null, declaredUnreadable?: string|null}} input
  * @returns {{risk: 'A'|'B'|'C', computedRisk: 'A'|'B'|'C', declaredRisk: string|null, readable: boolean, reasons: string[], categories: string[]}}
  */
-export function classifyRisk({ files, declaredRisk = null } = {}) {
+export function classifyRisk({ files, declaredRisk = null, declaredUnreadable = null } = {}) {
   const unreadable = (reason) => ({
     risk: /** @type {'A'} */ ('A'),
     computedRisk: /** @type {'A'} */ ('A'),
@@ -318,14 +740,24 @@ export function classifyRisk({ files, declaredRisk = null } = {}) {
       categories.add(RISK_CATEGORY.UNREADABLE)
       unreadableReasons.push(problem)
     }
+    const pathRatings = []
     for (const path of paths) {
-      const { risk, why, category } = classifyFile(path)
-      computed = higherRisk(computed, risk)
-      if (category) categories.add(category)
-      if (risk !== 'C') {
-        const renamed = path !== entry?.filename ? `（rename 前的原路径，现为 ${entry.filename}）` : ''
-        reasons.push(`${path} —— ${risk} 级（${why}）${renamed}`)
-      }
+      const rated = classifyFile(path)
+      pathRatings.push({ path, ...rated })
+      computed = higherRisk(computed, rated.risk)
+      if (rated.category) categories.add(rated.category)
+    }
+    const authReason = authDiffReason(entry, pathRatings)
+    if (authReason) {
+      computed = 'A'
+      categories.add(RISK_CATEGORY.AUTH_ISOLATION)
+      reasons.push(authReason)
+    }
+    for (const rated of pathRatings) {
+      if (rated.risk === 'C') continue
+      if (authReason && rated.risk !== 'A') continue
+      const renamed = rated.path !== entry?.filename ? `（rename 前的原路径，现为 ${entry.filename}）` : ''
+      reasons.push(`${rated.path} —— ${rated.risk} 级（${rated.why}）${renamed}`)
     }
   }
 
@@ -336,7 +768,11 @@ export function classifyRisk({ files, declaredRisk = null } = {}) {
   const declared = typeof declaredRisk === 'string' && RISK_ORDER.includes(declaredRisk) ? declaredRisk : null
   const risk = declared ? higherRisk(computed, declared) : computed
   if (declared && risk !== computed) {
-    reasons.unshift(`PR 自报 ${declared} 级，高于 diff 算出的 ${computed} 级 —— 取更高的一档`)
+    reasons.unshift(
+      typeof declaredUnreadable === 'string'
+        ? `PR 正文写了风险级但读不懂（\`${declaredUnreadable.replace(/`/g, '')}\`）—— 按 A 处理；本意是 B/C 就写 \`风险级别：B\`（或 C），改完会自动重判`
+        : `PR 自报 ${declared} 级，高于 diff 算出的 ${computed} 级 —— 取更高的一档`,
+    )
   }
 
   // Unreadable entries lead, always. They are the reason the rating cannot be

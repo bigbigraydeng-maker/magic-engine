@@ -1,3 +1,4 @@
+import type { PostReview } from '@/lib/tiktok/post-review'
 // 单讲数据层 — 讲课式内容存取都走这里，别处不许直接拼 snapshot。
 // content_posts.generation_context_snapshot 结构(讲课式)：
 //   lecture: LectureScript            结构化脚本(唯一真相源；script 列只是它拼出来的只读投影)
@@ -66,7 +67,11 @@ export interface LecturePublished {
  */
 export interface LecturePublishRequest {
   platform: 'facebook' | 'tiktok'
-  status: 'pending' | 'sending' | 'done' | 'failed'
+  tiktokReview?: PostReview
+  status: 'pending' | 'sending' | 'processing' | 'done' | 'failed'
+  /** Persist init receipt immediately; retries query this task and never repeat uncertain init. */
+  tiktokPublishId?: string
+  tiktokAccountId?: string
   /**
    * true = 这一条要真的公开发出去;不填 = 只发草稿(主页后台可见、公众看不到)。
    *
@@ -97,6 +102,7 @@ interface LectureSnapshot {
 }
 
 export interface LecturePostRow {
+  updated_at: string
   id: string
   client_id: string
   title: string
@@ -135,7 +141,7 @@ export async function loadLecturePost(
 } | null> {
   const { data, error } = await supabaseAdmin
     .from('content_posts')
-    .select('id, client_id, title, status, platforms, source, source_video_url, format, generation_context_snapshot')
+    .select('id, client_id, title, status, platforms, source, source_video_url, format, generation_context_snapshot, updated_at')
     .eq('client_id', clientId)
     .eq('id', postId)
     .single()
@@ -210,6 +216,18 @@ export async function setPublishRequest(params: {
   request: LecturePublishRequest | null
 }): Promise<void> {
   await patchSnapshot(params.clientId, params.postId, { lecture_publish_request: params.request })
+}
+
+/** Claim against the database-triggered revision; keep long scripts out of the query URL. */
+export async function claimLecturePublish(clientId: string, postId: string, snapshot: LecturePostRow['generation_context_snapshot'], request: LecturePublishRequest, updatedAt: string): Promise<boolean> {
+  if (!updatedAt) throw new Error('缺少发布版本，请重新加载')
+  const { data, error } = await supabaseAdmin.from('content_posts')
+    .update({ generation_context_snapshot: { ...snapshot, lecture_publish_request: request } })
+    .eq('client_id', clientId).eq('id', postId)
+    .eq('updated_at', updatedAt)
+    .select('id')
+  if (error) throw error
+  return Boolean(data?.length)
 }
 
 /** 记一条发布回执(追加，不覆盖——同一条片可能先发草稿再发公开)。 */

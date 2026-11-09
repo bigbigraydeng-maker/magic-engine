@@ -194,6 +194,8 @@ export async function callClaudeChat(params: {
   /** Budgeted workflows: no gateway, SDK retry, or fallback duplicate charge. */
   singleAttempt?: boolean
   maxOutputTokens?: number
+  /** Only with singleAttempt: per-request timeout (default 60000). */
+  timeoutMs?: number
 }): Promise<ClaudeCallResult> {
   const { systemPrompt, messages, maxOutputTokens = 4096, model = MODEL_SONNET } = params
 
@@ -207,7 +209,7 @@ export async function callClaudeChat(params: {
   let message: Anthropic.Message
   try {
     message = params.singleAttempt
-      ? await getAnthropicClientDirect().messages.create(body, { maxRetries: 0, timeout: 60000 })
+      ? await getAnthropicClientDirect().messages.create(body, { maxRetries: 0, timeout: params.timeoutMs ?? 60000 })
       : await getAnthropicClient().messages.create(body)
   } catch (sdkErr) {
     if (params.singleAttempt) throw sdkErr

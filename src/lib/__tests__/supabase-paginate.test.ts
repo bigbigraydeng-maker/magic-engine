@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { fetchAll } from '../supabase-paginate'
+import { fetchAll, fetchAllBatched } from '../supabase-paginate'
 
 /** 假装一张有 n 行的表，每次最多回 1000 行（Supabase 的真实行为）。 */
 function fakeTable(n: number, opts: { cap?: number } = {}) {
@@ -75,5 +75,34 @@ describe('把表真正读全', () => {
   it('触到上限时抛错，而不是安静地少给', async () => {
     const t = fakeTable(10_000)
     await expect(fetchAll(t.page, 2000)).rejects.toThrow(/上限/)
+  })
+})
+
+describe('有限并行分页', () => {
+  it('完整返回多页数据，保持顺序且包括最后一页', async () => {
+    const t = fakeTable(7668)
+    const rows = await fetchAllBatched(t.page)
+    expect(rows.map((r) => r.id)).toEqual(Array.from({ length: 7668 }, (_, i) => i))
+  })
+
+  it('首个整页后并行读取最多三页，完成顺序不会影响结果顺序', async () => {
+    const pending: Array<{ from: number; resolve: (value: { data: number[]; error: null }) => void }> = []
+    const page = (from: number) => from === 0
+      ? Promise.resolve({ data: Array.from({ length: 1000 }, (_, i) => i), error: null })
+      : new Promise<{ data: number[]; error: null }>((resolve) => pending.push({ from, resolve }))
+    const result = fetchAllBatched(page)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(pending.map((p) => p.from)).toEqual([1000, 2000, 3000])
+    pending[2].resolve({ data: [], error: null })
+    pending[1].resolve({ data: [], error: null })
+    pending[0].resolve({ data: [1000], error: null })
+    expect(await result).toEqual([...Array.from({ length: 1000 }, (_, i) => i), 1000])
+  })
+
+  it('所需页面失败或者达到上限时拒绝返回不完整结果', async () => {
+    await expect(fetchAllBatched(async (from) => from === 1000
+      ? { data: null, error: { message: '读失败' } }
+      : { data: Array.from({ length: 1000 }, (_, i) => from + i), error: null })).rejects.toThrow('读失败')
+    await expect(fetchAllBatched(fakeTable(5000).page, 2000)).rejects.toThrow(/上限/)
   })
 })

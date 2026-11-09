@@ -139,7 +139,7 @@ function ReviewReport({ content }: { content: ProjectReviewContent }) {
                     <p className="mt-0.5 text-xs text-gray-500">{r.rationale}</p>
                     {r.needs_prescription_change && (
                       <p className="mt-1 text-[11px] font-medium text-indigo-600">
-                        ⟳ 需回到诸葛亮处方层处理（补充 / 修订处方）
+                        ⟳ 需回到处方里处理（补充 / 修订）
                       </p>
                     )}
                   </div>

@@ -28,6 +28,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ActionRun } from './types'
 import { listDeadLetterRuns } from './store'
+import { dedicatedApprovalActionKeys, dedicatedDeniedActionKeys } from './dedicated-approval-entries'
 
 export interface KernelHandoffTodo {
   client_id: string
@@ -61,8 +62,15 @@ export async function fetchKernelHandoffTodos(
   now: Date = new Date(),
 ): Promise<KernelHandoffTodo[]> {
   const since = new Date(now.getTime() - HANDOFF_WINDOW_DAYS * 86_400_000).toISOString()
-  const runs = await listDeadLetterRuns(sb, since)
-  return runs.map((run) => toTodo(run))
+  // 🔴 有专属审批入口的动作，等批准时由它自己的待办负责（那边读同一份 action_runs，
+  //    账表漏记的 run 也看得见）。这里再发一条「入口还没上线」就是两条互相矛盾的待办。
+  //    只排除 pending_approval —— 它们的死信 / 被拒仍走这里。
+  const runs = await listDeadLetterRuns(sb, since, dedicatedApprovalActionKeys())
+  // 🔴 被拒的也由专属待办负责的动作（登记表 `ownsDeniedTodo`）：这里不再发一条「开发欠账」，免得一件事两条。
+  const deniedOwnedElsewhere = new Set(dedicatedDeniedActionKeys())
+  return runs
+    .filter((run) => !(run.status === 'denied' && deniedOwnedElsewhere.has(run.action_key)))
+    .map((run) => toTodo(run))
 }
 
 function toTodo(run: ActionRun): KernelHandoffTodo {

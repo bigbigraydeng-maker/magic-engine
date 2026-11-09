@@ -38,6 +38,9 @@ async function deliverToExistingContactFlow(env, submission) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      ...(submission.formType === 'meta_ads_ai_pilot'
+        ? { formType: 'meta_ads_ai_pilot' }
+        : {}),
       name: submission.name,
       email: submission.email,
       company: submission.company,
@@ -63,6 +66,7 @@ export async function onRequestPost({ request, env }) {
     if (clean(body.companyWebsite, 200)) return json({ ok: true });
 
     const submission = {
+      formType: clean(body.formType, 80),
       name: clean(body.name, 120),
       email: clean(body.email, 200).toLowerCase(),
       company: clean(body.company, 180),

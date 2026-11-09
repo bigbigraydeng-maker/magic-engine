@@ -13,8 +13,22 @@
  * 没活的时候工人没开机完全正常，报了就是噪音 —— 误报成常态，告警就废了。
  */
 
-/** 工单排队多久还没人认领算「没人干活」。给足合盖午休的余量。 */
+/** 「活着但这批活过不去」要等多久才报（工人在线，只是排队）。给足产能余量。 */
 export const QUEUE_STALE_HOURS = 6
+
+/**
+ * 出片机多久没有任何「我还活着」信号算离线（小时）。
+ *
+ * 以前这条线和上面共用 6 小时，因为空闲的出片机**没有任何信号**——只有干活时
+ * 才刷工单心跳。现在 worker 空闲时每 ~4 分钟发一次存活信号（`/api/factory/worker/ping`），
+ * 所以 30 分钟没动静就是真离线，不必再等 6 小时。
+ */
+export const WORKER_OFFLINE_HOURS = 0.5
+
+/** 人话时长：不到 1 小时说分钟，其余说小时。 */
+function span(hours: number): string {
+  return hours < 1 ? `${Math.max(1, Math.round(hours * 60))} 分钟` : `${hours.toFixed(0)} 小时`
+}
 
 export interface QueueSnapshot {
   /** 队列里等着的工单数（status='queued'） */
@@ -70,14 +84,17 @@ export function judgeWorkerPresence(snap: QueueSnapshot): WorkerPresence {
   // 队列空 = 工人没开机也无所谓，不报
   if (snap.queued === 0) return { idle: true }
 
-  // 有活，但最老的那单还没等够久 —— 可能工人正在跑别的单
-  if (snap.oldestQueuedHours === null || snap.oldestQueuedHours < QUEUE_STALE_HOURS) {
+  const hb = snap.lastHeartbeatHours
+  const workerOffline = hb === null || hb >= WORKER_OFFLINE_HOURS
+
+  // 有活，但最老的那单还没等够久 —— 可能工人正在跑别的单，也避开刚进队列的瞬间
+  if (snap.oldestQueuedHours === null || snap.oldestQueuedHours < WORKER_OFFLINE_HOURS) {
     return { idle: true }
   }
+  // 工人活着、只是还没轮到 —— 等满 6 小时才算「过不去」（下面 stuck_on_failure 那支）
+  if (!workerOffline && snap.oldestQueuedHours < QUEUE_STALE_HOURS) return { idle: true }
 
-  const waited = snap.oldestQueuedHours.toFixed(0)
-  const hb = snap.lastHeartbeatHours
-  const workerOffline = hb === null || hb >= QUEUE_STALE_HOURS
+  const waited = span(snap.oldestQueuedHours)
 
   /**
    * 🔴 工人离线时，**永远先报「去把工人跑起来」**，不管这些活失败过没有。
@@ -98,11 +115,11 @@ export function judgeWorkerPresence(snap: QueueSnapshot): WorkerPresence {
    */
   if (workerOffline) {
     const since =
-      hb === null ? '从来没有工人连上来过' : `已经 ${hb.toFixed(0)} 小时没有工人动过`
+      hb === null ? '从来没有工人连上来过' : `已经 ${span(hb)}没有工人动过`
     return {
       idle: false,
       kind: 'worker_offline',
-      humanReason: `${snap.queued} 个出片工单在排队，最老的等了 ${waited} 小时，${since}`,
+      humanReason: `${snap.queued} 个出片工单在排队，最老的等了 ${waited}，${since}`,
       // 这些活失败过的话，把原因带上：开机后如果还是过不去，就是它。
       ...(snap.queuedStuckOnFailure > 0 && snap.stuckSampleReason
         ? { sampleReason: snap.stuckSampleReason }
@@ -123,7 +140,7 @@ export function judgeWorkerPresence(snap: QueueSnapshot): WorkerPresence {
       kind: 'stuck_on_failure',
       humanReason:
         `工人在线，但排队的 ${snap.queued} 个出片工单${many ? '都' : ''}失败过、还没过去，` +
-        `最老的已经等了 ${waited} 小时`,
+        `最老的已经等了 ${waited}`,
       ...(snap.stuckSampleReason ? { sampleReason: snap.stuckSampleReason } : {}),
     }
   }
@@ -194,4 +211,22 @@ export function judgeQueueByClient(
     if (!verdict.idle) out.push({ clientId, verdict })
   }
   return out
+}
+
+/**
+ * 一个客户的「最近一次工人还活着」：干活时的工单心跳 与 空闲/干活间隙的存活信号取最新。
+ * 存活信号只算给它自己声明能领的客户（`client_ids`，服务端按领单白名单展开），
+ * 不能替没人服务的客户担保。
+ */
+export function latestAliveAt(
+  workOrderHeartbeat: string | undefined,
+  pings: ReadonlyArray<{ started_at: string; summary: { client_ids?: string[] | null } | null }>,
+  clientId: string,
+): string | undefined {
+  const id = clientId.toLowerCase()
+  const times = pings
+    .filter((p) => (p.summary?.client_ids ?? []).some((c) => c.toLowerCase() === id))
+    .map((p) => p.started_at)
+  if (workOrderHeartbeat) times.push(workOrderHeartbeat)
+  return times.sort((a, b) => Date.parse(b) - Date.parse(a))[0]
 }

@@ -1,5 +1,6 @@
 # 鲁班 — Agent 手册
 
+> ⚠️ 与代码不符，见 [`agent-autonomy-operating-plan-v1` §4.4](../specs/2026-09-24-agent-autonomy-operating-plan-v1.md)：大模型可直接调 `publish_to_gbp` 发谷歌商家帖子，绕过内核（台账 `2026-10-18-luban-gbp-publish-bypasses-kernel`）。正文未改。
 > 模型：Claude Sonnet（复杂决策）/ gpt-4o-mini（批量执行）  
 > 代码入口：`src/lib/luban/agent.ts` · `src/lib/luban/tools.ts` · `src/lib/luban/prompts.ts`  
 > 定位：执行者。接收诸葛亮的 work order，调用 flywheel adapter 完成实际操作，落数据到飞轮表。
@@ -21,7 +22,7 @@
 **做：**
 - 执行 Fix 操作（暂停关键词/调出价/加否定词/启停广告）
 - 调用 flywheel adapter → 写 `flywheel_actions`
-- 触发内容发布（Publer API）
+- 触发内容发布（Publer API）（Publer 已于 2026-10 删除）
 - 触发图片/视频生成（Atlas/WaveSpeed/Seedance）
 - 构建和执行 luban router（工具路由）
 
@@ -37,7 +38,7 @@
 
 | Plugin / Connector | 权限 |
 |--------------------|------|
-| Publer（Publishing Hub）| 读写 |
+| Publer（Publishing Hub）| 读写（Publer 已于 2026-10 删除） |
 | Meta Ads MCP | 读写（Fix 操作范围内）|
 | Google Ads API | 读写（Fix 操作范围内）|
 | Airtable（Content Workspace）| 读写 |
@@ -124,7 +125,7 @@ await flywheelAdapter.execute({
 | 失败场景 | 处理 |
 |---------|------|
 | 广告 API 返回 4xx | 标记 `failed`，写入失败原因，不重试 |
-| Publer 发布失败 | 重试 1 次，失败后转 FDE |
+| Publer 发布失败 | 重试 1 次，失败后转 FDE（Publer 已于 2026-10 删除） |
 | 生成任务超时（>60s）| 标记 `pending`，异步轮询 |
 | dry_run 模式 | 不实际操作，返回 `would_execute` 预览 |
 
@@ -137,3 +138,9 @@ await flywheelAdapter.execute({
 - 词表：`src/lib/flywheel/vocabulary.ts`
 - 诸葛亮手册（上游）：`docs/agents/20-zhuge.md`
 - 马良手册（视觉执行协作）：`docs/agents/60-maliang.md`
+
+---
+
+## 操作手册
+
+暂无。索引：[agents 索引](./README.md)。

@@ -25,6 +25,10 @@ describe('授权回来时落在「接通」', () => {
     ['gbp', 'connected'],
     ['gbp', 'needs_location'],
     ['gbp', 'error'],
+    ['tiktok', 'connected'],
+    ['tiktok', 'denied'],
+    ['youtube', 'connected'],
+    ['youtube', 'error'],
   ])('?%s=%s → 接通', (key, value) => {
     expect(pickInitialTab(from({ [key]: value }))).toBe('connect')
   })
@@ -70,4 +74,10 @@ describe('分组本身', () => {
       expect(t.hint.trim()).not.toBe('')
     }
   })
+})
+
+
+it('Instagram callback wins over tab selection and lands on the visible content panel', () => {
+  const params = new URLSearchParams({ instagram: 'connected', tab: 'connect' })
+  expect(pickInitialTab(key => params.get(key))).toBe('content')
 })

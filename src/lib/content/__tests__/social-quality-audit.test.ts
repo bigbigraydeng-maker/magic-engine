@@ -10,7 +10,14 @@ vi.mock('openai', () => ({
   default: vi.fn().mockImplementation(() => ({})),
 }))
 
+// Jev judgement (cliché check) — never hit the network in tests
+vi.mock('@/lib/jev/client', () => ({
+  callJev: vi.fn(),
+}))
+
 import { evaluate } from '@/lib/content/quality-rubric'
+import { callJev } from '@/lib/jev/client'
+const mockJudge = vi.mocked(callJev)
 const mockEvaluate = vi.mocked(evaluate)
 
 const PASSING_RESULT = {
@@ -52,16 +59,18 @@ describe('auditSocialPost', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     process.env.OPENAI_API_KEY = 'test-key'
+    mockJudge.mockResolvedValue({ answers: { cliche: { noul: 0.1 } } })
   })
 
   afterEach(() => {
     process.env.OPENAI_API_KEY = originalEnv
   })
 
-  it('returns null when OPENAI_API_KEY is not set', async () => {
+  it('still runs the content guard when OPENAI_API_KEY is not set (fail-closed)', async () => {
     delete process.env.OPENAI_API_KEY
     const result = await auditSocialPost('Content', ['facebook'], 'social_a', SAMPLE_METADATA, 'NZ tours')
-    expect(result).toBeNull()
+    expect(result.contextSnapshot.rubric_skipped).toBe(true)
+    expect(result.contentGuard.status).toBe('pass')
     expect(mockEvaluate).not.toHaveBeenCalled()
   })
 
@@ -238,6 +247,38 @@ describe('auditSocialPost', () => {
       const result = await auditSocialPost('Content', ['tiktok'], 'social_b', SAMPLE_METADATA)
 
       expect(result!.rubricResult.pass).toBe(true)
+    })
+  })
+
+  describe('content guard (mixed language / cliché)', () => {
+    const NAL_TITLE = 'Unlock the Power of 一件代发物流支持 with NAL Express!'
+
+    it('fails and flags human review for mixed-language copy even when the rubric passes', async () => {
+      mockEvaluate.mockResolvedValueOnce(PASSING_RESULT)
+      const result = await auditSocialPost(NAL_TITLE, ['facebook'], 'social_c', SAMPLE_METADATA)
+      expect(result.rubricResult.pass).toBe(false)
+      expect(result.contentGuard.needsHumanReview).toBe(true)
+      expect(result.retryable).toBe(true)
+      const guard = result.contextSnapshot.content_guard as Record<string, unknown>
+      expect(guard.needs_human_review).toBe(true)
+      expect(guard.status).toBe('fail')
+    })
+
+    it('treats a judgement error as needs-review, not pass, and not retryable', async () => {
+      mockEvaluate.mockResolvedValueOnce(PASSING_RESULT)
+      mockJudge.mockRejectedValueOnce(new Error('HTTP 503'))
+      const result = await auditSocialPost('Book the 12-day Golden China tour from Auckland today.', ['facebook'], 'social_c', SAMPLE_METADATA)
+      expect(result.rubricResult.pass).toBe(false)
+      expect(result.contentGuard.status).toBe('unavailable')
+      expect(result.retryable).toBe(false)
+    })
+
+    it('keeps the guard receipt when the rubric LLM call throws', async () => {
+      mockEvaluate.mockRejectedValueOnce(new Error('OpenAI 500'))
+      const result = await auditSocialPost('Unlock the Power of 一件代发物流支持 with NAL Express!', ['facebook'], 'social_c', SAMPLE_METADATA)
+      expect(result.contextSnapshot.rubric_error).toBe('OpenAI 500')
+      expect((result.contextSnapshot.content_guard as Record<string, unknown>).needs_human_review).toBe(true)
+      expect(result.rubricResult.pass).toBe(false)
     })
   })
 })

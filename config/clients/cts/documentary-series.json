@@ -1,0 +1,310 @@
+{
+  "client_id": "c0000000-0000-0000-0000-000000000000",
+  "name": "China, Up Close",
+  "voice": "Sam · New Zealand",
+  "style": "实景信息叙事 · Kiwi旅行视角 · 片头/常驻logo/品牌片尾 · 无数字人",
+  "cadence": "每周 2 YouTube + 3 Shorts + 7 TikTok（制作目标，非发布排程）",
+  "episodes": [
+    {
+      "key": "shanghai-beyond-skyline",
+      "series": "China, Up Close",
+      "location": "上海",
+      "title": "Beyond the Skyline",
+      "angle": "从黄浦江走到街道，看见天际线以外的日常。",
+      "scenes": [
+        "江面与天际线",
+        "街道、食物与园林",
+        "夜景"
+      ],
+      "kiwi": "首次抵达后慢下来，一次专注一个区域。",
+      "materialGap": "成片已定稿，待接入托管预览链接；配乐商业授权证据待补。",
+      "status": "editorial_final",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/shanghai-beyond-skyline-card.jpg",
+        "fullUrl": "/content-series/cts/covers/shanghai-beyond-skyline.jpg",
+        "mobileUrl": "/content-series/cts/covers/shanghai-beyond-skyline-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/shanghai-beyond-skyline-attribution.txt",
+        "status": "approved",
+        "photoNote": ""
+      }
+    },
+    {
+      "key": "chongqing-many-levels",
+      "series": "China, Up Close",
+      "location": "重庆",
+      "title": "A City on Many Levels",
+      "angle": "高差如何改变一座城市的街道与日常体验？",
+      "scenes": [
+        "坡道与楼梯",
+        "江岸与交通",
+        "食物准备与街头生活"
+      ],
+      "kiwi": "给步行和休息留时间，先确认集合点。",
+      "materialGap": "需审查可证实高差的重庆实景、街道和食物动态镜头。",
+      "status": "planned",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/chongqing-many-levels-card.jpg",
+        "fullUrl": "/content-series/cts/covers/chongqing-many-levels.jpg",
+        "mobileUrl": "/content-series/cts/covers/chongqing-many-levels-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/chongqing-many-levels-attribution.txt",
+        "status": "draft",
+        "photoNote": ""
+      }
+    },
+    {
+      "key": "zhangjiajie-more-than-view",
+      "series": "China, Up Close",
+      "location": "张家界",
+      "title": "More Than the View",
+      "angle": "山峰之外，实际游览的一天是什么样？",
+      "scenes": [
+        "山峰与人的尺度",
+        "步道与森林",
+        "观景过程"
+      ],
+      "kiwi": "按实际步行和休息需求选择行程。",
+      "materialGap": "需核实武陵源/天门山地点，补真实步道和游客移动镜头。",
+      "status": "planned",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/zhangjiajie-more-than-view-card.jpg",
+        "fullUrl": "/content-series/cts/covers/zhangjiajie-more-than-view.jpg",
+        "mobileUrl": "/content-series/cts/covers/zhangjiajie-more-than-view-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/zhangjiajie-more-than-view-attribution.txt",
+        "status": "draft",
+        "photoNote": ""
+      }
+    },
+    {
+      "key": "yangtze-life-along-river",
+      "series": "China, Up Close",
+      "location": "三峡",
+      "title": "Life Along the River",
+      "angle": "从船上观察两岸，而不仅是一张峡谷照片。",
+      "scenes": [
+        "航行中的江面",
+        "沿岸聚落",
+        "甲板观察"
+      ],
+      "kiwi": "问清航段、船舶和岸上活动的安排。",
+      "materialGap": "优先补三峡可核实动态镜头；泛用游轮不得当具体船舶承诺。",
+      "status": "planned",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/yangtze-life-along-river-card.jpg",
+        "fullUrl": "/content-series/cts/covers/yangtze-life-along-river.jpg",
+        "mobileUrl": "/content-series/cts/covers/yangtze-life-along-river-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/yangtze-life-along-river-attribution.txt",
+        "status": "draft",
+        "photoNote": "图库航行画面，不代表 CTS 指定船舶。"
+      }
+    },
+    {
+      "key": "suzhou-slowing-down",
+      "series": "China, Up Close",
+      "location": "苏州",
+      "title": "The Art of Slowing Down",
+      "angle": "园林里的路径、水面和框景值得怎样观察？",
+      "scenes": [
+        "窗景与廊道",
+        "水面与路径",
+        "老街生活"
+      ],
+      "kiwi": "给小尺度空间留时间；比较熟悉的开阔自然景观。",
+      "materialGap": "需核实具体园林地点，补细节镜头。",
+      "status": "planned",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/suzhou-slowing-down-card.jpg",
+        "fullUrl": "/content-series/cts/covers/suzhou-slowing-down.jpg",
+        "mobileUrl": "/content-series/cts/covers/suzhou-slowing-down-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/suzhou-slowing-down-attribution.txt",
+        "status": "draft",
+        "photoNote": ""
+      }
+    },
+    {
+      "key": "hangzhou-beside-lake",
+      "series": "China, Up Close",
+      "location": "杭州",
+      "title": "A City Beside the Lake",
+      "angle": "湖岸、街道与茶如何串起一天的观察？",
+      "scenes": [
+        "西湖宽景",
+        "岸边生活",
+        "茶的细节"
+      ],
+      "kiwi": "把一天留给一个区域，避免反复赶路。",
+      "materialGap": "需西湖与茶园准确地点证据，不能凭绿色山坡判断茶园。",
+      "status": "planned",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/hangzhou-beside-lake-card.jpg",
+        "fullUrl": "/content-series/cts/covers/hangzhou-beside-lake.jpg",
+        "mobileUrl": "/content-series/cts/covers/hangzhou-beside-lake-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/hangzhou-beside-lake-attribution.txt",
+        "status": "draft",
+        "photoNote": ""
+      }
+    },
+    {
+      "key": "chengdu-beyond-panda",
+      "series": "China, Up Close",
+      "location": "成都",
+      "title": "Look Beyond the Panda",
+      "angle": "熊猫之外，街道、茶与食物里还有什么？",
+      "scenes": [
+        "经核实的熊猫实景",
+        "茶馆",
+        "街头与备餐"
+      ],
+      "kiwi": "把休息和吃饭当作旅行内容。",
+      "materialGap": "需核实机构地点与茶馆、备餐动态素材。",
+      "status": "planned",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/chengdu-beyond-panda-card.jpg",
+        "fullUrl": "/content-series/cts/covers/chengdu-beyond-panda.jpg",
+        "mobileUrl": "/content-series/cts/covers/chengdu-beyond-panda-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/chengdu-beyond-panda-attribution.txt",
+        "status": "draft",
+        "photoNote": ""
+      }
+    },
+    {
+      "key": "winter-harbin-after-dark",
+      "series": "Winter · China, Up Close",
+      "location": "哈尔滨",
+      "title": "Winter After Dark",
+      "angle": "从结冰的城市与街道生活，认识不同于新西兰夏季的冬天。",
+      "scenes": [
+        "核实年份与地点的冰雪景观",
+        "街道行人",
+        "热食与室内休息"
+      ],
+      "kiwi": "南半球夏天出发，准备的是目的地冬季穿着。",
+      "materialGap": "冬季实景、热食和室内外转换需补；冰雪活动年份、开放日期和天气制作时核实。",
+      "status": "planned",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/winter-harbin-after-dark-card.jpg",
+        "fullUrl": "/content-series/cts/covers/winter-harbin-after-dark.jpg",
+        "mobileUrl": "/content-series/cts/covers/winter-harbin-after-dark-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/winter-harbin-after-dark-attribution.txt",
+        "status": "draft",
+        "photoNote": "历史冰景（来源标注2010），不代表当季活动布置。"
+      }
+    },
+    {
+      "key": "winter-jilin-rime",
+      "series": "Winter · China, Up Close",
+      "location": "吉林",
+      "title": "Waiting for the Rime",
+      "angle": "以雾凇为观察线索，讲期待与实际天气的关系。",
+      "scenes": [
+        "经核实的雾凇",
+        "江岸",
+        "当地早餐与生活"
+      ],
+      "kiwi": "给天气留弹性，不把自然现象当作保证。",
+      "materialGap": "需真实吉林雾凇动态镜头及地点证据；形成条件需官方来源，不能承诺每天可见。",
+      "status": "planned",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/winter-jilin-rime-card.jpg",
+        "fullUrl": "/content-series/cts/covers/winter-jilin-rime.jpg",
+        "mobileUrl": "/content-series/cts/covers/winter-jilin-rime-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/winter-jilin-rime-attribution.txt",
+        "status": "draft",
+        "photoNote": ""
+      }
+    },
+    {
+      "key": "winter-beijing-street",
+      "series": "Winter · China, Up Close",
+      "location": "北京",
+      "title": "A Winter Day at Street Level",
+      "angle": "以街道、热食和冬日光线组织一次城市观察。",
+      "scenes": [
+        "冬季街道",
+        "胡同生活",
+        "热食近景"
+      ],
+      "kiwi": "短距离分段探索，安排室内休息。",
+      "materialGap": "补真实冬季北京街景与食物；不拿夏景调色冒充冬季。",
+      "status": "planned",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/winter-beijing-street-card.jpg",
+        "fullUrl": "/content-series/cts/covers/winter-beijing-street.jpg",
+        "mobileUrl": "/content-series/cts/covers/winter-beijing-street-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/winter-beijing-street-attribution.txt",
+        "status": "draft",
+        "photoNote": ""
+      }
+    },
+    {
+      "key": "winter-zhangjiajie",
+      "series": "Winter · China, Up Close",
+      "location": "张家界",
+      "title": "When the Mountains Change",
+      "angle": "观察冬季山景与实际到访体验，保留天气不确定性。",
+      "scenes": [
+        "经核实的冬季山景",
+        "步道",
+        "观景与休息"
+      ],
+      "kiwi": "核实出行当天交通、步道和运营安排。",
+      "materialGap": "雪景不是保证；补真实冬季动态素材，核实拍摄地点，不能AI加雪当纪实。",
+      "status": "planned",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/winter-zhangjiajie-card.jpg",
+        "fullUrl": "/content-series/cts/covers/winter-zhangjiajie.jpg",
+        "mobileUrl": "/content-series/cts/covers/winter-zhangjiajie-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/winter-zhangjiajie-attribution.txt",
+        "status": "draft",
+        "photoNote": ""
+      }
+    },
+    {
+      "key": "winter-kiwi-preparation",
+      "series": "Winter · China, Up Close",
+      "location": "冬季旅行准备",
+      "title": "Summer Here, Winter There",
+      "angle": "给从新西兰出发的观众一组冬季旅行准备问题。",
+      "scenes": [
+        "分层衣物与行李",
+        "室内外转换",
+        "行走与休息"
+      ],
+      "kiwi": "用目的地温度与活动安排准备行李，不按出发地季节判断。",
+      "materialGap": "需可授权衣物/行李/休息场景；温度、装备与路线建议逐项核实，不提供未经验证的安全保证。",
+      "status": "planned",
+      "format": "YouTube · 2–3分钟",
+      "derivatives": "1 Shorts + 3 场景 TikTok",
+      "cover": {
+        "url": "/content-series/cts/covers/winter-kiwi-preparation-card.jpg",
+        "fullUrl": "/content-series/cts/covers/winter-kiwi-preparation.jpg",
+        "mobileUrl": "/content-series/cts/covers/winter-kiwi-preparation-mobile.jpg",
+        "creditUrl": "/content-series/cts/covers/winter-kiwi-preparation-attribution.txt",
+        "status": "draft",
+        "photoNote": ""
+      }
+    }
+  ],
+  "seasonalNote": "Winter：从新西兰夏季出发，观察中国冬天的街道、食物与生活。冬景和活动均按真实素材与当期事实核验。"
+}

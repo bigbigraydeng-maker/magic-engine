@@ -1,0 +1,43 @@
+{
+ "built_on": "2026-10-15",
+ "built_for": "CTS Silk Road reel (window 106)",
+ "note": "每张都核对了页面自述的地点；只用于景点画面，不冒充 CTS 团友实拍，不当作客户真实产品/价格画面。未找到有页面自述地点的火焰山(吐鲁番)与乌鲁木齐市集图，宁缺毋滥。",
+ "clips": [
+  {
+   "clip": "s4_mogao_caves.mp4",
+   "original": "footage/photos/silk-road-2026-10-15/pexels-25974825-mogao-caves.jpg",
+   "source": "Pexels",
+   "page": "https://www.pexels.com/photo/view-of-the-mogao-caves-dunhuang-china-25974825/",
+   "photographer": "Manta paopao (@manta-paopao-3826856)",
+   "license": "Pexels License (page label: Free)",
+   "location_basis": "页面标题与描述写明：View of the Mogao Caves, Dunhuang, China；位置字段 Dunhuang, China；画面是崖壁洞窟立面，无正脸、无品牌",
+   "size": "6240x4160",
+   "downloaded": "2026-10-15",
+   "website_name": "Mogao Caves"
+  },
+  {
+   "clip": "s5_crescent_spring.mp4",
+   "original": "footage/photos/silk-road-2026-10-15/pexels-33412586-crescent-lake-mingsha.jpg",
+   "source": "Pexels",
+   "page": "https://www.pexels.com/photo/scenic-view-of-crescent-lake-and-mingsha-dunes-33412586/",
+   "photographer": "Lovesa Chang (@lovesa-chang-249164204)",
+   "license": "Pexels License (page label: Free)",
+   "location_basis": "页面描述写明：Crescent Lake surrounded by Mingsha Sand Dunes in Dunhuang, China；画面是沙丘+月牙泉+楼阁，远处游客很小无可辨认面孔",
+   "size": "3264x2448",
+   "downloaded": "2026-10-15",
+   "website_name": "Crescent Spring / Mingsha Mountain"
+  },
+  {
+   "clip": "s6_tianchi_lake.mp4",
+   "original": "footage/photos/silk-road-2026-10-15/pexels-39894328-tianchi-tianshan.jpg",
+   "source": "Pexels",
+   "page": "https://www.pexels.com/photo/scenic-view-of-tianchi-lake-and-tianshan-mountains-39894328/",
+   "photographer": "Lywin (@lywin-55237728)",
+   "license": "Pexels License (page label: Free)",
+   "location_basis": "页面描述写明：Tianchi Lake and Tianshan Mountains in Xinjiang, China；位置字段 Changji, Xinjiang（天池属昌吉州）；官网写 Heavenly Lake in the Tianshan Mountains",
+   "size": "4057x2710",
+   "downloaded": "2026-10-15",
+   "website_name": "Heavenly Lake"
+  }
+ ]
+}

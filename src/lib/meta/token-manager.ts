@@ -42,7 +42,8 @@
 
 import { createClient } from '@supabase/supabase-js'
 import {
-  domainToEnvKey, pageIdToEnvVar, resolveMetaToken, loadStoredPageToken, type MetaTokenSource,
+  domainToEnvKey, pageIdToEnvVar, resolveMetaToken, loadStoredPageToken,
+  loadStoredClientMetaToken, type MetaTokenSource,
 } from './token-selection'
 
 const supabaseAdmin = createClient(
@@ -52,7 +53,7 @@ const supabaseAdmin = createClient(
 
 // Lookup rules live in token-selection.ts (no client at import time, so the daily
 // todo can reuse them); re-exported here for existing callers.
-export { domainToEnvKey, pageIdToEnvVar, type MetaTokenSource }
+export { domainToEnvKey, pageIdToEnvVar, loadStoredClientMetaToken, type MetaTokenSource }
 
 /**
  * Resolve the Meta access token to use for a given client.

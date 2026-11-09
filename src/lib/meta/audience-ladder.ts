@@ -17,7 +17,7 @@
  *    the gap is reported rather than silently ignored.
  */
 
-const GRAPH_BASE = 'https://graph.facebook.com/v19.0'
+import { GRAPH_BASE } from './graph-base'
 
 const DAY_SECONDS = 86_400
 

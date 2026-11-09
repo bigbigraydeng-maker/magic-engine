@@ -8,7 +8,7 @@
  *      单独当作 ownership proof（blocker 3）。
  */
 
-import { describe, it, expect } from 'vitest'
+import { vi, describe, it, expect } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AuthorizedExecutionContext } from '@/lib/kernel/types'
 import { createPageApplyOptimizationCapability } from '..'
@@ -29,19 +29,20 @@ function noopSb(): SupabaseClient {
 
 const PREP = {
   repo_owner: 'o', repo_name: 'r', default_branch: 'main',
-  content_path: 'website/x.html', page_version_token: 'sha_prepare',
+  page_url: 'https://x.com/page', content_path: 'website/x.html', page_version_token: 'sha_prepare',
   branch_name: 'me/page-apply/idem',
   patched_content: PATCHED,
   diff_changes: [],
 }
 
-async function runCommit(gh: any) {
+async function runCommit(gh: any, createPageGuard?: () => never) {
   const cap = createPageApplyOptimizationCapability(noopSb(), {
     resolveGithubConnection: async () => ({
       repoOwner: 'o', repoName: 'r', defaultBranch: 'main',
       contentPaths: ['website/x.html'], plainToken: 't',
     }),
     createGithubClient: () => gh,
+    createPageGuard: createPageGuard ?? (() => ({ clientId: 'c', assert: async () => undefined }) as never),
   })
   return cap.steps.commit({
     ctx: ctx(), stepKey: 'commit', attempt: 1, idempotencyKey: 'x',
@@ -222,5 +223,25 @@ describe('commit step · scenario 2 · same-run marker crash recovery', () => {
       humanReason: expect.stringMatching(/existing_branch_ownership_indeterminate/),
     })
     expect(commitFileCalled).toBe(false)
+  })
+})
+
+describe('commit step · protected-page re-check right before the first write', () => {
+  it('🔴 list changed after prepare: the branch is never created, nothing is committed', async () => {
+    const { gateFake, realGuard } = await import('@/lib/seo/__tests__/gate-test-kit')
+    const gh = {
+      getBranchSha: vi.fn(async () => 'base'),
+      createBranch: vi.fn(),
+      createBranchWithMarker: vi.fn(),
+      commitFile: vi.fn(),
+    }
+    const fake = gateFake({ meta_cycle_protected_slugs: ['page'] })
+    await expect(runCommit(gh, () => realGuard(fake, 'system') as never)).rejects.toMatchObject({
+      code: 'INVALID_INPUT', humanReason: expect.stringMatching(/protected_page/),
+    })
+    expect(gh.getBranchSha).not.toHaveBeenCalled()
+    expect(gh.createBranch).not.toHaveBeenCalled()
+    expect(gh.createBranchWithMarker).not.toHaveBeenCalled()
+    expect(gh.commitFile).not.toHaveBeenCalled()
   })
 })

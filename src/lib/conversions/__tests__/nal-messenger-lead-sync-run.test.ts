@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { runNalMessengerLeadSync } from '../nal-messenger-lead-sync-run'
+import { runNalMessengerLeadSync, runNalMessengerLeadSyncChunk, mergeNalMessengerSummaries } from '../nal-messenger-lead-sync-run'
 
 type Row = Record<string, unknown>
 
@@ -17,6 +17,8 @@ type ConversationSeed = {
   contact_id: string | null
   participant_psid: string | null
   participant_name?: string | null
+  /** 分块游标按 created_at, id 排序、并只看 createdBeforeIso 之前的；不填 = 很早以前。 */
+  created_at?: string
 }
 
 type MessageSeed = {
@@ -39,15 +41,27 @@ function fakeSupabase(seed: { conversations: ConversationSeed[]; messages: Messa
     from(table: string) {
       if (table === 'conversations') {
         // 实测核实：nal-messenger-lead-sync-run.ts 对这张表只调用
-        // .select('id, contact_id, participant_psid, participant_name').eq('client_id', ...).eq('channel', 'messenger')，
-        // 直接 await（不接 .single()）。
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: async () => ({ data: seed.conversations, error: null }),
-            }),
-          }),
+        // .select('id, contact_id, participant_psid, participant_name').eq('client_id', ...).eq('channel', 'messenger')
+        //   .lte('created_at', iso).order('created_at').order('id').range(from, to)，直接 await（2026-09-22 拆块后）。
+        // 假件按真语义执行：过滤 created_at、稳定排序、按 range 切片。
+        let createdBefore = ''
+        let range: [number, number] = [0, Number.MAX_SAFE_INTEGER]
+        const q = {
+          select: () => q,
+          eq: () => q,
+          lte: (_col: string, v: string) => ((createdBefore = v), q),
+          order: () => q,
+          range: (from: number, to: number) => ((range = [from, to]), q),
+          then: (resolve: (r: { data: ConversationSeed[]; error: null }) => unknown) => {
+            const rows = seed.conversations
+              .map((c) => ({ ...c, created_at: c.created_at ?? '2000-01-01T00:00:00.000Z' }))
+              .filter((c) => c.created_at <= createdBefore)
+              .sort((a, b) => (a.created_at === b.created_at ? a.id.localeCompare(b.id) : a.created_at.localeCompare(b.created_at)))
+              .slice(range[0], range[1] + 1)
+            return resolve({ data: rows, error: null })
+          },
         }
+        return q
       }
       if (table === 'conversation_messages') {
         // 实测核实：只调用
@@ -275,6 +289,46 @@ describe('runNalMessengerLeadSync', () => {
     const summary = await runNalMessengerLeadSync({ supabase: client, maxInsertsPerRun: 1 })
     expect(summary.insertedLeads).toBe(1)
     expect(summary.cappedAtMaxInserts).toBe(true)
+    expect(outcomes).toHaveLength(1)
+  })
+})
+
+describe('分块（2026-09-22，conversion-daily-pipeline 拆块）', () => {
+  const NOW = '2026-09-22T18:00:00.000Z'
+  const two = (): { conversations: ConversationSeed[]; messages: MessageSeed[] } => ({
+    conversations: [
+      { id: 'conv-a', contact_id: 'aaaaaaaa-2222-3333-4444-555555555555', participant_psid: 'psid-a' },
+      { id: 'conv-b', contact_id: 'bbbbbbbb-2222-3333-4444-555555555555', participant_psid: 'psid-b' },
+    ],
+    messages: [...qualifyingMessages('conv-a'), ...qualifyingMessages('conv-b')],
+  })
+
+  it('limit=1 → 两块各处理一个对话，第三块空、done=true', async () => {
+    const { client, outcomes } = fakeSupabase(two())
+    const c1 = await runNalMessengerLeadSyncChunk({ offset: 0, limit: 1, insertedSoFar: 0, createdBeforeIso: NOW }, { supabase: client })
+    expect(c1).toMatchObject({ nextOffset: 1, insertedSoFar: 1, done: false })
+    const c2 = await runNalMessengerLeadSyncChunk({ offset: 1, limit: 1, insertedSoFar: 1, createdBeforeIso: NOW }, { supabase: client })
+    expect(c2).toMatchObject({ nextOffset: 2, insertedSoFar: 2, done: false })
+    const c3 = await runNalMessengerLeadSyncChunk({ offset: 2, limit: 1, insertedSoFar: 2, createdBeforeIso: NOW }, { supabase: client })
+    expect(c3).toMatchObject({ nextOffset: 2, done: true })
+    expect(mergeNalMessengerSummaries(mergeNalMessengerSummaries(c1.summary, c2.summary), c3.summary)).toMatchObject({ totalConversations: 2, insertedLeads: 2 })
+    expect(outcomes).toHaveLength(2)
+  })
+
+  it('🔴 maxInsertsPerRun 跨块生效：insertedSoFar 已到上限 → 第二块不写、标 cappedAtMaxInserts', async () => {
+    const { client, outcomes } = fakeSupabase(two())
+    const c1 = await runNalMessengerLeadSyncChunk({ offset: 0, limit: 1, insertedSoFar: 0, createdBeforeIso: NOW }, { supabase: client, maxInsertsPerRun: 1 })
+    const c2 = await runNalMessengerLeadSyncChunk({ offset: 1, limit: 1, insertedSoFar: c1.insertedSoFar, createdBeforeIso: NOW }, { supabase: client, maxInsertsPerRun: 1 })
+    expect(c2.summary).toMatchObject({ insertedLeads: 0, cappedAtMaxInserts: true })
+    expect(outcomes).toHaveLength(1)
+  })
+
+  it('🔴 createdBeforeIso 之后新进来的对话不进本轮（块之间新对话不会把游标挤歪），明天再来', async () => {
+    const seed = two()
+    seed.conversations[1].created_at = '2026-09-22T19:00:00.000Z'
+    const { client, outcomes } = fakeSupabase(seed)
+    const c = await runNalMessengerLeadSyncChunk({ offset: 0, limit: 10, insertedSoFar: 0, createdBeforeIso: NOW }, { supabase: client })
+    expect(c.summary.totalConversations).toBe(1)
     expect(outcomes).toHaveLength(1)
   })
 })

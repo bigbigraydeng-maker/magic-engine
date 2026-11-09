@@ -10,10 +10,11 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isoWeekKey } from '@/lib/flywheel/seo-weekly'
+import { normalizeSlug, parseProtectedSlugs, readProtectedRaw } from '@/lib/seo/protected-pages'
 import { STEP6_JOB_NAME } from './receipts'
 import type { MetaCycleClientConfig } from './types'
 
-export { isoWeekKey }
+export { isoWeekKey, normalizeSlug }
 
 export const META_CYCLE_DUE_EVENT = 'seo/meta-cycle.due'
 export const META_CYCLE_JOB = 'seo-meta-cycle'
@@ -42,8 +43,12 @@ export interface MetaCycleRosterEntry {
   maxPagesPerRun: number
   cooldownDays: number
   brandVoice: string
+  /** See MetaCycleClientConfig.brandTerms. */
+  brandTerms: string[]
   /** See MetaCycleClientConfig.keywordFallbackLocations — validated here so a malformed config value can never reach the gate as garbage location_codes. */
   keywordFallbackLocations: number[]
+  /** See MetaCycleClientConfig.protectedSlugs — validated here so a malformed config value can never silently become "protect nothing". */
+  protectedSlugs: string[]
 }
 
 export type RosterResult =
@@ -60,7 +65,6 @@ const DEFAULT_COOLDOWN_DAYS = 30
 const DEFAULT_BRAND_VOICE = 'Professional, factual AU/NZ English. No invented prices, dates, or itinerary details.'
 /** PM 2026-09-20 (fourth pass): at most 2 fallback locations — this is a small, deliberate escape hatch (CTS configures [2036]/AU today), not a general multi-market crawl. */
 const MAX_KEYWORD_FALLBACK_LOCATIONS = 2
-
 function parseKeywordFallbackLocations(raw: unknown): number[] {
   if (!Array.isArray(raw)) return []
   return raw
@@ -95,6 +99,14 @@ function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown;
   if (typeof row.id !== 'string' || row.id.length === 0) return null
   if (typeof row.domain !== 'string' || row.domain.trim().length === 0) return null
   const cfg = (row.seo_config ?? {}) as Record<string, unknown>
+  const protectedRaw = readProtectedRaw(row.seo_config)
+  const protectedResult = protectedRaw.malformed
+    ? { entries: [] as string[], malformed: true, reason: 'seo_config_not_object' as string | null }
+    : parseProtectedSlugs(protectedRaw.raw)
+  if (protectedResult.malformed) {
+    console.error(`[seo-meta-cycle] client ${row.id}: protected-page list is malformed (${protectedResult.reason}) — skipping client (treating as empty would mean "protect nothing", the opposite of intent)`)
+    return null
+  }
   return {
     clientId: row.id,
     domain: row.domain.trim(),
@@ -106,6 +118,10 @@ function rowToEntry(row: { id?: unknown; domain?: unknown; semrush_db?: unknown;
     cooldownDays: typeof cfg.meta_cycle_cooldown_days === 'number' && cfg.meta_cycle_cooldown_days > 0 ? cfg.meta_cycle_cooldown_days : DEFAULT_COOLDOWN_DAYS,
     brandVoice: typeof cfg.meta_cycle_brand_voice === 'string' && cfg.meta_cycle_brand_voice.trim().length > 0 ? cfg.meta_cycle_brand_voice : DEFAULT_BRAND_VOICE,
     keywordFallbackLocations: parseKeywordFallbackLocations(cfg.meta_cycle_keyword_fallback_locations),
+    brandTerms: Array.isArray(cfg.brand_terms)
+      ? cfg.brand_terms.filter((t: unknown): t is string => typeof t === 'string' && t.trim().length > 0).map((t: string) => t.trim())
+      : [],
+    protectedSlugs: protectedResult.entries,
   }
 }
 
@@ -136,6 +152,8 @@ export function toClientConfig(entry: MetaCycleRosterEntry): MetaCycleClientConf
     cooldownDays: entry.cooldownDays,
     brandVoice: entry.brandVoice,
     keywordFallbackLocations: entry.keywordFallbackLocations,
+    brandTerms: entry.brandTerms,
+    protectedSlugs: entry.protectedSlugs,
   }
 }
 

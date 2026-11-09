@@ -1,22 +1,26 @@
 /**
  * POST /api/clients/[id]/meta-ads/draft
  *
- * ME 起草一条广告 → 在 Meta 上**建成暂停状态** → 回读过闸门 → 落账等人点头。
+ * Asks for the paused-draft card. Does not build the ad.
+ * A person confirms that card before anything is created on Meta.
+ * Several ad sets are refused here: the existing card cannot build them.
  *
- * 这个接口**不会让任何广告开始花钱**。开是另一个接口，而且必须有人点。
- *
- * 200 { actionId, status, summary, findings, readback }
- *   status = 'awaiting_approval' 才轮到人看；'blocked' 是 ME 自己没干完；
- *   'failed' 是建都没建出来。
- * 424 客户没配广告账户 / 拿不到 Meta 授权
+ * 202 { wroteMeta: false, status: 'awaiting_confirmation', card }
+ * 424 客户没配广告账户 / 主页 / 拿不到 Meta 授权
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { rejectAgentAdsBearer } from '@/lib/auth/agent-ads-guard'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { createDraftForApproval } from '@/lib/ads-strategy/draft-and-gate'
+import { createKernel } from '@/lib/kernel'
+import { publicError } from '@/lib/confirmation-card/http'
 import type { AdDraft } from '@/lib/ads-strategy/ad-draft'
+import { askerFromAccess } from '@/lib/ads-strategy/card-asker'
+import { askDirectPausedDraft } from '@/lib/ads-strategy/direct-draft-card'
+import { loadPausedDraftContext } from '@/lib/ads-strategy/paused-draft-context'
+import { issuePausedDraftCard } from '@/lib/ads-strategy/paused-draft-submit'
 
 export const maxDuration = 120
 
@@ -25,6 +29,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
   const { id: clientId } = await params
+  const denied = await rejectAgentAdsBearer(req, { clientId, action: 'write_meta' })
+  if (denied) return denied
 
   const access = await requirePaidClientAccess(clientId)
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status })
@@ -73,13 +79,24 @@ export async function POST(
     pageId: registeredPageId,
   }
 
-  const outcome = await createDraftForApproval(draft, {
-    supabase: supabaseAdmin,
-    adAccountId,
-    accessToken,
-    expectedGeo: (client as { country?: string } | null)?.country ?? null,
-    industry: (client as { industry?: string | null } | null)?.industry ?? null,
-  })
-
-  return NextResponse.json(outcome)
+  try {
+    const asked = await askDirectPausedDraft({
+      draft,
+      issue: async () => {
+        const context = await loadPausedDraftContext(supabaseAdmin, clientId, adAccountId)
+        return issuePausedDraftCard({
+          kernel: createKernel(supabaseAdmin),
+          clientId,
+          clicker: askerFromAccess(access, clientId, req.headers.get('x-me-actor') === 'agent'),
+          draft,
+          accountLabel: context.accountLabel,
+          review: context.review,
+        })
+      },
+    })
+    return NextResponse.json(asked.body, { status: asked.status })
+  } catch (error) {
+    const mapped = publicError(error)
+    return NextResponse.json({ error: mapped.message, wroteMeta: false }, { status: mapped.status })
+  }
 }

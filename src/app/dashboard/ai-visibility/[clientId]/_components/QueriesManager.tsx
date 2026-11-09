@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import type { AiVisibilityQuery, AiVisibilityRun } from '@/types/magic-engine';
+import { isRunConclusive } from '@/lib/ai-tracker/run-conclusive';
 
 const CATEGORY_LABELS: Record<string, string> = {
   comparison: 'Comparison',
@@ -166,8 +167,8 @@ export function QueriesManager({ clientId, queries, runs, onRefresh }: Props) {
                   {/* Last run result */}
                   <div className="flex-shrink-0 text-right min-w-[80px]">
                     {lastRun ? (
-                      lastRun.error_message ? (
-                        <span className="text-xs text-[#C2453A]" title={lastRun.error_message}>❌ Error</span>
+                      !isRunConclusive(lastRun) ? (
+                        <span className="text-xs text-[#C2453A]" title={lastRun.error_message ?? lastRun.parse_error_message ?? 'Error'}>❌ Error</span>
                       ) : lastRun.client_brand_rank != null ? (
                         <div>
                           <span className="text-sm font-bold text-me-ochre">#{lastRun.client_brand_rank}</span>

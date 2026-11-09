@@ -54,15 +54,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: message }, { status: 500 })
   }
 
-  const { generated, failed } = await generateDueBriefs(due, now)
-  const sweeps = await runPostBriefSweeps(now)
+  // 🔴 时间预算按本路由自己的 `maxDuration`（800 秒）来，不用 `CHUNK_TIME_BUDGET_MS`
+  //    的 90 秒。那 90 秒是给 Inngest**一段**用的（段必须在网关约 125 秒内返回）；
+  //    本路由是手动补触发，整轮一口气跑完才是它存在的意义 —— 用 90 秒会让补触发
+  //    每次只补掉 1/3，剩下的又要人再点一次。
+  const { generated, failed, aborted } = await generateDueBriefs(due, now, { budgetMs: 700_000 })
+  // 账户级故障（余额用光 / 密钥被拒）那一轮不跑扫尾：它们要读刚写好的卡，而这一轮没写完。
+  const sweeps = aborted ? null : await runPostBriefSweeps(now)
 
   return NextResponse.json({
-    ok: true,
+    ok: aborted === null,
     trigger: 'manual',
     candidates: due.length,
     generated,
     failed,
-    ...sweeps,
+    aborted,
+    ...(sweeps ?? {}),
   })
 }

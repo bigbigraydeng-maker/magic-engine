@@ -16,6 +16,7 @@ vi.mock('next/headers', () => ({
 vi.mock('../_components/ZhugeGlobalFab', () => ({
   ZhugeGlobalFab: ({ clientId }: { clientId: string }) => <div data-testid="zhuge-fab">{clientId}</div>,
 }))
+vi.mock('@/lib/meta/ai/entitlement',()=>({ pilotEntryVisible:vi.fn().mockResolvedValue(false) }))
 
 import ClientLayout from '../layout'
 
@@ -30,44 +31,28 @@ beforeEach(() => {
 })
 
 describe('ClientLayout — 诸葛亮 FAB gating', () => {
-  it('hides the FAB for self_serve visitors', () => {
+  it('hides the FAB for self_serve visitors', async () => {
     setTier('self_serve')
-    render(
-      <ClientLayout params={{ id: 'client-1' }}>
-        <p>page content</p>
-      </ClientLayout>,
-    )
+    render(await ClientLayout({ params:{ id:'client-1' },children:<p>page content</p> }))
     expect(screen.getByText('page content')).toBeTruthy()
     expect(screen.queryByTestId('zhuge-fab')).toBeNull()
   })
 
-  it('shows the FAB for paid_client visitors', () => {
+  it('shows the FAB for paid_client visitors', async () => {
     setTier('paid_client')
-    render(
-      <ClientLayout params={{ id: 'client-1' }}>
-        <p>page content</p>
-      </ClientLayout>,
-    )
+    render(await ClientLayout({ params:{ id:'client-1' },children:<p>page content</p> }))
     expect(screen.getByTestId('zhuge-fab')).toBeTruthy()
   })
 
-  it('shows the FAB for admin visitors', () => {
+  it('shows the FAB for admin visitors', async () => {
     setTier('admin')
-    render(
-      <ClientLayout params={{ id: 'client-1' }}>
-        <p>page content</p>
-      </ClientLayout>,
-    )
+    render(await ClientLayout({ params:{ id:'client-1' },children:<p>page content</p> }))
     expect(screen.getByTestId('zhuge-fab')).toBeTruthy()
   })
 
-  it('shows the FAB when the tier header is missing (fails open, matches readUserTier default)', () => {
+  it('shows the FAB when the tier header is missing (fails open, matches readUserTier default)', async () => {
     setTier(null)
-    render(
-      <ClientLayout params={{ id: 'client-1' }}>
-        <p>page content</p>
-      </ClientLayout>,
-    )
+    render(await ClientLayout({ params:{ id:'client-1' },children:<p>page content</p> }))
     expect(screen.getByTestId('zhuge-fab')).toBeTruthy()
   })
 })

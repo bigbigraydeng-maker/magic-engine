@@ -1,10 +1,11 @@
 /**
- * 每日只读诊断入口（被 google-data-pullback-daily 调用）：加载 → 诊断 → 并进当天体检记录 → 内部版日报。
+ * 每日只读诊断入口（被 google-data-pullback-daily 调用）：加载 → 诊断 → 目标进度取数 → 并进当天体检记录 → 内部版日报。
  * 尽力而为，不抛：诊断失败不能影响数据同步和体检。
  */
 
 import { loadDiagnosisInput } from './diagnostics/loader'
 import { runDiagnostics } from './diagnostics/run'
+import { buildDigestGoalContext } from './goal-context'
 import { persistAndSendInternalDigest } from './internal-digest'
 
 export interface DailyDiagnosticsResult {
@@ -26,9 +27,10 @@ export async function runPortfolioDiagnostics(
 ): Promise<DailyDiagnosticsResult> {
   try {
     const evaluatedAt = new Date().toISOString()
-    const input = await loadDiagnosisInput(clientId, insightDate, evaluatedAt)
+    const input = await loadDiagnosisInput(clientId, insightDate, evaluatedAt, { digestRecipients: configuredRecipients })
     const run = runDiagnostics({ ...input, digestRecipients: configuredRecipients })
-    const digest = await persistAndSendInternalDigest({ clientId, clientName, date: insightDate, run, configuredRecipients })
+    const goal = await buildDigestGoalContext(clientId, insightDate)
+    const digest = await persistAndSendInternalDigest({ clientId, clientName, date: insightDate, run, configuredRecipients, goal })
     return {
       success: !digest.error,
       hits: run.diagnoses.filter(d => d.status === 'hit').length,

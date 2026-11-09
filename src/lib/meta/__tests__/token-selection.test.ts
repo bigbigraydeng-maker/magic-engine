@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { pickScopedMetaToken, type TokenOwnerRow } from '../token-selection'
+import { pickScopedMetaToken, ownsKey, type TokenOwnerRow } from '../token-selection'
 
 const ENV = {
   META_SYSTEM_USER_TOKEN_CTSTOURS_CO_NZ: 'cts-token',
@@ -55,6 +55,40 @@ describe('domain key → earliest staff-created client only', () => {
     const b = row({ id: 'b', domain: 'ctstours.co.nz', created_at: 'also garbage' })
     const owners = [a, b].filter((c) => pickScopedMetaToken(c, [a, b], ENV) !== null)
     expect(owners).toHaveLength(1)
+  })
+})
+
+describe('ownsKey — generic form, reused by the cron route for a legacy per-name key', () => {
+  const byName = (r: TokenOwnerRow) => (r.name ? r.name.toUpperCase().replace(/[^A-Z0-9]/g, '_') : null)
+
+  it('the earliest non-self-serve row owns the name key', () => {
+    const real = row({ id: 'real', name: 'Kiteroa', created_at: '2026-01-01T00:00:00Z' })
+    const copy = row({ id: 'copy', name: 'Kiteroa', created_at: '2026-09-01T00:00:00Z' })
+    expect(ownsKey(real, [real, copy], byName)).toBe(true)
+    expect(ownsKey(copy, [real, copy], byName)).toBe(false)
+  })
+
+  it('a self-serve row never owns the key, even as the only holder', () => {
+    const squat = row({ id: 'squat', name: 'Kiteroa', source: 'self_serve' })
+    expect(ownsKey(squat, [squat], byName)).toBe(false)
+  })
+
+  it('a self-serve row never blocks a real client from owning the key', () => {
+    const squat = row({ id: 'squat', name: 'Kiteroa', created_at: '2020-01-01T00:00:00Z', source: 'self_serve' })
+    const real = row({ id: 'real', name: 'Kiteroa', created_at: '2026-09-01T00:00:00Z' })
+    expect(ownsKey(real, [squat, real], byName)).toBe(true)
+  })
+
+  it('no key on the row → never owns anything', () => {
+    const noName = row({ id: 'x' })
+    expect(ownsKey(noName, [noName], byName)).toBe(false)
+  })
+
+  it('two self-serve rows colliding on the same name, no staff-created row at all → neither owns it', () => {
+    const a = row({ id: 'a', name: 'Kiteroa', created_at: '2020-01-01T00:00:00Z', source: 'self_serve' })
+    const b = row({ id: 'b', name: 'Kiteroa', created_at: '2026-01-01T00:00:00Z', source: 'self_serve' })
+    expect(ownsKey(a, [a, b], byName)).toBe(false)
+    expect(ownsKey(b, [a, b], byName)).toBe(false)
   })
 })
 

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { DevDebtPanel } from './_components/DevDebtPanel'
 
 interface JobSummary {
   name: string
@@ -118,6 +119,8 @@ export default function CronHealthPage() {
                 </div>
               </div>
             </div>
+
+            <DevDebtPanel />
 
             {/* Warning jobs first */}
             {warning.length > 0 && (

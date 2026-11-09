@@ -10,8 +10,10 @@
  *
  *   ai-orchestrator-manual.yml   the orchestrator. workflow_dispatch only,
  *                               disabled by default, refuses to be switched on.
- *   ai-orchestrator-ci.yml       ordinary read-only CI. pull_request only,
- *                               UNfiltered (see below), no secrets, no writes.
+ *   pr-light-checks.yml          ordinary read-only CI for this module (and the
+ *                               other light checks). pull_request, no path
+ *                               filter, no secrets, the test job cannot write
+ *                               checks. Draft PRs skip the test job.
  *
  * The rules they share (pinned actions, no dangerous write scopes, no schedule,
  * no issue_comment) are asserted against both.
@@ -43,7 +45,7 @@ const requireFromHere = createRequire(import.meta.url)
 const YAML = requireFromHere('js-yaml') as { load(input: string): unknown }
 
 const MANUAL_PATH = join(process.cwd(), '.github/workflows/ai-orchestrator-manual.yml')
-const CI_PATH = join(process.cwd(), '.github/workflows/ai-orchestrator-ci.yml')
+const CI_PATH = join(process.cwd(), '.github/workflows/pr-light-checks.yml')
 
 interface WorkflowStep {
   uses?: string
@@ -54,6 +56,7 @@ interface WorkflowStep {
 
 interface WorkflowJob {
   name?: string
+  if?: string
   steps?: WorkflowStep[]
   permissions?: Record<string, string>
 }
@@ -261,23 +264,29 @@ describe('the CI workflow', () => {
     expect(Object.keys(ci.triggers)).toEqual(['pull_request'])
   })
 
-  it('grants only contents: read', () => {
+  it('grants the workflow token contents: read, and does not let the test job publish checks', () => {
     expect(ci.doc.permissions).toEqual({ contents: 'read' })
+    const testsJob = ci.doc.jobs?.tests
+    expect(testsJob?.permissions?.contents).toBe('read')
+    expect(testsJob?.permissions?.checks).toBeUndefined()
+    expect(ci.doc.jobs?.report?.permissions?.checks).toBe('write')
+    expect(ci.doc.jobs?.report?.permissions?.contents).not.toBe('write')
   })
 
-  it('reports on every pull request, so a required check can never hang', () => {
-    // `pull_request:` with no body at all — the only shape that guarantees the
-    // check reports on every PR.
-    expect(ci.triggers.pull_request ?? null).toBeNull()
+  it('skips draft pull requests and has no path filter', () => {
+    // Drafts are skipped at the job, which bills nothing. Path filters are
+    // still forbidden: a required check that never starts stays pending.
+    const trigger = (ci.triggers.pull_request ?? {}) as Record<string, unknown>
+    expect(trigger.paths).toBeUndefined()
+    expect(trigger['paths-ignore']).toBeUndefined()
+    expect(ci.doc.jobs?.tests?.if).toContain('draft')
+    expect(ci.doc.jobs?.tests?.if).toContain('false')
   })
 
-  it('references no secret at all', () => {
-    // Not "passes no model key" — names none. A secret it never references is a
-    // secret it cannot leak into a log or a subprocess. Checked against the
-    // executable content: the header comment explains the rule and is allowed to
-    // say the word.
+  it('references no repository secret', () => {
+    // github.token is the job token. A `secrets.` reference would pull a
+    // stored credential into a test run that executes pull-request code.
     expect(ci.executable).not.toMatch(/\bsecrets\./)
-    expect(ci.executable).not.toMatch(/\benv:/)
   })
 
   it('invokes no model provider endpoint or SDK', () => {
@@ -287,12 +296,16 @@ describe('the CI workflow', () => {
   })
 
   it('uses the stable check name the ruleset can require', () => {
-    // Renaming this silently detaches any required status check that names it.
-    expect(ci.doc.jobs?.tests?.name).toBe('ai-orchestrator-tests')
+    // The job that runs the tests is not named this. A skipped job reports
+    // success, so the required name is published only after a real run.
+    expect(ci.doc.jobs?.tests?.name).not.toBe('ai-orchestrator-tests')
+    const step = ci.steps.find((candidate) => candidate.name === 'ai-orchestrator-tests')
+    expect(step?.run).toContain('npx vitest run tools/ai-orchestrator')
   })
 
   it('runs the module test suite', () => {
-    const step = ci.steps.find((candidate) => candidate.run?.includes('vitest'))
+    // Other steps also run vitest. This one is the orchestrator suite, by name.
+    const step = ci.steps.find((candidate) => candidate.name === 'ai-orchestrator-tests')
     expect(step?.run).toContain('npx vitest run tools/ai-orchestrator')
   })
 

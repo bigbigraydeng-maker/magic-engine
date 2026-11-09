@@ -17,6 +17,7 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact } from '@/lib/crm/identity'
+import { markNewLeadStage } from './new-lead-stage'
 import { attributionColumns, attributionFromMetaLeadRow } from '@/lib/crm/attribution'
 import { lookupCreativeRefByAdId } from '@/lib/ads/creative-link'
 import { type SubscribeMemberResult } from '@/lib/mailchimp/client'
@@ -308,7 +309,9 @@ export async function ingestMetaLead(input: IngestMetaLeadInput): Promise<Ingest
       source: 'meta_lead_form',
       seenAt: lead.createdTime,
       attribution,
+      autoAssign: true,
     })
+    if (created) await markNewLeadStage(clientId, contactId)
 
     // ── 触点 Phase A：**在任何 Mailchimp 调用之前**先 create-if-not-exists 一条
     //    contact + source touchpoint。用 upsert(ignoreDuplicates=true) 保幂等：
@@ -416,6 +419,12 @@ export async function ingestMetaLead(input: IngestMetaLeadInput): Promise<Ingest
     //    metadata.mailchimp_result 从 pending 替换成本轮 provider 的真实结果。
     //    **用 UPDATE 而不是二次 upsert** —— upsert 走 ignoreDuplicates=true 会
     //    保留旧 metadata，正是当初 Phase B 也要修的病根。
+    //
+    // ⚠️ 2026-09-24 起这个字段**有下游判据在读**：`lib/meta/leads-sync.ts` 的
+    //    `readSettledLeadIds()` 拿它判「这条上轮办完没有、本轮还要不要打 Mailchimp」
+    //    （判据本体在 `lib/mailchimp/outlet-tally.ts` 的 `isMailchimpSettled`）。
+    //    改这里的回执形状、或做 metadata 清理之前，先去看那两处 —— 不然那道闸会
+    //    悄悄失效（表现是「又开始每轮重打了」）或者误判（表现是「再也不重试了」）。
     const receiptMetadata = {
       ...baseMetadata,
       mailchimp_result: mailchimp,

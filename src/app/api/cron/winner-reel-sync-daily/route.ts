@@ -2,8 +2,8 @@
  * Cron: Winner Reel Auto-Sync (daily 03:00 NZST)
  *
  * Iterates every client with winner_reel_sync_config.enabled = true and runs
- * syncWinnerReels(clientId). Returns a summary so we can log run health from
- * Render's cron output.
+ * syncWinnerReels(clientId). The job still runs. It only raises cards.
+ * Returns a summary so we can log run health from Render's cron output.
  *
  * Auth: standard ME cron protocol (CRON_SECRET bearer).
  */
@@ -56,6 +56,7 @@ export async function GET(request: Request) {
     results.push({
       clientId: r.clientId,
       status: r.status,
+      mode: 'propose_only',
       added: r.adsAdded.length,
       paused: r.adsPaused.length,
       guards: r.guardsHit,

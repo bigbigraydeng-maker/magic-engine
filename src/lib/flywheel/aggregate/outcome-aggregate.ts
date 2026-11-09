@@ -4,6 +4,8 @@
  * Pure functions; DB querying lives in the API route.
  */
 
+import { MIN_DECIDED_FOR_RATE } from '@/lib/flywheel/attribution/outcome-identity'
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface OutcomeRow {
@@ -16,6 +18,9 @@ export interface VerdictStats {
   inconclusive: number
   reversed: number
   total: number
+  /** confirmed + reversed — the cases that decided something. */
+  decided: number
+  /** confirmed ÷ decided; 0 when nothing was decided. */
   confirmed_rate: number
 }
 
@@ -35,12 +40,14 @@ export function computeVerdictStats(rows: OutcomeRow[]): VerdictStats {
     else if (r.verdict === 'reversed') reversed++
   }
   const total = confirmed + inconclusive + reversed
+  const decided = confirmed + reversed
   return {
     confirmed,
     inconclusive,
     reversed,
     total,
-    confirmed_rate: total === 0 ? 0 : confirmed / total,
+    decided,
+    confirmed_rate: decided === 0 ? 0 : confirmed / decided,
   }
 }
 
@@ -59,16 +66,17 @@ export function buildAggregateRows(rows: OutcomeRow[]): AggregateEntry[] {
 }
 
 /**
- * Pick top N entries by confirmed_rate, filtered to min_total or more outcomes.
- * Excludes entries with too few data points to be meaningful.
+ * Pick top N entries by confirmed_rate, keeping only entries with at least
+ * `minDecided` decided cases (confirmed + reversed). Undecided cases do not make
+ * a sample: "1 confirmed + 99 unknown" must not rank as a proven move.
  */
 export function pickTop(
   entries: AggregateEntry[],
   n: number,
-  minTotal = 2,
+  minDecided = MIN_DECIDED_FOR_RATE,
 ): AggregateEntry[] {
   return entries
-    .filter(e => e.total >= minTotal)
+    .filter(e => e.decided >= minDecided)
     .sort((a, b) => b.confirmed_rate - a.confirmed_rate)
     .slice(0, n)
 }

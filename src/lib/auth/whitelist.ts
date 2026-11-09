@@ -29,6 +29,23 @@ export function isGlobalAdminEmail(email: string): boolean {
   return list.includes(normalised)
 }
 
+/**
+ * 加钱批准人精确判定（第 3 刀 3a，PM 2026-11-03 定：只放 PM 本人）。
+ *
+ * 只认 `ADS_SPEND_APPROVER_EMAILS` 精确名单。**没配 / 为空 = 谁都不是**（fail closed），
+ * 刻意不回落到 `ADMIN_EMAILS`：那张名单有多个人（2026-11-03 Render 核对 6 个），
+ * 回落等于把加钱权发给所有管理员。
+ * 用途：内核里加钱类动作的批准与执行复核、重开暂停广告的授权。
+ */
+export function isSpendApproverEmail(email: string): boolean {
+  const normalised = email.toLowerCase().trim()
+  if (!normalised) return false
+  const raw = process.env.ADS_SPEND_APPROVER_EMAILS
+  if (!raw) return false
+  const list = raw.split(',').map((e) => e.toLowerCase().trim()).filter(Boolean)
+  return list.includes(normalised)
+}
+
 /** 解析 "email:clientId,email2:clientId2" 这类映射 */
 function lookupScopedEntry(raw: string, normalisedEmail: string): string | null {
   for (const entry of raw.split(',').map((e) => e.trim()).filter(Boolean)) {

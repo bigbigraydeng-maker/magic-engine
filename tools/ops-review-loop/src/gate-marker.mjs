@@ -174,6 +174,22 @@ export function findGateFor({ markers, base, head }) {
 }
 
 /**
+ * Must a fresh rating comment be posted? Yes when nothing is on record for
+ * this pair, or the record disagrees on the risk OR the auto-merge decision.
+ *
+ * The decision matters because an `edited` run (the PR body's 当场试跑 section
+ * filled in) flips it without moving the head; comparing only the risk left a
+ * stale "❌ 当场试跑不合格" comment next to a green check (魏征 W78-2, #2078).
+ *
+ * @param {{existing: GateRecord|null|undefined, risk: string, decision: string}} input
+ * @returns {boolean}
+ */
+export function shouldPostGateComment({ existing, risk, decision }) {
+  if (!existing) return true
+  return existing.risk !== risk || existing.decision !== decision
+}
+
+/**
  * Read gate markers only from sources whose author is trusted.
  *
  * 🔴 Codex finding on PR #1205 (P2, second half): a gate marker is a *verdict*,
