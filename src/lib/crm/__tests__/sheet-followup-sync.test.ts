@@ -213,3 +213,23 @@ describe('配置', () => {
     expect(Object.keys(CLIENT_FOLLOWUP_SHEETS)).toEqual(['c0000000-0000-0000-0000-000000000000'])
   })
 })
+
+describe('拒绝字段跟手记同一套写法（2026-11-09 只别打电话 2B）', () => {
+  it('只说不要电话 → do_not_call，metadata.do_not_contact 恒为 false', async () => {
+    const db = fakeDb({ identities: IDENT })
+    await run([row({ note: '7.14大瑞更新， 客户明确说了不要电话，只邮件联系', noteCol: 17 })], db)
+    const meta = db.written[0].metadata as Record<string, unknown>
+    expect(meta.outcome).toBe('do_not_call')
+    expect(meta.do_not_contact).toBe(false)
+    expect(meta.refusal_scope).toBeUndefined()
+  })
+  it('说不清 → 按全面拒绝写，另带 refusal_scope=needs_review', async () => {
+    const db = fakeDb({ identities: IDENT })
+    await run([row({ note: '不要打电话，不要发邮件', noteCol: 17 })], db)
+    expect(db.written[0].metadata).toMatchObject({
+      outcome: 'do_not_contact',
+      do_not_contact: true,
+      refusal_scope: 'needs_review',
+    })
+  })
+})

@@ -30,7 +30,7 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { DNC_CLEARED_OUTCOME } from '@/lib/crm/dnc'
+import { DNC_CLEARED_OUTCOME, DO_NOT_CALL_OUTCOME, saidDoNotCall } from '@/lib/crm/dnc'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
 import {
   decideReengageClear,
@@ -38,6 +38,7 @@ import {
   type ReengageInput,
   type ReengageMessage,
   type ReengageTouch,
+  type ReengageTrigger,
 } from '@/lib/crm/dnc-reengage'
 
 const BATCH = 100
@@ -281,12 +282,59 @@ export async function applyReengageClear(
   decision: Extract<ReengageDecision, { clear: true }>,
 ): Promise<ApplyResult> {
   const fresh = (await loadCandidatesFor(clientId, [contactId]))[0]
-  const again = fresh ? decideReengageClear(fresh.input) : null
-  if (!again || !again.clear || again.trigger.ref !== decision.trigger.ref) return { written: false, touchpointId: null }
+  if (!fresh) return { written: false, touchpointId: null }
+  const again = decideReengageClear(fresh.input)
+  if (!again.clear || again.trigger.ref !== decision.trigger.ref) return { written: false, touchpointId: null }
 
+  // The clear touch also voids any earlier do_not_call. Re-filling a form is not consent to be phoned
+  // (design v1 §E), so a do_not_call dated 1s after the clear puts it back. Written BEFORE the clear:
+  // if the clear then fails the person stays fully blocked and the next run retries; the other order
+  // could leave the clear written, the keep missing, and the person never revisited (no longer DNC).
+  const keep = keepDoNotCallRow(clientId, contactId, decision, fresh.input.touches)
+  if (keep) await insertKeepDoNotCallTouch(keep)
   const touchpointId = await insertClearTouch(clientId, contactId, decision)
   await releaseMirror(clientId, contactId)
   return { written: true, touchpointId }
+}
+
+/** The clear touch's time: the trigger's own time, never later than now (see insertClearTouch). */
+function clearOccurredAt(t: ReengageTrigger): string {
+  return new Date(Math.min(Date.parse(t.at), Date.now())).toISOString()
+}
+
+/**
+ * The do_not_call touch to re-assert after an automatic clear — only when the person had an active
+ * do_not_call before the clear. 1 second after the clear so it is the later verdict for `saidDoNotCall`.
+ */
+export function keepDoNotCallRow(
+  clientId: string,
+  contactId: string,
+  decision: Extract<ReengageDecision, { clear: true }>,
+  touchesBefore: readonly ReengageTouch[],
+): Record<string, unknown> | null {
+  const before = touchesBefore.map((t) => ({ outcome: t.outcome ?? null, flagged: t.flagged === true, occurredAt: t.occurredAt }))
+  if (!saidDoNotCall(before)) return null
+  const t = decision.trigger
+  const summary = '系统：客人主动再联系只解除「别再联系」，之前说过的「不要打电话」继续有效'
+  return {
+    client_id: clientId,
+    contact_id: contactId,
+    channel: 'phone',
+    direction: 'outbound',
+    occurred_at: new Date(Date.parse(clearOccurredAt(t)) + 1000).toISOString(),
+    summary,
+    raw: summary,
+    metadata: { outcome: DO_NOT_CALL_OUTCOME, do_not_contact: false, automated: true, kept_by: REENGAGE_CLEARED_BY },
+    source: REENGAGE_SOURCE,
+    source_ref: `dnc-reengage:${contactId}:${t.ref}:keep-do-not-call`,
+  }
+}
+
+async function insertKeepDoNotCallTouch(row: Record<string, unknown>): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from('contact_touchpoints')
+    .upsert(row, { onConflict: 'client_id,source,source_ref', ignoreDuplicates: true })
+  if (error) throw new Error(`[dnc-reengage] 写「继续不要打电话」触点失败: ${error.message}`)
 }
 
 async function insertClearTouch(
@@ -309,7 +357,7 @@ async function insertClearTouch(
         // The trigger's own time, not "now": any do-not-contact recorded later than the customer's action —
         // even one that syncs in late with an earlier timestamp than now — must still be the latest verdict.
         // Never later than now: a future time would outrank every do-not-contact recorded afterwards.
-        occurred_at: new Date(Math.min(Date.parse(t.at), Date.now())).toISOString(),
+        occurred_at: clearOccurredAt(t),
         summary,
         raw: `${summary}（触发：${t.kind} @ ${t.at}；拒联判决时间：${decision.dncAt}）`,
         metadata: {
