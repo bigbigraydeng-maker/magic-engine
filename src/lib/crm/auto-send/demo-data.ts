@@ -448,9 +448,8 @@ export function createDemoAdapter(delayMs = 0): AutoSendAdapter {
     },
     loadLetterDetail: async (letterId: string) => {
       await wait(delayMs)
-      const detail = DEMO_DETAILS[letterId]
-      if (!detail) throw new Error('示例里没有这封信')
-      return detail
+      if (!Object.prototype.hasOwnProperty.call(DEMO_DETAILS, letterId)) throw new Error('示例里没有这封信')
+      return DEMO_DETAILS[letterId]
     },
   }
 }

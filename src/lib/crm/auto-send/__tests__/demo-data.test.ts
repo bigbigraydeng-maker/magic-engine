@@ -108,4 +108,10 @@ describe('demo adapter', () => {
     const adapter: AutoSendAdapter = createDemoAdapter()
     await expect(adapter.loadLetterDetail('nope')).rejects.toThrow('示例里没有这封信')
   })
+
+  it('never answers with an inherited object key such as constructor or __proto__', async () => {
+    const adapter: AutoSendAdapter = createDemoAdapter()
+    await expect(adapter.loadLetterDetail('constructor')).rejects.toThrow('示例里没有这封信')
+    await expect(adapter.loadLetterDetail('__proto__')).rejects.toThrow('示例里没有这封信')
+  })
 })
