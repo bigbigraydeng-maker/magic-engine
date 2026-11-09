@@ -5,11 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const loadCreativeDecision = vi.fn()
 const proposeCreativeStateCards = vi.fn()
 const createKernel = vi.fn(() => ({ now: () => new Date('2026-11-10T18:00:00.000Z') }))
-const loadApprovedPromoDeliveryStage = vi.fn()
-
-vi.mock('@/lib/marketing-plan/promo/approved-delivery-stage', () => ({
-  loadApprovedPromoDeliveryStage: (...args: unknown[]) => loadApprovedPromoDeliveryStage(...args),
-}))
 
 vi.mock('@/lib/action-submission/creative-state-live', () => ({
   loadCreativeDecision: (...args: unknown[]) => loadCreativeDecision(...args),
@@ -30,8 +25,6 @@ describe('runCreativeStateDaily', () => {
     loadCreativeDecision.mockReset()
     proposeCreativeStateCards.mockReset()
     createKernel.mockClear()
-    loadApprovedPromoDeliveryStage.mockReset()
-    loadApprovedPromoDeliveryStage.mockResolvedValue({ kind: 'set', stage: 'test' })
   })
 
   it('issues the cards the rules already chose, and does not write an ad', async () => {
@@ -41,13 +34,6 @@ describe('runCreativeStateDaily', () => {
     expect(result).toEqual({ cards: 1, skipped: [], wroteMeta: false })
     expect(proposeCreativeStateCards).toHaveBeenCalledTimes(1)
     expect(proposeCreativeStateCards.mock.calls[0][1].clicker).toEqual({ kind: 'agent', email: null })
-  })
-
-  it('skips with no_delivery_stage when the approved plan has no stage', async () => {
-    loadApprovedPromoDeliveryStage.mockResolvedValue({ kind: 'missing' })
-    const result = await runCreativeStateDaily(SB, 'client-1')
-    expect(result).toEqual({ cards: 0, skipped: ['no_delivery_stage'], wroteMeta: false })
-    expect(loadCreativeDecision).not.toHaveBeenCalled()
   })
 
   it('does not open a card when there is nothing to propose', async () => {

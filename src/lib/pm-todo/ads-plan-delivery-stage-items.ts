@@ -23,8 +23,8 @@ function deliveryStageMissingItem(clientId: string, clientName: string): ManualI
     kind: 'ads_plan_delivery_stage_missing',
     client_id: clientId,
     client_name: clientName,
-    what: `${clientName} 的已批准推广计划还没标「投放阶段」（试投 / 放量 / 稳住）。没有这个标记，每天的素材放量建议和收回稳住建议都不会出确认卡。`,
-    how: '打开该客户的推广计划页，在「投放阶段」卡片里看清现在是试投、放量还是稳住；需要换阶段时点「生成放量草稿」等按钮，批准新草稿后再继续跑广告。系统不会替你自动标阶段。',
+    what: `${clientName} 的已批准推广计划还没标「投放阶段」（试投 / 放量 / 稳住）。没有这个标记，「收回稳住」的每日建议和「生成放量草稿」换阶段提案都不会工作；素材放量按广告里的试投/放量状态照常出卡，不受影响。`,
+    how: '打开该客户的推广计划页，在「投放阶段」卡片里标好现在是试投、放量还是稳住；要从试投切到放量时点「生成放量草稿」，批准新草稿后再继续。系统不会替你自动标阶段。',
     href: promoPlanHref(clientId),
   }
 }

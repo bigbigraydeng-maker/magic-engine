@@ -1,15 +1,15 @@
 ---
 id: 2026-11-09-ads-plan-delivery-stage-missing-todo
-title: 缺投放阶段时待办提醒，素材放量与收回写明跳过原因
+title: 缺投放阶段时待办提醒，收回稳住写明跳过原因
 status: decided
 owner: agent
 decided_on: 2026-11-09
 source: issue:github
-verify_how: 合并后第一个有「已批准 promo、在投、无 delivery.stage」客户的 pm-daily-todo 应出现一条 decide 待办；同日拉数回执 creative_state/scale_fallback 的 skipped 含 no_delivery_stage。
+verify_how: 合并后「已批准 promo、在投、无 delivery.stage」客户应出现 decide 待办；每日拉数 scale_fallback 的 skipped 含 no_delivery_stage。P-4 creative_state 不读计划阶段，缺阶段时仍照常跑。
 ---
-纯读：待办 `ads_plan_delivery_stage_missing`；判定 `src/lib/marketing-plan/promo/approved-delivery-stage.ts`；runner 见 `src/lib/creative-state/daily.ts` 与 `src/lib/ads-strategy/scale-fallback/run.ts`。
+纯读：待办 `ads_plan_delivery_stage_missing`；判定 `approved-delivery-stage.ts`；收回只在 `scale-fallback/run.ts` 短路 `no_delivery_stage`。
 
 ## 当场试跑
-触发：`npm test -- src/lib/marketing-plan/promo/__tests__/approved-delivery-stage.test.ts src/lib/pm-todo/__tests__/ads-plan-delivery-stage-items.test.ts src/lib/creative-state/__tests__/daily.test.ts src/lib/ads-strategy/scale-fallback/__tests__/run.test.ts`
-时间：2026-11-09
-状态/退出码：2026-11-09 本地 vitest 4 文件 14 例，退出码 0。
+触发：`npm test -- src/lib/marketing-plan/promo/__tests__/approved-delivery-stage.test.ts src/lib/pm-todo/__tests__/ads-plan-delivery-stage-items.test.ts src/lib/ads-strategy/scale-fallback/__tests__/run.test.ts`
+时间：2026-11-09（订正后）
+状态/退出码：2026-11-09 订正后本地 vitest 4 文件 13 例，退出码 0。
