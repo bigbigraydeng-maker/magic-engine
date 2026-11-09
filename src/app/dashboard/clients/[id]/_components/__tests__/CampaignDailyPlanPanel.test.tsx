@@ -14,6 +14,16 @@ import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { CampaignDailyPlanPanel } from '../CampaignDailyPlanPanel'
 
+// The auto-publish section reads its own status endpoint on mount. These tests script the panel's fetch
+// sequence call by call, so that section is stubbed here and exercised in its own test file.
+const autoPublishProps = vi.fn()
+vi.mock('../CampaignDailyAutoPublishPanel', () => ({
+  CampaignDailyAutoPublishPanel: (props: Record<string, unknown>) => {
+    autoPublishProps(props)
+    return null
+  },
+}))
+
 const CLIENT_ID = 'c0000000-0000-0000-0000-000000000000'
 const CAMPAIGN_ID = 'campaign-uuid'
 
@@ -54,7 +64,7 @@ afterEach(() => {
 })
 
 describe('CampaignDailyPlanPanel — date selection shows that day\'s three formats', () => {
-  it('selecting a later populated day swaps Post/Story/Reel away from Day 1\'s content', async () => {
+  it('selecting a later populated day swaps Post/Story away from Day 1\'s content', async () => {
     mockFetchOnce({
       success: true,
       campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
@@ -91,8 +101,7 @@ describe('CampaignDailyPlanPanel — date selection shows that day\'s three form
 
     await screen.findByText('Day 3 hook text')
     expect(screen.queryByText('Day 1 hook text')).not.toBeInTheDocument()
-    expect(screen.getByText('Day 3 frame')).toBeInTheDocument()
-    expect(screen.getByText('Day 3 reel brief')).toBeInTheDocument()
+    expect(screen.queryByText('Day 3 frame')).not.toBeInTheDocument()
   })
 })
 
@@ -212,40 +221,6 @@ describe('CampaignDailyPlanPanel — seven distinct Post thumbnails + clickable 
   })
 })
 
-describe('CampaignDailyPlanPanel — complete route must not omit Chongqing/Guangzhou', () => {
-  it('renders the full 5-city route text on the recap day without dropping Chongqing or Guangzhou', async () => {
-    const recapStory = 'The full journey: Shanghai → Beijing → Xi\'an → Chongqing → Guangzhou'
-    mockFetchOnce({
-      success: true,
-      campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
-      grounding: { status: 'OK', has_master_brief: true, has_campaign: true },
-      days: daysGrid(['2026-08-30']),
-      bundles: [
-        {
-          date: '2026-08-30',
-          post: { hook: 'Final stop: Guangzhou', body: 'Journey recap', cta: 'Enquire Now' },
-          story: { frames: [{ order: 3, copy: recapStory }] },
-          reel: { brief: 'recap', script: 's', caption: 'c', source_asset_ids: [], media_status: 'NO_MEDIA' },
-          readiness: readiness(),
-          provenance: [],
-        },
-      ],
-      publishing_plan: { conversion_goal: null, destination: 'UNKNOWN', status: 'NOT_AUTHORIZED' },
-      ad_candidate: null,
-    })
-
-    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
-
-    await screen.findByText(/The full journey/)
-    const recap = screen.getByText(/The full journey/)
-    expect(recap.textContent).toContain('Chongqing')
-    expect(recap.textContent).toContain('Guangzhou')
-    expect(recap.textContent).toContain('Shanghai')
-    expect(recap.textContent).toContain('Beijing')
-  })
-})
-
-
 describe('CampaignDailyPlanPanel — Reel readiness is script-only, media_status stays separate (Build Control TRUTHFUL READINESS)', () => {
   it('shows "Reel 脚本草稿完整" (not "Reel 草稿完整") AND still shows 暂无成片 for a NO_MEDIA Reel', async () => {
     mockFetchOnce({
@@ -272,14 +247,50 @@ describe('CampaignDailyPlanPanel — Reel readiness is script-only, media_status
     // Script-complete label, not the old "Reel 草稿完整".
     await screen.findByText('Reel 脚本草稿完整')
     expect(screen.queryByText('Reel 草稿完整')).not.toBeInTheDocument()
-    // NO_MEDIA banner stays visible so the reviewer never confuses a script
-    // draft with a real video file.
-    expect(screen.getByText(/暂无成片/)).toBeInTheDocument()
+    // The Reel script is no longer shown in the Post view; the card only
+    // points to the dedicated Reels tab.
+    expect(screen.getByText(/Story 和 Reel 不在这里看/)).toBeInTheDocument()
+    const reelsLink = screen.getByRole('link', { name: '短视频' })
+    expect(reelsLink).toHaveAttribute('href', '?tab=reels')
+    expect(screen.queryByText(/暂无成片/)).not.toBeInTheDocument()
+  })
+})
+
+describe('CampaignDailyPlanPanel — Reel card points to the Reels tab only', () => {
+  it('the Reel card only points to the Reels tab and never renders the script', async () => {
+    mockFetchOnce({
+      success: true,
+      campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
+      grounding: { status: 'OK', has_master_brief: true, has_campaign: true },
+      days: daysGrid(['2026-08-24']),
+      bundles: [
+        {
+          date: '2026-08-24',
+          post: { hook: 'hook', body: 'body', cta: 'Enquire Now' },
+          story: { frames: [{ order: 1, copy: 'f1' }] },
+          reel: { brief: 'SECRET BRIEF TEXT', script: 'SECRET SCRIPT TEXT', caption: 'c', source_asset_ids: [], media_status: 'NO_MEDIA' },
+          readiness: readiness(),
+          provenance: [],
+        },
+      ],
+      publishing_plan: { conversion_goal: null, destination: 'UNKNOWN', status: 'NOT_AUTHORIZED' },
+      ad_candidate: null,
+    })
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+
+    await screen.findByText(/Story 和 Reel 不在这里看/)
+    expect(screen.queryByText('SECRET SCRIPT TEXT')).not.toBeInTheDocument()
+    expect(screen.queryByText('SECRET BRIEF TEXT')).not.toBeInTheDocument()
+    const reelsLink = screen.getByRole('link', { name: '短视频' })
+    expect(reelsLink).toHaveAttribute('href', '?tab=reels')
+    expect(screen.getByRole('link', { name: '本周总览' })).toHaveAttribute('href', '?tab=overview')
+    expect(screen.queryByText('f1')).not.toBeInTheDocument()
   })
 })
 
 describe('CampaignDailyPlanPanel — conversion goal vs publishing destination (Build Control TRUTHFUL READINESS)', () => {
-  it('shows lead_form_submit as 转化目标 with a Chinese explainer; destination stays UNKNOWN and never echoes the CTA', async () => {
+  it('shows lead_form_submit as 转化目标 with a Chinese explainer; destination stays 未设定 and never echoes the CTA', async () => {
     mockFetchOnce({
       success: true,
       campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'lead_form_submit' },
@@ -306,14 +317,14 @@ describe('CampaignDailyPlanPanel — conversion goal vs publishing destination (
     expect(screen.getByText('lead_form_submit')).toBeInTheDocument()
     expect(screen.getByText(/用户在落地页提交表单即算转化/)).toBeInTheDocument()
 
-    // Destination row explicitly says UNKNOWN / 未连接; the primary_cta must
+    // Destination row explicitly says 未设定 (not set yet); the primary_cta must
     // NOT be echoed as a destination.
     expect(screen.getByText(/发布目的地/)).toBeInTheDocument()
-    expect(screen.getByText('UNKNOWN')).toBeInTheDocument()
+    expect(screen.getByText('未设定')).toBeInTheDocument()
     expect(screen.getByText(/等待发布桥确认，不经旧运营台/)).toBeInTheDocument()
 
-    // Publish authorisation stays NOT_AUTHORIZED.
-    expect(screen.getByText('NOT_AUTHORIZED')).toBeInTheDocument()
+    // Publish authorisation stays 未授权.
+    expect(screen.getByText('未授权')).toBeInTheDocument()
   })
 })
 
@@ -360,10 +371,11 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
     await screen.findByText('Facebook Post 审核')
-    expect(screen.getByText('Post 通过')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Post 通过' })).toBeDisabled()
+    expect(screen.getByText(/发布后系统会自动在这条帖子的第一条评论里贴/)).toBeInTheDocument()
     expect(screen.getByText('Post 需修改')).toBeInTheDocument()
     expect(screen.getByText(/不代表事实核验、Story\/Reel 通过、生成、排期、Provider 或发布授权/)).toBeInTheDocument()
-    expect(screen.getByText('NOT_AUTHORIZED')).toBeInTheDocument()
+    expect(screen.getByText('未授权')).toBeInTheDocument()
     expect(screen.queryByText(/Launch Hub/i)).not.toBeInTheDocument()
     expect(document.querySelector('a[href*="/dashboard/content"]')).toBeNull()
   })
@@ -378,9 +390,9 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
 
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
-    await screen.findByText('发布队列 / Publish Queue')
-    expect(screen.getByText('Ready 1/1')).toBeInTheDocument()
-    expect(screen.getByText('待排期')).toBeInTheDocument()
+    await screen.findByText('发布队列')
+    expect(screen.getByText('可排期 1/1')).toBeInTheDocument()
+    expect(screen.getByText('已批，等发')).toBeInTheDocument()
     expect(screen.getByText('未排期')).toBeInTheDocument()
     expect(screen.getByText('未发布')).toBeInTheDocument()
     expect(screen.getByText(/不写入旧运营台/)).toBeInTheDocument()
@@ -423,7 +435,15 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     fireEvent.click(await screen.findByRole('button', { name: '生成发布准备回执' }))
 
     await screen.findByText('✓ 发布准备回执已生成')
-    expect(screen.getByText('Inngest 已记录')).toBeInTheDocument()
+    expect(screen.getByText('回执已记录')).toBeInTheDocument()
+    // the auto-publish section is handed this exact plan's identity and the reviewed dates from the receipt
+    const lastProps = autoPublishProps.mock.calls.at(-1)?.[0] as Record<string, unknown>
+    expect(lastProps).toMatchObject({
+      clientId: CLIENT_ID,
+      campaignId: CAMPAIGN_ID,
+      reviewedDates: ['2026-08-24'],
+      queueReceiptReady: true,
+    })
     const postCall = vi.mocked(global.fetch).mock.calls[1]
     expect(postCall[0]).toBe(`/api/clients/${CLIENT_ID}/campaign-daily-plan/publish-queue`)
     expect(JSON.parse(postCall[1]!.body as string)).toMatchObject({
@@ -452,12 +472,21 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
     await screen.findByText('Facebook Post 审核')
 
-    fireEvent.click(screen.getByText('Post 需修改'))
-    expect(await screen.findByText('请先写明需要修改的原因。')).toBeInTheDocument()
+    expect(screen.getByText('Post 需修改').closest('button')).toBeDisabled()
     expect(global.fetch).toHaveBeenCalledTimes(1)
 
     fireEvent.change(screen.getByPlaceholderText('如需修改，请写明原因'), {
       target: { value: 'Use a stronger opening line' },
+    })
+    fireEvent.click(screen.getAllByRole('radio', { name: '不通过' })[2])
+    fireEvent.change(screen.getAllByPlaceholderText('说明未通过原因')[0], {
+      target: { value: 'Logo missing' },
+    })
+    fireEvent.change(screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')[0], {
+      target: { value: 'https://example.test/source' },
+    })
+    fireEvent.change(screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')[1], {
+      target: { value: 'https://example.test/source' },
     })
     fireEvent.click(screen.getByText('Post 需修改'))
 
@@ -475,7 +504,89 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
       date: '2026-08-24',
       verdict: 'NEEDS_REVISION',
       reason: 'Use a stronger opening line',
+      checklist_human: [
+        { key: 'factual_claims_have_source', judge: 'HUMAN', outcome: 'NOT_MEASURED', detail: null, source_ref: 'https://example.test/source' },
+        { key: 'factual_claims_source_verified', judge: 'HUMAN', outcome: 'NOT_MEASURED', detail: null, source_ref: 'https://example.test/source' },
+        { key: 'logo_watermark_present', judge: 'HUMAN', outcome: 'FAIL', detail: 'Logo missing', source_ref: null },
+        { key: 'asset_provenance_labeled', judge: 'HUMAN', outcome: 'NOT_MEASURED', detail: null, source_ref: null },
+        { key: 'asset_provenance_matches_claim_context', judge: 'HUMAN', outcome: 'NOT_MEASURED', detail: null, source_ref: null },
+      ],
     })
+  })
+
+  it('enables Post 通过 only after all human checks are PASS with sources', async () => {
+    mockFetchOnce(reviewPayload())
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+    await screen.findByText('Facebook Post 审核')
+
+    const passButton = screen.getByRole('button', { name: 'Post 通过' })
+    expect(passButton).toBeDisabled()
+
+    const passRadios = screen.getAllByRole('radio', { name: '通过' })
+    passRadios.forEach(radio => fireEvent.click(radio))
+
+    // Still disabled: the two factual checks need a source ref.
+    expect(screen.getByRole('button', { name: 'Post 通过' })).toBeDisabled()
+
+    const sourceInputs = screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')
+    fireEvent.change(sourceInputs[0], { target: { value: 'https://example.test/source' } })
+    fireEvent.change(sourceInputs[1], { target: { value: 'https://example.test/source' } })
+
+    expect(screen.getByRole('button', { name: 'Post 通过' })).toBeEnabled()
+  })
+
+  it('sends verdict PASS with the human checklist', async () => {
+    const first = reviewPayload()
+    const passed = reviewPayload({
+      verdict: 'PASS',
+      reason: null,
+      reviewed_at: '2026-09-01T15:05:00.000Z',
+      is_current: true,
+    })
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => first })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: true, changed: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => passed }) as unknown as typeof fetch
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+    await screen.findByText('Facebook Post 审核')
+
+    screen.getAllByRole('radio', { name: '通过' }).forEach(radio => fireEvent.click(radio))
+    const sourceInputs = screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')
+    fireEvent.change(sourceInputs[0], { target: { value: 'https://example.test/source' } })
+    fireEvent.change(sourceInputs[1], { target: { value: 'https://example.test/source' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Post 通过' }))
+
+    await screen.findByText('✓ Post 已通过')
+    const patchCall = vi.mocked(global.fetch).mock.calls[1]
+    expect(patchCall[0]).toBe(`/api/clients/${CLIENT_ID}/campaign-daily-plan/post-review`)
+    const requestInit = patchCall[1] as RequestInit
+    expect(requestInit.method).toBe('PATCH')
+    const body = JSON.parse(requestInit.body as string)
+    expect(body.verdict).toBe('PASS')
+    expect(body.checklist_human).toHaveLength(5)
+    expect(body.checklist_human.every((item: { outcome: string }) => item.outcome === 'PASS')).toBe(true)
+  })
+
+  it('explains an AUTO_CHECKS_FAILED refusal', async () => {
+    const first = reviewPayload()
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => first })
+      .mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({ success: false, error: 'AUTO_CHECKS_FAILED' }) }) as unknown as typeof fetch
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+    await screen.findByText('Facebook Post 审核')
+
+    screen.getAllByRole('radio', { name: '通过' }).forEach(radio => fireEvent.click(radio))
+    const sourceInputs = screen.getAllByPlaceholderText('来源 HTTPS URL 或 client_asset:<ID>')
+    fireEvent.change(sourceInputs[0], { target: { value: 'https://example.test/source' } })
+    fireEvent.change(sourceInputs[1], { target: { value: 'https://example.test/source' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Post 通过' }))
+
+    await screen.findByText(/正文里含有 CTA 或链接/)
   })
 
   it('shows a persisted PASS as expired when current asset validation no longer holds', async () => {
@@ -490,10 +601,64 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
 
     await screen.findByText('已失效，需重审')
     expect(screen.getByText('Post 已通过 0/1')).toBeInTheDocument()
-    expect(screen.queryByText('已通过')).not.toBeInTheDocument()
+    expect(screen.queryByText('已批')).not.toBeInTheDocument()
   })
 
-  it('makes a current PASS visually obvious and removes the duplicate pass action', async () => {
+  it('does not display an unusable legacy PASS as current', async () => {
+    mockFetchOnce(reviewPayload({
+      verdict: 'PASS',
+      reason: null,
+      reviewed_at: '2026-09-01T15:05:00.000Z',
+      is_current: false,
+    }))
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+
+    await screen.findByText('已失效，需重审')
+    expect(screen.getByText('Post 已通过 0/1')).toBeInTheDocument()
+    expect(screen.getByText(/发布后系统会自动在这条帖子的第一条评论里贴/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Post 通过/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Post 需修改' })).toBeInTheDocument()
+  })
+
+  it('one-click review passes a Post with all five checks and the official link as source', async () => {
+    const first = reviewPayload()
+    const passed = reviewPayload({
+      verdict: 'PASS',
+      reason: null,
+      reviewed_at: '2026-09-01T15:05:00.000Z',
+      is_current: true,
+    })
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => first })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: true, changed: true }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => passed }) as unknown as typeof fetch
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+    await screen.findByText('Facebook Post 审核')
+
+    fireEvent.click(screen.getByRole('button', { name: '按官网核对通过' }))
+
+    await screen.findByText('✓ Post 已通过')
+    const patchCall = vi.mocked(global.fetch).mock.calls[1]
+    expect(patchCall[0]).toBe(`/api/clients/${CLIENT_ID}/campaign-daily-plan/post-review`)
+    const requestInit = patchCall[1] as RequestInit
+    expect(requestInit.method).toBe('PATCH')
+    const body = JSON.parse(requestInit.body as string)
+    expect(body.verdict).toBe('PASS')
+    expect(body.checklist_human).toHaveLength(5)
+    expect(body.checklist_human.every((item: { outcome: string }) => item.outcome === 'PASS')).toBe(true)
+    const byKey = Object.fromEntries(
+      (body.checklist_human as Array<{ key: string; source_ref: string | null }>).map(item => [item.key, item.source_ref]),
+    )
+    expect(byKey.factual_claims_have_source).toBe('https://example.test/tour')
+    expect(byKey.factual_claims_source_verified).toBe('https://example.test/tour')
+    expect(byKey.logo_watermark_present).toBeNull()
+    expect(byKey.asset_provenance_labeled).toBeNull()
+    expect(byKey.asset_provenance_matches_claim_context).toBeNull()
+  })
+
+  it('one-click button is not offered once the Post is passed', async () => {
     mockFetchOnce(reviewPayload({
       verdict: 'PASS',
       reason: null,
@@ -503,63 +668,29 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
 
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
-    await screen.findByText('✓ 这一天的 Facebook Post 已通过')
-    expect(screen.getByText('Post 已通过 1/1')).toBeInTheDocument()
-    expect(screen.getByText('✓ Post 已通过')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Post 通过' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Post 需修改' })).toBeInTheDocument()
+    await screen.findByText('✓ Post 已通过')
+    expect(screen.queryByRole('button', { name: '按官网核对通过' })).not.toBeInTheDocument()
   })
 
-  it('batch-passes pending Posts one at a time using the latest review revision', async () => {
-    const first = reviewPayload()
-    first.days = daysGrid(['2026-08-24', '2026-08-25'])
-    first.bundles = [
-      first.bundles[0],
-      {
-        ...first.bundles[0],
-        date: '2026-08-25',
-        post: { ...first.bundles[0].post, hook: 'Second Post', image_asset_id: 'asset-2' },
-        post_review: null,
-      },
-    ]
-    first.review_summary = { passed: 0, needs_revision: 0, total: 2 }
-    const reviewed = {
-      ...first,
-      review_revision: '30000000-0000-0000-0000-000000000003',
-      bundles: first.bundles.map(bundle => ({
-        ...bundle,
-        post_review: {
-          verdict: 'PASS',
-          reason: null,
-          reviewed_at: '2026-09-01T15:10:00.000Z',
-          is_current: true,
-        },
-      })),
-      review_summary: { passed: 2, needs_revision: 0, total: 2 },
-    }
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: async () => first })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: true, changed: true, review_revision: '20000000-0000-0000-0000-000000000002' }) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ success: true, changed: true, review_revision: '30000000-0000-0000-0000-000000000003' }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => reviewed }) as unknown as typeof fetch
+  it('one-click button is hidden when the Post has no CTA link', async () => {
+    const payload = reviewPayload()
+    payload.bundles[0].post.cta_url = ''
+    mockFetchOnce(payload)
 
     render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: /批量通过未审 Post（2）/ }))
+    await screen.findByText('Facebook Post 审核')
+    expect(screen.queryByRole('button', { name: '按官网核对通过' })).not.toBeInTheDocument()
+  })
 
-    await screen.findByText('全部 Post 已通过')
-    const calls = vi.mocked(global.fetch).mock.calls
-    expect(calls).toHaveLength(4)
-    expect(JSON.parse(calls[1][1]!.body as string)).toMatchObject({
-      date: '2026-08-24',
-      verdict: 'PASS',
-      expected_review_revision: null,
-    })
-    expect(JSON.parse(calls[2][1]!.body as string)).toMatchObject({
-      date: '2026-08-25',
-      verdict: 'PASS',
-      expected_review_revision: '20000000-0000-0000-0000-000000000002',
-    })
+  it('keeps bulk pass unavailable', async () => {
+    mockFetchOnce(reviewPayload())
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+
+    await screen.findByText('Facebook Post 审核')
+    expect(screen.queryByRole('button', { name: /批量通过未审 Post/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/发布后系统会自动在这条帖子的第一条评论里贴/)).toBeInTheDocument()
   })
 
   it('ignores an old client GET that resolves after the panel switches clients', async () => {
@@ -586,5 +717,93 @@ describe('CampaignDailyPlanPanel — inline Facebook Post review (#1308)', () =>
 
     expect(screen.getByText('NEW CLIENT POST')).toBeInTheDocument()
     expect(screen.queryByText('OLD CLIENT POST')).not.toBeInTheDocument()
+  })
+})
+
+describe('CampaignDailyPlanPanel — readiness fold counts only what can be ready', () => {
+  it('says 已就绪 n/7 (the four rows that are always "not yet" are not in the total) and keeps the list in the page', async () => {
+    mockFetchOnce({
+      success: true,
+      campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
+      grounding: { status: 'OK', has_master_brief: true, has_campaign: true },
+      days: daysGrid(['2026-08-24']),
+      bundles: [
+        {
+          date: '2026-08-24',
+          post: { hook: 'h', body: 'b', cta: 'Enquire Now' },
+          story: { frames: [{ order: 1, copy: 'f1' }] },
+          reel: { brief: 'br', script: 'sc', caption: 'c', source_asset_ids: [], media_status: 'NO_MEDIA' },
+          readiness: readiness(),
+          provenance: [],
+        },
+      ],
+      publishing_plan: { conversion_goal: null, destination: 'UNKNOWN', status: 'NOT_AUTHORIZED' },
+      ad_candidate: null,
+    })
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+    await screen.findByText(/就绪检查 · 已就绪 5\/7/)
+    expect(screen.getByText('证据支撑')).toBeInTheDocument()
+    expect(screen.getByText('第三方服务授权')).toBeInTheDocument()
+  })
+})
+
+describe('CampaignDailyPlanPanel — expired drafts are folded, current days stay in the strip', () => {
+  it('puts days before today (NZ) into the folded expired list and lands on a current day', async () => {
+    const dayKey = (offset: number) =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Auckland', year: 'numeric', month: '2-digit', day: '2-digit' })
+        .format(new Date(Date.now() + offset * 86_400_000))
+    const dates = [-3, -2, -1, 0, 1, 2, 3].map(dayKey)
+    const bundle = (date: string, hook: string) => ({
+      date,
+      post: { hook, body: 'b', cta: 'Enquire Now' },
+      story: { frames: [{ order: 1, copy: 'f' }] },
+      reel: { brief: 'br', script: 's', caption: 'c', source_asset_ids: [], media_status: 'NO_MEDIA' },
+      readiness: readiness(),
+      provenance: [],
+    })
+    mockFetchOnce({
+      success: true,
+      campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
+      grounding: { status: 'OK', has_master_brief: true, has_campaign: true },
+      days: dates.map(date => ({ date, slots: { post: 'PLANNED', story: 'PLANNED', reel: 'PLANNED' } })),
+      bundles: dates.map((date, i) => bundle(date, `hook-${i}`)),
+      publishing_plan: { conversion_goal: null, destination: 'UNKNOWN', status: 'NOT_AUTHORIZED' },
+      ad_candidate: null,
+    })
+
+    const { container } = render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+
+    await screen.findByText('hook-3')
+    expect(screen.queryByText('hook-0')).not.toBeInTheDocument()
+    const expired = container.querySelector('details[data-expired-days]')
+    expect(expired?.textContent).toContain('已过期的旧草稿（3 天）')
+    expect(expired?.textContent).toContain(dates[0].slice(5))
+  })
+
+  it('says so when no day is today or later, and keeps the old days reachable', async () => {
+    mockFetchOnce({
+      success: true,
+      campaign: { id: CAMPAIGN_ID, title: 'Christmas Campaign', offer: null, primary_cta: 'Enquire Now' },
+      grounding: { status: 'OK', has_master_brief: true, has_campaign: true },
+      days: daysGrid(['2026-08-24']),
+      bundles: [
+        {
+          date: '2026-08-24',
+          post: { hook: 'old hook', body: 'b', cta: 'Enquire Now' },
+          story: { frames: [{ order: 1, copy: 'f' }] },
+          reel: { brief: 'br', script: 's', caption: 'c', source_asset_ids: [], media_status: 'NO_MEDIA' },
+          readiness: readiness(),
+          provenance: [],
+        },
+      ],
+      publishing_plan: { conversion_goal: null, destination: 'UNKNOWN', status: 'NOT_AUTHORIZED' },
+      ad_candidate: null,
+    })
+
+    render(<CampaignDailyPlanPanel clientId={CLIENT_ID} campaignId={CAMPAIGN_ID} />)
+
+    await screen.findByText('old hook')
+    expect(screen.getByText('今天和之后没有排好的图文。')).toBeInTheDocument()
+    expect(screen.getByText(/已过期的旧草稿（7 天）/)).toBeInTheDocument()
   })
 })

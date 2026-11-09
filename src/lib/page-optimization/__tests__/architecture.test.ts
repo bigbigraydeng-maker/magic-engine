@@ -141,8 +141,8 @@ function stripComments(src: string, fileName = 'scan.ts'): string {
     jsxTextSpans.some((span) => pos >= span.pos && pos < span.end)
 
   const chars = src.split('')
-  // 用 forEach 而不是 `for…of ranges.values()`：仓库 tsconfig 没设 target，
-  // 直接迭代 Map 的迭代器会撞 TS2802（要 downlevelIteration）。
+  // 用 forEach 而不是 `for…of ranges.values()`：直接迭代 Map 的迭代器需要
+  // tsconfig 的 target 够高（否则撞 TS2802），forEach 不挑 target，更稳。
   ranges.forEach((r) => {
     if (startsInsideJsxText(r.pos)) return
     for (let i = r.pos; i < r.end && i < chars.length; i++) {

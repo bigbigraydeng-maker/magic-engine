@@ -58,7 +58,7 @@ function makeActionRow(overrides: Record<string, unknown> = {}) {
 }
 
 function allowAuth() {
-  vi.mocked(requirePaidClientAccess).mockResolvedValue({ ok: true, user: { email: 'test@test.com' } as never, role: 'admin', allowedClientId: null })
+  vi.mocked(requirePaidClientAccess).mockResolvedValue({ ok: true, user: { email: 'test@test.com' } as never, role: 'admin', tier: 'admin', allowedClientId: null })
 }
 
 function denyAuth() {
@@ -189,13 +189,21 @@ describe('GET /api/clients/[id]/zhuge/latest-actions', () => {
       executed_at: '2026-05-20T00:00:00Z',
     }
 
-    // Three sequential from() calls: clients → flywheel_actions (latest) → flywheel_actions (session)
+    // Four sequential from() calls: clients → zhuge_sessions (none, so legacy
+    // fallback) → flywheel_actions (latest) → flywheel_actions (session)
     const clientsMock = {
       select: vi.fn().mockReturnValue({
         eq: vi.fn().mockReturnValue({
           single: vi.fn().mockResolvedValue({ data: { id: CLIENT_ID }, error: null }),
         }),
       }),
+    }
+    const zhugeSessionsMock = {
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      order: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
     }
     const latestMock = {
       select: vi.fn().mockReturnThis(),
@@ -213,6 +221,7 @@ describe('GET /api/clients/[id]/zhuge/latest-actions', () => {
 
     vi.mocked(supabaseAdmin.from)
       .mockReturnValueOnce(clientsMock as unknown as ReturnType<typeof supabaseAdmin.from>)
+      .mockReturnValueOnce(zhugeSessionsMock as unknown as ReturnType<typeof supabaseAdmin.from>)
       .mockReturnValueOnce(latestMock as unknown as ReturnType<typeof supabaseAdmin.from>)
       .mockReturnValueOnce(sessionMock as unknown as ReturnType<typeof supabaseAdmin.from>)
 
@@ -237,6 +246,16 @@ describe('GET /api/clients/[id]/zhuge/latest-actions', () => {
               single: vi.fn().mockResolvedValue({ data: { id: CLIENT_ID }, error: null }),
             }),
           }),
+        } as unknown as ReturnType<typeof supabaseAdmin.from>
+      }
+      if (table === 'zhuge_sessions') {
+        // No persisted session → route falls back to legacy flywheel_actions
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          order: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
         } as unknown as ReturnType<typeof supabaseAdmin.from>
       }
       return {

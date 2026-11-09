@@ -108,7 +108,7 @@ describe('CompetitorSnapshotAdapter.pullMetrics()', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]).toMatchObject({
       clientId:   CLIENT_ID,
-      flywheel:   'competitor',
+      flywheel:   'seo',   // 竞品归 seo 轮：flywheel_name 枚举里没有 'competitor'
       metricKey:  COMPETITOR_METRIC_KEY.ORGANIC_TRAFFIC,
       metricValue: 12000,
       source:     'dataforseo',

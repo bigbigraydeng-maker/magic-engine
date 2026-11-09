@@ -43,6 +43,14 @@
  */
 
 import { RISK_CATEGORY } from './risk.mjs'
+import {
+  checkTrialRunElements,
+  extractTrialRunSection,
+  findCannotRunExit,
+  parseLedgerVerifyBy,
+  scheduledCodeInPatch,
+  workflowHasSchedule,
+} from './trial-run.mjs'
 
 /**
  * Codex quality reporting status. Reported verbatim so a summary never implies
@@ -108,6 +116,14 @@ export const SPECIALIZED_EVIDENCE = {
   [RISK_CATEGORY.SUPPLY_CHAIN]: {
     id: 'dependency-evidence',
     label: '新增依赖的必要性、来源与锁文件变更已说明',
+  },
+  [RISK_CATEGORY.GOVERNANCE]: {
+    id: 'governance-evidence',
+    label: '规则改动已由人读过：改的是哪条规矩、谁拍板、旧规矩为什么作废，已写明',
+  },
+  [RISK_CATEGORY.BUILD_RUNTIME]: {
+    id: 'build-runtime-evidence',
+    label: '构建 / 运行时配置改了哪一项、影响哪些环境、怎么回退，已写明',
   },
   [RISK_CATEGORY.UNREADABLE]: {
     id: 'manual-rating-evidence',
@@ -466,4 +482,311 @@ export function decideReadiness({ risk, score, gates, observedSignals } = {}) {
     blockers,
     productDecisionReason: null,
   }
+}
+
+// --- 当场试跑 (trial-run) gate --------------------------------------------
+//
+// PM rule 2026-09-26: anything that will run automatically later must be
+// triggered once, end to end, before it counts as done. `check-risk-gate.mjs`
+// calls ONLY the pure functions below — never `scoreDelivery`, which throws on
+// an unknown signal and would turn one bad input into every PR going red.
+//
+// The path table lives here, not in `risk.mjs`: it answers "does this PR owe a
+// trial-run record", which is a different question from "how risky is it".
+
+/**
+ * Paths whose changes will run automatically later. `workflowSchedule` means
+ * a top-level workflow file whose head version has `on.schedule`.
+ */
+export const TRIAL_RUN_PATH_RULES = [
+  { exact: 'render.yaml', why: '生产服务与 cron 调度' },
+  { prefix: 'src/app/api/cron/', why: '生产定时任务路由' },
+  { prefix: 'src/lib/cron/', why: '生产定时任务注册与调度' },
+  // Whole directory, not just `functions/`: the client, serve guard and
+  // registry decide what runs too (狄仁杰 DR78-1, #2078).
+  { prefix: 'src/lib/inngest/', why: 'Inngest 后台 / 定时函数与注册' },
+  { prefix: 'src/app/api/inngest/', why: 'Inngest 注册入口' },
+  { prefix: 'scripts/factory-worker/inngest-', why: '工厂 worker 的 Inngest 函数' },
+  { prefix: 'scripts/auto-dev/', why: '自动开发通道脚本' },
+  // Called daily by a scheduled job; its output is the PM's 今日待办 (子牙, #2078).
+  { prefix: 'src/lib/pm-todo/', why: '每天定时生成的今日待办' },
+  { workflowSchedule: true, why: '带 schedule 的 GitHub 工作流' },
+]
+
+/** A workflow GitHub actually loads: directly under `.github/workflows/`. */
+export const WORKFLOW_FILE = /^\.github\/workflows\/[^/]+\.ya?ml$/
+
+/** Test-only files never run on a schedule; changing them owes no trial run. */
+const TEST_FILE = /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?$/
+
+/** Files whose added lines are scanned for scheduled-work markers. */
+const CODE_FILE = /\.([cm]?[jt]sx?|sh|py)$/
+
+/** How far ahead a "当场跑不了" card may promise its check. */
+export const CANNOT_RUN_MAX_DAYS = 7
+
+const LEDGER_CARD = /^docs\/ledger\/(\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*)\.md$/
+
+/**
+ * @param {{exact?: string, prefix?: string}} rule
+ * @param {string} path
+ */
+function trialPathRuleMatches(rule, path) {
+  if (rule.exact !== undefined) return path === rule.exact
+  if (rule.prefix !== undefined) return path.startsWith(rule.prefix)
+  return false
+}
+
+/**
+ * Every "will run automatically" hit in the diff. A workflow whose content we
+ * could not read (`contents[path]` missing or null) counts as a hit: "we could
+ * not tell" must not read as "not scheduled".
+ *
+ * @param {unknown} files
+ * @param {Record<string, string|null>} contents
+ * @returns {string[]} one human-readable line per hit
+ */
+function trialRunHits(files, contents) {
+  if (!Array.isArray(files) || files.length === 0) {
+    return ['改动清单读不到 —— 分不清有没有改到定时任务，按需要试跑处理']
+  }
+  const hits = []
+  for (const entry of files) {
+    const filename = entry?.filename
+    if (typeof filename !== 'string' || filename === '') {
+      hits.push('改动清单里有一项没有文件名 —— 按需要试跑处理')
+      continue
+    }
+    // A deleted scheduled job owes no trial run. A rename is NOT a deletion:
+    // it keeps `renamed` and both ends are checked below.
+    if (entry.status === 'removed') continue
+    const previous = typeof entry.previous_filename === 'string' ? entry.previous_filename : ''
+    for (const path of previous ? [filename, previous] : [filename]) {
+      if (TEST_FILE.test(path)) continue
+      const rule = TRIAL_RUN_PATH_RULES.find((r) => trialPathRuleMatches(r, path))
+      if (rule) hits.push(`${path}（${rule.why}）`)
+    }
+    if (WORKFLOW_FILE.test(filename)) {
+      const scheduled = workflowHasSchedule(contents[filename] ?? null)
+      if (scheduled === true) hits.push(`${filename}（带 schedule 的 GitHub 工作流）`)
+      if (scheduled === null) hits.push(`${filename}（工作流内容读不到或判不了有没有 schedule —— 按需要试跑处理）`)
+    }
+    const scan = scanAddedCode(entry, filename)
+    if (scan) hits.push(scan)
+  }
+  return hits
+}
+
+/**
+ * A job can be scheduled from anywhere: a new `createFunction(` or a changed
+ * `*_CRON =` outside the path table rated B and owed no record (DR78-1 /
+ * DR78-2, #2078). So the lines a diff adds are scanned too. A code file under
+ * `src/` or `scripts/` whose patch GitHub left out (large diffs) cannot be
+ * scanned and counts as a hit; one with zero changed lines (a pure rename)
+ * has nothing to scan.
+ *
+ * @param {Record<string, unknown>} entry
+ * @param {string} filename
+ * @returns {string|null}
+ */
+function scanAddedCode(entry, filename) {
+  if (!CODE_FILE.test(filename) || TEST_FILE.test(filename)) return null
+  const found = scheduledCodeInPatch(entry.patch)
+  if (found === null) {
+    if (Number(entry.changes) === 0) return null
+    if (!/^(src|scripts)\//.test(filename)) return null
+    return `${filename}（GitHub 没给出这份改动的内容，查不了有没有新增定时 / 后台任务 —— 按需要试跑处理）`
+  }
+  return found.length > 0 ? `${filename}（新增行里有定时 / 后台任务写法：${found.join('、')}）` : null
+}
+
+/**
+ * Which files the gate must read at the PR head before `evaluateTrialRun` can
+ * decide: every changed top-level workflow, and every ledger card this PR adds
+ * (a "当场跑不了" exit may cite it).
+ *
+ * @param {{files?: unknown}} input
+ * @returns {string[]}
+ */
+export function planTrialRunReads({ files } = {}) {
+  if (!Array.isArray(files)) return []
+  const paths = []
+  for (const entry of files) {
+    const filename = entry?.filename
+    if (typeof filename !== 'string' || entry.status === 'removed') continue
+    if (WORKFLOW_FILE.test(filename)) paths.push(filename)
+    else if (entry.status === 'added' && LEDGER_CARD.test(filename)) paths.push(filename)
+  }
+  return paths
+}
+
+/**
+ * @param {string} today YYYY-MM-DD
+ * @param {number} days
+ * @returns {string}
+ */
+function addDays(today, days) {
+  const d = new Date(`${today}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Check the "当场跑不了" exit: it must cite a ledger card this PR adds, whose
+ * `verify_by` falls between today and today + 7 days.
+ *
+ * @param {{cardIds: string[]}} exit
+ * @param {unknown[]} files
+ * @param {Record<string, string|null>} contents
+ * @param {string} today
+ * @returns {{ok: boolean, problems: string[]}}
+ */
+function checkCannotRunExit(exit, files, contents, today) {
+  const added = new Set(
+    files.filter((f) => f?.status === 'added' && typeof f.filename === 'string').map((f) => f.filename),
+  )
+  const cited = exit.cardIds.filter((id) => added.has(`docs/ledger/${id}.md`))
+  if (cited.length === 0) {
+    return { ok: false, problems: ['写了「当场跑不了」，但段里没引用本 PR 新增的台账卡（docs/ledger/<id>.md）'] }
+  }
+  const latest = addDays(today, CANNOT_RUN_MAX_DAYS)
+  const problems = []
+  for (const id of cited) {
+    const verifyBy = parseLedgerVerifyBy(contents[`docs/ledger/${id}.md`] ?? null)
+    if (verifyBy === null) problems.push(`台账卡 ${id} 读不到或没有合法的 verify_by`)
+    else if (verifyBy < today) problems.push(`台账卡 ${id} 的 verify_by（${verifyBy}）已过期，改成首次自动运行当天`)
+    else if (verifyBy > latest) problems.push(`台账卡 ${id} 的 verify_by（${verifyBy}）晚于 ${latest}，改成首次自动运行当天（最多 ${CANNOT_RUN_MAX_DAYS} 天内）`)
+    else return { ok: true, problems: [] }
+  }
+  return { ok: false, problems }
+}
+
+/**
+ * Does this PR owe a trial-run record, and does its body carry one?
+ *
+ * Checks presence and shape only — a made-up record passes. Reviewers judge
+ * whether it is true; every summary says so.
+ *
+ * @param {{files?: unknown, body?: unknown, contents?: Record<string, string|null>|null, today?: string}} input
+ * @returns {{required: boolean, satisfied: boolean, via: 'record'|'exit'|null, hits: string[], problems: string[]}}
+ */
+export function evaluateTrialRun({ files, body, contents, today } = {}) {
+  const read = contents && typeof contents === 'object' ? contents : {}
+  const hits = trialRunHits(files, read)
+  if (hits.length === 0) return { required: false, satisfied: true, via: null, hits, problems: [] }
+
+  const section = extractTrialRunSection(body)
+  if (section === null) {
+    return { required: true, satisfied: false, via: null, hits, problems: ['PR 正文没有「## 当场试跑」段'] }
+  }
+  const elements = checkTrialRunElements(section)
+  if (elements.missing.length === 0) return { required: true, satisfied: true, via: 'record', hits, problems: [] }
+
+  const exit = findCannotRunExit(section)
+  if (exit && Array.isArray(files) && typeof today === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(today)) {
+    const result = checkCannotRunExit(exit, files, read, today)
+    if (result.ok) return { required: true, satisfied: true, via: 'exit', hits, problems: [] }
+    return { required: true, satisfied: false, via: null, hits, problems: result.problems }
+  }
+  return {
+    required: true,
+    satisfied: false,
+    via: null,
+    hits,
+    problems: [`「## 当场试跑」段缺：${elements.missing.join('、')}`],
+  }
+}
+
+/**
+ * The trial-run result to use when the check itself blew up. Still blocks —
+ * an error is never a pass — but says why, instead of crashing the gate.
+ *
+ * @param {string} message
+ */
+export function trialRunCheckFailed(message) {
+  return {
+    required: true,
+    satisfied: false,
+    via: null,
+    hits: [],
+    problems: [`试跑检查自身出错：${message}`],
+  }
+}
+
+/**
+ * Fold the trial-run result into a merge decision. It can only make the
+ * decision stricter: a PR that owes a trial run and lacks one is blocked with
+ * auto-merge off, whatever its risk or sign-offs. It never produces `enable`.
+ *
+ * Fail closed: only an explicit `required: false`, or `satisfied: true`, lets
+ * the decision through unchanged.
+ *
+ * @param {{decision?: any, trialRun?: any}} input
+ */
+export function applyTrialRunToDecision({ decision, trialRun } = {}) {
+  const ok = trialRun && typeof trialRun === 'object' && (trialRun.required === false || trialRun.satisfied === true)
+  if (ok && decision && typeof decision === 'object') return decision
+  const problems =
+    trialRun && Array.isArray(trialRun.problems) && trialRun.problems.length > 0
+      ? trialRun.problems.map(String)
+      : ['试跑检查结果读不到']
+  const trialReason = `当场试跑不合格 —— ${problems.join('；')}`
+  // Already blocked for another reason (draft, fork, A without sign-off):
+  // keep that reason first — it is the one to act on (魏征 W78-1, #2078).
+  const earlier =
+    decision && typeof decision === 'object' && decision.pass === false && typeof decision.reason === 'string'
+      ? decision.reason
+      : null
+  return {
+    pass: false,
+    decision: 'disable',
+    tier: 'blocked',
+    reason: earlier ? `${earlier}；另：${trialReason}` : trialReason,
+  }
+}
+
+/**
+ * The whole trial-run evaluation, with the file reader injected. Never
+ * throws: a failing reader or unexpected input becomes a blocking result that
+ * says what went wrong (子牙 PR2 design review, item 1; 魏征 W78-5).
+ *
+ * @param {{files?: unknown, body?: unknown, today?: string, readFiles?: (paths: string[]) => Promise<Record<string, string|null>>}} input
+ */
+export async function evaluateTrialRunSafely({ files, body, today, readFiles } = {}) {
+  try {
+    // A missing `readFiles` throws here and lands in the catch like any other failure.
+    const contents = await /** @type {Function} */ (readFiles)(planTrialRunReads({ files }))
+    return evaluateTrialRun({ files, body, contents, today })
+  } catch (err) {
+    return trialRunCheckFailed(err instanceof Error ? err.message : String(err))
+  }
+}
+
+/**
+ * Summary lines for the Risk gate report, in plain Chinese.
+ *
+ * @param {any} trialRun
+ * @returns {string[]}
+ */
+export function describeTrialRun(trialRun) {
+  if (!trialRun || typeof trialRun !== 'object') return ['- 当场试跑：检查结果读不到 —— 按不合格处理']
+  if (trialRun.required === false) return ['- 当场试跑：不涉及（没改「以后会自动跑」的文件）']
+  const hits = Array.isArray(trialRun.hits) ? trialRun.hits : []
+  const lines = [`- 当场试跑：改到了「以后会自动跑」的文件 —— ${hits.slice(0, 5).join('；') || '（清单读不到）'}${hits.length > 5 ? ` 等 ${hits.length} 处` : ''}`]
+  if (trialRun.satisfied === true) {
+    lines.push(
+      trialRun.via === 'exit'
+        ? '  - 走「当场跑不了」出口：原因已写，并引用了本 PR 新增、7 天内到期的台账卡'
+        : '  - 「## 当场试跑」段齐了（触发方式 / 时间 / 状态）',
+    )
+  } else {
+    const problems = Array.isArray(trialRun.problems) ? trialRun.problems : []
+    lines.push(`  - ❌ ${problems.join('；') || '不合格'} → 本检查红、自动合并关闭`)
+    lines.push(
+      '  - 补法：在 PR 正文加「## 当场试跑」段，写「触发方式：… / 时间：… / 状态：…」；确实当场跑不了，写「当场跑不了：原因」并在本 PR 新增一张台账卡（verify_by = 首次自动运行当天，7 天内），段里写上卡的 id',
+    )
+  }
+  lines.push('  - 注意：机器只查段落在不在、格式对不对，试跑真假由审查人核对')
+  lines.push('  - 范围：只看直接改到的定时 / 后台任务文件和新增的定时写法，不追踪它们调用的代码')
+  return lines
 }

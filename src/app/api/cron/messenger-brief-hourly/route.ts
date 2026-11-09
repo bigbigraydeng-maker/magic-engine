@@ -1,83 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
-import { startCronRun } from '@/lib/cron/run-logger'
 import {
-  shouldGenerateBrief,
-  generateBrief,
-  storeBrief,
-  type BriefCandidate,
-  type StoredMessage,
-} from '@/lib/messenger/brief'
-import { autoTagQualifiedBuyers, type AutoTagResult } from '@/lib/crm/qualified-buyer-autotag'
-import { inferStagesFromConversations, type StageInferResult } from '@/lib/crm/stage-infer'
+  loadDueBriefs,
+  generateDueBriefs,
+  runPostBriefSweeps,
+} from '@/lib/messenger/brief-cycle'
 
 /**
- * GET /api/cron/messenger-brief-hourly
+ * GET /api/cron/messenger-brief-hourly —— **手动补触发**客户需求卡。
  *
- * Hourly cron — writes the customer brief for every settled Messenger thread
- * that has moved on since its last brief. Trigger rules live in lib/messenger/brief.
+ * 🔴 **定时不再走这条路由**（2026-09-07 改）。每小时的写卡由 Inngest 上的
+ *    `cloud-messenger-brief-after-sync` 干：私信同步跑完发一张条子，它收到就写。
  *
- * 简报写完后跑第二遍：把够格的人自动标成「真买家」（lib/crm/qualified-buyer）。
- * 挂在这里而不是新开一个 cron，是因为规则要读刚写好的简报，而且新 cron 要手工
- * link 密钥的环境变量组、漏了会每天静默 401。第二遍失败不影响简报那一遍。
+ * 🔴 **原来的走法坏了 14 天**：`render.yaml` 里是 `curl 私信同步 && curl 本路由`，
+ *    而那个 `&&` 守的是 curl 的退出码 —— 回答的是「网关有没有在超时前给我响应」，
+ *    不是「同步有没有跑完」。同步 2026-08-17 起每轮约 140 秒、网关约 125 秒掐断返 524，
+ *    于是本路由**从 2026-08-23 起一次都没被执行过**，销售的客户需求卡停在 8 月 23 号。
+ *    判据换成条子之后，响应超不超时跟写不写卡完全无关。
+ *    整段来龙去脉见 `@/lib/messenger/sync-completed-event`。
  *
- * 第三遍：读已有的邮件 / 私信 / 电话记录，把**空着**的「跟进到哪一步」填上
- * （lib/crm/stage-infer）。挂这里同上一条理由。候选人只从 stage 为空的里挑，
- * 填一个少一个，跑完之后每小时捞到 0 个、一次模型调用都不发生。
+ * 🔴 **本路由不写 `cron_run_logs`**：运行记录是「定时器有没有按时跑」的证据。
+ *    手动补触发写进去，会把「人手点了一下」伪装成「定时链路正常」——
+ *    正好盖住这次要监控的那件事。定时那条的运行记录由 Inngest 函数写。
+ *
+ * 🔴 **一轮不许在一个请求里跑完**：整轮 160~210 秒，网关约 125 秒就掐。本路由按
+ *    `BRIEFS_PER_CHUNK` 分批只是为了跟定时那条走同一套判据，**它自己仍然可能超时** ——
+ *    超时了服务端照样跑完，只是你看不到那个 JSON。要看结果就查 `conversation_briefs`。
  *
  * Auth: Bearer ${CRON_SECRET}
  */
 
 export const maxDuration = 800
 
-/**
- * Ceiling on model calls per run. A backlog drains over subsequent hours rather
- * than turning one bad run into an unbounded bill.
- */
-const MAX_BRIEFS_PER_RUN = 50
-
-interface ConversationRow {
-  id: string
-  client_id: string
-  message_count: number
-  last_message_at: string | null
-  last_message_from: string | null
-  conversation_briefs: {
-    source_message_count: number
-    regen_count: number
-    regen_count_date: string | null
-  }[]
-}
-
-function toCandidate(row: ConversationRow): BriefCandidate {
-  const brief = row.conversation_briefs?.[0]
-  return {
-    conversationId: row.id,
-    clientId: row.client_id,
-    messageCount: row.message_count,
-    lastMessageAt: row.last_message_at,
-    existingBriefMessageCount: brief?.source_message_count ?? null,
-    regenCount: brief?.regen_count ?? 0,
-    regenCountDate: brief?.regen_count_date ?? null,
-  }
-}
-
-async function loadMessages(conversationId: string): Promise<StoredMessage[]> {
-  const { data } = await supabaseAdmin
-    .from('conversation_messages')
-    .select('direction, sender_name, body, sent_at')
-    .eq('conversation_id', conversationId)
-    .order('sent_at', { ascending: true })
-
-  return (data ?? []).map((m) => ({
-    direction: m.direction as 'inbound' | 'outbound',
-    senderName: m.sender_name,
-    body: m.body ?? '',
-    sentAt: m.sent_at,
-  }))
-}
-
-export async function GET(req: NextRequest) {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   const cronSecret = process.env.CRON_SECRET
   if (!cronSecret) {
     return NextResponse.json(
@@ -90,99 +44,31 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const run = await startCronRun('messenger-brief-hourly')
   const now = new Date()
 
-  const { data, error } = await supabaseAdmin
-    .from('conversations')
-    .select(
-      'id, client_id, message_count, last_message_at, last_message_from, conversation_briefs(source_message_count, regen_count, regen_count_date)',
-    )
-    .gt('message_count', 0)
-    // 只认私信。这个任务写出来的是「Facebook 私信简报」，喂邮件进去会得到一张
-    // 说错渠道的卡，而销售会照着它去 Messenger 找一个从没在那说过话的人。
-    .eq('channel', 'messenger')
-    .order('last_message_at', { ascending: false })
-    .limit(500)
-
-  if (error) {
-    await run.finish({ error: error.message })
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  const rows = (data ?? []) as ConversationRow[]
-  const byId = new Map(rows.map((r) => [r.id, r]))
-
-  const due = rows
-    .map(toCandidate)
-    .filter((c) => shouldGenerateBrief(c, now))
-    .slice(0, MAX_BRIEFS_PER_RUN)
-
-  let generated = 0
-  let failed = 0
-
-  for (const candidate of due) {
-    try {
-      const messages = await loadMessages(candidate.conversationId)
-      if (messages.length === 0) continue
-      const row = byId.get(candidate.conversationId)!
-      const brief = await generateBrief(messages, {
-        awaitingReply: row.last_message_from === 'customer',
-        hoursSinceLastMessage: candidate.lastMessageAt
-          ? Math.round((now.getTime() - new Date(candidate.lastMessageAt).getTime()) / 3_600_000)
-          : 0,
-      })
-      await storeBrief(candidate, brief, now)
-      generated++
-    } catch (err) {
-      failed++
-      console.error(`[messenger/brief] ${candidate.conversationId} failed:`, err)
-    }
-  }
-
-  // 第二遍：自动标真买家。整轮失败也只记一笔，简报那一遍已经写完了，不回滚。
-  let qualifiedBuyers: AutoTagResult | { error: string }
+  let due
   try {
-    qualifiedBuyers = await autoTagQualifiedBuyers(now)
+    due = await loadDueBriefs(now)
   } catch (err) {
-    qualifiedBuyers = { error: err instanceof Error ? err.message : String(err) }
-    console.error('[crm/qualified-buyer] 自动打标整轮失败:', err)
+    const message = err instanceof Error ? err.message : String(err)
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 
-  /**
-   * 第三遍：读往来内容填空着的阶段。
-   *
-   * 放在最后：它是三遍里唯一「可以整轮不跑也没关系」的 —— 简报和真买家都直接
-   * 影响销售今天看到什么，而阶段是空的本来就已经空了两个月。整轮失败只记一笔。
-   */
-  let stageInfer: StageInferResult | { error: string }
-  try {
-    stageInfer = await inferStagesFromConversations(now)
-  } catch (err) {
-    stageInfer = { error: err instanceof Error ? err.message : String(err) }
-    console.error('[crm/stage-infer] 读往来填阶段整轮失败:', err)
-  }
-
-  await run.finish({
-    processed: due.length,
-    completed: generated,
-    failed,
-    summary: {
-      candidates: due.length,
-      generated,
-      failed,
-      capped: MAX_BRIEFS_PER_RUN,
-      qualifiedBuyers,
-      stageInfer,
-    },
-  })
+  // 🔴 时间预算按本路由自己的 `maxDuration`（800 秒）来，不用 `CHUNK_TIME_BUDGET_MS`
+  //    的 90 秒。那 90 秒是给 Inngest**一段**用的（段必须在网关约 125 秒内返回）；
+  //    本路由是手动补触发，整轮一口气跑完才是它存在的意义 —— 用 90 秒会让补触发
+  //    每次只补掉 1/3，剩下的又要人再点一次。
+  const { generated, failed, aborted } = await generateDueBriefs(due, now, { budgetMs: 700_000 })
+  // 账户级故障（余额用光 / 密钥被拒）那一轮不跑扫尾：它们要读刚写好的卡，而这一轮没写完。
+  const sweeps = aborted ? null : await runPostBriefSweeps(now)
 
   return NextResponse.json({
-    ok: true,
+    ok: aborted === null,
+    trigger: 'manual',
     candidates: due.length,
     generated,
     failed,
-    qualifiedBuyers,
-    stageInfer,
+    aborted,
+    ...(sweeps ?? {}),
   })
 }

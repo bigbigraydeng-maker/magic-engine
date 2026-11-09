@@ -40,12 +40,17 @@ export async function GET(
 
   // Goal 下拉:只给活跃的。pickFactoryGoal 对不在活跃列表里的 id 会静默退回「最新活跃
   // Goal」——填错不会报错,只会安静地按错的战略量产,所以从源头限制成选择而非输入。
-  const { data: goals } = await supabaseAdmin
+  const { data: goals, error: goalsError } = await supabaseAdmin
     .from('goals')
     .select('id, title')
     .eq('client_id', clientId)
     .eq('status', 'active')
     .order('created_at', { ascending: false })
+  // 🔴 这条查询失败绝不能当空数组处理:前端 FactoryConfigPanel 把「找不到匹配的
+  // active_goals」当成「这个 factory_goal_id 已失效」并在下次保存时清空它——如果只是
+  // 这次查询偶发抖动,会把一个仍然有效的 Goal 真的从数据库里抹掉,后果从「下拉框显示
+  // 错」升级成「数据丢」。查询失败就整个请求失败,不许假装"这个客户没有活跃目标"。
+  if (goalsError) return NextResponse.json({ error: 'Failed to load active goals' }, { status: 500 })
 
   return NextResponse.json({
     config: projectFactoryConfig(data.factory_config),

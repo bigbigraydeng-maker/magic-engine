@@ -47,7 +47,11 @@ function stubDb(over: Partial<Fake> = {}) {
   const f: Fake = {
     candidates: [{ id: CONTACT, client_id: CLIENT }],
     stages: ['new', 'contacted', 'quoted', 'deferred', 'no_response', 'traveling_soon'],
-    messages: [{ direction: 'inbound', body: CUSTOMER_LINE, sent_at: '2026-08-01T00:00:00Z' }],
+    messages: [
+      { direction: 'inbound', body: CUSTOMER_LINE, sent_at: '2026-08-01T00:00:00Z' },
+      // 真人隔天回的（不是两分钟内的自动回复）—— 「已联系 / 已报价」要有这个才落。
+      { direction: 'outbound', body: 'Hi, happy to help with that.', sent_at: '2026-08-02T00:00:00Z' },
+    ],
     updated: 1,
     ...over,
   }
@@ -422,5 +426,24 @@ describe('读不出来 → 潜在客户池', () => {
     const r = await inferStagesFromConversations(NOW, ask)
     expect(written.stage).toBeUndefined()
     expect(r.toPool).toBe(0)
+  })
+})
+
+describe('只有客人自己的话（含表单回声）时，不许落「已联系 / 已报价」（2026-11-03）', () => {
+  it('模型判已联系，但库里没有真人联系记录 → 不落，进潜在客户池', async () => {
+    const echo = 'Hello! I filled out your form and would like to know more about your business.'
+    stubDb({
+      messages: [
+        { direction: 'inbound', body: echo + ' Which tour interests you most?: Golden China', sent_at: '2026-08-01T00:00:00Z' },
+        { direction: 'inbound', body: CUSTOMER_LINE, sent_at: '2026-08-01T00:00:10Z' },
+        { direction: 'outbound', body: 'Thank you for contacting us.', sent_at: '2026-08-01T00:00:12Z' },
+      ],
+    })
+    answer({ stage: 'contacted', evidence: CUSTOMER_LINE, reason: '客户在聊' })
+
+    const r = await inferStagesFromConversations(NOW, ask)
+    expect(written.stage).toBe('new')
+    expect(r.toPool).toBe(1)
+    expect(r.rejected).toBe(1)
   })
 })

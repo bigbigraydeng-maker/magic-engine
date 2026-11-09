@@ -219,12 +219,11 @@ async function generateWithQualityRetry(
     try {
       const audit = await auditReelsDraft(lastContent.fb_caption, auditMeta)
 
-      if (!audit) break  // skipped (no API key) — proceed without retry
-
       qualityScore = audit.rubricResult.overallScore
       contextSnapshot = { ...audit.contextSnapshot, attempts: attempt }
 
-      if (audit.rubricResult.pass || attempt === MAX_ATTEMPTS) {
+      // retryable=false: only the content-guard judge was unavailable — a rewrite cannot fix that.
+      if (audit.rubricResult.pass || attempt === MAX_ATTEMPTS || !audit.retryable) {
         if (!audit.rubricResult.pass) {
           console.warn(
             `[reels quality] Draft failed quality threshold after ${attempt} attempt(s)` +

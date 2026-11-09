@@ -83,7 +83,7 @@ export async function collectChatGPT(question: Question): Promise<CollectionResu
 
     // Reuse existing parser. For industry-level we don't have a single
     // "client brand" — pass an empty string and ignore client_brand_rank.
-    const parsed = await parseRanking({ rawResponse: answer, clientBrandName: '___NONE___' })
+    const parsed = await parseRanking({ rawResponse: answer, clientBrandName: '' })
 
     const brands = parsed.brands.map(b => b.brand)
     const top3 = parsed.brands
@@ -132,12 +132,10 @@ async function collectDataForSeoPair(question: Question): Promise<SerpPair> {
   // dropping them. Without this, city questions get country-level SERP and
   // zh questions get English-locale SERP — both errors would be permanently
   // locked into the time series by locked_at on first successful collection.
-  const language = question.language === 'zh' ? 'zh-CN' : 'en'
-
   try {
     const serp = await getSerpPage(question.question_text, country, {
       city: question.city,
-      language,
+      language: question.language,
     })
     const half = DATAFORSEO_COST_PER_CALL / 2  // amortize one API call across two snapshot rows
 
@@ -166,7 +164,7 @@ async function collectDataForSeoPair(question: Question): Promise<SerpPair> {
     } else {
       const parsed = await parseRanking({
         rawResponse: serp.ai_overview_text,
-        clientBrandName: '___NONE___',
+        clientBrandName: '',
       })
       const aiBrands = parsed.brands.map(b => b.brand)
       const aiTop3 = parsed.brands

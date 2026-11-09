@@ -27,9 +27,82 @@ describe('projectFactoryConfig — 投影', () => {
       allow_b_track_landmark_ads: false, auto_order_enabled: false,
       creative_profile: EMPTY_CREATIVE_PROFILE,
       creative_recipe: null,
+      render: null,
     })
     expect(projectFactoryConfig(null).publish_target).toBeNull()
     expect(projectFactoryConfig(null).creative_recipe).toBeNull()
+    expect(projectFactoryConfig(null).render).toBeNull()
+  })
+
+  it('render:配了 engine=creatomate 但模板槽位不合法 → creatomate 投影为 null（不把半个对象丢给前端）', () => {
+    expect(
+      projectFactoryConfig({ render: { engine: 'creatomate', creatomate: { template_id: 'tmpl-1' } } }).render,
+    ).toEqual({ engine: 'creatomate', creatomate: null })
+  })
+
+  it('render:合法配置原样投影，camelCase 供内存使用', () => {
+    const r = projectFactoryConfig({
+      render: {
+        engine: 'creatomate',
+        creatomate: { template_id: 'tmpl-1', scene_field_map: [{ visual: 'Video-1' }], output_width: 1080, output_height: 1920, output_frame_rate: 30 },
+      },
+    }).render
+    expect(r).toEqual({
+      engine: 'creatomate',
+      creatomate: { templateId: 'tmpl-1', sceneFieldMap: [{ visual: 'Video-1' }], outputWidth: 1080, outputHeight: 1920, outputFrameRate: 30 },
+    })
+  })
+
+  it('render.creatomate.required_post_fields（2026-09-13 新增）：合法 string[] 原样投影为 requiredPostFields', () => {
+    const r = projectFactoryConfig({
+      render: {
+        engine: 'creatomate',
+        creatomate: { template_id: 'tmpl-1', scene_field_map: [{ visual: 'Video-1' }], required_post_fields: ['EndTour', 'EndDate'] },
+      },
+    }).render as { creatomate: { requiredPostFields?: string[] } | null } | null
+    expect(r?.creatomate?.requiredPostFields).toEqual(['EndTour', 'EndDate'])
+  })
+
+  it('required_post_fields 混了非字符串（脏数据）→ 投影为 undefined，不半收半弃', () => {
+    const r = projectFactoryConfig({
+      render: {
+        engine: 'creatomate',
+        creatomate: { template_id: 'tmpl-1', scene_field_map: [{ visual: 'Video-1' }], required_post_fields: ['EndTour', 123] },
+      },
+    }).render as { creatomate: { requiredPostFields?: string[] } | null } | null
+    expect(r?.creatomate?.requiredPostFields).toBeUndefined()
+  })
+
+  it('render.creatomate.offers/post_field_sources（2026-09-13 新增）：合法嵌套 Record 原样投影', () => {
+    const r = projectFactoryConfig({
+      render: {
+        engine: 'creatomate',
+        creatomate: {
+          template_id: 'tmpl-1',
+          scene_field_map: [{ visual: 'Video-1' }],
+          offers: { default: { tour: 'Best of China', price_line: 'From NZD $4,080 pp' } },
+          post_field_sources: { EndTour: 'tour', EndMeta: 'price_line' },
+        },
+      },
+    }).render as {
+      creatomate: { offers?: Record<string, Record<string, string>>; postFieldSources?: Record<string, string> } | null
+    } | null
+    expect(r?.creatomate?.offers).toEqual({ default: { tour: 'Best of China', price_line: 'From NZD $4,080 pp' } })
+    expect(r?.creatomate?.postFieldSources).toEqual({ EndTour: 'tour', EndMeta: 'price_line' })
+  })
+
+  it('offers 某个档位混了非字符串值（脏数据）→ 整个 offers 投影为 undefined，不半收半弃', () => {
+    const r = projectFactoryConfig({
+      render: {
+        engine: 'creatomate',
+        creatomate: {
+          template_id: 'tmpl-1',
+          scene_field_map: [{ visual: 'Video-1' }],
+          offers: { default: { tour: 'Best of China', price_line: 4080 } },
+        },
+      },
+    }).render as { creatomate: { offers?: unknown } | null } | null
+    expect(r?.creatomate?.offers).toBeUndefined()
   })
 
   it('🔴 只填一半的发布目标 → 投影成 null(等于没配,UI 才会提示「缺发布目标」)', () => {
@@ -136,7 +209,7 @@ describe('mergeFactoryConfig — 发布目标校验', () => {
     expect(!r.ok && r.error).toContain('只填一半')
   })
 
-  it('🔴 publer 等无 adapter 的平台 → 拒(配了也只会 no_adapter 失败)', () => {
+  it('🔴 publer(已退役)等无 adapter 的平台 → 拒(配了也只会 no_adapter 失败)', () => {
     const r = mergeFactoryConfig({}, { publish_target: { platform: 'publer', page_id: '123456' } })
     expect(r.ok).toBe(false)
     expect(!r.ok && r.error).toContain('facebook')
@@ -270,6 +343,155 @@ describe('creative_recipe — 白名单 + 版本闸(合同 5469105522 §1)', () 
     expect(r.ok).toBe(true)
     if (!r.ok) return
     expect('creative_recipe' in r.config).toBe(false)
+  })
+})
+
+describe('render — 子对象合并，不整体替换（子牙复审 B5：voice_id/avatar_image_url 是另一条管线的字段）', () => {
+  it('只改 engine 时，既有 voice_id/avatar_image_url 原样保留', () => {
+    const r = mergeFactoryConfig(
+      { render: { engine: 'ffmpeg', voice_id: 'bigrayvoice01', avatar_image_url: 'https://x/a.jpg' } },
+      { render: { engine: 'creatomate' } },
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.config.render).toEqual({
+      engine: 'creatomate',
+      voice_id: 'bigrayvoice01',
+      avatar_image_url: 'https://x/a.jpg',
+    })
+  })
+
+  it('配 creatomate 模板但缺 template_id → 拒', () => {
+    const r = mergeFactoryConfig({}, { render: { engine: 'creatomate', creatomate: { scene_field_map: [{ visual: 'V-1' }] } } })
+    expect(r.ok).toBe(false)
+  })
+
+  it('配 creatomate 模板但槽位为空 → 拒（模板容不下任何内容等于没配）', () => {
+    const r = mergeFactoryConfig({}, { render: { engine: 'creatomate', creatomate: { template_id: 't1', scene_field_map: [] } } })
+    expect(r.ok).toBe(false)
+  })
+
+  it('合法 creatomate 配置 → 存下（存储层 snake_case，跟 factory_config 其余字段同惯例）', () => {
+    const r = mergeFactoryConfig({}, {
+      render: {
+        engine: 'creatomate',
+        creatomate: { template_id: 't1', scene_field_map: [{ visual: 'V-1', caption: 'C-1' }], output_width: 1080, output_height: 1920, output_frame_rate: 30 },
+      },
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.config.render).toEqual({
+      engine: 'creatomate',
+      creatomate: { template_id: 't1', scene_field_map: [{ visual: 'V-1', caption: 'C-1' }], output_width: 1080, output_height: 1920, output_frame_rate: 30 },
+    })
+  })
+
+  it('传 render: null → 整段删掉', () => {
+    const r = mergeFactoryConfig({ render: { engine: 'creatomate' } }, { render: null })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect('render' in r.config).toBe(false)
+  })
+
+  it('🔴 PATCH 只带 creatomate 不带 engine → 不覆写既有 engine（魏征复审：曾会把已经是 creatomate 的客户静默降级回 ffmpeg）', () => {
+    const r = mergeFactoryConfig(
+      { render: { engine: 'creatomate', creatomate: { template_id: 't1', scene_field_map: [{ visual: 'V-1' }] } } },
+      { render: { creatomate: { template_id: 't1', scene_field_map: [{ visual: 'V-1', caption: 'C-1' }] } } },
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect((r.config.render as { engine: string }).engine).toBe('creatomate')
+  })
+
+  // 2026-09-13 修复：static_overrides/required_post_fields/offers/post_field_sources
+  // 此前在这段合并逻辑里完全没接（复审 ad68ebde 发现——资料包管理 UI 加了也白加，
+  // 保存路径根本不认这几个字段，见 client-config.ts 365-408 行附近注释）。
+  it('PATCH 带全部四个新字段 → 全部原样存下（跟 template_id/scene_field_map 同一次写入）', () => {
+    const r = mergeFactoryConfig({}, {
+      render: {
+        engine: 'creatomate',
+        creatomate: {
+          template_id: 't1',
+          scene_field_map: [{ visual: 'V-1' }],
+          static_overrides: { EndLogo: 'https://x/logo.png' },
+          required_post_fields: ['EndTour', 'EndDate'],
+          offers: { default: { tour: 'Best of China', price_line: 'From NZD $4,080 pp' } },
+          post_field_sources: { EndTour: 'tour', EndMeta: 'price_line' },
+        },
+      },
+    })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.config.render).toEqual({
+      engine: 'creatomate',
+      creatomate: {
+        template_id: 't1',
+        scene_field_map: [{ visual: 'V-1' }],
+        static_overrides: { EndLogo: 'https://x/logo.png' },
+        required_post_fields: ['EndTour', 'EndDate'],
+        offers: { default: { tour: 'Best of China', price_line: 'From NZD $4,080 pp' } },
+        post_field_sources: { EndTour: 'tour', EndMeta: 'price_line' },
+      },
+    })
+  })
+
+  it('🔴 这次 PATCH 只想改 template_id，没带 offers → 已存的 offers 原样保留，不会被清空', () => {
+    const r = mergeFactoryConfig(
+      {
+        render: {
+          engine: 'creatomate',
+          creatomate: {
+            template_id: 't1',
+            scene_field_map: [{ visual: 'V-1' }],
+            offers: { default: { tour: 'Best of China' } },
+            post_field_sources: { EndTour: 'tour' },
+          },
+        },
+      },
+      { render: { creatomate: { template_id: 't2', scene_field_map: [{ visual: 'V-1' }] } } },
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    const creatomate = (r.config.render as { creatomate: Record<string, unknown> }).creatomate
+    expect(creatomate.template_id).toBe('t2')
+    expect(creatomate.offers).toEqual({ default: { tour: 'Best of China' } })
+    expect(creatomate.post_field_sources).toEqual({ EndTour: 'tour' })
+  })
+
+  it('显式传 offers: null → 清空已存的 offers（跟 verified_cta 等字段同一套"null=删除"惯例）', () => {
+    const r = mergeFactoryConfig(
+      {
+        render: {
+          engine: 'creatomate',
+          creatomate: { template_id: 't1', scene_field_map: [{ visual: 'V-1' }], offers: { default: { tour: 'x' } } },
+        },
+      },
+      { render: { creatomate: { template_id: 't1', scene_field_map: [{ visual: 'V-1' }], offers: null } } },
+    )
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect('offers' in (r.config.render as { creatomate: Record<string, unknown> }).creatomate).toBe(false)
+  })
+
+  it('offers 形状不对（值不是字符串）→ 拒，报出人能看懂的错误', () => {
+    const r = mergeFactoryConfig({}, {
+      render: {
+        engine: 'creatomate',
+        creatomate: { template_id: 't1', scene_field_map: [{ visual: 'V-1' }], offers: { default: { tour: 123 } } },
+      },
+    })
+    expect(r.ok).toBe(false)
+    expect(!r.ok && r.error).toContain('offers')
+  })
+
+  it('required_post_fields 形状不对（混了非字符串）→ 拒', () => {
+    const r = mergeFactoryConfig({}, {
+      render: {
+        engine: 'creatomate',
+        creatomate: { template_id: 't1', scene_field_map: [{ visual: 'V-1' }], required_post_fields: ['EndTour', 123] },
+      },
+    })
+    expect(r.ok).toBe(false)
   })
 
   it('body 未提及 recipe → 现有配置原样保留(合并语义)', () => {

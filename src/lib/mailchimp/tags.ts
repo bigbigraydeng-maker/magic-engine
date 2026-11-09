@@ -28,7 +28,12 @@
 import { createHash } from 'node:crypto'
 // 复用 client.ts 已经 export 且有测试的那份 —— 两份 key 解析规则一定会漂移，
 // Mailchimp 改 key 格式时只会有一个文件被改到（子牙复审 P2）。
-import { datacenterFromKey } from './client'
+import {
+  datacenterFromKey,
+  subscribeMember,
+  type SubscribeMemberInput,
+  type SubscribeMemberResult,
+} from './client'
 
 const API_VERSION = '3.0'
 const REQUEST_TIMEOUT_MS = 20_000
@@ -216,4 +221,70 @@ export async function applyMemberTags(
   if (res.status === 204 || res.ok) return { status: 'applied', added: toAdd, removed: toRemove }
   if (res.status === 401) return { status: 'error', reason: 'unauthorized', retryable: false }
   return { status: 'error', reason: `http_${res.status}`, retryable: res.status >= 500 || res.status === 429 }
+}
+
+// ── 进名单 + 确保标签打上（连接层的完整契约）────────────────────────────────
+
+/**
+ * 「补打标签」的结果 —— 只在人**本来就在名单里**时才有意义。
+ *
+ * - `applied`        ── 本来没这个标签，刚补上
+ * - `already_tagged` ── 本来就有，什么都没做（幂等）
+ * - `not_attempted`  ── 调用方没给标签名，没什么好打的
+ * - `failed:<原因>`  ── 打了 Mailchimp 但没成（限流 / 5xx / 网络 / 授权）
+ */
+export type TagRepair = 'applied' | 'already_tagged' | 'not_attempted' | `failed:${string}`
+
+/**
+ * 把人放进名单，**并确保来源标签真的打上了**。
+ *
+ * ## 为什么需要这个包装（2026-09-06 生产实测）
+ *
+ * `subscribeMember` 走的是 `POST /lists/{id}/members`，标签只是这次「新建会员」
+ * 请求里顺带的一个字段。人**已经在名单里**时 Mailchimp 回 400 `Member Exists`，
+ * 这次请求整个不生效 —— 标签一个字都没写进去。而 `already_member` 在上游被当成
+ * 成功，还会写「会员关系已确认」，所以从日志上看一切正常。
+ *
+ * 实测后果：CTS 的 Meta 广告线索每小时 10 条全是 `already_member`，跑了整整一
+ * 个月，来源标签在他们名单里**从来没出现过** —— 广告归因证据一条都没落地。
+ *
+ * 这里补的那一刀走 `POST /members/{hash}/tags`（`applyMemberTags`），那是
+ * Mailchimp 用来改**已有**会员标签的入口，天然幂等。
+ *
+ * ## 打标签失败不改变会员关系的结论
+ *
+ * 人确实在名单里，这件事是真的，不因为标签没打上就变假 —— 所以 status 仍是
+ * `already_member`。但**失败必须说出来**：`tagRepair` 带着原因回给上游，让它
+ * 进 tally、进今日待办。「拿不到 ≠ 没有」，这正是这条链路上一次栽的跟头。
+ */
+export async function subscribeMemberEnsuringTag(
+  input: SubscribeMemberInput,
+): Promise<SubscribeMemberResult & { tagRepair?: TagRepair }> {
+  const res = await subscribeMember(input)
+  if (res.status !== 'already_member') return res
+  return { ...res, tagRepair: await repairTag(input) }
+}
+
+/** 给一个确认已在名单里的人补上来源标签。永不抛。 */
+async function repairTag(input: SubscribeMemberInput): Promise<TagRepair> {
+  const tag = input.tag?.trim()
+  if (!tag) return 'not_attempted'
+
+  const r = await applyMemberTags(
+    {
+      apiKey: input.apiKey,
+      audienceId: input.audienceId,
+      fetchImpl: input.fetchImpl,
+      timeoutMs: input.timeoutMs,
+    },
+    input.email,
+    { add: [tag] },
+  )
+
+  if (r.status === 'applied') return 'applied'
+  // `nothing_to_do` 上面已经挡掉（tag 非空），走到这里的 noop 只会是 already_correct。
+  if (r.status === 'noop') return 'already_tagged'
+  // `not_in_audience`：Mailchimp 前一秒才说这人存在，这一秒查不到。多半是刚被
+  // archive/cleaned。不当成功，如实上报。
+  return `failed:${r.reason}`
 }

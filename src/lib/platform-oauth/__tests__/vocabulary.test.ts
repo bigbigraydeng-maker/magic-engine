@@ -15,6 +15,8 @@ function makeRow(overrides?: Partial<PlatformOAuthConnectionRow>): PlatformOAuth
     id:                'row-uuid-1',
     client_id:         'client-uuid-1',
     provider:          'google_gbp',
+    authorizing_principal_id: null,
+    entitlement_revision: null,
     access_token_enc:  'iv.tag.cipher',
     refresh_token_enc: 'iv.tag.cipher2',
     token_expiry:      new Date(Date.now() + 3600_000).toISOString(),
@@ -49,6 +51,7 @@ describe('PLATFORM_PROVIDERS', () => {
     expect(PLATFORM_PROVIDERS.MICROSOFT_MAIL).toBe('microsoft_mail')
     expect(PLATFORM_PROVIDERS.GOOGLE_GA4).toBe('google_ga4')
     expect(PLATFORM_PROVIDERS.GOOGLE_GTM).toBe('google_gtm')
+    expect(PLATFORM_PROVIDERS.GOOGLE_YOUTUBE).toBe('google_youtube')
   })
 })
 

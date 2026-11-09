@@ -73,7 +73,7 @@ const makeFullPage = (overrides: Record<string, unknown> = {}) => ({
 function buildQueryChain(response: unknown) {
   // Build an infinitely chainable mock that resolves on await
   const chain: Record<string, unknown> = {}
-  const methods = ['select', 'eq', 'neq', 'gte', 'lte', 'lt', 'gt', 'order', 'range', 'overlaps', 'limit', 'single', 'maybeSingle']
+  const methods = ['select', 'eq', 'neq', 'not', 'gte', 'lte', 'lt', 'gt', 'order', 'range', 'overlaps', 'limit', 'single', 'maybeSingle']
   for (const m of methods) {
     chain[m] = vi.fn().mockReturnValue(chain)
   }
@@ -473,6 +473,161 @@ describe('GET /api/clients/[id]/site-audit/pages (v2 — corrected implementatio
       const body = await res.json()
       expect(body.pages).toEqual([])
       expect(body.total).toBe(0)
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Suite F: Index status (收录状态) — derived fields + not-indexed filter
+  // ---------------------------------------------------------------------------
+
+  describe('Suite F: Index status', () => {
+    const mockClient = { id: 'client-1', domain: 'example.com' }
+
+    it('未收录页面：not_indexed=true + index_class=thin，并原样带回 index_verdict/first_not_indexed_at', async () => {
+      const thin = makeFullPage({
+        word_count: 120,
+        index_verdict: 'Crawled - currently not indexed',
+        first_not_indexed_at: '2026-08-01T00:00:00Z',
+        crawl_status: 'crawled',
+        crawled_at: new Date().toISOString(),
+      })
+      setupFullFlow(mockClient, [thin], 1)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      const res = await GET(req, { params: { id: 'client-1' } })
+      const body = await res.json()
+      const page = body.pages[0]
+      expect(page.not_indexed).toBe(true)
+      expect(page.index_class).toBe('thin')
+      expect(page.first_not_indexed_at).toBe('2026-08-01T00:00:00Z')
+      expect(page.index_verdict).toBe('Crawled - currently not indexed')
+    })
+
+    it('谷歌不认识的网址 → index_class=unknown（优先于字数判定）', async () => {
+      const unknown = makeFullPage({
+        word_count: 50,
+        index_verdict: 'URL is unknown to Google',
+        first_not_indexed_at: '2026-08-01T00:00:00Z',
+      })
+      setupFullFlow(mockClient, [unknown], 1)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      const res = await GET(req, { params: { id: 'client-1' } })
+      const body = await res.json()
+      expect(body.pages[0].index_class).toBe('unknown')
+    })
+
+    it('已收录页面 → not_indexed=false, index_class=null', async () => {
+      const indexed = makeFullPage({
+        index_verdict: 'Submitted and indexed',
+        first_not_indexed_at: null,
+      })
+      setupFullFlow(mockClient, [indexed], 1)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      const res = await GET(req, { params: { id: 'client-1' } })
+      const body = await res.json()
+      expect(body.pages[0].not_indexed).toBe(false)
+      expect(body.pages[0].index_class).toBeNull()
+    })
+
+    it('indexStatus=not-indexed → 对 first_not_indexed_at 施加 not-null 过滤（真的接上了，不只是接受参数）', async () => {
+      const mockFrom = vi.fn()
+      vi.mocked(supabaseAdmin).from = mockFrom
+      mockFrom.mockReturnValueOnce(buildQueryChain({ data: mockClient, error: null }))
+      const pagesChain = buildQueryChain({ data: [], count: 0, error: null }) as Record<string, ReturnType<typeof vi.fn>>
+      mockFrom.mockReturnValueOnce(pagesChain)
+
+      const req = new NextRequest(
+        'http://localhost/api/clients/client-1/site-audit/pages?indexStatus=not-indexed'
+      )
+      const res = await GET(req, { params: { id: 'client-1' } })
+      expect(res.status).toBe(200)
+      expect(pagesChain.not).toHaveBeenCalledWith('first_not_indexed_at', 'is', null)
+    })
+
+    it('不带 indexStatus 时不施加 not-null 过滤（默认看全部）', async () => {
+      const mockFrom = vi.fn()
+      vi.mocked(supabaseAdmin).from = mockFrom
+      mockFrom.mockReturnValueOnce(buildQueryChain({ data: mockClient, error: null }))
+      const pagesChain = buildQueryChain({ data: [], count: 0, error: null }) as Record<string, ReturnType<typeof vi.fn>>
+      mockFrom.mockReturnValueOnce(pagesChain)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      await GET(req, { params: { id: 'client-1' } })
+      expect(pagesChain.not).not.toHaveBeenCalled()
+    })
+
+    it('accepts sort=first_not_indexed_at (oldest-first triage order)', async () => {
+      setupFullFlow(mockClient, [], 0)
+
+      const req = new NextRequest(
+        'http://localhost/api/clients/client-1/site-audit/pages?sort=first_not_indexed_at&order=asc'
+      )
+      const res = await GET(req, { params: { id: 'client-1' } })
+      expect(res.status).toBe(200)
+      const body = await res.json()
+      expect(body.sort).toBe('first_not_indexed_at')
+    })
+
+    it('🔴 被防火墙挡住的行不判 thin → index_class=crawled', async () => {
+      const blocked = makeFullPage({
+        word_count: 59,
+        index_verdict: 'Crawled - currently not indexed',
+        first_not_indexed_at: '2026-08-01T00:00:00Z',
+        crawl_status: 'antibot_challenged',
+        crawled_at: new Date().toISOString(),
+      })
+      setupFullFlow(mockClient, [blocked], 1)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      const res = await GET(req, { params: { id: 'client-1' } })
+      const body = await res.json()
+      expect(body.pages[0].index_class).toBe('crawled')
+    })
+
+    it('谷歌还没爬（Discovered）→ index_class=discovered，不是 thin', async () => {
+      const discovered = makeFullPage({
+        word_count: 59,
+        index_verdict: 'Discovered - currently not indexed',
+        first_not_indexed_at: '2026-08-01T00:00:00Z',
+        crawl_status: 'crawled',
+        crawled_at: new Date().toISOString(),
+      })
+      setupFullFlow(mockClient, [discovered], 1)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      const res = await GET(req, { params: { id: 'client-1' } })
+      const body = await res.json()
+      expect(body.pages[0].index_class).toBe('discovered')
+    })
+
+    it('跳转页 → index_class=not_a_problem', async () => {
+      const redirect = makeFullPage({
+        index_verdict: 'Page with redirect',
+        first_not_indexed_at: '2026-08-01T00:00:00Z',
+        crawl_status: 'crawled',
+        crawled_at: new Date().toISOString(),
+      })
+      setupFullFlow(mockClient, [redirect], 1)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      const res = await GET(req, { params: { id: 'client-1' } })
+      const body = await res.json()
+      expect(body.pages[0].index_class).toBe('not_a_problem')
+    })
+
+    it('🔴 取数必须带上 crawl_status（漏列时 thin 会悄悄消失）', async () => {
+      const mockFrom = vi.fn()
+      vi.mocked(supabaseAdmin).from = mockFrom
+      mockFrom.mockReturnValueOnce(buildQueryChain({ data: mockClient, error: null }))
+      const pagesChain = buildQueryChain({ data: [], count: 0, error: null }) as Record<string, ReturnType<typeof vi.fn>>
+      mockFrom.mockReturnValueOnce(pagesChain)
+
+      const req = new NextRequest('http://localhost/api/clients/client-1/site-audit/pages')
+      await GET(req, { params: { id: 'client-1' } })
+      expect(String(pagesChain.select.mock.calls[0][0])).toContain('crawl_status')
+      expect(String(pagesChain.select.mock.calls[0][0])).toContain('crawled_at')
     })
   })
 

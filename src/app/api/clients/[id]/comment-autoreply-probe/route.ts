@@ -15,7 +15,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { getPageAccessToken, fetchPagePosts } from '@/lib/meta/page-posts'
+import { fetchPagePosts } from '@/lib/meta/page-posts'
+import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
 import { fetchPostCommentsResult } from '@/lib/meta/comments'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
@@ -102,7 +103,14 @@ export async function GET(
     return NextResponse.json(result)
   }
 
-  const pageToken = await getPageAccessToken(userToken, pageId)
+  // AD-SEC-4: the configured Page is client-editable — never read it unless it is
+  // this client's verified Page (see page-sync-authorization.authorizeConfiguredPage).
+  const auth = await authorizeConfiguredPage(supabaseAdmin, clientId, pageId, process.env)
+  if (!auth.ok && auth.skipped === 'page_not_verified') {
+    notes.push('这里填的主页不是这个客户已核实绑定的 Facebook 主页，不会去读 —— 请团队在「Facebook 主页」卡片里核实绑定，或用主页管理员账号「连接 Meta」')
+    return NextResponse.json(result)
+  }
+  const pageToken = auth.ok ? auth.pageToken : null
   result.page_token_resolved = pageToken !== null
   if (!pageToken) {
     notes.push('无法解析 Page access token —— 确认该 token 管理此 Page（/me/accounts 未返回该 page_id）')

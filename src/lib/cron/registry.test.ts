@@ -1,11 +1,165 @@
 import { describe, it, expect } from 'vitest'
 import ts from 'typescript'
-import { readFileSync, existsSync, statSync } from 'fs'
+import { readFileSync, existsSync, statSync, readdirSync } from 'fs'
 import path from 'path'
-import { CRON_REGISTRY } from './registry'
+import { CRON_REGISTRY, UNSCHEDULED_CRON_ROUTES } from './registry'
 import { expectedIntervalHours } from './schedule'
+import { FLYWHEEL_SEO_WEEKLY_CRON, FLYWHEEL_SEO_WEEKLY_JOB } from '../flywheel/seo-weekly'
+import { COMPETITOR_WATCH_CRON, COMPETITOR_WATCH_JOB } from '../competitors/watch'
+import { AI_VISIBILITY_WEEKLY_CRON, AI_VISIBILITY_WEEKLY_JOB } from '../ai-tracker/weekly-fanout'
+import { GSC_PAGE_DAILY_CRON, GSC_PAGE_DAILY_JOB, GSC_PAGE_DAILY_PULL_JOB } from '../gsc/page-daily-plan'
+import {
+  GSC_QUERY_PAGE_DAILY_CRON,
+  GSC_QUERY_PAGE_DAILY_JOB,
+  GSC_QUERY_PAGE_DAILY_PULL_JOB,
+} from '../gsc/query-page-daily-store'
+import { META_CYCLE_CRON } from '@/lib/seo-meta/cycle/roster'
+import { RANK_SAMPLER_CRON, RANK_SAMPLER_JOB } from '@/lib/seo-meta/cycle/rank-sampler'
+import { STEP6_JOB_NAME } from '@/lib/seo-meta/cycle/receipts'
 
 const ROOT = path.resolve(__dirname, '../../..')
+const CRON_ROUTES_DIR = path.join(ROOT, 'src/app/api/cron')
+
+/** 不填 scheduler 就是 render —— 54 条老登记全是这样，不逐条补。 */
+const RENDER_ENTRIES = CRON_REGISTRY.filter((e) => (e.scheduler ?? 'render') === 'render')
+
+/** 一个文件里模块顶层的 `const X = '字面量'`（含 export）。 */
+function topLevelStringConsts(src: ts.SourceFile): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const stmt of src.statements) {
+    if (!ts.isVariableStatement(stmt)) continue
+    for (const d of stmt.declarationList.declarations) {
+      if (ts.isIdentifier(d.name) && d.initializer && ts.isStringLiteralLike(d.initializer)) {
+        out.set(d.name.text, d.initializer.text)
+      }
+    }
+  }
+  return out
+}
+
+/** `@/lib/x` / `./x` / `../x` → 真实文件路径。找不到（第三方包等）返回 null。 */
+function resolveModuleFile(specifier: string, fromFile: string): string | null {
+  const base = specifier.startsWith('@/')
+    ? path.join(ROOT, 'src', specifier.slice(2))
+    : specifier.startsWith('.')
+      ? path.resolve(path.dirname(fromFile), specifier)
+      : null
+  if (!base) return null
+  for (const candidate of [`${base}.ts`, `${base}.tsx`, path.join(base, 'index.ts')]) {
+    if (existsSync(candidate) && statSync(candidate).isFile()) return candidate
+  }
+  return null
+}
+
+/**
+ * 一处真正写进 cron_run_logs 的名字，用 TypeScript AST 读出来。
+ *
+ * 🔴 为什么不能用正则。`email-reply-digest` 写的是 `startCronRun(JOB_NAME)`，
+ *    名字在上面几十行外的一个常量里。找 `startCronRun('...')` 的正则扫它的结果是
+ *    「这个路由没写运行记录」—— 而那恰好跟「这个路由不存在」长得一模一样，
+ *    于是它会从对账里静默消失，正是这份对账要防的东西。
+ *
+ * 解析不出来的写法**不许当没看见**：返回 `UNRESOLVED:<原文>`，让调用方报红。
+ * 宁可红一次让人改，也不要悄悄漏掉一个任务。
+ */
+function jobNamesInFile(file: string): string[] {
+  const src = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true)
+  const consts = topLevelStringConsts(src)
+
+  // 跨文件一跳：`import { JOB } from '@/lib/...'` 之后 `startCronRun(JOB)`。
+  // 每周 SEO 快照就是这么写的（周期和 job 名的唯一定义处在业务模块里，清单反过来对账它）。
+  // 只跟一跳，跟不到就落 UNRESOLVED 报红 —— 不猜。
+  for (const stmt of src.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue
+    const bindings = stmt.importClause?.namedBindings
+    if (!bindings || !ts.isNamedImports(bindings)) continue
+    if (!ts.isStringLiteralLike(stmt.moduleSpecifier)) continue
+    const target = resolveModuleFile(stmt.moduleSpecifier.text, file)
+    if (!target) continue
+    const exported = topLevelStringConsts(
+      ts.createSourceFile(target, readFileSync(target, 'utf8'), ts.ScriptTarget.Latest, true),
+    )
+    for (const el of bindings.elements) {
+      const original = (el.propertyName ?? el.name).text
+      const v = exported.get(original)
+      if (v !== undefined && !consts.has(el.name.text)) consts.set(el.name.text, v)
+    }
+  }
+
+  // 认得出「换了名字」和「带命名空间」的两种叫法。
+  // 🔴 复审实测：只认裸的 `startCronRun(` 时，`import { startCronRun as begin }` 和
+  //    `import * as runLogger` + `runLogger.startCronRun(...)` 两种写法**全绿不报**。
+  //    后者是重构的常见产物 —— 也就是说随手改个 import 风格就能让一个任务从对账里消失。
+  //
+  // 🔴 `startCronRunId` 也算（2026-09-07 补）。跨步骤跑的任务（Inngest 那批）开记录用的是
+  //    它 —— 只认 `startCronRun` 的话，每周 SEO 快照和私信简报这两条**写着运行记录、
+  //    却扫不出来**，跟「这个任务不存在」长得一模一样，正是这份对账要防的东西。
+  // 🔴 `startCronRunWithId` 也算（2026-09-26 补）：Inngest 函数改成用「由 run id 算出的固定 id」开记录后，
+  //    只认前两个的话，谷歌逐页每日那两条就会写着运行记录却扫不出来——跟「这个任务不存在」一个样。
+  const ORIGINALS = ['startCronRun', 'startCronRunId', 'startCronRunWithId']
+  const aliases = new Set<string>(ORIGINALS)
+  for (const stmt of src.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue
+    const nb = stmt.importClause?.namedBindings
+    if (!nb || !ts.isNamedImports(nb)) continue
+    for (const el of nb.elements) {
+      if (ORIGINALS.includes((el.propertyName ?? el.name).text)) aliases.add(el.name.text)
+    }
+  }
+
+  const isStartCronRunCall = (node: ts.CallExpression): boolean =>
+    (ts.isIdentifier(node.expression) && aliases.has(node.expression.text)) ||
+    (ts.isPropertyAccessExpression(node.expression) && ORIGINALS.includes(node.expression.name.text))
+
+  const out: string[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && isStartCronRunCall(node)) {
+      const arg = node.arguments[0]
+      if (arg && ts.isStringLiteralLike(arg)) out.push(arg.text)
+      else if (arg && ts.isIdentifier(arg) && consts.has(arg.text)) out.push(consts.get(arg.text)!)
+      else out.push(`UNRESOLVED:${arg ? arg.getText(src) : '(无参数)'}`)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(src)
+  return Array.from(new Set(out))
+}
+
+/** startCronRun 自己的定义处 —— 它当然「提到」这个名字，但不是调用方。 */
+const RUN_LOGGER = path.join(ROOT, 'src/lib/cron/run-logger.ts')
+
+/**
+ * 全仓扫一遍：**任何**调了 `startCronRun` 的地方 → 它写的 job 名。
+ *
+ * 🔴 判据是「谁调了 startCronRun」，不是「哪个目录下的 route.ts」。
+ *    第一版只扫 cron 路由目录下的 route.ts，当天就自己踩中了这个洞：
+ *    每周 SEO 快照改挂 Inngest 之后，写运行记录的地方从路由挪到了
+ *    `src/lib/inngest/functions/`，只扫路由的话它当场从对账里消失 ——
+ *    跟这份对账要防的东西一模一样。所以按行为扫，不按位置扫。
+ */
+function jobNamesBySource(): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  const walk = (dir: string): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, e.name)
+      if (e.isDirectory()) {
+        if (e.name === 'node_modules' || e.name === '__tests__') continue
+        walk(full)
+        continue
+      }
+      if (!e.name.endsWith('.ts') && !e.name.endsWith('.tsx')) continue
+      if (e.name.endsWith('.test.ts') || e.name.endsWith('.test.tsx')) continue
+      if (full === RUN_LOGGER) continue
+      // 先粗筛再解析：全仓上千个文件，逐个走 AST 太慢，也没必要。
+      // 粗筛不带括号：`runLogger.startCronRun(...)` 和 `begin(...)`（别名）都得先进得来。
+      if (!readFileSync(full, 'utf8').includes('startCronRun')) continue
+      const names = jobNamesInFile(full)
+      if (names.length > 0) out.set(path.relative(ROOT, full), names)
+    }
+  }
+  walk(path.join(ROOT, 'src'))
+  return out
+}
 
 /**
  * 清单必须跟 render.yaml 永远一致。
@@ -69,8 +223,12 @@ function parseRenderYaml(): ParsedCron[] {
   let m: RegExpExecArray | null
   while ((m = re.exec(txt)) !== null) {
     const schedule = /schedule:\s*"([^"]+)"/.exec(m[2])?.[1] ?? ''
-    const routes = Array.from(m[2].matchAll(/\/api\/cron\/([a-z0-9-]+)/g)).map((x) => x[1])
     const startCommand = extractStartCommand(m[2])
+    // 🔴 路由只从**启动命令**里取，不从整段 YAML 里取。整段里还有注释，而注释里提到的
+    //    路由并不会被这条服务打 —— messenger-hourly 的注释里写着「mailbox-sync 路由保留
+    //    用于手动触发」，market-intel-daily 上方则是整段注释掉的 email-reply-digest。
+    //    按整段扒，这两个会被算成「这条服务也在跑它们」，对账当场出两个假阳性。
+    const routes = Array.from(startCommand.matchAll(/\/api\/cron\/([a-z0-9-]+)/g)).map((x) => x[1])
     out.push({ service: m[1], schedule, routes, startCommand })
   }
   return out
@@ -80,7 +238,12 @@ describe('CRON_REGISTRY 与 render.yaml 对账', () => {
   const parsed = parseRenderYaml()
 
   it('解析器真的解析到了东西（防止正则写歪导致后面全部空转成绿）', () => {
-    expect(parsed.length).toBeGreaterThan(30)
+    // 2026-10-24 起 blueprint 只留 3 条 dispatcher。少一条就等于调度器缺了一档。
+    expect(parsed.map((p) => p.service).sort()).toEqual([
+      'cron-dispatch-daily',
+      'cron-dispatch-frequent',
+      'cron-dispatch-weekly',
+    ])
   })
 
   it('🔴 render.yaml 里的每个 cron 都在清单里 —— 漏登记 = 脱离监控', () => {
@@ -91,13 +254,13 @@ describe('CRON_REGISTRY 与 render.yaml 对账', () => {
 
   it('清单里不该有 render.yaml 已经删掉的任务（否则天天误报「没跑」）', () => {
     const live = new Set(parsed.map((p) => p.service))
-    const stale = CRON_REGISTRY.filter((e) => !live.has(e.service)).map((e) => e.service)
+    const stale = RENDER_ENTRIES.filter((e) => !live.has(e.service)).map((e) => e.service)
     expect(stale, `这些已从 render.yaml 移除，清单该同步删：${stale.join(', ')}`).toEqual([])
   })
 
   it('调度表达式跟 render.yaml 一致', () => {
     const bySvc = new Map(parsed.map((p) => [p.service, p]))
-    const drift = CRON_REGISTRY
+    const drift = RENDER_ENTRIES
       .filter((e) => bySvc.get(e.service)?.schedule !== e.schedule)
       .map((e) => `${e.service}: 清单 ${e.schedule} vs yaml ${bySvc.get(e.service)?.schedule}`)
     expect(drift).toEqual([])
@@ -110,21 +273,26 @@ describe('CRON_REGISTRY 与 render.yaml 对账', () => {
     expect(bad, `这些表达式解析不了，需要在 schedule.ts 里支持：${bad.join(', ')}`).toEqual([])
   })
 
-  /** 从接口代码里读 startCronRun 的真实入参 —— 那才是日志里的名字。 */
-  function jobNameInCode(routes: string[]): string | null {
+  /**
+   * 一条 Render 服务打的所有路由，合起来写出的 job 名。
+   *
+   * 🔴 返回的是**列表**不是单个。messenger-hourly 那条服务的 startCommand 是
+   *    `curl 私信同步 && curl 私信简报`，两条 curl 各写各的记录。原来只取第一个命中，
+   *    第二个任务在对账里根本不存在 —— 它后来停了 14 天没人发现。
+   */
+  function jobNamesForService(routes: string[]): string[] {
+    const out: string[] = []
     for (const r of routes) {
-      const f = path.join(ROOT, 'src/app/api/cron', r, 'route.ts')
-      if (!existsSync(f)) continue
-      const m = /startCronRun\(\s*['"]([^'"]+)['"]/.exec(readFileSync(f, 'utf8'))
-      if (m) return m[1]
+      const f = path.join(CRON_ROUTES_DIR, r, 'route.ts')
+      if (existsSync(f)) out.push(...jobNamesInFile(f))
     }
-    return null
+    return Array.from(new Set(out))
   }
 
   it('logsRuns 标记跟接口代码里实际有没有 startCronRun 一致', () => {
     const bySvc = new Map(parsed.map((p) => [p.service, p]))
-    const drift = CRON_REGISTRY
-      .filter((e) => (jobNameInCode(bySvc.get(e.service)?.routes ?? []) !== null) !== e.logsRuns)
+    const drift = RENDER_ENTRIES
+      .filter((e) => (jobNamesForService(bySvc.get(e.service)?.routes ?? []).length > 0) !== e.logsRuns)
       .map((e) => `${e.service}: 清单 ${e.logsRuns}`)
     expect(drift).toEqual([])
   })
@@ -132,12 +300,204 @@ describe('CRON_REGISTRY 与 render.yaml 对账', () => {
   it('🔴 jobName 必须等于代码里 startCronRun 的入参 —— 猜错就会把在跑的判成没跑过', () => {
     const bySvc = new Map(parsed.map((p) => [p.service, p]))
     const drift: string[] = []
-    for (const e of CRON_REGISTRY) {
+    for (const e of RENDER_ENTRIES) {
       if (!e.logsRuns) continue
-      const actual = jobNameInCode(bySvc.get(e.service)?.routes ?? [])
-      if (actual && actual !== e.jobName) drift.push(`${e.service}: 清单 ${e.jobName} vs 代码 ${actual}`)
+      const actual = jobNamesForService(bySvc.get(e.service)?.routes ?? [])
+      if (actual.length > 0 && !actual.includes(e.jobName)) {
+        drift.push(`${e.service}: 清单 ${e.jobName} vs 代码 ${actual.join(' / ')}`)
+      }
     }
     expect(drift).toEqual([])
+  })
+
+  /**
+   * 🔴 **一条 cron 里不许用 `&&` 把第二件活儿串在第一件后面。**（2026-09-07 加）
+   *
+   * `&&` 守的是 curl 的退出码，而退出码回答的是「网关有没有在超时前把响应给我」，
+   * 不是「这件活儿有没有干完」。本仓已经为此付过一次代价：messenger-hourly 里
+   * `curl 私信同步 && curl 写需求卡`，同步 8/17 起每轮约 140 秒、网关约 125 秒掐断返 524，
+   * 写卡那条从 8/23 起**一次都没执行过**，销售的客户需求卡停更 14 天，而监控全绿。
+   *
+   * 跨步骤接力要走 Inngest（CLAUDE.md 铁律 3）：上一步跑完发事件，下一步作为消费者。
+   *
+   * 只禁「第二件活儿」，不禁 `&& curl hc-ping.com/...` 那种健康检查上报 ——
+   * 它漏掉的方向是「误报没跑」，会响；而漏掉一件活儿的方向是安静地不干，不会响。
+   */
+  it('🔴 startCommand 里不许 && 串第二个 /api/cron/ 调用（判据错在退出码，见 messenger 简报事故）', () => {
+    const chained: string[] = []
+    for (const p of parsed) {
+      // 按 && 切开，第一段是主命令，之后每一段都是「串在后面的」。
+      const [, ...rest] = p.startCommand.split('&&')
+      for (const seg of rest) {
+        if (/\/api\/cron\//.test(seg)) chained.push(`${p.service}: ${seg.trim().slice(0, 80)}`)
+      }
+    }
+    expect(
+      chained,
+      `这些 cron 用 && 把第二件活儿串在后面了，跨步骤接力请走 Inngest：${chained.join(' | ')}`,
+    ).toEqual([])
+  })
+
+  it('🔴 一条服务串了几个任务，就得登记几条 —— 少登记的那个会隐形（messenger 简报正是这么丢的）', () => {
+    const registeredBySvc = new Map<string, Set<string>>()
+    for (const e of RENDER_ENTRIES) {
+      if (!registeredBySvc.has(e.service)) registeredBySvc.set(e.service, new Set())
+      registeredBySvc.get(e.service)!.add(e.jobName)
+    }
+    const missing: string[] = []
+    for (const p of parsed) {
+      const registered = registeredBySvc.get(p.service)
+      if (!registered) continue // 上面「每个 cron 都在清单里」那条已经会报
+      for (const jn of jobNamesForService(p.routes)) {
+        if (!registered.has(jn)) missing.push(`${p.service} 里的 ${jn}`)
+      }
+    }
+    expect(missing, `这些任务跟别人共用一条 Render 服务，但自己没登记：${missing.join(', ')}`).toEqual([])
+  })
+})
+
+/**
+ * 「路由 → 清单」这个方向的对账。
+ *
+ * 上面那组查的是 render.yaml ↔ 清单。它查不出这一类：**代码里写着要定时跑、
+ * 谁都没给它排班**。2026-09-06 一次扫描抓出 6 个这样的接口，其中 messenger 简报
+ * 已经停了 14 天、销售的客户需求卡从 8/23 起没再更新，而告警一声都没响 ——
+ * 因为它压根不在任何一份名单里，「没通电」和「一切正常」于是长得一模一样。
+ *
+ * 判据只有一条：路由里调了 `startCronRun`，就说明它设计上要被定时触发、要留运行记录。
+ * 那它要么在 CRON_REGISTRY 里，要么在 UNSCHEDULED_CRON_ROUTES 里写明为什么不排班。
+ * 没有第三种情况。
+ */
+describe('每个写运行记录的地方，都必须有人认领', () => {
+  const byRoute = jobNamesBySource()
+  const allJobNames = Array.from(new Set(Array.from(byRoute.values()).flat()))
+
+  it('前提成立：扫到了调用处，而且每一个 startCronRun 的名字都解析出来了', () => {
+    // 🔴 门槛贴死当前实际数量（59 处）。原来写 >50，等于允许 9 个调用处静默消失才会响 ——
+    //    一个「查漏的测试」自己留 9 个名额的余量，等于没查。
+    //    新增任务会让它变大（不报红），少一个就立刻红。
+    expect(byRoute.size, '扫到的调用处比预期少 —— 有任务从对账里消失了').toBeGreaterThanOrEqual(59)
+    const unresolved = allJobNames.filter((n) => n.startsWith('UNRESOLVED:'))
+    expect(
+      unresolved,
+      `这些 startCronRun 的入参读不出来，请改成字面量或模块顶层常量：${unresolved.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('🔴 调了 startCronRun，就必须在清单里，或在白名单里写明为什么不排班', () => {
+    const registered = new Set(CRON_REGISTRY.map((e) => e.jobName))
+    const orphans: string[] = []
+    for (const [route, names] of byRoute) {
+      for (const jn of names) {
+        if (registered.has(jn) || jn in UNSCHEDULED_CRON_ROUTES) continue
+        orphans.push(`${route} → ${jn}`)
+      }
+    }
+    expect(
+      orphans,
+      `这些地方设计上要定时跑，却不在任何名单里 —— 也就是没人监控它跑没跑：${orphans.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('🔴 Inngest 那条的周期不许手抄 —— 清单必须等于代码里唯一那份定义', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === FLYWHEEL_SEO_WEEKLY_JOB)
+    expect(entry, `清单里找不到 ${FLYWHEEL_SEO_WEEKLY_JOB}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(
+      entry!.schedule,
+      '清单里的周期跟 src/lib/flywheel/seo-weekly.ts 的 FLYWHEEL_SEO_WEEKLY_CRON 不一致',
+    ).toBe(FLYWHEEL_SEO_WEEKLY_CRON)
+  })
+
+  it('🔴 竞品快照那条的周期不许手抄 —— 清单必须等于代码里唯一那份定义', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === COMPETITOR_WATCH_JOB)
+    expect(entry, `清单里找不到 ${COMPETITOR_WATCH_JOB}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(
+      entry!.schedule,
+      '清单里的周期跟 src/lib/competitors/watch.ts 的 COMPETITOR_WATCH_CRON 不一致',
+    ).toBe(COMPETITOR_WATCH_CRON)
+  })
+
+  it('🔴 AI 可见度追踪(灰度)那条的周期不许手抄 —— 清单必须等于代码里唯一那份定义', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === AI_VISIBILITY_WEEKLY_JOB)
+    expect(entry, `清单里找不到 ${AI_VISIBILITY_WEEKLY_JOB}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(
+      entry!.schedule,
+      '清单里的周期跟 src/lib/ai-tracker/weekly-fanout.ts 的 AI_VISIBILITY_WEEKLY_CRON 不一致',
+    ).toBe(AI_VISIBILITY_WEEKLY_CRON)
+  })
+
+  it('🔴 GSC per-page daily: the schedule is not hand-copied and the output table is the receipts table', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === GSC_PAGE_DAILY_JOB)
+    expect(entry, `CRON_REGISTRY has no ${GSC_PAGE_DAILY_JOB} entry`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(
+      entry!.schedule,
+      'the registry schedule differs from GSC_PAGE_DAILY_CRON in src/lib/gsc/page-daily-plan.ts',
+    ).toBe(GSC_PAGE_DAILY_CRON)
+    // started_at, not finished_at: finished_at is NULL while an order runs (see the registry comment).
+    expect(entry!.outputTables).toEqual([
+      { table: 'gsc_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' },
+    ])
+  })
+
+  it('🔴 GSC per-page daily pull orders: own job name, same schedule as the fan-out that triggers them', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === GSC_PAGE_DAILY_PULL_JOB)
+    expect(entry, `CRON_REGISTRY has no ${GSC_PAGE_DAILY_PULL_JOB} entry`).toBeDefined()
+    expect(GSC_PAGE_DAILY_PULL_JOB).not.toBe(GSC_PAGE_DAILY_JOB)
+    expect(entry!.scheduler).toBe('inngest')
+    expect(entry!.schedule, 'the pull entry must follow GSC_PAGE_DAILY_CRON (its upstream fan-out)').toBe(GSC_PAGE_DAILY_CRON)
+    expect(entry!.outputTables).toBeUndefined()
+  })
+
+  it('🔴 GSC per-(query, page) daily: own schedule constant, own job names, own receipts table', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === GSC_QUERY_PAGE_DAILY_JOB)
+    expect(entry, `CRON_REGISTRY has no ${GSC_QUERY_PAGE_DAILY_JOB} entry`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(entry!.schedule, 'the registry schedule differs from GSC_QUERY_PAGE_DAILY_CRON').toBe(GSC_QUERY_PAGE_DAILY_CRON)
+    expect(entry!.outputTables).toEqual([
+      { table: 'gsc_query_page_fetch_receipts', freshnessHours: 26, timestampColumn: 'started_at' },
+    ])
+    const pull = CRON_REGISTRY.find((e) => e.jobName === GSC_QUERY_PAGE_DAILY_PULL_JOB)
+    expect(pull, `CRON_REGISTRY has no ${GSC_QUERY_PAGE_DAILY_PULL_JOB} entry`).toBeDefined()
+    expect(pull!.schedule).toBe(GSC_QUERY_PAGE_DAILY_CRON)
+    // None of the four job names may coincide: a shared name would let one chain hide the other's failures.
+    expect(new Set([GSC_PAGE_DAILY_JOB, GSC_PAGE_DAILY_PULL_JOB, GSC_QUERY_PAGE_DAILY_JOB, GSC_QUERY_PAGE_DAILY_PULL_JOB]).size).toBe(4)
+  })
+
+  it('🔴 SEO 改标题周一主链：周期不许手抄，且必须登记（没登记 = 它安静地不跑时没人喊）', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === STEP6_JOB_NAME)
+    expect(entry, `清单里找不到 ${STEP6_JOB_NAME}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(entry!.schedule, '清单里的周期跟 src/lib/seo-meta/cycle/roster.ts 的 META_CYCLE_CRON 不一致').toBe(META_CYCLE_CRON)
+  })
+
+  it('🔴 SEO 排名每日采样：周期不许手抄，且是新登记（带 addedAt，首轮到点前不算"从没跑过"）', () => {
+    const entry = CRON_REGISTRY.find((e) => e.jobName === RANK_SAMPLER_JOB)
+    expect(entry, `清单里找不到 ${RANK_SAMPLER_JOB}`).toBeDefined()
+    expect(entry!.scheduler).toBe('inngest')
+    expect(entry!.schedule, '清单里的周期跟 src/lib/seo-meta/cycle/rank-sampler.ts 的 RANK_SAMPLER_CRON 不一致').toBe(RANK_SAMPLER_CRON)
+    expect(entry!.addedAt).toBe('2026-10-04')
+  })
+
+  it('🔴 白名单不许过期：排上班了就该从白名单删掉', () => {
+    const registered = new Set(CRON_REGISTRY.map((e) => e.jobName))
+    const stale = Object.keys(UNSCHEDULED_CRON_ROUTES).filter((n) => registered.has(n))
+    expect(
+      stale,
+      `这些已经登记进 CRON_REGISTRY 了，白名单里那几行是过期的，请删：${stale.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('🔴 白名单不许留死名字：路由没了就该从白名单删掉', () => {
+    const live = new Set(allJobNames)
+    const dead = Object.keys(UNSCHEDULED_CRON_ROUTES).filter((n) => !live.has(n))
+    expect(
+      dead,
+      `白名单里这些名字已经没有任何路由在用了，请删：${dead.join(', ')}`,
+    ).toEqual([])
   })
 })
 
@@ -153,9 +513,12 @@ describe('CRON_REGISTRY 与 render.yaml 对账', () => {
  * 里那条 curl 的 URL 解出来，读取位置从路由源码里查，位置标注从 docs/ENV.md 的表格里
  * 按表头定位「配在哪」那一列取。所以它不是第二份变量清单 —— 没有一项事实是抄来的。
  */
-const CRON_TRIGGERED_WEB_FLAGS: { env: string; service: string }[] = [
-  { env: 'PROSPECTING_SWEEP_ENABLED', service: 'prospecting-sweep' },
-  { env: 'JOB_SIGNAL_INGEST_ENABLED', service: 'job-boards-weekly' },
+// prospecting-sweep 不再是独立的 Render cron（2026-10-24 收进 dispatcher）。
+// 开关仍由 web 进程里的那条路由读取。对账改看路由源码，不再要求 yaml 里有同名服务。
+const CRON_TRIGGERED_WEB_FLAGS: { env: string; route: string }[] = [
+  { env: 'PROSPECTING_SWEEP_ENABLED', route: 'prospecting-sweep' },
+  { env: 'VIRAL_ANALYZER_ENABLED', route: 'viral-analyzer-worker' },
+  { env: 'VIRAL_ANALYZER_ENABLED', route: 'viral-discovery-weekly' },
 ]
 
 /**
@@ -203,11 +566,11 @@ describe('cron 触发、web 进程读取的开关：docs/ENV.md 的「配在哪�
   const parsed = parseRenderYaml()
 
   it('前提成立：解析器读到了 cron，也读到了 ENV.md 的表（正则写歪不许静默变绿）', () => {
-    expect(parsed.length).toBeGreaterThan(30)
+    expect(parsed.length).toBe(3)
     // 这里对 startCommand 只管本文件受检的那两条任务。**不**对全部 cron 设任何约束 ——
     // 无论是「必须 curl」还是「必须写成块格式」，都会让一条正当的新 cron 弄红一个跟它
     // 毫无关系的断言。受检任务自己的「只能 curl」在下面各自验。
-    const checked = CRON_TRIGGERED_WEB_FLAGS.map((f) => parsed.find((p) => p.service === f.service))
+    const checked = parsed
     expect(checked.filter((p) => (p?.startCommand ?? '').trim() === '')).toEqual([])
     // 块只能取到命令本身：吃到 envVars / - key 就是解析越界了（曾经真的越界过，
     // 只是当时把空白压平，整段还是以 curl 开头，所以一直没露馅）
@@ -265,26 +628,12 @@ describe('cron 触发、web 进程读取的开关：docs/ENV.md 的「配在哪�
     expect(isCurlOnly('curl -H "Authorization: Bearer ${CRON_SECRET}" https://x/y\n')).toBe(true)
   })
 
-  describe.each(CRON_TRIGGERED_WEB_FLAGS)('$env', ({ env, service }) => {
-    const svc = parsed.find((p) => p.service === service)
-
-    it(`${service} 这条 cron 还在，而且只是 curl —— 一旦它改成在自己进程里跑脚本，这个变量要挪回 Render-cron`, () => {
-      expect(svc, `render.yaml 里没有名为 ${service} 的 cron 了`).toBeDefined()
-      expect(
-        isCurlOnly(svc!.startCommand),
-        `${service} 的 startCommand 不再是纯 curl（拆开后有非 curl 的段）：${svc!.startCommand.trim()}`,
-      ).toBe(true)
-    })
-
-    it('确实是在它 curl 打的那条路由里 process.env 读的（路由路径从 render.yaml 推，不写死）', () => {
-      const hits = (svc?.routes ?? [])
-        .map((r) => path.join(ROOT, 'src/app/api/cron', r, 'route.ts'))
-        .filter((f) => existsSync(f))
-        .filter((f) => readFileSync(f, 'utf8').includes(`process.env.${env}`))
-      expect(
-        hits.length,
-        `${service} 打的路由里没有一条读 process.env.${env} —— 读取位置变了，配在哪要重新判定`,
-      ).toBeGreaterThan(0)
+  describe.each(CRON_TRIGGERED_WEB_FLAGS)('$env', ({ env, route }) => {
+    it('开关在 web 路由里读，dispatcher 的 curl 不会展开它', () => {
+      const file = path.join(ROOT, 'src/app/api/cron', route, 'route.ts')
+      expect(readFileSync(file, 'utf8')).toContain(`process.env.${env}`)
+      const leaking = parsed.filter((p) => p.startCommand.includes(env)).map((p) => p.service)
+      expect(leaking, `${env} 被写进了 cron 命令，cron 进程读不到业务开关`).toEqual([])
     })
 
     it('docs/ENV.md 标的是 Render-web', () => {
@@ -478,7 +827,7 @@ describe('docs/ENV.md 里带 cron 标注的变量，必须真的配得到 cron �
   const claimsCron = (where: string) => /Render-cron|全部 cron|\+\s*cron/.test(where)
 
   it('前提成立：两个解析器都读到了东西（走空不许静默变绿）', () => {
-    expect(parsed.length).toBeGreaterThan(30)
+    expect(parsed.length).toBe(3)
     expect(locations.size).toBeGreaterThan(50)
     expect(referenced.size).toBeGreaterThan(0)
     expect(claimsCron('Render-web + 全部 cron')).toBe(true)

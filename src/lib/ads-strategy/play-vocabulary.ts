@@ -79,6 +79,8 @@ export const PLAY_CATALOG: Readonly<Record<PlayKey, PlayDefinition>> = {
       '🔴 结构上**强制有一句机器先开口的问候语，关不掉**（清空会被拒绝保存）',
       '🔴 问候语照抄该创意自身的语言 —— 一个广告组里混多语种创意必然出事',
       '留不下电话邮箱，人走了就断',
+      '🔴 用接口建素材时**不能带链接**（`fb.com/messenger_doc/` 是界面内部占位链接，接口建会被 Meta 当场拒，PITFALLS D13）—— 用 app_destination: MESSENGER',
+      '视频广告必须带缩略图（image_hash 或 image_url）；没有「缺了就用首帧」这回事',
     ],
   },
   warm_pool_retarget: {

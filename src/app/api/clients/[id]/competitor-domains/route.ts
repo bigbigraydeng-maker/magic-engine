@@ -13,12 +13,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import { saveMetadata } from '@/lib/web-intelligence/targets'
 import { normaliseDomain } from '@/lib/competitors/resolver'
 
 const MAX_DOMAINS = 20
 
 interface PatchBody {
   domains?: unknown
+  monitoring?: unknown
 }
 
 export async function GET(
@@ -64,6 +66,16 @@ export async function PATCH(
     body = (await req.json()) as PatchBody
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
+
+  if (body.monitoring !== undefined) {
+    if (access.role !== 'admin') return NextResponse.json({ error: 'Administrator required' }, { status: 403 })
+    try {
+      await saveMetadata(clientId, body.monitoring)
+      return NextResponse.json({ success: true })
+    } catch {
+      return NextResponse.json({ error: 'Monitoring metadata not saved. Use an existing competitor and valid settings.' }, { status: 400 })
+    }
   }
 
   if (!Array.isArray(body.domains)) {

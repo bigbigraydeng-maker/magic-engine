@@ -93,13 +93,14 @@ describe('手工录入：撞到两个已有客人时不许自作主张', () => {
 
   it('抛错时带上是哪两个人，界面才能摆给销售看', async () => {
     mockTwoDifferentPeople()
-    const err = await resolveContact({
+    const err: unknown = await resolveContact({
       clientId: CLIENT,
       identities: [PHONE, EMAIL],
       mergeStrategy: 'reject',
-    }).catch((e) => e as AmbiguousIdentityError)
+    }).catch((e: unknown) => e)
 
     expect(err).toBeInstanceOf(AmbiguousIdentityError)
+    if (!(err instanceof AmbiguousIdentityError)) throw new Error('unreachable: asserted above')
     expect(err.contactIds.sort()).toEqual(['person-old', 'person-other'])
   })
 

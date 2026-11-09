@@ -28,12 +28,12 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import * as nodeCrypto from 'crypto'   // namespace import — required for vi.mock interception
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
+import {
+  GBP_OAUTH_SCOPE,
+  GBP_STATE_COOKIE,
+  GBP_STATE_TTL_SECS,
+} from '@/lib/gbp/oauth'
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-export const GBP_OAUTH_SCOPE    = 'https://www.googleapis.com/auth/business.manage'
-export const GBP_STATE_COOKIE   = 'gbp_oauth_state'
-export const STATE_TTL_SECS     = 600   // 10 minutes
 
 // ─── Route ───────────────────────────────────────────────────────────────────
 
@@ -102,7 +102,7 @@ export async function GET(req: NextRequest) {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : ''
   response.headers.append(
     'Set-Cookie',
-    `${GBP_STATE_COOKIE}=${cookieVal}; HttpOnly; SameSite=Lax; Max-Age=${STATE_TTL_SECS}; Path=/${secure}`,
+    `${GBP_STATE_COOKIE}=${cookieVal}; HttpOnly; SameSite=Lax; Max-Age=${GBP_STATE_TTL_SECS}; Path=/${secure}`,
   )
 
   return response

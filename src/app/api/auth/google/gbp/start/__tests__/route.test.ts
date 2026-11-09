@@ -19,7 +19,8 @@ vi.mock('crypto', async (importOriginal) => {
 
 // ─── Import after mocks ────────────────────────────────────────────────────────
 
-import { GET, GBP_STATE_COOKIE, GBP_OAUTH_SCOPE, STATE_TTL_SECS } from '../route'
+import { GET } from '../route'
+import { GBP_STATE_COOKIE, GBP_OAUTH_SCOPE, GBP_STATE_TTL_SECS } from '@/lib/gbp/oauth'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -180,10 +181,10 @@ describe('GET /api/auth/google/gbp/start', () => {
       expect(setCookie.toLowerCase()).toContain('samesite=lax')
     })
 
-    it(`cookie maxAge is ${STATE_TTL_SECS}s`, async () => {
+    it(`cookie maxAge is ${GBP_STATE_TTL_SECS}s`, async () => {
       const res = await GET(makeRequest('client-1'))
       const setCookie = res.headers.get('set-cookie') ?? ''
-      expect(setCookie).toContain(`Max-Age=${STATE_TTL_SECS}`)
+      expect(setCookie).toContain(`Max-Age=${GBP_STATE_TTL_SECS}`)
     })
 
     it('defaults the flow segment to "admin" when ?flow= is not passed', async () => {

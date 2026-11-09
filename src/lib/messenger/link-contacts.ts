@@ -47,7 +47,8 @@
  */
 
 import { supabaseAdmin } from '@/lib/supabase'
-import { isAutomatedPageMessage } from '@/lib/messenger/automation'
+import { cleanDisplayName } from '@/lib/crm/clean-display-name'
+import { lastHumanPageReplyAt } from '@/lib/messenger/automation'
 import { buildIdentities, normaliseEmail, normalisePhone, resolveContact } from '@/lib/crm/identity'
 import { parseLeadIntroMessage } from '@/lib/crm/messenger-lead-intro'
 
@@ -62,23 +63,12 @@ export interface IdentityIndex {
 const BUSINESS_EMAIL_DOMAINS = ['ctstours.co.nz']
 
 /**
- * Meta 在拿不到用户资料名时返回的**占位符**，不是人名。
- *
- * 为什么必须单独列出来、不能只靠「≥2 个词」筛掉：「Facebook 用户」正好是两个词，
- * 会通过词数检查。CTS 实测有 14 个人都叫这个 —— 一旦让它参与按姓名认亲，这 14 个
- * 互不相干的真人就会互相认亲，接到同一个人身上。
+ * 占位符 / 邮箱 / 电话 / 空白一律当「没有名字」。返回 null 表示这个人还没留下真名。
+ * 判据只有一份：`cleanDisplayName`（含 Meta 的「Facebook 用户」占位——CTS 实测有 14 个人叫这个，
+ * 一旦让它参与按姓名认亲，这 14 个互不相干的真人会互相认亲）。
  */
-const META_PLACEHOLDER_NAMES = new Set([
-  'facebook 用户',
-  'facebook用户',
-  'facebook user',
-])
-
-/** 占位符 / 空白一律当「没有名字」。返回 null 表示这个人还没留下真名。 */
 export function realDisplayName(raw: string | null | undefined): string | null {
-  const s = (raw ?? '').trim()
-  if (!s) return null
-  return META_PLACEHOLDER_NAMES.has(s.toLowerCase()) ? null : s
+  return cleanDisplayName(raw)
 }
 
 const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi
@@ -198,36 +188,13 @@ function lastSentAt(
  * lib/messenger/automation 的判定说明)。返回 null = 这段对话里没有任何真人回复。
  */
 function lastHumanOutboundAt(messages: LinkConversationInput['messages']): string | null {
-  // 某条出站消息「之前是否已有客户来信」= 线程里存在时间不晚于它的 inbound。
-  // 取最早的一条 inbound 时间做界:出站时间 >= 它 → 客户先留过言 → 这条出站才可能
-  // 是真人在回客户;否则是我们先开口 = 自动欢迎语/广播。
-  let firstInboundAt: string | null = null
-  for (const m of messages) {
-    if (m.direction === 'inbound' && (firstInboundAt === null || m.sentAt < firstInboundAt)) {
-      firstInboundAt = m.sentAt
-    }
-  }
-
-  // 每条出站消息**紧挨着它前面**那条客户来信是什么时候 —— 秒回判据要用
-  // (见 lib/messenger/automation 第 3 条)。按时间排一遍顺着扫，边走边记
-  // 最近一次 inbound，比每条出站都回头找一遍便宜。
-  const ordered = [...messages].sort((a, b) => a.sentAt.localeCompare(b.sentAt))
-
-  let latest: string | null = null
-  let prevInboundAt: string | null = null
-  for (const m of ordered) {
-    if (m.direction === 'inbound') {
-      prevInboundAt = m.sentAt
-      continue
-    }
-    const hasPriorInbound = firstInboundAt !== null && m.sentAt >= firstInboundAt
-    const msSincePriorInbound = prevInboundAt
-      ? new Date(m.sentAt).getTime() - new Date(prevInboundAt).getTime()
-      : null
-    if (isAutomatedPageMessage({ tags: m.tags ?? [], hasPriorInbound, msSincePriorInbound })) continue
-    if (!latest || m.sentAt > latest) latest = m.sentAt
-  }
-  return latest
+  // 整条会话交给 automation 里那套完整判据（先开口 / 来源 tag / 秒回 + Meta AI 客服接管期间 +
+  // 系统通知），跟回复率报表用同一份 —— WP-1a：以前这里只用单条判据，AI 客服接管期间间隔
+  // 超过 30 秒的追问、以及「你的 AI 客服将会回复」这类系统通知都会被当成真人回复，
+  // 写成「我们在 Messenger 回复过」，让没有真人看过的客人从名单里变灰（CTS 509 条里 47 条）。
+  return lastHumanPageReplyAt(
+    messages.map((m) => ({ direction: m.direction, body: m.body, sentAt: m.sentAt, tags: m.tags ?? [] })),
+  )
 }
 
 /**
@@ -579,7 +546,7 @@ export async function backfillFromLeadIntro(
 
   // 名字：Facebook 昵称常常是占位符或只有名，表单里那个是他自己填的全名。
   // 同样只在空着的时候写。
-  const name = leadName?.trim()
+  const name = cleanDisplayName(leadName)
   if (name) {
     await supabaseAdmin
       .from('contacts')

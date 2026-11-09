@@ -16,6 +16,20 @@
  *         `reachable` answers "is this binding actually live right now" — see below.
  * PATCH → { page_id: string | null } replaces the binding; null clears it.
  *
+ * ── AD-SEC-4 (2026-09-17) — who may change this, and what "bound" proves ─────
+ * This column picks the Page the Messenger and lead-form syncs read with a token
+ * that may be the shared fallback (it can see several clients' Pages), and it is
+ * the ownership basis for boost-post / draft / winner-reel-sync. So:
+ *   - PATCH: internal staff only (requireGlobalAdmin — ADMIN_EMAILS /
+ *     ADMIN_EMAIL_DOMAIN; DEMO_ADMINS, scoped admins and every client_portal_users
+ *     access_type incl. 'fde' are refused, nothing written or recorded);
+ *   - binding runs src/lib/meta/page-binding-service.ts: Meta must list the Page
+ *     for this client's token (or a stored OAuth connection) → the Page must not be
+ *     bound to another client (no override) → audit row first, fail closed;
+ *   - GET: the pick-list (`pages`) is staff-only — through the shared token it
+ *     lists other clients' Pages. `verification` says whether the syncs will run
+ *     (src/lib/meta/page-sync-authorization.ts); only staff see the reason.
+ *
  * WHY GET REPORTS `reachable` (added 2026-07-31)
  * ---------------------------------------------
  * A Page can be bound and still pull nothing: the agency can be allowed to
@@ -28,42 +42,27 @@
  * skipping with `no_page_token`, zero conversations in ME, nothing on screen
  * saying so. Computing it on GET costs nothing — readPages() is already called
  * here for the pick-list.
+ *
+ * `reachable` also checks the stored per-client OAuth token (added 2026-09-13,
+ * see computeReachable below) — not just the legacy env-var token `pages` is
+ * built from — otherwise any client who connects through "连接 Meta" gets a
+ * permanent false alarm even though the actual hourly sync works fine.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath } from 'next/cache'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { getMetaTokenForClient } from '@/lib/meta/token-manager'
+import { requireGlobalAdmin } from '@/lib/auth/require-admin'
+import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
 import { listManagedPages, type ManagedPage } from '@/lib/meta/page-posts'
+import { normalisePageId } from '@/lib/meta/page-binding'
+import { bindPage, clearPage } from '@/lib/meta/page-binding-service'
+import { assessPageBinding } from '@/lib/meta/page-sync-authorization'
 import { projectFactoryConfig } from '@/lib/factory/client-config'
 
 /** Why the pick-list is unavailable — the UI turns each into a plain sentence. */
 type PagesError = 'no_token' | 'meta_rejected'
-
-/**
- * Page IDs are long numeric strings ("1616575215312482"). We accept digits only:
- * people paste the vanity URL (facebook.com/CTSTOURS) by mistake, and saving that
- * would leave the sync silently pulling nothing until someone dug into the logs.
- *
- * Returns null on empty input (clear the binding); throws on anything malformed
- * so PATCH answers 400 with a sentence rather than storing junk.
- */
-function normalisePageId(raw: unknown): string | null {
-  if (raw === null || raw === undefined) return null
-  if (typeof raw !== 'string') throw new Error('page_id 必须是字符串或 null')
-
-  const trimmed = raw.trim()
-  if (trimmed.length === 0) return null
-
-  if (!/^\d{8,}$/.test(trimmed)) {
-    throw new Error(
-      '主页 ID 只能是数字（至少 8 位），比如 1616575215312482。' +
-        '主页网址里的名字（facebook.com/CTSTOURS）不是 ID，请在下面的列表里选，或到主页「关于」页面找「主页 ID」。',
-    )
-  }
-  return trimmed
-}
 
 async function readPages(
   clientId: string,
@@ -79,15 +78,49 @@ async function readPages(
 
 /**
  * Can ME actually act for the bound Page right now?
- *   true  → the Page is in the list our token can act for; sync will pull it
- *   false → bound, but Meta does not hand us this Page (grant missing/expired)
- *   null  → nothing bound, or we could not ask Meta at all
+ *   true  → the Page is in the list our token can act for, OR we hold a stored
+ *           per-client OAuth token for it; sync will pull it
+ *   false → bound, but neither source hands us this Page (grant missing/expired)
+ *   null  → nothing bound, or we could not ask Meta at all and have no stored token
  * `false` is the state that used to be invisible, so callers must render it.
+ *
+ * WHY THIS ALSO CHECKS getStoredPageToken (added 2026-09-13)
+ * ------------------------------------------------------------
+ * `pages` comes from getMetaTokenForClient — the legacy env-var token, which is
+ * what the pick-list is built from. It has no idea about a client that connected
+ * through the "连接 Meta" OAuth button: that flow stores its own per-client token
+ * in platform_oauth_connections via getStoredPageToken, and never touches the
+ * env var. New Asian Logistics hit exactly this: OAuth succeeded, the sync (which
+ * already tries getStoredPageToken first) worked fine, but this check only ever
+ * looked at the old env-token pick-list and reported "not reachable" forever.
+ * The pick-list logic itself is untouched — it still needs to know which Pages
+ * exist before it can offer them, and stored-token lookup needs a concrete
+ * page_id to check, so it cannot help there.
  */
-function computeReachable(pageId: string | null, pages: ManagedPage[] | null): boolean | null {
+async function computeReachable(
+  clientId: string,
+  pageId: string | null,
+  pages: ManagedPage[] | null,
+): Promise<boolean | null> {
   if (pageId === null) return null
+  if (pages?.some((p) => p.id === pageId)) return true
+
+  const storedToken = await getStoredPageToken(clientId, pageId)
+  if (storedToken) return true
+
   if (!pages) return null
-  return pages.some((p) => p.id === pageId)
+  return false
+}
+
+/**
+ * Will the syncs run for this Page? `null` when there is no Meta token at all —
+ * that is not a binding problem and `reachable` already says so. The refusal
+ * reason can name another client's binding, so only staff get it.
+ */
+async function verificationFor(clientId: string, pageId: string, isStaff: boolean) {
+  const assessment = await assessPageBinding(supabaseAdmin, clientId, pageId, process.env)
+  if (!assessment.verified && assessment.reason === 'no_meta_token') return null
+  return isStaff ? assessment : { verified: assessment.verified }
 }
 
 export async function GET(
@@ -110,6 +143,9 @@ export async function GET(
     return NextResponse.json({ error: 'Client not found' }, { status: 404 })
   }
 
+  // Global admin = tier admin with no client restriction (scoped admins carry allowedClientId).
+  const isStaff = access.tier === 'admin' && access.allowedClientId === null
+
   const raw = (data as { facebook_page_id: unknown }).facebook_page_id
   const page_id = typeof raw === 'string' && raw.trim().length > 0 ? raw : null
 
@@ -124,13 +160,18 @@ export async function GET(
   // Best-effort: a Meta outage must not stop someone reading or clearing the
   // binding, so a failed lookup degrades to "no pick-list" rather than a 500.
   const { pages, pages_error } = await readPages(clientId)
+  const reachable = await computeReachable(clientId, page_id, pages)
+
+  const verification = page_id ? await verificationFor(clientId, page_id, isStaff) : null
 
   return NextResponse.json({
     page_id,
     publish_target_page_id,
-    pages,
-    pages_error,
-    reachable: computeReachable(page_id, pages),
+    pages: isStaff ? pages : null,
+    pages_error: isStaff ? pages_error : null,
+    reachable,
+    verification,
+    can_edit: isStaff,
   })
 }
 
@@ -144,11 +185,23 @@ export async function PATCH(
     return NextResponse.json({ error: access.error }, { status: access.status })
   }
 
+  // 改绑定主页只许内部员工（AD-SEC-4，理由见文件头）。客户成员仍可 GET 查看。
+  const admin = await requireGlobalAdmin()
+  if (!admin.ok) {
+    return NextResponse.json({ error: admin.error }, { status: admin.status })
+  }
+  const actorEmail = (admin.user.email ?? '').toLowerCase().trim()
+
   let body: { page_id?: unknown }
   try {
     body = (await req.json()) as { page_id?: unknown }
   } catch {
     return NextResponse.json({ error: '请求格式错误' }, { status: 400 })
+  }
+
+  // An absent page_id must not silently mean "clear the binding".
+  if (!body || typeof body !== 'object' || !('page_id' in body)) {
+    return NextResponse.json({ error: '缺少 page_id（要清空绑定请明确传 null）' }, { status: 400 })
   }
 
   let next: string | null
@@ -161,16 +214,11 @@ export async function PATCH(
     )
   }
 
-  const { error: updateErr } = await supabaseAdmin
-    .from('clients')
-    .update({ facebook_page_id: next })
-    .eq('id', clientId)
-
-  if (updateErr) {
-    return NextResponse.json(
-      { error: `保存失败：${updateErr.message}` },
-      { status: 500 },
-    )
+  const result = next === null
+    ? await clearPage(clientId, actorEmail)
+    : await bindPage(clientId, actorEmail, next)
+  if (result.status !== 200) {
+    return NextResponse.json(result.body, { status: result.status })
   }
 
   try {
@@ -180,11 +228,10 @@ export async function PATCH(
   }
 
   // Tell the caller whether ME can actually reach the Page it was just told to
-  // watch. Saving succeeds either way — a binding made before Meta is connected
-  // is legitimate — but the UI must be able to say "saved, but not live yet"
-  // instead of implying the sync has started.
+  // watch, and whether the syncs will run for it.
   const { pages, pages_error } = await readPages(clientId)
-  const reachable = computeReachable(next, pages)
+  const reachable = await computeReachable(clientId, next, pages)
+  const verification = next ? await verificationFor(clientId, next, true) : null
 
-  return NextResponse.json({ success: true, page_id: next, reachable, pages, pages_error })
+  return NextResponse.json({ ...result.body, reachable, pages, pages_error, verification })
 }

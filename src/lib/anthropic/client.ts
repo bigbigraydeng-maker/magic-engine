@@ -16,6 +16,14 @@ export const MODEL_HAIKU = 'claude-haiku-4-5-20251001'
 // Pricing per million tokens (Sonnet 4.6)
 const PRICE_INPUT_PER_M = 3.0    // $3 / MTok
 const PRICE_OUTPUT_PER_M = 15.0  // $15 / MTok
+const HAIKU_PRICE_INPUT_PER_M = 1.0
+const HAIKU_PRICE_OUTPUT_PER_M = 5.0
+
+function modelCostUsd(model: string, inputTokens: number, outputTokens: number): number {
+  const isHaiku = model === MODEL_HAIKU
+  return (inputTokens / 1_000_000) * (isHaiku ? HAIKU_PRICE_INPUT_PER_M : PRICE_INPUT_PER_M)
+    + (outputTokens / 1_000_000) * (isHaiku ? HAIKU_PRICE_OUTPUT_PER_M : PRICE_OUTPUT_PER_M)
+}
 
 const CF_ACCOUNT_ID = 'bbd84393da8e5707ba617749dc17117c'
 const CF_GATEWAY_ID = 'magic-engine'
@@ -182,12 +190,17 @@ export async function callClaudeWithDocs(params: {
 export async function callClaudeChat(params: {
   systemPrompt: string
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
+  model?: string
+  /** Budgeted workflows: no gateway, SDK retry, or fallback duplicate charge. */
+  singleAttempt?: boolean
   maxOutputTokens?: number
+  /** Only with singleAttempt: per-request timeout (default 60000). */
+  timeoutMs?: number
 }): Promise<ClaudeCallResult> {
-  const { systemPrompt, messages, maxOutputTokens = 4096 } = params
+  const { systemPrompt, messages, maxOutputTokens = 4096, model = MODEL_SONNET } = params
 
   const body = {
-    model: MODEL_SONNET,
+    model,
     max_tokens: maxOutputTokens,
     system: systemPrompt,
     messages: messages.map(m => ({ role: m.role, content: m.content })),
@@ -195,8 +208,11 @@ export async function callClaudeChat(params: {
 
   let message: Anthropic.Message
   try {
-    message = await getAnthropicClient().messages.create(body)
+    message = params.singleAttempt
+      ? await getAnthropicClientDirect().messages.create(body, { maxRetries: 0, timeout: params.timeoutMs ?? 60000 })
+      : await getAnthropicClient().messages.create(body)
   } catch (sdkErr) {
+    if (params.singleAttempt) throw sdkErr
     // SDK 兜底:@anthropic-ai/sdk 0.32.1(2024 年版)在 Node 24 上会
     // `Invalid response body ... Premature close` —— 同样的请求 curl/fetch 直连是通的,
     // 纯粹是老 SDK 的 HTTP 层与新版 Node 打架。2026-07-25 本机实测复现 100%。
@@ -228,8 +244,7 @@ export async function callClaudeChat(params: {
 
   const inputTok = message.usage.input_tokens
   const outputTok = message.usage.output_tokens
-  const costUsd = (inputTok / 1_000_000) * PRICE_INPUT_PER_M
-    + (outputTok / 1_000_000) * PRICE_OUTPUT_PER_M
+  const costUsd = modelCostUsd(model, inputTok, outputTok)
 
   return { text, input_tokens: inputTok, output_tokens: outputTok, cost_usd: costUsd, stop_reason: message.stop_reason }
 }

@@ -6,7 +6,7 @@
  * 四 tab 显示 L3 记忆四张表内容；行级别可编辑（textarea + select）/ 删除；
  * 顶部按钮：手动触发抽取器 + 导出 JSON 备份。
  *
- * 仅 FDE 可见（路由用 requireDashboardClientAccess 鉴权 — 客户 portal 不可达）。
+ * 仅内部账号可见。服务端 layout 用 requireOperatorAccess：客户角色不渲染本页。
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -131,7 +131,6 @@ export default function ClientMemoryPage() {
           patterns_added: number
           experiments_added: number
           preferences_added: number
-          decisions_updated: number
           errors: string[]
         }
       }
@@ -142,7 +141,7 @@ export default function ClientMemoryPage() {
         flashAction(
           `抽取完成 — 处理 ${r?.outcomes_processed ?? 0} outcomes；` +
           `新增 patterns:${r?.patterns_added ?? 0} / experiments:${r?.experiments_added ?? 0} / ` +
-          `preferences:${r?.preferences_added ?? 0}；回填 decisions:${r?.decisions_updated ?? 0}` +
+          `preferences:${r?.preferences_added ?? 0}` +
           (r?.errors?.length ? `（${r.errors.length} 条错误）` : ''),
           true,
         )

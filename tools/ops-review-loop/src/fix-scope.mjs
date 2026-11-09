@@ -68,9 +68,12 @@ export const PROTECTED_PATHS = [
   // Authorization boundaries the architecture tests exist to defend.
   { prefix: 'src/lib/kernel/boundaries.ts', why: 'L1/L2 授权边界白名单' },
   { prefix: 'src/lib/kernel/outward-authorization.ts', why: '对外动作授权判定' },
-  // Anything that smells like credentials.
+  // Anything that smells like credentials. Same shape as the credentials rules
+  // in risk.mjs — a test asserts every path here also rates A there, so the two
+  // lists cannot drift apart again (魏征 W71-1, #2071).
   { suffix: '.env', why: '凭证' },
-  { includes: '/.env.', why: '凭证' },
+  { pattern: /^(?!\.env\.example$)(.*\/)?\.env/i, why: '凭证（.env 及各种后缀变体）' },
+  { basename: '.gitignore', why: '忽略清单 —— 删一行就能把密钥文件放进仓库' },
 ]
 
 /** Upper bound on how much one automated fix round may change. */
@@ -83,12 +86,15 @@ export function isGuardedBranch(branch) {
 }
 
 /** @param {string} path */
-function protectionFor(path) {
+export function protectionFor(path) {
+  const basename = path.slice(path.lastIndexOf('/') + 1)
   return PROTECTED_PATHS.find(
     (rule) =>
       (rule.prefix && path.startsWith(rule.prefix)) ||
       (rule.suffix && path.endsWith(rule.suffix)) ||
-      (rule.includes && path.includes(rule.includes)),
+      (rule.includes && path.includes(rule.includes)) ||
+      (rule.basename && basename === rule.basename) ||
+      (rule.pattern && rule.pattern.test(path)),
   )
 }
 

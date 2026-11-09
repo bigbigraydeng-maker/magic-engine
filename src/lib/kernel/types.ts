@@ -22,10 +22,33 @@ import type { AccessTier } from '@/lib/auth/access-types'
  *    只要生成端是开放词汇表，消费端的注册表就永远对不上 ——
  *    注册表建好之后必须把它反向注入 prompt，否则只会从「36 种自由文本」
  *    变成「36 种自由文本 + 一张对不上的表」。
+ *
+ * 🔴 生产里还有一个**故意不注册**的历史键 `page.apply_cts_github_metadata_request`
+ *    （2026-09-14 实查 `action_runs` run `a8ffeed8`，2026-08-21 手动试跑 1 次）。
+ *    它来自未合并分支 `codex/cts-gsc-page-query-capability`（PR #1133 已关闭），
+ *    不是本表某个键的旧名。别把它补进来——补进来等于重新放行一个没过审的动作。
+ *    注册表查不到时返回空（registry.ts）、审批服务拒绝批准，这行只是遗留记录。
  */
 export type ActionKey =
   | 'seo.build_publish_package'
   | 'page.apply_optimization_request'
+  | 'ads.auto_pause_on_d3'
+  // ── 广告支柱受限自治（spec 2026-09-24 §3 G4/G5，PM 2026-09-24 拍板）────────
+  //    这六个都是 outward + bounded：信封内自动执行，信封外不执行也不转审批，
+  //    而是落一条可恢复的 deny 并给 PM 一张三件套待办。
+  | 'ads.pause_unit'
+  | 'ads.pause_campaign'
+  | 'ads.cut_unit_budget'
+  | 'ads.cut_campaign_budget'
+  | 'ads.scale_unit_budget'
+  | 'ads.budget_move_plan'
+  | 'ads.add_retargeting_adset'
+  | 'ads.swap_creative'
+  /**
+   * P0 confirmation card. Approval is recorded here.
+   * The capability refuses to run, so a click never spends or publishes.
+   */
+  | 'governance.p0_confirmation'
 
 /** 一个 run 为了什么而跑。决定它需不需要挂 Goal。 */
 export type ActionPurpose =
@@ -117,11 +140,47 @@ export interface RetryPolicy {
  * 🔴 声明**不能覆盖事实**：v1 只放行 `reversible === true` 的对外动作，
  *    填 `rollback` 换不来放行。完整判据见 `outward-authorization.ts`。
  */
+/**
+ * 受限自治信封 —— 一个对外动作可以在**什么范围内**不经人点头就执行。
+ *
+ * 判据实现在 `autonomy-envelope.ts`（纯函数），声明的合法性由
+ * `outward-authorization.ts` 的结构闸把关。六项**全部必填**，且四个布尔项
+ * 类型上就写死成字面量 `true`：不允许声明成 `false` 来偷偷放宽。
+ *
+ * 🔴 想放宽某一项 = 改这份声明 = 一行进版本控制、要过 review 的 diff，
+ *    不是配置项、没有环境变量旁路。
+ */
+export interface AutonomyEnvelope {
+  /** 一次改动最多动多少比例的预算。允许域 (0, 0.2]，跟 Meta 护栏的 ±20% 对齐。 */
+  readonly maxBudgetDeltaRatio: number
+  /** 必须尊重客户配置的日预算上限（`ad_strategy_configs.daily_budget_cap_cents`）。 */
+  readonly respectDailyCapCents: true
+  /** 同一个单位两次变动之间至少隔多少小时。下限 72（反复改会一直重置 Meta 学习期）。 */
+  readonly minHoursSinceLastChange: number
+  /** 学习期中的单位不动。 */
+  readonly excludeLearningPhase: true
+  /** 在 Meta 对比测试（ad_studies）里的实体不动。 */
+  readonly excludeAdStudies: true
+  /** 没注册撤回处理函数就不自动做。 */
+  readonly requiresRollbackHandler: true
+}
+
+/**
+ * 这个对外动作要不要人点头。
+ *
+ * 🔴 `human_only` 是原来 `requiresHumanApproval: true` 的同义改写，行为完全不变。
+ *    `bounded` 是 PM 2026-09-24 新开的口子，只对广告支柱、只在信封内成立。
+ *    没有第三种写法：新增模式要改这个联合类型，也就要过 review。
+ */
+export type OutwardApproval =
+  | { readonly mode: 'human_only' }
+  | { readonly mode: 'bounded'; readonly envelope: AutonomyEnvelope }
+
 export interface OutwardAuthorization {
   /** 这条许可的出处（spec / issue / PR）。空白不算 —— 要能追到是谁按哪份文件批的。 */
   readonly declaredIn: string
-  /** 🔴 字面量 `true`：对外动作一律要人点头，这一项不允许声明成别的值。 */
-  readonly requiresHumanApproval: true
+  /** 人点头，还是信封内自治。缺这一项 = 声明不完整 = 不放行。 */
+  readonly approval: OutwardApproval
   /** 怎么撤回。说不清撤回路径的对外动作不许存在。 */
   readonly rollback: 'provider_native' | 'snapshot_restore'
 }
@@ -136,6 +195,18 @@ export type VerificationMethod =
    *    Growth 层的 matched remeasurement 走下游 Measurement/Verification 链，跟这个 method 无关。
    */
   | 'page_apply_integrity'
+  /**
+   * 🔴 `ads.auto_pause_on_d3` 专用：暂停之后回读 Meta 广告组状态，
+   *    确认它真的是 `PAUSED`（不是「写入没报错就算数」）。
+   */
+  | 'ads_pause_integrity'
+  /**
+   * 广告动作的执行完整性回读（spec 2026-09-24 §3 G5）。
+   * 只判「这次受授权的改动是否真按批准的值落到 Meta 上」——回读改后设置、
+   * 跟改前快照比对、确认只有该变的字段变了。**不判广告效果变好没变好**，
+   * 那是 Check 段（T+N 天回读 `ad_daily_insights`）的事。
+   */
+  | 'ads_readback_integrity'
 
 export interface VerificationSpec {
   readonly method: VerificationMethod
@@ -168,6 +239,15 @@ export interface ActionDefinition<K extends ActionKey = ActionKey> {
    * outward 的动作没有它就一定被拒 —— 授权层和 Gateway 各拒一次。
    */
   readonly outwardAuthorization: OutwardAuthorization | null
+  /**
+   * 这个动作会不会让客户**多花钱**（加预算、挪预算的加的一侧、新建会花钱的东西）。
+   *
+   * `true` = 加钱类：不管客户策略表写的是不是自动，只有 PM 本人（`KernelDeps.isSpendApprover`）
+   * 签的放行才能执行（第 3 刀 3a，`docs/specs/2026-11-03-ads-knife3-spend-gate-and-budget-buttons-design.md` §2）。
+   * 🔴 广告动作必须**明写** true / false（守卫测试盯着）——不按信封事实类型推断：
+   *    减预算的事实类型也是「改预算」，推断会把刹车误收进这道闸。
+   */
+  readonly spendIncrease?: boolean
   readonly idempotency: IdempotencyRule
   readonly costModel: CostModel
   /**
@@ -234,6 +314,17 @@ export type DenyCode =
    *    人改完了却因为幂等键命中旧的 denied run 而**永远做不了**。
    */
   | 'outward_requires_human_policy'
+  /**
+   * 动作声明成 bounded（信封内可自治），但**这一次**的具体改动不在信封内，
+   * 或者信封要的事实读不到（spec 2026-09-24 §3 G5）。
+   *
+   * 🔴 也是**可恢复**码：PM 把日预算上限调高、或者过了 72 小时冷却、
+   *    或者单位退出学习期之后，同一件事理应能做。不可恢复的话，幂等键会让
+   *    后续同内容的提交命中这条旧的 denied run，等于把这个动作永久锁死。
+   *    必须同步进 `RECOVERABLE_DENY_CODES`（runner.ts）**和**数据库
+   *    `kernel_claim_run_recovery` 里那份一字不差的副本。
+   */
+  | 'outside_autonomy_envelope'
   /**
    * 挂起等审批期间，客户的规则被改过了（模式变了 / 版本变了）。
    * 🔴 人工批准只能把「当前仍是 require_approval 的同一版政策」变成放行，

@@ -432,7 +432,12 @@ describe('Sprint B 工具验收 — Domain Analytics 技术栈 + WHOIS', () => {
       .find(m => m.role === 'user' && Array.isArray(m.content))
     const content = (toolResultMsg!.content as Array<{ content?: string }>)[0].content
     expect(content).toMatch(/IMPORTANT: domain expires in \d+ days/)
-    expect(content).toMatch(/quick_fix/)
+    // The warning names the exact expiry date and tells Claude what note to write.
+    expect(content).toContain(`(${soon})`)
+    expect(content).toContain('域名将于 X 天后到期，请立即续费')
+    // The raw WHOIS JSON is still passed through ahead of the warning.
+    const jsonPart = String(content).slice(0, String(content).indexOf(' IMPORTANT:'))
+    expect(JSON.parse(jsonPart)).toMatchObject({ expires_at: soon, registrar: 'Domainz' })
   })
 })
 
@@ -556,8 +561,15 @@ describe('Sprint D 工具验收 — SERP API + OnPage 审计', () => {
     const toolResultMsg = (secondCall[0].messages as Array<{ role: string; content: unknown }>)
       .find(m => m.role === 'user' && Array.isArray(m.content))
     const content = (toolResultMsg!.content as Array<{ content?: string }>)[0].content
-    expect(content).toMatch(/missing meta description/)
-    expect(content).toMatch(/diagnosis\.actions\.quick_fix/)
+    expect(content).toMatch(/Summary: Issues found: missing meta description, 3 images missing alt text\./)
+    expect(content).toContain('Add relevant issues to the notes field.')
+    // The raw audit JSON is still passed through ahead of the summary.
+    const jsonPart = String(content).slice(0, String(content).indexOf('\n\nSummary:'))
+    expect(JSON.parse(jsonPart)).toMatchObject({
+      url: 'https://cts-tours.com/',
+      images_no_alt: 3,
+      checks: { no_description: true, missing_alt_text: true },
+    })
   })
 
   it('fetch_onpage_audit null 时返回"No on-page audit data"，不中断', async () => {
@@ -678,10 +690,10 @@ describe('E.1.6 错误降级 — DataForSEO 故障不中断主流程', () => {
   })
 })
 
-// ─── E.1.7 工具注册验收 — 所有 11 个工具均已在 agent tools 数组中 ─────────────
+// ─── E.1.7 工具注册验收 — 所有 10 个工具均已在 agent tools 数组中 ─────────────
 
-describe('E.1.7 工具注册验收 — 所有 11 个工具均传给 Claude', () => {
-  it('messages.create 收到的 tools 数组覆盖全部 11 个工具', async () => {
+describe('E.1.7 工具注册验收 — 所有 10 个工具均传给 Claude', () => {
+  it('messages.create 收到的 tools 数组覆盖全部 10 个工具', async () => {
     mockCreate
       .mockResolvedValueOnce(buildEndTurnResponse(FINAL_REPORT_JSON))
 
@@ -705,9 +717,12 @@ describe('E.1.7 工具注册验收 — 所有 11 个工具均传给 Claude', () 
     // Pre-existing tools still present
     expect(toolNames).toContain('fetch_url')
     expect(toolNames).toContain('verify_business_registration')
-    expect(toolNames).toContain('fetch_social_metrics')
     // web_search is server-side — registered with name: 'web_search'
     expect(toolNames).toContain('web_search')
+    // fetch_social_metrics was intentionally removed — social metrics are
+    // discovered via web_search + fetch_url (see agent.ts).
+    expect(toolNames).not.toContain('fetch_social_metrics')
+    expect(toolNames).toHaveLength(10)
   })
 
   it('每个新工具的 input_schema 包含 required 字段定义', async () => {

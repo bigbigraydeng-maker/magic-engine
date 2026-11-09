@@ -1,0 +1,50 @@
+{
+  "_meta": {
+    "issue": "#1591 T-14d 端到端 dry-run（Messenger 部分）",
+    "client_id": "c0000000-0000-0000-0000-000000000000",
+    "source": "生产库 conversations + conversation_messages（project glbdnayojixmexgofbsd），channel='messenger' 只读查询，未写入生产任何数据",
+    "selection_method": "先按最新一条入站消息文本对 692 个 messenger 对话跑关键词启发式打标；'退改'/'签证'/'已停团'/'中英混用'/'post-sale' 五类在最新消息里命中太少，改成对整段对话的全部入站消息做关键词搜索找真实样本；'已停团'类因为生产库该客户当前 0 条 forbidden 知识事实，找不到会真正命中该闸的样本，用一条'这个团还在卖吗'式的真实提问做最接近的代理样本（见 caveats）",
+    "category_counts": {
+      "问价": 4, "团期": 3, "退改": 2, "签证": 3, "行前": 3,
+      "已停团": 1, "中英混用": 2, "post-sale": 3, "长消息": 8, "短消息": 5, "表情": 6
+    },
+    "caveats": [
+      "已停团类只有 1 条（#16），因为生产库 client_knowledge_facts 里这个客户当前没有任何 visibility='forbidden' 的行——这个发现本身写进了 report.md，不在本脚本里处理。",
+      "退改类第二条（#9）不是严格的'退款/改期'请求，是'看了行程单方向不对，想改'——真正的退款请求在这 692 条对话的全部历史消息里只找到 1 条真实样本（#8，2021-2022年的历史消息）。",
+      "中英混用类第二条（#18）是一条中文+英文夹杂的骚扰/营销私信（冒充'人民日报'邀请入群），不是正常客户咨询，选它只是因为真正双语夹杂的客户咨询在这个客户的历史里同样稀少。",
+      "#30 是一条用西里尔字母同形异构混淆的钓鱼私信（冒充 Meta 官方通知），不属于十类意图里任何一类，选它是因为它同时是'长消息'+带⚠️表情符号，顺带验证 pipeline 对垃圾/钓鱼输入的行为——这是一个额外发现，不占十类覆盖率的分母。"
+    ]
+  },
+  "selected": [
+    { "conversation_id": "d6f8937f-dfc6-48aa-9bcd-3493aaedf19a", "category": "问价", "preview": "How much do your China tours cost?" },
+    { "conversation_id": "04941c01-98ae-445c-a5de-bff679f30778", "category": "问价", "preview": "How much do your China tours cost?（同模板，不同对话，测试相同输入是否幂等处理）" },
+    { "conversation_id": "7161cb62-5627-4a02-b93b-d0da2cb17909", "category": "问价", "secondary": ["长消息"], "preview": "Hi, can you please send me costings for 3 adults? My daughter and I can share a room and my Dad will..." },
+    { "conversation_id": "38db37fa-be68-476d-abd7-b85af8d761ac", "category": "问价", "preview": "I'm interested but I travel alone how much is it for one person?" },
+    { "conversation_id": "a0e3aaeb-6e85-45dc-9546-b7086f0d0ff0", "category": "团期", "preview": "I like to visit Beijing, Xian, Zhangjiajie and Zhongqing. Two adults to depart from Malaysia" },
+    { "conversation_id": "02bcea48-ebc5-4615-b141-98c820086990", "category": "团期", "secondary": ["长消息"], "preview": "hello. when is your next departure please? I am a single female travelling alone, is it good quality..." },
+    { "conversation_id": "2a82c720-517c-4f37-bec2-10c692a5826e", "category": "团期", "secondary": ["长消息"], "preview": "Thanks. Departure date anytime between 22-26 dec, whenever is the cheapest, return date between 20-3..." },
+    { "conversation_id": "58f41d9a-7bfa-4814-a015-5836f3854db8", "category": "退改", "preview": "Hi there, I hope you're well. I have been trying to get in touch with someone regarding a cancelled trip/credit and wanting a refund...（历史消息，2021-2022）", "note": "真实退款请求，全库唯一样本" },
+    { "conversation_id": "553abad6-5e2d-4934-966b-44279ebb0e86", "category": "退改", "note": "代理样本：'Have viewed itinerary. Looks good, but wrong direction' —— 想改行程方向，非严格退款/改期" },
+    { "conversation_id": "fa6431e0-dd8e-4ff4-b0af-c12d9d0b366f", "category": "签证", "preview": "Do Kiwi passport need a visa for travel?" },
+    { "conversation_id": "3927f323-e9fb-483e-ad4e-b9a97fe135c8", "category": "签证", "secondary": ["表情"], "preview": "We are Philippines passport but we are permanent resident of New Zealand 🇳🇿 / Do we need a China visa to enter or apply" },
+    { "conversation_id": "11267d02-0571-49be-a317-5eeaa1ebdfdb", "category": "签证", "secondary": ["表情", "长消息"], "preview": "I'm a British passport holder living in NZ so for a few weeks I should t need a visa? Can you check please? / Questions: is this flights and accom and is there any way to add on 🏔️ Zhangjiajie National park" },
+    { "conversation_id": "d07cd514-9fbc-430c-9e01-e115b9037552", "category": "行前", "preview": "Can you send me the itinerary?" },
+    { "conversation_id": "25e6e5e9-5f04-4c86-9073-d36515e2b2a3", "category": "行前", "secondary": ["长消息"], "preview": "If you can send me the cheapest gud accommodation for couple pickup n drop from airport. Plez" },
+    { "conversation_id": "52570061-c276-4e98-9e76-b27f1bc43c85", "category": "行前", "preview": "Please email both this and the 15 day tour itinerary" },
+    { "conversation_id": "88232055-745d-4b52-bafb-0bd700b1bb41", "category": "已停团", "preview": "Are you still offering New Zealand south island tours", "note": "全库唯一可用代理样本，见 caveats" },
+    { "conversation_id": "99acb7d3-e8cf-470c-b24c-4e16fe852b6b", "category": "中英混用", "preview": "请問Wellington Angecy 可找那位" },
+    { "conversation_id": "7d82e559-13eb-4573-a0e6-950d7828388a", "category": "中英混用", "secondary": ["长消息"], "note": "冒充'人民日报'的骚扰私信，见 caveats", "preview": "您好，我是人民日报旗下中国文化和潮流...Hello! I am the adminis..." },
+    { "conversation_id": "c2301372-3b14-41fe-bfda-97717dc385cb", "category": "post-sale", "secondary": ["长消息"], "preview": "I've been traveling to a few countries in the last few years and for the first time in China last year and I absolutely love it. In Shanghai, Beijing and Hong Kong and I just got ba..." },
+    { "conversation_id": "b39e745f-9b81-42d3-a5bf-590d9375fa5c", "category": "post-sale", "preview": "Hey team! I have just reviewed you - 5 stars of course!! <3" },
+    { "conversation_id": "cc5a0b10-fb76-43af-b02f-1aef714f5a8b", "category": "post-sale", "preview": "just got back from Beijing to Shanghai and loved it. Checking availability for a tour to another part of China." },
+    { "conversation_id": "9109f3ca-eee0-49f9-8b79-2f316f8d176e", "category": "长消息", "preview": "Hello! I filled out your form and would like to know more about your business. Full name: Lesley Hal...（网站表单同步的模板长消息）" },
+    { "conversation_id": "1a80a4c5-0396-47ab-9f95-6f541be1edaa", "category": "长消息", "preview": "Hello! I filled out your form and would like to know more about your business. Full name: Lalitha Ka...（同模板，另一位联系人）" },
+    { "conversation_id": "f98fe37e-26c6-4d47-8416-4bf7fa8eca39", "category": "短消息", "preview": "Yes" },
+    { "conversation_id": "6b68e5fd-06eb-4ff0-96ed-40e4aaf96e82", "category": "短消息", "preview": "Yes please" },
+    { "conversation_id": "484f2f62-7cb1-471b-ab53-f3c3a9aff49e", "category": "短消息", "preview": "Been before" },
+    { "conversation_id": "e21d77de-3e48-4f9e-b05e-ff2ccc9bb141", "category": "表情", "secondary": ["短消息"], "preview": "👍" },
+    { "conversation_id": "826edf9b-d06e-48f2-b553-ebf3fa080d8d", "category": "表情", "secondary": ["短消息"], "preview": "👍👍🙏" },
+    { "conversation_id": "9a10ea8f-0ac6-46cc-aa36-69dbca256673", "category": "表情", "preview": "Thank you 😊" },
+    { "conversation_id": "50ae46c9-3460-4e59-910e-9280328f2e58", "category": "表情", "secondary": ["长消息"], "note": "额外发现：西里尔同形异构字符钓鱼私信，冒充 Meta 官方通知，见 caveats", "preview": "⚠️ Nоtіcе Rеgаrdіng Yоur Раgе Асtіvіtу..." }
+  ]
+}

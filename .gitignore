@@ -24,6 +24,10 @@ yarn-error.log*
 
 # Local env files
 .env.local
+
+# Claude Code session scratch output (used by scratch-preview launch config)
+/.claude/scratch/*
+!/.claude/scratch/.gitkeep
 .env.*.local
 
 # IDEs
@@ -32,6 +36,9 @@ yarn-error.log*
 *.swp
 *.swo
 *~
+
+# aider (per-user tool cache/history — never committed)
+.aider*
 
 # Microsoft Office lock files
 ~$*
@@ -66,3 +73,7 @@ scripts/factory-worker/node_modules/
 # Python 编译产物（scripts/video-pipeline）
 __pycache__/
 *.py[cod]
+
+# Impeccable skill machine-local config (hooks / consent)
+/.claude/settings.local.json
+/.impeccable/config.local.json

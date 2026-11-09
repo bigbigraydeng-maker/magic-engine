@@ -531,8 +531,8 @@ describe('docs/ENV.md 里带 worker 服务名的标注，必须跟真实 worker 
       const entry = entrypointOf(svc.dockerfilePath)
       if (!entry) continue
       const declared = new Set(svc.keys)
-      // Array.from 而不是直接迭代 Map：仓库 tsconfig 没设 target，
-      // 直接迭代迭代器会撞 TS2802（要 downlevelIteration）。同文件别处已踩过。
+      // Array.from 而不是直接迭代 Map：直接迭代迭代器要求 tsconfig 的 target
+      // 够高（否则撞 TS2802），Array.from 不挑 target。同文件别处已踩过。
       for (const [name, file] of Array.from(unguardedEnvReads(entry))) {
         checked++
         if (!declared.has(name)) {

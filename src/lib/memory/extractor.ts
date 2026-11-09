@@ -23,6 +23,15 @@
  *   于是让正反两条经验同时留在库里。现在每个动作每轮都对账到「当前结论那一侧
  *   生效、对侧下架」，DB 触发器（20260812100000）兜底。
  *
+ * 只学真执行过、结论站得住的动作（1b，2026-09-26）:
+ *
+ *   EXECUTION_GATED_FLYWHEELS 里的支柱（seo / ads）不再走「新鲜的强结论就学」：
+ *   每个动作过一遍 `classifyActionCase`（case-validity.ts）—— 诸葛亮的建议没执行过、
+ *   整站指标、广告方向未定、窗口没到期、没有强结论，都不学；已经学进去的，按
+ *   同一个判定下架（reconcile.ts），只切 is_active，被下架的行带表名进 cron 运行记录，
+ *   可按清单恢复。开关打开和下架用的是同一个判定，一轮之内不可能先开后关。
+ *   名单外的支柱（geo / social）输入与旧逻辑逐字相同。
+ *
  * 设计原则：
  *   - 纯规则版本，无 LLM 调用 — 廉价、可解释、易回滚
  *   - 幂等：按 (client_id, source_action_id) 对账，重复跑不产生新行
@@ -39,21 +48,42 @@ import {
   saveFailedExperiment,
   savePreference,
   setDerivedMemoryActive,
-  updateDecisionOutcome,
   type DerivedMemoryTable,
 } from './service'
+import {
+  MIN_OUTCOME_CONFIDENCE,
+  OUTCOME_FRESH_DAYS,
+  RULE_BASED_REASONS,
+  classifyActionCase,
+  isGatedFlywheel,
+  type CaseAction,
+  type CaseStatus,
+} from './case-validity'
+import {
+  loadClientEvidence,
+  loadDerivedMemory,
+  loadExtractorClientIds,
+  type ActionRow,
+  type ClientEvidence,
+  type DerivedMemoryRow,
+  type OutcomeRow,
+} from './extractor-load'
+import {
+  applyDeactivations,
+  loadAttributionHealth,
+  planDerivedMemoryDeactivations,
+  planPreferenceDeactivations,
+  type DeactivatedMemory,
+  type DeactivationReason,
+  type PreferenceRow,
+  type ReconcileRow,
+} from './reconcile'
 import type { FlywheelName, PatternType, PreferenceType } from './types'
 
 // ── 配置参数 ──────────────────────────────────────────────────────────────────
 
-/** 写入 patterns/experiments 的最低 outcome confidence */
-const MIN_OUTCOME_CONFIDENCE = 0.6
-
 /** 同 action_type 连续 confirmed ≥ N 次才生成 learned_preference */
 const MIN_OCCURRENCES_FOR_PREFERENCE = 3
-
-/** decision → outcome 匹配的时间窗（天） */
-const DECISION_MATCH_WINDOW_DAYS = 14
 
 // ── 公共类型 ──────────────────────────────────────────────────────────────────
 
@@ -64,11 +94,27 @@ export interface ExtractorResult {
   patterns_added: number
   experiments_added: number
   preferences_added: number
-  decisions_updated: number
   /** Rows switched off: the opposite verdict, and per-action duplicates. */
   memories_superseded: number
   /** Rows switched back on because the verdict flipped back. */
   memories_reactivated: number
+  /**
+   * 因为「太久没重算」被挡在门外的 outcome 行数。
+   *
+   * **必须报出来**，不能静默丢弃：这个数不为零，说明有一批动作的归因已经不再更新，
+   * 而系统仍然在拿它们当证据。零和非零是两件完全不同的事，看不见就等于没发生。
+   */
+  outcomes_stale_skipped: number
+  /** 1b · rows switched off because their action is no longer a valid case, by reason. */
+  deactivated_by_reason: Partial<Record<DeactivationReason, number>>
+  /** 1b · every row switched off by that reconciliation, with its table — the rollback list. */
+  deactivated: DeactivatedMemory[]
+  /** 1b · switch-offs held back because attribution looked stalled. */
+  skipped_attribution_stalled: number
+  /** 1b · memories left alone because their action's measurement window has not ended. */
+  skipped_immature: number
+  /** 1b · active memories of unknown pillar, left alone. */
+  skipped_unknown_pillar: number
   errors: string[]
 }
 
@@ -76,6 +122,17 @@ export interface ExtractorBatchResult {
   clients_processed: number
   aggregate: ExtractorResult
   per_client_errors: Array<{ client_id: string; error: string }>
+}
+
+export interface ExtractorOptions {
+  /**
+   * false = the manual FDE entry: never switch memories off, so every switch-off lands in
+   * the cron run log (the rollback list). Step 4 still only opens valid cases, whatever
+   * the entry point, so a manual run cannot reopen what the cron switched off.
+   */
+  reconcile?: boolean
+  /** Batch runs check attribution health once and pass it in; single runs check it themselves. */
+  attributionHealthy?: boolean
 }
 
 // ── 内部类型 ──────────────────────────────────────────────────────────────────
@@ -99,14 +156,7 @@ interface OutcomeJoinRow {
   expected_metric: string | null
 }
 
-/** A derived memory row, as far as reconciliation cares. */
-interface DerivedMemoryRow {
-  id: string
-  source_id: string | null
-  source_action_id: string | null
-  is_active: boolean
-  created_at: string
-}
+type MemoryIndex = Record<DerivedMemoryTable, Map<string, DerivedMemoryRow[]>>
 
 // ── 公共 API ──────────────────────────────────────────────────────────────────
 
@@ -117,139 +167,112 @@ interface DerivedMemoryRow {
 export async function runExtractorForClient(
   supabase: SupabaseClient,
   clientId: string,
+  /** 测试注入用；生产不传。新鲜度闸拿它算截止时间。 */
+  now: Date = new Date(),
+  options: ExtractorOptions = {},
 ): Promise<ExtractorResult> {
-  const result: ExtractorResult = {
-    outcomes_processed: 0,
-    actions_processed: 0,
-    patterns_added: 0,
-    experiments_added: 0,
-    preferences_added: 0,
-    decisions_updated: 0,
-    memories_superseded: 0,
-    memories_reactivated: 0,
-    errors: [],
-  }
+  const result = emptyResult()
+  const reconcile = options.reconcile ?? true
 
-  // 1. 拉取该客户所有 high-confidence outcomes + JOIN action
-  let outcomes: OutcomeJoinRow[] = []
+  // 1. 该客户全部 outcome 与全部动作 —— 记忆能依赖的证据都在这里
+  let evidence: ClientEvidence
   try {
-    outcomes = await loadOutcomesWithActions(supabase, clientId)
-    result.outcomes_processed = outcomes.length
+    evidence = await loadClientEvidence(supabase, clientId)
   } catch (err) {
     result.errors.push(`load outcomes: ${msgOf(err)}`)
     return result
   }
+  const actionById = new Map(evidence.actions.map((a) => [a.id, a]))
+  const outcomeById = new Map(evidence.outcomes.map((o) => [o.id, o]))
 
-  if (outcomes.length === 0) {
-    return result
-  }
+  // 2. 名单外支柱的输入与旧逻辑逐字相同：新鲜的强结论，一个动作一个案例
+  const legacy = legacyStrongReadings(evidence, actionById, now)
+  result.outcomes_processed = legacy.joined.length
+  result.outcomes_stale_skipped = legacy.staleSkipped
 
-  // 2. 折成「一个动作一个案例」—— 之后所有计数都在这上面做
-  const cases = keepOneCasePerAction(outcomes)
+  // 3. 名单内支柱：每个动作一个判定，打开与下架共用
+  const classify = makeClassifier(evidence, actionById, now)
+  const cases = [
+    ...keepOneCasePerAction(legacy.joined.filter((o) => !isGatedFlywheel(o.flywheel))),
+    ...validGatedCases(evidence, actionById, outcomeById, classify),
+  ]
   result.actions_processed = cases.length
 
-  // 3. 拉取已派生的记忆行，按动作索引（存量行没有 source_action_id，
-  //    用 outcome_id → action_id 认领回来，避免第一次跑就写出重复）
-  const outcomeToAction = new Map(outcomes.map(o => [o.outcome_id, o.action_id]))
-  let derived: Record<DerivedMemoryTable, Map<string, DerivedMemoryRow[]>> = {
-    client_proven_patterns: new Map(),
-    client_failed_experiments: new Map(),
-  }
+  // 4. 已派生的记忆行，按动作索引
+  let proven: DerivedMemoryRow[]
+  let failed: DerivedMemoryRow[]
   try {
-    derived = {
-      client_proven_patterns: indexByAction(
-        await loadDerivedMemory(supabase, clientId, 'client_proven_patterns'),
-        outcomeToAction,
-      ),
-      client_failed_experiments: indexByAction(
-        await loadDerivedMemory(supabase, clientId, 'client_failed_experiments'),
-        outcomeToAction,
-      ),
-    }
+    proven = await loadDerivedMemory(supabase, clientId, 'client_proven_patterns')
+    failed = await loadDerivedMemory(supabase, clientId, 'client_failed_experiments')
   } catch (err) {
     // 读不到存量就停手：继续跑会把「已有的」当成「没有的」，写出一堆重复记忆，
     // 而且对侧下架也做不了 —— 那比这一轮不抽取糟糕得多。
     result.errors.push(`load existing memories: ${msgOf(err)}`)
     return result
   }
+  const allOutcomeToAction = new Map(evidence.outcomes.map((o) => [o.id, o.action_id]))
+  const derived = {
+    // 名单外支柱照旧只用本轮新鲜强结论认领存量行（输入不变 = 行为不变）
+    legacy: indexBoth(proven, failed, new Map(legacy.joined.map((o) => [o.outcome_id, o.action_id]))),
+    gated: indexBoth(proven, failed, allOutcomeToAction),
+  }
 
-  // 4. 逐动作对账：当前结论那一侧生效，对侧下架
+  // 5. 逐动作对账：当前结论那一侧生效，对侧下架
   for (const out of cases) {
-    if ((out.confidence ?? 0) < MIN_OUTCOME_CONFIDENCE) continue
-    if (out.verdict !== 'confirmed' && out.verdict !== 'reversed') continue
+    await reconcileOneCase(supabase, out, isGatedFlywheel(out.flywheel) ? derived.gated : derived.legacy, result)
+  }
 
-    const confirmed = out.verdict === 'confirmed'
-    const winner: DerivedMemoryTable = confirmed ? 'client_proven_patterns' : 'client_failed_experiments'
-    const loser:  DerivedMemoryTable = confirmed ? 'client_failed_experiments' : 'client_proven_patterns'
-
-    try {
-      const held = derived[winner].get(out.action_id) ?? []
-
-      if (held.length === 0) {
-        const saved = confirmed
-          ? await saveProvenPattern(supabase, {
-              client_id: out.client_id,
-              pattern_type: actionToPatternType(out.action_type),
-              pattern_content: describePattern(out),
-              performance_metric: describeMetric(out),
-              flywheel: out.flywheel,
-              source_table: 'flywheel_outcomes',
-              source_id: out.outcome_id,
-              source_action_id: out.action_id,
-            })
-          : await saveFailedExperiment(supabase, {
-              client_id: out.client_id,
-              experiment_description: describeExperiment(out),
-              failure_reason: describeFailure(out),
-              dimension: flywheelToDimension(out.flywheel),
-              tried_at: out.executed_at,
-              source_table: 'flywheel_outcomes',
-              source_id: out.outcome_id,
-              source_action_id: out.action_id,
-            })
-        if (saved) {
-          if (confirmed) result.patterns_added++
-          else result.experiments_added++
-        }
-      } else {
-        // 已有该动作的记忆：认领存量行的动作身份，留一条生效，其余下架。
-        // 留最早那条 —— 它是这个动作第一次被学到的时间点，且排序确定。
-        const [keep, ...redundant] = [...held].sort(byCreatedAtThenId)
-        const changes = await adoptAndActivate(supabase, winner, keep, out.action_id)
-        result.memories_reactivated += changes
-
-        for (const row of redundant) {
-          result.memories_superseded += await adoptAndDeactivate(supabase, winner, row, out.action_id)
-        }
-      }
-
-      // 对侧下架。触发器只在 INSERT / is_active 变化时响，命中不了「本来就
-      // active 且这轮没被碰」的存量行，所以这一刀必须显式补上。
-      result.memories_superseded += await setDerivedMemoryActive(
-        supabase, loser, out.client_id, out.action_id, false,
-      )
-    } catch (err) {
-      result.errors.push(`action ${out.action_id}: ${msgOf(err)}`)
+  let healthy = true
+  if (reconcile) {
+    const health = options.attributionHealthy === undefined
+      ? await loadAttributionHealth(supabase, now)
+      : { healthy: options.attributionHealthy, detail: '' }
+    healthy = health.healthy
+    if (!health.healthy && health.detail) {
+      result.errors.push(`attribution stalled, freshness-based switch-offs held back: ${health.detail}`)
     }
   }
 
-  // 5. 聚合 action_type 频次 → 生成 preferences（同样按动作计数）
+  // 6. 聚合 action_type 频次 → preferences（同样按动作计数）；名单内支柱同时对账下架
+  const holdKeys = healthy ? new Set<string>() : stallSensitiveActionTypes(evidence.actions, classify)
   try {
-    const added = await extractPreferencesFromActionTypes(
-      supabase, clientId, cases,
-    )
-    result.preferences_added += added
+    await reconcilePreferences(supabase, clientId, cases, result, { reconcile, holdKeys })
   } catch (err) {
     result.errors.push(`extract preferences: ${msgOf(err)}`)
   }
 
-  // 5. 回填 decision_history.outcome_verdict
-  try {
-    const updated = await backfillDecisionOutcomes(supabase, clientId)
-    result.decisions_updated += updated
-  } catch (err) {
-    result.errors.push(`backfill decisions: ${msgOf(err)}`)
+  // 7. 名单内支柱：动作已不是有效案例的记忆行下架（只切 is_active，按行 id）
+  if (reconcile) {
+    const rows = [
+      ...toReconcileRows(proven, 'client_proven_patterns', allOutcomeToAction, actionById),
+      ...toReconcileRows(failed, 'client_failed_experiments', allOutcomeToAction, actionById),
+    ]
+    const plan = planDerivedMemoryDeactivations(rows, classify, healthy)
+    result.skipped_attribution_stalled += plan.skippedStalled
+    result.skipped_immature += plan.skippedImmature
+    result.skipped_unknown_pillar += plan.skippedUnknownPillar
+    await applyAndRecord(supabase, clientId, plan.deactivate, result)
   }
+
+  // （已退役 2026-09-06）这里原本还有一步「回填 client_decision_history.outcome_verdict」。
+  //
+  // 判据是错的，而且错得很彻底：它只按 client_id + 时间窗查 outcome，**从不看这条决策
+  // 本身关联的是哪个动作**，然后拿窗口内全部 outcome 的多数票，给该客户窗口内的**每一条**
+  // 决策盖同一个章。生产实测（2026-09-06）：116 条自动回填只有 5 种 note，每种恰好对应
+  // 一个客户 —— 其中一家的 50 条决策被一次性全部盖成 failure。
+  //
+  // 危害不止于脏数据：`memory/format.ts` 会把它拼成 `(outcome: failure)` 写进
+  // 「Recent Decisions」段，喂给鲁班（`luban/project-prompts.ts`）和华佗
+  // （`huatuo/memory.ts`，长模式）。也就是说 AI 被告知那 50 个互不相干的选择都失败了。
+  // 而 `updateDecisionOutcome` 只填 `outcome_verdict is null` 的行，**填过就不再复查**，
+  // 是不可逆的单向写。
+  //
+  // 🔴 要重做的话，判据必须换成「只匹配这条决策**所关联动作**的 outcome」，时间窗用
+  //    `flywheel_actions.executed_at` 而不是 `flywheel_outcomes.computed_at`
+  //    （后者每轮 attribution 都会被刷成「现在」，根本不是事件发生时间）。
+  //    但 `client_decision_history` 目前**没有指向 action 的外键**，接不上就别猜 ——
+  //    宁可这一段永久不做，也不要再往客户记忆里刻一批假结论。
+  //    人工/其它调用方要写结论，走 `memory/service.ts` 的 `updateDecisionOutcome`，那条没问题。
 
   return result
 }
@@ -259,49 +282,42 @@ export async function runExtractorForClient(
  */
 export async function runExtractorForAllClients(
   supabase: SupabaseClient,
+  /** 测试注入用；生产不传。 */
+  now: Date = new Date(),
 ): Promise<ExtractorBatchResult> {
-  const aggregate: ExtractorResult = {
-    outcomes_processed: 0,
-    actions_processed: 0,
-    patterns_added: 0,
-    experiments_added: 0,
-    preferences_added: 0,
-    decisions_updated: 0,
-    memories_superseded: 0,
-    memories_reactivated: 0,
-    errors: [],
-  }
+  const aggregate = emptyResult()
   const perClientErrors: Array<{ client_id: string; error: string }> = []
 
-  // 仅处理在 outcomes 表里出现过的客户（无 outcome 客户跳过）
-  const { data: rows, error } = await supabase
-    .from('flywheel_outcomes')
-    .select('client_id')
-    .order('client_id')
-
-  if (error) {
+  // 有 outcome 的客户 ∪ 还有在用派生记忆的客户（outcome 全被删掉的客户，记忆也得有人管）
+  let clientIds: string[]
+  try {
+    clientIds = await loadExtractorClientIds(supabase)
+  } catch (err) {
     return {
       clients_processed: 0,
       aggregate,
-      per_client_errors: [{ client_id: '*', error: `list clients: ${error.message}` }],
+      per_client_errors: [{ client_id: '*', error: `list clients: ${msgOf(err)}` }],
     }
   }
 
-  const clientIds = Array.from(new Set((rows ?? []).map(r => r.client_id))).filter(Boolean)
-  let processed = 0
+  // 归因是否正常只查一次：停摆时「过期 / 没有强结论」两类下架全部按住，只报一次
+  const health = await loadAttributionHealth(supabase, now)
+  if (!health.healthy) {
+    perClientErrors.push({
+      client_id: '*',
+      error: `attribution stalled, freshness-based switch-offs held back: ${health.detail}`,
+    })
+  }
 
+  let processed = 0
   for (const clientId of clientIds) {
     try {
-      const r = await runExtractorForClient(supabase, clientId)
+      const r = await runExtractorForClient(supabase, clientId, now, {
+        reconcile: true,
+        attributionHealthy: health.healthy,
+      })
       processed++
-      aggregate.outcomes_processed    += r.outcomes_processed
-      aggregate.actions_processed     += r.actions_processed
-      aggregate.patterns_added        += r.patterns_added
-      aggregate.experiments_added     += r.experiments_added
-      aggregate.preferences_added     += r.preferences_added
-      aggregate.decisions_updated     += r.decisions_updated
-      aggregate.memories_superseded   += r.memories_superseded
-      aggregate.memories_reactivated  += r.memories_reactivated
+      mergeInto(aggregate, r)
       if (r.errors.length > 0) {
         perClientErrors.push({ client_id: clientId, error: r.errors.join(' | ') })
       }
@@ -313,97 +329,280 @@ export async function runExtractorForAllClients(
   return { clients_processed: processed, aggregate, per_client_errors: perClientErrors }
 }
 
-// ── 数据加载 helpers ──────────────────────────────────────────────────────────
+// ── 结果 helpers ──────────────────────────────────────────────────────────────
 
-async function loadOutcomesWithActions(
-  supabase: SupabaseClient,
-  clientId: string,
-): Promise<OutcomeJoinRow[]> {
-  // 单跑 JOIN 在 PostgREST 风格里不直观；用两步查询并在内存里合并
-  const { data: outcomeRows, error: outcomeErr } = await supabase
-    .from('flywheel_outcomes')
-    .select('id, client_id, action_id, metric_key, delta, delta_pct, confidence, verdict, computed_at, window_days')
-    .eq('client_id', clientId)
-    .in('verdict', ['confirmed', 'reversed'])
-    .order('computed_at', { ascending: false })
-
-  if (outcomeErr) throw new Error(outcomeErr.message)
-  if (!outcomeRows || outcomeRows.length === 0) return []
-
-  const actionIds = Array.from(new Set(outcomeRows.map(r => r.action_id).filter(Boolean)))
-  if (actionIds.length === 0) return []
-
-  const { data: actionRows, error: actionErr } = await supabase
-    .from('flywheel_actions')
-    // expected_metric 决定折叠时哪一行代表这个动作 —— 少选它，代表读数就退化成
-    // 「窗口最长的那条」，跟 aggregate / case-library 的口径对不上。
-    .select('id, action_type, flywheel, vendor, executed_at, expected_metric')
-    .in('id', actionIds)
-
-  if (actionErr) throw new Error(actionErr.message)
-
-  const actionMap = new Map<string, { action_type: string; flywheel: FlywheelName; vendor: string | null; executed_at: string; expected_metric: string | null }>()
-  for (const a of actionRows ?? []) {
-    actionMap.set(a.id, {
-      action_type: a.action_type,
-      flywheel: a.flywheel,
-      vendor: a.vendor ?? null,
-      executed_at: a.executed_at,
-      expected_metric: a.expected_metric ?? null,
-    })
+function emptyResult(): ExtractorResult {
+  return {
+    outcomes_processed: 0,
+    actions_processed: 0,
+    patterns_added: 0,
+    experiments_added: 0,
+    preferences_added: 0,
+    memories_superseded: 0,
+    memories_reactivated: 0,
+    outcomes_stale_skipped: 0,
+    deactivated_by_reason: {},
+    deactivated: [],
+    skipped_attribution_stalled: 0,
+    skipped_immature: 0,
+    skipped_unknown_pillar: 0,
+    errors: [],
   }
-
-  const joined: OutcomeJoinRow[] = []
-  for (const o of outcomeRows) {
-    const a = actionMap.get(o.action_id)
-    if (!a) continue
-    joined.push({
-      outcome_id: o.id,
-      client_id: o.client_id,
-      metric_key: o.metric_key,
-      delta: o.delta,
-      delta_pct: o.delta_pct,
-      confidence: o.confidence,
-      verdict: o.verdict,
-      computed_at: o.computed_at,
-      window_days: o.window_days,
-      action_id: o.action_id,
-      action_type: a.action_type,
-      flywheel: a.flywheel,
-      vendor: a.vendor,
-      executed_at: a.executed_at,
-      expected_metric: a.expected_metric,
-    })
-  }
-  return joined
 }
 
-/**
- * 该客户在某张派生记忆表里的所有行（含已下架的）。
- *
- * 已下架的行必须一起读回来 —— 结论翻回 confirmed 时要能把它重新激活，
- * 只读 active 的话会认为「没有」，于是再插一条，重复就是这么来的。
- */
-async function loadDerivedMemory(
+function mergeInto(into: ExtractorResult, r: ExtractorResult): void {
+  into.outcomes_processed += r.outcomes_processed
+  into.actions_processed += r.actions_processed
+  into.patterns_added += r.patterns_added
+  into.experiments_added += r.experiments_added
+  into.preferences_added += r.preferences_added
+  into.memories_superseded += r.memories_superseded
+  into.memories_reactivated += r.memories_reactivated
+  into.outcomes_stale_skipped += r.outcomes_stale_skipped
+  into.skipped_attribution_stalled += r.skipped_attribution_stalled
+  into.skipped_immature += r.skipped_immature
+  into.skipped_unknown_pillar += r.skipped_unknown_pillar
+  into.deactivated.push(...r.deactivated)
+  for (const [reason, n] of Object.entries(r.deactivated_by_reason) as Array<[DeactivationReason, number]>) {
+    into.deactivated_by_reason[reason] = (into.deactivated_by_reason[reason] ?? 0) + n
+  }
+}
+
+async function applyAndRecord(
   supabase: SupabaseClient,
   clientId: string,
-  table: DerivedMemoryTable,
-): Promise<DerivedMemoryRow[]> {
-  const { data, error } = await supabase
-    .from(table)
-    .select('id, source_id, source_action_id, is_active, created_at')
-    .eq('client_id', clientId)
-    .eq('source_table', 'flywheel_outcomes')
+  planned: DeactivatedMemory[],
+  result: ExtractorResult,
+): Promise<void> {
+  if (planned.length === 0) return
+  const { done, errors } = await applyDeactivations(supabase, clientId, planned)
+  result.errors.push(...errors)
+  for (const d of done) {
+    result.deactivated.push(d)
+    result.deactivated_by_reason[d.reason] = (result.deactivated_by_reason[d.reason] ?? 0) + 1
+  }
+}
 
-  if (error) throw new Error(`${table}: ${error.message}`)
-  return (data ?? []) as DerivedMemoryRow[]
+// ── 证据整理 helpers ──────────────────────────────────────────────────────────
+
+/**
+ * 旧逻辑的输入：新鲜的强结论（confirmed / reversed）与动作拼好。
+ *
+ * 归因结果多久没被重算就不再当证据用（OUTCOME_FRESH_DAYS，见 case-validity.ts）：
+ * attribution 每 6 小时把所有**现役**动作的 outcome 重算一遍（`computed_at` 刷成现在），
+ * 所以健康的行永远不超过一天。
+ *
+ * 🔴 为什么必须有这道闸（2026-09-06 生产实测）：库里有 **51 行 / 17 个动作**的归因
+ *    永久冻结在 2026-08-04~05。成因见 Issue #859 —— page-upgrade 的 PR 被拒后
+ *    `expected_metric` 被写成 null，而两个写入方的查询都带
+ *    `.not('expected_metric','is',null)`，从此谁都不再选中它们，既不刷新也不删除。
+ *    抽取器不看时间读全表，于是一个多月前的读数一直被当现役证据学。
+ *
+ * 在内存里筛（不在查询里筛）是为了能数出「挡掉了多少」；时间读不出来的行保留 ——
+ * 不认识的格式不该等于「过期」。
+ */
+function legacyStrongReadings(
+  evidence: ClientEvidence,
+  actionById: Map<string, ActionRow>,
+  now: Date,
+): { joined: OutcomeJoinRow[]; staleSkipped: number } {
+  const strong = evidence.outcomes.filter((o) => o.verdict === 'confirmed' || o.verdict === 'reversed')
+  const cutoff = now.getTime() - OUTCOME_FRESH_DAYS * 86_400_000
+  const fresh = strong.filter((o) => {
+    const t = Date.parse(o.computed_at)
+    return Number.isNaN(t) || t >= cutoff
+  })
+
+  const joined: OutcomeJoinRow[] = []
+  for (const o of fresh) {
+    const a = actionById.get(o.action_id)
+    if (a) joined.push(joinRow(o, a))
+  }
+  return { joined, staleSkipped: strong.length - fresh.length }
+}
+
+function joinRow(o: OutcomeRow, a: ActionRow): OutcomeJoinRow {
+  return {
+    outcome_id: o.id,
+    client_id: o.client_id,
+    metric_key: o.metric_key,
+    delta: o.delta,
+    delta_pct: o.delta_pct,
+    confidence: o.confidence,
+    verdict: o.verdict,
+    computed_at: o.computed_at,
+    window_days: o.window_days ?? 0,
+    action_id: o.action_id,
+    action_type: a.action_type,
+    flywheel: a.flywheel,
+    vendor: a.vendor,
+    executed_at: a.executed_at,
+    expected_metric: a.expected_metric,
+  }
+}
+
+function toCaseAction(a: ActionRow): CaseAction {
+  return {
+    id: a.id,
+    flywheel: a.flywheel,
+    executed_at: a.executed_at,
+    expected_metric: a.expected_metric,
+    zhuge_session_key: a.zhuge_session_key,
+    payload_source: a.payload_source,
+    execution_item_id: a.execution_item_id,
+    action_run_id: a.action_run_id,
+  }
+}
+
+/** One `classifyActionCase` per action, memoised — step 5 and step 7 must see the same answer. */
+function makeClassifier(
+  evidence: ClientEvidence,
+  actionById: Map<string, ActionRow>,
+  now: Date,
+): (actionId: string) => CaseStatus {
+  const byAction = new Map<string, OutcomeRow[]>()
+  for (const o of evidence.outcomes) {
+    const held = byAction.get(o.action_id)
+    if (held) held.push(o)
+    else byAction.set(o.action_id, [o])
+  }
+  const memo = new Map<string, CaseStatus>()
+  return (actionId: string) => {
+    const hit = memo.get(actionId)
+    if (hit) return hit
+    const action = actionById.get(actionId)
+    const status = classifyActionCase({
+      action: action ? toCaseAction(action) : null,
+      outcomes: byAction.get(actionId) ?? [],
+      now,
+    })
+    memo.set(actionId, status)
+    return status
+  }
+}
+
+/** Gated-pillar actions that are valid cases, as step-5 input (their representative reading). */
+function validGatedCases(
+  evidence: ClientEvidence,
+  actionById: Map<string, ActionRow>,
+  outcomeById: Map<string, OutcomeRow>,
+  classify: (actionId: string) => CaseStatus,
+): OutcomeJoinRow[] {
+  const out: OutcomeJoinRow[] = []
+  const actionIds = Array.from(new Set(evidence.outcomes.map((o) => o.action_id))).sort()
+  for (const actionId of actionIds) {
+    const action = actionById.get(actionId)
+    if (!action || !isGatedFlywheel(action.flywheel)) continue
+    const status = classify(actionId)
+    if (status.kind !== 'valid') continue
+    const row = outcomeById.get(status.representative.id)
+    if (row) out.push(joinRow(row, action))
+  }
+  return out
+}
+
+function indexBoth(
+  proven: DerivedMemoryRow[],
+  failed: DerivedMemoryRow[],
+  outcomeToAction: Map<string, string>,
+): MemoryIndex {
+  return {
+    client_proven_patterns: indexByAction(proven, outcomeToAction),
+    client_failed_experiments: indexByAction(failed, outcomeToAction),
+  }
+}
+
+function toReconcileRows(
+  rows: DerivedMemoryRow[],
+  table: DerivedMemoryTable,
+  outcomeToAction: Map<string, string>,
+  actionById: Map<string, ActionRow>,
+): ReconcileRow[] {
+  return rows.map((r) => {
+    const actionId = r.source_action_id ?? (r.source_id ? outcomeToAction.get(r.source_id) ?? null : null)
+    const action = actionId ? actionById.get(actionId) : undefined
+    return {
+      id: r.id,
+      table,
+      is_active: r.is_active,
+      source_action_id: r.source_action_id,
+      action_id: actionId,
+      pillar: action?.flywheel ?? r.pillar_column,
+    }
+  })
+}
+
+// ── 逐动作对账 ────────────────────────────────────────────────────────────────
+
+async function reconcileOneCase(
+  supabase: SupabaseClient,
+  out: OutcomeJoinRow,
+  derived: MemoryIndex,
+  result: ExtractorResult,
+): Promise<void> {
+  if ((out.confidence ?? 0) < MIN_OUTCOME_CONFIDENCE) return
+  if (out.verdict !== 'confirmed' && out.verdict !== 'reversed') return
+
+  const confirmed = out.verdict === 'confirmed'
+  const winner: DerivedMemoryTable = confirmed ? 'client_proven_patterns' : 'client_failed_experiments'
+  const loser:  DerivedMemoryTable = confirmed ? 'client_failed_experiments' : 'client_proven_patterns'
+
+  try {
+    const held = derived[winner].get(out.action_id) ?? []
+
+    if (held.length === 0) {
+      const saved = confirmed
+        ? await saveProvenPattern(supabase, {
+            client_id: out.client_id,
+            pattern_type: actionToPatternType(out.action_type),
+            pattern_content: describePattern(out),
+            performance_metric: describeMetric(out),
+            flywheel: out.flywheel,
+            source_table: 'flywheel_outcomes',
+            source_id: out.outcome_id,
+            source_action_id: out.action_id,
+          })
+        : await saveFailedExperiment(supabase, {
+            client_id: out.client_id,
+            experiment_description: describeExperiment(out),
+            failure_reason: describeFailure(out),
+            dimension: flywheelToDimension(out.flywheel),
+            tried_at: out.executed_at,
+            source_table: 'flywheel_outcomes',
+            source_id: out.outcome_id,
+            source_action_id: out.action_id,
+          })
+      if (saved) {
+        if (confirmed) result.patterns_added++
+        else result.experiments_added++
+      }
+    } else {
+      // 已有该动作的记忆：认领存量行的动作身份，留一条生效，其余下架。
+      // 留最早那条 —— 它是这个动作第一次被学到的时间点，且排序确定。
+      const [keep, ...redundant] = [...held].sort(byCreatedAtThenId)
+      const changes = await adoptAndActivate(supabase, winner, keep, out.action_id)
+      result.memories_reactivated += changes
+
+      for (const row of redundant) {
+        result.memories_superseded += await adoptAndDeactivate(supabase, winner, row, out.action_id)
+      }
+    }
+
+    // 对侧下架。触发器只在 INSERT / is_active 变化时响，命中不了「本来就
+    // active 且这轮没被碰」的存量行，所以这一刀必须显式补上。
+    result.memories_superseded += await setDerivedMemoryActive(
+      supabase, loser, out.client_id, out.action_id, false,
+    )
+  } catch (err) {
+    result.errors.push(`action ${out.action_id}: ${msgOf(err)}`)
+  }
 }
 
 /**
  * 把记忆行按**动作**归类。
  *
  * 新行直接有 source_action_id。20260812100000 之前写的行只有 source_id
- * （= outcome.id），用本轮的 outcome → action 映射认回来，这样第一次跑不会把
+ * （= outcome.id），用 outcome → action 映射认回来，这样第一次跑不会把
  * 存量记忆当成不存在而重复写一遍。认不回来的（对应 outcome 已经不在了）留在
  * 原地不动 —— 没有证据说它属于哪个动作，猜一个比放着更糟。
  */
@@ -480,38 +679,31 @@ async function adoptAndDeactivate(
  * 不是「几行 outcome 说跑赢了」—— MIN_OCCURRENCES_FOR_PREFERENCE = 3，而一个 GSC
  * 动作一次就出三行（clicks / impressions / avg_position），按行数数的话一个动作
  * 就能自己凑够阈值，凭一次事件写出「持续跑赢」。
+ *
+ * 名单内支柱（1b）：写入与下架共用同一个支撑数（这里的 grouped，只数有效案例）；
+ * 证据回来时重新打开同内容的旧行、不新增行；支撑不足 3 的在用行下架（归因停摆时，
+ * 支撑可能只是被停摆拉低的类型按住不动；动作全都因规则失效的类型照样下架）。
+ * 读偏好失败直接报错 —— 当成「没有」会写出重复、还会漏掉所有下架。
  */
-async function extractPreferencesFromActionTypes(
+async function reconcilePreferences(
   supabase: SupabaseClient,
   clientId: string,
   cases: OutcomeJoinRow[],
-): Promise<number> {
-  // 按 (flywheel, action_type) 聚合 confirmed 动作数
-  const grouped = new Map<string, { count: number; flywheel: FlywheelName; actionType: string; samples: OutcomeJoinRow[] }>()
-  for (const o of cases) {
-    if (o.verdict !== 'confirmed') continue
-    if ((o.confidence ?? 0) < MIN_OUTCOME_CONFIDENCE) continue
-    const key = `${o.flywheel}::${o.action_type}`
-    const entry = grouped.get(key) ?? { count: 0, flywheel: o.flywheel, actionType: o.action_type, samples: [] }
-    entry.count++
-    if (entry.samples.length < 3) entry.samples.push(o)
-    grouped.set(key, entry)
-  }
+  result: ExtractorResult,
+  opts: { reconcile: boolean; holdKeys: ReadonlySet<string> },
+): Promise<void> {
+  const grouped = groupConfirmedByActionType(cases)
 
-  // 已有 auto_extracted preferences（按 flywheel + content 去重；同时用来下架
-  // 同一 action_type 的旧口径行 —— 见 supersedeStalePreferences）
-  const { data: existing } = await supabase
+  const { data: existing, error } = await supabase
     .from('client_learned_preferences')
-    .select('id, content, flywheel, preference_type, is_active')
+    .select('id, content, flywheel, preference_type, is_active, extracted_from_table')
     .eq('client_id', clientId)
     .eq('source', 'auto_extracted')
+  if (error) throw new Error(`load preferences: ${error.message}`)
 
   const existingRows = (existing ?? []) as PreferenceRow[]
-  const existingKeys = new Set(
-    existingRows.map(r => `${r.flywheel ?? 'global'}::${r.preference_type}::${r.content}`),
-  )
+  const byKey = new Map(existingRows.map((r) => [prefKey(r.flywheel ?? 'global', r.preference_type, r.content), r]))
 
-  let added = 0
   for (const entry of Array.from(grouped.values())) {
     if (entry.count < MIN_OCCURRENCES_FOR_PREFERENCE) continue
 
@@ -520,8 +712,20 @@ async function extractPreferencesFromActionTypes(
       content: `${entry.count} 个动作 confirmed: action_type='${entry.actionType}' 在 ${entry.flywheel} 飞轮持续跑赢`,
       flywheel: entry.flywheel,
     }
-    const key = `${preference.flywheel}::${preference.preference_type}::${preference.content}`
-    if (existingKeys.has(key)) continue
+    const held = byKey.get(prefKey(preference.flywheel, preference.preference_type, preference.content))
+    if (held) {
+      if (!held.is_active && isGatedFlywheel(entry.flywheel)) {
+        const { error: upErr } = await supabase
+          .from('client_learned_preferences')
+          .update({ is_active: true })
+          .eq('id', held.id)
+        if (upErr) throw new Error(`reactivate preference ${held.id}: ${upErr.message}`)
+        held.is_active = true
+        result.memories_reactivated++
+        await supersedeStalePreferences(supabase, existingRows, entry.flywheel, entry.actionType, preference.content)
+      }
+      continue
+    }
 
     // confidence_score 与样本数挂钩（cap 0.95）
     const confidence = Math.min(0.95, 0.5 + (entry.count - MIN_OCCURRENCES_FOR_PREFERENCE) * 0.1)
@@ -538,20 +742,63 @@ async function extractPreferencesFromActionTypes(
       extracted_from_id: sample?.outcome_id,
     })
     if (saved) {
-      added++
-      existingKeys.add(key)
+      result.preferences_added++
       await supersedeStalePreferences(supabase, existingRows, entry.flywheel, entry.actionType, preference.content)
     }
   }
-  return added
+
+  if (!opts.reconcile) return
+  const support = new Map(Array.from(grouped.values()).map((e) => [`${e.flywheel}::${e.actionType}`, e.count]))
+  const { planned, held } = planPreferenceDeactivations(
+    existingRows,
+    support,
+    MIN_OCCURRENCES_FOR_PREFERENCE,
+    opts.holdKeys,
+  )
+  result.skipped_attribution_stalled += held
+  await applyAndRecord(supabase, clientId, planned, result)
 }
 
-interface PreferenceRow {
-  id: string
-  content: string
-  flywheel: string | null
-  preference_type: string
-  is_active: boolean
+/**
+ * Gated action types whose low support may only be a symptom of stalled attribution:
+ * at least one of their actions is valid, or invalid for a freshness reason. A type whose
+ * every action fails a rule-based check (whole-site metric, never executed, …) is not
+ * included — its preference comes off even while attribution is stalled.
+ */
+function stallSensitiveActionTypes(
+  actions: readonly ActionRow[],
+  classify: (actionId: string) => CaseStatus,
+): Set<string> {
+  const keys = new Set<string>()
+  for (const a of actions) {
+    if (!isGatedFlywheel(a.flywheel)) continue
+    const status = classify(a.id)
+    if (status.kind === 'valid' || !RULE_BASED_REASONS.has(status.reason)) {
+      keys.add(`${a.flywheel}::${a.action_type}`)
+    }
+  }
+  return keys
+}
+
+function prefKey(flywheel: string, preferenceType: string, content: string): string {
+  return `${flywheel}::${preferenceType}::${content}`
+}
+
+/** 按 (flywheel, action_type) 聚合 confirmed 且够置信度的动作数 —— 写入与下架共用的支撑数。 */
+function groupConfirmedByActionType(
+  cases: OutcomeJoinRow[],
+): Map<string, { count: number; flywheel: FlywheelName; actionType: string; samples: OutcomeJoinRow[] }> {
+  const grouped = new Map<string, { count: number; flywheel: FlywheelName; actionType: string; samples: OutcomeJoinRow[] }>()
+  for (const o of cases) {
+    if (o.verdict !== 'confirmed') continue
+    if ((o.confidence ?? 0) < MIN_OUTCOME_CONFIDENCE) continue
+    const key = `${o.flywheel}::${o.action_type}`
+    const entry = grouped.get(key) ?? { count: 0, flywheel: o.flywheel, actionType: o.action_type, samples: [] }
+    entry.count++
+    if (entry.samples.length < 3) entry.samples.push(o)
+    grouped.set(key, entry)
+  }
+  return grouped
 }
 
 /**
@@ -594,69 +841,6 @@ async function supersedeStalePreferences(
   for (const row of stale) row.is_active = false
 }
 
-// ── Decision verdict backfill ─────────────────────────────────────────────────
-
-/**
- * 把 client_decision_history.outcome_verdict 是 null 的记录补全：
- * 在 created_at + window 天内查该客户 outcomes，按 majority verdict 决定。
- */
-async function backfillDecisionOutcomes(
-  supabase: SupabaseClient,
-  clientId: string,
-): Promise<number> {
-  const { data: decisions, error } = await supabase
-    .from('client_decision_history')
-    .select('id, created_at')
-    .eq('client_id', clientId)
-    .is('outcome_verdict', null)
-    .order('created_at', { ascending: false })
-    .limit(50)
-
-  if (error) {
-    throw new Error(error.message)
-  }
-  if (!decisions || decisions.length === 0) return 0
-
-  let updated = 0
-  for (const d of decisions) {
-    const start = new Date(d.created_at)
-    const end = new Date(start)
-    end.setDate(end.getDate() + DECISION_MATCH_WINDOW_DAYS)
-
-    const { data: outcomes, error: oErr } = await supabase
-      .from('flywheel_outcomes')
-      .select('verdict')
-      .eq('client_id', clientId)
-      .gte('computed_at', start.toISOString())
-      .lte('computed_at', end.toISOString())
-
-    if (oErr) continue
-    if (!outcomes || outcomes.length === 0) continue
-
-    const verdict = aggregateVerdicts(outcomes.map((o: { verdict: string }) => o.verdict))
-    if (!verdict) continue
-
-    await updateDecisionOutcome(supabase, d.id, verdict, `auto-derived from ${outcomes.length} outcomes within ${DECISION_MATCH_WINDOW_DAYS}d window`)
-    updated++
-  }
-  return updated
-}
-
-function aggregateVerdicts(verdicts: string[]): 'success' | 'failure' | 'inconclusive' | null {
-  let confirmed = 0
-  let reversed = 0
-  let inconclusive = 0
-  for (const v of verdicts) {
-    if (v === 'confirmed') confirmed++
-    else if (v === 'reversed') reversed++
-    else if (v === 'inconclusive') inconclusive++
-  }
-  const total = confirmed + reversed + inconclusive
-  if (total === 0) return null
-  if (confirmed > reversed && confirmed >= total / 2) return 'success'
-  if (reversed > confirmed && reversed >= total / 2) return 'failure'
-  return 'inconclusive'
-}
 
 // ── Action-type → pattern_type / description mapping ──────────────────────────
 

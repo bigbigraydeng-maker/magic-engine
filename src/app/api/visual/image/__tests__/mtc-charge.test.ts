@@ -63,7 +63,7 @@ function makePostRequest(body: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.resetAllMocks()
-  mockAccess.mockResolvedValue({ ok: true, user: { email: 't@t' } as never, role: 'admin', allowedClientId: null })
+  mockAccess.mockResolvedValue({ ok: true, user: { email: 't@t' } as never, role: 'admin', tier: 'admin', allowedClientId: null })
 
   // Default supabase chain — content_posts.select.eq.single
   const postChain = {

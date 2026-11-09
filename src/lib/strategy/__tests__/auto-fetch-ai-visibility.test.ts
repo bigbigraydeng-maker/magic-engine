@@ -136,9 +136,9 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
               eq: () => ({
                 eq: async () => ({
                   data: [
-                    { question_id: 'q1', top3_brands: ['A', 'B', 'C'] },
-                    { question_id: 'q2', top3_brands: ['D', 'E', 'F'] },
-                    { question_id: 'q3', top3_brands: ['G', 'H', 'I'] },
+                    { question_id: 'q1', top3_brands: ['A', 'B', 'C'], error_code: null },
+                    { question_id: 'q2', top3_brands: ['D', 'E', 'F'], error_code: null },
+                    { question_id: 'q3', top3_brands: ['G', 'H', 'I'], error_code: null },
                   ],
                   error: null,
                 }),
@@ -151,7 +151,7 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
     } as any
     const result = await autoFetchMetricValue(sb, 'client-1', 'ai_visibility_score')
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.reason).toMatch(/insufficient questions/)
+    if (!result.ok) expect(result.reason).toMatch(/insufficient fully-measured AI visibility questions/)
   })
 
   it('returns ok:true with score 0 when brand not in any top3 (genuine zero)', async () => {
@@ -193,6 +193,7 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
                   data: Array.from({ length: 10 }, (_, i) => ({
                     question_id: `q${i}`,
                     top3_brands: ['Wendy Wu', 'Intrepid', 'Globus'],
+                    error_code: null,
                   })),
                   error: null,
                 }),
@@ -207,7 +208,7 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.value).toBe(0)
-      expect(result.label).toMatch(/0\/10/)
+      expect(result.label).toMatch(/0\/10 fully-measured/)
     }
   })
 
@@ -248,16 +249,16 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
               eq: () => ({
                 eq: async () => ({
                   data: [
-                    { question_id: 'q1', top3_brands: ['CTS Tours', 'X', 'Y'] },          // hit (name)
-                    { question_id: 'q2', top3_brands: ['Wendy Wu', '中国旅行社', 'Y'] },  // hit (alias)
-                    { question_id: 'q3', top3_brands: ['Intrepid', 'cts tours', 'Y'] },   // hit (case-insensitive name)
-                    { question_id: 'q4', top3_brands: ['Globus', 'Y', 'Z'] },             // miss
-                    { question_id: 'q5', top3_brands: ['CTS Tours NZ Limited', 'Y'] },    // hit (substring)
-                    { question_id: 'q6', top3_brands: ['Other'] },                        // miss
-                    { question_id: 'q7', top3_brands: ['Other'] },                        // miss
-                    { question_id: 'q8', top3_brands: ['Other'] },                        // miss
-                    { question_id: 'q9', top3_brands: ['Other'] },                        // miss
-                    { question_id: 'q10', top3_brands: ['Other'] },                       // miss
+                    { question_id: 'q1', top3_brands: ['CTS Tours', 'X', 'Y'], error_code: null },          // hit (name)
+                    { question_id: 'q2', top3_brands: ['Wendy Wu', '中国旅行社', 'Y'], error_code: null },  // hit (alias)
+                    { question_id: 'q3', top3_brands: ['Intrepid', 'cts tours', 'Y'], error_code: null },   // hit (case-insensitive name)
+                    { question_id: 'q4', top3_brands: ['Globus', 'Y', 'Z'], error_code: null },             // miss
+                    { question_id: 'q5', top3_brands: ['CTS Tours NZ Limited', 'Y'], error_code: null },    // hit (substring)
+                    { question_id: 'q6', top3_brands: ['Other'], error_code: null },                        // miss
+                    { question_id: 'q7', top3_brands: ['Other'], error_code: null },                        // miss
+                    { question_id: 'q8', top3_brands: ['Other'], error_code: null },                        // miss
+                    { question_id: 'q9', top3_brands: ['Other'], error_code: null },                        // miss
+                    { question_id: 'q10', top3_brands: ['Other'], error_code: null },                       // miss
                   ],
                   error: null,
                 }),
@@ -272,7 +273,182 @@ describe('autoFetchMetricValue("ai_visibility_score") — error branches', () =>
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.value).toBe(40)
-      expect(result.label).toMatch(/4\/10/)
+      expect(result.label).toMatch(/4\/10 fully-measured/)
+    }
+  })
+})
+
+/**
+ * 2026-09-23 红线回归 (docs/PITFALLS.md D12, 第二处):
+ * A probe that failed is NOT a measurement of zero. These tests are the
+ * acceptance criteria for the fix — an all-failed collection must report
+ * "not computable", and healthy data must still score normally.
+ */
+function stubSupabaseWithSnapshots(
+  rows: Array<{ question_id: string; top3_brands: string[]; error_code: string | null }>,
+  client: { name: string; industry: string; brand_aliases: string[] } = {
+    name: 'CTS Tours', industry: 'travel', brand_aliases: [],
+  },
+) {
+  const today = new Date().toISOString().slice(0, 10)
+  let callCount = 0
+  return {
+    from: (table: string) => {
+      if (table === 'clients') {
+        return {
+          select: () => ({
+            eq: () => ({ single: async () => ({ data: client, error: null }) }),
+          }),
+        }
+      }
+      if (table === 'industry_ai_visibility_snapshots') {
+        callCount++
+        if (callCount === 1) {
+          return {
+            select: () => ({
+              eq: () => ({
+                order: () => ({
+                  limit: () => ({
+                    maybeSingle: async () => ({ data: { collected_date: today }, error: null }),
+                  }),
+                }),
+              }),
+            }),
+          }
+        }
+        return {
+          select: () => ({
+            eq: () => ({ eq: async () => ({ data: rows, error: null }) }),
+          }),
+        }
+      }
+      return {} as any
+    },
+  } as any
+}
+
+describe('autoFetchMetricValue("ai_visibility_score") — failed probes are not zeros', () => {
+  it('returns ok:false (NOT a low score) when every probe in the batch failed', async () => {
+    // 18 questions, every single probe blew up — exactly the 2026-09-22 shape:
+    // OpenAI credits exhausted + DataForSEO rejecting the request.
+    const rows = Array.from({ length: 18 }, (_, i) => ({
+      question_id: `q${i}`,
+      top3_brands: [] as string[],
+      error_code: i % 2 === 0 ? 'chatgpt_error' : 'dataforseo_error',
+    }))
+    const result = await autoFetchMetricValue(stubSupabaseWithSnapshots(rows), 'client-1', 'ai_visibility_score')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toMatch(/insufficient fully-measured/)
+      expect(result.reason).toMatch(/NOT COMPUTABLE, not zero/)
+      // The reason must name the real cause so nobody reads it as "AI ignores us"
+      expect(result.reason).toMatch(/chatgpt_error/)
+      expect(result.reason).toMatch(/dataforseo_error/)
+    }
+  })
+
+  it('still scores normally when every probe succeeded (no true signal suppressed)', async () => {
+    const rows = [
+      { question_id: 'q1', top3_brands: ['CTS Tours', 'X', 'Y'], error_code: null },
+      { question_id: 'q2', top3_brands: ['CTS Tours', 'X', 'Y'], error_code: null },
+      { question_id: 'q3', top3_brands: ['Wendy Wu', 'X', 'Y'],  error_code: null },
+      { question_id: 'q4', top3_brands: ['Wendy Wu', 'X', 'Y'],  error_code: null },
+      { question_id: 'q5', top3_brands: ['Wendy Wu', 'X', 'Y'],  error_code: null },
+    ]
+    const result = await autoFetchMetricValue(stubSupabaseWithSnapshots(rows), 'client-1', 'ai_visibility_score')
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value).toBe(40)          // 2 hits / 5 questions
+      expect(result.label).toMatch(/2\/5 fully-measured/)
+      expect(result.label).not.toMatch(/excluded/)
+    }
+  })
+
+  it('counts no_ai_overview rows as genuine zeros, not as failures', async () => {
+    // Google simply did not render an AI Overview — the brand really was absent.
+    // Dropping these would bias the score UPWARD.
+    const rows = [
+      { question_id: 'q1', top3_brands: ['CTS Tours'], error_code: null },
+      { question_id: 'q2', top3_brands: [] as string[], error_code: 'no_ai_overview' },
+      { question_id: 'q3', top3_brands: [] as string[], error_code: 'no_ai_overview' },
+      { question_id: 'q4', top3_brands: [] as string[], error_code: 'no_ai_overview' },
+      { question_id: 'q5', top3_brands: [] as string[], error_code: 'no_ai_overview' },
+    ]
+    const result = await autoFetchMetricValue(stubSupabaseWithSnapshots(rows), 'client-1', 'ai_visibility_score')
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value).toBe(20)          // 1 hit / 5 questions — denominator kept
+      expect(result.label).toMatch(/1\/5 fully-measured/)
+    }
+  })
+
+  it('excludes partially-measured questions from BOTH numerator and denominator', async () => {
+    // 6 questions fully measured on 2 platforms (2 hits), 4 questions where one
+    // platform died. Old row-level fix: the 4 partials stayed in the denominator
+    // as misses → 2/10 = 20. Complete-case: 2/6 = 33.
+    const full = [
+      { question_id: 'q1', top3_brands: ['CTS Tours'], error_code: null },
+      { question_id: 'q1', top3_brands: ['Other'],     error_code: null },
+      { question_id: 'q2', top3_brands: ['CTS Tours'], error_code: null },
+      { question_id: 'q2', top3_brands: ['Other'],     error_code: null },
+      ...['q3', 'q4', 'q5', 'q6'].flatMap(id => ([
+        { question_id: id, top3_brands: ['Other'], error_code: null },
+        { question_id: id, top3_brands: ['Other'], error_code: 'no_ai_overview' },
+      ])),
+    ]
+    const partial = ['p1', 'p2', 'p3', 'p4'].flatMap(id => ([
+      { question_id: id, top3_brands: ['Other'], error_code: null },
+      { question_id: id, top3_brands: [] as string[], error_code: 'dataforseo_error' },
+    ]))
+    const result = await autoFetchMetricValue(
+      stubSupabaseWithSnapshots([...full, ...partial]), 'client-1', 'ai_visibility_score')
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.value).toBe(33)        // 2 hits / 6 fully-measured, NOT 2/10
+      expect(result.label).toMatch(/2\/6 fully-measured/)
+      expect(result.label).toMatch(/4\/10 questions excluded/)
+    }
+  })
+
+  it('never lets partial questions inflate the score to 100%', async () => {
+    // Every non-hit question is partially measured. Keeping hits while dropping
+    // their partial misses would yield 2/2 = 100. Complete-case + coverage gate
+    // must refuse instead.
+    const rows = [
+      { question_id: 'h1', top3_brands: ['CTS Tours'], error_code: null },
+      { question_id: 'h2', top3_brands: ['CTS Tours'], error_code: null },
+      ...Array.from({ length: 8 }, (_, i) => i).flatMap(i => ([
+        { question_id: `m${i}`, top3_brands: ['Other'], error_code: null },
+        { question_id: `m${i}`, top3_brands: [] as string[], error_code: 'dataforseo_error' },
+      ])),
+    ]
+    const result = await autoFetchMetricValue(stubSupabaseWithSnapshots(rows), 'client-1', 'ai_visibility_score')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toMatch(/insufficient fully-measured/)
+  })
+
+  it('refuses a thin-but-large-enough sample because probe failures are not random', async () => {
+    // 6 fully measured (>= 5) out of 18 questions = 33% coverage, under the 60%
+    // floor. City questions are the ones that fail, so the survivors skew
+    // national — a biased sample, not merely a small one.
+    const full = Array.from({ length: 6 }, (_, i) => ({
+      question_id: `f${i}`, top3_brands: i === 0 ? ['CTS Tours'] : ['Other'], error_code: null,
+    }))
+    const dead = Array.from({ length: 12 }, (_, i) => ({
+      question_id: `d${i}`, top3_brands: [] as string[], error_code: 'dataforseo_error',
+    }))
+    const result = await autoFetchMetricValue(
+      stubSupabaseWithSnapshots([...full, ...dead]), 'client-1', 'ai_visibility_score')
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.reason).toMatch(/coverage too low/)
+      expect(result.reason).toMatch(/6\/18 questions \(33%\)/)
     }
   })
 })

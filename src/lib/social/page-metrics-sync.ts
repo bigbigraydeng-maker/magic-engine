@@ -1,9 +1,9 @@
 /**
  * FB Page metrics rollup (2026-08-01 · 社媒数据监控复活).
  *
- * The Publer engagement pullback had run for weeks writing ZERO metrics:
- * it only reads content_posts rows, but real posting happens straight on
- * the Facebook page (manual Publer line) and never lands there. Meanwhile
+ * The former per-post engagement pullback had run for weeks writing ZERO
+ * metrics: it only read content_posts rows, but real posting happens straight
+ * on the Facebook page and never lands there. Meanwhile
  * the comment-autoreply engine reads the SAME page's real posts daily via
  * the Graph API — proof the read path works.
  *
@@ -14,8 +14,7 @@
  *   social.fb.top_post_score         (best-performer signal)
  *
  * Source of truth = the live page feed, so posts published by ANY channel
- * (Publer, Business Suite, by hand) all count. Per-post attribution stays
- * with the Publer pullback for ME-scheduled posts.
+ * (Business Suite, by hand, ME) all count.
  *
  * Page mapping: social_comment_config.fb_page_id (same table the autoreply
  * engine trusts), falling back to factory_config.publish_target.page_id.
@@ -24,8 +23,9 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
-import { getMetaTokenForClient, getStoredPageToken } from '@/lib/meta/token-manager'
-import { getPageAccessToken, fetchPagePosts, type PagePost } from '@/lib/meta/page-posts'
+import { fetchPagePosts, type PagePost } from '@/lib/meta/page-posts'
+import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
+import { isSkippablePageTokenFailure, metaPageSyncHeld, rememberBrokenPageToken } from '@/lib/meta/broken-page-token'
 
 const POSTS_TO_FETCH = 50
 
@@ -134,6 +134,18 @@ export async function loadPageMappings(supabase: SupabaseClient): Promise<PageMa
   return Array.from(byClient.entries()).map(([client_id, page_id]) => ({ client_id, page_id }))
 }
 
+/** 主页这一腿里，真正算进 failed_count 的条数。已知坏令牌不算，它们有自己的待办。 */
+export function countPageMetricFailures(
+  pageMetrics: PageMetricsSyncResult | { error: string },
+): number {
+  if (!('results' in pageMetrics)) {
+    return isSkippablePageTokenFailure({ error: pageMetrics.error }) ? 0 : 1
+  }
+  return pageMetrics.results.filter(
+    (row) => row.outcome === 'error' && !isSkippablePageTokenFailure({ error: row.error }),
+  ).length
+}
+
 // ── Sync ────────────────────────────────────────────────────────────────────────
 
 export async function syncPageMetrics(
@@ -144,20 +156,25 @@ export async function syncPageMetrics(
 
   for (const { client_id, page_id } of mappings) {
     try {
-      // Prefer the Page token captured by the client's Meta OAuth connection.
-      // The legacy env-var path remains the fallback for clients that have not
-      // migrated to stored connections yet.
-      const storedPageToken = await getStoredPageToken(client_id, page_id)
-      const userToken = storedPageToken ? null : await getMetaTokenForClient(client_id)
-      if (!storedPageToken && !userToken) {
-        results.push({ client_id, page_id, outcome: 'no_token' })
+      if (await metaPageSyncHeld(supabase, client_id, page_id)) {
+        results.push({ client_id, page_id, outcome: 'error', error: 'connection_unhealthy' })
         continue
       }
-      const pageToken = storedPageToken ?? await getPageAccessToken(userToken!, page_id)
-      if (!pageToken) {
-        results.push({ client_id, page_id, outcome: 'no_token' })
+      // AD-SEC-4: both mapping sources are client-editable, so only read a Page
+      // verified as this client's (bound + gate, or its own OAuth connection).
+      // Token order is unchanged: stored OAuth Page token, else env-derived.
+      const auth = await authorizeConfiguredPage(supabase, client_id, page_id, process.env)
+      if (!auth.ok) {
+        const error = auth.skipped === 'page_not_verified' ? `page_not_verified: ${auth.reason}` : undefined
+        if (error) await rememberBrokenPageToken(supabase, client_id, page_id, error)
+        results.push(
+          error
+            ? { client_id, page_id, outcome: 'error', error }
+            : { client_id, page_id, outcome: 'no_token' },
+        )
         continue
       }
+      const pageToken = auth.pageToken
 
       const posts = await fetchPagePosts(page_id, pageToken, POSTS_TO_FETCH)
       const rollup = computeSocialRollup(posts)
@@ -186,12 +203,9 @@ export async function syncPageMetrics(
 
       results.push({ client_id, page_id, outcome: 'synced', posts_seen: posts.length })
     } catch (err) {
-      results.push({
-        client_id,
-        page_id,
-        outcome: 'error',
-        error: err instanceof Error ? err.message : String(err),
-      })
+      const error = err instanceof Error ? err.message : String(err)
+      await rememberBrokenPageToken(supabase, client_id, page_id, error)
+      results.push({ client_id, page_id, outcome: 'error', error })
     }
   }
 

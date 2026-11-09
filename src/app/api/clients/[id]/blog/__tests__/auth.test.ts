@@ -122,7 +122,7 @@ beforeEach(() => {
 })
 
 function allowAccess() {
-  mockAccess.mockResolvedValue({ ok: true, user: { email: 'test@test.com' } as never, role: 'admin', allowedClientId: null })
+  mockAccess.mockResolvedValue({ ok: true, user: { email: 'test@test.com' } as never, role: 'admin', tier: 'admin', allowedClientId: null })
 }
 
 // ---------------------------------------------------------------------------

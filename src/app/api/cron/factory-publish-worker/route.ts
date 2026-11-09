@@ -1,11 +1,11 @@
-// P0.1 factory-publish-worker cron — approved 成片 → 发到客户平台(FB Reel / Publer)+ 三落库。
+// P0.1 factory-publish-worker cron — approved 成片 → 发到客户平台(FB Reel)+ 三落库。
 // 一次领 1 条发(FB 上传慢,防 300s 超时)。Auth: CRON_SECRET bearer(同全部 ME crons)。
 //
 // 🔴 首发安全阀:默认**草稿模式**(video_state=DRAFT,不公开)。PM 验完草稿格式、显式 go 后,
 //    在 Render 设 FACTORY_PUBLISH_LIVE=true 才真发生产客户主页(不可逆)。这是「首次真发 PM 显式 go」的落地。
 
 import { NextRequest, NextResponse } from 'next/server'
-import { runPublishWorker } from '@/lib/factory/publish/publish-worker'
+import { runPublishWorker, reconcileMissingReelEvents } from '@/lib/factory/publish/publish-worker'
 import { runLecturePublishSweep, type PublishOutcome } from '@/lib/factory/lecture-publish'
 import { startCronRun } from '@/lib/cron/run-logger'
 
@@ -42,8 +42,19 @@ export async function GET(req: NextRequest) {
       lecture = { error: e instanceof Error ? e.message : String(e) }
     }
 
-    await cronRun.finish({ summary: { live, ...outcome, lecture } })
-    return NextResponse.json({ ok: true, live, ...outcome, lecture })
+    // 补发对账:已 PUBLISHED 但发布信号(me/factory.reel.published)没喊成的 Reel 补喊一遍。
+    // 单独 try(同讲课片):对账出问题不该把工单发布的运行记录带成失败。emit 是 best-effort,
+    // 没有这条补发,一次 Inngest 网络抖动 = 下游永远收不到"发了"、永远不建广告,且静默无声。
+    let reel_event_reconcile: 'ok' | { error: string }
+    try {
+      await reconcileMissingReelEvents()
+      reel_event_reconcile = 'ok'
+    } catch (e) {
+      reel_event_reconcile = { error: e instanceof Error ? e.message : String(e) }
+    }
+
+    await cronRun.finish({ summary: { live, ...outcome, lecture, reel_event_reconcile } })
+    return NextResponse.json({ ok: true, live, ...outcome, lecture, reel_event_reconcile })
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     await cronRun.finish({ error: msg })

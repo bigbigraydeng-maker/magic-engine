@@ -1,0 +1,1082 @@
+<title>NZ$1,000 Cliff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap">
+
+<style>
+  :root {
+    --ground:#070E1A; --surface:#0F1E33; --surface-2:#142A45; --surface-3:#1A324F;
+    --ink:#EDF3FA; --ink-soft:#C7D3E4; --ink-muted:#7C93AE;
+    --rule:#1F3450; --rule-strong:#2B4A70;
+    --me-blue:#6AAAFF; --me-blue-soft:#8AC5FF; --growth:#4BD39A;
+    --gold:#F4C260; --gold-soft:#FFD888; --alert:#F2724A;
+    --chip-bg:#17304E; --chip-ink:#C7D3E4;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 24px 60px rgba(0,0,0,.35);
+    --grad-cover:radial-gradient(140% 90% at 12% 0%,#1A3A63 0%,#0B1F3B 42%,#070E1A 100%);
+    --grad-panel:linear-gradient(160deg,#0F1E33 0%,#0A1728 100%);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--ground);color:var(--ink);
+    font-family:'Inter','PingFang SC','Hiragino Sans GB','Microsoft YaHei',-apple-system,sans-serif;
+    font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .display,h1,h2,h3,h4{font-family:'Newsreader','Songti SC','Noto Serif SC',Georgia,serif;
+    font-weight:500;letter-spacing:-.012em;text-wrap:balance;color:var(--ink)}
+  h1{font-size:clamp(34px,4.6vw,56px);line-height:1.06;margin:0;font-weight:600}
+  h2{font-size:clamp(25px,2.7vw,33px);line-height:1.18;margin:0 0 14px}
+  h3{font-size:19px;line-height:1.3;margin:0 0 10px;font-weight:600}
+  h4{font-size:15.5px;line-height:1.35;margin:0 0 6px;font-weight:600}
+  .num,.kpi-value{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;
+    font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .eyebrow{font-family:'Inter',sans-serif;font-size:10.5px;font-weight:600;
+    letter-spacing:.22em;text-transform:uppercase;color:var(--me-blue)}
+  a{color:var(--me-blue-soft);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:currentColor}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 32px}
+  section{padding:48px 0;border-top:1px solid var(--rule)}
+  section:first-of-type{border-top:none}
+
+  .brandbar{display:flex;align-items:center;justify-content:space-between;
+    padding:18px 32px;border-bottom:1px solid var(--rule);background:var(--ground)}
+  .brand{display:flex;align-items:center;gap:13px}
+  .brand-logo{width:34px;height:32px;border-radius:7px;background:#0F1E33;
+    display:grid;place-items:center;box-shadow:var(--shadow);border:1px solid var(--rule)}
+  .brand-name{display:flex;flex-direction:column;line-height:1.12}
+  .brand-name .n1{font-family:'Newsreader',Georgia,serif;font-weight:600;font-size:17px;color:var(--ink)}
+  .brand-name .n1 em{font-style:normal;color:var(--gold-soft)}
+  .brand-name .n2{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-muted);margin-top:4px}
+  .brandbar .meta{font-size:11px;color:var(--ink-muted);text-align:right;line-height:1.5}
+  .brandbar .meta strong{color:var(--ink-soft);font-weight:600;display:block;font-size:11.5px}
+
+  .cover{background:var(--grad-cover);padding:104px 0 88px;border-top:none;position:relative;overflow:hidden}
+  .cover:before{content:'';position:absolute;right:-100px;top:40px;width:520px;height:520px;
+    border-radius:50%;background:radial-gradient(circle at center,rgba(244,194,96,.10) 0%,transparent 65%)}
+  .cover .kicker{display:inline-flex;align-items:center;gap:10px;padding:6px 14px;
+    border:1px solid var(--rule-strong);border-radius:999px;font-size:10.5px;
+    letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);
+    background:color-mix(in srgb,var(--surface) 60%,transparent);margin-bottom:30px}
+  .cover .kicker .dot{width:6px;height:6px;border-radius:50%;background:var(--gold);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--gold) 25%,transparent)}
+  .cover h1{max-width:19ch}
+  .cover h1 em{font-style:normal;color:var(--gold-soft);font-weight:600}
+  .cover .lead{max-width:60ch;font-family:'Newsreader',Georgia,serif;
+    font-size:clamp(18px,1.7vw,22px);line-height:1.55;color:var(--ink-soft);margin:26px 0 0}
+  .cover .lead strong{color:var(--gold-soft);font-weight:500}
+
+  .cliff{margin-top:48px;padding:28px;background:color-mix(in srgb,var(--gold) 9%,transparent);
+    border:1px solid color-mix(in srgb,var(--gold) 30%,var(--rule));border-radius:14px}
+  .cliff .lbl{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);
+    font-weight:600;margin-bottom:16px}
+  .cliff-grid{display:grid;grid-template-columns:1fr auto 1fr;gap:20px;align-items:center}
+  @media(max-width:680px){.cliff-grid{grid-template-columns:1fr;gap:14px}}
+  .cliff-side{padding:18px;background:var(--surface);border-radius:10px;border:1px solid var(--rule)}
+  .cliff-side.low{border-color:color-mix(in srgb,var(--growth) 35%,var(--rule))}
+  .cliff-side.high{border-color:color-mix(in srgb,var(--alert) 35%,var(--rule))}
+  .cliff-side .t{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-muted)}
+  .cliff-side .v{font-family:'JetBrains Mono',monospace;font-size:30px;font-weight:600;
+    margin:8px 0 4px;line-height:1}
+  .cliff-side.low .v{color:var(--growth)}
+  .cliff-side.high .v{color:var(--alert)}
+  .cliff-side .d{font-size:12px;color:var(--ink-soft);line-height:1.5}
+  .cliff-arrow{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;
+    color:var(--gold-soft);text-align:center;white-space:nowrap}
+  .cliff-arrow span{display:block;font-size:10px;color:var(--ink-muted);
+    letter-spacing:.12em;text-transform:uppercase;margin-top:4px;font-family:'Inter',sans-serif}
+
+  .cover-meta{display:flex;justify-content:space-between;flex-wrap:wrap;gap:22px;
+    margin-top:40px;font-size:11px;color:var(--ink-muted)}
+  .cover-meta .label{text-transform:uppercase;letter-spacing:.18em;font-weight:600;
+    color:var(--ink-soft);display:block;margin-bottom:4px;font-size:9.5px}
+
+  .chip{display:inline-flex;align-items:center;padding:3px 9px;border-radius:5px;
+    background:var(--chip-bg);color:var(--chip-ink);font-size:10.5px;font-weight:500;white-space:nowrap}
+  .chip.blue{background:color-mix(in srgb,var(--me-blue) 20%,transparent);color:var(--me-blue-soft)}
+  .chip.green{background:color-mix(in srgb,var(--growth) 20%,transparent);color:var(--growth)}
+  .chip.gold{background:color-mix(in srgb,var(--gold) 20%,transparent);color:var(--gold-soft)}
+  .chip.alert{background:color-mix(in srgb,var(--alert) 20%,transparent);color:var(--alert)}
+  .chip.muted{background:color-mix(in srgb,var(--ink-muted) 15%,transparent);color:var(--ink-muted)}
+
+  .sec-head{display:flex;flex-direction:column;gap:6px;margin-bottom:24px;max-width:68ch}
+  .sec-head .en{font-family:'Newsreader',Georgia,serif;font-size:14.5px;font-style:italic;color:var(--ink-muted)}
+  .callout{margin-top:28px;padding:18px 22px;border-left:3px solid var(--gold);
+    background:color-mix(in srgb,var(--gold) 8%,transparent);border-radius:0 8px 8px 0;
+    color:var(--ink-soft);font-size:14.5px;line-height:1.65}
+  .callout strong{color:var(--ink);font-weight:600}
+  .callout.blue{border-left-color:var(--me-blue);background:color-mix(in srgb,var(--me-blue) 8%,transparent)}
+  .source-note{margin-top:18px;font-size:11.5px;color:var(--ink-muted);line-height:1.55;
+    padding:12px 14px;border:1px dashed var(--rule);border-radius:6px}
+  .source-note strong{color:var(--ink-soft);font-weight:600}
+
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+  .kpi{padding:22px;background:var(--grad-panel);border:1px solid var(--rule);border-radius:12px}
+  .kpi .label{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-muted)}
+  .kpi .kpi-value{font-size:28px;font-weight:600;color:var(--ink);margin:12px 0 6px;line-height:1.05}
+  .kpi .kpi-value .unit{font-size:13px;color:var(--ink-muted);margin-left:3px;font-weight:500}
+  .kpi .delta{font-size:12.5px;color:var(--growth);font-family:'JetBrains Mono',monospace}
+  .kpi .delta.down{color:var(--alert)}
+  .kpi .delta.flat{color:var(--ink-muted)}
+  .kpi .foot{font-size:11px;color:var(--ink-muted);margin-top:10px;line-height:1.45}
+
+  .findings{display:grid;gap:16px}
+  .finding{display:grid;grid-template-columns:58px 1fr;gap:20px;padding:24px;
+    background:var(--surface);border:1px solid var(--rule);border-radius:12px}
+  @media(max-width:600px){.finding{grid-template-columns:1fr;gap:12px}}
+  .finding .num-big{font-family:'JetBrains Mono',monospace;font-size:30px;font-weight:600;
+    color:var(--gold);line-height:1;padding-top:3px}
+  .finding h3{margin-bottom:8px;font-size:20px}
+  .finding p{margin:0 0 8px;font-size:14px;color:var(--ink-soft);line-height:1.65}
+  .finding p:last-of-type{margin-bottom:0}
+  .finding .tags{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
+
+  .tab-wrap{overflow-x:auto;margin:0 -4px}
+  .tab{width:100%;min-width:640px;border-collapse:separate;border-spacing:0;font-size:13px}
+  .tab th,.tab td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--rule);vertical-align:middle}
+  .tab th{font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-muted);background:color-mix(in srgb,var(--surface-2) 65%,transparent);
+    border-bottom:1px solid var(--rule-strong);white-space:nowrap}
+  .tab td.k{font-family:'Newsreader',Georgia,serif;font-size:15px;font-weight:600;color:var(--ink)}
+  .tab td.k .en{display:block;font-family:'Inter',sans-serif;font-size:10.5px;
+    color:var(--ink-muted);font-weight:500;margin-top:2px}
+  .tab td.n{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:13.5px;
+    color:var(--ink);text-align:right}
+  .tab td.small{font-size:12.5px;color:var(--ink-soft)}
+  .tab tr.hi td{background:color-mix(in srgb,var(--alert) 8%,transparent)}
+  .tab tr.lo td{background:color-mix(in srgb,var(--growth) 7%,transparent)}
+
+  .port-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  .port{padding:20px;background:var(--surface);border:1px solid var(--rule);
+    border-radius:10px;position:relative}
+  .port .strip{position:absolute;top:0;left:0;right:0;height:3px;border-radius:10px 10px 0 0}
+  .port.h5 .strip{background:linear-gradient(90deg,var(--alert),var(--gold))}
+  .port.h4 .strip{background:linear-gradient(90deg,var(--gold),var(--growth))}
+  .port.h3 .strip{background:var(--growth);opacity:.85}
+  .port .cn{font-family:'Newsreader',Georgia,serif;font-size:19px;font-weight:600;
+    color:var(--ink);margin-top:6px;line-height:1.2}
+  .port .en{font-size:10.5px;color:var(--ink-muted);margin-top:2px}
+  .port .stat{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:600;
+    color:var(--growth);margin-top:12px}
+  .port .stat .u{font-size:11px;color:var(--ink-muted);font-weight:500}
+  .port .note{font-size:11.5px;color:var(--ink-soft);margin-top:10px;padding-top:10px;
+    border-top:1px solid var(--rule);line-height:1.5}
+
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:680px){.compare{grid-template-columns:1fr}}
+  .comp-card{padding:24px;background:var(--surface);border:1px solid var(--rule);border-radius:12px}
+  .comp-card.nz{border-top:4px solid var(--me-blue)}
+  .comp-card.au{border-top:4px solid var(--ink-muted)}
+  .comp-card h3{font-family:'Newsreader',Georgia,serif;font-size:20px;margin-bottom:14px}
+  .comp-card ul{list-style:none;padding:0;margin:0;font-size:13px}
+  .comp-card ul li{padding:8px 0;border-bottom:1px dashed var(--rule);color:var(--ink-soft);line-height:1.55}
+  .comp-card ul li:last-child{border-bottom:none}
+  .comp-card ul li strong{color:var(--ink);font-weight:600}
+
+  .priority{display:flex;gap:22px;padding:24px 0;border-bottom:1px solid var(--rule)}
+  .priority:last-child{border-bottom:none}
+  .priority .p-num{font-family:'JetBrains Mono',monospace;font-size:34px;font-weight:600;
+    color:var(--gold);line-height:1;flex-shrink:0;width:60px;padding-top:5px}
+  .priority h3{font-family:'Newsreader',Georgia,serif;font-size:21px;margin-bottom:8px}
+  .priority p{font-size:13.5px;color:var(--ink-soft);line-height:1.65;margin:0 0 8px}
+  .priority .why{font-size:12.5px;color:var(--ink-muted);font-style:italic;line-height:1.55}
+  @media(max-width:560px){.priority{flex-direction:column;gap:12px}.priority .p-num{width:auto}}
+
+  .gap-list{display:grid;gap:12px}
+  .gap-item{padding:18px 20px;background:var(--surface);border:1px solid var(--rule);
+    border-radius:10px;border-left:3px solid var(--ink-muted)}
+  .gap-item h4{font-size:14px;color:var(--ink);margin-bottom:6px;font-family:'Inter',sans-serif;font-weight:600}
+  .gap-item p{font-size:12.5px;color:var(--ink-muted);margin:0;line-height:1.6}
+
+  .footer{padding:52px 32px 44px;border-top:1px solid var(--rule);background:var(--surface-2);
+    color:var(--ink-muted);font-size:12.5px;line-height:1.6}
+  .footer .wrap{padding:0}
+  .footer .inst{display:flex;align-items:center;gap:12px;margin-bottom:24px;
+    padding-bottom:22px;border-bottom:1px solid var(--rule)}
+  .footer .inst .lg{width:30px;height:28px;border-radius:6px;background:#0F1E33;
+    display:grid;place-items:center;border:1px solid var(--rule);flex-shrink:0}
+  .footer .inst .nm{font-family:'Newsreader',Georgia,serif;font-size:17px;font-weight:600;color:var(--ink);line-height:1.2}
+  .footer .inst .nm span{display:block;font-family:'Inter',sans-serif;font-size:10px;
+    letter-spacing:.2em;text-transform:uppercase;color:var(--ink-muted);font-weight:500;margin-top:4px}
+  .footer .grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:30px;margin-bottom:26px}
+  @media(max-width:720px){.footer .grid{grid-template-columns:1fr}}
+  .footer h4{font-family:'Inter',sans-serif;font-size:10.5px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--ink);margin:0 0 11px;font-weight:600}
+  .footer .legal{padding-top:20px;border-top:1px solid var(--rule);display:flex;
+    justify-content:space-between;flex-wrap:wrap;gap:12px;font-size:11px}
+
+  @media print{
+    html,body{background:#070E1A!important;color:#EDF3FA!important;
+      -webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    section{padding:42px 0}
+    .cover{padding:70px 0 54px;page-break-after:always;break-after:page}
+    .sec-head{break-after:avoid-page}
+    h1,h2,h3{break-after:avoid}
+    .finding,.comp-card,.port,.kpi,.gap-item,.cliff{break-inside:avoid;page-break-inside:avoid}
+    .tab-wrap{overflow:visible}.tab{min-width:0;font-size:10.5px}
+    .tab th,.tab td{padding:7px 9px}
+  }
+  /* ==== CHART SYSTEM (inlined from docs/magic-insight/_shared/charts.css) ==== */
+/*
+ * Magic Insight 报告图表系统 —— 手写 CSS + inline SVG，不依赖任何 JS 图表库。
+ *
+ * ⚠️ 本文件是【起新卷时的共享模板】，不是被 report.html 外链引用的样式表。
+ *    每份 report.html 必须把这段 CSS **内联**进自己的 <style> 里。
+ *    原因：报告要对外发送（邮件附件、单独另存、转发），外链 CSS 一旦脱离目录
+ *    图表会全部散版，而 PDF 里看不出问题。自包含是硬要求。
+ *    起新卷时把本文件内容复制进去；改进了图表样式请回写本文件，让后续卷受益。
+ *
+ * 为什么不用 Chart.js / ECharts：报告最终产物是 headless Chrome 打印的 PDF。
+ * JS 图表库要等 canvas 渲染完成，与 --virtual-time-budget 抢时序，
+ * 偶发画一半或全白，而 PDF 一旦出错没人会发现（图是空的但版面正常）。
+ * SVG 与 CSS 是声明式的，浏览器一次布局就定稿，确定性 100%。
+ *
+ * 所有图表的数值必须与 sources.md 台账一致。改数字请同时改台账。
+ */
+
+/* ---------- 图表外壳 ---------- */
+.chart {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 18px 20px 16px;
+}
+.chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+.chart-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: .01em;
+}
+.chart-unit {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.chart-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--rule);
+  font-size: 10.5px;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+
+/* ---------- 横向条形图（含正负分叉） ---------- */
+.bars { display: flex; flex-direction: column; gap: 7px; }
+.bar-row {
+  display: grid;
+  grid-template-columns: 76px minmax(90px, 1fr) 52px;
+  align-items: center;
+  gap: 10px;
+}
+.bar-label {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar-track {
+  position: relative;
+  height: 15px;
+  /* 保底宽度：grid 的 1fr 在容器宽度不确定时会塌成 0，
+     所有柱子不可见但版面看起来正常——PDF 里没人会发现。 */
+  min-width: 90px;
+  background: color-mix(in srgb, var(--surface-3) 60%, transparent);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 2px;
+}
+.bar-fill.pos { background: linear-gradient(90deg, color-mix(in srgb, var(--growth) 55%, transparent), var(--growth)); }
+.bar-fill.neg { background: linear-gradient(270deg, color-mix(in srgb, var(--alert) 55%, transparent), var(--alert)); }
+.bar-fill.gold { background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 55%, transparent), var(--gold)); }
+.bar-fill.blue { background: linear-gradient(90deg, color-mix(in srgb, var(--me-blue) 55%, transparent), var(--me-blue)); }
+.bar-fill.muted { background: color-mix(in srgb, var(--ink-muted) 45%, transparent); }
+/* 零轴 */
+.bar-track .zero {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: var(--rule-strong);
+}
+.bar-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: right;
+}
+.bar-value.pos { color: var(--growth); }
+.bar-value.neg { color: var(--alert); }
+.bar-value.neutral { color: var(--ink); }
+
+/* 高亮某一行（用于点出结论所在） */
+.bar-row.hl .bar-label { color: var(--ink); font-weight: 600; }
+
+/* ---------- 堆叠条形图 ---------- */
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.stack-row .sl {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 11.5px; margin-bottom: 5px;
+}
+.stack-row .sl .nm { color: var(--ink); font-weight: 600; }
+.stack-row .sl .tot { font-family: 'JetBrains Mono', monospace; color: var(--ink-muted); font-size: 10.5px; }
+.stack-bar { display: flex; height: 20px; border-radius: 3px; overflow: hidden; }
+.stack-seg { display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 600; }
+.stack-seg.foreign { background: var(--me-blue); color: #06101F; }
+.stack-seg.other { background: color-mix(in srgb, var(--ink-muted) 42%, transparent); color: var(--ink-soft); }
+.stack-seg.hkmt { background: var(--gold); color: #06101F; }
+
+/* ---------- 图例 ---------- */
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; font-size: 10.5px; color: var(--ink-muted); }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+
+/* ---------- 甜甜圈 ---------- */
+.donut-wrap { display: grid; grid-template-columns: 168px 1fr; gap: 18px; align-items: center; }
+@media (max-width: 560px) { .donut-wrap { grid-template-columns: 1fr; } }
+.donut { position: relative; }
+.donut svg { display: block; transform: rotate(-90deg); }
+.donut-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; pointer-events: none;
+}
+.donut-center .v { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 600; color: var(--gold-soft); line-height: 1; }
+.donut-center .l { font-size: 9.5px; color: var(--ink-muted); margin-top: 4px; letter-spacing: .06em; }
+.donut-key { display: flex; flex-direction: column; gap: 8px; }
+.donut-key .row { display: grid; grid-template-columns: 12px 1fr auto; gap: 9px; align-items: center; font-size: 11.5px; }
+.donut-key .sw { width: 10px; height: 10px; border-radius: 2px; }
+.donut-key .nm { color: var(--ink-soft); }
+.donut-key .pc { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--ink); }
+
+/* ---------- 图表并排网格 ---------- */
+.chart-grid { display: grid; gap: 14px; }
+.chart-grid.two { grid-template-columns: 1fr 1fr; }
+.chart-grid.side { grid-template-columns: 1.15fr .85fr; }
+@media (max-width: 760px) { .chart-grid.two, .chart-grid.side { grid-template-columns: 1fr; } }
+
+/* ---------- 打印保真 ---------- */
+@media print {
+  .chart { break-inside: avoid; page-break-inside: avoid; }
+  .bar-fill, .stack-seg, .donut svg circle {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+  /* ==== COVER SYSTEM (inlined from docs/magic-insight/_shared/cover.css) ==== */
+/*
+ * Magic Insight 报告封面系统 —— 全幅照片 hero + 暗色遮罩 + 醒目标题。
+ *
+ * ⚠️ 起新卷时的共享模板，必须【内联】进 report.html。
+ *
+ * 图片方案（2026-09-04 v2，取代 base64）：封面图存成卷目录里的
+ *   cover.jpg，HTML 用相对路径 background-image:url(cover.jpg) 引用。
+ *   - 对外交付物是 PDF，headless Chrome 生成 PDF 时会把图烘焙进去，
+ *     PDF 自包含、国内可靠——不需要 base64。
+ *   - 好处：换图 = 换一个文件，不用 curl→压缩→base64→内联那一套；
+ *     report.html 从 600K+ 瘦回几十 K，可读可 diff。
+ *   - HTML 不再单文件自包含，但那不是交付物；对外只发 PDF。
+ *
+ * 每卷换一张贴题的 Unsplash 照片，打破「清一色深蓝背景」的同质化。
+ * 图片来源必须记进该卷 sources.md（摄影师 + Unsplash 链接 + License）。
+ *
+ * ⚠️ 禁用 text-shadow：PDF 阅读器（微信 / macOS 预览等）会把文字阴影
+ *    渲染成白色横条（2026-09-04 实测事故）。文字可读性靠底部实色遮罩，
+ *    不靠 shadow。
+ */
+
+/* 照片封面容器：盖住整块 cover section */
+.cover.cover-photo {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: #06101F;
+}
+
+/* 背景照片层 */
+.cover-photo .cover-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* 暗色渐变遮罩：底部最深（放标题），中段透一点图，顶部再压一档给品牌角标 */
+.cover-photo .cover-scrim {
+  position: absolute;
+  inset: 0;
+  /* 底部压到近乎实色，标题坐在实底上——去掉 text-shadow 后靠这个保证可读 */
+  background:
+    linear-gradient(180deg,
+      rgba(6, 16, 31, 0.78) 0%,
+      rgba(6, 16, 31, 0.32) 24%,
+      rgba(6, 16, 31, 0.52) 52%,
+      rgba(6, 16, 31, 0.88) 78%,
+      rgba(6, 16, 31, 0.98) 100%),
+    linear-gradient(90deg,
+      rgba(6, 16, 31, 0.55) 0%,
+      rgba(6, 16, 31, 0.12) 55%,
+      rgba(6, 16, 31, 0.0) 100%);
+}
+
+/* 顶部品牌条 */
+.cover-photo .cover-topbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 24px 40px;
+}
+.cover-photo .cover-topbar .cb-brand {
+  display: flex; align-items: center; gap: 11px;
+}
+.cover-photo .cover-topbar .cb-logo {
+  width: 34px; height: 32px; border-radius: 8px;
+  background: rgba(6, 16, 31, 0.55);
+  border: 1px solid rgba(244, 194, 96, 0.4);
+  display: grid; place-items: center;
+  backdrop-filter: blur(4px);
+}
+.cover-photo .cover-topbar .cb-name {
+  font-family: 'Newsreader', Georgia, serif;
+  font-size: 16px; font-weight: 600; color: #fff;
+  letter-spacing: .01em;
+}
+.cover-photo .cover-topbar .cb-name em { font-style: normal; color: var(--gold-soft); }
+.cover-photo .cover-topbar .cb-vol {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(6, 16, 31, 0.35);
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+}
+
+/* 标题区（压在底部深色处） */
+.cover-photo .cover-hero {
+  position: relative;
+  z-index: 2;
+  margin-top: auto;
+  padding: 0 40px 34px;
+  max-width: 1120px;
+}
+.cover-photo .cover-eyebrow {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase;
+  color: var(--gold-soft); font-weight: 600;
+  margin-bottom: 16px;
+}
+.cover-photo .cover-eyebrow .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--gold);
+  box-shadow: 0 0 0 3px rgba(244, 194, 96, 0.25);
+}
+.cover-photo .cover-hero h1 {
+  color: #fff;
+  font-size: clamp(38px, 5.2vw, 62px);
+  line-height: 1.04;
+  margin: 0;
+  font-weight: 600;
+  max-width: 20ch;
+}
+.cover-photo .cover-hero h1 em { font-style: normal; color: var(--gold-soft); font-weight: 600; }
+.cover-photo .cover-hero .cover-lead {
+  font-family: 'Newsreader', Georgia, serif;
+  font-size: clamp(16px, 1.6vw, 20px);
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 20px 0 0;
+  max-width: 64ch;
+}
+.cover-photo .cover-hero .cover-lead strong { color: var(--gold-soft); font-weight: 500; }
+
+/* 照片版权署名 */
+.cover-photo .cover-credit {
+  position: absolute;
+  right: 12px; bottom: 8px;
+  z-index: 2;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: .02em;
+}
+
+/* 封面下方的信息带（立场 + 元信息），紧接照片，深色 */
+.cover-infoband {
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+  padding: 26px 0 30px;
+}
+
+@media (max-width: 640px) {
+  .cover-photo { min-height: 480px; }
+  .cover-photo .cover-topbar { padding: 18px 22px; }
+  .cover-photo .cover-hero { padding: 0 22px 26px; }
+  .cover-photo .cover-topbar .cb-name { font-size: 14px; }
+}
+
+@media print {
+  .cover.cover-photo {
+    min-height: 0;
+    height: 248mm; /* 占满首页 A4 可打印高度 */
+    page-break-after: always;
+    break-after: page;
+  }
+  .cover-photo .cover-img,
+  .cover-photo .cover-scrim {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+  
+
+  @page{size:A4;margin:13mm 11mm 15mm;background:#070E1A}
+</style>
+
+<section class="cover cover-photo">
+  <div class="cover-img" style="background-image:url(cover.jpg)"></div>
+  <div class="cover-scrim"></div>
+  <div class="cover-topbar">
+    <div class="cb-brand"><div class="cb-logo"><svg width="22" height="20" viewBox="0 0 68 64" role="img" aria-label="Magic Insight"><defs><linearGradient id="cl1" x1="0" y1="0" x2="68" y2="64" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#EBCB8B"/><stop offset=".55" stop-color="#C4912E"/><stop offset="1" stop-color="#A6781F"/></linearGradient><radialGradient id="cl2" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#FFF"/><stop offset=".45" stop-color="#FBEFD2"/><stop offset="1" stop-color="#EBCB8B"/></radialGradient></defs><g stroke="url(#cl1)" fill="none" stroke-linecap="round" stroke-width="3.4"><path d="M8,16 C20,19 31,25 46,30"/><path d="M8,24 C21,26 31,28 46,30"/><path d="M8,32 C22,33 31,33 46,30"/><path d="M8,40 C22,39 31,37 46,30"/><path d="M8,48 C20,45 31,38 46,30"/></g><g fill="url(#cl1)"><circle cx="8" cy="16" r="2.2"/><circle cx="8" cy="24" r="2.2"/><circle cx="8" cy="32" r="2.2"/><circle cx="8" cy="40" r="2.2"/><circle cx="8" cy="48" r="2.2"/></g><rect x="45" y="21" width="12" height="12" rx="3" fill="#FFFCF5" stroke="url(#cl1)" stroke-width="1.8"/><rect x="48" y="24" width="6" height="6" rx="1.5" fill="url(#cl2)"/></svg></div><span class="cb-name">Magic <em>Insight</em> 数据研究院</span></div>
+    <span class="cb-vol">Research Series · Vol.03</span>
+  </div>
+  <div class="cover-hero">
+    <div class="cover-eyebrow"><span class="dot"></span>新西兰 · 中国 → NZ 小批量物流</div>
+    <h1>新西兰的整个游戏，<br>都在<em>一条一千块的线上</em></h1>
+    <p class="cover-lead">跟澳洲不一样。新西兰用一条 NZ$1,000 的界线，把进口货物切成两个世界——<strong>线下面每票管理费 NZ$2.09，线上面 NZ$118.44。</strong>还有一条专门盯着集货拆单的合并计算规则。这份报告把这条线两边的真实成本、时效与合规边界拆开讲清楚。</p>
+  </div>
+  <div class="cover-credit">Photo · CHUTTERSNAP / Unsplash</div>
+</section>
+<section class="cover-infoband">
+  <div class="wrap">
+    <div class="cliff">
+      <div class="lbl">2026-04-01 起生效 · 海运每票管理征费</div>
+      <div class="cliff-grid">
+        <div class="cliff-side low">
+          <div class="t">货值 ≤ NZ$1,000</div>
+          <div class="v">NZ$2.09</div>
+          <div class="d">简化清关（ICR / SID）· GST 由离岸卖家在销售点代收 · 边境不再征收</div>
+        </div>
+        <div class="cliff-arrow">56.7×<span>跨过这条线</span></div>
+        <div class="cliff-side high">
+          <div class="t">货值 &gt; NZ$1,000</div>
+          <div class="v">NZ$118.44</div>
+          <div class="d">必须完整进口申报 · 边境征收 GST 与关税 · 到货后 20 天内申报</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cover-meta">
+      <div><span class="label">出品</span>Magic Insight 数据研究院</div>
+      <div><span class="label">隶属</span>Magic Engine · magicengine.com.au</div>
+      <div><span class="label">数据截至</span>2026-09-03 核查</div>
+      <div><span class="label">覆盖</span>监管 · 贸易 · 电商 · 港口 · 运价</div>
+      <div><span class="label">版本</span>Vol.03 · v1.0</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">01 · 五条核心判断</span>
+      <h2>只看一页就看这页</h2>
+      <div class="en">What the verified data actually says — and where it differs from the Australia picture.</div>
+    </div>
+
+    <div class="chart-grid side" style="margin-bottom:22px">
+      <div class="chart">
+        <div class="chart-head">
+          <span class="chart-title">图 1 · NZ$1,000 界线两侧的每票管理征费</span>
+          <span class="chart-unit">NZD / 票 · 不含 GST</span>
+        </div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-label">海运 ≤1,000</span>
+            <div class="bar-track"><div class="bar-fill muted" style="left:0;width:1.8%"></div></div>
+            <span class="bar-value neutral">2.09</span></div>
+          <div class="bar-row"><span class="bar-label">空运 ≤1,000</span>
+            <div class="bar-track"><div class="bar-fill muted" style="left:0;width:1.9%"></div></div>
+            <span class="bar-value neutral">2.21</span></div>
+          <div class="bar-row hl"><span class="bar-label">空运 &gt;1,000</span>
+            <div class="bar-track"><div class="bar-fill gold" style="left:0;width:43.7%"></div></div>
+            <span class="bar-value neutral">51.81</span></div>
+          <div class="bar-row hl"><span class="bar-label">海运 &gt;1,000</span>
+            <div class="bar-track"><div class="bar-fill neg" style="left:0;width:100%"></div></div>
+            <span class="bar-value neg">118.44</span></div>
+        </div>
+        <div class="chart-note">
+          条长按金额等比。海运跨过 NZ$1,000 这条线，单票固定成本从 2 块变成 118 块——<strong style="color:var(--alert)">56.7 倍</strong>。这不是税率，是固定管理费，与货值大小无关。
+        </div>
+      </div>
+
+      <div class="chart">
+        <div class="chart-head">
+          <span class="chart-title">图 2 · 线上消费：本地商家 vs 海外商家</span>
+          <span class="chart-unit">2025 · 同比 %</span>
+        </div>
+        <div class="bars">
+          <div class="bar-row hl"><span class="bar-label">本地增速</span>
+            <div class="bar-track"><div class="bar-fill pos" style="left:0;width:100%"></div></div>
+            <span class="bar-value pos">+11</span></div>
+          <div class="bar-row"><span class="bar-label">海外增速</span>
+            <div class="bar-track"><div class="bar-fill muted" style="left:0;width:45.5%"></div></div>
+            <span class="bar-value pos">+5</span></div>
+        </div>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--rule)">
+          <div class="bars">
+            <div class="bar-row hl"><span class="bar-label">本地客单</span>
+              <div class="bar-track"><div class="bar-fill blue" style="left:0;width:100%"></div></div>
+              <span class="bar-value neutral">$136</span></div>
+            <div class="bar-row"><span class="bar-label">海外客单</span>
+              <div class="bar-track"><div class="bar-fill muted" style="left:0;width:61.0%"></div></div>
+              <span class="bar-value neutral">$83</span></div>
+          </div>
+        </div>
+        <div class="chart-note">
+          本地商家占 80% 份额且增速翻倍于海外；<strong style="color:var(--ink)">海外客单价还在跌（−1%）</strong>。跨境 B2C 直邮在失速，本地履约在赢。
+        </div>
+      </div>
+    </div>
+
+    <div class="findings">
+      <div class="finding">
+        <div class="num-big">01</div>
+        <div>
+          <h3>NZ$1,000 这条线决定了单票该怎么装</h3>
+          <p>2026-04-01 起，新西兰海关按票征收货物管理征费。货值 <strong>≤NZ$1,000</strong> 的海运货每票 <strong>NZ$2.09</strong>；一旦超过，跳到 <strong>NZ$118.44</strong>（海关 73.87 + MPI 44.57，均不含 GST）。空运对应为 NZ$2.21 与 NZ$51.81。</p>
+          <p>这不是税，是固定管理费。对做零散小单的人来说，<strong>把一票货凑到 NZ$1,100 是最糟的选择</strong>——多赚不了多少货值，却要多付 116 块固定成本，外加完整申报的时间与代理费。</p>
+          <div class="tags"><span class="chip alert">56.7 倍跳变</span><span class="chip green">已核实</span></div>
+        </div>
+      </div>
+
+      <div class="finding">
+        <div class="num-big">02</div>
+        <div>
+          <h3>有一条明文规则专门堵集货拆单</h3>
+          <p>新西兰规定：<strong>同一进口商、同一航班或同一邮件批次，货物合计超过 NZ$1,000，就必须提交完整进口申报</strong>，不能靠拆成多票走简化通道。</p>
+          <p>集货（consolidation）是华人物流商最成熟的业务模式，而这条规则正好架在它上面。它不禁止集货——但它意味着<strong>集货商必须按"同一进口商"维度做合并核算</strong>，而不是按票。这是澳洲那边没有的一整个合规议题。</p>
+          <div class="tags"><span class="chip gold">直接影响集货</span><span class="chip green">已核实</span></div>
+        </div>
+      </div>
+
+      <div class="finding">
+        <div class="num-big">03</div>
+        <div>
+          <h3>门槛怎么算和税怎么算，用的是两个不同口径</h3>
+          <p>判断是否超过 NZ$1,000 时，<strong>按海关完税价格计，不含运费与保险费</strong>。但离岸卖家在销售点代收 15% GST 时，<strong>计税基数是完税价格加上运费与保险费</strong>。</p>
+          <p>两个口径差一段运费。货值卡在 NZ$900–1,000 区间的货最容易出事：门槛判定说没超，客户看到的账单却比预期高。<strong>这是新西兰进口里最常被搞混的一点，也是最容易做成服务卖点的一点。</strong></p>
+          <div class="tags"><span class="chip alert">高频踩坑</span><span class="chip green">已核实</span></div>
+        </div>
+      </div>
+
+      <div class="finding">
+        <div class="num-big">04</div>
+        <div>
+          <h3>跨境线上消费在放缓，本地在加速</h3>
+          <p>NZ Post 数据：2025 年新西兰线上消费 <strong>NZ$127 亿（NZ$12.7 b）</strong>，同比 +10%。但拆开看——本地商家 <strong>+11%</strong>，海外商家只有 <strong>+5%</strong>；海外客单价还<strong>跌了 1%</strong> 到 NZ$83，本地客单价涨 5% 到 NZ$136。</p>
+          <p>含义：直接卖给新西兰消费者的跨境小包在变慢变小。<strong>真正在长的是"本地商家从中国进货、在本地履约"这条链</strong>——而这条链需要的正是 B2B 小批量进口物流，不是 B2C 小包。</p>
+          <div class="tags"><span class="chip blue">需求端转向</span><span class="chip green">已核实</span></div>
+        </div>
+      </div>
+
+      <div class="finding">
+        <div class="num-big">05</div>
+        <div>
+          <h3>市场高度集中在两个港，规模只有澳洲的零头</h3>
+          <p>陶朗加港 FY2025 集装箱 <strong>1,208,252 TEU</strong>（+5.3%），奥克兰港 <strong>883,516 TEU</strong>（+5%），两港合计约 209 万 TEU。作为对比，仅墨尔本一港就是 339 万 TEU。</p>
+          <p>小而集中意味着两件事：<strong>覆盖全国不需要铺很多点</strong>（两个港加奥克兰的仓就能覆盖主要人口），但<strong>单一客户流失的影响也更大</strong>。奥克兰港进口箱平均滞留 <strong>2.0 天</strong>，作业效率不构成瓶颈。</p>
+          <div class="tags"><span class="chip green">已核实</span><span class="chip muted">规模有限</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">02 · 那条线的两边</span>
+      <h2>NZ$1,000 上下，成本与流程完全是两套</h2>
+      <div class="en">Every figure below is from NZ Customs, IRD or MFAT — checked 2026-09-03.</div>
+    </div>
+
+    <div class="tab-wrap">
+      <table class="tab">
+        <thead>
+          <tr><th>项目</th><th>≤ NZ$1,000</th><th>&gt; NZ$1,000</th><th>依据</th></tr>
+        </thead>
+        <tbody>
+          <tr class="lo"><td class="k">海运管理征费<span class="en">per consignment, excl GST</span></td><td class="n">NZ$2.09</td><td class="n" style="color:var(--alert)">NZ$118.44</td><td class="small">NZ Customs · 2026-04-01 起</td></tr>
+          <tr class="lo"><td class="k">空运管理征费<span class="en">per consignment, excl GST</span></td><td class="n">NZ$2.21</td><td class="n" style="color:var(--alert)">NZ$51.81</td><td class="small">NZ Customs · 2026-04-01 起</td></tr>
+          <tr><td class="k">清关方式</td><td class="small">ICR 核销 / 简化申报 SID</td><td class="small">完整进口申报（电子提交）</td><td class="small">NZ Customs（2026-04 版）</td></tr>
+          <tr><td class="k">GST 征收环节</td><td class="small">离岸卖家在销售点代收 15%</td><td class="small">边境征收 15%</td><td class="small">IRD · 2019-12-01 起</td></tr>
+          <tr><td class="k">GST 计税基数</td><td class="small">完税价格 + 运费保险</td><td class="small">NZ 价值 + 关税 + 运费保险</td><td class="small">IRD AD265 / NZ Customs</td></tr>
+          <tr><td class="k">门槛判定基数</td><td class="small" colspan="2">海关完税价格，<strong>不含</strong>运费与保险 —— 与计税基数口径不同</td><td class="small">IRD</td></tr>
+          <tr><td class="k">申报时限</td><td class="small">随货报告</td><td class="small">到货后 20 天内</td><td class="small">NZ Customs（2026-04 版）</td></tr>
+          <tr class="hi"><td class="k">合并计算规则</td><td class="small" colspan="2"><strong>同一进口商 · 同一航班或同一邮件批次合计超过 NZ$1,000 → 必须完整申报</strong></td><td class="small">IRD AD265</td></tr>
+          <tr><td class="k">例外货物</td><td class="small" colspan="2">酒精、烟草无论货值均在边境征税；贵金属 GST 免税</td><td class="small">IRD AD265</td></tr>
+          <tr><td class="k">邮政渠道（UPU）</td><td class="small" colspan="2">按重量征费 NZ$1.28/kg（海关 0.40 + MPI 0.88），不含 GST</td><td class="small">NZ Customs</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <strong>怎么用这张表</strong> · 它其实是一张定价表。做小批量进口服务的，可以直接按"这票会不会过线"给客户两套报价与两套时效承诺。目前新西兰市场上把这条线讲清楚的英文内容极少——<strong>把它做成一个可算的工具，比多投广告有用。</strong>
+    </div>
+
+    <div class="source-note">
+      <strong>口径与时效</strong> · 征费金额自 2026-04-01 起生效，均为<strong>不含 GST</strong> 口径；海关小时费率 NZ$133.00/小时（<strong>含 GST</strong>，最低收费 NZ$399.00）与之口径不同，不可混用。全部数字于 2026-09-03 在 customs.govt.nz 与 ird.govt.nz 页面核对。征费金额会调整，引用前请复核当期公布值。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">03 · 市场大盘</span>
+      <h2>盘子有多大，需求在往哪边走</h2>
+      <div class="en">Trade, e-commerce and the direction of travel.</div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi">
+        <div class="label">NZ 自中国进口（货物）</div>
+        <div class="kpi-value">NZ$169.2<span class="unit">亿</span></div>
+        <div class="delta flat">◆ NZ$16.92 b</div>
+        <div class="foot">MFAT · 年度截至 2024 年 9 月 · 另含服务 NZ$13.7 亿（NZ$1.37 b）<span class="chip green">已核实</span></div>
+      </div>
+      <div class="kpi">
+        <div class="label">主要进口品类</div>
+        <div class="kpi-value" style="font-size:14px;line-height:1.5;font-family:'Inter',sans-serif;font-weight:500">电机与电气设备 · 机械 · 家具 · 塑料制品 · 车辆</div>
+        <div class="foot" style="margin-top:12px">MFAT 列举顺序 · 家具与塑料制品是小批量进口的主力货种<span class="chip green">已核实</span></div>
+      </div>
+      <div class="kpi">
+        <div class="label">NZ 线上消费总额</div>
+        <div class="kpi-value">NZ$127<span class="unit">亿</span></div>
+        <div class="delta">▲ +10% · NZ$12.7 b</div>
+        <div class="foot">NZ Post Business IQ · 2025 日历年 · 较 2024 增 NZ$11 亿（NZ$1.1 b）<span class="chip green">已核实</span></div>
+      </div>
+      <div class="kpi">
+        <div class="label">线上占实体零售支出</div>
+        <div class="kpi-value">23<span class="unit">%</span></div>
+        <div class="delta">▲ 每四块钱有近一块在线上</div>
+        <div class="foot">NZ Post Business IQ · 2025 日历年<span class="chip green">已核实</span></div>
+      </div>
+      <div class="kpi">
+        <div class="label">本地商家线上增速</div>
+        <div class="kpi-value">+11<span class="unit">%</span></div>
+        <div class="delta">▲ 占线上消费 80%</div>
+        <div class="foot">NZ Post Business IQ · 2025 vs 2024<span class="chip green">已核实</span></div>
+      </div>
+      <div class="kpi">
+        <div class="label">海外商家线上增速</div>
+        <div class="kpi-value">+5<span class="unit">%</span></div>
+        <div class="delta down">▼ 仅本地增速的一半</div>
+        <div class="foot">NZ Post Business IQ · 占线上消费 20%<span class="chip green">已核实</span></div>
+      </div>
+      <div class="kpi">
+        <div class="label">海外商家平均客单</div>
+        <div class="kpi-value">NZ$83</div>
+        <div class="delta down">▼ −1% · 本地为 NZ$136（+5%）</div>
+        <div class="foot">NZ Post Business IQ · 2025 日历年 · 跨境小包在变小<span class="chip green">已核实</span></div>
+      </div>
+      <div class="kpi">
+        <div class="label">线上交易笔数</div>
+        <div class="kpi-value">+6<span class="unit">%</span></div>
+        <div class="delta">▲ 全年多出 600 万笔以上</div>
+        <div class="foot">NZ Post Business IQ · 数据由 Dot Loves Data 汇编<span class="chip green">已核实</span></div>
+      </div>
+    </div>
+
+    <div class="callout blue">
+      <strong>这组数字里最该注意的一条</strong> · 海外商家线上增速 +5%、客单价 −1%，而本地商家 +11%、客单价 +5%。<strong>直发消费者的跨境小包在失速，本地商家进货再本地履约的模式在赢。</strong>对物流服务商的含义很直接：把资源压在 B2C 小包价格战上回报在变差，压在"帮本地小商家把货从中国弄进来"上更顺势。
+    </div>
+
+    <div class="source-note">
+      <strong>口径提示</strong> · MFAT 页面标注「Trade figures correct as at September 2025」，但其列出的进出口数值明确标注为「year ending September 2024」——<strong>页面更新时间与数据期间不是一回事</strong>，本报告采用后者。NZ Post 数据为 2025 日历年，与 MFAT 的 9 月年度口径不同，两者不可直接相减或合并成趋势。
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">04 · 港口与通道</span>
+      <h2>货从哪进来</h2>
+      <div class="en">Two ports carry the country. Both report on a June financial year.</div>
+    </div>
+
+    <div class="port-grid">
+      <div class="port h5">
+        <div class="strip"></div>
+        <div class="cn">陶朗加港</div>
+        <div class="en">Port of Tauranga · NZX 上市</div>
+        <div class="stat">1,208,252<span class="u"> TEU</span></div>
+        <div class="note">FY2025（6 月财年）· 同比 +5.3% · 总货量 2,530 万吨（+7%）· 承担全国约 33% 吨位与 48% 集装箱出口 · 全国最大集装箱港</div>
+      </div>
+      <div class="port h4">
+        <div class="strip"></div>
+        <div class="cn">奥克兰港</div>
+        <div class="en">Port of Auckland</div>
+        <div class="stat">883,516<span class="u"> TEU</span></div>
+        <div class="note">FY2025（截至 2025-06-30）· 同比 +5% · 2020 年以来最高 · 进口箱平均滞留 2.0 天 · 紧邻全国最大消费市场</div>
+      </div>
+      <div class="port h3">
+        <div class="strip"></div>
+        <div class="cn">两港合计</div>
+        <div class="en">Combined</div>
+        <div class="stat">≈209<span class="u"> 万 TEU</span></div>
+        <div class="note">本报告按两港 FY2025 公布值相加所得 · <span class="chip gold">推算</span> 供规模感参考，非官方合并统计口径</div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>规模感</strong> · 两港合计约 209 万 TEU。作为对照，澳洲仅墨尔本一港 FY25 就有 339 万 TEU。<strong>新西兰是个小而集中的市场</strong>——好处是覆盖全国不需要铺很多点，坏处是客户集中度高，掉一个大客户影响大。奥克兰港进口箱滞留 2.0 天，说明码头效率不是瓶颈，瓶颈在清关与后端。
+    </div>
+
+    <div class="source-note">
+      <strong>口径</strong> · 两港均采用 6 月财年，与前一节 NZ Post 的日历年、MFAT 的 9 月年度均不同，<strong>三者不可合并成同一条趋势线</strong>。陶朗加港「33% 吨位 / 48% 集装箱出口」为该港自述市场地位。「两港合计」为本报告相加所得，标注为推算。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">05 · 运价与时效</span>
+      <h2>中国到奥克兰，实际要多少钱多少天</h2>
+      <div class="en">Live marketplace quotes, not marketing pages — and the gap between the two.</div>
+    </div>
+
+    <div class="tab-wrap">
+      <table class="tab">
+        <thead>
+          <tr><th>服务</th><th style="text-align:right">价格</th><th style="text-align:right">折每 CBM</th><th>时效</th><th>有效期</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="k">LCL 标准服务 A<span class="en">Shanghai → Auckland</span></td><td class="n">US$394</td><td class="n">≈US$79</td><td class="small">23 天</td><td class="small">至 2026-10-01</td></tr>
+          <tr><td class="k">LCL 标准服务 B<span class="en">Shanghai → Auckland</span></td><td class="n">US$623</td><td class="n">≈US$125</td><td class="small">23 天</td><td class="small">至 2026-09-16</td></tr>
+          <tr><td class="k">LCL 标准服务 C<span class="en">Shanghai → Auckland</span></td><td class="n">US$920</td><td class="n">≈US$184</td><td class="small">19 天</td><td class="small">至 2026-09-16</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <strong>这三行最有价值的地方在对比</strong> · 上表是 Flexport 平台上「每 5 CBM / 750 kg」的实际挂牌价，折合每 CBM <strong>约 US$79–184</strong>。而市面上货代营销页普遍宣称中国→奥克兰 LCL「US$38/CBM 起」——<strong>差 2 到 5 倍。</strong></p>
+      <p style="margin:10px 0 0">差在哪不难猜：营销价通常只含基本海运费，不含目的港费用、拆箱费、文件费与清关。<strong>把全包价和拆解表做出来，本身就是差异化。</strong>注意 19 天那档比 23 天那档贵一倍多——时效在这条线上是明码标价的。</div>
+    </div>
+
+    <div class="source-note">
+      <strong>重要限定</strong> · 上表为 Flexport 公开平台在 2026-09-03 显示的挂牌报价，币种为 US$，<strong>属实时市场报价而非官方指数，随时变动，不构成报价依据</strong>。同日该页面 FCL 与空运显示「0 offerings」，故本报告不给出 FCL 与空运价格——<span class="chip muted">数据缺口</span>宁可留空也不填估计值。折算每 CBM 为本报告按 5 CBM 除算所得<span class="chip gold">推算</span>。
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">06 · 与澳洲的结构差异</span>
+      <h2>同一套打法搬过来会踩什么</h2>
+      <div class="en">Why the Australia playbook does not transfer cleanly.</div>
+    </div>
+
+    <div class="compare">
+      <div class="comp-card nz">
+        <h3>新西兰</h3>
+        <ul>
+          <li><strong>NZ$1,000 是硬分界</strong> · 跨线海运每票管理费从 NZ$2.09 跳到 NZ$118.44</li>
+          <li><strong>有明文合并计算规则</strong> · 同一进口商同一航班合计超线即须完整申报，直接约束集货</li>
+          <li><strong>GST 早已前移到销售点</strong> · 2019-12-01 起由离岸卖家代收，注册门槛 NZ$60,000</li>
+          <li><strong>关税基本为零</strong> · 中国原产货物自 2021 年起可享零关税（须满足原产地规则）</li>
+          <li><strong>进口不需要原产地证书</strong> · NZ 海关明确不要求（出口到中国方向相反）</li>
+          <li><strong>市场小而集中</strong> · 两港约 209 万 TEU，人口约 520 万</li>
+          <li><strong>跨境 B2C 在失速</strong> · 海外商家线上增速仅 +5%，客单价 −1%</li>
+        </ul>
+      </div>
+      <div class="comp-card au">
+        <h3>澳洲（Vol.02 已覆盖）</h3>
+        <ul>
+          <li>无等价的单票管理费悬崖结构</li>
+          <li>未见同等明文的同批次合并计算规则</li>
+          <li>GST 低值进口规则与 NZ 时间线、门槛不同</li>
+          <li>关税与 FTA 安排为另一套</li>
+          <li>原产地文件要求需单独确认</li>
+          <li>市场大而分散 · 仅墨尔本一港即 339 万 TEU</li>
+          <li>需求侧结构见 Vol.02，本报告未重复核查</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>一句话</strong> · 澳洲那版的主线是"洋人客户在增长、华资拿不到英文流量"。<strong>新西兰的主线不一样——是"监管结构本身在决定你该怎么装箱、怎么开票、怎么合并"。</strong>在新西兰，把合规讲清楚的价值高于把广告投出去的价值，因为这里的坑更明确、也更可算。
+    </div>
+
+    <div class="source-note">
+      <strong>对照说明</strong> · 右栏澳洲条目为 Vol.02 已核查内容的摘要，本报告<strong>未对澳洲数据重新取证</strong>；两栏并列用于说明结构差异，不构成逐项等价比较。凡本报告未亲自核实的澳洲细节（如原产地文件要求），已在文中标注为需单独确认。
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">07 · 数据缺口</span>
+      <h2>这些我没查到，所以没写进上面</h2>
+      <div class="en">Stated plainly, because a missing number is a fine outcome and an invented one is not.</div>
+    </div>
+
+    <div class="gap-list">
+      <div class="gap-item">
+        <h4>MPI 熏蒸与处理的具体费用</h4>
+        <p>mpi.govt.nz 全站被机器人防护拦截，无法读取。海关文件只说明费用由进口商承担、由 MPI 认可的第三方处理机构收取，未在任何可访问的官方页面公布统一价目。<strong>本报告因此不给出任何 MPI 处理费金额。</strong></p>
+      </div>
+      <div class="gap-item">
+        <h4>MPI 检验员小时费率</h4>
+        <p>搜索结果摘要中出现过具体数字，但无法在 mpi.govt.nz 正文亲自读到，按规则不予采信。权威来源应为 MPI「Fees and charges for importing」页面及 Biosecurity (Costs) Regulations。</p>
+      </div>
+      <div class="gap-item">
+        <h4>「新西兰生物安保全球最严」这个说法</h4>
+        <p>没有任何政府机构发布过跨国生物安保严格度排名。<strong>这个说法在本报告中被删除。</strong>可核实的制度特征是：集装箱与全部木质包装均属强制申报的风险货物；集装箱检疫申报须在到港前 12 小时提交；不合规货物退运或销毁费用全部由进口商承担。</p>
+      </div>
+      <div class="gap-item">
+        <h4>Stats NZ 最新年度贸易数据</h4>
+        <p>Stats NZ「Overseas merchandise trade: November 2025」页面未能取到正文。<strong>本报告因此采用 MFAT 的年度截至 2024 年 9 月口径</strong>，而非任何更新但未经一手核实的数字。若需最新年度值，应直接查 Stats NZ 信息发布页。</p>
+      </div>
+      <div class="gap-item">
+        <h4>中国→新西兰 FCL 与空运价格</h4>
+        <p>Flexport 页面在核查当日 FCL 与空运均显示「0 offerings」。<strong>本报告不给出这两个模式的价格。</strong></p>
+      </div>
+      <div class="gap-item">
+        <h4>新西兰对消费品的 MFN 基准关税税率</h4>
+        <p>需逐个税则号查 Working Tariff Document，未在任何页面读到具体税率。因中国原产货物自 2021 年起已享零关税，对本报告主线影响有限；但若要写「FTA 省下多少关税」，必须先补齐 MFN 基准。</p>
+      </div>
+      <div class="gap-item">
+        <h4>新西兰英文物流关键词的搜索量与竞争格局</h4>
+        <p>Vol.02（澳洲）中的关键词表在数据核查中被判定为不可采信。<strong>本报告不包含任何搜索量、CPC 或 SERP 占位数据</strong>——这类数字必须来自实时拉取，未拉取就不写。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">08 · 五条动作建议</span>
+      <h2>接下来具体做什么</h2>
+      <div class="en">Sized for a mid-sized operator, ordered by cost-to-value.</div>
+    </div>
+
+    <div class="priority">
+      <div class="p-num">01</div>
+      <div>
+        <h3>做一个 NZ$1,000 界线的报价计算器</h3>
+        <p>输入货值、体积、运输方式，输出这票该走哪条通道、总落地成本多少、跨线会多花多少。把 NZ$2.09 / NZ$118.44 的跳变、两个不同的计税口径、以及 15% GST 全算进去。</p>
+        <p class="why">这是本报告识别出的最高性价比动作：所有数据都是公开且稳定的，做一次长期有效，而目前市面上把这条线讲清楚的英文内容极少。</p>
+      </div>
+    </div>
+
+    <div class="priority">
+      <div class="p-num">02</div>
+      <div>
+        <h3>把合并计算规则做成集货服务的明示条款</h3>
+        <p>同一进口商同一航班合计超 NZ$1,000 即须完整申报——这条规则决定了集货怎么排、怎么开票、怎么跟客户解释。与其等客户被卡住，不如在服务说明里写清楚，并按"同一进口商"维度做合并核算。</p>
+        <p class="why">把合规风险前置说明，反而是最强的信任构建方式——尤其面对不熟悉新西兰规则的中国出口方。</p>
+      </div>
+    </div>
+
+    <div class="priority">
+      <div class="p-num">03</div>
+      <div>
+        <h3>用全包价对打「US$38/CBM 起」的营销价</h3>
+        <p>Flexport 实际挂牌折合每 CBM 约 US$79–184，而营销页普遍宣称 US$38 起。把目的港费、拆箱费、文件费、清关费、征费全部列出，做一张对照表。</p>
+        <p class="why">客户最深的心理阴影是「报价看着便宜、到港一堆附加费」。透明本身就是差异化，而且不需要额外成本。</p>
+      </div>
+    </div>
+
+    <div class="priority">
+      <div class="p-num">04</div>
+      <div>
+        <h3>把目标客户从 B2C 小包转向本地小商家进货</h3>
+        <p>海外商家线上增速 +5%、客单价 −1%；本地商家 +11%、客单价 +5%。资源应该跟着后者走——服务的是"本地卖家从中国进货、在新西兰履约"，而不是直发消费者。</p>
+        <p class="why">这个转向同时解决了单票规模问题：本地商家进货的单票天然比 B2C 小包大，更容易做出服务价值。</p>
+      </div>
+    </div>
+
+    <div class="priority">
+      <div class="p-num">05</div>
+      <div>
+        <h3>补齐本报告的两个数据缺口再做决策</h3>
+        <p>MPI 处理费用与 Stats NZ 最新年度贸易数据，是本报告明确没拿到的两块。前者影响落地成本测算的准确度，后者影响市场规模判断。做重大投入决策前应先补上。</p>
+        <p class="why">这两项都不难拿——MPI 需要绕过机器人防护直接联系或现场查询，Stats NZ 需要直接下载数据表而非读网页。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="footer">
+  <div class="wrap">
+    <div class="inst">
+      <div class="lg">
+        <svg width="18" height="17" viewBox="0 0 68 64" role="img" aria-label="Magic Insight">
+          <defs>
+            <linearGradient id="g3" x1="0" y1="0" x2="68" y2="64" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#EBCB8B"/><stop offset=".55" stop-color="#C4912E"/><stop offset="1" stop-color="#A6781F"/>
+            </linearGradient>
+            <radialGradient id="g4" cx=".5" cy=".5" r=".5">
+              <stop offset="0" stop-color="#FFF"/><stop offset=".45" stop-color="#FBEFD2"/><stop offset="1" stop-color="#EBCB8B"/>
+            </radialGradient>
+          </defs>
+          <g stroke="url(#g3)" fill="none" stroke-linecap="round" stroke-width="3.4">
+            <path d="M8,16 C20,19 31,25 46,30"/><path d="M8,24 C21,26 31,28 46,30"/><path d="M8,32 C22,33 31,33 46,30"/><path d="M8,40 C22,39 31,37 46,30"/><path d="M8,48 C20,45 31,38 46,30"/>
+          </g>
+          <g fill="url(#g3)"><circle cx="8" cy="16" r="2.2"/><circle cx="8" cy="24" r="2.2"/><circle cx="8" cy="32" r="2.2"/><circle cx="8" cy="40" r="2.2"/><circle cx="8" cy="48" r="2.2"/></g>
+          <rect x="45" y="21" width="12" height="12" rx="3" fill="#FFFCF5" stroke="url(#g3)" stroke-width="1.8"/>
+          <rect x="48" y="24" width="6" height="6" rx="1.5" fill="url(#g4)"/>
+        </svg>
+      </div>
+      <div class="nm">Magic Insight 数据研究院<span>Research Series · Vol. 03 · NZ Logistics</span></div>
+    </div>
+
+    <div class="grid">
+      <div>
+        <h4>关于本报告</h4>
+        <p>《中国 → 新西兰小批量物流市场观察》聚焦 NZ$1,000 界线两侧的成本、时效与合规结构。监管部分数据于 2026-09-03 逐条在 customs.govt.nz、ird.govt.nz、mfat.govt.nz 页面核对。</p>
+      </div>
+      <div>
+        <h4>数据分层</h4>
+        <p>· <strong>已核实</strong> — 附一手来源，本次核对过<br>· <strong>推算</strong> — 基于已核实数字的换算，算法已注明<br>· <strong>判断</strong> — 综合判断，不是数据<br>· <strong>数据缺口</strong> — 明确未取到，见第 07 节</p>
+      </div>
+      <div>
+        <h4>使用说明</h4>
+        <p>Magic Engine 高级会员专属内容。运价与征费金额随时变动，引用前请复核当期值。本报告为市场观察，供从业者判断参考，<strong>不构成经营决策依据</strong>。</p>
+      </div>
+    </div>
+
+    <div class="legal">
+      <div>© 2026 Magic Engine · Magic Insight 数据研究院出品 · 高级会员专属 · <a href="https://magicengine.com.au">magicengine.com.au</a></div>
+      <div>Vol.03 · v1.0 · <span class="num">2026-09-03</span></div>
+    </div>
+  </div>
+</div>

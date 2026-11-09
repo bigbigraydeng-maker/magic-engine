@@ -83,11 +83,23 @@ describe('汇总实测', () => {
     expect(summariseInsights([])).toEqual({ spend: 0, conversations: 0, impressions: 0, clicks: 0, ads: 0, days: 0 })
   })
 
-  it('表单 lead 和私信对话都算「有人举手」', () => {
+  it('单条广告只有一种举手方式时,原样计入', () => {
+    const rows: AdInsightRow[] = [
+      { entity_id: 'x', insight_date: '2026-07-01', spend: 10, impressions: 1, clicks: 1, leads: 0, messaging_conversations: 2 },
+      { entity_id: 'y', insight_date: '2026-07-01', spend: 10, impressions: 1, clicks: 1, leads: 3, messaging_conversations: 0 },
+    ]
+    expect(summariseInsights(rows).conversations).toBe(5)
+  })
+
+  it('同一条广告表单和私信同时非零时不重复计数(2026-09-06 CTS 事故)', () => {
+    // Lead Form 广告如果开了 Messenger 自动回复,Meta 会把同一个人算成
+    // 一个 lead + 一个 messaging_conversation。CTS 2026-09-06 实测:同一天
+    // leads=27、messaging=25,是同一批人,不是 52 个人举手。
     const rows: AdInsightRow[] = [
       { entity_id: 'x', insight_date: '2026-07-01', spend: 10, impressions: 1, clicks: 1, leads: 3, messaging_conversations: 2 },
     ]
-    expect(summariseInsights(rows).conversations).toBe(5)
+    // max(3, 2) = 3,不是 3 + 2 = 5。
+    expect(summariseInsights(rows).conversations).toBe(3)
   })
 })
 

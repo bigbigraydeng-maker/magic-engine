@@ -1,0 +1,130 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "Shanghai & Surroundings: evergreen price reel (E3 v2 logo-always: logo shown for whole video)",
+ "angle_source": {
+  "source": "manual_remotion_cts_shanghai",
+  "authorized_by": "PM 2026-10-06 (create-order authorization; coordinator 2026-10-06 logo-always variant for agent comparison)",
+  "facts_checked": "ctstours.co.nz shanghai-surroundings page, 2026-10-06 (price NZD 2,699)"
+ },
+ "rationale_one_liner": "PM 2026-10-06 授权：上海周边团降价 Reel（E3 v2，logo 常驻版），只存草稿，不发布",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "list",
+   "props": {
+    "brandColor": "#C41E3A",
+    "itemOverlayOpacity": 0.15,
+    "logoFile": "logo.png",
+    "musicFile": "music/momentum.mp3",
+    "beats": [
+     0.09,
+     0.69,
+     1.29,
+     1.89,
+     2.49,
+     3.09,
+     3.69,
+     4.29,
+     4.89,
+     5.49,
+     6.09,
+     6.69,
+     7.29,
+     7.89,
+     8.49,
+     9.09,
+     9.69,
+     10.29,
+     10.89,
+     11.49,
+     12.09,
+     12.69,
+     13.29,
+     13.89,
+     14.49,
+     15.09,
+     15.69,
+     16.29,
+     16.89,
+     17.49
+    ],
+    "hook": {
+     "clip": "clips/hook_bundgroup.mp4",
+     "lines": [
+      {
+       "badge": "10",
+       "text": "DAYS"
+      },
+      {
+       "badge": null,
+       "text": "SHANGHAI"
+      },
+      {
+       "badge": null,
+       "text": "+3 CITIES"
+      }
+     ]
+    },
+    "items": [
+     {
+      "text": "FLIGHTS FROM AUCKLAND",
+      "clip": "clips/item1_skylineday.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "ANCIENT WATER TOWNS",
+      "clip": "clips/item2_watertown.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "THE BUND, SHANGHAI",
+      "clip": "clips/item3_bund.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "7 NIGHTS OF HOTELS",
+      "clip": "clips/item2_aerialnight.mp4",
+      "blurBackdrop": true
+     },
+     {
+      "text": "NANJING ROAD",
+      "clip": "clips/item5_nanjingroad.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "ENGLISH-SPEAKING GUIDE",
+      "clip": "clips/item3_walklane.mp4",
+      "blurBackdrop": false
+     }
+    ],
+    "itemLabel": "INCLUDED",
+    "revealTitle": "SHANGHAI + 3 CITIES.",
+    "price": {
+     "backdropClip": "clips/price_shanghaiday.mp4",
+     "fromLabel": "FROM",
+     "currencyPrefix": "NZ$",
+     "amount": 2699,
+     "qualifier": "PER PERSON · TWIN SHARE",
+     "dateLine": "FREE CHANGES UP TO 60 DAYS PRE-DEPARTURE",
+     "footnote": "VISA: AS PER POLICY AT TIME OF DEPARTURE"
+    },
+    "logoMode": "always"
+   }
+  },
+  "copy": {
+   "caption": "Suzhou. Wuxi. Hangzhou. Shanghai. Ten days from Auckland, flights included. From NZD $2,699 per person, twin share. Visa requirements as per policy at time of departure. Itinerary in the first comment.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/discovery/shanghai-surroundings",
+    "offer": [
+     "10 days from Auckland",
+     "From NZD $2,699 per person, twin share"
+    ]
+   }
+  }
+ }
+}

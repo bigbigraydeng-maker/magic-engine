@@ -167,7 +167,11 @@ describe('extractStylesheetUrls', () => {
   })
 
   it('skips malformed hrefs without throwing', () => {
-    const html = `<link rel="stylesheet" href=":::not-a-url::">
+    // Both hrefs are rejected by the WHATWG URL parser even with a base URL
+    // (unterminated IPv6 literal / space in host). A relative-looking string
+    // such as ":::x" is NOT malformed — it resolves against the base.
+    const html = `<link rel="stylesheet" href="http://[bad">
+                  <link rel="stylesheet" href="https://exa mple.com/x.css">
                   <link rel="stylesheet" href="/ok.css">`
     const out = extractStylesheetUrls(html, BASE)
     expect(out.urls).toEqual(['https://oztop.com.au/ok.css'])

@@ -30,6 +30,21 @@ vi.mock('@/lib/strategy/analyzer', () => ({
   analyzeOpportunities: vi.fn(),
 }))
 
+// P14.C.5: the route loads per-client SEO mode confidence before scoring.
+// Zero-filled entries → getModeBoost() = 0 → scoring identical to pre-P14.C.5.
+// getModeBoost stays real (pure function).
+vi.mock('@/lib/case-library/outcome-confidence', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/case-library/outcome-confidence')>()
+  return {
+    ...actual,
+    fetchSeoBlogConfidenceByMode: vi.fn().mockResolvedValue({
+      unified:  { successRate: 0, sampleSize: 0 },
+      geo_only: { successRate: 0, sampleSize: 0 },
+      seo_only: { successRate: 0, sampleSize: 0 },
+    }),
+  }
+})
+
 // ---------------------------------------------------------------------------
 // Imports after mocks
 // ---------------------------------------------------------------------------
@@ -144,10 +159,11 @@ function setupClientNotFound() {
 }
 
 function setupClientFoundWithInsert(clientId = 'client-1') {
-  // Echo back what was passed to insert() as the DB-returned rows,
-  // adding minimal DB-generated fields so StrategyItem shape is satisfied.
+  // P14.C.3: the route now upserts with ignoreDuplicates. Echo back what was
+  // passed to upsert() as the DB-returned rows, adding minimal DB-generated
+  // fields so StrategyItem shape is satisfied.
   const mockSelect = vi.fn().mockImplementation(function () {
-    const insertedPayload: object[] = (mockInsert.mock.calls[0]?.[0] ?? []) as object[]
+    const insertedPayload: object[] = (mockUpsert.mock.calls[0]?.[0] ?? []) as object[]
     const now = new Date().toISOString()
     const rows = insertedPayload.map((row, i) => ({
       id: `generated-id-${i}`,
@@ -157,7 +173,7 @@ function setupClientFoundWithInsert(clientId = 'client-1') {
     }))
     return Promise.resolve({ data: rows, error: null })
   })
-  const mockInsert = vi.fn().mockReturnValue({ select: mockSelect })
+  const mockUpsert = vi.fn().mockReturnValue({ select: mockSelect })
   const mockFrom = vi.fn()
 
   mockFrom.mockImplementation((table: string) => {
@@ -174,13 +190,13 @@ function setupClientFoundWithInsert(clientId = 'client-1') {
       }
     }
     if (table === 'content_strategy_items') {
-      return { insert: mockInsert }
+      return { upsert: mockUpsert }
     }
-    return { select: vi.fn(), insert: vi.fn() }
+    return { select: vi.fn(), upsert: vi.fn() }
   })
 
   vi.mocked(supabaseAdmin.from).mockImplementation(mockFrom)
-  return { mockInsert, mockSelect }
+  return { mockUpsert, mockSelect }
 }
 
 function setupClientFoundWithInsertError(clientId = 'client-1') {
@@ -201,7 +217,7 @@ function setupClientFoundWithInsertError(clientId = 'client-1') {
     }
     if (table === 'content_strategy_items') {
       return {
-        insert: vi.fn().mockReturnValue({
+        upsert: vi.fn().mockReturnValue({
           select: vi.fn().mockResolvedValue({
             data: null,
             error: { message: 'DB insert failed' },
@@ -305,7 +321,7 @@ describe('POST /api/clients/[id]/strategy/generate', () => {
 
   describe('Suite 3: Items generation and scoring', () => {
     it('returns 200 with scored items when analyzeOpportunities returns opportunities', async () => {
-      const { mockInsert } = setupClientFoundWithInsert()
+      const { mockUpsert } = setupClientFoundWithInsert()
       const opp = makeRawOpportunity()
       mockAnalyzeOpportunities.mockResolvedValue([opp])
 
@@ -316,7 +332,8 @@ describe('POST /api/clients/[id]/strategy/generate', () => {
       expect(response.status).toBe(200)
       expect(body.items).toHaveLength(1)
       expect(body.count).toBe(1)
-      expect(mockInsert).toHaveBeenCalledTimes(1)
+      expect(body.skipped_duplicates).toBe(0)
+      expect(mockUpsert).toHaveBeenCalledTimes(1)
     })
 
     it('each item has required fields: strategy_run_id, client_id, action_type, content_mode, priority, priority_score', async () => {
@@ -522,19 +539,48 @@ describe('POST /api/clients/[id]/strategy/generate', () => {
   // =========================================================================
 
   describe('Suite 5: DB insert and error handling', () => {
-    it('inserts items into content_strategy_items table', async () => {
-      const { mockInsert } = setupClientFoundWithInsert()
+    it('upserts items into content_strategy_items, ignoring (client_id, proposed_title) duplicates', async () => {
+      const { mockUpsert } = setupClientFoundWithInsert()
       mockAnalyzeOpportunities.mockResolvedValue([makeRawOpportunity()])
 
       const [req, ctx] = makeRequest()
       await POST(req, ctx)
 
-      expect(mockInsert).toHaveBeenCalledTimes(1)
-      const insertedItems = mockInsert.mock.calls[0][0] as unknown[]
+      expect(mockUpsert).toHaveBeenCalledTimes(1)
+      const insertedItems = mockUpsert.mock.calls[0][0] as unknown[]
       expect(insertedItems).toHaveLength(1)
+      // P14.C.3: re-running strategy must not pollute the kanban with duplicates
+      expect(mockUpsert.mock.calls[0][1]).toEqual({
+        onConflict:       'client_id,proposed_title',
+        ignoreDuplicates: true,
+      })
     })
 
-    it('returns 500 when DB insert fails', async () => {
+    it('reports skipped_duplicates when the DB returns fewer rows than were sent', async () => {
+      const { mockUpsert, mockSelect } = setupClientFoundWithInsert()
+      mockAnalyzeOpportunities.mockResolvedValue([
+        makeRawOpportunity(),
+        makeRawOpportunity({ proposed_title: 'Already on the kanban' }),
+      ])
+      // DB ignored one duplicate row → only one row comes back
+      mockSelect.mockImplementation(() => {
+        const sent = (mockUpsert.mock.calls[0]?.[0] ?? []) as object[]
+        return Promise.resolve({
+          data: [{ id: 'generated-id-0', created_at: 'now', updated_at: 'now', ...sent[0] }],
+          error: null,
+        })
+      })
+
+      const [req, ctx] = makeRequest()
+      const response = await POST(req, ctx)
+      const body = await response.json() as GenerateResponse
+
+      expect(response.status).toBe(200)
+      expect(body.count).toBe(1)
+      expect(body.skipped_duplicates).toBe(1)
+    })
+
+    it('returns 500 when DB upsert fails', async () => {
       setupClientFoundWithInsertError()
       mockAnalyzeOpportunities.mockResolvedValue([makeRawOpportunity()])
 

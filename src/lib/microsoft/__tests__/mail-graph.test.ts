@@ -27,14 +27,18 @@ const msg = (over: Record<string, unknown> = {}) => ({
 
 /** 记下每次请求的 URL —— 筛选条件、排序、字段都靠它验证。 */
 let urls: string[]
+/** 记下每次请求带的请求头 —— 免疫令牌 / 稳定 id 请求头都靠它验证。 */
+let requestHeaders: Record<string, string>[]
 
 function mockGraph(pages: Array<{ value: unknown[]; next?: string }>, ok = true, status = 200) {
   urls = []
+  requestHeaders = []
   let i = 0
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string) => {
+    vi.fn(async (url: string, init?: { headers?: Record<string, string> }) => {
       urls.push(url)
+      requestHeaders.push(init?.headers ?? {})
       const page = pages[i] ?? { value: [] }
       i += 1
       return {
@@ -153,6 +157,17 @@ describe('请求本身', () => {
     await fetchMailSince('tok-123', 'inbox', SINCE)
     const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
     expect((call[1] as { headers: Record<string, string> }).headers.Authorization).toBe('Bearer tok-123')
+  })
+
+  /**
+   * 不带这个请求头，Graph 默认给的 id 在信从「草稿」变「已发送」时会变——
+   * mail-send.ts 存的正是这一刻之前的 id，两边对不上会让刚发的信在时间线上
+   * 插出重复的一行（2026-09-15 子牙架构复审 PR #1714 揪出来的）。
+   */
+  it('带上稳定 id 请求头 —— 否则跟 mail-send.ts 存的 id 会对不上', async () => {
+    mockGraph([{ value: [] }])
+    await fetchMailSince('tok', 'inbox', SINCE)
+    expect(requestHeaders[0].Prefer).toBe('IdType="ImmutableId"')
   })
 })
 

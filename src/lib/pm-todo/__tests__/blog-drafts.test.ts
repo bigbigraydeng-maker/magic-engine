@@ -60,7 +60,9 @@ describe('buildDraftTodos', () => {
   it('有通道时才让人去看去发', () => {
     const todos = buildDraftTodos([draft({ client_id: 'cts' })], CONNECTED, NOW)
     expect(todos[0].how).toContain('点发布')
-    expect(todos[0].href).toBe('/dashboard/clients/cts/blog')
+    // 🔴 必须绝对网址 —— 相对路径会被 dropBrokenLinks 静默丢掉（见
+    //    manual-items.ts:assertAbsoluteHref 头注）。
+    expect(todos[0].href).toBe('https://app.magicengine.com.au/dashboard/clients/cts/blog')
   })
 
   it('取最早那篇算天数 —— 最久没人看的那篇才是问题', () => {

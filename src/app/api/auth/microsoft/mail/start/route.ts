@@ -28,11 +28,9 @@ import {
   MICROSOFT_AUTH_URL,
   MICROSOFT_MAIL_SCOPES,
   MICROSOFT_STATE_COOKIE,
+  MICROSOFT_STATE_TTL_SECS,
   microsoftRedirectUri,
 } from '@/lib/microsoft/mail-oauth'
-
-/** 随机数只活 10 分钟 —— 够一个人登录一次，不够别人捡去用。 */
-export const STATE_TTL_SECS = 600
 
 export async function GET(req: NextRequest) {
   const clientId = req.nextUrl.searchParams.get('clientId')
@@ -124,7 +122,7 @@ export async function GET(req: NextRequest) {
   // Strict 会让 cookie 不被带上，回调侧看起来就像有人在伪造请求。
   res.headers.set(
     'Set-Cookie',
-    `${MICROSOFT_STATE_COOKIE}=${cookieVal}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${STATE_TTL_SECS}`,
+    `${MICROSOFT_STATE_COOKIE}=${cookieVal}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${MICROSOFT_STATE_TTL_SECS}`,
   )
   return res
 }

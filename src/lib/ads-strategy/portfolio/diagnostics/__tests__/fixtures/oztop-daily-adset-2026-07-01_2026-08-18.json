@@ -1,0 +1,10024 @@
+[
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "1.65",
+  "impressions": "141",
+  "reach": "81",
+  "clicks": "0",
+  "frequency": "1.740741",
+  "cpm": "11.700000",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "128"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "128"
+   },
+   {
+    "action_type": "video_view",
+    "value": "128"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "136"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "114"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "126"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "122"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "120"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "115"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "114"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "15"
+   }
+  ],
+  "date_start": "2026-07-02",
+  "date_stop": "2026-07-02"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "23.03",
+  "impressions": "1380",
+  "reach": "512",
+  "clicks": "2",
+  "frequency": "2.695313",
+  "cpm": "16.685218",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1333"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1333"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1331"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1375"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1228"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1290"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1296"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1253"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1231"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1229"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-03",
+  "date_stop": "2026-07-03"
+ },
+ {
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
+  "campaign_name": "New Leads campaign Jul 26",
+  "adset_name": "New Leads ad set",
+  "spend": "33.19",
+  "impressions": "384",
+  "reach": "328",
+  "clicks": "7",
+  "frequency": "1.170732",
+  "cpm": "86.439843",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "5"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "3"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "160"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "160"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "152"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "351"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "28"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "138"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "72"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "44"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "30"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "27"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-07-03",
+  "date_stop": "2026-07-03"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "12.25",
+  "impressions": "786",
+  "reach": "328",
+  "clicks": "0",
+  "frequency": "2.396341",
+  "cpm": "15.585115",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "761"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "761"
+   },
+   {
+    "action_type": "video_view",
+    "value": "761"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "785"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "738"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "753"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "751"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "742"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "738"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "737"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-04",
+  "date_stop": "2026-07-04"
+ },
+ {
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
+  "campaign_name": "New Leads campaign Jul 26",
+  "adset_name": "New Leads ad set",
+  "spend": "23.87",
+  "impressions": "226",
+  "reach": "198",
+  "clicks": "3",
+  "frequency": "1.141414",
+  "cpm": "105.610620",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "92"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "92"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "89"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "197"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "72"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "35"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "25"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-07-04",
+  "date_stop": "2026-07-04"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "21.32",
+  "impressions": "1313",
+  "reach": "451",
+  "clicks": "0",
+  "frequency": "2.911308",
+  "cpm": "16.235643",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "1290"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1290"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1290"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1306"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1261"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1284"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1283"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1272"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1263"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1262"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-05",
+  "date_stop": "2026-07-05"
+ },
+ {
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
+  "campaign_name": "New Leads campaign Jul 26",
+  "adset_name": "New Leads ad set",
+  "spend": "48.01",
+  "impressions": "781",
+  "reach": "656",
+  "clicks": "19",
+  "frequency": "1.190549",
+  "cpm": "61.466197",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "link_click",
+    "value": "9"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "326"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "6"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "326"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "6"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "5"
+   },
+   {
+    "action_type": "lead",
+    "value": "3"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "311"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "746"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "35"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "268"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "125"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "76"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "38"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "32"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-07-05",
+  "date_stop": "2026-07-05"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "17.30",
+  "impressions": "1105",
+  "reach": "302",
+  "clicks": "3",
+  "frequency": "3.65894",
+  "cpm": "15.660000",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1077"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1077"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1074"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1103"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1042"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1066"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1057"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1045"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1042"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1042"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-06",
+  "date_stop": "2026-07-06"
+ },
+ {
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
+  "campaign_name": "New Leads campaign Jul 26",
+  "adset_name": "New Leads ad set",
+  "spend": "44.25",
+  "impressions": "552",
+  "reach": "494",
+  "clicks": "14",
+  "frequency": "1.117409",
+  "cpm": "80.161957",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "7"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "214"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "214"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "205"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "511"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "34"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "180"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "85"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "57"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "39"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "33"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-07-06",
+  "date_stop": "2026-07-06"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "13.67",
+  "impressions": "870",
+  "reach": "356",
+  "clicks": "1",
+  "frequency": "2.44382",
+  "cpm": "15.707586",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "841"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "841"
+   },
+   {
+    "action_type": "video_view",
+    "value": "840"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "868"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "810"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "836"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "829"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "817"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "810"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "810"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-07",
+  "date_stop": "2026-07-07"
+ },
+ {
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
+  "campaign_name": "New Leads campaign Jul 26",
+  "adset_name": "New Leads ad set",
+  "spend": "33.31",
+  "impressions": "464",
+  "reach": "412",
+  "clicks": "13",
+  "frequency": "1.126214",
+  "cpm": "71.788578",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "5"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "4"
+   },
+   {
+    "action_type": "offsite_content_view_add_20_s_calls",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "162"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "4"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "162"
+   },
+   {
+    "action_type": "onsite_web_view_content",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_web_app_view_content",
+    "value": "1"
+   },
+   {
+    "action_type": "view_content",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "4"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "153"
+   },
+   {
+    "action_type": "offsite_conversion.fb_pixel_lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_lead_add_20_s_calls",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_view_content",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_conversion.fb_pixel_view_content",
+    "value": "1"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "421"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "25"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "131"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "64"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "42"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "25"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "23"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-07",
+  "date_stop": "2026-07-07"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "122992771939214112",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S2-LeadReels-BNE-GC",
+  "spend": "18.43",
+  "impressions": "1153",
+  "reach": "455",
+  "clicks": "1",
+  "frequency": "2.534066",
+  "cpm": "15.982220",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1124"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1124"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1123"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1141"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1054"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1096"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1105"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1091"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1066"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1057"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-07",
+  "date_stop": "2026-07-07"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "121627794319130403",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S3-Promo-BNE-GC",
+  "spend": "17.41",
+  "impressions": "1177",
+  "reach": "478",
+  "clicks": "4",
+  "frequency": "2.462343",
+  "cpm": "14.791504",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "4"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1114"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1114"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1110"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1166"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1032"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1094"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1071"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1057"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1032"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1031"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "date_start": "2026-07-07",
+  "date_stop": "2026-07-07"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "21.94",
+  "impressions": "1385",
+  "reach": "453",
+  "clicks": "2",
+  "frequency": "3.057395",
+  "cpm": "15.839350",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1368"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1368"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1366"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1382"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1333"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1358"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1356"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1344"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1336"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1334"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-08",
+  "date_stop": "2026-07-08"
+ },
+ {
+  "campaign_id": "124532415366484353",
+  "adset_id": "123424225443421020",
+  "campaign_name": "New Leads campaign Jul 26",
+  "adset_name": "New Leads ad set",
+  "spend": "13.81",
+  "impressions": "165",
+  "reach": "159",
+  "clicks": "1",
+  "frequency": "1.037736",
+  "cpm": "83.672728",
+  "actions": [
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_unlike",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "61"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "61"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "0"
+   },
+   {
+    "action_type": "video_view",
+    "value": "60"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "151"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "8"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "51"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "24"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "15"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "8"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-08",
+  "date_stop": "2026-07-08"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "122992771939214112",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S2-LeadReels-BNE-GC",
+  "spend": "35.44",
+  "impressions": "2276",
+  "reach": "620",
+  "clicks": "0",
+  "frequency": "3.670968",
+  "cpm": "15.570870",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "2272"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "2272"
+   },
+   {
+    "action_type": "video_view",
+    "value": "2272"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2271"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2211"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2251"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2262"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2252"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2214"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2211"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "date_start": "2026-07-08",
+  "date_stop": "2026-07-08"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "121627794319130403",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S3-Promo-BNE-GC",
+  "spend": "32.30",
+  "impressions": "2141",
+  "reach": "615",
+  "clicks": "1",
+  "frequency": "3.481301",
+  "cpm": "15.088136",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "2113"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "2113"
+   },
+   {
+    "action_type": "video_view",
+    "value": "2112"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2131"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2024"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2086"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2072"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2065"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2018"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2016"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-08",
+  "date_stop": "2026-07-08"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "17.37",
+  "impressions": "1149",
+  "reach": "379",
+  "clicks": "2",
+  "frequency": "3.031662",
+  "cpm": "15.121410",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1127"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1127"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1125"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1137"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1087"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1104"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1122"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1090"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1087"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1087"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-09",
+  "date_stop": "2026-07-09"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "122992771939214112",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S2-LeadReels-BNE-GC",
+  "spend": "25.75",
+  "impressions": "1698",
+  "reach": "453",
+  "clicks": "0",
+  "frequency": "3.748344",
+  "cpm": "15.165902",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "1682"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1682"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1682"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1685"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1652"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1673"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1677"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1675"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1652"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1652"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "date_start": "2026-07-09",
+  "date_stop": "2026-07-09"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "121627794319130403",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S3-Promo-BNE-GC",
+  "spend": "26.66",
+  "impressions": "1766",
+  "reach": "488",
+  "clicks": "1",
+  "frequency": "3.618852",
+  "cpm": "15.098698",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1736"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1736"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1735"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1753"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1676"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1713"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1724"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1710"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1670"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1670"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-09",
+  "date_stop": "2026-07-09"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "60.07",
+  "impressions": "1176",
+  "reach": "863",
+  "clicks": "41",
+  "frequency": "1.362688",
+  "cpm": "51.078062",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "4"
+   },
+   {
+    "action_type": "link_click",
+    "value": "23"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "4"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "368"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "369"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "4"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "4"
+   },
+   {
+    "action_type": "video_view",
+    "value": "344"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1125"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "89"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "326"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "181"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "131"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "92"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "84"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-07-09",
+  "date_stop": "2026-07-09"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "12.12",
+  "impressions": "786",
+  "reach": "319",
+  "clicks": "2",
+  "frequency": "2.46395",
+  "cpm": "15.421375",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "763"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "763"
+   },
+   {
+    "action_type": "video_view",
+    "value": "761"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "777"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "729"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "751"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "750"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "734"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "731"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "730"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-10",
+  "date_stop": "2026-07-10"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "54.07",
+  "impressions": "1049",
+  "reach": "763",
+  "clicks": "27",
+  "frequency": "1.374836",
+  "cpm": "51.540229",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "5"
+   },
+   {
+    "action_type": "link_click",
+    "value": "14"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "5"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "275"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "275"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "5"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "5"
+   },
+   {
+    "action_type": "video_view",
+    "value": "259"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1001"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "71"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "237"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "146"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "95"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "73"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "70"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "date_start": "2026-07-10",
+  "date_stop": "2026-07-10"
+ },
+ {
+  "campaign_id": "128935235445693327",
+  "adset_id": "122484593700717559",
+  "campaign_name": "Oztop — WhatsApp — Cold Broad — 20260709",
+  "adset_name": "新互动广告组",
+  "spend": "47.35",
+  "impressions": "977",
+  "reach": "672",
+  "clicks": "24",
+  "frequency": "1.453869",
+  "cpm": "48.464586",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "253"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "254"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "245"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "899"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "66"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "226"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "121"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "87"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "70"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "66"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-07-10",
+  "date_stop": "2026-07-10"
+ },
+ {
+  "campaign_id": "122395194351255552",
+  "adset_id": "121668273531412522",
+  "campaign_name": "Oztop — WhatsApp — RETARGET Warm Pool — 20260710",
+  "adset_name": "新互动广告组",
+  "spend": "22.24",
+  "impressions": "477",
+  "reach": "413",
+  "clicks": "3",
+  "frequency": "1.154964",
+  "cpm": "46.628301",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "124"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "124"
+   },
+   {
+    "action_type": "video_view",
+    "value": "124"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "441"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "24"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "116"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "56"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "37"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "25"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "25"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-10",
+  "date_stop": "2026-07-10"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "29.06",
+  "impressions": "1752",
+  "reach": "522",
+  "clicks": "1",
+  "frequency": "3.356322",
+  "cpm": "16.588356",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1705"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1705"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1704"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1752"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1636"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1689"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1684"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1653"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1639"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1638"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "date_start": "2026-07-11",
+  "date_stop": "2026-07-11"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "43.30",
+  "impressions": "1145",
+  "reach": "887",
+  "clicks": "25",
+  "frequency": "1.290868",
+  "cpm": "37.818078",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "15"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "268"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "269"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "252"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1097"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "48"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "239"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "123"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "70"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "50"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "46"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-11",
+  "date_stop": "2026-07-11"
+ },
+ {
+  "campaign_id": "128935235445693327",
+  "adset_id": "122484593700717559",
+  "campaign_name": "Oztop — WhatsApp — Cold Broad — 20260709",
+  "adset_name": "新互动广告组",
+  "spend": "29.85",
+  "impressions": "514",
+  "reach": "356",
+  "clicks": "13",
+  "frequency": "1.44382",
+  "cpm": "58.067509",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "141"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "141"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "136"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "475"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "33"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "129"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "63"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "46"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "34"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "31"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-11",
+  "date_stop": "2026-07-11"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "34.29",
+  "impressions": "2233",
+  "reach": "551",
+  "clicks": "4",
+  "frequency": "4.052632",
+  "cpm": "15.357233",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "4"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "2194"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "2194"
+   },
+   {
+    "action_type": "video_view",
+    "value": "2190"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2226"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2146"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2179"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2177"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2166"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2148"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2146"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "date_start": "2026-07-12",
+  "date_stop": "2026-07-12"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "71.98",
+  "impressions": "1997",
+  "reach": "1512",
+  "clicks": "36",
+  "frequency": "1.320767",
+  "cpm": "36.043265",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "link_click",
+    "value": "18"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "5"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "453"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "8"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "453"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "8"
+   },
+   {
+    "action_type": "post",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "5"
+   },
+   {
+    "action_type": "lead",
+    "value": "3"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "427"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1939"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "98"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "418"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "219"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "139"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "102"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "96"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-12",
+  "date_stop": "2026-07-12"
+ },
+ {
+  "campaign_id": "128935235445693327",
+  "adset_id": "122484593700717559",
+  "campaign_name": "Oztop — WhatsApp — Cold Broad — 20260709",
+  "adset_name": "新互动广告组",
+  "spend": "29.34",
+  "impressions": "586",
+  "reach": "403",
+  "clicks": "6",
+  "frequency": "1.454094",
+  "cpm": "50.074403",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "103"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "103"
+   },
+   {
+    "action_type": "video_view",
+    "value": "101"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "526"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "91"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "43"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "28"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "22"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-12",
+  "date_stop": "2026-07-12"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "23.15",
+  "impressions": "1608",
+  "reach": "526",
+  "clicks": "2",
+  "frequency": "3.057034",
+  "cpm": "14.399440",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1515"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1515"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1513"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1602"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1411"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1494"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1471"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1431"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1413"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1412"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "date_start": "2026-07-13",
+  "date_stop": "2026-07-13"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "76.69",
+  "impressions": "1811",
+  "reach": "1390",
+  "clicks": "27",
+  "frequency": "1.302878",
+  "cpm": "42.348702",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "16"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "3"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_unlike",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "452"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "452"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "0"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "433"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1735"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "91"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "416"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "207"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "139"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "93"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "90"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-13",
+  "date_stop": "2026-07-13"
+ },
+ {
+  "campaign_id": "128935235445693327",
+  "adset_id": "122484593700717559",
+  "campaign_name": "Oztop — WhatsApp — Cold Broad — 20260709",
+  "adset_name": "新互动广告组",
+  "spend": "24.11",
+  "impressions": "273",
+  "reach": "198",
+  "clicks": "1",
+  "frequency": "1.378788",
+  "cpm": "88.328571",
+  "actions": [
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "46"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "46"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "46"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "231"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "36"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "9"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-13",
+  "date_stop": "2026-07-13"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "10.02",
+  "impressions": "4949",
+  "reach": "4632",
+  "clicks": "1",
+  "frequency": "1.068437",
+  "cpm": "2.023681",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "563"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "563"
+   },
+   {
+    "action_type": "video_view",
+    "value": "562"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3581"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "67"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "645"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "204"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "107"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "68"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "67"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-13",
+  "date_stop": "2026-07-13"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "24.53",
+  "impressions": "1600",
+  "reach": "543",
+  "clicks": "3",
+  "frequency": "2.946593",
+  "cpm": "15.334312",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1518"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1518"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1515"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1594"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1423"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1509"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1470"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1446"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1427"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1425"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "12"
+   }
+  ],
+  "date_start": "2026-07-14",
+  "date_stop": "2026-07-14"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "81.23",
+  "impressions": "1830",
+  "reach": "1353",
+  "clicks": "28",
+  "frequency": "1.35255",
+  "cpm": "44.389672",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "link_click",
+    "value": "14"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "411"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "411"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "3"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "396"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1772"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "104"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "379"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "219"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "149"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "107"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "101"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-14",
+  "date_stop": "2026-07-14"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "15.89",
+  "impressions": "7989",
+  "reach": "7384",
+  "clicks": "3",
+  "frequency": "1.081934",
+  "cpm": "1.988809",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "919"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "919"
+   },
+   {
+    "action_type": "video_view",
+    "value": "918"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5365"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "95"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1051"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "326"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "151"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "101"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "92"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-14",
+  "date_stop": "2026-07-14"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "36.49",
+  "impressions": "2413",
+  "reach": "625",
+  "clicks": "3",
+  "frequency": "3.8608",
+  "cpm": "15.123207",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "2364"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "2364"
+   },
+   {
+    "action_type": "video_view",
+    "value": "2361"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2405"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2284"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2346"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2338"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2314"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2286"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2284"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "date_start": "2026-07-15",
+  "date_stop": "2026-07-15"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "92.44",
+  "impressions": "1911",
+  "reach": "1418",
+  "clicks": "28",
+  "frequency": "1.347673",
+  "cpm": "48.373470",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "16"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "3"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "3"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "417"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "417"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "400"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1821"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "95"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "386"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "209"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "136"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "102"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "95"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-15",
+  "date_stop": "2026-07-15"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "16.49",
+  "impressions": "8083",
+  "reach": "7127",
+  "clicks": "4",
+  "frequency": "1.134138",
+  "cpm": "2.039503",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "920"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "920"
+   },
+   {
+    "action_type": "video_view",
+    "value": "917"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5466"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "102"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1054"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "344"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "175"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "105"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "102"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-15",
+  "date_stop": "2026-07-15"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "29.76",
+  "impressions": "2018",
+  "reach": "534",
+  "clicks": "0",
+  "frequency": "3.779026",
+  "cpm": "14.749653",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "1997"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1997"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1997"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2017"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1940"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1978"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1991"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1959"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1940"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1940"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-16",
+  "date_stop": "2026-07-16"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "86.87",
+  "impressions": "1790",
+  "reach": "1294",
+  "clicks": "33",
+  "frequency": "1.383308",
+  "cpm": "48.532123",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "4"
+   },
+   {
+    "action_type": "link_click",
+    "value": "16"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "4"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "4"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "377"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "377"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "4"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "4"
+   },
+   {
+    "action_type": "video_view",
+    "value": "360"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1714"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "79"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "340"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "177"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "115"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "81"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "76"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-16",
+  "date_stop": "2026-07-16"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "16.74",
+  "impressions": "8074",
+  "reach": "7374",
+  "clicks": "5",
+  "frequency": "1.094928",
+  "cpm": "2.073657",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "972"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "972"
+   },
+   {
+    "action_type": "video_view",
+    "value": "969"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5092"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "103"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1118"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "368"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "162"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "108"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "98"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-16",
+  "date_stop": "2026-07-16"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "28.89",
+  "impressions": "1923",
+  "reach": "493",
+  "clicks": "0",
+  "frequency": "3.900609",
+  "cpm": "15.021997",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "1897"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1897"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1897"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1919"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1863"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1894"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1886"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1877"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1864"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1863"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-17",
+  "date_stop": "2026-07-17"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "83.26",
+  "impressions": "1613",
+  "reach": "1267",
+  "clicks": "28",
+  "frequency": "1.273086",
+  "cpm": "51.616367",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "13"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "359"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "359"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "345"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1560"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "83"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "334"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "182"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "116"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "84"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "80"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-17",
+  "date_stop": "2026-07-17"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "16.98",
+  "impressions": "7804",
+  "reach": "7068",
+  "clicks": "2",
+  "frequency": "1.104131",
+  "cpm": "2.175385",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "976"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "976"
+   },
+   {
+    "action_type": "video_view",
+    "value": "974"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4798"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "111"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1150"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "378"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "184"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "118"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "105"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-17",
+  "date_stop": "2026-07-17"
+ },
+ {
+  "campaign_id": "120940315782125204",
+  "adset_id": "120296502060247708",
+  "campaign_name": "OZ-THRU-S1-hooktest-202607",
+  "adset_name": "OZ-THRU-S1-BNE-GC",
+  "spend": "3.19",
+  "impressions": "190",
+  "reach": "76",
+  "clicks": "0",
+  "frequency": "2.5",
+  "cpm": "16.811053",
+  "actions": [
+   {
+    "action_type": "post_engagement",
+    "value": "188"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "188"
+   },
+   {
+    "action_type": "video_view",
+    "value": "188"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "190"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "183"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "185"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "187"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "183"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "183"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "183"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "date_start": "2026-07-18",
+  "date_stop": "2026-07-18"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "76.87",
+  "impressions": "1237",
+  "reach": "1005",
+  "clicks": "28",
+  "frequency": "1.230846",
+  "cpm": "62.141472",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "14"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "313"
+   },
+   {
+    "action_type": "like",
+    "value": "2"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "315"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "296"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1174"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "78"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "292"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "155"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "103"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "77"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "75"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-18",
+  "date_stop": "2026-07-18"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "17.83",
+  "impressions": "8240",
+  "reach": "7363",
+  "clicks": "7",
+  "frequency": "1.119109",
+  "cpm": "2.163933",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "7"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1069"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1069"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1062"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5051"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "122"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1228"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "432"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "201"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "128"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "115"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-18",
+  "date_stop": "2026-07-18"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "110.62",
+  "impressions": "1807",
+  "reach": "1301",
+  "clicks": "35",
+  "frequency": "1.388932",
+  "cpm": "61.219424",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "23"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "3"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "434"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "434"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "3"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "408"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1682"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "93"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "391"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "202"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "135"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "100"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "91"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-19",
+  "date_stop": "2026-07-19"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "17.66",
+  "impressions": "8378",
+  "reach": "7695",
+  "clicks": "5",
+  "frequency": "1.088759",
+  "cpm": "2.107341",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1084"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1084"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1082"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5308"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "125"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1249"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "438"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "220"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "136"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "122"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-19",
+  "date_stop": "2026-07-19"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "78.60",
+  "impressions": "1706",
+  "reach": "1292",
+  "clicks": "25",
+  "frequency": "1.320433",
+  "cpm": "46.073037",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "13"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "397"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "4"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "398"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "380"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1626"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "72"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "363"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "187"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "118"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "77"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "68"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-20",
+  "date_stop": "2026-07-20"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "17.70",
+  "impressions": "8694",
+  "reach": "8133",
+  "clicks": "8",
+  "frequency": "1.068978",
+  "cpm": "2.036129",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "3"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "3"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1139"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1139"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1133"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5513"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "115"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1289"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "427"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "208"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "122"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "113"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-20",
+  "date_stop": "2026-07-20"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "85.32",
+  "impressions": "1669",
+  "reach": "1205",
+  "clicks": "31",
+  "frequency": "1.385062",
+  "cpm": "51.118275",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "18"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_unlike",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "374"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "374"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_5_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "353"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1581"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "82"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "324"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "185"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "128"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "85"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "79"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-21",
+  "date_stop": "2026-07-21"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "17.36",
+  "impressions": "8460",
+  "reach": "7732",
+  "clicks": "3",
+  "frequency": "1.094154",
+  "cpm": "2.052340",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1011"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1011"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1009"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5162"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "121"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1171"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "406"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "185"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "129"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "115"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-21",
+  "date_stop": "2026-07-21"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "93.60",
+  "impressions": "1465",
+  "reach": "1102",
+  "clicks": "26",
+  "frequency": "1.329401",
+  "cpm": "63.890786",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "link_click",
+    "value": "15"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "3"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "359"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "4"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "359"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_2_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_user_depth_3_message_send",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "3"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "340"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1392"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "64"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "324"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "174"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "102"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "67"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "61"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-22",
+  "date_stop": "2026-07-22"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "16.95",
+  "impressions": "8216",
+  "reach": "7412",
+  "clicks": "6",
+  "frequency": "1.108473",
+  "cpm": "2.063449",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1049"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1049"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1046"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5079"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "125"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1206"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "419"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "215"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "134"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "120"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-22",
+  "date_stop": "2026-07-22"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "89.76",
+  "impressions": "1361",
+  "reach": "1053",
+  "clicks": "36",
+  "frequency": "1.292498",
+  "cpm": "65.953270",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "20"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "318"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "318"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "296"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1301"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "64"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "286"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "149"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "97"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "67"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "62"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-23",
+  "date_stop": "2026-07-23"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "17.20",
+  "impressions": "8160",
+  "reach": "7465",
+  "clicks": "5",
+  "frequency": "1.093101",
+  "cpm": "2.107721",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "1045"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "1045"
+   },
+   {
+    "action_type": "video_view",
+    "value": "1042"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5198"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "106"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1227"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "387"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "158"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "113"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "102"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-23",
+  "date_stop": "2026-07-23"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "74.90",
+  "impressions": "1335",
+  "reach": "1044",
+  "clicks": "14",
+  "frequency": "1.278736",
+  "cpm": "56.107416",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "10"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "303"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "303"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "292"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1277"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "56"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "271"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "139"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "87"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "63"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "57"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-24",
+  "date_stop": "2026-07-24"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "17.46",
+  "impressions": "7789",
+  "reach": "6824",
+  "clicks": "9",
+  "frequency": "1.141413",
+  "cpm": "2.241161",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "8"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "5"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "5"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "961"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "961"
+   },
+   {
+    "action_type": "video_view",
+    "value": "953"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4867"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "97"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1118"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "364"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "170"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "102"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "89"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-24",
+  "date_stop": "2026-07-24"
+ },
+ {
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
+  "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
+  "adset_name": "Raptor-01 · Home Reno · Brisbane",
+  "spend": "40.07",
+  "impressions": "595",
+  "reach": "461",
+  "clicks": "7",
+  "frequency": "1.290672",
+  "cpm": "67.348739",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "90"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "90"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "83"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "572"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "20"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "86"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "52"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "30"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "22"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "21"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-25",
+  "date_stop": "2026-07-25"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "70.71",
+  "impressions": "1052",
+  "reach": "864",
+  "clicks": "26",
+  "frequency": "1.217593",
+  "cpm": "67.219391",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "link_click",
+    "value": "14"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "262"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "262"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "3"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "247"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1007"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "61"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "243"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "134"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "81"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "62"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "60"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "date_start": "2026-07-25",
+  "date_stop": "2026-07-25"
+ },
+ {
+  "campaign_id": "124402261590905043",
+  "adset_id": "124852317152232046",
+  "campaign_name": "OZ-REACH-Warmpool-BNE-GC",
+  "adset_name": "OZ-REACH-S4-BNE-GC-home",
+  "spend": "0",
+  "impressions": "2",
+  "reach": "2",
+  "clicks": "0",
+  "frequency": "1",
+  "cpm": "0",
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1"
+   }
+  ],
+  "date_start": "2026-07-25",
+  "date_stop": "2026-07-25"
+ },
+ {
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
+  "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
+  "adset_name": "Raptor-01 · Home Reno · Brisbane",
+  "spend": "25.25",
+  "impressions": "405",
+  "reach": "352",
+  "clicks": "6",
+  "frequency": "1.150568",
+  "cpm": "62.342223",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "3"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_20_s_calls",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "74"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "74"
+   },
+   {
+    "action_type": "onsite_web_view_content",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_app_view_content",
+    "value": "1"
+   },
+   {
+    "action_type": "view_content",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "70"
+   },
+   {
+    "action_type": "omni_view_content",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_conversion.fb_pixel_view_content",
+    "value": "1"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "376"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "23"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "74"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "37"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "25"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "23"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "23"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-26",
+  "date_stop": "2026-07-26"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "92.01",
+  "impressions": "1693",
+  "reach": "1394",
+  "clicks": "32",
+  "frequency": "1.214491",
+  "cpm": "54.346604",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "20"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "412"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "412"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_unsave",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "390"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1643"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "71"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "373"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "187"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "109"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "77"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "70"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-26",
+  "date_stop": "2026-07-26"
+ },
+ {
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
+  "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
+  "adset_name": "Raptor-01 · Home Reno · Brisbane",
+  "spend": "26.52",
+  "impressions": "390",
+  "reach": "323",
+  "clicks": "3",
+  "frequency": "1.20743",
+  "cpm": "68.010000",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "66"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "66"
+   },
+   {
+    "action_type": "video_view",
+    "value": "65"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "354"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "68"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "31"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-27",
+  "date_stop": "2026-07-27"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "80.46",
+  "impressions": "1472",
+  "reach": "1173",
+  "clicks": "31",
+  "frequency": "1.254902",
+  "cpm": "54.660937",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "link_click",
+    "value": "14"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "311"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "312"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "3"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "294"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1394"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "60"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "282"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "132"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "83"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "62"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "59"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-27",
+  "date_stop": "2026-07-27"
+ },
+ {
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
+  "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
+  "adset_name": "Raptor-01 · Home Reno · Brisbane",
+  "spend": "22.41",
+  "impressions": "389",
+  "reach": "299",
+  "clicks": "8",
+  "frequency": "1.301003",
+  "cpm": "57.597687",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "61"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "61"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "54"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "350"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "61"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "31"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "20"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "19"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "18"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-28",
+  "date_stop": "2026-07-28"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "66.05",
+  "impressions": "1288",
+  "reach": "1036",
+  "clicks": "29",
+  "frequency": "1.243243",
+  "cpm": "51.278339",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "13"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "280"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "280"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "265"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1226"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "55"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "260"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "139"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "78"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "57"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "52"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-28",
+  "date_stop": "2026-07-28"
+ },
+ {
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
+  "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
+  "adset_name": "Raptor-01 · Home Reno · Brisbane",
+  "spend": "28.09",
+  "impressions": "478",
+  "reach": "355",
+  "clicks": "4",
+  "frequency": "1.346479",
+  "cpm": "58.769247",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_20_s_calls",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "88"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "88"
+   },
+   {
+    "action_type": "onsite_web_view_content",
+    "value": "2"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_web_app_view_content",
+    "value": "2"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "view_content",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "85"
+   },
+   {
+    "action_type": "omni_view_content",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_conversion.fb_pixel_view_content",
+    "value": "2"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "423"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "17"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "92"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "40"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "24"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "19"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "18"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-29",
+  "date_stop": "2026-07-29"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "70.12",
+  "impressions": "1208",
+  "reach": "926",
+  "clicks": "21",
+  "frequency": "1.304536",
+  "cpm": "58.044785",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "13"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "3"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "269"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "269"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "3"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "253"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1143"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "51"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "243"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "122"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "80"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "53"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "49"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-29",
+  "date_stop": "2026-07-29"
+ },
+ {
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
+  "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
+  "adset_name": "Raptor-01 · Home Reno · Brisbane",
+  "spend": "23.88",
+  "impressions": "336",
+  "reach": "273",
+  "clicks": "6",
+  "frequency": "1.230769",
+  "cpm": "71.070536",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "62"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "63"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "57"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "293"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "68"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "36"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "18"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "14"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "13"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-30",
+  "date_stop": "2026-07-30"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "68.18",
+  "impressions": "1144",
+  "reach": "909",
+  "clicks": "21",
+  "frequency": "1.258526",
+  "cpm": "59.594319",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "268"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "268"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "256"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1089"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "61"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "246"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "127"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "84"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "63"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "60"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-30",
+  "date_stop": "2026-07-30"
+ },
+ {
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
+  "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
+  "adset_name": "Raptor-01 · Home Reno · Brisbane",
+  "spend": "23.95",
+  "impressions": "331",
+  "reach": "295",
+  "clicks": "6",
+  "frequency": "1.122034",
+  "cpm": "72.356193",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "4"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "58"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "58"
+   },
+   {
+    "action_type": "video_view",
+    "value": "54"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "272"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "61"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "27"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "16"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-07-31",
+  "date_stop": "2026-07-31"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "62.97",
+  "impressions": "1172",
+  "reach": "980",
+  "clicks": "16",
+  "frequency": "1.195918",
+  "cpm": "53.728157",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "263"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "263"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "251"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1116"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "53"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "241"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "128"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "86"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "61"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "56"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-07-31",
+  "date_stop": "2026-07-31"
+ },
+ {
+  "campaign_id": "128601431077301255",
+  "adset_id": "120003040608477028",
+  "campaign_name": "Oztop · 猛禽系列 · Free Measure Quote · Jun26",
+  "adset_name": "Raptor-01 · Home Reno · Brisbane",
+  "spend": "4.63",
+  "impressions": "83",
+  "reach": "73",
+  "clicks": "2",
+  "frequency": "1.136986",
+  "cpm": "55.821686",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_20_s_calls",
+    "value": "8"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "19"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "19"
+   },
+   {
+    "action_type": "onsite_web_view_content",
+    "value": "8"
+   },
+   {
+    "action_type": "onsite_web_app_view_content",
+    "value": "8"
+   },
+   {
+    "action_type": "view_content",
+    "value": "8"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "8"
+   },
+   {
+    "action_type": "video_view",
+    "value": "18"
+   },
+   {
+    "action_type": "omni_view_content",
+    "value": "8"
+   },
+   {
+    "action_type": "offsite_conversion.fb_pixel_view_content",
+    "value": "8"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "72"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "19"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "10"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "5"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-08-01",
+  "date_stop": "2026-08-01"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "51.32",
+  "impressions": "976",
+  "reach": "778",
+  "clicks": "17",
+  "frequency": "1.254499",
+  "cpm": "52.578074",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "223"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "223"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "211"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "935"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "49"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "207"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "98"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "63"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "52"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "49"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-08-01",
+  "date_stop": "2026-08-01"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "88.88",
+  "impressions": "1822",
+  "reach": "1358",
+  "clicks": "36",
+  "frequency": "1.341679",
+  "cpm": "48.784249",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "24"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "5"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "10"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "10"
+   },
+   {
+    "action_type": "onsite_conversion.post_unlike",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "414"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "7"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "414"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "8"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "4"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "383"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1747"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "89"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "373"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "195"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "128"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "96"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "86"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-02",
+  "date_stop": "2026-08-02"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "87.75",
+  "impressions": "1770",
+  "reach": "1362",
+  "clicks": "32",
+  "frequency": "1.299559",
+  "cpm": "49.576271",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "18"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "354"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "354"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "336"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1687"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "83"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "328"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "182"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "116"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "90"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "84"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-08-03",
+  "date_stop": "2026-08-03"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "49.67",
+  "impressions": "891",
+  "reach": "676",
+  "clicks": "24",
+  "frequency": "1.318047",
+  "cpm": "55.742425",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "13"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "202"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "202"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "188"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "844"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "43"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "179"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "91"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "62"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "45"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "43"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-08-04",
+  "date_stop": "2026-08-04"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "66.00",
+  "impressions": "1210",
+  "reach": "932",
+  "clicks": "21",
+  "frequency": "1.298283",
+  "cpm": "54.545207",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "270"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "5"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "270"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "1"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "254"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1145"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "54"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "239"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "120"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "82"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "61"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "57"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-05",
+  "date_stop": "2026-08-05"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "70.64",
+  "impressions": "1278",
+  "reach": "985",
+  "clicks": "20",
+  "frequency": "1.297462",
+  "cpm": "55.277464",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "286"
+   },
+   {
+    "action_type": "like",
+    "value": "2"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "288"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "274"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1173"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "57"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "260"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "160"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "95"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "62"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "58"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-06",
+  "date_stop": "2026-08-06"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "73.08",
+  "impressions": "1271",
+  "reach": "1019",
+  "clicks": "16",
+  "frequency": "1.247301",
+  "cpm": "57.496617",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "6"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "266"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "266"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "258"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1185"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "61"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "251"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "146"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "77"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "62"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "62"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-08-07",
+  "date_stop": "2026-08-07"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "55.13",
+  "impressions": "1022",
+  "reach": "850",
+  "clicks": "21",
+  "frequency": "1.202353",
+  "cpm": "53.943640",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "14"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "232"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "232"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "217"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "965"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "52"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "208"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "120"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "79"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "52"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "51"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-08-08",
+  "date_stop": "2026-08-08"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "89.24",
+  "impressions": "1512",
+  "reach": "1184",
+  "clicks": "21",
+  "frequency": "1.277027",
+  "cpm": "59.018453",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "342"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "342"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "329"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1417"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "73"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "314"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "166"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "101"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "74"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "68"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-08-09",
+  "date_stop": "2026-08-09"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "62.79",
+  "impressions": "1364",
+  "reach": "1096",
+  "clicks": "19",
+  "frequency": "1.244526",
+  "cpm": "46.036583",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "link_click",
+    "value": "11"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "277"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "278"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "3"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "3"
+   },
+   {
+    "action_type": "video_view",
+    "value": "264"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1288"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "63"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "255"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "132"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "94"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "65"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "58"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-10",
+  "date_stop": "2026-08-10"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "67.87",
+  "impressions": "1142",
+  "reach": "901",
+  "clicks": "28",
+  "frequency": "1.267481",
+  "cpm": "59.432312",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "5"
+   },
+   {
+    "action_type": "link_click",
+    "value": "10"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "5"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "257"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "comment",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "257"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_comment",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "5"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "5"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "5"
+   },
+   {
+    "action_type": "video_view",
+    "value": "244"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1079"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "58"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "242"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "125"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "83"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "58"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "56"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "2"
+   }
+  ],
+  "date_start": "2026-08-11",
+  "date_stop": "2026-08-11"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "76.23",
+  "impressions": "1457",
+  "reach": "1157",
+  "clicks": "26",
+  "frequency": "1.259291",
+  "cpm": "52.316747",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "15"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_replied_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "317"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "317"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "1"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "300"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1346"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "69"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "288"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "165"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "104"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "73"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "71"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-12",
+  "date_stop": "2026-08-12"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "68.90",
+  "impressions": "1071",
+  "reach": "791",
+  "clicks": "16",
+  "frequency": "1.353982",
+  "cpm": "64.333613",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "9"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "254"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "3"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "254"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "3"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "242"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1006"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "56"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "241"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "126"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "82"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "62"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "57"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-13",
+  "date_stop": "2026-08-13"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "69.78",
+  "impressions": "1200",
+  "reach": "998",
+  "clicks": "25",
+  "frequency": "1.202405",
+  "cpm": "58.149000",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "15"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "3"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "275"
+   },
+   {
+    "action_type": "like",
+    "value": "1"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "4"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "276"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "4"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "3"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "256"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1124"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "47"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "246"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "135"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "80"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "51"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "48"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-14",
+  "date_stop": "2026-08-14"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "56.32",
+  "impressions": "974",
+  "reach": "764",
+  "clicks": "17",
+  "frequency": "1.274869",
+  "cpm": "57.827310",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "8"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "223"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "223"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "post",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "214"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "926"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "48"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "209"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "93"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "67"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "51"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "48"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-15",
+  "date_stop": "2026-08-15"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "82.30",
+  "impressions": "1684",
+  "reach": "1260",
+  "clicks": "25",
+  "frequency": "1.336508",
+  "cpm": "48.870427",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "link_click",
+    "value": "13"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.total_messaging_connection",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "358"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "1"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "358"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_first_reply",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_save",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_save",
+    "value": "1"
+   },
+   {
+    "action_type": "lead",
+    "value": "1"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.messaging_conversation_started_7d",
+    "value": "1"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "1"
+   },
+   {
+    "action_type": "video_view",
+    "value": "344"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "1604"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "78"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "330"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "173"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "99"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "81"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "76"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-16",
+  "date_stop": "2026-08-16"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "57.20",
+  "impressions": "1010",
+  "reach": "794",
+  "clicks": "20",
+  "frequency": "1.27204",
+  "cpm": "56.634951",
+  "actions": [
+   {
+    "action_type": "offsite_complete_registration_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "link_click",
+    "value": "10"
+   },
+   {
+    "action_type": "offsite_search_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "post_reaction",
+    "value": "2"
+   },
+   {
+    "action_type": "landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "omni_landing_page_view",
+    "value": "2"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "226"
+   },
+   {
+    "action_type": "post_interaction_gross",
+    "value": "2"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "226"
+   },
+   {
+    "action_type": "post_interaction_net",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.post_net_like",
+    "value": "2"
+   },
+   {
+    "action_type": "lead",
+    "value": "2"
+   },
+   {
+    "action_type": "offsite_content_view_add_meta_leads",
+    "value": "2"
+   },
+   {
+    "action_type": "onsite_conversion.lead_grouped",
+    "value": "2"
+   },
+   {
+    "action_type": "video_view",
+    "value": "214"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "963"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "47"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "208"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "110"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "70"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "50"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "47"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "3"
+   }
+  ],
+  "date_start": "2026-08-17",
+  "date_stop": "2026-08-17"
+ },
+ {
+  "campaign_id": "124880535491333552",
+  "adset_id": "125444453533343654",
+  "campaign_name": "Oztop — Lead Form — Cold Broad — 20260709",
+  "adset_name": "新潜在客户广告组",
+  "spend": "5.19",
+  "impressions": "91",
+  "reach": "75",
+  "clicks": "1",
+  "frequency": "1.213333",
+  "cpm": "57.085715",
+  "actions": [
+   {
+    "action_type": "link_click",
+    "value": "1"
+   },
+   {
+    "action_type": "post_engagement",
+    "value": "30"
+   },
+   {
+    "action_type": "page_engagement",
+    "value": "30"
+   },
+   {
+    "action_type": "video_view",
+    "value": "29"
+   }
+  ],
+  "video_play_actions": [
+   {
+    "action_type": "video_view",
+    "value": "85"
+   }
+  ],
+  "video_thruplay_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "6"
+   }
+  ],
+  "video_p25_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "30"
+   }
+  ],
+  "video_p50_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "15"
+   }
+  ],
+  "video_p75_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "11"
+   }
+  ],
+  "video_p95_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_p100_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "7"
+   }
+  ],
+  "video_avg_time_watched_actions": [
+   {
+    "action_type": "video_view",
+    "value": "4"
+   }
+  ],
+  "date_start": "2026-08-18",
+  "date_stop": "2026-08-18"
+ }
+]

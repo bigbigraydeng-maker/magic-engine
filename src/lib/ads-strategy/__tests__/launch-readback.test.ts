@@ -186,6 +186,47 @@ describe('renderReadback', () => {
   it('没撞坑时明说没撞坑', () => {
     expect(renderReadback(checkLaunch(base()))).toContain('没撞上已知的坑')
   })
+
+  it('事故来源不带客户名 / 真人姓名 / 金额 —— 回读会原样给任何客户看（红线 2）', () => {
+    // 第一份：撞上除「读不到设置」以外的全部坑；第二份：两项设置读不到 + 落点未知。
+    const all = checkLaunch({
+      adSet: {
+        adSetId: 'AS1', adSetName: 'x', optimizationGoal: 'CONVERSATIONS',
+        targeting: {
+          customAudienceRelaxed: true, advantageAudience: true, customAudienceIds: [],
+          implicitLookalikeIds: ['LAL1'], geoNames: ['New Zealand'],
+        },
+        creatives: [
+          { adId: 'A1', adName: 'cn', buyerFacingText: ['全新四房'] },
+          { adId: 'A2', adName: 'en', buyerFacingText: ['Brand-new home'] },
+          { adId: 'A3', adName: 'empty', buyerFacingText: [''] },
+        ],
+      },
+      claimsRetargeting: true,
+      expectedGeo: 'Auckland',
+    })
+    const unknowns = checkLaunch({
+      adSet: {
+        adSetId: 'AS2', adSetName: 'y', optimizationGoal: 'LINK_CLICKS', targeting: {},
+        creatives: [
+          { adId: 'B1', adName: 'cn', buyerFacingText: ['全新四房'] },
+          { adId: 'B2', adName: 'en', buyerFacingText: ['Brand-new home'] },
+        ],
+      },
+      claimsRetargeting: true,
+    })
+    const codes = [...all.findings, ...unknowns.findings].map(f => f.code)
+    for (const c of [
+      'mixed_script_messaging_adset', 'messaging_destination_unknown', 'retargeting_relaxed',
+      'retargeting_advantage_audience', 'retargeting_without_audience', 'retargeting_relaxation_unknown',
+      'retargeting_advantage_unknown', 'implicit_lookalike_attached', 'geo_mismatch', 'creative_without_buyer_text',
+    ]) expect(codes).toContain(c)
+
+    const out = renderReadback(all) + renderReadback(unknowns)
+    for (const banned of ['Roman', 'Boris', 'Richard', 'Jude', '$1.25M', '$5.88', 'Kiteroa']) {
+      expect(out, `回读输出含「${banned}」`).not.toContain(banned)
+    }
+  })
 })
 
 // ── 回归：把 2026-08-04 那条真实广告喂进去，必须被拦下 ──────────────
@@ -205,7 +246,9 @@ describe('回归：2026-08-04 Roman 的真实配置', () => {
       expectedGeo: 'Auckland',
     })
     expect(r.safeToActivate).toBe(false)
-    expect(r.findings[0].learnedFrom).toContain('Boris')
+    // 事故来源会原样输出给任何客户看 —— 只留事故形状，不带客户名 / 真人姓名（红线 2）。
+    expect(r.findings[0].learnedFrom).toContain('得罪 5 人')
+    expect(r.findings[0].learnedFrom).not.toContain('Boris')
   })
 })
 
@@ -291,5 +334,85 @@ describe('dominantScript', () => {
 
   it('按字符数取多数：中文为主夹几个英文词 → han', () => {
     expect(dominantScript(['Rangitoto College 学区 · Rothesay Bay 全新四房独立屋，产权已下发'])).toBe('han')
+  })
+})
+
+describe('checkLaunch — 草案声明的受众必须回读看见（刀②）', () => {
+  const plain = (targeting: LaunchReadbackInput['adSet']['targeting']): LaunchReadbackInput => ({
+    adSet: {
+      adSetId: 'AS1',
+      adSetName: '普通组',
+      optimizationGoal: 'LEAD_GENERATION',
+      targeting,
+      creatives: [{ adId: 'A1', adName: 'a', buyerFacingText: ['Hello'] }],
+    },
+  })
+
+  it('声明的受众确实挂上了 → 不报', () => {
+    const r = checkLaunch({
+      ...plain({ customAudienceIds: ['1111111'] }),
+      expectedAudienceIds: ['1111111'],
+    })
+    expect(r.findings.map(f => f.code)).not.toContain('audience_not_attached')
+  })
+
+  it('🔴 声明两个只挂上一个 → blocker，点名缺的那个', () => {
+    const r = checkLaunch({
+      ...plain({ customAudienceIds: ['1111111'] }),
+      expectedAudienceIds: ['1111111', '2222222'],
+    })
+    const f = r.findings.find(x => x.code === 'audience_not_attached')
+    expect(f).toBeDefined()
+    expect(f!.severity).toBe('blocker')
+    expect(f!.message).toContain('2222222')
+    expect(r.safeToActivate).toBe(false)
+  })
+
+  it('🔴 回读里根本没有 customAudienceIds → 报「没读到」', () => {
+    const r = checkLaunch({
+      ...plain({}),
+      expectedAudienceIds: ['1111111'],
+    })
+    const f = r.findings.find(x => x.code === 'audience_not_attached')
+    expect(f).toBeDefined()
+    expect(f!.message).toContain('没读到')
+  })
+
+  it('没声明受众 → 不拿这条去要求它', () => {
+    expect(checkLaunch(plain({ customAudienceIds: [] })).findings.map(f => f.code))
+      .not.toContain('audience_not_attached')
+    expect(checkLaunch({ ...plain({ customAudienceIds: [] }), expectedAudienceIds: [] }).findings.map(f => f.code))
+      .not.toContain('audience_not_attached')
+  })
+
+  it('声明的排除受众确实挂上了 → 不报', () => {
+    const r = checkLaunch({
+      ...plain({ excludedAudienceIds: ['3333333'] }),
+      expectedExcludedAudienceIds: ['3333333'],
+    })
+    expect(r.findings.map(f => f.code)).not.toContain('excluded_audience_not_attached')
+  })
+
+  it('🔴 声明排除却没挂上 → blocker；读不到 → 报「没读到」', () => {
+    const missing = checkLaunch({
+      ...plain({ excludedAudienceIds: [] }),
+      expectedExcludedAudienceIds: ['3333333'],
+    })
+    const f = missing.findings.find(x => x.code === 'excluded_audience_not_attached')
+    expect(f).toBeDefined()
+    expect(f!.severity).toBe('blocker')
+
+    const unknown = checkLaunch({
+      ...plain({}),
+      expectedExcludedAudienceIds: ['3333333'],
+    })
+    const g = unknown.findings.find(x => x.code === 'excluded_audience_not_attached')
+    expect(g).toBeDefined()
+    expect(g!.message).toContain('没读到')
+  })
+
+  it('没声明排除受众 → 不报', () => {
+    expect(checkLaunch(plain({ excludedAudienceIds: [] })).findings.map(f => f.code))
+      .not.toContain('excluded_audience_not_attached')
   })
 })

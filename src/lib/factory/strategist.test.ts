@@ -1,8 +1,15 @@
 // P21.J M1 — 策略决策核护栏测试(对照 spec §5.2 护栏总表)
 import { describe, expect, it } from 'vitest'
 import { pickShotRecipe } from './shot-recipes'
-import { decideSignal, maxNewClipsFor, normalizeAngle, pickFactoryGoal } from './strategist'
-import type { DemandSignal, GateContext, GoalSlice } from './types'
+import { FACTORY_ORDER_BUDGET_CAP_USD } from './constants'
+import { decideSignal, goalForSignal, maxNewClipsFor, normalizeAngle, pickFactoryGoal } from './strategist'
+import type { Decision, DemandSignal, GateContext, GoalSlice, WorkOrderDraft } from './types'
+
+/** Decision 是判别式 union：先按 outcome 收窄，再拿 workOrder（没接受的工单没有 workOrder）。 */
+function acceptedWorkOrder(d: Decision): WorkOrderDraft {
+  if (d.outcome !== 'accepted') throw new Error(`expected accepted decision, got ${d.outcome}`)
+  return d.workOrder
+}
 
 function makeSignal(over: Partial<DemandSignal> = {}): DemandSignal {
   return {
@@ -38,6 +45,7 @@ function makeCtx(over: Partial<GateContext> = {}): GateContext {
     recentAngles: [],
     blocklist: [],
     activeWinners: [],
+    winnerThemeGuards: [],
     balanceUsd: 20,
     dailyOrderCount: 0,
     dailyCostUsd: 0,
@@ -162,17 +170,19 @@ describe('角度溯源 + 去重(护栏 2/7)', () => {
       cta_segment: {},
       win_reason_tags: ['scenery_first'],
       cost_per_thruplay: 0.01,
+      cost_per_result: 5,
+      result_type: 'lead' as const,
       status: 'active',
     }
     // new_campaign 强制 fresh angle(不挂骨架),避免 winner 被选为骨架
     const signal = makeSignal({ signal_type: 'new_campaign', evidence: { campaign_name: 'Spring Sale' } })
     const locked = decideSignal(
-      makeCtx({ signal, activeWinners: [{ ...winnerBase, current_frequency: 2.0 }] }),
+      makeCtx({ signal, winnerThemeGuards: [{ hook_segment: winnerBase.hook_segment, current_frequency: 2.0 }] }),
     )
     expect((locked as { workOrder: { angle: string } }).workOrder.angle).toBe('Silk Road adventure')
 
     const unlocked = decideSignal(
-      makeCtx({ signal, activeWinners: [{ ...winnerBase, current_frequency: 3.0 }] }),
+      makeCtx({ signal, winnerThemeGuards: [{ hook_segment: winnerBase.hook_segment, current_frequency: 3.0 }] }),
     )
     expect((unlocked as { workOrder: { angle: string } }).workOrder.angle).toBe('Best of China group tours')
   })
@@ -190,6 +200,8 @@ describe('骨架 + 工单组装', () => {
             cta_segment: {},
             win_reason_tags: ['price_hook'],
             cost_per_thruplay: 0.0148,
+            cost_per_result: 4.57,
+            result_type: 'lead',
             current_frequency: 1.2,
             status: 'active',
           },
@@ -197,7 +209,7 @@ describe('骨架 + 工单组装', () => {
       }),
     )
     expect(d.outcome).toBe('accepted')
-    const wo = (d as { workOrder: Record<string, unknown> }).workOrder as {
+    const wo = acceptedWorkOrder(d) as unknown as {
       order_type: string
       winner_structure_id: string
       angle_source: { type: string; ref_id: string }
@@ -218,7 +230,7 @@ describe('骨架 + 工单组装', () => {
   it('疲劳信号 happy path:rationale 带 frequency 数字 + 溯源 + 预扣硬数 + 生成计划', () => {
     const d = decideSignal(makeCtx())
     expect(d.outcome).toBe('accepted')
-    const wo = (d as { workOrder: Record<string, unknown> }).workOrder as {
+    const wo = acceptedWorkOrder(d) as unknown as {
       rationale_one_liner: string
       angle_source: { type: string; ref_text: string }
       brief: { max_new_clips: number; clip_generation_plan: unknown[]; segments: unknown[] }
@@ -289,6 +301,45 @@ describe('骨架 + 工单组装', () => {
   })
 })
 
+describe('goalForSignal — a named goal is not replaced', () => {
+  const goals = [
+    { id: 'g-newest', title: 'newest', primary_metric_key: 'leads_count' },
+    { id: 'g-named', title: 'named', primary_metric_key: 'leads_count' },
+  ]
+
+  it('uses the named active goal', () => {
+    expect(goalForSignal('g-named', 'g-newest', goals)?.id).toBe('g-named')
+  })
+
+  it('returns null when the named goal is not active', () => {
+    expect(goalForSignal('g-gone', 'g-newest', goals)).toBeNull()
+    expect(goalForSignal('g-gone', null, [])).toBeNull()
+  })
+
+  it('an unnamed signal still uses the configured or newest goal', () => {
+    expect(goalForSignal(null, 'g-named', goals)?.id).toBe('g-named')
+    expect(goalForSignal('  ', null, goals)?.id).toBe('g-newest')
+  })
+})
+
+describe('asset_only material stamp', () => {
+  it('stamps the brief and keeps the shared budget cap', () => {
+    const signal = makeSignal({
+      signal_type: 'new_campaign',
+      evidence: { campaign_name: 'Spring push' },
+      request: { notes: 'Spring push', deliverable: 'asset_only' },
+    })
+    const wo = acceptedWorkOrder(decideSignal(makeCtx({ signal })))
+    expect(wo.brief.remotion).toEqual({ deliverable: 'asset_only' })
+    expect(wo.budget_cap_usd).toBe(FACTORY_ORDER_BUDGET_CAP_USD)
+  })
+
+  it('does not stamp a normal request', () => {
+    const wo = acceptedWorkOrder(decideSignal(makeCtx()))
+    expect(wo.brief.remotion).toBeUndefined()
+  })
+})
+
 describe('pickFactoryGoal — B0 Goal 圈定(诸葛亮红线:禁盲选最新)', () => {
   const goals: GoalSlice[] = [
     { id: 'g-newest', title: 'Leads', primary_metric_key: 'leads_count' },       // [0] 最新
@@ -332,7 +383,7 @@ describe('魏征 M1 评审修复回归', () => {
       }),
     )
     expect(d.outcome).toBe('accepted')
-    const wo = (d as { workOrder: Record<string, unknown> }).workOrder as {
+    const wo = acceptedWorkOrder(d) as unknown as {
       order_type: string
       angle: string
       angle_source: { type: string; ref_text: string }

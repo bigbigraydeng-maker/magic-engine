@@ -38,8 +38,12 @@ export async function summarizeItem(candidate: CandidateItem): Promise<Summarize
     throw new Error('OPENAI_API_KEY not configured — cannot summarize market intel items')
   }
 
-  const { default: OpenAI } = await import('openai')
-  const client = new OpenAI({ apiKey })
+  // 走统一封装（而不是自己 new）—— 账户级失效（余额耗尽 / 钥匙失效）
+  // 的识别与落库都装在那一层，是全站唯一能一次盖住所有调用点的位置。
+  // bypassGateway：这条链路用的是 responses API，从没经过 CF 网关验证过，
+  // 只拿拦截、不换路由（见 openai-client.ts 的 OpenAIClientOptions）。
+  const { getOpenAIClient } = await import('@/lib/ai/openai-client')
+  const client = getOpenAIClient({ apiKey, bypassGateway: true })
 
   const res = await client.responses.create({
     model: MODEL,
@@ -82,8 +86,12 @@ export async function generateDailyNote(passedItems: SummarizedItem[]): Promise<
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) return null
 
-  const { default: OpenAI } = await import('openai')
-  const client = new OpenAI({ apiKey })
+  // 走统一封装（而不是自己 new）—— 账户级失效（余额耗尽 / 钥匙失效）
+  // 的识别与落库都装在那一层，是全站唯一能一次盖住所有调用点的位置。
+  // bypassGateway：这条链路用的是 responses API，从没经过 CF 网关验证过，
+  // 只拿拦截、不换路由（见 openai-client.ts 的 OpenAIClientOptions）。
+  const { getOpenAIClient } = await import('@/lib/ai/openai-client')
+  const client = getOpenAIClient({ apiKey, bypassGateway: true })
 
   const list = passedItems.map((item) => `- ${item.headlineZh}`).join('\n')
 

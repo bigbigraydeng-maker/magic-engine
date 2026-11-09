@@ -29,9 +29,13 @@ export interface AdInsightRow {
   parentId: string | null
   spend: number
   /**
-   * ⚠️ **这一列是两种单位相加**：`meta/client.ts:246` 写死
-   * `results = leads + messaging_conversations`。
-   * 所以它本身不是一个可比的量 —— 必须配合下面两列判断单位是否一致。
+   * ⚠️ **这一列本身不一定是单一单位**：`meta/client.ts:parseDailyMetrics` 用
+   * `Math.max(leads, messaging)`（2026-09-08 起；之前是 `leads + messaging`，
+   * 对 lead form + Messenger auto-reply 场景 2× 双算，见 client.ts 里那段注释
+   * 和 docs/history/CHANGELOG.md）。
+   * 就算不再相加，一条广告同时收到表单和私信时它仍然是「哪种量占多数」的口径，
+   * 跟纯表单或纯私信的兄弟广告放一起比单价仍然不公允 —— 必须配合下面两列判断
+   * 单位是否一致。
    */
   results: number
   impressions: number
@@ -39,6 +43,30 @@ export interface AdInsightRow {
   leads?: number
   /** 私信对话数。同上。 */
   messagingConversations?: number
+}
+
+/**
+ * 读侧要从 `ad_daily_insights` 取的列。日期列叫 `insight_date`（不是 `date`）——
+ * 2026-09-14 前看板查的是不存在的 `date` 列，查询整条报错、页面静默显示「没数据」。
+ * 留资/私信两列必须一起取，否则 `unitOf` 永远判成 unknown，单位闸形同虚设。
+ */
+export const AD_INSIGHT_SELECT =
+  'client_id, entity_id, entity_name, parent_id, spend, results, impressions, leads, messaging_conversations, insight_date'
+
+/** `ad_daily_insights` 一行（按 AD_INSIGHT_SELECT 取回）→ AdInsightRow。 */
+export function adInsightRowFromDb(r: Record<string, unknown>): AdInsightRow {
+  const optionalNumber = (v: unknown): number | undefined =>
+    v === null || v === undefined ? undefined : Number(v)
+  return {
+    entityId:    r.entity_id as string,
+    entityName:  (r.entity_name as string | null) ?? (r.entity_id as string),
+    parentId:    (r.parent_id as string | null) ?? null,
+    spend:       Number(r.spend ?? 0),
+    results:     Number(r.results ?? 0),
+    impressions: Number(r.impressions ?? 0),
+    leads:                  optionalNumber(r.leads),
+    messagingConversations: optionalNumber(r.messaging_conversations),
+  }
 }
 
 /** 一条广告的 results 到底装的是什么。 */
@@ -242,11 +270,12 @@ function judge(comparable: AdBreakdownChild[]): {
     }
   }
 
-  // ── 单位一致性闸（2026-08-04 子牙抽查发现）──────────────────────────
-  // `results = leads + messaging_conversations`（meta/client.ts:246）。所以
-  // 「$10.29/结果」可能是 1 个表单 + 6 个对话拼出来的价格，跟纯对话的
-  // 「$7.24/结果」根本不是同一个东西。拿它们比大小，就是本模块自己在犯
-  // 它要防的那个错 —— 而这条比较**当天真的在页面上跑着**（Ad G · EN）。
+  // ── 单位一致性闸（2026-08-04 子牙抽查发现，2026-09-08 更新）──────────
+  // 即便 client.ts 现在用 max(leads, messaging)（不再简单相加），一条广告
+  // 收到「1 个表单 + 6 个对话」时 results 仍是 6（表现为对话单价），跟纯表单
+  // 广告的「$7.24/结果」不是同一个东西 —— 兄弟对比跨单位仍会拿它们比大小，
+  // 就是本模块自己在犯它要防的那个错。这条比较**曾经真的在页面上跑着**
+  // （Ad G · EN，2026-08-04 抽查）。
   const units = new Set(comparable.map(c => c.resultUnit))
   const allUnknown = units.size === 1 && units.has('unknown')
 

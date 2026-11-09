@@ -17,9 +17,16 @@
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { buildIdentities, resolveContact } from '@/lib/crm/identity'
+import { markNewLeadStage } from './new-lead-stage'
 import { attributionColumns, attributionFromMetaLeadRow } from '@/lib/crm/attribution'
 import { lookupCreativeRefByAdId } from '@/lib/ads/creative-link'
-import { subscribeMember, type SubscribeMemberResult } from '@/lib/mailchimp/client'
+import { type SubscribeMemberResult } from '@/lib/mailchimp/client'
+import { subscribeMemberEnsuringTag } from '@/lib/mailchimp/tags'
+import {
+  isUndefinedColumn,
+  readAudienceId,
+  readLeadSourceTag,
+} from '@/lib/mailchimp/audience-config'
 import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import type { MetaLead, MetaLeadAnswer } from '@/lib/meta/lead-forms'
 
@@ -302,7 +309,9 @@ export async function ingestMetaLead(input: IngestMetaLeadInput): Promise<Ingest
       source: 'meta_lead_form',
       seenAt: lead.createdTime,
       attribution,
+      autoAssign: true,
     })
+    if (created) await markNewLeadStage(clientId, contactId)
 
     // ── 触点 Phase A：**在任何 Mailchimp 调用之前**先 create-if-not-exists 一条
     //    contact + source touchpoint。用 upsert(ignoreDuplicates=true) 保幂等：
@@ -410,6 +419,12 @@ export async function ingestMetaLead(input: IngestMetaLeadInput): Promise<Ingest
     //    metadata.mailchimp_result 从 pending 替换成本轮 provider 的真实结果。
     //    **用 UPDATE 而不是二次 upsert** —— upsert 走 ignoreDuplicates=true 会
     //    保留旧 metadata，正是当初 Phase B 也要修的病根。
+    //
+    // ⚠️ 2026-09-24 起这个字段**有下游判据在读**：`lib/meta/leads-sync.ts` 的
+    //    `readSettledLeadIds()` 拿它判「这条上轮办完没有、本轮还要不要打 Mailchimp」
+    //    （判据本体在 `lib/mailchimp/outlet-tally.ts` 的 `isMailchimpSettled`）。
+    //    改这里的回执形状、或做 metadata 清理之前，先去看那两处 —— 不然那道闸会
+    //    悄悄失效（表现是「又开始每轮重打了」）或者误判（表现是「再也不重试了」）。
     const receiptMetadata = {
       ...baseMetadata,
       mailchimp_result: mailchimp,
@@ -438,9 +453,16 @@ export async function ingestMetaLead(input: IngestMetaLeadInput): Promise<Ingest
         .update({ mailchimp_synced_at: new Date().toISOString() })
         .eq('id', contactId)
       if (syncErr) {
-        // 观测列没写上不影响主管道；如实 warn，不 throw。
+        // 观测列没写上不影响主管道；如实 warn，不 throw。会员关系的权威回执是
+        // 上面刚写成功的触点 metadata.mailchimp_result，不靠这一列。
+        //
+        // 生产上这里目前**必然**失败：`contacts.mailchimp_synced_at` 跟
+        // `clients.mailchimp_audience_id` 是同一条没 apply 的 migration
+        // (20260826010000) 加的。分开措辞，免得下一个人把结构性缺列当成偶发抖动。
         console.warn(
-          `[meta-lead] contact ${contactId} mailchimp_synced_at 更新失败: ${sanitizeErr(syncErr.message)}`,
+          isUndefinedColumn(syncErr)
+            ? `[meta-lead] contact ${contactId} mailchimp_synced_at 这一列在库里不存在（migration 20260826010000 未 apply）；回执已落触点 metadata，不影响同步`
+            : `[meta-lead] contact ${contactId} mailchimp_synced_at 更新失败: ${sanitizeErr(syncErr.message)}`,
         )
       }
     }
@@ -493,7 +515,10 @@ interface SyncMailchimpInput {
  * 把一个 lead → Mailchimp audience。**永远返回结果对象**，绝不 throw。
  *
  * gate 顺序（Issue #1188 硬约束 + PM override 5425996255）：
- *   1. 客户是否配置了 audience id —— 没配 → skipped: no_audience_config
+ *   1. 客户是否配置了 audience id（走 `mailchimp/audience-config` 的容错读法：
+ *      专列优先、42703 降级到 `leads_config`）—— 读不到 → skipped:
+ *      client_config_read_failed **并 console.error**；查得到但没配 → skipped:
+ *      no_audience_config
  *   2. 是否有邮箱 —— 没有 → skipped: no_email
  *   3. 是否拿到 API key —— 没有 → skipped: no_api_key
  *   4. 表单里是否明确 opt-out —— 是 → skipped: explicit_opt_out
@@ -510,20 +535,21 @@ interface SyncMailchimpInput {
  *    任何 dnc_cleared 触点（那是「人明确纠正」的强信号，跟表单勾选是两回事）。
  */
 async function syncMailchimp(input: SyncMailchimpInput): Promise<SubscribeMemberResult> {
-  // 1. 客户配置。**只 select 出口需要的那一列**，别顺手拉全表。
-  const { data: clientRow, error: clientErr } = await supabaseAdmin
-    .from('clients')
-    .select('mailchimp_audience_id')
-    .eq('id', input.clientId)
-    .maybeSingle()
-  if (clientErr) {
-    // 查配置失败 = 不该猜「有」也不该猜「没有」，如实 skipped：cron 日志能看见。
+  // 1. 客户配置。走共享读法 —— **绝不直接 select('mailchimp_audience_id')**：
+  //    那一列的 migration 至今没 apply 到生产，直接选它整条查询 42703 报错，
+  //    这里就每小时静默走 client_config_read_failed。见 audience-config.ts 的
+  //    注释和 2026-09-03 的生产实测。
+  const configRead = await readAudienceId(input.clientId)
+  if (!configRead.ok) {
+    // 查配置失败 = 不该猜「有」也不该猜「没有」。**必须吼出来** —— 这条分支
+    // 以前只有一个 return，没有一行日志、没有一个计数，于是「从来没同步过」
+    // 这件事在生产上藏了一整个月没人看得见。拿不到数据 ≠ 真没有。
+    console.error(
+      `[meta-lead] client ${input.clientId} Mailchimp 出口读配置失败，本条没进邮件名单: ${sanitizeErr(configRead.message)}`,
+    )
     return { status: 'skipped', reason: 'client_config_read_failed' }
   }
-  const audienceId =
-    typeof clientRow?.mailchimp_audience_id === 'string'
-      ? clientRow.mailchimp_audience_id.trim()
-      : ''
+  const audienceId = configRead.audienceId
   if (!audienceId) {
     return { status: 'skipped', reason: 'no_audience_config' }
   }
@@ -556,19 +582,32 @@ async function syncMailchimp(input: SyncMailchimpInput): Promise<SubscribeMember
     return { status: 'skipped', reason: 'contact_dnc' }
   }
 
-  // 7. 打出去
+  // 7. 来源标签名 —— 从客户配置读，不写死在共享代码里（平台化红线 2）。
+  //    读失败不拿默认值糊过去：那等于把「读不到」伪装成「客户就要默认」。
+  const tagRead = await readLeadSourceTag(input.clientId)
+  if (!tagRead.ok) {
+    console.error(
+      `[meta-lead] client ${input.clientId} 来源标签配置读取失败，本条不发: ${tagRead.message}`,
+    )
+    return { status: 'skipped', reason: 'source_tag_read_failed' }
+  }
+
+  // 8. 打出去
   try {
-    return await subscribeMember({
+    return await subscribeMemberEnsuringTag({
       apiKey,
       audienceId,
       email,
       firstName: input.parsed.firstName,
       lastName: input.parsed.lastName,
-      // SOURCE merge field + tag —— Mailchimp 后台分组用。**精确字符串**
-      // `facebook_leadgen`，跟原 #1188 合同里客户自动化 / 分组条款硬绑；两处
-      // 都不许再改（改动 = 打断客户 audience 自动化 segment）。
+      // SOURCE merge field 保持 `facebook_leadgen` 不动 —— 它是 Mailchimp 里
+      // 一个 text 字段的值，跟 #1188 合同措辞绑着，且确实写进去了。
       source: 'facebook_leadgen',
-      tag: 'facebook_leadgen',
+      // 标签则相反：原来写死的 `facebook_leadgen` 在 CTS 名单里**从来没出现
+      // 过**（2026-09-06 实测，分段根本不存在）—— 因为人已在名单里时那次请求
+      // 整个不生效。既然没有任何自动化能绑在一个不存在的标签上，就改成从配置
+      // 读，CTS 沿用他们真正在用的 `fb_lead`。
+      tag: tagRead.tag,
     })
   } catch {
     // subscribeMember 应该永远不 throw，兜底防御。
@@ -585,10 +624,14 @@ async function syncMailchimp(input: SyncMailchimpInput): Promise<SubscribeMember
  *
  * 触点 select 跟 `messenger-stop-signal.ts` 那份保持同款字段
  * (`metadata`, `occurred_at`)，判据入口是全仓唯一的 `isDoNotContact`。
+ *
+ * 导出给一次性回填脚本复用（例如 `scripts/backfills/tag-historical-meta-leads.ts`）——
+ * 任何要在写 Mailchimp 之前判断「这个人能不能联系」的地方，都必须走这一份，
+ * 不许各自拼一份查询。
  */
-type DncCheck = 'blocked' | 'ok' | 'unknown'
+export type DncCheck = 'blocked' | 'ok' | 'unknown'
 
-async function evaluateDnc(contactId: string): Promise<DncCheck> {
+export async function evaluateDnc(contactId: string): Promise<DncCheck> {
   const [contactRes, touchesRes] = await Promise.all([
     supabaseAdmin.from('contacts').select('do_not_contact').eq('id', contactId).maybeSingle(),
     supabaseAdmin

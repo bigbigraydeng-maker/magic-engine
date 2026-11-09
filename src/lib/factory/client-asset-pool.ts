@@ -23,6 +23,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import { projectOrFilter } from '@/lib/clients/project-scope'
+import { canBackRealPrice } from '@/lib/assets/provenance'
 
 /** 每个客户最多取这么多张当底图池 —— 够轮换即可，不必全量。 */
 const MAX_ASSETS = 40
@@ -38,6 +39,8 @@ const MIN_QUALITY = 5
 export interface AssetRow {
   storage_url: string | null
   vision_metadata?: unknown
+  /** 素材来源(见 provenance.ts)。`requireVerified` 过滤靠这个字段判断。 */
+  source?: unknown
 }
 
 function visionOf(row: AssetRow): Record<string, unknown> {
@@ -52,17 +55,36 @@ function qualityOf(row: AssetRow): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+export interface SelectAssetOpts {
+  /**
+   * 只保留能打真实价格的来源(`client_verified`/`fde_shot`,见 provenance.ts::
+   * canBackRealPrice)。默认 false,保持这个池子原有的口径不变(本模块头注写明:
+   * 出去的图只当 i2v 底图,不背书真价,所以过去不筛来源)。
+   *
+   * 2026-09 Creatomate 真实照片接线新增:那条调用路径是"把真实照片直接当
+   * 客户产品画面用",不是氛围空镜,必须只认核实过的来源,否则免登录上传链接
+   * 传进来的网图/AI图会被自动当成"客户真实产品照片"塞进无人审核的成片
+   * (设计复审魏征 ❌ 指出的红线风险)。
+   */
+  requireVerified?: boolean
+}
+
 /**
  * 纯函数：把素材行筛成可用底图 URL。
  *
  * 排除视频行 —— `vision_metadata.kind='video'` 的行没有 scene/objects，
  * 且 i2v 要的是静图，喂视频进去会失败（魏征 M6 同源问题）。
  */
-export function selectAssetUrls(rows: AssetRow[], max: number = MAX_ASSETS): string[] {
+export function selectAssetUrls(
+  rows: AssetRow[],
+  max: number = MAX_ASSETS,
+  opts: SelectAssetOpts = {},
+): string[] {
   return rows
     .filter((r) => {
       if (!r.storage_url) return false
       if (visionOf(r).kind === 'video') return false
+      if (opts.requireVerified && !canBackRealPrice(r.source as string | null | undefined)) return false
       const q = qualityOf(r)
       return q == null || q >= MIN_QUALITY
     })
@@ -94,10 +116,11 @@ export async function loadClientAssetPool(
    * 不给：房源专属素材一律不给（跟楼盘那层同一口径）。
    */
   listingId: string | null = null,
+  opts: SelectAssetOpts = {},
 ): Promise<string[]> {
   let q = supabase
     .from('client_assets')
-    .select('storage_url, vision_metadata')
+    .select('storage_url, vision_metadata, source')
     .eq('client_id', clientId)
     .eq('status', 'analyzed')
     .is('archived_at', null)
@@ -115,5 +138,55 @@ export async function loadClientAssetPool(
   const { data, error } = await q.limit(MAX_ASSETS * 3)
 
   if (error || !data) return []
-  return selectAssetUrls(data as AssetRow[])
+  return selectAssetUrls(data as AssetRow[], MAX_ASSETS, opts)
+}
+
+/** 供 rankAssetsByPrompt 用的行形状 —— 比 AssetRow 多 id/original_filename,排序要靠 id 回指。 */
+export interface RankableAssetRow {
+  id: string
+  storage_url: string | null
+  original_filename: string | null
+  vision_metadata: unknown
+  source: unknown
+}
+
+/**
+ * 读该客户自有素材的**完整行**(带 id/文件名),供"按画面描述挑最匹配的一张"用——
+ * `loadClientAssetPool` 只吐 URL,排不了序。隔离参数/过滤口径跟 `loadClientAssetPool`
+ * 完全一致(同一张表、同一套楼盘/房源隔离),只是多带两列、不吐成扁平 URL 数组。
+ */
+export async function loadRankableClientAssets(
+  clientId: string,
+  supabase: SupabaseClient = supabaseAdmin,
+  projectId: string | null = null,
+  listingId: string | null = null,
+): Promise<RankableAssetRow[]> {
+  let q = supabase
+    .from('client_assets')
+    .select('id, storage_url, original_filename, vision_metadata, source')
+    .eq('client_id', clientId)
+    .eq('status', 'analyzed')
+    .is('archived_at', null)
+    .not('storage_url', 'is', null)
+
+  const orFilter = projectOrFilter(projectId)
+  q = orFilter ? q.or(orFilter) : q.is('project_id', null)
+
+  q = listingId
+    ? q.or(`listing_id.eq.${listingId},listing_id.is.null`)
+    : q.is('listing_id', null)
+
+  const { data, error } = await q.limit(MAX_ASSETS * 3)
+  if (error || !data) return []
+  // 🔴 2026-09-13 生产实测发现：`.not('vision_metadata->>kind', 'eq', 'video')` 曾直接写在
+  //    上面的查询里——但绝大多数照片行的 vision_metadata 根本没有 `kind` 这个键（只有视频行
+  //    才写 kind='video'），PostgREST 的 not-eq 在这种「键不存在」情况下走 SQL 三值逻辑
+  //    （NOT(NULL = 'video') 是 NULL，WHERE 照样排除该行），把 CTS 47 张已核实真实照片里的
+  //    46 张（缺 kind 键的那些）一起过滤掉了，只剩 1 张——真实照片选图功能因此实质性失效，
+  //    每条新脚本几乎必然掉进 AI 现画兜底路径。改成跟 `selectAssetUrls`（同文件 86 行）
+  //    一致的 JS 侧判断：只有明确写了 kind==='video' 才排除，键不存在按"不是视频"处理，
+  //    避免同一个排除意图在两处用不同真值语义各写一份、其中一份还悄悄错了。
+  return (data as RankableAssetRow[]).filter(
+    (r) => (r.vision_metadata as Record<string, unknown> | null)?.kind !== 'video',
+  )
 }

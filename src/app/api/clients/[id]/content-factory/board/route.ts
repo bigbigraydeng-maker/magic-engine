@@ -1,6 +1,7 @@
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { projectFactoryConfig } from '@/lib/factory/client-config'
 
 /** 做片流水线还没结束的状态（与 video 路由同一套判据） */
 const ACTIVE_JOB_STATUSES = ['queued', 'planning', 'rendering', 'assembling']
@@ -10,6 +11,19 @@ import {
   type ContentPostStatus,
   type FactoryStage,
 } from '@/lib/factory/content-stages'
+
+/** Postgrest 错误是普通对象、不是 Error 实例；直接 `instanceof Error` 会丢掉真实原因（曾被吞成 "Unknown error"）。 */
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message
+  if (err && typeof err === 'object') {
+    const e = err as { message?: unknown; code?: unknown }
+    if (typeof e.message === 'string' && e.message !== '') {
+      return typeof e.code === 'string' && e.code !== '' ? `${e.message} (${e.code})` : e.message
+    }
+    try { return JSON.stringify(err) } catch { /* fall through */ }
+  }
+  return String(err)
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +60,30 @@ export async function GET(
     // 课程分组：source 以「系列课」开头的成体系内容，收进课程区（不混进平铺看板）。
     const courseMap = new Map<string, { name: string; source: string; lessons: unknown[] }>()
 
+    const contentPostIds = (data ?? []).map((p) => p.id)
+    const youtubeStageByPostId = new Map<string, { status: string; videoId: string | null; createdAt: string }>()
+    if (contentPostIds.length > 0) {
+      const { data: receipts, error: receiptsError } = await supabaseAdmin
+        .from('youtube_publish_receipts')
+        .select('content_post_id, status, video_id, created_at')
+        .eq('client_id', params.id)
+        .eq('stage', 'staging')
+        .in('content_post_id', contentPostIds)
+        .order('created_at', { ascending: false })
+      if (receiptsError) {
+        console.warn('[content-factory/board] youtube_publish_receipts 读取失败，按没有 YouTube 阶段处理', { clientId: params.id, error: describeError(receiptsError) })
+      } else {
+        for (const receipt of receipts ?? []) {
+          if (!receipt.content_post_id || youtubeStageByPostId.has(receipt.content_post_id)) continue
+          youtubeStageByPostId.set(receipt.content_post_id, {
+            status: receipt.status,
+            videoId: receipt.video_id,
+            createdAt: receipt.created_at,
+          })
+        }
+      }
+    }
+
     const cardOf = (p: (typeof data)[number], status: ContentPostStatus, stage: FactoryStage) => ({
       id: p.id,
       title: p.title || '(无标题)',
@@ -62,6 +100,7 @@ export async function GET(
       script: p.script ?? '',
       pillar: p.pillar_id ?? '',
       visualBrief: p.visual_brief ?? '',
+      youtubeStage: youtubeStageByPostId.get(p.id) ?? null,
     })
 
     for (const p of data ?? []) {
@@ -129,12 +168,23 @@ export async function GET(
       FACTORY_STAGES.map((s) => [s, stages[s].length]),
     ) as Record<FactoryStage, number>
 
+    // 这个客户配了哪些「资料包」（团/档位）——供前端"确认做"时的归属下拉框用。
+    // 只有一个（或零个）档位时前端不需要下拉框（见 post-fields.ts::resolveOfferFacts
+    // 的兜底规则：客户只配一个档位可以不指定），这里始终把 key 列表吐出来，
+    // 由前端决定要不要渲染选择框，不在接口层做"只有一个就不返回"这种特殊情形。
+    const { data: clientRow } = await supabaseAdmin
+      .from('clients')
+      .select('factory_config')
+      .eq('id', params.id)
+      .single()
+    const offerKeys = Object.keys(projectFactoryConfig(clientRow?.factory_config).render?.creatomate?.offers ?? {})
+
     // 看板是每客户实时数据，绝不能被边缘/浏览器缓存(否则新写入的选题/成片看不到)。
-    return NextResponse.json({ stages, counts, courses }, {
+    return NextResponse.json({ stages, counts, courses, offerKeys }, {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate', 'CDN-Cache-Control': 'no-store' },
     })
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error'
+    const message = describeError(err)
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

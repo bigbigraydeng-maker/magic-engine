@@ -24,7 +24,7 @@ import { requirePaidClientAccess } from '@/lib/auth/client-access'
  */
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: { id: string } }
 ) {
   const access = await requirePaidClientAccess(params.id)
   if (!access.ok) {
@@ -36,7 +36,7 @@ export async function GET(
     return NextResponse.json({ error: session.error }, { status: session.status })
   }
 
-  const { id: clientId } = await params
+  const { id: clientId } = params
 
   // Find the latest snapshot_date for this client (any location_code).
   const { data: latestRow, error: latestErr } = await supabaseAdmin

@@ -1,0 +1,12 @@
+# www.parkhomes.nz and parkhomes.nz are both attached as live 200 domains on
+# the Cloudflare Pages project — neither redirects to the other. Every page's
+# <link rel="canonical"> already declares the non-www host (see SITE_URL in
+# src/layouts/Base.astro), so Search Console has been splitting the same
+# pages' clicks/impressions across two hostnames instead of consolidating
+# them. Force www onto the canonical non-www host.
+https://www.parkhomes.nz/* https://parkhomes.nz/:splat 301!
+
+# Legacy URLs from before the current site (pre-dates this repo, no known
+# mapping) — send them to a real page instead of leaving them as dead 404s
+# that Google Search Console keeps flagging.
+/copy-of-bridgeside-park /projects 301

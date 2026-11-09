@@ -35,8 +35,15 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { getValidTokenForConnection } from '@/lib/platform-oauth/token-manager'
 import { fetchMailSince, type MailFolder, type MailMessage } from '@/lib/microsoft/mail-graph'
-import { classifySender } from '@/lib/microsoft/mail-sender'
+import { classifySender, isOwnAddress } from '@/lib/microsoft/mail-sender'
+import { applyFormNotices, emptyFormStats, mirrorFormThread, type FormEnquiryStats } from '@/lib/microsoft/mail-form-ingest'
+import type { FormNoticeLead } from '@/lib/microsoft/mail-form-notice'
 import { resolveContact } from '@/lib/crm/identity'
+import { isAutoReply } from './auto-reply'
+import { contactKindOf, readDomainRules, type DomainRules } from '@/lib/crm/contact-kind'
+import { extractAgentCustomers } from '@/lib/crm/travel-agent-customer-extract'
+import { sendInngestEvent } from '@/lib/workflows/inngest-event'
+import { CONVERSATION_MESSAGE_RECEIVED_EVENT } from '@/lib/conversations/events'
 
 // ─── 计划（纯函数，不碰数据库） ──────────────────────────────────────────────
 
@@ -49,6 +56,10 @@ export interface PlannedMessage {
   receivedAt: string
   /** 这封是自动回复（不算「有人跟过他」）。 */
   automated: boolean
+  /** 网站表单通知里提取出的客人（见 mail-form-ingest）。有它时对方已被改写成这位客人。 */
+  formLead?: FormNoticeLead
+  /** 这封信的发件人其实是自己人（同事 / 点名的员工地址）：虽然躺在收件箱里，但不是客人说的话，已按「我们发出的」记。值为发件地址。 */
+  staffSender?: string
 }
 
 export interface PlannedThread {
@@ -76,36 +87,7 @@ export interface MailPlan {
   skipped: SkippedSender[]
 }
 
-/**
- * 自动回复的主题前缀。
- *
- * 只看主题、只看开头，跟 mail-sender 里同一套保守做法：一封真回信的主题几乎
- * 不可能以这些词开头，而「包含」会把「Re: 关于 out of office 期间的行程」误伤。
- * 认不出来就当成真回信 —— 漏判一封自动回复只是让一张卡早一天变灰，
- * 误判一封真回信却会让销售以为自己没跟过、重复联系客人。
- */
-const AUTO_REPLY_SUBJECTS = [
-  'automatic reply',
-  'auto reply',
-  'auto-reply',
-  'automatic response',
-  'out of office',
-  'out-of-office',
-  'ooo:',
-  'undeliverable',
-  'delivery status notification',
-  '自动回复',
-  '自動回覆',
-]
-
-/** 这封出站邮件是机器发的自动回执，不是人写的回信。 */
-export function isAutoReply(subject: string | null): boolean {
-  const s = (subject ?? '').trim().toLowerCase()
-  if (!s) return false
-  // 去掉转发/回复前缀再判 —— 「Re: Automatic reply: …」仍然是自动回执。
-  const stripped = s.replace(/^((re|fw|fwd|回复|轉寄)\s*:\s*)+/i, '')
-  return AUTO_REPLY_SUBJECTS.some((p) => stripped.startsWith(p))
-}
+export { isAutoReply }
 
 /**
  * 线程编号。Graph 一般会给 `conversationId`，给不出时退回「这封信自成一条线程」
@@ -113,6 +95,8 @@ export function isAutoReply(subject: string | null): boolean {
  * conversations 表和同一个 (client_id, conversation_id) 唯一键。
  */
 export function threadKey(m: MailMessage): string {
+  // 网站表单通知每封自成一条线程：同主题的两位客人不能被 Exchange 的会话分组并到一起。
+  if (m.formLead) return `mail-form:${m.id}`
   return m.conversationId ? `mail:${m.conversationId}` : `mail-msg:${m.id}`
 }
 
@@ -180,21 +164,35 @@ export function planMailIngest(messages: MailMessage[], opts: PlanOptions): Mail
     }
 
     const thread = threads.get(key)!
+    // 方向本来由文件夹决定（收件箱 = 客人来信），但同事从自己的邮箱发信、抄送到
+    // 公司收件箱时也躺在收件箱里；若只看文件夹，会把同事的报价当成客人回了话
+    // （CTS 出票同事的机票报价事故）。线程的第一封信仍按原规则判（自己人发起的
+    // 线程整条丢，见上面 `if (!existing)`）。
+    const staffSent = m.direction === 'inbound' && isOwnAddress(m.counterparty.address, opts.ownDomains)
+    const direction: 'inbound' | 'outbound' = staffSent ? 'outbound' : m.direction
     thread.messages.push({
       id: m.id,
-      direction: m.direction,
+      direction,
       subject: m.subject,
       preview: m.preview,
       receivedAt: m.receivedAt,
       // 只有出站才可能是自动回执；客人那边发来的自动回复不归我们管，
       // 而且把它标成 automated 会让一条真的来信从「他回话了」里消失。
-      automated: m.direction === 'outbound' && isAutoReply(m.subject),
+      // 同事发的信一律标 automated：同步看不到收件人，没法证明这封信真的发给了客人
+      // （例如回复全部时去掉了客人的内部往来），不能算「有人跟进过他」。信照存。
+      automated: staffSent || (direction === 'outbound' && isAutoReply(m.subject)),
+      formLead: m.formLead,
+      staffSender: staffSent ? m.counterparty.address : undefined,
     })
-    if (m.direction === 'inbound') thread.hasInbound = true
+    if (direction === 'inbound') thread.hasInbound = true
     // 主题以**最新一封**为准 —— 线程标题跟着最后一次来回走，跟邮箱里看到的一致。
     if (m.subject) thread.subject = m.subject
-    thread.lastAt = m.receivedAt
-    thread.lastFrom = m.direction === 'inbound' ? 'customer' : 'page'
+    // 同事的信只存触点，不动线程的「最后一句是谁说的 / 几点」：否则同事内部往来会让
+    // 「客人写了超过一天没人回」这条提醒把客人丢掉（子牙复审 P1）。
+    if (!staffSent) {
+      thread.lastAt = m.receivedAt
+      thread.lastFrom = direction === 'inbound' ? 'customer' : 'page'
+    }
   }
 
   return { threads: Array.from(threads.values()), skipped: Array.from(skipped.values()) }
@@ -269,6 +267,8 @@ export interface MailSyncResult {
    * 进 CRM，而 cron 还记这次成功。宁可这一轮少读一点，下一轮重来。
    */
   stoppedEarly?: string
+  /** 网站表单通知的处理结果（只有这个邮箱出现过表单通知才有）。 */
+  formEnquiries?: FormEnquiryStats
   error?: string
 }
 
@@ -349,6 +349,45 @@ interface StoredThread {
   conversationId: string
   contactId: string | null
   newMessages: number
+  /**
+   * Graph 消息 id，这一轮真正新插进 `conversation_messages` 的那些（不含被
+   * `ignoreDuplicates` 挡掉的重复行）。`syncMailbox` 用它决定该给哪几条消息
+   * emit `conversation/message.received`——只有"这一轮真的新存了"才该触发
+   * 下游 F1-F4，重放/重复同步不能对着同一封信再触发一遍。
+   */
+  insertedMessageIds: string[]
+}
+
+/**
+ * 「同一封信」的兜底指纹——方向 + 发送时间，精确到秒（Graph 给的时间戳本身
+ * 就是秒级精度，取毫秒只是白多一层假精确）。
+ *
+ * PR #1714 把 `mail-graph.ts` 读信时用的消息 id 从 Graph 默认的 REST id 换成了
+ * `ImmutableId`。这个同步在那之前已经长期把 REST id 存进 `message_id` /
+ * `source_ref`，上线当次的水位线回看窗口（6 小时，见 `WATERMARK_LOOKBACK_MS`）
+ * 会把刚存过的信再读一遍——但这次 Graph 吐出来的是另一种 id，跟库里存的对不上，
+ * `(conversation_id, message_id)` / `(client_id, source, source_ref)` 两个唯一键
+ * 都认不出是同一封，会被当成新信重复插入。同一封信不管用哪种 id 格式，方向和
+ * 发送时间不会变，拿它兜底再认一次（2026-09-15 Codex 复审 PR #1714 指出）。
+ *
+ * 🔴 **只在切换那一刻之前收到的信上生效，不是永久规则**（2026-09-15 子牙架构
+ * 复审同一个 PR 指出）。真实邮件时间戳只有秒级精度——同一条线程 / 同一个人
+ * 名下，只要同一秒内来了两封方向相同的不同邮件（客户连发两条、或历史批量
+ * 回填时的巧合），指纹会撞上，第二封会被**永久静默丢弃**，违反这个同步自己
+ * 「一封都不能丢」的铁律。这个兜底存在的理由只是「换 id 格式那一刻，库里
+ * 已经躺着一批用旧格式存的信」——`IMMUTABLE_ID_CUTOVER_AT` 之后收到的信，
+ * 从第一次读到最后一次读用的都是同一种（`ImmutableId`）格式，根本不会撞上
+ * 这个问题，也就不该承担这份「误判成重复」的风险。
+ */
+const IMMUTABLE_ID_CUTOVER_AT = new Date('2026-09-15T20:00:00Z').getTime()
+
+function messageSignature(direction: string, at: string): string {
+  return `${direction}|${Math.floor(new Date(at).getTime() / 1000)}`
+}
+
+/** 这封信收到时，`mail-graph.ts` 是不是已经在用稳定 id 了——是的话直接信 id，不用指纹兜底。 */
+function receivedBeforeIdFormatCutover(at: string): boolean {
+  return new Date(at).getTime() < IMMUTABLE_ID_CUTOVER_AT
 }
 
 /** 存一条邮件线程和它的信。抛异常一路上抛 —— 调用方要靠它决定停不停。 */
@@ -385,24 +424,55 @@ async function storeThread(
     throw new Error(`存邮件对话失败: ${error?.message}`)
   }
 
-  const { data: inserted, error: msgErr } = await supabaseAdmin
+  // 先看这条线程库里已经有哪些信——message_id 精确匹配的照常交给下面的 upsert
+  // 去重；id 对不上但「方向 + 发送时间」对得上的，说明是同一封信换了个 id 格式
+  // 读回来的，直接跳过，不再插一行。
+  const { data: existingRows } = await supabaseAdmin
     .from('conversation_messages')
-    .upsert(
-      thread.messages.map((m) => ({
-        conversation_id: row.id,
-        message_id: m.id,
-        direction: m.direction,
-        sender_name: m.direction === 'inbound' ? thread.counterparty.name : null,
-        body: m.preview,
-        sent_at: m.receivedAt,
-      })),
-      { onConflict: 'conversation_id,message_id', ignoreDuplicates: true },
-    )
-    .select('id')
+    .select('message_id, direction, sent_at')
+    .eq('conversation_id', row.id)
 
-  if (msgErr) {
-    // 信没存下是可惜，但线程行已经在了、人还能接上 —— 不为此放弃整条线程。
-    console.error('[mail-ingest] 存邮件正文失败:', msgErr)
+  const existingIds = new Set((existingRows ?? []).map((r) => r.message_id as string))
+  const existingSignatures = new Set(
+    (existingRows ?? []).map((r) =>
+      messageSignature(r.direction as string, r.sent_at as string),
+    ),
+  )
+  const toStore = thread.messages.filter((m) => {
+    if (existingIds.has(m.id)) return true
+    // 换过 id 格式那一刻之后收到的信，从第一次读到之后每一次都是同一种格式，
+    // 不会撞上「同一封信、两种 id」这个问题——不用指纹兜底，直接当新信存，
+    // 免得把同一秒内两封方向相同的不同邮件误判成重复、悄悄丢掉一封。
+    if (!receivedBeforeIdFormatCutover(m.receivedAt)) return true
+    return !existingSignatures.has(messageSignature(m.direction, m.receivedAt))
+  })
+
+  let inserted: { id: string; message_id: string }[] | null = []
+  if (toStore.length > 0) {
+    const { data, error: msgErr } = await supabaseAdmin
+      .from('conversation_messages')
+      .upsert(
+        toStore.map((m) => ({
+          conversation_id: row.id,
+          message_id: m.id,
+          direction: m.direction,
+          sender_name: m.direction === 'inbound' ? thread.counterparty.name : null,
+          body: m.preview,
+          sent_at: m.receivedAt,
+        })),
+        { onConflict: 'conversation_id,message_id', ignoreDuplicates: true },
+      )
+      // `ignoreDuplicates: true` 生成 `ON CONFLICT DO NOTHING`——PostgREST 的
+      // `.select()` 只回传真正插进去的行，被去重挡掉的重复行不会出现在这里。
+      // `insertedMessageIds` 因此天然就是"这一轮真的新存了"的集合，不用另外
+      // 再比对一次 existingIds。
+      .select('id, message_id')
+
+    if (msgErr) {
+      // 信没存下是可惜，但线程行已经在了、人还能接上 —— 不为此放弃整条线程。
+      console.error('[mail-ingest] 存邮件正文失败:', msgErr)
+    }
+    inserted = data
   }
 
   // 消息数用**库里实际有多少条**，不能用这一批的条数。
@@ -424,6 +494,54 @@ async function storeThread(
     conversationId: row.id as string,
     contactId: (row.contact_id as string | null) ?? null,
     newMessages: inserted?.length ?? 0,
+    insertedMessageIds: (inserted ?? []).map((r) => r.message_id),
+  }
+}
+
+/**
+ * 这一轮真正新存的入站信，逐条 emit `conversation/message.received`——issue
+ * #1745 调研结论指出的缺口：Messenger/WhatsApp webhook 早就在 emit 这个事件，
+ * 邮件同步却从来没有，导致就算 `channel-dispatch.ts` 认识了 `'email'`，F1-F4
+ * 也永远不会被邮件触发。
+ *
+ * Best-effort，跟 Messenger/WhatsApp webhook 同一个态度（见
+ * `webhooks/whatsapp/route.ts` emit 前的注释）：消息已经落库是这次同步真正要
+ * 保证的事，emit 失败只打日志，不能让一次 Inngest 网络抖动导致整个邮箱同步
+ * 提前失败、更晚的线程也读不到。
+ *
+ * 只处理入站（`direction === 'inbound'`）——我们自己发出去的信（比如
+ * `sendMailReply` 立刻写进时间线那条）不该触发一次"客户消息进来了"。
+ */
+async function emitNewInboundMessageEvents(
+  clientId: string,
+  conversationId: string,
+  contactId: string | null,
+  thread: PlannedThread,
+  insertedMessageIds: readonly string[],
+): Promise<void> {
+  if (insertedMessageIds.length === 0) return
+  const insertedIds = new Set(insertedMessageIds)
+  // 网站表单通知默认不触发自动回复相关事件（客人之后的真回复不带 formLead，仍正常触发）。
+  const newInbound = thread.messages.filter((m) => m.direction === 'inbound' && insertedIds.has(m.id) && !m.formLead)
+
+  for (const m of newInbound) {
+    try {
+      await sendInngestEvent({
+        id: `mail:${conversationId}:${m.id}`,
+        name: CONVERSATION_MESSAGE_RECEIVED_EVENT,
+        data: {
+          channel: 'email',
+          client_id: clientId,
+          conversation_id: conversationId,
+          contact_id: contactId,
+          message_id: m.id,
+          direction: 'inbound',
+          sent_at: m.receivedAt,
+        },
+      })
+    } catch (err) {
+      console.error(`[mail-ingest] emit ${CONVERSATION_MESSAGE_RECEIVED_EVENT} 失败（消息已入库）:`, err)
+    }
   }
 }
 
@@ -433,10 +551,38 @@ async function writeTouchpoints(
   contactId: string,
   thread: PlannedThread,
 ): Promise<number> {
+  // 按**这个人**取已有触点，不按这条线程——线程缺 conversationId 时会用
+  // `mail-msg:<id>` 自成一条线程（见 threadKey），id 格式一换，那条线程本身
+  // 都是新的，光比对同一条线程里的旧记录挡不住重复。同一个人身上不会有两条
+  // 「同一时刻、同一方向」的真实触点，按人比对能兜住这种情况。
+  const { data: existingRows } = await supabaseAdmin
+    .from('contact_touchpoints')
+    .select('source_ref, direction, occurred_at')
+    .eq('client_id', clientId)
+    .eq('contact_id', contactId)
+    .eq('channel', 'email')
+
+  const existingRefs = new Set((existingRows ?? []).map((r) => r.source_ref as string))
+  const existingSignatures = new Set(
+    (existingRows ?? []).map((r) =>
+      messageSignature(r.direction as string, r.occurred_at as string),
+    ),
+  )
+  const toWrite = thread.messages.filter((m) => {
+    if (existingRefs.has(m.id)) return true
+    // 同上（见 storeThread）：只在换 id 格式那一刻之前收到的信上信这份指纹，
+    // 这份兜底比消息去重更宽——按人比对，不按单条线程——过了切换时刻还
+    // 继续按指纹判重复，撞车概率会比消息去重更高。
+    if (!receivedBeforeIdFormatCutover(m.receivedAt)) return true
+    return !existingSignatures.has(messageSignature(m.direction, m.receivedAt))
+  })
+
+  if (toWrite.length === 0) return 0
+
   const { data, error } = await supabaseAdmin
     .from('contact_touchpoints')
     .upsert(
-      thread.messages.map((m) => ({
+      toWrite.map((m) => ({
         client_id: clientId,
         contact_id: contactId,
         channel: 'email',
@@ -451,6 +597,8 @@ async function writeTouchpoints(
           automated: m.automated,
           // 邮件同步不知道是哪位同事按的发送 —— 留空，不假装。
           logged_by: null,
+          // 同事发的信（不是客人说的话），留下发件地址方便回查。
+          ...(m.staffSender ? { staff_sender: m.staffSender } : {}),
         },
         source: 'microsoft_mail',
         source_ref: m.id,
@@ -493,6 +641,23 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     return { ...base, error: err instanceof Error ? err.message : String(err) }
   }
 
+  // 同行域名清单只读一次，整轮共用。读失败不管 —— readDomainRules 对 null
+  // 宽容，返回空清单，hook 自然不会触发。
+  let domainRules: DomainRules
+  try {
+    const { data: clientRow } = await supabaseAdmin
+      .from('clients')
+      .select('leads_config')
+      .eq('id', target.clientId)
+      .maybeSingle()
+    domainRules = readDomainRules(clientRow?.leads_config ?? null)
+  } catch (err) {
+    // 读不到就当没配置 —— 测试 mock 里没这张表也走这条路。
+    // agent-customer hook 会自然跳过，不影响主同步。
+    console.warn('[agent-customer-hook] leads_config 读失败，本轮跳过 trade 检测：', err)
+    domainRules = { own: [], trade: [] }
+  }
+
   const since = await getMailWatermark(target.clientId, target.mailbox)
 
   // 收件箱和已发送分开读 —— 方向由文件夹决定，不靠比对发件人猜（见 mail-graph）。
@@ -513,9 +678,28 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     truncated = truncated || res.truncated
   }
 
-  const plan = planMailIngest(all, {
-    ownDomains: ownDomainsOf(target.mailbox, target.domain, target.ownDomains ?? []),
+  const ownDomains = ownDomainsOf(target.mailbox, target.domain, target.ownDomains ?? [])
+
+  // 网站表单通知（发件人是本邮箱自己）：识别 → 提取客人 → 改写对方。认不出的丢掉并计数。
+  const formStats = emptyFormStats()
+  const readable = await applyFormNotices({
+    token,
+    mailbox: target.mailbox,
+    clientId: target.clientId,
+    // 表单通知认证只认真域名；点名的员工地址（含 @）不能当成整个域名交过去。
+    ownDomains: ownDomains.filter((d) => !d.includes('@')),
+    messages: all,
+    stats: formStats,
   })
+
+  // 官网改了出发时间/预算的选项文案 → 映射不到稳定代码（已存空）：不能静默，留一条日志（不含任何客人信息）。
+  if (formStats.unknownExtras > 0) {
+    console.warn(
+      `[mail-form] ${formStats.unknownExtras} 封网站表单的出发时间/预算选项映射不到稳定代码（官网可能改了选项），已存空；邮箱 ${target.mailbox}`,
+    )
+  }
+
+  const plan = planMailIngest(readable, { ownDomains })
 
   // **从旧到新处理**，配合下面「一条失败就停」。
   //
@@ -536,7 +720,31 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
       messages += stored.newMessages
 
       let contactId = stored.contactId
-      if (!contactId) {
+      const hasFormLead = thread.messages.some((m) => m.formLead)
+      if (hasFormLead) {
+        // 网站表单：走 mirrorWebFormLead（reject 策略、不覆盖老客人姓名、写 web_form 触点），
+        // 不走下面默认的 resolveContact。放在 `!contactId` 判断之外：线程可能已被员工回复挂到老联系人上，
+        // 放里面会漏写 web_form 触点（写入靠 source_ref 幂等）。
+        // 只在这条会话还没挂上联系人时做：表单线程每小时都会被重读，对已挂好的会话再 mirror 一次
+        // 会把已有联系人的 last_seen_at 回退到旧通知的时间（魏征 2026-10-19 复审 R2）。
+        // mirror 失败（抛错）→ 会话没挂人 → 下一轮自然重试。
+        if (!stored.contactId) {
+          const formContact = await mirrorFormThread({ clientId: target.clientId, messages: thread.messages })
+          contactId = formContact
+          if (contactId) {
+            await supabaseAdmin
+              .from('conversations')
+              .update({ contact_id: contactId, updated_at: new Date().toISOString() })
+              .eq('id', stored.conversationId)
+              .is('contact_id', null)
+          } else {
+            // 识别成功却没认到人（邮箱被身份规则拒绝）：不静默 —— 记日志并计入回执。
+            console.error('[mail-form] 表单通知识别成功但没能挂上联系人:', thread.key)
+            formStats.failed += 1
+            formStats.failedReasons.no_contact = (formStats.failedReasons.no_contact ?? 0) + 1
+          }
+        }
+      } else if (!contactId) {
         if (thread.hasInbound) {
           // 客人自己开过口 —— 认人，认不到就按邮箱新建（判断②）。
           // 只带**一个**身份，所以结构上不可能触发两个真人的不可逆合并。
@@ -544,8 +752,12 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
             clientId: target.clientId,
             identities: [{ kind: 'email', value: thread.counterparty.address }],
             displayName: thread.counterparty.name,
+            // 邮件显示名质量最差（对方没设时 Graph 给的就是邮箱），不覆盖已有名字（子牙 B2）。
+            overwriteDisplayName: false,
+            fillEmptyDisplayName: true,
             source: 'email',
             seenAt: thread.lastAt,
+            autoAssign: true,
           })
           contactId = res.contactId
           if (res.created) newContacts += 1
@@ -564,8 +776,22 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
         }
       }
 
+      // 下游 F1-F4 靠这个事件驱动（issue #1745）——contact_id 允许 null（客人
+      // 第一次来信、这条对话还没认到人），下游据此决定要不要跳过需要联系方式
+      // 的步骤，跟 Messenger/WhatsApp webhook 是同一个约定。
+      await emitNewInboundMessageEvents(
+        target.clientId,
+        stored.conversationId,
+        contactId,
+        thread,
+        stored.insertedMessageIds,
+      )
+
       if (contactId) {
-        touchpoints += await writeTouchpoints(target.clientId, contactId, thread)
+        // 表单通知只写 web_form 触点（上面已写），不再写一条邮件触点 —— 同一封信不重复计数。
+        const emailThread = { ...thread, messages: thread.messages.filter((m) => !m.formLead) }
+        touchpoints += await writeTouchpoints(target.clientId, contactId, emailThread)
+        await runAgentCustomerHook(target.clientId, contactId, emailThread, stored.conversationId, domainRules)
       }
       done += 1
     } catch (err) {
@@ -587,5 +813,84 @@ export async function syncMailbox(target: MailboxTarget): Promise<MailSyncResult
     skipped: plan.skipped,
     truncated,
     stoppedEarly,
+    ...(formStats.recognised > 0 ? { formEnquiries: formStats } : {}),
+  }
+}
+
+/**
+ * 如果这条线程的对手方是 trade 类（同行 Agent），跑 AI 提取，把新拿到的
+ * 终端客户 UPSERT 进 agent_customers。
+ *
+ * 提取失败一律吞：这是新加的旁路，绝不能让它把主同步搞挂。
+ * 同一个 (agent_contact_id, customer_name) 视为同一个终端客户；已经存在的
+ * 就更新 last_contact_at / last_contact_summary / 空字段补齐，stage 不动。
+ */
+async function runAgentCustomerHook(
+  clientId: string,
+  contactId: string,
+  thread: PlannedThread,
+  conversationId: string,
+  rules: DomainRules,
+): Promise<void> {
+  try {
+    if (contactKindOf([thread.counterparty.address], rules) !== 'trade') return
+
+    const inbound = thread.messages.filter((m) => m.direction === 'inbound').slice(-20)
+    if (inbound.length === 0) return
+
+    const latestInbound = inbound[inbound.length - 1]
+    const latestInboundAt = latestInbound.receivedAt
+    const latestInboundSummary = latestInbound.subject ?? latestInbound.preview.slice(0, 120) ?? null
+
+    const result = await extractAgentCustomers({
+      clientId,
+      agentContactId: contactId,
+      conversationId,
+      emails: inbound.map((m) => ({
+        subject: m.subject,
+        bodyPreview: m.preview,
+        direction: m.direction,
+        occurredAt: m.receivedAt,
+      })),
+    })
+    if (result.customers.length === 0) return
+
+    for (const customer of result.customers) {
+      if (!customer.customerName) continue
+
+      // 单次 upsert 走 ON CONFLICT —— 先 select 再 insert/update 在并发下会插两条。
+      // 幂等键跟 migration 里的 UNIQUE INDEX 列顺序一致。
+      //
+      // 「不覆盖已有非空字段」靠 payload 里**只在有值时才带这个键**实现：
+      // upsert 不会重写 payload 里没出现的列，所以 AI 这次没抽到的字段保持原样。
+      const payload: Record<string, unknown> = {
+        client_id: clientId,
+        agent_contact_id: contactId,
+        conversation_id: conversationId,
+        customer_name: customer.customerName,
+        last_contact_at: latestInboundAt,
+        last_contact_summary: latestInboundSummary,
+        updated_at: new Date().toISOString(),
+      }
+      if (customer.pax != null) payload.pax = customer.pax
+      if (customer.tripType != null) payload.trip_type = customer.tripType
+      if (customer.travelDates != null) payload.travel_dates = customer.travelDates
+      if (customer.specificNeeds != null) payload.specific_needs = customer.specificNeeds
+      // 只在这次触发 suspicious 时才写 true —— PM 过目后手动改成 false 的行，
+      // 只要新一批不再触发，就不会被拉回 true。
+      if (customer.suspicious === true) payload.needs_review = true
+
+      await supabaseAdmin
+        .from('agent_customers')
+        .upsert(payload, {
+          onConflict: 'client_id,agent_contact_id,conversation_id,customer_name',
+        })
+    }
+  } catch (err) {
+    console.warn('[agent-customer-hook] AI 提取或 UPSERT 失败（不影响主同步）：', {
+      clientId,
+      contactId,
+      err: err instanceof Error ? err.message : String(err),
+    })
   }
 }

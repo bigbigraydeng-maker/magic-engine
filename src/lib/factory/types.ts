@@ -78,8 +78,18 @@ export interface WinnerSlice {
   cta_segment: Record<string, unknown>
   win_reason_tags: string[]
   cost_per_thruplay: number | null
+  /** 该赢家所在广告组自己结果种类的单次成本（winner-gate 只放有这个数的进来） */
+  cost_per_result: number
+  /** 结果种类（lead / messaging_started）；只在同一种里比单次成本 */
+  result_type: 'lead' | 'messaging_started'
   current_frequency: number | null
   status: string
+}
+
+/** 「别撞在跑赢家的题材」护栏用：全部 status=active 的赢家，不经确认闸 */
+export interface WinnerThemeGuard {
+  hook_segment: Record<string, unknown>
+  current_frequency: number | null
 }
 
 export interface BlocklistEntry {
@@ -91,6 +101,8 @@ export interface BlocklistEntry {
 export interface ClipSlice {
   id: string
   scene_tag: string
+  /** Human-reviewed catalogue tags; legacy clips may not have any. */
+  tags?: string[]
   motion_type: string | null
   track: 'a_real' | 'b_generated'
   usage_count: number
@@ -114,7 +126,10 @@ export interface GateContext {
   /** 近 14 天全部工单 angle(含打回/归档,魏征 F4) */
   recentAngles: string[]
   blocklist: BlocklistEntry[]
+  /** 照赢家出片只能用这些：程序复核通过 + 有权的人点过认（winner-gate） */
   activeWinners: WinnerSlice[]
+  /** 题材防撞护栏（护栏 7）：全部 status=active 的赢家，不管认没认 */
+  winnerThemeGuards: WinnerThemeGuard[]
   /** factory_balance_ledger 结余;null = 查询失败 */
   balanceUsd: number | null
   /** 该 client 当日已建工单数 / 当日生成成本 */
@@ -206,7 +221,7 @@ export interface VerifiedOffer {
 
 /** 发布目标(clients.factory_config.publish_target 存,FDE 配)。缺 → 不发标失败,绝不猜/误发别客户页。 */
 export interface PublishTarget {
-  platform: 'facebook' | 'publer'
+  platform: 'facebook' | 'instagram'
   /** facebook:页 id(如 Oztop 748077268383005)。 */
   page_id?: string
   /**
@@ -215,29 +230,48 @@ export interface PublishTarget {
    * 不满足就发不出去(2026-08-04 实测:讲课片发布报「授权没配好」正是这个原因)。
    */
   client_id?: string
-  /** publer:CTS 账号 id */
-  publer_account_id?: string
-  publer_provider?: string
   /** 防误发(魏征 B9 第三重):期望的客户品牌名,resolveToken 校验 FB 页名 ~ 此值,不符不发 */
   expect_brand?: string
 }
 
 /** 发布回执(存 published_ref):幂等对账锚(防"发出去没记上"重发)+ P1 measure 数据源。一次存全。 */
 export interface PublishedRef {
-  platform: 'facebook' | 'publer'
+  platform: 'facebook' | 'instagram'
   page_id?: string
   post_id: string
   video_id?: string
   published_at: string
   permalink?: string
+  /** Published Reel's idempotently-created CTA comment, when enabled. */
+  first_comment_id?: string
+  /**
+   * 这条回执对应的是真·公开发布(PUBLISHED)还是草稿(DRAFT)。
+   * 由 adapter 按 draft 参数盖戳 —— publish-worker 只在 PUBLISHED 时才 emit 发布信号,
+   * 草稿绝不通知下游建广告(草稿不可 promote 成广告)。undefined = 来路不明(如 findExisting
+   * 补记),保守当作"不确定" —— 不 emit、不补发,等真查过 video_state 再说。
+   */
+  video_state?: 'DRAFT' | 'PUBLISHED'
+  /**
+   * 发布信号(me/factory.reel.published)的 Inngest 回执 id。
+   * 有值 = 已喊过下游;空/缺 = 还没喊成 → 补发对账会重发(仅当 video_state=PUBLISHED)。
+   */
+  event_ids?: string[]
+  /** 受控转公开动作盖的戳:Instagram 跟发已下线,此标记保留无害。 */
+  ig_crosspost_blocked?: boolean
+  /** 受控转公开动作的请求编号(流量记录里 promote_authorization 的引用)。 */
+  promote_request_id?: string
+  /** true = published_at 是估算值(人手已转公开、Meta 读不到真实时间时),不是转公开成功的那一刻。 */
+  published_at_estimated?: boolean
+  /** 转公开已完成但首评没发成功:工厂页据此显示「补发首评」入口。 */
+  first_comment_pending?: boolean
 }
 
 /**
  * 发布适配器契约(子牙 B8):publish-worker 主体只认 adapter + 状态机 + 三落库,平台差异全塞进 adapter。
- * 加 CTS = 多写个 PublerAdapter,worker 一行不改。
+ * 加新平台 = 多写个 adapter,worker 一行不改。
  */
 export interface PublishAdapter {
-  readonly platform: 'facebook' | 'publer'
+  readonly platform: 'facebook' | 'instagram'
   /**
    * 发布一条成片,返回回执。draft=true 只发草稿/不公开(首测验格式)。
    * onStarted(魏征 B9 防双发):拿到平台 video_id 的第一时间(上传/finish 之前)回调,
@@ -246,6 +280,7 @@ export interface PublishAdapter {
   publish(args: {
     videoUrl: string
     caption: string
+    firstComment?: string
     target: PublishTarget
     idempotencyTag: string
     draft: boolean
@@ -253,6 +288,18 @@ export interface PublishAdapter {
   }): Promise<PublishedRef>
   /** 幂等对账(魏征 B9 防双发):查平台侧该 wo(靠 idempotencyTag)是否已发。已发→回执,未发→null。 */
   findExisting(args: { target: PublishTarget; idempotencyTag: string }): Promise<PublishedRef | null>
+  /**
+   * 可选:平台侧「处理中」的临时回执(如 Instagram 容器)需要事后对账时由 adapter 提供;
+   * worker 暂不调用,Facebook 无此钩子。返回 null = 仍在处理或查不到,不得据此判定失败。
+   */
+  reconcile?(args: { target: PublishTarget; ref: PublishedRef; idempotencyTag: string }): Promise<PublishedRef | null>
+  /** Create or recover the CTA first comment without duplicating it after a worker retry. */
+  ensureFirstComment?(args: {
+    target: PublishTarget
+    videoId: string
+    idempotencyTag: string
+    message: string
+  }): Promise<string>
 }
 
 export interface WorkOrderBrief {
@@ -270,6 +317,8 @@ export interface WorkOrderBrief {
   clip_generation_plan: ClipGenerationPlanItem[]
   aspect_ratio: '9:16'
   notes: string
+  /** Set only when the signal asked for material and nothing publishable. */
+  remotion?: Record<string, unknown>
   /** A2:后端生成的广告文案(品牌接地)。worker 读它装配,不再自己写硬编 CTS 的文案。 */
   copy?: AdCopy
   /** B0 归因桩:这条产出预期服务的 Goal + 北极星指标。诸葛亮红线——每条片天生挂对 Goal
@@ -317,3 +366,7 @@ export type RejectReason =
   | 'unsupported_signal'
   /** 价格广告红线:verifiedOffer(真价)客户无真拍(a_real)素材,不许用 AI 底料背书真价 */
   | 'price_ad_needs_real_footage'
+  /** request.platform present but not a supported platform = rejected (missing is defaulted to the factory output platform). */
+  | 'platform_required'
+  /** request.creative_tags present but malformed. */
+  | 'creative_tags_invalid'

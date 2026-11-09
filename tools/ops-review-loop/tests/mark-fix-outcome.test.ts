@@ -6,11 +6,11 @@ import { join } from 'node:path'
 const createIssueComment = vi.fn().mockResolvedValue({})
 const getPullRequest = vi.fn()
 vi.mock('../src/github.mjs', () => ({
-  createIssueComment: (...args) => createIssueComment(...args),
-  getPullRequest: (...args) => getPullRequest(...args),
+  createIssueComment: (...args: unknown[]) => createIssueComment(...args),
+  getPullRequest: (...args: unknown[]) => getPullRequest(...args),
 }))
 
-function withEnv(overrides, run) {
+function withEnv(overrides: Record<string, string>, run: () => Promise<unknown>) {
   const original = { ...process.env }
   Object.assign(process.env, overrides)
   return run().finally(() => {
@@ -19,7 +19,7 @@ function withEnv(overrides, run) {
 }
 
 describe('mark-fix-outcome', () => {
-  let dir
+  let dir: string
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'ops-loop-'))
@@ -79,7 +79,7 @@ describe('mark-fix-outcome', () => {
 })
 
 describe('mark-fix-outcome: a round that pushed nothing', () => {
-  let dir
+  let dir: string
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'ops-loop-nopush-'))
@@ -148,7 +148,7 @@ describe('mark-fix-outcome: a round that pushed nothing', () => {
 })
 
 describe('mark-fix-outcome: the baseline must bracket this round', () => {
-  let dir
+  let dir: string
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'ops-loop-baseline-'))
@@ -224,7 +224,7 @@ describe('mark-fix-outcome: the baseline must bracket this round', () => {
 })
 
 describe('mark-fix-outcome: pushed a commit and then failed', () => {
-  let dir
+  let dir: string
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'ops-loop-pushfail-'))

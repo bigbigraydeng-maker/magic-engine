@@ -106,3 +106,29 @@ export const ACCESS_TYPES_PORTAL = [
   'portal',
   'both',
 ] as const satisfies readonly AccessType[]
+
+/**
+ * access_types that prove the email belongs to a real person at the CUSTOMER
+ * company — deliberately narrower than `ACCESS_TYPES_PAID` / `paid_client`.
+ *
+ * `paid_client` tier groups 'fde' in with real customer accounts because for
+ * /dashboard access purposes they're equivalent (both get full functional
+ * access). But 'fde' rows were originally "internal Frontline Deployment
+ * Engineer accounts" (see `20260602000001_client_portal_users_add_fde.sql`)
+ * and `require-admin.ts` explicitly warns it can't be trusted as proof of
+ * EITHER identity ("不算内部身份，那是按客户发放的成员行，付费客户自己就
+ * 能给任意邮箱发") — i.e. it's ambiguous on the one axis that matters here.
+ *
+ * Use this wherever code needs to confirm "this email represents the
+ * customer, not Magic Engine" — e.g. a dual-signature gate where an ME actor
+ * and a customer signer must be two different, unambiguous parties (knowledge
+ * base rollout confirmers, issue #1646/#1648). Never substitute
+ * `ACCESS_TYPES_PAID` there — that whitelist answers a different question
+ * ("can this email use /dashboard") and admitting 'fde' would let an
+ * ambiguous account stand in for the customer's own signature.
+ */
+export const ACCESS_TYPES_CUSTOMER_ONLY = [
+  'client',
+  'dashboard',
+  'both',
+] as const satisfies readonly AccessType[]

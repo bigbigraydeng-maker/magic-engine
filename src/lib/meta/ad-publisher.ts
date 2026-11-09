@@ -12,16 +12,37 @@
  * 建广告是四次写操作（系列 / 组 / 创意 / 广告），任何一步都可能失败。半成品
  * 留在账户里比失败更糟：它会出现在后台、会被人误开、会进第二天的扫描。
  * 所以失败时按创建的**逆序**删回去，删不掉的如实报出来让人处理。
+ * 只删系列 / 广告组 / 广告；**创意永远不删**（见 `newRun`）。
+ * 多个广告组时，是 1 次系列 + 每组各 1 次组 + 每条广告各 2 次（创意 / 广告）；
+ * 失败时同样按逆序回滚，且只回滚本次建出来的。
  */
 
 import type { AdDraft, AdDraftCreative } from '@/lib/ads-strategy/ad-draft'
-import { metaTripletFor } from '@/lib/ads-strategy/ad-draft'
+import { adSetViews, metaTripletFor, MESSENGER_CTA_TYPE } from '@/lib/ads-strategy/ad-draft'
+import { isPlaybackGoal, PLAYBACK_REQUIRED_PLATFORMS } from '@/lib/ads-strategy/launch-readback'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v21.0'
 
+/** 单次写请求的上限。不设的话一次卡死就能把整个建广告请求拖过平台的超时线。 */
+const WRITE_TIMEOUT_MS = 15_000
+/** 回滚时单次删除的上限：回滚是在赶时间，别让它自己也卡住。 */
+const DELETE_TIMEOUT_MS = 8_000
+
+/** 时间预算。全部可选 —— 不给就是不限（现有调用方行为不变）。时间点是 `now()` 的毫秒数。 */
+export interface PublishOptions {
+  /** 过了这个点不再发起新的写：停手、回滚、报失败。 */
+  stopWritingAt?: number
+  /** 回滚时过了这个点就不再试删，没来得及删的 id 全部进 `orphans`。 */
+  giveUpRollbackAt?: number
+  now?: () => number
+}
+
 export interface PublishedDraft {
   campaignId: string
+  /** 第一个广告组的编号（单组草稿就是它唯一的那个）。 */
   adSetId: string
+  /** 这次建出来的全部广告组编号，按草稿里的顺序。单组 = 只有一个，等于 adSetId。 */
+  adSetIds: string[]
   adIds: string[]
   /** 建到一半失败、又没删干净的东西 —— 必须有人去 Meta 后台手动删。 */
   orphans: string[]
@@ -36,29 +57,36 @@ export interface PublishFailure {
 
 export type PublishResult = ({ ok: true } & PublishedDraft) | PublishFailure
 
+/** `ambiguous`：请求没有得到明确答复（超时 / 断网 / 回执读不懂），Meta 那边**可能已经建成**。 */
+type GraphCreateResult = { id: string } | { error: string; ambiguous: boolean }
+
 async function graphPost(
   path: string,
   body: Record<string, string>,
   accessToken: string,
-): Promise<{ id: string } | { error: string }> {
+): Promise<GraphCreateResult> {
   let res: Response
   try {
     res = await fetch(`${GRAPH_BASE}/${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ ...body, access_token: accessToken }).toString(),
+      signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
     })
   } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) }
+    return { error: err instanceof Error ? err.message : String(err), ambiguous: true }
   }
   const text = await res.text().catch(() => '')
-  if (!res.ok) return { error: `HTTP ${res.status}: ${text.slice(0, 400)}` }
+  // 5xx（502 / 504 网关超时）可能是 Meta 建成之后才超时，和「明确拒绝」不是一回事。
+  if (!res.ok) return { error: `HTTP ${res.status}: ${text.slice(0, 400)}`, ambiguous: res.status >= 500 }
   try {
     const json = JSON.parse(text) as { id?: unknown }
-    if (typeof json.id !== 'string') return { error: `返回里没有 id：${text.slice(0, 200)}` }
+    if (typeof json.id !== 'string') {
+      return { error: `返回里没有 id：${text.slice(0, 200)}`, ambiguous: true }
+    }
     return { id: json.id }
   } catch {
-    return { error: `返回不是 JSON：${text.slice(0, 200)}` }
+    return { error: `返回不是 JSON：${text.slice(0, 200)}`, ambiguous: true }
   }
 }
 
@@ -79,6 +107,7 @@ async function graphUpdate(
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ ...body, access_token: accessToken }).toString(),
+      signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
     })
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -95,6 +124,7 @@ async function graphDelete(id: string, accessToken: string): Promise<boolean> {
   try {
     const res = await fetch(`${GRAPH_BASE}/${id}?access_token=${encodeURIComponent(accessToken)}`, {
       method: 'DELETE',
+      signal: AbortSignal.timeout(DELETE_TIMEOUT_MS),
     })
     return res.ok
   } catch {
@@ -112,44 +142,230 @@ function targetingFor(d: AdDraft): Record<string, unknown> {
     d.geoCityKeys && d.geoCityKeys.length > 0
       ? { cities: d.geoCityKeys.map((key) => ({ key, radius: 10, distance_unit: 'kilometer' })) }
       : { countries: d.geoCountries }
-  return {
+  const targeting: Record<string, unknown> = {
     geo_locations: geo,
     age_min: d.ageMin ?? 25,
     age_max: d.ageMax ?? 65,
+    // 看完类视频必须手动锁版位，否则 Meta 把钱导向 Audience Network 奖励视频（PITFALLS D9）。
+    ...(isPlaybackGoal(metaTripletFor(d.kind).optimizationGoal)
+      ? { publisher_platforms: [...PLAYBACK_REQUIRED_PLATFORMS] }
+      : {}),
     // 明确关掉 Meta 的自动放宽。**这不代表它一定关着** —— Meta 可能照样开，
     // 所以建完还要回读一遍（这正是闸门存在的理由）。
     targeting_automation: { advantage_audience: 0 },
   }
+
+  if (d.audienceIds && d.audienceIds.length > 0) {
+    targeting.custom_audiences = d.audienceIds.map((id) => ({ id }))
+    // 明确不放宽名单：不扩展到名单以外的人，也不自动加相似人群。
+    targeting.targeting_relaxation_types = { custom_audience: 0, lookalike: 0 }
+  }
+  if (d.excludedAudienceIds && d.excludedAudienceIds.length > 0) {
+    targeting.excluded_custom_audiences = d.excludedAudienceIds.map((id) => ({ id }))
+  }
+
+  return targeting
 }
 
+function assertNever(x: never): never {
+  throw new Error(`不认识的广告类型：${String(x)}`)
+}
+
+/** 视频封面：hash 优先（链接可能是会过期的签名链接）。 */
+function thumbnailFields(c: AdDraftCreative): Record<string, string> {
+  if (c.thumbnailImageHash) return { image_hash: c.thumbnailImageHash }
+  if (c.thumbnailUrl) return { image_url: c.thumbnailUrl }
+  return {}
+}
+
+/**
+ * 创意。**对 `kind` 穷举**：加新类型漏改这里会编译不过，而不是静默建成别的东西。
+ *
+ * 私信类型 🔴 **不写任何 link**（PITFALLS D13，2026-09-26 实测）：用接口建「点了开
+ * Messenger」的素材时，带 `fb.com/messenger_doc/` 这个界面内部占位链接会被 Meta 当场
+ * 报 1815765 拒收；一次过审的写法是 `app_destination: MESSENGER` 且不带 link。
+ */
 function creativeSpec(d: AdDraft, c: AdDraftCreative): Record<string, string> {
   const storySpec: Record<string, unknown> = { page_id: d.pageId }
 
-  if (d.kind === 'video_thruplay') {
-    storySpec.video_data = {
-      video_id: c.videoId,
-      message: c.primaryText,
-      title: c.headline,
-      ...(c.description ? { link_description: c.description } : {}),
-      ...(c.thumbnailUrl ? { image_url: c.thumbnailUrl } : {}),
-      call_to_action: { type: 'LEARN_MORE', value: { link: d.linkUrl ?? '' } },
+  switch (d.kind) {
+    case 'video_thruplay':
+      storySpec.video_data = {
+        video_id: c.videoId,
+        message: c.primaryText,
+        title: c.headline,
+        ...(c.description ? { link_description: c.description } : {}),
+        ...(c.thumbnailUrl ? { image_url: c.thumbnailUrl } : {}),
+        call_to_action: { type: 'LEARN_MORE', value: { link: d.linkUrl ?? '' } },
+      }
+      break
+    case 'messenger_conversation':
+      storySpec.video_data = {
+        video_id: c.videoId,
+        message: c.primaryText,
+        title: c.headline,
+        ...(c.description ? { link_description: c.description } : {}),
+        ...thumbnailFields(c),
+        call_to_action: { type: MESSENGER_CTA_TYPE, value: { app_destination: 'MESSENGER' } },
+      }
+      break
+    case 'lead_form': {
+      if (c.videoId) {
+        // 视频留资：实测过审的写法是 video_data（读回来是 object_type VIDEO），不是把 video_id 塞进 link_data
+        // （同类实测见 docs/PITFALLS.md D13 与 Meta 广告手册 §30）。封面必给（validateDraft 查）。
+        // CTA value 只写表单 id：10-09 真建成的上海那条（docs/clients/cts/2026-10-09-shanghai-ads-paused-build.md §2.3）
+        // 的 CTA 里只有 lead_gen_form_id，落地页由表单结束页承载。Meta 视频留资示例的 value 里带 link（fb.me），
+        // 带不带都有依据；这里取「有实测的那种」。
+        storySpec.video_data = {
+          video_id: c.videoId,
+          message: c.primaryText,
+          title: c.headline,
+          ...(c.description ? { link_description: c.description } : {}),
+          ...thumbnailFields(c),
+          call_to_action: { type: 'SIGN_UP', value: { lead_gen_form_id: d.leadFormId } },
+        }
+      } else {
+        storySpec.link_data = {
+          message: c.primaryText,
+          name: c.headline,
+          ...(c.description ? { description: c.description } : {}),
+          ...(c.imageHash ? { image_hash: c.imageHash } : {}),
+          // 留资文档：link_data.link 只能是 https://fb.me/（真正的落地页在表单结束页）
+          link: 'https://fb.me/',
+          call_to_action: { type: 'SIGN_UP', value: { lead_gen_form_id: d.leadFormId } },
+        }
+      }
+      break
     }
-  } else {
-    storySpec.link_data = {
-      message: c.primaryText,
-      name: c.headline,
-      ...(c.description ? { description: c.description } : {}),
-      ...(c.imageHash ? { image_hash: c.imageHash } : {}),
-      ...(c.videoId ? { video_id: c.videoId } : {}),
-      link: d.linkUrl ?? `https://facebook.com/${d.pageId}`,
-      call_to_action: {
-        type: 'SIGN_UP',
-        value: { lead_gen_form_id: d.leadFormId },
-      },
-    }
+    default:
+      return assertNever(d.kind)
   }
 
   return { name: c.name, object_story_spec: JSON.stringify(storySpec) }
+}
+
+function campaignBody(d: AdDraft): Record<string, string> {
+  return {
+    name: d.campaignName,
+    objective: metaTripletFor(d.kind).objective,
+    status: 'PAUSED',
+    special_ad_categories: JSON.stringify([]),
+    // ⚠️ 将来若走系列预算（CBO）路径，这个字段应随草案决定，不能照抄 'false'。
+    // 预算放在广告组（不用系列预算）时，Meta 现在要求明确写 is_adset_budget_sharing_enabled
+    // （否则报 100/4834011）。false = 各组预算互不共享，与我们每组独立日预算的做法一致。
+    // 2026-10-26 $1 试跑第一次真跑 ads.create_ad 时撞上。
+    is_adset_budget_sharing_enabled: 'false',
+    ...(d.campaignSpendCapMinor !== undefined ? { spend_cap: String(d.campaignSpendCapMinor) } : {}),
+  }
+}
+
+function adSetBodyFor(d: AdDraft, campaignId: string, nowMs: number): Record<string, string> {
+  const t = metaTripletFor(d.kind)
+  const end = nowMs + d.durationDays * 86_400_000
+  const body: Record<string, string> = {
+    name: d.adSetName,
+    campaign_id: campaignId,
+    status: 'PAUSED',
+    billing_event: t.billingEvent,
+    optimization_goal: t.optimizationGoal,
+    // 不用系列预算时，竞价策略要在组上明说；最低成本（不设上限）= Meta 自动出价，不需要 bid_amount。
+    // 2026-10-26 $1 试跑第二次真跑撞上（100/2490487）。
+    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+    // Meta 收的是最小货币单位（分）。传元会变成 1/100 的预算，静默跑不出量。
+    daily_budget: String(Math.round(d.dailyBudget * 100)),
+    start_time: String(Math.floor(nowMs / 1000)),
+    end_time: String(Math.floor(end / 1000)),
+    targeting: JSON.stringify(targetingFor(d)),
+    // 三种类型都只需要主页；留成一个函数是为了以后哪种需要别的时有个明确的落点。
+    promoted_object: JSON.stringify({ page_id: d.pageId }),
+  }
+  if (t.destinationType) body.destination_type = t.destinationType
+  return body
+}
+
+type MadeOrFailed = { id: string } | PublishFailure
+
+/**
+ * 一次「建」的运行状态：记下建出来的东西，出错时按逆序收拾。
+ *
+ * 为什么要有「可能已建成」这个单子：请求超时 / 断网时我们不知道 Meta 有没有建成，
+ * 拿不到 id 就删不了。把名字记下来，让人去后台按名字核对 —— 比假装没这回事强。
+ */
+function newRun(accessToken: string, opts: PublishOptions) {
+  const now = opts.now ?? Date.now
+  // 只记「回滚要删」的三类：系列 / 广告组 / 广告。创意**不进这张单子，回滚永远不删创意**：
+  // Meta 对内容相同的创意会复用同一个对象（2026-10-27 实测），它可能正被在投的广告用着，
+  // 删它会被 Meta 拒（1487235），还会把一个根本不用收拾的编号当成「要手动删」的孤儿报给人。
+  // 没挂任何广告的创意不花钱，留着无害。
+  const created = new Set<string>()
+  const possible: string[] = []
+
+  const rollback = async (): Promise<string[]> => {
+    const stuck: string[] = []
+    for (const id of [...created].reverse()) {
+      if (opts.giveUpRollbackAt !== undefined && now() > opts.giveUpRollbackAt) {
+        stuck.push(id) // 没时间了：不试，如实交给人。
+        continue
+      }
+      if (!(await graphDelete(id, accessToken))) stuck.push(id)
+    }
+    return stuck
+  }
+
+  const fail = async (step: PublishFailure['step'], error: string): Promise<PublishFailure> => ({
+    ok: false, step, error, orphans: [...(await rollback()), ...possible],
+  })
+
+  const make = async (
+    step: PublishFailure['step'],
+    label: string,
+    name: string,
+    path: string,
+    body: Record<string, string>,
+  ): Promise<MadeOrFailed> => {
+    if (opts.stopWritingAt !== undefined && now() > opts.stopWritingAt) {
+      return fail(step, '整次请求有时间上限，时间不够了，已停手并回滚')
+    }
+    const r = await graphPost(path, body, accessToken)
+    if ('error' in r) {
+      // 创意不进孤儿名单：不花钱，也不该让人去后台「核对」一个可能被在投广告共用的对象。
+      if (r.ambiguous && step !== 'creative') {
+        possible.push(`未确认是否已建成：${label}「${name}」，请去 Meta 后台按名字核对`)
+      }
+      return fail(step, r.error)
+    }
+    if (step !== 'creative') created.add(r.id)
+    return r
+  }
+
+  return { make, now }
+}
+
+type Run = ReturnType<typeof newRun>
+
+/** 每条创意 → 每条广告。 */
+async function publishCreatives(
+  d: AdDraft,
+  adAccountId: string,
+  adSetId: string,
+  run: Run,
+): Promise<string[] | PublishFailure> {
+  const adIds: string[] = []
+  for (const c of d.creatives) {
+    const creative = await run.make(
+      'creative', '创意', c.name, `${adAccountId}/adcreatives`, creativeSpec(d, c),
+    )
+    if ('ok' in creative) return creative
+    const ad = await run.make('ad', '广告', c.name, `${adAccountId}/ads`, {
+      name: c.name,
+      adset_id: adSetId,
+      creative: JSON.stringify({ creative_id: creative.id }),
+      status: 'PAUSED',
+    })
+    if ('ok' in ad) return ad
+    adIds.push(ad.id)
+  }
+  return adIds
 }
 
 /**
@@ -161,91 +377,29 @@ export async function publishDraftPaused(
   d: AdDraft,
   adAccountId: string,
   accessToken: string,
+  opts: PublishOptions = {},
 ): Promise<PublishResult> {
-  const t = metaTripletFor(d.kind)
-  const created: string[] = []
-  /** 出错时按逆序删回去；删不掉的如实返回。 */
-  const rollback = async (): Promise<string[]> => {
-    const stuck: string[] = []
-    for (const id of [...created].reverse()) {
-      if (!(await graphDelete(id, accessToken))) stuck.push(id)
-    }
-    return stuck
-  }
+  const run = newRun(accessToken, opts)
 
   // ── 1. 广告系列 ──────────────────────────────────────────────────────
-  const campaign = await graphPost(
-    `${adAccountId}/campaigns`,
-    {
-      name: d.campaignName,
-      objective: t.objective,
-      status: 'PAUSED',
-      special_ad_categories: JSON.stringify([]),
-    },
-    accessToken,
-  )
-  if ('error' in campaign) return { ok: false, step: 'campaign', error: campaign.error, orphans: [] }
-  created.push(campaign.id)
+  const campaign = await run.make('campaign', '广告系列', d.campaignName, `${adAccountId}/campaigns`, campaignBody(d))
+  if ('ok' in campaign) return campaign
 
-  // ── 2. 广告组 ────────────────────────────────────────────────────────
-  const start = new Date()
-  const end = new Date(start.getTime() + d.durationDays * 86_400_000)
-  const adSetBody: Record<string, string> = {
-    name: d.adSetName,
-    campaign_id: campaign.id,
-    status: 'PAUSED',
-    billing_event: t.billingEvent,
-    optimization_goal: t.optimizationGoal,
-    // Meta 收的是最小货币单位（分）。传元会变成 1/100 的预算，静默跑不出量。
-    daily_budget: String(Math.round(d.dailyBudget * 100)),
-    start_time: String(Math.floor(start.getTime() / 1000)),
-    end_time: String(Math.floor(end.getTime() / 1000)),
-    targeting: JSON.stringify(targetingFor(d)),
-    promoted_object: JSON.stringify(
-      d.kind === 'lead_form'
-        ? { page_id: d.pageId }
-        : { page_id: d.pageId },
-    ),
-  }
-  if (t.destinationType) adSetBody.destination_type = t.destinationType
-
-  const adSet = await graphPost(`${adAccountId}/adsets`, adSetBody, accessToken)
-  if ('error' in adSet) {
-    return { ok: false, step: 'adset', error: adSet.error, orphans: await rollback() }
-  }
-  created.push(adSet.id)
-
-  // ── 3+4. 每条创意 → 每条广告 ─────────────────────────────────────────
+  // ── 2+3+4. 逐个广告组：先建组，再建它的创意和广告 ──────────────────────
+  // 多组草稿的每个组都是「单组草稿」的样子（adSetViews），所以建组、建创意的函数不用改。
+  const startMs = run.now()
+  const adSetIds: string[] = []
   const adIds: string[] = []
-  for (const c of d.creatives) {
-    const creative = await graphPost(
-      `${adAccountId}/adcreatives`,
-      creativeSpec(d, c),
-      accessToken,
-    )
-    if ('error' in creative) {
-      return { ok: false, step: 'creative', error: creative.error, orphans: await rollback() }
-    }
-    created.push(creative.id)
-
-    const ad = await graphPost(
-      `${adAccountId}/ads`,
-      {
-        name: c.name,
-        adset_id: adSet.id,
-        creative: JSON.stringify({ creative_id: creative.id }),
-        status: 'PAUSED',
-      },
-      accessToken,
-    )
-    if ('error' in ad) {
-      return { ok: false, step: 'ad', error: ad.error, orphans: await rollback() }
-    }
-    created.push(ad.id)
-    adIds.push(ad.id)
+  for (const view of adSetViews(d)) {
+    const adSet = await run.make('adset', '广告组', view.adSetName, `${adAccountId}/adsets`, adSetBodyFor(view, campaign.id, startMs))
+    if ('ok' in adSet) return adSet
+    adSetIds.push(adSet.id)
+    const made = await publishCreatives(view, adAccountId, adSet.id, run)
+    if (!Array.isArray(made)) return made
+    adIds.push(...made)
   }
 
-  return { ok: true, campaignId: campaign.id, adSetId: adSet.id, adIds, orphans: [] }
+  return { ok: true, campaignId: campaign.id, adSetId: adSetIds[0], adSetIds, adIds, orphans: [] }
 }
 
 /**
@@ -264,4 +418,32 @@ export async function activatePublished(
     if (!r.ok) return { ok: false, error: `开 ${id} 失败：${r.error}` }
   }
   return { ok: true }
+}
+
+/**
+ * 补一刀暂停：回读发现有东西不是暂停的时候用（`created-as-expected` 的 `not_paused`）。
+ *
+ * 三层都试，**不在第一个失败时停** —— 此时的目标是尽量多地让钱停下来，不是保持顺序。
+ * 失败的 id 如实返回，由调用方记账让人看见。
+ */
+export async function pausePublished(
+  p: Pick<PublishedDraft, 'campaignId' | 'adSetId' | 'adIds'> & { adSetIds?: readonly string[] },
+  accessToken: string,
+  opts: { deadlineAt?: number; now?: () => number } = {},
+): Promise<{ ok: boolean; failed: string[] }> {
+  const now = opts.now ?? Date.now
+  // 同时发：此刻的目标是尽快让钱停下来，不是保持顺序；串行最坏 (N+2)×15 秒。
+  const ids = [...new Set([...p.adIds, ...(p.adSetIds ?? []), p.adSetId, p.campaignId])]
+  const results = await Promise.all(
+    ids.map(async (id): Promise<string | null> => {
+      // 有顶：整次请求不能因为补暂停拖过平台的超时线。没来得及的如实报出来。
+      if (opts.deadlineAt !== undefined && now() > opts.deadlineAt) {
+        return `${id}：整次请求的时间用完了，没来得及`
+      }
+      const r = await graphUpdate(id, { status: 'PAUSED' }, accessToken)
+      return r.ok ? null : `${id}：${r.error}`
+    }),
+  )
+  const failed = results.filter((x): x is string => x !== null)
+  return { ok: failed.length === 0, failed }
 }

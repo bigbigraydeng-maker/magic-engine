@@ -101,6 +101,14 @@ function makeRequest(body: unknown) {
 
 const CTX = { params: { id: CLIENT_ID } }
 
+const ALLOW_ACCESS: Awaited<ReturnType<typeof requirePaidClientAccess>> = {
+  ok: true,
+  user: { id: 'test-user', email: 'test@magiclab.com' } as never,
+  role: 'admin',
+  tier: 'admin',
+  allowedClientId: null,
+}
+
 /** Utility: mock supabaseAdmin chain for geo_directives with configurable result */
 function mockDirectiveFetch(data: unknown, error: { message: string } | null = null) {
   const chainResult = { data, error }
@@ -157,7 +165,7 @@ describe('POST /api/clients/[id]/cms/publish-geo-snippet', () => {
   // ── 2. Input validation ──────────────────────────────────────────────────────
 
   it('returns 400 when provider is missing', async () => {
-    mockAuth.mockResolvedValue({ ok: true })
+    mockAuth.mockResolvedValue(ALLOW_ACCESS)
 
     const res = await POST(makeRequest({}), CTX)
     expect(res.status).toBe(400)
@@ -166,14 +174,14 @@ describe('POST /api/clients/[id]/cms/publish-geo-snippet', () => {
   })
 
   it('returns 400 when provider is an unknown value', async () => {
-    mockAuth.mockResolvedValue({ ok: true })
+    mockAuth.mockResolvedValue(ALLOW_ACCESS)
 
     const res = await POST(makeRequest({ provider: 'squarespace' }), CTX)
     expect(res.status).toBe(400)
   })
 
   it('returns 400 when body is invalid JSON', async () => {
-    mockAuth.mockResolvedValue({ ok: true })
+    mockAuth.mockResolvedValue(ALLOW_ACCESS)
     const badReq = new NextRequest(
       `http://localhost:3001/api/clients/${CLIENT_ID}/cms/publish-geo-snippet`,
       { method: 'POST', body: 'not-json', headers: { 'Content-Type': 'application/json' } },
@@ -186,7 +194,7 @@ describe('POST /api/clients/[id]/cms/publish-geo-snippet', () => {
   // ── 3. No active directive ───────────────────────────────────────────────────
 
   it('returns 404 when no active GEO directive exists', async () => {
-    mockAuth.mockResolvedValue({ ok: true })
+    mockAuth.mockResolvedValue(ALLOW_ACCESS)
     mockDirectiveFetch(null)
 
     const res = await POST(makeRequest({ provider: 'wordpress' }), CTX)
@@ -196,7 +204,7 @@ describe('POST /api/clients/[id]/cms/publish-geo-snippet', () => {
   })
 
   it('returns 500 when geo_directives fetch errors', async () => {
-    mockAuth.mockResolvedValue({ ok: true })
+    mockAuth.mockResolvedValue(ALLOW_ACCESS)
     mockDirectiveFetch(null, { message: 'connection timeout' })
 
     const res = await POST(makeRequest({ provider: 'wordpress' }), CTX)
@@ -206,7 +214,7 @@ describe('POST /api/clients/[id]/cms/publish-geo-snippet', () => {
   // ── 4. No CMS connection ─────────────────────────────────────────────────────
 
   it('returns 422 when WordPress connection is missing', async () => {
-    mockAuth.mockResolvedValue({ ok: true })
+    mockAuth.mockResolvedValue(ALLOW_ACCESS)
     mockDirectiveFetch(MOCK_DIRECTIVE)
     mockGetWp.mockResolvedValue(null)
 
@@ -217,7 +225,7 @@ describe('POST /api/clients/[id]/cms/publish-geo-snippet', () => {
   })
 
   it('returns 422 when Shopify connection is not verified', async () => {
-    mockAuth.mockResolvedValue({ ok: true })
+    mockAuth.mockResolvedValue(ALLOW_ACCESS)
     mockDirectiveFetch(MOCK_DIRECTIVE)
     mockGetShopify.mockResolvedValue({
       status:    'error',
@@ -234,7 +242,7 @@ describe('POST /api/clients/[id]/cms/publish-geo-snippet', () => {
   // ── 5. WordPress happy path ───────────────────────────────────────────────────
 
   it('publishes to WordPress and returns published_url', async () => {
-    mockAuth.mockResolvedValue({ ok: true })
+    mockAuth.mockResolvedValue(ALLOW_ACCESS)
     mockDirectiveAndUpdate(MOCK_DIRECTIVE)
 
     mockGetWp.mockResolvedValue({
@@ -245,7 +253,7 @@ describe('POST /api/clients/[id]/cms/publish-geo-snippet', () => {
     } as unknown as Awaited<ReturnType<typeof getWordpressConnection>>)
 
     mockWpDraft.mockResolvedValue({ platformId: 'wp-123', previewUrl: WP_URL } as unknown as Awaited<ReturnType<typeof createWordpressPageDraft>>)
-    mockWpPublish.mockResolvedValue(undefined)
+    mockWpPublish.mockResolvedValue({ link: WP_URL })
 
     const res = await POST(makeRequest({ provider: 'wordpress' }), CTX)
     expect(res.status).toBe(200)
@@ -260,7 +268,7 @@ describe('POST /api/clients/[id]/cms/publish-geo-snippet', () => {
   // ── 6. Shopify happy path ─────────────────────────────────────────────────────
 
   it('publishes to Shopify and returns published_url', async () => {
-    mockAuth.mockResolvedValue({ ok: true })
+    mockAuth.mockResolvedValue(ALLOW_ACCESS)
     mockDirectiveAndUpdate(MOCK_DIRECTIVE)
 
     mockGetShopify.mockResolvedValue({

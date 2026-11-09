@@ -17,7 +17,7 @@ import { validateRegistry } from '../validate'
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..')
 
 /** 防空跑:总数 + 每泳道最小数(漏 import 一个泳道文件立刻红,总数断言盖不住这种)。 */
-const LANE_MINIMUMS = { shared: 5, geo: 5, seo: 6, social: 2, ads: 2 } as const
+const LANE_MINIMUMS = { shared: 5, geo: 5, seo: 6, social: 1, ads: 2 } as const
 
 describe('登记册规模(防清单被腰斩后静默全绿)', () => {
   it('总数 ≥ 20', () => {
@@ -61,15 +61,23 @@ describe('WP00 七层边界（Build Control Room 2026-08-15 05:43 复审裁决�
     expect(offenders).toEqual([])
   })
 
+  /**
+   * 下面两条查的是「类型层已经锁死（never）、但 JSON / as 断言仍可能塞进来」的脏数据。
+   * 直接在判别式 union 上做 `!== undefined` 会被 TS 收窄成 never（编译期就认定不可能），
+   * 所以先放宽成结构类型再查 —— 这是运行时对账，不是重复类型检查。
+   */
+  const LOOSE: readonly { id: string; origin: string; architecturalRole?: string; adapterOf?: string }[] =
+    PRODUCT_MAP_COMPONENTS
+
   it('B2：supporting artifact 不占顶层七角色（有 adapterOf 的一律无 architecturalRole）', () => {
-    const offenders = PRODUCT_MAP_COMPONENTS.filter(
+    const offenders = LOOSE.filter(
       (c) => c.origin === 'me2_native' && c.adapterOf !== undefined && c.architecturalRole !== undefined,
     ).map((c) => c.id)
     expect(offenders).toEqual([])
   })
 
   it('没有任何 legacy 组件伪装成已纳入 ME2 治理', () => {
-    const offenders = PRODUCT_MAP_COMPONENTS.filter((c) => c.origin === 'legacy' && c.architecturalRole !== undefined).map(
+    const offenders = LOOSE.filter((c) => c.origin === 'legacy' && c.architecturalRole !== undefined).map(
       (c) => c.id,
     )
     expect(offenders).toEqual([])

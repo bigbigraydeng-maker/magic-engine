@@ -62,6 +62,37 @@ describe('verifyActionLink', () => {
     expect((await verifyActionLink('https://nope.invalid/a', f as never)))
       .toEqual({ kind: 'broken', status: null })
   })
+
+  it(
+    '🔴 2026-09-15 排查 /dashboard/today 卡死顺手补的隐患: 每次 fetch(HEAD 和退化的 GET)都必须带 ' +
+    'AbortSignal 超时——否则一个响应慢/卡住的公开网址会让 dropBrokenLinks 的 Promise.all 永远不 ' +
+    'resolve，整个今日待办接口跟着挂起且不报错，一直到平台自己的请求超时（如果有）才会结束',
+    async () => {
+      const f = vi.fn()
+        .mockResolvedValueOnce({ ok: false, status: 405 }) // 逼出退化 GET 那一次调用
+        .mockResolvedValueOnce({ ok: true, status: 200 })
+      await verifyActionLink('https://example.com/a', f as never)
+      expect(f).toHaveBeenCalledTimes(2)
+      for (const call of f.mock.calls) {
+        const [, options] = call
+        expect(options?.signal).toBeInstanceOf(AbortSignal)
+      }
+    },
+  )
+
+  it('一个真的挂起不返回、直到被 abort 才拒绝的 fetch 最终会被判成 broken，不会让调用方无限期挂着', async () => {
+    const hangingFetch: typeof fetch = (_url, init) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal as AbortSignal | undefined
+        // 不真的等 8 秒——直接模拟"信号已经 abort"这一刻的行为，验证的是
+        // "abort 之后 fetch 会 reject、verifyActionLink 会把它接住判 broken"
+        // 这条因果链，不是在测 AbortSignal.timeout 本身准不准时。
+        if (signal) signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'TimeoutError')))
+        queueMicrotask(() => signal?.dispatchEvent(new Event('abort')))
+      })
+    const result = await verifyActionLink('https://slow.example.com/a', hangingFetch)
+    expect(result).toEqual({ kind: 'broken', status: null })
+  })
 })
 
 describe('GSC 入口与步骤', () => {

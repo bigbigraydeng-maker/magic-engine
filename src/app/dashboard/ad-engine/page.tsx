@@ -15,10 +15,20 @@
 
 import Link from 'next/link'
 import { supabaseAdmin } from '@/lib/supabase'
-import { breakdownByParent, type AdInsightRow } from '@/lib/ads-strategy/ad-level-breakdown'
+import {
+  AD_INSIGHT_SELECT,
+  adInsightRowFromDb,
+  breakdownByParent,
+  type AdInsightRow,
+} from '@/lib/ads-strategy/ad-level-breakdown'
 import { summariseIndustryCoverage, type ClientIndustryRow } from '@/lib/memory/industry-coverage'
 import { INDUSTRY_OPTIONS } from '@/lib/clients/industries'
 import LessonToggle from './_components/LessonToggle'
+import LessonVerify, { type SiteOption } from './_components/LessonVerify'
+import LessonTrial from './_components/LessonTrial'
+import AutoJudgeAll from './_components/AutoJudgeAll'
+import AiVerdictBanner from './_components/AiVerdictBanner'
+import { trialSampleFor } from '@/lib/agent-learning/lesson-trial/eligibility'
 
 export const dynamic = 'force-dynamic'
 
@@ -81,14 +91,16 @@ async function loadBreakdowns(): Promise<ClientBreakdown[]> {
   // 顺带：汇总数字本来就该有时间窗。拿半年前的花费跟这周的比，结论必然是歪的。
   const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10)
 
-  const { data: rows } = await supabaseAdmin
+  const { data: rows, error } = await supabaseAdmin
     .from('ad_daily_insights')
-    .select('client_id, entity_id, entity_name, parent_id, spend, results, impressions, date')
+    .select(AD_INSIGHT_SELECT)
     .eq('level', 'ad')
-    .gte('date', since)
-    .order('date', { ascending: false })
+    .gte('insight_date', since)
+    .order('insight_date', { ascending: false })
     .limit(ROW_LIMIT)
 
+  // 查询出错必须抛出来 —— 之前查了不存在的 `date` 列，报错被吞，页面一直显示「没数据」。
+  if (error) throw new Error(`[ad-engine] 读取广告级数据失败：${error.message}`)
   if (!rows || rows.length === 0) return []
   // 真撞到上限就说出来 —— 不说的话，这页读起来像「全都算过了」。
   if (rows.length >= ROW_LIMIT) {
@@ -105,14 +117,7 @@ async function loadBreakdowns(): Promise<ClientBreakdown[]> {
   for (const r of rows) {
     const cid = r.client_id as string
     const list = byClient.get(cid) ?? []
-    list.push({
-      entityId:    r.entity_id as string,
-      entityName:  (r.entity_name as string | null) ?? (r.entity_id as string),
-      parentId:    r.parent_id as string | null,
-      spend:       Number(r.spend ?? 0),
-      results:     Number(r.results ?? 0),
-      impressions: Number(r.impressions ?? 0),
-    })
+    list.push(adInsightRowFromDb(r))
     byClient.set(cid, list)
   }
 
@@ -158,12 +163,16 @@ async function loadIndustryCoverage() {
 }
 
 export default async function AdEnginePage() {
-  const [lessons, breakdowns, coverage] = await Promise.all([
+  const [lessons, breakdowns, coverage, siteRows] = await Promise.all([
     loadLessons(), loadBreakdowns(), loadIndustryCoverage(),
+    supabaseAdmin.from('clients').select('id, name, domain'),
   ])
+  const allClients: SiteOption[] = (siteRows.data ?? []).map(c => ({ id: c.id as string, name: c.name as string }))
+  const sites: SiteOption[] = (siteRows.data ?? []).filter(c => c.domain).map(c => ({ id: c.id as string, name: c.name as string }))
 
   const active = lessons.filter(l => l.is_active)
-  const retired = lessons.filter(l => !l.is_active)
+  const trialable = lessons.filter(l => !l.is_active && trialSampleFor(l.lesson_key, l.evidence?.kind))
+  const retired = lessons.filter(l => !l.is_active && !trialable.some(t => t.lesson_key === l.lesson_key))
   const divergentCount = breakdowns.reduce(
     (n, c) => n + c.parents.filter(p => p.verdict === 'divergent').length, 0)
 
@@ -199,9 +208,24 @@ export default async function AdEnginePage() {
             </p>
           )}
           {active.map(l => (
-            <LessonCard key={l.lesson_key} lesson={l} />
+            <LessonCard key={l.lesson_key} lesson={l} sites={sites} clients={allClients} />
           ))}
         </div>
+
+        {trialable.length > 0 && (
+          <details open className="mt-6">
+            <summary className="cursor-pointer text-sm font-medium text-slate-800 hover:text-slate-900">
+              待试的专家经验（{trialable.length} 条）
+            </summary>
+            <p className="mt-2 text-sm text-slate-600">
+              AI 会自己对比有/没有这条经验的效果并给结论，只是测试，不会正式启用。
+            </p>
+            <AutoJudgeAll pending={trialable.filter(l => !l.evidence?.ai_verdict).length} />
+            <div className="mt-3 space-y-3">
+              {trialable.map(l => <LessonCard key={l.lesson_key} lesson={l} sites={sites} clients={allClients} />)}
+            </div>
+          </details>
+        )}
 
         {retired.length > 0 && (
           <details className="mt-6">
@@ -209,7 +233,7 @@ export default async function AdEnginePage() {
               已停用的 {retired.length} 条
             </summary>
             <div className="mt-3 space-y-3 opacity-60">
-              {retired.map(l => <LessonCard key={l.lesson_key} lesson={l} />)}
+              {retired.map(l => <LessonCard key={l.lesson_key} lesson={l} sites={sites} clients={allClients} />)}
             </div>
           </details>
         )}
@@ -345,8 +369,11 @@ export default async function AdEnginePage() {
   )
 }
 
-function LessonCard({ lesson: l }: { lesson: LessonRow }) {
+function LessonCard({ lesson: l, sites, clients }: { lesson: LessonRow; sites: SiteOption[]; clients: SiteOption[] }) {
   const redacted = Boolean(l.evidence && 'original_rationale' in l.evidence)
+  const expertSource = l.evidence?.kind === 'expert_rss_candidate' && typeof l.evidence.expert === 'string'
+    ? l.evidence.expert
+    : null
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex items-start justify-between gap-4">
@@ -358,6 +385,11 @@ function LessonCard({ lesson: l }: { lesson: LessonRow }) {
             </span>
             {l.flywheel && (
               <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">{l.flywheel}</span>
+            )}
+            {expertSource && (
+              <span className="rounded bg-sky-50 px-2 py-0.5 text-[11px] text-sky-800 ring-1 ring-sky-200">
+                来源：{expertSource}
+              </span>
             )}
             <span className="text-[11px] text-slate-400">
               置信 {Number(l.confidence).toFixed(2)}
@@ -377,6 +409,14 @@ function LessonCard({ lesson: l }: { lesson: LessonRow }) {
         </div>
         <LessonToggle lessonKey={l.lesson_key} isActive={l.is_active} />
       </div>
+      <LessonVerify lessonKey={l.lesson_key} lesson={l.lesson} rationale={l.rationale} sites={sites} clients={clients} />
+      {!l.is_active && <AiVerdictBanner verdict={l.evidence?.ai_verdict} />}
+      {!l.is_active && trialSampleFor(l.lesson_key, l.evidence?.kind) && (
+        <details className="mt-2 text-xs">
+          <summary className="cursor-pointer text-slate-500">手动再试一次 / 自己决定</summary>
+          <LessonTrial lessonKey={l.lesson_key} />
+        </details>
+      )}
     </div>
   )
 }

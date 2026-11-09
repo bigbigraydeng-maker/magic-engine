@@ -74,7 +74,7 @@ interface PageHealthRow {
  */
 export async function GET(
   _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: { params: { id: string } },
 ) {
   const access = await requirePaidClientAccess(params.id)
   if (!access.ok) {
@@ -86,7 +86,7 @@ export async function GET(
     return NextResponse.json({ error: session.error }, { status: session.status })
   }
 
-  const { id: clientId } = await params
+  const { id: clientId } = params
 
   const [gscHistory, ga4History] = await Promise.all([
     fetchGscHistory(clientId),

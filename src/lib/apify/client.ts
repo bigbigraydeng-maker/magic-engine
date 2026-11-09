@@ -1,4 +1,4 @@
-import type { ApifyRunResult, ApifyScrapingResult } from './types'
+import type { ApifyRunResult, ApifyScrapingResult, ApifyStartOptions } from './types'
 
 const APIFY_BASE = 'https://api.apify.com/v2'
 const POLL_INTERVAL_MS = 3000
@@ -17,14 +17,19 @@ function normalizeActorId(actorId: string): string {
 
 export async function runActor(
   actorId: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  options: ApifyStartOptions = {},
 ): Promise<ApifyRunResult> {
-  const token = getApifyKey()
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(options)) {
+    if (value !== undefined) query.set(key, String(value))
+  }
   const res = await fetch(
-    `${APIFY_BASE}/acts/${normalizeActorId(actorId)}/runs?token=${token}`,
+    `${APIFY_BASE}/acts/${normalizeActorId(actorId)}/runs?${query}`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(60_000),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getApifyKey()}` },
       body: JSON.stringify(input),
     }
   )
@@ -39,25 +44,14 @@ export async function runActor(
 }
 
 export async function waitForRun(
-  actorId: string,
+  _actorId: string,
   runId: string,
   timeoutMs = 120000
 ): Promise<ApifyRunResult> {
-  const token = getApifyKey()
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    const res = await fetch(
-      `${APIFY_BASE}/acts/${normalizeActorId(actorId)}/runs/${runId}?token=${token}`
-    )
-
-    if (!res.ok) {
-      const err = await res.text()
-      throw new Error(`Apify waitForRun poll error ${res.status}: ${err}`)
-    }
-
-    const json = await res.json() as { data: ApifyRunResult }
-    const run = json.data
+    const run = await getRun(runId)
 
     if (run.status === 'SUCCEEDED' || run.status === 'FAILED' ||
         run.status === 'TIMED-OUT' || run.status === 'ABORTED') {
@@ -76,9 +70,9 @@ export async function waitForRun(
 }
 
 export async function getDatasetItems<T>(datasetId: string): Promise<T[]> {
-  const token = getApifyKey()
   const res = await fetch(
-    `${APIFY_BASE}/datasets/${datasetId}/items?token=${token}`
+    `${APIFY_BASE}/datasets/${encodeURIComponent(datasetId)}/items`,
+    { headers: { Authorization: `Bearer ${getApifyKey()}` }, signal: AbortSignal.timeout(30_000) },
   )
 
   if (!res.ok) {
@@ -121,4 +115,25 @@ export async function runActorAndGetResults<T>(
       error: err instanceof Error ? err.message : String(err),
     }
   }
+}
+
+/** Read/abort a persisted run without starting another paid Actor. */
+async function requestRun(runId: string, abort = false): Promise<ApifyRunResult> {
+  if (!/^[a-zA-Z0-9]+$/.test(runId)) throw new Error('Invalid Apify run ID')
+  const res = await fetch(`${APIFY_BASE}/actor-runs/${runId}${abort ? '/abort' : ''}`, {
+    method: abort ? 'POST' : 'GET',
+    signal: AbortSignal.timeout(30_000),
+    headers: { Authorization: `Bearer ${getApifyKey()}` },
+  })
+  if (!res.ok) throw new Error(`Apify ${abort ? 'abortRun' : 'getRun'} error ${res.status}`)
+  const json = await res.json() as { data: ApifyRunResult }
+  return json.data
+}
+
+export function getRun(runId: string): Promise<ApifyRunResult> {
+  return requestRun(runId)
+}
+
+export function abortRun(runId: string): Promise<ApifyRunResult> {
+  return requestRun(runId, true)
 }

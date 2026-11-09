@@ -9,7 +9,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import {
   SOURCE_LABELS,
@@ -107,14 +107,22 @@ function AssetCard({
   asset,
   clientId,
   onChanged,
+  highlighted = false,
 }: {
   asset: ClientAsset
   clientId: string
   onChanged: () => void
+  /** 从「待办」深链跳进来点名要看这张图——默认展开 + 加一圈提示框，省得在网格里大海捞针。 */
+  highlighted?: boolean
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(highlighted)
   const [saving, setSaving] = useState(false)
+  const cardRef = useRef<HTMLDivElement>(null)
   const vm = asset.vision_metadata
+
+  useEffect(() => {
+    if (highlighted) cardRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [highlighted])
 
   async function setSource(next: AssetSource) {
     setSaving(true)
@@ -132,7 +140,12 @@ function AssetCard({
 
   return (
     <div
-      className="bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden cursor-pointer hover:border-zinc-600 transition-colors"
+      ref={cardRef}
+      className={`bg-zinc-900 border rounded-lg overflow-hidden cursor-pointer transition-colors ${
+        highlighted
+          ? 'border-orange-400 ring-2 ring-orange-400 ring-offset-1 ring-offset-zinc-950'
+          : 'border-zinc-800 hover:border-zinc-600'
+      }`}
       onClick={() => setExpanded(e => !e)}
     >
       {/* Thumbnail */}
@@ -617,7 +630,7 @@ function StoryboardPanel({
               <div className="flex items-center justify-between bg-emerald-950/40 border border-emerald-700/40 rounded-lg px-4 py-3">
                 <div>
                   <p className="text-xs font-medium text-emerald-300">✓ 已发送到内容看板</p>
-                  <p className="text-[11px] text-emerald-600 mt-0.5">可在 Launch Hub → Reels Studio 查看并生成视频</p>
+                  <p className="text-[11px] text-emerald-600 mt-0.5">可在执行看板 → 短视频（Reels Studio）查看并生成视频</p>
                 </div>
                 <Link
                   href={`/dashboard/clients/${clientId}/execution`}
@@ -688,6 +701,9 @@ function StoryboardPanel({
 export default function AssetsPage() {
   const params = useParams()
   const clientId = typeof params.id === 'string' ? params.id : Array.isArray(params.id) ? params.id[0] : ''
+  // 从「今日待办」深链跳进来的目标图（?highlight=<assetId>）——待办卡片点名要看哪张图，
+  // 不能让 PM 落地后还要在整个素材库里自己找。
+  const highlightId = useSearchParams().get('highlight')
 
   const [assets, setAssets] = useState<ClientAsset[]>([])
   const [loading, setLoading] = useState(true)
@@ -780,7 +796,13 @@ export default function AssetsPage() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
             {filtered.map(asset => (
-              <AssetCard key={asset.id} asset={asset} clientId={clientId} onChanged={loadAssets} />
+              <AssetCard
+                key={asset.id}
+                asset={asset}
+                clientId={clientId}
+                onChanged={loadAssets}
+                highlighted={asset.id === highlightId}
+              />
             ))}
           </div>
         )}

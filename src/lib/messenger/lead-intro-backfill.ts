@@ -36,6 +36,14 @@ const PAGE = 200
  */
 const MAX_PAGES = 25
 
+/**
+ * 一次 `.in()` 里塞多少个 id。
+ *
+ * PostgREST 把 `in.(...)` 拼进 URL，太长会被网关按超长 URL 拒掉。200 个 uuid
+ * 约 7.6KB，离常见的 8~16KB 上限还有余量，也让往返次数保持在个位数。
+ */
+const IN_CHUNK = 200
+
 export interface LeadIntroBackfillResult {
   /** 这一轮真正翻过私信的人数。 */
   scanned: number
@@ -65,6 +73,39 @@ interface MessageRow {
  * 一页页扫完。代价是每轮会重扫那些补不上的人 —— CTS 这个量级（几百人）可以接受，
  * 真到需要省这几百次查询的规模，就该换成给「试过补不上」打标。
  */
+/**
+ * 一页 1000 行地读完，而不是发一次请求就当读全了。
+ *
+ * 🔴 **Supabase 的 API 默认最多返回 1000 行，而且不报错**。批量查询（`.in(...)`）
+ *    一不小心就会踩到：拿回 1000 行、以为这就是全部，剩下的静默消失。放在这里的后果是
+ *    某个人的开场白那条消息被截掉 → 他的电话邮箱永远补不上 → CRM 卡片继续写着
+ *    「没留电话」。这类「答案是错的但没人报错」正是本仓最不能接受的失败方式。
+ *
+ * 读失败返回 `null`（不是空数组）：空数组跟「这个客户真的没有对话」长得一模一样。
+ */
+async function readAllPages<T>(
+  query: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
+  what: string,
+): Promise<T[] | null> {
+  const PAGE_ROWS = 1000
+  const out: T[] = []
+  for (let page = 0; ; page++) {
+    const { data, error } = await query(page * PAGE_ROWS, page * PAGE_ROWS + PAGE_ROWS - 1)
+    if (error) {
+      console.error(`[messenger/lead-intro-backfill] ${what}失败:`, error.message)
+      return null
+    }
+    const rows = (data ?? []) as T[]
+    out.push(...rows)
+    if (rows.length < PAGE_ROWS) return out
+    // 安全阀：真到这个量级说明客户规模变了，该换做法而不是一直翻下去。
+    if (page >= MAX_PAGES - 1) {
+      console.warn(`[messenger/lead-intro-backfill] ${what}超过 ${MAX_PAGES * PAGE_ROWS} 行，本轮未读完`)
+      return out
+    }
+  }
+}
+
 export async function backfillLeadIntroDetails(
   clientId: string,
   page: number = PAGE,
@@ -107,35 +148,98 @@ export async function backfillLeadIntroDetails(
     return empty
   }
 
+  /**
+   * 🔴 **对话和消息一次性取回来，不按人逐个查**（2026-09-07 改）。
+   *
+   * 原来是每个候选人两次查询（先查他的对话、再查那些对话的入站消息）。CTS + Roman
+   * 这个量级是 314 个候选人 → **628 次串行往返**，把这条每小时任务从约 25 秒推到
+   * 约 140 秒。而网关约 125 秒就掐断连接返 524 —— 串在它后面的「写客户需求卡」
+   * 因此 14 天一次都没跑（见 `sync-completed-event.ts`）。
+   *
+   * 现在：1 次查对话 + 按 `IN_CHUNK` 分几次查消息，往返次数从三位数降到个位数。
+   * 判据一个字没改 —— 只是把「一个人查一次」换成「一批人查一次，在内存里分组」。
+   *
+   * 量级安全：CTS 是最大的一个，593 条已挂人的私信对话共 1106 条入站消息、约 0.26 MB
+   * （2026-09-07 实测）。真涨到装不下的那天，该做的是给「试过补不上」打标，
+   * 不是退回逐人查询。
+   */
+  const contactIds = contacts.map((c) => c.id)
+  const messagesByContact = new Map<string, { direction: 'inbound' | 'outbound'; body: string; sentAt: string }[]>()
+
+  try {
+    // 这个客户名下、已挂在候选人身上的私信对话 → conversationId ↦ contactId。
+    const convoOwner = new Map<string, string>()
+    for (let i = 0; i < contactIds.length; i += IN_CHUNK) {
+      const slice = contactIds.slice(i, i + IN_CHUNK)
+      const rows = await readAllPages<{ id: string; contact_id: string | null }>(
+        (from, to) =>
+          supabaseAdmin
+            .from('conversations')
+            .select('id, contact_id')
+            .eq('client_id', clientId)
+            .eq('channel', 'messenger')
+            .in('contact_id', slice)
+            // 稳定排序 —— 分页边界上的行会在两次请求间换位，重复或漏行。
+            .order('id', { ascending: true })
+            .range(from, to),
+        '读对话',
+      )
+      if (!rows) return empty
+      for (const row of rows) if (row.contact_id) convoOwner.set(row.id, row.contact_id)
+    }
+
+    const convoIds = Array.from(convoOwner.keys())
+    for (let i = 0; i < convoIds.length; i += IN_CHUNK) {
+      const slice = convoIds.slice(i, i + IN_CHUNK)
+      const rows = await readAllPages<MessageRow & { conversation_id: string }>(
+        (from, to) =>
+          supabaseAdmin
+            .from('conversation_messages')
+            .select('conversation_id, direction, body, sent_at')
+            .in('conversation_id', slice)
+            .eq('direction', 'inbound')
+            // 排序仍按 sent_at —— 判据要「按字段各取最新非空值」，顺序不能乱。
+            // 同刻并列时用 id 兜底，否则分页边界会重复或漏行。
+            .order('sent_at', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, to),
+        '读消息',
+      )
+      if (!rows) return empty
+      for (const m of rows) {
+        const owner = convoOwner.get(m.conversation_id)
+        if (!owner) continue
+        const list = messagesByContact.get(owner) ?? []
+        list.push({ direction: m.direction, body: m.body ?? '', sentAt: m.sent_at })
+        messagesByContact.set(owner, list)
+      }
+    }
+  } catch (err) {
+    console.error(
+      '[messenger/lead-intro-backfill] 批量读取抛异常:',
+      err instanceof Error ? err.message : String(err),
+    )
+    return empty
+  }
+
+  /**
+   * 🔴 同一个人可能有不止一条私信对话，分块取回来之后**必须重新按时间排一遍**。
+   *    分块只保证块内有序；跨块拼起来是「块 1 的全部 + 块 2 的全部」，
+   *    时间上是乱的。而判据要的是「按字段各取最新非空值」—— 顺序错了，
+   *    客人后来更正过的号码会被更早那条盖回去。
+   */
+  for (const list of messagesByContact.values()) {
+    list.sort((a, b) => a.sentAt.localeCompare(b.sentAt))
+  }
+
   let scanned = 0
   let matched = 0
 
   for (const c of contacts) {
     // 逐个隔离：一个人的数据坏了不牵连这一批剩下的。
     try {
-      const { data: convos } = await supabaseAdmin
-        .from('conversations')
-        .select('id')
-        .eq('client_id', clientId)
-        .eq('channel', 'messenger')
-        .eq('contact_id', c.id)
-
-      const ids = ((convos ?? []) as { id: string }[]).map((x) => x.id)
-      if (ids.length === 0) continue
-
-      const { data: msgs } = await supabaseAdmin
-        .from('conversation_messages')
-        .select('direction, body, sent_at')
-        .in('conversation_id', ids)
-        .eq('direction', 'inbound')
-        .order('sent_at', { ascending: true })
-
-      const messages = ((msgs ?? []) as MessageRow[]).map((m) => ({
-        direction: m.direction,
-        body: m.body ?? '',
-        sentAt: m.sent_at,
-      }))
-      if (messages.length === 0) continue
+      const messages = messagesByContact.get(c.id)
+      if (!messages || messages.length === 0) continue
 
       scanned++
       // 判据只有一份 —— 认不认得出、补不补得进，全在那边判。

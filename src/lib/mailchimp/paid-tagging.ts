@@ -36,7 +36,7 @@ import {
   looksLikeCustomerAddress,
   isForwardedSubject,
 } from './paid-signal'
-import { applyMemberTags, type MailchimpTagsConfig } from './tags'
+import { applyMemberTags, findMemberByEmail, type MailchimpTagsConfig } from './tags'
 
 /** 一封待判定的邮件。字段刻意只取 `microsoft/mail-graph` 已经给的那些。 */
 export interface CandidateMail {
@@ -76,6 +76,20 @@ export interface PaidTaggingPolicy {
 
 export const DEFAULT_PAID_TAG = 'paid_customer'
 
+/**
+ * 从 `clients.leads_config` 里读这个客户的付费标签名。
+ *
+ * 🔴 单一来源：写入侧（cron 的 `readPolicy`）和读取侧（今日待办的已处理过滤）
+ * 必须用**同一个**标签名，否则一边打 `paid_customer`、另一边查 `vip`，
+ * 过滤永远不命中，待办会一直重复冒出来 —— 而且这种不一致完全静默。
+ * 本仓已经因为「两份解析规则各写一套」栽过跟头（见 `tags.ts` 头注）。
+ */
+export function readPaidTag(leadsConfig: unknown): string {
+  const cfg = (leadsConfig ?? {}) as { paid_tagging?: { paid_tag?: unknown } }
+  const raw = cfg.paid_tagging?.paid_tag
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : DEFAULT_PAID_TAG
+}
+
 export interface PaidTaggingResult {
   scanned: number
   /** 自动打上标签的人（含摘掉的线索标签）。 */
@@ -92,6 +106,59 @@ export interface PaidTaggingResult {
 
 function emptyResult(): PaidTaggingResult {
   return { scanned: 0, tagged: [], needsReview: [], notInAudience: [], chasing: [], errors: [] }
+}
+
+/**
+ * needs_review 确认闸的并发与总预算 —— 跟 `paid-review-filter.ts` 读取侧同一条
+ * 纪律（Codex P1 复审 PR #1484 round 2）：一次扫描可能命中几十个不同邮箱，
+ * 串行 `findMemberByEmail` 按默认 20s 超时等下去，会在写完 `needsReview` 前
+ * 就被调用方的整体时限（`render.yaml` 的 curl `--max-time 620` / 路由
+ * `maxDuration 600`，且一次运行还要跑多个客户邮箱）杀掉。
+ *
+ * 预算到点后不再发起新查询，没来得及查的候选人一律保留在 needsReview 里
+ * （fail-open —— 宁可多提醒一次，不能让一条真待处理的确认静默消失）。
+ *
+ * 🔴 这个预算必须是**整次 cron 运行共享一份**，不是每个邮箱各领 15 秒
+ * （Codex P2 复审 PR #1484 round 3）：路由按连接串行调用 `runPaidTagging`
+ * （见 `route.ts`），如果每次调用都重新起 15 秒读秒，命中待复核候选的邮箱
+ * 一多，总耗时会累加到超过路由 `maxDuration 600` / `render.yaml` 的
+ * `curl --max-time 620`。所以截止时间由调用方算好、通过 `RunOptions.
+ * reviewCheckDeadline` 传进来，这里只在没传时（比如单测）兜底给一个默认值。
+ */
+export const REVIEW_CHECK_CONCURRENCY = 5
+export const REVIEW_CHECK_TIMEOUT_MS = 5_000
+export const REVIEW_CHECK_BUDGET_MS = 15_000
+
+/** 有界并发反查一批邮箱，返回其中已经打过 paidTag 的那些。 */
+async function findAlreadyPaidEmails(
+  cfg: MailchimpTagsConfig,
+  paidTag: string,
+  emails: readonly string[],
+  deadline: number,
+): Promise<Set<string>> {
+  const confirmed = new Set<string>()
+  if (emails.length === 0) return confirmed
+
+  const lookupCfg = { ...cfg, timeoutMs: cfg.timeoutMs ?? REVIEW_CHECK_TIMEOUT_MS }
+  const concurrency = Math.max(1, Math.min(REVIEW_CHECK_CONCURRENCY, emails.length))
+  let nextIndex = 0
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = nextIndex++
+      if (i >= emails.length) return
+      // 预算用完 —— 不再发起新查询，剩下的候选人保持默认「还没确认」。
+      if (Date.now() >= deadline) return
+
+      const found = await findMemberByEmail(lookupCfg, emails[i])
+      if (found.status === 'found' && found.member.tags.includes(paidTag)) {
+        confirmed.add(emails[i])
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()))
+  return confirmed
 }
 
 /** 主题 + 摘要拼成可搜文本 —— 确认句可能只出现在其中一处。 */
@@ -115,6 +182,14 @@ export interface RunOptions {
    * 标签是不是已经对了，预演出来的数字会比真跑虚高一大截，等于没预演。
    */
   dryRun?: boolean
+  /**
+   * needs_review 反查 Mailchimp 的共享截止时间（`Date.now()` 同一时钟的毫秒
+   * 时间戳）。一次 cron 运行要按连接串行调用多次 `runPaidTagging`，这个值
+   * 必须由调用方在循环开始前算一次、每次调用都传同一个，否则预算会按连接数
+   * 成倍累加（Codex P2 复审 PR #1484 round 3）。不传就按单次调用兜底给
+   * `REVIEW_CHECK_BUDGET_MS`——仅供单测/单次调用场景使用。
+   */
+  reviewCheckDeadline?: number
 }
 
 export async function runPaidTagging(
@@ -125,6 +200,10 @@ export async function runPaidTagging(
 ): Promise<PaidTaggingResult> {
   const out = emptyResult()
   const alreadyTagged = new Set<string>()
+  // needs_review 候选先攒起来，反查 Mailchimp 挪到循环结束后统一做有界并发批量
+  // 查询（见 `findAlreadyPaidEmails`），不在这里逐个 await——避免几十个不同
+  // 邮箱串行等 20s 默认超时，累计吃满调用方的整体时限。
+  const pendingReview: PaidTaggingResult['needsReview'] = []
 
   for (const mail of mails) {
     out.scanned += 1
@@ -156,7 +235,12 @@ export async function runPaidTagging(
     if (!evidenceIsVerbatim(verdict.evidence, text)) continue
 
     if (verdict.kind === 'needs_review') {
-      out.needsReview.push({
+      // 🔴 处理确认闸（2026-09-08，每日待办自动闭环审计发现）：PM 昨天已经去
+      // Mailchimp 手动打过 paidTag，这封邮件不该再冒出来——判定条件只看邮件
+      // 内容本身，跟 Mailchimp 当前标签状态无关，所以同一个人会被天天重新报。
+      // 真正的反查挪到循环结束后批量做（见 `findAlreadyPaidEmails`），这里只
+      // 攒候选人，不在主循环里逐个 await 网络请求。
+      pendingReview.push({
         email,
         name: mail.counterparty?.name ?? null,
         evidence: verdict.evidence,
@@ -183,6 +267,25 @@ export async function runPaidTagging(
     } else {
       out.errors.push({ email, reason: applied.reason, retryable: applied.retryable })
     }
+  }
+
+  // 本轮循环里已经打过（或本来就已带）paidTag 的邮箱，不该再进反查——查了也是
+  // 白查，还占共享预算（Codex P2 复审 PR #1484 round 3）。dry 跑下
+  // `applyMemberTags` 不会真的写，但 `alreadyTagged` 记的是「这个人本来就该被
+  // 认定为已付费」这件事本身，跟有没有真的落盘无关，所以预演一样要排除。
+  const stillPending = pendingReview.filter((r) => !alreadyTagged.has(r.email))
+
+  // 查不到 / 查出错 / 预算用完没来得及查的一律按"还没处理"算——宁可多提醒
+  // 一次，不能因为查询失败就让一条真待处理的信静默消失（fail-open）。
+  const deadline = opts.reviewCheckDeadline ?? Date.now() + REVIEW_CHECK_BUDGET_MS
+  const confirmedPaid = await findAlreadyPaidEmails(
+    cfg,
+    policy.paidTag,
+    Array.from(new Set(stillPending.map((r) => r.email))),
+    deadline,
+  )
+  for (const review of stillPending) {
+    if (!confirmedPaid.has(review.email)) out.needsReview.push(review)
   }
 
   return out

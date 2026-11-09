@@ -1,193 +1,188 @@
 /**
- * Tests for flywheel-seo-weekly cron endpoint — P12.B.4
+ * GET /api/cron/flywheel-seo-weekly —— **手动补触发**的测试。
+ *
+ * 🔴 2026-09-07 这条路由的职责变了：以前它在一个请求里把所有客户串着跑完，现在只负责
+ *    把派单条子发给 Inngest，真正干活的是 `cloud-flywheel-seo-snapshot-one`。
+ *    原来那批「一个客户失败不影响其他客户 / 过滤空网址 / 汇总写了几行」的用例，
+ *    对应的逻辑搬去了 `src/lib/flywheel/seo-weekly.ts`，在那边直测（不含 HTTP 壳），
+ *    所以这里不再重复断言它们 —— 重复断言只会在改动时同时红两处，指不出真正的破绽。
+ *
+ * 这里只管这条路由自己负责的四件事：鉴权、名单查不出来怎么办、发了几张条子、
+ * 以及**有条子没发出去时不许报成功**。
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
 
-// ── Mock supabaseAdmin ────────────────────────────────────────────────────────
-
 const mockClientsQuery = vi.fn()
-const mockEq = vi.fn()
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
     from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: mockEq.mockImplementation(() => ({
-          not: mockClientsQuery,
+    select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          contains: vi.fn(() => ({ not: mockClientsQuery })),
         })),
-      })),
+    })),
     })),
   },
 }))
 
-// startCronRun writes to cron_run_logs via supabaseAdmin — out of scope here
-vi.mock('@/lib/cron/run-logger', () => ({
-  startCronRun: vi.fn(async () => ({ finish: vi.fn(async () => {}) })),
+const mockSendInngestEvent = vi.fn()
+vi.mock('@/lib/workflows/inngest-event', () => ({
+  sendInngestEvent: (...args: unknown[]) => mockSendInngestEvent(...args),
 }))
 
-// ── Mock SeoContentAdapter ────────────────────────────────────────────────────
-
-const mockPullMetrics = vi.fn()
-
-vi.mock('@/lib/flywheel/adapters/SeoContentAdapter', () => ({
-  SeoContentAdapter: vi.fn().mockImplementation(() => ({
-    pullMetrics: mockPullMetrics,
-  })),
-}))
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function makeRequest(secret: string | null) {
+function makeRequest(secret: string | null, clientId?: string, attempt?: string) {
   const headers: Record<string, string> = {}
   if (secret !== null) headers['authorization'] = `Bearer ${secret}`
-  return new NextRequest('http://localhost:3001/api/cron/flywheel-seo-weekly', {
+  const url = new URL('http://localhost:3001/api/cron/flywheel-seo-weekly')
+  if (clientId) url.searchParams.set('client_id', clientId)
+  if (attempt) url.searchParams.set('attempt', attempt)
+  return new NextRequest(url, {
     method: 'GET',
     headers,
   })
 }
 
 const CRON_SECRET = 'test-cron-secret'
+const CTS = 'c0000000-0000-0000-0000-000000000000'
+const OZTOP = 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84'
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
-
-describe('GET /api/cron/flywheel-seo-weekly', () => {
+describe('GET /api/cron/flywheel-seo-weekly — 手动补触发', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     process.env.CRON_SECRET = CRON_SECRET
+    mockSendInngestEvent.mockResolvedValue({ event_ids: ['evt_1'] })
   })
 
-  it('returns 500 when CRON_SECRET env var is not set', async () => {
+  it('没配 CRON_SECRET → 500，且一张条子都不发', async () => {
     delete process.env.CRON_SECRET
     const { GET } = await import('./route')
-    const res = await GET(makeRequest(CRON_SECRET))
+    const res = await GET(makeRequest('anything'))
     expect(res.status).toBe(500)
-    const json = await res.json()
-    expect(json.error).toMatch(/CRON_SECRET/)
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
   })
 
-  it('returns 401 when authorization header is missing', async () => {
+  it('🔴 没带 / 带错密钥 → 401，且一张条子都不发（发了就是白花钱）', async () => {
     const { GET } = await import('./route')
-    const res = await GET(makeRequest(null))
-    expect(res.status).toBe(401)
+    for (const secret of [null, 'wrong']) {
+      vi.clearAllMocks()
+      const res = await GET(makeRequest(secret))
+      expect(res.status).toBe(401)
+      expect(mockSendInngestEvent).not.toHaveBeenCalled()
+    }
   })
 
-  it('returns 401 when authorization header has wrong secret', async () => {
-    const { GET } = await import('./route')
-    const res = await GET(makeRequest('wrong-secret'))
-    expect(res.status).toBe(401)
-  })
-
-  it('returns 500 when clients DB query fails', async () => {
-    mockClientsQuery.mockResolvedValueOnce({
-      data: null,
-      error: { message: 'connection refused' },
-    })
+  it('名单查不出来 → 500，不发条子', async () => {
+    mockClientsQuery.mockResolvedValue({ data: null, error: { message: 'db down' } })
     const { GET } = await import('./route')
     const res = await GET(makeRequest(CRON_SECRET))
     expect(res.status).toBe(500)
-    const json = await res.json()
-    expect(json.error).toMatch(/connection refused/)
+    expect(await res.json()).toMatchObject({ status: 'roster_failed', clients_dispatched: 0 })
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
   })
 
-  it('returns early with 0 processed when no clients have a domain', async () => {
-    mockClientsQuery.mockResolvedValueOnce({ data: [], error: null })
+  it('没人要扫 → 200 且明说 0 个，不发条子', async () => {
+    mockClientsQuery.mockResolvedValue({ data: [], error: null })
     const { GET } = await import('./route')
     const res = await GET(makeRequest(CRON_SECRET))
-    const json = await res.json()
     expect(res.status).toBe(200)
-    expect(json.success).toBe(true)
-    expect(json.clients_processed).toBe(0)
-    expect(json.metrics_written).toBe(0)
+    expect(await res.json()).toMatchObject({ status: 'roster_empty', clients_dispatched: 0 })
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
   })
 
-  it('processes one client and returns metrics_written count', async () => {
-    mockClientsQuery.mockResolvedValueOnce({
-      data: [{ id: 'client-cts', domain: 'ctstours.com.au' }],
+  it('一人一张条子，条子里带客户、网址、周编号，事件名是云端专属那个', async () => {
+    mockClientsQuery.mockResolvedValue({
+      data: [
+        { id: CTS, domain: 'ctstours.co.nz' },
+        { id: OZTOP, domain: 'oztopbuildingsupplies.com.au' },
+      ],
       error: null,
     })
-    mockPullMetrics.mockResolvedValueOnce([
-      { metricKey: 'organic_keywords', metricValue: 1200 },
-      { metricKey: 'organic_traffic', metricValue: 8500 },
-      { metricKey: 'authority_score', metricValue: 32 },
-      { metricKey: 'published_posts', metricValue: 7 },
-    ])
-
     const { GET } = await import('./route')
     const res = await GET(makeRequest(CRON_SECRET))
-    const json = await res.json()
-
     expect(res.status).toBe(200)
-    expect(json.success).toBe(true)
-    expect(json.clients_processed).toBe(1)
-    expect(json.metrics_written).toBe(4)
-    expect(json.failed).toBe(0)
-    // 真客户闸门：选客户必须按 client_status='active' 过滤
-    expect(mockEq).toHaveBeenCalledWith('client_status', 'active')
-    expect(json.results[0]).toMatchObject({ client_id: 'client-cts', metrics_written: 4 })
+    const body = await res.json()
+    expect(body).toMatchObject({ status: 'dispatched', clients_dispatched: 2, trigger: 'manual', no_publish: true })
+    expect(mockSendInngestEvent).toHaveBeenCalledTimes(2)
+
+    const first = mockSendInngestEvent.mock.calls[0][0] as {
+      id: string
+      name: string
+      data: { client_id: string; domain: string; week_key: string }
+    }
+    expect(first.name).toBe('flywheel/seo.snapshot.due')
+    expect(first.data.client_id).toBe(CTS)
+    expect(first.data.domain).toBe('ctstours.co.nz')
+    // 去重键必须带上客户和周 —— 少了任一，同周补触发就会重复付款
+    expect(first.id).toContain(CTS)
+    expect(first.id).toContain(first.data.week_key)
   })
 
-  it('processes multiple clients and sums metrics_written', async () => {
-    mockClientsQuery.mockResolvedValueOnce({
+  it('🔴 有条子没发出去 → 不许报成 200 成功，必须点名是谁没发出去', async () => {
+    mockClientsQuery.mockResolvedValue({
       data: [
-        { id: 'client-cts', domain: 'ctstours.com.au' },
-        { id: 'client-oz', domain: 'oztop.co.nz' },
+        { id: CTS, domain: 'ctstours.co.nz' },
+        { id: OZTOP, domain: 'oztopbuildingsupplies.com.au' },
       ],
       error: null,
     })
-    mockPullMetrics
-      .mockResolvedValueOnce(Array(4).fill({ metricKey: 'k', metricValue: 1 }))
-      .mockResolvedValueOnce(Array(3).fill({ metricKey: 'k', metricValue: 1 }))
-
+    mockSendInngestEvent
+      .mockResolvedValueOnce({ event_ids: ['evt_1'] })
+      .mockRejectedValueOnce(new Error('INNGEST_EVENT_KEY_MISSING'))
     const { GET } = await import('./route')
     const res = await GET(makeRequest(CRON_SECRET))
-    const json = await res.json()
-
-    expect(json.clients_processed).toBe(2)
-    expect(json.metrics_written).toBe(7)
-    expect(json.failed).toBe(0)
+    expect(res.status).toBe(207)
+    const body = await res.json()
+    expect(body.clients_dispatched).toBe(1)
+    expect(body.error).toContain('1/2')
+    expect(body.failed).toEqual([{ client_id: OZTOP, error: 'INNGEST_EVENT_KEY_MISSING' }])
   })
 
-  it('continues processing remaining clients when one pullMetrics fails', async () => {
-    mockClientsQuery.mockResolvedValueOnce({
+  it('client_id 模式只派 CTS 一张条子，不会误扫其他客户', async () => {
+    mockClientsQuery.mockResolvedValue({
       data: [
-        { id: 'client-bad', domain: 'bad.com.au' },
-        { id: 'client-ok', domain: 'ok.com.au' },
+        { id: CTS, domain: 'ctstours.co.nz' },
+        { id: OZTOP, domain: 'oztopbuildingsupplies.com.au' },
       ],
       error: null,
     })
-    mockPullMetrics
-      .mockRejectedValueOnce(new Error('SEMrush timeout'))
-      .mockResolvedValueOnce(Array(4).fill({ metricKey: 'k', metricValue: 1 }))
-
     const { GET } = await import('./route')
-    const res = await GET(makeRequest(CRON_SECRET))
-    const json = await res.json()
-
-    expect(json.clients_processed).toBe(2)
-    expect(json.metrics_written).toBe(4)
-    expect(json.failed).toBe(1)
-    expect(json.results[0]).toMatchObject({ client_id: 'client-bad', metrics_written: 0, error: 'SEMrush timeout' })
-    expect(json.results[1]).toMatchObject({ client_id: 'client-ok', metrics_written: 4 })
+    const res = await GET(makeRequest(CRON_SECRET, CTS))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ client_id: CTS, clients_dispatched: 1 })
+    expect(mockSendInngestEvent).toHaveBeenCalledTimes(1)
+    expect(mockSendInngestEvent.mock.calls[0][0].data.client_id).toBe(CTS)
   })
 
-  it('filters out clients that have null or empty domain', async () => {
-    mockClientsQuery.mockResolvedValueOnce({
+  it('attempt 模式生成新的去重键，且只接受安全字符', async () => {
+    mockClientsQuery.mockResolvedValue({ data: [{ id: CTS, domain: 'ctstours.co.nz' }], error: null })
+    const { GET } = await import('./route')
+    const res = await GET(makeRequest(CRON_SECRET, CTS, 'retry-1'))
+    expect(res.status).toBe(200)
+    expect(mockSendInngestEvent.mock.calls[0][0].id).toContain('-retry-1')
+
+    vi.clearAllMocks()
+    const bad = await GET(makeRequest(CRON_SECRET, CTS, 'retry/unsafe'))
+    expect(bad.status).toBe(400)
+    expect(mockSendInngestEvent).not.toHaveBeenCalled()
+  })
+
+  it('🔴 一个人发失败不影响其他人 —— 后面的还得继续发', async () => {
+    mockClientsQuery.mockResolvedValue({
       data: [
-        { id: 'client-nodomain', domain: null },
-        { id: 'client-emptydomain', domain: '' },
-        { id: 'client-valid', domain: 'valid.com.au' },
+        { id: CTS, domain: 'ctstours.co.nz' },
+        { id: OZTOP, domain: 'oztopbuildingsupplies.com.au' },
       ],
       error: null,
     })
-    mockPullMetrics.mockResolvedValueOnce(Array(4).fill({ metricKey: 'k', metricValue: 1 }))
-
+    mockSendInngestEvent
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce({ event_ids: ['evt_2'] })
     const { GET } = await import('./route')
     const res = await GET(makeRequest(CRON_SECRET))
-    const json = await res.json()
-
-    expect(json.clients_processed).toBe(1)
-    expect(json.results[0].client_id).toBe('client-valid')
+    expect(mockSendInngestEvent).toHaveBeenCalledTimes(2)
+    expect((await res.json()).clients_dispatched).toBe(1)
   })
 })

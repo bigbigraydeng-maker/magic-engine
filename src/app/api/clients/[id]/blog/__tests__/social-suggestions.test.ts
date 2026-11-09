@@ -34,6 +34,16 @@ vi.mock('@/lib/supabase', () => ({
   },
 }))
 
+// 2026-08-05 (狄仁杰复审): the route now runs requireDashboardClientAccess
+// (cookie session) BEFORE the bearer-token check. Default to an admin session
+// so the remaining tests exercise the bearer gate + business logic.
+const mockRequireDashboardClientAccess = vi.fn()
+
+vi.mock('@/lib/auth/client-access', () => ({
+  requireDashboardClientAccess: (...args: unknown[]) => mockRequireDashboardClientAccess(...args),
+  requirePaidClientAccess:      (...args: unknown[]) => mockRequireDashboardClientAccess(...args),
+}))
+
 const mockMessagesCreate = vi.fn()
 
 vi.mock('@/lib/anthropic/client', () => ({
@@ -110,6 +120,12 @@ const MOCK_ANTHROPIC_RESPONSE = [
 beforeEach(() => {
   process.env.INTERNAL_API_KEY = 'test-internal-key'
   vi.clearAllMocks()
+  mockRequireDashboardClientAccess.mockResolvedValue({
+    ok: true,
+    user: { id: 'test-user', email: 'test@magiclab.com' },
+    role: 'admin',
+    allowedClientId: null,
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -224,6 +240,19 @@ describe('POST /social-suggestions — AI parse failure', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /social-suggestions — authentication', () => {
+  it('returns the session gate status before checking the bearer token', async () => {
+    mockRequireDashboardClientAccess.mockResolvedValue({ ok: false, status: 403, error: 'Forbidden' })
+
+    const req = makeAuthedRequest('/api/clients/client-abc/blog/post-xyz/social-suggestions')
+    const res = await POST(req, { params: PARAMS })
+    const body = await res.json()
+
+    expect(res.status).toBe(403)
+    expect(body.error).toBe('Forbidden')
+    expect(mockRequireDashboardClientAccess).toHaveBeenCalledWith('client-abc')
+    expect(mockMessagesCreate).not.toHaveBeenCalled()
+  })
+
   it('returns 401 when Authorization header is missing', async () => {
     const req = makeRequest('/api/clients/client-abc/blog/post-xyz/social-suggestions')
     const res = await POST(req, { params: PARAMS })

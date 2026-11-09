@@ -98,4 +98,64 @@ export const PLATFORM_CANDIDATE_REVIEWS: PlatformCandidateReview[] = [
     name: '行业市场研究报告出品能力（署名 "Magic Insight 数据研究院"，面向高级会员定期出品行业级市场研究）',
     reviewDate: '2026-10-03',
   },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '分档 AI 视频配额闸（每档每月 i2v 条数硬顶 · 满额后优雅退化到静图版 · 超额走 Add-on 加购）',
+    reviewDate: '2026-10-04',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: 'Meta 广告受众管理与类似人群能力（建/改自定义受众 + 建 Lookalike 类似人群 + audience-ladder 接线到触发点）',
+    reviewDate: '2026-10-06',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '三层漏斗广告打法剧本（认知→线索→再营销→回传闭环 · 骨架通用 + 分行业配方）',
+    reviewDate: '2026-10-06',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '内容发布→广告草稿直链（Daily Plan 发布完成 → 自动建暂停态广告进指定广告组 · me_ad_launch）',
+    reviewDate: '2026-10-06',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: 'Meta 广告数据地基健康诊断（pixel/CAPI 分浏览器端 vs 服务端回传 · 修前基线→修后验证标准）',
+    reviewDate: '2026-10-06',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '转化真相回流能力（Conversion Truth Uplink · 从 CRM 成交事件 → 多平台广告 API：Meta CAPI 先做，Google/TikTok 预留接口）',
+    reviewDate: '2026-10-07',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: 'ME 「基于产品事实的 Meta 广告方案生成」能力(拉官网真行程/价 + 现有受众池水位 + 客户历史广告成本基线 → 出三层漏斗 A/B/C 三版文案 + 受众种子选择 + 预算分配 + 激活闲置类似人群 · 全程官网 grounding 不编造)',
+    reviewDate: '2026-10-07',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '广告效果按天诊断引擎（拉 campaign/adset/ad 级每日 Insights → 算成本效率（CPM/CTR/单次线索成本/单次私信开聊成本）→ 查再营销受众是否为空 → 输出预算调整建议 + 原因）',
+    reviewDate: '2026-10-13',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '行程转路线地图生成器（按 Tour 结构化行程数据——城市顺序 + 交通方式 + 停留天数——自动画出风格化路线图，供社媒/广告/落地页使用）',
+    reviewDate: '2026-10-13',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '私信/WhatsApp 对话内容判断有效咨询/成交 → 回传 Meta CAPI',
+    reviewDate: '2026-10-13',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: 'AI 辅助图片识别打标签（看图识地名，用来补 hero-rules.ts 关键词清单收不到的生僻地方）',
+    reviewDate: '2026-10-15',
+  },
+  {
+    // 与 docs/registry/platform-candidates.md 候选名逐字一致
+    name: '从客户历史对话（Messenger/WhatsApp）批量提炼接待风格/标准应对+还没入库的事实，喂给客户知识库',
+    reviewDate: '2026-10-15',
+  },
 ]

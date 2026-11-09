@@ -8,7 +8,7 @@
  * "published" comes from the stored receipt rather than from optimism.
  */
 import React from 'react'
-import { render, screen, fireEvent, cleanup, act } from '@testing-library/react'
+import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CampaignDailyPublishPanel, type PublishReceipt } from '../CampaignDailyPublishPanel'
 
@@ -265,6 +265,7 @@ describe('publish panel — what it calls published comes from the receipt', () 
     created_at: '2026-09-03T06:00:00.000Z',
     published: [{
       date: '2026-09-03',
+      idempotency_key: 'fbpost_a',
       post_id: `${PAGE_ID}_91`,
       page_id: PAGE_ID,
       published_at: '2026-09-03T06:00:00.000Z',
@@ -286,5 +287,129 @@ describe('publish panel — what it calls published comes from the receipt', () 
     render(<CampaignDailyPublishPanel {...props({ publishReceipt: receipt })} />)
 
     expect(screen.getByText(/09-04 没发出去：image url unreachable/)).toBeTruthy()
+  })
+})
+
+/**
+ * Gate B/3 — Tune 建议 useEffect 集成断言。
+ *
+ * 魏征 #9 指出：原 16 测试的 publishReceipt 大多为 null，publishedPosts=[]，
+ * useEffect 从未被触发，"全过 ≠ 我没破坏"。这两条锁住 published 状态下的行为。
+ */
+describe('publish panel — Tune 建议 fetch 行为', () => {
+  const publishedReceipt: PublishReceipt = {
+    status: 'PARTIAL',
+    page_id: PAGE_ID,
+    created_at: '2026-09-03T06:00:00.000Z',
+    published: [{
+      date: '2026-09-03',
+      idempotency_key: 'fbpost_a',
+      post_id: `${PAGE_ID}_91`,
+      page_id: PAGE_ID,
+      published_at: '2026-09-03T06:00:00.000Z',
+      permalink: `https://www.facebook.com/${PAGE_ID}_91`,
+    }],
+    failed: [],
+  }
+
+  it('有 published 帖子时会 fetch tune-suggestions endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ success: true, suggestions: { [`${PAGE_ID}_91`]: null } }),
+    )
+    global.fetch = fetchMock as never
+
+    await act(async () => {
+      render(<CampaignDailyPublishPanel {...props({ publishReceipt: publishedReceipt })} />)
+    })
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining(`/api/clients/${CLIENT_ID}/campaign-daily-plan/tune-suggestions?campaign_id=${CAMPAIGN_ID}`),
+        expect.objectContaining({ cache: 'no-store' }),
+      )
+    })
+  })
+
+  it('🔴 建议按 idempotency_key 取，不按 post_id —— 排期帖回执里的照片编号跟建议的帖子编号对不上', async () => {
+    const scheduledReceipt: PublishReceipt = {
+      ...publishedReceipt,
+      published: [{
+        date: '2026-09-03',
+        idempotency_key: 'fbpost_a',
+        post_id: '1750835520181969',
+        page_id: PAGE_ID,
+        published_at: '2026-09-03T06:00:00.000Z',
+        permalink: 'https://www.facebook.com/1750835520181969',
+      }],
+    }
+    // This effect reads `res.json()` (not `text()` like the publish calls), so answer with a real Response.
+    const fetchMock = vi.fn().mockImplementation(async () => Response.json({
+      success: true,
+      suggestions: {
+        fbpost_a: {
+          decision: 'REPEAT',
+          rationale: '本条明显比同类历史好',
+          primaryMetric: 'likes',
+          targetValue: 20,
+          cohortMean: 10,
+          deltaPct: 100,
+          sampleSize: 3,
+          caveats: [],
+          sourceActionIds: ['a1'],
+          thresholdsUsed: { minSampleSize: 3, repeatDeltaPct: 30, stopDeltaPct: -30 },
+        },
+      },
+    }))
+    global.fetch = fetchMock as never
+
+    await act(async () => {
+      render(<CampaignDailyPublishPanel {...props({ publishReceipt: scheduledReceipt })} />)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(/值得再做一次/)).toBeTruthy()
+    })
+    expect(screen.queryByText(/等 T\+72/)).toBeNull()
+  })
+
+  it('fetch 500 → 显示「暂时读不到」，绝不显示「等 T+72」', async () => {
+    // PITFALLS「读失败别显示空输入框」：500 不能伪装成「未到点」。
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false, status: 500, text: async () => '{"success":false}',
+    })
+    global.fetch = fetchMock as never
+
+    await act(async () => {
+      render(<CampaignDailyPublishPanel {...props({ publishReceipt: publishedReceipt })} />)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(/暂时读不到/)).toBeTruthy()
+    })
+    expect(screen.queryByText(/等 T\+72/)).toBeNull()
+  })
+
+  it('fetch 抛异常（网络断）→ 也走「暂时读不到」', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('network down'))
+    global.fetch = fetchMock as never
+
+    await act(async () => {
+      render(<CampaignDailyPublishPanel {...props({ publishReceipt: publishedReceipt })} />)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText(/暂时读不到/)).toBeTruthy()
+    })
+  })
+
+  it('无 publishedPosts 时不 fetch tune-suggestions', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ success: true }))
+    global.fetch = fetchMock as never
+
+    await act(async () => {
+      render(<CampaignDailyPublishPanel {...props({ publishReceipt: null })} />)
+    })
+    // 无 publishedPosts 时 useEffect 立即 return，不 fetch。
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

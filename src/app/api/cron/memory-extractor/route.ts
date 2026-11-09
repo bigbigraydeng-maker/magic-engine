@@ -20,11 +20,27 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
-import { runExtractorForClient, runExtractorForAllClients } from '@/lib/memory'
+import { runExtractorForClient, runExtractorForAllClients, type ExtractorResult } from '@/lib/memory'
 import { startCronRun } from '@/lib/cron/run-logger'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
+
+/**
+ * What the run log must keep: the stale-evidence count, and every memory switched off
+ * this run with its table and reason — restoring by this list is the rollback path
+ * (run logs with a summary are kept 180 days).
+ */
+function reconcileSummary(result: ExtractorResult): Record<string, unknown> {
+  return {
+    outcomes_stale_skipped: result.outcomes_stale_skipped,
+    deactivated_by_reason: result.deactivated_by_reason,
+    deactivated: result.deactivated,
+    skipped_attribution_stalled: result.skipped_attribution_stalled,
+    skipped_immature: result.skipped_immature,
+    skipped_unknown_pillar: result.skipped_unknown_pillar,
+  }
+}
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const cronSecret = process.env.CRON_SECRET
@@ -51,13 +67,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       console.log(
         `[memory-extractor/cron] client=${clientId} outcomes=${result.outcomes_processed} ` +
         `patterns+${result.patterns_added} experiments+${result.experiments_added} ` +
-        `preferences+${result.preferences_added} decisions+${result.decisions_updated} ` +
+        `preferences+${result.preferences_added} stale_skipped=${result.outcomes_stale_skipped} ` +
         `errors=${result.errors.length}`,
       )
       await cronRun.finish({
         processed: result.outcomes_processed,
         completed: result.outcomes_processed - result.errors.length,
         failed: result.errors.length,
+        // 「有多少证据因为太久没重算被挡在门外」必须落进运行记录 ——
+        // 只挡不报等于把一次静默丢弃换成了另一次。
+        // 下架清单（带表名）也必须进运行记录：它就是回滚清单。
+        summary: reconcileSummary(result),
       })
       return NextResponse.json({
         ok: true,
@@ -79,13 +99,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     console.log(
       `[memory-extractor/cron] all clients_processed=${batch.clients_processed} ` +
       `patterns+${batch.aggregate.patterns_added} experiments+${batch.aggregate.experiments_added} ` +
-      `preferences+${batch.aggregate.preferences_added} decisions+${batch.aggregate.decisions_updated} ` +
+      `preferences+${batch.aggregate.preferences_added} stale_skipped=${batch.aggregate.outcomes_stale_skipped} ` +
       `client_errors=${batch.per_client_errors.length}`,
     )
     await cronRun.finish({
       processed: batch.clients_processed,
       completed: batch.clients_processed - batch.per_client_errors.length,
       failed: batch.per_client_errors.length,
+      summary: reconcileSummary(batch.aggregate),
     })
     return NextResponse.json({
       ok: true,

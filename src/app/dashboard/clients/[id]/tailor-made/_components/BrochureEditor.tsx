@@ -12,6 +12,7 @@ import {
 } from '@/lib/tailor-made/brochure-types';
 import { createBrochureFromItinerary } from '@/lib/tailor-made/brochure-seed';
 import type { TailorMadeRecord } from '@/lib/tailor-made/types';
+import BrochureAudit from './BrochureAudit';
 
 /**
  * 画册编辑器。
@@ -262,6 +263,9 @@ export default function BrochureEditor({
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         {/* ---------- 左：表单 ---------- */}
         <div className="space-y-4">
+          {/* 撞图体检：同一个城市板块里两张卡片用了同一张图。见 lib/tailor-made/brochure-audit.ts */}
+          <BrochureAudit brochure={brochure} />
+
           <Section
             title="用一句话改"
             hint="内容已经按行程单排好了。想改哪里直接说 —— 「北京那段写长一点」「所有介绍都别用感叹句」「上海标题换成外滩」。"

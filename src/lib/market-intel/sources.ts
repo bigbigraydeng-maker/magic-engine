@@ -19,11 +19,19 @@ export const MARKET_INTEL_SOURCES: MarketIntelSourceConfig[] = [
     feedUrl: 'https://venturebeat.com/category/ai/feed/',
     categories: ['ai_startup', 'llm_news'],
   },
-  {
-    name: 'Search Engine Land',
-    feedUrl: 'https://searchengineland.com/feed',
-    categories: ['marketing', 'google_ads'],
-  },
+  // Search Engine Land（https://searchengineland.com/feed）—— 2026-09-03 停用。
+  // 自 2026-08-20 上线起 16/16 次抓取全部 HTTP 403、last_success_at 始终为 null：
+  // 生产出口 IP 被站点反爬 WAF 硬拦，不是 feed_url 写错（403 ≠ 404，换 URL 无解），
+  // 换 UA 也无法在本环境验证。它的 marketing + Google Ads/SEM 话题已被 Search Engine
+  // Journal / SEJ · PPC / Marketing Dive 冗余覆盖，故先在 DB 里 enabled=false 关掉，
+  // 停止每日假警报。留在这里而不删除，是为了记录原因、日后找到可抓取方式（如换等价源，
+  // 参照下方 MenaBytes→Campaign Middle East 的处理）时能一眼看到并恢复。
+  // 恢复方式：确认可抓取后，UPDATE market_intel_sources SET enabled=true WHERE feed_url=...
+  // {
+  //   name: 'Search Engine Land',
+  //   feedUrl: 'https://searchengineland.com/feed',
+  //   categories: ['marketing', 'google_ads'],
+  // },
   {
     name: 'Search Engine Journal',
     feedUrl: 'https://www.searchenginejournal.com/feed/',

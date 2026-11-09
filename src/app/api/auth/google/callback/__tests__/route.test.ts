@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   encryptToken:      vi.fn((s: string) => `enc:${s}`),
   listGa4Properties: vi.fn(),
   setGa4Property:    vi.fn(),
+  persistGbpFromTokens: vi.fn(),
   requireDashboardClientAccess: vi.fn(),
   upsertCalls:       [] as Array<{ table: string; row: unknown; opts?: unknown }>,
   updateCalls:       [] as Array<{ table: string; row: unknown }>,
@@ -55,6 +56,12 @@ vi.mock('@/lib/ga4/admin', () => ({
 vi.mock('@/lib/ga4/property', () => ({
   setGa4Property: mocks.setGa4Property,
 }))
+
+vi.mock('@/lib/gbp/oauth-persist', async (importOriginal) => {
+  // 保留 `scopeIncludesGbp` 的真实实现（它是纯函数），只 mock 掉真正做副作用的 persist。
+  const actual = await importOriginal<typeof import('@/lib/gbp/oauth-persist')>()
+  return { ...actual, persistGbpFromTokens: mocks.persistGbpFromTokens }
+})
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
@@ -144,6 +151,7 @@ beforeEach(() => {
   mocks.storeTokens.mockResolvedValue(undefined)
   mocks.listGa4Properties.mockResolvedValue({ ok: true, properties: [] })
   mocks.setGa4Property.mockResolvedValue({ ok: true, status: 'connected', propertyId: '123456789' })
+  mocks.persistGbpFromTokens.mockResolvedValue({ ok: true, locationStatus: 'ready' })
   mocks.requireDashboardClientAccess.mockResolvedValue(adminAccess())
 })
 
@@ -471,6 +479,63 @@ describe('GET /api/auth/google/callback', () => {
 
       expect(res.headers.get('location')).toContain('oauth=success')
       expect(mocks.setGa4Property).not.toHaveBeenCalled()
+    })
+  })
+
+  /**
+   * 2026-09-07 铁律 3 落地：GBP scope 合到 COMBINED_GOOGLE_SCOPES 后，一次授权
+   * 就该把商家页连接也落库；不再要求 PM 每客户再单独走一次 `/gbp/start`。
+   * 这里锁两条边界，防止未来重构悄悄退化回两次点击：
+   *  (a) scope 含 business.manage → helper 一定被调用
+   *  (b) scope 不含 → helper 一定不被调用（此前的历史授权范围行为不变）
+   */
+  describe('GBP one-click merge (2026-09-07 铁律 3)', () => {
+    const GBP_SCOPE = 'https://www.googleapis.com/auth/business.manage'
+    const scopeWithGbp =
+      `https://www.googleapis.com/auth/webmasters.readonly ` +
+      `https://www.googleapis.com/auth/analytics.readonly ${GBP_SCOPE}`
+
+    it('scope 含 business.manage → 把 GBP 连接一起落库（跟 refresh_token 一起传进去）', async () => {
+      mocks.exchangeCode.mockResolvedValue({ ...TOKEN_RESPONSE, scope: scopeWithGbp })
+
+      await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+      expect(mocks.persistGbpFromTokens).toHaveBeenCalledTimes(1)
+      expect(mocks.persistGbpFromTokens).toHaveBeenCalledWith(expect.objectContaining({
+        clientId:     CLIENT_ID,
+        accessToken:  TOKEN_RESPONSE.access_token,
+        refreshToken: TOKEN_RESPONSE.refresh_token,
+        scope:        scopeWithGbp,
+      }))
+    })
+
+    it('scope 不含 business.manage → 不动 GBP（老流程不变）', async () => {
+      // 默认 fixture scope 就没 GBP —— 这里再显式一次防止将来改 fixture 时踩坑
+      mocks.exchangeCode.mockResolvedValue({ ...TOKEN_RESPONSE })
+
+      await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+      expect(mocks.persistGbpFromTokens).not.toHaveBeenCalled()
+    })
+
+    it('GBP persist 失败不影响 GSC/GA4 已经落好的授权 —— daily-todo 明天再浮出来', async () => {
+      mocks.exchangeCode.mockResolvedValue({ ...TOKEN_RESPONSE, scope: scopeWithGbp })
+      mocks.persistGbpFromTokens.mockResolvedValue({ ok: false, reason: 'gbp_api_failed' })
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      const res = await GET(makeRequest({ code: 'auth-code', state: 'sig.state' }))
+
+      // 整条授权仍标 success（GSC/GA4 已经写好）
+      expect(res.headers.get('location')).toContain('oauth=success')
+      // GSC 授权照常落
+      expect(mocks.upsertCalls.some(
+        (c) => c.table === 'platform_oauth_connections' && (c.row as { provider: string }).provider === 'google_gsc',
+      )).toBe(true)
+      // GA4 授权照常落
+      expect(mocks.upsertCalls.some(
+        (c) => c.table === 'platform_oauth_connections' && (c.row as { provider: string }).provider === 'google_ga4',
+      )).toBe(true)
+      consoleWarn.mockRestore()
     })
   })
 

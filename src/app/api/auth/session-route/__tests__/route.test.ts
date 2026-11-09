@@ -36,11 +36,13 @@ function accessRows(rows: Array<{ client_id: string; access_type: string }>) {
   }
 }
 
-function briefStatusRow(brief_completed_at: string | null) {
+// Self-serve landing is gated on the wizard's own completion stamp
+// (clients.onboarding_completed_at), not on the Step-1 brief_completed_at.
+function onboardingStatusRow(onboarding_completed_at: string | null) {
   return {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
-    maybeSingle: vi.fn().mockResolvedValue({ data: { brief_completed_at } }),
+    maybeSingle: vi.fn().mockResolvedValue({ data: { onboarding_completed_at } }),
   }
 }
 
@@ -88,27 +90,27 @@ describe('/api/auth/session-route', () => {
     expect(body.redirect).toBe('/portal/client-123')
   })
 
-  it('routes self_serve users without a completed brief to the brief page', async () => {
+  it('routes self_serve users who have not finished onboarding to the wizard', async () => {
     mocks.getUser.mockResolvedValue({ data: { user: { email: 'selfserve@example.com' } } })
     mocks.from
       .mockReturnValueOnce(accessRows([
         { client_id: 'client-123', access_type: 'self_serve' },
       ]))
-      .mockReturnValueOnce(briefStatusRow(null))
+      .mockReturnValueOnce(onboardingStatusRow(null))
 
     const res = await GET(request('/dashboard'))
     const body = await res.json() as { redirect: string }
 
-    expect(body.redirect).toBe('/dashboard/clients/client-123/brief')
+    expect(body.redirect).toBe('/dashboard/clients/client-123/onboarding')
   })
 
-  it('preserves deep dashboard targets for self_serve users after the brief is complete', async () => {
+  it('preserves deep dashboard targets for self_serve users after onboarding is complete', async () => {
     mocks.getUser.mockResolvedValue({ data: { user: { email: 'selfserve@example.com' } } })
     mocks.from
       .mockReturnValueOnce(accessRows([
         { client_id: 'client-123', access_type: 'self_serve' },
       ]))
-      .mockReturnValueOnce(briefStatusRow('2026-06-02T01:00:00.000Z'))
+      .mockReturnValueOnce(onboardingStatusRow('2026-06-02T01:00:00.000Z'))
 
     const res = await GET(request('/dashboard/clients/client-123/execution'))
     const body = await res.json() as { redirect: string }

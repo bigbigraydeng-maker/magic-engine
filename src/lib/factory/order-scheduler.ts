@@ -14,6 +14,7 @@
 // 不走内部 HTTP 自调用(直接 import evaluateSignal):本仓已根治过这个反模式(PR #297)。
 
 import { supabaseAdmin } from '@/lib/supabase'
+import { CURRENT_FACTORY_OUTPUT_PLATFORM } from './creative-tags'
 import { evaluateSignal, nzDay } from './evaluate'
 
 export interface ScheduleOutcome {
@@ -65,7 +66,7 @@ async function scheduleOne(client: EnabledClient, now: Date): Promise<ScheduleOu
       evidence: {},
       // 角度不在这里指定:由 strategist 从 master_brief 的 content_pillars / core_proposition
       // 溯源挑选(护栏 2)。调度器塞角度 = 绕过溯源护栏,正是要避免的。
-      request: { notes: '每日自动排产(factory-order-scheduler)' },
+      request: { notes: '每日自动排产(factory-order-scheduler)', platform: CURRENT_FACTORY_OUTPUT_PLATFORM },
     })
     .select('id')
     .single()

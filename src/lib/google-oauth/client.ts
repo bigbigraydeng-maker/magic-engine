@@ -36,11 +36,58 @@ export const GA4_SCOPE = 'https://www.googleapis.com/auth/analytics.readonly'
  */
 export const INDEXING_SCOPE = 'https://www.googleapis.com/auth/indexing'
 
-/** Combined scopes for the recommended "connect Google" flow — grants GSC + GA4 + Indexing in one consent. */
+/**
+ * Google Business Profile 管理权限（读写商家档案 / 发帖）。
+ * 合到 COMBINED_GOOGLE_SCOPES：客户老板一次点完覆盖商家页 + GSC + GA4 + Indexing，
+ * 不用再来第二次；`/api/auth/google/callback` 检查 token.scope 是否包含这个，
+ * 是就顺手把 platform_oauth_connections.google_gbp + client_connectors.gbp
+ * 一起写好（见 lib/gbp/oauth-persist.ts）。老的 `/api/auth/google/gbp/start`
+ * 单独入口保留兼容，走的是同一个 helper。
+ */
+export const GBP_SCOPE = 'https://www.googleapis.com/auth/business.manage'
+
+/**
+ * 只读 Google 表格权限（2026-09-13，CTS CAPI 项目）。
+ *
+ * 这套客户没有配置任何 Google 服务账号（`GOOGLE_SERVICE_ACCOUNT_CREDENTIALS`
+ * 在生产环境里根本不存在，PM 实测确认过）——所以读表格不能走服务账号那条路，
+ * 只能走这里：客户本来就用自己的 Google 账号连过一次 GSC/GA4（见
+ * `google_oauth_tokens`），这次只是给同一个连接多要一个权限，不需要另建
+ * 任何新的授权身份。
+ */
+export const SHEETS_READONLY_SCOPE = 'https://www.googleapis.com/auth/spreadsheets.readonly'
+
+/**
+ * 读写 Google 表格（2026-09-24，线索分流回写客户表格）。
+ *
+ * 比 `SHEETS_READONLY_SCOPE` 多的只有「能往表里追加行」。ME 往客户表格里
+ * **只 append、不改也不删**（见 `lib/google-sheets/client.ts::appendSheetValues`），
+ * 但 Google 没有「只允许追加」的更小权限，只能要完整的 spreadsheets。
+ *
+ * 🔴 已经连过的客户**不会自动拿到它** —— `google_oauth_tokens.scopes` 里存的是
+ *    上次同意时 Google 实际批准的清单，拿旧 token 调写接口会被判 403。
+ *    客户（或 PM）必须重新走一次 `/api/auth/google/connect` 才会在同意页上
+ *    看到这个新权限。写表格失败时会下发人工待办点名这件事，不会静默。
+ */
+export const SHEETS_RW_SCOPE = 'https://www.googleapis.com/auth/spreadsheets'
+
+/**
+ * Combined scopes for the recommended "connect Google" flow —
+ * grants GBP + GSC + GA4 + Indexing + Sheets in one consent (2026-09-07 铁律 3
+ * "遇卡点必自动化"：从两次 OAuth 点击合并成一次，见 PR grant-permissions-fix).
+ *
+ * 🔴 加了新 scope 之后，**已经连过的客户不会自动拿到它**——`google_oauth_tokens`
+ *    里存的是上次同意时 Google 实际批准的 scope 列表，服务端拿旧 token 去调
+ *    新权限的 API 会被 Google 判 403。客户必须重新走一次 `/api/auth/google/connect`
+ *    才会在 Google 的同意页面上看到新权限、批准后才写得进新 token。
+ */
 export const COMBINED_GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/webmasters.readonly',
   'https://www.googleapis.com/auth/analytics.readonly',
   INDEXING_SCOPE,
+  GBP_SCOPE,
+  // 读写版覆盖只读版（Google 认的是「读写」这一条，不需要两条都列）。
+  SHEETS_RW_SCOPE,
   'email',
 ]
 

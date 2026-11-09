@@ -98,11 +98,25 @@
     "note": "resized to 1400px wide, re-encoded JPEG q58"
   },
   "yangtze-gorges": {
-    "author": "User:Vmenkov",
-    "license": "CC BY-SA 3.0",
-    "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0",
-    "source": "https://commons.wikimedia.org/wiki/File:QuYuan-Xiling-Gorge-5008.jpg",
-    "note": "resized to 1400px wide, re-encoded JPEG q58"
+    "author": "Brian Cyan",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "source": "https://unsplash.com/photos/a-large-body-of-water-surrounded-by-mountains-CkGqtusgQzM",
+    "note": "replaces earlier low-resolution Wikimedia photo (2026-09-15); resized to 1400px wide, center-cropped to 1400x1050, re-encoded JPEG q65"
+  },
+  "yangtze-gorges-detail": {
+    "author": "Dong Zhang",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "source": "https://unsplash.com/photos/vfaYObaMRew",
+    "note": "used for days that name a specific gorge (Qutang/Wu/Xiling) so a multi-day cruise doesn't repeat one photo; resampled to 950px tall, center-cropped to 1400x950, re-encoded JPEG q65"
+  },
+  "pingyao": {
+    "author": "Quan-You Zhang",
+    "license": "Unsplash License",
+    "licenseUrl": "https://unsplash.com/license",
+    "source": "https://unsplash.com/photos/a-group-of-people-standing-in-front-of-a-tall-building-x8KGuxqQce0",
+    "note": "cropped to remove the street crowd in the foreground; resized to 1400px wide, center-cropped to 1400x950, re-encoded JPEG q65"
   },
   "zhujiajiao": {
     "author": "Chensiyuan",

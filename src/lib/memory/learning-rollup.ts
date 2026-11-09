@@ -92,9 +92,13 @@ export async function runWeeklyLearningRollup(
   const [outcomeClientsRes, feedbackClientsRes] = await Promise.all([
     supabase
       .from('flywheel_outcomes')
-      .select('client_id')
-      .gte('computed_at', weekStart.toISOString())
-      .lt('computed_at', weekEnd.toISOString()),
+      // 跟下面 rollupOneClient 的取数用**同一个时间列**（见那里的长注释）。
+      // 两处不一致不会写出错数（没信号的客户本来就不插记录），但会按「重算时间」
+      // 把一批这一周其实没动过的客户捞进来各跑一次空查询 —— 白花钱，也让
+      // `clients_processed` 这个数字不再代表「这一周真有活动的客户数」。
+      .select('client_id, flywheel_actions!inner(executed_at)')
+      .gte('flywheel_actions.executed_at', weekStart.toISOString())
+      .lt('flywheel_actions.executed_at', weekEnd.toISOString()),
     supabase
       .from('zhuge_feedback_events')
       .select('client_id')
@@ -228,12 +232,23 @@ async function rollupOneClient(
     supabase
       .from('flywheel_outcomes')
       // action_id / metric_key / window_days 是折叠用的自然键，expected_metric
-      // 决定折叠时挑哪一行当代表。左连接（不加 !inner）：动作记录不在了的孤儿
-      // outcome 仍然按自己算一个案例，行为不比从前少。
-      .select('verdict, action_id, metric_key, window_days, flywheel_actions(expected_metric)')
+      // 决定折叠时挑哪一行当代表。
+      //
+      // 🔴 周窗口切在**动作执行时间**上，不是 outcome 的 `computed_at`。
+      //    `computed_at` 是「最后一次被重算的时间」，attribution 每 6 小时把所有现役行
+      //    刷成「现在」—— 生产实测（2026-09-06）：全表 336 行的 `computed_at` 只有 3 个
+      //    取值，285 行全挤在最近那一轮。按它切周窗口，结果只有两种：**全部**或**零**。
+      //    2026-08-31 那次周报的窗口（08-24~08-31）里一行都没有，整轮空转。
+      //    `flywheel_actions.executed_at` 才是事件真正发生的时间（生产上分布在 18 个周）。
+      //
+      //    改成 `!inner` 的代价：动作记录不在了的孤儿 outcome 不再进这个查询。
+      //    这不是行为退化 —— 没有 executed_at 的行本来就归不进任何一周，
+      //    以前它能进来只是因为窗口切错了列。`collapseOutcomesToActions` 的孤儿分支
+      //    保留作防御，但从这个查询已经不会再收到孤儿。
+      .select('verdict, action_id, metric_key, window_days, flywheel_actions!inner(expected_metric, executed_at)')
       .eq('client_id', clientId)
-      .gte('computed_at', startIso)
-      .lt('computed_at', endIso),
+      .gte('flywheel_actions.executed_at', startIso)
+      .lt('flywheel_actions.executed_at', endIso),
     supabase
       .from('zhuge_feedback_events')
       .select('feedback_state')

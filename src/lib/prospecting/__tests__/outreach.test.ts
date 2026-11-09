@@ -226,14 +226,14 @@ describe('complianceFooter', () => {
 
 describe('generateOutreachEmail', () => {
   it('returns a draft with the segment as angle', async () => {
-    mockClaude.mockResolvedValue({ text: JSON.stringify({ subject: 'About your flooring store', body: 'x'.repeat(80) }), tokens_in: 1, tokens_out: 1, cost_usd: 0 })
+    mockClaude.mockResolvedValue({ text: JSON.stringify({ subject: 'About your flooring store', body: 'x'.repeat(80) }), input_tokens: 1, output_tokens: 1, cost_usd: 0 })
     const email = await generateOutreachEmail(input())
     expect(email.subject).toBe('About your flooring store')
     expect(email.angle).toBe('core_target')
   })
 
   it('throws (caller retries) when the model returns a malformed draft', async () => {
-    mockClaude.mockResolvedValue({ text: '{"subject": "hi"}', tokens_in: 1, tokens_out: 1, cost_usd: 0 })
+    mockClaude.mockResolvedValue({ text: '{"subject": "hi"}', input_tokens: 1, output_tokens: 1, cost_usd: 0 })
     await expect(generateOutreachEmail(input())).rejects.toThrow(/body/)
   })
 

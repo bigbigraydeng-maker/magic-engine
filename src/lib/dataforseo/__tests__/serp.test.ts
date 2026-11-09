@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { getSerpPage } from '../serp'
+import aiOverviewFixture from './fixtures/serp-ai-overview-nz.json'
 
 vi.mock('@/lib/validation-utils', () => ({
   validateEnvVar: () => 'test',
@@ -13,13 +14,35 @@ function makeMockResponse(items: unknown[]) {
     ok: true,
     json: () =>
       Promise.resolve({
-        tasks: [{ result: [{ items }] }],
+        tasks: [{ status_code: 20000, result: [{ items }] }],
       }),
   } as Response)
 }
 
 describe('getSerpPage', () => {
   beforeEach(() => mockFetch.mockReset())
+
+  it('sends the ISO 639-1 Chinese language code', async () => {
+    mockFetch.mockReturnValue(makeMockResponse([]))
+
+    await getSerpPage('奥克兰旅行社', 'nz', { language: 'zh' })
+
+    const request = mockFetch.mock.calls[0]?.[1] as RequestInit
+    const payload = JSON.parse(String(request.body)) as Array<{ language_code?: string }>
+    expect(payload[0]?.language_code).toBe('zh')
+  })
+
+  it('throws when DataForSEO returns an HTTP-200 task error', async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        tasks: [{ status_code: 40501, status_message: 'Invalid Field.' }],
+      }),
+    } as Response)
+
+    await expect(getSerpPage('奥克兰旅行社', 'nz', { language: 'zh' }))
+      .rejects.toThrow('DataForSEO SERP task 40501: Invalid Field.')
+  })
 
   it('extracts local_pack listings (max 3)', async () => {
     mockFetch.mockReturnValue(
@@ -81,7 +104,7 @@ describe('getSerpPage', () => {
         { type: 'paid', domain: 'ads.com' },
         { type: 'local_pack', title: 'Local Biz', rating: 4.5, reviews_count: 80, address: '10 King St' },
         { type: 'people_also_ask', title: 'How to choose flooring?' },
-        { type: 'ai_overview', ai_overview: { text: 'AI answer here', references: [{ url: 'https://ref.com', title: 'Ref' }] } },
+        { type: 'ai_overview', items: [{ text: 'AI answer here' }], references: [{ url: 'https://ref.com' }] },
       ]),
     )
 
@@ -94,5 +117,24 @@ describe('getSerpPage', () => {
       { name: 'Local Biz', rating: 4.5, review_count: 80, address: '10 King St', domain: null },
     ])
     expect(result.people_also_ask).toEqual(['How to choose flooring?'])
+  })
+
+  it('parses the real AI Overview shape recorded from a live NZ response', async () => {
+    mockFetch.mockReturnValue(makeMockResponse(aiOverviewFixture.items))
+
+    const result = await getSerpPage('best time to visit new zealand', 'nz')
+
+    expect(result.ai_overview_text).toContain('December to February')
+    expect(result.ai_overview_sources.length).toBeGreaterThanOrEqual(5)
+    expect(result.ai_overview_sources).toContain('https://www.nz-tourism.com/when-is-the-best-time-to-visit-new-zealand/')
+  })
+
+  it('reports no AI Overview when the SERP has none', async () => {
+    mockFetch.mockReturnValue(makeMockResponse([{ type: 'organic', rank_absolute: 1, url: 'https://a.com' }]))
+
+    const result = await getSerpPage('x', 'nz')
+
+    expect(result.ai_overview_text).toBeNull()
+    expect(result.ai_overview_sources).toEqual([])
   })
 })

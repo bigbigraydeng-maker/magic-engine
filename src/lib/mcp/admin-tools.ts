@@ -13,6 +13,7 @@
  * "Claude Desktop / Anthropic".
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 import { logMcpAccess, requireAdminContext } from '@/lib/auth/api-key-access'
 import { createAdminQueries, type AdminQueries } from '@/lib/mcp/admin-scoped-queries'
@@ -20,10 +21,7 @@ import { checkRateLimit } from '@/lib/mcp/rate-limit'
 
 const ADMIN_RATE_LIMIT = 30 // per minute, lower than client's 60
 
-interface ToolResult {
-  content: Array<{ type: 'text'; text: string }>
-  isError?: boolean
-}
+type ToolResult = CallToolResult
 
 function errorResult(message: string): ToolResult {
   return { content: [{ type: 'text', text: message }], isError: true }

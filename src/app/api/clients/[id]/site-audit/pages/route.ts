@@ -15,10 +15,14 @@
  *                Allowed: blog | product | service | landing | about | contact | other
  * - hasGeoBlock (optional): Filter by GEO block presence: 'true' or 'false'
  * - statusCode  (optional): Filter by status code range: '2xx' | '4xx' | '5xx'
+ * - indexStatus (optional): 'not-indexed' → only pages Google has not indexed
+ *                (first_not_indexed_at IS NOT NULL). Drives the 今日待办
+ *                not_indexed 汇总项的 ?filter=not-indexed 直达清单.
  *
  * Response:
  * {
- *   pages:  ClientSitePage[],
+ *   pages:  ClientSitePage[],   // each row carries index_verdict / first_not_indexed_at
+ *                               // plus derived not_indexed / index_class
  *   total:  number,
  *   limit:  number,
  *   offset: number,
@@ -32,6 +36,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { classifyNotIndexed, isNotIndexed, type IndexClass } from '@/lib/seo/index-status'
 
 export const maxDuration = 60
 
@@ -52,11 +57,12 @@ const PAGE_TYPES: PageType[] = [
   'blog', 'product', 'service', 'landing', 'about', 'contact', 'other',
 ]
 
-export type SortColumn = 'url' | 'word_count' | 'crawled_at' | 'has_geo_block'
+export type SortColumn = 'url' | 'word_count' | 'crawled_at' | 'has_geo_block' | 'first_not_indexed_at'
 export type SortOrder = 'asc' | 'desc'
 
 const ALLOWED_SORT_COLUMNS: SortColumn[] = [
-  'url', 'word_count', 'crawled_at', 'has_geo_block',
+  // first_not_indexed_at asc = oldest-not-indexed first = most urgent to fix.
+  'url', 'word_count', 'crawled_at', 'has_geo_block', 'first_not_indexed_at',
 ]
 
 const ALLOWED_ORDERS: SortOrder[] = ['asc', 'desc']
@@ -66,7 +72,8 @@ const MAX_LIMIT = 500
 const DEFAULT_SORT: SortColumn = 'crawled_at'
 const DEFAULT_ORDER: SortOrder = 'desc'
 
-export interface ClientSitePage {
+/** Raw shape read from client_site_pages (before deriving not_indexed/index_class). */
+interface SitePageRow {
   id: string
   url: string
   title: string | null
@@ -79,6 +86,19 @@ export interface ClientSitePage {
   crawled_at: string | null
   created_at: string
   updated_at: string
+  /** Google coverageState, verbatim-ish; null until the URL has been inspected. */
+  index_verdict: string | null
+  /** Non-null ⟺ currently not indexed (cleared when it flips back to indexed). */
+  first_not_indexed_at: string | null
+  /** Our own crawl outcome ('crawled' | 'antibot_challenged' | 'pending' | 'failed'). Only 'crawled' rows have a trustworthy word_count. */
+  crawl_status: string | null
+}
+
+export interface ClientSitePage extends SitePageRow {
+  /** Derived: first_not_indexed_at IS NOT NULL. */
+  not_indexed: boolean
+  /** Derived local reason, only for not-indexed pages; null otherwise. */
+  index_class: IndexClass | null
 }
 
 export interface PagesResponse {
@@ -199,7 +219,7 @@ export async function GET(
     let query = supabaseAdmin
       .from('client_site_pages')
       .select(
-        'id, url, title, page_type, topics, primary_keyword, word_count, has_geo_block, status_code, crawled_at, created_at, updated_at',
+        'id, url, title, page_type, topics, primary_keyword, word_count, has_geo_block, status_code, crawled_at, created_at, updated_at, index_verdict, first_not_indexed_at, crawl_status',
         { count: 'exact' }
       )
       .eq('client_id', clientId)
@@ -207,6 +227,22 @@ export async function GET(
     // Apply optional filters
     if (pageTypeParam) {
       query = query.eq('page_type', pageTypeParam)
+    }
+
+    // Index-status filter: 'not-indexed' → only pages Google has not indexed.
+    // first_not_indexed_at is the authoritative signal (see lib/seo/index-status).
+    //
+    // No asset (image/PDF) exclusion here on purpose: the count comes from SQL
+    // (count: 'exact'), so a JS-side isHtmlPageUrl filter would desync total vs
+    // rows. It isn't needed either — only the daily URL-inspection (index-check.ts)
+    // ever writes first_not_indexed_at, and it inspects HTML pages only, so assets
+    // never carry the timestamp this filter keys on. That invariant is what keeps
+    // this list's count aligned with the 今日待办 not_indexed 汇总项 (which does
+    // exclude assets via isHtmlPageUrl). If asset inspection is ever enabled,
+    // exclude assets at the write site so all three consumers stay in lockstep.
+    const indexStatusParam = searchParams.get('indexStatus')
+    if (indexStatusParam === 'not-indexed') {
+      query = query.not('first_not_indexed_at', 'is', null)
     }
 
     const hasGeoParam = searchParams.get('hasGeoBlock')
@@ -238,9 +274,20 @@ export async function GET(
       throw new Error(`Failed to fetch pages: ${pagesError.message}`)
     }
 
+    // Derive index status per row (Google's own reason + whether our crawl was clean and recent) so the frontend never re-derives it — one source of truth in seo/index-status.
+    const now = new Date()
+    const rows = ((pages ?? []) as SitePageRow[]).map<ClientSitePage>((p) => {
+      const notIndexed = isNotIndexed(p.first_not_indexed_at)
+      return {
+        ...p,
+        not_indexed: notIndexed,
+        index_class: notIndexed ? classifyNotIndexed(p, now) : null,
+      }
+    })
+
     return NextResponse.json<PagesResponse>(
       {
-        pages: (pages ?? []) as ClientSitePage[],
+        pages: rows,
         total: count ?? 0,
         limit,
         offset,

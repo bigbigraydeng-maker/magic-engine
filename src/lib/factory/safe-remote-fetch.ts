@@ -45,10 +45,15 @@ export function isBlockedAddress(ip: string): boolean {
   return true // 解析不出来的一律当危险
 }
 
-/** 这一跳能不能走：协议必须是 http(s)，且解析出的每个 IP 都不在禁用段。 */
-async function assertHopAllowed(u: URL): Promise<string | null> {
+/** 这一跳能不能走：协议必须是 http(s)，解析出的每个 IP 都不在禁用段，且（若给了
+ *  allowedHosts）主机名在白名单里——每一跳都查，不是只查最终地址：跳转可能从一个
+ *  白名单域名转到别处（Creatomate 结果下载用，spec §4.4/§6.1，只信任官方域名）。 */
+async function assertHopAllowed(u: URL, allowedHosts?: readonly string[]): Promise<string | null> {
   if (u.protocol !== 'https:' && u.protocol !== 'http:') {
     return '这个链接的协议不支持 — 用普通的 http/https 分享链接'
+  }
+  if (allowedHosts && !allowedHosts.includes(u.hostname)) {
+    return `这个链接不在信任的域名列表里（${u.hostname}）`
   }
   let addrs: { address: string }[]
   try {
@@ -75,8 +80,15 @@ export interface SafeHeadResult {
 /**
  * 安全地探一下这个链接是不是真能下到东西。
  * 只取前 1KB（Range），不下整个文件。
+ *
+ * @param allowedHosts 给了就额外校验每一跳的主机名必须在这个列表里（不给 = 不限制，
+ *   维持原有行为，向后兼容既有调用方）。
  */
-export async function safeProbeRemoteFile(rawUrl: string, timeoutMs = 20000): Promise<SafeHeadResult> {
+export async function safeProbeRemoteFile(
+  rawUrl: string,
+  timeoutMs = 20000,
+  allowedHosts?: readonly string[],
+): Promise<SafeHeadResult> {
   let current: URL
   try {
     current = new URL(rawUrl)
@@ -85,7 +97,7 @@ export async function safeProbeRemoteFile(rawUrl: string, timeoutMs = 20000): Pr
   }
 
   for (let hop = 0; hop < MAX_HOPS; hop++) {
-    const blocked = await assertHopAllowed(current)
+    const blocked = await assertHopAllowed(current, allowedHosts)
     if (blocked) return { ok: false, error: blocked }
 
     let res: Response

@@ -91,6 +91,10 @@ export interface MetricSummaryTile {
   deltaPct28d:   number | null
   /** Ordered ascending sparkline for 28 daily points (null-filled for gaps) */
   sparkline:     Array<number | null>
+  /** Ad-account currency (NZD / AUD / …). Absent on non-money tiles. */
+  currency?:     string | null
+  /** Window the current value covers, e.g. "2026-09-25 至 2026-10-25". */
+  periodLabel?:  string | null
 }
 
 // ─── Metric metadata ──────────────────────────────────────────────────────────

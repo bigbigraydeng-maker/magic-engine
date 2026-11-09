@@ -38,10 +38,10 @@ describe('fetchClientOutcomeHistory 客户作用域', () => {
     const captured: Array<[string, string]> = []
     const supabase = fakeSupabase([
       { action_id: 'a2', metric_key: 'm', window_days: 28, verdict: 'confirmed', flywheel_actions: { action_type: 'seo.publish_blog' } },
-      { action_id: 'a3', metric_key: 'm', window_days: 28, verdict: 'refuted',   flywheel_actions: { action_type: 'seo.publish_blog' } },
+      { action_id: 'a3', metric_key: 'm', window_days: 28, verdict: 'reversed',   flywheel_actions: { action_type: 'seo.publish_blog' } },
     ], captured)
     const map = await fetchClientOutcomeHistory(supabase, 'client-1')
-    expect(map['seo.publish_blog']).toEqual({ successRate: 0.5, sampleSize: 2 })
+    expect(map['seo.publish_blog']).toEqual({ successRate: 0.5, sampleSize: 2, totalCases: 2 })
   })
 
   it('可选 flywheel / action_type 过滤也带上', async () => {
@@ -70,26 +70,26 @@ describe('fetchClientOutcomeHistory 多窗口去重', () => {
     // 按行数计样本，一个动作会被当成两个「客户案例」报给诸葛亮。
     const captured: Array<[string, string]> = []
     const supabase = fakeSupabase([
-      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 28, verdict: 'confirmed', flywheel_actions: { action_type: 'seo.publish_blog' } },
-      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 14, verdict: 'confirmed', flywheel_actions: { action_type: 'seo.publish_blog' } },
+      { action_id: 'a1', metric_key: 'seo.gsc.page_clicks', window_days: 28, verdict: 'confirmed', flywheel_actions: { action_type: 'seo.publish_blog' } },
+      { action_id: 'a1', metric_key: 'seo.gsc.page_clicks', window_days: 14, verdict: 'confirmed', flywheel_actions: { action_type: 'seo.publish_blog' } },
     ], captured)
 
     const map = await fetchClientOutcomeHistory(supabase, 'client-1')
 
-    expect(map['seo.publish_blog']).toEqual({ successRate: 1, sampleSize: 1 })
+    expect(map['seo.publish_blog']).toEqual({ successRate: 1, sampleSize: 1, totalCases: 1 })
   })
 
   it('两个窗口结论不一致时取更长的那个窗口', async () => {
     const captured: Array<[string, string]> = []
     const supabase = fakeSupabase([
-      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 14, verdict: 'reversed', flywheel_actions: { action_type: 'seo.publish_blog' } },
-      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 28, verdict: 'confirmed', flywheel_actions: { action_type: 'seo.publish_blog' } },
+      { action_id: 'a1', metric_key: 'seo.gsc.page_clicks', window_days: 14, verdict: 'reversed', flywheel_actions: { action_type: 'seo.publish_blog' } },
+      { action_id: 'a1', metric_key: 'seo.gsc.page_clicks', window_days: 28, verdict: 'confirmed', flywheel_actions: { action_type: 'seo.publish_blog' } },
     ], captured)
 
     const map = await fetchClientOutcomeHistory(supabase, 'client-1')
 
     // 28 天的观察更成熟，胜出；且样本数仍是 1，不是 2。
-    expect(map['seo.publish_blog']).toEqual({ successRate: 1, sampleSize: 1 })
+    expect(map['seo.publish_blog']).toEqual({ successRate: 1, sampleSize: 1, totalCases: 1 })
   })
 
   it('同一动作的多个指标只算一个案例，取它承诺的那个指标', async () => {
@@ -98,26 +98,26 @@ describe('fetchClientOutcomeHistory 多窗口去重', () => {
     // 凑够阈值，还能用三票把成功率拽偏。代表读数取动作自己承诺的那个指标。
     const captured: Array<[string, string]> = []
     const supabase = fakeSupabase([
-      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 28, verdict: 'confirmed',
-        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.clicks' } },
-      { action_id: 'a1', metric_key: 'seo.gsc.impressions', window_days: 28, verdict: 'reversed',
-        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.clicks' } },
-      { action_id: 'a1', metric_key: 'seo.gsc.avg_position', window_days: 28, verdict: 'reversed',
-        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.clicks' } },
+      { action_id: 'a1', metric_key: 'seo.gsc.page_clicks', window_days: 28, verdict: 'confirmed',
+        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.page_clicks' } },
+      { action_id: 'a1', metric_key: 'seo.gsc.page_impressions', window_days: 28, verdict: 'reversed',
+        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.page_clicks' } },
+      { action_id: 'a1', metric_key: 'seo.gsc.page_avg_position', window_days: 28, verdict: 'reversed',
+        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.page_clicks' } },
     ], captured)
 
     const map = await fetchClientOutcomeHistory(supabase, 'client-1')
 
     // 一个动作 = 一个案例，且结论跟着 expected_metric 走（confirmed）。
-    expect(map['seo.publish_blog']).toEqual({ successRate: 1, sampleSize: 1 })
+    expect(map['seo.publish_blog']).toEqual({ successRate: 1, sampleSize: 1, totalCases: 1 })
   })
 
   it('动作承诺的指标没被量到时，退回量到的那个，样本数仍是 1', async () => {
     const captured: Array<[string, string]> = []
     const supabase = fakeSupabase([
-      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 28, verdict: 'reversed',
+      { action_id: 'a1', metric_key: 'seo.gsc.page_clicks', window_days: 28, verdict: 'reversed',
         flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.domain.organic_traffic' } },
-      { action_id: 'a1', metric_key: 'seo.gsc.impressions', window_days: 28, verdict: 'reversed',
+      { action_id: 'a1', metric_key: 'seo.gsc.page_impressions', window_days: 28, verdict: 'reversed',
         flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.domain.organic_traffic' } },
     ], captured)
 
@@ -129,15 +129,29 @@ describe('fetchClientOutcomeHistory 多窗口去重', () => {
   it('两个不同动作仍算两个案例', async () => {
     const captured: Array<[string, string]> = []
     const supabase = fakeSupabase([
-      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 28, verdict: 'confirmed',
-        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.clicks' } },
-      { action_id: 'a2', metric_key: 'seo.gsc.clicks', window_days: 28, verdict: 'reversed',
-        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.clicks' } },
+      { action_id: 'a1', metric_key: 'seo.gsc.page_clicks', window_days: 28, verdict: 'confirmed',
+        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.page_clicks' } },
+      { action_id: 'a2', metric_key: 'seo.gsc.page_clicks', window_days: 28, verdict: 'reversed',
+        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.page_clicks' } },
     ], captured)
 
     const map = await fetchClientOutcomeHistory(supabase, 'client-1')
 
-    expect(map['seo.publish_blog']).toEqual({ successRate: 0.5, sampleSize: 2 })
+    expect(map['seo.publish_blog']).toEqual({ successRate: 0.5, sampleSize: 2, totalCases: 2 })
+  })
+
+  it('整站指标的旧强结论一律读成判不了（不进成功率，也不算可判定样本）', async () => {
+    const captured: Array<[string, string]> = []
+    const supabase = fakeSupabase([
+      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 28, verdict: 'confirmed',
+        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.gsc.clicks' } },
+      { action_id: 'a2', metric_key: 'seo.domain.organic_traffic', window_days: 14, verdict: 'reversed',
+        flywheel_actions: { action_type: 'seo.publish_blog', expected_metric: 'seo.domain.organic_traffic' } },
+    ], captured)
+
+    const map = await fetchClientOutcomeHistory(supabase, 'client-1')
+
+    expect(map['seo.publish_blog']).toEqual({ successRate: 0, sampleSize: 0, totalCases: 2 })
   })
 })
 
@@ -147,8 +161,8 @@ describe('fetchSeoBlogConfidenceByMode 多窗口去重', () => {
   it('同一篇博客的两个窗口只进一次桶', async () => {
     const captured: Array<[string, string]> = []
     const supabase = fakeSupabase([
-      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 28, verdict: 'confirmed', flywheel_actions: { payload: { mode: 'unified' } } },
-      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 14, verdict: 'confirmed', flywheel_actions: { payload: { mode: 'unified' } } },
+      { action_id: 'a1', metric_key: 'seo.gsc.page_clicks', window_days: 28, verdict: 'confirmed', flywheel_actions: { payload: { mode: 'unified' } } },
+      { action_id: 'a1', metric_key: 'seo.gsc.page_clicks', window_days: 14, verdict: 'confirmed', flywheel_actions: { payload: { mode: 'unified' } } },
     ], captured)
 
     const byMode = await fetchSeoBlogConfidenceByMode(supabase, 'client-1')
@@ -159,13 +173,24 @@ describe('fetchSeoBlogConfidenceByMode 多窗口去重', () => {
   it('两篇不同博客仍算两个样本', async () => {
     const captured: Array<[string, string]> = []
     const supabase = fakeSupabase([
-      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 28, verdict: 'confirmed', flywheel_actions: { payload: { mode: 'unified' } } },
-      { action_id: 'a2', metric_key: 'seo.gsc.clicks', window_days: 28, verdict: 'reversed', flywheel_actions: { payload: { mode: 'unified' } } },
+      { action_id: 'a1', metric_key: 'seo.gsc.page_clicks', window_days: 28, verdict: 'confirmed', flywheel_actions: { payload: { mode: 'unified' } } },
+      { action_id: 'a2', metric_key: 'seo.gsc.page_clicks', window_days: 28, verdict: 'reversed', flywheel_actions: { payload: { mode: 'unified' } } },
     ], captured)
 
     const byMode = await fetchSeoBlogConfidenceByMode(supabase, 'client-1')
 
     expect(byMode.unified.sampleSize).toBe(2)
     expect(byMode.unified.successRate).toBe(0.5)
+  })
+
+  it('整站点击数的旧结论不算可判定样本', async () => {
+    const captured: Array<[string, string]> = []
+    const supabase = fakeSupabase([
+      { action_id: 'a1', metric_key: 'seo.gsc.clicks', window_days: 28, verdict: 'confirmed', flywheel_actions: { payload: { mode: 'unified' } } },
+    ], captured)
+
+    const byMode = await fetchSeoBlogConfidenceByMode(supabase, 'client-1')
+
+    expect(byMode.unified).toEqual({ successRate: 0, sampleSize: 0, totalCases: 1 })
   })
 })

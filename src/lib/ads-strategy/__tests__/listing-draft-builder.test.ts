@@ -77,7 +77,6 @@ describe('buildBuyerLeadDraft', () => {
   it('没给来源链接 → 抛（事实不可溯不许投放）', () => {
     expect(() => buildBuyerLeadDraft({ ...LISTING, sourceUrl: '' }, AGENT, OPTS)).toThrow(
       NotGroundedError,
-  BannedPhraseError,
     )
   })
 

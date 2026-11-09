@@ -59,24 +59,92 @@ export async function guardAdmin(): Promise<NextResponse | null> {
  *
  * 判据很简单：`allowedClientId` 有值 = 这个人被限定在某一个客户里 = 不该碰平台级开关。
  *
- * 用在**影响多个客户**的写接口上（跨客户经验开关、全局配置…）；
- * 只动单个客户数据的接口继续用 `guardAdmin`。
+ * 用在**影响多个客户**的写接口、花钱 / 对外发布 / 运维类动作上；
+ * 按客户操作的接口用 `requireAdminScope` + `scopeAllowsClient` 核客户 ——
+ * 只套 `guardAdmin` 会放行限定客户的管理员去碰别的客户。
  */
 export async function guardGlobalAdmin(): Promise<NextResponse | null> {
-  const session = await requireSession()
-  if (!session.ok) {
-    return NextResponse.json({ error: session.error }, { status: session.status })
+  const result = await requireGlobalAdmin()
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status })
   }
+  return null
+}
+
+/**
+ * 同 guardGlobalAdmin 的判据，但把 user 带回来（需要记审计 actor 的接口用）。
+ *
+ * 这是「内部员工」的唯一判据：ADMIN_EMAILS / ADMIN_EMAIL_DOMAIN。
+ * `client_portal_users.access_type='fde'` **不算** —— 那是按客户发放的成员行，
+ * 付费客户自己就能给任意邮箱发（clients/[id]/users），不能当内部身份用。
+ */
+export async function requireGlobalAdmin(): Promise<AdminResult> {
+  const session = await requireSession()
+  if (!session.ok) return session
 
   const perms = getUserPermissions(session.user.email ?? '')
   if (!perms || perms.role !== 'admin') {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    return { ok: false, status: 403, error: 'Forbidden' }
   }
   if (perms.allowedClientId) {
-    return NextResponse.json(
-      { error: 'Forbidden — this endpoint affects every client, scoped admins cannot use it' },
-      { status: 403 },
-    )
+    return {
+      ok: false,
+      status: 403,
+      error: 'Forbidden — this endpoint affects every client, scoped admins cannot use it',
+    }
   }
-  return null
+  return { ok: true, user: session.user }
+}
+
+/** 管理员的客户范围：全局（内部员工），或被限定在某一个客户（DEMO_ADMINS）。 */
+export type AdminScope = { kind: 'global' } | { kind: 'client'; clientId: string }
+
+export type ScopedAdminResult =
+  | { ok: true; user: User; scope: AdminScope }
+  | { ok: false; status: 401 | 403; error: string }
+
+/**
+ * 一次读取同时给出「是不是管理员」和「被限定在哪个客户」。
+ *
+ * 范围和授权必须来自同一次读取。读不到身份一律拒，不会退成全局管理员 ——
+ * 原来 guardAdmin + 第二次 requireAdmin 的写法，第二次读失败时会被当成没有限定。
+ *
+ * 只认环境变量里的管理员，和 requireAdmin / requireGlobalAdmin 同一个判据；
+ * 库里 scoped_admin=true 的账号这里仍然是 403。
+ *
+ * 邮箱为空一律拒：`getUserPermissions('')` 在 ADMIN_EMAILS 多一个逗号时会返回全局管理员。
+ *
+ * 客户 id 统一转小写、去首尾空白再比较（见 scopeAllowsClient）。
+ *
+ * ⚠️ 只看 ok、不看 scope，效果就等于 guardAdmin：按客户操作的接口必须用 scopeAllowsClient 核客户，
+ *    或把限定客户的 id 传给下游（看 scope.kind，只有 'global' 才可以不限客户）。
+ */
+export async function requireAdminScope(): Promise<ScopedAdminResult> {
+  const session = await requireSession()
+  if (!session.ok) return session
+
+  const email = (session.user.email ?? '').trim()
+  if (!email) {
+    return { ok: false, status: 403, error: 'Forbidden' }
+  }
+
+  const perms = getUserPermissions(email)
+  if (!perms || perms.role !== 'admin') {
+    return { ok: false, status: 403, error: 'Forbidden' }
+  }
+
+  if (perms.allowedClientId === null) {
+    return { ok: true, user: session.user, scope: { kind: 'global' } }
+  }
+
+  return {
+    ok: true,
+    user: session.user,
+    scope: { kind: 'client', clientId: perms.allowedClientId.trim().toLowerCase() },
+  }
+}
+
+/** 全局管理员恒可；被限定在某个客户的管理员只能碰自己那一个（比较时不区分大小写、忽略首尾空白）。 */
+export function scopeAllowsClient(scope: AdminScope, clientId: string): boolean {
+  return scope.kind === 'global' || scope.clientId === clientId.trim().toLowerCase()
 }

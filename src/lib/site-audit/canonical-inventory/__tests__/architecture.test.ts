@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
+import ts from 'typescript'
 import { readFileSync, readdirSync, statSync } from 'fs'
 import { join, relative } from 'path'
 
@@ -25,15 +26,67 @@ function walk(dir: string, out: string[] = []): string[] {
   return out
 }
 
-function stripComments(src: string): string {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .filter((line) => {
-      const t = line.trim()
-      return !t.startsWith('//') && !t.startsWith('*')
-    })
-    .join('\n')
+/** 按文件后缀选 ScriptKind —— .tsx/.jsx 必须按 JSX 解析，否则 JsxText 保护无从谈起（Issue #923）。 */
+const scriptKindFor = (fileName: string): ts.ScriptKind =>
+  fileName.endsWith('.tsx')
+    ? ts.ScriptKind.TSX
+    : fileName.endsWith('.jsx')
+      ? ts.ScriptKind.JSX
+      : /\.(js|mjs|cjs)$/.test(fileName)
+        ? ts.ScriptKind.JS
+        : ts.ScriptKind.TS
+
+const parseSource = (code: string, fileName = 'scan.ts'): ts.SourceFile =>
+  // setParentNodes = false：只按位置取注释、按节点类型取说明符，用不上父指针。
+  ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, false, scriptKindFor(fileName))
+
+function stripComments(src: string, fileName = 'scan.ts'): string {
+  const sourceFile = parseSource(src, fileName)
+  const ranges = new Map<string, ts.CommentRange>()
+  // JSX 文本区间：起点落在这里面的「注释」是假的，见上面 Issue #923 那段
+  const jsxTextSpans: Array<{ pos: number; end: number }> = []
+
+  // `node.pos` 就是含前导 trivia 的起点（= getFullStart()），不需要父指针
+  const collectLeadingAt = (pos: number): void => {
+    for (const r of ts.getLeadingCommentRanges(src, pos) ?? []) {
+      ranges.set(`${r.pos}:${r.end}`, r)
+    }
+  }
+  // `node.end` 是节点的结束位置 —— 同一行内紧跟在它后面的注释算它的 trailing trivia
+  const collectTrailingAt = (pos: number): void => {
+    for (const r of ts.getTrailingCommentRanges(src, pos) ?? []) {
+      ranges.set(`${r.pos}:${r.end}`, r)
+    }
+  }
+  const visit = (node: ts.Node): void => {
+    if (node.kind === ts.SyntaxKind.JsxText) jsxTextSpans.push({ pos: node.pos, end: node.end })
+    collectLeadingAt(node.pos)
+    collectTrailingAt(node.end)
+    // 🔴 必须走 getChildren()（token 级），不是 forEachChild（只给子**节点**）。
+    //    JSX 表达式里的注释 `<div>{/* … */}</div>` 挂在 `}` 这个 **token** 的
+    //    前导 trivia 上 —— JsxExpression 没有子节点，forEachChild 一个都不给，
+    //    于是整段注释原样留下，后面仍用正则的检查会把它当成生产代码。
+    //    同理还有块尾 `}` 之前那种独占一行的注释。
+    for (const child of node.getChildren(sourceFile)) visit(child)
+  }
+  visit(sourceFile)
+  // 文件末尾那条注释是 EOF token 的前导 trivia，不挂在任何其它节点上
+  collectLeadingAt(sourceFile.endOfFileToken.pos)
+
+  // 起点落在 JSX 文本里 = 这段「注释」其实是页面上的字面文本，不许挖（Issue #923）
+  const startsInsideJsxText = (pos: number): boolean =>
+    jsxTextSpans.some((span) => pos >= span.pos && pos < span.end)
+
+  const chars = src.split('')
+  // 用 forEach 而不是 `for…of ranges.values()`：直接迭代 Map 的迭代器需要
+  // tsconfig 的 target 够高（否则撞 TS2802），forEach 不挑 target，更稳。
+  ranges.forEach((r) => {
+    if (startsInsideJsxText(r.pos)) return
+    for (let i = r.pos; i < r.end && i < chars.length; i++) {
+      if (chars[i] !== '\n') chars[i] = ' '
+    }
+  })
+  return chars.join('')
 }
 
 const PRODUCTION_FILES = walk(DIR)

@@ -146,3 +146,19 @@ describe('callClaudeWithTools', () => {
     expect(result.tool_rounds).toBe(1)
   })
 })
+
+describe('budgeted single-attempt chat', () => {
+  it('disables SDK retries and does not invoke fetch fallback after an ambiguous error', async () => {
+    const { callClaudeChat } = await import('../client')
+    const originalFetch = globalThis.fetch
+    const fallback = vi.fn()
+    globalThis.fetch = fallback
+    mockCreate.mockRejectedValueOnce(new Error('response interrupted'))
+    try {
+      await expect(callClaudeChat({ systemPrompt: 'test', messages: [{ role: 'user', content: 'test' }], singleAttempt: true })).rejects.toThrow('response interrupted')
+      expect(mockCreate).toHaveBeenCalledTimes(1)
+      expect(mockCreate).toHaveBeenCalledWith(expect.anything(), { maxRetries: 0, timeout: 60000 })
+      expect(fallback).not.toHaveBeenCalled()
+    } finally { globalThis.fetch = originalFetch }
+  })
+})

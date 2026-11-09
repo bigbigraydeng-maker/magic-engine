@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   requireDashboardClientAccess: vi.fn(),
   encryptToken: vi.fn((s: string) => `enc:${s}`),
   upsert: vi.fn(),
+  resolveGbpLocation: vi.fn(),
 }))
 
 vi.mock('@/lib/auth/client-access', () => ({
@@ -20,16 +21,31 @@ vi.mock('@/lib/platform-oauth/vocabulary', async (importOriginal) => {
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: {
-    from: vi.fn(() => ({
-      upsert: mocks.upsert,
-    })),
+    from: vi.fn((table: string) => {
+      // Step 7b reads the client row to resolve which GBP location posts go to.
+      if (table === 'clients') {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq:     vi.fn().mockReturnThis(),
+          single: vi.fn().mockResolvedValue({
+            data:  { id: 'client-abc-123', name: 'OzTop Building Supplies', domain: 'oztop.com.au' },
+            error: null,
+          }),
+        }
+      }
+      return { upsert: mocks.upsert }
+    }),
   },
+}))
+
+vi.mock('@/lib/gbp/location', () => ({
+  resolveGbpLocation: mocks.resolveGbpLocation,
 }))
 
 // ─── Import after mocks ────────────────────────────────────────────────────────
 
 import { GET } from '../route'
-import { GBP_STATE_COOKIE } from '../../start/route'
+import { GBP_STATE_COOKIE } from '@/lib/gbp/oauth'
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -70,7 +86,7 @@ function makeRequest(opts: {
 }
 
 function adminAccess() {
-  return { ok: true as const, user: { email: 'admin@test.com' }, role: 'admin' as const, allowedClientId: null }
+  return { ok: true as const, user: { email: 'admin@test.com' }, role: 'admin' as const, tier: 'admin' as const, allowedClientId: null }
 }
 
 function happyFetch() {
@@ -86,6 +102,9 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_APP_URL        = 'https://app.magic-engine.com'
   mocks.requireDashboardClientAccess.mockResolvedValue(adminAccess())
   mocks.upsert.mockResolvedValue({ error: null })
+  mocks.resolveGbpLocation.mockResolvedValue({
+    ok: true, locationName: 'accounts/987654321/locations/111', cached: false,
+  })
 })
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -236,6 +255,17 @@ describe('GET /api/auth/google/gbp/callback', () => {
       const loc = res.headers.get('location') ?? ''
       expect(loc).toContain(CLIENT_ID)
       expect(loc).toContain('gbp=connected')
+    })
+
+    it('redirects with gbp=needs_location when the location cannot be resolved (never claims ready)', async () => {
+      happyFetch()
+      mocks.resolveGbpLocation.mockResolvedValue({ ok: false, reason: 'ambiguous', candidates: [] })
+      const res = await GET(makeRequest({ code: 'auth-code', state: NONCE, cookieValue: COOKIE_VAL }))
+
+      expect(res.status).toBe(302)
+      const loc = res.headers.get('location') ?? ''
+      expect(loc).toContain('gbp=needs_location')
+      expect(loc).not.toContain('gbp=connected')
     })
 
     it('clears the state cookie after successful connection', async () => {

@@ -94,6 +94,14 @@ describe('幂等键', () => {
     expect(computeIdempotencyKey(DEF, 'c', { blog_post_id: 'p1', content_hash: 'h2' })).not.toBe(base)
   })
 
+  it('同一确认操作重试仍复用原键，新操作获得新键', () => {
+    const input = { blog_post_id: 'p1', content_hash: 'h1' }
+    const first = computeIdempotencyKey(DEF, 'c', input, 'attempt-1')
+    expect(computeIdempotencyKey(DEF, 'c', input, 'attempt-1')).toBe(first)
+    expect(computeIdempotencyKey(DEF, 'c', input, 'attempt-2')).not.toBe(first)
+    expect(computeIdempotencyKey(DEF, 'c', input)).not.toBe(first)
+  })
+
   it('不参与键的字段变了 → 键不变', () => {
     const a = computeIdempotencyKey(DEF, 'c', { blog_post_id: 'p1', content_hash: 'h1' })
     const b = computeIdempotencyKey(DEF, 'c', { blog_post_id: 'p1', content_hash: 'h1', note: '随手写的' })

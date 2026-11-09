@@ -9,7 +9,9 @@
  * to open a console or paste an id to publish — every field the API demands is
  * supplied from the loaded plan, and the Page comes from the client record.
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { TuneSuggestionInline } from './TuneSuggestionInline'
+import type { TuneRecommendation } from '@/lib/flywheel/tune/types'
 
 interface Props {
   clientId: string
@@ -26,6 +28,9 @@ interface Props {
 
 export interface PublishedPost {
   date: string
+  /** Tune suggestions are keyed by this, not post_id (a scheduled post's
+   *  receipt holds the photo id; its measurement row holds the story id). */
+  idempotency_key: string
   post_id: string
   page_id: string
   published_at: string
@@ -81,6 +86,8 @@ export function CampaignDailyPublishPanel({
   const [error, setError] = useState('')
   const [confirming, setConfirming] = useState(false)
   const [progress, setProgress] = useState('')
+  const [tuneSuggestions, setTuneSuggestions] = useState<Record<string, TuneRecommendation | null>>({})
+  const [tuneFetchFailed, setTuneFetchFailed] = useState(false)
 
   const identityReady = Boolean(planId && planRevision && reviewRevision)
   const canDryRun = identityReady && queueReceiptReady && Boolean(facebookPageId)
@@ -186,6 +193,52 @@ export function CampaignDailyPublishPanel({
 
   const publishedPosts = publishReceipt?.published ?? []
 
+  /**
+   * 一次拉齐本活动所有已发布帖子的 Tune 建议（Gate B/3，只读）。
+   *
+   * 读失败必须**显式**告知 UI —— PITFALLS「读失败别显示空输入框」：
+   * 若把 500/403/网络断了当空数据处理，PM 会看到「等 T+72」占位并误以为
+   * 「时间还没到」，而实际是后台挂了。因此这里区分三态：ok / failed / idle。
+   *
+   * 依赖 key 用每条 post_id 拼接 —— 用 length 会漏掉「撤一条 + 发一条」这种
+   * 数量不变但内容变的情况。
+   */
+  const publishedPostKey = publishedPosts.map((p) => p.post_id).join(',')
+  useEffect(() => {
+    if (publishedPosts.length === 0) {
+      setTuneSuggestions({})
+      setTuneFetchFailed(false)
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch(
+          `/api/clients/${clientId}/campaign-daily-plan/tune-suggestions?campaign_id=${encodeURIComponent(campaignId)}`,
+          { cache: 'no-store' },
+        )
+        if (!res.ok) {
+          if (!cancelled) { setTuneFetchFailed(true); setTuneSuggestions({}) }
+          return
+        }
+        const json = (await res.json()) as { success?: boolean; suggestions?: Record<string, TuneRecommendation | null> }
+        if (cancelled) return
+        if (json.success && json.suggestions) {
+          setTuneSuggestions(json.suggestions)
+          setTuneFetchFailed(false)
+        } else {
+          setTuneFetchFailed(true)
+          setTuneSuggestions({})
+        }
+      } catch {
+        if (!cancelled) { setTuneFetchFailed(true); setTuneSuggestions({}) }
+      }
+    })()
+    return () => { cancelled = true }
+    // publishedPostKey 已经包含 length，改依赖后 length 无需再列。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, campaignId, publishedPostKey])
+
   return (
     <div className="border-t border-black/[.06] pt-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -227,6 +280,10 @@ export function CampaignDailyPublishPanel({
               <p className="mt-0.5 text-[10px] text-me-charcoal/45">
                 发布时间 {formatWhen(post.published_at)} · 帖子编号 {post.post_id}
               </p>
+              <TuneSuggestionInline
+                suggestion={tuneSuggestions[post.idempotency_key] ?? null}
+                fetchFailed={tuneFetchFailed}
+              />
             </div>
           ))}
         </div>

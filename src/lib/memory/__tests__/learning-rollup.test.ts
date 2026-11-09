@@ -29,7 +29,7 @@ interface MockState {
     action_id?: string
     metric_key?: string
     window_days?: number
-    flywheel_actions?: { expected_metric?: string | null } | null
+    flywheel_actions?: { expected_metric?: string | null; executed_at?: string } | null
   }>
   feedback: Array<{ client_id: string; feedback_state: string; created_at: string }>
   existingPreferences: Array<{
@@ -45,15 +45,16 @@ function makeMockSupabase(state: MockState): SupabaseClient {
   function makeQuery(table: string) {
     const filters: Record<string, unknown> = {}
     const rangeFilters: Array<{ op: 'gte' | 'lt'; col: string; val: unknown }> = []
+    let selectStr = ''
 
     const builder: Record<string, unknown> = {
-      select() { return builder },
+      select(cols?: string) { selectStr = cols ?? ''; return builder },
       eq(col: string, val: unknown) { filters[col] = val; return builder },
       gte(col: string, val: unknown) { rangeFilters.push({ op: 'gte', col, val }); return builder },
       lt(col: string, val: unknown) { rangeFilters.push({ op: 'lt', col, val }); return builder },
       limit() { return builder },
       then(resolve: (r: { data: unknown[]; error: null }) => void) {
-        const rows = pickRows(table, state, filters, rangeFilters)
+        const rows = pickRows(table, state, filters, rangeFilters, selectStr)
         resolve({ data: rows, error: null })
       },
     }
@@ -85,11 +86,22 @@ function makeMockSupabase(state: MockState): SupabaseClient {
   } as unknown as SupabaseClient
 }
 
+/** 支持 `表.列` 这种嵌套路径；路径头一段不存在（= inner join 没匹配上）返回 undefined。 */
+function readCol(row: Record<string, unknown>, col: string): unknown {
+  if (!col.includes('.')) return row[col]
+  const [embed, field] = col.split('.')
+  const joined = row[embed]
+  const obj = Array.isArray(joined) ? joined[0] : joined
+  if (!obj || typeof obj !== 'object') return undefined
+  return (obj as Record<string, unknown>)[field]
+}
+
 function pickRows(
   table: string,
   state: MockState,
   eqFilters: Record<string, unknown>,
   rangeFilters: Array<{ op: 'gte' | 'lt'; col: string; val: unknown }>,
+  selectStr = '',
 ): unknown[] {
   let rows: Array<Record<string, unknown>> = []
   if (table === 'flywheel_outcomes') rows = state.outcomes as unknown as Array<Record<string, unknown>>
@@ -100,11 +112,21 @@ function pickRows(
     rows = rows.filter(r => r[col] === val)
   }
   for (const f of rangeFilters) {
+    // 🔴 按 PostgREST 真实行为建模，不按调用次序。嵌套列上的范围过滤，内连接和
+    //    左连接**结果不一样**，而这正是本次要钉的东西：
+    //      `flywheel_actions!inner(...)` → 过滤作用在顶层行上，不匹配的整条不返回
+    //      `flywheel_actions(...)`（左连接）→ 顶层行**照样返回**，只是把嵌套对象置空
+    //    假件如果两者不分（比如只做 r['表.列'] 查一个不存在的键，一律滤掉），
+    //    「孤儿不进查询」那条断言就会因为错的理由通过 —— 把 !inner 去掉也照样绿。
+    const [embed] = f.col.includes('.') ? f.col.split('.') : [null]
+    const isInner = embed !== null && selectStr.includes(`${embed}!inner`)
+
     rows = rows.filter(r => {
-      const v = r[f.col] as string | undefined
-      if (typeof v !== 'string') return false
-      if (f.op === 'gte') return v >= (f.val as string)
-      return v < (f.val as string)
+      const v = readCol(r, f.col)
+      const matches = typeof v === 'string' && (f.op === 'gte' ? v >= (f.val as string) : v < (f.val as string))
+      if (matches) return true
+      // 左连接：不匹配不删行（真库会把 embed 置空后照样返回它）
+      return embed !== null && !isInner
     })
   }
   return rows
@@ -157,10 +179,10 @@ describe('runWeeklyLearningRollup', () => {
     const state: MockState = {
       outcomes: [
         // client A: 2 confirmed in window
-        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-06-02T00:00:00Z' },
-        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-06-03T00:00:00Z' },
+        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-06-02T00:00:00Z', flywheel_actions: { executed_at: '2026-06-02T00:00:00Z' } },
+        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-06-03T00:00:00Z', flywheel_actions: { executed_at: '2026-06-03T00:00:00Z' } },
         // client B: 1 reversed in window
-        { client_id: 'client-b', verdict: 'reversed',  computed_at: '2026-06-04T00:00:00Z' },
+        { client_id: 'client-b', verdict: 'reversed',  computed_at: '2026-06-04T00:00:00Z', flywheel_actions: { executed_at: '2026-06-04T00:00:00Z' } },
       ],
       feedback: [
         { client_id: 'client-a', feedback_state: 'done', created_at: '2026-06-05T00:00:00Z' },
@@ -193,7 +215,7 @@ describe('runWeeklyLearningRollup', () => {
   it('is idempotent — a second run for the same week inserts nothing', async () => {
     const state: MockState = {
       outcomes: [
-        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-06-02T00:00:00Z' },
+        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-06-02T00:00:00Z', flywheel_actions: { executed_at: '2026-06-02T00:00:00Z' } },
       ],
       feedback: [],
       existingPreferences: [
@@ -219,11 +241,11 @@ describe('runWeeklyLearningRollup', () => {
     const state: MockState = {
       outcomes: [
         // Inside the window (W23: Mon 2026-06-01 → Mon 2026-06-08)
-        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-06-02T12:00:00Z' },
+        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-06-02T12:00:00Z', flywheel_actions: { executed_at: '2026-06-02T12:00:00Z' } },
         // Outside: too old
-        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-05-15T00:00:00Z' },
+        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-05-15T00:00:00Z', flywheel_actions: { executed_at: '2026-05-15T00:00:00Z' } },
         // Outside: at weekEnd boundary (exclusive)
-        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-06-08T00:00:00Z' },
+        { client_id: 'client-a', verdict: 'confirmed', computed_at: '2026-06-08T00:00:00Z', flywheel_actions: { executed_at: '2026-06-08T00:00:00Z' } },
       ],
       feedback: [],
       existingPreferences: [],
@@ -256,9 +278,9 @@ describe('runWeeklyLearningRollup', () => {
   it('produces a summary content line that mentions key signal counts', async () => {
     const state: MockState = {
       outcomes: [
-        { client_id: 'c1', verdict: 'confirmed', computed_at: '2026-06-02T00:00:00Z' },
-        { client_id: 'c1', verdict: 'reversed',  computed_at: '2026-06-03T00:00:00Z' },
-        { client_id: 'c1', verdict: 'reversed',  computed_at: '2026-06-04T00:00:00Z' },
+        { client_id: 'c1', verdict: 'confirmed', computed_at: '2026-06-02T00:00:00Z', flywheel_actions: { executed_at: '2026-06-02T00:00:00Z' } },
+        { client_id: 'c1', verdict: 'reversed',  computed_at: '2026-06-03T00:00:00Z', flywheel_actions: { executed_at: '2026-06-03T00:00:00Z' } },
+        { client_id: 'c1', verdict: 'reversed',  computed_at: '2026-06-04T00:00:00Z', flywheel_actions: { executed_at: '2026-06-04T00:00:00Z' } },
       ],
       feedback: [
         { client_id: 'c1', feedback_state: 'dismissed', created_at: '2026-06-02T00:00:00Z' },
@@ -296,7 +318,7 @@ describe('周报摘要按动作计数，不按 outcome 行数', () => {
       action_id: actionId,
       metric_key,
       window_days: 28,
-      flywheel_actions: { expected_metric: 'seo.gsc.clicks' },
+      flywheel_actions: { executed_at: '2026-06-03T00:00:00Z', expected_metric: 'seo.gsc.clicks' },
     }))
   }
 
@@ -324,8 +346,8 @@ describe('周报摘要按动作计数，不按 outcome 行数', () => {
     const state: MockState = {
       outcomes: [
         // 承诺的是 clicks —— clicks 跑赢了，只是排名滑了
-        { client_id: 'c1', verdict: 'confirmed', computed_at: '2026-06-03T00:00:00Z', action_id: 'act-1', metric_key: 'seo.gsc.clicks',       window_days: 28, flywheel_actions: { expected_metric: 'seo.gsc.clicks' } },
-        { client_id: 'c1', verdict: 'reversed',  computed_at: '2026-06-03T00:00:00Z', action_id: 'act-1', metric_key: 'seo.gsc.avg_position', window_days: 28, flywheel_actions: { expected_metric: 'seo.gsc.clicks' } },
+        { client_id: 'c1', verdict: 'confirmed', computed_at: '2026-06-03T00:00:00Z', action_id: 'act-1', metric_key: 'seo.gsc.clicks',       window_days: 28, flywheel_actions: { executed_at: '2026-06-03T00:00:00Z', expected_metric: 'seo.gsc.clicks' } },
+        { client_id: 'c1', verdict: 'reversed',  computed_at: '2026-06-03T00:00:00Z', action_id: 'act-1', metric_key: 'seo.gsc.avg_position', window_days: 28, flywheel_actions: { executed_at: '2026-06-03T00:00:00Z', expected_metric: 'seo.gsc.clicks' } },
       ],
       feedback: [],
       existingPreferences: [],
@@ -337,5 +359,70 @@ describe('周报摘要按动作计数，不按 outcome 行数', () => {
     const content = (state.insertedPreferences[0].payload as Record<string, unknown>).content as string
     expect(content).toContain('confirmed=1')
     expect(content).toContain('reversed=0')
+  })
+})
+
+/**
+ * 周窗口切在**动作执行时间**上，不是 outcome 的 `computed_at`。
+ *
+ * `computed_at` 是「最后一次被重算的时间」—— attribution 每 6 小时把所有现役行刷成
+ * 「现在」。生产实测（2026-09-06）：全表 336 行的 `computed_at` 只有 3 个取值，
+ * 285 行全挤在最近那一轮。按它切周窗口，结果只有两种：**全部**或**零**。
+ * 2026-08-31 那次周报的窗口（08-24~08-31）里一行都没有，整轮空转，而周报照发。
+ *
+ * 下面三条断言就是钉这件事：谁把过滤列改回 `computed_at`，这里立刻红。
+ */
+describe('周窗口不受「重算时间」影响（防 2026-08-31 那种空转周报）', () => {
+  const now = new Date('2026-06-08T07:00:00Z') // 周一 W24 → 汇总 W23（06-01 ~ 06-08）
+
+  it('动作在窗口内、但 computed_at 被重算刷到了窗口之外 —— 照样算进这一周', async () => {
+    const state: MockState = {
+      outcomes: [
+        {
+          client_id: 'c1', verdict: 'confirmed',
+          // 复刻生产：attribution 今天又跑了一轮，把这行刷成「现在」
+          computed_at: '2026-09-06T12:00:00Z',
+          flywheel_actions: { executed_at: '2026-06-03T00:00:00Z' },
+        },
+      ],
+      feedback: [], existingPreferences: [], insertedPreferences: [],
+    }
+
+    const r = await runWeeklyLearningRollup(makeMockSupabase(state), { now })
+
+    expect(r.results).toHaveLength(1)
+    expect(r.results[0].outcomes_confirmed).toBe(1)
+    expect(r.preferences_inserted).toBe(1)
+  })
+
+  it('动作不在窗口内、但 computed_at 恰好落在窗口里 —— 不许算进来', async () => {
+    const state: MockState = {
+      outcomes: [
+        {
+          client_id: 'c1', verdict: 'confirmed',
+          computed_at: '2026-06-03T00:00:00Z',        // 窗口内
+          flywheel_actions: { executed_at: '2026-04-01T00:00:00Z' }, // 两个月前执行的
+        },
+      ],
+      feedback: [], existingPreferences: [], insertedPreferences: [],
+    }
+
+    const r = await runWeeklyLearningRollup(makeMockSupabase(state), { now })
+
+    expect(r.preferences_inserted).toBe(0)
+    expect(state.insertedPreferences).toHaveLength(0)
+  })
+
+  it('关联动作已经不在了的孤儿 outcome 不进这个查询 —— 它归不进任何一周', async () => {
+    const state: MockState = {
+      outcomes: [
+        { client_id: 'c1', verdict: 'confirmed', computed_at: '2026-06-03T00:00:00Z' }, // 无 flywheel_actions
+      ],
+      feedback: [], existingPreferences: [], insertedPreferences: [],
+    }
+
+    const r = await runWeeklyLearningRollup(makeMockSupabase(state), { now })
+
+    expect(r.preferences_inserted).toBe(0)
   })
 })

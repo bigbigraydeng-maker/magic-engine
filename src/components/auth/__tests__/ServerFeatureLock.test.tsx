@@ -14,7 +14,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 
 // Mock `next/headers` per-test so we can flip the x-user-tier value.
-const headersMock = vi.fn<[], { get: (k: string) => string | null }>()
+const headersMock = vi.fn<() => { get: (k: string) => string | null }>()
 vi.mock('next/headers', () => ({
   headers: () => headersMock(),
 }))

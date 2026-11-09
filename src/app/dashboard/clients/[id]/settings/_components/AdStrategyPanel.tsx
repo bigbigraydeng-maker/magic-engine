@@ -13,6 +13,7 @@
  * turning OFF asks for confirmation, and every toggle shows a confirmation
  * banner OUTSIDE the recipients block so it stays visible when disabled.
  * Writes go through /api/clients/[id]/ad-strategy-config — never raw SQL.
+ * Only ME staff can save (route answers 403 → plain-Chinese banner).
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -68,6 +69,13 @@ export function AdStrategyPanel({ clientId }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       })
+      if (res.status === 403) {
+        // Only ME staff may change monitoring / recipients (route guardGlobalAdmin).
+        setBanner({ kind: 'err', text: '只有 Magic Engine 内部同事能改这项。原来的设置还在。' })
+        // Put the unsaved draft back so the box matches "原来的设置还在".
+        if (state.phase === 'ready') setRecipientsDraft(state.config.digest_recipients.join('\n'))
+        return
+      }
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? `HTTP ${res.status}`)
       setState({ phase: 'ready', config: json.config })

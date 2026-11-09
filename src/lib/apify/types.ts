@@ -1,9 +1,20 @@
+/** Apify Run Actor query parameters; omitted fields retain legacy defaults. */
+export interface ApifyStartOptions {
+  maxTotalChargeUsd?: number
+  timeout?: number
+  memory?: number
+  build?: string
+}
+
 export interface ApifyRunResult {
   id: string
-  status: 'READY' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'TIMED-OUT' | 'ABORTED'
+  status: 'READY' | 'RUNNING' | 'TIMING-OUT' | 'ABORTING' | 'SUCCEEDED' | 'FAILED' | 'TIMED-OUT' | 'ABORTED'
   defaultDatasetId: string
   startedAt: string
   finishedAt?: string
+  usageTotalUsd?: number
+  buildId?: string
+  buildNumber?: string
 }
 
 export interface SocialProfileData {

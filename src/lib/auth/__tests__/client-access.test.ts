@@ -10,7 +10,7 @@ vi.mock('@/lib/supabase', () => ({
   },
 }))
 
-import { requireDashboardClientAccess, requirePaidClientAccess, requireOnboardingClientAccess } from '../client-access'
+import { requireDashboardClientAccess, requireOperatorAccess, requirePaidClientAccess, requireOnboardingClientAccess } from '../client-access'
 import { requireSession } from '../require-session'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { AccessType } from '../access-types'
@@ -387,5 +387,89 @@ describe('requirePaidClientAccess', () => {
       expect(result.status).toBe(403)
       expect(result.reason).toBe('forbidden')
     }
+  })
+})
+
+describe('requireOperatorAccess', () => {
+  const saved: Record<string, string | undefined> = {}
+
+  beforeEach(() => {
+    vi.resetAllMocks()
+    for (const key of KEYS) {
+      saved[key] = process.env[key]
+      delete process.env[key]
+    }
+  })
+
+  afterEach(() => {
+    for (const key of KEYS) {
+      if (saved[key] === undefined) delete process.env[key]
+      else process.env[key] = saved[key]
+    }
+  })
+
+  it('access_type=both 且 scoped_admin=false → 客户角色 403', async () => {
+    mockUser('partner@client.example')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'both', scoped_admin: false }])
+
+    const result = await requireOperatorAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(403)
+  })
+
+  it('access_type=dashboard 且 scoped_admin=false → 客户角色 403', async () => {
+    mockUser('staff-row@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'dashboard', scoped_admin: false }])
+
+    const result = await requireOperatorAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(403)
+  })
+
+  it('access_type=fde 但没有 scoped_admin → 仍是客户角色 403', async () => {
+    mockUser('named-fde@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'fde', scoped_admin: false }])
+
+    const result = await requireOperatorAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.status).toBe(403)
+  })
+
+  it('scoped_admin 的 FDE 视角仍可打开', async () => {
+    mockUser('demo@example.com')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'both', scoped_admin: true }])
+
+    const result = await requireOperatorAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.role).toBe('admin')
+  })
+
+  it('ADMIN_EMAILS 精确名单仍可打开', async () => {
+    process.env.ADMIN_EMAILS = 'pm@magiclab.com'
+    mockUser('pm@magiclab.com')
+
+    const result = await requireOperatorAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.role).toBe('admin')
+      expect(result.allowedClientId).toBeNull()
+    }
+  })
+
+  it('ADMIN_EMAIL_DOMAIN 域名后缀仍可打开，不看门户行的 access_type', async () => {
+    process.env.ADMIN_EMAIL_DOMAIN = 'magiclab.test'
+    mockUser('someone@magiclab.test')
+    mockPortalRows([{ client_id: CLIENT_ID, access_type: 'dashboard', scoped_admin: false }])
+
+    const result = await requireOperatorAccess(CLIENT_ID)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.role).toBe('admin')
+    expect(mockFrom).not.toHaveBeenCalled()
   })
 })

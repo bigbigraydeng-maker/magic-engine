@@ -25,7 +25,14 @@ export async function sendInngestEvent<TData extends Record<string, unknown>>(
     body: JSON.stringify(event),
   })
 
-  if (!response.ok) throw new Error(`INNGEST_EVENT_SEND_FAILED:${response.status}`)
+  if (!response.ok) {
+    // 响应体带 provider 侧的具体拒绝原因（"invalid event key" / "quota exceeded" 之类）——
+    // 只留状态码 = 观测得不够，下次事故还是看不出哪一步挂。
+    // 200 字够看，不至于把整条日志撑爆。
+    const body = await response.text().catch(() => '')
+    const tail = body ? `:${body.trim().slice(0, 200)}` : ''
+    throw new Error(`INNGEST_EVENT_SEND_FAILED:${response.status}${tail}`)
+  }
 
   const json = await response.json().catch(() => null)
   const ids = parseEventIds(json)

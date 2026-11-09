@@ -10,6 +10,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { isSnapshotConclusive } from '@/lib/industry-ai-visibility/snapshot-conclusive'
 
 interface Question {
   id:             string
@@ -472,11 +473,11 @@ function QuestionRow({ question, snapshot }: { question: Question; snapshot?: Sn
               <span className="ml-2 text-me-charcoal/45">· {snapshot.collected_date}</span>
             </p>
           )}
-          {snapshot && !snapshot.brands_mentioned?.length && !snapshot.error_message && (
+          {snapshot && !snapshot.brands_mentioned?.length && isSnapshotConclusive(snapshot) && (
             <p className="mt-1 text-xs font-semibold text-me-charcoal/45 italic">尚无识别到品牌</p>
           )}
-          {snapshot?.error_message && snapshot.error_code !== 'no_ai_overview' && (
-            <p className="mt-1 text-xs font-semibold text-status-rej">采集失败：{snapshot.error_message}</p>
+          {snapshot && !isSnapshotConclusive(snapshot) && (
+            <p className="mt-1 text-xs font-semibold text-status-rej">采集失败：{snapshot.error_message ?? snapshot.error_code}</p>
           )}
           {!snapshot && (
             <p className="mt-1 text-xs font-semibold text-me-charcoal/45">尚未采集</p>
@@ -541,14 +542,14 @@ function DayCard({ day, snapshots }: { day: string; snapshots: Snapshot[] }) {
           // "AI Overview appeared but no brand extracted". Previously both
           // showed as "无品牌", masking a real product signal.
           const isAiAbsent = s.error_code === 'no_ai_overview'
-          const isRealError = s.error_message && !isAiAbsent
+          const isRealError = !isSnapshotConclusive(s)
           return (
             <div key={s.id} className="rounded border border-black/5 bg-white px-2 py-1.5">
               <p className="text-[10px] font-black uppercase tracking-wide text-me-charcoal/45">
                 {PLATFORM_LABELS_SHORT[s.platform] ?? s.platform}
               </p>
               {isRealError ? (
-                <p className="mt-1 text-[11px] font-semibold text-status-rej">✗ {s.error_message}</p>
+                <p className="mt-1 text-[11px] font-semibold text-status-rej">✗ {s.error_message ?? s.error_code}</p>
               ) : isAiAbsent ? (
                 <p className="mt-1 text-[11px] font-semibold text-me-charcoal/45 italic">本题未出现 AI Overview</p>
               ) : s.top3_brands && s.top3_brands.length > 0 ? (

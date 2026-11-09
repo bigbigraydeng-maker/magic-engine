@@ -1,0 +1,108 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "A Tale of Two Cities #2: '10 days, Beijing and Xi'an' 15-second reel (departs 18 March 2027; v5 (music momentum_q.mp3 = momentum.mp3 attenuated 5.5 dB, 0.5s fade-in baked in, per 74 window loudness request; picture unchanged), hook train photo = Guangzhou high-speed train (Unsplash located; r2's red-white train may be Indonesian Whoosh); no guests)",
+ "angle_source": {
+  "source": "manual_remotion_cts_spring2027",
+  "authorized_by": "74 号 CTS 广告总控补充需求单（2026-10-12，PM 要求补充更多素材）；只出片到 in_review，不发布、不起广告",
+  "facts_checked": "ctstours.co.nz/tours/china/discovery/beijing-xian, 2026-10-12：NZD 3,480 pp twin share；单人房差 NZD 395；10 days / 7 nights（北京 4 + 西安 3）；18 March 2027；D3 Forbidden City、D4 Great Wall、D6 高铁 G89、D7 Terracotta Warriors；International and domestic airfares（片内只写 FLIGHTS）。"
+ },
+ "rationale_one_liner": "Tale 第二条：角度「10 天看北京和西安」，钩子是高铁；与终版 f4b5d44f 的故宫钩子不同；只存草稿。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "list",
+   "props": {
+    "brandColor": "#B61E2E",
+    "itemOverlayOpacity": 0.08,
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "cutFlash": false,
+    "footageScrim": 0.35,
+    "musicFile": "music/momentum_q.mp3",
+    "musicStartSec": 0,
+    "beats": [
+     0,
+     0.8,
+     1.6,
+     2.4,
+     3.2,
+     4.35,
+     5.5,
+     6.65,
+     7.8,
+     8.95,
+     10.1,
+     10.7,
+     11.3,
+     11.9,
+     12.5,
+     13.1,
+     13.7,
+     14.3,
+     14.9
+    ],
+    "hook": {
+     "clip": "clips/c4c_train_gz.mp4",
+     "lines": [
+      {
+       "badge": "10",
+       "text": "DAYS"
+      },
+      {
+       "badge": null,
+       "text": "2 CITIES"
+      },
+      {
+       "badge": null,
+       "text": "1 TRAIN"
+      }
+     ]
+    },
+    "items": [
+     {
+      "text": "THE GREAT WALL",
+      "clip": "clips/c1_greatwall_jinshanling.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "TERRACOTTA WARRIORS, XI'AN",
+      "clip": "clips/c1b_terracotta.mp4",
+      "blurBackdrop": false
+     },
+     {
+      "text": "THE FORBIDDEN CITY, BEIJING",
+      "clip": "clips/c1_forbiddencity_aerial.mp4",
+      "blurBackdrop": false
+     }
+    ],
+    "itemLabel": "YOUR 10 DAYS",
+    "revealTitle": "BEIJING & XI'AN.",
+    "price": {
+     "backdropClip": "clips/c3b_bigwildgoose.mp4",
+     "fromLabel": "FROM",
+     "currencyPrefix": "NZ$",
+     "amount": 3480,
+     "qualifier": "PER PERSON · TWIN SHARE",
+     "footnote": "SINGLE SUPPLEMENT NZ$395",
+     "footnoteSize": 50
+    }
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Ten days from Auckland: four nights in Beijing, three in Xi'an, and a high-speed train in between. Flights, hotels, an English-speaking tour guide, and the breakfasts and five lunches listed in the itinerary are in the price. NZD $3,480 per person, twin share; single supplement NZD $395. Travel insurance and tips are not included. Next departure 18 March 2027.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/discovery/beijing-xian",
+    "offer": [
+     "10 days from Auckland",
+     "NZD $3,480 per person, twin share",
+     "Next departure 18 March 2027"
+    ]
+   }
+  }
+ }
+}

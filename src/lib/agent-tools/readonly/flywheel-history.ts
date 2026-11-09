@@ -7,6 +7,7 @@
  */
 
 import { fetchClientOutcomeHistory } from '@/lib/case-library/outcome-confidence'
+import { MIN_DECIDED_FOR_RATE } from '@/lib/flywheel/attribution/outcome-identity'
 import {
   type ReadonlyToolModule,
   truncateToolOutput,
@@ -19,8 +20,9 @@ export const queryFlywheelHistory: ReadonlyToolModule = {
     name: 'query_flywheel_history',
     description:
       'Look up THIS client\'s own historical action outcomes: for each action_type the client ' +
-      'has tried before, its measured success rate and sample size (from the flywheel ' +
-      'attribution library). Use this to prefer moves that already worked for THIS client and ' +
+      'has tried before, its success rate over DECIDED cases (confirmed vs reversed; null when ' +
+      `fewer than ${MIN_DECIDED_FOR_RATE} were decided) and how many cases were decided out of all cases (from the ` +
+      'flywheel attribution library). Use this to prefer moves that already worked for THIS client and ' +
       'avoid re-proposing ones that failed. Scoped to the current client only.',
     input_schema: {
       type: 'object',
@@ -52,15 +54,29 @@ export const queryFlywheelHistory: ReadonlyToolModule = {
       const actions = Object.entries(map)
         .map(([action_type, e]) => ({
           action_type,
-          success_rate_pct: Math.round(e.successRate * 100),
-          sample_size: e.sampleSize,
+          // null = too few decided cases to state a rate; it means "unknown", not 0%.
+          success_rate_pct: e.sampleSize >= MIN_DECIDED_FOR_RATE ? Math.round(e.successRate * 100) : null,
+          decided_cases: e.sampleSize,
+          total_cases: e.totalCases,
         }))
-        .sort((a, b) => b.success_rate_pct - a.success_rate_pct)
+        .sort(
+          (a, b) =>
+            (b.success_rate_pct ?? -1) - (a.success_rate_pct ?? -1) || b.decided_cases - a.decided_cases,
+        )
 
       if (actions.length === 0) {
         return JSON.stringify({ client_scoped: true, note: 'No historical outcomes for this client yet.', actions: [] })
       }
-      return truncateToolOutput(JSON.stringify({ client_scoped: true, actions }))
+      return truncateToolOutput(
+        JSON.stringify({
+          client_scoped: true,
+          note:
+            'success_rate_pct counts decided cases only (confirmed vs reversed). Whole-site SEO traffic ' +
+            'changes and changes inside the noise floor are inconclusive and excluded. ' +
+            `null = fewer than ${MIN_DECIDED_FOR_RATE} decided cases: treat it as unknown, not as a failure.`,
+          actions,
+        }),
+      )
     } catch (err) {
       return JSON.stringify({
         error: `Flywheel history lookup failed: ${err instanceof Error ? err.message : String(err)}`,

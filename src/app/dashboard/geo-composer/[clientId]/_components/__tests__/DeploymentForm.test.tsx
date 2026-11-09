@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react'
 import { DeploymentForm } from '../DeploymentForm'
 import type { GeoDirective } from '@/types/magic-engine'
+import type { CmsProviders } from '../../deploy/page'
 
 void React
 
@@ -93,8 +94,23 @@ const DIRECTIVE: GeoDirective = {
   updated_at:    '2026-06-04T00:00:00Z',
 } as unknown as GeoDirective
 
-const GITHUB_PROVIDERS = {
-  github: { connected: true, status: 'connected' as const },
+// Full CmsConnectionStatus shape (src/lib/cms/vocabulary.ts) — the form only
+// reads `.connected`, but the fixture must satisfy the real contract.
+const GITHUB_PROVIDERS: CmsProviders = {
+  github: {
+    connected:      true,
+    provider:       'github',
+    repoOwner:      'acme',
+    repoName:       'repo',
+    branch:         'main',
+    tokenHint:      'ab12',
+    status:         'connected',
+    lastError:      null,
+    lastTestedAt:   '2026-06-04T00:00:00Z',
+    contentTargets: [],
+  },
+  wordpress: null,
+  shopify:   null,
 }
 
 function makeDriftResponse(driftedPaths: string[] = ['layouts/main.html']) {

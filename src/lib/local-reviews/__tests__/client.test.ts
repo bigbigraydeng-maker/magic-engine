@@ -1,11 +1,12 @@
 /**
- * Unit tests for src/lib/local-reviews/client.ts — GBP + ProductReview connector.
+ * Unit tests for src/lib/local-reviews/client.ts — GBP + ProductReview +
+ * Tripadvisor connector.
  *
- * Reference: ROADMAP.md P8.12.S1.2
+ * Reference: ROADMAP.md P8.12.S1.2 / P8.13.C.2
  *
- * Mock strategy: global fetch is stubbed (SerpAPI); the Jina Reader module
- * is mocked via vi.hoisted so the mock survives vi.resetModules(); the
- * client module is re-imported each test so getSerpApiKey re-reads env.
+ * Mock strategy: global fetch is stubbed (DataForSEO Business Data transport);
+ * the Jina Reader module is mocked via vi.hoisted. DataForSEO credentials are
+ * injected with vi.stubEnv so the suite never depends on the real environment.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -15,6 +16,13 @@ vi.stubGlobal('fetch', mockFetch)
 
 const { mockFetchUrl } = vi.hoisted(() => ({ mockFetchUrl: vi.fn() }))
 vi.mock('@/lib/brief/jina', () => ({ fetchUrlAsMarkdown: mockFetchUrl }))
+
+import {
+  fetchGbpReviews,
+  fetchProductReviewReviews,
+  fetchTripadvisorReviews,
+  aggregateLocalReviews,
+} from '../client'
 
 // ─── Response helpers ────────────────────────────────────────────────────────
 
@@ -27,186 +35,201 @@ function jsonResponse(payload: unknown, status = 200) {
   } as Response)
 }
 
+/** Wrap items in the DataForSEO `tasks[0].result[0].items` envelope. */
+function dataforseoItems(items: unknown[]) {
+  return { tasks: [{ status_code: 20000, result: [{ items }] }] }
+}
+
+type Route = {
+  gmbInfo?:     () => Promise<Response>
+  reviews?:     () => Promise<Response>
+  tripadvisor?: () => Promise<Response>
+}
+
+/** Route fetch calls by DataForSEO endpoint path. */
+function routeFetch(routes: Route) {
+  mockFetch.mockImplementation((url: string) => {
+    if (url.includes('/business_data/google/my_business_info/live')) {
+      return (routes.gmbInfo ?? (() => jsonResponse(dataforseoItems([]))))()
+    }
+    if (url.includes('/business_data/google/reviews/live')) {
+      return (routes.reviews ?? (() => jsonResponse(dataforseoItems([]))))()
+    }
+    if (url.includes('/business_data/tripadvisor/search/live')) {
+      return (routes.tripadvisor ?? (() => jsonResponse(dataforseoItems([]))))()
+    }
+    throw new Error(`Unexpected fetch: ${url}`)
+  })
+}
+
+function callsTo(pathFragment: string): Array<[string, RequestInit]> {
+  return (mockFetch.mock.calls as Array<[string, RequestInit]>).filter(([url]) =>
+    url.includes(pathFragment),
+  )
+}
+
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-const SERPAPI_PLACE = {
-  place_results: {
-    title: 'Oztop Building Supplies',
-    rating: 3.8,
-    reviews: 87,
+const GMB_PLACE = dataforseoItems([
+  {
     place_id: 'ChIJabc123',
-    user_reviews: {
-      most_relevant: [
-        { username: 'Happy Customer', rating: 5, description: 'Great service!', date: '2 months ago' },
-        { username: 'Angry Customer', rating: 1, description: 'Never delivered.', date: '1 week ago' },
-        { username: 'Mild Customer', rating: 2, description: 'Slow and unhelpful.', date: '3 days ago' },
-      ],
-    },
+    title:    'Oztop Building Supplies',
+    address:  '1 Example St, Slacks Creek QLD 4127',
+    phone:    '+61 7 0000 0000',
+    url:      'https://oztop.com.au',
+    maps_url: 'https://maps.google.com/?cid=123',
+    rating:   { value: 3.8, votes_count: 87 },
   },
-}
+])
 
-const SERPAPI_LOCAL_LIST = {
-  local_results: [
-    { title: 'Oztop Building Supplies', rating: 4.0, reviews: 50, place_id: 'ChIJlocal1' },
-  ],
-}
+const GOOGLE_REVIEWS = dataforseoItems([
+  { rating: { value: 5 }, review_text: 'Great service!',       timestamp: '2026-07-01', author_name: 'Happy Customer' },
+  { rating: { value: 1 }, review_text: 'Never delivered.',     timestamp: '2026-08-20', author_name: 'Angry Customer' },
+  { rating: { value: 2 }, review_text: 'Slow and unhelpful.',  timestamp: '2026-08-28', author_name: 'Mild Customer' },
+  { rating: { value: 4 }, review_text: 'Fine.',                timestamp: '2026-08-29', author_name: null },
+])
 
-// ─── Env restore ─────────────────────────────────────────────────────────────
+const TRIPADVISOR_LISTING = dataforseoItems([
+  {
+    title:         'CTS Tours',
+    url:           'https://www.tripadvisor.co.nz/Attraction_Review-cts-tours',
+    rating:        4.6,
+    reviews_count: 312,
+  },
+])
 
-let savedSerpKey: string | undefined
+// ─── Env + mock lifecycle ────────────────────────────────────────────────────
 
 beforeEach(() => {
-  savedSerpKey = process.env.SERPAPI_API_KEY
+  vi.stubEnv('DATAFORSEO_LOGIN', 'test-login')
+  vi.stubEnv('DATAFORSEO_PASSWORD', 'test-password')
   mockFetch.mockReset()
   mockFetchUrl.mockReset()
 })
 
 afterEach(() => {
-  if (savedSerpKey !== undefined) process.env.SERPAPI_API_KEY = savedSerpKey
-  else delete process.env.SERPAPI_API_KEY
-  vi.resetModules()
+  vi.unstubAllEnvs()
 })
 
 // ─── fetchGbpReviews ─────────────────────────────────────────────────────────
 
 describe('fetchGbpReviews', () => {
-  it('throws when SERPAPI_API_KEY is missing', async () => {
-    delete process.env.SERPAPI_API_KEY
-    const { fetchGbpReviews } = await import('../client')
+  it('throws when DATAFORSEO_LOGIN is missing and never hits the network', async () => {
+    vi.stubEnv('DATAFORSEO_LOGIN', '')
     await expect(fetchGbpReviews('Oztop Building Supplies QLD')).rejects.toThrow(
-      /SERPAPI_API_KEY/,
+      /DATAFORSEO_LOGIN/,
     )
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
-  it('maps place_results and keeps only negative review samples', async () => {
-    process.env.SERPAPI_API_KEY = 'test-key'
-    mockFetch.mockImplementation(() => jsonResponse(SERPAPI_PLACE))
-    const { fetchGbpReviews } = await import('../client')
+  it('sends Basic auth built from the stubbed credentials and the business keyword', async () => {
+    routeFetch({ gmbInfo: () => jsonResponse(GMB_PLACE) })
+
+    await fetchGbpReviews('Oztop Building Supplies Slacks Creek QLD')
+
+    const [, init] = callsTo('my_business_info')[0]
+    const expectedAuth = `Basic ${Buffer.from('test-login:test-password').toString('base64')}`
+    expect(init.method).toBe('POST')
+    expect((init.headers as Record<string, string>).Authorization).toBe(expectedAuth)
+    expect(JSON.parse(init.body as string)).toEqual([
+      { keyword: 'Oztop Building Supplies Slacks Creek QLD', language_code: 'en' },
+    ])
+  })
+
+  it('maps the GMB place card and keeps only negative review samples', async () => {
+    routeFetch({
+      gmbInfo: () => jsonResponse(GMB_PLACE),
+      reviews: () => jsonResponse(GOOGLE_REVIEWS),
+    })
 
     const result = await fetchGbpReviews('Oztop Building Supplies Slacks Creek QLD')
-    expect(result).not.toBeNull()
-    expect(result!.source).toBe('google')
-    expect(result!.rating).toBe(3.8)
-    expect(result!.review_count).toBe(87)
-    expect(result!.url).toContain('place_id:ChIJabc123')
-    // 5-star review excluded; only the 1- and 2-star reviews kept.
-    expect(result!.recent_negative_samples).toHaveLength(2)
-    expect(result!.recent_negative_samples.every(r => r.rating <= 2)).toBe(true)
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+
+    expect(result).toEqual({
+      source:              'google',
+      url:                 'https://maps.google.com/?cid=123',
+      rating:              3.8,
+      review_count:        87,
+      rating_distribution: null,
+      response_rate:       null,
+      recent_negative_samples: [
+        { rating: 1, text: 'Never delivered.',    date: '2026-08-20', author: 'Angry Customer' },
+        { rating: 2, text: 'Slow and unhelpful.', date: '2026-08-28', author: 'Mild Customer' },
+      ],
+    })
+    // Reviews are requested for the same keyword, 20 deep.
+    const [, reviewsInit] = callsTo('google/reviews')[0]
+    expect(JSON.parse(reviewsInit.body as string)[0]).toMatchObject({
+      keyword: 'Oztop Building Supplies Slacks Creek QLD',
+      depth:   20,
+    })
+  })
+
+  it('caps negative samples at 5', async () => {
+    const many = dataforseoItems(
+      Array.from({ length: 8 }, (_, i) => ({
+        rating: { value: 1 }, review_text: `bad ${i}`, timestamp: null, author_name: null,
+      })),
+    )
+    routeFetch({
+      gmbInfo: () => jsonResponse(GMB_PLACE),
+      reviews: () => jsonResponse(many),
+    })
+
+    const result = await fetchGbpReviews('Oztop')
+    expect(result!.recent_negative_samples).toHaveLength(5)
+    expect(result!.recent_negative_samples.map(r => r.text)).toEqual(
+      ['bad 0', 'bad 1', 'bad 2', 'bad 3', 'bad 4'],
     )
   })
 
-  it('falls back to the first local_results entry when no place_results', async () => {
-    process.env.SERPAPI_API_KEY = 'test-key'
-    mockFetch.mockImplementation(() => jsonResponse(SERPAPI_LOCAL_LIST))
-    const { fetchGbpReviews } = await import('../client')
+  it('returns null (and skips the reviews call) when DataForSEO finds no place', async () => {
+    routeFetch({ gmbInfo: () => jsonResponse(dataforseoItems([])) })
 
-    const result = await fetchGbpReviews('building supplies brisbane')
-    expect(result!.rating).toBe(4.0)
-    expect(result!.review_count).toBe(50)
-    expect(result!.recent_negative_samples).toEqual([])
+    expect(await fetchGbpReviews('no such business xyz')).toBeNull()
+    expect(callsTo('google/reviews')).toHaveLength(0)
   })
 
-  it('returns null when SerpAPI finds no place', async () => {
-    process.env.SERPAPI_API_KEY = 'test-key'
-    mockFetch.mockImplementation(() => jsonResponse({}))
-    const { fetchGbpReviews } = await import('../client')
+  it('returns null when the response has no tasks at all', async () => {
+    routeFetch({ gmbInfo: () => jsonResponse({}) })
 
     expect(await fetchGbpReviews('no such business xyz')).toBeNull()
   })
 
-  it('throws on a non-ok HTTP status', async () => {
-    process.env.SERPAPI_API_KEY = 'test-key'
-    mockFetch.mockImplementation(() => jsonResponse({}, 429))
-    const { fetchGbpReviews } = await import('../client')
+  it('throws on a non-ok HTTP status from the place lookup', async () => {
+    routeFetch({ gmbInfo: () => jsonResponse({}, 429) })
 
-    await expect(fetchGbpReviews('anything')).rejects.toThrow(/SerpAPI error: 429/)
+    await expect(fetchGbpReviews('anything')).rejects.toThrow(/DataForSEO GMB info error: 429/)
   })
 
-  it('throws when SerpAPI returns an error field', async () => {
-    process.env.SERPAPI_API_KEY = 'test-key'
-    mockFetch.mockImplementation(() =>
-      jsonResponse({ error: 'Invalid API key' }),
-    )
-    const { fetchGbpReviews } = await import('../client')
+  it('still returns the snapshot when the reviews call fails (samples are enrichment)', async () => {
+    routeFetch({
+      gmbInfo: () => jsonResponse(GMB_PLACE),
+      reviews: () => jsonResponse({}, 500),
+    })
 
-    await expect(fetchGbpReviews('anything')).rejects.toThrow(/Invalid API key/)
-  })
-
-  // ── brand-token verification (P8.12.S1.7 — Apapaya regression) ────────────
-
-  it('returns null when SerpAPI place title does not match the brand (Apapaya regression)', async () => {
-    process.env.SERPAPI_API_KEY = 'test-key'
-    // SerpAPI returns a fuzzy match — a same-city unrelated business with a
-    // different name. Without brand verification we'd surface it as "Apapaya".
-    mockFetch.mockImplementation(() =>
-      jsonResponse({
-        place_results: {
-          title: 'Some Unrelated Cafe',
-          rating: 4.2,
-          reviews: 1744,
-          place_id: 'ChIJwrong',
-        },
-      }),
-    )
-    const { fetchGbpReviews } = await import('../client')
-
-    expect(await fetchGbpReviews('Apapaya Wantirna South VIC')).toBeNull()
-  })
-
-  it('matches title case-insensitively', async () => {
-    process.env.SERPAPI_API_KEY = 'test-key'
-    mockFetch.mockImplementation(() =>
-      jsonResponse({
-        place_results: {
-          title: 'APAPAYA Wantirna',
-          rating: 4.2,
-          reviews: 1744,
-          place_id: 'ChIJright',
-        },
-      }),
-    )
-    const { fetchGbpReviews } = await import('../client')
-
-    const result = await fetchGbpReviews('Apapaya Wantirna South VIC')
+    const result = await fetchGbpReviews('Oztop')
     expect(result).not.toBeNull()
-    expect(result!.rating).toBe(4.2)
+    expect(result!.rating).toBe(3.8)
+    expect(result!.recent_negative_samples).toEqual([])
   })
 
-  it('drops a local_results fallback when no entry title matches the brand', async () => {
-    process.env.SERPAPI_API_KEY = 'test-key'
-    mockFetch.mockImplementation(() =>
-      jsonResponse({
-        local_results: [
-          { title: 'Random Other Business', rating: 4.0, reviews: 50, place_id: 'ChIJfuzzy' },
-        ],
-      }),
-    )
-    const { fetchGbpReviews } = await import('../client')
+  it('returns an empty sample list when there are no reviews', async () => {
+    routeFetch({
+      gmbInfo: () => jsonResponse(GMB_PLACE),
+      reviews: () => jsonResponse(dataforseoItems([])),
+    })
 
-    expect(await fetchGbpReviews('Apapaya Melbourne')).toBeNull()
+    const result = await fetchGbpReviews('Oztop')
+    expect(result!.recent_negative_samples).toEqual([])
   })
 
-  it('scans all local_results and picks the first brand-matching entry, not just [0]', async () => {
-    process.env.SERPAPI_API_KEY = 'test-key'
-    // Codex review P2 on PR #24: real match may not be local_results[0].
-    mockFetch.mockImplementation(() =>
-      jsonResponse({
-        local_results: [
-          { title: 'Some Other Business', rating: 3.0, reviews: 10, place_id: 'ChIJfirst' },
-          { title: 'Apapaya Cafe', rating: 4.5, reviews: 200, place_id: 'ChIJsecond' },
-        ],
-      }),
-    )
-    const { fetchGbpReviews } = await import('../client')
+  it('leaves url/rating/review_count null when the place card omits them', async () => {
+    routeFetch({
+      gmbInfo: () => jsonResponse(dataforseoItems([{ place_id: 'ChIJbare', title: 'Bare Listing' }])),
+    })
 
-    const result = await fetchGbpReviews('Apapaya Melbourne')
-    expect(result).not.toBeNull()
-    expect(result!.rating).toBe(4.5)
-    expect(result!.url).toContain('place_id:ChIJsecond')
+    const result = await fetchGbpReviews('Bare Listing')
+    expect(result).toMatchObject({ source: 'google', url: null, rating: null, review_count: null })
   })
 })
 
@@ -214,7 +237,6 @@ describe('fetchGbpReviews', () => {
 
 describe('fetchProductReviewReviews', () => {
   it('returns null for a non-ProductReview URL without fetching', async () => {
-    const { fetchProductReviewReviews } = await import('../client')
     const result = await fetchProductReviewReviews('https://example.com/reviews')
     expect(result).toBeNull()
     expect(mockFetchUrl).not.toHaveBeenCalled()
@@ -227,7 +249,6 @@ describe('fetchProductReviewReviews', () => {
       markdown: '# Example\n\n4.2 out of 5\n\nBased on 134 reviews from real customers.',
       chars: 60,
     })
-    const { fetchProductReviewReviews } = await import('../client')
 
     const result = await fetchProductReviewReviews(
       'https://www.productreview.com.au/listings/example',
@@ -245,7 +266,6 @@ describe('fetchProductReviewReviews', () => {
       markdown: '# Example\n\nNo structured rating data on this page.',
       chars: 40,
     })
-    const { fetchProductReviewReviews } = await import('../client')
 
     expect(
       await fetchProductReviewReviews('https://www.productreview.com.au/listings/example'),
@@ -254,35 +274,72 @@ describe('fetchProductReviewReviews', () => {
 
   it('degrades gracefully to null when Jina throws (anti-scraping)', async () => {
     mockFetchUrl.mockRejectedValue(new Error('Jina fetch failed: HTTP 403'))
-    const { fetchProductReviewReviews } = await import('../client')
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     expect(
       await fetchProductReviewReviews('https://www.productreview.com.au/listings/example'),
     ).toBeNull()
+    spy.mockRestore()
+  })
+})
+
+// ─── fetchTripadvisorReviews ─────────────────────────────────────────────────
+
+describe('fetchTripadvisorReviews', () => {
+  it('maps the first Tripadvisor listing', async () => {
+    routeFetch({ tripadvisor: () => jsonResponse(TRIPADVISOR_LISTING) })
+
+    const result = await fetchTripadvisorReviews('CTS Tours New Zealand')
+    expect(result).toEqual({
+      source:                  'tripadvisor',
+      url:                     'https://www.tripadvisor.co.nz/Attraction_Review-cts-tours',
+      rating:                  4.6,
+      review_count:            312,
+      rating_distribution:     null,
+      recent_negative_samples: [],
+      response_rate:           null,
+    })
+  })
+
+  it('returns null when the listing has no URL', async () => {
+    routeFetch({
+      tripadvisor: () => jsonResponse(dataforseoItems([{ title: 'CTS Tours', rating: 4.6 }])),
+    })
+
+    expect(await fetchTripadvisorReviews('CTS Tours')).toBeNull()
+  })
+
+  it('never throws — HTTP errors degrade to null', async () => {
+    routeFetch({ tripadvisor: () => jsonResponse({}, 503) })
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    expect(await fetchTripadvisorReviews('CTS Tours')).toBeNull()
+    spy.mockRestore()
   })
 })
 
 // ─── aggregateLocalReviews (non-fatal wrapper) ───────────────────────────────
 
 describe('aggregateLocalReviews', () => {
-  it('returns an empty array (never throws) when SERPAPI_API_KEY is missing', async () => {
-    delete process.env.SERPAPI_API_KEY
-    const { aggregateLocalReviews } = await import('../client')
+  it('returns an empty array (never throws) when DataForSEO credentials are missing', async () => {
+    vi.stubEnv('DATAFORSEO_LOGIN', '')
 
     const result = await aggregateLocalReviews({ businessQuery: 'Oztop QLD' })
     expect(result).toEqual([])
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('aggregates both GBP and ProductReview snapshots when both succeed', async () => {
-    process.env.SERPAPI_API_KEY = 'test-key'
-    mockFetch.mockImplementation(() => jsonResponse(SERPAPI_PLACE))
+    routeFetch({
+      gmbInfo: () => jsonResponse(GMB_PLACE),
+      reviews: () => jsonResponse(GOOGLE_REVIEWS),
+    })
     mockFetchUrl.mockResolvedValue({
       url: 'https://www.productreview.com.au/listings/example',
       title: 'Example',
       markdown: '4.2 out of 5 from 134 reviews',
       chars: 30,
     })
-    const { aggregateLocalReviews } = await import('../client')
 
     const result = await aggregateLocalReviews({
       businessQuery: 'Oztop Building Supplies QLD',
@@ -293,13 +350,60 @@ describe('aggregateLocalReviews', () => {
   })
 
   it('skips ProductReview when no listing URL is provided', async () => {
-    process.env.SERPAPI_API_KEY = 'test-key'
-    mockFetch.mockImplementation(() => jsonResponse(SERPAPI_PLACE))
-    const { aggregateLocalReviews } = await import('../client')
+    routeFetch({ gmbInfo: () => jsonResponse(GMB_PLACE) })
 
     const result = await aggregateLocalReviews({ businessQuery: 'Oztop QLD' })
     expect(result).toHaveLength(1)
     expect(result[0].source).toBe('google')
     expect(mockFetchUrl).not.toHaveBeenCalled()
+  })
+
+  it('adds a Tripadvisor snapshot when a tripadvisorKeyword is provided', async () => {
+    routeFetch({
+      gmbInfo:     () => jsonResponse(GMB_PLACE),
+      tripadvisor: () => jsonResponse(TRIPADVISOR_LISTING),
+    })
+
+    const result = await aggregateLocalReviews({
+      businessQuery: 'CTS Tours Auckland',
+      tripadvisorKeyword: 'CTS Tours New Zealand',
+    })
+    expect(result.map(s => s.source).sort()).toEqual(['google', 'tripadvisor'])
+  })
+
+  it('a GBP transport failure does not block the other sources', async () => {
+    routeFetch({
+      gmbInfo:     () => jsonResponse({}, 500),
+      tripadvisor: () => jsonResponse(TRIPADVISOR_LISTING),
+    })
+    mockFetchUrl.mockResolvedValue({
+      url: 'https://www.productreview.com.au/listings/example',
+      title: 'Example',
+      markdown: '4.2 out of 5 from 134 reviews',
+      chars: 30,
+    })
+
+    const result = await aggregateLocalReviews({
+      businessQuery: 'Oztop QLD',
+      productReviewUrl: 'https://www.productreview.com.au/listings/example',
+      tripadvisorKeyword: 'Oztop',
+    })
+    expect(result.map(s => s.source).sort()).toEqual(['productreview', 'tripadvisor'])
+  })
+
+  it('drops null snapshots so callers only see resolved sources', async () => {
+    routeFetch({ gmbInfo: () => jsonResponse(dataforseoItems([])) })
+    mockFetchUrl.mockResolvedValue({
+      url: 'https://www.productreview.com.au/listings/example',
+      title: 'Example',
+      markdown: 'nothing parseable here',
+      chars: 22,
+    })
+
+    const result = await aggregateLocalReviews({
+      businessQuery: 'ghost business',
+      productReviewUrl: 'https://www.productreview.com.au/listings/example',
+    })
+    expect(result).toEqual([])
   })
 })

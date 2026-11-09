@@ -7,11 +7,34 @@ import { getSources, createSource, getActiveSources } from './sources';
 import * as supabaseModule from '@/lib/supabase';
 
 vi.mock('@/lib/supabase', () => ({
-  supabase: {
+  supabaseAdmin: {
     from: vi.fn(),
   },
   verifyProjectOwnership: vi.fn(),
 }));
+
+type QueryResult = {
+  data: unknown;
+  error: { code?: string; message: string } | null;
+  count?: number;
+};
+type FromReturn = ReturnType<typeof supabaseModule.supabaseAdmin.from>;
+
+/**
+ * Chainable, awaitable stand-in for a supabase query builder.
+ * Every builder method returns the same chain; `await chain` resolves to `result`.
+ */
+function chainable(result: QueryResult): FromReturn {
+  const chain: Record<string, unknown> = {};
+  for (const method of ['select', 'eq', 'in', 'gte', 'order', 'range', 'limit', 'insert', 'update', 'single']) {
+    chain[method] = vi.fn().mockReturnValue(chain);
+  }
+  chain.then = (
+    resolve: (value: QueryResult) => unknown,
+    reject?: (reason: unknown) => unknown
+  ) => Promise.resolve(result).then(resolve, reject);
+  return chain as unknown as FromReturn;
+}
 
 describe('Sources Database Operations', () => {
   const mockProjectId = 'project-123';
@@ -38,14 +61,9 @@ describe('Sources Database Operations', () => {
         },
       ];
 
-      const mockQuery = {
-        eq: vi.fn().mockReturnThis(),
-        select: vi.fn().mockResolvedValue({ data: mockSources, error: null }),
-      };
-
-      vi.mocked(supabaseModule.supabase.from).mockReturnValue({
-        select: vi.fn().mockReturnValue(mockQuery),
-      } as any);
+      vi.mocked(supabaseModule.supabaseAdmin.from).mockReturnValue(
+        chainable({ data: mockSources, error: null })
+      );
 
       const result = await getSources(mockProjectId);
 
@@ -79,13 +97,9 @@ describe('Sources Database Operations', () => {
         updated_at: '2026-04-06T00:00:00Z',
       };
 
-      const mockQuery = {
-        insert: vi.fn().mockReturnThis(),
-        select: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: mockCreatedSource, error: null }),
-      };
-
-      vi.mocked(supabaseModule.supabase.from).mockReturnValue(mockQuery as any);
+      vi.mocked(supabaseModule.supabaseAdmin.from).mockReturnValue(
+        chainable({ data: mockCreatedSource, error: null })
+      );
 
       const result = await createSource(mockProjectId, validInput);
 
@@ -105,19 +119,12 @@ describe('Sources Database Operations', () => {
     });
 
     it('should reject duplicate account', async () => {
-      const mockQuery = {
-        insert: vi.fn().mockReturnThis(),
-        select: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({
-          data: null,
-          error: { code: '23505', message: 'Duplicate key' },
-        }),
-      };
-
-      vi.mocked(supabaseModule.supabase.from).mockReturnValue(mockQuery as any);
+      vi.mocked(supabaseModule.supabaseAdmin.from).mockReturnValue(
+        chainable({ data: null, error: { code: '23505', message: 'Duplicate key' } })
+      );
 
       await expect(createSource(mockProjectId, validInput)).rejects.toThrow(
-        'Account already connected'
+        'Social account already connected: facebook/fb-account-123'
       );
     });
 
@@ -137,17 +144,14 @@ describe('Sources Database Operations', () => {
         updated_at: '2026-04-06T00:00:00Z',
       };
 
-      const mockQuery = {
-        insert: vi.fn().mockReturnThis(),
-        select: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: mockCreatedSource, error: null }),
-      };
-
-      vi.mocked(supabaseModule.supabase.from).mockReturnValue(mockQuery as any);
+      vi.mocked(supabaseModule.supabaseAdmin.from).mockReturnValue(
+        chainable({ data: mockCreatedSource, error: null })
+      );
 
       const result = await createSource(mockProjectId, inputWithExpiry);
 
-      expect(result.token_expires_at).toBeDefined();
+      expect(result.token_expires_at).toBeInstanceOf(Date);
+      expect(result.token_expires_at?.toISOString()).toBe('2026-12-31T00:00:00.000Z');
     });
   });
 
@@ -166,14 +170,9 @@ describe('Sources Database Operations', () => {
         },
       ];
 
-      const mockQuery = {
-        eq: vi.fn().mockReturnThis(),
-        select: vi.fn().mockResolvedValue({ data: mockActiveSources, error: null }),
-      };
-
-      vi.mocked(supabaseModule.supabase.from).mockReturnValue({
-        select: vi.fn().mockReturnValue(mockQuery),
-      } as any);
+      vi.mocked(supabaseModule.supabaseAdmin.from).mockReturnValue(
+        chainable({ data: mockActiveSources, error: null })
+      );
 
       const result = await getActiveSources(mockProjectId, 'xiaohongshu');
 

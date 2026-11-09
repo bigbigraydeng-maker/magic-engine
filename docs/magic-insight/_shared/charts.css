@@ -1,0 +1,160 @@
+/*
+ * Magic Insight 报告图表系统 —— 手写 CSS + inline SVG，不依赖任何 JS 图表库。
+ *
+ * ⚠️ 本文件是【起新卷时的共享模板】，不是被 report.html 外链引用的样式表。
+ *    每份 report.html 必须把这段 CSS **内联**进自己的 <style> 里。
+ *    原因：报告要对外发送（邮件附件、单独另存、转发），外链 CSS 一旦脱离目录
+ *    图表会全部散版，而 PDF 里看不出问题。自包含是硬要求。
+ *    起新卷时把本文件内容复制进去；改进了图表样式请回写本文件，让后续卷受益。
+ *
+ * 为什么不用 Chart.js / ECharts：报告最终产物是 headless Chrome 打印的 PDF。
+ * JS 图表库要等 canvas 渲染完成，与 --virtual-time-budget 抢时序，
+ * 偶发画一半或全白，而 PDF 一旦出错没人会发现（图是空的但版面正常）。
+ * SVG 与 CSS 是声明式的，浏览器一次布局就定稿，确定性 100%。
+ *
+ * 所有图表的数值必须与 sources.md 台账一致。改数字请同时改台账。
+ */
+
+/* ---------- 图表外壳 ---------- */
+.chart {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 18px 20px 16px;
+}
+.chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+.chart-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: .01em;
+}
+.chart-unit {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.chart-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--rule);
+  font-size: 10.5px;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+
+/* ---------- 横向条形图（含正负分叉） ---------- */
+.bars { display: flex; flex-direction: column; gap: 7px; }
+.bar-row {
+  display: grid;
+  grid-template-columns: 76px minmax(90px, 1fr) 52px;
+  align-items: center;
+  gap: 10px;
+}
+.bar-label {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar-track {
+  position: relative;
+  height: 15px;
+  /* 保底宽度：grid 的 1fr 在容器宽度不确定时会塌成 0，
+     所有柱子不可见但版面看起来正常——PDF 里没人会发现。 */
+  min-width: 90px;
+  background: color-mix(in srgb, var(--surface-3) 60%, transparent);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 2px;
+}
+.bar-fill.pos { background: linear-gradient(90deg, color-mix(in srgb, var(--growth) 55%, transparent), var(--growth)); }
+.bar-fill.neg { background: linear-gradient(270deg, color-mix(in srgb, var(--alert) 55%, transparent), var(--alert)); }
+.bar-fill.gold { background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 55%, transparent), var(--gold)); }
+.bar-fill.blue { background: linear-gradient(90deg, color-mix(in srgb, var(--me-blue) 55%, transparent), var(--me-blue)); }
+.bar-fill.muted { background: color-mix(in srgb, var(--ink-muted) 45%, transparent); }
+/* 零轴 */
+.bar-track .zero {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: var(--rule-strong);
+}
+.bar-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: right;
+}
+.bar-value.pos { color: var(--growth); }
+.bar-value.neg { color: var(--alert); }
+.bar-value.neutral { color: var(--ink); }
+
+/* 高亮某一行（用于点出结论所在） */
+.bar-row.hl .bar-label { color: var(--ink); font-weight: 600; }
+
+/* ---------- 堆叠条形图 ---------- */
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.stack-row .sl {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 11.5px; margin-bottom: 5px;
+}
+.stack-row .sl .nm { color: var(--ink); font-weight: 600; }
+.stack-row .sl .tot { font-family: 'JetBrains Mono', monospace; color: var(--ink-muted); font-size: 10.5px; }
+.stack-bar { display: flex; height: 20px; border-radius: 3px; overflow: hidden; }
+.stack-seg { display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 600; }
+.stack-seg.foreign { background: var(--me-blue); color: #06101F; }
+.stack-seg.other { background: color-mix(in srgb, var(--ink-muted) 42%, transparent); color: var(--ink-soft); }
+.stack-seg.hkmt { background: var(--gold); color: #06101F; }
+
+/* ---------- 图例 ---------- */
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; font-size: 10.5px; color: var(--ink-muted); }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+
+/* ---------- 甜甜圈 ---------- */
+.donut-wrap { display: grid; grid-template-columns: 168px 1fr; gap: 18px; align-items: center; }
+@media (max-width: 560px) { .donut-wrap { grid-template-columns: 1fr; } }
+.donut { position: relative; }
+.donut svg { display: block; transform: rotate(-90deg); }
+.donut-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; pointer-events: none;
+}
+.donut-center .v { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 600; color: var(--gold-soft); line-height: 1; }
+.donut-center .l { font-size: 9.5px; color: var(--ink-muted); margin-top: 4px; letter-spacing: .06em; }
+.donut-key { display: flex; flex-direction: column; gap: 8px; }
+.donut-key .row { display: grid; grid-template-columns: 12px 1fr auto; gap: 9px; align-items: center; font-size: 11.5px; }
+.donut-key .sw { width: 10px; height: 10px; border-radius: 2px; }
+.donut-key .nm { color: var(--ink-soft); }
+.donut-key .pc { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--ink); }
+
+/* ---------- 图表并排网格 ---------- */
+.chart-grid { display: grid; gap: 14px; }
+.chart-grid.two { grid-template-columns: 1fr 1fr; }
+.chart-grid.side { grid-template-columns: 1.15fr .85fr; }
+@media (max-width: 760px) { .chart-grid.two, .chart-grid.side { grid-template-columns: 1fr; } }
+
+/* ---------- 打印保真 ---------- */
+@media print {
+  .chart { break-inside: avoid; page-break-inside: avoid; }
+  .bar-fill, .stack-seg, .donut svg circle {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

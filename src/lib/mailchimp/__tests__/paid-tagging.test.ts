@@ -193,6 +193,43 @@ describe('runPaidTagging · 🔴 铁律 8：说不出原话就不算数', () => 
   })
 })
 
+describe('runPaidTagging · 🔴 处理过的人不再问', () => {
+  /**
+   * 2026-09-06 生产实测：待确认名单上 4 个人**全部**已经有 paid_customer 了。
+   * Baker 每天打开待办看到的是同一批已处理的名字 —— 处理完也不消失，
+   * 这种待办栏人很快就不看了，铁律 3 下半的人工车道等于白建。
+   */
+  it('🔴 客人说付了，但他已经有 paid_customer → 不再进待办', async () => {
+    const { cfg } = fakeMailchimp({ 'enrkay@gmail.com': ['paid_customer'] })
+    const r = await runPaidTagging(
+      [mail({ direction: 'inbound', subject: 'Payment confirmation', preview: 'Thank you Lisa' })],
+      cfg,
+      POLICY,
+    )
+    expect(r.needsReview).toHaveLength(0)
+  })
+
+  it('还没打标签的人 → 照常进待办（证明上一条不是因为别的原因空的）', async () => {
+    const { cfg } = fakeMailchimp({ 'enrkay@gmail.com': ['fb_lead'] })
+    const r = await runPaidTagging(
+      [mail({ direction: 'inbound', subject: 'Payment confirmation', preview: 'Thank you Lisa' })],
+      cfg,
+      POLICY,
+    )
+    expect(r.needsReview).toHaveLength(1)
+  })
+
+  it('🔴 查不到这个人（网络/404）→ 照常问，宁可多问一次也不漏', async () => {
+    const { cfg } = fakeMailchimp({})
+    const r = await runPaidTagging(
+      [mail({ direction: 'inbound', subject: 'Payment confirmation', preview: 'Thank you Lisa' })],
+      cfg,
+      POLICY,
+    )
+    expect(r.needsReview).toHaveLength(1)
+  })
+})
+
 describe('runPaidTagging · 转发信降级', () => {
   it('🔴 Fw: 开头的确认信 → needs_review，不自动打（收件人可能是代理/同事）', async () => {
     const { cfg, writes } = fakeMailchimp({ 'agent@housesoftravel.co.nz': ['fb_lead'] })
@@ -208,6 +245,111 @@ describe('runPaidTagging · 转发信降级', () => {
     expect(r.tagged).toHaveLength(0)
     expect(r.needsReview).toHaveLength(1)
     expect(writes).toHaveLength(0)
+  })
+})
+
+describe('runPaidTagging · 🔴 needs_review 处理确认闸（2026-09-08 每日待办自动闭环审计）', () => {
+  it('PM 已经在 Mailchimp 打过 paidTag → 不再重复报 needs_review', async () => {
+    const { cfg, writes } = fakeMailchimp({ 'enrkay@gmail.com': ['paid_customer'] })
+    const r = await runPaidTagging(
+      [mail({ direction: 'inbound', subject: 'Payment confirmation', preview: 'Get Outlook for Android' })],
+      cfg,
+      POLICY,
+    )
+    expect(r.needsReview).toHaveLength(0)
+    expect(writes).toHaveLength(0) // 只反查，不写标签（那是自动打标签档的事）
+  })
+
+  it('还没打过标签 → 照常报 needs_review（回归：确认闸没把正常路径也挡掉）', async () => {
+    const { cfg } = fakeMailchimp({ 'enrkay@gmail.com': ['fb_lead'] })
+    const r = await runPaidTagging(
+      [mail({ direction: 'inbound', subject: 'Payment confirmation', preview: 'Get Outlook for Android' })],
+      cfg,
+      POLICY,
+    )
+    expect(r.needsReview).toHaveLength(1)
+  })
+
+  it('同一个人两封 needs_review 信 → 只查 Mailchimp 一次（幂等短路）', async () => {
+    let lookups = 0
+    const impl = async (url: string): Promise<Response> => {
+      if (url.includes('/tags')) return new Response(null, { status: 204 })
+      lookups += 1
+      return new Response(
+        JSON.stringify({ email_address: 'enrkay@gmail.com', status: 'subscribed', tags: [] }),
+        { status: 200 },
+      )
+    }
+    const r = await runPaidTagging(
+      [
+        mail({ id: 'a', direction: 'inbound', subject: 'Payment confirmation', preview: 'Get Outlook for Android' }),
+        mail({ id: 'b', direction: 'inbound', subject: 'Payment confirmation', preview: 'Get Outlook for Android' }),
+      ],
+      { ...CFG_BASE, fetchImpl: impl },
+      POLICY,
+    )
+    expect(r.needsReview).toHaveLength(2)
+    expect(lookups).toBe(1)
+  })
+
+  it('反查 Mailchimp 出错（限流/网络）→ 按"还没处理"算，照常报出来，不静默吞掉', async () => {
+    const impl = async () => new Response(null, { status: 429 })
+    const r = await runPaidTagging(
+      [mail({ direction: 'inbound', subject: 'Payment confirmation', preview: 'Get Outlook for Android' })],
+      { ...CFG_BASE, fetchImpl: impl },
+      POLICY,
+    )
+    expect(r.needsReview).toHaveLength(1)
+  })
+
+  it('🔴 Codex round 3：同一批里这个邮箱已经被本轮确认打过标签 → needs_review 排除它，也不再反查', async () => {
+    let lookups = 0
+    const { cfg } = fakeMailchimp({ 'enrkay@gmail.com': ['fb_lead'] })
+    const baseFetch = cfg.fetchImpl
+    const impl = async (url: string, init?: RequestInit) => {
+      if (!url.includes('/tags')) lookups += 1
+      return baseFetch(url, init)
+    }
+    const r = await runPaidTagging(
+      [
+        // 一封我们自己确认收款的信，先把这个邮箱打上 paid_customer。
+        mail({ id: 'confirmed', preview: 'Your payment has been received in full' }),
+        // 同一批里客人自己也甩了张回单，命中 needs_review。
+        mail({
+          id: 'review',
+          direction: 'inbound',
+          subject: 'Payment confirmation',
+          preview: 'Get Outlook for Android',
+        }),
+      ],
+      { ...cfg, fetchImpl: impl },
+      POLICY,
+    )
+    expect(r.tagged).toHaveLength(1)
+    // 已经在本轮确认打过标签的邮箱不该再冒出来要人复核。
+    expect(r.needsReview).toHaveLength(0)
+    // 且不该为它多发一次反查请求——它已经在 alreadyTagged 里，查了也是白查。
+    expect(lookups).toBe(1) // 只有 applyMemberTags 内部那一次 findMemberByEmail
+  })
+
+  it('🔴 Codex round 3：共享的 reviewCheckDeadline 已过期 → 不再发起新反查，仍按"还没处理"报出来', async () => {
+    let lookups = 0
+    const impl = async (url: string): Promise<Response> => {
+      if (url.includes('/tags')) return new Response(null, { status: 204 })
+      lookups += 1
+      return new Response(
+        JSON.stringify({ email_address: 'enrkay@gmail.com', status: 'subscribed', tags: [] }),
+        { status: 200 },
+      )
+    }
+    const r = await runPaidTagging(
+      [mail({ direction: 'inbound', subject: 'Payment confirmation', preview: 'Get Outlook for Android' })],
+      { ...CFG_BASE, fetchImpl: impl },
+      POLICY,
+      { reviewCheckDeadline: Date.now() - 1 },
+    )
+    expect(r.needsReview).toHaveLength(1)
+    expect(lookups).toBe(0)
   })
 })
 

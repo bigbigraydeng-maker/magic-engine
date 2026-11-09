@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
+  AD_INSIGHT_SELECT,
+  adInsightRowFromDb,
   breakdownByParent,
   MIN_RESULTS_FOR_COMPARISON,
   DIVERGENCE_RATIO_THRESHOLD,
@@ -159,5 +161,52 @@ describe('breakdownByParent', () => {
     // 三语只有 2 个结果 —— 当初就是拿它当证据得出「三语便宜」的，必须被判定为样本不足
     const trilingual = p.children.find(c => c.entityId === 'E2')!
     expect(trilingual.underpowered).toBe(true)
+  })
+})
+
+describe('读侧取列（G12：看板查了不存在的 date 列）', () => {
+  // 形状照抄生产 ad_daily_insights 一行（2026-09-12 CTS level='ad'，只保留读侧用到的列）
+  const prodRow = {
+    client_id: 'c0000000-0000-0000-0000-000000000000',
+    entity_id: '120249672615250307',
+    entity_name: 'GC · Food · EN · Reborn · 20260908',
+    parent_id: '120247480862390307',
+    insight_date: '2026-09-12',
+    spend: 1.84,
+    impressions: 74,
+    leads: 0,
+    messaging_conversations: 0,
+    results: 0,
+  }
+
+  it('取列用 insight_date，不含不存在的 date 列，并带上留资/私信两列', () => {
+    const cols = AD_INSIGHT_SELECT.split(',').map(c => c.trim())
+    expect(cols).toContain('insight_date')
+    expect(cols).not.toContain('date')
+    expect(cols).toContain('leads')
+    expect(cols).toContain('messaging_conversations')
+  })
+
+  it('映射后留资/私信两列有值，单位不再退化成 unknown', () => {
+    const r = adInsightRowFromDb(prodRow)
+    expect(r.leads).toBe(0)
+    expect(r.messagingConversations).toBe(0)
+    const [p] = breakdownByParent([r])
+    expect(p.children[0].resultUnit).toBe('none')
+  })
+
+  it('数据库列为 null 时保持 undefined（判 unknown），不伪造成 0', () => {
+    const r = adInsightRowFromDb({ ...prodRow, leads: null, messaging_conversations: null })
+    expect(r.leads).toBeUndefined()
+    const [p] = breakdownByParent([r])
+    expect(p.children[0].resultUnit).toBe('unknown')
+  })
+
+  it('接上两列后，表单广告与私信广告同组会被单位闸拦成 mixed_units', () => {
+    const [p] = breakdownByParent([
+      adInsightRowFromDb({ ...prodRow, entity_id: 'F', spend: 30, results: 5, leads: 5, messaging_conversations: 0 }),
+      adInsightRowFromDb({ ...prodRow, entity_id: 'M', spend: 10, results: 5, leads: 0, messaging_conversations: 5 }),
+    ])
+    expect(p.verdict).toBe('mixed_units')
   })
 })

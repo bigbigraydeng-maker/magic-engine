@@ -26,60 +26,6 @@ function DiffSection({
   original: string
   enhanced: string
 }) {
-  const handleGithubPublish = async () => {
-    if (!result) return
-    setSaving(true)
-    setError(null)
-    try {
-      const res = await fetch(`/api/clients/${clientId}/cms/github/update-page`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          page_id: pageId,
-          page_url: result.source_page_url,
-          enhanced_title: result.enhanced_title,
-          enhanced_meta_title: result.enhanced_meta_title,
-          enhanced_meta_description: result.enhanced_meta_description,
-          enhanced_html_body: result.enhanced_html_body,
-          execution_item_id: executionItemId,
-        }),
-      })
-      const data = await res.json() as {
-        success?: boolean
-        error?: string
-        pr_url?: string
-        file_path?: string
-        body_applied?: boolean
-      }
-      if (!res.ok || !data.success || !data.pr_url || !data.file_path) {
-        throw new Error(data.error ?? `HTTP ${res.status}`)
-      }
-      setCompletion({
-        kind: 'github_pr',
-        prUrl: data.pr_url,
-        filePath: data.file_path,
-        bodyApplied: data.body_applied === true,
-      })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '创建网站更新 PR 失败')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleExecute = () => {
-    if (!executionPlan) return
-    if (executionPlan.mode === 'github_pr') {
-      void handleGithubPublish()
-      return
-    }
-    if (executionPlan.mode === 'wordpress_rewriter') {
-      handleOpenRewriter()
-      return
-    }
-    void handleApprove()
-  }
-
   return (
     <div className="space-y-1">
       <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{label}</p>
@@ -243,6 +189,60 @@ export default function UpgradePage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : '无法打开安全发布流程')
     }
+  }
+
+  const handleGithubPublish = async () => {
+    if (!result) return
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/clients/${clientId}/cms/github/update-page`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          page_id: pageId,
+          page_url: result.source_page_url,
+          enhanced_title: result.enhanced_title,
+          enhanced_meta_title: result.enhanced_meta_title,
+          enhanced_meta_description: result.enhanced_meta_description,
+          enhanced_html_body: result.enhanced_html_body,
+          execution_item_id: executionItemId,
+        }),
+      })
+      const data = await res.json() as {
+        success?: boolean
+        error?: string
+        pr_url?: string
+        file_path?: string
+        body_applied?: boolean
+      }
+      if (!res.ok || !data.success || !data.pr_url || !data.file_path) {
+        throw new Error(data.error ?? `HTTP ${res.status}`)
+      }
+      setCompletion({
+        kind: 'github_pr',
+        prUrl: data.pr_url,
+        filePath: data.file_path,
+        bodyApplied: data.body_applied === true,
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '创建网站更新 PR 失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleExecute = () => {
+    if (!executionPlan) return
+    if (executionPlan.mode === 'github_pr') {
+      void handleGithubPublish()
+      return
+    }
+    if (executionPlan.mode === 'wordpress_rewriter') {
+      handleOpenRewriter()
+      return
+    }
+    void handleApprove()
   }
 
   return (

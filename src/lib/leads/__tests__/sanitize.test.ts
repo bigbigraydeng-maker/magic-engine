@@ -154,9 +154,19 @@ describe('sanitizeLead — submitted_at ISO validation (魏征 P1.5)', () => {
   })
 
   it('normalises non-canonical (but parseable) inputs to canonical ISO', () => {
-    const r = sanitizeLead({ ...valid, submitted_at: '2026-06-13T05:00:00' })
-    if (!r.ok) throw new Error('expected ok')
-    expect(r.lead.submitted_at).toMatch(/^2026-06-13T\d{2}:00:00\.000Z$/)
+    // Inputs carry an explicit offset so the expected value does not depend on
+    // the machine's local timezone.
+    const withOffset = sanitizeLead({ ...valid, submitted_at: '2026-06-13T05:00:00+10:00' })
+    if (!withOffset.ok) throw new Error('expected ok')
+    expect(withOffset.lead.submitted_at).toBe('2026-06-12T19:00:00.000Z')
+
+    const rfc1123 = sanitizeLead({ ...valid, submitted_at: 'Sat, 13 Jun 2026 05:00:00 GMT' })
+    if (!rfc1123.ok) throw new Error('expected ok')
+    expect(rfc1123.lead.submitted_at).toBe('2026-06-13T05:00:00.000Z')
+
+    const noMillis = sanitizeLead({ ...valid, submitted_at: '2026-06-13T05:00:00Z' })
+    if (!noMillis.ok) throw new Error('expected ok')
+    expect(noMillis.lead.submitted_at).toBe('2026-06-13T05:00:00.000Z')
   })
 
   it.each(['abc', 'not-a-date', '2026-13-99', '', '   '])(

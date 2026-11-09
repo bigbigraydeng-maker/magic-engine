@@ -372,15 +372,18 @@ describe('E2E Suite 2 — Full Pipeline (35 pages, happy path)', () => {
     expect(mockSupabase.from).toHaveBeenCalledWith('client_site_pages')
   })
 
-  it('upserted pages contain correct client_id and job_id throughout', async () => {
+  it('upserted pages contain correct client_id and crawl_status throughout', async () => {
     await executeJob(mockSupabase as unknown as SupabaseClient, CTS_JOB_ID)
 
     const allCalls: unknown[] = mockSupabase._upsert.mock.calls.map(
       (call: unknown[]) => call[0]
     )
-    for (const page of allCalls as { client_id: string; job_id: string }[]) {
+    expect(allCalls.length).toBeGreaterThan(0)
+    for (const page of allCalls as { client_id: string; crawl_status: string; job_id?: unknown }[]) {
       expect(page.client_id).toBe(CTS_CLIENT_ID)
-      expect(page.job_id).toBe(CTS_JOB_ID)
+      expect(page.crawl_status).toBe('crawled')
+      // job_id is not a column on client_site_pages (removed in 40d43a86)
+      expect(page).not.toHaveProperty('job_id')
     }
   })
 
@@ -712,14 +715,18 @@ describe('E2E Suite 5 — Database consistency', () => {
     const record = mockSupabase._upsert.mock.calls[0][0] as Record<string, unknown>
 
     const requiredFields = [
-      'client_id', 'job_id', 'url', 'title', 'markdown_content',
+      'client_id', 'url', 'path', 'title', 'markdown_content',
       'word_count', 'page_type', 'topics', 'primary_keyword',
       'classification_confidence', 'has_geo_block', 'geo_detection_method',
-      'geo_confidence', 'status_code', 'crawled_at',
+      'geo_confidence', 'status_code', 'crawled_at', 'crawl_status',
     ]
     for (const field of requiredFields) {
       expect(record).toHaveProperty(field)
     }
+    expect(record.path).toBe('/tours/beijing-tour')
+    expect(record.crawl_status).toBe('crawled')
+    // job_id is not a column on client_site_pages (removed in 40d43a86)
+    expect(record).not.toHaveProperty('job_id')
   })
 
   it('word_count is a positive integer for pages with content', async () => {
@@ -1059,13 +1066,15 @@ describe('E2E Suite 7 — Concurrent job isolation', () => {
       crawlAndClassifyPages(supabaseB, CLIENT_B, urlsB, JOB_B, { maxPages: 50, rateLimitMs: 0 }),
     ])
 
-    const pageA = upsertA.mock.calls[0][0] as { client_id: string; job_id: string }
-    const pageB = upsertB.mock.calls[0][0] as { client_id: string; job_id: string }
+    const pageA = upsertA.mock.calls[0][0] as { client_id: string; url: string }
+    const pageB = upsertB.mock.calls[0][0] as { client_id: string; url: string }
 
+    expect(upsertA).toHaveBeenCalledTimes(1)
+    expect(upsertB).toHaveBeenCalledTimes(1)
     expect(pageA.client_id).toBe(CLIENT_A)
-    expect(pageA.job_id).toBe(JOB_A)
+    expect(pageA.url).toBe(urlsA[0])
     expect(pageB.client_id).toBe(CLIENT_B)
-    expect(pageB.job_id).toBe(JOB_B)
+    expect(pageB.url).toBe(urlsB[0])
   })
 
   it('job A failure does not affect job B completion', async () => {
@@ -1192,12 +1201,17 @@ describe('E2E Suite 9 — Job lifecycle state machine', () => {
     ).rejects.toThrow('Job ID is required')
   })
 
-  it('completes immediately with zero pages when site has no URLs', async () => {
+  it('fails with a user-visible message when site has no URLs', async () => {
     vi.mocked(crawlerDiscoverUrls).mockResolvedValue([])
 
     await executeJob(mockSupabase as unknown as SupabaseClient, CTS_JOB_ID)
 
-    expect(mockRunner.completeJob).toHaveBeenCalledWith(CTS_JOB_ID)
+    expect(mockRunner.failJob).toHaveBeenCalledWith(
+      CTS_JOB_ID,
+      expect.stringContaining('No pages found'),
+      []
+    )
+    expect(mockRunner.completeJob).not.toHaveBeenCalled()
     expect(crawlPages).not.toHaveBeenCalled()
     expect(mockSupabase._upsert).not.toHaveBeenCalled()
   })

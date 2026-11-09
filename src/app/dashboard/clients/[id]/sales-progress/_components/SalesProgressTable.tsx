@@ -1,0 +1,206 @@
+/**
+ * Read-only, server-renderable table of "sales progress" per departure.
+ * Plain table markup with the shared Tailwind vocabulary; no hooks,
+ * no 'use client', no data fetching. All user-facing text is Simplified Chinese.
+ */
+
+import type { SalesProgressData } from '@/lib/crm/sales-progress/load'
+import type { SalesBooking, UnitProgress } from '@/lib/crm/sales-progress/types'
+import {
+  formatCapacity,
+  formatGeneratedAt,
+  formatRemaining,
+  invoiceText,
+  originLabel,
+  peopleText,
+  rowNotes,
+  statusText,
+} from './format'
+
+function companyOnlyText(row: UnitProgress): string | null {
+  if (row.remainingCompanyOnly === null) return null
+  if (row.remainingCompanyOnly < 0) return `超订 ${-row.remainingCompanyOnly} 人`
+  return `${row.remainingCompanyOnly} 人`
+}
+
+function hasDetail(row: UnitProgress): boolean {
+  return rowNotes(row).length > 0 || row.bookings.length > 0
+}
+
+function BookingList({ bookings }: { bookings: SalesBooking[] }): JSX.Element {
+  return (
+    <details>
+      <summary className="inline-flex min-h-11 cursor-pointer items-center text-me-charcoal/70">
+        看这几张订单（{bookings.length}）
+      </summary>
+      <ul className="mt-1 space-y-0.5">
+        {bookings.map((b) => (
+          <li key={b.id} className="text-me-charcoal/70">
+            {invoiceText(b)} · {peopleText(b)} · {originLabel(b.originKind)}
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
+function RowDetail({ row }: { row: UnitProgress }): JSX.Element | null {
+  const notes = rowNotes(row)
+  if (notes.length === 0 && row.bookings.length === 0) return null
+  return (
+    <tr className="border-b border-me-charcoal/10">
+      <td colSpan={6} className="pb-3 pl-6 pr-3 pt-0 text-xs text-me-charcoal/70">
+        {notes.map((note) => (
+          <p key={note}>{note}</p>
+        ))}
+        {row.bookings.length > 0 ? <BookingList bookings={row.bookings} /> : null}
+      </td>
+    </tr>
+  )
+}
+
+function countCellClass(value: number, muted: boolean): string {
+  const tone = muted || value === 0 ? 'text-me-charcoal/55' : 'text-me-charcoal'
+  return `px-3 py-2 tabular-nums ${tone}`
+}
+
+function ProgressRow({ row }: { row: UnitProgress }): JSX.Element {
+  const companyOnly = companyOnlyText(row)
+  const detail = hasDetail(row)
+  const noCapacity = row.unit.capacity === null
+  const textTone = noCapacity ? 'text-me-charcoal/55' : 'text-me-charcoal'
+  return (
+    <>
+      <tr
+        className={
+          detail ? 'hover:bg-me-ivory/60' : 'border-b border-me-charcoal/10 hover:bg-me-ivory/60'
+        }
+      >
+        <td className={`px-3 py-2 ${textTone}`}>
+          {row.unit.label}
+          {statusText(row.unit) !== null ? (
+            <span className="block text-xs text-me-charcoal/70">{statusText(row.unit)}</span>
+          ) : null}
+        </td>
+        <td className={`px-3 py-2 tabular-nums ${textTone}`}>{formatCapacity(row)}</td>
+        <td className={countCellClass(row.companyConfirmed, noCapacity)}>
+          {row.companyConfirmed} 人
+        </td>
+        <td className={countCellClass(row.customerStated, noCapacity)}>{row.customerStated} 人</td>
+        <td className={countCellClass(row.unverified, noCapacity)}>{row.unverified} 人</td>
+        <td className={`px-3 py-2 tabular-nums ${textTone}`}>
+          <span className={row.overBy > 0 ? 'font-semibold text-status-rej' : undefined}>
+            {formatRemaining(row)}
+          </span>
+          {companyOnly !== null ? (
+            <span className="block text-xs text-me-charcoal/70">仅算公司确认：{companyOnly}</span>
+          ) : null}
+        </td>
+      </tr>
+      <RowDetail row={row} />
+    </>
+  )
+}
+
+function Footer({ data }: { data: SalesProgressData }): JSX.Element {
+  const { result } = data
+  return (
+    <div className="mt-3 space-y-1 text-xs text-me-charcoal/70">
+      {result.unattributedOrders > 0 ? (
+        <p>
+          订单没有挂出发日：{result.unattributedOrders} 单，共 {result.unattributedPeople} 人
+        </p>
+      ) : null}
+      {result.onClosedUnits.map((item) => (
+        <p key={item.unit.unitId}>
+          挂在已取消/已关闭出发日上的订单：{item.unit.label}，{item.orders} 单，共 {item.people} 人
+        </p>
+      ))}
+    </div>
+  )
+}
+
+function MissingCapacityNotice({ rows, clientId }: { rows: UnitProgress[]; clientId: string }): JSX.Element | null {
+  const missing = rows.filter(
+    (row) =>
+      row.unit.capacity === null &&
+      row.unit.capacityNote === null &&
+      row.unit.unitStatus !== 'cancelled' &&
+      row.unit.unitStatus !== 'closed',
+  )
+  if (missing.length === 0) return null
+  return (
+    <div className="mt-3 rounded-xl border border-status-exec/30 bg-status-exec/10 p-4 text-sm text-me-charcoal">
+      <p>
+        有 {missing.length} 个出发日还没填座位数，所以算不出剩余座位。请把座位数补到团目录（导入表格里的「人数」一列），补完这里会自动出数。
+      </p>
+      <p className="mt-2">
+        <a
+          href={`/dashboard/clients/${clientId}/tour-catalog`}
+          className="inline-flex min-h-11 items-center font-semibold text-me-ochre underline"
+        >
+          去团目录
+        </a>
+      </p>
+      <details className="mt-1">
+        <summary className="inline-flex min-h-11 cursor-pointer items-center text-me-charcoal/70">
+          看是哪几个出发日（{missing.length}）
+        </summary>
+        <ul className="mt-1 space-y-0.5 text-xs text-me-charcoal/70">
+          {missing.map((row) => (
+            <li key={row.unit.unitId}>{row.unit.label}</li>
+          ))}
+        </ul>
+      </details>
+    </div>
+  )
+}
+
+export function SalesProgressTable({ data, clientId }: { data: SalesProgressData; clientId: string }): JSX.Element {
+  const { result } = data
+  return (
+    <div className="text-me-charcoal">
+      <p className="text-xs text-me-charcoal/70">数据截至 {formatGeneratedAt(data.generatedAt)}</p>
+      {data.originColumnsMissing ? (
+        <p className="mt-2 text-xs text-me-charcoal/70">
+          订单的「来源」「发票号」两列还没有在系统里启用，所有订单暂按「待核实」算。
+        </p>
+      ) : null}
+      {result.activeOrders === 0 ? (
+        <p className="mt-2 text-xs text-me-charcoal/70">
+          现在还没有录入任何订单；第一批订单导入后，这里才会有数字。
+        </p>
+      ) : null}
+      <MissingCapacityNotice rows={result.rows} clientId={clientId} />
+      {result.rows.length === 0 ? (
+        <p className="mt-2 text-xs text-me-charcoal/70">还没有出发日。</p>
+      ) : (
+        <>
+          <div className="mt-3 overflow-x-auto rounded-xl border border-black/10 bg-white shadow-sm">
+            <table className="w-full min-w-[560px] border-collapse text-sm [&_td:not(:first-child)]:whitespace-nowrap [&_th]:whitespace-nowrap">
+              <thead>
+                <tr className="border-b border-me-charcoal/10 bg-me-ivory text-left text-xs text-me-charcoal/70">
+                  <th className="w-[34%] min-w-[160px] px-3 py-2 font-medium">团 · 出发日</th>
+                  <th className="px-3 py-2 font-medium">座位上限</th>
+                  <th className="px-3 py-2 font-medium">公司确认</th>
+                  <th className="px-3 py-2 font-medium">客人自述</th>
+                  <th className="px-3 py-2 font-medium">待核实</th>
+                  <th className="px-3 py-2 font-medium">剩余</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.rows.map((row) => (
+                  <ProgressRow key={row.unit.unitId} row={row} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-me-charcoal/70">
+            对外只说「公司确认」那一栏；其余两栏只是内部参考。「剩余」按保守算法，上限减去三栏之和；下面那行小字「仅算公司确认」只算公司确认的座位。
+          </p>
+        </>
+      )}
+      <Footer data={data} />
+    </div>
+  )
+}

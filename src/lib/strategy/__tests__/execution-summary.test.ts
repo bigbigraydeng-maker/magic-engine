@@ -21,7 +21,11 @@ vi.mock('@/lib/supabase', () => ({
 }))
 
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { getExecutionSummaryForGoal } from '../initiatives'
+import {
+  getExecutionSummaryForGoal,
+  listInitiativesForGoal,
+  readInitiativesForGoal,
+} from '../initiatives'
 
 const GOAL_ID = 'goal-1'
 
@@ -76,18 +80,20 @@ function buildSupabase(tables: {
   initiatives?: MockInitiativeRow[]
   execution_items?: MockActionRow[]
   campaign_briefs?: MockCampaignRow[]
+  initiativesError?: string
 }): SupabaseClient {
   const fromFn = (table: string) => {
     if (table === 'initiatives') {
       // listInitiativesForGoal chains: .select().eq().order().order().eq() (is_archived filter)
-      const data = tables.initiatives ?? []
+      const data = tables.initiativesError ? null : tables.initiatives ?? []
+      const error = tables.initiativesError ? { message: tables.initiativesError } : null
       const chain = {
         select: () => chain,
         eq: () => chain,
         order: () => chain,
         // final await: { data, error }
-        then: (cb: (v: { data: typeof data; error: null }) => unknown) =>
-          cb({ data, error: null }),
+        then: (cb: (v: { data: typeof data; error: typeof error }) => unknown) =>
+          cb({ data, error }),
       }
       return chain
     }
@@ -130,6 +136,24 @@ describe('getExecutionSummaryForGoal', () => {
       aggregateCompletionPct: null,
       perInitiative: [],
     })
+  })
+
+  it('returns null (not a zero summary) when the initiatives read fails', async () => {
+    const sb = buildSupabase({ initiativesError: 'connection reset' })
+    const result = await getExecutionSummaryForGoal(sb, GOAL_ID)
+    expect(result).toBeNull()
+  })
+
+  it('readInitiativesForGoal tells a failed read apart from an empty goal', async () => {
+    const failed = await readInitiativesForGoal(buildSupabase({ initiativesError: 'boom' }), GOAL_ID)
+    expect(failed).toEqual({ ok: false, error: { message: 'boom' } })
+    const empty = await readInitiativesForGoal(buildSupabase({ initiatives: [] }), GOAL_ID)
+    expect(empty).toEqual({ ok: true, rows: [] })
+  })
+
+  it('listInitiativesForGoal keeps its legacy [] on read error', async () => {
+    const rows = await listInitiativesForGoal(buildSupabase({ initiativesError: 'boom' }), GOAL_ID)
+    expect(rows).toEqual([])
   })
 
   it('excludes skipped from completion denominator', async () => {

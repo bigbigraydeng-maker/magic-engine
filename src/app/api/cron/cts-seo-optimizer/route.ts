@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabase'
 import { startCronRun } from '@/lib/cron/run-logger'
-import { runCtsMetaPr } from '@/lib/seo-meta/cts-meta-pr'
 
 /**
- * POST /api/cron/cts-seo-optimizer (22.E.S17)
+ * POST /api/cron/cts-seo-optimizer — RETIRED, inert.
  *
- * Monday 05:30 UTC (right after oztop-seo-optimizer) — CTS's title
- * executor: GSC pos-4-20 pages → AI title/desc → narrow-lane edit of the
- * site repo's central meta data file → ONE weekly PR the PM merges.
- * CI on the client repo gates the merge; nothing auto-deploys.
+ * Retired 2026-09-20 (replaced by the Inngest meta-cycle), but on
+ * 2026-09-28 05:31 UTC it still ran and auto-merged chinatravel#213 with
+ * three wrong titles and no information-completeness gate. Cause: removing
+ * a cron block from render.yaml does not delete the Render cron service,
+ * and that service still carried the one-off schedule "30 5 28 9 *".
+ *
+ * "Kept for rollback" is how it got back in, so this route no longer runs
+ * anything. Any call is recorded as a failed cron run (so the daily check
+ * surfaces it) and answered 410. Rollback means restoring the old handler
+ * from git history in a reviewed PR, not calling this URL.
  *
  * Auth: Bearer ${CRON_SECRET}
  */
@@ -28,26 +32,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  const error = 'cts-seo-optimizer is retired (2026-09-20); refusing to run. Delete the Render cron service that still calls it.'
   const cronRun = await startCronRun('cts-seo-optimizer')
-
-  try {
-    const result = await runCtsMetaPr(supabaseAdmin)
-
-    await cronRun.finish({
-      processed: result.pages?.length ?? 0,
-      completed: result.outcome === 'pr_opened' ? 1 : 0,
-      failed: result.outcome === 'error' ? 1 : 0,
-      summary: result as unknown as Record<string, unknown>,
-      error: result.outcome === 'error' ? result.error : undefined,
-    })
-
-    return NextResponse.json(
-      { success: result.outcome !== 'error', ...result },
-      { status: result.outcome === 'error' ? 500 : 200 },
-    )
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    await cronRun.finish({ failed: 1, error: message })
-    return NextResponse.json({ success: false, error: message }, { status: 500 })
-  }
+  await cronRun.finish({ failed: 1, error })
+  return NextResponse.json({ success: false, error }, { status: 410 })
 }

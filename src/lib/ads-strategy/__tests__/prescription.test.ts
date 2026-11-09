@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { prescribe } from '../prescription'
+import { prescribe, type PrescribeInput } from '../prescription'
 import type { MetricVerdict } from '../baseline'
 
 function ctrMetric(verdict: 'alert' | 'watch' | 'healthy'): MetricVerdict {

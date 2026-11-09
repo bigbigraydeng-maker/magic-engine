@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { buildQualifiedMentionVerification } from '@/lib/geo-module/verification'
 import {
   GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY,
+  GOAL_SUBTYPES_BY_INTENT,
   PRIMARY_METRIC_CATALOG,
   getRecommendedMetrics,
 } from '@/types/strategy'
@@ -33,6 +34,20 @@ describe('GEO qualified mention Goal metric', () => {
       expect(metrics.map(metric => metric.key)).toContain(GEO_QUALIFIED_MENTION_GOAL_METRIC_KEY)
     },
   )
+
+  it('offers the personal influence sub-type under awareness with its three primary metrics', () => {
+    const sub = GOAL_SUBTYPES_BY_INTENT.awareness.find(item => item.value === 'personal_influence')
+    expect(sub).toMatchObject({ label_zh: '个人影响力', default_direction: 'increase' })
+    const keys = getRecommendedMetrics('awareness', 'personal_influence').map(metric => metric.key)
+    expect(keys.sort()).toEqual(['brand_search_volume', 'dm_conversations', 'social_followers_growth'])
+  })
+
+  it('does not change what the other awareness sub-types recommend', () => {
+    const keys = getRecommendedMetrics('awareness', 'new_market').map(metric => metric.key)
+    expect(keys).not.toContain('dm_conversations')
+    expect(keys).not.toContain('social_followers_growth')
+    expect(keys).not.toContain('brand_search_volume')
+  })
 
   it('preserves the exact metric key through the existing Goal insert path', async () => {
     const single = vi.fn().mockResolvedValue({

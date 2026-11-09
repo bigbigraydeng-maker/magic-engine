@@ -5,19 +5,15 @@
 import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
-vi.mock('@/lib/meta/token-manager', () => ({
-  getStoredPageToken: vi.fn(),
-  getMetaTokenForClient: vi.fn(),
-}))
+vi.mock('@/lib/meta/page-sync-authorization', () => ({ authorizeConfiguredPage: vi.fn() }))
 vi.mock('@/lib/meta/page-posts', () => ({
-  getPageAccessToken: vi.fn(),
   fetchPagePosts: vi.fn(),
 }))
 
-import { computeSocialRollup, syncPageMetrics } from '../page-metrics-sync'
+import { computeSocialRollup, countPageMetricFailures, syncPageMetrics } from '../page-metrics-sync'
 import type { PagePost } from '@/lib/meta/page-posts'
-import { getStoredPageToken, getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { getPageAccessToken, fetchPagePosts } from '@/lib/meta/page-posts'
+import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
+import { fetchPagePosts } from '@/lib/meta/page-posts'
 
 const NOW = new Date('2026-08-01T12:00:00Z')
 
@@ -87,33 +83,69 @@ describe('computeSocialRollup', () => {
   })
 })
 
+function fakeDb(inserts: unknown[]) {
+  return {
+    from(table: string) {
+      if (table === 'clients') {
+        return {
+          select: () => ({ eq: async () => ({ data: [{ id: 'client-1', factory_config: null }], error: null }) }),
+        }
+      }
+      if (table === 'social_comment_config') {
+        return { select: async () => ({ data: [{ client_id: 'client-1', fb_page_id: 'page-1' }], error: null }) }
+      }
+      const empty = { data: [] as unknown[], error: null }
+      const chain: Record<string, unknown> = {
+        select: () => chain,
+        eq: () => chain,
+        in: async () => empty,
+        update: () => chain,
+        upsert: async () => ({ error: null }),
+        insert: async (rows: unknown) => { inserts.push(rows); return { error: null } },
+        then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve(empty)),
+      }
+      return chain
+    },
+  }
+}
+
 describe('syncPageMetrics token resolution', () => {
-  it('uses stored Page token and does not require the legacy user-token env path', async () => {
-    vi.mocked(getStoredPageToken).mockResolvedValue('stored-page-token')
-    vi.mocked(getMetaTokenForClient).mockResolvedValue(null)
+  it('reads with the Page token the ownership gate hands back', async () => {
+    vi.mocked(authorizeConfiguredPage).mockResolvedValue({ ok: true, pageToken: 'stored-page-token', via: 'client_oauth' })
     vi.mocked(fetchPagePosts).mockResolvedValue([post({ createdAt: '2026-09-02T00:00:00Z', reactions: 3 })])
-
     const inserts: unknown[] = []
-    const db = {
-      from(table: string) {
-        if (table === 'clients') {
-          return {
-            select: () => ({ eq: async () => ({ data: [{ id: 'client-1', factory_config: null }], error: null }) }),
-          }
-        }
-        if (table === 'social_comment_config') {
-          return { select: async () => ({ data: [{ client_id: 'client-1', fb_page_id: 'page-1' }], error: null }) }
-        }
-        return { insert: async (rows: unknown) => { inserts.push(rows); return { error: null } } }
-      },
-    }
 
-    const result = await syncPageMetrics(db as never)
+    const result = await syncPageMetrics(fakeDb(inserts) as never)
 
     expect(result.results).toEqual([{ client_id: 'client-1', page_id: 'page-1', outcome: 'synced', posts_seen: 1 }])
-    expect(getStoredPageToken).toHaveBeenCalledWith('client-1', 'page-1')
-    expect(getMetaTokenForClient).not.toHaveBeenCalled()
-    expect(getPageAccessToken).not.toHaveBeenCalled()
+    expect(authorizeConfiguredPage).toHaveBeenCalledWith(expect.anything(), 'client-1', 'page-1', expect.anything())
+    expect(fetchPagePosts).toHaveBeenCalledWith('page-1', 'stored-page-token', expect.any(Number))
     expect(inserts).toHaveLength(1)
+  })
+
+  it('AD-SEC-4: a configured Page not verified as this client\'s is never read and nothing is recorded under this client', async () => {
+    vi.mocked(fetchPagePosts).mockClear()
+    vi.mocked(authorizeConfiguredPage).mockResolvedValue({ ok: false, skipped: 'page_not_verified', reason: 'not_bound_page' })
+    const inserts: unknown[] = []
+
+    const result = await syncPageMetrics(fakeDb(inserts) as never)
+
+    expect(result.results).toEqual([{ client_id: 'client-1', page_id: 'page-1', outcome: 'error', error: 'page_not_verified: not_bound_page' }])
+    expect(countPageMetricFailures(result)).toBe(1)
+    expect(fetchPagePosts).not.toHaveBeenCalled()
+    expect(inserts).toHaveLength(0)
+  })
+
+  it('Graph 190 记下来，但不算进这轮 failed；普通 500 照算', async () => {
+    vi.mocked(authorizeConfiguredPage).mockResolvedValue({ ok: true, pageToken: 'stored-page-token', via: 'client_oauth' })
+    vi.mocked(fetchPagePosts).mockRejectedValue(new Error('HTTP 400 code=190'))
+
+    const tokenDead = await syncPageMetrics(fakeDb([]) as never)
+    expect(tokenDead.results[0].error).toContain('190')
+    expect(countPageMetricFailures(tokenDead)).toBe(0)
+
+    vi.mocked(fetchPagePosts).mockRejectedValue(new Error('HTTP 500 boom'))
+    const real = await syncPageMetrics(fakeDb([]) as never)
+    expect(countPageMetricFailures(real)).toBe(1)
   })
 })

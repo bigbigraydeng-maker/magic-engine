@@ -21,6 +21,12 @@ vi.mock('@/lib/site-audit/job-runner', () => ({
   JobRunner: vi.fn(),
 }))
 
+// Mock cron_run_logs receipt (route calls startCronRun before any work)
+const mockCronFinish = vi.fn(async () => {})
+vi.mock('@/lib/cron/run-logger', () => ({
+  startCronRun: vi.fn(async () => ({ finish: mockCronFinish })),
+}))
+
 describe('POST /api/cron/site-audit-jobs', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -91,6 +97,18 @@ describe('POST /api/cron/site-audit-jobs', () => {
         }),
       })
 
+      // Zombie watchdog query (22.E.S15): no in_progress jobs stuck > 2h
+      mockFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            lt: vi.fn().mockResolvedValue({
+              data: [],
+              error: null,
+            }),
+          }),
+        }),
+      })
+
       // Recovery query (no stale pending jobs)
       mockFrom.mockReturnValueOnce({
         select: vi.fn().mockReturnValue({
@@ -108,7 +126,7 @@ describe('POST /api/cron/site-audit-jobs', () => {
         cleanupOldJobs: vi.fn().mockResolvedValue(5),
       }
 
-      vi.mocked(JobRunner).mockReturnValue(mockJobRunner as any)
+      vi.mocked(JobRunner).mockReturnValue(mockJobRunner as unknown as JobRunner)
 
       const request = new NextRequest('http://localhost:3000/api/cron/site-audit-jobs', {
         method: 'POST',
@@ -131,7 +149,7 @@ describe('POST /api/cron/site-audit-jobs', () => {
         cleanupOldJobs: vi.fn().mockRejectedValue(new Error('Cleanup failed')),
       }
 
-      vi.mocked(JobRunner).mockReturnValue(mockJobRunner as any)
+      vi.mocked(JobRunner).mockReturnValue(mockJobRunner as unknown as JobRunner)
 
       const request = new NextRequest('http://localhost:3000/api/cron/site-audit-jobs', {
         method: 'POST',
@@ -181,6 +199,18 @@ describe('POST /api/cron/site-audit-jobs', () => {
         }),
       })
 
+      // Zombie watchdog query (22.E.S15): no in_progress jobs stuck > 2h
+      mockFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            lt: vi.fn().mockResolvedValue({
+              data: [],
+              error: null,
+            }),
+          }),
+        }),
+      })
+
       // Recovery query (no stale pending jobs)
       mockFrom.mockReturnValueOnce({
         select: vi.fn().mockReturnValue({
@@ -197,7 +227,7 @@ describe('POST /api/cron/site-audit-jobs', () => {
       const mockJobRunner = {
         cleanupOldJobs: vi.fn().mockResolvedValue(0),
       }
-      vi.mocked(JobRunner).mockReturnValue(mockJobRunner as any)
+      vi.mocked(JobRunner).mockReturnValue(mockJobRunner as unknown as JobRunner)
 
       const request = new NextRequest('http://localhost:3000/api/cron/site-audit-jobs', {
         method: 'POST',
@@ -243,6 +273,18 @@ describe('POST /api/cron/site-audit-jobs', () => {
         }),
       })
 
+      // Zombie watchdog query (22.E.S15): no in_progress jobs stuck > 2h
+      mockFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            lt: vi.fn().mockResolvedValue({
+              data: [],
+              error: null,
+            }),
+          }),
+        }),
+      })
+
       // Recovery query (pending jobs stuck > 1 hour)
       mockFrom.mockReturnValueOnce({
         select: vi.fn().mockReturnValue({
@@ -268,7 +310,7 @@ describe('POST /api/cron/site-audit-jobs', () => {
         cleanupOldJobs: vi.fn().mockResolvedValue(0),
         startJob: vi.fn().mockResolvedValue({ id: 'job-2', status: 'in_progress' }),
       }
-      vi.mocked(JobRunner).mockReturnValue(mockJobRunner as any)
+      vi.mocked(JobRunner).mockReturnValue(mockJobRunner as unknown as JobRunner)
 
       const request = new NextRequest('http://localhost:3000/api/cron/site-audit-jobs', {
         method: 'POST',
@@ -311,6 +353,18 @@ describe('POST /api/cron/site-audit-jobs', () => {
         }),
       })
 
+      // Zombie watchdog query (22.E.S15): no in_progress jobs stuck > 2h
+      mockFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            lt: vi.fn().mockResolvedValue({
+              data: [],
+              error: null,
+            }),
+          }),
+        }),
+      })
+
       // Recovery query
       mockFrom.mockReturnValueOnce({
         select: vi.fn().mockReturnValue({
@@ -327,7 +381,7 @@ describe('POST /api/cron/site-audit-jobs', () => {
       const mockJobRunner = {
         cleanupOldJobs: vi.fn().mockResolvedValue(3),
       }
-      vi.mocked(JobRunner).mockReturnValue(mockJobRunner as any)
+      vi.mocked(JobRunner).mockReturnValue(mockJobRunner as unknown as JobRunner)
 
       const request = new NextRequest('http://localhost:3000/api/cron/site-audit-jobs', {
         method: 'POST',
@@ -346,9 +400,84 @@ describe('POST /api/cron/site-audit-jobs', () => {
       expect(data).toHaveProperty('cleaned_jobs')
       expect(data).toHaveProperty('failed_jobs_found')
       expect(data).toHaveProperty('resumed_jobs')
+      expect(data).toHaveProperty('zombies_failed')
       expect(data.cleaned_jobs).toBe(3)
       expect(data.failed_jobs_found).toBe(0)
       expect(data.resumed_jobs).toBe(0)
+      expect(data.zombies_failed).toBe(0)
+
+      // cron_run_logs receipt is closed with the same numbers
+      expect(mockCronFinish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          summary: { cleaned_jobs: 3, failed_jobs_found: 0, resumed_jobs: 0, zombies_failed: 0 },
+        })
+      )
+    })
+  })
+
+  // =========================================================================
+  // Zombie Watchdog Tests (22.E.S15)
+  // =========================================================================
+
+  describe('Zombie watchdog (in_progress > 2h)', () => {
+    beforeEach(() => {
+      process.env.CRON_SECRET = 'test-secret'
+    })
+
+    it('should fail in_progress jobs stuck > 2 hours', async () => {
+      const mockFrom = vi.fn()
+
+      // Watchdog query (no failed jobs)
+      mockFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            not: vi.fn().mockResolvedValue({ data: [], error: null }),
+          }),
+        }),
+      })
+
+      // Zombie watchdog query (one stuck job)
+      mockFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            lt: vi.fn().mockResolvedValue({ data: [{ id: 'job-zombie' }], error: null }),
+          }),
+        }),
+      })
+
+      // Recovery query (no stale pending jobs)
+      mockFrom.mockReturnValueOnce({
+        select: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            lt: vi.fn().mockResolvedValue({ data: [], error: null }),
+          }),
+        }),
+      })
+
+      vi.mocked(supabaseAdmin).from = mockFrom
+      const mockJobRunner = {
+        cleanupOldJobs: vi.fn().mockResolvedValue(0),
+        failJob: vi.fn().mockResolvedValue(undefined),
+      }
+      vi.mocked(JobRunner).mockReturnValue(mockJobRunner as unknown as JobRunner)
+
+      const request = new NextRequest('http://localhost:3000/api/cron/site-audit-jobs', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-cron-secret': 'test-secret',
+        },
+      })
+
+      const response = await POST(request)
+
+      expect(response.status).toBe(200)
+      const data = await response.json()
+      expect(data.zombies_failed).toBe(1)
+      expect(mockJobRunner.failJob).toHaveBeenCalledWith(
+        'job-zombie',
+        expect.stringContaining('in_progress > 2h')
+      )
     })
   })
 

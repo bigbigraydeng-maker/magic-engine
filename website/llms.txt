@@ -1,17 +1,19 @@
 # Magic Engine
 
-> Magic Engine is an AI growth engine for Australian and New Zealand businesses. It connects discovery, analysis, recommended actions, execution and outcome tracking.
+> Magic Engine is a Digital Marketing Growth Intelligence System for established businesses entering their next market.
 
-Magic Engine is operated by Magic Engine AI Technology Limited in New Zealand.
+Magic Engine combines market intelligence, localised marketing, controlled execution and outcome verification across search, AI visibility, social, advertising, reputation and competitor intelligence.
 
-## Core product
+## Start here
 
-- [AI Growth Engine](https://magicengine.com.au/ai-growth-engine): how the Magic Engine operating loop works
-- [Free Growth Diagnosis](https://magicengine.com.au/discover): identify the most useful next growth action
-- [AI Adoption and Training](https://magicengine.com.au/training): practical AI rollout for AU/NZ teams
-- [GEO and AI Visibility](https://magicengine.com.au/geo): help search and AI systems understand and recommend a business
+- [Magic Engine](https://magicengine.com.au/): who Magic Engine helps and how the growth intelligence loop works
+- [Join the waitlist](https://magicengine.com.au/waitlist/): early-access interest for established businesses preparing to enter their next market
+- [Magic Insight](https://magicengine.com.au/insights/): evidence-led cross-market research published by Magic Engine
+- [The NZ$1,000 Cliff](https://magicengine.com.au/insights/nz-1000-freight-threshold): executive brief on China–New Zealand small-batch freight
+- [China Inbound Tourism in 2025](https://magicengine.com.au/insights/china-inbound-tourism-growth-2025): executive brief on national growth, city gateways and Beijing market signals
+- [The Australia Freight Gap](https://magicengine.com.au/insights/china-australia-freight-gap): executive brief on why China dominates Australian small-seller supply categories yet is nearly invisible in English-language freight search
 
-## Industry solutions
+## Existing specialist pages
 
 - [Industry Solutions](https://magicengine.com.au/industry-solutions): compare purpose-built growth systems by industry and customer journey
 - [Real Estate](https://magicengine.com.au/real-estate): audience growth for agents and brand/project demand for developers
@@ -28,4 +30,4 @@ Magic Engine is operated by Magic Engine AI Technology Limited in New Zealand.
 
 ## Markets and languages
 
-Magic Engine is designed for Australia and New Zealand. Delivery supports English and Chinese-speaking teams.
+Magic Engine's strongest operating context connects China, Australia and New Zealand. Other markets are assessed case by case. The English website is designed for international decision-makers. The Chinese website uses a separate market-specific narrative rather than a direct translation.

@@ -11,6 +11,7 @@
 
 import { supabaseAdmin } from '../../supabase'
 import { getDomainMetrics } from '../../dataforseo/labs'
+import { SEO_WEEKLY_PAID_SOURCE } from '../seo-weekly'
 import { isValidSeoActionType, SEO_METRIC_KEY } from '../vocabulary'
 import { registerAdapter } from './registry'
 import type {
@@ -85,7 +86,7 @@ export class SeoContentAdapter implements FlywheelAdapter {
     const base = {
       clientId,
       flywheel: 'seo' as const,
-      source: 'semrush',
+      source: SEO_WEEKLY_PAID_SOURCE,
       sourceRef: { domain },
       measuredAt: now,
     }
@@ -111,7 +112,7 @@ export class SeoContentAdapter implements FlywheelAdapter {
           flywheel: 'seo',
           metric_key: row.metric_key,
           metric_value: row.metric_value,
-          source: 'semrush',
+          source: SEO_WEEKLY_PAID_SOURCE,
           source_ref: { domain },
           measured_at: now,
         })
@@ -149,11 +150,12 @@ export class SeoContentAdapter implements FlywheelAdapter {
 
     if (toInsert.length === 0) return []
 
-    // Write metrics to DB; log on failure but don't throw — partial data is
-    // better than no data.
+    // A returned row is a claim that it was persisted. Do not swallow a write
+    // failure: callers must record a failed/no-data run rather than reporting
+    // a successful snapshot that is absent from flywheel_metrics.
     const { error } = await supabaseAdmin.from('flywheel_metrics').insert(toInsert)
     if (error) {
-      console.error('[SeoContentAdapter] pullMetrics insert error:', error.message)
+      throw new Error(`SeoContentAdapter.pullMetrics metrics insert error: ${error.message}`)
     }
 
     return returned

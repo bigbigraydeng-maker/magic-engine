@@ -24,7 +24,9 @@
 
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
+import { FACTORY_CONFIG_SECTION } from '@/lib/factory/config-link'
 import { ClientStatusPanel } from './_components/ClientStatusPanel'
+import { YoutubePanel } from './_components/YoutubePanel'
 import { GbpPanel } from './_components/GbpPanel'
 import { GbpLocationPanel } from './_components/GbpLocationPanel'
 import { GscPanel } from './_components/GscPanel'
@@ -37,11 +39,15 @@ import { OtherDataSourcesPanel } from './_components/OtherDataSourcesPanel'
 import { CmsPanel } from '../_components/CmsPanel'
 import { MailboxPanel } from './_components/MailboxPanel'
 import { AdStrategyPanel } from './_components/AdStrategyPanel'
+import { AdOutcomePanel } from './_components/AdOutcomePanel'
+import { QualifiedStagesPanel } from './_components/QualifiedStagesPanel'
 import { CompetitorDomainsPanel } from './_components/CompetitorDomainsPanel'
 import { ReputationIdentityPanel } from './_components/ReputationIdentityPanel'
 import { PrimaryKeywordsPanel } from './_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from './_components/BrandAliasesPanel'
+import { BrandGeoAnchorsPanel } from './_components/BrandGeoAnchorsPanel'
 import { SocialHandlesPanel } from './_components/SocialHandlesPanel'
+import { SocialConnectionsPanel } from './_components/SocialConnectionsPanel'
 import { ApiKeysPanel } from './_components/ApiKeysPanel'
 import { ExcludedTopicsPanel } from './_components/ExcludedTopicsPanel'
 import { WeeklyBlogPanel } from './_components/WeeklyBlogPanel'
@@ -52,10 +58,13 @@ import { UploadLinkPanel } from './_components/UploadLinkPanel'
 import { FactoryConfigPanel } from './_components/FactoryConfigPanel'
 import { CommentAutoReplyPanel } from './_components/CommentAutoReplyPanel'
 import { LeadsConfigPanel } from './_components/LeadsConfigPanel'
+import { MailchimpAudiencePanel } from './_components/MailchimpAudiencePanel'
 import { LeadNotifyEmailsPanel } from './_components/LeadNotifyEmailsPanel'
 import { DomainRulesPanel } from './_components/DomainRulesPanel'
 import { PipelineStagesPanel } from './_components/PipelineStagesPanel'
+import { BookingMembersCard } from '../crm/_components/bookings/BookingMembersCard'
 import { CommentAuditList } from './_components/CommentAuditList'
+import { MessengerEmergencyStopPanel } from './_components/MessengerEmergencyStopPanel'
 import {
   SettingsSection,
   SettingsTabBar,
@@ -75,33 +84,61 @@ const ERROR_MESSAGES: Record<string, string> = {
  * **必须是一个函数、按 tab 分支返回**，不能把五组都渲染出来再用 CSS 藏 ——
  * 藏起来的板块照样会挂载、照样会发请求，那就白改了。
  */
-function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
+/**
+ * 授权/连接回跳时，本来就是来看「成没成」的那一块——默认展开，
+ * 不用先点开才看得到结果（其余板块照旧默认收起，见 SettingsSection）。
+ */
+interface ConnectCallbacks {
+  mail: boolean
+  gbp: boolean
+  oauth: boolean
+  tiktok: boolean
+}
+
+function TabBody({
+  tab,
+  clientId,
+  callbacks,
+  focusSection,
+}: {
+  tab: SettingsTab
+  clientId: string
+  callbacks: ConnectCallbacks
+  /** `?section=` 深链指向的板块 id —— 命中的那块默认展开并滚过去。 */
+  focusSection: string | null
+}) {
   switch (tab) {
     case 'connect':
       return (
         <>
-          <SettingsSection first icon="🚦" title="真客户 / 调研档案">
+          <SettingsSection first icon="📱" title="社媒授权与连接（六个平台）" id="social-connections">
+            <SocialConnectionsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🚦" title="真客户 / 调研档案">
             <ClientStatusPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="✉️" title="公司邮箱（客人发来的信）">
+          <SettingsSection icon="▶️" title="YouTube 频道配置" id="youtube-channel" defaultOpen={focusSection === 'youtube-channel'}>
+            <YoutubePanel clientId={clientId} configurationOnly />
+          </SettingsSection>
+          <SettingsSection icon="✉️" title="公司邮箱（客人发来的信）" defaultOpen={callbacks.mail}>
             <MailboxPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="📍" title="Google Business Profile">
+          <SettingsSection icon="📍" title="Google Business Profile" defaultOpen={callbacks.gbp}>
             <GbpPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🏪" title="发到哪一家门店">
+          <SettingsSection icon="🏪" title="发到哪一家门店" defaultOpen={callbacks.gbp}>
             <GbpLocationPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🔎" title="Google Search Console">
+          <SettingsSection icon="🔎" title="Google Search Console" defaultOpen={callbacks.oauth}>
             <GscPanel clientId={clientId} />
             <div className="mt-3"><GscPropertyPanel clientId={clientId} /></div>
             <div className="mt-3"><DataSnapshotPanel anchor="gsc" clientId={clientId} /></div>
           </SettingsSection>
-          <SettingsSection icon="📈" title="Google Analytics 4">
+          <SettingsSection icon="📈" title="Google Analytics 4" defaultOpen={callbacks.oauth}>
             <Ga4Panel clientId={clientId} />
             <div className="mt-3"><DataSnapshotPanel anchor="ga4" clientId={clientId} /></div>
           </SettingsSection>
-          <SettingsSection icon="📊" title="同步哪一个 GA4 Property">
+          <SettingsSection icon="📊" title="同步哪一个 GA4 Property" defaultOpen={callbacks.oauth}>
             <Ga4PropertyPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="📢" title="Google Ads">
@@ -109,6 +146,8 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
           </SettingsSection>
           <SettingsSection icon="🩺" title="广告健康监测">
             <AdStrategyPanel clientId={clientId} />
+            <div className="mt-3"><AdOutcomePanel clientId={clientId} /></div>
+            <div className="mt-3"><QualifiedStagesPanel clientId={clientId} /></div>
           </SettingsSection>
           <SettingsSection icon="🌐" title="网站连接（GitHub / WordPress / Shopify）">
             <CmsPanel clientId={clientId} />
@@ -134,6 +173,9 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
           <SettingsSection icon="🏷️" title="品牌词别名">
             <BrandAliasesPanel clientId={clientId} />
           </SettingsSection>
+          <SettingsSection icon="📍" title="品牌地域锚点（防同名海外分公司冒领）">
+            <BrandGeoAnchorsPanel clientId={clientId} />
+          </SettingsSection>
           <SettingsSection icon="🥊" title="竞品域名清单">
             <CompetitorDomainsPanel clientId={clientId} />
           </SettingsSection>
@@ -158,6 +200,9 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
           <SettingsSection icon="🤝" title="谁是自己人 / 谁是同行（按邮箱域名认）">
             <DomainRulesPanel clientId={clientId} />
           </SettingsSection>
+          <SettingsSection icon="📮" title="Meta 广告线索送进哪个 Mailchimp 名单">
+            <MailchimpAudiencePanel clientId={clientId} />
+          </SettingsSection>
           <SettingsSection icon="📧" title="邮件反应同步（谁打开了 / 谁点了链接）">
             <LeadsConfigPanel clientId={clientId} />
           </SettingsSection>
@@ -167,19 +212,30 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
           <SettingsSection icon="📤" title="客户素材上传链接（免登录）">
             <UploadLinkPanel clientId={clientId} />
           </SettingsSection>
+          <SettingsSection icon="🔑" title="权限：谁能看订单与付款进度">
+            <BookingMembersCard clientId={clientId} />
+          </SettingsSection>
         </>
       )
 
     case 'content':
       return (
         <>
-          <SettingsSection first icon="📱" title="社媒账号（Instagram · Facebook · TikTok）">
+          <SettingsSection first icon="📱" title="社媒授权与连接（六个平台）" id="social-connections">
+            <SocialConnectionsPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🏷️" title="社媒资料登记（不授予发布权限）" id="social-profiles" defaultOpen={focusSection === 'social-profiles'}>
             <SocialHandlesPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="📝" title="每周自动 Blog（SEO 盯梢）">
             <WeeklyBlogPanel clientId={clientId} />
           </SettingsSection>
-          <SettingsSection icon="🎬" title="视频工厂配置（出片 / 发片）">
+          <SettingsSection
+            icon="🎬"
+            title="视频工厂配置（出片 / 发片）"
+            id={FACTORY_CONFIG_SECTION}
+            defaultOpen={focusSection === FACTORY_CONFIG_SECTION}
+          >
             <FactoryConfigPanel clientId={clientId} />
           </SettingsSection>
           <SettingsSection icon="💬" title="Facebook 评论自动回复">
@@ -193,9 +249,14 @@ function TabBody({ tab, clientId }: { tab: SettingsTab; clientId: string }) {
 
     case 'advanced':
       return (
-        <SettingsSection first icon="🔌" title="MCP API 访问">
-          <ApiKeysPanel clientId={clientId} />
-        </SettingsSection>
+        <>
+          <SettingsSection first icon="🔌" title="MCP API 访问">
+            <ApiKeysPanel clientId={clientId} />
+          </SettingsSection>
+          <SettingsSection icon="🚨" title="AI 客服自动回复 · 紧急全渠道停">
+            <MessengerEmergencyStopPanel clientId={clientId} />
+          </SettingsSection>
+        </>
       )
   }
 }
@@ -211,6 +272,23 @@ export default function ClientSettingsPage() {
   // GSC/GA4 合并授权（/api/auth/google/callback）回跳带的是 ?oauth=，不是
   // ?gbp=——PR5 复审发现这条错误提示之前直接消失了，补上一个通用版本。
   const oauthStatus = searchParams.get('oauth')
+  // 邮箱授权回跳（见 MailboxPanel）——用它来判断该默认展开哪一块，不用来
+  // 渲染横幅（那条横幅在 MailboxPanel 自己里面）。
+  const mailStatus = searchParams.get('mail')
+  const tiktokStatus = searchParams.get('tiktok')
+  const tiktokMessage: Record<string, string> = {
+    connected: 'TikTok 授权已完成。发布视频前请确认目标账号。',
+    denied: 'TikTok 授权已取消，可以重新连接。',
+    bad_state: '本次连接已失效，请从「连接 TikTok」重新开始。',
+    exchange_failed: 'TikTok 授权未完成，请重新连接。',
+    missing_scopes: 'TikTok 没有授予所需权限，请重新连接并允许账号信息和视频发布。',
+    needs_team_check: '这个 TikTok 账号暂时无法连接到当前客户，请联系团队核实后再试。',
+    has_other_account: '该客户已连接另一个 TikTok 账号。如需更换，请联系团队先断开旧授权再重新连接。',
+    save_failed: 'TikTok 授权已完成，但保存失败，请稍后重试。',
+  }
+  // 深链锚点（见 lib/factory/config-link）——驾驶舱的「该客户工厂配置」跳过来时
+  // 直接落在「视频工厂配置」那一块，不用人在「内容与社媒」里自己找。
+  const focusSection = searchParams.get('section')
 
   const errorMessage =
     gbpStatus === 'error' ? (ERROR_MESSAGES[gbpReason] ?? '连接过程中发生未知错误，请重试。') : null
@@ -229,6 +307,12 @@ export default function ClientSettingsPage() {
         </div>
 
         <h1 className="text-2xl font-black text-slate-950">客户配置中心</h1>
+
+        {tiktokStatus && tiktokMessage[tiktokStatus] && (
+          <div role="status" className="mt-5 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-800">
+            {tiktokMessage[tiktokStatus]}
+          </div>
+        )}
 
         {gbpStatus === 'connected' && (
           <div className="mt-5 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
@@ -300,7 +384,12 @@ export default function ClientSettingsPage() {
         <SettingsTabBar active={tab} onPick={pickTab} />
 
         <div className="mt-6">
-          <TabBody tab={tab} clientId={clientId} />
+          <TabBody
+            tab={tab}
+            clientId={clientId}
+            callbacks={{ mail: mailStatus !== null, gbp: gbpStatus !== null, oauth: oauthStatus !== null, tiktok: tiktokStatus !== null }}
+            focusSection={focusSection}
+          />
         </div>
       </div>
     </div>

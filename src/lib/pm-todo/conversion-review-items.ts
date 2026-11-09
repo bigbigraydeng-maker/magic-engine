@@ -1,0 +1,209 @@
+/**
+ * 今日待办里的「成交/咨询待核对」（Issue #1397 PR3）。
+ *
+ * 文案原则（板桥复审的必改项）：
+ *   · 不许出现"回写""CAPI""事件"这类内部说法 —— PM 看不懂按下去会发生什么。
+ *   · 要说清**按了会怎样、不按会损失什么**，而不只是"有一条待处理"。
+ *   · href 直达能动手的那一页，不是 API 地址。
+ *
+ * 这里是**拉**模式：直接查库里待处理的行，不依赖任何事件送达。
+ * 事件丢了、进程崩了，待办照样出得来 —— 管道不许断头。
+ */
+
+import type { SupabaseClient } from '@supabase/supabase-js'
+import type { ManualItem } from './manual-items'
+import { formatMoney } from '@/lib/conversions/money'
+import { isPastEventWindow } from '@/lib/conversions/event-window'
+
+/** 一次最多列这么多，免得某天灌进来几百条把今日待办淹掉。 */
+const MAX_ITEMS = 20
+
+type PendingRow = {
+  id: string
+  client_id: string
+  outcome_kind: 'purchase' | 'balance' | 'lead'
+  customer_first: string | null
+  customer_last: string | null
+  amount_minor: number | null
+  currency: string | null
+  order_ref: string | null
+  occurred_at: string
+}
+
+type DoubtRow = {
+  id: string
+  outcome_id: string
+  me_sale_outcomes: { client_id: string; customer_first: string | null; order_ref: string | null } | null
+}
+
+/** 只露首字母 —— 待办会被截图、会进日志。 */
+function shortName(first: string | null, last: string | null): string {
+  const f = first?.trim()
+  const l = last?.trim()
+  if (f) return `${f[0].toUpperCase()}${l ? ` ${l[0].toUpperCase()}.` : ''} 这位客人`
+  return '这位客人'
+}
+
+function daysAgo(iso: string, now: Date): number {
+  return Math.floor((now.getTime() - new Date(iso).getTime()) / 86_400_000)
+}
+
+export async function pushConversionReviewItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  clientNames: Map<string, { name: string }>,
+  now: Date,
+): Promise<void> {
+  // ── 待核对的成交/咨询 ────────────────────────────────────────────────
+  const { data, error } = await supabase
+    .from('me_sale_outcomes')
+    .select(
+      'id, client_id, outcome_kind, customer_first, customer_last, ' +
+        'amount_minor, currency, order_ref, occurred_at',
+    )
+    .eq('review_status', 'pending_review')
+    .is('redacted_at', null)
+    .order('occurred_at', { ascending: true })
+    .limit(MAX_ITEMS)
+
+  if (error) throw new Error(`成交待核对查询失败: ${error.message}`)
+
+  for (const row of (data ?? []) as unknown as PendingRow[]) {
+    const clientName = clientNames.get(row.client_id)?.name ?? '客户'
+    const who = shortName(row.customer_first, row.customer_last)
+    const age = daysAgo(row.occurred_at, now)
+    // 广告平台只收 7 天内的 —— 快到期的要显眼，过期的别再催人做无用功。
+    // 按精确时间判（不按取整后的天数）：距今 7.3 天也已经发不出去了。
+    const expired = isPastEventWindow(row.occurred_at, now)
+
+    let what: string
+    if (row.outcome_kind === 'lead') {
+      what =
+        `${who}${age === 0 ? '今天' : `${age} 天前`}来问过一次。要把「这是个真实咨询」告诉广告平台吗？` +
+        '告诉后，平台会去找更多像他这样会主动来问的人；不告诉，平台只知道谁点了广告，不知道谁真的开口。'
+    } else {
+      const money = formatMoney(row.amount_minor, row.currency) ?? '一笔款'
+      const kindWord = row.outcome_kind === 'balance' ? '付了尾款' : '付了定金'
+      what =
+        `${who}${kindWord} ${money}${row.order_ref ? `（单号 ${row.order_ref}）` : ''}。` +
+        '要把这笔成交告诉广告平台吗？' +
+        '告诉后，平台会去找更多像他这样真会掏钱的人，同样的预算能带回更多真客户；' +
+        '不告诉，平台会继续找那些爱填表但不付钱的人。'
+    }
+
+    if (expired) {
+      what += ` ⚠️ 这条已经过去 ${age} 天，广告平台只收 7 天内的 —— 现在告诉它也收不进去了，可以直接选「不发送」。`
+    }
+
+    items.push({
+      kind: 'conversion_needs_review',
+      client_name: clientName,
+      client_id: row.client_id,
+      what,
+      how: expired
+        ? '打开页面，在这条上点「不发送」并选原因「超过时限」即可。'
+        : '打开页面，看一眼客人和金额对不对，对就点「告诉广告平台」（会再确认一次），不对就点「不发送」并选个原因。',
+      // 🔴 必须是绝对网址。相对路径会被 dropBrokenLinks 静默丢掉
+      //    （同 `cross_client_leak` 那次事故，见 manual-items.ts:1540）。
+      href: `https://app.magicengine.com.au/dashboard/conversions?client=${row.client_id}&focus=${row.id}`,
+    })
+  }
+
+  // ── 发出去了但不知道对方收没收 ──────────────────────────────────────
+  // 这一档程序绝不会自己重发 —— 重发一次就是永久多记一笔成交，撤不回。
+  const { data: doubts, error: doubtErr } = await supabase
+    .from('me_conversion_writebacks')
+    .select('id, outcome_id, me_sale_outcomes(client_id, customer_first, order_ref)')
+    .eq('status', 'in_doubt')
+    .limit(MAX_ITEMS)
+
+  if (doubtErr) throw new Error(`不确定状态查询失败: ${doubtErr.message}`)
+
+  for (const row of (doubts ?? []) as unknown as DoubtRow[]) {
+    const outcome = row.me_sale_outcomes
+    if (!outcome) continue
+    const clientName = clientNames.get(outcome.client_id)?.name ?? '客户'
+
+    items.push({
+      kind: 'conversion_send_in_doubt',
+      client_name: clientName,
+      client_id: outcome.client_id,
+      what:
+        `有一笔成交${outcome.order_ref ? `（单号 ${outcome.order_ref}）` : ''}发给广告平台时断线了，` +
+        '不确定对方收到没有。系统**不会**自己重发 —— 万一对方其实收到了，重发就等于把同一笔算成两笔，而且撤不回。',
+      how:
+        '去广告平台后台的事件管理页看一眼这笔在不在：' +
+        '在，就点「已确认收到」；不在，就点「重新发送」。',
+      // 🔴 必须是绝对网址（见上面同类注释）。
+      // 带上 focus=<outcome_id> —— 同客户多条 in_doubt 时，光滚到 "需要你动手"
+      // 区块不够，PM 分不清邮件说的是哪一笔。page.tsx 的 focus effect 会用这个
+      // id 定位到具体卡片，找不到就静默不动（stuck 空表面上说明已处理完）。
+      href: `https://app.magicengine.com.au/dashboard/conversions?client=${outcome.client_id}&focus=${row.outcome_id}&status=in_doubt`,
+    })
+  }
+
+  await pushTokenDeadItems(supabase, items, clientNames, now)
+}
+
+type AuthFailedRow = {
+  id: string
+  outcome_id: string
+  me_sale_outcomes: { client_id: string; occurred_at: string; review_status: string; redacted_at: string | null } | null
+}
+
+/**
+ * 已批准、但因**授权失效**发不出去的成交/咨询——按客户合并成一条「需要你动手」。
+ *
+ * 2026-09-22 起授权失败不再永久作废，而是等令牌修好后由 `writeback-resend-run.ts`
+ * 每天自动补发；但「令牌还没修好」这件事之前只写在 cron summary 里，PM 看不见，
+ * CTS 19 条就是这样静静过了 7 天窗口的（子牙复审 M2：发现不许死在日志里）。
+ * 这里是拉模式：直接查库，不依赖补发步骤有没有跑。
+ */
+async function pushTokenDeadItems(
+  supabase: SupabaseClient,
+  items: ManualItem[],
+  clientNames: Map<string, { name: string }>,
+  now: Date,
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('me_conversion_writebacks')
+    .select('id, outcome_id, me_sale_outcomes(client_id, occurred_at, review_status, redacted_at)')
+    .eq('status', 'failed')
+    .eq('last_error_code', 'auth')
+    .limit(200)
+
+  if (error) throw new Error(`授权失效待补发查询失败: ${error.message}`)
+
+  const byClient = new Map<string, { count: number; oldestOccurredAt: string }>()
+  for (const row of (data ?? []) as unknown as AuthFailedRow[]) {
+    const o = row.me_sale_outcomes
+    if (!o || o.review_status !== 'approved' || o.redacted_at) continue
+    // 已经过了 7 天的补发步骤会自己判过期，这里只催还救得回来的。
+    if (isPastEventWindow(o.occurred_at, now)) continue
+    const cur = byClient.get(o.client_id)
+    if (!cur) byClient.set(o.client_id, { count: 1, oldestOccurredAt: o.occurred_at })
+    else {
+      cur.count++
+      if (o.occurred_at < cur.oldestOccurredAt) cur.oldestOccurredAt = o.occurred_at
+    }
+  }
+
+  for (const [clientId, agg] of byClient) {
+    const clientName = clientNames.get(clientId)?.name ?? '客户'
+    const daysLeft = Math.max(0, 7 - daysAgo(agg.oldestOccurredAt, now))
+    items.push({
+      kind: 'conversion_capi_token_dead',
+      client_name: clientName,
+      client_id: clientId,
+      what:
+        `有 ${agg.count} 条已经批准的成交/咨询发不到广告平台：连接广告平台的授权失效了。` +
+        `最早的一条再过 ${daysLeft} 天就超过平台只收 7 天内的限制，到时候这些就永久丢了，` +
+        '广告平台会继续找不对的人。',
+      how:
+        '重新连接一次这个客户的广告平台授权（跟上次令牌过期时同一个步骤）。' +
+        '连好之后不用手动补发——系统每天早上会自动把还在 7 天内的补发出去，看板上这些条目会自己消失。',
+      // 🔴 必须是绝对网址（见上面同类注释）。
+      href: `https://app.magicengine.com.au/dashboard/conversions?client=${clientId}&status=failed`,
+    })
+  }
+}

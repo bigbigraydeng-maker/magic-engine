@@ -602,7 +602,7 @@ export function SocialPlanSection({ clientId, campaignId, campaignName, mode = '
       {/* Results */}
       {plan && (
         isTaskMode ? (
-          /* ── Task mode: single card + Launch Hub ───────────────────────────── */
+          /* ── Task mode: single card + 内容日历 ───────────────────────────── */
           <div className="space-y-4 px-4 py-4 sm:px-5">
             {taskKind === 'social_post' && plan.posts[0] && (
               <PostCard
@@ -807,8 +807,8 @@ function SaveToBoardBar({
       {isSuccess && (
         <span className="text-xs font-semibold text-cyan-800">
           Saved {savedCount} {label}.
-          <a href={`/dashboard/content?client=${clientId}`} className="underline font-medium ml-1">
-            Open content board
+          <a href={`/dashboard/clients/${clientId}/daily-plan`} className="underline font-medium ml-1">
+            Open daily plan
           </a>
         </span>
       )}
@@ -1886,8 +1886,8 @@ function StoryCard({ index, story, clientId, launchHubPlatform, onGenStart, onGe
 }
 
 // ─── LaunchHubScheduler ────────────────────────────────────────────────────────
-// 车间交付按钮：把内容作为 draft 写入 content_posts，交给 Launch Hub 审核发布。
-// 不在车间排期——排期是市场（Launch Hub）的职责。
+// 车间交付按钮：把内容作为 draft 写入 content_posts，交给内容日历审核发布。
+// 不在车间排期——排期是内容日历的职责。
 //
 // States: idle → sending → sent
 
@@ -1917,7 +1917,7 @@ function LaunchHubScheduler({
     setSending(true)
     setErrorMsg(null)
     try {
-      const res = await fetch('/api/publer/quick-post', {
+      const res = await fetch('/api/content/quick-post', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1944,8 +1944,8 @@ function LaunchHubScheduler({
   if (sent) {
     return (
       <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2.5 space-y-1">
-        <p className="text-xs font-black text-green-700">✅ 已交付 Launch Hub（草稿待审核）</p>
-        <p className="text-[10px] text-green-600">前往 Launch Hub 审核后安排发布到 {platformLabel}</p>
+        <p className="text-xs font-black text-green-700">✅ 已交付内容日历（草稿待审核）</p>
+        <p className="text-[10px] text-green-600">前往内容日历审核后安排发布到 {platformLabel}</p>
       </div>
     )
   }
@@ -1991,7 +1991,7 @@ function LaunchHubScheduler({
       >
         {sending
           ? <><span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-400 border-t-slate-800" />交付中…</>
-          : <>🚀 交付到 Launch Hub<span className="ml-auto text-[10px] font-semibold text-slate-400">{platformLabel} · 草稿</span></>
+          : <>🚀 交付到内容日历<span className="ml-auto text-[10px] font-semibold text-slate-400">{platformLabel} · 草稿</span></>
         }
       </button>
     </div>

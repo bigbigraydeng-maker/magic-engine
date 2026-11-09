@@ -6,6 +6,21 @@ import { GENERATION_CONFIG } from '@/lib/visual/generation-config'
 // Mock global fetch
 global.fetch = vi.fn()
 
+// jsdom ≥ 27 no longer provides window.localStorage; the hook persists queue
+// state there on every change, so install a minimal in-memory Storage.
+function createMemoryStorage(): Storage {
+  let store = new Map<string, string>()
+  return {
+    get length() { return store.size },
+    clear: () => { store = new Map() },
+    getItem: (key: string) => store.get(key) ?? null,
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    removeItem: (key: string) => { store.delete(key) },
+    setItem: (key: string, value: string) => { store.set(key, String(value)) },
+  }
+}
+vi.stubGlobal('localStorage', createMemoryStorage())
+
 describe('useGenerationQueue - 1Hz Local Smoothing (P9.0.7)', () => {
   beforeEach(() => {
     vi.useFakeTimers()

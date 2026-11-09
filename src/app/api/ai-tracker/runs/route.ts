@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabaseAdmin
       .from('ai_visibility_runs')
       .select(
-        'id, query_id, ai_engine, ai_model, brands_mentioned, client_brand_rank, tokens_used, cost_usd, latency_ms, error_message, ran_at'
+        'id, query_id, ai_engine, ai_model, brands_mentioned, client_brand_rank, tokens_used, cost_usd, latency_ms, error_message, parse_error_message, ran_at'
       )
       .eq('client_id', clientId)
       .order('ran_at', { ascending: false })

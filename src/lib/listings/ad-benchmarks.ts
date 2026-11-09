@@ -146,8 +146,11 @@ export function summariseInsights(rows: AdInsightRow[]): {
     impressions += num(r.impressions)
     clicks += num(r.clicks)
     // 表单 lead 和私信对话都算「有人举手了」。地产这条线目前跑的是私信目标，
-    // 两个都加是为了将来换成表单目标时分母的含义不变。
-    conversations += num(r.leads) + num(r.messaging_conversations)
+    // 未来换成表单目标时分母含义仍要不变。
+    // 用 max 而不是 +：Lead Form 广告如果开了 Messenger 自动回复，Meta 会
+    // 把同一个人算成一个 lead + 一个 messaging_conversation（CTS 2026-09-06
+    // 事故），简单相加 2× 双算。见 meta/client.ts parseDailyMetrics 的说明。
+    conversations += Math.max(num(r.leads), num(r.messaging_conversations))
   }
 
   return { spend, conversations, impressions, clicks, ads: ads.size, days: days.size }

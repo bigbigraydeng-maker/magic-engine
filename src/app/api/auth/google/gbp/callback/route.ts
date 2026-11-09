@@ -20,16 +20,12 @@
 
 import { type NextRequest, NextResponse } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
-import { supabaseAdmin } from '@/lib/supabase'
-import { encryptToken } from '@/lib/platform-oauth/vocabulary'
-import { resolveGbpLocation } from '@/lib/gbp/location'
-import { GBP_STATE_COOKIE } from '../start/route'
+import { GBP_STATE_COOKIE } from '@/lib/gbp/oauth'
+import { persistGbpFromTokens } from '@/lib/gbp/oauth-persist'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
-const GBP_ACCOUNTS_URL = 'https://mybusinessaccountmanagement.googleapis.com/v1/accounts'
-const GBP_SCOPE        = 'https://www.googleapis.com/auth/business.manage'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -131,112 +127,22 @@ export async function GET(req: NextRequest) {
   const tokenScope = (tokenData as { scope?: string }).scope ?? '(missing)'
   console.log('[gbp/callback] token granted with scope:', tokenScope)
 
-  // ── 6. Fetch GBP account info ─────────────────────────────────────────────
-  const accountsRes = await fetch(GBP_ACCOUNTS_URL, {
-    headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
+  // ── 6-7. 拉账号 + 落库 + 解析门店 —— 全部走共享 helper（合并流也走它）─────
+  const persist = await persistGbpFromTokens({
+    clientId,
+    accessToken:  tokenData.access_token,
+    refreshToken: tokenData.refresh_token,
+    expiresInSec: tokenData.expires_in ?? 3600,
+    scope:        tokenScope,
   })
 
-  if (!accountsRes.ok) {
-    // Capture status + body so we can distinguish:
-    //   403 → user not in Test users, or business.manage scope missing
-    //   429 → quota
-    //   404 → API not enabled in this GCP project
-    const errorBody = await accountsRes.text().catch(() => '(unreadable)')
-    console.error('[gbp/callback] GBP accounts API failed:', {
-      status:     accountsRes.status,
-      statusText: accountsRes.statusText,
-      body:       errorBody.slice(0, 500),
-      scope:      tokenScope,
-    })
-    return errorRedirect(appUrl, clientId, flow, 'gbp_api_failed')
-  }
-
-  const accountsData = (await accountsRes.json()) as {
-    accounts?: Array<{ name: string; accountName: string }>
-  }
-
-  const accounts = accountsData.accounts ?? []
-  if (accounts.length === 0) {
-    console.warn('[gbp/callback] no GBP accounts under this Google user')
-    return errorRedirect(appUrl, clientId, flow, 'no_gbp_accounts')
-  }
-
-  const gbpAccount = accounts[0]   // MVP: connect first account (location picker in Phase 24.A.7)
-
-  // ── 7. Encrypt + upsert platform_oauth_connections ───────────────────────
-  const expiresAt = new Date(Date.now() + (tokenData.expires_in ?? 3600) * 1000)
-
-  const { error: dbError } = await supabaseAdmin
-    .from('platform_oauth_connections')
-    .upsert(
-      {
-        client_id:         clientId,
-        provider:          'google_gbp',
-        access_token_enc:  encryptToken(tokenData.access_token),
-        refresh_token_enc: encryptToken(tokenData.refresh_token),
-        token_expiry:      expiresAt.toISOString(),
-        account_id:        gbpAccount.name,
-        display_name:      gbpAccount.accountName,
-        scopes:            [GBP_SCOPE],
-        status:            'active',
-      },
-      { onConflict: 'client_id,provider,account_id' },
-    )
-
-  if (dbError) {
-    // Non-fatal for now: log and continue — user can reconnect from settings
-    console.error('[gbp/callback] Failed to persist connection:', dbError.message)
-  } else {
-    // 向导 Step 3 判断"GBP 已连接"读的是 client_connectors，不是
-    // platform_oauth_connections——这条一直没写，此前没暴露是因为向导从没
-    // 接入真实注册流程，客户走不到这里（2026-08-11 复审发现，见 spec §2.2）。
-    const now = new Date().toISOString()
-    await supabaseAdmin
-      .from('client_connectors')
-      .upsert(
-        {
-          client_id:    clientId,
-          anchor:       'gbp',
-          status:       'connected',
-          config:       { account_name: gbpAccount.accountName },
-          connected_at: now,
-          updated_at:   now,
-        },
-        { onConflict: 'client_id,anchor' },
-      )
-  }
-
-  // ── 7b. Resolve which location posts go to, while we're here ─────────────
-  // PM asked for a genuine one-click setup: without this the location stays
-  // unresolved and the first weekly post would be the one to discover a
-  // problem. Failure is non-fatal — the connection itself is good, we just
-  // flag that a location still needs picking.
-  // Default to "not confirmed": telling the PM it is ready when we do not
-  // know is the one outcome that must never happen (魏征 🟡5).
-  let locationStatus: 'ready' | 'needs_location' = 'needs_location'
-  try {
-    const { data: clientRow } = await supabaseAdmin
-      .from('clients')
-      .select('id, name, domain')
-      .eq('id', clientId)
-      .single()
-
-    if (clientRow) {
-      const resolved = await resolveGbpLocation(
-        clientRow as { id: string; name: string; domain: string | null },
-      )
-      if (resolved.ok) locationStatus = 'ready'
-      else console.warn('[gbp/callback] location unresolved:', resolved.reason)
-    } else {
-      console.warn('[gbp/callback] client row unreadable — leaving location unconfirmed')
-    }
-  } catch (err) {
-    console.warn('[gbp/callback] location resolution failed:', err instanceof Error ? err.message : err)
+  if (!persist.ok) {
+    return errorRedirect(appUrl, clientId, flow, persist.reason ?? 'gbp_api_failed')
   }
 
   // ── 8. Clear CSRF cookie + redirect to success ────────────────────────────
   const successUrl = buildDestinationUrl(appUrl, clientId, flow)
-  successUrl.searchParams.set('gbp', locationStatus === 'ready' ? 'connected' : 'needs_location')
+  successUrl.searchParams.set('gbp', persist.locationStatus === 'ready' ? 'connected' : 'needs_location')
 
   const response = NextResponse.redirect(successUrl.toString(), 302)
   response.headers.append(

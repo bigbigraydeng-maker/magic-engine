@@ -1,430 +1,93 @@
-﻿<!DOCTYPE html>
-<html lang="zh">
+<!doctype html>
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="facebook-domain-verification" content="o3eut05f26ow89p225dihdmxeai483" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>为澳新企业做 AI 升级。 | Magic Engine</title>
-  <meta name="description" content="Magic Engine 帮助英语和中文团队把 SEO、GEO、培训和上线执行放在一个地方。">
-  <meta property="og:title" content="为澳新企业做 AI 升级。 | Magic Engine">
-  <meta property="og:description" content="Magic Engine 帮助英语和中文团队把 SEO、GEO、培训和上线执行放在一个地方。">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Magic Engine｜在下一个市场找到客户</title>
+  <meta name="description" content="Magic Engine 帮助中国品牌出海、海外华人企业进入主流市场，以及成熟品牌进入下一个国家。提供市场研究、本地化内容、网站改进与数字营销服务。">
+  <meta property="og:title" content="Magic Engine｜在下一个市场找到客户">
+  <meta property="og:description" content="市场研究、本地化内容、网站改进与数字营销。先约定交付范围，再检查实际效果。">
   <meta property="og:type" content="website">
-  <meta property="og:site_name" content="Magic Engine">
   <meta property="og:url" content="https://magicengine.com.au/cn/">
-  <meta property="og:image" content="https://magicengine.com.au/assets/og-card.svg">
-  <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="为澳新企业做 AI 升级。 | Magic Engine">
-  <meta name="twitter:description" content="Magic Engine 帮助英语和中文团队把 SEO、GEO、培训和上线执行放在一个地方。">
+  <meta property="og:image" content="https://magicengine.com.au/assets/og-card.png">
   <link rel="canonical" href="https://magicengine.com.au/cn/">
-  <link rel="alternate" hreflang="zh-Hans" href="https://magicengine.com.au/cn/">
   <link rel="alternate" hreflang="en" href="https://magicengine.com.au/">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="alternate" hreflang="zh-Hans" href="https://magicengine.com.au/cn/">
   <link rel="icon" href="/assets/favicon.svg?v=20260602" type="image/svg+xml">
+  <link rel="stylesheet" href="/next-market.css">
+  <script src="/next-market.js" defer></script>
+<link rel="stylesheet" href="/experience.css">
+<script src="/experience.js" defer></script>
 </head>
-<body>
-
-<!-- ── Navigation ── -->
-<nav class="nav">
-  <div class="container">
-    <div class="nav-inner">
-      <a href="/cn/" class="nav-logo">
-        <svg width="28" height="26" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-          <defs>
-            <linearGradient id="meGrad_cn_index_1" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#EBCB8B"/><stop offset="0.55" stop-color="#C4912E"/><stop offset="1" stop-color="#A6781F"/>
-            </linearGradient>
-            <radialGradient id="meNode_cn_index_1" cx="0.5" cy="0.5" r="0.5">
-              <stop offset="0" stop-color="#FFFFFF"/><stop offset="0.45" stop-color="#FBEFD2"/><stop offset="1" stop-color="#EBCB8B"/>
-            </radialGradient>
-          </defs>
-          <rect width="100" height="100" rx="22" fill="#0D0D0D"/>
-          <g stroke="url(#meGrad_cn_index_1)" fill="none" stroke-linecap="round" stroke-width="5.5">
-            <path d="M14,24 C38,30 56,44 78,52"/>
-            <path d="M14,36 C38,40 56,46 78,52"/>
-            <path d="M14,48 C40,50 56,50 78,52"/>
-            <path d="M14,60 C40,58 56,56 78,52"/>
-            <path d="M14,72 C38,66 56,60 78,52"/>
-          </g>
-          <g fill="url(#meGrad_cn_index_1)">
-            <circle cx="14" cy="24" r="3.5"/><circle cx="14" cy="36" r="3.5"/><circle cx="14" cy="48" r="3.5"/><circle cx="14" cy="60" r="3.5"/><circle cx="14" cy="72" r="3.5"/>
-          </g>
-          <rect x="69" y="41" width="20" height="20" rx="5" fill="url(#meNode_cn_index_1)"/>
-        </svg>
-        <span data-en="Magic Engine" data-zh="魔力引擎">魔力引擎</span>
-      </a>
-      <ul class="nav-links">
-        <li><a href="/cn/discover" data-en="Free Discovery" data-zh="免费探查">免费探查</a></li>
-        <li><a href="/cn/geo" data-en="GEO" data-zh="GEO">GEO</a></li>
-        <li><a href="/cn/training" data-en="Training" data-zh="培训">培训</a></li>
-        <li><a href="/cn/about" data-en="About" data-zh="关于">关于</a></li>
-      </ul>
-      <div class="nav-actions">
-        <button class="btn-lang" id="lang-toggle" onclick="toggleLang()" aria-label="Switch language">中文</button>
-        <a href="/cn/discover" class="btn-register" data-en="Get diagnosis" data-zh="开始诊断">开始诊断</a>
-        <a href="https://app.magicengine.com.au/portal/login" class="btn-portal" data-en="Client portal" data-zh="客户入口">客户入口</a>
-      </div>
+<body class="nm-site">
+  <header class="nm-nav">
+    <div class="nm-shell nm-nav-inner">
+      <a class="nm-brand" href="/cn/" aria-label="Magic Engine 中文首页"><img src="/assets/favicon.svg" alt=""><span>Magic Engine</span></a>
+      <nav class="nm-desktop-nav" aria-label="中文导航"><ul class="nm-links"><li><a href="/cn/lab/">免费工具</a></li><li><a href="#clients">我们服务谁</a></li><li><a href="#system">怎么做</a></li><li><a href="#client-work">客户实践</a></li><li><a href="#founder">创始人</a></li><li><a href="/insights/">Magic Insight</a></li><li><a href="/blog/">Articles</a></li></ul></nav>
+      <div class="nm-nav-actions"><a class="nm-nav-portal" href="/">English</a><a class="nm-btn nm-btn-primary nm-btn-small" href="mailto:hello@magicengine.cloud?subject=Project%20enquiry">咨询项目合作</a></div>
+      <details class="nm-mobile"><summary aria-label="打开导航">菜单</summary><nav class="nm-mobile-panel"><a href="/cn/lab/">免费工具</a><a href="#clients">我们服务谁</a><a href="#system">怎么做</a><a href="#founder">创始人</a><a href="/insights/">Magic Insight</a><a href="/blog/">Articles</a><a href="mailto:hello@magicengine.cloud?subject=Project%20enquiry">咨询项目合作</a><a href="/">English</a></nav></details>
     </div>
-  </div>
-</nav>
+  </header>
 
-<!-- ── Hero ── -->
-<section class="hero">
-  <div class="container">
-    <div class="hero-badge" data-en="AU/NZ · Bilingual · GEO ready" data-zh="AU/NZ · 双语 · GEO 就绪">AU/NZ · 双语 · GEO 就绪</div>
-    <h1 class="serif" data-en="AI upgrades for AU/NZ businesses." data-zh="为澳新企业做 AI 升级。">为澳新企业做 AI 升级。</h1>
-    <p class="hero-sub" data-en="Magic Engine helps English and Chinese-speaking teams improve SEO, GEO, training, and launch-ready execution in one place." data-zh="Magic Engine 帮助英语和中文团队把 SEO、GEO、培训和上线执行放在一个地方。">Magic Engine 帮助英语和中文团队把 SEO、GEO、培训和上线执行放在一个地方。</p>
+  <main>
+    <section class="nm-cn-hero">
+      <div class="nm-shell nm-hero-grid"><div class="nm-hero-copy">
+        <span class="nm-eyebrow">市场研究 · 本地化内容 · 数字营销</span>
+        <h1>在下一个市场，找到你的客户。</h1>
+        <p class="nm-lead">我们帮助已有经营基础的企业，为新市场调整品牌表达、网站和数字营销。先约定要解决的问题，再交付具体改动，最后一起检查效果。</p>
+        <div class="nm-actions" style="margin-top:34px"><a class="nm-btn nm-btn-primary" href="mailto:hello@magicengine.cloud?subject=Project%20enquiry">咨询项目合作 →</a><a class="nm-btn nm-btn-ghost" href="#clients">看看是否适合你</a></div>
+        <div class="nm-trustline"><span>中国与澳新双重商业语境</span><span>品牌、电商与增长经验</span><span>AI 辅助研究、内容和分析</span></div>
+      </div><figure class="me-production"><div class="me-production-top"><span><i aria-hidden="true"></i> ME 演示工作台</span><span class="me-production-tag">虚拟客户</span></div><div class="me-production-screen"><img src="/assets/me-production-walkthrough.gif" width="960" height="660" alt="Magic Engine 演示工作台操作动画"></div><figcaption><strong>看看 ME 如何把市场信号变成下一步行动。</strong><span>Harbourline Physio 是虚拟客户，不连接客户系统，也不使用私有数据。</span><a href="/demo/">进入演示工作台 →</a></figcaption></figure></div>
+    </section>
+<section class="nm-section-sm nm-section-warm" aria-labelledby="lab-entry-heading"><div class="nm-shell nm-reading"><span class="nm-eyebrow">Magic Engine 工具实验室</span><h2 id="lab-entry-heading">先免费看清你的广告钱花得值不值。</h2><p>Facebook 广告体检：连上广告账户，AI 用中文告诉你哪条广告该留、哪条该停。只看不改，免费。适合在国内往海外投广告的外贸企业，也适合在澳洲、新西兰做生意的华人老板。</p><div class="nm-actions" style="margin-top:24px"><a class="nm-btn nm-btn-primary" href="/cn/meta-ads-ai/">去体检 →</a><a class="nm-btn nm-btn-ghost" href="/cn/lab/">看看全部免费工具</a></div></div></section>
+<section class="me-capabilities" aria-labelledby="capabilities-heading"><div class="nm-shell"><div class="me-capabilities-heading"><div><span class="nm-eyebrow">探索 MAGIC ENGINE</span><h2 id="capabilities-heading">三个关键信号，形成一个清晰的增长判断。</h2></div><p>直接进入虚拟客户工作台，看看 ME 如何把分散的平台数据，变成老板能够理解和执行的下一步。</p></div><div class="me-capability-grid"><a class="me-capability me-capability-ads" href="/demo/#ads"><div class="me-capability-top"><span>付费增长</span><span>打开演示 ↗</span></div><h3>广告智能</h3><p>把广告花费连接到有效线索，对比渠道效率，并审批下一次测试。</p><div class="me-capability-metric"><strong>$32.21</strong><span>每条有效线索成本</span><em>↓ 11%</em></div><div class="me-capability-channels"><span>Google</span><span>Meta</span><span>TikTok</span></div></a><a class="me-capability me-capability-social" href="/demo/#social"><div class="me-capability-top"><span>品牌提升</span><span>打开演示 ↗</span></div><h3>社媒增长</h3><p>查看发布节奏、有效互动，以及社媒注意力是否正在形成品牌需求。</p><div class="me-capability-metric"><strong>18.7K</strong><span>本周触达人数</span><em>↑ 23%</em></div><div class="me-capability-channels"><span>触达</span><span>观看</span><span>品牌搜索</span></div></a><a class="me-capability me-capability-competitors" href="/demo/#competitors"><div class="me-capability-top"><span>市场信号</span><span>打开演示 ↗</span></div><h3>竞品情报</h3><p>追踪搜索份额、竞争对手动作，以及现在最值得抢占的市场机会。</p><div class="me-capability-metric"><strong>38%</strong><span>重点搜索份额</span><em>监控 4 家</em></div><div class="me-capability-channels"><span>搜索</span><span>内容</span><span>评价</span></div></a></div><p class="me-capabilities-note">虚拟演示数据 · 不连接任何客户系统</p></div></section>
+<section class="me-ecosystem" aria-labelledby="ecosystem-heading"><div class="nm-shell"><div class="me-ecosystem-heading"><span class="nm-eyebrow">营销与网站生态</span><h2 id="ecosystem-heading">围绕客户所在的平台，开展增长工作。</h2></div><ul class="me-platforms"><li class="me-platform"><img src="/assets/ecosystem/meta.svg" width="28" height="28" alt=""><span>Meta</span></li><li class="me-platform"><img src="/assets/ecosystem/facebook.svg" width="28" height="28" alt=""><span>Facebook</span></li><li class="me-platform"><img src="/assets/ecosystem/instagram.svg" width="28" height="28" alt=""><span>Instagram</span></li><li class="me-platform"><img src="/assets/ecosystem/google.svg" width="28" height="28" alt=""><span>Google</span></li><li class="me-platform"><img src="/assets/ecosystem/youtube.svg" width="28" height="28" alt=""><span>YouTube</span></li><li class="me-platform"><img src="/assets/ecosystem/tiktok.svg" width="28" height="28" alt=""><span>TikTok</span></li><li class="me-platform"><img src="/assets/ecosystem/reddit.svg" width="28" height="28" alt=""><span>Reddit</span></li><li class="me-platform"><img src="/assets/ecosystem/shopify.svg" width="28" height="28" alt=""><span>Shopify</span></li><li class="me-platform"><img src="/assets/ecosystem/wordpress.svg" width="28" height="28" alt=""><span>WordPress</span></li></ul><p class="me-ecosystem-note">各平台的支持范围按项目确认。Logo 用于标识相关平台，不代表官方合作或认证。</p></div></section>
 
-    <!-- Inline URL form -->
-    <form id="hero-url-form">
-      <div class="url-bar">
-        <input type="text" id="hero-url-input" placeholder="yourwebsite.com.au" autocomplete="off"
-               data-en="yourwebsite.com.au" data-zh="yourwebsite.com.au" aria-label="Your website URL">
-        <button type="submit" class="btn-primary" data-en="Get free diagnosis →" data-zh="开始免费诊断 →">开始免费诊断 →</button>
-      </div>
-    </form>
-    <p class="url-hint" data-en="Need GEO, training, or paid media instead? Start with diagnosis, or go straight to the new pages." data-zh="如果你更需要 GEO、培训或广告投放，也可以先做诊断，或直接进入新页面。">Need GEO, training, or paid media instead? <a href="/cn/discover" style="color:var(--gold-dark);text-decoration:underline;text-decoration-color:rgba(190,138,46,.4)">Start with diagnosis</a>, or go straight to the new pages.</p>
-
-    <!-- Secondary CTA -->
-    <div class="hero-ctas" style="margin-top:24px;margin-bottom:0;">
-      <a href="/cn/geo" class="btn-secondary" data-en="Explore GEO" data-zh="查看 GEO">查看 GEO</a>
-      <a href="/cn/training" class="btn-secondary" data-en="Explore training" data-zh="查看培训">查看培训</a>
-      <a href="/cn/ads" class="btn-secondary" data-en="Start ads launch" data-zh="开始广告投放">开始广告投放</a>
-    </div>
-  </div>
-</section>
-
-<div class="divider"></div>
-
-<!-- ── What it does ── -->
-<section>
-  <div class="container">
-    <div class="center">
-      <div class="section-label" data-en="How we help" data-zh="我们怎么帮">我们怎么帮</div>
-      <h2 class="serif section-heading" data-en="Diagnose. Execute. Prove." data-zh="先诊断，再执行，再证明。">先诊断，再执行，再证明。</h2>
-      <p class="section-sub" data-en="Built for AU/NZ teams that need AI upgrade, GEO, training, and a clear next step." data-zh="为需要 AI 升级、GEO、培训和明确下一步的澳新团队而建。">为需要 AI 升级、GEO、培训和明确下一步的澳新团队而建。</p>
-    </div>
-    <div class="three-grid">
-      <div class="card">
-        <div class="card-icon ci-gold" aria-hidden="true">🔍</div>
-        <h3 data-en="Diagnose" data-zh="诊断">诊断</h3>
-        <p data-en="Score SEO, GEO, social, ads, reputation, and competitor signals for AU/NZ businesses without overcomplicating the stack." data-zh="为澳新企业评分 SEO、GEO、社媒、广告、口碑和竞品信号，同时不把系统做复杂。">为澳新企业评分 SEO、GEO、社媒、广告、口碑和竞品信号，同时不把系统做复杂。</p>
-      </div>
-      <div class="card">
-        <div class="card-icon ci-green" aria-hidden="true">🔧</div>
-        <h3 data-en="Execute" data-zh="执行">执行</h3>
-        <p data-en="Turn findings into website fixes, bilingual updates, training tasks, social assets, and ad decisions customers can approve." data-zh="把发现转化为网站修复、双语更新、培训任务、社媒素材和可审批的广告决策。">把发现转化为网站修复、双语更新、培训任务、社媒素材和可审批的广告决策。</p>
-      </div>
-      <div class="card">
-        <div class="card-icon ci-ink" aria-hidden="true">📈</div>
-        <h3 data-en="Prove" data-zh="证明">证明</h3>
-        <p data-en="Bring outcomes back into one portal your team can actually use for approvals, reports, and next-step decisions." data-zh="把结果带回一个团队真正会用的门户，用于审批、报告和下一步决策。">把结果带回一个团队真正会用的门户，用于审批、报告和下一步决策。</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<div class="divider"></div>
-
-<!-- ── GEO / AI visibility hook ── -->
-<section style="background:var(--paper-dim);">
-  <div class="container">
-    <div class="local-grid">
-      <div>
-        <div class="section-label" data-en="GEO / AI visibility" data-zh="GEO / AI 可见度">GEO / AI 可见度</div>
-        <h2 class="serif section-heading" data-en="Make the right pages easier for Google and AI to understand." data-zh="让 Google 和 AI 更容易看懂正确的页面。">让 Google 和 AI 更容易看懂正确的页面。</h2>
-        <p class="section-sub" style="margin-bottom:24px;" data-en="GEO helps your homepage, service pages, training pages, and contact flow stay readable for search engines and answer engines. The goal is not more pages — it is clearer signal." data-zh="GEO 让你的首页、服务页、培训页和联系路径更容易被搜索引擎和答案引擎读懂。目标不是更多页面，而是更清晰的信号。">GEO 让你的首页、服务页、培训页和联系路径更容易被搜索引擎和答案引擎读懂。目标不是更多页面，而是更清晰的信号。</p>
-        <p class="muted small" style="margin-bottom:32px;" data-en="Bilingual English and Chinese messaging, AU/NZ context, and a simple next step keep the surface practical." data-zh="中英双语、澳新语境和简单下一步，让公开页面更实用。">中英双语、澳新语境和简单下一步，让公开页面更实用。</p>
-        <div class="hero-ctas" style="margin-top:0;">
-          <a href="/cn/geo" class="btn-primary" data-en="Explore GEO →" data-zh="查看 GEO →">查看 GEO →</a>
-          <a href="/cn/ai-search" class="btn-secondary" data-en="Open AI search →" data-zh="打开 AI 搜索 →">打开 AI 搜索 →</a>
+    <section class="nm-section nm-section-dark" id="clients">
+      <div class="nm-shell">
+        <div class="nm-reading"><span class="nm-eyebrow">我们服务谁</span><h2>三个起点，同一个问题：如何赢得另一个市场。</h2><p class="nm-lead">适合已有产品、客户或经营基础，希望触达新市场客户的企业。当前重点是中国与澳大利亚、新西兰之间的市场拓展。</p></div>
+        <div class="nm-grid-3" style="margin-top:46px">
+          <article class="nm-card" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14)"><span class="nm-card-num" style="color:var(--nm-gold-soft)">01</span><h3>中国品牌走向海外</h3><p>产品和供应链已经成熟，但需要重新理解目标国家的消费者、竞争格局、品牌信任和获客渠道。</p></article>
+          <article class="nm-card" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14)"><span class="nm-card-num" style="color:var(--nm-gold-soft)">02</span><h3>海外华人企业进入主流市场</h3><p>企业在华人圈已有稳定生意，希望跨过语言与圈层边界，真正服务本地英文消费者。</p></article>
+          <article class="nm-card" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.14)"><span class="nm-card-num" style="color:var(--nm-gold-soft)">03</span><h3>成熟品牌进入下一个国家</h3><p>已经在一个海外市场成功，希望先评估当地客户、竞争和获客渠道，再决定如何进入新市场。</p></article>
         </div>
       </div>
-      <div>
-        <ul class="local-checks">
-          <li class="local-check">
-            <div class="chk-icon" aria-hidden="true">✓</div>
-            <div class="chk-text">
-              <strong data-en="Google search visibility" data-zh="Google 搜索可见度">Google 搜索可见度</strong>
-              <span data-en="Where you rank for the searches that matter in AU/NZ" data-zh="你在澳新相关搜索中的排名">你在澳新相关搜索中的排名</span>
-            </div>
-          </li>
-          <li class="local-check">
-            <div class="chk-icon" aria-hidden="true">✓</div>
-            <div class="chk-text">
-              <strong data-en="AI assistant mentions" data-zh="AI 助手提及">AI 助手提及</strong>
-              <span data-en="Whether ChatGPT, Gemini, DeepSeek and Google AI cite your business" data-zh="ChatGPT、Gemini、DeepSeek 和 Google AI 是否引用你的业务">ChatGPT、Gemini、DeepSeek 和 Google AI 是否引用你的业务</span>
-            </div>
-          </li>
-          <li class="local-check">
-            <div class="chk-icon" aria-hidden="true">✓</div>
-            <div class="chk-text">
-              <strong data-en="Social & review footprint" data-zh="社媒与评价足迹">社媒与评价足迹</strong>
-              <span data-en="Your presence and reputation across key platforms" data-zh="你在各主要平台的存在与声誉">你在各主要平台的存在与声誉</span>
-            </div>
-          </li>
-          <li class="local-check">
-            <div class="chk-icon" aria-hidden="true">✓</div>
-            <div class="chk-text">
-              <strong data-en="Competitor intelligence" data-zh="竞争对手情报">竞争对手情报</strong>
-              <span data-en="Where they're outranking you and how to close the gap" data-zh="他们在哪些地方超过你以及如何弥补差距">他们在哪些地方超过你以及如何弥补差距</span>
-            </div>
-          </li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</section>
+    </section>
 
-<div class="divider"></div>
-
-<!-- ── Why AU/NZ ── -->
-<section>
-  <div class="container">
-    <div class="local-grid">
-      <div>
-        <div class="section-label" data-en="Built for AU/NZ" data-zh="专为澳新打造">专为澳新打造</div>
-        <h2 class="serif section-heading" data-en="The tool that actually understands your market." data-zh="真正懂你市场的工具。">真正懂你市场的工具。</h2>
-        <p class="section-sub" style="margin-bottom:0;" data-en="Generic tools give you generic results. Magic Engine knows the difference between a 30 June EOFY and a 31 March one — and so do your customers." data-zh="通用工具给你通用结果。Magic Engine 知道 6 月 30 日财年末和 3 月 31 日的区别——你的客户也知道。">通用工具给你通用结果。Magic Engine 知道 6 月 30 日财年末和 3 月 31 日的区别——你的客户也知道。</p>
+    <section class="nm-section" id="system">
+      <div class="nm-shell">
+        <div class="nm-reading"><span class="nm-eyebrow">合作后拿到什么</span><h2>交付清楚，工作可检查。</h2><p class="nm-lead">从一个市场、一个业务目标开始。开始前约定交付内容、双方责任、时间与费用；广告预算单独确认。</p></div>
+        <div class="nm-grid-3" style="margin-top:36px">
+          <article class="nm-card"><span class="nm-card-num">01 · 检查</span><h3>市场与渠道诊断</h3><p>整理目标客户、竞争情况和现有营销表现，提供信息来源，列出最值得优先处理的问题。</p></article>
+          <article class="nm-card"><span class="nm-card-num">02 · 交付</span><h3>约定的网站改动与营销素材</h3><p>按合作范围交付本地化文案、网站改进、社媒内容或广告素材。发布前由你检查确认。</p></article>
+          <article class="nm-card"><span class="nm-card-num">03 · 复盘</span><h3>效果回顾与下一步建议</h3><p>在约定周期内，对比询盘、单条线索成本或搜索流量等指标。说明数据缺口，再决定继续、调整或停止。</p></article>
+        </div>
+        <details class="nm-card" style="margin-top:24px"><summary>我们的工作方法：IMPACT</summary><p style="margin-top:16px">检查现状 → 建立基线 → 选择行动 → 执行 → 检查结果 → 调整下一步。AI 辅助研究、起草和分析；商业判断与审批由人负责。</p><p>具体工具和流程按项目确认。完成一次发布，不等于证明带来了增长。</p></details>
       </div>
-      <div>
-        <ul class="local-checks">
-          <li class="local-check">
-            <div class="chk-icon" aria-hidden="true">✓</div>
-            <div class="chk-text">
-              <strong data-en="Correct EOFY awareness" data-zh="正确的财年末意识">正确的财年末意识</strong>
-              <span data-en="AU: 30 June · NZ: 31 March — never confused" data-zh="澳大利亚：6月30日 · 新西兰：3月31日——绝不混淆">澳大利亚：6月30日 · 新西兰：3月31日——绝不混淆</span>
-            </div>
-          </li>
-          <li class="local-check">
-            <div class="chk-icon" aria-hidden="true">✓</div>
-            <div class="chk-text">
-              <strong data-en="Local GST rates" data-zh="本地 GST 税率">本地 GST 税率</strong>
-              <span data-en="10% AU · 15% NZ — correct in every report and campaign" data-zh="澳大利亚 10% · 新西兰 15%——每份报告和活动均正确">澳大利亚 10% · 新西兰 15%——每份报告和活动均正确</span>
-            </div>
-          </li>
-          <li class="local-check">
-            <div class="chk-icon" aria-hidden="true">✓</div>
-            <div class="chk-text">
-              <strong data-en="Your actual platforms" data-zh="你的实际平台">你的实际平台</strong>
-              <span data-en="Gumtree, TradeMe, Seek, Facebook Marketplace — not US defaults" data-zh="Gumtree、TradeMe、Seek、Facebook Marketplace——不是美国默认平台">Gumtree、TradeMe、Seek、Facebook Marketplace——不是美国默认平台</span>
-            </div>
-          </li>
-          <li class="local-check">
-            <div class="chk-icon" aria-hidden="true">✓</div>
-            <div class="chk-text">
-              <strong data-en="Local seasonal moments" data-zh="本地季节性节点">本地季节性节点</strong>
-              <span data-en="ANZAC Day, Matariki, Melbourne Cup — the moments that move AU/NZ buyers" data-zh="澳新日、茅利基节、墨尔本杯——推动澳新买家的关键节点">澳新日、茅利基节、墨尔本杯——推动澳新买家的关键节点</span>
-            </div>
-          </li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</section>
-
-<div class="divider"></div>
-
-<section>
-  <div class="container">
-    <div class="center">
-      <div class="section-label" data-en="SME service pages" data-zh="SME 服务页">SME 服务页</div>
-      <h2 class="serif section-heading" data-en="Clear landing pages for the work smaller teams actually buy." data-zh="给小团队真正会买的服务，配上清晰落地页。">给小团队真正会买的服务，配上清晰落地页。</h2>
-      <p class="section-sub" data-en="Built for digital marketing SMEs, founders, and lean growth teams - not large-agency retainers." data-zh="面向数字营销 SME、创始人和精简增长团队，不走大型 agency retainers 那套。">面向数字营销 SME、创始人和精简增长团队，不走大型 agency retainers 那套。</p>
-    </div>
-    <div class="three-grid">
-      <div class="card">
-        <div class="card-icon ci-gold" aria-hidden="true">1</div>
-        <h3 data-en="AI Training for Business" data-zh="企业 AI 培训">企业 AI 培训</h3>
-        <p data-en="Workshop-first rollout support for teams that need practical adoption, not theory." data-zh="以工作坊为先，帮助团队真正落地，而不是停留在理论。">以工作坊为先，帮助团队真正落地，而不是停留在理论。</p>
-        <a href="/cn/ai-training" class="btn-secondary" style="margin-top:12px;" data-en="View page" data-zh="查看页面">查看页面</a>
-      </div>
-      <div class="card">
-        <div class="card-icon ci-green" aria-hidden="true">2</div>
-        <h3 data-en="AI Automation for Business" data-zh="企业 AI 自动化">企业 AI 自动化</h3>
-        <p data-en="Practical workflow fixes for repetitive tasks, handoffs, and reporting." data-zh="为重复任务、交接和报告流程做实用修复。">为重复任务、交接和报告流程做实用修复。</p>
-        <a href="/cn/ai-automation" class="btn-secondary" style="margin-top:12px;" data-en="View page" data-zh="查看页面">查看页面</a>
-      </div>
-      <div class="card">
-        <div class="card-icon ci-ink" aria-hidden="true">3</div>
-        <h3 data-en="AI Marketing for SMEs" data-zh="SME AI 营销">SME AI 营销</h3>
-        <p data-en="A smaller, clearer alternative to big-agency retainers for AU/NZ teams." data-zh="面向澳新团队，比大型 agency retainers 更小、更清晰。">面向澳新团队，比大型 agency retainers 更小、更清晰。</p>
-        <a href="/cn/ai-marketing-smes" class="btn-secondary" style="margin-top:12px;" data-en="View page" data-zh="查看页面">查看页面</a>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ── AU/NZ identity strip ── -->
-<div class="identity-strip">
-  <p data-en="🇦🇺 Built for Australian &amp; New Zealand businesses" data-zh="🇦🇺 专为澳大利亚和新西兰企业打造">🇦🇺 专为澳大利亚和新西兰企业打造</p>
-</div>
-
-<div class="divider"></div>
-
-<!-- ── How it works ── -->
-<section style="background:var(--paper-dim);">
-  <div class="container">
-    <div class="center">
-      <div class="section-label" data-en="How it works" data-zh="如何运作">如何运作</div>
-      <h2 class="serif section-heading" data-en="From invisible to unmissable in three steps." data-zh="三步从隐形到无处不在。">三步从隐形到无处不在。</h2>
-      <p class="section-sub" data-en="No agency middlemen. No lock-in contracts. You're in control at every step." data-zh="没有中间代理，没有锁定合同，每一步你都掌控。">没有中间代理，没有锁定合同，每一步你都掌控。</p>
-    </div>
-    <div class="how-grid">
-      <div class="how-step">
-        <h3 data-en="Submit your URL" data-zh="提交你的网址">提交你的网址</h3>
-        <p data-en="Enter your website. 张骞 scouts every corner of your digital presence — Google, AI search, social, ads, reviews. Takes about 2 minutes. Completely free." data-zh="输入你的网址，张骞探查你数字存在的每个角落——Google、AI 搜索、社媒、广告、评价。大约 2 分钟，完全免费。">输入你的网址，张骞探查你数字存在的每个角落——Google、AI 搜索、社媒、广告、评价。大约 2 分钟，完全免费。</p>
-      </div>
-      <div class="how-step">
-        <h3 data-en="Review your report" data-zh="查看你的报告">查看你的报告</h3>
-        <p data-en="Get a plain-English report of exactly where you stand — what's strong, what's missing, and the one opportunity you should act on first." data-zh="收到一份直白的报告，清楚说明你的现状——哪里强，哪里缺，以及最应该优先采取行动的一个机会。">收到一份直白的报告，清楚说明你的现状——哪里强，哪里缺，以及最应该优先采取行动的一个机会。</p>
-      </div>
-      <div class="how-step">
-        <h3 data-en="Approve and we execute" data-zh="审批，我们执行">审批，我们执行</h3>
-        <p data-en="Magic Engine turns your findings into real improvements — content created, ads adjusted, listings fixed — that you approve before anything goes live." data-zh="Magic Engine 将你的发现转化为实际改进——创作内容、调整广告、修复列表——一切上线前都需要你审批。">Magic Engine 将你的发现转化为实际改进——创作内容、调整广告、修复列表——一切上线前都需要你审批。</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<div class="divider"></div>
-
-<!-- ── Social proof ── -->
-<section>
-  <div class="container">
-    <div class="center">
-      <div class="section-label" data-en="What business owners say" data-zh="企业主说什么">企业主说什么</div>
-      <h2 class="serif section-heading" data-en="Loved by AU/NZ business owners." data-zh="深受澳新企业主喜爱。">深受澳新企业主喜爱。</h2>
-      <!-- TODO: Replace placeholders with real testimonials before launch -->
-    </div>
-    <div class="testi-grid">
-      <div class="testi">
-        <p class="testi-quote" data-en='"I had no idea my Google Business Profile was missing half the information. The report found it in minutes — and told me exactly what to fix."' data-zh='"我不知道我的 Google 商业资料缺少一半信息。报告几分钟就找到了——还告诉我到底该怎么修。"'>
-          "I had no idea my Google Business Profile was missing half the information. The report found it in minutes — and told me exactly what to fix."
-        </p>
-        <div class="testi-author">
-          <div class="t-avatar" aria-hidden="true">S</div>
-          <div>
-            <div class="t-name">Sarah M.</div>
-            <div class="t-biz" data-en="Café owner, Brisbane QLD" data-zh="咖啡馆老板，布里斯班 QLD">咖啡馆老板，布里斯班 QLD</div>
-          </div>
+    </section>
+    <section class="nm-section nm-section-warm nm-divider" id="client-work">
+      <div class="nm-shell">
+        <div class="nm-reading"><span class="nm-eyebrow">客户实践</span><h2>三类真实业务，各有具体问题。</h2><p class="nm-lead">以下客户均作匿名处理，介绍已开展的工作或合作重点，不承诺同样的结果。</p></div>
+        <div class="nm-grid-3" style="margin-top:36px">
+          <article class="nm-card"><span class="nm-card-num">新西兰 · 旅游企业</span><h3>支持旅游产品营销</h3><details class="me-case-detail"><summary>查看工作内容 <span aria-hidden="true">↗</span></summary><p>工作涵盖广告、社媒内容和询盘跟进规划。已有社媒视频发布实例；一次发布本身不能证明新增了预订。</p></details></article>
+          <article class="nm-card"><span class="nm-card-num">澳大利亚 · 建材企业</span><h3>找到搜索曝光中的转化缺口</h3><details class="me-case-detail"><summary>查看工作内容 <span aria-hidden="true">↗</span></summary><p>根据 Google Search Console 数据，识别有搜索曝光但点击较少的页面，提出标题、产品信息和内部链接的改进优先级。这是诊断成果，不代表已实现销售增长。</p></details></article>
+          <article class="nm-card"><span class="nm-card-num">物流企业</span><h3>梳理潜在客户咨询</h3><details class="me-case-detail"><summary>查看工作内容 <span aria-hidden="true">↗</span></summary><p>合作重点是如何使用当前有效的服务信息，让客户咨询得到一致的回答。此处暂不展示已验证的增长结果。</p></details></article>
         </div>
       </div>
-      <div class="testi">
-        <p class="testi-quote" data-en='"The EOFY campaign Magic Engine drafted for us went live in a week. We saw more enquiries in that month than the previous three combined."' data-zh='"Magic Engine 为我们起草的 EOFY 活动一周后上线，那个月的询价量超过了前三个月的总和。"'>
-          "The EOFY campaign Magic Engine drafted for us went live in a week. We saw more enquiries in that month than the previous three combined."
-        </p>
-        <div class="testi-author">
-          <div class="t-avatar" aria-hidden="true">T</div>
-          <div>
-            <div class="t-name">Tane W.</div>
-            <div class="t-biz" data-en="Trade services, Auckland NZ" data-zh="贸易服务，奥克兰 NZ">贸易服务，奥克兰 NZ</div>
-          </div>
-        </div>
-      </div>
-      <div class="testi">
-        <p class="testi-quote" data-en='"Finally a tool that knows we\'re in Melbourne, not Milwaukee. Every recommendation was relevant — EOFY, local platforms, all of it."' data-zh='"终于有一个知道我们在墨尔本而不是密尔沃基的工具了。每一条建议都切实可行——财年末、本地平台，全都对。"'>
-          "Finally a tool that knows we're in Melbourne, not Milwaukee. Every recommendation was relevant — EOFY, local platforms, all of it."
-        </p>
-        <div class="testi-author">
-          <div class="t-avatar" aria-hidden="true">D</div>
-          <div>
-            <div class="t-name">David K.</div>
-            <div class="t-biz" data-en="Retail, Melbourne VIC" data-zh="零售，墨尔本 VIC">零售，墨尔本 VIC</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
+    </section>
 
-<div class="divider"></div>
+    <section class="nm-section" id="founder">
+      <div class="nm-shell nm-founder-grid">
+        <div><span class="nm-eyebrow">Founder · 大瑞</span><h2>从跨境电商实践，到下一代跨市场增长系统。</h2><p>大瑞曾创立 Magic Lamp——澳新早期以 SaaS 平台模式连接中国供应链与本地市场的跨境电商企业。此后积累了电商运营、品牌管理、澳新本地商业与跨文化团队经验。</p><p>Magic Engine 把这些经验重新组织成一个更清晰的能力：帮助企业判断并进入下一个国家。合作范围围绕客户的营销需求约定，具体服务与平台开放状态分别确认。</p><div class="nm-actions" style="margin-top:28px"><a class="nm-btn nm-btn-dark" href="mailto:hello@magicengine.cloud?subject=Project%20enquiry">咨询项目合作 →</a></div></div>
+        <div class="nm-cn-statement"><strong>Magic Lamp → Magic Engine</strong><p>创始人的跨境经营经验用于理解客户、渠道与市场差异。此前企业的经营成绩，不等同于 Magic Engine 客户的营销结果。</p></div>
+      </div>
+    </section>
 
-<!-- ── Final CTA ── -->
-<section class="cta-photo">
-  <div class="container">
-    <div class="cta-block">
-      <h2 class="serif" data-en="Start with diagnosis, then go deeper." data-zh="先诊断，再深入。">先诊断，再深入。</h2>
-      <p data-en="If you are ready for GEO or training, the new pages are live. If you want the free diagnosis first, start there and we will point you to the right next step." data-zh="如果你已经准备好看 GEO 或培训，新页面已经上线。如果你想先做免费诊断，也可以先从那里开始。">如果你已经准备好看 GEO 或培训，新页面已经上线。如果你想先做免费诊断，也可以先从那里开始。</p>
-      <div class="hero-ctas" style="margin-top:26px;">
-        <a href="/cn/discover" class="btn-primary" style="font-size:1rem;padding:15px 28px;" data-en="Run free diagnosis →" data-zh="开始免费诊断 →">开始免费诊断 →</a>
-        <a href="/cn/geo" class="btn-secondary" style="font-size:1rem;padding:14px 26px;" data-en="Explore GEO" data-zh="查看 GEO">查看 GEO</a>
-        <a href="/cn/training" class="btn-secondary" style="font-size:1rem;padding:14px 26px;" data-en="Explore training" data-zh="查看培训">查看培训</a>
-        <a href="/cn/ads" class="btn-secondary" style="font-size:1rem;padding:14px 26px;" data-en="Start ads launch" data-zh="开始广告投放">开始广告投放</a>
-      </div>
-    </div>
-  </div>
-</section>
+    <section class="nm-cta"><div class="nm-shell nm-cta-inner"><div><h2>你已经在哪个市场被验证？下一站想去哪里？</h2><p>邮件告诉我们你的网站、目标市场和主要问题，可以使用中文。我们先讨论合作范围，再确认费用与安排。</p></div><a class="nm-btn nm-btn-primary" href="mailto:hello@magicengine.cloud?subject=Project%20enquiry">咨询项目合作 →</a></div></section>
+    <section class="nm-section-sm nm-section-warm"><div class="nm-shell nm-reading"><span class="nm-eyebrow">Magic Engine 工具实验室</span><h2>想先自己试试？</h2><p>我们把做好的小工具放在工具实验室，免费试用，不用付款。项目合作可直接通过邮件咨询。</p><a class="nm-btn nm-btn-dark" href="/cn/lab/">去工具实验室 →</a></div></section>
+  </main>
 
-<!-- ── Footer ── -->
-<footer class="site-footer">
-  <div class="container">
-    <div class="footer-inner">
-      <div class="footer-brand">
-        <a href="/cn/" class="nav-logo" style="color:rgba(255,255,255,.8);text-decoration:none;">
-          <svg width="24" height="22" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-          <defs>
-            <linearGradient id="meGrad_cn_index_2" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#EBCB8B"/><stop offset="0.55" stop-color="#C4912E"/><stop offset="1" stop-color="#A6781F"/>
-            </linearGradient>
-            <radialGradient id="meNode_cn_index_2" cx="0.5" cy="0.5" r="0.5">
-              <stop offset="0" stop-color="#FFFFFF"/><stop offset="0.45" stop-color="#FBEFD2"/><stop offset="1" stop-color="#EBCB8B"/>
-            </radialGradient>
-          </defs>
-          <rect width="100" height="100" rx="22" fill="#0D0D0D"/>
-          <g stroke="url(#meGrad_cn_index_2)" fill="none" stroke-linecap="round" stroke-width="5.5">
-            <path d="M14,24 C38,30 56,44 78,52"/>
-            <path d="M14,36 C38,40 56,46 78,52"/>
-            <path d="M14,48 C40,50 56,50 78,52"/>
-            <path d="M14,60 C40,58 56,56 78,52"/>
-            <path d="M14,72 C38,66 56,60 78,52"/>
-          </g>
-          <g fill="url(#meGrad_cn_index_2)">
-            <circle cx="14" cy="24" r="3.5"/><circle cx="14" cy="36" r="3.5"/><circle cx="14" cy="48" r="3.5"/><circle cx="14" cy="60" r="3.5"/><circle cx="14" cy="72" r="3.5"/>
-          </g>
-          <rect x="69" y="41" width="20" height="20" rx="5" fill="url(#meNode_cn_index_2)"/>
-        </svg>
-          <span style="color:rgba(255,255,255,.8);">Magic Engine</span>
-        </a>
-        <p data-en="AI-era visibility for ambitious Australian and New Zealand businesses." data-zh="为有野心的澳新企业提供 AI 时代可见度解决方案。">为有野心的澳新企业提供 AI 时代可见度解决方案。</p>
-      </div>
-      <div class="footer-col">
-        <h4 data-en="Product" data-zh="产品">产品</h4>
-        <ul>
-          <li><a href="/cn/discover" data-en="Free Discovery" data-zh="免费探查">免费探查</a></li>
-          <li><a href="/cn/geo" data-en="GEO" data-zh="GEO">GEO</a></li>
-          <li><a href="/cn/training" data-en="Training" data-zh="培训">培训</a></li>
-          <li><a href="/cn/ads" data-en="Ads Launch" data-zh="广告投放">广告投放</a></li>
-          <li><a href="https://app.magicengine.com.au/portal/login" data-en="Client portal" data-zh="客户入口">客户入口</a></li>
-        </ul>
-      </div>
-      <div class="footer-col">
-        <h4 data-en="Company" data-zh="公司">公司</h4>
-        <ul>
-          <li><a href="/cn/about" data-en="About" data-zh="关于我们">关于我们</a></li>
-          <li><a href="mailto:hello@magicengine.cloud" data-en="Contact" data-zh="联系我们">联系我们</a></li>
-        </ul>
-      </div>
-      <div class="footer-col">
-        <h4 data-en="Legal" data-zh="法律">法律</h4>
-        <ul>
-          <li><a href="/cn/privacy" data-en="Privacy Policy" data-zh="隐私政策">隐私政策</a></li>
-          <li><a href="/cn/terms" data-en="Terms of Service" data-zh="服务条款">服务条款</a></li>
-        </ul>
-      </div>
-    </div>
-    <div class="footer-bottom">
-      <div class="footer-entity">
-        Magic Engine AI Technology Limited · New Zealand · hello@magicengine.cloud
-      </div>
-      <div class="footer-copy">© 2026 Magic Engine</div>
-    </div>
-  </div>
-</footer>
-
-<script src="/google-tag.js"></script>
-<script src="/meta-pixel.js"></script>
-<script src="/app.js"></script>
+  <footer class="nm-footer"><div class="nm-shell"><div class="nm-footer-grid"><div><a class="nm-brand" href="/cn/"><img src="/assets/favicon.svg" alt=""><span>Magic Engine</span></a><p>在下一个市场，找到你的客户。</p></div><div class="nm-footer-tools"><h4>Magic Engine 工具实验室</h4><ul><li><a href="/cn/meta-ads-ai/">Facebook 广告体检</a></li><li><a href="/cn/discover">免费网站诊断</a></li></ul></div><nav class="nm-footer-links"><a href="/">English</a><a href="/insights/">Magic Insight</a><a href="/cn/lab/">免费工具</a><a href="/privacy">隐私政策（英文版）</a><a href="mailto:hello@magicengine.cloud">hello@magicengine.cloud</a></nav></div><div class="nm-footer-legal"><span>© 2026 Magic Engine</span><span>Magic Engine AI Technology Limited · New Zealand</span></div></div></footer>
+  <script src="/google-tag.js"></script><script src="/meta-pixel.js"></script>
 </body>
 </html>
-
-

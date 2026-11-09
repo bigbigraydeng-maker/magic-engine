@@ -5,6 +5,8 @@
 /* App is light-mode only — do NOT inherit OS dark-mode */
 :root {
   color-scheme: light;
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: "Space Grotesk", Inter, ui-sans-serif, system-ui, sans-serif;
 }
 
 body {
@@ -13,7 +15,7 @@ body {
 }
 
 /* Force readable text inside ALL form controls, regardless of OS theme. */
-input,
+input:not([type="radio"]):not([type="checkbox"]),
 textarea,
 select {
   color: #111827;

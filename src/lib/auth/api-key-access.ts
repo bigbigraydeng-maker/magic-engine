@@ -65,7 +65,7 @@ export function generateAdminApiKey(): GeneratedKey {
 export type KeyKind = 'client' | 'admin'
 
 export type ApiKeyAuth =
-  | { kind: 'client'; keyId: string; clientId: string; scopes: string[] }
+  | { kind: 'client'; keyId: string; clientId: string; scopes: string[]; expiresAt?: string | null }
   | { kind: 'admin'; keyId: string; ownerEmail: string; scopes: string[]; ipAllowlist: string[] }
 
 export type ApiKeyAuthFailure =
@@ -133,6 +133,12 @@ interface LookupRow {
   ownerEmail: string | null
   scopes: string[]
   ipAllowlist: string[]
+  /** Client keys only. Null means the row has no expiry. Admin lookups leave this null. */
+  expiresAt: string | null
+}
+
+function clientExpiresAt(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null
 }
 
 /**
@@ -144,7 +150,7 @@ async function lookupByKind(kind: KeyKind, hash: string): Promise<LookupRow | nu
   if (kind === 'client') {
     const { data, error } = await supabaseAdmin
       .from('client_api_keys')
-      .select('id, client_id, scopes')
+      .select('id, client_id, scopes, expires_at')
       .eq('key_hash', hash)
       .is('revoked_at', null)
       .maybeSingle()
@@ -153,12 +159,14 @@ async function lookupByKind(kind: KeyKind, hash: string): Promise<LookupRow | nu
       return 'error'
     }
     if (!data) return null
+    if (data.expires_at && Date.parse(data.expires_at) <= Date.now()) return null
     return {
       keyId: data.id as string,
       clientId: data.client_id as string,
       ownerEmail: null,
       scopes: (data.scopes as string[]) ?? ['read:all'],
       ipAllowlist: [],
+      expiresAt: clientExpiresAt(data.expires_at),
     }
   }
 
@@ -196,6 +204,7 @@ async function lookupByKind(kind: KeyKind, hash: string): Promise<LookupRow | nu
     ownerEmail: data.owner_email as string,
     scopes: (data.scopes as string[]) ?? ['admin:read:all'],
     ipAllowlist: (data.ip_allowlist as string[]) ?? [],
+    expiresAt: null,
   }
 }
 
@@ -245,7 +254,13 @@ export async function verifyApiKey(
   if (kind === 'client') {
     return {
       ok: true,
-      auth: { kind: 'client', keyId: found.keyId, clientId: found.clientId as string, scopes: found.scopes },
+      auth: {
+        kind: 'client',
+        keyId: found.keyId,
+        clientId: found.clientId as string,
+        scopes: found.scopes,
+        expiresAt: found.expiresAt,
+      },
     }
   }
   return {
@@ -293,13 +308,17 @@ export function logMcpAccess(params: {
   if (kind === 'admin') row.admin_key_id = params.keyId
   else row.client_key_id = params.keyId
 
-  void supabaseAdmin
-    .from('mcp_access_log')
-    .insert(row)
+  // 审计日志即发即弃，但**任何一环都不许炸成未处理的 rejection**。
+  // Supabase 的 builder 类型是 PromiseLike（没有 .catch），所以先用
+  // Promise.resolve() 包一层拿到真 Promise，再 .then().catch() ——
+  // 这样连 then 回调自己抛错也一并兜住。写成 .then(f, g) 是兜不住 f 的。
+  void Promise.resolve(
+    supabaseAdmin.from('mcp_access_log').insert(row),
+  )
     .then(({ error }) => {
       if (error) console.error('[api-key-access] logMcpAccess failed:', error)
     })
-    .catch((e) => console.error('[api-key-access] logMcpAccess rejected:', e))
+    .catch((e: unknown) => console.error('[api-key-access] logMcpAccess rejected:', e))
 }
 
 // ── tool-callback context guards (physically separate per kind) ─────────────

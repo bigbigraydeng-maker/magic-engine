@@ -165,6 +165,7 @@ export function formatBenchmarksForPrompt(
   benchmarks: HuatuoLookupContext['benchmarks'],
   industryName: string,
   customerBudgetAud?: number,
+  budgetCurrency?: string | null,
 ): string {
   const lines: string[] = [
     `## 行业基准数据（${industryName}，AU/NZ 小型企业）`,
@@ -209,8 +210,12 @@ export function formatBenchmarksForPrompt(
   }
 
   if (customerBudgetAud != null) {
+    // Omitted currency keeps the old AUD comparison. null means the currency is unknown.
+    const sameUnit = budgetCurrency === undefined || budgetCurrency === 'AUD'
     lines.push('')
-    lines.push(formatBudgetComparison(benchmarks, customerBudgetAud))
+    lines.push(sameUnit
+      ? formatBudgetComparison(benchmarks, customerBudgetAud)
+      : formatUncomparedBudget(customerBudgetAud, budgetCurrency))
   }
 
   return lines.join('\n')
@@ -278,6 +283,18 @@ function formatBudgetComparison(
     `- 预算比值：${ratio.toFixed(2)}×`,
     '',
     `**指导**：${guidance}`,
+  ].join('\n')
+}
+
+/** Industry typical budgets are AUD. A different currency must not be divided into them. */
+function formatUncomparedBudget(amount: number, currency: string | null): string {
+  const unit = currency ?? '币种未标明'
+  return [
+    '## 预算定位',
+    '',
+    `- 客户月预算：${amount} ${unit}`,
+    '- 上面表格里的「典型月预算」是澳元，和这笔预算不是同一种货币。',
+    '- 不要把两者相除，也不要把客户的数字改写成澳元。预算分配的上限就是这笔客户预算本身。',
   ].join('\n')
 }
 

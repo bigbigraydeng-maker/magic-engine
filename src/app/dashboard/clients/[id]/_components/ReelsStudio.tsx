@@ -102,12 +102,6 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
   // Video generation state
   const [generatingVideo, setGeneratingVideo] = useState(false)
 
-  // Publishing Hub modal (video_ready)
-  const [reelPubModal, setReelPubModal] = useState(false)
-  const [reelAccounts, setReelAccounts] = useState<Array<{ id: string; name: string; provider: string }>>([])
-  const [reelScheduleForm, setReelScheduleForm] = useState({ account_id: '', scheduled_at: '', caption: '' })
-  const [reelScheduleLoading, setReelScheduleLoading] = useState(false)
-
   // ─── Fetch helpers ──────────────────────────────────────────────────────────
 
   const fetchDrafts = useCallback(async () => {
@@ -395,54 +389,6 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
     }
   }
 
-  const openReelPublish = useCallback(async () => {
-    if (!activeDraft?.video_url) return
-    const defaultTime = new Date(Date.now() + 3_600_000)
-      .toLocaleString('sv-SE', { timeZone: 'Pacific/Auckland' })
-      .replace(' ', 'T')
-      .slice(0, 16)
-    setReelScheduleForm({
-      account_id: '',
-      scheduled_at: defaultTime,
-      caption: activeDraft.fb_caption ?? '',
-    })
-    setReelPubModal(true)
-    try {
-      const res = await fetch('/api/publer/accounts')
-      if (res.ok) {
-        const d = await res.json()
-        setReelAccounts(d.accounts ?? [])
-      }
-    } catch { /* silent — user can still type account id manually */ }
-  }, [activeDraft])
-
-  const handleReelPublish = useCallback(async () => {
-    if (!activeDraft || !reelScheduleForm.account_id || !reelScheduleForm.scheduled_at) return
-    setReelScheduleLoading(true)
-    try {
-      const res = await fetch(`/api/clients/${clientId}/reels/${activeDraft.id}/publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          account_id: reelScheduleForm.account_id,
-          scheduled_at: new Date(reelScheduleForm.scheduled_at).toISOString(),
-          caption: reelScheduleForm.caption,
-        }),
-      })
-      const d = await res.json()
-      if (d.success) {
-        setReelPubModal(false)
-        alert(`✅ 已安排发布！Publishing Hub Job: ${d.job_id}`)
-      } else {
-        alert('发布失败: ' + (d.error ?? 'Unknown error'))
-      }
-    } catch (err) {
-      alert(`Error: ${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setReelScheduleLoading(false)
-    }
-  }, [activeDraft, clientId, reelScheduleForm])
-
   const handleGenerateVideo = async () => {
     if (!activeDraft) return
     setGeneratingVideo(true)
@@ -474,7 +420,7 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
         <div>
           <p className="text-sm font-semibold text-me-charcoal/90">🎬 Reels Studio</p>
           <p className="text-xs text-me-charcoal/55 mt-0.5">
-            读取 Master Brief + Campaign Brief → 生成提示词 → 参考帧 → 视频 → Publishing Hub
+            读取 Master Brief + Campaign Brief → 生成提示词 → 参考帧 → 视频
           </p>
         </div>
         {!readonly && (
@@ -710,12 +656,6 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
                         >
                           ↓ Download video
                         </a>
-                        <button
-                          onClick={openReelPublish}
-                          className="text-xs px-3 py-1.5 bg-[#5C8A4A] hover:bg-[#5C8A4A] text-white rounded-lg font-medium transition-colors"
-                        >
-                          📅 安排发布
-                        </button>
                       </div>
                     </div>
                   ) : activeDraft.status === 'video_generating' ? (
@@ -831,70 +771,6 @@ export function ReelsStudio({ clientId, defaultCampaignId, onDraftGenerated, rea
               Select a draft to edit, or generate a new Reel ↑
             </div>
           )}
-        </div>
-      )}
-
-      {/* Publishing Hub modal */}
-      {reelPubModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl">
-            <h2 className="text-base font-semibold mb-4">📅 安排发布到 Publishing Hub</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-me-charcoal/55 block mb-1">发布账号</label>
-                <select
-                  value={reelScheduleForm.account_id}
-                  onChange={e => setReelScheduleForm(f => ({ ...f, account_id: e.target.value }))}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white"
-                >
-                  <option value="">选择账号…</option>
-                  {reelAccounts.map(a => (
-                    <option key={a.id} value={a.id}>{a.name} ({a.provider})</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs text-me-charcoal/55 block mb-1">发布时间（NZT）</label>
-                <input
-                  type="datetime-local"
-                  value={reelScheduleForm.scheduled_at}
-                  onChange={e => setReelScheduleForm(f => ({ ...f, scheduled_at: e.target.value }))}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-me-charcoal/55 block mb-1">文案（Facebook Caption）</label>
-                <textarea
-                  value={reelScheduleForm.caption}
-                  onChange={e => setReelScheduleForm(f => ({ ...f, caption: e.target.value }))}
-                  rows={4}
-                  className="w-full border rounded px-2 py-1.5 text-sm text-me-charcoal/90 bg-white resize-none"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 mt-5 justify-end">
-              <button
-                onClick={() => setReelPubModal(false)}
-                className="px-3 py-1.5 text-sm border rounded hover:bg-me-ivory"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleReelPublish}
-                disabled={!reelScheduleForm.account_id || reelScheduleLoading}
-                className="px-3 py-1.5 text-sm bg-[#5C8A4A] text-white rounded disabled:opacity-50 hover:bg-[#5C8A4A] flex items-center gap-2"
-              >
-                {reelScheduleLoading ? (
-                  <>
-                    <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                    排程中…
-                  </>
-                ) : (
-                  '确认发布'
-                )}
-              </button>
-            </div>
-          </div>
         </div>
       )}
     </div>

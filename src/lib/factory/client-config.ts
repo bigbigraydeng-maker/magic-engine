@@ -22,8 +22,9 @@ import {
   type RecipeCtaFacts,
   type WinnerRecipeId,
 } from './recipe'
+import type { CreatomateTemplateContract } from '@/lib/creatomate/types'
 
-/** 只有 facebook 有真实 adapter;publer 在 publish-worker.ts 仍是注释状态。
+/** 只有 facebook 有真实 adapter;其它平台都没有 adapter。
  *  放开别的平台 = 配了个必然 markFailed('no_adapter') 的目标。 */
 export const SUPPORTED_PLATFORMS = ['facebook'] as const
 
@@ -80,6 +81,13 @@ export interface FactoryConfigView {
    * 只允许 WINNER_RECIPE_IDS 白名单里的 id;version 显式且与已注册 recipe 不一致 → 拒。
    */
   creative_recipe: { id: WinnerRecipeId; version: number } | null
+  /**
+   * 出片引擎（spec docs/specs/2026-09-09-creatomate-connector-spec-v1.md §4.1/§9）。
+   * 默认 ffmpeg（不配 = 维持现状，出片仍需人工处理）。voice_id/avatar_image_url 是
+   * lecture-render.ts/render-pipeline.ts 的既有字段，这个投影不认识它们、也不会碰它们——
+   * mergeFactoryConfig 对 render 做的是子对象合并，不是整体替换，见下方合并逻辑。
+   */
+  render: { engine: 'ffmpeg' | 'creatomate'; creatomate: CreatomateTemplateContract | null } | null
 }
 
 export type MergeResult =
@@ -132,7 +140,47 @@ export function projectFactoryConfig(raw: unknown): FactoryConfigView {
         return null
       }
     })(),
+    render: projectRender(cfg.render),
   }
+}
+
+/** 校验 Record<string,string>——脏数据(非对象/含非字符串值)一律拒绝,不半收半弃。 */
+function isStringRecord(v: unknown): v is Record<string, string> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  return Object.values(v as Record<string, unknown>).every((x) => typeof x === 'string')
+}
+
+/** 校验 string[]，同上原则：脏数据一律拒绝。 */
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string')
+}
+
+/** 校验 Record<string, Record<string,string>>（offers 的形状），同上原则：脏数据一律拒绝。 */
+function isNestedStringRecord(v: unknown): v is Record<string, Record<string, string>> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  return Object.values(v as Record<string, unknown>).every((x) => isStringRecord(x))
+}
+
+function projectRender(raw: unknown): FactoryConfigView['render'] {
+  const r = (raw ?? null) as Record<string, unknown> | null
+  if (!r) return null
+  const engine = r.engine === 'creatomate' ? 'creatomate' : 'ffmpeg'
+  const c = (r.creatomate ?? null) as Record<string, unknown> | null
+  const creatomate =
+    c && typeof c.template_id === 'string' && Array.isArray(c.scene_field_map)
+      ? {
+          templateId: c.template_id,
+          sceneFieldMap: c.scene_field_map as CreatomateTemplateContract['sceneFieldMap'],
+          outputWidth: typeof c.output_width === 'number' ? c.output_width : undefined,
+          outputHeight: typeof c.output_height === 'number' ? c.output_height : undefined,
+          outputFrameRate: typeof c.output_frame_rate === 'number' ? c.output_frame_rate : undefined,
+          staticOverrides: isStringRecord(c.static_overrides) ? c.static_overrides : undefined,
+          requiredPostFields: isStringArray(c.required_post_fields) ? c.required_post_fields : undefined,
+          offers: isNestedStringRecord(c.offers) ? c.offers : undefined,
+          postFieldSources: isStringRecord(c.post_field_sources) ? c.post_field_sources : undefined,
+        }
+      : null
+  return { engine, creatomate }
 }
 
 /** 风格投影:脏数据一律降级 null,不把半个对象抛给前端或下发给装配脚本。 */
@@ -274,6 +322,97 @@ export function mergeFactoryConfig(
       } catch (e) {
         return { ok: false, error: e instanceof Error ? e.message : String(e) }
       }
+    }
+  }
+
+  if ('render' in body) {
+    const raw = body.render as Record<string, unknown> | null
+    if (raw === null) {
+      delete next.render
+    } else {
+      // 子对象合并，不是整体替换：existing.render 里的 voice_id/avatar_image_url
+      // （lecture-render.ts/render-pipeline.ts 用，这个表单不认识、也不该动）原样保留。
+      const existingRender = (next.render ?? {}) as Record<string, unknown>
+      const merged: Record<string, unknown> = { ...existingRender }
+
+      // 🔴 只在 body 真的带了 engine 时才覆写——第二轮复审指出，PATCH 只带
+      //    { render: { creatomate: {...} } } 而不带 engine 时，无条件覆写会把已经是
+      //    creatomate 的客户静默降级回 ffmpeg（"确认"从此不出片也不报错，同类事故
+      //    Meta targeting 局部传值清空兄弟字段那次已经吃过一次教训）。
+      if ('engine' in raw) {
+        merged.engine = raw.engine === 'creatomate' ? 'creatomate' : 'ffmpeg'
+      }
+
+      if ('creatomate' in raw) {
+        const c = raw.creatomate as Record<string, unknown> | null
+        if (c === null) {
+          delete merged.creatomate
+        } else {
+          const templateId = asTrimmed(c.template_id)
+          const sceneFieldMap = c.scene_field_map
+          if (!templateId) return { ok: false, error: 'Creatomate 模板 ID 不能为空' }
+          if (!Array.isArray(sceneFieldMap) || sceneFieldMap.length === 0) {
+            return { ok: false, error: 'Creatomate 镜头槽位映射不能为空（至少配一个镜头对应的元素名）' }
+          }
+          for (const slot of sceneFieldMap) {
+            if (!slot || typeof (slot as Record<string, unknown>).visual !== 'string') {
+              return { ok: false, error: '每个镜头槽位至少要填 visual（画面元素名）' }
+            }
+          }
+          const outputWidth = c.output_width != null ? Number(c.output_width) : undefined
+          const outputHeight = c.output_height != null ? Number(c.output_height) : undefined
+          const outputFrameRate = c.output_frame_rate != null ? Number(c.output_frame_rate) : undefined
+
+          // 🔴 2026-09-13 修复：这四个字段此前完全没接进 PATCH 合并——即便调用方传了
+          // static_overrides/required_post_fields/offers/post_field_sources，这里重新拼
+          // merged.creatomate 时全部丢弃，写库前悄悄没了（复审 ad68ebde 发现：资料包管理
+          // UI 加了也白加，因为保存路径根本不认这几个字段）。跟 `render` 顶层同一个原则——
+          // 每个字段各自判断"这次 PATCH 有没有带"：带了就校验+覆盖（`null` = 清空），没带
+          // 就沿用已存的值，不能因为这次 PATCH 只想改 template_id 就把其它字段清空。
+          const existingCreatomate = (existingRender.creatomate ?? {}) as Record<string, unknown>
+
+          let staticOverrides = existingCreatomate.static_overrides
+          if ('static_overrides' in c) {
+            if (c.static_overrides === null) staticOverrides = undefined
+            else if (isStringRecord(c.static_overrides)) staticOverrides = c.static_overrides
+            else return { ok: false, error: 'static_overrides 必须是元素名→文字/链接的键值对（值只能是字符串）' }
+          }
+
+          let requiredPostFields = existingCreatomate.required_post_fields
+          if ('required_post_fields' in c) {
+            if (c.required_post_fields === null) requiredPostFields = undefined
+            else if (isStringArray(c.required_post_fields)) requiredPostFields = c.required_post_fields
+            else return { ok: false, error: 'required_post_fields 必须是元素名组成的字符串数组' }
+          }
+
+          let offers = existingCreatomate.offers
+          if ('offers' in c) {
+            if (c.offers === null) offers = undefined
+            else if (isNestedStringRecord(c.offers)) offers = c.offers
+            else return { ok: false, error: 'offers 必须是「档位名 → {字段名: 字符串值}」这样的两层键值对' }
+          }
+
+          let postFieldSources = existingCreatomate.post_field_sources
+          if ('post_field_sources' in c) {
+            if (c.post_field_sources === null) postFieldSources = undefined
+            else if (isStringRecord(c.post_field_sources)) postFieldSources = c.post_field_sources
+            else return { ok: false, error: 'post_field_sources 必须是元素名→档位字段名的键值对（值只能是字符串）' }
+          }
+
+          merged.creatomate = {
+            template_id: templateId,
+            scene_field_map: sceneFieldMap,
+            ...(outputWidth ? { output_width: outputWidth } : {}),
+            ...(outputHeight ? { output_height: outputHeight } : {}),
+            ...(outputFrameRate ? { output_frame_rate: outputFrameRate } : {}),
+            ...(staticOverrides ? { static_overrides: staticOverrides } : {}),
+            ...(requiredPostFields ? { required_post_fields: requiredPostFields } : {}),
+            ...(offers ? { offers } : {}),
+            ...(postFieldSources ? { post_field_sources: postFieldSources } : {}),
+          }
+        }
+      }
+      next.render = merged
     }
   }
 

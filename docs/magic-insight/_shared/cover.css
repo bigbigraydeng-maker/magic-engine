@@ -1,0 +1,172 @@
+/*
+ * Magic Insight 报告封面系统 —— 全幅照片 hero + 暗色遮罩 + 醒目标题。
+ *
+ * ⚠️ 起新卷时的共享模板，必须【内联】进 report.html。
+ *
+ * 图片方案（2026-09-04 v2，取代 base64）：封面图存成卷目录里的
+ *   cover.jpg，HTML 用相对路径 background-image:url(cover.jpg) 引用。
+ *   - 对外交付物是 PDF，headless Chrome 生成 PDF 时会把图烘焙进去，
+ *     PDF 自包含、国内可靠——不需要 base64。
+ *   - 好处：换图 = 换一个文件，不用 curl→压缩→base64→内联那一套；
+ *     report.html 从 600K+ 瘦回几十 K，可读可 diff。
+ *   - HTML 不再单文件自包含，但那不是交付物；对外只发 PDF。
+ *
+ * 每卷换一张贴题的 Unsplash 照片，打破「清一色深蓝背景」的同质化。
+ * 图片来源必须记进该卷 sources.md（摄影师 + Unsplash 链接 + License）。
+ *
+ * ⚠️ 禁用 text-shadow：PDF 阅读器（微信 / macOS 预览等）会把文字阴影
+ *    渲染成白色横条（2026-09-04 实测事故）。文字可读性靠底部实色遮罩，
+ *    不靠 shadow。
+ */
+
+/* 照片封面容器：盖住整块 cover section */
+.cover.cover-photo {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: #06101F;
+}
+
+/* 背景照片层 */
+.cover-photo .cover-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* 暗色渐变遮罩：底部最深（放标题），中段透一点图，顶部再压一档给品牌角标 */
+.cover-photo .cover-scrim {
+  position: absolute;
+  inset: 0;
+  /* 底部压到近乎实色，标题坐在实底上——去掉 text-shadow 后靠这个保证可读 */
+  background:
+    linear-gradient(180deg,
+      rgba(6, 16, 31, 0.78) 0%,
+      rgba(6, 16, 31, 0.32) 24%,
+      rgba(6, 16, 31, 0.52) 52%,
+      rgba(6, 16, 31, 0.88) 78%,
+      rgba(6, 16, 31, 0.98) 100%),
+    linear-gradient(90deg,
+      rgba(6, 16, 31, 0.55) 0%,
+      rgba(6, 16, 31, 0.12) 55%,
+      rgba(6, 16, 31, 0.0) 100%);
+}
+
+/* 顶部品牌条 */
+.cover-photo .cover-topbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 24px 40px;
+}
+.cover-photo .cover-topbar .cb-brand {
+  display: flex; align-items: center; gap: 11px;
+}
+.cover-photo .cover-topbar .cb-logo {
+  width: 34px; height: 32px; border-radius: 8px;
+  background: rgba(6, 16, 31, 0.55);
+  border: 1px solid rgba(244, 194, 96, 0.4);
+  display: grid; place-items: center;
+  backdrop-filter: blur(4px);
+}
+.cover-photo .cover-topbar .cb-name {
+  font-family: 'Newsreader', Georgia, serif;
+  font-size: 16px; font-weight: 600; color: #fff;
+  letter-spacing: .01em;
+}
+.cover-photo .cover-topbar .cb-name em { font-style: normal; color: var(--gold-soft); }
+.cover-photo .cover-topbar .cb-vol {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(6, 16, 31, 0.35);
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+}
+
+/* 标题区（压在底部深色处） */
+.cover-photo .cover-hero {
+  position: relative;
+  z-index: 2;
+  margin-top: auto;
+  padding: 0 40px 34px;
+  max-width: 1120px;
+}
+.cover-photo .cover-eyebrow {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase;
+  color: var(--gold-soft); font-weight: 600;
+  margin-bottom: 16px;
+}
+.cover-photo .cover-eyebrow .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--gold);
+  box-shadow: 0 0 0 3px rgba(244, 194, 96, 0.25);
+}
+.cover-photo .cover-hero h1 {
+  color: #fff;
+  font-size: clamp(38px, 5.2vw, 62px);
+  line-height: 1.04;
+  margin: 0;
+  font-weight: 600;
+  max-width: 20ch;
+}
+.cover-photo .cover-hero h1 em { font-style: normal; color: var(--gold-soft); font-weight: 600; }
+.cover-photo .cover-hero .cover-lead {
+  font-family: 'Newsreader', Georgia, serif;
+  font-size: clamp(16px, 1.6vw, 20px);
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 20px 0 0;
+  max-width: 64ch;
+}
+.cover-photo .cover-hero .cover-lead strong { color: var(--gold-soft); font-weight: 500; }
+
+/* 照片版权署名 */
+.cover-photo .cover-credit {
+  position: absolute;
+  right: 12px; bottom: 8px;
+  z-index: 2;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: .02em;
+}
+
+/* 封面下方的信息带（立场 + 元信息），紧接照片，深色 */
+.cover-infoband {
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+  padding: 26px 0 30px;
+}
+
+@media (max-width: 640px) {
+  .cover-photo { min-height: 480px; }
+  .cover-photo .cover-topbar { padding: 18px 22px; }
+  .cover-photo .cover-hero { padding: 0 22px 26px; }
+  .cover-photo .cover-topbar .cb-name { font-size: 14px; }
+}
+
+@media print {
+  .cover.cover-photo {
+    min-height: 0;
+    height: 248mm; /* 占满首页 A4 可打印高度 */
+    page-break-after: always;
+    break-after: page;
+  }
+  .cover-photo .cover-img,
+  .cover-photo .cover-scrim {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

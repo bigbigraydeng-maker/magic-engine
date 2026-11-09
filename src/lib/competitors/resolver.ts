@@ -63,6 +63,7 @@ export async function getClientCompetitors(
   clientId: string,
   autoDomains: string[] = [],
   max: number = 5,
+  strict = false,
 ): Promise<ResolvedCompetitors> {
   // Fetch the two persisted sources in parallel.
   const [clientResult, briefResult] = await Promise.all([
@@ -80,6 +81,8 @@ export async function getClientCompetitors(
       .limit(1)
       .maybeSingle(),
   ])
+
+  if (strict && (clientResult.error || briefResult.error)) throw new Error('competitor_source_read_failed')
 
   const fdeDomains   = normaliseList(clientResult.data?.competitor_domains)
   const briefDomains = normaliseList(briefResult.data?.competitor_domains)

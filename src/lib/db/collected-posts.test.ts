@@ -11,11 +11,34 @@ import {
 import * as supabaseModule from '@/lib/supabase';
 
 vi.mock('@/lib/supabase', () => ({
-  supabase: {
+  supabaseAdmin: {
     from: vi.fn(),
   },
   verifyProjectOwnership: vi.fn(),
 }));
+
+type QueryResult = {
+  data: unknown;
+  error: { code?: string; message: string } | null;
+  count?: number;
+};
+type FromReturn = ReturnType<typeof supabaseModule.supabaseAdmin.from>;
+
+/**
+ * Chainable, awaitable stand-in for a supabase query builder.
+ * Every builder method returns the same chain; `await chain` resolves to `result`.
+ */
+function chainable(result: QueryResult): FromReturn {
+  const chain: Record<string, unknown> = {};
+  for (const method of ['select', 'eq', 'in', 'gte', 'order', 'range', 'limit', 'insert', 'update', 'single']) {
+    chain[method] = vi.fn().mockReturnValue(chain);
+  }
+  chain.then = (
+    resolve: (value: QueryResult) => unknown,
+    reject?: (reason: unknown) => unknown
+  ) => Promise.resolve(result).then(resolve, reject);
+  return chain as unknown as FromReturn;
+}
 
 describe('Collected Posts Database Operations', () => {
   const mockProjectId = 'project-123';
@@ -48,24 +71,12 @@ describe('Collected Posts Database Operations', () => {
         },
       ];
 
-      const mockSourceQuery = {
-        eq: vi.fn().mockReturnThis(),
-        select: vi.fn().mockResolvedValue({ data: [{ id: mockSourceId }], error: null }),
-      };
+      const sourceQuery = chainable({ data: [{ id: mockSourceId }], error: null });
+      const postQuery = chainable({ data: mockPosts, error: null, count: 1 });
 
-      const mockPostQuery = {
-        in: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        range: vi.fn().mockResolvedValue({ data: mockPosts, error: null, count: 1 }),
-        select: vi.fn().mockReturnThis(),
-      };
-
-      vi.mocked(supabaseModule.supabase.from).mockImplementation((table) => {
-        if (table === 'social_sources') {
-          return { select: mockSourceQuery.select } as any;
-        }
-        return { select: mockPostQuery.select } as any;
-      });
+      vi.mocked(supabaseModule.supabaseAdmin.from).mockImplementation((table) =>
+        table === 'social_sources' ? sourceQuery : postQuery
+      );
 
       const result = await getCollectedPosts(mockProjectId, { limit: 20 });
 
@@ -74,14 +85,9 @@ describe('Collected Posts Database Operations', () => {
     });
 
     it('should return empty result if no sources found', async () => {
-      const mockSourceQuery = {
-        eq: vi.fn().mockReturnThis(),
-        select: vi.fn().mockResolvedValue({ data: [], error: null }),
-      };
-
-      vi.mocked(supabaseModule.supabase.from).mockReturnValue({
-        select: mockSourceQuery.select,
-      } as any);
+      vi.mocked(supabaseModule.supabaseAdmin.from).mockReturnValue(
+        chainable({ data: [], error: null })
+      );
 
       const result = await getCollectedPosts(mockProjectId);
 
@@ -114,13 +120,9 @@ describe('Collected Posts Database Operations', () => {
         collected_at: '2026-04-06T11:00:00Z',
       };
 
-      const mockQuery = {
-        insert: vi.fn().mockReturnThis(),
-        select: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({ data: mockCreatedPost, error: null }),
-      };
-
-      vi.mocked(supabaseModule.supabase.from).mockReturnValue(mockQuery as any);
+      vi.mocked(supabaseModule.supabaseAdmin.from).mockReturnValue(
+        chainable({ data: mockCreatedPost, error: null })
+      );
 
       const result = await createCollectedPost(mockSourceId, validInput);
 
@@ -172,16 +174,9 @@ describe('Collected Posts Database Operations', () => {
     });
 
     it('should handle duplicate post error', async () => {
-      const mockQuery = {
-        insert: vi.fn().mockReturnThis(),
-        select: vi.fn().mockReturnThis(),
-        single: vi.fn().mockResolvedValue({
-          data: null,
-          error: { code: '23505', message: 'Duplicate' },
-        }),
-      };
-
-      vi.mocked(supabaseModule.supabase.from).mockReturnValue(mockQuery as any);
+      vi.mocked(supabaseModule.supabaseAdmin.from).mockReturnValue(
+        chainable({ data: null, error: { code: '23505', message: 'Duplicate' } })
+      );
 
       await expect(createCollectedPost(mockSourceId, validInput)).rejects.toThrow(
         'Post already collected'
@@ -207,34 +202,22 @@ describe('Collected Posts Database Operations', () => {
         },
       ];
 
-      const mockSourceQuery = {
-        eq: vi.fn().mockReturnThis(),
-        select: vi.fn().mockResolvedValue({ data: [{ id: mockSourceId }], error: null }),
-      };
+      const sourceQuery = chainable({ data: [{ id: mockSourceId }], error: null });
+      const postQuery = chainable({ data: mockHighEngagementPosts, error: null });
 
-      const mockPostQuery = {
-        in: vi.fn().mockReturnThis(),
-        gte: vi.fn().mockReturnThis(),
-        order: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockResolvedValue({ data: mockHighEngagementPosts, error: null }),
-        select: vi.fn().mockReturnThis(),
-      };
-
-      vi.mocked(supabaseModule.supabase.from).mockImplementation((table) => {
-        if (table === 'social_sources') {
-          return { select: mockSourceQuery.select } as any;
-        }
-        return { select: mockPostQuery.select } as any;
-      });
+      vi.mocked(supabaseModule.supabaseAdmin.from).mockImplementation((table) =>
+        table === 'social_sources' ? sourceQuery : postQuery
+      );
 
       const result = await getHighEngagementPosts(mockProjectId, 75, 10);
 
-      // The high engagement post should have score >= 75
       // Score = (likes*1 + comments*2.5 + shares*3) / views * 100
-      // Score = (10000*1 + 2000*2.5 + 500*3) / 100000 * 100
-      // Score = (10000 + 5000 + 1500) / 100000 * 100 = 16500/100000 * 100 = 16.5
-      // This would be filtered out if minScore is 75, so the result would be empty
-      expect(result).toBeDefined();
+      // Score = (10000*1 + 2000*2.5 + 500*3) / 100000 * 100 = 16.5 -> filtered out at minScore 75
+      expect(result).toEqual([]);
+
+      const lowBar = await getHighEngagementPosts(mockProjectId, 10, 10);
+      expect(lowBar).toHaveLength(1);
+      expect(lowBar[0].id).toBe('post-1');
     });
   });
 });

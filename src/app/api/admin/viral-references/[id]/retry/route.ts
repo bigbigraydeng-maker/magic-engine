@@ -5,12 +5,16 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 import { analyzeViralReference } from '@/lib/reels/viral-analyzer'
 
 export async function POST(
   _req: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   const { id } = params
 
   const { data: ref, error } = await supabaseAdmin
@@ -25,7 +29,13 @@ export async function POST(
 
   await supabaseAdmin
     .from('viral_reference_library')
-    .update({ analysis_status: 'pending', analysis_error: null })
+    .update({
+      analysis_status: 'pending',
+      analysis_error: null,
+      analysis_attempts: 0,
+      next_retry_at: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', id)
 
   analyzeViralReference(ref.id, ref.source_url).catch(err => {

@@ -178,8 +178,7 @@ async function listGoals(clientId: string, status?: string): Promise<GoalSummary
   let query = supabaseAdmin
     .from('goals')
     .select(
-      'id, title, status, primary_metric_label, baseline_value, current_value, ' +
-        'target_value, target_direction, verdict, period_start, period_end',
+      'id, title, status, primary_metric_label, baseline_value, current_value, target_value, target_direction, verdict, period_start, period_end',
     )
     .eq('client_id', clientId)
     .order('created_at', { ascending: false })
@@ -195,8 +194,7 @@ async function getSeoPerformance(clientId: string, limit?: number): Promise<SeoR
   const { data } = await supabaseAdmin
     .from('gsc_performance_snapshots')
     .select(
-      'site_url, period_start, period_end, total_clicks, total_impressions, ' +
-        'avg_ctr, avg_position, top_queries, top_pages',
+      'site_url, period_start, period_end, total_clicks, total_impressions, avg_ctr, avg_position, top_queries, top_pages',
     )
     .eq('client_id', clientId)
     .order('period_end', { ascending: false })
@@ -219,9 +217,7 @@ async function getTraffic(clientId: string, limit?: number): Promise<TrafficResu
   const { data } = await supabaseAdmin
     .from('ga4_traffic_snapshots')
     .select(
-      'property_id, period_start, period_end, total_sessions, total_users, ' +
-        'total_new_users, total_pageviews, avg_session_duration, bounce_rate, ' +
-        'top_pages, top_sources',
+      'property_id, period_start, period_end, total_sessions, total_users, total_new_users, total_pageviews, avg_session_duration, bounce_rate, top_pages, top_sources',
     )
     .eq('client_id', clientId)
     .order('period_end', { ascending: false })

@@ -1,179 +1,92 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Insights | Magic Engine</title>
-  <meta name="description" content="Practical guides on AI adoption, AI search visibility, and growth for Australian and New Zealand businesses.">
-  <meta property="og:title" content="Insights | Magic Engine">
-  <meta property="og:description" content="Practical guides on AI adoption, AI search visibility, and growth for Australian and New Zealand businesses.">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Articles — Cross-Market Growth Guides | Magic Engine</title>
+  <meta name="description" content="Practical Magic Engine guides on AI adoption, digital visibility and the operating decisions behind entering a new market.">
+  <meta property="og:title" content="Magic Engine Articles — Practical Cross-Market Growth Guides">
+  <meta property="og:description" content="Clear guides for businesses using AI, digital channels and better operating systems to enter their next market.">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Magic Engine">
   <meta property="og:url" content="https://magicengine.com.au/blog/">
-  <meta property="og:image" content="https://magicengine.com.au/assets/og-card.svg">
-  <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="Insights | Magic Engine">
-  <meta name="twitter:description" content="Practical guides on AI adoption, AI search visibility, and growth for Australian and New Zealand businesses.">
+  <meta property="og:image" content="https://magicengine.com.au/assets/og-card.png">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="canonical" href="https://magicengine.com.au/blog/">
-  <link rel="stylesheet" href="/styles.css">
   <link rel="icon" href="/assets/favicon.svg?v=20260602" type="image/svg+xml">
+  <link rel="stylesheet" href="/next-market.css">
+  <link rel="stylesheet" href="/editorial.css">
+  <script src="/section-guide.js" defer></script>
+  <script src="/next-market.js" defer></script>
   <script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@graph": [
-    {
-      "@type": "Organization",
-      "name": "Magic Engine",
-      "url": "https://magicengine.com.au/",
-      "areaServed": ["Australia", "New Zealand"]
-    },
-    {
-      "@type": "CollectionPage",
-      "name": "Magic Engine Insights",
-      "url": "https://magicengine.com.au/blog/",
-      "description": "Practical guides on AI adoption, AI search visibility, and growth for Australian and New Zealand businesses."
-    }
-  ]
-}
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "CollectionPage",
+        "name": "Magic Engine Articles",
+        "url": "https://magicengine.com.au/blog/",
+        "description": "Practical guides on AI adoption, digital visibility and cross-market growth.",
+        "isPartOf": {"@type": "WebSite", "name": "Magic Engine", "url": "https://magicengine.com.au/"}
+      },
+      {
+        "@type": "ItemList",
+        "itemListElement": [
+          {"@type": "ListItem", "position": 1, "url": "https://magicengine.com.au/blog/what-is-an-agentic-workflow", "name": "What Is an Agentic Workflow?"},
+          {"@type": "ListItem", "position": 2, "url": "https://magicengine.com.au/blog/ai-training-for-small-business", "name": "How to Roll Out AI Training for a Small Business Team"}
+        ]
+      }
+    ]
+  }
   </script>
 </head>
-<body>
-<nav class="nav">
-  <div class="container">
-    <div class="nav-inner">
-      <a href="/" class="nav-logo">
-        <svg width="28" height="26" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-          <defs>
-            <linearGradient id="meGrad_blog_1" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#EBCB8B"/><stop offset="0.55" stop-color="#C4912E"/><stop offset="1" stop-color="#A6781F"/>
-            </linearGradient>
-            <radialGradient id="meNode_blog_1" cx="0.5" cy="0.5" r="0.5">
-              <stop offset="0" stop-color="#FFFFFF"/><stop offset="0.45" stop-color="#FBEFD2"/><stop offset="1" stop-color="#EBCB8B"/>
-            </radialGradient>
-          </defs>
-          <rect width="100" height="100" rx="22" fill="#0D0D0D"/>
-          <g stroke="url(#meGrad_blog_1)" fill="none" stroke-linecap="round" stroke-width="5.5">
-            <path d="M14,24 C38,30 56,44 78,52"/>
-            <path d="M14,36 C38,40 56,46 78,52"/>
-            <path d="M14,48 C40,50 56,50 78,52"/>
-            <path d="M14,60 C40,58 56,56 78,52"/>
-            <path d="M14,72 C38,66 56,60 78,52"/>
-          </g>
-          <g fill="url(#meGrad_blog_1)">
-            <circle cx="14" cy="24" r="3.5"/><circle cx="14" cy="36" r="3.5"/><circle cx="14" cy="48" r="3.5"/><circle cx="14" cy="60" r="3.5"/><circle cx="14" cy="72" r="3.5"/>
-          </g>
-          <rect x="69" y="41" width="20" height="20" rx="5" fill="url(#meNode_blog_1)"/>
-        </svg>
-        <span>Magic Engine</span>
-      </a>
-      <ul class="nav-links">
-        <li><a href="/discover">Free Discovery</a></li>
-        <li><a href="/geo">GEO</a></li>
-        <li><a href="/ai-training">Training</a></li>
-        <li><a href="/blog/">Insights</a></li>
-        <li><a href="/about">About</a></li>
-      </ul>
-      <div class="nav-actions">
-        <a href="/discover" class="btn-register">Get diagnosis</a>
-        <a href="https://app.magicengine.com.au/portal/login" class="btn-portal">Client portal</a>
-      </div>
+<body class="nm-site nm-editorial">
+  <header class="nm-nav">
+    <div class="nm-shell nm-nav-inner">
+      <a class="nm-brand" href="/" aria-label="Magic Engine home"><img src="/assets/favicon.svg" alt=""><span>Magic Engine</span></a>
+      <nav class="nm-desktop-nav" aria-label="Primary navigation"><ul class="nm-links"><li><a href="/#paths">Who we help</a></li><li><a href="/#system">How it works</a></li><li><a href="/insights/">Magic Insight</a></li><li><a href="/blog/" aria-current="page">Articles</a></li><li><a href="/waitlist/">Join the waitlist</a></li><li><a href="/#founder">Founder</a></li></ul></nav>
+      <div class="nm-nav-actions"><a class="nm-nav-portal" href="https://app.magicengine.com.au/portal/login">Client portal</a><a class="nm-btn nm-btn-primary nm-btn-small" href="/waitlist/">Discuss your next market</a></div>
+      <details class="nm-mobile"><summary aria-label="Open navigation">Menu</summary><nav class="nm-mobile-panel" aria-label="Mobile navigation"><a href="/">Home</a><a href="/insights/">Magic Insight</a><a href="/blog/" aria-current="page">Articles</a><a href="/waitlist/">Join the waitlist</a><a href="/cn/">中文站</a><a href="https://app.magicengine.com.au/portal/login">Client portal</a></nav></details>
     </div>
-  </div>
-</nav>
+  </header>
 
-<section class="hero" style="padding-bottom:40px;">
-  <div class="container">
-    <div class="hero-badge">Insights · AU/NZ</div>
-    <h1 class="serif">Practical guides on AI adoption and AI-era visibility.</h1>
-    <p class="hero-sub">No hype, no padding — just what actually works for Australian and New Zealand businesses right now.</p>
-  </div>
-</section>
+  <main>
+    <header class="nm-page-hero nm-blog-page-hero">
+      <div class="nm-shell nm-reading">
+        <span class="nm-eyebrow">Magic Engine · Articles</span>
+        <h1>Articles</h1>
+        <p class="nm-lead">Clear guides on AI adoption, digital visibility and the operating decisions behind sustainable cross-market growth.</p>
+      </div>
+    </header>
 
-<div class="divider"></div>
+    <section class="nm-section nm-section-warm nm-divider">
+      <div class="nm-shell">
+        <div class="nm-editorial-heading"><span class="nm-eyebrow">Latest articles</span><span>AI adoption · Digital visibility · Market expansion</span></div>
+        <div class="nm-blog-system-grid">
+          <a class="nm-card nm-path-card nm-blog-system-card" href="/blog/what-is-an-agentic-workflow">
+            <figure class="nm-path-image">
+              <img src="https://images.unsplash.com/photo-1758873271949-742d6648b6b0?auto=format&amp;fit=crop&amp;w=1200&amp;q=82" alt="A business team working together around a laptop in a modern office">
+              <figcaption>Photo: Vitaly Gariev / Unsplash</figcaption>
+            </figure>
+            <div class="nm-path-copy"><span class="nm-card-num">AI AUTOMATION · 8 MIN READ</span><h3>What Is an Agentic Workflow?</h3><p>A plain-English guide to connecting useful AI steps without building an autonomous system your team cannot control.</p><span class="nm-card-link">Read article →</span></div>
+          </a>
+          <a class="nm-card nm-path-card nm-blog-system-card" href="/blog/ai-training-for-small-business">
+            <figure class="nm-path-image">
+              <img src="https://images.unsplash.com/photo-1521737711867-e3b97375f902?auto=format&amp;fit=crop&amp;w=1200&amp;q=82" alt="A small business team learning together around a table" loading="lazy">
+              <figcaption>Photo: Campaign Creators / Unsplash</figcaption>
+            </figure>
+            <div class="nm-path-copy"><span class="nm-card-num">AI TRAINING · 7 MIN READ</span><h3>How to Roll Out AI Training for a Small Business Team</h3><p>A right-sized approach for Australian and New Zealand teams—what to cover, what to skip and how to know it worked.</p><span class="nm-card-link">Read article →</span></div>
+          </a>
+        </div>
+      </div>
+      <div class="nm-shell nm-section-invite"><a href="/waitlist/#apply">Join the waitlist <span aria-hidden="true">↗</span></a><span>Apply for early access</span></div>
+    </section>
 
-<section>
-  <div class="container">
-    <div class="blog-grid">
-      <a class="blog-card" href="/blog/what-is-an-agentic-workflow.html">
-        <div class="article-meta">2026-09-02 · AI Automation</div>
-        <h3>What Is an Agentic Workflow? A Plain-English Guide for AU/NZ Small Business</h3>
-        <p>No hype, no autonomous-robot-workforce talk — what an agentic workflow actually is, real small-business examples, and how to try one without overbuilding.</p>
-      </a>
-      <a class="blog-card" href="/blog/ai-training-for-small-business.html">
-        <div class="article-meta">2026-09-02 · AI Training</div>
-        <h3>How to Roll Out AI Training for a Small Business Team (Without Overbuilding It)</h3>
-        <p>A practical, step-by-step approach to AI training for small and medium businesses in Australia and New Zealand — what to cover, what to skip, and how to know it worked.</p>
-      </a>
-    </div>
-  </div>
-</section>
+    <section class="nm-cta nm-editorial-next"><div class="nm-shell nm-cta-inner"><div><h2>Need evidence before the next move?</h2><p>Explore Magic Insight—research briefs for decisions that cross markets.</p></div><a class="nm-btn nm-btn-primary" href="/insights/">Explore Magic Insight →</a></div></section>
+  </main>
+  <aside class="nm-mobile-invite" hidden aria-label="Early access"><span>Magic Engine · Early access</span><a class="nm-btn nm-btn-primary" href="/waitlist/#apply">Join the waitlist →</a></aside>
 
-<footer class="site-footer">
-  <div class="container">
-    <div class="footer-inner">
-      <div class="footer-brand">
-        <a href="/" class="nav-logo" style="color:rgba(255,255,255,.8);text-decoration:none;">
-          <svg width="24" height="22" viewBox="0 0 100 100" fill="none" aria-hidden="true">
-          <defs>
-            <linearGradient id="meGrad_blog_2" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
-              <stop stop-color="#EBCB8B"/><stop offset="0.55" stop-color="#C4912E"/><stop offset="1" stop-color="#A6781F"/>
-            </linearGradient>
-            <radialGradient id="meNode_blog_2" cx="0.5" cy="0.5" r="0.5">
-              <stop offset="0" stop-color="#FFFFFF"/><stop offset="0.45" stop-color="#FBEFD2"/><stop offset="1" stop-color="#EBCB8B"/>
-            </radialGradient>
-          </defs>
-          <rect width="100" height="100" rx="22" fill="#0D0D0D"/>
-          <g stroke="url(#meGrad_blog_2)" fill="none" stroke-linecap="round" stroke-width="5.5">
-            <path d="M14,24 C38,30 56,44 78,52"/>
-            <path d="M14,36 C38,40 56,46 78,52"/>
-            <path d="M14,48 C40,50 56,50 78,52"/>
-            <path d="M14,60 C40,58 56,56 78,52"/>
-            <path d="M14,72 C38,66 56,60 78,52"/>
-          </g>
-          <g fill="url(#meGrad_blog_2)">
-            <circle cx="14" cy="24" r="3.5"/><circle cx="14" cy="36" r="3.5"/><circle cx="14" cy="48" r="3.5"/><circle cx="14" cy="60" r="3.5"/><circle cx="14" cy="72" r="3.5"/>
-          </g>
-          <rect x="69" y="41" width="20" height="20" rx="5" fill="url(#meNode_blog_2)"/>
-        </svg>
-          <span style="color:rgba(255,255,255,.8);">Magic Engine</span>
-        </a>
-        <p>AI upgrade, GEO, and training for Australian and New Zealand businesses.</p>
-      </div>
-      <div class="footer-col">
-        <h4>Product</h4>
-        <ul>
-          <li><a href="/discover">Free Discovery</a></li>
-          <li><a href="/geo">GEO</a></li>
-          <li><a href="/ai-training">Training</a></li>
-        </ul>
-      </div>
-      <div class="footer-col">
-        <h4>Company</h4>
-        <ul>
-          <li><a href="/about">About</a></li>
-          <li><a href="/blog/">Insights</a></li>
-          <li><a href="mailto:hello@magicengine.cloud">Contact</a></li>
-        </ul>
-      </div>
-      <div class="footer-col">
-        <h4>Legal</h4>
-        <ul>
-          <li><a href="/privacy">Privacy Policy</a></li>
-          <li><a href="/terms">Terms of Service</a></li>
-        </ul>
-      </div>
-    </div>
-    <div class="footer-bottom">
-      <div class="footer-entity">
-        Magic Engine AI Technology Limited · New Zealand · hello@magicengine.cloud
-      </div>
-      <div class="footer-copy">© 2026 Magic Engine</div>
-    </div>
-  </div>
-</footer>
-
-<script src="/google-tag.js"></script>
-<script src="/meta-pixel.js"></script>
-<script src="/app.js"></script>
+  <footer class="nm-footer"><div class="nm-shell"><div class="nm-footer-grid"><div><a class="nm-brand" href="/"><img src="/assets/favicon.svg" alt=""><span>Magic Engine</span></a><p>Digital Marketing Growth Intelligence for businesses entering their next market.</p></div><nav class="nm-footer-links" aria-label="Footer navigation"><a href="/insights/">Magic Insight</a><a href="/blog/">Articles</a><a href="/waitlist/">Join the waitlist</a><a href="/cn/">中文站</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://app.magicengine.com.au/portal/login">Client portal</a><a href="mailto:hello@magicengine.cloud">hello@magicengine.cloud</a></nav></div><div class="nm-footer-legal"><span>© 2026 Magic Engine</span><span>China · Australia · New Zealand</span></div></div></footer>
+  <script src="/google-tag.js"></script><script src="/meta-pixel.js"></script>
 </body>
 </html>

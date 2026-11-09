@@ -48,7 +48,8 @@ import { ownDomainsOf } from '@/lib/microsoft/mail-ingest'
 import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
 import {
   runPaidTagging,
-  DEFAULT_PAID_TAG,
+  readPaidTag,
+  REVIEW_CHECK_BUDGET_MS,
   type CandidateMail,
   type PaidTaggingPolicy,
 } from '@/lib/mailchimp/paid-tagging'
@@ -69,11 +70,12 @@ const MAX_LOOKBACK_DAYS = 400
  */
 function readPolicy(leadsConfig: unknown, ownDomains: readonly string[]): PaidTaggingPolicy {
   const cfg = (leadsConfig ?? {}) as {
-    paid_tagging?: { paid_tag?: unknown; lead_tags_to_remove?: unknown }
+    paid_tagging?: { lead_tags_to_remove?: unknown }
   }
   const raw = cfg.paid_tagging ?? {}
-  const paidTag =
-    typeof raw.paid_tag === 'string' && raw.paid_tag.trim() ? raw.paid_tag.trim() : DEFAULT_PAID_TAG
+  // 🔴 标签名走 paid-tagging.ts 那一份，别在这里再解析一遍 —— 写入侧和今日待办
+  //    的已处理过滤必须认同一个标签名，两份规则一漂移，过滤就永远不命中。
+  const paidTag = readPaidTag(leadsConfig)
   const leadTagsToRemove = Array.isArray(raw.lead_tags_to_remove)
     ? raw.lead_tags_to_remove.filter((t): t is string => typeof t === 'string' && !!t.trim())
     : []
@@ -136,7 +138,7 @@ async function audienceIdsByClient(clientIds: string[]): Promise<Map<string, str
   if (!error) {
     for (const r of (data ?? []) as Array<{ id: string; mailchimp_audience_id: string | null }>) {
       const v = (r.mailchimp_audience_id ?? '').trim()
-      if (v) out.set(r.id, v)
+      out.set(r.id, v)
     }
   }
   return out
@@ -243,6 +245,13 @@ async function run(lookbackDays: number, dryRun: boolean): Promise<NextResponse>
   const results: Array<Record<string, unknown>> = []
   const needsReview: Array<Record<string, unknown>> = []
 
+  // 🔴 needs_review 反查 Mailchimp 的预算必须是整次运行共享一份，不能每个连接
+  // 各领一份：下面按连接串行调用 `runPaidTagging`，连接一多，各自的 15 秒预算
+  // 会累加到超过下面的 `maxDuration 600` / `render.yaml` 的 `curl --max-time
+  // 620`（Codex P2 复审 PR #1484 round 3）。所以在循环外算一次共享截止时间，
+  // 每次调用都传同一个值。
+  const reviewCheckDeadline = Date.now() + REVIEW_CHECK_BUDGET_MS
+
   for (const conn of connections) {
     const client = byClient.get(conn.client_id)
     // 连接指向一个查不到的客户（删过客户但连接还在）—— 跳过，不为它报错。
@@ -268,7 +277,10 @@ async function run(lookbackDays: number, dryRun: boolean): Promise<NextResponse>
       readOwnEmailDomains(client.leads_config),
     )
     const policy = readPolicy(client.leads_config, own)
-    const r = await runPaidTagging(read.mails, { apiKey, audienceId }, policy, { dryRun })
+    const r = await runPaidTagging(read.mails, { apiKey, audienceId }, policy, {
+      dryRun,
+      reviewCheckDeadline,
+    })
 
     for (const item of r.needsReview) {
       needsReview.push({ ...item, clientId: client.id, clientName: client.name, mailbox: conn.account_id })

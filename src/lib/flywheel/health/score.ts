@@ -17,6 +17,8 @@
  *   0–24    Critical 🔴
  */
 
+import { isLowerBetter } from '../polarity'
+
 export type FlywheelName = 'seo' | 'geo' | 'ads' | 'social'
 
 export interface MetricSnapshot {
@@ -58,23 +60,23 @@ export interface HealthScoreResult {
 
 export const HEALTH_METRICS: Record<FlywheelName, { key: string; lowerIsBetter: boolean }[]> = {
   seo: [
-    { key: 'seo.gsc.clicks',        lowerIsBetter: false },
-    { key: 'seo.gsc.avg_position',   lowerIsBetter: true  }, // lower rank number = better
-    { key: 'seo.ga4.sessions',       lowerIsBetter: false },
-    { key: 'seo.ga4.bounce_rate',    lowerIsBetter: true  },
+    { key: 'seo.gsc.clicks',        lowerIsBetter: isLowerBetter('seo.gsc.clicks') },
+    { key: 'seo.gsc.avg_position',   lowerIsBetter: isLowerBetter('seo.gsc.avg_position') }, // lower rank number = better
+    { key: 'seo.ga4.sessions',       lowerIsBetter: isLowerBetter('seo.ga4.sessions') },
+    { key: 'seo.ga4.bounce_rate',    lowerIsBetter: isLowerBetter('seo.ga4.bounce_rate') },
   ],
   geo: [
-    { key: 'geo.query.mention_rate', lowerIsBetter: false },
-    { key: 'geo.query.avg_rank',     lowerIsBetter: true  },
+    { key: 'geo.query.mention_rate', lowerIsBetter: isLowerBetter('geo.query.mention_rate') },
+    { key: 'geo.query.avg_rank',     lowerIsBetter: isLowerBetter('geo.query.avg_rank') },
   ],
   ads: [
-    { key: 'ads.account.roas',       lowerIsBetter: false },
-    { key: 'ads.account.cpa',        lowerIsBetter: true  }, // pending ADS_METRIC_KEY.CPA (P18.B vocab)
-    { key: 'ads.account.ctr',        lowerIsBetter: false },
+    { key: 'ads.account.roas',       lowerIsBetter: isLowerBetter('ads.account.roas') },
+    { key: 'ads.account.cpa',        lowerIsBetter: isLowerBetter('ads.account.cpa') }, // pending ADS_METRIC_KEY.CPA (P18.B vocab)
+    { key: 'ads.account.ctr',        lowerIsBetter: isLowerBetter('ads.account.ctr') },
   ],
   social: [
-    { key: 'social.account.engagement_rate', lowerIsBetter: false }, // pending SOCIAL_METRIC_KEY.ENGAGEMENT_RATE (P18.B vocab)
-    { key: 'social.posts.published_count',   lowerIsBetter: false },
+    { key: 'social.account.engagement_rate', lowerIsBetter: isLowerBetter('social.account.engagement_rate') }, // pending SOCIAL_METRIC_KEY.ENGAGEMENT_RATE (P18.B vocab)
+    { key: 'social.posts.published_count',   lowerIsBetter: isLowerBetter('social.posts.published_count') },
   ],
 }
 

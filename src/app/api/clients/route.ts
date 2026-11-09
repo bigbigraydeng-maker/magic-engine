@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { getUserPermissions } from '@/lib/auth/whitelist'
+import { guardGlobalAdmin } from '@/lib/auth/require-admin'
 
 /**
  * P0-J fix (魏征 CRITICAL #1): this endpoint previously returned ALL clients
@@ -128,20 +129,30 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  // Internal staff only (AD-SEC-4). This had no auth at all — middleware does not
+  // cover /api — so anyone could create staff-created ('fde') client rows, and a
+  // staff-created row carrying a domain is what owns that domain's Meta token.
+  const guard = await guardGlobalAdmin()
+  if (guard) return guard
+
   try {
     const body = await req.json()
-    const { name, domain, website_url } = body
+    const { name, domain, website_url, semrush_db } = body
 
     if (!name) {
       return NextResponse.json({ error: 'name is required' }, { status: 400 })
     }
+
+    // Market is set at creation so discovery never runs against the wrong country
+    // (a follow-up PATCH that failed silently left NZ clients on AU data).
+    const market = semrush_db === 'nz' ? 'nz' : 'au'
 
     const { data, error } = await supabaseAdmin
       .from('clients')
       .insert({
         name,
         domain: domain || website_url || null,
-        semrush_db: 'au',
+        semrush_db: market,
         monthly_quota: 1000,
         plan_tier: 'starter',
       })

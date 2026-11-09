@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { AiVisibilityPanel } from './_components/AiVisibilityPanel'
 import { GoogleSerpPanel } from './_components/GoogleSerpPanel'
+import { WebIntelligencePanel } from './_components/WebIntelligencePanel'
 
 interface BaselineDomain {
   id: string
@@ -545,7 +546,7 @@ export default function IndustryBaselinesPage() {
   const [domains, setDomains] = useState<BaselineDomain[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [activeTab, setActiveTab] = useState<'baselines' | 'ai_visibility' | 'google_serp' | 'runs'>('baselines')
+  const [activeTab, setActiveTab] = useState<'baselines' | 'ai_visibility' | 'google_serp' | 'runs' | 'web_intelligence'>('baselines')
   const [runsRefreshKey, setRunsRefreshKey] = useState(0)
   const [triggering, setTriggering] = useState(false)
   const [triggerMsg, setTriggerMsg] = useState('')
@@ -622,12 +623,13 @@ export default function IndustryBaselinesPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 border-b border-black/10">
+        <div className="flex flex-wrap gap-1 border-b border-black/10">
           {([
             { key: 'baselines',     label: 'SEO Baselines' },
             { key: 'ai_visibility', label: 'AI 可见度' },
             { key: 'google_serp',   label: 'Google 排名' },
             { key: 'runs',          label: 'Cron Runs' },
+            { key: 'web_intelligence', label: '竞争分析' },
           ] as const).map(({ key, label }) => (
             <button
               key={key}
@@ -680,6 +682,8 @@ export default function IndustryBaselinesPage() {
         {activeTab === 'ai_visibility' && <AiVisibilityPanel />}
 
         {activeTab === 'google_serp' && <GoogleSerpPanel />}
+
+        {activeTab === 'web_intelligence' && <WebIntelligencePanel />}
 
         {activeTab === 'runs' && (
           <CronRunsPanel refreshKey={runsRefreshKey} />

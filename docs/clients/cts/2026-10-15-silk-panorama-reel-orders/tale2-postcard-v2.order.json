@@ -1,0 +1,78 @@
+{
+ "client_id": "c0000000-0000-0000-0000-000000000000",
+ "goal_id": "287dc046-0b95-42fd-9fc1-4f5d39ecd8be",
+ "master_brief_id": "a93c40e0-a5d3-4f53-8cd5-88a85ff83e73",
+ "order_type": "fresh_angle",
+ "angle": "A Tale of Two Cities #2 postcard v2: Temple of Heaven hook, no repeated Great Wall at end, louder music",
+ "angle_source": {
+  "source": "manual_remotion_cts_may2027",
+  "authorized_by": "18 号统筹 2026-10-15：3 月团三条按复审意见用 postcard 重出无价格版（价格只放首评，以官网当天为准）；只出片到 in_review，不发布",
+  "facts_checked": "ctstours.co.nz/tours/china/discovery/beijing-xian, 2026-10-15：10 天/7 晚；Beijing→Xi'an；亮点 Walk the Great Wall、Explore the Forbidden City、Discover the Terracotta Warriors 官网原词；不写车次；价格与出发日只留首评链接。",
+  "note": "简报里的第一人称叙述要求不适用：本片无旁白，不替真人编亲身经历；质检口吻标记按误报处理；无 Early Bird/催单话术"
+ },
+ "rationale_one_liner": "Tale v2：钩子改天坛（官网亮点）、片尾换故宫俯瞰（不再长城重复）、音乐响度提到约 -17 LUFS；其余不动；只存草稿。",
+ "budget_cap_usd": 0.5,
+ "brief": {
+  "engine": "remotion",
+  "remotion": {
+   "template": "postcard",
+   "props": {
+    "brandColor": "#B61E2E",
+    "logoFile": "logo.png",
+    "logoMode": "always",
+    "musicFile": "music/analytical-scholar_n.mp3",
+    "musicStartSec": 0,
+    "scrim": 0.55,
+    "cardOpacity": 0.55,
+    "cardSide": "center",
+    "accent": "#FFB38A",
+    "hook": {
+     "clip": "clips/s7_temple_of_heaven.mp4",
+     "lines": [
+      "A TALE OF",
+      "TWO CITIES"
+     ]
+    },
+    "scenes": [
+     {
+      "clip": "clips/c1_greatwall_jinshanling.mp4",
+      "place": "Beijing",
+      "line": "Walk the Great Wall",
+      "sourceQuote": "Walk the Great Wall, one of the ten wonders of the world",
+      "placeSourceQuote": "Route, in order: Auckland, Beijing, Xi'an, then back to Auckland (Day 10: Beijing — Auckland)",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/discovery/beijing-xian"
+     },
+     {
+      "clip": "clips/c1b_terracotta.mp4",
+      "place": "Xi'an",
+      "line": "The Terracotta Warriors",
+      "sourceQuote": "Discover the Terracotta Warriors — the greatest archaeological find of the century",
+      "placeSourceQuote": "Beijing Wanda Moments or similar 4-star hotel; Mercure Xi'an Downtown or similar 4-star hotel",
+      "sourceUrl": "https://www.ctstours.co.nz/tours/china/discovery/beijing-xian"
+     }
+    ],
+    "price": null,
+    "end": {
+     "backdropClip": "clips/s9_forbidden_city_view.mp4",
+     "title": "10 DAYS"
+    },
+    "timing": {
+     "hookSec": 3.0,
+     "sceneSec": 4.0,
+     "priceSec": 4
+    },
+    "cardTop": 870
+   }
+  },
+  "copy": {
+   "caption": "Full day-by-day itinerary in the first comment. Ten days from Auckland: Beijing and Xi'an. Highlights include the Great Wall, the Forbidden City and the Terracotta Warriors. International and domestic airfares, 4-star hotel accommodation, an English-speaking tour guide, and the entrance fees and meals as specified in the itinerary are included. Travel insurance is not included.",
+   "endcard": {
+    "cta": "Full itinerary and inclusions",
+    "url": "https://www.ctstours.co.nz/tours/china/discovery/beijing-xian",
+    "offer": [
+     "10 days, Beijing and Xi'an"
+    ]
+   }
+  }
+ }
+}

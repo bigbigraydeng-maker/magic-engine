@@ -25,6 +25,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  // 🔴 已暂停(2026-09-08,PM「停抓图」):抓来的图无人消费 —— 把原图变成可用底图的
+  //    transformStockImages 是零调用方的死代码,抓来的原图被 evaluate 的「只收 AI 改过的图」
+  //    硬闸挡在成片外,这条 cron 只会白花 Apify 钱。render.yaml 里的调度已注释掉;这里再用
+  //    环境开关兜底(默认关),万一被手动打也不花钱、不抓图。
+  //    恢复时:设 FACTORY_STOCK_REFILL_ENABLED=true + render.yaml/registry 取消注释 +
+  //    先把 stock-transform 接进调用链(否则恢复了还是白抓)。
+  if (process.env.FACTORY_STOCK_REFILL_ENABLED !== 'true') {
+    return NextResponse.json({ ok: true, paused: true, reason: 'harvest paused 2026-09-08 (no downstream consumer)' })
+  }
+
   const cronRun = await startCronRun('factory-stock-refill')
   try {
     const summary = await runStockRefill()

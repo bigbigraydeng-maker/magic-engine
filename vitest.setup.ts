@@ -6,6 +6,15 @@
 import { vi } from 'vitest'
 import '@testing-library/jest-dom'
 
+// jsdom has no ResizeObserver — needed by any chart using recharts' ResponsiveContainer.
+class ResizeObserverStub implements ResizeObserver {
+  constructor(_callback: ResizeObserverCallback) {}
+  observe(_target: Element) {}
+  unobserve(_target: Element) {}
+  disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub
+
 // Mock environment variables for tests
 process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://test.supabase.co'
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key'

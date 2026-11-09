@@ -12,9 +12,12 @@
 import { describe, expect, it } from 'vitest'
 import { EMPTY_EXTERNAL_FACTS } from '../external-facts'
 import { deriveOperationalSnapshot } from '../operational-snapshot'
+import type { IntegrationEvidence } from '../types'
 import { makeComponent, makeFacts, mergedPr, mergedPrSync, mergedPrSyncToBranch, openDraftPr } from './_fixtures'
 
-const repoEv = (over: Record<string, unknown> = {}) => ({ kind: 'importer', ref: 'src/a.ts', observedAt: '2026-08-14', verification: 'repo_verified', ...over })
+const repoEv = (over: Partial<IntegrationEvidence> = {}): IntegrationEvidence => ({
+  kind: 'importer', ref: 'src/a.ts', observedAt: '2026-08-14', verification: 'repo_verified', ...over,
+})
 
 describe('code in main?', () => {
   it('机器同步的 merged PR → yes，evidenceSource 带 PR 号 + checkedAt', () => {

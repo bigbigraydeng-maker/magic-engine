@@ -142,13 +142,13 @@ async function runDiscovery(params: Parameters<typeof pullAndInsert>[0]): Promis
     .single<{ id: string }>()
   const logId = logRow?.id ?? null
 
-  const finish = (status: string, extra: Record<string, unknown>): Promise<void> =>
-    logId
-      ? supabaseAdmin.from('cron_run_logs')
-          .update({ status, finished_at: new Date().toISOString(), duration_ms: Date.now() - startedAt, ...extra })
-          .eq('id', logId)
-          .then(() => undefined, () => undefined)
-      : Promise.resolve()
+  const finish = async (status: string, extra: Record<string, unknown>): Promise<void> => {
+    if (!logId) return
+    await supabaseAdmin.from('cron_run_logs')
+      .update({ status, finished_at: new Date().toISOString(), duration_ms: Date.now() - startedAt, ...extra })
+      .eq('id', logId)
+      .then(() => undefined, () => undefined)
+  }
 
   try {
     const { discovered, inserted, noWebsite } = await pullAndInsert(params)

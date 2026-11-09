@@ -5,7 +5,7 @@
  * create fresh Ads from Page posts, and pause fatigued Ads.
  */
 
-const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
+import { GRAPH_BASE } from './graph-base'
 
 export interface AdSummary {
   adId: string
@@ -87,6 +87,37 @@ export async function createAdFromPost(input: {
   return { adId: json.id }
 }
 
+export interface AdPlacement {
+  adId: string
+  status: string | null
+  accountId: string | null
+  campaignId: string | null
+  adsetId: string | null
+}
+
+/** Read one ad. A failed read is null — the caller must not treat that as paused. */
+export async function readAdPlacement(adId: string, accessToken: string): Promise<AdPlacement | null> {
+  const fields = 'status,account_id,campaign_id,adset_id'
+  const url = `${GRAPH_BASE}/${adId}?fields=${fields}&access_token=${encodeURIComponent(accessToken)}`
+  const res = await fetch(url)
+  if (!res.ok) return null
+  const body = (await res.json()) as {
+    status?: string
+    account_id?: string
+    campaign_id?: string
+    adset_id?: string
+    error?: { message?: string }
+  }
+  if (body.error) return null
+  return {
+    adId,
+    status: body.status ?? null,
+    accountId: body.account_id ?? null,
+    campaignId: body.campaign_id ?? null,
+    adsetId: body.adset_id ?? null,
+  }
+}
+
 /**
  * Pause an Ad (soft off — creative + insights preserved for later analysis).
  */
@@ -98,6 +129,17 @@ export async function pauseAd(adId: string, accessToken: string): Promise<void> 
     body,
   })
   if (!res.ok) throw new Error(`pauseAd ${adId}: ${res.status} ${await res.text()}`)
+}
+
+/** Turn one already-paused ad on. Does not touch the ad set or the campaign. */
+export async function activateAd(adId: string, accessToken: string): Promise<boolean> {
+  const body = new URLSearchParams({ status: 'ACTIVE', access_token: accessToken })
+  const res = await fetch(`${GRAPH_BASE}/${adId}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body,
+  })
+  return res.ok
 }
 
 /**

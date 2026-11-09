@@ -1,0 +1,946 @@
+<title>Where Inbound China Actually Grew</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600;6..72,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap">
+
+<style>
+  :root{
+    --ground:#070E1A;--surface:#0F1E33;--surface-2:#142A45;--surface-3:#1A324F;
+    --ink:#EDF3FA;--ink-soft:#C7D3E4;--ink-muted:#7C93AE;
+    --rule:#1F3450;--rule-strong:#2B4A70;
+    --me-blue:#6AAAFF;--me-blue-soft:#8AC5FF;--growth:#4BD39A;
+    --gold:#F4C260;--gold-soft:#FFD888;--alert:#F2724A;
+    --chip-bg:#17304E;--chip-ink:#C7D3E4;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 24px 60px rgba(0,0,0,.35);
+    --grad-cover:radial-gradient(140% 90% at 12% 0%,#1A3A63 0%,#0B1F3B 42%,#070E1A 100%);
+    --grad-panel:linear-gradient(160deg,#0F1E33 0%,#0A1728 100%);
+  }
+  *{box-sizing:border-box}html,body{margin:0;padding:0}
+  body{background:var(--ground);color:var(--ink);
+    font-family:'Inter','PingFang SC','Hiragino Sans GB','Microsoft YaHei',-apple-system,sans-serif;
+    font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .display,h1,h2,h3,h4{font-family:'Newsreader','Songti SC','Noto Serif SC',Georgia,serif;
+    font-weight:500;letter-spacing:-.012em;text-wrap:balance;color:var(--ink)}
+  h1{font-size:clamp(34px,4.6vw,56px);line-height:1.06;margin:0;font-weight:600}
+  h2{font-size:clamp(25px,2.7vw,33px);line-height:1.18;margin:0 0 14px}
+  h3{font-size:19px;line-height:1.3;margin:0 0 10px;font-weight:600}
+  h4{font-size:15.5px;line-height:1.35;margin:0 0 6px;font-weight:600}
+  .num,.kpi-value{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;
+    font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .eyebrow{font-family:'Inter',sans-serif;font-size:10.5px;font-weight:600;
+    letter-spacing:.22em;text-transform:uppercase;color:var(--me-blue)}
+  a{color:var(--me-blue-soft);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:currentColor}
+  .wrap{max-width:1120px;margin:0 auto;padding:0 32px}
+  section{padding:46px 0;border-top:1px solid var(--rule)}
+  section:first-of-type{border-top:none}
+
+  .brandbar{display:flex;align-items:center;justify-content:space-between;
+    padding:18px 32px;border-bottom:1px solid var(--rule);background:var(--ground)}
+  .brand{display:flex;align-items:center;gap:13px}
+  .brand-logo{width:34px;height:32px;border-radius:7px;background:#0F1E33;
+    display:grid;place-items:center;box-shadow:var(--shadow);border:1px solid var(--rule)}
+  .brand-name{display:flex;flex-direction:column;line-height:1.12}
+  .brand-name .n1{font-family:'Newsreader',Georgia,serif;font-weight:600;font-size:17px;color:var(--ink)}
+  .brand-name .n1 em{font-style:normal;color:var(--gold-soft)}
+  .brand-name .n2{font-size:9.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--ink-muted);margin-top:4px}
+  .brandbar .meta{font-size:11px;color:var(--ink-muted);text-align:right;line-height:1.5}
+  .brandbar .meta strong{color:var(--ink-soft);font-weight:600;display:block;font-size:11.5px}
+
+  .cover{background:var(--grad-cover);padding:72px 0 56px;border-top:none;position:relative;overflow:hidden}
+  .cover:before{content:'';position:absolute;right:-100px;top:40px;width:520px;height:520px;
+    border-radius:50%;background:radial-gradient(circle at center,rgba(244,194,96,.10) 0%,transparent 65%)}
+  .cover .kicker{display:inline-flex;align-items:center;gap:10px;padding:6px 14px;
+    border:1px solid var(--rule-strong);border-radius:999px;font-size:10.5px;
+    letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);
+    background:color-mix(in srgb,var(--surface) 60%,transparent);margin-bottom:30px}
+  .cover .kicker .dot{width:6px;height:6px;border-radius:50%;background:var(--gold);
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--gold) 25%,transparent)}
+  .cover h1{max-width:20ch}
+  .cover h1 em{font-style:normal;color:var(--gold-soft);font-weight:600}
+  .cover .lead{max-width:62ch;font-family:'Newsreader',Georgia,serif;
+    font-size:clamp(18px,1.7vw,22px);line-height:1.55;color:var(--ink-soft);margin:26px 0 0}
+  .cover .lead strong{color:var(--gold-soft);font-weight:500}
+  .cover-meta{display:flex;justify-content:space-between;flex-wrap:wrap;gap:20px;
+    margin-top:30px;font-size:11px;color:var(--ink-muted)}
+  .cover-meta .label{text-transform:uppercase;letter-spacing:.18em;font-weight:600;
+    color:var(--ink-soft);display:block;margin-bottom:4px;font-size:9.5px}
+
+  .stance{margin-top:26px;padding:22px 24px;background:color-mix(in srgb,var(--me-blue) 8%,transparent);
+    border:1px solid color-mix(in srgb,var(--me-blue) 26%,var(--rule));border-radius:12px}
+  .stance .lbl{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--me-blue-soft);
+    font-weight:600;margin-bottom:10px}
+  .stance p{margin:0;font-size:13.5px;color:var(--ink-soft);line-height:1.65}
+
+  .chip{display:inline-flex;align-items:center;padding:3px 9px;border-radius:5px;
+    background:var(--chip-bg);color:var(--chip-ink);font-size:10.5px;font-weight:500;white-space:nowrap}
+  .chip.blue{background:color-mix(in srgb,var(--me-blue) 20%,transparent);color:var(--me-blue-soft)}
+  .chip.green{background:color-mix(in srgb,var(--growth) 20%,transparent);color:var(--growth)}
+  .chip.gold{background:color-mix(in srgb,var(--gold) 20%,transparent);color:var(--gold-soft)}
+  .chip.alert{background:color-mix(in srgb,var(--alert) 20%,transparent);color:var(--alert)}
+  .chip.muted{background:color-mix(in srgb,var(--ink-muted) 15%,transparent);color:var(--ink-muted)}
+
+  .sec-head{display:flex;flex-direction:column;gap:6px;margin-bottom:24px;max-width:74ch}
+  .sec-head .en{font-family:'Newsreader',Georgia,serif;font-size:14.5px;font-style:italic;color:var(--ink-muted)}
+  .callout{margin-top:20px;padding:18px 22px;border-left:3px solid var(--gold);
+    background:color-mix(in srgb,var(--gold) 8%,transparent);border-radius:0 8px 8px 0;
+    color:var(--ink-soft);font-size:14.5px;line-height:1.65}
+  .callout strong{color:var(--ink);font-weight:600}
+  .callout.blue{border-left-color:var(--me-blue);background:color-mix(in srgb,var(--me-blue) 8%,transparent)}
+  .source-note{margin-top:18px;font-size:11.5px;color:var(--ink-muted);line-height:1.55;
+    padding:12px 14px;border:1px dashed var(--rule);border-radius:6px}
+  .source-note strong{color:var(--ink-soft);font-weight:600}
+
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+  .kpi{padding:22px;background:var(--grad-panel);border:1px solid var(--rule);border-radius:12px}
+  .kpi .label{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-muted)}
+  .kpi .kpi-value{font-size:28px;font-weight:600;color:var(--ink);margin:12px 0 6px;line-height:1.05}
+  .kpi .kpi-value .unit{font-size:13px;color:var(--ink-muted);margin-left:3px;font-weight:500}
+  .kpi .delta{font-size:12.5px;color:var(--growth);font-family:'JetBrains Mono',monospace}
+  .kpi .delta.down{color:var(--alert)}
+  .kpi .delta.flat{color:var(--ink-muted)}
+  .kpi .foot{font-size:11px;color:var(--ink-muted);margin-top:10px;line-height:1.45}
+
+  .findings{display:grid;gap:12px}
+  .finding{display:grid;grid-template-columns:52px 1fr;gap:16px;padding:18px 20px;
+    background:var(--surface);border:1px solid var(--rule);border-radius:12px}
+  @media(max-width:600px){.finding{grid-template-columns:1fr;gap:12px}}
+  .finding .num-big{font-family:'JetBrains Mono',monospace;font-size:30px;font-weight:600;
+    color:var(--gold);line-height:1;padding-top:3px}
+  .finding h3{margin-bottom:8px;font-size:20px}
+  .finding p{margin:0 0 8px;font-size:14px;color:var(--ink-soft);line-height:1.65}
+  .finding p:last-of-type{margin-bottom:0}
+  .finding .tags{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap}
+  .finding .mk{margin-top:12px;padding:12px 14px;background:color-mix(in srgb,var(--me-blue) 9%,transparent);
+    border-radius:8px;font-size:13px;color:var(--ink-soft);line-height:1.6}
+  .finding .mk b{color:var(--me-blue-soft);font-weight:600}
+
+  .tab-wrap{overflow-x:auto;margin:0 -4px}
+  .tab{width:100%;min-width:660px;border-collapse:separate;border-spacing:0;font-size:13px}
+  .tab th,.tab td{text-align:left;padding:11px 13px;border-bottom:1px solid var(--rule);vertical-align:middle}
+  .tab th{font-size:10px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-muted);background:color-mix(in srgb,var(--surface-2) 65%,transparent);
+    border-bottom:1px solid var(--rule-strong);white-space:nowrap}
+  .tab td.k{font-family:'Newsreader',Georgia,serif;font-size:15px;font-weight:600;color:var(--ink)}
+  .tab td.k .en{display:block;font-family:'Inter',sans-serif;font-size:10.5px;
+    color:var(--ink-muted);font-weight:500;margin-top:2px}
+  .tab td.n{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:13.5px;
+    color:var(--ink);text-align:right}
+  .tab td.g{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:14px;text-align:right}
+  .tab td.g.up{color:var(--growth)}
+  .tab td.g.down{color:var(--alert)}
+  .tab td.small{font-size:12.5px;color:var(--ink-soft)}
+  .tab tr.hot td{background:color-mix(in srgb,var(--growth) 8%,transparent)}
+  .tab tr.cold td{background:color-mix(in srgb,var(--alert) 8%,transparent)}
+
+  .myth{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:680px){.myth{grid-template-columns:1fr}}
+  .myth-card{padding:24px;background:var(--surface);border:1px solid var(--rule);border-radius:12px}
+  .myth-card.wrong{border-top:4px solid var(--alert)}
+  .myth-card.right{border-top:4px solid var(--growth)}
+  .myth-card .t{font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;font-weight:600;margin-bottom:10px}
+  .myth-card.wrong .t{color:var(--alert)}
+  .myth-card.right .t{color:var(--growth)}
+  .myth-card h3{font-family:'Newsreader',Georgia,serif;font-size:19px;margin-bottom:10px}
+  .myth-card p{font-size:13px;color:var(--ink-soft);line-height:1.6;margin:0 0 8px}
+  .myth-card ul{margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--ink-soft);line-height:1.65}
+
+  .funnel{display:grid;grid-template-columns:1fr auto 1fr;gap:18px;align-items:center;max-width:860px;margin:0 auto}
+  @media(max-width:680px){.funnel{grid-template-columns:1fr;gap:12px}}
+  .fn{padding:20px;background:var(--surface);border:1px solid var(--rule);border-radius:10px}
+  .fn.old{border-color:color-mix(in srgb,var(--ink-muted) 35%,var(--rule));opacity:.9}
+  .fn.new{border-color:color-mix(in srgb,var(--growth) 35%,var(--rule))}
+  .fn .t{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-muted);font-weight:600}
+  .fn ol{margin:12px 0 0;padding-left:20px;font-size:13px;color:var(--ink-soft);line-height:1.7}
+  .fn .dur{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;margin-top:12px}
+  .fn.old .dur{color:var(--ink-muted)}
+  .fn.new .dur{color:var(--growth)}
+  .fn-arrow{font-family:'JetBrains Mono',monospace;font-size:20px;color:var(--gold-soft);text-align:center;font-weight:600}
+
+  .priority{display:flex;gap:20px;padding:18px 0;border-bottom:1px solid var(--rule)}
+  .priority:last-child{border-bottom:none}
+  .priority .p-num{font-family:'JetBrains Mono',monospace;font-size:34px;font-weight:600;
+    color:var(--gold);line-height:1;flex-shrink:0;width:60px;padding-top:5px}
+  .priority h3{font-family:'Newsreader',Georgia,serif;font-size:21px;margin-bottom:8px}
+  .priority p{font-size:13.5px;color:var(--ink-soft);line-height:1.65;margin:0 0 8px}
+  .priority .why{font-size:12.5px;color:var(--ink-muted);font-style:italic;line-height:1.55}
+  @media(max-width:560px){.priority{flex-direction:column;gap:12px}.priority .p-num{width:auto}}
+
+  .gap-list{display:grid;gap:12px}
+  .gap-item{padding:18px 20px;background:var(--surface);border:1px solid var(--rule);
+    border-radius:10px;border-left:3px solid var(--ink-muted)}
+  .gap-item h4{font-size:14px;color:var(--ink);margin-bottom:6px;font-family:'Inter',sans-serif;font-weight:600}
+  .gap-item p{font-size:12.5px;color:var(--ink-muted);margin:0;line-height:1.6}
+
+  .footer{padding:52px 32px 44px;border-top:1px solid var(--rule);background:var(--surface-2);
+    color:var(--ink-muted);font-size:12.5px;line-height:1.6}
+  .footer .wrap{padding:0}
+  .footer .inst{display:flex;align-items:center;gap:12px;margin-bottom:24px;
+    padding-bottom:22px;border-bottom:1px solid var(--rule)}
+  .footer .inst .lg{width:30px;height:28px;border-radius:6px;background:#0F1E33;
+    display:grid;place-items:center;border:1px solid var(--rule);flex-shrink:0}
+  .footer .inst .nm{font-family:'Newsreader',Georgia,serif;font-size:17px;font-weight:600;color:var(--ink);line-height:1.2}
+  .footer .inst .nm span{display:block;font-family:'Inter',sans-serif;font-size:10px;
+    letter-spacing:.2em;text-transform:uppercase;color:var(--ink-muted);font-weight:500;margin-top:4px}
+  .footer .grid{display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:30px;margin-bottom:26px}
+  @media(max-width:720px){.footer .grid{grid-template-columns:1fr}}
+  .footer h4{font-family:'Inter',sans-serif;font-size:10.5px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--ink);margin:0 0 11px;font-weight:600}
+  .footer .legal{padding-top:20px;border-top:1px solid var(--rule);display:flex;
+    justify-content:space-between;flex-wrap:wrap;gap:12px;font-size:11px}
+
+  @media print{
+    html,body{background:#070E1A!important;color:#EDF3FA!important;
+      -webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+    section{padding:30px 0}
+    .cover{padding:52px 0 40px;page-break-after:always;break-after:page}
+    .sec-head{break-after:avoid-page}h1,h2,h3{break-after:avoid}
+    .finding,.myth-card,.kpi,.gap-item,.fn{break-inside:avoid;page-break-inside:avoid}
+    .tab-wrap{overflow:visible}.tab{min-width:0;font-size:10.5px}
+    .tab th,.tab td{padding:7px 9px}
+  }
+/* ==== CHART SYSTEM (inlined from docs/magic-insight/_shared/charts.css) ==== */
+/*
+ * Magic Insight 报告图表系统 —— 手写 CSS + inline SVG，不依赖任何 JS 图表库。
+ *
+ * ⚠️ 本文件是【起新卷时的共享模板】，不是被 report.html 外链引用的样式表。
+ *    每份 report.html 必须把这段 CSS **内联**进自己的 <style> 里。
+ *    原因：报告要对外发送（邮件附件、单独另存、转发），外链 CSS 一旦脱离目录
+ *    图表会全部散版，而 PDF 里看不出问题。自包含是硬要求。
+ *    起新卷时把本文件内容复制进去；改进了图表样式请回写本文件，让后续卷受益。
+ *
+ * 为什么不用 Chart.js / ECharts：报告最终产物是 headless Chrome 打印的 PDF。
+ * JS 图表库要等 canvas 渲染完成，与 --virtual-time-budget 抢时序，
+ * 偶发画一半或全白，而 PDF 一旦出错没人会发现（图是空的但版面正常）。
+ * SVG 与 CSS 是声明式的，浏览器一次布局就定稿，确定性 100%。
+ *
+ * 所有图表的数值必须与 sources.md 台账一致。改数字请同时改台账。
+ */
+
+/* ---------- 图表外壳 ---------- */
+.chart {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 18px 20px 16px;
+}
+.chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+}
+.chart-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: .01em;
+}
+.chart-unit {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.chart-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--rule);
+  font-size: 10.5px;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+
+/* ---------- 横向条形图（含正负分叉） ---------- */
+.bars { display: flex; flex-direction: column; gap: 7px; }
+.bar-row {
+  display: grid;
+  grid-template-columns: 76px minmax(90px, 1fr) 52px;
+  align-items: center;
+  gap: 10px;
+}
+.bar-label {
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bar-track {
+  position: relative;
+  height: 15px;
+  /* 保底宽度：grid 的 1fr 在容器宽度不确定时会塌成 0，
+     导致所有柱子不可见而版面看起来正常——PDF 里没人会发现。
+     给一个 min-width 让它在任何容器下都画得出来。 */
+  min-width: 90px;
+  background: color-mix(in srgb, var(--surface-3) 60%, transparent);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 2px;
+}
+.bar-fill.pos { background: linear-gradient(90deg, color-mix(in srgb, var(--growth) 55%, transparent), var(--growth)); }
+.bar-fill.neg { background: linear-gradient(270deg, color-mix(in srgb, var(--alert) 55%, transparent), var(--alert)); }
+.bar-fill.gold { background: linear-gradient(90deg, color-mix(in srgb, var(--gold) 55%, transparent), var(--gold)); }
+.bar-fill.blue { background: linear-gradient(90deg, color-mix(in srgb, var(--me-blue) 55%, transparent), var(--me-blue)); }
+.bar-fill.muted { background: color-mix(in srgb, var(--ink-muted) 45%, transparent); }
+/* 零轴 */
+.bar-track .zero {
+  position: absolute; top: 0; bottom: 0; width: 1px;
+  background: var(--rule-strong);
+}
+.bar-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: right;
+}
+.bar-value.pos { color: var(--growth); }
+.bar-value.neg { color: var(--alert); }
+.bar-value.neutral { color: var(--ink); }
+
+/* 高亮某一行（用于点出结论所在） */
+.bar-row.hl .bar-label { color: var(--ink); font-weight: 600; }
+
+/* ---------- 堆叠条形图 ---------- */
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.stack-row .sl {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 11.5px; margin-bottom: 5px;
+}
+.stack-row .sl .nm { color: var(--ink); font-weight: 600; }
+.stack-row .sl .tot { font-family: 'JetBrains Mono', monospace; color: var(--ink-muted); font-size: 10.5px; }
+.stack-bar { display: flex; height: 20px; border-radius: 3px; overflow: hidden; }
+.stack-seg { display: flex; align-items: center; justify-content: center; font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 600; }
+.stack-seg.foreign { background: var(--me-blue); color: #06101F; }
+.stack-seg.other { background: color-mix(in srgb, var(--ink-muted) 42%, transparent); color: var(--ink-soft); }
+.stack-seg.hkmt { background: var(--gold); color: #06101F; }
+
+/* ---------- 图例 ---------- */
+.legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; font-size: 10.5px; color: var(--ink-muted); }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+
+/* ---------- 甜甜圈 ---------- */
+.donut-wrap { display: grid; grid-template-columns: 168px 1fr; gap: 18px; align-items: center; }
+@media (max-width: 560px) { .donut-wrap { grid-template-columns: 1fr; } }
+.donut { position: relative; }
+.donut svg { display: block; transform: rotate(-90deg); }
+.donut-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; pointer-events: none;
+}
+.donut-center .v { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 600; color: var(--gold-soft); line-height: 1; }
+.donut-center .l { font-size: 9.5px; color: var(--ink-muted); margin-top: 4px; letter-spacing: .06em; }
+.donut-key { display: flex; flex-direction: column; gap: 8px; }
+.donut-key .row { display: grid; grid-template-columns: 12px 1fr auto; gap: 9px; align-items: center; font-size: 11.5px; }
+.donut-key .sw { width: 10px; height: 10px; border-radius: 2px; }
+.donut-key .nm { color: var(--ink-soft); }
+.donut-key .pc { font-family: 'JetBrains Mono', monospace; font-weight: 600; color: var(--ink); }
+
+/* ---------- 图表并排网格 ---------- */
+.chart-grid { display: grid; gap: 14px; }
+.chart-grid.two { grid-template-columns: 1fr 1fr; }
+.chart-grid.side { grid-template-columns: 1.15fr .85fr; }
+@media (max-width: 760px) { .chart-grid.two, .chart-grid.side { grid-template-columns: 1fr; } }
+
+/* ---------- 打印保真 ---------- */
+@media print {
+  .chart { break-inside: avoid; page-break-inside: avoid; }
+  .bar-fill, .stack-seg, .donut svg circle {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+  /* ==== COVER SYSTEM (inlined from docs/magic-insight/_shared/cover.css) ==== */
+/*
+ * Magic Insight 报告封面系统 —— 全幅照片 hero + 暗色遮罩 + 醒目标题。
+ *
+ * ⚠️ 起新卷时的共享模板，必须【内联】进 report.html。
+ *
+ * 图片方案（2026-09-04 v2，取代 base64）：封面图存成卷目录里的
+ *   cover.jpg，HTML 用相对路径 background-image:url(cover.jpg) 引用。
+ *   - 对外交付物是 PDF，headless Chrome 生成 PDF 时会把图烘焙进去，
+ *     PDF 自包含、国内可靠——不需要 base64。
+ *   - 好处：换图 = 换一个文件，不用 curl→压缩→base64→内联那一套；
+ *     report.html 从 600K+ 瘦回几十 K，可读可 diff。
+ *   - HTML 不再单文件自包含，但那不是交付物；对外只发 PDF。
+ *
+ * 每卷换一张贴题的 Unsplash 照片，打破「清一色深蓝背景」的同质化。
+ * 图片来源必须记进该卷 sources.md（摄影师 + Unsplash 链接 + License）。
+ *
+ * ⚠️ 禁用 text-shadow：PDF 阅读器（微信 / macOS 预览等）会把文字阴影
+ *    渲染成白色横条（2026-09-04 实测事故）。文字可读性靠底部实色遮罩，
+ *    不靠 shadow。
+ */
+
+/* 照片封面容器：盖住整块 cover section */
+.cover.cover-photo {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  min-height: 560px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  background: #06101F;
+}
+
+/* 背景照片层 */
+.cover-photo .cover-img {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* 暗色渐变遮罩：底部最深（放标题），中段透一点图，顶部再压一档给品牌角标 */
+.cover-photo .cover-scrim {
+  position: absolute;
+  inset: 0;
+  /* 底部压到近乎实色，标题坐在实底上——去掉 text-shadow 后靠这个保证可读 */
+  background:
+    linear-gradient(180deg,
+      rgba(6, 16, 31, 0.78) 0%,
+      rgba(6, 16, 31, 0.32) 24%,
+      rgba(6, 16, 31, 0.52) 52%,
+      rgba(6, 16, 31, 0.88) 78%,
+      rgba(6, 16, 31, 0.98) 100%),
+    linear-gradient(90deg,
+      rgba(6, 16, 31, 0.55) 0%,
+      rgba(6, 16, 31, 0.12) 55%,
+      rgba(6, 16, 31, 0.0) 100%);
+}
+
+/* 顶部品牌条 */
+.cover-photo .cover-topbar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 24px 40px;
+}
+.cover-photo .cover-topbar .cb-brand {
+  display: flex; align-items: center; gap: 11px;
+}
+.cover-photo .cover-topbar .cb-logo {
+  width: 34px; height: 32px; border-radius: 8px;
+  background: rgba(6, 16, 31, 0.55);
+  border: 1px solid rgba(244, 194, 96, 0.4);
+  display: grid; place-items: center;
+  backdrop-filter: blur(4px);
+}
+.cover-photo .cover-topbar .cb-name {
+  font-family: 'Newsreader', Georgia, serif;
+  font-size: 16px; font-weight: 600; color: #fff;
+  letter-spacing: .01em;
+}
+.cover-photo .cover-topbar .cb-name em { font-style: normal; color: var(--gold-soft); }
+.cover-photo .cover-topbar .cb-vol {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px; letter-spacing: .18em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(6, 16, 31, 0.35);
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+}
+
+/* 标题区（压在底部深色处） */
+.cover-photo .cover-hero {
+  position: relative;
+  z-index: 2;
+  margin-top: auto;
+  padding: 0 40px 34px;
+  max-width: 1120px;
+}
+.cover-photo .cover-eyebrow {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 10.5px; letter-spacing: .2em; text-transform: uppercase;
+  color: var(--gold-soft); font-weight: 600;
+  margin-bottom: 16px;
+}
+.cover-photo .cover-eyebrow .dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--gold);
+  box-shadow: 0 0 0 3px rgba(244, 194, 96, 0.25);
+}
+.cover-photo .cover-hero h1 {
+  color: #fff;
+  font-size: clamp(38px, 5.2vw, 62px);
+  line-height: 1.04;
+  margin: 0;
+  font-weight: 600;
+  max-width: 20ch;
+}
+.cover-photo .cover-hero h1 em { font-style: normal; color: var(--gold-soft); font-weight: 600; }
+.cover-photo .cover-hero .cover-lead {
+  font-family: 'Newsreader', Georgia, serif;
+  font-size: clamp(16px, 1.6vw, 20px);
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 20px 0 0;
+  max-width: 64ch;
+}
+.cover-photo .cover-hero .cover-lead strong { color: var(--gold-soft); font-weight: 500; }
+
+/* 照片版权署名 */
+.cover-photo .cover-credit {
+  position: absolute;
+  right: 12px; bottom: 8px;
+  z-index: 2;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: .02em;
+}
+
+/* 封面下方的信息带（立场 + 元信息），紧接照片，深色 */
+.cover-infoband {
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+  padding: 26px 0 30px;
+}
+
+@media (max-width: 640px) {
+  .cover-photo { min-height: 480px; }
+  .cover-photo .cover-topbar { padding: 18px 22px; }
+  .cover-photo .cover-hero { padding: 0 22px 26px; }
+  .cover-photo .cover-topbar .cb-name { font-size: 14px; }
+}
+
+@media print {
+  .cover.cover-photo {
+    min-height: 0;
+    height: 248mm; /* 占满首页 A4 可打印高度 */
+    page-break-after: always;
+    break-after: page;
+  }
+  .cover-photo .cover-img,
+  .cover-photo .cover-scrim {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+  
+
+  /* ---- SERP 排名列表（Vol.05 新增）---- */
+  .rank-list{display:grid;gap:5px;margin-top:4px}
+  .rank-row{display:grid;grid-template-columns:26px 1fr auto;align-items:center;gap:12px;
+    padding:7px 12px;background:var(--surface);border:1px solid var(--rule);border-radius:7px}
+  .rank-row .rk{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;color:var(--ink-muted);text-align:center}
+  .rank-row .dm{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--ink)}
+  .rank-row .tp{font-size:10.5px;font-weight:600;padding:2px 9px;border-radius:4px;white-space:nowrap}
+  .rank-row .tp.local{background:color-mix(in srgb,var(--me-blue) 18%,transparent);color:var(--me-blue-soft)}
+  .rank-row .tp.intl{background:color-mix(in srgb,var(--ink-muted) 20%,transparent);color:var(--ink-soft)}
+  .rank-row .tp.content{background:color-mix(in srgb,var(--gold) 18%,transparent);color:var(--gold-soft)}
+  .rank-row .tp.cn{background:color-mix(in srgb,var(--alert) 18%,transparent);color:var(--alert)}
+  @media print{.rank-row{break-inside:avoid}}
+  @page{size:A4;margin:11mm 10mm 13mm;background:#070E1A}
+</style>
+
+<section class="cover cover-photo">
+  <div class="cover-img" style="background-image:url(cover.jpg)"></div>
+  <div class="cover-scrim"></div>
+  <div class="cover-topbar">
+    <div class="cb-brand"><div class="cb-logo"><svg width="22" height="20" viewBox="0 0 68 64" role="img" aria-label="Magic Insight"><defs><linearGradient id="cl1" x1="0" y1="0" x2="68" y2="64" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#EBCB8B"/><stop offset=".55" stop-color="#C4912E"/><stop offset="1" stop-color="#A6781F"/></linearGradient><radialGradient id="cl2" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#FFF"/><stop offset=".45" stop-color="#FBEFD2"/><stop offset="1" stop-color="#EBCB8B"/></radialGradient></defs><g stroke="url(#cl1)" fill="none" stroke-linecap="round" stroke-width="3.4"><path d="M8,16 C20,19 31,25 46,30"/><path d="M8,24 C21,26 31,28 46,30"/><path d="M8,32 C22,33 31,33 46,30"/><path d="M8,40 C22,39 31,37 46,30"/><path d="M8,48 C20,45 31,38 46,30"/></g><g fill="url(#cl1)"><circle cx="8" cy="16" r="2.2"/><circle cx="8" cy="24" r="2.2"/><circle cx="8" cy="32" r="2.2"/><circle cx="8" cy="40" r="2.2"/><circle cx="8" cy="48" r="2.2"/></g><rect x="45" y="21" width="12" height="12" rx="3" fill="#FFFCF5" stroke="url(#cl1)" stroke-width="1.8"/><rect x="48" y="24" width="6" height="6" rx="1.5" fill="url(#cl2)"/></svg></div><span class="cb-name">Magic <em>Insight</em> 数据研究院</span></div>
+    <span class="cb-vol">Research Series · Vol.05</span>
+  </div>
+  <div class="cover-hero">
+    <div class="cover-eyebrow"><span class="dot"></span>中国 → 澳洲小批量物流 · 海外市场数字营销赛道观察</div>
+    <h1>中国造满了澳洲的货架，<br><em>可没人在英文世界接住这门生意</em></h1>
+    <p class="cover-lead">澳洲人网购的家具七成多来自中国、灯具和陶瓷近八成来自中国——这是海关口径的事实。需求一直在长。可当洋人小卖家用英文搜"怎么把货从中国运来"，<strong>搜到的首页几乎没有中国背景的物流商</strong>。这份报告把这条缺口摆出来。</p>
+  </div>
+  <div class="cover-credit">Photo · Rinson Chory / Unsplash</div>
+</section>
+<section class="cover-infoband">
+  <div class="wrap">
+    <div class="stance">
+      <div class="lbl">这份报告的立场</div>
+      <p>不是写给某一家货代或某一个客户的。这是 Magic Engine 所处的 <strong style="color:var(--ink)">digital marketing（海外市场）赛道</strong>的观察——拉数据、看结构、找增长机会。事实在前，营销含义在后；判断标注为判断，不冒充数据。</p>
+    </div>
+    <div class="cover-meta">
+      <div><span class="label">出品</span>Magic Insight 数据研究院</div>
+      <div><span class="label">隶属</span>Magic Engine · magicengine.com.au</div>
+      <div><span class="label">数据核查</span>2026-09-05 · 逐条打开发布方页面</div>
+      <div><span class="label">口径</span>官方 / 行业 / 判断 三层</div>
+      <div><span class="label">版本</span>Vol.05 · v1.0</div>
+    </div>
+  </div>
+</section>
+
+<!-- 01 -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">01 · 五条核心判断</span>
+      <h2>只看一页就看这页</h2>
+      <div class="en">Five calls, each backed by a primary source. Where a number is an estimate or missing, it says so.</div>
+    </div>
+    <div class="findings">
+      <div class="finding">
+        <div class="num-big">01</div>
+        <div>
+          <h3>洋人小卖家要卖的货，本来就高度依赖中国</h3>
+          <p>不是趋势判断，是海关口径的事实。按 ABS 分品类数据，澳洲进口的家具床垫有 <strong>74.4%</strong> 来自中国、灯具照明 <strong>78.9%</strong>、陶瓷 <strong>79.1%</strong>、贱金属家用器具 <strong>75.0%</strong>、婴儿车与玩具 <strong>68.3%</strong>。这些正是独立零售和小电商最主力的品类。</p>
+          <div class="mk"><b>营销含义：</b>需求底盘不用培育，它已经存在。要抢的不是"让人买中国货"，是"让要买中国货的人找到你运"。</div>
+          <div class="tags"><span class="chip green">ABS 一手 · CY2025</span></div>
+        </div>
+      </div>
+      <div class="finding">
+        <div class="num-big">02</div>
+        <div>
+          <h3>中国是澳洲第一大进口来源，且断层领先</h3>
+          <p>澳洲自中国进口（货物+服务）<strong>A$1,302 亿（A$130.2 b）</strong>，占澳洲总进口 <strong>19.8%</strong>，第一大来源国——第二名美国 15.0%、第三名日本仅 4.9%。若只看货物（不含服务），据 ABS 月度数据推算约为 <strong>A$1,237 亿（A$123.7 b）</strong>，占货物进口约 26.9%（因分母不含服务，比例天然更高，两者不可直接相减比较）。这条贸易走廊的体量本身不缺，缺的是把小单接住的服务层。</p>
+          <div class="mk"><b>营销含义：</b>大盘足够大，容得下专做"零散小单"的细分玩家——大 3PL 不屑于做的那块，正是空档。</div>
+          <div class="tags"><span class="chip green">DFAT / ABS 一手 · CY2025</span></div>
+        </div>
+      </div>
+      <div class="finding">
+        <div class="num-big">03</div>
+        <div>
+          <h3>需求端在长，但客单价在跌——利好小批量</h3>
+          <p>澳洲线上消费 CY2025 达 <strong>A$826 亿（A$82.6 b）</strong>（+14%），82% 家庭网购。但平均客单价 <strong>A$96，同比 −0.4%</strong>。买得更频、单笔更小——这正是"高频、零散、小批量"进口的需求形态。</p>
+          <div class="mk"><b>营销含义：</b>市场结构在往小批量高频走，恰好是集货/拼箱/小包这类服务的顺风，而不是整柜大宗的顺风。</div>
+          <div class="tags"><span class="chip green">Australia Post 一手 · CY2025</span></div>
+        </div>
+      </div>
+      <div class="finding">
+        <div class="num-big">04</div>
+        <div>
+          <h3>英文搜索入口，几乎没有中国背景的物流商</h3>
+          <p>实测澳洲区搜 <em>freight forwarder china to australia</em>，首页 12 个结果里，本地老牌货代占 6 个（willship / transcoast / wwcf / brint / icecargo / auspost）、国际平台占 3 个（Freightos / DHL / Wise），<strong>中国背景的货代只有 2 个，且都排在第 10 名开外</strong>。</p>
+          <div class="mk"><b>营销含义：</b>洋人客户的第一触点被本地玩家占满。谁能把英文站、结构化内容、评价做扎实，谁就能在这个入口上补位。</div>
+          <div class="tags"><span class="chip green">Semrush SERP 实测</span></div>
+        </div>
+      </div>
+      <div class="finding">
+        <div class="num-big">05</div>
+        <div>
+          <h3>这条航线连公开运价指数都没有——信息高度不对称</h3>
+          <p>Freightos FBX、Drewry WCI、Xeneta XSI-C——三家权威海运运价指数<strong>全部不发布中国→澳洲/大洋洲航线</strong>。市场上只有货代自己挂的指导价，各家报出的数字能差好几倍。信息不对称越严重，"讲清楚成本"的内容就越值钱。</p>
+          <div class="mk"><b>营销含义：</b>把"这条线到底多少钱、含哪些费"讲透明，本身就是稀缺内容，是低成本高信任的获客切口。</div>
+          <div class="tags"><span class="chip gold">三家发布方页面实测确认</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 02 需求底盘 -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">02 · 需求底盘</span>
+      <h2>洋人的货架，本来就是中国造</h2>
+      <div class="en">Not a forecast — customs data. For the categories small sellers live on, China is already the dominant source.</div>
+    </div>
+    <div class="chart" style="margin-bottom:22px">
+      <div class="chart-head">
+        <span class="chart-title">图 1 · 小卖家主力品类中，中国占澳洲该品类进口的比重</span>
+        <span class="chart-unit">CY2025 · 仅货物 · 海关价值</span>
+      </div>
+      <div class="bars">
+        <div class="bar-row hl"><span class="bar-label">陶瓷</span><div class="bar-track"><div class="bar-fill gold" style="left:0;width:79.1%"></div></div><span class="bar-value neutral">79.1%</span></div>
+        <div class="bar-row hl"><span class="bar-label">灯具照明</span><div class="bar-track"><div class="bar-fill gold" style="left:0;width:78.9%"></div></div><span class="bar-value neutral">78.9%</span></div>
+        <div class="bar-row"><span class="bar-label">金属家用器具</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:75.0%"></div></div><span class="bar-value neutral">75.0%</span></div>
+        <div class="bar-row hl"><span class="bar-label">家具床垫</span><div class="bar-track"><div class="bar-fill gold" style="left:0;width:74.4%"></div></div><span class="bar-value neutral">74.4%</span></div>
+        <div class="bar-row hl"><span class="bar-label">玩具婴童</span><div class="bar-track"><div class="bar-fill gold" style="left:0;width:68.3%"></div></div><span class="bar-value neutral">68.3%</span></div>
+        <div class="bar-row"><span class="bar-label">电机电器</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:64.8%"></div></div><span class="bar-value neutral">64.8%</span></div>
+        <div class="bar-row"><span class="bar-label">纺织制成品</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:62.5%"></div></div><span class="bar-value neutral">62.5%</span></div>
+        <div class="bar-row"><span class="bar-label">塑料制品</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:61.2%"></div></div><span class="bar-value neutral">61.2%</span></div>
+        <div class="bar-row hl"><span class="bar-label">服装配饰</span><div class="bar-track"><div class="bar-fill gold" style="left:0;width:57.3%"></div></div><span class="bar-value neutral">57.3%</span></div>
+        <div class="bar-row"><span class="bar-label">家用电器</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:54.7%"></div></div><span class="bar-value neutral">54.7%</span></div>
+        <div class="bar-row"><span class="bar-label">电信设备</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:52.2%"></div></div><span class="bar-value neutral">52.2%</span></div>
+        <div class="bar-row"><span class="bar-label">鞋类</span><div class="bar-track"><div class="bar-fill muted" style="left:0;width:40.8%"></div></div><span class="bar-value neutral">40.8%</span></div>
+      </div>
+      <div class="chart-note">金色为占比超七成的品类。家具、灯具、玩具、服装——独立零售和小电商的主力货架，本就高度依赖中国供给。数据源：ABS Merchandise Imports by Commodity（SITC），CY2025 仅货物、海关价值。</div>
+    </div>
+    <div class="chart-grid side">
+      <div class="chart">
+        <div class="chart-head"><span class="chart-title">图 2 · 澳洲进口来源国 Top 5</span><span class="chart-unit">货物+服务 · A$b · CY2025</span></div>
+        <div class="bars">
+          <div class="bar-row hl"><span class="bar-label">中国</span><div class="bar-track"><div class="bar-fill gold" style="left:0;width:100%"></div></div><span class="bar-value neutral">130.2</span></div>
+          <div class="bar-row"><span class="bar-label">美国</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:75.7%"></div></div><span class="bar-value neutral">98.6</span></div>
+          <div class="bar-row"><span class="bar-label">日本</span><div class="bar-track"><div class="bar-fill muted" style="left:0;width:24.9%"></div></div><span class="bar-value neutral">32.4</span></div>
+          <div class="bar-row"><span class="bar-label">新加坡</span><div class="bar-track"><div class="bar-fill muted" style="left:0;width:21.7%"></div></div><span class="bar-value neutral">28.2</span></div>
+          <div class="bar-row"><span class="bar-label">泰国</span><div class="bar-track"><div class="bar-fill muted" style="left:0;width:18.1%"></div></div><span class="bar-value neutral">23.6</span></div>
+        </div>
+        <div class="chart-note">中国占澳洲进口 19.8%，是第二名美国的 1.3 倍、第三名日本的 4 倍。DFAT，CY2025 货物+服务。</div>
+      </div>
+      <div class="chart">
+        <div class="chart-head"><span class="chart-title">图 3 · 澳洲线上消费的三种口径</span><span class="chart-unit">占零售比重 %</span></div>
+        <div class="bars">
+          <div class="bar-row"><span class="bar-label">Australia Post</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:100%"></div></div><span class="bar-value neutral">24%</span></div>
+          <div class="bar-row"><span class="bar-label">NAB 指数</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:62.1%"></div></div><span class="bar-value neutral">14.9%</span></div>
+          <div class="bar-row"><span class="bar-label">ABS 官方</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:52.9%"></div></div><span class="bar-value neutral">12.7%</span></div>
+        </div>
+        <div class="chart-note">三家口径不同，不能混用、不能相减：Australia Post 用 CommBank iQ 银行交易数据估算，未说明是否仅实物商品或是否含 GST；ABS 只统计其零售企业名录内的澳洲商家、不含海外卖家；NAB 为截至 2025 年 9 月的滚动 12 个月估算。差异的具体成因（比如是否含海外商户）三方均未在公开页面写明，本报告不替它们下定义。</div>
+      </div>
+    </div>
+    <div class="callout"><strong>把两张图连起来看</strong> · 澳洲人网购在涨（图 3 任一口径都是两位数增长），而他们买的实物品类高度是中国造（图 1）。这两件事叠加，意味着"从中国到澳洲的小批量货运"需求是<strong>结构性的、且还在扩大</strong>——不是某个风口。</div>
+  </div>
+</section>
+
+<!-- 03 港口 -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">03 · 港口与通道</span>
+      <h2>货从哪进来</h2>
+      <div class="en">Five container ports, same financial year for once — so the comparison is clean.</div>
+    </div>
+    <div class="chart" style="margin-bottom:20px">
+      <div class="chart-head"><span class="chart-title">图 4 · 澳洲五大集装箱港吞吐量</span><span class="chart-unit">FY2024-25 · 百万 TEU</span></div>
+      <div class="bars">
+        <div class="bar-row hl"><span class="bar-label">墨尔本</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:100%"></div></div><span class="bar-value neutral">3.39</span></div>
+        <div class="bar-row"><span class="bar-label">悉尼 Botany</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:81.8%"></div></div><span class="bar-value neutral">2.77</span></div>
+        <div class="bar-row"><span class="bar-label">布里斯班</span><div class="bar-track"><div class="bar-fill blue" style="left:0;width:47.8%"></div></div><span class="bar-value neutral">1.62</span></div>
+        <div class="bar-row"><span class="bar-label">珀斯 Fremantle</span><div class="bar-track"><div class="bar-fill muted" style="left:0;width:26.2%"></div></div><span class="bar-value neutral">0.89</span></div>
+        <div class="bar-row"><span class="bar-label">阿德莱德</span><div class="bar-track"><div class="bar-fill muted" style="left:0;width:11.8%"></div></div><span class="bar-value neutral">0.40</span></div>
+      </div>
+      <div class="chart-note">五港同为 FY2024-25，口径可比。墨尔本是全澳最大集装箱港，官方自述"比全国任何港口多 21% 的货量"。数据源：各港务公司年报 / 月报。悉尼、布里斯班最新一期财年（FY2025-26）已分别增至 2.95M（+6.26%）、1.74M（自算约 +7.3%）TEU，但墨尔本官方尚未发布 FY2025-26 年度单一数字，故排名图统一只用 FY2024-25 这一期，不与更新的财年混排。</div>
+    </div>
+    <div class="callout blue"><strong>对小批量物流的含义</strong> · 墨尔本 + 悉尼两港合计承接了全澳约六成的集装箱量，是拼箱（LCL）到岸拆箱、本地分拨的天然重心。布里斯班增速最快（+7.3%），是华人电商和小卖家聚集、值得关注的第三极。</div>
+  </div>
+</section>
+
+<!-- 04 监管 A$1000 -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">04 · 那条 A$1,000 的线</span>
+      <h2>澳洲进口的规则，全绕着一个数字转</h2>
+      <div class="en">One threshold decides clearance path, who collects GST, and the paperwork fee. Get it exactly right.</div>
+    </div>
+    <div class="tab-wrap" style="margin-bottom:20px">
+      <table class="tab">
+        <thead><tr><th>货值（海关价值）</th><th>清关方式</th><th>GST 谁收</th><th>进口处理费 IPC</th><th>生物安全费</th></tr></thead>
+        <tbody>
+          <tr class="lo"><td class="k">≤ A$1,000</td><td class="small">自评估清关 SAC</td><td class="small">离岸卖家在<strong>销售点</strong>代收 10%</td><td class="n">A$0</td><td class="small">—</td></tr>
+          <tr><td class="k">A$1,000–10,000</td><td class="small">完整进口申报 FID</td><td class="small">进口商在<strong>边境</strong>缴</td><td class="n">A$50</td><td class="small">空运 $48 / 海运 $71</td></tr>
+          <tr class="hi"><td class="k">≥ A$10,000</td><td class="small">完整进口申报 FID</td><td class="small">进口商在边境缴</td><td class="n">A$152</td><td class="small">空运 $48 / 海运 $71</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="chart-grid side">
+      <div class="chart">
+        <div class="chart-head"><span class="chart-title">规则要点</span><span class="chart-unit">ATO / ABF · 现行</span></div>
+        <ul style="margin:0;padding-left:18px;font-size:13px;color:var(--ink-soft);line-height:1.7">
+          <li><strong>低值 GST 制度</strong>（2018-07-01 起）：A$1,000 及以下由海外卖家在卖出时就代收 10% GST，不在边境征。</li>
+          <li><strong>海外卖家注册线</strong>：对澳销售额满 A$75,000/12 个月，就必须注册澳洲 GST。</li>
+          <li><strong>ChAFTA 关税待遇</strong>：中国原产货物自 2019-01-01 起 100% 免澳洲进口<strong>关税</strong>——但要满足原产地规则、附原产地证（COO）。<strong style="color:var(--gold-soft)">关税免了不等于全免税费</strong>：10% GST、IPC 进口处理费、生物安全费该收还收，别把这条读成"零成本清关"。</li>
+          <li><strong>IPC 是固定费</strong>，与货值大小无关，跨过 A$1,000 从 0 跳到 A$50。</li>
+        </ul>
+      </div>
+      <div class="chart">
+        <div class="chart-head"><span class="chart-title">澳洲独有：臭椿象季 (BMSB)</span><span class="chart-unit">DAFF · 每年 9/1–4/30</span></div>
+        <p style="font-size:13px;color:var(--ink-soft);line-height:1.65;margin:0 0 10px">每年 <strong>9 月 1 日至次年 4 月 30 日</strong>（按提单装船日算），一批 HS 章目下的货物受褐色臭椿象生物安全管制。</p>
+        <p style="font-size:13px;color:var(--ink-soft);line-height:1.65;margin:0"><strong>中国的定位是"随机查验"</strong>，不强制离岸处理（不同于美国、意大利等强制处理国）。但抽中就查、可能延误，木质包装还须符合 ISPM 15。这是澳洲线区别于其他航线的时效变量。</p>
+      </div>
+    </div>
+    <div class="callout"><strong>营销含义</strong> · 洋人小卖家最怕的就是"到港后一堆没预料到的费用和延误"。把 A$1,000 这条线、IPC 阶梯、BMSB 季节讲清楚，就是最实在的信任内容——比任何"专业可靠"的口号都管用。这些规则是全报告最耐引用、最不会过期的部分。</div>
+  </div>
+</section>
+
+<!-- 05 运价 -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">05 · 运价与时效</span>
+      <h2>一个连指数都没有的市场</h2>
+      <div class="en">Three global rate indices, zero of them cover this lane. That opacity is itself the finding.</div>
+    </div>
+    <div class="chart-grid side" style="margin-bottom:20px">
+      <div class="chart">
+        <div class="chart-head"><span class="chart-title">同一条航线，货代自报价能差好几倍</span><span class="chart-unit">🟡 各家营销页 · 非成交价</span></div>
+        <p style="font-size:13px;color:var(--ink-soft);line-height:1.7;margin:0">
+          没有权威指数，市场上只剩下货代各自挂的"指导价"，而这些指导价本身就互相矛盾：
+          有海外货代网站报 LCL 每 CBM 二三十美元级别，<strong style="color:var(--ink)">澳洲本地货代给出的起步价却是每 CBM 一百多到三百澳元</strong>——同一条航线、同一种服务，报价能差数倍。
+        </p>
+        <p style="font-size:12.5px;color:var(--ink-muted);line-height:1.6;margin-top:10px">
+          我们不选边站——这两类数字都不是成交价，只是货代自己挂的营销页报价，随时在变。<strong>报价越是各说各话，说明这条航线的透明度越低</strong>，这正是本节要说明的现象本身，而不是拿其中一个数字当"市场价"。
+        </p>
+      </div>
+      <div class="chart">
+        <div class="chart-head"><span class="chart-title">时效与破本点</span><span class="chart-unit">🟡 行业普遍说法</span></div>
+        <ul style="margin:0 0 12px;padding-left:18px;font-size:13px;color:var(--ink-soft);line-height:1.7">
+          <li>海运：港到港数周量级，门到门因两端清关拖车更长——货代各自给出的具体天数区间不一致</li>
+          <li>空运：机场到机场以天计，门到门明显更慢</li>
+        </ul>
+        <div style="padding:12px 14px;background:color-mix(in srgb,var(--gold) 10%,transparent);border-left:3px solid var(--gold);border-radius:0 8px 8px 0;font-size:13px;color:var(--ink)">
+          <strong>LCL vs FCL 破本点：业内常见说法约 13–15 CBM</strong><br><span style="color:var(--ink-soft);font-size:12.5px">多家货代口径接近但非权威统一标准。大致方向是：低于这个体积拼箱更省，接近整箱容量时改走整箱反而划算。</span>
+        </div>
+      </div>
+    </div>
+    <div class="callout"><strong>这一节最重要的不是价格，是"查不到价格"</strong> · Freightos FBX、Drewry WCI、Xeneta XSI-C——三家权威运价指数<strong>没有一家覆盖中国→澳洲航线</strong>（逐个发布方页面确认）。上海航运交易所 SCFI 虽然列了"澳新（墨尔本）"这条航线，但公开页面的数值栏是空的，要付费订阅才能看到。这条走廊的运价透明度明显低于中美、中欧干线。信息越不透明，"把成本讲清楚"的内容就越是稀缺资产。</div>
+  </div>
+</section>
+
+<!-- 06 数字营销现状 -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">06 · 数字营销现状</span>
+      <h2>洋人在英文世界找物流，看到的是谁</h2>
+      <div class="en">Where the customer's first touch actually lands — measured, not guessed.</div>
+    </div>
+    <div class="chart" style="margin-bottom:20px">
+      <div class="chart-head"><span class="chart-title">图 5 · "freight forwarder china to australia" 澳洲区首页 12 名</span><span class="chart-unit">Semrush 实测 · au 库</span></div>
+      <div class="rank-list">
+        <div class="rank-row"><span class="rk">1</span><span class="dm">willship.com.au</span><span class="tp local">澳洲本地货代</span></div>
+        <div class="rank-row"><span class="rk">2</span><span class="dm">transcoast.com.au</span><span class="tp local">澳洲本地货代</span></div>
+        <div class="rank-row"><span class="rk">3</span><span class="dm">wwcf.com.au</span><span class="tp local">澳洲本地货代</span></div>
+        <div class="rank-row"><span class="rk">4</span><span class="dm">freightos.com</span><span class="tp intl">国际平台</span></div>
+        <div class="rank-row"><span class="rk">5</span><span class="dm">dhl.com</span><span class="tp intl">国际巨头</span></div>
+        <div class="rank-row"><span class="rk">6</span><span class="dm">mbmlog.com</span><span class="tp content">内容聚合</span></div>
+        <div class="rank-row"><span class="rk">7</span><span class="dm">brint.com.au</span><span class="tp local">澳洲本地货代</span></div>
+        <div class="rank-row"><span class="rk">8</span><span class="dm">wise.com</span><span class="tp intl">国际平台</span></div>
+        <div class="rank-row"><span class="rk">9</span><span class="dm">icecargo.com.au</span><span class="tp local">澳洲本地货代</span></div>
+        <div class="rank-row"><span class="rk">10</span><span class="dm">maskuralogistics.com</span><span class="tp cn">中国背景</span></div>
+        <div class="rank-row"><span class="rk">11</span><span class="dm">jikelogistics.com</span><span class="tp cn">中国背景</span></div>
+        <div class="rank-row"><span class="rk">12</span><span class="dm">auspost.com.au</span><span class="tp local">澳洲本地</span></div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--me-blue)"></i>澳洲本地（6）</span>
+        <span><i style="background:var(--ink-muted)"></i>国际平台/巨头（3）</span>
+        <span><i style="background:var(--gold)"></i>内容聚合（1）</span>
+        <span><i style="background:var(--alert)"></i>中国背景（2，均在第 10 名后）</span>
+      </div>
+      <div class="chart-note">这是洋人小卖家找物流的第一触点。本地老牌货代 + 国际平台占满前 9，中国背景的货代只有 2 个、都在末尾。Semrush au 库实测，核心高意图词。</div>
+    </div>
+    <div class="callout blue"><strong>但换个入口，格局不一样</strong> · 同一个问题在 AI 检索里（"最好的中国到澳洲货代"），被引用的来源里中国背景玩家反而有位置——DFH Logistics、Mbmlog、China Top Freight 都被列入，和 Alibaba 采购指南、WWCF、One World Courier 并列。<strong>AI 检索按"内容有没有把问题讲清楚"来引用，而不是按本地品牌资历。</strong>这正是新入场者能撬动的支点：与其在传统 SERP 跟本地老店拼资历，不如把"讲透这条线"的内容做到能被 AI 引用。</div>
+    <div class="source-note"><strong>本节数据边界</strong> · SERP 排名与 AI 引用为实测。<strong>关键词搜索量 / CPC / 完整关键词矩阵本轮未完整取得</strong>（Semrush 生产额度已用尽），故报告不给出具体搜索量数字，只呈现可核验的排名结构。完整关键词矩阵待 ME 生产额度补测——这正是 ME 平台本身具备、可为合作方持续跑的能力。</div>
+  </div>
+</section>
+
+<!-- 07 缺口 -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">07 · 数据缺口</span>
+      <h2>这些我们没查到，所以没写</h2>
+      <div class="en">Stated plainly. A missing number is acceptable; an invented one is not.</div>
+    </div>
+    <div class="gap-list">
+      <div class="gap-item"><h4>中国→澳洲航线的权威运价指数</h4><p>Freightos FBX、Drewry WCI、Xeneta XSI-C 三家均确认不发布本航线。上海航运交易所 SCFI 有"澳新（墨尔本）"分航线，但公开页数值单元格为空、需付费订阅。报告不给出任何具体成交价，只呈现货代报价之间的分歧幅度。</p></div>
+      <div class="gap-item"><h4>澳洲线上卖家的绝对数量</h4><p>ABS、Australia Post、NAB 三个一手源都不统计。最接近的是 ABS "32% 的有雇员企业接受线上订单"，是比例不是绝对数。"直接从中国进口的小企业数量"同样无一手来源。</p></div>
+      <div class="gap-item"><h4>低值（≤A$1,000）小包裹的件数或金额</h4><p>ABS 货物贸易统计按海关申报价值汇总，不单独区分小额消费者包裹。本轮未找到 ABS/ABF 公开的低值进口件数数据——而这恰是"零散小单"市场规模最该有的数字。</p></div>
+      <div class="gap-item"><h4>关键词搜索量 / CPC 完整矩阵</h4><p>Semrush 生产额度本轮用尽，只完成了核心词的 SERP 排名实测。搜索量与出价的完整矩阵待补——这是 ME 平台可持续跑的能力，不是查不到，是本轮没跑完。</p></div>
+      <div class="gap-item"><h4>Meta / TikTok / YouTube 上的社媒热度</h4><p>本轮聚焦搜索与 AI 检索两个"主动找物流"的高意图入口。社媒被动种草这块未接入，标为待建，不臆测数字。</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 08 来源 -->
+<section style="background:var(--surface-2)">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">08 · 数据来源</span>
+      <h2>每个数字来自哪里</h2>
+      <div class="en">Every figure was read on the publisher's own page on 2026-09-05.</div>
+    </div>
+    <div class="tab-wrap">
+      <table class="tab">
+        <thead><tr><th>内容</th><th>发布方</th><th>口径与期间</th></tr></thead>
+        <tbody>
+          <tr><td class="k">品类中国占比（家具 74.4% 等）</td><td class="small">ABS Merchandise Imports by Commodity (SITC)</td><td class="small">CY2025 · 仅货物 · 海关价值</td></tr>
+          <tr><td class="k">自华进口 A$1,302 亿（A$130.2 b）· 占 19.8% · 来源国排名</td><td class="small">DFAT</td><td class="small">CY2025 · 货物+服务合计</td></tr>
+          <tr><td class="k">线上消费 A$826 亿（A$82.6 b · +14%） · 客单 A$96 · 82% 家庭</td><td class="small">Australia Post eCommerce Report 2026</td><td class="small">CY2025 · CommBank iQ 交易口径</td></tr>
+          <tr><td class="k">线上占零售 12.7%（官方）</td><td class="small">ABS Retail Trade, June 2025</td><td class="small">2025-06 单月 · 含 GST · 仅名录内企业</td></tr>
+          <tr><td class="k">五大港 TEU（墨 3.39M 等）</td><td class="small">各港务公司年报 / 月报</td><td class="small">FY2024-25 · 各港自报总 TEU</td></tr>
+          <tr><td class="k">A$1,000 线 · GST 制度 · 卖家注册线</td><td class="small">ATO — GST on low value imported goods</td><td class="small">2018-07-01 起 · 现行</td></tr>
+          <tr><td class="k">SAC/FID 分界 · 进口处理费 IPC 阶梯</td><td class="small">Australian Border Force (ABF)</td><td class="small">现行 · 引 ACN 2015/44</td></tr>
+          <tr><td class="k">BMSB 臭椿象季 · 中国随机查验 · 木质包装</td><td class="small">Dept of Agriculture (DAFF)</td><td class="small">2026-27 季 9/1–4/30</td></tr>
+          <tr><td class="k">ChAFTA 生效 2015 · 2019 起关税归零</td><td class="small">DFAT — ChAFTA</td><td class="small">现行 · 需原产地证 · 不含 GST/IPC/生物安全费</td></tr>
+          <tr><td class="k">运价报价分歧 / 时效 / 破本点</td><td class="small">多家货代公开营销页（口径互不一致）</td><td class="small">🟡 行业口径 · 2026-09 · 非成交价</td></tr>
+          <tr><td class="k">三家权威运价指数不覆盖本航线</td><td class="small">Freightos / Drewry / Xeneta 各发布方页面</td><td class="small">2026-09-05 逐个确认</td></tr>
+          <tr><td class="k">SCFI 澳新航线存在但数值未公开</td><td class="small">上海航运交易所</td><td class="small">2026-09-04 期 · 需付费订阅</td></tr>
+          <tr><td class="k">SERP 首页 12 名</td><td class="small">Semrush（au 库）</td><td class="small">实测 · 核心高意图词</td></tr>
+          <tr><td class="k">AI 检索引用来源</td><td class="small">AI 检索实测</td><td class="small">2026-09 · 定性</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="source-note">完整数据台账（每条的 URL、置信度与"未取得"清单）见本卷 <strong>sources.md</strong>。本报告为市场观察，供赛道从业者判断参考，<strong>不构成经营决策依据</strong>。运价与政策会变，引用前请复核当期发布值。</div>
+  </div>
+</section>
+
+<!-- 09 动作 -->
+<section>
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">09 · 五条动作建议</span>
+      <h2>如果要接住这门生意</h2>
+      <div class="en">For anyone in this lane — not a plan for any one company.</div>
+    </div>
+    <div class="priority">
+      <div class="p-num">01</div>
+      <div><h3>先在英文搜索入口补位，而不是继续只做华人圈</h3>
+      <p>首页 12 名里中国背景玩家只有 2 个、都在末尾。这不是竞争太激烈，是根本没认真做英文 SEO。一个说人话的英文站 + 结构化内容 + Google Business Profile + 真实评价，就能在这个入口补位。</p>
+      <p class="why">洋人客户的第一触点在英文搜索，中文渠道再强也够不到他们。</p></div>
+    </div>
+    <div class="priority">
+      <div class="p-num">02</div>
+      <div><h3>把内容做到能被 AI 检索引用，绕开跟本地老店拼资历</h3>
+      <p>AI 检索按"有没有把问题讲清楚"引用，而不是按品牌年头。这是新入场者唯一能跳过资历门槛的入口。把"中国→澳洲怎么运、多少钱、含哪些费、多久到"写成一篇能被 AI 抓取和引用的权威内容。</p>
+      <p class="why">传统 SERP 前排被 40 年老店占着，硬拼资历赢不了；AI 检索是平的。</p></div>
+    </div>
+    <div class="priority">
+      <div class="p-num">03</div>
+      <div><h3>把"透明成本"做成产品卖点——这个市场连指数都没有</h3>
+      <p>权威运价指数都不覆盖这条线，洋人小卖家最怕到港后冒出没预料的费用。把 A$1,000 线、IPC 阶梯、GST 谁收、BMSB 季节、ChAFTA 关税待遇逐条讲清，做一个透明的到岸成本估算——这在英文互联网上几乎没人做。</p>
+      <p class="why">信息越不对称，"讲透明"越稀缺，越是低成本高信任的获客切口。</p></div>
+    </div>
+    <div class="priority">
+      <div class="p-num">04</div>
+      <div><h3>盯住小批量的经济甜区，业内说法约十几个 CBM 以下</h3>
+      <p>业内常说 LCL 拼箱与 FCL 整箱的破本点在十几个 CBM（不同货代给的具体数字略有出入）。这条线以下是拼箱、集货、小包的主场，也是大 3PL 不愿碰、本地货代报价不透明的地带。产品和内容都围绕"小批量怎么最省"来做，避开跟大玩家拼整箱。</p>
+      <p class="why">需求结构（客单价在跌、高频小单）正好在往这个甜区走。</p></div>
+    </div>
+    <div class="priority">
+      <div class="p-num">05</div>
+      <div><h3>把英文获客当独立业务线，别挂在现有华人团队身上顺手做</h3>
+      <p>英文 SEO、AI 内容、英文客服、评价运营，和中文渠道是两套能力，重叠度低。挂在现有团队"顺手做"通常三个月不了了之。明确一个负责人、独立小预算、可量化的季度目标（站上线→核心词进前 20→首批英文自然询价）。</p>
+      <p class="why">这是最容易失败的一环——不是因为难，是因为没被当成一件正事来做。</p></div>
+    </div>
+    <div class="callout"><strong>一句话收尾</strong> · 这份报告没有发现一个"没人知道的秘密市场"——货是中国的、需求在长，这些从业者都隐约感觉得到。真正的差别在于：<strong>谁先把"能被洋人搜到、能被 AI 引用、能把成本讲透明"这三件事做完。</strong>它们没有技术门槛，只有执行门槛。</div>
+  </div>
+</section>
+
+<div class="footer">
+  <div class="wrap">
+    <div class="inst">
+      <div class="lg"><svg width="18" height="17" viewBox="0 0 68 64" role="img" aria-label="Magic Insight"><defs><linearGradient id="fl1" x1="0" y1="0" x2="68" y2="64" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#EBCB8B"/><stop offset=".55" stop-color="#C4912E"/><stop offset="1" stop-color="#A6781F"/></linearGradient><radialGradient id="fl2" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#FFF"/><stop offset=".45" stop-color="#FBEFD2"/><stop offset="1" stop-color="#EBCB8B"/></radialGradient></defs><g stroke="url(#fl1)" fill="none" stroke-linecap="round" stroke-width="3.4"><path d="M8,16 C20,19 31,25 46,30"/><path d="M8,24 C21,26 31,28 46,30"/><path d="M8,32 C22,33 31,33 46,30"/><path d="M8,40 C22,39 31,37 46,30"/><path d="M8,48 C20,45 31,38 46,30"/></g><g fill="url(#fl1)"><circle cx="8" cy="16" r="2.2"/><circle cx="8" cy="24" r="2.2"/><circle cx="8" cy="32" r="2.2"/><circle cx="8" cy="40" r="2.2"/><circle cx="8" cy="48" r="2.2"/></g><rect x="45" y="21" width="12" height="12" rx="3" fill="#FFFCF5" stroke="url(#fl1)" stroke-width="1.8"/><rect x="48" y="24" width="6" height="6" rx="1.5" fill="url(#fl2)"/></svg></div>
+      <div class="nm">Magic Insight 数据研究院<span>Research Series · Vol. 05 · Logistics</span></div>
+      <div style="margin-left:auto;text-align:right;font-size:11.5px;line-height:1.6">
+        <div style="color:var(--ink);font-weight:600">Magic Engine</div>
+        <div><a href="https://magicengine.com.au" style="color:var(--me-blue-soft)">magicengine.com.au</a></div>
+        <div style="color:var(--ink-muted);font-size:10.5px;margin-top:2px">AI Growth Engine for AU / NZ Businesses</div>
+      </div>
+    </div>
+    <div class="grid">
+      <div><h4>关于本系列</h4><p><strong>Magic Insight 数据研究院</strong>是 <strong>Magic Engine</strong>（<a href="https://magicengine.com.au">magicengine.com.au</a>）旗下的研究出品品牌。本系列不为任何单一客户撰写，也不提供针对某一家公司的方案——拉取数据、分析数据、寻找增长机会。事实在前，营销含义在后。</p></div>
+      <div><h4>数据分层</h4><p>· <strong>官方</strong> — 政府 / 官方机构一手<br>· <strong>行业</strong> — 行业机构 / 货代公开口径<br>· <strong>判断</strong> — 本院综合判断，明确不是数据<br>· <strong>未取得</strong> — 本轮未拿到，原因见第 07 节</p></div>
+      <div><h4>使用说明</h4><p>Magic Engine 高级会员专属内容。运价与政策会更新，引用前请复核当期发布值。本报告为市场观察，<strong>不构成经营决策依据</strong>。</p></div>
+    </div>
+    <div class="legal">
+      <div>© 2026 Magic Engine · Magic Insight 数据研究院出品 · 高级会员专属 · <a href="https://magicengine.com.au">magicengine.com.au</a></div>
+      <div>Vol.05 · v1.0 · <span class="num">2026-09-05</span></div>
+    </div>
+  </div>
+</div>

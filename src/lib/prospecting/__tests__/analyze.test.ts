@@ -52,7 +52,7 @@ beforeEach(() => {
     ai_engine: 'openai', ai_model: 'x', raw_response: 'Top picks: FloorFlow and Brisbane Timber Floors.',
     citations: [], tokens_used: null, cost_usd: null, latency_ms: 1, error_message: null,
   })
-  mockClaude.mockResolvedValue({ text: JSON.stringify(GOOD_SYNTHESIS), tokens_in: 1, tokens_out: 1, cost_usd: 0 })
+  mockClaude.mockResolvedValue({ text: JSON.stringify(GOOD_SYNTHESIS), input_tokens: 1, output_tokens: 1, cost_usd: 0 })
 })
 
 describe('brandMentioned', () => {
@@ -148,7 +148,7 @@ describe('analyzeProspect', () => {
   })
 
   it('returns a neutral error fallback when synthesis JSON is malformed', async () => {
-    mockClaude.mockResolvedValue({ text: '{"pillars": "nope"}', tokens_in: 1, tokens_out: 1, cost_usd: 0 })
+    mockClaude.mockResolvedValue({ text: '{"pillars": "nope"}', input_tokens: 1, output_tokens: 1, cost_usd: 0 })
     const a = await analyzeProspect(input())
     expect(a.error).toBe('AI 返回格式异常')
     expect(a.pillars.seo.summary).toBe('analysis failed')

@@ -17,14 +17,16 @@
  * scheme, same shape — so the two flows stay readable side by side.
  */
 
-import { createHmac } from 'crypto'
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto'
 
 const GRAPH_VERSION = 'v21.0'
 const AUTH_URL = `https://www.facebook.com/${GRAPH_VERSION}/dialog/oauth`
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`
 
 /** Ten minutes is plenty to click through a consent screen, short enough to be useless if leaked. */
-const STATE_TTL_MS = 10 * 60 * 1000
+export const META_STATE_TTL_SECS = 600
+export const META_STATE_COOKIE = 'meta_page_oauth_state'
+export const META_STATE_PATH = '/api/auth/facebook'
 
 /**
  * What we ask the user to grant.
@@ -60,6 +62,12 @@ export const META_PAGE_SCOPES = [
   // 而当时 token 已经带着 pages_show_list。Graph 要的就是这一条,没有替代品。
   // 教训:注释与生产报错冲突时,信报错。
   'pages_manage_ads',
+  // 回复 / 隐藏主页上的评论必须有这一条 —— pages_read_engagement 只够读。
+  // 没有它,评论自动回复读得到评论,但每一条回复都被 Meta 拒掉(2026-10-07 在 CTS
+  // 存下来的主页 token 上实测,它就没有这一条)。已经连过的客户要重新点一次「连接 Meta」。
+  // 加权限不会弄死已有的 Meta 连接:Meta 的主页 token 刷新时不重放 scope 清单
+  // (见 src/lib/platform-oauth/connection-health.ts 的 SCOPE_REPLAYED_ON_REFRESH,META 在那里是 null)。
+  'pages_manage_engagement',
 ] as const
 
 /**
@@ -80,6 +88,9 @@ export type MetaConnectIntent = 'publishing'
 
 export interface VerifiedState {
   clientId: string
+  userId: string
+  targetPageId: string | null
+  nonce: string
   intent?: MetaConnectIntent
 }
 
@@ -102,36 +113,39 @@ function appId(): string {
  * caller cannot swap in another client's id on the way back and attach their
  * token to someone else's account.
  */
-export function buildState(clientId: string, intent?: MetaConnectIntent): string {
-  // `intent` is only added when set, so an inbox connect keeps producing the
-  // exact same payload shape it always has — no behaviour change for callers
-  // that never pass it.
+export function buildState(input: Omit<VerifiedState, 'nonce'>): string {
   const payload = Buffer.from(
-    JSON.stringify({ clientId, exp: Date.now() + STATE_TTL_MS, ...(intent ? { intent } : {}) }),
+    JSON.stringify({ ...input, nonce: randomBytes(16).toString('hex'), exp: Date.now() + META_STATE_TTL_SECS * 1000 }),
   ).toString('base64url')
   const sig = createHmac('sha256', appSecret()).update(payload).digest('base64url')
   return `${payload}.${sig}`
 }
 
 export function verifyState(state: string): VerifiedState | null {
-  const dot = state.lastIndexOf('.')
-  if (dot === -1) return null
-
-  const payload = state.slice(0, dot)
-  const sig = state.slice(dot + 1)
-  const expected = createHmac('sha256', appSecret()).update(payload).digest('base64url')
-  if (sig !== expected) return null
-
   try {
+    const dot = state.lastIndexOf('.')
+    if (dot === -1) return null
+    const payload = state.slice(0, dot)
+    const sig = Buffer.from(state.slice(dot + 1), 'utf8')
+    const expected = Buffer.from(createHmac('sha256', appSecret()).update(payload).digest('base64url'), 'utf8')
+    if (sig.length !== expected.length || !timingSafeEqual(sig, expected)) return null
     const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as {
       clientId?: unknown
+      userId?: unknown
+      targetPageId?: unknown
+      nonce?: unknown
       exp?: unknown
       intent?: unknown
     }
-    if (typeof data.clientId !== 'string' || typeof data.exp !== 'number') return null
-    if (Date.now() > data.exp) return null
-    const intent = data.intent === 'publishing' ? 'publishing' : undefined
-    return intent ? { clientId: data.clientId, intent } : { clientId: data.clientId }
+    if (typeof data.clientId !== 'string' || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(data.clientId)) return null
+    if (typeof data.userId !== 'string' || !data.userId) return null
+    if (typeof data.nonce !== 'string' || !/^[0-9a-f]{32}$/.test(data.nonce)) return null
+    if (data.targetPageId !== null && (typeof data.targetPageId !== 'string' || !/^\d+$/.test(data.targetPageId))) return null
+    if (typeof data.exp !== 'number' || !Number.isFinite(data.exp) || Date.now() >= data.exp || data.exp > Date.now() + META_STATE_TTL_SECS * 1000) return null
+    if (data.intent !== undefined && data.intent !== 'publishing') return null
+    if (data.intent === 'publishing' && !data.targetPageId) return null
+    return { clientId: data.clientId, userId: data.userId, targetPageId: data.targetPageId,
+      nonce: data.nonce, ...(data.intent ? { intent: data.intent } : {}) }
   } catch {
     return null
   }
@@ -172,21 +186,7 @@ export interface MetaPageToken {
  * readable message instead of showing a stack trace to whoever clicked.
  */
 export async function exchangeCode(code: string, redirectUri: string): Promise<string | null> {
-  const params = new URLSearchParams({
-    client_id: appId(),
-    client_secret: appSecret(),
-    redirect_uri: redirectUri,
-    code,
-  })
-
-  try {
-    const res = await fetch(`${GRAPH_BASE}/oauth/access_token?${params.toString()}`)
-    if (!res.ok) return null
-    const body = (await res.json()) as { access_token?: string }
-    return body.access_token ?? null
-  } catch {
-    return null
-  }
+  return (await exchangeMetaTokenFields({ redirect_uri:redirectUri,code }))?.token ?? null
 }
 
 /**
@@ -197,21 +197,7 @@ export async function exchangeCode(code: string, redirectUri: string): Promise<s
  * without anyone touching it again.
  */
 export async function exchangeForLongLivedToken(shortToken: string): Promise<string | null> {
-  const params = new URLSearchParams({
-    grant_type: 'fb_exchange_token',
-    client_id: appId(),
-    client_secret: appSecret(),
-    fb_exchange_token: shortToken,
-  })
-
-  try {
-    const res = await fetch(`${GRAPH_BASE}/oauth/access_token?${params.toString()}`)
-    if (!res.ok) return null
-    const body = (await res.json()) as { access_token?: string }
-    return body.access_token ?? null
-  } catch {
-    return null
-  }
+  return (await exchangeMetaTokenFields({ grant_type:'fb_exchange_token',fb_exchange_token:shortToken }))?.token ?? null
 }
 
 /**
@@ -276,4 +262,37 @@ export async function listGrantedScopes(userToken: string): Promise<string[] | n
   } catch {
     return null
   }
+}
+
+/** Metadata-preserving exchange for new consent purposes. Existing Page callers keep their contract. */
+export async function exchangeMetaTokenFields(params: Record<string,string>, version=GRAPH_VERSION): Promise<{ token:string; seconds:number|null } | null> {
+  if (!/^v\d+\.0$/.test(version)) return null
+  const query=new URLSearchParams({ client_id:appId(),client_secret:appSecret(),...params })
+  try {
+    const res=await fetch(`https://graph.facebook.com/${version}/oauth/access_token?${query}`,{
+      method:'GET',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(12_000),
+    })
+    if (!res.ok) {
+      // Never log the query (carries client_secret) or the body (may echo request params) — only
+      // the status, so a 2026-09-21 production mystery (both exchanges succeeded with a token but
+      // neither had a usable expires_in) doesn't repeat as another unexplained failure.
+      console.warn('[meta-oauth] token exchange non-OK response',{ version,grantType:params.grant_type ?? 'authorization_code',status:res.status })
+      return null
+    }
+    const body=await res.json() as { access_token?:unknown; expires_in?:unknown }
+    if(typeof body.access_token!=='string') {
+      console.warn('[meta-oauth] token exchange missing access_token',{ version,grantType:params.grant_type ?? 'authorization_code',responseKeys:Object.keys(body) })
+      return null
+    }
+    const seconds=Number(body.expires_in)
+    // Meta returns expires_in:0 to mean "this token does not expire" (documented for some
+    // long-lived exchanges) — that is a real signal, not a missing value, so 0 must pass through
+    // rather than collapse to null alongside genuinely absent/invalid values.
+    const usable=Number.isFinite(seconds) && seconds>=0
+    if(!usable) {
+      console.warn('[meta-oauth] token exchange expires_in unusable',{ version,grantType:params.grant_type ?? 'authorization_code',
+        responseKeys:Object.keys(body),hasExpiresInKey:'expires_in' in body,expiresInType:typeof body.expires_in,expiresInRaw:body.expires_in })
+    }
+    return { token:body.access_token,seconds:usable ? seconds : null }
+  } catch { return null }
 }

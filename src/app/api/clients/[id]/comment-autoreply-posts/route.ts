@@ -14,7 +14,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
-import { getPageAccessToken, fetchPageReels } from '@/lib/meta/page-posts'
+import { fetchPageReels } from '@/lib/meta/page-posts'
+import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
 import { fetchAdStoryIds } from '@/lib/meta/ads-posts'
 
 const GRAPH_BASE = 'https://graph.facebook.com/v20.0'
@@ -61,10 +62,19 @@ export async function GET(
     .maybeSingle()
   const adAccountId = (clientRow?.meta_ad_account_id as string) || ''
 
-  const userToken = await getMetaTokenForClient(clientId)
-  if (!userToken) return NextResponse.json({ error: '未找到该客户的 Meta token' }, { status: 400 })
-  const pageToken = await getPageAccessToken(userToken, pageId)
-  if (!pageToken) return NextResponse.json({ error: '无法解析 Page access token' }, { status: 502 })
+  // AD-SEC-4: the configured Page is client-editable — only list posts of this
+  // client's verified Page (see page-sync-authorization.authorizeConfiguredPage).
+  const auth = await authorizeConfiguredPage(supabaseAdmin, clientId, pageId, process.env)
+  if (!auth.ok) {
+    if (auth.skipped === 'page_not_verified') {
+      return NextResponse.json({ error: '这里填的主页不是这个客户已核实绑定的 Facebook 主页，不能读取', reason: auth.reason }, { status: 403 })
+    }
+    if (auth.skipped === 'no_meta_token') return NextResponse.json({ error: '未找到该客户的 Meta token' }, { status: 400 })
+    return NextResponse.json({ error: '无法解析 Page access token' }, { status: 502 })
+  }
+  const pageToken = auth.pageToken
+  // Ads API (boosted story ids) needs the user token; without one those are skipped.
+  const userToken = adAccountId ? await getMetaTokenForClient(clientId) : null
 
   const fields = 'id,message,story,created_time,comments.filter(stream).summary(true).limit(0)'
   let url: string | null =
@@ -115,7 +125,7 @@ export async function GET(
 
   // Boosted-ad story posts — carry paid-delivery comments the organic edges miss.
   const adSummaries: PostSummary[] = []
-  if (adAccountId) {
+  if (adAccountId && userToken) {
     const storyIds = await fetchAdStoryIds(adAccountId, userToken).catch(() => [])
     const known = new Set([...posts.map(p => p.full_id), ...reelSummaries.map(r => r.full_id)])
     for (const sid of storyIds) {

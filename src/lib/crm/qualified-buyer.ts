@@ -11,6 +11,8 @@
  * 落库那一半在 qualified-buyer-autotag.ts。
  */
 
+import { isNegated } from './negation'
+
 // ── 规则一 · 什么算真买家（PM 2026-08-01 拍板）─────────────────────────────
 
 /**
@@ -121,29 +123,6 @@ const NEGATION_MARKERS: readonly string[] = [
 ]
 
 /**
- * 分句符。否定只在**同一个子句内**生效 —— 固定长度的窗口两头不讨好：
- * 英文「not interested in a viewing」隔了 15 个字符，窗口小了漏；
- * 中文「这周不想看房，下周想约看房」窗口大了又会让前半句的「不」
- * 把后半句真实的意向也一起否掉。
- */
-const CLAUSE_BREAKS = /[，,。.；;！!？?\n、]/
-
-/** 命中点所在的那个子句里有没有否定词。 */
-function isNegated(haystack: string, hitIndex: number): boolean {
-  const before = haystack.slice(0, hitIndex)
-  // 往前找最近的分句符，只看它之后那一段。
-  let start = 0
-  for (let i = before.length - 1; i >= 0; i--) {
-    if (CLAUSE_BREAKS.test(before[i])) {
-      start = i + 1
-      break
-    }
-  }
-  const clause = before.slice(start)
-  return NEGATION_MARKERS.some((marker) => clause.includes(marker))
-}
-
-/**
  * 这堆文本里有没有人说「想去看房」。返回第一个命中，附上原话（审计要有出处）。
  *
  * 只做子串匹配，故意不做词形还原 / 模糊匹配：宁可漏标（这个人下次多说两句就会
@@ -161,7 +140,7 @@ export function detectViewingRequest(texts: readonly string[]): ViewingRequestHi
     for (const phrase of VIEWING_REQUEST_PHRASES) {
       let at = haystack.indexOf(phrase)
       while (at !== -1) {
-        if (!isNegated(haystack, at)) {
+        if (!isNegated(haystack, at, NEGATION_MARKERS)) {
           const excerpt =
             text.length > EXCERPT_MAX_CHARS ? `${text.slice(0, EXCERPT_MAX_CHARS)}…` : text
           return { phrase, excerpt }

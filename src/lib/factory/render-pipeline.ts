@@ -1,3 +1,7 @@
+// 🔴 已退役(2026-09-02，render.yaml 同一条注释)：跟 render-assemble.ts 同一条旧
+// ffmpeg 拼片管线，已停机不再被任何 worker 调用。留仓库不删，不要当活代码维护——
+// 出片现在走 Creatomate 链(scene-assets.ts)。
+//
 // 做片编排 — 把一条排队任务跑成成片素材：分镜 → 逐段出画面+配音 → 交给拼接。
 // 由后台 worker 调用（i2v 慢，跑 15-30 分钟，不能塞进普通请求）。
 // 拼接(ffmpeg)是容器里单独一步(assembleJob，见 render-assemble)，本文件只管到「待拼接」。

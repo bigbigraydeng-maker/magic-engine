@@ -32,7 +32,7 @@ const HASH = computeBlogContentHash(BLOG_DRAFT as unknown as BlogDraftRow)
 
 const OUTWARD_DECL: OutwardAuthorization = {
   declaredIn: 'hardening-v1 test',
-  requiresHumanApproval: true,
+  approval: { mode: 'human_only' },
   rollback: 'provider_native',
 }
 

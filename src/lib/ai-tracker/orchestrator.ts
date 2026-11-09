@@ -21,6 +21,13 @@ import { runClaude } from './runners/claude'
 import { runPerplexity } from './runners/perplexity'
 import { runGemini } from './runners/gemini'
 import { parseRanking } from './parser'
+import {
+  buildClientIdentifiers,
+  hasGeoGate,
+  isClientBrand,
+  type ClientBrandIdentity,
+} from './client-brand-match'
+import { isRunConclusive } from './run-conclusive'
 import { supabaseAdmin } from '../supabase'
 import { writeTrackerFlywheelMetrics } from '../flywheel/metrics/writeTrackerMetrics'
 import type {
@@ -48,6 +55,18 @@ export interface RunTrackerResult {
   runs_attempted: number
   runs_succeeded: number
   runs_failed: number
+  /**
+   * Runs that produced a real, usable ranking — same standard as
+   * `isRunConclusive` (shared with the snapshot gate and monthly-aggregator).
+   * Deliberately separate from `runs_succeeded`: that counter goes up even
+   * when `parseRanking` throws (see processOne — the DB update still
+   * succeeds, so `runs_succeeded++` fires regardless of `parse_error_message`).
+   * Callers that need "did this client get any real data" — not "did the
+   * provider call and DB write both not error" — should read this field
+   * instead (Codex review 2026-09-28, on the old ai-tracker-weekly cron
+   * still trusting runs_succeeded for its all-failed detection).
+   */
+  runs_conclusive: number
   client_brand_mentions: number
   total_cost_usd: number
   total_latency_ms: number
@@ -59,6 +78,8 @@ interface ClientRow {
   id: string
   name: string
   domain: string | null
+  brand_aliases: string[] | null
+  brand_geo_anchors: string[] | null
 }
 
 interface BriefRow {
@@ -99,6 +120,7 @@ export async function runTracker(
     runs_attempted: queries.length * engines.length,
     runs_succeeded: 0,
     runs_failed: 0,
+    runs_conclusive: 0,
     client_brand_mentions: 0,
     total_cost_usd: 0,
     total_latency_ms: 0,
@@ -116,6 +138,9 @@ export async function runTracker(
       queries,
       clientId: client.id,
       brandName,
+      clientDomain: client.domain,
+      clientAliases: client.brand_aliases,
+      clientGeoAnchors: client.brand_geo_anchors,
       result,
     })
     console.log(`[runTracker] Engine ${engine} completed: succeeded=${result.runs_succeeded}, failed=${result.runs_failed}`)
@@ -124,7 +149,12 @@ export async function runTracker(
   // 4. Aggregate weekly snapshot (only if we got at least one successful run)
   console.log('[runTracker] Aggregating snapshot...')
   if (result.runs_succeeded > 0) {
-    const agg = await aggregateSnapshot(client.id, brandName)
+    const agg = await aggregateSnapshot(client.id, {
+      brandName,
+      domain: client.domain,
+      aliases: client.brand_aliases,
+      geoAnchors: client.brand_geo_anchors,
+    })
     result.snapshot_id = agg?.snapshotId ?? null
 
     // 5. Write GEO flywheel metrics so attribution job can compute outcomes
@@ -151,12 +181,18 @@ async function loadClientContext(
 ): Promise<{ client: ClientRow; brandName: string }> {
   const { data: client, error } = await supabaseAdmin
     .from('clients')
-    .select('id, name, domain')
+    .select('id, name, domain, brand_aliases, brand_geo_anchors')
     .eq('id', clientId)
     .single<ClientRow>()
 
   if (error || !client) {
-    throw new Error(`Client not found: ${clientId}`)
+    // Carry the driver message: the most likely cause of a sudden failure
+    // here is a column in the select above missing from the database (a
+    // migration that never ran), and "client not found" would send whoever
+    // is on call looking for the wrong thing.
+    throw new Error(
+      `Client context load failed (${clientId}): ${error?.message ?? 'no row returned'}`
+    )
   }
 
   // Try active master_brief first; fall back to client.name
@@ -198,6 +234,9 @@ interface EngineLaneInput {
   queries: AiVisibilityQuery[]
   clientId: string
   brandName: string
+  clientDomain: string | null
+  clientAliases: string[] | null
+  clientGeoAnchors: string[] | null
   result: RunTrackerResult
 }
 
@@ -206,7 +245,7 @@ interface EngineLaneInput {
  * Add delay between batches to prevent rate limiting on both runner and parser calls.
  */
 async function runEngineLane(input: EngineLaneInput): Promise<void> {
-  const { engine, queries, clientId, brandName, result } = input
+  const { engine, queries, clientId, brandName, clientDomain, clientAliases, clientGeoAnchors, result } = input
 
   console.log(`[runEngineLane] ${engine}: starting with ${queries.length} queries, batch size = ${PER_ENGINE_BATCH_SIZE}`)
 
@@ -218,7 +257,9 @@ async function runEngineLane(input: EngineLaneInput): Promise<void> {
     await Promise.all(
       batch.map(q => {
         console.log(`[runEngineLane] ${engine}: processing query ${q.id}`)
-        return processOne({ engine, query: q, clientId, brandName, result })
+        return processOne({
+          engine, query: q, clientId, brandName, clientDomain, clientAliases, clientGeoAnchors, result,
+        })
       })
     )
     const batchElapsed = Date.now() - startBatch
@@ -241,6 +282,9 @@ interface ProcessOneInput {
   query: AiVisibilityQuery
   clientId: string
   brandName: string
+  clientDomain: string | null
+  clientAliases: string[] | null
+  clientGeoAnchors: string[] | null
   result: RunTrackerResult
 }
 
@@ -249,7 +293,7 @@ interface ProcessOneInput {
  * Catches all errors so one failure doesn't kill the whole pass.
  */
 async function processOne(input: ProcessOneInput): Promise<void> {
-  const { engine, query, clientId, brandName, result } = input
+  const { engine, query, clientId, brandName, clientDomain, clientAliases, clientGeoAnchors, result } = input
   const market: MarketTag = (query.market_tag ?? 'au-nz') as MarketTag
 
   try {
@@ -311,6 +355,9 @@ async function processOne(input: ProcessOneInput): Promise<void> {
       const parsed = await parseRanking({
         rawResponse: runnerOut.raw_response,
         clientBrandName: brandName,
+        clientDomain,
+        clientAliases,
+        clientGeoAnchors,
       })
       brands = parsed.brands
       clientBrandRank = parsed.client_brand_rank
@@ -338,13 +385,43 @@ async function processOne(input: ProcessOneInput): Promise<void> {
       updatePayload.parse_error_message = parseError
     }
 
-    await supabaseAdmin
+    const { error: updateErr } = await supabaseAdmin
       .from('ai_visibility_runs')
       .update(updatePayload)
       .eq('id', runRow.id)
 
-    result.runs_succeeded++
     result.total_cost_usd += (runnerOut.cost_usd ?? 0) + parseCost
+
+    if (updateErr) {
+      result.runs_failed++
+      result.errors.push({
+        query_id: query.id,
+        engine,
+        message: `DB update failed: ${updateErr.message}`,
+      })
+      return
+    }
+
+    result.runs_succeeded++
+    // 🔴 Deliberately separate from runs_succeeded above, and deliberately
+    //    NOT changing what runs_succeeded/runs_failed count: a parse failure
+    //    (parseRanking threw, parse_error_message got set) still reaches
+    //    here and still increments runs_succeeded — that's the existing,
+    //    tested behavior (see orchestrator.test.ts "still counts the run
+    //    as succeeded when the update itself succeeds"). Two other callers
+    //    read runs_succeeded/runs_failed directly (weekly-fanout.ts's
+    //    Inngest path uses `runs_succeeded > 0` for its receipt status;
+    //    ai-visibility-weekly.ts logs both fields) — flipping their meaning
+    //    here would silently change those paths' behavior too, with no
+    //    tests covering that. runs_conclusive is purely additive instead:
+    //    same isRunConclusive standard the snapshot gate already uses, so
+    //    a caller that needs "did we get real data" (the old
+    //    ai-tracker-weekly cron's all-failed detection) can read this
+    //    field without anyone else's behavior changing (Codex review
+    //    2026-09-28).
+    if (isRunConclusive({ error_message: null, parse_error_message: parseError })) {
+      result.runs_conclusive++
+    }
     if (clientBrandRank !== null) result.client_brand_mentions++
   } catch (err: unknown) {
     result.runs_failed++
@@ -366,32 +443,43 @@ interface AggregateResult {
  * Uses Monday of the current week as the snapshot key.
  * Returns metric data alongside the snapshot id for flywheel writes.
  */
-async function aggregateSnapshot(clientId: string, brandName: string): Promise<AggregateResult | null> {
+async function aggregateSnapshot(
+  clientId: string,
+  identity: ClientBrandIdentity
+): Promise<AggregateResult | null> {
   const weekOf = mondayOfThisWeek().toISOString().slice(0, 10) // YYYY-MM-DD
 
   // Pull all runs for this client this week
   const weekStart = new Date(weekOf + 'T00:00:00.000Z').toISOString()
   const { data: runs, error } = await supabaseAdmin
     .from('ai_visibility_runs')
-    .select('ai_engine, ai_model, client_brand_rank, brands_mentioned')
+    .select('ai_engine, ai_model, client_brand_rank, brands_mentioned, error_message, parse_error_message')
     .eq('client_id', clientId)
     .gte('ran_at', weekStart)
 
   if (error || !runs) return null
 
-  const totalRuns = runs.length
-  const ranks = runs
+  // Failed provider calls / parser errors carry a null client_brand_rank that
+  // is indistinguishable from "AI answered but didn't mention the client" —
+  // counting them here would drag the same head-line mention rate the
+  // dashboard's per-engine cards already exclude them from back down to
+  // "failure == not mentioned". Same filter as isRunConclusive() everywhere
+  // else this data is displayed.
+  const conclusiveRuns = runs.filter(isRunConclusive)
+
+  const totalRuns = conclusiveRuns.length
+  const ranks = conclusiveRuns
     .map(r => (r as { client_brand_rank: number | null }).client_brand_rank)
     .filter((r): r is number => r !== null)
   const mentionsCount = ranks.length
   const avgRank =
     mentionsCount > 0 ? ranks.reduce((a, b) => a + b, 0) / mentionsCount : null
   const modelsCovered = Array.from(
-    new Set(runs.map(r => (r as { ai_model: string }).ai_model))
+    new Set(conclusiveRuns.map(r => (r as { ai_model: string }).ai_model))
   )
   // Distinct engines where brand appeared at least once
   const engineCoverage = new Set(
-    runs
+    conclusiveRuns
       .filter(r => (r as { client_brand_rank: number | null }).client_brand_rank !== null)
       .map(r => (r as { ai_engine: string }).ai_engine)
   ).size
@@ -399,11 +487,12 @@ async function aggregateSnapshot(clientId: string, brandName: string): Promise<A
   // Build a compact ranking_table for reporting:
   //   { brands: [{ name, mentions, avg_rank, by_engine }] }
   const ranking_table = buildRankingTable(
-    runs as Array<{
+    conclusiveRuns as Array<{
       ai_engine: string
       brands_mentioned: BrandMention[]
+      client_brand_rank: number | null
     }>,
-    brandName
+    identity
   )
 
   // Upsert by (client_id, week_of)
@@ -428,15 +517,38 @@ async function aggregateSnapshot(clientId: string, brandName: string): Promise<A
   return { snapshotId: snapshot.id, mentionsCount, totalRuns, avgRank, engineCoverage }
 }
 
-/** Aggregate brand mentions across all runs into a flat ranking table. */
-function buildRankingTable(
-  runs: Array<{ ai_engine: string; brands_mentioned: BrandMention[] }>,
-  clientBrandName?: string
+/**
+ * Aggregate brand mentions across all runs into a flat ranking table.
+ *
+ * The client's name variants ("CTS Tours", "CTS Tours - China Travel Service
+ * (NZ) Limited") collapse into one canonical row. Which entry IS the client
+ * is decided per run, by the rank `resolveClientBrandRank` already resolved
+ * against that run's answer text — not by matching the brand name on its own.
+ * A brand name carries no market signal of its own, so judging it in
+ * isolation would un-merge every variant that happens not to spell out the
+ * country, and would re-credit the client with a same-named sibling's
+ * mentions in answers the run layer had already rejected.
+ */
+export function buildRankingTable(
+  runs: Array<{
+    ai_engine: string
+    brands_mentioned: BrandMention[]
+    client_brand_rank: number | null
+  }>,
+  identity?: ClientBrandIdentity
 ): Record<string, unknown> {
   const byBrand = new Map<
     string,
     { mentions: number; rankSum: number; byEngine: Record<string, number[]> }
   >()
+
+  const ids = identity ? buildClientIdentifiers(identity) : []
+  const canonicalKey = identity?.brandName.trim() ?? ''
+  // Only a client with the gate on defers to the per-run decision. Without
+  // anchors this table stays exactly what it was, including for legacy rows
+  // that name the client in brands_mentioned while client_brand_rank is null
+  // — re-adjudicating those is a separate job, not this change's to do.
+  const gated = identity ? hasGeoGate(identity) : false
 
   for (const run of runs) {
     const mentions = Array.isArray(run.brands_mentioned)
@@ -444,7 +556,16 @@ function buildRankingTable(
       : []
     for (const m of mentions) {
       if (!m.brand) continue
-      const key = m.brand.trim()
+      // Every client-matching entry in an accepted run belongs to the client,
+      // not only the one sitting at client_brand_rank — that rank is the
+      // MINIMUM of the client's entries, so keying on it would throw the
+      // client's other spellings out into their own competitor rows. (Measured
+      // on CTS: 333 runs, 686 entries.)
+      const isClient =
+        canonicalKey !== '' &&
+        isClientBrand(m.brand, ids) &&
+        (!gated || run.client_brand_rank !== null)
+      const key = isClient ? canonicalKey : m.brand.trim()
       if (!key) continue
       const entry = byBrand.get(key) ?? {
         mentions: 0,
@@ -458,12 +579,6 @@ function buildRankingTable(
       entry.byEngine[run.ai_engine] = ranksForEngine
       byBrand.set(key, entry)
     }
-  }
-
-  // Merge brand name variants for the client (e.g. "CTS Tours" and
-  // "CTS Tours - China Travel Service (NZ) Limited" → one canonical entry)
-  if (clientBrandName) {
-    mergeClientBrandVariants(byBrand, clientBrandName)
   }
 
   const brands = Array.from(byBrand.entries())
@@ -480,59 +595,6 @@ function buildRankingTable(
     })
 
   return { brands }
-}
-
-/**
- * Merge all brand-name variants of the client into a single canonical entry.
- * Variants are detected by substring inclusion (case-insensitive):
- *   "CTS Tours - China Travel Service (NZ) Limited" includes "CTS Tours"
- *   → both collapse into the canonical client brand name.
- */
-function mergeClientBrandVariants(
-  byBrand: Map<string, { mentions: number; rankSum: number; byEngine: Record<string, number[]> }>,
-  clientBrandName: string
-): void {
-  const canon = clientBrandName.trim()
-  const canonLower = canon.toLowerCase()
-
-  let canonicalKey = ''
-  const variantKeys: string[] = []
-
-  for (const key of Array.from(byBrand.keys())) {
-    const keyLower = key.toLowerCase().trim()
-    if (keyLower === canonLower) {
-      canonicalKey = key
-    } else if (keyLower.includes(canonLower)) {
-      // Only merge when the RAW CANDIDATE contains the canonical brand name
-      // (e.g. "CTS Tours - China Travel Service NZ" contains "CTS Tours").
-      // Deliberately NOT merging the reverse direction — that would absorb
-      // short competitor names into a longer client name (e.g. "Magic" into
-      // "Magic Engine"), corrupting competitor rankings in the snapshot.
-      variantKeys.push(key)
-    }
-  }
-
-  if (variantKeys.length === 0) return
-
-  const canonEntry = (canonicalKey ? byBrand.get(canonicalKey) : undefined) ?? {
-    mentions: 0,
-    rankSum: 0,
-    byEngine: {} as Record<string, number[]>,
-  }
-
-  for (const variantKey of variantKeys) {
-    const variant = byBrand.get(variantKey)
-    if (!variant) continue
-    canonEntry.mentions += variant.mentions
-    canonEntry.rankSum += variant.rankSum
-    for (const [engine, ranks] of Object.entries(variant.byEngine)) {
-      canonEntry.byEngine[engine] = [...(canonEntry.byEngine[engine] ?? []), ...ranks]
-    }
-    byBrand.delete(variantKey)
-  }
-
-  if (canonicalKey && canonicalKey !== canon) byBrand.delete(canonicalKey)
-  byBrand.set(canon, canonEntry)
 }
 
 /** Returns this week's Monday at 00:00 UTC. */

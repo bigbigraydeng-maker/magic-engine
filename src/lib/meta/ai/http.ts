@@ -1,0 +1,50 @@
+import { NextResponse } from 'next/server'
+import { readBoundedJson } from '@/lib/http/bounded-body'
+import { extractBearer, verifyApiKey } from '@/lib/auth/api-key-access'
+import { requireOnboardingClientAccess } from '@/lib/auth/client-access'
+import { MetaReadError } from '../graph-read'
+import { enabled } from './contract'
+import { isSelfServeClient,requirePilotActive,requirePilotLifecycleAccess } from './entitlement'
+import { requireMetaScope } from './store'
+export function json(data: unknown, status=200) { return NextResponse.json(data,{ status,headers:{ 'Cache-Control':'no-store' } }) }
+export function failure(error: unknown) { return json({ error:error instanceof MetaReadError ? error.code : 'request_failed' },error instanceof MetaReadError ? error.status : 500) }
+export function checkEnabled() { if (!enabled()) throw new MetaReadError('not_available',404) }
+export function checkOrigin(request: Request) {
+  const configured = process.env.NEXT_PUBLIC_APP_URL
+  if (!configured || request.headers.get('origin') !== new URL(configured).origin) throw new MetaReadError('origin_required',403)
+}
+export async function dashboardAccess(clientId: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(clientId)) throw new MetaReadError('invalid_client',400)
+  const access = await requireOnboardingClientAccess(clientId)
+  if (!access.ok) throw new MetaReadError(access.error,access.status)
+  return access
+}
+export async function pilotDashboardAccess(clientId: string) {
+  const access=await dashboardAccess(clientId)
+  try {
+    await requirePilotLifecycleAccess(clientId)
+  } catch(error) {
+    // A self-serve member of a self-serve client may open the page before activating (it offers the activation).
+    const notYetOpened=error instanceof MetaReadError && error.code==='pilot_required'
+    if(!notYetOpened || access.tier!=='self_serve' || !await isSelfServeClient(clientId)) throw error
+  }
+  return access
+}
+export async function activeDashboardAccess(clientId: string) {
+  const access=await dashboardAccess(clientId)
+  await requirePilotActive(clientId)
+  return access
+}
+export async function apiPrincipal(request: Request) {
+  const result = await verifyApiKey(extractBearer(request.headers.get('authorization')),{ expectedKind:'client' })
+  if (!result.ok || result.auth.kind !== 'client') throw new MetaReadError('unauthorised',401)
+  requireMetaScope(result.auth)
+  await requirePilotActive(result.auth.clientId)
+  return result.auth
+}
+export async function boundedBody(request: Request): Promise<unknown> {
+  const result = await readBoundedJson(request, 24000)
+  if (result.ok) return result.value
+  if (result.reason === 'too_large') throw new MetaReadError('request_too_large', 413)
+  throw new MetaReadError('invalid_json')
+}

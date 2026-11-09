@@ -9,8 +9,15 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { FACTORY_B_TRACK_SCENE_TAGS, FACTORY_CLIENT_DERIVED_SCENE_TAG } from './constants'
+import { scanContentQualityFlags, type QualityFlag } from './content-quality-guard'
 import { scanRedlineHits, validateClipPath } from './worker-guard'
 import { assertRecipeReceipt, winnerRecipeFromBrief, type WinnerRecipe } from './recipe'
+import { buildReelPostCaption, buildReelPublishAutoChecks } from '@/lib/social/reel-publishing'
+import { buildReelMediaAutoChecks, type ReelMediaEvidence } from '@/lib/social/reel-media-checks'
+import { assessRemotionContentSubstance } from './content-substance'
+import type { AspectOutputRecord } from './video-aspects'
+import { isRemotionBrief } from './render-mode'
+import { MACHINE_REVIEWED_KEY } from '@/lib/maliang/review-disposition'
 
 const ACTIVE_STATUSES = ['claimed', 'producing']
 
@@ -37,6 +44,9 @@ export interface CompleteParams {
   newClips: CompleteClipInput[]
   /** blocker 1:recipe 单必须携带 executed receipt;legacy 单可 undefined。 */
   recipeReceipt?: unknown
+  mediaEvidence?: ReelMediaEvidence | null
+  /** Set only when brief.remotion.aspects asked for extra ratios. */
+  aspectOutputs?: AspectOutputRecord[]
 }
 
 /**
@@ -110,20 +120,36 @@ function assertRecipeCompletion(
 }
 
 export type CompleteResult =
-  | { ok: true; status: 'in_review'; redlineHits: string[]; newClipIds: string[] }
+  | { ok: true; status: 'in_review'; redlineHits: string[]; qualityFlags: QualityFlag[]; newClipIds: string[] }
   | { ok: false; status: number; error: string }
 
 export async function completeWorkOrder(
   supabase: SupabaseClient,
   p: CompleteParams,
 ): Promise<CompleteResult> {
-  const { wo, workerId, videoPath, segmentsPath, srtPath, caption, actualCost, newClips, recipeReceipt } = p
+  const { wo, workerId, videoPath, segmentsPath, srtPath, caption, actualCost, newClips, recipeReceipt, mediaEvidence, aspectOutputs } = p
   const clientId = wo.client_id as string
   const woId = wo.id as string
 
   // blocker 1:recipe brief 必须携带并通过 shared receipt validator（防旧 worker 只报路径就 in_review）
   const recipeGate = assertRecipeCompletion(wo, newClips, recipeReceipt)
   if (!recipeGate.ok) return { ok: false, status: 422, error: recipeGate.error }
+
+  // 内容实质闸（服务端复核）：用工单自己的 props 重算，不信出片机自报的结论。默认只告警+留审计，
+  // FACTORY_CONTENT_SUBSTANCE_ENFORCE=1 后：缺内容或缺 capability 一律 422（在任何库写入之前）。
+  const substance = assessRemotionContentSubstance(wo.brief, mediaEvidence)
+  const enforceSubstance = process.env.FACTORY_CONTENT_SUBSTANCE_ENFORCE === '1'
+  if (substance.applicable) {
+    if (enforceSubstance && !substance.assetOnly && substance.server?.verdict !== 'pass') {
+      return { ok: false, status: 422, error: `content_substance_failed: ${substance.server?.reason ?? ''}`.slice(0, 300) }
+    }
+    if (enforceSubstance && !substance.capable) {
+      return { ok: false, status: 422, error: 'content_substance_missing' }
+    }
+    if ((!substance.assetOnly && substance.server?.verdict !== 'pass') || substance.mismatch || !substance.capable) {
+      console.warn(`[factory worker] content substance warning for ${String(wo.id)}: server=${substance.server?.verdict} reported=${substance.reported?.verdict ?? 'none'} capable=${substance.capable} mismatch=${substance.mismatch} enforce=${enforceSubstance}`)
+    }
+  }
 
   // ② 成片级红线复扫(fail-closed:红线/brief 查询失败即拒,查不到 ≠ 没有)
   const { data: client, error: cErr } = await supabase
@@ -151,22 +177,71 @@ export async function completeWorkOrder(
     }
   }
 
+  // brand_name 供下面的成片文案品控用(竞品角度检测)——同一条查询多选一列,不增加往返。
   const { data: brief, error: bErr } = await supabase
     .from('master_briefs')
-    .select('excluded_topics')
+    .select('excluded_topics, brand_name')
     .eq('id', wo.master_brief_id as string)
     .maybeSingle()
   if (bErr) return { ok: false, status: 500, error: 'brief lookup failed' }
 
-  const overlays = (Array.isArray((wo.brief as Record<string, unknown>)?.['segments'])
-    ? ((wo.brief as Record<string, unknown>)['segments'] as Array<Record<string, unknown>>)
+  const briefRecord = (wo.brief as Record<string, unknown>) ?? {}
+  const segmentsArr = Array.isArray(briefRecord['segments'])
+    ? (briefRecord['segments'] as Array<Record<string, unknown>>)
     : []
-  ).map((s) => (typeof s['text_overlay'] === 'string' ? (s['text_overlay'] as string) : null))
+  const overlaysFromBrief = segmentsArr.map((s) => (typeof s['text_overlay'] === 'string' ? (s['text_overlay'] as string) : null))
+  // legacy(非 recipe)单的逐段字幕实际写在 brief.copy.segments[].{title_sub,caption,title_main}
+  // (worker.mjs resolveCopy/buildSrt 同一取法)——brief.segments[].text_overlay 从未被任何调用方
+  // 写入过。漏收 copy.segments 会导致 findRepeatedCaption 只拿到 worker 拼好的单条聚合 caption
+  // 字符串,永远测不出真实的跨段字幕重复(2026-09-20 codex review round 2)。
+  const copySegmentsArr = Array.isArray((briefRecord['copy'] as Record<string, unknown> | undefined)?.['segments'])
+    ? (((briefRecord['copy'] as Record<string, unknown>)['segments']) as Array<Record<string, unknown>>)
+    : []
+  // worker.mjs 用的是 `title_sub || caption || title_main`(buildSrt / caption 拼接同一取法)——
+  // 空字符串跟 null/undefined 一样要跳到下一个字段。用 `??` 会在 title_sub==='' 时停在那里,
+  // 把这一段错记成 null,漏掉 worker 实际渲染并提交的 caption 内容(2026-09-20 codex review round 3)。
+  const overlaysFromCopy = copySegmentsArr.map((s) => {
+    const candidates = [s['title_sub'], s['caption'], s['title_main']]
+    const text = candidates.find((v) => typeof v === 'string' && v.trim().length > 0)
+    return typeof text === 'string' ? text : null
+  })
+  // recipe(multicut)单不把字幕写进 brief.segments.text_overlay —— 实际渲染的字幕(含 hook 之外的
+  // middle 段)只存在于已经过 assertRecipeReceipt 校验的 recipeReceipt.segments[].caption 里,
+  // 漏收会导致品控完全扫不到这些段(2026-09-20 codex review)。
+  const receiptSegments =
+    recipeReceipt != null && typeof recipeReceipt === 'object' && Array.isArray((recipeReceipt as { segments?: unknown }).segments)
+      ? ((recipeReceipt as { segments: Array<Record<string, unknown>> }).segments)
+      : []
+  const overlaysFromReceipt = receiptSegments.map((s) => (typeof s['caption'] === 'string' ? (s['caption'] as string) : null))
+  // 三路结构化逐段来源合流:brief.segments.text_overlay(历史保留,当前无写入方)/
+  // brief.copy.segments(legacy worker 真正落的地方)/ recipe receipt segments。
+  // `caption` 单独作为 worker 拼好的聚合串继续保留在下面的 [caption, ...overlays] 里,
+  // 不并入 overlays 本身——否则聚合串会跟其中某一段重复计数,污染逐段重复检测。
+  const overlays = [...overlaysFromBrief, ...overlaysFromCopy, ...overlaysFromReceipt]
   const redlineHits = scanRedlineHits(
     [caption, ...overlays],
     (client.brand_redline_phrases as string[] | null) ?? [],
     (brief?.excluded_topics as string[] | null) ?? [],
   )
+
+  // 成片文案品控(2026-09-20 Jev 评估):静态红线短语查不出的语义类缺陷 ——
+  // 竞品品牌当角度 / 内部分类标签冒充字幕 / 人称口吻不符简报。命中不打回,
+  // 标记随 redline_hits 一起进 output,ReviewInbox 标红转人工(同一套口径)。
+  // scanContentQualityFlags 内部已吞掉所有异常(Jev 网络/超时不允许拖垮这条主链路)。
+  const hookSegment = segmentsArr.find((s) => s['role'] === 'hook')
+  const receiptHookSegment = receiptSegments.find((s) => s['role'] === 'hook')
+  const onScreenHook =
+    (typeof hookSegment?.['text_overlay'] === 'string' ? (hookSegment['text_overlay'] as string) : null) ??
+    (typeof receiptHookSegment?.['caption'] === 'string' ? (receiptHookSegment['caption'] as string) : null) ??
+    overlays.find((o): o is string => !!o) ??
+    null
+  const brandNameForGuard = (brief?.brand_name as string | undefined) ?? ''
+  const qualityFlags = await scanContentQualityFlags({
+    brandName: brandNameForGuard,
+    angleLabel: typeof wo.angle === 'string' ? (wo.angle as string) : null,
+    onScreenHook,
+    captions: [caption, ...overlays].filter((t): t is string => !!t),
+  })
 
   // ③ new_clips 幂等入库:idempotency_key 命中已有行 → 复用不重插
   const insertedClipIds: string[] = []
@@ -229,7 +304,38 @@ export async function completeWorkOrder(
     srt_path: srtPath,
     caption,
     redline_hits: redlineHits,
+    quality_flags: qualityFlags,
+    // Media results are collected by the authenticated rendering worker and
+    // interpreted here at the server boundary. Missing probe values fail closed.
+    quality_checklist_auto: [
+      ...buildReelMediaAutoChecks(mediaEvidence),
+      ...buildReelPublishAutoChecks({
+        workOrderId: woId,
+        body: buildReelPostCaption((briefRecord.copy ?? {}) as Record<string, unknown>),
+        endcard: (((briefRecord.copy ?? {}) as Record<string, unknown>).endcard ?? {}) as Record<string, unknown>,
+      }),
+    ],
     new_clip_ids: insertedClipIds,
+    ...(aspectOutputs ? { aspect_outputs: aspectOutputs } : {}),
+    ...(substance.applicable
+      ? {
+          // Server recompute is the verdict; the worker's report is audit only.
+          content_substance: {
+            server: substance.server
+              ? { verdict: substance.server.verdict, kinds: substance.server.kinds, textSeconds: substance.server.textSeconds, reason: substance.server.reason.slice(0, 500) }
+              : null,
+            reported: substance.reported,
+            capable: substance.capable,
+            mismatch: substance.mismatch,
+            enforced: enforceSubstance,
+          },
+          // Audit mark only: the approve/publish guards read brief.remotion.deliverable (see deliverable.ts), not this.
+          ...(substance.assetOnly ? { deliverable: 'asset_only' } : {}),
+        }
+      : {}),
+    // Template renders enter the human queue before 马良 finishes. Until the
+    // verdict lands, the order is explicitly not machine-reviewed.
+    ...(isRemotionBrief(wo.brief) ? { [MACHINE_REVIEWED_KEY]: false } : {}),
   }
 
   // .select() 判行数:load 后被 sweeper 收回时 0 行匹配不能伪装成功(魏征 M2-P1-1)
@@ -252,5 +358,5 @@ export async function completeWorkOrder(
     return { ok: false, status: 409, error: 'work order reclaimed mid-flight' }
   }
 
-  return { ok: true, status: 'in_review', redlineHits, newClipIds: insertedClipIds }
+  return { ok: true, status: 'in_review', redlineHits, qualityFlags, newClipIds: insertedClipIds }
 }

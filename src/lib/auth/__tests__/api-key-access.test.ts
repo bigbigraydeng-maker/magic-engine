@@ -151,7 +151,8 @@ describe('verifyApiKey', () => {
     const res = await verifyApiKey(`${KEY_PREFIX}validtoken`)
     expect(res.ok).toBe(true)
     if (res.ok) {
-      expect(res.auth.clientId).toBe(CLIENT_ID)
+      expect(res.auth.kind).toBe('client')
+      if (res.auth.kind === 'client') expect(res.auth.clientId).toBe(CLIENT_ID)
       expect(res.auth.keyId).toBe(KEY_ID)
       expect(res.auth.scopes).toEqual(['read:all'])
     }
@@ -256,8 +257,9 @@ describe('logMcpAccess', () => {
   })
 
   it('admin kind writes admin_key_id, never client_key_id (R2)', () => {
-    const insertChain = mockInsertOk()
-    mockFrom.mockReturnValue(insertChain)
+    // 这条要读 insert 收到的原始行，所以把 vi.fn 单独留一份，别被 from() 的返回类型抹掉 .mock。
+    const insert = vi.fn().mockResolvedValue({ error: null })
+    mockFrom.mockReturnValue({ insert } as unknown as ReturnType<typeof supabaseAdmin.from>)
 
     logMcpAccess({
       kind: 'admin',
@@ -268,7 +270,7 @@ describe('logMcpAccess', () => {
       sourceIp: '203.0.113.5',
     })
 
-    const row = insertChain.insert.mock.calls[0][0]
+    const row = insert.mock.calls[0][0] as Record<string, unknown>
     expect(row.key_kind).toBe('admin')
     expect(row.admin_key_id).toBe(KEY_ID)
     expect(row).not.toHaveProperty('client_key_id')

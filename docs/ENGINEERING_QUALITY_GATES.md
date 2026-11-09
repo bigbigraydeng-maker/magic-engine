@@ -30,7 +30,24 @@ Magic Engine 不采用“一切改动都用最高强度验证”，也不回到�
 - SSRF、凭据、密钥、重定向、外部网络安全边界；
 - 付款、计费、预算、供应商花费；
 - CMS 发布、广告投放、邮件/社媒发布等不可轻易撤回的外部副作用；
+- 外部平台授权的**权限清单变更**（任何 `*_SCOPES` 常量）—— 见下方专条；
 - 失败可能造成客户数据泄露、错误执行、重复收费、生产中断或不可逆损害。
+
+#### A 级专条：改 `*_SCOPES` 必须同 PR 带上重连下发（2026-09-24 事故后加）
+
+改授权权限清单会让**已经连好的客户**在下次续期时断掉（微软）或让新功能对老客户
+静默 403（谷歌）。真实代价：CTS 邮箱断 9 天，客人询价一封没进系统，而那次改动的
+提交说明里其实已经写了「已有连接需要重连」—— **写在提交说明里不算下发**。
+
+所以这类 PR 的验收条件里必须同时包含三项，缺一不算完成：
+
+1. 受影响客户的**重连待办**会进今日待办「🙋 需要你动手」，带 what / how / href；
+2. 这个平台在 `src/lib/platform-oauth/connection-health.ts` 的 `HEARTBEAT_POLICY`
+   里有心跳节奏（没有就写清为什么）；
+3. 「多久没通上话就报警」的判据（同上 `staleHours`）。
+
+`src/lib/platform-oauth/__tests__/scope-change-gate.test.ts` 会在清单被改动时失败，
+把这三项摆到改动者眼前。事故全文见 [PITFALLS F11 / F12](./PITFALLS.md)。
 
 ### B 级：普通产品与业务逻辑
 
@@ -58,7 +75,7 @@ Magic Engine 不采用“一切改动都用最高强度验证”，也不回到�
 | 回归测试 | 必须 | 必须 | 视影响范围 |
 | Mutation | 只做关键安全/状态/身份/并发判据；冻结 head 跑一次完整相关套件 | 默认不做；高价值判据可做少量 targeted probe | 不做 |
 | Type / lint / build | 必须，按已知基线判断新增错误 | 必须 | build 或相关检查 |
-| 人工审查 | 按 `CLAUDE.md` 大任务规则；安全核心加攻击验证 | 一次集中 review | 自审或一次轻量 review |
+| 人工审查 | Codex Astra 审查 + Claude Code 独立复核。两签齐，合并闸才绿；仍不自动合 | 必过检查全绿即自动合。子牙 / 魏征 / 狄仁杰 只做可选抽查，缺席不挡 | 必过检查全绿即自动合 |
 | 最终证据 | 冻结 head、测试、CI、未解决 blocker、限制 | 测试、build、review 结论 | 截图/smoke/build 结果 |
 
 “全部 mock”不是 A 级边界测试的同义词。若关键主张是“实际 socket 使用了已验证 IP”“真实数据库锁住了行”或“TLS 仍校验证书”，测试必须越过被证明的那一层；同时必须保持隔离，不访问生产、不消费 provider 预算。
@@ -152,16 +169,19 @@ Magic Engine 不采用“一切改动都用最高强度验证”，也不回到�
 ### 10.1 定级：`risk.mjs`
 
 - 输入是 PR 的**实际改动文件清单**，不是 PR 描述。
-- 命中受保护路径清单中任意一条即为 **A**（migration / `.sql`、`.github/workflows/`、`tools/ops-review-loop/`、`tools/ai-orchestrator/`、`render.yaml`、`src/middleware.ts`、`src/lib/auth/`、`src/app/api/auth/`、`src/app/api/webhooks/`、RLS、隔离判定、`src/lib/kernel/`、`src/app/api/kernel/`、`src/lib/execution/`、计费 / 支付 / 额度、cron 注册与路由、对外发布器、对外发信、花费与发布 guardrail、SSRF 边界、凭证、`package.json` / `package-lock.json`）。
+- 命中受保护路径清单中任意一条即为 **A**（migration / `.sql`、`.github/workflows/`、`tools/ops-review-loop/`、`tools/ai-orchestrator/`、`render.yaml`、`src/middleware.ts`、`src/lib/auth/`、`src/app/api/auth/`、`src/app/api/webhooks/`、RLS、隔离判定、`src/lib/kernel/`、`src/app/api/kernel/`、`src/lib/execution/`、计费 / 支付 / 额度、cron 注册与路由、对外发布器、对外发信、花费与发布 guardrail、SSRF 边界、凭证、`package.json` / `package-lock.json`；2026-09-27 补：任意目录的 `.env*`（不分大小写，只放过根目录模板 `.env.example`）与 `.gitignore` / `.dockerignore`、`next.config.*`、`middleware` 各种写法、`instrumentation*`、`Dockerfile*`、`supabase/config.toml`、`.nvmrc` / `.node-version` / `.tool-versions`、`tools/local-executor-bridge/`、`tsconfig*.json`、`vitest.config|setup|workspace|projects.*`、`playwright.config.*` / `jest.config.*`、`postcss|tailwind.config.*`、`.babelrc*` / `babel.config.*` / `.swcrc`、`eslint.config.*` / `.eslintrc*`、`.husky/`、数据库红线检查脚本 `scripts/check-policy-to-clause.mjs` / `scripts/db-replay-and-verify.sh`、任意目录的 `package.json` 与依赖锁、`.npmrc` —— 这些以前判 B、会无人自动合，一行就能泄密钥、关检查或改生产运行方式）。
+- **改动行里的鉴权也是 A**（2026-10-25，#3123）：路径不在上一清单里，但增删行碰到登录、权限或客户访问校验（`requireSession`、`requireDashboardClientAccess`、`requirePaidClientAccess`、`requirePlanApproverAccess`、`requireAdmin` 这类，或从 `auth/require-session`、`auth/client-access`、`auth/require-admin` 引入）的，定为 A（鉴权隔离）。没改这些校验的业务改动仍按路径定级。源文件有改动行数但 GitHub 没给 patch（不是 0 行的纯改名）时，没法判断是否改了鉴权，也定为 A。
 - **C 是白名单，不是兜底**：只有文档、样式、图片、纯测试文件命中低风险清单；一个 diff 里**每一个**文件都命中才算 C。没认出来的一律 **B**。
 - **读不到就是 A**：清单拿不到、为空、某一项没有文件名 —— 全部按 A 处理并注明「读不到」。「我们没看」和「我们看了没问题」不许长得一样。「读不到」这条理由永远排在原因列表最前面，不会被条数上限截掉。
 - **rename 两头都算**：GitHub 把 `git mv .github/workflows/guard.yml docs/guard.yml` 报成一条记录 —— 新路径在 `filename`，受保护的旧路径在 `previous_filename`。只看 `filename` 会把「悄悄停用控制面」判成改文档，所以新旧路径都定级、取更高的一档。标成 `renamed` / `copied` 却说不出原路径的记录按读不到处理。
-- 自报级别只作下限（见 §2 的提示）。
-- 每条 A 规则还带一个**风险类别**（migration / 控制面 / 生产调度 / 鉴权隔离 / Kernel 执行 / 钱 / 对外副作用 / 出网边界 / 凭证 / 供应链 / 读不到），这是 §10.4 决定「要哪种专项证据」的依据。
+- 自报级别只作下限（见 §2 的提示）。统一写法是正文一行 `风险级别：A`；机器也认 `风险级：A`、`**风险级：A**`、`风险级：**A**`、`Risk: A`、以及 `## 风险级` 标题下一行写等级。以风险级标签开头、带冒号或独占一行、却读不出等级的（如 `风险级别：见下表`）按 **A** 处理，并在理由里点名那一行 —— 2026-09-26 #2061、#2075 就是写了 A 但机器没读出，被当 B 无人自动合并。
+- 每条 A 规则还带一个**风险类别**（migration / 控制面 / 生产调度 / 鉴权隔离 / Kernel 执行 / 钱 / 对外副作用 / 出网边界 / 凭证 / 供应链 / 治理 / 构建与运行配置 / 读不到），这是 §10.4 决定「要哪种专项证据」的依据。
 
 ### 10.2 抽样：`sampling.mjs`
 
 C 级不必每次都请 Codex，但也不能一次都不请。按 `(PR 号, head commit)` 做**稳定** 20% 抽样：同一个 commit 永远得到同一个答案，重跑工作流、重复投递事件、作者反复重试都改不了结果。用 FNV-1a 而不是随机数，正是为了这一点。A / B 一律必审；级别认不出来也按必审处理。
+
+B 级另有一条**不挡合并**的抽查：子牙 / 魏征 / 狄仁杰 用同一个稳定抽样看大约 20% 的 B 级提交。抽中与否只写在摘要里。A 级不靠这三人，只认 Codex Astra 与 Claude Code 两方签字。C 级不抽这三人。缺席不改变 B / C「检查全绿就自动合」。
 
 ### 10.3 轮次上限：`maxRoundsForRisk`
 
@@ -231,3 +251,54 @@ C 级不必每次都请 Codex，但也不能一次都不请。按 `(PR 号, head
 
 - **只收 A / B / C。** builder 见到别的值直接报错，parser 见到别的值直接丢弃。级别认不出来不能只是「按最严门槛算分」—— 因为按类别要专项证据那道闸只在 `risk === 'A'` 时才跑，一个写着 `"risk":"nonsense"` 的标记会整个绕过它。
 - **标记必须来自可信身份。** 标记是一条**判定结论**，而任何能在 PR 下留言的人 —— 包括 PR 作者自己 —— 都能手打一条。转义只防标记被截断，防不了它被伪造署名。所以读标记只能走 `selectTrustedGateMarkers`，显式传入可信身份清单；来源没有作者、或作者不在清单里，一律丢弃。接线 PR 必须传写这条评论的那个身份（check-run 的产出方或本闭环的 bot），**绝不能**传 `github.event.pull_request.user.login`。
+
+## 11. 资源优先级判断（PM 2026-09-07 拍板）
+
+§2 的 A/B/C 判的是**这一件事要投入多少验证强度**。本节判的是**一堆待做的事里，资源先给谁**——两件事互不替代，一个 PR 通常要过两道判断：先定优先级决定「现在做不做」，再定风险级别决定「做的时候多小心」。
+
+触发时机：**同时出现两个以上待办 / 待修 bug / 待排 Issue，需要决定先做哪个**时（不是每个单独 PR 都要跑一遍——单独一件事直接做，不需要排序）。
+
+### 11.1 三个维度
+
+每一项待做的事，在下面三个维度上打分（高 / 中 / 低）：
+
+1. **频率** —— 这件事在实际运营里天天/每周撞上，还是偶发/异常触发？
+   - 高：日常运营链路里的常态动作（内容审核、出片排产、每日待办处理…）
+   - 中：周期性但不是每天（周报、月度复查…）
+   - 低：只在异常/边界条件触发（数据口径对不上、罕见并发…）
+
+2. **IMPACT 闭环关键度** —— IMPACT = Inspect → Measure → Prescribe → Act → Check → Tune。这件事卡在闭环的哪一段？
+   - 高：卡在 **Act（执行）**——一旦卡死，后面 Check、Tune 全部无从谈起，闭环直接断在这一环；或卡在 **Measure（衡量）**且系统给出的是**错误信号**（不是诚实报警，是在说谎，例如方向判反的指标）
+   - 中：卡在 Measure 但系统只是诚实报警缺一个修复入口（伤害可控，不是拍脑袋做反方向决策）；或卡在 Inspect/Prescribe 影响判断质量但不阻塞执行
+   - 低：不在 IMPACT 六段的关键路径上，纯支撑性/边缘功能
+
+3. **收入关联度** —— 跟钱挂不挂钩？
+   - 高：直接关系客户投诉、续费、新签（客户能感知到、能影响付费决策的东西）
+   - 中：间接影响客户效果判断或运营效率，但不直接触发投诉/流失
+   - 低：纯内部治理、开发体验、长尾边缘场景
+
+### 11.2 综合判定
+
+三个维度各打出高 / 中 / 低后，只看「有几个高、几个中、几个低」这个组合，不看具体是哪个维度——三档三维一共只有 10 种组合，下表**穷尽全部 10 种、互斥排列**，任何一次打分都能唯一落进一行，不存在两行都符合或两行都不符合的情况：
+
+| 三维得分组合（与维度顺序无关） | 优先级 |
+|---|---|
+| 高高高、高高中 | **P0**，本周资源 |
+| 高高低 | **P1**，两周内 |
+| 高中中、高中低、中中中、中中低 | **P2**，排队，资源富余时做 |
+| 高低低、中低低、低低低 | **P3 / 暂缓**，写进 ROADMAP 待认领，不主动占用当前资源 |
+
+判定顺序：高的个数越多，优先级不会更低；高的个数相同时，低的个数越多，优先级不会更高。两个高必须搭配至少一个中或高才够 P0（一中即够，一低就降到 P1）；只要落到「最多一个高、且不满足多数为低」的区间，一律 P2；只要三个维度里有两个或以上是低，一律 P3，不因剩下那个维度是高而例外。
+
+### 11.3 例子（2026-09-07 每日待办 href 落地页审计发现的问题）
+
+- `price_claim_unbacked`（配图来源改错表，PM 点开素材库找不到那张图）：频率高（内容审核天天过）+ Act 段核心（直接卡发布）+ 收入高（配错图客户按图下单对不上，投诉算客户的）→ 高高高 → **P0**
+- `factory_worker_idle`（出片工人没开机，落地页只能看状态不能远程启动）：频率高（几乎天天可能撞上）+ Act 段核心（出片是内容交付链路）+ 收入高（停摆影响客户满意度/续费）→ 高高高 → **P0**
+- `kernel_needs_human`（3 处分支落地页 href 为空，压根没有入口）：频率中（不确定，但发生了完全无解）+ Act 段核心（是「管道不许断头」这条铁律的安全网本身失效）+ 收入中 → 高中中 → **P2**
+- `leads_metric_untrusted`（客资数字不可信，落地页没有修复触发条件的入口）：频率中 + Measure 段但系统诚实报警（不是说谎）+ 收入中（影响续费判断但不是当场做反方向决策）→ 中中中 → **P2**
+- `meta_stuck`（网站 meta 改动排队卡住，落地页跟客户 WP 后台不对应）：频率中 + Act 段但影响的是 SEO 慢变量 + 收入中 → 中中中 → **P2**
+- `goal_baseline_mismatch`（目标起点数字改不了，页面只读）：频率低（异常检测触发）+ Measure 段但已经诚实提醒「这个数可能反了」+ 收入中 → 中中低 → **P2**
+
+### 11.4 谁来判
+
+跟 §9 一致：Claude Code 在需要排序时先算一遍三维打分，把结果和理由摆出来；Product Owner 只决定「同意这个顺序」还是「这次业务上有别的考虑要插队」——不亲自重新算分。

@@ -19,6 +19,7 @@
  */
 
 import type { Verdict, MetricVerdict } from './baseline'
+import { resolveAdsPlaybook } from './playbooks'
 
 /** Frequency at/above which decay is read as audience fatigue, not creative age. */
 const FREQ_FATIGUE_THRESHOLD = 2.5
@@ -39,6 +40,8 @@ export interface PrescribeInput {
   verdict: Verdict
   metrics: MetricVerdict[]
   frequency_7d: number | null
+  /** `clients.industry` — only picks the result noun in the copy. null/unknown → neutral words. */
+  industry?: string | null
 }
 
 /**
@@ -76,7 +79,7 @@ export function prescribe(input: PrescribeInput): Prescription | null {
       title: '从爆款池补新素材',
       why: '观众没被打扰过度(频次很低),但点击率持续走低 —— 是素材本身老化失效,补新素材最对症。',
       executable: true,
-      execute_hint: '把近期表现最好的内容补进账户统一的爆款广告组(不一定是这张卡这条);新素材一律先暂停、不花钱,你确认开启后才投。',
+      execute_hint: '先出确认卡。点确认后才补进账户统一的爆款广告组（不一定是这张卡这条）。建成仍暂停、不花钱。要开投再点一张卡。',
     }
   }
 
@@ -84,7 +87,7 @@ export function prescribe(input: PrescribeInput): Prescription | null {
     return {
       kind: 'review_offer',
       title: '检查报价文案和落地流程',
-      why: '点击没变差但每个询盘变贵了 —— 问题多半不在广告,在点进去之后(表单/报价/页面)。',
+      why: `点击没变差但${resolveAdsPlaybook(input.industry ?? null).costPerResultLabel}变贵了 —— 问题多半不在广告,在点进去之后(表单/报价/页面)。`,
       executable: false,
       execute_hint: '这要改报价文案和落地页,我不自动动。先按住钱(降预算或先停),改哪里我来查了给你。',
     }

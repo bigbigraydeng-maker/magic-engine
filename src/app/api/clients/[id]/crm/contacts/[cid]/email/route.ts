@@ -1,0 +1,90 @@
+/**
+ * GET /api/clients/[id]/crm/contacts/[cid]/email
+ *
+ * 这个人的邮件线索——只为回答一件事：**在 CRM 里能不能当场回他**。
+ * 照 `.../messenger/route.ts` 的样板写（那份文件头写的道理原样成立，换了渠道）。
+ *
+ * 邮件没有 Messenger 那种 24 小时/7 天回复窗口——不返回 `replyWindow`，
+ * 前端据此不显示窗口提示，发送按钮也不会因为「窗口」被禁用。真正挡发送的
+ * 是「这个人有没有来过信」，那件事留给 `sendMailReply` 在发送那一刻判断
+ * （没有客人来信会报 409 `no_thread`），这里不重复猜。
+ *
+ * Responses:
+ *   200  { conversationId, participantName } —— 能回
+ *   200  { conversationId: null, compose }   —— 这个人没有可回复的邮件线；compose 说明能不能写第一封
+ *        compose = { canCompose: true, recipient, mailbox, sentToContactLast7Days }
+ *                | { canCompose: false, reason, message }
+ *   401 / 403 / 500
+ */
+
+import { NextRequest, NextResponse } from 'next/server'
+import { requirePaidClientAccess } from '@/lib/auth/client-access'
+import { supabaseAdmin } from '@/lib/supabase'
+import { previewCompose } from '@/lib/microsoft/mail-send-new'
+import { createMailNewDeps } from '@/lib/microsoft/mail-send-new-prod'
+
+interface RouteParams {
+  params: { id: string; cid: string }
+}
+
+/** 没有可回复的线程：顺带告诉前端能不能写第一封（读失败就当不能写，不让界面猜）。 */
+async function noThread(clientId: string, contactId: string): Promise<NextResponse> {
+  try {
+    const compose = await previewCompose({ clientId, contactId }, createMailNewDeps())
+    return NextResponse.json({ conversationId: null, compose })
+  } catch (err) {
+    console.error('[crm/email] compose 预览失败:', err instanceof Error ? err.message : err)
+    return NextResponse.json({ conversationId: null, compose: { canCompose: false, reason: 'config_unreadable', message: '系统暂时读不到发信设置。' } })
+  }
+}
+
+export async function GET(_req: NextRequest, { params }: RouteParams): Promise<NextResponse> {
+  const { id: clientId, cid: contactId } = params
+  const access = await requirePaidClientAccess(clientId)
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status })
+  }
+
+  // client_id 一起进 where —— 会话 id 虽然是我们自己查出来的，但隔离不靠
+  // 「上游查对了」这种假设成立（见 mail-send.ts 的同款复核）。
+  const { data: convos, error } = await supabaseAdmin
+    .from('conversations')
+    .select('id, participant_name')
+    .eq('client_id', clientId)
+    .eq('contact_id', contactId)
+    // 只认邮件。这条路由的结果直接决定卡片上给不给「在这里回邮件」的框——
+    // 拿到一条私信线程，销售会对着一个从没收过他邮件的人打字。
+    .eq('channel', 'email')
+    // 同一个人可能连了不止一条邮件线程——最新的在前，那才是他还在说话的地方。
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+    .limit(10)
+
+  if (error) {
+    return NextResponse.json({ error: '读取失败' }, { status: 500 })
+  }
+  const candidates = (convos as Array<{ id: string; participant_name: string | null }> | null) ?? []
+  if (candidates.length === 0) {
+    return noThread(clientId, contactId)
+  }
+
+  // 只有「客人真的来过信」的线程才算可回复：`sendMailReply` 回的是客人最后一封入站信，
+  // 一条只有我们发出（或发送失败遗留）的线程回不了，不能让抽屉误显示回复框。
+  const { data: inbound, error: inboundError } = await supabaseAdmin
+    .from('conversation_messages')
+    .select('conversation_id')
+    .in('conversation_id', candidates.map((c) => c.id))
+    .eq('direction', 'inbound')
+  if (inboundError) {
+    return NextResponse.json({ error: '读取失败' }, { status: 500 })
+  }
+  const withInbound = new Set(((inbound as Array<{ conversation_id: string }> | null) ?? []).map((m) => m.conversation_id))
+  const convo = candidates.find((c) => withInbound.has(c.id))
+  if (!convo) {
+    return noThread(clientId, contactId)
+  }
+
+  return NextResponse.json({
+    conversationId: convo.id,
+    participantName: convo.participant_name ?? null,
+  })
+}

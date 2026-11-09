@@ -1,0 +1,434 @@
+<title>城市合伙人招募手册</title>
+<style>
+  :root {
+    --ink: #221e17;
+    --ink-soft: #4c4436;
+    --muted: #837863;
+    --paper: #fbf7ef;
+    --paper-raised: #ffffff;
+    --paper-sunk: #f4ecdd;
+    --line: rgba(34, 30, 23, 0.12);
+    --line-strong: rgba(34, 30, 23, 0.22);
+    --ochre: #c4912e;
+    --ochre-deep: #94661a;
+    --ochre-tint: #f1e3c6;
+    --ink-inverse: #f5eeddff;
+    --dark-band: #211c14;
+    --dark-band-ink: #f3ead7;
+    --dark-band-muted: #bcab8c;
+    --dark-band-line: rgba(243, 234, 215, 0.18);
+    --good: #5c7f3f;
+    --shadow: 0 1px 2px rgba(34,30,23,0.05), 0 10px 30px rgba(34,30,23,0.07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #ece4d4;
+      --ink-soft: #cabfa7;
+      --muted: #97896f;
+      --paper: #16130d;
+      --paper-raised: #1e1a12;
+      --paper-sunk: #211c13;
+      --line: rgba(236, 228, 212, 0.13);
+      --line-strong: rgba(236, 228, 212, 0.24);
+      --ochre: #d9a94f;
+      --ochre-deep: #e8c273;
+      --ochre-tint: rgba(217, 169, 79, 0.16);
+      --dark-band: #241f16;
+      --dark-band-ink: #f3ead7;
+      --dark-band-muted: #c3b492;
+      --dark-band-line: rgba(243, 234, 215, 0.16);
+      --good: #8bad63;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 10px 30px rgba(0,0,0,0.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #ece4d4;
+    --ink-soft: #cabfa7;
+    --muted: #97896f;
+    --paper: #16130d;
+    --paper-raised: #1e1a12;
+    --paper-sunk: #211c13;
+    --line: rgba(236, 228, 212, 0.13);
+    --line-strong: rgba(236, 228, 212, 0.24);
+    --ochre: #d9a94f;
+    --ochre-deep: #e8c273;
+    --ochre-tint: rgba(217, 169, 79, 0.16);
+    --dark-band: #241f16;
+    --dark-band-ink: #f3ead7;
+    --dark-band-muted: #c3b492;
+    --dark-band-line: rgba(243, 234, 215, 0.16);
+    --good: #8bad63;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 10px 30px rgba(0,0,0,0.4);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    line-height: 1.72;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: var(--ochre-tint); }
+  h1, h2, h3 { font-family: "Space Grotesk", "PingFang SC", "Microsoft YaHei", sans-serif; text-wrap: balance; margin: 0; }
+
+  .wrap { max-width: 840px; margin: 0 auto; padding: 0 28px; }
+
+  /* hero */
+  header.hero {
+    background: var(--dark-band);
+    color: var(--dark-band-ink);
+    padding: 68px 28px 60px;
+  }
+  .hero-inner { max-width: 840px; margin: 0 auto; }
+  .brand {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 15px;
+    letter-spacing: 0.02em; color: var(--dark-band-ink);
+  }
+  .brand .dot { width: 10px; height: 10px; border-radius: 3px; background: var(--ochre); transform: rotate(45deg); }
+  .hero-eyebrow {
+    margin-top: 34px; font-size: 12.5px; font-weight: 600; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--ochre);
+  }
+  h1.hero-title {
+    margin-top: 16px; font-size: clamp(30px, 5vw, 46px); font-weight: 700;
+    line-height: 1.14; letter-spacing: -0.01em; color: var(--dark-band-ink); max-width: 17ch;
+  }
+  .hero-sub {
+    margin-top: 20px; font-size: 16.5px; color: var(--dark-band-muted); max-width: 54ch; line-height: 1.7;
+  }
+  .hero-meta {
+    margin-top: 30px; display: flex; flex-wrap: wrap; gap: 10px;
+  }
+  .chip {
+    font-size: 12.5px; font-weight: 500; padding: 6px 13px; border-radius: 999px;
+    border: 1px solid var(--dark-band-line); color: var(--dark-band-ink);
+  }
+
+  /* section rhythm */
+  section { padding: 52px 0; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: none; }
+  .kicker {
+    font-family: "Space Grotesk", sans-serif; font-size: 12.5px; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--ochre-deep); margin-bottom: 14px;
+  }
+  h2.sec {
+    font-size: clamp(23px, 3.4vw, 30px); font-weight: 600; letter-spacing: -0.01em; line-height: 1.24;
+    max-width: 22ch;
+  }
+  .lede { margin-top: 16px; font-size: 16px; color: var(--ink-soft); max-width: 62ch; }
+  p { margin: 14px 0 0; }
+  p.body { font-size: 15.5px; color: var(--ink-soft); max-width: 64ch; }
+  b, strong { color: var(--ink); font-weight: 600; }
+
+  /* opportunity stat row */
+  .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 28px; }
+  .stat {
+    background: var(--paper-raised); border: 1px solid var(--line); border-radius: 14px;
+    padding: 20px 18px; box-shadow: var(--shadow);
+  }
+  .stat .big {
+    font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 26px;
+    color: var(--ochre-deep); font-variant-numeric: tabular-nums;
+  }
+  .stat .cap { margin-top: 4px; font-size: 13px; color: var(--muted); line-height: 1.45; }
+
+  /* product: what you sell */
+  .prod-card {
+    margin-top: 26px; background: var(--paper-sunk); border: 1px solid var(--line);
+    border-radius: 16px; padding: 26px 26px 22px;
+  }
+  .prod-line { display: flex; gap: 14px; align-items: flex-start; padding: 12px 0; border-bottom: 1px dashed var(--line); }
+  .prod-line:last-child { border-bottom: none; }
+  .prod-ico {
+    flex: none; width: 34px; height: 34px; border-radius: 9px; background: var(--ochre-tint);
+    color: var(--ochre-deep); display: flex; align-items: center; justify-content: center;
+  }
+  .prod-ico svg { width: 18px; height: 18px; }
+  .prod-line .t { font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 15px; }
+  .prod-line .d { font-size: 13.5px; color: var(--ink-soft); margin-top: 2px; }
+
+  /* reasons it sells */
+  .why-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 26px; }
+  .why {
+    background: var(--paper-raised); border: 1px solid var(--line); border-radius: 13px;
+    padding: 18px 18px; box-shadow: var(--shadow);
+  }
+  .why .h { font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 9px; }
+  .why .h::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ochre); flex: none; }
+  .why .b { margin-top: 8px; font-size: 13.5px; color: var(--ink-soft); line-height: 1.6; }
+
+  /* earnings */
+  .earn-table-wrap { margin-top: 24px; overflow-x: auto; border-radius: 14px; border: 1px solid var(--line); box-shadow: var(--shadow); }
+  table.earn { border-collapse: collapse; width: 100%; min-width: 460px; background: var(--paper-raised); }
+  table.earn th, table.earn td { padding: 14px 18px; text-align: left; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+  table.earn thead th { background: var(--dark-band); color: var(--ochre-deep); font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 13.5px; }
+  table.earn tbody tr:last-child td { border-bottom: none; }
+  table.earn .rate { font-family: "Space Grotesk", sans-serif; font-weight: 700; color: var(--ochre-deep); font-variant-numeric: tabular-nums; }
+  table.earn .base { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 15px; }
+  table.earn td.bonus-cell { background: var(--ochre-tint); text-align: center; }
+  .bonus-pill {
+    display: inline-block; font-family: "Space Grotesk", sans-serif; font-weight: 700;
+    font-size: 15px; padding: 4px 13px; border-radius: 999px;
+    background: var(--ochre); color: #221e17; font-variant-numeric: tabular-nums;
+    box-shadow: 0 1px 4px rgba(196,145,46,0.4);
+  }
+  .bonus-none { color: var(--muted); }
+  table.earn td.total { font-family: "Space Grotesk", sans-serif; font-weight: 700; color: var(--ochre-deep); font-variant-numeric: tabular-nums; font-size: 17px; }
+  .reward-banner {
+    margin-top: 20px; display: flex; gap: 13px; align-items: center;
+    background: var(--ochre-tint); border: 1px solid var(--ochre); border-radius: 12px;
+    padding: 16px 20px; font-size: 14.5px; color: var(--ink); line-height: 1.6;
+  }
+  .reward-banner svg { flex: none; width: 24px; height: 24px; color: var(--ochre-deep); }
+  .reward-banner b { color: var(--ochre-deep); }
+
+  .example {
+    margin-top: 22px; background: var(--paper-sunk); border: 1px solid var(--line);
+    border-left: 3px solid var(--ochre); border-radius: 12px; padding: 20px 22px;
+  }
+  .example .lab { font-family: "Space Grotesk", sans-serif; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ochre-deep); }
+  .example .calc { margin-top: 10px; font-size: 15px; color: var(--ink); line-height: 1.7; }
+  .example .calc b { color: var(--ochre-deep); font-variant-numeric: tabular-nums; }
+  .disclaimer { margin-top: 12px; font-size: 12.5px; color: var(--muted); font-style: italic; line-height: 1.6; }
+
+  /* your job — numbered sequence is legitimate here */
+  .steps { margin-top: 26px; display: flex; flex-direction: column; gap: 2px; }
+  .step { display: flex; gap: 18px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .step:last-child { border-bottom: none; }
+  .step .n {
+    flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--ochre);
+    color: #221e17; font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .step .t { font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 15.5px; }
+  .step .d { font-size: 14px; color: var(--ink-soft); margin-top: 3px; }
+
+  /* support grid */
+  .sup-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 26px; }
+  .sup { background: var(--paper-raised); border: 1px solid var(--line); border-radius: 13px; padding: 18px; box-shadow: var(--shadow); }
+  .sup .h { font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 15px; }
+  .sup .b { margin-top: 7px; font-size: 13.5px; color: var(--ink-soft); line-height: 1.6; }
+
+  /* compliance callout */
+  .compliance {
+    margin-top: 8px; background: var(--dark-band); color: var(--dark-band-ink);
+    border-radius: 18px; padding: 34px 30px;
+  }
+  .compliance .kicker { color: var(--ochre); }
+  .compliance h2 { color: var(--dark-band-ink); }
+  .compliance p { color: var(--dark-band-muted); font-size: 15px; max-width: 60ch; }
+  .compliance .pillar { display: flex; gap: 12px; align-items: flex-start; margin-top: 18px; }
+  .compliance .pillar svg { flex: none; width: 22px; height: 22px; color: var(--good); margin-top: 1px; }
+  .compliance .pillar .t { font-size: 15px; color: var(--dark-band-ink); }
+  .compliance .pillar .t b { color: var(--dark-band-ink); }
+
+  /* join flow */
+  .join-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 26px; }
+  .jstep { text-align: center; }
+  .jstep .n {
+    width: 40px; height: 40px; margin: 0 auto; border-radius: 50%; border: 2px solid var(--ochre);
+    color: var(--ochre-deep); font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .jstep .t { margin-top: 10px; font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 14.5px; }
+  .jstep .d { margin-top: 4px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+
+  /* faq */
+  .faq { margin-top: 22px; display: flex; flex-direction: column; gap: 0; }
+  .qa { padding: 18px 0; border-bottom: 1px solid var(--line); }
+  .qa:last-child { border-bottom: none; }
+  .qa .q { font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 15.5px; display: flex; gap: 10px; }
+  .qa .q::before { content: "Q"; color: var(--ochre-deep); font-weight: 700; }
+  .qa .a { margin-top: 8px; font-size: 14px; color: var(--ink-soft); line-height: 1.65; padding-left: 22px; }
+
+  /* CTA footer */
+  .cta {
+    margin: 44px 0 0; text-align: center; padding: 44px 28px;
+    background: var(--paper-sunk); border-radius: 18px; border: 1px solid var(--line);
+  }
+  .cta h2 { font-size: 24px; font-weight: 600; }
+  .cta p { color: var(--ink-soft); font-size: 15px; margin-top: 10px; }
+  .cta .mail {
+    display: inline-block; margin-top: 20px; font-family: "Space Grotesk", sans-serif; font-weight: 600;
+    font-size: 15px; padding: 13px 26px; border-radius: 10px; background: var(--ochre); color: #221e17;
+    text-decoration: none;
+  }
+  .foot-note { text-align: center; font-size: 12px; color: var(--muted); margin: 22px 0 60px; line-height: 1.6; }
+
+  @media (max-width: 680px) {
+    .stat-row, .why-grid, .sup-grid { grid-template-columns: 1fr; }
+    .join-steps { grid-template-columns: repeat(2, 1fr); }
+    header.hero { padding: 48px 22px 44px; }
+    section { padding: 40px 0; }
+  }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap">
+
+<header class="hero">
+  <div class="hero-inner">
+    <div class="brand"><span class="dot"></span> Magic Engine</div>
+    <div class="hero-eyebrow">城市合伙人招募 · 澳大利亚 & 新西兰</div>
+    <h1 class="hero-title">帮身边的生意主被看见，把它做成你的事业</h1>
+    <p class="hero-sub">Magic Engine 正在澳新招募城市合伙人。你把一套「好用、便宜、看得懂」的数字营销工具带给本地华人中小生意主，帮他们迈出线上增长的第一步——每一个你带来的付费客户，都是你长期的佣金收入。</p>
+    <div class="hero-meta">
+      <span class="chip">$39 起 · 低门槛好开口</span>
+      <span class="chip">佣金逐年结算 · 客户在你就在</span>
+      <span class="chip">产品自己干活 · 你不用懂技术</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section>
+    <div class="kicker">机会</div>
+    <h2 class="sec">一大批生意主知道要做线上，却不知道从哪下手</h2>
+    <p class="lede">澳新有大量华人中小生意主——餐饮、零售、旅游、地产、留学中介、贸易……他们清楚「必须被 Google 和 AI 搜到、必须有线上口碑」，但请不起动辄几千一月的代理公司，也没时间自己摸索。</p>
+    <p class="body">这中间就是你的机会：把一个一顿饭钱就能开始、马上能看到东西的工具递到他们手里，帮他们跨出第一步。你熟悉这个社群，你的一句话比冷冰冰的广告有用得多。</p>
+    <div class="stat-row">
+      <div class="stat"><div class="big">$39/月</div><div class="cap">起步门槛，一顿饭的钱，决策快、好开口</div></div>
+      <div class="stat"><div class="big">永久免费</div><div class="cap">客户先免费拥有一个网站，体验到价值再升级</div></div>
+      <div class="stat"><div class="big">40%</div><div class="cap">客户第一年，你拿到的佣金比例（逐年结算）</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="kicker">你要卖的是什么</div>
+    <h2 class="sec">不是让你去背技术——是把一个会自己干活的助手介绍给对的人</h2>
+    <p class="lede">Magic Engine 是一套帮生意主做「数字营销增长」的系统。客户付费后，网站、内容、被搜到、口碑打理，大部分由系统自动完成。你负责的是把它介绍给对的人、陪他们开始。</p>
+    <div class="prod-card">
+      <div class="prod-line">
+        <div class="prod-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 8h18"/><circle cx="6" cy="6" r="0.6" fill="currentColor"/></svg></div>
+        <div><div class="t">一个真的能用的网站</div><div class="d">免费就先有一个能发给客户、印在名片上的网站；升级后换成自己的域名、被 Google 搜到、配公司邮箱。</div></div>
+      </div>
+      <div class="prod-line">
+        <div class="prod-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
+        <div><div class="t">被 Google 和 AI 搜到</div><div class="d">SEO 和 AI 可见度监控 + 优化，让客户在搜索和 ChatGPT 这类 AI 里能被找到、被提到。</div></div>
+      </div>
+      <div class="prod-line">
+        <div class="prod-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h10M4 18h7"/></svg></div>
+        <div><div class="t">内容和口碑有人帮着打理</div><div class="d">图文、短视频、评论回复，系统按客户的真实素材和信息自动产出，客户确认就好。</div></div>
+      </div>
+      <div class="prod-line">
+        <div class="prod-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3.5-4 3 3L21 7"/></svg></div>
+        <div><div class="t">越用越懂他的生意</div><div class="d">档位越高，覆盖越宽、判断越深——从每月 $39，到 $199、$499，再到全案托管的定制服务。</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="kicker">为什么好卖</div>
+    <h2 class="sec">这是一个门槛低、转化顺、你本来就懂的生意</h2>
+    <div class="why-grid">
+      <div class="why"><div class="h">价格低，决策快</div><div class="b">$39 一个月，不用层层审批、不用大预算，生意主自己就能拍板。</div></div>
+      <div class="why"><div class="h">免费档先给价值</div><div class="b">客户先免费拥有一个网站，用起来有「爽感」，再自然升级——你不是硬推，是顺水推舟。</div></div>
+      <div class="why"><div class="h">转化路径已经设计好</div><div class="b">培训、诊断、体验的整套话术和流程我们都给你，你照着做，不用自己发明。</div></div>
+      <div class="why"><div class="h">服务你熟悉的社群</div><div class="b">你面对的是本地华人生意主——你懂他们的语言、渠道和顾虑，这是外人做不到的。</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="kicker">你能赚多少</div>
+    <h2 class="sec">基础佣金 15%，现在加入还锁定「市场启动奖励」</h2>
+    <p class="lede">你的佣金 = 固定的基础佣金 <b>15%</b> + 我们当前的<b>市场启动奖励</b>。奖励让你前两年的实际佣金远高于基础比例——现在加入，就锁定这份额外奖励。</p>
+
+    <div class="earn-table-wrap">
+      <table class="earn">
+        <thead><tr><th>客户订阅进入</th><th>基础佣金</th><th>市场启动奖励</th><th>你实际拿到</th></tr></thead>
+        <tbody>
+          <tr><td>第 1 年</td><td class="base">15%</td><td class="bonus-cell"><span class="bonus-pill">+25%</span></td><td class="total">40%</td></tr>
+          <tr><td>第 2 年</td><td class="base">15%</td><td class="bonus-cell"><span class="bonus-pill">+5%</span></td><td class="total">20%</td></tr>
+          <tr><td>第 3 年起</td><td class="base">15%</td><td class="bonus-cell"><span class="bonus-none">—</span></td><td class="total">15%</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="reward-banner">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l2.6 5.3 5.9.9-4.2 4.1 1 5.8L12 17.8 6.7 18.2l1-5.8L3.5 8.2l5.9-.9L12 2Z"/></svg>
+      <div><b>市场启动奖励是限时开放的。</b>现在加入的合伙人，锁定前两年 +25% / +5% 的额外奖励；之后加入只享受 15% 基础佣金。</div>
+    </div>
+
+    <div class="example">
+      <div class="lab">收入示例</div>
+      <div class="calc">如果你第一年带来 <b>200</b> 个 $39 客户，按第一年 40%（15% 基础 + 25% 奖励）计算，第一年佣金约 <b>NZD $20,000</b>。<br>客户升级到 $199 / $499，你的佣金同步提高；客户升级到全案定制服务，另有专属奖励（面议）。</div>
+      <div class="disclaimer">以上仅为说明性示例，用于展示佣金如何计算，<b>不是收入承诺</b>。实际收入取决于你带来的客户数量、客户选择的档位与续订情况，可能高于或低于此示例。</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="kicker">你的工作</div>
+    <h2 class="sec">四件事，都是你擅长的「跟人打交道」</h2>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><div><div class="t">办 / 参加本地活动，接触生意主</div><div class="d">线下培训、商会、社群聚会——把 Magic Engine 讲给需要的人听。</div></div></div>
+      <div class="step"><div class="n">2</div><div><div class="t">用诊断工具，帮他看到问题</div><div class="d">我们给你现成的诊断工具和话术，几分钟让生意主看到自己线上的差距。</div></div></div>
+      <div class="step"><div class="n">3</div><div><div class="t">陪他完成开通</div><div class="d">开通流程我们设计得很简单，你陪他走一遍，他就上手了。</div></div></div>
+      <div class="step"><div class="n">4</div><div><div class="t">让满意的客户带来新客户</div><div class="d">客户用得好会推荐朋友，推荐成功双方都有奖励，你的收入自己会滚起来。</div></div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="kicker">我们给你的支持</div>
+    <h2 class="sec">你不是一个人在跑——重活我们干</h2>
+    <div class="sup-grid">
+      <div class="sup"><div class="h">完整培训 + 认证</div><div class="b">从产品到话术到诊断工具，系统培训，认证上岗，不用你自己摸索。</div></div>
+      <div class="sup"><div class="h">现成营销物料</div><div class="b">手册、演示、案例、诊断报告模板——你需要的对客材料我们都备好。</div></div>
+      <div class="sup"><div class="h">产品自己干活</div><div class="b">客户的网站、内容、报告都是系统自动产出，你完全不需要懂技术。</div></div>
+      <div class="sup"><div class="h">专属后台</div><div class="b">你的客户、进度、佣金，都在自己的后台里看得清清楚楚。</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="compliance">
+      <div class="kicker">干净的规则</div>
+      <h2 class="sec">你的收入只来自真实成交的客户</h2>
+      <p>这是一条正规、合法、可以长期做的分销合作——不是拉人头，不需要囤货，不靠发展下线赚钱。</p>
+      <div class="pillar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        <div class="t"><b>收入来自成交，不来自招募。</b>你的佣金挂在真实付费的客户身上，跟你介绍了多少新合伙人无关。</div>
+      </div>
+      <div class="pillar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        <div class="t"><b>零加盟费、零囤货。</b>加入不需要先交钱、先进货，你的成本只有你自己的时间和精力。</div>
+      </div>
+      <div class="pillar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+        <div class="t"><b>符合澳新法规。</b>合作模式遵守澳大利亚与新西兰关于分销与消费者保护的相关法律。</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="kicker">怎么加入</div>
+    <h2 class="sec">四步，开始你的城市合伙人之路</h2>
+    <div class="join-steps">
+      <div class="jstep"><div class="n">1</div><div class="t">提交申请</div><div class="d">发邮件告诉我们你在哪个城市、你的背景</div></div>
+      <div class="jstep"><div class="n">2</div><div class="t">面谈</div><div class="d">一次简单沟通，双向了解是否合适</div></div>
+      <div class="jstep"><div class="n">3</div><div class="t">培训认证</div><div class="d">完成培训，拿到你的合伙人资格</div></div>
+      <div class="jstep"><div class="n">4</div><div class="t">正式开始</div><div class="d">拿到后台和物料，开始你的第一批客户</div></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="kicker">常见问题</div>
+    <h2 class="sec">你可能想问的几件事</h2>
+    <div class="faq">
+      <div class="qa"><div class="q">我不懂技术，能做吗？</div><div class="a">能。产品会自己干活——网站、内容、报告都是系统自动出。你负责的是跟人打交道，把它介绍给需要的生意主。</div></div>
+      <div class="qa"><div class="q">需要先交钱、先囤货吗？</div><div class="a">不需要。这是干净的分销合作，零加盟费、零囤货，你靠真实成交拿佣金。</div></div>
+      <div class="qa"><div class="q">客户不续费了，我还有佣金吗？</div><div class="a">佣金按客户实际付费的月份结算——客户在，你就有；客户停了，这一份佣金停止，但不影响你其他客户。</div></div>
+      <div class="qa"><div class="q">一个城市招几个合伙人？</div><div class="a">名额有限，我们会保护你的区域，避免同城恶性竞争。具体名额在面谈时说明。</div></div>
+      <div class="qa"><div class="q">这跟传销有什么区别？</div><div class="a">本质区别：你的钱来自「卖出产品给真实客户」，不是「拉新的合伙人进来」。没有下线抽成、没有入门费——这是正规分销。</div></div>
+    </div>
+  </section>
+
+  <div class="cta">
+    <h2>准备好了，就聊一聊</h2>
+    <p>告诉我们你在哪个城市、你的背景，我们安排一次简单的沟通。</p>
+    <a class="mail" href="mailto:hello@magicengine.cloud">hello@magicengine.cloud</a>
+  </div>
+
+  <p class="foot-note">Magic Engine · 城市合伙人招募手册（内部草稿版）<br>本手册中的收入示例仅供说明，非收入承诺；佣金结构与区域政策以正式合作协议为准。</p>
+
+</div>

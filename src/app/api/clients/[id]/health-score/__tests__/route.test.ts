@@ -26,9 +26,11 @@ const makeChainable = (terminalFn: () => unknown) => {
     get(_, prop) {
       if (prop === 'then' || prop === 'catch' || prop === 'finally') {
         return (...args: unknown[]) => {
-          const p = terminalFn() as Promise<unknown>
-          const method = (p as unknown as Record<string, unknown>)[String(prop)] as ((...a: unknown[]) => unknown) | undefined
-          return method?.(...args)
+          // Bind to the real promise: Promise.prototype.then throws
+          // "called on incompatible receiver" when invoked unbound.
+          const p = Promise.resolve(terminalFn())
+          const method = Reflect.get(p, prop) as (...a: unknown[]) => unknown
+          return Reflect.apply(method, p, args)
         }
       }
       return () => new Proxy({}, handler)

@@ -76,6 +76,46 @@ describe('连上了', () => {
     )
   })
 
+  /**
+   * 🔴 重连成功要盖上「刚刚通上话」的时间戳。
+   *
+   * 不盖的话，断线监控（`platform-oauth/connection-health.ts`）在人已经重连好
+   * 之后还会继续报，一直报到下一轮定时刷新为止 —— PM 修好了，系统还在骂他。
+   */
+  it('把「刚刚通上话」的时间戳盖上，免得修好了监控还在报', async () => {
+    await call()
+    const arg = vi.mocked(upsertConnection).mock.calls[0][0]
+    expect(arg.lastSyncedAt).toBeInstanceOf(Date)
+  })
+
+  /**
+   * 🔴 存**微软实际批准的**那一份权限，不是我们请求的那一份。
+   *
+   * 企业租户的管理员可以只批一部分。存请求清单的话，库里记成「全有」，
+   * 于是「权限比现在要的少」那条判据对真正危险的情况完全瞎掉 —— 下一次刷新
+   * 照样撞 AADSTS65001，也就是 2026-09-15 那场 9 天事故的复刻。
+   */
+  it('存微软实际批准的权限清单，不是我们请求的那一份', async () => {
+    vi.mocked(exchangeCodeForTokens).mockResolvedValueOnce({
+      ok: true as const,
+      tokens: {
+        access_token: 'at',
+        refresh_token: 'rt',
+        expires_in: 3600,
+        // 管理员只批了读，没批写
+        scope: 'offline_access https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Read',
+      },
+    })
+    await call()
+    const arg = vi.mocked(upsertConnection).mock.calls[0][0]
+    expect(arg.scopes).toEqual([
+      'offline_access',
+      'https://graph.microsoft.com/User.Read',
+      'https://graph.microsoft.com/Mail.Read',
+    ])
+    expect(arg.scopes).not.toContain('https://graph.microsoft.com/Mail.ReadWrite')
+  })
+
   it('用完就把那个一次性 cookie 清掉 —— 留着只会变成一把能被重放的钥匙', async () => {
     const res = await call()
     expect(res.headers.get('set-cookie')).toContain('Max-Age=0')

@@ -26,6 +26,8 @@ import {
 } from './auto-run-policy'
 import { deriveEndorsement, type PrescriptionAnchor, type MarketingPlanAnchor } from './endorsement'
 import { WEEKLY_COOLDOWN_DAYS } from '@/lib/blog/cadence'
+import { readPromoSpec } from '@/lib/marketing-plan/promo/spec'
+import { promoContentHash } from '@/lib/marketing-plan/promo/content-hash'
 
 /** 一轮最多跑几件。上限低不是保守，是因为每件都会花钱、都会写东西出来。 */
 export const MAX_ITEMS_PER_RUN = 3
@@ -70,6 +72,17 @@ export interface CandidateClientRow {
   domain: string | null
   client_status: string
   seo_config: Record<string, unknown> | null
+}
+
+/** 营销计划锚点查询回来的行 —— 比 MarketingPlanAnchor 多两列原始数据，用来现算指纹。 */
+interface MarketingPlanRow {
+  id: string
+  client_id: string
+  status: string
+  approved_at: string | null
+  end_date: string | null
+  plan_data: Record<string, unknown> | null
+  generation_meta: Record<string, unknown> | null
 }
 
 export interface JudgedCandidate {
@@ -210,11 +223,24 @@ export async function selectAutoRunCandidates(
   if (planIds.length > 0) {
     const { data, error } = await supabase
       .from('marketing_plans')
-      .select('id, client_id, status, approved_at, end_date')
+      .select('id, client_id, status, approved_at, end_date, plan_data, generation_meta')
       .in('id', planIds)
     if (error) throw new Error(`营销计划查询失败: ${error.message}`)
-    for (const m of (data ?? []) as Array<MarketingPlanAnchor & { id: string }>) {
-      plans.set(m.id, m)
+    for (const m of (data ?? []) as MarketingPlanRow[]) {
+      // 批准回执里的指纹 = 批准当时那一版推广内容；现在这一版的指纹现算。
+      // 两者不一致（或现在读不出来）→ 批准的不是现在这一版，endorsement 会判 stale。
+      const receipt = (
+        m.generation_meta as { approval_receipt?: { content_hash?: string } } | null
+      )?.approval_receipt
+      const spec = readPromoSpec(m.plan_data)
+      plans.set(m.id, {
+        client_id: m.client_id,
+        status: m.status,
+        approved_at: m.approved_at,
+        end_date: m.end_date,
+        promo_hash_approved: receipt?.content_hash ?? null,
+        promo_hash_now: spec ? promoContentHash(spec) : null,
+      })
     }
   }
 

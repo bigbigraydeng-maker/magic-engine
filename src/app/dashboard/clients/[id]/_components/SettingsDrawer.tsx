@@ -6,9 +6,11 @@ import { BriefPanel } from './BriefPanel'
 import { CmsPanel } from './CmsPanel'
 import { UsersPanel } from './UsersPanel'
 import { LocaleSettingsPanel } from './LocaleSettingsPanel'
+import { ClientKindField } from './ClientKindField'
 import { MtcBudgetPanel } from './MtcBudgetPanel'
 import { MetaAdAccountPanel } from './MetaAdAccountPanel'
 import { FacebookPagePanel } from './FacebookPagePanel'
+import { WhatsAppNumberPanel } from './WhatsAppNumberPanel'
 import { PrimaryKeywordsPanel } from '../settings/_components/PrimaryKeywordsPanel'
 import { BrandAliasesPanel } from '../settings/_components/BrandAliasesPanel'
 import { CompetitorDomainsPanel } from '../settings/_components/CompetitorDomainsPanel'
@@ -145,6 +147,14 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
                 <div className="mt-3">
                   <FacebookPagePanel clientId={clientId} />
                 </div>
+
+                <h3 className="mt-5 font-display text-lg font-semibold tracking-tight text-me-charcoal">WhatsApp 号码</h3>
+                <p className="mt-1 text-xs text-me-charcoal/55">
+                  绑定后，客人在 WhatsApp 上说的话实时进来，出现在「今天该联系谁」里。跟上面的主页各管各的渠道。
+                </p>
+                <div className="mt-3">
+                  <WhatsAppNumberPanel clientId={clientId} />
+                </div>
               </div>
 
               {/* PR5（docs/specs/2026-08-11-onboarding-integrations-unify-v1.md §2.4）：
@@ -207,6 +217,10 @@ export function SettingsDrawer({ open, onClose, clientId, client, activeTab, onT
                 </p>
                 <div className="mt-2">
                   <LocaleSettingsPanel clientId={clientId} />
+                </div>
+                <p className="mt-4 text-[11px] font-black uppercase tracking-[0.14em] text-me-ochre">客户类型</p>
+                <div className="mt-2">
+                  <ClientKindField clientId={clientId} />
                 </div>
               </div>
 

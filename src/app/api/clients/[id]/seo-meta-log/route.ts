@@ -31,7 +31,7 @@ export async function GET(
 
   const { data, error } = await supabaseAdmin
     .from('seo_meta_log')
-    .select('id, page_slug, page_url, keyword, old_title, old_desc, new_title, new_desc, wp_updated, optimised_at')
+    .select('id, page_slug, page_url, keyword, old_title, old_desc, new_title, new_desc, wp_updated, applied_channel, optimised_at')
     .eq('client_id', clientId)
     .order('optimised_at', { ascending: false })
     .limit(limit)
@@ -40,5 +40,14 @@ export async function GET(
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true, logs: data ?? [] })
+  // wp_updated alone only ever flips true for the WordPress-plugin channel
+  // (Oztop) — a repo-PR client (applied_channel='pr', e.g. CTS) never sets
+  // it even once its PR is merged. `applied` is the channel-aware "is this
+  // actually live" flag the frontend should render instead of raw wp_updated.
+  const logs = ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    ...row,
+    applied: row.wp_updated === true || row.applied_channel === 'pr',
+  }))
+
+  return NextResponse.json({ success: true, logs })
 }

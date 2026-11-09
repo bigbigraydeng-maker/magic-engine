@@ -77,12 +77,13 @@ describe('getCampaignDailyInsights', () => {
       cpm:          13.41,
       leads:        6,
       messaging_conversations: 2,
-      results:      8,
+      // results = max(leads, messaging) — see "cross-category overlap" test below.
+      results:      6,
     })
     // CTR is clicks/impressions, stored as a fraction.
     expect(rows[0].ctr).toBeCloseTo(150 / 6097, 6)
     // cost_per_result = spend / results
-    expect(rows[0].cost_per_result).toBeCloseTo(81.77 / 8, 6)
+    expect(rows[0].cost_per_result).toBeCloseTo(81.77 / 6, 6)
   })
 
   it('keeps ONE ctr metric per campaign — outbound_clicks_ctr never leaks in', async () => {
@@ -187,10 +188,10 @@ describe('getCampaignDailyInsights', () => {
     ).resolves.toEqual({ rows: [], complete: false })
   })
 
-  it('does NOT double-count when parent+child action types both appear', async () => {
+  it('does NOT double-count within-category (parent+child action types)', async () => {
     // Meta returns `lead` (aggregate) AND `onsite_conversion.lead_grouped`
     // (its Instant-Form child) for the same submissions; likewise the two
-    // messaging types overlap. Summing would inflate results up to 2×.
+    // messaging types overlap. `pickAction` picks ONE via priority, never sums.
     fetchMock.mockResolvedValueOnce(jsonResponse({
       data: [{
         campaign_id: 'a', date_start: '2026-07-13',
@@ -205,10 +206,56 @@ describe('getCampaignDailyInsights', () => {
     }))
 
     const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
-    // 10 leads + 4 messaging = 14, NOT 20 + 8 = 28.
     expect(rows[0].leads).toBe(10)
     expect(rows[0].messaging_conversations).toBe(4)
-    expect(rows[0].results).toBe(14)
+    // max(10, 4) = 10 — see cross-category test below for why we don't sum.
+    expect(rows[0].results).toBe(10)
+  })
+
+  it('does NOT double-count cross-category when leads and messaging overlap (CTS regression)', async () => {
+    // Real CTS Reborn day 2026-08-31: Meta reported 10 form submits AND 9
+    // messaging_conversations for the SAME campaign because CTS's lead form
+    // is Messenger-connected — the same person filling the form also triggers
+    // a Messenger event. Summing gave 19 results / $53 spend = $2.79 CPL,
+    // when Meta's own `cost_per_result` said $5.32 (spend / 10 leads). This
+    // 2× under-count fooled the PM into thinking ads were performing twice
+    // as well as they actually were. Regression: never revert to summing.
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      data: [{
+        campaign_id: 'a', date_start: '2026-08-31',
+        spend: '53', impressions: '2000', clicks: '80',
+        actions: [
+          { action_type: 'lead', value: '10' },
+          { action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '9' },
+        ],
+      }],
+    }))
+
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-08-31', '2026-08-31')
+    expect(rows[0].leads).toBe(10)
+    expect(rows[0].messaging_conversations).toBe(9)
+    // max(10, 9) = 10, NOT 10 + 9 = 19.
+    expect(rows[0].results).toBe(10)
+    expect(rows[0].cost_per_result).toBeCloseTo(5.3, 1)
+  })
+
+  it('reports messaging correctly for pure-CTWA campaigns with zero leads', async () => {
+    // A Click-to-WhatsApp campaign with no lead form ever reports messaging
+    // but zero leads. Must return messaging count (not zero).
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      data: [{
+        campaign_id: 'ctwa', date_start: '2026-07-13',
+        spend: '40', impressions: '1500', clicks: '35',
+        actions: [
+          { action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '8' },
+        ],
+      }],
+    }))
+
+    const { rows } = await getCampaignDailyInsights(ACCOUNT, TOKEN, '2026-07-13', '2026-07-13')
+    expect(rows[0].leads).toBe(0)
+    expect(rows[0].messaging_conversations).toBe(8)
+    expect(rows[0].results).toBe(8)
   })
 
   it('falls back to the child action type when the parent is absent', async () => {

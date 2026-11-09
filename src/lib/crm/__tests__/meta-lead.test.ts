@@ -13,7 +13,7 @@
  *   7. `mailchimp_synced_at` 只在 subscribed / 明确 already_member 时才写
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/lib/supabase', () => ({
   supabaseAdmin: { from: vi.fn() },
@@ -31,6 +31,7 @@ vi.mock('@/lib/mailchimp/client', async () => {
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { subscribeMember } from '@/lib/mailchimp/client'
+import { DEFAULT_META_LEAD_SOURCE_TAG } from '@/lib/mailchimp/audience-config'
 import { ingestMetaLead, parseLeadAnswers } from '../meta-lead'
 import type { MetaLead } from '@/lib/meta/lead-forms'
 
@@ -69,10 +70,30 @@ let providerCallState: Array<{ upserts: number; updates: number }>
 
 interface MockDbOptions {
   identityHits?: { contact_id: string; kind: string; value: string }[]
+  /**
+   * 这个客户在 `leads_config.meta_leads.source_tag` 里配的来源标签名。
+   * 不传 = 没配，代码该落到平台默认值上。
+   */
+  sourceTag?: string | null
   /** ad_creative_links 里这条广告对应的片子；null = 这条广告不是 ME 建的。 */
   creativeLinkRow?: { creative_ref: string } | null
-  /** clients.mailchimp_audience_id；undefined = 客户不存在，null/'' = 未配置。 */
+  /**
+   * 这个客户配好的 audience id；null/'' = 未配置。
+   *
+   * **默认落在 `clients.leads_config.mailchimp_audience_id` 里** —— 那是生产
+   * 今天的真实形态：专列 `clients.mailchimp_audience_id` 的 migration
+   * (20260826010000) 至今没 apply，对生产库选它会 42703。假件必须照真 schema
+   * 建模，否则「查询写错」这类事故测不出来（测试全绿 / 生产全空，正是本次要修的病）。
+   */
   audienceId?: string | null
+  /**
+   * 专列在库里存不存在。默认 `'absent'` = 复刻生产：select 到它整条查询 42703。
+   * 传 `'present'` 时 `audienceId` 改放在专列上（模拟 migration apply 之后）。
+   */
+  dedicatedColumn?: 'absent' | 'present'
+  /** 降级读 `leads_config` 那一次也失败（探测「不许把两次失败都吞掉」）。 */
+  leadsConfigReadError?: string | null
+  /** 真实的读失败（**不是** 42703）——权限被回收 / 网络抖动那一类。 */
   clientReadError?: string | null
   contactUpdateError?: string | null
   /** DNC 判据的输入。默认：do_not_contact=false，触点没有任何 dnc 类记录。 */
@@ -103,8 +124,11 @@ interface MockDbOptions {
 function mockDb(opts: MockDbOptions = {}) {
   const {
     identityHits = [],
+    sourceTag = null,
     creativeLinkRow = null,
     audienceId = null,
+    dedicatedColumn = 'absent',
+    leadsConfigReadError = null,
     clientReadError = null,
     contactUpdateError = null,
     contactDncFlag = false,
@@ -143,15 +167,42 @@ function mockDb(opts: MockDbOptions = {}) {
       }
     }
     if (table === 'clients') {
+      // **按表建模，不按调用次序**：看 select 到底点了哪几列，再决定这一次
+      // 查询在真库上会发生什么。选到一列库里没有的 → PostgREST 整条 400/42703，
+      // 不是「那一列返回 null」。
       return {
-        select: () => ({
+        select: (cols: string) => ({
           eq: () => ({
-            maybeSingle: () =>
-              Promise.resolve(
-                clientReadError
-                  ? { data: null, error: { message: clientReadError } }
-                  : { data: { mailchimp_audience_id: audienceId }, error: null },
-              ),
+            maybeSingle: () => {
+              const wantsDedicated = cols.includes('mailchimp_audience_id')
+              if (wantsDedicated && dedicatedColumn === 'absent') {
+                return Promise.resolve({
+                  data: null,
+                  error: {
+                    code: '42703',
+                    message: 'column clients.mailchimp_audience_id does not exist',
+                  },
+                })
+              }
+              if (clientReadError) {
+                return Promise.resolve({ data: null, error: { message: clientReadError } })
+              }
+              if (!wantsDedicated && leadsConfigReadError) {
+                return Promise.resolve({ data: null, error: { message: leadsConfigReadError } })
+              }
+              const row: Record<string, unknown> = {}
+              if (cols.includes('leads_config')) {
+                // 专列 present 时故意在 leads_config 里留一个**不一样**的旧值：
+                // 真库上这两处可以同时有值，代码必须只认专列。
+                row.leads_config = {
+                  mailchimp_audience_id:
+                    dedicatedColumn === 'present' ? 'stale-leads-config-value' : audienceId,
+                  ...(sourceTag ? { meta_leads: { source_tag: sourceTag } } : {}),
+                }
+              }
+              if (wantsDedicated) row.mailchimp_audience_id = audienceId
+              return Promise.resolve({ data: row, error: null })
+            },
           }),
         }),
       }
@@ -584,6 +635,31 @@ const consented = () =>
   })
 
 describe('ingestMetaLead → Mailchimp 出口', () => {
+  // 「人已在名单里 → 补打来源标签」那一刀走的是真 `fetch`（`applyMemberTags`）。
+  // 不接管就会在跑测试时真的打 Mailchimp —— 慢、不稳，而且拿到的
+  // `failed:network` 会把「补打成功」的用例伪装成通过。
+  let tagCalls: { url: string; body: unknown }[] = []
+  let tagStatus = 204
+  const realFetch = globalThis.fetch
+
+  beforeEach(() => {
+    tagCalls = []
+    tagStatus = 204
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      tagCalls.push({ url: String(url), body: init?.body ? JSON.parse(String(init.body)) : null })
+      // GET /members/{hash} —— 查这个人现在有哪些标签
+      if (!init?.method || init.method === 'GET') {
+        return new Response(JSON.stringify({ status: 'subscribed', tags: [] }), { status: 200 })
+      }
+      // POST /members/{hash}/tags —— 真正写标签
+      return new Response(null, { status: tagStatus })
+    }) as unknown as typeof fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
   it('R1 valid + consented + audience 已配 → 触发 subscribeMember，写 mailchimp_synced_at', async () => {
     mockDb({ audienceId: 'dda97b7e61' })
     subscribeMock.mockResolvedValueOnce({ status: 'subscribed' })
@@ -636,8 +712,81 @@ describe('ingestMetaLead → Mailchimp 出口', () => {
 
     expect(subscribeMock).toHaveBeenCalledTimes(1)
     // 只调用了一次 —— 不会为 already_member 再 PATCH 一次去重新订阅
-    expect(res.mailchimp).toEqual({ status: 'already_member' })
+    expect(res.mailchimp).toEqual({ status: 'already_member', tagRepair: 'applied' })
     expect(contactUpdates).toHaveLength(1)
+  })
+
+  it('R2b Member Exists → 来源标签**真的**补打上去（这条链路整月漏掉的就是它）', async () => {
+    // 2026-09-06 生产实测：CTS 每小时 10 条全 already_member，跑了一个月，
+    // 来源标签在他们名单里从来没出现过 —— `POST /members` 对已存在的人整个
+    // 不生效，标签一个字都没写进去。这条用例钉的就是那一刀。
+    mockDb({ audienceId: 'dda97b7e61', sourceTag: 'fb_lead' })
+    subscribeMock.mockResolvedValueOnce({ status: 'already_member' })
+
+    const res = await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: consented() })
+
+    expect(res.mailchimp).toEqual({ status: 'already_member', tagRepair: 'applied' })
+    const write = tagCalls.find((c) => c.url.endsWith('/tags'))
+    expect(write).toBeDefined()
+    expect(write?.body).toEqual({ tags: [{ name: 'fb_lead', status: 'active' }] })
+  })
+
+  it('R2c 补打标签失败 → 不当成一切正常，原因如实带回给上游', async () => {
+    // 会员关系是真的（人确实在名单里），但归因证据没落地。两件事必须分开报，
+    // 否则又变成「看起来一切正常」。
+    mockDb({ audienceId: 'dda97b7e61', sourceTag: 'fb_lead' })
+    subscribeMock.mockResolvedValueOnce({ status: 'already_member' })
+    tagStatus = 429
+
+    const res = await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: consented() })
+
+    expect(res.mailchimp).toEqual({ status: 'already_member', tagRepair: 'failed:http_429' })
+  })
+
+  it('R2d 客户没配标签名 → 用平台默认值，不是不打', async () => {
+    mockDb({ audienceId: 'dda97b7e61' })
+    subscribeMock.mockResolvedValueOnce({ status: 'already_member' })
+
+    await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: consented() })
+
+    const write = tagCalls.find((c) => c.url.endsWith('/tags'))
+    expect(write?.body).toEqual({ tags: [{ name: DEFAULT_META_LEAD_SOURCE_TAG, status: 'active' }] })
+  })
+
+  it('标签名配置读失败 → 本条不发，不拿默认值糊过去', async () => {
+    // 「读不到」和「客户就是要默认」是两件事。拿默认值糊过去 = 用一个可能是错的
+    // 标签把广告归因证据打歪，而且没有任何人会发现 —— 这条链路刚栽过同款跟头。
+    // 专列 present 让 audience 那次读走专列成功，把失败精确隔离在标签这次读上。
+    mockDb({
+      audienceId: 'dda97b7e61',
+      dedicatedColumn: 'present',
+      leadsConfigReadError: 'connection reset',
+    })
+
+    const res = await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: consented() })
+
+    expect(res.mailchimp).toEqual({ status: 'skipped', reason: 'source_tag_read_failed' })
+    expect(subscribeMock).not.toHaveBeenCalled()
+    expect(tagCalls).toHaveLength(0)
+  })
+
+  it('新进名单的人不走补打那一刀 —— 标签已经在建会员那次请求里带上了', async () => {
+    mockDb({ audienceId: 'dda97b7e61', sourceTag: 'fb_lead' })
+    subscribeMock.mockResolvedValueOnce({ status: 'subscribed' })
+
+    const res = await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: consented() })
+
+    expect(res.mailchimp).toEqual({ status: 'subscribed' })
+    expect(tagCalls).toHaveLength(0)
+  })
+
+  it('标签名从客户配置读，不是写死的 —— 换个客户就该换个名字', async () => {
+    mockDb({ audienceId: 'dda97b7e61', sourceTag: 'oztop_showroom_lead' })
+    subscribeMock.mockResolvedValueOnce({ status: 'subscribed' })
+
+    await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: consented() })
+
+    expect(subscribeMock.mock.calls[0][0]).toMatchObject({ tag: 'oztop_showroom_lead' })
   })
 
   it('R3 provider 5xx → 主管道照常写入，synced_at 不写，触点里如实留 failed', async () => {
@@ -1446,5 +1595,86 @@ describe('ingestMetaLead → persistent opt-out via metadata.do_not_contact', ()
     // dnc_cleared 晚于持久 DNC 位 —— isDoNotContact() 认最后一次判决 → 放行
     expect(subscribeMock).toHaveBeenCalledTimes(1)
     expect(res.mailchimp).toEqual({ status: 'subscribed' })
+  })
+})
+
+/**
+ * audience id 怎么读 —— 本组用例存在的唯一理由是一次真实的静默事故。
+ *
+ * 2026-08~09 生产上 `syncMailchimp` 直接 `select('mailchimp_audience_id')`，
+ * 而那一列的 migration (20260826010000) 从没 apply。PostgREST 整条查询回
+ * 42703，代码走 `client_config_read_failed` 分支 **return，没有一行日志、
+ * 没有一个计数**。于是 Meta 表单进来的人一个都没进 Mailchimp audience，
+ * `facebook_leadgen` 标签一次都没出现过 —— 一整个月没有任何人看得见。
+ *
+ * 这里钉三件事：
+ *   · 专列不存在时**不许**当成失败（要落到 leads_config 继续干活）
+ *   · 真失败时**不许**静默（必须 console.error）
+ *   · 「读不到」和「查得到但没配」是两个不同的 reason，不许混成一个
+ */
+describe('Mailchimp audience id 的读法（防静默失败）', () => {
+  it('专列没 apply（42703）+ leads_config 里配了 → 照常订阅，绝不静默跳过', async () => {
+    // 生产今天的真实形态：dedicatedColumn 缺省就是 'absent'。
+    mockDb({ audienceId: 'dda97b7e61' })
+    provideOnce({ status: 'subscribed' })
+
+    const res = await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: lead() })
+
+    expect(res.mailchimp).toEqual({ status: 'subscribed' })
+    // 用的是 leads_config 里那个值，不是空串
+    expect(subscribeMock.mock.calls[0][0]).toMatchObject({ audienceId: 'dda97b7e61' })
+    // 42703 是「这一列还没建」，不是故障 —— 不该往错误日志里吼
+    expect(console.error).not.toHaveBeenCalled()
+  })
+
+  it('专列 apply 之后 → 只认专列，leads_config 里的旧值一律不看', async () => {
+    mockDb({ audienceId: 'from-column', dedicatedColumn: 'present' })
+    provideOnce({ status: 'subscribed' })
+
+    await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: lead() })
+
+    expect(subscribeMock.mock.calls[0][0]).toMatchObject({ audienceId: 'from-column' })
+  })
+
+  it('专列 apply 之后被清空 → 出口真的关掉，不许被 leads_config 的旧值复活', async () => {
+    // 运营清空专列 = 明确要停这个客户的出口。假件里 leads_config 仍留着旧值。
+    mockDb({ audienceId: null, dedicatedColumn: 'present' })
+
+    const res = await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: lead() })
+
+    expect(res.mailchimp).toEqual({ status: 'skipped', reason: 'no_audience_config' })
+    expect(subscribeMock).not.toHaveBeenCalled()
+  })
+
+  it('专列没 apply + leads_config 也没配 → no_audience_config（查得到，就是没配）', async () => {
+    mockDb({ audienceId: null })
+
+    const res = await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: lead() })
+
+    expect(res.mailchimp).toEqual({ status: 'skipped', reason: 'no_audience_config' })
+    expect(subscribeMock).not.toHaveBeenCalled()
+  })
+
+  it('真实读失败（非 42703）→ client_config_read_failed **并且吼进错误日志**', async () => {
+    mockDb({ audienceId: 'dda97b7e61', clientReadError: 'permission denied for table clients' })
+
+    const res = await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: lead() })
+
+    expect(res.mailchimp).toEqual({ status: 'skipped', reason: 'client_config_read_failed' })
+    expect(subscribeMock).not.toHaveBeenCalled()
+    // 这条断言就是本次修复的核心：读不到配置不许再无声无息地过去。
+    expect(console.error).toHaveBeenCalledTimes(1)
+    expect(String((console.error as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0])).toContain(
+      '读配置失败',
+    )
+  })
+
+  it('42703 降级之后第二次查询也失败 → 照样报 client_config_read_failed，不许吞', async () => {
+    mockDb({ audienceId: 'dda97b7e61', leadsConfigReadError: 'connection reset' })
+
+    const res = await ingestMetaLead({ clientId: CLIENT, defaultCountry: 'NZ', lead: lead() })
+
+    expect(res.mailchimp).toEqual({ status: 'skipped', reason: 'client_config_read_failed' })
+    expect(console.error).toHaveBeenCalledTimes(1)
   })
 })

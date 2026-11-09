@@ -192,10 +192,11 @@ describe('VERDICT_META fallback', () => {
   })
 
   it('renders unknown verdicts with inconclusive styling and confirmed verdicts with confirmed styling', () => {
+    // Deliberately outside the verdict union — exercises the runtime fallback.
     const unknownVerdictOutcome = {
       ...baseOutcome,
       verdict: 'unknown_verdict',
-    } as OutcomeSummary
+    } as unknown as OutcomeSummary
 
     const { container, rerender } = render(React.createElement(OutcomeChip, { outcome: unknownVerdictOutcome }))
     const unknownVerdictChip = container.querySelector('span')

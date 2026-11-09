@@ -224,12 +224,12 @@ describe('POST /api/clients/[id]/google-ads/execute — P18.B', () => {
     expect(mockSetStatus.mock.calls[0][2]).toBe('PAUSED')
   })
 
-  it('reactivates campaign via google_ads.reactivate_campaign', async () => {
+  it('reactivates campaign via ads.reactivate_campaign', async () => {
     mockGetCampaign.mockResolvedValue({ ...MOCK_CAMPAIGN, status: 'PAUSED' })
 
     const { POST } = await import('./route')
     const res  = await POST(
-      makeRequest({ action_type: 'google_ads.reactivate_campaign', campaign_id: CAMPAIGN_ID, google_ads_customer_id: CUSTOMER_ID }),
+      makeRequest({ action_type: 'ads.reactivate_campaign', campaign_id: CAMPAIGN_ID, google_ads_customer_id: CUSTOMER_ID }),
       ROUTE_CTX,
     )
     const json = await res.json()

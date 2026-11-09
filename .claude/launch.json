@@ -25,6 +25,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8877", "--directory", "website"],
       "port": 8877
+    },
+    {
+      "name": "scratch-preview",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8901", "--directory", ".claude/scratch", "--bind", "127.0.0.1"],
+      "port": 8901
     }
   ]
 }

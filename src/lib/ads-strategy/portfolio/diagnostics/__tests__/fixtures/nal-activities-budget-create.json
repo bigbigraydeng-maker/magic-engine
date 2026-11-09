@@ -1,0 +1,522 @@
+[
+ {
+  "event_type": "update_campaign_budget",
+  "event_time": "2026-09-13T10:03:05+0000",
+  "object_id": "52412100843565",
+  "object_name": "新潜在客户广告系列-3PL",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":2925,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":936,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "update_campaign_budget",
+  "event_time": "2026-09-13T10:03:04+0000",
+  "object_id": "52902974440554",
+  "object_name": "新亚8月广告系列-物流",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":2340,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":7254,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-09-13T10:02:27+0000",
+  "object_id": "52567871115731",
+  "object_name": "物流再营销广告组-ThruPlay观众",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-13T10:01:15+0000",
+  "object_id": "52340300649016",
+  "object_name": "类似受众 (NZ, 1%) - NAL-ThruPlay视频观众再营销池-25%-365d",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"\\u7c7b\\u4f3c\\u53d7\\u4f17 (NZ, 1\\u0025) - NAL-ThruPlay\\u89c6\\u9891\\u89c2\\u4f17\\u518d\\u8425\\u9500\\u6c60-25\\u0025-365d\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-13T10:01:15+0000",
+  "object_id": "52902784557244",
+  "object_name": "类似受众 (NZ) - NAL-ThruPlay视频观众再营销池-25%-365d",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"\\u7c7b\\u4f3c\\u53d7\\u4f17 (NZ) - NAL-ThruPlay\\u89c6\\u9891\\u89c2\\u4f17\\u518d\\u8425\\u9500\\u6c60-25\\u0025-365d\"}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-09-13T10:00:55+0000",
+  "object_id": "52770554253532",
+  "object_name": "物流再营销广告组-ThruPlay观众",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-13T09:59:39+0000",
+  "object_id": "52438409830467",
+  "object_name": "NAL-ThruPlay视频观众再营销池-25%-365d",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"NAL-ThruPlay\\u89c6\\u9891\\u89c2\\u4f17\\u518d\\u8425\\u9500\\u6c60-25\\u0025-365d\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-13T02:50:42+0000",
+  "object_id": "52704376115087",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-11T12:12:20+0000",
+  "object_id": "52119063016553",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-09-11T04:46:02+0000",
+  "object_id": "52104815523595",
+  "object_name": "ThruPlay_物流_200/cbm",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-09-11T04:46:01+0000",
+  "object_id": "52028365152823",
+  "object_name": "Thruplay-物流-200/cbm",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":1170,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-09-11T03:56:58+0000",
+  "object_id": "52426144644352",
+  "object_name": "新互动广告组",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-09-11T03:56:58+0000",
+  "object_id": "52119647569063",
+  "object_name": "Thruplay-物流-2KG",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":1170,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T23:30:44+0000",
+  "object_id": "52062069971335",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T23:30:44+0000",
+  "object_id": "52336019714146",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T23:30:44+0000",
+  "object_id": "52021054003391",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T23:30:44+0000",
+  "object_id": "52143072442192",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T23:30:44+0000",
+  "object_id": "52327032283062",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T23:30:44+0000",
+  "object_id": "52080253250421",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T23:30:44+0000",
+  "object_id": "52353187900707",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T23:30:44+0000",
+  "object_id": "52404917548820",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T17:38:12+0000",
+  "object_id": "52831915310274",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T17:38:12+0000",
+  "object_id": "52395526941343",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T07:28:37+0000",
+  "object_id": "52130138645326",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T07:28:37+0000",
+  "object_id": "52922650477482",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T07:28:37+0000",
+  "object_id": "52144736902152",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T07:28:37+0000",
+  "object_id": "52354902942071",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T07:28:37+0000",
+  "object_id": "52074872173364",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T07:28:37+0000",
+  "object_id": "52067041317851",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-10T07:28:37+0000",
+  "object_id": "52919863555134",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-05T11:03:17+0000",
+  "object_id": "52541838545806",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-05T11:03:17+0000",
+  "object_id": "52635848474334",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-05T10:32:16+0000",
+  "object_id": "52085331066893",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-04T20:52:52+0000",
+  "object_id": "52553982307461",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-04T20:52:52+0000",
+  "object_id": "52943122583003",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-04T20:52:52+0000",
+  "object_id": "52818855597894",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-04T20:52:52+0000",
+  "object_id": "52591308375542",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-04T20:52:52+0000",
+  "object_id": "52538567046901",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-04T20:52:52+0000",
+  "object_id": "52512214213043",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-04T20:52:52+0000",
+  "object_id": "52122028103565",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-04T20:52:52+0000",
+  "object_id": "52179011592570",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-09-04T20:52:52+0000",
+  "object_id": "52362350354527",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-03T04:41:31+0000",
+  "object_id": "52483085477340",
+  "object_name": "物流广告-WhatsApp",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52580503500399,\"new\":52580503500399}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-09-03T04:41:29+0000",
+  "object_id": "52580503500399",
+  "object_name": "新潜在客户广告组-WhatsApp",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-09-03T04:41:29+0000",
+  "object_id": "52025872830354",
+  "object_name": "物流广告组-WhatsApp",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":1170,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-09-01T00:28:55+0000",
+  "object_id": "52025761573398",
+  "object_name": "9月新潜在客户-3PL",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52429223893140,\"new\":52429223893140}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-09-01T00:28:22+0000",
+  "object_id": "52429223893140",
+  "object_name": "新潜在客户广告组-9月1日",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-09-01T00:28:21+0000",
+  "object_id": "52412100843565",
+  "object_name": "新潜在客户广告系列-3PL",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":2925,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "update_campaign_budget",
+  "event_time": "2026-08-31T03:42:19+0000",
+  "object_id": "52902974440554",
+  "object_name": "新亚8月广告系列-物流",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":4680,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":2340,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "update_campaign_budget",
+  "event_time": "2026-08-28T06:08:37+0000",
+  "object_id": "52902974440554",
+  "object_name": "新亚8月广告系列-物流",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":2340,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":4680,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-08-28T05:56:59+0000",
+  "object_id": "52778559405408",
+  "object_name": "测试 - 3PL潜在用户-8月28日-8nzd测试",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52143863593432,\"new\":52143863593432}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-08-28T05:56:51+0000",
+  "object_id": "52830042489305",
+  "object_name": "测试 - 3PL潜在用户-8月28日设置-A版测试",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52143863593432,\"new\":52143863593432},\"last_learning_exit\":1787804899}"
+ },
+ {
+  "event_type": "update_campaign_budget",
+  "event_time": "2026-08-28T05:29:50+0000",
+  "object_id": "52902974440554",
+  "object_name": "新亚8月广告系列-物流",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":null,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":2340,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-08-28T03:28:39+0000",
+  "object_id": "52711116240720",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-08-28T03:28:39+0000",
+  "object_id": "52157745802803",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-08-28T03:28:39+0000",
+  "object_id": "52234810943863",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-08-28T03:28:39+0000",
+  "object_id": "52326446644232",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "create_audience",
+  "event_time": "2026-08-28T03:28:39+0000",
+  "object_id": "52242582270265",
+  "object_name": "asa_auto_custom_audience",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"type\":4,\"name\":\"asa_auto_custom_audience\"}"
+ },
+ {
+  "event_type": "update_ad_set_budget",
+  "event_time": "2026-08-25T04:06:19+0000",
+  "object_id": "52886694875449",
+  "object_name": "物流潜在客户广告组",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"old_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"old_value\":1170,\"additional_type\":\"status_string\",\"additional_value\":\"\"},\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":2340,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\",\"last_learning_exit\":1787552948}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-08-24T00:01:39+0000",
+  "object_id": "52618201350217",
+  "object_name": "物流新潜在客户广告",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52143863593432,\"new\":52143863593432}}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-08-17T06:28:51+0000",
+  "object_id": "52171594927040",
+  "object_name": "物流_潜在客户_Message_8月",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52886694875449,\"new\":52886694875449}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-08-17T06:28:50+0000",
+  "object_id": "52886694875449",
+  "object_name": "物流潜在客户广告组",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":1170,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_ad",
+  "event_time": "2026-08-17T04:28:19+0000",
+  "object_id": "52557867380412",
+  "object_name": "3PL新潜在客户广告",
+  "object_type": "ADGROUP",
+  "extra_data": "{\"campaign_id\":{\"mutation_input\":52143863593432,\"new\":52143863593432}}"
+ },
+ {
+  "event_type": "create_ad_set",
+  "event_time": "2026-08-17T04:28:17+0000",
+  "object_id": "52143863593432",
+  "object_name": "3PL新潜在客户广告组",
+  "object_type": "CAMPAIGN",
+  "extra_data": "{\"new_value\":{\"type\":\"payment_amount\",\"currency\":\"NZD\",\"new_value\":2340,\"additional_type\":\"status_string\",\"additional_value\":\"\\u5355\\u65e5\\u9884\\u7b97\"},\"type\":\"composite_data\"}"
+ },
+ {
+  "event_type": "create_campaign_group",
+  "event_time": "2026-08-17T04:28:17+0000",
+  "object_id": "52902974440554",
+  "object_name": "新亚8月广告系列-物流",
+  "object_type": "CAMPAIGN_GROUP",
+  "extra_data": "{\"type\":\"composite_data\"}"
+ }
+]

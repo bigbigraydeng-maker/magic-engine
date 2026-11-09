@@ -22,20 +22,16 @@ export default function NewClientPage() {
       const res = await fetch('/api/clients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: data.name, domain: data.domain }),
+        body: JSON.stringify({
+          name: data.name,
+          domain: data.domain,
+          semrush_db: data.targetMarket === 'nz' ? 'nz' : 'au',
+        }),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Failed to create client')
       const newId = json.client?.id as string
       if (!newId) throw new Error('Client created but no id returned')
-
-      if (data.targetMarket === 'nz') {
-        await fetch(`/api/clients/${newId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ semrush_db: 'nz' }),
-        }).catch(() => {})
-      }
 
       router.push(`/dashboard/clients/${newId}/zhangqian`)
     } catch (err) {

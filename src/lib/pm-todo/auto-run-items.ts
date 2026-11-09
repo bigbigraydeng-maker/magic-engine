@@ -63,7 +63,7 @@ function summariseReasons(blocked: JudgedCandidate[]): string {
       const k = b.endorsement.kind
       label =
         k === 'stale_prescription' ? '挂的方案已经被换掉'
-        : k === 'stale_marketing_plan' ? '挂的营销计划已经结束'
+        : k === 'stale_marketing_plan' ? '挂的营销计划已结束，或批准之后内容被改过'
         : k === 'unendorsed' ? '没有任何一轮分析在认它'
         : k === 'recent_analysis' ? '分析结论已经过期'
         : '方案批下来太久没复核' // current_prescription / current_marketing_plan 过保鲜期

@@ -163,7 +163,7 @@ describe('caller: fail-closed 前置检查', () => {
     const { deps, mapCandidate, runAction } = makeDeps()
     const input = makeInput({
       request: makeRequest({
-        basedOnVersion: { known: false, reason: 'snapshot missing' },
+        basedOnVersion: { known: false, reason: 'not_recorded_by_source' },
       }),
     })
 

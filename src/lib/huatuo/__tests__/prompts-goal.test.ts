@@ -67,6 +67,14 @@ function makeGoal(periodDays: number, intent: GoalRow['intent'] = 'acquisition')
   } as unknown as GoalRow
 }
 
+/**
+ * goal 现在是第 8 个参数（前面依次是 priorContext / memoryContext / memoryBundle / promptMode）。
+ * 这里只关心 Goal 注入，其余上下文一律留空，promptMode 用默认的 long。
+ */
+function promptWithGoal(goal: GoalRow): string {
+  return buildHuatuoGenerationPrompt(DISCOVERY, INTAKE, LOOKUP, undefined, undefined, undefined, 'long', goal)
+}
+
 describe('DAPE W4 — system prompt schema', () => {
   it('指示 phases 阶段数不写死 3 (修 BUG-FMT-F19)', () => {
     expect(HUATUO_GENERATION_SYSTEM_PROMPT).toMatch(/阶段数不写死/)
@@ -92,7 +100,7 @@ describe('buildHuatuoGenerationPrompt + Goal', () => {
 
   it('Goal 90 天 → 12 周约束注入 prompt', () => {
     const goal = makeGoal(90)
-    const prompt = buildHuatuoGenerationPrompt(DISCOVERY, INTAKE, LOOKUP, undefined, undefined, goal)
+    const prompt = promptWithGoal(goal)
     // ~13 周 (90/7=12.86, round to 13)
     expect(prompt).toMatch(/共 \*\*1[23] 周\*\*/)
     expect(prompt).toMatch(/duration_weeks 之和必须/)
@@ -100,27 +108,27 @@ describe('buildHuatuoGenerationPrompt + Goal', () => {
 
   it('Goal 60 天 → 8-9 周约束', () => {
     const goal = makeGoal(60)
-    const prompt = buildHuatuoGenerationPrompt(DISCOVERY, INTAKE, LOOKUP, undefined, undefined, goal)
+    const prompt = promptWithGoal(goal)
     expect(prompt).toMatch(/共 \*\*[89] 周\*\*/)
   })
 
   it('intent=acquisition 推荐 demand_generation', () => {
     const goal = makeGoal(90, 'acquisition')
-    const prompt = buildHuatuoGenerationPrompt(DISCOVERY, INTAKE, LOOKUP, undefined, undefined, goal)
+    const prompt = promptWithGoal(goal)
     expect(prompt).toMatch(/acquisition/)
     expect(prompt).toMatch(/demand_generation/)
   })
 
   it('intent=sales 推荐 demand_generation', () => {
     const goal = makeGoal(90, 'sales')
-    const prompt = buildHuatuoGenerationPrompt(DISCOVERY, INTAKE, LOOKUP, undefined, undefined, goal)
+    const prompt = promptWithGoal(goal)
     expect(prompt).toMatch(/sales/)
     expect(prompt).toMatch(/demand_generation/)
   })
 
   it('注入 Goal 主指标 + 基线 + 目标', () => {
     const goal = makeGoal(90)
-    const prompt = buildHuatuoGenerationPrompt(DISCOVERY, INTAKE, LOOKUP, undefined, undefined, goal)
+    const prompt = promptWithGoal(goal)
     expect(prompt).toMatch(/Brisbane 月询盘 20→50/)
     expect(prompt).toMatch(/新增线索/)
     expect(prompt).toMatch(/20 → 50/)
@@ -128,19 +136,19 @@ describe('buildHuatuoGenerationPrompt + Goal', () => {
 
   it('短 period 阶段建议 = 2 phases', () => {
     const goal = makeGoal(35)  // 5 周
-    const prompt = buildHuatuoGenerationPrompt(DISCOVERY, INTAKE, LOOKUP, undefined, undefined, goal)
+    const prompt = promptWithGoal(goal)
     expect(prompt).toMatch(/2 phases/)
   })
 
   it('长 period 阶段建议 = 4-5 phases', () => {
     const goal = makeGoal(120)  // 17 周左右
-    const prompt = buildHuatuoGenerationPrompt(DISCOVERY, INTAKE, LOOKUP, undefined, undefined, goal)
+    const prompt = promptWithGoal(goal)
     expect(prompt).toMatch(/4-5 phases/)
   })
 
   it('每次调用都强调"至少 1 个 terminal Initiative"', () => {
     const goal = makeGoal(90)
-    const prompt = buildHuatuoGenerationPrompt(DISCOVERY, INTAKE, LOOKUP, undefined, undefined, goal)
+    const prompt = promptWithGoal(goal)
     expect(prompt).toMatch(/至少 1 个 terminal Initiative/)
   })
 })

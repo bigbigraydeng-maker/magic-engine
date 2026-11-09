@@ -124,8 +124,8 @@ describe('calculateProspectScore', () => {
     const r = calculateProspectScore(input({
       rating: 4.2, review_count: 5, has_phone: true, is_claimed: true, https_ok: true,
       tracking: { ga4: false, gtm: false, meta_pixel: false, clarity: true, legacy_ua: false, contact_form: true, emails: ['x@y.co.nz'], facebook_url: null, instagram_url: null },
-      onpage: { word_count: 500, core_web_vitals: { lcp: 2000, cls: 0.1, tbt: 100 },
-        checks: { no_title: true, no_description: false, no_h1: false, missing_alt_text: false, broken_links: false, redirect_chain: false, https: true } },
+      onpage: onpage({ word_count: 500, core_web_vitals: { lcp: 2000, cls: 0.1, tbt: 100 },
+        checks: { no_title: true, no_description: false, no_h1: false, missing_alt_text: false, broken_links: false, redirect_chain: false, https: true } }),
     }))
     expect(r.score).toBeGreaterThanOrEqual(QUALIFICATION_THRESHOLD)
     expect(r.score).toBeLessThan(55)        // the band the old bar rejected
