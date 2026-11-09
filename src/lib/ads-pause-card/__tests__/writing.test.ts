@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { KernelDeps } from '@/lib/kernel/deps'
 import { ADS_ACTION_TYPE, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
+import { approvalPlanHash, type ApprovalSource } from '@/lib/approval-source/read'
 import { confirmPauseCard } from '../confirm'
 import { issuePauseCards } from '../issue'
-import type { PauseHold } from '../ledger'
+import { saveHold, type PauseHold } from '../ledger'
 import { orderKey, type PauseAdSetOrder } from '../order'
 
 const payload: PauseHold = {
@@ -25,6 +26,7 @@ const payload: PauseHold = {
   },
   goalId: 'goal-1',
   planId: 'plan-1',
+  source: null,
   before: null,
   after: null,
   wrote: false,
@@ -91,14 +93,18 @@ describe('writing ledger', () => {
     const execute = vi.fn()
     const result = await confirmPauseCard({
       kernel: kernelFor([
-        holdRow({ ...payload, status: 'holding', orderKey: orderKey(order) }),
+        holdRow({ ...payload, status: 'holding', orderKey: orderKey(order), source: pauseSource() }),
         prescriptionRow(order),
         { id: 'goal-1', client_id: 'client-1', status: 'active' },
         {
           id: 'plan-1',
           client_id: 'client-1',
           status: 'approved',
-          generation_meta: { from_prescription: { prescription_id: 'rx-1', version: 2 } },
+          plan_data: {},
+          generation_meta: {
+            from_prescription: { prescription_id: 'rx-1', version: 2 },
+            blank_draft: { goal_id: 'goal-1' },
+          },
         },
       ]),
       clientId: 'client-1',
@@ -117,6 +123,42 @@ describe('writing ledger', () => {
     expect(result.wrote).toBe(false)
     expect(result.reason).toContain('没有在投广告组')
     expect(execute).not.toHaveBeenCalled()
+  })
+})
+
+describe('executed pause review', () => {
+  it('records metric, direction and window in one shape only after a real pause', async () => {
+    const saved: Record<string, unknown>[] = []
+    const sb = {
+      from() {
+        return {
+          update(patch: Record<string, unknown>) {
+            saved.push(patch)
+            const chain = {
+              eq() { return chain },
+              then(resolve: (value: { error: null }) => unknown) {
+                return Promise.resolve({ error: null }).then(resolve)
+              },
+            }
+            return chain
+          },
+        }
+      },
+    } as unknown as SupabaseClient
+    const row = { id: 'hold-1', payload }
+    await saveHold(sb, 'client-1', row, { ...payload, status: 'failed', wrote: false }, null)
+    await saveHold(sb, 'client-1', row, { ...payload, status: 'executed', wrote: true, source: pauseSource() }, payload.order.metric)
+    expect(saved[0]?.executed_at).toBeUndefined()
+    expect((saved[0]?.payload as PauseHold).review).toBeUndefined()
+    expect(saved[1]?.expected_metric).toBe(payload.order.metric)
+    expect(saved[1]?.executed_at).toEqual(expect.any(String))
+    expect((saved[1]?.payload as PauseHold).review).toMatchObject({
+      metric: payload.order.metric,
+      direction: 'pause',
+      observationWindowDays: 7,
+      objectId: 'set-a',
+      source: pauseSource(),
+    })
   })
 })
 
@@ -145,6 +187,7 @@ function prescriptionRow(order: PauseAdSetOrder): Record<string, unknown> {
     status: 'approved',
     version: 2,
     goal_id: 'goal-1',
+    approved_at: '2026-11-08T00:00:00.000Z',
     content: {
       pause_ad_set: {
         ad_account_id: order.adAccountId,
@@ -157,6 +200,17 @@ function prescriptionRow(order: PauseAdSetOrder): Record<string, unknown> {
       },
     },
     generation_meta: { plan_draft: { plan_id: 'plan-1' } },
+  }
+}
+
+function pauseSource(): ApprovalSource {
+  return {
+    prescriptionId: 'rx-1',
+    version: 2,
+    goalId: 'goal-1',
+    planId: 'plan-1',
+    planHash: approvalPlanHash('plan-1', null),
+    approvedOn: '2026-11-08',
   }
 }
 

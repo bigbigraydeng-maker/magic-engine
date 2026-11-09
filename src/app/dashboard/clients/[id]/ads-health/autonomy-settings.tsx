@@ -133,50 +133,38 @@ interface AccountCapsResponse {
 
 // ─── Sub-components (each kept small and single-purpose) ──────────────────────
 
-function CapField({
-  draftCap,
-  currentCap,
-  onChange,
-  onSave,
-  saving,
+const FILL_PLAN_DAILY_CAP = '在广告计划里填上每天的广告总上限。'
+
+function PlanDailyCapNote({
+  clientId,
+  cents,
+  legacyCents,
 }: {
-  draftCap: string
-  currentCap: number | null
-  onChange: (v: string) => void
-  onSave: () => void
-  saving: boolean
+  clientId: string
+  cents: number | null
+  legacyCents: number | null
 }) {
+  const legacy = typeof legacyCents === 'number' && legacyCents > 0 && legacyCents !== cents
+    ? `旧记录 $${centsToDisplay(legacyCents)} / 天，已经不再生效。`
+    : null
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700">每天最多花多少</label>
-      <div className="mt-1.5 flex items-center gap-2">
-        <input
-          type="number"
-          min={0.01}
-          step="0.01"
-          value={draftCap}
-          onChange={e => onChange(e.target.value)}
-          placeholder="未设"
-          className="w-40 rounded-lg border border-gray-300 px-3 py-1.5 text-sm tabular-nums text-gray-800 focus:border-gray-400 focus:outline-none"
-        />
-        <button
-          type="button"
-          disabled={saving}
-          onClick={onSave}
-          data-testid="save-total-cap"
-          className="rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
-        >
-          {saving ? '保存中…' : '保存上限'}
-        </button>
-        <span className="text-xs text-gray-400">$ / 天（按广告账户的币种）</span>
-      </div>
-      <p className="mt-1 text-xs text-gray-400">广告自动化每天最多花这么多钱。留空 = 没设上限，这时系统只看不动钱。</p>
-      <p className="mt-0.5 text-xs text-gray-400">
-        当前：
-        <span className="tabular-nums text-gray-600">
-          {currentCap == null ? '未设' : `$${centsToDisplay(currentCap)} / 天`}
-        </span>
-      </p>
+      <span className="block text-sm font-medium text-gray-700">每天最多花多少</span>
+      {cents == null ? (
+        <p className="mt-1 text-sm text-gray-700">{FILL_PLAN_DAILY_CAP}</p>
+      ) : (
+        <p className="mt-1 text-sm text-gray-700">
+          已批准计划上的每天总上限：
+          <span className="tabular-nums">${centsToDisplay(cents)} / 天</span>
+        </p>
+      )}
+      {legacy && <p className="mt-1 text-xs text-gray-400">{legacy}</p>}
+      <Link
+        href={`/dashboard/clients/${clientId}/promo-plan`}
+        className="mt-1 inline-block text-xs text-gray-500 hover:text-gray-700"
+      >
+        去广告计划里改 →
+      </Link>
     </div>
   )
 }
@@ -392,13 +380,15 @@ function CreativePoolList({
 /**
  * 清空一个账户的上限**不等于**"不设上限"——真正的判据
  * （`src/lib/capabilities/ads/envelope-facts.ts` 里 `perAccountCaps` 那段）分两种：
- *   · 这个客户只绑了 1 个账户 → 回落成**客户总闸**，等于把这个账户的额度抬到总闸
+ *   · 这个客户只绑了 1 个账户 → 回落成已批准计划上的每天总上限
  *   · 绑了 2 个及以上 → 这个账户直接不许自动动钱
  * 第一种是放宽钱闸，所以清空必须二次确认，文案也要分开说（魏征复审 2026-10-19）。
  */
 function clearConfirmText(accountCount: number, totalCap: number | null): string {
   if (accountCount <= 1) {
-    const ceiling = totalCap == null ? '客户总闸（现在也没设）' : `客户总闸 $${centsToDisplay(totalCap)} / 天`
+    const ceiling = totalCap == null
+      ? '已批准计划上的每天总上限（现在也没设，要先在广告计划里填上）'
+      : `已批准计划上的每天总上限 $${centsToDisplay(totalCap)} / 天`
     return `清空后这个账户不是"没有上限"：因为这个客户只绑了一个广告账户，判据会回落成${ceiling}，等于把它的额度放宽。确定清空吗？`
   }
   return '清空后这个账户将不允许自动动钱（这个客户绑了 2 个及以上账户时的规则）。确定清空吗？'
@@ -533,7 +523,7 @@ function useAccountCaps(clientId: string) {
       setMessage('每天上限要填大于 0 的金额；留空表示清空这个账户的上限（清空会二次确认）')
       return
     }
-    // 清空是放宽钱闸的一种（单账户客户会回落成客户总闸），所以要二次确认。
+    // 清空是放宽钱闸的一种（单账户客户会回落成已批准计划上的每天总上限），所以要二次确认。
     if (parsed === null && !window.confirm(clearConfirmText(rows?.length ?? 0, totalCap))) {
       return
     }
@@ -642,14 +632,14 @@ function AccountCapList({ clientId }: { clientId: string }) {
       {visibilityError && <p className="text-xs text-red-600">{visibilityError}</p>}
       <p className="text-xs text-gray-400">关掉「在广告健康页显示」后，广告健康页不再列出这个账户，超支提醒也不会盯着它。打开后从下一次心跳 / 明早体检起生效；今日实时面板最多一分钟后更新。</p>
       <p className="text-xs text-gray-400">
-        客户总闸：
+        已批准计划上的每天总上限：
         <span className="tabular-nums text-gray-600">
-          {totalCap == null ? '未设' : `$${centsToDisplay(totalCap)} / 天`}
+          {totalCap == null ? FILL_PLAN_DAILY_CAP : `$${centsToDisplay(totalCap)} / 天`}
         </span>
       </p>
-      <p className="text-xs text-gray-400">各账户加起来不能超过客户总闸；超了保存会被拒绝</p>
+      <p className="text-xs text-gray-400">各账户加起来不能超过已批准计划上的每天总上限；超了保存会被拒绝</p>
       <p className="text-xs text-gray-400">
-        清空某个账户的上限不等于「不设上限」：这个客户只绑 1 个账户时，判据会回落成客户总闸（等于放宽）；绑了 2 个及以上时，没填上限的账户不许自动动钱。
+        清空某个账户的上限不等于「不设上限」：这个客户只绑 1 个账户时，判据会回落成已批准计划上的每天总上限（等于放宽）；绑了 2 个及以上时，没填上限的账户不许自动动钱。
       </p>
     </div>
   )
@@ -662,24 +652,32 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
-  const [draftCap, setDraftCap] = useState('')
+  const [planCapCents, setPlanCapCents] = useState<number | null>(null)
   const [draftMode, setDraftMode] = useState<AutonomyMode>('observe')
   const [draftRefs, setDraftRefs] = useState('')
   const [version, setVersion] = useState<string | null | undefined>(undefined)
 
   const applyConfig = (c: AdStrategyConfig, v?: string | null) => {
     setConfig(c)
-    setDraftCap(centsToDisplay(c.daily_budget_cap_cents))
     setDraftMode(c.autonomy_mode)
     if (v !== undefined) setVersion(v)
   }
 
   const load = async () => {
     try {
-      const res = await fetch(`/api/clients/${clientId}/ad-strategy-config`)
+      const [res, capsRes] = await Promise.all([
+        fetch(`/api/clients/${clientId}/ad-strategy-config`),
+        fetch(`/api/clients/${clientId}/ad-accounts`),
+      ])
       const json = (await res.json()) as ConfigResponse
       if (!res.ok || !json.config) throw new Error(json.error ?? `HTTP ${res.status}`)
       applyConfig(json.config, json.version)
+      if (capsRes.ok) {
+        const caps = (await capsRes.json()) as { client_total_cap_cents?: unknown }
+        setPlanCapCents(typeof caps.client_total_cap_cents === 'number' ? caps.client_total_cap_cents : null)
+      } else {
+        setPlanCapCents(null)
+      }
     } catch {
       setLoadError('读不到广告自治配置，稍后再试')
     }
@@ -736,54 +734,16 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
     }
   }
 
-  const capUnset = draftCap.trim() === '' && config.daily_budget_cap_cents == null
+  const capUnset = planCapCents == null
   const newRefs = draftRefs.split('\n').map(r => r.trim()).filter(Boolean)
   const existingRefs = new Set(config.creative_pool.map(e => e.ref))
   const freshRefs = [...new Set(newRefs)].filter(r => !existingRefs.has(r))
-
-  // 单独保存客户总闸：和账户级保存按钮体验一致，用户改完数字可以直接存，不用滚到最底部。
-  // 只 PATCH daily_budget_cap_cents，不动模式、不动素材池；expected_version 也不带（这个字段只在素材池并发时才有意义）。
-  const saveTotalCap = async () => {
-    setSaving(true)
-    setMessage(null)
-    try {
-      const parsedCap = displayToCents(draftCap)
-      if (parsedCap !== null && (!Number.isInteger(parsedCap) || parsedCap <= 0)) {
-        setMessage('每天上限要填大于 0 的金额')
-        return
-      }
-      if (parsedCap === config.daily_budget_cap_cents) {
-        setMessage('没有改动')
-        return
-      }
-      const res = await fetch(`/api/clients/${clientId}/ad-strategy-config`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ daily_budget_cap_cents: parsedCap }),
-      })
-      const json = (await res.json()) as ConfigResponse
-      if (!res.ok || !json.config) throw new Error(json.message ?? json.error ?? `HTTP ${res.status}`)
-      applyConfig(json.config, json.version)
-      setMessage('已保存')
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : '保存失败')
-    } finally {
-      setSaving(false)
-    }
-  }
 
   const save = async () => {
     setSaving(true)
     setMessage(null)
     try {
       const body: Record<string, unknown> = {}
-
-      const parsedCap = displayToCents(draftCap)
-      if (parsedCap !== null && (!Number.isInteger(parsedCap) || parsedCap <= 0)) {
-        setMessage('每天上限要填大于 0 的金额')
-        return
-      }
-      if (parsedCap !== config.daily_budget_cap_cents) body.daily_budget_cap_cents = parsedCap
       if (draftMode !== config.autonomy_mode) body.autonomy_mode = draftMode
 
       // 只在提交新候选时才动素材池。服务端会保留已有素材的批准状态，但会带上
@@ -864,12 +824,10 @@ export default function AutonomySettings({ clientId }: { clientId: string }) {
           </Link>
         </div>
 
-        <CapField
-          draftCap={draftCap}
-          currentCap={config.daily_budget_cap_cents}
-          onChange={setDraftCap}
-          onSave={saveTotalCap}
-          saving={saving}
+        <PlanDailyCapNote
+          clientId={clientId}
+          cents={planCapCents}
+          legacyCents={config.daily_budget_cap_cents}
         />
 
         <ModeField draftMode={draftMode} capUnset={capUnset} truth={autopilotTruth(config)} onChange={setDraftMode} />

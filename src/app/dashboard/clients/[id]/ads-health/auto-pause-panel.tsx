@@ -75,6 +75,12 @@ export default function AutoPausePanel({
         body: JSON.stringify({ resolution, expectedDecisionId: it.expectedDecisionId, ...(reason ? { reason } : {}) }),
       })
       const json = await res.json().catch(() => ({}))
+      if (res.status === 202 || json.status === 'awaiting_confirmation') {
+        setError(typeof json.humanReason === 'string' ? json.humanReason : '确认卡已出，还没暂停。')
+        await load()
+        onPendingAdsChanged?.()
+        return
+      }
       if (res.status === 409) {
         setError(`${json.error ?? '这条已经变了'}（列表已刷新，请再看一遍）`)
         await load()
@@ -117,7 +123,7 @@ export default function AutoPausePanel({
   return (
     <div style={{ maxWidth: 720 }}>
       <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>
-        系统发现这些广告组连续花钱没结果，建议暂停。点「批准」立刻暂停（不用去 Meta 后台），点「驳回」就不停。
+        系统发现这些广告组连续花钱没结果，建议暂停。点「批准」会先出一张确认卡，确认后才暂停。点「驳回」就不停。
       </p>
       {error && <div style={{ color: '#b91c1c', marginBottom: 12 }}>{error}</div>}
       {items.length === 0 && <div style={{ color: '#64748b' }}>目前没有等你点头的暂停建议。</div>}

@@ -4,7 +4,7 @@
  * 规则（设计稿 §5.2-7 + Codex 对币种的意见）：
  *  - 按「账户」汇总本计划所有广告步骤的日预算，不是逐个步骤比；
  *  - 账户币种必须能确定（来自账户快照），缺失 → unknown，不猜；
- *  - 客户总上限（ad_strategy_configs.daily_budget_cap_cents）没有币种，只有当全部涉及账户
+ *  - 客户每天总上限（已批准计划上的数）没有币种，只有当全部涉及账户
  *    币种一致时才与之比较，币种不一致或缺失 → unknown（不做换算）；
  *  - 账户级上限（client_meta_ad_accounts.daily_budget_cap_cents）按账户比，没设就不比这一层；
  *  - 已在投放的预算暂未纳入（读取口径还没定：CBO / ABO 层级），结果里明说。
@@ -12,6 +12,7 @@
  * 结论只有三种：ok / over / unknown。unknown 在检查清单里是灰色，花钱相关的硬门不能批准。
  */
 
+import { FILL_PLAN_DAILY_CAP } from '@/lib/approval-source/plan-cap'
 import type { AdsStep, PromoSpec } from './spec'
 
 export interface AccountCapFacts {
@@ -78,7 +79,7 @@ export function checkAdsBudget(
   }
 
   if (clientCapCents === null) {
-    reasons.push('客户的广告日预算总上限还没设置')
+    reasons.push(FILL_PLAN_DAILY_CAP)
     unknown = true
   } else {
     const involved = Object.keys(perAccount).map(id => byId.get(id)).filter((a): a is AccountCapFacts => !!a)

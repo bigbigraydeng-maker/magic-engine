@@ -83,14 +83,15 @@ function clientVerdict(label: string, projected: Projected, live: BudgetSnapshot
   if (!Number.isSafeInteger(live.otherAccountsLiveCents) || (live.otherAccountsLiveCents ?? -1) < 0) {
     return unread(label, '其它广告账户现在的日预算读不到')
   }
-  if (!Number.isSafeInteger(live.clientCapCents) || (live.clientCapCents ?? 0) <= 0) {
-    return unread(label, '这位客户所有账户加在一起的每日上限读不到')
-  }
   const other = live.otherAccountsLiveCents as number
   const before = projected.before + other
   const after = projected.after + other
   if (!Number.isSafeInteger(before) || !Number.isSafeInteger(after)) {
     return unread(label, '所有账户加在一起的日预算算不出来')
+  }
+  if (!Number.isSafeInteger(live.clientCapCents) || (live.clientCapCents ?? 0) <= 0) {
+    if (after <= before) return green(label, '这次没有上调，不对照每天总上限')
+    return red(label, '已批准的计划里还没有每天广告总上限，没有改。')
   }
   if (after > (live.clientCapCents as number) && after > before) {
     return red(label, '改完会超过这位客户所有广告账户加在一起的每日上限，没有改。')

@@ -12,8 +12,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { createKernel } from '@/lib/kernel'
-import { requireAdsO1BudgetScaleAccess, submitAdsO1BudgetScale } from '@/lib/action-submission/ads-o1-budget-scale'
-import { requireStopLossAccess, submitStopLossThroughKernel } from '@/lib/action-submission/stop-loss'
+import { requireAdsO1BudgetScaleAccess } from '@/lib/action-submission/ads-o1-budget-scale'
+import { requireStopLossAccess } from '@/lib/action-submission/stop-loss'
+import { CLIENT_BUDGET_FACT_FRESH_MS } from '@/lib/capabilities/ads/envelope-facts'
+import { clickerFromAccess, issueMoneyBudget } from '@/lib/action-submission/money-card'
+import { loadMoneyBudgetLive } from '@/lib/ads-budget-card/money-live'
 import { resolveAccountTimezone, accountDayKey } from '@/lib/ads-strategy/account-timezone'
 import { loadBudgetChange, type BudgetChangeUnit } from '@/lib/ads-strategy/budget-change/load'
 import { validateReduceTarget } from '@/lib/ads-strategy/budget-change/plan'
@@ -88,18 +91,23 @@ async function submitScale(clientId: string, unit: BudgetChangeUnit, kind: Exclu
   }
   const goal = await activeGoalId(clientId)
   if ('error' in goal) return goal.error
-  const outcome = await submitAdsO1BudgetScale(createKernel(supabaseAdmin), {
-    clientId, access, goalId: goal.id, cycleDate: loaded.target.cycleDate,
-    adAccountId: unit.adAccountId, adsetId: loaded.target.scaleAdsetId,
-    ...(unit.level === 'campaign' && loaded.target.campaignId ? { campaignId: loaded.target.campaignId } : {}),
-    beforeCents: before, afterCents: option.afterCents, source: 'ads_health_scorecard',
-    evidence: { kind, currency: loaded.plan.currency, target_level: unit.level, not_checked: loaded.plan.notChecked },
+  const issued = await issueScorecardCard(clientId, access, unit, {
+    source: 'scorecard_up',
+    entityId: unit.level === 'campaign' ? (loaded.target.campaignId ?? unit.id) : unit.id,
+    campaignId: unit.level === 'campaign' ? loaded.target.campaignId : null,
+    scaleAdsetId: loaded.target.scaleAdsetId,
+    beforeCents: before,
+    afterCents: option.afterCents,
+    goalId: goal.id,
+    cycleDate: loaded.target.cycleDate,
+    requestId: null,
+    snapshotAt: new Date().toISOString(),
   })
-  // 同一天同一改动再点一次：内核拿回已在等批的那一条（幂等），也算提交成功
-  if (outcome.kind !== 'pending_approval' && outcome.kind !== 'idempotent_hit') {
-    return NextResponse.json({ error: outcome.humanReason ?? '系统没有建立待批请求', kind: outcome.kind, runId: outcome.run.id }, { status: 409 })
-  }
-  return NextResponse.json({ ok: true, status: 'awaiting_approval', runId: outcome.run.id, beforeCents: before, afterCents: option.afterCents }, { status: 202 })
+  if (!issued.card) return NextResponse.json({ error: issued.reason ?? '没有出确认卡，没有改预算。', wroteMeta: false }, { status: 409 })
+  return NextResponse.json({
+    ok: true, status: 'awaiting_confirmation', wroteMeta: false,
+    runId: issued.card.runId, beforeCents: before, afterCents: option.afterCents, card: issued.card,
+  }, { status: 202 })
 }
 
 async function submitReduce(clientId: string, unit: BudgetChangeUnit, targetCents: unknown, requestId: unknown): Promise<NextResponse> {
@@ -123,21 +131,69 @@ async function submitReduce(clientId: string, unit: BudgetChangeUnit, targetCent
   const goal = unit.level === 'adset' ? await activeGoalId(clientId) : null
   if (goal && 'error' in goal) return goal.error
   const timezone = await resolveAccountTimezone(unit.adAccountId)
-  if (!timezone) return NextResponse.json({ error: '读不到广告账户时区' }, { status: 503 })
-  const submitted = await submitStopLossThroughKernel(createKernel(supabaseAdmin), {
-    clientId, access, goalId: goal?.id, campaignId: loaded.target.campaignId,
-    adAccountId: unit.adAccountId,
-    requestId, cycleDate: accountDayKey(timezone, new Date()),
-    action: unit.level === 'campaign' ? 'cut_campaign' : 'cut_unit',
-    targets: [{ id: unit.id, name: unit.id, currentCents: loaded.plan.currentCents, afterCents: target }],
+  if (!timezone) return NextResponse.json({ error: '读不到广告账户时区', wroteMeta: false }, { status: 503 })
+  const issued = await issueScorecardCard(clientId, access, unit, {
+    source: 'scorecard_down',
+    entityId: unit.id,
+    campaignId: loaded.target.campaignId,
+    scaleAdsetId: null,
+    beforeCents: loaded.plan.currentCents,
+    afterCents: target,
+    goalId: goal && 'id' in goal ? goal.id : null,
+    cycleDate: accountDayKey(timezone, new Date()),
+    requestId,
+    snapshotAt: new Date().toISOString(),
   })
-  const run = submitted.runs[0]
-  const executed = run?.kind === 'succeeded' || run?.kind === 'idempotent_hit'
-  // 跟老止损路由对齐：等批准 / 正在处理不是失败
-  const waiting = run?.kind === 'pending_approval' || run?.kind === 'in_progress'
-  const status = executed ? 'executed' : run?.kind === 'pending_approval' ? 'awaiting_approval' : run?.kind ?? 'refused'
-  return NextResponse.json(
-    { ok: executed || waiting, status, runId: run?.runId ?? null, reason: run?.humanReason ?? null, warnings: run?.warnings ?? [], beforeCents: loaded.plan.currentCents, afterCents: target },
-    { status: executed ? 200 : waiting ? 202 : 409 },
-  )
+  if (!issued.card) return NextResponse.json({ error: issued.reason ?? '没有出确认卡，没有改预算。', wroteMeta: false }, { status: 409 })
+  return NextResponse.json({
+    ok: false, status: 'awaiting_confirmation', wroteMeta: false,
+    runId: issued.card.runId, beforeCents: loaded.plan.currentCents, afterCents: target, card: issued.card,
+  }, { status: 202 })
+}
+
+async function issueScorecardCard(
+  clientId: string,
+  access: Extract<Awaited<ReturnType<typeof requireStopLossAccess>>, { ok: true }>,
+  unit: BudgetChangeUnit,
+  spec: {
+    source: 'scorecard_up' | 'scorecard_down'
+    entityId: string
+    campaignId: string | null
+    scaleAdsetId: string | null
+    beforeCents: number
+    afterCents: number
+    goalId: string | null
+    cycleDate: string
+    requestId: string | null
+    snapshotAt: string
+  },
+) {
+  return issueMoneyBudget({
+    kernel: createKernel(supabaseAdmin),
+    sb: supabaseAdmin,
+    clientId,
+    clicker: clickerFromAccess(access, clientId),
+    source: spec.source,
+    level: unit.level,
+    entityId: spec.entityId,
+    adAccountId: unit.adAccountId,
+    campaignId: spec.campaignId,
+    scaleAdsetId: spec.scaleAdsetId,
+    name: spec.entityId,
+    beforeCents: spec.beforeCents,
+    afterCents: spec.afterCents,
+    snapshotAt: spec.snapshotAt,
+    goalId: spec.goalId,
+    cycleDate: spec.cycleDate,
+    requestId: spec.requestId,
+    freshMs: CLIENT_BUDGET_FACT_FRESH_MS,
+    readLive: () => loadMoneyBudgetLive(supabaseAdmin, clientId, {
+      level: unit.level,
+      entityId: spec.entityId,
+      adAccountId: unit.adAccountId,
+      name: spec.entityId,
+      beforeCents: spec.beforeCents,
+      afterCents: spec.afterCents,
+    }),
+  })
 }

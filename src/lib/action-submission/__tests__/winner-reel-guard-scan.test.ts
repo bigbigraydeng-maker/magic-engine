@@ -1,7 +1,6 @@
 /**
- * Guards that can be checked without loading the winner executor.
- * That executor imports a deleted pause-card module, so its fake-port
- * suite cannot be collected. No live Meta calls. Ids here are short fakes.
+ * Guards that can be checked without a live Meta call.
+ * Ids here are short fakes.
  */
 
 import { readFileSync } from 'node:fs'
@@ -72,10 +71,14 @@ describe('winner confirm source order', () => {
     expect(confirm.indexOf('claimHold')).toBeLessThan(writeAt)
   })
 
-  it('gap: the decision status is not read before the write', () => {
+  it('reads expired and void before claiming the ledger or writing', () => {
     const between = confirm.slice(confirm.indexOf('ports.decide'), writeAt)
-    expect(between).not.toContain('expired')
-    expect(between).not.toContain('card.status')
+    const statusAt = between.indexOf('card.status')
+    const claimAt = between.indexOf('claimHold')
+    expect(between).toContain('expired')
+    expect(between).toContain('voided')
+    expect(statusAt).toBeGreaterThan(-1)
+    expect(claimAt).toBeGreaterThan(statusAt)
   })
 
   it('a mismatched read-back is a failed return, not a second create', () => {

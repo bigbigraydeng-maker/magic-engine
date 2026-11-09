@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { agreedPlanDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { matchDrafts } from './draft-match'
 import {
   parseDraftRow,
@@ -101,6 +102,23 @@ function configFrom(row: Loaded<unknown>): { outcome: Loaded<OutcomeFact | null>
   return { outcome: { read: 'ok', value: parseOutcome(row.value) }, strategy: { read: 'ok', value: strategy } }
 }
 
+function strategyFromPlan(
+  strategy: Loaded<StrategyFact | null>,
+  plans: Loaded<unknown[]>,
+): Loaded<StrategyFact | null> {
+  if (strategy.read !== 'ok' || strategy.value === null) return strategy
+  if (plans.read !== 'ok') return { read: 'ok', value: { ...strategy.value, dailyCapCents: null } }
+  const agreed = agreedPlanDailyTotalCap(
+    plans.value.filter((row): row is { status?: unknown; plan_data?: unknown } => (
+      !!row && typeof row === 'object' && (row as { status?: unknown }).status === 'approved'
+    )),
+  )
+  return {
+    read: 'ok',
+    value: { ...strategy.value, dailyCapCents: agreed.state === 'set' ? agreed.cents : null },
+  }
+}
+
 function goalFrom(row: Loaded<unknown>): Loaded<GoalFact | null> {
   if (row.read !== 'ok') return row.read === 'skipped' ? { read: 'skipped' } : { read: 'unread' }
   if (row.value === null) return { read: 'ok', value: null }
@@ -189,7 +207,7 @@ export async function loadChainFacts(db: ChainReader, input: LoadChainInput): Pr
     prescription,
     goal: goalFrom(goal),
     outcome: split.outcome,
-    strategy: split.strategy,
+    strategy: strategyFromPlan(split.strategy, plans),
     plans: planFacts,
     workOrders: orders.read === 'skipped' ? { read: 'skipped' } : ordersFrom(orders),
     drafts: draftsFrom(rawDrafts, goalId, planFacts, split.strategy),

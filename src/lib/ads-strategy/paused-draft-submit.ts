@@ -10,6 +10,9 @@ import { assertMayClick, contentFingerprint, decideConfirmationCard, issueConfir
 import { notesFor } from '@/lib/confirmation-card/records'
 import { voidStaleCard } from '@/lib/confirmation-card/settle'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
+import type { CardFacts } from '@/lib/confirmation-card/facts'
+import { markOrHold } from './independent-review-gate'
+import { draftProposalText } from './independent-review'
 import { isExpired, readStoredCard } from '@/lib/confirmation-card/view'
 import type { AdDraft } from './ad-draft'
 import { createDraftForApproval, type CreateDraftDeps, type CreateDraftOutcome } from './draft-and-gate'
@@ -68,6 +71,21 @@ export interface PausedDraftSubmitResult {
 
 type CreatePaused = (draft: AdDraft, deps: CreateDraftDeps) => Promise<CreateDraftOutcome>
 
+async function factsAfterReview(
+  sb: KernelDeps['supabase'],
+  draft: AdDraft,
+  accountLabel: string,
+  review: PausedDraftReview,
+): Promise<CardFacts> {
+  const facts = pausedDraftFacts(draft, accountLabel, review)
+  const blocked = pausedDraftBlock(draft, accountLabel, review) !== null
+  const marked = await markOrHold(sb, draft.clientId, facts.hardChecks, blocked, draftProposalText(draft))
+  if (marked.kind === 'return') {
+    throw new ConfirmationCardError('rule_blocked', `独立复核退回：${marked.reason}`)
+  }
+  return { ...facts, hardChecks: marked.checks }
+}
+
 export async function issuePausedDraftCard(args: {
   kernel: KernelDeps
   clientId: string
@@ -78,7 +96,7 @@ export async function issuePausedDraftCard(args: {
   now?: Date
 }): Promise<ConfirmationCardView> {
   const draft = { ...args.draft, clientId: args.clientId }
-  const facts = pausedDraftFacts(draft, args.accountLabel, args.review)
+  const facts = await factsAfterReview(args.kernel.supabase, draft, args.accountLabel, args.review)
   const draftHash = canonicalHashOfInput(draft)
   const fingerprint = contentFingerprint(normalizeFacts(facts))
   const now = args.now ?? args.kernel.now()

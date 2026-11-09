@@ -6,6 +6,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
+import type { ApprovalSource } from '@/lib/approval-source/read'
+import { executedReviewStamp, type ReviewStamp } from '@/lib/flywheel/attribution/executed-review'
 import type { PauseAdSetOrder } from './order'
 
 export type HoldStatus = 'holding' | 'writing' | 'executed' | 'failed' | 'declined' | 'refused'
@@ -18,11 +20,13 @@ export interface PauseHold {
   order: PauseAdSetOrder
   goalId: string
   planId: string
+  source: ApprovalSource | null
   before: string | null
   after: string | null
   wrote: boolean
   resultLine?: string
   kernelRunId?: string | null
+  review?: ReviewStamp
 }
 
 export interface HoldRow {
@@ -83,11 +87,24 @@ export async function saveHold(
   payload: PauseHold,
   expectedMetric: string | null,
 ): Promise<void> {
-  const patch: Record<string, unknown> = { payload, expected_metric: expectedMetric }
-  if (payload.status === 'executed') patch.executed_at = new Date().toISOString()
+  const stamped = withReview(payload)
+  const patch: Record<string, unknown> = { payload: stamped, expected_metric: expectedMetric }
+  if (stamped.status === 'executed') patch.executed_at = new Date().toISOString()
   if (payload.kernelRunId) patch.action_run_id = payload.kernelRunId
   const { error } = await sb.from('flywheel_actions').update(patch).eq('id', row.id).eq('client_id', clientId)
   if (error) throw new ConfirmationCardError('invalid', '结果没能记下。没有再去暂停一次。')
+}
+
+function withReview(payload: PauseHold): PauseHold {
+  if (payload.status !== 'executed') return payload
+  const review = executedReviewStamp({
+    metric: payload.order.metric,
+    direction: payload.order.direction,
+    observationWindowDays: payload.order.observationDays,
+    objectId: payload.order.adsetId,
+    source: payload.source,
+  })
+  return review ? { ...payload, review } : payload
 }
 
 async function rowsWhere(sb: SupabaseClient, clientId: string, column: string, value: string): Promise<HoldRow[]> {
