@@ -32,6 +32,14 @@ vi.mock('@/lib/meta/asset-upload', () => ({
   waitForVideoReady: vi.fn(),
 }))
 
+const launch = vi.hoisted(() => ({
+  bindDraftLaunch: vi.fn(async () => ({ ok: true as const, planId: 'plan-1' })),
+}))
+
+vi.mock('@/lib/ads-launch/plan-gate', () => ({
+  bindDraftLaunch: launch.bindDraftLaunch,
+}))
+
 import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
 import { publishDraftPaused, activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
 import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchCampaignReadback, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
@@ -142,6 +150,7 @@ const OK_PUBLISH = {
 
 beforeEach(() => {
   vi.resetAllMocks()
+  launch.bindDraftLaunch.mockResolvedValue({ ok: true, planId: 'plan-1' })
   mPublish.mockResolvedValue(OK_PUBLISH)
   mSpend.mockResolvedValue({
     ok: true,
@@ -361,6 +370,15 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
     const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r.ok).toBe(true)
     expect(updated.at(-1)?.status).toBe('active')
+    expect(updated.at(-1)?.activation?.plan_id).toBe('plan-1')
+  })
+
+  it('没有已批准的计划：不开，也不碰广告平台', async () => {
+    launch.bindDraftLaunch.mockResolvedValueOnce({ ok: false, reason: '这位客户现在没有已批准的广告计划，没有开。' })
+    const { sb } = fakeSupabase(READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r).toEqual({ ok: false, error: '这位客户现在没有已批准的广告计划，没有开。' })
+    expect(mActivate).not.toHaveBeenCalled()
   })
 
   it('已经开过的不能再开一次', async () => {
@@ -795,6 +813,28 @@ describe('approveDraft — 私信广告现在不能用「开」按钮打开', ()
       const { sb } = fakeSupabase({ ...base, draft: { ...DRAFT, kind } })
       expect((await approveDraft('act1', sb, 'tok', PM)).ok, kind).toBe(true)
     }
+  })
+
+  it('短视频留资不从旧开按钮开，零 Meta 调用', async () => {
+    const { sb, updated } = fakeSupabase({ ...base, draft: { ...DRAFT, kind: 'reels_lead' } })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('开投确认卡')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(updated).toHaveLength(0)
+  })
+
+  it('短视频留资从开投确认卡可以走到打开', async () => {
+    mActivate.mockResolvedValue({ ok: true })
+    const { sb } = fakeSupabase({ ...base, draft: { ...DRAFT, kind: 'reels_lead' } })
+    const card = {
+      actorUserId: 'u-pm',
+      actorEmail: 'pm@magiclab.test',
+      basis: 'go_live_card' as const,
+      cardRunId: '11111111-1111-4111-8111-111111111111',
+    }
+    expect((await approveDraft('act1', sb, 'tok', card, 'go-live-card')).ok).toBe(true)
+    expect(mActivate).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -133,7 +133,7 @@ describe('admitFinishedAsset', () => {
     const { d, upload } = deps()
     const result = await admitFinishedAsset(order({ videoPath: 'https://evil.example/renders/c-1/wo-1/final.mp4' }), d)
     expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.status).toBe(409)
+    if (!result.ok) expect(result.status).toBe(422)
     expect(upload).not.toHaveBeenCalled()
   })
 
