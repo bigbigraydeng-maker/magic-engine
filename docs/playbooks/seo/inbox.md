@@ -48,3 +48,31 @@
 - 证据：`docs/ledger/2026-10-29-seo-rank-verdict-gap-alert.md`；PR https://github.com/bigbigraydeng-maker/magic-engine/pull/3374；生产库 `cron_run_logs` `job_name='seo-meta-rank-sampler'` 10-26～11-01 七行，`seo_meta_log` live 7 / 未判定 7 / 近 7 天新判定 0（2026-11-03 取数）。
 - 建议的规则或检查：把 10-29 第 3 条的检查改成「新上线的改动没有记改前名次 → 报人工」，「派 0 条」本身不算失败。判不出效果的根因跟本周第 1 条是同一个：没有新改动上线。
 - 与现有手册关系：修正本候选区 10-29 第 3 条（升正文时以本条为准）。
+
+## 2026-11-10 · 硬规则把「同一组天数换了写法」当成丢事实 + 编事实，拦下了一条其实没改事实的文案
+- 层级：客户·CTS（单客户候选；这段规则代码是所有客户共用的）
+- 发生了什么：W46（11-09）`how-many-days-in-chongqing` 走到了生成，被硬规则拦下，原因原文是「drops fact(s) from the original — NZ, 2 days, 5 days; also introduces fact(s) not in the original — 2, 7」。原文：标题「3, 5 or 7 Days」，描述「2 days, 5 days, or longer … by CTS Tours NZ」；新文：标题「2, 3, 5 or 7」，描述「covering 2, 3, 5 and 7-day itineraries」。2、3、5、7 这几个天数新旧都有，只是写法从「2 days」变成「2, 3, 5 and 7-day」；「7」原标题里就有，却被判成「新编的」。另外「NZ」来自原文署名「CTS Tours NZ」，就算把「CTS Tours NZ」整个加进品牌忽略词，「NZ」照样被当成地名事实拦（本地复现，见证据）。
+- 证据：生产库 `cron_run_logs` `job_name='seo-meta-cycle-step4-applied'`，W46 `summary.proposals[1]` 的 `factCheckReason` / `oldTitle` / `oldDesc` / `newTitle` / `newDesc`（2026-11-10 取数）；`src/lib/seo-meta/cycle/hard-fact-check.ts:283-322`（`checkHardFactsPreserved`，把「数量」和「裸数字」分两套抽取、分别比对）；本地复现：用这四段原文直接调 `checkHardFactsPreserved`，`ignoreTerms` 为 `[]`、`['CTS Tours','CTS']`、`['CTS Tours NZ','CTS Tours','CTS']` 三种情况都返回同一条拦截原因（2026-11-10，`npx tsx` 一次性脚本，未进仓库）。
+- 建议的规则或检查：①比对数字前先把「2 days」「2-day」「2, 3, 5 and 7-day」里的数字统一抽出来再比，只在「某个数字新旧两边都找不到」时才算丢 / 新编；②品牌署名（含「CTS Tours NZ」这种带地区后缀的写法）整体从事实抽取里剔除，别再单独抽出「NZ」；③给这条用例加一个回归测试（上面四段原文应判通过）。硬规则仍按「宁可多拦」设计，但被拦的原因要是真事实。
+- 与现有手册关系：补充 playbook-seo-general.md 第十三节（事实核对）；与本候选区 10-29 第 2 条（丢 CTS 被拦，PR 3368 已修）同一类问题的新变体：修了「CTS」，没修「NZ」和数字写法。
+
+## 2026-11-10 · 新标题被硬截在第 60 个字符，截在单词中间（「…Famous Train Stat」）
+- 层级：通用·候选（共用代码，任何客户都会遇到；目前只有 CTS 一个客户的实例）
+- 发生了什么：W46 `liziba-station-chongqing-guide` 的新标题是「Liziba Station Chongqing: Guide to China's Famous Train Stat」，正好 60 个字符，最后一个词「Station」被切成「Stat」。这次它被判官拦下所以没上线；如果判官放行，这个半截标题会直接改到客户网站上。代码里生成后一律 `.slice(0, 60)`，不看是不是切在单词中间，后面的事实核对和判官也不检查标题完不完整。
+- 证据：生产库 `cron_run_logs` `job_name='seo-meta-cycle-step4-applied'`，W46 `summary.proposals[0].newTitle`（2026-11-10 取数）；`src/lib/seo-meta/cycle/runner.ts:385`、`:397`、`:458`（`title.slice(0, AI_META_MAX_TITLE)`，`AI_META_MAX_TITLE = 60`）；同样写法在 `src/lib/seo-meta/cycle/ai-meta.ts:95` 和 `src/lib/seo-meta/cts-meta-pr.ts:351`。
+- 建议的规则或检查：超长时退回到最后一个完整单词（必要时去掉末尾标点），或者超长就让模型重写一次；加一条机器检查「新标题最后一个词不在原文 / 关键词 / 词典里 → 判截断，不上线」。
+- 与现有手册关系：新增（手册讲了标题长度上限，没讲超长怎么处理）。
+
+## 2026-11-10 · 判官连续第 2 周只给分数就拦李子坝，这周的新描述几乎是原文改写
+- 层级：客户·CTS（单客户候选）
+- 发生了什么：`liziba-station-chongqing-guide` W45 被判官以 0.89 拦，W46 又以 0.70 拦，两次原因都只有「contradiction score ≥ 0.5 threshold」。W46 的新描述是「China's most photographed railway station … how to visit, and capture the best shots」，原文是「the most photographed railway station in China — and possibly the world … how to visit, and how to get the best shot」，看不出事实冲突；可能的嫌疑是标题被截成「Train Stat」（见上一条）或「Famous」，但判官没给理由，**没法证实**。李子坝这组页面至此 W41–W46 共进候选 9 次、上线 0 次。
+- 证据：生产库 `cron_run_logs` `job_name='seo-meta-cycle-step4-applied'`，W45、W46 的 `proposals[]` 里该 slug 的 `factCheckReason` / `oldDesc` / `newDesc` / `newTitle`（2026-11-10 取数）；W46 `step3-prescribed` 里 `liziba-monorail-chongqing-guide` 仍是 `keyword_data_unavailable`。
+- 建议的规则或检查：同本候选区 11-03 第 5 条（判官必须写明冲突的是哪句）；加一条：同页连续 2 周只因「判官分数」被拦、且没有理由 → 直接转人工看一眼，不要第 3 周再自动提同一页。
+- 与现有手册关系：印证本候选区 11-03 第 5 条（新数字：第 2 周、0.70、改写度很高），并印证 11-03 第 6 条（李子坝占名额从 7 次到 9 次）。
+
+## 2026-11-10 · 修复的验收日已过 7 天，「一页没上线」的台账卡还停在 decided，周循环已连续 6 周零上线
+- 层级：客户·CTS（单客户候选）
+- 发生了什么：W46（11-09）`applied=[]`、`logged_rows=0`，这是 W41–W46 连续第 6 周零上线；`seo_meta_log` 仍是 65 行，最后一行 2026-09-28，近 7 天新增 0。W46 9 个候选里 7 个在生成前就失败（受保护页 3、数据文件里找不到 2 —— `xian-city-wall-travel-guide` 已连续 5 周、`visa-requirements` 连续 2 周、没有关键词数据 1、没有本页专属关键词 1），走到生成的 2 个分别被判官和硬规则拦下（见前两条）。台账卡 `2026-10-29-cts-meta-cycle-generator-sees-original` 的验收是「至少 1 页上线」、`verify_by: 2026-11-03`，W45、W46 两轮都没达成，卡片状态却仍是 `decided`，没有改成 `failed`，今日待办读台账时看不出这件事失败了。排名采样器本周 7 天仍是每天派 0 条，7 条已上线改动仍全部没有判定（原因同 11-03 第 7 条）。
+- 证据：生产库 `cron_run_logs` `job_name like 'seo-meta-cycle-step%'`，W45、W46 共 12 行；`seo_meta_log` 总数 / `max(created_at)` / 近 7 天新增；`cron_run_logs` `job_name='seo-meta-rank-sampler'` 近 7 天 7 行、`rows_dispatched` 全为 0（2026-11-10 取数）；`docs/ledger/2026-10-29-cts-meta-cycle-generator-sees-original.md`（`status: decided`，`verify_by: 2026-11-03`）。
+- 建议的规则或检查：①台账卡过了 `verify_by` 还没达成验收，巡检要自动把它标成「到期未验证」并进今日待办，不能一直停在 decided；②印证 10-29 第 1 条的「产出体检」：连续 ≥2 周 `proposals>0 且 applied=0` 就开人工卡——这条到今天还没有任何机制在做。
+- 与现有手册关系：印证本候选区 10-29 第 1 条、11-03 第 1 条（新数字：第 6 周、W46 7/9 名额生成前失败、xian-city-wall 第 5 周）；新增「过期台账卡不会自己变 failed」。

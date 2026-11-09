@@ -418,6 +418,10 @@ const CRON_REGISTRY_ENTRIES = [
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/cloud-reel-scheduled-go-public.ts 的 REEL_SCHEDULED_CRON。
   // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
   { service: 'inngest:cloud-reel-scheduled-go-public', jobName: 'reel-scheduled-go-public', schedule: '*/30 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-04' },
+  // 经销商月结：每月 1 日新西兰 09:00 算上个月分润，存成「待批准」月结；只记账、不付钱、不外发。数据库表没上线时写 skipped 回执。
+  // 🔴 schedule 唯一定义在 src/lib/inngest/functions/distributor-monthly-statement.ts 的 DISTRIBUTOR_STATEMENT_SCHEDULE。
+  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
+  { service: 'inngest:cloud-distributor-monthly-statement', jobName: 'distributor-monthly-statement', schedule: '0 9 1 * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-10' },
   { service: 'inngest:cloud-baozheng-weekly', jobName: 'baozheng-weekly', schedule: '0 10 * * 3', logsRuns: true, scheduler: 'inngest', addedAt: '2026-11-03' },
   { service: 'inngest:cloud-libai-prompt-library-monthly', jobName: 'libai-prompt-library-monthly', schedule: '0 9 * * 2', logsRuns: true, scheduler: 'inngest', addedAt: '2026-09-25' },
   // 司马迁 · 口碑周巡（agent 自治计划 B2）：每周四新西兰 09:00 读本周新 Google 评价、起草回复，

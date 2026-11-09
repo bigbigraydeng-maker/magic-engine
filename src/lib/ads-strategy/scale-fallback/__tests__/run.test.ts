@@ -35,5 +35,6 @@ describe('每天提议收回，自己不改预算', () => {
     const source = readFileSync(join(process.cwd(), 'src/lib/ads-strategy/scale-fallback/run.ts'), 'utf8')
     expect(source).not.toContain('graph.facebook')
     expect(source).toContain('wroteMeta: false')
+    expect(source).toContain("lifetime: 'nz_day'")
   })
 })
