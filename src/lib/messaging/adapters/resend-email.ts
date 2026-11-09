@@ -5,8 +5,8 @@
  *  - Every sending account label has its own variable, `RESEND_API_KEY_<ACCOUNT>`. A missing, empty or malformed key
  *    means NO send. resend@6 quietly falls back to `RESEND_API_KEY` (ME's system key) when it is handed an empty key, so
  *    an empty value never reaches `new Resend(...)`, and the label 'system' is refused outright: a client's mail never
- *    uses the system key by accident. (Using the same Resend account on purpose is allowed: the PM may put the same key
- *    into the client's own variable, as for CTS on 2026-11-10.) The SDK client is created inside each call, with the
+ *    uses the system key by accident. (Using the same Resend account on purpose is allowed: the client's own variable
+ *    may hold a key of that account, as CTS does since 2026-11-10.) The SDK client is created inside each call, with the
  *    provider address pinned, so the SDK's own `RESEND_BASE_URL` variable cannot send the key somewhere else.
  *  - The SDK sets no request timeout. The call gets 15 seconds; after that the outcome is UNKNOWN (the request may have
  *    reached Resend). Unknown is never "failed": the caller keeps the send pending and may replay it only with the SAME
