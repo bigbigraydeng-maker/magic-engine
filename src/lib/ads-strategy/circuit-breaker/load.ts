@@ -44,6 +44,8 @@ export async function loadBreakerFacts(
 ): Promise<BreakerFacts | 'unreadable'> {
   const client = await readClient(sb, clientId)
   if (!client) return 'unreadable'
+  const strategy = await readStrategy(sb, clientId)
+  if (!strategy) return 'unreadable'
   const plans = await readPlans(sb, clientId)
   if (!plans) return 'unreadable'
   const snaps = await readSnaps(sb, clientId)
@@ -54,7 +56,7 @@ export async function loadBreakerFacts(
   if (!spend) return 'unreadable'
   const captures = await readCaptures(sb, clientId)
   if (!captures) return 'unreadable'
-  return assemble(now, localDate, client.leads, plans, snaps, spend, captures, accounts)
+  return assemble(now, localDate, client.leads, plans, snaps, spend, captures, accounts, strategy.row)
 }
 
 function assemble(
@@ -66,6 +68,7 @@ function assemble(
   spend: { rows: SpendRaw[]; truncated: boolean },
   captures: { rows: CaptureStamp[]; error: boolean },
   accounts: string[],
+  strategy: { target_cost_per_primary?: unknown } | null,
 ): BreakerFacts {
   const cap = plans.error ? null : agreedPlanDailyTotalCap(plans.rows)
   const latest = latestSnaps(snaps.rows)
@@ -78,7 +81,7 @@ function assemble(
     hoursElapsed: hoursIntoLocalDay(timezoneOf(snaps.rows), now),
     capCents: cap?.state === 'set' ? cap.cents : null,
     capReadable: !plans.error && cap?.state !== 'unreadable',
-    settings: readBreakerSettings(leads, plans.rows),
+    settings: readBreakerSettings(leads, plans.rows, strategy),
     spend: spend.rows.flatMap((row) => mapSpend(row, live, currency)),
     spendReadable: !spend.truncated,
     policyAds: policyAds(latest, live),
@@ -95,6 +98,15 @@ async function readClient(sb: SupabaseClient, clientId: string): Promise<{ leads
   if (error) return null
   const row = data as { leads_config?: unknown; meta_ad_account_id?: string | null } | null
   return { leads: row?.leads_config ?? null, primary: row?.meta_ad_account_id ?? null }
+}
+
+async function readStrategy(
+  sb: SupabaseClient,
+  clientId: string,
+): Promise<{ row: { target_cost_per_primary?: unknown } | null } | null> {
+  const { data, error } = await sb.from('ad_strategy_configs').select('target_cost_per_primary').eq('client_id', clientId).maybeSingle()
+  if (error) return null
+  return { row: (data as { target_cost_per_primary?: unknown } | null) ?? null }
 }
 
 async function readPlans(sb: SupabaseClient, clientId: string): Promise<{ rows: { plan_data?: unknown }[]; error: boolean } | null> {
