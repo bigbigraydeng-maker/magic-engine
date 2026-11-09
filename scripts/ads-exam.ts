@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { countExamCorrectionCandidates } from '../src/lib/ads-strategy/exam/corrections'
 import { ADS_EXAM_QUESTIONS } from '../src/lib/ads-strategy/exam/questions'
 import {
   scoreExam,
@@ -94,7 +95,12 @@ function main(): void {
     process.exit(2)
   }
   const score = scoreExam(ADS_EXAM_QUESTIONS, toResults(report))
+  const candidateCount = countExamCorrectionCandidates()
   console.log(formatScoreboard(score))
+  console.log('')
+  console.log(
+    `考卷候选题（PM 纠正沉淀，未并入正式题库）：${candidateCount} 道`,
+  )
   process.exit(score.ok ? 0 : 1)
 }
 
