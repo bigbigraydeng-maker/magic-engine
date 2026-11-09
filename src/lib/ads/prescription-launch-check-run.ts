@@ -4,8 +4,8 @@
  */
 
 import {
-  judgeLaunch, linesForCard, matchLaunch, parseExecutedLaunches, planOutcomeWrites,
-  type ActionRow, type InsightRef, type KpiRef, type LaunchAssessment, type PlanRef,
+  combineLaunchAssessments, judgeLaunch, linesForCard, matchLaunch, parseExecutedLaunches, planOutcomeWrites,
+  type ActionRow, type InsightRef, type KpiRef, type LaunchAssessment, type LaunchRef, type PlanRef,
   type PrescriptionRef, type SiblingRef,
 } from './prescription-launch-check'
 
@@ -98,13 +98,7 @@ export async function readOneLaunch(store: LaunchCheckStore, input: {
     missingCampaign: parsed.missingCampaign > 0,
   })
   if (match.kind !== 'matched') return { lines: match.lines }
-  const assessment = judgeLaunch({
-    launch: match.launch,
-    insights: await store.listInsights(input.clientId, match.launch.campaignId),
-    kpis: input.kpis,
-    now: input.now,
-    accountTimezone: await store.readAccountTimezone(input.clientId, match.launch.campaignId),
-  })
+  const assessment = await assessLaunches(store, input.clientId, match.launches, input.kpis, input.now)
   const caseId = await store.findCaseId(input.prescription.id)
   return { lines: linesForCard(assessment, caseId !== null) }
 }
@@ -148,18 +142,32 @@ async function checkOne(
       missingCampaign: parsed.missingCampaign > 0,
     })
     if (match.kind !== 'matched') return counts
-    const assessment = judgeLaunch({
-      launch: match.launch,
-      insights: await store.listInsights(prescription.clientId, match.launch.campaignId),
-      kpis: prescription.kpis,
-      now,
-      accountTimezone: await store.readAccountTimezone(prescription.clientId, match.launch.campaignId),
-    })
+    const assessment = await assessLaunches(store, prescription.clientId, match.launches, prescription.kpis, now)
     addCounts(counts, await persist(store, prescription, assessment))
   } catch {
     counts.failed += 1
   }
   return counts
+}
+
+async function assessLaunches(
+  store: LaunchCheckStore,
+  clientId: string,
+  launches: readonly LaunchRef[],
+  kpis: readonly KpiRef[],
+  now: Date,
+): Promise<LaunchAssessment> {
+  const parts: LaunchAssessment[] = []
+  for (const launch of launches) {
+    parts.push(judgeLaunch({
+      launch,
+      insights: await store.listInsights(clientId, launch.campaignId),
+      kpis,
+      now,
+      accountTimezone: await store.readAccountTimezone(clientId, launch.campaignId),
+    }))
+  }
+  return combineLaunchAssessments(parts)
 }
 
 async function persist(

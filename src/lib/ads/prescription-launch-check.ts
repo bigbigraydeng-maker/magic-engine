@@ -111,7 +111,7 @@ export interface LaunchAssessment {
 export type LaunchMatch =
   | { kind: 'not_launched'; lines: string[] }
   | { kind: 'unmatched'; lines: string[] }
-  | { kind: 'matched'; launch: LaunchRef }
+  | { kind: 'matched'; launches: LaunchRef[] }
 
 export interface ExistingOutcome {
   id: string
@@ -315,16 +315,66 @@ function classifyLaunches(
     else if (mark === 'match') matches.push(launch)
   }
   if (tie) return { kind: 'unmatched', lines: ['不知道。同一时间通过了不止一份处方，对不上是哪一份。'] }
-  if (matches.length > 1) {
-    // 同一支广告暂停后又开投，会有多条开投记录；同一 campaign 只算一次，从最早那次算起。
-    const campaignId = matches[0].campaignId
-    if (matches.every(launch => launch.campaignId === campaignId)) {
-      return { kind: 'matched', launch: earliestLaunch(matches) }
-    }
-    return { kind: 'unmatched', lines: ['不知道。对上了不止一条已开投的广告。'] }
+  if (matches.length === 0) return { kind: 'unmatched', lines: ['不知道。已开投的广告对不上这份处方。'] }
+  // 同一支广告暂停后又开投，同一 campaign 只算一次，从最早那次算起。
+  // 不同 campaign 都留下，后面逐支检查，不再因为「不止一条」整份放弃。
+  return { kind: 'matched', launches: earliestPerCampaign(matches) }
+}
+
+/** 每支广告只留最早的开投，并按开投时间排好，方便写成「第 1 支、第 2 支」。 */
+export function earliestPerCampaign(matches: readonly LaunchRef[]): LaunchRef[] {
+  const byCampaign = new Map<string, LaunchRef[]>()
+  for (const launch of matches) {
+    const list = byCampaign.get(launch.campaignId) ?? []
+    list.push(launch)
+    byCampaign.set(launch.campaignId, list)
   }
-  if (matches.length === 1) return { kind: 'matched', launch: matches[0] }
-  return { kind: 'unmatched', lines: ['不知道。已开投的广告对不上这份处方。'] }
+  return [...byCampaign.values()].map(earliestLaunch).sort((left, right) => {
+    const gap = Date.parse(left.authorizedAt) - Date.parse(right.authorizedAt)
+    if (gap !== 0) return gap
+    return left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+  })
+}
+
+const VERDICT_WORD: Record<LaunchVerdict, string> = {
+  met: '达标', missed: '没达标', unknown: '不知道', pending: '还没到时间',
+}
+
+/** 一支广告沿用原来的句子。多支时每一支都写进同一条结论，取最差的那一档。 */
+export function combineLaunchAssessments(parts: readonly LaunchAssessment[]): LaunchAssessment {
+  if (parts.length === 0) return { lines: [NOT_LAUNCHED_LINE], checkpoints: [], campaignId: null }
+  if (parts.length === 1) return parts[0]
+  const checkpoints = parts[0].checkpoints.map(seed => mergedPoint(seed.kpiMetric, seed.sentence.split('：')[0] ?? '', parts))
+  return { lines: checkpoints.map(point => point.sentence), checkpoints, campaignId: parts[0].campaignId }
+}
+
+function mergedPoint(
+  kpiMetric: LaunchCheckpoint['kpiMetric'],
+  label: string,
+  parts: readonly LaunchAssessment[],
+): LaunchCheckpoint {
+  const points = parts.map(part => part.checkpoints.find(point => point.kpiMetric === kpiMetric))
+  const present = points.filter((point): point is LaunchCheckpoint => point !== undefined)
+  const verdict = mergedVerdict(present.map(point => point.verdict))
+  const detail = present.map((point, index) => `第 ${index + 1} 支${restAfterLabel(point.sentence, label)}`).join('')
+  return {
+    kpiMetric,
+    due: present.some(point => point.due),
+    verdict,
+    sentence: `${label}：${VERDICT_WORD[verdict]}。${detail}`,
+  }
+}
+
+function mergedVerdict(list: readonly LaunchVerdict[]): LaunchVerdict {
+  if (list.some(item => item === 'missed')) return 'missed'
+  if (list.some(item => item === 'unknown')) return 'unknown'
+  if (list.some(item => item === 'pending')) return 'pending'
+  return 'met'
+}
+
+function restAfterLabel(sentence: string, label: string): string {
+  const prefix = `${label}：`
+  return sentence.startsWith(prefix) ? sentence.slice(prefix.length) : sentence
 }
 
 function earliestLaunch(launches: readonly LaunchRef[]): LaunchRef {
