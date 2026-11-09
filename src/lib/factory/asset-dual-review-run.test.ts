@@ -151,6 +151,15 @@ describe('runAssetDualReview', () => {
     expect(ref.meta_video_id).toBe('555')
   })
 
+  it('does not archive or upload when acceptance is waiting for a card', async () => {
+    const harness = io({})
+    harness.fake.attachVideo = async () => ({ ok: true, videoId: null, accountId: null, awaitingCard: true })
+    const receipt = await runAssetDualReview(harness.fake, { clientId: CLIENT, workOrderId: WO })
+    expect(receipt).toMatchObject({ passed: true, pooled: false, status: 'awaiting_card' })
+    expect(harness.pools).toEqual([])
+    expect(harness.writes).toEqual([])
+  })
+
   it('does not archive when the upload fails', async () => {
     const harness = io({})
     harness.fake.attachVideo = async () => ({ ok: false, error: '成片传到广告账户失败' })
