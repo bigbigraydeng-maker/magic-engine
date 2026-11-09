@@ -40,6 +40,7 @@ const CTA_FOR_KIND: Readonly<Record<DraftKind, string>> = {
   lead_form: 'SIGN_UP',
   video_thruplay: 'LEARN_MORE',
   messenger_conversation: MESSENGER_CTA_TYPE,
+  reels_lead: 'SIGN_UP',
 }
 
 const URL_TAGS = /^[A-Za-z0-9_.~\-]+=[A-Za-z0-9_.~\-]+(?:&[A-Za-z0-9_.~\-]+=[A-Za-z0-9_.~\-]+)*$/

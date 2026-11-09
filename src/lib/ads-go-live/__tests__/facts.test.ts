@@ -59,6 +59,17 @@ describe('go-live facts', () => {
     ])
   })
 
+  it('lets a paused reels lead draft through the same go-live card', () => {
+    const facts = buildGoLiveFacts({
+      draftId: 'draft-reels',
+      view: view({ kind: 'reels_lead' }),
+      gates: greenGates(),
+      boundLabels: [],
+    })
+    expect(facts.what).toBe('开投：把暂停的广告改成在投')
+    expect(facts.hardChecks.some((check) => check.label === '广告类型')).toBe(false)
+  })
+
   it('blocks when the account, amount, date, kind, or ids cannot be read', () => {
     expect(chooseAccountLabel('act_99887766', ['演示广告账户'])).toEqual({ label: '演示广告账户' })
     expect(chooseAccountLabel(null, [])).toEqual({ problem: '读不到广告账户' })

@@ -34,6 +34,7 @@ import {
   withoutInheritedSpend,
 } from './ad-draft'
 import { draftNotYetBuildable } from './ad-draft-expansion'
+import { reelsLeadOpenBlocked } from './reels-lead'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
 import { attachReadbackFindings } from './attach-readback'
@@ -53,6 +54,7 @@ import {
   type SpendActivationEntry,
   type SpendActivationReceipt,
 } from '@/lib/ads/spend-activation'
+import { bindDraftLaunch } from '@/lib/ads-launch/plan-gate'
 
 /**
  * 一条广告动作在账本里的状态。
@@ -620,6 +622,9 @@ export async function approveDraft(
         '在那之前它只能是暂停状态（账本里没写类型的旧草案同样不能开）。',
     }
   }
+  if (reelsLeadOpenBlocked(p.draft.kind, entry)) {
+    return { ok: false, error: '短视频留资只能从开投确认卡打开。这里没有开。' }
+  }
   if (p.status !== 'awaiting_approval') {
     return { ok: false, error: `这条现在是「${p.status}」，只有等待批准的才能开` }
   }
@@ -634,6 +639,10 @@ export async function approveDraft(
     return { ok: false, error: '这条草案没记下 Meta 那边的 id，开不了' }
   }
 
+  const clientId = (data as { client_id: string }).client_id
+  const bound = await bindDraftLaunch(supabase, clientId, p.draft)
+  if (!bound.ok) return { ok: false, error: bound.reason }
+
   const hasAudiences =
     (p.draft.audienceIds?.length ?? 0) > 0 || (p.draft.excludedAudienceIds?.length ?? 0) > 0
   if (hasAudiences) {
@@ -641,13 +650,13 @@ export async function approveDraft(
     if (audienceError) return { ok: false, error: audienceError }
   }
 
-  const clientId = (data as { client_id: string }).client_id
   const receipt = buildSpendActivationReceipt({
     authority,
     entry,
     clientId,
     campaignId: p.campaignId,
     draftActionId: actionId,
+    planId: bound.planId,
   })
 
   // 占位：只有还在等待批准的才占得到。占不到说明别处已经动过它（并发批准 / 否决），不开。

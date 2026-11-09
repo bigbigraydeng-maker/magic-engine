@@ -116,6 +116,42 @@ describe('lead_form 视频创意写法（实测过审的 video_data）', () => {
     })
   })
 
+  it('短视频留资用同一段 video_data，三层暂停，并只锁两条 Reels', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    const r = await publishDraftPaused({
+      ...VID,
+      kind: 'reels_lead',
+      placements: ['facebook_reels', 'instagram_reels'],
+    }, 'act_1', 'tok')
+    expect(r.ok).toBe(true)
+    const spec = JSON.parse(calls.find((c) => c.url.includes('/adcreatives'))!.body.get('object_story_spec')!)
+    expect(spec.video_data.call_to_action).toEqual({ type: 'SIGN_UP', value: { lead_gen_form_id: 'f1' } })
+    expect(spec.link_data).toBeUndefined()
+    const targeting = JSON.parse(calls.find((c) => c.url.includes('/adsets'))!.body.get('targeting')!)
+    expect(targeting.publisher_platforms).toEqual(['facebook', 'instagram'])
+    expect(targeting.facebook_positions).toEqual(['facebook_reels'])
+    expect(targeting.instagram_positions).toEqual(['reels'])
+    const statuses = calls.filter((c) => c.method === 'POST' && c.body.has('status')).map((c) => c.body.get('status'))
+    expect(statuses.every((status) => status === 'PAUSED')).toBe(true)
+    expect(calls.some((c) => c.body.get('status') === 'ACTIVE')).toBe(false)
+  })
+
+  it('短视频留资缺视频或版位时一次都不写', async () => {
+    const fetchMock = mockGraph()
+    vi.stubGlobal('fetch', fetchMock)
+    const missingVideo = await publishDraftPaused({
+      ...DRAFT,
+      kind: 'reels_lead',
+      placements: ['facebook_reels', 'instagram_reels'],
+    }, 'act_1', 'tok')
+    expect(missingVideo.ok).toBe(false)
+    expect(fetchMock).not.toHaveBeenCalled()
+    calls = []
+    const missingPlacement = await publishDraftPaused({ ...VID, kind: 'reels_lead' }, 'act_1', 'tok')
+    expect(missingPlacement.ok).toBe(false)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('只给图 → 仍然是 link_data（老写法不变）', async () => {
     vi.stubGlobal('fetch', mockGraph())
     await publishDraftPaused(DRAFT, 'act_1', 'tok')
