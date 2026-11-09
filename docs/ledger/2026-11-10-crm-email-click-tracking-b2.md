@@ -10,4 +10,4 @@ verify_how: 全部上线且 PM 回「开追踪」后，只在测试邮箱 hello@
 ---
 设计稿 docs/specs/2026-11-10-crm-email-click-tracking-b2-design-v0.md（子牙、魏征已审，v0.1）。PM 11-10 回「开始 B2」「开始写」。
 分四步上线：第 0 步只让发信设置认识 link_tracking（不改任何行为）；第 1 步 ME 发信打编号 + 收点击接口 + 两张新表（Ray 亲手合）；第 2 步 CTS 官网中间层回传（chinatravel 仓库）；第 3 步 PM 回「开追踪」才在设置里打开。
-待 PM 定：CTS 官网隐私政策要不要加一句「邮件链接会记录点击」。回滚：先存一版不带 link_tracking 的设置，再回退代码。
+第 1 步代码 11-10 写完（魏征代码复审 1 条 P1 + 3 条 P2 已修）；第 2 步在 chinatravel 仓库分支 feat/me-email-click-beacon。待 PM 定：CTS 官网隐私政策要不要加一句「邮件链接会记录点击」。回滚：先存一版不带 link_tracking 的设置，再回退代码。
