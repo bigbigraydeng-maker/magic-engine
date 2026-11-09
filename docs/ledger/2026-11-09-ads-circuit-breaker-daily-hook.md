@@ -1,11 +1,13 @@
 ---
 id: 2026-11-09-ads-circuit-breaker-daily-hook
 title: 每日拉数之后提议暂停确认卡
-status: decided
+status: done
 owner: agent
 decided_on: 2026-11-09
+done_on: 2026-11-09
+done_ref: pr:3703
 source: doc:docs/ledger/2026-11-09-ads-circuit-breaker-propose-pause.md
-verify_by: 2026-11-12
+verify_by: 2026-11-10
 verify_how: 每日拉数任务跑完后，异常客户的动作账上有一条提议，确认卡未点时广告状态不变。
 ---
 每天拉完数就跑一遍判定。超限、无线索或政策问题就申请已有的暂停系列确认卡。
