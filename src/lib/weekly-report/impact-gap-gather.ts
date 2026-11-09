@@ -1,7 +1,3 @@
-/**
- * IMPACT 批次 B · 只读取数（无写入）。复用既有 7 天花费、上限、诊断、漏斗基线逻辑。
- */
-
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { pickWinnerBaseline, type FunnelMetrics } from '@/lib/ads-strategy/entity-tree/funnel-baseline'
 import type { DiagnosisRun } from '@/lib/ads-strategy/portfolio/diagnostics/types'
@@ -112,8 +108,6 @@ export async function gatherM2Slice(
         adAccountId: acc.ad_account_id,
         spend7d: spendRow?.spend ?? (spendMap.size === 0 ? null : 0),
         currency: spendRow?.currency ?? null,
-        timezone: null,
-        accountDailyCapCents: acc.daily_budget_cap_cents,
       })
     }
     const mixedCurrency = currencies.size > 1

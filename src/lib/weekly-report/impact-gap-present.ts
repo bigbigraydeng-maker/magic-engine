@@ -11,8 +11,6 @@ export interface M2SpendAccountSlice {
   readonly adAccountId: string
   readonly spend7d: number | null
   readonly currency: string | null
-  readonly timezone: string | null
-  readonly accountDailyCapCents: number | null
 }
 
 export interface M2SpendVsCapSlice {
