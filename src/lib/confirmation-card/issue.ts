@@ -9,7 +9,7 @@ import { contentFingerprint, normalizeFacts, type CardFacts } from './facts'
 import { ensureConfirmationPolicy } from './policy'
 import { listPendingCards } from './records'
 import { ConfirmationCardError } from './errors'
-import { settleExpired, voidStaleCard } from './settle'
+import { EOD_EXPIRED_REASON, settleExpired, voidStaleCard } from './settle'
 import { isExpired, presentCard, readStoredCard, type ConfirmationCardView } from './view'
 
 function issuerName(clicker: CardClicker): string {
@@ -18,7 +18,9 @@ function issuerName(clicker: CardClicker): string {
   return 'unknown'
 }
 
-function cardInput(facts: CardFacts, fingerprint: string, issuedAt: string): Record<string, unknown> {
+function cardInput(
+  facts: CardFacts, fingerprint: string, issuedAt: string, expiresAt: string | null,
+): Record<string, unknown> {
   return {
     subject_key: facts.subjectKey,
     content_fingerprint: fingerprint,
@@ -28,6 +30,7 @@ function cardInput(facts: CardFacts, fingerprint: string, issuedAt: string): Rec
     date_label: facts.date,
     scope_label: facts.scope,
     issued_at: issuedAt,
+    ...(expiresAt ? { expires_at: expiresAt } : {}),
     hard_checks: JSON.stringify(facts.hardChecks),
   }
 }
@@ -48,8 +51,8 @@ async function retireOld(
       await voidStaleCard(deps, run)
       continue
     }
-    if (isExpired(stored.issuedAt, now)) {
-      await settleExpired(deps, run)
+    if (isExpired(stored.issuedAt, now, stored.expiresAt)) {
+      await settleExpired(deps, run, stored.expiresAt ? EOD_EXPIRED_REASON : undefined)
       continue
     }
     fresh = run
@@ -64,9 +67,10 @@ async function openRun(
   facts: CardFacts,
   fingerprint: string,
   now: Date,
+  expiresAt: string | null,
 ): Promise<ActionRun> {
   const issuedAt = now.toISOString()
-  const input = cardInput(facts, fingerprint, issuedAt)
+  const input = cardInput(facts, fingerprint, issuedAt, expiresAt)
   const base = {
     clientId,
     actionKey: CONFIRMATION_ACTION_KEY,
@@ -91,15 +95,16 @@ async function openRun(
 
 export async function issueConfirmationCard(
   deps: KernelDeps,
-  args: { clientId: string; clicker: CardClicker; facts: CardFacts; now?: Date },
+  args: { clientId: string; clicker: CardClicker; facts: CardFacts; now?: Date; expiresAt?: string },
 ): Promise<ConfirmationCardView> {
   assertMayIssue(args.clicker, args.clientId)
   const now = args.now ?? deps.now()
   const facts = normalizeFacts(args.facts)
   const fingerprint = contentFingerprint(facts)
+  const expiresAt = args.expiresAt && Number.isFinite(Date.parse(args.expiresAt)) ? args.expiresAt : null
   await ensureConfirmationPolicy(deps.supabase, args.clientId, issuerName(args.clicker), now)
   const fresh = await retireOld(deps, args.clientId, facts.subjectKey, fingerprint, now)
-  const run = fresh ?? await openRun(deps, args.clientId, args.clicker, facts, fingerprint, now)
+  const run = fresh ?? await openRun(deps, args.clientId, args.clicker, facts, fingerprint, now, expiresAt)
   const decisionId = run.authorization_decision_id
   if (!decisionId) throw new ConfirmationCardError('invalid', '确认卡没有挂上审批编号，没有当成已确认。')
   return presentCard({

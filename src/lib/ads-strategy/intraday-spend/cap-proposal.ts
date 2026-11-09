@@ -1,7 +1,3 @@
-/**
- * Decide whether today's NZ close-of-day forecast needs one confirm card.
- * This file does not write, does not call Meta, and does not treat a gap as zero.
- */
 import { checkBudgetWithinSafeRange } from '@/lib/meta/guardrails'
 import { amountLine, budgetWhat, money } from '@/lib/ads-budget-card/copy'
 import { CAMPAIGN_PAUSE_WHAT } from '@/lib/ads-strategy/paused-draft-copy'
@@ -9,22 +5,10 @@ import type { CardFacts } from '@/lib/confirmation-card/facts'
 import { pacingFromSamples, ticksFromSamples, type PacingPayload, type StoredSample } from './view'
 import { accountDayKey } from './sample'
 export const NZ_TZ = 'Pacific/Auckland'
-/** Three sample intervals. Older than this is stale, not zero. */
 export const SAMPLE_FRESH_MS = 30 * 60 * 1000
-/** Same window as the circuit-breaker default. A missing stamp is not fresh. */
 export const SNAPSHOT_FRESH_MS = 12 * 60 * 60 * 1000
 export const OBSERVATION_WINDOW_DAYS = 7
-export type CapGap =
-  | 'no_plan'
-  | 'no_cap'
-  | 'many_plans'
-  | 'unreadable'
-  | 'no_samples'
-  | 'stale_samples'
-  | 'stale_snapshot'
-  | 'snapshot_error'
-  | 'no_snapshot'
-  | 'no_live'
+export type CapGap = 'no_plan' | 'no_cap' | 'many_plans' | 'unreadable' | 'no_samples' | 'stale_samples' | 'stale_snapshot' | 'snapshot_error' | 'no_snapshot' | 'no_live'
 export interface LiveBudget { level: 'campaign' | 'adset'; id: string; campaignId: string | null; accountId: string; name: string; dailyMinor: number; active: boolean }
 export interface SampleSignal { readable: boolean; latestAt: string | null; accountDay: string | null; spendMinor: number | null; forecastMinor: number | null }
 export interface SnapshotSignal { readable: boolean; capturedAt: string | null; complete: boolean; error: string | null; budgets: readonly LiveBudget[] | null }
@@ -47,6 +31,20 @@ const SUMMARY: Record<CapGap, string> = {
 }
 export function subjectFor(day: string): string {
   return `intraday-cap:${day}`
+}
+
+export function nzDayExpiresAt(day: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number]
+  const next = new Date(Date.UTC(y, (m ?? 1) - 1, (d ?? 1) + 1)).toISOString().slice(0, 10)
+  for (const offset of ['+13:00', '+12:00']) {
+    const at = new Date(`${next}T00:00:00.000${offset}`)
+    if (Number.isNaN(at.getTime())) continue
+    if (accountDayKey(NZ_TZ, at) !== next) continue
+    if (accountDayKey(NZ_TZ, new Date(at.getTime() - 1)) !== day) continue
+    return at.toISOString()
+  }
+  return null
 }
 export function decreaseWithinStep(before: number, after: number): boolean {
   if (!Number.isSafeInteger(before) || !Number.isSafeInteger(after)) return false
@@ -72,22 +70,12 @@ export function describePlan(plan: CardPlan, attach: boolean): CardFacts {
     account: '已登记的广告账户',
     amount: planAmount(plan),
     date: plan.day,
-    scope: attach
-      ? '不确认就保持现在这样。点了确认才会按这张卡改，现在没有改。'
-      : '这张卡只是建议。确认了也不会改预算或暂停。',
+    scope: attach ? '不确认就保持现在这样。点了确认才会按这张卡改，现在没有改。' : '这张卡只是建议。确认了也不会改预算或暂停。',
     hardChecks: [{ label: '确认后才改', state: 'green', reason: '这一步没有改广告' }],
   }
 }
-const SYNTH_BUDGET: LiveBudget = {
-  level: 'adset', id: '123456', campaignId: '234567', accountId: 'act_111111',
-  name: '合成组', dailyMinor: 5000, active: true,
-}
-/** Fixture proposal. Writes nothing. A second pass must not open another card. */
-export async function proposeDry(
-  rows: readonly StoredSample[],
-  capCents: number | null,
-  now: Date,
-): Promise<CapReceipt> {
+const SYNTH_BUDGET: LiveBudget = { level: 'adset', id: '123456', campaignId: '234567', accountId: 'act_111111', name: '合成组', dailyMinor: 5000, active: true }
+export async function proposeDry(rows: readonly StoredSample[], capCents: number | null, now: Date): Promise<CapReceipt> {
   const decision = judgeIntradayCap(dryFacts(rows, capCents, now))
   const open = new Set<string>()
   const seen: CapReceipt[] = []
@@ -98,35 +86,21 @@ export async function proposeDry(
   }
   seen.push(await applyCapDecision(decision, ports))
   seen.push(await applyCapDecision(decision, ports))
-  return {
-    cards: seen[0]?.cards ?? 0,
-    todos: seen[0]?.todos ?? 0,
-    action: seen[1]?.action === 'deduped' ? seen[0]?.action ?? 'deduped' : seen[1]?.action ?? 'none',
-  }
+  const action = seen[1]?.action === 'deduped' ? seen[0]?.action ?? 'deduped' : seen[1]?.action ?? 'none'
+  return { cards: seen[0]?.cards ?? 0, todos: seen[0]?.todos ?? 0, action }
 }
 function dryFacts(rows: readonly StoredSample[], capCents: number | null, now: Date): CapFacts {
-  const nzDay = accountDayKey(NZ_TZ, now)
   return {
-    now,
-    nzDay,
-    planCount: capCents === null ? 0 : 1,
-    capCents,
+    now, nzDay: accountDayKey(NZ_TZ, now), planCount: capCents === null ? 0 : 1, capCents,
     sample: { readable: true, ...paceSignal(rows, now) },
-    snapshot: {
-      readable: true, capturedAt: now.toISOString(), complete: true, error: null, budgets: [SYNTH_BUDGET],
-    },
+    snapshot: { readable: true, capturedAt: now.toISOString(), complete: true, error: null, budgets: [SYNTH_BUDGET] },
   }
 }
 export function paceSignal(rows: readonly StoredSample[], now: Date): Omit<SampleSignal, 'readable'> {
   const nz = accountDayKey(NZ_TZ, now)
   const pacing = pacingFromSamples(rows, null, now)
   const ticks = ticksFromSamples(rows).filter((tick) => tick.accountDay === nz)
-  return {
-    latestAt: latestAt(rows, nz),
-    accountDay: ticks[0]?.accountDay ?? pacing.accounts[0]?.accountDay ?? null,
-    spendMinor: ticks.length === 0 ? null : sumLatest(ticks),
-    forecastMinor: forecastMinor(pacing, nz),
-  }
+  return { latestAt: latestAt(rows, nz), accountDay: ticks[0]?.accountDay ?? pacing.accounts[0]?.accountDay ?? null, spendMinor: ticks.length === 0 ? null : sumLatest(ticks), forecastMinor: forecastMinor(pacing, nz) }
 }
 export function pickTarget(budgets: readonly LiveBudget[]): LiveBudget | null {
   const active = budgets.filter((row) => row.active && row.dailyMinor > 0)
@@ -180,25 +154,15 @@ function decreaseOrKeep(day: string, target: LiveBudget | null, excess: number):
   if (!target || excess <= 0) return keepPlan(day)
   const after = target.dailyMinor - excess
   if (!Number.isSafeInteger(after) || after <= 0 || after >= target.dailyMinor) return keepPlan(day)
-  return {
-    kind: 'card', action: 'decrease', day, beforeMinor: target.dailyMinor, afterMinor: after,
-    name: target.name, accountId: target.accountId, campaignId: campaignOf(target),
-    adsetId: target.level === 'adset' ? target.id : null,
-  }
+  return { kind: 'card', action: 'decrease', day, beforeMinor: target.dailyMinor, afterMinor: after, name: target.name, accountId: target.accountId, campaignId: campaignOf(target), adsetId: target.level === 'adset' ? target.id : null }
 }
 function pausePlan(day: string, target: LiveBudget): CardPlan {
   const campaignId = campaignOf(target)
   if (!campaignId) return keepPlan(day)
-  return {
-    kind: 'card', action: 'pause', day, beforeMinor: null, afterMinor: null,
-    name: target.name, accountId: target.accountId, campaignId, adsetId: null,
-  }
+  return { kind: 'card', action: 'pause', day, beforeMinor: null, afterMinor: null, name: target.name, accountId: target.accountId, campaignId, adsetId: null }
 }
 function keepPlan(day: string): CardPlan {
-  return {
-    kind: 'card', action: 'keep', day, beforeMinor: null, afterMinor: null,
-    name: null, accountId: null, campaignId: null, adsetId: null,
-  }
+  return { kind: 'card', action: 'keep', day, beforeMinor: null, afterMinor: null, name: null, accountId: null, campaignId: null, adsetId: null }
 }
 function wholeMinor(value: number | null): number | null {
   if (value === null || !Number.isFinite(value) || value < 0) return null
@@ -219,37 +183,22 @@ async function todoReceipt(
   return { cards: 0, todos: wrote ? 1 : 0, action: decision.code }
 }
 function planWhat(plan: CardPlan, attach: boolean): string {
-  if (plan.action === 'pause') {
-    return attach
-      ? CAMPAIGN_PAUSE_WHAT
-      : '今天的花费已经高于每天上限。建议暂停在投的广告系列，不确认就保持现在这样。'
-  }
+  if (plan.action === 'pause') return attach ? CAMPAIGN_PAUSE_WHAT : '今天的花费已经高于每天上限。建议暂停在投的广告系列，不确认就保持现在这样。'
   if (plan.action === 'decrease' && plan.beforeMinor !== null && plan.afterMinor !== null) {
-    return attach
-      ? budgetWhat(plan.name, plan.beforeMinor, plan.afterMinor)
-      : `建议把日预算从 ${money(plan.beforeMinor)} 降到 ${money(plan.afterMinor)}。不确认就保持现在这样。`
+    return attach ? budgetWhat(plan.name, plan.beforeMinor, plan.afterMinor) : `建议把日预算从 ${money(plan.beforeMinor)} 降到 ${money(plan.afterMinor)}。不确认就保持现在这样。`
   }
   return '收盘预测会高于每天上限。建议保持现在的日预算，不调高。'
 }
 function planAmount(plan: CardPlan): string {
-  if (plan.action === 'decrease' && plan.beforeMinor !== null && plan.afterMinor !== null) {
-    return amountLine(plan.beforeMinor, plan.afterMinor)
-  }
+  if (plan.action === 'decrease' && plan.beforeMinor !== null && plan.afterMinor !== null) return amountLine(plan.beforeMinor, plan.afterMinor)
   return plan.action === 'pause' ? '不改预算' : '保持现在的预算'
 }
 function ageMs(iso: string | null, now: Date): number | null {
-  if (!iso) return null
-  const time = Date.parse(iso)
-  if (!Number.isFinite(time)) return null
-  return now.getTime() - time
+  const time = iso ? Date.parse(iso) : Number.NaN
+  return Number.isFinite(time) ? now.getTime() - time : null
 }
 function latestAt(rows: readonly StoredSample[], nz: string | null): string | null {
-  let best: string | null = null
-  for (const row of rows) {
-    if (row.accountDay !== nz) continue
-    if (!best || row.sampledAt > best) best = row.sampledAt
-  }
-  return best
+  return rows.reduce<string | null>((best, row) => row.accountDay === nz && (!best || row.sampledAt > best) ? row.sampledAt : best, null)
 }
 function sumLatest(ticks: ReturnType<typeof ticksFromSamples>): number {
   const latest = new Map<string, (typeof ticks)[number]>()
@@ -257,16 +206,13 @@ function sumLatest(ticks: ReturnType<typeof ticksFromSamples>): number {
     const prev = latest.get(tick.adAccountId)
     if (!prev || tick.localMinute >= prev.localMinute) latest.set(tick.adAccountId, tick)
   }
-  let sum = 0
-  for (const tick of latest.values()) sum += tick.spendMinor
-  return sum
+  return [...latest.values()].reduce((sum, tick) => sum + tick.spendMinor, 0)
 }
 function forecastMinor(pacing: PacingPayload, nz: string | null): number | null {
   if (!nz || pacing.forecastMajor === null) return null
   const today = pacing.accounts.filter((row) => row.accountDay === nz)
-  if (today.length === 0) return null
   const blocked = today.some((row) => (row.spendMajor ?? 0) > 0 && row.forecastStatus !== 'ok')
   const points = today.flatMap((row) => row.pointMinor === null ? [] : [row.pointMinor])
-  if (blocked || points.length === 0) return null
+  if (today.length === 0 || blocked || points.length === 0) return null
   return points.reduce((sum, point) => sum + point, 0)
 }

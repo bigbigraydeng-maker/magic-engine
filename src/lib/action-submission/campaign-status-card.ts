@@ -133,6 +133,11 @@ export async function confirmCampaignStatusCard(
   if (row.payload.status === 'writing') return stopped(409, '上次写到一半，没有再自动写一次。')
   if (row.payload.status !== 'holding') return stopped(409, row.payload.resultLine ?? '这张卡已经有结果了，没有再改。')
   if (args.resolution === 'decline') return decline(sb, args, row, deps)
+  if (row.payload.requestedBy === 'intraday-cap@internal') {
+    const { intradayConfirmRefusal } = await import('@/lib/ads-strategy/intraday-spend/cap-proposal-run')
+    const block = await intradayConfirmRefusal(sb, args.clientId, new Date(), 'pause')
+    if (block) return stopped(409, block)
+  }
   const bound = await resumePlan(sb, args.clientId, row.payload)
   if (!bound.ok) return stopped(409, bound.reason)
   const block = await guard(args.clientId, row.payload, deps)

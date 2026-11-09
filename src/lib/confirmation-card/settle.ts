@@ -5,6 +5,7 @@ import { rejectRun } from '@/lib/kernel/human-approval'
 
 const SYSTEM = '系统'
 export const EXPIRED_REASON = '过了 30 分钟没人点，这张卡作废了'
+export const EOD_EXPIRED_REASON = '过了新西兰当天没人点，这张卡作废了'
 export const VOID_REASON = '要确认的内容变了，这张旧卡作废'
 export const STOPPED_PACK_REASON = '整包已停，这张还没点的卡作废'
 
@@ -22,8 +23,8 @@ async function rejectPending(deps: KernelDeps, run: ActionRun, reason: string): 
   }
 }
 
-export async function settleExpired(deps: KernelDeps, run: ActionRun): Promise<void> {
-  await rejectPending(deps, run, EXPIRED_REASON)
+export async function settleExpired(deps: KernelDeps, run: ActionRun, reason = EXPIRED_REASON): Promise<void> {
+  await rejectPending(deps, run, reason)
 }
 
 export async function voidStaleCard(deps: KernelDeps, run: ActionRun): Promise<void> {

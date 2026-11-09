@@ -1,10 +1,12 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { isExpired } from '@/lib/confirmation-card/view'
 import {
   applyCapDecision,
   decreaseWithinStep,
   judgeIntradayCap,
+  nzDayExpiresAt,
   type CapFacts,
   type CapPorts,
   type CardPlan,
@@ -23,20 +25,8 @@ function ready(patch: Partial<CapFacts> = {}): CapFacts {
     nzDay: '2026-11-09',
     planCount: 1,
     capCents: 1000,
-    sample: {
-      readable: true,
-      latestAt: NOW.toISOString(),
-      accountDay: '2026-11-09',
-      spendMinor: 400,
-      forecastMinor: 1600,
-    },
-    snapshot: {
-      readable: true,
-      capturedAt: NOW.toISOString(),
-      complete: true,
-      error: null,
-      budgets: [budget(2000)],
-    },
+    sample: { readable: true, latestAt: NOW.toISOString(), accountDay: '2026-11-09', spendMinor: 400, forecastMinor: 1600 },
+    snapshot: { readable: true, capturedAt: NOW.toISOString(), complete: true, error: null, budgets: [budget(2000)] },
     ...patch,
   }
 }
@@ -135,10 +125,19 @@ describe('intraday cap proposal', () => {
     expect(decreaseWithinStep(2000, 2500)).toBe(false)
     expect(decreaseWithinStep(2000, 1800)).toBe(true)
   })
+  it('stays valid until Auckland midnight in both daylight offsets', () => {
+    const summer = nzDayExpiresAt('2026-11-09')
+    const winter = nzDayExpiresAt('2026-07-15')
+    expect(summer).toBe('2026-11-09T11:00:00.000Z')
+    expect(winter).toBe('2026-07-15T12:00:00.000Z')
+    const issued = '2026-11-09T01:00:00.000Z'
+    expect(isExpired(issued, new Date('2026-11-09T10:59:59.000Z'), summer)).toBe(false)
+    expect(isExpired(issued, new Date(summer ?? ''), summer)).toBe(true)
+    expect(isExpired(issued, new Date(Date.parse(issued) + 30 * 60 * 1000))).toBe(true)
+  })
   it('does not call Meta from the proposal files', () => {
     const dir = path.join(__dirname, '..')
-    const src = readFileSync(path.join(dir, 'cap-proposal.ts'), 'utf8')
-      + readFileSync(path.join(dir, 'cap-proposal-run.ts'), 'utf8')
+    const src = readFileSync(path.join(dir, 'cap-proposal.ts'), 'utf8') + readFileSync(path.join(dir, 'cap-proposal-run.ts'), 'utf8')
     expect(src).not.toContain('graph.facebook.com')
     expect(src).not.toContain('setCampaignStatus')
     expect(src).not.toContain('getMetaTokenForClient')

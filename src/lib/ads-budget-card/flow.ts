@@ -117,6 +117,13 @@ async function confirm(args: Parameters<typeof submitBudgetCard>[0], row: HoldRo
 }
 
 async function recheck(args: Parameters<typeof submitBudgetCard>[0], row: HoldRow): Promise<string | null> {
+  if (row.payload.subjectKey.startsWith('intraday-cap:')) {
+    const { intradayConfirmRefusal } = await import('@/lib/ads-strategy/intraday-spend/cap-proposal-run')
+    const block = await intradayConfirmRefusal(
+      args.kernel.supabase, args.clientId, args.now ?? args.kernel.now(), 'decrease',
+    )
+    if (block) return block
+  }
   const locked = await args.locks.read(args.clientId, row.payload.order.prescriptionId)
   if (!locked.ok) return locked.reason
   if (!sameLock(row.payload.lock, locked.lock)) {

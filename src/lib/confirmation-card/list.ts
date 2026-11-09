@@ -2,15 +2,15 @@ import type { KernelDeps } from '@/lib/kernel/deps'
 import type { ActionRun } from '@/lib/kernel/types'
 import type { CardClicker } from './actor'
 import { listPendingCards, listShownCards, notesFor, type DecisionNote } from './records'
-import { settleExpired } from './settle'
+import { EOD_EXPIRED_REASON, settleExpired } from './settle'
 import { isExpired, presentCard, readStoredCard, type ConfirmationCardView } from './view'
 
 async function expirePending(deps: KernelDeps, clientId: string, now: Date): Promise<void> {
   const pending = await listPendingCards(deps.supabase, clientId)
   for (const run of pending) {
     const stored = readStoredCard(run.input)
-    if (!stored || !isExpired(stored.issuedAt, now)) continue
-    await settleExpired(deps, run)
+    if (!stored || !isExpired(stored.issuedAt, now, stored.expiresAt)) continue
+    await settleExpired(deps, run, stored.expiresAt ? EOD_EXPIRED_REASON : undefined)
   }
 }
 

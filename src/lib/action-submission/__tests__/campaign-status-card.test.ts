@@ -169,6 +169,18 @@ describe('campaign status card', () => {
     expect(store.rows[0]?.payload.status).toBe('executed')
   })
 
+  it('does not pause an intraday card when the latest projection is not fresh', async () => {
+    const store = memory()
+    const { used } = deps()
+    await requestCampaignStatusCard(store.client, request('pause', 'ACTIVE'), used)
+    const row = store.rows[0]
+    if (row) row.payload = { ...row.payload, requestedBy: 'intraday-cap@internal' }
+    const result = await confirmCampaignStatusCard(store.client, click, used)
+    expect(result.wroteMeta).toBe(false)
+    expect(used.write).not.toHaveBeenCalled()
+    expect(used.decide).not.toHaveBeenCalled()
+  })
+
   it('records an expired or void card and does not write', async () => {
     for (const status of ['expired', 'voided'] as const) {
       const store = memory()

@@ -6,7 +6,7 @@ import { assertMayClick } from './actor'
 import { confirmBlockReason } from './facts'
 import { notesFor } from './records'
 import { ConfirmationCardError } from './errors'
-import { settleExpired } from './settle'
+import { EOD_EXPIRED_REASON, settleExpired } from './settle'
 import { isExpired, presentCard, readStoredCard, type ConfirmationCardView } from './view'
 import { CONFIRMATION_ACTION_KEY } from '@/lib/kernel/registry-confirmation'
 
@@ -90,8 +90,8 @@ export async function decideConfirmationCard(
   const stored = readStoredCard(run.input)
   if (!stored) throw new ConfirmationCardError('invalid', '这张卡的内容读不出来，没有点成。')
   assertFingerprint(stored.fingerprint, args.fingerprint)
-  if (run.status === 'pending_approval' && isExpired(stored.issuedAt, now)) {
-    await settleExpired(deps, run)
+  if (run.status === 'pending_approval' && isExpired(stored.issuedAt, now, stored.expiresAt)) {
+    await settleExpired(deps, run, stored.expiresAt ? EOD_EXPIRED_REASON : undefined)
     return presentSettled(deps, run.id, args.clicker, now)
   }
   if (run.status !== 'pending_approval') {
