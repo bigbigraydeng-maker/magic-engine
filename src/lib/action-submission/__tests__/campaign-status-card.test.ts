@@ -16,6 +16,7 @@ vi.mock('@/lib/ads-launch/plan-gate', () => ({
 }))
 import type { KernelDeps } from '@/lib/kernel/deps'
 import { pausedDraftClickUrl, CAMPAIGN_PAUSE_WHAT, CAMPAIGN_RESUME_WHAT } from '@/lib/ads-strategy/paused-draft-copy'
+import { RULE_CLEARED, STALE_SNAPSHOT } from '@/lib/ads-strategy/daily-card-guard'
 import {
   confirmCampaignStatusCard,
   requestCampaignStatusCard,
@@ -265,6 +266,72 @@ describe('campaign status card', () => {
     expect(result.wroteMeta).toBe(true)
     expect(result.reason).toContain('没有再写一次')
     expect(store.rows[0]?.payload.status).toBe('failed')
+  })
+
+  it('refuses an expired daily pause before any write, even if confirm would say yes', async () => {
+    const now = new Date('2026-11-09T05:00:00.000Z')
+    const store = memory()
+    const recheck = vi.fn(async () => null)
+    const { used } = deps({ now: () => now, recheckPause: recheck })
+    await requestCampaignStatusCard(store.client, { ...request('pause', 'ACTIVE'), cardLifetime: 'nz_day' }, used)
+    const row = store.rows[0]
+    if (!row) throw new Error('missing hold')
+    row.payload.issuedAt = '2026-11-07T17:00:00.000Z'
+    const result = await confirmCampaignStatusCard(store.client, click, used)
+    expect(result.wroteMeta).toBe(false)
+    expect(result.reason).toContain('23:59')
+    expect(used.write).not.toHaveBeenCalled()
+    expect(used.decide).not.toHaveBeenCalled()
+    expect(used.live).not.toHaveBeenCalled()
+    expect(recheck).not.toHaveBeenCalled()
+  })
+
+  it('keeps a daily pause past 30 minutes, then refuses a cleared rule or a stale snapshot', async () => {
+    const now = new Date('2026-11-09T05:00:00.000Z')
+    const issued = new Date(now.getTime() - 31 * 60 * 1000).toISOString()
+    const kept = memory()
+    const { used } = deps({
+      now: () => now,
+      recheckPause: vi.fn(async () => null),
+      live: vi.fn()
+        .mockResolvedValueOnce({ status: 'ACTIVE', accountId: '11', name: '系列' })
+        .mockResolvedValueOnce({ status: 'PAUSED', accountId: '11', name: '系列' }),
+    })
+    await requestCampaignStatusCard(kept.client, { ...request('pause', 'ACTIVE'), cardLifetime: 'nz_day' }, used)
+    const keptRow = kept.rows[0]
+    if (!keptRow) throw new Error('missing hold')
+    keptRow.payload.issuedAt = issued
+    const ok = await confirmCampaignStatusCard(kept.client, click, used)
+    expect(ok.wroteMeta).toBe(true)
+
+    for (const reason of [RULE_CLEARED, STALE_SNAPSHOT]) {
+      const store = memory()
+      const { used: blocked } = deps({ now: () => now, recheckPause: vi.fn(async () => reason) })
+      await requestCampaignStatusCard(store.client, { ...request('pause', 'ACTIVE'), cardLifetime: 'nz_day' }, blocked)
+      const row = store.rows[0]
+      if (!row) throw new Error('missing hold')
+      row.payload.issuedAt = issued
+      const result = await confirmCampaignStatusCard(store.client, click, blocked)
+      expect(result.wroteMeta).toBe(false)
+      expect(result.reason).toBe(reason)
+      expect(blocked.write).not.toHaveBeenCalled()
+      expect(blocked.decide).not.toHaveBeenCalled()
+    }
+  })
+
+  it('still refuses a manual pause 30 minutes after it was issued', async () => {
+    const now = new Date('2026-11-09T05:00:00.000Z')
+    const store = memory()
+    const { used } = deps({ now: () => now })
+    await requestCampaignStatusCard(store.client, request('pause', 'ACTIVE'), used)
+    const row = store.rows[0]
+    if (!row) throw new Error('missing hold')
+    row.payload.issuedAt = new Date(now.getTime() - 31 * 60 * 1000).toISOString()
+    const result = await confirmCampaignStatusCard(store.client, click, used)
+    expect(result.wroteMeta).toBe(false)
+    expect(result.reason).toContain('30 分钟')
+    expect(used.write).not.toHaveBeenCalled()
+    expect(used.decide).not.toHaveBeenCalled()
   })
 
   it('routes both campaign cards to the confirm route, and the old board no longer names the writer', () => {

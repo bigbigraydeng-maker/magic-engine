@@ -23,8 +23,8 @@ import {
   decreaseWithinStep,
   describePlan,
   judgeIntradayCap,
-  nzDayExpiresAt,
   paceSignal,
+  projectsOverCap,
   subjectFor,
   type CapFacts,
   type CapGap,
@@ -120,14 +120,12 @@ async function issuePlan(
   clientId: string,
   plan: CardPlan,
 ): Promise<boolean> {
-  const expiresAt = nzDayExpiresAt(plan.day)
-  if (!expiresAt) return false
   const attach = await canAttach(sb, clientId, plan)
   const card = await issueConfirmationCard(kernel, {
     clientId,
     clicker: { kind: 'agent', email: 'intraday-cap@internal' },
     facts: describePlan(plan, attach),
-    expiresAt,
+    lifetime: 'nz_day',
   })
   if (attach) await attachHold(sb, clientId, plan, card.runId, card.fingerprint, card.expectedDecisionId).catch(() => undefined)
   return true
@@ -230,21 +228,19 @@ function budgetRows(rows: readonly SnapRow[]): LiveBudget[] {
   }
   return out
 }
-const STALE_CONFIRM = '最新花费不再显示会超过每天上限，或数据已经旧了，没有改。'
+const OVER_CAP = '最新花费不再显示会超过每天上限，没有改。'
 
 export async function intradayConfirmRefusal(
   sb: SupabaseClient,
   clientId: string,
   now: Date,
-  action: 'decrease' | 'pause',
 ): Promise<string | null> {
   try {
-    const decision = judgeIntradayCap(await loadFacts(sb, clientId, now))
-    if (decision.kind === 'card' && decision.action === action) return null
+    if (projectsOverCap(await loadFacts(sb, clientId, now))) return null
   } catch {
-    return STALE_CONFIRM
+    return OVER_CAP
   }
-  return STALE_CONFIRM
+  return OVER_CAP
 }
 
 function asMinor(value: unknown): number | null {

@@ -63,7 +63,9 @@ async function issueOne(
 ): Promise<boolean> {
   const { issueConfirmationCard } = await import('@/lib/confirmation-card')
   try {
-    await issueConfirmationCard(kernel, { clientId, clicker: CLICKER, facts: fallbackFacts(proposal), now })
+    await issueConfirmationCard(kernel, {
+      clientId, clicker: CLICKER, facts: fallbackFacts(proposal), now, lifetime: 'nz_day',
+    })
     return true
   } catch {
     return false

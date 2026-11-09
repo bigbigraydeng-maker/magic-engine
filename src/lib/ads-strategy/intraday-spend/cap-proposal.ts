@@ -33,19 +33,6 @@ export function subjectFor(day: string): string {
   return `intraday-cap:${day}`
 }
 
-export function nzDayExpiresAt(day: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null
-  const [y, m, d] = day.split('-').map(Number) as [number, number, number]
-  const next = new Date(Date.UTC(y, (m ?? 1) - 1, (d ?? 1) + 1)).toISOString().slice(0, 10)
-  for (const offset of ['+13:00', '+12:00']) {
-    const at = new Date(`${next}T00:00:00.000${offset}`)
-    if (Number.isNaN(at.getTime())) continue
-    if (accountDayKey(NZ_TZ, at) !== next) continue
-    if (accountDayKey(NZ_TZ, new Date(at.getTime() - 1)) !== day) continue
-    return at.toISOString()
-  }
-  return null
-}
 export function decreaseWithinStep(before: number, after: number): boolean {
   if (!Number.isSafeInteger(before) || !Number.isSafeInteger(after)) return false
   if (after <= 0 || after >= before) return false
@@ -119,6 +106,11 @@ function planGap(facts: CapFacts): CapGap | null {
   if (facts.planCount !== 1) return 'many_plans'
   if (facts.capCents === null || facts.capCents <= 0) return 'no_cap'
   return null
+}
+export function projectsOverCap(facts: CapFacts): boolean {
+  if (planGap(facts) || sampleGap(facts)) return false
+  const forecast = wholeMinor(facts.sample?.forecastMinor ?? null)
+  return forecast !== null && forecast > (facts.capCents as number)
 }
 function sampleGap(facts: CapFacts): CapGap | null {
   const sample = facts.sample

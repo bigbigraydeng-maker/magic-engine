@@ -59,6 +59,7 @@ async function issueCampaign(
       dailyBudget: null,
       objective: null,
       executionItemId: null,
+      cardLifetime: 'nz_day',
     })
     const runId = typeof out.body.runId === 'string' ? out.body.runId : ''
     if (out.status !== 202 || runId.length === 0 || out.body.wroteMeta !== false) return { ok: false, reason: 'card_failed' }

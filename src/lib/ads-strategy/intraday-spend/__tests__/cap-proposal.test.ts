@@ -1,12 +1,11 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { isExpired } from '@/lib/confirmation-card/view'
 import {
   applyCapDecision,
   decreaseWithinStep,
   judgeIntradayCap,
-  nzDayExpiresAt,
+  projectsOverCap,
   type CapFacts,
   type CapPorts,
   type CardPlan,
@@ -125,15 +124,20 @@ describe('intraday cap proposal', () => {
     expect(decreaseWithinStep(2000, 2500)).toBe(false)
     expect(decreaseWithinStep(2000, 1800)).toBe(true)
   })
-  it('stays valid until Auckland midnight in both daylight offsets', () => {
-    const summer = nzDayExpiresAt('2026-11-09')
-    const winter = nzDayExpiresAt('2026-07-15')
-    expect(summer).toBe('2026-11-09T11:00:00.000Z')
-    expect(winter).toBe('2026-07-15T12:00:00.000Z')
-    const issued = '2026-11-09T01:00:00.000Z'
-    expect(isExpired(issued, new Date('2026-11-09T10:59:59.000Z'), summer)).toBe(false)
-    expect(isExpired(issued, new Date(summer ?? ''), summer)).toBe(true)
-    expect(isExpired(issued, new Date(Date.parse(issued) + 30 * 60 * 1000))).toBe(true)
+  it('treats confirm as allowed only while the latest sample still projects over the cap', () => {
+    expect(projectsOverCap(ready())).toBe(true)
+    const under = ready({
+      sample: { readable: true, latestAt: NOW.toISOString(), accountDay: '2026-11-09', spendMinor: 200, forecastMinor: 800 },
+    })
+    expect(projectsOverCap(under)).toBe(false)
+    const staleSample = ready({
+      sample: { readable: true, latestAt: new Date(NOW.getTime() - 31 * 60 * 1000).toISOString(), accountDay: '2026-11-09', spendMinor: 400, forecastMinor: 1600 },
+    })
+    expect(projectsOverCap(staleSample)).toBe(false)
+    const staleSnap = ready({
+      snapshot: { readable: true, capturedAt: new Date(NOW.getTime() - 13 * 60 * 60 * 1000).toISOString(), complete: true, error: null, budgets: [budget(2000)] },
+    })
+    expect(projectsOverCap(staleSnap)).toBe(true)
   })
   it('does not call Meta from the proposal files', () => {
     const dir = path.join(__dirname, '..')
@@ -141,5 +145,7 @@ describe('intraday cap proposal', () => {
     expect(src).not.toContain('graph.facebook.com')
     expect(src).not.toContain('setCampaignStatus')
     expect(src).not.toContain('getMetaTokenForClient')
+    expect(src).toContain("lifetime: 'nz_day'")
+    expect(src).not.toContain('expiresAt')
   })
 })

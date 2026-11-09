@@ -6,7 +6,9 @@
 import type { KernelDeps } from '@/lib/kernel/deps'
 import { canonicalHashOfInput } from '@/lib/kernel/canonical-hash'
 import { issueConfirmationCard, decideConfirmationCard, type CardClicker } from '@/lib/confirmation-card'
-import type { ConfirmationCardView } from '@/lib/confirmation-card/view'
+import type { CardLifetime, ConfirmationCardView } from '@/lib/confirmation-card/view'
+import { isExpired } from '@/lib/confirmation-card/view'
+import { NZ_DAY_EXPIRED } from '@/lib/ads-strategy/daily-card-guard'
 import { ConfirmationCardError } from '@/lib/confirmation-card/errors'
 import type { CardFacts, HardCheck } from '@/lib/confirmation-card/facts'
 import { ADS_ACTION_TYPE, ADS_METRIC_KEY } from '@/lib/flywheel/vocabulary'
@@ -42,6 +44,8 @@ export interface CreativeHold {
   readonly readback: string | null
   readonly confirmedBy: string | null
   readonly resultLine?: string
+  readonly lifetime?: CardLifetime
+  readonly issuedAt?: string
 }
 
 export interface CreativeActor {
@@ -91,7 +95,7 @@ interface HoldRow {
 
 export async function proposeCreativeStateCards(
   kernel: KernelDeps,
-  args: { clientId: string; clicker: CardClicker; decision: CreativeDecision; now?: Date },
+  args: { clientId: string; clicker: CardClicker; decision: CreativeDecision; now?: Date; lifetime?: CardLifetime },
 ): Promise<{ issued: Array<{ kind: CreativeKind; runId: string }>; skipped: string[] }> {
   const now = args.now ?? kernel.now()
   const day = now.toISOString().slice(0, 10)
@@ -121,9 +125,10 @@ export async function confirmCreativeStateCard(
   }
   if (row.payload.status !== 'holding') return quiet(row.payload)
   if (input.choice === 'decline') return decline(kernel, input, row, ports)
-  if (!(await stillSame(input.clientId, row.payload, ports))) {
-    throw new ConfirmationCardError('stale', '这条建议已经对不上现在的广告了，没有改。')
-  }
+  const expired = expiredLine(row.payload, kernel.now())
+  if (expired) return { card: null, resultLine: expired, wroteMeta: false }
+  const blocked = await blockReason(input.clientId, row.payload, ports)
+  if (blocked) throw new ConfirmationCardError('stale', blocked)
   const card = await ports.decide(input)
   if (card.status !== 'confirmed') return refuseClosed(kernel, input, row, card)
   const claimed = await claimHold(kernel.supabase, input.clientId, row, who(input.actor))
@@ -135,7 +140,7 @@ export async function confirmCreativeStateCard(
 
 async function issueOne(
   kernel: KernelDeps,
-  args: { clientId: string; clicker: CardClicker; now?: Date },
+  args: { clientId: string; clicker: CardClicker; now?: Date; lifetime?: CardLifetime },
   proposal: CreativeProposal,
   existing: HoldRow[],
   day: string,
@@ -152,15 +157,33 @@ async function issueOne(
     return null
   }
   const facts = factsFor(subjectKey, proposal.kind)
-  const card = await issueConfirmationCard(kernel, { clientId: args.clientId, clicker: args.clicker, facts, now: args.now })
-  await insertHold(kernel.supabase, args.clientId, holdFrom(proposal, card, day, subjectKey))
+  const lifetime = args.lifetime ?? 'urgent_30m'
+  const card = await issueConfirmationCard(kernel, {
+    clientId: args.clientId, clicker: args.clicker, facts, now: args.now, lifetime,
+  })
+  const issuedAt = (args.now ?? kernel.now()).toISOString()
+  await insertHold(kernel.supabase, args.clientId, holdFrom(proposal, card, day, subjectKey, lifetime, issuedAt))
   return { kind: proposal.kind, runId: card.runId }
 }
 
-async function stillSame(clientId: string, hold: CreativeHold, ports: CreativePorts): Promise<boolean> {
+function expiredLine(hold: CreativeHold, now: Date): string | null {
+  if (!hold.issuedAt) return null
+  const lifetime = hold.lifetime ?? 'urgent_30m'
+  if (!isExpired(hold.issuedAt, now, lifetime)) return null
+  return lifetime === 'nz_day' ? NZ_DAY_EXPIRED : '过了 30 分钟没人点，这张卡作废了。'
+}
+
+async function blockReason(clientId: string, hold: CreativeHold, ports: CreativePorts): Promise<string | null> {
   const decision = await ports.recheck(clientId).catch(() => null)
-  if (!decision) return false
-  return decision.proposals.some((item) => item.kind === hold.kind && item.ad.adId === hold.adId)
+  if (!decision) return '广告数据读不出来，没有改广告。'
+  if (decision.skipped.includes('stale_snapshot') || decision.skipped.includes('ledger_unread')) {
+    return '广告快照不是最近一次抓全的，或者抓的时候出错了，没有改广告。'
+  }
+  if (decision.skipped.includes('plan_guard')) {
+    return '已批准的计划对不上单独一份，或者每天上限读不到，没有改广告。'
+  }
+  const same = decision.proposals.some((item) => item.kind === hold.kind && item.ad.adId === hold.adId)
+  return same ? null : '按最新数字，这条建议已经不成立，没有改广告。'
 }
 
 async function writeOnce(input: ConfirmCreativeInput, hold: CreativeHold, ports: CreativePorts): Promise<CreativeHold> {
@@ -221,13 +244,21 @@ function facts(subjectKey: string, what: string, amount: string, date: string, s
   return { subjectKey, what, account: ACCOUNT, amount, date, scope, hardChecks }
 }
 
-function holdFrom(proposal: CreativeProposal, card: ConfirmationCardView, day: string, subjectKey: string): CreativeHold {
+function holdFrom(
+  proposal: CreativeProposal,
+  card: ConfirmationCardView,
+  day: string,
+  subjectKey: string,
+  lifetime: CardLifetime,
+  issuedAt: string,
+): CreativeHold {
   const scaleAdsetId = proposal.kind === 'pause' ? null : proposal.scaleAdsetId
   return {
     kind: proposal.kind, status: 'holding', cardRunId: card.runId, subjectKey, fingerprint: card.fingerprint,
     proposedOn: day, adId: proposal.ad.adId, name: proposal.ad.name, adsetId: proposal.ad.adsetId,
     scaleAdsetId, postId: proposal.ad.postId, pageId: proposal.ad.pageId, adAccountId: proposal.ad.adAccountId,
     writeAttempted: false, wroteMeta: false, readback: null, confirmedBy: null,
+    lifetime, issuedAt,
   }
 }
 

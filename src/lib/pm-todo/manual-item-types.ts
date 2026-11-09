@@ -58,6 +58,7 @@ import type { BaozhengItemKind } from './baozheng-items'
 import type { FactoryWinnerItemKind } from './factory-winner-items'
 import type { SimaqianItemKind } from './simaqian-review-items'
 import type { ToolLeadItemKind } from './tool-lead-items'
+import type { DistributorApplicationItemKind } from './distributor-application-items'
 import type { PmKind } from './five-kinds'
 
 /**
@@ -75,6 +76,8 @@ import type { PmKind } from './five-kinds'
 //   我们的探活 fetch 很可能拿到 403 → 整条被当坏链接丢掉。而这两条恰恰是
 //   「全站 AI 在空跑」和「这套告警自己瞎了」—— 宁可让人自己找入口，也不能让它静默消失。
 export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
+  // distributor_application_pending：链接是登录后的经销商页，探活易判坏链接；丢了 = 有人申请了没人知道。
+  'distributor_application_pending',
   // 标题效果判定的两条欠账：链接是要登录的后台页，探活会判坏链接——不能因此静默消失（2026-10-29）。
   'seo_rank_verdict_overdue',
   'seo_rank_baseline_missing',
@@ -303,6 +306,7 @@ export type ManualItemKind =
   | 'paid_signal_needs_review'
   /** 工具实验室有人留资（自助开通 / 网站诊断留邮箱）—— 这张表以前写完没人读，见 tool-lead-items.ts */
   | ToolLeadItemKind
+  | DistributorApplicationItemKind
   | CommentScopeTodoKind
   | CommentReplyScopeTodoKind
   /** 主页评论分流后仍要 FDE 公开回复（不含评论原文） */

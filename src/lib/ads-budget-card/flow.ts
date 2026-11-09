@@ -120,7 +120,7 @@ async function recheck(args: Parameters<typeof submitBudgetCard>[0], row: HoldRo
   if (row.payload.subjectKey.startsWith('intraday-cap:')) {
     const { intradayConfirmRefusal } = await import('@/lib/ads-strategy/intraday-spend/cap-proposal-run')
     const block = await intradayConfirmRefusal(
-      args.kernel.supabase, args.clientId, args.now ?? args.kernel.now(), 'decrease',
+      args.kernel.supabase, args.clientId, args.now ?? args.kernel.now(),
     )
     if (block) return block
   }

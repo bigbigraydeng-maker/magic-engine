@@ -34,6 +34,7 @@ describe('runCreativeStateDaily', () => {
     expect(result).toEqual({ cards: 1, skipped: [], wroteMeta: false })
     expect(proposeCreativeStateCards).toHaveBeenCalledTimes(1)
     expect(proposeCreativeStateCards.mock.calls[0][1].clicker).toEqual({ kind: 'agent', email: null })
+    expect(proposeCreativeStateCards.mock.calls[0][1].lifetime).toBe('nz_day')
   })
 
   it('does not open a card when there is nothing to propose', async () => {
