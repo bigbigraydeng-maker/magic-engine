@@ -27,15 +27,35 @@ export type CatalogueGateResult =
   | { ok: false; reason: 'catalogue_expired'; validUntil: string }
   | { ok: false; reason: 'catalogue_unavailable' }
 
-/** host + path of a link, or null when it is not a link with an authority. */
+const ENCODED_BYTE_RE = /%([0-9a-fA-F]{2})/g
+const UNRESERVED_RE = /^[A-Za-z0-9\-._~]$/
+
+/** "%2D" → "-": an encoded letter, digit or -._~ names the same file to a web server. Other encodings are kept. */
+function decodeUnreserved(path: string): string {
+  return path.replace(ENCODED_BYTE_RE, (match, hex: string) => {
+    const char = String.fromCharCode(Number.parseInt(hex, 16))
+    return UNRESERVED_RE.test(char) ? char : match.toUpperCase()
+  })
+}
+
+/**
+ * host + path of a link, written the one way every spelling of the same address comes out as; null when it is not a link
+ * with a host. Spellings that open the same file are the same key: "www." or not, "./" and "x/../", "%2e" and other encoded
+ * letters, doubled or trailing slashes, port, user-info. Path letters keep their case (HTTP paths are case-sensitive).
+ */
 export function catalogueKey(url: string): string | null {
-  const match = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)([^?#]*)/i.exec(url.replace(/\\/g, '/'))
-  if (match === null) return null
-  const authority = match[1]
-  const hostPart = authority.includes('@') ? authority.slice(authority.lastIndexOf('@') + 1) : authority
-  const host = hostPart.replace(/:\d+$/, '').toLowerCase().replace(/\.+$/, '')
+  let parsed: URL
+  try {
+    parsed = new URL(url.replace(/\\/g, '/'))
+  } catch {
+    return null
+  }
+  const host = parsed.hostname.toLowerCase().replace(/\.+$/, '').replace(/^www\./, '')
   if (host === '') return null
-  const path = match[2] === '' ? '/' : match[2]
+  // Decoding can turn "%2e" into a dot segment, so resolve the path again afterwards (slashes collapsed first, or "//x"
+  // would be read as a host).
+  const decoded = decodeUnreserved(parsed.pathname).replace(/\/{2,}/g, '/')
+  const path = new URL(decoded, 'https://resolve.invalid').pathname.replace(/(.)\/+$/, '$1')
   return `${host}${path}`
 }
 

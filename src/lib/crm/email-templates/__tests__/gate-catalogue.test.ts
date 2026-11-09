@@ -26,6 +26,15 @@ describe('catalogue gate', () => {
     ['over http', 'see http://www.example.com/brochures/Brochure-2027.pdf'],
     ['without a scheme', 'see www.example.com/brochures/Brochure-2027.pdf'],
     ['at the end of a sentence', `see ${URL}.`],
+    // spellings that open the same file (review 2026-11-09)
+    ['without www.', 'see https://example.com/brochures/Brochure-2027.pdf'],
+    ['without www. or a scheme', 'see example.com/brochures/Brochure-2027.pdf'],
+    ['with ./ in the path', 'see https://www.example.com/brochures/./Brochure-2027.pdf'],
+    ['with x/../ in the path', 'see https://www.example.com/brochures/x/../Brochure-2027.pdf'],
+    ['with %2e as a dot segment', 'see https://www.example.com/brochures/%2e/Brochure-2027.pdf'],
+    ['with an encoded letter', 'see https://www.example.com/brochures/Brochure%2D2027.pdf'],
+    ['with a doubled slash', 'see https://www.example.com/brochures//Brochure-2027.pdf'],
+    ['with a trailing slash', 'see https://www.example.com/brochures/Brochure-2027.pdf/'],
   ])('an expired catalogue blocks %s', (_label, body) => {
     expect(verdict(body, expired)).toEqual({ ok: false, reason: 'catalogue_expired', validUntil: '2026-12-31' })
   })
@@ -50,8 +59,10 @@ describe('catalogue gate', () => {
   })
 
   it('catalogueKey', () => {
-    expect(catalogueKey('https://User@Www.Example.com:443/A/b?x#y')).toBe('www.example.com/A/b')
-    expect(catalogueKey('https://www.example.com')).toBe('www.example.com/')
+    expect(catalogueKey('https://User@Www.Example.com:443/A/b?x#y')).toBe('example.com/A/b')
+    expect(catalogueKey('https://www.example.com')).toBe('example.com/')
+    // an encoded slash stays encoded: it is not a path separator
+    expect(catalogueKey('https://www.example.com/a%2Fb')).toBe('example.com/a%2Fb')
     expect(catalogueKey('not a url')).toBeNull()
   })
 })

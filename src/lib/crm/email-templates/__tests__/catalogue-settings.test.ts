@@ -82,6 +82,9 @@ describe('providers.catalogue', () => {
     ['https://www.example.com:8443/a.pdf', 'host must be a bare hostname (no encoding or port)'],
     ['https://www.example.com/a b.pdf', 'must not contain whitespace'],
     [`https://www.example.com/${'a'.repeat(500)}`, 'must be at most 500 characters'],
+    ['https://www.example.com/a/../b.pdf', 'must be written plainly, as https://www.example.com/b.pdf'],
+    ['https://www.example.com/b%2D1.pdf', 'must be written plainly, as https://www.example.com/b%2D1.pdf'],
+    ['https://WWW.example.com/b.pdf', 'must be written plainly, as https://www.example.com/b.pdf'],
   ])('refuses the url %s', (url, message) => {
     expect(errorsOf(raw(catalogue({ url })))).toContain(`providers.catalogue.url: ${message}`)
   })

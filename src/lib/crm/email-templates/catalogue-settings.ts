@@ -43,6 +43,8 @@ function urlProblem(value: string): string | null {
   const rawHost = value.slice('https://'.length).split(/[/?#]/, 1)[0]
   if (rawHost.includes('@') || parsed.username !== '' || parsed.password !== '') return 'must not contain credentials'
   if (rawHost.includes('%') || parsed.port !== '') return 'host must be a bare hostname (no encoding or port)'
+  // Stored the way a browser writes it, so the expiry gate compares like with like.
+  if (parsed.pathname.includes('%') || parsed.href !== value) return `must be written plainly, as ${parsed.href}`
   return null
 }
 
