@@ -52,11 +52,21 @@ describe('tagBody', () => {
     expect(r.ok && r.links[0].url).toBe('https://example.com/a?date=2027-03-11')
   })
 
-  it('returns the body untouched and says so when the result would not match the original links', () => {
-    // A browser reads "\" as "/", so the gates see https://example.com/a/b here; a token inserted before the backslash
-    // would change what the link opens. The re-check must catch it and keep the original text.
-    const body = 'See https://example.com/a\\b today'
-    expect(tagBody(body, HOSTS, tokens('AAAAAAAAAAAA'))).toEqual({ ok: false, body, reason: 'mismatch' })
+  it('leaves a link alone when more text is glued to its end (we cannot be sure where the reader thinks it ends)', () => {
+    // A browser reads "\" as "/" (the gates see https://example.com/a/b); "(" continues a path like /a_(b);
+    // Chinese written straight after a link may be read as part of it.
+    for (const body of ['See https://example.com/a\\b today', 'See https://example.com/a_(b) today', '看 https://example.com/a请点']) {
+      expect(tagBody(body, HOSTS, tokens('AAAAAAAAAAAA'))).toEqual({ ok: true, body, links: [] })
+    }
+  })
+
+  it('an old-token copy next to the same plain link: both get the new token and the old one is gone', () => {
+    const r = tagBody('https://example.com/a and https://example.com/a?me=OLDOLDOLDOLD', HOSTS, tokens('NEWNEWNEWNEW'))
+    expect(r).toEqual({
+      ok: true,
+      body: 'https://example.com/a?me=NEWNEWNEWNEW and https://example.com/a?me=NEWNEWNEWNEW',
+      links: [{ token: 'NEWNEWNEWNEW', url: 'https://example.com/a' }],
+    })
   })
 
   it('refuses a token that is not 12 letters or digits', () => {

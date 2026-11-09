@@ -6,7 +6,8 @@
  * recipient has it. The worst a holder can do is add clicks to their own record. So:
  *  - the body is at most 1KB and is parsed strictly; a malformed token is refused before any database read;
  *  - an unknown token, a token whose mail was not sent, and every other "no" all answer 204: callers learn nothing;
- *  - there is no per-IP limit (every report comes from the website's own server), only a whole-endpoint cap per minute;
+ *  - there is no per-IP limit (every report comes from the website's own server), only a whole-endpoint cap per minute,
+ *    counted on well-formed reports only;
  *  - this route never tells the website to retry, and never fails its page: the site does not wait for us.
  */
 
@@ -26,12 +27,13 @@ const overCap = createMinuteCap(600)
 const noContent = (): NextResponse => new NextResponse(null, { status: 204 })
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  if (overCap(Date.now())) return new NextResponse(null, { status: 429 })
   const body = await readBoundedJson(req, MAX_BODY_BYTES)
   if (!body.ok) return new NextResponse(null, { status: body.reason === 'too_large' ? 413 : 400 })
   const value = body.value
   const parsed = parseClickReport(value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null)
   if (!parsed.ok) return new NextResponse(null, { status: 400 })
+  // Only well-formed reports use up the minute's allowance: junk cannot crowd out real clicks (review, 魏征 P2-3).
+  if (overCap(Date.now())) return new NextResponse(null, { status: 429 })
   try {
     await recordClick(parsed.report, createClickStore(supabaseAdmin, createMailNewStore()), new Date())
   } catch (err) {

@@ -82,10 +82,10 @@ describe('tagLinks (prod)', () => {
     expect(await tagLinks(save, args(BROCHURE), seq)).toEqual({ body: BROCHURE, tagged: 0, warning: 'link_tracking_failed' })
   })
 
-  it('a re-check mismatch sends the original text, with a warning, and stores nothing', async () => {
+  it('a link it cannot safely token is sent as written, and nothing is stored', async () => {
     const { save } = saver()
-    const body = 'See https://example.com/a\\b'
-    expect(await tagLinks(save, args(body), seq)).toEqual({ body, tagged: 0, warning: 'link_tracking_mismatch' })
+    const body = 'See https://example.com/a_(b)'
+    expect(await tagLinks(save, args(body), seq)).toEqual({ body, tagged: 0, warning: null })
     expect(save).not.toHaveBeenCalled()
   })
 

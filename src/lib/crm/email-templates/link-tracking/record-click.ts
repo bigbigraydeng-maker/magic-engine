@@ -118,7 +118,7 @@ export interface ClickStore {
   findToken(token: string): Promise<TokenInfo | null>
   /** True only when the mail this token was given to is recorded as sent (not failed, not still unknown). */
   mailWasSent(info: TokenInfo): Promise<boolean>
-  /** How many clicks the token has, and when the latest one was recorded (ISO) or null. */
+  /** How many clicks the token has, and when the latest click that was NOT a suspected scan was recorded (ISO) or null. */
   clickStats(token: string): Promise<{ count: number; lastAt: string | null; hasHuman: boolean }>
   insertClick(row: ClickRow): Promise<void>
   emitFirstHumanClick(info: TokenInfo, clickedAt: string): Promise<void>

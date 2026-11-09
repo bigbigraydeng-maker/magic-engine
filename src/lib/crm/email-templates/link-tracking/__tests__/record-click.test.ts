@@ -136,3 +136,20 @@ describe('createMinuteCap', () => {
     expect(over(60_001)).toBe(false)
   })
 })
+
+describe('statsFromRows (the 5-minute de-dupe)', () => {
+  it('a scan a second before the guest does not swallow the guest\'s click', async () => {
+    const { statsFromRows } = await import('../click-store-prod')
+    const rows = [{ occurred_at: '2026-11-11T07:03:00Z', counts_as_human: false, suspected_scan: true }]
+    expect(statsFromRows(rows)).toEqual({ count: 1, lastAt: null, hasHuman: false })
+  })
+
+  it('a real click within 5 minutes does count for the de-dupe', async () => {
+    const { statsFromRows } = await import('../click-store-prod')
+    const rows = [
+      { occurred_at: '2026-11-11T07:05:00Z', counts_as_human: false, suspected_scan: true },
+      { occurred_at: '2026-11-11T07:03:00Z', counts_as_human: true, suspected_scan: false },
+    ]
+    expect(statsFromRows(rows)).toEqual({ count: 2, lastAt: '2026-11-11T07:03:00Z', hasHuman: true })
+  })
+})

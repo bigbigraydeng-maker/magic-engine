@@ -21,6 +21,10 @@ export const TOKEN_RE = /^[A-Za-z0-9]{12}$/
 // trimmed below the same way the link finder trims it.
 const RAW_LINK_RE = /(?:https?:\/\/|www\.)[A-Za-z0-9\-._~:/?#@!$&*+,;=%[\]]+/gi
 const TRAILING_PUNCT_RE = /[.,;:!?)]+$/
+// What may follow a link we token: nothing, white space, or sentence punctuation. Anything else (a "(" in "/a_(b)",
+// Chinese text written straight after the link) means our idea of where the link ends may not be the reader's:
+// such a link is left exactly as it is.
+const SAFE_AFTER_RE = /^(?:$|[\s.,;:!?)\]>'"。，、；：！？）】」』])/
 
 export interface TaggedLink {
   token: string
@@ -70,11 +74,12 @@ function linksOf(text: string): string[] {
 export function tagBody(body: string, hosts: readonly string[], newToken: () => string): TagResult {
   const tracked = new Set(hosts.map((h) => h.toLowerCase().replace(/\.+$/, '')))
   const tokens = new Map<string, string>()
-  const out = body.replace(RAW_LINK_RE, (match) => {
+  const out = body.replace(RAW_LINK_RE, (match: string, offset: number, whole: string) => {
     const link = match.replace(TRAILING_PUNCT_RE, '')
     const tail = match.slice(link.length)
     const host = hostOf(link)
     if (host === null || !tracked.has(host)) return match
+    if (!SAFE_AFTER_RE.test(whole.slice(offset + match.length, offset + match.length + 1))) return match
     const clean = stripToken(link)
     let token = tokens.get(clean)
     if (token === undefined) {
@@ -85,9 +90,10 @@ export function tagBody(body: string, hosts: readonly string[], newToken: () => 
     return withToken(clean, token) + tail
   })
   if (tokens.size === 0) return { ok: true, body, links: [] }
-  const before = linksOf(body)
-  const after = linksOf(out)
-  const same = before.length === after.length && before.every((l, i) => l === after[i])
+  // The finder de-duplicates, so compare the sets of links (an old ?me= copy and the same link without it are one link).
+  const before = new Set(linksOf(body))
+  const after = new Set(linksOf(out))
+  const same = before.size === after.size && [...before].every((l) => after.has(l))
   const everyTokenLands = [...tokens.values()].every((t) => out.includes(`${TOKEN_PARAM}=${t}`))
   if (!same || !everyTokenLands) return { ok: false, body, reason: 'mismatch' }
   return { ok: true, body: out, links: [...tokens].map(([url, token]) => ({ token, url })) }
