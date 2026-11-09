@@ -34,6 +34,7 @@ import {
   AI_REVIEWER_IDENTITY,
   type CircuitBreakerRule,
 } from './ai-auto-review-circuit-breaker'
+import { readPaymentMatchEnabled } from './payment-match-run'
 import { sendApprovedOutcome, type SendDeps } from './writeback-service'
 import type { SourceKind } from './intake'
 import { approvalCutoffIso, eventAgeMs, isTooLateToApprove, DAY_MS, META_EVENT_WINDOW_DAYS } from './event-window'
@@ -193,26 +194,15 @@ export async function runAiAutoReviewForClient(
   const remaining = batchSize - sweep.items.length
 
   const cooldownCutoff = new Date(now.getTime() - UNCERTAIN_RETRY_COOLDOWN_MS).toISOString()
+  // 成交金额回传开着时，成交不交给模型。对不上的要留在待核对里给人看，不能被这里发掉。
+  const holdPurchases = await readPaymentMatchEnabled(supabase, clientId)
   const { data: pending, error: pendingErr } = remaining <= 0
     ? { data: [], error: null }
-    : await supabase
-    .from('me_sale_outcomes')
-    .select(
-      'id, client_id, contact_id, outcome_kind, customer_first, customer_last, ' +
-        'amount_minor, currency, source_kind, occurred_at, ai_review_attempts, ai_last_reviewed_at',
-    )
-    .eq('client_id', clientId)
-    .eq('review_status', 'pending_review')
-    .in('source_kind', [...AI_AUTO_REVIEWABLE_SOURCE_KINDS])
-    .is('redacted_at', null)
-    .lt('ai_review_attempts', MAX_UNCERTAIN_ATTEMPTS)
-    .or(`ai_last_reviewed_at.is.null,ai_last_reviewed_at.lt.${cooldownCutoff}`)
-    .order('occurred_at', { ascending: true })
-    .limit(remaining)
+    : await selectPendingForAi(supabase, clientId, cooldownCutoff, remaining, holdPurchases)
 
   if (pendingErr) throw new Error(`读取待审核记录失败：${pendingErr.message}`)
 
-  // 实测核实：select() 只取了上面列出的那几列，字段名跟 PendingOutcomeRow 逐一对应
+  // 实测核实：selectPendingForAi() 只取了列出的那几列，字段名跟 PendingOutcomeRow 逐一对应
   // （不是从任意形状猜的），跟 writeback-service.ts 里 OutcomeRow 的同款断言一致
   // ——这里是唯一一处需要断言 Supabase 泛型返回值形状的地方。
   const rows = (pending ?? []) as unknown as PendingOutcomeRow[]
@@ -370,6 +360,31 @@ export async function runAiAutoReviewForClient(
     expired,
     items,
   }
+}
+
+function selectPendingForAi(
+  supabase: SupabaseClient,
+  clientId: string,
+  cooldownCutoff: string,
+  remaining: number,
+  holdPurchases: boolean,
+) {
+  let query = supabase
+    .from('me_sale_outcomes')
+    .select(
+      'id, client_id, contact_id, outcome_kind, customer_first, customer_last, ' +
+        'amount_minor, currency, source_kind, occurred_at, ai_review_attempts, ai_last_reviewed_at',
+    )
+    .eq('client_id', clientId)
+    .eq('review_status', 'pending_review')
+    .in('source_kind', [...AI_AUTO_REVIEWABLE_SOURCE_KINDS])
+    .is('redacted_at', null)
+    .lt('ai_review_attempts', MAX_UNCERTAIN_ATTEMPTS)
+  if (holdPurchases) query = query.neq('outcome_kind', 'purchase')
+  return query
+    .or(`ai_last_reviewed_at.is.null,ai_last_reviewed_at.lt.${cooldownCutoff}`)
+    .order('occurred_at', { ascending: true })
+    .limit(remaining)
 }
 
 /**

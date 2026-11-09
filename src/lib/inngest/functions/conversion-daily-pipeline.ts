@@ -96,6 +96,7 @@ import { runAiAutoReviewForClient, MAX_BATCH_SIZE, type RunOptions, type RunSumm
 import { runFailedWritebackResend } from '@/lib/conversions/writeback-resend-run'
 import { metaCapiWriter } from '@/lib/meta/capi/writer'
 import { runPaymentEmailDetectionForEnabledClients } from '@/lib/conversions/payment-email-detect-wire'
+import { runPaymentMatchAutoSend } from '@/lib/conversions/payment-match-run'
 
 export const CONVERSION_DAILY_PIPELINE_JOB = 'conversion-daily-pipeline'
 export const CONVERSION_DAILY_PIPELINE_TZ = 'Pacific/Auckland'
@@ -199,6 +200,11 @@ export type ConversionPipelineDeps = {
    * 可选：没传就不跑这一段（旧测试与本地试跑不受影响）。放在同步之后、AI 审核之前。
    */
   detectPayments?: (opts: { nowIso: string }) => Promise<unknown>
+  /**
+   * 定金已确认且金额等于所订团标价 → 走现有发送路径。可选：没传就不跑。
+   * 放在付款识别之后、AI 审核之前，这样对不上的成交还在待核对里，不会被模型先发掉。
+   */
+  matchPayments?: (opts: { nowIso: string }) => Promise<unknown>
   /** 运行记录读写——默认真的 run-logger；本地 Inngest dev server 试跑时注入假的。 */
   runLog?: {
     start: (jobName: string) => Promise<string>
@@ -365,6 +371,10 @@ export async function runConversionDailyPipeline(
   const payments = detectPayments
     ? await step.run('detect-payments', () => timed('detect-payments', () => detectPayments({ nowIso })))
     : null
+  const matchPayments = deps.matchPayments
+  const paymentMatch = matchPayments
+    ? await step.run('match-payments', () => timed('match-payments', () => matchPayments({ nowIso })))
+    : null
   const nalReview = await runReviewChunks(step, 'ai-review-nal', NAL_CLIENT_ID, nowIso, deps.reviewClient)
   const ctsReview = await runReviewChunks(step, 'ai-review-cts', CTS_CLIENT_ID, nowIso, deps.reviewClient)
   const nalResend = await step.run('resend-failed-nal', () =>
@@ -374,7 +384,16 @@ export async function runConversionDailyPipeline(
     timed('resend-failed-cts', () => deps.resendFailed(CTS_CLIENT_ID, { nowIso })),
   )
 
-  const results = { nalSync, ctsSync, ...(payments ? { payments } : {}), nalReview, ctsReview, nalResend, ctsResend }
+  const results = {
+    nalSync,
+    ctsSync,
+    ...(payments ? { payments } : {}),
+    ...(paymentMatch ? { paymentMatch } : {}),
+    nalReview,
+    ctsReview,
+    nalResend,
+    ctsResend,
+  }
   const total = Object.keys(results).length
   const failedCount = Object.values(results).filter((r) => !r.ok).length
 
@@ -413,4 +432,11 @@ export const conversionDailyPipeline = createConversionDailyPipelineFunction({
       now: new Date(nowIso),
     }),
   detectPayments: ({ nowIso }) => runPaymentEmailDetectionForEnabledClients({ nowIso }),
+  // 判断用开跑时刻；发送在 runPaymentMatchAutoSend 里不接收这个时间。
+  matchPayments: ({ nowIso }) =>
+    runPaymentMatchAutoSend({
+      supabase: supabaseAdmin,
+      sendDeps: { writer: metaCapiWriter, fetcher: fetch },
+      now: new Date(nowIso),
+    }),
 })

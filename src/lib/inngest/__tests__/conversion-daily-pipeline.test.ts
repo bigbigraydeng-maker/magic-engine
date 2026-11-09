@@ -266,6 +266,34 @@ describe('分块循环怎么推进、怎么停', () => {
     expect(finish).toHaveBeenCalledWith('run-1', expect.any(Number), expect.objectContaining({ processed: 7, completed: 7, failed: 0 }))
   })
 
+  it('金额对得上才回传：排在付款识别之后、AI 审核之前，失败不挡审核', async () => {
+    const match = vi.fn(async () => ({ enabledClientIds: [], scanned: 0, sent: 0, held: 0 }))
+    const { harness, finish, result } = await run({
+      detectPayments: async () => ({ ok: true }),
+      matchPayments: match,
+    })
+    const ids = harness.ranStepIds
+    expect(ids.indexOf('detect-payments')).toBeLessThan(ids.indexOf('match-payments'))
+    expect(ids.indexOf('match-payments')).toBeLessThan(ids.indexOf('ai-review-nal-1'))
+    expect(match).toHaveBeenCalledTimes(1)
+    expect(result).toHaveProperty('paymentMatch')
+    expect(finish).toHaveBeenCalledWith('run-1', expect.any(Number), expect.objectContaining({ processed: 8, completed: 8, failed: 0 }))
+
+    const failed = await run({
+      detectPayments: async () => ({ ok: true }),
+      matchPayments: async () => {
+        throw new Error('模拟回传读取失败')
+      },
+    })
+    expect(failed.result.paymentMatch).toMatchObject({ ok: false, error: expect.stringContaining('模拟回传读取失败') })
+    expect(failed.harness.ranStepIds).toContain('ai-review-cts-1')
+    expect(failed.finish).toHaveBeenCalledWith(
+      'run-1',
+      expect.any(Number),
+      expect.objectContaining({ processed: 8, completed: 7, failed: 1 }),
+    )
+  })
+
   it('邮箱付款识别段失败 → 记失败，但同步已完成、审核与补发照常（互不连坐）', async () => {
     const { result, harness, finish } = await run({
       detectPayments: async () => {
