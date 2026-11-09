@@ -31,7 +31,7 @@ function token(sendId = SEND, clientId = CLIENT): string {
   return signed.token
 }
 
-const ROW: UnsubscribeSendRow = { id: SEND, clientId: CLIENT, contactId: CONTACT, dedupeScope: 'lifetime', toAddressSha256: ADDRESS_SHA }
+const ROW: UnsubscribeSendRow = { id: SEND, clientId: CLIENT, contactId: CONTACT, channel: 'email', dedupeScope: 'lifetime', toAddressSha256: ADDRESS_SHA }
 
 function deps(over: { read?: SendRowRead | Error; write?: EmailUnsubscribeWrite | Error } = {}) {
   const records: EmailUnsubscribeRecord[] = []
@@ -46,7 +46,7 @@ function deps(over: { read?: SendRowRead | Error; write?: EmailUnsubscribeWrite 
     record: async (input) => {
       if (over.write instanceof Error) throw over.write
       records.push(input)
-      return over.write ?? { ok: true, created: true }
+      return over.write ?? { ok: true, created: true, refreshed: false }
     },
     now: () => NOW,
     log: (code, sendId) => {
@@ -94,18 +94,22 @@ describe('POST /api/u/<token>: one click unsubscribes the address the letter wen
     expect(logs).toEqual([['unsubscribed', SEND]])
   })
 
-  it('a second click is harmless and gets the same page', async () => {
-    const { d, logs } = deps({ write: { ok: true, created: false } })
-    expect(await handleUnsubscribePost(token(), d)).toEqual({ status: 200, html: DONE_PAGE })
-    expect(logs).toEqual([['already_unsubscribed', SEND]])
+  it('a second click is harmless and gets the same page (logged as a later unsubscribe when it moved the time)', async () => {
+    const same = deps({ write: { ok: true, created: false, refreshed: false } })
+    expect(await handleUnsubscribePost(token(), same.d)).toEqual({ status: 200, html: DONE_PAGE })
+    expect(same.logs).toEqual([['already_unsubscribed', SEND]])
+    const later = deps({ write: { ok: true, created: false, refreshed: true } })
+    expect(await handleUnsubscribePost(token(), later.d)).toEqual({ status: 200, html: DONE_PAGE })
+    expect(later.logs).toEqual([['unsubscribed_again', SEND]])
   })
 
-  it('a link whose send is missing, of another client, a rehearsal row or without an address writes nothing (404)', async () => {
+  it('a link whose send is missing, of another client, a rehearsal row, without an address or not an e-mail writes nothing (404)', async () => {
     const reads: SendRowRead[] = [
       { ok: true, row: null },
       { ok: true, row: { ...ROW, clientId: 'd5c98811-1c1d-4ded-bdf0-4cefec6afb84' } },
       { ok: true, row: { ...ROW, dedupeScope: 'shadow' } },
       { ok: true, row: { ...ROW, toAddressSha256: null } },
+      { ok: true, row: { ...ROW, channel: 'sms' } },
     ]
     for (const read of reads) {
       const { d, records } = deps({ read })
@@ -162,17 +166,23 @@ describe('createRateLimiter / clientKeyOf', () => {
     expect(limiter.allow('a')).toBe(true)
   })
 
-  it('stays bounded: past maxKeys it starts over instead of growing', () => {
-    const limiter = createRateLimiter({ limit: 1, windowMs: 60_000, maxKeys: 2, now: () => 0 })
-    limiter.allow('a')
-    limiter.allow('b')
-    expect(limiter.allow('c')).toBe(true)
-    expect(limiter.allow('a')).toBe(true)
+  it('stays bounded by forgetting the oldest addresses, never all of them at once', () => {
+    const limiter = createRateLimiter({ limit: 1, windowMs: 60_000, maxKeys: 3, now: () => 0 })
+    expect(limiter.allow('real')).toBe(true)
+    expect(limiter.allow('real')).toBe(false)
+    limiter.allow('fake-1')
+    limiter.allow('fake-2')
+    // A fourth address pushes out only the oldest ('real'); the two fakes keep their counts.
+    limiter.allow('fake-3')
+    expect(limiter.allow('fake-2')).toBe(false)
+    expect(limiter.allow('fake-3')).toBe(false)
   })
 
-  it('keys by the first forwarded address', () => {
-    expect(clientKeyOf('203.0.113.7, 10.0.0.1')).toBe('203.0.113.7')
-    expect(clientKeyOf(null)).toBe('unknown')
-    expect(clientKeyOf('  ')).toBe('unknown')
+  it('keys by the edge\'s own header, else the LAST forwarded entry (the first one is whatever the caller sent)', () => {
+    const h = (values: Record<string, string>) => ({ get: (name: string) => values[name.toLowerCase()] ?? null })
+    expect(clientKeyOf(h({ 'cf-connecting-ip': '198.51.100.9', 'x-forwarded-for': '203.0.113.7, 10.0.0.1' }))).toBe('198.51.100.9')
+    expect(clientKeyOf(h({ 'x-forwarded-for': 'spoofed-by-caller, 203.0.113.7' }))).toBe('203.0.113.7')
+    expect(clientKeyOf(h({ 'x-real-ip': '203.0.113.8' }))).toBe('203.0.113.8')
+    expect(clientKeyOf(h({}))).toBe('unknown')
   })
 })

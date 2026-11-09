@@ -1,6 +1,7 @@
 /**
- * What one provider receipt (Resend: sent / delivered / delayed / bounced / complained / failed / suppressed) does to
- * the send ledger row of the letter it is about. Pure: no database, no clock.
+ * What one provider receipt (sent / delivered / delayed / bounced / complained / failed / suppressed) does to the send
+ * ledger row of the letter it is about. Pure: no database, no clock, no provider details (those are read into a
+ * provider-neutral `ProviderReceipt` in src/lib/messaging/provider-events/).
  *
  * The ledger only moves forward (status levels, §4.2): pending 1 < unknown_outcome 2 < sent 3 < delivery_delayed 4 <
  * delivered 5 < suppressed = failed 6 < bounced 7 < complained 8. A receipt that would move it back, or sideways, changes
@@ -13,35 +14,19 @@
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §4.2, §6.5 (implementation: §16.10).
  */
 
-export const RECEIPT_EVENT_TYPES = [
-  'email.sent',
-  'email.delivery_delayed',
-  'email.delivered',
-  'email.suppressed',
-  'email.failed',
-  'email.bounced',
-  'email.complained',
-] as const
-export type ReceiptEventType = (typeof RECEIPT_EVENT_TYPES)[number]
+import type { ReceiptKind } from '@/lib/messaging/provider-events/resend-receipt'
 
-export type ReceiptStatus =
-  | 'sent'
-  | 'delivery_delayed'
-  | 'delivered'
-  | 'suppressed'
-  | 'failed'
-  | 'bounced'
-  | 'complained'
+export type { ReceiptKind }
 
-export const RECEIPT_TARGET: Readonly<Record<ReceiptEventType, ReceiptStatus>> = {
-  'email.sent': 'sent',
-  'email.delivery_delayed': 'delivery_delayed',
-  'email.delivered': 'delivered',
-  'email.suppressed': 'suppressed',
-  'email.failed': 'failed',
-  'email.bounced': 'bounced',
-  'email.complained': 'complained',
-}
+export const RECEIPT_KINDS: readonly ReceiptKind[] = [
+  'sent',
+  'delivery_delayed',
+  'delivered',
+  'suppressed',
+  'failed',
+  'bounced',
+  'complained',
+]
 
 /** The send group's levels, the same as triggered_send_status_rank() in the ledger migration. */
 const RANK: Readonly<Record<string, number>> = {
@@ -57,14 +42,10 @@ const RANK: Readonly<Record<string, number>> = {
 }
 
 /** Statuses that mean the letter left the provider for the guest's mail server: they fix `sent_at` when it is empty. */
-const LEFT_PROVIDER: ReadonlySet<ReceiptStatus> = new Set(['sent', 'delivery_delayed', 'delivered', 'bounced', 'complained'])
+const LEFT_PROVIDER: ReadonlySet<ReceiptKind> = new Set(['sent', 'delivery_delayed', 'delivered', 'bounced', 'complained'])
 
 export const NOT_SENT_CONFIRMED = 'not_sent_confirmed'
 export const PROVIDER_FAILED_REASON = 'provider_failed'
-
-export function isReceiptEventType(value: string): value is ReceiptEventType {
-  return (RECEIPT_EVENT_TYPES as readonly string[]).includes(value)
-}
 
 export function rankOf(status: string): number | null {
   return RANK[status] ?? null
@@ -87,10 +68,12 @@ export interface ReceiptRow {
   updatedAt: string
 }
 
-/** What a stored receipt says, without any address. */
+/** What a receipt says, without any address. */
 export interface ReceiptFacts {
-  type: ReceiptEventType
-  /** The provider's id of the letter (Resend `email_id`). */
+  kind: ReceiptKind
+  /** The provider's own event name (kept in last_event_type). */
+  eventType: string
+  /** The provider's id of the letter. */
   messageId: string | null
   /** When the event happened (ISO), or null when the receipt did not say. */
   occurredAt: string | null
@@ -101,25 +84,25 @@ export interface ReceiptFacts {
 }
 
 export interface ReceiptPatch {
-  status?: ReceiptStatus
+  status?: ReceiptKind
   provider_message_id?: string
   reason_code?: string
   bounce_kind?: 'permanent' | 'transient' | 'undetermined'
   sent_at?: string
   provider_impact?: 'PROVIDER_ACCEPTED'
-  last_event_type: ReceiptEventType
+  last_event_type: string
   last_event_at: string
 }
 
 export type ReceiptDecision =
-  | { kind: 'update'; patch: ReceiptPatch; status: ReceiptStatus }
+  | { kind: 'update'; patch: ReceiptPatch; status: ReceiptKind }
   | { kind: 'unchanged'; reason: 'not_a_send' | 'not_forward' | 'failed_after_delivery' | 'person_marked_not_sent' }
 
 function isPersonNotSent(row: ReceiptRow): boolean {
   return row.status === 'failed' && row.reasonCode === NOT_SENT_CONFIRMED
 }
 
-function moveAllowed(row: ReceiptRow, target: ReceiptStatus): ReceiptDecision | null {
+function moveAllowed(row: ReceiptRow, target: ReceiptKind): ReceiptDecision | null {
   const from = rankOf(row.status)
   const to = RANK[target]
   if (row.dedupeScope !== 'lifetime' || from === null) return { kind: 'unchanged', reason: 'not_a_send' }
@@ -133,7 +116,7 @@ function moveAllowed(row: ReceiptRow, target: ReceiptStatus): ReceiptDecision | 
 
 /**
  * Decide the update for one receipt. `bindMessageId` = the provider id to record on a row that does not have one yet
- * (matched by the letter's tag or by its address); null when the row was found by its own message id.
+ * (the row was named exactly by the letter's own tag or signed link); null when it was found by its own message id.
  */
 export function decideReceipt(
   row: ReceiptRow,
@@ -141,12 +124,12 @@ export function decideReceipt(
   bindMessageId: string | null,
   nowIso: string,
 ): ReceiptDecision {
-  const target = RECEIPT_TARGET[facts.type]
+  const target = facts.kind
   const refusal = moveAllowed(row, target)
   if (refusal !== null) return refusal
   const patch: ReceiptPatch = {
     status: target,
-    last_event_type: facts.type,
+    last_event_type: facts.eventType,
     last_event_at: facts.occurredAt ?? nowIso,
   }
   if (bindMessageId !== null && row.providerMessageId === null) patch.provider_message_id = bindMessageId
@@ -156,12 +139,4 @@ export function decideReceipt(
   if (LEFT_PROVIDER.has(target) && row.sentAt === null) patch.sent_at = facts.emailCreatedAt ?? facts.occurredAt ?? nowIso
   if (row.providerImpact !== 'PROVIDER_ACCEPTED') patch.provider_impact = 'PROVIDER_ACCEPTED'
   return { kind: 'update', patch, status: target }
-}
-
-/** Resend's bounce type ("Permanent" / "Transient" / "Undetermined") as the ledger's bounce_kind. */
-export function bounceKindOf(value: unknown): ReceiptFacts['bounceKind'] {
-  if (typeof value !== 'string') return null
-  const v = value.trim().toLowerCase()
-  if (v === 'permanent' || v === 'transient' || v === 'undetermined') return v
-  return null
 }

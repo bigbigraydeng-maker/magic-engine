@@ -12,15 +12,29 @@ import type { EnvReader } from './unsubscribe-token'
 export async function loadUnsubscribeSendRow(db: SupabaseClient, sendId: string): Promise<SendRowRead> {
   const { data, error } = await db
     .from('triggered_sends')
-    .select('id, client_id, contact_id, dedupe_scope, to_address_sha256')
+    .select('id, client_id, contact_id, channel, dedupe_scope, to_address_sha256')
     .eq('id', sendId)
     .maybeSingle()
   if (error) return { ok: false }
   if (data === null) return { ok: true, row: null }
-  const row = data as { id: string; client_id: string; contact_id: string; dedupe_scope: string; to_address_sha256: string | null }
+  const row = data as {
+    id: string
+    client_id: string
+    contact_id: string
+    channel: string
+    dedupe_scope: string
+    to_address_sha256: string | null
+  }
   return {
     ok: true,
-    row: { id: row.id, clientId: row.client_id, contactId: row.contact_id, dedupeScope: row.dedupe_scope, toAddressSha256: row.to_address_sha256 },
+    row: {
+      id: row.id,
+      clientId: row.client_id,
+      contactId: row.contact_id,
+      channel: row.channel,
+      dedupeScope: row.dedupe_scope,
+      toAddressSha256: row.to_address_sha256,
+    },
   }
 }
 

@@ -107,12 +107,12 @@ const RECORD: EmailUnsubscribeRecord = {
 }
 
 describe('recordEmailUnsubscribe', () => {
-  it('writes the row the readers look for: e-mail only, machine-written, one per contact and address', () => {
+  it('writes the row the readers look for: e-mail only, machine-written (outbound side), one per contact and address', () => {
     expect(buildEmailUnsubscribeRow(RECORD)).toEqual({
       client_id: RECORD.clientId,
       contact_id: CONTACT,
       channel: 'email',
-      direction: 'inbound',
+      direction: 'outbound',
       occurred_at: '2026-11-10T01:02:03.000Z',
       summary: expect.stringContaining('退订'),
       raw: null,
@@ -139,21 +139,31 @@ describe('recordEmailUnsubscribe', () => {
     expect(JSON.stringify(buildEmailUnsubscribeRow(RECORD))).not.toContain('@')
   })
 
-  it('is a machine record, so it never reads as the guest getting in touch', () => {
+  it('is a machine record, so no CRM reader takes it as the guest getting in touch or as us following up', () => {
     const row = buildEmailUnsubscribeRow(RECORD)
     expect(isAutomatedTouch(row.source as string, row.metadata as Record<string, unknown>)).toBe(true)
   })
 
-  it('upserts with "ignore duplicates" on the table\'s unique key, and says whether it was new', async () => {
+  it('upserts with "ignore duplicates" on the table\'s unique key; a new record is "created"', async () => {
     const created = createQueryStub({ contact_touchpoints: ok([{ id: 'new' }]) })
-    expect(await recordEmailUnsubscribe(created.db, RECORD)).toEqual({ ok: true, created: true })
+    expect(await recordEmailUnsubscribe(created.db, RECORD)).toEqual({ ok: true, created: true, refreshed: false })
     expect(created.of('contact_touchpoints')).toContainEqual({
       table: 'contact_touchpoints',
       method: 'upsert',
       args: [buildEmailUnsubscribeRow(RECORD), { onConflict: 'client_id,source,source_ref', ignoreDuplicates: true }],
     })
+    expect(created.of('contact_touchpoints').some((c) => c.method === 'update')).toBe(false)
+  })
+
+  it('a repeat moves the existing record to the later time only (never back)', async () => {
+    // The stub answers both calls with the same rows: the upsert "ignored", the update moved one row.
     const repeat = createQueryStub({ contact_touchpoints: ok([]) })
-    expect(await recordEmailUnsubscribe(repeat.db, RECORD)).toEqual({ ok: true, created: false })
+    expect(await recordEmailUnsubscribe(repeat.db, RECORD)).toEqual({ ok: true, created: false, refreshed: false })
+    const calls = repeat.of('contact_touchpoints')
+    const row = buildEmailUnsubscribeRow(RECORD)
+    expect(calls).toContainEqual({ table: 'contact_touchpoints', method: 'update', args: [{ occurred_at: row.occurred_at, summary: row.summary, metadata: row.metadata }] })
+    expect(calls).toContainEqual({ table: 'contact_touchpoints', method: 'eq', args: ['source_ref', row.source_ref] })
+    expect(calls).toContainEqual({ table: 'contact_touchpoints', method: 'lt', args: ['occurred_at', row.occurred_at] })
   })
 
   it('a failed write is a failure with no detail from the database', async () => {

@@ -1,6 +1,6 @@
 /**
- * The Supabase side of the receipt consumer: reads the stored receipt and the send ledger, writes the ledger with
- * compare-and-set, records a complaint's unsubscribe. Errors are passed on as codes only: the details of a failed write
+ * The Supabase side of the receipt consumer: reads the send ledger, writes it with compare-and-set, records a
+ * complaint's unsubscribe. (The stored receipt itself is read by the intake's store, provider-events/store.ts.) Errors are passed on as codes only: the details of a failed write
  * can echo a whole row.
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §6.5 (implementation: §16.10).
  */
@@ -8,8 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { recordEmailUnsubscribe } from '@/lib/crm/email-unsubscribe'
 import type { ReceiptPatch, ReceiptRow } from './receipt'
-import { NOT_SENT_CONFIRMED } from './receipt'
-import type { ReceiptStore, StoredReceipt, UpdateResult } from './receipt-consumer'
+import type { ReceiptStore, UpdateResult } from './receipt-consumer'
 
 const LEDGER = 'triggered_sends'
 const COLUMNS =
@@ -56,23 +55,6 @@ function rowsOf(data: unknown): ReceiptRow[] {
   return Array.isArray(data) ? (data as LedgerDbRow[]).map(toRow) : []
 }
 
-export async function loadStoredReceipt(
-  db: SupabaseClient,
-  key: { account: string; providerEventId: string },
-): Promise<StoredReceipt | null> {
-  const { data, error } = await db
-    .from('provider_webhook_events')
-    .select('event_type, provider_message_id, occurred_at, payload')
-    .eq('provider', 'resend')
-    .eq('account', key.account)
-    .eq('provider_event_id', key.providerEventId)
-    .maybeSingle()
-  if (error) throw new Error(`receipt read: ${codeOf(error)}`)
-  if (data === null) return null
-  const row = data as { event_type: string; provider_message_id: string | null; occurred_at: string | null; payload: unknown }
-  return { eventType: row.event_type, providerMessageId: row.provider_message_id, occurredAt: row.occurred_at, payload: row.payload }
-}
-
 export function createReceiptStore(db: SupabaseClient): ReceiptStore {
   return {
     async findByMessageId(messageId) {
@@ -90,7 +72,7 @@ export function createReceiptStore(db: SupabaseClient): ReceiptStore {
       if (error) throw new Error(`ledger read: ${codeOf(error)}`)
       return data === null ? null : toRow(data as LedgerDbRow)
     },
-    async findUnboundByAddress(fingerprints, sinceIso) {
+    async findPendingByAddress(fingerprints, sinceIso) {
       const hashes = fingerprints.filter((f) => SHA256_RE.test(f))
       if (hashes.length === 0) return []
       const { data, error } = await db
@@ -98,9 +80,9 @@ export function createReceiptStore(db: SupabaseClient): ReceiptStore {
         .select(COLUMNS)
         .in('to_address_sha256', hashes)
         .eq('dedupe_scope', 'lifetime')
+        .eq('status', 'pending')
         .is('provider_message_id', null)
         .gte('first_attempt_at', sinceIso)
-        .or(`status.in.(pending,unknown_outcome),and(status.eq.failed,reason_code.eq.${NOT_SENT_CONFIRMED})`)
         .limit(2)
       if (error) throw new Error(`ledger read: ${codeOf(error)}`)
       return rowsOf(data)

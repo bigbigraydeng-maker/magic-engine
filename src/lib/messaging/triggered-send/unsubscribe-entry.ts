@@ -19,6 +19,7 @@ export interface UnsubscribeSendRow {
   id: string
   clientId: string
   contactId: string
+  channel: string
   dedupeScope: string
   toAddressSha256: string | null
 }
@@ -145,8 +146,14 @@ export async function handleUnsubscribePost(token: string, deps: UnsubscribeEntr
     return { status: 503, html: UNAVAILABLE_PAGE }
   }
   const row = read.row
-  // A real letter is a live ledger row of the same client that has an address: anything else is not a link we sent.
-  if (row === null || row.clientId !== clientId || row.dedupeScope !== 'lifetime' || row.toAddressSha256 === null) {
+  // A real letter is a live e-mail row of the same client that has an address: anything else is not a link we sent.
+  if (
+    row === null ||
+    row.clientId !== clientId ||
+    row.channel !== 'email' ||
+    row.dedupeScope !== 'lifetime' ||
+    row.toAddressSha256 === null
+  ) {
     deps.log('send_not_found', sendId)
     return { status: 404, html: INVALID_PAGE }
   }
@@ -164,14 +171,15 @@ export async function handleUnsubscribePost(token: string, deps: UnsubscribeEntr
     deps.log('record_failed', sendId)
     return { status: 503, html: UNAVAILABLE_PAGE }
   }
-  deps.log(written.created ? 'unsubscribed' : 'already_unsubscribed', sendId)
+  deps.log(written.created ? 'unsubscribed' : written.refreshed ? 'unsubscribed_again' : 'already_unsubscribed', sendId)
   return { status: 200, html: DONE_PAGE }
 }
 
 /**
  * A small per-address limiter for this public entry (per server process). A valid link costs one ledger read and one
  * idempotent write; a forged one costs one HMAC. The limit is generous because mail providers send their one-click
- * POSTs from shared addresses.
+ * POSTs from shared addresses. When it holds `maxKeys` addresses it forgets the oldest ones, never all of them at once
+ * (clearing everything would let a flood of made-up addresses reset the limit of a real one).
  */
 export function createRateLimiter(opts: { limit: number; windowMs: number; maxKeys: number; now?: () => number }) {
   const hits = new Map<string, { windowStart: number; count: number }>()
@@ -181,7 +189,12 @@ export function createRateLimiter(opts: { limit: number; windowMs: number; maxKe
       const t = now()
       const entry = hits.get(key)
       if (entry === undefined || t - entry.windowStart >= opts.windowMs) {
-        if (entry === undefined && hits.size >= opts.maxKeys) hits.clear()
+        hits.delete(key)
+        while (hits.size >= opts.maxKeys) {
+          const oldest = hits.keys().next().value
+          if (oldest === undefined) break
+          hits.delete(oldest)
+        }
         hits.set(key, { windowStart: t, count: 1 })
         return true
       }
@@ -191,8 +204,14 @@ export function createRateLimiter(opts: { limit: number; windowMs: number; maxKe
   }
 }
 
-/** The first address of X-Forwarded-For (set by the hosting proxy), or 'unknown'. Only used as a limiter key. */
-export function clientKeyOf(forwardedFor: string | null): string {
-  const first = (forwardedFor ?? '').split(',')[0]?.trim() ?? ''
-  return first === '' ? 'unknown' : first.slice(0, 64)
+/**
+ * The caller's address as our edge reports it, used only as the limiter's key. The first X-Forwarded-For entry is
+ * whatever the caller sent, so it is never used: the edge's own header first, then the LAST forwarded entry (the one
+ * the nearest proxy appended).
+ */
+export function clientKeyOf(headers: { get(name: string): string | null }): string {
+  const edge = headers.get('cf-connecting-ip') ?? headers.get('true-client-ip')
+  const forwarded = (headers.get('x-forwarded-for') ?? '').split(',').map((part) => part.trim()).filter((part) => part !== '')
+  const key = edge?.trim() || forwarded.at(-1) || headers.get('x-real-ip')?.trim() || ''
+  return key === '' ? 'unknown' : key.slice(0, 64)
 }

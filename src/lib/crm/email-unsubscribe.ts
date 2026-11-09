@@ -4,10 +4,14 @@
  * Asked about a contact AND its addresses: the same address can sit on two contact records, and an unsubscribe given on
  * one of them must stop mail to that address from the other one too. A record (written by the unsubscribe entry and by
  * the receipt consumer, P2-2b) is one contact_touchpoints row:
- *   source 'me_unsubscribe', channel 'email', direction 'inbound', contact_id = the contact the letter was for,
- *   source_ref '<contact id>:<address fingerprint>' (so a second click, or a click plus a complaint, writes nothing new),
+ *   source 'me_unsubscribe', channel 'email', direction 'outbound', contact_id = the contact the letter was for,
+ *   source_ref '<contact id>:<address fingerprint>' (one row per contact and address),
+ *   occurred_at = the LATEST click or complaint (a later one moves it forward: the reply rule compares with it),
  *   metadata { automated: true, kind: 'email_unsubscribed', address_sha256: <fingerprint of the address it was sent to>,
  *              via: 'link' | 'complaint', triggered_send_id }.
+ * Why 'outbound' although the guest acted: in the CRM read models "automated" is an outbound notion (ME's own letters,
+ * Mailchimp campaigns, auto-replies are all outbound machine rows, and every reader skips them); an inbound e-mail row is
+ * read as "the guest wrote to us" and would put an unsubscribed guest at the top of the call list (review 2026-11-10).
  * A row of this contact counts whatever its address; a row of another contact counts when its address fingerprint is
  * one of this guest's addresses.
  *
@@ -88,7 +92,8 @@ export interface EmailUnsubscribeRecord {
   occurredAt: string
 }
 
-export type EmailUnsubscribeWrite = { ok: true; created: boolean } | { ok: false; error: string }
+/** `created`: the first record of this contact and address; `refreshed`: an existing one moved to this later time. */
+export type EmailUnsubscribeWrite = { ok: true; created: boolean; refreshed: boolean } | { ok: false; error: string }
 
 const SUMMARY: Record<EmailUnsubscribeRecord['via'], string> = {
   link: '客人点了 ME 自动信里的退订链接：以后不再给他发邮件（打电话不受影响）',
@@ -111,7 +116,7 @@ export function buildEmailUnsubscribeRow(input: EmailUnsubscribeRecord): Record<
     client_id: input.clientId,
     contact_id: input.contactId,
     channel: 'email',
-    direction: 'inbound',
+    direction: 'outbound',
     occurred_at: new Date(Date.parse(input.occurredAt)).toISOString(),
     summary: SUMMARY[input.via],
     raw: null,
@@ -127,18 +132,37 @@ export function buildEmailUnsubscribeRow(input: EmailUnsubscribeRecord): Record<
   }
 }
 
-/** Record the unsubscribe. Writing it again (a second click, a click and a complaint) leaves the first row as it was. */
+function codeOf(error: { code?: unknown }): string {
+  return typeof error.code === 'string' ? error.code : 'unknown'
+}
+
+/**
+ * Record the unsubscribe. A repeat (a second click, a click and a complaint) writes no second row, but moves the
+ * existing row to the later time, so "unsubscribed after the guest's last mail" stays true after a guest who wrote in
+ * unsubscribes again. An earlier time never moves it back.
+ */
 export async function recordEmailUnsubscribe(db: SupabaseClient, input: EmailUnsubscribeRecord): Promise<EmailUnsubscribeWrite> {
   const problem = recordProblem(input)
   if (problem !== null) return { ok: false, error: `invalid unsubscribe record: ${problem}` }
+  const row = buildEmailUnsubscribeRow(input)
   try {
-    const { data, error } = await db
+    const inserted = await db
       .from('contact_touchpoints')
-      .upsert(buildEmailUnsubscribeRow(input), { onConflict: 'client_id,source,source_ref', ignoreDuplicates: true })
+      .upsert(row, { onConflict: 'client_id,source,source_ref', ignoreDuplicates: true })
       .select('id')
     // Only the error code: the details of a failed write can echo the whole row.
-    if (error) return { ok: false, error: `unsubscribe write: ${typeof error.code === 'string' ? error.code : 'unknown'}` }
-    return { ok: true, created: Array.isArray(data) && data.length > 0 }
+    if (inserted.error) return { ok: false, error: `unsubscribe write: ${codeOf(inserted.error)}` }
+    if (Array.isArray(inserted.data) && inserted.data.length > 0) return { ok: true, created: true, refreshed: false }
+    const moved = await db
+      .from('contact_touchpoints')
+      .update({ occurred_at: row.occurred_at, summary: row.summary, metadata: row.metadata })
+      .eq('client_id', input.clientId)
+      .eq('source', EMAIL_UNSUBSCRIBE_SOURCE)
+      .eq('source_ref', row.source_ref as string)
+      .lt('occurred_at', row.occurred_at as string)
+      .select('id')
+    if (moved.error) return { ok: false, error: `unsubscribe refresh: ${codeOf(moved.error)}` }
+    return { ok: true, created: false, refreshed: Array.isArray(moved.data) && moved.data.length > 0 }
   } catch (err) {
     return { ok: false, error: `unsubscribe write: ${err instanceof Error ? err.name : 'exception'}` }
   }

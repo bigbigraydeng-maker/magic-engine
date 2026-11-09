@@ -18,8 +18,8 @@ import {
 
 const DATA = { provider: 'resend', account: 'system', provider_event_id: 'msg_1' }
 const LOADED: LoadedReceipt = {
-  facts: { type: 'email.delivered', messageId: 'em_1', occurredAt: null, emailCreatedAt: null, bounceKind: null },
-  tagSendId: null,
+  facts: { kind: 'delivered', eventType: 'email.delivered', messageId: 'em_1', occurredAt: null, emailCreatedAt: null, bounceKind: null },
+  hints: [],
   toFingerprints: ['a'.repeat(64)],
 }
 
@@ -45,13 +45,22 @@ const untouched = async (): Promise<never> => {
 const NO_STORE: ReceiptStore = {
   findByMessageId: untouched,
   findById: untouched,
-  findUnboundByAddress: untouched,
+  findPendingByAddress: untouched,
   updateIfUnchanged: untouched,
   recordUnsubscribe: untouched,
 }
 
+let logged: Array<Record<string, string>> = []
 function deps(load: LoadedReceipt | null): ReceiptRunDeps {
-  return { load: async () => load, store: NO_STORE, now: () => new Date('2026-11-10T02:00:00.000Z') }
+  logged = []
+  return {
+    load: async () => load,
+    store: NO_STORE,
+    now: () => new Date('2026-11-10T02:00:00.000Z'),
+    log: (line) => {
+      logged.push(line)
+    },
+  }
 }
 
 vi.mock('@/lib/messaging/triggered-send/receipt-consumer', async (importOriginal) => {
@@ -91,22 +100,39 @@ describe('cloud-triggered-send-provider-event', () => {
     expect(await runProviderEventReceipt(DATA, s.tools, deps(LOADED))).toEqual({ outcome: 'not_ours' })
     expect(s.ran).toEqual(['load-event', 'apply-1'])
     expect(s.slept).toEqual([])
-    expect(applyReceipt.mock.calls[0][2]).toMatchObject({ bindPending: false })
+    expect(applyReceipt.mock.calls[0][2]).toMatchObject({ lastTry: false })
+    expect(logged).toEqual([])
   })
 
-  it('a letter still in flight is waited for, and only the last try may bind it by address', async () => {
+  it('a letter still in flight is waited for; only the last try may report it unmatched (never bind it)', async () => {
     applyReceipt.mockReset()
     for (let i = 0; i < IN_FLIGHT_ATTEMPTS - 1; i++) applyReceipt.mockResolvedValueOnce({ outcome: 'in_flight', sendId: 's1' })
-    applyReceipt.mockResolvedValueOnce({ outcome: 'applied', sendId: 's1', status: 'sent' })
+    applyReceipt.mockResolvedValueOnce({ outcome: 'unmatched', sendId: 's1' })
     const s = steps()
-    expect(await runProviderEventReceipt(DATA, s.tools, deps(LOADED))).toEqual({ outcome: 'applied', sendId: 's1', status: 'sent' })
+    const d = deps(LOADED)
+    expect(await runProviderEventReceipt(DATA, s.tools, d)).toEqual({ outcome: 'unmatched', sendId: 's1' })
     expect(s.ran).toEqual(['load-event', 'apply-1', 'apply-2', 'apply-3', 'apply-4'])
     expect(s.slept).toEqual([
       ['wait-1', IN_FLIGHT_WAIT],
       ['wait-2', IN_FLIGHT_WAIT],
       ['wait-3', IN_FLIGHT_WAIT],
     ])
-    expect(applyReceipt.mock.calls.map((c) => c[2].bindPending)).toEqual([false, false, false, true])
+    expect(applyReceipt.mock.calls.map((c) => c[2].lastTry)).toEqual([false, false, false, true])
+    expect(logged).toEqual([{ evt: 'triggered_send_receipt', outcome: 'unmatched', send_id: 's1' }])
+  })
+
+  it('logs applied, conflict and ambiguous outcomes with ids only; not "not ours"', async () => {
+    for (const [outcome, line] of [
+      [{ outcome: 'applied', sendId: 's1', status: 'delivered' }, { evt: 'triggered_send_receipt', outcome: 'applied', send_id: 's1', status: 'delivered' }],
+      [{ outcome: 'conflict', sendId: 's1' }, { evt: 'triggered_send_receipt', outcome: 'conflict', send_id: 's1' }],
+      [{ outcome: 'ambiguous' }, { evt: 'triggered_send_receipt', outcome: 'ambiguous' }],
+    ] as const) {
+      applyReceipt.mockReset()
+      applyReceipt.mockResolvedValueOnce(outcome)
+      const d = deps(LOADED)
+      await runProviderEventReceipt(DATA, steps().tools, d)
+      expect(logged).toEqual([line])
+    }
   })
 
   it('step results hold no address (they are stored by Inngest)', async () => {

@@ -5,16 +5,14 @@ import { describe, expect, it } from 'vitest'
 import {
   NOT_SENT_CONFIRMED,
   PROVIDER_FAILED_REASON,
-  RECEIPT_EVENT_TYPES,
-  RECEIPT_TARGET,
-  bounceKindOf,
+  RECEIPT_KINDS,
   decideReceipt,
   rankOf,
-  type ReceiptEventType,
   type ReceiptFacts,
+  type ReceiptKind,
   type ReceiptRow,
 } from '../receipt'
-import { RESEND_STORED_EVENT_TYPES } from '../../provider-events/types'
+import { RESEND_RECEIPT_KINDS } from '../../provider-events/resend-receipt'
 
 const NOW = '2026-11-10T02:00:00.000Z'
 
@@ -36,8 +34,16 @@ function row(over: Partial<ReceiptRow> = {}): ReceiptRow {
   }
 }
 
-function facts(type: ReceiptEventType, over: Partial<ReceiptFacts> = {}): ReceiptFacts {
-  return { type, messageId: 'em_1', occurredAt: '2026-11-10T01:30:00.000Z', emailCreatedAt: '2026-11-10T01:00:00.000Z', bounceKind: null, ...over }
+function facts(kind: ReceiptKind, over: Partial<ReceiptFacts> = {}): ReceiptFacts {
+  return {
+    kind,
+    eventType: `email.${kind}`,
+    messageId: 'em_1',
+    occurredAt: '2026-11-10T01:30:00.000Z',
+    emailCreatedAt: '2026-11-10T01:00:00.000Z',
+    bounceKind: null,
+    ...over,
+  }
 }
 
 describe('the levels match the ledger migration', () => {
@@ -61,14 +67,14 @@ describe('the levels match the ledger migration', () => {
     expect(rankOf('blocked')).toBeNull()
   })
 
-  it('follows exactly the receipt types the intake stores', () => {
-    expect([...RECEIPT_EVENT_TYPES].sort()).toEqual([...RESEND_STORED_EVENT_TYPES].sort())
+  it('every kind the Resend reader produces is a kind the ledger follows, and back', () => {
+    expect([...new Set(Object.values(RESEND_RECEIPT_KINDS))].sort()).toEqual([...RECEIPT_KINDS].sort())
   })
 })
 
 describe('decideReceipt: only forward', () => {
   it('moves forward and records which event did it', () => {
-    expect(decideReceipt(row(), facts('email.delivered'), null, NOW)).toEqual({
+    expect(decideReceipt(row(), facts('delivered'), null, NOW)).toEqual({
       kind: 'update',
       status: 'delivered',
       patch: { status: 'delivered', last_event_type: 'email.delivered', last_event_at: '2026-11-10T01:30:00.000Z' },
@@ -76,35 +82,34 @@ describe('decideReceipt: only forward', () => {
   })
 
   it('a receipt that would move back or sideways changes nothing (out-of-order receipts converge)', () => {
-    expect(decideReceipt(row({ status: 'delivered' }), facts('email.sent'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_forward' })
-    expect(decideReceipt(row({ status: 'delivered' }), facts('email.delivered'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_forward' })
-    expect(decideReceipt(row({ status: 'bounced' }), facts('email.delivered'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_forward' })
-    expect(decideReceipt(row({ status: 'complained' }), facts('email.bounced'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_forward' })
-    expect(decideReceipt(row({ status: 'failed', reasonCode: 'provider_rejected' }), facts('email.suppressed'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_forward' })
+    expect(decideReceipt(row({ status: 'delivered' }), facts('sent'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_forward' })
+    expect(decideReceipt(row({ status: 'delivered' }), facts('delivered'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_forward' })
+    expect(decideReceipt(row({ status: 'bounced' }), facts('delivered'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_forward' })
+    expect(decideReceipt(row({ status: 'complained' }), facts('bounced'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_forward' })
+    expect(decideReceipt(row({ status: 'failed', reasonCode: 'provider_rejected' }), facts('suppressed'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_forward' })
   })
 
   it('delivered then bounced moves on; bounced then delivered stays bounced', () => {
     const delivered = row({ status: 'delivered' })
-    expect(decideReceipt(delivered, facts('email.bounced'), null, NOW)).toMatchObject({ kind: 'update', status: 'bounced' })
-    expect(decideReceipt(row({ status: 'bounced' }), facts('email.delivered'), null, NOW).kind).toBe('unchanged')
+    expect(decideReceipt(delivered, facts('bounced'), null, NOW)).toMatchObject({ kind: 'update', status: 'bounced' })
+    expect(decideReceipt(row({ status: 'bounced' }), facts('delivered'), null, NOW).kind).toBe('unchanged')
   })
 
   it('every type from every send status: allowed exactly when its level is higher', () => {
     const statuses = ['pending', 'unknown_outcome', 'sent', 'delivery_delayed', 'delivered', 'suppressed', 'bounced', 'complained']
     for (const status of statuses) {
-      for (const type of RECEIPT_EVENT_TYPES) {
-        const target = RECEIPT_TARGET[type]
-        const decision = decideReceipt(row({ status }), facts(type), null, NOW)
+      for (const target of RECEIPT_KINDS) {
+        const decision = decideReceipt(row({ status }), facts(target), null, NOW)
         const forward = (rankOf(target) ?? 0) > (rankOf(status) ?? 0)
         const failedAfterDelivery = target === 'failed' && (rankOf(status) ?? 0) >= 5
-        expect(decision.kind === 'update', `${status} + ${type}`).toBe(forward && !failedAfterDelivery)
+        expect(decision.kind === 'update', `${status} + ${target}`).toBe(forward && !failedAfterDelivery)
       }
     }
   })
 
   it('rows that are not live sends never change', () => {
     for (const r of [row({ dedupeScope: 'shadow', status: 'shadow' }), row({ status: 'blocked' }), row({ status: 'skipped' })]) {
-      expect(decideReceipt(r, facts('email.delivered'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_a_send' })
+      expect(decideReceipt(r, facts('delivered'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'not_a_send' })
     }
   })
 })
@@ -112,41 +117,41 @@ describe('decideReceipt: only forward', () => {
 describe('decideReceipt: the two exceptions of the design', () => {
   it('a person\'s "not sent" mark is overridden by any real receipt from sent up', () => {
     const marked = row({ status: 'failed', reasonCode: NOT_SENT_CONFIRMED, providerMessageId: null, sentAt: null })
-    for (const type of ['email.sent', 'email.delivery_delayed', 'email.delivered', 'email.suppressed', 'email.bounced', 'email.complained'] as const) {
-      expect(decideReceipt(marked, facts(type), 'em_9', NOW), type).toMatchObject({ kind: 'update', status: RECEIPT_TARGET[type] })
+    for (const kind of ['sent', 'delivery_delayed', 'delivered', 'suppressed', 'bounced', 'complained'] as const) {
+      expect(decideReceipt(marked, facts(kind), 'em_9', NOW), kind).toMatchObject({ kind: 'update', status: kind })
     }
   })
 
   it('but a "failed" receipt never touches a "not sent" row (the reason may not change while failed)', () => {
     const marked = row({ status: 'failed', reasonCode: NOT_SENT_CONFIRMED })
-    expect(decideReceipt(marked, facts('email.failed'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'person_marked_not_sent' })
+    expect(decideReceipt(marked, facts('failed'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'person_marked_not_sent' })
   })
 
   it('a "failed" receipt never applies once the letter was delivered (failed would release the address)', () => {
     for (const status of ['delivered', 'suppressed', 'bounced', 'complained']) {
-      const decision = decideReceipt(row({ status }), facts('email.failed'), null, NOW)
+      const decision = decideReceipt(row({ status }), facts('failed'), null, NOW)
       expect(decision.kind, status).toBe('unchanged')
     }
-    expect(decideReceipt(row({ status: 'delivered' }), facts('email.failed'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'failed_after_delivery' })
+    expect(decideReceipt(row({ status: 'delivered' }), facts('failed'), null, NOW)).toEqual({ kind: 'unchanged', reason: 'failed_after_delivery' })
   })
 })
 
 describe('decideReceipt: the columns that go with the status', () => {
   it('failed always carries its reason in the same update', () => {
-    expect(decideReceipt(row({ status: 'sent' }), facts('email.failed'), null, NOW)).toMatchObject({
+    expect(decideReceipt(row({ status: 'sent' }), facts('failed'), null, NOW)).toMatchObject({
       kind: 'update',
       patch: { status: 'failed', reason_code: PROVIDER_FAILED_REASON },
     })
   })
 
   it('a bounce carries its kind; an unknown kind is "undetermined"', () => {
-    expect(decideReceipt(row(), facts('email.bounced', { bounceKind: 'permanent' }), null, NOW)).toMatchObject({ patch: { bounce_kind: 'permanent' } })
-    expect(decideReceipt(row(), facts('email.bounced', { bounceKind: null }), null, NOW)).toMatchObject({ patch: { bounce_kind: 'undetermined' } })
+    expect(decideReceipt(row(), facts('bounced', { bounceKind: 'permanent' }), null, NOW)).toMatchObject({ patch: { bounce_kind: 'permanent' } })
+    expect(decideReceipt(row(), facts('bounced', { bounceKind: null }), null, NOW)).toMatchObject({ patch: { bounce_kind: 'undetermined' } })
   })
 
   it('fills sent_at only when it is empty and the letter left the provider, from the letter\'s own creation time', () => {
     const unknown = row({ status: 'unknown_outcome', sentAt: null, providerMessageId: null, providerImpact: 'PROVIDER_UNKNOWN' })
-    expect(decideReceipt(unknown, facts('email.delivered'), 'em_1', NOW)).toEqual({
+    expect(decideReceipt(unknown, facts('delivered'), 'em_1', NOW)).toEqual({
       kind: 'update',
       status: 'delivered',
       patch: {
@@ -158,32 +163,22 @@ describe('decideReceipt: the columns that go with the status', () => {
         last_event_at: '2026-11-10T01:30:00.000Z',
       },
     })
-    const suppressed = decideReceipt(unknown, facts('email.suppressed'), 'em_1', NOW)
+    const suppressed = decideReceipt(unknown, facts('suppressed'), 'em_1', NOW)
     expect(suppressed.kind === 'update' && 'sent_at' in suppressed.patch).toBe(false)
-    const already = decideReceipt(row({ sentAt: '2026-11-10T00:00:00.000Z' }), facts('email.delivered'), null, NOW)
+    const already = decideReceipt(row({ sentAt: '2026-11-10T00:00:00.000Z' }), facts('delivered'), null, NOW)
     expect(already.kind === 'update' && 'sent_at' in already.patch).toBe(false)
   })
 
   it('falls back to the event time, then to now, when the receipt has no times', () => {
     const unknown = row({ status: 'pending', sentAt: null })
-    expect(decideReceipt(unknown, facts('email.sent', { emailCreatedAt: null }), null, NOW)).toMatchObject({ patch: { sent_at: '2026-11-10T01:30:00.000Z' } })
-    expect(decideReceipt(unknown, facts('email.sent', { emailCreatedAt: null, occurredAt: null }), null, NOW)).toMatchObject({
+    expect(decideReceipt(unknown, facts('sent', { emailCreatedAt: null }), null, NOW)).toMatchObject({ patch: { sent_at: '2026-11-10T01:30:00.000Z' } })
+    expect(decideReceipt(unknown, facts('sent', { emailCreatedAt: null, occurredAt: null }), null, NOW)).toMatchObject({
       patch: { sent_at: NOW, last_event_at: NOW },
     })
   })
 
   it('only records a message id on a row that has none', () => {
-    const decision = decideReceipt(row({ status: 'sent', providerMessageId: 'em_1' }), facts('email.delivered'), 'em_other', NOW)
+    const decision = decideReceipt(row({ status: 'sent', providerMessageId: 'em_1' }), facts('delivered'), 'em_other', NOW)
     expect(decision.kind === 'update' && 'provider_message_id' in decision.patch).toBe(false)
-  })
-})
-
-describe('bounceKindOf', () => {
-  it('reads Resend\'s bounce type', () => {
-    expect(bounceKindOf('Permanent')).toBe('permanent')
-    expect(bounceKindOf(' transient ')).toBe('transient')
-    expect(bounceKindOf('Undetermined')).toBe('undetermined')
-    expect(bounceKindOf('Suppressed')).toBeNull()
-    expect(bounceKindOf(undefined)).toBeNull()
   })
 })

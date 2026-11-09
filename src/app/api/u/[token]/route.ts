@@ -25,13 +25,13 @@ function respond(result: EntryPage): NextResponse {
 }
 
 export async function GET(req: NextRequest, ctx: { params: Promise<{ token: string }> }): Promise<NextResponse> {
-  if (!limiter.allow(clientKeyOf(req.headers.get('x-forwarded-for')))) return respond({ status: 429, html: BUSY_PAGE })
+  if (!limiter.allow(clientKeyOf(req.headers))) return respond({ status: 429, html: BUSY_PAGE })
   const { token } = await ctx.params
   return respond(handleUnsubscribeGet(token, createUnsubscribeEntryDeps(supabaseAdmin)))
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ token: string }> }): Promise<NextResponse> {
-  if (!limiter.allow(clientKeyOf(req.headers.get('x-forwarded-for')))) return respond({ status: 429, html: BUSY_PAGE })
+  if (!limiter.allow(clientKeyOf(req.headers))) return respond({ status: 429, html: BUSY_PAGE })
   const declared = Number(req.headers.get('content-length') ?? '0')
   if (Number.isFinite(declared) && declared > MAX_DECLARED_BODY) return respond({ status: 413, html: TOO_LARGE_PAGE })
   const { token } = await ctx.params

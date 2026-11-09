@@ -9,7 +9,8 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn(() => { throw new Error('the default client must not be used in these tests') }) } }))
 
 import { createQueryStub, fail, ok } from '@/lib/crm/email-templates/__tests__/query-stub'
-import { checkReplyUnsubscribe } from '../reply-unsubscribe-gate'
+import { GATE_MESSAGES } from '../email-templates/send-gates'
+import { REPLY_UNSUBSCRIBE_UNVERIFIABLE_MESSAGE, checkReplyUnsubscribe } from '../reply-unsubscribe-gate'
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
 const CONTACT = 'c0000000-0000-4000-8000-000000000002'
@@ -74,6 +75,10 @@ describe('checkReplyUnsubscribe', () => {
       const gate = await checkReplyUnsubscribe({ clientId: CLIENT, contactId: CONTACT, lastInboundAt: null }, { db: stub.db })
       expect(gate).toMatchObject({ blocked: true, status: 503, reason: 'unsubscribe_unverifiable' })
     }
+  })
+
+  it('explains an unreadable answer in the same words as the staff-send gate', () => {
+    expect(REPLY_UNSUBSCRIBE_UNVERIFIABLE_MESSAGE).toBe(GATE_MESSAGES.unsubscribe_unverifiable)
   })
 
   it('a contact id that is not a uuid refuses the reply (it would go into a filter)', async () => {

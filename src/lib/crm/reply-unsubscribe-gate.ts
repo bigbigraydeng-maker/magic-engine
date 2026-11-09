@@ -15,10 +15,12 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
+import { GATE_MESSAGES } from './email-templates/send-gates'
 import { readEmailUnsubscribed } from './email-unsubscribe'
 
 export const REPLY_UNSUBSCRIBED_MESSAGE = '这位客人在他最后一封来信之后退订了邮件，这封没有发出。等他再来信就可以回复；打电话不受影响。'
-export const REPLY_UNSUBSCRIBE_UNVERIFIABLE_MESSAGE = '暂时查不到他有没有退订邮件，先别发，稍后再试。'
+/** The same words as the staff-send gate, so the two paths explain an unreadable answer the same way. */
+export const REPLY_UNSUBSCRIBE_UNVERIFIABLE_MESSAGE = GATE_MESSAGES.unsubscribe_unverifiable
 
 export type ReplyUnsubscribeGate =
   | { blocked: false }

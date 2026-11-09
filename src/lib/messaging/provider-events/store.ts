@@ -1,5 +1,7 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { supabaseAdmin } from '@/lib/supabase'
 import type { InsertOutcome, ProviderEventInput, ProviderEventStore } from './types'
+import type { StoredProviderEvent } from './resend-receipt'
 
 // 基于 Supabase 的 ProviderEventStore 实现：把 provider webhook 事件写入 provider_webhook_events 表。
 export const supabaseProviderEventStore: ProviderEventStore = {
@@ -22,4 +24,25 @@ export const supabaseProviderEventStore: ProviderEventStore = {
     const code = typeof error.code === 'string' && /^[A-Za-z0-9_]{1,16}$/.test(error.code) ? error.code : 'unknown'
     throw new Error(`provider_webhook_events insert failed: ${code}`)
   },
+}
+
+/** One stored event by its key (the consumer's read). A read error throws with its code only; a missing row is null. */
+export async function loadStoredProviderEvent(
+  db: SupabaseClient,
+  key: { provider: 'resend'; account: string; providerEventId: string },
+): Promise<StoredProviderEvent | null> {
+  const { data, error } = await db
+    .from('provider_webhook_events')
+    .select('event_type, provider_message_id, occurred_at, payload')
+    .eq('provider', key.provider)
+    .eq('account', key.account)
+    .eq('provider_event_id', key.providerEventId)
+    .maybeSingle()
+  if (error) {
+    const code = typeof error.code === 'string' && /^[A-Za-z0-9_]{1,16}$/.test(error.code) ? error.code : 'unknown'
+    throw new Error(`provider_webhook_events read failed: ${code}`)
+  }
+  if (data === null) return null
+  const row = data as { event_type: string; provider_message_id: string | null; occurred_at: string | null; payload: unknown }
+  return { eventType: row.event_type, providerMessageId: row.provider_message_id, occurredAt: row.occurred_at, payload: row.payload }
 }
