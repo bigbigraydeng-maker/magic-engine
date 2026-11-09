@@ -6,7 +6,7 @@
  * 因此形同虚设（子牙 2026-08-05 复审）。有了它，服务端才有能力自己换 id。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { uploadImageToMeta, uploadVideoToMeta, uploadAssetToMeta, waitForVideoReady } from '../asset-upload'
+import { uploadImageToMeta, uploadVideoToMeta, uploadAssetToMeta, readVideoInAdAccount, waitForVideoReady } from '../asset-upload'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -112,6 +112,30 @@ describe('uploadVideoToMeta', () => {
   it('回执里没有 id → 失败', async () => {
     stub(() => ({ _body: '{}' }))
     expect((await uploadVideoToMeta('act_1', 'https://s/v.mp4', 'tok')).ok).toBe(false)
+  })
+})
+
+describe('readVideoInAdAccount', () => {
+  it('reads the same video id back from that ad account', async () => {
+    const calls = stub(() => ({ _body: JSON.stringify({ id: '555' }) }))
+    const seen = await readVideoInAdAccount('act_1', '555', 'tok')
+    expect(seen).toEqual({ ok: true, videoId: '555' })
+    expect(calls[0].url).toContain('/act_1/advideos/555')
+    expect(calls[0].url).not.toContain('/campaigns')
+    expect(calls[0].url).not.toContain('/adsets')
+  })
+
+  it('does not treat a different id as the uploaded video', async () => {
+    stub(() => ({ _body: JSON.stringify({ id: '556' }) }))
+    const seen = await readVideoInAdAccount('act_1', '555', 'tok')
+    expect(seen.ok).toBe(false)
+  })
+
+  it('does not treat an error response as the uploaded video', async () => {
+    stub(() => ({ ok: false, status: 400, _body: '{"error":{"message":"no"}}' }))
+    const seen = await readVideoInAdAccount('act_1', '555', 'tok')
+    expect(seen.ok).toBe(false)
+    if (!seen.ok) expect(seen.error).not.toContain('no')
   })
 })
 
