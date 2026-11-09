@@ -145,7 +145,7 @@ describe('statements', () => {
     expect((await statementActionPost(req({ action: 'void' }), params)).status).toBe(200)
     h.access = { ok: true, user: { email: 'payer@example.com' } }
     expect((await statementActionPost(req({ action: 'approve' }), params)).status).toBe(200)
-    expect(settlement.actOnStatement).toHaveBeenLastCalledWith(ID, 'approve', 'payer@example.com')
+    expect(settlement.actOnStatement).toHaveBeenLastCalledWith(ID, 'approve', 'payer@example.com', { actorIsPayoutApprover: true })
     expect((await statementActionPost(req({ action: 'delete' }), params)).status).toBe(400)
   })
 

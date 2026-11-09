@@ -4,14 +4,17 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn(), rpc: vi.fn() 
 
 import {
   DISTRIBUTOR_STATEMENT_CRON, DISTRIBUTOR_STATEMENT_EVENT, DISTRIBUTOR_STATEMENT_FUNCTION_ID, DISTRIBUTOR_STATEMENT_JOB,
-  DISTRIBUTOR_STATEMENT_SCHEDULE, createDistributorStatementFunction, handleStatement, type StatementDeps,
+  DISTRIBUTOR_STATEMENT_SCHEDULE, createDistributorStatementFunction, type StatementDeps, type StatementReceipt,
 } from '../distributor-monthly-statement'
 import { CLOUD_FN_PREFIX } from '../../client'
 import { CRON_REGISTRY } from '@/lib/cron/registry'
 
 type Fn = ReturnType<typeof createDistributorStatementFunction>
 const opts = (fn: Fn) => Reflect.get(fn, 'opts') as { id?: string; triggers?: { cron?: string; event?: string }[]; retries?: number; concurrency?: { limit?: number } }
-const step = () => ({ run: vi.fn(async <T,>(_id: string, fn: () => Promise<T> | T) => fn()) })
+const step = () => ({ run: vi.fn(async (_id: string, fn: () => Promise<unknown> | unknown) => fn()) })
+/** Runs the registered handler the way Inngest would, with a pass-through step. */
+const handleStatement = (d: StatementDeps, event: { name: string; data: unknown }, s: ReturnType<typeof step>) =>
+  (Reflect.get(createDistributorStatementFunction(d), 'fn') as (a: { event: unknown; step: unknown }) => Promise<StatementReceipt>)({ event, step: s })
 
 function deps(over: Partial<StatementDeps> = {}): StatementDeps {
   return {

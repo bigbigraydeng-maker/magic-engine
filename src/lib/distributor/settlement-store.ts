@@ -6,7 +6,7 @@
 import { supabaseAdmin } from '@/lib/supabase'
 import { AI_STEWARD_RULES_V1 } from './config'
 import { monthEnd, planMonth, savePayload, toDistributors, toSales, type DistributorDbRow, type LevelDbRow, type SaleDbRow, type SettlementHistory } from './settlement'
-import { fail, selectAll, DistributorStoreError } from './store'
+import { ensureRuleVersion, fail, selectAll, DistributorStoreError } from './store'
 import { nzOffset, toMs } from './time'
 import type { SettledSaleInfo, TeamMonthEntry } from './types'
 
@@ -86,6 +86,8 @@ export async function computeMonth(month: string, dryRun: boolean): Promise<Comp
     rules: AI_STEWARD_RULES_V1,
   })
   const payload = savePayload(plan)
+  // The statement references the rule version; make sure it exists and still matches the code.
+  if (!dryRun) await ensureRuleVersion()
   const summary = {
     month,
     dryRun,
@@ -124,14 +126,26 @@ const NEXT: Record<StatementAction, { from: readonly StatementRow['status'][]; t
   void: { from: ['computed', 'approved'], to: 'voided' },
 }
 
-/** One step on a statement. Voiding is only allowed for the latest live statement (later ones depend on it). */
-export async function actOnStatement(id: string, action: StatementAction, actorEmail: string): Promise<StatementRow> {
+/**
+ * One step on a statement. Voiding is only allowed for the latest live statement (later ones depend on it).
+ * Voiding an approved statement needs the payout approver: money may already have been sent outside ME,
+ * and a void + recompute + approve by someone else would pay the same sales twice.
+ */
+export async function actOnStatement(
+  id: string,
+  action: StatementAction,
+  actorEmail: string,
+  opts: { actorIsPayoutApprover: boolean },
+): Promise<StatementRow> {
   const { data: current, error } = await supabaseAdmin.from('distributor_statements').select('id, period_month, status').eq('id', id).maybeSingle()
   if (error) fail('load statement', error)
   if (!current) throw new DistributorStoreError('statement not found', 404)
   const st = current as StatementRow
   const step = NEXT[action]
   if (!step.from.includes(st.status)) throw new DistributorStoreError(`cannot ${action} a statement that is ${st.status}`, 409)
+  if ((action !== 'void' || st.status === 'approved') && !opts.actorIsPayoutApprover) {
+    throw new DistributorStoreError('only the payout approver can do this', 403)
+  }
   if (action === 'void') {
     const later = await supabaseAdmin.from('distributor_statements').select('id').gt('period_month', st.period_month).neq('status', 'voided').limit(1)
     if (later.error) fail('check later statements', later.error)

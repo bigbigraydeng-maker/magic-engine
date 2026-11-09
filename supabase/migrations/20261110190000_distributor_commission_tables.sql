@@ -80,6 +80,9 @@ BEGIN
       SELECT 1 FROM public.distributor_commission_lines l
         JOIN public.distributor_statements s ON s.id = l.statement_id
        WHERE l.sale_id = OLD.id AND s.status <> 'voided'
+    ) OR EXISTS (
+      SELECT 1 FROM public.distributor_statements s
+       WHERE s.id = OLD.settled_statement_id AND s.status <> 'voided'
     ) THEN
       RAISE EXCEPTION 'sale % is already settled; record a refund instead of editing it', OLD.id;
     END IF;
@@ -265,6 +268,13 @@ DECLARE
   already INTEGER;
   marked INTEGER;
 BEGIN
+  -- One statement save at a time, and never a month at or before an existing live statement
+  -- (the opening-debt chain must follow calendar order).
+  PERFORM pg_advisory_xact_lock(hashtext('distributor_save_statement'));
+  IF EXISTS (SELECT 1 FROM public.distributor_statements
+              WHERE status <> 'voided' AND period_month >= (p->>'period_month')::date) THEN
+    RAISE EXCEPTION 'a live statement for % or a later month already exists', p->>'period_month';
+  END IF;
   INSERT INTO public.distributor_statements(period_month, rule_version, total_payable_cents)
   VALUES ((p->>'period_month')::date, p->>'rule_version', (p->>'total_payable_cents')::bigint)
   RETURNING id INTO sid;
@@ -288,8 +298,10 @@ BEGIN
   IF already > 0 THEN
     RAISE EXCEPTION '% sale(s) are already settled in a live statement', already;
   END IF;
-  UPDATE public.distributor_sales SET settled_statement_id = sid
-   WHERE id IN (SELECT x::uuid FROM jsonb_array_elements_text(p->'sale_ids') x);
+  UPDATE public.distributor_sales s SET settled_statement_id = sid
+   WHERE s.id IN (SELECT x::uuid FROM jsonb_array_elements_text(p->'sale_ids') x)
+     AND (s.settled_statement_id IS NULL
+          OR EXISTS (SELECT 1 FROM public.distributor_statements v WHERE v.id = s.settled_statement_id AND v.status = 'voided'));
   GET DIAGNOSTICS marked = ROW_COUNT;
   IF marked <> wanted THEN
     RAISE EXCEPTION 'statement lists % sale(s) but % exist', wanted, marked;

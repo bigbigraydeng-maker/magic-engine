@@ -9,7 +9,7 @@ import { nextStatus } from './admin-input'
 import type { DistributorLevel } from './types'
 
 export class DistributorStoreError extends Error {
-  constructor(message: string, readonly status: 400 | 404 | 409 | 500) {
+  constructor(message: string, readonly status: 400 | 403 | 404 | 409 | 500) {
     super(message)
   }
 }
@@ -123,7 +123,7 @@ export function canonicalJson(value: unknown): string {
 }
 
 /** Registers the active rule version; refuses if the stored config differs (rules changed without a new version). */
-async function ensureRuleVersion(): Promise<void> {
+export async function ensureRuleVersion(): Promise<void> {
   const rules = AI_STEWARD_RULES_V1
   const version = await supabaseAdmin
     .from('distributor_rule_versions')

@@ -8,6 +8,7 @@
  * 新增函数部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑。
  * 设计：docs/specs/2026-11-10-distributor-commission-system-v0.1.md
  */
+import type { GetStepTools } from 'inngest'
 import { inngest, CLOUD_FN_PREFIX } from '../client'
 import { supabaseAdmin } from '@/lib/supabase'
 import { cronRunHandle, startCronRunId } from '@/lib/cron/run-logger'
@@ -45,9 +46,7 @@ export interface StatementReceipt {
   no_payout: true
 }
 
-interface StepLike {
-  run<T>(id: string, fn: () => Promise<T> | T): Promise<T>
-}
+type StepLike = GetStepTools<typeof inngest>
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -83,8 +82,9 @@ async function runCompute(deps: StatementDeps, month: string, dryRun: boolean): 
 }
 
 export async function handleStatement(deps: StatementDeps, event: { name?: string; data?: unknown }, step: StepLike): Promise<StatementReceipt> {
-  const started = await step.run('start-run', async () => ({ runId: await deps.startRun(), startedAt: Date.now() }))
-  const req = requestOf(event, deps.now())
+  // The request (month, dry-run) is taken inside the first step so a replay never re-reads the clock.
+  const started = await step.run('start-run', async () => ({ runId: await deps.startRun(), startedAt: Date.now(), req: requestOf(event, deps.now()) }))
+  const req = started.req
   const result = await step.run('compute', () => runCompute(deps, req.month, req.dryRun))
   const receipt: StatementReceipt = { job: DISTRIBUTOR_STATEMENT_JOB, trigger: req.trigger, no_payout: true, ...result }
   await step.run('finish-run', async () => {

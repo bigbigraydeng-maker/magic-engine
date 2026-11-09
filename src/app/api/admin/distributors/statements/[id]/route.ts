@@ -1,7 +1,7 @@
 /**
  * POST /api/admin/distributors/statements/[id] → { action: 'approve' | 'mark_paid' | 'void' }.
- * approve / mark_paid: only people on ADS_SPEND_APPROVER_EMAILS (the same "who may approve money" list the
- * ads kernel uses; empty = nobody). void: any global admin. Approving records consent to pay; "mark paid"
+ * approve / mark_paid / voiding an approved statement: only people on ADS_SPEND_APPROVER_EMAILS (the same
+ * "who may approve money" list the ads kernel uses; empty = nobody). Voiding a not-yet-approved statement: any global admin. Approving records consent to pay; "mark paid"
  * records a transfer done outside ME. Nothing here moves money.
  */
 import { NextResponse } from 'next/server'
@@ -25,7 +25,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: 'Only the payout approver can do this' }, { status: 403 })
   }
   try {
-    return NextResponse.json({ statement: await actOnStatement(id.toLowerCase(), action satisfies StatementAction, g.email) })
+    const actorIsPayoutApprover = isSpendApproverEmail(g.email)
+    return NextResponse.json({ statement: await actOnStatement(id.toLowerCase(), action satisfies StatementAction, g.email, { actorIsPayoutApprover }) })
   } catch (err) {
     return storeFailure(err)
   }
