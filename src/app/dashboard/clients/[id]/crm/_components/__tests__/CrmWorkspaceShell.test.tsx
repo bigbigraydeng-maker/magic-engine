@@ -183,16 +183,18 @@ describe('CrmWorkspaceShell', () => {
       '销售进度',
       '到期日历',
       '邮件模板',
+      '自动发信',
       '设置',
     ])
   })
 
-  it('shows 邮件模板 only when the feature is ready or I can configure it', async () => {
+  it('shows 邮件模板 and 自动发信 only when the feature is ready or I can configure it', async () => {
     const { unmount } = render(<CrmWorkspaceShell clientId={CLIENT}>body</CrmWorkspaceShell>)
     await waitFor(() => {
       expect(screen.getByText('今天先联系')).toBeTruthy()
     })
     expect(screen.queryByText('邮件模板')).toBeNull()
+    expect(screen.queryByText('自动发信')).toBeNull()
     unmount()
 
     resetCrmNavProbeCache()
@@ -204,6 +206,9 @@ describe('CrmWorkspaceShell', () => {
     expect(screen.getByText('邮件模板').closest('a')?.getAttribute('href')).toMatch(
       /\/crm\/templates$/,
     )
+    expect(screen.getByText('自动发信').closest('a')?.getAttribute('href')).toMatch(
+      /\/crm\/auto-letters$/,
+    )
     second.unmount()
 
     resetCrmNavProbeCache()
@@ -212,15 +217,17 @@ describe('CrmWorkspaceShell', () => {
     await waitFor(() => {
       expect(screen.getByText('邮件模板')).toBeTruthy()
     })
+    expect(screen.getByText('自动发信')).toBeTruthy()
   })
 
-  it('puts 邮件模板 and 设置 in the right-aligned group', async () => {
+  it('puts 邮件模板, 自动发信 and 设置 in the right-aligned group', async () => {
     templatesBody = { featureState: 'ready' }
     render(<CrmWorkspaceShell clientId={CLIENT}>body</CrmWorkspaceShell>)
     await waitFor(() => {
       expect(screen.getByText('邮件模板')).toBeTruthy()
     })
     expect(screen.getByText('邮件模板').closest('.ml-auto')).not.toBeNull()
+    expect(screen.getByText('自动发信').closest('.ml-auto')).not.toBeNull()
     expect(screen.getByText('设置').closest('.ml-auto')).not.toBeNull()
     expect(screen.getByText('今天先联系').closest('.ml-auto')).toBeNull()
   })
@@ -255,6 +262,32 @@ describe('CrmWorkspaceShell', () => {
     expect(payments.getAttribute('aria-current')).toBe('page')
     expect(payments.className).toContain('bg-me-charcoal')
     expect(screen.getByText('全部客人').getAttribute('aria-current')).toBeNull()
+  })
+
+  it('销售进度 keeps its own gate and highlight, independent of 自动发信', async () => {
+    // Bookings allowed, templates not ready: 销售进度 shows (highlighted on its page), 自动发信 stays hidden.
+    bookingsStatus = 200
+    navState.path = `${BASE}/sales-progress`
+    const first = render(<CrmWorkspaceShell clientId={CLIENT}>body</CrmWorkspaceShell>)
+    await waitFor(() => {
+      expect(screen.getByText('销售进度')).toBeTruthy()
+    })
+    expect(screen.getByText('销售进度').getAttribute('aria-current')).toBe('page')
+    expect(screen.getByText('销售进度').closest('a')?.getAttribute('href')).toMatch(/\/sales-progress$/)
+    expect(screen.queryByText('自动发信')).toBeNull()
+    first.unmount()
+
+    // Templates ready, bookings denied: 自动发信 shows (highlighted on its own page), 销售进度 stays hidden.
+    resetCrmNavProbeCache()
+    bookingsStatus = 403
+    templatesBody = { featureState: 'ready' }
+    navState.path = `${BASE}/crm/auto-letters`
+    render(<CrmWorkspaceShell clientId={CLIENT}>body</CrmWorkspaceShell>)
+    await waitFor(() => {
+      expect(screen.getByText('自动发信')).toBeTruthy()
+    })
+    expect(screen.getByText('自动发信').getAttribute('aria-current')).toBe('page')
+    expect(screen.queryByText('销售进度')).toBeNull()
   })
 
   it('uses the expected sizes and accessible focus styles', () => {
