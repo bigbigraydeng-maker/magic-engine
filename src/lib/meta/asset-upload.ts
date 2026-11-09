@@ -121,6 +121,26 @@ export async function uploadVideoToMeta(
   }
 }
 
+/** Read one video back from this ad account. Does not create or open an ad. */
+export async function readVideoInAdAccount(
+  adAccountId: string,
+  videoId: string,
+  accessToken: string,
+): Promise<{ ok: true; videoId: string } | { ok: false; error: string }> {
+  if (!/^\d{1,32}$/.test(videoId)) return { ok: false, error: '回读的视频编号格式不对。' }
+  const params = new URLSearchParams({ fields: 'id', access_token: accessToken })
+  try {
+    const res = await fetch(`${GRAPH_BASE}/${adAccountId}/advideos/${videoId}?${params}`)
+    const text = await res.text()
+    if (!res.ok) return { ok: false, error: '广告账户里还读不到这条视频。' }
+    const id = (JSON.parse(text) as { id?: unknown }).id
+    if (id !== videoId) return { ok: false, error: '回读到的视频编号和刚传的对不上。' }
+    return { ok: true, videoId }
+  } catch {
+    return { ok: false, error: '回读广告账户里的视频失败。' }
+  }
+}
+
 /** 按 mime 分流。判 mime 不判文件名 —— 文件名会骗人。 */
 export async function uploadAssetToMeta(
   adAccountId: string,

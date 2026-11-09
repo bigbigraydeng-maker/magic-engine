@@ -17,6 +17,7 @@ import {
 } from './ad-draft'
 import { draftNotYetBuildable, reviewDraftAgainstCaps, reviewDraftForBuild } from './ad-draft-expansion'
 import { PAUSED_DRAFT_WHAT } from './paused-draft-copy'
+import { REELS_LEAD_KIND } from './reels-lead'
 
 export const PAUSED_DRAFT_SUBJECT_PREFIX = 'meta-paused-draft:'
 export const PAUSED_DRAFT_HOLD = 'ads.paused_draft_hold'
@@ -225,9 +226,13 @@ function adSetCount(draft: AdDraft): number {
 
 function scopeLine(draft: AdDraft): string {
   const mark = draftMark(draft)
-  if (draft.existingAdSetId) return `在已有广告组里加暂停广告，不新建系列、不开。稿 ${mark}`
-  if (draft.existingCampaignId) return `在已有系列里加 1 个暂停广告组，不新建系列、不开。稿 ${mark}`
-  return `1 个暂停系列，${adSetCount(draft)} 个广告组，不开启。稿 ${mark}`
+  const base = draft.existingAdSetId
+    ? `在已有广告组里加暂停广告，不新建系列、不开。稿 ${mark}`
+    : draft.existingCampaignId
+      ? `在已有系列里加 1 个暂停广告组，不新建系列、不开。稿 ${mark}`
+      : `1 个暂停系列，${adSetCount(draft)} 个广告组，不开启。稿 ${mark}`
+  if (draft.kind !== REELS_LEAD_KIND) return base
+  return `${base} 类型：短视频留资，只锁两条 Reels。`
 }
 
 function dateLine(draft: AdDraft): string {
