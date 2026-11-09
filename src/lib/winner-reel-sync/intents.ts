@@ -48,4 +48,6 @@ export interface ProposalHold {
   score: number | null
   ctr: number | null
   resultLine?: string
+  /** Approved ads plan this activate was checked against. */
+  planId?: string
 }

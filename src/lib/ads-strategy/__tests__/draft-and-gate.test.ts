@@ -32,6 +32,14 @@ vi.mock('@/lib/meta/asset-upload', () => ({
   waitForVideoReady: vi.fn(),
 }))
 
+const launch = vi.hoisted(() => ({
+  bindDraftLaunch: vi.fn(async () => ({ ok: true as const, planId: 'plan-1' })),
+}))
+
+vi.mock('@/lib/ads-launch/plan-gate', () => ({
+  bindDraftLaunch: launch.bindDraftLaunch,
+}))
+
 import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
 import { publishDraftPaused, activatePublished, pausePublished } from '@/lib/meta/ad-publisher'
 import { fetchAdSetReadback, fetchAdCreativesReadback, fetchCampaignStatus, fetchCampaignReadback, fetchAccountMinDailyBudget } from '@/lib/meta/readback'
@@ -142,6 +150,7 @@ const OK_PUBLISH = {
 
 beforeEach(() => {
   vi.resetAllMocks()
+  launch.bindDraftLaunch.mockResolvedValue({ ok: true, planId: 'plan-1' })
   mPublish.mockResolvedValue(OK_PUBLISH)
   mSpend.mockResolvedValue({
     ok: true,
@@ -361,6 +370,15 @@ describe('approveDraft — 唯一让钱动起来的地方', () => {
     const r = await approveDraft('act1', sb, 'tok', PM)
     expect(r.ok).toBe(true)
     expect(updated.at(-1)?.status).toBe('active')
+    expect(updated.at(-1)?.activation?.plan_id).toBe('plan-1')
+  })
+
+  it('没有已批准的计划：不开，也不碰广告平台', async () => {
+    launch.bindDraftLaunch.mockResolvedValueOnce({ ok: false, reason: '这位客户现在没有已批准的广告计划，没有开。' })
+    const { sb } = fakeSupabase(READY)
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r).toEqual({ ok: false, error: '这位客户现在没有已批准的广告计划，没有开。' })
+    expect(mActivate).not.toHaveBeenCalled()
   })
 
   it('已经开过的不能再开一次', async () => {
