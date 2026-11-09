@@ -38,11 +38,13 @@ describe('阶段写在原有计划里，旧计划指纹不变', () => {
     expect(promoContentHash(parsed.spec)).toBe(promoContentHash(baseSpec()))
   })
 
-  it('写上阶段会改变指纹，所以必须另批，不会自动算已批准', () => {
+  it('只改投放阶段不换指纹；改每天总上限才会换', () => {
     const plain = parsePromoSpec(baseSpec())
-    const next = parsePromoSpec(marked('test'))
+    const next = parsePromoSpec(marked('steady'))
     expect(plain.ok && next.ok).toBe(true)
     if (!plain.ok || !next.ok) return
+    expect(promoContentHash(next.spec)).toBe(promoContentHash(plain.spec))
+    next.spec.daily_total_cap_cents = (next.spec.daily_total_cap_cents ?? 0) + 100
     expect(promoContentHash(next.spec)).not.toBe(promoContentHash(plain.spec))
   })
 

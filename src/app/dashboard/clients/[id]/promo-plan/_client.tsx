@@ -139,6 +139,26 @@ export function PromoPlanClient() {
     setMessage('✓ 已记录：这一周你看过、没意见。计划和预算都没有改动。')
   })
 
+  const onMark = (stage: 'steady' | 'test') => {
+    void (async () => {
+      setBusy('mark'); setMessage(null)
+      try {
+        const res = await fetch(`${base}/${selectedId}/promo/delivery`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stage }),
+        })
+        const json = await res.json() as { success: boolean; error?: string; reason?: string }
+        if (json.reason === 'approver_only') setApproverOnly(true)
+        if (!json.success) throw new Error(json.error ?? '没有改成')
+        setMessage(stage === 'steady' ? '✓ 已标为稳住。预算和每天总上限没有改。' : '✓ 已改回试投。预算和每天总上限没有改。')
+        await refresh(selectedId)
+      } catch (e) {
+        setMessage(`✗ ${(e as Error).message}`)
+      } finally {
+        setBusy(null)
+      }
+    })()
+  }
+
   const onPropose = () => {
     void (async () => {
       setBusy('propose'); setMessage(null)
@@ -248,8 +268,10 @@ export function PromoPlanClient() {
               <DeliveryStageCard
                 view={delivery}
                 busy={busy === 'propose'}
+                marking={busy === 'mark'}
                 canAct={!approverOnly && selected.status === 'approved'}
                 onPropose={onPropose}
+                onMark={onMark}
               />
             )}
             {shownPhases
