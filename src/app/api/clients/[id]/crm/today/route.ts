@@ -666,6 +666,8 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       suggestedChannel: c.seg.suggestedChannel,
       /** 号码在库里但打不通 —— 卡片靠它把「没留电话」和「号是坏的」分开说。 */
       phoneUnusable: c.seg.phoneUnusable ?? false,
+      /** 客人说过不要电话（只关电话，邮件照常）—— 抽屉据此藏拨号、显示撤销条。 */
+      doNotCall: c.seg.doNotCall === true,
       /** 被标成「别再联系」—— 抽屉靠它给出取消入口（早前判词误判过一批人）。 */
       doNotContact: c.doNotContact === true,
       dueAt: c.seg.dueAt,
@@ -780,6 +782,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
          * 点开它就能拨那个已知打不通的号，是这一组里最不该出现的事。
          */
         phoneUnusable: seg.phoneUnusable ?? false,
+        doNotCall: seg.doNotCall === true,
         /** 「要记住的事」—— 见上面那一处同名字段的注释，两处必须一致。 */
         important: { note: row?.important_note ?? null, dueAt: row?.important_due_at ?? null },
         /** 被标成「别再联系」—— 抽屉靠它给出取消入口。 */

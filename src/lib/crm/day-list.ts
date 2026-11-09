@@ -107,10 +107,12 @@ function withLiveReach(
   contact: ContactLike,
 ): SegmentResult {
   const seg = { ...frozen, dueAt: live.dueAt ?? frozen.dueAt }
-  if (live.phoneUnusable === frozen.phoneUnusable) return seg
+  // 「只别打电话」同理是渠道事实：今天刚记下「不要电话」的人，卡上不能整天挂着拨号。
+  if (live.phoneUnusable === frozen.phoneUnusable && live.doNotCall === frozen.doNotCall) return seg
   return {
     ...seg,
     phoneUnusable: live.phoneUnusable,
+    doNotCall: live.doNotCall,
     // 从冻结版**本来想用**的那个渠道重新解一次（`wantedChannel`），按实时的
     // 电话状况算。
     //
@@ -119,7 +121,7 @@ function withLiveReach(
     // 也不能直接抄 `live.suggestedChannel` —— 那会把冻结版的桶意图一起换掉。
     suggestedChannel: reachableChannel(frozen.wantedChannel ?? frozen.suggestedChannel, {
       ...contact,
-      hasPhone: live.phoneUnusable ? false : contact.hasPhone,
+      hasPhone: live.phoneUnusable || live.doNotCall ? false : contact.hasPhone,
     }),
   }
 }

@@ -53,6 +53,21 @@ describe('due-calendar', () => {
     const byTitle = Object.fromEntries(callbackItems(touches, contacts, '2026-11').map((i) => [i.title, i.assignee]))
     expect(byTitle).toEqual({ Ann: 'info@ctstours.co.nz', Bob: null, Cat: null })
   })
+  it('keeps a do-not-call contact as an email follow-up, without the phone number', () => {
+    const contacts = [
+      { id: 'c1', display_name: 'Ann', primary_phone: '+64', do_not_contact: false, do_not_call: true },
+      { id: 'c2', display_name: 'Bob', primary_phone: '+64', do_not_contact: false },
+    ]
+    const touches = contacts.map((c) => ({
+      contact_id: c.id,
+      occurred_at: '2026-11-01T00:00:00Z',
+      metadata: { callback_at: '2026-11-05T21:00:00Z' },
+    }))
+    const byTitle = Object.fromEntries(callbackItems(touches, contacts, '2026-11').map((i) => [i.title, i]))
+    expect(byTitle.Ann).toMatchObject({ kind: 'callback', emailOnly: true, phone: null })
+    expect(byTitle.Bob.phone).toBe('+64')
+    expect(byTitle.Bob).not.toHaveProperty('emailOnly')
+  })
   it('sorts by date then time, untimed last', () => {
     const base = { kind: 'verify' as const, title: '', refId: '', phone: null, status: null, assignee: null }
     const sorted = sortDueItems([

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requirePaidClientAccess } from '@/lib/auth/client-access'
 import { supabaseAdmin } from '@/lib/supabase'
-import { isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
+import { isDoNotCall, isDoNotContact, type DncTouch } from '@/lib/crm/dnc'
 import { normalisePhone } from '@/lib/crm/identity'
 import { outboundNumberAllowed, parseAllowedPrefixes, startOutboundCall, staffPhoneForEmail } from '@/lib/telephony/twilio/outbound'
 import { phoneLineIsDead, type TouchpointLike } from '@/lib/crm/segments'
@@ -64,6 +64,10 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   }))
   if (isDoNotContact(contact.do_not_contact === true, dnc)) {
     return NextResponse.json({ error: '这位客人说过别再联系，不能拨打' }, { status: 409 })
+  }
+  // 「只别打电话」：邮件 / 短信照常，只拦拨号（设计稿 2026-11-09 §5）。
+  if (isDoNotCall(contact.do_not_contact === true, dnc)) {
+    return NextResponse.json({ error: '这位客人说过不要电话，请用邮件或短信。' }, { status: 409 })
   }
 
   // 号码已被标成打不通：服务端也拦（界面藏按钮只是提示，不是闸）。
