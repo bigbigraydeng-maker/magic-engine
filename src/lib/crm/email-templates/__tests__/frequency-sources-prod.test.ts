@@ -5,6 +5,7 @@ vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 import {
   createFrequencySources,
   messageIdOfAudit,
+  touchpointItem,
   type FrequencySourceDeps,
   type MailchimpPort,
 } from '@/lib/crm/email-templates/frequency-sources-prod'
@@ -175,6 +176,36 @@ describe('touchpoint source', () => {
     expect(calls).toContainEqual({ table: 'contact_touchpoints', method: 'eq', args: ['channel', 'email'] })
     expect(calls).toContainEqual({ table: 'contact_touchpoints', method: 'eq', args: ['direction', 'outbound'] })
     expect(calls).toContainEqual({ table: 'contact_touchpoints', method: 'eq', args: ['client_id', CLIENT] })
+  })
+
+  it("counts ME's own automated letters, marked as machine mail with their subject label, but not a cancelled one", async () => {
+    const { value } = deps({
+      tables: {
+        contact_touchpoints: ok([
+          { source_ref: 'S1', occurred_at: '2026-10-25T03:00:00Z', metadata: { automated: true, counts_toward_frequency: true, subject_label: 'me_send:welcome' } },
+          { source_ref: 'S2', occurred_at: '2026-10-25T04:00:00Z', metadata: { automated: true, counts_toward_frequency: false, subject_label: 'me_send:welcome' } },
+          { source_ref: 'M1', occurred_at: '2026-10-25T05:00:00Z', metadata: {} },
+        ]),
+      },
+    })
+    const res = await createFrequencySources(value).touchpoints('contact-1', SINCE)
+    expect(res.ok && res.items).toEqual([
+      { source: 'touchpoint', id: 'S1', at: '2026-10-25T03:00:00Z', subject: 'me_send:welcome', address: '', automated: true },
+      { source: 'touchpoint', id: 'M1', at: '2026-10-25T05:00:00Z', subject: null, address: '' },
+    ])
+  })
+})
+
+describe('touchpointItem', () => {
+  it('a counted machine mail without a label still gets a non-empty subject (so it is never folded into a sales email)', () => {
+    expect(touchpointItem({ source_ref: 'S1', occurred_at: '2026-10-25T03:00:00Z', metadata: { counts_toward_frequency: true } })).toMatchObject({
+      subject: 'automated',
+      automated: true,
+    })
+  })
+
+  it('only a real true counts: a string "true" is not the flag', () => {
+    expect(touchpointItem({ source_ref: 'S1', occurred_at: '2026-10-25T03:00:00Z', metadata: { automated: true, counts_toward_frequency: 'true' } })).toBeNull()
   })
 })
 

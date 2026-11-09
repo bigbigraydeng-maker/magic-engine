@@ -7,6 +7,8 @@
  */
 
 import { createHash } from 'node:crypto'
+import type { EmailUnsubscribeRead } from '@/lib/messaging/email-unsubscribe'
+import { isAutomatedTemplateKey } from './automated-template-key'
 import type { EffectiveEmailConfig } from './effective-config'
 import { getProvider } from './facts/registry'
 import type { FactProvider, PickInput, PublishedTourFact, RenderFacts } from './facts/types'
@@ -25,6 +27,7 @@ export type GateReason =
   | 'config_invalid'
   | 'recipient_not_allowed'
   | 'template_unavailable'
+  | 'template_automated'
   | 'template_outdated'
   | 'catalog_outdated'
   | 'catalog_unreadable'
@@ -41,6 +44,8 @@ export type GateReason =
   | 'catalogue_unavailable'
   | 'already_followed_up'
   | 'duplicate_template'
+  | 'email_unsubscribed'
+  | 'unsubscribe_unverifiable'
   | 'frequency_cap'
   | 'frequency_unverifiable'
   | 'internal_error'
@@ -49,6 +54,7 @@ export const GATE_MESSAGES: Record<GateReason, string> = {
   config_invalid: '发信设置无效，这封没有发出，请找 Magic Lab 团队。',
   recipient_not_allowed: '试运行期间只能发给测试地址，这封没有发出。',
   template_unavailable: '这个模板已被停用或不存在，这封没有发出。',
+  template_automated: '这是系统自动发的信的模板，不能手动发。这封没有发出。',
   template_outdated: '模板刚被更新，请重新生成预览后再发。',
   catalog_outdated: '官网价格或班期刚更新，请重新生成预览后再发。',
   catalog_unreadable: '暂时读不到官网上架数据，这封没有发出，请稍后再试。',
@@ -65,6 +71,8 @@ export const GATE_MESSAGES: Record<GateReason, string> = {
   catalogue_unavailable: '这个客户还没配目录，或目录已过期，这封没有发出。',
   already_followed_up: '这次通话后已经发过跟进邮件了。',
   duplicate_template: '同一个模板刚给他发过，请稍后再发。',
+  email_unsubscribed: '这位客人已经退订了邮件，这封没有发出。打电话不受影响。',
+  unsubscribe_unverifiable: '暂时查不到他有没有退订邮件，先别发，稍后再试。',
   frequency_cap: '他最近收到的邮件已达上限。',
   frequency_unverifiable: '暂时数不清他这周收了几封，先别发，稍后再试。',
   internal_error: '系统内部出错，这封没有发出。',
@@ -176,6 +184,8 @@ export interface SendGateData {
   /** Provider message ids of the mails these templates sent to this guest since `sinceIso`; throws when it cannot list them all. */
   exemptMessageIdsSince(clientId: string, contactId: string, templateKeys: readonly string[], sinceIso: string): Promise<string[]>
   frequencySources: FrequencySources
+  /** Did the guest unsubscribe from e-mail (ME's one-click link)? A failed read must come back as `ok:false`. */
+  loadEmailUnsubscribed(clientId: string, contactId: string): Promise<EmailUnsubscribeRead>
   /** The client's own time zone ("today" differs between Sydney and Auckland). Absent = the default zone. */
   loadTimeZone?(clientId: string): Promise<string>
 }
@@ -273,6 +283,8 @@ async function templateStage(
   tz: string,
   meta: SendMeta,
 ): Promise<TemplateStage | GateFailure> {
+  // The key comes from the browser: an automated letter's template is refused here, not only hidden from the picker.
+  if (isAutomatedTemplateKey(template.key)) return fail(409, 'template_automated', meta)
   const tpl = await data.loadTemplate(args.clientId, template.key)
   const sendable = checkTemplateSendable(tpl, template.version)
   if (!sendable.ok || tpl === null) return fail(409, sendable.ok ? 'template_unavailable' : sendable.reason, meta)
@@ -486,7 +498,20 @@ async function frequencyStage(args: InLockArgs, data: SendGateData, tz: string):
   return { ...fail(409, 'frequency_cap', { ...args.meta, blockDetail: detail }), error: `${GATE_MESSAGES.frequency_cap}${text}。` }
 }
 
+// Checked inside the lock, first: an unsubscribe that arrived while the earlier checks ran still stops this mail.
+// Its own check, deliberately not part of the do-not-contact check: unsubscribing stops e-mail only, not calls.
+async function unsubscribedStage(args: InLockArgs, data: SendGateData): Promise<GateFailure | null> {
+  const read = await data.loadEmailUnsubscribed(args.clientId, args.contactId)
+  if (!read.ok) {
+    return fail(503, 'unsubscribe_unverifiable', { ...args.meta, blockDetail: `unverifiable:${read.error}`.slice(0, 300) })
+  }
+  if (read.unsubscribed) return fail(409, 'email_unsubscribed', { ...args.meta, blockDetail: 'email_unsubscribed' })
+  return null
+}
+
 async function runInLock(args: InLockArgs, data: SendGateData, tz: string): Promise<InLockResult> {
+  const unsubscribed = await unsubscribedStage(args, data)
+  if (unsubscribed !== null) return unsubscribed
   const followUp = await followUpStage(args, data)
   if (followUp !== null) return followUp
   const frequency = await frequencyStage(args, data, tz)

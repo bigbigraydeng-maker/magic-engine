@@ -88,6 +88,32 @@ async function auditSource(deps: FrequencySourceDeps, contactId: string, sinceIs
   }
 }
 
+type TouchpointRow = { source_ref: string | null; occurred_at: string; metadata: Record<string, unknown> | null }
+
+/**
+ * Out-of-office replies and other machine mail are left out: they are not "emails we sent". The exception is mail a
+ * machine sent on our behalf whose writer flags it `counts_toward_frequency: true` (ME's own automated letters,
+ * docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §6.4): the guest really receives it, so the cap counts it. It stays
+ * marked `automated` (never read as a person's email) and keeps a non-empty subject label, so the de-duplication can
+ * never fold it into a sales email sent the same minute.
+ */
+export function touchpointItem(row: TouchpointRow): OutboundItem | null {
+  const metadata = row.metadata
+  if (metadata?.counts_toward_frequency === true) {
+    const label = typeof metadata.subject_label === 'string' ? metadata.subject_label.trim() : ''
+    return {
+      source: 'touchpoint',
+      id: row.source_ref,
+      at: row.occurred_at,
+      subject: label === '' ? 'automated' : label,
+      address: '',
+      automated: true,
+    }
+  }
+  if (metadata?.automated === true) return null
+  return { source: 'touchpoint', id: row.source_ref, at: row.occurred_at, subject: null, address: '' }
+}
+
 async function touchpointSource(deps: FrequencySourceDeps, contactId: string, sinceIso: string): Promise<SourceResult> {
   const rows = await deps.db
     .from('contact_touchpoints')
@@ -99,14 +125,13 @@ async function touchpointSource(deps: FrequencySourceDeps, contactId: string, si
     .gte('occurred_at', sinceIso)
     .limit(500)
   if (rows.error) return { ok: false, error: `touchpoints: ${rows.error.message}` }
-  const list =
-    (rows.data as Array<{ source_ref: string | null; occurred_at: string; metadata: Record<string, unknown> | null }> | null) ?? []
-  return {
-    ok: true,
-    items: list
-      .filter((r) => r.metadata?.automated !== true) // out-of-office / auto-replies are not "emails we sent"
-      .map((r) => ({ source: 'touchpoint', id: r.source_ref, at: r.occurred_at, subject: null, address: '' })),
+  const list = (rows.data as TouchpointRow[] | null) ?? []
+  const items: OutboundItem[] = []
+  for (const row of list) {
+    const item = touchpointItem(row)
+    if (item !== null) items.push(item)
   }
+  return { ok: true, items }
 }
 
 async function recipientItems(

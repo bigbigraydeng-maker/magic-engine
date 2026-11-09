@@ -19,14 +19,19 @@
  * 机器发的那一笔**仍然留在时间线上**（客人确实收到了），只是不算「有人跟过他」。
  */
 
+import { ME_SEND_SOURCE } from '@/lib/messaging/triggered-send/send-touchpoint'
+
 /**
  * 这些来源写出来的出站整类都是机器发的。
  *
  * 整类拉黑只用于「这个系统压根不产生人工动作」的来源。邮件不在这里 ——
  * info@ 的已发送里绝大多数是同事真的在回信，只有个别几封是自动回执，
  * 那种要靠下面的 `metadata.automated` 逐条标。
+ *
+ * `me_send` = ME 自己通过 Resend 自动发的信（欢迎信等）。写入方也会标 `automated: true`，
+ * 这里按来源再认一次，两条判据任一条都够（设计稿 2026-11-02-me-send-gate-p2 §6.4）。
  */
-const AUTOMATED_SOURCES = new Set(['mailchimp'])
+const AUTOMATED_SOURCES = new Set(['mailchimp', ME_SEND_SOURCE])
 
 /**
  * 这一笔是机器发的吗。

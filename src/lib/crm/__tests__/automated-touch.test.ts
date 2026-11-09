@@ -14,6 +14,12 @@ describe('按来源', () => {
     expect(isAutomatedTouch('mailchimp', null)).toBe(true)
   })
 
+  /** ME 自己通过 Resend 自动发的信（欢迎信等）—— 客人收到了，但不是销售跟过他。 */
+  it('ME 自动发的信整类是机器发的，哪怕写入方漏标了 automated', () => {
+    expect(isAutomatedTouch('me_send', null)).toBe(true)
+    expect(isAutomatedTouch('me_send', { automated: false })).toBe(true)
+  })
+
   /** 销售手打的电话记录 —— 这就是「人跟过」本身，认错它整套分级都塌了。 */
   it('人手记的电话不是机器发的', () => {
     expect(isAutomatedTouch('me_manual', null)).toBe(false)

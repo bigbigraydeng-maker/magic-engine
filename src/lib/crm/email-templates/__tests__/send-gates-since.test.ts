@@ -64,6 +64,7 @@ function dataReturning(receipts: StoredReceipt[], seenSince: string[]): SendGate
       return receipts.filter((r) => r.createdAt >= since)
     },
     exemptMessageIdsSince: async () => [],
+    loadEmailUnsubscribed: async () => ({ ok: true, unsubscribed: false }),
     frequencySources: {
       sentItems: async () => ({ ok: true, items: [] }),
       audit: async () => ({ ok: true, items: [] }),

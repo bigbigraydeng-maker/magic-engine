@@ -31,6 +31,11 @@ export interface OutboundItem {
   subject: string | null
   /** Lower-case recipient address this item counts for. '' = contact-scoped (audit rows, touchpoints): counted for the primary address. */
   address: string
+  /**
+   * true = a mail a machine sent that still counts toward the cap (ME's own automated letters). It is never a person's
+   * email: anything asking "did a person write to this guest" must leave it out. Absent = an ordinary item.
+   */
+  automated?: true
 }
 
 /** A source either answers (possibly with zero items) or fails. A failure is NEVER read as zero. */

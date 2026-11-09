@@ -99,6 +99,7 @@ export function makeData(over: Partial<SendGateData> = {}): SendGateData {
     loadSenderName: vi.fn(async () => 'Lisa Zhang'),
     sentTemplateReceiptsSince: vi.fn(async () => [] as StoredReceipt[]),
     exemptMessageIdsSince: vi.fn(async () => [] as string[]),
+    loadEmailUnsubscribed: vi.fn(async () => ({ ok: true as const, unsubscribed: false })),
     frequencySources: emptySources(),
     ...over,
   }
