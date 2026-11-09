@@ -18,6 +18,8 @@ import { creativeRefsOfPhase } from '@/lib/marketing-plan/promo/phase-creatives'
 import { pickPlanForPrescription } from '@/lib/marketing-plan/promo/plan-pick'
 import { ApprovalRecord } from './_components/ApprovalRecord'
 import { PlanOverview } from './_components/PlanOverview'
+import { DeliveryStageCard } from './_components/DeliveryStageCard'
+import type { DeliveryView } from '@/lib/marketing-plan/promo/stage-evidence'
 import { ScheduleTable } from './_components/ScheduleTable'
 import { expandPromoSchedule } from '@/lib/marketing-plan/promo/schedule'
 import { todayInNz } from '@/lib/marketing-plan/promo/schedule-view'
@@ -53,6 +55,7 @@ export function PromoPlanClient() {
   const [message, setMessage] = useState<string | null>(null)
   const [showSample, setShowSample] = useState(false)
   const [approverOnly, setApproverOnly] = useState(false)
+  const [delivery, setDelivery] = useState<DeliveryView | null>(null)
 
   const base = `/api/clients/${clientId}/marketing-plan`
 
@@ -80,10 +83,12 @@ export function PromoPlanClient() {
       live_link?: { lines: string[] } | null
       live_ads_visible?: boolean
       prescription?: GoalPrescriptionView | null
+      delivery?: DeliveryView | null
       error?: string
     }
     if (!json.success || !json.board) throw new Error(json.error ?? '读取推广计划失败')
     setBoard(json.board)
+    setDelivery(json.delivery ?? null)
     setOptions(json.options ?? null)
     setLiveAds(json.live_ads ?? null)
     setLiveLink(json.live_link?.lines ?? null)
@@ -98,7 +103,7 @@ export function PromoPlanClient() {
       const id = keepId ?? pickPlanForPrescription(loaded.plans, loaded.prescription?.goal_id ?? null)?.id ?? null
       setSelectedId(id)
       if (id) await loadBoard(id)
-      else { setBoard(null); setPrescription(loaded.prescription) }
+      else { setBoard(null); setDelivery(null); setPrescription(loaded.prescription) }
     } catch (e) {
       setError((e as Error).message)
     } finally { setLoading(false) }
@@ -133,6 +138,24 @@ export function PromoPlanClient() {
     if (!j.success) throw new Error(j.error ?? '记录失败')
     setMessage('✓ 已记录：这一周你看过、没意见。计划和预算都没有改动。')
   })
+
+  const onPropose = () => {
+    void (async () => {
+      setBusy('propose'); setMessage(null)
+      try {
+        const res = await fetch(`${base}/${selectedId}/promo/stage-proposal`, { method: 'POST' })
+        const json = await res.json() as { success: boolean; error?: string; plan_id?: string; reason?: string }
+        if (json.reason === 'approver_only') setApproverOnly(true)
+        if (!json.success || !json.plan_id) throw new Error(json.error ?? '没有生成草稿')
+        setMessage('✓ 已生成一份放量草稿。正在跑的计划没有改，也没有自动批准。')
+        await refresh(json.plan_id)
+      } catch (e) {
+        setMessage(`✗ ${(e as Error).message}`)
+      } finally {
+        setBusy(null)
+      }
+    })()
+  }
 
   const onApprove = () => {
     if (!confirm('确认批准这份计划？批准后只会派出内部待办，广告不会自动投放。')) return
@@ -220,6 +243,14 @@ export function PromoPlanClient() {
                   ))}
                 </ul>
               </div>
+            )}
+            {delivery && !showSample && (
+              <DeliveryStageCard
+                view={delivery}
+                busy={busy === 'propose'}
+                canAct={!approverOnly && selected.status === 'approved'}
+                onPropose={onPropose}
+              />
             )}
             {shownPhases
               ? <PlanOverview phases={shownPhases} sample={showSample} onCloseSample={showSample ? () => setShowSample(false) : undefined} />

@@ -858,3 +858,56 @@ describe('the receipt of an attempt that reached the send is written while the g
     expect(result.ok).toBe(true)
   })
 })
+
+describe('click tokens (design 2026-11-10 B2 §4.2): after the gates, inside the lock, never a reason not to send', () => {
+  it('the tokened body is what goes out; the footer is not handed to the tagger; the receipt notes how many', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings({ footer: 'Unsubscribe: https://www.example.com/u' }))
+    f.deps.gates = stubGates(f)
+    const tagLinks = vi.fn(async (a: { body: string }) => {
+      f.calls.push('tagLinks')
+      return { body: `${a.body} [tokened]`, tagged: 2, warning: null }
+    })
+    f.deps.tagLinks = tagLinks
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result.ok).toBe(true)
+    expect(tagLinks.mock.calls[0][0].body).not.toContain('Unsubscribe')
+    const draftArgs = (f.graph.createDraft as ReturnType<typeof vi.fn>).mock.calls[0][1] as { body: string }
+    expect(draftArgs.body).toBe('Hi Amy,\nThanks for your enquiry. [tokened]\n\nUnsubscribe: https://www.example.com/u')
+    expect(result.meta?.warnings).toContain('link_tracked:2')
+    expect(indexOf(f, 'inLock')).toBeLessThan(indexOf(f, 'tagLinks'))
+    expect(indexOf(f, 'tagLinks')).toBeLessThan(indexOf(f, 'createDraft'))
+  })
+
+  it('a tagger that throws anyway: the original text still goes out, with a warning, never a refusal', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    f.deps.gates = stubGates(f)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    f.deps.tagLinks = vi.fn(async () => {
+      throw new Error('db down')
+    })
+    const result = await sendMailNew(baseInput(), f.deps)
+    expect(result.ok).toBe(true)
+    const draftArgs = (f.graph.createDraft as ReturnType<typeof vi.fn>).mock.calls[0][1] as { body: string }
+    expect(draftArgs.body).toBe('Hi Amy,\nThanks for your enquiry.')
+    expect(result.meta?.warnings).toContain('link_tracking_failed')
+  })
+
+  it('a mail refused by an in-lock gate is never tagged (no tokens for mails that did not go out)', async () => {
+    const f = makeFakes()
+    withSettings(f, okSettings())
+    const refusal: GateFailure = { ok: false, status: 409, reason: 'frequency_cap', error: 'cap', meta: baseMeta() }
+    f.deps.gates = stubGates(f, { inLock: refusal })
+    f.deps.tagLinks = vi.fn(async (a: { body: string }) => ({ body: a.body, tagged: 0, warning: null }))
+    await sendMailNew(baseInput(), f.deps)
+    expect(f.deps.tagLinks).not.toHaveBeenCalled()
+  })
+
+  it('a legacy-config client is never tagged', async () => {
+    const f = makeFakes({ leadsConfig: ENABLED })
+    f.deps.tagLinks = vi.fn(async (a: { body: string }) => ({ body: a.body, tagged: 0, warning: null }))
+    await sendMailNew(baseInput(), f.deps)
+    expect(f.deps.tagLinks).not.toHaveBeenCalled()
+  })
+})

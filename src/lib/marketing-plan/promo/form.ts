@@ -144,6 +144,14 @@ export function withAdsTargeting(step: AdsStep, targeting: AdsTargeting | undefi
   return { ...step, settings: settings as AdsStep['settings'] }
 }
 
+/** 标试投 / 已证明。留空时把键删掉，避免内容指纹把「没标」写成空值。 */
+export function withBudgetRole(step: AdsStep, role: 'test' | 'proven' | undefined): AdsStep {
+  const settings: Record<string, unknown> = { ...step.settings }
+  if (role === undefined) delete settings.budget_role
+  else settings.budget_role = role
+  return { ...step, settings: settings as AdsStep['settings'] }
+}
+
 /**
  * 改投放范围里的年龄；留空时**把键删掉**而不是写 undefined（原因同 `withAdsTargeting`）。
  */

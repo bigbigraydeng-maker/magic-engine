@@ -143,5 +143,17 @@ describe('buildSpendActivationReceipt', () => {
     expect(receipt.entry).toBe('go-live-card')
     expect(receipt.card_run_id).toBe('11111111-1111-4111-8111-111111111111')
   })
+
+  it('records the bound plan only when one was checked', () => {
+    const receipt = buildSpendActivationReceipt({
+      authority: { actorUserId: 'u-pm', actorEmail: 'pm@magiclab.test', basis: 'global_admin' },
+      entry: 'meta-ads/execute',
+      clientId: 'c1',
+      campaignId: 'camp-1',
+      planId: 'plan-1',
+      now: new Date('2026-10-06T01:02:03.000Z'),
+    })
+    expect(receipt.plan_id).toBe('plan-1')
+  })
 })
 

@@ -131,6 +131,8 @@ export interface GateState {
   templateKey: string | null
   callEvidenceAt: string | null
   addresses: string[]
+  /** The published facts preLock already read (link labelling inside the lock must not read the database again). */
+  linkFacts?: RenderFacts | null
 }
 
 export type GateStatus = 403 | 409 | 503
@@ -434,6 +436,7 @@ async function runPreLock(args: PreLockArgs, data: SendGateData, tz: string): Pr
   })
   meta.warnings = result.warnings.map((w) => (w.ruleId ? `${w.code}:${w.ruleId}` : w.code))
   if (result.blocks.length > 0) return contentFailure(result.blocks, meta)
+  state.linkFacts = facts
   return { ok: true, meta, state }
 }
 

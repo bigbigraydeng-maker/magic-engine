@@ -25,6 +25,13 @@ import { issuePausedDraftCard, submitPausedDraftCard } from '@/lib/ads-strategy/
 import type { CreateDraftDeps } from '@/lib/ads-strategy/draft-and-gate'
 import { askDirectPausedDraft } from '@/lib/ads-strategy/direct-draft-card'
 import { admitFinishedAsset, type AdmitDeps, type AdmitWorkOrder } from '@/lib/ads-strategy/admit-finished-asset'
+import { pausedDraftClickUrl, VIDEO_UPLOAD_WHAT } from '@/lib/ads-strategy/paused-draft-copy'
+import {
+  confirmVideoUploadCard,
+  requestVideoUploadCard,
+  uploadOrAsk,
+  VIDEO_UPLOAD_HOLD,
+} from '@/lib/ads-strategy/video-upload-card'
 import { writeHeldBudget } from '@/lib/action-submission/money-card-write'
 import type { MoneyHold } from '@/lib/action-submission/money-card'
 
@@ -390,6 +397,30 @@ const EIGHT = [
     present: ['ASSET_UPLOAD_REFUSED'],
     absent: ['deps.upload(', 'uploadVideoToMeta('],
   },
+  {
+    name: 'finished-asset runner',
+    file: 'src/lib/ads-strategy/admit-finished-asset-run.ts',
+    present: ['requestFinishedVideoUpload', 'ASSET_UPLOAD_REFUSED'],
+    absent: ['uploadVideoToMeta('],
+  },
+  {
+    name: 'video upload card',
+    file: 'src/lib/ads-strategy/video-upload-card.ts',
+    present: ['confirmVideoUploadCard', 'requestVideoUploadCard'],
+    absent: ['uploadVideoToMeta(', 'createDraftForApproval(', 'setCampaignStatus(', 'setAdSetStatus(', '@/lib/supabase', '@/lib/capabilities'],
+  },
+  {
+    name: 'video upload exec',
+    file: 'src/lib/ads-strategy/video-upload-exec.ts',
+    present: ['uploadVideoToMeta(', 'readVideoInAdAccount('],
+    absent: ['createDraftForApproval(', 'setCampaignStatus(', 'setAdSetStatus(', '/campaigns', '/adsets'],
+  },
+  {
+    name: 'video upload confirm route',
+    file: 'src/app/api/clients/[id]/meta-ads/video-upload-card/[runId]/route.ts',
+    present: ['confirmVideoUploadCard'],
+    absent: ['uploadVideoToMeta('],
+  },
 ]
 
 describe('the eight direct Meta writes are carded or refused', () => {
@@ -443,12 +474,104 @@ describe('the eight direct Meta writes are carded or refused', () => {
     const result = await admitFinishedAsset(order, {
       uploadEnabled: true,
       publicBase: 'https://files.example.test/bucket',
-      accounts: async () => ({ ok: true, accounts: [{ adAccountId: 'act_1', isPrimary: true }], registeredIds: ['act_1'] }),
+      accounts: async () => ({ ok: true, accounts: [{ adAccountId: VIDEO_ACCOUNT, isPrimary: true }], registeredIds: [VIDEO_ACCOUNT] }),
       token: async () => 'tok',
       upload,
       remember: async () => ({ ok: true }),
     })
     expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toContain('没有确认卡')
     expect(upload).not.toHaveBeenCalled()
+  })
+})
+
+const VIDEO_FILE = 'https://files.example.test/bucket/renders/c/wo-1/final.mp4'
+const VIDEO_ACCOUNT = 'act_1234567890'
+
+function videoExec(readBackOk = true) {
+  const upload = vi.fn(async () => ({ ok: true as const, videoId: '555' }))
+  const readBack = vi.fn(async () => (readBackOk ? { ok: true as const, videoId: '555' } : { ok: false as const, error: 'missing' }))
+  const remember = vi.fn(async () => ({ ok: true as const }))
+  const token = vi.fn(async () => 'tok')
+  return { upload, readBack, remember, token, deps: { currentFileUrl: async () => VIDEO_FILE, accountRegistered: async () => true, token, upload, readBack, remember } }
+}
+
+async function issued(workOrderId: string) {
+  const f = kernel()
+  const card = await requestVideoUploadCard({
+    kernel: f.kernel, clientId: CLIENT_A, clicker: { kind: 'agent', email: null },
+    workOrderId, accountId: VIDEO_ACCOUNT, fileUrl: VIDEO_FILE,
+  })
+  return { f, card }
+}
+
+function press(bundle: Awaited<ReturnType<typeof issued>>, deps: ReturnType<typeof videoExec>['deps'], over: { fingerprint?: string; now?: Date; runId?: string } = {}) {
+  return confirmVideoUploadCard({
+    kernel: bundle.f.kernel, clientId: CLIENT_A, runId: over.runId ?? bundle.card.runId, clicker: OPC,
+    resolution: 'confirm', expectedDecisionId: bundle.card.expectedDecisionId,
+    fingerprint: over.fingerprint ?? bundle.card.fingerprint, deps, now: over.now,
+  })
+}
+
+describe('video upload writes only after a confirmed card', () => {
+  it('points the card click at the upload confirm route', () => {
+    expect(pausedDraftClickUrl(CLIENT_A, 'run-1', VIDEO_UPLOAD_WHAT)).toBe(`/api/clients/${CLIENT_A}/meta-ads/video-upload-card/run-1`)
+  })
+
+  it('asks for a card instead of uploading when acceptance has none', async () => {
+    const upload = vi.fn<AdmitDeps['upload']>(async () => ({ ok: true as const, videoId: '555' }))
+    const ask = vi.fn(async () => ({ ok: true as const }))
+    const order: AdmitWorkOrder = { id: 'wo-1', clientId: CLIENT_A, status: 'in_review', assetOnly: true, videoPath: 'renders/c/wo-1/final.mp4', reviewRef: {} }
+    const result = await uploadOrAsk({
+      admit: () => admitFinishedAsset(order, {
+        uploadEnabled: true, publicBase: 'https://files.example.test/bucket',
+        accounts: async () => ({ ok: true, accounts: [{ adAccountId: VIDEO_ACCOUNT, isPrimary: true }], registeredIds: [VIDEO_ACCOUNT] }),
+        token: async () => 'tok', upload, remember: async () => ({ ok: true }),
+      }),
+      ask,
+    })
+    expect(result).toMatchObject({ ok: true, awaitingCard: true, videoId: null })
+    expect(ask).toHaveBeenCalledTimes(1)
+    expect(upload).not.toHaveBeenCalled()
+  })
+
+  it('does not upload when the card is missing, mismatched, or expired', async () => {
+    const bundle = await issued('wo-1')
+    const expired = videoExec()
+    const late = await press(bundle, expired.deps, { now: later() })
+    expect(late.wrote).toBe(false)
+    expect(late.reason).toMatch(/作废/)
+    expect(expired.upload).not.toHaveBeenCalled()
+    expect(expired.token).not.toHaveBeenCalled()
+    const mismatch = videoExec()
+    expect((await press(bundle, mismatch.deps, { fingerprint: 'b'.repeat(64) })).wrote).toBe(false)
+    expect(mismatch.upload).not.toHaveBeenCalled()
+    const missing = videoExec()
+    const gone = await press(bundle, missing.deps, { runId: '11111111-1111-4111-8111-111111111111' })
+    expect(gone.statusCode).toBe(404)
+    expect(missing.upload).not.toHaveBeenCalled()
+  })
+
+  it('uploads once after confirm, and only remembers a matching read-back', async () => {
+    const bundle = await issued('wo-1')
+    const used = videoExec()
+    const result = await press(bundle, used.deps, { now: new Date(START) })
+    expect(result).toMatchObject({ wrote: true, videoId: '555' })
+    expect(result.reason).toContain('回读')
+    expect(used.upload).toHaveBeenCalledTimes(1)
+    expect(used.upload).toHaveBeenCalledWith(VIDEO_ACCOUNT, VIDEO_FILE, 'tok')
+    expect(used.readBack).toHaveBeenCalledWith(VIDEO_ACCOUNT, '555', 'tok')
+    expect(used.remember).toHaveBeenCalledWith('wo-1', '555', VIDEO_ACCOUNT)
+    const rows = bundle.f.tables.flywheel_actions as Array<{ action_type: string; payload: { status?: string } }>
+    expect(rows.filter((row) => row.action_type === VIDEO_UPLOAD_HOLD && row.payload.status === 'executed')).toHaveLength(1)
+    const again = videoExec()
+    expect((await press(bundle, again.deps, { now: new Date(START) })).wrote).toBe(true)
+    expect(again.upload).not.toHaveBeenCalled()
+    const missed = await issued('wo-2')
+    const unread = videoExec(false)
+    const hidden = await press(missed, unread.deps, { now: new Date(START) })
+    expect(hidden).toMatchObject({ wrote: true, videoId: null })
+    expect(hidden.reason).toMatch(/回读/)
+    expect(unread.remember).not.toHaveBeenCalled()
   })
 })
