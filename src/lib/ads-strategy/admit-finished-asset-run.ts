@@ -6,14 +6,18 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { isAssetOnly } from '@/lib/factory/deliverable'
 import { validateRenderPath } from '@/lib/factory/worker-guard'
-import { uploadVideoToMeta } from '@/lib/meta/asset-upload'
+import { createKernel } from '@/lib/kernel'
 import { getRegisteredAccountIds } from '@/lib/meta/campaign-ownership'
 import { getClientAdAccounts } from '@/lib/meta/client-ad-accounts'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
+import { requestVideoUploadCard } from './video-upload-card'
 import {
   ACCOUNT_UPLOAD_SOURCE,
+  ASSET_UPLOAD_REFUSED,
   admitFinishedAsset,
   creativePoolUploadEnabled,
+  readyToUpload,
+  type AdmitDeps,
   type AdmitOutcome,
   type AdmitWorkOrder,
 } from './admit-finished-asset'
@@ -94,24 +98,43 @@ async function rememberVideo(
   return { ok: true as const }
 }
 
+function depsFor(supabase: SupabaseClient, order: AdmitWorkOrder): AdmitDeps {
+  return {
+    uploadEnabled: creativePoolUploadEnabled(),
+    publicBase: contentFactoryPublicBase(),
+    accounts: () => loadAccounts(order.clientId),
+    token: () => getMetaTokenForClient(order.clientId),
+    upload: async () => ({ ok: false, error: ASSET_UPLOAD_REFUSED }),
+    remember: (videoId, accountId) => rememberVideo(supabase, order, videoId, accountId),
+  }
+}
+
 export async function admitAssetBeforeAccept(
   supabase: SupabaseClient,
   workOrderId: string,
 ): Promise<AdmitOutcome> {
   const loaded = await loadOrder(supabase, workOrderId)
   if (!loaded.ok) return loaded
-  const order = loaded.order
-  return admitFinishedAsset(order, {
-    uploadEnabled: creativePoolUploadEnabled(),
-    publicBase: contentFactoryPublicBase(),
-    accounts: () => loadAccounts(order.clientId),
-    token: () => getMetaTokenForClient(order.clientId),
-    upload: async (accountId, fileUrl, token, title) => {
-      const uploaded = await uploadVideoToMeta(accountId, fileUrl, token, title)
-      if (!uploaded.ok) return uploaded
-      if (uploaded.asset.kind !== 'video') return { ok: false, error: '上传回执不是视频。' }
-      return { ok: true, videoId: uploaded.asset.videoId }
-    },
-    remember: (videoId, accountId) => rememberVideo(supabase, order, videoId, accountId),
+  return admitFinishedAsset(loaded.order, depsFor(supabase, loaded.order))
+}
+
+/** Issue the upload card. Does not copy the file. */
+export async function requestFinishedVideoUpload(
+  supabase: SupabaseClient,
+  workOrderId: string,
+): Promise<{ ok: true; runId: string } | { ok: false; status: number; error: string }> {
+  const loaded = await loadOrder(supabase, workOrderId)
+  if (!loaded.ok) return loaded
+  const plan = await readyToUpload(loaded.order, depsFor(supabase, loaded.order))
+  if (!plan.ok) return plan
+  if (plan.kind !== 'needs_card') return { ok: false, status: 409, error: '这条成片不用再出上传确认卡。' }
+  const card = await requestVideoUploadCard({
+    kernel: createKernel(supabase),
+    clientId: loaded.order.clientId,
+    clicker: { kind: 'agent', email: null },
+    workOrderId: loaded.order.id,
+    accountId: plan.accountId,
+    fileUrl: plan.fileUrl,
   })
+  return { ok: true, runId: card.runId }
 }
