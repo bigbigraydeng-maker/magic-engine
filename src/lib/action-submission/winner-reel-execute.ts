@@ -18,7 +18,8 @@ import { pauseConfirmedWinnerAd, type WinnerPauseInput, type WinnerPauseResult }
 import { collectWinnerSuggestions, type WinnerSuggestions } from '@/lib/winner-reel-sync/engine'
 import { proposeActivateCard } from '@/lib/winner-reel-sync/propose'
 import { claimHold, holdForCard, saveHold, type HoldRow } from '@/lib/winner-reel-sync/ledger'
-import type { ProposalHold } from '@/lib/winner-reel-sync/intents'
+import { bindLaunchToApprovedPlan, type LaunchBind } from '@/lib/ads-launch/plan-gate'
+import type { ProposalHold, ProposalKind } from '@/lib/winner-reel-sync/intents'
 
 export interface WinnerActor {
   triggeredBy: string
@@ -64,6 +65,20 @@ interface PausedCreate {
   accessToken: string
 }
 
+async function launchPlan(
+  sb: KernelDeps['supabase'],
+  clientId: string,
+  kind: ProposalKind,
+): Promise<LaunchBind | null> {
+  if (kind !== 'activate') return null
+  return bindLaunchToApprovedPlan(sb, clientId, { mode: 'ad_only' })
+}
+
+function stampPlan(hold: ProposalHold, bound: LaunchBind | null): ProposalHold {
+  if (!bound?.ok) return hold
+  return { ...hold, planId: bound.planId }
+}
+
 export async function confirmWinnerCard(
   sb: KernelDeps['supabase'],
   input: ConfirmWinnerInput,
@@ -76,6 +91,8 @@ export async function confirmWinnerCard(
   }
   if (row.payload.status !== 'holding') return quiet(row.payload)
   if (input.choice === 'decline') return decline(sb, input, row, ports)
+  const bound = await launchPlan(sb, input.clientId, row.payload.kind)
+  if (bound && !bound.ok) return { card: null, resultLine: bound.reason, wroteMeta: false }
   if (!(await stillValid(input, row.payload, ports))) {
     throw new ConfirmationCardError('stale', '这条建议已经对不上现在的广告了，没有改。')
   }
@@ -86,7 +103,7 @@ export async function confirmWinnerCard(
   const claimed = await claimHold(sb, input.clientId, row, who(input.actor))
   if (!claimed) return { card, resultLine: '没有改广告。', wroteMeta: false }
   const next = await writeOnce(input, claimedPayload(row, input.actor), ports)
-  await saveHold(sb, input.clientId, row, next)
+  await saveHold(sb, input.clientId, row, stampPlan(next, bound))
   return { card, resultLine: next.resultLine ?? '做完了。', wroteMeta: next.wroteMeta }
 }
 

@@ -6,6 +6,14 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+
+const launch = vi.hoisted(() => ({
+  bindLaunchToApprovedPlan: vi.fn(async () => ({ ok: true as const, planId: 'plan-1' })),
+}))
+
+vi.mock('@/lib/ads-launch/plan-gate', () => ({
+  bindLaunchToApprovedPlan: launch.bindLaunchToApprovedPlan,
+}))
 import type { KernelDeps } from '@/lib/kernel/deps'
 import { pausedDraftClickUrl, CAMPAIGN_PAUSE_WHAT, CAMPAIGN_RESUME_WHAT } from '@/lib/ads-strategy/paused-draft-copy'
 import {
@@ -203,9 +211,27 @@ describe('campaign status card', () => {
     expect(store.order.indexOf('receipt')).toBeLessThan(store.order.indexOf('write'))
     expect(result.wroteMeta).toBe(true)
     expect(store.rows[0]?.payload.authorization?.schema).toBe('ads.spend_activation_receipt.v1')
+    expect(store.rows[0]?.payload.authorization?.plan_id).toBe('plan-1')
+  })
+
+  it('refuses a resume when no approved plan is bound, and does not read the ad platform', async () => {
+    launch.bindLaunchToApprovedPlan.mockResolvedValueOnce({
+      ok: false,
+      reason: '这位客户现在没有已批准的广告计划，没有开。',
+    })
+    const store = memory()
+    const { used } = deps({ live: vi.fn(async () => ({ status: 'PAUSED', accountId: '11', name: '系列' })) })
+    await requestCampaignStatusCard(store.client, request('resume', 'PAUSED'), used)
+    const result = await confirmCampaignStatusCard(store.client, click, used)
+    expect(result.statusCode).toBe(409)
+    expect(result.reason).toContain('没有已批准')
+    expect(used.live).not.toHaveBeenCalled()
+    expect(used.decide).not.toHaveBeenCalled()
+    expect(used.write).not.toHaveBeenCalled()
   })
 
   it('does not write when the live campaign no longer matches', async () => {
+    launch.bindLaunchToApprovedPlan.mockClear()
     const store = memory()
     const { used } = deps({ live: vi.fn(async () => ({ status: 'PAUSED', accountId: '11', name: '系列' })) })
     await requestCampaignStatusCard(store.client, request('pause', 'ACTIVE'), used)
@@ -213,6 +239,7 @@ describe('campaign status card', () => {
     expect(result.statusCode).toBe(409)
     expect(used.decide).not.toHaveBeenCalled()
     expect(used.write).not.toHaveBeenCalled()
+    expect(launch.bindLaunchToApprovedPlan).not.toHaveBeenCalled()
   })
 
   it('does not write again when the read-back mismatches', async () => {

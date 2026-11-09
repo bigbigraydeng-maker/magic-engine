@@ -6,6 +6,14 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+
+const launch = vi.hoisted(() => ({
+  bindLaunchToApprovedPlan: vi.fn(async () => ({ ok: true as const, planId: 'plan-1' })),
+}))
+
+vi.mock('@/lib/ads-launch/plan-gate', () => ({
+  bindLaunchToApprovedPlan: launch.bindLaunchToApprovedPlan,
+}))
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { confirmWinnerCard, type ConfirmWinnerInput, type WinnerPorts } from '../winner-reel-execute'
 import type { ProposalHold } from '@/lib/winner-reel-sync/intents'
@@ -159,6 +167,7 @@ describe('winner card confirm', () => {
   })
 
   it('a pause suggestion uses the confirmed pause once and does not open another card', async () => {
+    launch.bindLaunchToApprovedPlan.mockClear()
     const store = db({ id: 'row-1', payload: hold({ kind: 'pause_ad', postId: null, adId: '101', score: null, ctr: 0.1, before: 0.1 }) })
     const used = ports({
       runPause: vi.fn(async () => ({ ok: true, wroteMeta: true, readback: 'PAUSED', reason: '已暂停，回读是暂停。' })),
@@ -167,6 +176,7 @@ describe('winner card confirm', () => {
     expect(used.decide).toHaveBeenCalledTimes(1)
     expect(used.runPause).toHaveBeenCalledTimes(1)
     expect(used.runPause).toHaveBeenCalledWith({ clientId: CLIENT, adId: '101', adAccountId: 'act_11', adsetId: '301' })
+    expect(launch.bindLaunchToApprovedPlan).not.toHaveBeenCalled()
     expect(used.createPaused).not.toHaveBeenCalled()
     expect(result.wroteMeta).toBe(true)
     expect(store.rows[0]?.payload.confirmedBy).toBe('session-user')
@@ -214,6 +224,22 @@ describe('winner card confirm', () => {
     expect(used.activate).toHaveBeenCalledTimes(1)
     expect(result.resultLine).toContain('没有再改一次')
     expect(store.rows[0]?.payload.status).toBe('failed')
+    expect(store.rows[0]?.payload.planId).toBe('plan-1')
+  })
+
+  it('does not turn an ad on when the approved plan blocks the launch', async () => {
+    launch.bindLaunchToApprovedPlan.mockResolvedValueOnce({
+      ok: false,
+      reason: '这位客户现在没有已批准的广告计划，没有开。',
+    })
+    const store = db({ id: 'row-1', payload: hold({ kind: 'activate', postId: null, adId: '101', score: null }) })
+    const used = ports()
+    const result = await confirmWinnerCard(store.client, input(), used)
+    expect(result.wroteMeta).toBe(false)
+    expect(result.resultLine).toContain('没有已批准')
+    expect(used.token).not.toHaveBeenCalled()
+    expect(used.activate).not.toHaveBeenCalled()
+    expect(store.rows[0]?.payload.status).toBe('holding')
   })
 })
 

@@ -7,9 +7,11 @@ const m = vi.hoisted(() => ({
   fetchCampaignStatus: vi.fn(),
   fetchEffectiveStatus: vi.fn(),
   token: vi.fn(),
+  assertLaunchAllowed: vi.fn(async () => ({ ok: true as const, planId: 'plan-1' })),
 }))
 
 vi.mock('@/lib/ads-strategy/draft-and-gate', () => ({ approveDraft: m.approveDraft }))
+vi.mock('@/lib/ads-launch/plan-gate', () => ({ assertLaunchAllowed: m.assertLaunchAllowed }))
 vi.mock('@/lib/meta/ad-publisher', () => ({
   activatePublished: m.activatePublished,
   pausePublished: m.pausePublished,
@@ -133,6 +135,7 @@ beforeEach(() => {
   m.activatePublished.mockResolvedValue({ ok: true })
   m.pausePublished.mockResolvedValue({ ok: true, failed: [] })
   m.fetchCampaignStatus.mockResolvedValue('ACTIVE')
+  m.assertLaunchAllowed.mockResolvedValue({ ok: true, planId: 'plan-1' })
 })
 
 describe('executeConfirmedGoLive', () => {
@@ -158,7 +161,25 @@ describe('executeConfirmedGoLive', () => {
     })
     expect(wrong.settle.outcome).toBe('held')
     expect(m.token).toHaveBeenCalledTimes(1)
+    expect(m.assertLaunchAllowed).toHaveBeenCalledTimes(1)
     expect(m.approveDraft).not.toHaveBeenCalled()
+  })
+
+  it('refuses the launch before any ad-platform call when the plan gate says no', async () => {
+    m.assertLaunchAllowed.mockResolvedValueOnce({ ok: false, reason: '这位客户现在没有已批准的广告计划，没有开。' })
+    const { sb } = fakeDb({ status: 'awaiting_approval' })
+    const result = await executeConfirmedGoLive({
+      supabase: sb as never,
+      clientId: 'client-1',
+      draftId: 'draft-1',
+      authority: authority(),
+      ids: IDS,
+    })
+    expect(result.settle).toMatchObject({ outcome: 'held', reason: '这位客户现在没有已批准的广告计划，没有开。' })
+    expect(m.token).not.toHaveBeenCalled()
+    expect(m.approveDraft).not.toHaveBeenCalled()
+    expect(m.fetchCampaignStatus).not.toHaveBeenCalled()
+    expect(m.activatePublished).not.toHaveBeenCalled()
   })
 
   it('marks the draft live after one readback of active and does not pause', async () => {
