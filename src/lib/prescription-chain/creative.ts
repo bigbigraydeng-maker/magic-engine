@@ -30,11 +30,19 @@ export function linkedPlan(facts: ChainFacts): PlanFact | null | 'unread' | 'no-
 }
 
 function reviewTooOld(orders: WorkOrderFact[], nowMs: number): boolean {
-  return orders.some((order) => {
+  return countOldReviews(orders, nowMs) > 0
+}
+
+function countOldReviews(orders: WorkOrderFact[], nowMs: number): number {
+  return orders.filter((order) => {
     if (order.status !== 'in_review' || !order.updatedAt) return false
     const at = Date.parse(order.updatedAt)
     return Number.isFinite(at) && nowMs - at > REVIEW_WAIT_MS
-  })
+  }).length
+}
+
+function planIsLive(plan: PlanFact): boolean {
+  return plan.status === 'approved' || plan.status === 'completed'
 }
 
 function covers(pool: PoolFact[], ref: string, today: string): 'yes' | 'no' | 'ambiguous' {
@@ -104,6 +112,25 @@ export function deriveCreative(facts: ChainFacts): ReturnType<typeof chainStep> 
   const now = Date.parse(facts.nowIso)
   if (!Number.isFinite(now)) return unreadStep('creative')
   const orders = facts.workOrders.read === 'ok' ? facts.workOrders.value : []
+  if (orders.some((order) => STUCK_WORK.has(order.status))) {
+    return chainStep('creative', 'blocked', '有素材工单失败了，还不能拿去投。')
+  }
+  const livePlan = plan && planIsLive(plan) ? plan : null
+  if (livePlan) {
+    const named = namedCreatives(livePlan, pool, nzToday(now))
+    if (named.state === 'done') {
+      const oldCount = countOldReviews(orders, now)
+      if (oldCount > 0) {
+        return chainStep(
+          'creative',
+          'done',
+          `${named.detail}另有 ${oldCount} 条素材待审超过 24 小时，不挡这份计划`,
+        )
+      }
+      return named
+    }
+    if (named.state === 'blocked' || named.state === 'active') return named
+  }
   const stuck = fromOrders(orders, now)
   if (stuck) return stuck
   if (!plan) return missingPlan(facts)

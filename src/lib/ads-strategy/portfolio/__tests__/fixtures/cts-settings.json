@@ -1,22 +1,22 @@
 {
  "captured": "2026-09-14 Meta Graph v21.0 read-only GET (ads re-read with creative fields)",
- "ad_account_id": "act_2202695063810470",
+ "ad_account_id": "act_2240254741126989",
  "account": {
-  "id": "act_2202695063810470",
+  "id": "act_2240254741126989",
   "name": "CTS",
   "account_status": 1,
   "disable_reason": 0,
   "spend_cap": "0",
-  "amount_spent": "29434",
+  "amount_spent": "34438",
   "currency": "NZD",
   "timezone_name": "Pacific/Auckland",
   "timezone_offset_hours_utc": 12,
-  "min_daily_budget": 171,
+  "min_daily_budget": 200,
   "is_prepay_account": false
  },
  "campaigns": [
   {
-   "id": "52551118114073",
+   "id": "52346313240585",
    "name": "GC · 再营销收割测试 · 私信组 · 北京上海看完95% · 20260913",
    "objective": "OUTCOME_ENGAGEMENT",
    "status": "ACTIVE",
@@ -30,7 +30,7 @@
    "updated_time": "2026-09-14T00:11:45+1200"
   },
   {
-   "id": "52551117286873",
+   "id": "52952375077143",
    "name": "GC · 再营销收割测试 · 北京上海看完95% · 20260913",
    "objective": "OUTCOME_LEADS",
    "status": "ACTIVE",
@@ -44,7 +44,7 @@
    "updated_time": "2026-09-14T00:11:44+1200"
   },
   {
-   "id": "52549857862873",
+   "id": "52083440086532",
    "name": "GC · 顶层认知 · 视频观看 · 20260908",
    "objective": "OUTCOME_AWARENESS",
    "status": "ACTIVE",
@@ -58,7 +58,7 @@
    "updated_time": "2026-09-08T15:32:18+1200"
   },
   {
-   "id": "52549839818273",
+   "id": "52640575887034",
    "name": "CTS · Golden China · LAL实验 · 20260907",
    "objective": "OUTCOME_LEADS",
    "status": "PAUSED",
@@ -74,13 +74,13 @@
  ],
  "adsets": [
   {
-   "id": "52551118124873",
+   "id": "52151282553412",
    "name": "收割 · 北京上海看完95% · 私信 · $12 · 20260913",
-   "campaign_id": "52551118114073",
+   "campaign_id": "52346313240585",
    "optimization_goal": "CONVERSATIONS",
    "billing_event": "IMPRESSIONS",
    "destination_type": "MESSENGER",
-   "daily_budget": "1200",
+   "daily_budget": "1404",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -88,13 +88,13 @@
     "age_min": 25,
     "excluded_custom_audiences": [
      {
-      "id": "52549822861673",
+      "id": "52482924144212",
       "name": "CTS · LIST · fb+newsletter · 20260907"
      }
     ],
     "custom_audiences": [
      {
-      "id": "52551117275273",
+      "id": "52170070344921",
       "name": "CTS · GC 北京+上海视频看完95% · 365d · 20260913"
      }
     ],
@@ -124,18 +124,18 @@
     "standard"
    ],
    "promoted_object": {
-    "page_id": "1616575215312482",
+    "page_id": "1606507503425425",
     "smart_pse_enabled": false
    }
   },
   {
-   "id": "52551117304473",
+   "id": "52149073923601",
    "name": "收割 · 北京上海看完95% · 留资 · $12 · 20260913",
-   "campaign_id": "52551117286873",
+   "campaign_id": "52952375077143",
    "optimization_goal": "LEAD_GENERATION",
    "billing_event": "IMPRESSIONS",
    "destination_type": "ON_AD",
-   "daily_budget": "1200",
+   "daily_budget": "1404",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -143,13 +143,13 @@
     "age_min": 25,
     "excluded_custom_audiences": [
      {
-      "id": "52549822861673",
+      "id": "52482924144212",
       "name": "CTS · LIST · fb+newsletter · 20260907"
      }
     ],
     "custom_audiences": [
      {
-      "id": "52551117275273",
+      "id": "52170070344921",
       "name": "CTS · GC 北京+上海视频看完95% · 365d · 20260913"
      }
     ],
@@ -178,18 +178,18 @@
     "standard"
    ],
    "promoted_object": {
-    "page_id": "1616575215312482",
+    "page_id": "1606507503425425",
     "smart_pse_enabled": false
    }
   },
   {
-   "id": "52549857906273",
+   "id": "52510454332891",
    "name": "GC 顶层 · ThruPlay · 4 条各 $10 · 20260908",
-   "campaign_id": "52549857862873",
+   "campaign_id": "52083440086532",
    "optimization_goal": "THRUPLAY",
    "billing_event": "IMPRESSIONS",
    "destination_type": "UNDEFINED",
-   "daily_budget": "1000",
+   "daily_budget": "1170",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -197,7 +197,7 @@
     "age_min": 25,
     "excluded_custom_audiences": [
      {
-      "id": "52549822861673",
+      "id": "52482924144212",
       "name": "CTS · LIST · fb+newsletter · 20260907"
      }
     ],
@@ -224,13 +224,13 @@
    ]
   },
   {
-   "id": "52549843017273",
+   "id": "52749531035243",
    "name": "CTS · Golden China · LAL 1% · NZ 55+ · 20260907",
-   "campaign_id": "52549839818273",
+   "campaign_id": "52640575887034",
    "optimization_goal": "LINK_CLICKS",
    "billing_event": "IMPRESSIONS",
    "destination_type": "UNDEFINED",
-   "daily_budget": "2500",
+   "daily_budget": "2925",
    "lifetime_budget": "0",
    "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
    "targeting": {
@@ -238,13 +238,13 @@
     "age_min": 18,
     "excluded_custom_audiences": [
      {
-      "id": "52549822861673",
+      "id": "52482924144212",
       "name": "CTS · LIST · fb+newsletter · 20260907"
      }
     ],
     "custom_audiences": [
      {
-      "id": "52549838527273",
+      "id": "52611581539253",
       "name": "类似受众 (NZ, 1%) - CTS · LIST · fb+newsletter · 20260907"
      }
     ],
@@ -274,227 +274,227 @@
  ],
  "ads": [
   {
-   "id": "52551118152673",
+   "id": "52050641703471",
    "name": "GC · Beijing · EN · 私信收割 · 20260913",
-   "adset_id": "52551118124873",
-   "campaign_id": "52551118114073",
+   "adset_id": "52151282553412",
+   "campaign_id": "52346313240585",
    "status": "ACTIVE",
    "effective_status": "ACTIVE",
    "created_time": "2026-09-13T23:54:02+1200",
    "updated_time": "2026-09-14T00:12:14+1200",
    "creative": {
-    "video_id": "3247643238956506",
-    "effective_object_story_id": "1616575215312482_1760890155843172",
+    "video_id": "3206432270917620",
+    "effective_object_story_id": "1606507503425425_1730145646468389",
     "object_story_spec": {
-     "page_id": "1616575215312482",
+     "page_id": "1606507503425425",
      "video_data": {
-      "video_id": "1620585116152417"
+      "video_id": "1643003832443422"
      }
     },
-    "id": "2460773220997689"
+    "id": "2400476504580311"
    }
   },
   {
-   "id": "52551117325273",
+   "id": "52204762690145",
    "name": "GC · Beijing · EN · 收割 · 20260913",
-   "adset_id": "52551117304473",
-   "campaign_id": "52551117286873",
+   "adset_id": "52149073923601",
+   "campaign_id": "52952375077143",
    "status": "ACTIVE",
    "effective_status": "ACTIVE",
    "created_time": "2026-09-13T23:44:19+1200",
    "updated_time": "2026-09-14T00:12:11+1200",
    "creative": {
-    "video_id": "1034180596286460",
-    "effective_object_story_id": "1616575215312482_1754804506451737",
-    "id": "1083416197392932"
+    "video_id": "1025524157022348",
+    "effective_object_story_id": "1606507503425425_1782031243708805",
+    "id": "1050538464201692"
    }
   },
   {
-   "id": "52551117314273",
+   "id": "52565348595239",
    "name": "GC · Grand Tour · EN · 收割 · 20260913",
-   "adset_id": "52551117304473",
-   "campaign_id": "52551117286873",
+   "adset_id": "52149073923601",
+   "campaign_id": "52952375077143",
    "status": "ACTIVE",
    "effective_status": "ACTIVE",
    "created_time": "2026-09-13T23:44:12+1200",
    "updated_time": "2026-09-14T00:12:08+1200",
    "creative": {
-    "video_id": "1811869926837720",
-    "effective_object_story_id": "1616575215312482_1754804249785096",
-    "id": "5701206620105414"
+    "video_id": "1832855172056401",
+    "effective_object_story_id": "1606507503425425_1744922020508229",
+    "id": "5743055854177548"
    }
   },
   {
-   "id": "52549893770273",
+   "id": "52053523026152",
    "name": "GC · Beijing · EN · 20260908",
-   "adset_id": "52549857906273",
-   "campaign_id": "52549857862873",
+   "adset_id": "52510454332891",
+   "campaign_id": "52083440086532",
    "status": "ACTIVE",
    "effective_status": "ACTIVE",
    "created_time": "2026-09-08T04:02:16+1200",
    "updated_time": "2026-09-12T14:24:52+1200",
    "creative": {
-    "video_id": "2354728365274921",
-    "effective_object_story_id": "1616575215312482_1759506872648167",
+    "video_id": "2312024039213026",
+    "effective_object_story_id": "1606507503425425_1747302915954084",
     "object_story_spec": {
-     "page_id": "1616575215312482",
+     "page_id": "1606507503425425",
      "video_data": {
-      "video_id": "2889090431457816"
+      "video_id": "2835187640484034"
      }
     },
-    "id": "1061239610129329"
+    "id": "1004004957814657"
    }
   },
   {
-   "id": "52549893756273",
+   "id": "52097367006935",
    "name": "GC · Xi'an · EN · 20260908",
-   "adset_id": "52549857906273",
-   "campaign_id": "52549857862873",
+   "adset_id": "52510454332891",
+   "campaign_id": "52083440086532",
    "status": "ACTIVE",
    "effective_status": "ACTIVE",
    "created_time": "2026-09-08T04:02:11+1200",
    "updated_time": "2026-09-12T14:24:13+1200",
    "creative": {
-    "video_id": "1014069841672235",
-    "effective_object_story_id": "1616575215312482_1759506875981500",
+    "video_id": "1016656832335715",
+    "effective_object_story_id": "1606507503425425_1721122623394129",
     "object_story_spec": {
-     "page_id": "1616575215312482",
+     "page_id": "1606507503425425",
      "video_data": {
-      "video_id": "1379126637752433"
+      "video_id": "1353781415156982"
      }
     },
-    "id": "2534794020277980"
+    "id": "2564222003263828"
    }
   },
   {
-   "id": "52549893801073",
+   "id": "52000374231471",
    "name": "GC · Shanghai · EN · 20260908",
-   "adset_id": "52549857906273",
-   "campaign_id": "52549857862873",
+   "adset_id": "52510454332891",
+   "campaign_id": "52083440086532",
    "status": "ACTIVE",
    "effective_status": "ACTIVE",
    "created_time": "2026-09-08T04:02:22+1200",
    "updated_time": "2026-09-12T14:24:09+1200",
    "creative": {
-    "video_id": "919925140801137",
-    "effective_object_story_id": "1616575215312482_1759506899314831",
+    "video_id": "918762374170944",
+    "effective_object_story_id": "1606507503425425_1742139324735397",
     "object_story_spec": {
-     "page_id": "1616575215312482",
+     "page_id": "1606507503425425",
      "video_data": {
-      "video_id": "1577461386834053"
+      "video_id": "1593456851723328"
      }
     },
-    "id": "1588250602388523"
+    "id": "1563160035742168"
    }
   },
   {
-   "id": "52549989429473",
+   "id": "52768091915942",
    "name": "GC · Food · EN · 20260908",
-   "adset_id": "52549857906273",
-   "campaign_id": "52549857862873",
+   "adset_id": "52510454332891",
+   "campaign_id": "52083440086532",
    "status": "ACTIVE",
    "effective_status": "ACTIVE",
    "created_time": "2026-09-08T17:31:18+1200",
    "updated_time": "2026-09-12T14:23:57+1200",
    "creative": {
-    "video_id": "1016706784674387",
-    "effective_object_story_id": "1616575215312482_1759506879314833",
+    "video_id": "1009270346614284",
+    "effective_object_story_id": "1606507503425425_1759748485224122",
     "object_story_spec": {
-     "page_id": "1616575215312482",
+     "page_id": "1606507503425425",
      "video_data": {
-      "video_id": "3658504104316017"
+      "video_id": "3620612055577337"
      }
     },
-    "id": "975674198892179"
+    "id": "971622325143140"
    }
   },
   {
-   "id": "52549893739473",
+   "id": "52933085345652",
    "name": "GC · Grand Tour · EN · 20260908",
-   "adset_id": "52549857906273",
-   "campaign_id": "52549857862873",
+   "adset_id": "52510454332891",
+   "campaign_id": "52083440086532",
    "status": "ACTIVE",
    "effective_status": "ACTIVE",
    "created_time": "2026-09-08T04:02:06+1200",
    "updated_time": "2026-09-12T14:23:38+1200",
    "creative": {
-    "video_id": "1105239395405046",
-    "effective_object_story_id": "1616575215312482_1759506865981501",
+    "video_id": "1111912054510263",
+    "effective_object_story_id": "1606507503425425_1767543410520546",
     "object_story_spec": {
-     "page_id": "1616575215312482",
+     "page_id": "1606507503425425",
      "video_data": {
-      "video_id": "3642598035891621"
+      "video_id": "3653944439491614"
      }
     },
-    "id": "1734640937763996"
+    "id": "1734034530450353"
    }
   },
   {
-   "id": "52550116901073",
+   "id": "52057274615245",
    "name": "GC · VisaFree · EN · 20260909",
-   "adset_id": "52549857906273",
-   "campaign_id": "52549857862873",
+   "adset_id": "52510454332891",
+   "campaign_id": "52083440086532",
    "status": "ACTIVE",
    "effective_status": "ACTIVE",
    "created_time": "2026-09-09T04:22:11+1200",
    "updated_time": "2026-09-12T14:23:31+1200",
    "creative": {
-    "video_id": "1053258604220140",
-    "effective_object_story_id": "1616575215312482_1759506885981499",
+    "video_id": "1005324546855501",
+    "effective_object_story_id": "1606507503425425_1717483492455525",
     "object_story_spec": {
-     "page_id": "1616575215312482",
+     "page_id": "1606507503425425",
      "video_data": {
-      "video_id": "1216953767307962"
+      "video_id": "1247321821957544"
      }
     },
-    "id": "1057257300543972"
+    "id": "1092522556025793"
    }
   },
   {
-   "id": "52549847838473",
+   "id": "52112713490866",
    "name": "CTS · GoldenChina · LAL · B一辈子 · 20260908",
-   "adset_id": "52549843017273",
-   "campaign_id": "52549839818273",
+   "adset_id": "52749531035243",
+   "campaign_id": "52640575887034",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-09-08T00:10:34+1200",
    "updated_time": "2026-09-08T00:18:36+1200",
    "creative": {
-    "effective_object_story_id": "1616575215312482_1754562303142624",
+    "effective_object_story_id": "1606507503425425_1752323006902142",
     "object_story_spec": {
-     "page_id": "1616575215312482"
+     "page_id": "1606507503425425"
     },
-    "id": "1422966763112542"
+    "id": "1409530005926253"
    }
   },
   {
-   "id": "52549847826873",
+   "id": "52545792133420",
    "name": "CTS · GoldenChina · LAL · A免签全包 · 20260908",
-   "adset_id": "52549843017273",
-   "campaign_id": "52549839818273",
+   "adset_id": "52749531035243",
+   "campaign_id": "52640575887034",
    "status": "PAUSED",
    "effective_status": "PAUSED",
    "created_time": "2026-09-08T00:10:30+1200",
    "updated_time": "2026-09-08T00:14:57+1200",
    "creative": {
-    "effective_object_story_id": "1616575215312482_1754561886475999",
+    "effective_object_story_id": "1606507503425425_1790401732330352",
     "object_story_spec": {
-     "page_id": "1616575215312482"
+     "page_id": "1606507503425425"
     },
-    "id": "1111845191524978"
+    "id": "1124410144867941"
    }
   }
  ],
  "audiences": [
   {
-   "id": "52551117275273",
+   "id": "52170070344921",
    "name": "CTS · GC 北京+上海视频看完95% · 365d · 20260913",
    "subtype": "ENGAGEMENT",
    "approximate_count_lower_bound": 1000,
    "approximate_count_upper_bound": 1000,
    "time_created": 1789299810,
    "time_updated": 1789299820,
-   "rule": "[{\"event_name\":\"video_completed\",\"object_id\":2354728365274921},{\"event_name\":\"video_completed\",\"object_id\":919925140801137}]",
+   "rule": "[{\"event_name\":\"video_completed\",\"object_id\":2312024039213026},{\"event_name\":\"video_completed\",\"object_id\":918762374170944}]",
    "retention_days": 365,
    "operation_status": {
     "code": 200,
@@ -506,14 +506,14 @@
    }
   },
   {
-   "id": "52549865359073",
+   "id": "52649742243513",
    "name": "CTS · VIDEO · 看过50% · 365d",
    "subtype": "ENGAGEMENT",
    "approximate_count_lower_bound": 1000,
    "approximate_count_upper_bound": 1000,
    "time_created": 1788788658,
    "time_updated": 1788788658,
-   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"id\":1616575215312482,\"type\":\"page\"}],\"retention_seconds\":31536000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"video_view\"},{\"field\":\"video_view_percentage\",\"operator\":\"gte\",\"value\":50}]}}]}}",
+   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"id\":1606507503425425,\"type\":\"page\"}],\"retention_seconds\":31536000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"video_view\"},{\"field\":\"video_view_percentage\",\"operator\":\"gte\",\"value\":50}]}}]}}",
    "retention_days": 365,
    "operation_status": {
     "code": 441,
@@ -525,7 +525,7 @@
    }
   },
   {
-   "id": "52549838527273",
+   "id": "52611581539253",
    "name": "类似受众 (NZ, 1%) - CTS · LIST · fb+newsletter · 20260907",
    "subtype": "LOOKALIKE",
    "approximate_count_lower_bound": 32600,
@@ -545,7 +545,7 @@
     "country": "NZ",
     "origin": [
      {
-      "id": "52549822861673",
+      "id": "52482924144212",
       "name": "CTS · LIST · fb+newsletter · 20260907",
       "type": "custom_audience"
      }
@@ -555,7 +555,7 @@
    }
   },
   {
-   "id": "52549822861673",
+   "id": "52482924144212",
    "name": "CTS · LIST · fb+newsletter · 20260907",
    "subtype": "CUSTOM",
    "approximate_count_lower_bound": 1000,
@@ -573,14 +573,14 @@
    }
   },
   {
-   "id": "6971567517469",
+   "id": "6939377845445",
    "name": "公共主页互动客户",
    "subtype": "ENGAGEMENT",
    "approximate_count_lower_bound": 1000,
    "approximate_count_upper_bound": 1000,
    "time_created": 1777902644,
    "time_updated": 1777902644,
-   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"page\",\"id\":1146745731851959}],\"retention_seconds\":31536000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"page_engaged\"}]}}]}}",
+   "rule": "{\"inclusions\":{\"operator\":\"or\",\"rules\":[{\"event_sources\":[{\"type\":\"page\",\"id\":1108546381046118}],\"retention_seconds\":31536000,\"filter\":{\"operator\":\"and\",\"filters\":[{\"field\":\"event\",\"operator\":\"eq\",\"value\":\"page_engaged\"}]}}]}}",
    "retention_days": 365,
    "operation_status": {
     "code": 450,

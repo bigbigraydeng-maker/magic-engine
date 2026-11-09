@@ -4,6 +4,7 @@
  */
 import { supabaseAdmin } from '@/lib/supabase'
 import { unusableAccountNote } from '@/lib/ads-strategy/war-map/pools'
+import { authorizedAdSetIds, parseLaunchReceipts } from './launch-receipts'
 import type { LiveAdsAccount, LiveAdsFact, LiveAdsState } from './live-ads-message'
 
 export type { LiveAdsAccount, LiveAdsFact, LiveAdsState } from './live-ads-message'
@@ -28,6 +29,10 @@ export function dayMinus(day: string, n: number): string {
   return new Date(new Date(`${day}T00:00:00Z`).getTime() - n * 86_400_000).toISOString().slice(0, 10)
 }
 
+export function isLiveAdset(row: { effective_status: string | null; capture_reason: string | null }): boolean {
+  return row.effective_status === 'ACTIVE' && row.capture_reason !== 'disappeared'
+}
+
 function stateOf(ins: AccountInsightFact | undefined, today: string, unusable: string | null): LiveAdsState {
   if (unusable !== null) return 'unusable'
   if (!ins || ins.last_day === null || ins.last_day < dayMinus(today, 1)) return 'no_spend_data'
@@ -37,7 +42,7 @@ function stateOf(ins: AccountInsightFact | undefined, today: string, unusable: s
 function byAccount(input: LiveAdsInput): LiveAdsAccount[] {
   const map = new Map<string, LiveAdsAccount>()
   for (const a of input.adsets) {
-    if (a.effective_status !== 'ACTIVE' || a.capture_reason === 'disappeared') continue
+    if (!isLiveAdset(a)) continue
     const id = a.ad_account_id ?? '未知账户'
     const ins = input.accountInsights?.[id]
     const unusable = unusableAccountNote(input.accountFacts?.[id]?.status_code ?? null)
@@ -51,6 +56,19 @@ function byAccount(input: LiveAdsInput): LiveAdsAccount[] {
     map.set(id, cur)
   }
   return Array.from(map.values())
+}
+
+export function unrecordedCounts(
+  adsets: LiveAdsInput['adsets'],
+  authorized: ReadonlySet<string>,
+): { ad_account_id: string; count: number }[] {
+  const map = new Map<string, number>()
+  for (const row of adsets) {
+    if (!isLiveAdset(row) || authorized.has(row.entity_id)) continue
+    const id = row.ad_account_id ?? '未知账户'
+    map.set(id, (map.get(id) ?? 0) + 1)
+  }
+  return [...map.entries()].map(([ad_account_id, count]) => ({ ad_account_id, count }))
 }
 
 export function summarizeLiveAds(input: LiveAdsInput): LiveAdsFact {
@@ -154,6 +172,20 @@ async function loadSnapshotAgeHours(clientId: string, accounts: string[], now: D
   return Math.max(0, Math.floor((now.getTime() - new Date(at).getTime()) / 3_600_000))
 }
 
+const RECEIPT_CAP = 500
+
+async function loadLaunchReceipts(clientId: string): Promise<ReturnType<typeof parseLaunchReceipts> | null> {
+  const { data, error } = await supabaseAdmin.from('flywheel_actions')
+    .select('id, payload')
+    .eq('client_id', clientId)
+    .eq('action_type', 'ads.create_ad')
+    .limit(RECEIPT_CAP)
+  if (error) return null
+  const rows = (data ?? []) as { id: string; payload: unknown }[]
+  if (rows.length >= RECEIPT_CAP) return null
+  return parseLaunchReceipts(rows)
+}
+
 export async function loadLiveAds(clientId: string, now: Date = new Date()): Promise<LiveAdsFact> {
   try {
     const bound = await loadAccountIds(clientId)
@@ -163,10 +195,13 @@ export async function loadLiveAds(clientId: string, now: Date = new Date()): Pro
     const adsets = await loadAdsets(clientId, bound.ids, new Date(now.getTime() - 2 * 86_400_000).toISOString())
     const accountInsights = await loadAccountInsights(clientId, bound.ids, today)
     if (adsets === null || accountInsights === null) return FAIL
-    const [accountFacts, snapshotAgeHours] = await Promise.all([
-      loadAccountFacts(clientId, bound.ids), loadSnapshotAgeHours(clientId, bound.ids, now),
+    const [accountFacts, snapshotAgeHours, receipts] = await Promise.all([
+      loadAccountFacts(clientId, bound.ids), loadSnapshotAgeHours(clientId, bound.ids, now), loadLaunchReceipts(clientId),
     ])
-    return summarizeLiveAds({ adsets, accountLabels: bound.labels, accountInsights, accountFacts, today, snapshotAgeHours })
+    const fact = summarizeLiveAds({ adsets, accountLabels: bound.labels, accountInsights, accountFacts, today, snapshotAgeHours })
+    if (!fact.ok) return fact
+    if (receipts === null) return { ...fact, receipt_read: 'failed' }
+    return { ...fact, receipt_read: 'ok', unrecorded: unrecordedCounts(adsets, authorizedAdSetIds(receipts)) }
   } catch {
     return FAIL
   }

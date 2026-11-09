@@ -106,7 +106,7 @@ describe('往已有广告组加暂停视频广告', () => {
     const r = await publishDraftPaused(DRAFT, 'act_1', 'tok')
     expect(r.ok).toBe(false)
     expect(calls.some((c) => c.method === 'DELETE' && c.url.includes(ADSET))).toBe(false)
-    expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('cr1'))).toBe(true)
+    expect(calls.some((c) => c.method === 'DELETE' && c.url.includes('cr1'))).toBe(false)
   })
 
   it('补暂停和开投都不碰已有组和已有系列', async () => {

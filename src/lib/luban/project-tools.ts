@@ -12,6 +12,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { ExecutionItemStatus, DiagnosticDimension, ExecutionLogKind } from '@/types/diagnostic'
+import { loadAdsAgentInvestigationEnabled } from '@/lib/ads-strategy/agent-chat/config'
+import { buildAdsInvestigationTools } from '@/lib/ads-strategy/agent-chat/tools'
 
 export interface ProjectLubanToolContext {
   supabase: SupabaseClient
@@ -314,5 +316,17 @@ export function buildProjectLubanTools(ctx: ProjectLubanToolContext): ProjectLub
         return `✅ 执行项「${owned.title}」已更新：${parts.join('、')}。`
       },
     },
+  }
+}
+
+/** Project Luban + optional read-only ads investigation tools (per-client config). */
+export async function buildProjectLubanToolsFull(ctx: ProjectLubanToolContext): Promise<ProjectLubanToolset> {
+  const base = buildProjectLubanTools(ctx)
+  const enabled = await loadAdsAgentInvestigationEnabled(ctx.supabase, ctx.clientId)
+  if (!enabled) return base
+  const inv = buildAdsInvestigationTools(ctx)
+  return {
+    tools: [...base.tools, ...inv.tools],
+    handlers: { ...base.handlers, ...inv.handlers },
   }
 }

@@ -197,10 +197,13 @@ export async function sendDraft(token: string, draftId: string): Promise<GraphCa
 export async function callWithRetry<T>(
   connectionId: string,
   call: (token: string) => Promise<GraphCallResult<T>>,
+  opts?: { markErrorOnFailure?: boolean },
 ): Promise<GraphCallResult<T> | { ok: false; status: 424; error: string }> {
+  // Only a caller that asks for it gets the switch; every other call keeps exactly the arguments it always had.
+  const noMark = opts?.markErrorOnFailure === false ? { markErrorOnFailure: false } : null
   let token: string
   try {
-    token = await getValidTokenForConnection(connectionId)
+    token = noMark ? await getValidTokenForConnection(connectionId, noMark) : await getValidTokenForConnection(connectionId)
   } catch {
     return { ok: false, status: 424, error: '邮箱授权掉线了，请找 Magic Lab 团队重连' }
   }
@@ -210,7 +213,7 @@ export async function callWithRetry<T>(
 
   let refreshedToken: string
   try {
-    refreshedToken = await getValidTokenForConnection(connectionId, { forceRefresh: true })
+    refreshedToken = await getValidTokenForConnection(connectionId, noMark ? { forceRefresh: true, ...noMark } : { forceRefresh: true })
   } catch {
     return { ok: false, status: 424, error: '邮箱授权掉线了，请找 Magic Lab 团队重连' }
   }

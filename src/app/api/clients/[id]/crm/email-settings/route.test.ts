@@ -22,7 +22,7 @@ const access = (over: Record<string, unknown> = {}) => ({ ok: true, role: 'admin
 const get = () => GET(new NextRequest('http://x/api'), ctx)
 const put = (body: unknown) => PUT(new NextRequest('http://x/api', { method: 'PUT', body: JSON.stringify(body) }), ctx)
 
-const stored = (over = {}) => serialiseEmailSettings(settingsObj({ recipientAllowlist: ['hello@magicengine.cloud'], ...over }))
+const stored = (over = {}) => ({ cap_exempt_template_keys: [], ...serialiseEmailSettings(settingsObj({ recipientAllowlist: ['hello@magicengine.cloud'], ...over })) })
 
 beforeEach(() => {
   vi.resetAllMocks()
@@ -70,7 +70,13 @@ describe('GET email-settings', () => {
     vi.mocked(loadEmailSettings).mockResolvedValue({ kind: 'ok', version: 2, settings: settingsObj() })
     const body = (await (await get()).json()) as { state: string; version: number; settings: unknown }
     expect(body).toMatchObject({ state: 'ok', version: 2 })
-    expect(body.settings).toEqual(serialiseEmailSettings(settingsObj()))
+    expect(body.settings).toEqual({ cap_exempt_template_keys: [], ...serialiseEmailSettings(settingsObj()) })
+  })
+
+  it('the exemption list is shown as stored when it has keys', async () => {
+    vi.mocked(loadEmailSettings).mockResolvedValue({ kind: 'ok', version: 3, settings: settingsObj({ capExemptTemplateKeys: ['tour-enquiry-reply'] }) })
+    const body = (await (await get()).json()) as { settings: { cap_exempt_template_keys: string[] } }
+    expect(body.settings.cap_exempt_template_keys).toEqual(['tour-enquiry-reply'])
   })
 
   it('503 when the read fails', async () => {
@@ -118,6 +124,25 @@ describe('PUT email-settings', () => {
     vi.mocked(appendEmailSettings).mockResolvedValue({ ok: true, value: { version: 1 } })
     await put({ settings: stored(), baseVersion: null })
     expect(appendEmailSettings).toHaveBeenCalledWith({ marker: 'db' }, expect.objectContaining({ baseVersion: null }))
+  })
+
+  it('400 when the exemption list is missing (a page opened before the list existed would silently clear it)', async () => {
+    const { cap_exempt_template_keys: omitted, ...withoutList } = stored()
+    void omitted
+    const res = await put({ settings: withoutList, baseVersion: 1 })
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as { error: string }).error).toContain('cap_exempt_template_keys')
+    expect(appendEmailSettings).not.toHaveBeenCalled()
+  })
+
+  it('saves the exemption list as sent', async () => {
+    vi.mocked(appendEmailSettings).mockResolvedValue({ ok: true, value: { version: 2 } })
+    const res = await put({ settings: { ...stored(), cap_exempt_template_keys: ['tour-enquiry-reply', 'catalogue-request-reply'] }, baseVersion: 1 })
+    expect(res.status).toBe(200)
+    expect(appendEmailSettings).toHaveBeenCalledWith(
+      { marker: 'db' },
+      expect.objectContaining({ settings: expect.objectContaining({ capExemptTemplateKeys: ['tour-enquiry-reply', 'catalogue-request-reply'] }) }),
+    )
   })
 
   it('someone else changed them first: 409', async () => {

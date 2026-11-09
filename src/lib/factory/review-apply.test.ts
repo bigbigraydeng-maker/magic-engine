@@ -262,6 +262,20 @@ describe('applyQualityReject — 打回重开', () => {
     expect(reopened.brief.review_feedback).toBe('画面太慢')
   })
 
+  it('重开新单不带 weekly_pack', async () => {
+    const { db, inserts } = mockSupabase([
+      { data: { ...IN_REVIEW_WO, brief: { segments: [], weekly_pack: { publish_on: '2026-11-10' } } }, error: null },
+      { data: [{ id: 'wo-1' }], error: null },
+      { data: { id: 'wo-2' }, error: null },
+    ])
+    const r = await reject(db)
+    expect(r.ok).toBe(true)
+    const reopened = inserts[0] as { brief: Record<string, unknown> }
+    expect(reopened.brief.weekly_pack).toBeUndefined()
+    expect('weekly_pack' in reopened.brief).toBe(false)
+    expect(reopened.brief.reopened_from).toBe('wo-1')
+  })
+
   it('🔴 R4 legacy 客户(无 recipe)打回 → 新单不带 recipe_replan_required / digest,legacy 路径继续', async () => {
     const legacyWo = { ...IN_REVIEW_WO, brief: { segments: [{ role: 'hook' }, { role: 'cta' }] } }
     const { db, inserts } = mockSupabase([

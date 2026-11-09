@@ -1,3 +1,4 @@
+import { readClientDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { supabaseAdmin } from '@/lib/supabase'
 import { collectAdPlays } from '@/lib/ads-strategy/plan-seed/attach'
 import { buildPlanSeed } from '@/lib/ads-strategy/plan-seed/build'
@@ -105,14 +106,8 @@ async function loadAccounts(clientId: string) {
 }
 
 async function loadClientCapCents(clientId: string): Promise<number | null> {
-  const { data, error } = await supabaseAdmin
-    .from('ad_strategy_configs')
-    .select('daily_budget_cap_cents')
-    .eq('client_id', clientId)
-    .maybeSingle()
-  if (error || !data) return null
-  const cap = (data as { daily_budget_cap_cents?: unknown }).daily_budget_cap_cents
-  return typeof cap === 'number' && cap > 0 ? cap : null
+  const cap = await readClientDailyTotalCap(supabaseAdmin, clientId)
+  return cap.state === 'set' ? cap.cents : null
 }
 
 async function hasApprovedPlan(clientId: string, goalId: string): Promise<boolean> {

@@ -143,3 +143,33 @@ describe('专属入口的批准闸：版本 + 档次，读注册表', () => {
     expect(() => assertActorMayApproveAction(runOf(D3), 'admin')).not.toThrow()
   })
 })
+
+describe('🔴 加钱类动作（第 3 刀 3a）：通用面一律不给批，拒绝照旧', () => {
+  const SCALE = 'ads.scale_unit_budget'
+  const deps = {} as KernelDeps
+
+  beforeEach(() => {
+    approveRun.mockReset()
+    rejectRun.mockReset()
+  })
+
+  it('满权限账号看加预算 → 不能批、原因是 spend_increase、能拒', () => {
+    const p = approvalPermissionsFor(runOf(SCALE, { purpose: 'growth' }), 'admin')
+    expect(p).toMatchObject({ canApprove: false, canReject: true, approveBlockedReason: 'spend_increase' })
+  })
+
+  it('直接调 decideApproval 批加预算 → forbidden，不碰 Kernel', async () => {
+    await expect(
+      decideApproval(deps, { run: runOf(SCALE, { purpose: 'growth' }), actorEmail: 'ray@magiclab', input: { resolution: 'approve', expectedDecisionId: SEEN } }),
+    ).rejects.toMatchObject({ code: 'forbidden_tier' })
+    expect(approveRun).not.toHaveBeenCalled()
+  })
+
+  it('拒加预算 → 照常交给 Kernel', async () => {
+    rejectRun.mockResolvedValueOnce({ verdict: 'deny', decision: { id: 'd2', reason: '不做' } })
+    await decideApproval(deps, {
+      run: runOf(SCALE, { purpose: 'growth' }), actorEmail: 'ray@magiclab', input: { resolution: 'reject', expectedDecisionId: SEEN, reason: '不做' },
+    })
+    expect(rejectRun).toHaveBeenCalled()
+  })
+})

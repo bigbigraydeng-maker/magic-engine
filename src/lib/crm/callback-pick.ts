@@ -146,14 +146,15 @@ export function resolveCallbackRequest(
 /**
  * 把校验过的回电时间盖到解析结果上：**按钮选的时间赢过 AI 从原话里读出来的**。
  *
- * 例外两条，都是合规/事实压过日程：「别再联系」和「号码是坏的」。
+ * 例外三条，都是合规/事实压过日程：「别再联系」「只别打电话」和「号码是坏的」。
  * 另外「没接」「先不考虑」保留员工原本的结论，只补时间。
  * 一个说了别再打的人，不能因为销售顺手点了个时间就被排进回电名单。
  * 员工写的原话（summary / raw）一个字不动，这里只改结论和时间。
  */
 export function withStructuredCallback(parsed: NoteParse, callbackIso: string | null | undefined): NoteParse {
   if (!callbackIso) return parsed
-  if (parsed.do_not_contact || parsed.outcome === 'bad_number') return parsed
+  // 「只别打电话」同样不排回电：回电就是打电话（2026-11-09）。
+  if (parsed.do_not_contact || parsed.outcome === 'bad_number' || parsed.outcome === 'do_not_call') return parsed
   // 员工自己写的结论是「没接 / 客人说先不考虑」时保留它，只补回电时间 ——
   // 「没接，约明天再打」仍是一次没接通，不能改标成「聊上了约了回电」。
   const keepsOwnOutcome = parsed.outcome === 'no_answer' || parsed.outcome === 'not_interested_now'

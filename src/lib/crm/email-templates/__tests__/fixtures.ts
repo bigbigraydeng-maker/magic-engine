@@ -36,6 +36,7 @@ export function settingsObj(over: Partial<EmailSettings> = {}): EmailSettings {
     footer: null,
     limits: { perUserPerHour: 30, perUserPerDay: 100, perMailboxPerDay: 200 },
     frequencyCap: { max: 2, windowDays: 7 },
+    capExemptTemplateKeys: [],
     recipientAllowlist: null,
     sameTemplateCooldownHours: 24,
     callPromptHours: 24,
@@ -97,6 +98,7 @@ export function makeData(over: Partial<SendGateData> = {}): SendGateData {
     })),
     loadSenderName: vi.fn(async () => 'Lisa Zhang'),
     sentTemplateReceiptsSince: vi.fn(async () => [] as StoredReceipt[]),
+    exemptMessageIdsSince: vi.fn(async () => [] as string[]),
     frequencySources: emptySources(),
     ...over,
   }

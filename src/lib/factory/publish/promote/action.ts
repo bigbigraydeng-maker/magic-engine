@@ -48,6 +48,7 @@ const claimTargetOf = (ctx: PromoteContext): ClaimTarget => ({
 const previewDataOf = (ctx: PromoteContext): Omit<PreviewData, 'preview_token' | 'expires_at'> => ({
   mode: ctx.view.published ? 'sync_only' : 'promote', page_id: ctx.pageId, video_id: ctx.videoId,
   caption: ctx.view.description, first_comment: ctx.firstComment, checklist_passed_at: ctx.approvedAt,
+  fact_check: ctx.factCheck,
 })
 
 function readSlots(payload: Record<string, unknown>): Record<string, PreviewSlot> {
@@ -70,14 +71,14 @@ export async function previewStage(deps: PromoteDeps, input: PromoteInput, t: Cl
 }
 
 /** 校验令牌:哈希匹配、同一邮箱槽、未过期、未用过、指纹一致。 */
-function checkToken(deps: PromoteDeps, input: PromoteInput, t: ClaimTarget, payload: Record<string, unknown>): Fail | null {
+export function checkToken(deps: PromoteDeps, input: PromoteInput, t: ClaimTarget, payload: Record<string, unknown>): Fail | null {
   const slot = readSlots(payload)[emailSlot(input.adminEmail)]
   if (!input.previewToken || !slot) return fail(403, '请先点「预览」拿确认令牌,不能跳过预览直接确认')
   if (!hashesEqual(slot.token_hash, hashToken(input.previewToken))) return fail(403, '确认令牌不对(只有点预览的那位管理员能用)')
   if (slot.used) return fail(409, '这个确认令牌已经用过了,请重新预览')
   if (Date.parse(slot.expires_at) <= deps.now().getTime()) return fail(409, '确认令牌已过期(5 分钟),请重新预览')
   if (slot.work_order_id !== t.orderId) return fail(403, '确认令牌不是给这个工单的')
-  if (slot.fingerprint !== t.fingerprint) return fail(409, '预览之后内容变了(草稿文案/首评/审片记录),请重新预览')
+  if (slot.fingerprint !== t.fingerprint) return fail(409, '预览之后内容变了(草稿文案/首评/审片记录/团目录),请重新预览')
   return null
 }
 
@@ -116,7 +117,16 @@ async function confirmStage(deps: PromoteDeps, input: PromoteInput, ctx: Promote
   const requestId = deps.uuid()
   const claimed = await claim(deps, input, claimTargetOf(ctx), { requestId, attemptId: requestId })
   if ('ok' in claimed) return claimed
-  const facts = await decidePublished(deps, ctx, claimed.payload, requestId)
+  return executeClaimed(deps, ctx, claimed.payload, requestId)
+}
+
+/**
+ * Everything after a successful claim: call the platform (or sync an already-public reel), write the traffic
+ * row then the order, the completion books, the first comment and the close-out. Shared by the person-confirmed
+ * path above and the scheduled executor (scheduled-action.ts), which claims under a week-card grant instead.
+ */
+export async function executeClaimed(deps: PromoteDeps, ctx: PromoteContext, claimedPayload: Record<string, unknown>, requestId: string): Promise<PromoteResult> {
+  const facts = await decidePublished(deps, ctx, claimedPayload, requestId)
   if ('ok' in facts) return facts
   const trafficFail = await writeTraffic(deps, ctx, facts, requestId)
   if (trafficFail) return trafficFail
@@ -126,6 +136,7 @@ async function confirmStage(deps: PromoteDeps, input: PromoteInput, ctx: Promote
   const done = await finishStage(deps, {
     orderId: ctx.order.id, clientId: ctx.order.client_id, masterBriefId: ctx.order.master_brief_id ?? '',
     target: ctx.target, videoId: ctx.videoId, firstComment: ctx.firstComment, rowId: ctx.row.id,
+    commentBlockedReason: ctx.commentBlockedReason,
   }, requestId)
   if (done.closed === 'fenced') return fail(409, '收尾被另一个请求接管了,请刷新页面查看结果')
   const data: PromotedData = {

@@ -173,10 +173,32 @@ describe('landPrescription —— 批准后挂到目标下，不再生成看板�
     expect(updates.some((u) => u.patch.status === 'approved')).toBe(true)
   })
 
+  it('批准新版本时按 supersedes_id 把上一版标成 superseded', async () => {
+    const { supabase, updates } = fakeSupabase()
+    await landPrescription(
+      supabase,
+      { ...PRES, id: 'rx-new', supersedes_id: 'rx-prior' },
+      'approver@example.com',
+      { requireStatus: 'draft' },
+    )
+    const archived = updates.find((row) => row.table === 'prescriptions' && row.patch.status === 'superseded')
+    expect(archived?.calls).toEqual(expect.arrayContaining([
+      ['eq', 'id', 'rx-prior'],
+      ['eq', 'client_id', 'c1'],
+    ]))
+    expect(updates.find((row) => row.patch.status === 'approved')?.calls).toEqual(
+      expect.arrayContaining([['eq', 'id', 'rx-new']]),
+    )
+  })
+
   it('修订版落地 → 把被它替代的上一版归档，但仍然不插入新的看板待办', async () => {
     const { supabase, updates, inserts } = fakeSupabase()
     const r = await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' })
-    expect(updates.some((u) => u.table === 'prescriptions' && u.patch.status === 'superseded')).toBe(true)
+    const prior = updates.find((u) => u.table === 'prescriptions' && u.patch.status === 'superseded')
+    expect(prior).toBeTruthy()
+    expect(prior!.calls).toContainEqual(['eq', 'client_id', 'c1'])
+    expect(prior!.calls).toContainEqual(['eq', 'goal_id', 'g1'])
+    expect(prior!.calls).toContainEqual(['eq', 'status', 'approved'])
     expect(mockDerive).toHaveBeenCalledTimes(1)
     expect(r.initiativesInserted).toBe(2)
     expect(inserts.filter((i) => i.table === 'execution_items')).toEqual([])
@@ -278,6 +300,22 @@ describe('landPrescription —— 批准后挂到目标下，不再生成看板�
     const { supabase, updates } = fakeSupabase()
     await landPrescription(supabase, PRES)
     expect(updates.some((u) => u.table === 'execution_items')).toBe(false)
+  })
+
+  it('上一版已经不是已批准时，不改它，也不把新版改回去', async () => {
+    const { supabase, updates } = fakeSupabase({ matched: { 'prescriptions:superseded': 0 } })
+    const r = await landPrescription(supabase, { ...PRES, supersedes_id: 'old1' }, 'x', { requireStatus: 'draft' })
+    expect(r.notes.join()).toContain('没有改它')
+    expect(updates.filter((u) => u.table === 'execution_items')).toEqual([])
+    expect(updates.filter((u) => u.patch.status === 'draft')).toEqual([])
+    expect(updates.filter((u) => u.patch.status === 'approved')).toHaveLength(1)
+  })
+
+  it('没有目标时不接替上一版', async () => {
+    const { supabase, updates } = fakeSupabase()
+    const r = await landPrescription(supabase, { ...PRES, goal_id: null, supersedes_id: 'old1' })
+    expect(r.notes.join()).toContain('没有目标可核对')
+    expect(updates.filter((u) => u.patch.status === 'superseded')).toEqual([])
   })
 
   it('旧版归档失败不致命 —— 新方案已经落地了，只是界面上多一份', async () => {

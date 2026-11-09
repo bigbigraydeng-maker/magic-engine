@@ -21,6 +21,8 @@ export interface ContactRow {
   phoneUnusable?: boolean
   /** 被标成「别再联系」—— 展开里给一条取消的路（见 DncBanner）。 */
   doNotContact?: boolean
+  /** 客人说过不要电话（只关电话，邮件照常）—— 抽屉藏拨号、给「放回电话名单」。 */
+  doNotCall?: boolean
   email: string | null
   hasMessenger: boolean
   stage: string | null
@@ -126,6 +128,7 @@ export const OUTCOME_LABEL: Record<string, string> = {
   missed_inbound: '漏接来电',
   bad_number: '号码不通',
   do_not_contact: '别再联系',
+  do_not_call: '只别打电话',
   not_interested: '没兴趣',
   // 少了这一条，「暂时不考虑」这个结论在时间线上完全不显示 ——
   // 软硬拒绝分开这件事，在最主要的翻查视图里就等于没做。

@@ -17,13 +17,23 @@ export function windowLabel(dataDay: string | null): string | null {
   return dataDay ? `${shortDay(shiftDay(dataDay, -6))}–${shortDay(dataDay)}` : null
 }
 
+/** 系列频率 = 整个系列的曝光 ÷ 去重人数：已暂停的广告组（例：只有 1 千多人的老客户再营销组）会把它拉高，在投的组可能没过线 */
+function mixedWithStopped(c: CampaignFrequencyInput): boolean {
+  return (c.stoppedAdsetSpend7d ?? 0) > 0 && (c.liveAdsetCount ?? 0) > 0
+}
+
 function rowOf(c: WarMapInput['campaigns'][number], names: Map<string, string>, stale: boolean, dataDay: string | null): FrequencyRow {
   const f = c.frequency7d
   let light: Light = 'green'
   let note = '没过红线 3'
+  let mixed = false
   if (f === null) {
     light = 'unknown'
     note = '没有 7 天频率'
+  } else if (f > FATIGUE_FREQUENCY_HIGH && mixedWithStopped(c)) {
+    light = 'unknown'
+    mixed = true
+    note = '系列频率高于 3，但数字混进了已暂停的广告组，在投的组单独的频率读不到，不能直接当红灯；去 Meta 后台按广告组看'
   } else if (f > FATIGUE_FREQUENCY_HIGH) {
     light = 'red'
     note = '高于 3：同一批人在反复看，要换人或降预算'
@@ -39,6 +49,7 @@ function rowOf(c: WarMapInput['campaigns'][number], names: Map<string, string>, 
     spend7d: c.spend7d,
     light,
     note,
+    ...(mixed ? { mixedWithStopped: true } : {}),
   }
 }
 
@@ -56,6 +67,13 @@ export function frequencyHeadline(rows: FrequencyRow[], staleDays: number | null
   if (red > 0) {
     const tail = stale ? `（数据停在 ${shortDay(dataDay)}）` : ''
     return { light: 'red', sentence: `有 ${red} 条广告频率高于 3，在反复打扰同一批人${tail}` }
+  }
+  const mixedRows = rows.filter(r => r.mixedWithStopped)
+  if (mixedRows.length > 0 && !stale) {
+    return {
+      light: 'unknown',
+      sentence: `频率判不了：${mixedRows.length} 个系列的频率（最高 ${max === null ? '—' : max.toFixed(2)}）混进了已暂停的广告组，在投的组单独的频率读不到`,
+    }
   }
   if (stale) {
     const peak = max === null ? '' : `；最近读到的最高是 ${max.toFixed(2)}`

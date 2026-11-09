@@ -12,9 +12,11 @@ import {
   MAX_AD_SETS,
   MAX_AUTO_DAILY_BUDGET,
   MESSENGER_CTA_TYPE,
+  ageProblems,
   audienceListProblems,
   creativeProblems,
   isKnownDraftKind,
+  isWholeCents,
   messengerCreativeProblems,
   registerExpandedDraftProblems,
   validateDraft,
@@ -27,6 +29,12 @@ import {
 import { isMetaObjectId } from '@/lib/meta/owned-ad-object'
 import { lockPlacements } from './placement-lock'
 import { audienceReadinessError, type AudienceFact } from './draft-audiences'
+
+/** 发布器一次最多在一个系列下建几个广告组。比草稿自己的上限 `MAX_AD_SETS` 更严：每多一组就多一串写请求。 */
+export const MAX_BUILDABLE_AD_SETS = 5
+
+/** 发布器目前只会建这两种类型的多广告组。私信要等转码和问候语回读，多组还没做。 */
+const MULTI_SET_BUILDABLE_KINDS: ReadonlySet<DraftKind> = new Set<DraftKind>(['lead_form', 'video_thruplay'])
 
 const CTA_FOR_KIND: Readonly<Record<DraftKind, string>> = {
   lead_form: 'SIGN_UP',
@@ -57,7 +65,7 @@ export interface PromoPhaseAdSets {
 /** 发布器今天建不出来、或者建出来会和草稿不一致的，返回给人看的原因。建得了返回 null。 */
 export function draftNotYetBuildable(d: AdDraft): string | null {
   const reasons: string[] = []
-  if (d.adSets !== undefined) reasons.push('多个广告组')
+  reasons.push(...multiSetBlocks(d))
   if (d.budgetMode === 'campaign' || d.campaignDailyBudget !== undefined) reasons.push('系列预算')
   if (d.budgetMode !== undefined && d.budgetMode !== 'ad_set' && d.budgetMode !== 'campaign') {
     reasons.push('看不懂的预算方式')
@@ -66,13 +74,25 @@ export function draftNotYetBuildable(d: AdDraft): string | null {
   if (Array.isArray(d.adSets)) {
     for (const set of d.adSets) {
       if (isAdSet(set) && expansionBlocksBuild(set.expansion)) reasons.push('打开的受众扩量')
+      // 发布器不会写网址参数和首评：多组放行之后，写在组上的这两项也必须拦，不然草稿说有、实际没建。
+      if (isAdSet(set) && (set.urlTags !== undefined || set.firstComment !== undefined)) reasons.push('网址参数或首评')
     }
   }
   if (d.urlTags !== undefined || d.firstComment !== undefined) reasons.push('网址参数或首评')
   if (ctaBlocksBuild(d)) reasons.push('和广告类型不一致的按钮')
   if (reasons.length === 0) return null
   const unique = [...new Set(reasons)]
-  return `这份草稿写了${unique.join('、')}。现在的建草稿程序只会建单个广告组、预算放在组上，并且不会按草稿去改已经存在的广告，所以这次没建。`
+  return `这份草稿写了${unique.join('、')}。现在的建草稿程序最多能在一个系列下建 ${MAX_BUILDABLE_AD_SETS} 个广告组（预算放在每个广告组上，只支持留资和看完视频两种），并且不会按草稿去改已经存在的广告，所以这次没建。`
+}
+
+/** 多广告组里发布器今天建不了的部分。单组草稿（没有 adSets）返回空。 */
+function multiSetBlocks(d: AdDraft): string[] {
+  if (d.adSets === undefined) return []
+  if (!Array.isArray(d.adSets)) return ['格式不对的多个广告组']
+  const reasons: string[] = []
+  if (d.adSets.length > MAX_BUILDABLE_AD_SETS) reasons.push(`超过 ${MAX_BUILDABLE_AD_SETS} 个的多个广告组`)
+  if (!isKnownDraftKind(d.kind) || !MULTI_SET_BUILDABLE_KINDS.has(d.kind)) reasons.push('这种广告类型的多个广告组')
+  return reasons
 }
 
 /** `validateDraft` 里多出来的那部分。旧草稿一个新字段都没有时，返回空。 */
@@ -81,6 +101,7 @@ export function expandedDraftProblems(d: AdDraft): DraftProblem[] {
     ...budgetProblems(d),
     ...attachIdProblems(d),
     ...placementProblems(d),
+    ...spendCapProblems(d),
     ...(Array.isArray(d.adSets) ? adSetListProblems(d) : singleSetExtraProblems(d)),
   ]
 }
@@ -257,6 +278,27 @@ function audienceFactProblems(d: AdDraft, facts: ReadonlyMap<string, AudienceFac
   return problems
 }
 
+/** 系列花费上限：给了就必须是正整数（分），且不能低于整个投放期的预算合计（每天 × 天数）。 */
+function spendCapProblems(d: AdDraft): DraftProblem[] {
+  const cap = d.campaignSpendCapMinor
+  if (cap === undefined) return []
+  if (typeof cap !== 'number' || !Number.isInteger(cap) || cap <= 0) {
+    return [{ field: 'campaignSpendCapMinor', message: '系列花费上限必须是大于 0 的整数（账户币种的最小单位，例如 NZD 的分）' }]
+  }
+  // 上限低于「每天预算 × 天数」= 还没跑完就会被 Meta 拦停；这里按整个投放期算，不是只比一天。
+  const dayMinor = cents(d.dailyBudget)
+  if (dayMinor !== null && dayMinor > 0 && Number.isInteger(d.durationDays) && d.durationDays > 0) {
+    const totalMinor = dayMinor * d.durationDays
+    if (cap < totalMinor) {
+      return [{
+        field: 'campaignSpendCapMinor',
+        message: `系列花费上限（${cap}）低于整个投放期的预算合计（每天 × ${d.durationDays} 天 = ${totalMinor}，单位是分）。上限太低会让广告没跑完就被拦停；也可能是单位填错了（要写分，不是元）`,
+      }]
+    }
+  }
+  return []
+}
+
 function budgetProblems(d: AdDraft): DraftProblem[] {
   const mode = d.budgetMode
   const hasSets = Array.isArray(d.adSets)
@@ -309,6 +351,11 @@ function adSetBudgetProblems(d: AdDraft): DraftProblem[] {
     if (!isAdSet(set)) return
     if (!Number.isFinite(set.dailyBudget) || (set.dailyBudget ?? 0) <= 0) {
       p.push({ field: `adSets[${i}].dailyBudget`, message: '每个广告组的日预算必须是大于 0 的数' })
+      sumOk = false
+      return
+    }
+    if (!isWholeCents(set.dailyBudget as number)) {
+      p.push({ field: `adSets[${i}].dailyBudget`, message: '广告组日预算最多写到分（两位小数），多出来的位数会被 Meta 悄悄四舍五入' })
       sumOk = false
       return
     }
@@ -414,15 +461,6 @@ function placeProblems(set: AdDraftAdSet, prefix: string): DraftProblem[] {
     return [{ field: `${prefix}geoCityKeys`, message: '国家和城市不能同时填：一起写时城市范围会失效。要按城市投就只填城市' }]
   }
   return []
-}
-
-function ageProblems(ageMin: number | undefined, ageMax: number | undefined, prefix: string): DraftProblem[] {
-  const p: DraftProblem[] = []
-  if (ageMin !== undefined && ageMin < 18) p.push({ field: `${prefix}ageMin`, message: 'Meta 不允许投给 18 岁以下' })
-  if (ageMin !== undefined && ageMax !== undefined && ageMin > ageMax) {
-    p.push({ field: `${prefix}ageMax`, message: '年龄下限比上限还大' })
-  }
-  return p
 }
 
 function switchProblems(

@@ -9,11 +9,11 @@ import { readPromoSpec, type PromoPhase, type PromoSpec, type PromoStep } from '
 import { buildPromoTemplate } from '@/lib/marketing-plan/promo/template'
 import { formatGoalChoice } from '@/lib/marketing-plan/promo/goal-choice'
 import {
-  STEP_KIND_LABEL, addPhase, addStep, newBusinessCase, newExperiment, newSalesHandover,
-  removePhase, removeStep, setBusinessCase, setExperiment, setGoal, setIsExperiment, setSalesHandover,
-  updatePhase, updateStep, type StepKind,
+  STEP_KIND_LABEL, addPhase, addStep, centsToYuan, newBusinessCase, newExperiment, newSalesHandover,
+  removePhase, removeStep, setBusinessCase, setDailyTotalCap, setExperiment, setGoal, setIsExperiment, setSalesHandover,
+  updatePhase, updateStep, yuanToCents, type StepKind,
 } from '@/lib/marketing-plan/promo/form'
-import { Field, inputCls } from './Field'
+import { Field, LocalInput, inputCls } from './Field'
 import { AdsFields, BlogFields, NewsletterFields, SocialFields } from './StepFields'
 import { AdsDraftPanel } from './AdsDraftPanel'
 import { BusinessCaseFields, ExperimentFields, SalesHandoverFields } from './PhaseCards'
@@ -213,6 +213,14 @@ export function PromoSpecForm({ clientId, plan, options, onSaved }: Props) {
         <p className="text-xs text-gray-500 mt-0.5">分阶段写清楚：每个阶段投多少广告、发多少社媒、写什么博客和邮件。保存后上面的卡片会立刻更新；批准之前什么都不会发生。</p>
       </div>
       <GoalPicker clientId={clientId} spec={spec} options={options} setSpec={setSpec} />
+      <Field label="这位客户一天的广告总共不超过" hint="单位是元。第一次做广告时在这里填上。改这个数字要重新批准这份计划。">
+        <LocalInput
+          value={spec.daily_total_cap_cents ?? 0}
+          format={centsToYuan}
+          parse={yuanToCents}
+          onValue={n => setSpec(setDailyTotalCap(spec, n > 0 ? n : undefined))}
+        />
+      </Field>
       <SalesHandoverBlock spec={spec} setSpec={setSpec} />
       <ul className="space-y-4">
         {spec.phases.map((p, i) => (

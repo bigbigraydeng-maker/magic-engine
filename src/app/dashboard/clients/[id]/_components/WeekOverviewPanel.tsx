@@ -22,6 +22,10 @@ import { describeStoryChips, describeStoryItemState, describeStoryPackLine } fro
 import { buildTodoSummary } from '@/lib/social/week-overview/todo'
 
 import { ReelWorkGroups, StatusTag, TodoStrip } from './SocialDailyParts'
+import { WeekPackApproval } from './WeekPackApproval'
+import { ReelGrantsPanel } from './ReelGrantsPanel'
+import { DailyListPanel } from './DailyListPanel'
+import { ReelReadbackPanel } from './ReelReadbackPanel'
 
 const ROLE_LABEL: Record<string, string> = {
   inspiration: '灵感',
@@ -152,6 +156,14 @@ function ReelTile({ data, works }: { data: WeekOverview; works: ReelWork[] | nul
         </>
       )}
       <p className="text-xs text-me-charcoal/70">{quotaOf('每周', data.quota?.reel_per_week)}</p>
+    </Tile>
+  )
+}
+
+function PostTile() {
+  return (
+    <Tile title="图文帖子">
+      <p className="text-sm text-me-charcoal/80">尚未接入。这一周的整包不会授权图文，也不会把它显示成 0 条。</p>
     </Tile>
   )
 }
@@ -306,17 +318,30 @@ export function WeekOverviewPanel({ clientId }: { clientId: string }) {
       {data.story_error && data.reels_error && (
         <p role="alert" className={ERROR_TEXT}>Story 和 Reel 都读取失败，现在不知道这一周排到哪了，请刷新页面；还不行就找开发。</p>
       )}
-      <TodoStrip summary={todo} />
+      <WeekPackApproval clientId={clientId} />
       <SafetyBanner live={data.live} clientId={clientId} />
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <ReelTile data={data} works={works} />
-        <StoryTile data={data} now={now} />
-      </div>
-      <StoryDays data={data} now={now} />
-      <ReelSection data={data} works={works} clientId={clientId} />
-      <p className="rounded-xl border border-dashed border-black/15 px-3 py-2 text-xs text-me-charcoal/70">
-        即将上线：图文帖子排进每天日历 · 整周画面复核 · 被规则拦下内容的清单
-      </p>
+      <details data-other-items className="group rounded-2xl border border-black/10 bg-white p-4">
+        <summary className="cursor-pointer text-sm font-bold text-me-charcoal">
+          其他事项（不急，点开看）
+          <span className="ml-2 text-xs font-medium text-me-charcoal/70">待处理 {todo.total} 件</span>
+        </summary>
+        <div className="mt-4 space-y-5">
+          <TodoStrip summary={todo} />
+          <DailyListPanel clientId={clientId} />
+          <ReelReadbackPanel clientId={clientId} />
+          <ReelGrantsPanel clientId={clientId} />
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <ReelTile data={data} works={works} />
+            <StoryTile data={data} now={now} />
+            <PostTile />
+          </div>
+          <StoryDays data={data} now={now} />
+          <ReelSection data={data} works={works} clientId={clientId} />
+          <p className="rounded-xl border border-dashed border-black/15 px-3 py-2 text-xs text-me-charcoal/70">
+            即将上线：图文排进每天日历 · 整周画面复核
+          </p>
+        </div>
+      </details>
     </div>
   )
 }

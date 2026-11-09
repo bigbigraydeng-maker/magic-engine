@@ -354,8 +354,19 @@ export default function CrmAllContactsPage() {
         openContactFromNudge(deepLinkId, stashedName)
         return
       }
-      setToast('这个人不在这份名单里了 —— 用上面的搜索框找找看')
-      window.setTimeout(() => setToast(null), 4000)
+      // 日历 / 摘要邮件的直达链接没有存名字：名单只装了第一页，客人在后面几页很常见。
+      // 先按编号单独读这一位再开抽屉，真读不到（换客户 / 记录被删）才提示。
+      const wantedId = deepLinkId
+      readContactById(wantedId)
+        .then((found) => {
+          setQuickRow(found)
+          setDrawerSectionKey(null)
+          setDrawerContactId(found.contactId)
+        })
+        .catch(() => {
+          setToast('这个人不在这份名单里了 —— 用上面的搜索框找找看')
+          window.setTimeout(() => setToast(null), 4000)
+        })
       return
     }
     openDrawer(deepLinkId)

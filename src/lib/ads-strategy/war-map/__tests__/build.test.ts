@@ -405,7 +405,7 @@ describe('数据新鲜度只算真在投的账户（#3322）', () => {
     const v = buildWarMap(twoAccounts({ audiences: [aud({ adAccountId: 'act_live' })] }))
     expect(v.clocks.staleDays).toBe(0)
     expect(v.clocks.dataDay).toBe('2026-10-15')
-    expect(v.clocks.note).toContain('备用号 没在投，没有新数据是正常的')
+    expect(v.clocks.note).toContain('广告账户 备用号 没在投，这个账户没有新数据是正常的')
     expect(v.accountSummaries.find(s => s.adAccountId === 'act_idle')?.dormant).toBe(true)
     expect(v.accountSummaries.find(s => s.adAccountId === 'act_live')?.dormant).toBe(false)
   })
@@ -560,6 +560,50 @@ describe('② 频率', () => {
     const v = buildWarMap(baseInput({ campaigns: [camp({ frequency7d: 3.5 })] }))
     expect(v.frequency.rows[0].light).toBe('red')
     expect(v.adjust.actions.some(a => a.key === 'freq-camp_1')).toBe(true)
+  })
+  it('频率高于 3 的那条清单：负责人是你（pm），不是 agent——系统里没有任何程序会自动改它', () => {
+    const v = buildWarMap(baseInput({ campaigns: [camp({ frequency7d: 3.5 })] }))
+    const a = v.adjust.actions.find(x => x.key === 'freq-camp_1')
+    expect(a?.owner).toBe('pm')
+    expect(a?.how).toContain('需要你决定')
+    expect(a?.how).toContain('系统不会自动改')
+  })
+  it('系列频率 3.16，但系列里混着已暂停的广告组、在投的组还在：不亮红，也不说「反复打扰同一批人」', () => {
+    const v = buildWarMap(baseInput({
+      campaigns: [camp({ frequency7d: 3.16, spend7d: 929, stoppedAdsetSpend7d: 161, liveAdsetCount: 1 })],
+    }))
+    expect(v.frequency.rows[0].light).toBe('unknown')
+    expect(v.frequency.rows[0].mixedWithStopped).toBe(true)
+    expect(v.frequency.rows[0].note).toContain('已暂停')
+    expect(v.frequency.headline.light).toBe('unknown')
+    expect(v.frequency.headline.sentence).toContain('混进了已暂停的广告组')
+    expect(v.frequency.headline.sentence).not.toContain('反复打扰')
+    expect(v.adjust.actions.some(a => a.key === 'freq-camp_1')).toBe(false)
+    // 前两句判不了，第三句也不许说「今天没有要调的」
+    expect(v.adjust.headline.light).not.toBe('green')
+  })
+  it('系列频率高于 3、系列里没有已暂停的组花过钱：照旧亮红', () => {
+    const v = buildWarMap(baseInput({
+      campaigns: [camp({ frequency7d: 3.5, stoppedAdsetSpend7d: 0, liveAdsetCount: 2 })],
+    }))
+    expect(v.frequency.rows[0].light).toBe('red')
+    expect(v.frequency.headline.light).toBe('red')
+  })
+  it('系列频率高于 3、组都停了没有在投的组：不算「混进」，照旧按系列判（已停系列另有口径）', () => {
+    const v = buildWarMap(baseInput({
+      campaigns: [camp({ frequency7d: 3.5, stoppedAdsetSpend7d: 80, liveAdsetCount: 0 })],
+    }))
+    expect(v.frequency.rows[0].light).toBe('red')
+  })
+  it('有一个系列真超线、另一个系列只是混了已暂停的组：整体仍是红，只算真超线的那 1 条', () => {
+    const v = buildWarMap(baseInput({
+      campaigns: [
+        camp({ frequency7d: 3.8, spend7d: 300 }),
+        camp({ campaignId: 'c2', frequency7d: 3.2, stoppedAdsetSpend7d: 50, liveAdsetCount: 1 }),
+      ],
+    }))
+    expect(v.frequency.headline.light).toBe('red')
+    expect(v.frequency.headline.sentence).toContain('有 1 条')
   })
 })
 

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ─── Hoisted mocks ────────────────────────────────────────────────────────────
 
@@ -27,6 +27,8 @@ vi.mock('../vocabulary', async (importOriginal) => {
 
 import {
   getValidToken,
+  getValidTokenForConnection,
+  isTransientRefreshFailure,
   PlatformConnectionNotFoundError,
   PlatformTokenRefreshError,
 } from '../token-manager'
@@ -298,5 +300,142 @@ describe('刷新请求的形状（根因闸门，改之前先读 PITFALLS F11）
     expect(body.get('scope')).toBe(MICROSOFT_MAIL_SCOPES.join(' '))
     // offline_access 少了就换不回刷新能力，下一小时安静地断
     expect(body.get('scope')).toContain('offline_access')
+  })
+})
+
+/**
+ * A read-only background reader (the triggered-send shadow run) must be able to read a mailbox WITHOUT ever taking it
+ * offline: when its token refresh fails once, the connection must stay `active` for the people who send from it.
+ * Every other caller keeps the old behaviour (a failed refresh marks the connection as error).
+ */
+describe('getValidTokenForConnection — markErrorOnFailure', () => {
+  const MS_ROW = { ...VALID_ROW, provider: 'microsoft_mail', purpose: 'legacy' }
+
+  function setup() {
+    const eqAfterUpdate = vi.fn().mockResolvedValue({ error: null })
+    const update = vi.fn().mockReturnValue({ eq: eqAfterUpdate })
+    const chain: Record<string, unknown> = {}
+    for (const m of ['select', 'eq']) chain[m] = vi.fn().mockReturnValue(chain)
+    chain['maybeSingle'] = vi.fn().mockResolvedValue({ data: MS_ROW, error: null })
+    chain['update'] = update
+    mocks.from.mockReset()
+    mocks.from.mockReturnValue(chain)
+    return { update }
+  }
+
+  beforeEach(() => {
+    process.env.MICROSOFT_CLIENT_ID = 'ms-client'
+    process.env.MICROSOFT_CLIENT_SECRET = 'ms-secret'
+    mocks.isTokenExpired.mockReturnValue(true)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  // 永久失败（对方明确拒绝）才标 error；临时失败（5xx / 网络）见下面的 isTransientRefreshFailure 用例
+  const failRefresh = () =>
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })))
+
+  it('by default a failed refresh marks the connection as error (behaviour unchanged for every other caller)', async () => {
+    const { update } = setup()
+    failRefresh()
+    await expect(getValidTokenForConnection('conn-1')).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+  })
+
+  it('with markErrorOnFailure:false a failed refresh still throws but leaves the connection alone', async () => {
+    const { update } = setup()
+    failRefresh()
+    await expect(getValidTokenForConnection('conn-1', { markErrorOnFailure: false })).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).not.toHaveBeenCalled()
+  })
+
+  it('with markErrorOnFailure:false a successful refresh is still saved (the token has to be kept fresh)', async () => {
+    const { update } = setup()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ access_token: 'new-token', expires_in: 3600 }) }),
+    )
+    await expect(getValidTokenForConnection('conn-1', { markErrorOnFailure: false })).resolves.toBe('new-token')
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ access_token_enc: 'enc:new-token' }))
+    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+  })
+})
+
+describe('临时刷新失败不把连接标坏（2026-11-03 CTS / NAL 的 GA4 被一次 500 / fetch failed 永久停掉）', () => {
+  const MS_ROW = { ...VALID_ROW, provider: 'microsoft_mail', purpose: 'legacy' }
+
+  function setup() {
+    const eqAfterUpdate = vi.fn().mockResolvedValue({ error: null })
+    const update = vi.fn().mockReturnValue({ eq: eqAfterUpdate })
+    const chain: Record<string, unknown> = {}
+    for (const m of ['select', 'eq']) chain[m] = vi.fn().mockReturnValue(chain)
+    chain['maybeSingle'] = vi.fn().mockResolvedValue({ data: MS_ROW, error: null })
+    chain['update'] = update
+    mocks.from.mockReset()
+    mocks.from.mockReturnValue(chain)
+    return { update }
+  }
+
+  beforeEach(() => {
+    process.env.MICROSOFT_CLIENT_ID = 'ms-client'
+    process.env.MICROSOFT_CLIENT_SECRET = 'ms-secret'
+    mocks.isTokenExpired.mockReturnValue(true)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('classifies 5xx / 429 / network failures as transient, 4xx and missing config as permanent', () => {
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 500: {"error":"internal_failure"}'))).toBe(true)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 503: x'))).toBe(true)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 429: x'))).toBe(true)
+    expect(isTransientRefreshFailure(new TypeError('fetch failed'))).toBe(true)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 400: {"error":"invalid_grant"}'))).toBe(false)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 401: x'))).toBe(false)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not configured'))).toBe(false)
+  })
+
+  it('a 400 rejection whose body merely mentions network / HTTP 500 stays permanent (魏征补审 P2-1)', () => {
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('microsoft_mail', 'HTTP 400: {"error_description":"AADSTS70000: network policy blocked this grant"}'))).toBe(false)
+    expect(isTransientRefreshFailure(new PlatformTokenRefreshError('google_ga4', 'HTTP 400: {"error":"invalid_grant","error_description":"see HTTP 500 docs"}'))).toBe(false)
+  })
+
+  it('a response cut off halfway (JSON parse error / terminated) is transient, not a dead connection', () => {
+    expect(isTransientRefreshFailure(new SyntaxError('Unexpected end of JSON input'))).toBe(true)
+    expect(isTransientRefreshFailure(new TypeError('terminated'))).toBe(true)
+  })
+
+  it('a 500 from the provider throws but leaves the connection active', async () => {
+    const { update } = setup()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'internal_failure' }), { status: 500 })))
+    await expect(getValidTokenForConnection('conn-1')).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+  })
+
+  it('a network failure (fetch failed) throws but leaves the connection active', async () => {
+    const { update } = setup()
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed')))
+    await expect(getValidTokenForConnection('conn-1')).rejects.toThrow('fetch failed')
+    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+  })
+
+  it('getValidToken: a 503 does not mark error, an invalid_grant does', async () => {
+    const { update } = setup()
+    const row = { ...VALID_ROW }
+    const chain: Record<string, unknown> = {}
+    for (const m of ['select', 'eq', 'order', 'limit']) chain[m] = vi.fn().mockReturnValue(chain)
+    chain['maybeSingle'] = vi.fn().mockResolvedValue({ data: row, error: null })
+    chain['single'] = vi.fn().mockResolvedValue({ data: row, error: null })
+    chain['update'] = update
+    mocks.from.mockReturnValue(chain)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 503 })))
+    await expect(getValidToken('client-1', 'google_gbp')).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })))
+    await expect(getValidToken('client-1', 'google_gbp')).rejects.toBeInstanceOf(PlatformTokenRefreshError)
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }))
   })
 })

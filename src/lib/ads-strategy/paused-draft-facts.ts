@@ -197,6 +197,10 @@ function countCheck(draft: AdDraft): HardCheck {
 }
 
 function buildableCheck(draft: AdDraft): HardCheck {
+  // 确认卡这条入口只会建单个广告组；多个广告组走起草接口（meta-ads/draft），不走卡。
+  if (Array.isArray(draft.adSets)) {
+    return { label: '能按草稿建成暂停', state: 'red', reason: '多个广告组不能用确认卡建，要走起草接口' }
+  }
   if (!draftNotYetBuildable(draft)) return { label: '能按草稿建成暂停', state: 'green', reason: '' }
   return { label: '能按草稿建成暂停', state: 'red', reason: '这份草稿现在还不能原样建成暂停' }
 }

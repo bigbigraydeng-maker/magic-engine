@@ -9,6 +9,5 @@ verify_by: 2026-11-08
 verify_how: Ray 对 §14 待定点勾选后，再开 W1 编码 PR；设计 PR 合并前 ledger-check 与 vitest ledger 绿
 ---
 
-flow-plan 第 4 步「每周批下周整包」的设计稿已写：确认卡作入口，Story/图文/Reel 各调现有授权函数。
-编码依赖 Ray 定：卡 TTL、图文是否接入、Reel 是否等 #2817、批包节奏、部分失败策略。
-指针：docs/specs/2026-11-01-publishing-calendar-design-v0.4-weekly-pack-approval.md
+Ray 已定：图文 v1 不接入；Reel 公开等 #2817；CTS 默认四/五/一（NZ）；部分失败不回滚；审批人维持现状；问价/投诉自动回复策略见设计稿 §14.2。
+编码：A 级 L4。Ray 2026-11-01 17:38 NZDT 已说 go，实现见 2026-11-01-weekly-social-pack-approval-v1。指针：docs/specs/2026-11-01-publishing-calendar-design-v0.4-weekly-pack-approval.md

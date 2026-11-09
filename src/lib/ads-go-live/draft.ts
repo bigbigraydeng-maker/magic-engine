@@ -69,6 +69,9 @@ export function parsePausedDraft(payload: unknown): PausedDraftView | null {
   const reusedAdSet = Boolean(body && text(body.existingAdSetId))
   const reusedCampaign = Boolean(body && text(body.existingCampaignId)) || reusedAdSet
   const spend = reusedAdSet ? storedSpend(body) : null
+  // 多个广告组的草稿：账本里只有 adSetIds（没有单个 adSetId），上线卡和「开」按钮都只会开一个组，
+  // 开了一个就等于另外几组被静默落下 —— 一律当作「编号不全」，让上线卡走不通、交回人处理（失败关闭）。
+  const multiSet = (Array.isArray(row.adSetIds) && row.adSetIds.length > 0) || (body !== null && Array.isArray(body.adSets))
   return {
     status,
     kind: body ? text(body.kind) : null,
@@ -77,7 +80,7 @@ export function parsePausedDraft(payload: unknown): PausedDraftView | null {
     accountLabel: text(row.accountLabel),
     inheritedSchedule: Boolean(spend),
     ...(spend && spend.endTime !== undefined ? { endTime: spend.endTime } : {}),
-    ids: campaignId && adSetId && adIds
+    ids: !multiSet && campaignId && adSetId && adIds
       ? {
           campaignId,
           adSetId,

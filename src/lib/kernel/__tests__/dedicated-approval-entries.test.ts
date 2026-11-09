@@ -115,11 +115,17 @@ describe('通用 handoff：登记动作的等批准不再发通用待办', () =>
     expect(todos.map((t) => t.run_id)).toEqual([deadLetter.id])
   })
 
-  it('D3 的死信 / 被拒仍走通用待办（专属待办只管等批准）', async () => {
+  it('D3 的死信仍走通用待办；被拒的改由专属「被拦下」一栏列（2026-11-04，免得一件事两条）', async () => {
     const dl = run(D3, 'dead_letter', 5)
     const denied = run(D3, 'denied', 6)
     const todos = await fetchKernelHandoffTodos(sbWith([dl, denied]), NOW)
-    expect(todos.map((t) => t.run_id).sort()).toEqual([dl.id, denied.id].sort())
+    expect(todos.map((t) => t.run_id)).toEqual([dl.id])
+  })
+
+  it('没标 ownsDeniedTodo 的动作被拒 → 通用待办照发（原有行为不变）', async () => {
+    const denied = run(OTHER, 'denied', 6)
+    const todos = await fetchKernelHandoffTodos(sbWith([denied]), NOW)
+    expect(todos.map((t) => t.run_id)).toEqual([denied.id])
   })
 
   it('没登记的动作等批准 → 通用待办照发（原有行为不变）', async () => {

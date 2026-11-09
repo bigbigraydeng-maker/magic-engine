@@ -33,6 +33,9 @@ export default function CrmCalendarPage({ params }: { params: { id: string } }) 
   const [month, setMonth] = useState(thisMonth)
   const [items, setItems] = useState<DueItem[]>([])
   const [includesLedger, setIncludesLedger] = useState(false)
+  const [viewerEmail, setViewerEmail] = useState<string | null>(null)
+  // 默认看全公司；「只看我的」= 只留跟进人是自己的回电（没人跟进的不算我的，仍在全公司里）
+  const [mineOnly, setMineOnly] = useState(false)
   const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
   const [selected, setSelected] = useState<string | null>(null)
 
@@ -43,12 +46,13 @@ export default function CrmCalendarPage({ params }: { params: { id: string } }) 
     fetch(`/api/clients/${clientId}/crm/calendar?month=${month}`)
       .then(async (res) => {
         if (!res.ok) throw new Error(String(res.status))
-        return res.json() as Promise<{ items: DueItem[]; includesLedger: boolean }>
+        return res.json() as Promise<{ items: DueItem[]; includesLedger: boolean; viewerEmail: string | null }>
       })
       .then((data) => {
         if (cancelled) return
         setItems(data.items)
         setIncludesLedger(data.includesLedger)
+        setViewerEmail(data.viewerEmail)
         setState('ok')
       })
       .catch(() => !cancelled && setState('error'))
@@ -57,13 +61,17 @@ export default function CrmCalendarPage({ params }: { params: { id: string } }) 
     }
   }, [clientId, month])
 
+  const visible = useMemo(
+    () => (mineOnly && viewerEmail ? items.filter((it) => it.kind === 'verify' || it.assignee === viewerEmail) : items),
+    [items, mineOnly, viewerEmail],
+  )
   const byDate = useMemo(() => {
     const map = new Map<string, DueItem[]>()
-    for (const it of items) map.set(it.date, [...(map.get(it.date) ?? []), it])
+    for (const it of visible) map.set(it.date, [...(map.get(it.date) ?? []), it])
     return map
   }, [items])
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Pacific/Auckland' })
-  const shown = selected ? byDate.get(selected) ?? [] : items
+  const shown = selected ? byDate.get(selected) ?? [] : visible
   const [yy, mm] = month.split('-')
 
   return (
@@ -78,6 +86,12 @@ export default function CrmCalendarPage({ params }: { params: { id: string } }) 
             <button type="button" className="ml-2 text-sm underline" onClick={() => { setMonth(thisMonth); setSelected(null) }}>回到本月</button>
           )}
         </div>
+        {viewerEmail && (
+          <div className="flex overflow-hidden rounded border border-me-charcoal/20 text-sm" role="group" aria-label="回电范围">
+            <button type="button" aria-pressed={!mineOnly} className={`px-3 py-1 ${!mineOnly ? 'bg-me-charcoal text-white' : ''}`} onClick={() => { setMineOnly(false); setSelected(null) }}>全公司</button>
+            <button type="button" aria-pressed={mineOnly} className={`px-3 py-1 ${mineOnly ? 'bg-me-charcoal text-white' : ''}`} onClick={() => { setMineOnly(true); setSelected(null) }}>只看我的</button>
+          </div>
+        )}
         <a
           className="ml-auto text-sm underline"
           href={`https://calendar.google.com/calendar/u/0/r/month/${yy}/${Number(mm)}/1`}
@@ -102,8 +116,9 @@ export default function CrmCalendarPage({ params }: { params: { id: string } }) 
         ))}
         {monthCells(month).map((date, i) => {
           const list = date ? byDate.get(date) ?? [] : []
-          const calls = list.filter((x) => x.kind === 'callback').length
-          const checks = list.length - calls
+          const calls = list.filter((x) => x.kind === 'callback' && !x.emailOnly).length
+          const mails = list.filter((x) => x.kind === 'callback' && x.emailOnly).length
+          const checks = list.length - calls - mails
           return (
             <button
               key={date ?? `pad-${i}`}
@@ -116,6 +131,7 @@ export default function CrmCalendarPage({ params }: { params: { id: string } }) 
                 <>
                   <span className={date === today ? 'rounded bg-me-charcoal px-1 text-white' : ''}>{Number(date.slice(8))}</span>
                   {calls > 0 && <span className="mt-1 block">● {calls} 个回电</span>}
+                  {mails > 0 && <span className="block">● {mails} 个邮件跟进</span>}
                   {checks > 0 && <span className="block">◆ {checks} 项核对</span>}
                 </>
               )}
@@ -128,14 +144,18 @@ export default function CrmCalendarPage({ params }: { params: { id: string } }) 
         {selected ? `${selected} 当天` : '本月全部'}
         {selected && <button type="button" className="ml-2 text-xs font-normal underline" onClick={() => setSelected(null)}>看全月</button>}
       </h2>
-      {state === 'ok' && shown.length === 0 && <p className="text-sm text-me-charcoal/60">这里没有安排。</p>}
+      {state === 'ok' && shown.length === 0 && (
+        <p className="text-sm text-me-charcoal/60">
+          {mineOnly ? '这里没有归你跟进的安排（没人跟进的客人在「全公司」里）。' : '这里没有安排。'}
+        </p>
+      )}
       <ul className="space-y-1.5 text-sm">
         {shown.map((it) => (
           <li key={`${it.kind}-${it.refId}-${it.date}`} className="flex flex-wrap gap-x-3 rounded border border-me-charcoal/10 bg-white px-3 py-2">
             <span className="tabular-nums text-me-charcoal/60">{it.date.slice(5)}{it.time ? ` ${it.time}` : ''}</span>
             {it.kind === 'callback' ? (
               <>
-                <span>● 回电：</span>
+                <span>{it.emailOnly ? '● 邮件跟进：' : '● 回电：'}</span>
                 <Link className="underline" href={`/dashboard/clients/${clientId}/crm/all?contact=${it.refId}`}>{it.title}</Link>
                 {it.phone && <span className="text-me-charcoal/60">{it.phone}</span>}
               </>

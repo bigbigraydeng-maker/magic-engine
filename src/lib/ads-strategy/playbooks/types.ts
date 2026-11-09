@@ -24,4 +24,11 @@ export interface AdsPlaybook {
   readonly costPerResultLabel: string
   /** 投放地区对照时客户那一侧叫什么，拼成「房源在「Auckland」」。 */
   readonly expectedGeoNoun: string
+  /**
+   * 同组素材并排比较的样本门槛：每条素材的链接点击数（手册 E-02③：门槛按点击数、由行业层给）。
+   * null = 这个行业还没定门槛，页面写「门槛未定」，不编数字。
+   */
+  readonly creativeCompareMinLinkClicks: number | null
+  /** 素材只在「同一个 X」里比时 X 叫什么，如旅游「团和出发档期」。null = 这个行业不需要这条提醒。 */
+  readonly creativeOfferNoun: string | null
 }

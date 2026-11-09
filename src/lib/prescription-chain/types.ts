@@ -75,6 +75,8 @@ export interface PrescriptionFact {
   approvedAt: string | null
   errorMessage: string | null
   intake: IntakeFact | null
+  /** FDE 人工粘贴处方（agent 或 generation_meta.source=manual）。 */
+  manual: boolean
   contentPresent: boolean
   adPlayCount: number
   /** Costs whose metric name is a cost. Empty means the prescription did not write one. */
@@ -83,6 +85,7 @@ export interface PrescriptionFact {
 }
 
 export interface GoalFact {
+  title: string | null
   targetValue: number | null
   baselineValue: number | null
   currentValue: number | null

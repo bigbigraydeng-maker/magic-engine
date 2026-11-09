@@ -20,7 +20,7 @@ Check 的主人是现有归因任务，不是卫青，也不是诸葛亮。Tune 
 |---|---|---|---|---|---|
 | 广告数字门槛 | 卫青 `weiqing` | `src/lib/ads-strategy/rules/` | 21 | 不进。代码直接判定 | 2026-10-28 |
 | 广告健康档判定词 | 卫青 `weiqing` | `src/lib/ads-strategy/baseline.ts` | 5 | 不进。只认上面五个英文词 | 2026-10-28 |
-| 广告操作手册草案 | 卫青 `weiqing` | `docs/sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md` | 68 | 不进。草案，未批准不进提示词 | 2026-10-28 |
+| 广告操作手册草案 | 卫青 `weiqing` | `docs/sops/2026-10-10-ads-agent-playbook-and-rules-v1.0.md` | 74 | 不进。草案，未批准不进提示词。v1.1 新增 E-19～E-23、B-14 共 6 条（68 + 6，没有重数旧条目；§7.2 另有一行 B-14 指向，不重复计） | 2026-11-03 |
 | 广告规则摘要 | 卫青 `weiqing` | `docs/skill-cards/ME-ADS-RULES-DIGEST.md` | 134 | 不进。对账用的索引 | 2026-10-28 |
 | 广告经验手册 | 卫青 `weiqing` | `docs/playbooks/ads/meta-general.md` | 42 | 不进。正文不是提示词 | 2026-10-28 |
 | 社媒规则摘要 | 苏东坡 `sudongpo` | `docs/skill-cards/ME-SOCIAL-RULES-DIGEST.md` | 12 | 不进。对账用的索引 | 2026-10-28 |

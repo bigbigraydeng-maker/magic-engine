@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { agreedPlanDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { matchDrafts } from './draft-match'
 import {
   parseDraftRow,
@@ -101,6 +102,23 @@ function configFrom(row: Loaded<unknown>): { outcome: Loaded<OutcomeFact | null>
   return { outcome: { read: 'ok', value: parseOutcome(row.value) }, strategy: { read: 'ok', value: strategy } }
 }
 
+function strategyFromPlan(
+  strategy: Loaded<StrategyFact | null>,
+  plans: Loaded<unknown[]>,
+): Loaded<StrategyFact | null> {
+  if (strategy.read !== 'ok' || strategy.value === null) return strategy
+  if (plans.read !== 'ok') return { read: 'ok', value: { ...strategy.value, dailyCapCents: null } }
+  const agreed = agreedPlanDailyTotalCap(
+    plans.value.filter((row): row is { status?: unknown; plan_data?: unknown } => (
+      !!row && typeof row === 'object' && (row as { status?: unknown }).status === 'approved'
+    )),
+  )
+  return {
+    read: 'ok',
+    value: { ...strategy.value, dailyCapCents: agreed.state === 'set' ? agreed.cents : null },
+  }
+}
+
 function goalFrom(row: Loaded<unknown>): Loaded<GoalFact | null> {
   if (row.read !== 'ok') return row.read === 'skipped' ? { read: 'skipped' } : { read: 'unread' }
   if (row.value === null) return { read: 'ok', value: null }
@@ -164,14 +182,14 @@ function prescriptionFrom(row: Loaded<unknown>): ChainFacts['prescription'] {
 export async function loadChainFacts(db: ChainReader, input: LoadChainInput): Promise<ChainFacts> {
   const prescription = prescriptionFrom(await readMaybe(
     db.from('prescriptions')
-      .select('status, goal_id, approved_at, error_message, intake, content')
+      .select('status, goal_id, approved_at, error_message, intake, content, agent_name, generation_meta')
       .eq('id', input.prescriptionId)
       .eq('client_id', input.clientId),
   ))
   const goalId = prescription.read === 'ok' ? prescription.value?.goalId ?? null : null
   const [goal, config, plans, orders, rawDrafts, snapshot] = await Promise.all([
     goalId
-      ? readMaybe(db.from('goals').select('target_value, baseline_value, current_value, period_start, period_end').eq('id', goalId).eq('client_id', input.clientId))
+      ? readMaybe(db.from('goals').select('title, target_value, baseline_value, current_value, period_start, period_end').eq('id', goalId).eq('client_id', input.clientId))
       : Promise.resolve({ read: 'skipped' as const }),
     readMaybe(db.from('ad_strategy_configs').select('daily_budget_cap_cents, creative_pool, target_cost_per_primary').eq('client_id', input.clientId)),
     readList(db.from('marketing_plans').select('id, status, plan_data, generation_meta, created_at').eq('client_id', input.clientId).order('created_at', { ascending: false })),
@@ -189,7 +207,7 @@ export async function loadChainFacts(db: ChainReader, input: LoadChainInput): Pr
     prescription,
     goal: goalFrom(goal),
     outcome: split.outcome,
-    strategy: split.strategy,
+    strategy: strategyFromPlan(split.strategy, plans),
     plans: planFacts,
     workOrders: orders.read === 'skipped' ? { read: 'skipped' } : ordersFrom(orders),
     drafts: draftsFrom(rawDrafts, goalId, planFacts, split.strategy),
