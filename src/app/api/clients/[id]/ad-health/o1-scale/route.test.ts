@@ -103,25 +103,26 @@ beforeEach(() => {
 })
 
 describe('O1 campaign-budget proposal', () => {
-  it('turns a $50/day campaign budget into a $60/day approval proposal', async () => {
+  it('refuses to raise a live campaign budget and does not issue a card', async () => {
     const response = await post()
+    const body = await response.json()
 
-    expect(response.status, JSON.stringify(await response.clone().json())).toBe(202)
-    expect(await response.json()).toMatchObject({ ok: true, wroteMeta: false, beforeCents: 5000, afterCents: 6000 })
+    expect(response.status).toBe(409)
+    expect(body).toMatchObject({ wroteMeta: false })
+    expect(body.error).toContain('新开一份计划')
     expect(m.submit).not.toHaveBeenCalled()
-    expect(m.issue).toHaveBeenCalledWith(expect.objectContaining({
-      clientId: CLIENT_ID, goalId: 'goal-1', adAccountId: ACCOUNT_ID, scaleAdsetId: ADSET_ID,
-      campaignId: CAMPAIGN_ID, beforeCents: 5000, afterCents: 6000, source: 'opportunity',
-    }))
+    expect(m.issue).not.toHaveBeenCalled()
   })
 
-  it('系列行是 6 小时前那一轮写的（之后几轮系列没变、没写行）→ 照常建审批', async () => {
+  it('系列行是 6 小时前那一轮写的，仍然拒绝加预算，不建审批', async () => {
     setup(undefined, { campaignAgeMs: 6 * 60 * 60 * 1000 })
 
     const response = await post()
+    const body = await response.json()
 
-    expect(response.status, JSON.stringify(await response.clone().json())).toBe(202)
-    expect(await response.json()).toMatchObject({ ok: true, beforeCents: 5000, afterCents: 6000 })
+    expect(response.status).toBe(409)
+    expect(body.wroteMeta).toBe(false)
+    expect(m.issue).not.toHaveBeenCalled()
   })
 
   it('🔴 系列最新一行超过 24 小时 → 拒，不拿旧预算建审批', async () => {

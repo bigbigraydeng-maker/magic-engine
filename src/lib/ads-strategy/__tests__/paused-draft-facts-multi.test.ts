@@ -1,6 +1,6 @@
 /**
- * 确认卡这条入口只会建单个广告组：多个广告组的草稿必须在卡上就被拦（红），
- * 不能走到「点了确认却只建出一个组」。多组只走起草接口。
+ * 确认卡这条入口只会建单个广告组：多个广告组的草稿必须在卡上就被拦（红）。
+ * 起草接口同样拒绝，不建。
  */
 import { describe, it, expect } from 'vitest'
 import { pausedDraftBlock, pausedDraftFacts } from '../paused-draft-facts'
@@ -33,7 +33,7 @@ const MULTI: AdDraft = {
 }
 
 describe('确认卡：多个广告组的草稿', () => {
-  it('「能按草稿建成暂停」这一项是红的，原因写明要走起草接口', () => {
+  it('「能按草稿建成暂停」这一项是红的，原因写明没有去建', () => {
     const check = pausedDraftFacts(MULTI, 'acct', REVIEW).hardChecks.find((c) => c.label === '能按草稿建成暂停')
     expect(check?.state).toBe('red')
     expect(check?.reason).toContain('多个广告组')

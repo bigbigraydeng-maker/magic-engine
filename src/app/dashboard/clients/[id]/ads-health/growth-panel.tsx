@@ -190,7 +190,7 @@ function O1Approval({
   const money = (cents: number) => `${currency} ${(cents / 100).toFixed(2)}`.trim()
   return (
     <div className="mt-3 rounded-lg border border-sky-200 bg-white p-3 text-xs text-gray-700">
-      <p>这是系统建议，不会自动加预算。批准后最多上调 20%，并受客户预算上限约束。</p>
+      <p>在投计划的预算不能在这里加。要加预算，请新开一份计划。</p>
       {typeof before === 'number' && typeof after === 'number' && <p className="mt-1">当前{budgetTarget}日预算 {money(before)} → 建议 {money(after)}</p>}
       {(pending ?? active ?? terminal) && (
         <ApprovalContextNotes

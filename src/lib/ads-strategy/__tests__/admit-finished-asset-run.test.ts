@@ -44,7 +44,7 @@ beforeEach(() => {
 })
 
 describe('admitAssetBeforeAccept', () => {
-  it('uploads the finished file and remembers the video id without writing the pool', async () => {
+  it('does not upload the finished file when acceptance has no confirmation card', async () => {
     const { client, updates } = db({
       id: 'wo-1',
       client_id: 'c-1',
@@ -54,16 +54,10 @@ describe('admitAssetBeforeAccept', () => {
       review_ref: {},
     })
     const result = await admitAssetBeforeAccept(client, 'wo-1')
-    expect(result).toEqual({ ok: true, action: 'uploaded', videoId: '555', accountId: ACCOUNT })
-    expect(mocks.upload).toHaveBeenCalledWith(
-      ACCOUNT,
-      'https://files.example.test/storage/v1/object/public/content-factory/renders/c-1/wo-1/final.mp4',
-      'tok',
-      'asset wo-1',
-    )
-    expect(mocks.upload.mock.calls[0][2]).toBe('tok')
-    expect(JSON.stringify(updates[0])).toContain('account_upload')
-    expect(JSON.stringify(updates[0])).not.toContain('tok')
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.error).toContain('没有确认卡')
+    expect(mocks.upload).not.toHaveBeenCalled()
+    expect(updates).toHaveLength(0)
   })
 
   it('does not upload a render path that belongs to another order', async () => {

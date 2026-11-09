@@ -199,7 +199,7 @@ function ScaleSection(props: {
         disabled={disabled}
         onClick={onUp20}
       />
-      <p className="text-xs text-gray-500">加预算只是提交，要 PM 本人批了才会真改。</p>
+      <p className="text-xs text-gray-500">在投计划的预算不能在这里加。要加预算，请新开一份计划。</p>
     </div>
   )
 }

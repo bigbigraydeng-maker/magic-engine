@@ -4,6 +4,7 @@
  * cover expiry in their own tests; this file covers the other three gates.
  */
 
+import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { KernelDeps } from '@/lib/kernel/deps'
@@ -22,6 +23,10 @@ import { decideGoLive, issueGoLive } from '@/lib/ads-go-live/decide'
 import type { AdDraft } from '@/lib/ads-strategy/ad-draft'
 import { issuePausedDraftCard, submitPausedDraftCard } from '@/lib/ads-strategy/paused-draft-submit'
 import type { CreateDraftDeps } from '@/lib/ads-strategy/draft-and-gate'
+import { askDirectPausedDraft } from '@/lib/ads-strategy/direct-draft-card'
+import { admitFinishedAsset, type AdmitDeps, type AdmitWorkOrder } from '@/lib/ads-strategy/admit-finished-asset'
+import { writeHeldBudget } from '@/lib/action-submission/money-card-write'
+import type { MoneyHold } from '@/lib/action-submission/money-card'
 
 const OPC: CardClicker = { kind: 'opc', email: 'opc@example.com' }
 const START = '2026-10-28T00:00:00.000Z'
@@ -327,5 +332,123 @@ describe('ad-set pause refuses without a confirmed card', () => {
     expect(mismatch.wrote).toBe(false)
     expect(mismatch.reason).toMatch(/不是这一张卡/)
     expect(execute).not.toHaveBeenCalled()
+  })
+})
+
+const EIGHT = [
+  {
+    name: 'paused draft ask',
+    file: 'src/app/api/clients/[id]/meta-ads/draft/route.ts',
+    present: ['askDirectPausedDraft', 'issuePausedDraftCard'],
+    absent: ['createDraftForApproval(', 'publishDraftPaused('],
+  },
+  {
+    name: 'listing draft ask',
+    file: 'src/app/api/clients/[id]/meta-ads/draft-listing/route.ts',
+    present: ['issueListingDraftCard'],
+    absent: ['uploadAssetToMeta(', 'createDraftForApproval(', 'uploadVideoToMeta('],
+  },
+  {
+    name: 'stop-loss ask',
+    file: 'src/app/api/clients/[id]/ad-health/stop-loss/route.ts',
+    present: ['issueMoneyBudget', 'requestCampaignStatusCard'],
+    absent: ['submitStopLossThroughKernel(', 'setCampaignStatus(', 'setCampaignDailyBudget(', 'executeStopLoss('],
+  },
+  {
+    name: 'scorecard budget ask',
+    file: 'src/app/api/clients/[id]/ad-health/budget-change/route.ts',
+    present: ['issueMoneyBudget', 'LIVE_PLAN_INCREASE_REFUSED'],
+    absent: ['submitStopLossThroughKernel(', 'queueRaiseAfterCard(', 'submitAdsO1BudgetScale('],
+  },
+  {
+    name: 'opportunity raise ask',
+    file: 'src/app/api/clients/[id]/ad-health/o1-scale/route.ts',
+    present: ['LIVE_PLAN_INCREASE_REFUSED'],
+    absent: ['issueMoneyBudget(', 'submitAdsO1BudgetScale(', 'setCampaignDailyBudget('],
+  },
+  {
+    name: 'opportunity raise decision',
+    file: 'src/app/api/clients/[id]/ad-health/o1-scale/[runId]/decision/route.ts',
+    present: ['LIVE_PLAN_INCREASE_REFUSED', 'refuseLivePlanIncrease'],
+    absent: ['inngest.send(', 'approveRun(', 'setCampaignDailyBudget('],
+  },
+  {
+    name: 'auto-pause decision',
+    file: 'src/app/api/clients/[id]/ad-health/auto-pause/[runId]/decision/route.ts',
+    present: ['issueMoneyPause'],
+    absent: ['setAdSetStatus('],
+  },
+  {
+    name: 'service pause ask',
+    file: 'src/lib/meta/service-pause-only.ts',
+    present: ['requestCampaignStatusCard', 'issuePauseCard'],
+    absent: ['setCampaignStatus(', 'setCampaignDailyBudget('],
+  },
+  {
+    name: 'finished-asset acceptance',
+    file: 'src/lib/ads-strategy/admit-finished-asset.ts',
+    present: ['ASSET_UPLOAD_REFUSED'],
+    absent: ['deps.upload(', 'uploadVideoToMeta('],
+  },
+]
+
+describe('the eight direct Meta writes are carded or refused', () => {
+  it.each(EIGHT)('$name stays behind a card or a refusal', ({ file, present, absent }) => {
+    const source = readFileSync(file, 'utf8')
+    for (const token of present) expect(source, token).toContain(token)
+    for (const token of absent) expect(source, token).not.toContain(token)
+  })
+
+  it('several ad sets are refused and the ask does not build', async () => {
+    const issue = vi.fn()
+    const refused = await askDirectPausedDraft({ draft: { adSets: [{ name: 'a' }] }, issue })
+    expect(refused.status).toBe(409)
+    expect(refused.body.wroteMeta).toBe(false)
+    expect(String(refused.body.error)).toContain('没有去建')
+    expect(issue).not.toHaveBeenCalled()
+  })
+
+  it('approving an auto-pause suggestion only issues the pause card', () => {
+    const source = readFileSync('src/app/api/clients/[id]/ad-health/auto-pause/[runId]/decision/route.ts', 'utf8')
+    const decide = source.slice(source.indexOf('async function decide'), source.indexOf('export async function POST'))
+    expect(decide).toContain('issueAutoPauseCard')
+    expect(decide).not.toContain('approveAndExecuteAdsAutoPause')
+  })
+
+  it('a confirmed raise of a live plan does not write', async () => {
+    const hold = {
+      raising: true,
+      source: 'scorecard_up',
+      level: 'adset',
+      entityId: 'set-1',
+      beforeCents: 1000,
+      afterCents: 1100,
+    } as MoneyHold
+    const result = await writeHeldBudget({} as never, CLIENT_A, hold)
+    expect(result.wroteMeta).toBe(false)
+    expect(result.queued).toBeUndefined()
+    expect(result.reason).toContain('新开一份计划')
+  })
+
+  it('acceptance does not upload a finished video', async () => {
+    const upload = vi.fn<AdmitDeps['upload']>(async () => ({ ok: true as const, videoId: '555' }))
+    const order: AdmitWorkOrder = {
+      id: 'wo-1',
+      clientId: CLIENT_A,
+      status: 'in_review',
+      assetOnly: true,
+      videoPath: 'renders/c/wo-1/final.mp4',
+      reviewRef: {},
+    }
+    const result = await admitFinishedAsset(order, {
+      uploadEnabled: true,
+      publicBase: 'https://files.example.test/bucket',
+      accounts: async () => ({ ok: true, accounts: [{ adAccountId: 'act_1', isPrimary: true }], registeredIds: ['act_1'] }),
+      token: async () => 'tok',
+      upload,
+      remember: async () => ({ ok: true }),
+    })
+    expect(result.ok).toBe(false)
+    expect(upload).not.toHaveBeenCalled()
   })
 })
