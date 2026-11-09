@@ -77,13 +77,24 @@ function fakeSupabase(
     failAfterFirstUpdate?: boolean
     claimMatches?: boolean
     planRows?: { created_at?: string; payload?: unknown }[]
+    clientRow?: { facebook_page_id?: string; leads_config?: unknown } | null
   } = {},
 ) {
   const inserted: DraftRecord[] = []
   const updated: DraftRecord[] = []
   let updateCount = 0
   const sb = {
-    from: () => ({
+    from: (table?: string) => {
+      if (table === 'clients' && Object.prototype.hasOwnProperty.call(opts, 'clientRow')) {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: opts.clientRow, error: null }),
+            }),
+          }),
+        }
+      }
+      return {
       insert: (row: { payload: DraftRecord }) => {
         inserted.push(row.payload)
         return {
@@ -124,7 +135,8 @@ function fakeSupabase(
         }
         return b
       },
-    }),
+    }
+    },
   } as unknown as SupabaseClient
   return { sb, inserted, updated }
 }
@@ -766,6 +778,42 @@ describe('createDraftForApproval — 请求体形状不对时不抛 500、要落
   })
 })
 
+describe('createDraftForApproval — 伙伴主页先对上客户配置，再去建', () => {
+  const partner = { ...DRAFT, kind: 'partner_page' as const, pageId: '11111', partnerIdentity: 'own' as const }
+
+  it('读不到主页配置就不建，也不调用发布器', async () => {
+    const { sb, inserted } = fakeSupabase()
+    const r = await createDraftForApproval(partner, deps(sb))
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('主页配置')
+    expect(mPublish).not.toHaveBeenCalled()
+    expect(inserted).toHaveLength(1)
+  })
+
+  it('确认卡上的身份和现在的配置不一致，就不建', async () => {
+    const { sb } = fakeSupabase(undefined, {
+      clientRow: { facebook_page_id: '11111', leads_config: { ads_partner_page: { identity: 'own' } } },
+    })
+    const r = await createDraftForApproval(
+      { ...partner, pageId: '22222', partnerIdentity: 'partner' },
+      deps(sb),
+    )
+    expect(r.status).toBe('failed')
+    expect(r.error).toContain('不一致')
+    expect(mPublish).not.toHaveBeenCalled()
+  })
+
+  it('身份仍是客户自己的主页时，按暂停草稿去建', async () => {
+    mPublish.mockResolvedValue(OK_PUBLISH)
+    const { sb } = fakeSupabase(undefined, {
+      clientRow: { facebook_page_id: '11111', leads_config: {} },
+    })
+    const r = await createDraftForApproval(partner, deps(sb))
+    expect(r.status).toBe('awaiting_approval')
+    expect(mPublish.mock.calls[0]?.[0]).toMatchObject({ kind: 'partner_page', pageId: '11111', partnerIdentity: 'own' })
+  })
+})
+
 describe('createDraftForApproval — 其它类型的行为不变', () => {
   it('留资草案：不等转码、不查期望、不给预算参数、不补暂停', async () => {
     mPublish.mockResolvedValue(OK_PUBLISH)
@@ -834,6 +882,38 @@ describe('approveDraft — 私信广告现在不能用「开」按钮打开', ()
       cardRunId: '11111111-1111-4111-8111-111111111111',
     }
     expect((await approveDraft('act1', sb, 'tok', card, 'go-live-card')).ok).toBe(true)
+    expect(mActivate).toHaveBeenCalledTimes(1)
+  })
+
+  it('伙伴主页不从旧开按钮开，也不去对计划上限', async () => {
+    const { sb, updated } = fakeSupabase({ ...base, draft: { ...DRAFT, kind: 'partner_page', partnerIdentity: 'own' } })
+    const r = await approveDraft('act1', sb, 'tok', PM)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('开投确认卡')
+    expect(mActivate).not.toHaveBeenCalled()
+    expect(launch.bindDraftLaunch).not.toHaveBeenCalled()
+    expect(updated).toHaveLength(0)
+  })
+
+  it('伙伴主页从开投确认卡打开时，先对已批准计划的每天总上限', async () => {
+    const card = {
+      actorUserId: 'u-pm',
+      actorEmail: 'pm@magiclab.test',
+      basis: 'go_live_card' as const,
+      cardRunId: '11111111-1111-4111-8111-111111111111',
+    }
+    launch.bindDraftLaunch.mockResolvedValueOnce({ ok: false, reason: '这位客户现在没有已批准的广告计划，没有开。' })
+    const blocked = fakeSupabase({ ...base, draft: { ...DRAFT, kind: 'partner_page', partnerIdentity: 'own' } })
+    const refused = await approveDraft('act1', blocked.sb, 'tok', card, 'go-live-card')
+    expect(refused.ok).toBe(false)
+    if (!refused.ok) expect(refused.error).toContain('已批准的广告计划')
+    expect(mActivate).not.toHaveBeenCalled()
+
+    mActivate.mockResolvedValue({ ok: true })
+    launch.bindDraftLaunch.mockResolvedValue({ ok: true, planId: 'plan-1' })
+    const { sb } = fakeSupabase({ ...base, draft: { ...DRAFT, kind: 'partner_page', partnerIdentity: 'own' } })
+    expect((await approveDraft('act1', sb, 'tok', card, 'go-live-card')).ok).toBe(true)
+    expect(launch.bindDraftLaunch).toHaveBeenCalled()
     expect(mActivate).toHaveBeenCalledTimes(1)
   })
 })

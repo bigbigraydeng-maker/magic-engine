@@ -85,6 +85,46 @@ describe('POST /meta-ads/draft — pageId 归属（AD-SEC-2）', () => {
     expect(issuePausedDraftCard).not.toHaveBeenCalled()
   })
 
+  it('伙伴主页默认仍用客户自己的主页，不信请求体里的主页', async () => {
+    clientRow = {
+      ...clientRow,
+      leads_config: { ads_partner_page: { identity: 'own', partner_page_id: '22222' } },
+    }
+    const res = await POST(
+      req({ kind: 'partner_page', pageId: '33333', partnerIdentity: 'partner' }),
+      { params: Promise.resolve({ id: 'c1' }) },
+    )
+    expect(res.status).toBe(202)
+    const draftArg = issuePausedDraftCard.mock.calls[0][0] as { draft: { pageId: string; partnerIdentity?: string } }
+    expect(draftArg.draft.pageId).toBe('real-page-id')
+    expect(draftArg.draft.partnerIdentity).toBe('own')
+  })
+
+  it('配置指定伙伴主页时，用配置里的编号，不信请求体', async () => {
+    clientRow = {
+      ...clientRow,
+      leads_config: { ads_partner_page: { identity: 'partner', partner_page_id: '22222' } },
+    }
+    const res = await POST(
+      req({ kind: 'partner_page', pageId: '33333' }),
+      { params: Promise.resolve({ id: 'c1' }) },
+    )
+    expect(res.status).toBe(202)
+    const draftArg = issuePausedDraftCard.mock.calls[0][0] as { draft: { pageId: string; partnerIdentity?: string } }
+    expect(draftArg.draft.pageId).toBe('22222')
+    expect(draftArg.draft.partnerIdentity).toBe('partner')
+  })
+
+  it('要换成伙伴主页但配置里没有编号，不出卡，也不去建', async () => {
+    clientRow = { ...clientRow, leads_config: { ads_partner_page: { identity: 'partner' } } }
+    const res = await POST(req({ kind: 'partner_page', pageId: '33333' }), { params: Promise.resolve({ id: 'c1' }) })
+    expect(res.status).toBe(409)
+    expect(issuePausedDraftCard).not.toHaveBeenCalled()
+    const body = await res.json()
+    expect(body.wroteMeta).toBe(false)
+    expect(body.error).toContain('伙伴主页编号')
+  })
+
   it('多个广告组不出卡，也不去建', async () => {
     const res = await POST(req({ adSets: [{ name: 'a' }, { name: 'b' }] }), { params: Promise.resolve({ id: 'c1' }) })
     expect(res.status).toBe(409)
