@@ -183,16 +183,18 @@ describe('CrmWorkspaceShell', () => {
       '销售进度',
       '到期日历',
       '邮件模板',
+      '自动发信',
       '设置',
     ])
   })
 
-  it('shows 邮件模板 only when the feature is ready or I can configure it', async () => {
+  it('shows 邮件模板 and 自动发信 only when the feature is ready or I can configure it', async () => {
     const { unmount } = render(<CrmWorkspaceShell clientId={CLIENT}>body</CrmWorkspaceShell>)
     await waitFor(() => {
       expect(screen.getByText('今天先联系')).toBeTruthy()
     })
     expect(screen.queryByText('邮件模板')).toBeNull()
+    expect(screen.queryByText('自动发信')).toBeNull()
     unmount()
 
     resetCrmNavProbeCache()
@@ -204,6 +206,9 @@ describe('CrmWorkspaceShell', () => {
     expect(screen.getByText('邮件模板').closest('a')?.getAttribute('href')).toMatch(
       /\/crm\/templates$/,
     )
+    expect(screen.getByText('自动发信').closest('a')?.getAttribute('href')).toMatch(
+      /\/crm\/auto-send$/,
+    )
     second.unmount()
 
     resetCrmNavProbeCache()
@@ -212,15 +217,17 @@ describe('CrmWorkspaceShell', () => {
     await waitFor(() => {
       expect(screen.getByText('邮件模板')).toBeTruthy()
     })
+    expect(screen.getByText('自动发信')).toBeTruthy()
   })
 
-  it('puts 邮件模板 and 设置 in the right-aligned group', async () => {
+  it('puts 邮件模板, 自动发信 and 设置 in the right-aligned group', async () => {
     templatesBody = { featureState: 'ready' }
     render(<CrmWorkspaceShell clientId={CLIENT}>body</CrmWorkspaceShell>)
     await waitFor(() => {
       expect(screen.getByText('邮件模板')).toBeTruthy()
     })
     expect(screen.getByText('邮件模板').closest('.ml-auto')).not.toBeNull()
+    expect(screen.getByText('自动发信').closest('.ml-auto')).not.toBeNull()
     expect(screen.getByText('设置').closest('.ml-auto')).not.toBeNull()
     expect(screen.getByText('今天先联系').closest('.ml-auto')).toBeNull()
   })

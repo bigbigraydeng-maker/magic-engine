@@ -97,28 +97,36 @@ describe('writeSidebarCollapsed', () => {
 describe('buildCrmNavItems', () => {
   it('returns items in the expected order', () => {
     const keys = buildCrmNavItems(CLIENT).map((item) => item.key)
-    expect(keys).toEqual(['today', 'all', 'payments', 'sales', 'calendar', 'templates', 'settings'])
+    expect(keys).toEqual(['today', 'all', 'payments', 'sales', 'calendar', 'templates', 'autosend', 'settings'])
   })
 
   it('uses the exact Chinese labels', () => {
     const labels = buildCrmNavItems(CLIENT).map((item) => item.label)
-    expect(labels).toEqual(['今天先联系', '全部客人', '付款总览', '销售进度', '到期日历', '邮件模板', '设置'])
+    expect(labels).toEqual(['今天先联系', '全部客人', '付款总览', '销售进度', '到期日历', '邮件模板', '自动发信', '设置'])
   })
 
   it('has no placeholder item: every item is a real link', () => {
     for (const item of buildCrmNavItems(CLIENT)) expect(typeof item.href).toBe('string')
   })
 
-  it('payments, sales and calendar need bookings access; only templates needs the template gate', () => {
+  it('payments, sales and calendar need bookings access; templates and autosend share the template gate', () => {
     const items = buildCrmNavItems(CLIENT)
     expect(items.filter((i) => i.gate === 'bookings').map((i) => i.key)).toEqual(['payments', 'sales', 'calendar'])
-    expect(items.filter((i) => i.gate === 'templates').map((i) => i.key)).toEqual(['templates'])
+    expect(items.filter((i) => i.gate === 'templates').map((i) => i.key)).toEqual(['templates', 'autosend'])
   })
 
-  it('templates and settings are right-aligned, the rest left-aligned', () => {
+  it('templates, autosend and settings are right-aligned, the rest left-aligned', () => {
     const items = buildCrmNavItems(CLIENT)
-    expect(items.filter((i) => i.align === 'right').map((i) => i.key)).toEqual(['templates', 'settings'])
+    expect(items.filter((i) => i.align === 'right').map((i) => i.key)).toEqual(['templates', 'autosend', 'settings'])
     expect(items.filter((i) => i.align === 'left')).toHaveLength(5)
+  })
+
+  it('autosend sits between templates and settings and points at the auto-send page', () => {
+    const items = buildCrmNavItems(CLIENT)
+    const keys = items.map((i) => i.key)
+    expect(keys.indexOf('autosend')).toBe(keys.indexOf('templates') + 1)
+    expect(keys.indexOf('settings')).toBe(keys.indexOf('autosend') + 1)
+    expect(items.find((i) => i.key === 'autosend')?.href).toBe(`${BASE}/crm/auto-send`)
   })
 
   it('embeds the clientId in every href', () => {
@@ -177,6 +185,14 @@ describe('activeCrmNavKey', () => {
 
   it('templates page => templates', () => {
     expect(activeCrmNavKey(`${BASE}/crm/templates`, '', CLIENT)).toBe('templates')
+  })
+
+  it('auto-send page => autosend', () => {
+    expect(activeCrmNavKey(`${BASE}/crm/auto-send`, '', CLIENT)).toBe('autosend')
+  })
+
+  it('auto-send of a different client => null', () => {
+    expect(activeCrmNavKey('/dashboard/clients/other/crm/auto-send', '', CLIENT)).toBeNull()
   })
 
   it('a CRM page with no nav item (decisions) => null', () => {
