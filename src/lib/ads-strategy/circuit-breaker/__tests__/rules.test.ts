@@ -153,6 +153,17 @@ describe('settings', () => {
     expect(settings.cplMultiple).toBe(3)
     expect(settings.targetCplCents).toBe(250)
   })
+
+  it('客户设置里的目标和已批准计划不一致时，不挑一份去判', () => {
+    const settings = readBreakerSettings(
+      null,
+      [{ plan_data: { promo: { target_cpl_cents: 250 } } }],
+      { target_cost_per_primary: 8 },
+    )
+    expect(settings.targetCplCents).toBeNull()
+    const agreed = readBreakerSettings(null, [], { target_cost_per_primary: 8 })
+    expect(agreed.targetCplCents).toBe(800)
+  })
 })
 
 describe('hoursIntoLocalDay', () => {

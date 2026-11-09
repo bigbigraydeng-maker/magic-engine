@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server'
 import { publicError } from '@/lib/confirmation-card/http'
 import { issuePausedDraftCard } from '@/lib/ads-strategy/paused-draft-submit'
 import type { AdDraft } from '@/lib/ads-strategy/ad-draft'
+import { draftStampedWithIdentity } from '@/lib/ads-strategy/partner-page'
 import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { cardContext, clientAds, kernel, pausedDraftGate } from './access'
@@ -28,9 +29,12 @@ export async function POST(
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     return NextResponse.json({ error: '请求内容读不懂，没有收下。' }, { status: 400 })
   }
-  const draft = { ...(body as AdDraft), clientId: id, pageId: ads.pageId }
-  delete (draft as { accessToken?: unknown }).accessToken
-  delete (draft as { access_token?: unknown }).access_token
+  const incoming = { ...(body as AdDraft), clientId: id }
+  delete (incoming as { accessToken?: unknown }).accessToken
+  delete (incoming as { access_token?: unknown }).access_token
+  const stamped = draftStampedWithIdentity(incoming, ads.pageId, ads.leadsConfig)
+  if (!stamped.ok) return NextResponse.json({ error: stamped.reason }, { status: 409 })
+  const draft = stamped.draft
   try {
     const context = await cardContext(id, ads.adAccountId)
     const readSpend = await spendReader(id, ads.adAccountId, draft)

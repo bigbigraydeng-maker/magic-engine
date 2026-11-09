@@ -686,3 +686,76 @@ describe('targetingFor — 自定义受众（包含 / 排除）', () => {
     expect(targetingOf().custom_audiences).toBeUndefined()
   })
 })
+
+describe('partner_page stays paused and refuses a partner page without sharing', () => {
+  const partner: AdDraft = {
+    ...DRAFT,
+    kind: 'partner_page',
+    pageId: '22222',
+    partnerIdentity: 'partner',
+  }
+
+  function json(body: unknown, status = 200): Response {
+    return { ok: status < 300, status, text: async () => JSON.stringify(body) } as Response
+  }
+
+  it('client-page identity does not ask Meta about sharing, and every new object is paused', async () => {
+    vi.stubGlobal('fetch', mockGraph())
+    const result = await publishDraftPaused({ ...DRAFT, kind: 'partner_page', partnerIdentity: 'own' }, 'act_1', 'tok')
+    expect(result.ok).toBe(true)
+    expect(calls.every((call) => call.method === 'POST')).toBe(true)
+    expect(calls.some((call) => call.body.get('status') === 'ACTIVE')).toBe(false)
+    for (const call of calls) {
+      if (call.body.has('status')) expect(call.body.get('status')).toBe('PAUSED')
+    }
+    const spec = JSON.parse(calls.find((call) => call.url.includes('/adcreatives'))!.body.get('object_story_spec')!)
+    expect(spec.page_id).toBe('p1')
+    expect(spec.facebook_branded_content).toBeUndefined()
+  })
+
+  it('partner identity writes the configured page only after sharing is readable, still paused', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const body = new URLSearchParams(String(init?.body ?? ''))
+      calls.push({ url: String(url), method: init?.method ?? 'GET', body })
+      if ((init?.method ?? 'GET') !== 'POST') {
+        if (String(url).includes('promote_pages')) return json({ data: [{ id: '22222' }] })
+        return json({ id: '22222', tasks: ['ADVERTISE'] })
+      }
+      const id = String(url).includes('/campaigns') ? 'camp1'
+        : String(url).includes('/adsets') ? 'as1'
+        : String(url).includes('/adcreatives') ? 'cr1'
+        : 'ad1'
+      return json({ id })
+    }))
+    const result = await publishDraftPaused(partner, 'act_1', 'tok')
+    expect(result.ok).toBe(true)
+    const firstPost = calls.findIndex((call) => call.method === 'POST')
+    expect(firstPost).toBeGreaterThan(0)
+    const posts = calls.filter((call) => call.method === 'POST')
+    for (const call of posts) {
+      if (call.body.has('status')) expect(call.body.get('status')).toBe('PAUSED')
+    }
+    const creative = posts.find((call) => call.url.includes('/adcreatives'))!
+    const spec = JSON.parse(creative.body.get('object_story_spec')!)
+    expect(spec.page_id).toBe('22222')
+    expect(creative.body.get('facebook_branded_content')).toBeNull()
+    const adSet = posts.find((call) => call.url.includes('/adsets'))!
+    expect(JSON.parse(adSet.body.get('promoted_object')!)).toEqual({ page_id: '22222' })
+  })
+
+  it('missing asset sharing returns the Chinese reason and does not create anything', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push({ url: String(url), method: 'GET', body: new URLSearchParams() })
+      if (String(url).includes('promote_pages')) return json({ data: [] })
+      return json({ error: { code: 10, message: 'permission secret-token' } }, 400)
+    }))
+    const result = await publishDraftPaused(partner, 'act_1', 'tok')
+    expect(result.ok).toBe(false)
+    if (!result.ok) {
+      expect(result.error).toBe('伙伴主页还没有投放权限，或还没有分享到这个广告账户。这次没有去建。')
+      expect(result.error).not.toContain('secret-token')
+      expect(result.orphans).toEqual([])
+    }
+    expect(calls.every((call) => call.method === 'GET')).toBe(true)
+  })
+})

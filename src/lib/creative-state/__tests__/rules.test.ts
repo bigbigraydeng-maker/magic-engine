@@ -37,6 +37,8 @@ describe('creative state rules', () => {
   it('reads the client target and never lowers the lead floor', () => {
     expect(rulesFromConfig(null).targetCpl).toBeNull()
     expect(rulesFromConfig({ target_cost_per_primary: 0 }).targetCpl).toBeNull()
+    expect(rulesFromConfig(null, [{ plan_data: { promo: { target_cpl_cents: 400 } } }]).targetCpl).toBe(4)
+    expect(rulesFromConfig({ target_cost_per_primary: 8 }, [{ plan_data: { promo: { target_cpl_cents: 400 } } }]).targetCpl).toBeNull()
     expect(rules(4, 5).minLeads).toBe(10)
     expect(rules(4, 15).minLeads).toBe(15)
   })
