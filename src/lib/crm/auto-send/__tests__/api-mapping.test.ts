@@ -84,6 +84,13 @@ describe('mapAutoLettersList', () => {
     const empty = mapAutoLettersList({ ...list, nextBatch: null, scheduledLetters: [], totalDistinctLetters: 0 })
     expect(empty).toEqual({ nextBatch: null, sections: [] })
   })
+
+  it('passes the server notices through only when there are some', () => {
+    const notice = '有 2 张已交定金的订单没有出发日（或日期不对），没排进任何一封信。'
+    expect(mapAutoLettersList({ ...list, notices: [notice] }).notices).toEqual([notice])
+    expect('notices' in mapAutoLettersList({ ...list, notices: [] })).toBe(false)
+    expect('notices' in mapAutoLettersList(list)).toBe(false)
+  })
 })
 
 describe('mapAutoLetterDetail', () => {

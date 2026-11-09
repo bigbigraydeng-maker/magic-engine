@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { compactDate, dayOfMonth, daysBetween, fromDayNumber, toDayNumber, weekdayLabelZh, weekdayOf } from '../dates'
-import { buildLetterKey, buildTemplateKey, buildTriggerKey, parseLetterKey } from '../keys'
+import { buildLetterKey, buildTemplateKey, buildTriggerKey, parseLetterKey, tourCodeOf } from '../keys'
 
 describe('dates', () => {
   it('rejects anything that is not a real YYYY-MM-DD', () => {
@@ -33,17 +33,42 @@ describe('dates', () => {
 describe('letter / template / trigger keys', () => {
   const identity = { sendDate: '2026-12-02', tourId: 'tour-1', departOn: '2027-03-11', monthsLeft: 3 as const }
 
+  const code = tourCodeOf('tour-1')
+
   it('builds the three spellings from the same four facts', () => {
     expect(buildLetterKey(identity)).toBe('plan:2026-12-02:tour-1:2027-03-11:3')
-    expect(buildTemplateKey(identity)).toBe('countdown-20261202-tour-1-20270311-m3')
-    expect(buildTriggerKey(identity)).toBe('countdown_20261202_tour-1_20270311_3')
+    expect(buildTemplateKey(identity)).toBe(`auto-countdown-20261202-${code}-20270311-m3`)
+    expect(buildTriggerKey(identity)).toBe(`countdown_20261202_${code}_20270311_3`)
   })
 
   it('uses w for the weekly letters', () => {
     const weekly = { ...identity, monthsLeft: 'weekly' as const }
     expect(buildLetterKey(weekly)).toBe('plan:2026-12-02:tour-1:2027-03-11:w')
-    expect(buildTemplateKey(weekly)).toBe('countdown-20261202-tour-1-20270311-w')
-    expect(buildTriggerKey(weekly)).toBe('countdown_20261202_tour-1_20270311_w')
+    expect(buildTemplateKey(weekly)).toBe(`auto-countdown-20261202-${code}-20270311-w`)
+    expect(buildTriggerKey(weekly)).toBe(`countdown_20261202_${code}_20270311_w`)
+  })
+
+  it('the short tour code is 7 chars of a-z0-9, stable, and different for different tours', () => {
+    expect(code).toMatch(/^[a-z0-9]{7}$/)
+    expect(tourCodeOf('tour-1')).toBe(code)
+    const ids = ['tour-1', 'tour-2', '7a5c1e2f-0000-4000-8000-000000000001', '7a5c1e2f-0000-4000-8000-000000000002', 'a:b c/d', 'é-é', '']
+    const codes = ids.map(tourCodeOf)
+    codes.forEach((c) => expect(c).toMatch(/^[a-z0-9]{7}$/))
+    expect(new Set(codes).size).toBe(ids.length)
+  })
+
+  it('the template and trigger keys fit the database rules for any tour id (uuid, odd characters)', () => {
+    const TEMPLATE_KEY_RE = /^[a-z0-9][a-z0-9-]{1,62}$/
+    const TRIGGER_KEY_RE = /^[a-z][a-z0-9_]{0,39}$/
+    for (const tourId of ['7a5c1e2f-0000-4000-8000-000000000001', 'a:b c/d', 'é-é', 'T-1']) {
+      for (const monthsLeft of [1, 2, 3, 4, 5, 6, 'weekly'] as const) {
+        const template = buildTemplateKey({ ...identity, tourId, monthsLeft })
+        const trigger = buildTriggerKey({ ...identity, tourId, monthsLeft })
+        expect(template).toMatch(TEMPLATE_KEY_RE)
+        expect(template?.startsWith('auto-')).toBe(true)
+        expect(trigger).toMatch(TRIGGER_KEY_RE)
+      }
+    }
   })
 
   it('round-trips, including a tour id with awkward characters', () => {

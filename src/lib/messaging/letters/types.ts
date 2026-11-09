@@ -115,6 +115,11 @@ export interface AutoLettersList {
   scheduledLetters: LetterRow[]
   /** 「共 N 个不同的信」。 */
   totalDistinctLetters: number
+  /**
+   * 给员工看的提醒（中文人话），例如「有 N 张已交定金的订单没有出发日，没排进任何一封信」。
+   * 契约之外只加不改的字段；没有提醒就是空数组或不带这个字段。
+   */
+  notices?: string[]
 }
 
 // ─── 接口 B：详情 GET /api/clients/[id]/crm/auto-letters/[letterKey] ──────────

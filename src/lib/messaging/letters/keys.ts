@@ -2,11 +2,14 @@
  * 信编号：一封信 = 某个发信日 × 某个团（tourId + 出发日）× 第几个月（或每周）。
  * 编号只由这四样事实算出来，同一封信前后不变；读接口、发信引擎、登记工具都用同一套写法。
  *
- *   letterKey   plan:<发信日>:<tourId 编码>:<出发日>:<月数 | w>        （读接口 / 页面用，不透明）
- *   templateKey countdown-<发信日 YYYYMMDD>-<tourId 编码>-<出发日 YYYYMMDD>-<m月数 | w>   （信的登记，crm_email_templates.template_key）
- *   triggerKey  countdown_<发信日 YYYYMMDD>_<tourId 编码>_<出发日 YYYYMMDD>_<月数 | w>    （发信引擎写 triggered_sends.trigger_key）
+ *   letterKey   plan:<发信日>:<tourId 编码>:<出发日>:<月数 | w>                     （读接口 / 页面用，不透明）
+ *   templateKey auto-countdown-<发信日 YYYYMMDD>-<团码>-<出发日 YYYYMMDD>-<m月数 | w>   （信的登记，crm_email_templates.template_key）
+ *   triggerKey  countdown_<发信日 YYYYMMDD>_<团码>_<出发日 YYYYMMDD>_<月数 | w>         （发信引擎写 triggered_sends.trigger_key）
  *
- * tourId 用 encodeURIComponent 编码，所以编号里的「:」只会出现在分隔位。
+ * tourId 用 encodeURIComponent 编码，所以 letterKey 里的「:」只会出现在分隔位。
+ * 登记用的两个编号有长度和字符限制（模板键：小写字母 / 数字 / 连字符、最长 63 位，且 `auto-` 开头让销售选不到、手发会被拒；
+ * 发信编号：小写字母 / 数字 / 下划线、最长 40 位），而 tourId 是 36 位的 uuid，放不下——所以两处都用 7 位「团码」
+ * （由 tourId 算出的短码，只用来分团，不能反查；同一个 tourId 永远算出同一个码）。
  */
 
 import { compactDate, toDayNumber } from './dates'
@@ -53,6 +56,16 @@ export function parseLetterKey(key: string): LetterIdentity | null {
   return { sendDate, tourId, departOn, monthsLeft: token === 'w' ? 'weekly' : Number(token) }
 }
 
+/** 7 位短码：tourId 的 32 位哈希（FNV-1a）转 36 进制，不足补 0。只含 a-z、0-9。 */
+export function tourCodeOf(tourId: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < tourId.length; index += 1) {
+    hash ^= tourId.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(36).padStart(7, '0')
+}
+
 function codeParts(identity: LetterIdentity): { send: string; depart: string; tour: string; months: string } | null {
   if (buildLetterKey(identity) === null) return null
   const send = compactDate(identity.sendDate)
@@ -61,7 +74,7 @@ function codeParts(identity: LetterIdentity): { send: string; depart: string; to
   return {
     send,
     depart,
-    tour: encodeURIComponent(identity.tourId),
+    tour: tourCodeOf(identity.tourId),
     months: monthsToken(identity.monthsLeft),
   }
 }
@@ -70,7 +83,7 @@ function codeParts(identity: LetterIdentity): { send: string; depart: string; to
 export function buildTemplateKey(identity: LetterIdentity): string | null {
   const parts = codeParts(identity)
   if (!parts) return null
-  return `countdown-${parts.send}-${parts.tour}-${parts.depart}-${parts.months === 'w' ? 'w' : `m${parts.months}`}`
+  return `auto-countdown-${parts.send}-${parts.tour}-${parts.depart}-${parts.months === 'w' ? 'w' : `m${parts.months}`}`
 }
 
 /** 发信引擎写 triggered_sends.trigger_key 用的编号。 */

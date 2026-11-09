@@ -126,6 +126,36 @@ describe('AutoSendBoard · 加载中 / 出错 / 空', () => {
   })
 })
 
+describe('AutoSendBoard · 服务器提醒', () => {
+  const NOTICE = '有 2 张已交定金的订单没有出发日（或日期不对），没排进任何一封信。请先在订单里补上出发日。'
+
+  it('shows the notices above an otherwise empty page — that is exactly when they matter', async () => {
+    const adapter: AutoSendAdapter = {
+      loadOverview: () => Promise.resolve({ nextBatch: null, sections: [], notices: [NOTICE] }),
+      loadLetterDetail: () => Promise.reject(new Error('没有')),
+    }
+    render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={adapter} />)
+    expect((await screen.findByTestId('auto-send-notices')).textContent).toContain(NOTICE)
+    expect(screen.getByTestId('auto-send-empty')).toBeTruthy()
+  })
+
+  it('shows the notices above the lists when there are letters, and nothing when there are none', async () => {
+    const demo = await createDemoAdapter().loadOverview()
+    const withNotice: AutoSendAdapter = {
+      loadOverview: () => Promise.resolve({ ...demo, notices: [NOTICE] }),
+      loadLetterDetail: () => Promise.reject(new Error('没有')),
+    }
+    const { unmount } = render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={withNotice} />)
+    expect((await screen.findByTestId('auto-send-notices')).textContent).toContain(NOTICE)
+    unmount()
+
+    const without: AutoSendAdapter = { loadOverview: () => Promise.resolve(demo), loadLetterDetail: () => Promise.reject(new Error('没有')) }
+    render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={without} />)
+    await screen.findByTestId('auto-send-next-batch')
+    expect(screen.queryByTestId('auto-send-notices')).toBeNull()
+  })
+})
+
 describe('AutoSendBoard · 列表、筛选、看这批', () => {
   it('renders the next-batch card, both panels, the legend and no demo banner', async () => {
     await renderReady()

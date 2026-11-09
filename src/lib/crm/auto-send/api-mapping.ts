@@ -13,7 +13,7 @@ import type {
   LetterStatus as ApiLetterStatus,
   RecipientRow as ApiRecipientRow,
 } from '@/lib/messaging/letters/types'
-import { COUNTDOWN_CADENCE } from '@/lib/messaging/letters/plan'
+import { COUNTDOWN_CADENCE } from '@/lib/messaging/letters/cadence'
 import { bodyTextToBlocks } from './body-blocks'
 import { formatShortDate } from './format'
 import type {
@@ -91,6 +91,7 @@ export function mapAutoLettersList(api: AutoLettersList): AutoSendOverview {
       status: api.nextBatch.phase,
     },
     sections,
+    ...(api.notices && api.notices.length > 0 ? { notices: api.notices } : {}),
   }
 }
 

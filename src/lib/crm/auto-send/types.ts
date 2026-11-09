@@ -65,6 +65,8 @@ export interface NextBatch {
 export interface AutoSendOverview {
   nextBatch: NextBatch | null
   sections: LetterSection[]
+  /** 服务器给员工的提醒（中文人话），例如哪些订单没排进信里；没有就不带这个字段。 */
+  notices?: string[]
 }
 
 /** 信的正文，已经切成块；页面不解析任何标记语言。 */
