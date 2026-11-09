@@ -309,6 +309,26 @@ BEGIN
   RETURN sid;
 END $$;
 
+-- 经销商自己的只读后台：不发 ME 登录账号，用一次性邀请链接换一个有效期内的会话。只存令牌的 SHA-256。
+-- invite：管理员生成，24 小时内有效、只能用一次；session：换出来的会话，30 天有效，可撤销。
+CREATE TABLE public.distributor_portal_tokens (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  distributor_id  UUID NOT NULL REFERENCES public.distributors(id) ON DELETE RESTRICT,
+  kind            TEXT NOT NULL CHECK (kind IN ('invite','session')),
+  token_hash      TEXT NOT NULL UNIQUE CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+  expires_at      TIMESTAMPTZ NOT NULL,
+  used_at         TIMESTAMPTZ,
+  revoked_at      TIMESTAMPTZ,
+  created_by      TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (expires_at > created_at),
+  CHECK (kind = 'invite' OR used_at IS NULL)
+);
+CREATE INDEX distributor_portal_tokens_distributor_idx ON public.distributor_portal_tokens(distributor_id);
+ALTER TABLE public.distributor_portal_tokens ENABLE ROW LEVEL SECURITY;
+CREATE POLICY distributor_portal_tokens_service_role ON public.distributor_portal_tokens
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
 REVOKE ALL ON FUNCTION public.distributor_save_statement(JSONB) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.distributor_save_statement(JSONB) FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.distributor_save_statement(JSONB) TO service_role;

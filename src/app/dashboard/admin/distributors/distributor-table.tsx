@@ -1,5 +1,15 @@
 'use client'
-import { LEVEL_LABELS, STATUS_LABELS, SkeletonRow, formatMoney, type Distributor } from './shared'
+import { useState } from 'react'
+import {
+  LEVEL_LABELS,
+  STATUS_LABELS,
+  SkeletonRow,
+  errorText,
+  formatMoney,
+  postJson,
+  type ApiError,
+  type Distributor,
+} from './shared'
 
 interface DistributorTableProps {
   distributors: Distributor[]
@@ -9,9 +19,60 @@ interface DistributorTableProps {
 }
 
 export function DistributorTable({ distributors, loading, onDecision, busyId }: DistributorTableProps) {
+  const [linkBusyId, setLinkBusyId] = useState<string | null>(null)
+  const [linkUrlById, setLinkUrlById] = useState<Record<string, string>>({})
+  const [linkErrById, setLinkErrById] = useState<Record<string, string>>({})
+
+  const generateLink = async (d: Distributor) => {
+    if (!window.confirm(`给「${d.display_name}」生成一条 24 小时有效、只能用一次的登录链接？`)) return
+    setLinkBusyId(d.id)
+    setLinkErrById((prev) => {
+      const next = { ...prev }
+      delete next[d.id]
+      return next
+    })
+    const res = await postJson<{ url: string }>(`/api/admin/distributors/${d.id}/access-link`, {})
+    setLinkBusyId(null)
+    if (!res.ok || !res.data) {
+      const err: ApiError | null = res.err
+      setLinkErrById((prev) => ({ ...prev, [d.id]: errorText(err) || '生成失败' }))
+      return
+    }
+    setLinkUrlById((prev) => ({ ...prev, [d.id]: res.data!.url }))
+  }
+
   const actionsFor = (d: Distributor) => {
+    const canLink = d.status === 'approved' || d.status === 'suspended'
+    const linkButton = canLink ? (
+      <button
+        type="button"
+        disabled={linkBusyId === d.id}
+        onClick={() => generateLink(d)}
+        className="ml-2 rounded-lg bg-me-charcoal/10 px-3 py-1 text-xs font-bold text-me-charcoal/75 disabled:opacity-50"
+      >
+        登录链接
+      </button>
+    ) : null
+
+    const linkResult = linkUrlById[d.id] ? (
+      <div className="mt-2">
+        <input
+          readOnly
+          value={linkUrlById[d.id]}
+          onFocus={(e) => e.currentTarget.select()}
+          className="w-full rounded-lg border border-black/[0.1] bg-me-ivory px-2 py-1 text-xs text-me-charcoal/80"
+        />
+        <p className="mt-1 text-xs text-me-charcoal/55">复制后自己发给对方。系统不会自动发送。</p>
+      </div>
+    ) : null
+
+    const linkError = linkErrById[d.id] ? (
+      <p className="mt-2 text-xs font-medium text-[#C2453A]">{linkErrById[d.id]}</p>
+    ) : null
+
+    let action: React.ReactNode
     if (d.status === 'pending') {
-      return (
+      action = (
         <>
           <button
             type="button"
@@ -31,9 +92,8 @@ export function DistributorTable({ distributors, loading, onDecision, busyId }: 
           </button>
         </>
       )
-    }
-    if (d.status === 'approved') {
-      return (
+    } else if (d.status === 'approved') {
+      action = (
         <button
           type="button"
           disabled={busyId === d.id}
@@ -43,9 +103,8 @@ export function DistributorTable({ distributors, loading, onDecision, busyId }: 
           停用
         </button>
       )
-    }
-    if (d.status === 'suspended') {
-      return (
+    } else if (d.status === 'suspended') {
+      action = (
         <button
           type="button"
           disabled={busyId === d.id}
@@ -55,8 +114,18 @@ export function DistributorTable({ distributors, loading, onDecision, busyId }: 
           恢复
         </button>
       )
+    } else {
+      action = <span className="text-xs text-me-charcoal/45">—</span>
     }
-    return <span className="text-xs text-me-charcoal/45">—</span>
+
+    return (
+      <>
+        {action}
+        {linkButton}
+        {linkResult}
+        {linkError}
+      </>
+    )
   }
 
   return (
