@@ -233,12 +233,12 @@ describe('GET promo — 在跑广告提示只给内部账号', () => {
     expect(m.liveAds).not.toHaveBeenCalled()
     expect(m.liveLink).not.toHaveBeenCalled()
   })
-  it('已批准的计划：内部账号不读花费，仍读对上关系', async () => {
+  it('已批准的计划：内部账号也读开投回执和对上关系', async () => {
     m.access.mockResolvedValue({ ok: true, tier: 'admin', user: { email: 'fde@example.com' } })
     m.plan = planWith(undefined, { status: 'approved' })
     const json = await (await GET(req(null, 'GET'), { params: P })).json()
-    expect(json.live_ads).toBeNull()
-    expect(m.liveAds).not.toHaveBeenCalled()
+    expect(json.live_ads.ok).toBe(true)
+    expect(m.liveAds).toHaveBeenCalledWith('client-1')
     expect(m.liveLink).toHaveBeenCalledWith('client-1')
   })
 })

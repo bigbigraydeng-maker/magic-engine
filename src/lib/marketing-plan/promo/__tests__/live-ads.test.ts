@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: {} }))
 
 import { summarizeLiveAds } from '../live-ads'
-import { adsRunningFrom, describeLiveAds } from '../live-ads-message'
+import { adsRunningFrom, describeLiveAds, describeUnrecordedAdsets } from '../live-ads-message'
 import type { LiveAdsFact } from '../live-ads-message'
 
 const adset = (id: string, acct: string, status = 'ACTIVE', at = '2026-10-20T06:00:00Z') =>
@@ -39,16 +39,12 @@ describe('summarizeLiveAds', () => {
 })
 
 describe('describeLiveAds', () => {
-  it('红字：只列确认有花费的账户，说清「手动开的、ME 没有批准记录」，不再说「请先批准」', () => {
+  it('有花费本身不再说没有批准记录；欠款账户仍是灰字', () => {
     const m = describeLiveAds(mk({ act_1: { last_day: '2026-10-20', spend_2d: 156.01 }, act_2: { last_day: '2026-10-10', spend_2d: 0 } }, { act_1: { currency: 'NZD', status_code: 1 }, act_2: { currency: 'NZD', status_code: 3 } }))
-    expect(m?.level).toBe('red')
-    expect(m?.text).toContain('ME 里没有这些广告的批准记录')
+    expect(m?.level).toBe('grey')
+    expect(m?.text ?? '').not.toContain('批准记录')
     expect(m?.text).not.toContain('手动开的')
-    expect(m?.text).toContain('NZ$156.01')
-    expect(m?.text).toContain('补走批准流程')
-    expect(m?.text).not.toContain('联系统筹')
-    expect(m?.text).not.toContain('UTC')
-    expect(m?.text).toContain('主账户') // 欠款账户以灰字另说
+    expect(m?.text).toContain('主账户')
     expect(m?.text).toContain('不会出广告')
   })
   it('黄字：花费数据没跟上，明说可能已经在花钱，不说「停在」，不当成没事', () => {
@@ -81,14 +77,37 @@ describe('describeLiveAds', () => {
       today: '2026-10-20',
       snapshotAgeHours: 0,
     })
-    const text = describeLiveAds(f)?.text ?? ''
+    const covered = f.ok ? { ...f, receipt_read: 'ok' as const, unrecorded: [{ ad_account_id: 'act_42', count: 1 }] } : f
+    const text = describeUnrecordedAdsets(covered)?.text ?? ''
     expect(text).not.toMatch(/act_\d/)
     expect(text).toContain('已绑定的广告账户')
     expect(text).toContain('NZ$10.00')
+    expect(text).toContain('没有开投批准记录')
   })
   it('读不到 / null → 不出提示', () => {
     expect(describeLiveAds(null)).toBeNull()
     expect(describeLiveAds({ ok: false, reason: 'x' })).toBeNull()
+  })
+})
+
+describe('describeUnrecordedAdsets', () => {
+  const base = () => mk({ act_1: { last_day: '2026-10-20', spend_2d: 12 }, act_2: { last_day: '2026-10-20', spend_2d: 0 } })
+  it('只点名没有回执的账户；两边都有回执就不出红字', () => {
+    const fact = base()
+    if (!fact.ok) throw new Error('expected ok')
+    const none = describeUnrecordedAdsets({ ...fact, receipt_read: 'ok', unrecorded: [{ ad_account_id: 'act_1', count: 1 }] })
+    expect(none?.level).toBe('red')
+    expect(none?.text).toContain('官方账户 1 个')
+    expect(none?.text).toContain('已经对上批准记录的不在这里')
+    expect(none?.text).not.toContain('主账户')
+    expect(describeUnrecordedAdsets({ ...fact, receipt_read: 'ok', unrecorded: [] })).toBeNull()
+  })
+  it('回执没读到时不说没有批准记录', () => {
+    const fact = base()
+    if (!fact.ok) throw new Error('expected ok')
+    const text = describeUnrecordedAdsets({ ...fact, receipt_read: 'failed' })?.text ?? ''
+    expect(text).toContain('读不到开投批准记录')
+    expect(text).not.toContain('没有开投批准记录')
   })
 })
 
