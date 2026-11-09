@@ -5,9 +5,9 @@
  */
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AutoSendBoard, AutoSendWorkspace } from '../auto-send/AutoSendBoard'
-import type { AutoSendAdapter } from '@/lib/crm/auto-send/adapter'
+import { AutoSendNotConnectedError, type AutoSendAdapter } from '@/lib/crm/auto-send/adapter'
 import { createDemoAdapter } from '@/lib/crm/auto-send/demo-data'
 
 const CLIENT = 'client-123'
@@ -16,6 +16,12 @@ const CLIENT = 'client-123'
 async function renderReady(): Promise<void> {
   render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={createDemoAdapter()} />)
   await screen.findByTestId('auto-send-next-batch')
+}
+
+/** 数据来源暂时没有：适配器报「还没接通」。 */
+const NOT_CONNECTED: AutoSendAdapter = {
+  loadOverview: () => Promise.reject(new AutoSendNotConnectedError()),
+  loadLetterDetail: () => Promise.reject(new AutoSendNotConnectedError()),
 }
 
 function rowIds(): string[] {
@@ -44,7 +50,7 @@ function flaky(): { adapter: AutoSendAdapter; fix: () => void } {
 
 describe('AutoSendBoard · 还没接通 / 看示例', () => {
   it('shows the not-connected state with a 看示例 button, no letters and no demo banner', async () => {
-    render(<AutoSendBoard clientId={CLIENT} />)
+    render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={NOT_CONNECTED} />)
     expect(await screen.findByTestId('auto-send-not-connected')).toBeTruthy()
     expect(screen.queryByTestId('auto-send-demo-banner')).toBeNull()
     expect(screen.queryAllByTestId(/^letter-row-/)).toHaveLength(0)
@@ -52,7 +58,7 @@ describe('AutoSendBoard · 还没接通 / 看示例', () => {
   })
 
   it('看示例 shows the demo letters under a banner; 退出示例 goes back to not-connected', async () => {
-    render(<AutoSendBoard clientId={CLIENT} />)
+    render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={NOT_CONNECTED} />)
     fireEvent.click(await screen.findByRole('button', { name: '看示例（假数据）' }))
     expect(await screen.findByTestId('auto-send-demo-banner')).toBeTruthy()
     expect(screen.getByTestId('auto-send-demo-banner').textContent).toContain('示例数据（假的）')
@@ -281,7 +287,7 @@ describe('AutoSendBoard · 抽屉', () => {
   })
 
   it('in demo mode the drawer says 示例数据 and the demo guests are not links', async () => {
-    render(<AutoSendBoard clientId={CLIENT} />)
+    render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={NOT_CONNECTED} />)
     fireEvent.click(await screen.findByRole('button', { name: '看示例（假数据）' }))
     await screen.findByTestId('letter-row-demo-l1')
     const dialog = await openLetter('demo-l1')
@@ -302,5 +308,76 @@ describe('AutoSendBoard · 抽屉', () => {
     expect((await within(dialog).findByRole('alert')).textContent).toContain('暂时读不到这封信：网络出错')
     expect(within(dialog).getByRole('button', { name: '重试' })).toBeTruthy()
     expect(within(dialog).getByRole('heading', { name: '读不到这封信' })).toBeTruthy()
+  })
+})
+
+describe('AutoSendBoard · 真实数据走读接口（对外只收 clientId）', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const LIST = {
+    generatedAt: '2026-11-10T09:00:00+13:00',
+    nextBatch: { sendDate: '2026-12-02', weekdayLabel: '周三', letterCount: 1, recipientCount: 2, phase: 'draft' },
+    depositLetters: [],
+    scheduledLetters: [
+      {
+        letterKey: 'plan:2026-12-02:t-1:2027-03-11:3',
+        sendDate: '2026-12-02',
+        audience: { tourName: 'Tour One', departOn: '2027-03-11', monthsLeft: 3 },
+        subject: null,
+        status: 'draft',
+        channel: 'me',
+        counts: { recipients: 2, sent: null, blocked: null, failed: null, rehearsal: 0 },
+      },
+    ],
+    totalDistinctLetters: 7,
+  }
+
+  it('shows the planned letters it reads from the interface, not the demo, and links names to the customer page', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/crm/auto-letters')) return new Response(JSON.stringify(LIST), { status: 200 })
+      return new Response(
+        JSON.stringify({
+          letter: { ...LIST.scheduledLetters[0], previewText: null, bodyText: null, sampleFirstName: 'Alex' },
+          tiles: { recipients: 2, sent: null, blocked: null, failed: null, rehearsal: 0 },
+          mailchimpSummary: null,
+          recipients: [
+            { contactId: 'c-1', displayName: 'Pat One', seats: 2, status: 'pending', reasonText: null, opened: null, clicked: null },
+          ],
+        }),
+        { status: 200 },
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AutoSendBoard clientId={CLIENT} />)
+    const row = await screen.findByTestId('letter-row-plan:2026-12-02:t-1:2027-03-11:3')
+    expect(row.textContent).toContain('12月2日（周三）')
+    expect(row.textContent).toContain('3月11日团 · 3个月信')
+    expect(row.textContent).toContain('（还没写）')
+    expect(screen.queryByTestId('auto-send-demo-banner')).toBeNull()
+    expect(screen.queryByTestId('auto-send-not-connected')).toBeNull()
+
+    fireEvent.click(within(row).getByRole('button'))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(await within(dialog).findByRole('tab', { name: '收件人与发送情况 2' }))
+    expect(within(dialog).getByText('Pat One').closest('a')?.getAttribute('href')).toBe(
+      `/dashboard/clients/${CLIENT}/crm/all?contact=c-1`,
+    )
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      `/api/clients/${CLIENT}/crm/auto-letters`,
+      `/api/clients/${CLIENT}/crm/auto-letters/plan%3A2026-12-02%3At-1%3A2027-03-11%3A3`,
+    ])
+  })
+
+  it('a refused read (no access) shows the Chinese reason, not an empty list', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: 'x' }), { status: 403 })),
+    )
+    render(<AutoSendBoard clientId={CLIENT} />)
+    expect((await screen.findByRole('alert')).textContent).toContain('你的账号没有查看这一页的权限。')
+    expect(screen.queryByTestId('auto-send-empty')).toBeNull()
   })
 })

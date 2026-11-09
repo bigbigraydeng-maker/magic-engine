@@ -43,6 +43,31 @@ const EXISTING_KEYS: readonly string[] = [
 const EMDASH = '—'
 const CJK = /[\u4E00-\u9FFF]/
 
+describe('resolveReasonText · text already translated by the read interface', () => {
+  it('shows reasonText as it is, ahead of any code', () => {
+    const out = resolveReasonText(
+      { status: 'blocked', reasonCode: 'frequency_cap', reasonDetail: null, reasonText: ' 他最近 7 天已收 2 封 ' },
+      { frequency_cap: 'BASE-TEXT' },
+    )
+    expect(out).toEqual({ main: '他最近 7 天已收 2 封', detail: null })
+  })
+
+  it('blank reasonText falls back to the code path', () => {
+    const out = resolveReasonText(
+      { status: 'blocked', reasonCode: 'no_consent_basis', reasonDetail: null, reasonText: '   ' },
+      {},
+    )
+    expect(out.main).toBe('没有同意依据')
+  })
+
+  it('does not touch sent, pending or rehearsal rows', () => {
+    for (const status of ['sent', 'pending', 'rehearsal'] as const) {
+      const out = resolveReasonText({ status, reasonCode: null, reasonDetail: null, reasonText: '不该出现' }, {})
+      expect(out.main).not.toBe('不该出现')
+    }
+  })
+})
+
 describe('resolveReasonText', () => {
   it('shows an em dash for sent rows', () => {
     expect(

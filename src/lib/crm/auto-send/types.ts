@@ -78,6 +78,8 @@ export interface LetterContent {
   /** 预览行：标题下面那行灰色小字。 */
   previewText: string | null
   body: BodyBlock[]
+  /** 正文里的名字已经换成了这个示例名字（读接口给的）；页面提示「每位客人收到的是自己的名字」。没有就不提示。 */
+  sampleFirstName?: string | null
 }
 
 /** 「打开」这一列怎么显示：走 Mailchimp 的信有每位客人的记录，ME 自己发的信只有总数。 */
@@ -93,6 +95,8 @@ export interface RecipientRow {
   /** 座位数来自订单；订单没填 → null，页面显示「—」。 */
   seats: number | null
   status: RecipientStatus
+  /** 已经翻成大白话的原因（读接口给的）；有它就直接显示，不再看 reasonCode。 */
+  reasonText?: string | null
   /** 对应「最近发送」REASON_LABELS 的 key；页面把它翻成大白话。 */
   reasonCode: string | null
   /** 补充说明（已经是大白话）；没有就 null。 */
