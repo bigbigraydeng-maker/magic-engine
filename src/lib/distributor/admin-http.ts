@@ -8,13 +8,37 @@ import { DistributorStoreError } from './store'
 
 export type AdminGate = { ok: true; email: string } | { ok: false; response: NextResponse }
 
-/** Writes must carry an Origin header equal to this host; browsers always send one on fetch POST. */
+/**
+ * Origins this app is served from: APP_URL (what getPublicOrigin uses on Render, where req.url is the
+ * internal localhost address), the forwarded / Host header, and the request URL itself (local dev).
+ */
+function ownOrigins(req: Request): Set<string> {
+  const out = new Set<string>()
+  const add = (value: string | undefined | null) => {
+    if (!value) return
+    try {
+      out.add(new URL(value).origin)
+    } catch {
+      /* ignore malformed config */
+    }
+  }
+  add(process.env.APP_URL)
+  add(process.env.NEXT_PUBLIC_APP_URL)
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host')
+  if (host) {
+    const proto = req.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+    add(`${proto ?? (host.startsWith('localhost') ? 'http' : 'https')}://${host}`)
+  }
+  add(req.url)
+  return out
+}
+
+/** Writes must carry an Origin header naming this app; browsers always send one on fetch / form POST. */
 export function isCrossOrigin(req: Request): boolean {
   const origin = req.headers.get('origin')
-  if (!origin) return true
+  if (!origin || origin === 'null') return true
   try {
-    const selfHost = req.headers.get('x-forwarded-host') ?? new URL(req.url).host
-    return new URL(origin).host !== selfHost
+    return !ownOrigins(req).has(new URL(origin).origin)
   } catch {
     return true
   }

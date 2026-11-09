@@ -41,6 +41,26 @@ export function DistributorTable({ distributors, loading, onDecision, busyId }: 
     setLinkUrlById((prev) => ({ ...prev, [d.id]: res.data!.url }))
   }
 
+  const revokeLinks = async (d: Distributor) => {
+    if (!window.confirm(`撤销「${d.display_name}」的全部登录？对方已经打开的后台会马上退出，没用过的链接也会作废。`)) return
+    setLinkBusyId(d.id)
+    let message = ''
+    try {
+      const res = await fetch(`/api/admin/distributors/${d.id}/access-link`, { method: 'DELETE' })
+      const json: unknown = await res.json()
+      message = res.ok ? '已撤销全部登录' : errorText(json as ApiError) || '撤销失败'
+    } catch {
+      message = '撤销失败'
+    }
+    setLinkBusyId(null)
+    setLinkUrlById((prev) => {
+      const next = { ...prev }
+      delete next[d.id]
+      return next
+    })
+    setLinkErrById((prev) => ({ ...prev, [d.id]: message }))
+  }
+
   const actionsFor = (d: Distributor) => {
     const canLink = d.status === 'approved' || d.status === 'suspended'
     const linkButton = canLink ? (
@@ -51,6 +71,16 @@ export function DistributorTable({ distributors, loading, onDecision, busyId }: 
         className="ml-2 rounded-lg bg-me-charcoal/10 px-3 py-1 text-xs font-bold text-me-charcoal/75 disabled:opacity-50"
       >
         登录链接
+      </button>
+    ) : null
+    const revokeButton = canLink ? (
+      <button
+        type="button"
+        disabled={linkBusyId === d.id}
+        onClick={() => revokeLinks(d)}
+        className="ml-2 rounded-lg bg-me-charcoal/10 px-3 py-1 text-xs font-bold text-me-charcoal/75 disabled:opacity-50"
+      >
+        撤销登录
       </button>
     ) : null
 
@@ -122,6 +152,7 @@ export function DistributorTable({ distributors, loading, onDecision, busyId }: 
       <>
         {action}
         {linkButton}
+        {revokeButton}
         {linkResult}
         {linkError}
       </>

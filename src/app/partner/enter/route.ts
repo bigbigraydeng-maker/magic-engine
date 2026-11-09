@@ -6,7 +6,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { getPublicOrigin } from '@/lib/auth/public-origin'
 import { isCrossOrigin } from '@/lib/distributor/admin-http'
-import { isTokenShaped, redeemInvite, sessionCookie } from '@/lib/distributor/portal-auth'
+import { isTokenShaped, redeemInvite, revokeSession, sessionCookie, sessionTokenFrom } from '@/lib/distributor/portal-auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +20,9 @@ export async function GET(request: NextRequest) {
   if (!isTokenShaped(token)) return NextResponse.redirect(`${origin}/partner?link=invalid`, 303)
   // Token shape is base64url only, so it is safe to place in the HTML attribute as-is.
   return new NextResponse(page(token), {
-    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' },
+    headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', // same-origin (not no-referrer): no-referrer makes the form POST send `Origin: null`, which the
+    // same-origin check must refuse; same-origin still keeps the token out of any third-party Referer.
+    'referrer-policy': 'same-origin' },
   })
 }
 
@@ -31,6 +33,9 @@ export async function POST(request: NextRequest) {
   const token = form.get('t')
   const session = isTokenShaped(token) ? await redeemInvite(token) : null
   if (!session) return NextResponse.redirect(`${origin}/partner?link=expired`, 303)
+  // A browser that was signed in as someone else: end that older session instead of leaving it valid.
+  const previous = sessionTokenFrom(request)
+  if (previous) await revokeSession(previous).catch((err: unknown) => console.error('[partner-portal] revoke previous failed:', err))
   const response = NextResponse.redirect(`${origin}/partner`, 303)
   response.headers.append('set-cookie', sessionCookie(session.sessionToken, session.expiresAt, origin.startsWith('https://')))
   response.headers.set('cache-control', 'no-store')

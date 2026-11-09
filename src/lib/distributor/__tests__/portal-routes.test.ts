@@ -22,13 +22,15 @@ vi.mock('@/lib/distributor/portal-auth', async (orig) => {
     redeemInvite: vi.fn(async () => h.redeemed),
     createInvite: vi.fn(async () => ({ token: 'B'.repeat(43), expiresAt: '2026-11-11T00:00:00Z' })),
     revokeSession: vi.fn(async () => undefined),
+    revokeAllAccess: vi.fn(async () => 3),
   }
 })
 
 import * as auth from '@/lib/distributor/portal-auth'
 import { GET as meGet } from '@/app/api/partner/me/route'
 import { GET as enterGet, POST as enterPost } from '@/app/partner/enter/route'
-import { POST as accessLinkPost } from '@/app/api/admin/distributors/[id]/access-link/route'
+import { DELETE as accessLinkDelete, POST as accessLinkPost } from '@/app/api/admin/distributors/[id]/access-link/route'
+import { POST as logoutPost } from '@/app/api/partner/logout/route'
 import { NextRequest } from 'next/server'
 
 const TOKEN = 'A'.repeat(43)
@@ -80,7 +82,7 @@ describe('/partner/enter', () => {
     h.redeemed = { sessionToken: 'C'.repeat(43), expiresAt: '2026-12-10T00:00:00Z' }
     const ok = await enterPost(post())
     expect(ok.headers.get('location')).toBe('https://app.test/partner')
-    expect(ok.headers.get('set-cookie')).toMatch(new RegExp(`^${auth.PORTAL_COOKIE}=C{43}; Path=/; HttpOnly; SameSite=Lax;.*Secure`))
+    expect(ok.headers.get('set-cookie')).toMatch(new RegExp(`^${auth.PORTAL_COOKIE_SECURE}=C{43}; Path=/; HttpOnly; SameSite=Lax;.*Secure`))
     h.redeemed = null
     const used = await enterPost(post())
     expect(used.headers.get('location')).toBe('https://app.test/partner?link=expired')
@@ -99,5 +101,39 @@ describe('admin access link', () => {
     const ok = await accessLinkPost(req('https://app.test'), { params: Promise.resolve({ id: ID }) })
     expect(ok.status).toBe(201)
     expect((await ok.json()).url).toBe(`https://app.test/partner/enter?t=${'B'.repeat(43)}`)
+  })
+})
+
+describe('portal hardening', () => {
+  it('a same-browser re-login ends the older session', async () => {
+    h.redeemed = { sessionToken: 'C'.repeat(43), expiresAt: '2026-12-10T00:00:00Z' }
+    const res = await enterPost(new NextRequest('https://app.test/partner/enter', {
+      method: 'POST',
+      body: new URLSearchParams({ t: TOKEN }),
+      headers: { origin: 'https://app.test', 'content-type': 'application/x-www-form-urlencoded', cookie: `${auth.PORTAL_COOKIE_SECURE}=${'D'.repeat(43)}` },
+    }))
+    expect(res.headers.get('location')).toBe('https://app.test/partner')
+    expect(auth.revokeSession).toHaveBeenCalledWith('D'.repeat(43))
+  })
+
+  it('logout refuses another site, and clears the cookie for this one', async () => {
+    const cross = await logoutPost(new NextRequest('https://app.test/api/partner/logout', { method: 'POST', headers: { origin: 'https://evil.example' } }))
+    expect(cross.status).toBe(403)
+    expect(auth.revokeSession).not.toHaveBeenCalled()
+    const ok = await logoutPost(new NextRequest('https://app.test/api/partner/logout', { method: 'POST', headers: { origin: 'https://app.test', cookie: `${auth.PORTAL_COOKIE_SECURE}=${TOKEN}` } }))
+    expect(ok.status).toBe(200)
+    expect(auth.revokeSession).toHaveBeenCalledWith(TOKEN)
+    expect(ok.headers.get('set-cookie')).toContain('Max-Age=0')
+  })
+
+  it('admin can revoke every login of a distributor, same-origin global admin only', async () => {
+    const req = (origin: string) => new NextRequest(`https://app.test/api/admin/distributors/${ID}/access-link`, { method: 'DELETE', headers: { origin } })
+    expect((await accessLinkDelete(req('https://evil.example'), { params: Promise.resolve({ id: ID }) })).status).toBe(403)
+    h.admin = { ok: false, status: 403, error: 'Forbidden' }
+    expect((await accessLinkDelete(req('https://app.test'), { params: Promise.resolve({ id: ID }) })).status).toBe(403)
+    expect(auth.revokeAllAccess).not.toHaveBeenCalled()
+    h.admin = { ok: true, user: { email: 'pm@example.com' } }
+    const ok = await accessLinkDelete(req('https://app.test'), { params: Promise.resolve({ id: ID }) })
+    expect(await ok.json()).toEqual({ revoked: 3 })
   })
 })

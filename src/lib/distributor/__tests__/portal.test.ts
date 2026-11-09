@@ -35,7 +35,8 @@ function builder(table: string) {
 
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: (t: string) => builder(t) } }))
 
-import { PORTAL_COOKIE, createInvite, hashToken, redeemInvite, resolveSession, sessionCookie, sessionTokenFrom } from '../portal-auth'
+import { PORTAL_COOKIE, PORTAL_COOKIE_SECURE, createInvite, hashToken, redeemInvite, resolveSession, revokeAllAccess, sessionCookie, sessionTokenFrom } from '../portal-auth'
+import { isCrossOrigin } from '../admin-http'
 import { buildPortalView } from '../portal-view'
 
 const NOW = Date.parse('2026-11-10T00:00:00Z')
@@ -49,6 +50,8 @@ describe('portal auth', () => {
     await expect(createInvite('d1', 'pm@x', NOW)).rejects.toMatchObject({ status: 409 })
     h.respond = (op) => (op.table === 'distributors' ? { data: { status: 'approved' }, error: null } : { data: null, error: null })
     const { token, expiresAt } = await createInvite('d1', 'pm@x', NOW)
+    const revokeOld = h.calls.find((c) => c.op === 'update')
+    expect(revokeOld?.filters).toMatchObject({ 'eq:distributor_id': 'd1', 'eq:kind': 'invite', 'is:used_at': null, 'is:revoked_at': null })
     const insert = h.calls.find((c) => c.op === 'insert')?.payload as { token_hash: string; kind: string }
     expect(insert.kind).toBe('invite')
     expect(insert.token_hash).toBe(hashToken(token))
@@ -75,6 +78,9 @@ describe('portal auth', () => {
     let status = 'approved'
     h.respond = (op) => (op.table === 'distributors' ? { data: { status }, error: null } : { data: { distributor_id: 'd1' }, error: null })
     expect(await resolveSession(TOKEN, NOW)).toBe('d1')
+    const lookup = h.calls.find((c) => c.table === 'distributor_portal_tokens')
+    // An invite token must never work as a session cookie; revoked or expired sessions must not either.
+    expect(lookup?.filters).toMatchObject({ 'eq:token_hash': hashToken(TOKEN), 'eq:kind': 'session', 'is:revoked_at': null, 'gt:expires_at': '2026-11-10T00:00:00.000Z' })
     status = 'rejected'
     expect(await resolveSession(TOKEN, NOW)).toBeNull()
     expect(await resolveSession(null, NOW)).toBeNull()
@@ -85,10 +91,33 @@ describe('portal auth', () => {
     expect(sessionTokenFrom(req(`a=1; ${PORTAL_COOKIE}=${TOKEN}; b=2`))).toBe(TOKEN)
     expect(sessionTokenFrom(req(`${PORTAL_COOKIE}=short`))).toBeNull()
     expect(sessionTokenFrom(req('sb-access-token=xyz'))).toBeNull()
+    expect(sessionTokenFrom(req(`${PORTAL_COOKIE}=${'B'.repeat(43)}; ${PORTAL_COOKIE_SECURE}=${TOKEN}`))).toBe(TOKEN)
     const cookie = sessionCookie(TOKEN, '2026-12-10T00:00:00Z', true)
+    expect(cookie.startsWith(`${PORTAL_COOKIE_SECURE}=`)).toBe(true)
     expect(cookie).toContain('HttpOnly')
     expect(cookie).toContain('Secure')
     expect(cookie).toContain('SameSite=Lax')
+  })
+})
+
+describe('revoke and origin checks', () => {
+  it('revokes every live token of one distributor', async () => {
+    h.respond = (op) => (op.op === 'update' ? { data: [{ id: 'a' }, { id: 'b' }], error: null } : { data: null, error: null })
+    expect(await revokeAllAccess('d1', NOW)).toBe(2)
+    expect(h.calls[0].filters).toMatchObject({ 'eq:distributor_id': 'd1', 'is:revoked_at': null })
+  })
+
+  it('treats Origin null or missing as cross-site, and accepts APP_URL when req.url is the internal address', () => {
+    const r = (headers: Record<string, string>) => new Request('http://localhost:10000/api/x', { method: 'POST', headers })
+    expect(isCrossOrigin(r({}))).toBe(true)
+    expect(isCrossOrigin(r({ origin: 'null' }))).toBe(true)
+    expect(isCrossOrigin(r({ origin: 'https://evil.example', host: 'app.test' }))).toBe(true)
+    expect(isCrossOrigin(r({ origin: 'https://app.test', 'x-forwarded-host': 'app.test', 'x-forwarded-proto': 'https' }))).toBe(false)
+    const before = process.env.APP_URL
+    process.env.APP_URL = 'https://app.magic.test'
+    expect(isCrossOrigin(r({ origin: 'https://app.magic.test' }))).toBe(false)
+    if (before === undefined) delete process.env.APP_URL
+    else process.env.APP_URL = before
   })
 })
 

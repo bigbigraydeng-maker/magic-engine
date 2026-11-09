@@ -9,7 +9,13 @@ import { createHash, randomBytes } from 'crypto'
 import { supabaseAdmin } from '@/lib/supabase'
 import { DistributorStoreError, fail } from './store'
 
+/**
+ * On https the cookie uses the __Host- prefix (browser enforces Secure, Path=/, no Domain), so a sibling
+ * subdomain cannot plant its own value. Plain name only on local http dev, where __Host- is refused.
+ */
+export const PORTAL_COOKIE_SECURE = '__Host-me_partner_session'
 export const PORTAL_COOKIE = 'me_partner_session'
+const cookieName = (secure: boolean) => (secure ? PORTAL_COOKIE_SECURE : PORTAL_COOKIE)
 export const INVITE_TTL_MS = 24 * 3_600_000
 export const SESSION_TTL_MS = 30 * 24 * 3_600_000
 
@@ -28,17 +34,16 @@ export function isTokenShaped(value: unknown): value is string {
   return typeof value === 'string' && TOKEN_SHAPE.test(value)
 }
 
-/** Reads the portal session token from a Cookie header. */
+/** Reads the portal session token from a Cookie header; the __Host- cookie wins over the plain one. */
 export function sessionTokenFrom(req: Request): string | null {
   const header = req.headers.get('cookie') ?? ''
+  const found = new Map<string, string>()
   for (const part of header.split(';')) {
     const [name, ...rest] = part.trim().split('=')
-    if (name === PORTAL_COOKIE) {
-      const value = rest.join('=')
-      return isTokenShaped(value) ? value : null
-    }
+    if ((name === PORTAL_COOKIE_SECURE || name === PORTAL_COOKIE) && !found.has(name)) found.set(name, rest.join('='))
   }
-  return null
+  const value = found.get(PORTAL_COOKIE_SECURE) ?? found.get(PORTAL_COOKIE) ?? null
+  return isTokenShaped(value) ? value : null
 }
 
 const PORTAL_STATUSES = new Set(['approved', 'suspended'])
@@ -54,6 +59,11 @@ export async function createInvite(distributorId: string, actorEmail: string, no
   const status = await distributorStatus(distributorId)
   if (!status) throw new DistributorStoreError('distributor not found', 404)
   if (!PORTAL_STATUSES.has(status)) throw new DistributorStoreError('only approved distributors can get a login link', 409)
+  // A new link replaces any earlier unused one.
+  const stale = await supabaseAdmin.from('distributor_portal_tokens')
+    .update({ revoked_at: new Date(now).toISOString() })
+    .eq('distributor_id', distributorId).eq('kind', 'invite').is('used_at', null).is('revoked_at', null)
+  if (stale.error) fail('revoke old invites', stale.error)
   const { token, hash } = newToken()
   const expiresAt = new Date(now + INVITE_TTL_MS).toISOString()
   const { error } = await supabaseAdmin.from('distributor_portal_tokens').insert({
@@ -123,14 +133,26 @@ export async function revokeSession(token: string, now = Date.now()): Promise<vo
   if (error) fail('revoke portal session', error)
 }
 
+/** Ends every invite and session of one distributor (admin "撤销登录"). Returns how many were revoked. */
+export async function revokeAllAccess(distributorId: string, now = Date.now()): Promise<number> {
+  const { data, error } = await supabaseAdmin
+    .from('distributor_portal_tokens')
+    .update({ revoked_at: new Date(now).toISOString() })
+    .eq('distributor_id', distributorId)
+    .is('revoked_at', null)
+    .select('id')
+  if (error) fail('revoke portal access', error)
+  return ((data ?? []) as unknown[]).length
+}
+
 export function sessionCookie(token: string, expiresAt: string, secure: boolean): string {
-  const attrs = [`${PORTAL_COOKIE}=${token}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Expires=${new Date(expiresAt).toUTCString()}`]
+  const attrs = [`${cookieName(secure)}=${token}`, 'Path=/', 'HttpOnly', 'SameSite=Lax', `Expires=${new Date(expiresAt).toUTCString()}`]
   if (secure) attrs.push('Secure')
   return attrs.join('; ')
 }
 
 export function clearedSessionCookie(secure: boolean): string {
-  const attrs = [`${PORTAL_COOKIE}=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0']
+  const attrs = [`${cookieName(secure)}=`, 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0']
   if (secure) attrs.push('Secure')
   return attrs.join('; ')
 }
