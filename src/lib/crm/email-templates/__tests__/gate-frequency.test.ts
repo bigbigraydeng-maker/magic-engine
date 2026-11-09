@@ -34,6 +34,7 @@ type Overrides = Partial<{
   audit: () => Promise<SourceResult>
   touchpoints: () => Promise<SourceResult>
   mailchimp: () => Promise<SourceResult>
+  meSends: FrequencySources['meSends']
 }>
 
 function sources(overrides: Overrides = {}): FrequencySources {
@@ -43,6 +44,7 @@ function sources(overrides: Overrides = {}): FrequencySources {
     audit: overrides.audit ?? empty,
     touchpoints: overrides.touchpoints ?? empty,
     mailchimp: overrides.mailchimp ?? empty,
+    meSends: overrides.meSends ?? empty,
   }
 }
 
@@ -439,10 +441,11 @@ describe('evaluateFrequency', () => {
         audit: captureContact,
         touchpoints: captureContact,
         mailchimp: capture,
+        meSends: capture,
       },
     })
     const after = Date.now()
-    expect(calls).toHaveLength(4)
+    expect(calls).toHaveLength(5)
     for (const c of calls) {
       const t = Date.parse(c.since)
       const expectedMin = before - 7 * DAY - 5000
@@ -828,5 +831,50 @@ describe('evaluateFrequency: exempt mails (loadExemptIds)', () => {
       reason: 'frequency_unverifiable',
       error: expect.stringContaining('exempt ids'),
     })
+  })
+})
+
+
+// ---- ME's own automated mails (send gate P2-2a) ------------------------------------------------------------
+
+describe("ME's automated mails are never folded into another record", () => {
+  // One ME mail claimed at t0, and a second, unrelated record within the 120-second window. Every case is two mails.
+  const t0 = Date.now() - 10 * MIN
+  const meMail = item({ source: 'me_send', id: 'ts-1', at: new Date(t0).toISOString(), subject: 'ME 自动发的信', address: '', automated: true })
+
+  it.each([
+    ['a sales mail whose audit row has no subject (90 s later)', item({ source: 'audit', id: null, at: new Date(t0 + 90_000).toISOString(), subject: null, address: '' })],
+    ['a human touchpoint without a subject (60 s earlier)', item({ source: 'touchpoint', id: 'M9', at: new Date(t0 - 60_000).toISOString(), subject: null, address: '' })],
+    ['a mailbox mail whose subject is only "RE:" (30 s later)', item({ source: 'sent_items', id: 'G1', at: new Date(t0 + 30_000).toISOString(), subject: 'RE:', address: 'guest@example.com' })],
+    ['a mailbox mail with an empty subject (10 s later)', item({ source: 'sent_items', id: 'G2', at: new Date(t0 + 10_000).toISOString(), subject: '', address: 'guest@example.com' })],
+  ])('%s', async (_label, other) => {
+    for (const order of [[meMail, other], [other, meMail]]) {
+      expect(dedupeItems(order)).toHaveLength(2)
+    }
+    const v = await run(
+      sources({
+        meSends: async () => ({ ok: true, items: [meMail] }),
+        audit: async () => ({ ok: true, items: other.source === 'audit' ? [other] : [] }),
+        touchpoints: async () => ({ ok: true, items: other.source === 'touchpoint' ? [other] : [] }),
+        sentItems: async () => ({ ok: true, items: other.source === 'sent_items' ? [other] : [] }),
+      }),
+    )
+    expect(v.ok === false && v.reason === 'frequency_cap' ? v.count : v.ok ? v.count : -1).toBe(2)
+  })
+
+  it('two records of the same ME mail (same id) are still one mail', () => {
+    const twin = { ...meMail, at: new Date(t0 + 5 * MIN).toISOString() }
+    expect(dedupeItems([meMail, twin])).toHaveLength(1)
+  })
+
+  it('a failing ME-mail source makes the count unverifiable, never zero', async () => {
+    const v = await run(sources({ meSends: async () => ({ ok: false, error: 'ledger down' }) }))
+    expect(v).toMatchObject({ ok: false, reason: 'frequency_unverifiable' })
+  })
+
+  it('the ME-mail source is asked with the guest addresses', async () => {
+    const meSends = vi.fn<FrequencySources['meSends']>(async () => ({ ok: true, items: [] }))
+    await run(sources({ meSends }))
+    expect(meSends.mock.calls[0]?.[0]).toEqual(ADDR)
   })
 })

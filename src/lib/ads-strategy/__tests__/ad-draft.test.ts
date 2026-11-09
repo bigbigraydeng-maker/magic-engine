@@ -337,9 +337,13 @@ describe('isApprovableKind — ME 的「开」按钮只认白名单', () => {
     }
   })
 
-  it('isKnownDraftKind 认四种、不认原型链上的名字', () => {
-    expect(['lead_form', 'video_thruplay', 'messenger_conversation', 'reels_lead'].every(isKnownDraftKind)).toBe(true)
+  it('isKnownDraftKind 认五种、不认原型链上的名字', () => {
+    expect(['lead_form', 'video_thruplay', 'messenger_conversation', 'reels_lead', 'partner_page'].every(isKnownDraftKind)).toBe(true)
     expect(isKnownDraftKind('hasOwnProperty')).toBe(false)
+  })
+
+  it('伙伴主页可以进开投卡', () => {
+    expect(isApprovableKind('partner_page')).toBe(true)
   })
 })
 

@@ -15,7 +15,7 @@ import { listCurrentTemplates } from '@/lib/crm/email-templates/template-store'
 import { loadPostCallState } from '@/lib/crm/email-templates/post-call-state'
 import { createPreviewData } from '@/lib/crm/email-templates/preview-prod'
 import { canEditSettings } from '@/lib/crm/email-templates/settings-input'
-import { settingsObj } from '@/lib/crm/email-templates/__tests__/fixtures'
+import { settingsObj, template } from '@/lib/crm/email-templates/__tests__/fixtures'
 import { GET } from './route'
 
 const ctx = { params: { id: 'client-a', cid: 'contact-1' } }
@@ -42,6 +42,16 @@ describe('GET post-call', () => {
       callPromptHours: 12,
     })
     expect(createPreviewData).toHaveBeenCalledWith('client-a')
+  })
+
+  it("leaves the templates of ME's automated letters out of the staff picker", async () => {
+    vi.mocked(listCurrentTemplates).mockResolvedValue([
+      template({ templateKey: 'auto-welcome', name: 'Welcome (automatic)' }),
+      template({ templateKey: 'post-call-single-tour', name: 'Post-call single tour' }),
+    ])
+    await get()
+    const passed = vi.mocked(loadPostCallState).mock.calls[0][0].templates
+    expect(passed.map((t) => t.templateKey)).toEqual(['post-call-single-tour'])
   })
 
   it('reads the templates only when the feature is ready', async () => {

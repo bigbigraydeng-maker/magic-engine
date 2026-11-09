@@ -116,5 +116,18 @@ export interface EmailSettings {
   sameTemplateCooldownHours: number
   callPromptHours: number
   guardrails: { allowedLinkHosts: string[]; rules: GuardrailRule[] }
-  providers: { publishedTours?: PublishedToursProviderSettings; catalogue?: CatalogueProviderSettings }
+  providers: {
+    publishedTours?: PublishedToursProviderSettings
+    catalogue?: CatalogueProviderSettings
+    linkTracking?: LinkTrackingSettings
+  }
+}
+
+/**
+ * Per-recipient click tracking for links to sites that report clicks back to ME (the client's own site).
+ * Design: docs/specs/2026-11-10-crm-email-click-tracking-b2-design-v0.md §4.1.
+ */
+export interface LinkTrackingSettings {
+  /** Lower-case hostnames whose links get a click token; each must also be in guardrails.allowedLinkHosts. */
+  hosts: string[]
 }

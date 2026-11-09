@@ -24,7 +24,7 @@ export interface QueryStub {
   touched(table: string): boolean
 }
 
-const CHAIN_METHODS = ['select', 'eq', 'in', 'gte', 'lte', 'limit', 'order'] as const
+const CHAIN_METHODS = ['select', 'eq', 'neq', 'in', 'gte', 'lte', 'limit', 'order', 'upsert', 'update', 'or'] as const
 
 export function ok(data: unknown): StubResult {
   return { data, error: null }

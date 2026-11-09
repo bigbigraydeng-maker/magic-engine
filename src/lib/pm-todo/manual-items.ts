@@ -67,6 +67,7 @@ import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushRankVerdictGapItems } from './seo-rank-verdict-overdue-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
+import { pushCrmLinkTrackingItems } from './crm-link-tracking-items'
 import {
   buildCrawlHealthItems,
   buildNotIndexedItems,
@@ -496,6 +497,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
     (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 删除数据请求失败待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // CRM 邮件点击追踪疑似悄悄坏了 —— 「没点击」和「坏了」看起来一样，不许只活在日志里（铁律 3）
+    (b) => pushCrmLinkTrackingItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 邮件点击追踪检查失败（不阻塞其他待办）:', e),
     ),
     // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
     // 实测查到 CTS 的发布通道指向 Oztop 的网站，填错两个多月没人发现。

@@ -21,8 +21,8 @@ import type { PlayKey } from './play-vocabulary'
 import { dominantScript } from './launch-readback'
 import { reelsLeadCreativeProblems, reelsLeadDraftProblems } from './reels-lead'
 
-/** 目前 ME 会发的四种广告。短视频留资复用留资打法，不另开一套打法。 */
-export type DraftKind = 'lead_form' | 'video_thruplay' | 'messenger_conversation' | 'reels_lead'
+/** 目前 ME 会发的五种广告。短视频留资和伙伴主页都复用留资打法，不另开一套打法。 */
+export type DraftKind = 'lead_form' | 'video_thruplay' | 'messenger_conversation' | 'reels_lead' | 'partner_page'
 
 /** 打法 → 这个草案要走哪套 Meta 参数。两边必须对得上，别各自加。 */
 export const DRAFT_PLAY: Readonly<Record<DraftKind, PlayKey>> = {
@@ -30,6 +30,7 @@ export const DRAFT_PLAY: Readonly<Record<DraftKind, PlayKey>> = {
   video_thruplay: 'thruplay_pool_build',
   messenger_conversation: 'messenger_direct',
   reels_lead: 'lead_form_harvest',
+  partner_page: 'lead_form_harvest',
 }
 
 export function isKnownDraftKind(k: unknown): k is DraftKind {
@@ -47,8 +48,9 @@ export function isKnownDraftKind(k: unknown): k is DraftKind {
 export const APPROVABLE_KINDS: ReadonlySet<DraftKind> = new Set<DraftKind>([
   'lead_form',
   'video_thruplay',
-  // 短视频留资可以进开投卡。旧的开按钮在 approveDraft 里按入口拒绝，不在这里放行。
+  // 短视频留资和伙伴主页可以进开投卡。旧的开按钮在 approveDraft 里按入口拒绝。
   'reels_lead',
+  'partner_page',
 ])
 
 export function isApprovableKind(k: unknown): boolean {
@@ -187,8 +189,13 @@ export interface AdDraft {
   leadFormId?: string
   /** 落地页 —— 表单广告的隐私政策/后续跳转用。 */
   linkUrl?: string
-  /** 广告主页 id。 */
+  /** 广告主页 id。伙伴主页广告由服务端按客户配置写上，不信请求体。 */
   pageId: string
+  /**
+   * 伙伴主页广告的身份。不写 = 客户自己的主页。
+   * `partner` = 用这位客户配置里的伙伴主页。请求体里的值不作数。
+   */
+  partnerIdentity?: 'own' | 'partner'
   /** 一个草案下可以有多条创意；**同一个组里语言必须一致**（闸门会查）。多个广告组时文案写在组上，这里留空数组。 */
   creatives: AdDraftCreative[]
   /** 包含的自定义受众编号（Meta 自定义受众的数字 id）。给了就等于声明这个广告组是重定向。 */
@@ -365,7 +372,7 @@ function validateCommon(d: AdDraft): DraftProblem[] {
     p.push(...audienceListProblems(d.audienceIds, d.excludedAudienceIds, ''))
   }
 
-  if (d.kind === 'lead_form' && !d.leadFormId) {
+  if ((d.kind === 'lead_form' || d.kind === 'partner_page') && !d.leadFormId) {
     p.push({ field: 'leadFormId', message: '留资广告没挂表单 —— 那它收不到任何联系方式' })
   }
   p.push(...reelsLeadDraftProblems(d))
@@ -384,10 +391,10 @@ export function creativeProblems(kind: DraftKind, creatives: AdDraftCreative[], 
     if ((kind === 'video_thruplay' || kind === 'messenger_conversation') && !c.videoId) {
       p.push({ field: `${prefix}creatives[${i}].videoId`, message: '视频广告没给视频' })
     }
-    if (kind === 'lead_form' && !c.imageHash && !c.videoId) {
+    if ((kind === 'lead_form' || kind === 'partner_page') && !c.imageHash && !c.videoId) {
       p.push({ field: `${prefix}creatives[${i}].imageHash`, message: '表单广告没给图也没给视频' })
     }
-    if (kind === 'lead_form' && c.videoId && !hasThumbnail(c)) {
+    if ((kind === 'lead_form' || kind === 'partner_page') && c.videoId && !hasThumbnail(c)) {
       p.push({ field: `${prefix}creatives[${i}].thumbnail`, message: THUMBNAIL_MISSING })
     }
     if (kind === 'reels_lead') p.push(...reelsLeadCreativeProblems(c, prefix, i))
@@ -528,6 +535,12 @@ const META_TRIPLET: Readonly<Record<DraftKind, MetaObjectiveTriplet>> = {
     billingEvent: 'IMPRESSIONS',
     destinationType: 'ON_AD',
   },
+  partner_page: {
+    objective: 'OUTCOME_LEADS',
+    optimizationGoal: 'LEAD_GENERATION',
+    billingEvent: 'IMPRESSIONS',
+    destinationType: 'ON_AD',
+  },
 }
 
 /**
@@ -620,6 +633,7 @@ const DRAFT_WHAT: Readonly<Record<DraftKind, string>> = {
   video_thruplay: '养受众（让人看完视频，之后可以再投给他们）',
   messenger_conversation: '私信开聊（让人点广告直接进 Messenger 和我们对话）',
   reels_lead: '短视频留资（用已上传的视频在 Reels 上收表单）',
+  partner_page: '伙伴主页广告（身份主页按客户配置，先暂停）',
 }
 
 export function describeDraft(d: AdDraft): string {
@@ -637,7 +651,13 @@ export function describeDraft(d: AdDraft): string {
 }
 
 function draftWhat(d: AdDraft): string {
-  return isKnownDraftKind(d.kind) ? DRAFT_WHAT[d.kind] : '（不认识的广告类型）'
+  if (!isKnownDraftKind(d.kind)) return '（不认识的广告类型）'
+  if (d.kind === 'partner_page') {
+    return d.partnerIdentity === 'partner'
+      ? '伙伴主页广告（身份用已配置的伙伴主页）'
+      : '伙伴主页广告（身份用客户自己的主页）'
+  }
+  return DRAFT_WHAT[d.kind]
 }
 
 /** 草稿上的每天金额和天数不会写进已有广告组，不能拿来当实际花费。 */
