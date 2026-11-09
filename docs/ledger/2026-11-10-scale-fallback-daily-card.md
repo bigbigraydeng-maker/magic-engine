@@ -1,9 +1,11 @@
 ---
 id: 2026-11-10-scale-fallback-daily-card
 title: 每天拉完数可以提议把日预算收回去
-status: decided
+status: done
 owner: agent
 decided_on: 2026-11-10
+done_on: 2026-11-10
+done_ref: pr:3718
 source: doc:docs/ledger/2026-11-10-scale-fallback-steady-card.md
 verify_by: 2026-11-12
 verify_how: 每日拉数任务跑完后，运行记录里能看到收回建议的张数。没点确认卡之前，预算不变，广告也不暂停。
