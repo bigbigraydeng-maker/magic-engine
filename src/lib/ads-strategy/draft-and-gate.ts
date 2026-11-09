@@ -34,6 +34,7 @@ import {
   withoutInheritedSpend,
 } from './ad-draft'
 import { draftNotYetBuildable } from './ad-draft-expansion'
+import { reelsLeadOpenBlocked } from './reels-lead'
 import { publishDraftPaused, activatePublished, pausePublished, type PublishedDraft } from '@/lib/meta/ad-publisher'
 import { readExistingAdSetSpend } from '@/lib/meta/existing-adset-spend'
 import { attachReadbackFindings } from './attach-readback'
@@ -620,6 +621,9 @@ export async function approveDraft(
         '这条草案的类型现在不能用「开」按钮打开：私信广告要等「PM 授权 + 每日总预算检查」上线之后才行，' +
         '在那之前它只能是暂停状态（账本里没写类型的旧草案同样不能开）。',
     }
+  }
+  if (reelsLeadOpenBlocked(p.draft.kind, entry)) {
+    return { ok: false, error: '短视频留资只能从开投确认卡打开。这里没有开。' }
   }
   if (p.status !== 'awaiting_approval') {
     return { ok: false, error: `这条现在是「${p.status}」，只有等待批准的才能开` }
