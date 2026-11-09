@@ -5,6 +5,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { KernelDeps } from '@/lib/kernel/deps'
 import { isUuid } from '@/lib/validation-utils'
+import { loadApprovedPromoDeliveryStage } from '@/lib/marketing-plan/promo/approved-delivery-stage'
 import { fallbackFacts } from './facts'
 import { loadScaleFallback } from './load'
 import { judgeScaleFallback, type ScaleFallbackProposal } from './rules'
@@ -32,6 +33,13 @@ export async function runScaleFallback(
 
 async function issueDaily(sb: SupabaseClient, clientId: string, now: Date): Promise<ScaleFallbackResult> {
   if (!isUuid(clientId)) return { cards: 0, skipped: ['client'], wroteMeta: false }
+  const stageRead = await loadApprovedPromoDeliveryStage(sb, clientId)
+  if (stageRead === 'query_failed') {
+    return { cards: 0, skipped: ['ledger_unread'], wroteMeta: false }
+  }
+  if (stageRead.kind === 'missing') {
+    return { cards: 0, skipped: ['no_delivery_stage'], wroteMeta: false }
+  }
   const loaded = await loadScaleFallback(sb, clientId, now)
   if (loaded === 'unreadable') return { cards: 0, skipped: ['unreadable'], wroteMeta: false }
   const proposals = judgeScaleFallback(loaded)

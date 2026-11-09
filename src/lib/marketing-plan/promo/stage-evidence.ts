@@ -11,6 +11,7 @@ const QUOTED = '已报价'
 const LEVELS = ['campaign', 'adset'] as const
 
 export interface DeliveryView {
+  stage: 'test' | 'scale' | 'steady' | null
   stage_label: string
   goal: string
   ratio_text: string
@@ -177,6 +178,7 @@ async function loadEvidence(supabase: SupabaseClient, clientId: string, spec: Pr
 export function describeDelivery(spec: PromoSpec, verdict: SwitchVerdict, ladder: LadderView, draftNote: string | null): DeliveryView {
   const marked = spec.delivery !== undefined
   return {
+    stage: spec.delivery?.stage ?? null,
     stage_label: marked && spec.delivery ? STAGE_LABEL[spec.delivery.stage] : '还没标',
     goal: marked && spec.delivery ? spec.delivery.goal : STAGE_GOAL.test,
     ratio_text: ratioWarning(spec).text,

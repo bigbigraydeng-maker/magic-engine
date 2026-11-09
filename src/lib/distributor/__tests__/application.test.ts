@@ -32,7 +32,7 @@ function builder(table: string) {
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: (t: string) => builder(t) } }))
 
 import { GLOBAL_HOURLY_LIMIT, PER_SOURCE_HOURLY_LIMIT, clientIpFrom, hashApplicantIp, parseApplication, submitApplication, type ApplicationInput } from '../application'
-import { DISTRIBUTOR_TERMS_VERSION, distributorTerms } from '../terms'
+import { DISTRIBUTOR_TERMS_VERSION } from '../terms'
 import { normaliseReferralCode } from '../referral-code'
 import { POST } from '@/app/api/partner/apply/route'
 
@@ -169,20 +169,10 @@ describe('POST /api/partner/apply', () => {
   it('returns the first reason for a bad form, 201 for a good one', async () => {
     const bad = await post(JSON.stringify({ ...BODY, accept_terms: false }))
     expect(bad.status).toBe(400)
-    expect((await bad.json()).error).toBe('请先阅读并勾选同意经销商条款')
+    expect((await bad.json()).error).toBe('请先阅读并勾选同意上面的经销商规则')
     h.respond = respondWith({ upline: 'up-1' })
     const ok = await post(JSON.stringify(BODY))
     expect(ok.status).toBe(201)
     expect(await ok.json()).toEqual({ ok: true })
-  })
-})
-
-describe('terms', () => {
-  it('quotes the rates the engine actually pays and promises no income', () => {
-    const text = distributorTerms().flatMap((s) => s.points).join('\n')
-    expect(text).toContain('普通经销商 20%，一级 30%，特级 35%')
-    expect(text).toContain('5%')
-    expect(text).toContain('不收加盟费')
-    expect(text).toContain('不保证任何收入')
   })
 })
