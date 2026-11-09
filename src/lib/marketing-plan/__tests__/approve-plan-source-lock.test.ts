@@ -1,7 +1,8 @@
 /**
- * Plan approval stays a single-row compare-and-swap.
- * Two drafts for one goal can both become approved. This file does not
- * archive the loser or write a row back: that would pretend the pair was atomic.
+ * Plan approval still flips one draft with a compare-and-swap.
+ * Approving a second draft for the same goal archives the earlier approved plan.
+ * A failed save puts that plan back. Calling approve on a plan that is already
+ * approved does not archive its siblings.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { baseSpec, goodFacts } from '@/lib/marketing-plan/promo/__tests__/fixtures'
@@ -14,41 +15,45 @@ const h = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/supabase', () => {
-  function match(filters: Array<[string, unknown]>) {
-    return h.rows.filter((row) => filters.every(([column, value]) => row[column] === value))
+  function valueOf(row: Record<string, unknown>, col: string): unknown {
+    if (col === 'generation_meta->superseded_by->>plan_id') {
+      const meta = row.generation_meta as { superseded_by?: { plan_id?: unknown } } | null
+      return meta?.superseded_by?.plan_id
+    }
+    return row[col]
   }
   return {
     supabaseAdmin: {
       from(table: string) {
-        const filters: Array<[string, unknown]> = []
-        if (table === 'execution_items') {
-          const count = { select: () => count, eq: () => count, then: (done: (value: unknown) => unknown) => done({ count: 0, error: null }) }
-          return count
-        }
+        const filters: { col: string; val: unknown }[] = []
+        let patch: Record<string, unknown> | null = null
         const api = {
           select: () => api,
-          eq(column: string, value: unknown) { filters.push([column, value]); return api },
-          single: async () => {
-            const row = match(filters)[0] ?? null
-            return { data: row, error: null }
-          },
-          update(patch: Record<string, unknown>) {
-            const written: Array<[string, unknown]> = []
-            const chain = {
-              eq(column: string, value: unknown) { written.push([column, value]); return chain },
-              select() { return chain },
-              maybeSingle: async () => {
-                const id = String(written.find(([column]) => column === 'id')?.[1] ?? '')
-                h.writes.push({ id, patch })
-                if (h.failId === id) return { data: null, error: { message: 'save failed' } }
-                const row = match(written)[0]
-                if (!row) return { data: null, error: null }
-                Object.assign(row, patch)
-                return { data: row, error: null }
-              },
-            }
-            return chain
-          },
+          eq(col: string, val: unknown) { filters.push({ col, val }); return api },
+          update(next: Record<string, unknown>) { patch = next; return api },
+          maybeSingle: () => Promise.resolve(finish(true)),
+          single: () => Promise.resolve(finish(true)),
+          then: (resolve: (value: unknown) => unknown, reject?: (error: unknown) => unknown) =>
+            Promise.resolve(finish(false)).then(resolve, reject),
+        }
+        function matches(row: Record<string, unknown>): boolean {
+          return filters.every((filter) => valueOf(row, filter.col) === filter.val)
+        }
+        function finish(one: boolean) {
+          if (table === 'execution_items') return { data: null, error: null, count: 0 }
+          if (table !== 'marketing_plans') return { data: null, error: { message: 'unexpected table' } }
+          const hits = h.rows.filter(matches)
+          if (patch) {
+            const hit = hits[0]
+            if (!hit) return { data: null, error: null }
+            const id = String(hit.id ?? '')
+            h.writes.push({ id, patch })
+            if (h.failId === id) return { data: null, error: { message: 'save failed' } }
+            Object.assign(hit, patch)
+            return { data: { ...hit }, error: null }
+          }
+          if (one) return { data: hits[0] ? { ...hits[0] } : null, error: null }
+          return { data: hits.map((row) => ({ ...row })), error: null }
         }
         return api
       },
@@ -102,37 +107,46 @@ beforeEach(() => {
 })
 
 describe('approvePlan source lock', () => {
-  it('lets two drafts for one goal both succeed, and does not write either back', async () => {
+  it('archives the earlier plan for the same goal and leaves another goal approved', async () => {
     h.rows = [row('plan-a', 'draft'), row('plan-b', 'draft'), row('plan-c', 'approved', 'goal-2')]
-    const [left, right] = await Promise.all([
-      approvePlan({ clientId: 'client-1', planId: 'plan-a', approvedBy: 'ray@example.com' }),
-      approvePlan({ clientId: 'client-1', planId: 'plan-b', approvedBy: 'ray@example.com' }),
-    ])
-    expect(left.kind).toBe('approved')
-    expect(right.kind).toBe('approved')
-    expect(h.rows.map((item) => item.status)).toEqual(['approved', 'approved', 'approved'])
-    expect(h.writes.map((item) => item.id).sort()).toEqual(['plan-a', 'plan-b'])
-    expect(h.writes.every((item) => item.patch.status === 'approved')).toBe(true)
+    const first = await approvePlan({ clientId: 'client-1', planId: 'plan-a', approvedBy: 'ray@example.com' })
+    const second = await approvePlan({ clientId: 'client-1', planId: 'plan-b', approvedBy: 'ray@example.com' })
+    expect(first.kind).toBe('approved')
+    expect(second.kind).toBe('approved')
+    expect(h.rows.find((item) => item.id === 'plan-a')?.status).toBe('archived')
+    expect(h.rows.find((item) => item.id === 'plan-b')?.status).toBe('approved')
+    expect(h.rows.find((item) => item.id === 'plan-c')?.status).toBe('approved')
     expect(vi.mocked(revokePlanTasks)).not.toHaveBeenCalled()
   })
 
-  it('leaves every plan untouched when the approval save fails', async () => {
+  it('puts the older plan back when the approval save fails', async () => {
     h.rows = [row('plan-a', 'draft'), row('plan-b', 'approved')]
     h.failId = 'plan-a'
     const result = await approvePlan({ clientId: 'client-1', planId: 'plan-a', approvedBy: 'ray@example.com' })
     expect(result.kind).toBe('conflict')
     expect(h.rows.map((item) => item.status)).toEqual(['draft', 'approved'])
-    expect(h.writes).toEqual([{ id: 'plan-a', patch: expect.objectContaining({ status: 'approved' }) }])
+    expect(h.writes.some((item) => item.id === 'plan-a' && item.patch.status === 'approved')).toBe(true)
+    const older = h.rows.find((item) => item.id === 'plan-b')
+    expect(older?.generation_meta).toEqual({ model: 'x' })
     expect(vi.mocked(revokePlanTasks)).toHaveBeenCalledTimes(1)
   })
 
-  it('a second click does not approve again and does not touch the other plan', async () => {
+  it('a second click does not approve again and does not write again', async () => {
     h.rows = [row('plan-a', 'draft'), row('plan-b', 'approved')]
     const first = await approvePlan({ clientId: 'client-1', planId: 'plan-a', approvedBy: 'ray@example.com' })
+    const writesAfterFirst = h.writes.length
     const second = await approvePlan({ clientId: 'client-1', planId: 'plan-a', approvedBy: 'ray@example.com' })
     expect(first.kind).toBe('approved')
     expect(second.kind).toBe('already_approved')
-    expect(h.writes).toHaveLength(1)
+    expect(h.writes).toHaveLength(writesAfterFirst)
+    expect(h.rows.find((item) => item.id === 'plan-b')?.status).toBe('archived')
+  })
+
+  it('does not archive siblings when the plan is already approved', async () => {
+    h.rows = [row('plan-a', 'approved'), row('plan-b', 'approved')]
+    const result = await approvePlan({ clientId: 'client-1', planId: 'plan-a', approvedBy: 'ray@example.com' })
+    expect(result.kind).toBe('already_approved')
+    expect(h.writes).toHaveLength(0)
     expect(h.rows.find((item) => item.id === 'plan-b')?.status).toBe('approved')
   })
 
