@@ -75,7 +75,7 @@ export type NoteParse = z.infer<typeof NoteParseSchema>
 // ── 规则层：三件不能交给 AI 的事 ──────────────────────────────────────────
 
 /** 客户明确划清界限的说法。宁可多报 —— 漏判是骚扰，误判只是少打一通。 */
-const DNC_PATTERNS: RegExp[] = [
+export const DNC_PATTERNS: RegExp[] = [
   /do\s*not\s*follow\s*up/i,
   /no\s*need\s*(to\s*)?follow\s*up/i,
   /do\s*not\s*want\s*to\s*talk/i,
