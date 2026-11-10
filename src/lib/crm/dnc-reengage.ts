@@ -162,7 +162,8 @@ function isAnsweredCall(t: ReengageTouch): boolean {
   return (t.talkSeconds ?? 0) >= MIN_INBOUND_CALL_SECONDS
 }
 
-function touchKind(t: ReengageTouch): ReengageKind | null {
+/** Which kind of "customer reached out" a touch is, or null. Also read by the AI-takeover "came back" check. */
+export function touchKind(t: ReengageTouch): ReengageKind | null {
   if (t.direction !== 'inbound') return null
   if (t.channel === 'messenger' || t.channel === 'whatsapp') return null
   const src = t.source ?? ''

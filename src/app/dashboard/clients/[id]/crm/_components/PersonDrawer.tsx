@@ -26,6 +26,8 @@ import { PostCallEmailBar } from './PostCallEmailBar'
 import { ProfileCard } from './ProfileCard'
 import { ReturnLeadPanel } from './ReturnLeadPanel'
 import { DncBanner } from './DncBanner'
+import { AiTakeoverTag } from './AiTakeoverTag'
+import { CatalogueTakeoverPanel } from './CatalogueTakeoverPanel'
 import { MarkWonPanel } from './MarkWonPanel'
 import { ImportantMarkerEditor } from './ImportantMarkerEditor'
 import { BookingsBlock } from './bookings/BookingsBlock'
@@ -82,6 +84,9 @@ export interface DrawerRow {
   doNotContact?: boolean
   /** 客人说过不要电话（只关电话，邮件 / 私信照常）—— 不给拨号，给「放回电话名单」。 */
   doNotCall?: boolean
+  /** 「AI 跟进中」/「客人回来了」—— 名字旁的小标（列表接口给；抽屉的目录块会再读一次最新状态）。 */
+  aiTakeover?: boolean
+  customerCameBack?: boolean
   /**
    * 「该做什么」—— 阶段 / 冷热 / 意向合成的那一个概念（PM 2026-10-10）。
    * 列表接口算好传进来；没有（老调用方）就退回只显示阶段按钮。
@@ -297,6 +302,7 @@ export function PersonDrawer({
             <BackToPayments key={row.contactId} clientId={clientId} />
             <div className="flex min-w-0 items-center gap-2">
               <h2 className="truncate text-lg font-black text-me-charcoal">{row.name}</h2>
+              <AiTakeoverTag aiTakeover={row.aiTakeover} cameBack={row.customerCameBack} />
               {noCallOnly && (
                 <span className="shrink-0 rounded-full bg-me-ochre/12 px-2 py-0.5 text-[11px] font-bold text-me-ochre">
                   只别打电话
@@ -551,6 +557,9 @@ export function PersonDrawer({
               <span className="text-xs text-me-charcoal/45">没留电话和邮箱，只能在私信里回他</span>
             )}
           </div>
+
+          {/* 发目录 + 「AI 跟进中 / 收回人工」（设计稿 2026-11-08 §4）。共享组件不写死哪一版目录，版本从发信设置读。 */}
+          <CatalogueTakeoverPanel key={row.contactId} clientId={clientId} contactId={row.contactId} name={row.name} onSaved={onSaved} />
 
           {/* 客人档案：名字（可改）/ 昵称 / 邮箱 / 电话（可加）。PM 2026-10-22：先把字段做好，以后有机会再完善。 */}
           <ProfileCard clientId={clientId} contactId={row.contactId} onChanged={() => onSaved('✓ 档案已保存', true)} />
