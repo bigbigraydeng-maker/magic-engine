@@ -48,7 +48,13 @@ export function defaultReadbackWindow(now: Date): { since: Date; until: Date } {
   return { since, until }
 }
 
-export async function loadSocialReadbackPanel(
+export interface SocialReadbackBundle {
+  panel: SocialReadbackPanel
+  actions: PublishActionRow[]
+  receipts: ReceiptRow[]
+}
+
+export async function loadSocialReadbackBundle(
   supabase: SupabaseClient,
   input: {
     clientId: string
@@ -57,7 +63,7 @@ export async function loadSocialReadbackPanel(
     limit?: number
     now?: Date
   },
-): Promise<SocialReadbackPanel> {
+): Promise<SocialReadbackBundle> {
   const now = input.now ?? new Date()
   const sinceIso = input.since.toISOString()
   const untilIso = input.until.toISOString()
@@ -121,7 +127,7 @@ export async function loadSocialReadbackPanel(
     receipts = toRows<ReceiptRow>(receiptsResult.data)
   }
 
-  return buildSocialReadbackPanel({
+  const panel = buildSocialReadbackPanel({
     clientId: input.clientId,
     since: sinceIso,
     until: untilIso,
@@ -132,4 +138,19 @@ export async function loadSocialReadbackPanel(
     stories,
     storyRegistrationRows,
   })
+  return { panel, actions, receipts }
+}
+
+export async function loadSocialReadbackPanel(
+  supabase: SupabaseClient,
+  input: {
+    clientId: string
+    since: Date
+    until: Date
+    limit?: number
+    now?: Date
+  },
+): Promise<SocialReadbackPanel> {
+  const bundle = await loadSocialReadbackBundle(supabase, input)
+  return bundle.panel
 }

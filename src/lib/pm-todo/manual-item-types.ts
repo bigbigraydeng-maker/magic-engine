@@ -131,6 +131,10 @@ export const NEVER_DROP_KINDS = new Set<ManualItemKind>([
   'social_account_audit',
   // 社媒每周回看建议：链接是要登录的后台页。没人看见 = 发出去的片效果好坏没人知道，配比不会调。
   'social_readback_suggestion',
+  'social_post_readback_missing',
+  'social_post_readback_unreadable',
+  'social_post_readback_retries_exhausted',
+  'social_story_readback_unsupported',
   // Reel 每日清单：链接是要登录的后台页。没人看见 = 排了日子的片没人批，到日不发。
   'reel_daily_list_pending',
   // 广告开投前追踪检查：链接是 Events Manager / GA4 / Inngest 这类要登录的后台页，探活多半判成坏链接——
@@ -276,6 +280,10 @@ export type ManualItemKind =
   | 'social_account_audit'
   /** 社媒每周回看建议：公开满 72 小时的 Reel 成绩，多做 / 少做建议（读每周回看的回执） */
   | 'social_readback_suggestion'
+  | 'social_post_readback_missing'
+  | 'social_post_readback_unreadable'
+  | 'social_post_readback_retries_exhausted'
+  | 'social_story_readback_unsupported'
   /** Reel 每日清单：今天到后天排了日子、还没放行的（开了社媒 Agent 的客户） */
   | 'reel_daily_list_pending'
   | 'auto_run_blocked'
