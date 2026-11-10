@@ -74,14 +74,15 @@ const fetchMock = vi.fn()
 
 beforeEach(() => {
   vi.clearAllMocks()
+  delete process.env.SOCIAL_COMMENT_AUTOREPLY_KILL
   updates.length = 0
   row = {
     id: ROW_ID, client_id: CLIENT, page_id: 'page-1', comment_id: 'comment-1',
-    public_reply_text: 'Stored draft.', public_reply_id: null, reply_status: 'pending',
+    public_reply_text: 'Stored draft.', public_reply_id: null, reply_status: 'pending', reply_source: 'catalog_draft',
   }
   vi.mocked(supabaseAdmin.from).mockImplementation(() => table() as never)
   vi.mocked(requireDashboardClientAccess).mockResolvedValue({
-    ok: true, user: { email: 'staff@example.test' }, role: 'fde', tier: 'full', allowedClientId: null,
+    ok: true, user: { email: 'staff@example.test' }, role: 'admin', tier: 'full', allowedClientId: null,
   } as never)
   vi.mocked(authorizeConfiguredPage).mockResolvedValue({ ok: true, pageToken: 'page-token', via: 'staff_verified' })
   fetchMock.mockResolvedValue(new Response(JSON.stringify({ id: 'reply-9' }), { status: 200 }))
@@ -171,6 +172,47 @@ describe('send_draft', () => {
     const again = await send({})
     expect(again.status).toBe(409)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  describe('the client\'s own staff', () => {
+    beforeEach(() => {
+      vi.mocked(requireDashboardClientAccess).mockResolvedValue({
+        ok: true, user: { email: 'owner@client.test' }, role: 'client-viewer', tier: 'full', allowedClientId: CLIENT,
+      } as never)
+    })
+
+    it('may send and edit a drafted reply', async () => {
+      const res = await send({ text: 'Edited draft.' })
+      expect(res.status).toBe(200)
+      expect(sentBody().get('message')).toBe('Edited draft.')
+      expect(row?.reviewed_by).toBe('owner@client.test')
+    })
+
+    it.each([
+      ['a waiting comment with no draft', { reply_source: 'fallback', public_reply_text: null }],
+      ['a row whose draft text is blank', { reply_source: 'catalog_draft', public_reply_text: '  ' }],
+    ])('may not write a reply from nothing on %s', async (_label, over) => {
+      Object.assign(row!, over)
+      const res = await send({ text: 'Anything I like.' })
+      expect(res.status).toBe(403)
+      expect(fetchMock).not.toHaveBeenCalled()
+      expect(row?.reply_status).toBe('pending')
+    })
+  })
+
+  it('our staff may reply to a waiting comment that has no draft', async () => {
+    Object.assign(row!, { reply_source: 'fallback', public_reply_text: null })
+    const res = await send({ text: 'Written by a person.' })
+    expect(res.status).toBe(200)
+    expect(sentBody().get('message')).toBe('Written by a person.')
+  })
+
+  it('the global stop for comment replies stops a person\'s send too', async () => {
+    process.env.SOCIAL_COMMENT_AUTOREPLY_KILL = '1'
+    const res = await send({})
+    expect(res.status).toBe(503)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(row?.reply_status).toBe('pending')
   })
 
   it('signed-out callers are turned away before anything is read', async () => {

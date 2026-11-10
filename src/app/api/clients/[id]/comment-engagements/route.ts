@@ -20,6 +20,7 @@ import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { getPageAccessToken } from '@/lib/meta/page-posts'
 import { deleteComment, replyToComment } from '@/lib/meta/comments'
 import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
+import { isKilled } from '@/lib/social/comment-autoreply-engine'
 
 export async function GET(
   req: NextRequest,
@@ -86,7 +87,9 @@ export async function PATCH(
   }
 
   if (action === 'send_draft') {
-    return sendDraft(clientId, engagementId, access.user.email ?? reviewer, body.text)
+    // The global stop for comment replies stops a person's send from here too.
+    if (isKilled()) return NextResponse.json({ error: 'Comment replies are switched off' }, { status: 503 })
+    return sendDraft(clientId, engagementId, access.user.email ?? reviewer, body.text, access.role === 'admin')
   }
 
   const { data: row } = await supabaseAdmin
@@ -144,10 +147,11 @@ async function sendDraft(
   engagementId: string,
   reviewer: string | null,
   rawText: unknown,
+  isStaff: boolean,
 ): Promise<NextResponse> {
   const { data: row } = await supabaseAdmin
     .from('social_comment_engagements')
-    .select('id, page_id, comment_id, public_reply_text, public_reply_id, reply_status')
+    .select('id, page_id, comment_id, public_reply_text, public_reply_id, reply_status, reply_source')
     .eq('id', engagementId)
     .eq('client_id', clientId)
     .maybeSingle()
@@ -155,10 +159,16 @@ async function sendDraft(
 
   const current = row as {
     page_id: string; comment_id: string; public_reply_text: string | null
-    public_reply_id: string | null; reply_status: string
+    public_reply_id: string | null; reply_status: string; reply_source: string | null
   }
   if (current.reply_status !== 'pending' || current.public_reply_id) {
     return NextResponse.json({ error: 'This comment is not waiting for a reply' }, { status: 409 })
+  }
+  // A client's own staff may send (and edit) a drafted reply. Writing a reply
+  // from nothing on any waiting comment stays with our staff.
+  const hasDraft = current.reply_source === 'catalog_draft' && (current.public_reply_text ?? '').trim().length > 0
+  if (!isStaff && !hasDraft) {
+    return NextResponse.json({ error: 'This comment has no drafted reply to send' }, { status: 403 })
   }
   const edited = typeof rawText === 'string' ? rawText.trim() : ''
   const text = edited.length > 0 ? edited : (current.public_reply_text ?? '').trim()
@@ -197,20 +207,22 @@ async function sendDraft(
   }
 
   const done = new Date().toISOString()
-  const { error: saveError } = await supabaseAdmin
-    .from('social_comment_engagements')
-    .update({
-      reply_status: 'replied',
-      public_reply_text: text,
-      public_reply_id: replyId,
-      needs_human: false,
-      reviewed_by: reviewer,
-      reviewed_at: done,
-      error_message: null,
-      updated_at: done,
-    })
-    .eq('id', engagementId)
+  const sent = {
+    reply_status: 'replied',
+    public_reply_text: text,
+    public_reply_id: replyId,
+    needs_human: false,
+    reviewed_by: reviewer,
+    reviewed_at: done,
+    error_message: null,
+    updated_at: done,
+  }
+  const save = () => supabaseAdmin.from('social_comment_engagements').update(sent).eq('id', engagementId)
+  let { error: saveError } = await save()
+  // One more try: a row left in 'processing' with no reply id can be neither re-sent nor reverted.
+  if (saveError) ({ error: saveError } = await save())
   if (saveError) {
+    console.error('[comment-engagements] send_draft posted reply', replyId, 'but could not record it:', saveError.message)
     // The reply IS on Facebook. Say so rather than report a clean failure.
     return NextResponse.json(
       { success: true, action: 'send_draft', public_reply_id: replyId, warning: 'Reply was posted but the record was not updated' },

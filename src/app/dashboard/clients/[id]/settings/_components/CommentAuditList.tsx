@@ -116,6 +116,7 @@ export function CommentAuditList({ clientId }: Props) {
         const cat = CATEGORY_META[it.category ?? 'other'] ?? CATEGORY_META.other
         const isDraft = it.reply_status === 'pending' && it.reply_source === 'catalog_draft' && !!it.public_reply_text
         const draftText = edits[it.id] ?? it.public_reply_text ?? ''
+        const draftTour = (it.guardrail_flags ?? []).find(f => f.startsWith('tour:'))?.slice(5) ?? null
         return (
           <div key={it.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2">
@@ -144,6 +145,11 @@ export function CommentAuditList({ clientId }: Props) {
                 <label htmlFor={`draft-${it.id}`} className="block text-xs font-bold text-amber-800">
                   按团目录起草的回复（还没发出去，可以改）
                 </label>
+                {draftTour && (
+                  <p className="mt-0.5 text-xs text-slate-600">
+                    依据的团：<span className="font-semibold text-slate-800">{draftTour}</span>。发之前先确认这条帖子讲的确实是这个团。
+                  </p>
+                )}
                 <textarea
                   id={`draft-${it.id}`}
                   value={draftText}

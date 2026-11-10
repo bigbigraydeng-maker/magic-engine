@@ -363,7 +363,7 @@ describe('catalog-grounded draft for a question left to a person', () => {
         public_reply_id: null,
         public_reply_text: 'Hi Sam, yes, a guide is included.',
         reply_source: 'catalog_draft',
-        guardrail_flags: ['not_greeting_or_faq', 'tour_draft'],
+        guardrail_flags: ['not_greeting_or_faq', 'tour_draft', 'tour:Harbour Loop'],
         private_reply_sent: false,
       }),
     ])

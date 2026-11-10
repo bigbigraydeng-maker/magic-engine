@@ -424,11 +424,16 @@ function handoffDecision(decision: CommentDecision, block: CommentAutoReplyBlock
 
 export const TOUR_DRAFT_FLAG = 'tour_draft'
 
-function withDraft(decision: CommentDecision): CommentDecision {
-  const flags = decision.guardrailFlags.includes(TOUR_DRAFT_FLAG)
-    ? decision.guardrailFlags
-    : [...decision.guardrailFlags, TOUR_DRAFT_FLAG]
-  return { ...decision, guardrailFlags: flags, replySource: 'catalog_draft' }
+/** Prefix of the flag naming the tour a draft was written from, so the reviewer can see it. */
+export const TOUR_NAME_FLAG_PREFIX = 'tour:'
+
+function withDraft(decision: CommentDecision, tourName: string): CommentDecision {
+  const flags = decision.guardrailFlags.filter((f) => f !== TOUR_DRAFT_FLAG && !f.startsWith(TOUR_NAME_FLAG_PREFIX))
+  return {
+    ...decision,
+    guardrailFlags: [...flags, TOUR_DRAFT_FLAG, `${TOUR_NAME_FLAG_PREFIX}${tourName}`],
+    replySource: 'catalog_draft',
+  }
 }
 
 /** Human-only intents never get a draft, whatever the classifier called the comment. */
@@ -440,7 +445,11 @@ const NO_DRAFT_INTENTS: ReadonlySet<CommentIntent> = new Set(['price', 'complain
  * complaint / refund / booking wording, model failure, or a draft that says
  * more than the catalog does. Never throws and never calls a Meta write.
  */
-async function tryTourDraft(comment: PageComment, ctx: ReplyContext, scratch: DraftScratch): Promise<string | null> {
+async function tryTourDraft(
+  comment: PageComment,
+  ctx: ReplyContext,
+  scratch: DraftScratch,
+): Promise<{ reply: string; tourName: string } | null> {
   try {
     if (isTourDraftKilled()) return null
     if (NO_DRAFT_INTENTS.has(routeComment({ category: 'question', comment_text: comment.message }).intent)) return null
@@ -465,7 +474,7 @@ async function tryTourDraft(comment: PageComment, ctx: ReplyContext, scratch: Dr
       aliasesByTourId: facts.aliasesByTourId,
       today: scratch.today,
     })
-    return result.ok ? result.reply : null
+    return result.ok ? { reply: result.reply, tourName: result.tourName } : null
   } catch (err) {
     console.error('[autoreply-engine] tour draft failed; leaving the comment to a person:', err instanceof Error ? err.message : 'unknown')
     return null
@@ -532,8 +541,8 @@ async function processClaimedComment(
     const draft = gate.block === 'not_greeting_or_faq' && decision.category === 'question'
       ? await tryTourDraft(comment, ctx, scratch)
       : null
-    await finalise(claim.rowId, draft ? withDraft(handoff) : handoff, {
-      status: 'pending', hidden: false, dmSent: false, publicReplyId: null, publicText: draft,
+    await finalise(claim.rowId, draft ? withDraft(handoff, draft.tourName) : handoff, {
+      status: 'pending', hidden: false, dmSent: false, publicReplyId: null, publicText: draft ? draft.reply : null,
     })
     return { publicReplied: false, dmSent: false, hidden: false, needsHuman: true, failed: false, drafted: draft !== null }
   }
