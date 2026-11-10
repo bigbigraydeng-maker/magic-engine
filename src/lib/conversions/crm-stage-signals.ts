@@ -178,17 +178,17 @@ export function planLeadStageEvents(input: {
     events.push(e)
   }
 
-  // 第一档：每条表单线索进来的那一刻
+  // 第一档：每条表单线索进来之后 1 秒（Meta：事件时间要晚于线索生成时间）
   if (config.initialEventName) {
     for (const lead of input.leads) {
       if (!LEAD_ID_RE.test(lead.leadId)) continue
       const ms = Date.parse(lead.createdAt)
-      if (!Number.isFinite(ms) || !inWindow(ms)) continue
+      if (!Number.isFinite(ms) || !inWindow(ms) || ms + 1000 > nowMs) continue
       push({
         contactId: lead.contactId,
         leadId: lead.leadId,
         eventName: config.initialEventName,
-        occurredAt: new Date(ms).toISOString(),
+        occurredAt: new Date(ms + 1000).toISOString(),
         sourceRef: leadStageSourceRef(lead.leadId, config.initialEventName),
         order: -1,
       })

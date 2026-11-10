@@ -13,7 +13,7 @@ vi.mock('../writeback-service', () => ({
   sendApprovedOutcome: (...a: unknown[]) => sendMock(...a),
 }))
 
-import { runCrmStageSignalsForClient, CRM_STAGE_SOURCE_KIND } from '../crm-stage-signals-run'
+import { runCrmStageSignalsForClient, runCrmStageChunkForEnabledClients, CRM_STAGE_SOURCE_KIND } from '../crm-stage-signals-run'
 
 type Row = Record<string, unknown>
 
@@ -33,6 +33,7 @@ class FakeDb {
     const filters: Array<(r: Row) => boolean> = []
     let embedWritebacks = false
     let orderCol: string | null = null
+    let patch: Row | null = null
     const q = {
       select(cols?: string) {
         embedWritebacks = typeof cols === 'string' && cols.includes('me_conversion_writebacks(')
@@ -43,6 +44,8 @@ class FakeDb {
       in(c: string, v: unknown[]) { filters.push((r) => v.includes(r[c])); return q },
       gte(c: string, v: string) { filters.push((r) => String(r[c]) >= v); return q },
       order(c: string) { orderCol = c; return q },
+      limit() { return q },
+      update(p: Row) { patch = p; return q },
       filter(path: string, _op: string, v: string) {
         // 只支持本文件用到的 leads_config->crm_stage_signals->>enabled
         if (path === 'leads_config->crm_stage_signals->>enabled') {
@@ -55,7 +58,16 @@ class FakeDb {
           const dup = rows.some(
             (r) => r.client_id === row.client_id && r.source_kind === row.source_kind && r.source_ref === row.source_ref,
           )
-          if (dup) return { data: null, error: { code: '23505', message: 'duplicate key' } }
+          const dupContact =
+            row.outcome_kind === 'lead_stage' &&
+            rows.some(
+              (r) =>
+                r.outcome_kind === 'lead_stage' &&
+                r.client_id === row.client_id &&
+                r.contact_id === row.contact_id &&
+                r.lead_stage === row.lead_stage,
+            )
+          if (dup || dupContact) return { data: null, error: { code: '23505', message: 'duplicate key' } }
         }
         rows.push({ id: `${table}-${rows.length + 1}`, redacted_at: null, ...row })
         return { data: null, error: null }
@@ -65,6 +77,10 @@ class FakeDb {
       },
       then(resolve: (v: { data: Row[]; error: null }) => unknown) {
         let out = rows.filter((r) => filters.every((f) => f(r)))
+        if (patch) {
+          for (const r of out) Object.assign(r, patch)
+          return Promise.resolve(resolve({ data: out, error: null }))
+        }
         if (orderCol) {
           const col = orderCol
           out = [...out].sort((a, b) => String(a[col]).localeCompare(String(b[col])))
@@ -100,7 +116,7 @@ const CONFIG = {
 let db: FakeDb
 function seedBasic(leadsConfig: unknown = CONFIG) {
   db.tables.clients.push({ id: CLIENT, default_phone_country: '64', leads_config: leadsConfig })
-  db.tables.contacts.push({ id: 'c1', client_id: CLIENT, primary_email: 'A@Example.com', primary_phone: '021 555 123' })
+  db.tables.contacts.push({ id: 'c1', client_id: CLIENT, primary_email: 'A@Example.com', primary_phone: '021 555 123', do_not_contact: false })
   db.tables.contact_touchpoints.push({ client_id: CLIENT, contact_id: 'c1', source: 'meta_lead_form', source_ref: LEAD, occurred_at: ago(20) })
   db.tables.contact_stage_events.push({ client_id: CLIENT, contact_id: 'c1', to_stage: 'deposit_paid', created_at: ago(1) })
 }
@@ -190,6 +206,67 @@ describe('runCrmStageSignalsForClient', () => {
     const s = await run()
     expect(s).toMatchObject({ ran: true, inserted: 0, skippedNoMatchKey: 2 })
     expect(sendMock).not.toHaveBeenCalled()
+  })
+
+  it('客人后来又填了一次表（新线索编号）→ 已报过的档不会挂到新编号上再报一次', async () => {
+    seedBasic()
+    await run()
+    db.tables.contact_touchpoints.push({ client_id: CLIENT, contact_id: 'c1', source: 'meta_lead_form', source_ref: '2397056934398420', occurred_at: ago(1.5) })
+    sendMock.mockClear()
+    const s = await run()
+    expect(s).toMatchObject({ ran: true, inserted: 0 })
+    expect(db.tables.me_sale_outcomes).toHaveLength(2)
+    expect(sendMock).not.toHaveBeenCalled()
+  })
+
+  it('已标「别再联系」的客人 → 不写入（不为发不出去的事再存一份邮箱电话）', async () => {
+    seedBasic()
+    db.tables.contacts[0].do_not_contact = true
+    const s = await run()
+    expect(s).toMatchObject({ ran: true, inserted: 0, skippedDoNotContact: 2 })
+    expect(db.tables.me_sale_outcomes).toHaveLength(0)
+  })
+
+  it('发送口按触点查到拒联（没建发送记录）→ 记录标成「客人拒联」，以后不再被捞出来', async () => {
+    seedBasic()
+    sendMock.mockImplementation(async () => ({ status: 'redacted', message: '', writebackId: null }))
+    await run()
+    expect(db.tables.me_sale_outcomes.every((r) => r.review_status === 'rejected' && r.reject_reason === 'customer_opted_out')).toBe(true)
+    sendMock.mockClear()
+    expect(await run()).toMatchObject({ ran: true, attempted: 0, remaining: 0 })
+  })
+
+  it('发过但卡在「授权失效 / 平台忙」的不在这里反复撞（每条只尝试一次，归补发任务管）', async () => {
+    seedBasic()
+    sendMock.mockImplementation(async (id: string) => {
+      db.tables.me_conversion_writebacks.push({ outcome_id: id, status: 'failed' })
+      return { status: 'failed', message: '', writebackId: 'wb' }
+    })
+    await run()
+    sendMock.mockClear()
+    expect(await run()).toMatchObject({ ran: true, attempted: 0, remaining: 0 })
+    expect(sendMock).not.toHaveBeenCalled()
+  })
+
+  it('允许种类名单里没有线索阶段 → 一条都不写', async () => {
+    seedBasic({ ...CONFIG, capi_send_kinds: ['purchase'] })
+    expect(await run()).toEqual({ ran: false, reason: 'kind_not_allowed' })
+    expect(db.tables.me_sale_outcomes).toHaveLength(0)
+  })
+
+  it('每块所有客户合计限量：名额用完还有客户没轮到 → done:false；下一块接着发，最后 done:true', async () => {
+    seedBasic()
+    db.tables.clients.push({ id: 'client-y', default_phone_country: '64', leads_config: CONFIG })
+    db.tables.contacts.push({ id: 'c2', client_id: 'client-y', primary_email: 'b@example.com', primary_phone: null, do_not_contact: false })
+    db.tables.contact_touchpoints.push({ client_id: 'client-y', contact_id: 'c2', source: 'meta_lead_form', source_ref: '2397056934398420', occurred_at: ago(9) })
+    db.tables.contact_stage_events.push({ client_id: 'client-y', contact_id: 'c2', to_stage: 'quoted', created_at: ago(1) })
+    const deps = { supabase: db as never, sendDeps: { writer: {} as never, fetcher: fetch }, now: NOW }
+    const first = await runCrmStageChunkForEnabledClients(deps, 2)
+    expect(first.done).toBe(false)
+    expect(sendMock).toHaveBeenCalledTimes(2)
+    const second = await runCrmStageChunkForEnabledClients(deps, 2)
+    expect(second.done).toBe(true)
+    expect(sendMock).toHaveBeenCalledTimes(3)
   })
 
   it('别的客户的阶段变化不会被读进来', async () => {

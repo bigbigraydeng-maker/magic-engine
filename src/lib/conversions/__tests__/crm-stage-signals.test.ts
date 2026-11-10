@@ -183,6 +183,8 @@ describe('planLeadStageEvents', () => {
       ],
     })
     expect(r.events).toEqual([expect.objectContaining({ leadId: LEAD_A, eventName: 'Lead', sourceRef: leadStageSourceRef(LEAD_A, 'Lead') })])
+    // 第一档也比线索时间晚 1 秒（Meta：事件时间要晚于线索生成时间）
+    expect(Date.parse(r.events[0].occurredAt) - Date.parse(ago(3))).toBe(1000)
   })
 
   it('线索编号格式不对（不是 15–17 位数字）→ 当作没有这条线索', () => {

@@ -96,7 +96,7 @@ import { runAiAutoReviewForClient, MAX_BATCH_SIZE, type RunOptions, type RunSumm
 import { runFailedWritebackResend } from '@/lib/conversions/writeback-resend-run'
 import { metaCapiWriter } from '@/lib/meta/capi/writer'
 import { runPaymentEmailDetectionForEnabledClients } from '@/lib/conversions/payment-email-detect-wire'
-import { crmStageEnabledClientIds, runCrmStageSignalsForClient } from '@/lib/conversions/crm-stage-signals-run'
+import { runCrmStageChunkForEnabledClients } from '@/lib/conversions/crm-stage-signals-run'
 
 export const CONVERSION_DAILY_PIPELINE_JOB = 'conversion-daily-pipeline'
 export const CONVERSION_DAILY_PIPELINE_TZ = 'Pacific/Auckland'
@@ -201,8 +201,8 @@ export type ConversionPipelineDeps = {
    */
   detectPayments?: (opts: { nowIso: string }) => Promise<unknown>
   /**
-   * 线索阶段回传（2026-11-10）：对开了 `leads_config.crm_stage_signals.enabled` 的客户各跑一块。
-   * 每块每客户最多发一小批，`done:false` 就再跑一块，直到发完或到块数硬顶。
+   * 线索阶段回传（2026-11-10）：对开了 `leads_config.crm_stage_signals.enabled` 的客户跑一块。
+   * 每块所有客户合计最多尝试一小批，`done:false` 就再跑一块，直到发完或到块数硬顶。
    * 可选：没传就不跑这一段。放在最后——它只发线索阶段事件，不影响前面各段。
    */
   crmStageChunk?: (opts: { nowIso: string }) => Promise<{ summary: Record<string, unknown>; done: boolean }>
@@ -305,7 +305,7 @@ async function runReviewChunks(
   return { ok: true, summary: agg, chunks: durationMs.length, durationMs, transientRetries }
 }
 
-/** 线索阶段回传最多跑几块（每块每客户 ≤ 25 条，10 块足够覆盖 7 天积压）。 */
+/** 线索阶段回传最多跑几块（每块所有客户合计 ≤ 20 条；首次打开时 CTS 约 170 条积压，10 块够）。 */
 export const MAX_CRM_STAGE_CHUNKS = 10
 
 /** 逐块推进线索阶段回传；任一块失败就停，跑满硬顶仍没发完算失败（不能悄悄留一截没发）。 */
@@ -461,18 +461,10 @@ export const conversionDailyPipeline = createConversionDailyPipelineFunction({
       now: new Date(nowIso),
     }),
   detectPayments: ({ nowIso }) => runPaymentEmailDetectionForEnabledClients({ nowIso }),
-  crmStageChunk: async ({ nowIso }) => {
-    const summary: Record<string, unknown> = {}
-    let done = true
-    for (const clientId of await crmStageEnabledClientIds(supabaseAdmin)) {
-      const s = await runCrmStageSignalsForClient(clientId, {
-        supabase: supabaseAdmin,
-        sendDeps: { writer: metaCapiWriter, fetcher: fetch },
-        now: new Date(nowIso),
-      })
-      summary[clientId] = s
-      if (s.ran && s.remaining > 0) done = false
-    }
-    return { summary, done }
-  },
+  crmStageChunk: ({ nowIso }) =>
+    runCrmStageChunkForEnabledClients({
+      supabase: supabaseAdmin,
+      sendDeps: { writer: metaCapiWriter, fetcher: fetch },
+      now: new Date(nowIso),
+    }),
 })

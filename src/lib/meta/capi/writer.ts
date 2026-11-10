@@ -368,6 +368,15 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
           latencyMs: Date.now() - startedAt,
         }
       }
+      // 把网站像素编号误填成线索阶段数据集 = 线索阶段事件混进网站数据，按配置错误拦下。
+      if (config.crmStage.datasetId === creds.pixelId) {
+        return {
+          ok: false,
+          errorName: 'ConfigError',
+          errorMessage: '线索阶段数据集编号跟网站像素是同一个——必须是单独新建的线索阶段数据集',
+          latencyMs: Date.now() - startedAt,
+        }
+      }
       datasetId = config.crmStage.datasetId
     }
 

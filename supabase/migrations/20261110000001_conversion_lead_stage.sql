@@ -57,6 +57,13 @@ alter table public.me_sale_outcomes
     or meta_lead_id is not null
   );
 
+-- 🔴 同一位客人的同一档只能有一条：客人后来又填了一次表（换了线索编号）时，
+--    不能把「已报价」挂到新编号上再报一次——Meta 那边就多记一位，撤不回。
+--    删除个人信息后 contact_id 仍保留，所以这条索引也挡住「删完又被每日任务重新写入」。
+create unique index if not exists uq_me_sale_outcomes_lead_stage_per_contact
+  on public.me_sale_outcomes (client_id, contact_id, lead_stage)
+  where outcome_kind = 'lead_stage' and contact_id is not null;
+
 -- ── 4. source_kind 增加 crm_stage_auto ────────────────────────────────────
 alter table public.me_sale_outcomes
   drop constraint if exists me_sale_outcomes_source_kind_check;

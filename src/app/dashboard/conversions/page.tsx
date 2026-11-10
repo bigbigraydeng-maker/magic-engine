@@ -38,7 +38,7 @@ type Writeback = {
 
 type Outcome = {
   id: string
-  outcome_kind: 'purchase' | 'balance' | 'lead'
+  outcome_kind: 'purchase' | 'balance' | 'lead' | 'lead_stage'
   order_ref: string | null
   amount_minor: number | null
   currency: string | null
@@ -84,7 +84,7 @@ function money(o: Outcome): string {
 }
 
 function kindLabel(k: Outcome['outcome_kind']): string {
-  return k === 'purchase' ? '收到定金' : k === 'balance' ? '收到尾款' : '有效咨询'
+  return k === 'purchase' ? '收到定金' : k === 'balance' ? '收到尾款' : k === 'lead_stage' ? '线索阶段' : '有效咨询'
 }
 
 /** 精确天数。判"过没过期"用它，跟服务端同一口径；显示时才取整。 */
@@ -540,7 +540,7 @@ export default function ConversionsPage() {
               <div key={o.id} className="rounded-xl border border-status-attn/40 bg-me-gold/15 p-4">
                 <div className="text-[15px] font-semibold text-me-charcoal">
                   {kindLabel(o.outcome_kind)}
-                  {o.outcome_kind !== 'lead' && ` · ${money(o)}`}
+                  {o.outcome_kind !== 'lead' && o.outcome_kind !== 'lead_stage' && ` · ${money(o)}`}
                   {o.order_ref && <span className="font-normal text-me-charcoal/50"> · 单号 {o.order_ref}</span>}
                 </div>
                 <div className="my-2 text-sm leading-relaxed text-me-charcoal/70">
@@ -616,7 +616,7 @@ export default function ConversionsPage() {
                   )}
                   <div className={`text-[15px] font-semibold ${displayName(o.customer_first) ? 'mt-0.5 text-me-charcoal/70' : 'text-me-charcoal'}`}>
                     {kindLabel(o.outcome_kind)}
-                    {o.outcome_kind !== 'lead' && <span className="tabular-nums"> · {money(o)}</span>}
+                    {o.outcome_kind !== 'lead' && o.outcome_kind !== 'lead_stage' && <span className="tabular-nums"> · {money(o)}</span>}
                     {o.order_ref && <span className="font-normal text-me-charcoal/50"> · 单号 {o.order_ref}</span>}
                   </div>
                   <div className="mt-1 text-xs text-me-charcoal/50">

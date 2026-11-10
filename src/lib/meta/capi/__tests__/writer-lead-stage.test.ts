@@ -132,6 +132,16 @@ describe('发到哪里', () => {
   })
 })
 
+describe('数据集编号误填成网站像素', () => {
+  it('发送时按配置错误拦下，一个请求都不发', async () => {
+    const { fetcher } = fakeFetch(ok)
+    const wrong: ClientSendConfig = { ...BASE, crmStage: { datasetId: WEB_PIXEL, leadEventSource: 'Magic Engine' } }
+    const raw = await writer.send(writer.build(stage(), wrong), wrong, { fetcher })
+    expect(raw).toMatchObject({ ok: false, errorName: 'ConfigError' })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+})
+
 describe('预检', () => {
   it('配了线索阶段数据集 → 也确认令牌看得见它；看不见就预检不过', async () => {
     const { fetcher } = fakeFetch((url) => {

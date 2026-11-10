@@ -200,12 +200,13 @@ export async function GET(request: Request) {
     // 会先被"最新 N 条"的窗口挤掉，压根轮不到这一步筛选（同一类问题的另一面）。
     .select(sendStatuses.length > 0 ? SELECT_COLUMNS.replace('me_conversion_writebacks(', 'me_conversion_writebacks!inner(') : SELECT_COLUMNS)
     .eq('client_id', clientId)
-    // 线索阶段记录是规则自动生成、自动批准的（每月几百条），不需要人审；
-    // 混进审核列表会把真正要人看的成交挤出 limit 窗口。
-    .neq('outcome_kind', 'lead_stage')
     .order('occurred_at', { ascending: false })
     .limit(limit)
 
+  // 线索阶段记录是规则自动生成、自动批准的（每月几百条），平常不需要人看；
+  // 混进默认列表会把真正要人审的成交挤出 limit 窗口。但按发送状态筛（不确定 / 发送失败 /
+  // 试运行预览）时要能看到它们——那是人唯一能核对、处理它们的地方（深链 focus 走上面单独的查询）。
+  if (sendStatuses.length === 0) query = query.neq('outcome_kind', 'lead_stage')
   if (status) query = query.eq('review_status', status)
   if (sendStatuses.length > 0) query = query.in('me_conversion_writebacks.status', sendStatuses)
 
