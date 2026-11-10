@@ -61,6 +61,14 @@ describe('judgeLead', () => {
     ).toBe('explained')
   })
 
+  it('a guest who unsubscribed from ME, complained, or whose address bounced explains why ME would not welcome them', () => {
+    for (const reason of ['email_unsubscribed', 'complained', 'hard_bounced_address']) {
+      expect(judgeLead(row('c1', reason, { would_send: false, legacy_welcomed: true })), reason).toBe('explained')
+    }
+    // A rule-side reason still does not: the person who authorizes has to see that difference.
+    expect(judgeLead(row('c1', 'no_consent_basis', { would_send: false, legacy_welcomed: true }))).toBe('unexplained')
+  })
+
   it('returns unexplained when ME would send and the batch did not welcome', () => {
     expect(judgeLead(row('c1', null, { would_send: true, legacy_welcomed: false, ...SEEN }))).toBe('unexplained')
   })

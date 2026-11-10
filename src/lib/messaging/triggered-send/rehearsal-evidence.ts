@@ -258,6 +258,14 @@ export function parseSweepReceipt(startedAt: unknown, summary: unknown): SweepRe
   }
 }
 
+/** Two runs a day for 37 days is about 75 receipts; far more than that means a read we cannot trust in full. */
+export const MAX_SWEEP_RECEIPTS = 500
+
+/**
+ * The sweep receipts of the window, oldest first (the latest receipt of a day wins). Read NEWEST first and turned
+ * around, and a full page counts as unreadable: cutting the newest receipts off would hide the days whose latest sweep
+ * set people aside, and they would look consistent (76's review of #3754).
+ */
 async function readSweepReceipts(db: SupabaseClient, clientId: string, sinceIso: string): Promise<SweepReceiptLite[] | null> {
   const { data, error } = await db
     .from('cron_run_logs')
@@ -265,11 +273,15 @@ async function readSweepReceipts(db: SupabaseClient, clientId: string, sinceIso:
     .eq('job_name', REHEARSAL_SWEEP_JOB)
     .eq('summary->>client_id', clientId)
     .gte('started_at', sinceIso)
-    .order('started_at', { ascending: true })
-    .limit(500)
+    .order('started_at', { ascending: false })
+    .limit(MAX_SWEEP_RECEIPTS)
   if (error) return null
   const rows = (data as Array<{ started_at: unknown; summary: unknown }> | null) ?? []
-  return rows.map((r) => parseSweepReceipt(r.started_at, r.summary)).filter((r): r is SweepReceiptLite => r !== null)
+  if (rows.length >= MAX_SWEEP_RECEIPTS) return null
+  return rows
+    .reverse()
+    .map((r) => parseSweepReceipt(r.started_at, r.summary))
+    .filter((r): r is SweepReceiptLite => r !== null)
 }
 
 /** Days a proposal of these decisions was submitted after local midnight (that day is only partly compared). */
