@@ -10,7 +10,7 @@ import type { CardStatus } from '@/lib/confirmation-card/view'
 import { ConfirmationCard } from './ConfirmationCard'
 import { STATUS_CHIP_LABEL, isMutedStatus } from './card-display'
 
-interface CardPayload {
+export interface CardPayload {
   readonly runId: string
   readonly expectedDecisionId: string
   readonly fingerprint: string

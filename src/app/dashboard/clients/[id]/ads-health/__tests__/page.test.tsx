@@ -91,6 +91,18 @@ function respond(campaigns: unknown[]) {
 /** Route fetches by URL so one test can drive both the page load and a click. */
 function mockFetch(routes: Record<string, unknown>) {
   return vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes('/confirmation-cards')) {
+      return { ok: true, status: 200, json: async () => ({ cards: [] }) } as unknown as Response
+    }
+    if (url.includes('/meta-ads/actions')) {
+      return { ok: true, status: 200, json: async () => ({ success: true, actions: [] }) } as unknown as Response
+    }
+    if (url.includes('/ad-strategy-config')) {
+      return { ok: true, status: 200, json: async () => ({ config: {} }) } as unknown as Response
+    }
+    if (url.includes('/approval-context')) {
+      return { ok: true, status: 200, json: async () => ({}) } as unknown as Response
+    }
     const key = Object.keys(routes).find(k => url.includes(k))
     const body = key ? routes[key] : {}
     const status = (body as { __status?: number }).__status ?? 200
@@ -364,7 +376,7 @@ describe('「等你点头」标签', () => {
     await userEvent.click(await screen.findByText('等你点头'))
 
     // 面板自己去取待批准列表，取到空就如实说没有 —— 不是一个指向别处的链接
-    await waitFor(() => expect(screen.getByText('目前没有等你点头的暂停建议。')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText(/这一栏目前没有等你点头的暂停建议/)).toBeTruthy())
     expect(screen.queryByText(/去「.*」处理/)).toBeNull()
   })
 
@@ -395,7 +407,7 @@ describe('「等你点头」标签', () => {
     await userEvent.click(await screen.findByText('等你点头'))
     await waitFor(() => expect(screen.getByText('物流组', { exact: false })).toBeTruthy())
 
-    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+    await userEvent.click(screen.getByText('出确认卡（暂停）'))
 
     // 🔴 这一刀的全部红线：接口网址、方法、请求体一个字都不许变
     const decide = calls.find((c) => c.url.includes('/decision'))
@@ -413,6 +425,18 @@ describe('「等你点头」标签', () => {
     const calls: Array<{ url: string; init?: RequestInit }> = []
     const fn = vi.fn((url: string, init?: RequestInit) => {
       calls.push({ url, init })
+      if (url.includes('/confirmation-cards')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ cards: [] }) })
+      }
+      if (url.includes('/meta-ads/actions')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ success: true, actions: [] }) })
+      }
+      if (url.includes('/ad-strategy-config')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ config: {} }) })
+      }
+      if (url.includes('/approval-context')) {
+        return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) })
+      }
       if (url.includes('/ad-health/auto-pause/')) {
         return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(decideReply) })
       }
@@ -445,7 +469,7 @@ describe('「等你点头」标签', () => {
     vi.stubGlobal('fetch', fn)
     await openPanel()
 
-    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+    await userEvent.click(screen.getByText('出确认卡（暂停）'))
 
     await waitFor(() => expect(screen.getByText(/没暂停成：广告组已被别处改过——广告还在投/)).toBeTruthy())
   })
@@ -455,7 +479,7 @@ describe('「等你点头」标签', () => {
     vi.stubGlobal('fetch', fn)
     await openPanel()
 
-    await userEvent.click(screen.getByText('批准（立刻暂停）'))
+    await userEvent.click(screen.getByText('出确认卡（暂停）'))
 
     await waitFor(() => expect(screen.getByText(/列表已刷新，请再看一遍/)).toBeTruthy())
     // 只提交过一次，没有拿新 id 重试
@@ -465,18 +489,19 @@ describe('「等你点头」标签', () => {
   it('驳回必须带理由；理由留空就不发请求', async () => {
     const { fn, calls } = panelFetch({ ok: true, kind: 'done' })
     vi.stubGlobal('fetch', fn)
-    vi.stubGlobal('prompt', vi.fn(() => ''))
     await openPanel()
 
-    await userEvent.click(screen.getByText('驳回'))
+    await userEvent.click(screen.getByText('不用暂停'))
+    await userEvent.click(screen.getByText('记下，不暂停'))
     expect(calls.filter((c) => c.url.includes('/decision'))).toHaveLength(0)
 
-    vi.stubGlobal('prompt', vi.fn(() => '这个组我要留着'))
-    await userEvent.click(screen.getByText('驳回'))
+    await userEvent.click(screen.getByText('不用暂停'))
+    await userEvent.click(screen.getByText('品牌曝光优先'))
+    await userEvent.click(screen.getByText('记下，不暂停'))
 
     await waitFor(() => expect(calls.filter((c) => c.url.includes('/decision'))).toHaveLength(1))
     const body = JSON.parse(String(calls.find((c) => c.url.includes('/decision'))!.init?.body))
-    expect(body).toEqual({ resolution: 'reject', expectedDecisionId: 'dec-1', reason: '这个组我要留着' })
+    expect(body).toEqual({ resolution: 'reject', expectedDecisionId: 'dec-1', reason: '品牌曝光优先' })
   })
 
   it('批准暂停后在等你点头标签刷新列表', async () => {
@@ -512,8 +537,8 @@ describe('「等你点头」标签', () => {
     render(<AdsHealthPage />)
     await userEvent.click(await screen.findByText('等你点头'))
     await waitFor(() => expect(screen.getByText('物流组', { exact: false })).toBeTruthy())
-    await userEvent.click(screen.getByText('批准（立刻暂停）'))
-    await waitFor(() => expect(screen.getByText('目前没有等你点头的暂停建议。')).toBeTruthy())
+    await userEvent.click(screen.getByText('出确认卡（暂停）'))
+    await waitFor(() => expect(screen.getByText(/这一栏目前没有等你点头的暂停建议/)).toBeTruthy())
   })
 
 
@@ -540,7 +565,7 @@ describe('「等你点头」标签', () => {
     render(<AdsHealthPage />)
 
     await waitFor(() =>
-      expect(screen.getByText(/系统发现这些广告组连续花钱没结果/)).toBeTruthy(),
+      expect(screen.getByText(/打开自动暂停页/)).toBeTruthy(),
     )
   })
 
