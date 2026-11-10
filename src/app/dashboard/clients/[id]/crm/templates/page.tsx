@@ -20,7 +20,7 @@ const NO_ACCESS_TEXT = '你的账号没有查看这一页的权限。'
 const UNAVAILABLE_TEXT = '这一页暂时打不开，请稍后再试；如果一直这样，请告诉 Magic Engine。'
 
 function Shell({ children }: { children: ReactNode }): JSX.Element {
-  return <div className="mx-auto w-full max-w-4xl px-5 py-6 sm:px-8">{children}</div>
+  return <div className="mx-auto w-full max-w-[1200px] px-5 py-6 sm:px-8">{children}</div>
 }
 
 function Notice({ text }: { text: string }): JSX.Element {
@@ -46,9 +46,6 @@ export default async function EmailTemplatesPage({ params }: { params: { id: str
           回到全部客人
         </Link>
       </div>
-      <p className="mb-2 text-sm text-me-charcoal/70">
-        通话之后，在客人的资料页点「选模板」就能发跟进邮件。模板里的团、价格、班期永远来自已发布的团目录；每封信都由你点「发送」，系统不会自己发。
-      </p>
       <TemplatesAdmin clientId={params.id} />
       <RecentSends clientId={params.id} />
       {settingsAdmin && (

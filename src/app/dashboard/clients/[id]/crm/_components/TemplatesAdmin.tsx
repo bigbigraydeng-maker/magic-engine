@@ -1,16 +1,18 @@
 'use client'
 
 /**
- * 邮件模板页的主体：列表、状态、历史、打开编辑器。
- * 读失败绝不显示成「没有模板」。
+ * 邮件模板页：左侧列表 + 右侧预览；编辑走 TemplateEditor。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
 import type { ReceiptSummaryRow } from '@/lib/crm/email-templates/receipt-store'
 import type { FeatureState } from '@/lib/crm/email-templates/feature-state'
+import { isAutomatedTemplateKey } from '@/lib/crm/email-templates/automated-template-key'
 import { EMAIL_SETTINGS_SAVED_EVENT } from '@/lib/crm/email-templates/settings-events'
+import { MeChip } from '@/components/ui/me-primitives'
 import { TemplateEditor, type TemplateVariables } from './TemplateEditor'
+import { TemplatePreviewPane } from './TemplatePreviewPane'
 
 interface ListPayload {
   featureState: FeatureState
@@ -31,39 +33,6 @@ type EditorState =
   | { kind: 'new' }
   | { kind: 'edit'; initial: EmailTemplateVersion }
   | { kind: 'prefill'; initial: EmailTemplateVersion; prefill: EmailTemplateVersion }
-
-function formatNz(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  try {
-    return new Intl.DateTimeFormat('zh-CN', {
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(d)
-  } catch {
-    return '—'
-  }
-}
-
-function formatNzFull(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  try {
-    return new Intl.DateTimeFormat('zh-CN', {
-      year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(d)
-  } catch {
-    return '—'
-  }
-}
 
 function bannerText(state: FeatureState): string | null {
   switch (state) {
@@ -92,24 +61,8 @@ function sortByName(list: EmailTemplateVersion[]): EmailTemplateVersion[] {
   })
 }
 
-function statsFor(stats: ReceiptSummaryRow[], key: string): ReceiptSummaryRow {
-  const found = stats.find((s) => s.templateKey === key)
-  return found ?? { templateKey: key, sent: 0, blocked: 0, failed: 0, unknown: 0 }
-}
-
-function StatusBadge({ status }: { status: EmailTemplateVersion['status'] }) {
-  if (status === 'active') {
-    return (
-      <span className="inline-block rounded-full bg-green-100 px-2 py-0.5 text-[11px] font-bold text-green-800">
-        启用
-      </span>
-    )
-  }
-  return (
-    <span className="inline-block rounded-full bg-me-stone/40 px-2 py-0.5 text-[11px] font-bold text-me-charcoal/60">
-      停用
-    </span>
-  )
+function statsFor(stats: ReceiptSummaryRow[], key: string): number {
+  return stats.find((s) => s.templateKey === key)?.sent ?? 0
 }
 
 export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
@@ -118,7 +71,8 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
   const [loading, setLoading] = useState(true)
   const [readError, setReadError] = useState<string | null>(null)
   const [editor, setEditor] = useState<EditorState>({ kind: 'closed' })
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [showDisabled, setShowDisabled] = useState(false)
   const [history, setHistory] = useState<Record<string, HistoryPayload | 'loading' | 'error'>>({})
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [rowError, setRowError] = useState<Record<string, string>>({})
@@ -131,14 +85,8 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
     timers.current = []
   }, [])
 
-  useEffect(() => {
-    return () => {
-      clearTimers()
-    }
-  }, [clearTimers])
+  useEffect(() => () => clearTimers(), [clearTimers])
 
-  // A background read (after the settings were saved) never blanks the page: if it fails, what is on the screen stays,
-  // so an open template editor does not lose what is being typed into it.
   const load = useCallback(async (opts: { background?: boolean } = {}) => {
     const background = opts.background === true
     if (!background) {
@@ -155,11 +103,7 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
         }
         return
       }
-      if (
-        !Array.isArray(json.templates) ||
-        !Array.isArray(json.stats) ||
-        typeof json.featureState !== 'string'
-      ) {
+      if (!Array.isArray(json.templates) || !Array.isArray(json.stats) || typeof json.featureState !== 'string') {
         if (!background) {
           setData(null)
           setReadError('返回的数据看不懂')
@@ -196,20 +140,6 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
     window.addEventListener(EMAIL_SETTINGS_SAVED_EVENT, reload)
     return () => window.removeEventListener(EMAIL_SETTINGS_SAVED_EVENT, reload)
   }, [load])
-
-  const showNotices = useCallback(
-    (list: string[], version: number | null) => {
-      clearTimers()
-      setNotices(list)
-      setSavedVersion(version)
-      const t = setTimeout(() => {
-        setNotices([])
-        setSavedVersion(null)
-      }, 6000)
-      timers.current.push(t)
-    },
-    [clearTimers],
-  )
 
   const loadHistory = useCallback(
     async (key: string) => {
@@ -248,11 +178,49 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
     [history, loadHistory],
   )
 
+  const showNotices = useCallback(
+    (list: string[], version: number | null) => {
+      clearTimers()
+      setNotices(list)
+      setSavedVersion(version)
+      const t = setTimeout(() => {
+        setNotices([])
+        setSavedVersion(null)
+      }, 6000)
+      timers.current.push(t)
+    },
+    [clearTimers],
+  )
+
+  const grouped = useMemo(() => {
+    if (!data) return { manual: [] as EmailTemplateVersion[], auto: [] as EmailTemplateVersion[], disabled: [] as EmailTemplateVersion[] }
+    const sorted = sortByName(data.templates)
+    const manual: EmailTemplateVersion[] = []
+    const auto: EmailTemplateVersion[] = []
+    const disabled: EmailTemplateVersion[] = []
+    for (const row of sorted) {
+      if (row.status === 'disabled') disabled.push(row)
+      else if (isAutomatedTemplateKey(row.templateKey)) auto.push(row)
+      else manual.push(row)
+    }
+    return { manual, auto, disabled }
+  }, [data])
+
+  useEffect(() => {
+    if (!data || selectedKey) return
+    const first = grouped.manual[0] ?? grouped.auto[0] ?? grouped.disabled[0]
+    if (first) setSelectedKey(first.templateKey)
+  }, [data, grouped, selectedKey])
+
+  const selected = useMemo(() => {
+    if (!data || !selectedKey) return null
+    return data.templates.find((t) => t.templateKey === selectedKey) ?? null
+  }, [data, selectedKey])
+
   const toggleStatus = useCallback(
-    async (row: EmailTemplateVersion) => {
+    async (row: EmailTemplateVersion, nextNote: '启用' | '停用') => {
       if (busyKey !== null) return
-      const nextStatus = row.status === 'active' ? 'disabled' : 'active'
-      const note = nextStatus === 'active' ? '启用' : '停用'
+      const nextStatus = nextNote === '启用' ? 'active' : 'disabled'
       setBusyKey(row.templateKey)
       setRowError((prev) => {
         const next = { ...prev }
@@ -274,7 +242,7 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
               pickMode: row.pickMode,
               pickFilter: row.pickFilter,
               status: nextStatus,
-              changeNote: note,
+              changeNote: nextNote,
             }),
           },
         )
@@ -285,10 +253,7 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
           return
         }
         if (!res.ok) {
-          setRowError((prev) => ({
-            ...prev,
-            [row.templateKey]: json.error ?? '保存失败，请稍后再试',
-          }))
+          setRowError((prev) => ({ ...prev, [row.templateKey]: json.error ?? '保存失败，请稍后再试' }))
           return
         }
         await load()
@@ -309,6 +274,7 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
   const onSaved = useCallback(
     (template: EmailTemplateVersion, incoming: string[]) => {
       setEditor({ kind: 'closed' })
+      setSelectedKey(template.templateKey)
       void load()
       showNotices(incoming, template.version)
     },
@@ -322,10 +288,67 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
 
   const banner = data ? bannerText(data.featureState) : null
   const canEdit = data?.canEditTemplates === true
-  const sorted = data ? sortByName(data.templates) : []
+
+  const activeCount = grouped.manual.length + grouped.auto.length
+
+  function renderListItem(row: EmailTemplateVersion): JSX.Element {
+    const selectedRow = row.templateKey === selectedKey
+    const sent = data ? statsFor(data.stats, row.templateKey) : 0
+    return (
+      <li key={row.templateKey}>
+        <button
+          type="button"
+          onClick={() => setSelectedKey(row.templateKey)}
+          className={`w-full rounded-xl border px-3 py-2 text-left transition ${
+            selectedRow
+              ? 'border-me-ochre bg-me-ochre/10 shadow-[inset_3px_0_0_#C4912E]'
+              : 'border-me-charcoal/10 bg-white hover:bg-me-ivory/60'
+          }`}
+        >
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-sm font-bold text-me-charcoal">{row.name}</span>
+            {isAutomatedTemplateKey(row.templateKey) && (
+              <MeChip gold>系统自动发</MeChip>
+            )}
+          </div>
+          <p className="mt-0.5 text-[11px] text-me-charcoal/55">
+            近 30 天发出 {sent} 次 · 第 {row.version} 版
+          </p>
+        </button>
+      </li>
+    )
+  }
+
+  if (editor.kind !== 'closed' && data) {
+    return (
+      <EditorShell>
+        <button
+          type="button"
+          onClick={closeEditor}
+          className="mb-3 text-sm text-me-charcoal underline"
+        >
+          ← 回到模板列表
+        </button>
+        <TemplateEditor
+          clientId={clientId}
+          initial={editor.kind === 'new' ? null : editor.initial}
+          prefill={editor.kind === 'prefill' ? editor.prefill : null}
+          variables={data.variables}
+          onSaved={onSaved}
+          onCancel={closeEditor}
+          onReload={onReload}
+          onRequestDeactivate={
+            editor.kind === 'edit' && editor.initial.status === 'active'
+              ? () => void toggleStatus(editor.initial, '停用')
+              : undefined
+          }
+        />
+      </EditorShell>
+    )
+  }
 
   return (
-    <div data-testid="templates-admin" className="mt-4">
+    <div data-testid="templates-admin" className="mt-2">
       {banner !== null && (
         <p className="mb-3 rounded-lg border border-me-stone/60 bg-me-stone/20 px-3 py-2 text-xs text-me-charcoal/70">
           {banner}
@@ -344,35 +367,21 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
         <p className="mb-3 text-xs font-semibold text-green-700">✓ 已保存为第 {savedVersion} 版</p>
       )}
 
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-black text-me-charcoal">邮件模板</h3>
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+        <TemplatesSummary activeCount={activeCount} data={data} stats={data?.stats ?? []} />
         {canEdit && (
           <button
             type="button"
             onClick={() => setEditor({ kind: 'new' })}
-            className="rounded-lg bg-me-charcoal px-3 py-1.5 text-xs font-bold text-white"
+            className="rounded-xl border border-dashed border-me-charcoal/30 px-4 py-2 text-xs font-bold text-me-charcoal"
           >
-            新建模板
+            + 新建模板
           </button>
         )}
       </div>
 
       {data && !canEdit && (
         <p className="mb-3 text-xs text-me-charcoal/55">你可以看模板，修改要找 Magic Lab 的同事。</p>
-      )}
-
-      {editor.kind !== 'closed' && data && (
-        <div className="mb-4">
-          <TemplateEditor
-            clientId={clientId}
-            initial={editor.kind === 'new' ? null : editor.initial}
-            prefill={editor.kind === 'prefill' ? editor.prefill : null}
-            variables={data.variables}
-            onSaved={onSaved}
-            onCancel={closeEditor}
-            onReload={onReload}
-          />
-        </div>
       )}
 
       {loading && <p className="text-xs text-me-charcoal/60">加载中…</p>}
@@ -390,136 +399,90 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
         </div>
       )}
 
-      {!loading && readError === null && data && sorted.length === 0 && (
+      {!loading && readError === null && data && data.templates.length === 0 && (
         <p className="text-xs text-me-charcoal/60">还没有模板。</p>
       )}
 
-      {!loading && readError === null && data && sorted.length > 0 && (
-        <ul className="space-y-2">
-          {sorted.map((row) => {
-            const s = statsFor(data.stats, row.templateKey)
-            const isOpen = expanded[row.templateKey] === true
-            const hist = history[row.templateKey]
-            const err = rowError[row.templateKey]
-            return (
-              <li
-                key={row.templateKey}
-                className="rounded-xl border border-me-charcoal/10 bg-me-ivory/40 p-3"
-              >
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                  <span className="text-sm font-bold text-me-charcoal">{row.name}</span>
-                  <span className="text-[11px] text-me-charcoal/50">{row.templateKey}</span>
-                  <StatusBadge status={row.status} />
-                  <span className="text-[11px] text-me-charcoal/60">第 {row.version} 版</span>
-                  <span className="text-[11px] text-me-charcoal/60">{formatNz(row.createdAt)}</span>
-                </div>
-                <p className="mt-1 text-[11px] text-me-charcoal/60">
-                  近 30 天：发出 {s.sent} · 被拦 {s.blocked} · 出错 {s.failed} · 不明 {s.unknown}
-                </p>
-
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setExpanded((prev) => ({ ...prev, [row.templateKey]: !isOpen }))
-                    }
-                    className="rounded-lg border border-me-stone bg-white px-2 py-1 text-[11px] font-bold text-me-charcoal"
-                  >
-                    {isOpen ? '收起内容' : '看内容'}
-                  </button>
-                  {canEdit && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setEditor({ kind: 'edit', initial: row })}
-                        className="rounded-lg border border-me-stone bg-white px-2 py-1 text-[11px] font-bold text-me-charcoal"
-                      >
-                        编辑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void toggleStatus(row)}
-                        disabled={busyKey !== null}
-                        className="rounded-lg border border-me-stone bg-white px-2 py-1 text-[11px] font-bold text-me-charcoal disabled:opacity-40"
-                      >
-                        {busyKey === row.templateKey
-                          ? '保存中…'
-                          : row.status === 'active'
-                            ? '停用'
-                            : '启用'}
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => toggleHistory(row.templateKey)}
-                    className="rounded-lg border border-me-stone bg-white px-2 py-1 text-[11px] font-bold text-me-charcoal"
-                  >
-                    {hist && hist !== 'loading' && hist !== 'error' ? '收起历史' : '历史'}
-                  </button>
-                </div>
-
-                {err && (
-                  <p className="mt-2 text-xs font-semibold text-red-700" role="alert">
-                    {err}
-                  </p>
-                )}
-
-                {isOpen && (
-                  <div className="mt-2 rounded-lg border border-me-stone/60 bg-white p-2">
-                    <p className="text-[11px] font-bold text-me-charcoal/70">主题</p>
-                    <pre className="whitespace-pre-wrap text-xs text-me-charcoal">{row.subject}</pre>
-                    <p className="mt-2 text-[11px] font-bold text-me-charcoal/70">正文</p>
-                    <pre className="whitespace-pre-wrap text-xs text-me-charcoal">{row.body}</pre>
-                  </div>
-                )}
-
-                {hist === 'loading' && (
-                  <p className="mt-2 text-xs text-me-charcoal/60">加载历史中…</p>
-                )}
-                {hist === 'error' && (
-                  <div className="mt-2 text-xs text-red-800">
-                    <p>暂时读不到历史。</p>
-                    <button
-                      type="button"
-                      onClick={() => void loadHistory(row.templateKey)}
-                      className="mt-1 rounded-lg border border-red-300 bg-white px-2 py-1 text-[11px] font-bold text-red-800"
-                    >
-                      重试
-                    </button>
-                  </div>
-                )}
-                {hist && hist !== 'loading' && hist !== 'error' && (
-                  <ul className="mt-2 space-y-1 border-t border-me-stone/60 pt-2">
-                    {hist.history.map((v) => (
-                      <li key={v.id} className="text-[11px] text-me-charcoal/70">
-                        <div className="flex flex-wrap items-baseline gap-x-2">
-                          <span className="font-bold">第 {v.version} 版</span>
-                          <span>{formatNzFull(v.createdAt)}</span>
-                          <span>{v.createdBy}</span>
-                          <span>{v.changeNote ?? '—'}</span>
-                          <span>{v.status === 'active' ? '启用' : '停用'}</span>
-                        </div>
-                        {canEdit && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setEditor({ kind: 'prefill', initial: row, prefill: v })
-                            }
-                            className="mt-1 rounded-lg border border-me-stone bg-white px-2 py-0.5 text-[11px] font-bold text-me-charcoal"
-                          >
-                            以这一版内容写新版本
-                          </button>
-                        )}
-                      </li>
-                    ))}
+      {!loading && readError === null && data && data.templates.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,340px)_1fr]">
+          <div className="space-y-4">
+            {grouped.manual.length > 0 && (
+              <section>
+                <h3 className="mb-2 text-xs font-bold text-me-charcoal/70">同事手动发（{grouped.manual.length}）</h3>
+                <ul className="space-y-2" role="list">
+                  {grouped.manual.map(renderListItem)}
+                </ul>
+              </section>
+            )}
+            {grouped.auto.length > 0 && (
+              <section>
+                <h3 className="mb-2 text-xs font-bold text-me-charcoal/70">系统自动发（{grouped.auto.length}）</h3>
+                <ul className="space-y-2" role="list">
+                  {grouped.auto.map(renderListItem)}
+                </ul>
+              </section>
+            )}
+            {grouped.disabled.length > 0 && (
+              <section>
+                <button
+                  type="button"
+                  onClick={() => setShowDisabled((v) => !v)}
+                  className="text-xs font-bold text-me-charcoal/60 underline"
+                >
+                  {showDisabled ? '收起' : '展开'}停用的（{grouped.disabled.length}）
+                </button>
+                {showDisabled && (
+                  <ul className="mt-2 space-y-2" role="list">
+                    {grouped.disabled.map(renderListItem)}
                   </ul>
                 )}
-              </li>
-            )
-          })}
-        </ul>
+              </section>
+            )}
+          </div>
+          {selected && (
+            <TemplatePreviewPane
+              row={selected}
+              stats={data.stats}
+              canEdit={canEdit}
+              busy={busyKey === selected.templateKey}
+              rowError={rowError[selected.templateKey]}
+              onEdit={() => setEditor({ kind: 'edit', initial: selected })}
+              onDeactivate={() => void toggleStatus(selected, '停用')}
+              onActivate={() => void toggleStatus(selected, '启用')}
+              history={selectedKey ? history[selectedKey] ?? null : null}
+              onToggleHistory={() => toggleHistory(selected.templateKey)}
+              onRetryHistory={() => void loadHistory(selected.templateKey)}
+              onPrefillVersion={
+                canEdit
+                  ? (v) => setEditor({ kind: 'prefill', initial: selected, prefill: v })
+                  : undefined
+              }
+            />
+          )}
+        </div>
       )}
+    </div>
+  )
+}
+
+function EditorShell({ children }: { children: ReactNode }): JSX.Element {
+  return <div className="mx-auto max-w-5xl">{children}</div>
+}
+
+function TemplatesSummary(props: {
+  activeCount: number
+  data: ListPayload | null
+  stats: ReceiptSummaryRow[]
+}): JSX.Element {
+  const { activeCount, data, stats } = props
+  const sent30 = stats.reduce((n, s) => (s.templateKey ? n + s.sent : n), 0)
+  return (
+    <div>
+      <p className="text-sm font-bold text-me-charcoal">
+        {activeCount} 个模板在用
+        {data ? ` · 近 30 天发出 ${sent30} 封` : ''}
+      </p>
+      <p className="text-xs text-me-charcoal/55">名字和数字是示例样式；以你账号读到的为准。</p>
     </div>
   )
 }
