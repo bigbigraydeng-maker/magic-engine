@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { normaliseReferralCode } from '@/lib/distributor/referral-code'
 import { NO_OWN_SALES_EXAMPLE, SIMULATION_EXAMPLES, formatDollars, simulateMonth } from '@/lib/distributor/simulate'
 import { DISTRIBUTOR_TERMS_VERSION } from '@/lib/distributor/terms'
@@ -6,9 +7,9 @@ import { ApplyForm } from './apply-form'
 import { PlanCards, RuleCards, SettlementCards } from './rules'
 import { Simulator } from './simulator'
 
-export const metadata: Metadata = { title: '申请成为经销商 · Magic Engine' }
+export const metadata: Metadata = { title: '加入 Magic Network · Magic Engine 经销商网络' }
 
-const CHIPS = ['加入免费', '只按真实付款分钱', '拉人本身没有奖励', '每月 1 日结算']
+const CHIPS = ['仅限邀请', '加入免费', '只按真实付款分钱', '拉人本身没有奖励', '每月 1 日结算']
 
 /** Worked examples, computed with the same engine as the monthly settlement. */
 function Examples() {
@@ -48,14 +49,20 @@ export default async function ApplyPage({ searchParams }: { searchParams: Promis
   return (
     <main className="min-h-screen bg-me-ivory px-4 py-8 md:py-16">
       <div className="mx-auto max-w-5xl">
-        <div className="text-[13px] font-bold tracking-[0.08em] text-me-ochre">MAGIC ENGINE 经销商计划</div>
+        <div className="text-[13px] font-bold tracking-[0.08em] text-me-ochre">MAGIC NETWORK · Magic Engine 经销商网络</div>
         <h1 className="mt-2 font-display text-[30px] font-bold leading-tight text-me-charcoal md:mt-3 md:text-[44px]">
           推荐 AI 数字人管家，<br className="hidden md:block" />
           按客户真实付款拿分润
         </h1>
         <p className="mt-3 max-w-3xl text-[15px] leading-relaxed text-me-charcoal/70 md:mt-4 md:text-lg">
-          帮身边的商家写视频脚本、生成视频、发布到社交媒体、拉回数据看效果。客户付费，你按实付金额拿分润。加入免费，不囤货，不保证收入——卖多少拿多少。
+          Magic Network 是 Magic Engine 旗下产品的经销商网络，第一个产品是 AI 数字人管家：帮商家写视频脚本、生成视频、发布到社交媒体、拉回数据看效果。客户付费，你按实付金额拿分润。加入免费，不囤货，不保证收入——卖多少拿多少。
         </p>
+        <Link
+          href={referralCode ? `/ai-steward?ref=${referralCode}` : '/ai-steward'}
+          className="mt-4 inline-block text-[15px] font-semibold text-me-ochre underline underline-offset-4"
+        >
+          先看看客户会看到的产品介绍 →
+        </Link>
         <div className="mt-5 flex flex-wrap gap-2">
           {CHIPS.map((c) => (
             <span key={c} className="rounded-full bg-me-ochre/12 px-3 py-1.5 text-[13px] font-semibold text-me-charcoal">

@@ -4,6 +4,6 @@
  * promise a rate the engine does not pay. Changing any of that wording means a new version: each
  * application stores the version the applicant actually saw.
  */
-export const DISTRIBUTOR_TERMS_VERSION = 'distributor-terms-2026-11-10b'
+export const DISTRIBUTOR_TERMS_VERSION = 'distributor-terms-2026-11-10c'
 
 export const PRIVACY_CONTACT_EMAIL = 'hello@magicengine.cloud'

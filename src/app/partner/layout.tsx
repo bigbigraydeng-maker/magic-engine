@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
 
 export const metadata: Metadata = {
-  title: '经销商后台 · Magic Engine',
+  title: 'Magic Network 经销商后台 · Magic Engine',
   robots: { index: false, follow: false },
 }
 

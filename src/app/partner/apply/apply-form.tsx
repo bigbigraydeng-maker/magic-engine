@@ -1,5 +1,6 @@
 'use client'
 import { useState, type FormEvent } from 'react'
+import Link from 'next/link'
 
 interface ApplyFormProps {
   termsVersion: string
@@ -22,6 +23,10 @@ export function ApplyForm({ termsVersion, initialReferralCode }: ApplyFormProps)
 
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    if (!referralCode.trim()) {
+      setError('目前仅限邀请加入，请填写介绍你的经销商给的邀请码')
+      return
+    }
     if (!accepted) {
       setError('请先阅读并勾选同意上面的经销商规则')
       return
@@ -67,7 +72,7 @@ export function ApplyForm({ termsVersion, initialReferralCode }: ApplyFormProps)
         <div className="px-6 py-8">
           <h2 className="text-base font-bold text-me-charcoal/90">申请已收到</h2>
           <p className="mt-3 text-sm text-me-charcoal/75">
-            谢谢！我们会逐份审核，审核后用你留的邮箱或电话联系你。审核通过后你会收到一条登录经销商后台的链接。
+            谢谢！我们会逐份审核，审核后用你留的邮箱或电话联系你。审核通过后你会收到一条登录 Magic Network 经销商后台的链接。
           </p>
         </div>
       </div>
@@ -82,6 +87,27 @@ export function ApplyForm({ termsVersion, initialReferralCode }: ApplyFormProps)
         </div>
         <div className="px-6 py-5">
           <form onSubmit={submit} noValidate className="relative space-y-4">
+            {initialReferralCode ? null : (
+              <p className="rounded-xl bg-me-ochre/12 px-4 py-3 text-sm leading-relaxed text-me-charcoal/80">
+                目前仅限邀请加入。请向介绍你的经销商要一个 8 位邀请码；没有人介绍的话，可以先
+                <Link href="/contact" className="mx-1 font-semibold text-me-ochre underline underline-offset-4">联系我们</Link>。
+              </p>
+            )}
+            <div>
+              <label className="block text-sm font-medium text-me-charcoal/80">
+                邀请码 *（介绍你的经销商给的 8 位码）
+                <input
+                  type="text"
+                  className={`mt-1 uppercase ${inputClass}`}
+                  maxLength={12}
+                  required
+                  autoCapitalize="characters"
+                  value={referralCode}
+                  onChange={(e) => setReferralCode(e.target.value)}
+                />
+              </label>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-me-charcoal/80">
                 名字 *
@@ -142,19 +168,6 @@ export function ApplyForm({ termsVersion, initialReferralCode }: ApplyFormProps)
 
             <div>
               <label className="block text-sm font-medium text-me-charcoal/80">
-                推荐码（介绍你的人给的 8 位码，没有就留空）
-                <input
-                  type="text"
-                  className={`mt-1 uppercase ${inputClass}`}
-                  maxLength={12}
-                  value={referralCode}
-                  onChange={(e) => setReferralCode(e.target.value)}
-                />
-              </label>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-me-charcoal/80">
                 想跟我们说的话（你现在做什么、打算怎么推荐给客户）
                 <textarea
                   className={`mt-1 ${inputClass}`}
@@ -191,7 +204,7 @@ export function ApplyForm({ termsVersion, initialReferralCode }: ApplyFormProps)
 
             <button
               type="submit"
-              disabled={status === 'sending' || !accepted}
+              disabled={status === 'sending' || !accepted || !referralCode.trim()}
               className="rounded-lg bg-me-ochre px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
             >
               {status === 'sending' ? '提交中…' : '提交申请'}
