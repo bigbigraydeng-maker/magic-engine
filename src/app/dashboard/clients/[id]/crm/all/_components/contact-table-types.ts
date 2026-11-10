@@ -47,6 +47,10 @@ export interface ContactRow {
   handled?: boolean
   /** 已处理时的一句人话（例如「今天联系过了，他还没回」）。 */
   handledWhy?: string | null
+  /** 「AI 跟进中」：发了目录、系统在跟（lib/crm/ai-takeover）。缺省 = 不在接管中。 */
+  aiTakeover?: boolean
+  /** 接管期间客人回来了（回信 / 填表 / 来电 / 私信）—— 名字旁标「客人回来了」。 */
+  customerCameBack?: boolean
   /** AI 对这位客人的摘要；分段列表「该做什么」列有就显示它，没有就显示规则那句。 */
   aiSummary?: string | null
   /** 最新一张 AI 摘要的意向；null = 没有摘要。 */
