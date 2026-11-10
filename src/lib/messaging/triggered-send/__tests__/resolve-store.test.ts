@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { createQueryStub, type RecordedCall } from '@/lib/crm/email-templates/__tests__/query-stub'
-import { readRecentSends, RECENT_SENDS_LIMIT } from '../recent-sends'
+import { createQueryStub, ok, type RecordedCall } from '@/lib/crm/email-templates/__tests__/query-stub'
+import { createReceiptStore } from '../receipt-store-prod'
+import { readRecentSends, RECENT_SENDS_LIMIT, UNKNOWN_SENDS_LIMIT } from '../recent-sends'
 import { createResolveDeps } from '../resolve-store'
 import type { ResolvableRow } from '../resolve-unknown'
 import { WELCOME_NOT_SENT_TIMELINE_LINE } from '../send-touchpoint'
@@ -56,6 +57,15 @@ describe('resolve_unknown — the database side', () => {
     expect(await createResolveDeps(refused.db).write(ROW, patch)).toEqual({ ok: false, error: 'ledger update: P0001' })
   })
 
+  it('says whether the letter has its own timeline line (by send id); a failed read is "cannot tell"', async () => {
+    const one = createQueryStub({ contact_touchpoints: { data: [{ id: 't1' }], error: null } })
+    expect(await createResolveDeps(one.db).timelinePresent(CLIENT, SEND)).toBe(true)
+    const q = one.of('contact_touchpoints')
+    expect(has(q, 'eq', 'source', 'me_send') && has(q, 'eq', 'source_ref', SEND) && has(q, 'eq', 'client_id', CLIENT)).toBe(true)
+    expect(await createResolveDeps(createQueryStub({ contact_touchpoints: { data: [], error: null } }).db).timelinePresent(CLIENT, SEND)).toBe(false)
+    expect(await createResolveDeps(createQueryStub({ contact_touchpoints: { data: null, error: { message: 'x' } } }).db).timelinePresent(CLIENT, SEND)).toBeNull()
+  })
+
   it('「没发出」 rewrites the letter’s own timeline line (by send id) as cancelled', async () => {
     const stub = createQueryStub({ contact_touchpoints: { data: [{ id: 't1' }], error: null } })
     expect(await createResolveDeps(stub.db).cancelTimeline(CLIENT, SEND)).toEqual({ ok: true, updated: 1 })
@@ -88,7 +98,7 @@ describe('「最近发送」 — the latest live letters', () => {
 
   it('🔴 reads only this client’s REAL welcome rows (never the rehearsal’s), newest activity first, at most the page’s limit', async () => {
     const stub = createQueryStub({ triggered_sends: { data: [], error: null } })
-    expect(await readRecentSends(stub.db, CLIENT)).toEqual({ ok: true, rows: [] })
+    expect(await readRecentSends(stub.db, CLIENT)).toEqual({ ok: true, rows: [], unknownCount: 0, unknownMore: false })
     const q = stub.of('triggered_sends')
     for (const f of [['client_id', CLIENT], ['trigger_key', 'welcome'], ['channel', 'email'], ['dedupe_scope', 'lifetime']]) expect(has(q, 'eq', ...f), String(f)).toBe(true)
     expect(has(q, 'order', 'updated_at', { ascending: false })).toBe(true)
@@ -112,5 +122,38 @@ describe('「最近发送」 — the latest live letters', () => {
     expect(await readRecentSends(down.db, CLIENT)).toEqual({ ok: false, error: 'recent sends: 08006' })
     const odd = createQueryStub({ triggered_sends: { data: { nope: true }, error: null } })
     expect(await readRecentSends(odd.db, CLIENT)).toMatchObject({ ok: false })
+    // Either of the two reads failing fails the whole list.
+    const isUnknownQuery = (query: readonly RecordedCall[]) => query.some((c) => c.method === 'eq' && c.args[0] === 'status')
+    const recentDown = createQueryStub({ triggered_sends: (query) => (isUnknownQuery(query) ? ok([]) : { data: null, error: { code: '57014', message: 'x' } }) })
+    expect(await readRecentSends(recentDown.db, CLIENT)).toEqual({ ok: false, error: 'recent sends: 57014' })
+  })
+
+  it('🔴 every letter whose outcome is unknown comes first and is counted, however much newer activity there is', async () => {
+    const unknown = [{ ...LIVE, id: 'u1', status: 'unknown_outcome', reason_code: 'expired_20h', annotations: {} }, { ...LIVE, id: 'u2', status: 'unknown_outcome', reason_code: 'expired_20h', annotations: {} }]
+    const recent = Array.from({ length: RECENT_SENDS_LIMIT }, (_, i) => ({ ...LIVE, id: `b${i}`, status: 'blocked', reason_code: 'lock_busy', annotations: {} }))
+    recent[3] = unknown[1] // one unknown is also among the latest: listed once
+    const isUnknownQuery = (query: readonly RecordedCall[]) => query.some((c) => c.method === 'eq' && c.args[0] === 'status' && c.args[1] === 'unknown_outcome')
+    const stub = createQueryStub({ triggered_sends: (query) => ok(isUnknownQuery(query) ? unknown : recent) })
+    const read = await readRecentSends(stub.db, CLIENT)
+    expect(read.ok && read.rows.slice(0, 2).map((r) => r.id)).toEqual(['u1', 'u2'])
+    expect(read.ok && read.rows.length).toBe(2 + RECENT_SENDS_LIMIT - 1)
+    expect(read).toMatchObject({ ok: true, unknownCount: 2, unknownMore: false })
+    const unknownQuery = stub.calls.filter((c) => c.method === 'limit').map((c) => c.args[0])
+    expect(unknownQuery).toEqual([UNKNOWN_SENDS_LIMIT, RECENT_SENDS_LIMIT])
+    const full = Array.from({ length: UNKNOWN_SENDS_LIMIT }, (_, i) => ({ ...LIVE, id: `u${i}`, status: 'unknown_outcome', annotations: {} }))
+    const many = createQueryStub({ triggered_sends: (query) => ok(isUnknownQuery(query) ? full : []) })
+    expect(await readRecentSends(many.db, CLIENT)).toMatchObject({ ok: true, unknownCount: UNKNOWN_SENDS_LIMIT, unknownMore: true })
+  })
+})
+
+describe('the receipt side still reports receipts to the address of a letter a person settled', () => {
+  it('🔴 a person’s 「已发出」 (no message id) is looked up like a 「没发出」, so an untagged receipt is reported, not dropped', async () => {
+    const stub = createQueryStub({ triggered_sends: { data: [], error: null } })
+    await createReceiptStore(stub.db).findUnboundByAddress(['a'.repeat(64)], '2026-11-01T00:00:00.000Z')
+    const filter = String(stub.of('triggered_sends').find((c) => c.method === 'or')?.args[0])
+    expect(filter).toContain('status.in.(pending,unknown_outcome)')
+    expect(filter).toContain('and(status.eq.failed,reason_code.eq.not_sent_confirmed)')
+    expect(filter).toContain('and(status.eq.sent,reason_code.eq.sent_confirmed)')
+    expect(has(stub.of('triggered_sends'), 'is', 'provider_message_id', null)).toBe(true)
   })
 })

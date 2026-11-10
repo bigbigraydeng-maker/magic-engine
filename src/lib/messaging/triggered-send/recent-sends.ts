@@ -1,16 +1,19 @@
 /**
- * The PM page's 「最近发送」: the latest live ledger rows of one client's welcome letter (real sending only; the
- * rehearsal's shadow rows never show here), newest activity first: what happened to each letter and why, when, whether
- * the provider took it, and how a person settled it. No address, no subject line, no body: the guest is a contact id
- * (the page links to the CRM). Read-only.
- * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §17.4 (之二乙).
+ * The PM page's 「最近发送」: the live ledger rows of one client's welcome letter (real sending only; the rehearsal's
+ * shadow rows never show here): EVERY letter whose outcome is unknown first (the page is the only place a person settles
+ * them, so newer activity must not push one off the page; counted here, not on the page), then the latest others, newest
+ * activity first: what happened to each letter and why, when, whether the provider took it, and how a person settled
+ * it. No guest address, no subject line, no body: the guest is a contact id (the page links to the CRM). Read-only.
+ * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §17.4, §17.7 (之二乙).
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { resolutionOf, type Resolution } from './resolve-unknown'
 
-/** How many rows the page shows; it says so under the list. */
+/** How many of the other rows the page shows; it says so under the list. */
 export const RECENT_SENDS_LIMIT = 20
+/** Unknown outcomes shown at most; more than this = the page says there are more (a person must look in the ledger). */
+export const UNKNOWN_SENDS_LIMIT = 200
 
 const COLUMNS =
   'id, contact_id, status, reason_code, last_block_reason, bounce_kind, provider_impact, attempts, first_attempt_at, sent_at, last_event_type, last_event_at, created_at, updated_at, annotations'
@@ -52,7 +55,9 @@ export interface RecentSend {
   resolution: Pick<Resolution, 'outcome' | 'by' | 'at'> | null
 }
 
-export type RecentSendsRead = { ok: true; rows: RecentSend[] } | { ok: false; error: string }
+export type RecentSendsRead =
+  | { ok: true; rows: RecentSend[]; unknownCount: number; unknownMore: boolean }
+  | { ok: false; error: string }
 
 function codeOf(error: { code?: unknown }): string {
   return typeof error.code === 'string' && /^[A-Za-z0-9_]{1,16}$/.test(error.code) ? error.code : 'error'
@@ -79,20 +84,22 @@ function toView(r: DbRow): RecentSend {
   }
 }
 
+/** This client's live welcome-letter rows (never the rehearsal's). */
+function liveRows(db: SupabaseClient, clientId: string) {
+  return db.from('triggered_sends').select(COLUMNS).eq('client_id', clientId).eq('trigger_key', 'welcome').eq('channel', 'email').eq('dedupe_scope', 'lifetime')
+}
+
 export async function readRecentSends(db: SupabaseClient, clientId: string, limit: number = RECENT_SENDS_LIMIT): Promise<RecentSendsRead> {
   try {
-    const { data, error } = await db
-      .from('triggered_sends')
-      .select(COLUMNS)
-      .eq('client_id', clientId)
-      .eq('trigger_key', 'welcome')
-      .eq('channel', 'email')
-      .eq('dedupe_scope', 'lifetime')
-      .order('updated_at', { ascending: false })
-      .limit(limit)
-    if (error) return { ok: false, error: `recent sends: ${codeOf(error)}` }
-    if (!Array.isArray(data)) return { ok: false, error: 'recent sends: no rows array' }
-    return { ok: true, rows: (data as DbRow[]).map(toView) }
+    const unknown = await liveRows(db, clientId).eq('status', 'unknown_outcome').order('first_attempt_at', { ascending: true }).limit(UNKNOWN_SENDS_LIMIT)
+    if (unknown.error) return { ok: false, error: `recent sends: ${codeOf(unknown.error)}` }
+    const recent = await liveRows(db, clientId).order('updated_at', { ascending: false }).limit(limit)
+    if (recent.error) return { ok: false, error: `recent sends: ${codeOf(recent.error)}` }
+    if (!Array.isArray(unknown.data) || !Array.isArray(recent.data)) return { ok: false, error: 'recent sends: no rows array' }
+    const pinned = (unknown.data as DbRow[]).map(toView)
+    const shown = new Set(pinned.map((r) => r.id))
+    const others = (recent.data as DbRow[]).filter((r) => !shown.has(r.id)).map(toView)
+    return { ok: true, rows: [...pinned, ...others], unknownCount: pinned.length, unknownMore: pinned.length >= UNKNOWN_SENDS_LIMIT }
   } catch {
     return { ok: false, error: 'recent sends: read threw' }
   }

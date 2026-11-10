@@ -20,6 +20,7 @@ import { RevokeButton } from './RevokeButton'
 import {
   errorText,
   FORMAL_PROPOSAL_NOTE,
+  FORMAL_PROPOSAL_REPLACES_NOTE,
   nzTime,
   problemText,
   stateText,
@@ -81,7 +82,9 @@ function AuthorizationSection({ clientId, auth, formalProposalOpen, onDone }: Au
         {auth.trial && <MePill tone="sched">试跑</MePill>}
       </div>
       <p className="mb-2 text-xs text-me-charcoal/60">
-        {r.authorized_by_email ?? '—'} 在 {nzTime(r.authorized_at)} 批准；{nzTime(r.live_from)} 之后进来的新客人才会收到；有效到 {nzTime(r.expires_at)}。
+        {r.authorized_by_email ?? '—'} 在 {nzTime(r.authorized_at)} 批准；
+        {auth.state === 'formal_sending_not_enabled' ? '这一版不发；' : `${nzTime(r.live_from)} 之后进来的新客人才会收到；`}
+        有效到 {nzTime(r.expires_at)}。
       </p>
       <Summary lines={auth.summary} />
       {auth.trial && !formalProposalOpen && <p className="mt-2 text-sm text-me-charcoal/80" data-testid="trial-followup">{TRIAL_FOLLOWUP_NOTE}</p>}
@@ -115,7 +118,11 @@ function ProposalSection(props: ProposalProps): JSX.Element {
   return (
     <Section title="③ 待批的提案" testId="proposal">
       <p className="mb-2 text-xs text-me-charcoal/60">{r.proposed_by_email} 在 {nzTime(r.proposed_at)} 提交。提案不是授权，提交了也不会发信。</p>
-      {!proposal.trial && <p className="mb-2 text-sm font-semibold text-[#9A6B12]" data-testid="formal-proposal-note">{FORMAL_PROPOSAL_NOTE}</p>}
+      {!proposal.trial && (
+        <p className="mb-2 text-sm font-semibold text-[#9A6B12]" data-testid="formal-proposal-note">
+          {FORMAL_PROPOSAL_NOTE}{props.replacing ? FORMAL_PROPOSAL_REPLACES_NOTE : ''}
+        </p>
+      )}
       <Summary lines={proposal.summary} />
       {proposal.template !== null && <Letter template={proposal.template} />}
       <div className="mt-3">
@@ -220,6 +227,8 @@ export function WelcomeLetterPanel({ clientId }: { clientId: string }): JSX.Elem
         clientId={clientId}
         rows={status.recent_sends ?? null}
         limit={status.recent_sends_limit ?? 20}
+        unknown={status.unknown_sends ?? null}
+        serverNow={status.server_now ?? null}
         canResolve={status.can_authorize === true}
         onDone={after}
       />

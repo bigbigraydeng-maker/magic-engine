@@ -34,6 +34,9 @@ const { templateContentSha256 } = await load('lib/messaging/triggered-send/welco
 const { getCurrentTemplate } = await load('lib/crm/email-templates/template-store.ts')
 const { readEmailUnsubscribed } = await load('lib/crm/email-unsubscribe.ts')
 const { readAddressHistory } = await load('lib/messaging/triggered-send/shadow-ports-prod.ts')
+const { readResendReceipt } = await load('lib/messaging/provider-events/resend-receipt.ts')
+const { identifyLetter, applyReceipt } = await load('lib/messaging/triggered-send/receipt-consumer.ts')
+const { createReceiptStore } = await load('lib/messaging/triggered-send/receipt-store-prod.ts')
 
 let passed = 0
 const failures: string[] = []
@@ -169,6 +172,12 @@ async function unknownLetter(clientId: string, email: string): Promise<{ guest: 
   return { guest, row }
 }
 
+/** One provider receipt through the REAL consumer (identify the letter, match it, write it), as the receipt workflow does. */
+async function receipt(eventType: string, messageId: string, data: Record<string, unknown>) {
+  const stored = { eventType, providerMessageId: messageId, occurredAt: new Date().toISOString(), payload: { type: eventType, data: { email_id: messageId, ...data } } }
+  return applyReceipt(identifyLetter(readResendReceipt(stored), (name: string) => ENV[name]), createReceiptStore(supabaseAdmin), { lastTry: true, now: new Date() })
+}
+
 async function timeline(clientId: string, sendId: string) {
   const { data } = await supabaseAdmin.from('contact_touchpoints').select('summary, metadata').eq('client_id', clientId).eq('source', 'me_send').eq('source_ref', sendId)
   return (data ?? []) as Array<Record<string, any>>
@@ -184,7 +193,7 @@ async function timeline(clientId: string, sendId: string) {
   check('R1b the page also says the site address the unsubscribe link needs is set', status.prerequisites?.app_url === true, status.prerequisites)
   const preview = await resolve(clientId, { send_id: row.id, outcome: 'not_sent', seen_updated_at: shown?.updated_at })
   const still = await liveRow(clientId, guest)
-  check('R1c a preview writes nothing', preview.status === 200 && preview.body.mode === 'PREVIEW' && still?.status === 'unknown_outcome' && still?.updated_at === row.updated_at, preview.body)
+  check('R1c a preview writes nothing, and says the letter has its timeline line', preview.status === 200 && preview.body.mode === 'PREVIEW' && preview.body.timeline_present === true && still?.status === 'unknown_outcome' && still?.updated_at === row.updated_at, preview.body)
   const done = await resolve(clientId, { send_id: row.id, outcome: 'not_sent', seen_updated_at: shown?.updated_at, confirm: true })
   const after = await liveRow(clientId, guest)
   check('R1d confirmed: failed + not_sent_confirmed, who / when / request id kept on the row', done.body.mode === 'RESOLVED' && after?.status === 'failed' && after?.reason_code === 'not_sent_confirmed' && after?.annotations?.resolution?.outcome === 'not_sent' && after?.annotations?.resolution?.by === PM.email && typeof after?.annotations?.resolution?.request_id === 'string', { done: done.body, after })
@@ -200,8 +209,14 @@ async function timeline(clientId: string, sendId: string) {
   const twice = await resolve(clientId, { send_id: row.id, outcome: 'not_sent', seen_updated_at: shown?.updated_at, confirm: true })
   const flip = await resolve(clientId, { send_id: row.id, outcome: 'sent', seen_updated_at: shown?.updated_at, confirm: true })
   check('R1h the same answer again is harmless; the other answer is refused (no flipping)', twice.body.mode === 'ALREADY_RESOLVED' && flip.status === 409 && flip.body.error === 'ALREADY_RESOLVED' && (await liveRow(clientId, guest))?.status === 'failed', { twice: twice.body, flip: flip.body })
-  const late = await supabaseAdmin.from('triggered_sends').update({ status: 'delivered', last_event_type: 'email.delivered', last_event_at: new Date().toISOString() }).eq('id', row.id)
-  check('R1i a late real receipt may still overwrite 「没发出」 (the table allows that one way back)', late.error === null && (await liveRow(clientId, guest))?.status === 'delivered', late.error)
+  // A late real receipt, named by the letter's own tag, through the real consumer.
+  const late = await receipt('email.delivered', `e2e-msg-late-${crypto.randomUUID()}`, { to: ['r1@example.test'], tags: { triggered_send_id: row.id } })
+  const overwritten = await liveRow(clientId, guest)
+  check('R1i a late real receipt still moves 「没发出」 on (the one way back the table allows)', late.outcome === 'applied' && overwritten?.status === 'delivered' && overwritten?.reason_code === 'not_sent_confirmed', { late, status: overwritten?.status })
+  const page = (await statusQuery(statusDeps(), clientId, { canAuthorize: true })).body as Record<string, any>
+  const flagged = (page.recent_sends ?? []).find((s: Record<string, any>) => s.id === row.id)
+  const lineAfter = await timeline(clientId, row.id)
+  check('R1j the page gets what it needs to flag it (delivered + not_sent_confirmed); the timeline line is NOT changed back (之三 restores it)', flagged?.status === 'delivered' && flagged?.reason_code === 'not_sent_confirmed' && lineAfter[0]?.metadata?.send_state === 'cancelled', { flagged, lineAfter })
 }
 
 // ── R2. the PM settles an unclear letter as 「已发出」 ──
@@ -210,12 +225,17 @@ async function timeline(clientId: string, sendId: string) {
   const { guest, row } = await unknownLetter(clientId, 'r2@example.test')
   const done = await resolve(clientId, { send_id: row.id, outcome: 'sent', seen_updated_at: row.updated_at, confirm: true })
   const after = await liveRow(clientId, guest)
-  check('R2a confirmed: sent, provider accepted, sent at the first attempt (the right week for the cap)', done.body.mode === 'RESOLVED' && after?.status === 'sent' && after?.reason_code === 'sent_confirmed' && after?.provider_impact === 'PROVIDER_ACCEPTED' && Date.parse(after?.sent_at) === Date.parse(row.first_attempt_at), { done: done.body, after })
+  check('R2a confirmed: sent, provider accepted, NO sent time (the cap counts the latest moment it could have gone)', done.body.mode === 'RESOLVED' && after?.status === 'sent' && after?.reason_code === 'sent_confirmed' && after?.provider_impact === 'PROVIDER_ACCEPTED' && after?.sent_at === null, { done: done.body, after })
   const line = await timeline(clientId, row.id)
   check('R2b the timeline line is left as it was (the letter went)', done.body.timeline === 'unchanged' && line.length === 1 && line[0].metadata?.send_state === 'claimed', line)
   const before = sent.length
   const again = await sendOne({ plan: await planFor(clientId), contactId: guest, deps: sendDeps() })
   check('R2c no second letter', again.outcome === 'already_done' && sent.length === before, again)
+  const untagged = await receipt('email.complained', `e2e-msg-untagged-${crypto.randomUUID()}`, { to: ['r2@example.test'] })
+  check('R2d an untagged receipt to that address is reported for a person ("unmatched"), not dropped as "not ours"', untagged.outcome === 'unmatched' && untagged.sendId === row.id, untagged)
+  const filled = await receipt('email.delivered', `e2e-msg-real-${crypto.randomUUID()}`, { to: ['r2@example.test'], tags: { triggered_send_id: row.id }, created_at: '2026-11-10T08:00:00.000Z' })
+  const real = await liveRow(clientId, guest)
+  check('R2e a later tagged receipt fills in the real sent time', filled.outcome === 'applied' && real?.status === 'delivered' && Date.parse(real?.sent_at) === Date.parse('2026-11-10T08:00:00.000Z'), { filled, sent_at: real?.sent_at })
 }
 
 // ── R3. refusals, against the real ledger ──
@@ -249,6 +269,28 @@ async function timeline(clientId: string, sendId: string) {
   const status = (await statusQuery(statusDeps(), clientId, { canAuthorize: true })).body as Record<string, any>
   const ids = (status.recent_sends ?? []).map((s: Record<string, any>) => s.id)
   check('R3f 「最近发送」 never shows rehearsal rows; newest activity first', !ids.includes(shadowId) && ids.length === 2 && ids[0] === row.id, ids)
+}
+
+// ── R5. newer activity never pushes a letter waiting for a person off the page ──
+{
+  const { clientId, authId } = await newClient(['r5@example.test'])
+  const { row } = await unknownLetter(clientId, 'r5@example.test')
+  for (let i = 0; i < 21; i += 1) {
+    const other = await newGuest(clientId, `r5-${i}@example.test`)
+    const ins = await supabaseAdmin.from('triggered_sends').insert({ client_id: clientId, trigger_key: 'welcome', channel: 'email', contact_id: other, dedupe_scope: 'lifetime', status: 'blocked', reason_code: 'lock_busy', authorization_id: authId, annotations: {} })
+    if (ins.error) throw new Error(`seed blocked row failed: ${ins.error.code}`)
+  }
+  const page = (await statusQuery(statusDeps(), clientId, { canAuthorize: true })).body as Record<string, any>
+  check('R5 🔴 21 newer rows later, the unknown letter is still listed first and counted', page.recent_sends?.[0]?.id === row.id && page.unknown_sends?.count === 1 && page.unknown_sends?.more === false && page.recent_sends?.length === 21, { first: page.recent_sends?.[0]?.id, unknown: page.unknown_sends, n: page.recent_sends?.length })
+}
+
+// ── R6. a letter without a timeline line never reached the provider: the preview says so ──
+{
+  const { clientId } = await newClient(['r6@example.test'])
+  const { row } = await unknownLetter(clientId, 'r6@example.test')
+  const gone = await supabaseAdmin.from('contact_touchpoints').delete().eq('client_id', clientId).eq('source', 'me_send').eq('source_ref', row.id)
+  const preview = await resolve(clientId, { send_id: row.id, outcome: 'sent', seen_updated_at: row.updated_at })
+  check('R6 the preview of 「已发出」 says the letter has no timeline line', gone.error === null && preview.body.mode === 'PREVIEW' && preview.body.timeline_present === false, { preview: preview.body, gone: gone.error })
 }
 
 // ── R4. a client whose authorization in force is for the real list: the page says it sends nothing ──

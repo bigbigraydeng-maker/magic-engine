@@ -134,10 +134,17 @@ function prerequisitesFor(account: string, deps: CommandDeps): Record<string, un
   }
 }
 
-/** The page's 「最近发送」; a read that fails is `null` (the page says it could not read them), never an empty list. */
-async function recentSends(deps: StatusDeps, clientId: string): Promise<unknown[] | null> {
+/**
+ * The page's 「最近发送」 and how many letters wait for a person (counted here, over every unknown one); a read that
+ * fails is `null` for both (the page says it could not read them), never an empty list or a zero.
+ */
+async function recentSends(deps: StatusDeps, clientId: string): Promise<Record<string, unknown>> {
   const read = await deps.loadRecentSends(clientId).catch((): RecentSendsRead => ({ ok: false, error: 'threw' }))
-  return read.ok ? read.rows : null
+  return {
+    recent_sends: read.ok ? read.rows : null,
+    recent_sends_limit: RECENT_SENDS_LIMIT,
+    unknown_sends: read.ok ? { count: read.unknownCount, more: read.unknownMore } : null,
+  }
 }
 
 export async function statusQuery(deps: StatusDeps, clientId: string, viewer: { canAuthorize: boolean }): Promise<CommandResult> {
@@ -146,8 +153,7 @@ export async function statusQuery(deps: StatusDeps, clientId: string, viewer: { 
   const { proposal, authorized } = open.open
   const account = (proposal ?? authorized)?.account ?? null
   return done({
-    recent_sends: await recentSends(deps, clientId),
-    recent_sends_limit: RECENT_SENDS_LIMIT,
+    ...(await recentSends(deps, clientId)),
     can_manage: true,
     can_authorize: viewer.canAuthorize,
     server_now: deps.now().toISOString(),

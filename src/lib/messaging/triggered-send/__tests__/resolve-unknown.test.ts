@@ -28,30 +28,41 @@ interface Options {
   row?: ResolvableRow | null
   load?: 'fail'
   write?: CasWrite
-  /** What a second read (after a write that found the row moved on) answers. */
+  /** What every read after the first answers (a receipt or another tab moved the row on). */
   reread?: ResolvableRow
   cancel?: TouchpointCancel | 'throw'
+  timeline?: boolean | null | 'throw'
 }
 
+/** A ledger of one row: a write that goes through changes what the next read sees, like the real table. */
 function world(opts: Options = {}) {
   const writes: Array<{ row: ResolvableRow; patch: Record<string, unknown> }> = []
   const cancels: Array<{ clientId: string; sendId: string }> = []
+  let current: ResolvableRow | null = opts.row === undefined ? row() : opts.row
   let loads = 0
   const deps: ResolveDeps = {
     load: async () => {
       loads += 1
       if (opts.load === 'fail') return { ok: false, error: 'ledger read: 08006' }
       if (loads > 1 && opts.reread !== undefined) return { ok: true, row: opts.reread }
-      return { ok: true, row: opts.row === undefined ? row() : opts.row }
+      return { ok: true, row: current }
     },
     write: async (r, patch) => {
       writes.push({ row: r, patch })
-      return opts.write ?? { ok: true, result: 'updated' }
+      const result = opts.write ?? { ok: true, result: 'updated' }
+      if (result.ok && result.result === 'updated' && current !== null) {
+        current = { ...current, status: String(patch.status), reasonCode: (patch.reason_code as string | undefined) ?? current.reasonCode, annotations: patch.annotations as Record<string, unknown>, updatedAt: '2026-11-20T01:00:00.000001+00:00' }
+      }
+      return result
     },
     cancelTimeline: async (clientId, sendId) => {
       cancels.push({ clientId, sendId })
       if (opts.cancel === 'throw') throw new Error('db down')
       return opts.cancel ?? { ok: true, updated: 1 }
+    },
+    timelinePresent: async () => {
+      if (opts.timeline === 'throw') throw new Error('db down')
+      return opts.timeline === undefined ? true : opts.timeline
     },
     now: () => NOW,
     newRequestId: () => 'req-1',
@@ -70,10 +81,16 @@ describe('resolve_unknown — the PM settles a letter nobody could tell about', 
     for (const outcome of ['sent', 'not_sent'] as const) {
       const w = world()
       const res = await resolveUnknownCommand(w.deps, CLIENT, ACTOR, command({ outcome }))
-      expect(res).toMatchObject({ status: 200, body: { success: true, no_send: true, mode: 'PREVIEW', outcome, consequence: CONSEQUENCE[outcome], send: { id: SEND, status: 'unknown_outcome' } } })
+      expect(res).toMatchObject({ status: 200, body: { success: true, no_send: true, mode: 'PREVIEW', outcome, consequence: CONSEQUENCE[outcome], send: { id: SEND, status: 'unknown_outcome' }, timeline_present: true } })
       expect(w.writes).toEqual([])
       expect(w.cancels).toEqual([])
     }
+  })
+
+  it('the preview says when the letter has no timeline line at all (it never reached the provider); unknown when that read fails', async () => {
+    expect((await resolveUnknownCommand(world({ timeline: false }).deps, CLIENT, ACTOR, command({ outcome: 'sent' }))).body.timeline_present).toBe(false)
+    expect((await resolveUnknownCommand(world({ timeline: null }).deps, CLIENT, ACTOR, command())).body.timeline_present).toBeNull()
+    expect((await resolveUnknownCommand(world({ timeline: 'throw' }).deps, CLIENT, ACTOR, command())).body).toMatchObject({ mode: 'PREVIEW', timeline_present: null })
   })
 
   it('🔴 「没发出」 = failed + not_sent_confirmed (who, when, request id kept on the row) and the timeline line is cancelled', async () => {
@@ -89,16 +106,16 @@ describe('resolve_unknown — the PM settles a letter nobody could tell about', 
     expect(res).toMatchObject({ status: 200, body: { mode: 'RESOLVED', outcome: 'not_sent', consequence: 'NEVER_WELCOMED_AUTOMATICALLY_AGAIN', timeline: 'cancelled', resolution: RESOLUTION('not_sent') } })
   })
 
-  it('🔴 「已发出」 = sent, provider accepted, sent at the FIRST attempt (the right week for the cap); the timeline line stays', async () => {
+  it('🔴 「已发出」 = sent, provider accepted, NO sent time (the cap counts the latest moment it could have gone; a receipt fills it in); the timeline line stays', async () => {
     const w = world()
     const res = await resolveUnknownCommand(w.deps, CLIENT, ACTOR, command({ outcome: 'sent', confirm: true }))
     expect(w.writes[0].patch).toEqual({
       status: 'sent',
       reason_code: SENT_CONFIRMED,
       provider_impact: 'PROVIDER_ACCEPTED',
-      sent_at: FIRST_ATTEMPT,
       annotations: { gate_contract_version: 1, resolution: RESOLUTION('sent') },
     })
+    expect(w.writes[0].patch).not.toHaveProperty('sent_at')
     expect(w.cancels).toEqual([])
     expect(res.body).toMatchObject({ mode: 'RESOLVED', outcome: 'sent', timeline: 'unchanged' })
   })
@@ -128,6 +145,23 @@ describe('resolve_unknown — the PM settles a letter nobody could tell about', 
     const res = await resolveUnknownCommand(w.deps, CLIENT, ACTOR, command({ confirm: true }))
     expect(res).toMatchObject({ status: 409, body: { error: 'SEND_CHANGED', send: { status: 'delivered' } } })
     expect(w.cancels).toEqual([])
+  })
+
+  it('🔴 a receipt that moved the row on right AFTER 「没发出」 was written: the timeline line is left alone (the letter did go)', async () => {
+    const delivered = row({ status: 'delivered', reasonCode: NOT_SENT_CONFIRMED, annotations: { resolution: RESOLUTION('not_sent') } })
+    const w = world({ reread: delivered })
+    const res = await resolveUnknownCommand(w.deps, CLIENT, ACTOR, command({ confirm: true }))
+    expect(res).toMatchObject({ status: 200, body: { mode: 'RESOLVED', timeline: 'receipt_arrived' } })
+    expect(w.writes).toHaveLength(1)
+    expect(w.cancels).toEqual([])
+  })
+
+  it('another tab gave the same answer a moment earlier: that is this answer (not a conflict); a different answer meanwhile is a conflict', async () => {
+    const same = world({ write: { ok: true, result: 'changed' }, reread: row({ status: 'failed', reasonCode: NOT_SENT_CONFIRMED, annotations: { resolution: RESOLUTION('not_sent') } }) })
+    expect(await resolveUnknownCommand(same.deps, CLIENT, ACTOR, command({ confirm: true }))).toMatchObject({ status: 200, body: { mode: 'ALREADY_RESOLVED', timeline: 'unchanged' } })
+    expect(same.cancels).toEqual([])
+    const other = world({ write: { ok: true, result: 'changed' }, reread: row({ status: 'sent', reasonCode: SENT_CONFIRMED, annotations: { resolution: RESOLUTION('sent') } }) })
+    expect(await resolveUnknownCommand(other.deps, CLIENT, ACTOR, command({ confirm: true }))).toMatchObject({ status: 409, body: { error: 'SEND_CHANGED', send: { status: 'sent' } } })
   })
 
   it('a letter of another client, or none, is "not found"; nothing written', async () => {

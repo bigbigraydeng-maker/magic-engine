@@ -149,16 +149,16 @@ describe('status — the PM page', () => {
     expect(await appUrl('https://app.example.com')).toBe(true)
   })
 
-  it('🔴 shows the latest live letters as read; a failed read is null (the page says so), never an empty list', async () => {
+  it('🔴 shows the live letters as read and how many wait for a person; a failed read is null (the page says so), never an empty list or zero', async () => {
     const rows = [{ id: 's1', status: 'unknown_outcome' }, { id: 's2', status: 'delivered' }]
-    w.set.recentSends({ ok: true, rows: rows as never })
-    expect((await statusQuery(w.statusDeps, CLIENT, ADMIN)).body).toMatchObject({ recent_sends: rows, recent_sends_limit: 20 })
+    w.set.recentSends({ ok: true, rows: rows as never, unknownCount: 1, unknownMore: false })
+    expect((await statusQuery(w.statusDeps, CLIENT, ADMIN)).body).toMatchObject({ recent_sends: rows, recent_sends_limit: 20, unknown_sends: { count: 1, more: false } })
     w.set.recentSends({ ok: false, error: 'recent sends: 08006' })
-    expect((await statusQuery(w.statusDeps, CLIENT, ADMIN)).body.recent_sends).toBeNull()
+    expect((await statusQuery(w.statusDeps, CLIENT, ADMIN)).body).toMatchObject({ recent_sends: null, unknown_sends: null })
     w.set.recentSends('throw')
     const res = await statusQuery(w.statusDeps, CLIENT, ADMIN)
     expect(res.status).toBe(200)
-    expect(res.body.recent_sends).toBeNull()
+    expect(res.body).toMatchObject({ recent_sends: null, unknown_sends: null })
   })
 
   it('a failed read of the table is a 500, never "nothing proposed"', async () => {

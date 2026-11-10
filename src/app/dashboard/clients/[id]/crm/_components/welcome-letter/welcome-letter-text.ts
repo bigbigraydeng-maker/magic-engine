@@ -127,9 +127,11 @@ export interface StatusPayload {
   proposal?: ProposalView | null
   authorization?: AuthorizationView | null
   prerequisites?: { account: string; account_key: boolean; unsubscribe_secret: boolean; events: boolean; trial_domains: boolean; approvers?: boolean; app_url?: boolean } | null
-  /** null = 读不到（页面要说读不到，不能当成「没发过」）。 */
+  /** null = 读不到（页面要说读不到，不能当成「没发过」）。结果不明的信全部排在最前面。 */
   recent_sends?: RecentSendView[] | null
   recent_sends_limit?: number
+  /** 结果不明、等人标的信有几封（服务端数的，不受 20 封的限制）；more = 太多，页面只列出前一部分。 */
+  unknown_sends?: { count: number; more: boolean } | null
 }
 
 const STATE_TEXT: Readonly<Record<string, string>> = {
@@ -252,8 +254,10 @@ export function revokeErrorText(body: (Answer & { current_authorization?: unknow
 export const TRIAL_ONLY_NOTE = '这一版只发内部邮箱的试跑：正式名单的授权批了也一封都不发。'
 
 /** 正式名单的提案下面那一句。 */
-export const FORMAL_PROPOSAL_NOTE =
-  '这是正式名单的提案。这一版只发内部邮箱的试跑：正式名单就算批了也一封都不发；而且批了会替换掉正在跑的试跑授权，试跑也就停了。'
+export const FORMAL_PROPOSAL_NOTE = '这是正式名单的提案。这一版只发内部邮箱的试跑：正式名单就算批了也一封都不发。'
+
+/** 现在已经有一份授权在生效时，正式提案下面多说的一句。 */
+export const FORMAL_PROPOSAL_REPLACES_NOTE = '而且批了会替换掉现在生效的那份授权：试跑也就停了。'
 
 /** 试跑授权生效、又没有正式提案放着时的提醒（彩排按最新一份没撤销的规则来比）。 */
 export const TRIAL_FOLLOWUP_NOTE =
@@ -329,7 +333,7 @@ const SEND_REASON_TEXT: Readonly<Record<string, string>> = {
 }
 
 const PROVIDER_IMPACT_TEXT: Readonly<Record<string, string>> = {
-  NONE: '还没交给发信服务',
+  NONE: '发信服务没有接收',
   PROVIDER_ACCEPTED: '发信服务已接收',
   PROVIDER_UNKNOWN: '交没交给发信服务，不确定',
 }
@@ -357,8 +361,18 @@ export const RESOLVE_HOW_TO_CHECK = '怎么核对：点「看客人」查到他�
 export const RESOLVE_CONSEQUENCE_TEXT: Readonly<Record<'sent' | 'not_sent', string>> = {
   sent: '按「已经发出」记：算进这位客人这 7 天收到的封数，系统不会再给他发欢迎信。如果客人其实没收到，请销售手发。',
   not_sent:
-    '按「没发出」记：这位客人（和这个邮箱）以后不会再自动收到欢迎信，要发请销售手发；时间线上那一条会改成「没有发出」。之后要是发信服务送来真实回执（比如送达），系统会按回执改过来。',
+    '按「没发出」记：这位客人（和这个邮箱）以后不会再自动收到欢迎信，要发请销售手发；这封仍算进他这 7 天收到的封数（系统确定不了它没发出），所以销售手发可能要等几天。时间线上那一条会改成「没有发出」。如果之后发信服务的回执证明其实送到了，这一页会跟着显示出来，但时间线那条不会自动改回：到时请告诉发信窗口，也别让销售再手发。',
 }
+
+/** 预览「已发出」时，这封信连时间线都没有：发信前一定先写时间线，写不进就不发，所以它没交给过发信服务。 */
+export const NO_TIMELINE_HINT = '系统记录：这封信连时间线都没有。发信前一定先写时间线、写不进就不发，所以它没交给过发信服务，标「没发出」更准。'
+
+/** 你标过「没发出」、后来回执证明发出去了的那一行。 */
+export const RECEIPT_OVERRODE_NOT_SENT =
+  '你标过「没发出」，但后来发信服务的回执证明这封信发出去了。时间线上那条还写着「没有发出」：请告诉发信窗口改回来，也别让销售再手发。'
+
+/** 超过 20 小时还停在「正在发」的信（例如授权撤销了，没人再接手）。 */
+export const STUCK_PENDING_TEXT = '超过 20 小时还没确认发没发出去：系统不会再重试，之后会转成「结果不明」让你核对。'
 
 const RESOLVE_ERROR_TEXT: Readonly<Record<string, string>> = {
   APPROVER_REQUIRED: '只有 PM 本人能标。',
@@ -381,6 +395,7 @@ export function resolvedText(outcome: 'sent' | 'not_sent', body: { mode?: unknow
   let line = body?.mode === 'ALREADY_RESOLVED' ? `这封信之前已经标过「${label}」了。` : `已标「${label}」。`
   if (outcome === 'not_sent' && body?.mode !== 'ALREADY_RESOLVED') line += '这位客人以后不会再自动收到欢迎信。'
   if (body?.timeline === 'failed') line += '时间线上那一条没改成「没有发出」，不影响发信；请告诉发信窗口补改。'
+  if (body?.timeline === 'receipt_arrived') line += '刚标完，发信服务的回执就证明这封其实发出去了：这一页已按回执显示，时间线没改，也别让销售再手发。'
   return line
 }
 

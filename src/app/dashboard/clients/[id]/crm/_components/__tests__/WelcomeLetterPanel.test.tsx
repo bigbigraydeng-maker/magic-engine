@@ -300,14 +300,50 @@ describe('WelcomeLetterPanel — 最近发送 and 「结果不明」 (之二乙)
         send({ id: 's-4', status: 'bounced', reason_code: null, bounce_kind: 'permanent', provider_impact: 'PROVIDER_ACCEPTED', attempts: 1 }),
       ],
       recent_sends_limit: 20,
+      unknown_sends: { count: 1, more: false },
     })
     render(<WelcomeLetterPanel clientId={CLIENT} />)
     const box = await screen.findByTestId('recent-sends')
     expect(screen.getAllByTestId('recent-send')).toHaveLength(4)
-    for (const words of ['结果不明', '已送达', '客人没有名字', '试过 2 次', '永久退信', '只显示最近 20 封']) expect(box.textContent, words).toContain(words)
+    for (const words of ['结果不明', '已送达', '客人没有名字', '试过 2 次', '永久退信', '其余只显示最近 20 封']) expect(box.textContent, words).toContain(words)
     expect(screen.getByTestId('unknown-count').textContent).toContain('有 1 封信结果不明')
     expect(box.textContent).not.toContain('@')
     expect(box.querySelector('a')?.getAttribute('href')).toBe(`/dashboard/clients/${CLIENT}/crm/all?contact=${GUEST}`)
+  })
+
+  it('🔴 how many letters wait for a person comes from the server (every unknown one, not just the rows shown)', async () => {
+    statusBody = status({ recent_sends: [send()], unknown_sends: { count: 230, more: true } })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    const count = (await screen.findByTestId('unknown-count')).textContent
+    expect(count).toContain('有 230 封信结果不明')
+    expect(count).toContain('太多了')
+  })
+
+  it('🔴 a letter marked 「没发出」 that a receipt later proved went out is flagged: the timeline still says otherwise', async () => {
+    statusBody = status({
+      recent_sends: [send({ status: 'delivered', reason_code: 'not_sent_confirmed', provider_impact: 'PROVIDER_ACCEPTED', resolution: { outcome: 'not_sent', by: 'pm@example.com', at: '2026-11-20T01:00:00.000Z' } })],
+    })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    expect((await screen.findByTestId('receipt-overrode')).textContent).toContain('别让销售再手发')
+  })
+
+  it('a letter still "being sent" more than 20 hours after its first try says it will not be retried', async () => {
+    statusBody = status({ server_now: '2026-11-21T00:00:00.000Z', recent_sends: [send({ status: 'pending', reason_code: null, first_attempt_at: '2026-11-20T02:00:00.000Z' })] })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    expect((await screen.findByTestId('stuck-pending')).textContent).toContain('不会再重试')
+    cleanup()
+    statusBody = status({ server_now: '2026-11-20T03:00:00.000Z', recent_sends: [send({ status: 'pending', reason_code: null, first_attempt_at: '2026-11-20T02:00:00.000Z' })] })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    await screen.findByTestId('recent-sends')
+    expect(screen.queryByTestId('stuck-pending')).toBeNull()
+  })
+
+  it('the preview warns when the letter has no timeline line (it never reached the provider)', async () => {
+    statusBody = status({ recent_sends: [send()] })
+    commandBody = { success: true, mode: 'PREVIEW', outcome: 'sent', consequence: 'COUNTED_AS_SENT', timeline_present: false }
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    fireEvent.click(await screen.findByText('核对后标「已发出」'))
+    expect((await screen.findByTestId('no-timeline-hint')).textContent).toContain('没交给过发信服务')
   })
 
   it('an empty list says nothing was sent yet; a failed read says it could not read them (never "nothing sent")', async () => {
@@ -338,6 +374,29 @@ describe('WelcomeLetterPanel — 最近发送 and 「结果不明」 (之二乙)
     expect(notice).toContain('已标「没发出」')
     expect(notice).toContain('时间线上那一条没改成')
     await waitFor(() => expect(statusCalls()).toBe(2))
+  })
+
+  it('🔴 the 「没发出」 consequence says what is true: still counted for 7 days, and the timeline line is NOT changed back by a later receipt', async () => {
+    statusBody = status({ recent_sends: [send()] })
+    commandBody = { success: true, mode: 'PREVIEW', outcome: 'not_sent', consequence: 'NEVER_WELCOMED_AUTOMATICALLY_AGAIN', timeline_present: true }
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    fireEvent.click(await screen.findByText('核对后标「没发出」'))
+    const words = (await screen.findByTestId('resolve-preview')).textContent ?? ''
+    expect(words).toContain('仍算进他这 7 天收到的封数')
+    expect(words).toContain('时间线那条不会自动改回')
+    expect(words).not.toContain('系统会按回执改过来')
+    expect(screen.queryByTestId('no-timeline-hint')).toBeNull()
+  })
+
+  it('a receipt that arrived right after 「没发出」 was written: the notice says the letter did go and the timeline was left alone', async () => {
+    statusBody = status({ recent_sends: [send()] })
+    commandBody = { success: true, mode: 'PREVIEW', outcome: 'not_sent', consequence: 'NEVER_WELCOMED_AUTOMATICALLY_AGAIN', timeline_present: true }
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    fireEvent.click(await screen.findByText('核对后标「没发出」'))
+    await screen.findByTestId('resolve-preview')
+    commandBody = { success: true, mode: 'RESOLVED', outcome: 'not_sent', timeline: 'receipt_arrived' }
+    fireEvent.click(screen.getByText('确认标「没发出」'))
+    expect((await screen.findByTestId('notice')).textContent).toContain('其实发出去了')
   })
 
   it('a letter that moved on meanwhile is not marked: the page says so and reads again', async () => {
@@ -376,9 +435,22 @@ describe('WelcomeLetterPanel — 最近发送 and 「结果不明」 (之二乙)
     render(<WelcomeLetterPanel clientId={CLIENT} />)
     expect((await screen.findByTestId('trial-only-note')).textContent).toContain('只发内部邮箱的试跑')
     expect(screen.getByTestId('formal-proposal-note').textContent).toContain('正式名单就算批了也一封都不发')
-    expect(screen.getByTestId('authorization').textContent).toContain('正式名单一封都不发')
+    expect(screen.getByTestId('formal-proposal-note').textContent).toContain('替换掉现在生效的那份授权')
+    const auth = screen.getByTestId('authorization').textContent ?? ''
+    expect(auth).toContain('正式名单一封都不发')
+    expect(auth).toContain('这一版不发')
+    expect(auth).not.toContain('之后进来的新客人才会收到')
     fireEvent.click(screen.getByText('预览授权'))
-    expect((await screen.findByTestId('authorize-preview')).textContent).toContain('批了也一封都不发')
+    const preview = (await screen.findByTestId('authorize-preview')).textContent ?? ''
+    expect(preview).toContain('批了也一封都不发')
+    expect(preview).toContain('等正式名单真发上线后')
+  })
+
+  it('a formal proposal with nothing in force does not talk about replacing anything', async () => {
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    const note = (await screen.findByTestId('formal-proposal-note')).textContent ?? ''
+    expect(note).toContain('正式名单就算批了也一封都不发')
+    expect(note).not.toContain('替换')
   })
 
   it('a trial in force with no formal proposal open reminds to propose one; with one open it does not', async () => {

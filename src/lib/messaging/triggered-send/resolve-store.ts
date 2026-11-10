@@ -1,15 +1,16 @@
 /**
  * The database side of `resolve_unknown` (`resolve-unknown.ts`): read one live welcome-letter row of a client, write the
  * PM's answer as a compare-and-set from `unknown_outcome` at the `updated_at` that was read (a receipt that moved the
- * row on wins), and mark the letter's timeline line cancelled. The table's own guards still apply (status only forward,
- * write-once columns, `failed` reason written once). Errors are returned as codes only (a failed write may echo the row).
- * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §4.2, §13, §17.4.
+ * row on wins), say whether the letter has its timeline line, and mark that line cancelled. The table's own guards
+ * still apply (status only forward, write-once columns, `failed` reason written once). Errors are returned as codes
+ * only (a failed write may echo the row).
+ * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §4.2, §13, §17.4, §17.7.
  */
 
 import { randomUUID } from 'node:crypto'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ResolvableRow, ResolveDeps } from './resolve-unknown'
-import { cancelSendTouchpoint, WELCOME_NOT_SENT_TIMELINE_LINE } from './send-touchpoint'
+import { cancelSendTouchpoint, ME_SEND_SOURCE, WELCOME_NOT_SENT_TIMELINE_LINE } from './send-touchpoint'
 
 const TABLE = 'triggered_sends'
 const COLUMNS = 'id, client_id, status, reason_code, first_attempt_at, annotations, updated_at'
@@ -70,6 +71,17 @@ export function createResolveDeps(db: SupabaseClient): ResolveDeps {
     },
     cancelTimeline: (clientId, sendId) =>
       cancelSendTouchpoint(db, { clientId, triggeredSendId: sendId, triggerKey: 'welcome', summary: WELCOME_NOT_SENT_TIMELINE_LINE }),
+    async timelinePresent(clientId, sendId) {
+      const { data, error } = await db
+        .from('contact_touchpoints')
+        .select('id')
+        .eq('client_id', clientId)
+        .eq('source', ME_SEND_SOURCE)
+        .eq('source_ref', sendId)
+        .limit(1)
+      if (error || !Array.isArray(data)) return null
+      return data.length > 0
+    },
     now: () => new Date(),
     newRequestId: () => randomUUID(),
   }

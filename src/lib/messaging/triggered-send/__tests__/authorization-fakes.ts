@@ -222,7 +222,7 @@ export function fakeWorld(): FakeWorld {
   let emitConfigured = true
   let mailboxCheck: MailboxCheck = { ok: true }
   let envValues: Record<string, string> = { TRIGGERED_SEND_TRIAL_DOMAINS: 'example.com' }
-  let recentRead: RecentSendsRead | 'throw' = { ok: true, rows: [] }
+  let recentRead: RecentSendsRead | 'throw' = { ok: true, rows: [], unknownCount: 0, unknownMore: false }
   const deps: CommandDeps = {
     store,
     loadTemplate: async () => templateRead,

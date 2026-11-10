@@ -45,6 +45,8 @@ const RANK: Readonly<Record<string, number>> = {
 const LEFT_PROVIDER: ReadonlySet<ReceiptKind> = new Set(['sent', 'delivery_delayed', 'delivered', 'bounced', 'complained'])
 
 export const NOT_SENT_CONFIRMED = 'not_sent_confirmed'
+/** A person checked a letter whose outcome was unknown and said it went (`resolve-unknown.ts`); it has no message id. */
+export const SENT_CONFIRMED = 'sent_confirmed'
 export const PROVIDER_FAILED_REASON = 'provider_failed'
 
 export function rankOf(status: string): number | null {

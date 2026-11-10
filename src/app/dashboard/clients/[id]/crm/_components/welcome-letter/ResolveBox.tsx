@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { MeButton } from '@/components/ui/me-primitives'
 import { postCommand } from './api'
 import {
+  NO_TIMELINE_HINT,
   RESOLVE_CONSEQUENCE_TEXT,
   RESOLVE_HOW_TO_CHECK,
   resolvedText,
@@ -21,6 +22,8 @@ const LABEL: Readonly<Record<Outcome, string>> = { sent: '已发出', not_sent: 
 
 export function ResolveBox({ clientId, send, onDone }: { clientId: string; send: RecentSendView; onDone: (notice: Notice) => void }): JSX.Element {
   const [choice, setChoice] = useState<Outcome | null>(null)
+  /** From the preview: false = the letter has no timeline line (it never reached the provider). */
+  const [timelinePresent, setTimelinePresent] = useState<boolean | null>(null)
   const [busy, setBusy] = useState(false)
 
   const ask = async (outcome: Outcome, confirm: boolean) => {
@@ -28,6 +31,7 @@ export function ResolveBox({ clientId, send, onDone }: { clientId: string; send:
     const answer = await postCommand(clientId, 'resolve-unknown', { send_id: send.id, outcome, seen_updated_at: send.updated_at, confirm })
     setBusy(false)
     if (answer.ok && !confirm && answer.body?.mode === 'PREVIEW') {
+      setTimelinePresent(typeof answer.body.timeline_present === 'boolean' ? answer.body.timeline_present : null)
       setChoice(outcome)
       return
     }
@@ -49,6 +53,7 @@ export function ResolveBox({ clientId, send, onDone }: { clientId: string; send:
   return (
     <div className="mt-2 border-l-2 border-me-charcoal/25 py-1 pl-3" data-testid="resolve-preview">
       <p className="text-sm font-semibold text-me-charcoal">{RESOLVE_CONSEQUENCE_TEXT[choice]}</p>
+      {timelinePresent === false && <p className="mt-1 text-sm font-semibold text-[#C2453A]" data-testid="no-timeline-hint">{NO_TIMELINE_HINT}</p>}
       <div className="mt-2 flex flex-wrap gap-2">
         <MeButton variant="secondary" size="sm" disabled={busy} onClick={() => void ask(choice, true)}>确认标「{LABEL[choice]}」</MeButton>
         <MeButton variant="ghost" size="sm" disabled={busy} onClick={() => setChoice(null)}>先不</MeButton>
