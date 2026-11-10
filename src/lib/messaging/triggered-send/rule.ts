@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { parseSendBlock, type SendRuleBlock } from './send-rule'
+
+export type { SendRuleBlock }
 
 export const GATE_CONTRACT_VERSION = 1
 // Only sources whose lead-form touchpoints are known to exist. A source for hand-made test contacts is added with the
@@ -15,7 +18,12 @@ export interface TriggeredSendRule {
   legacy: { mailchimp_campaign_title_prefix: string; excluded_tags: string[] }
   human_mail: { required_mailboxes: string[] }
   recipient_allowlist: string[] | null
+  /** The real-send block (identity, template, quiet hours, stop lines). Absent on rehearsal-only proposals. */
+  send?: SendRuleBlock
 }
+
+/** A rule that may be authorized for real sending: the send block is there. */
+export type SendableRule = TriggeredSendRule & { send: SendRuleBlock }
 
 export type RuleParseResult = { ok: true; rule: TriggeredSendRule } | { ok: false; error: string }
 
@@ -109,7 +117,9 @@ export function parseRule(input: unknown): RuleParseResult {
       return fail('rule must be a plain object')
     }
 
-    const topErr = checkExactKeys(input, TOP_KEYS, '')
+    // `send` is the one optional top-level key: rehearsal proposals do not carry it.
+    const { send: sendRaw, ...required } = input
+    const topErr = checkExactKeys(required, TOP_KEYS, '')
     if (topErr) return fail(topErr)
 
     // gate_contract_version
@@ -294,6 +304,13 @@ export function parseRule(input: unknown): RuleParseResult {
       recipient_allowlist: allowlist,
     }
 
+    // Absent stays absent (never written as `undefined`): a rehearsal proposal keeps its fingerprint.
+    if (Object.prototype.hasOwnProperty.call(input, 'send')) {
+      const send = parseSendBlock(sendRaw)
+      if (!send.ok) return fail(send.error)
+      rule.send = send.send
+    }
+
     return { ok: true, rule }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error'
@@ -332,6 +349,15 @@ function encode(value: unknown): string {
     return '{' + parts.join(',') + '}'
   }
   throw new Error('canonicalJson: only plain objects, arrays and JSON primitives are allowed')
+}
+
+/** A rule that may be authorized for real sending: valid, and carrying its send block. */
+export function parseSendRule(input: unknown): { ok: true; rule: SendableRule } | { ok: false; error: string } {
+  const parsed = parseRule(input)
+  if (!parsed.ok) return parsed
+  const { send } = parsed.rule
+  if (send === undefined) return fail('send is required for a rule that may be authorized')
+  return { ok: true, rule: { ...parsed.rule, send } }
 }
 
 export function canonicalJson(value: unknown): string {
