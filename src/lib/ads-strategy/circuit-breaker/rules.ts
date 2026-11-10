@@ -1,6 +1,6 @@
 /**
  * Conservative anomaly rules. Pure. Never pauses and never calls Meta.
- * A missing cap or target is "cannot judge", not zero.
+ * A missing cap, target, or primary-result count is "cannot judge", not zero.
  */
 
 import { DEFAULT_STALE_HOURS } from './settings'
@@ -9,13 +9,16 @@ import type { BreakerSettings } from './settings'
 export const POLICY_ERROR_STATUSES = ['DISAPPROVED', 'WITH_ISSUES'] as const
 const MIN_FORECAST_HOURS = 1
 
+export type PrimaryResultKind = 'lead' | 'messaging_started'
+
 export interface SpendRow {
   readonly accountId: string
   readonly campaignId: string
   readonly campaignName: string
   readonly day: string
   readonly spendCents: number
-  readonly leads: number | null
+  /** Count of the client's primary result. null = cannot judge, never zero. */
+  readonly primaryCount: number | null
   readonly currency: string | null
   readonly campaignLive: boolean
 }
@@ -57,6 +60,8 @@ export interface BreakerFacts {
   readonly insights: readonly InsightStamp[]
   readonly accounts: readonly string[]
   readonly freshReadable: boolean
+  /** null = the configured primary result is not a count this pass can read. */
+  readonly primaryResult: PrimaryResultKind | null
 }
 
 export type PauseRule = 'spend_over_cap' | 'cpl_zero_leads' | 'policy_error'
@@ -79,6 +84,7 @@ export type AlertCode =
   | 'policy_unreadable'
   | 'fresh_unreadable'
   | 'stale'
+  | 'primary_unreadable'
 
 export interface AlertFinding {
   readonly kind: 'alert'
@@ -117,7 +123,7 @@ export function judgeBreaker(facts: BreakerFacts): BreakerJudgement {
   if (!facts.settings.enabled) return { pauses: [], alerts: [] }
   const spend = spendPause(facts)
   const pauses = mergePauses([...(spend ? [spend] : []), ...cplPauses(facts), ...policyPauses(facts)])
-  const alerts = [spendAlert(facts), policyAlert(facts), freshAlert(facts)].flatMap((item) => item ?? [])
+  const alerts = [spendAlert(facts), cplAlert(facts), policyAlert(facts), freshAlert(facts)].flatMap((item) => item ?? [])
   return { pauses, alerts }
 }
 
@@ -147,13 +153,30 @@ function spendAlert(facts: BreakerFacts): AlertFinding | null {
   return null
 }
 
-function cplPauses(facts: BreakerFacts): PauseProposal[] {
+const LEAD_CPL_SUMMARY = '最近这一天有花费，但没有线索，花费已经高于约定的目标线索成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'
+const CHAT_CPL_SUMMARY = '最近这一天有花费，但没有开聊，花费已经高于约定的目标开聊成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'
+
+function cplWindow(facts: BreakerFacts): { rows: SpendRow[]; line: number } | null {
   const target = facts.settings.targetCplCents
   const window = cplRows(facts)
-  if (!facts.spendReadable || target === null || window === null || currenciesClash(window)) return []
-  return groupCampaigns(window)
-    .filter((row) => row.leads === 0 && row.spendCents > target * facts.settings.cplMultiple && row.campaignLive)
-    .map((hit) => pauseOf('cpl_zero_leads', hit, '最近这一天有花费，但没有线索，花费已经高于约定的目标线索成本倍数。系统没有暂停。请在确认卡上点确认，才会暂停。'))
+  if (!facts.spendReadable || target === null || window === null || currenciesClash(window)) return null
+  return { rows: groupCampaigns(window), line: target * facts.settings.cplMultiple }
+}
+
+function cplPauses(facts: BreakerFacts): PauseProposal[] {
+  const window = cplWindow(facts)
+  if (!window) return []
+  return window.rows
+    .filter((row) => row.primaryCount === 0 && row.spendCents > window.line && row.campaignLive)
+    .map((hit) => pauseOf('cpl_zero_leads', hit, facts.primaryResult === 'messaging_started' ? CHAT_CPL_SUMMARY : LEAD_CPL_SUMMARY))
+}
+
+function cplAlert(facts: BreakerFacts): AlertFinding | null {
+  const window = cplWindow(facts)
+  if (!window) return null
+  const blind = window.rows.some((row) => row.primaryCount === null && row.spendCents > window.line && row.campaignLive)
+  if (!blind) return null
+  return alert('primary_unreadable', '', '主结果数读不出来，没有出暂停卡。')
 }
 
 function policyPauses(facts: BreakerFacts): PauseProposal[] {
@@ -232,8 +255,8 @@ function groupCampaigns(rows: readonly SpendRow[]): SpendRow[] {
       map.set(row.campaignId, row)
       continue
     }
-    const leads = prior.leads === null || row.leads === null ? null : prior.leads + row.leads
-    map.set(row.campaignId, { ...prior, spendCents: prior.spendCents + row.spendCents, leads, campaignLive: prior.campaignLive || row.campaignLive })
+    const primaryCount = prior.primaryCount === null || row.primaryCount === null ? null : prior.primaryCount + row.primaryCount
+    map.set(row.campaignId, { ...prior, spendCents: prior.spendCents + row.spendCents, primaryCount, campaignLive: prior.campaignLive || row.campaignLive })
   }
   return [...map.values()]
 }

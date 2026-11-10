@@ -9,9 +9,11 @@ import { supabaseAdmin } from '@/lib/supabase'
 import { loadEmailSettings } from '@/lib/crm/email-templates/settings-store'
 import { createSendGatesProd } from '@/lib/crm/email-templates/send-gates-prod'
 import { recordSendAttemptProd } from '@/lib/crm/email-templates/send-record-prod'
+import { saveTokensTo, tagLinks } from '@/lib/crm/email-templates/link-tracking/tag-links-prod'
 import { CONNECTION_STATUS } from '@/lib/platform-oauth/vocabulary'
 import { MICROSOFT_MAIL_PROVIDER } from '@/lib/microsoft/mail-oauth'
 import { checkManualSendDncForContact } from '@/lib/crm/manual-send-dnc-gate'
+import { readEmailUnsubscribed } from '@/lib/crm/email-unsubscribe'
 import type { TouchKind } from '@/lib/crm/email-compose/enquiry-record'
 import { GRAPH, callWithRetry, writeTouchpoint, type GraphCallResult } from '@/lib/microsoft/mail-send'
 import {
@@ -73,6 +75,7 @@ export function createMailNewStore(): MailNewStore {
       return (data as { leads_config: unknown } | null)?.leads_config ?? null
     },
     checkDnc: (clientId, contactId) => checkManualSendDncForContact(clientId, contactId),
+    checkEmailUnsubscribed: (clientId, contactId, addresses) => readEmailUnsubscribed(db, clientId, { contactId, addresses }),
     async loadContact(clientId, contactId) {
       const { data } = await db.from('contacts').select('id, primary_email').eq('id', contactId).eq('client_id', clientId).maybeSingle()
       const row = data as { id: string; primary_email: string | null } | null
@@ -324,6 +327,15 @@ export function createMailNewDeps(clientId?: string): MailNewDeps {
         requestId: input.requestId,
         actorEmail: input.sentByEmail,
         result,
+      })
+    deps.tagLinks = ({ input, requestId, body, config, state }) =>
+      tagLinks(saveTokensTo(supabaseAdmin), {
+        clientId: input.clientId,
+        contactId: input.contactId,
+        requestId,
+        body,
+        config,
+        facts: state.linkFacts ?? null,
       })
   }
   return deps

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { audienceLadder } from '../audience-ladder'
 import { defaultTestDelivery, ratioWarning } from '../delivery-stage'
 import { withBudgetRole } from '../form'
 import { promoContentHash } from '../content-hash'
@@ -37,11 +38,13 @@ describe('阶段写在原有计划里，旧计划指纹不变', () => {
     expect(promoContentHash(parsed.spec)).toBe(promoContentHash(baseSpec()))
   })
 
-  it('写上阶段会改变指纹，所以必须另批，不会自动算已批准', () => {
+  it('只改投放阶段不换指纹；改每天总上限才会换', () => {
     const plain = parsePromoSpec(baseSpec())
-    const next = parsePromoSpec(marked('test'))
+    const next = parsePromoSpec(marked('steady'))
     expect(plain.ok && next.ok).toBe(true)
     if (!plain.ok || !next.ok) return
+    expect(promoContentHash(next.spec)).toBe(promoContentHash(plain.spec))
+    next.spec.daily_total_cap_cents = (next.spec.daily_total_cap_cents ?? 0) + 100
     expect(promoContentHash(next.spec)).not.toBe(promoContentHash(plain.spec))
   })
 
@@ -70,7 +73,9 @@ describe('试投证据够了才建议放量', () => {
     expect(judgeSwitch(marked('test'), fresh({ targetMajor: null })).kind).toBe('unreadable')
     expect(judgeSwitch(marked('test'), fresh({ capture: 'stale' })).kind).toBe('unreadable')
     expect(judgeSwitch(marked('test'), fresh({ capture: 'incomplete' })).kind).toBe('unreadable')
-    expect(judgeSwitch(marked('scale'), fresh()).kind).toBe('scale_hold')
+    const scaled = judgeSwitch(marked('scale'), fresh())
+    expect(scaled.kind).toBe('scale_hold')
+    if (scaled.kind === 'scale_hold') expect(scaled.text).toContain('不改预算')
     expect(judgeSwitch(marked('steady'), fresh()).kind).toBe('steady')
     expect(judgeSwitch(baseSpec(), fresh()).kind).toBe('not_marked')
   })
@@ -89,6 +94,28 @@ describe('试投证据够了才建议放量', () => {
     expect(row.approved_at).toBeNull()
     expect(row.generation_meta).not.toHaveProperty('approval_receipt')
     expect(row.plan_data.tasks).toEqual([])
+  })
+})
+
+describe('受众顺序只是建议', () => {
+  const banned = /华人|中国人|华裔|Chinese|ethnicity/i
+
+  it('顺序是广泛、兴趣、相似受众，种子含已报价，不按族裔，也不新建', () => {
+    const view = audienceLadder({ stage: 'test', countries: ['NZ'], qualified: 'ready', quoted: 'included' })
+    const text = `${view.note} ${view.rungs.map(rung => `${rung.title} ${rung.detail}`).join(' ')}`
+    expect(view.rungs.map(rung => rung.title)).toEqual(['广泛', '兴趣', '相似受众'])
+    expect(view.rungs.find(rung => rung.suggested)?.title).toBe('广泛')
+    expect(text).toContain('已报价')
+    expect(text).toContain('不会在广告后台新建')
+    expect(text).not.toMatch(banned)
+  })
+
+  it('没有合格客人，或已报价被排除时，放量不停在相似受众', () => {
+    const empty = audienceLadder({ stage: 'scale', countries: ['NZ'], qualified: 'empty', quoted: 'absent' })
+    const excluded = audienceLadder({ stage: 'scale', countries: ['NZ'], qualified: 'ready', quoted: 'excluded' })
+    expect(empty.rungs.find(rung => rung.suggested)?.title).toBe('兴趣')
+    expect(excluded.rungs.find(rung => rung.suggested)?.title).toBe('兴趣')
+    expect(excluded.rungs[2].detail).toContain('已报价')
   })
 })
 

@@ -1,6 +1,7 @@
 // Resend 回调接收口 /api/webhooks/resend/<账号>
 // 具体逻辑都在 @/lib/messaging/provider-events/resend-ingest，这里只做壳。
 import { NextRequest, NextResponse } from 'next/server'
+import { inngest } from '@/lib/inngest/client'
 import { readCappedBody } from '@/lib/telephony/voipline/ingest'
 import { handleResendWebhook } from '@/lib/messaging/provider-events/resend-ingest'
 import { supabaseProviderEventStore } from '@/lib/messaging/provider-events/store'
@@ -21,6 +22,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ account: s
     svixTimestamp: req.headers.get('svix-timestamp'),
     svixSignature: req.headers.get('svix-signature'),
     env: (n) => process.env[n],
+    emit: async (event) => {
+      await inngest.send(event)
+    },
   })
   return NextResponse.json(result.body, { status: result.status })
 }

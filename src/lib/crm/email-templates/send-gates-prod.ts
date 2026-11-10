@@ -4,6 +4,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { readEmailUnsubscribed } from '@/lib/crm/email-unsubscribe'
 import { supabaseAdmin } from '@/lib/supabase'
 import { loadPublishedTourFacts } from '@/lib/tour-catalog/store-publish'
 import { findConnectedCallEvidence, type PhoneTouch } from './call-evidence'
@@ -106,6 +107,7 @@ export function createSendGateData(
     sentTemplateReceiptsSince: (clientId, contactId, sinceIso) => findSentTemplateReceiptsSince(db, clientId, contactId, sinceIso),
     exemptMessageIdsSince: (clientId, contactId, keys, sinceIso) => findSentMessageIdsOfTemplates(db, clientId, contactId, keys, sinceIso),
     loadTimeZone: (clientId) => loadClientTimeZone(db, clientId),
+    loadEmailUnsubscribed: (clientId, contactId, addresses) => readEmailUnsubscribed(db, clientId, { contactId, addresses }),
     frequencySources: createFrequencySources({
       db,
       clientId: args.clientId,

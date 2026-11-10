@@ -210,6 +210,11 @@ export const A_RISK_RULES = [
   { prefix: 'src/lib/crm/email-templates/gates/', why: '销售手发邮件的频次 / 内容关口 —— 关口松了会多发', category: RISK_CATEGORY.OUTWARD_WRITE },
   { pattern: /^src\/lib\/crm\/email-templates\/(frequency-sources-prod|send-gates|send-gates-prod)\.ts$/, why: '销售手发邮件的频次来源与关口装配 —— 来源读不到按 0 就等于关掉频次闸', category: RISK_CATEGORY.OUTWARD_WRITE },
   { pattern: /^src\/lib\/crm\/(dnc|manual-send-dnc-gate|automated-touch)\.ts$/, why: '别再联系判据与机器信标记 —— 决定谁会被发信、什么算人工联系', category: RISK_CATEGORY.OUTWARD_WRITE },
+  // --- Send gate P2-2a: without these the files rated B and auto-merged (measured with classifyFile on 2026-11-10).
+  // P2-2b added reply-unsubscribe-gate (the reply rule) and mail-send.ts (replies to a guest's mail now check unsubscribes).
+  { pattern: /^src\/lib\/crm\/(email-unsubscribe|touchpoint-sources|address-sha256|reply-unsubscribe-gate)\.ts$/, why: '退订判据与写入、回复客人来信的退订规则、ME 自己写的联系记录来源、邮箱指纹 —— 决定谁还能收邮件、哪些信算机器发的', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { exact: 'src/lib/crm/email-templates/automated-template-key.ts', why: '自动信模板规则 —— 松了销售就能手发 ME 的自动信', category: RISK_CATEGORY.OUTWARD_WRITE },
+  { pattern: /^src\/lib\/microsoft\/mail-send(-new(-prod)?)?\.ts$/, why: '销售手发邮件与回复客人来信的总流程 —— 决定关口（含退订、频次）跑不跑', category: RISK_CATEGORY.OUTWARD_WRITE },
   { basenameIncludes: 'guardrail', why: '花费 / 发布安全闸 —— 它松了别的全松', category: RISK_CATEGORY.OUTWARD_WRITE },
   // --- Music vocal gate: the registry IS the gate; a hand-written signature would otherwise pass as B ---
   { pattern: /^scripts\/factory-worker\/.*music[-_]?vocal[^/]*$/i, why: '音乐人声闸：登记表 music-vocals.json、闸模块、回填工具及其测试 —— 登记表就是闸本身，签字格式可被手写伪造，只能靠人审', category: RISK_CATEGORY.OUTWARD_WRITE },

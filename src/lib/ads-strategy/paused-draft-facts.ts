@@ -17,6 +17,7 @@ import {
 } from './ad-draft'
 import { draftNotYetBuildable, reviewDraftAgainstCaps, reviewDraftForBuild } from './ad-draft-expansion'
 import { PAUSED_DRAFT_WHAT } from './paused-draft-copy'
+import { partnerPageScopeNote } from './partner-page'
 import { REELS_LEAD_KIND } from './reels-lead'
 
 export const PAUSED_DRAFT_SUBJECT_PREFIX = 'meta-paused-draft:'
@@ -231,8 +232,9 @@ function scopeLine(draft: AdDraft): string {
     : draft.existingCampaignId
       ? `在已有系列里加 1 个暂停广告组，不新建系列、不开。稿 ${mark}`
       : `1 个暂停系列，${adSetCount(draft)} 个广告组，不开启。稿 ${mark}`
-  if (draft.kind !== REELS_LEAD_KIND) return base
-  return `${base} 类型：短视频留资，只锁两条 Reels。`
+  const noted = `${base}${partnerPageScopeNote(draft)}`
+  if (draft.kind !== REELS_LEAD_KIND) return noted
+  return `${noted} 类型：短视频留资，只锁两条 Reels。`
 }
 
 function dateLine(draft: AdDraft): string {

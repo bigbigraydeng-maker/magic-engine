@@ -1,6 +1,9 @@
+import { resolveTargetCplCents } from '@/lib/ads-strategy/client-target-cpl'
+
 /**
  * Per-client breaker settings from existing JSON. No new column.
  * Missing keys keep the conservative defaults. A bad number is not a zero.
+ * The lead-cost target is the shared client target, not a number written here.
  */
 
 export const BREAKER_CONFIG_KEY = 'ads_circuit_breaker'
@@ -25,7 +28,11 @@ export function defaultBreakerSettings(): BreakerSettings {
   }
 }
 
-export function readBreakerSettings(leadsConfig: unknown, planRows: readonly { plan_data?: unknown }[]): BreakerSettings {
+export function readBreakerSettings(
+  leadsConfig: unknown,
+  planRows: readonly { plan_data?: unknown }[],
+  strategyRow?: { target_cost_per_primary?: unknown } | null,
+): BreakerSettings {
   const block = objectOf(objectOf(leadsConfig)?.[BREAKER_CONFIG_KEY])
   const base = defaultBreakerSettings()
   return {
@@ -33,28 +40,16 @@ export function readBreakerSettings(leadsConfig: unknown, planRows: readonly { p
     cplMultiple: atLeast(block?.cpl_multiple, DEFAULT_CPL_MULTIPLE, DEFAULT_CPL_MULTIPLE),
     staleHours: atLeast(block?.stale_hours, 1, DEFAULT_STALE_HOURS),
     forecastEnabled: block?.forecast_enabled === false ? false : base.forecastEnabled,
-    targetCplCents: positiveInt(block?.target_cpl_cents) ?? agreedPlanCpl(planRows),
+    targetCplCents: resolveTargetCplCents({
+      strategyMajor: strategyRow?.target_cost_per_primary,
+      leadsConfig,
+      planRows,
+    }),
   }
-}
-
-function agreedPlanCpl(rows: readonly { plan_data?: unknown }[]): number | null {
-  const values: Array<number | null> = []
-  for (const row of rows) {
-    const promo = objectOf(objectOf(row.plan_data)?.promo)
-    if (!promo || !('target_cpl_cents' in promo)) continue
-    values.push(positiveInt(promo.target_cpl_cents))
-  }
-  if (values.length === 0 || values.some((cents) => cents === null)) return null
-  return new Set(values).size === 1 ? values[0] : null
 }
 
 function atLeast(value: unknown, min: number, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < min) return fallback
-  return value
-}
-
-function positiveInt(value: unknown): number | null {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) return null
   return value
 }
 

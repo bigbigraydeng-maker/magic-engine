@@ -46,6 +46,7 @@ const SOURCE_LABEL: Record<string, string> = {
   audit: '系统发送记录',
   touchpoint: '邮件记录',
   mailchimp: '群发',
+  me_send: 'ME 自动信',
 }
 
 const MAX_PICKS = 3

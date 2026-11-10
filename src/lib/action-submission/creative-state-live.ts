@@ -12,6 +12,7 @@ import { agreedPlanDailyTotalCap } from '@/lib/approval-source/plan-cap'
 import { createAdFromPost, readAdPlacement } from '@/lib/meta/ads-manager'
 import { getMetaTokenForClient } from '@/lib/meta/token-manager'
 import { pauseConfirmedWinnerAd } from '@/lib/ads-pause-card/winner-pause'
+import { latestUsableCapture, singleApprovedPlanReason } from '@/lib/ads-strategy/daily-card-guard'
 import {
   decideCreatives,
   rulesFromConfig,
@@ -35,7 +36,7 @@ export async function loadCreativeDecision(
   sb: Sb,
   clientId: string,
   now: Date,
-  promotionsToday = countPromotions(sb, clientId, now),
+  promotionsToday?: Promise<number>,
 ): Promise<CreativeDecision> {
   const config = await maybe(sb, 'winner_reel_sync_config', 'target_adset_id, ad_account_id, fb_page_id', clientId, true)
   if (config === 'unread') return empty('ledger_unread')
@@ -44,20 +45,22 @@ export async function loadCreativeDecision(
   if (!scaleId || !accountId) return empty('no_scale_adset')
   const strategy = await maybe(sb, 'ad_strategy_configs', 'target_cost_per_primary, min_primary_per_unit', clientId, false)
   if (strategy === 'unread') return empty('ledger_unread')
+  const leads = await readLeads(sb, clientId)
+  if (leads === 'unread') return empty('ledger_unread')
+  const plans = await approvedPlans(sb, clientId)
+  if (plans === 'unread') return empty('ledger_unread')
   const capture = await latestCapture(sb, clientId, accountId)
   if (capture === 'unread') return empty('ledger_unread')
   const built = await buildAds(sb, clientId, accountId, scaleId, text(config?.fb_page_id), now)
   if (built === 'unread') return empty('ledger_unread')
   if (built === 'capped') return empty('too_many_rows')
-  const plan = await planRoom(sb, clientId)
-  if (plan === 'unread') return empty('ledger_unread')
   return decideCreatives({
-    rules: rulesFromConfig(strategy),
+    rules: rulesFromConfig(strategy, plans, leads),
     captures: capture ? [capture] : [],
     creatives: built.creatives,
     scale: built.scale,
-    plan,
-    promotionsToday: await promotionsToday,
+    plan: planRoomFrom(plans),
+    promotionsToday: await (promotionsToday ?? countPromotions(sb, clientId, now)),
     now,
   })
 }
@@ -72,7 +75,7 @@ export function liveCreativePorts(kernel: KernelDeps): CreativePorts {
       expectedDecisionId: input.decisionId,
       fingerprint: input.fingerprint,
     }),
-    recheck: (clientId) => loadCreativeDecision(kernel.supabase, clientId, kernel.now(), Promise.resolve(0)),
+    recheck: (clientId) => recheckCreative(kernel, clientId),
     token: getMetaTokenForClient,
     createPaused: (input) => createAdFromPost(input),
     readPlacement: async (adId, token) => {
@@ -183,10 +186,19 @@ function groupInsights(rows: Record<string, unknown>[]): Map<string, Array<{ dat
   return out
 }
 
-async function planRoom(sb: Sb, clientId: string): Promise<PlanRoom | 'unread'> {
+async function readLeads(sb: Sb, clientId: string): Promise<unknown | 'unread'> {
+  const { data, error } = await sb.from('clients').select('leads_config').eq('id', clientId).maybeSingle()
+  if (error) return 'unread'
+  return (data as { leads_config?: unknown } | null)?.leads_config ?? null
+}
+
+async function approvedPlans(sb: Sb, clientId: string): Promise<{ plan_data?: unknown }[] | 'unread'> {
   const { data, error } = await sb.from('marketing_plans').select('status, plan_data').eq('client_id', clientId).eq('status', 'approved')
   if (error) return 'unread'
-  const rows = (data ?? []) as { status?: unknown; plan_data?: unknown }[]
+  return (data ?? []) as { plan_data?: unknown }[]
+}
+
+function planRoomFrom(rows: readonly { plan_data?: unknown }[]): PlanRoom {
   const cap = agreedPlanDailyTotalCap(rows)
   return { approvedDailyCap: cap.state === 'set' ? cap.cents / 100 : null, committedDaily: committedMajor(rows) }
 }
@@ -218,20 +230,18 @@ async function countPromotions(sb: Sb, clientId: string, now: Date): Promise<num
   )).length
 }
 
+async function recheckCreative(kernel: KernelDeps, clientId: string): Promise<CreativeDecision> {
+  const decision = await loadCreativeDecision(kernel.supabase, clientId, kernel.now(), Promise.resolve(0))
+  const plan = await singleApprovedPlanReason(kernel.supabase, clientId)
+  if (!plan) return decision
+  return { proposals: [], skipped: [...decision.skipped, 'plan_guard'] }
+}
+
 async function latestCapture(sb: Sb, clientId: string, accountId: string): Promise<CaptureFact | null | 'unread'> {
-  const { data, error } = await sb.from('ad_snapshot_captures')
-    .select('complete, captured_at, ad_account_id')
-    .eq('client_id', clientId)
-    .eq('ad_account_id', accountId)
-    .eq('level', 'ad')
-    .order('captured_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (error) return 'unread'
-  if (!data) return null
-  const row = data as { complete?: boolean; captured_at?: string; ad_account_id?: string }
-  if (typeof row.captured_at !== 'string' || typeof row.ad_account_id !== 'string') return null
-  return { accountId: row.ad_account_id, complete: row.complete === true, capturedAt: row.captured_at }
+  const found = await latestUsableCapture(sb, clientId, accountId, 'ad')
+  if (found.state === 'unread') return 'unread'
+  if (found.state === 'none') return null
+  return { accountId, complete: true, capturedAt: found.capturedAt }
 }
 
 async function maybe(sb: Sb, table: string, columns: string, clientId: string, enabled: boolean): Promise<Record<string, unknown> | null | 'unread'> {

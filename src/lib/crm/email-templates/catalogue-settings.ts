@@ -8,6 +8,7 @@
  */
 
 import type { CatalogueProviderSettings, EmailSettings } from './types'
+import { isAutomatedTemplateKey } from './automated-template-key'
 import { TEMPLATE_KEY_RE } from './template-store'
 
 export type AddError = (path: string, message: string) => void
@@ -81,7 +82,13 @@ export function parseCatalogueSettings(value: unknown, path: string, add: AddErr
     add(`${path}.${key}`, 'unknown key')
     keysOk = false
   }
-  const templateKey = readField(value.template_key, `${path}.template_key`, add, (s) => TEMPLATE_KEY_RE.test(s), 'must be a template key (lower-case letters, digits and hyphens)')
+  const templateKey = readField(
+    value.template_key,
+    `${path}.template_key`,
+    add,
+    (s) => TEMPLATE_KEY_RE.test(s) && !isAutomatedTemplateKey(s),
+    'must be a template key (lower-case letters, digits and hyphens), not an automated letter (auto-…)',
+  )
   const versionLabel = readField(value.version_label, `${path}.version_label`, add, (s) => VERSION_LABEL_RE.test(s), 'must be 1-20 letters, digits, dots, hyphens or spaces')
   const url = readUrl(value.url, `${path}.url`, add)
   const validUntil = readField(value.valid_until, `${path}.valid_until`, add, isRealYmd, 'must be a real date written YYYY-MM-DD')

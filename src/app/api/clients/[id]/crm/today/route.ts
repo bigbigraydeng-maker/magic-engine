@@ -36,6 +36,9 @@ import { WORKLIST_GROUPS, groupDisplayMeta } from '@/lib/crm/worklist-groups'
 import { contactCardTitle } from '@/lib/crm/display-name'
 import { followUpMarks } from '@/lib/crm/follow-up-marks'
 import { contactsTouchedToday, dayWorklist, localDayStartMs } from '@/lib/crm/day-list'
+import { applyTakeoverToDayList } from '@/lib/crm/ai-takeover/day-list-filter'
+import { toReengageTouchRow } from '@/lib/crm/ai-takeover/came-back'
+import { loadTakeoverSince } from '@/lib/crm/ai-takeover/prod'
 import { loadStageSuppressedTodayIds } from '@/lib/crm/day-stage-events'
 import { stageSuppressesWorklist, isMarketingAction } from '@/lib/crm/pipeline'
 import { isAutomatedTouch } from '@/lib/crm/automated-touch'
@@ -410,6 +413,19 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     },
   )
 
+  // AI 接管中的客人不进「今天要联系」；接管后客人回来了才重新出现，标「客人回来了」（lib/crm/ai-takeover）。
+  // 读不到接管名单就当没有人在接管 —— 跟这个功能上线前一样，整页照常打开。
+  const takeoverSince = await loadTakeoverSince(clientId).catch((err: unknown) => {
+    console.warn('[crm/today] 读 AI 接管名单失败，按无人接管显示:', err instanceof Error ? err.message : err)
+    return new Map<string, string>()
+  })
+  const shown = applyTakeoverToDayList(ranked, {
+    takeoverSince,
+    touchesOf: (id) => (byContact.get(id) ?? []).map(toReengageTouchRow),
+    dayStartMs: localDayStartMs(now, timeZone),
+    now,
+  })
+
   /**
    * 系统提议改阶段 —— 提议，不自动改。
    *
@@ -602,7 +618,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     }
   }
 
-  const toRow = (c: (typeof ranked)[number]) => {
+  const toRow = (c: (typeof shown)[number]) => {
     const row = contactById.get(c.id)
     const last = (byContact.get(c.id) ?? [])[0]
     // 早上打开这一页要一眼看懂：今天动过没有、上次谁跟的、聊到哪了。
@@ -670,6 +686,10 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
       doNotCall: c.seg.doNotCall === true,
       /** 被标成「别再联系」—— 抽屉靠它给出取消入口（早前判词误判过一批人）。 */
       doNotContact: c.doNotContact === true,
+      /** AI 跟进中（接管后客人回来了才会出现在这里）。 */
+      aiTakeover: c.takeover.aiTakeover,
+      /** 接管期间客人回信 / 填表 / 来电 / 发私信了 —— 卡片标「客人回来了」。 */
+      customerCameBack: c.takeover.cameBack !== null,
       dueAt: c.seg.dueAt,
       lastTouchAt: c.seg.lastTouchAt,
       lastNote: last?.summary ?? null,
@@ -701,7 +721,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
   // 展示用分桶在 lib/crm/worklist-groups 里，不在这个文件里 —— 它漏一行就会让
   // 整段客人从页面上消失（2026-08-02 的 33 人事故），必须能被测试钉住。
   const buckets = WORKLIST_GROUPS.map(({ key, members, layer }) => {
-    const all = ranked
+    const all = shown
       .filter((c) => members.includes(c.seg.segment))
       // 置顶的排最前（多个置顶按最近钉的在上）。只在桶内生效 ——
       // 跨桶置顶会让人脱离「这批该怎么办」的说明，反而不知道要干嘛。
@@ -852,7 +872,7 @@ export async function GET(_req: NextRequest, { params }: RouteParams): Promise<N
     viewerEmail: access.user.email ?? null,
     counts: segmentCounts(models, now),
     totalContacts: models.length,
-    todoTotal: ranked.length,
+    todoTotal: shown.length,
     generatedAt: now.toISOString(),
   })
 }

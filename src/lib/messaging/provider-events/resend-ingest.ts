@@ -1,4 +1,4 @@
-// Resend 回调入库主流程：验签 → 校验 → 清洗 → 落库。
+// Resend 回调入库主流程：验签 → 校验 → 清洗 → 落库 → 叫醒回执消费方（P2-2b）。
 import {
   EVENT_TYPE_MAX,
   PROVIDER_EVENT_ID_MAX,
@@ -11,6 +11,7 @@ import {
   type WebhookResult,
 } from './types'
 import { loadResendWebhookSecret, verifyResendSignature } from './resend-signature'
+import { buildProviderEventReceived } from './events'
 
 const SVIX_ID_RE = new RegExp(`^[A-Za-z0-9_-]{1,${PROVIDER_EVENT_ID_MAX}}$`)
 const DB_CODE_RE = /^[A-Za-z0-9_]{1,16}$/
@@ -213,6 +214,14 @@ export async function handleResendWebhook(
   } catch (err) {
     log('error', 'store_failed', { dbCode: errorCodeOf(err) })
     return { status: 500, body: { ok: false, error: 'store_failed' } }
+  }
+
+  // 10. 叫醒回执消费方（重复也发：上一次可能入库成功、发事件失败）。发不出去 → 500，让 Resend 重试。
+  try {
+    await input.emit(buildProviderEventReceived({ account, providerEventId: svixId }))
+  } catch {
+    log('error', 'emit_failed')
+    return { status: 500, body: { ok: false, error: 'emit_failed' } }
   }
 
   if (outcome === 'duplicate') {

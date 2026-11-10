@@ -3,6 +3,7 @@
  * Target cost comes from the client row. Missing target means no card.
  */
 
+import { resolveTargetCplMajor } from '@/lib/ads-strategy/client-target-cpl'
 import { OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS } from '@/lib/ads-strategy/portfolio/diagnostics/thresholds'
 
 export const CONSERVATIVE_CREATIVE_RULES = {
@@ -71,11 +72,16 @@ export interface CreativeDecision {
   readonly skipped: readonly string[]
 }
 
-export function rulesFromConfig(row: {
-  target_cost_per_primary?: unknown
-  min_primary_per_unit?: unknown
-} | null): CreativeRules {
-  const target = positive(row?.target_cost_per_primary)
+export function rulesFromConfig(
+  row: { target_cost_per_primary?: unknown; min_primary_per_unit?: unknown } | null,
+  planRows: readonly { plan_data?: unknown }[] = [],
+  leadsConfig: unknown = null,
+): CreativeRules {
+  const target = resolveTargetCplMajor({
+    strategyMajor: row?.target_cost_per_primary,
+    leadsConfig,
+    planRows,
+  })
   const configured = whole(row?.min_primary_per_unit)
   const minLeads = Math.max(CONSERVATIVE_CREATIVE_RULES.minLeads, configured ?? 0)
   return { ...CONSERVATIVE_CREATIVE_RULES, targetCpl: target, minLeads }
@@ -178,11 +184,6 @@ function oneCaptureFresh(row: CaptureFact, now: Date, maxAgeHours: number): bool
   if (!Number.isFinite(at)) return false
   const age = now.getTime() - at
   return age >= 0 && age <= maxAgeHours * 3_600_000
-}
-
-function positive(value: unknown): number | null {
-  const amount = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN
-  return Number.isFinite(amount) && amount > 0 ? amount : null
 }
 
 function whole(value: unknown): number | null {

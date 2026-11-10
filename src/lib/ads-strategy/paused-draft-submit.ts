@@ -17,6 +17,7 @@ import { isExpired, readStoredCard } from '@/lib/confirmation-card/view'
 import type { AdDraft, InheritedAdSetSpend } from './ad-draft'
 import { withInheritedSpend, withoutInheritedSpend } from './ad-draft'
 import { createDraftForApproval, type CreateDraftDeps, type CreateDraftOutcome } from './draft-and-gate'
+import { isCleanPartnerRefusal } from './partner-page'
 import {
   PAUSED_DRAFT_HOLD,
   metaErrorClass,
@@ -284,6 +285,7 @@ function outcomeLine(who: string | null, outcome: CreateDraftOutcome): string {
   const name = who ?? '有人'
   if (outcome.status === 'awaiting_approval') return `${name} 点了确认。暂停草稿已进审批队列。`
   if (outcome.status === 'blocked') return `${name} 点了确认。已经建成暂停，回读对不上，保持暂停，不删除。`
+  if (isCleanPartnerRefusal(outcome.error)) return `${name} 点了确认。${outcome.error}`
   return `${name} 点了确认。${plainMetaError(outcome.error ?? '没有建成')}`
 }
 
@@ -363,7 +365,7 @@ function holdFate(
   if (run.status !== 'pending_approval') return 'settled'
   if (!incoming) return 'live'
   const stored = readStoredCard(run.input)
-  if (stored && isExpired(stored.issuedAt, now)) return 'expired'
+  if (stored && isExpired(stored.issuedAt, now, stored.lifetime)) return 'expired'
   const replaced = payload.subjectKey === incoming.subjectKey && payload.fingerprint !== incoming.fingerprint
   return stored && replaced ? 'replaced' : 'live'
 }

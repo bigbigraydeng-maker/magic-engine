@@ -35,8 +35,10 @@ import {
  */
 
 export interface TimelineEntry {
-  kind: 'touch' | 'stage' | 'message'
+  kind: 'touch' | 'stage' | 'message' | 'click'
   at: string
+  /** kind 'click': which tracked mail link the guest opened, e.g. "目录". Never counts as what they last said. */
+  clickLabel?: string
   // touch
   channel?: string | null
   direction?: 'inbound' | 'outbound'
@@ -501,7 +503,16 @@ function TouchRow({ e, clientId }: { e: TimelineEntry; clientId: string }) {
   )
 }
 
+function ClickRow({ e }: { e: TimelineEntry }) {
+  return (
+    <p className="text-xs text-me-charcoal/55" data-testid="timeline-click">
+      🔗 客人点了邮件里的「{e.clickLabel}」 · {when(e.at)}
+    </p>
+  )
+}
+
 function Row({ e, clientId }: { e: TimelineEntry; clientId: string }) {
+  if (e.kind === 'click') return <ClickRow e={e} />
   if (e.kind === 'message') return <MessageRow e={e} />
   if (e.kind === 'stage') return <StageRow e={e} />
   return <TouchRow e={e} clientId={clientId} />

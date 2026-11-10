@@ -44,11 +44,11 @@ export function kernel() {
 
 export async function clientAds(clientId: string): Promise<
   | { ok: false; response: NextResponse }
-  | { ok: true; adAccountId: string; pageId: string; country: string | null; industry: string | null }
+  | { ok: true; adAccountId: string; pageId: string; country: string | null; industry: string | null; leadsConfig: unknown }
 > {
   const { data } = await supabaseAdmin
     .from('clients')
-    .select('meta_ad_account_id, facebook_page_id, country, industry')
+    .select('meta_ad_account_id, facebook_page_id, country, industry, leads_config')
     .eq('id', clientId)
     .maybeSingle()
   const row = data as {
@@ -56,6 +56,7 @@ export async function clientAds(clientId: string): Promise<
     facebook_page_id?: string | null
     country?: string | null
     industry?: string | null
+    leads_config?: unknown
   } | null
   if (!row?.meta_ad_account_id) {
     return { ok: false, response: NextResponse.json({ error: '这个客户还没配广告账户。' }, { status: 424 }) }
@@ -69,6 +70,7 @@ export async function clientAds(clientId: string): Promise<
     pageId: row.facebook_page_id,
     country: row.country ?? null,
     industry: row.industry ?? null,
+    leadsConfig: row.leads_config,
   }
 }
 

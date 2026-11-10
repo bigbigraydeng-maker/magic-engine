@@ -7,7 +7,7 @@
  * 本文件是**编排**：所有读写（数据库、Graph）都通过注入的 `store` / `graph` 完成，
  * 所以每一道闸、每一种失败都能用内存替身一条条钉住；真实实现在 `mail-send-new-prod.ts`。
  *
- * 顺序（任何一步失败都不发）：校验 → 开关 → 收件人 → 只发给咨询过的人 → 别再联系 → 选邮箱
+ * 顺序（任何一步失败都不发）：校验 → 开关 → 收件人 → 只发给咨询过的人 → 别再联系 → 退订邮件 → 选邮箱
  * → 重复请求 → 对账上次不明的发送 → 配额 → 抢锁（联系人 + 收件地址两把）→ 锁内再看一次重复请求
  * → 先写会话 + 审计 → 建草稿 → 发送 → 发完补记录。
  *
@@ -19,6 +19,7 @@ import { hasEnquiryRecord, type TouchKind } from '@/lib/crm/email-compose/enquir
 import { evaluateQuota, quotaMessage, type EmailUsage } from '@/lib/crm/email-compose/quota'
 import { isUuid, normalizeRecipient, pickRecipient, sanitizeBody, sanitizeSubject } from '@/lib/crm/email-compose/validate'
 import type { ManualSendDncGate } from '@/lib/crm/manual-send-dnc-gate'
+import type { EmailUnsubscribeRead } from '@/lib/crm/email-unsubscribe'
 import { classifySender } from '@/lib/microsoft/mail-sender'
 import { effectiveFromLegacy, effectiveFromSettings, type EffectiveEmailConfig } from '@/lib/crm/email-templates/effective-config'
 import {
@@ -26,6 +27,7 @@ import {
   emptyMeta,
   type GateFailure,
   type GateReason,
+  type GateState,
   type MailNewGates,
   type PreLockResult,
   type SendMeta,
@@ -101,6 +103,11 @@ export interface MailNewStore {
   loadSettings?(clientId: string): Promise<LoadSettingsResult>
   /** 别再联系闸（按联系人，fail-closed）。 */
   checkDnc(clientId: string, contactId: string): Promise<ManualSendDncGate>
+  /**
+   * 退订邮件闸（ME 一键退订 / 把 ME 自动信标成垃圾邮件；按联系人或这些地址，fail-closed）。所有客户都查，
+   * 旧版设置的客户也查：它们不跑锁内关口。读不到 = `{ ok:false }`，必须拒发。
+   */
+  checkEmailUnsubscribed(clientId: string, contactId: string, addresses: readonly string[]): Promise<EmailUnsubscribeRead>
   loadContact(clientId: string, contactId: string): Promise<{ id: string; primaryEmail: string | null } | null>
   loadIdentityEmails(clientId: string, contactId: string): Promise<string[]>
   loadTouchKinds(clientId: string, contactId: string): Promise<TouchKind[]>
@@ -152,6 +159,16 @@ export interface MailNewDeps {
    * The caller still records every outcome afterwards; the receipt table drops the repeat (same request, same outcome).
    */
   recordUnderLock?(input: SendMailNewInput, result: SendMailNewResult): Promise<void>
+  /**
+   * Gives the tracked links of the body a click token (design 2026-11-10 B2 §4.2), after every gate and inside the
+   * guest's lock. Never throws: tracking is not a safety gate, so a failure returns the body untouched with a warning.
+   * Only the body is passed: links in the footer (an unsubscribe link, say) are never tokened.
+   */
+  tagLinks?(args: { input: SendMailNewInput; requestId: string; body: string; config: EffectiveEmailConfig; state: GateState }): Promise<{
+    body: string
+    tagged: number
+    warning: string | null
+  }>
 }
 
 const fail = (
@@ -244,7 +261,8 @@ async function resolveSend(
   const contact = await store.loadContact(input.clientId, input.contactId)
   if (!contact) return fail(404, 'not_found', '找不到这个客人。')
 
-  const pick = pickRecipient(contact.primaryEmail, await store.loadIdentityEmails(input.clientId, input.contactId))
+  const identityEmails = await store.loadIdentityEmails(input.clientId, input.contactId)
+  const pick = pickRecipient(contact.primaryEmail, identityEmails)
   if (!pick.ok) {
     return fail(409, 'no_recipient', pick.reason === 'ambiguous' ? '这个客人有多个邮箱且没有主邮箱，请先在资料里定一个。' : '这个客人没有可用的邮箱。')
   }
@@ -265,6 +283,10 @@ async function resolveSend(
 
   const dnc = await checkDnc(input, deps)
   if (dnc) return dnc
+
+  const addresses = [pick.email, contact.primaryEmail ?? '', ...identityEmails]
+  const unsubscribed = await checkUnsubscribed(input, deps, addresses)
+  if (unsubscribed) return unsubscribed
 
   const mailbox = await chooseMailbox(input.clientId, config, deps, verifyMailbox)
   if ('ok' in mailbox) return mailbox
@@ -486,13 +508,20 @@ async function sendUnderLock(args: LockedSend, deps: MailNewDeps): Promise<SendM
     if (!step.ok) return gateFailure(step)
     meta = step.meta
   }
+  let body = args.body
+  if (pre !== null && meta !== undefined && deps.tagLinks !== undefined) {
+    const tagged = await tagLinksSafely(deps.tagLinks, { input, requestId: args.requestId, body, config, state: pre.state })
+    body = tagged.body
+    const notes = [...(tagged.warning === null ? [] : [tagged.warning]), ...(tagged.tagged > 0 ? [`link_tracked:${tagged.tagged}`] : [])]
+    if (notes.length > 0) meta = { ...meta, warnings: [...meta.warnings, ...notes] }
+  }
   let sent: SendMailNewResult
   try {
     sent = await claimAndSend(
       {
         input,
         subject: args.subject,
-        body: appendFooter(args.body, config.footer),
+        body: appendFooter(body, config.footer),
         requestId: args.requestId,
         to: args.to,
         mailbox: args.mailbox,
@@ -512,6 +541,19 @@ async function sendUnderLock(args: LockedSend, deps: MailNewDeps): Promise<SendM
   return result
 }
 
+/** A tagLinks that throws anyway must not turn into a refusal (this is still before the send starts). */
+async function tagLinksSafely(
+  tag: NonNullable<MailNewDeps['tagLinks']>,
+  args: Parameters<NonNullable<MailNewDeps['tagLinks']>>[0],
+): Promise<{ body: string; tagged: number; warning: string | null }> {
+  try {
+    return await tag(args)
+  } catch (err) {
+    console.error('[mail-send-new] 打编号出错，这封按原文发出:', err instanceof Error ? err.message : err)
+    return { body: args.body, tagged: 0, warning: 'link_tracking_failed' }
+  }
+}
+
 const SEND_UNKNOWN_MESSAGE = '系统出错了，这封邮件有没有发出去还不确定。请先到时间线确认，别重复发送。'
 
 /** The receipt as sendMailNew will finally return it (with the mailbox), written before the locks are let go. */
@@ -527,6 +569,27 @@ async function checkDnc(input: SendMailNewInput, deps: MailNewDeps): Promise<Sen
   const gate: ManualSendDncGate = await deps.store.checkDnc(input.clientId, input.contactId)
   if (!gate.blocked) return null
   return fail(gate.status, gate.reason, gate.error)
+}
+
+/**
+ * The guest unsubscribed from e-mail (ME's link, or a spam complaint about an ME letter): no e-mail, for every client
+ * (clients on the old settings never reach the in-lock check). Its own check, not part of "do not contact": calls stay.
+ * An unreadable answer refuses the send.
+ */
+async function checkUnsubscribed(
+  input: SendMailNewInput,
+  deps: MailNewDeps,
+  addresses: readonly string[],
+): Promise<SendMailNewResult | null> {
+  let read: EmailUnsubscribeRead
+  try {
+    read = await deps.store.checkEmailUnsubscribed(input.clientId, input.contactId, addresses)
+  } catch (err) {
+    read = { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+  if (!read.ok) return fail(503, 'unsubscribe_unverifiable', GATE_MESSAGES.unsubscribe_unverifiable)
+  if (read.unsubscribed) return fail(409, 'email_unsubscribed', GATE_MESSAGES.email_unsubscribed)
+  return null
 }
 
 interface SendPlan {

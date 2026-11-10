@@ -79,7 +79,7 @@ export function judgeSwitch(spec: PromoSpec, evidence: SwitchEvidence): SwitchVe
   const row = spec.delivery
   if (!row) return { kind: 'not_marked', text: '这份计划还没写入试投、放量或稳住。下面按试投来提醒。已批准的计划不会因此被重新批准。' }
   if (row.stage === 'steady') return { kind: 'steady', text: `${STAGE_LABEL.steady}阶段不提案加预算，也不另起计划。` }
-  if (row.stage === 'scale') return { kind: 'scale_hold', text: '放量之后什么时候进入稳住，规则还没定。这次不提案。' }
+  if (row.stage === 'scale') return { kind: 'scale_hold', text: '放量之后，每日检查会按客户目标看要不要提议回到稳住。这里不另起计划，也不改预算。' }
   const blocked = evidenceBlock(evidence, row.started_on)
   return blocked ?? costVerdict(evidence)
 }

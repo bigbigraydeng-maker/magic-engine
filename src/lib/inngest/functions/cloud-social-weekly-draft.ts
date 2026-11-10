@@ -599,6 +599,7 @@ async function handleDue(
   const ctx = await step.run('parse-event', async () => parseDueEvent(event, deps.now()))
 
   let receipt: ClientRunReceipt
+  let imagePostReceipt: ImagePostStepReceipt | null = null
   if (!ctx.clientId) {
     receipt = await step.run('invalid-event', async () => invalidEventReceipt(ctx))
   } else {
@@ -644,31 +645,36 @@ async function handleDue(
         return loopErrorReceipt(ctx, resolved.mode, resolved.forced, message, backfill.receipt)
       }
     })
-  }
-
-  // --- Image post auto-draft (knife 3) ---
-  let imagePostReceipt: ImagePostStepReceipt | null = null
-  if (ctx.clientId && resolved.mode === 'write') {
-    imagePostReceipt = await step.run('draft-image-posts', async (): Promise<ImagePostStepReceipt> => {
-      if (!process.env.OPENAI_API_KEY) {
-        return { attempted: 0, drafted: 0, planIds: [], skipped: 'no_openai_key', error: null }
-      }
-      const { getOpenAIClient } = await import('@/lib/ai/openai-client')
-      const openai = getOpenAIClient()
-      const callLLM = async (prompt: string): Promise<string> => {
-        const resp = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.7,
-          max_tokens: 600,
-        })
-        return resp.choices[0]?.message?.content ?? ''
-      }
-      return runImagePostStep(ctx.clientId, isoDate(deps.now()), resolved.clientConfig, null, {
-        supabase: supabaseAdmin,
-        callLLM,
+    // --- Image post auto-draft (knife 3) ---
+    if (resolved.mode === 'write') {
+      imagePostReceipt = await step.run('draft-image-posts', async (): Promise<ImagePostStepReceipt> => {
+        // Own step, own safety net: whatever goes wrong here becomes an error receipt. It must never stop 'finish-run'
+        // (the run log) or touch the reel loop, which already finished above.
+        try {
+          if (!process.env.OPENAI_API_KEY) {
+            return { attempted: 0, drafted: 0, planIds: [], skipped: 'no_openai_key', error: null }
+          }
+          const { getOpenAIClient } = await import('@/lib/ai/openai-client')
+          const openai = getOpenAIClient()
+          const callLLM = async (prompt: string): Promise<string> => {
+            const resp = await openai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              messages: [{ role: 'user', content: prompt }],
+              temperature: 0.7,
+              max_tokens: 600,
+            })
+            return resp.choices[0]?.message?.content ?? ''
+          }
+          return await runImagePostStep(ctx.clientId, isoDate(nzCalendar(deps.now())), resolved.clientConfig, null, {
+            supabase: supabaseAdmin,
+            callLLM,
+          })
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e)
+          return { attempted: 0, drafted: 0, planIds: [], skipped: null, error: `image_step_failed: ${message}`.slice(0, 300) }
+        }
       })
-    })
+    }
   }
 
   await step.run('finish-run', async () => {
