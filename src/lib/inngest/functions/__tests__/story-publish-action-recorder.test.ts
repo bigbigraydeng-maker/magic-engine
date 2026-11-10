@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { createStoryPublishActionRecorder, STORY_PUBLISH_ACTION_RECORDER_ID } from '../story-publish-action-recorder'
+import type { PublishDispatchReceipt } from '@/lib/social/publish-gate/receipt'
 import { cloudFunctions } from '../index'
 import { CLOUD_FN_PREFIX, WORKER_OWNED_EVENTS } from '../../client'
 import { LITE_EVENTS } from '@/lib/social/story-lite/types'
@@ -75,10 +76,16 @@ function sentItem(over: Record<string, unknown> = {}) {
   }
 }
 
-function run(data: unknown, store = db()) {
+function run(data: unknown, store = db(), opts: { enabled?: boolean; clientLive?: boolean } = {}) {
   const step = { run: vi.fn(async (_id: string, fn: () => Promise<unknown>) => fn()) }
-  const fn = createStoryPublishActionRecorder({ supabase: store.supabase, enabled: () => true })
-  return { step, store, done: handlerOf(fn)({ event: { data }, step }) }
+  const receipts: PublishDispatchReceipt[] = []
+  const fn = createStoryPublishActionRecorder({
+    supabase: store.supabase,
+    enabled: () => opts.enabled ?? true,
+    clientLive: async () => opts.clientLive ?? true,
+    recordDryRun: async (receipt) => { receipts.push(receipt) },
+  })
+  return { step, store, receipts, done: handlerOf(fn)({ event: { data }, step }) }
 }
 
 describe('story publish action recorder', () => {
@@ -94,17 +101,45 @@ describe('story publish action recorder', () => {
       'src/lib/inngest/functions/story-publish-action-recorder.ts',
       'src/lib/inngest/functions/story-publish-action-reconcile.ts',
       'src/lib/social/story-publish-action.ts',
+      'src/lib/social/publish-gate/receipt.ts',
+      'src/lib/social/publish-gate/read-live.ts',
     ].map((name) => readFileSync(resolve(name), 'utf8')).join('\n')
     expect(src).not.toContain('graph.facebook.com')
   })
 
-  it('switch off: a live send does not query and does not step', async () => {
-    const store = db()
+  it('master switch off: a live send records post id and time and writes no action', async () => {
+    const { store, receipts, done } = run(liveEvent(), db(), { enabled: false })
+    await expect(done).resolves.toMatchObject({ ok: true, mode: 'dry_run', recorded: true })
+    expect(receipts).toEqual([expect.objectContaining({
+      kind: 'story_register',
+      mode: 'dry_run',
+      postId: 'story-receipt-1',
+      publishedAt: '2026-11-02T07:00:00.000Z',
+      calledPublishApi: false,
+      reason: 'master_switch_off',
+    })])
+    expect(store.inserts.filter((row) => row.table === 'flywheel_actions')).toHaveLength(0)
+  })
+
+  it('client switch off: the master switch alone does not write an action', async () => {
+    const { store, receipts, done } = run(liveEvent(), db(), { enabled: true, clientLive: false })
+    await expect(done).resolves.toMatchObject({ mode: 'dry_run', recorded: true })
+    expect(receipts[0]).toMatchObject({ reason: 'client_switch_off', calledPublishApi: false, postId: 'story-receipt-1' })
+    expect(store.inserts.filter((row) => row.table === 'flywheel_actions')).toHaveLength(0)
+  })
+
+  it('a live send that does not match leaves a failed receipt when the switch is off', async () => {
+    const { store, receipts, done } = run(liveEvent(), db({ item: sentItem({ status: 'FAILED' }) }), { enabled: false })
+    await expect(done).resolves.toMatchObject({ ok: false, reason: 'status_not_sent', recorded: true })
+    expect(receipts[0]).toMatchObject({ mode: 'failed', calledPublishApi: false, reason: 'status_not_sent' })
+    expect(store.inserts.filter((row) => row.table === 'flywheel_actions')).toHaveLength(0)
+    expect(store.inserts.filter((row) => row.table === 'cron_run_logs')).toHaveLength(0)
+  })
+
+  it('a missing receipt writer is not a silent skip', async () => {
     const step = { run: vi.fn(async (_id: string, fn: () => Promise<unknown>) => fn()) }
-    const fn = createStoryPublishActionRecorder({ supabase: store.supabase, enabled: () => false })
-    await expect(handlerOf(fn)({ event: { data: liveEvent() }, step })).resolves.toEqual({ skipped: 'register_disabled' })
-    expect(step.run).not.toHaveBeenCalled()
-    expect(store.from).not.toHaveBeenCalled()
+    const fn = createStoryPublishActionRecorder({ supabase: db().supabase, enabled: () => false })
+    await expect(handlerOf(fn)({ event: { data: liveEvent() }, step })).rejects.toThrow('receipt writer missing')
   })
 
   it('T11b dry run, blocked, and retry do not query and do not step', async () => {
