@@ -112,6 +112,14 @@ describe('build · 身份哈希', () => {
     expect(nz.data[0].user_data.ph).toEqual(intl.data[0].user_data.ph)
   })
 
+  it('库里存的国际格式纯数字电话，客户没配默认国家码也带上（2026-11-10：三个开了回传的客户都没配，电话从没发出去过）', () => {
+    const noCountry = { ...CONFIG, defaultPhoneCountry: null }
+    const stored = writer.build(outcome({ customerPhone: '6421555123' }), noCountry)
+    const intl = writer.build(outcome({ customerPhone: '+64 21 555 123' }), noCountry)
+    expect(stored.data[0].user_data.ph).toBeDefined()
+    expect(stored.data[0].user_data.ph).toEqual(intl.data[0].user_data.ph)
+  })
+
   it('换个国家的客户，同样的本地号码哈希不同', () => {
     // 这条钉住"国别不能写死"：换客户换国家，行为必须跟着变。
     const nz = writer.build(outcome({ customerPhone: '021 555 1234' }), CONFIG)

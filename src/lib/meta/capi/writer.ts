@@ -34,7 +34,7 @@ import type {
   RawSendResult,
   SendVerdict,
 } from '@/lib/conversions/destination-writer'
-import { hashEmail, hashName, hashPhone } from '@/lib/pii/hasher'
+import { hashEmail, hashName, hashStoredPhone } from '@/lib/pii/hasher'
 import { maskForPreview } from './preview'
 import { resolveCapiConfig, type CapiCredentials } from './config'
 import { toMajorUnits } from '@/lib/conversions/money'
@@ -144,7 +144,7 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
     const userData: Record<string, string[] | string> = {}
 
     const em = hashEmail(outcome.customerEmail)
-    const ph = hashPhone(outcome.customerPhone, config.defaultPhoneCountry)
+    const ph = hashStoredPhone(outcome.customerPhone, config.defaultPhoneCountry)
     const fn = hashName(outcome.customerFirst)
     const ln = hashName(outcome.customerLast)
 
@@ -224,7 +224,7 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
     }
     const userData: Record<string, string[] | string> = { lead_id: outcome.metaLeadId }
     const em = hashEmail(outcome.customerEmail)
-    const ph = hashPhone(outcome.customerPhone, config.defaultPhoneCountry)
+    const ph = hashStoredPhone(outcome.customerPhone, config.defaultPhoneCountry)
     const fn = hashName(outcome.customerFirst)
     const ln = hashName(outcome.customerLast)
     if (em) userData.em = [em]
