@@ -1,7 +1,8 @@
 /**
  * Production wiring of the authorization commands: the authorization table, 127's template store and settings, the
  * salespeople's mailbox connections, the rehearsal's shadow rows and sweep receipts, the event sender, the deploy
- * settings and the clock. Read failures are passed on as failures, never as "none".
+ * settings and the clock; the status also reads the latest live ledger rows. Read failures are passed on as failures,
+ * never as "none".
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §4.3 (plan: §17).
  */
 
@@ -12,6 +13,7 @@ import { getCurrentTemplate } from '@/lib/crm/email-templates/template-store'
 import { createMailNewStore } from '@/lib/microsoft/mail-send-new-prod'
 import { sendInngestEvent } from '@/lib/workflows/inngest-event'
 import type { CommandDeps, SalesCapRead, TemplateRead } from './authorization-core'
+import type { StatusDeps } from './authorization-status'
 import {
   activateAuthorization,
   authorizeProposal,
@@ -20,6 +22,7 @@ import {
   loadOpenAuthorizations,
   revokeAuthorization,
 } from './authorization-store'
+import { readRecentSends } from './recent-sends'
 import { loadRehearsalEvidence } from './rehearsal-evidence'
 import { checkRequiredMailboxes } from './shadow-reads-prod'
 
@@ -68,5 +71,7 @@ export function createAuthorizationDeps(db: SupabaseClient): CommandDeps {
   }
 }
 
-/** The status needs exactly the command ports. */
-export const createAuthorizationStatusDeps = createAuthorizationDeps
+/** The status: the command ports plus the page's 「最近发送」 (live ledger rows only). */
+export function createAuthorizationStatusDeps(db: SupabaseClient): StatusDeps {
+  return { ...createAuthorizationDeps(db), loadRecentSends: (clientId) => readRecentSends(db, clientId) }
+}

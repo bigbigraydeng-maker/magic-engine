@@ -267,3 +267,136 @@ describe('welcome-letter-text', () => {
     expect(rehearsalHeadline({ ...base, consecutiveDays: 0, runFrom: null, runTo: null, undatedRows: 2 })).toContain('算不出是哪天的线索')
   })
 })
+
+describe('WelcomeLetterPanel — 最近发送 and 「结果不明」 (之二乙)', () => {
+  const GUEST = 'b0000000-0000-4000-8000-000000000001'
+  const SEEN = '2026-11-20T16:00:00.123456+00:00'
+  const send = (over: Record<string, unknown> = {}) => ({
+    id: 's-1',
+    contact_id: GUEST,
+    status: 'unknown_outcome',
+    reason_code: 'expired_20h',
+    last_block_reason: null,
+    bounce_kind: null,
+    provider_impact: 'PROVIDER_UNKNOWN',
+    attempts: 2,
+    first_attempt_at: '2026-11-19T20:00:00.000Z',
+    sent_at: null,
+    last_event_type: null,
+    last_event_at: null,
+    created_at: '2026-11-19T20:00:00.000Z',
+    updated_at: SEEN,
+    resolution: null,
+    ...over,
+  })
+  const statusCalls = () => calls.filter((c) => c.url.endsWith('/status')).length
+
+  it('🔴 lists the real letters in words, links each guest, never shows an address, and says how many need a person', async () => {
+    statusBody = status({
+      recent_sends: [
+        send(),
+        send({ id: 's-2', status: 'delivered', reason_code: null, provider_impact: 'PROVIDER_ACCEPTED', attempts: 1, sent_at: '2026-11-18T20:00:01.000Z' }),
+        send({ id: 's-3', status: 'blocked', reason_code: 'missing_first_name', provider_impact: 'NONE', attempts: 0 }),
+        send({ id: 's-4', status: 'bounced', reason_code: null, bounce_kind: 'permanent', provider_impact: 'PROVIDER_ACCEPTED', attempts: 1 }),
+      ],
+      recent_sends_limit: 20,
+    })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    const box = await screen.findByTestId('recent-sends')
+    expect(screen.getAllByTestId('recent-send')).toHaveLength(4)
+    for (const words of ['结果不明', '已送达', '客人没有名字', '试过 2 次', '永久退信', '只显示最近 20 封']) expect(box.textContent, words).toContain(words)
+    expect(screen.getByTestId('unknown-count').textContent).toContain('有 1 封信结果不明')
+    expect(box.textContent).not.toContain('@')
+    expect(box.querySelector('a')?.getAttribute('href')).toBe(`/dashboard/clients/${CLIENT}/crm/all?contact=${GUEST}`)
+  })
+
+  it('an empty list says nothing was sent yet; a failed read says it could not read them (never "nothing sent")', async () => {
+    statusBody = status({ recent_sends: [] })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    expect((await screen.findByTestId('recent-sends')).textContent).toContain('还没有真发过信')
+    cleanup()
+    statusBody = status({ recent_sends: null })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    const box = await screen.findByTestId('recent-sends')
+    expect(box.textContent).toContain('暂时读不到最近发送')
+    expect(box.textContent).not.toContain('还没有真发过信')
+  })
+
+  it('🔴 「没发出」: a preview of the letter as seen, the consequence before confirming, then confirm and read the page again', async () => {
+    statusBody = status({ recent_sends: [send()] })
+    commandBody = { success: true, mode: 'PREVIEW', outcome: 'not_sent', consequence: 'NEVER_WELCOMED_AUTOMATICALLY_AGAIN' }
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    fireEvent.click(await screen.findByText('核对后标「没发出」'))
+    expect((await screen.findByTestId('resolve-preview')).textContent).toContain('以后不会再自动收到欢迎信')
+    expect(posted('resolve-unknown')[0]).toEqual({ client_id: CLIENT, send_id: 's-1', outcome: 'not_sent', seen_updated_at: SEEN, confirm: false })
+
+    commandBody = { success: true, mode: 'RESOLVED', outcome: 'not_sent', timeline: 'failed' }
+    fireEvent.click(screen.getByText('确认标「没发出」'))
+    await waitFor(() => expect(posted('resolve-unknown')).toHaveLength(2))
+    expect(posted('resolve-unknown')[1]).toMatchObject({ outcome: 'not_sent', confirm: true, seen_updated_at: SEEN })
+    const notice = (await screen.findByTestId('notice')).textContent
+    expect(notice).toContain('已标「没发出」')
+    expect(notice).toContain('时间线上那一条没改成')
+    await waitFor(() => expect(statusCalls()).toBe(2))
+  })
+
+  it('a letter that moved on meanwhile is not marked: the page says so and reads again', async () => {
+    statusBody = status({ recent_sends: [send()] })
+    commandBody = { success: false, error: 'NOT_UNKNOWN' }
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    fireEvent.click(await screen.findByText('核对后标「已发出」'))
+    expect((await screen.findByTestId('notice')).textContent).toContain('状态已经变了')
+    expect(screen.queryByTestId('resolve-preview')).toBeNull()
+    await waitFor(() => expect(statusCalls()).toBe(2))
+  })
+
+  it('🔴 someone who may manage but is not the approver sees why there are no buttons', async () => {
+    statusBody = status({ can_authorize: false, recent_sends: [send()] })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    expect((await screen.findByTestId('resolve-not-approver')).textContent).toContain('只有 PM 本人')
+    expect(screen.queryByTestId('resolve-box')).toBeNull()
+  })
+
+  it('a settled letter shows who settled it and when, and offers no buttons', async () => {
+    statusBody = status({
+      recent_sends: [send({ status: 'failed', reason_code: 'not_sent_confirmed', resolution: { outcome: 'not_sent', by: 'pm@example.com', at: '2026-11-20T01:00:00.000Z' } })],
+    })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    const box = await screen.findByTestId('recent-sends')
+    expect(box.textContent).toContain('pm@example.com 在')
+    expect(box.textContent).toContain('标了「没发出」')
+    expect(screen.queryByTestId('resolve-box')).toBeNull()
+    expect(screen.queryByTestId('unknown-count')).toBeNull()
+  })
+
+  it('🔴 says this version sends trials only: a formal proposal, its preview and a formal authorization all say they send nothing', async () => {
+    statusBody = status({
+      authorization: { record: record({ id: 'a-1', authorized_at: '2026-11-15T00:00:00.000Z' }), summary: ['x'], trial: false, state: 'formal_sending_not_enabled', template: null },
+    })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    expect((await screen.findByTestId('trial-only-note')).textContent).toContain('只发内部邮箱的试跑')
+    expect(screen.getByTestId('formal-proposal-note').textContent).toContain('正式名单就算批了也一封都不发')
+    expect(screen.getByTestId('authorization').textContent).toContain('正式名单一封都不发')
+    fireEvent.click(screen.getByText('预览授权'))
+    expect((await screen.findByTestId('authorize-preview')).textContent).toContain('批了也一封都不发')
+  })
+
+  it('a trial in force with no formal proposal open reminds to propose one; with one open it does not', async () => {
+    const trial = { record: record({ id: 'a-1', authorized_at: '2026-11-15T00:00:00.000Z' }), summary: ['x'], trial: true, state: 'active', template: null }
+    statusBody = status({ authorization: trial, proposal: null })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    expect((await screen.findByTestId('trial-followup')).textContent).toContain('再提一份正式名单的提案')
+    cleanup()
+    statusBody = status({ authorization: trial })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    await screen.findByTestId('authorization')
+    expect(screen.queryByTestId('trial-followup')).toBeNull()
+  })
+
+  it('the site address is one of the things a real send needs (yes/no only)', async () => {
+    statusBody = status({ prerequisites: { ...status().prerequisites, app_url: false } })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    const row = [...(await screen.findByTestId('prerequisites')).querySelectorAll('li')].find((li) => li.textContent?.includes('站点地址'))
+    expect(row?.textContent).toContain('✗')
+  })
+})

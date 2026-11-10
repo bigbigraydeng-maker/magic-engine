@@ -17,14 +17,21 @@ vi.mock('@/lib/messaging/triggered-send/authorization-authorize', async (importO
   return { ...actual, authorizeCommand: vi.fn() }
 })
 vi.mock('@/lib/messaging/triggered-send/authorization-status', () => ({ statusQuery: vi.fn() }))
+vi.mock('@/lib/messaging/triggered-send/resolve-store', () => ({ createResolveDeps: vi.fn(() => ({ marker: 'resolve-deps' })) }))
+vi.mock('@/lib/messaging/triggered-send/resolve-unknown', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/messaging/triggered-send/resolve-unknown')>()
+  return { ...actual, resolveUnknownCommand: vi.fn() }
+})
 
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
 import { authorizeCommand } from '@/lib/messaging/triggered-send/authorization-authorize'
 import { proposeCommand, revokeCommand } from '@/lib/messaging/triggered-send/authorization-commands'
 import { statusQuery } from '@/lib/messaging/triggered-send/authorization-status'
+import { resolveUnknownCommand } from '@/lib/messaging/triggered-send/resolve-unknown'
 import { POST as authorizePOST } from '../authorize/route'
 import { POST as proposePOST } from '../propose/route'
+import { POST as resolvePOST } from '../resolve-unknown/route'
 import { POST as revokePOST } from '../revoke/route'
 import { GET as statusGET } from '../status/route'
 
@@ -39,19 +46,21 @@ const commands = {
   propose: vi.mocked(proposeCommand),
   authorize: vi.mocked(authorizeCommand),
   revoke: vi.mocked(revokeCommand),
+  resolve: vi.mocked(resolveUnknownCommand),
   status: vi.mocked(statusQuery),
 }
 
 const globalAdmin = { ok: true as const, user: { id: USER_ID, email: 'PM@Example.com' }, role: 'admin' as const, tier: 'admin' as const, allowedClientId: null }
 
-const bodies: Record<'propose' | 'authorize' | 'revoke', Record<string, unknown>> = {
+const bodies: Record<'propose' | 'authorize' | 'revoke' | 'resolve-unknown', Record<string, unknown>> = {
   propose: { client_id: CLIENT, account: 'cts', daily_cap: 20, rule: {}, confirm: false },
   authorize: { client_id: CLIENT, authorization_id: ID, rule_sha256: SHA, template_sha256: SHA },
   revoke: { client_id: CLIENT, authorization_id: ID, reason: 'stop' },
+  'resolve-unknown': { client_id: CLIENT, send_id: ID, outcome: 'not_sent', seen_updated_at: '2026-11-19T22:00:00.123456+00:00' },
 }
-const handlers = { propose: proposePOST, authorize: authorizePOST, revoke: revokePOST }
+const handlers = { propose: proposePOST, authorize: authorizePOST, revoke: revokePOST, 'resolve-unknown': resolvePOST }
 type WriteName = keyof typeof handlers
-const WRITES: WriteName[] = ['propose', 'authorize', 'revoke']
+const WRITES: WriteName[] = ['propose', 'authorize', 'revoke', 'resolve-unknown']
 
 function post(name: WriteName, body: unknown, opts: { clientId?: string; contentType?: string } = {}) {
   const clientId = opts.clientId ?? CLIENT
@@ -75,7 +84,7 @@ beforeEach(() => {
   process.env.TRIGGERED_SEND_APPROVER_EMAILS = ' pm@example.com '
   mockedAccess.mockResolvedValue(globalAdmin as never)
   mockedAdmin.mockReturnValue(true)
-  for (const c of [commands.propose, commands.authorize, commands.revoke, commands.status]) {
+  for (const c of [commands.propose, commands.authorize, commands.revoke, commands.resolve, commands.status]) {
     c.mockResolvedValue({ status: 200, body: { success: true, mode: 'PREVIEW' } })
   }
 })
@@ -159,6 +168,37 @@ describe('🔴 authorizing: the PM himself only (the approver list), never just 
     expect((await post('authorize', bodies.authorize)).status).toBe(200)
     await getStatus()
     expect(commands.status).toHaveBeenCalledWith({ marker: 'status-deps' }, CLIENT, { canAuthorize: true })
+  })
+})
+
+describe('🔴 「已发出 / 没发出」: the PM himself only, like authorizing (「没发出」 means never welcomed automatically again)', () => {
+  it('a global administrator who is not on the approver list cannot settle a letter', async () => {
+    mockedAccess.mockResolvedValue({ ...globalAdmin, user: { id: USER_ID, email: 'other-admin@example.com' } } as never)
+    const res = await post('resolve-unknown', { ...bodies['resolve-unknown'], confirm: true })
+    expect(res.status).toBe(403)
+    expect((await res.json()).error).toBe('APPROVER_REQUIRED')
+    expect(commands.resolve).not.toHaveBeenCalled()
+  })
+
+  it('no approver list configured = nobody may settle a letter', async () => {
+    delete process.env.TRIGGERED_SEND_APPROVER_EMAILS
+    expect((await post('resolve-unknown', bodies['resolve-unknown'])).status).toBe(403)
+    expect(commands.resolve).not.toHaveBeenCalled()
+  })
+
+  it('the PM on the list may; the command gets him, the ledger port and the body (a preview unless confirmed)', async () => {
+    expect((await post('resolve-unknown', bodies['resolve-unknown'])).status).toBe(200)
+    expect(commands.resolve).toHaveBeenCalledWith(
+      { marker: 'resolve-deps' },
+      CLIENT,
+      { email: 'pm@example.com', userId: USER_ID },
+      expect.objectContaining({ send_id: ID, outcome: 'not_sent', confirm: false }),
+    )
+  })
+
+  it('refuses an answer other than the two', async () => {
+    expect((await post('resolve-unknown', { ...bodies['resolve-unknown'], outcome: 'delivered' })).status).toBe(400)
+    expect(commands.resolve).not.toHaveBeenCalled()
   })
 })
 

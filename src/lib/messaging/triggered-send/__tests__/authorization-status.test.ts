@@ -14,16 +14,16 @@ beforeEach(() => {
 })
 
 async function proposalOf(): Promise<Record<string, unknown>> {
-  return (await statusQuery(w.deps, CLIENT, ADMIN)).body.proposal as Record<string, unknown>
+  return (await statusQuery(w.statusDeps, CLIENT, ADMIN)).body.proposal as Record<string, unknown>
 }
 
 async function authorizationOf(): Promise<Record<string, unknown>> {
-  return (await statusQuery(w.deps, CLIENT, ADMIN)).body.authorization as Record<string, unknown>
+  return (await statusQuery(w.statusDeps, CLIENT, ADMIN)).body.authorization as Record<string, unknown>
 }
 
 describe('status — the PM page', () => {
   it('nothing proposed: says so, practice mode, no prerequisites; says whether this viewer may authorize', async () => {
-    const res = await statusQuery(w.deps, CLIENT, { canAuthorize: false })
+    const res = await statusQuery(w.statusDeps, CLIENT, { canAuthorize: false })
     expect(res.body).toMatchObject({ success: true, can_manage: true, can_authorize: false, mode: 'practice', proposal: null, authorization: null, prerequisites: null })
   })
 
@@ -77,7 +77,8 @@ describe('status — the PM page', () => {
   })
 
   it('the authorization in force is judged like the sender would; a disabled or edited template voids it, an unreadable one is temporary', async () => {
-    w.store.seed({ authorizedAt: '2026-11-15T00:00:00.000Z', activatedAt: '2026-11-15T00:00:01.000Z', expiresAt: '2027-02-01T00:00:00.000Z' })
+    const rule = sendableRule({ recipient_allowlist: ['hello@example.com'] })
+    w.store.seed({ rule, ruleSha256: ruleSha256(rule), authorizedAt: '2026-11-15T00:00:00.000Z', activatedAt: '2026-11-15T00:00:01.000Z', expiresAt: '2027-02-01T00:00:00.000Z' })
     expect((await authorizationOf()).state).toBe('active')
     w.set.template({ ok: false })
     expect((await authorizationOf()).state).toBe('template_unreadable')
@@ -96,9 +97,9 @@ describe('status — the PM page', () => {
 
   it('says whether the approver list is set (yes/no only)', async () => {
     w.store.seed()
-    expect(((await statusQuery(w.deps, CLIENT, ADMIN)).body.prerequisites as Record<string, unknown>).approvers).toBe(false)
+    expect(((await statusQuery(w.statusDeps, CLIENT, ADMIN)).body.prerequisites as Record<string, unknown>).approvers).toBe(false)
     w.set.env({ TRIGGERED_SEND_APPROVER_EMAILS: 'pm@example.com' })
-    const body = (await statusQuery(w.deps, CLIENT, ADMIN)).body
+    const body = (await statusQuery(w.statusDeps, CLIENT, ADMIN)).body
     expect((body.prerequisites as Record<string, unknown>).approvers).toBe(true)
     expect(JSON.stringify(body)).not.toContain('pm@example.com')
   })
@@ -120,17 +121,49 @@ describe('status — the PM page', () => {
       UNSUBSCRIBE_SIGNING_SECRET: 's'.repeat(40),
       TRIGGERED_SEND_TRIAL_DOMAINS: 'example.com',
     })
-    const res = await statusQuery(w.deps, CLIENT, ADMIN)
+    const res = await statusQuery(w.statusDeps, CLIENT, ADMIN)
     expect(res.body).toMatchObject({ mode: 'live', prerequisites: { account: 'cts', account_key: true, unsubscribe_secret: true, events: true, trial_domains: true } })
     expect(JSON.stringify(res.body)).not.toContain('x'.repeat(30))
     expect(JSON.stringify(res.body)).not.toContain('s'.repeat(40))
     w.set.env({ TRIGGERED_SEND_LIVE: 'TRUE', TRIGGERED_SEND_CLIENTS: CLIENT })
-    expect((await statusQuery(w.deps, CLIENT, ADMIN)).body).toMatchObject({ mode: 'practice', prerequisites: { trial_domains: false } })
+    expect((await statusQuery(w.statusDeps, CLIENT, ADMIN)).body).toMatchObject({ mode: 'practice', prerequisites: { trial_domains: false } })
+  })
+
+  it('🔴 this version sends trials only: an authorization for the real list in force is shown as "sends nothing"', async () => {
+    w.store.seed({ authorizedAt: '2026-11-15T00:00:00.000Z', activatedAt: '2026-11-15T00:00:01.000Z', expiresAt: '2027-02-01T00:00:00.000Z' })
+    expect(await authorizationOf()).toMatchObject({ trial: false, state: 'formal_sending_not_enabled' })
+    // Not active for another reason first: that reason is what the PM sees.
+    w.set.template({ ok: false })
+    expect((await authorizationOf()).state).toBe('template_unreadable')
+  })
+
+  it('says whether the site address the unsubscribe link needs is usable (https, no path), yes/no only', async () => {
+    w.store.seed()
+    const appUrl = async (value: string | null) => {
+      w.set.env(value === null ? {} : { APP_URL: value })
+      return ((await statusQuery(w.statusDeps, CLIENT, ADMIN)).body.prerequisites as Record<string, unknown>).app_url
+    }
+    expect(await appUrl(null)).toBe(false)
+    expect(await appUrl('http://app.example.com')).toBe(false)
+    expect(await appUrl('https://app.example.com/some/path')).toBe(false)
+    expect(await appUrl('https://app.example.com')).toBe(true)
+  })
+
+  it('🔴 shows the latest live letters as read; a failed read is null (the page says so), never an empty list', async () => {
+    const rows = [{ id: 's1', status: 'unknown_outcome' }, { id: 's2', status: 'delivered' }]
+    w.set.recentSends({ ok: true, rows: rows as never })
+    expect((await statusQuery(w.statusDeps, CLIENT, ADMIN)).body).toMatchObject({ recent_sends: rows, recent_sends_limit: 20 })
+    w.set.recentSends({ ok: false, error: 'recent sends: 08006' })
+    expect((await statusQuery(w.statusDeps, CLIENT, ADMIN)).body.recent_sends).toBeNull()
+    w.set.recentSends('throw')
+    const res = await statusQuery(w.statusDeps, CLIENT, ADMIN)
+    expect(res.status).toBe(200)
+    expect(res.body.recent_sends).toBeNull()
   })
 
   it('a failed read of the table is a 500, never "nothing proposed"', async () => {
     w.store.fail.loadOpen = '08006'
-    expect(await statusQuery(w.deps, CLIENT, ADMIN)).toMatchObject({ status: 500, body: { error: 'AUTHORIZATIONS_UNREADABLE' } })
+    expect(await statusQuery(w.statusDeps, CLIENT, ADMIN)).toMatchObject({ status: 500, body: { error: 'AUTHORIZATIONS_UNREADABLE' } })
   })
 })
 

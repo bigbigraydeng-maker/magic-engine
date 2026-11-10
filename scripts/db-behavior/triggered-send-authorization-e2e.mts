@@ -19,7 +19,7 @@ if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$/.test(target)) {
 const SRC = new URL('../../src/', import.meta.url)
 const load = (path: string) => import(new URL(path, SRC).href)
 const { supabaseAdmin } = await load('lib/supabase.ts')
-const { createAuthorizationDeps } = await load('lib/messaging/triggered-send/authorization-deps-prod.ts')
+const { createAuthorizationStatusDeps } = await load('lib/messaging/triggered-send/authorization-deps-prod.ts')
 const { proposeCommand, revokeCommand } = await load('lib/messaging/triggered-send/authorization-commands.ts')
 const { authorizeCommand } = await load('lib/messaging/triggered-send/authorization-authorize.ts')
 const { statusQuery } = await load('lib/messaging/triggered-send/authorization-status.ts')
@@ -48,7 +48,8 @@ let mailboxes: { ok: true } | { ok: false; reason: 'missing' | 'unreadable'; det
 const ENV: Record<string, string> = { TRIGGERED_SEND_TRIAL_DOMAINS: 'example.test' }
 function deps() {
   return {
-    ...createAuthorizationDeps(supabaseAdmin),
+    // The status ports are the command ports plus 「最近发送」; the commands ignore the extra one.
+    ...createAuthorizationStatusDeps(supabaseAdmin),
     emit: async (event: { id: string; data: Record<string, unknown> }) => {
       if (emitFails) throw new Error('inngest down (simulated)')
       events.push(event)
@@ -151,7 +152,8 @@ check('C7 event "authorized" went out before arming', events.at(-1)?.data.change
 const again = await authorizeCommand(deps(), CLIENT, ACTOR, { ...cmd, confirm: true })
 check('C8 a second click on the same proposal is refused', again.status === 409 && again.body.error === 'ALREADY_AUTHORIZED', again.body)
 st = await status()
-check('C9 status: the authorization is active', st.authorization?.state === 'active', st.authorization)
+// It is in force; this version sends trials only, so an authorization for the real list says it sends nothing (P2-2c-2b).
+check('C9 status: the authorization is in force, and for the real list it says it sends nothing in this version', st.authorization?.state === 'formal_sending_not_enabled', st.authorization?.state)
 
 // ── D. the database's own guards, bypassing the store's filters ──
 const sneak = await supabaseAdmin.from('triggered_send_authorizations').update({ authorized_by_email: 'x@example.test', authorized_by_user_id: ACTOR.userId, authorized_at: new Date().toISOString(), live_from: new Date(Date.now() - 60_000).toISOString(), expires_at: new Date(Date.now() + 86_400_000).toISOString() }).eq('id', p0.id).select('id')
