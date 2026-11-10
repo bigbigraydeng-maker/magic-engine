@@ -235,9 +235,9 @@ describe('comment auto-reply route gate', () => {
     expect(res.needs_human).toBe(1)
   })
 
-  it('pure praise that is not a greeting or FAQ goes to a human with no thank-you', async () => {
-    const res = await run('What a wonderful day out', wouldSend({
-      category: 'praise',
+  it('a non-praise comment that is not greeting or FAQ goes to a human with no thank-you', async () => {
+    const res = await run('Where did I leave my hat?', wouldSend({
+      category: 'other',
       publicReply: 'thanks-template',
       publicReplyAfterDm: null,
       privateReply: null,
@@ -303,6 +303,19 @@ describe('comment auto-reply route gate', () => {
     expect(replyToComment).toHaveBeenCalledWith('comment-1', 'thanks-template', 'page-token')
     expect(res).toMatchObject({ public_replies: 1, private_replies: 0, hidden: 0, needs_human: 0, failed: 0 })
     expect(flywheelInserts).toHaveLength(1)
+  })
+
+  it('praise routed as auto_ok praise gets the public thank-you', async () => {
+    const res = await run('What a wonderful day out', wouldSend({
+      category: 'praise',
+      publicReply: 'thanks-template',
+      publicReplyAfterDm: null,
+      privateReply: null,
+      needsHuman: false,
+      replySource: 'fallback',
+    }))
+    expect(replyToComment).toHaveBeenCalledWith('comment-1', 'thanks-template', 'page-token')
+    expect(res).toMatchObject({ public_replies: 1, needs_human: 0, failed: 0 })
   })
 
   it('an FAQ still gets the private reply and the public reply', async () => {

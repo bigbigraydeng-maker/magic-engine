@@ -9,8 +9,8 @@
  * replied to twice even if two cron runs overlap or a later step fails.
  *
  * Send gate: before a public reply or private reply, `routeComment` must return
- * a greeting or FAQ. Price, complaint, refund, booking change, praise that is
- * not a greeting or FAQ, unknown, or a routing throw is recorded for the
+ * a greeting, FAQ or genuine praise. Price, complaint, refund, booking change,
+ * unknown, or a routing throw is recorded for the
  * existing human queue and does not call Meta. Spam the classifier marks with
  * shouldHide is still hidden, as before. If classification throws, nothing is
  * hidden or sent — the comment waits for a person.
@@ -357,6 +357,7 @@ const GREETING_OR_FAQ: ReadonlySet<CommentIntent> = new Set([
   'faq_itinerary',
   'faq_visa',
   'faq_signup',
+  'praise',
 ])
 
 export type CommentAutoReplyBlock = 'not_greeting_or_faq' | 'routing_error'
@@ -442,8 +443,8 @@ async function processClaimedComment(
     return { publicReplied: false, dmSent: false, hidden, needsHuman: false, failed: false }
   }
 
-  // Greeting/FAQ only. Praise, price, complaint, refund, unknown, and routing
-  // errors are not replied to or DM'd — they join the existing needs_human queue.
+  // Greeting, FAQ or genuine praise only. Price, complaint, refund, unknown, and
+  // routing errors are not replied to or DM'd — they join the needs_human queue.
   const gate = assessCommentAutoReply(comment.message, decision.category)
   if (!gate.send) {
     await finalise(claim.rowId, handoffDecision(decision, gate.block), {
