@@ -1,9 +1,9 @@
 /**
- * 「欢迎信自动发送」页面调的四个接口。只发 JSON（接口不收别的格式）；不缓存。
+ * 「欢迎信自动发送」页面调的五个接口。只发 JSON（接口不收别的格式）；不缓存。
  */
 import type { StatusPayload } from './welcome-letter-text'
 
-export type CommandName = 'propose' | 'authorize' | 'revoke'
+export type CommandName = 'propose' | 'authorize' | 'revoke' | 'resolve-unknown'
 
 export interface CommandAnswer {
   ok: boolean

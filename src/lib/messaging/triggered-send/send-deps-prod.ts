@@ -12,14 +12,12 @@ import type { TemplateRead } from './authorization-core'
 import { revokeAsSystem } from './authorization-core'
 import { createAuthorizationDeps } from './authorization-deps-prod'
 import { loadOpenAuthorizations } from './authorization-store'
-import { cancelSendTouchpoint, writeSendTouchpoint } from './send-touchpoint'
+import { cancelSendTouchpoint, WELCOME_NOT_SENT_TIMELINE_LINE, writeSendTouchpoint } from './send-touchpoint'
 import { findContactIdsByAddresses, loadSendContact } from './send-contact'
 import { createSendLedger, createSendLocks, replayStoredReceipts } from './send-store'
 import type { SendDeps } from './send-types'
 import { createShadowGatePorts } from './shadow-ports-prod'
 import { checkRequiredMailboxes } from './shadow-reads-prod'
-
-const CANCELLED_SUMMARY = 'ME 自动发信没有发出：欢迎信'
 
 async function readTemplate(clientId: string, key: string): Promise<TemplateRead> {
   try {
@@ -65,7 +63,7 @@ export function createProdSendDeps(): SendDeps {
     ledger: createSendLedger(db),
     resend: createResendEmailPort(),
     writeTouchpoint: (input) => writeSendTouchpoint(db, input),
-    cancelTouchpoint: (clientId, sendId) => cancelSendTouchpoint(db, { clientId, triggeredSendId: sendId, triggerKey: 'welcome', summary: CANCELLED_SUMMARY }),
+    cancelTouchpoint: (clientId, sendId) => cancelSendTouchpoint(db, { clientId, triggeredSendId: sendId, triggerKey: 'welcome', summary: WELCOME_NOT_SENT_TIMELINE_LINE }),
     replayReceipts: (messageId) => replayStoredReceipts(db, messageId, env, () => new Date()),
     newIdempotencyKey: () => `triggered-send:welcome:${randomUUID()}`,
   }

@@ -98,6 +98,29 @@ export interface AuthorizationView {
   template: TemplateViewData | null
 }
 
+/** 「最近发送」里的一封真发的信（不含邮箱：客人只有联系人编号，页面链到客户档案）。 */
+export interface RecentSendView {
+  id: string
+  contact_id: string
+  status: string
+  reason_code: string | null
+  last_block_reason: string | null
+  bounce_kind: string | null
+  provider_impact: string
+  attempts: number
+  first_attempt_at: string | null
+  sent_at: string | null
+  last_event_type: string | null
+  last_event_at: string | null
+  created_at: string
+  updated_at: string
+  resolution: { outcome: 'sent' | 'not_sent'; by: string; at: string } | null
+  /** 标过「没发出」、后来回执证明发出去了（服务端判的）。 */
+  went_out_after_not_sent?: boolean
+  /** 标过「已发出」、后来回执说没发出去（服务端判的）。 */
+  not_sent_after_sent?: boolean
+}
+
 export interface StatusPayload {
   success: boolean
   can_manage?: boolean
@@ -107,7 +130,12 @@ export interface StatusPayload {
   mode?: 'live' | 'practice'
   proposal?: ProposalView | null
   authorization?: AuthorizationView | null
-  prerequisites?: { account: string; account_key: boolean; unsubscribe_secret: boolean; events: boolean; trial_domains: boolean; approvers?: boolean } | null
+  prerequisites?: { account: string; account_key: boolean; unsubscribe_secret: boolean; events: boolean; trial_domains: boolean; approvers?: boolean; app_url?: boolean } | null
+  /** null = 读不到（页面要说读不到，不能当成「没发过」）。结果不明的信全部排在最前面。 */
+  recent_sends?: RecentSendView[] | null
+  recent_sends_limit?: number
+  /** 结果不明、等人标的信有几封（服务端数的，不受 20 封的限制）；more = 不止这么多，页面只列出前一部分。 */
+  unknown_sends?: { count: number; more: boolean } | null
 }
 
 const STATE_TEXT: Readonly<Record<string, string>> = {
@@ -119,6 +147,7 @@ const STATE_TEXT: Readonly<Record<string, string>> = {
   template_changed: '信的内容改过或被停用了，这份授权已作废：要重新提案、重新授权',
   template_unreadable: '暂时读不到模板，这期间先不发',
   trial_recipient_not_internal: '试跑名单里的地址已不在内部邮箱域名里，不会发',
+  formal_sending_not_enabled: '这是正式名单的授权；这一版只发内部邮箱的试跑，正式名单一封都不发（要等「正式名单真发」那张单上线）',
   revoked: '已撤销',
 }
 
@@ -221,6 +250,162 @@ export function revokeErrorText(body: (Answer & { current_authorization?: unknow
   }
   if (code === 'AUTHORIZATION_NOT_FOUND') return '找不到这一份，页面已刷新，请看上面现在生效的是哪一份。'
   return '撤销没成功，请马上再点一次；再不行就告诉发信窗口。'
+}
+
+// ── 「最近发送」 ─────────────────────────────────────────────────────────────────────────────────────────
+
+/** 页面顶上那一句：这一版只发试跑。 */
+export const TRIAL_ONLY_NOTE = '这一版只发内部邮箱的试跑：正式名单的授权批了也一封都不发。'
+
+/** 正式名单的提案下面那一句。 */
+export const FORMAL_PROPOSAL_NOTE = '这是正式名单的提案。这一版只发内部邮箱的试跑：正式名单就算批了也一封都不发。'
+
+/** 现在已经有一份授权在生效时，正式提案下面多说的一句；生效的是试跑时再补半句。 */
+export const FORMAL_PROPOSAL_REPLACES_NOTE = '而且批了会替换掉现在生效的那份授权。'
+export const FORMAL_PROPOSAL_STOPS_TRIAL_NOTE = '正在跑的试跑也就停了。'
+
+/** 试跑授权生效、又没有正式提案放着时的提醒（彩排按最新一份没撤销的规则来比）。 */
+export const TRIAL_FOLLOWUP_NOTE =
+  '试跑批完以后，请马上再提一份正式名单的提案放着（先不用批）：彩排按最新一份没撤销的规则来比，不提的话，试跑这几天的真客人都会被记成「不在试跑名单」，正式名单的「连续一致天数」会断。'
+
+const SEND_STATUS_TEXT: Readonly<Record<string, string>> = {
+  blocked: '暂缓：下一轮再试',
+  skipped: '不发',
+  pending: '正在发（或等下一轮自动重试）',
+  unknown_outcome: '结果不明：系统判断不了发没发出去，要人核对',
+  sent: '已交给发信服务',
+  delivery_delayed: '对方邮箱暂时没收，发信服务还在重试',
+  delivered: '已送达',
+  suppressed: '发信服务没发（这个地址在它的停发名单里）',
+  failed: '没发出',
+  bounced: '退信',
+  complained: '客人把信标成了垃圾邮件',
+}
+
+export type SendTone = 'track' | 'exec' | 'attn' | 'sched' | 'rej'
+
+const SEND_STATUS_TONE: Readonly<Record<string, SendTone>> = {
+  blocked: 'attn',
+  skipped: 'attn',
+  pending: 'sched',
+  delivery_delayed: 'sched',
+  unknown_outcome: 'exec',
+  sent: 'track',
+  delivered: 'track',
+  suppressed: 'rej',
+  failed: 'rej',
+  bounced: 'rej',
+  complained: 'rej',
+}
+
+const SEND_REASON_TEXT: Readonly<Record<string, string>> = {
+  stale: '进来太久了，不再补发',
+  bad_email: '邮箱地址不能用',
+  system_address: '是系统地址，不是真客人',
+  not_in_allowlist: '不在试跑名单里',
+  dnc: '标了「别再联系」',
+  mailchimp_suppressed: '在 Mailchimp 里退订了或被停发',
+  excluded_tag: '带了「不发」的标签',
+  no_consent_basis: '没有能发信的同意依据',
+  sales_email_exists: '销售已经亲自写过信',
+  frequency_full: '这 7 天收到的信已经满了',
+  email_unsubscribed: '客人退订了 ME 的邮件',
+  complained: '客人投诉过 ME 的信',
+  hard_bounced_address: '这个邮箱以前永久退信过',
+  legacy_welcomed: '旧群发已经发过欢迎信',
+  address_duplicate: '同一个邮箱已经在另一位客人名下收过（或正在发）',
+  dnc_unverifiable: '查不到客人有没有标「别再联系」，先不发，下一轮再看',
+  consent_unreadable: '读不到客人的同意记录，先不发，下一轮再看',
+  legacy_unverifiable: '查不到旧群发有没有发过，先不发，下一轮再看',
+  evidence_unverifiable: '查不到销售写没写过信、这周收了几封，先不发，下一轮再看',
+  frequency_unverifiable: '查不到这 7 天已经收了几封，先不发，下一轮再看',
+  unsubscribe_unverifiable: '查不到客人有没有退订，先不发，下一轮再看',
+  address_history_unreadable: '查不到这个邮箱有没有退信、投诉过，先不发，下一轮再看',
+  missing_first_name: '客人没有名字，信里没法称呼；补上名字后下一轮会发',
+  render_failed: '信没排出来',
+  request_invalid: '发信内容不合格，没发',
+  lock_busy: '同一位客人正被另一轮处理，下一轮再试',
+  lock_unreadable: '暂时拿不到处理权，下一轮再试',
+  cap_reached: '今天的封数到上限了，明天再发',
+  expired_20h: '20 小时里都没确认发没发出去，系统不再重试',
+  provider_rejected: '发信服务拒收了，不会重发',
+  provider_account_error: '发信账号出了问题（钥匙或账号设置），没发',
+  not_attempted: '发之前就停了，没发',
+  provider_failed: '发信服务报告没发出',
+  sent_confirmed: '人工核对后标了「已发出」',
+  not_sent_confirmed: '人工核对后标了「没发出」',
+  skipped: '不发',
+}
+
+const PROVIDER_IMPACT_TEXT: Readonly<Record<string, string>> = {
+  NONE: '发信服务没有接收',
+  PROVIDER_ACCEPTED: '发信服务已接收',
+  PROVIDER_UNKNOWN: '交没交给发信服务，不确定',
+}
+
+export function sendStatusText(status: string): string {
+  return SEND_STATUS_TEXT[status] ?? `状态：${status}`
+}
+
+export function sendStatusTone(status: string): SendTone {
+  return SEND_STATUS_TONE[status] ?? 'attn'
+}
+
+export function sendReasonText(code: string): string {
+  return SEND_REASON_TEXT[code] ?? `原因代号：${code}`
+}
+
+export function providerImpactText(impact: string): string {
+  return PROVIDER_IMPACT_TEXT[impact] ?? impact
+}
+
+/** 「结果不明」怎么核对。 */
+export const RESOLVE_HOW_TO_CHECK = '怎么核对：点「看客人」查到他的邮箱，去发信服务的后台按邮箱搜这封信；或者直接问客人收没收到。'
+
+/** 点「确认」之前给 PM 看的后果。 */
+export const RESOLVE_CONSEQUENCE_TEXT: Readonly<Record<'sent' | 'not_sent', string>> = {
+  sent: '按「已经发出」记：算进这位客人这 7 天收到的封数，系统不会再给他发欢迎信。如果客人其实没收到，请销售手发。',
+  not_sent:
+    '按「没发出」记：这位客人（和这个邮箱）以后不会再自动收到欢迎信，要发请销售手发；这封仍算进他这 7 天收到的封数（系统确定不了它没发出），所以销售手发可能要等几天。时间线上那一条会改成「没有发出」。如果之后发信服务的回执证明其实送到了，这一页会跟着显示出来，但时间线那条不会自动改回：到时请告诉发信窗口，也别让销售再手发。',
+}
+
+/** 预览「已发出」时，这封信连时间线都没有：发信前一定先写时间线，写不进就不发，所以它没交给过发信服务。 */
+export const NO_TIMELINE_HINT = '系统记录：这封信连时间线都没有。发信前一定先写时间线、写不进就不发，所以它没交给过发信服务，标「没发出」更准。'
+
+/** 你标过「没发出」、后来回执证明发出去了的那一行。 */
+export const RECEIPT_OVERRODE_NOT_SENT =
+  '你标过「没发出」，但后来发信服务的回执证明这封信发出去了。时间线上那条可能还写着「没有发出」：请让发信窗口核对、改对，也别让销售再手发。'
+
+/** 你标过「已发出」、后来回执说没发出去的那一行。 */
+export const RECEIPT_SAYS_NOT_SENT =
+  '你标过「已发出」，但后来发信服务的回执说这封没有发出去：客人没收到欢迎信，系统也不会再发，要发请销售手发。'
+
+/** 超过 20 小时还停在「正在发」的信（例如授权撤销了，没人再接手）。 */
+export const STUCK_PENDING_TEXT = '超过 20 小时还没确认发没发出去：系统不会再重试，之后会转成「结果不明」让你核对。'
+
+const RESOLVE_ERROR_TEXT: Readonly<Record<string, string>> = {
+  APPROVER_REQUIRED: '只有 PM 本人能标。',
+  GLOBAL_ADMIN_REQUIRED: '只有管理员能做这一步。',
+  NOT_UNKNOWN: '这封信的状态已经变了（可能回执到了），不用再标。页面已刷新。',
+  SEND_CHANGED: '这封信刚有了新动静，页面已刷新，请再看一眼再标。',
+  ALREADY_RESOLVED: '这封信已经有人标过了，页面已刷新。',
+  SEND_NOT_FOUND: '找不到这封信，页面已刷新。',
+}
+
+/** 标「已发出 / 没发出」没成功时的话。 */
+export function resolveErrorText(body: { error?: unknown } | null): string {
+  const code = typeof body?.error === 'string' ? body.error : ''
+  return RESOLVE_ERROR_TEXT[code] ?? '这次没标成，请再点一次；再不行就告诉发信窗口。'
+}
+
+/** 标成功（或之前已经标过同样的）之后的话；时间线那一条没改成就一定说出来。 */
+export function resolvedText(outcome: 'sent' | 'not_sent', body: { mode?: unknown; timeline?: unknown } | null): string {
+  const label = outcome === 'sent' ? '已发出' : '没发出'
+  let line = body?.mode === 'ALREADY_RESOLVED' ? `这封信之前已经标过「${label}」了。` : `已标「${label}」。`
+  if (outcome === 'not_sent' && body?.mode !== 'ALREADY_RESOLVED') line += '这位客人以后不会再自动收到欢迎信。'
+  if (body?.timeline === 'failed') line += '时间线上那一条没改成「没有发出」，不影响发信；请告诉发信窗口补改。'
+  if (body?.timeline === 'receipt_arrived') line += '刚标完，发信服务的回执就证明这封其实发出去了：这一页已按回执显示，时间线没改，也别让销售再手发。'
+  return line
 }
 
 /** 新西兰时间，到分钟。读不懂的时间原样显示。 */

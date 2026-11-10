@@ -10,7 +10,7 @@
  * The address is used to wait and to report, never to bind: when a row of that address was claimed in the last 30
  * minutes and is still `pending` without a message id, its sender is probably about to record the id, so the receipt
  * is retried a few times; when any live row of that address has no message id (an unknown outcome, a person's "not
- * sent", a stuck pending row), the receipt is reported as "unmatched" (ids only) for a person to look at.
+ * sent" or "sent", a stuck pending row), the receipt is reported as "unmatched" (ids only) for a person to look at.
  * Everything else is ME's own system mail ("not ours"): nothing happens, nothing is retried, nothing is reported.
  *
  * The update is compare-and-set on the row's `updated_at`, so two receipts of one letter never overwrite each other.

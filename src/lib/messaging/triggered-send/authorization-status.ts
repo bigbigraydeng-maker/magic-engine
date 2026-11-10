@@ -17,12 +17,16 @@ import { GATE_CONTRACT_VERSION, parseRule } from './rule'
 import { describeRule } from './rule-summary'
 import { judgeStandingAuthorization } from './standing-authorization'
 import { readApprovers } from './approvers'
+import { RECENT_SENDS_LIMIT, type RecentSendsRead } from './recent-sends'
+import { publicOriginOf } from './send-letter'
 import { checkTrialRecipients, readTrialDomains } from './trial-recipients'
 import { UNSUBSCRIBE_SECRET_ENV, UNSUBSCRIBE_SECRET_MIN_LENGTH } from './unsubscribe-token'
 import { checkAutomatedTemplate, type AutomatedTemplateCheck } from './welcome-template'
 
-/** Kept as a name for the status wiring; the status needs nothing beyond the command ports. */
-export type StatusDeps = CommandDeps
+/** The command ports plus the page's 「最近发送」 (`recent-sends.ts`). */
+export interface StatusDeps extends CommandDeps {
+  loadRecentSends(clientId: string): Promise<RecentSendsRead>
+}
 
 interface TemplateView {
   key: string
@@ -100,6 +104,8 @@ async function authorizationView(deps: CommandDeps, record: AuthorizationRecord)
   )
   let state = verdict.active ? 'active' : verdict.reason.toLowerCase()
   if (state === 'template_changed' && (read === null || !read.ok)) state = 'template_unreadable'
+  // This version sends trials only: an authorization for the real list is in force but sends nothing (`send-arming.ts`).
+  if (state === 'active' && parsed.ok && parsed.rule.recipient_allowlist === null) state = 'formal_sending_not_enabled'
   // A trial in force whose addresses are no longer on the internal domains will not be sent (the sender checks again).
   if (state === 'active' && parsed.ok && !checkTrialRecipients(parsed.rule, deps.env).ok) state = 'trial_recipient_not_internal'
   return {
@@ -123,15 +129,31 @@ function prerequisitesFor(account: string, deps: CommandDeps): Record<string, un
     events: deps.canEmit(),
     trial_domains: readTrialDomains(deps.env).size > 0,
     approvers: readApprovers(deps.env).length > 0,
+    // The letter's unsubscribe link points at ME itself: no usable https site address = the sender stops the run.
+    app_url: publicOriginOf(deps.env) !== null,
   }
 }
 
-export async function statusQuery(deps: CommandDeps, clientId: string, viewer: { canAuthorize: boolean }): Promise<CommandResult> {
+/**
+ * The page's 「最近发送」 and how many letters wait for a person (counted here, over every unknown one); a read that
+ * fails is `null` for both (the page says it could not read them), never an empty list or a zero.
+ */
+async function recentSends(deps: StatusDeps, clientId: string): Promise<Record<string, unknown>> {
+  const read = await deps.loadRecentSends(clientId).catch((): RecentSendsRead => ({ ok: false, error: 'threw' }))
+  return {
+    recent_sends: read.ok ? read.rows : null,
+    recent_sends_limit: RECENT_SENDS_LIMIT,
+    unknown_sends: read.ok ? { count: read.unknownCount, more: read.unknownMore } : null,
+  }
+}
+
+export async function statusQuery(deps: StatusDeps, clientId: string, viewer: { canAuthorize: boolean }): Promise<CommandResult> {
   const open = await deps.store.loadOpen(clientId)
   if (!open.ok) return refuse(500, 'AUTHORIZATIONS_UNREADABLE')
   const { proposal, authorized } = open.open
   const account = (proposal ?? authorized)?.account ?? null
   return done({
+    ...(await recentSends(deps, clientId)),
     can_manage: true,
     can_authorize: viewer.canAuthorize,
     server_now: deps.now().toISOString(),

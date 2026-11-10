@@ -6,7 +6,9 @@
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
 import type { AuthorizationChangedEvent } from '@/lib/inngest/triggered-send-events'
 import type { AuthorizationStorePort, CommandDeps, SalesCapRead, TemplateRead } from '../authorization-core'
+import type { StatusDeps } from '../authorization-status'
 import type { AuthorizationRecord, NewProposal, OpenAuthorizations, StoreError } from '../authorization-store'
+import type { RecentSendsRead } from '../recent-sends'
 import type { RehearsalEvidence, RehearsalRead } from '../rehearsal-evidence'
 import { ruleSha256, type SendableRule, type TriggeredSendRule } from '../rule'
 import type { MailboxCheck } from '../types'
@@ -194,6 +196,8 @@ export class FakeStore implements AuthorizationStorePort {
 
 export interface FakeWorld {
   deps: CommandDeps
+  /** The command ports plus the page's 「最近发送」 (an empty list unless set). */
+  statusDeps: StatusDeps
   store: FakeStore
   events: AuthorizationChangedEvent[]
   set: {
@@ -204,6 +208,7 @@ export interface FakeWorld {
     canEmit(value: boolean): void
     mailboxes(check: MailboxCheck): void
     env(values: Record<string, string>): void
+    recentSends(read: RecentSendsRead | 'throw'): void
   }
 }
 
@@ -217,6 +222,7 @@ export function fakeWorld(): FakeWorld {
   let emitConfigured = true
   let mailboxCheck: MailboxCheck = { ok: true }
   let envValues: Record<string, string> = { TRIGGERED_SEND_TRIAL_DOMAINS: 'example.com' }
+  let recentRead: RecentSendsRead | 'throw' = { ok: true, rows: [], unknownCount: 0, unknownMore: false }
   const deps: CommandDeps = {
     store,
     loadTemplate: async () => templateRead,
@@ -232,8 +238,16 @@ export function fakeWorld(): FakeWorld {
     now: () => NOW,
     newRequestId: () => nextId(),
   }
+  const statusDeps: StatusDeps = {
+    ...deps,
+    loadRecentSends: async () => {
+      if (recentRead === 'throw') throw new Error('db down')
+      return recentRead
+    },
+  }
   return {
     deps,
+    statusDeps,
     store,
     events,
     set: {
@@ -244,6 +258,7 @@ export function fakeWorld(): FakeWorld {
       canEmit: (value) => (emitConfigured = value),
       mailboxes: (check) => (mailboxCheck = check),
       env: (values) => (envValues = values),
+      recentSends: (read) => (recentRead = read),
     },
   }
 }

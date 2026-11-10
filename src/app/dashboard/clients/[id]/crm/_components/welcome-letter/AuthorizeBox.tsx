@@ -32,9 +32,13 @@ function PreviewList({ preview }: { preview: Preview }): JSX.Element {
   const recipients = preview.trial_recipients ?? []
   return (
     <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-me-charcoal" data-testid="authorize-preview">
-      <li>{preview.trial ? `这是试跑：只发给这 ${recipients.length} 个地址：${recipients.join('、')}。` : '这是正式名单：符合条件的新客人都会收到。'}</li>
       <li>
-        从你点「确认授权」那一刻{preview.backfill_hours > 0 ? `往前 ${preview.backfill_hours} 小时` : ''}起进来的新客人才会收到
+        {preview.trial
+          ? `这是试跑：只发给这 ${recipients.length} 个地址：${recipients.join('、')}。`
+          : '这是正式名单。这一版只发内部邮箱的试跑：批了也一封都不发（要等「正式名单真发」那张单上线）。'}
+      </li>
+      <li>
+        {preview.trial ? '' : '等正式名单真发上线后：'}从你点「确认授权」那一刻{preview.backfill_hours > 0 ? `往前 ${preview.backfill_hours} 小时` : ''}起进来的新客人才会收到
         （按现在点的话大约是 {nzTime(preview.live_from)} 起）；每天最多 {preview.daily_cap} 封。
       </li>
       <li>有效到 {nzTime(preview.expires_at)} 前后，到期自动停。</li>
