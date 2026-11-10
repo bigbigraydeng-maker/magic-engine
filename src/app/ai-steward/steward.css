@@ -1,15 +1,15 @@
 /* AI 数字人管家营销页（/ai-steward）。照 Figma「营销页 v2 · 高级版」实现；全部选择器限定在 .ast 下，不影响别的页面。 */
-.ast { background: #0B0B0C; color: #F4EFE6; font-family: var(--ast-sans), "Noto Sans SC", Inter, sans-serif; overflow-x: hidden; position: relative; }
+.ast { background: #0B0B0C; color: #F4EFE6; font-family: "Noto Sans SC", "PingFang SC", Inter, sans-serif; overflow-x: hidden; position: relative; }
 .ast * { box-sizing: border-box; }
 /* Dark page: no cream app background showing on overscroll. */
 body:has(.ast) { background: #0B0B0C; }
 .ast h1, .ast h2, .ast h3, .ast h4, .ast h5, .ast p { margin: 0; }
 .ast a { text-decoration: none; }
-.ast .serif { font-family: var(--ast-serif), "Noto Serif SC", serif; }
-.ast .latin, .ast .stat .n, .ast .pnum, .ast .hrow .dt, .ast .fi .k, .ast .plan .p, .ast .st .k { font-family: var(--ast-latin), "Cormorant Garamond", serif; }
+.ast .serif { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; }
+.ast .latin, .ast .stat .n, .ast .pnum, .ast .hrow .dt, .ast .fi .k, .ast .plan .p, .ast .st .k { font-family: "Cormorant Garamond", serif; }
 .ast .dbr { display: inline; }
-.ast .serif { font-family: var(--ast-serif), "Noto Serif SC", serif; }
-.ast .latin { font-family: var(--ast-latin), "Cormorant Garamond", serif; }
+.ast .serif { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; }
+.ast .latin { font-family: "Cormorant Garamond", serif; }
 .ast .gold { color: #D9B26A; }
 .ast .goldgrad { color: #D9B26A; }
 .ast .muted { color: rgba(244,239,230,.62); }
@@ -50,9 +50,9 @@ body:has(.ast) { background: #0B0B0C; }
 .ast .stats { margin: 0 96px 0; border-top: 1px solid rgba(217,178,106,.35); }
 .ast .stat { flex: 1; }
 .ast .stat { padding: 34px 0 0; }
-.ast .stat .n { font-family: var(--ast-latin), "Cormorant Garamond", serif; font-weight: 500; line-height: 1; }
+.ast .stat .n { font-family: "Cormorant Garamond", serif; font-weight: 500; line-height: 1; }
 .ast .stat .n { font-size: 76px; }
-.ast .stat .n small { font-family: var(--ast-serif), "Noto Serif SC", serif; font-weight: 500; }
+.ast .stat .n small { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 500; }
 .ast .stat .n small { font-size: 26px; margin-left: 6px; }
 .ast .stat .l { color: rgba(244,239,230,.55); }
 .ast .stat .l { font-size: 15px; margin-top: 12px; letter-spacing: .06em; }
@@ -68,7 +68,7 @@ body:has(.ast) { background: #0B0B0C; }
 .ast .pimg { width: 700px; height: 520px; border-radius: 4px; }
 .ast .pimg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(0deg, rgba(11,11,12,.35), rgba(11,11,12,0) 50%); border-radius: 4px; }
 .ast .ptxt { flex: 1; }
-.ast .pnum { font-family: var(--ast-latin), "Cormorant Garamond", serif; font-style: italic; font-weight: 400; line-height: 1; }
+.ast .pnum { font-family: "Cormorant Garamond", serif; font-style: italic; font-weight: 400; line-height: 1; }
 .ast .pnum { font-size: 120px; }
 .ast .ptxt h3 { font-size: 46px; line-height: 1.25; font-weight: 600; margin-top: 18px; }
 .ast .ptxt p { font-size: 19px; line-height: 1.85; margin-top: 22px; color: rgba(244,239,230,.62); }
@@ -79,7 +79,7 @@ body:has(.ast) { background: #0B0B0C; }
 .ast .hotlist { flex: 1; }
 .ast .hrow { display: flex; align-items: baseline; border-bottom: 1px solid rgba(244,239,230,.12); }
 .ast .hrow { padding: 30px 0; gap: 36px; }
-.ast .hrow .dt { font-family: var(--ast-latin), "Cormorant Garamond", serif; color: #D9B26A; white-space: nowrap; }
+.ast .hrow .dt { font-family: "Cormorant Garamond", serif; color: #D9B26A; white-space: nowrap; }
 .ast .hrow .dt { font-size: 34px; width: 140px; }
 .ast .hrow .t { font-weight: 600; }
 .ast .hrow .t { font-size: 30px; }
@@ -96,7 +96,7 @@ body:has(.ast) { background: #0B0B0C; }
 .ast .fgrid { grid-template-columns: repeat(3, 1fr); margin-top: 110px; }
 .ast .fi { border-bottom: 1px solid rgba(244,239,230,.12); }
 .ast .fi { padding: 44px 40px 48px 0; }
-.ast .fi .k { font-family: var(--ast-latin), "Cormorant Garamond", serif; font-style: italic; color: #D9B26A; }
+.ast .fi .k { font-family: "Cormorant Garamond", serif; font-style: italic; color: #D9B26A; }
 .ast .fi .k { font-size: 26px; }
 .ast .fi h3 { font-weight: 600; }
 .ast .fi h3 { font-size: 28px; margin-top: 18px; }
@@ -111,9 +111,9 @@ body:has(.ast) { background: #0B0B0C; }
 .ast .plan .tag { top: -12px; left: 34px; font-size: 11px; padding: 5px 12px; }
 .ast .plan .v { color: rgba(244,239,230,.7); }
 .ast .plan .v { font-size: 17px; }
-.ast .plan .p { font-family: var(--ast-latin), "Cormorant Garamond", serif; font-weight: 500; line-height: 1; }
+.ast .plan .p { font-family: "Cormorant Garamond", serif; font-weight: 500; line-height: 1; }
 .ast .plan .p { font-size: 76px; margin-top: 22px; }
-.ast .plan .p small { font-family: var(--ast-sans), "Noto Sans SC", sans-serif; color: rgba(244,239,230,.66); }
+.ast .plan .p small { font-family: "Noto Sans SC", sans-serif; color: rgba(244,239,230,.66); }
 .ast .plan .p small { font-size: 16px; margin-left: 4px; }
 .ast .plan .e { color: rgba(244,239,230,.66); }
 .ast .plan .e { font-size: 14px; margin-top: 18px; }
@@ -121,7 +121,7 @@ body:has(.ast) { background: #0B0B0C; }
 .ast .incl { font-size: 16px; margin-top: 32px; }
 .ast /* steps */ .steps { display: grid; }
 .ast .steps { grid-template-columns: repeat(4, 1fr); gap: 48px; margin-top: 80px; }
-.ast .st .k { font-family: var(--ast-latin), "Cormorant Garamond", serif; font-style: italic; color: #D9B26A; line-height: 1; }
+.ast .st .k { font-family: "Cormorant Garamond", serif; font-style: italic; color: #D9B26A; line-height: 1; }
 .ast .st .k { font-size: 64px; }
 .ast .st h3 { font-weight: 600; }
 .ast .st h3 { font-size: 26px; margin-top: 20px; }
@@ -226,4 +226,57 @@ body:has(.ast) { background: #0B0B0C; }
   .ast .steps { grid-template-columns: 1fr 1fr; }
   .ast .final .in { padding: 140px 40px; }
   .ast .foot { padding: 28px 40px; }
+}
+
+/* Local craft cards */
+.ast .lgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 80px; background: rgba(244,239,230,.12); border: 1px solid rgba(244,239,230,.12); }
+.ast .lc { background: #0B0B0C; padding: 40px 36px 44px; }
+.ast .lc .code { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px; letter-spacing: .08em; color: #D9B26A; border: 1px solid rgba(217,178,106,.4); display: inline-block; padding: 4px 10px; border-radius: 4px; }
+.ast .lc h3 { font-size: 28px; font-weight: 600; margin-top: 22px; }
+.ast .lc p { font-size: 16px; line-height: 1.8; color: rgba(244,239,230,.62); margin-top: 12px; }
+
+/* Compare table */
+.ast .ctable { margin-top: 72px; border-top: 1px solid rgba(244,239,230,.14); }
+.ast .crow { display: grid; grid-template-columns: 180px 1fr 1fr; border-bottom: 1px solid rgba(244,239,230,.12); }
+.ast .crow > div { padding: 26px 24px 26px 0; font-size: 18px; line-height: 1.6; }
+.ast .chead > div { font-size: 14px; font-weight: 700; letter-spacing: .06em; color: rgba(244,239,230,.55); padding-top: 18px; padding-bottom: 18px; }
+.ast .chead .us { color: #D9B26A; }
+.ast .crow .ck { font-family: "Noto Serif SC", "Songti SC", "STSong", serif; font-weight: 600; font-size: 20px; }
+.ast .crow .us { color: #F4EFE6; }
+.ast .crow:not(.chead) .us::before { content: "✓"; color: #D9B26A; font-weight: 700; margin-right: 10px; }
+.ast .crow .them { color: rgba(244,239,230,.62); }
+
+/* Engine pipeline */
+.ast .engine { margin-top: 80px; border-top: 1px solid rgba(217,178,106,.35); }
+.ast .erow { display: grid; grid-template-columns: 520px 1fr; border-bottom: 1px solid rgba(244,239,230,.12); padding: 34px 0; align-items: baseline; }
+.ast .erow .en { display: flex; align-items: baseline; gap: 22px; }
+.ast .erow .num { font-family: "Cormorant Garamond", serif; font-style: italic; font-size: 44px; color: #D9B26A; line-height: 1; width: 64px; }
+.ast .erow .label { font-family: "Cormorant Garamond", serif; font-size: 32px; font-weight: 500; letter-spacing: .01em; }
+.ast .erow h3 { font-size: 24px; font-weight: 600; }
+.ast .erow p { font-size: 16px; line-height: 1.8; color: rgba(244,239,230,.62); margin-top: 8px; }
+.ast .metrics { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 36px; }
+.ast .metrics span { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 13px; color: rgba(244,239,230,.72); border: 1px solid rgba(244,239,230,.18); border-radius: 999px; padding: 8px 14px; }
+
+@media (min-width: 768px) and (max-width: 1199px) {
+  .ast .lgrid { grid-template-columns: 1fr 1fr; }
+  .ast .erow { grid-template-columns: 1fr; gap: 12px; }
+}
+@media (max-width: 767px) {
+  .ast .lgrid { grid-template-columns: 1fr; margin-top: 36px; }
+  .ast .lc { padding: 24px 20px 28px; }
+  .ast .lc h3 { font-size: 20px; margin-top: 14px; }
+  .ast .lc p { font-size: 14px; }
+  .ast .ctable { margin-top: 32px; }
+  .ast .crow { grid-template-columns: 1fr; padding: 16px 0; }
+  .ast .crow > div { padding: 2px 0; font-size: 14px; }
+  .ast .chead { display: none; }
+  .ast .crow .ck { font-size: 17px; margin-bottom: 6px; }
+  .ast .crow .them::before { content: "外包："; color: rgba(244,239,230,.45); }
+  .ast .engine { margin-top: 32px; }
+  .ast .erow { grid-template-columns: 1fr; gap: 8px; padding: 22px 0; }
+  .ast .erow .num { font-size: 30px; width: 40px; }
+  .ast .erow .label { font-size: 22px; }
+  .ast .erow h3 { font-size: 18px; }
+  .ast .erow p { font-size: 14px; }
+  .ast .metrics span { font-size: 11px; padding: 6px 10px; }
 }
