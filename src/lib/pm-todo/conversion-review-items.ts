@@ -33,7 +33,13 @@ type PendingRow = {
 type DoubtRow = {
   id: string
   outcome_id: string
-  me_sale_outcomes: { client_id: string; customer_first: string | null; order_ref: string | null } | null
+  me_sale_outcomes: {
+    client_id: string
+    customer_first: string | null
+    order_ref: string | null
+    outcome_kind?: string | null
+    lead_stage?: string | null
+  } | null
 }
 
 /** 只露首字母 —— 待办会被截图、会进日志。 */
@@ -113,7 +119,7 @@ export async function pushConversionReviewItems(
   // 这一档程序绝不会自己重发 —— 重发一次就是永久多记一笔成交，撤不回。
   const { data: doubts, error: doubtErr } = await supabase
     .from('me_conversion_writebacks')
-    .select('id, outcome_id, me_sale_outcomes(client_id, customer_first, order_ref)')
+    .select('id, outcome_id, me_sale_outcomes(client_id, customer_first, order_ref, outcome_kind, lead_stage)')
     .eq('status', 'in_doubt')
     .limit(MAX_ITEMS)
 
@@ -129,7 +135,9 @@ export async function pushConversionReviewItems(
       client_name: clientName,
       client_id: outcome.client_id,
       what:
-        `有一笔成交${outcome.order_ref ? `（单号 ${outcome.order_ref}）` : ''}发给广告平台时断线了，` +
+        (outcome.outcome_kind === 'lead_stage'
+          ? `有一条线索阶段事件（客人走到「${outcome.lead_stage ?? '某一档'}」）发给广告平台时断线了，`
+          : `有一笔成交${outcome.order_ref ? `（单号 ${outcome.order_ref}）` : ''}发给广告平台时断线了，`) +
         '不确定对方收到没有。系统**不会**自己重发 —— 万一对方其实收到了，重发就等于把同一笔算成两笔，而且撤不回。',
       how:
         '去广告平台后台的事件管理页看一眼这笔在不在：' +
