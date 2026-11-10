@@ -4,7 +4,7 @@ title: FDE 客户主页 Figma 概览重排
 status: done
 owner: agent
 decided_on: 2026-11-10
-source: session:cloud-agent
+source: session:73ff67ee
 verify_how: 管理员打开客户工作台概览见现在怎么样/今日要做/手风琴细节；客户视角仍为四 Tab
 done_on: 2026-11-10
 done_ref: pr:3759
