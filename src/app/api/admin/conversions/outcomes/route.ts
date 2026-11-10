@@ -200,6 +200,9 @@ export async function GET(request: Request) {
     // 会先被"最新 N 条"的窗口挤掉，压根轮不到这一步筛选（同一类问题的另一面）。
     .select(sendStatuses.length > 0 ? SELECT_COLUMNS.replace('me_conversion_writebacks(', 'me_conversion_writebacks!inner(') : SELECT_COLUMNS)
     .eq('client_id', clientId)
+    // 线索阶段记录是规则自动生成、自动批准的（每月几百条），不需要人审；
+    // 混进审核列表会把真正要人看的成交挤出 limit 窗口。
+    .neq('outcome_kind', 'lead_stage')
     .order('occurred_at', { ascending: false })
     .limit(limit)
 
