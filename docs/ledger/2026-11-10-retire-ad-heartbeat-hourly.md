@@ -5,6 +5,7 @@ status: done
 owner: pm
 decided_on: 2026-11-10
 source: doc:docs/ledger/2026-11-10-ad-intraday-spend-samples.md
+verify_how: 合并并 Inngest Sync 后云端函数列表不再含 ad-heartbeat；ad-intraday-spend-sample 运行记录仍持续写入。
 done_on: 2026-11-10
 done_ref: pr:3742
 ---
