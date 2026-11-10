@@ -248,6 +248,25 @@ export async function listRecentReceipts(
   return mapRowsOrThrow(Array.isArray(data) ? data : [])
 }
 
+/** Receipts written since `sinceIso`, newest first (the 「发信统计」 page). `limit` is capped like `listRecentReceipts`'s. */
+export async function listReceiptsSince(
+  db: SupabaseClient,
+  clientId: string,
+  sinceIso: string,
+  limit: number,
+): Promise<StoredReceipt[]> {
+  const n = Math.min(Math.max(Math.floor(limit), 1), 1000)
+  const { data, error } = await db
+    .from(TABLE)
+    .select('*')
+    .eq('client_id', clientId)
+    .gte('created_at', sinceIso)
+    .order('created_at', { ascending: false })
+    .limit(n)
+  if (error !== null) throw new Error(`${TABLE}: list since: ${error.message}`)
+  return mapRowsOrThrow(Array.isArray(data) ? data : [])
+}
+
 /** The stored receipt of one request with a given outcome (settling an `unknown` send starts from it). */
 export async function findReceiptByRequest(
   db: SupabaseClient,
