@@ -32,6 +32,11 @@ const EXPLAINED_REASONS: ReadonlySet<string> = new Set([
   'dnc',
   'mailchimp_suppressed',
   'excluded_tag',
+  // The guest's own doing on one of ME's letters (an unsubscribe, a complaint) or a dead address: the old batch does not
+  // know about ME's letters, so it would still mail them.
+  'email_unsubscribed',
+  'complained',
+  'hard_bounced_address',
 ])
 
 const LEAD_LOCAL_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/

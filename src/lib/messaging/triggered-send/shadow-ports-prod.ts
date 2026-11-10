@@ -1,7 +1,7 @@
 /**
- * The production wiring of the four READ-ONLY gate ports of the shadow run (consent, do-not-contact, Mailchimp member,
- * e-mail evidence). Nothing in here sends or changes anything: every call is a read (database select, Graph GET,
- * Mailchimp GET).
+ * The production wiring of the six READ-ONLY gate ports (consent, do-not-contact, Mailchimp member, e-mail evidence,
+ * ME's own unsubscribes, ME's own ledger of complaints and permanent bounces), used by the rehearsal and by real sending.
+ * Nothing in here sends or changes anything: every call is a read (database select, Graph GET, Mailchimp GET).
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §5 and §16.5.
  */
 
@@ -22,13 +22,18 @@ import {
   type MailchimpPort,
 } from '@/lib/crm/email-templates/frequency-sources-prod'
 import { evaluateFrequency } from '@/lib/crm/email-templates/gates/frequency'
+import { readEmailUnsubscribed } from '@/lib/crm/email-unsubscribe'
 
 import { localDay } from './candidates'
 import type { TriggeredSendRule } from './rule'
+import { addressSha256 } from './shadow-store'
 import type {
+  AddressHistoryRead,
   ConsentRead,
   DncRead,
+  EvidenceOptions,
   EvidenceRead,
+  UnsubscribeRead,
   LegacyBatchSeen,
   LegacyEvidence,
   MemberRead,
@@ -88,6 +93,45 @@ function withDeadline<T>(work: Promise<T>, ms: number, message: string): Promise
       },
     )
   })
+}
+
+// ── ME's own ledger: complaints and permanent bounces ───────────────────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+
+function codeOf(error: { code?: unknown }): string {
+  return typeof error.code === 'string' && /^[A-Za-z0-9_]{1,16}$/.test(error.code) ? error.code : 'error'
+}
+
+/**
+ * Has the guest complained about one of ME's letters (to this contact, or to any of its addresses on another contact),
+ * or did one of its addresses bounce permanently? Two existence reads (limit 1), so the answer never depends on how
+ * many other rows there are. Only real (non-rehearsal) rows count. A failed read is `ok:false`.
+ */
+export async function readAddressHistory(db: SupabaseClient, clientId: string, contact: ShadowContact): Promise<AddressHistoryRead> {
+  if (!UUID_RE.test(contact.contactId)) return { ok: false, error: 'address history: contact id is not a uuid' }
+  const hashes = [...new Set(contact.addresses.map(addressSha256))]
+  const live = () => db.from('triggered_sends').select('id').eq('client_id', clientId).eq('dedupe_scope', 'lifetime')
+  const byGuest = hashes.length > 0 ? `contact_id.eq.${contact.contactId},to_address_sha256.in.(${hashes.join(',')})` : `contact_id.eq.${contact.contactId}`
+  try {
+    const [complaint, bounce] = await Promise.all([
+      live().eq('status', 'complained').or(byGuest).limit(1),
+      hashes.length > 0 ? live().eq('status', 'bounced').eq('bounce_kind', 'permanent').in('to_address_sha256', hashes).limit(1) : Promise.resolve({ data: [], error: null }),
+    ])
+    if (complaint.error) return { ok: false, error: `address history: ${codeOf(complaint.error)}` }
+    if (bounce.error) return { ok: false, error: `address history: ${codeOf(bounce.error)}` }
+    return { ok: true, complained: (complaint.data ?? []).length > 0, hardBounced: (bounce.data ?? []).length > 0 }
+  } catch (err) {
+    return { ok: false, error: `address history: ${errorMessage(err)}` }
+  }
+}
+
+async function readUnsubscribed(db: SupabaseClient, clientId: string, contact: ShadowContact): Promise<UnsubscribeRead> {
+  try {
+    return await readEmailUnsubscribed(db, clientId, { contactId: contact.contactId, addresses: contact.addresses })
+  } catch (err) {
+    return { ok: false, error: `unsubscribe read: ${errorMessage(err)}` }
+  }
 }
 
 // ── consent ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -379,7 +423,8 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
     }
   }
 
-  async function readEvidence(contact: ShadowContact): Promise<EvidenceRead> {
+  async function readEvidence(contact: ShadowContact, opts: EvidenceOptions = {}): Promise<EvidenceRead> {
+    const exempt = opts.exemptSendId
     try {
       const verdict = await evaluate({
         cap: { max: Number.MAX_SAFE_INTEGER, windowDays: deps.rule.frequency_cap.window_days },
@@ -388,6 +433,8 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
         contactId: contact.contactId,
         sources,
         budgetMs: EVIDENCE_BUDGET_MS,
+        // A letter of ME's own still in flight (taken over by a later run) must not count against itself (§16.8 ④).
+        ...(exempt === undefined ? {} : { loadExemptIds: async () => [exempt] }),
       })
       if (!verdict.ok && verdict.reason === 'frequency_unverifiable') return { ok: false, error: verdict.error }
       // The cap is unreachable on purpose, so a verdict always carries the de-duplicated items.
@@ -408,7 +455,9 @@ export function createShadowGatePorts(deps: ShadowPortsDeps): {
         return { ok: false, error: errorMessage(err) }
       }
     },
-    evidence: (contact) => readEvidence(contact),
+    evidence: (contact, opts) => readEvidence(contact, opts),
+    unsubscribed: (contact) => readUnsubscribed(deps.db, deps.clientId, contact),
+    addressHistory: (contact) => readAddressHistory(deps.db, deps.clientId, contact),
   }
 
   return {

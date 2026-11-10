@@ -4,6 +4,8 @@ import { graphGetPage } from '@/lib/microsoft/mail-send-new-prod'
 import { createShadowGatePorts } from '@/lib/messaging/triggered-send/shadow-ports-prod'
 import type { TriggeredSendRule } from '@/lib/messaging/triggered-send/rule'
 import type { ChunkResult, PrepareResult, SweepPlan, SweepReceipt, SweepStatus } from '@/lib/messaging/triggered-send/types'
+import { emptySendReceipt, finalizeSend } from '@/lib/messaging/triggered-send/send-sweep'
+import type { SendOneResult, SendPlan, SendPrepareResult } from '@/lib/messaging/triggered-send/send-types'
 import {
   TRIGGERED_SEND_DISPATCH_ID,
   TRIGGERED_SEND_DISPATCH_JOB,
@@ -207,9 +209,14 @@ describe('runSweepOrder', () => {
     const finalize = vi.fn((_plan: SweepPlan, results: ChunkResult[]): SweepReceipt =>
       receipt({ decided: results.reduce((n, r) => n + r.decided, 0) }),
     )
-    const deps: SweepRunDeps = { startRun, finishRun, prepare, decideChunk, finalize, now: () => NOW, ...overrides }
-    return { deps, startRun, finishRun, prepare, decideChunk, finalize }
+    const sendPrepare = vi.fn(async (): Promise<SendPrepareResult> => ({ kind: 'stop', receipt: NOT_ARMED }))
+    const sendStale = vi.fn(async (): Promise<SendOneResult[]> => [])
+    const sendOne = vi.fn(async (): Promise<SendOneResult> => ({ outcome: 'sent', reason: null, sendId: 'r1', stopRun: false, providerImpact: 'PROVIDER_ACCEPTED' }))
+    const deps: SweepRunDeps = { startRun, finishRun, prepare, decideChunk, finalize, sendPrepare, sendStale, sendOne, finalizeSend, now: () => NOW, ...overrides }
+    return { deps, startRun, finishRun, prepare, decideChunk, finalize, sendPrepare, sendStale, sendOne }
   }
+
+  const NOT_ARMED = { ...emptySendReceipt('2026-11-02T20:00:00.000Z'), status: 'not_armed' as const }
 
   it('returns invalid_payload without any step or log', async () => {
     const step = fakeStep()
@@ -241,15 +248,15 @@ describe('runSweepOrder', () => {
     const { deps, startRun, finishRun, decideChunk, finalize } = sweepDeps({ kind: 'done', receipt: r })
     const result = await runSweepOrder(step, deps, PAYLOAD, RUN_ID)
 
-    expect(result).toBe(r)
-    expect(step.ids).toEqual(['log-start', 'prepare', 'log-finish'])
+    expect(result).toEqual({ ...r, send: NOT_ARMED })
+    expect(step.ids).toEqual(['log-start', 'prepare', 'send-prepare', 'log-finish'])
     expect(decideChunk).not.toHaveBeenCalled()
     expect(finalize).not.toHaveBeenCalled()
     const runLogId = cronRunIdFromInngestRun(RUN_ID)
     expect(startRun).toHaveBeenCalledWith(runLogId)
     const [finishId, , opts] = finishRun.mock.calls[0] as [string, number, Record<string, unknown>]
     expect(finishId).toBe(runLogId)
-    expect(opts).toEqual(sweepFinishOpts(r))
+    expect(opts).toEqual(sweepFinishOpts(r, NOT_ARMED))
   })
 
   it('runs one step per chunk of 4 contacts, stale ones first, with deterministic step ids', async () => {
@@ -262,7 +269,7 @@ describe('runSweepOrder', () => {
     const { deps, decideChunk, finalize, finishRun } = sweepDeps({ kind: 'plan', plan: p })
     const result = await runSweepOrder(step, deps, PAYLOAD, RUN_ID)
 
-    expect(step.ids).toEqual(['log-start', 'prepare', 'decide-stale-0', 'decide-candidates-1', 'decide-candidates-2', 'log-finish'])
+    expect(step.ids).toEqual(['log-start', 'prepare', 'decide-stale-0', 'decide-candidates-1', 'decide-candidates-2', 'send-prepare', 'log-finish'])
     expect(decideChunk.mock.calls.map((c) => c[0])).toEqual([
       { plan: p, kind: 'stale', contactIds: ['s1', 's2'] },
       { plan: p, kind: 'candidates', contactIds: ['c1', 'c2', 'c3', 'c4'] },
@@ -272,9 +279,27 @@ describe('runSweepOrder', () => {
     const [finalPlan, results] = finalize.mock.calls[0] as [SweepPlan, ChunkResult[]]
     expect(finalPlan).toBe(p)
     expect(results).toHaveLength(3)
-    expect(result).toMatchObject({ status: 'swept', decided: 3 })
+    expect(result).toMatchObject({ status: 'swept', decided: 3, send: NOT_ARMED })
     const [, , opts] = finishRun.mock.calls[0] as [string, number, Record<string, unknown>]
-    expect(opts).toEqual(sweepFinishOpts(result as SweepReceipt))
+    expect(opts).toEqual(sweepFinishOpts(result as SweepReceipt, NOT_ARMED))
+  })
+
+  it('🔴 real sending runs after the rehearsal: one step to plan, one for the stale guests, one per guest; a stop ends the run', async () => {
+    const step = fakeStep()
+    const sendPlan: SendPlan = { clientId: CLIENT_A, authorizationId: 'auth-1', sweepDay: '2026-11-03', contactIds: ['g1', 'g2', 'g3'], staleIds: ['old1'], createdAt: '2026-11-02T20:00:00.000Z' }
+    const stop: SendOneResult = { outcome: 'account_error', reason: 'provider_account_error', sendId: 'r2', stopRun: true, providerImpact: 'NONE' }
+    const { deps, sendOne, sendStale, finishRun } = sweepDeps({ kind: 'done', receipt: receipt({ status: 'no_open_proposal' }) }, {
+      sendPrepare: vi.fn(async (): Promise<SendPrepareResult> => ({ kind: 'plan', plan: sendPlan })),
+    })
+    sendOne.mockImplementationOnce(async () => ({ outcome: 'sent', reason: null, sendId: 'r1', stopRun: false, providerImpact: 'PROVIDER_ACCEPTED' }))
+    sendOne.mockImplementationOnce(async () => stop)
+    const result = await runSweepOrder(step, deps, PAYLOAD, RUN_ID)
+    expect(step.ids).toEqual(['log-start', 'prepare', 'send-prepare', 'send-stale', 'send-0', 'send-1', 'log-finish'])
+    expect(sendStale).toHaveBeenCalledWith(sendPlan)
+    expect(sendOne.mock.calls.map((c) => (c as unknown[])[0])).toEqual([{ plan: sendPlan, contactId: 'g1' }, { plan: sendPlan, contactId: 'g2' }])
+    expect(result).toMatchObject({ send: { tried: 2, provider_impact: 'PROVIDER_ACCEPTED', stopped: 'account_error:provider_account_error' } })
+    const [, , opts] = finishRun.mock.calls[0] as [string, number, { summary: { send: unknown } }]
+    expect(opts.summary.send).toMatchObject({ authorization_id: 'auth-1', by_outcome: { sent: 1, account_error: 1 } })
   })
 
   it('runs the chunks one after the other, never in parallel', async () => {
@@ -314,7 +339,7 @@ describe('sweepFinishOpts', () => {
     expect(opts.completed).toBe(3)
     expect(opts.failed).toBe(2)
     expect(opts.error).toBeUndefined()
-    expect(opts.summary).toEqual(receipt({ status: 'swept', deferred: 2, to_decide: 5, decided: 3 }))
+    expect(opts.summary).toEqual({ ...receipt({ status: 'swept', deferred: 2, to_decide: 5, decided: 3 }), send: null })
   })
 
   it('counts contacts that already held a row as completed, so processed = completed + failed', () => {
@@ -334,7 +359,7 @@ describe('sweepFinishOpts', () => {
       const opts = sweepFinishOpts(r)
       expect(opts.error).toBe(`boom: ${status}`)
       expect(opts.failed).toBe(3)
-      expect(opts.summary).toEqual(r)
+      expect(opts.summary).toEqual({ ...r, send: null })
     })
   }
 })
