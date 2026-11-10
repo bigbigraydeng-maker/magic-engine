@@ -24,6 +24,8 @@ import {
   loadRunForApproval,
 } from '@/lib/kernel-approval/service'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ runId: string }> },

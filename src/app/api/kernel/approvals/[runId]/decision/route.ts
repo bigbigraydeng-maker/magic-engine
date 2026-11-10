@@ -33,6 +33,8 @@ import {
   parseDecisionInput,
 } from '@/lib/kernel-approval/service'
 
+export const dynamic = 'force-dynamic'
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ runId: string }> },
