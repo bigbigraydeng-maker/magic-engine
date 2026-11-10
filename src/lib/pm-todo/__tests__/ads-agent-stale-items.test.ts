@@ -1,11 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { loadClientCapFacts } from '@/lib/ads-strategy/circuit-cap-facts'
 import type { ManualItem } from '../manual-item-types'
 import {
   pushAdsAgentStaleItems,
   pushAdsDailyPullbackGapItems,
   pushAdsDailySpendOverCapNoticeItems,
-  pushAdsHeartbeatStallItems,
 } from '../ads-agent-stale-items'
 
 vi.mock('@/lib/meta/client-ad-accounts', () => ({
@@ -89,33 +88,6 @@ describe('pushAdsDailySpendOverCapNoticeItems', () => {
     const items: Parameters<typeof pushAdsDailySpendOverCapNoticeItems>[1] = []
     await pushAdsDailySpendOverCapNoticeItems({} as never, items, () => 'n')
     expect(items).toHaveLength(0)
-  })
-})
-
-describe('pushAdsHeartbeatStallItems', () => {
-  const env = process.env
-
-  afterEach(() => {
-    process.env = { ...env }
-  })
-
-  it('does not alert when dry and no clients', async () => {
-    process.env.AD_HEARTBEAT_MODE = 'dry'
-    process.env.AD_HEARTBEAT_CLIENT_IDS = ''
-    const items: ManualItem[] = []
-    const supabase = { from: () => chain('cron_run_logs', []) }
-    await pushAdsHeartbeatStallItems(supabase as never, items, NOW)
-    expect(items).toHaveLength(0)
-  })
-
-  it('alerts when configured client never succeeds', async () => {
-    process.env.AD_HEARTBEAT_MODE = 'dry'
-    process.env.AD_HEARTBEAT_CLIENT_IDS = 'c1'
-    const items: ManualItem[] = []
-    const supabase = { from: () => chain('cron_run_logs', []) }
-    await pushAdsHeartbeatStallItems(supabase as never, items, NOW)
-    expect(items).toHaveLength(1)
-    expect(items[0]?.kind).toBe('ads_heartbeat_stall')
   })
 })
 
