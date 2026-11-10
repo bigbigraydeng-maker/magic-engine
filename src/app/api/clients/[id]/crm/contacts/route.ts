@@ -362,7 +362,7 @@ const TOUCH_SCAN_PAGE = 1000
 const TOUCH_SCAN_MAX_PAGES = 40
 
 const PAGE_CONTACT_COLUMNS =
-  'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at, assigned_to'
+  'id, display_name, primary_phone, primary_email, do_not_contact, snooze_until, stage, first_seen_at, pinned_at, important_note, important_due_at, assigned_to, ai_takeover_since'
 
 /** 这一页的人的全部触点（带全字段，给分段与整理用）。 */
 function fetchTouchesFor(clientId: string, ids: string[]): Promise<TouchRow[]> {
@@ -1107,6 +1107,8 @@ function assembleRows(
     const built = responseRowFor(c, tps, stageMeta, model, seg, briefs.get(c.id) ?? null)
     customPerContact.push(built.custom)
     if (sources !== undefined) built.row.sources = sources.get(c.id) ?? []
+    // 「AI 跟进中」小标：镜像列有值就标（今天名单走自己的一套，见 getPriority）。
+    built.row.aiTakeover = c.ai_takeover_since != null
     return built.row
   })
 

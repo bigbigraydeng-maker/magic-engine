@@ -47,6 +47,8 @@ export interface ContactRow {
    * 抽屉透出来，让员工看得见 + 改得动（issue #3158）。
    */
   assigned_to: string | null
+  /** 「AI 跟进中」镜像列（lib/crm/ai-takeover）；空 = 不在接管中。 */
+  ai_takeover_since?: string | null
 }
 
 export interface TouchRow {
