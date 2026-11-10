@@ -218,6 +218,22 @@ describe('GET contacts — 分页形状', () => {
     expect(body).not.toHaveProperty('contacts')
   })
 
+  it('「AI 跟进中」镜像列有值 → 分页行带 aiTakeover: true（全部客人名单小标）', async () => {
+    const original = CONTACTS[0].ai_takeover_since
+    CONTACTS[0].ai_takeover_since = '2026-11-10T01:59:33.874Z'
+    try {
+      const { body } = await get('client-a', '?page=1&perPage=100')
+      const items = body.items as Array<{ contactId: string; aiTakeover?: boolean }>
+      expect(items.find((r) => r.contactId === 'a1')?.aiTakeover).toBe(true)
+      expect(items.filter((r) => r.contactId !== 'a1').every((r) => r.aiTakeover === false)).toBe(true)
+      const cols = recorded.filter((r) => r.table === 'contacts').map((r) => r.columns ?? '')
+      expect(cols.some((c) => c.includes('ai_takeover_since'))).toBe(true)
+    } finally {
+      if (original === undefined) delete CONTACTS[0].ai_takeover_since
+      else CONTACTS[0].ai_takeover_since = original
+    }
+  })
+
   it('阶段营销动作无效时与阶段接口一样回退到 suppress', async () => {
     const original = STAGES[0].marketing_action
     STAGES[0].marketing_action = 'invalid'
