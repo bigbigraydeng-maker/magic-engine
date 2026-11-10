@@ -22,11 +22,11 @@ beforeEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('新建空白草稿计划按钮', () => {
+describe('新建空白草稿按钮', () => {
   it('推广计划页上看得到这个按钮', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ success: true, plans: [] })))
     render(<PromoPlanClient />)
-    expect(await screen.findByRole('button', { name: '新建空白草稿计划' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: '新建空白草稿' })).toBeTruthy()
   })
 
   it('先选目标再确认；请求里只有目标编号，没有示例标题', async () => {
@@ -38,7 +38,7 @@ describe('新建空白草稿计划按钮', () => {
     const onCreated = vi.fn()
     render(<BlankDraftPlanButton clientId="client-1" onCreated={onCreated} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '新建空白草稿计划' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建空白草稿' }))
     const select = await screen.findByLabelText('选择目标')
     expect((select as HTMLSelectElement).value).toBe('')
     expect(screen.getByRole('button', { name: '确认新建' })).toBeDisabled()
@@ -58,10 +58,10 @@ describe('新建空白草稿计划按钮', () => {
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ goals: [DRAFT] }))
     vi.stubGlobal('fetch', fetchMock)
     render(<BlankDraftPlanButton clientId="client-1" onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole('button', { name: '新建空白草稿计划' }))
+    fireEvent.click(screen.getByRole('button', { name: '新建空白草稿' }))
     await screen.findByLabelText('选择目标')
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(fetchMock.mock.calls.some(call => (call[1] as RequestInit | undefined)?.method === 'POST')).toBe(false)
-    expect(screen.getByRole('button', { name: '新建空白草稿计划' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '新建空白草稿' })).toBeTruthy()
   })
 })

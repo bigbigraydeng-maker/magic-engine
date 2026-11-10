@@ -1,6 +1,9 @@
 'use client'
 
+import { useState } from 'react'
 import type { DeliveryView } from '@/lib/marketing-plan/promo/stage-evidence'
+import { MeButton } from '@/components/ui/me-primitives'
+import { ScaleDraftConfirmDialog } from './ScaleDraftConfirmDialog'
 
 interface Props {
   view: DeliveryView
@@ -9,11 +12,15 @@ interface Props {
   canAct: boolean
   onPropose?: () => void
   onMark?: (stage: 'steady' | 'test') => void
+  /** 只渲染按钮条（嵌在状态卡里） */
+  actionsOnly?: boolean
+  /** 嵌入详情区：不重复按钮，只展示受众梯 */
+  embedded?: boolean
 }
 
 const CONFIRM = '只改阶段，不改预算和上限'
 
-function StageActions({ view, busy, marking, canAct, onPropose, onMark }: Props) {
+function StageButtons({ view, busy, marking, canAct, onPropose, onMark, onRequestPropose }: Props & { onRequestPropose: () => void }) {
   const locked = busy || marking
   const showMark = canAct && Boolean(onMark)
   const showPropose = canAct && view.can_propose && Boolean(onPropose)
@@ -22,57 +29,77 @@ function StageActions({ view, busy, marking, canAct, onPropose, onMark }: Props)
   return (
     <div className="flex flex-wrap gap-2">
       {showMark && onMark && (
-        <button
+        <MeButton
           type="button"
+          variant="ghost"
+          size="sm"
+          disabled={locked}
           onClick={() => {
             if (!window.confirm(CONFIRM)) return
             onMark(backToTest ? 'test' : 'steady')
           }}
-          disabled={locked}
-          className="border border-gray-300 bg-white text-gray-900 text-sm font-semibold rounded-lg px-3 py-1.5 hover:bg-gray-50 disabled:opacity-50"
         >
           {marking ? '正在记下…' : backToTest ? '改回试投' : '标为稳住'}
-        </button>
+        </MeButton>
       )}
       {showPropose && onPropose && (
-        <button
+        <MeButton
           type="button"
-          onClick={onPropose}
+          variant="ghost"
+          size="sm"
+          className="border-[#C2453A]/35 text-[#C2453A]"
           disabled={locked}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg px-4 py-2 disabled:opacity-50"
+          onClick={onRequestPropose}
         >
           {busy ? '正在生成草稿…' : '生成放量草稿'}
-        </button>
+        </MeButton>
       )}
     </div>
   )
 }
 
-export function DeliveryStageCard({ view, busy, marking = false, canAct, onPropose, onMark }: Props) {
+export function DeliveryStageCard(props: Props) {
+  const { view, busy, marking = false, canAct, onPropose, onMark, actionsOnly, embedded } = props
+  const [scaleOpen, setScaleOpen] = useState(false)
+
+  const confirmPropose = () => {
+    setScaleOpen(false)
+    onPropose?.()
+  }
+
+  if (actionsOnly) {
+    return (
+      <>
+        <StageButtons {...props} onRequestPropose={() => setScaleOpen(true)} />
+        <ScaleDraftConfirmDialog
+          open={scaleOpen}
+          busy={busy}
+          onCancel={() => setScaleOpen(false)}
+          onConfirm={confirmPropose}
+        />
+      </>
+    )
+  }
+
+  if (!embedded) return null
+
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-4 space-y-3" aria-label="投放阶段">
+    <div className="space-y-3" aria-label="投放阶段详情">
+      <p className="text-sm text-black/65">{view.switch_text}</p>
       <div>
-        <h2 className="text-sm font-bold text-gray-900">现在是：{view.stage_label}</h2>
-        <p className="mt-1 text-sm text-gray-700">{view.goal}</p>
-      </div>
-      <p className="text-sm text-gray-700">{view.ratio_text}</p>
-      <p className="text-sm text-gray-800">{view.switch_text}</p>
-      {view.draft_note && <p className="text-sm text-gray-700">{view.draft_note}</p>}
-      <StageActions view={view} busy={busy} marking={marking} canAct={canAct} onPropose={onPropose} onMark={onMark} />
-      <div>
-        <h3 className="text-sm font-semibold text-gray-900">建议的受众顺序</h3>
-        <p className="mt-1 text-xs text-gray-600">{view.ladder_note}</p>
+        <h3 className="text-sm font-semibold text-[#1A1A1A]">建议的受众顺序</h3>
+        <p className="mt-1 text-xs text-black/50">{view.ladder_note}</p>
         <ol className="mt-2 space-y-2">
           {view.rungs.map((rung, index) => (
-            <li key={rung.title} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
-              <p className="text-sm font-medium text-gray-900">
+            <li key={rung.title} className="rounded-[12px] border border-black/[.06] bg-white px-3 py-2">
+              <p className="text-sm font-medium text-[#1A1A1A]">
                 {index + 1}. {rung.title}{rung.suggested ? '（建议先做这一档）' : ''}
               </p>
-              <p className="text-xs text-gray-700 mt-0.5">{rung.detail}</p>
+              <p className="mt-0.5 text-xs text-black/55">{rung.detail}</p>
             </li>
           ))}
         </ol>
       </div>
-    </section>
+    </div>
   )
 }
