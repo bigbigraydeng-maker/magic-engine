@@ -11,7 +11,7 @@ const has = (calls: readonly RecordedCall[], method: string, ...args: unknown[])
 const ROW: LifetimeRow = {
   id: 'e0000000-0000-4000-8000-000000000001', contactId: 'b0000000-0000-4000-8000-000000000001', status: 'pending', reasonCode: null,
   authorizationId: 'a0000000-0000-4000-8000-000000000001', idempotencyKey: 'k', renderedSha256: 'r', toAddressSha256: 't',
-  firstAttemptAt: '2026-11-19T20:00:00+00:00', providerMessageId: null, updatedAt: '2026-11-19T20:00:01.123456+00:00',
+  firstAttemptAt: '2026-11-19T20:00:00+00:00', providerMessageId: null, attempts: 1, updatedAt: '2026-11-19T20:00:01.123456+00:00',
 }
 
 describe('the live ledger (production)', () => {
