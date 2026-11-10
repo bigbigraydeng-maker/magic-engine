@@ -33,6 +33,7 @@ function wentOut(recipients?: RecipientOutcome[]): LetterFacts {
     sends: {
       channel: 'me',
       proposalPending: false,
+      proposalApproved: false,
       started: true,
       recipients: recipients ?? [outcome({ contactId: 'c1' }), outcome({ contactId: 'c2', outcome: 'blocked', reasonCode: 'dnc' })],
     },
@@ -40,7 +41,16 @@ function wentOut(recipients?: RecipientOutcome[]): LetterFacts {
 }
 
 /** 提案递上去了，等 PM 放行。 */
-const waiting: LetterFacts = { registry: null, sends: { channel: 'me', proposalPending: true, started: false, recipients: [] } }
+const waiting: LetterFacts = {
+  registry: null,
+  sends: { channel: 'me', proposalPending: true, proposalApproved: false, started: false, recipients: [] },
+}
+
+/** PM 已放行，可是一行发送记录都没有（引擎没动）。 */
+const approvedOnly: LetterFacts = {
+  registry: null,
+  sends: { channel: 'me', proposalPending: false, proposalApproved: true, started: false, recipients: [] },
+}
 
 describe('lookbackDaysFor', () => {
   it('covers the whole life of a group that has not left yet (the first letter is at most 6.5 months before departure)', () => {
@@ -110,6 +120,13 @@ describe('buildList · letters whose send day has passed', () => {
     const list = buildList(plan, new Map([['a-untraced', waiting]]), TODAY, 'now')
     expect(list.pastLetters).toHaveLength(1)
     expect(list.pastLetters[0]).toMatchObject({ letterKey: 'a-untraced', status: 'awaiting_release' })
+  })
+
+  it('a letter that was approved but never went out is listed too (still not sent), and its group counts it as overdue', () => {
+    const list = buildList(plan, new Map([['a-untraced', approvedOnly]]), TODAY, 'now')
+    expect(list.pastLetters).toHaveLength(1)
+    expect(list.pastLetters[0]).toMatchObject({ letterKey: 'a-untraced', status: 'draft', counts: { sent: null } })
+    expect(list.tourGroups.find((g) => g.tourName === 'Tour One')?.lettersOverdue).toBe(1)
   })
 
   it('nothing in the records at all means no history', () => {

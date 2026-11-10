@@ -137,8 +137,16 @@ function mergeOutcomes(rows: readonly SendRow[]): RecipientOutcome[] {
   return Array.from(byContact.values(), outcomeOf)
 }
 
-async function loadPendingProposals(db: SupabaseClient, clientId: string, triggerKeys: readonly string[]): Promise<Set<string>> {
+interface ProposalStates {
+  /** 等你放行：还没批、也没撤回，并且带着要发的那一版正文。 */
+  pending: Set<string>
+  /** 已放行：批了、没撤回。 */
+  approved: Set<string>
+}
+
+async function loadProposalStates(db: SupabaseClient, clientId: string, triggerKeys: readonly string[]): Promise<ProposalStates> {
   const pending = new Set<string>()
+  const approved = new Set<string>()
   for (const group of chunk(triggerKeys, CHUNK_SIZE)) {
     const res = await db
       .from('triggered_send_authorizations')
@@ -148,13 +156,16 @@ async function loadPendingProposals(db: SupabaseClient, clientId: string, trigge
     if (res.error) throw new Error(res.error.message)
     for (const row of rowsOf(res.data)) {
       const key = str(row.trigger_key)
-      // 等你放行 = 还没批、也没撤回，并且带着要发的那一版正文（约定 §10；演练用的欢迎信提案这一列是空的，不算）。
-      if (key !== null && row.authorized_at == null && row.revoked_at == null && str(row.template_sha256) !== null) {
+      if (key === null || row.revoked_at != null) continue // 撤回的提案不算（没有「撤下了、没发」这一种状态可显示）
+      if (row.authorized_at != null) {
+        approved.add(key)
+      } else if (str(row.template_sha256) !== null) {
+        // 等你放行（约定 §10；演练用的欢迎信提案这一列是空的，不算）。
         pending.add(key)
       }
     }
   }
-  return pending
+  return { pending, approved }
 }
 
 async function loadSendRows(db: SupabaseClient, clientId: string, triggerKeys: readonly string[]): Promise<SendRow[]> {
@@ -179,7 +190,10 @@ async function loadSendRows(db: SupabaseClient, clientId: string, triggerKeys: r
   return rows
 }
 
-/** 返回的 Map 只含「有提案或有发送记录」的信（key = trigger_key）；没有任何事实的信不在里面（页面显示草稿）。 */
+/**
+ * 返回的 Map 只含「有提案（等你放行的或已放行的）或有发送记录」的信（key = trigger_key）；
+ * 没有任何事实的信不在里面（页面显示草稿）。
+ */
 export async function loadMeSends(
   db: SupabaseClient,
   clientId: string,
@@ -188,18 +202,20 @@ export async function loadMeSends(
   const keys = unique(triggerKeys)
   const result = new Map<string, SendFacts>()
   if (keys.length === 0) return result
-  const [pending, sendRows] = await Promise.all([loadPendingProposals(db, clientId, keys), loadSendRows(db, clientId, keys)])
+  const [proposals, sendRows] = await Promise.all([loadProposalStates(db, clientId, keys), loadSendRows(db, clientId, keys)])
 
   const rowsByKey = new Map<string, SendRow[]>()
   for (const row of sendRows) rowsByKey.set(row.triggerKey, [...(rowsByKey.get(row.triggerKey) ?? []), row])
 
   for (const key of keys) {
     const rows = rowsByKey.get(key) ?? []
-    const proposalPending = pending.has(key)
-    if (rows.length === 0 && !proposalPending) continue
+    const proposalPending = proposals.pending.has(key)
+    const proposalApproved = proposals.approved.has(key)
+    if (rows.length === 0 && !proposalPending && !proposalApproved) continue
     result.set(key, {
       channel: 'me',
       proposalPending,
+      proposalApproved,
       // 已经开始发 = 有真发行（不是演练），并且至少一行不是被拦 / 跳过（约定 §10）。
       started: rows.some((row) => !row.rehearsal && row.status !== 'blocked' && row.status !== 'skipped'),
       recipients: mergeOutcomes(rows),

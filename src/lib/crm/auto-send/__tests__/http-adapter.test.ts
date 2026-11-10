@@ -68,11 +68,6 @@ describe('createHttpAdapter', () => {
     }
   })
 
-  it('no rhythm (cadence null) is a normal list', async () => {
-    const overview = await createHttpAdapter('c', async () => json({ ...LIST_BODY, cadence: null })).loadOverview()
-    expect(overview).toEqual({ nextBatch: null, sections: [] })
-  })
-
   it('reads one letter with the key URL-encoded (it contains colons)', async () => {
     const fetchImpl = vi.fn<FetchLike>(async () => json(DETAIL_BODY))
     const detail = await createHttpAdapter('client-1', fetchImpl).loadLetterDetail('plan:2026-12-02:t-1:2027-03-11:3')

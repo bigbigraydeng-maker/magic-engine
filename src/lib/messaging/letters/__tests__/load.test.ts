@@ -213,14 +213,22 @@ describe('loadMeSends', () => {
       { client_id: CLIENT_A, trigger_key: OTHER, authorized_at: null, revoked_at: null, template_sha256: null },
     ])
     const sends = await loadMeSends(ctx.db, CLIENT_A, [TRIGGER, OTHER])
-    expect(sends.get(TRIGGER)).toMatchObject({ channel: 'me', proposalPending: true, started: false, recipients: [] })
+    expect(sends.get(TRIGGER)).toMatchObject({ channel: 'me', proposalPending: true, proposalApproved: false, started: false, recipients: [] })
     expect(sends.has(OTHER)).toBe(false) // the rehearsal-only welcome proposal has no template version: not "waiting"
   })
 
-  it('an approved or withdrawn proposal is not waiting', async () => {
+  it('an approved proposal is not waiting, but it leaves a trace even with no send row (approved, nothing went out)', async () => {
     seed('triggered_send_authorizations', [
       { client_id: CLIENT_A, trigger_key: TRIGGER, authorized_at: '2026-11-20T00:00:00Z', revoked_at: null, template_sha256: 'sha' },
-      { client_id: CLIENT_A, trigger_key: OTHER, authorized_at: null, revoked_at: '2026-11-20T00:00:00Z', template_sha256: 'sha' },
+    ])
+    const facts = (await loadMeSends(ctx.db, CLIENT_A, [TRIGGER])).get(TRIGGER)
+    expect(facts).toMatchObject({ channel: 'me', proposalPending: false, proposalApproved: true, started: false, recipients: [] })
+  })
+
+  it('a withdrawn proposal leaves no trace (no status can say 撤下了、没发), even one that was approved before it was withdrawn', async () => {
+    seed('triggered_send_authorizations', [
+      { client_id: CLIENT_A, trigger_key: TRIGGER, authorized_at: null, revoked_at: '2026-11-20T00:00:00Z', template_sha256: 'sha' },
+      { client_id: CLIENT_A, trigger_key: OTHER, authorized_at: '2026-11-19T00:00:00Z', revoked_at: '2026-11-20T00:00:00Z', template_sha256: 'sha' },
     ])
     expect((await loadMeSends(ctx.db, CLIENT_A, [TRIGGER, OTHER])).size).toBe(0)
   })
@@ -461,6 +469,17 @@ describe('rhythm, past batches and empty reasons', () => {
       ])
       expect(list.pastLetters[0].counts).toEqual({ recipients: 2, sent: 1, blocked: 1, failed: 0, rehearsal: 0, opened: null })
       expect(list.pastLetters.map((l) => l.letterKey)).not.toContain(buildLetterKey(NOV_4_TOUR_TWO)) // planned that day, but nothing in the records
+    })
+
+    it('a batch that was approved but never went out stays in the history, still a draft, and counts as overdue in its group', async () => {
+      seedHistory()
+      seed('triggered_send_authorizations', [
+        { client_id: CLIENT_A, trigger_key: buildTriggerKey(NOV_4_TOUR_TWO), authorized_at: '2026-11-03T00:00:00Z', revoked_at: null, template_sha256: 'sha' },
+      ])
+      const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      const row = list.pastLetters.find((l) => l.letterKey === buildLetterKey(NOV_4_TOUR_TWO))
+      expect(row).toMatchObject({ status: 'draft', counts: { sent: null } })
+      expect(list.tourGroups.find((g) => g.tourName === 'Tour Two')).toMatchObject({ lettersOverdue: 1, lettersSent: 0 })
     })
 
     it('the upcoming list and the next batch do not change', async () => {

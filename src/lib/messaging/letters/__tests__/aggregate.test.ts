@@ -32,7 +32,7 @@ function outcome(over: Partial<RecipientOutcome> & { contactId: string }): Recip
 }
 
 function sends(over: Partial<SendFacts> = {}): SendFacts {
-  return { channel: 'me', proposalPending: false, started: false, recipients: [], ...over }
+  return { channel: 'me', proposalPending: false, proposalApproved: false, started: false, recipients: [], ...over }
 }
 
 describe('deriveLetterStatus', () => {

@@ -60,6 +60,12 @@ export interface SendFacts {
   channel: LetterChannel
   /** 有未授权、未撤回的提案（等 PM 放行）。 */
   proposalPending: boolean
+  /**
+   * 有已授权、未撤回的提案（PM 已放行）。哪怕一行发送记录都没有也算「有痕迹」：
+   * 放行了、过了发信日却一封都没发出去，正是要如实显示的「没发出去」（发信窗口 11-10 定）。
+   * 撤回的提案不算痕迹——状态里没有「撤下了、没发」这一种可显示。
+   */
+  proposalApproved: boolean
   /** 已授权且已经开始发。 */
   started: boolean
   recipients: RecipientOutcome[]
