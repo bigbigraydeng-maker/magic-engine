@@ -11,6 +11,7 @@ import type { LiveTodayView } from '@/lib/ads-strategy/heartbeat/live-view'
 import { HeldCards } from '@/components/confirmation-card/HeldCards'
 import { MeButton, MePill, MeStatCard, MeTable } from '@/components/ui/me-primitives'
 import AdsNextStepCard from './ads-next-step-card'
+import OutsideChangePanel from './outside-change-panel'
 import { TodayGoalProgress } from './today-goal-progress'
 import HourlyLeadsPanel from './hourly-leads-panel'
 import LiveTodayPanel from './live-today-panel'
@@ -191,6 +192,7 @@ export function AdsHealthTodayTab(props: TodayTabProps) {
 
   return (
     <>
+      <OutsideChangePanel clientId={clientId} />
       {!loading && !error && (
         <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-[24px] border border-black/10 bg-white p-5 shadow-card">

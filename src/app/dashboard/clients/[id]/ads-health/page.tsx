@@ -20,7 +20,6 @@ import GrowthPanel, { type GrowthStateView } from './growth-panel'
 import BreakdownPanel from './breakdown-panel'
 import LiveTodayPanel from './live-today-panel'
 import EntityTreePanel from './entity-tree-panel'
-import OutsideChangePanel from './outside-change-panel'
 import AutoPausePanel from './auto-pause-panel'
 import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
 import { AdsHealthTodayTab } from './ads-health-today-tab'
@@ -579,8 +578,6 @@ export default function AdsHealthPage() {
   return (
     <div className="mx-auto max-w-5xl bg-me-ivory px-4 py-6 md:py-8">
       <AdsHealthPageHeader clientId={clientId} insightDate={latest?.insight_date} />
-
-      <OutsideChangePanel clientId={clientId} />
 
       <TabBar tab={tab} onChange={setTab} />
 

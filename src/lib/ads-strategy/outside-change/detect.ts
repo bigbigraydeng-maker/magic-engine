@@ -1,6 +1,6 @@
 /**
- * Compare consecutive stored ad snapshots and keep the budget / new-ad-set / new-ad
- * changes that no finished ME action record explains.
+ * Compare consecutive stored ad snapshots and keep the budget / pause-resume /
+ * new-ad-set / new-ad changes that no finished ME action record explains.
  *
  * Read-only and pure: no network, no database, no client names or client ids.
  * A "consecutive" pair is two stored rows of the same entity in time order.
@@ -29,6 +29,16 @@ const CREATE_KEYS = new Set([
   'ads.add_retargeting_adset',
   'ads.swap_creative',
 ])
+/** Kernel ledger keys that explain a pause or resume. The old entry is not in this set. */
+const STATUS_KEYS = new Set([
+  'ads.pause_unit',
+  'ads.pause_campaign',
+])
+/**
+ * Post-hoc adoption of a hand edit already made on Meta.
+ * `manual_meta_adopted` is that source: the row records the edit, it does not mean ME made it.
+ */
+const POST_HOC_META_SOURCES = new Set(['manual_meta_adopted'])
 const DONE_STATUS = new Set(['succeeded', 'active', 'executed'])
 /**
  * ME paused draft ledger rows — not live yet, but still ME-created (not outside Meta edits).
@@ -52,6 +62,8 @@ export interface SnapshotFact {
   dailyBudgetMinor: number | null
   lifetimeBudgetMinor: number | null
   currency: string | null
+  /** Meta effective status. Null when the snapshot did not store one. */
+  effectiveStatus: string | null
   capturedAt: string
 }
 
@@ -61,10 +73,12 @@ export interface ActionFact {
   ids: string[]
   /** null = the row has no status field (older budget receipts still count). */
   status: string | null
+  /** `adopted.source` on the row. Null when this row was not an adoption. */
+  adoptedSource: string | null
 }
 
 export interface OutsideChange {
-  kind: 'budget' | 'new_adset' | 'new_ad'
+  kind: 'budget' | 'status' | 'new_adset' | 'new_ad'
   where: string
   what: string
   capturedAt: string
@@ -76,6 +90,17 @@ interface Candidate {
   row: SnapshotFact
   previousCapturedAt: string | null
   what: string
+}
+
+/** Read `adopted.source` from a stored action payload. Missing or blank means not an adoption. */
+export function adoptedSource(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null
+  const adopted = (value as { adopted?: unknown }).adopted
+  if (!adopted || typeof adopted !== 'object') return null
+  const source = (adopted as { source?: unknown }).source
+  if (typeof source !== 'string') return null
+  const trimmed = source.trim()
+  return trimmed === '' ? null : trimmed
 }
 
 export function idsInRecord(value: unknown): string[] {
@@ -140,6 +165,26 @@ function budgetWhat(prev: SnapshotFact, next: SnapshotFact): string | null {
   return parts.length > 0 ? parts.join('，') : null
 }
 
+function statusWord(status: string): string {
+  switch (status) {
+    case 'ACTIVE': return '开着'
+    case 'PAUSED': return '已暂停'
+    case 'CAMPAIGN_PAUSED': return '系列已暂停'
+    case 'ADSET_PAUSED': return '已暂停'
+    default: return status
+  }
+}
+
+function statusWhat(prev: SnapshotFact, next: SnapshotFact): string | null {
+  if (!prev.settingsHash || !next.settingsHash) return null
+  if (prev.settingsHash === DISAPPEARED_HASH || next.settingsHash === DISAPPEARED_HASH) return null
+  if (prev.capturedAt === next.capturedAt) return null
+  const before = (prev.effectiveStatus ?? '').trim()
+  const after = (next.effectiveStatus ?? '').trim()
+  if (!before || !after || before === after) return null
+  return `开停 ${statusWord(before)} → ${statusWord(after)}`
+}
+
 function groups(rows: SnapshotFact[], levels: ReadonlySet<string>): Map<string, SnapshotFact[]> {
   const map = new Map<string, SnapshotFact[]>()
   for (const row of rows) {
@@ -160,6 +205,18 @@ function budgetCandidates(rows: SnapshotFact[]): Candidate[] {
       const what = budgetWhat(list[i - 1], list[i])
       if (!what) continue
       out.push({ kind: 'budget', row: list[i], previousCapturedAt: list[i - 1].capturedAt, what })
+    }
+  }
+  return out
+}
+
+function statusCandidates(rows: SnapshotFact[]): Candidate[] {
+  const out: Candidate[] = []
+  for (const list of groups(rows, new Set(['campaign', 'adset'])).values()) {
+    for (let i = 1; i < list.length; i++) {
+      const what = statusWhat(list[i - 1], list[i])
+      if (!what) continue
+      out.push({ kind: 'status', row: list[i], previousCapturedAt: list[i - 1].capturedAt, what })
     }
   }
   return out
@@ -262,15 +319,18 @@ function statusExplains(action: ActionFact, createAction: boolean): boolean {
   return false
 }
 
+function keysFor(kind: OutsideChange['kind']): Set<string> {
+  if (kind === 'budget') return BUDGET_KEYS
+  if (kind === 'status') return STATUS_KEYS
+  return CREATE_KEYS
+}
+
 function matched(candidate: Candidate, actions: ActionFact[]): boolean {
-  const keys = candidate.kind === 'budget' ? BUDGET_KEYS : CREATE_KEYS
+  const keys = keysFor(candidate.kind)
   return actions.some((action) => {
     if (!keys.has(action.key)) return false
-    const createAction = CREATE_KEYS.has(action.key)
-    // TODO(Ray): matched() ignores adopted.source today. Rows sourced as manual_meta_adopted
-    // (post-hoc adoption of hand-made Meta edits) still count as ME-explained. Decide whether
-    // those should be treated as outside changes instead; suggested default: mark as ME 外改动.
-    if (!statusExplains(action, createAction)) return false
+    if (action.adoptedSource !== null && POST_HOC_META_SOURCES.has(action.adoptedSource)) return false
+    if (!statusExplains(action, CREATE_KEYS.has(action.key))) return false
     if (!action.ids.includes(candidate.row.entityId)) return false
     return inWindow(action, candidate.previousCapturedAt, candidate.row.capturedAt)
   })
@@ -282,7 +342,7 @@ export function detectOutsideChanges(
   history: readonly SnapshotFact[] = [],
 ): OutsideChange[] {
   const names = namesOf(snapshots)
-  const open = [...budgetCandidates(snapshots), ...newCandidates(snapshots, history)]
+  const open = [...budgetCandidates(snapshots), ...statusCandidates(snapshots), ...newCandidates(snapshots, history)]
     .filter((candidate) => !matched(candidate, actions))
   open.sort((a, b) => b.row.capturedAt.localeCompare(a.row.capturedAt) || a.row.entityId.localeCompare(b.row.entityId))
   return open.map((candidate) => ({

@@ -13,12 +13,13 @@ function snap(partial: Partial<SnapshotFact> & Pick<SnapshotFact, 'level' | 'ent
     dailyBudgetMinor: null,
     lifetimeBudgetMinor: null,
     currency: 'NZD',
+    effectiveStatus: null,
     ...partial,
   }
 }
 
 function action(partial: Partial<ActionFact> & Pick<ActionFact, 'key' | 'occurredAt' | 'ids'>): ActionFact {
-  return { status: 'succeeded', ...partial }
+  return { status: 'succeeded', adoptedSource: null, ...partial }
 }
 
 const campaign = snap({
@@ -180,6 +181,59 @@ describe('detectOutsideChanges', () => {
     })
     expect(idsInRecord({ draft: { pageId: 'page-9' } })).not.toContain('page-9')
     expect(detectOutsideChanges([before, after, adset, ad], [budget, created])).toEqual([])
+  })
+
+  it('still tags ME 外 when the matching row was a post-hoc adoption of a hand Meta edit', () => {
+    const before = snap({
+      level: 'adset', entityId: 'set-1', entityName: 'North', campaignId: 'camp-1',
+      capturedAt: T0, settingsHash: 'h1', dailyBudgetMinor: 5000,
+    })
+    const after = snap({ ...before, capturedAt: T1, settingsHash: 'h2', dailyBudgetMinor: 6000 })
+    const adopted = action({
+      key: 'ads.scale_unit_budget',
+      occurredAt: '2026-10-30T09:00:00.000Z',
+      ids: ['set-1'],
+      adoptedSource: 'manual_meta_adopted',
+    })
+    const found = detectOutsideChanges([before, after], [adopted])
+    expect(found).toEqual([expect.objectContaining({ kind: 'budget', entityId: 'set-1' })])
+  })
+
+  it('tags a pause or resume when no Kernel pause record explains it', () => {
+    const before = snap({
+      level: 'campaign', entityId: 'camp-1', entityName: 'Spring',
+      capturedAt: T0, settingsHash: 'c1', effectiveStatus: 'ACTIVE', dailyBudgetMinor: 5000,
+    })
+    const after = snap({ ...before, capturedAt: T1, settingsHash: 'c2', effectiveStatus: 'PAUSED' })
+    const oldEntry = action({
+      key: 'ads.reactivate_campaign',
+      occurredAt: '2026-10-30T09:00:00.000Z',
+      ids: ['camp-1'],
+    })
+    expect(detectOutsideChanges([before, after], [])).toEqual([
+      expect.objectContaining({ kind: 'status', entityId: 'camp-1', what: '开停 开着 → 已暂停' }),
+    ])
+    expect(detectOutsideChanges([before, after], [oldEntry])).toEqual([
+      expect.objectContaining({ kind: 'status', entityId: 'camp-1' }),
+    ])
+  })
+
+  it('drops a pause when a Kernel pause record matches, and keeps it when that record was adopted by hand', () => {
+    const before = snap({
+      level: 'campaign', entityId: 'camp-1', entityName: 'Spring',
+      capturedAt: T0, settingsHash: 'c1', effectiveStatus: 'ACTIVE',
+    })
+    const after = snap({ ...before, capturedAt: T1, settingsHash: 'c2', effectiveStatus: 'PAUSED' })
+    const kernel = action({
+      key: 'ads.pause_campaign',
+      occurredAt: '2026-10-30T09:00:00.000Z',
+      ids: ['camp-1'],
+    })
+    const adopted = action({ ...kernel, adoptedSource: 'manual_meta_adopted' })
+    expect(detectOutsideChanges([before, after], [kernel])).toEqual([])
+    expect(detectOutsideChanges([before, after], [adopted])).toEqual([
+      expect.objectContaining({ kind: 'status', entityId: 'camp-1' }),
+    ])
   })
 
   it('formats the snapshot time in New Zealand daylight time', () => {

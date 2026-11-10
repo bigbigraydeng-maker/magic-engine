@@ -1,10 +1,13 @@
 /**
- * Reads stored snapshots and ME action rows for the ads-health outside-change tag.
+ * Reads stored snapshots and Kernel action rows for the ads-health outside-change tag.
  * Database only. Never calls Meta and never writes.
+ * ME evidence is `action_runs` only. `flywheel_actions` from the old meta-ads/execute
+ * entry are not evidence that ME made the change.
  * New-entity checks also read one pre-window row per ad set and ad (indexed lookup).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
+  adoptedSource,
   detectOutsideChanges,
   idsInRecord,
   MATCH_BEFORE_MS,
@@ -26,8 +29,10 @@ const ACTION_KEYS = [
   'ads.create_ad',
   'ads.add_retargeting_adset',
   'ads.swap_creative',
+  'ads.pause_unit',
+  'ads.pause_campaign',
 ]
-const SNAP_COLS = 'level, entity_id, entity_name, campaign_id, adset_id, settings_hash, daily_budget_minor, lifetime_budget_minor, currency, captured_at'
+const SNAP_COLS = 'level, entity_id, entity_name, campaign_id, adset_id, settings_hash, daily_budget_minor, lifetime_budget_minor, currency, effective_status, captured_at'
 
 interface RawSnap {
   level: string
@@ -39,18 +44,14 @@ interface RawSnap {
   daily_budget_minor: number | string | null
   lifetime_budget_minor: number | string | null
   currency: string | null
+  effective_status: string | null
   captured_at: string
-}
-
-interface RawFly {
-  action_type: string
-  payload: unknown
-  executed_at: string
 }
 
 interface RawRun {
   action_key: string
   input: unknown
+  evidence: unknown
   status: string | null
   created_at: string
   finished_at: string | null
@@ -75,22 +76,19 @@ function toSnapshot(row: RawSnap): SnapshotFact | null {
     dailyBudgetMinor: minor(row.daily_budget_minor),
     lifetimeBudgetMinor: minor(row.lifetime_budget_minor),
     currency: row.currency,
+    effectiveStatus: row.effective_status,
     capturedAt: row.captured_at,
   }
 }
 
-function statusOf(payload: unknown): string | null {
-  if (!payload || typeof payload !== 'object') return null
-  const status = (payload as { status?: unknown }).status
-  return typeof status === 'string' && status ? status : null
-}
-
-function toFlywheel(row: RawFly): ActionFact {
-  return { key: row.action_type, occurredAt: row.executed_at, ids: idsInRecord(row.payload), status: statusOf(row.payload) }
-}
-
 function toRun(row: RawRun): ActionFact {
-  return { key: row.action_key, occurredAt: row.finished_at ?? row.created_at, ids: idsInRecord(row.input), status: row.status }
+  return {
+    key: row.action_key,
+    occurredAt: row.finished_at ?? row.created_at,
+    ids: idsInRecord(row.input),
+    status: row.status,
+    adoptedSource: adoptedSource(row.input) ?? adoptedSource(row.evidence),
+  }
 }
 
 function adAndAdsetTargets(facts: SnapshotFact[]): SnapshotFact[] {
@@ -159,17 +157,12 @@ export async function loadOutsideChanges(
       .eq('client_id', clientId).eq('platform', 'meta').in('level', LEVELS)
       .gte('captured_at', since).order('captured_at', { ascending: true }).range(from, to),
   )
-  const flywheel = await pageAll<RawFly>((from, to) =>
-    supabase.from('flywheel_actions').select('action_type, payload, executed_at')
-      .eq('client_id', clientId).eq('flywheel', 'ads').in('action_type', ACTION_KEYS)
-      .gte('executed_at', actionSince).order('executed_at', { ascending: true }).range(from, to),
-  )
   const runs = await pageAll<RawRun>((from, to) =>
-    supabase.from('action_runs').select('action_key, input, status, created_at, finished_at')
+    supabase.from('action_runs').select('action_key, input, evidence, status, created_at, finished_at')
       .eq('client_id', clientId).in('action_key', ACTION_KEYS)
       .gte('created_at', actionSince).order('created_at', { ascending: true }).range(from, to),
   )
   const facts = snapshots.map(toSnapshot).filter((row): row is SnapshotFact => row !== null)
   const history = await historyBeforeWindow(clientId, supabase, since, facts)
-  return detectOutsideChanges(facts, [...flywheel.map(toFlywheel), ...runs.map(toRun)], history)
+  return detectOutsideChanges(facts, runs.map(toRun), history)
 }
