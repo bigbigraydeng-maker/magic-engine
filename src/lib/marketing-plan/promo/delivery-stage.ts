@@ -1,3 +1,9 @@
+/**
+ * Stage labels and the 30/70 budget reminder.
+ * Confirmed by Ray 2026-11-10: the split is a reminder only, never a hard block.
+ * Test to scale needs 14 days, 30 primary results, and cost at or under target.
+ * Scale to steady has no automatic rule.
+ */
 import type { AdsStep, BudgetRole, DeliveryStage, PromoSpec } from './spec'
 import { allAdsSteps } from './spec'
 
