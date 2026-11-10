@@ -5,6 +5,10 @@
 
 ---
 
+### 2026-11-10（CRM「自动发信」页面：按团看倒计时信发没发、被拦几位、打没打开）
+
+PR [#3711](https://github.com/bigbigraydeng-maker/magic-engine/pull/3711)（B 级，页面第一版，示例数据）、[#3713](https://github.com/bigbigraydeng-maker/magic-engine/pull/3713)（合并 `6ecbccd64`；A 级，PM 回「合 3713」后 `--admin`）、[#3749](https://github.com/bigbigraydeng-maker/magic-engine/pull/3749)（合并 `5921905e5`；A 级，PM 回「合 3749」后 `--admin`）。ME 后台 CRM 顶部「自动发信」：每封信一行（哪天发、发给哪个团、标题、状态、收件人数、已发 / 被拦 / 出错 / 打开），点开看全文、收件人名单和每个人的结果；「按团看」每个团一行（已发几封、往后几封、过期没发、结果不明、最近一封的结果、下一封）；发完的批次不再隔天消失；状态含「没发出去」「结果不明」（写明先别重发）；走 Mailchimp 发的那一批按「活动标题＝模板键」对上后显示每位客人的发出 / 打开 / 点击（打开只供参考），ME 和 Mailchimp 两边都发过会提示可能重复发了。两个只读接口 `GET /api/clients/[id]/crm/auto-letters[/<信编号>]`；批次计划函数和信编号在 `src/lib/messaging/letters/`。只读：不发信、不放行、不改数据、不返回邮箱。真实数据验收＝12/3（台账卡 `2026-11-10-auto-letters-mailchimp-batch-read-wired`）；小问题记在 `2026-11-10-auto-letters-review-p2-followups`。
+
 ### 2026-11-10（ME 自己发信的底座第 1 单：能经 Resend 发出去，销售手发加三处加严）
 
 PR [#3720](https://github.com/bigbigraydeng-maker/magic-engine/pull/3720)（合并 `27063ea2f`；A 级，PM 本人回「合」后 `--admin`）。Resend 发信接口：钥匙按发信账号分开（`RESEND_API_KEY_<账号>`），缺钥匙宁可不发、绝不借 ME 系统钥匙；15 秒超时一律记「结果不明」、只许同一幂等键重发；首发被 400/413/422 拒才算「被拒」，401/403/404/451 算「我们自己的钥匙或账号错了」。ME 自动发的信计入销售「7 天 2 封」（按收件地址读发信账本）；销售手发在锁内拦已退订的客人；`auto-` 开头的自动信模板销售选不到也发不出。本单不发信，两个总开关没开。PM 11-10 已在 Render 填 `RESEND_API_KEY_CTS`、`UNSUBSCRIBE_SIGNING_SECRET`（只核了变量名）。11-10 03:32 部署上线。台账卡 `2026-11-10-me-send-gate-p2-2a-resend-send`（11/17 验）。
