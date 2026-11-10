@@ -30,7 +30,7 @@ import { isOverviewEmpty, visibleSections } from '@/lib/crm/auto-send/view'
 import { LetterDrawer } from './LetterDrawer'
 import { LetterSectionPanel } from './LetterSectionPanel'
 import { StatusLegend } from './StatusLegend'
-import { Panel, SmallButton } from './ui'
+import { NoticeList, Panel, SmallButton } from './ui'
 
 type LoadState =
   | { kind: 'loading' }
@@ -289,10 +289,15 @@ function StatePanels({
     case 'error':
       return <ErrorPanel {...panel} message={load.message} />
     case 'ready':
-      return isOverviewEmpty(load.overview) ? (
-        <EmptyPanel {...panel} nextBatch={load.overview.nextBatch} />
-      ) : (
-        <ReadyView overview={load.overview} {...panel} {...list} />
+      return (
+        <>
+          <NoticeList notices={load.overview.notices} />
+          {isOverviewEmpty(load.overview) ? (
+            <EmptyPanel {...panel} nextBatch={load.overview.nextBatch} />
+          ) : (
+            <ReadyView overview={load.overview} {...panel} {...list} />
+          )}
+        </>
       )
   }
 }

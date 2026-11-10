@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   AutoSendNotConnectedError,
   createLiveAdapter,
@@ -6,11 +6,22 @@ import {
   loadErrorText,
 } from '../adapter'
 
-describe('createLiveAdapter (真实数据还没接通)', () => {
-  it('reports "not connected" for both reads and never returns an empty result', async () => {
-    const adapter = createLiveAdapter('client-1')
-    await expect(adapter.loadOverview()).rejects.toBeInstanceOf(AutoSendNotConnectedError)
-    await expect(adapter.loadLetterDetail('any-letter')).rejects.toBeInstanceOf(AutoSendNotConnectedError)
+describe('createLiveAdapter', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('reads the real interface (the auto-letters read route), not a stub', async () => {
+    const fetchMock = vi.fn(async (_url: string) =>
+      new Response(
+        JSON.stringify({ generatedAt: 'x', nextBatch: null, depositLetters: [], scheduledLetters: [], totalDistinctLetters: 0, cadence: null }),
+        { status: 200 },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(createLiveAdapter('client-1').loadOverview()).resolves.toEqual({ nextBatch: null, sections: [] })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/clients/client-1/crm/auto-letters')
   })
 
   it('has read methods only: nothing that could send or release', () => {

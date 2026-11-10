@@ -89,3 +89,19 @@ export function RehearsalPill({ count }: { count?: number }): JSX.Element {
     </span>
   )
 }
+
+/** 服务器给员工的提醒（例如「有 N 张订单没有出发日，没排进信里」）：放在列表最上面，不藏。 */
+export function NoticeList({ notices }: { notices: readonly string[] | undefined }): JSX.Element | null {
+  if (!notices || notices.length === 0) return null
+  return (
+    <div
+      role="status"
+      data-testid="auto-send-notices"
+      className="mb-4 space-y-1 rounded-xl border border-status-rej/40 bg-white p-3 text-xs text-me-charcoal"
+    >
+      {notices.map((notice, index) => (
+        <p key={index}>{notice}</p>
+      ))}
+    </div>
+  )
+}
