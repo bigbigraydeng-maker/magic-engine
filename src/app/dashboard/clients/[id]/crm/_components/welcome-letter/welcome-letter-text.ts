@@ -20,7 +20,7 @@ export interface RehearsalStats {
   unexplainedContactIds: string[]
 }
 
-export type RehearsalDayKind = 'consistent' | 'inconsistent' | 'no_leads' | 'not_compared' | 'other_rule' | 'switch_day'
+export type RehearsalDayKind = 'consistent' | 'inconsistent' | 'partial' | 'no_leads' | 'not_compared' | 'not_yet' | 'other_rule' | 'switch_day'
 
 export interface RehearsalCalendarDay {
   day: string
@@ -35,6 +35,8 @@ export interface BatchRow {
   emailsSent: number
   matchedContacts: number
   gap: number
+  /** The leads' day of this batch was a day a proposal was switched (only partly compared). */
+  partialDay?: boolean
 }
 
 export interface RehearsalEvidenceView {
@@ -44,6 +46,7 @@ export interface RehearsalEvidenceView {
   runTo: string | null
   calendar: RehearsalCalendarDay[]
   undatedRows: number
+  switchToday?: boolean
   batches: BatchRow[]
   batchGap: number
   rowsCounted: number
@@ -104,7 +107,7 @@ export interface StatusPayload {
   mode?: 'live' | 'practice'
   proposal?: ProposalView | null
   authorization?: AuthorizationView | null
-  prerequisites?: { account: string; account_key: boolean; unsubscribe_secret: boolean; events: boolean; trial_domains: boolean } | null
+  prerequisites?: { account: string; account_key: boolean; unsubscribe_secret: boolean; events: boolean; trial_domains: boolean; approvers?: boolean } | null
 }
 
 const STATE_TEXT: Readonly<Record<string, string>> = {
@@ -115,6 +118,7 @@ const STATE_TEXT: Readonly<Record<string, string>> = {
   gate_changed: '发信关口升级过，要重新提案、重新授权',
   template_changed: '信的内容改过或被停用了，这份授权已作废：要重新提案、重新授权',
   template_unreadable: '暂时读不到模板，这期间先不发',
+  trial_recipient_not_internal: '试跑名单里的地址已不在内部邮箱域名里，不会发',
   revoked: '已撤销',
 }
 
@@ -140,7 +144,8 @@ const WARNING_TEXT: Readonly<Record<string, string>> = {
   SALES_FREQUENCY_CAP_WIDER: '销售手发那条路的「每周最多几封」比这份规则宽：客人一周里可能收到超过上限的信。销售那条路归「邮件模板」设置管，这里只提醒，不拦。',
   SALES_FREQUENCY_CAP_OFF: '销售手发那条路没有设每周上限。这里只提醒，不拦。',
   SALES_FREQUENCY_CAP_UNKNOWN: '读不到销售手发那条路的每周上限。这里只提醒，不拦。',
-  LEGACY_BATCH_GAP: '旧群发发给了一些 ME 没看到的人（比如回访客人、官网订阅的人、合并过的联系人）。换成 ME 发之后，这些人就收不到欢迎信了。授权前请先看下面的批次对账，弄清楚是谁。',
+  LEGACY_BATCH_GAP: '旧群发发给了一些 ME 没看到的人（比如回访客人、官网订阅的人、合并过的联系人；换提案那天的差额里也有一部分是换提案造成的）。换成 ME 发之后，这些人就收不到欢迎信了。授权前请先看下面的批次对账，弄清楚是谁。',
+  REHEARSAL_RESETS_TOMORROW: '这份提案是今天交的：今天批，彩排天数照算；过了今天才批，今天这一天只比了一部分，连续天数会从头算，要再等 5 天。',
 }
 
 const ERROR_TEXT: Readonly<Record<string, string>> = {
@@ -193,17 +198,25 @@ export function errorText(body: Answer): string {
   let text = authorizeFailureText(code, body) ?? PROBLEM_TEXT[code] ?? ERROR_TEXT[code] ?? (code.startsWith('INVALID_') ? '提交的内容格式不对。' : '出错了，稍后再试。')
   if (code === 'RULE_INVALID' && typeof body?.detail === 'string') text += `（${body.detail}）`
   if (code === 'TEMPLATE_NOT_SENDABLE' && typeof body?.reason === 'string') text += `（${body.reason}）`
-  if (body?.replaced_authorization_revoked === true) text += ' 注意：之前生效的那份授权已经停了，现在没有生效的授权，新客人暂时收不到欢迎信。'
+  if (body?.replaced_authorization_revoked === true) {
+    // After a failed rollback this one may still be in force: then only say that the earlier one was stopped.
+    text += body?.rollback === 'FAILED'
+      ? ' 之前生效的那份授权已经停了。'
+      : ' 注意：之前生效的那份授权已经停了，现在没有生效的授权，新客人暂时收不到欢迎信。'
+  }
   if (body?.replaced_proposal_revoked === true) text += ' 注意：之前那份待批提案已经撤下，彩排会停到新提案交上为止。'
   return text
 }
 
 /** 撤销失败时的话：刹车要马上再踩，不是「稍后再试」。 */
-export function revokeErrorText(body: (Answer & { current_authorization?: unknown }) | null): string {
+export function revokeErrorText(body: (Answer & { current_authorization?: unknown; current_unreadable?: unknown }) | null): string {
   const code = typeof body?.error === 'string' ? body.error : ''
   if (code === 'ALREADY_REVOKED') {
-    return body?.current_authorization != null
-      ? '这一份早就撤销过了。页面已刷新：上面还有另一份「生效中」的授权，要停请点它的「撤销授权」。'
+    if (body?.current_unreadable === true || body?.current_authorization === undefined) {
+      return '这一份早就撤销过了，但现在查不到哪一份在生效：页面已刷新，请看上面①区写的状态。'
+    }
+    return body.current_authorization !== null
+      ? '这一份早就撤销过了。页面已刷新：上面还有另一份授权（看它写的状态），要停请点它的「撤销授权」。'
       : '这一份早就撤销过了，现在没有生效的授权。页面已刷新。'
   }
   if (code === 'AUTHORIZATION_NOT_FOUND') return '找不到这一份，页面已刷新，请看上面现在生效的是哪一份。'
@@ -240,6 +253,8 @@ export function rehearsalHeadline(e: RehearsalEvidenceView): string {
 export const DAY_KIND_TEXT: Readonly<Record<RehearsalDayKind, string>> = {
   consistent: '一致',
   inconsistent: '有对不上的',
+  partial: '这天有客人还没比完（断开）',
+  not_yet: '还没比（今天上午扫描后再看）',
   no_leads: '这天没有新客人',
   not_compared: '这天没比对（断开）',
   other_rule: '这天按另一份规则彩排（断开）',

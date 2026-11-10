@@ -16,7 +16,8 @@ import type { AuthorizationRecord } from './authorization-store'
 import { GATE_CONTRACT_VERSION, parseRule } from './rule'
 import { describeRule } from './rule-summary'
 import { judgeStandingAuthorization } from './standing-authorization'
-import { readTrialDomains } from './trial-recipients'
+import { readApprovers } from './approvers'
+import { checkTrialRecipients, readTrialDomains } from './trial-recipients'
 import { UNSUBSCRIBE_SECRET_ENV, UNSUBSCRIBE_SECRET_MIN_LENGTH } from './unsubscribe-token'
 import { checkAutomatedTemplate, type AutomatedTemplateCheck } from './welcome-template'
 
@@ -99,6 +100,8 @@ async function authorizationView(deps: CommandDeps, record: AuthorizationRecord)
   )
   let state = verdict.active ? 'active' : verdict.reason.toLowerCase()
   if (state === 'template_changed' && (read === null || !read.ok)) state = 'template_unreadable'
+  // A trial in force whose addresses are no longer on the internal domains will not be sent (the sender checks again).
+  if (state === 'active' && parsed.ok && !checkTrialRecipients(parsed.rule, deps.env).ok) state = 'trial_recipient_not_internal'
   return {
     record: recordView(record),
     rule: record.rule,
@@ -119,6 +122,7 @@ function prerequisitesFor(account: string, deps: CommandDeps): Record<string, un
     unsubscribe_secret: unsubscribe.length >= UNSUBSCRIBE_SECRET_MIN_LENGTH,
     events: deps.canEmit(),
     trial_domains: readTrialDomains(deps.env).size > 0,
+    approvers: readApprovers(deps.env).length > 0,
   }
 }
 

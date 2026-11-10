@@ -205,6 +205,45 @@ check('G4 a second revoke changes nothing', twice.status === 409 && (await row(p
 const stale = await revokeCommand(deps(), CLIENT, ACTOR, { client_id: CLIENT, authorization_id: p1, reason: 'from an old page' })
 check('G5 a brake on a stale page answers what is open now (here: nothing in force)', stale.status === 409 && stale.body.error === 'ALREADY_REVOKED' && stale.body.current_authorization === null, stale.body)
 
+// ── H. the sweeps' receipts (cron_run_logs): only a REAL clean sweep proves a day had no new leads; batch totals ──
+// A client of its own: the rows of the sections above are another rule's and would (rightly) break this run.
+const CLIENT_H = crypto.randomUUID()
+{
+  const c = await supabaseAdmin.from('clients').insert({ id: CLIENT_H, name: 'E2E authorization client H' })
+  const t = await supabaseAdmin.from('crm_email_templates').insert({ client_id: CLIENT_H, template_key: 'auto-welcome', version: 1, name: 'Welcome', subject: 'Welcome, {{ first_name }}', body: 'Hi {{first_name}},\nThanks for your enquiry.', fact_source: 'none', pick_mode: 'none', pick_filter: {}, status: 'active', created_by: 'fde@example.test' })
+  if (c.error || t.error) throw new Error(`seed H failed: ${c.error?.code ?? ''} ${t.error?.code ?? ''}`)
+}
+const statusH = async () => (await statusQuery(deps(), CLIENT_H, { canAuthorize: true })).body as Record<string, any>
+const rH = baseRule({ send: SEND })
+const pH = crypto.randomUUID()
+const insH = await supabaseAdmin.from('triggered_send_authorizations').insert({ id: pH, request_id: crypto.randomUUID(), client_id: CLIENT_H, trigger_key: 'welcome', channel: 'email', account: 'cts', rule: rH, rule_sha256: ruleSha256(rH), template_version: 1, template_sha256: String(p1row.template_sha256), daily_cap: 5, proposed_by_email: 'pm@example.test', proposed_at: `${dayBefore(10)}T00:00:00+13:00` })
+check('H0 a proposal submitted ten days ago', insH.error === null, insH.error?.code)
+const hRows = []
+for (const d of [1, 2, 4, 5, 6]) {
+  for (let i = 0; i < 2; i += 1) {
+    hRows.push({ client_id: CLIENT_H, trigger_key: 'welcome', channel: 'email', contact_id: crypto.randomUUID(), dedupe_scope: 'shadow', status: 'shadow', authorization_id: pH, annotations: { gate_contract_version: 1, lead_local_day: dayBefore(d), would_send: true, legacy_welcomed: true, legacy_batch_seen: true, legacy_campaign_ids: d === 2 ? ['e2e-batch-1'] : [] } })
+  }
+}
+await supabaseAdmin.from('triggered_sends').insert(hRows)
+const receiptFor = (day: string, dryRun: boolean | undefined, batches: unknown[] = []) => ({
+  job_name: 'triggered-send-welcome-sweep',
+  status: 'completed',
+  started_at: `${day}T09:00:00+13:00`,
+  summary: { status: 'swept', client_id: CLIENT_H, authorization_id: pH, to_decide: 0, deferred: 0, legacy_batches: batches, ...(dryRun === undefined ? {} : { dry_run: dryRun }) },
+})
+// The sweep of day −2 judges the leads of day −3 (no rows on day −3).
+await supabaseAdmin.from('cron_run_logs').insert([receiptFor(dayBefore(2), true), receiptFor(dayBefore(2), undefined)])
+st = await statusH()
+check('H1 a dry-run receipt (or one without the field) does not prove the gap day had no leads: the run is 2 days', st.proposal?.rehearsal?.consecutiveDays === 2, st.proposal?.rehearsal?.consecutiveDays)
+await supabaseAdmin.from('cron_run_logs').insert(receiptFor(dayBefore(2), false, [{ campaignId: 'e2e-batch-1', title: 'auto_e1_batch_e2e', sentAt: `${dayBefore(1)}T08:01:00+13:00`, emailsSent: 3 }]))
+st = await statusH()
+check('H2 a real clean sweep proves it: the gap day is skipped and the run is 5 days', st.proposal?.rehearsal?.consecutiveDays === 5 && st.proposal?.rehearsal?.calendar?.find((d: { day: string }) => d.day === dayBefore(3))?.kind === 'no_leads', { days: st.proposal?.rehearsal?.consecutiveDays })
+const batch = st.proposal?.rehearsal?.batches?.[0]
+check('H3 the old batch read from the receipts: 3 sent, 2 matched, gap 1, and the page warns', batch?.emailsSent === 3 && batch?.matchedContacts === 2 && batch?.gap === 1 && (st.proposal?.warnings ?? []).includes('LEGACY_BATCH_GAP'), { batch, warnings: st.proposal?.warnings })
+await supabaseAdmin.from('cron_run_logs').insert({ ...receiptFor(dayBefore(1), false), started_at: `${dayBefore(1)}T11:00:00+13:00`, summary: { ...receiptFor(dayBefore(1), false).summary, deferred: 3 } })
+st = await statusH()
+check('H4 a day whose latest real sweep set people aside is only partly compared: the run breaks there', st.proposal?.rehearsal?.calendar?.find((d: { day: string }) => d.day === dayBefore(2))?.kind === 'partial' && st.proposal?.rehearsal?.consecutiveDays === 1, { days: st.proposal?.rehearsal?.consecutiveDays })
+
 console.log(`\n${passed} passed, ${failures.length} failed`)
 if (failures.length > 0) {
   for (const f of failures) console.log(`  - ${f}`)

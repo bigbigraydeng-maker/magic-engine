@@ -9,8 +9,8 @@
  *   template is bound → the template can be read, may be sent automatically and (proposal) is still the bound version
  *   → the salespeople's mailboxes are connected (§5.2 F) → (proposal, real leads) five consistent rehearsal days
  *   (§5.4) → (proposal) events can be sent.
- * Warnings never block: the sales path's weekly cap wider than the rule's, and an old batch that sent to people ME did
- * not see (§16.6).
+ * Warnings never block: the sales path's weekly cap wider than the rule's, an old batch that sent to people ME did not
+ * see (§16.6), and a proposal submitted today (authorized today, its rehearsal days hold; from tomorrow they restart).
  * Design: docs/specs/2026-11-02-me-send-gate-p2-design-v0.md §4.3, §5.2, §5.4, §6.6 (plan: §17.2).
  */
 
@@ -116,6 +116,8 @@ async function gather(deps: CommandDeps, clientId: string, raw: unknown, withReh
   const capWarning = salesCap !== null && rule !== null ? salesCapWarning(salesCap, rule) : null
   if (capWarning !== null) warnings.push(capWarning)
   if (rehearsal !== null && rehearsal.ok && rehearsal.evidence.batchGap > 0) warnings.push('LEGACY_BATCH_GAP')
+  // Submitted today after midnight: today counts, but from tomorrow this partly compared day restarts the run.
+  if (rehearsal !== null && rehearsal.ok && rehearsal.evidence.switchToday) warnings.push('REHEARSAL_RESETS_TOMORROW')
   return { rule, templateRead, templateCheck, mailboxes, rehearsal, warnings, problem: null }
 }
 

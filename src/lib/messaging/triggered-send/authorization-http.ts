@@ -11,18 +11,10 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { requireDashboardClientAccess } from '@/lib/auth/client-access'
 import { isGlobalAdminEmail } from '@/lib/auth/whitelist'
+import { isTriggeredSendApprover } from './approvers'
 import type { Actor, CommandResult } from './authorization-core'
 
 const CLIENT_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
-export const APPROVER_ENV = 'TRIGGERED_SEND_APPROVER_EMAILS'
-
-/** Exact, case-insensitive; not configured = nobody (fail closed). */
-export function isTriggeredSendApprover(email: string, env: (name: string) => string | undefined = (n) => process.env[n]): boolean {
-  const normalised = email.toLowerCase().trim()
-  if (normalised === '') return false
-  const list = (env(APPROVER_ENV) ?? '').split(',').map((e) => e.toLowerCase().trim()).filter((e) => e.length > 0)
-  return list.includes(normalised)
-}
 
 /** Live state: never let a browser or proxy keep an old answer. */
 export const NO_STORE = { 'Cache-Control': 'no-store' }

@@ -86,6 +86,23 @@ describe('status — the PM page', () => {
     expect((await authorizationOf()).state).toBe('template_changed')
   })
 
+  it('🔴 a trial in force whose addresses left the internal domains is shown as "will not be sent"', async () => {
+    const rule = sendableRule({ recipient_allowlist: ['hello@example.com'] })
+    w.store.seed({ rule, ruleSha256: ruleSha256(rule), authorizedAt: '2026-11-15T00:00:00.000Z', activatedAt: '2026-11-15T00:00:01.000Z', expiresAt: '2027-02-01T00:00:00.000Z' })
+    expect((await authorizationOf()).state).toBe('active')
+    w.set.env({ TRIGGERED_SEND_TRIAL_DOMAINS: 'magicengine.cloud' })
+    expect((await authorizationOf()).state).toBe('trial_recipient_not_internal')
+  })
+
+  it('says whether the approver list is set (yes/no only)', async () => {
+    w.store.seed()
+    expect(((await statusQuery(w.deps, CLIENT, ADMIN)).body.prerequisites as Record<string, unknown>).approvers).toBe(false)
+    w.set.env({ TRIGGERED_SEND_APPROVER_EMAILS: 'pm@example.com' })
+    const body = (await statusQuery(w.deps, CLIENT, ADMIN)).body
+    expect((body.prerequisites as Record<string, unknown>).approvers).toBe(true)
+    expect(JSON.stringify(body)).not.toContain('pm@example.com')
+  })
+
   it('an authorized row that was never armed, or has run out, says so', async () => {
     const row = w.store.seed({ authorizedAt: '2026-11-15T00:00:00.000Z', expiresAt: '2027-02-01T00:00:00.000Z' })
     expect((await authorizationOf()).state).toBe('not_activated')

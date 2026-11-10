@@ -201,7 +201,7 @@
 | `DAILY_PLAN_AUTO_PUBLISH_LIVE` | 🔴 每日计划图文 Post 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部发布闸门、什么都不发也不写库，只在 cron_run_logs 留一行）。第一次真发必须 PM 明确说 go | Render-web |
 | `STORY_AUTO_PUBLISH_LIVE` | 🔴 Story 自动发布是否**真发**。必须严格等于 `true`。**未配 = 只演练**（走完全部检查、什么都不发，只记检查结果）。真发还要客户在 `STORY_AUTO_PUBLISH_CLIENTS` 名单里；第一次真发必须 PM 明确说 go | Render-web |
 | `TRIGGERED_SEND_LIVE` / `TRIGGERED_SEND_CLIENTS` | 🔴 ME 自动信（欢迎信等）是否**真发**：`TRIGGERED_SEND_LIVE` 必须严格等于 `true`，且客户在 `TRIGGERED_SEND_CLIENTS`（逗号分隔 client id）名单里，两者都满足才真发；**未配 = 只演练**。这只是「武装」不是刹车：刹车是在「欢迎信自动发送」页点撤销。只能 PM 本人改，改完要手动部署 | Render-web |
-| `TRIGGERED_SEND_APPROVER_EMAILS` | 🔴 谁能在「欢迎信自动发送」页点**授权**（逗号分隔、精确邮箱）。**未配或为空 = 谁都不能授权**，不回落到 `ADMIN_EMAILS`（那张名单有好几个人）。只放 PM 本人；提案、撤销、查看仍是全局管理员 | Render-web |
+| `TRIGGERED_SEND_APPROVER_EMAILS` | 🔴 谁能在「欢迎信自动发送」页点**授权**（逗号分隔、精确邮箱）。**未配或为空 = 谁都不能授权**，不回落到 `ADMIN_EMAILS`（那张名单有好几个人）。只放 PM 本人（他的登录邮箱也必须在 `ADMIN_EMAILS` 里，那是四个接口共同的门）；提案、撤销、查看仍是全局管理员 | Render-web |
 | `TRIGGERED_SEND_TRIAL_DOMAINS` | 🔴 只发内部邮箱的「试跑」允许发到哪些域名（逗号分隔、精确域名，如 `magicengine.cloud`）。**未配 = 不能提、不能批任何试跑**；试跑名单最多 3 个地址，每个都必须落在这些域名里 | Render-web |
 | `STORY_AUTO_PUBLISH_CLIENTS` | Story 自动发布允许真发的客户 id，逗号分隔、小写。**未配或不在名单 = 只演练** | Render-web |
 | `SOCIAL_STORY_PUBLISH_REGISTER_ENABLED` | 新发 Story 登记进读回链。必须严格等于 `true`。**未配 = 关**：监听函数不查库、不写动作行，和现在一样 | Render-web |

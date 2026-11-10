@@ -65,6 +65,7 @@ export function evidence(consecutiveDays: number, over: Partial<RehearsalEvidenc
     runTo: consecutiveDays > 0 ? '2026-11-18' : null,
     calendar: [],
     undatedRows: 0,
+    switchToday: false,
     batches: [],
     batchGap: 0,
     rowsCounted: consecutiveDays * 10,

@@ -3,10 +3,10 @@
  * 有问题的提案不给授权按钮、说清楚为什么；撤销要写原因；页面上不出现任何密钥。
  * 接口全是假的（替换 fetch），数据是合成的。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { WelcomeLetterPanel } from '../welcome-letter/WelcomeLetterPanel'
-import { errorText, problemText, rehearsalHeadline } from '../welcome-letter/welcome-letter-text'
+import { errorText, problemText, rehearsalHeadline, revokeErrorText } from '../welcome-letter/welcome-letter-text'
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
 const RULE_SHA = 'a'.repeat(64)
@@ -181,8 +181,70 @@ describe('WelcomeLetterPanel', () => {
     fireEvent.click(await screen.findByText('撤销授权'))
     fireEvent.change(screen.getByPlaceholderText('撤销原因（必填，一句话）'), { target: { value: 'stop' } })
     fireEvent.click(screen.getByText('确认撤销授权'))
-    expect((await screen.findByTestId('notice')).textContent).toContain('另一份「生效中」的授权')
+    expect((await screen.findByTestId('notice')).textContent).toContain('上面还有另一份授权')
     await waitFor(() => expect(calls.filter((c) => c.url.endsWith('/status')).length).toBe(2))
+  })
+})
+
+describe('WelcomeLetterPanel — round two', () => {
+  const live = () =>
+    status({ authorization: { record: record({ id: 'a-1', authorized_at: '2026-11-15T00:00:00.000Z' }), summary: ['x'], trial: false, state: 'active', template: null } })
+
+  it('🔴 a brake that failed keeps the box and the reason, so pressing again is one click', async () => {
+    statusBody = live()
+    commandBody = { success: false, error: 'REVOKE_FAILED' }
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    fireEvent.click(await screen.findByText('撤销授权'))
+    fireEvent.change(screen.getByPlaceholderText('撤销原因（必填，一句话）'), { target: { value: 'stop' } })
+    fireEvent.click(screen.getByText('确认撤销授权'))
+    expect((await screen.findByTestId('notice')).textContent).toContain('请马上再点一次')
+    expect((screen.getByPlaceholderText('撤销原因（必填，一句话）') as HTMLInputElement).value).toBe('stop')
+  })
+
+  it('🔴 a brake whose answer could not read what is open now never claims "nothing in force"', () => {
+    const text = revokeErrorText({ error: 'ALREADY_REVOKED', current_unreadable: true })
+    expect(text).toContain('查不到哪一份在生效')
+    expect(text).not.toContain('现在没有生效的授权')
+    expect(revokeErrorText({ error: 'ALREADY_REVOKED', current_authorization: null })).toContain('现在没有生效的授权')
+  })
+
+  it('🔴 a failed rollback after the old authorization was stopped does not also say "nothing in force"', () => {
+    const text = errorText({ error: 'AUTHORIZATION_NOT_ACTIVATED', rollback: 'FAILED', replaced_authorization_revoked: true })
+    expect(text).toContain('可能在生效')
+    expect(text).toContain('之前生效的那份授权已经停了')
+    expect(text).not.toContain('现在没有生效的授权')
+  })
+
+  it('"撤下提案" on a proposal another page authorized meanwhile says an authorization was stopped', async () => {
+    commandBody = { success: true, mode: 'REVOKED', authorization: { id: 'p-1', authorized_at: '2026-11-19T01:00:00.000Z' } }
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    fireEvent.click(await screen.findByText('撤下提案'))
+    fireEvent.change(screen.getByPlaceholderText('撤销原因（必填，一句话）'), { target: { value: 'x' } })
+    fireEvent.click(screen.getByText('确认撤下提案'))
+    expect((await screen.findByTestId('notice')).textContent).toContain('已撤销授权')
+  })
+
+  it('🔴 a reload that fails keeps the last page (and the brake), says so, and keeps the notice', async () => {
+    statusBody = live()
+    commandBody = { success: false, error: 'REVOKE_FAILED' }
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    fireEvent.click(await screen.findByText('撤销授权'))
+    fireEvent.change(screen.getByPlaceholderText('撤销原因（必填，一句话）'), { target: { value: 'stop' } })
+    statusBody = { success: false, error: 'INTERNAL_ERROR' }
+    fireEvent.click(screen.getByText('确认撤销授权'))
+    expect(await screen.findByTestId('reload-failed')).toBeTruthy()
+    expect(screen.getByTestId('notice').textContent).toContain('请马上再点一次')
+    expect(screen.getByText('确认撤销授权')).toBeTruthy()
+  })
+
+  it('a trial proposal says it needs no rehearsal; compared days without any batch say the batches were not read', async () => {
+    statusBody = status({ proposal: { ...status().proposal, trial: true, rehearsal: null } })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    expect((await screen.findByTestId('proposal')).textContent).toContain('不需要彩排对照')
+    cleanup()
+    statusBody = status({ proposal: { ...status().proposal, rehearsal: { ...status().proposal.rehearsal, batches: [] } } })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    expect((await screen.findByTestId('batches-missing')).textContent).toContain('没有读到旧群发的批次记录')
   })
 })
 

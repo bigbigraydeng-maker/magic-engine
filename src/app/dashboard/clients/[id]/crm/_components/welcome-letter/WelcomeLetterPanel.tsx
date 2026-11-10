@@ -89,7 +89,7 @@ function AuthorizeOrWhyNot({ clientId, proposal, canAuthorize, replacing, onDone
     return <p className="mt-3 rounded-lg bg-[rgba(194,69,58,.08)] p-2 text-sm text-[#C2453A]" data-testid="proposal-problem">{problemText(proposal.problem)}</p>
   }
   if (!canAuthorize) {
-    return <p className="mt-3 text-sm text-me-charcoal/70" data-testid="not-approver">这份提案可以授权，但只有 PM 本人能点「授权」。</p>
+    return <p className="mt-3 text-sm text-me-charcoal/70" data-testid="not-approver">这份提案可以授权，但你不在授权人名单里，或名单还没设好（看下面③）：只有 PM 本人能点「授权」。</p>
   }
   return <AuthorizeBox clientId={clientId} proposal={proposal} replacing={replacing} onDone={onDone} />
 }
@@ -104,7 +104,11 @@ function ProposalSection(props: ProposalProps): JSX.Element {
       <Summary lines={proposal.summary} />
       {proposal.template !== null && <Letter template={proposal.template} />}
       <div className="mt-3">
-        {proposal.rehearsal !== null ? <RehearsalTable clientId={clientId} evidence={proposal.rehearsal} /> : <p className="text-sm text-me-charcoal/70">暂时读不到彩排对照。</p>}
+        {proposal.rehearsal !== null ? (
+          <RehearsalTable clientId={clientId} evidence={proposal.rehearsal} />
+        ) : (
+          <p className="text-sm text-me-charcoal/70">{proposal.trial ? '这是只发内部邮箱的试跑，不需要彩排对照。' : '暂时读不到彩排对照。'}</p>
+        )}
       </div>
       {proposal.warnings.map((w) => <p key={w} className="mt-2 text-sm font-semibold text-[#C2453A]">{warningText(w)}</p>)}
       <AuthorizeOrWhyNot {...props} proposal={proposal} />
@@ -128,6 +132,7 @@ function Prerequisites({ data, mode }: { data: StatusPayload['prerequisites']; m
         {data != null && row(data.unsubscribe_secret, '一键退订链接的签名密钥已放进 Render')}
         {data != null && row(data.events, '系统的事件通道配好了（授权要靠它留回执）')}
         {data != null && row(data.trial_domains, '已设好哪些邮箱算内部邮箱（只发内部邮箱的试跑要用）')}
+        {data != null && row(data.approvers === true, '已设好授权人名单（只放 PM 本人；他也要在管理员名单里）')}
       </ul>
       <p className="mt-2 text-xs text-me-charcoal/60">这里只显示有没有，不显示任何密钥。每封信的送达、退信、投诉能不能记回来，要在只发内部邮箱的试跑里实测。</p>
     </Section>
@@ -138,10 +143,14 @@ export function WelcomeLetterPanel({ clientId }: { clientId: string }): JSX.Elem
   const [status, setStatus] = useState<StatusPayload | null>(null)
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<Notice | null>(null)
+  const [reloadFailed, setReloadFailed] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
-    setStatus(await fetchStatus(clientId).catch(() => ({ success: false, error: 'INTERNAL_ERROR' })))
+    const next: StatusPayload = await fetchStatus(clientId).catch(() => ({ success: false, error: 'INTERNAL_ERROR' }))
+    // A failed reload keeps the last good page (and says so) instead of hiding it, the notice and the brake.
+    setStatus((previous) => (next.success || previous === null || !previous.success ? next : previous))
+    setReloadFailed(!next.success)
     setLoading(false)
   }, [clientId])
 
@@ -168,18 +177,22 @@ export function WelcomeLetterPanel({ clientId }: { clientId: string }): JSX.Elem
     </div>
   )
 
-  if (status === null) return <main className="p-4">{header}<p className="text-sm text-me-charcoal/60">正在读取…</p></main>
-  if (!status.success) return <main className="p-4">{header}<p className="text-sm font-semibold text-[#C2453A]">{errorText(status)}</p></main>
+  const noticeLine =
+    notice === null ? null : (
+      <p className={`mb-4 rounded-lg p-2 text-sm ${notice.tone === 'ok' ? 'bg-[rgba(92,138,74,.10)] text-[#3F6B33]' : 'bg-[rgba(194,69,58,.08)] font-semibold text-[#C2453A]'}`} role="status" data-testid="notice">
+        {notice.text}
+      </p>
+    )
+
+  if (status === null) return <main className="p-4">{header}{noticeLine}<p className="text-sm text-me-charcoal/60">正在读取…</p></main>
+  if (!status.success) return <main className="p-4">{header}{noticeLine}<p className="text-sm font-semibold text-[#C2453A]">{errorText(status)}</p></main>
   if (status.can_manage !== true) return <main className="p-4">{header}<p className="text-sm text-me-charcoal/70">只有管理员能看这一页。</p></main>
 
   return (
     <main className="p-4" data-testid="welcome-letter-panel">
       {header}
-      {notice !== null && (
-        <p className={`mb-4 rounded-lg p-2 text-sm ${notice.tone === 'ok' ? 'bg-[rgba(92,138,74,.10)] text-[#3F6B33]' : 'bg-[rgba(194,69,58,.08)] font-semibold text-[#C2453A]'}`} role="status" data-testid="notice">
-          {notice.text}
-        </p>
-      )}
+      {noticeLine}
+      {reloadFailed && <p className="mb-4 text-sm font-semibold text-[#C2453A]" data-testid="reload-failed">刚才刷新没成功，下面是上一次读到的内容；请再点「刷新」。</p>}
       <AuthorizationSection clientId={clientId} auth={status.authorization ?? null} onDone={after} />
       <ProposalSection
         clientId={clientId}

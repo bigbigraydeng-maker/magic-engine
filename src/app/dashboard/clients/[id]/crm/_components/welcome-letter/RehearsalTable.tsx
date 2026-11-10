@@ -13,7 +13,7 @@ const BAD = 'font-bold text-[#C2453A]'
 
 function DayRow({ clientId, day }: { clientId: string; day: RehearsalEvidenceView['calendar'][number] }): JSX.Element {
   const s = day.stats
-  const kindClass = day.kind === 'consistent' || day.kind === 'no_leads' ? GOOD : BAD
+  const kindClass = day.kind === 'consistent' || day.kind === 'no_leads' ? GOOD : day.kind === 'not_yet' ? 'text-me-charcoal/70' : BAD
   return (
     <tr className="border-t border-me-charcoal/10">
       <td className="py-1 pr-3 tabular-nums">{day.day}</td>
@@ -35,7 +35,11 @@ function DayRow({ clientId, day }: { clientId: string; day: RehearsalEvidenceVie
 }
 
 function Batches({ evidence }: { evidence: RehearsalEvidenceView }): JSX.Element | null {
-  if (evidence.batches.length === 0) return null
+  if (evidence.batches.length === 0) {
+    // Days were compared but no batch was read: say so, never let "nothing read" look like "no gap".
+    const compared = evidence.calendar.some((d) => d.kind === 'consistent' || d.kind === 'inconsistent' || d.kind === 'partial')
+    return compared ? <p className="mt-3 text-xs font-semibold text-[#C2453A]" data-testid="batches-missing">没有读到旧群发的批次记录，批次对账这次做不了。</p> : null
+  }
   return (
     <div className="mt-3 overflow-x-auto" data-testid="batches">
       <p className="mb-1 text-xs font-semibold text-me-charcoal/70">旧群发每一批：实发人数和 ME 对上的人数（差几位 = 旧群发发了、ME 没看到的人）</p>
@@ -52,7 +56,10 @@ function Batches({ evidence }: { evidence: RehearsalEvidenceView }): JSX.Element
         <tbody>
           {evidence.batches.map((b) => (
             <tr key={b.campaignId} className="border-t border-me-charcoal/10">
-              <td className="py-1 pr-3">{b.title}</td>
+              <td className="py-1 pr-3">
+                {b.title}
+                {b.partialDay === true && <span className="ml-1 text-me-charcoal/60">（这批客人进来那天中途换了提案，差额里有一部分是换提案造成的）</span>}
+              </td>
               <td className="py-1 pr-3">{nzTime(b.sentAt)}</td>
               <td className="py-1 pr-3 tabular-nums">{b.emailsSent}</td>
               <td className="py-1 pr-3 tabular-nums">{b.matchedContacts}</td>

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { ShadowRowForCompare } from '../compare'
+import { TRIGGERED_SEND_SWEEP_JOB } from '@/lib/inngest/functions/triggered-send-welcome-sweep'
 import {
   REHEARSAL_DAYS_SHOWN,
+  REHEARSAL_SWEEP_JOB,
   decisionFingerprint,
   matchingProposalIds,
   parseSweepReceipt,
@@ -40,9 +42,11 @@ function input(over: Partial<RehearsalInput> = {}): RehearsalInput {
     rows: [],
     otherRuleDays: new Set(),
     switchDays: new Set(),
-    sweptDays: new Set(),
+    noLeadDays: new Set(),
+    partialDays: new Set(),
     batches: [],
     proposalsCounted: 1,
+    timeZone: 'Pacific/Auckland',
     ...over,
   }
 }
@@ -95,8 +99,8 @@ describe('summarizeRehearsal — calendar days in a row, ending yesterday', () =
   it('🔴 a day nobody compared breaks the run; a day the sweep shows had no new leads does not', () => {
     const rows = [...consistentRows('2026-11-12', '2026-11-14'), ...consistentRows('2026-11-16', '2026-11-19')]
     expect(summarizeRehearsal(input({ rows })).consecutiveDays).toBe(4)
-    // The sweep of 11-16 (deciding 11-15's leads) ran under these decisions with nothing set aside: 11-15 had no leads.
-    expect(summarizeRehearsal(input({ rows, sweptDays: new Set(['2026-11-16']) }))).toMatchObject({ consecutiveDays: 7, runFrom: '2026-11-12' })
+    // The real sweep of 11-16 proved 11-15 had no new leads (see receiptFacts).
+    expect(summarizeRehearsal(input({ rows, noLeadDays: new Set(['2026-11-15']) }))).toMatchObject({ consecutiveDays: 7, runFrom: '2026-11-12' })
   })
 
   it('🔴 a day under another rule (a trial) or a switch day breaks the run', () => {
@@ -118,13 +122,30 @@ describe('summarizeRehearsal — calendar days in a row, ending yesterday', () =
   })
 
   it('lists the last 14 calendar days, oldest first, with what happened on each', () => {
-    const e = summarizeRehearsal(input({ rows: consistentRows('2026-11-18', '2026-11-19'), otherRuleDays: new Set(['2026-11-17']), sweptDays: new Set(['2026-11-17']) }))
+    const e = summarizeRehearsal(input({ rows: consistentRows('2026-11-18', '2026-11-19'), otherRuleDays: new Set(['2026-11-17']), noLeadDays: new Set(['2026-11-16']) }))
     expect(e.calendar).toHaveLength(REHEARSAL_DAYS_SHOWN)
     expect(e.calendar[0].day).toBe('2026-11-06')
     expect(e.calendar.at(-1)).toMatchObject({ day: '2026-11-19', kind: 'consistent' })
     expect(e.calendar.find((d) => d.day === '2026-11-17')?.kind).toBe('other_rule')
     expect(e.calendar.find((d) => d.day === '2026-11-16')?.kind).toBe('no_leads')
     expect(e.calendar.find((d) => d.day === '2026-11-10')?.kind).toBe('not_compared')
+  })
+
+  it('yesterday before this morning\'s sweep is "not yet", not a break; a proposal submitted today is flagged', () => {
+    const e = summarizeRehearsal(input({ rows: consistentRows('2026-11-14', '2026-11-18'), switchDays: new Set([TODAY]) }))
+    expect(e.calendar.at(-1)).toMatchObject({ day: '2026-11-19', kind: 'not_yet' })
+    expect(e).toMatchObject({ consecutiveDays: 5, switchToday: true })
+  })
+
+  it('a batch whose leads came in on a switch day is marked: part of its gap is the switch', () => {
+    const e = summarizeRehearsal(
+      input({
+        rows: [row('2026-11-18', {}, { legacy_campaign_ids: ['c1'] })],
+        switchDays: new Set(['2026-11-18']),
+        batches: [{ campaignId: 'c1', title: 'batch_1119', sentAt: '2026-11-18T19:01:00Z', emailsSent: 5 }],
+      }),
+    )
+    expect(e.batches[0]).toMatchObject({ campaignId: 'c1', gap: 4, partialDay: true })
   })
 
   it('batch totals: the old batch\'s recipients against the leads ME matched to it, newest first, gap summed', () => {
@@ -150,16 +171,60 @@ describe('the production facts behind it', () => {
     expect([...switchDaysOf([{ proposedAt: '2026-11-01T01:00:00.000Z' }], 'Pacific/Auckland')]).toEqual(['2026-11-01'])
   })
 
-  it('sweep receipts: only these decisions count, a sweep that set people aside is not a clean day, old batches are dropped', () => {
-    const receipts = [
-      { startedAt: '2026-11-17T20:01:00Z', status: 'swept', authorizationId: 'p1', deferred: 0, legacyBatches: [{ campaignId: 'old', title: 't0', sentAt: '2026-10-30T19:00:00Z', emailsSent: 9 }] },
-      { startedAt: '2026-11-18T20:01:00Z', status: 'swept', authorizationId: 'p1', deferred: 2, legacyBatches: [{ campaignId: 'c1', title: 't1', sentAt: '2026-11-18T19:00:00Z', emailsSent: 4 }] },
-      { startedAt: '2026-11-19T20:01:00Z', status: 'swept', authorizationId: 'trial', deferred: 0, legacyBatches: [{ campaignId: 'c2', title: 't2', sentAt: '2026-11-19T19:00:00Z', emailsSent: 3 }] },
-      { startedAt: '2026-11-19T22:01:00Z', status: 'swept', authorizationId: 'p1', deferred: 0, legacyBatches: [{ campaignId: 'c1', title: 't1', sentAt: '2026-11-18T19:00:00Z', emailsSent: 5 }] },
-    ]
-    const facts = receiptFacts(receipts, new Set(['p1']), '2026-10-31T11:00:00.000Z', 'Pacific/Auckland')
-    expect([...facts.sweptDays].sort()).toEqual(['2026-11-18', '2026-11-20'])
+  const receipt = (startedAt: string, over: Record<string, unknown> = {}) => ({
+    startedAt,
+    status: 'swept',
+    dryRun: false,
+    authorizationId: 'p1',
+    deferred: 0,
+    legacyBatches: [] as Array<{ campaignId: string; title: string; sentAt: string | null; emailsSent: number }>,
+    ...over,
+  })
+  const P1_EARLY = new Map([['p1', '2026-10-31T11:00:00.000Z']])
+
+  it('sweep receipts: only these decisions count; old batches are dropped; the latest receipt of a batch wins', () => {
+    const facts = receiptFacts(
+      [
+        receipt('2026-11-17T20:01:00Z', { legacyBatches: [{ campaignId: 'old', title: 't0', sentAt: '2026-10-30T19:00:00Z', emailsSent: 9 }] }),
+        receipt('2026-11-18T20:01:00Z', { legacyBatches: [{ campaignId: 'c1', title: 't1', sentAt: '2026-11-18T19:00:00Z', emailsSent: 4 }] }),
+        receipt('2026-11-19T20:01:00Z', { authorizationId: 'trial', legacyBatches: [{ campaignId: 'c2', title: 't2', sentAt: '2026-11-19T19:00:00Z', emailsSent: 3 }] }),
+        receipt('2026-11-19T22:01:00Z', { legacyBatches: [{ campaignId: 'c1', title: 't1', sentAt: '2026-11-18T19:00:00Z', emailsSent: 5 }] }),
+      ],
+      P1_EARLY,
+      'Pacific/Auckland',
+    )
+    // Sweeps on NZ 11-18, 11-19 and 11-20 were clean: lead days 11-17, 11-18, 11-19 had no new leads (when no rows).
+    expect([...facts.noLeadDays].sort()).toEqual(['2026-11-17', '2026-11-18', '2026-11-19'])
     expect(facts.batches).toEqual([{ campaignId: 'c1', title: 't1', sentAt: '2026-11-18T19:00:00Z', emailsSent: 5 }])
+  })
+
+  it('🔴 a dry run proves nothing about a day (it writes no rows); a receipt without the field counts as a dry run', () => {
+    const facts = receiptFacts([receipt('2026-11-18T20:01:00Z', { dryRun: true })], P1_EARLY, 'Pacific/Auckland')
+    expect(facts.noLeadDays.size + facts.partialDays.size).toBe(0)
+    expect(parseSweepReceipt('2026-11-18T20:01:00Z', { status: 'swept', authorization_id: 'p1', deferred: 0 })?.dryRun).toBe(true)
+    expect(parseSweepReceipt('2026-11-18T20:01:00Z', { status: 'swept', dry_run: false })?.dryRun).toBe(false)
+  })
+
+  it('🔴 a clean sweep of a proposal submitted that morning proves nothing about the day before', () => {
+    // Proposal at NZ 11-20 08:00, clean sweep at 09:00: yesterday's leads came before the proposal and were never judged.
+    const late = receiptFacts([receipt('2026-11-19T20:01:00Z')], new Map([['p1', '2026-11-19T19:00:00.000Z']]), 'Pacific/Auckland')
+    expect(late.noLeadDays.has('2026-11-19')).toBe(false)
+    // Submitted at midnight starting 11-19: the whole of 11-19 was judged.
+    const midnight = receiptFacts([receipt('2026-11-19T20:01:00Z')], new Map([['p1', '2026-11-18T11:00:00.000Z']]), 'Pacific/Auckland')
+    expect(midnight.noLeadDays.has('2026-11-19')).toBe(true)
+  })
+
+  it('🔴 a day whose latest real sweep set people aside (or did not finish) was only partly compared', () => {
+    const setAside = receiptFacts([receipt('2026-11-18T20:01:00Z', { deferred: 4 })], P1_EARLY, 'Pacific/Auckland')
+    expect([...setAside.partialDays]).toEqual(['2026-11-18'])
+    // The 11:00 retry finished the job: the latest real sweep of the day is clean.
+    const retried = receiptFacts([receipt('2026-11-18T20:01:00Z', { deferred: 4 }), receipt('2026-11-18T22:01:00Z')], P1_EARLY, 'Pacific/Auckland')
+    expect(retried.partialDays.size).toBe(0)
+    expect(summarizeRehearsal(input({ rows: consistentRows('2026-11-15', '2026-11-19'), partialDays: new Set(['2026-11-18']) })).consecutiveDays).toBe(1)
+  })
+
+  it('the run-log job name is the sweep function\'s own (a rename would silently hide every receipt)', () => {
+    expect(REHEARSAL_SWEEP_JOB).toBe(TRIGGERED_SEND_SWEEP_JOB)
   })
 
   it('a receipt it cannot read is left out, never guessed', () => {

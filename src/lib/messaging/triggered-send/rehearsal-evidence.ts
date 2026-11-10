@@ -8,8 +8,10 @@
  *  - a day with rows of a proposal that decides differently (a trial, say) breaks the run; so does the day a proposal
  *    of these decisions was submitted after midnight (the sweep only judges leads that came after the proposal, so that
  *    day is only partly compared), and so does any row whose lead day cannot be read;
- *  - a day without rows is skipped only when the next morning's sweep ran under these decisions with nothing set aside
- *    (then the day truly had no new leads); otherwise nobody compared it and the run breaks there.
+ *  - a day with rows whose next-morning sweep (the latest real one) set people aside was only partly compared: it breaks;
+ *  - a day without rows is skipped only when the next morning's sweep proves it had no new leads: a REAL sweep (never a
+ *    dry run, which writes no rows), under these decisions, nothing set aside, of a proposal that already existed when
+ *    that day began (the sweep only judges leads that came after its proposal); otherwise nobody compared it: it breaks.
  * The window is the last 35 days. The batch totals (the old batch's own recipient count against the leads ME matched to
  * it) come from the sweeps' receipts in `cron_run_logs`; only campaigns sent after the first proposal of these decisions
  * count (contract ④). A gap is shown, it does not block (§16.6: explained before authorizing, not an automatic fail).
@@ -36,12 +38,24 @@ export const REHEARSAL_REQUIRED_DAYS = 5
 export const REHEARSAL_WINDOW_DAYS = 35
 /** How many calendar days (ending yesterday) the evidence lists. */
 export const REHEARSAL_DAYS_SHOWN = 14
-const SWEEP_JOB = 'triggered-send-welcome-sweep'
+/** The sweep's run-log job name (pinned equal to the sweep function's constant by a test). */
+export const REHEARSAL_SWEEP_JOB = 'triggered-send-welcome-sweep'
 const PAGE_SIZE = 1000
 const MAX_ROWS = 5000
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 
-export type RehearsalDayKind = 'consistent' | 'inconsistent' | 'no_leads' | 'not_compared' | 'other_rule' | 'switch_day'
+export type RehearsalDayKind =
+  | 'consistent'
+  | 'inconsistent'
+  | 'partial'
+  | 'no_leads'
+  | 'not_compared'
+  | 'not_yet'
+  | 'other_rule'
+  | 'switch_day'
+
+/** A batch of the old daily send, with whether its leads' day was only partly compared (a proposal switched that day). */
+export type RehearsalBatch = BatchReconciliation & { partialDay: boolean }
 
 export interface RehearsalCalendarDay {
   day: string
@@ -58,7 +72,9 @@ export interface RehearsalEvidence {
   /** The latest calendar days ending yesterday, oldest first. */
   calendar: RehearsalCalendarDay[]
   undatedRows: number
-  batches: BatchReconciliation[]
+  /** A proposal of these decisions was submitted today after midnight: authorized today the run holds; tomorrow it restarts. */
+  switchToday: boolean
+  batches: RehearsalBatch[]
   /** Recipients of the old batch ME did not match, summed over the batches (0 = none). */
   batchGap: number
   rowsCounted: number
@@ -100,18 +116,24 @@ export interface RehearsalInput {
   otherRuleDays: ReadonlySet<string>
   /** Days a proposal with these decisions was submitted after local midnight. */
   switchDays: ReadonlySet<string>
-  /** Local days on which a sweep ran under these decisions and set nothing aside. */
-  sweptDays: ReadonlySet<string>
+  /** Lead days a real, clean next-morning sweep proves had no new leads (see `receiptFacts`). */
+  noLeadDays: ReadonlySet<string>
+  /** Lead days whose latest real next-morning sweep set people aside: only partly compared. */
+  partialDays: ReadonlySet<string>
   batches: readonly BatchForReconcile[]
   proposalsCounted: number
+  timeZone: string
 }
 
 function dayKind(day: string, input: RehearsalInput, byDay: ReadonlyMap<string, CompareDay>): RehearsalDayKind {
   if (input.otherRuleDays.has(day)) return 'other_rule'
   if (input.switchDays.has(day)) return 'switch_day'
   const stats = byDay.get(day)
-  if (stats !== undefined) return isConsistentDay(stats) ? 'consistent' : 'inconsistent'
-  return input.sweptDays.has(shiftDay(day, 1)) ? 'no_leads' : 'not_compared'
+  if (stats !== undefined) {
+    if (!isConsistentDay(stats)) return 'inconsistent'
+    return input.partialDays.has(day) ? 'partial' : 'consistent'
+  }
+  return input.noLeadDays.has(day) ? 'no_leads' : 'not_compared'
 }
 
 function walkRun(input: RehearsalInput, byDay: ReadonlyMap<string, CompareDay>): { count: number; from: string | null; to: string | null } {
@@ -133,6 +155,12 @@ function walkRun(input: RehearsalInput, byDay: ReadonlyMap<string, CompareDay>):
   return { count, from, to }
 }
 
+/** The old batch goes out the morning after its leads' day: was that day a switch day (partly compared)? */
+function batchLeadDayIsSwitch(batch: BatchForReconcile, input: RehearsalInput): boolean {
+  const sent = batch.sentAt === null ? null : localDay(batch.sentAt, input.timeZone)
+  return sent !== null && input.switchDays.has(shiftDay(sent, -1))
+}
+
 /** Pure: the evidence for one rule. */
 export function summarizeRehearsal(input: RehearsalInput): RehearsalEvidence {
   const counted = input.rows.filter((row) => row.annotations.gate_contract_version === input.gateContractVersion)
@@ -143,11 +171,16 @@ export function summarizeRehearsal(input: RehearsalInput): RehearsalEvidence {
   const byDay = new Map(compareShadowRows(counted).map((d) => [d.leadLocalDay, d]))
   const run = undatedRows > 0 ? { count: 0, from: null, to: null } : walkRun(input, byDay)
   const calendar: RehearsalCalendarDay[] = []
+  const yesterday = shiftDay(input.today, -1)
   for (let i = REHEARSAL_DAYS_SHOWN; i >= 1; i -= 1) {
     const day = shiftDay(input.today, -i)
-    calendar.push({ day, kind: dayKind(day, input, byDay), stats: byDay.get(day) ?? null })
+    const kind = dayKind(day, input, byDay)
+    // Yesterday is compared by this morning's sweep: before it has run, it is "not yet", not a break.
+    calendar.push({ day, kind: day === yesterday && kind === 'not_compared' ? 'not_yet' : kind, stats: byDay.get(day) ?? null })
   }
-  const batches = reconcileBatches(input.batches, counted).sort((a, b) => ((a.sentAt ?? '') < (b.sentAt ?? '') ? 1 : -1))
+  const batches = reconcileBatches(input.batches, counted)
+    .map((b) => ({ ...b, partialDay: batchLeadDayIsSwitch(b, input) }))
+    .sort((a, b) => ((a.sentAt ?? '') < (b.sentAt ?? '') ? 1 : -1))
   return {
     requiredDays: REHEARSAL_REQUIRED_DAYS,
     consecutiveDays: run.count,
@@ -155,6 +188,7 @@ export function summarizeRehearsal(input: RehearsalInput): RehearsalEvidence {
     runTo: run.to,
     calendar,
     undatedRows,
+    switchToday: input.switchDays.has(input.today),
     batches,
     batchGap: batches.reduce((sum, b) => sum + Math.max(0, b.gap), 0),
     rowsCounted: counted.length,
@@ -196,6 +230,8 @@ async function readShadowRows(db: SupabaseClient, clientId: string, sinceIso: st
 export interface SweepReceiptLite {
   startedAt: string
   status: string
+  /** A dry run writes no rows: it never proves anything about a day. A receipt without the field counts as dry. */
+  dryRun: boolean
   authorizationId: string | null
   deferred: number
   legacyBatches: BatchForReconcile[]
@@ -215,6 +251,7 @@ export function parseSweepReceipt(startedAt: unknown, summary: unknown): SweepRe
   return {
     startedAt,
     status: typeof s.status === 'string' ? s.status : '',
+    dryRun: s.dry_run !== false,
     authorizationId: typeof s.authorization_id === 'string' ? s.authorization_id : null,
     deferred: typeof s.deferred === 'number' ? s.deferred : -1,
     legacyBatches: batches,
@@ -225,7 +262,7 @@ async function readSweepReceipts(db: SupabaseClient, clientId: string, sinceIso:
   const { data, error } = await db
     .from('cron_run_logs')
     .select('started_at, summary')
-    .eq('job_name', SWEEP_JOB)
+    .eq('job_name', REHEARSAL_SWEEP_JOB)
     .eq('summary->>client_id', clientId)
     .gte('started_at', sinceIso)
     .order('started_at', { ascending: true })
@@ -246,25 +283,52 @@ export function switchDaysOf(proposals: ReadonlyArray<{ proposedAt: string }>, t
   return days
 }
 
-/** What the sweeps under these decisions say: the days with a clean sweep, and the batches after the first proposal. */
-export function receiptFacts(
-  receipts: readonly SweepReceiptLite[],
-  matchingIds: ReadonlySet<string>,
-  firstProposalAt: string | null,
-  timeZone: string,
-): { sweptDays: Set<string>; batches: BatchForReconcile[] } {
-  const sweptDays = new Set<string>()
-  const latest = new Map<string, BatchForReconcile>()
+/** The proposal existed when `day` began: the instant before it was proposed lies on an earlier local day. */
+function existedBefore(proposedAt: string, day: string, timeZone: string): boolean {
+  const before = localDay(new Date(Date.parse(proposedAt) - 1), timeZone)
+  return before !== null && before < day
+}
+
+export interface ReceiptFacts {
+  noLeadDays: Set<string>
+  partialDays: Set<string>
+  batches: BatchForReconcile[]
+}
+
+/**
+ * What the sweeps under these decisions say (receipts in time order, so the latest REAL sweep of a day decides it):
+ *  - lead day L had no new leads when the latest real sweep of L+1 was clean (swept, nothing set aside) and its proposal
+ *    already existed when L began;
+ *  - lead day L was only partly compared when that sweep set people aside or did not finish;
+ *  - the old batch's campaigns these sweeps saw, sent after the first proposal of these decisions (contract ④), the
+ *    latest receipt winning (a dry run reads the same campaigns from Mailchimp, so its list counts here).
+ * `proposals` = the proposals with these decisions: id → submitted at.
+ */
+export function receiptFacts(receipts: readonly SweepReceiptLite[], proposals: ReadonlyMap<string, string>, timeZone: string): ReceiptFacts {
+  const firstProposalAt = [...proposals.values()].sort()[0] ?? null
+  const latestRealBySweepDay = new Map<string, SweepReceiptLite>()
+  const latestBatch = new Map<string, BatchForReconcile>()
   for (const r of receipts) {
-    if (r.authorizationId === null || !matchingIds.has(r.authorizationId)) continue
-    const day = localDay(r.startedAt, timeZone)
-    if (r.status === 'swept' && r.deferred === 0 && day !== null) sweptDays.add(day)
+    if (r.authorizationId === null || !proposals.has(r.authorizationId)) continue
     for (const b of r.legacyBatches) {
       if (firstProposalAt !== null && (b.sentAt === null || b.sentAt < firstProposalAt)) continue
-      latest.set(b.campaignId, b)
+      latestBatch.set(b.campaignId, b)
     }
+    const sweepDay = localDay(r.startedAt, timeZone)
+    if (!r.dryRun && sweepDay !== null) latestRealBySweepDay.set(sweepDay, r)
   }
-  return { sweptDays, batches: [...latest.values()] }
+  const noLeadDays = new Set<string>()
+  const partialDays = new Set<string>()
+  for (const [sweepDay, r] of latestRealBySweepDay) {
+    const leadDay = shiftDay(sweepDay, -1)
+    if (r.status !== 'swept' || r.deferred !== 0) {
+      partialDays.add(leadDay)
+      continue
+    }
+    const proposedAt = r.authorizationId === null ? undefined : proposals.get(r.authorizationId)
+    if (proposedAt !== undefined && existedBefore(proposedAt, leadDay, timeZone)) noLeadDays.add(leadDay)
+  }
+  return { noLeadDays, partialDays, batches: [...latestBatch.values()] }
 }
 
 function splitRows(rows: readonly ShadowDbRow[], matchingIds: ReadonlySet<string>): { matching: ShadowRowForCompare[]; otherRuleDays: Set<string> } {
@@ -295,9 +359,8 @@ export async function loadRehearsalEvidence(db: SupabaseClient, clientId: string
   const [rows, receipts] = await Promise.all([readShadowRows(db, clientId, sinceIso), readSweepReceipts(db, clientId, sinceIso)])
   if (rows === null) return { ok: false, code: 'shadow_rows_unreadable' }
   if (receipts === null) return { ok: false, code: 'sweep_receipts_unreadable' }
-  const firstProposalAt = matching.map((r) => r.proposedAt).sort()[0] ?? null
   const split = splitRows(rows, matchingIds)
-  const facts = receiptFacts(receipts, matchingIds, firstProposalAt, tz)
+  const facts = receiptFacts(receipts, new Map(matching.map((r) => [r.id, r.proposedAt])), tz)
   return {
     ok: true,
     evidence: summarizeRehearsal({
@@ -306,9 +369,11 @@ export async function loadRehearsalEvidence(db: SupabaseClient, clientId: string
       rows: split.matching,
       otherRuleDays: split.otherRuleDays,
       switchDays: switchDaysOf(matching, tz),
-      sweptDays: facts.sweptDays,
+      noLeadDays: facts.noLeadDays,
+      partialDays: facts.partialDays,
       batches: facts.batches,
       proposalsCounted: matchingIds.size,
+      timeZone: tz,
     }),
   }
 }

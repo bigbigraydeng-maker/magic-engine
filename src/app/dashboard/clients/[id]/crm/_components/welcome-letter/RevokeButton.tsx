@@ -32,9 +32,16 @@ export function RevokeButton({
     setBusy(true)
     const answer = await postCommand(clientId, 'revoke', { authorization_id: id, reason: reason.trim() })
     setBusy(false)
+    if (!answer.ok) {
+      // Keep the box and the reason: "press it again" must be one click away.
+      onDone({ tone: 'bad', text: revokeErrorText(answer.body) })
+      return
+    }
     setOpen(false)
     setReason('')
-    onDone(answer.ok ? { tone: 'ok', text: doneText } : { tone: 'bad', text: revokeErrorText(answer.body) })
+    // A proposal another page authorized meanwhile is an authorization now: say what was really stopped.
+    const stopped = answer.body?.authorization as { authorized_at?: unknown } | undefined
+    onDone({ tone: 'ok', text: typeof stopped?.authorized_at === 'string' ? '已撤销授权：从下一封信起就停。' : doneText })
   }
 
   if (!open) {
