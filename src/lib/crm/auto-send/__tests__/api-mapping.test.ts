@@ -16,7 +16,7 @@ function row(overrides: Partial<LetterRow> = {}): LetterRow {
     subject: 'Sample subject',
     status: 'draft',
     channel: 'me',
-    counts: { recipients: 10, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null },
+    counts: { recipients: 10, sent: null, blocked: null, failed: null, rehearsal: 0, unknown: 0, opened: null },
     ...overrides,
   }
 }
@@ -36,16 +36,24 @@ describe('audience label and status', () => {
     expect(viewStatusOf('sent', null)).toBe('sent')
   })
 
+  it('a letter nobody got and a letter with unknown results keep their own status, written or not', () => {
+    expect(viewStatusOf('not_sent', null)).toBe('not_sent')
+    expect(viewStatusOf('not_sent', 'Subject')).toBe('not_sent')
+    expect(viewStatusOf('unknown', null)).toBe('unknown')
+    expect(viewStatusOf('unknown', 'Subject')).toBe('unknown')
+  })
+
   it('summaryOf carries the counts, including rehearsal rows and the opened number', () => {
-    const s = summaryOf(row({ counts: { recipients: 10, sent: 8, blocked: 1, failed: 1, rehearsal: 2, opened: 5 } }))
+    const s = summaryOf(row({ counts: { recipients: 10, sent: 6, blocked: 1, failed: 1, rehearsal: 2, unknown: 2, opened: 5 } }))
     expect(s).toMatchObject({
       letterId: 'plan:2026-12-02:t-1:2027-03-11:3',
       sendDate: '2026-12-02',
       title: 'Sample subject',
       recipientCount: 10,
-      sentCount: 8,
+      sentCount: 6,
       blockedCount: 1,
       failedCount: 1,
+      unknownCount: 2,
       rehearsalCount: 2,
       openedCount: 5,
     })
@@ -99,7 +107,7 @@ describe('mapAutoLettersList', () => {
       letterKey: 'plan:2026-11-04:t-1:2027-03-11:4',
       sendDate: '2026-11-04',
       status: 'sent',
-      counts: { recipients: 10, sent: 8, blocked: 1, failed: 1, rehearsal: 0, opened: 6 },
+      counts: { recipients: 10, sent: 8, blocked: 1, failed: 1, rehearsal: 0, unknown: 0, opened: 6 },
     })
     const overview = mapAutoLettersList({ ...list, pastLetters: [past] })
     expect(overview.sections.map((s) => s.key)).toEqual(['scheduled', 'past'])
@@ -139,7 +147,8 @@ describe('mapAutoLettersList · tour groups', () => {
     lettersSent: 2,
     lettersAhead: 5,
     lettersOverdue: 1,
-    lastSent: { letterKey: 'k-old', sendDate: '2026-11-04', recipients: 10, sent: 8, blocked: 1, failed: 1, opened: 6 },
+    lettersUnknown: 0,
+    lastSent: { letterKey: 'k-old', sendDate: '2026-11-04', recipients: 10, sent: 8, blocked: 1, failed: 1, unknown: 0, opened: 6 },
     next: { letterKey: 'k-written', sendDate: '2026-12-02', status: 'draft' },
     letterKeys: ['k-old', 'k-written'],
     ...over,
@@ -165,7 +174,8 @@ describe('mapAutoLettersList · tour groups', () => {
       lettersSent: 2,
       lettersAhead: 5,
       lettersOverdue: 1,
-      lastSent: { letterId: 'k-old', sendDate: '2026-11-04', recipientCount: 10, sentCount: 8, blockedCount: 1, failedCount: 1, openedCount: 6 },
+      lettersUnknown: 0,
+      lastSent: { letterId: 'k-old', sendDate: '2026-11-04', recipientCount: 10, sentCount: 8, blockedCount: 1, failedCount: 1, unknownCount: 0, openedCount: 6 },
       next: { letterId: 'k-written', sendDate: '2026-12-02', status: 'draft' },
       letterIds: ['k-old', 'k-written'],
     })
@@ -189,20 +199,36 @@ describe('mapAutoLettersList · tour groups', () => {
   })
 
   it('a letter that does not record opens shows null, not zero', () => {
-    const quiet = group({ lastSent: { letterKey: 'k', sendDate: '2026-11-04', recipients: 2, sent: 2, blocked: 0, failed: 0, opened: null } })
+    const quiet = group({ lastSent: { letterKey: 'k', sendDate: '2026-11-04', recipients: 2, sent: 2, blocked: 0, failed: 0, unknown: 0, opened: null } })
     expect(mapAutoLettersList({ ...base, tourGroups: [quiet] }).groups[0].lastSent?.openedCount).toBeNull()
+  })
+
+  it('carries the letters whose results are unknown, in the group and in its last sent letter', () => {
+    const unsure = group({
+      lettersUnknown: 2,
+      lastSent: { letterKey: 'k', sendDate: '2026-11-04', recipients: 5, sent: 3, blocked: 0, failed: 0, unknown: 2, opened: null },
+    })
+    const [mapped] = mapAutoLettersList({ ...base, tourGroups: [unsure] }).groups
+    expect(mapped.lettersUnknown).toBe(2)
+    expect(mapped.lastSent?.unknownCount).toBe(2)
+  })
+
+  it('the next batch card can say a batch was not sent or has unknown results', () => {
+    const batch = (phase: 'not_sent' | 'unknown') => ({ sendDate: '2026-12-02', weekdayLabel: '周三', letterCount: 2, recipientCount: 6, phase })
+    expect(mapAutoLettersList({ ...base, nextBatch: batch('not_sent') }).nextBatch?.status).toBe('not_sent')
+    expect(mapAutoLettersList({ ...base, nextBatch: batch('unknown') }).nextBatch?.status).toBe('unknown')
   })
 })
 
 describe('mapAutoLetterDetail', () => {
   const detail: AutoLetterDetail = {
     letter: {
-      ...row({ counts: { recipients: 3, sent: 1, blocked: 1, failed: 1, rehearsal: 0, opened: null }, status: 'sent' }),
+      ...row({ counts: { recipients: 3, sent: 1, blocked: 1, failed: 1, rehearsal: 0, unknown: 0, opened: null }, status: 'sent' }),
       previewText: 'A short preview',
       bodyText: 'Kia ora {{first_name}},\n\nWhat to do now\n\n- one thing\n- another thing',
       sampleFirstName: 'Alex',
     },
-    tiles: { recipients: 3, sent: 1, blocked: 1, failed: 1, rehearsal: 0, opened: null },
+    tiles: { recipients: 3, sent: 1, blocked: 1, failed: 1, rehearsal: 0, unknown: 0, opened: null },
     mailchimpSummary: { opened: 2, clicked: 1 },
     recipients: [
       { contactId: 'c1', displayName: 'Pat One', seats: 2, status: 'sent', reasonText: null, opened: true, clicked: true },
@@ -222,6 +248,18 @@ describe('mapAutoLetterDetail', () => {
       { kind: 'bullet', text: 'one thing' },
       { kind: 'bullet', text: 'another thing' },
     ])
+  })
+
+  it('a recipient whose result is unknown keeps that status and its plain reason', () => {
+    const mapped = mapAutoLetterDetail({
+      ...detail,
+      letter: { ...detail.letter, status: 'unknown', counts: { ...detail.letter.counts, sent: 0, blocked: 0, failed: 0, unknown: 3 } },
+      recipients: [
+        { contactId: 'c1', displayName: 'Pat One', seats: 2, status: 'unknown', reasonText: '发送结果不明，等人核对', opened: null, clicked: null },
+      ],
+    })
+    expect(mapped.summary).toMatchObject({ status: 'unknown', unknownCount: 3 })
+    expect(mapped.recipients[0]).toMatchObject({ status: 'unknown', reasonText: '发送结果不明，等人核对' })
   })
 
   it('a letter that is not written yet has no content', () => {

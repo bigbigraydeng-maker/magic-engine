@@ -27,8 +27,13 @@ function planned(over: Partial<PlannedLetter> & { sendDate: NzDate }): PlannedLe
   }
 }
 
+/**
+ * A recipient result. `settled` defaults to what the ledger would say: everything is final except queued rows
+ * and unknown outcomes (a retryable block is the one case a test sets by hand with `settled: false`).
+ */
 function outcome(over: Partial<RecipientOutcome> & { contactId: string }): RecipientOutcome {
-  return { outcome: 'sent', reasonCode: null, opened: null, clicked: null, ...over }
+  const kind = over.outcome ?? 'sent'
+  return { outcome: 'sent', reasonCode: null, settled: kind !== 'pending' && kind !== 'unknown', opened: null, clicked: null, ...over }
 }
 
 function sends(over: Partial<SendFacts> = {}): SendFacts {
@@ -48,12 +53,75 @@ describe('deriveLetterStatus', () => {
     expect(deriveLetterStatus(sends({ proposalPending: true, recipients: delivered }))).toBe('awaiting_release')
   })
 
-  it('a letter nobody really got is not sent: all failed, all blocked, all queued, rehearsal only, or released with no record at all', () => {
-    for (const bad of ['failed', 'blocked', 'pending', 'rehearsal'] as const) {
-      const rows = [outcome({ contactId: 'c1', outcome: bad }), outcome({ contactId: 'c2', outcome: bad })]
-      expect(deriveLetterStatus(sends({ recipients: rows }))).toBe('draft')
-    }
-    expect(deriveLetterStatus(sends({ proposalApproved: true }))).toBe('draft')
+  describe('a letter nobody really got', () => {
+    const rowsOf = (kind: RecipientOutcome['outcome'], over: Partial<RecipientOutcome> = {}) => [
+      outcome({ contactId: 'c1', outcome: kind, ...over }),
+      outcome({ contactId: 'c2', outcome: kind, ...over }),
+    ]
+    const clock = { sendDate: '2026-12-02', today: '2026-12-03' }
+
+    it('every row settled without a receipt (skipped / suppressed / failed / bounced) → not sent', () => {
+      expect(deriveLetterStatus(sends({ recipients: rowsOf('failed') }))).toBe('not_sent')
+      expect(deriveLetterStatus(sends({ recipients: rowsOf('blocked') }))).toBe('not_sent')
+      const mixed = [outcome({ contactId: 'c1', outcome: 'failed' }), outcome({ contactId: 'c2', outcome: 'blocked' })]
+      expect(deriveLetterStatus(sends({ recipients: mixed }))).toBe('not_sent')
+      // the same on the send day itself: the rows are final, no need to wait for the day to pass
+      expect(deriveLetterStatus(sends({ recipients: mixed }), { sendDate: '2026-12-02', today: '2026-12-02' })).toBe('not_sent')
+    })
+
+    it('a row that can still change keeps the batch going: queued, or a retryable block, even after the send day', () => {
+      expect(deriveLetterStatus(sends({ recipients: rowsOf('pending') }), clock)).toBe('draft')
+      expect(deriveLetterStatus(sends({ recipients: rowsOf('blocked', { settled: false }) }), clock)).toBe('draft')
+      const oneQueued = [outcome({ contactId: 'c1', outcome: 'failed' }), outcome({ contactId: 'c2', outcome: 'pending' })]
+      expect(deriveLetterStatus(sends({ recipients: oneQueued }), clock)).toBe('draft')
+    })
+
+    it('rehearsal rows are never a send: a rehearsal-only letter is a draft, unless it was released and the day passed with nothing real sent', () => {
+      expect(deriveLetterStatus(sends({ recipients: rowsOf('rehearsal') }), clock)).toBe('draft')
+      expect(deriveLetterStatus(sends({ proposalApproved: true, recipients: rowsOf('rehearsal') }), { sendDate: '2026-12-02', today: '2026-12-02' })).toBe('draft')
+      expect(deriveLetterStatus(sends({ proposalApproved: true, recipients: rowsOf('rehearsal') }), clock)).toBe('not_sent')
+    })
+
+    it('released but no record at all: not sent only once the send day has passed', () => {
+      const released = sends({ proposalApproved: true })
+      expect(deriveLetterStatus(released)).toBe('draft') // no clock given
+      expect(deriveLetterStatus(released, { sendDate: '2026-12-02', today: '2026-12-01' })).toBe('draft')
+      expect(deriveLetterStatus(released, { sendDate: '2026-12-02', today: '2026-12-02' })).toBe('draft') // the send day itself
+      expect(deriveLetterStatus(released, clock)).toBe('not_sent')
+      // never released and nothing recorded: nothing to say
+      expect(deriveLetterStatus(sends(), clock)).toBe('draft')
+    })
+
+    it('Mailchimp letters never get this status (their release and results live in Mailchimp)', () => {
+      expect(deriveLetterStatus(sends({ channel: 'mailchimp', recipients: rowsOf('failed') }), clock)).toBe('draft')
+      expect(deriveLetterStatus(sends({ channel: 'mailchimp', proposalApproved: true }), clock)).toBe('draft')
+    })
+  })
+
+  describe('results that are still unknown', () => {
+    const clock = { sendDate: '2026-12-02', today: '2026-12-10' }
+
+    it('nobody confirmed, but some outcomes are unknown → unknown (never "not sent": the letter may have arrived)', () => {
+      expect(deriveLetterStatus(sends({ recipients: [outcome({ contactId: 'c1', outcome: 'unknown' })] }), clock)).toBe('unknown')
+      const withFailure = [outcome({ contactId: 'c1', outcome: 'unknown' }), outcome({ contactId: 'c2', outcome: 'failed' })]
+      expect(deriveLetterStatus(sends({ recipients: withFailure }), clock)).toBe('unknown')
+      expect(deriveLetterStatus(sends({ recipients: withFailure }))).toBe('unknown') // no clock needed
+    })
+
+    it('one confirmed receipt beats everything else', () => {
+      const rows = [outcome({ contactId: 'c1', outcome: 'unknown' }), outcome({ contactId: 'c2', outcome: 'sent' })]
+      expect(deriveLetterStatus(sends({ recipients: rows }), clock)).toBe('sent')
+    })
+
+    it('a letter still waiting for release is waiting, whatever the old rows say', () => {
+      const rows = [outcome({ contactId: 'c1', outcome: 'unknown' })]
+      expect(deriveLetterStatus(sends({ proposalPending: true, recipients: rows }), clock)).toBe('awaiting_release')
+    })
+
+    it('Mailchimp letters never get this status', () => {
+      const rows = [outcome({ contactId: 'c1', outcome: 'unknown' })]
+      expect(deriveLetterStatus(sends({ channel: 'mailchimp', recipients: rows }), clock)).toBe('draft')
+    })
   })
 
   it('one person who really got it is enough, whatever happened to the others', () => {
@@ -78,7 +146,7 @@ describe('buildLetterRow', () => {
     expect(row.subject).toBeNull()
     expect(row.status).toBe('draft')
     expect(row.channel).toBe('me')
-    expect(row.counts).toEqual({ recipients: 2, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null })
+    expect(row.counts).toEqual({ recipients: 2, sent: null, blocked: null, failed: null, rehearsal: 0, unknown: 0, opened: null })
     expect(row.audience).toEqual({ tourName: 'Tour One', departOn: '2027-03-11', monthsLeft: 3 })
   })
 
@@ -102,7 +170,7 @@ describe('buildLetterRow', () => {
     const row = buildLetterRow(planned({ sendDate: '2026-12-02' }), facts)
     expect(row.subject).toBe('Subject')
     expect(row.status).toBe('sent')
-    expect(row.counts).toEqual({ recipients: 4, sent: 1, blocked: 1, failed: 1, rehearsal: 1, opened: null }) // c1, c2 planned + c3, c4 only in the records
+    expect(row.counts).toEqual({ recipients: 4, sent: 1, blocked: 1, failed: 1, rehearsal: 1, unknown: 0, opened: null }) // c1, c2 planned + c3, c4 only in the records
   })
 
   describe('opened (reference only)', () => {
@@ -185,6 +253,36 @@ describe('buildList', () => {
     expect(buildList(plan, new Map([['k1', sentFacts]]), '2026-11-10', 'now').nextBatch?.phase).toBe('draft')
   })
 
+  describe('batch phase with the new statuses', () => {
+    const rowsOf = (kind: RecipientOutcome['outcome']): LetterFacts => ({
+      registry: null,
+      sends: sends({ recipients: [outcome({ contactId: 'c1', outcome: kind, reasonCode: kind === 'failed' ? 'bounced' : null })] }),
+    })
+    const sent = rowsOf('sent')
+    const phaseOf = (k1: LetterFacts, k2: LetterFacts) =>
+      buildList(plan, new Map([['k1', k1], ['k2', k2]]), '2026-12-02', 'now').nextBatch?.phase
+
+    it('a letter with a result nobody can tell yet makes the whole batch unknown: that is the one to see first', () => {
+      expect(phaseOf(sent, rowsOf('unknown'))).toBe('unknown')
+      expect(phaseOf(rowsOf('failed'), rowsOf('unknown'))).toBe('unknown')
+    })
+
+    it('a letter that nobody got because of errors makes the batch not sent', () => {
+      expect(phaseOf(sent, rowsOf('failed'))).toBe('not_sent')
+    })
+
+    it('a letter that nobody got only because the rules skipped everyone does not spoil a batch that went out', () => {
+      expect(phaseOf(sent, rowsOf('blocked'))).toBe('sent')
+    })
+
+    it('released but nothing recorded counts as an error once the send day has passed, not before', () => {
+      const released: LetterFacts = { registry: null, sends: sends({ proposalApproved: true }) }
+      expect(phaseOf(sent, released)).toBe('draft') // the send day itself
+      const later = buildList(plan, new Map([['k1', sent], ['k2', released]]), '2026-11-10', 'now')
+      expect(later.nextBatch?.phase).toBe('draft') // the batch is still ahead
+    })
+  })
+
   it('nothing planned: no next batch, empty lists, zero total', () => {
     expect(buildList([], new Map(), '2026-11-10', 'now')).toEqual({
       generatedAt: 'now',
@@ -215,7 +313,7 @@ describe('buildDetail', () => {
     expect(detail.letter.previewText).toBeNull()
     expect(detail.letter.bodyText).toBeNull()
     expect(detail.letter.sampleFirstName).toBe(SAMPLE_FIRST_NAME)
-    expect(detail.tiles).toEqual({ recipients: 3, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null })
+    expect(detail.tiles).toEqual({ recipients: 3, sent: null, blocked: null, failed: null, rehearsal: 0, unknown: 0, opened: null })
     expect(detail.mailchimpSummary).toBeNull()
     expect(detail.recipients.map((r) => [r.displayName, r.status])).toEqual([
       ['Al', 'pending'],
@@ -248,6 +346,35 @@ describe('buildDetail', () => {
     expect(byId.c2).toMatchObject({ status: 'blocked', reasonText: '他最近 7 天已收 2 封' })
     expect(byId.c3).toMatchObject({ status: 'failed', reasonText: '系统出错' })
     expect(detail.tiles).toMatchObject({ recipients: 3, sent: 1, blocked: 1, failed: 1, rehearsal: 0 })
+  })
+
+  it('unknown outcomes are listed with a plain reason and counted apart; a complaint still counts as received', () => {
+    const detail = buildDetail(letter, {
+      registry: null,
+      sends: sends({
+        recipients: [
+          outcome({ contactId: 'c1', outcome: 'unknown', reasonCode: 'unknown_outcome' }),
+          outcome({ contactId: 'c2', outcome: 'sent', reasonCode: 'complained' }),
+          outcome({ contactId: 'c3', outcome: 'sent' }),
+        ],
+      }),
+    })
+    const byId = Object.fromEntries(detail.recipients.map((r) => [r.contactId, r]))
+    expect(byId.c1).toMatchObject({ status: 'unknown', reasonText: '发送结果不明，等人核对' })
+    expect(byId.c2).toMatchObject({ status: 'sent', reasonText: '他投诉过' })
+    expect(byId.c3).toMatchObject({ status: 'sent', reasonText: null })
+    expect(detail.tiles).toMatchObject({ recipients: 3, sent: 2, unknown: 1 })
+    expect(detail.letter.counts.unknown).toBe(1)
+    expect(detail.letter.status).toBe('sent')
+  })
+
+  it('a letter whose rows are all unknown is unknown, and says so in the tiles and the list row', () => {
+    const detail = buildDetail(letter, {
+      registry: null,
+      sends: sends({ recipients: [outcome({ contactId: 'c1', outcome: 'unknown' }), outcome({ contactId: 'c2', outcome: 'unknown' })] }),
+    })
+    expect(detail.letter.status).toBe('unknown')
+    expect(detail.tiles).toMatchObject({ sent: 0, unknown: 2 })
   })
 
   it('rehearsal rows are shown as rehearsal and counted apart from sent', () => {

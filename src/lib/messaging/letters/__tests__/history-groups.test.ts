@@ -22,8 +22,10 @@ function letter(over: Partial<PlannedLetter> & { sendDate: NzDate; letterKey: st
   }
 }
 
+/** `settled` defaults to what the ledger says: every status is final except queued rows and unknown outcomes. */
 function outcome(over: Partial<RecipientOutcome> & { contactId: string }): RecipientOutcome {
-  return { outcome: 'sent', reasonCode: null, opened: null, clicked: null, ...over }
+  const kind = over.outcome ?? 'sent'
+  return { outcome: 'sent', reasonCode: null, settled: kind !== 'pending' && kind !== 'unknown', opened: null, clicked: null, ...over }
 }
 
 /** 已经发出去：c1 发出，c2 被拦。 */
@@ -121,11 +123,20 @@ describe('buildList · letters whose send day has passed', () => {
     expect(list.pastLetters[0]).toMatchObject({ letterKey: 'a-untraced', status: 'awaiting_release' })
   })
 
-  it('a letter that was approved but never went out is listed too (still not sent), and its group counts it as overdue', () => {
+  it('a letter that was approved but never went out is listed too (not sent: nothing recorded), and its group counts it as overdue', () => {
     const list = buildList(plan, new Map([['a-untraced', approvedOnly]]), TODAY, 'now')
     expect(list.pastLetters).toHaveLength(1)
-    expect(list.pastLetters[0]).toMatchObject({ letterKey: 'a-untraced', status: 'draft', counts: { sent: null } })
+    expect(list.pastLetters[0]).toMatchObject({ letterKey: 'a-untraced', status: 'not_sent', counts: { sent: null } })
     expect(list.tourGroups.find((g) => g.tourName === 'Tour One')?.lettersOverdue).toBe(1)
+  })
+
+  it('a batch nobody got is listed as not sent; a batch whose results are unknown is listed as unknown, never as not sent', () => {
+    const allFailed = wentOut([outcome({ contactId: 'c1', outcome: 'failed', reasonCode: 'bounced' }), outcome({ contactId: 'c2', outcome: 'failed', reasonCode: 'bounced' })])
+    const unsure = wentOut([outcome({ contactId: 'c1', outcome: 'unknown', reasonCode: 'unknown_outcome' }), outcome({ contactId: 'c2', outcome: 'failed', reasonCode: 'bounced' })])
+    const list = buildList(plan, new Map([['a-untraced', allFailed], ['b-2026-11-04', unsure]]), TODAY, 'now')
+    const byKey = Object.fromEntries(list.pastLetters.map((row) => [row.letterKey, row]))
+    expect(byKey['a-untraced']).toMatchObject({ status: 'not_sent', counts: { sent: 0, failed: 2, unknown: 0 } })
+    expect(byKey['b-2026-11-04']).toMatchObject({ status: 'unknown', counts: { sent: 0, failed: 1, unknown: 1 } })
   })
 
   it('nothing in the records at all means no history', () => {
@@ -179,6 +190,7 @@ describe('buildList · tourGroups', () => {
       sent: 1,
       blocked: 1,
       failed: 0,
+      unknown: 0,
       opened: null,
     })
   })
@@ -229,5 +241,68 @@ describe('buildList · tourGroups', () => {
 
   it('no orders, no groups', () => {
     expect(buildList([], new Map(), TODAY, 'now').tourGroups).toEqual([])
+  })
+})
+
+describe('buildList · tourGroups · letters nobody got, and results nobody can tell', () => {
+  const failedRow = (id: string) => outcome({ contactId: id, outcome: 'failed', reasonCode: 'bounced' })
+  const skippedRow = (id: string) => outcome({ contactId: id, outcome: 'blocked', reasonCode: 'dnc' })
+  const plan: PlannedLetter[] = [
+    letter({ sendDate: '2026-10-07', letterKey: 'q1', monthsLeft: 5 }), // went out, though one result is unknown
+    letter({ sendDate: '2026-11-04', letterKey: 'q2', monthsLeft: 4 }), // everyone failed
+    letter({ sendDate: '2026-12-02', letterKey: 'q3', monthsLeft: 3 }), // everyone skipped by the sending rules
+    letter({ sendDate: '2026-12-09', letterKey: 'q4', monthsLeft: 3 }), // nothing confirmed, results unknown
+    letter({ sendDate: '2027-01-06', letterKey: 'q5', monthsLeft: 2 }), // waiting for release
+  ]
+  const facts = new Map<string, LetterFacts>([
+    ['q1', wentOut([outcome({ contactId: 'c1' }), outcome({ contactId: 'c2', outcome: 'unknown', reasonCode: 'unknown_outcome' })])],
+    ['q2', wentOut([failedRow('c1'), failedRow('c2')])],
+    ['q3', wentOut([skippedRow('c1'), skippedRow('c2')])],
+    ['q4', wentOut([outcome({ contactId: 'c1', outcome: 'unknown', reasonCode: 'unknown_outcome' }), failedRow('c2')])],
+    ['q5', waiting],
+  ])
+  const list = buildList(plan, facts, TODAY, 'now')
+  const [group] = list.tourGroups
+  const statusOf = (key: string) => [...list.pastLetters, ...list.scheduledLetters].find((row) => row.letterKey === key)?.status
+
+  it('each letter gets the status its results deserve', () => {
+    expect(['q1', 'q2', 'q3', 'q4', 'q5'].map(statusOf)).toEqual(['sent', 'not_sent', 'not_sent', 'unknown', 'awaiting_release'])
+  })
+
+  it('the group counts them apart: errors are overdue, unknown results are not, rule skips raise no alarm, and none of them is "ahead"', () => {
+    expect(group).toMatchObject({ lettersSent: 1, lettersAhead: 1, lettersOverdue: 1, lettersUnknown: 1 })
+    expect(group.next).toEqual({ letterKey: 'q5', sendDate: '2027-01-06', status: 'awaiting_release' })
+  })
+
+  it('every one of them stays on the page, oldest first, so the group can be opened to look', () => {
+    expect(group.letterKeys).toEqual(['q1', 'q2', 'q3', 'q4', 'q5'])
+  })
+
+  it('the last letter that went out carries its unknown results next to the others', () => {
+    expect(group.lastSent).toMatchObject({ letterKey: 'q1', sent: 1, blocked: 0, failed: 0, unknown: 1 })
+  })
+
+  it("a batch that goes out today and ended up not sent or unknown is not 'ahead' either; only the not-sent one raises the alarm", () => {
+    const todays: PlannedLetter[] = [
+      letter({ sendDate: TODAY, letterKey: 'n1' }),
+      letter({ sendDate: TODAY, letterKey: 'n2', tourId: 't-2', tourName: 'Tour Two', departOn: '2027-05-08' }),
+    ]
+    const todaysFacts = new Map<string, LetterFacts>([
+      ['n1', wentOut([failedRow('c1'), failedRow('c2')])],
+      ['n2', wentOut([outcome({ contactId: 'c1', outcome: 'unknown', reasonCode: 'unknown_outcome' }), outcome({ contactId: 'c2', outcome: 'unknown', reasonCode: 'unknown_outcome' })])],
+    ])
+    const [one, two] = buildList(todays, todaysFacts, TODAY, 'now').tourGroups
+    expect(one).toMatchObject({ tourName: 'Tour One', lettersSent: 0, lettersAhead: 0, lettersOverdue: 1, lettersUnknown: 0 })
+    expect(two).toMatchObject({ tourName: 'Tour Two', lettersSent: 0, lettersAhead: 0, lettersOverdue: 0, lettersUnknown: 1 })
+    expect(one.next).toBeNull()
+    expect(two.next).toBeNull()
+  })
+
+  it('a released letter with no record after its day is overdue; before its day it is just ahead', () => {
+    const released: LetterFacts = { registry: null, sends: { channel: 'me', proposalPending: false, proposalApproved: true, recipients: [] } }
+    const late = buildList([letter({ sendDate: '2026-12-02', letterKey: 'r1' })], new Map([['r1', released]]), TODAY, 'now').tourGroups[0]
+    expect(late).toMatchObject({ lettersOverdue: 1, lettersAhead: 0 })
+    const early = buildList([letter({ sendDate: '2026-12-16', letterKey: 'r1' })], new Map([['r1', released]]), TODAY, 'now').tourGroups[0]
+    expect(early).toMatchObject({ lettersOverdue: 0, lettersAhead: 1 })
   })
 })

@@ -74,12 +74,16 @@ export async function loadRegistry(
 
 // ─── ME 自己发的信：提案 + 发送记录 ──────────────────────────────────────────
 
-/** 发送账本的状态 → 收件人状态（约定 §3）。认不出的状态按「待发」，绝不当成已发。 */
+/**
+ * 发送账本的状态 → 收件人状态（约定 §3，11-10 傍晚按发信窗口的口径更新）。认不出的状态按「待发」，绝不当成已发。
+ * complained（客人投诉）说明信已经送到，算收到；unknown_outcome 单列成「结果不明」，不并进出错。
+ */
 export function recipientStatusOf(status: string): RecipientStatus {
   switch (status) {
     case 'sent':
     case 'delivered':
     case 'delivery_delayed':
+    case 'complained':
       return 'sent'
     case 'blocked':
     case 'skipped':
@@ -87,13 +91,28 @@ export function recipientStatusOf(status: string): RecipientStatus {
       return 'blocked'
     case 'failed':
     case 'bounced':
-    case 'complained':
-    case 'unknown_outcome':
       return 'failed'
+    case 'unknown_outcome':
+      return 'unknown'
     default:
       return 'pending'
   }
 }
+
+/**
+ * 账本状态里已经落定、不会再变的：收到了，或者终局没收到（规则内跳过 skipped、被屏蔽 suppressed、发送失败 failed、被退回 bounced）。
+ * 排队中（pending / claimed）、终身行上可重试的拦截（blocked）、结果不明（unknown_outcome）都还没落定。
+ */
+const SETTLED_STATUSES: ReadonlySet<string> = new Set([
+  'sent',
+  'delivered',
+  'delivery_delayed',
+  'complained',
+  'skipped',
+  'suppressed',
+  'failed',
+  'bounced',
+])
 
 interface SendRow {
   triggerKey: string
@@ -120,11 +139,18 @@ const STATUS_REASON: Readonly<Record<string, string>> = {
 
 function outcomeOf(row: SendRow): RecipientOutcome {
   if (row.rehearsal) {
-    return { contactId: row.contactId, outcome: 'rehearsal', reasonCode: row.reasonCode, opened: null, clicked: null }
+    return { contactId: row.contactId, outcome: 'rehearsal', reasonCode: row.reasonCode, settled: true, opened: null, clicked: null }
   }
   // 这几种状态账本常常不写原因码：照状态补一个，让页面说清楚（退信 → 邮箱退回；结果不明 → 等人核对；投诉 → 他投诉过）。
   const reasonCode = row.reasonCode ?? STATUS_REASON[row.status] ?? null
-  return { contactId: row.contactId, outcome: recipientStatusOf(row.status), reasonCode, opened: null, clicked: null }
+  return {
+    contactId: row.contactId,
+    outcome: recipientStatusOf(row.status),
+    reasonCode,
+    settled: SETTLED_STATUSES.has(row.status),
+    opened: null,
+    clicked: null,
+  }
 }
 
 /** 同一个人既有真发行又有演练行时，真发的算数（演练只是预演）。 */

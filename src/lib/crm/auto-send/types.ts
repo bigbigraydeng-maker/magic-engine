@@ -15,10 +15,15 @@ export type LetterStatus =
   | 'planned' //           计划中：排期有了，信还没写
   | 'draft' //             草稿：稿子已经在 ME 里，但还没提交给 PM 放行
   | 'awaiting_release' //  等你放行：已经提交，等 PM 点头
-  | 'sent' //              已发出
+  | 'sent' //              已发出：至少一位客人确认收到
+  | 'not_sent' //          没发出去：一位客人也没收到（被拦、发送失败或被退回）
+  | 'unknown' //           结果不明：没拿到最终结果，信可能已经送到，别重发
 
-/** 一位收件人这封信的结果。`rehearsal` = 演练：系统彩排了一遍，没有真的发，永远不算「已发」。 */
-export type RecipientStatus = 'sent' | 'blocked' | 'failed' | 'rehearsal' | 'pending'
+/**
+ * 一位收件人这封信的结果。`rehearsal` = 演练：系统彩排了一遍，没有真的发，永远不算「已发」；
+ * `unknown` = 结果不明：发出了但没拿到最终结果，信可能已经送到。
+ */
+export type RecipientStatus = 'sent' | 'blocked' | 'failed' | 'rehearsal' | 'pending' | 'unknown'
 
 /** 列表里的一行：一封信（某个发信日 × 某组客人 × 某个阶段的那一版）。 */
 export interface LetterSummary {
@@ -37,6 +42,8 @@ export interface LetterSummary {
   sentCount: number | null
   blockedCount: number | null
   failedCount: number | null
+  /** 结果不明的人数（信可能已经送到，别重发）；没有就 0。 */
+  unknownCount: number
   /** 演练行条数（彩排，没有真的发）。 */
   rehearsalCount: number
   /** 打开过的人数，仅供参考（有些邮箱会提前加载图片，数字偏高）；这类信不记录打开 → null（显示「—」）。 */
@@ -77,6 +84,8 @@ export interface TourGroupSummary {
   lettersAhead: number
   /** 过了发信日、系统里有记录却没发出去的封数（这一批没有发出去，要有人看）。 */
   lettersOverdue: number
+  /** 结果不明的封数（信可能已经送到，别重发）。 */
+  lettersUnknown: number
   /** 最近一封已经发出去的信；还没发过 → null。 */
   lastSent: {
     letterId: string
@@ -85,6 +94,7 @@ export interface TourGroupSummary {
     sentCount: number
     blockedCount: number
     failedCount: number
+    unknownCount: number
     openedCount: number | null
   } | null
   /** 下一封（还没发出的、最近的那封）；没有 → null。 */

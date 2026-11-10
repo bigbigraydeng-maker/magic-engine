@@ -55,6 +55,7 @@ export function summaryOf(row: ApiLetterRow): LetterSummary {
     sentCount: row.counts.sent,
     blockedCount: row.counts.blocked,
     failedCount: row.counts.failed,
+    unknownCount: row.counts.unknown,
     rehearsalCount: row.counts.rehearsal,
     openedCount: row.counts.opened,
   }
@@ -109,6 +110,7 @@ function groupOf(group: TourGroupRow, subjectOf: ReadonlyMap<string, string | nu
     lettersSent: group.lettersSent,
     lettersAhead: group.lettersAhead,
     lettersOverdue: group.lettersOverdue,
+    lettersUnknown: group.lettersUnknown,
     lastSent:
       lastSent === null
         ? null
@@ -119,6 +121,7 @@ function groupOf(group: TourGroupRow, subjectOf: ReadonlyMap<string, string | nu
             sentCount: lastSent.sent,
             blockedCount: lastSent.blocked,
             failedCount: lastSent.failed,
+            unknownCount: lastSent.unknown,
             openedCount: lastSent.opened,
           },
     next:

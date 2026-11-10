@@ -17,7 +17,9 @@
  *    5) 列表多三块（PM 11-10 要「按团看发没发、被拦几位、打没打开」）：`cadence`（脚注用的节奏）、
  *       `pastLetters`（已过发信日、发送记录或提案里有痕迹的信，发完的批次不再隔天消失）、
  *       `tourGroups`（按团汇总，见 `TourGroupRow`）；
- *    6) `LetterCounts` / `LetterTiles` 多一个可空的 `opened`（打开过的人数；这类信不记录就是 `null`），仅供参考。
+ *    6) `LetterCounts` / `LetterTiles` 多一个可空的 `opened`（打开过的人数；这类信不记录就是 `null`），仅供参考；
+ *    7) 状态多「没发出去」「结果不明」，`RecipientStatus` 多 `unknown`，`LetterCounts` / `LetterTiles` 多 `unknown`，
+ *       `TourGroupRow` 多 `lettersUnknown`（口径见 `LetterStatus` 的注释）。
  */
 
 /** 新西兰日历日，`YYYY-MM-DD`。 */
@@ -65,8 +67,16 @@ export interface PlannedLetter {
 
 // ─── 接口 A：列表 GET /api/clients/[id]/crm/auto-letters ──────────────────────
 
-/** 草稿 / 等你放行 / 已发（对应设计稿的状态图例）。 */
-export type LetterStatus = 'draft' | 'awaiting_release' | 'sent'
+/**
+ * 草稿 / 等你放行 / 已发（对应设计稿的状态图例）/ 没发出去 / 结果不明（后两个是 11-10 傍晚加的，口径是发信窗口按发信账本定的）。
+ * 只对 ME 自己发的信；Mailchimp 的信仍只有已发 / 草稿。
+ *  - `sent`：至少一位客人确认收到（账本状态 sent / delivered / delivery_delayed / complained）。
+ *  - `not_sent`：放行了或已经有真实发送行，可是没有一位收到，而且所有行都已经落定
+ *    （skipped / suppressed / failed / bounced）；或者放行了却一行都没有、发信日已过。
+ *  - `unknown`：没有一位确认收到，但有结果不明的行（unknown_outcome）——信可能已经送到，别重发，不能显示成「没发出去」。
+ *  - 还没落定的行（pending 排队中、可重试的 blocked）：这一批还在进行，仍是草稿。
+ */
+export type LetterStatus = 'draft' | 'awaiting_release' | 'sent' | 'not_sent' | 'unknown'
 
 export type LetterChannel = 'me' | 'mailchimp'
 
@@ -85,6 +95,8 @@ export interface LetterCounts {
   failed: number | null
   /** 演练行条数（没有真发），没有就是 0。 */
   rehearsal: number
+  /** 结果不明的人数（unknown_outcome，信可能已经送到），没有就是 0。 */
+  unknown: number
   /**
    * 打开过的人数（只算真发出去的）。这类信不记录打开 → `null`（页面显示「—」）。
    * 仅供参考：苹果邮件等会提前加载图片，数字偏高；不要用它做任何自动决定。
@@ -128,10 +140,15 @@ export interface TourGroupRow {
   recipients: number
   /** 已发出去的信的封数（至少一位真发出去；演练不算）。 */
   lettersSent: number
-  /** 往后还会发的信的封数（发信日 ≥ 今天且还没发出）。 */
+  /** 往后还会发的信的封数（发信日 ≥ 今天、还没发出、也不是「没发出去」）。 */
   lettersAhead: number
-  /** 过了发信日、系统里有痕迹（提案或发送记录）却没发出去的信的封数——这批没发出去，要有人看。 */
+  /**
+   * 要人去看的「没发出去」的封数：状态是「没发出去」且有出错 / 被退回、或放行了却一行记录都没有（全是规则内跳过的不算），
+   * 加上过了发信日、系统里有痕迹（提案或发送记录）却还是草稿 / 等你放行的（不含结果不明的）。
+   */
   lettersOverdue: number
+  /** 结果不明的信的封数（状态是「结果不明」：信可能已经送到，别重发）。 */
+  lettersUnknown: number
   /** 最近一封已经发出去的信；还没发过 → `null`。 */
   lastSent: {
     letterKey: string
@@ -140,6 +157,8 @@ export interface TourGroupRow {
     sent: number
     blocked: number
     failed: number
+    /** 结果不明的人数（信可能已经送到）；没有就 0。 */
+    unknown: number
     /** 仅供参考；这类信不记录打开 → `null`。 */
     opened: number | null
   } | null
@@ -180,7 +199,8 @@ export interface AutoLettersList {
 
 // ─── 接口 B：详情 GET /api/clients/[id]/crm/auto-letters/[letterKey] ──────────
 
-export type RecipientStatus = 'pending' | 'sent' | 'blocked' | 'failed' | 'rehearsal'
+/** `unknown`：发出了但没拿到最终结果（unknown_outcome），信可能已经送到。 */
+export type RecipientStatus = 'pending' | 'sent' | 'blocked' | 'failed' | 'rehearsal' | 'unknown'
 
 export interface RecipientRow {
   /** 点姓名 → 打开客人资料页。 */
@@ -202,6 +222,8 @@ export interface LetterTiles {
   blocked: number | null
   failed: number | null
   rehearsal: number
+  /** 同 `LetterCounts.unknown`。 */
+  unknown: number
   /** 同 `LetterCounts.opened`。 */
   opened: number | null
 }

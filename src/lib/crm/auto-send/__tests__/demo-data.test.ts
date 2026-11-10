@@ -5,6 +5,9 @@ import type { LetterDetail, LetterSummary, RecipientStatus } from '../types'
 
 const ALL_SUMMARIES: LetterSummary[] = DEMO_OVERVIEW.sections.flatMap((section) => section.letters)
 
+/** The demo page is frozen on the day of its next batch. */
+const DEMO_TODAY = '2026-12-02'
+
 function detailFor(letterId: string): LetterDetail {
   const detail = DEMO_DETAILS[letterId]
   if (!detail) throw new Error(`missing demo detail for ${letterId}`)
@@ -39,6 +42,18 @@ describe('demo data: overview and details never drift apart', () => {
         expect(countStatus(detail, 'failed')).toBe(summary.failedCount)
       }
       expect(countStatus(detail, 'rehearsal')).toBe(summary.rehearsalCount)
+      expect(countStatus(detail, 'unknown')).toBe(summary.unknownCount)
+    }
+  })
+
+  it('shows the two new statuses with numbers that add up: nobody got the first, and the second still has results nobody can tell', () => {
+    const notSent = detailFor('demo-l11')
+    expect(notSent.summary).toMatchObject({ status: 'not_sent', sentCount: 0, blockedCount: 3, failedCount: 2, unknownCount: 0 })
+    const unknown = detailFor('demo-l12')
+    expect(unknown.summary).toMatchObject({ status: 'unknown', sentCount: 0, blockedCount: 1, unknownCount: 4 })
+    expect(unknown.recipients.filter((recipient) => recipient.status === 'unknown').every((recipient) => (recipient.reasonText ?? '') !== '')).toBe(true)
+    for (const detail of [notSent, unknown]) {
+      expect(countStatus(detail, 'sent')).toBe(0)
     }
   })
 
@@ -86,7 +101,7 @@ describe('demo data: panels and groups', () => {
   it('lists the letters whose day has passed in their own panel, newest first, after the upcoming ones', () => {
     expect(DEMO_OVERVIEW.sections.map((section) => section.key)).toEqual(['trigger', 'scheduled', 'past'])
     const past = DEMO_OVERVIEW.sections[2]
-    expect(past.letters.map((letter) => letter.letterId)).toEqual(['demo-l2', 'demo-l1'])
+    expect(past.letters.map((letter) => letter.letterId)).toEqual(['demo-l2', 'demo-l11', 'demo-l12', 'demo-l1'])
     const upcoming = DEMO_OVERVIEW.sections[1].letters
     expect(upcoming.every((letter) => (letter.sendDate ?? '') >= '2026-12-02')).toBe(true)
     expect(past.letters.every((letter) => (letter.sendDate ?? '') < '2026-12-02')).toBe(true)
@@ -108,8 +123,13 @@ describe('demo data: panels and groups', () => {
     for (const group of DEMO_OVERVIEW.groups) {
       const letters = group.letterIds.map((id) => byId.get(id) as LetterSummary)
       const sent = letters.filter((letter) => letter.status === 'sent')
+      const isAhead = (letter: LetterSummary): boolean =>
+        (letter.sendDate ?? '') >= DEMO_TODAY && !['sent', 'not_sent', 'unknown'].includes(letter.status)
       expect(group.lettersSent).toBe(sent.length)
-      expect(group.lettersAhead).toBe(letters.filter((letter) => letter.status !== 'sent').length)
+      expect(group.lettersAhead).toBe(letters.filter(isAhead).length)
+      expect(group.lettersUnknown).toBe(letters.filter((letter) => letter.status === 'unknown').length)
+      // a "not sent" letter raises the alarm when it had errors; the demo has no letter skipped only by the rules
+      expect(group.lettersOverdue).toBe(letters.filter((letter) => letter.status === 'not_sent' && (letter.failedCount ?? 0) > 0).length)
       const last = sent[sent.length - 1]
       if (last === undefined) {
         expect(group.lastSent).toBeNull()
@@ -119,10 +139,11 @@ describe('demo data: panels and groups', () => {
           sentCount: last.sentCount,
           blockedCount: last.blockedCount,
           failedCount: last.failedCount,
+          unknownCount: last.unknownCount,
           openedCount: last.openedCount,
         })
       }
-      const next = letters.find((letter) => letter.status !== 'sent')
+      const next = letters.find(isAhead)
       expect(group.next?.letterId).toBe(next?.letterId)
     }
   })

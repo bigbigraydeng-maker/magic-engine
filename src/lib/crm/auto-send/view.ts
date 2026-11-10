@@ -88,7 +88,7 @@ export function splitBodyPreview(
   return { shown, hiddenCount: blocks.length - shown.length }
 }
 
-export type TileKey = 'recipients' | 'sent' | 'blocked' | 'failed' | 'rehearsal' | 'opened'
+export type TileKey = 'recipients' | 'sent' | 'blocked' | 'failed' | 'unknown' | 'rehearsal' | 'opened'
 
 /** Tiles shown above the recipient list on the detail view. */
 export function detailTiles(summary: LetterSummary): Array<{
@@ -110,6 +110,11 @@ export function detailTiles(summary: LetterSummary): Array<{
     { key: 'blocked', label: '被拦', value: formatCount(summary.blockedCount) },
     { key: 'failed', label: '出错', value: formatCount(summary.failedCount) },
   ]
+
+  // 结果不明只在有的时候放一块（这是真发出去的结果，别藏；没有就不占格子）。
+  if (summary.unknownCount > 0) {
+    tiles.push({ key: 'unknown', label: '结果不明', value: String(summary.unknownCount) })
+  }
 
   if (summary.rehearsalCount > 0) {
     tiles.push({
@@ -181,6 +186,7 @@ export const OPENED_NOTE =
 export function lastSentLine(last: NonNullable<TourGroupSummary['lastSent']>): string {
   const parts = [formatShortDate(last.sendDate), `已发 ${last.sentCount}`, `被拦 ${last.blockedCount}`]
   if (last.failedCount > 0) parts.push(`出错 ${last.failedCount}`)
+  if (last.unknownCount > 0) parts.push(`结果不明 ${last.unknownCount}`)
   parts.push(`打开 ${formatCount(last.openedCount)}`)
   return parts.join(' · ')
 }
@@ -190,8 +196,32 @@ export function letterResultLine(letter: LetterSummary): string {
   if (letter.sentCount === null) return '还没发'
   const parts = [`已发 ${letter.sentCount}`, `被拦 ${formatCount(letter.blockedCount)}`]
   if ((letter.failedCount ?? 0) > 0) parts.push(`出错 ${letter.failedCount}`)
+  if (letter.unknownCount > 0) parts.push(`结果不明 ${letter.unknownCount}`)
   parts.push(`打开 ${formatCount(letter.openedCount)}`)
   return parts.join(' · ')
+}
+
+/**
+ * 抽屉顶部的一句大白话：这封信「没发出去」是怎么回事、「结果不明」要不要动手。没什么要说的 → null。
+ * 「没发出去」写出是被拦还是出错；放行了却一行记录都没有的，单独说清楚（多半是发信那边没跑起来）。
+ */
+export function statusNote(summary: LetterSummary): string | null {
+  const parts: string[] = []
+  if (summary.status === 'not_sent') {
+    const why = [
+      (summary.blockedCount ?? 0) > 0 ? `被拦 ${summary.blockedCount} 位` : null,
+      (summary.failedCount ?? 0) > 0 ? `出错 ${summary.failedCount} 位` : null,
+    ].filter((part): part is string => part !== null)
+    parts.push(
+      why.length > 0
+        ? `这一批一封都没送到客人手里（${why.join('，')}）。`
+        : '这一批放行了，可是发信日已经过了，系统里一条发送记录都没有。',
+    )
+  }
+  if (summary.unknownCount > 0) {
+    parts.push(`有 ${summary.unknownCount} 位结果不明：信可能已经送到，先别重发。`)
+  }
+  return parts.length === 0 ? null : parts.join('')
 }
 
 /** Footnote under the recipient list, matching the open-info kind. */

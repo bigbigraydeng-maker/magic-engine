@@ -21,6 +21,7 @@ import {
   recipientsTabLabel,
   resolveView,
   splitBodyPreview,
+  statusNote,
   totalLetterCount,
   visibleSections,
 } from '../view'
@@ -36,6 +37,7 @@ function makeLetter(overrides: Partial<LetterSummary> = {}): LetterSummary {
     sentCount: null,
     blockedCount: null,
     failedCount: null,
+    unknownCount: 0,
     rehearsalCount: 0,
     openedCount: null,
     ...overrides,
@@ -248,6 +250,13 @@ describe('detailTiles', () => {
     expect(tiles[4]).toEqual({ key: 'rehearsal', label: '演练', value: '5' })
   })
 
+  it('adds a tile for results nobody can tell, right after the errors, only when there are some', () => {
+    const tiles = detailTiles(makeLetter({ sentCount: 3, blockedCount: 0, failedCount: 0, unknownCount: 2, rehearsalCount: 1 }))
+    expect(tiles.map((tile) => tile.key)).toEqual(['recipients', 'sent', 'blocked', 'failed', 'unknown', 'rehearsal'])
+    expect(tiles[4]).toEqual({ key: 'unknown', label: '结果不明', value: '2' })
+    expect(detailTiles(makeLetter({ unknownCount: 0 })).some((tile) => tile.key === 'unknown')).toBe(false)
+  })
+
   it('has no rehearsal tile when no rehearsal ran', () => {
     const tiles = detailTiles(makeLetter({ rehearsalCount: 0 }))
 
@@ -262,6 +271,47 @@ describe('detailTiles', () => {
     expect(detailTiles(makeLetter({ openedCount: null })).some((tile) => tile.key === 'opened')).toBe(false)
     // nobody opened yet is a real 0, not a missing number
     expect(detailTiles(makeLetter({ sentCount: 3, openedCount: 0 })).find((tile) => tile.key === 'opened')?.value).toBe('0')
+  })
+})
+
+describe('statusNote · what a letter nobody got, or with unknown results, means', () => {
+  it('says nothing for a letter that is fine', () => {
+    for (const status of ['draft', 'planned', 'awaiting_release', 'sent'] as const) {
+      expect(statusNote(makeLetter({ status, sentCount: 3, blockedCount: 1, failedCount: 0 })), status).toBeNull()
+    }
+  })
+
+  it('a letter nobody got says why: blocked, errors, or both', () => {
+    expect(statusNote(makeLetter({ status: 'not_sent', sentCount: 0, blockedCount: 3, failedCount: 0 }))).toBe(
+      '这一批一封都没送到客人手里（被拦 3 位）。',
+    )
+    expect(statusNote(makeLetter({ status: 'not_sent', sentCount: 0, blockedCount: 0, failedCount: 2 }))).toBe(
+      '这一批一封都没送到客人手里（出错 2 位）。',
+    )
+    expect(statusNote(makeLetter({ status: 'not_sent', sentCount: 0, blockedCount: 3, failedCount: 2 }))).toBe(
+      '这一批一封都没送到客人手里（被拦 3 位，出错 2 位）。',
+    )
+  })
+
+  it('released but nothing recorded at all is said apart: it points at the sending side, not at the guests', () => {
+    expect(statusNote(makeLetter({ status: 'not_sent', sentCount: null, blockedCount: null, failedCount: null }))).toBe(
+      '这一批放行了，可是发信日已经过了，系统里一条发送记录都没有。',
+    )
+  })
+
+  it('unknown results always say "do not resend", on a sent letter too', () => {
+    expect(statusNote(makeLetter({ status: 'unknown', sentCount: 0, unknownCount: 4 }))).toBe(
+      '有 4 位结果不明：信可能已经送到，先别重发。',
+    )
+    expect(statusNote(makeLetter({ status: 'sent', sentCount: 3, unknownCount: 1 }))).toBe(
+      '有 1 位结果不明：信可能已经送到，先别重发。',
+    )
+  })
+
+  it('a letter nobody got that also has unknown results says both', () => {
+    expect(statusNote(makeLetter({ status: 'not_sent', sentCount: 0, blockedCount: 1, failedCount: 0, unknownCount: 2 }))).toBe(
+      '这一批一封都没送到客人手里（被拦 1 位）。有 2 位结果不明：信可能已经送到，先别重发。',
+    )
   })
 })
 
@@ -343,7 +393,7 @@ describe('recipientsFootnote', () => {
 })
 
 describe('lastSentLine / letterResultLine', () => {
-  const last = { letterId: 'a', sendDate: '2026-12-02', recipientCount: 10, sentCount: 8, blockedCount: 1, failedCount: 1, openedCount: 6 }
+  const last = { letterId: 'a', sendDate: '2026-12-02', recipientCount: 10, sentCount: 8, blockedCount: 1, failedCount: 1, unknownCount: 0, openedCount: 6 }
 
   it('writes date, sent, blocked, failed and opened on one line', () => {
     expect(lastSentLine(last)).toBe('12月2日 · 已发 8 · 被拦 1 · 出错 1 · 打开 6')
@@ -351,6 +401,13 @@ describe('lastSentLine / letterResultLine', () => {
 
   it('leaves 出错 out when nothing failed, and shows a dash when opens are not recorded', () => {
     expect(lastSentLine({ ...last, failedCount: 0, openedCount: null })).toBe('12月2日 · 已发 8 · 被拦 1 · 打开 —')
+  })
+
+  it('adds the people whose result is unknown, only when there are some', () => {
+    expect(lastSentLine({ ...last, unknownCount: 2 })).toBe('12月2日 · 已发 8 · 被拦 1 · 出错 1 · 结果不明 2 · 打开 6')
+    expect(letterResultLine(makeLetter({ sentCount: 0, blockedCount: 1, failedCount: 0, unknownCount: 4 }))).toBe(
+      '已发 0 · 被拦 1 · 结果不明 4 · 打开 —',
+    )
   })
 
   it('a letter row inside an opened group says the same thing, or 还没发', () => {
@@ -378,6 +435,7 @@ describe('resolveView / lettersById', () => {
     lettersSent: 0,
     lettersAhead: 1,
     lettersOverdue: 0,
+    lettersUnknown: 0,
     lastSent: null,
     next: null,
     letterIds: [],

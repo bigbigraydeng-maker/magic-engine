@@ -20,6 +20,7 @@ const DEFAULT_LETTER: LetterSummary = {
   sentCount: null,
   blockedCount: null,
   failedCount: null,
+  unknownCount: 0,
   rehearsalCount: 0,
   openedCount: null,
 }
@@ -34,6 +35,8 @@ const LETTER_STATUSES: ReadonlyArray<LetterStatus> = [
   'draft',
   'awaiting_release',
   'sent',
+  'not_sent',
+  'unknown',
 ]
 
 const RECIPIENT_STATUSES: ReadonlyArray<RecipientStatus> = [
@@ -42,10 +45,11 @@ const RECIPIENT_STATUSES: ReadonlyArray<RecipientStatus> = [
   'failed',
   'rehearsal',
   'pending',
+  'unknown',
 ]
 
 describe('LETTER_STATUS_META', () => {
-  it('defines exactly the five letter statuses', () => {
+  it('defines exactly the seven letter statuses', () => {
     expect(Object.keys(LETTER_STATUS_META).sort()).toEqual([...LETTER_STATUSES].sort())
   })
 
@@ -56,12 +60,14 @@ describe('LETTER_STATUS_META', () => {
       draft: { label: '草稿', tone: 'attn' },
       awaiting_release: { label: '等你放行', tone: 'sched' },
       sent: { label: '已发出', tone: 'track' },
+      not_sent: { label: '没发出去', tone: 'rej' },
+      unknown: { label: '结果不明', tone: 'exec' },
     })
   })
 })
 
 describe('RECIPIENT_STATUS_META', () => {
-  it('defines exactly the five recipient statuses', () => {
+  it('defines exactly the six recipient statuses', () => {
     expect(Object.keys(RECIPIENT_STATUS_META).sort()).toEqual([...RECIPIENT_STATUSES].sort())
   })
 
@@ -72,6 +78,7 @@ describe('RECIPIENT_STATUS_META', () => {
       failed: { label: '出错', tone: 'rej' },
       rehearsal: { label: '演练', tone: 'attn' },
       pending: { label: '还没发', tone: 'attn' },
+      unknown: { label: '结果不明', tone: 'exec' },
     })
   })
 })
@@ -81,8 +88,8 @@ describe('FILTER_OPTIONS', () => {
     const keys: LetterFilter[] = FILTER_OPTIONS.map((option) => option.key)
     const labels = FILTER_OPTIONS.map((option) => option.label)
 
-    expect(keys).toEqual(['all', 'draft', 'awaiting_release', 'sent', 'blocked'])
-    expect(labels).toEqual(['全部', '草稿', '等你放行', '已发', '有被拦的'])
+    expect(keys).toEqual(['all', 'draft', 'awaiting_release', 'sent', 'not_sent', 'unknown', 'blocked'])
+    expect(labels).toEqual(['全部', '草稿', '等你放行', '已发', '没发出去', '结果不明', '有被拦的'])
   })
 })
 
@@ -134,12 +141,35 @@ describe('matchesFilter', () => {
   })
 })
 
+describe("matchesFilter · letters nobody got, and results nobody can tell", () => {
+  it("'not_sent' keeps only letters whose status is not sent", () => {
+    for (const status of LETTER_STATUSES) {
+      expect(matchesFilter(makeLetter({ status }), 'not_sent')).toBe(status === 'not_sent')
+    }
+  })
+
+  it("'unknown' keeps letters whose status is unknown, and also a sent letter that still has an unknown result", () => {
+    expect(matchesFilter(makeLetter({ status: 'unknown', unknownCount: 3 }), 'unknown')).toBe(true)
+    expect(matchesFilter(makeLetter({ status: 'sent', sentCount: 4, unknownCount: 1 }), 'unknown')).toBe(true)
+    expect(matchesFilter(makeLetter({ status: 'sent', sentCount: 4, unknownCount: 0 }), 'unknown')).toBe(false)
+    expect(matchesFilter(makeLetter({ status: 'not_sent', sentCount: 0, unknownCount: 0 }), 'unknown')).toBe(false)
+  })
+
+  it("'sent' never takes a letter nobody received, and 'blocked' ignores unknown results", () => {
+    expect(matchesFilter(makeLetter({ status: 'not_sent', sentCount: 0, blockedCount: 3 }), 'sent')).toBe(false)
+    expect(matchesFilter(makeLetter({ status: 'unknown', sentCount: 0, unknownCount: 2 }), 'sent')).toBe(false)
+    expect(matchesFilter(makeLetter({ status: 'unknown', blockedCount: 0, failedCount: 0, unknownCount: 2 }), 'blocked')).toBe(false)
+  })
+})
+
 describe('nextBatchSentence', () => {
   it('returns the expected sentence for every status', () => {
     const expected: Record<LetterStatus, string> = {
       draft: '现在是草稿，发出前会请你看稿并点头',
       awaiting_release: '已经提交，等你点头才会发',
       sent: '已经发出',
+      not_sent: '这一批一封都没送到客人手里，要去看一下原因',
+      unknown: '这一批有结果不明的，信可能已经送到，先别重发',
       planned: '排期有了，信还没写',
       not_enabled: '这类信的自动发送还没开通',
     }
@@ -151,11 +181,13 @@ describe('nextBatchSentence', () => {
 })
 
 describe('STATUS_LEGEND', () => {
-  it('has eight entries in the documented order', () => {
+  it('has ten entries in the documented order', () => {
     expect(STATUS_LEGEND.map((entry) => entry.label)).toEqual([
       '草稿',
       '等你放行',
       '已发出',
+      '没发出去',
+      '结果不明',
       '被拦',
       '出错',
       '计划中',
@@ -173,6 +205,8 @@ describe('STATUS_LEGEND', () => {
       false,
       false,
       false,
+      false,
+      false,
       true,
     ])
     expect(STATUS_LEGEND[STATUS_LEGEND.length - 1].label).toBe('演练')
@@ -182,6 +216,16 @@ describe('STATUS_LEGEND', () => {
     for (const entry of STATUS_LEGEND) {
       expect(entry.text.trim().length).toBeGreaterThan(0)
     }
+  })
+
+  it('every letter status label is explained here, and the two new ones say what to do', () => {
+    const explained = new Set(STATUS_LEGEND.map((entry) => entry.label))
+    for (const meta of [...Object.values(LETTER_STATUS_META), RECIPIENT_STATUS_META.unknown]) {
+      expect(explained.has(meta.label), meta.label).toBe(true)
+    }
+    const text = (label: string) => STATUS_LEGEND.find((entry) => entry.label === label)?.text ?? ''
+    expect(text('没发出去')).toContain('一封都没送到客人手里')
+    expect(text('结果不明')).toContain('先别重发')
   })
 })
 

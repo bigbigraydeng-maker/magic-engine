@@ -17,7 +17,7 @@ const NEVER_SENT_TEXT = '还没发过'
 const NO_NEXT_TEXT = '没有了'
 
 const GROUPS_FOOTNOTE =
-  '「往后」按现在的订单和节奏算；前面错过的批次不补发，所以不算在里面。「过期没发」是发信日已经过了、系统里有记录却没发出去的信。'
+  '「往后」按现在的订单和节奏算；前面错过的批次不补发，所以不算在里面。「过期没发」是发信日已经过了、系统里有记录却没发出去的信（出错、被退回，或放行了却没有发送记录）；「结果不明」是发出了但没拿到最终结果，信可能已经送到，先别重发。'
 
 interface GroupProps {
   groups: TourGroupSummary[]
@@ -28,9 +28,17 @@ interface GroupProps {
   onOpen: (letterId: string) => void
 }
 
-function Overdue({ group }: { group: TourGroupSummary }): JSX.Element | null {
-  if (group.lettersOverdue === 0) return null
-  return <div className="text-xs text-status-rej">过期没发 {group.lettersOverdue} 封</div>
+/** 「已发」格子下面的提醒：过期没发（红字）、结果不明（深色粗体）；都没有就不画。 */
+function GroupFlags({ group }: { group: TourGroupSummary }): JSX.Element | null {
+  if (group.lettersOverdue === 0 && group.lettersUnknown === 0) return null
+  return (
+    <>
+      {group.lettersOverdue > 0 && <div className="text-xs text-status-rej">过期没发 {group.lettersOverdue} 封</div>}
+      {group.lettersUnknown > 0 && (
+        <div className="text-xs font-semibold text-me-charcoal">结果不明 {group.lettersUnknown} 封</div>
+      )}
+    </>
+  )
 }
 
 function NextCell({ next }: { next: TourGroupSummary['next'] }): JSX.Element {
@@ -114,12 +122,12 @@ function GroupRow({ group, letters, openGroupId, onToggle, onOpen }: GroupProps 
           >
             {group.tourName}
           </button>
-          <div className="text-[11px] text-me-charcoal/55">{formatShortDate(group.departOn)}出发</div>
+          <div className="text-xs text-me-charcoal/55">{formatShortDate(group.departOn)}出发</div>
         </td>
         <td className="py-2.5 pr-3 text-right font-bold text-me-charcoal">{group.recipientCount}</td>
         <td className="py-2.5 pr-3 text-right text-me-charcoal/70">
           <div>{group.lettersSent} 封</div>
-          <Overdue group={group} />
+          <GroupFlags group={group} />
         </td>
         <td className="py-2.5 pr-3 text-right text-me-charcoal/70">{group.lettersAhead} 封</td>
         <td className="py-2.5 pr-3 text-me-charcoal/70">{lastSentText(group)}</td>
@@ -201,6 +209,9 @@ function GroupCards({ groups, letters, openGroupId, onToggle, onOpen }: GroupPro
                 收件人 {group.recipientCount} · 已发 {group.lettersSent} 封 · 往后 {group.lettersAhead} 封
               </p>
               {group.lettersOverdue > 0 && <p className="text-xs text-status-rej">过期没发 {group.lettersOverdue} 封</p>}
+              {group.lettersUnknown > 0 && (
+                <p className="text-xs font-semibold text-me-charcoal">结果不明 {group.lettersUnknown} 封</p>
+              )}
               <p className="mt-1 text-xs text-me-charcoal/70">最近一封：{lastSentText(group)}</p>
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-me-charcoal/70">
                 <span>下一封：{group.next === null ? NO_NEXT_TEXT : formatSendDate(group.next.sendDate)}</span>

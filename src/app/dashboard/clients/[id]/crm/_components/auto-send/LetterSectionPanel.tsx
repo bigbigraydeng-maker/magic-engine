@@ -27,13 +27,14 @@ function StatusCell({ letter }: { letter: LetterSummary }): JSX.Element {
   )
 }
 
-/** 「被拦」一格：被拦人数；有出错的另起一行用红字写出来。 */
+/** 「被拦」一格：被拦人数；有出错的另起一行用红字写出来，结果不明的再另起一行。 */
 function BlockedCell({ letter }: { letter: LetterSummary }): JSX.Element {
   const failed = letter.failedCount ?? 0
   return (
     <>
       <div>{formatCount(letter.blockedCount)}</div>
       {failed > 0 && <div className="text-xs text-status-rej">出错 {failed}</div>}
+      {letter.unknownCount > 0 && <div className="text-xs font-semibold text-me-charcoal">结果不明 {letter.unknownCount}</div>}
     </>
   )
 }
@@ -142,6 +143,7 @@ function LetterCards({ letters, onOpen }: { letters: LetterSummary[]; onOpen: (i
               收件人 {letter.recipientCount} · 已发 {formatCount(letter.sentCount)} · 被拦{' '}
               {formatCount(letter.blockedCount)}
               {(letter.failedCount ?? 0) > 0 && <span className="text-status-rej"> · 出错 {letter.failedCount}</span>}
+              {letter.unknownCount > 0 && <span className="font-semibold text-me-charcoal"> · 结果不明 {letter.unknownCount}</span>}
               {' · '}打开 {formatCount(letter.openedCount)}
             </p>
           </button>

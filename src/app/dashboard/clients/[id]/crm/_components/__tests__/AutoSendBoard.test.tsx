@@ -70,7 +70,7 @@ describe('AutoSendBoard · 还没接通 / 看示例', () => {
     expect(screen.getByTestId('auto-send-demo-banner').textContent).toContain('示例数据（假的）')
     expect(await screen.findByTestId('section-groups')).toBeTruthy()
     showLetters()
-    await waitFor(() => expect(rowIds().length).toBe(11))
+    await waitFor(() => expect(rowIds().length).toBe(13))
 
     fireEvent.click(screen.getByRole('button', { name: '退出示例' }))
     expect(await screen.findByTestId('auto-send-not-connected')).toBeTruthy()
@@ -101,7 +101,7 @@ describe('AutoSendBoard · 加载中 / 出错 / 空', () => {
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await screen.findByTestId('auto-send-next-batch')
     showLetters()
-    expect(rowIds().length).toBe(11)
+    expect(rowIds().length).toBe(13)
   })
 
   it('shows a Chinese error message as it is', async () => {
@@ -177,7 +177,7 @@ describe('AutoSendBoard · 列表、筛选、看这批', () => {
     expect(screen.getByTestId('section-past').textContent).toContain('已过发信日的信（系统里有发送记录或提交记录的）')
     expect(screen.getByTestId('auto-send-legend').textContent).toContain('演练')
     expect(screen.queryByTestId('auto-send-demo-banner')).toBeNull()
-    expect(rowIds()).toHaveLength(11)
+    expect(rowIds()).toHaveLength(13)
   })
 
   it('filters by status; 已发 and 有被拦的 never include a rehearsal-only or draft letter', async () => {
@@ -192,10 +192,17 @@ describe('AutoSendBoard · 列表、筛选、看这批', () => {
     expect(rowIds()).toEqual(['letter-row-demo-l2', 'letter-row-demo-l1'])
 
     fireEvent.click(screen.getByRole('button', { name: '有被拦的' }))
-    expect(rowIds()).toEqual(['letter-row-demo-l2', 'letter-row-demo-l1'])
+    // the two past batches nobody received also had blocked or failed guests
+    expect(rowIds()).toEqual(['letter-row-demo-l2', 'letter-row-demo-l11', 'letter-row-demo-l12', 'letter-row-demo-l1'])
+
+    fireEvent.click(screen.getByRole('button', { name: '没发出去' }))
+    expect(rowIds()).toEqual(['letter-row-demo-l11'])
+
+    fireEvent.click(screen.getByRole('button', { name: '结果不明' }))
+    expect(rowIds()).toEqual(['letter-row-demo-l12'])
 
     fireEvent.click(screen.getByRole('button', { name: '全部' }))
-    expect(rowIds()).toHaveLength(11)
+    expect(rowIds()).toHaveLength(13)
   })
 
   it('看这批 narrows the list to that batch without leaving the page; 看全部 restores it', async () => {
@@ -210,7 +217,7 @@ describe('AutoSendBoard · 列表、筛选、看这批', () => {
     expect(screen.queryByTestId('section-trigger')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: '看全部' }))
-    expect(rowIds()).toHaveLength(11)
+    expect(rowIds()).toHaveLength(13)
     expect(screen.getByTestId('section-trigger')).toBeTruthy()
   })
 
@@ -234,6 +241,67 @@ describe('AutoSendBoard · 列表、筛选、看这批', () => {
     await renderReady()
     expect(screen.queryByRole('button', { name: /发送/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /^放行/ })).toBeNull()
+  })
+})
+
+describe('AutoSendBoard · 没发出去 / 结果不明', () => {
+  const pTexts = (root: HTMLElement): Array<string | null> => Array.from(root.querySelectorAll('p')).map((p) => p.textContent)
+
+  it('the list row of a letter nobody got shows the status and the errors; the one with unknown results shows how many', async () => {
+    await renderReady()
+    const notSent = screen.getByTestId('letter-row-demo-l11')
+    expect(notSent.textContent).toContain('没发出去')
+    const cells11 = Array.from(notSent.querySelectorAll('td')).map((td) => td.textContent)
+    expect(cells11[5]).toBe('0') // sent
+    expect(cells11[6]).toBe('3出错 2') // blocked, then the errors
+    const unknown = screen.getByTestId('letter-row-demo-l12')
+    expect(unknown.textContent).toContain('结果不明')
+    const cells12 = Array.from(unknown.querySelectorAll('td')).map((td) => td.textContent)
+    expect(cells12[6]).toBe('1结果不明 4')
+  })
+
+  it('the phone card of each letter says the same: the errors, and the people whose result is unknown', async () => {
+    await renderReady()
+    expect(screen.getByTestId('letter-card-demo-l11').textContent).toContain('被拦 3 · 出错 2')
+    expect(screen.getByTestId('letter-card-demo-l12').textContent).toContain('被拦 1 · 结果不明 4')
+    expect(screen.getByTestId('letter-card-demo-l1').textContent).not.toContain('结果不明')
+  })
+
+  it('the legend explains both statuses in plain words, including what not to do', async () => {
+    await renderReady()
+    const legend = screen.getByTestId('auto-send-legend').textContent ?? ''
+    expect(legend).toContain('没发出去')
+    expect(legend).toContain('一封都没送到客人手里')
+    expect(legend).toContain('结果不明')
+    expect(legend).toContain('先别重发')
+  })
+
+  it('the drawer of a letter nobody got says why, in one sentence under the numbers, and has no tile for unknown results', async () => {
+    await renderReady()
+    const dialog = await openLetter('demo-l11')
+    const note = await within(dialog).findByTestId('auto-send-status-note')
+    expect(note.textContent).toBe('这一批一封都没送到客人手里（被拦 3 位，出错 2 位）。')
+    expect(pTexts(dialog)).not.toContain('结果不明')
+  })
+
+  it('the drawer of a letter with unknown results says not to resend, shows the tile, and lists those guests as 结果不明 with the reason', async () => {
+    await renderReady()
+    const dialog = await openLetter('demo-l12')
+    const note = await within(dialog).findByTestId('auto-send-status-note')
+    expect(note.textContent).toBe('有 4 位结果不明：信可能已经送到，先别重发。')
+    expect(pTexts(dialog)).toContain('结果不明') // the tile label
+    fireEvent.click(within(dialog).getByRole('tab', { name: /收件人与发送情况/ }))
+    const guest = await within(dialog).findByTestId('recipient-demo-contact-22')
+    expect(guest.textContent).toContain('结果不明')
+    expect(guest.textContent).toContain('发送结果不明，等人核对')
+    expect(dialog.textContent).toContain('下面标「结果不明」的：发出了，但没拿到最终结果')
+  })
+
+  it('a letter that went out normally has neither the sentence nor the note', async () => {
+    await renderReady()
+    const dialog = await openLetter('demo-l1')
+    await within(dialog).findByRole('heading', { name: 'Sample letter: how the weather looks on your route' })
+    expect(within(dialog).queryByTestId('auto-send-status-note')).toBeNull()
   })
 })
 
@@ -459,8 +527,36 @@ describe('AutoSendBoard · 按团看', () => {
   it('a group nothing has gone out for says 还没发过 and shows where its next letter stands', async () => {
     await renderReady('groups')
     const c = cellsOf(groupRow('demo-group-c'))
-    expect(c.slice(2, 5)).toEqual(['0 封', '2 封', '还没发过'])
+    // nothing sent, one letter that was due but nobody got it (errors), two still ahead
+    expect(c.slice(2, 5)).toEqual(['0 封过期没发 1 封', '2 封', '还没发过'])
     expect(cellsOf(groupRow('demo-group-d'))[5]).toContain('等你放行')
+  })
+
+  it('a group with a letter whose results are unknown says so next to its sent count, apart from the overdue ones', async () => {
+    await renderReady('groups')
+    const d = cellsOf(groupRow('demo-group-d'))
+    expect(d[2]).toBe('0 封结果不明 1 封')
+    expect(d[2]).not.toContain('过期没发')
+    expect(groupRow('demo-group-a').textContent).not.toContain('结果不明')
+    // the phone card says the same
+    expect(screen.getByTestId('group-card-demo-group-d').textContent).toContain('结果不明 1 封')
+    expect(screen.getByTestId('group-card-demo-group-c').textContent).toContain('过期没发 1 封')
+  })
+
+  it('opening those groups shows the letter nobody got and the letter with unknown results, each with its own status and numbers', async () => {
+    await renderReady('groups')
+    fireEvent.click(groupRow('demo-group-c'))
+    const [listC] = screen.getAllByTestId('group-letters-demo-group-c')
+    const firstC = within(listC).getAllByRole('button')[0]
+    expect(firstC.textContent).toContain('11月4日')
+    expect(firstC.textContent).toContain('没发出去')
+    expect(firstC.textContent).toContain('已发 0 · 被拦 3 · 出错 2 · 打开 —')
+
+    fireEvent.click(groupRow('demo-group-d'))
+    const [listD] = screen.getAllByTestId('group-letters-demo-group-d')
+    const firstD = within(listD).getAllByRole('button')[0]
+    expect(firstD.textContent).toContain('结果不明')
+    expect(firstD.textContent).toContain('已发 0 · 被拦 1 · 结果不明 4 · 打开 —')
   })
 
   it('opening a group lists its letters oldest first; a click on a letter opens the drawer for that letter', async () => {
@@ -515,7 +611,7 @@ describe('AutoSendBoard · 按团看', () => {
   it('switches between the two views; 看这批 (a letter-view filter) takes the page to the letter view', async () => {
     await renderReady('groups')
     showLetters()
-    expect(rowIds()).toHaveLength(11)
+    expect(rowIds()).toHaveLength(13)
     fireEvent.click(screen.getByRole('button', { name: '按团看' }))
     expect(screen.queryAllByTestId(/^group-row-/)).toHaveLength(4)
 
@@ -531,7 +627,7 @@ describe('AutoSendBoard · 按团看', () => {
     render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={adapter} />)
     await screen.findByTestId('auto-send-next-batch')
     expect(screen.queryByRole('group', { name: '换个角度看' })).toBeNull()
-    expect(rowIds()).toHaveLength(11)
+    expect(rowIds()).toHaveLength(13)
   })
 
   it('has no send or release button in the group view either', async () => {
