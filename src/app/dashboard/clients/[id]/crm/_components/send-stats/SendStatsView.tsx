@@ -23,10 +23,10 @@ function when(iso: string): string {
 
 const REACTION_TEXT: Record<string, string> = {
   email: '回信了',
-  phone: '来电话了',
-  whatsapp: '发消息了',
-  messenger: '发消息了',
-  sms: '发消息了',
+  inbound_call: '来电话了',
+  message: '发消息了',
+  form: '填了表',
+  web_form: '填了表',
 }
 
 const CHIP = 'inline-block whitespace-nowrap rounded px-2 py-0.5 text-xs font-semibold'
@@ -58,7 +58,7 @@ function RowChips({ row }: { row: SendStatRow }) {
     <span className="flex flex-wrap justify-end gap-1">
       {row.reaction && (
         <Chip tone="blue">
-          {REACTION_TEXT[row.reaction.channel] ?? '联系了我们'} · {when(row.reaction.at)}
+          {REACTION_TEXT[row.reaction.kind] ?? '联系了我们'} · {when(row.reaction.at)}
         </Chip>
       )}
       {s.clicked && <Chip tone="green">{clickText(row)}</Chip>}
@@ -85,7 +85,7 @@ function percent(part: number, whole: number): string {
 function GroupBlock({ group, clientId, now }: { group: MailGroup; clientId: string; now: Date }) {
   const [open, setOpen] = useState(false)
   const shown = open ? group.rows : group.rows.slice(0, ROWS_SHOWN)
-  const { sent, clicked, reacted } = group.summary
+  const { sent, clicked, reacted, clicksUnreadable } = group.summary
   return (
     <section className="overflow-hidden rounded-xl border border-me-charcoal/10 bg-white" data-testid="send-group">
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-me-charcoal/10 px-4 py-2.5">
@@ -93,7 +93,7 @@ function GroupBlock({ group, clientId, now }: { group: MailGroup; clientId: stri
           {dayTitle(group.day, now)} · {group.label}
         </h2>
         <p className="text-xs text-me-charcoal/60">
-          发出 {sent} 封 · {clicked} 位点了链接{reacted > 0 ? ` · ${reacted} 位联系了我们` : ''}
+          发出 {sent} 封 · {clicksUnreadable ? '点击读不到' : `${clicked} 位点了链接`}{reacted > 0 ? ` · ${reacted} 位联系了我们` : ''}
           {group.summary.notDelivered > 0 ? ` · ${group.summary.notDelivered} 封没发出` : ''}
         </p>
       </header>
@@ -171,7 +171,10 @@ export function SendStatsView({ clientId }: { clientId: string }): JSX.Element {
         <span className="flex-1" />
         <label className="text-xs text-me-charcoal/60">
           时间{' '}
-          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="rounded border border-me-stone bg-white px-2 py-1 text-xs">
+          <select value={days} onChange={(e) => {
+              setDays(Number(e.target.value))
+              setLabel(null)
+            }} className="rounded border border-me-stone bg-white px-2 py-1 text-xs">
             {DAY_CHOICES.map((d) => (
               <option key={d} value={d}>
                 最近 {d} 天
@@ -198,8 +201,13 @@ export function SendStatsView({ clientId }: { clientId: string }): JSX.Element {
       {!loading && !error && data && (
         <>
           <div className="mb-2 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
-            <Card label="发出" value={String(total.sent)} note="位客人" />
-            <Card label="点了链接" value={String(total.clicked)} note={`${percent(total.clicked, total.sent)}，肯定看过`} tone="green" />
+            <Card label="发出" value={String(total.sent)} note="封信" />
+            <Card
+              label="点了链接"
+              value={total.clicksUnreadable ? '—' : String(total.clicked)}
+              note={total.clicksUnreadable ? '这一项读不到' : `${percent(total.clicked, total.sent)}，肯定看过`}
+              tone="green"
+            />
             <Card label="回了信 / 来了电话" value={reactionsOk ? String(total.reacted) : '—'} note={reactionsOk ? '发信之后' : '这一项读不到'} />
             <Card label="被拦 / 出错" value={String(total.notDelivered)} note={total.notDelivered === 0 ? '都发出去了' : '没发出去'} />
           </div>

@@ -16,7 +16,7 @@ const row = (over: Partial<SendStatRow> = {}): SendStatRow => ({
   ...over,
 })
 const click = { label: '目录', firstClickedAt: '2026-11-10T03:00:00.000Z' }
-const reaction = { at: '2026-11-10T04:00:00.000Z', channel: 'email' }
+const reaction = { at: '2026-11-10T04:00:00.000Z', kind: 'email' }
 
 describe('groupLabelOf', () => {
   it.each([
@@ -41,6 +41,10 @@ describe('statusOf / summarise', () => {
     expect(statusOf(row({ clicks: [click], reaction }))).toEqual({ kind: 'sent', clicked: true, clicksReadable: true, reacted: true })
     expect(statusOf(row({ clicks: null }))).toMatchObject({ clicked: false, clicksReadable: false })
   })
+  it('🔴 any sent mail with unreadable clicks makes the clicked number a floor, flagged (not a plain 0)', () => {
+    expect(summarise([row({ id: 'a', clicks: null }), row({ id: 'b', clicks: [click] })])).toMatchObject({ clicked: 1, clicksUnreadable: true })
+    expect(summarise([row({ id: 'a', outcome: 'blocked', clicks: [] })]).clicksUnreadable).toBe(false)
+  })
   it('anything but sent is not a delivered mail', () => {
     for (const outcome of ['blocked', 'failed', 'unknown']) expect(statusOf(row({ outcome })).kind).toBe(outcome)
   })
@@ -51,7 +55,7 @@ describe('statusOf / summarise', () => {
       row({ id: 'c' }),
       row({ id: 'd', outcome: 'blocked', clicks: [click] }),
     ]
-    expect(summarise(rows)).toEqual({ sent: 3, clicked: 2, reacted: 1, notDelivered: 1 })
+    expect(summarise(rows)).toEqual({ sent: 3, clicked: 2, reacted: 1, notDelivered: 1, clicksUnreadable: false })
   })
 })
 
@@ -67,7 +71,7 @@ describe('groupRows', () => {
     const groups = groupRows(rows, TZ)
     expect(groups.map((g) => `${g.day} ${g.label}`)).toEqual(['2026-11-10 一键发目录', '2026-11-09 自己写的信'])
     expect(groups[0]?.rows.map((r) => r.id)).toEqual(['both', 'clicked', 'quiet'])
-    expect(groups[0]?.summary).toEqual({ sent: 3, clicked: 2, reacted: 1, notDelivered: 0 })
+    expect(groups[0]?.summary).toEqual({ sent: 3, clicked: 2, reacted: 1, notDelivered: 0, clicksUnreadable: false })
   })
   it('a send at 23:30 UTC on the 9th is the 10th in Auckland (the viewer day, not the server day)', () => {
     expect(localDay('2026-11-09T23:30:00.000Z', 'Pacific/Auckland')).toBe('2026-11-10')

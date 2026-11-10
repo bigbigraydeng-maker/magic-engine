@@ -12,8 +12,8 @@ export interface SendStatClick {
 export interface SendStatReaction {
   /** When the guest got in touch first after this mail. */
   at: string
-  /** `email` | `phone` | `whatsapp` | `messenger` | `sms` */
-  channel: string
+  /** `email` (a real reply) | `inbound_call` (an answered call) | `message` (chat) | `form` / `web_form` (filled a form) */
+  kind: string
 }
 
 export interface SendStatRow {

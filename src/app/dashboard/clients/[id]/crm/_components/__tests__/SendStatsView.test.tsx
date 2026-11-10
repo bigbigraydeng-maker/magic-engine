@@ -40,7 +40,7 @@ describe('SendStatsView', () => {
     stub({ body: payload([
       row({ id: 'a', contactName: 'Clicker', clicks: [click] }),
       row({ id: 'b', contactName: 'Quiet' }),
-      row({ id: 'c', contactName: 'Replier', reaction: { at: '2026-11-10T05:00:00.000Z', channel: 'email' } }),
+      row({ id: 'c', contactName: 'Replier', reaction: { at: '2026-11-10T05:00:00.000Z', kind: 'email' } }),
       row({ id: 'd', contactName: 'Blocked', outcome: 'blocked', blockReason: 'frequency_cap' }),
     ]) })
     render(<SendStatsView clientId="c1" />)
@@ -81,8 +81,27 @@ describe('SendStatsView', () => {
     render(<SendStatsView clientId="c1" />)
     await screen.findByText('Amy Lee')
     expect(screen.getByText('点击读不到')).toBeTruthy()
-    expect(screen.getByText('这一项读不到')).toBeTruthy()
+    expect(screen.getAllByText('这一项读不到')).toHaveLength(2)
     expect(screen.getByText('回了信 / 来了电话').nextElementSibling?.textContent).toBe('—')
+  })
+
+  it('🔴 clicks unreadable: the 「点了链接」 card and the group line say so too (never a flat 0)', async () => {
+    stub({ body: payload([row({ clicks: null })]) })
+    render(<SendStatsView clientId="c1" />)
+    await screen.findByText('Amy Lee')
+    expect(screen.getByText('点了链接').nextElementSibling?.textContent).toBe('—')
+    expect(screen.getByTestId('send-group').textContent).toContain('点击读不到')
+    expect(screen.getByTestId('send-group').textContent).not.toContain('0 位点了链接')
+  })
+
+  it('changing the time range resets the mail-type filter (the chip may not exist in the new range)', async () => {
+    stub({ body: payload([row({ templateKey: 'countdown-x', templateName: '倒计时信·离出发 4 个月' })]) }, { body: payload([row({ contactName: 'Cat' })]) })
+    render(<SendStatsView clientId="c1" />)
+    await screen.findByText('Amy Lee')
+    fireEvent.click(screen.getByRole('button', { name: '倒计时信' }))
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '30' } })
+    await screen.findByText('Cat')
+    expect(screen.getByRole('button', { name: '全部' }).className).toContain('bg-me-charcoal')
   })
 
   it('🔴 a failed read shows the reason and a retry, never "no mails"; retry asks again', async () => {

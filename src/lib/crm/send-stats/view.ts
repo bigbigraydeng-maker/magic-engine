@@ -37,10 +37,12 @@ export interface Summary {
   clicked: number
   reacted: number
   notDelivered: number
+  /** At least one mail that went out has clicks that could not be read: `clicked` is then a floor, not the number. */
+  clicksUnreadable: boolean
 }
 
 export function summarise(rows: readonly SendStatRow[]): Summary {
-  const out: Summary = { sent: 0, clicked: 0, reacted: 0, notDelivered: 0 }
+  const out: Summary = { sent: 0, clicked: 0, reacted: 0, notDelivered: 0, clicksUnreadable: false }
   for (const row of rows) {
     const s = statusOf(row)
     if (s.kind !== 'sent') {
@@ -48,6 +50,7 @@ export function summarise(rows: readonly SendStatRow[]): Summary {
       continue
     }
     out.sent++
+    if (!s.clicksReadable) out.clicksUnreadable = true
     if (s.clicked) out.clicked++
     if (s.reacted) out.reacted++
   }
@@ -84,7 +87,7 @@ export function groupRows(rows: readonly SendStatRow[], timeZone?: string): Mail
     const day = localDay(row.createdAt, timeZone)
     const label = groupLabelOf(row)
     const key = `${day}|${label}`
-    const g = map.get(key) ?? { day, label, rows: [], summary: { sent: 0, clicked: 0, reacted: 0, notDelivered: 0 } }
+    const g = map.get(key) ?? { day, label, rows: [], summary: summarise([]) }
     g.rows.push(row)
     map.set(key, g)
   }
