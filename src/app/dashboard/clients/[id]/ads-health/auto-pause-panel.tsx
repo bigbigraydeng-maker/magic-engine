@@ -16,7 +16,6 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { MeButton } from '@/components/ui/me-primitives'
 import { ApprovalContextNotes } from './approval-context-notes'
 
 interface PendingItem {
@@ -107,65 +106,57 @@ export default function AutoPausePanel({
   }
 
   if (!items) {
-    if (!error) {
-      return <p className="text-sm text-me-charcoal/55">加载中…</p>
-    }
+    if (!error) return <div>加载中…</div>
     return (
-      <div className="space-y-3">
-        <p className="text-sm text-status-rej">{error}</p>
-        <MeButton type="button" variant="ghost" size="sm" className="min-h-11" onClick={() => { setError(null); void load() }}>
+      <div>
+        <div style={{ color: '#b91c1c', marginBottom: 8 }}>{error}</div>
+        <button
+          onClick={() => { setError(null); void load() }}
+          style={{ border: '1px solid #cbd5e1', borderRadius: 6, padding: '4px 12px', cursor: 'pointer' }}
+        >
           重试
-        </MeButton>
+        </button>
       </div>
     )
   }
 
   return (
-    <div className="max-w-3xl">
-      <p className="mb-4 text-sm text-me-charcoal/55">
+    <div style={{ maxWidth: 720 }}>
+      <p style={{ fontSize: 13, color: '#64748b', marginBottom: 16 }}>
         系统发现这些广告组连续花钱没结果，建议暂停。点「批准」会先出一张确认卡，确认后才暂停。点「驳回」就不停。
       </p>
-      {error && <p className="mb-3 text-sm text-status-rej">{error}</p>}
-      {items.length === 0 && (
-        <p className="text-sm text-me-charcoal/55">目前没有等你点头的暂停建议。</p>
-      )}
+      {error && <div style={{ color: '#b91c1c', marginBottom: 12 }}>{error}</div>}
+      {items.length === 0 && <div style={{ color: '#64748b' }}>目前没有等你点头的暂停建议。</div>}
       {hasMore && (
-        <p className="mb-3 text-sm text-me-ochre">还有更早的建议没列出来——先处理完这些，刷新后会接着显示。</p>
+        <div style={{ color: '#b45309', marginBottom: 12 }}>还有更早的建议没列出来——先处理完这些，刷新后会接着显示。</div>
       )}
       {items.map((it) => (
-        <div
-          key={it.runId}
-          className="mb-3 rounded-xl border border-black/10 bg-white p-4 shadow-sm"
-        >
-          <p className="font-semibold text-me-charcoal">{it.diagnosisTitle ?? '花钱没结果'}</p>
-          <p className="mt-1 text-xs text-me-charcoal/55">
+        <div key={it.runId} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 16, marginBottom: 12 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{it.diagnosisTitle ?? '花钱没结果'}</div>
+          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 12 }}>
             广告组：{it.adsetName ?? '（名字没记下）'}（编号 {it.adsetId ?? '未知'}）· 诊断日：{it.insightDate ?? '未知'}
-          </p>
+          </div>
           <ApprovalContextNotes clientId={clientId} adsetId={it.adsetId} runId={it.runId} runStatus="pending_approval" />
           {!it.expectedDecisionId && (
-            <p className="mt-2 text-xs text-status-rej">
+            <div style={{ fontSize: 12, color: '#b91c1c', marginBottom: 8 }}>
               这条的审批记录对不上，先别点——它不会自己执行。回我一句「查一下这条暂停建议」我来理顺。
-            </p>
+            </div>
           )}
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div style={{ display: 'flex', gap: 8 }}>
             <button
-              type="button"
-              className="min-h-11 rounded-xl bg-status-track px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!it.expectedDecisionId || busyRunId === it.runId}
               onClick={() => decide(it, 'approve')}
+              style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}
             >
               批准（立刻暂停）
             </button>
-            <MeButton
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="min-h-11"
+            <button
               disabled={!it.expectedDecisionId || busyRunId === it.runId}
               onClick={() => decide(it, 'reject')}
+              style={{ background: '#f1f5f9', color: '#0f172a', border: '1px solid #cbd5e1', borderRadius: 6, padding: '6px 14px', cursor: 'pointer' }}
             >
               驳回
-            </MeButton>
+            </button>
           </div>
         </div>
       ))}

@@ -7,6 +7,7 @@ import {
   pausedDraftClickUrl,
 } from '@/lib/ads-strategy/paused-draft-copy'
 import { ConfirmationCard } from './ConfirmationCard'
+import { ConfirmationCardDialog } from './ConfirmationCardDialog'
 
 interface CardPayload {
   readonly runId: string
@@ -96,12 +97,22 @@ async function postDecision(
   return toCardPayload(await res.json().catch(() => null)) ?? view
 }
 
-function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
+function CardRow({
+  clientId,
+  card,
+  layout,
+}: {
+  clientId: string
+  card: CardPayload
+  layout: 'default' | 'ads-health'
+}) {
   const [view, setView] = useState(card)
   const [note, setNote] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
   const clickUrl = pausedDraftClickUrl(clientId, view.runId, view.what)
   const goLive = clickUrl === GO_LIVE_CONFIRM_HREF
+  const useDialog = layout === 'ads-health' && !goLive
 
   async function send(resolution: 'confirm' | 'decline') {
     if (goLive) return
@@ -111,11 +122,13 @@ function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
     if (typeof result === 'string') setNote(result)
     else setView(result)
     setBusy(false)
+    setDialogOpen(false)
   }
 
   return (
     <div className="mt-4 md:max-w-[calc(50%-0.5rem)] md:min-w-[min(100%,20rem)]">
       <ConfirmationCard
+        layout={layout}
         what={view.what}
         account={view.account}
         amount={view.amount}
@@ -127,9 +140,29 @@ function CardRow({ clientId, card }: { clientId: string; card: CardPayload }) {
         declineEnabled={goLive ? false : view.declineEnabled}
         blockedReason={view.blockedReason}
         busy={busy}
-        onConfirm={() => { void send('confirm') }}
+        onConfirm={() => {
+          if (useDialog) setDialogOpen(true)
+          else void send('confirm')
+        }}
         onDecline={() => { void send('decline') }}
       />
+      {useDialog && (
+        <ConfirmationCardDialog
+          open={dialogOpen}
+          what={view.what}
+          account={view.account}
+          amount={view.amount}
+          date={view.date}
+          scope={view.scope}
+          expiresLabel={view.expiresLabel}
+          statusLine={view.statusLine}
+          confirmEnabled={view.confirmEnabled}
+          blockedReason={view.blockedReason}
+          busy={busy}
+          onClose={() => setDialogOpen(false)}
+          onConfirm={() => { void send('confirm') }}
+        />
+      )}
       {goLive ? (
         <p className="mt-2 text-base">
           <a className="font-medium text-me-ochre underline hover:text-me-charcoal" href={GO_LIVE_CONFIRM_HREF}>{GO_LIVE_CONFIRM_LABEL}</a>
@@ -144,10 +177,14 @@ export function HeldCards({
   clientId,
   refreshKey = 0,
   hideWhenEmpty = false,
+  layout = 'default',
+  onCountChange,
 }: {
   clientId: string
   refreshKey?: number
   hideWhenEmpty?: boolean
+  layout?: 'default' | 'ads-health'
+  onCountChange?: (count: number) => void
 }) {
   const [cards, setCards] = useState<CardPayload[] | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
@@ -165,10 +202,12 @@ export function HeldCards({
         return
       }
       setProblem(null)
-      setCards(readList(await res.json().catch(() => null)))
+      const list = readList(await res.json().catch(() => null))
+      setCards(list)
+      onCountChange?.(list.length)
     })()
     return () => { alive = false }
-  }, [clientId, refreshKey])
+  }, [clientId, refreshKey, onCountChange])
 
   if (problem) return <p className="mt-4 text-sm text-status-rej">{problem}</p>
   if (!cards || cards.length === 0) {
@@ -178,7 +217,7 @@ export function HeldCards({
   }
   return (
     <div className="mt-4 flex flex-col gap-4 md:flex-row md:flex-wrap">
-      {cards.map((card) => <CardRow key={card.runId} clientId={clientId} card={card} />)}
+      {cards.map((card) => <CardRow key={card.runId} clientId={clientId} card={card} layout={layout} />)}
     </div>
   )
 }
