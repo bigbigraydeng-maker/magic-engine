@@ -17,9 +17,9 @@ afterEach(() => {
 })
 
 describe('magicNetworkUrl', () => {
-  it('points at the temporary site and keeps the query string', () => {
-    expect(magicNetworkUrl('/join', { ref: 'ABCD2345' })).toBe('https://magic-network.onrender.com/join?ref=ABCD2345')
-    expect(magicNetworkUrl('/join')).toBe('https://magic-network.onrender.com/join')
+  it('points at the Magic Network site and keeps the query string', () => {
+    expect(magicNetworkUrl('/join', { ref: 'ABCD2345' })).toBe('https://network.magiclab.co.nz/join?ref=ABCD2345')
+    expect(magicNetworkUrl('/join')).toBe('https://network.magiclab.co.nz/join')
   })
 
   it('uses MAGIC_NETWORK_URL once set, without a doubled slash, and keeps repeated params', () => {
@@ -33,13 +33,13 @@ describe('magicNetworkUrl', () => {
 describe('old ME pages', () => {
   it('/ai-steward sends visitors to the product page on the new site', async () => {
     await expect(AiStewardPage({ searchParams: Promise.resolve({ ref: 'ABCD2345' }) })).rejects.toThrow(
-      'REDIRECT https://magic-network.onrender.com/products/ai-steward?ref=ABCD2345',
+      'REDIRECT https://network.magiclab.co.nz/products/ai-steward?ref=ABCD2345',
     )
   })
 
   it('/partner/apply sends visitors to the application page on the new site', async () => {
     await expect(ApplyPage({ searchParams: Promise.resolve({ ref: 'ABCD2345' }) })).rejects.toThrow(
-      'REDIRECT https://magic-network.onrender.com/join?ref=ABCD2345',
+      'REDIRECT https://network.magiclab.co.nz/join?ref=ABCD2345',
     )
   })
 })
