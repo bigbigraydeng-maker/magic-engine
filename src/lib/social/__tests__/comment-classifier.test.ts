@@ -53,13 +53,20 @@ describe('decideByCategory — praise', () => {
     expect(d.replySource).toBe('fallback')
   })
 
-  it('adds a DM only when purchase intent is signalled', () => {
+  it('purchase intent in praise: no automatic DM, thank-you kept, handed to a person', () => {
     const withIntent = decideByCategory(
       { category: 'praise', confidence: 0.95, purchase_intent: true, praise_reply: 'Thank you! 🙏' },
       CTX,
     )
-    expect(withIntent.privateReply).not.toBeNull()
-    expect(isSafeToAutoSend(withIntent.privateReply!)).toBe(true)
+    expect(withIntent.privateReply).toBeNull()
+    expect(withIntent.needsHuman).toBe(true)
+    expect(withIntent.publicReply).toBeTruthy()
+    const noIntent = decideByCategory(
+      { category: 'praise', confidence: 0.95, purchase_intent: false, praise_reply: 'Thank you! 🙏' },
+      CTX,
+    )
+    expect(noIntent.privateReply).toBeNull()
+    expect(noIntent.needsHuman).toBe(false)
   })
 })
 

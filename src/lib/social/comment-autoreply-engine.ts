@@ -9,8 +9,8 @@
  * replied to twice even if two cron runs overlap or a later step fails.
  *
  * Send gate: before a public reply or private reply, `routeComment` must return
- * a greeting or FAQ. Price, complaint, refund, booking change, praise that is
- * not a greeting or FAQ, unknown, or a routing throw is recorded for the
+ * a greeting, FAQ or genuine praise. Price, complaint, refund, booking change,
+ * unknown, or a routing throw is recorded for the
  * existing human queue and does not call Meta. Spam the classifier marks with
  * shouldHide is still hidden, as before. If classification throws, nothing is
  * hidden or sent — the comment waits for a person.
