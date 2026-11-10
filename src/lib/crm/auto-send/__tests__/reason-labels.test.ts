@@ -69,8 +69,8 @@ describe('resolveReasonText · text already translated by the read interface', (
 
   it('a pending row shows the plain note the read interface attached, otherwise a dash', () => {
     expect(
-      resolveReasonText({ status: 'pending', reasonCode: null, reasonDetail: null, reasonText: '这一批发出时他还没交定金' }, {}),
-    ).toEqual({ main: '这一批发出时他还没交定金', detail: null })
+      resolveReasonText({ status: 'pending', reasonCode: null, reasonDetail: null, reasonText: '这一批发出时他不在名单里（不补发）' }, {}),
+    ).toEqual({ main: '这一批发出时他不在名单里（不补发）', detail: null })
     expect(resolveReasonText({ status: 'pending', reasonCode: null, reasonDetail: null, reasonText: null }, {})).toEqual({ main: '—', detail: null })
     expect(resolveReasonText({ status: 'pending', reasonCode: 'dnc', reasonDetail: '地址无效', reasonText: '   ' }, {})).toEqual({ main: '—', detail: null })
   })

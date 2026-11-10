@@ -248,7 +248,8 @@ function mailchimpSummaryOf(sends: SendFacts | null): AutoLetterDetail['mailchim
 
 /**
  * 详情。`today` 给了，并且这封信的发信日早于今天、整批已经发出去，那么计划里有、发送记录里没有的人，
- * 说明他们是这一批发出之后才交的定金——显示「这一批发出时他还没交定金」，不显示「待发」（引擎不会补发）。
+ * 说明引擎发这一批时他们不在名单里（多半是这一批发出之后才交的定金）——显示「这一批发出时他不在名单里（不补发）」，
+ * 不显示「待发」（引擎不会补发）。
  */
 export function buildDetail(planned: PlannedLetter, facts: LetterFacts | null, today?: NzDate): AutoLetterDetail {
   const row = buildLetterRow(planned, facts)

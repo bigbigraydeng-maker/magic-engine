@@ -60,6 +60,19 @@ describe('createHttpAdapter', () => {
     expect(overview.groups).toEqual([])
   })
 
+  it('a list without the rhythm number (an older server) or with a nonsense one is an error, never a half-empty page', async () => {
+    const { cadence: _cadence, ...withoutCadence } = LIST_BODY
+    void _cadence
+    for (const body of [withoutCadence, { ...LIST_BODY, cadence: 'six' }]) {
+      await expect(createHttpAdapter('c', async () => json(body)).loadOverview()).rejects.toThrow('读到的内容格式不对')
+    }
+  })
+
+  it('no rhythm (cadence null) is a normal list', async () => {
+    const overview = await createHttpAdapter('c', async () => json({ ...LIST_BODY, cadence: null })).loadOverview()
+    expect(overview).toEqual({ nextBatch: null, sections: [] })
+  })
+
   it('reads one letter with the key URL-encoded (it contains colons)', async () => {
     const fetchImpl = vi.fn<FetchLike>(async () => json(DETAIL_BODY))
     const detail = await createHttpAdapter('client-1', fetchImpl).loadLetterDetail('plan:2026-12-02:t-1:2027-03-11:3')
