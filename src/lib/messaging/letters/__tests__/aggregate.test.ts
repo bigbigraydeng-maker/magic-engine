@@ -89,7 +89,7 @@ describe('buildLetterRow', () => {
     const row = buildLetterRow(planned({ sendDate: '2026-12-02' }), facts)
     expect(row.subject).toBe('Subject')
     expect(row.status).toBe('sent')
-    expect(row.counts).toEqual({ recipients: 2, sent: 1, blocked: 1, failed: 1, rehearsal: 1, opened: null })
+    expect(row.counts).toEqual({ recipients: 4, sent: 1, blocked: 1, failed: 1, rehearsal: 1, opened: null }) // c1, c2 planned + c3, c4 only in the records
   })
 
   describe('opened (reference only)', () => {
@@ -261,6 +261,15 @@ describe('buildDetail', () => {
     const me = buildDetail(letter, { registry: null, sends: sends({ started: true, recipients: rows.map((r) => ({ ...r, opened: null, clicked: null })) }) })
     expect(me.mailchimpSummary).toBeNull()
     expect(me.recipients.every((r) => r.opened === null && r.clicked === null)).toBe(true)
+  })
+
+  it('the recipient total never falls below the people who have a result: people only in the records are counted too', () => {
+    const rows = [outcome({ contactId: 'c1' }), outcome({ contactId: 'gone-1' }), outcome({ contactId: 'gone-2', outcome: 'failed', reasonCode: 'bounced' })]
+    const detail = buildDetail(letter, { registry: null, sends: sends({ started: true, recipients: rows }) })
+    expect(detail.letter.counts.recipients).toBe(5) // c1, c2, c3 planned + two people only in the records
+    expect(detail.tiles.recipients).toBe(detail.recipients.length) // same number as the rows of the list
+    const { sent, blocked, failed, rehearsal } = detail.tiles
+    expect((sent ?? 0) + (blocked ?? 0) + (failed ?? 0) + rehearsal).toBeLessThanOrEqual(detail.tiles.recipients)
   })
 
   it('a person with a send record who is no longer in the plan is still listed (name unknown)', () => {

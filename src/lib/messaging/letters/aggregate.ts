@@ -96,13 +96,24 @@ function openedCountOf(sends: SendFacts): number | null {
   return real.filter((r) => r.opened === true).length
 }
 
+/**
+ * 收件人数 = 计划里的人 + 发送记录里有、计划里已经没有的人（订单后来变了）——和详情里名单的行数一致，
+ * 这样「已发 + 被拦 + 出错 + 演练」永远不会比收件人总数还多。
+ */
+function recipientTotal(planned: PlannedLetter, sends: SendFacts | null): number {
+  if (sends === null) return planned.recipients.length
+  const known = new Set(planned.recipients.map((p) => p.contactId))
+  const ledgerOnly = new Set(sends.recipients.map((r) => r.contactId).filter((id) => !known.has(id)))
+  return planned.recipients.length + ledgerOnly.size
+}
+
 function countsOf(planned: PlannedLetter, sends: SendFacts | null): LetterCounts {
   if (sends === null || sends.recipients.length === 0) {
     return { recipients: planned.recipients.length, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null }
   }
   const c = countOutcomes(sends.recipients)
   return {
-    recipients: planned.recipients.length,
+    recipients: recipientTotal(planned, sends),
     sent: c.sent,
     blocked: c.blocked,
     failed: c.failed,
