@@ -146,6 +146,23 @@ describe('creative state cards', () => {
     expect(out.skipped).toContain('promotion_cap')
   })
 
+  it('a proposal from the previous New Zealand day does not use up today', async () => {
+    const now = new Date('2026-11-09T12:30:00.000Z')
+    const yesterday = store([hold({ proposedOn: '2026-11-09' })])
+    const again = await proposeCreativeStateCards(kernel(yesterday.client), {
+      clientId: CLIENT, clicker: { kind: 'agent', email: null },
+      decision: { proposals: [proposal('move_to_scale')], skipped: [] }, now,
+    })
+    expect(again.issued.map((item) => item.kind)).toEqual(['move_to_scale'])
+    const today = store([hold({ proposedOn: '2026-11-10' })])
+    const blocked = await proposeCreativeStateCards(kernel(today.client), {
+      clientId: CLIENT, clicker: { kind: 'agent', email: null },
+      decision: { proposals: [proposal('new_plan')], skipped: [] }, now,
+    })
+    expect(blocked.issued).toEqual([])
+    expect(blocked.skipped).toContain('promotion_cap')
+  })
+
   it('creates a paused scale ad once, and does not write again when the read-back disagrees', async () => {
     const db = store([hold()])
     const used = ports()

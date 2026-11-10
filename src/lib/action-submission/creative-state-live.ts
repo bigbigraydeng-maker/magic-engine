@@ -15,6 +15,7 @@ import { pauseConfirmedWinnerAd } from '@/lib/ads-pause-card/winner-pause'
 import { latestUsableCapture, singleApprovedPlanReason } from '@/lib/ads-strategy/daily-card-guard'
 import {
   decideCreatives,
+  nzProposalDay,
   rulesFromConfig,
   type CaptureFact,
   type CreativeDecision,
@@ -224,7 +225,7 @@ function committedMajor(rows: readonly { plan_data?: unknown }[]): number | null
 async function countPromotions(sb: Sb, clientId: string, now: Date): Promise<number> {
   const { data, error } = await sb.from('flywheel_actions').select('payload').eq('client_id', clientId).eq('action_type', 'ads.creative_state_proposal')
   if (error || !data) return Number.POSITIVE_INFINITY
-  const day = now.toISOString().slice(0, 10)
+  const day = nzProposalDay(now)
   return (data as Array<{ payload?: { kind?: string; proposedOn?: string } }>).filter((row) => (
     (row.payload?.kind === 'move_to_scale' || row.payload?.kind === 'new_plan') && row.payload.proposedOn === day
   )).length
