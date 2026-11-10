@@ -5,6 +5,10 @@
 
 ---
 
+### 2026-11-10（ME 自己发信的底座第 3 单之一：欢迎信授权页，只有 PM 本人能批）
+
+PR [#3754](https://github.com/bigbigraydeng-maker/magic-engine/pull/3754)（合并 `e07318618`；A 级，PM 本人在 76 窗口回「合 3754」后由 76 签字并合并）。CRM 新增一页 `/dashboard/clients/<客户>/crm/welcome-letter`：看提案写了什么、信长什么样、彩排连续几天一致、旧群发每批对得上几位；「授权」先预览再确认，只有 `TRIGGERED_SEND_APPROVER_EMAILS` 名单里的人能点；「撤销」永远能点。四个接口 `/api/clients/[id]/triggered-send/{propose,authorize,revoke,status}`。不发信、不改数据库结构、不开开关。上线核对（11-10 17:22）：四个接口不登录全部 401、不缓存；生产里只有 10-31 那份彩排提案，没人批过，真发 0 行。
+
 ### 2026-11-10（ME 自己发信的底座第 2 单：每封信的下落记回账本，一键退订链接能用）
 
 PR [#3736](https://github.com/bigbigraydeng-maker/magic-engine/pull/3736)（合并 `097a9f683`；A 级，PM 本人在 76 窗口回「合 3736」后由 76 合并）。一键退订入口 `/api/u/<令牌>`（GET 只显示按钮、POST 才退订，只停邮件不停电话；签名令牌只带发送记录编号）；Resend 回执入库后叫醒回执消费函数 `cloud-triggered-send-provider-event`，只认消息号、信自己的标签或签名退订链接，状态只前进；投诉 = 退订邮件；销售手发和回复客人来信都查退订。不发信、不改数据库结构、不开开关。上线核对（11-10 15:34）：假签名退订链接显示「This link is not valid」；合并后系统邮件回执照常入库、发信账本 0 行变化；线上事件通道有密钥。

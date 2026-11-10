@@ -31,7 +31,7 @@
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 匿名 key | Render-web | ✅ |
 | `SUPABASE_SERVICE_ROLE_KEY` | 服务端全权 key — ME 全部数据访问走它（不用 end-user RLS） | Render-web | ✅ |
 | `CRON_SECRET` | 所有 `/api/cron/*` 的 Bearer 鉴权 | Render-web + 全部 cron + **GH** | ✅ |
-| `APP_URL` | 应用自身域名（邮件链接 / OAuth callback 拼接） | Render-web | ✅ |
+| `APP_URL` | 应用自身域名（邮件链接 / OAuth callback 拼接）。**自动欢迎信的退订链接也指向它**：必须是 `https://` 开头、不带路径的站点地址，读不到或不合格，真发整轮不发（`no_app_url`） | Render-web | ✅ |
 | `NEXT_PUBLIC_APP_URL` | 同上，前端可见版本 | Render-web | ✅ |
 | `NEXT_PUBLIC_SITE_URL` | 站点 URL（另一处用法） | Render-web | ❌ |
 | `NEXT_PUBLIC_REPORT_BASE_URL` | 报告分享链接基址 | Render-web | ❌ |

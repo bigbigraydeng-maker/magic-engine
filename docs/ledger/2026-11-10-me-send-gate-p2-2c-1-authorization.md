@@ -1,12 +1,14 @@
 ---
 id: 2026-11-10-me-send-gate-p2-2c-1-authorization
 title: 发信底座第 3 单之一「授权」：CRM 里多一页「欢迎信自动发送」，看提案、看信、看彩排连续几天一致，点「授权」或「撤销」；改动单等你回「合」，本单一封信都不发
-status: decided
+status: done
 owner: pm
 decided_on: 2026-11-10
 source: session:33ebcd0b
 verify_by: 2026-11-17
 verify_how: 看是否已：①本单（A 级）两位审查员审过、PM 本人回「合 <单号>」后合并；②用管理员账号打开后台 CTS 的 CRM，把地址最后一段换成 /crm/welcome-letter，能看到 10-31 那份彩排提案、写着「只用来彩排……不能授权」，以及彩排连续一致几天；③不是管理员的账号打开只看到「只有管理员能看这一页」；④Render 里已填 TRIGGERED_SEND_APPROVER_EMAILS（只有 PM 本人）和 TRIGGERED_SEND_TRIAL_DOMAINS（试跑的内部邮箱域名），只核有没有、不看值，没填就谁都批不了也不能试跑。缺哪件写哪件；真发要等第 3 单之二（真发流程）、之三（安全项）合并后，只发 hello@ 的受控试跑
+done_on: 2026-11-10
+done_ref: pr:3754
 ---
 PM 11-10 14:4x 在 126 窗口回「立即开始补充功能开发」（126 转来，已核原话）；总授权是 PM 在 126、127 窗口说的「你把功能做上线，我去 ME 后台仔细检查后操作发送」。
 内容：授权表读写（批准、武装、撤销都由数据库定时间）；四个接口 /api/clients/[id]/triggered-send/{propose,authorize,revoke,status}，只认全局管理员；批准时核对 PM 看到的那一版、模板没改过、正式名单要彩排连续 5 天一致（试跑只发内部邮箱，不受这条）；授权事件发出后才生效；撤销永远能做；CRM 新页面 /crm/welcome-letter。
