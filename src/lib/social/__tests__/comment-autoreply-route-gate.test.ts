@@ -15,7 +15,9 @@ const routingHold = vi.hoisted(() => ({
 vi.mock('@/lib/supabase', () => ({ supabaseAdmin: { from: vi.fn() } }))
 vi.mock('@/lib/meta/page-sync-authorization', () => ({ authorizeConfiguredPage: vi.fn() }))
 vi.mock('@/lib/meta/token-manager', () => ({ getMetaTokenForClient: vi.fn() }))
-vi.mock('@/lib/meta/page-posts', () => ({ fetchPagePosts: vi.fn(), fetchPageReels: vi.fn() }))
+vi.mock('@/lib/meta/page-posts', () => ({ fetchPagePosts: vi.fn(), fetchPageReels: vi.fn(), fetchPostText: vi.fn() }))
+vi.mock('../comment-tour-draft', () => ({ draftTourAnswer: vi.fn() }))
+vi.mock('../weekly-loop/fact-aliases', () => ({ loadSocialFactSource: vi.fn() }))
 vi.mock('@/lib/meta/ads-posts', () => ({ fetchAdStoryIds: vi.fn() }))
 vi.mock('@/lib/meta/comments', () => ({
   fetchPostCommentsResult: vi.fn(),
@@ -32,7 +34,9 @@ vi.mock('../comment-routing', async (importOriginal) => {
 
 import { supabaseAdmin } from '@/lib/supabase'
 import { authorizeConfiguredPage } from '@/lib/meta/page-sync-authorization'
-import { fetchPagePosts, fetchPageReels } from '@/lib/meta/page-posts'
+import { fetchPagePosts, fetchPageReels, fetchPostText } from '@/lib/meta/page-posts'
+import { draftTourAnswer } from '../comment-tour-draft'
+import { loadSocialFactSource } from '../weekly-loop/fact-aliases'
 import { fetchPostCommentsResult, hideComment, replyToComment, sendPrivateReply } from '@/lib/meta/comments'
 import { classifyComment, type CommentDecision } from '../comment-classifier'
 import { routeComment, type CommentRoutingInput } from '../comment-routing'
@@ -181,6 +185,9 @@ beforeEach(() => {
   engagementUpdates.length = 0
   flywheelInserts.length = 0
   delete process.env.SOCIAL_COMMENT_AUTOREPLY_KILL
+  delete process.env.SOCIAL_COMMENT_TOUR_DRAFT_KILL
+  // Default: the client has no published catalog, so nothing is ever drafted.
+  vi.mocked(loadSocialFactSource).mockResolvedValue({ ok: false, reason: 'catalog_not_published' })
   vi.mocked(authorizeConfiguredPage).mockResolvedValue({ ok: true, pageToken: 'page-token', via: 'staff_verified' })
   vi.mocked(replyToComment).mockResolvedValue('reply-1')
   vi.mocked(sendPrivateReply).mockResolvedValue(true)
@@ -324,5 +331,90 @@ describe('comment auto-reply route gate', () => {
     expect(sendPrivateReply).toHaveBeenCalledWith('comment-1', 'private-template', 'page-token')
     expect(replyToComment).toHaveBeenCalledWith('comment-1', 'public-after-dm', 'page-token')
     expect(res).toMatchObject({ public_replies: 1, private_replies: 1, hidden: 0, failed: 0 })
+  })
+})
+
+describe('catalog-grounded draft for a question left to a person', () => {
+  const POST_TEXT = { text: 'Harbour Loop. 10 days with a guide.', title: 'Harbour Loop' }
+
+  function withCatalog(): void {
+    vi.mocked(loadSocialFactSource).mockResolvedValue({ ok: true, catalogVersion: 3, tours: [], aliasesByTourId: {} })
+    vi.mocked(fetchPostText).mockResolvedValue(POST_TEXT)
+  }
+
+  it('stores the draft on the pending row and writes nothing to Meta', async () => {
+    withCatalog()
+    vi.mocked(draftTourAnswer).mockResolvedValue({
+      ok: true, reply: 'Hi Sam, yes, a guide is included.', tourId: 't1', tourName: 'Harbour Loop', evidence: ['Included: guide'],
+    })
+    const res = await run('Are they guided?', wouldSend())
+    expect(replyToComment).not.toHaveBeenCalled()
+    expect(sendPrivateReply).not.toHaveBeenCalled()
+    expect(hideComment).not.toHaveBeenCalled()
+    expect(flywheelInserts).toEqual([])
+    expect(fetchPostText).toHaveBeenCalledWith(POST, 'page-token')
+    expect(draftTourAnswer).toHaveBeenCalledWith(expect.objectContaining({
+      commentText: 'Are they guided?', authorFirstName: 'Sam', post: POST_TEXT,
+    }))
+    expect(engagementUpdates).toEqual([
+      expect.objectContaining({
+        needs_human: true,
+        reply_status: 'pending',
+        public_reply_id: null,
+        public_reply_text: 'Hi Sam, yes, a guide is included.',
+        reply_source: 'catalog_draft',
+        guardrail_flags: ['not_greeting_or_faq', 'tour_draft', 'tour:Harbour Loop'],
+        private_reply_sent: false,
+      }),
+    ])
+    expect(res).toMatchObject({ public_replies: 0, private_replies: 0, needs_human: 1, drafts: 1 })
+  })
+
+  it('a price question is never drafted', async () => {
+    withCatalog()
+    const res = await run('What does it cost?', wouldSend())
+    expect(draftTourAnswer).not.toHaveBeenCalled()
+    expectNoMetaWrite()
+    expect(res).toMatchObject({ needs_human: 1, drafts: 0 })
+  })
+
+  it('no draft when the drafter declines', async () => {
+    withCatalog()
+    vi.mocked(draftTourAnswer).mockResolvedValue({ ok: false, skip: 'not_answerable' })
+    const res = await run('Is it suitable for slow walkers?', wouldSend())
+    expectNoMetaWrite()
+    expect(res).toMatchObject({ needs_human: 1, drafts: 0 })
+  })
+
+  it('no draft when the post text cannot be read', async () => {
+    withCatalog()
+    vi.mocked(fetchPostText).mockResolvedValue(null)
+    await run('Are they guided?', wouldSend())
+    expect(draftTourAnswer).not.toHaveBeenCalled()
+    expectNoMetaWrite()
+  })
+
+  it('a drafter throw leaves the comment to a person', async () => {
+    withCatalog()
+    vi.mocked(draftTourAnswer).mockRejectedValue(new Error('boom'))
+    const res = await run('Are they guided?', wouldSend())
+    expectNoMetaWrite()
+    expect(res).toMatchObject({ needs_human: 1, drafts: 0 })
+  })
+
+  it('the kill switch stops drafting without touching the catalog', async () => {
+    withCatalog()
+    process.env.SOCIAL_COMMENT_TOUR_DRAFT_KILL = '1'
+    await run('Are they guided?', wouldSend())
+    expect(loadSocialFactSource).not.toHaveBeenCalled()
+    expect(draftTourAnswer).not.toHaveBeenCalled()
+    expectNoMetaWrite()
+  })
+
+  it('only questions are drafted', async () => {
+    withCatalog()
+    await run('Where did I leave my hat?', wouldSend({ category: 'other' }))
+    expect(draftTourAnswer).not.toHaveBeenCalled()
+    expectNoMetaWrite()
   })
 })

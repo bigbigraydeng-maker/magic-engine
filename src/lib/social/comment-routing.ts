@@ -109,6 +109,8 @@ const PRICE_ASCII = [
   'pricing',
   'priced',
   'how much',
+  'cost',
+  'costs',
   'quotation',
   'quote',
   'fee',

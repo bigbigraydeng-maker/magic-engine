@@ -95,7 +95,14 @@ describe('routeComment', () => {
     expect(routeComment({ category: 'question', comment_text: "What's the exact agenda please" }).intent).toBe(
       'faq_itinerary',
     )
-    expect(routeComment({ category: 'question', comment_text: 'All inclusive cost please?' }).route).toBe('human')
+  })
+
+  it('问 cost 算问价，交给人', () => {
+    expect(routeComment({ category: 'question', comment_text: 'All inclusive cost please?' })).toMatchObject({
+      route: 'human', intent: 'price', guide_to_dm: true,
+    })
+    expect(routeComment({ category: 'question', comment_text: 'What does it cost?' }).intent).toBe('price')
+    expect(routeComment({ category: 'other', comment_text: 'We went to the Gold Coast' }).intent).toBe('unknown')
   })
 
   it('空文本、纯表情、判不出 → human', () => {

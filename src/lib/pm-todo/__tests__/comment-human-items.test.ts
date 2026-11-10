@@ -79,6 +79,27 @@ describe('buildCommentHumanTodos', () => {
   })
 })
 
+describe('已起好草稿的评论', () => {
+  it('how 里说明有几条草稿、怎么发', () => {
+    const items = buildCommentHumanTodos(
+      [
+        row({ comment_text: 'Are they guided?', reply_source: 'catalog_draft' }),
+        row({ comment_text: 'Is airfare in it?', reply_source: 'catalog_draft' }),
+        row({ comment_text: 'Something else entirely', reply_source: 'none' }),
+      ],
+      active,
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].what).toContain('3 条')
+    expect(items[0].how).toContain('其中 2 条已按团目录起好回复草稿')
+    expect(items[0].how).toContain('发到 Facebook')
+  })
+
+  it('没有草稿时不提草稿', () => {
+    expect(buildCommentHumanTodos([row({ comment_text: 'Something else entirely' })], active)[0].how).not.toContain('草稿')
+  })
+})
+
 describe('commentHumanTodoTextLooksSafe', () => {
   it('模板文案默认通过', () => {
     const items = buildCommentHumanTodos([row()], active)
