@@ -4,7 +4,7 @@ title: 预算卡和暂停卡真正改完后，按同一个广告组、同一段�
 status: done
 owner: agent
 decided_on: 2026-11-09
-source: session:9c129e32
+source: doc:docs/ledger/2026-11-08-ads-executed-window-review.md
 verify_by: 2026-11-18
 verify_how: 等一张已执行的预算卡或暂停卡过了自己的观察天数，打开那条执行记录，能看到做了什么、为什么、前后结果、以及变好了、变差了或判不了和原因。保存失败的那一轮会在自动任务的报错里出现，下一轮会再试，不能只留在日志里。
 done_on: 2026-11-09
