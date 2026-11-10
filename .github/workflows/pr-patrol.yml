@@ -18,6 +18,7 @@ on:
         default: true
 
 permissions:
+  contents: read
   pull-requests: read
   checks: read
   issues: write # only to edit this patrol's own comment on the tracking issue
