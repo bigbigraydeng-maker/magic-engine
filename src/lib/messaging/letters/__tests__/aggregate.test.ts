@@ -275,6 +275,19 @@ describe('buildList', () => {
       expect(phaseOf(sent, rowsOf('blocked'))).toBe('sent')
     })
 
+    it('a batch where the rules skipped everyone in every letter is not sent: nobody got anything, so the card must not say it went out', () => {
+      expect(phaseOf(rowsOf('blocked'), rowsOf('blocked'))).toBe('not_sent')
+      // one letter only: the same
+      const single = buildList([plan[1]], new Map([['k1', rowsOf('blocked')]]), '2026-12-02', 'now')
+      expect(single.nextBatch).toMatchObject({ letterCount: 1, phase: 'not_sent' })
+      // a mix of "skipped by the rules" and "failed" is not sent either (the failed one is also worth an alarm)
+      expect(phaseOf(rowsOf('blocked'), rowsOf('failed'))).toBe('not_sent')
+    })
+
+    it('a batch where one letter went out and the rest were skipped by the rules still counts as sent', () => {
+      expect(phaseOf(rowsOf('blocked'), sent)).toBe('sent')
+    })
+
     it('released but nothing recorded counts as an error once the send day has passed, not before', () => {
       const released: LetterFacts = { registry: null, sends: sends({ proposalApproved: true }) }
       expect(phaseOf(sent, released)).toBe('draft') // the send day itself

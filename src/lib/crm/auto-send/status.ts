@@ -70,7 +70,7 @@ const NEXT_BATCH_SENTENCES: Readonly<Record<LetterStatus, string>> = {
   draft: '现在是草稿，发出前会请你看稿并点头',
   awaiting_release: '已经提交，等你点头才会发',
   sent: '已经发出',
-  not_sent: '这一批一封都没送到客人手里，要去看一下原因',
+  not_sent: '这一批里有信没送到客人手里，要去看一下原因',
   unknown: '这一批有结果不明的，信可能已经送到，先别重发',
   planned: '排期有了，信还没写',
   not_enabled: '这类信的自动发送还没开通',

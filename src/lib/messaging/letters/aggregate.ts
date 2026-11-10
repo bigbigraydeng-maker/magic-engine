@@ -174,11 +174,17 @@ export function buildLetterRow(planned: PlannedLetter, facts: LetterFacts | null
   }
 }
 
-/** 这一批（同一发信日）整体处在哪一步；有结果不明的最先提醒（别重发），其次是没发出去的。 */
+/**
+ * 这一批（同一发信日）整体处在哪一步；有结果不明的最先提醒（别重发），其次是没发出去的。
+ * 整批都走完了（每封不是已发就是没发出去）：至少一封有人收到才算「已发出」（有一封全被规则跳过也不影响）；
+ * 一封都没送到客人手里（比如所有人都被退订 / 别再联系 / 本周已收满挡住）就是「没发出去」，不能说成已发出。
+ */
 function batchPhase(rows: readonly LetterRow[]): LetterStatus {
   if (rows.some((r) => r.status === 'unknown')) return 'unknown'
   if (rows.some(needsAttention)) return 'not_sent'
-  if (rows.every((r) => r.status === 'sent' || r.status === 'not_sent')) return 'sent'
+  if (rows.every((r) => r.status === 'sent' || r.status === 'not_sent')) {
+    return rows.some((r) => r.status === 'sent') ? 'sent' : 'not_sent'
+  }
   if (rows.some((r) => r.status === 'awaiting_release')) return 'awaiting_release'
   return 'draft'
 }
