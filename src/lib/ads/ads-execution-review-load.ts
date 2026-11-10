@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchLatestOutcomesByAction } from '@/lib/flywheel/execution-outcomes'
 import { ADS_ACTION_TYPE } from '@/lib/flywheel/vocabulary'
 import {
   buildAdsExecutionReviewPanel,
@@ -16,10 +17,6 @@ function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
-}
-
-function num(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 export async function loadAdsExecutionReviewPanel(
@@ -50,42 +47,21 @@ export async function loadAdsExecutionReviewPanel(
   }
 
   const actionIds = (actions ?? []).map((row) => row.id).filter((id): id is string => typeof id === 'string')
-  const outcomeByAction = new Map<string, { baseline: number | null; after: number | null }>()
-
-  if (actionIds.length > 0) {
-    const { data: outcomes, error: outcomeError } = await supabase
-      .from('flywheel_outcomes')
-      .select('action_id, baseline, after_value')
-      .in('action_id', actionIds)
-
-    if (outcomeError) {
-      throw new Error(`loadAdsExecutionReviewPanel: flywheel_outcomes — ${outcomeError.message}`)
-    }
-
-    for (const row of outcomes ?? []) {
-      if (typeof row.action_id !== 'string') continue
-      const baseline = num(row.baseline)
-      const after = num(row.after_value)
-      const prev = outcomeByAction.get(row.action_id)
-      if (!prev) {
-        outcomeByAction.set(row.action_id, { baseline, after })
-      }
-    }
-  }
+  const outcomeByAction = await fetchLatestOutcomesByAction(actionIds)
 
   const rows: RawExecutionRow[] = (actions ?? []).flatMap((row) => {
     if (typeof row.id !== 'string') return []
     const payload = record(row.payload)
     const executed_at = typeof row.executed_at === 'string' ? row.executed_at : null
     const action_type = typeof row.action_type === 'string' ? row.action_type : null
-    const outcome = outcomeByAction.get(row.id)
+    const outcome = outcomeByAction[row.id]
     return [{
       id: row.id,
       action_type,
       executed_at,
       payload,
       outcome_baseline: outcome?.baseline ?? null,
-      outcome_after: outcome?.after ?? null,
+      outcome_after: outcome?.after_value ?? null,
     }]
   })
 
