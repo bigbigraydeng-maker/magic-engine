@@ -20,6 +20,7 @@ import ScorecardSection from './scorecard-section'
 import QualifiedPanel from './qualified-panel'
 import type { GrowthStateView } from './growth-panel'
 import { goalLiveNote } from './growth-panel'
+import { AdsExecutionReviewPanel } from './ads-execution-review-panel'
 
 type Verdict = 'healthy' | 'watch' | 'alert' | 'insufficient_history' | 'paused'
 
@@ -235,6 +236,10 @@ export function AdsHealthTodayTab(props: TodayTabProps) {
         <p className="mt-1 text-xs text-me-charcoal/55">在你点确认之前，预算和投放都不会改。</p>
         <HeldCards clientId={clientId} refreshKey={refreshKey} hideWhenEmpty />
       </section>
+
+      <div className="mb-6">
+        <AdsExecutionReviewPanel clientId={clientId} />
+      </div>
 
       <AdsNextStepCard clientId={clientId} refreshKey={refreshKey} />
 
