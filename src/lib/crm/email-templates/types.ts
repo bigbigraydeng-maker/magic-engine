@@ -22,6 +22,8 @@ export interface EmailTemplateVersion {
   pickFilter: PickFilter
   status: TemplateStatus
   changeNote: string | null
+  /** Colleague-facing note. Missing on older callers means "not set". */
+  whenToUse?: string | null
   createdBy: string
   createdAt: string
 }
@@ -38,6 +40,8 @@ export interface NewTemplateVersionInput {
   pickFilter: PickFilter
   status: TemplateStatus
   changeNote?: string | null
+  /** Omitted or blank is stored as null. */
+  whenToUse?: string | null
   createdBy: string
 }
 

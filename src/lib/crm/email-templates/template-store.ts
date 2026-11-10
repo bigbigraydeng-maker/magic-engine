@@ -9,6 +9,7 @@ import {
   type PickMode,
   type TemplateStatus,
 } from './types'
+import { normalizeWhenToUse } from './when-to-use'
 
 export const TEMPLATE_KEY_RE = /^[a-z0-9][a-z0-9-]{1,62}$/
 
@@ -89,6 +90,8 @@ export function mapTemplateRow(row: unknown): EmailTemplateVersion | null {
     return null
   }
   if (row.change_note !== null && typeof row.change_note !== 'string') return null
+  const whenToUse = readStoredWhenToUse(row.when_to_use)
+  if (whenToUse === undefined) return null
   return {
     id: row.id,
     clientId: row.client_id,
@@ -102,9 +105,18 @@ export function mapTemplateRow(row: unknown): EmailTemplateVersion | null {
     pickFilter,
     status: row.status,
     changeNote: row.change_note ?? null,
+    whenToUse,
     createdBy: row.created_by,
     createdAt: row.created_at,
   }
+}
+
+/** Missing or blank stays null so rows written before the column existed still load. A non-string does not. */
+function readStoredWhenToUse(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed === '' ? null : trimmed
 }
 
 function mapRowsOrThrow(rows: unknown): EmailTemplateVersion[] {
@@ -208,6 +220,7 @@ export function validateNewTemplateInput(input: NewTemplateVersionInput): string
   if (bodyError !== null) return bodyError
   const noteError = validateChangeNote(input.changeNote)
   if (noteError !== null) return noteError
+  if (!normalizeWhenToUse(input.whenToUse).ok) return '「什么时候用」需为不超过 200 个字的文字'
   const createdByError = validateCreatedBy(input.createdBy)
   if (createdByError !== null) return createdByError
   if (!isFactSource(input.factSource)) return '事实来源无效'
@@ -314,8 +327,14 @@ function buildInsertRow(input: NewTemplateVersionInput, version: number): Record
     pick_filter: toPickFilterJson(input.pickFilter),
     status: input.status,
     change_note: input.changeNote ?? null,
+    when_to_use: storedWhenToUse(input.whenToUse),
     created_by: input.createdBy,
   }
+}
+
+function storedWhenToUse(value: string | null | undefined): string | null {
+  const normalized = normalizeWhenToUse(value)
+  return normalized.ok ? normalized.value : null
 }
 
 function resolveNextVersion(

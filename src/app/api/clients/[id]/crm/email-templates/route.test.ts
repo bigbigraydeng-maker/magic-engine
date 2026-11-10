@@ -143,6 +143,16 @@ describe('POST email-templates', () => {
     )
   })
 
+  it('trims the optional when-to-use note onto the saved version', async () => {
+    vi.mocked(appendTemplateVersion).mockResolvedValue({ ok: true, value: { version: 1 } as never })
+    const res = await post({ ...goodBody, whenToUse: '  打完电话 24 小时内  ' })
+    expect(res.status).toBe(201)
+    expect(appendTemplateVersion).toHaveBeenCalledWith(
+      { marker: 'db' },
+      expect.objectContaining({ whenToUse: '打完电话 24 小时内', templateKey: 'post-call-single-tour' }),
+    )
+  })
+
   it('works before any settings exist, with a notice that the red lines were not checked', async () => {
     vi.mocked(loadEmailSettings).mockResolvedValue({ kind: 'none' })
     vi.mocked(appendTemplateVersion).mockResolvedValue({ ok: true, value: {} as never })
