@@ -4,7 +4,7 @@ title: 社媒 R-2：发后读数缺口进今日待办（过点没回执 / 读不
 status: done
 owner: agent
 decided_on: 2026-11-10
-source: doc:uploads/readback-gap-2026-11-03.md
+source: doc:docs/specs/2026-10-29-social-wp1-readback-implementation-brief-v2.md
 verify_by: 2026-11-12
 verify_how: 本地跑 pushSocialPostReadbackGapItems 单测；有 staging 客户数据时打开今日待办邮件或 dev-debt，应出现过点没回执或 Story 不支持类条目；未到点的不会出。不加 cron、不写库。
 done_on: 2026-11-10
