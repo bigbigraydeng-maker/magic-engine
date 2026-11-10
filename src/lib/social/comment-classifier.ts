@@ -47,7 +47,8 @@ export interface CommentDecision {
   shouldHide: boolean
   needsHuman: boolean
   guardrailFlags: string[]
-  replySource: 'llm' | 'fallback' | 'none'
+  /** 'catalog_draft' = a catalog-grounded draft stored for a person to send; never auto-sent. */
+  replySource: 'llm' | 'fallback' | 'none' | 'catalog_draft'
 }
 
 interface LlmClassification {
