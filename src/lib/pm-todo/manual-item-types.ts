@@ -47,7 +47,6 @@ import type {
   AdsAgentDailyPullGapItemKind,
   AdsAgentSyncStaleItemKind,
   AdsDailySpendOverCapNoticeItemKind,
-  AdsHeartbeatStallItemKind,
   AdsPlanDailyCapMissingItemKind,
 } from './ads-agent-stale-items'
 import type { AdsPlanDeliveryStageMissingItemKind } from './ads-plan-delivery-stage-items'
@@ -342,7 +341,6 @@ export type ManualItemKind =
   | AdsAgentSyncStaleItemKind
   | AdsAgentDailyPullGapItemKind
   | AdsDailySpendOverCapNoticeItemKind
-  | AdsHeartbeatStallItemKind
   | AdsPlanDailyCapMissingItemKind
   | AdsPlanDeliveryStageMissingItemKind
   | AdsCircuitBreakerPauseKind
