@@ -223,6 +223,19 @@ describe('the production facts behind it', () => {
     expect(summarizeRehearsal(input({ rows: consistentRows('2026-11-15', '2026-11-19'), partialDays: new Set(['2026-11-18']) })).consecutiveDays).toBe(1)
   })
 
+  it('🔴 yesterday that this morning\'s real sweeps set aside entirely (so no rows) is "not finished": a break, never "not yet"', () => {
+    // NZ 11-20 09:00 and 11:00: both real sweeps set everyone aside (say the salespeople's mailboxes could not be read).
+    const facts = receiptFacts([receipt('2026-11-19T20:01:00Z', { deferred: 3 }), receipt('2026-11-19T22:01:00Z', { deferred: 3 })], P1_EARLY, 'Pacific/Auckland')
+    expect([...facts.partialDays]).toEqual(['2026-11-19'])
+    const e = summarizeRehearsal(input({ rows: consistentRows('2026-11-14', '2026-11-18'), partialDays: facts.partialDays }))
+    expect(e.calendar.at(-1)).toMatchObject({ day: '2026-11-19', kind: 'partial', stats: null })
+    expect(e).toMatchObject({ consecutiveDays: 0, runFrom: null })
+    // An older day with no rows that a sweep set aside is "not finished" too (it broke the run before as well).
+    const older = summarizeRehearsal(input({ rows: [...consistentRows('2026-11-14', '2026-11-16'), ...consistentRows('2026-11-18', '2026-11-19')], partialDays: new Set(['2026-11-17']) }))
+    expect(older.calendar.find((d) => d.day === '2026-11-17')?.kind).toBe('partial')
+    expect(older.consecutiveDays).toBe(2)
+  })
+
   it('the run-log job name is the sweep function\'s own (a rename would silently hide every receipt)', () => {
     expect(REHEARSAL_SWEEP_JOB).toBe(TRIGGERED_SEND_SWEEP_JOB)
   })

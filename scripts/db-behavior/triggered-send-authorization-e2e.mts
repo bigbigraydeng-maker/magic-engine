@@ -244,6 +244,32 @@ await supabaseAdmin.from('cron_run_logs').insert({ ...receiptFor(dayBefore(1), f
 st = await statusH()
 check('H4 a day whose latest real sweep set people aside is only partly compared: the run breaks there', st.proposal?.rehearsal?.calendar?.find((d: { day: string }) => d.day === dayBefore(2))?.kind === 'partial' && st.proposal?.rehearsal?.consecutiveDays === 1, { days: st.proposal?.rehearsal?.consecutiveDays })
 
+// ── I. this morning's real sweeps set ALL of yesterday's leads aside (so yesterday has no rows): "not finished", a break ──
+const CLIENT_I = crypto.randomUUID()
+{
+  const c = await supabaseAdmin.from('clients').insert({ id: CLIENT_I, name: 'E2E authorization client I' })
+  const t = await supabaseAdmin.from('crm_email_templates').insert({ client_id: CLIENT_I, template_key: 'auto-welcome', version: 1, name: 'Welcome', subject: 'Welcome, {{ first_name }}', body: 'Hi {{first_name}},\nThanks for your enquiry.', fact_source: 'none', pick_mode: 'none', pick_filter: {}, status: 'active', created_by: 'fde@example.test' })
+  if (c.error || t.error) throw new Error(`seed I failed: ${c.error?.code ?? ''} ${t.error?.code ?? ''}`)
+}
+const statusI = async () => (await statusQuery(deps(), CLIENT_I, { canAuthorize: true })).body as Record<string, any>
+const pI = crypto.randomUUID()
+const insI = await supabaseAdmin.from('triggered_send_authorizations').insert({ id: pI, request_id: crypto.randomUUID(), client_id: CLIENT_I, trigger_key: 'welcome', channel: 'email', account: 'cts', rule: rH, rule_sha256: ruleSha256(rH), template_version: 1, template_sha256: String(p1row.template_sha256), daily_cap: 5, proposed_by_email: 'pm@example.test', proposed_at: `${dayBefore(10)}T00:00:00+13:00` })
+const iRows = []
+for (const d of [2, 3, 4, 5, 6]) {
+  for (let i = 0; i < 2; i += 1) {
+    iRows.push({ client_id: CLIENT_I, trigger_key: 'welcome', channel: 'email', contact_id: crypto.randomUUID(), dedupe_scope: 'shadow', status: 'shadow', authorization_id: pI, annotations: { gate_contract_version: 1, lead_local_day: dayBefore(d), would_send: true, legacy_welcomed: true, legacy_batch_seen: true, legacy_campaign_ids: [] } })
+  }
+}
+const iSeed = await supabaseAdmin.from('triggered_sends').insert(iRows)
+st = await statusI()
+const yesterdayKind = (s: Record<string, any>) => s.proposal?.rehearsal?.calendar?.find((d: { day: string }) => d.day === dayBefore(1))?.kind
+check('I0 before this morning\'s sweep has run, yesterday is "not yet" and the five days before it count', insI.error === null && iSeed.error === null && yesterdayKind(st) === 'not_yet' && st.proposal?.rehearsal?.consecutiveDays === 5, { kind: yesterdayKind(st), days: st.proposal?.rehearsal?.consecutiveDays })
+// Both of this morning's real sweeps (09:00 and 11:00) set every one of yesterday's leads aside: no rows are written.
+const setAsideAll = (time: string) => ({ job_name: 'triggered-send-welcome-sweep', status: 'completed', started_at: `${nzToday}T${time}:00+13:00`, summary: { status: 'swept', client_id: CLIENT_I, authorization_id: pI, to_decide: 2, deferred: 2, legacy_batches: [], dry_run: false } })
+await supabaseAdmin.from('cron_run_logs').insert([setAsideAll('09:00'), setAsideAll('11:00')])
+st = await statusI()
+check('I1 then yesterday is "not finished" and breaks the run (0 days), so the real list cannot be authorized', yesterdayKind(st) === 'partial' && st.proposal?.rehearsal?.consecutiveDays === 0 && st.proposal?.problem === 'REHEARSAL_NOT_READY', { kind: yesterdayKind(st), days: st.proposal?.rehearsal?.consecutiveDays, problem: st.proposal?.problem })
+
 console.log(`\n${passed} passed, ${failures.length} failed`)
 if (failures.length > 0) {
   for (const f of failures) console.log(`  - ${f}`)

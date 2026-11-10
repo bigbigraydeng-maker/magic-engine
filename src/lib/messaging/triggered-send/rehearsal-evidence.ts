@@ -129,10 +129,10 @@ function dayKind(day: string, input: RehearsalInput, byDay: ReadonlyMap<string, 
   if (input.otherRuleDays.has(day)) return 'other_rule'
   if (input.switchDays.has(day)) return 'switch_day'
   const stats = byDay.get(day)
-  if (stats !== undefined) {
-    if (!isConsistentDay(stats)) return 'inconsistent'
-    return input.partialDays.has(day) ? 'partial' : 'consistent'
-  }
+  if (stats !== undefined && !isConsistentDay(stats)) return 'inconsistent'
+  // Rows or not: a sweep that set everyone aside wrote none, and that day must break the run, never pass as "not yet".
+  if (input.partialDays.has(day)) return 'partial'
+  if (stats !== undefined) return 'consistent'
   return input.noLeadDays.has(day) ? 'no_leads' : 'not_compared'
 }
 
