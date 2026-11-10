@@ -356,7 +356,7 @@ export function parseSendRule(input: unknown): { ok: true; rule: SendableRule } 
   const parsed = parseRule(input)
   if (!parsed.ok) return parsed
   const { send } = parsed.rule
-  if (send === undefined) return fail('send is required for a rule that may be authorized')
+  if (send === undefined) return { ok: false, error: 'send is required for a rule that may be authorized' }
   return { ok: true, rule: { ...parsed.rule, send } }
 }
 

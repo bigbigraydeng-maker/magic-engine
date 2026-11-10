@@ -1,0 +1,157 @@
+'use client'
+
+/**
+ * 「欢迎信自动发送」：PM 在这一页看清楚再操作——
+ *  ① 现在生效的授权（状态、规则大白话、有效期；「撤销」= 紧急刹车）
+ *  ② 待批的提案（规则大白话、信长什么样、彩排连续几天一致、为什么还不能批；「授权」先预览再确认）
+ *  ③ 真发前要准备好的东西（只显示有没有，不显示任何密钥）
+ *  ④ 高级：提交新提案
+ * 只有全局管理员能看能点；别人看到一句「只有管理员能看」。这一页本身不发信。
+ */
+import { useCallback, useEffect, useState } from 'react'
+import { MeButton, MePill } from '@/components/ui/me-primitives'
+import { fetchStatus } from './api'
+import { AuthorizeBox } from './AuthorizeBox'
+import { ProposeBox } from './ProposeBox'
+import { RehearsalTable } from './RehearsalTable'
+import { RevokeButton } from './RevokeButton'
+import {
+  errorText,
+  nzTime,
+  problemText,
+  stateText,
+  warningText,
+  type AuthorizationView,
+  type ProposalView,
+  type StatusPayload,
+  type TemplateViewData,
+} from './welcome-letter-text'
+
+function Section({ title, children, testId }: { title: string; children: React.ReactNode; testId?: string }): JSX.Element {
+  return (
+    <section className="mb-4 rounded-xl border border-me-charcoal/10 bg-me-ivory/40 p-3" data-testid={testId}>
+      <h2 className="mb-2 text-[13px] font-black text-me-charcoal/70">{title}</h2>
+      {children}
+    </section>
+  )
+}
+
+function Summary({ lines }: { lines: string[] | null }): JSX.Element {
+  if (lines === null) return <p className="text-sm text-[#C2453A]">规则读不懂。</p>
+  return (
+    <ul className="list-disc space-y-1 pl-5 text-sm text-me-charcoal">
+      {lines.map((l) => <li key={l}>{l}</li>)}
+    </ul>
+  )
+}
+
+function Letter({ template }: { template: TemplateViewData }): JSX.Element {
+  if (template.subject === null || template.body === null) return <p className="text-sm text-[#C2453A]">读不到模板「{template.key}」。</p>
+  return (
+    <div className="mt-2 border-l-2 border-me-charcoal/25 pl-3 py-1 text-sm" data-testid="letter">
+      <p className="text-xs text-me-charcoal/60">模板「{template.key}」第 {template.version} 版{template.check === 'ok' ? '' : '（不能自动发）'}</p>
+      <p className="mt-1 font-semibold">{template.subject}</p>
+      <pre className="mt-1 whitespace-pre-wrap font-sans text-me-charcoal/90">{template.body}</pre>
+      <p className="mt-1 text-xs text-me-charcoal/60">{'{{first_name}}'} 发的时候换成客人的名字。</p>
+    </div>
+  )
+}
+
+function AuthorizationSection({ clientId, auth, onDone }: { clientId: string; auth: AuthorizationView | null; onDone: () => void }): JSX.Element {
+  if (auth === null) return <Section title="① 现在生效的授权" testId="authorization"><p className="text-sm text-me-charcoal/70">还没有生效的授权：不会自动发欢迎信。</p></Section>
+  const r = auth.record
+  return (
+    <Section title="① 现在生效的授权" testId="authorization">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <MePill tone={auth.state === 'active' ? 'track' : 'rej'}>{stateText(auth.state)}</MePill>
+        {auth.trial && <MePill tone="sched">试跑</MePill>}
+      </div>
+      <p className="mb-2 text-xs text-me-charcoal/60">
+        {r.authorized_by_email ?? '—'} 在 {nzTime(r.authorized_at)} 批准；{nzTime(r.live_from)} 之后进来的新客人才会收到；有效到 {nzTime(r.expires_at)}。
+      </p>
+      <Summary lines={auth.summary} />
+      <div className="mt-3"><RevokeButton clientId={clientId} id={r.id} label="撤销授权" onDone={onDone} /></div>
+    </Section>
+  )
+}
+
+function ProposalSection({ clientId, proposal, onDone }: { clientId: string; proposal: ProposalView | null; onDone: () => void }): JSX.Element {
+  if (proposal === null) return <Section title="② 待批的提案" testId="proposal"><p className="text-sm text-me-charcoal/70">现在没有待批的提案。</p></Section>
+  const r = proposal.record
+  return (
+    <Section title="② 待批的提案" testId="proposal">
+      <p className="mb-2 text-xs text-me-charcoal/60">{r.proposed_by_email} 在 {nzTime(r.proposed_at)} 提交。提案不是授权，提交了也不会发信。</p>
+      <Summary lines={proposal.summary} />
+      {proposal.template !== null && <Letter template={proposal.template} />}
+      <div className="mt-3">
+        {proposal.rehearsal !== null ? <RehearsalTable clientId={clientId} evidence={proposal.rehearsal} /> : <p className="text-sm text-me-charcoal/70">暂时读不到彩排对照。</p>}
+      </div>
+      {proposal.warnings.map((w) => <p key={w} className="mt-2 text-sm font-semibold text-[#C2453A]">{warningText(w)}</p>)}
+      {proposal.problem !== null ? (
+        <p className="mt-3 rounded-lg bg-[rgba(194,69,58,.08)] p-2 text-sm text-[#C2453A]" data-testid="proposal-problem">{problemText(proposal.problem)}</p>
+      ) : (
+        <AuthorizeBox clientId={clientId} proposal={proposal} onDone={onDone} />
+      )}
+      <div className="mt-3"><RevokeButton clientId={clientId} id={r.id} label="撤下提案" onDone={onDone} /></div>
+    </Section>
+  )
+}
+
+function Prerequisites({ data, mode }: { data: StatusPayload['prerequisites']; mode: StatusPayload['mode'] }): JSX.Element {
+  const row = (ok: boolean, text: string) => (
+    <li key={text} className="flex items-start gap-2 text-sm">
+      <span className={ok ? 'text-[#3F6B33]' : 'text-[#C2453A]'}>{ok ? '✓' : '✗'}</span>
+      <span>{text}</span>
+    </li>
+  )
+  return (
+    <Section title="③ 真发之前要准备好的" testId="prerequisites">
+      <ul className="space-y-1">
+        {row(mode === 'live', mode === 'live' ? '真发开关：已打开（Render 上两个开关都开着）' : '真发开关：关着，只演练、不会真发（要你在 Render 打开两个开关并重新部署）')}
+        {data != null && row(data.account_key, `发信账号「${data.account}」的钥匙已放进 Render`)}
+        {data != null && row(data.unsubscribe_secret, '一键退订链接的签名密钥已放进 Render')}
+        {data != null && row(data.receipts_webhook, '发信回执通道已接上（这个账号的回执能收进来）')}
+      </ul>
+      <p className="mt-2 text-xs text-me-charcoal/60">这里只显示有没有，不显示任何密钥。</p>
+    </Section>
+  )
+}
+
+export function WelcomeLetterPanel({ clientId }: { clientId: string }): JSX.Element {
+  const [status, setStatus] = useState<StatusPayload | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setStatus(await fetchStatus(clientId).catch(() => ({ success: false, error: 'INTERNAL_ERROR' })))
+    setLoading(false)
+  }, [clientId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const header = (
+    <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h1 className="font-display text-lg font-semibold">欢迎信自动发送</h1>
+        <p className="text-xs text-me-charcoal/60">新客人留资后第二天早上自动发一封欢迎信。看清楚再授权；撤销从下一封起生效。</p>
+      </div>
+      <MeButton variant="ghost" size="sm" disabled={loading} onClick={() => void load()}>刷新</MeButton>
+    </div>
+  )
+
+  if (status === null) return <main className="p-4">{header}<p className="text-sm text-me-charcoal/60">正在读取…</p></main>
+  if (!status.success) return <main className="p-4">{header}<p className="text-sm font-semibold text-[#C2453A]">{errorText(status)}</p></main>
+  if (status.can_manage !== true) return <main className="p-4">{header}<p className="text-sm text-me-charcoal/70">只有管理员能看这一页。</p></main>
+
+  return (
+    <main className="p-4" data-testid="welcome-letter-panel">
+      {header}
+      <AuthorizationSection clientId={clientId} auth={status.authorization ?? null} onDone={() => void load()} />
+      <ProposalSection clientId={clientId} proposal={status.proposal ?? null} onDone={() => void load()} />
+      <Prerequisites data={status.prerequisites ?? null} mode={status.mode} />
+      <ProposeBox clientId={clientId} onDone={() => void load()} />
+    </main>
+  )
+}
