@@ -10,6 +10,8 @@ import { runDailyPlanPublish } from './daily-plan-publish-runner'
 import { getActiveAuthorization } from './daily-plan-auto-publish-store'
 import { claimAttempt, finishAttempt, listAttempts, listLiveAuthorizations } from './daily-plan-auto-publish-worker-store'
 import { readAutoPublishSwitches } from './daily-plan-auto-publish-decide'
+import { readPublishLive } from '@/lib/social/publish-gate/read-live'
+import { writePublishDispatchReceipt } from '@/lib/social/publish-gate/receipt'
 import type { AutoPublishWorkerDeps, PlanState, ScopeState } from './daily-plan-auto-publish-worker'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,5 +124,7 @@ export function buildProductionDeps(now: Date, env: NodeJS.ProcessEnv = process.
     emit: async event => {
       await sendInngestEvent(event)
     },
+    clientPublishLive: (clientId) => readPublishLive(supabaseAdmin, clientId, 'image_post'),
+    recordDispatch: (receipt) => writePublishDispatchReceipt(supabaseAdmin, receipt),
   }
 }

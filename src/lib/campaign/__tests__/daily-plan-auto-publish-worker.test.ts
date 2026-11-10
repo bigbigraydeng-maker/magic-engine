@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { runAutoPublishSweep, type AutoPublishWorkerDeps, type PlanState, type RunPublishInput } from '../daily-plan-auto-publish-worker'
+import type { PublishDispatchReceipt } from '@/lib/social/publish-gate/receipt'
 import type { AutoPublishAuthorization } from '../daily-plan-auto-publish'
 import type { AttemptRecord } from '../daily-plan-auto-publish-worker-store'
 
@@ -146,6 +147,76 @@ describe('runAutoPublishSweep — practice mode never sends or writes', () => {
     const summary = await runAutoPublishSweep(deps)
     expect(summary.records.every(r => r.mode === 'practice')).toBe(true)
     expect(claimAttempt).not.toHaveBeenCalled()
+  })
+})
+
+describe('runAutoPublishSweep — per-client switch', () => {
+  it('client flag off rehearses and records the slot, and never sends', async () => {
+    const receipts: PublishDispatchReceipt[] = []
+    const { deps, runPublish, claimAttempt } = build()
+    deps.clientPublishLive = async () => false
+    deps.recordDispatch = async (receipt) => { receipts.push(receipt) }
+    const summary = await runAutoPublishSweep(deps)
+
+    expect(resultsOf(summary)).toEqual([`${TODAY}:would_publish`, `${TOMORROW}:would_publish`])
+    expect(claimAttempt).not.toHaveBeenCalled()
+    expect(runPublish.mock.calls.every((c) => c[0].command.no_publish === true)).toBe(true)
+    expect(receipts).toHaveLength(2)
+    for (const receipt of receipts) {
+      expect(receipt).toMatchObject({
+        kind: 'image_post',
+        mode: 'dry_run',
+        postId: null,
+        calledPublishApi: false,
+        reason: 'client_switch_off',
+      })
+      expect(receipt.publishedAt).toEqual(expect.any(String))
+    }
+  })
+
+  it('env switch off records env_switch_off and does not call a live publish', async () => {
+    const receipts: PublishDispatchReceipt[] = []
+    const { deps, runPublish } = build({ live: false })
+    deps.recordDispatch = async (receipt) => { receipts.push(receipt) }
+    await runAutoPublishSweep(deps)
+    expect(runPublish.mock.calls.every((c) => c[0].command.no_publish === true)).toBe(true)
+    expect(receipts.every((r) => r.mode === 'dry_run' && r.reason === 'env_switch_off' && r.calledPublishApi === false)).toBe(true)
+  })
+
+  it('a gate refusal while the switch is off is a failed receipt, not a silent skip', async () => {
+    const receipts: PublishDispatchReceipt[] = []
+    const { deps, runPublish } = build({
+      live: false,
+      runPublish: async () => ({ status: 409, body: { error: 'PRICE_CLAIM_UNBACKED' } }),
+    })
+    deps.recordDispatch = async (receipt) => { receipts.push(receipt) }
+    const summary = await runAutoPublishSweep(deps)
+    expect(resultsOf(summary)).toEqual([`${TODAY}:blocked(PRICE_CLAIM_UNBACKED)`, `${TOMORROW}:blocked(PRICE_CLAIM_UNBACKED)`])
+    expect(runPublish.mock.calls.every((c) => c[0].command.no_publish === true)).toBe(true)
+    expect(receipts.every((r) => r.mode === 'failed' && r.calledPublishApi === false && r.reason === 'PRICE_CLAIM_UNBACKED')).toBe(true)
+  })
+
+  it('a receipt writer that throws is noted on the sweep and does not abort the run', async () => {
+    const { deps } = build({ live: false })
+    deps.recordDispatch = async () => { throw new Error('disk full') }
+    const summary = await runAutoPublishSweep(deps)
+    expect(resultsOf(summary).some((row) => row.includes('receipt_write_failed'))).toBe(true)
+  })
+
+  it('both switches on record the post id and the scheduled time', async () => {
+    const receipts: PublishDispatchReceipt[] = []
+    const { deps, runPublish } = build()
+    deps.clientPublishLive = async () => true
+    deps.recordDispatch = async (receipt) => { receipts.push(receipt) }
+    await runAutoPublishSweep(deps)
+    const live = runPublish.mock.calls.filter((c) => c[0].command.no_publish === false)
+    expect(live).toHaveLength(2)
+    expect(receipts.map((r) => r.mode)).toEqual(['registered', 'registered'])
+    expect(receipts[0]).toMatchObject({
+      postId: `post-${TODAY}`,
+      publishedAt: '2026-10-13T19:00:00.000Z',
+      calledPublishApi: true,
+    })
   })
 })
 

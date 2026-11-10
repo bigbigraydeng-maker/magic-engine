@@ -2,6 +2,8 @@
  * Tests for the reel scheduled go-public Inngest function. The executor
  * (`runScheduledPromote`) is stubbed through `runOne`; only the wiring is on trial.
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   createReelScheduledFunction,
@@ -99,7 +101,10 @@ describe('reel-scheduled-go-public function', () => {
     await handlerOf(earlyFn)({ event: cronEvent, step: fakeStep() })
     expect(early.runOne).not.toHaveBeenCalled()
 
-    const onTime = makeDeps(env, { now: () => new Date('2026-11-09T05:00:00Z') })
+    const onTime = makeDeps(env, {
+      now: () => new Date('2026-11-09T05:00:00Z'),
+      clientPublishLive: async () => true,
+    })
     const onTimeFn = createReelScheduledFunction(onTime)
     await handlerOf(onTimeFn)({ event: cronEvent, step: fakeStep() })
     const calls = (onTime.runOne as unknown as { mock: { calls: [string, { dryRun: boolean; executedBy: string }][] } }).mock.calls
@@ -108,6 +113,75 @@ describe('reel-scheduled-go-public function', () => {
       expect(opts.dryRun).toBe(false)
       expect(opts.executedBy.startsWith('system:week-card:')).toBe(true)
     }
+  })
+
+  it('master switch off leaves a dry-run receipt and does not call runOne', async () => {
+    const receipts: Array<{ calledPublishApi: boolean; mode: string; reason: string }> = []
+    const deps = makeDeps({}, {
+      recordDispatch: async (receipt) => { receipts.push(receipt) },
+    })
+    const fn = createReelScheduledFunction(deps)
+    const out = (await handlerOf(fn)({ event: cronEvent, step: fakeStep() })) as { dry_run: boolean; no_publish: boolean }
+    expect(out).toMatchObject({ dry_run: true, no_publish: true })
+    expect(deps.runOne).not.toHaveBeenCalled()
+    expect(receipts).toEqual([expect.objectContaining({
+      mode: 'dry_run', calledPublishApi: false, reason: 'master_switch_off', postId: null,
+    })])
+  })
+
+  it('client flag off rehearses each due reel and does not claim a publish', async () => {
+    const receipts: Array<{ calledPublishApi: boolean; mode: string; postId: string | null }> = []
+    const deps = makeDeps({ WEEKLY_PACK_REEL_SCHEDULED_PUBLIC: 'true' }, {
+      clientPublishLive: async () => false,
+      recordDispatch: async (receipt) => { receipts.push(receipt) },
+      runOne: vi.fn(async (orderId: string) => ({
+        order_id: orderId,
+        outcome: 'dry_run_ok' as const,
+        reason: 'all_gates_pass',
+        needs_person: false,
+      })),
+    })
+    const fn = createReelScheduledFunction(deps)
+    await handlerOf(fn)({ event: cronEvent, step: fakeStep() })
+    const calls = (deps.runOne as unknown as { mock: { calls: [string, { dryRun: boolean }][] } }).mock.calls
+    expect(calls.map((c) => c[0])).toEqual(['o1', 'o2', 'o3'])
+    for (const [, opts] of calls) expect(opts.dryRun).toBe(true)
+    expect(receipts.every((r) => r.mode === 'dry_run' && r.calledPublishApi === false && r.postId === null)).toBe(true)
+    expect(receipts).toHaveLength(3)
+  })
+
+  it('both switches on record the stored post id and time, and do not emit the ad event', async () => {
+    const receipts: Array<{ mode: string; postId: string | null; publishedAt: string | null; calledPublishApi: boolean }> = []
+    const deps = makeDeps({ WEEKLY_PACK_REEL_SCHEDULED_PUBLIC: 'true' }, {
+      listClients: vi.fn(async () => [{ id: 'c1', config: {} }]),
+      loadDueOrderIds: vi.fn(async () => ['o1']),
+      clientPublishLive: async () => true,
+      loadPublishedRef: async () => ({ postId: '55555', publishedAt: '2026-11-10T05:00:00.000Z' }),
+      recordDispatch: async (receipt) => { receipts.push(receipt) },
+    })
+    const fn = createReelScheduledFunction(deps)
+    const out = (await handlerOf(fn)({ event: cronEvent, step: fakeStep() })) as { dry_run: boolean; no_publish: boolean }
+    expect(out).toMatchObject({ dry_run: false, no_publish: false })
+    expect(receipts).toEqual([expect.objectContaining({
+      mode: 'registered', postId: '55555', publishedAt: '2026-11-10T05:00:00.000Z', calledPublishApi: true,
+    })])
+    const src = readFileSync(join(process.cwd(), 'src/lib/inngest/functions/cloud-reel-scheduled-go-public.ts'), 'utf8')
+    expect(src).not.toContain('me/factory.reel.published')
+    expect(src).not.toContain('graph.facebook.com')
+  })
+
+  it('a real publish with no stored post id is a failed receipt', async () => {
+    const receipts: Array<{ mode: string; reason: string; calledPublishApi: boolean }> = []
+    const deps = makeDeps({ WEEKLY_PACK_REEL_SCHEDULED_PUBLIC: 'true' }, {
+      listClients: vi.fn(async () => [{ id: 'c1', config: {} }]),
+      loadDueOrderIds: vi.fn(async () => ['o1']),
+      clientPublishLive: async () => true,
+      loadPublishedRef: async () => null,
+      recordDispatch: async (receipt) => { receipts.push(receipt) },
+    })
+    const fn = createReelScheduledFunction(deps)
+    await handlerOf(fn)({ event: cronEvent, step: fakeStep() })
+    expect(receipts[0]).toMatchObject({ mode: 'failed', reason: 'register_missing_ref', calledPublishApi: true })
   })
 
   it('client config weekly_pack.publish_hour 9 → runs at 09:00 NZ', async () => {

@@ -15,8 +15,9 @@
  *                   every date of that plan (the manual route's rule)
  *   claim           one atomic row per (plan, date) before anything is sent;
  *                   a claim with no result is UNKNOWN_OUTCOME and is never retried
- *   mode            practice (dry run) unless the live switch AND the client
- *                   allow-list both say so; practice writes nothing
+ *   mode            practice (dry run) unless the env switch, the allow-list,
+ *                   AND the per-client flag all say so. Practice never calls
+ *                   the publish API. A wired receipt writer records the rehearsal.
  *
  * All I/O is injected so the sweep can be exercised end to end without a
  * network: see `__tests__/daily-plan-auto-publish-worker.test.ts`.
@@ -41,6 +42,7 @@ import {
 } from './daily-plan-auto-publish-decide'
 import type { AttemptPatch, AttemptRecord } from './daily-plan-auto-publish-worker-store'
 import { resolvePublishSchedule, type CampaignDailyPublishCommand } from './daily-plan-publish'
+import type { PublishDispatchReceipt } from '@/lib/social/publish-gate/receipt'
 
 /** Upper bound for one Facebook call made by the unattended publisher. */
 const UNATTENDED_REQUEST_TIMEOUT_MS = 45_000
@@ -109,6 +111,13 @@ export interface AutoPublishWorkerDeps {
   runPublish: (input: RunPublishInput) => Promise<{ status: number; body: Record<string, unknown> }>
   /** Best-effort machine-readable receipt; the attempts table is the source of truth. */
   emit: (event: { id: string; name: string; data: Record<string, unknown> }) => Promise<void>
+  /**
+   * Extra per-client gate. Omitted: the env allow-list decides (existing callers).
+   * Present: a false result forces practice even when the env says live.
+   */
+  clientPublishLive?: (clientId: string) => Promise<boolean>
+  /** Omitted: practice only lands in the sweep summary. Present: also write a dispatch receipt. */
+  recordDispatch?: (receipt: PublishDispatchReceipt) => Promise<void>
 }
 
 export interface SweepDateRecord {
@@ -178,7 +187,9 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
   const today = nzDateString(now)
 
   for (const auth of grants) {
-    const live = isLiveFor(deps.switches, auth.client_id)
+    const envLive = isLiveFor(deps.switches, auth.client_id)
+    const clientLive = deps.clientPublishLive ? await deps.clientPublishLive(auth.client_id) : true
+    const live = envLive && clientLive
     const mode: SweepDateRecord['mode'] = live ? 'live' : 'practice'
     const note = (date: string, result: string, reason?: string) =>
       records.push({ client_id: auth.client_id, plan_id: auth.plan_id, date, mode, result, ...(reason ? { reason } : {}) })
@@ -324,6 +335,7 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
             }
           }
           note(item.date, 'missed_window', 'MISSED_WINDOW')
+          if (!live) await recordImage(deps, auth, item.date, 'failed', null, null, false, 'MISSED_WINDOW')
           continue
         }
         sendable.push(item)
@@ -364,13 +376,20 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
             }
           }
           note(item.date, 'blocked', reason)
+          if (!live) await recordImage(deps, auth, item.date, 'failed', null, null, false, reason)
         }
         continue
       }
 
       // 4. Practice mode stops here: it proved every gate passes, and sends nothing.
       if (!live) {
-        for (const item of sendable) note(item.date, 'would_publish')
+        for (const item of sendable) {
+          note(item.date, 'would_publish')
+          const slot = resolvePublishSchedule(item.date, now, 0)
+          const at = slot.publishNow ? null : slot.scheduledPublishTime.toISOString()
+          const reason = envLive ? 'client_switch_off' : 'env_switch_off'
+          await recordImage(deps, auth, item.date, 'dry_run', null, at, false, reason)
+        }
         continue
       }
 
@@ -460,16 +479,23 @@ export async function runAutoPublishSweep(deps: AutoPublishWorkerDeps): Promise<
         await emitAttempt(deps, auth, item.date, requestId, outcome.status, 'reasonCode' in outcome ? outcome.reasonCode : null, now)
         if (finished) {
           note(item.date, outcome.status, outcome.status === 'published' ? undefined : outcome.reasonCode)
+          await recordLiveOutcome(deps, auth, item.date, outcome)
         } else {
           // The send may have gone out but its record could not be written (the claim changed under us).
           // Surface the post id in the run log and count it as an error so it cannot pass unnoticed.
           const postId = outcome.status === 'published' ? outcome.postId : null
           note(item.date, 'error', `FINISH_LOST_CLAIM_CHANGED${postId ? ` post_id=${postId}` : ''} outcome=${outcome.status}`)
+          await recordImage(deps, auth, item.date, 'failed', postId, null, true, 'finish_lost')
         }
       }
     } catch (error: unknown) {
       // One plan's failure must not stop the others; the record is what the run log shows.
-      note('*', 'error', error instanceof Error ? error.message.slice(0, 200) : 'UNKNOWN_ERROR')
+      const message = error instanceof Error ? error.message.slice(0, 200) : 'UNKNOWN_ERROR'
+      note('*', 'error', message)
+      await recordImage(deps, auth, '*', 'failed', null, null, false, message).catch((writeError: unknown) => {
+        const detail = writeError instanceof Error ? writeError.message.slice(0, 120) : 'RECEIPT_WRITE_FAILED'
+        note('*', 'error', `receipt_write_failed ${detail}`)
+      })
     }
   }
 
@@ -517,6 +543,46 @@ async function claimFor(
     now: (deps.clock ?? (() => new Date()))(),
     ...(item.decision.action === 'reclaim' ? { fromStatus: item.decision.fromStatus } : {}),
   })
+}
+
+async function recordImage(
+  deps: AutoPublishWorkerDeps,
+  auth: { client_id: string; plan_id: string },
+  date: string,
+  mode: PublishDispatchReceipt['mode'],
+  postId: string | null,
+  publishedAt: string | null,
+  calledPublishApi: boolean,
+  reason: string,
+): Promise<void> {
+  if (!deps.recordDispatch) return
+  await deps.recordDispatch({
+    clientId: auth.client_id,
+    kind: 'image_post',
+    subjectRef: `${auth.plan_id}:${date}`,
+    mode,
+    postId,
+    publishedAt,
+    calledPublishApi,
+    reason,
+  })
+}
+
+async function recordLiveOutcome(
+  deps: AutoPublishWorkerDeps,
+  auth: { client_id: string; plan_id: string },
+  date: string,
+  outcome: AttemptOutcome,
+): Promise<void> {
+  if (outcome.status === 'published' && outcome.postId && outcome.scheduledPublishTime) {
+    await recordImage(deps, auth, date, 'registered', outcome.postId, outcome.scheduledPublishTime, true, 'published')
+    return
+  }
+  const tried = outcome.status === 'published' || outcome.status === 'unknown_outcome'
+  const postId = outcome.status === 'published' ? outcome.postId : null
+  const at = outcome.status === 'published' ? outcome.scheduledPublishTime : null
+  const reason = outcome.status === 'published' ? 'register_missing_fields' : outcome.reasonCode
+  await recordImage(deps, auth, date, 'failed', postId, at, tried, reason)
 }
 
 async function emitAttempt(
