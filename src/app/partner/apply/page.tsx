@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import { normaliseReferralCode } from '@/lib/distributor/referral-code'
 import { NO_OWN_SALES_EXAMPLE, SIMULATION_EXAMPLES, formatDollars, simulateMonth } from '@/lib/distributor/simulate'
 import { DISTRIBUTOR_TERMS_VERSION } from '@/lib/distributor/terms'
@@ -56,6 +57,12 @@ export default async function ApplyPage({ searchParams }: { searchParams: Promis
         <p className="mt-3 max-w-3xl text-[15px] leading-relaxed text-me-charcoal/70 md:mt-4 md:text-lg">
           帮身边的商家写视频脚本、生成视频、发布到社交媒体、拉回数据看效果。客户付费，你按实付金额拿分润。加入免费，不囤货，不保证收入——卖多少拿多少。
         </p>
+        <Link
+          href={referralCode ? `/ai-steward?ref=${referralCode}` : '/ai-steward'}
+          className="mt-4 inline-block text-[15px] font-semibold text-me-ochre underline underline-offset-4"
+        >
+          先看看客户会看到的产品介绍 →
+        </Link>
         <div className="mt-5 flex flex-wrap gap-2">
           {CHIPS.map((c) => (
             <span key={c} className="rounded-full bg-me-ochre/12 px-3 py-1.5 text-[13px] font-semibold text-me-charcoal">

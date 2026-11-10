@@ -104,37 +104,48 @@ function Header({ profile, onLogout }: { profile: PortalView['profile']; onLogou
   )
 }
 
-function ReferralCard({ code }: { code: string }) {
+function CopyRow({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false)
-  const link = `${window.location.origin}/partner/apply?ref=${code}`
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(link)
+      await navigator.clipboard.writeText(value)
       setCopied(true)
     } catch {
       setCopied(false)
     }
   }
   return (
+    <div className="mt-3">
+      <div className="mb-1 text-xs font-semibold text-me-charcoal/65">{label}</div>
+      <div className="flex gap-2">
+        <input
+          readOnly
+          aria-label={label}
+          value={value}
+          onFocus={(e) => e.currentTarget.select()}
+          className="w-full rounded-lg border border-black/[0.1] bg-me-ivory px-2 py-1 text-xs text-me-charcoal/80"
+        />
+        <button type="button" onClick={copy} className="shrink-0 rounded-lg bg-me-ochre px-3 py-1 text-xs font-bold text-white">
+          {copied ? '已复制' : '复制'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ReferralCard({ code }: { code: string }) {
+  const origin = window.location.origin
+  return (
     <div className="mb-8 overflow-hidden rounded-2xl bg-white shadow-sm">
       <div className="border-b border-black/[0.06] px-6 py-4">
         <h2 className="text-base font-bold text-me-charcoal/90">我的推荐链接</h2>
       </div>
       <div className="px-6 py-5">
-        <p className="mb-3 text-sm text-me-charcoal/75">
-          别人用这个链接申请、审核通过后，就挂在你下面。你的推荐码是 <span className="font-bold tabular-nums">{code}</span>。
+        <p className="text-sm text-me-charcoal/75">
+          你的推荐码是 <span className="font-bold tabular-nums">{code}</span>。下面两条链接都带着它。
         </p>
-        <div className="flex gap-2">
-          <input
-            readOnly
-            value={link}
-            onFocus={(e) => e.currentTarget.select()}
-            className="w-full rounded-lg border border-black/[0.1] bg-me-ivory px-2 py-1 text-xs text-me-charcoal/80"
-          />
-          <button type="button" onClick={copy} className="shrink-0 rounded-lg bg-me-ochre px-3 py-1 text-xs font-bold text-white">
-            {copied ? '已复制' : '复制'}
-          </button>
-        </div>
+        <CopyRow label="发给客户：产品介绍页" value={`${origin}/ai-steward?ref=${code}`} />
+        <CopyRow label="发给想做经销商的人：申请页（审核通过后挂在你下面）" value={`${origin}/partner/apply?ref=${code}`} />
       </div>
     </div>
   )
