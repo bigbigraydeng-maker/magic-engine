@@ -240,7 +240,7 @@ export interface LetterDetailRow extends LetterRow {
 export interface AutoLetterDetail {
   letter: LetterDetailRow
   tiles: LetterTiles
-  /** 只有走 Mailchimp 的信有；ME 自己发的信为 `null`。 */
+  /** 只有走 Mailchimp 的信有，而且要打开记录已经同步进来（一位的打开记录都没有就是 `null`，不说成 0）；ME 自己发的信为 `null`。 */
   mailchimpSummary: { opened: number; clicked: number } | null
   /** 一批最多几十位，不分页。 */
   recipients: RecipientRow[]

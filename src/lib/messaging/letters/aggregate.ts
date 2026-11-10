@@ -296,6 +296,8 @@ function recipientRows(planned: PlannedLetter, sends: SendFacts | null, notInBat
 function mailchimpSummaryOf(sends: SendFacts | null): AutoLetterDetail['mailchimpSummary'] {
   if (sends === null || sends.channel !== 'mailchimp') return null
   const real = sends.recipients.filter((r) => r.outcome === 'sent')
+  // 一位的打开记录都没有：打开还没同步进来，不能说成「已打开 0 位」。
+  if (!real.some((r) => r.opened !== null)) return null
   return { opened: real.filter((r) => r.opened === true).length, clicked: real.filter((r) => r.clicked === true).length }
 }
 

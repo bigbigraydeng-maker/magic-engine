@@ -402,6 +402,20 @@ describe('buildDetail', () => {
     expect(me.recipients.every((r) => r.opened === null && r.clicked === null)).toBe(true)
   })
 
+  it('a Mailchimp letter whose opens have not been recorded yet has no summary (not "opened 0"), and no opened number', () => {
+    const untracked = buildDetail(letter, {
+      registry: null,
+      sends: sends({ channel: 'mailchimp', recipients: [outcome({ contactId: 'c1' }), outcome({ contactId: 'c2' })] }),
+    })
+    expect(untracked.mailchimpSummary).toBeNull()
+    expect(untracked.tiles.opened).toBeNull()
+    const tracked = buildDetail(letter, {
+      registry: null,
+      sends: sends({ channel: 'mailchimp', recipients: [outcome({ contactId: 'c1', opened: false }), outcome({ contactId: 'c2', opened: false })] }),
+    })
+    expect(tracked.mailchimpSummary).toEqual({ opened: 0, clicked: 0 }) // tracked and nobody opened: a real 0
+  })
+
   it('the recipient total never falls below the people who have a result: people only in the records are counted too', () => {
     const rows = [outcome({ contactId: 'c1' }), outcome({ contactId: 'gone-1' }), outcome({ contactId: 'gone-2', outcome: 'failed', reasonCode: 'bounced' })]
     const detail = buildDetail(letter, { registry: null, sends: sends({ recipients: rows }) })

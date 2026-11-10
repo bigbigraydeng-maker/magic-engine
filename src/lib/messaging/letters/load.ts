@@ -15,7 +15,7 @@ import { shiftDays } from './dates'
 import { lookbackDaysFor } from './history'
 import { buildTemplateKey, buildTriggerKey, parseLetterKey, type LetterIdentity } from './keys'
 import { UNKNOWN_TOUR_NAME, loadBookingFacts } from './load-bookings'
-import { loadMeSends, loadRegistry } from './load-facts'
+import { loadMailchimpSends, loadMeSends, loadRegistry } from './load-facts'
 import { planCountdownCalendar, planCountdownIssue } from './plan'
 import type { AutoLetterDetail, AutoLettersList, NzDate, PlannedLetter } from './types'
 
@@ -32,12 +32,22 @@ function identityOf(letter: PlannedLetter): LetterIdentity {
   return { sendDate: letter.sendDate, tourId: letter.tourId, departOn: letter.departOn, monthsLeft: letter.monthsLeft }
 }
 
-/** 取这些信的登记 + 发送事实（按 letterKey）。信的编号算不出来（日期不合法）就当没有事实。 */
+/** Mailchimp 里有同名的已发活动、对不上哪一个：如实告诉员工，这封信的发送情况先不显示。 */
+function mismatchNotice(templateKey: string, campaigns: number): string {
+  return `「${templateKey}」在 Mailchimp 里对不上：有 ${campaigns} 个同名活动，这封信的发送情况先不显示（只留一个同名活动就能对上）。`
+}
+
+/**
+ * 取这些信的登记 + 发送事实（按 letterKey）。信的编号算不出来（日期不合法）就当没有事实。
+ * 发送事实有两个来源：走 Mailchimp 发的（活动标题 ＝ 模板键，一字不差）和 ME 自己发的（提案 / 发送记录）。
+ * 两边都有时以 Mailchimp 为准（它对得上就说明这一封是在 Mailchimp 发出去的）；Mailchimp 对不上（同名活动不止一个）就不猜，
+ * 退回 ME 这边的记录，并在 notices 里说一句。
+ */
 async function loadLetterFacts(
   db: SupabaseClient,
   clientId: string,
   letters: readonly PlannedLetter[],
-): Promise<Map<string, LetterFacts>> {
+): Promise<{ facts: Map<string, LetterFacts>; notices: string[] }> {
   const keyed = letters.map((letter) => ({
     letterKey: letter.letterKey,
     templateKey: buildTemplateKey(identityOf(letter)),
@@ -45,18 +55,23 @@ async function loadLetterFacts(
   }))
   const templateKeys = keyed.flatMap((item) => (item.templateKey === null ? [] : [item.templateKey]))
   const triggerKeys = keyed.flatMap((item) => (item.triggerKey === null ? [] : [item.triggerKey]))
-  const [registry, sends] = await Promise.all([
+  const [registry, meSends, mailchimp] = await Promise.all([
     loadRegistry(db, clientId, templateKeys),
     loadMeSends(db, clientId, triggerKeys),
+    loadMailchimpSends(db, clientId, templateKeys),
   ])
   const facts = new Map<string, LetterFacts>()
+  const notices: string[] = []
   for (const item of keyed) {
+    const viaMailchimp = item.templateKey === null ? null : (mailchimp.facts.get(item.templateKey) ?? null)
+    const clash = item.templateKey === null ? undefined : mailchimp.ambiguous.get(item.templateKey)
+    if (item.templateKey !== null && clash !== undefined) notices.push(mismatchNotice(item.templateKey, clash))
     facts.set(item.letterKey, {
       registry: item.templateKey === null ? null : (registry.get(item.templateKey) ?? null),
-      sends: item.triggerKey === null ? null : (sends.get(item.triggerKey) ?? null),
+      sends: viaMailchimp ?? (item.triggerKey === null ? null : (meSends.get(item.triggerKey) ?? null)),
     })
   }
-  return facts
+  return { facts, notices }
 }
 
 /** 列表上要显示的信：最近几批（含「下一批」）。其余的信只算个数，不用读记录。 */
@@ -87,11 +102,11 @@ export async function loadAutoLettersList(
   // 回看窗口起算：能装下一个还没出发的团的全部信（history.ts），这样「已过发信日的信」和团汇总的「已发几封」才不会少算。
   const from = shiftDays(today, -lookbackDaysFor(cadence)) ?? today
   const planned = planCountdownCalendar(facts, from, cadence)
-  const letterFacts = await loadLetterFacts(db, clientId, lettersToRead(planned, today))
+  const { facts: letterFacts, notices: mismatches } = await loadLetterFacts(db, clientId, lettersToRead(planned, today))
   return {
     ...buildList(planned, letterFacts, today, now.toISOString()),
     cadence: { firstMonth: cadence.firstMonth },
-    notices,
+    notices: [...notices, ...mismatches],
   }
 }
 
@@ -116,7 +131,7 @@ async function detailFromRecords(
     monthsLeft: identity.monthsLeft,
     recipients: [],
   }
-  const letterFacts = (await loadLetterFacts(db, clientId, [stub])).get(letterKey) ?? null
+  const letterFacts = (await loadLetterFacts(db, clientId, [stub])).facts.get(letterKey) ?? null
   if (letterFacts?.sends == null) return null
   const people = letterFacts.sends.recipients.map((recipient) => recipient.contactId)
   const [tours, names] = await Promise.all([
@@ -147,6 +162,6 @@ export async function loadAutoLetterDetail(
   const { facts } = await loadBookingFacts(db, clientId)
   const letter = planCountdownIssue(facts, identity.sendDate, cadence).find((candidate) => candidate.letterKey === letterKey)
   if (letter === undefined) return detailFromRecords(db, clientId, identity, letterKey, today)
-  const letterFacts = await loadLetterFacts(db, clientId, [letter])
+  const { facts: letterFacts } = await loadLetterFacts(db, clientId, [letter])
   return buildDetail(letter, letterFacts.get(letterKey) ?? null, today)
 }
