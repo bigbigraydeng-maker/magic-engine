@@ -1,7 +1,9 @@
 /**
  * "Did the guest get in touch after this mail?": the first thing the guest did after the mail went out, judged by the
  * SAME rule the AI-takeover "came back" check uses (`customerCameBack`): a real email reply (not a Mailchimp open /
- * click, not an auto-reply, not a STOP), an answered inbound call, a chat message, or a form. Within
+ * click, not an auto-reply, not a STOP), an answered inbound call, or a form. (A WhatsApp / Messenger reply is not
+ * counted yet: those channels keep one row per conversation with no text, so there is nothing to date the first reply
+ * by. Same gap as the AI-takeover check.) Within
  * `REACTION_WINDOW_DAYS` of the mail, so a call three months later is not credited to it. Read-only. A failed or
  * incomplete read returns `null` (never "nobody reacted").
  */
@@ -18,7 +20,7 @@ const ID_CHUNK = 100
 /** Rows per database page, and how many pages one batch of guests may take before the read counts as failed. */
 const PAGE_SIZE = 1000
 const MAX_PAGES = 10
-const COLUMNS = 'contact_id, channel, direction, occurred_at, summary, raw, metadata, source'
+const COLUMNS = 'id, contact_id, channel, direction, occurred_at, summary, raw, metadata, source'
 
 export interface SentMail {
   /** Any key the caller wants back (the receipt id). */
@@ -73,6 +75,8 @@ async function readRows(db: SupabaseClient, clientId: string, ids: readonly stri
       .in('contact_id', [...ids])
       .gte('occurred_at', earliest)
       .order('occurred_at', { ascending: true })
+      // Rows with the same time must still come in a fixed order, or a page boundary could skip one.
+      .order('id', { ascending: true })
       .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
     if (error) throw new Error(error.message)
     const got = Array.isArray(data) ? data : []

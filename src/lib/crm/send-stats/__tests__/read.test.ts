@@ -37,11 +37,19 @@ describe('clampDays', () => {
 describe('latestPerRequest', () => {
   it('keeps the first (newest) row per guest + request; the same request id for another guest is another mail', () => {
     const rows = [
-      { id: 'a', requestId: 'q', contactId: 'p1' },
-      { id: 'b', requestId: 'q', contactId: 'p1' },
-      { id: 'c', requestId: 'q', contactId: 'p2' },
+      { id: 'a', requestId: 'q', contactId: 'p1', createdAt: '2026-11-10T02:10:00.000Z' },
+      { id: 'b', requestId: 'q', contactId: 'p1', createdAt: '2026-11-10T02:00:00.000Z' },
+      { id: 'c', requestId: 'q', contactId: 'p2', createdAt: '2026-11-10T02:05:00.000Z' },
     ]
     expect(latestPerRequest(rows).map((r) => r.id)).toEqual(['a', 'c'])
+  })
+
+  it('the mail takes the latest row\'s result but the earliest row\'s time (when it was really sent, not when it was settled)', () => {
+    const [one] = latestPerRequest([
+      { id: 'settled', requestId: 'q', contactId: 'p1', createdAt: '2026-11-10T02:10:00.000Z' },
+      { id: 'first', requestId: 'q', contactId: 'p1', createdAt: '2026-11-10T02:00:00.000Z' },
+    ])
+    expect(one).toEqual({ id: 'settled', requestId: 'q', contactId: 'p1', createdAt: '2026-11-10T02:00:00.000Z' })
   })
 })
 
@@ -92,7 +100,7 @@ describe('readSendStats', () => {
       receipt({ id: 'other', requestId: 'q2', createdAt: '2026-11-10T01:00:00.000Z' }),
     ] as never)
     const out = await readSendStats(db(), 'c1', 7, NOW)
-    expect(out.rows.map((r) => [r.id, r.outcome])).toEqual([['settled', 'sent'], ['other', 'sent']])
+    expect(out.rows.map((r) => [r.id, r.outcome, r.createdAt])).toEqual([['settled', 'sent', '2026-11-10T02:00:00.000Z'], ['other', 'sent', '2026-11-10T01:00:00.000Z']])
   })
 
   it('a hand-written mail has no template; a template since removed has no name', async () => {

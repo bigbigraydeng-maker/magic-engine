@@ -40,7 +40,7 @@ describe('firstReactions — what counts as the guest getting in touch', () => {
     expect(firstReactions([send], [call({ metadata: { outcome: 'missed_inbound', talk_seconds: 0 } })], NOW).size).toBe(0)
   })
 
-  it('a chat message with words counts; an empty one does not', () => {
+  it('a chat row with words counts; the real WhatsApp / Messenger rows have no text, so today they do not (known gap)', () => {
     const chat = (raw: string | null) => touch({ channel: 'whatsapp', source: 'whatsapp', summary: null, raw })
     expect(firstReactions([send], [chat('Hello, is the March tour full?')], NOW).get('s1')?.kind).toBe('message')
     expect(firstReactions([send], [chat(null)], NOW).size).toBe(0)
@@ -98,7 +98,7 @@ describe('loadReactions', () => {
     const out = await loadReactions(client, 'c1', [send], NOW)
     expect(out?.get('s1')?.kind).toBe('email')
     expect(calls.range).toEqual([1000, 1999])
-    expect(calls.order).toEqual(['occurred_at', { ascending: true }])
+    expect(calls.order).toEqual(['id', { ascending: true }])
   })
 
   it('🔴 too many pages → unreadable (null), never a shortened list', async () => {

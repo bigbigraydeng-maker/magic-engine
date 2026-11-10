@@ -44,18 +44,18 @@ async function readClicks(db: SupabaseClient, clientId: string, requestIds: read
 
 /**
  * The receipts table only ever gains rows: settling an `unknown` send, or sending again under the same request, adds a
- * row and leaves the old one. One request is one mail: keep its latest row (the list is newest first).
+ * row and leaves the old one. One request is one mail: it takes the LATEST row's result and the EARLIEST row's time
+ * (the moment it was actually sent, not the moment it was settled). `newestFirst` is newest first.
  */
-export function latestPerRequest<T extends { requestId: string; contactId: string }>(newestFirst: readonly T[]): T[] {
-  const seen = new Set<string>()
-  const out: T[] = []
+export function latestPerRequest<T extends { requestId: string; contactId: string; createdAt: string }>(newestFirst: readonly T[]): T[] {
+  const byKey = new Map<string, { row: T; firstAt: string }>()
   for (const r of newestFirst) {
     const key = `${r.contactId}|${r.requestId}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(r)
+    const seen = byKey.get(key)
+    if (!seen) byKey.set(key, { row: r, firstAt: r.createdAt })
+    else if (Date.parse(r.createdAt) < Date.parse(seen.firstAt)) seen.firstAt = r.createdAt
   }
-  return out
+  return [...byKey.values()].map(({ row, firstAt }) => (firstAt === row.createdAt ? row : { ...row, createdAt: firstAt }))
 }
 
 export async function readSendStats(db: SupabaseClient, clientId: string, days: number, now: Date = new Date()): Promise<SendStatsPayload> {
