@@ -102,7 +102,7 @@ export function recipientStatusOf(status: string): RecipientStatus {
 
 /**
  * 账本状态里已经落定、不会再变的：收到了，或者终局没收到（规则内跳过 skipped、被屏蔽 suppressed、发送失败 failed、被退回 bounced）。
- * 排队中（pending / claimed）、终身行上可重试的拦截（blocked）、结果不明（unknown_outcome）都还没落定。
+ * 排队中（pending）、终身行上可重试的拦截（blocked）、结果不明（unknown_outcome）都还没落定；认不出的状态也按没落定，绝不当成已发。
  */
 const SETTLED_STATUSES: ReadonlySet<string> = new Set([
   'sent',

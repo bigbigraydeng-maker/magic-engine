@@ -798,6 +798,58 @@ describe('letters sent through Mailchimp', () => {
     expect(detail?.letter).toMatchObject({ status: 'sent', channel: 'mailchimp' })
   })
 
+  describe('a letter that both sides sent: ME has people who really received it, and a Mailchimp campaign carries the same title', () => {
+    const BOTH_SIDES = (me: number, mailchimp: number): string =>
+      `「${TITLE}」这封信 ME 和 Mailchimp 都发过，可能重复发了（ME 发了 ${me} 位，Mailchimp 发了 ${mailchimp} 位）；页面先按 Mailchimp 的记录显示。`
+    const meRow = (n: number, status: string, scope = 'lifetime'): Row => ({
+      id: `s-${n}-${status}-${scope}`,
+      client_id: CLIENT_A,
+      trigger_key: buildTriggerKey(NOV_4),
+      contact_id: cid(n),
+      dedupe_scope: scope,
+      status,
+      reason_code: null,
+    })
+
+    it('says so on top of the page with both counts, and still shows the Mailchimp record', async () => {
+      seedThreeGuests()
+      seed('triggered_sends', [meRow(1, 'delivered'), meRow(2, 'sent')])
+      seed('contact_touchpoints', [sentRow(1), sentRow(2), sentRow(3)])
+      const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(list.notices).toContain(BOTH_SIDES(2, 3))
+      expect(list.pastLetters.find((l) => l.letterKey === KEY)).toMatchObject({ status: 'sent', channel: 'mailchimp', counts: { sent: 3 } })
+    })
+
+    it('says nothing when ME only has rehearsal rows, rows nobody received, or a proposal', async () => {
+      seedThreeGuests()
+      seed('triggered_sends', [
+        meRow(1, 'shadow', 'shadow'),
+        meRow(2, 'failed'),
+        meRow(3, 'skipped'),
+        meRow(1, 'pending'),
+      ])
+      seed('triggered_send_authorizations', [
+        { client_id: CLIENT_A, trigger_key: buildTriggerKey(NOV_4), authorized_at: '2026-11-03T00:00:00Z', revoked_at: null, template_sha256: 'sha' },
+      ])
+      seed('contact_touchpoints', [sentRow(1), sentRow(2)])
+      const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(list.notices ?? []).toEqual([])
+    })
+
+    it('says nothing when only ME sent it, or only Mailchimp did', async () => {
+      seedThreeGuests()
+      seed('triggered_sends', [meRow(1, 'delivered')])
+      const onlyMe = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(onlyMe.notices ?? []).toEqual([])
+      ctx = createFakeDb()
+      state = ctx.state
+      seedThreeGuests()
+      seed('contact_touchpoints', [sentRow(1)])
+      const onlyMailchimp = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(onlyMailchimp.notices ?? []).toEqual([])
+    })
+  })
+
   it('a letter that has left the plan but was sent through Mailchimp still opens from the records', async () => {
     seedCatalog()
     seed('contacts', [contactRow({ id: cid(7), client_id: CLIENT_A, display_name: 'Gone Guest' })])

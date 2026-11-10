@@ -37,11 +37,20 @@ function mismatchNotice(templateKey: string, campaigns: number): string {
   return `「${templateKey}」在 Mailchimp 里对不上：有 ${campaigns} 个同名活动，这封信的发送情况先不显示（只留一个同名活动就能对上）。`
 }
 
+/** 同一封信 ME 和 Mailchimp 都真的发出去过：可能重复发了，不能悄悄只显示一边（发信窗口 11-10 要求），两边的人数都说出来。 */
+function bothSidesNotice(templateKey: string, meSent: number, mailchimpSent: number): string {
+  return `「${templateKey}」这封信 ME 和 Mailchimp 都发过，可能重复发了（ME 发了 ${meSent} 位，Mailchimp 发了 ${mailchimpSent} 位）；页面先按 Mailchimp 的记录显示。`
+}
+
+function sentCount(sends: { recipients: readonly { outcome: string }[] } | null): number {
+  return sends === null ? 0 : sends.recipients.filter((recipient) => recipient.outcome === 'sent').length
+}
+
 /**
  * 取这些信的登记 + 发送事实（按 letterKey）。信的编号算不出来（日期不合法）就当没有事实。
  * 发送事实有两个来源：走 Mailchimp 发的（活动标题 ＝ 模板键，一字不差）和 ME 自己发的（提案 / 发送记录）。
- * 两边都有时以 Mailchimp 为准（它对得上就说明这一封是在 Mailchimp 发出去的）；Mailchimp 对不上（同名活动不止一个）就不猜，
- * 退回 ME 这边的记录，并在 notices 里说一句。
+ * 两边都有时以 Mailchimp 为准（它对得上就说明这一封是在 Mailchimp 发出去的）；但 ME 那边也有真的收到的人（不是演练、不是被拦）时，
+ * 说明这一封可能两边都发了，在 notices 里提示。Mailchimp 对不上（同名活动不止一个）就不猜，退回 ME 这边的记录，并在 notices 里说一句。
  */
 async function loadLetterFacts(
   db: SupabaseClient,
@@ -66,9 +75,13 @@ async function loadLetterFacts(
     const viaMailchimp = item.templateKey === null ? null : (mailchimp.facts.get(item.templateKey) ?? null)
     const clash = item.templateKey === null ? undefined : mailchimp.ambiguous.get(item.templateKey)
     if (item.templateKey !== null && clash !== undefined) notices.push(mismatchNotice(item.templateKey, clash))
+    const viaMe = item.triggerKey === null ? null : (meSends.get(item.triggerKey) ?? null)
+    if (item.templateKey !== null && viaMailchimp !== null && sentCount(viaMe) > 0) {
+      notices.push(bothSidesNotice(item.templateKey, sentCount(viaMe), sentCount(viaMailchimp)))
+    }
     facts.set(item.letterKey, {
       registry: item.templateKey === null ? null : (registry.get(item.templateKey) ?? null),
-      sends: viaMailchimp ?? (item.triggerKey === null ? null : (meSends.get(item.triggerKey) ?? null)),
+      sends: viaMailchimp ?? viaMe,
     })
   }
   return { facts, notices }
