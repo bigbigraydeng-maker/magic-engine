@@ -6,6 +6,7 @@ import {
   pushAdsDailyPullbackGapItems,
   pushAdsDailySpendOverCapNoticeItems,
   pushAdsHeartbeatStallItems,
+  pushAdsIntradaySpendSampleStallItems,
 } from '../ads-agent-stale-items'
 
 vi.mock('@/lib/meta/client-ad-accounts', () => ({
@@ -88,6 +89,29 @@ describe('pushAdsDailySpendOverCapNoticeItems', () => {
     })
     const items: Parameters<typeof pushAdsDailySpendOverCapNoticeItems>[1] = []
     await pushAdsDailySpendOverCapNoticeItems({} as never, items, () => 'n')
+    expect(items).toHaveLength(0)
+  })
+})
+
+describe('pushAdsIntradaySpendSampleStallItems', () => {
+  it('alerts on infra when no successful cron run', async () => {
+    const items: ManualItem[] = []
+    const supabase = { from: () => chain('cron_run_logs', []) }
+    await pushAdsIntradaySpendSampleStallItems(supabase as never, items, NOW)
+    expect(items).toHaveLength(1)
+    expect(items[0]?.kind).toBe('ads_agent_sync_stale')
+    expect(items[0]?.client_id).toBe('infra')
+    expect(items[0]?.what).toContain('日内花费采样')
+  })
+
+  it('silent when recent success', async () => {
+    const recent = new Date(NOW.getTime() - 15 * 60_000).toISOString()
+    const items: ManualItem[] = []
+    const supabase = {
+      from: () =>
+        chain('cron_run_logs', [{ status: 'completed', finished_at: recent, started_at: recent }]),
+    }
+    await pushAdsIntradaySpendSampleStallItems(supabase as never, items, NOW)
     expect(items).toHaveLength(0)
   })
 })
