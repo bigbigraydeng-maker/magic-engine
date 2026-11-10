@@ -47,6 +47,7 @@ import { pushLeadSheetItems } from './lead-sheet-items'
 import { foldRootCauseDuplicates } from './dedupe-root-cause'
 import { pushCalendarClosureItems } from './calendar-closure-items'
 import { pushToolLeadItems } from './tool-lead-items'
+import { pushDistributorApplicationItems } from './distributor-application-items'
 import { pushToolsWideBudgetItems } from './tools-wide-budget-items'
 import { pushAdsAutonomySyncItems } from './ads-autonomy-items'
 import { pushAdsRuleFindingItems } from './ads-rule-finding-items'
@@ -67,6 +68,7 @@ import { pushGoalRolloverItems } from './goal-rollover-items'
 import { pushMagicBridgeQuotaItems } from './magic-bridge-quota-items'
 import { pushRankVerdictGapItems } from './seo-rank-verdict-overdue-items'
 import { pushDataDeletionFailureItems } from './data-deletion-items'
+import { pushCrmLinkTrackingItems } from './crm-link-tracking-items'
 import {
   buildCrawlHealthItems,
   buildNotIndexedItems,
@@ -330,6 +332,10 @@ function infraPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>,
     (b) => pushToolLeadItems(supabase, b, clients, now).catch((e) =>
       console.warn('[manual-items] 工具实验室留资待办生成失败（不阻塞其他待办）:', e),
     ),
+    // 有人在申请页申请做经销商 —— 批准 / 拒绝只有人能做
+    (b) => pushDistributorApplicationItems(supabase, b, now).catch((e) =>
+      console.warn('[manual-items] 经销商申请待办生成失败（不阻塞其他待办）:', e),
+    ),
     // 工具实验室全站每月合计上限（网站诊断+广告体检赞助分析共用）快用完
     (b) => pushToolsWideBudgetItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 工具实验室全站上限待办生成失败（不阻塞其他待办）:', e),
@@ -496,6 +502,10 @@ function clientPushers(supabase: SupabaseClient, clients: Map<string, ClientRow>
     // Facebook 删除数据请求处理失败 —— 失败不许只写日志（铁律 3）
     (b) => pushDataDeletionFailureItems(supabase, b, now).catch((e) =>
       console.warn('[manual-items] 删除数据请求失败待办生成失败（不阻塞其他待办）:', e),
+    ),
+    // CRM 邮件点击追踪疑似悄悄坏了 —— 「没点击」和「坏了」看起来一样，不许只活在日志里（铁律 3）
+    (b) => pushCrmLinkTrackingItems(supabase, b, nameOf, now).catch((e) =>
+      console.warn('[manual-items] 邮件点击追踪检查失败（不阻塞其他待办）:', e),
     ),
     // 客户之间有没有串台 —— PM 2026-08-05：「坚决不能胡窜」。
     // 实测查到 CTS 的发布通道指向 Oztop 的网站，填错两个多月没人发现。

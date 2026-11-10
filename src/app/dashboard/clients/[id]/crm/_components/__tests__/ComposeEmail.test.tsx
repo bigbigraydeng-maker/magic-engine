@@ -148,4 +148,31 @@ describe('ComposeEmail', () => {
     expect(f).toHaveBeenCalledTimes(1)
     expect(screen.getByLabelText('邮件正文')).toHaveValue('mine')
   })
+
+  it('follow-up button posts kind follow_up, fills the box and shows the checks and what the AI read', async () => {
+    const f = stub([
+      { ok: true, body: { conversationId: null, compose: can } },
+      {
+        ok: true,
+        body: {
+          subject: 'Best of China',
+          body: 'Kia ora Amy,\n\nHello.',
+          kind: 'follow_up',
+          read: [{ kind: 'system', text: '我们发过 2026-09-15' }],
+          checks: [
+            { id: 'links', status: 'pass', label: '链接都在官网', detail: 'ok' },
+            { id: 'prices', status: 'fail', label: '价格出自团目录', detail: '找不到 3000' },
+          ],
+        },
+      },
+    ])
+    draw()
+    fireEvent.click(await screen.findByTestId('compose-ai-follow-up'))
+    expect(await screen.findByTestId('compose-ai-review')).toBeInTheDocument()
+    expect(screen.getByLabelText('邮件主题')).toHaveValue('Best of China')
+    expect(screen.getByTestId('compose-check-prices')).toHaveTextContent('✗')
+    expect(screen.getByText(/我们发过 2026-09-15/)).toBeInTheDocument()
+    const [, init] = f.mock.calls[1] as [string, { body: string }]
+    expect(JSON.parse(init.body)).toEqual({ kind: 'follow_up' })
+  })
 })

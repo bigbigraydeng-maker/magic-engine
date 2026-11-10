@@ -697,3 +697,18 @@ describe('机器自动发出的邮件（Mailchimp 欢迎信 / 群发）', () => 
     expect(s.lastWho).toBe('客人')
   })
 })
+
+describe('点了邮件里的链接（设计稿 2026-11-10 B2 §4.6）', () => {
+  it('shows the click as its own line, and never as what the guest last said', async () => {
+    mockTimeline([
+      touch({ kind: 'message', at: '2026-11-10T00:00:00Z', direction: 'inbound', body: '想三月走', senderName: 'Sue' }),
+      { kind: 'click', at: '2026-11-11T07:03:00Z', clickLabel: '目录' },
+    ])
+    const onSummary = vi.fn()
+    render(<ContactTimeline clientId="cts" contactId="c1" onSummary={onSummary} />)
+    await waitFor(() => expect(screen.getByTestId('timeline-click')).toBeTruthy())
+    expect(screen.getByTestId('timeline-click').textContent).toContain('客人点了邮件里的「目录」')
+    const s = onSummary.mock.calls.at(-1)?.[0]
+    expect(s.lastText).toBe('想三月走')
+  })
+})

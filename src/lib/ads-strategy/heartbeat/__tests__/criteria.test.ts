@@ -23,10 +23,16 @@ describe('classifyRead', () => {
     kind: 'adsets' as const,
   }
 
-  it('empty adset list with active campaigns → read_failed (empty_adset_list)', () => {
+  it('empty adset list with active campaigns is all paused, not a failed read', () => {
     const r = classifyRead({ ...base, accountHasActiveCampaigns: true })
+    expect(r.verdict).toBe('ok')
+    expect(r.reason).toBe('all_paused')
+  })
+
+  it('a failed adset read is still read_failed when the list is empty', () => {
+    const r = classifyRead({ ...base, accountHasActiveCampaigns: true, ok: false })
     expect(r.verdict).toBe('read_failed')
-    expect(r.reason).toBe('empty_adset_list')
+    expect(r.reason).toBe('read_failed')
   })
 
   it('empty adset list without active campaigns → ok', () => {

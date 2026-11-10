@@ -1,9 +1,21 @@
 /**
  * Creative test → scale → retire. Pure. No network, no database.
  * Target cost comes from the client row. Missing target means no card.
+ *
+ * Scaling qualification confirmed by Ray 2026-11-10: at least 7 live days,
+ * at least 10 leads, cost per lead at or under the client target, and at most
+ * one scaling proposal per New Zealand day. Cards only. The retire multiple
+ * was not part of that confirmation.
  */
 
+import { resolveTargetCplMajor } from '@/lib/ads-strategy/client-target-cpl'
+import { nzToday } from '@/lib/ads-strategy/promo-window'
 import { OWNERSHIP_MAX_AD_CAPTURE_AGE_HOURS } from '@/lib/ads-strategy/portfolio/diagnostics/thresholds'
+
+/** Calendar day in Pacific/Auckland. The one-card cap uses this, not UTC. */
+export function nzProposalDay(now: Date): string {
+  return nzToday(now.getTime())
+}
 
 export const CONSERVATIVE_CREATIVE_RULES = {
   minLiveDays: 7,
@@ -71,11 +83,16 @@ export interface CreativeDecision {
   readonly skipped: readonly string[]
 }
 
-export function rulesFromConfig(row: {
-  target_cost_per_primary?: unknown
-  min_primary_per_unit?: unknown
-} | null): CreativeRules {
-  const target = positive(row?.target_cost_per_primary)
+export function rulesFromConfig(
+  row: { target_cost_per_primary?: unknown; min_primary_per_unit?: unknown } | null,
+  planRows: readonly { plan_data?: unknown }[] = [],
+  leadsConfig: unknown = null,
+): CreativeRules {
+  const target = resolveTargetCplMajor({
+    strategyMajor: row?.target_cost_per_primary,
+    leadsConfig,
+    planRows,
+  })
   const configured = whole(row?.min_primary_per_unit)
   const minLeads = Math.max(CONSERVATIVE_CREATIVE_RULES.minLeads, configured ?? 0)
   return { ...CONSERVATIVE_CREATIVE_RULES, targetCpl: target, minLeads }
@@ -178,11 +195,6 @@ function oneCaptureFresh(row: CaptureFact, now: Date, maxAgeHours: number): bool
   if (!Number.isFinite(at)) return false
   const age = now.getTime() - at
   return age >= 0 && age <= maxAgeHours * 3_600_000
-}
-
-function positive(value: unknown): number | null {
-  const amount = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : Number.NaN
-  return Number.isFinite(amount) && amount > 0 ? amount : null
 }
 
 function whole(value: unknown): number | null {

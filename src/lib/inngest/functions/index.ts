@@ -24,7 +24,6 @@ import { adsD3AutoPause } from './ads-d3-auto-pause'
 import { leadSheetSyncFanOut, leadSheetSyncOne } from './lead-sheet-sync'
 import { calendarClosureAudit } from './calendar-closure-audit'
 import { promoPlanDailyWatch } from './promo-plan-daily-watch'
-import { adHeartbeat } from './ad-heartbeat'
 import { adBreakdownCapture } from './ad-breakdown-capture'
 import { adsTrackingPreflight } from './ads-tracking-preflight'
 import { adsTrackingLaunchWatch } from './ads-tracking-launch-watch'
@@ -40,6 +39,7 @@ import { libaiPromptLibraryMonthly } from './libai-prompt-library-monthly'
 import { simaqianReputationWeekly } from './simaqian-reputation-weekly'
 import { gscPageDailyFanOut, gscPageDailyPull } from './gsc-page-daily'
 import { baozhengWeekly } from './baozheng-weekly'
+import { distributorMonthlyStatement } from './distributor-monthly-statement'
 import { gscQueryPageDailyFanOut, gscQueryPageDailyPull } from './gsc-query-page-daily'
 import { toolsLabLeadFollowUp, toolsLabReportEmailReceipt } from './tools-lab-lead-followup'
 import { dailyPlanAutoPublish } from './daily-plan-auto-publish'
@@ -53,6 +53,7 @@ import { planDraftFromPrescription } from './plan-draft-from-prescription'
 import { crmEmailSendReceipt } from './crm-email-send-receipt'
 import { zhangqianDiscovery } from './zhangqian-discovery'
 import { triggeredSendWelcomeDispatch, triggeredSendWelcomeSweep } from './triggered-send-welcome-sweep'
+import { triggeredSendProviderEvent } from './triggered-send-provider-event'
 import { crmDncReengageSweep } from './crm-dnc-reengage-sweep'
 import { socialWeeklyDraft } from './cloud-social-weekly-draft'
 import { reelScheduledGoPublic } from './cloud-reel-scheduled-go-public'
@@ -61,7 +62,6 @@ import { socialReadbackWeekly } from './cloud-social-readback-weekly'
 
 export const cloudFunctions = [
   promoPlanDailyWatch,
-  adHeartbeat,
   adBreakdownCapture,
   adsTrackingPreflight,
   adsTrackingLaunchWatch,
@@ -110,6 +110,7 @@ export const cloudFunctions = [
   simaqianReputationWeekly,
   // 包拯：每周复核 AI 判客人阶段准不准（只读；总开关 BAOZHENG_ENABLED 默认关）
   baozhengWeekly,
+  distributorMonthlyStatement,
   gscPageDailyFanOut,
   gscPageDailyPull,
   gscQueryPageDailyFanOut,
@@ -131,6 +132,8 @@ export const cloudFunctions = [
   zhangqianDiscovery,
   triggeredSendWelcomeDispatch,
   triggeredSendWelcomeSweep,
+  // ME 自动信的回执：送达 / 退信 / 投诉写回发信账本（只认 ME 自己发的信；系统邮件的回执对不上就结束）
+  triggeredSendProviderEvent,
   // 客人自己回来找我们 → 自动解除「别再联系」（每 15 分钟；默认只演练，名单里的客户才真写）
   crmDncReengageSweep,
   // 社媒每周出稿编排（两个开关默认关；关着也每天写一行 disabled 回执）

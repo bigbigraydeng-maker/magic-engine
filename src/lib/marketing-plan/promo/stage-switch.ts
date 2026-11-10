@@ -11,6 +11,9 @@ export interface SwitchEvidence {
   spendMajor: number | null
   targetMajor: number | null
   currency: string | null
+  /** False when the client's primary result is not lead or messaging. */
+  primaryKnown?: boolean
+  resultNoun?: '留资' | '开聊'
 }
 export type SwitchVerdict =
   | { kind: 'propose'; text: string }
@@ -34,13 +37,20 @@ function money(amount: number, currency: string | null): string {
 function windowDays(startedOn: string, stableEnd: string): number {
   return dayNumber(stableEnd) - dayNumber(startedOn) + 1
 }
+function noun(evidence: SwitchEvidence): string {
+  return evidence.resultNoun === '开聊' ? '开聊' : '留资'
+}
+
 function evidenceBlock(evidence: SwitchEvidence, startedOn: string): SwitchVerdict | null {
   if (evidence.capture !== 'fresh') {
     const why = evidence.capture === 'stale' ? '广告快照抓取太旧' : evidence.capture === 'incomplete' ? '广告快照没抓全' : evidence.capture === 'missing' ? '找不到广告快照抓取记录' : '广告快照抓取记录读不出来'
     return { kind: 'unreadable', text: `${why}，不能判断能不能从试投进入放量。过期只看抓取记录，不拿旧快照硬判。` }
   }
+  if (evidence.primaryKnown === false) {
+    return { kind: 'unreadable', text: '主结果还没配成留资或开聊，不能判断能不能放量。不会用另一个数顶上。' }
+  }
   if (!evidence.asOf || !evidence.stableEnd || evidence.datesSeen === null || evidence.leads === null || evidence.spendMajor === null) {
-    return { kind: 'unreadable', text: '试投以来的留资或花费没读全，不能把没读到的天当成零。这次不提案。' }
+    return { kind: 'unreadable', text: `试投以来的${noun(evidence)}或花费没读全，不能把没读到的天当成零。这次不提案。` }
   }
   if (evidence.targetMajor === null) {
     return { kind: 'unreadable', text: '目标单次留资成本还没在设置里填，不能判断能不能放量。不会用一个写死的数字顶上。' }
@@ -54,7 +64,7 @@ function evidenceBlock(evidence: SwitchEvidence, startedOn: string): SwitchVerdi
     return { kind: 'unreadable', text: '有的天没有花费记录，不能把空白当成零留资。这次不提案。' }
   }
   if (evidence.leads < STAGE_SWITCH_MIN_LEADS) {
-    return { kind: 'hold', text: `稳定记录里的留资是 ${evidence.leads} 条，还不到 ${STAGE_SWITCH_MIN_LEADS} 条。先继续试投。` }
+    return { kind: 'hold', text: `稳定记录里的${noun(evidence)}是 ${evidence.leads} 条，还不到 ${STAGE_SWITCH_MIN_LEADS} 条。先继续试投。` }
   }
   return null
 }
@@ -62,24 +72,29 @@ function costVerdict(evidence: SwitchEvidence): SwitchVerdict {
   const leads = evidence.leads ?? 0
   const spend = evidence.spendMajor ?? 0
   const target = evidence.targetMajor ?? 0
-  if (leads <= 0) return { kind: 'unreadable', text: '留资读数不正常，这次不提案。' }
+  if (leads <= 0) return { kind: 'unreadable', text: `${noun(evidence)}读数不正常，这次不提案。` }
   const cplCents = Math.round((spend / leads) * 100)
   const targetCents = Math.round(target * 100)
   const shown = money(cplCents / 100, evidence.currency)
   const goal = money(target, evidence.currency)
   if (cplCents > targetCents) {
-    return { kind: 'hold', text: `单次留资成本 ${shown}，高于设置里的目标 ${goal}。先继续试投，不另起放量计划。` }
+    return { kind: 'hold', text: `单次${noun(evidence)}成本 ${shown}，高于设置里的目标 ${goal}。先继续试投，不另起放量计划。` }
   }
   return {
     kind: 'propose',
-    text: `试投已满 ${STAGE_SWITCH_MIN_DAYS} 天，留资 ${leads} 条，单次成本 ${shown}，不高于目标 ${goal}。可以另起一份放量草稿。正在跑的计划不会被改，也不会自动重新批准。`,
+    text: `试投已满 ${STAGE_SWITCH_MIN_DAYS} 天，${noun(evidence)} ${leads} 条，单次成本 ${shown}，不高于目标 ${goal}。可以另起一份放量草稿。正在跑的计划不会被改，也不会自动重新批准。`,
   }
 }
 export function judgeSwitch(spec: PromoSpec, evidence: SwitchEvidence): SwitchVerdict {
   const row = spec.delivery
   if (!row) return { kind: 'not_marked', text: '这份计划还没写入试投、放量或稳住。下面按试投来提醒。已批准的计划不会因此被重新批准。' }
   if (row.stage === 'steady') return { kind: 'steady', text: `${STAGE_LABEL.steady}阶段不提案加预算，也不另起计划。` }
-  if (row.stage === 'scale') return { kind: 'scale_hold', text: '放量之后什么时候进入稳住，规则还没定。这次不提案。' }
+  if (row.stage === 'scale') {
+    return {
+      kind: 'scale_hold',
+      text: '放量不会自动改成稳住。要记下稳住，请在这页点「标为稳住」。这里不另起计划，也不改预算。',
+    }
+  }
   const blocked = evidenceBlock(evidence, row.started_on)
   return blocked ?? costVerdict(evidence)
 }

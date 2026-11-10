@@ -6,7 +6,7 @@
 
 import type { MarketingPlan } from '../types'
 import { hasPromoField, readPromoSpec } from './spec'
-import { promoContentHash } from './content-hash'
+import { promoContentMatches } from './content-hash'
 import { LIGHT_META } from './labels'
 import type { Light } from './gates'
 
@@ -108,7 +108,7 @@ export function describeApprovalRecord(
   if (spec !== null) {
     if (approvedHash === null) {
       contentText = '这份计划的批准没有记录内容版本（较早的计划）。'
-    } else if (approvedHash === promoContentHash(spec)) {
+    } else if (promoContentMatches(approvedHash, spec)) {
       contentText = '批准的就是现在这一版内容。'
     } else {
       contentText = '⚠️ 批准的不是现在这一版内容：批准之后计划内容被改过。请退回草稿后重新批准。'

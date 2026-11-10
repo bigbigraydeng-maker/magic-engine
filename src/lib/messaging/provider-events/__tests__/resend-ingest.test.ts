@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createHmac } from 'node:crypto'
 import { handleResendWebhook, sanitizeValue, errorCodeOf } from '../resend-ingest'
 import type { ProviderEventInput, ProviderEventStore } from '../types'
+import type { ProviderEventReceivedEvent } from '../events'
 
 // 测试用密钥（合法格式：whsec_ + base64，解码后 >= 16 字节）
 const SECRET = 'whsec_' + 'ABEiM0RVZneImaq7zN3u/wARIjNEVWZ3'
@@ -68,6 +69,16 @@ interface CallOpts {
   env?: (name: string) => string | undefined
   omit?: 'id' | 'ts' | 'sig'
   nowSec?: number
+  emit?: (event: ProviderEventReceivedEvent) => Promise<void>
+}
+
+// Every wake-up event the intake sends, in order (reset before each test).
+let emitted: ProviderEventReceivedEvent[] = []
+beforeEach(() => {
+  emitted = []
+})
+const recordEmit = async (event: ProviderEventReceivedEvent): Promise<void> => {
+  emitted.push(event)
 }
 
 // 调用被测入口，自动按需签名
@@ -95,6 +106,7 @@ async function call(
     svixTimestamp,
     svixSignature,
     env,
+    emit: opts.emit ?? recordEmit,
     nowSec: opts.nowSec,
   })
 }
@@ -775,5 +787,63 @@ describe('sanitizeValue', () => {
     expect(arr[2]).toBe(true)
     expect(arr[3]).toBeNull()
     expect(nested.emoji).toBe(emoji)
+  })
+})
+
+describe('handleResendWebhook - 叫醒回执消费方（P2-2b）', () => {
+  it('sends one wake-up event per stored receipt, keyed by the provider event id, with no address in it', async () => {
+    const { store } = makeStore()
+    const res = await call(store, eventBody('email.delivered'), { id: 'msg_wake_1' })
+    expect(res.status).toBe(200)
+    expect(emitted).toEqual([
+      {
+        id: 'provider_event:resend:system:msg_wake_1',
+        name: 'crm.provider_event.received',
+        data: { provider: 'resend', account: 'system', provider_event_id: 'msg_wake_1' },
+      },
+    ])
+    expect(JSON.stringify(emitted)).not.toContain('@')
+  })
+
+  it('sends it again for a duplicate delivery (the first attempt may have stored the row but failed to emit)', async () => {
+    const { store } = makeStore()
+    await call(store, eventBody(), { id: 'msg_dup' })
+    const second = await call(store, eventBody(), { id: 'msg_dup' })
+    expect(second.body).toEqual({ ok: true, duplicate: true })
+    expect(emitted.map((e) => e.id)).toEqual(['provider_event:resend:system:msg_dup', 'provider_event:resend:system:msg_dup'])
+  })
+
+  it('answers 500 when the event cannot be sent, so Resend retries; the row is already stored', async () => {
+    const { store, rows } = makeStore()
+    const res = await call(store, eventBody(), {
+      id: 'msg_emit_fail',
+      emit: async () => {
+        throw new Error('inngest down')
+      },
+    })
+    expect(res).toEqual({ status: 500, body: { ok: false, error: 'emit_failed' } })
+    expect(rows).toHaveLength(1)
+    expect(logged()).toContain('emit_failed')
+    expect(logged()).not.toContain('inngest down')
+  })
+
+  it('sends nothing for refused or ignored requests', async () => {
+    const { store } = makeStore()
+    await call(store, eventBody(), { account: 'cts' })
+    await call(store, eventBody(), { secret: 'whsec_' + 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' })
+    await call(store, eventBody('email.opened'), { id: 'msg_opened' })
+    await call(store, 'not json', { id: 'msg_bad' })
+    expect(emitted).toEqual([])
+  })
+
+  it('sends nothing when the row could not be stored', async () => {
+    const store: ProviderEventStore = {
+      insert: async () => {
+        throw Object.assign(new Error('boom'), { code: '08006' })
+      },
+    }
+    const res = await call(store, eventBody(), { id: 'msg_store_fail' })
+    expect(res.status).toBe(500)
+    expect(emitted).toEqual([])
   })
 })

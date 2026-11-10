@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { audienceLadder } from '../audience-ladder'
 import { defaultTestDelivery, ratioWarning } from '../delivery-stage'
+import { primaryMetricOf, windowPrimaryTotals } from '../stage-evidence'
 import { withBudgetRole } from '../form'
 import { promoContentHash } from '../content-hash'
 import { buildScaleDraft, judgeSwitch, type SwitchEvidence } from '../stage-switch'
@@ -37,11 +39,13 @@ describe('阶段写在原有计划里，旧计划指纹不变', () => {
     expect(promoContentHash(parsed.spec)).toBe(promoContentHash(baseSpec()))
   })
 
-  it('写上阶段会改变指纹，所以必须另批，不会自动算已批准', () => {
+  it('只改投放阶段不换指纹；改每天总上限才会换', () => {
     const plain = parsePromoSpec(baseSpec())
-    const next = parsePromoSpec(marked('test'))
+    const next = parsePromoSpec(marked('steady'))
     expect(plain.ok && next.ok).toBe(true)
     if (!plain.ok || !next.ok) return
+    expect(promoContentHash(next.spec)).toBe(promoContentHash(plain.spec))
+    next.spec.daily_total_cap_cents = (next.spec.daily_total_cap_cents ?? 0) + 100
     expect(promoContentHash(next.spec)).not.toBe(promoContentHash(plain.spec))
   })
 
@@ -53,6 +57,7 @@ describe('阶段写在原有计划里，旧计划指纹不变', () => {
     expect(parsePromoSpec(spec).ok).toBe(true)
     expect(ratioWarning(spec).level).toBe('warn')
     expect(ratioWarning(spec).text).toContain('不拦住批准')
+    expect(judgeSwitch(spec, fresh()).kind).toBe('propose')
   })
 })
 
@@ -63,6 +68,34 @@ describe('试投证据够了才建议放量', () => {
     expect(verdict.text).toContain('不会自动重新批准')
   })
 
+  it('满 14 天、30 个主结果、成本等于目标才建议；差一档不建议', () => {
+    expect(judgeSwitch(marked('test'), fresh({ leads: 30, spendMajor: 600 })).kind).toBe('propose')
+    expect(judgeSwitch(marked('test'), fresh({ leads: 29, spendMajor: 580 })).kind).toBe('hold')
+    expect(judgeSwitch(marked('test'), fresh({ leads: 30, spendMajor: 600.3 })).kind).toBe('hold')
+    expect(judgeSwitch(marked('test'), fresh({ asOf: '2026-11-14', stableEnd: '2026-11-13', datesSeen: 13 })).kind).toBe('hold')
+    expect(judgeSwitch(marked('test'), fresh({ primaryKnown: false, leads: null })).kind).toBe('unreadable')
+  })
+
+  it('主结果按客户配置计数，缺数不当成 0', () => {
+    expect(primaryMetricOf('lead')).toBe('leads')
+    expect(primaryMetricOf('messaging_started')).toBe('messaging_conversations')
+    expect(primaryMetricOf('other')).toBeNull()
+    const rows = [{ insight_date: '2026-11-02', spend: 10, leads: 1, messaging_conversations: 30 }]
+    expect(windowPrimaryTotals(rows, '2026-11-01', '2026-11-14', 'messaging_conversations')?.leads).toBe(30)
+    expect(windowPrimaryTotals(rows, '2026-11-01', '2026-11-14', 'leads')?.leads).toBe(1)
+    const missing = [{ insight_date: '2026-11-02', spend: 10, leads: 30, messaging_conversations: null }]
+    expect(windowPrimaryTotals(missing, '2026-11-01', '2026-11-14', 'messaging_conversations')).toBeNull()
+  })
+
+  it('放量不会自动建议改成稳住', () => {
+    const scaled = judgeSwitch(marked('scale'), fresh())
+    expect(scaled.kind).toBe('scale_hold')
+    if (scaled.kind !== 'scale_hold') return
+    expect(scaled.text).toContain('标为稳住')
+    expect(scaled.text).toContain('不改预算')
+    expect(scaled.text.includes('提议回到稳住')).toBe(false)
+  })
+
   it('差一条、贵一点、天数不够、目标没填、快照过期，都不建议', () => {
     expect(judgeSwitch(marked('test'), fresh({ leads: 29 })).kind).toBe('hold')
     expect(judgeSwitch(marked('test'), fresh({ spendMajor: 630 })).kind).toBe('hold')
@@ -70,7 +103,9 @@ describe('试投证据够了才建议放量', () => {
     expect(judgeSwitch(marked('test'), fresh({ targetMajor: null })).kind).toBe('unreadable')
     expect(judgeSwitch(marked('test'), fresh({ capture: 'stale' })).kind).toBe('unreadable')
     expect(judgeSwitch(marked('test'), fresh({ capture: 'incomplete' })).kind).toBe('unreadable')
-    expect(judgeSwitch(marked('scale'), fresh()).kind).toBe('scale_hold')
+    const scaled = judgeSwitch(marked('scale'), fresh())
+    expect(scaled.kind).toBe('scale_hold')
+    if (scaled.kind === 'scale_hold') expect(scaled.text).toContain('不改预算')
     expect(judgeSwitch(marked('steady'), fresh()).kind).toBe('steady')
     expect(judgeSwitch(baseSpec(), fresh()).kind).toBe('not_marked')
   })
@@ -89,6 +124,28 @@ describe('试投证据够了才建议放量', () => {
     expect(row.approved_at).toBeNull()
     expect(row.generation_meta).not.toHaveProperty('approval_receipt')
     expect(row.plan_data.tasks).toEqual([])
+  })
+})
+
+describe('受众顺序只是建议', () => {
+  const banned = /华人|中国人|华裔|Chinese|ethnicity/i
+
+  it('顺序是广泛、兴趣、相似受众，种子含已报价，不按族裔，也不新建', () => {
+    const view = audienceLadder({ stage: 'test', countries: ['NZ'], qualified: 'ready', quoted: 'included' })
+    const text = `${view.note} ${view.rungs.map(rung => `${rung.title} ${rung.detail}`).join(' ')}`
+    expect(view.rungs.map(rung => rung.title)).toEqual(['广泛', '兴趣', '相似受众'])
+    expect(view.rungs.find(rung => rung.suggested)?.title).toBe('广泛')
+    expect(text).toContain('已报价')
+    expect(text).toContain('不会在广告后台新建')
+    expect(text).not.toMatch(banned)
+  })
+
+  it('没有合格客人，或已报价被排除时，放量不停在相似受众', () => {
+    const empty = audienceLadder({ stage: 'scale', countries: ['NZ'], qualified: 'empty', quoted: 'absent' })
+    const excluded = audienceLadder({ stage: 'scale', countries: ['NZ'], qualified: 'ready', quoted: 'excluded' })
+    expect(empty.rungs.find(rung => rung.suggested)?.title).toBe('兴趣')
+    expect(excluded.rungs.find(rung => rung.suggested)?.title).toBe('兴趣')
+    expect(excluded.rungs[2].detail).toContain('已报价')
   })
 })
 

@@ -146,6 +146,23 @@ describe('creative state cards', () => {
     expect(out.skipped).toContain('promotion_cap')
   })
 
+  it('a proposal from the previous New Zealand day does not use up today', async () => {
+    const now = new Date('2026-11-09T12:30:00.000Z')
+    const yesterday = store([hold({ proposedOn: '2026-11-09' })])
+    const again = await proposeCreativeStateCards(kernel(yesterday.client), {
+      clientId: CLIENT, clicker: { kind: 'agent', email: null },
+      decision: { proposals: [proposal('move_to_scale')], skipped: [] }, now,
+    })
+    expect(again.issued.map((item) => item.kind)).toEqual(['move_to_scale'])
+    const today = store([hold({ proposedOn: '2026-11-10' })])
+    const blocked = await proposeCreativeStateCards(kernel(today.client), {
+      clientId: CLIENT, clicker: { kind: 'agent', email: null },
+      decision: { proposals: [proposal('new_plan')], skipped: [] }, now,
+    })
+    expect(blocked.issued).toEqual([])
+    expect(blocked.skipped).toContain('promotion_cap')
+  })
+
   it('creates a paused scale ad once, and does not write again when the read-back disagrees', async () => {
     const db = store([hold()])
     const used = ports()
@@ -193,6 +210,55 @@ describe('creative state cards', () => {
     const quiet = await confirmCreativeStateCard(kernel(stuck.client), input(), stuckPorts)
     expect(quiet.wroteMeta).toBe(false)
     expect(stuckPorts.createPaused).not.toHaveBeenCalled()
+  })
+
+  it('does not write when a daily card is past NZ midnight, even if confirm would say yes', async () => {
+    const db = store([hold({
+      lifetime: 'nz_day',
+      issuedAt: '2026-11-07T17:00:00.000Z',
+    })])
+    const used = ports()
+    const result = await confirmCreativeStateCard(kernel(db.client), input(), used)
+    expect(result.wroteMeta).toBe(false)
+    expect(result.resultLine).toContain('23:59')
+    expect(used.createPaused).not.toHaveBeenCalled()
+    expect(used.pause).not.toHaveBeenCalled()
+    expect(used.decide).not.toHaveBeenCalled()
+  })
+
+  it('keeps a daily card alive past 30 minutes and refuses once the rule is gone or the snapshot is stale', async () => {
+    const alive = store([hold({
+      lifetime: 'nz_day',
+      issuedAt: new Date(NOW.getTime() - 31 * 60 * 1000).toISOString(),
+    })])
+    const alivePorts = ports()
+    const ok = await confirmCreativeStateCard(kernel(alive.client), input(), alivePorts)
+    expect(ok.wroteMeta).toBe(true)
+    expect(alivePorts.createPaused).toHaveBeenCalledTimes(1)
+
+    const cleared = store([hold({ lifetime: 'nz_day', issuedAt: NOW.toISOString() })])
+    const clearedPorts = ports({ recheck: vi.fn(async () => ({ proposals: [], skipped: [] })) })
+    await expect(confirmCreativeStateCard(kernel(cleared.client), input(), clearedPorts)).rejects.toThrow(/不成立/)
+    expect(clearedPorts.createPaused).not.toHaveBeenCalled()
+
+    const stale = store([hold({ lifetime: 'nz_day', issuedAt: NOW.toISOString() })])
+    const stalePorts = ports({ recheck: vi.fn(async () => ({ proposals: [], skipped: ['stale_snapshot'] })) })
+    await expect(confirmCreativeStateCard(kernel(stale.client), input(), stalePorts)).rejects.toThrow(/快照/)
+    expect(stalePorts.createPaused).not.toHaveBeenCalled()
+    expect(stalePorts.pause).not.toHaveBeenCalled()
+  })
+
+  it('still drops a manual card 30 minutes after it was issued', async () => {
+    const db = store([hold({
+      lifetime: 'urgent_30m',
+      issuedAt: new Date(NOW.getTime() - 31 * 60 * 1000).toISOString(),
+    })])
+    const used = ports()
+    const result = await confirmCreativeStateCard(kernel(db.client), input(), used)
+    expect(result.wroteMeta).toBe(false)
+    expect(result.resultLine).toContain('30 分钟')
+    expect(used.createPaused).not.toHaveBeenCalled()
+    expect(used.decide).not.toHaveBeenCalled()
   })
 
   it('sends the three cards to the creative-state confirm route', () => {

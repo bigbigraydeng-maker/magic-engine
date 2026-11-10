@@ -306,6 +306,23 @@ describe('decideShadow', () => {
     expect(decision.annotations.sales_email).toBe(true)
   })
 
+  it("ME's own automated letter is not a sales e-mail, but it does count toward the cap", async () => {
+    const fields = { source: 'touchpoint' as const, id: 'send-1', at: '2026-11-02T00:00:00Z', subject: 'me_send:welcome', address: '' }
+    const meLetter = makeItem({ ...fields, automated: true })
+    const { ports } = makePorts({ evidence: { ok: true, items: [meLetter], legacy: NOT_WELCOMED } })
+    const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports })
+    expect(decision.kind).toBe('write')
+    if (decision.kind !== 'write') return
+    expect(decision.reasonCode).not.toBe('sales_email_exists')
+    expect(decision.annotations.sales_email).toBe(false)
+    expect(decision.annotations.frequency_count).toBe(1)
+
+    // the same item without the machine mark IS read as a sales e-mail: the mark is what makes the difference
+    const { ports: humanPorts } = makePorts({ evidence: { ok: true, items: [makeItem(fields)], legacy: NOT_WELCOMED } })
+    const human = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: humanPorts })
+    expect(human.kind === 'write' && human.reasonCode).toBe('sales_email_exists')
+  })
+
   it('reason 8: frequency_full', async () => {
     const { ports } = makePorts({
       evidence: {

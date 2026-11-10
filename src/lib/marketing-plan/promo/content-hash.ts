@@ -4,7 +4,8 @@ import type { PromoSpec } from './spec'
 /**
  * 推广结构的内容指纹：同样的内容永远同一个值，改了任何一处金额 / 受众 / 素材 / 日期 / 目标就变。
  * 序列化复用 plan-guard 的 stableStringify（键排序、数组保序），和「推广结构是否被改动」用同一把尺。
- * 剔除 checks（客户端可写、保存时被清空、判定不参与）与 gate_snapshot（服务端留底，不属于被批准的内容）。
+ * 剔除 checks（客户端可写、保存时被清空、判定不参与）、gate_snapshot（服务端留底）
+ * 和 delivery（投放阶段不是预算、受众、素材或目标；标阶段不能让已批准计划被当成内容被改过）。
  *
  * 还剔除经营判断卡里的「剩余座位」三项（子牙 2026-10-18 复审必改项 1）：
  * 座位数是天天变的事实，不是「这笔钱该不该批」的内容。把它算进指纹的话，
@@ -29,14 +30,33 @@ function stripVolatile(spec: PromoSpec): PromoSpec {
   }
 }
 
-export function promoContentHash(spec: PromoSpec): string {
+function contentHash(spec: PromoSpec, skipDelivery: boolean): string {
   // 用 Object.entries 过滤，避免解构出未使用变量触发 lint 报错。
   const content: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(stripVolatile(spec))) {
     if (key === 'checks' || key === 'gate_snapshot') continue
+    if (skipDelivery && key === 'delivery') continue
     content[key] = value
   }
   return sha256Hex(stableStringify(content)).slice(0, 16)
+}
+
+/** 新指纹不含投放阶段。标稳住或改回试投不会让已批准计划被当成内容被改过。 */
+export function promoContentHash(spec: PromoSpec): string {
+  return contentHash(spec, true)
+}
+
+/**
+ * 阶段曾经算进指纹。已批准计划上的旧回执、旧核实仍认这个值，
+ * 这样「只是把阶段拆出指纹」不会让正在跑的计划被当成内容被改过。
+ */
+export function promoContentMatches(storedHash: string, spec: PromoSpec): boolean {
+  return storedHash === contentHash(spec, true) || storedHash === contentHash(spec, false)
+}
+
+/** 阶段还算进指纹时的值。只给测试认出旧回执，新的批准不再这样写。 */
+export function __promoContentHashWithDeliveryForTest(spec: PromoSpec): string {
+  return contentHash(spec, false)
 }
 
 /**

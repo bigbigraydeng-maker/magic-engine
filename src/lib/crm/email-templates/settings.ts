@@ -6,6 +6,7 @@ import type {
 } from './types'
 import { TEMPLATE_KEY_RE } from './template-store'
 import { checkCatalogueAgainst, parseCatalogueSettings, serialiseCatalogue } from './catalogue-settings'
+import { checkLinkTrackingAgainst, parseLinkTrackingSettings, serialiseLinkTracking } from './link-tracking-settings'
 
 export type ParseSettingsResult =
   | { ok: true; settings: EmailSettings }
@@ -534,7 +535,7 @@ function parseProviders(
     sink.add(path, 'must be an object')
     return null
   }
-  for (const key of unknownKeys(value, ['published_tours', 'catalogue'])) {
+  for (const key of unknownKeys(value, ['published_tours', 'catalogue', 'link_tracking'])) {
     sink.add(`${path}.${key}`, 'unknown key')
   }
   const out: EmailSettings['providers'] = {}
@@ -548,6 +549,11 @@ function parseProviders(
     const catalogue = parseCatalogueSettings(value.catalogue, `${path}.catalogue`, (p, m) => sink.add(p, m))
     if (catalogue === null) ok = false
     else out.catalogue = catalogue
+  }
+  if ('link_tracking' in value) {
+    const tracking = parseLinkTrackingSettings(value.link_tracking, `${path}.link_tracking`, (p, m) => sink.add(p, m))
+    if (tracking === null) ok = false
+    else out.linkTracking = tracking
   }
   return ok ? out : null
 }
@@ -661,7 +667,10 @@ export function parseEmailSettingsStrict(raw: unknown): ParseSettingsResult {
   const sink = new ErrorSink()
   readTopLevelKeys(raw, sink)
   const settings = assemble(readParts(raw, sink))
-  if (settings !== null) checkCatalogueAgainst(settings, (p, m) => sink.add(p, m))
+  if (settings !== null) {
+    checkCatalogueAgainst(settings, (p, m) => sink.add(p, m))
+    checkLinkTrackingAgainst(settings, (p, m) => sink.add(p, m))
+  }
   if (sink.errors.length > 0 || settings === null) {
     return { ok: false, errors: sink.errors }
   }
@@ -680,6 +689,7 @@ export function serialiseEmailSettings(
   }
   // Only written when set: a version without it stays readable by code that predates the catalogue line.
   if (settings.providers.catalogue) providers.catalogue = serialiseCatalogue(settings.providers.catalogue)
+  if (settings.providers.linkTracking) providers.link_tracking = serialiseLinkTracking(settings.providers.linkTracking)
   return {
     enabled: settings.enabled,
     send_mailbox: settings.sendMailbox,
