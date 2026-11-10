@@ -26,7 +26,6 @@ export const metadata: Metadata = {
 const IMG = '/marketing/ai-steward'
 const PHOTO_CREDITS = ['Brooke Cagle', 'Sulthan Auliya', 'Cherrydeck', 'Vitaly Gariev', 'Jakob Owens']
 const RECOMMENDED_PLAN = 'videos-16'
-const CONTACT_HREF = '/contact'
 
 const bg = (file: string) => ({ backgroundImage: `url('${IMG}/${file}')` })
 const Br = () => <br className="dbr" />
@@ -88,11 +87,11 @@ const STEPS = [
 ] as const
 
 /** A consult prompt placed between sections, so the reader never has to scroll back to the top to act. */
-function CtaBand({ title, note, cta = '预约免费咨询' }: { title: string; note: string; cta?: string }) {
+function CtaBand({ title, note, href, cta = '预约免费咨询' }: { title: string; note: string; href: string; cta?: string }) {
   return (
     <div className="ctaband">
       <div><div className="cb-t serif">{title}</div><div className="cb-n">{note}</div></div>
-      <Link href={CONTACT_HREF} className="btn gold-solid">{cta}</Link>
+      <Link href={href} className="btn gold-solid">{cta}</Link>
     </div>
   )
 }
@@ -106,7 +105,7 @@ function Hero({ applyHref }: { applyHref: string }) {
     <>
       <div className="nav">
         <div className="logo">MAGIC ENGINE</div>
-        <div className="links"><a href="#why">服务</a><a href="#hot">热点</a><a href="#pricing">价格</a><Link href={applyHref}>成为经销商</Link><Link href={CONTACT_HREF}>开始合作</Link></div>
+        <div className="links"><a href="#why">服务</a><a href="#hot">热点</a><a href="#pricing">价格</a><Link href={applyHref}>开始合作</Link></div>
       </div>
       <section className="hero" style={bg('owner.jpg')}>
         <div className="veil" />
@@ -114,7 +113,7 @@ function Hero({ applyHref }: { applyHref: string }) {
           
           <h1 className="serif">老板不用出镜，<br /><span className="goldgrad">每天都有新视频</span></h1>
           <p className="lead muted">AI 数字人管家，从脚本、出片到发布和数据，一站完成。<Br />由熟悉新西兰市场的本地团队，和你一起经营账号。</p>
-          <div className="ctas"><Link href={CONTACT_HREF} className="btn gold-solid">预约免费咨询</Link><a href="#pricing" className="btn line">查看价格</a></div>
+          <div className="ctas"><Link href={applyHref} className="btn gold-solid">预约免费咨询</Link><a href="#pricing" className="btn line">查看价格</a></div>
         </div>
         <div className="phone" aria-hidden="true">
           <div className="screen" style={bg('hero.jpg')}>
@@ -242,7 +241,7 @@ function Features() {
   )
 }
 
-function Pricing() {
+function Pricing({ applyHref }: { applyHref: string }) {
   return (
     <section className="sec" id="pricing">
       <div className="head">
@@ -258,7 +257,7 @@ function Pricing() {
               <div className="v">每月 {plan.videosPerMonth} 条</div>
               <div className={hl ? 'p goldgrad' : 'p'}>{formatDollars(plan.monthlyCents, true)}<small>/月</small></div>
               <div className="e">平均每条 {formatDollars(Math.round(plan.monthlyCents / plan.videosPerMonth))}</div>
-              <Link href={CONTACT_HREF} className="plan-cta">咨询这一档 →</Link>
+              <Link href={applyHref} className="plan-cta">咨询这一档 →</Link>
             </div>
           )
         })}
@@ -307,15 +306,15 @@ export default async function AiStewardPage({ searchParams }: { searchParams: Pr
       <div className="inner">
         <Hero applyHref={applyHref} />
         <Pillars />
-        <CtaBand title="想知道你的行业在新西兰该怎么做内容？" note="先免费聊一次，听听我们怎么看你的账号。" />
+        <CtaBand href={applyHref} title="想知道你的行业在新西兰该怎么做内容？" note="先免费聊一次，听听我们怎么看你的账号。" />
         <LocalCraft />
         <Compare />
-        <CtaBand title="让本地团队帮你看一眼账号" note="哪里像外地写的、哪些本地节点漏了，一次说清楚。" cta="免费账号诊断" />
+        <CtaBand href={applyHref} title="让本地团队帮你看一眼账号" note="哪里像外地写的、哪些本地节点漏了，一次说清楚。" cta="免费账号诊断" />
         <Hot />
         <Engine />
-        <CtaBand title="这个月的热点，你的账号跟上了吗？" note="定好方向后，3 个工作日出第一条。" />
+        <CtaBand href={applyHref} title="这个月的热点，你的账号跟上了吗？" note="定好方向后，3 个工作日出第一条。" />
         <Features />
-        <Pricing />
+        <Pricing applyHref={applyHref} />
         <Steps />
         <PartnerBand applyHref={applyHref} />
         <section className="final" style={bg('owner.jpg')}>
@@ -324,10 +323,10 @@ export default async function AiStewardPage({ searchParams }: { searchParams: Pr
             
             <h2 className="serif">下个月，你的账号<br /><span className="goldgrad">每天都有新内容</span></h2>
             <p className="sub muted">先免费聊一次，看看适不适合你的生意。</p>
-            <div className="ctas"><Link href={CONTACT_HREF} className="btn gold-solid">预约免费咨询</Link></div>
+            <div className="ctas"><Link href={applyHref} className="btn gold-solid">预约免费咨询</Link></div>
           </div>
         </section>
-        <Link href={CONTACT_HREF} className="float-cta" aria-label="免费咨询">免费咨询</Link>
+        <Link href={applyHref} className="float-cta" aria-label="免费咨询">免费咨询</Link>
         <footer className="foot"><span>© Magic Engine · 新西兰　·　<Link href={applyHref} className="foot-link">成为经销商</Link></span><span>图片来自 Unsplash：{PHOTO_CREDITS.join('、')}</span></footer>
       </div>
     </main>
