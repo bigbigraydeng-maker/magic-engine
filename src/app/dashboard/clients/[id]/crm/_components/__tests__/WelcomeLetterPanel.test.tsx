@@ -312,19 +312,36 @@ describe('WelcomeLetterPanel — 最近发送 and 「结果不明」 (之二乙)
   })
 
   it('🔴 how many letters wait for a person comes from the server (every unknown one, not just the rows shown)', async () => {
-    statusBody = status({ recent_sends: [send()], unknown_sends: { count: 230, more: true } })
+    statusBody = status({ recent_sends: [send()], unknown_sends: { count: 200, more: true } })
     render(<WelcomeLetterPanel clientId={CLIENT} />)
     const count = (await screen.findByTestId('unknown-count')).textContent
-    expect(count).toContain('有 230 封信结果不明')
+    expect(count).toContain('至少有 200 封信结果不明')
     expect(count).toContain('太多了')
+    cleanup()
+    statusBody = status({ recent_sends: [send()], unknown_sends: { count: 3, more: false } })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    const exact = (await screen.findByTestId('unknown-count')).textContent
+    expect(exact).toContain('有 3 封信结果不明')
+    expect(exact).not.toContain('至少')
   })
 
   it('🔴 a letter marked 「没发出」 that a receipt later proved went out is flagged: the timeline still says otherwise', async () => {
     statusBody = status({
-      recent_sends: [send({ status: 'delivered', reason_code: 'not_sent_confirmed', provider_impact: 'PROVIDER_ACCEPTED', resolution: { outcome: 'not_sent', by: 'pm@example.com', at: '2026-11-20T01:00:00.000Z' } })],
+      recent_sends: [send({ status: 'delivered', reason_code: 'not_sent_confirmed', provider_impact: 'PROVIDER_ACCEPTED', resolution: { outcome: 'not_sent', by: 'pm@example.com', at: '2026-11-20T01:00:00.000Z' }, went_out_after_not_sent: true })],
     })
     render(<WelcomeLetterPanel clientId={CLIENT} />)
-    expect((await screen.findByTestId('receipt-overrode')).textContent).toContain('别让销售再手发')
+    const flag = (await screen.findByTestId('receipt-overrode')).textContent
+    expect(flag).toContain('别让销售再手发')
+    expect(flag).toContain('可能还写着')
+  })
+
+  it('🔴 a letter marked 「已发出」 that a receipt later said did not go is flagged: the guest has no welcome letter', async () => {
+    statusBody = status({
+      recent_sends: [send({ status: 'suppressed', reason_code: 'sent_confirmed', resolution: { outcome: 'sent', by: 'pm@example.com', at: '2026-11-20T01:00:00.000Z' }, not_sent_after_sent: true })],
+    })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    expect((await screen.findByTestId('receipt-says-not-sent')).textContent).toContain('请销售手发')
+    expect(screen.queryByTestId('receipt-overrode')).toBeNull()
   })
 
   it('a letter still "being sent" more than 20 hours after its first try says it will not be retried', async () => {
@@ -436,6 +453,8 @@ describe('WelcomeLetterPanel — 最近发送 and 「结果不明」 (之二乙)
     expect((await screen.findByTestId('trial-only-note')).textContent).toContain('只发内部邮箱的试跑')
     expect(screen.getByTestId('formal-proposal-note').textContent).toContain('正式名单就算批了也一封都不发')
     expect(screen.getByTestId('formal-proposal-note').textContent).toContain('替换掉现在生效的那份授权')
+    // What is in force is the real list, not a trial: nothing about a trial stopping.
+    expect(screen.getByTestId('formal-proposal-note').textContent).not.toContain('试跑也就停了')
     const auth = screen.getByTestId('authorization').textContent ?? ''
     expect(auth).toContain('正式名单一封都不发')
     expect(auth).toContain('这一版不发')
@@ -444,6 +463,12 @@ describe('WelcomeLetterPanel — 最近发送 and 「结果不明」 (之二乙)
     const preview = (await screen.findByTestId('authorize-preview')).textContent ?? ''
     expect(preview).toContain('批了也一封都不发')
     expect(preview).toContain('等正式名单真发上线后')
+  })
+
+  it('a formal proposal while a trial is in force says approving it stops the trial', async () => {
+    statusBody = status({ authorization: { record: record({ id: 'a-1', authorized_at: '2026-11-15T00:00:00.000Z' }), summary: ['x'], trial: true, state: 'active', template: null } })
+    render(<WelcomeLetterPanel clientId={CLIENT} />)
+    expect((await screen.findByTestId('formal-proposal-note')).textContent).toContain('正在跑的试跑也就停了')
   })
 
   it('a formal proposal with nothing in force does not talk about replacing anything', async () => {

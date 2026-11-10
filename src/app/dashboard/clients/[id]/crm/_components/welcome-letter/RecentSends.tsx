@@ -11,6 +11,7 @@ import {
   nzTime,
   providerImpactText,
   RECEIPT_OVERRODE_NOT_SENT,
+  RECEIPT_SAYS_NOT_SENT,
   sendReasonText,
   sendStatusText,
   sendStatusTone,
@@ -32,8 +33,6 @@ interface Props {
   onDone: (notice: Notice) => void
 }
 
-/** 这些状态 = 信已经离开发信服务（和回执那边「离开发信服务」的口径一致）。 */
-const LEFT_PROVIDER = new Set(['sent', 'delivery_delayed', 'delivered', 'bounced', 'complained'])
 /** 发信方 20 小时后不再重试同一封信。 */
 const REPLAY_HOURS_MS = 20 * 3_600_000
 
@@ -65,7 +64,6 @@ type RowProps = Pick<Props, 'clientId' | 'serverNow' | 'canResolve' | 'onDone'> 
 function SendRow({ clientId, send, serverNow, canResolve, onDone }: RowProps): JSX.Element {
   const reason = send.reason_code ?? send.last_block_reason
   const needsPerson = send.status === 'unknown_outcome' && send.resolution === null
-  const overridden = send.reason_code === 'not_sent_confirmed' && LEFT_PROVIDER.has(send.status)
   return (
     <li className="border-b border-me-charcoal/10 py-2 last:border-b-0" data-testid="recent-send">
       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -79,7 +77,8 @@ function SendRow({ clientId, send, serverNow, canResolve, onDone }: RowProps): J
         {send.attempts > 1 ? `；试过 ${send.attempts} 次` : ''}
       </p>
       <Resolution send={send} />
-      {overridden && <p className="mt-1 text-sm font-semibold text-[#C2453A]" data-testid="receipt-overrode">{RECEIPT_OVERRODE_NOT_SENT}</p>}
+      {send.went_out_after_not_sent === true && <p className="mt-1 text-sm font-semibold text-[#C2453A]" data-testid="receipt-overrode">{RECEIPT_OVERRODE_NOT_SENT}</p>}
+      {send.not_sent_after_sent === true && <p className="mt-1 text-sm font-semibold text-[#C2453A]" data-testid="receipt-says-not-sent">{RECEIPT_SAYS_NOT_SENT}</p>}
       {stuck(send, serverNow) && <p className="mt-1 text-sm text-[#9A6B12]" data-testid="stuck-pending">{STUCK_PENDING_TEXT}</p>}
       {needsPerson && (canResolve
         ? <ResolveBox clientId={clientId} send={send} onDone={onDone} />
@@ -90,8 +89,10 @@ function SendRow({ clientId, send, serverNow, canResolve, onDone }: RowProps): J
 
 function UnknownCount({ unknown }: { unknown: Props['unknown'] }): JSX.Element | null {
   if (unknown === null || unknown.count === 0) return null
-  const more = unknown.more ? '（太多了，下面只列出最早的一部分，其余请让发信窗口查）' : ''
-  return <p className="mb-2 text-sm font-semibold text-[#9A6B12]" data-testid="unknown-count">有 {unknown.count} 封信结果不明，要核对后标一下（都排在最上面）{more}。</p>
+  const words = unknown.more
+    ? `至少有 ${unknown.count} 封信结果不明，要核对后标一下（太多了，下面只列出最早的 ${unknown.count} 封，其余请让发信窗口查）。`
+    : `有 ${unknown.count} 封信结果不明，要核对后标一下（都排在最上面）。`
+  return <p className="mb-2 text-sm font-semibold text-[#9A6B12]" data-testid="unknown-count">{words}</p>
 }
 
 export function RecentSends({ clientId, rows, limit, unknown, serverNow, canResolve, onDone }: Props): JSX.Element {

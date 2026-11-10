@@ -44,6 +44,11 @@ const RANK: Readonly<Record<string, number>> = {
 /** Statuses that mean the letter left the provider for the guest's mail server: they fix `sent_at` when it is empty. */
 const LEFT_PROVIDER: ReadonlySet<ReceiptKind> = new Set(['sent', 'delivery_delayed', 'delivered', 'bounced', 'complained'])
 
+/** The letter left the provider for the guest's mail server (`suppressed` / `failed`: it did not). One definition for all. */
+export function leftProvider(status: string): boolean {
+  return (LEFT_PROVIDER as ReadonlySet<string>).has(status)
+}
+
 export const NOT_SENT_CONFIRMED = 'not_sent_confirmed'
 /** A person checked a letter whose outcome was unknown and said it went (`resolve-unknown.ts`); it has no message id. */
 export const SENT_CONFIRMED = 'sent_confirmed'

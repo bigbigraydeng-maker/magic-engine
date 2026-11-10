@@ -138,11 +138,29 @@ describe('「最近发送」 — the latest live letters', () => {
     expect(read.ok && read.rows.slice(0, 2).map((r) => r.id)).toEqual(['u1', 'u2'])
     expect(read.ok && read.rows.length).toBe(2 + RECENT_SENDS_LIMIT - 1)
     expect(read).toMatchObject({ ok: true, unknownCount: 2, unknownMore: false })
-    const unknownQuery = stub.calls.filter((c) => c.method === 'limit').map((c) => c.args[0])
-    expect(unknownQuery).toEqual([UNKNOWN_SENDS_LIMIT, RECENT_SENDS_LIMIT])
-    const full = Array.from({ length: UNKNOWN_SENDS_LIMIT }, (_, i) => ({ ...LIVE, id: `u${i}`, status: 'unknown_outcome', annotations: {} }))
-    const many = createQueryStub({ triggered_sends: (query) => ok(isUnknownQuery(query) ? full : []) })
-    expect(await readRecentSends(many.db, CLIENT)).toMatchObject({ ok: true, unknownCount: UNKNOWN_SENDS_LIMIT, unknownMore: true })
+    const limits = stub.calls.filter((c) => c.method === 'limit').map((c) => c.args[0])
+    expect(limits).toEqual([UNKNOWN_SENDS_LIMIT + 1, RECENT_SENDS_LIMIT])
+    // Exactly the limit: all of them are listed, nothing more. One more: "at least", and only the limit is listed.
+    const unknownRows = (n: number) => Array.from({ length: n }, (_, i) => ({ ...LIVE, id: `u${i}`, status: 'unknown_outcome', annotations: {} }))
+    const exactly = createQueryStub({ triggered_sends: (query) => ok(isUnknownQuery(query) ? unknownRows(UNKNOWN_SENDS_LIMIT) : []) })
+    expect(await readRecentSends(exactly.db, CLIENT)).toMatchObject({ ok: true, unknownCount: UNKNOWN_SENDS_LIMIT, unknownMore: false })
+    const many = createQueryStub({ triggered_sends: (query) => ok(isUnknownQuery(query) ? unknownRows(UNKNOWN_SENDS_LIMIT + 1) : []) })
+    const read2 = await readRecentSends(many.db, CLIENT)
+    expect(read2).toMatchObject({ ok: true, unknownCount: UNKNOWN_SENDS_LIMIT, unknownMore: true })
+    expect(read2.ok && read2.rows.length).toBe(UNKNOWN_SENDS_LIMIT)
+  })
+
+  it('🔴 flags a person’s answer that a later receipt contradicts (one definition of "left the provider")', async () => {
+    const rows = [
+      { ...LIVE, id: 'a', status: 'delivered', reason_code: 'not_sent_confirmed' },
+      { ...LIVE, id: 'b', status: 'suppressed', reason_code: 'not_sent_confirmed' },
+      { ...LIVE, id: 'c', status: 'suppressed', reason_code: 'sent_confirmed', annotations: { resolution: { outcome: 'sent', by: 'pm@example.com', at: 'x' } } },
+      { ...LIVE, id: 'd', status: 'delivered', reason_code: 'sent_confirmed', annotations: { resolution: { outcome: 'sent', by: 'pm@example.com', at: 'x' } } },
+    ]
+    const stub = createQueryStub({ triggered_sends: (query) => ok(query.some((c) => c.method === 'eq' && c.args[0] === 'status') ? [] : rows) })
+    const read = await readRecentSends(stub.db, CLIENT)
+    const flags = read.ok ? read.rows.map((r) => [r.id, r.went_out_after_not_sent, r.not_sent_after_sent]) : null
+    expect(flags).toEqual([['a', true, false], ['b', false, false], ['c', false, true], ['d', false, false]])
   })
 })
 

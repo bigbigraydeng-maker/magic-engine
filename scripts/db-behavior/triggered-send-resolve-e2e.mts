@@ -216,7 +216,7 @@ async function timeline(clientId: string, sendId: string) {
   const page = (await statusQuery(statusDeps(), clientId, { canAuthorize: true })).body as Record<string, any>
   const flagged = (page.recent_sends ?? []).find((s: Record<string, any>) => s.id === row.id)
   const lineAfter = await timeline(clientId, row.id)
-  check('R1j the page gets what it needs to flag it (delivered + not_sent_confirmed); the timeline line is NOT changed back (之三 restores it)', flagged?.status === 'delivered' && flagged?.reason_code === 'not_sent_confirmed' && lineAfter[0]?.metadata?.send_state === 'cancelled', { flagged, lineAfter })
+  check('R1j the page flags it (went_out_after_not_sent); the timeline line is NOT changed back (之三 restores it)', flagged?.status === 'delivered' && flagged?.went_out_after_not_sent === true && flagged?.not_sent_after_sent === false && lineAfter[0]?.metadata?.send_state === 'cancelled', { flagged, lineAfter })
 }
 
 // ── R2. the PM settles an unclear letter as 「已发出」 ──

@@ -156,6 +156,13 @@ describe('resolve_unknown — the PM settles a letter nobody could tell about', 
     expect(w.cancels).toEqual([])
   })
 
+  it('🔴 a receipt right after 「没发出」 that says the letter did NOT go (suppressed) changes nothing: the line is cancelled as usual', async () => {
+    const suppressed = row({ status: 'suppressed', reasonCode: NOT_SENT_CONFIRMED, annotations: { resolution: RESOLUTION('not_sent') } })
+    const w = world({ reread: suppressed })
+    expect((await resolveUnknownCommand(w.deps, CLIENT, ACTOR, command({ confirm: true }))).body).toMatchObject({ mode: 'RESOLVED', timeline: 'cancelled' })
+    expect(w.cancels).toHaveLength(1)
+  })
+
   it('another tab gave the same answer a moment earlier: that is this answer (not a conflict); a different answer meanwhile is a conflict', async () => {
     const same = world({ write: { ok: true, result: 'changed' }, reread: row({ status: 'failed', reasonCode: NOT_SENT_CONFIRMED, annotations: { resolution: RESOLUTION('not_sent') } }) })
     expect(await resolveUnknownCommand(same.deps, CLIENT, ACTOR, command({ confirm: true }))).toMatchObject({ status: 200, body: { mode: 'ALREADY_RESOLVED', timeline: 'unchanged' } })

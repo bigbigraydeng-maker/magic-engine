@@ -21,6 +21,7 @@ import {
   errorText,
   FORMAL_PROPOSAL_NOTE,
   FORMAL_PROPOSAL_REPLACES_NOTE,
+  FORMAL_PROPOSAL_STOPS_TRIAL_NOTE,
   nzTime,
   problemText,
   stateText,
@@ -98,6 +99,8 @@ interface ProposalProps {
   proposal: ProposalView | null
   canAuthorize: boolean
   replacing: boolean
+  /** The authorization in force is a trial (approving the real list stops it). */
+  replacingTrial: boolean
   onDone: (notice: Notice) => void
 }
 
@@ -120,7 +123,9 @@ function ProposalSection(props: ProposalProps): JSX.Element {
       <p className="mb-2 text-xs text-me-charcoal/60">{r.proposed_by_email} 在 {nzTime(r.proposed_at)} 提交。提案不是授权，提交了也不会发信。</p>
       {!proposal.trial && (
         <p className="mb-2 text-sm font-semibold text-[#9A6B12]" data-testid="formal-proposal-note">
-          {FORMAL_PROPOSAL_NOTE}{props.replacing ? FORMAL_PROPOSAL_REPLACES_NOTE : ''}
+          {FORMAL_PROPOSAL_NOTE}
+          {props.replacing ? FORMAL_PROPOSAL_REPLACES_NOTE : ''}
+          {props.replacingTrial ? FORMAL_PROPOSAL_STOPS_TRIAL_NOTE : ''}
         </p>
       )}
       <Summary lines={proposal.summary} />
@@ -237,6 +242,7 @@ export function WelcomeLetterPanel({ clientId }: { clientId: string }): JSX.Elem
         proposal={status.proposal ?? null}
         canAuthorize={status.can_authorize === true}
         replacing={(status.authorization ?? null) !== null}
+        replacingTrial={status.authorization?.trial === true}
         onDone={after}
       />
       <Prerequisites data={status.prerequisites ?? null} mode={status.mode} />

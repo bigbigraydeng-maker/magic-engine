@@ -26,7 +26,7 @@
 
 import { z } from 'zod'
 import { AUTHORIZATION_UUID_SCHEMA, done, refuse, type Actor, type CommandResult } from './authorization-core'
-import { NOT_SENT_CONFIRMED, SENT_CONFIRMED } from './receipt'
+import { leftProvider, NOT_SENT_CONFIRMED, SENT_CONFIRMED } from './receipt'
 import type { TouchpointCancel } from './send-touchpoint'
 import type { CasWrite } from './send-types'
 
@@ -85,7 +85,8 @@ export const CONSEQUENCE: Readonly<Record<ResolutionOutcome, string>> = {
 
 /**
  * What happened to the timeline line: only 「没发出」 changes it. `receipt_arrived` = a receipt moved the row on right
- * after the answer was written (the letter did go): the line is left as it was.
+ * after the answer was written and says the letter left the provider: the line is left as it was. A receipt that says
+ * it did not go (e.g. `suppressed`) changes nothing: the line is cancelled as usual.
  */
 export type TimelineResult = 'cancelled' | 'none' | 'failed' | 'unchanged' | 'receipt_arrived'
 
@@ -130,10 +131,13 @@ async function reload(deps: ResolveDeps, clientId: string, sendId: string): Prom
   return read === null || !read.ok ? null : read.row
 }
 
-/** 「没发出」 written: the timeline line is cancelled only while the row still says so (a receipt may have just moved it on). */
+/**
+ * 「没发出」 written: the timeline line is cancelled unless a receipt has just shown the letter did leave the provider.
+ * (A receipt arriving between this read and the cancel still wins on the page, which flags the row; §17 之三 restores.)
+ */
 async function afterNotSent(deps: ResolveDeps, clientId: string, sendId: string): Promise<TimelineResult> {
   const now = await reload(deps, clientId, sendId)
-  if (now !== null && !stillNotSent(now)) return 'receipt_arrived'
+  if (now !== null && leftProvider(now.status)) return 'receipt_arrived'
   return cancelTimeline(deps, clientId, sendId)
 }
 

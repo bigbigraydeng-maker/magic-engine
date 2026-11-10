@@ -115,6 +115,10 @@ export interface RecentSendView {
   created_at: string
   updated_at: string
   resolution: { outcome: 'sent' | 'not_sent'; by: string; at: string } | null
+  /** 标过「没发出」、后来回执证明发出去了（服务端判的）。 */
+  went_out_after_not_sent?: boolean
+  /** 标过「已发出」、后来回执说没发出去（服务端判的）。 */
+  not_sent_after_sent?: boolean
 }
 
 export interface StatusPayload {
@@ -130,7 +134,7 @@ export interface StatusPayload {
   /** null = 读不到（页面要说读不到，不能当成「没发过」）。结果不明的信全部排在最前面。 */
   recent_sends?: RecentSendView[] | null
   recent_sends_limit?: number
-  /** 结果不明、等人标的信有几封（服务端数的，不受 20 封的限制）；more = 太多，页面只列出前一部分。 */
+  /** 结果不明、等人标的信有几封（服务端数的，不受 20 封的限制）；more = 不止这么多，页面只列出前一部分。 */
   unknown_sends?: { count: number; more: boolean } | null
 }
 
@@ -256,8 +260,9 @@ export const TRIAL_ONLY_NOTE = '这一版只发内部邮箱的试跑：正式名
 /** 正式名单的提案下面那一句。 */
 export const FORMAL_PROPOSAL_NOTE = '这是正式名单的提案。这一版只发内部邮箱的试跑：正式名单就算批了也一封都不发。'
 
-/** 现在已经有一份授权在生效时，正式提案下面多说的一句。 */
-export const FORMAL_PROPOSAL_REPLACES_NOTE = '而且批了会替换掉现在生效的那份授权：试跑也就停了。'
+/** 现在已经有一份授权在生效时，正式提案下面多说的一句；生效的是试跑时再补半句。 */
+export const FORMAL_PROPOSAL_REPLACES_NOTE = '而且批了会替换掉现在生效的那份授权。'
+export const FORMAL_PROPOSAL_STOPS_TRIAL_NOTE = '正在跑的试跑也就停了。'
 
 /** 试跑授权生效、又没有正式提案放着时的提醒（彩排按最新一份没撤销的规则来比）。 */
 export const TRIAL_FOLLOWUP_NOTE =
@@ -369,7 +374,11 @@ export const NO_TIMELINE_HINT = '系统记录：这封信连时间线都没有�
 
 /** 你标过「没发出」、后来回执证明发出去了的那一行。 */
 export const RECEIPT_OVERRODE_NOT_SENT =
-  '你标过「没发出」，但后来发信服务的回执证明这封信发出去了。时间线上那条还写着「没有发出」：请告诉发信窗口改回来，也别让销售再手发。'
+  '你标过「没发出」，但后来发信服务的回执证明这封信发出去了。时间线上那条可能还写着「没有发出」：请让发信窗口核对、改对，也别让销售再手发。'
+
+/** 你标过「已发出」、后来回执说没发出去的那一行。 */
+export const RECEIPT_SAYS_NOT_SENT =
+  '你标过「已发出」，但后来发信服务的回执说这封没有发出去：客人没收到欢迎信，系统也不会再发，要发请销售手发。'
 
 /** 超过 20 小时还停在「正在发」的信（例如授权撤销了，没人再接手）。 */
 export const STUCK_PENDING_TEXT = '超过 20 小时还没确认发没发出去：系统不会再重试，之后会转成「结果不明」让你核对。'
