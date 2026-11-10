@@ -6,6 +6,8 @@
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react'
+import { variableLabel } from '@/lib/crm/email-templates/placeholders'
+import { TemplateMoreMenu } from './TemplateMoreMenu'
 import type {
   EmailTemplateVersion,
   FactSource,
@@ -29,6 +31,7 @@ export interface TemplateEditorProps {
   onSaved: (template: EmailTemplateVersion, notices: string[]) => void
   onCancel: () => void
   onReload: () => void
+  onRequestDeactivate?: () => void
 }
 
 const KEY_RE = /^[a-z0-9][a-z0-9-]{1,62}$/
@@ -42,11 +45,6 @@ const PICK_MODE_LABELS: Record<PickMode, string> = {
   none: '不选团',
   one: '选一个团',
   many: '选多个团',
-}
-
-const STATUS_LABELS: Record<TemplateStatus, string> = {
-  active: '启用',
-  disabled: '停用',
 }
 
 const MONTHS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
@@ -134,7 +132,7 @@ type SaveError =
   | { kind: 'other'; message: string }
 
 export function TemplateEditor(props: TemplateEditorProps): JSX.Element {
-  const { clientId, initial, prefill, variables, onSaved, onCancel, onReload } = props
+  const { clientId, initial, prefill, variables, onSaved, onCancel, onReload, onRequestDeactivate } = props
   const isNew = initial === null
 
   const [form, setForm] = useState<FormState>(() => initialState(initial, prefill))
@@ -281,14 +279,24 @@ export function TemplateEditor(props: TemplateEditorProps): JSX.Element {
 
   return (
     <div className="rounded-xl border border-me-charcoal/10 bg-me-ivory/40 p-4" data-testid="template-editor">
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm font-black text-me-charcoal/80">
-          {isNew ? '新建邮件模板' : '修改邮件模板'}
-        </p>
-        {!isNew && (
-          <p className="text-xs text-me-charcoal/55">
-            当前是第 {initial.version} 版。保存会生成新的一版，旧版本都留着。
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-black text-me-charcoal/80">
+            {isNew ? '新建邮件模板' : `编辑：${initial.name}`}
           </p>
+          {!isNew && (
+            <p className="text-xs text-me-charcoal/55">
+              当前是第 {initial.version} 版。保存会生成新的一版，旧版本都留着。
+            </p>
+          )}
+        </div>
+        {!isNew && onRequestDeactivate && (
+          <TemplateMoreMenu
+            canEdit
+            status={initial.status}
+            disabled={saving}
+            onDeactivate={onRequestDeactivate}
+          />
         )}
       </div>
 
@@ -328,19 +336,6 @@ export function TemplateEditor(props: TemplateEditorProps): JSX.Element {
               {form.templateKey}
             </p>
           )}
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-xs font-semibold text-me-charcoal/70">状态</span>
-          <select
-            value={form.status}
-            onChange={(e) => update('status', e.target.value as TemplateStatus)}
-            aria-label="模板状态"
-            className="w-full rounded-lg border border-me-stone bg-white px-3 py-2 text-sm"
-          >
-            <option value="active">{STATUS_LABELS.active}</option>
-            <option value="disabled">{STATUS_LABELS.disabled}</option>
-          </select>
         </label>
 
         <label className="block">
@@ -455,16 +450,16 @@ export function TemplateEditor(props: TemplateEditorProps): JSX.Element {
       </div>
 
       <div className="mt-2">
-        <p className="mb-1 text-xs font-semibold text-me-charcoal/70">插入占位符</p>
+        <p className="mb-1 text-xs font-semibold text-me-charcoal/70">插入变量</p>
         <div className="flex flex-wrap gap-1">
           {placeholderNames.map((name) => (
             <button
               key={name}
               type="button"
               onClick={() => insertPlaceholder(name)}
-              className="rounded-md border border-me-stone bg-white px-2 py-1 text-xs text-me-charcoal/80 hover:bg-me-ivory"
+              className="rounded-full border border-me-stone bg-white px-2 py-1 text-xs text-me-charcoal/80 hover:bg-me-ivory"
             >
-              {`{{${name}}}`}
+              + {variableLabel(name)}
             </button>
           ))}
         </div>

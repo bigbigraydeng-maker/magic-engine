@@ -11,6 +11,7 @@ import type { ReceiptSummaryRow } from '@/lib/crm/email-templates/receipt-store'
 import type { FeatureState } from '@/lib/crm/email-templates/feature-state'
 import { EMAIL_SETTINGS_SAVED_EVENT } from '@/lib/crm/email-templates/settings-events'
 import { TemplateEditor, type TemplateVariables } from './TemplateEditor'
+import { TemplateMoreMenu } from './TemplateMoreMenu'
 
 interface ListPayload {
   featureState: FeatureState
@@ -371,6 +372,11 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
             onSaved={onSaved}
             onCancel={closeEditor}
             onReload={onReload}
+            onRequestDeactivate={
+              editor.kind === 'edit' || editor.kind === 'prefill'
+                ? () => void toggleStatus(editor.initial)
+                : undefined
+            }
           />
         </div>
       )}
@@ -436,18 +442,13 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
                       >
                         编辑
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => void toggleStatus(row)}
+                      <TemplateMoreMenu
+                        canEdit
+                        status={row.status}
                         disabled={busyKey !== null}
-                        className="rounded-lg border border-me-stone bg-white px-2 py-1 text-[11px] font-bold text-me-charcoal disabled:opacity-40"
-                      >
-                        {busyKey === row.templateKey
-                          ? '保存中…'
-                          : row.status === 'active'
-                            ? '停用'
-                            : '启用'}
-                      </button>
+                        onDeactivate={() => void toggleStatus(row)}
+                        onActivate={() => void toggleStatus(row)}
+                      />
                     </>
                   )}
                   <button

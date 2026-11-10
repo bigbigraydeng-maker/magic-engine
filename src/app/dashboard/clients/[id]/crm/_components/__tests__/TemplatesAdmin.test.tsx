@@ -92,6 +92,19 @@ const LIST = 'GET /api/clients/c1/crm/email-templates'
 const PUT_KEY = 'PUT /api/clients/c1/crm/email-templates/post-call'
 const HISTORY = 'GET /api/clients/c1/crm/email-templates/post-call'
 
+function deactivateFromRowMenu(rowName: string): void {
+  const li = screen.getByText(rowName).closest('li') as HTMLElement
+  fireEvent.click(within(li).getByRole('button', { name: '更多操作' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '停用这个模板…' }))
+  fireEvent.click(screen.getByRole('button', { name: '确认停用' }))
+}
+
+function activateFromRowMenu(rowName: string): void {
+  const li = screen.getByText(rowName).closest('li') as HTMLElement
+  fireEvent.click(within(li).getByRole('button', { name: '更多操作' }))
+  fireEvent.click(within(li).getByRole('menuitem', { name: '重新启用' }))
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
@@ -277,7 +290,7 @@ describe('who may change what', () => {
     await screen.findByText('Post call')
     expect(screen.queryByRole('button', { name: '新建模板' })).toBeNull()
     expect(screen.queryByRole('button', { name: '编辑' })).toBeNull()
-    expect(screen.queryByRole('button', { name: '停用' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '更多操作' })).toBeNull()
     expect(screen.getByText('你可以看模板，修改要找 Magic Lab 的同事。')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '历史' }).length).toBeGreaterThan(0)
   })
@@ -291,7 +304,7 @@ describe('switching a template off or on', () => {
     })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByText('Post call')
-    fireEvent.click(screen.getByRole('button', { name: '停用' }))
+    deactivateFromRowMenu('Post call')
     await waitFor(() => expect(r.of(PUT_KEY)).toHaveLength(1))
     expect(r.of(PUT_KEY)[0].body).toEqual({
       baseVersion: 3,
@@ -315,7 +328,7 @@ describe('switching a template off or on', () => {
     })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByText('A thanks')
-    fireEvent.click(screen.getByRole('button', { name: '启用' }))
+    activateFromRowMenu('A thanks')
     await waitFor(() => expect(r.of('PUT /api/clients/c1/crm/email-templates/a-thanks')).toHaveLength(1))
     expect(r.of('PUT /api/clients/c1/crm/email-templates/a-thanks')[0].body).toMatchObject({ baseVersion: 1, status: 'active', changeNote: '启用' })
   })
@@ -324,7 +337,7 @@ describe('switching a template off or on', () => {
     const r = routes({ [LIST]: [{ body: list() }], [PUT_KEY]: [{ status: 409, body: { error: 'stale' } }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByText('Post call')
-    fireEvent.click(screen.getByRole('button', { name: '停用' }))
+    deactivateFromRowMenu('Post call')
     expect(await screen.findByText('别人刚改过，请刷新后再试。')).toBeInTheDocument()
     expect(r.of(LIST).length).toBe(2)
   })
@@ -333,7 +346,7 @@ describe('switching a template off or on', () => {
     routes({ [LIST]: [{ body: list() }], [PUT_KEY]: [{ status: 400, body: { error: '正文：占位符不对' } }] })
     render(<TemplatesAdmin clientId="c1" />)
     await screen.findByText('Post call')
-    fireEvent.click(screen.getByRole('button', { name: '停用' }))
+    deactivateFromRowMenu('Post call')
     expect(await screen.findByText('正文：占位符不对')).toBeInTheDocument()
   })
 })

@@ -6,6 +6,7 @@ import {
   validateTemplateText,
   substitute,
   hasUnresolvedBraces,
+  variableLabel,
 } from '@/lib/crm/email-templates/placeholders'
 import type { ProviderValue, VariableSpec } from '@/lib/crm/email-templates/facts/types'
 import type { PickMode } from '@/lib/crm/email-templates/types'
@@ -19,6 +20,13 @@ const providerVars: Readonly<Record<string, VariableSpec>> = {
 describe('constants', () => {
   it('exposes common variables', () => {
     expect(COMMON_VARIABLES).toEqual(['first_name', 'sender_name', 'call_when', 'catalogue_url'])
+  })
+
+  it('maps variable names to Chinese labels for the editor UI', () => {
+    expect(variableLabel('first_name')).toBe('客人名字')
+    expect(variableLabel('tour_name')).toBe('团名')
+    expect(variableLabel('input.note')).toBe('手填：note')
+    expect(variableLabel('unknown_key')).toBe('unknown_key')
   })
 
   it('input variable regex accepts lowercase names', () => {
