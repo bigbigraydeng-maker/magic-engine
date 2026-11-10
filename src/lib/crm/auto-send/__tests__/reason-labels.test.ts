@@ -43,6 +43,39 @@ const EXISTING_KEYS: readonly string[] = [
 const EMDASH = '—'
 const CJK = /[\u4E00-\u9FFF]/
 
+describe('resolveReasonText · text already translated by the read interface', () => {
+  it('shows reasonText as it is, ahead of any code', () => {
+    const out = resolveReasonText(
+      { status: 'blocked', reasonCode: 'frequency_cap', reasonDetail: null, reasonText: ' 他最近 7 天已收 2 封 ' },
+      { frequency_cap: 'BASE-TEXT' },
+    )
+    expect(out).toEqual({ main: '他最近 7 天已收 2 封', detail: null })
+  })
+
+  it('blank reasonText falls back to the code path', () => {
+    const out = resolveReasonText(
+      { status: 'blocked', reasonCode: 'no_consent_basis', reasonDetail: null, reasonText: '   ' },
+      {},
+    )
+    expect(out.main).toBe('没有同意依据')
+  })
+
+  it('does not touch sent or rehearsal rows', () => {
+    for (const status of ['sent', 'rehearsal'] as const) {
+      const out = resolveReasonText({ status, reasonCode: null, reasonDetail: null, reasonText: '不该出现' }, {})
+      expect(out.main).not.toBe('不该出现')
+    }
+  })
+
+  it('a pending row shows the plain note the read interface attached, otherwise a dash', () => {
+    expect(
+      resolveReasonText({ status: 'pending', reasonCode: null, reasonDetail: null, reasonText: '这一批发出时他不在名单里（不补发）' }, {}),
+    ).toEqual({ main: '这一批发出时他不在名单里（不补发）', detail: null })
+    expect(resolveReasonText({ status: 'pending', reasonCode: null, reasonDetail: null, reasonText: null }, {})).toEqual({ main: '—', detail: null })
+    expect(resolveReasonText({ status: 'pending', reasonCode: 'dnc', reasonDetail: '地址无效', reasonText: '   ' }, {})).toEqual({ main: '—', detail: null })
+  })
+})
+
 describe('resolveReasonText', () => {
   it('shows an em dash for sent rows', () => {
     expect(

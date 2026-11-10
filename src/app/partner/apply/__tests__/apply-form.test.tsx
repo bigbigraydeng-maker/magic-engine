@@ -11,13 +11,24 @@ function fill() {
   field(/^名字/, '王小明')
   field(/^邮箱/, 'wang@example.com')
   field(/^电话/, '+64 21 123 4567')
+  field(/^邀请码/, 'ABCD2345')
 }
 
 describe('ApplyForm', () => {
   it('keeps submit disabled until the terms are ticked, and prefills the referral code', () => {
     render(<ApplyForm termsVersion={DISTRIBUTOR_TERMS_VERSION} initialReferralCode="ABCD2345" />)
     expect((screen.getByRole('button', { name: '提交申请' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByLabelText(/^推荐码/) as HTMLInputElement).value).toBe('ABCD2345')
+    expect((screen.getByLabelText(/^邀请码/) as HTMLInputElement).value).toBe('ABCD2345')
+    expect(screen.queryByText(/目前仅限邀请加入/)).toBeNull()
+  })
+
+  it('without an invite code: explains invite-only and keeps submit disabled even with the terms ticked', () => {
+    render(<ApplyForm termsVersion={DISTRIBUTOR_TERMS_VERSION} initialReferralCode={null} />)
+    expect(screen.getByText(/目前仅限邀请加入/)).toBeTruthy()
+    fireEvent.click(screen.getByLabelText('我已阅读并同意上面的经销商规则'))
+    expect((screen.getByRole('button', { name: '提交申请' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(screen.getByLabelText(/^邀请码/), { target: { value: 'abcd2345' } })
+    expect((screen.getByRole('button', { name: '提交申请' }) as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('posts the form with the terms version and shows the confirmation', async () => {

@@ -104,7 +104,7 @@ export default function DistributorsPage() {
       <div className="mx-auto max-w-7xl">
         <div className="mb-8">
           <h1 className="font-display text-3xl font-bold tracking-tight text-me-charcoal/90">
-            经销商管理
+            Magic Network · 经销商管理
           </h1>
           <p className="mt-1 text-sm text-me-charcoal/55">
             这里只记账，不会付钱。每月付款要另外批准。

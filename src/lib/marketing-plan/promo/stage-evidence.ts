@@ -60,21 +60,32 @@ async function readCaptures(supabase: SupabaseClient, clientId: string, accountI
   return captureState(rows, now, maxAgeMs)
 }
 
-interface InsightRow { insight_date?: unknown; spend?: unknown; leads?: unknown }
+export type PrimaryMetric = 'leads' | 'messaging_conversations'
 
-function insightTotals(rows: InsightRow[] | null, from: string, to: string): { leads: number; spend: number; dates: number } | null {
+/** Same mapping as the circuit breaker: lead → leads, messaging_started → messaging_conversations. */
+export function primaryMetricOf(value: unknown): PrimaryMetric | null {
+  if (value === 'lead') return 'leads'
+  if (value === 'messaging_started') return 'messaging_conversations'
+  return null
+}
+
+interface InsightRow {
+  insight_date?: unknown
+  spend?: unknown
+  leads?: unknown
+  messaging_conversations?: unknown
+}
+
+export function windowPrimaryTotals(
+  rows: InsightRow[] | null,
+  from: string,
+  to: string,
+  metric: PrimaryMetric,
+): { leads: number; spend: number; dates: number } | null {
   if (!rows) return null
   const byDate = new Map<string, { leads: number; spend: number }>()
   for (const row of rows) {
-    if (typeof row.insight_date !== 'string' || row.insight_date < from || row.insight_date > to) continue
-    if (row.spend === null || row.spend === undefined || row.leads === null || row.leads === undefined) return null
-    const spend = typeof row.spend === 'number' ? row.spend : Number(row.spend)
-    const leads = typeof row.leads === 'number' ? row.leads : Number(row.leads)
-    if (!Number.isFinite(spend) || !Number.isFinite(leads) || leads < 0 || spend < 0) return null
-    const cur = byDate.get(row.insight_date) ?? { leads: 0, spend: 0 }
-    cur.leads += leads
-    cur.spend += spend
-    byDate.set(row.insight_date, cur)
+    if (!addInsightDay(byDate, row, from, to, metric)) return null
   }
   let leads = 0
   let spend = 0
@@ -82,11 +93,31 @@ function insightTotals(rows: InsightRow[] | null, from: string, to: string): { l
   return { leads, spend, dates: byDate.size }
 }
 
+function addInsightDay(
+  byDate: Map<string, { leads: number; spend: number }>,
+  row: InsightRow,
+  from: string,
+  to: string,
+  metric: PrimaryMetric,
+): boolean {
+  if (typeof row.insight_date !== 'string' || row.insight_date < from || row.insight_date > to) return true
+  const raw = metric === 'messaging_conversations' ? row.messaging_conversations : row.leads
+  if (row.spend === null || row.spend === undefined || raw === null || raw === undefined) return false
+  const spend = typeof row.spend === 'number' ? row.spend : Number(row.spend)
+  const leads = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(spend) || !Number.isFinite(leads) || leads < 0 || spend < 0) return false
+  const cur = byDate.get(row.insight_date) ?? { leads: 0, spend: 0 }
+  cur.leads += leads
+  cur.spend += spend
+  byDate.set(row.insight_date, cur)
+  return true
+}
+
 async function readInsights(
-  supabase: SupabaseClient, clientId: string, accountIds: string[], from: string, to: string,
+  supabase: SupabaseClient, clientId: string, accountIds: string[], from: string, to: string, metric: PrimaryMetric,
 ): Promise<{ leads: number; spend: number; dates: number } | null> {
   const { data, error } = await supabase.from('ad_daily_insights')
-    .select('insight_date, spend, leads')
+    .select('insight_date, spend, leads, messaging_conversations')
     .eq('client_id', clientId)
     .eq('level', 'campaign')
     .in('ad_account_id', accountIds)
@@ -96,19 +127,22 @@ async function readInsights(
   if (error) return null
   const rows = (data ?? []) as InsightRow[]
   if (rows.length >= 2000) return null
-  return insightTotals(rows, from, to)
+  return windowPrimaryTotals(rows, from, to, metric)
 }
 
-async function readTarget(supabase: SupabaseClient, clientId: string): Promise<number | null | undefined> {
+async function readStrategy(
+  supabase: SupabaseClient, clientId: string,
+): Promise<{ target: number | null; metric: PrimaryMetric | null } | undefined> {
   const { data, error } = await supabase.from('ad_strategy_configs')
-    .select('target_cost_per_primary')
+    .select('target_cost_per_primary, primary_result')
     .eq('client_id', clientId)
     .maybeSingle()
   if (error) return undefined
-  const raw = (data as { target_cost_per_primary?: unknown } | null)?.target_cost_per_primary
-  if (raw === null || raw === undefined) return null
-  const value = Number(raw)
-  return Number.isFinite(value) && value > 0 ? value : null
+  const row = data as { target_cost_per_primary?: unknown; primary_result?: unknown } | null
+  const raw = row?.target_cost_per_primary
+  const value = raw === null || raw === undefined ? null : Number(raw)
+  const target = value !== null && Number.isFinite(value) && value > 0 ? value : null
+  return { target, metric: primaryMetricOf(row?.primary_result) }
 }
 
 async function readCurrency(supabase: SupabaseClient, accountIds: string[]): Promise<string | null | undefined> {
@@ -164,15 +198,25 @@ async function loadEvidence(supabase: SupabaseClient, clientId: string, spec: Pr
   const accountIds = [...new Set(allAdsSteps(spec).map(row => row.step.settings.ad_account_id))]
   if (accountIds.length === 0) return blankEvidence('missing')
   const capture = await readCaptures(supabase, clientId, accountIds, now)
-  const target = await readTarget(supabase, clientId)
-  if (capture !== 'fresh' || !spec.delivery) {
-    return { ...blankEvidence(capture), targetMajor: target === undefined ? null : target }
+  const strategy = await readStrategy(supabase, clientId)
+  const targetMajor = strategy === undefined ? null : strategy.target
+  if (capture !== 'fresh' || !spec.delivery) return { ...blankEvidence(capture), targetMajor }
+  if (strategy === undefined) return { ...blankEvidence('unreadable'), asOf: today, targetMajor }
+  if (strategy.metric === null) {
+    return { ...blankEvidence('fresh'), asOf: today, targetMajor, primaryKnown: false }
   }
   const stableEnd = shiftDate(today, -DEFAULT_PROMO_PLAYBOOK.insightsUnstableDays)
-  const totals = stableEnd < spec.delivery.started_on ? { leads: 0, spend: 0, dates: 0 } : await readInsights(supabase, clientId, accountIds, spec.delivery.started_on, stableEnd)
+  const totals = stableEnd < spec.delivery.started_on
+    ? { leads: 0, spend: 0, dates: 0 }
+    : await readInsights(supabase, clientId, accountIds, spec.delivery.started_on, stableEnd, strategy.metric)
   const currency = await readCurrency(supabase, accountIds)
-  if (currency === undefined || target === undefined || totals === null) return { ...blankEvidence('unreadable'), asOf: today, stableEnd }
-  return { capture, asOf: today, stableEnd, datesSeen: totals.dates, leads: totals.leads, spendMajor: totals.spend, targetMajor: target, currency }
+  if (currency === undefined || totals === null) return { ...blankEvidence('unreadable'), asOf: today, stableEnd }
+  return {
+    capture, asOf: today, stableEnd, datesSeen: totals.dates, leads: totals.leads,
+    spendMajor: totals.spend, targetMajor, currency,
+    resultNoun: strategy.metric === 'messaging_conversations' ? '开聊' : '留资',
+    primaryKnown: true,
+  }
 }
 
 export function describeDelivery(spec: PromoSpec, verdict: SwitchVerdict, ladder: LadderView, draftNote: string | null): DeliveryView {

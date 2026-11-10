@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   capturesFresh,
   decideCreatives,
+  nzProposalDay,
   rulesFromConfig,
   type LiveCreative,
   type ScaleRoom,
@@ -66,6 +67,20 @@ describe('creative state rules', () => {
     const blocked = decide({ scale: tight, plan: { approvedDailyCap: 12, committedDaily: 10 } })
     expect(blocked.proposals).toEqual([])
     expect(blocked.skipped).toContain('over_plan_cap')
+  })
+
+  it('qualifies at 7 days, 10 leads, and cost equal to the target; one step under does not', () => {
+    expect(decide({ creatives: [ad({ liveDays: 7, leads: 10, spend: 40 })] }).proposals[0]?.kind).toBe('move_to_scale')
+    expect(decide({ creatives: [ad({ liveDays: 6, leads: 10, spend: 40 })] }).proposals).toEqual([])
+    expect(decide({ creatives: [ad({ liveDays: 7, leads: 9, spend: 36 })] }).proposals).toEqual([])
+    expect(decide({ creatives: [ad({ liveDays: 7, leads: 10, spend: 41 })] }).proposals).toEqual([])
+    expect(decide({ promotionsToday: 1 }).proposals).toEqual([])
+  })
+
+  it('counts the scaling cap on the New Zealand day, not the UTC day', () => {
+    expect(nzProposalDay(new Date('2026-11-09T10:59:00.000Z'))).toBe('2026-11-09')
+    expect(nzProposalDay(new Date('2026-11-09T11:00:00.000Z'))).toBe('2026-11-10')
+    expect(new Date('2026-11-09T11:00:00.000Z').toISOString().slice(0, 10)).toBe('2026-11-09')
   })
 
   it('does not promote without a target, a post, a scale budget, or a free daily slot', () => {

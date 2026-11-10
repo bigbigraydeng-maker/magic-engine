@@ -17,7 +17,7 @@ import {
   CREATIVE_PAUSE_WHAT,
   CREATIVE_PLAN_WHAT,
 } from '@/lib/creative-state/copy'
-import type { CreativeDecision, CreativeProposal } from '@/lib/creative-state/rules'
+import { nzProposalDay, type CreativeDecision, type CreativeProposal } from '@/lib/creative-state/rules'
 
 const ACTION = ADS_ACTION_TYPE.CREATIVE_STATE_PROPOSAL
 const ACCOUNT = '这位客户的广告账户'
@@ -98,7 +98,7 @@ export async function proposeCreativeStateCards(
   args: { clientId: string; clicker: CardClicker; decision: CreativeDecision; now?: Date; lifetime?: CardLifetime },
 ): Promise<{ issued: Array<{ kind: CreativeKind; runId: string }>; skipped: string[] }> {
   const now = args.now ?? kernel.now()
-  const day = now.toISOString().slice(0, 10)
+  const day = nzProposalDay(now)
   const existing = await loadHolds(kernel.supabase, args.clientId)
   if (existing === 'unread') return { issued: [], skipped: [...args.decision.skipped, 'ledger_unread'] }
   const issued: Array<{ kind: CreativeKind; runId: string }> = []

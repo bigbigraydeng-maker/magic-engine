@@ -8,6 +8,7 @@ export type AdAgentJobId =
   | 'spend_fetch'
   | 'meta_leads_sync'
   | 'prescription_weekly'
+  | 'intraday_spend_sample'
 
 export interface AdAgentScheduledJob {
   id: AdAgentJobId
@@ -26,7 +27,12 @@ export const AD_AGENT_SCHEDULED_JOBS: readonly AdAgentScheduledJob[] = [
   { id: 'spend_fetch', label: '每日花费拉取', intervalHours: 24, tolerance: 2.5 },
   { id: 'meta_leads_sync', label: 'Facebook 新客户同步', intervalHours: 0.5, tolerance: 3 },
   { id: 'prescription_weekly', label: '周方案进度复查', intervalHours: 168, tolerance: 1.25 },
+  /** 每 10 分钟；默认 stall = interval × tolerance = 60 分钟（待 Ray 确认） */
+  { id: 'intraday_spend_sample', label: '日内花费采样', intervalHours: 10 / 60, tolerance: 6 },
 ] as const
+
+/** ad-intraday-spend-sample 默认 stall 阈值（小时），= staleThresholdHours(jobById('intraday_spend_sample')) */
+export const INTRADAY_SPEND_SAMPLE_DEFAULT_STALL_HOURS = 1
 
 export function jobById(id: AdAgentJobId): AdAgentScheduledJob {
   const hit = AD_AGENT_SCHEDULED_JOBS.find((j) => j.id === id)

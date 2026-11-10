@@ -28,13 +28,14 @@ import {
 } from '@/lib/ads-strategy/monitoring/spend-cap-notice'
 import { listActiveCircuitTrips } from '@/lib/ads-strategy/circuit-state'
 import {
-  AD_HEARTBEAT_JOB_NAME,
-  evaluateHeartbeatStall,
-  heartbeatStallShouldAlert,
-  heartbeatStallSummary,
-  readHeartbeatEnvConfig,
-  type HeartbeatCronRun,
-} from '@/lib/ads-strategy/monitoring/heartbeat-stall'
+  evaluateIntradaySpendSampleStall,
+  INTRADAY_SPEND_SAMPLE_CRON_JOB,
+  INTRADAY_SPEND_SAMPLE_LOOKBACK_HOURS,
+  intradaySpendSampleStallHow,
+  intradaySpendSampleStallShouldAlert,
+  intradaySpendSampleStallWhat,
+  type IntradaySpendSampleCronRun,
+} from '@/lib/ads-strategy/monitoring/intraday-spend-sample-stall'
 import {
   collectDailyPullbackGaps,
   formatDailyPullbackGapWhat,
@@ -44,13 +45,11 @@ import { pushAdsPlanDeliveryStageMissingItems } from './ads-plan-delivery-stage-
 
 export type AdsAgentSyncStaleItemKind = 'ads_agent_sync_stale'
 export type AdsDailySpendOverCapNoticeItemKind = 'ads_daily_spend_over_cap_notice'
-export type AdsHeartbeatStallItemKind = 'ads_heartbeat_stall'
 export type AdsAgentDailyPullGapItemKind = 'ads_agent_daily_pull_gap'
 export type AdsPlanDailyCapMissingItemKind = 'ads_plan_daily_cap_missing'
 
 const DAILY_PULLBACK_JOB = 'google-data-pullback-daily'
 const DAILY_PULLBACK_STALE_HOURS = 30
-const HEARTBEAT_LOOKBACK_HOURS = 72
 
 const META_LEADS_LOOKBACK_MS = 48 * 3_600_000
 const PRESCRIPTION_LOOKBACK_DAYS = 10
@@ -308,39 +307,49 @@ export async function pushAdsDailySpendOverCapNoticeItems(
   }
 }
 
-async function loadHeartbeatRuns(
+const INTRADAY_STALL_INFRA_MARKER = '日内花费采样'
+
+async function loadIntradaySpendSampleRuns(
   supabase: SupabaseClient,
   since: string,
-): Promise<HeartbeatCronRun[]> {
+): Promise<IntradaySpendSampleCronRun[]> {
   const { data, error } = await supabase
     .from('cron_run_logs')
     .select('status, finished_at, started_at')
-    .eq('job_name', AD_HEARTBEAT_JOB_NAME)
+    .eq('job_name', INTRADAY_SPEND_SAMPLE_CRON_JOB)
     .gte('started_at', since)
     .not('finished_at', 'is', null)
     .order('started_at', { ascending: false })
     .limit(80)
-  if (error) throw new Error(`ad-heartbeat 运行记录读取失败：${error.message}`)
-  return (data ?? []) as HeartbeatCronRun[]
+  if (error) throw new Error(`${INTRADAY_SPEND_SAMPLE_CRON_JOB} 运行记录读取失败：${error.message}`)
+  return (data ?? []) as IntradaySpendSampleCronRun[]
 }
 
-export async function pushAdsHeartbeatStallItems(
+export async function pushAdsIntradaySpendSampleStallItems(
   supabase: SupabaseClient,
   items: ManualItem[],
   now: Date,
 ): Promise<void> {
-  const cfg = readHeartbeatEnvConfig(process.env.AD_HEARTBEAT_MODE, process.env.AD_HEARTBEAT_CLIENT_IDS)
-  const since = new Date(now.getTime() - HEARTBEAT_LOOKBACK_HOURS * 3_600_000).toISOString()
-  const runs = await loadHeartbeatRuns(supabase, since)
-  const verdict = evaluateHeartbeatStall(cfg, runs, now)
-  if (!verdict || !heartbeatStallShouldAlert(verdict)) return
-  if (items.some((i) => i.kind === 'ads_heartbeat_stall')) return
+  const since = new Date(now.getTime() - INTRADAY_SPEND_SAMPLE_LOOKBACK_HOURS * 3_600_000).toISOString()
+  const runs = await loadIntradaySpendSampleRuns(supabase, since)
+  const finding = evaluateIntradaySpendSampleStall(runs, now)
+  if (!intradaySpendSampleStallShouldAlert(finding)) return
+  if (
+    items.some(
+      (i) =>
+        i.kind === 'ads_agent_sync_stale' &&
+        i.client_id === 'infra' &&
+        i.what.includes(INTRADAY_STALL_INFRA_MARKER),
+    )
+  ) {
+    return
+  }
   items.push({
-    kind: 'ads_heartbeat_stall',
+    kind: 'ads_agent_sync_stale',
     client_id: 'infra',
     client_name: 'Magic Engine 后台',
-    what: heartbeatStallSummary(verdict),
-    how: '这条不用你动手 —— 是开发排查广告小时心跳（Inngest）。回我一句「查一下广告心跳」我就看 Inngest / 运行记录和 env 开关（AD_HEARTBEAT_*）',
+    what: intradaySpendSampleStallWhat(finding!),
+    how: intradaySpendSampleStallHow(),
     href: `${APP_BASE}/dashboard/admin/cron-health`,
   })
 }
@@ -409,7 +418,7 @@ export async function pushAdsAgentMonitorItems(
 ): Promise<void> {
   await pushAdsAgentStaleItems(supabase, items, now, nameOf)
   await pushAdsDailyPullbackGapItems(supabase, items, now, nameOf)
-  await pushAdsHeartbeatStallItems(supabase, items, now)
+  await pushAdsIntradaySpendSampleStallItems(supabase, items, now)
   await pushAdsDailySpendOverCapNoticeItems(supabase, items, nameOf)
   await pushAdsPlanDeliveryStageMissingItems(supabase, items, nameOf)
 }

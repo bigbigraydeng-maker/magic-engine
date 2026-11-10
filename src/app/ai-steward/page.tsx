@@ -6,6 +6,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { AI_STEWARD_RULES_V1 as RULES } from '@/lib/distributor/config'
+import { normaliseReferralCode } from '@/lib/distributor/referral-code'
 import { formatDollars } from '@/lib/distributor/simulate'
 import './steward.css'
 
@@ -25,7 +26,6 @@ export const metadata: Metadata = {
 const IMG = '/marketing/ai-steward'
 const PHOTO_CREDITS = ['Brooke Cagle', 'Sulthan Auliya', 'Cherrydeck', 'Vitaly Gariev', 'Jakob Owens']
 const RECOMMENDED_PLAN = 'videos-16'
-const CONTACT_HREF = '/contact'
 
 const bg = (file: string) => ({ backgroundImage: `url('${IMG}/${file}')` })
 const Br = () => <br className="dbr" />
@@ -86,7 +86,17 @@ const STEPS = [
   { k: '04', t: '发布与复盘', p: '按时发出，每月看数据再调整' },
 ] as const
 
-function Hero() {
+/** A consult prompt placed between sections, so the reader never has to scroll back to the top to act. */
+function CtaBand({ title, note, href, cta = '预约免费咨询' }: { title: string; note: string; href: string; cta?: string }) {
+  return (
+    <div className="ctaband">
+      <div><div className="cb-t serif">{title}</div><div className="cb-n">{note}</div></div>
+      <Link href={href} className="btn gold-solid">{cta}</Link>
+    </div>
+  )
+}
+
+function Hero({ applyHref }: { applyHref: string }) {
   const plans = RULES.catalog.plans
   const minVideos = Math.min(...plans.map((p) => p.videosPerMonth))
   const maxVideos = Math.max(...plans.map((p) => p.videosPerMonth))
@@ -95,7 +105,7 @@ function Hero() {
     <>
       <div className="nav">
         <div className="logo">MAGIC ENGINE</div>
-        <div className="links"><a href="#why">服务</a><a href="#hot">热点</a><a href="#pricing">价格</a><Link href={CONTACT_HREF}>开始合作</Link></div>
+        <div className="links"><a href="#why">服务</a><a href="#hot">热点</a><a href="#pricing">价格</a><Link href={applyHref}>开始合作</Link></div>
       </div>
       <section className="hero" style={bg('owner.jpg')}>
         <div className="veil" />
@@ -103,7 +113,7 @@ function Hero() {
           
           <h1 className="serif">老板不用出镜，<br /><span className="goldgrad">每天都有新视频</span></h1>
           <p className="lead muted">AI 数字人管家，从脚本、出片到发布和数据，一站完成。<Br />由熟悉新西兰市场的本地团队，和你一起经营账号。</p>
-          <div className="ctas"><Link href={CONTACT_HREF} className="btn gold-solid">预约免费咨询</Link><a href="#pricing" className="btn line">查看价格</a></div>
+          <div className="ctas"><Link href={applyHref} className="btn gold-solid">预约免费咨询</Link><a href="#pricing" className="btn line">查看价格</a></div>
         </div>
         <div className="phone" aria-hidden="true">
           <div className="screen" style={bg('hero.jpg')}>
@@ -231,7 +241,7 @@ function Features() {
   )
 }
 
-function Pricing() {
+function Pricing({ applyHref }: { applyHref: string }) {
   return (
     <section className="sec" id="pricing">
       <div className="head">
@@ -247,12 +257,27 @@ function Pricing() {
               <div className="v">每月 {plan.videosPerMonth} 条</div>
               <div className={hl ? 'p goldgrad' : 'p'}>{formatDollars(plan.monthlyCents, true)}<small>/月</small></div>
               <div className="e">平均每条 {formatDollars(Math.round(plan.monthlyCents / plan.videosPerMonth))}</div>
+              <Link href={applyHref} className="plan-cta">咨询这一档 →</Link>
             </div>
           )
         })}
       </div>
       <p className="incl">每个套餐默认含 {RULES.catalog.includedAvatars} 个数字人，每多 1 个一次性加 {formatDollars(RULES.catalog.extraAvatarOneTimeCents, true)}。价格以 Magic Engine 当时公布的为准。</p>
     </section>
+  )
+}
+
+/** Bridge to the distributor programme: people who like the product can sell it. Carries the referral code. */
+function PartnerBand({ applyHref }: { applyHref: string }) {
+  const topRate = Math.max(...Object.values(RULES.retailRateBp)) / 100
+  return (
+    <div className="ctaband partner">
+      <div>
+        <div className="cb-t serif">想把它推荐给身边的老板？</div>
+        <div className="cb-n">加入 Magic Network（Magic Engine 经销商网络）：加入免费，不囤货，按客户实付金额拿分润，零售最高 {topRate}%。</div>
+      </div>
+      <Link href={applyHref} className="btn line">了解 Magic Network</Link>
+    </div>
   )
 }
 
@@ -269,32 +294,40 @@ function Steps() {
   )
 }
 
-export default function AiStewardPage() {
+export default async function AiStewardPage({ searchParams }: { searchParams: Promise<{ ref?: string | string[] }> }) {
+  const { ref } = await searchParams
+  const referralCode = normaliseReferralCode(Array.isArray(ref) ? ref[0] : ref)
+  const applyHref = referralCode ? `/partner/apply?ref=${referralCode}` : '/partner/apply'
   return (
     <main className="ast">
       <link rel="preconnect" href="https://fonts.googleapis.com" />
       <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
       <link rel="stylesheet" href={FONTS_HREF} />
       <div className="inner">
-        <Hero />
+        <Hero applyHref={applyHref} />
         <Pillars />
+        <CtaBand href={applyHref} title="想知道你的行业在新西兰该怎么做内容？" note="先免费聊一次，听听我们怎么看你的账号。" />
         <LocalCraft />
         <Compare />
+        <CtaBand href={applyHref} title="让本地团队帮你看一眼账号" note="哪里像外地写的、哪些本地节点漏了，一次说清楚。" cta="免费账号诊断" />
         <Hot />
         <Engine />
+        <CtaBand href={applyHref} title="这个月的热点，你的账号跟上了吗？" note="定好方向后，3 个工作日出第一条。" />
         <Features />
-        <Pricing />
+        <Pricing applyHref={applyHref} />
         <Steps />
+        <PartnerBand applyHref={applyHref} />
         <section className="final" style={bg('owner.jpg')}>
           <div className="veil" />
           <div className="in">
             
             <h2 className="serif">下个月，你的账号<br /><span className="goldgrad">每天都有新内容</span></h2>
             <p className="sub muted">先免费聊一次，看看适不适合你的生意。</p>
-            <div className="ctas"><Link href={CONTACT_HREF} className="btn gold-solid">预约免费咨询</Link></div>
+            <div className="ctas"><Link href={applyHref} className="btn gold-solid">预约免费咨询</Link></div>
           </div>
         </section>
-        <footer className="foot"><span>© Magic Engine · 新西兰</span><span>图片来自 Unsplash：{PHOTO_CREDITS.join('、')}</span></footer>
+        <Link href={applyHref} className="float-cta" aria-label="免费咨询">免费咨询</Link>
+        <footer className="foot"><span>© Magic Engine · 新西兰　·　<Link href={applyHref} className="foot-link">成为经销商</Link></span><span>图片来自 Unsplash：{PHOTO_CREDITS.join('、')}</span></footer>
       </div>
     </main>
   )

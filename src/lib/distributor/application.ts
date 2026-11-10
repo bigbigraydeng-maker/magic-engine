@@ -26,7 +26,7 @@ export interface ApplicationInput {
   contactPhone: string
   region: string | null
   note: string | null
-  referralCode: string | null
+  referralCode: string
   termsVersion: string
   /** True when the hidden honeypot field was filled: answer as if accepted, write nothing. */
   isBot: boolean
@@ -51,15 +51,17 @@ export function parseApplication(body: unknown): Parsed<ApplicationInput> {
   const note = typeof b.note === 'string' ? b.note.replace(/[^\P{C}\n]/gu, ' ').trim() : ''
   if (note.length > 1000) errors.push('留言请控制在 1000 字以内')
   const rawRef = typeof b.referral_code === 'string' ? b.referral_code.trim() : ''
-  const referralCode = rawRef ? normaliseReferralCode(rawRef) : null
-  if (rawRef && !referralCode) errors.push('推荐码格式不对（8 位字母和数字）')
+  // Invite-only (PM 2026-11-10): no application without the code of an approved distributor.
+  const referralCode = normaliseReferralCode(rawRef)
+  if (!rawRef) errors.push('目前仅限邀请加入，请填写介绍你的经销商给的邀请码')
+  else if (!referralCode) errors.push('邀请码格式不对（8 位字母和数字）')
   if (b.accept_terms !== true) errors.push('请先阅读并勾选同意上面的经销商规则')
   if (b.terms_version !== DISTRIBUTOR_TERMS_VERSION) errors.push('条款已经更新，请刷新页面重新阅读后再提交')
   const isBot = typeof b.website === 'string' && b.website.trim() !== ''
   if (errors.length) return { ok: false, errors }
   return {
     ok: true,
-    value: { displayName, contactEmail: email, contactPhone: phone, region: region || null, note: note || null, referralCode, termsVersion: DISTRIBUTOR_TERMS_VERSION, isBot },
+    value: { displayName, contactEmail: email, contactPhone: phone, region: region || null, note: note || null, referralCode: referralCode ?? '', termsVersion: DISTRIBUTOR_TERMS_VERSION, isBot },
   }
 }
 
@@ -106,7 +108,7 @@ async function uplineFor(code: string): Promise<string> {
     .from('distributors').select('id').eq('referral_code', code).eq('status', 'approved').maybeSingle()
   if (error) fail('look up referral code', error)
   const id = (data as { id: string } | null)?.id
-  if (!id) throw new DistributorStoreError('推荐码无效，请向介绍你的人确认，或者留空', 400)
+  if (!id) throw new DistributorStoreError('邀请码无效，请向介绍你的经销商确认', 400)
   return id
 }
 
@@ -119,7 +121,7 @@ export async function submitApplication(input: ApplicationInput, ipHash: string,
   if ((await countRecent(null, now)) >= GLOBAL_HOURLY_LIMIT) {
     throw new DistributorStoreError('现在申请的人太多，请一小时后再试', 429)
   }
-  const parentId = input.referralCode ? await uplineFor(input.referralCode) : null
+  const parentId = await uplineFor(input.referralCode)
   const { error } = await supabaseAdmin.from('distributors').insert({
     display_name: input.displayName,
     contact_email: input.contactEmail,

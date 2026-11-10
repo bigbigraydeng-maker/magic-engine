@@ -33,8 +33,8 @@ export async function pushDistributorApplicationItems(
   items.push({
     kind: 'distributor_application_pending',
     client_id: 'infra',
-    client_name: 'Magic Engine 经销商',
-    what: `有 ${count} 个人在申请页申请做经销商，等你批准或拒绝（最早一份已经等了 ${waitedDays} 天）。批准后对方就能卖服务、拿分润`,
+    client_name: 'Magic Network',
+    what: `有 ${count} 个人申请加入 Magic Network（做经销商），等你批准或拒绝（最早一份已经等了 ${waitedDays} 天）。批准后对方就能卖服务、拿分润`,
     how: '打开经销商页，在列表里看他们留的邮箱、电话、城市和留言，合适的点「批准」，不合适的点「拒绝」。批准后再点「登录链接」把链接发给对方',
     href: `${APP_BASE}/dashboard/admin/distributors`,
   })

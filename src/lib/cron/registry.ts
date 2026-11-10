@@ -370,13 +370,6 @@ const CRON_REGISTRY_ENTRIES = [
   // 回执写 cron_run_logs 并发事件 ads.tracking_preflight.checked。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ads-tracking-preflight.ts 的 TRACKING_PREFLIGHT_CRON。
   { service: 'inngest:cloud-ads-tracking-preflight', jobName: 'ads-tracking-preflight', schedule: '0 7 * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-20' },
-  // 广告心跳：每小时新西兰第 5 分只读采样一遍 Meta（不发布、不改广告、不扣费），
-  // 默认 `dry` 且默认一个客户都不跑（要 AD_HEARTBEAT_MODE=live + AD_HEARTBEAT_CLIENT_IDS 才真跑）。
-  // 每一轮（含空轮）都写一行运行记录，它自己哪天停了才看得出来。
-  // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ad-heartbeat.ts 的 AD_HEARTBEAT_CRON
-  //    （带 TZ=Pacific/Auckland 前缀；每小时第 5 分在任何整小时偏移的时区里是同一个周期，所以这里写不带时区的 5 * * * *）。
-  // 🔴 新增函数，部署后必须去 Inngest 后台 Sync 一次，否则安静地不跑——这条登记就是为了把它喊出来。
-  { service: 'inngest:cloud-ad-heartbeat', jobName: 'ad-heartbeat', schedule: '5 * * * *', logsRuns: true, scheduler: 'inngest', addedAt: '2026-10-21' },
   // 广告拆分数据抓取：每天新西兰 06:30 只读拉一遍 Meta 的小时/版位设备/年龄性别/地区拆分数据（不写 Meta、不发布、不扣费），
   // 默认 `dry`（不写表，只写运行记录和事件）且默认一个客户都不跑（要 AD_BREAKDOWN_MODE=live + AD_BREAKDOWN_CLIENT_IDS 才真写）。
   // 🔴 schedule 不许手抄：唯一定义在 src/lib/inngest/functions/ad-breakdown-capture.ts 的 AD_BREAKDOWN_CRON。
