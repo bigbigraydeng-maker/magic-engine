@@ -33,7 +33,6 @@ import { BlankDraftPlanButton } from './_components/BlankDraftPlanButton'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
 import { PromoSpecForm } from './_components/PromoSpecForm'
 import { PromoPlanStatusCard } from './_components/PromoPlanStatusCard'
-import { PromoCollapsible } from './_components/PromoCollapsible'
 
 const planKey = (p: MarketingPlan) => `${p.id}:${JSON.stringify((p.plan_data as unknown as { promo?: unknown })?.promo ?? null)}`
 
@@ -216,36 +215,23 @@ export function PromoPlanClient() {
   const viewPhases = useMemo(() => (shownSpec?.phases ?? []).map(p => ({ id: p.id, name: p.name, start_date: p.start_date })), [shownSpec])
   const scheduleMode = showSample ? 'sample' : approvedLike ? 'approved' : 'preview'
   const showContinue = board ? continueButtonVisible(board) : false
-  const isDraft = selected?.status === 'draft'
 
   return (
-    <div className="min-h-screen bg-[#FBF8F3] px-4 py-6 sm:px-8">
-      <div className="mx-auto max-w-4xl space-y-5">
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[.14em] text-black/40">客户工作台</p>
-            <h1 className="font-display text-2xl font-bold text-[#1A1A1A]">推广计划</h1>
-            <p className="mt-1 text-sm text-black/55">
-              {isDraft
-                ? '当前是草稿：批准前不会开投，也不会自动派活。'
-                : selected
-                  ? `执行中：${selected.title}`
-                  : '先有计划，批准了才动手；每周一页看清花了多少、做得怎么样。'}
-            </p>
-          </div>
-          <div className="flex flex-col items-stretch gap-2 sm:items-end">
-            <BlankDraftPlanButton clientId={clientId} onCreated={id => { void refresh(id) }} />
-            <Link href={`/dashboard/clients/${clientId}/marketing-plan`} className="text-xs text-[#C4912E] hover:underline">
-              去 Marketing Plan 看任务 →
-            </Link>
-          </div>
-        </header>
+    <div className="min-h-screen bg-[#FBF8F3] p-4 sm:p-6">
+      <div className="max-w-4xl mx-auto space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900">推广计划</h1>
+          <Link href={`/dashboard/clients/${clientId}/marketing-plan`} className="ml-auto text-xs text-indigo-600 hover:underline">
+            去 Marketing Plan 看任务 →
+          </Link>
+          <BlankDraftPlanButton clientId={clientId} onCreated={id => { void refresh(id) }} />
+        </div>
 
         {plans.length > 1 && (
           <select
             value={selectedId ?? ''}
             onChange={e => { setSelectedId(e.target.value); void refresh(e.target.value) }}
-            className="w-full rounded-xl border border-black/10 bg-white px-3 py-2 text-sm sm:w-auto"
+            className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white w-full sm:w-auto"
             aria-label="选择计划"
           >
             {plans.filter(p => p.status !== 'archived').map(p => (
@@ -254,20 +240,16 @@ export function PromoPlanClient() {
           </select>
         )}
 
-        {loading && <p className="py-6 text-sm text-black/40 animate-pulse">加载中…</p>}
-        {error && (
-          <p className="rounded-[16px] border border-[#C2453A]/25 bg-[#C2453A]/8 p-3 text-sm text-[#8b2e26]">
-            读取失败：{error}。请稍后重试。
-          </p>
-        )}
-        {message && (
-          <p className="rounded-[16px] border border-black/10 bg-white p-3 text-sm text-black/75">{message}</p>
-        )}
+        {loading && <p className="text-sm text-gray-400 animate-pulse py-6">加载中…</p>}
+        {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">读取失败：{error}。请稍后重试。</p>}
+        {message && <p className="text-sm bg-white border border-gray-200 rounded-lg p-3">{message}</p>}
+
+        {!loading && !error && prescription && <PrescriptionCard clientId={clientId} prescription={prescription} />}
 
         {!loading && !error && !selected && (
-          <div className="rounded-[20px] border border-dashed border-black/15 bg-white p-8 text-center">
-            <p className="text-sm text-black/70">这个客户还没有可用的计划。</p>
-            <p className="mt-1 text-xs text-black/45">用「新建空白草稿计划」挂到目标后，在「填写安排」里搭阶段。</p>
+          <div className="rounded-xl border border-dashed border-gray-300 bg-white p-6 text-center">
+            <p className="text-sm text-gray-700">这个客户还没有可用的计划。</p>
+            <p className="text-xs text-gray-500 mt-1">用上面的「新建空白草稿」选一个目标。</p>
           </div>
         )}
 
@@ -294,9 +276,9 @@ export function PromoPlanClient() {
             />
 
             {board.approval?.deferred_blockers && board.approval.deferred_blockers.length > 0 && (
-              <div className="rounded-[16px] border border-[#C4912E]/35 bg-[#C4912E]/10 px-4 py-3">
-                <p className="text-sm font-semibold text-[#6a4a12]">这些阶段还没过关，开始前必须补齐</p>
-                <ul className="mt-2 space-y-1 text-xs text-[#6a4a12]">
+              <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
+                <p className="text-sm font-semibold text-yellow-800">这些阶段还没过关，开始前必须补齐</p>
+                <ul className="mt-2 text-xs text-yellow-800 space-y-1">
                   {board.approval.deferred_blockers.map((b, i) => (
                     <li key={i}>• {b.phase_name}：{b.label}——{b.reason}</li>
                   ))}
@@ -307,85 +289,43 @@ export function PromoPlanClient() {
             {shownPhases
               ? <PlanOverview phases={shownPhases} sample={showSample} onCloseSample={showSample ? () => setShowSample(false) : undefined} />
               : (
-                <div className="rounded-[20px] border border-dashed border-black/15 bg-white p-4">
-                  <p className="text-sm text-black/65">这份计划还没有分阶段的推广安排。在下方「填写安排」里搭出阶段。</p>
+                <div className="rounded-xl border border-dashed border-gray-300 bg-white p-4">
+                  <p className="text-sm text-gray-700">这份计划还没有分阶段的推广安排。先在下面展开里搭出阶段。</p>
                 </div>
               )}
-
-            {schedule && (
-              <PromoCollapsible
-                title="排期表 · 每天做什么"
-                subtitle={scheduleMode === 'preview' ? '批准前预览，不会派活。' : '按日展开；对账看本周区块。'}
-                defaultOpen={false}
-              >
-                <ScheduleTable
-                  schedule={schedule}
-                  mode={scheduleMode}
-                  today={todayIso}
-                  phases={viewPhases}
-                  adsRunning={adsRunningFrom(liveAdsVisible ? liveAds : null)}
-                />
-              </PromoCollapsible>
-            )}
-
-            {board.reconcile && selected.status === 'approved' && (
-              <PromoCollapsible title="本周对账" subtitle="最近 7 个完整自然日" defaultOpen>
-                <ReconcileTable rec={board.reconcile} />
-              </PromoCollapsible>
-            )}
-
-            <PromoCollapsible title="批准记录" subtitle="谁批的、批时检查项" defaultOpen={false}>
-              <ApprovalRecord plan={selected} />
-            </PromoCollapsible>
-
+            {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} phases={viewPhases} adsRunning={adsRunningFrom(liveAdsVisible ? liveAds : null)} />}
+            <ApprovalRecord plan={selected} />
+            {board.reconcile && selected.status === 'approved' && <ReconcileTable rec={board.reconcile} />}
             {board.next_phase && (
-              <PromoCollapsible
-                title="下一时间段开始前要检查的事"
-                subtitle={board.next_phase.phase.name}
-                defaultOpen
-              >
-                <GateList
-                  view={board.next_phase}
-                  onVerify={onVerify}
-                  busyKey={busy}
-                  creatives={{
-                    clientId,
-                    refs: creativeRefsOfPhase(selected ? readPromoSpec(selected.plan_data) : null, board.next_phase.phase.id),
-                    canAct: !approverOnly,
-                    onChanged: () => { void refresh(selectedId) },
-                  }}
-                />
-              </PromoCollapsible>
+              <GateList
+                view={board.next_phase}
+                onVerify={onVerify}
+                busyKey={busy}
+                creatives={{
+                  clientId,
+                  refs: creativeRefsOfPhase(selected ? readPromoSpec(selected.plan_data) : null, board.next_phase.phase.id),
+                  canAct: !approverOnly,
+                  onChanged: () => { void refresh(selectedId) },
+                }}
+              />
             )}
-
-            {prescription && (
-              <PromoCollapsible title="处方" subtitle="花钱与回顾写在处方页，此处只读" defaultOpen={false}>
-                <PrescriptionCard clientId={clientId} prescription={prescription} />
-              </PromoCollapsible>
-            )}
-
             {board.has_promo && !board.spec_valid && <SpecProblems board={board} />}
 
-            {approve?.visible && approve.hint && isDraft && (
-              <p className="text-xs text-black/50">{approve.hint}</p>
-            )}
-
-            {isDraft && !approverOnly && (
+            {selected.status === 'draft' && !approverOnly && (
               <>
-                <details ref={editorRef} open={editorOpen || !board.has_promo} className="rounded-[20px] border border-black/10 bg-white">
-                  <summary className="cursor-pointer px-5 py-4 text-sm font-medium text-black/70">填写安排（阶段、预算、内容）</summary>
-                  <div className="space-y-3 border-t border-black/[.06] p-4">
+                <details ref={editorRef} open={editorOpen || !board.has_promo} className="rounded-xl border border-gray-200 bg-white">
+                  <summary className="px-4 py-3 text-sm font-medium text-gray-700 cursor-pointer">想自己改？展开（填表、加阶段、看示例）</summary>
+                  <div className="p-3 space-y-3">
                     {!showSample && !shownPhases && (
-                      <button type="button" onClick={() => setShowSample(true)} className="rounded-xl border border-black/10 px-4 py-2 text-sm hover:bg-[#FBF8F3]">
-                        看示例计划
-                      </button>
+                      <button type="button" onClick={() => setShowSample(true)} className="text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">看示例计划</button>
                     )}
                     <PromoSpecForm key={planKey(selected)} clientId={clientId} plan={selected} options={options} onSaved={() => void refresh(selected.id)} />
                   </div>
                 </details>
-                <PromoCollapsible title="高级改法" subtitle="直接改结构文本，只给技术同事用" defaultOpen={false}>
+                <details className="rounded-xl border border-gray-200 bg-white">
+                  <summary className="px-4 py-3 text-xs text-gray-500 cursor-pointer">高级：直接改结构文本（只给技术同事用）</summary>
                   <PromoSpecEditor key={planKey(selected)} clientId={clientId} plan={selected} onSaved={() => void refresh(selected.id)} />
-                </PromoCollapsible>
+                </details>
               </>
             )}
           </>
@@ -397,9 +337,9 @@ export function PromoPlanClient() {
 
 function SpecProblems({ board }: { board: PromoBoard }) {
   return (
-    <div className="rounded-[16px] border border-[#C2453A]/25 bg-[#C2453A]/8 p-4">
-      <p className="text-sm font-semibold text-[#8b2e26]">推广计划的内容有问题，暂时不能批准：</p>
-      <ul className="mt-2 space-y-1 text-xs text-[#8b2e26]">
+    <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+      <p className="text-sm font-semibold text-red-800">推广计划的内容有问题，暂时不能批准：</p>
+      <ul className="mt-2 text-xs text-red-700 space-y-1">
         {board.issues.map((i, k) => <li key={k}>• {i.path ? `${i.path}：` : ''}{i.message}</li>)}
       </ul>
     </div>

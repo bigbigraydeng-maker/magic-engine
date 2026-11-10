@@ -70,9 +70,10 @@ export function ScheduleTable({ schedule, mode, today, phases, adsRunning = 'unk
     weekStart === w0 ? '本周' : weekStart === next ? '下周' : null
 
   return (
-    <section className="-mx-1" aria-label="排期表">
-      <div className="pb-3">
-        <p className="text-xs text-black/50">{MODE_NOTE[mode]}</p>
+    <section className="rounded-xl border border-gray-200 bg-white" aria-label="排期表">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h2 className="text-sm font-bold text-gray-900">排期表 · 每天做什么</h2>
+        <p className="text-xs text-gray-500 mt-0.5">{MODE_NOTE[mode]}</p>
         {!schedule.error && <p className="text-xs font-medium text-gray-800 mt-1">{summaryOf(schedule)}</p>}
         {!schedule.error && <p className="text-[11px] text-gray-600 mt-0.5">{view.routine}</p>}
         {!schedule.error && view.adsNote && adsRunning === 'none' && <p className="text-[11px] text-gray-600 mt-0.5">{view.adsNote}（以 Meta 为准）</p>}

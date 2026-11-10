@@ -25,23 +25,24 @@ interface Props {
 
 export function GateList({ view, onVerify, busyKey, creatives }: Props) {
   return (
-    <section className="-mx-1" aria-label={`检查清单：${view.phase.name}`}>
-      <div className="pb-3">
-        <p className="text-xs text-black/50">
+    <section className="rounded-xl border border-gray-200 bg-white">
+      <div className="px-4 py-3 border-b border-gray-100">
+        <h2 className="text-sm font-bold text-gray-900">下一阶段检查清单：{view.phase.name}</h2>
+        <p className="text-xs text-gray-500 mt-0.5">
           {view.phase.start_date} 至 {view.phase.end_date}。
           灯的意思：🟢 通过　🟡 有风险　🔴 没过　⚪ 还没核实（读不到或太旧，不能当作通过）
         </p>
       </div>
       {view.results.length === 0 ? (
-        <p className="py-2 text-sm text-black/50">这个阶段没有需要检查的项。</p>
+        <p className="px-4 py-4 text-sm text-gray-500">这个阶段没有需要检查的项。</p>
       ) : (
-        <ul className="divide-y divide-black/[.06]">
+        <ul className="divide-y divide-gray-100">
           {view.results.map(r => {
             const meta = LIGHT_META[r.light]
             const manual = (MANUAL_GATE_KEYS as readonly string[]).includes(r.key)
             const busy = busyKey === `${view.phase.id}:${r.key}`
             return (
-              <li key={r.key} className="flex flex-col gap-2 py-3 sm:flex-row sm:items-start">
+              <li key={r.key} className="px-4 py-3 flex flex-col sm:flex-row sm:items-start gap-2">
                 <span className={`shrink-0 self-start text-xs font-medium border rounded-full px-2 py-0.5 ${meta.cls}`}>
                   {meta.dot} {meta.label}
                 </span>

@@ -8,12 +8,12 @@ export function ApprovalRecord({ plan }: { plan: MarketingPlan }) {
   const view = describeApprovalRecord(plan)
   if (!view) return null
   const alert = view.tone === 'alert'
-  const cls = alert ? 'text-[#8b2e26]' : 'text-[#1A1A1A]'
+  const cls = alert ? 'border-red-200 bg-red-50' : view.tone === 'neutral' ? 'border-gray-200 bg-gray-50' : 'border-gray-200 bg-white'
   return (
-    <section className="-mx-1" aria-label="批准记录">
-      <p className={`text-sm font-semibold ${cls}`}>{view.headline}</p>
-      <ul className="mt-2 space-y-0.5">
-        {view.lines.map((l, i) => <li key={i} className="text-xs text-black/65">{l}</li>)}
+    <section className={`rounded-xl border px-4 py-3 ${cls}`} aria-label="批准记录">
+      <h2 className={`text-sm font-bold ${alert ? 'text-red-800' : 'text-gray-900'}`}>{view.headline}</h2>
+      <ul className="mt-1 space-y-0.5">
+        {view.lines.map((l, i) => <li key={i} className="text-xs text-gray-700">{l}</li>)}
       </ul>
     </section>
   )
