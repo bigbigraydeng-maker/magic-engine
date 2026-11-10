@@ -5,9 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   blankDay,
   buildFileName,
+  PRODUCT_TYPE_CHOICES,
   TAILOR_MADE_STATUS_LABEL,
   type TailorMadeDay,
   type TailorMadeItinerary,
+  type TailorMadeProductType,
   type TailorMadeRecord,
   type TailorMadeStatus,
   type TailorMadeFlight,
@@ -664,6 +666,17 @@ export default function TailorMadeEditor({
           </Section>
 
           <Section id="tm-trip" title="行程概览">
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-gray-700">产品类型</span>
+              <select
+                className={inputCls}
+                value={payload.trip.productType ?? 'tailor-made'}
+                onChange={(e) => edit((d) => { d.trip.productType = e.target.value as TailorMadeProductType; })}
+              >
+                {PRODUCT_TYPE_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+              <span className="mt-1 block text-xs text-gray-500">决定封面图上的小字：Tailor-made journey 或 Seat-in-coach (SIC) journey</span>
+            </label>
             <Text label="行程名称" value={payload.trip.title}
               onChange={(v) => edit((d) => { d.trip.title = v; })} />
             <Text label="城市线" hint="用逗号分隔，如 Beijing, Xi'an, Shanghai" value={payload.trip.route.join(', ')}

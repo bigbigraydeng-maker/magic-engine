@@ -8,6 +8,22 @@
 
 export type TailorMadeStatus = 'draft' | 'sent' | 'confirmed' | 'archived';
 
+/**
+ * 产品类型：决定封面和画册封面上那行小字写什么。
+ * 留空（老数据）一律按定制行程处理，所以加这个字段不需要改库、不影响已存的行程单。
+ */
+export type TailorMadeProductType = 'tailor-made' | 'sic';
+
+export const PRODUCT_TYPE_CHOICES: Array<{ value: TailorMadeProductType; label: string }> = [
+  { value: 'tailor-made', label: 'Tailor-made（定制行程）' },
+  { value: 'sic', label: 'Seat-in-coach（SIC 拼车 / 散拼）' },
+];
+
+/** 封面上压在图上的小字。模板（itinerary-template.html）里有同样的映射，改这里要同步改模板。 */
+export function productEyebrow(type: TailorMadeProductType | undefined): string {
+  return type === 'sic' ? 'Seat-in-coach (SIC) journey' : 'Tailor-made journey';
+}
+
 export interface TailorMadeConsultant {
   name: string;
   title: string;
@@ -80,6 +96,8 @@ export interface TailorMadeItinerary {
     travellers: string;
   };
   trip: {
+    /** 留空 = tailor-made */
+    productType?: TailorMadeProductType;
     title: string;
     route: string[];
     dateRange: string;
