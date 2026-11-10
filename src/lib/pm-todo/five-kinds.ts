@@ -116,6 +116,10 @@ export const LANE_OF_KIND: Record<ManualItemKind, TodoLane> = {
   daily_plan_post_unmeasured: 'one_click', // 重新连接 Meta / 确认帖子公开
   daily_plan_first_comment_failed: 'one_click', // 在帖子下补发首评（文案已写好，复制即可）
   social_readback_refused: 'one_click', // 打开视频看是不是已经公开，公开了就转给开发
+  social_post_readback_missing: 'dev', // 过点没回执：读数链欠账
+  social_post_readback_unreadable: 'truth', // 有回执但读不到，多是权限或平台字段
+  social_post_readback_retries_exhausted: 'dev', // 读数重试耗尽
+  social_story_readback_unsupported: 'weekly', // Story 类型暂无 T+N 读数，周知即可
   mailchimp_export_broken: 'one_click', // 设置页填回 Mailchimp Audience ID
   lead_sheet_reauth_needed: 'one_click', // 写表被 Google 判 403，重新走一次「连接 Google」
   calendar_closure_overdue_summary: 'truth', // 日历到期没闭环的件数：「认一下」哪些真做了

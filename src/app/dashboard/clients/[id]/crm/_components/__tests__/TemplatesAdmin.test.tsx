@@ -297,6 +297,7 @@ describe('switching a template off or on', () => {
       pickFilter: {},
       status: 'disabled',
       changeNote: '停用',
+      whenToUse: null,
     })
     expect(await screen.findByText('✓ 已保存为第 4 版')).toBeInTheDocument()
     await waitFor(() => expect(r.of(LIST).length).toBe(2))

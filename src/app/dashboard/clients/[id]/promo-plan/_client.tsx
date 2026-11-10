@@ -2,11 +2,10 @@
 
 /**
  * 推广计划 —— PM 每周的一页纸。
- * 从上到下：一句话头条 → 本周对账 → 下一阶段检查清单 → 两个按钮（按计划继续 / 批准计划）。
- * 设计稿：docs/specs/2026-10-14-promo-plan-board-design-v0.1.md §9
+ * 设计稿：Figma LqrVdEMndi3Zr5rQfUeKwW（2-2 / 3-2 / 4-2）
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import type { MarketingPlan } from '@/lib/marketing-plan/types'
@@ -18,7 +17,6 @@ import { creativeRefsOfPhase } from '@/lib/marketing-plan/promo/phase-creatives'
 import { pickPlanForPrescription } from '@/lib/marketing-plan/promo/plan-pick'
 import { ApprovalRecord } from './_components/ApprovalRecord'
 import { PlanOverview } from './_components/PlanOverview'
-import { DeliveryStageCard } from './_components/DeliveryStageCard'
 import type { DeliveryView } from '@/lib/marketing-plan/promo/stage-evidence'
 import { ScheduleTable } from './_components/ScheduleTable'
 import { expandPromoSchedule } from '@/lib/marketing-plan/promo/schedule'
@@ -29,14 +27,13 @@ import { GateList } from './_components/GateList'
 import type { GoalPrescriptionView } from '@/lib/marketing-plan/promo/goal-prescription'
 import type { PromoOptions } from '@/lib/marketing-plan/promo/options'
 import { PrescriptionCard } from './_components/PrescriptionCard'
-import { adsRunningFrom, describeLiveAds, describeUnrecordedAdsets } from '@/lib/marketing-plan/promo/live-ads-message'
-import type { LiveAdsFact, LiveAdsMessage } from '@/lib/marketing-plan/promo/live-ads-message'
+import { adsRunningFrom } from '@/lib/marketing-plan/promo/live-ads-message'
+import type { LiveAdsFact } from '@/lib/marketing-plan/promo/live-ads-message'
 import { BlankDraftPlanButton } from './_components/BlankDraftPlanButton'
 import { PromoSpecEditor } from './_components/PromoSpecEditor'
-import { dailyTotalCapSentence } from '@/lib/marketing-plan/promo/daily-total-cap'
 import { PromoSpecForm } from './_components/PromoSpecForm'
+import { PromoPlanStatusCard } from './_components/PromoPlanStatusCard'
 
-/** 计划内容变了（含从「高级」保存）就换 key，让表格和文本编辑器都重新读最新内容。 */
 const planKey = (p: MarketingPlan) => `${p.id}:${JSON.stringify((p.plan_data as unknown as { promo?: unknown })?.promo ?? null)}`
 
 export function PromoPlanClient() {
@@ -56,6 +53,8 @@ export function PromoPlanClient() {
   const [showSample, setShowSample] = useState(false)
   const [approverOnly, setApproverOnly] = useState(false)
   const [delivery, setDelivery] = useState<DeliveryView | null>(null)
+  const [editorOpen, setEditorOpen] = useState(false)
+  const editorRef = useRef<HTMLDetailsElement>(null)
 
   const base = `/api/clients/${clientId}/marketing-plan`
 
@@ -117,7 +116,6 @@ export function PromoPlanClient() {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}),
     })
     const json = await res.json() as { success: boolean; error?: string; reason?: string; blockers?: { label: string; reason: string }[] }
-    // 服务端判定当前账号不是 Magic Lab 内部账号时，隐藏需要内部权限的操作
     if (json.reason === 'approver_only') setApproverOnly(true)
     return json
   }
@@ -189,10 +187,16 @@ export function PromoPlanClient() {
     })
   }
 
+  const openEditor = () => {
+    setEditorOpen(true)
+    queueMicrotask(() => {
+      editorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      if (editorRef.current && !editorRef.current.open) editorRef.current.open = true
+    })
+  }
+
   const approve = board ? approveButtonState(board) : null
-  // 「今天」按新西兰日期（页面是 NZ 的），不用 UTC，免得凌晨少算一天
   const todayIso = todayInNz()
-  // 展示用的推广结构：示例开着看示例，否则看这份计划自己的
   const shownSpec = useMemo(
     () => (showSample ? buildPromoSample(todayIso) : selected ? readPromoSpec(selected.plan_data) : null),
     [showSample, selected, todayIso],
@@ -206,18 +210,16 @@ export function PromoPlanClient() {
     () => (shownSpec ? describePromoSpec(shownSpec, showSample ? {} : accountLabels) : null),
     [shownSpec, showSample, accountLabels],
   )
-  // 目前只有默认排期摆法（行业剧本还没有证据，见 playbooks.ts）
   const schedule = useMemo(() => (shownSpec ? expandPromoSchedule(shownSpec, DEFAULT_PROMO_PLAYBOOK) : null), [shownSpec])
   const approvedLike = selected?.status === 'approved' || selected?.status === 'completed'
   const viewPhases = useMemo(() => (shownSpec?.phases ?? []).map(p => ({ id: p.id, name: p.name, start_date: p.start_date })), [shownSpec])
   const scheduleMode = showSample ? 'sample' : approvedLike ? 'approved' : 'preview'
+  const showContinue = board ? continueButtonVisible(board) : false
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 sm:p-6">
+    <div className="min-h-screen bg-[#FBF8F3] p-4 sm:p-6">
       <div className="max-w-4xl mx-auto space-y-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Link href={`/dashboard/clients/${clientId}`} className="text-gray-400 hover:text-gray-600 text-sm">← 客户主页</Link>
-          <span className="text-gray-300">/</span>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-900">推广计划</h1>
           <Link href={`/dashboard/clients/${clientId}/marketing-plan`} className="ml-auto text-xs text-indigo-600 hover:underline">
             去 Marketing Plan 看任务 →
@@ -239,7 +241,7 @@ export function PromoPlanClient() {
         )}
 
         {loading && <p className="text-sm text-gray-400 animate-pulse py-6">加载中…</p>}
-        {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">读取失败：{error}。这不代表“没有计划”，请稍后重试。</p>}
+        {error && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">读取失败：{error}。请稍后重试。</p>}
         {message && <p className="text-sm bg-white border border-gray-200 rounded-lg p-3">{message}</p>}
 
         {!loading && !error && prescription && <PrescriptionCard clientId={clientId} prescription={prescription} />}
@@ -247,13 +249,32 @@ export function PromoPlanClient() {
         {!loading && !error && !selected && (
           <div className="rounded-xl border border-dashed border-gray-300 bg-white p-6 text-center">
             <p className="text-sm text-gray-700">这个客户还没有可用的计划。</p>
-            <p className="text-xs text-gray-500 mt-1">用上面的「新建空白草稿计划」选一个目标。不会自动写内容，也不会改动已有计划。</p>
+            <p className="text-xs text-gray-500 mt-1">用上面的「新建空白草稿」选一个目标。</p>
           </div>
         )}
 
         {board && selected && (
           <>
-            <Headline board={board} plan={selected} liveAds={liveAdsVisible ? liveAds : null} liveLink={liveAdsVisible ? liveLink : null} liveAdsVisible={liveAdsVisible} clientId={clientId} />
+            <PromoPlanStatusCard
+              board={board}
+              plan={selected}
+              delivery={delivery && !showSample ? delivery : null}
+              liveAds={liveAdsVisible ? liveAds : null}
+              liveLink={liveAdsVisible ? liveLink : null}
+              liveAdsVisible={liveAdsVisible}
+              clientId={clientId}
+              busy={busy}
+              marking={busy === 'mark'}
+              approverOnly={approverOnly}
+              approve={approve}
+              showContinue={showContinue}
+              onContinue={onContinue}
+              onApprove={onApprove}
+              onPropose={onPropose}
+              onMark={onMark}
+              onOpenEditor={openEditor}
+            />
+
             {board.approval?.deferred_blockers && board.approval.deferred_blockers.length > 0 && (
               <div className="rounded-xl border border-yellow-200 bg-yellow-50 px-4 py-3">
                 <p className="text-sm font-semibold text-yellow-800">这些阶段还没过关，开始前必须补齐</p>
@@ -264,23 +285,14 @@ export function PromoPlanClient() {
                 </ul>
               </div>
             )}
-            {delivery && !showSample && (
-              <DeliveryStageCard
-                view={delivery}
-                busy={busy === 'propose'}
-                marking={busy === 'mark'}
-                canAct={!approverOnly && selected.status === 'approved'}
-                onPropose={onPropose}
-                onMark={onMark}
-              />
-            )}
+
             {shownPhases
               ? <PlanOverview phases={shownPhases} sample={showSample} onCloseSample={showSample ? () => setShowSample(false) : undefined} />
               : (
-                  <div className="rounded-xl border border-dashed border-gray-300 bg-white p-4 flex flex-wrap items-center gap-3">
-                    <p className="text-sm text-gray-700 flex-1">这份计划还没有分阶段的推广安排。先在下面「想自己改？展开」里搭出阶段，广告那一项可以让系统起草预算、受众和素材。</p>
-                  </div>
-                )}
+                <div className="rounded-xl border border-dashed border-gray-300 bg-white p-4">
+                  <p className="text-sm text-gray-700">这份计划还没有分阶段的推广安排。先在下面展开里搭出阶段。</p>
+                </div>
+              )}
             {schedule && <ScheduleTable schedule={schedule} mode={scheduleMode} today={todayIso} phases={viewPhases} adsRunning={adsRunningFrom(liveAdsVisible ? liveAds : null)} />}
             <ApprovalRecord plan={selected} />
             {board.reconcile && selected.status === 'approved' && <ReconcileTable rec={board.reconcile} />}
@@ -299,42 +311,13 @@ export function PromoPlanClient() {
             )}
             {board.has_promo && !board.spec_valid && <SpecProblems board={board} />}
 
-            {approverOnly && (
-              <p className="text-xs text-gray-500">批准、核实、保存需要 Magic Lab 内部账号。</p>
-            )}
-            <div className="flex flex-col sm:flex-row gap-3">
-              {!approverOnly && continueButtonVisible(board) && (
-                <details className="rounded-lg border border-gray-200 bg-white px-4 py-2">
-                  <summary className="text-xs text-gray-500 cursor-pointer">每周手动确认（想自己确认这一周时展开）</summary>
-                  <button onClick={onContinue} disabled={busy === 'continue'}
-                    className="mt-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg px-5 py-2.5 disabled:opacity-50">
-                    按计划继续
-                  </button>
-                </details>
-              )}
-              {!approverOnly && approve?.visible && (
-                <div className="flex-1">
-                  <button onClick={onApprove} disabled={approve.disabled || busy === 'approve'}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg px-5 py-2.5 disabled:opacity-40 disabled:cursor-not-allowed">
-                    {busy === 'approve' ? '批准中…' : approve.label}
-                  </button>
-                  <p className="text-xs text-gray-600 mt-2">{approve.hint}</p>
-                  {approve.blockers.length > 0 && (
-                    <ul className="mt-2 space-y-1 text-xs text-gray-700">
-                      {approve.blockers.map((b, i) => <li key={i}>• <strong>{b.label}</strong>：{b.reason}{b.how ? ` ——${b.how}` : ''}</li>)}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </div>
-
             {selected.status === 'draft' && !approverOnly && (
               <>
-                <details open={!board.has_promo} className="rounded-xl border border-gray-200 bg-white">
+                <details ref={editorRef} open={editorOpen || !board.has_promo} className="rounded-xl border border-gray-200 bg-white">
                   <summary className="px-4 py-3 text-sm font-medium text-gray-700 cursor-pointer">想自己改？展开（填表、加阶段、看示例）</summary>
                   <div className="p-3 space-y-3">
                     {!showSample && !shownPhases && (
-                      <button onClick={() => setShowSample(true)} className="text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">看示例计划</button>
+                      <button type="button" onClick={() => setShowSample(true)} className="text-sm border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50">看示例计划</button>
                     )}
                     <PromoSpecForm key={planKey(selected)} clientId={clientId} plan={selected} options={options} onSaved={() => void refresh(selected.id)} />
                   </div>
@@ -352,37 +335,6 @@ export function PromoPlanClient() {
   )
 }
 
-function Headline({ board, plan, liveAds, liveLink, liveAdsVisible, clientId }: {
-  board: PromoBoard; plan: MarketingPlan; liveAds: LiveAdsFact | null; liveLink: string[] | null; liveAdsVisible: boolean; clientId: string
-}) {
-  const draft = plan.status === 'draft'
-  const missing = describeUnrecordedAdsets(liveAds)
-  const live = describeLiveAds(liveAds)
-  const text = draft
-    ? missing?.level === 'red' ? '还没批准——有开着的广告组没有批准记录'
-      : live?.level === 'amber' ? '还没批准——Meta 里的广告可能已经在花钱'
-      : '还没批准——批准之前，ME 的自动动作都不会发生'
-    : board.reconcile?.headline ?? (board.has_promo ? '推广计划的内容有问题，先改好' : '这份计划还没有推广计划的阶段')
-  const blind = !draft && !!board.reconcile?.blind
-  return (
-    <div className={`rounded-xl border px-5 py-4 ${blind ? 'bg-gray-100 border-gray-300' : 'bg-white border-gray-200'}`}>
-      <p className="text-xs text-gray-500 mb-1">{plan.title}</p>
-      <p className="text-lg font-bold text-gray-900">{text}</p>
-      <p className="text-sm text-gray-800 mt-2">{dailyTotalCapSentence(plan.plan_data)}</p>
-      {liveAdsVisible && <LiveAdsNotice fact={liveAds} missing={missing} message={live} clientId={clientId} />}
-      {liveAdsVisible && liveLink && liveLink.length > 0 && (
-        <ul className="mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 space-y-1">
-          {liveLink.map((line, index) => <li key={`${index}-${line}`}>{line}</li>)}
-        </ul>
-      )}
-      {blind && <p className="text-xs text-gray-600 mt-1">“看不清”不是“正常”：先把上面写的缺项补上，再看对账。</p>}
-      {board.today && !board.timezone_known && (
-        <p className="text-xs text-yellow-800 mt-1">广告账户的时区还没确定，日期暂按世界标准时间算，花费对账会显示“看不清”。</p>
-      )}
-    </div>
-  )
-}
-
 function SpecProblems({ board }: { board: PromoBoard }) {
   return (
     <div className="rounded-xl border border-red-200 bg-red-50 p-4">
@@ -391,26 +343,5 @@ function SpecProblems({ board }: { board: PromoBoard }) {
         {board.issues.map((i, k) => <li key={k}>• {i.path ? `${i.path}：` : ''}{i.message}</li>)}
       </ul>
     </div>
-  )
-}
-
-function LiveAdsNotice({ fact, missing, message, clientId }: {
-  fact: LiveAdsFact | null; missing: LiveAdsMessage | null; message: LiveAdsMessage | null; clientId: string
-}) {
-  const tone = (level: LiveAdsMessage['level']) => level === 'red' ? 'border-red-300 bg-red-50 text-red-800'
-    : level === 'amber' ? 'border-yellow-300 bg-yellow-50 text-yellow-900' : 'border-gray-200 bg-gray-50 text-gray-700'
-  return (
-    <>
-      {missing && (
-        <p className={`mt-2 rounded-lg border px-3 py-2 text-sm ${tone(missing.level)}`}>
-          {missing.text}{' '}
-          <a className="underline font-medium" href={`/dashboard/clients/${clientId}/ads-health`}>去作战地图看「已开投」</a>
-        </p>
-      )}
-      {message && <p className={`mt-2 rounded-lg border px-3 py-2 text-sm ${tone(message.level)}`}>{message.text}</p>}
-      {!missing && !message && (!fact || !fact.ok) && (
-        <p className="text-xs text-gray-600 mt-1">读不到广告花费，没法确认 Meta 里有没有在跑的广告。</p>
-      )}
-    </>
   )
 }

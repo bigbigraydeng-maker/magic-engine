@@ -46,6 +46,9 @@ export default async function EmailTemplatesPage({ params }: { params: { id: str
           回到全部客人
         </Link>
       </div>
+      <p className="mb-2 text-sm text-me-charcoal/70">
+        通话之后，在客人的资料页点「选模板」就能发跟进邮件。模板里的团、价格、班期永远来自已发布的团目录；每封信都由你点「发送」，系统不会自己发。
+      </p>
       <TemplatesAdmin clientId={params.id} />
       <RecentSends clientId={params.id} />
       {settingsAdmin && (

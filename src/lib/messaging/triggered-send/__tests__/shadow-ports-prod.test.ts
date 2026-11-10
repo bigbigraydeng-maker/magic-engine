@@ -1024,3 +1024,24 @@ describe('the required mailbox must still be connected when the sent items are r
     expect((await ports.evidence(CONTACT)).ok).toBe(true)
   })
 })
+
+describe('the evidence of a letter of ME’s own still in flight, and ME’s own unsubscribes', () => {
+  it('🔴 a taken-over letter is exempt from its own count (§16.8 ④); a plain read exempts nothing', async () => {
+    const evaluate = vi.fn(async (args: EvaluateArgs): Promise<FrequencyVerdict> => {
+      const exempt = args.loadExemptIds === undefined ? [] : await args.loadExemptIds('2026-10-26T00:00:00.000Z')
+      return { ok: true, count: 0, items: exempt.map((id) => item({ id, source: 'me_send' })) }
+    })
+    const { ports } = createShadowGatePorts(makeDeps({ evaluate }))
+    const withExempt = await ports.evidence(CONTACT, { exemptSendId: 'send-1' })
+    expect(withExempt.ok && withExempt.items.map((i) => i.id)).toEqual(['send-1'])
+    const plain = await ports.evidence(CONTACT)
+    expect(plain.ok && plain.items).toEqual([])
+  })
+
+  it('🔴 the unsubscribe port asks for this guest (contact and every address); a failed read is never "not unsubscribed"', async () => {
+    const down = createShadowGatePorts(makeDeps({ db: makeFakeDb({ data: null, error: { message: 'db down' } }) as never })).ports
+    expect(await down.unsubscribed({ ...CONTACT, contactId: '22222222-2222-4222-8222-222222222222' })).toMatchObject({ ok: false })
+    const bad = createShadowGatePorts(makeDeps()).ports
+    expect(await bad.unsubscribed({ ...CONTACT, contactId: 'not-a-uuid' })).toMatchObject({ ok: false })
+  })
+})

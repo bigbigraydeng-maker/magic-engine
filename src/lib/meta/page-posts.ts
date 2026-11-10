@@ -141,6 +141,42 @@ export async function fetchPagePosts(
   }
 }
 
+export interface PostText {
+  text: string
+  /** First attachment's title (an ad's headline), when there is one. */
+  title: string | null
+}
+
+/**
+ * Read one post's body text and attachment title. Read-only.
+ * Returns null when Meta refuses or the post has neither — callers treat that
+ * as "we do not know what this post is about".
+ */
+export async function fetchPostText(
+  postId: string,
+  pageAccessToken: string,
+  fetcher: typeof fetch = fetch,
+): Promise<PostText | null> {
+  const url = `${GRAPH_BASE}/${postId}?fields=message,attachments{title}&access_token=${encodeURIComponent(pageAccessToken)}`
+  try {
+    const res = await fetcher(url)
+    if (!res.ok) return null
+    const body = (await res.json()) as {
+      message?: string
+      attachments?: { data?: Array<{ title?: string }> }
+      error?: unknown
+    }
+    if (body.error) return null
+    const text = typeof body.message === 'string' ? body.message : ''
+    const rawTitle = body.attachments?.data?.[0]?.title
+    const title = typeof rawTitle === 'string' && rawTitle.trim().length > 0 ? rawTitle : null
+    if (text.trim().length === 0 && title === null) return null
+    return { text, title }
+  } catch {
+    return null
+  }
+}
+
 function mapPosts(rows: RawPost[]): PagePost[] {
   return rows.map((p) => {
     const postId = p.id.includes('_') ? p.id.split('_')[1] : p.id

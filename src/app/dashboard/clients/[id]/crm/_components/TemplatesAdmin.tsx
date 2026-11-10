@@ -264,6 +264,7 @@ export function TemplatesAdmin(props: { clientId: string }): JSX.Element {
               pickFilter: row.pickFilter,
               status: nextStatus,
               changeNote: note,
+              whenToUse: row.whenToUse ?? null,
             }),
           },
         )

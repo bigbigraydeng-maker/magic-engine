@@ -2,12 +2,14 @@ import { describe, it, expect, vi } from 'vitest'
 import type { OutboundItem } from '@/lib/crm/email-templates/gates/types'
 import type { TriggeredSendRule } from '../rule'
 import type {
+  AddressHistoryRead,
   ConsentRead,
   DncRead,
   EvidenceRead,
   MemberRead,
   ShadowContact,
   ShadowGatePorts,
+  UnsubscribeRead,
 } from '../types'
 import { decideShadow, isPlausibleEmail, isSystemAddress, staleDecision } from '../shadow-gates'
 
@@ -55,6 +57,8 @@ interface PortsOptions {
   dnc?: DncRead
   member?: MemberRead
   evidence?: EvidenceRead
+  unsubscribed?: UnsubscribeRead
+  history?: AddressHistoryRead
 }
 
 function makePorts(opts: PortsOptions = {}): {
@@ -63,6 +67,8 @@ function makePorts(opts: PortsOptions = {}): {
   dnc: ReturnType<typeof vi.fn>
   member: ReturnType<typeof vi.fn>
   evidence: ReturnType<typeof vi.fn>
+  unsubscribed: ReturnType<typeof vi.fn>
+  addressHistory: ReturnType<typeof vi.fn>
 } {
   const consent = vi.fn(async (): Promise<ConsentRead> =>
     opts.consent ?? { ok: true, bases: ['form_disclosure_attested'], sourceRef: 'lead-1' },
@@ -73,8 +79,12 @@ function makePorts(opts: PortsOptions = {}): {
     async (): Promise<EvidenceRead> =>
       opts.evidence ?? { ok: true, items: [], legacy: NOT_WELCOMED },
   )
-  const ports: ShadowGatePorts = { consent, dnc, member, evidence }
-  return { ports, consent, dnc, member, evidence }
+  const unsubscribed = vi.fn(async (): Promise<UnsubscribeRead> => opts.unsubscribed ?? { ok: true, unsubscribed: false })
+  const addressHistory = vi.fn(
+    async (): Promise<AddressHistoryRead> => opts.history ?? { ok: true, complained: false, hardBounced: false },
+  )
+  const ports: ShadowGatePorts = { consent, dnc, member, evidence, unsubscribed, addressHistory }
+  return { ports, consent, dnc, member, evidence, unsubscribed, addressHistory }
 }
 
 describe('isPlausibleEmail', () => {
@@ -742,5 +752,47 @@ describe('decideShadow - behaviours the mutation probe found unpinned', () => {
       ports,
     })
     expect(decision).toMatchObject({ kind: 'write', reasonCode: 'not_in_allowlist' })
+  })
+})
+
+describe('decideShadow — ME’s own unsubscribes, complaints and bounces; the mode', () => {
+  it('🔴 a guest who unsubscribed from ME, complained, or whose address bounced for good is skipped, in both modes', async () => {
+    const cases: Array<[PortsOptions, string]> = [
+      [{ unsubscribed: { ok: true, unsubscribed: true } }, 'email_unsubscribed'],
+      [{ history: { ok: true, complained: true, hardBounced: false } }, 'complained'],
+      [{ history: { ok: true, complained: false, hardBounced: true } }, 'hard_bounced_address'],
+    ]
+    for (const [opts, reason] of cases) {
+      for (const mode of ['rehearsal', 'send'] as const) {
+        const { ports } = makePorts(opts)
+        const decision = await decideShadow({ contact: makeContact(), rule: makeRule(), ports, mode })
+        expect(decision, `${reason} / ${mode}`).toMatchObject({ kind: 'write', status: 'skipped', reasonCode: reason })
+      }
+    }
+  })
+
+  it('🔴 a failed read of them is never "not unsubscribed": the contact is set aside', async () => {
+    const unsub = makePorts({ unsubscribed: { ok: false, error: 'db down' } })
+    expect(await decideShadow({ contact: makeContact(), rule: makeRule(), ports: unsub.ports })).toMatchObject({ kind: 'defer', reasonCode: 'unsubscribe_unverifiable' })
+    const history = makePorts({ history: { ok: false, error: 'db down' } })
+    expect(await decideShadow({ contact: makeContact(), rule: makeRule(), ports: history.ports })).toMatchObject({ kind: 'defer', reasonCode: 'address_history_unreadable' })
+    const throws = makePorts()
+    throws.unsubscribed.mockRejectedValueOnce(new Error('boom'))
+    expect(await decideShadow({ contact: makeContact(), rule: makeRule(), ports: throws.ports })).toMatchObject({ kind: 'defer', reasonCode: 'unsubscribe_unverifiable' })
+  })
+
+  it('🔴 what the old batch already did is only noted in a rehearsal, and a final skip when really sending', async () => {
+    const welcomed = { ok: true as const, items: [], legacy: { welcomed: true, batchSeen: true, campaignIds: ['c1'] } }
+    const rehearsal = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: makePorts({ evidence: welcomed }).ports })
+    expect(rehearsal).toMatchObject({ kind: 'write', status: 'shadow', reasonCode: null, annotations: { legacy_welcomed: true, would_send: true } })
+    const send = await decideShadow({ contact: makeContact(), rule: makeRule(), ports: makePorts({ evidence: welcomed }).ports, mode: 'send' })
+    expect(send).toMatchObject({ kind: 'write', status: 'skipped', reasonCode: 'legacy_welcomed', annotations: { would_send: false } })
+  })
+
+  it('a contact without any address reads no ledger history (there is nothing to match)', async () => {
+    const f = makePorts()
+    await decideShadow({ contact: makeContact({ primaryEmail: null, addresses: [] }), rule: makeRule(), ports: f.ports })
+    expect(f.addressHistory).not.toHaveBeenCalled()
+    expect(f.unsubscribed).toHaveBeenCalledTimes(1)
   })
 })

@@ -688,3 +688,112 @@ describe('人工裁决「不确定」', () => {
     }
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────
+// 2026-11-10：按客户允许的事件种类发送闸 + 线索阶段事件
+describe('按客户允许的事件种类发送（所有发送入口共用的闸）', () => {
+  it('客户只允许成交类 → 留资不发、连发送记录都不建，如实说「不回传这类」', async () => {
+    seed(db, {
+      outcome: { outcome_kind: 'lead', amount_minor: null, currency: null },
+      client: { leads_config: { capi_send_kinds: ['purchase', 'lead_stage'] } },
+    })
+    const w = makeWriter()
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.status).toBe('not_allowed')
+    expect(r.message).toMatch(/不回传这类事件/)
+    expect(w.sendSpy).not.toHaveBeenCalled()
+    expect(db.tables.me_conversion_writebacks).toHaveLength(0)
+  })
+
+  it('同一客户的成交照常发', async () => {
+    seed(db, { client: { leads_config: { capi_send_kinds: ['purchase', 'lead_stage'] } } })
+    const w = makeWriter()
+    expect((await sendApprovedOutcome(OUTCOME, deps(db, w))).status).toBe('confirmed')
+    expect(w.sendSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('没写这项配置的客户（如 NAL）行为不变：留资照发', async () => {
+    seed(db, { outcome: { outcome_kind: 'lead', amount_minor: null, currency: null }, client: { leads_config: {} } })
+    expect((await sendApprovedOutcome(OUTCOME, deps(db))).status).toBe('confirmed')
+  })
+
+  it('配置写坏了（不是数组）→ 一类都不发', async () => {
+    seed(db, { client: { leads_config: { capi_send_kinds: 'purchase' } } })
+    expect((await sendApprovedOutcome(OUTCOME, deps(db))).status).toBe('not_allowed')
+  })
+
+  it('查询里点了客户配置这一列（闸不会因为少读一列而悄悄失效）', async () => {
+    seed(db)
+    await sendApprovedOutcome(OUTCOME, deps(db))
+    expect(db.selectLog.find((s) => s.table === 'clients')?.columns).toContain('leads_config')
+    expect(db.selectLog.find((s) => s.table === 'me_sale_outcomes')?.columns).toContain('lead_stage')
+  })
+})
+
+describe('线索阶段事件', () => {
+  const STAGE_OUTCOME = {
+    outcome_kind: 'lead_stage',
+    lead_stage: 'Quoted',
+    meta_lead_id: '1189338710082692',
+    amount_minor: null,
+    currency: null,
+    source_kind: 'crm_stage_auto',
+  }
+  const stageCfg = (over: Record<string, unknown> = {}) => ({
+    crm_stage_signals: {
+      enabled: true,
+      mode: 'live',
+      dataset_id: '998877665544332',
+      stages: [{ event_name: 'Quoted', stage_keys: ['quoted'] }],
+      ...over,
+    },
+  })
+
+  it('客户没开线索阶段回传 → 不发', async () => {
+    seed(db, { outcome: STAGE_OUTCOME, client: { leads_config: {} } })
+    const w = makeWriter()
+    expect((await sendApprovedOutcome(OUTCOME, deps(db, w))).status).toBe('not_allowed')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('客户整体是正式模式、但线索阶段这一路还在试运行 → 只出预览，不真发', async () => {
+    seed(db, { outcome: STAGE_OUTCOME, client: { conversion_stage: 'live', leads_config: stageCfg({ mode: 'dry_run' }) } })
+    const w = makeWriter()
+    const r = await sendApprovedOutcome(OUTCOME, deps(db, w))
+    expect(r.status).toBe('dry_run')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('线索阶段切正式、但客户整体还在试运行 → 仍不真发（两个都开才发）', async () => {
+    seed(db, { outcome: STAGE_OUTCOME, client: { conversion_stage: 'dry_run', leads_config: stageCfg() } })
+    const w = makeWriter()
+    expect((await sendApprovedOutcome(OUTCOME, deps(db, w))).status).toBe('dry_run')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+  })
+
+  it('两个都开 → 真发，把数据集和阶段名交给组装层，来源渠道固定为 system_generated', async () => {
+    seed(db, { outcome: STAGE_OUTCOME, client: { leads_config: stageCfg() } })
+    const build = vi.fn((_forSend: unknown, _config: unknown) => ({ data: [] }))
+    const w = makeWriter({ build })
+    expect((await sendApprovedOutcome(OUTCOME, deps(db, w))).status).toBe('confirmed')
+    const [forSend, config] = build.mock.calls[0]
+    expect(forSend).toMatchObject({ outcomeKind: 'lead_stage', leadStage: 'Quoted', actionSource: 'system_generated' })
+    expect(config).toMatchObject({ crmStage: { datasetId: '998877665544332', leadEventSource: 'Magic Engine' } })
+  })
+
+  it('允许种类名单里没有 lead_stage → 即使开了线索阶段回传也不发', async () => {
+    seed(db, { outcome: STAGE_OUTCOME, client: { leads_config: { ...stageCfg(), capi_send_kinds: ['purchase'] } } })
+    expect((await sendApprovedOutcome(OUTCOME, deps(db))).status).toBe('not_allowed')
+  })
+
+  it('客人说过别再联系 → 线索阶段事件也不发（沿用同一套拒联判据）', async () => {
+    seed(db, {
+      outcome: { ...STAGE_OUTCOME, contact_id: 'contact-1' },
+      client: { leads_config: stageCfg() },
+      contact: { id: 'contact-1', do_not_contact: true },
+    })
+    const w = makeWriter()
+    expect((await sendApprovedOutcome(OUTCOME, deps(db, w))).status).toBe('redacted')
+    expect(w.sendSpy).not.toHaveBeenCalled()
+  })
+})

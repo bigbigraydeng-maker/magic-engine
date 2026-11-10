@@ -87,6 +87,33 @@ export type FetchEngagementResult =
   | { ok: true; read: EngagementRead }
   | { ok: false; failure: GraphFailure }
 
+/**
+ * Factory Reel 登记的 `post_id` 是 `<pageId>_<videoId>`；Graph 读评论要用 bare video id。
+ */
+export function reelBareVideoId(postId: string, pageId: string): string | null {
+  const prefix = `${pageId}_`
+  if (!postId.startsWith(prefix)) return null
+  const bare = postId.slice(prefix.length)
+  return bare.length > 0 ? bare : null
+}
+
+/** 选 Graph 节点 id：factory_reel 优先 payload.video_id，再拆 composite post_id；否则用帖 id。 */
+export function resolveEngagementGraphObjectId(input: {
+  postId: string
+  pageId: string
+  publishSource: string | null
+  payloadVideoId?: string | null
+}): string {
+  if (input.publishSource !== 'factory_reel') return input.postId
+  const explicit =
+    typeof input.payloadVideoId === 'string' && input.payloadVideoId.trim().length > 0
+      ? input.payloadVideoId.trim()
+      : null
+  if (explicit) return explicit
+  const parsed = reelBareVideoId(input.postId, input.pageId)
+  return parsed ?? input.postId
+}
+
 /** 读一次。只读，绝不写 Facebook。`fetcher` 可注入以便测试。 */
 export async function fetchPostEngagement(
   postId: string,

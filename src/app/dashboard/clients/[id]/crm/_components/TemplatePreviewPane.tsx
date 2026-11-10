@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { isAutomatedTemplateKey, automatedSendDisplay } from '@/lib/crm/email-templates/automated-template-key'
 import type { EmailTemplateVersion } from '@/lib/crm/email-templates/types'
 import type { ReceiptSummaryRow } from '@/lib/crm/email-templates/receipt-store'
@@ -40,7 +39,6 @@ export function TemplatePreviewPane(props: {
   onToggleStatus: () => void
 }): JSX.Element {
   const { row, stats, canEdit, busy, rowError, onEdit, onToggleStatus } = props
-  const [showVariables] = useState(true)
   const auto = isAutomatedTemplateKey(row.templateKey)
   const meta = auto ? automatedSendDisplay(row.templateKey) : null
   const s = rowStats(stats, row.templateKey)
@@ -78,10 +76,10 @@ export function TemplatePreviewPane(props: {
       {!auto && <p className="mb-2 text-xs text-me-charcoal/75">同事在客人资料页选手动发送；系统不会自己发。</p>}
       <div className="rounded-lg border border-me-stone/60 bg-white p-3">
         <p className="text-[11px] font-bold text-me-charcoal/70">主题</p>
-        <div className="mb-2 mt-1">{showVariables ? <TemplateBodyChips text={row.subject} /> : row.subject}</div>
+        <div className="mb-2 mt-1"><TemplateBodyChips text={row.subject} /></div>
         <p className="text-[11px] font-bold text-me-charcoal/70">正文</p>
         <div className="mt-1 max-h-80 overflow-y-auto">
-          {showVariables ? <TemplateBodyChips text={row.body} /> : row.body}
+          <TemplateBodyChips text={row.body} />
         </div>
       </div>
       <p className="mt-2 text-xs text-me-charcoal/60">

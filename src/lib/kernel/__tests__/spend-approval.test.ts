@@ -268,10 +268,12 @@ describe('刹车不受影响', () => {
 describe('🔴 批准人来源：approveRun / approveAndRun 的生产调用点是白名单', () => {
   // 第 3–5 道闸都信 approvedByUser 这个字符串。每个调用点都必须从登录会话（或已核实的授权凭证）取，
   // 不许从请求体取。新增调用点 = 这条测试红 = 必须有人看过它的身份来源再登记（魏征 / 子牙 11-03）。
+  // o1-scale decision route now refuses budget increases on live plans
+  // (budget rule: increases need a new plan), so it has no approval call.
   const ALLOWED: Record<string, RegExp> = {
-    'src/app/api/clients/[id]/ad-health/o1-scale/[runId]/decision/route.ts': /approveRun\(kernel, run\.id, access\.user\.email,/,
     'src/lib/confirmation-card/decide.ts': /approveRun\(deps, runId, grant\.email,/,
     'src/lib/action-submission/ads-auto-pause.ts': /approveAndRun\(deps, runId, approvedByUser,/,
+    'src/lib/action-submission/pause-ad-set.ts': /approveAndRun\(deps, pending\.run\.id, email, \{ expectedDecisionId: decisionId \}\)/,
     'src/lib/kernel-approval/service.ts': /approveRun\(deps, run\.id, actorEmail,/,
     'src/lib/kernel/runner.ts': /approveRun\(deps, runId, approvedByUser, options\)/,
   }

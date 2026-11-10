@@ -136,7 +136,7 @@ describe('loadPostPerformance', () => {
         data: [
           {
             action_id: 'a1',
-            window_hours: 24,
+            window_hours: 72,
             status: 'ok',
             measured_at: '2024-01-11T10:00:00.000Z',
             values: { likes: 0, comments: 2 },

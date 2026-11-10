@@ -137,6 +137,7 @@ describe('template-store', () => {
     ['blank subject', { subject: '   ' }],
     ['body too long', { body: 'x'.repeat(10001) }],
     ['change note too long', { changeNote: 'x'.repeat(301) }],
+    ['when to use too long', { whenToUse: '字'.repeat(201) }],
     ['pickMode one with factSource none', { pickMode: 'one' as const }],
     ['factSource published_tours with pickMode none', { factSource: 'published_tours' as const }],
     ['departureMonths 13', { pickFilter: { departureMonths: [13] } }],
@@ -211,6 +212,68 @@ describe('template-store', () => {
       },
     })
     await expect(listCurrentTemplates(db, CLIENT_A)).rejects.toThrow('unreadable row')
+  })
+
+  it('stores a trimmed when-to-use note and reads it back, including a blank as none', async () => {
+    const { db, tables } = makeDb()
+    const saved = expectOk(await appendTemplateVersion(db, baseInput({ whenToUse: '  打完电话 24 小时内  ' })))
+    expect(saved.whenToUse).toBe('打完电话 24 小时内')
+    expect(tables.crm_email_templates[0].when_to_use).toBe('打完电话 24 小时内')
+    const blank = expectOk(await appendTemplateVersion(db, baseInput({ baseVersion: 1, whenToUse: '   ' })))
+    expect(blank.whenToUse).toBeNull()
+    expect(tables.crm_email_templates[1].when_to_use).toBeNull()
+  })
+
+  it('reads a row written before the column existed, and refuses a non-text value', async () => {
+    const { db } = createFakeDb({
+      seed: {
+        crm_email_templates: [
+          {
+            id: 'r-old',
+            client_id: CLIENT_A,
+            template_key: 'welcome-email',
+            version: 1,
+            name: 'n',
+            subject: 's',
+            body: 'b',
+            fact_source: 'none',
+            pick_mode: 'none',
+            pick_filter: {},
+            status: 'active',
+            change_note: null,
+            created_by: 'staff@example.com',
+            created_at: '2024-01-01T00:00:00.000Z',
+          },
+        ],
+      },
+    })
+    const current = await getCurrentTemplate(db, CLIENT_A, 'welcome-email')
+    expect(current?.whenToUse).toBeNull()
+
+    const { db: bad } = createFakeDb({
+      seed: {
+        crm_email_templates: [
+          {
+            id: 'r-bad',
+            client_id: CLIENT_A,
+            template_key: 'welcome-email',
+            version: 1,
+            name: 'n',
+            subject: 's',
+            body: 'b',
+            fact_source: 'none',
+            pick_mode: 'none',
+            pick_filter: {},
+            status: 'active',
+            change_note: null,
+            when_to_use: 5,
+            created_by: 'staff@example.com',
+            created_at: '2024-01-01T00:00:00.000Z',
+          },
+        ],
+      },
+    })
+    await expect(getCurrentTemplate(bad, CLIENT_A, 'welcome-email')).rejects.toThrow('unreadable row')
   })
 
   it('disabling is a new version', async () => {

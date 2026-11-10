@@ -86,6 +86,7 @@ describe('a new template', () => {
       pickFilter: {},
       status: 'disabled',
       changeNote: null,
+      whenToUse: null,
     })
     expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ version: 1 }), ['提醒：x'])
   })
@@ -209,9 +210,10 @@ describe('editing an existing template', () => {
   it('can switch a template off or on by status (a new version)', async () => {
     const f = stub(200, { template: existing, notices: [] })
     draw({ initial: existing })
+    fireEvent.change(screen.getByLabelText('模板状态'), { target: { value: 'disabled' } })
     save()
     await waitFor(() => expect(f).toHaveBeenCalled())
-    expect(sentBody(f)).toMatchObject({ status: 'active' })
+    expect(sentBody(f)).toMatchObject({ status: 'disabled' })
   })
 })
 

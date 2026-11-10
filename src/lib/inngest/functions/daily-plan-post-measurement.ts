@@ -38,7 +38,13 @@ import {
   type DailyPlanPostPublishedEvent,
 } from '@/lib/campaign/daily-plan-publish'
 import { getStoredPageToken } from '@/lib/meta/token-manager'
-import { fetchPostEngagement, type EngagementRead, type FieldRead, type GraphFailure } from '@/lib/meta/post-engagement'
+import {
+  fetchPostEngagement,
+  resolveEngagementGraphObjectId,
+  type EngagementRead,
+  type FieldRead,
+  type GraphFailure,
+} from '@/lib/meta/post-engagement'
 import {
   recordPublishAction,
   recordSnapshot,
@@ -204,15 +210,33 @@ export type GraphReadResult =
   | { kind: 'permanent'; failure: GraphFailure }
   | { kind: 'transient'; failure: GraphFailure }
 
+export async function readActionEngagementGraphId(
+  supabase: SupabaseClient,
+  actionId: string,
+  postId: string,
+  pageId: string,
+): Promise<string> {
+  const { data, error } = await supabase
+    .from('flywheel_actions')
+    .select('payload')
+    .eq('id', actionId)
+    .maybeSingle()
+  if (error) throw new Error(`readActionEngagementGraphId: db error — ${error.message}`)
+  const p = (data as { payload?: Record<string, unknown> } | null)?.payload ?? {}
+  const source = typeof p.source === 'string' ? p.source : null
+  const videoId = typeof p.video_id === 'string' ? p.video_id : null
+  return resolveEngagementGraphObjectId({ postId, pageId, publishSource: source, payloadVideoId: videoId })
+}
+
 export async function readGraphOnce(
   clientId: string,
   pageId: string,
-  postId: string,
+  graphObjectId: string,
   fetcher: typeof fetch,
 ): Promise<GraphReadResult> {
   const token = await getStoredPageToken(clientId, pageId)
   if (!token) return { kind: 'no_token' }
-  const result = await fetchPostEngagement(postId, token, fetcher)
+  const result = await fetchPostEngagement(graphObjectId, token, fetcher)
   if (result.ok) return { kind: 'read', read: result.read }
   return result.failure.kind === 'transient'
     ? { kind: 'transient', failure: result.failure }
@@ -282,10 +306,14 @@ export function createMeasureFunction(deps: {
       if (!identity.ok) return { ok: false, reason: identity.reason }
       await step.sleepUntil(`wait-${d.window_hours}h`, new Date(d.target_at))
 
+      const graphObjectId = await step.run('resolve-graph-object', () =>
+        readActionEngagementGraphId(deps.supabase, d.action_id, d.post_id, d.page_id),
+      )
+
       // 🔴 P3：把 Graph 读取做成独立的持久 step —— 成功后被 Inngest 记忆化，
       // 后续同一 run 的重试都复用同一份数字，不再重新问 Graph、不再产生 hash 漂移。
       const read = await step.run(`read-graph-${d.window_hours}h`, () =>
-        readGraphOnce(d.client_id, d.page_id, d.post_id, deps.fetcher ?? fetch),
+        readGraphOnce(d.client_id, d.page_id, graphObjectId, deps.fetcher ?? fetch),
       )
 
       // 到执行时才重新取令牌 —— 发布时能用不代表 72 小时后还能用。

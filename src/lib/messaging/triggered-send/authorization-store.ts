@@ -219,8 +219,10 @@ export async function revokeAuthorization(
 }
 
 /**
- * Authorize an open proposal. `authorized_at` is stamped by the database; `liveFrom` and `expiresAt` must sit inside
- * the table's CHECKs against that stamp (the caller leaves a margin for clock skew). A CHECK violation = `23514`.
+ * Authorize an open proposal. `authorized_at` is stamped by the database: the value sent here is only a placeholder
+ * that the table's update trigger replaces with its own now() (migration 20261102130000, part f; the local trial's C4
+ * checks it). `liveFrom` and `expiresAt` must sit inside the table's CHECKs against that stamp (the caller leaves a
+ * margin for clock skew). A CHECK violation = `23514`.
  */
 export async function authorizeProposal(
   db: SupabaseClient,
@@ -247,7 +249,10 @@ export async function authorizeProposal(
   return rows.length === 1 ? { ok: true, record: toRecord(rows[0]) } : { ok: false, code: 'not_open' }
 }
 
-/** Arm an authorized row, after its authorization event went out. The database stamps the time. */
+/**
+ * Arm an authorized row, after its authorization event went out. The database stamps the time: the value sent here is
+ * a placeholder the trigger replaces with now(), and it must be non-null (the trigger only stamps a column being set).
+ */
 export async function activateAuthorization(db: SupabaseClient, id: string): Promise<{ ok: true; record: AuthorizationRecord } | StoreError> {
   const { data, error } = await db
     .from(TABLE)

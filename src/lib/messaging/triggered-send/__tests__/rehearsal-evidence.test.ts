@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ShadowRowForCompare } from '../compare'
 import { TRIGGERED_SEND_SWEEP_JOB } from '@/lib/inngest/functions/triggered-send-welcome-sweep'
+import { createQueryStub } from '@/lib/crm/email-templates/__tests__/query-stub'
 import {
+  MAX_SWEEP_RECEIPTS,
+  loadRehearsalEvidence,
   REHEARSAL_DAYS_SHOWN,
   REHEARSAL_SWEEP_JOB,
   decisionFingerprint,
@@ -249,5 +252,31 @@ describe('the production facts behind it', () => {
       deferred: -1,
       legacyBatches: [],
     })
+  })
+})
+
+describe('loadRehearsalEvidence — reading the sweep receipts', () => {
+  const NOW_READ = new Date('2026-11-20T00:00:00.000Z')
+  const proposals = { data: [{ id: 'p1', rule: sendableRule(), proposed_at: '2026-10-31T11:00:00.000Z' }], error: null }
+
+  it('🔴 the newest receipts are read first, and a full page is "unreadable" (it would hide the latest set-aside days)', async () => {
+    const full = Array.from({ length: MAX_SWEEP_RECEIPTS }, (_, i) => ({ started_at: new Date(Date.UTC(2026, 10, 19) - i * 60_000).toISOString(), summary: { status: 'swept', client_id: 'c', authorization_id: 'p1', deferred: 0, dry_run: false } }))
+    const stub = createQueryStub({ triggered_send_authorizations: proposals, triggered_sends: { data: [], error: null }, cron_run_logs: { data: full, error: null } })
+    expect(await loadRehearsalEvidence(stub.db, 'c', sendableRule(), NOW_READ)).toEqual({ ok: false, code: 'sweep_receipts_unreadable' })
+    expect(stub.of('cron_run_logs').some((c) => c.method === 'order' && JSON.stringify(c.args) === JSON.stringify(['started_at', { ascending: false }]))).toBe(true)
+  })
+
+  it('fewer than a page are used oldest first (the latest receipt of a day wins)', async () => {
+    const two = [
+      { started_at: '2026-11-18T22:01:00.000Z', summary: { status: 'swept', client_id: 'c', authorization_id: 'p1', deferred: 0, dry_run: false } },
+      { started_at: '2026-11-18T20:01:00.000Z', summary: { status: 'swept', client_id: 'c', authorization_id: 'p1', deferred: 4, dry_run: false } },
+    ]
+    const stub = createQueryStub({ triggered_send_authorizations: proposals, triggered_sends: { data: [], error: null }, cron_run_logs: { data: two, error: null } })
+    const read = await loadRehearsalEvidence(stub.db, 'c', sendableRule(), NOW_READ)
+    expect(read.ok).toBe(true)
+    // The 11:00 retry (read first, newest) finished the job and wins: the lead day 11-18 had no new leads. Had the older
+    // 09:00 receipt (4 set aside) won, the day would be "only partly compared".
+    const kind = read.ok ? read.evidence.calendar.find((d) => d.day === '2026-11-18')?.kind : 'unread'
+    expect(kind).toBe('no_leads')
   })
 })

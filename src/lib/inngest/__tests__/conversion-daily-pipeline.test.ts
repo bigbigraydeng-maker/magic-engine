@@ -35,6 +35,7 @@ import {
   CONVERSION_DAILY_PIPELINE_RETRIES,
   AI_REVIEW_CHUNK_SIZE,
   MAX_SYNC_CHUNKS,
+  MAX_CRM_STAGE_CHUNKS,
   TRANSIENT_BACKOFF_MS,
   TRANSIENT_MAX_RETRIES,
   isTransientError,
@@ -264,6 +265,32 @@ describe('分块循环怎么推进、怎么停', () => {
     expect(detect).toHaveBeenCalledTimes(1)
     expect(result).toHaveProperty('payments')
     expect(finish).toHaveBeenCalledWith('run-1', expect.any(Number), expect.objectContaining({ processed: 7, completed: 7, failed: 0 }))
+  })
+
+  it('线索阶段回传段：排在补发之后、log-finish 之前；没发完就再跑一块，发完就停', async () => {
+    let n = 0
+    const crmStageChunk = vi.fn(async () => {
+      n++
+      return { summary: { 'client-x': { ran: true, remaining: n < 2 ? 1 : 0 } }, done: n >= 2 }
+    })
+    const { harness, finish, result } = await run({ crmStageChunk })
+    expect(harness.ranStepIds.slice(-4)).toEqual(['resend-failed-cts', 'crm-stage-1', 'crm-stage-2', 'log-finish'])
+    expect(crmStageChunk).toHaveBeenCalledTimes(2)
+    expect(result).toHaveProperty('crmStage')
+    expect(finish).toHaveBeenCalledWith('run-1', expect.any(Number), expect.objectContaining({ processed: 7, completed: 7, failed: 0 }))
+  })
+
+  it(`线索阶段回传跑满 ${MAX_CRM_STAGE_CHUNKS} 块仍没发完 → 算失败（不悄悄留一截），其余段不受影响`, async () => {
+    const { result, finish } = await run({ crmStageChunk: async () => ({ summary: {}, done: false }) })
+    expect(result.crmStage).toMatchObject({ ok: false, chunks: MAX_CRM_STAGE_CHUNKS })
+    expect(result.ctsResend).toMatchObject({ ok: true })
+    expect(finish).toHaveBeenCalledWith('run-1', expect.any(Number), expect.objectContaining({ failed: 1 }))
+  })
+
+  it('没接线索阶段回传（旧装配）→ 不跑这一段，运行记录仍是 6 段', async () => {
+    const { harness, finish } = await run()
+    expect(harness.ranStepIds.some((id) => id.startsWith('crm-stage'))).toBe(false)
+    expect(finish).toHaveBeenCalledWith('run-1', expect.any(Number), expect.objectContaining({ processed: 6 }))
   })
 
   it('邮箱付款识别段失败 → 记失败，但同步已完成、审核与补发照常（互不连坐）', async () => {

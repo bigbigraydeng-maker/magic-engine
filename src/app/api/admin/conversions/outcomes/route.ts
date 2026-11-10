@@ -203,6 +203,10 @@ export async function GET(request: Request) {
     .order('occurred_at', { ascending: false })
     .limit(limit)
 
+  // 线索阶段记录是规则自动生成、自动批准的（每月几百条），平常不需要人看；
+  // 混进默认列表会把真正要人审的成交挤出 limit 窗口。但按发送状态筛（不确定 / 发送失败 /
+  // 试运行预览）时要能看到它们——那是人唯一能核对、处理它们的地方（深链 focus 走上面单独的查询）。
+  if (sendStatuses.length === 0) query = query.neq('outcome_kind', 'lead_stage')
   if (status) query = query.eq('review_status', status)
   if (sendStatuses.length > 0) query = query.in('me_conversion_writebacks.status', sendStatuses)
 
