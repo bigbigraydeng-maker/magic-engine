@@ -13,14 +13,12 @@ import { readResendReceipt } from '@/lib/messaging/provider-events/resend-receip
 import type { StoredProviderEvent } from '@/lib/messaging/provider-events/receipt-types'
 import { applyReceipt, identifyLetter } from './receipt-consumer'
 import { createReceiptStore } from './receipt-store-prod'
-import { loadContactsByIds } from './shadow-reads-prod'
-import type { CasWrite, ClaimInput, ClaimOutcome, ClaimRead, ContactLoad, DecisionWrite, EnvReader, LedgerWrite, LifetimeRow, SendLedger, SendLocks } from './send-types'
+import type { CasWrite, ClaimInput, ClaimOutcome, ClaimRead, DecisionWrite, EnvReader, LedgerWrite, LifetimeRow, SendLedger, SendLocks } from './send-types'
 
 const TABLE = 'triggered_sends'
 const COLUMNS = 'id, contact_id, status, reason_code, authorization_id, idempotency_key, rendered_sha256, to_address_sha256, first_attempt_at, provider_message_id, updated_at'
 /** How long a claimed letter is ours before another run may take it over (§3.3; the claim allows 1–30). */
 export const CLAIM_LEASE_MINUTES = 10
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const CLAIM_OUTCOMES: ReadonlySet<string> = new Set([
   'claimed', 'takeover', 'in_flight', 'exists_terminal', 'expired_unknown', 'address_duplicate', 'cap_reached', 'auth_inactive', 'rule_invalid', 'template_mismatch',
 ])
@@ -149,19 +147,6 @@ export function createSendLedger(db: SupabaseClient): SendLedger {
       casUpdate(db, row, 'pending', { status: 'sent', provider_message_id: input.messageId, provider_account: input.account, sent_at: input.sentAt, provider_impact: 'PROVIDER_ACCEPTED' }),
     markFailed: (row, input) => casUpdate(db, row, 'pending', { status: 'failed', reason_code: input.reasonCode, provider_account: input.account }),
   }
-}
-
-/** One guest as a letter needs it: the rehearsal's view (same audience filter) plus the display name. */
-export async function loadSendContact(db: SupabaseClient, args: { clientId: string; contactId: string; sources: readonly string[] }): Promise<ContactLoad> {
-  if (!UUID_RE.test(args.contactId)) return { ok: false, error: 'contact id is not a uuid' }
-  const read = await loadContactsByIds(db, { clientId: args.clientId, contactIds: [args.contactId], sources: args.sources })
-  if (!read.ok) return read
-  const contact = read.contacts.find((c) => c.contactId === args.contactId)
-  if (contact === undefined) return { ok: true, contact: null }
-  const { data, error } = await db.from('contacts').select('display_name').eq('client_id', args.clientId).eq('id', args.contactId).maybeSingle()
-  if (error) return { ok: false, error: `contact name: ${codeOf(error)}` }
-  const name = (data as { display_name: unknown } | null)?.display_name
-  return { ok: true, contact: { ...contact, displayName: typeof name === 'string' ? name : null } }
 }
 
 /** The holder label of ME's own lock rows (the sales side writes its mailbox there). */

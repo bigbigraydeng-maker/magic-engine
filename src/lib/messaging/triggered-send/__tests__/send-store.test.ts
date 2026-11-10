@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createQueryStub, type RecordedCall } from '@/lib/crm/email-templates/__tests__/query-stub'
-import { CLAIM_LEASE_MINUTES, createSendLedger, createSendLocks, loadSendContact, replayStoredReceipts, SEND_LOCK_HOLDER } from '../send-store'
+import { loadSendContact } from '../send-contact'
+import { CLAIM_LEASE_MINUTES, createSendLedger, createSendLocks, replayStoredReceipts, SEND_LOCK_HOLDER } from '../send-store'
 import type { LifetimeRow } from '../send-types'
 
 const CLIENT = 'c0000000-0000-0000-0000-000000000000'
