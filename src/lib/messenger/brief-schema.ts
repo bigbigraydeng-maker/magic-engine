@@ -64,6 +64,11 @@ export interface BriefContext {
   hoursSinceLastMessage: number
   /** 省略时按私信处理 —— 私信是这条链路上线时唯一的渠道。 */
   channel?: BriefChannel
+  /**
+   * AI call notes of this customer's recent phone calls (newest last), e.g. `2026-11-10 call: ...`.
+   * A call is not in the thread, so without this a brief cannot know it happened (`brief-calls.ts`).
+   */
+  recentCalls?: string[]
 }
 
 export const MessengerBriefSchema = z.object({
