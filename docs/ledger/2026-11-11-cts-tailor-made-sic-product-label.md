@@ -1,7 +1,7 @@
 ---
 id: 2026-11-11-cts-tailor-made-sic-product-label
 title: CTS 定制行程单封面小字可在 Tailor-made 与 Seat-in-coach (SIC) 之间切换
-status: done
+status: decided
 owner: agent
 decided_on: 2026-11-11
 source: session:dde5b762
