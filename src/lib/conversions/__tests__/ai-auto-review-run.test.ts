@@ -54,6 +54,7 @@ function fakeDb(table: string) {
     src().filter((r) =>
       filters.every(([op, col, val]) => {
         if (op === 'eq') return r[col] === val
+        if (op === 'neq') return r[col] !== val
         if (op === 'is') return val === null ? r[col] == null : r[col] === val
         if (op === 'in') return (val as unknown[]).includes(r[col])
         if (op === 'lt') {
@@ -82,6 +83,10 @@ function fakeDb(table: string) {
     },
     in: (col: string, vals: unknown[]) => {
       filters.push(['in', col, vals])
+      return builder
+    },
+    neq: (col: string, val: unknown) => {
+      filters.push(['neq', col, val])
       return builder
     },
     // 幂等窗口的 or() 在这份假件里当直通处理（不额外过滤）——这份测试不断言
@@ -497,6 +502,24 @@ describe('分块调用（2026-09-22 conversion-daily-pipeline 拆块）', () => 
     const summary = await runWith({ maxBatchSize: 5, carried: { approvedCount: BATCH_HARD_STOP_COUNT - 1, approvedAmountMinor: 0 } })
     expect(summary).toMatchObject({ ran: true, approved: 1 })
     expect((clients[0] as { ai_auto_review_enabled: boolean }).ai_auto_review_enabled).toBe(false)
+  })
+
+  it('成交金额回传开关开着时，成交不交给 AI，咨询仍交给 AI', async () => {
+    clients = [{ id: 'c1', ai_auto_review_enabled: true, conversion_payment_match_enabled: true }]
+    outcomes.push(pendingRow({ id: 'purchase', outcome_kind: 'purchase' }))
+    outcomes.push(pendingRow({ id: 'lead', outcome_kind: 'lead', amount_minor: null, currency: null }))
+    vi.mocked(judgeOutcome).mockResolvedValue({
+      verdict: 'approve',
+      reason: '数据完整',
+      model: 'm',
+      promptVersion: 'v1',
+      inputSnapshot: {},
+      rawOutput: '{}',
+    })
+    await run()
+    expect(judgeOutcome).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(judgeOutcome).mock.calls[0][0].outcomeKind).toBe('lead')
+    expect(outcomes.find((row) => row.id === 'purchase')).toMatchObject({ review_status: 'pending_review' })
   })
 
   it('🔴 发送不透传判断用的 now——状态机要用真实时间写 last_attempt_at，否则「卡在 sending 超过 5 分钟」会被误触发（子牙实施后复审 MAJOR）', async () => {
