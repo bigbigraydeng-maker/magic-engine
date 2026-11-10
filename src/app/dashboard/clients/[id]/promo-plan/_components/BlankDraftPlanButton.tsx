@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { formatGoalChoice } from '@/lib/marketing-plan/promo/goal-choice'
+import { MeButton } from '@/components/ui/me-primitives'
 
 interface GoalChoice {
   id: string
@@ -21,10 +22,9 @@ export function BlankDraftPlanButton({ clientId, onCreated }: Props) {
   return (
     <div className="basis-full">
       {!draft.open && (
-        <button type="button" onClick={draft.openPanel}
-          className="text-sm font-semibold border border-gray-300 bg-white rounded-lg px-4 py-2 hover:bg-gray-50">
-          新建空白草稿计划
-        </button>
+        <MeButton type="button" variant="ghost" size="sm" onClick={draft.openPanel}>
+          新建空白草稿
+        </MeButton>
       )}
       {draft.open && (
         <BlankDraftPanel
