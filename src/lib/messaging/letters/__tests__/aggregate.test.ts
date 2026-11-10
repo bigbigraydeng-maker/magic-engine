@@ -254,7 +254,7 @@ describe('buildDetail · a batch that has already gone out', () => {
 
   it('people planned but absent from the send record say they were not yet depositors, not 待发', () => {
     const detail = buildDetail(letter, wentOut, '2026-12-10')
-    expect(NOT_IN_BATCH_TEXT).toBe('这一批发出时他还没交定金')
+    expect(NOT_IN_BATCH_TEXT).toBe('这一批发出时他不在名单里（不补发）')
     expect(detail.recipients.find((r) => r.contactId === 'c2')).toMatchObject({ status: 'pending', reasonText: NOT_IN_BATCH_TEXT })
     expect(note(detail, 'c1')).toBeNull() // has a record: sent
     expect(note(detail, 'c3')).toBeNull() // has a record (claimed, still pending): not "not in batch"

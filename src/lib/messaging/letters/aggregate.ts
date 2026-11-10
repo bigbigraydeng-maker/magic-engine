@@ -29,8 +29,8 @@ import type {
 /** 页面代入 `{{first_name}}` 用的示例名字（服务器给，页面不要自己编）。 */
 export const SAMPLE_FIRST_NAME = 'Alex'
 
-/** 这一批已经发出去，但这个人当时不在名单里（订单后来才交定金）：不显示成「待发」。 */
-export const NOT_IN_BATCH_TEXT = '这一批发出时他还没交定金'
+/** 这一批已经发出去，但这个人当时不在名单里（引擎不补发）：不显示成「待发」，只说事实。 */
+export const NOT_IN_BATCH_TEXT = '这一批发出时他不在名单里（不补发）'
 
 /** 列表里「按期发送的信」只列最近几批。 */
 export const SCHEDULED_BATCHES_SHOWN = 2
@@ -130,6 +130,9 @@ function nextBatchOf(rows: readonly LetterRow[], planned: readonly PlannedLetter
   }
 }
 
+/** buildList 自己算得出的部分；节奏（cadence）和提醒（notices）由 load.ts 补上。 */
+export type ListCore = Omit<AutoLettersList, 'cadence' | 'notices'>
+
 /**
  * 列表：`planned` 是从今天起的整份计划（已按发信日排好）；`factsByKey` 是已有的登记 / 发送事实（按 letterKey）。
  * 「下一批」= 今天（含）起第一个有信的批次日；「按期发送的信」= 最近几批。
@@ -139,7 +142,7 @@ export function buildList(
   factsByKey: ReadonlyMap<string, LetterFacts>,
   today: NzDate,
   generatedAt: string,
-): AutoLettersList {
+): ListCore {
   const upcoming = planned.filter((letter) => letter.sendDate >= today)
   const batchDays = Array.from(new Set(upcoming.map((letter) => letter.sendDate)))
   const shownDays = new Set(batchDays.slice(0, SCHEDULED_BATCHES_SHOWN))
@@ -208,7 +211,8 @@ function mailchimpSummaryOf(sends: SendFacts | null): AutoLetterDetail['mailchim
 
 /**
  * 详情。`today` 给了，并且这封信的发信日早于今天、整批已经发出去，那么计划里有、发送记录里没有的人，
- * 说明他们是这一批发出之后才交的定金——显示「这一批发出时他还没交定金」，不显示「待发」（引擎不会补发）。
+ * 说明引擎发这一批时他们不在名单里（多半是这一批发出之后才交的定金）——显示「这一批发出时他不在名单里（不补发）」，
+ * 不显示「待发」（引擎不会补发）。
  */
 export function buildDetail(planned: PlannedLetter, facts: LetterFacts | null, today?: NzDate): AutoLetterDetail {
   const row = buildLetterRow(planned, facts)

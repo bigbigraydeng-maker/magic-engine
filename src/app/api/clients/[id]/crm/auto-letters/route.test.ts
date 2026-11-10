@@ -16,7 +16,7 @@ const LIST_CTX = { params: { id: 'client-a' } }
 const KEY = buildLetterKey({ sendDate: '2026-12-02', tourId: 'tour-1', departOn: '2027-03-11', monthsLeft: 3 }) as string
 const detailCtx = (letterKey: string) => ({ params: { id: 'client-a', letterKey } })
 
-const EMPTY_LIST = { generatedAt: 'now', nextBatch: null, depositLetters: [], scheduledLetters: [], totalDistinctLetters: 0 }
+const EMPTY_LIST = { generatedAt: 'now', nextBatch: null, depositLetters: [], scheduledLetters: [], totalDistinctLetters: 0, cadence: null }
 const DETAIL = { letter: { letterKey: KEY }, tiles: {}, mailchimpSummary: null, recipients: [] }
 
 beforeEach(() => {

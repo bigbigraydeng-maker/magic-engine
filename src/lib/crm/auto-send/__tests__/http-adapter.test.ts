@@ -8,6 +8,7 @@ const LIST_BODY = {
   depositLetters: [],
   scheduledLetters: [],
   totalDistinctLetters: 0,
+  cadence: { firstMonth: 6 },
 }
 
 const DETAIL_BODY = {
@@ -37,6 +38,19 @@ describe('createHttpAdapter', () => {
     const fetchImpl = vi.fn<FetchLike>(async () => json(LIST_BODY))
     const overview = await createHttpAdapter('client-1', fetchImpl).loadOverview()
     expect(fetchImpl).toHaveBeenCalledWith('/api/clients/client-1/crm/auto-letters')
+    expect(overview).toEqual({ nextBatch: null, sections: [] })
+  })
+
+  it('a list without the rhythm number (an older server) or with a nonsense one is an error, never a half-empty page', async () => {
+    const { cadence: _cadence, ...withoutCadence } = LIST_BODY
+    void _cadence
+    for (const body of [withoutCadence, { ...LIST_BODY, cadence: 'six' }]) {
+      await expect(createHttpAdapter('c', async () => json(body)).loadOverview()).rejects.toThrow('读到的内容格式不对')
+    }
+  })
+
+  it('no rhythm (cadence null) is a normal list', async () => {
+    const overview = await createHttpAdapter('c', async () => json({ ...LIST_BODY, cadence: null })).loadOverview()
     expect(overview).toEqual({ nextBatch: null, sections: [] })
   })
 

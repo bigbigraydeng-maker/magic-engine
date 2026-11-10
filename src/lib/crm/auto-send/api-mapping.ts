@@ -4,6 +4,7 @@
  *
  * 读接口是「倒计时信」专用的（按团、出发日、几个月分组），页面是通用的看板；
  * 「对象」那一列的文字、两个面板的标题和说明，都在这里按接口的意思拼好再交给页面。
+ * 节奏（比如「离出发超过几个月」）一律用接口带来的数，页面这边不再读任何节奏常量。
  */
 
 import type {
@@ -13,7 +14,6 @@ import type {
   LetterStatus as ApiLetterStatus,
   RecipientRow as ApiRecipientRow,
 } from '@/lib/messaging/letters/types'
-import { COUNTDOWN_CADENCE } from '@/lib/messaging/letters/cadence'
 import { bodyTextToBlocks } from './body-blocks'
 import { formatShortDate } from './format'
 import type {
@@ -57,13 +57,16 @@ export function summaryOf(row: ApiLetterRow): LetterSummary {
   }
 }
 
-function depositSection(rows: ApiLetterRow[]): LetterSection {
+function depositSection(rows: ApiLetterRow[], cadence: AutoLettersList['cadence']): LetterSection {
   return {
     key: 'deposit',
     kind: 'trigger',
     title: '交了定金就自动发的信',
     note: null,
-    footnote: `只有订的时候离出发超过 ${COUNTDOWN_CADENCE.firstMonth} 个月的客人会收到；订得晚的客人直接进当月那一批。`,
+    footnote:
+      cadence === null
+        ? null
+        : `只有订的时候离出发超过 ${cadence.firstMonth} 个月的客人会收到；订得晚的客人直接进当月那一批。`,
     letters: rows.map((row) => ({ ...summaryOf(row), whenLabel: '定金确认后' })),
   }
 }
@@ -81,7 +84,7 @@ function scheduledSection(rows: ApiLetterRow[], total: number): LetterSection {
 
 export function mapAutoLettersList(api: AutoLettersList): AutoSendOverview {
   const sections: LetterSection[] = []
-  if (api.depositLetters.length > 0) sections.push(depositSection(api.depositLetters))
+  if (api.depositLetters.length > 0) sections.push(depositSection(api.depositLetters, api.cadence))
   if (api.scheduledLetters.length > 0) sections.push(scheduledSection(api.scheduledLetters, api.totalDistinctLetters))
   return {
     nextBatch: api.nextBatch && {

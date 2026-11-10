@@ -392,6 +392,7 @@ describe('rhythm, past batches and empty reasons', () => {
       depositLetters: [],
       scheduledLetters: [],
       totalDistinctLetters: 0,
+      cadence: null,
       notices: [],
     })
     expect(await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW, () => null)).toBeNull()
@@ -419,9 +420,15 @@ describe('rhythm, past batches and empty reasons', () => {
     ])
     const after = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, new Date('2026-12-09T20:00:00Z')) // NZ 2026-12-10
     const byName = Object.fromEntries((after?.recipients ?? []).map((r) => [r.displayName, [r.status, r.reasonText]]))
-    expect(byName).toEqual({ 'Bea Test': ['sent', null], 'Al Test': ['pending', '这一批发出时他还没交定金'] })
+    expect(byName).toEqual({ 'Bea Test': ['sent', null], 'Al Test': ['pending', '这一批发出时他不在名单里（不补发）'] })
     const before = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW) // before the send day
     expect((before?.recipients ?? []).every((r) => r.reasonText === null)).toBe(true)
+  })
+
+  it('the list carries the rhythm number the page footnote needs, from the same resolver that plans the batches', async () => {
+    seedTwoGuests()
+    expect((await loadAutoLettersList(ctx.db, CLIENT_A, NOW)).cadence).toEqual({ firstMonth: 6 })
+    expect((await loadAutoLettersList(ctx.db, CLIENT_A, NOW, () => ({ ...COUNTDOWN_CADENCE, firstMonth: 4 }))).cadence).toEqual({ firstMonth: 4 })
   })
 
   it('statuses the ledger leaves without a reason still get a plain one', async () => {

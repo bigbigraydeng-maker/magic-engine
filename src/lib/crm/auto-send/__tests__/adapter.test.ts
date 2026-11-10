@@ -14,7 +14,7 @@ describe('createLiveAdapter', () => {
   it('reads the real interface (the auto-letters read route), not a stub', async () => {
     const fetchMock = vi.fn(async (_url: string) =>
       new Response(
-        JSON.stringify({ generatedAt: 'x', nextBatch: null, depositLetters: [], scheduledLetters: [], totalDistinctLetters: 0 }),
+        JSON.stringify({ generatedAt: 'x', nextBatch: null, depositLetters: [], scheduledLetters: [], totalDistinctLetters: 0, cadence: null }),
         { status: 200 },
       ),
     )

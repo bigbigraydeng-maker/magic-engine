@@ -69,11 +69,11 @@ export async function loadAutoLettersList(
 ): Promise<AutoLettersList> {
   const today = nzTodayIso(now)
   const cadence = resolveCadence(clientId)
-  if (cadence === null) return { ...buildList([], new Map(), today, now.toISOString()), notices: [] }
+  if (cadence === null) return { ...buildList([], new Map(), today, now.toISOString()), cadence: null, notices: [] }
   const { facts, notices } = await loadBookingFacts(db, clientId)
   const planned = planCountdownCalendar(facts, today, cadence)
   const letterFacts = await loadLetterFacts(db, clientId, lettersShownOnList(planned, today))
-  return { ...buildList(planned, letterFacts, today, now.toISOString()), notices }
+  return { ...buildList(planned, letterFacts, today, now.toISOString()), cadence: { firstMonth: cadence.firstMonth }, notices }
 }
 
 /** 找不到这封信（编号不认识，或现在的计划里没有它）→ null，路由翻成 404。 */

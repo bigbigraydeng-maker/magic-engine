@@ -362,6 +362,7 @@ describe('AutoSendBoard · 真实数据走读接口（对外只收 clientId）',
       },
     ],
     totalDistinctLetters: 7,
+    cadence: { firstMonth: 6 },
   }
 
   it('shows the planned letters it reads from the interface, not the demo, and links names to the customer page', async () => {

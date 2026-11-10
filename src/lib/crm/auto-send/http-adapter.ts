@@ -21,12 +21,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** 节奏：null（没配）或带着「订的时候离出发超过几个月」。 */
+function isCadence(value: unknown): boolean {
+  return value === null || (isRecord(value) && typeof value.firstMonth === 'number')
+}
+
 function isList(value: unknown): value is AutoLettersList {
   return (
     isRecord(value) &&
     Array.isArray(value.depositLetters) &&
     Array.isArray(value.scheduledLetters) &&
-    typeof value.totalDistinctLetters === 'number'
+    typeof value.totalDistinctLetters === 'number' &&
+    isCadence(value.cadence)
   )
 }
 

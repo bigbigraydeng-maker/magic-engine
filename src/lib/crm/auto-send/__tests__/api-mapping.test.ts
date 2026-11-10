@@ -58,6 +58,7 @@ describe('mapAutoLettersList', () => {
     depositLetters: [],
     scheduledLetters: [row(), row({ letterKey: 'plan:2027-01-06:t-1:2027-03-11:2', sendDate: '2027-01-06', subject: null })],
     totalDistinctLetters: 32,
+    cadence: { firstMonth: 6 },
   }
 
   it('builds the next-batch card and a scheduled panel whose text comes from the data', () => {
@@ -78,6 +79,12 @@ describe('mapAutoLettersList', () => {
     expect(deposit.kind).toBe('trigger')
     expect(deposit.letters[0]).toMatchObject({ sendDate: null, whenLabel: '定金确认后' })
     expect(deposit.footnote).toContain('超过 6 个月')
+  })
+
+  it('the deposit footnote takes its number from the interface (the rhythm), and is left out when there is no rhythm', () => {
+    const deposit = [row({ sendDate: '' })]
+    expect(mapAutoLettersList({ ...list, depositLetters: deposit, cadence: { firstMonth: 4 } }).sections[0].footnote).toContain('超过 4 个月')
+    expect(mapAutoLettersList({ ...list, depositLetters: deposit, cadence: null }).sections[0].footnote).toBeNull()
   })
 
   it('no next batch and no letters give an empty overview', () => {

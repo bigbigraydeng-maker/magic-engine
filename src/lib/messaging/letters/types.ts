@@ -13,7 +13,8 @@
  *    1) `RecipientStatus` 多一个 `'rehearsal'`：演练（彩排）没有真发，页面标「演练」，永远不算「已发」；
  *    2) `LetterCounts` / `LetterTiles` 多一个 `rehearsal` 计数（没有演练行就是 0）；
  *    3) `RecipientRow.displayName` 可以是 `null`（联系人没有名字）：页面自己写「（没有名字）」，服务器不编；
- *    4) `LetterAudience.monthsLeft` 为 `null` 表示「每周信」（最后一个月每周三那种）。
+ *    4) `LetterAudience.monthsLeft` 为 `null` 表示「每周信」（最后一个月每周三那种）；
+ *    5) 列表多一个 `cadence`（页面脚注要写的节奏数；没配节奏就是 `null`）。
  */
 
 /** 新西兰日历日，`YYYY-MM-DD`。 */
@@ -115,6 +116,11 @@ export interface AutoLettersList {
   scheduledLetters: LetterRow[]
   /** 「共 N 个不同的信」。 */
   totalDistinctLetters: number
+  /**
+   * 页面脚注要写的那个数（「订的时候离出发超过 N 个月」的 N），取自这个客户用的节奏；
+   * 没配节奏 → `null`（页面不写这句脚注）。
+   */
+  cadence: { firstMonth: number } | null
   /**
    * 给员工看的提醒（中文人话），例如「有 N 张已交定金的订单没有出发日，没排进任何一封信」。
    * 契约之外只加不改的字段；没有提醒就是空数组或不带这个字段。
