@@ -547,7 +547,6 @@ export default function AdsHealthPage() {
   }, [searchParams])
 
   const [nextStepRefreshKey, setNextStepRefreshKey] = useState(0)
-  const [confirmCardCount, setConfirmCardCount] = useState(0)
   const bumpNextStepCard = useCallback(() => {
     setNextStepRefreshKey((k) => k + 1)
   }, [])
@@ -597,8 +596,6 @@ export default function AdsHealthPage() {
           evaluated={latest?.payload.evaluated ?? 0}
           scorecard={data?.growth && !('viewer' in data.growth) ? data.growth.payload?.scorecard : undefined}
           refreshKey={nextStepRefreshKey}
-          confirmCardCount={confirmCardCount}
-          onConfirmCardCount={setConfirmCardCount}
           overallTint={overallMeta.tint}
           overallDot={overallMeta.dot}
           overallText={overallMeta.text}
