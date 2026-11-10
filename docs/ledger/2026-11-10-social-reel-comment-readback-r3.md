@@ -4,7 +4,7 @@ title: R-3：工厂 Reel T+读数走 video 节点拿 comments.summary
 status: decided
 owner: agent
 decided_on: 2026-11-10
-source: doc:docs/specs/2026-10-29-social-wp1-readback-implementation-brief-v2.md
+source: pr:3778
 verify_by: 2026-11-17
 verify_how: 合并后下一批 factory_reel 过 T+4 时，回执 comments 不再是 field_absent 而帖子 reactions 仍有数；对比 Graph 对 bare video id 的手动 GET 应一致。
 ---
