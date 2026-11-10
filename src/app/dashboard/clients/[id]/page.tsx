@@ -1,8 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entries'
-import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
 import { useParams, useSearchParams, useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { GenerationDrawer } from './_components/GenerationDrawer';
@@ -10,368 +8,19 @@ import { SettingsDrawer, type SettingsTab } from './_components/SettingsDrawer';
 import { ZhugePriorityWidget } from './_components/ZhugePriorityWidget';
 import { ZhugeDrawer } from './_components/ZhugeDrawer';
 import { NextStepCard, type DiscoveryStatus, type PrescriptionStatus } from './_components/NextStepCard';
-import type { ClientDiscoveryRow } from '@/lib/zhangqian/types';
 import type { ZhugeOutput } from '@/lib/zhuge/types';
 import { ClientDataTab } from './_components/ClientDataTab';
 import { LocaleConfirmBanner } from './_components/LocaleConfirmBanner';
 import { IntelligenceSummarySection } from './_components/intelligence/IntelligenceSummarySection';
-import { BriefGateBanner } from './_components/BriefGateBanner';
 import { GoalBanner } from './_components/GoalBanner';
 import { WorkLogPanel } from './_components/WorkLogPanel';
-import { clientWorkflowSteps, prescriptionEntryHref } from './prescription-entry';
-import { industryFeatureFlags } from '@/lib/clients/industry-features';
+import { BrandHealthWidget } from './_components/BrandHealthWidget';
+import { WorkflowProgress } from './_components/ClientWorkflowProgress';
+import { ClientToolsGrid } from './_components/ClientToolsGrid';
+import { ClientHomeFdeView } from './_components/fde-home/ClientHomeFdeView';
+import type { Client } from './_components/client-types';
 import { homeEntryVisible, type HomeEntry } from '@/lib/auth/home-entries';
 import { useWorkspaceViewer } from '@/app/dashboard/workspace-viewer';
-
-
-interface Client {
-  id: string;
-  name: string;
-  domain?: string;
-  created_at: string;
-  /** 决定「房子」「行程单」「楼盘」这类行业专属入口显不显示。空 = 认不出，一个都不给。 */
-  industry?: string | null;
-}
-
-/**
- * ⚠️ 合并说明（2026-08-03）：main 上另一个窗口用内联 isRealEstate/isTravel
- * 正则做了同一件事。这里统一改用 `lib/clients/industry-features` 的共用模块，
- * 理由不是「我的更好」而是三条实际差异：
- *   ① 它已被导航、房子页、行程单页、楼盘页、接口层共用 —— 内联版只管这一个文件，
- *      两套判据迟早分叉（一处放行一处拦，最难查）
- *   ② 它把 `real_estate`（下划线，库里实际存的写法）归一化后再匹配；
- *      内联正则写的是 `real[_\s-]?estate` 能匹配，但旅游那条 `travel|tour` 
- *      匹配不到库里的 `Travel — Tour Operator`（长破折号）
- *   ③ 它有 12 个测试钉住「认不出行业 = 一个都不给」这条默认隐藏规则
- */
-
-// ─── Brand Health Widget ──────────────────────────────────────────────────────
-
-type ZhangqianStatus = 'loading' | 'none' | 'reviewing' | 'confirmed';
-
-const HEALTH_DIMS = [
-  { key: 'seo',            label: 'SEO' },
-  { key: 'social',         label: '社媒' },
-  { key: 'ai_visibility',  label: 'AI可见' },
-  { key: 'ads',            label: '广告' },
-  { key: 'competitor',     label: '竞品' },
-  { key: 'reputation',     label: '口碑' },
-] as const;
-
-function scoreColor(v: number | null): string {
-  if (v == null) return '#B7B1A5';
-  if (v >= 60) return '#5C8A4A';
-  if (v >= 40) return '#C4912E';
-  return '#C2453A';
-}
-
-function RadarChart({ scores }: { scores: Record<string, number> }) {
-  const cx = 110, cy = 110, maxR = 78;
-  const n = HEALTH_DIMS.length;
-  const angle = (i: number) => (i / n) * 2 * Math.PI - Math.PI / 2;
-  const pt = (i: number, r: number): [number, number] => [
-    cx + r * Math.cos(angle(i)),
-    cy + r * Math.sin(angle(i)),
-  ];
-
-  const rings = [25, 50, 75, 100];
-
-  const scorePoly = HEALTH_DIMS
-    .map((d, i) => {
-      const s = scores[d.key];
-      return s != null ? pt(i, (s / 100) * maxR) : null;
-    })
-    .filter((p): p is [number, number] => p !== null)
-    .map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`)
-    .join(' ');
-
-  return (
-    <svg viewBox="0 0 220 220" className="w-full" style={{ maxHeight: 190 }}>
-      {rings.map(pct => {
-        const pts = HEALTH_DIMS.map((_, i) => {
-          const [x, y] = pt(i, (pct / 100) * maxR);
-          return `${x.toFixed(1)},${y.toFixed(1)}`;
-        }).join(' ');
-        return (
-          <polygon key={pct} points={pts}
-            fill={pct === 100 ? '#FBF8F3' : 'none'}
-            stroke="#EAE6DF" strokeWidth="0.75" />
-        );
-      })}
-      {HEALTH_DIMS.map((_, i) => {
-        const [x, y] = pt(i, maxR);
-        return <line key={i} x1={cx} y1={cy} x2={x.toFixed(1)} y2={y.toFixed(1)} stroke="#EAE6DF" strokeWidth="0.75" />;
-      })}
-      <polygon points={scorePoly} fill="rgba(196,145,46,0.18)" stroke="#C4912E" strokeWidth="2" strokeLinejoin="round" />
-      {HEALTH_DIMS.map((d, i) => {
-        const s = scores[d.key];
-        if (s == null) return null;
-        const [x, y] = pt(i, (s / 100) * maxR);
-        return <circle key={i} cx={x.toFixed(1)} cy={y.toFixed(1)} r="3.5" fill="#C4912E" stroke="white" strokeWidth="1.5" />;
-      })}
-      {HEALTH_DIMS.map((d, i) => {
-        const [lx, ly] = pt(i, maxR + 19);
-        const v = scores[d.key] as number | undefined ?? null;
-        return (
-          <g key={i}>
-            <text x={lx.toFixed(1)} y={(ly - 4).toFixed(1)} textAnchor="middle" fontSize="9" fill="#1A1A1A" fontWeight="600">{d.label}</text>
-            <text x={lx.toFixed(1)} y={(ly + 8).toFixed(1)} textAnchor="middle" fontSize="9" fill={scoreColor(v)} fontWeight="700">{v ?? '—'}</text>
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
-const CRISIS_BADGE: Record<string, { label: string; cls: string }> = {
-  'TYPE_E 声誉陷阱': { label: '声誉陷阱', cls: 'bg-[#C2453A]/12 text-[#C2453A] border-[#C2453A]/30' },
-  'TYPE_D 数字缺失': { label: '数字缺失', cls: 'bg-me-ochre/15 text-me-ochre border-me-ochre/30' },
-  'TYPE_B 社媒空洞': { label: '社媒空洞', cls: 'bg-me-gold/30 text-me-ochre border-me-ochre/30' },
-  'TYPE_A AI不可见': { label: 'AI不可见', cls: 'bg-[#3E6E8C]/12 text-[#3E6E8C] border-[#3E6E8C]/30' },
-};
-
-function BrandHealthWidget({ clientId }: { clientId: string }) {
-  const [status, setStatus] = useState<ZhangqianStatus>('loading');
-  const [discovery, setDiscovery] = useState<ClientDiscoveryRow | null>(null);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch(`/api/clients/${clientId}/zhangqian/latest`);
-        if (res.status === 404) { setStatus('none'); return; }
-        if (!res.ok) { setStatus('none'); return; }
-        const data = await res.json() as { success: boolean; discovery: ClientDiscoveryRow };
-        if (data.success && data.discovery) {
-          setDiscovery(data.discovery);
-          setStatus(data.discovery.confirmed_at ? 'confirmed' : 'reviewing');
-        } else {
-          setStatus('none');
-        }
-      } catch {
-        setStatus('none');
-      }
-    })();
-  }, [clientId]);
-
-  // ── Loading ──
-  if (status === 'loading') {
-    return (
-      <div className="h-32 animate-pulse rounded-xl border border-black/10 bg-white p-4" />
-    );
-  }
-
-  // ── No discovery yet ──
-  if (status === 'none') {
-    return (
-      <div className="flex items-center justify-between gap-4 rounded-xl border border-dashed border-me-ochre/30 bg-me-ochre/10 p-4">
-        <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-me-charcoal text-xs font-black text-white">DI</span>
-          <div>
-            <p className="text-sm font-black text-me-charcoal">品牌健康扫描未完成</p>
-            <p className="text-xs font-semibold text-me-charcoal/55">张骞发现 Agent 将自动分析品牌现状，生成诊断报告</p>
-          </div>
-        </div>
-        <Link
-          href={`/dashboard/clients/${clientId}/zhangqian`}
-          className="shrink-0 rounded-lg bg-me-charcoal px-4 py-2 text-sm font-black text-white transition-colors hover:bg-me-charcoal/85"
-        >
-          启动发现 →
-        </Link>
-      </div>
-    );
-  }
-
-  // ── Awaiting confirmation ──
-  if (status === 'reviewing') {
-    return (
-      <div className="flex items-center justify-between gap-4 rounded-xl border border-me-ochre/30 bg-me-ochre/10 p-4">
-        <div className="flex items-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-me-ochre/15 text-xs font-black text-me-ochre">QA</span>
-          <div>
-            <p className="text-sm font-black text-me-charcoal">发现报告待确认</p>
-            <p className="text-xs font-semibold text-me-ochre">张骞已完成扫描，请核查数据后确认导入</p>
-          </div>
-        </div>
-        <Link
-          href={`/dashboard/clients/${clientId}/zhangqian`}
-          className="shrink-0 rounded-lg bg-me-ochre px-4 py-2 text-sm font-black text-white transition-colors hover:bg-me-ochre/90"
-        >
-          查看 &amp; 确认 →
-        </Link>
-      </div>
-    );
-  }
-
-  // ── Confirmed — show radar chart ──
-  const diag = discovery?.payload?.diagnosis;
-  const scores = diag?.scores as Record<string, number> | undefined;
-  const crisisType = diag?.crisis_type ?? null;
-  const crisisBadge = crisisType ? CRISIS_BADGE[crisisType] : null;
-
-  return (
-    <div className="rounded-xl border border-me-ochre/30 bg-white p-5 shadow-sm">
-      <div className="mb-2 flex items-center gap-3">
-        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-me-ochre/10 text-xs font-black text-me-ochre">BH</span>
-        <p className="text-sm font-black text-me-charcoal">品牌健康快照</p>
-        {crisisBadge && (
-          <span className={`ml-auto rounded-full border px-2 py-0.5 text-xs font-bold ${crisisBadge.cls}`}>
-            {crisisBadge.label}
-          </span>
-        )}
-      </div>
-      {discovery?.generated_at && (
-        <p className="mb-3 text-xs font-semibold text-me-charcoal/45">
-          发现于 {new Date(discovery.generated_at).toLocaleDateString('zh-CN', { timeZone: 'Pacific/Auckland' })}
-        </p>
-      )}
-
-      {scores && <RadarChart scores={scores} />}
-
-      {scores && (
-        <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1 border-t border-black/[.06] pt-3">
-          {HEALTH_DIMS.map(({ key, label }) => {
-            const v = scores[key] as number | undefined ?? null;
-            return (
-              <div key={key} className="flex items-center justify-between gap-1">
-                <span className="text-[11px] font-semibold text-me-charcoal/45">{label}</span>
-                <span className="text-[11px] font-bold tabular-nums" style={{ color: scoreColor(v) }}>
-                  {v ?? '—'}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── ToolCard ─────────────────────────────────────────────────────────────────
-
-type ToolBadge = 'in_house' | 'external'
-
-const BADGE_CONFIG: Record<ToolBadge, { label: string; cls: string }> = {
-  in_house: { label: '系统内',  cls: 'bg-me-ochre/10 text-me-ochre border-me-ochre/20' },
-  external: { label: '外部执行', cls: 'bg-me-ochre/10 text-me-ochre border-me-ochre/20'  },
-}
-
-function ToolCard({
-  href, onClick, title, desc, badge, soon,
-}: {
-  href?: string
-  onClick?: () => void
-  title: string
-  desc: string
-  badge: ToolBadge
-  soon?: boolean
-}) {
-  const b = BADGE_CONFIG[badge]
-  const interactive = !soon && (!!href || !!onClick)
-  const inner = (
-    <div className={`flex items-center gap-3 rounded-xl border bg-white p-4 transition-all ${
-      soon
-        ? 'cursor-not-allowed border-dashed border-black/10 opacity-60'
-        : interactive
-          ? 'group cursor-pointer border-black/10 hover:border-me-ochre/40 hover:shadow-sm'
-          : 'border-black/10'
-    }`}>
-      <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-me-charcoal text-[11px] font-black text-white">
-        {title.slice(0, 2).toUpperCase()}
-      </span>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-0.5">
-          <p className="text-sm font-black text-me-charcoal">{title}</p>
-          <span className={`rounded-full border px-1.5 py-0.5 text-[10px] font-bold leading-none ${b.cls}`}>
-            {b.label}
-          </span>
-          {soon && <span className="rounded-full bg-me-ivory px-1.5 py-0.5 text-[10px] font-bold leading-none text-me-charcoal/45">Soon</span>}
-        </div>
-        <p className="text-xs font-semibold text-me-charcoal/55">{desc}</p>
-      </div>
-      {interactive && <span className="flex-shrink-0 text-me-charcoal/35 transition-colors group-hover:text-me-ochre">→</span>}
-    </div>
-  )
-  if (href && !soon) return <Link href={href}>{inner}</Link>
-  if (onClick && !soon) return <button className="w-full text-left" onClick={onClick}>{inner}</button>
-  return inner
-}
-
-type SubLink = { label: string; href?: string; onClick?: () => void }
-
-/**
- * 「自动暂停」那条次级链接的网址 —— 只认登记表，不在这里拼。
- * 登记表查不到（入口被撤）时退回广告健康页，不猜一个可能 404 的网址。
- */
-function autoPauseHref(clientId: string): string {
-  const entry = dedicatedApprovalEntryFor(ADS_AUTO_PAUSE_ACTION_KEY)
-  return entry ? entry.path(clientId) : `/dashboard/clients/${encodeURIComponent(clientId)}/ads-health`
-}
-
-function ToolDoorCard({ href, onClick, title, desc, badge, links }: {
-  href?: string; onClick?: () => void; title: string; desc: string; badge: ToolBadge; links: SubLink[]
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <ToolCard href={href} onClick={onClick} title={title} desc={desc} badge={badge} />
-      <div className="flex flex-wrap gap-x-3 gap-y-1 px-1">
-        {links.map(l => l.href
-          ? <Link key={l.label} href={l.href} className="text-xs font-semibold text-me-charcoal/55 hover:text-me-ochre">{l.label}</Link>
-          : <button key={l.label} type="button" onClick={l.onClick} className="text-xs font-semibold text-me-charcoal/55 hover:text-me-ochre">{l.label}</button>)}
-      </div>
-    </div>
-  )
-}
-
-// ─── Workflow Progress ────────────────────────────────────────────────────────
-
-function WorkflowProgress({
-  discoveryConfirmed,
-  hasPrescription,
-  prescriptionId,
-  clientId,
-}: {
-  discoveryConfirmed: boolean
-  hasPrescription: boolean
-  prescriptionId: string | null
-  clientId: string
-}) {
-  const steps = clientWorkflowSteps({ discoveryConfirmed, hasPrescription, prescriptionId, clientId })
-  const firstPending = steps.findIndex(s => !s.done)
-  return (
-    <div className="overflow-x-auto rounded-xl border border-black/10 bg-white px-4 py-4 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <div className="flex min-w-max items-center gap-0">
-        {steps.map((step, i) => (
-          <ProgressStep key={step.label} step={step} index={i} active={i === firstPending} last={i === steps.length - 1} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ProgressStep({ step, index, active, last }: {
-  step: ReturnType<typeof clientWorkflowSteps>[number]
-  index: number
-  active: boolean
-  last: boolean
-}) {
-  const inner = (
-    <div className={`flex items-center gap-2 rounded-lg px-3 py-2 ${active ? 'bg-me-ochre/10' : ''}`}>
-      <div className={`flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-black ${step.done ? 'bg-[#5C8A4A] text-white' : active ? 'bg-me-charcoal text-white' : 'bg-me-ivory text-me-charcoal/45'}`}>
-        {step.done ? '✓' : index + 1}
-      </div>
-      <div>
-        <p className={`text-xs font-black leading-none ${step.done ? 'text-[#5C8A4A]' : active ? 'text-me-charcoal' : 'text-me-charcoal/45'}`}>{step.label}</p>
-        <p className="mt-0.5 text-[10px] font-semibold text-me-charcoal/45">{step.sublabel}</p>
-      </div>
-    </div>
-  )
-  return (
-    <div className="flex items-center">
-      {(step.alwaysLink || (step.href && !step.done)) ? <a href={step.href}>{inner}</a> : inner}
-      {!last && <div className={`mx-1 h-px w-8 ${step.done ? 'bg-[#5C8A4A]/70' : 'bg-me-stone'}`} />}
-    </div>
-  )
-}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -491,6 +140,71 @@ export default function ClientDetailPage() {
         </Link>
       </div>
     );
+  }
+
+  const isFdeHome = viewer.role === 'admin'
+
+  const clientDrawers = (
+    <>
+      <GenerationDrawer
+        clientId={clientId}
+        open={generationOpen}
+        onClose={() => setGenerationOpen(false)}
+        executionItemId={execItemId}
+      />
+      <ZhugeDrawer
+        clientId={clientId}
+        isOpen={zhugeDrawerOpen}
+        onClose={() => setZhugeDrawerOpen(false)}
+        onComplete={(output) => {
+          setZhugeFreshOutput(output)
+          setZhugeRefreshKey(k => k + 1)
+        }}
+      />
+      <SettingsDrawer
+        open={settingsOpen}
+        onClose={() => {
+          setSettingsOpen(false)
+          const params = new URLSearchParams(searchParams?.toString() ?? '')
+          let dirty = false
+          if (params.has('brief')) { params.delete('brief'); dirty = true }
+          if (params.has('settings')) { params.delete('settings'); dirty = true }
+          if (dirty && pathname) {
+            const query = params.toString()
+            router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+          }
+        }}
+        clientId={clientId}
+        client={client}
+        activeTab={settingsTab}
+        onTabChange={setSettingsTab}
+      />
+    </>
+  )
+
+  if (isFdeHome) {
+    return (
+      <div className="min-h-screen bg-me-ivory">
+        <LocaleConfirmBanner clientId={clientId} />
+        <GoalBanner clientId={clientId} />
+        <ClientHomeFdeView
+          client={client}
+          clientId={clientId}
+          discoveryStatus={discoveryStatus}
+          prescriptionStatus={prescriptionStatus}
+          prescriptionId={prescriptionId}
+          discoveryConfirmed={discoveryConfirmed}
+          showEntry={showEntry}
+          hasActiveBrief={hasActiveBrief}
+          onOpenSettings={() => openSettings('brief')}
+          onOpenGeneration={() => setGenerationOpen(true)}
+          zhugeRefreshKey={zhugeRefreshKey}
+          zhugeFreshOutput={zhugeFreshOutput}
+          onAskZhuge={() => setZhugeDrawerOpen(true)}
+        />
+        {clientDrawers}
+      </div>
+    )
   }
 
   return (
@@ -621,158 +335,14 @@ export default function ClientDetailPage() {
 
       {/* ── 工具 tab ──────────────────────────────────────────────────────────── */}
       {activeTab === 'tools' && (
-        <>
-          {/* Zone A: 内容生产 */}
-          <BriefGateBanner clientId={clientId} featureLabel="workspace production entry points">
-            <section>
-              <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">内容生产</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                <ToolDoorCard
-                  href={showEntry('week-overview')
-                    ? `/dashboard/clients/${clientId}/daily-plan?tab=overview`
-                    : `/dashboard/clients/${clientId}/daily-plan?tab=post`}
-                  title="社媒"
-                  desc="社媒日常 · 这周 Post / Story / Reel 一眼看清、审核通过或打回"
-                  badge="in_house"
-                  links={[
-                    { label: '图文帖子', href: `/dashboard/clients/${clientId}/daily-plan?tab=post` },
-                  ]}
-                />
-                <ToolCard href={`/dashboard/clients/${clientId}/blog`}           title="博客"           desc="双信号博客生产与管理"            badge="in_house" />
-                {showEntry('story') && (
-                  <ToolCard href={`/dashboard/clients/${clientId}/story`}          title="Story 自动发布" desc="看这一周要发的 Story · 一键授权 / 随时停（仅管理员）" badge="in_house" />
-                )}
-                {showEntry('geo-composer') && (
-                  <ToolCard href={`/dashboard/geo-composer/${clientId}`}           title="GEO Composer"  desc="部署 AI 搜索优化指令"            badge="in_house" />
-                )}
-                {showEntry('ai-visibility') && (
-                  <ToolCard href={`/dashboard/ai-visibility/${clientId}`}          title="AI 可见度追踪" desc="监控 AI 搜索中的品牌曝光"         badge="in_house" />
-                )}
-                <ToolCard href={`/dashboard/clients/${clientId}/settings?tab=connect`} title="平台连接"    desc="连接 GBP · GSC · GA4 · Meta 广告账户" badge="in_house" />
-                <ToolDoorCard
-                  href={`/dashboard/clients/${clientId}/ads-health`}
-                  title="广告"
-                  desc="广告健康 · 每天自动体检、疲劳预警 · 花钱推广的事都从这里进"
-                  badge="in_house"
-                  links={[
-                    { label: '计划', href: `/dashboard/clients/${clientId}/promo-plan` },
-                    ...(showEntry('ad-approval') ? [{ label: '等你点头的广告', href: '/dashboard/ad-approval' }] : []),
-                    // 🔴 网址从登记表取，不写死：入口搬动时（2026-10-18 搬进广告门标签）
-                    //    改 `dedicated-approval-entries.ts` 一处，这里和待办的链接一起跟着走。
-                    { label: '自动暂停', href: autoPauseHref(clientId) },
-                    { label: 'Meta 账户连接', href: `/dashboard/clients/${clientId}/settings?tab=connect` },
-                  ]}
-                />
-                {/* 视频工厂此前只在内部导航(跨客户总览),客户维度没有入口 —— 跟紧邻的
-                    「素材库」不一致,而且 PM 是按客户干活的。?client= 进去只看这个客户。 */}
-                <ToolDoorCard
-                  href={showEntry('factory')
-                    ? `/dashboard/factory?client=${clientId}`
-                    : `/dashboard/clients/${clientId}/content-factory`}
-                  title="出片"
-                  desc="视频工厂 · 看片审片、拍板、跟 Claude 说人话改片 · 只看这个客户"
-                  badge="in_house"
-                  links={[
-                    { label: '素材库', href: `/dashboard/clients/${clientId}/assets` },
-                    ...(showEntry('factory-clips') ? [{ label: '视频工厂素材标签与审核', href: `/dashboard/clients/${clientId}/factory-clips` }] : []),
-                    { label: '内容工厂', href: `/dashboard/clients/${clientId}/content-factory` },
-                    { label: '生成单条内容', onClick: () => setGenerationOpen(true) },
-                  ]}
-                />
-              </div>
-            </section>
-          </BriefGateBanner>
-
-          {/* Zone A2: 经营工具
-              注意：这一区不属于 DAPE 任何一段，也不对应 6 支柱 —— 它不是 ME 替客户做的
-              营销动作，而是客户拿去做自己生意的工具。单独成区，别混进「内容生产」。
-              不套 BriefGateBanner：Brief 是营销服务的前置，跟客户自己的日常经营无关。 */}
-          <section>
-            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">经营工具</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {/* 行业专属：旅行社后台不该有地产工具，建材客户后台不该有旅游行程单
-                  （PM 2026-08-03 点名）。认不出行业就都不给 —— lib/clients/industry-features */}
-              {industryFeatureFlags(client?.industry).tailor_made && (
-                <ToolCard
-                  href={`/dashboard/clients/${clientId}/tailor-made`}
-                  title="Tailor-made 行程单"
-                  desc="定制行程：粘贴行程 → AI 解析 → 上传出票单读航班 → 导出品牌 PDF"
-                  badge="in_house"
-                />
-              )}
-              {industryFeatureFlags(client?.industry).tour_catalog && (
-                <ToolCard
-                  href={`/dashboard/clients/${clientId}/tour-catalog`}
-                  title="团目录 · Beta"
-                  desc="团名、行程、展示价、出发班期统一在这里维护。测试版。"
-                  badge="in_house"
-                />
-              )}
-              {industryFeatureFlags(client?.industry).business_calculator && showEntry('business-calculator') && (
-                <ToolCard
-                  href={`/dashboard/clients/${clientId}/business-calculator`}
-                  title="经营测算 · 内部"
-                  desc="手填广告、线索价、转化率、价格和成本，算年度利润；可存多个场景对比。仅内部模拟。"
-                  badge="in_house"
-                />
-              )}
-              {industryFeatureFlags(client?.industry).projects && (
-                <ToolCard
-                  href={`/dashboard/clients/${clientId}/projects`}
-                  title="楼盘"
-                  desc="中介名下每个开发项目：各自的卖点、策略、素材，发票开给开发商"
-                  badge="in_house"
-                />
-              )}
-              {industryFeatureFlags(client?.industry).listings && (
-                <ToolCard
-                  href={`/dashboard/clients/${clientId}/listings`}
-                  title="房子"
-                  desc="中介手上的每一套房：建档、改状态、看每套房带来了多少客人"
-                  badge="in_house"
-                />
-              )}
-            </div>
-          </section>
-
-          {/* Zone B: 诊断与分析 */}
-          <section>
-            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">诊断与分析</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {/*
-                2026-09-28（CRM 重整 B1，PM 拍板）：这个区原来是 6 张散卡片（我的客人 /
-                今天该联系谁 / 全部客人 / 客户消息 / 商务收件箱 / 同行渠道）——收成 1 张
-                「CRM 管理」，进去之后在 CrmTabs 里能摸到全部 6 个目的地，一个都没少。
-                同一次改动顺手堵上了 WP-A 那个漏洞：以前「同行渠道」这张卡片没有任何
-                行业过滤，NAL（非旅游客户）也能点进去看到本该只有 CTS 才有的东西——
-                现在整张卡片收进「CRM 管理」，「同行渠道」子入口只在 industryFeatureFlags
-                判定为旅游客户时才出现（CrmTabs.tsx），服务端也补了闸（agents/page.tsx +
-                三条 API 路由），不是只藏了个按钮。见台账
-                client-custom-features-leak-to-other-clients。
-              */}
-              <ToolCard href={`/dashboard/clients/${clientId}/crm/all`}            title="CRM 管理"       desc="客人清单、往来记录、跟进阶段、同行渠道 —— 全部客人相关的功能都在这里"  badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/zhangqian`}          title="张骞发现"       desc="扫描社媒、评价、关键词、竞品，生成品牌现状全景报告"  badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/operating-agent`}   title="经营 Agent"      desc="把客户目标、产品范围和竞品证据合成下一步经营判断；无证据时明确说不知道" badge="in_house" />
-              <ToolCard href={prescriptionEntryHref(clientId, prescriptionStatus === 'none' ? null : prescriptionId)} title="处方" desc="跟华佗说要什么结果、每月预算，就能开方或改已有的方" badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/site-audit/pages`}   title="站点审计"       desc="逐页检查标题/描述/H1/图片ALT等 SEO 技术项，输出修复清单"  badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/seo-gap`}            title="SEO Gap 分析"   desc="对比竞品，找出客户未覆盖但流量大的关键词机会"  badge="in_house" />
-              {showEntry('memory') && (
-                <ToolCard href={`/dashboard/clients/${clientId}/memory`}             title="客户记忆库"     desc="L3 长期学习：好模式 / 失败记录 / 偏好 / 决策历史（仅 FDE）"  badge="in_house" />
-              )}
-              <ToolCard                                                             title="口碑管理"       desc="Google 评价 · 公众号舆情"        badge="external" soon />
-              <ToolCard                                                             title="竞品追踪"       desc="持续监控竞品动态"                 badge="external" soon />
-            </div>
-          </section>
-
-          {/* Zone C: SEO 工具 */}
-          <section>
-            <p className="mb-3 text-xs font-black uppercase tracking-[0.14em] text-me-ochre">SEO 工具</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <ToolCard href={`/dashboard/clients/${clientId}/strategy`}           title="内容策略"        desc="根据关键词机会和竞品数据，制定博客选题与内容发布计划"  badge="in_house" />
-              <ToolCard href={`/dashboard/clients/${clientId}/seo-intelligence`}   title="SEO Intelligence" desc="关键词排名 · 流量趋势 · 竞品对比 · Untapped 词挖掘"    badge="in_house" />
-            </div>
-          </section>
-        </>
+        <ClientToolsGrid
+          clientId={clientId}
+          client={client}
+          showEntry={showEntry}
+          onOpenGeneration={() => setGenerationOpen(true)}
+          prescriptionStatus={prescriptionStatus}
+          prescriptionId={prescriptionId}
+        />
       )}
 
       {/* ── 日志 tab ──────────────────────────────────────────────────────────── */}
@@ -782,47 +352,7 @@ export default function ClientDetailPage() {
         </div>
       )}
 
-      {/* Generation drawer */}
-      <GenerationDrawer
-        clientId={clientId}
-        open={generationOpen}
-        onClose={() => setGenerationOpen(false)}
-        executionItemId={execItemId}
-      />
-
-      {/* Zhuge AI drawer — real-time conduct + Luban trigger */}
-      <ZhugeDrawer
-        clientId={clientId}
-        isOpen={zhugeDrawerOpen}
-        onClose={() => setZhugeDrawerOpen(false)}
-        onComplete={(output) => {
-          setZhugeFreshOutput(output)
-          setZhugeRefreshKey(k => k + 1)
-        }}
-      />
-
-      {/* Settings drawer.
-          On close we also strip the auto-open URL params (?brief, ?settings)
-          so a page refresh doesn't re-open the drawer the FDE just closed.
-          Other params (e.g. ?exec) are preserved. */}
-      <SettingsDrawer
-        open={settingsOpen}
-        onClose={() => {
-          setSettingsOpen(false)
-          const params = new URLSearchParams(searchParams?.toString() ?? '')
-          let dirty = false
-          if (params.has('brief'))    { params.delete('brief');    dirty = true }
-          if (params.has('settings')) { params.delete('settings'); dirty = true }
-          if (dirty && pathname) {
-            const query = params.toString()
-            router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
-          }
-        }}
-        clientId={clientId}
-        client={client}
-        activeTab={settingsTab}
-        onTabChange={setSettingsTab}
-      />
+      {clientDrawers}
     </div>
   );
 }
