@@ -368,15 +368,10 @@ export class MetaCapiWriter implements DestinationWriter<MetaCapiPayload> {
           latencyMs: Date.now() - startedAt,
         }
       }
-      // 把网站像素编号误填成线索阶段数据集 = 线索阶段事件混进网站数据，按配置错误拦下。
-      if (config.crmStage.datasetId === creds.pixelId) {
-        return {
-          ok: false,
-          errorName: 'ConfigError',
-          errorMessage: '线索阶段数据集编号跟网站像素是同一个——必须是单独新建的线索阶段数据集',
-          latencyMs: Date.now() - startedAt,
-        }
-      }
+      // 线索阶段数据集**可以**跟网站像素是同一个：Meta 事件管理工具现在的 CRM 接入流程
+      // （连接数据 → CRM → 手动连接）就是把 CRM 事件挂到已有的统一数据集上，不再新建
+      // （2026-11-10 在 CTS 的事件管理工具里实测）。Meta 靠 action_source=system_generated
+      // + custom_data.event_source=crm 区分它们，不靠数据集。发到哪个数据集只认客户配置。
       datasetId = config.crmStage.datasetId
     }
 
