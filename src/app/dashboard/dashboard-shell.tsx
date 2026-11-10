@@ -9,7 +9,7 @@ import { FeatureLockModal } from '@/components/auth/FeatureLockGate'
 import { viewerFacts } from '@/lib/auth/home-entries'
 import { WorkspaceViewerProvider } from './workspace-viewer'
 import { ClientFdeShell } from './shell/client-fde-shell'
-import type { NavItem, NavSection } from './shell/nav-types'
+import type { NavItem, NavSection } from './shell/nav-active'
 
 export const ADMIN_SECTIONS: NavSection[] = [
   {

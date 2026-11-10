@@ -2,7 +2,7 @@ import { dedicatedApprovalEntryFor } from '@/lib/kernel/dedicated-approval-entri
 import { ADS_AUTO_PAUSE_ACTION_KEY } from '@/lib/action-submission/ads-auto-pause-key'
 import { industryFeatureFlags } from '@/lib/clients/industry-features'
 import { homeEntryVisible, type ViewerFacts } from '@/lib/auth/home-entries'
-import type { NavItem, NavSection } from './nav-types'
+import type { NavItem, NavSection } from './nav-active'
 
 function autoPausePath(clientId: string): string {
   const entry = dedicatedApprovalEntryFor(ADS_AUTO_PAUSE_ACTION_KEY)

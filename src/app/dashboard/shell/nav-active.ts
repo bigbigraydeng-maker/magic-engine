@@ -1,4 +1,18 @@
-import type { NavItem, NavSection } from './nav-types'
+export type NavItem = {
+  key: string
+  label: string
+  href?: string
+  mark?: string
+  soon?: boolean
+  paidOnlyFeature?: string
+  badge?: 'admin' | 'fde'
+}
+
+export type NavSection = {
+  title?: string
+  items: NavItem[]
+  collapsed?: boolean
+}
 
 export function activeNavKey(pathname: string, sections: NavSection[]): string {
   for (const section of sections) {
@@ -16,9 +30,7 @@ export function activeNavKey(pathname: string, sections: NavSection[]): string {
 
 export function swapClientInPath(pathname: string, nextClientId: string): string {
   const prefix = '/dashboard/clients/'
-  if (!pathname.startsWith(prefix)) {
-    return `/dashboard/clients/${nextClientId}`
-  }
+  if (!pathname.startsWith(prefix)) return `/dashboard/clients/${nextClientId}`
   const rest = pathname.slice(prefix.length)
   const slash = rest.indexOf('/')
   const suffix = slash === -1 ? '' : rest.slice(slash)
