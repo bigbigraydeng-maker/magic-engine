@@ -25,6 +25,9 @@ class FakeDb {
     contact_stage_events: [],
     me_sale_outcomes: [],
     me_conversion_writebacks: [],
+    crm_bookings: [],
+    crm_booking_milestones: [],
+    crm_booking_events: [],
   }
 
   from(table: string) {
@@ -267,6 +270,83 @@ describe('runCrmStageSignalsForClient', () => {
     const second = await runCrmStageChunkForEnabledClients(deps, 2)
     expect(second.done).toBe(true)
     expect(sendMock).toHaveBeenCalledTimes(3)
+  })
+
+  describe('某一档读订单里程碑', () => {
+    const BOOKING_CONFIG = {
+      crm_stage_signals: {
+        ...CONFIG.crm_stage_signals,
+        stages: [
+          { event_name: 'Quoted', stage_keys: ['quoted'] },
+          { event_name: 'Deposit Paid', booking_milestone: 'deposit' },
+        ],
+      },
+    }
+    function seedBooking(over: { status?: string; state?: string; markedDaysAgo?: number } = {}) {
+      db.tables.clients.push({ id: CLIENT, default_phone_country: '64', leads_config: BOOKING_CONFIG })
+      db.tables.contacts.push({ id: 'c1', client_id: CLIENT, primary_email: 'a@example.com', primary_phone: null, do_not_contact: false })
+      db.tables.contact_touchpoints.push({ client_id: CLIENT, contact_id: 'c1', source: 'meta_lead_form', source_ref: LEAD, occurred_at: ago(20) })
+      db.tables.crm_bookings.push({ id: 'b1', client_id: CLIENT, contact_id: 'c1', status: over.status ?? 'active' })
+      db.tables.crm_booking_milestones.push({ booking_id: 'b1', client_id: CLIENT, kind: 'deposit', state: over.state ?? 'paid' })
+      db.tables.crm_booking_events.push({
+        client_id: CLIENT, booking_id: 'b1', action: 'milestone_paid', milestone_kind: 'deposit', created_at: ago(over.markedDaysAgo ?? 1),
+      })
+    }
+
+    it('员工在订单里标了定金 → 报 Deposit Paid（并补 Quoted），时间是标的那一刻', async () => {
+      seedBooking()
+      const s = await run()
+      expect(s).toMatchObject({ ran: true, planned: 2, inserted: 2 })
+      expect(db.tables.me_sale_outcomes.map((r) => r.lead_stage)).toEqual(['Quoted', 'Deposit Paid'])
+      expect(db.tables.me_sale_outcomes[1].occurred_at).toBe(ago(1))
+    })
+
+    it('客人阶段被改成「已付定金」但订单没标 → 不报定金', async () => {
+      seedBooking({ state: 'unpaid' })
+      db.tables.contact_stage_events.push({ client_id: CLIENT, contact_id: 'c1', to_stage: 'deposit_paid', created_at: ago(1) })
+      const s = await run()
+      expect(s).toMatchObject({ ran: true, inserted: 0 })
+    })
+
+    it('标了又取消（里程碑现在是未收）→ 不报', async () => {
+      seedBooking({ state: 'unpaid' })
+      expect(await run()).toMatchObject({ ran: true, planned: 0 })
+    })
+
+    it('订单已取消 → 不报', async () => {
+      seedBooking({ status: 'cancelled' })
+      expect(await run()).toMatchObject({ ran: true, planned: 0 })
+    })
+
+    it('标的时间在 7 天窗口之外 → 不报（补不回）', async () => {
+      seedBooking({ markedDaysAgo: 9 })
+      expect(await run()).toMatchObject({ ran: true, planned: 0 })
+    })
+
+    it('同一位客人两张订单：一张标了又取消、另一张后来真收了 → 时间按真收的那张算，不按取消的那张', async () => {
+      seedBooking({ state: 'unpaid', markedDaysAgo: 3 })
+      db.tables.crm_bookings.push({ id: 'b2', client_id: CLIENT, contact_id: 'c1', status: 'active' })
+      db.tables.crm_booking_milestones.push({ booking_id: 'b2', client_id: CLIENT, kind: 'deposit', state: 'paid' })
+      db.tables.crm_booking_events.push({ client_id: CLIENT, booking_id: 'b2', action: 'milestone_paid', milestone_kind: 'deposit', created_at: ago(1) })
+      await run()
+      const deposit = db.tables.me_sale_outcomes.find((r) => r.lead_stage === 'Deposit Paid')
+      expect(deposit?.occurred_at).toBe(ago(1))
+    })
+
+    it('订单已取消、但客人这周刚被报价 → 只报 Quoted，不报定金', async () => {
+      seedBooking({ status: 'cancelled' })
+      db.tables.contact_stage_events.push({ client_id: CLIENT, contact_id: 'c1', to_stage: 'quoted', created_at: ago(2) })
+      await run()
+      expect(db.tables.me_sale_outcomes.map((r) => r.lead_stage)).toEqual(['Quoted'])
+    })
+
+    it('别的客户的订单不会被读进来', async () => {
+      seedBooking({ state: 'unpaid' })
+      db.tables.crm_bookings.push({ id: 'b9', client_id: 'other', contact_id: 'c1', status: 'active' })
+      db.tables.crm_booking_milestones.push({ booking_id: 'b9', client_id: 'other', kind: 'deposit', state: 'paid' })
+      db.tables.crm_booking_events.push({ client_id: 'other', booking_id: 'b9', action: 'milestone_paid', milestone_kind: 'deposit', created_at: ago(1) })
+      expect(await run()).toMatchObject({ ran: true, planned: 0 })
+    })
   })
 
   it('别的客户的阶段变化不会被读进来', async () => {
