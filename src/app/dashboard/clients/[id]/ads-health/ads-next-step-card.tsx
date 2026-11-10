@@ -105,26 +105,26 @@ export default function AdsNextStepCard({
 
   return (
     <section
-      className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+      className="mb-6 rounded-xl border border-black/10 bg-white p-5 shadow-card"
       aria-label="广告下一步"
     >
-      <h2 className="text-sm font-semibold text-slate-800">广告下一步</h2>
-      <p className="mt-0.5 text-xs text-slate-400">体检红灯、等人批的动作、华佗处方、IMPACT 事实缺口 —— 只读汇总</p>
+      <h2 className="font-display text-base font-semibold text-me-charcoal">广告下一步</h2>
+      <p className="mt-0.5 text-xs text-me-charcoal/55">体检红灯、等人批的动作、华佗处方、IMPACT 事实缺口 —— 只读汇总</p>
       <dl className="mt-3 space-y-3 text-sm">
         <div>
-          <dt className="text-xs font-medium text-slate-500">体检红灯 · 跟目标成本比</dt>
-          <dd className="mt-0.5 text-slate-800">
+          <dt className="text-xs font-medium text-me-charcoal/55">体检红灯 · 跟目标成本比</dt>
+          <dd className="mt-0.5 text-me-charcoal">
             {healthRowText(loadStatus, view?.healthRedLights)}
           </dd>
         </div>
         <div>
-          <dt className="text-xs font-medium text-slate-500">待批动作</dt>
-          <dd className="mt-0.5 text-slate-800">
+          <dt className="text-xs font-medium text-me-charcoal/55">待批动作</dt>
+          <dd className="mt-0.5 text-me-charcoal">
             {rowText(loadStatus, view?.pendingActions, (data) => (
               <ul className="space-y-1">
                 {data.items.map((item) => (
                   <li key={`${item.href}:${item.summary}`}>
-                    <Link href={item.href} className="text-sky-700 hover:underline">
+                    <Link href={item.href} className="font-medium text-me-ochre hover:underline">
                       {item.summary}
                     </Link>
                   </li>
@@ -134,8 +134,8 @@ export default function AdsNextStepCard({
           </dd>
         </div>
         <div>
-          <dt className="text-xs font-medium text-slate-500">处方状态</dt>
-          <dd className="mt-0.5 text-slate-800">
+          <dt className="text-xs font-medium text-me-charcoal/55">处方状态</dt>
+          <dd className="mt-0.5 text-me-charcoal">
             {rowText(loadStatus, view?.prescription, (data) => {
               const when = data.approvedAt
                 ? ` · 批准 ${new Date(data.approvedAt).toLocaleDateString('en-NZ', { timeZone: 'Pacific/Auckland' })}`
@@ -150,8 +150,8 @@ export default function AdsNextStepCard({
           </dd>
         </div>
         <div>
-          <dt className="text-xs font-medium text-slate-500">IMPACT 事实 / 缺口</dt>
-          <dd className="mt-0.5 text-slate-800">
+          <dt className="text-xs font-medium text-me-charcoal/55">IMPACT 事实 / 缺口</dt>
+          <dd className="mt-0.5 text-me-charcoal">
             {impactGapsRow(loadStatus, view?.impactGaps)}
           </dd>
         </div>

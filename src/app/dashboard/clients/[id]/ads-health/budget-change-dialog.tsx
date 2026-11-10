@@ -276,10 +276,10 @@ function ReadyView(props: {
   const lastMod = plan.hoursSinceMetaUpdate === null ? '读不到' : `${plan.hoursSinceMetaUpdate} 小时前`
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-      <div className="max-w-md w-full rounded-xl bg-white p-4 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-800">调「{unit.name ?? unit.id}」的每天预算</h3>
-        <p className="text-xs text-gray-600">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-me-charcoal/40 p-4">
+      <div className="max-w-md w-full space-y-3 rounded-card border border-black/10 bg-me-ivory p-5 shadow-card">
+        <h3 className="font-display text-base font-semibold text-me-charcoal">调「{unit.name ?? unit.id}」的每天预算</h3>
+        <p className="text-xs text-me-charcoal/70">
           现在每天 {money(cur, plan.currentCents)}；客户每天上限还剩 {headroom}；Meta 上次修改：{lastMod}
         </p>
         <ScaleSection
@@ -298,7 +298,7 @@ function ReadyView(props: {
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            className="min-h-11 rounded-xl border border-black/10 px-4 py-2 text-sm font-medium text-me-charcoal hover:bg-me-stone/60"
           >
             取消
           </button>
@@ -311,8 +311,8 @@ function ReadyView(props: {
 function ResultView(props: { state: SubmitState; onClose: () => void }) {
   const { state, onClose } = props
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-      <div className="max-w-md w-full rounded-xl bg-white p-4 space-y-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-me-charcoal/40 p-4">
+      <div className="max-w-md w-full space-y-3 rounded-card border border-black/10 bg-me-ivory p-5 shadow-card">
         {state.kind === 'pending' && (
           <p className="text-xs text-gray-700">确认卡已出，预算还没改。请到确认卡上点确认。</p>
         )}
@@ -333,7 +333,7 @@ function ResultView(props: { state: SubmitState; onClose: () => void }) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            className="min-h-11 rounded-xl border border-black/10 px-4 py-2 text-sm font-medium text-me-charcoal hover:bg-me-stone/60"
           >
             关闭
           </button>
@@ -358,9 +358,9 @@ export default function BudgetChangeDialog(props: {
 
   if (load.kind === 'loading') {
     return (
-      <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-        <div className="max-w-md w-full rounded-xl bg-white p-4 space-y-3">
-          <p className="text-xs text-gray-600">正在当场读 Meta 和加钱规则…</p>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-me-charcoal/40 p-4">
+        <div className="max-w-md w-full rounded-card border border-black/10 bg-me-ivory p-5 shadow-card">
+          <p className="text-sm text-me-charcoal/55">正在当场读 Meta 和加钱规则…</p>
         </div>
       </div>
     )
@@ -368,14 +368,14 @@ export default function BudgetChangeDialog(props: {
 
   if (load.kind === 'error') {
     return (
-      <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
-        <div className="max-w-md w-full rounded-xl bg-white p-4 space-y-3">
-          <p className="text-xs text-red-700">{load.message}</p>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-me-charcoal/40 p-4">
+        <div className="max-w-md w-full space-y-3 rounded-card border border-black/10 bg-me-ivory p-5 shadow-card">
+          <p className="text-sm text-status-rej">{load.message}</p>
           <div className="flex justify-end">
             <button
               type="button"
               onClick={onClose}
-              className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+              className="min-h-11 rounded-xl border border-black/10 px-4 py-2 text-sm font-medium text-me-charcoal hover:bg-me-stone/60"
             >
               关闭
             </button>

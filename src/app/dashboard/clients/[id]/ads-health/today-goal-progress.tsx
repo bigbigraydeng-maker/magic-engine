@@ -138,15 +138,15 @@ export function TodayGoalProgress({
 
   const tone =
     pace.verdict === 'on_track'
-      ? { dot: 'bg-emerald-500', tint: 'border-emerald-200 bg-emerald-50', text: 'text-emerald-800' }
+      ? { dot: 'bg-status-track', tint: 'border-status-track/25 bg-status-track/10', text: 'text-status-track' }
       : pace.verdict === 'behind'
-        ? { dot: 'bg-amber-500', tint: 'border-amber-200 bg-amber-50', text: 'text-amber-800' }
+        ? { dot: 'bg-status-exec', tint: 'border-me-ochre/30 bg-me-ochre/10', text: 'text-me-ochre' }
         : pace.verdict === 'unreachable_within_caps'
-          ? { dot: 'bg-red-500', tint: 'border-red-200 bg-red-50', text: 'text-red-800' }
-          : { dot: 'bg-gray-400', tint: 'border-gray-200 bg-gray-50', text: 'text-gray-700' }
+          ? { dot: 'bg-status-rej', tint: 'border-status-rej/25 bg-status-rej/10', text: 'text-status-rej' }
+          : { dot: 'bg-status-attn', tint: 'border-me-stone bg-me-ivory', text: 'text-me-charcoal' }
 
   return (
-    <div className={`mb-4 rounded-xl border p-5 ${tone.tint}`}>
+    <div className={`mb-4 rounded-xl border p-5 shadow-sm ${tone.tint}`}>
       <p className={`text-base font-semibold ${tone.text}`}>{goal.title} · 目标进度</p>
       <div className="mt-3 h-2 w-full rounded-full bg-white/70 overflow-hidden">
         <div className={`h-full ${tone.dot}`} style={{ width: `${pct}%` }} />

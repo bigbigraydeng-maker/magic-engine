@@ -31,6 +31,7 @@ import BreakdownPanel from './breakdown-panel'
 import EntityTreePanel from './entity-tree-panel'
 import AutoPausePanel from './auto-pause-panel'
 import AdsNextStepCard from './ads-next-step-card'
+import { HeldCards } from '@/components/confirmation-card/HeldCards'
 import { PAGE_TABS, tabFromQuery, type PageTab } from './tabs'
 import { CurrentWinnerPanel } from './current-winner-panel'
 import type { ClientGrowthView } from '@/lib/ads-strategy/agents/growth-client-view'
@@ -96,11 +97,18 @@ interface AdHealthResponse {
 // ─── Verdict styling (colour = conclusion, per 板桥) ───────────────────────────
 
 const VERDICT_META: Record<Verdict, { label: string; dot: string; tint: string; text: string }> = {
-  alert:                { label: '该动手了', dot: 'bg-red-500',    tint: 'bg-red-50 border-red-200',       text: 'text-red-700' },
-  watch:                { label: '留意',     dot: 'bg-amber-500',  tint: 'bg-amber-50 border-amber-200',   text: 'text-amber-700' },
-  healthy:              { label: '健康',     dot: 'bg-emerald-500', tint: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700' },
-  insufficient_history: { label: '数据积累中', dot: 'bg-gray-400',  tint: 'bg-gray-50 border-gray-200',     text: 'text-gray-500' },
-  paused:               { label: '已停投',   dot: 'bg-gray-300',  tint: 'bg-gray-50 border-gray-200 opacity-70', text: 'text-gray-400' },
+  alert:                { label: '该动手了', dot: 'bg-status-rej',   tint: 'border-status-rej/25 bg-status-rej/10', text: 'text-status-rej' },
+  watch:                { label: '留意',     dot: 'bg-status-exec',  tint: 'border-me-ochre/30 bg-me-ochre/10',     text: 'text-me-ochre' },
+  healthy:              { label: '健康',     dot: 'bg-status-track', tint: 'border-status-track/25 bg-status-track/10', text: 'text-status-track' },
+  insufficient_history: { label: '数据积累中', dot: 'bg-status-attn',  tint: 'border-me-stone bg-me-ivory',            text: 'text-status-attn' },
+  paused:               { label: '已停投',   dot: 'bg-me-taupe',     tint: 'border-me-stone bg-me-stone/40 opacity-80', text: 'text-me-taupe' },
+}
+
+function fmtDataUpdatedLine(insightDate: string): string {
+  const parts = insightDate.split('-').map((x) => parseInt(x, 10))
+  if (parts.length !== 3 || parts.some((n) => Number.isNaN(n))) return `数据更新于 ${insightDate}（新西兰时间）`
+  const [, month, day] = parts
+  return `数据更新于 ${month}月${day}日 早上 6:00（新西兰时间）`
 }
 
 function fmtPct(fraction: number | null): string {
@@ -237,7 +245,7 @@ function PrescriptionBlock({ clientId, c }: { clientId: string; c: CampaignNarra
             type="button"
             disabled={running || done}
             onClick={run}
-            className="shrink-0 rounded-lg bg-gray-800 px-3 py-1.5 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
+            className="min-h-11 shrink-0 rounded-xl bg-me-charcoal px-4 py-2 text-sm font-semibold text-me-ivory hover:bg-me-black disabled:opacity-50"
           >
             {running ? '执行中…' : done ? '已执行 ✓' : '执行'}
           </button>
@@ -289,8 +297,8 @@ function MoneySummary({ campaigns, playbook, scorecard }: {
   const showWorst = worst && perResult != null && campaigns.length > 1 && worst.per > perResult * 1.2
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 mb-4">
-      <p className="text-sm text-gray-700">
+    <div className="mb-4 rounded-xl border border-black/10 bg-white p-4 shadow-sm">
+      <p className="text-sm text-me-charcoal">
         过去 7 天花了 <span className="font-semibold tabular-nums">${spend.toFixed(0)}</span>
         {results > 0 ? (
           <>
@@ -315,8 +323,8 @@ function MoneySummary({ campaigns, playbook, scorecard }: {
 function TypedMoneySummary({ spend, summary }: { spend: number; summary: ResultSummary }) {
   const skipped = summary.noResultUnits + summary.unknownUnits
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 mb-4">
-      <p className="text-sm text-gray-700">
+    <div className="mb-4 rounded-xl border border-black/10 bg-white p-4 shadow-sm">
+      <p className="text-sm text-me-charcoal">
         过去 7 天花了 <span className="font-semibold tabular-nums">${spend.toFixed(0)}</span>
         {summary.rows.length === 0 && <>,按结果种类汇总的数今天读不到（见下面成绩单）。</>}
         {summary.rows.length > 0 && <>,其中：</>}
@@ -475,7 +483,7 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
           type="button"
           disabled={busy !== null || settled}
           onClick={() => run('cut')}
-          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="min-h-11 rounded-xl border border-black/10 bg-white px-4 py-2 text-sm font-medium text-me-charcoal hover:bg-me-stone/50 disabled:opacity-50"
         >
           {busy === 'cut' ? '正在改…' : '预算降 20%'}
         </button>
@@ -483,7 +491,7 @@ function StopLossBlock({ clientId, c, playbook }: { clientId: string; c: Campaig
           type="button"
           disabled={busy !== null || settled}
           onClick={() => run('pause')}
-          className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          className="min-h-11 rounded-xl border border-black/10 bg-white px-4 py-2 text-sm font-medium text-me-charcoal hover:bg-me-stone/50 disabled:opacity-50"
         >
           {busy === 'pause' ? '正在停…' : '先全停'}
         </button>
@@ -558,17 +566,75 @@ function CampaignCard({ clientId, c, playbook }: { clientId: string; c: Campaign
 
 // ─── Page ──────────────────────────────────────────────────────────────────────
 
+function AdsHealthPageHeader({
+  clientId,
+  insightDate,
+}: {
+  clientId: string
+  insightDate?: string
+}) {
+  return (
+    <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <Link
+          href={`/dashboard/clients/${clientId}`}
+          className="text-sm text-me-charcoal/45 hover:text-me-charcoal/70"
+        >
+          ← 返回客户
+        </Link>
+        <h1 className="mt-2 font-display text-2xl font-bold tracking-tight text-me-charcoal md:text-3xl">
+          广告健康
+        </h1>
+        <p className="mt-1 max-w-xl text-sm text-me-charcoal/55">
+          先看现在花得怎么样、有没有要你点头的事，其余往下翻。
+        </p>
+      </div>
+      {insightDate ? (
+        <p className="shrink-0 text-xs text-me-charcoal/45 sm:text-right">
+          {fmtDataUpdatedLine(insightDate)}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function ConfirmationCardsSection({
+  clientId,
+  refreshKey,
+}: {
+  clientId: string
+  refreshKey: number
+}) {
+  return (
+    <section
+      id="confirmation-cards"
+      className="mb-6 rounded-xl border border-dashed border-me-ochre/40 bg-me-ochre/5 p-4 md:p-5"
+      aria-label="等你点头的确认卡"
+    >
+      <h2 className="font-display text-base font-semibold text-me-charcoal">
+        等你点头 · 确认卡
+      </h2>
+      <p className="mt-1 text-xs text-me-charcoal/55">
+        在你点确认之前，预算和投放都不会改。
+      </p>
+      <HeldCards clientId={clientId} refreshKey={refreshKey} />
+    </section>
+  )
+}
+
 function TabBar({ tab, onChange }: { tab: PageTab; onChange: (t: PageTab) => void }) {
   return (
-    <div className="mb-5 flex gap-1 border-b border-gray-200">
+    <div className="mb-5 flex flex-wrap gap-1 border-b border-me-stone">
       {PAGE_TABS.map(item => (
         <button
           key={item.key}
           type="button"
           onClick={() => onChange(item.key)}
           title={item.hint}
-          className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
-            tab === item.key ? 'border-gray-800 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'
+          className={`-mb-px min-h-11 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+            tab === item.key
+              ? 'border-me-ochre text-me-charcoal'
+              : 'border-transparent text-me-charcoal/45 hover:text-me-charcoal/70'
           }`}
         >
           {item.label}
@@ -626,14 +692,8 @@ export default function AdsHealthPage() {
   const stopped = campaigns.filter(c => c.verdict === 'paused')
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-8">
-      <div className="mb-5">
-        <Link href={`/dashboard/clients/${clientId}`} className="text-sm text-gray-400 hover:text-gray-600">
-          ← 返回客户
-        </Link>
-        <h1 className="mt-2 text-2xl font-semibold text-gray-800">广告健康</h1>
-        <p className="text-sm text-gray-400">每天自动体检 · 先看「今天看这里」，其余按需要点开</p>
-      </div>
+    <div className="mx-auto max-w-5xl px-4 py-6 md:py-8">
+      <AdsHealthPageHeader clientId={clientId} insightDate={latest?.insight_date} />
 
       <AdsNextStepCard clientId={clientId} refreshKey={nextStepRefreshKey} />
 
@@ -641,6 +701,7 @@ export default function AdsHealthPage() {
 
       {tab === 'today' && (
         <>
+          <ConfirmationCardsSection clientId={clientId} refreshKey={nextStepRefreshKey} />
           {!loading && !error && (
             <TodayGoalProgress
               state={data?.growth}
@@ -775,8 +836,8 @@ export default function AdsHealthPage() {
         </div>
       )}
 
-      <p className="mt-8 text-xs text-gray-300 text-center">
-        所有判断由系统每天自动生成 · 数字直接来自广告平台,可自行核对
+      <p className="mt-8 text-center text-xs text-me-charcoal/35">
+        所有判断由系统每天自动生成 · 数字直接来自广告平台，可自行核对
       </p>
     </div>
   )

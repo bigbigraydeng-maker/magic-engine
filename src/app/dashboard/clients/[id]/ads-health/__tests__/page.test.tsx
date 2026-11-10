@@ -600,7 +600,7 @@ describe('「等你点头」标签', () => {
     // 断言「哪个标签是选中态」，而不是断言某块面板的文字 ——
     // 选中态是这条用例真正要测的事，而面板内容会随取数结果变。
     const active = await screen.findByTitle('三句话：池子、频率、今天调什么')
-    expect(active.className).toContain('border-gray-800')
+    expect(active.className).toContain('border-me-ochre')
     expect(screen.getByTitle('这个客户等人点头的广告动作').className).toContain('border-transparent')
     expect(screen.queryByText(/系统发现这些广告组连续花钱没结果/)).toBeNull()
   })
@@ -624,7 +624,7 @@ describe('「等你点头」标签', () => {
     rerender(<AdsHealthPage />)
 
     await waitFor(() => {
-      expect(screen.getByTitle('每天预算上限、自动化、可投视频').className).toContain('border-gray-800')
+      expect(screen.getByTitle('每天预算上限、自动化、可投视频').className).toContain('border-me-ochre')
     })
   })
 })
