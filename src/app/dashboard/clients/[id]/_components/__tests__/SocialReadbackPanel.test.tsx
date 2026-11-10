@@ -79,6 +79,42 @@ describe('SocialReadbackPanel', () => {
     expect(screen.queryByText(/payload/i)).not.toBeInTheDocument()
   })
 
+  it('shows a story direct-message line when the payload has one', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        panel: {
+          client_id: CLIENT,
+          since: '2026-10-01T00:00:00.000Z',
+          until: '2026-11-03T00:00:00.000Z',
+          limit: 20,
+          generated_at: '2026-11-03T00:00:00.000Z',
+          items: [
+            {
+              id: 'story-1',
+              kind: 'story',
+              kind_label: 'Story',
+              platform_label: 'Facebook',
+              published_at: '2026-11-01T10:00:00.000Z',
+              published_at_display: '2026/11/01 23:00',
+              story_sent: true,
+              story_registered: true,
+              story_dm: '发后 12 小时新开私信 2 条（已去掉带来广告编号的会话）',
+              summary: '已发出并已登记；Story 没有公开的赞评转，观看数需要洞察权限，目前读不到。',
+              windows: null,
+            },
+          ],
+        },
+      }),
+    } as Response)
+    render(<SocialReadbackPanel clientId={CLIENT} />)
+    await waitFor(() => {
+      expect(screen.getByText(/新开私信 2 条/)).toBeInTheDocument()
+    })
+    expect(screen.getByText('已登记发出')).toBeInTheDocument()
+  })
+
   it('shows forbidden message for non-admin', async () => {
     vi.mocked(fetch).mockResolvedValue({ ok: false, status: 403, json: async () => ({}) } as Response)
     render(<SocialReadbackPanel clientId={CLIENT} />)
