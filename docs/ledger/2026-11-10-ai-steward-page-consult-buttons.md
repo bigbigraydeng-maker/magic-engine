@@ -1,6 +1,6 @@
 ---
 id: 2026-11-10-ai-steward-page-consult-buttons
-title: AI 数字人管家营销页穿插咨询按钮，并和经销商申请页互相打通（PM 11-10）
+title: AI 数字人管家营销页各段之间穿插「预约免费咨询」按钮（PM 11-10）
 status: decided
 owner: pm
 decided_on: 2026-11-10
