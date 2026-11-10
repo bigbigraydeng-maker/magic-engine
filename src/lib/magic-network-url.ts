@@ -1,8 +1,8 @@
 /**
  * Address of the standalone Magic Network site (PM 2026-11-10: Magic Network leaves ME).
- * Set MAGIC_NETWORK_URL once the real domain is registered; until then the temporary Render address.
+ * Set MAGIC_NETWORK_URL once the real domain is registered; the default is the Magic Lab subdomain (PM bought magiclab.co.nz on 2026-11-10).
  */
-const DEFAULT_URL = 'https://magic-network.onrender.com'
+const DEFAULT_URL = 'https://network.magiclab.co.nz'
 
 type Params = Record<string, string | string[] | undefined>
 
