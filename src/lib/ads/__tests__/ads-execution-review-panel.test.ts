@@ -92,6 +92,45 @@ describe('buildExecutionReviewItem', () => {
     expect(item?.verdict_label).toBe('判不了')
     expect(item?.reason).toContain('花费')
   })
+
+  it('keeps a before/after pair from one source when the other source is only one-sided', () => {
+    const base = {
+      action_type: BUDGET_CARD_ACTION,
+      executed_at: '2026-01-01T00:00:00.000Z',
+      outcome_baseline: 12.4,
+      outcome_after: 8.25,
+    }
+    const payload = {
+      status: 'executed',
+      direction: 'down',
+      observationWindowDays: 7,
+      order: { expectedMetric: 'ads.account.cpa', direction: 'down', observationWindowDays: 7, adsetId: 'set-a' },
+      lock: SOURCE,
+    }
+    const onlyBefore = buildExecutionReviewItem({
+      ...base,
+      id: 'mix-before',
+      payload: { ...payload, beforeCents: 2000 },
+    }, NOW_DUE)
+    expect(onlyBefore?.before_display).toBe('20.00')
+    expect(onlyBefore?.after_display).toBeNull()
+
+    const onlyAfter = buildExecutionReviewItem({
+      ...base,
+      id: 'mix-after',
+      payload: { ...payload, afterCents: 1600 },
+    }, NOW_DUE)
+    expect(onlyAfter?.before_display).toBeNull()
+    expect(onlyAfter?.after_display).toBe('16.00')
+
+    const outcomeOnly = buildExecutionReviewItem({
+      ...base,
+      id: 'outcome-pair',
+      payload,
+    }, NOW_DUE)
+    expect(outcomeOnly?.before_display).toBe('12.4')
+    expect(outcomeOnly?.after_display).toBe('8.25')
+  })
 })
 
 describe('buildAdsExecutionReviewPanel', () => {

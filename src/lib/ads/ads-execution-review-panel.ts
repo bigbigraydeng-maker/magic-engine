@@ -126,6 +126,14 @@ function beforeAfterFromOutcome(
   return { before: fmt(baseline), after: fmt(after) }
 }
 
+function chooseBeforeAfter(
+  payloadBa: { before: string | null; after: string | null },
+  outcomeBa: { before: string | null; after: string | null },
+): { before: string | null; after: string | null } {
+  if (payloadBa.before === null && payloadBa.after === null) return outcomeBa
+  return payloadBa
+}
+
 function pendingLabel(windowDays: number): string {
   return `第 ${windowDays} 天出结论`
 }
@@ -188,8 +196,7 @@ export function buildExecutionReviewItem(row: RawExecutionRow, now: Date): Execu
   }
 
   const what_done = whatDoneFromPayload(actionType, payload)
-  const before_display = payloadBa.before ?? outcomeBa.before
-  const after_display = payloadBa.after ?? outcomeBa.after
+  const chosen = chooseBeforeAfter(payloadBa, outcomeBa)
 
   return {
     action_id: row.id,
@@ -201,8 +208,8 @@ export function buildExecutionReviewItem(row: RawExecutionRow, now: Date): Execu
     phase,
     phase_label,
     what_done,
-    before_display,
-    after_display,
+    before_display: chosen.before,
+    after_display: chosen.after,
     verdict,
     verdict_label: verdict ? VERDICT_ZH[verdict] : null,
     reason,
