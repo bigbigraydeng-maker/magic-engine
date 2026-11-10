@@ -14,12 +14,21 @@ describe('createLiveAdapter', () => {
   it('reads the real interface (the auto-letters read route), not a stub', async () => {
     const fetchMock = vi.fn(async (_url: string) =>
       new Response(
-        JSON.stringify({ generatedAt: 'x', nextBatch: null, depositLetters: [], scheduledLetters: [], totalDistinctLetters: 0 }),
+        JSON.stringify({
+          generatedAt: 'x',
+          nextBatch: null,
+          depositLetters: [],
+          scheduledLetters: [],
+          pastLetters: [],
+          tourGroups: [],
+          totalDistinctLetters: 0,
+          cadence: null,
+        }),
         { status: 200 },
       ),
     )
     vi.stubGlobal('fetch', fetchMock)
-    await expect(createLiveAdapter('client-1').loadOverview()).resolves.toEqual({ nextBatch: null, sections: [] })
+    await expect(createLiveAdapter('client-1').loadOverview()).resolves.toEqual({ nextBatch: null, sections: [], groups: [] })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/clients/client-1/crm/auto-letters')
   })

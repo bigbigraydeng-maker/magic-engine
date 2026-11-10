@@ -5,14 +5,21 @@ import type {
   LetterSection,
   LetterSummary,
   OpenInfo,
+  TourGroupSummary,
 } from '../types'
 import {
+  OPENED_NOTE,
+  VIEW_OPTIONS,
   detailTiles,
   engagementText,
   isOverviewEmpty,
+  lastSentLine,
+  letterResultLine,
+  lettersById,
   openInfoLine,
   recipientsFootnote,
   recipientsTabLabel,
+  resolveView,
   splitBodyPreview,
   totalLetterCount,
   visibleSections,
@@ -30,6 +37,7 @@ function makeLetter(overrides: Partial<LetterSummary> = {}): LetterSummary {
     blockedCount: null,
     failedCount: null,
     rehearsalCount: 0,
+    openedCount: null,
     ...overrides,
   }
 }
@@ -83,6 +91,7 @@ function makeOverview(): AutoSendOverview {
         ],
       }),
     ],
+    groups: [],
   }
 }
 
@@ -137,6 +146,7 @@ describe('visibleSections', () => {
     const overview: AutoSendOverview = {
       nextBatch: null,
       sections: [makeSection({ letters: [makeLetter({ status: 'sent' })] })],
+      groups: [],
     }
 
     expect(visibleSections(overview, 'draft', null)).toEqual([])
@@ -159,7 +169,7 @@ describe('totalLetterCount / isOverviewEmpty', () => {
   })
 
   it('treats an overview without sections as empty', () => {
-    const overview: AutoSendOverview = { nextBatch: null, sections: [] }
+    const overview: AutoSendOverview = { nextBatch: null, sections: [], groups: [] }
 
     expect(totalLetterCount(overview)).toBe(0)
     expect(isOverviewEmpty(overview)).toBe(true)
@@ -169,6 +179,7 @@ describe('totalLetterCount / isOverviewEmpty', () => {
     const overview: AutoSendOverview = {
       nextBatch: null,
       sections: [makeSection({ letters: [] })],
+      groups: [],
     }
 
     expect(totalLetterCount(overview)).toBe(0)
@@ -243,6 +254,15 @@ describe('detailTiles', () => {
     expect(tiles).toHaveLength(4)
     expect(tiles.some((tile) => tile.key === 'rehearsal')).toBe(false)
   })
+
+  it('adds an opened tile, marked reference-only, only when this kind of letter records opens', () => {
+    const tracked = detailTiles(makeLetter({ sentCount: 8, openedCount: 6 }))
+    expect(tracked[tracked.length - 1]).toEqual({ key: 'opened', label: '打开（仅供参考）', value: '6' })
+
+    expect(detailTiles(makeLetter({ openedCount: null })).some((tile) => tile.key === 'opened')).toBe(false)
+    // nobody opened yet is a real 0, not a missing number
+    expect(detailTiles(makeLetter({ sentCount: 3, openedCount: 0 })).find((tile) => tile.key === 'opened')?.value).toBe('0')
+  })
 })
 
 describe('recipientsTabLabel', () => {
@@ -256,8 +276,14 @@ describe('recipientsTabLabel', () => {
 describe('openInfoLine', () => {
   it('describes Mailchimp per-recipient opens', () => {
     expect(
-      openInfoLine({ kind: 'per_recipient', openedPeople: 3, clickedPeople: 1 }),
+      openInfoLine({ kind: 'per_recipient', openedPeople: 3, clickedPeople: 1, fromMailchimp: true }),
     ).toBe('Mailchimp 回传：已打开 3 位 · 其中点了链接 1 位')
+  })
+
+  it('describes opens that ME recorded itself, marked as reference only', () => {
+    expect(
+      openInfoLine({ kind: 'per_recipient', openedPeople: 3, clickedPeople: 1, fromMailchimp: false }),
+    ).toBe('已打开 3 位 · 其中点了链接 1 位（仅供参考）')
   })
 
   it('describes totals-only opens', () => {
@@ -276,6 +302,7 @@ describe('engagementText', () => {
     kind: 'per_recipient',
     openedPeople: 3,
     clickedPeople: 1,
+    fromMailchimp: true,
   }
 
   it('describes the engagement of a recipient in a Mailchimp letter', () => {
@@ -297,7 +324,7 @@ describe('engagementText', () => {
 
 describe('recipientsFootnote', () => {
   it('explains seats and profiles for Mailchimp letters', () => {
-    const info: OpenInfo = { kind: 'per_recipient', openedPeople: 3, clickedPeople: 1 }
+    const info: OpenInfo = { kind: 'per_recipient', openedPeople: 3, clickedPeople: 1, fromMailchimp: true }
 
     expect(recipientsFootnote(info)).toBe(
       '只显示姓名，不显示邮箱；点姓名可以打开这位客人的资料。座位数来自订单，订单没填就显示「—」。',
@@ -312,5 +339,69 @@ describe('recipientsFootnote', () => {
 
     expect(recipientsFootnote(totalsOnly)).toBe(expected)
     expect(recipientsFootnote(none)).toBe(expected)
+  })
+})
+
+describe('lastSentLine / letterResultLine', () => {
+  const last = { letterId: 'a', sendDate: '2026-12-02', recipientCount: 10, sentCount: 8, blockedCount: 1, failedCount: 1, openedCount: 6 }
+
+  it('writes date, sent, blocked, failed and opened on one line', () => {
+    expect(lastSentLine(last)).toBe('12月2日 · 已发 8 · 被拦 1 · 出错 1 · 打开 6')
+  })
+
+  it('leaves 出错 out when nothing failed, and shows a dash when opens are not recorded', () => {
+    expect(lastSentLine({ ...last, failedCount: 0, openedCount: null })).toBe('12月2日 · 已发 8 · 被拦 1 · 打开 —')
+  })
+
+  it('a letter row inside an opened group says the same thing, or 还没发', () => {
+    expect(letterResultLine(makeLetter({ sentCount: 8, blockedCount: 1, failedCount: 1, openedCount: 6 }))).toBe(
+      '已发 8 · 被拦 1 · 出错 1 · 打开 6',
+    )
+    expect(letterResultLine(makeLetter({ sentCount: 4, blockedCount: 0, failedCount: 0, openedCount: null }))).toBe(
+      '已发 4 · 被拦 0 · 打开 —',
+    )
+    expect(letterResultLine(makeLetter({ sentCount: null }))).toBe('还没发')
+  })
+
+  it('the reference-only note says why opens can be wrong and what a dash means', () => {
+    expect(OPENED_NOTE).toContain('只能当参考')
+    expect(OPENED_NOTE).toContain('显示「—」')
+  })
+})
+
+describe('resolveView / lettersById', () => {
+  const group: TourGroupSummary = {
+    groupId: 'g1',
+    tourName: 'T',
+    departOn: '2027-03-11',
+    recipientCount: 2,
+    lettersSent: 0,
+    lettersAhead: 1,
+    lettersOverdue: 0,
+    lastSent: null,
+    next: null,
+    letterIds: [],
+  }
+
+  it('offers both views, groups first', () => {
+    expect(VIEW_OPTIONS.map((option) => option.key)).toEqual(['groups', 'letters'])
+  })
+
+  it('with groups the page starts on 按团看 unless the staff member picked otherwise', () => {
+    const overview = { ...makeOverview(), groups: [group] }
+    expect(resolveView(null, overview)).toBe('groups')
+    expect(resolveView('letters', overview)).toBe('letters')
+    expect(resolveView('groups', overview)).toBe('groups')
+  })
+
+  it('with no groups there is only the letter view, whatever was picked', () => {
+    expect(resolveView(null, makeOverview())).toBe('letters')
+    expect(resolveView('groups', makeOverview())).toBe('letters')
+  })
+
+  it('finds every letter of every panel by its id', () => {
+    const byId = lettersById(makeOverview())
+    expect(Array.from(byId.keys())).toEqual(['t1', 's-draft', 's-sent', 's-planned'])
+    expect(byId.get('s-sent')?.status).toBe('sent')
   })
 })

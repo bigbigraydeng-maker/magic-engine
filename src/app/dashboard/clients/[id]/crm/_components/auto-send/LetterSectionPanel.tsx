@@ -8,6 +8,7 @@
 
 import { formatCount } from '@/lib/crm/auto-send/format'
 import type { LetterSection, LetterSummary } from '@/lib/crm/auto-send/types'
+import { OPENED_NOTE } from '@/lib/crm/auto-send/view'
 import { LetterStatusPill, Panel, RehearsalPill, SmallButton, letterWhenText as whenText } from './ui'
 
 const NO_TITLE_TEXT = '（还没写）'
@@ -32,7 +33,7 @@ function BlockedCell({ letter }: { letter: LetterSummary }): JSX.Element {
   return (
     <>
       <div>{formatCount(letter.blockedCount)}</div>
-      {failed > 0 && <div className="text-[10px] text-status-rej">出错 {failed}</div>}
+      {failed > 0 && <div className="text-xs text-status-rej">出错 {failed}</div>}
     </>
   )
 }
@@ -68,6 +69,7 @@ function LetterRow({ letter, onOpen }: { letter: LetterSummary; onOpen: (id: str
       <td className="py-2.5 pr-3 text-right text-me-charcoal/70">
         <BlockedCell letter={letter} />
       </td>
+      <td className="py-2.5 pr-3 text-right text-me-charcoal/70">{formatCount(letter.openedCount)}</td>
       <td aria-hidden className="py-2.5 text-center text-base text-me-charcoal/45">
         ›
       </td>
@@ -87,6 +89,7 @@ function LetterTable({ letters, onOpen }: { letters: LetterSummary[]; onOpen: (i
           <col className="w-[72px]" />
           <col className="w-14" />
           <col className="w-14" />
+          <col className="w-14" />
           <col className="w-6" />
         </colgroup>
         <thead>
@@ -98,6 +101,9 @@ function LetterTable({ letters, onOpen }: { letters: LetterSummary[]; onOpen: (i
             <th className="py-1 pr-3 text-right font-semibold">收件人</th>
             <th className="py-1 pr-3 text-right font-semibold">已发</th>
             <th className="py-1 pr-3 text-right font-semibold">被拦</th>
+            <th className="py-1 pr-3 text-right font-semibold" title={OPENED_NOTE}>
+              打开
+            </th>
             <th className="py-1">
               <span className="sr-only">查看这封信</span>
             </th>
@@ -136,6 +142,7 @@ function LetterCards({ letters, onOpen }: { letters: LetterSummary[]; onOpen: (i
               收件人 {letter.recipientCount} · 已发 {formatCount(letter.sentCount)} · 被拦{' '}
               {formatCount(letter.blockedCount)}
               {(letter.failedCount ?? 0) > 0 && <span className="text-status-rej"> · 出错 {letter.failedCount}</span>}
+              {' · '}打开 {formatCount(letter.openedCount)}
             </p>
           </button>
         </li>
@@ -171,7 +178,7 @@ export function LetterSectionPanel({
     >
       <LetterTable letters={section.letters} onOpen={onOpen} />
       <LetterCards letters={section.letters} onOpen={onOpen} />
-      {section.footnote && <p className="mt-2 text-[11px] text-me-charcoal/55">{section.footnote}</p>}
+      {section.footnote && <p className="mt-2 text-xs text-me-charcoal/55">{section.footnote}</p>}
     </Panel>
   )
 }

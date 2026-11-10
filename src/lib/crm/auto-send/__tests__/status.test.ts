@@ -21,6 +21,7 @@ const DEFAULT_LETTER: LetterSummary = {
   blockedCount: null,
   failedCount: null,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 function makeLetter(overrides: Partial<LetterSummary> = {}): LetterSummary {

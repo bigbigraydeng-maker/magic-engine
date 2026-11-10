@@ -14,6 +14,10 @@
  *    2) `LetterCounts` / `LetterTiles` 多一个 `rehearsal` 计数（没有演练行就是 0）；
  *    3) `RecipientRow.displayName` 可以是 `null`（联系人没有名字）：页面自己写「（没有名字）」，服务器不编；
  *    4) `LetterAudience.monthsLeft` 为 `null` 表示「每周信」（最后一个月每周三那种）。
+ *    5) 列表多三块（PM 11-10 要「按团看发没发、被拦几位、打没打开」）：`cadence`（脚注用的节奏）、
+ *       `pastLetters`（已过发信日、发送记录或提案里有痕迹的信，发完的批次不再隔天消失）、
+ *       `tourGroups`（按团汇总，见 `TourGroupRow`）；
+ *    6) `LetterCounts` / `LetterTiles` 多一个可空的 `opened`（打开过的人数；这类信不记录就是 `null`），仅供参考。
  */
 
 /** 新西兰日历日，`YYYY-MM-DD`。 */
@@ -81,6 +85,12 @@ export interface LetterCounts {
   failed: number | null
   /** 演练行条数（没有真发），没有就是 0。 */
   rehearsal: number
+  /**
+   * 打开过的人数（只算真发出去的）。这类信不记录打开 → `null`（页面显示「—」）。
+   * 仅供参考：苹果邮件等会提前加载图片，数字偏高；不要用它做任何自动决定。
+   * 算法：真发出去的收件人里只要有一位 `opened` 不是 `null` 才给数（`opened === true` 的人数），否则 `null`。
+   */
+  opened: number | null
 }
 
 export interface LetterRow {
@@ -105,16 +115,62 @@ export interface NextBatch {
   phase: LetterStatus
 }
 
+/**
+ * 按团汇总的一行：一个团 × 一个出发日（和计划函数里「同一个团」一致）。出发日已过的团不列。
+ * 「已发几封」只数真发出去的（演练不算）；「往后几封」按现在的订单和节奏算；前面错过的批次不补，也不算进去。
+ */
+export interface TourGroupRow {
+  /** 不透明、稳定（同一个团前后不变）；页面只当 key 用，不要解析。 */
+  groupKey: string
+  tourName: string
+  departOn: NzDate
+  /** 这个团现在的收件人数（订单有效 + 定金已付，同一个人合并）。 */
+  recipients: number
+  /** 已发出去的信的封数（至少一位真发出去；演练不算）。 */
+  lettersSent: number
+  /** 往后还会发的信的封数（发信日 ≥ 今天且还没发出）。 */
+  lettersAhead: number
+  /** 过了发信日、系统里有痕迹（提案或发送记录）却没发出去的信的封数——这批没发出去，要有人看。 */
+  lettersOverdue: number
+  /** 最近一封已经发出去的信；还没发过 → `null`。 */
+  lastSent: {
+    letterKey: string
+    sendDate: NzDate
+    recipients: number
+    sent: number
+    blocked: number
+    failed: number
+    /** 仅供参考；这类信不记录打开 → `null`。 */
+    opened: number | null
+  } | null
+  /** 下一封（发信日 ≥ 今天且还没发出，最近的那封）；没有 → `null`。远期的信没读记录，按草稿算。 */
+  next: { letterKey: string; sendDate: NzDate; status: LetterStatus } | null
+  /** 这个团在 `pastLetters` ∪ `scheduledLetters` 里有行可看的信的编号，按发信日从早到晚；页面点开这个团时用。 */
+  letterKeys: string[]
+}
+
 export interface AutoLettersList {
   /** ISO 时间，服务器时间。 */
   generatedAt: string
   nextBatch: NextBatch | null
   /** 面板「交了定金就自动发的信」。 */
   depositLetters: LetterRow[]
-  /** 面板「按期发送的信」：最近两批。 */
+  /** 面板「按期发送的信」：从今天起的最近两批。 */
   scheduledLetters: LetterRow[]
-  /** 「共 N 个不同的信」。 */
+  /**
+   * 已经过了发信日、并且发送记录或提案里有痕迹的信（新的在前）。没有痕迹的历史批次不列
+   * （系统上线前的批次日全是「该发没发」的噪音）。最多列最近 4 个批次日；没有就 `[]`。
+   */
+  pastLetters: LetterRow[]
+  /** 按团汇总：每个（团 × 出发日）一行，按出发日从近到远；没有订单 → `[]`。 */
+  tourGroups: TourGroupRow[]
+  /** 「共 N 个不同的信」（从今天起往后的）。 */
   totalDistinctLetters: number
+  /**
+   * 页面脚注要写的那个数（「订的时候离出发超过 N 个月」的 N），取自这个客户用的节奏；
+   * 没配节奏 → `null`（页面不写这句脚注）。
+   */
+  cadence: { firstMonth: number } | null
   /**
    * 给员工看的提醒（中文人话），例如「有 N 张已交定金的订单没有出发日，没排进任何一封信」。
    * 契约之外只加不改的字段；没有提醒就是空数组或不带这个字段。
@@ -146,6 +202,8 @@ export interface LetterTiles {
   blocked: number | null
   failed: number | null
   rehearsal: number
+  /** 同 `LetterCounts.opened`。 */
+  opened: number | null
 }
 
 export interface LetterDetailRow extends LetterRow {

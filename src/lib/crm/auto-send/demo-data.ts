@@ -19,6 +19,7 @@ import type {
   LetterSummary,
   RecipientRow,
   RecipientStatus,
+  TourGroupSummary,
 } from './types'
 
 /* ------------------------------------------------------------------ helpers */
@@ -95,6 +96,7 @@ const T1: LetterSummary = {
   blockedCount: null,
   failedCount: null,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L1: LetterSummary = {
@@ -108,6 +110,7 @@ const L1: LetterSummary = {
   blockedCount: 1,
   failedCount: 1,
   rehearsalCount: 0,
+  openedCount: 6,
 }
 
 const L2: LetterSummary = {
@@ -121,6 +124,7 @@ const L2: LetterSummary = {
   blockedCount: 1,
   failedCount: 0,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L3: LetterSummary = {
@@ -134,6 +138,7 @@ const L3: LetterSummary = {
   blockedCount: null,
   failedCount: null,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L4: LetterSummary = {
@@ -147,6 +152,7 @@ const L4: LetterSummary = {
   blockedCount: null,
   failedCount: null,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L5: LetterSummary = {
@@ -160,6 +166,7 @@ const L5: LetterSummary = {
   blockedCount: null,
   failedCount: null,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L6: LetterSummary = {
@@ -173,6 +180,7 @@ const L6: LetterSummary = {
   blockedCount: null,
   failedCount: null,
   rehearsalCount: 5,
+  openedCount: null,
 }
 
 const L7: LetterSummary = {
@@ -186,6 +194,7 @@ const L7: LetterSummary = {
   blockedCount: null,
   failedCount: null,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L8: LetterSummary = {
@@ -199,6 +208,7 @@ const L8: LetterSummary = {
   blockedCount: null,
   failedCount: null,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L9: LetterSummary = {
@@ -212,6 +222,7 @@ const L9: LetterSummary = {
   blockedCount: null,
   failedCount: null,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 const L10: LetterSummary = {
@@ -225,6 +236,7 @@ const L10: LetterSummary = {
   blockedCount: null,
   failedCount: null,
   rehearsalCount: 0,
+  openedCount: null,
 }
 
 /* ----------------------------------------------------------------- contents */
@@ -348,8 +360,90 @@ const SCHEDULED_SECTION: LetterSection = {
   kind: 'scheduled',
   title: '按期发送的信',
   note: '示例：每月第一个周三；最后一个月每周三',
-  footnote: '共 10 个不同的信，这里先列最近几批；往后的批次到时间再出现。（示例数据）',
-  letters: [L1, L2, L3, L4, L5, L6, L7, L8, L9, L10],
+  footnote: '共 8 个不同的信，这里先列最近两批；往后的批次到时间再出现。（示例数据）',
+  letters: [L3, L4, L5, L6, L7, L8, L9, L10],
+}
+
+/** 已经过了发信日、系统里有记录的信，新的在前（和真实数据的列法一样）。 */
+const PAST_SECTION: LetterSection = {
+  key: 'past',
+  kind: 'scheduled',
+  title: '已过发信日的信',
+  note: '系统里有发送记录或提交记录的',
+  footnote:
+    '这里只列最近几批。发信日已经过了、却还是「草稿」或「等你放行」的，说明这一批没有发出去；没有记录的日子不列。（示例数据）',
+  letters: [L2, L1],
+}
+
+/* ------------------------------------------------------------------- groups */
+
+/** 「最近一封已发」那一格：直接取这封信的数字，和列表里永远一致。 */
+function lastSentOf(letter: LetterSummary): NonNullable<TourGroupSummary['lastSent']> {
+  return {
+    letterId: letter.letterId,
+    sendDate: letter.sendDate ?? '',
+    recipientCount: letter.recipientCount,
+    sentCount: letter.sentCount ?? 0,
+    blockedCount: letter.blockedCount ?? 0,
+    failedCount: letter.failedCount ?? 0,
+    openedCount: letter.openedCount,
+  }
+}
+
+function nextOf(letter: LetterSummary): NonNullable<TourGroupSummary['next']> {
+  return { letterId: letter.letterId, sendDate: letter.sendDate ?? '', status: letter.status }
+}
+
+const GROUP_A: TourGroupSummary = {
+  groupId: 'demo-group-a',
+  tourName: '示例团甲',
+  departOn: '2027-03-11',
+  recipientCount: 10,
+  lettersSent: 1,
+  lettersAhead: 2,
+  lettersOverdue: 0,
+  lastSent: lastSentOf(L1),
+  next: nextOf(L3),
+  letterIds: [L1.letterId, L3.letterId, L7.letterId],
+}
+
+const GROUP_B: TourGroupSummary = {
+  groupId: 'demo-group-b',
+  tourName: '示例团乙',
+  departOn: '2027-03-18',
+  recipientCount: 5,
+  lettersSent: 1,
+  lettersAhead: 2,
+  lettersOverdue: 0,
+  lastSent: lastSentOf(L2),
+  next: nextOf(L4),
+  letterIds: [L2.letterId, L4.letterId, L8.letterId],
+}
+
+const GROUP_C: TourGroupSummary = {
+  groupId: 'demo-group-c',
+  tourName: '示例团丙',
+  departOn: '2027-05-08',
+  recipientCount: 5,
+  lettersSent: 0,
+  lettersAhead: 2,
+  lettersOverdue: 0,
+  lastSent: null,
+  next: nextOf(L5),
+  letterIds: [L5.letterId, L9.letterId],
+}
+
+const GROUP_D: TourGroupSummary = {
+  groupId: 'demo-group-d',
+  tourName: '示例团丁',
+  departOn: '2027-05-13',
+  recipientCount: 5,
+  lettersSent: 0,
+  lettersAhead: 2,
+  lettersOverdue: 0,
+  lastSent: null,
+  next: nextOf(L6),
+  letterIds: [L6.letterId, L10.letterId],
 }
 
 /* ------------------------------------------------------------------ exports */
@@ -361,7 +455,8 @@ export const DEMO_OVERVIEW: AutoSendOverview = {
     recipientCount: 21,
     status: 'draft',
   },
-  sections: [TRIGGER_SECTION, SCHEDULED_SECTION],
+  sections: [TRIGGER_SECTION, SCHEDULED_SECTION, PAST_SECTION],
+  groups: [GROUP_A, GROUP_B, GROUP_C, GROUP_D],
 }
 
 export const DEMO_DETAILS: Readonly<Record<string, LetterDetail>> = {
@@ -375,13 +470,14 @@ export const DEMO_DETAILS: Readonly<Record<string, LetterDetail>> = {
     summary: L1,
     content: L1_CONTENT,
     recipients: L1_RECIPIENTS,
-    openInfo: { kind: 'per_recipient', openedPeople: 6, clickedPeople: 2 },
+    openInfo: { kind: 'per_recipient', openedPeople: 6, clickedPeople: 2, fromMailchimp: true },
   },
   'demo-l2': {
     summary: L2,
     content: L2_CONTENT,
     recipients: L2_RECIPIENTS,
-    openInfo: { kind: 'totals_only', opens: 3, clicks: 1 },
+    // ME 自己发的信现在不记录打开：整列显示「—」。
+    openInfo: { kind: 'none' },
   },
   'demo-l3': {
     summary: L3,

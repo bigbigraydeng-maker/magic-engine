@@ -349,7 +349,7 @@ describe('loadAutoLettersList / loadAutoLetterDetail (end to end on a fake datab
     ])
     const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, key)
     expect(detail?.letter).toMatchObject({ letterKey: key, subject: 'S', bodyText: 'Kia ora {{first_name}}', previewText: null, status: 'draft' })
-    expect(detail?.tiles).toEqual({ recipients: 2, sent: 0, blocked: 1, failed: 0, rehearsal: 1 })
+    expect(detail?.tiles).toEqual({ recipients: 2, sent: 0, blocked: 1, failed: 0, rehearsal: 1, opened: null })
     expect(detail?.recipients.map((r) => [r.displayName, r.status, r.reasonText, r.seats])).toEqual([
       ['Al Test', 'rehearsal', null, null],
       ['Bea Test', 'blocked', '他最近 7 天已收 2 封', 2],
@@ -391,7 +391,10 @@ describe('rhythm, past batches and empty reasons', () => {
       nextBatch: null,
       depositLetters: [],
       scheduledLetters: [],
+      pastLetters: [],
+      tourGroups: [],
       totalDistinctLetters: 0,
+      cadence: null,
       notices: [],
     })
     expect(await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW, () => null)).toBeNull()
@@ -419,9 +422,85 @@ describe('rhythm, past batches and empty reasons', () => {
     ])
     const after = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, new Date('2026-12-09T20:00:00Z')) // NZ 2026-12-10
     const byName = Object.fromEntries((after?.recipients ?? []).map((r) => [r.displayName, [r.status, r.reasonText]]))
-    expect(byName).toEqual({ 'Bea Test': ['sent', null], 'Al Test': ['pending', '这一批发出时他还没交定金'] })
+    expect(byName).toEqual({ 'Bea Test': ['sent', null], 'Al Test': ['pending', '这一批发出时他不在名单里（不补发）'] })
     const before = await loadAutoLetterDetail(ctx.db, CLIENT_A, KEY, NOW) // before the send day
     expect((before?.recipients ?? []).every((r) => r.reasonText === null)).toBe(true)
+  })
+
+  it('the list carries the rhythm number the page footnote needs, from the same resolver that plans the batches', async () => {
+    seedTwoGuests()
+    expect((await loadAutoLettersList(ctx.db, CLIENT_A, NOW)).cadence).toEqual({ firstMonth: 6 })
+    expect((await loadAutoLettersList(ctx.db, CLIENT_A, NOW, () => ({ ...COUNTDOWN_CADENCE, firstMonth: 4 }))).cadence).toEqual({ firstMonth: 4 })
+  })
+
+  describe('history: batches that already went out stay on the list', () => {
+    const NOV_4 = { sendDate: '2026-11-04', tourId: T1, departOn: '2027-03-11', monthsLeft: 4 as const }
+    const OCT_7 = { sendDate: '2026-10-07', tourId: T1, departOn: '2027-03-11', monthsLeft: 5 as const }
+    const NOV_4_TOUR_TWO = { sendDate: '2026-11-04', tourId: T2, departOn: '2027-05-08', monthsLeft: 6 as const }
+
+    function seedHistory(): void {
+      seedCatalog()
+      seedBooking({ n: 1, name: 'Bea Test', party: 2 })
+      seedBooking({ n: 2, name: 'Al Test' })
+      seedBooking({ n: 3, name: 'Cy Test', tour: T2, departure: D2, snapshot: '2027-05-08', party: 1 })
+      seed('triggered_sends', [
+        { id: 'h1', client_id: CLIENT_A, trigger_key: buildTriggerKey(NOV_4), contact_id: cid(1), dedupe_scope: 'lifetime', status: 'delivered', reason_code: null },
+        { id: 'h2', client_id: CLIENT_A, trigger_key: buildTriggerKey(NOV_4), contact_id: cid(2), dedupe_scope: 'lifetime', status: 'blocked', reason_code: 'frequency_full' },
+      ])
+      seed('triggered_send_authorizations', [
+        { client_id: CLIENT_A, trigger_key: buildTriggerKey(OCT_7), authorized_at: null, revoked_at: null, template_sha256: 'sha' },
+      ])
+    }
+
+    it('lists the letters that left a trace, newest first, with their results; the rest of the past stays out', async () => {
+      seedHistory()
+      const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(list.pastLetters.map((l) => [l.sendDate, l.audience.tourName, l.audience.monthsLeft, l.status])).toEqual([
+        ['2026-11-04', 'Tour One', 4, 'sent'],
+        ['2026-10-07', 'Tour One', 5, 'awaiting_release'],
+      ])
+      expect(list.pastLetters[0].counts).toEqual({ recipients: 2, sent: 1, blocked: 1, failed: 0, rehearsal: 0, opened: null })
+      expect(list.pastLetters.map((l) => l.letterKey)).not.toContain(buildLetterKey(NOV_4_TOUR_TWO)) // planned that day, but nothing in the records
+    })
+
+    it('the upcoming list and the next batch do not change', async () => {
+      seedHistory()
+      const list = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(list.nextBatch?.sendDate).toBe('2026-12-02')
+      expect(list.scheduledLetters.map((l) => l.sendDate)).toEqual(['2026-12-02', '2026-12-02', '2027-01-06', '2027-01-06'])
+      expect(list.totalDistinctLetters).toBe(16)
+    })
+
+    it('tour groups count what went out, what is ahead and what was due but never went out', async () => {
+      seedHistory()
+      const { tourGroups } = await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      const one = tourGroups.find((g) => g.tourName === 'Tour One')
+      const two = tourGroups.find((g) => g.tourName === 'Tour Two')
+      expect(one).toMatchObject({ departOn: '2027-03-11', recipients: 2, lettersSent: 1, lettersOverdue: 1 })
+      expect(one?.lettersAhead).toBe(7) // 3 monthly letters (12/2, 1/6, 2/3) + 4 weekly letters in the last month
+      expect(one?.lastSent).toMatchObject({ letterKey: buildLetterKey(NOV_4), sent: 1, blocked: 1, failed: 0, opened: null })
+      expect(one?.next).toMatchObject({ sendDate: '2026-12-02', status: 'draft' })
+      expect(two).toMatchObject({ departOn: '2027-05-08', recipients: 1, lettersSent: 0, lettersOverdue: 0, lastSent: null })
+    })
+
+    it('the history reads stay inside this client and never ask for an address, a rule or who wrote a letter', async () => {
+      seedHistory()
+      await loadAutoLettersList(ctx.db, CLIENT_A, NOW)
+      expect(state.queries.length).toBeGreaterThan(0)
+      for (const q of state.queries) expect(q.eqs).toContainEqual(['client_id', CLIENT_A])
+      const letterReads = state.queries.filter((q) =>
+        ['triggered_sends', 'triggered_send_authorizations', 'crm_email_templates'].includes(q.table),
+      )
+      expect(letterReads.length).toBeGreaterThan(0)
+      for (const q of letterReads) expect(q.columns ?? '').not.toMatch(/rule|address|annotations|email|created_by|note|raw/i)
+    })
+
+    it('a past letter opens in the drawer the same way an upcoming one does', async () => {
+      seedHistory()
+      const detail = await loadAutoLetterDetail(ctx.db, CLIENT_A, buildLetterKey(NOV_4) as string, NOW)
+      expect(detail?.letter.status).toBe('sent')
+      expect(detail?.tiles).toMatchObject({ recipients: 2, sent: 1, blocked: 1 })
+    })
   })
 
   it('statuses the ledger leaves without a reason still get a plain one', async () => {

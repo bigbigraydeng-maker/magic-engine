@@ -54,7 +54,7 @@ describe('demo data: open information', () => {
   it('matches the L1 open numbers to what the recipients say', () => {
     const detail = detailFor('demo-l1')
     const { openInfo, recipients } = detail
-    expect(openInfo).toEqual({ kind: 'per_recipient', openedPeople: 6, clickedPeople: 2 })
+    expect(openInfo).toEqual({ kind: 'per_recipient', openedPeople: 6, clickedPeople: 2, fromMailchimp: true })
     if (openInfo.kind !== 'per_recipient') throw new Error('expected per_recipient open info')
     const openedPeople = recipients.filter(
       (recipient) => recipient.engagement === 'opened' || recipient.engagement === 'clicked',
@@ -64,11 +64,66 @@ describe('demo data: open information', () => {
     expect(clickedPeople).toBe(openInfo.clickedPeople)
   })
 
-  it('reports totals only for the letter sent by ME', () => {
+  it('reports no open numbers at all for the letter sent by ME (it does not record opens)', () => {
     const detail = detailFor('demo-l2')
-    expect(detail.openInfo).toEqual({ kind: 'totals_only', opens: 3, clicks: 1 })
+    expect(detail.openInfo).toEqual({ kind: 'none' })
+    expect(detail.summary.openedCount).toBeNull()
     for (const recipient of detail.recipients) {
       expect(recipient.engagement).toBeNull()
+    }
+  })
+
+  it('the list number for the Mailchimp letter is the same as its detail says', () => {
+    const detail = detailFor('demo-l1')
+    if (detail.openInfo.kind !== 'per_recipient') throw new Error('expected per_recipient open info')
+    expect(detail.summary.openedCount).toBe(detail.openInfo.openedPeople)
+  })
+})
+
+describe('demo data: panels and groups', () => {
+  const byId = new Map(ALL_SUMMARIES.map((summary) => [summary.letterId, summary]))
+
+  it('lists the letters whose day has passed in their own panel, newest first, after the upcoming ones', () => {
+    expect(DEMO_OVERVIEW.sections.map((section) => section.key)).toEqual(['trigger', 'scheduled', 'past'])
+    const past = DEMO_OVERVIEW.sections[2]
+    expect(past.letters.map((letter) => letter.letterId)).toEqual(['demo-l2', 'demo-l1'])
+    const upcoming = DEMO_OVERVIEW.sections[1].letters
+    expect(upcoming.every((letter) => (letter.sendDate ?? '') >= '2026-12-02')).toBe(true)
+    expect(past.letters.every((letter) => (letter.sendDate ?? '') < '2026-12-02')).toBe(true)
+  })
+
+  it('every group points at letters that exist, oldest first', () => {
+    expect(DEMO_OVERVIEW.groups.length).toBeGreaterThan(0)
+    for (const group of DEMO_OVERVIEW.groups) {
+      const dates = group.letterIds.map((id) => {
+        const letter = byId.get(id)
+        if (!letter) throw new Error(`group ${group.groupId} points at a missing letter ${id}`)
+        return letter.sendDate ?? ''
+      })
+      expect([...dates].sort()).toEqual(dates)
+    }
+  })
+
+  it('the group numbers agree with the letters they list', () => {
+    for (const group of DEMO_OVERVIEW.groups) {
+      const letters = group.letterIds.map((id) => byId.get(id) as LetterSummary)
+      const sent = letters.filter((letter) => letter.status === 'sent')
+      expect(group.lettersSent).toBe(sent.length)
+      expect(group.lettersAhead).toBe(letters.filter((letter) => letter.status !== 'sent').length)
+      const last = sent[sent.length - 1]
+      if (last === undefined) {
+        expect(group.lastSent).toBeNull()
+      } else {
+        expect(group.lastSent).toMatchObject({
+          letterId: last.letterId,
+          sentCount: last.sentCount,
+          blockedCount: last.blockedCount,
+          failedCount: last.failedCount,
+          openedCount: last.openedCount,
+        })
+      }
+      const next = letters.find((letter) => letter.status !== 'sent')
+      expect(group.next?.letterId).toBe(next?.letterId)
     }
   })
 })

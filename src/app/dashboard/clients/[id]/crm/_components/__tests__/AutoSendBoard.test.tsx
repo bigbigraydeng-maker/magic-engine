@@ -12,10 +12,16 @@ import { createDemoAdapter } from '@/lib/crm/auto-send/demo-data'
 
 const CLIENT = 'client-123'
 
-/** 用示例数据当「真实数据」：页面不会标示例，客人姓名会是链接。 */
-async function renderReady(): Promise<void> {
+/** 切到「按信看」（有团可看时页面先显示「按团看」）。 */
+function showLetters(): void {
+  fireEvent.click(screen.getByRole('button', { name: '按信看' }))
+}
+
+/** 用示例数据当「真实数据」：页面不会标示例，客人姓名会是链接。默认切到「按信看」，因为多数检查看的是一封封信。 */
+async function renderReady(view: 'letters' | 'groups' = 'letters'): Promise<void> {
   render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={createDemoAdapter()} />)
   await screen.findByTestId('auto-send-next-batch')
+  if (view === 'letters') showLetters()
 }
 
 /** 数据来源暂时没有：适配器报「还没接通」。 */
@@ -62,6 +68,8 @@ describe('AutoSendBoard · 还没接通 / 看示例', () => {
     fireEvent.click(await screen.findByRole('button', { name: '看示例（假数据）' }))
     expect(await screen.findByTestId('auto-send-demo-banner')).toBeTruthy()
     expect(screen.getByTestId('auto-send-demo-banner').textContent).toContain('示例数据（假的）')
+    expect(await screen.findByTestId('section-groups')).toBeTruthy()
+    showLetters()
     await waitFor(() => expect(rowIds().length).toBe(11))
 
     fireEvent.click(screen.getByRole('button', { name: '退出示例' }))
@@ -92,6 +100,7 @@ describe('AutoSendBoard · 加载中 / 出错 / 空', () => {
     fix()
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await screen.findByTestId('auto-send-next-batch')
+    showLetters()
     expect(rowIds().length).toBe(11)
   })
 
@@ -106,7 +115,7 @@ describe('AutoSendBoard · 加载中 / 出错 / 空', () => {
 
   it('shows the empty state when there are no letters, with the next batch date when known', async () => {
     const empty: AutoSendAdapter = {
-      loadOverview: () => Promise.resolve({ nextBatch: null, sections: [] }),
+      loadOverview: () => Promise.resolve({ nextBatch: null, sections: [], groups: [] }),
       loadLetterDetail: () => Promise.reject(new Error('没有')),
     }
     const { unmount } = render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={empty} />)
@@ -118,6 +127,7 @@ describe('AutoSendBoard · 加载中 / 出错 / 空', () => {
         Promise.resolve({
           nextBatch: { sendDate: '2026-12-02', letterCount: 0, recipientCount: 0, status: 'planned' },
           sections: [],
+          groups: [],
         }),
       loadLetterDetail: () => Promise.reject(new Error('没有')),
     }
@@ -131,7 +141,7 @@ describe('AutoSendBoard · 服务器提醒', () => {
 
   it('shows the notices above an otherwise empty page — that is exactly when they matter', async () => {
     const adapter: AutoSendAdapter = {
-      loadOverview: () => Promise.resolve({ nextBatch: null, sections: [], notices: [NOTICE] }),
+      loadOverview: () => Promise.resolve({ nextBatch: null, sections: [], groups: [], notices: [NOTICE] }),
       loadLetterDetail: () => Promise.reject(new Error('没有')),
     }
     render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={adapter} />)
@@ -164,6 +174,7 @@ describe('AutoSendBoard · 列表、筛选、看这批', () => {
     expect(card.textContent).toContain('4 封信 · 共 21 位收件人 · 现在是草稿，发出前会请你看稿并点头')
     expect(screen.getByTestId('section-trigger')).toBeTruthy()
     expect(screen.getByTestId('section-scheduled').textContent).toContain('按期发送的信（示例：每月第一个周三；最后一个月每周三）')
+    expect(screen.getByTestId('section-past').textContent).toContain('已过发信日的信（系统里有发送记录或提交记录的）')
     expect(screen.getByTestId('auto-send-legend').textContent).toContain('演练')
     expect(screen.queryByTestId('auto-send-demo-banner')).toBeNull()
     expect(rowIds()).toHaveLength(11)
@@ -178,10 +189,10 @@ describe('AutoSendBoard · 列表、筛选、看这批', () => {
     expect(rowIds()).toEqual(['letter-row-demo-l6'])
 
     fireEvent.click(screen.getByRole('button', { name: '已发' }))
-    expect(rowIds()).toEqual(['letter-row-demo-l1', 'letter-row-demo-l2'])
+    expect(rowIds()).toEqual(['letter-row-demo-l2', 'letter-row-demo-l1'])
 
     fireEvent.click(screen.getByRole('button', { name: '有被拦的' }))
-    expect(rowIds()).toEqual(['letter-row-demo-l1', 'letter-row-demo-l2'])
+    expect(rowIds()).toEqual(['letter-row-demo-l2', 'letter-row-demo-l1'])
 
     fireEvent.click(screen.getByRole('button', { name: '全部' }))
     expect(rowIds()).toHaveLength(11)
@@ -231,8 +242,8 @@ describe('AutoSendBoard · 抽屉', () => {
     await renderReady()
     const dialog = await openLetter('demo-l1')
     expect(await within(dialog).findByText('收件人')).toBeTruthy()
-    const tiles = within(dialog).getAllByText(/^(收件人|已发|被拦|出错)$/).map((el) => el.parentElement?.textContent)
-    expect(tiles).toEqual(['10收件人', '8已发', '1被拦', '1出错'])
+    const tiles = within(dialog).getAllByText(/^(收件人|已发|被拦|出错|打开（仅供参考）)$/).map((el) => el.parentElement?.textContent)
+    expect(tiles).toEqual(['10收件人', '8已发', '1被拦', '1出错', '6打开（仅供参考）'])
 
     fireEvent.click(within(dialog).getByRole('tab', { name: '收件人与发送情况 10' }))
     expect(within(dialog).getByText('Mailchimp 回传：已打开 6 位 · 其中点了链接 2 位')).toBeTruthy()
@@ -248,14 +259,14 @@ describe('AutoSendBoard · 抽屉', () => {
     expect(dialog.textContent).not.toContain('@')
   })
 
-  it('shows a letter ME sent itself: totals only, every 打开 cell is a dash', async () => {
+  it('shows a letter ME sent itself: no open numbers anywhere, every 打开 cell is a dash', async () => {
     await renderReady()
     const dialog = await openLetter('demo-l2')
     await within(dialog).findByText('收件人')
+    expect(within(dialog).queryByText('打开（仅供参考）')).toBeNull() // no opened tile when opens are not recorded
     fireEvent.click(within(dialog).getByRole('tab', { name: '收件人与发送情况 5' }))
-    expect(
-      within(dialog).getByText('ME 自己发的信：打开 / 点击只记总数（打开 3 次 · 点击 1 次），不记每位客人。'),
-    ).toBeTruthy()
+    expect(within(dialog).queryByText(/只记总数/)).toBeNull()
+    expect(within(dialog).queryByText(/已打开 \d+ 位/)).toBeNull()
     expect(within(dialog).getByText('已在 Mailchimp 退订')).toBeTruthy()
     const lastCells = Array.from(dialog.querySelectorAll('tbody tr')).map((tr) => tr.lastElementChild?.textContent)
     expect(lastCells).toEqual(['—', '—', '—', '—', '—'])
@@ -319,6 +330,8 @@ describe('AutoSendBoard · 抽屉', () => {
   it('in demo mode the drawer says 示例数据 and the demo guests are not links', async () => {
     render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={NOT_CONNECTED} />)
     fireEvent.click(await screen.findByRole('button', { name: '看示例（假数据）' }))
+    await screen.findByTestId('section-groups')
+    showLetters()
     await screen.findByTestId('letter-row-demo-l1')
     const dialog = await openLetter('demo-l1')
     expect(await within(dialog).findByText('示例数据')).toBeTruthy()
@@ -334,6 +347,7 @@ describe('AutoSendBoard · 抽屉', () => {
     }
     render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={adapter} />)
     await screen.findByTestId('auto-send-next-batch')
+    showLetters()
     const dialog = await openLetter('demo-l1')
     expect((await within(dialog).findByRole('alert')).textContent).toContain('暂时读不到这封信：网络出错')
     expect(within(dialog).getByRole('button', { name: '重试' })).toBeTruthy()
@@ -358,10 +372,13 @@ describe('AutoSendBoard · 真实数据走读接口（对外只收 clientId）',
         subject: null,
         status: 'draft',
         channel: 'me',
-        counts: { recipients: 2, sent: null, blocked: null, failed: null, rehearsal: 0 },
+        counts: { recipients: 2, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null },
       },
     ],
+    pastLetters: [],
+    tourGroups: [],
     totalDistinctLetters: 7,
+    cadence: { firstMonth: 6 },
   }
 
   it('shows the planned letters it reads from the interface, not the demo, and links names to the customer page', async () => {
@@ -370,7 +387,7 @@ describe('AutoSendBoard · 真实数据走读接口（对外只收 clientId）',
       return new Response(
         JSON.stringify({
           letter: { ...LIST.scheduledLetters[0], previewText: null, bodyText: null, sampleFirstName: 'Alex' },
-          tiles: { recipients: 2, sent: null, blocked: null, failed: null, rehearsal: 0 },
+          tiles: { recipients: 2, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null },
           mailchimpSummary: null,
           recipients: [
             { contactId: 'c-1', displayName: 'Pat One', seats: 2, status: 'pending', reasonText: null, opened: null, clicked: null },
@@ -409,5 +426,226 @@ describe('AutoSendBoard · 真实数据走读接口（对外只收 clientId）',
     render(<AutoSendBoard clientId={CLIENT} />)
     expect((await screen.findByRole('alert')).textContent).toContain('你的账号没有查看这一页的权限。')
     expect(screen.queryByTestId('auto-send-empty')).toBeNull()
+  })
+})
+
+describe('AutoSendBoard · 按团看', () => {
+  const groupRow = (id: string): HTMLElement => screen.getByTestId(`group-row-${id}`)
+  const cellsOf = (el: HTMLElement): Array<string | null> => Array.from(el.querySelectorAll('td')).map((td) => td.textContent)
+
+  it('opens on 按团看 when there are groups: one row per group, no letter rows, and a way to switch', async () => {
+    await renderReady('groups')
+    expect(screen.getByTestId('section-groups')).toBeTruthy()
+    expect(screen.queryAllByTestId(/^group-row-/)).toHaveLength(4)
+    expect(rowIds()).toHaveLength(0)
+    expect(screen.getByRole('button', { name: '按团看' }).getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByRole('button', { name: '按信看' }).getAttribute('aria-pressed')).toBe('false')
+    expect(screen.queryByRole('group', { name: '按状态筛选' })).toBeNull() // the status filters belong to the letter view
+  })
+
+  it('a group row says which tour, how many people, what went out, what is ahead, the last result and the next letter', async () => {
+    await renderReady('groups')
+    const a = cellsOf(groupRow('demo-group-a'))
+    expect(a[0]).toContain('示例团甲')
+    expect(a[0]).toContain('3月11日出发')
+    expect(a.slice(1, 5)).toEqual(['10', '1 封', '2 封', '10月7日 · 已发 8 · 被拦 1 · 出错 1 · 打开 6'])
+    expect(a[5]).toContain('12月2日（周三）')
+    expect(a[5]).toContain('草稿')
+
+    // a letter ME sent does not record opens: a dash, never a made-up number
+    expect(cellsOf(groupRow('demo-group-b'))[4]).toBe('11月4日 · 已发 4 · 被拦 1 · 打开 —')
+  })
+
+  it('a group nothing has gone out for says 还没发过 and shows where its next letter stands', async () => {
+    await renderReady('groups')
+    const c = cellsOf(groupRow('demo-group-c'))
+    expect(c.slice(2, 5)).toEqual(['0 封', '2 封', '还没发过'])
+    expect(cellsOf(groupRow('demo-group-d'))[5]).toContain('等你放行')
+  })
+
+  it('opening a group lists its letters oldest first; a click on a letter opens the drawer for that letter', async () => {
+    await renderReady('groups')
+    fireEvent.click(within(groupRow('demo-group-a')).getByRole('button', { name: /展开这个团的信/ }))
+    const [list] = screen.getAllByTestId('group-letters-demo-group-a') // the table and the phone card share the open state
+    const items = within(list).getAllByRole('button')
+    expect(items).toHaveLength(3)
+    expect(items[0].textContent).toContain('10月7日')
+    expect(items[0].textContent).toContain('已发出')
+    expect(items[0].textContent).toContain('已发 8 · 被拦 1 · 出错 1 · 打开 6')
+    expect(items[1].textContent).toContain('草稿')
+    expect(items[2].textContent).toContain('计划中')
+    expect(items[2].textContent).toContain('还没发')
+
+    fireEvent.click(items[0])
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByRole('heading', { name: 'Sample letter: how the weather looks on your route' })).toBeTruthy()
+  })
+
+  it('a click on the row (not only the name) opens and closes the group; only one group is open at a time', async () => {
+    await renderReady('groups')
+    fireEvent.click(groupRow('demo-group-a'))
+    expect(screen.getAllByTestId('group-letters-demo-group-a').length).toBeGreaterThan(0)
+    fireEvent.click(groupRow('demo-group-b'))
+    expect(screen.queryAllByTestId('group-letters-demo-group-a')).toHaveLength(0)
+    expect(screen.getAllByTestId('group-letters-demo-group-b').length).toBeGreaterThan(0)
+    fireEvent.click(groupRow('demo-group-b'))
+    expect(screen.queryAllByTestId('group-letters-demo-group-b')).toHaveLength(0)
+  })
+
+  it('shows the phone card of every group too, with the same numbers', async () => {
+    await renderReady('groups')
+    const card = screen.getByTestId('group-card-demo-group-a')
+    expect(card.textContent).toContain('示例团甲')
+    expect(card.textContent).toContain('收件人 10 · 已发 1 封 · 往后 2 封')
+    expect(card.textContent).toContain('10月7日 · 已发 8 · 被拦 1 · 出错 1 · 打开 6')
+  })
+
+  it('flags letters that were due but never went out, and only on the group they belong to', async () => {
+    const demo = await createDemoAdapter().loadOverview()
+    const adapter: AutoSendAdapter = {
+      loadOverview: async () => ({ ...demo, groups: demo.groups.map((g, i) => (i === 0 ? { ...g, lettersOverdue: 2 } : g)) }),
+      loadLetterDetail: () => Promise.reject(new Error('没有')),
+    }
+    render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={adapter} />)
+    await screen.findByTestId('group-row-demo-group-a')
+    expect(groupRow('demo-group-a').textContent).toContain('过期没发 2 封')
+    expect(groupRow('demo-group-b').textContent).not.toContain('过期没发')
+  })
+
+  it('switches between the two views; 看这批 (a letter-view filter) takes the page to the letter view', async () => {
+    await renderReady('groups')
+    showLetters()
+    expect(rowIds()).toHaveLength(11)
+    fireEvent.click(screen.getByRole('button', { name: '按团看' }))
+    expect(screen.queryAllByTestId(/^group-row-/)).toHaveLength(4)
+
+    fireEvent.click(screen.getByRole('button', { name: '看这批' }))
+    expect(rowIds()).toEqual(['letter-row-demo-l3', 'letter-row-demo-l4', 'letter-row-demo-l5', 'letter-row-demo-l6'])
+    expect(screen.queryByTestId('section-groups')).toBeNull()
+    expect(screen.getByRole('button', { name: '按信看' }).getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('with no groups there is no switch and the page shows the letters', async () => {
+    const demo = await createDemoAdapter().loadOverview()
+    const adapter: AutoSendAdapter = { loadOverview: async () => ({ ...demo, groups: [] }), loadLetterDetail: () => Promise.reject(new Error('没有')) }
+    render(<AutoSendWorkspace clientId={CLIENT} liveAdapter={adapter} />)
+    await screen.findByTestId('auto-send-next-batch')
+    expect(screen.queryByRole('group', { name: '换个角度看' })).toBeNull()
+    expect(rowIds()).toHaveLength(11)
+  })
+
+  it('has no send or release button in the group view either', async () => {
+    await renderReady('groups')
+    expect(screen.queryByRole('button', { name: /发送/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^放行/ })).toBeNull()
+  })
+})
+
+describe('AutoSendBoard · 打开（仅供参考）', () => {
+  it('the letter list has a 打开 column: a number where opens are recorded, a dash where they are not', async () => {
+    await renderReady()
+    const heads = Array.from(document.querySelectorAll('thead th')).map((th) => th.textContent)
+    expect(heads).toContain('打开')
+    const cellsOf = (id: string) => Array.from(screen.getByTestId(`letter-row-${id}`).querySelectorAll('td')).map((td) => td.textContent)
+    expect(cellsOf('demo-l1')[7]).toBe('6')
+    expect(cellsOf('demo-l2')[7]).toBe('—')
+    expect(cellsOf('demo-l3')[7]).toBe('—')
+  })
+
+  it('says opens are reference only, in the letter view and in the group view', async () => {
+    await renderReady()
+    expect(document.body.textContent).toContain('「打开」只能当参考')
+    fireEvent.click(screen.getByRole('button', { name: '按团看' }))
+    expect(screen.getByTestId('section-groups').textContent).toContain('「打开」只能当参考')
+  })
+})
+
+describe('AutoSendBoard · 真实数据：发完的批次和按团汇总', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const SENT_KEY = 'plan:2026-11-04:t-1:2027-03-11:4'
+  const NEXT_KEY = 'plan:2026-12-02:t-1:2027-03-11:3'
+  const letter = (key: string, sendDate: string, months: number, over: Record<string, unknown> = {}) => ({
+    letterKey: key,
+    sendDate,
+    audience: { tourName: 'Tour One', departOn: '2027-03-11', monthsLeft: months },
+    subject: null,
+    status: 'draft',
+    channel: 'me',
+    counts: { recipients: 2, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null },
+    ...over,
+  })
+  const LIST = {
+    generatedAt: '2026-11-10T09:00:00+13:00',
+    nextBatch: { sendDate: '2026-12-02', weekdayLabel: '周三', letterCount: 1, recipientCount: 2, phase: 'draft' },
+    depositLetters: [],
+    scheduledLetters: [letter(NEXT_KEY, '2026-12-02', 3, { subject: 'Next one' })],
+    pastLetters: [
+      letter(SENT_KEY, '2026-11-04', 4, {
+        subject: 'Sent one',
+        status: 'sent',
+        counts: { recipients: 2, sent: 1, blocked: 1, failed: 0, rehearsal: 0, opened: null },
+      }),
+    ],
+    tourGroups: [
+      {
+        groupKey: 'g:abc1234:2027-03-11',
+        tourName: 'Tour One',
+        departOn: '2027-03-11',
+        recipients: 2,
+        lettersSent: 1,
+        lettersAhead: 6,
+        lettersOverdue: 0,
+        lastSent: { letterKey: SENT_KEY, sendDate: '2026-11-04', recipients: 2, sent: 1, blocked: 1, failed: 0, opened: null },
+        next: { letterKey: NEXT_KEY, sendDate: '2026-12-02', status: 'draft' },
+        letterKeys: [SENT_KEY, NEXT_KEY],
+      },
+    ],
+    totalDistinctLetters: 7,
+    cadence: { firstMonth: 6 },
+  }
+
+  it('starts on the group, shows what already went out, and opens that past letter from the group', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/crm/auto-letters')) return new Response(JSON.stringify(LIST), { status: 200 })
+      return new Response(
+        JSON.stringify({
+          letter: { ...LIST.pastLetters[0], previewText: null, bodyText: null, sampleFirstName: 'Alex' },
+          tiles: { recipients: 2, sent: 1, blocked: 1, failed: 0, rehearsal: 0, opened: null },
+          mailchimpSummary: null,
+          recipients: [],
+        }),
+        { status: 200 },
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<AutoSendBoard clientId={CLIENT} />)
+    const row = await screen.findByTestId('group-row-g:abc1234:2027-03-11')
+    const cells = Array.from(row.querySelectorAll('td')).map((td) => td.textContent)
+    expect(cells.slice(1, 5)).toEqual(['2', '1 封', '6 封', '11月4日 · 已发 1 · 被拦 1 · 打开 —'])
+    expect(cells[5]).toContain('12月2日（周三）')
+
+    fireEvent.click(within(row).getByRole('button', { name: /展开这个团的信/ }))
+    const [list] = screen.getAllByTestId('group-letters-g:abc1234:2027-03-11')
+    fireEvent.click(within(list).getAllByRole('button')[0])
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByRole('heading', { name: 'Sent one' })).toBeTruthy()
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      `/api/clients/${CLIENT}/crm/auto-letters`,
+      `/api/clients/${CLIENT}/crm/auto-letters/${encodeURIComponent(SENT_KEY)}`,
+    ])
+  })
+
+  it('in the letter view the letter that already went out is in its own panel after the upcoming ones', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(LIST), { status: 200 })))
+    render(<AutoSendBoard clientId={CLIENT} />)
+    await screen.findByTestId('section-groups')
+    showLetters()
+    expect(rowIds()).toEqual([`letter-row-${NEXT_KEY}`, `letter-row-${SENT_KEY}`])
+    expect(screen.getByTestId('section-past').textContent).toContain('已过发信日的信')
+    expect(screen.getByTestId(`letter-row-${SENT_KEY}`).textContent).toContain('已发出')
   })
 })

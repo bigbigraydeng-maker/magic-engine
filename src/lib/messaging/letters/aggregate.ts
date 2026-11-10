@@ -10,6 +10,8 @@
 
 import { reasonTextFor } from './reasons'
 import { weekdayLabelZh } from './dates'
+import { buildTourGroups } from './groups'
+import { pastLetterEntries, type LetterEntry } from './history'
 import type {
   AutoLetterDetail,
   AutoLettersList,
@@ -29,8 +31,8 @@ import type {
 /** 页面代入 `{{first_name}}` 用的示例名字（服务器给，页面不要自己编）。 */
 export const SAMPLE_FIRST_NAME = 'Alex'
 
-/** 这一批已经发出去，但这个人当时不在名单里（订单后来才交定金）：不显示成「待发」。 */
-export const NOT_IN_BATCH_TEXT = '这一批发出时他还没交定金'
+/** 这一批已经发出去，但这个人当时不在名单里（引擎不补发）：不显示成「待发」，只说事实。 */
+export const NOT_IN_BATCH_TEXT = '这一批发出时他不在名单里（不补发）'
 
 /** 列表里「按期发送的信」只列最近几批。 */
 export const SCHEDULED_BATCHES_SHOWN = 2
@@ -78,12 +80,29 @@ function countOutcomes(recipients: readonly RecipientOutcome[]): Record<Recipien
   return counts
 }
 
+/**
+ * 打开过的人数：只看真发出去的收件人；这类信不记录打开（没有一位的 opened 不是 null）→ null，页面显示「—」。
+ * 仅供参考：苹果邮件等会提前加载图片，数字偏高。
+ */
+function openedCountOf(sends: SendFacts): number | null {
+  const real = sends.recipients.filter((r) => r.outcome === 'sent')
+  if (!real.some((r) => r.opened !== null)) return null
+  return real.filter((r) => r.opened === true).length
+}
+
 function countsOf(planned: PlannedLetter, sends: SendFacts | null): LetterCounts {
   if (sends === null || sends.recipients.length === 0) {
-    return { recipients: planned.recipients.length, sent: null, blocked: null, failed: null, rehearsal: 0 }
+    return { recipients: planned.recipients.length, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null }
   }
   const c = countOutcomes(sends.recipients)
-  return { recipients: planned.recipients.length, sent: c.sent, blocked: c.blocked, failed: c.failed, rehearsal: c.rehearsal }
+  return {
+    recipients: planned.recipients.length,
+    sent: c.sent,
+    blocked: c.blocked,
+    failed: c.failed,
+    rehearsal: c.rehearsal,
+    opened: openedCountOf(sends),
+  }
 }
 
 export function deriveLetterStatus(sends: SendFacts | null): LetterStatus {
@@ -130,33 +149,54 @@ function nextBatchOf(rows: readonly LetterRow[], planned: readonly PlannedLetter
   }
 }
 
+/** buildList 自己算得出的部分；节奏（cadence）和提醒（notices）由 load.ts 补上。 */
+export type ListCore = Omit<AutoLettersList, 'cadence' | 'notices'>
+
 /**
- * 列表：`planned` 是从今天起的整份计划（已按发信日排好）；`factsByKey` 是已有的登记 / 发送事实（按 letterKey）。
- * 「下一批」= 今天（含）起第一个有信的批次日；「按期发送的信」= 最近几批。
+ * 列表：`planned` 是回看窗口起的整份计划（已按发信日排好，含已经过去的批次日）；`factsByKey` 是已有的登记 / 发送事实
+ * （按 letterKey）。
+ *  - 「下一批」= 今天（含）起第一个有信的批次日；「按期发送的信」= 从今天起的最近几批；
+ *  - 「已过发信日的信」= 发信日已过、系统里有痕迹的信（最近几个批次日，见 history.ts）；
+ *  - 「按团汇总」= 每个还没出发的团一行（见 groups.ts）。
  */
 export function buildList(
   planned: readonly PlannedLetter[],
   factsByKey: ReadonlyMap<string, LetterFacts>,
   today: NzDate,
   generatedAt: string,
-): AutoLettersList {
-  const upcoming = planned.filter((letter) => letter.sendDate >= today)
-  const batchDays = Array.from(new Set(upcoming.map((letter) => letter.sendDate)))
+): ListCore {
+  const entries: LetterEntry[] = planned.map((letter) => {
+    const facts = factsByKey.get(letter.letterKey) ?? null
+    return { letter, row: buildLetterRow(letter, facts), traced: facts?.sends != null }
+  })
+  const upcoming = entries.filter((entry) => entry.letter.sendDate >= today)
+  const batchDays = Array.from(new Set(upcoming.map((entry) => entry.letter.sendDate)))
   const shownDays = new Set(batchDays.slice(0, SCHEDULED_BATCHES_SHOWN))
-  const rowFor = (letter: PlannedLetter): LetterRow => buildLetterRow(letter, factsByKey.get(letter.letterKey) ?? null)
+  const scheduled = upcoming.filter((entry) => shownDays.has(entry.letter.sendDate))
   const nextDay = batchDays[0]
-  const nextRows = nextDay === undefined ? [] : upcoming.filter((l) => l.sendDate === nextDay).map(rowFor)
+  const nextRows = nextDay === undefined ? [] : upcoming.filter((entry) => entry.letter.sendDate === nextDay).map((entry) => entry.row)
+  const past = pastLetterEntries(entries, today)
+  const displayed = new Set([...scheduled, ...past].map((entry) => entry.row.letterKey))
   return {
     generatedAt,
-    nextBatch: nextBatchOf(nextRows, upcoming),
+    nextBatch: nextBatchOf(nextRows, upcoming.map((entry) => entry.letter)),
     depositLetters: [],
-    scheduledLetters: upcoming.filter((letter) => shownDays.has(letter.sendDate)).map(rowFor),
+    scheduledLetters: scheduled.map((entry) => entry.row),
+    pastLetters: past.map((entry) => entry.row),
+    tourGroups: buildTourGroups(entries, today, displayed),
     totalDistinctLetters: upcoming.length,
   }
 }
 
 function tilesOf(counts: LetterCounts): LetterTiles {
-  return { recipients: counts.recipients, sent: counts.sent, blocked: counts.blocked, failed: counts.failed, rehearsal: counts.rehearsal }
+  return {
+    recipients: counts.recipients,
+    sent: counts.sent,
+    blocked: counts.blocked,
+    failed: counts.failed,
+    rehearsal: counts.rehearsal,
+    opened: counts.opened,
+  }
 }
 
 function compareNames(a: string | null, b: string | null): number {

@@ -39,6 +39,8 @@ export interface LetterSummary {
   failedCount: number | null
   /** 演练行条数（彩排，没有真的发）。 */
   rehearsalCount: number
+  /** 打开过的人数，仅供参考（有些邮箱会提前加载图片，数字偏高）；这类信不记录打开 → null（显示「—」）。 */
+  openedCount: number | null
 }
 
 /** 列表里的一个面板（一类信）。标题、说明、脚注都由数据带进来。 */
@@ -62,9 +64,40 @@ export interface NextBatch {
   status: LetterStatus
 }
 
+/** 「按团看」的一行：一个团 × 一个出发日。 */
+export interface TourGroupSummary {
+  groupId: string
+  tourName: string
+  /** 日历日期 YYYY-MM-DD。 */
+  departOn: string
+  recipientCount: number
+  /** 已发出去几封（至少一位真发出去；演练不算）。 */
+  lettersSent: number
+  /** 往后还会发几封。 */
+  lettersAhead: number
+  /** 过了发信日、系统里有记录却没发出去的封数（这一批没有发出去，要有人看）。 */
+  lettersOverdue: number
+  /** 最近一封已经发出去的信；还没发过 → null。 */
+  lastSent: {
+    letterId: string
+    sendDate: string
+    recipientCount: number
+    sentCount: number
+    blockedCount: number
+    failedCount: number
+    openedCount: number | null
+  } | null
+  /** 下一封（还没发出的、最近的那封）；没有 → null。 */
+  next: { letterId: string; sendDate: string; status: LetterStatus } | null
+  /** 点开这个团时列出的信（按发信日从早到晚）。 */
+  letterIds: string[]
+}
+
 export interface AutoSendOverview {
   nextBatch: NextBatch | null
   sections: LetterSection[]
+  /** 「按团看」的汇总；没有就 []。 */
+  groups: TourGroupSummary[]
   /** 服务器给员工的提醒（中文人话），例如哪些订单没排进信里；没有就不带这个字段。 */
   notices?: string[]
 }
@@ -84,9 +117,12 @@ export interface LetterContent {
   sampleFirstName?: string | null
 }
 
-/** 「打开」这一列怎么显示：走 Mailchimp 的信有每位客人的记录，ME 自己发的信只有总数。 */
+/**
+ * 「打开」这一列怎么显示：有每位客人的记录（`fromMailchimp` 说明是 Mailchimp 回传的）、只有总数、或者这类信不记录。
+ * 仅供参考：有些邮箱会提前加载图片，把没看的信也算成已打开。
+ */
 export type OpenInfo =
-  | { kind: 'per_recipient'; openedPeople: number; clickedPeople: number }
+  | { kind: 'per_recipient'; openedPeople: number; clickedPeople: number; fromMailchimp: boolean }
   | { kind: 'totals_only'; opens: number; clicks: number }
   | { kind: 'none' }
 

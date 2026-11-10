@@ -8,6 +8,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { nzTodayIso } from '@/lib/crm/booking-view'
 import { SCHEDULED_BATCHES_SHOWN, buildDetail, buildList, type LetterFacts } from './aggregate'
 import { COUNTDOWN_CADENCE, type CountdownCadence } from './cadence'
+import { shiftDays } from './dates'
+import { lookbackDaysFor } from './history'
 import { buildTemplateKey, buildTriggerKey, parseLetterKey, type LetterIdentity } from './keys'
 import { loadBookingFacts } from './load-bookings'
 import { loadMeSends, loadRegistry } from './load-facts'
@@ -61,6 +63,14 @@ function lettersShownOnList(planned: readonly PlannedLetter[], today: string): P
   return upcoming.filter((letter) => shownDays.has(letter.sendDate))
 }
 
+/**
+ * 要去读记录的信：已经过了发信日的（要看有没有痕迹，团汇总也要数「已发几封」）+ 列表上显示的最近几批。
+ * 更远的信还没有任何记录，只算个数，不用读。
+ */
+function lettersToRead(planned: readonly PlannedLetter[], today: string): PlannedLetter[] {
+  return [...planned.filter((letter) => letter.sendDate < today), ...lettersShownOnList(planned, today)]
+}
+
 export async function loadAutoLettersList(
   db: SupabaseClient,
   clientId: string,
@@ -69,11 +79,17 @@ export async function loadAutoLettersList(
 ): Promise<AutoLettersList> {
   const today = nzTodayIso(now)
   const cadence = resolveCadence(clientId)
-  if (cadence === null) return { ...buildList([], new Map(), today, now.toISOString()), notices: [] }
+  if (cadence === null) return { ...buildList([], new Map(), today, now.toISOString()), cadence: null, notices: [] }
   const { facts, notices } = await loadBookingFacts(db, clientId)
-  const planned = planCountdownCalendar(facts, today, cadence)
-  const letterFacts = await loadLetterFacts(db, clientId, lettersShownOnList(planned, today))
-  return { ...buildList(planned, letterFacts, today, now.toISOString()), notices }
+  // 回看窗口起算：能装下一个还没出发的团的全部信（history.ts），这样「已过发信日的信」和团汇总的「已发几封」才不会少算。
+  const from = shiftDays(today, -lookbackDaysFor(cadence)) ?? today
+  const planned = planCountdownCalendar(facts, from, cadence)
+  const letterFacts = await loadLetterFacts(db, clientId, lettersToRead(planned, today))
+  return {
+    ...buildList(planned, letterFacts, today, now.toISOString()),
+    cadence: { firstMonth: cadence.firstMonth },
+    notices,
+  }
 }
 
 /** 找不到这封信（编号不认识，或现在的计划里没有它）→ null，路由翻成 404。 */

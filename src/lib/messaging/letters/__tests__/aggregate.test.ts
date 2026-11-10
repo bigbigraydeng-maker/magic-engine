@@ -64,7 +64,7 @@ describe('buildLetterRow', () => {
     expect(row.subject).toBeNull()
     expect(row.status).toBe('draft')
     expect(row.channel).toBe('me')
-    expect(row.counts).toEqual({ recipients: 2, sent: null, blocked: null, failed: null, rehearsal: 0 })
+    expect(row.counts).toEqual({ recipients: 2, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null })
     expect(row.audience).toEqual({ tourName: 'Tour One', departOn: '2027-03-11', monthsLeft: 3 })
   })
 
@@ -89,7 +89,45 @@ describe('buildLetterRow', () => {
     const row = buildLetterRow(planned({ sendDate: '2026-12-02' }), facts)
     expect(row.subject).toBe('Subject')
     expect(row.status).toBe('sent')
-    expect(row.counts).toEqual({ recipients: 2, sent: 1, blocked: 1, failed: 1, rehearsal: 1 })
+    expect(row.counts).toEqual({ recipients: 2, sent: 1, blocked: 1, failed: 1, rehearsal: 1, opened: null })
+  })
+
+  describe('opened (reference only)', () => {
+    const openedOf = (recipients: RecipientOutcome[]): number | null =>
+      buildLetterRow(planned({ sendDate: '2026-12-02' }), { registry: null, sends: sends({ started: true, recipients }) }).counts.opened
+
+    it('this kind of letter does not record opens → null (a dash), never 0', () => {
+      expect(openedOf([outcome({ contactId: 'c1' }), outcome({ contactId: 'c2' })])).toBeNull()
+      expect(openedOf([])).toBeNull()
+    })
+
+    it('counts the people who opened among real sends only; blocked and rehearsal rows are left out', () => {
+      expect(
+        openedOf([
+          outcome({ contactId: 'c1', opened: true }),
+          outcome({ contactId: 'c2', opened: false }),
+          outcome({ contactId: 'c3', outcome: 'blocked', reasonCode: 'dnc', opened: true }),
+          outcome({ contactId: 'c4', outcome: 'rehearsal', opened: true }),
+        ]),
+      ).toBe(1)
+    })
+
+    it('tracked but nobody has opened yet is 0, not a dash', () => {
+      expect(openedOf([outcome({ contactId: 'c1', opened: false })])).toBe(0)
+    })
+
+    it('one tracked person is enough to say the letter is tracked; untracked people do not count as opened', () => {
+      expect(openedOf([outcome({ contactId: 'c1', opened: true }), outcome({ contactId: 'c2', opened: null })])).toBe(1)
+    })
+
+    it('the drawer tiles carry the same number', () => {
+      const detail = buildDetail(planned({ sendDate: '2026-12-02' }), {
+        registry: null,
+        sends: sends({ started: true, recipients: [outcome({ contactId: 'c1', opened: true }), outcome({ contactId: 'c2', opened: false })] }),
+      })
+      expect(detail.tiles.opened).toBe(1)
+      expect(detail.letter.counts.opened).toBe(1)
+    })
   })
 })
 
@@ -140,6 +178,8 @@ describe('buildList', () => {
       nextBatch: null,
       depositLetters: [],
       scheduledLetters: [],
+      pastLetters: [],
+      tourGroups: [],
       totalDistinctLetters: 0,
     })
     expect(buildList(plan, new Map(), '2030-01-01', 'now').nextBatch).toBeNull()
@@ -162,7 +202,7 @@ describe('buildDetail', () => {
     expect(detail.letter.previewText).toBeNull()
     expect(detail.letter.bodyText).toBeNull()
     expect(detail.letter.sampleFirstName).toBe(SAMPLE_FIRST_NAME)
-    expect(detail.tiles).toEqual({ recipients: 3, sent: null, blocked: null, failed: null, rehearsal: 0 })
+    expect(detail.tiles).toEqual({ recipients: 3, sent: null, blocked: null, failed: null, rehearsal: 0, opened: null })
     expect(detail.mailchimpSummary).toBeNull()
     expect(detail.recipients.map((r) => [r.displayName, r.status])).toEqual([
       ['Al', 'pending'],
@@ -254,7 +294,7 @@ describe('buildDetail · a batch that has already gone out', () => {
 
   it('people planned but absent from the send record say they were not yet depositors, not 待发', () => {
     const detail = buildDetail(letter, wentOut, '2026-12-10')
-    expect(NOT_IN_BATCH_TEXT).toBe('这一批发出时他还没交定金')
+    expect(NOT_IN_BATCH_TEXT).toBe('这一批发出时他不在名单里（不补发）')
     expect(detail.recipients.find((r) => r.contactId === 'c2')).toMatchObject({ status: 'pending', reasonText: NOT_IN_BATCH_TEXT })
     expect(note(detail, 'c1')).toBeNull() // has a record: sent
     expect(note(detail, 'c3')).toBeNull() // has a record (claimed, still pending): not "not in batch"
